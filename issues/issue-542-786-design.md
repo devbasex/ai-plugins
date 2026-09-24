@@ -286,8 +286,9 @@ sequenceDiagram
   participant L as launch-reviewer.sh
   participant C as 担当 2 者
   P->>S: start-round
-  S->>S: 作業ツリーを head へ同期・ラウンドを開く
+  S->>S: 作業ツリーを head へ同期
   S->>G: **控えを取り直す（2 ラウンド目以降）**
+  S->>S: ラウンドを開く（round を状態ファイルへ保存）
   Note over S: 変更の節のファイルを書く / 消す（#934 へ移した）
   P->>L: 席ごとに起動
   L->>C: プロンプト（控え・観点・**出し切りの指示**）

@@ -1,7 +1,8 @@
 """レビュワーの母集合と終了基準（#371）。
 
-**母集合はホストを含む全ランタイムである（#892）。** レビュー担当は CLI プロセスとして起動する
-ため、ホストと同じランタイムでもホストの会話の作業文脈は持ち込まれない。担当はラウンドごとの
+**母集合は claude / codex / kiro とホストである（#892 でホストを含め、#786 で agy を既定から
+外した。agy は `--include agy` で足し、ホストが agy なら 4 者）。** レビュー担当は CLI プロセス
+として起動するため、ホストと同じランタイムでもホストの会話の作業文脈は持ち込まれない。担当はラウンドごとの
 輪番で 2 者を選ぶ。`participants` を持たず `host` だけを持つ古い状態ファイルは、変更の前の
 母集合（全ランタイム − ホスト）で輪番を回す。
 
@@ -222,10 +223,11 @@ def test_start_round_records_the_reviewers(state_mod, tmp_path, capsys, monkeypa
 
 
 def test_read_result_accepts_every_runtime(state_mod):
-    """`read-result` は母集合の 4 者すべてを受け取る。
+    """`read-result` は担当になりうる 4 つの名前（`ALL_RUNTIMES`）すべてを受け取る。
 
     実機で `kiro` が結果を書いたのに `invalid choice` で弾かれた。担当が 4 つの名前を
-    取りうる以上、副コマンドの引数も同じ母集合を持たなければ、結果を残した担当が
+    取りうる以上（agy も `--include agy` かホストが agy なら座る）、副コマンドの引数も
+    同じ名前の集合を持たなければ、結果を残した担当が
     「結果なし」として扱われる。
     """
     parser = state_mod.build_parser()
