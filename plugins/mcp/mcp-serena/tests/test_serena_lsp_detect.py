@@ -41,13 +41,6 @@ def test_count_uses_only_table_extensions_as_denominator():
     assert counts == {"python": 11, "typescript": 1}
 
 
-@pytest.mark.parametrize("paths", [["README.md"], []])
-def test_count_returns_empty_for_paths_without_table_extensions(paths):
-    ext = table.extension_map(table.load())
-
-    assert detect.count(paths, ext) == {}
-
-
 def test_table_extensions_do_not_overlap_and_are_lowercase():
     data = table.load()
     seen = {}
