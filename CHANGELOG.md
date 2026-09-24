@@ -9,6 +9,42 @@
 **開発版（接尾辞の付いた版）は載せない。** `9.8.0` は `9.8.0-dev.1` までしか出ておらず、
 その内容は `10.0.0` で届いている。
 
+## [ndf 10.17.7] - 2026-09-24
+
+### 追加
+
+- **`/ndf:install-wrapper` を足した**（#928。Claude Code だけ・明示指示でだけ動く）。`install`（既定）/
+  `uninstall` / `status` の 3 つを引数で分ける。`install` は中継の写しを `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/relay.py`、
+  `claude` の関数を同じ親の `shellrc` に置き、シェルの設定へは `shellrc` を読む 1 行だけを囲みで足す
+  （`DEVBASE_SHELLRC_DIR` があれば `$DEVBASE_SHELLRC_DIR/ndf-relay.sh` に置く）。10.17.4〜10.17.6 が
+  足した囲み（alias を直に持つ）は、中だけを読み込みの行へ置き換える。`uninstall` は `~/.bashrc` と
+  `~/.zshrc` の両方の囲みを外し、`shellrc`・写し・旧い写しを消す。書く前に `<ファイル>.ndf-bak-<UTC>` へ
+  バックアップを取る
+- **`/ndf:restart` を足した**（#928。Claude Code だけ）。中継の下では再開用のコマンドを `ndf-next` の
+  ブロックで出し、中継が静まりの後に `/exit` → プラグインの更新 → 起動し直しを行う。中継の外では、
+  貼り付ける中身を示す。再開用のコマンドに承認・同意・判断の結果を書かない
+- **中継が質問（`AskUserQuestion`）の答えを代わりに送らない守りを足した**（#928）。`AskUserQuestion` の
+  PreToolUse / PostToolUse hook が質問の表示中の印を作る・消し、中継は印がある間と、印の後に応答が
+  再開した間は子の端末へ何も書かない。印の確かめ直しと `/exit` の書き込みを質問の始まりと排他にし、
+  排他のロックが取れない質問は拒否してモデルに呼び直させる
+- **`relay.py` に `uninstall` / `status` / `startup` / `question open|close` の副命令を足した**（#928）
+- **中継の 2 つ目以降の区間へ、最初の区間の起動の方針の引数を引き継ぐ**（#936）。
+  `--dangerously-skip-permissions`・`--model` などを引き継ぎ、前の会話を指す・会話に名前を付ける・
+  起動の形を変える選択肢（`--resume`・`--continue`・`--session-id`・`--name`・`--worktree` など）と
+  位置引数は落とす。引き継いだ引数は `start` の行の `carried` に残る
+
+### 変更
+
+- **SessionStart hook がシェルの設定を書かなくなった**（#928）。`relay.py install` を外し、`relay.py startup`
+  に替えた。`startup` は在る写しを今の版で置き直し（新しい版の写しを古い版で置き直さない。無い写しは
+  作らない）、10.17.4〜10.17.6 が自動で足した囲みが残っていれば 1 度だけ知らせる
+- **中継が `/exit` と改行を 1 回の書き込みで送るようにした**（#928）
+- **公開 Skill は Claude Code 向けが 47 個になった**（`install-wrapper` と `restart`。Codex / Kiro CLI / agy へは配らない）
+
+### 削除
+
+- **環境変数 `NDF_RELAY_AUTO` と `NDF_RELAY_EXIT_GAP` を読まなくなった**（#928）。置いたままでも害は無い
+
 ## [ndf 10.17.6] - 2026-09-24
 
 ### 追加
