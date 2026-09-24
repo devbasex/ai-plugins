@@ -1,7 +1,7 @@
 ---
 name: cross-refactoring
 description: "Let every CLI propose refactorings on a PR once, then one CLI plans, tests, applies, and verifies what fits a time budget. Use when structural improvement should be done across runtimes within a set time（クロスリファクタリング・多AIリファクタリング・時間内の構造改善）."
-argument-hint: "[PR番号] --scope PATH... [--budget-minutes N] [--implementer NAME] [--host claude|codex|agy|kiro] [--exclude NAMES] [--include NAMES] [--require-all] [--model RT=MODEL] [--baseline-test CMD] [--round-test CMD] [--max-fix-rounds N] [--ci-check NAME] [--workflow-step]"
+argument-hint: "[PR番号] --scope PATH... [--budget-minutes N] [--implementer NAME] [--host claude|codex|agy|kiro] [--exclude NAMES] [--include NAMES] [--require-all] [--model RT=MODEL] [--baseline-test CMD] [--round-test CMD] [--ci-check NAME] [--workflow-step]"
 allowed-tools:
   - Bash
   - Read
@@ -38,7 +38,7 @@ allowed-tools:
 
 | 語 | 意味 |
 | --- | --- |
-| 想定最大時間 | `--budget-minutes`。計画はこの中に収まるように立てる。**目安の上限**で、実行中の CLI は止めない |
+| 想定最大時間 | `--budget-minutes`。計画はこの中に収まるように立てる。**時間に関わる数値はすべてここから逆算する**（段の上限・テスト 1 回の上限・無音の打ち切り） |
 | フェーズ | 提案・計画・テスト追加・実装・検証/修正の 5 つ。**それぞれ 1 回だけ**行う（検証と修正の繰り返しを除く） |
 | 実装担当 | 計画以降の 4 フェーズを通して担う 1 ランタイム |
 | 候補 | 提案を鍵（`path` + `symbol` + `smell`）でまとめたもの。計画へ渡す |
@@ -55,11 +55,11 @@ allowed-tools:
 | --- | --- |
 | 参加者 | **全員 CLI プロセス。** 提案は参加者の全員、計画以降は実装担当 1 者。ホストと同じランタイムでも別プロセスで起動する |
 | 実装担当 | **名指し（`--implementer`）→ ホスト（参加者にいれば）→ 参加者の先頭。** 輪番は持たない。再開しても変わらない |
-| 時間 | 計画の時点で「想定最大時間 − 経過 − 控え」に収まる件数だけを採る。実装の途中は**項目ごとの着手の締め切り**で止める |
-| 検証の単位 | **項目。** HEAD で項目ごとの限ったテストを走らせる。全体のテストは危険の印が立ったときに 1 度だけ |
+| 時間 | 計画の時点で「想定最大時間 − 経過 − 控え」に収まる件数だけを採る。実装の途中は**項目ごとの着手の締め切り**で止める。**段の上限・テスト 1 回の上限・直しの打ち切りは予算から算術で出し、計画の終わりまでに状態ファイルと改修計画へ書き出す。** 監視はその段の終わり + 余裕で CLI を止め、修正は回数でなく締め切りまで試みる（式は [docs/02 の「締め切り」](docs/02-plan-and-implement.md#締め切り)） |
+| 検証の単位 | **項目。** HEAD で項目ごとの限ったテストを走らせる。全体のテストは危険の印が立ったときに 1 度だけ。落ちたら落ちたテストだけを走らせ直して揺れ・元からの失敗を除き、変更が原因なら締め切りまで直し、直らなければ印の項目を新しい順に絞って取り消す |
 | 収束しない項目 | **項目の単位で取り消す。** 同じファイルの隣接行を触る項目どうしは git で分離できないため、取り消しを広げる |
 | 見積り | 配分テーブル。所要は**進行側の時計とコミットの時刻**で測り、担当の申告を使わない |
-| 判断 | Jev（公開リポジトリで鍵があるとき）に段・同じ変更か・D5 を問い、確信度が足りなければ実装担当の答えを使う |
+| 判断 | Jev（公開リポジトリで鍵があるとき）に段・同じ変更か・D5 を**計画の段で**問い、確信度が足りなければ実装担当の答えを使う。**計画の後で LLM が動くのは作業の CLI（テストの追加・実装・直し）だけ**で、取り消し・見送り・絞り込み・揺れの判定・次の試行に進むかはスクリプトが決める。機械で決まらないテストの差分はレビューへ引き継ぐ |
 | 範囲の扱い | `--scope` は**検証にも効く**。範囲外を触ったコミットの項目は取り消す。**テストの置き場所を含めないと `init` が止める** |
 | 公開の責務 | **進行側だけが push する。** 生成物の同期は `--sync-command` として push の直前に進行側が行う |
 | 検証の情報源 | **git と実際のテスト実行。** 結果ファイルの申告は検証に使わない |
@@ -85,16 +85,15 @@ allowed-tools:
 | `--model RT=MODEL` | ランタイムごとのモデル。繰り返し指定できる | CLI の既定 |
 | `--baseline-test CMD` | 着手前・危険の印・最終ゲートで実行する全体のテスト | 必須 |
 | `--round-test CMD` | 範囲のテスト。項目ごとの限ったテストを組み立てる元で、組み立てられない項目はそのまま走らせる。**`--baseline-test` の実行器が `pytest` / `python -m pytest` / `jest` / `vitest` でなければ必須** | `--baseline-test` から組み立てる |
-| `--max-fix-rounds N` | **1 項目あたり**の修正の上限 | `3` |
 | `--ci-check NAME` | 最終ゲートで手元のテストの代わりに見る検査の名前（排他） | なし |
 | `--workflow-step` | `development-workflow` の 1 工程として起動したことを伝える。`cross-review` を省く | 単独起動 |
 | `--severity-threshold LEVEL` | この重要度未満は `threshold` で見送る | `minor` |
-| `--test-timeout SEC` | テスト 1 回あたりの上限秒数 | `900` |
 | `--sync-command CMD` | 生成物を同期するコマンド。push の直前に進行側が実行する | なし |
 | `--plan-file PATH` | 改修計画を**ファイル**へ書き出す先（対象リポジトリからの相対）。空文字なら記録しない | PR のコメント 1 件 |
 
-**廃止した引数**: `--max-test-rounds` / `--max-outer-rounds` / `--max-items-per-round` は、
-渡すと廃止を知らせる 1 行を出して**値を使わずに続ける**。次の版で外す。
+**廃止した引数**: `--max-test-rounds` / `--max-outer-rounds` / `--max-items-per-round` と、
+`--max-fix-rounds` / `--test-timeout`（決定 24。修正は締め切りまで、テストの上限は予算から
+導く）は、渡すと廃止を知らせる 1 行を出して**値を使わずに続ける**。次の版で外す。
 
 ```text
 /ndf:cross-refactoring 130 --scope src/services tests/services --round-test "pytest tests/services -q" --baseline-test "pytest -q"
@@ -150,9 +149,12 @@ flowchart TD
     Impl --> V{"限ったテストが通る ?"}
     V -->|いいえ| Fix["修正（実装担当）"] --> Cap{"上限・残り時間 ?"}
     Cap -->|未達| V
-    Cap -->|到達| Drop["その項目だけ取り消す"]:::stop --> V
+    Cap -->|到達| Drop["その項目だけ取り消す<br/>全体のテストなら印の項目を新しい順に絞る"]:::stop --> V
     V -->|はい| D{"危険の印 ?"}
-    D -->|立った| W["全体のテストを 1 度"] --> Gate
+    D -->|立った| W{"全体のテストを 1 度"}
+    W -->|通る・揺れ・元からの失敗| Gate
+    W -->|変更が原因| Fix
+    W -->|取り出せない| DropAll["印の項目をまとめて取り消す"]:::stop --> Gate
     D -->|無い| Gate{"最終ゲート"}
     Gate -->|単独| CR["全体のテスト → /ndf:cross-review"]
     Gate -->|工程の 1 つ| Whole["全体のテスト（使い回しあり）<br/>--ci-check なら継続的統合"]
@@ -228,9 +230,9 @@ rf_eval init "$PR" --scope $SCOPE \
         --baseline-test "$BASELINE" ${ROUND_TEST:+--round-test "$ROUND_TEST"} \
         ${BUDGET:+--budget-minutes "$BUDGET"} ${IMPLEMENTER:+--implementer "$IMPLEMENTER"} \
         ${HOST:+--host "$HOST"} ${EXCLUDE:+--exclude "$EXCLUDE"} ${INCLUDE:+--include "$INCLUDE"} \
-        ${REQUIRE_ALL:+--require-all} ${MAX_FIX:+--max-fix-rounds "$MAX_FIX"} \
+        ${REQUIRE_ALL:+--require-all} \
         ${CI_CHECK:+--ci-check "$CI_CHECK"} ${WORKFLOW_STEP:+--workflow-step} \
-        ${SEVERITY:+--severity-threshold "$SEVERITY"} ${TEST_TIMEOUT:+--test-timeout "$TEST_TIMEOUT"} \
+        ${SEVERITY:+--severity-threshold "$SEVERITY"} \
         ${SYNC_COMMAND:+--sync-command "$SYNC_COMMAND"} ${PLAN_FILE+--plan-file "$PLAN_FILE"} \
         $MODEL_ARGS
 export CROSS_REFACTORING_TMP_DIR="$TMP_DIR"
@@ -244,13 +246,14 @@ todo() {
     [ "$p" = "$1" ] && return 1
   done
 }
-# 実装担当 1 者のフェーズを起動して待つ。上限は start-phase が予算から導く（PHASE_TIMEOUT）。
+# 実装担当 1 者のフェーズを起動して待つ。上限は start-phase が状態ファイルの上限の表から
+# 返す（PHASE_TIMEOUT = その段の終わりまでの残り + 余裕）。無音の許容も同じ値にする（決定 24）。
 impl_phase() {
   rf_eval start-phase "$ID" "$1"
   "$SCRIPTS/launch-cli.sh" "$IMPL" "$1" "$ID"
   "$LIB/monitor.py" "$ID" --agents "$IMPL" --tmp-dir "$TMP_DIR" \
       --stem-template "{agent}-$1-rf$ID" --phase "$1" \
-      ${PHASE_TIMEOUT:+--timeout "$PHASE_TIMEOUT"} --stall-timeout "$IMPL_STALL_TIMEOUT"
+      ${PHASE_TIMEOUT:+--timeout "$PHASE_TIMEOUT" --stall-timeout "$PHASE_TIMEOUT"}
 }
 
 GO_FINAL=
@@ -259,16 +262,12 @@ if todo propose; then
   rf_eval start-phase "$ID" propose
   for a in $RUNTIMES; do "$SCRIPTS/launch-cli.sh" "$a" propose "$ID"; done
   "$LIB/monitor.py" "$ID" --agents "$RUNTIMES_CSV" --tmp-dir "$TMP_DIR" \
-      --stem-template "{agent}-propose-rf$ID" --phase propose
+      --stem-template "{agent}-propose-rf$ID" --phase propose \
+      ${PHASE_TIMEOUT:+--timeout "$PHASE_TIMEOUT" --stall-timeout "$PHASE_TIMEOUT"}
   rf merge-proposals "$ID" || GO_FINAL=1          # 2 = 候補 0 件
 fi
 if [ -z "$GO_FINAL" ]; then
-  if todo plan; then
-    rf_eval start-phase "$ID" plan
-    "$SCRIPTS/launch-cli.sh" "$IMPL" plan "$ID"
-    "$LIB/monitor.py" "$ID" --agents "$IMPL" --tmp-dir "$TMP_DIR" \
-        --stem-template "{agent}-plan-rf$ID" --phase plan
-  fi
+  todo plan && impl_phase plan
   rf_eval merge-plan "$ID" || GO_FINAL=1           # TESTS_NEEDED。2 = 項目 0 件
 fi
 if [ -z "$GO_FINAL" ] && [ "$TESTS_NEEDED" = 1 ] && todo add-tests; then
@@ -277,14 +276,10 @@ if [ -z "$GO_FINAL" ] && [ "$TESTS_NEEDED" = 1 ] && todo add-tests; then
 fi
 if [ -z "$GO_FINAL" ]; then
   todo implement && impl_phase implement
-  rf_eval merge-implement "$ID" || GO_FINAL=1      # JUDGE_NEEDED。2 = 残る項目 0 件
-fi
-if [ -z "$GO_FINAL" ] && [ "$JUDGE_NEEDED" = 1 ]; then
-  impl_phase judge-test-changes                    # 段 2（docs/02 の「テストの差分の判定」）
-  rf merge-test-judgements "$ID"
+  rf merge-implement "$ID" || GO_FINAL=1           # 2 = 残る項目 0 件
 fi
 while [ -z "$GO_FINAL" ]; do                        # 検証と修正の繰り返し（唯一の繰り返し）
-  rf_eval verify "$ID"                             # VERIFY=done|fix
+  rf_eval verify "$ID"                             # VERIFY=done|fix。締め切りは verify が時計で見る
   [ "$VERIFY" = fix ] || break
   impl_phase fix
   rf merge-fix "$ID"
@@ -295,11 +290,12 @@ while :; do
   rf_eval final-gate "$ID"; gate=$?                # FINAL_GATE=...
   case $gate in
     0) break ;;
-    1) echo "⚠ 最終ゲートが通らないまま修正の上限に達しました" >&2; break ;;
-    2) "$SCRIPTS/launch-cli.sh" "$FINAL_FIX_IMPL" final-fix "$ID"
+    1) echo "⚠ 最終ゲートが通らないまま修正を打ち切りました（想定最大時間の終わり）" >&2; break ;;
+    2) rf_eval start-phase "$ID" final-fix
+       "$SCRIPTS/launch-cli.sh" "$FINAL_FIX_IMPL" final-fix "$ID"
        "$LIB/monitor.py" "$ID" --agents "$FINAL_FIX_IMPL" --tmp-dir "$TMP_DIR" \
            --stem-template "{agent}-final-fix" --phase final-fix \
-           --stall-timeout "$IMPL_STALL_TIMEOUT"
+           ${PHASE_TIMEOUT:+--timeout "$PHASE_TIMEOUT" --stall-timeout "$PHASE_TIMEOUT"}
        rf merge-final-fix "$ID" ;;
     *) exit $gate ;;
   esac
@@ -330,8 +326,9 @@ done
 | `launch-cli.sh` に「ホストなら起動しない」分岐を入れる | ホストは実装担当として起動しうる。分岐はランタイム名だけで行う |
 | `--scope` を省く / テストの置き場所を入れない | 提案が発散する。足したテストが範囲外になる。**`init` が止める** |
 | 実装担当に生成物を同期させる・push させる | 範囲外の変更が生まれる。検証を通る前に公開される |
-| 実行中の CLI を時間切れで殺す | 半端な変更が残る。時間は計画と締め切りで守る |
-| 検証の中で全体のテストを 2 回以上走らせる | 「原則実施しない」が崩れる。取り消した後の HEAD は最終ゲートが確かめる |
+| 監視の上限を表の固定値のまま使う・LLM の申告で締め切りを守らせる | 予算の外まで走る。**上限はその段の終わり + 余裕で、スクリプトが時計で止める。** 止めたときの半端な変更は取り込みが捨て、コミット済みの項目は締め切りで判定する |
+| 計画の後に判断のために LLM を呼ぶ（Jev・判定の CLI） | 計画で見積もった時間の外で所要が伸び、結果が再現しない。判断は計画で済ませ、後はスクリプトの規則で決める |
+| 検証の中で全体のテストを 2 回以上走らせる | 「原則実施しない」が崩れる。走らせ直すのは落ちたテストだけで、取り消した後の HEAD は最終ゲートが確かめる |
 | 結果ファイルの申告（所要・コミット）を材料にする | JSON を書き換えるだけで通る検査になる。対応は `Item-Id`、所要は時計とコミットの時刻 |
 | 改修計画の URL を Markdown のリンクで書く | 読み手の画面から URL を取り出せない。**生の URL で書く** |
 | 取り消した項目の内訳を Pull Request の文章へ並べる | 同じ一覧が 2 か所になり、片方だけが古くなる |
@@ -345,6 +342,7 @@ done
 - フェーズごとの所要と、想定最大時間との差（`cross-review` を除く）
 - 改善項目の表（**`<ファイル>#<シンボル>`**・兆候・手法・段・見積り・状態・危険の印・修正の回数）
 - 採用・取り消し・見送りの件数と、**見送りの理由別の件数**。内訳は**改修計画の生の URL**
-- 検証の中で全体のテストを走らせたか、走らせた理由（印）
+- 着手前の全体のテストの結果（通過か失敗・秒・HEAD）と、検証の中で全体のテストを走らせたか、走らせた理由（印）、落ちたときの見分け（揺れ・元からの失敗・変更が原因）と結末
 - 判断に Jev を使ったか（使わなかった理由・呼び出しの失敗の数）
 - 最終ゲートの結果（`cross-review` の収束、または全体のテスト／継続的統合の合否）
+- 監視が段の上限で CLI を止めた段と、固定のまま残した値（OS の後始末と通信の待ち）

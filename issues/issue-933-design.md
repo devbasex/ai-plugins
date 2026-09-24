@@ -134,7 +134,7 @@ plugins/ndf/skills/cross-refactoring/
 ├── docs/02-plan-and-implement.md      # 02-apply-and-review.md を置き換える（計画 / テスト追加 / 実装）
 ├── docs/03-review-viewpoints.md
 ├── docs/04-verify-and-report.md       # 04-fix-and-report.md を置き換える（検証/修正 / 配分テーブル / 最終ゲート / 報告）
-├── prompts/{propose,plan,add-tests,implement,fix,final-fix,judge-test-changes}.md
+├── prompts/{propose,plan,add-tests,implement,fix,final-fix}.md（`judge-test-changes` は決定 25 で外した）
 └── scripts/
     ├── refactor.py
     └── refactor_lib/{budget,allocation,danger}.py と commands/{setup,propose,plan,implement,converge,gate,report,assess}.py
@@ -159,8 +159,9 @@ plugins/ndf/scripts/lib/{jev,limits,assignment}.py
 | `plan` | オブジェクト | `available_minutes`・`reserve`（下の表）・`selected[]`・`table_source`（初期値か履歴か） |
 | `items[]` | 項目 | 採った項目。下の表 |
 | `deferred_items[]` | 今と同じ形 | 理由は `budget` / `rank` / `duplicate` / `vocabulary` / `threshold` / `no_target` / `test_failed` / `not_done` |
-| `whole_test` | `{ran, flags[], status, seconds, head, reverted}` | 検証の中の全体のテスト（最大 1 回）。`reverted`（bool）は、落ちて印を持つ項目を取り消したら真になる。最終ゲートはこのキーを読み、取り消した後の HEAD で全体のテストを走らせるかを決める |
-| `baseline_test` / `round_test` | 今と同じ | 着手前のテスト。`baseline_test.seconds` を控えに使う |
+| `whole_test` | `{ran, flags[], status, seconds, head, reverted, items[], failed_tests[], flaky[], preexisting[], caused[], baseline_head, rerun_command[], rerun_log, resolution, unparsed_reason}` | 検証の中の全体のテスト（最大 1 回）。`reverted`（bool）は、落ちて印を持つ項目を取り消したら真になる。最終ゲートはこのキーを読み、取り消した後の HEAD で全体のテストを走らせるかを決める。落ちたときの見分け（`flaky` / `preexisting` / `caused`）と結末（`resolution`: `kept` / `fixing` / `fixed` / `narrowed` / `reverted_all`）は決定 22。取り出せなかった理由は `unparsed_reason` |
+| `baseline_test` / `round_test` | 今と同じ + `baseline_test.head` | 着手前のテスト。`baseline_test.seconds` を控えと上限の計算に、`head` を元からの失敗の見分け（決定 22）に使う |
+| `limits` | オブジェクト | 実行時の値（余裕・テスト 1 回の上限・段ごとの終わりの時刻）。`init` と `merge-plan` が書き、以後の段は読むだけ（決定 24。式は下の「時間の決め方」） |
 | `final_gate` / `plan_comment` / `pending_push` / `sync_command` | 今と同じ | 変えない |
 | `history_written` | bool | 履歴へ追記したか（二重に書かない） |
 
@@ -244,10 +245,9 @@ plugins/ndf/scripts/lib/{jev,limits,assignment}.py
 | --- | --- | --- |
 | `--budget-minutes N` | 新しい。1 以上の整数。それ以外は終了コード 4 | 30（2026-09-24 利用者の指示で 60 から変更） |
 | `--implementer NAME` | 新しい。参加者の中の 1 者。参加者に無ければ終了コード 4 | 下の決め方 |
-| `--max-fix-rounds N` | 意味が変わる。**1 項目あたり**の修正の上限 | 3 |
 | `--round-test CMD` | 意味は変わらない。**`--baseline-test` の実行器が既知の実行器（下の「実装担当の `plan` の結果ファイル」の組み立ての表）でなければ、対象の語の有無にかかわらず必須になる。** 省くと `init` が終了コード 4 で止まる。省いたまま進むと、全項目が `no_target` になり、提案と計画に使った時間の後に何も適用されずに終わるためである | `--baseline-test` を差し替えの元にする |
-| `--max-test-rounds` / `--max-outer-rounds` / `--max-items-per-round` | 廃止。受け取ると `⚠ <引数> は廃止しました（#933）。--budget-minutes で所要を決めます` を標準エラーへ出して無視する | — |
-| そのほか（`--scope` / `--baseline-test` / `--host` / `--exclude` / `--include` / `--require-all` / `--model` / `--ci-check` / `--workflow-step` / `--severity-threshold` / `--test-timeout` / `--sync-command` / `--plan-file`） | 変えない | 今と同じ |
+| `--max-test-rounds` / `--max-outer-rounds` / `--max-items-per-round`、`--max-fix-rounds` / `--test-timeout`（決定 24） | 廃止。受け取ると `⚠ <引数> は廃止しました（#933）。--budget-minutes で所要を決めます` を標準エラーへ出して無視する | — |
+| そのほか（`--scope` / `--baseline-test` / `--host` / `--exclude` / `--include` / `--require-all` / `--model` / `--ci-check` / `--workflow-step` / `--severity-threshold` / `--sync-command` / `--plan-file`） | 変えない | 今と同じ |
 
 **実装担当の決め方:** `--implementer` → ホストが参加者にいればホスト → 参加者の先頭。`init` で決めて状態へ書き、再開で変えない。
 
@@ -270,7 +270,7 @@ plugins/ndf/scripts/lib/{jev,limits,assignment}.py
 - `start-round` / `next-apply-round` / `merge-apply` / `advance`（ラウンドと群）
 - `verify-round` / `should-abandon` / `abandon-items`（`verify` と `merge-fix` へ畳む）
 
-`merge-test-judgements` は残す。修正がテストを書き換えたときに、振る舞いの変更を含むかを判定する経路である。
+`merge-test-judgements` は決定 25 で外した。段 1 で決まらないテストの差分は、`merge-implement` が `review_test_judgements` へ残して最終ゲートのレビューへ引き継ぐ。
 
 ### 実装担当の `plan` の結果ファイル
 
@@ -376,8 +376,9 @@ stateDiagram-v2
   implemented --> verified: 限ったテストが通った
   implemented --> failing: 落ちた
   failing --> implemented: 修正のコミット
-  failing --> reverted: 修正の上限・残り時間が尽きた
-  verified --> reverted: 危険の印の全体のテストが落ち、印を持っていた
+  failing --> reverted: 修正の残り時間が尽きた（回数の上限は持たない。決定 23）
+  verified --> failing: 危険の印の全体のテストが変更の原因で落ち、印を持っていた（決定 22）
+  verified --> reverted: 同上で締め切りか上限に達した（新しい順に絞る）か、落ちたテストを取り出せなかった
   verified --> [*]
   reverted --> [*]
   deferred --> [*]
@@ -400,19 +401,23 @@ stateDiagram-v2
   - 項目 i の実装の締め切り: `T − Σ_{j≥i} implement_j − Σ_{j=1..n} verify_j`。検証は実装のフェーズの後に全件をまとめて走らせるため、i より前の項目の検証も末尾の側に残る。後順位ほど締め切りが遅い
   - 項目 i のテストの追加の締め切り: `T − Σ_{j=1..n} (implement_j + verify_j) − Σ_{j≥i} test_j`。テストの追加は実装より前のフェーズなので、実装と検証の全件を先に差し引く
   - 締め切りは `add-tests` と `implement` の雛形に項目ごとの時刻として渡す
-- **実行中の CLI は時間切れで止めない。** そのため `add-tests` と `implement` の監視の上限（`--timeout`）は予算から導き、締め切りより先に監視が CLI を止めないようにする。上限は `max(表の値, T − 起動の時刻) + 600` 秒である（`T` は上の終わりの時刻、600 秒は最後の項目が締め切りの直前に着手した分の余裕）。無進捗の許容（`--stall-timeout`）は今の値のまま歯止めとして残す
+- **段の監視の上限は、その段の終わりまでの残り + 余裕（0.05·B）である**（決定 23・24。決定 4 の「実行中の CLI を止めない」を改めた）。テストの追加と実装の終わりは最後の項目の完了の締め切り、修正は直しの試行の打ち切り、最終ゲートの修正は想定最大時間の終わり、提案と計画は予算の比率の枠（0.20·B / 0.30·B）である。無進捗の許容も同じ値を渡す。止めたときは未コミットの変更を捨て、コミット済みの項目は締め切りで判定する。式と係数の正本は `docs/02-plan-and-implement.md` の「締め切り」の節
 
 ## 検証と修正
 
 ### 検証と修正の繰り返し（`verify`）
 
 1. `implemented` の項目ごとに、HEAD で限ったテストを走らせる
-2. 落ちた項目のうち、`fix_count` が上限に達したもの、または修正の残り時間が `fix` に足りないものを取り消す。修正の残り時間は `started_at + budget_minutes − danger_whole_test − final_whole_test − 今` で測る（控えの `fix` を差し引かない終わりから測る。`T` から測ると、控えた修正 1 回分が使われない）（項目の単位。隣接する変更は今と同じく全件の取り消しへ退避）
+2. 修正の残り時間が `fix` に足りなければ、落ちた項目を取り消す（回数の上限は持たない。決定 23）。修正の残り時間は `started_at + budget_minutes − danger_whole_test − final_whole_test − 今` で測る（控えの `fix` を差し引かない終わりから測る。`T` から測ると、控えた修正 1 回分が使われない）（項目の単位。隣接する変更は今と同じく全件の取り消しへ退避）
 3. 残りの落ちた項目があれば `VERIFY=fix` を返す（駆動が修正を 1 回起動する）
    - **同じ語の並びを共有した項目は、1 つの修正の対象としてまとめて扱う。** 共有したコマンドが落ちたとき、どの項目が壊したかはその 1 回からは分からない。修正は共有した項目の全部を対象に 1 回起動し、`fix_count` も共有した項目に同じだけ数える
    - 共有した項目を取り消すとき（上限か残り時間）は、**新しい項目から 1 件ずつ取り消し、そのたびに共有したコマンドを走らせ直し、通った時点で止める。** 通る前に取り消した項目だけが見送りになり、古い項目のコミットは残る（AC15）。走らせ直しは限ったテストで、全体のテストではない
 4. 落ちた項目が無くなったら危険の印を判定する。印が 1 つでもあり、`whole_test.ran` が偽なら全体のテストを 1 度走らせる
-5. 全体のテストが落ちたら、印を持つ項目を新しい順に取り消し、`whole_test.reverted` を真にする。**検証の中では走らせ直さない。** 取り消した後の HEAD は最終ゲートが全体のテストで確かめる（下の「最終ゲートとの関係」）
+5. 全体のテストが落ちたら、落ちたテストの ID を取り出し、**それだけを**今の HEAD と着手前の HEAD（`baseline_test.head`。一時の detach の作業ツリー）で走らせ直して、揺れ・元からの失敗・変更が原因に分ける（決定 22。決定 15 を改めた）。**全体のテストは検証の中で走らせ直さない**
+   - 変更が原因のものが無ければ取り消さない
+   - あれば、2 と同じ締め切り・上限の内なら印の項目を `failing` にして `VERIFY=fix` を返す。修正の後の `verify` は落ちたテストだけを走らせ直し、通れば残す
+   - 締め切りか上限に達したら、印の項目を新しい順に 1 件ずつ取り消し、落ちたテストが通った時点で止める（3 の共有した項目と同じ形）。`whole_test.reverted` を真にする
+   - 落ちたテストを取り出せない（pytest でない・要約の行が無い・打ち切り）ときは、印の項目をまとめて取り消し、理由を残す。取り消した後の HEAD は最終ゲートが全体のテストで確かめる（下の「最終ゲートとの関係」）
 6. `VERIFY=done` を返す
 
 ### 危険の印

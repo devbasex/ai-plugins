@@ -21,7 +21,6 @@
 | `IMPL` / `IMPL_MODEL` | 実装担当（計画・テスト追加・実装・修正・最終ゲートの修正）とそのモデル |
 | `PHASE` | 再開の地点。駆動は終わったフェーズを飛ばす |
 | `BUDGET_MINUTES` | 想定最大時間 |
-| `IMPL_STALL_TIMEOUT` | 実装担当の無進捗の許容（テストの制限時間 + 900 秒） |
 | `WORKTREE_ROOT` / `WORK` / `TMP_DIR` | 作業ディレクトリと一時ディレクトリ |
 | `REPO` / `HEAD_BRANCH` / `BASE_BRANCH` / `SCOPE` | 対象の情報 |
 
@@ -73,8 +72,8 @@
 
 | 再開で渡した引数 | 扱い |
 | --- | --- |
-| `--max-fix-rounds` / `--test-timeout` | 置き換える（`resume_changes` に残る） |
-| `--budget-minutes` | **計画の前**（`phase` が `propose` か `plan` で計画が無い）だけ置き換える。後は知らせるだけ。採用の件数・締め切り・控えは計画の時点の予算で固定されている |
+| `--max-fix-rounds` / `--test-timeout` | 廃止を知らせて無視する（決定 24。修正は締め切りまで、テストの上限は予算から導く） |
+| `--budget-minutes` | **計画の前**（`phase` が `propose` か `plan` で計画が無い）だけ置き換え、上限の表（`limits`）を組み直す。後は知らせるだけ。採用の件数・締め切り・控えは計画の時点の予算で固定されている |
 | `--implementer` | 知らせるだけ（置き換えない） |
 | `--exclude` / `--include` / `--require-all` | 参加者を作り直す。**実装担当が外れたら**、計画の前は決め方を当て直し、計画の後は止める |
 | そのほか状態に載る引数 | 状態と違えば「反映しない」と知らせる |
@@ -209,15 +208,17 @@ claude 17 本 / codex 1 メソッド / kiro 0 本と揃わなかった。最後�
 
 ```bash
 "$SCRIPTS/prepare-worktrees.sh" "$ID" sync "$(git -C "$WORK" rev-parse HEAD)"
-rf_eval start-phase "$ID" propose
+rf_eval start-phase "$ID" propose            # PHASE_TIMEOUT = 提案の枠の終わりまでの残り + 余裕
 for a in $RUNTIMES; do "$SCRIPTS/launch-cli.sh" "$a" propose "$ID"; done
 "$LIB/monitor.py" "$ID" --agents "$RUNTIMES_CSV" --tmp-dir "$TMP_DIR" \
-    --stem-template "{agent}-propose-rf$ID" --phase propose
+    --stem-template "{agent}-propose-rf$ID" --phase propose \
+    --timeout "$PHASE_TIMEOUT" --stall-timeout "$PHASE_TIMEOUT"
 rf merge-proposals "$ID"          # 2 = 候補 0 件（最終ゲートへ）
 ```
 
-**提案は参加者の全員が 1 度だけ、並行して行う。** 提案フェーズの所要は計画の対象に
-しない（計画はその後に立つ）。上限は監視の上限の表（`lib/limits.py` の `propose`）が持つ。
+**提案は参加者の全員が 1 度だけ、並行して行う。** 提案と計画は想定最大時間の中の枠で
+行い、枠の終わり（提案 `開始 + 0.20·B`、計画 `開始 + 0.30·B`）を監視の上限にする
+（決定 24。式は [02 の「締め切り」](02-plan-and-implement.md#締め切り)）。
 
 ### 観点を並べて観点ごとに探させる
 

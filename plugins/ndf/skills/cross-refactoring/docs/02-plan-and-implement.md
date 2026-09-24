@@ -8,10 +8,11 @@
 ## 計画
 
 ```bash
-rf_eval start-phase "$ID" plan
+rf_eval start-phase "$ID" plan               # PHASE_TIMEOUT = 計画の枠の終わりまでの残り + 余裕
 "$SCRIPTS/launch-cli.sh" "$IMPL" plan "$ID"
 "$LIB/monitor.py" "$ID" --agents "$IMPL" --tmp-dir "$TMP_DIR" \
-    --stem-template "{agent}-plan-rf$ID" --phase plan
+    --stem-template "{agent}-plan-rf$ID" --phase plan \
+    --timeout "$PHASE_TIMEOUT" --stall-timeout "$PHASE_TIMEOUT"
 rf_eval merge-plan "$ID"          # TESTS_NEEDED=0|1。2 = 項目 0 件（最終ゲートへ）
 ```
 
@@ -31,7 +32,7 @@ rf_eval merge-plan "$ID"          # TESTS_NEEDED=0|1。2 = 項目 0 件（最終
 | `tests` | 構造改善の前に足す現状固定テストの置き場所。空なら足さない |
 | `test_targets` | 限ったテストの対象（パスか `<パス>::<名前>`）。進行側がコマンドへ差し込む |
 | `merge_into` | 同じ `path` + `symbol` の別の候補と同じ変更なら、その候補の `key` |
-| `risk` | 公開の入出力が変わりうるか（危険の印 D5 の材料。**立てる側にだけ使う**） |
+| `risk` | 公開の入出力が変わりうるか（危険の印 D5 の材料。Jev が使えなければこれを使う） |
 
 **計画を読めなくても止めない。** 段は既定（または Jev）、テストは足さず、限ったテストは
 `--round-test` をそのまま使う形で進める。止めると提案に使った時間が丸ごと無駄になる。
@@ -51,6 +52,10 @@ rf_eval merge-plan "$ID"          # TESTS_NEEDED=0|1。2 = 項目 0 件（最終
 6. **時間に収まる件数を選ぶ。** 使える時間 = 想定最大時間 − 経過 − 控え。順位の順にたどり、
    **入る項目は入れ、入らない項目は飛ばして次を見る**（`budget` で見送る。決定 10）
 7. **締め切りを出す**（下の節）。採った項目は `I-001` の形の ID を持つ
+8. **D5 を決める。** 採った項目ごとに、公開の入出力が変わりうるかを Jev に問い（確信度 0.7
+   以上で採る）、使えなければ実装担当の `risk` を使う。`items[].public_io` に残し、検証は
+   読むだけにする（決定 25）
+9. **実行時の値を書き出す。** 締め切りの節の表の値を `state["limits"]` へ書く（決定 24）
 
 控え（`plan.reserve`）は次の 3 つの和である。
 
@@ -91,9 +96,37 @@ rf_eval merge-plan "$ID"          # TESTS_NEEDED=0|1。2 = 項目 0 件（最終
 - 実装の締め切り i: `T − Σ_{j≥i} implement_j − Σ_{全件} verify_j`。後順位ほど遅い
 - テストの追加の締め切り i: `T − Σ_{全件}(implement_j + verify_j) − Σ_{j≥i} test_j`
 
-締め切りは雛形へ項目ごとの時刻として渡す。**実行中の CLI は時間切れで止めない。** その
-ため `add-tests` と `implement` の監視と CLI の上限は、`start-phase` が
-`max(上限の表の値, T − 起動の時刻) + 600` 秒として返す（`PHASE_TIMEOUT`）。
+締め切りは雛形へ項目ごとの時刻として渡す。
+
+**時間に関わる数値は、この節の式だけで決まる**（決定 23・24）。B は想定最大時間
+（`--budget-minutes`）、w は着手前の全体のテストの実測秒（`baseline_test.seconds`）、
+開始は `started_at`、R は控え（危険の印と最終ゲートの全体のテスト、修正 1 回）である。
+係数は `refactor_lib/timeline.py` にだけ置き、実行の途中で数値を決めるために LLM へ問わない。
+
+| 値 | 式 | 書き出す時点 |
+| --- | --- | --- |
+| 余裕 | `0.05·B` | `init` |
+| 着手前のテスト 1 回の上限 | `0.10·B`（w はまだ無い） | `init` |
+| テスト 1 回の上限 | `max(3·w, 0.01·B)` | `init` |
+| 提案の枠の終わり | `開始 + 0.20·B` | `init` |
+| 計画の枠の終わり | `開始 + 0.30·B` | `init` |
+| テストの追加の終わり | 最後の項目の `test_start_deadline + test` の見積り | `merge-plan` |
+| 実装の終わり | 最後の項目の `start_deadline + implement` の見積り | `merge-plan` |
+| 直しの試行の打ち切り | `開始 + B − danger_whole_test − final_whole_test`（`budget.fix_end`） | `merge-plan` |
+| 最終ゲートの修正の打ち切り | `開始 + B` | `init` |
+| 段の監視の上限（`PHASE_TIMEOUT`） | その段の終わりまでの残り + 余裕（過ぎていれば余裕だけ） | `start-phase` |
+| 無音の打ち切り（`--stall-timeout`） | 段の監視の上限と同じ | `start-phase` |
+| CLI の上限（`cli_timeout`） | 段の監視の上限 + 余裕 | `start-phase` |
+
+値は `state["limits"]` に書き出し、改修計画のコメントに「時間の上限」の表として載せる。
+**段の監視の上限で CLI を止める。** 止めたときは未コミットの変更を捨て、コミット済みの
+項目は上の表の締め切りとコミットの時刻でそのまま判定する（`not_done` など）。止めたことは
+`phases.<段>.stopped` に残り、報告に 1 行出る。修正は 1 回 = 1 起動で、次の試行の前に
+`verify` が時計を見る（控えの `fix` より残りが短ければ打ち切る）。回数の上限は持たない。
+
+固定のまま残すのは、OS の後始末と通信の待ち（`kill_grace` 5 秒・監視の SIGTERM の猶予
+3 秒・`RESULT_AGE_GRACE` 30 秒・見回り 15 秒・Jev の通信 10 / 20 秒・認証の確認 120 秒）
+だけである。予算と性質が違い、報告の「固定のまま残した値」に並ぶ。
 
 ## テストの追加
 
@@ -102,7 +135,7 @@ rf_eval start-phase "$ID" add-tests          # PHASE_TIMEOUT
 "$SCRIPTS/launch-cli.sh" "$IMPL" add-tests "$ID"
 "$LIB/monitor.py" "$ID" --agents "$IMPL" --tmp-dir "$TMP_DIR" \
     --stem-template "{agent}-add-tests-rf$ID" --phase add-tests \
-    --timeout "$PHASE_TIMEOUT" --stall-timeout "$IMPL_STALL_TIMEOUT"
+    --timeout "$PHASE_TIMEOUT" --stall-timeout "$PHASE_TIMEOUT"
 rf merge-tests "$ID"                         # 2 = 残る項目 0 件
 ```
 
@@ -126,8 +159,8 @@ rf_eval start-phase "$ID" implement          # PHASE_TIMEOUT
 "$SCRIPTS/launch-cli.sh" "$IMPL" implement "$ID"
 "$LIB/monitor.py" "$ID" --agents "$IMPL" --tmp-dir "$TMP_DIR" \
     --stem-template "{agent}-implement-rf$ID" --phase implement \
-    --timeout "$PHASE_TIMEOUT" --stall-timeout "$IMPL_STALL_TIMEOUT"
-rf_eval merge-implement "$ID"                # JUDGE_NEEDED=0|1。2 = 残る項目 0 件
+    --timeout "$PHASE_TIMEOUT" --stall-timeout "$PHASE_TIMEOUT"
+rf merge-implement "$ID"                     # 2 = 残る項目 0 件
 ```
 
 実装担当は順位の順に 1 件ずつ適用し、**1 改善項目 = 1 コミット**にする（テストを足した
@@ -143,7 +176,7 @@ rf_eval merge-implement "$ID"                # JUDGE_NEEDED=0|1。2 = 残る項�
 | 1 改善項目 = 1 コミット | 同じ `Item-Id` のコミットの数 | 項目を取り消す |
 | 実行主体の明記 | `Item-Id` / `Impl-Runtime` / `Impl-Model` のトレーラー | 項目を取り消す |
 | 対象範囲の遵守 | `git show --name-only` | 項目を取り消す |
-| **テストの期待値が変わっていない** | テストの差分（段 1） | 項目を取り消す。決まらない差分は段 2 へ |
+| **テストの期待値が変わっていない** | テストの差分（段 1） | 項目を取り消す。決まらない差分は最終ゲートのレビューへ引き継ぐ |
 | 文書の文言を固定するテストを足していない | 追加行の文字列 | 項目を取り消す |
 | 差分予算 | `git show --numstat` | 実差分が見積りの 2 倍（抽出系は 3 倍）を超えたら取り消す |
 | 締め切り | コミットの時刻 | 完了の締め切りを過ぎたら `not_done`（テストのコミットも取り消す） |
@@ -315,49 +348,20 @@ Impl-Model: gpt-5.5
 `Impl-Model` には**実際に使ったモデル名**を書かせる。既定モデルで走った場合は
 `default` として報告時に区別する。
 
-## テストの差分の判定（段 2）
+## テストの差分の判定
 
-**テストの差分は 3 段で判定する**（#443）。機械で決まらないものを、そのままレビューへ
-送らない。
+**テストの差分は 2 段で判定する**（#443、決定 25）。計画の後に判断のために LLM を起動しない。
 
 | 段 | 誰が判定するか | 何を見るか |
 | --- | --- | --- |
-| 1 | `verify.py` | 前後が同一か。**値が失われていれば項目を取り消す** |
-| 2 | AI エージェント（`--phase judge-test-changes`） | 期待値が `assert` の行の外にある差分について、同じ入力に対する期待出力が変わったか |
-| 3 | 最終ゲートのレビュー | AI が `undecidable` と答えたものだけ |
+| 1 | `verify.py`（`merge-implement` の中） | 前後が同一か。**値が失われていれば項目を取り消す** |
+| 2 | 最終ゲートのレビュー | 段 1 で決まらなかったもの（期待値が `assert` の行の外にある差分・テストの追加） |
 
-**段 1 は `merge-implement` が機械で行う。** 期待値の変更を持つ項目を取り消し、決まらなかった
-差分を項目ごとに `items[].pending_test_judgements` へ記録する（実装計画 I7）。記録があれば
-`JUDGE_NEEDED=1` を返し、判定の材料（項目ごとの実装のコミットのテストの差分）を
-`<TMP_DIR>/test-diff-rf<ID>.diff` へ書き出す。
+段 1 で決まらなかった差分は、項目ごとに `items[].review_test_judgements` へ記録し、
+改修計画のその項目の節に「レビューで確かめるテストの差分」として載せる。**通ったものとしては
+扱わない。** 読み手（単独起動なら `cross-review`、工程の 1 つなら工程表の実装レビュー）が
+確かめる。
 
-**段 2 は進行側が 1 回だけ起動し、全項目の保留をまとめて問う。**
-
-```bash
-if [ "$JUDGE_NEEDED" = 1 ]; then
-  rf_eval start-phase "$ID" judge-test-changes
-  "$SCRIPTS/launch-cli.sh" "$IMPL" judge-test-changes "$ID"
-  "$LIB/monitor.py" "$ID" --agents "$IMPL" --tmp-dir "$TMP_DIR" \
-      --stem-template "{agent}-judge-test-changes-rf$ID" --phase judge-test-changes
-  rf merge-test-judgements "$ID"
-fi
-```
-
-**起動は背景で走るため、監視で待ってから取り込む。** 待たずに取り込むと答えが欠け、
-全件が `undecidable` になる。
-
-**取り込みの結果で次が決まる。**
-
-| 答え | 次にどうするか |
-| --- | --- |
-| すべて `unchanged` | **保留を解く。** 記録が消え、次の工程へ進む |
-| 1 件でも `changed` | **その項目を取り消す**（`merge-test-judgements` が行う）。他の項目は残る |
-| `undecidable` | 保留を解かず `review_test_judgements` へ移し、**最終ゲートのレビューへ引き継ぐ** |
-| 答えが欠けている | `undecidable` と同じに扱う。**待機を挟まないと全件がこれになる** |
-
-**答えが欠けたものを `unchanged` に倒さない。** 倒すと、判定を返さないことが通過の手段に
-なる。知らない答えも同じ扱いにする。
-
-**機械が enforce するのは段 1 と、記録が残ること、取り込みの判定である。** 起動そのものは
-手順である。変えてよい範囲の定義は `refactoring` の `references/test-changes.md` が持つ。
-
+以前は段 1 と段 3 の間に AI エージェントの判定（`judge-test-changes`）を挟んでいた。計画の
+後の LLM の呼び出しを作業の CLI だけにするため外した（決定 25）。変えてよい範囲の定義は
+`refactoring` の `references/test-changes.md` が持つ。
