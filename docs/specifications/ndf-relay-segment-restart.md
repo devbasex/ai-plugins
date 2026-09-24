@@ -2,7 +2,7 @@
 
 `/goal /ndf:development-workflow` の区間の切れ目で人が行っていた「`/exit`・起動し直し・次の
 コマンドの貼り付け」を、端末の前景に常駐する中継（`plugins/ndf/scripts/relay.py`）が行う。
-人が入力するのは関門の答えだけになる。中継が動けないとき・止まると決めたときは、`ndf-relay:` の
+人が入力するのは関門の答えだけになる。中継は利用者が `/ndf:install-wrapper` で入れたときだけ挟まる。中継が動けないとき・止まると決めたときは、`ndf-relay:` の
 1 行を出して、人がコマンドを貼り付ける今までどおりの運用へ落ちる。Claude Code だけが対象である。
 この文書は、中継の入出力の契約・状態の置き場所・判定の条件と、それぞれをそう決めた理由を残す。
 
@@ -14,6 +14,7 @@
 | 中継の始め方・中継を挟まない起動・止め方・上限・落ちたときの続け方・記録の読み方 | `plugins/ndf/skills/development-workflow/references/relay.md` |
 | 文脈量の hook の判定（上限・文脈量の読み方・工程へ入る起動の見分け方） | [ndf-token-waits-and-context-cut.md](ndf-token-waits-and-context-cut.md) の「文脈量の判定」 |
 | 3 層（conductor / supervisor / worker）の運転 | [ndf-agent-layers-unattended-run.md](ndf-agent-layers-unattended-run.md) |
+| 導入・取り外し（`install` / `uninstall` / `status` / `startup`）・`/ndf:restart`・関門を越えない守り・起動の方針の引数の引継ぎ | [ndf-relay-install-and-restart.md](ndf-relay-install-and-restart.md) |
 
 ## 概要
 
@@ -22,14 +23,14 @@
 
 | 順 | 誰が | 何をする |
 | ---: | --- | --- |
-| 1 | SessionStart hook | `relay.py install` が中継を安定した場所へ置き、`~/.bashrc`（zsh なら `~/.zshrc`）へ印のついた囲みで `alias claude=...` を 1 度だけ足す。次に開いたシェルから、`claude` と打つと中継を挟む |
+| 1 | 利用者 | 前もって `/ndf:install-wrapper` を 1 度打っておく。写しと `claude` の関数が `~/.claude/ndf/` に置かれ、次に開いたシェルから `claude` と打つと中継を挟む |
 | 2 | 利用者 | `claude` と打ち、起動した claude の中で `/goal /ndf:development-workflow #895` を入力する |
 | 3 | conductor（区間 1） | 設計の関門で `AskUserQuestion` を出す。答えを待つあいだ Stop は起きず、印は書かれない |
 | 4 | 利用者 | 「承認」と答える（キー入力は中継を通ってそのまま子へ届く） |
 | 5 | conductor | 設計 Pull Request をマージし、最後の応答に `ndf-next` のブロック（中身 `/goal /ndf:development-workflow #895`）を出して応答を終える |
 | 6 | Stop hook | `relay.py mark` がブロックの中身を印 `next.json` へ写す |
-| 7 | 中継 | 印・会話の記録・利用者の入力が 15 秒動かないのを見て、子の端末へ `/exit` と改行を入力し、子が終わるのを確かめる |
-| 8 | 中継 | プラグインを更新して版を読み、区切りの 1 行（`── ndf-relay: 区間 2 ──`）を出して、同じ端末で `claude "<ブロックの中身>"` を子として起動する |
+| 7 | 中継 | 印・会話の記録・利用者の入力が 15 秒動かず、質問が表示されていないのを見て、子の端末へ `/exit` と改行を 1 回で入力し、子が終わるのを確かめる |
+| 8 | 中継 | プラグインを更新して版を読み、区切りの 1 行（`── ndf-relay: 区間 2 ──`）を出して、同じ端末で `claude <最初の区間の起動の方針の引数> "<ブロックの中身>"` を子として起動する |
 | 9 | conductor（区間 2） | 新しい版の hook と Skill で、実装の持ち場から始める |
 
 **`/goal` を使わない普段の利用では印が書かれず、中継は何もしないまま claude と同じ終了コードで
@@ -62,9 +63,11 @@
 
 | 要素 | 責務 |
 | --- | --- |
-| `plugins/ndf/scripts/relay.py` | 中継の本体。副命令 `run` / `stop` / `mark` / `install` と、文脈量の hook が使う内部の `is-child` を持つ。標準ライブラリだけで書く |
+| `plugins/ndf/scripts/relay.py` | 中継の本体。副命令 `run` / `stop` / `mark`、導入の `install` / `uninstall` / `status` / `startup`、質問の印の `question`、文脈量の hook と `/ndf:restart` が使う `is-child` を持つ。標準ライブラリだけで書く |
 | `plugins/ndf/hooks/claude.json` の `Stop` | `NDF_RELAY_DIR` があるときだけ `python3 <root>/scripts/relay.py mark` を呼ぶ（既存の Slack 通知の後、`timeout` 5 秒、`continueOnError: true`）。無ければ `python3` を起こさない |
-| `plugins/ndf/hooks/claude.json` の `SessionStart`（`matcher: startup`） | `python3 <root>/scripts/relay.py install` を既存の 3 件の後に呼ぶ（`timeout` 5 秒、`continueOnError: true`） |
+| `plugins/ndf/hooks/claude.json` の `SessionStart`（`matcher: startup\|resume`） | 写しか記録があるときだけ `relay.py startup` を呼ぶ。シェルの設定は書かない（[導入の仕様](ndf-relay-install-and-restart.md)） |
+| `plugins/ndf/hooks/claude.json` の `PreToolUse` / `PostToolUse`（`matcher: AskUserQuestion`） | `NDF_RELAY_DIR` があるときだけ `relay.py question open` / `close` を呼ぶ（`timeout` 10 秒） |
+| `plugins/ndf/skills/install-wrapper/` / `restart/` | 明示の導入・取り外しと、好きな時点の切り替え（Claude Code だけ） |
 | `plugins/ndf/scripts/token-guard.sh` | 文脈量の判定で、中継の直接の子の conductor なら 1 度の通しをせずに止め続ける（下の「文脈の上限で切る」） |
 | `development-workflow/references/context-window.md` / `relay.md` / `SKILL.md` | 次のコマンドの形・中継の案内・引き継ぎの規約 |
 
@@ -95,7 +98,7 @@ graph TB
 ```
 
 **Codex / Kiro / agy には中継も hook も置かない。** `hooks/codex.json` と `dev.agy/hooks.json` は
-`mark` も `install` も呼ばず、Kiro は hook の定義を持たない。これらのランタイムでは、人が
+`relay.py` を呼ばず、Kiro は hook の定義を持たない。これらのランタイムでは、人が
 `ndf-next` のブロックの中身を貼り付ける。
 
 ## 決定と理由
@@ -117,23 +120,24 @@ graph TB
 | 次のコマンドはシェルを通さず、絶対パスと引数の配列で `os.execve` に渡す | 中身は LLM の出力で、引用符や `$(...)` を含みうる |
 | 記録は区間ごとに `start` と `end` の 2 行に分ける | 版は起動の時点で、長さと終わり方は終わった後に分かる。1 行にまとめると、起動の後に落ちた区間の行が書かれないか、行を書き直すことになる |
 | 次の区間の作業ディレクトリが消えていたら、主ディレクトリか在る最も近い親で起動する | 設計 Pull Request のマージで作業ツリーが消える切れ目は毎回起きうる。次の区間は「新しい会話で戻す」で作業ツリーを戻すので、主ディレクトリから始めて足りる |
-| `alias claude=...` で常に中継を挟み、`run` の後ろはすべて claude の引数として解釈しない | 中継の設定を引数で受けると claude の引数と名前がぶつかる。設定は環境変数（`NDF_RELAY_*`）だけで受ける |
-| 2 つ目以降の区間へ `run` の引数を引き継がない | `--resume` や `-c` を引き継ぐと捨てた会話へ戻る。引き継いでよい引数を判定すると、claude の引数の意味を中継が持つことになる |
+| `claude` の関数で常に中継を挟み、`run` の後ろはすべて claude の引数として受ける | 中継の設定を引数で受けると claude の引数と名前がぶつかる。設定は環境変数（`NDF_RELAY_*`）だけで受ける |
+| 2 つ目以降の区間へ、`run` の引数のうち起動の方針を表すものだけを引き継ぐ（#936） | 何も引き継がないと、devbase の `alias claude` が足す `--dangerously-skip-permissions` が 2 つ目の区間で落ちる。`--resume` や `-c`・最初のプロンプトを引き継ぐと捨てた会話へ戻るので、会話ごと・区間ごとのものは値ごと落とす（[導入の仕様](ndf-relay-install-and-restart.md)の「起動の方針の引数の引継ぎ」） |
 | 中継が要らない起動は、深さの変数だけを足して本物の claude を exec する | 擬似端末を挟むと出力の形・終了コード・シグナルの届き方が変わる。Claude Code から継いだ環境変数を外すと、直接打ったときと振る舞いが変わる |
-| alias は版に依らない安定した場所を指し、SessionStart hook が起動ごとに置き直す | 版つきのキャッシュを指すと古い版に固定され、古い版のディレクトリが消えると alias が壊れる。動いている中継は入れ替えない（子の端末を手放すことになる） |
-| alias はログインシェルの設定へ印のついた囲みで 1 度だけ足し、消されたら足し直さない。既存の `claude` の定義があれば足さない | 利用者が明示に自動を求めた。囲みの外は書き換えず、書く前にバックアップを取る。消したのは利用者の判断で、既存の定義を上書きすると選んだ起動の仕方が黙って替わる。bash と zsh 以外は書き方が違い、読み違えると設定を壊す |
+| `claude` の関数は版に依らない写しを指し、SessionStart hook が在る写しだけを起動ごとに置き直す（版は後退させない） | 版つきのキャッシュを指すと古い版に固定され、古い版のディレクトリが消えると壊れる。動いている中継は入れ替えない（子の端末を手放すことになる） |
+| 導入は利用者が明示に打つ `/ndf:install-wrapper` だけにし、SessionStart hook はシェルの設定を書かない（#928。10.17.6 までは hook が alias の囲みを自動で足した） | 利用者のシェル設定を黙って書き換えない。既存の `claude` の定義があれば足さない（選んだ起動の仕方が黙って替わる）。bash と zsh 以外は書き方が違い、読み違えると設定を壊す |
 | 文脈の上限は既存の文脈量の hook が作り、中継の下では 1 度の通しをやめる | 上限の値と読み方を 1 つにし、測る側と止める側を食い違わせない。人の居ない前提で LLM が「続ける」と決めると上限を超えたまま進む。Stop hook で上限を見て応答を続けさせると、文で尋ねた関門まで承認の前に切る |
 | 背景の処理が動いている Stop では印を書かない。判定は `background_tasks` の `status: running` だけで行う | 動いているあいだに切ると、その処理（supervisor を含む）が子の claude と一緒に終わる。背景の Bash もサブエージェントも同じ形で載る。conductor が自分で数えると数え違えて子を失う |
 | 次の区間の中身は `/goal` を含めたまま位置引数 1 つで渡す | `/goal ...` の複数行の位置引数でも、改行ごと 1 つの条件として目標が設定される |
 | 文脈量の hook は `relay.py is-child` で中継の直接の子かを見る | bash の hook に親のたどりを写すと、2 つの実装が食い違う |
+| 質問が表示されているあいだと、印の後に応答が再開したあいだは子の端末へ書かない。`/exit` と改行は質問の hook と同じロックの中で 1 回の write で書く（#928） | 質問の表示中に書いた `\r` は選択肢 1 を決める（実測）。10.17.6 までの 1 秒あけた `/exit` と `\r` のあいだに質問が出ると、`\r` が答えになる（[導入の仕様](ndf-relay-install-and-restart.md)の「関門を越えない守り」） |
 | 待ちの秒数と打ち切りはすべて環境変数で短くできる | 擬似端末の上の単体テストを数十秒で終える |
 
 ## 仕様
 
 ### 常に成り立つ条件
 
-- **`mark` と `install` は常に終了コード 0 で終わる。** 例外も含めて Stop と SessionStart を止めない。
-  `mark` は何も出力しない
+- **`mark`・`startup`・`question` は常に終了コード 0 で終わる。** 例外も含めて Stop・SessionStart・
+  質問を止めない。`mark` は何も出力しない
 - **中継は本体の例外で子の claude を巻き込まない。** 中継が落ちると擬似端末が閉じ、子は SIGHUP で
   終わる。切れ目の判定の中の例外は `stop` の行（`error`）と `ndf-relay:` の 1 行に変え、子が終わる
   まで入出力の中継だけを続ける
@@ -141,6 +145,7 @@ graph TB
   受け取りのすべての経路で `tcsetattr` で戻す。端末が閉じていて戻せないときは、その失敗を無視する
 - **印を書くのは中継の直接の子の claude だけで、`AskUserQuestion` の答えを待つあいだと背景の処理が
   動いているあいだは書かない。** 直接の子でない claude の Stop は印を読みも消しもしない
+- **中継は、質問の印（`question`）がある間・印の後に応答の行がある間は、子の端末へ何も書かない**
 - **中継は同じ起動の作業ディレクトリしか読まない。** 起動ごとに新しいディレクトリを作るので、pid が
   再利用されても前の起動の `stop` や `next.json` を読まない
 - **中継が生きているかは `relay.lock` の排他で見る。** pid の生死では見ない
@@ -159,8 +164,8 @@ graph TB
 | `run` | `[claude の引数 ...]`。中継は解釈しない | 素通しでは claude の終了コードそのもの（exec で置き換わる）。中継では最後の区間の claude の終了コード（シグナルで終わったら 128 + 番号）/ 2: 次の区間の更新か起動に失敗した / 127: 本物の claude が見つからない・起動の入れ子・1 つ目の区間の exec の失敗 | 区切りの 1 行と `ndf-relay:` の 1 行。印なしで終わるときは何も出さない |
 | `stop` | 無し | 0: 動いている中継に停止の印を置いた（1 つ以上）/ 1: 動いている中継が無い | 置いた中継の pid を 1 行ずつ |
 | `mark` | 標準入力に Stop hook の JSON | 常に 0 | 無し |
-| `install` | 無し | 常に 0 | 足したときと、既存の定義で足さなかった初回だけ `{"systemMessage": "<1 行>"}` |
-| `is-child` | 無し（内部用。`relay.md` に載せない） | 0: 中継が動いていて、呼んだ claude が中継の直接の子 / 1: それ以外 | 無し |
+| `install` / `uninstall` / `status` / `startup` / `question` | [導入の仕様](ndf-relay-install-and-restart.md)の副命令の表 | 同左 | 同左 |
+| `is-child` | 無し（内部用。`relay.md` に載せない。`/ndf:restart` が呼ぶ） | 0: 中継が動いていて、呼んだ claude が中継の直接の子 / 1: それ以外 | 無し |
 
 副命令が無い・知らない副命令は、使い方を標準エラーへ出して終了コード 2 で終わる。
 
@@ -191,12 +196,11 @@ graph TB
 
 ### 本物の claude
 
-alias は子のプロセスには効かないため、中継は実体を探す。**素通しも区間の起動も、ここで決めた
+alias と関数は子のプロセスには効かないため、中継は実体を探す。**素通しも区間の起動も、ここで決めた
 絶対パスを使い、名前 `claude` で `PATH` を引き直さない。**
 
 1. 環境変数 `NDF_RELAY_CLAUDE` があればそれ
-2. `PATH` を前から見て、実行できる `claude` のうち、実体（`realpath`）が `relay.py` 自身とその安定した
-   置き場所でなく、先頭 4 KB に `relay.py` を含まないもの。読めないファイルは中継と見なさない（飛ばし
+2. `PATH` を前から見て、実行できる `claude` のうち、実体（`realpath`）が `relay.py` 自身と写し・旧い写しでなく、先頭 4 KB に `relay.py` を含まないもの。読めないファイルは中継と見なさない（飛ばし
    損ねた繰り返しは `NDF_RELAY_DEPTH` が止める）
 
 ### 中継の流れ
@@ -220,10 +224,10 @@ stateDiagram-v2
 | 段 | すること |
 | --- | --- |
 | 中継する | 端末の属性を保存して標準入力を raw にし、`select` で標準入力 → マスタ、マスタ → 標準出力を流す（Ctrl-C もバイトのまま子へ届く）。SIGWINCH で端末の大きさをマスタへ `TIOCSWINSZ` で写す。`NDF_RELAY_POLL` 秒（既定 2）ごとに印を見る。1 つ目の区間は今の作業ディレクトリで `<本物の claude> <run の引数>` を起動する |
-| 静まりを待つ | 次がそろうまで待つ。(1) 印の `written_at`・`transcript_path` の更新時刻・利用者の最後の入力の時刻のうち最も遅いものから `NDF_RELAY_QUIET` 秒。(2) 目標のある区間では、印より後の判定の記録（下の「目標の判定の記録」）。(3) 印が消えていない |
+| 静まりを待つ | 次がそろうまで待つ。(1) 印の `written_at`・`transcript_path` の更新時刻・利用者の最後の入力の時刻のうち最も遅いものから `NDF_RELAY_QUIET` 秒。(2) 目標のある区間では、印より後の判定の記録（下の「目標の判定の記録」）。(3) 印が消えていない。(4) 質問の印が無い。(5) 会話の記録に印より後の `assistant` / `user` の行が無い |
 | 続けさせる | 停止の印・1 日の起動回数・空回りのどれかに当たるか、判定の中で例外が起きたら、`/exit` を入力しない。`stop` の行を書き、印を消し、`ndf-relay:` の 1 行を出す。以後は入出力を中継するだけで、次の印では何もしない。子が終わると `end`（`no-mark`）を書いて子の終了コードで終わる |
-| 終わらせる | 子の端末へ `/exit` を書き、`NDF_RELAY_EXIT_GAP` 秒（既定 1）おいて `\r` を書く。`NDF_RELAY_EXIT_WAIT` 秒（既定 30）で終わらなければ SIGTERM、`NDF_RELAY_TERM_WAIT` 秒（既定 10）でも終わらなければ SIGKILL を送り、終わりを `waitpid` で確かめてから `end` を書く |
-| 起動する | `claude plugin marketplace update <名前>` → `claude plugin update ndf@<名前> -y` → `claude plugin list --json` で版を読む。どれかが 0 以外・打ち切り・版が読めなければ `update-failed`。作業ディレクトリは印の `cwd`、消えていればパスの `/.worktrees/` の手前（主ディレクトリ）、無ければ在る最も近い親、それも無ければ HOME。区切りの 1 行を出し、`<本物の claude> <印の中身>`（中身は 1 つの引数）を起動する。exec に失敗したら `start-failed` |
+| 終わらせる | `question.lock` の中で (4)(5) と記録の大きさ・更新時刻を確かめ直し、子の端末へ `/exit\r` を 1 回の write で書いて `NDF_RELAY_EXIT_HOLD` 秒（既定 1）後に放す。`NDF_RELAY_EXIT_WAIT` 秒（既定 30。質問の印がある間は数えない）で終わらなければ SIGTERM、`NDF_RELAY_TERM_WAIT` 秒（既定 10）でも終わらなければ SIGKILL を送り、終わりを `waitpid` で確かめてから `end` を書く |
+| 起動する | `claude plugin marketplace update <名前>` → `claude plugin update ndf@<名前> -y` → `claude plugin list --json` で版を読む。どれかが 0 以外・打ち切り・版が読めなければ `update-failed`。作業ディレクトリは印の `cwd`、消えていればパスの `/.worktrees/` の手前（主ディレクトリ）、無ければ在る最も近い親、それも無ければ HOME。区切りの 1 行を出し、`<本物の claude> <起動の方針の引数> <印の中身>`（中身は 1 つの引数）を起動する。exec に失敗したら `start-failed` |
 
 **更新と起動に失敗したときは、`stop` の行を書き、次のコマンドの中身を画面に出して終了コード 2 で
 終わる。** 1 つ目の区間の exec に失敗したときは、`stop`（`start-failed`）を書き `ndf-relay:` の 1 行を
@@ -293,29 +297,12 @@ stateDiagram-v2
 
 hook が止めるのは工程へ入る起動だけで、持ち場の中の Bash や Read は止めない。
 
-### `install`
+### 導入（`install`）
 
-**alias は安定した場所 `${XDG_DATA_HOME:-$HOME/.local/share}/ndf/relay.py` を指す。** SessionStart
-hook は起動した版のパスで動くので、`claude plugin update` の後の最初の起動（中継が起動する次の区間を
-含む）で写しが新しい版になる。動いている `run` は古い版のまま最後まで動き、利用者が次に `claude` と
-打ったときから新しい版になる。
-
-| # | 段 | すること |
-| ---: | --- | --- |
-| I1 | 止める | `NDF_RELAY_AUTO=0` なら何もしない。それ以外は状態の親とデータの親を権限 `0700` で作り、`install.lock` の排他を 2 秒まで待って取る（取れなければ何もせず終わる）。I2〜I7 はこのロックの中で行う |
-| I2 | 置き直す | 自分と写しの中身が違うか写しが無いときだけ、一時ファイルに書いて権限 `0755` にしてから置き換える |
-| I3 | 足す先 | `$SHELL` の名前が `bash` なら `~/.bashrc`、`zsh` なら `${ZDOTDIR:-$HOME}/.zshrc`。それ以外では足さない |
-| I4 | 既にある | 足す先に `# >>> ndf relay >>>` の行があれば何もしない |
-| I5 | 利用者が消した | 記録 `rc-added` に足す先のパスがあるのに囲みが無ければ、足さない。足し直すには記録の行を消す |
-| I6 | 既存の定義 | 足す先（bash では `~/.bash_aliases` も）に、行頭の `alias claude=`、`function claude`、`claude()` / `claude ()` があれば足さない。記録 `rc-skipped` に無ければ案内を 1 度だけ出して記録する |
-| I7 | 足す | 足す先があれば `<足す先>.ndf-bak-<UTC の %Y%m%dT%H%M%SZ>` へ写してから、末尾へ下の囲みを追記する（無ければ作る）。`rc-added` に記録し、足したことを知らせる |
-
-```bash
-# >>> ndf relay >>>
-# ndf の中継（区間の切れ目で claude を自動で起動し直す）。消せば元に戻る。
-alias claude='python3 "${XDG_DATA_HOME:-$HOME/.local/share}/ndf/relay.py" run'
-# <<< ndf relay <<<
-```
+**導入・取り外し・状態の表示・写しの置き直しは [ndf-relay-install-and-restart.md](ndf-relay-install-and-restart.md) が持つ。**
+10.17.6 までは SessionStart hook の `install` が `${XDG_DATA_HOME:-$HOME/.local/share}/ndf/relay.py` へ写し、
+`~/.bashrc`（zsh なら `.zshrc`）へ alias の囲みを 1 度だけ足していた。今は利用者の `/ndf:install-wrapper`
+だけが写しを `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/ndf/` に置き、シェルの設定へ読み込みの 1 行を置く。
 
 ## データ・設定
 
@@ -332,10 +319,11 @@ alias claude='python3 "${XDG_DATA_HOME:-$HOME/.local/share}/ndf/relay.py" run'
 | `relay.pid` | `run` | 中継の pid（表示のため。生死の判定には使わない） |
 | `child.pid` | `run` | 今の区間の claude の pid。区間ごとに書き換える |
 | `next.json` | `mark` | 印。権限 `0600` の一時ファイルに書いてから置き換える |
+| `question` / `question.lock` | `question open` / `close`・`mark`・`run` | 質問の印（`0600`、空）と、質問の始まりと `/exit` の write を排他にするロック |
 | `stop` | `stop` か利用者 | 空。在れば停止の印 |
 | `log.jsonl` | `run` | 記録 |
 
-状態の親には、作業ディレクトリのほかに `count.lock`・`install.lock`・`rc-added`・`rc-skipped` を置く。
+状態の親には、作業ディレクトリのほかに `count.lock`・`install.lock`・`rc-added`・`rc-skipped`・`rc-user`・`rc-noticed` を置く。
 
 ### 印（`next.json`）
 
@@ -357,10 +345,11 @@ alias claude='python3 "${XDG_DATA_HOME:-$HOME/.local/share}/ndf/relay.py" run'
 | `command` | 起動に渡した中身（`start`）。1 つ目の区間は `run` の引数をシェルの形でつないだもの（引数なしなら空） |
 | `from_session` | 前の区間の `session_id`（`start`。1 つ目は空） |
 | `plugin_version` | 起動の直前に読んだ `ndf@<名前>` の版（`start`） |
+| `carried` | 2 つ目以降の区間の先頭に付けた起動の方針の引数（`start`。1 つ目の区間には無い） |
 | `cwd` / `cwd_fallback` | 起動した作業ディレクトリと、印の `cwd` が消えていたときの元の値（`start`。消えていなければ `cwd_fallback` は無い） |
 | `seconds` | 区間の長さ（`end`）。起動から、印の `written_at`（`mark` / `sigterm` / `sigkill`）か子の終わり（`no-mark`）まで |
 | `ended_by` | `mark`（`/exit` で終わった）/ `no-mark`（印なしで終わった）/ `sigterm` / `sigkill`（`end`） |
-| `reason` | `stop-file` / `max-starts` / `spin` / `update-failed` / `start-failed` / `error`（`stop`）。`start-failed` は `errno` も持つ |
+| `reason` | `stop-file` / `max-starts` / `spin` / `count-lock`（質問の後に `count.lock` を取り直せない）/ `update-failed` / `start-failed` / `error`（`stop`）。`start-failed` は `errno` も持つ |
 
 **`end` は区間の claude が実際に終わったときだけ書く。** 落ちると決めたときは `stop` の行だけを書き、
 その区間が後で終わったときに `end`（`no-mark`）を書く。中継そのものが SIGTERM / SIGHUP で先に終わると、
@@ -371,12 +360,12 @@ alias claude='python3 "${XDG_DATA_HOME:-$HOME/.local/share}/ndf/relay.py" run'
 | 変数 | 既定 | 意味 |
 | --- | --- | --- |
 | `NDF_RELAY` | — | `0` で `run` を常に素通しにする |
-| `NDF_RELAY_AUTO` | — | `0` で `install` が何もしない |
 | `NDF_RELAY_MAX_STARTS` | `20` | 1 日の起動回数の上限（全部の中継の合計） |
 | `NDF_RELAY_QUIET` | `15` | 静まりの秒数 |
 | `NDF_RELAY_SPIN` | `120` | 空回りとみなす区間の秒数 |
 | `NDF_RELAY_POLL` | `2` | 印を見る間隔（秒） |
-| `NDF_RELAY_EXIT_GAP` / `NDF_RELAY_EXIT_WAIT` / `NDF_RELAY_TERM_WAIT` | `1` / `30` / `10` | `/exit` と改行の間・`/exit` の後の待ち・SIGTERM の後の待ち（秒） |
+| `NDF_RELAY_EXIT_HOLD` / `NDF_RELAY_EXIT_WAIT` / `NDF_RELAY_TERM_WAIT` | `1` / `30` / `10` | `/exit` を書いた後に `question.lock` を持つ秒・`/exit` の後の待ち・SIGTERM の後の待ち（秒） |
+| `NDF_RELAY_QUESTION_WAIT` | `3` | `question open` が `question.lock` を待つ秒 |
 | `NDF_RELAY_LIST_TIMEOUT` / `NDF_RELAY_UPDATE_TIMEOUT` | `15` / `120` | `plugin list` と `marketplace update`・`plugin update` の打ち切り（秒） |
 | `NDF_RELAY_CLAUDE` | — | 本物の claude の絶対パス（最優先） |
 | `NDF_RELAY_DIR` | — | 中継が子に置く作業ディレクトリ。hook と文脈量の hook が中継の下かをこれで見る |
@@ -401,28 +390,28 @@ alias claude='python3 "${XDG_DATA_HOME:-$HOME/.local/share}/ndf/relay.py" run'
 - `NDF_RELAY_DIR` とその親は `0700`、印は `0600` で、同じ利用者のプロセスだけが読み書きできる
 - 次のコマンドはシェルも `PATH` の探索も通さず、本物の claude の絶対パスと引数の配列で `os.execve` に
   渡す。`claude` という名前のラッパーへ戻らない
-- `install` が書くのはログインシェルの設定の印のついた囲みの中だけで、囲みの外は読むだけである。書く前に
-  バックアップを取る
+- `install` / `uninstall` が書くのはシェルの設定の印のついた囲みの中だけで、囲みの外は読むだけである。
+  書く前にバックアップを取る。SessionStart hook はシェルの設定を書かない
 
 ## 運用
 
-- **始める:** 利用者の手作業は無い（SessionStart が `install` を呼ぶ）。次に開いたシェルから効く
+- **始める:** `/ndf:install-wrapper` を 1 度打つ。次に開いたシェルから効く
 - **止める:** 1 回だけなら `NDF_RELAY=0 claude`。切り替えだけを止めるなら `relay.py stop` か停止の印。
-  alias を戻すなら囲みを消す（`NDF_RELAY_AUTO=0` で `install` も止まる）。データの移行は無い
-- **区間をまたいで設定を保つ:** 2 つ目以降の区間は印の中身だけで起動するので、モデルなどは設定か
-  環境変数（`ANTHROPIC_MODEL` など）で与える
+  関数を外すなら `/ndf:install-wrapper uninstall`
+- **区間をまたいで設定を保つ:** 最初の区間に付けた起動の方針の引数（`--model` など）は 2 つ目以降の区間にも
+  付く。会話ごと・区間ごとの引数（`--resume` など）は付かない
 - **前の区間の画面:** claude は区間ごとに代替画面を使うため、端末の履歴に残るのは
   `Resume this session with: claude --resume <id>` と区切りの 1 行だけである。会話の記録は残る
-- **既知の制約:** `install` が既存の `claude` の定義を探すのは足す先と `~/.bash_aliases` だけで、別の
-  ファイルから読み込む定義は見落とし、囲みの alias が後から上書きする。利用者は囲みを消せば戻せる
+- **既知の制約:** `install` が既存の `claude` の定義を探すのはシェルの設定と `~/.bash_aliases` だけで、別の
+  ファイルから読み込む定義は見落とす。先に定義された alias は関数と組み合わさり、その引数が中継へ渡る
 - **費用:** 中継の待ちは `select` とファイルの確認で、LLM を使わない。`mark` は `NDF_RELAY_DIR` が無ければ
-  `python3` を起こさない。`install` は 2 回目以降、ファイル 1 つの読み比べで終わる
+  `python3` を起こさない。`startup` は写しも記録も無ければ `python3` を起こさない
 
 ## テスト観点
 
 単体テストは `plugins/ndf/scripts/tests/test_relay.py`（子の claude を擬似端末の上で動く
-`tests/fixtures/relay_fake_claude.py` に差し替え、`claude plugin ...` も同じ差し替えが受ける。`install`
-と `run` は一時の HOME と `XDG_*` の下でだけ動かす）と、`test_token_guard.py` の中継の下の 4 件にある。
+`tests/fixtures/relay_fake_claude.py` に差し替え、`claude plugin ...` も同じ差し替えが受ける。`run` は一時の HOME と
+`XDG_*` の下でだけ動かす。導入と守りの観点は[導入の仕様](ndf-relay-install-and-restart.md)の「テスト観点」）と、`test_token_guard.py` の中継の下の 4 件にある。
 
 - `mark`: ブロック 1 つで印が 5 つのキーで書かれ、複数行を保ち、権限が `0600` であること。`stop_hook_active`
   が真でも書くこと。`NDF_RELAY_DIR` 無し・中継が動いていない・ブロック 0・2 つ・4 つのバッククォートの囲みの
@@ -435,7 +424,7 @@ alias claude='python3 "${XDG_DATA_HOME:-$HOME/.local/share}/ndf/relay.py" run'
   ラッパーを飛ばし、読めないファイルは中継と見なさず、`NDF_RELAY_CLAUDE` が最優先で、深さ 2 と本物の
   不在で終了コード 127 になること
 - 中継: 1 つ目の区間が `run` の引数を受け、印なしで終われば子の終了コード（シグナル 15 なら 143）で何も
-  出さずに終わること。切れ目で `/exit` と `\r` → 子の終わり → `marketplace update` → `plugin update -y` →
+  出さずに終わること。切れ目で `/exit\r` → 子の終わり → `marketplace update` → `plugin update -y` →
   `plugin list --json` → 区切りの 1 行 → 次の子の起動（中身が 1 つの引数）の順になり、3 つ目の区間まで
   続くこと。記録の `start` と `end` のキーと `plugin_version` の値が合うこと。利用者の入力・記録の更新・
   目標の判定待ちのあいだは `/exit` を送らず、印が消えれば取りやめること
@@ -449,13 +438,9 @@ alias claude='python3 "${XDG_DATA_HOME:-$HOME/.local/share}/ndf/relay.py" run'
 - `stop`: 動いている中継すべてにだけ停止の印を置き、`relay.pid` が無関係な生きたプロセスを指すディレクトリを
   飛ばし、動いている中継が無ければ終了コード 1 であること。同じ pid で 2 回作った作業ディレクトリが別で（`0700`・空）、
   前の起動の `stop` と `next.json` を持ち込まず、親が無くても作ること
-- `install`: 1 回目に写し・囲み・バックアップ・`rc-added`・`systemMessage` ができ、2 回目は何も変えず、
-  囲みを消した後は足さないこと。既存の `alias` / 関数（`~/.bash_aliases` を含む）では足さず案内が 1 回だけで
-  あること。`ZDOTDIR`・bash と zsh 以外のシェル・`NDF_RELAY_AUTO=0`・写しの置き換え・書けない場所・4 つの
-  同時起動・ロックの保持を扱えること
 - 文脈量の hook: 中継の直接の子の conductor では、上限を超えた持ち場の起動が 2 回続けて止まり、理由が
   `ndf-next` と supervisor の報告の待ちを含むこと。直接の子でない・中継が動いていないときは 1 度だけ通すこと
-- Codex / agy の hook の定義に `mark` と `install` が無いこと（`claude plugin validate .` を含む）
+- Codex / agy の hook の定義に `relay.py` が無いこと（`claude plugin validate .` を含む）
 
 **本物の Claude Code での通しの確かめ**（2.1.280・`--model haiku`・擬似端末の上。プラグインの更新は
 差し替えのラッパーが受けた。記録は [PR #921](https://github.com/devbasex/ai-plugins/pull/921) の本文）:
@@ -475,6 +460,7 @@ alias claude='python3 "${XDG_DATA_HOME:-$HOME/.local/share}/ndf/relay.py" run'
 ## 関連リンク
 
 - [#895](https://github.com/devbasex/ai-plugins/issues/895)（設計は [PR #908](https://github.com/devbasex/ai-plugins/pull/908)、実装は [PR #921](https://github.com/devbasex/ai-plugins/pull/921)）
+- [#928](https://github.com/devbasex/ai-plugins/issues/928) / [#936](https://github.com/devbasex/ai-plugins/issues/936) — 明示の導入・`/ndf:restart`・関門を越えない守り・起動の方針の引数の引継ぎ（[ndf-relay-install-and-restart.md](ndf-relay-install-and-restart.md)）
 - [#827](https://github.com/devbasex/ai-plugins/issues/827) — supervisor の層のスクリプト駆動。「何が claude を起動し、状態をどこに持つか」の答え（スクリプトが起動し、正本は会話の外の記録、LLM の結果は hook がファイルへ写す）を共有する
 - [ndf-token-waits-and-context-cut.md](ndf-token-waits-and-context-cut.md) — 文脈量の hook と引き継ぎの 1 行
 - [ndf-agent-layers-unattended-run.md](ndf-agent-layers-unattended-run.md) — 3 層の運転

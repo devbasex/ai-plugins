@@ -17,8 +17,15 @@
 | `quit <n>` | 終了コード n で終わる |
 | `size` | 端末の大きさを `FAKE_DIR/size-<pid>` へ書く |
 | `tr <JSON>` | 会話の記録（`FAKE_DIR/transcript-<pid>.jsonl`）へ 1 行足す |
+| `q open` / `q close` | `relay.py question open` / `close` を `AskUserQuestion` の hook と同じ形で呼び、出力を `FAKE_DIR/question-<pid>.jsonl` へ書く |
+| `answer [mark <中身>]` | 質問に答えた後の Stop を模す。`relay.py mark` を呼び（中身が無ければブロック無し）、終了コード 0 で終わる |
+| `unq` | 質問の印だけを消す |
 
-最初の位置引数が `mark ` で始まれば、起動の直後にその行を 1 度実行する。
+`FAKE_EXIT_QUESTION=1` なら、最初の `/exit` で終わらずに質問の印を置く（書かれた `/exit` が質問の
+答えの後に働く形を模す）。このとき SIGTERM を受けたら `FAKE_DIR/sigterm-<pid>` を書いて 143 で終わる。
+受けたバイトは読んだ単位ごとに `FAKE_DIR/chunks-<pid>.jsonl` へも書く。
+
+最後の引数（区間のプロンプト）が `mark ` で始まれば、起動の直後にその行を 1 度実行する。
 """
 import fcntl
 import json
@@ -64,15 +71,21 @@ def transcript():
 
 
 def do_mark(body):
-    msg = f"次の区間:\n\n```ndf-next\n{body}\n```"
+    msg = f"次の区間:\n\n```ndf-next\n{body}\n```" if body is not None else "ブロックは無い"
     data = {"session_id": f"s{os.getpid()}", "transcript_path": transcript(), "cwd": os.getcwd(),
             "stop_hook_active": False, "last_assistant_message": msg, "background_tasks": []}
     subprocess.run([sys.executable, RELAY, "mark"], input=json.dumps(data), text=True)
 
 
+PENDING = []
+
+
 def handle(line):
     if line == "/exit":
-        if os.environ.get("FAKE_IGNORE_EXIT") != "1":
+        if os.environ.get("FAKE_EXIT_QUESTION") == "1" and not PENDING:
+            PENDING.append(1)
+            open(os.path.join(os.environ["NDF_RELAY_DIR"], "question"), "w").close()
+        elif os.environ.get("FAKE_IGNORE_EXIT") != "1":
             sys.exit(0)
     elif line.startswith("mark "):
         do_mark(line[5:])
@@ -86,6 +99,18 @@ def handle(line):
     elif line.startswith("tr "):
         with open(transcript(), "a") as f:
             f.write(line[3:] + "\n")
+    elif line.startswith("q "):
+        p = subprocess.run([sys.executable, RELAY, "question", line[2:]], input="{}", text=True,
+                           capture_output=True)
+        log(f"question-{os.getpid()}.jsonl", {"action": line[2:], "stdout": p.stdout, "code": p.returncode})
+    elif line == "answer" or line.startswith("answer mark "):
+        do_mark(line[12:] if line.startswith("answer mark ") else None)
+        sys.exit(0)
+    elif line == "unq":
+        try:
+            os.unlink(os.path.join(os.environ["NDF_RELAY_DIR"], "question"))
+        except OSError:
+            pass
 
 
 def main():
@@ -94,13 +119,18 @@ def main():
         plugin(args[1:])
     if os.environ.get("FAKE_IGNORE_EXIT") == "1":
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    if os.environ.get("FAKE_EXIT_QUESTION") == "1":
+        def on_term(*_):
+            open(os.path.join(D, f"sigterm-{os.getpid()}"), "w").close()
+            os._exit(143)
+        signal.signal(signal.SIGTERM, on_term)
     log("starts.jsonl", {"argv": args, "cwd": os.getcwd(), "pid": os.getpid(),
                          "relay_dir": os.environ.get("NDF_RELAY_DIR"),
                          "claudecode": os.environ.get("CLAUDECODE"),
                          "depth": os.environ.get("NDF_RELAY_DEPTH")})
     open(transcript(), "a").close()
-    if args and args[0].startswith("mark "):
-        do_mark(args[0][5:])
+    if args and args[-1].startswith("mark "):
+        do_mark(args[-1][5:])
     tty.setraw(0)
     buf = b""
     raw = open(os.path.join(D, f"input-{os.getpid()}"), "ab", buffering=0)
@@ -109,6 +139,7 @@ def main():
         if not data:
             return
         raw.write(data)
+        log(f"chunks-{os.getpid()}.jsonl", {"hex": data.hex()})
         buf += data
         while b"\r" in buf:
             line, buf = buf.split(b"\r", 1)

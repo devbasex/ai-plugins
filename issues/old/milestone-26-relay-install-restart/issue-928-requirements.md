@@ -136,6 +136,10 @@
 - [ ] AC21: 本物の Claude Code（一時の HOME・隔離した `CLAUDE_CONFIG_DIR`）の上で、中継の下の `/ndf:restart` が人の入力なしで次の区間を起動することを 1 度通す。記録を実装の Pull Request に残す
 - [ ] AC22: 既存の中継の単体テストと全体テストが通る。`claude plugin validate .` と `python3 scripts/check-skill-frontmatter.py` が終了コード 0
 
+### 9. 区間をまたいだ起動の方針（#936）
+
+- [ ] AC31: 2 つ目以降の区間は、最初の区間の引数のうち起動の方針を表すもの（`--dangerously-skip-permissions`・`--model`・`--add-dir` など。devbase の `alias claude` が足す引数を含む）を先頭に付けて起動する。区間ごとの引数（最初のプロンプト・`--` 以後・`-c`・`--resume`・`--session-id`・`--fork-session`・`--from-pr`・`--teleport`・`--cloud`・`-n`/`--name`・`--bg`・`--tmux`）は値ごと引き継がない。10.17.4 の囲みを知らせる 1 行には、`/ndf:install-wrapper` で入れ直せば別のファイルが定義した `alias claude` が戻る旨の案内がある（#936・決定 22）
+
 ## 前提
 
 - 前提 1: 10.17.4 の自動の囲みは、`rc-added` に載り `rc-user` に載らないパスと、囲みの存在の両方で見分けられる。記録が無い囲み（利用者が自分で写した）は自動の囲みとして扱わない
@@ -177,3 +181,4 @@
 | AC17〜AC19・AC30 | 設計の文書の実測の表・不変条件の節・起票した課題の番号 |
 | AC20〜AC22 | 全体テスト・静的検査・実装の Pull Request の記録 |
 | AC23〜AC26b | `test_relay.py`（試験用の子が質問の hook と同じ印を置く・会話の記録に行を足す）と、AC21 の通しの中で質問を 1 回出し、表示中に印が残っていても `/exit` が書かれないこと |
+| AC31 | `test_relay.py` の単体テスト（引数の選び分け）と、alias → シェルの関数 → 中継を擬似端末で通して 2 つ目の区間の起動の引数を見る試験。知らせの 1 行は本文を読んで確かめる（文言を固定するテストは書かない） |

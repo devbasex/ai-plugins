@@ -5,7 +5,7 @@
 
 例: 設計の関門をまたいで実装へ進む。
 
-1. 利用者がいつもどおり `claude` と打つ（alias が中継を挟む）。その中で `/goal /ndf:development-workflow #895` を入力する
+1. 利用者がいつもどおり `claude` と打つ（`/ndf:install-wrapper` で入れた関数が中継を挟む）。その中で `/goal /ndf:development-workflow #895` を入力する
 2. conductor が設計の関門で `AskUserQuestion` を出し、利用者が「承認」と答える
 3. conductor が設計 Pull Request をマージし、最後の応答に次のブロックを出して応答を終える
 
@@ -20,19 +20,42 @@
 
 ## 始め方
 
-**利用者の手作業は無い。** ndf の入った Claude Code を起動すると、SessionStart hook が
-`relay.py install` を呼び、次の 2 つを行う。
+**中継を使うかは利用者が決める。** claude の中で `/ndf:install-wrapper` を 1 度打つ。SessionStart hook は
+シェルの設定を書かない。
 
-| すること | 中身 |
+| 置くもの | 中身 |
 | --- | --- |
-| 中継を置き直す | `${XDG_DATA_HOME:-~/.local/share}/ndf/relay.py` へ写す。中身が同じなら書かない。更新の後の最初の起動で新しい版になる |
-| alias を 1 度だけ足す | `$SHELL` が bash なら `~/.bashrc`、zsh なら `${ZDOTDIR:-~}/.zshrc` の末尾へ、印のついた囲み（`# >>> ndf relay >>>` 〜 `# <<< ndf relay <<<`）で `alias claude='python3 "${XDG_DATA_HOME:-$HOME/.local/share}/ndf/relay.py" run'` を足す。書く前に `<設定>.ndf-bak-<UTC の時刻>` へ写しを取る。足したときだけ 1 行で知らせる |
+| 写しと写しの版 | `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/relay.py` と `relay.version` |
+| 中継の rc | `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/shellrc`。`function claude { ... }` を定義する。関数は呼んだ時点で写しが在れば中継を、無ければ素の `claude` を起こす |
+| 読み込みの 1 行 | `[ -f "$HOME/.claude/ndf/shellrc" ] && . "$HOME/.claude/ndf/shellrc"`。`DEVBASE_SHELLRC_DIR` がディレクトリを指せば `$DEVBASE_SHELLRC_DIR/ndf-relay.sh` に置き、無ければ `$SHELL` の設定（bash は `~/.bashrc`、zsh は `${ZDOTDIR:-~}/.zshrc`）の末尾へ囲み（`# >>> ndf relay >>>` 〜 `# <<< ndf relay <<<`）で足す。書く前に `<設定>.ndf-bak-<UTC の時刻>` へ写しを取る |
 
-- **次に開いたシェルから効く。** 今のシェルでは `source ~/.bashrc` で効く
-- 既に `claude` の alias か関数がある（bash では `~/.bash_aliases` も見る）と足さず、1 度だけ案内する。中継を使うなら、案内の alias の 1 行を自分で置く
-- **戻すには囲みを消す。** 消した後は足し直さない（`${XDG_STATE_HOME:-~/.local/state}/ndf/relay/rc-added` の記録で見分ける。足し直したいときはその行を消す）
-- bash と zsh 以外のシェルでは足さない
-- **`NDF_RELAY_AUTO=0` で `install` 全体が何もしなくなる**
+- **次に開いたシェルから効く**
+- 既に `claude` の alias か関数がある（bash では `~/.bash_aliases` も見る）・bash と zsh 以外のシェルでは足さず、自分で置く 1 行を示す
+- `/ndf:install-wrapper status` で、読み込み先・囲みの形・写しの版を見られる
+- **devbase では `~/.claude` が同じアカウントグループのコンテナで共有される。** 写しと中継の rc はコンテナを作り直しても残り、導入・取り外しの効果は同じグループの全コンテナに及ぶ
+
+**写しは SessionStart hook が今の版に保つ。** 写しか 10.17.4〜10.17.6 の写し（`${XDG_DATA_HOME:-~/.local/share}/ndf/relay.py`）が
+在れば、起動ごと（新しい会話・`-c`・`--resume`）に今のプラグインの `relay.py` で置き直す。無い写しは作らない。
+写しの版が今のプラグインより新しければ置き直さない（同じ `~/.claude` を共有する古い版のコンテナが写しを
+後退させないため）。
+
+### 10.17.4〜10.17.6 から上げた利用者
+
+10.17.4〜10.17.6 の SessionStart hook は、`~/.bashrc` か `~/.zshrc` へ alias の囲みを自動で足していた。次の版では:
+
+- 起動したときに 1 度だけ「10.17.4〜10.17.6 が自動で足したもの。使い続けるなら何もしなくてよい。外すなら `/ndf:install-wrapper uninstall`」と知らせる
+- 何もしなければ、その囲みの alias が指す 10.17.4〜10.17.6 の写し（hook が今の版で置き直す）で中継が動く
+- `/ndf:install-wrapper` を打つと、囲みの中だけを読み込みの 1 行へ置き換える
+- `NDF_RELAY_AUTO` は意味を失った（hook が導入しないため）。置いたままでも害は無い
+
+## 外し方・戻し方
+
+| したいこと | 手段 |
+| --- | --- |
+| 外す | `/ndf:install-wrapper uninstall`。`~/.bashrc` と `~/.zshrc` の囲みを外し（バックアップの後。囲みの外は変えない）、読み込み先のファイル・中継の rc・写し・10.17.4〜10.17.6 の写しを消す。開いているシェルでは `unset -f claude`（10.17.4〜10.17.6 の囲みなら `unalias claude`）で外れる |
+| 手で外す | 囲みの行を消し、`~/.claude/ndf/` の `relay.py`・`relay.version`・`shellrc` を消す |
+| 過去の版へ戻した | `/ndf:install-wrapper` を打ち直す（明示の導入は版を比べずに今の版を置く） |
+| `/ndf:install-wrapper` を持たない 10.17.6 以前へ戻す | **戻す前に** `/ndf:install-wrapper uninstall` を打つ。戻した後なら囲みと `~/.claude/ndf/` を手で消す |
 
 ## 中継を挟まない起動
 
@@ -57,12 +80,34 @@
 
 | 手段 | 効き目 |
 | --- | --- |
-| `python3 ~/.local/share/ndf/relay.py stop`（別の端末から） | 動いている中継すべてに停止の印を置く。次の印を受けても `/exit` を入力しない。動いている中継が無ければ終了コード 1 |
+| `python3 ~/.claude/ndf/relay.py stop`（別の端末から） | 動いている中継すべてに停止の印を置く。次の印を受けても `/exit` を入力しない。動いている中継が無ければ終了コード 1 |
 | `touch <作業ディレクトリ>/stop` | 同じ（1 つの中継だけ） |
 | 区間の中で `/exit` か Ctrl-C を 2 回 | 中継も次の区間を起動せずに終わる |
 
 作業ディレクトリは `${XDG_STATE_HOME:-~/.local/state}/ndf/relay/<時刻>-<pid>-<乱数>/` で、
 起動ごとに新しく作る。区間の中では環境変数 `NDF_RELAY_DIR` が指す。
+
+## 好きな時点で切り替える（`/ndf:restart`）
+
+**中継の下で `/ndf:restart [再開用のコマンド]` を打つと、区間の切れ目と同じ経路で切り替わる。**
+claude が再開用のコマンドを `ndf-next` のブロックで出して応答を終え、中継が静まりを待ってから
+`/exit` → プラグインの更新 → 起動を行う。プラグインの更新を反映したいとき・文脈を切りたいときに使う。
+引数が無ければ、`/goal` の目標か、課題番号・作業ツリー・Pull Request を差し込む定型の 1 文で作る。
+中継の外では、手順の 1 行と貼り付ける中身を示すだけで終わる。
+
+## 関門を越えない守り
+
+**中継は、質問（`AskUserQuestion`）の答えを代わりに送らない。** 質問の表示中に中継が書いた `\r` は
+選択肢 1 を決めるため、次のあいだは子の端末へ何も書かない。
+
+| 条件 | 見分け方 |
+| --- | --- |
+| 質問が表示されている | `AskUserQuestion` の `PreToolUse` hook が作業ディレクトリへ `question` を作り、`PostToolUse` と次の Stop（`mark`）が消す |
+| 印の後に応答が再開した | 会話の記録に、印の `written_at` より後の `assistant` か `user` の行がある。次の Stop が印を書き直すか消すまで待つ |
+
+- `/exit` と改行は 1 回の write で書く。確かめ直しと write は、質問の hook と同じロック（`question.lock`）の中で行い、書いた後も 1 秒持つ。**ロックを 3 秒以内に取れない質問の hook は、その質問を拒否する**（モデルが呼び直す）
+- 書いた `/exit` が質問の答えの後に働く形になったら、質問が消えるまで SIGTERM までの秒を数えない。子が終わった後は印を読み直し、無ければ次の区間を起動しない
+- **守りが効くのは、中継を起動し直した後からである**（`/exit` で中継を抜けて `claude` と打ち直した後）。動いている中継は古い版の `run` のまま動く
 
 ## 上限
 
@@ -89,9 +134,14 @@ conductor では、文脈量の hook が工程へ入る起動を 1 度の通し�
 
 ## 区間をまたいで設定を保つ
 
-**2 つ目以降の区間は、ブロックの中身だけで起動する。** 最初の `claude` に付けた引数
-（`--model`・`--resume`・`-c` など）は引き継がない。捨てた会話へ戻らないためである。
-モデルなどを保つときは、設定か環境変数（`ANTHROPIC_MODEL` など）で与える。
+**2 つ目以降の区間は、最初の `claude` に付けた起動の方針の引数を先頭に付け、ブロックの
+中身で起動する。** alias（devbase の `--dangerously-skip-permissions` など）や手で付けた
+`--model`・`--permission-mode`・`--settings`・`--add-dir`・`--mcp-config`・`--plugin-dir` は
+すべての区間に効く。**会話ごと・区間ごとの引数は引き継がない。** 最初のプロンプト・`--` 以後・
+`-c`/`--continue`・`-r`/`--resume`・`--session-id`・`--fork-session`・`--from-pr`・`--teleport`・
+`--cloud`・`-n`/`--name`・`--bg`/`--background`・`--tmux`・`-w`/`--worktree` である。次の区間は新しい会話を
+始めるので、付けると前の会話へ戻るか、同じ ID を 2 度使うか、区間が端末に出ない。
+引数と値の区切りは `claude` と同じ規則で読み、知らない選択肢は値ごと引き継ぐ。
 
 ## 記録の読み方
 
@@ -99,7 +149,7 @@ conductor では、文脈量の hook が工程へ入る起動を 1 度の通し�
 
 | `event` | いつ | 主なキー |
 | --- | --- | --- |
-| `start` | 区間を起動した | `section`・`pid`・`command`・`from_session`・`plugin_version`（起動の直前に読んだ版）・`cwd`（印の作業ディレクトリが消えていたら `cwd_fallback` に元の値） |
+| `start` | 区間を起動した | `section`・`pid`・`command`・`from_session`・`plugin_version`（起動の直前に読んだ版）・`cwd`（印の作業ディレクトリが消えていたら `cwd_fallback` に元の値）・`carried`（2 つ目以降の区間だけ。ブロックの中身の前に付けた引数） |
 | `end` | 区間が終わった | `seconds`（起動から印まで。印なしなら終わりまで）・`ended_by`（`mark` / `no-mark` / `sigterm` / `sigkill`） |
 | `stop` | 次の区間を起動しないと決めた | `reason`（`stop-file` / `max-starts` / `spin` / `update-failed` / `start-failed` / `error`） |
 
