@@ -11,6 +11,7 @@ import os
 import re
 import shutil
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -89,25 +90,33 @@ def link_kiro(project: Path, plugin: Path) -> None:
         (skills / src.name).symlink_to(src, target_is_directory=True)
 
 
-def install_claude_runtime(home: Path, project: Path, tmp: Path) -> tuple[Path, dict]:
+@dataclass(frozen=True)
+class Installed:
+    """置いた配布物の期待するルートと、入口を探す 1 段の実行の条件。"""
+    root: Path
+    substitute: Path | None = None
+    claude: bool = False
+
+
+def install_claude_runtime(home: Path, project: Path, tmp: Path) -> Installed:
     root = install_claude(home)
-    return root, {"substitute": root, "claude": True}
+    return Installed(root, substitute=root, claude=True)
 
 
-def install_kiro(home: Path, project: Path, tmp: Path) -> tuple[Path, dict]:
+def install_kiro(home: Path, project: Path, tmp: Path) -> Installed:
     root = make_plugin(tmp / "kiro-src" / "plugins" / "ndf")
     link_kiro(project, root)
-    return root, {}
+    return Installed(root)
 
 
-def install_codex(home: Path, project: Path, tmp: Path) -> tuple[Path, dict]:
+def install_codex(home: Path, project: Path, tmp: Path) -> Installed:
     root = make_plugin(home / ".codex" / ".tmp" / "marketplaces" / "ai-plugins" / "plugins" / "ndf")
-    return root, {}
+    return Installed(root)
 
 
-def install_agy(home: Path, project: Path, tmp: Path) -> tuple[Path, dict]:
+def install_agy(home: Path, project: Path, tmp: Path) -> Installed:
     root = make_plugin(home / ".gemini" / "config" / "plugins" / "ndf")
-    return root, {}
+    return Installed(root)
 
 
 INSTALLERS = {
@@ -119,7 +128,7 @@ INSTALLERS = {
 RUNTIMES = tuple(INSTALLERS)
 
 
-def install(runtime: str, home: Path, project: Path, tmp: Path) -> tuple[Path, dict]:
+def install(runtime: str, home: Path, project: Path, tmp: Path) -> Installed:
     """ランタイムの配布物を置き、期待するルートと実行の条件を返す。"""
     return INSTALLERS[runtime](home, project, tmp)
 
@@ -143,8 +152,8 @@ def project(tmp_path: Path) -> Path:
 @pytest.mark.parametrize("runtime", RUNTIMES)
 def test_distributed(runtime, tmp_path, home, project) -> None:
     """配布済み: 利用者のリポジトリからは、そのランタイムの配布物を採る。"""
-    root, kw = install(runtime, home, project, tmp_path)
-    assert run_finder(project, home, **kw) == str(root / "scripts")
+    i = install(runtime, home, project, tmp_path)
+    assert run_finder(project, home, substitute=i.substitute, claude=i.claude) == str(i.root / "scripts")
 
 
 @pytest.mark.parametrize("runtime", RUNTIMES)
@@ -153,10 +162,10 @@ def test_development(runtime, tmp_path, home) -> None:
     repo = tmp_path / "repo"
     subprocess.run(["git", "init", "-q", str(repo)], check=True)
     dev = make_plugin(repo / "plugins" / "ndf")
-    _, kw = install(runtime, home, repo, tmp_path)
+    i = install(runtime, home, repo, tmp_path)
     sub = repo / "docs"
     sub.mkdir()
-    assert run_finder(sub, home, **kw) == str(dev / "scripts")
+    assert run_finder(sub, home, substitute=i.substitute, claude=i.claude) == str(dev / "scripts")
 
 
 def test_issue_590_old_codex_copy_is_not_taken(home, project) -> None:
