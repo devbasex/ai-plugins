@@ -13,7 +13,7 @@
 1. conductor が `設計: #954` を **`ndf:supervisor`**（寿命 5 分）で起動する
 2. supervisor が要求・設計・再構成を通し、設計 Pull Request を出す。文脈は 30 万を超えている
 3. supervisor が `cross-review` を起動しようとする。hook が自分の記録を読み、今の文脈が最初の
-   呼び出しの文脈の 2.5 倍以上なので止める。理由の欄に区切りの返し方が出る
+   呼び出しの文脈の 1.5 倍以上なので止める。理由の欄に区切りの返し方が出る
 4. supervisor が `結果: 区切り`・`次の工程: ドキュメントレビュー` で返す
 5. conductor が同じ `設計: #954` を **`ndf:supervisor-waits`**（寿命 1 時間）で起動し直す。
    起動指示の「前の持ち場の報告」に 4 の報告を入れる
@@ -54,11 +54,12 @@ F1〜F4 を #954 で実装する。F5 は契約だけをこの設計に置き、
 
 | 要素 | 変更 | 責務 |
 | --- | --- | --- |
-| `plugins/ndf/agents/supervisor.md` | 新規 | 寿命 5 分の supervisor の定義。本文は規約の正本（`agent-layers.md`）を指すだけ |
-| `plugins/ndf/agents/supervisor-waits.md` | 新規 | 同じ定義に `experimental: { cacheTtl: 1h }` を足したもの |
+| `plugins/ndf/agents/supervisor.md` | 新規 | 寿命 5 分の supervisor の定義。本文は規約の正本（`agent-layers.md`）を指すだけ（全文は「supervisor の定義の作り方」） |
+| `plugins/ndf/agents/supervisor-waits.md` | 新規 | 同じ本文に `experimental: { cacheTtl: 1h }` を足したもの |
+| `plugins/ndf/scripts/tests/test_supervisor_agents.py` | 新規 | 2 つの定義の登録・寿命・本文の一致・道具を照らす |
 | `plugins/ndf/.claude-plugin/plugin.json` | 変更 | `agents` に 2 つを足す。`description` の定義の数を直す |
 | 定義の数を書いた現行の文書 | 変更 | 書き方の正本は `docs/specifications/ndf-worker-agent-and-skill-excerpts.md` の「専門エージェントの一覧に入れない」。**supervisor の 2 定義も専門の数に入れず、3 層の定義として別枠にする**（「専門 8 個と、3 層の定義 3 個（supervisor 2・worker 1）」）。直すのは正本の列挙する 5 か所（`README.md` の箇条書き・表を含む、`plugins/ndf/README.md`、`docs/ndf-plugin-reference.md`、`AGENTS.md`、`plugin.json` の `description`）と正本そのもの。発表・記事など時点の記録は変えない |
-| `agent-layers.md` | 変更 | 起動指示の `subagent_type`（区間の先頭の工程で選ぶ）、持ち場の報告の `結果: 区切り` と `次の工程`、conductor の受け方、supervisor の規則 11（区切り） |
+| `agent-layers.md` | 変更 | 起動指示の `subagent_type`（区間の先頭の工程で選ぶ。定義が使えないときは省く）、持ち場の報告の `結果: 区切り` と `次の工程`、conductor の受け方、supervisor の規則 11（区切り） |
 | `context-window.md` | 変更 | 「切ってよい点」の後に、持ち場の中の切れ目として「区切り」を 1 節足す（4 つの切れ目と持ち場の境は変えない） |
 | `waiting.md` | 変更 | 待ちの費用の節に、待ちの後の書き直しと区切り・寿命への参照を 1 段落 |
 | `plugins/ndf/scripts/token-guard.sh` | 変更 | 判定「区切り」を足す（F3） |
@@ -81,20 +82,8 @@ flowchart LR
 
 ### F1: supervisor の定義
 
-```markdown
----
-name: supervisor-waits
-description: NDF の 3 層の supervisor（待ちを抱える区間）。持ち場を通し、持ち場の報告で返す
-experimental:
-  cacheTtl: 1h
----
-```
-
-- `supervisor.md` は `experimental` を持たない。**どちらも `tools` / `disallowedTools` を書かない**
-  （supervisor は Skill と Agent を使う。`general-purpose` と同じ道具を持つ）
-- 本文は worker の定義と同じ形で、規約の正本（`agent-layers.md` の「conductor → supervisor」）を
-  指し、守る規則は起動指示が渡すと書く。**規則を定義へ写さない**（起動指示と二重になる）
-- `model` は書かない（conductor と同じモデル。`agent-layers.md` の「モデルを選ぶ」）
+定義は 2 つで、違いは frontmatter の `name`・`description` と `experimental` だけである。作り方は次の節
+「supervisor の定義の作り方」にある。
 
 **起動指示の `subagent_type` は、その supervisor が最初に通す工程で決める。**
 
@@ -105,6 +94,133 @@ experimental:
 
 モードで検査が構造改善を含まない（`documentation` / `light`）ときは、検査の最初の工程が実装
 レビューになり、同じく `supervisor-waits` に当たる。
+
+### supervisor の定義の作り方
+
+#### 1. 2 つの定義の全文
+
+`plugins/ndf/agents/worker.md` の形（frontmatter・見出し・正本を指す段落・守る規則の要約）にならう。
+**守る規則の本文は写さない。** 起動指示が 11 個を渡すので、定義には正本の場所と、定義で守らせる 1 点だけを書く。
+
+`plugins/ndf/agents/supervisor.md`:
+
+```markdown
+---
+name: supervisor
+description: NDF の 3 層の supervisor。1 つの持ち場（連続する工程の束）を通し、持ち場の報告で返す
+---
+
+# supervisor
+
+NDF の 3 層（conductor → supervisor → worker）の supervisor である。conductor が起動し、
+1 つの持ち場を通して `## 持ち場の報告` で返す。規約の正本は `development-workflow` の
+`references/agent-layers.md` の「conductor → supervisor」にある。
+
+**守る規則は起動指示の「守る規則」が渡す。** この定義は規則を写さない。起動指示に規則が
+無いときは、正本の規則に従う。
+
+**寿命の違う 2 つの定義があり、本文は同じである。** `supervisor` はキャッシュの寿命が 5 分で、
+収束ループの工程（構造改善・実装レビュー・ドキュメントレビュー）を持ち場の途中で始めると
+hook が止める。止められたら `結果: 区切り` で返す（規則 11）。`supervisor-waits` は寿命が
+1 時間で、収束ループの工程から始める持ち場に使い、hook は止めない。
+```
+
+`plugins/ndf/agents/supervisor-waits.md`:
+
+```markdown
+---
+name: supervisor-waits
+description: NDF の 3 層の supervisor（収束ループから始める区間。キャッシュの寿命 1 時間）。持ち場を通し、持ち場の報告で返す
+experimental:
+  cacheTtl: 1h
+---
+
+# supervisor
+
+NDF の 3 層（conductor → supervisor → worker）の supervisor である。conductor が起動し、
+1 つの持ち場を通して `## 持ち場の報告` で返す。規約の正本は `development-workflow` の
+`references/agent-layers.md` の「conductor → supervisor」にある。
+
+**守る規則は起動指示の「守る規則」が渡す。** この定義は規則を写さない。起動指示に規則が
+無いときは、正本の規則に従う。
+
+**寿命の違う 2 つの定義があり、本文は同じである。** `supervisor` はキャッシュの寿命が 5 分で、
+収束ループの工程（構造改善・実装レビュー・ドキュメントレビュー）を持ち場の途中で始めると
+hook が止める。止められたら `結果: 区切り` で返す（規則 11）。`supervisor-waits` は寿命が
+1 時間で、収束ループの工程から始める持ち場に使い、hook は止めない。
+```
+
+- **どちらも `tools` / `disallowedTools` を書かない。** supervisor は Skill と Agent を使う。`general-purpose` と同じ道具を持つ
+- `model` は書かない（conductor と同じモデル。`agent-layers.md` の「モデルを選ぶ」）
+- 本文に「5 分」「1 時間」の片方だけを書かない。2 つの本文を同じに保つため、両方の寿命を 1 段落で説明する
+
+#### 2. 2 つの本文を同じに保つ
+
+**手で 2 つ書き、テストで本文の一致を確かめる**（決定 12）。生成はしない。
+
+| 検査 | 中身 |
+| --- | --- |
+| 本文の一致 | 2 つのファイルの frontmatter（先頭の `---` から次の `---` まで）を除いた残りが、バイト単位で等しい |
+| frontmatter の差 | `name` が `supervisor` / `supervisor-waits`。`experimental.cacheTtl` は `supervisor-waits` だけが `1h` を持ち、`supervisor` は `experimental` を持たない |
+| 道具 | どちらも `tools` / `disallowedTools` を持たない |
+
+#### 3. `plugin.json` への登録と検査
+
+`plugins/ndf/.claude-plugin/plugin.json` の `agents` の配列の、`./agents/worker.md` の前に 2 行を足す。
+
+```json
+"./agents/supervisor.md",
+"./agents/supervisor-waits.md",
+"./agents/worker.md"
+```
+
+検査は `plugins/ndf/scripts/tests/test_supervisor_agents.py` に置く（`test_worker_agent.py` にならう。
+frontmatter の読み方も同じく、字下げの無い行だけを `key: value` として読み、`experimental` の下の
+`cacheTtl` は字下げの行として別に読む）。
+
+| テスト | 照らすもの |
+| --- | --- |
+| 定義が配られる | `plugin.json` の `agents` に `./agents/supervisor.md` と `./agents/supervisor-waits.md` がある |
+| 寿命は片方だけ | 上の表の「frontmatter の差」 |
+| 本文が同じ | 上の表の「本文の一致」 |
+| 道具を絞らない | 上の表の「道具」 |
+
+`claude plugin validate .` の終了コードも見る（AC1）。`scripts/build-runtime-plugins.sh` は触らない。
+agy へは `dev.agy/agents -> ../agents` の symlink で届き、生成する物が無い（決定 11）。
+
+#### 4. 定義が使えないとき
+
+**3 層は Claude Code だけで動く。** conductor が `Agent` ツールで supervisor を起動する形で、Codex / Kiro /
+agy の側に 3 層の起動は無い。
+
+| 場面 | 何が起きるか | 扱い |
+| --- | --- | --- |
+| Claude Code が 2.1.248 より前 | `experimental` を読まず、`supervisor-waits` も寿命 5 分で動く | 何もしない。hook は `supervisor-waits` を区切らないので、その区間は今と同じ費用になる（損はしない） |
+| 手元の NDF が古く、`ndf:supervisor` / `ndf:supervisor-waits` が無い | 知らない `subagent_type` で `Agent` が失敗する | conductor は、起動の前に自分の会話の「使えるエージェントの一覧」に `ndf:supervisor` があるかを見る。**無ければ `subagent_type` を省いて起動する**（`general-purpose`。今と同じ動き）。一覧にあっても `Agent` が失敗したら、同じ起動を `subagent_type` を省いて 1 度だけやり直す |
+| 利用枠を超えて usage credits に入った | frontmatter の `1h` が無視され、5 分になる | 何もしない。損はしない。測定で 1 時間の区間に 5 分の書き込みが出たら、この場合と読む（U4） |
+| Codex / Kiro | 定義は配られない（Kiro は `.kiro/agents/ndf.json` を雛形から作り、`agents/*.md` を写さない。Codex には配る経路が無い） | 何もしない |
+| agy | `dev.agy/agents` の symlink で 2 つの定義が届き、公開エージェントが 9 から 11 に増える | 受け入れる（決定 11）。agy に 3 層の起動は無く、定義は起動されない限り何もしない |
+
+**`general-purpose` へ落ちたときは区切りも働かない。** hook は入力の `agent_type` が `ndf:supervisor` の
+ときだけ判定する（F3）。そのため、落ちた supervisor は今と同じ形で最後まで通す。
+
+#### 5. 1 時間が効いたかを確かめる（U1）
+
+**会話の記録の `usage.cache_creation` の 2 つの区分で見る。** 呼び出しごとに
+`ephemeral_5m_input_tokens` と `ephemeral_1h_input_tokens` が分かれて記録される。
+
+| 見る場所 | 1 時間が効いたとき | 効いていないとき |
+| --- | --- | --- |
+| 実機の 1 回（AC3）: `<記録のディレクトリ>/<セッション>/subagents/agent-<ID>.jsonl` の assistant 行 | `supervisor-waits` の起動で `ephemeral_1h_input_tokens` > 0、`ephemeral_5m_input_tokens` = 0 | `ephemeral_1h_input_tokens` がすべて 0 |
+| 配布の後（AC7）: `token-usage.py --format json` の `per_role` | `agent_type` が `ndf:supervisor-waits` の行で `w1h` > 0、`w5` = 0 | 同じ行で `w1h` = 0 |
+
+`w5` / `w1h` は今の集計にある列で、`cache_creation` の 2 つの区分をそのまま足したものである。
+`agent_type` の軸は F4 で足す。**`ndf:supervisor` の行は `w1h` = 0 で、`w5` だけを持つ**ことも同時に見る。
+両方の行で `w1h` > 0 なら、設定か環境変数で寿命が一括で変えられている。
+
+AC3 の実機の 1 回は、`env -i` と一時の HOME で隔離した claude に `--plugin-dir` で作業ツリーの NDF を渡し、
+`ndf:supervisor-waits` と `ndf:supervisor` のサブエージェントを 1 本ずつ起動して記録を読む。
+同じ 1 回で、hook の入力の `agent_type` の値（U2）と、meta の `agentType` の値も控える。
 
 ### F2: 持ち場の報告に足すもの
 
@@ -127,7 +243,7 @@ supervisor の規則に 11 を足す:
 >     済ませること（Pull Request を出す・進行を記録する）は、起動の前に済ませておく
 
 **区切るかを supervisor に判断させない。** 規則 11 は hook の判定（F3）に従うだけで、自分から区切らない。
-文脈が短い（C < 2.5P）ときは hook が通し、そのまま続ける。hook の無いランタイムでは区切らない。
+文脈が短い（C < 1.5P）ときは hook が通し、そのまま続ける。hook の無いランタイムでは区切らない。
 
 **区切りは持ち場の語彙を増やさない。** `description` は同じ `<持ち場>: <課題>` のままで、
 測定（`skill-stats --agents`・`token-usage.py`）の持ち場の判定は変わらない。「持ち場の一覧」では、
@@ -152,11 +268,11 @@ supervisor の中で一度も走らない。区切りの判定が止めなけれ
 | 読む記録 | **supervisor 自身の記録** `${transcript_path%.jsonl}/subagents/agent-<agent_id>.jsonl`。入力の `transcript_path` はサブエージェントの中でも親（conductor）の記録を指すので、そのまま読まない（`token-guard.sh` の既存の注記、`statusline.sh` の組み立てと同じ） |
 | P | 読む記録の**先頭から**最初の assistant 呼び出しを探し、その文脈（`input + cache_read + cache_creation`）を取る。既存の `context_tokens()` は末尾 200 行だけを読んで最後の呼び出しを返すので、P には使えない。先頭から読む走査を別に持つ |
 | C | 読む記録の最後の assistant 呼び出しの文脈 |
-| 止める条件 | `C ≥ 比 × P`。比の既定は 2.5（決定 4） |
+| 止める条件 | `C ≥ 比 × P`。比の既定は 1.5（決定 4） |
 | 止め方 | `permissionDecision: deny`。理由の欄に規則 11 の返し方（`結果: 区切り`・`次の工程`）を出す |
 | 止め続ける | **条件を満たす間は、同じ起動を何度でも止める。** conductor の判定の「1 度だけ通す」は持たない。supervisor の下には人がおらず、やり直すだけで越えられると、区切るかが LLM の裁量に戻るためである（中継の子の conductor と同じ扱い）。控えのファイルも持たない |
 | 止めない | `agent_id` が無い（conductor）・定義の名前が `ndf:supervisor` でない（`ndf:supervisor-waits`・worker・`general-purpose`・取れない）・記録が読めない・P か C が読めない |
-| 変える | `NDF_SUPERVISOR_CUT_RATIO`（既定 2.5）。`NDF_SUPERVISOR_CUT_GUARD=0` でこの判定を無効にする |
+| 変える | `NDF_SUPERVISOR_CUT_RATIO`（既定 1.5）。`NDF_SUPERVISOR_CUT_GUARD=0` でこの判定を無効にする |
 
 **定義の名前で見分けるので、`subagent_type` を省いて起動した supervisor（conductor が古い起動の形を使った場合）は
 止めない。** その supervisor は区切らずに続ける（今と同じ費用）。
@@ -250,7 +366,7 @@ sequenceDiagram
   C->>S1: 設計: #954（ndf:supervisor）
   S1->>S1: 要求・設計・再構成・pr
   S1->>H: Skill cross-review
-  H-->>S1: deny（C ≥ 2.5P。区切りで返す）
+  H-->>S1: deny（C ≥ 1.5P。区切りで返す）
   S1-->>C: 結果: 区切り / 次の工程: ドキュメントレビュー
   C->>S2: 設計: #954（ndf:supervisor-waits、前の報告）
   S2->>H: Skill cross-review

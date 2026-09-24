@@ -86,7 +86,7 @@
 ## 受け入れ条件
 
 - [ ] AC1: `plugins/ndf/agents/` に supervisor の定義が 2 つあり、`experimental.cacheTtl: 1h` を
-  持つのは片方だけである。`claude plugin validate .` が終了コード 0 で終わる
+  持つのは片方だけである。frontmatter を除いた本文は 2 つで等しい。`claude plugin validate .` が終了コード 0 で終わる
 - [ ] AC2: `agent-layers.md` の起動指示に、supervisor が最初に通す工程から `subagent_type` を選ぶ表がある。
   1 時間の定義を割り当てるのは、決定 3 の損益分岐を満たす区間だけである
 - [ ] AC3: 1 時間の定義で起動した supervisor の記録で、`cache_creation.ephemeral_1h_input_tokens`
@@ -94,9 +94,11 @@
 - [ ] AC4: 持ち場の報告の `結果` に `区切り` があり、`次の工程` の項目がある。conductor は
   `区切り` を受けると同じ持ち場の supervisor を新しく起動し、`次の工程` から始めさせる。同じ `次の工程` の
   `区切り` が続けて 2 回返ったら、`止まった` と同じに扱う
+- [ ] AC4b: conductor は、使えるエージェントの一覧に `ndf:supervisor` が無いとき、または `Agent` が知らない
+  `subagent_type` で失敗したとき、`subagent_type` を省いて起動する（今と同じ動き）
 - [ ] AC5: 寿命 5 分の supervisor（`ndf:supervisor`）の中で `cross-review` / `cross-refactoring` の Skill を起動したときの hook の
-  振る舞いがテストで固定されている。今の文脈が最初の呼び出しの文脈の 2.5 倍以上なら止める（やり直しても止め続ける）。
-  理由の欄に `結果: 区切り` で返す手順が出る。2.5 倍未満・1 時間の supervisor・conductor・worker では止めない
+  振る舞いがテストで固定されている。今の文脈が最初の呼び出しの文脈の 1.5 倍以上なら止める（やり直しても止め続ける）。
+  理由の欄に `結果: 区切り` で返す手順が出る。1.5 倍未満・1 時間の supervisor・conductor・worker では止めない
 - [ ] AC6: `token-usage.py` が持ち場ごとに、待ちの後（直前の間隔 5 分超）の書き直しの量と読み込みの量を出す（テストがある）
 - [ ] AC7: 採った後、設計・検査・取り込みの持ち場 5 本以上で「全体の書き直し」の回数・量と直前の
   間隔を `token-usage.py` で測り、基準の実測（設計の「基準の実測」）と並べて #954 に残す
@@ -115,7 +117,7 @@ AC7・AC8 は #954 の本文の受け入れ条件 2・3 を具体化したもの
 | 条件 | 手段 |
 | --- | --- |
 | AC1 | `claude plugin validate .`（終了コードで見る）と、定義の frontmatter の単体テスト |
-| AC2・AC4 | 文書の変更。文言を照合するテストは書かない（`AGENTS.md`） |
+| AC2・AC4・AC4b | 文書の変更。文言を照合するテストは書かない（`AGENTS.md`）。AC4b は実機でも 1 回確かめる |
 | AC3 | 実機。`env -i` と一時の HOME で隔離した claude でサブエージェントを 1 本起動し、記録の `usage` を読む |
 | AC5 | `plugins/ndf/scripts/tests/` の hook のテスト（偽の会話の記録を渡す） |
 | AC6 | `scripts/tests/` の `token-usage.py` のテスト（偽の記録） |
