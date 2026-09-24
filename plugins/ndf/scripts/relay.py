@@ -8,7 +8,10 @@
 | `run [claude の引数 ...]` | 端末の前景に常駐し、claude を擬似端末の子として起動する。印を受けたら子へ `/exit` を入力し、プラグインを更新して次の区間を起動する。中継が要らない起動は本物の claude をそのまま exec する（素通し） |
 | `stop` | 動いている中継すべてに停止の印を置く |
 | `mark` | Stop hook の本体。最後の応答の `ndf-next` のブロックを印 `next.json` へ写す |
-| `install` | SessionStart hook の本体。中継を安定した場所へ置き直し、bash / zsh の設定へ alias を 1 度だけ足す |
+| `install` / `uninstall` / `status` | `/ndf:install-wrapper` の本体。写しと中継の rc を `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/` に置き、シェルの設定へ読み込みの 1 行を足す・外す・状態を示す（#928） |
+| `startup` | SessionStart hook の本体。在る写しを今の版で置き直し（版は後退させない）、10.17.4 が自動で足した囲みを 1 度だけ知らせる。シェルの設定は書かない |
+| `question open` / `question close` | `AskUserQuestion` の `PreToolUse` / `PostToolUse` hook の本体。質問の表示中の印を作る・消す（関門を越えない守り） |
+| `is-child` | 中継の直接の子の claude から呼ばれていれば 0 |
 
 **標準ライブラリだけで書く。** 印と作業ディレクトリの形（`next.json` のキーと
 `NDF_RELAY_DIR` のファイル）は版をまたいで変えない。hook は区間ごとに新しい版で動き、
@@ -40,14 +43,12 @@ CHILD_FILE = "child.pid"
 LOG_FILE = "log.jsonl"
 COUNT_LOCK = "count.lock"
 INSTALL_LOCK = "install.lock"
+COPY_LOCK = "copy.lock"
+QUESTION_FILE = "question"
+QUESTION_LOCK = "question.lock"
 
 BLOCK_OPEN = "# >>> ndf relay >>>"
 BLOCK_CLOSE = "# <<< ndf relay <<<"
-ALIAS_LINE = """alias claude='python3 "${XDG_DATA_HOME:-$HOME/.local/share}/ndf/relay.py" run'"""
-RC_BLOCK = (f"{BLOCK_OPEN}\n"
-            "# ndf の中継（区間の切れ目で claude を自動で起動し直す）。消せば元に戻る。\n"
-            f"{ALIAS_LINE}\n"
-            f"{BLOCK_CLOSE}\n")
 
 # 素通しにする引数と副命令（Claude Code 2.1.280 の `claude --help` から写す）
 PASS_FLAGS = {"-p", "--print", "-h", "--help", "-v", "--version"}
@@ -230,6 +231,8 @@ def cmd_mark() -> int:
         return 0
     if not isinstance(data, dict) or not is_direct_child(d):
         return 0
+    # Stop が起きたなら質問は表示されていない（Esc で取り消した印もここで消える）
+    remove(os.path.join(d, QUESTION_FILE))
     path = os.path.join(d, MARK_FILE)
     blocks = next_blocks(str(data.get("last_assistant_message") or ""))
     if len(blocks) != 1 or background_running(data.get("background_tasks")):
@@ -250,7 +253,10 @@ def cmd_mark() -> int:
 
 def _is_self(path: str) -> bool:
     real = os.path.realpath(path)
-    mine = {os.path.realpath(__file__), os.path.realpath(os.path.join(data_dir(), "relay.py"))}
+    mine = {os.path.realpath(__file__), os.path.realpath(os.path.join(data_dir(), "relay.py")),
+            os.path.realpath(os.path.join(os.environ.get("CLAUDE_CONFIG_DIR")
+                                          or os.path.join(os.path.expanduser("~"), ".claude"),
+                                          "ndf", "relay.py"))}
     if real in mine:
         return True
     try:
@@ -399,6 +405,8 @@ class Relay:
         self.last_tick = 0.0
         self.stdin_open = True
         self.count_lock: int | None = None
+        self.exited = None
+        self.saw_question = False
         self.quiet = _num("NDF_RELAY_QUIET", 15)
         self.poll = _num("NDF_RELAY_POLL", 2)
         self.max_starts = int(_num("NDF_RELAY_MAX_STARTS", 20))
@@ -470,6 +478,7 @@ class Relay:
     def start_section(self, args: list[str], cwd: str, command: str, from_session: str,
                       cwd_fallback: str | None = None) -> None:
         remove(self.path(MARK_FILE))
+        remove(self.path(QUESTION_FILE))
         at = self.spawn(args, cwd)
         self.section += 1
         self.started_at = at
@@ -593,13 +602,15 @@ class Relay:
         written = parse_iso(m.get("written_at")) or time.time()
         latest = max(written, self.last_input)
         tp = m.get("transcript_path") or ""
-        try:
-            latest = max(latest, os.stat(tp).st_mtime)
-        except OSError:
-            pass
+        snap = file_snap(tp)
+        if snap is not None:
+            latest = max(latest, snap[1] / 1e9)
         if time.time() - latest < self.quiet:
             return None
         if goal_pending(tp, written):
+            return None
+        # (4) 質問の表示中は書かない（G1）。(5) 印の後に応答が再開していたら書かない（G2）
+        if os.path.exists(self.path(QUESTION_FILE)) or replied_after(tp, written):
             return None
         if os.path.exists(self.path(STOP_FILE)):
             self.halt("stop-file", "停止の印がある")
@@ -614,7 +625,21 @@ class Relay:
             self.release_count()
             self.halt("spin", f"区間が 3 つ続けて {int(self.spin)} 秒未満で切れ目に達した")
             return None
+        m["_snap"] = snap
         return m
+
+    def recheck(self, m) -> tuple[str, str] | None:
+        """質問の後に読み直した印で起動する前に、`count.lock`・上限・空回りを判定し直す。"""
+        end = time.time() + 5
+        while not self.take_count():
+            if time.time() >= end:
+                return "count-lock", "起動の数を数えるロックが取れない"
+            time.sleep(0.1)
+        if self.count_today() >= self.max_starts:
+            return "max-starts", f"1 日の起動回数が上限 {self.max_starts} に達した"
+        if self.spinning(parse_iso(m.get("written_at")) or time.time()):
+            return "spin", f"区間が 3 つ続けて {int(self.spin)} 秒未満で切れ目に達した"
+        return None
 
     def halt(self, reason: str, why: str) -> None:
         self.halted = True
@@ -683,25 +708,66 @@ class Relay:
 
     # -- 切り替え
 
-    def end_child(self) -> str:
-        """子へ `/exit` を入力して終わらせる。30 秒で SIGTERM、さらに 10 秒で SIGKILL。"""
-        waits = [("/exit", _num("NDF_RELAY_EXIT_GAP", 1)), ("\r", _num("NDF_RELAY_EXIT_WAIT", 30))]
-        for keys, wait in waits:
+    def write_exit(self, m) -> bool:
+        """G3。`question.lock` の中で確かめ直し、`/exit` と改行を 1 回の write で書き、1 秒おいて放す。
+        確かめ直しで外れたら書かずに偽を返す（`count.lock` も放す）。"""
+        fd = os.open(self.path(QUESTION_LOCK), os.O_RDWR | os.O_CREAT, 0o600)
+        try:
             try:
-                os.write(self.fd, keys.encode())
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:
+                self.release_count()
+                return False
+            now = self.read_mark()
+            if (os.path.exists(self.path(QUESTION_FILE)) or now is None
+                    or now.get("written_at") != m.get("written_at")
+                    or file_snap(m.get("transcript_path") or "") != m.get("_snap")):
+                self.release_count()
+                return False
+            try:
+                os.write(self.fd, b"/exit\r")
             except OSError:
                 pass
-            if self.pump(until=time.time() + wait):
-                return "mark"
+            # TUI が書いた入力を読み終える前に質問が描かれないよう、1 秒ロックを持つ
+            end = time.time() + _num("NDF_RELAY_EXIT_HOLD", 1)
+            while time.time() < end:
+                res = self.pump(until=min(end, time.time() + 0.1))
+                self.saw_question |= os.path.exists(self.path(QUESTION_FILE))
+                if res:
+                    self.exited = res
+                    break
+            return True
+        finally:
+            os.close(fd)
+
+    def end_child(self) -> tuple[str, int, bool]:
+        """`/exit` の後の待ち。(終わり方, 子の wait の状態, 待ちのあいだに質問が出たか) を返す。
+        30 秒で SIGTERM、さらに 10 秒で SIGKILL。質問の印がある間は秒を数えず、`count.lock` を放す。"""
+        questioned, self.saw_question = self.saw_question, False
+        if self.exited:
+            res, self.exited = self.exited, None
+            return "mark", res[1], questioned
+        left = _num("NDF_RELAY_EXIT_WAIT", 30)
+        while left > 0:
+            t0 = time.time()
+            res = self.pump(until=t0 + min(left, 0.2))
+            if res:
+                return "mark", res[1], questioned
+            if os.path.exists(self.path(QUESTION_FILE)):
+                questioned = True
+                self.release_count()
+                continue
+            left -= time.time() - t0
         for sig, how, wait in ((signal.SIGTERM, "sigterm", _num("NDF_RELAY_TERM_WAIT", 10)),
                                (signal.SIGKILL, "sigkill", None)):
             try:
                 os.kill(self.pid, sig)
             except ProcessLookupError:
                 pass
-            if self.pump(until=None if wait is None else time.time() + wait):
-                return how
-        return "sigkill"
+            res = self.pump(until=None if wait is None else time.time() + wait)
+            if res:
+                return how, res[1], questioned
+        return "sigkill", 0, questioned
 
     def update(self) -> str | None:
         t = _num("NDF_RELAY_UPDATE_TIMEOUT", 120)
@@ -738,10 +804,27 @@ class Relay:
                          seconds=round(time.time() - self.started_at, 3), ended_by="no-mark")
                 return exit_code(res[1])
             m = res[1]
+            if not self.write_exit(m):
+                continue
             written = parse_iso(m.get("written_at")) or time.time()
-            ended_by = self.end_child()
-            self.log(event="end", section=self.section, pid=self.pid,
-                     seconds=round(written - self.started_at, 3), ended_by=ended_by)
+            ended_by, status, questioned = self.end_child()
+            again = self.read_mark()
+            if questioned or again is None or again.get("written_at") != m.get("written_at"):
+                # 書いた /exit が質問の答えの後に働いた。答えの後の Stop が印を書き直すか消している
+                self.release_count()
+                m = again
+                if m is None:
+                    self.log(event="end", section=self.section, pid=self.pid,
+                             seconds=round(time.time() - self.started_at, 3), ended_by="no-mark")
+                    return exit_code(status)
+                self.log(event="end", section=self.section, pid=self.pid,
+                         seconds=round(written - self.started_at, 3), ended_by=ended_by)
+                why = self.recheck(m)
+                if why:
+                    return self.give_up(why[0], why[1], m["command"])
+            else:
+                self.log(event="end", section=self.section, pid=self.pid,
+                         seconds=round(written - self.started_at, 3), ended_by=ended_by)
             command = m["command"]
             version = self.update()
             if version is None:
@@ -766,6 +849,38 @@ class Relay:
             os.close(self.lock_fd)
         except OSError:
             pass
+
+
+def file_snap(path: str) -> tuple[int, int] | None:
+    """(大きさ, 更新時刻の ns)。無ければ None。"""
+    try:
+        st = os.stat(path)
+    except (OSError, ValueError):
+        return None
+    return st.st_size, st.st_mtime_ns
+
+
+def replied_after(transcript_path: str, written: float) -> bool:
+    """会話の記録に、印より後の `assistant` か `user` の行があれば真（G2）。"""
+    if not transcript_path:
+        return False
+    try:
+        with open(transcript_path, errors="replace") as f:
+            for line in f:
+                if '"assistant"' not in line and '"user"' not in line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(row, dict) or row.get("type") not in ("assistant", "user"):
+                    continue
+                t = parse_iso(row.get("timestamp"))
+                if t is not None and t > written:
+                    return True
+    except OSError:
+        return False
+    return False
 
 
 def goal_pending(transcript_path: str, written: float) -> bool:
@@ -886,10 +1001,104 @@ def cmd_stop() -> int:
     return 0 if found else 1
 
 
-# ---------------------------------------------------------------- install
+# ---------------------------------------------------------------- 導入（install / uninstall / status / startup）
 
 
-DEF_RE = re.compile(r"^\s*(alias\s+claude=|function\s+claude\b|claude\s*\(\s*\))", re.M)
+DEF_RE = re.compile(r"^\s*(alias\s+claude=|function\s+claude\b|claude\s*\(\s*\))")
+UNSAFE = set("'\"\\$`!\n")
+VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:-(dev|rc)\.(\d+))?$")
+
+
+def config_dir() -> str:
+    """写し・写しの版・中継の rc の親。devbase では永続化される `~/.claude` の下になる。"""
+    base = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
+    return os.path.join(base, "ndf")
+
+
+def copy_path() -> str:
+    return os.path.join(config_dir(), "relay.py")
+
+
+def copy_version_path() -> str:
+    return os.path.join(config_dir(), "relay.version")
+
+
+def shellrc_path() -> str:
+    return os.path.join(config_dir(), "shellrc")
+
+
+def old_copy_path() -> str:
+    """10.17.4 が置いた写し。10.17.4 の囲みの alias が指す。"""
+    return os.path.join(data_dir(), "relay.py")
+
+
+def loader_file() -> str | None:
+    """devbase が読み込む永続化の場所（devbasex/devbase#253）。無ければ None。"""
+    d = os.environ.get("DEVBASE_SHELLRC_DIR")
+    return os.path.join(d, "ndf-relay.sh") if d and os.path.isdir(d) else None
+
+
+def rc_files() -> list[str]:
+    home = os.path.expanduser("~")
+    return [os.path.join(home, ".bashrc"), os.path.join(os.environ.get("ZDOTDIR") or home, ".zshrc")]
+
+
+def shell_rc() -> tuple[str, str, list[str]] | None:
+    """(シェルの名前, 足す先, 既存の定義を探すファイル)。bash と zsh 以外は None。"""
+    shell = os.path.basename(os.environ.get("SHELL", ""))
+    bashrc, zshrc = rc_files()
+    if shell == "bash":
+        return shell, bashrc, [bashrc, os.path.join(os.path.expanduser("~"), ".bash_aliases")]
+    if shell == "zsh":
+        return shell, zshrc, [zshrc]
+    return None
+
+
+def sh_quote(path: str) -> str:
+    """`$HOME` の下なら `"$HOME/..."`、それ以外は `"<絶対パス>"`。"""
+    home = os.path.expanduser("~").rstrip("/")
+    if home and path.startswith(home + "/"):
+        return f'"$HOME{path[len(home):]}"'
+    return f'"{path}"'
+
+
+def shellrc_body() -> str:
+    c = sh_quote(copy_path())
+    return ("# ndf の中継。/ndf:install-wrapper が書き、/ndf:install-wrapper uninstall が消す\n"
+            "function claude {\n"
+            f"  if [ -f {c} ]; then python3 {c} run \"$@\"\n"
+            "  else command claude \"$@\"; fi\n"
+            "}\n")
+
+
+def loader_line() -> str:
+    s = sh_quote(shellrc_path())
+    return f"[ -f {s} ] && . {s}"
+
+
+def loader_inner() -> list[str]:
+    return ["# ndf の中継（/ndf:install-wrapper uninstall で外れる）", loader_line()]
+
+
+def loader_body() -> str:
+    return "\n".join(loader_inner()) + "\n"
+
+
+def plugin_version(root: str | None = None) -> str | None:
+    """`<プラグインのルート>/.claude-plugin/plugin.json` の版。ルートは relay.py の 2 つ上。"""
+    root = root or os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+    data = read_json(os.path.join(root, ".claude-plugin", "plugin.json"))
+    v = data.get("version") if isinstance(data, dict) else None
+    return v.strip() if isinstance(v, str) and v.strip() else None
+
+
+def version_key(v: str | None):
+    """`X.Y.Z` < 同じ `X.Y.Z` では `-dev.N` < `-rc.N` < 接尾辞なし。読めなければ None。"""
+    m = VERSION_RE.match((v or "").strip())
+    if not m:
+        return None
+    rank = {"dev": 0, "rc": 1, None: 2}[m.group(4)]
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3)), rank, int(m.group(5) or 0))
 
 
 def _flock_wait(fd: int, seconds: float) -> bool:
@@ -904,9 +1113,33 @@ def _flock_wait(fd: int, seconds: float) -> bool:
             time.sleep(0.05)
 
 
+def _lock(path: str, seconds: float) -> int | None:
+    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+    if _flock_wait(fd, seconds):
+        return fd
+    os.close(fd)
+    return None
+
+
+def _unlock(fd: int | None) -> None:
+    if fd is not None:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+
+
 def _read(path: str) -> str | None:
     try:
         with open(path, encoding="utf-8", errors="replace") as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+def _read_bytes(path: str) -> bytes | None:
+    try:
+        with open(path, "rb") as f:
             return f.read()
     except OSError:
         return None
@@ -916,90 +1149,419 @@ def _records(path: str) -> list[str]:
     return (_read(path) or "").splitlines()
 
 
-def _append_record(path: str, line: str) -> None:
-    with open(path, "a") as f:
-        f.write(line + "\n")
+def _add_record(path: str, line: str) -> None:
+    if line not in _records(path):
+        with open(path, "a") as f:
+            f.write(line + "\n")
 
 
-def place_copy() -> None:
-    dst = os.path.join(data_dir(), "relay.py")
-    src = os.path.realpath(__file__)
-    with open(src, "rb") as f:
-        body = f.read()
-    try:
-        with open(dst, "rb") as f:
-            if f.read() == body:
-                return
-    except OSError:
-        pass
-    tmp = f"{dst}.{os.getpid()}.tmp"
+def _drop_records(path: str, lines: list[str]) -> None:
+    rows = _records(path)
+    keep = [r for r in rows if r not in lines]
+    if keep != rows:
+        _write_file(path, "".join(r + "\n" for r in keep).encode(), 0o600)
+
+
+def _write_file(path: str, body: bytes, mode: int) -> None:
+    """一時ファイルに書いてから置き換える。symlink は指す先を置き換える。"""
+    real = os.path.realpath(path)
+    tmp = f"{real}.{os.getpid()}.tmp"
     with open(tmp, "wb") as f:
         f.write(body)
-    os.chmod(tmp, 0o755)
-    os.replace(tmp, dst)
+    os.chmod(tmp, mode)
+    os.replace(tmp, real)
 
 
-def rc_target() -> tuple[str, list[str]] | None:
-    shell = os.path.basename(os.environ.get("SHELL", ""))
-    home = os.path.expanduser("~")
-    if shell == "bash":
-        return os.path.join(home, ".bashrc"), [os.path.join(home, ".bash_aliases")]
-    if shell == "zsh":
-        return os.path.join(os.environ.get("ZDOTDIR") or home, ".zshrc"), []
+def _self_body() -> bytes:
+    with open(os.path.realpath(__file__), "rb") as f:
+        return f.read()
+
+
+def _backup(path: str, body: str) -> str:
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    bak = f"{path}.ndf-bak-{stamp}"
+    with open(bak, "w", encoding="utf-8") as f:
+        f.write(body)
+    return bak
+
+
+def blocks_of(lines: list[str]) -> tuple[list[tuple[int, int]], bool]:
+    """囲みの (開きの行, 閉じの行) と、閉じの無い囲みがあるかを返す。`lines` は改行を落とした行。"""
+    found, start = [], None
+    for i, line in enumerate(lines):
+        s = line.rstrip("\r")
+        if start is None and s == BLOCK_OPEN:
+            start = i
+        elif start is not None and s == BLOCK_CLOSE:
+            found.append((start, i))
+            start = None
+    return found, start is not None
+
+
+def rc_blocks(path: str) -> tuple[list[tuple[int, int]], bool, str | None]:
+    body = _read(path)
+    if body is None:
+        return [], False, None
+    found, unclosed = blocks_of(body.split("\n"))
+    return found, unclosed, body
+
+
+def has_definition(paths: list[str]) -> str | None:
+    """囲みの外に行頭の `claude` の定義を持つファイル。"""
+    for p in paths:
+        body = _read(p)
+        if body is None:
+            continue
+        lines = body.split("\n")
+        inside = set()
+        for a, b in blocks_of(lines)[0]:
+            inside.update(range(a, b + 1))
+        if any(DEF_RE.match(line) for i, line in enumerate(lines) if i not in inside):
+            return p
     return None
 
 
-def install_once() -> str | None:
-    """I2〜I7。利用者へ知らせる 1 行を返す（知らせることが無ければ None）。"""
-    place_copy()
-    target = rc_target()
-    if target is None:
-        return None
-    rc, extra = target
-    body = _read(rc)
-    if body is not None and BLOCK_OPEN in body.splitlines():
-        return None
+def rewrite_blocks(path: str, body: str, inner: list[str] | None) -> str:
+    """囲みの中を `inner` へ置き換える（None なら囲みを行ごと外す）。囲みの外は変えない。
+    バックアップのパスを返す。"""
+    lines = body.split("\n")
+    out, i = [], 0
+    for a, b in blocks_of(lines)[0]:
+        out += lines[i:a]
+        if inner is not None:
+            out += [lines[a]] + inner + [lines[b]]
+        i = b + 1
+    out += lines[i:]
+    bak = _backup(path, body)
+    _write_file(path, "\n".join(out).encode("utf-8"), os.stat(path).st_mode & 0o7777)
+    return bak
+
+
+def block_inner(body: str, a: int, b: int) -> list[str]:
+    return [x.rstrip("\r") for x in body.split("\n")[a + 1:b]]
+
+
+def place_copy_to(dst: str, body: bytes, mode: int = 0o755) -> bool:
+    if _read_bytes(dst) == body:
+        return False
+    _write_file(dst, body, mode)
+    return True
+
+
+def out(line: str) -> None:
+    print(f"ndf-relay: {line}")
+
+
+class LockBusy(Exception):
+    pass
+
+
+def _take_both(copy_needed: bool) -> tuple[int, int | None]:
+    """`install.lock` → `copy.lock` の順に 2 秒まで待つ。どちらかが取れなければ LockBusy。"""
     root = state_root()
-    added, skipped = os.path.join(root, "rc-added"), os.path.join(root, "rc-skipped")
-    if rc in _records(added):
-        return None
-    if any(DEF_RE.search(_read(p) or "") for p in [rc] + extra):
-        if rc in _records(skipped):
-            return None
-        _append_record(skipped, rc)
-        return (f"ndf-relay: {rc} に claude の定義があるため alias を足さない。"
-                f"中継を使うなら {ALIAS_LINE} を自分で置く")
-    if body is not None:
-        stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
-        with open(f"{rc}.ndf-bak-{stamp}", "w", encoding="utf-8") as f:
-            f.write(body)
-    with open(rc, "a", encoding="utf-8") as f:
-        if body and not body.endswith("\n"):
-            f.write("\n")
-        f.write(("\n" if body else "") + RC_BLOCK)
-    _append_record(added, rc)
-    return (f"ndf-relay: {rc} へ alias claude を足した。次に開くシェルから効く"
-            f"（今のシェルでは source {rc}）。戻すには囲みを消す")
+    os.makedirs(root, mode=0o700, exist_ok=True)
+    fd = _lock(os.path.join(root, INSTALL_LOCK), 2)
+    if fd is None:
+        raise LockBusy()
+    if not copy_needed:
+        return fd, None
+    cfd = _lock(os.path.join(config_dir(), COPY_LOCK), 2)
+    if cfd is None:
+        _unlock(fd)
+        raise LockBusy()
+    return fd, cfd
 
 
 def cmd_install() -> int:
-    if os.environ.get("NDF_RELAY_AUTO") == "0":
-        return 0
+    """利用者が明示に打つ導入（E0〜E6）。版は比べずに今の版を置く。"""
+    loader = loader_file()
+    for p in [copy_path(), shellrc_path()] + ([loader] if loader else []):
+        if UNSAFE & set(p):
+            out(f"{p} は引用できない文字を含むため置かない")
+            return 1
+    sh = shell_rc()
+    if loader is None and sh is None:
+        shell = os.path.basename(os.environ.get("SHELL", "")) or "このシェル"
+        out(f"{shell} には足さない。使うなら次の 1 行を設定へ置く: {loader_line()}")
+        return 1
+    look = sh[2] if sh else rc_files() + [os.path.join(os.path.expanduser("~"), ".bash_aliases")]
+    found = has_definition(look)
+    if found:
+        out(f"{found} に claude の定義があるため足さない。使うなら次の 1 行を自分で置く: {loader_line()}")
+        return 1
+    for rc in rc_files():
+        if rc_blocks(rc)[1]:
+            out(f"{rc} の囲みに閉じが無い。直してから打ち直す")
+            return 1
     try:
-        root = state_root()
-        os.makedirs(root, mode=0o700, exist_ok=True)
-        os.makedirs(data_dir(), mode=0o700, exist_ok=True)
-        fd = os.open(os.path.join(root, INSTALL_LOCK), os.O_RDWR | os.O_CREAT, 0o600)
+        os.makedirs(config_dir(), mode=0o700, exist_ok=True)
+        fd, cfd = _take_both(True)
+    except LockBusy:
+        out("ほかの導入が動いている。少し待ってから打ち直す")
+        return 3
+    except OSError as e:
+        out(f"書けない（{e}）")
+        return 3
+    try:
+        return _install_locked(loader, sh)
+    except OSError as e:
+        out(f"書けない（{e}）")
+        return 3
+    finally:
+        _unlock(cfd)
+        _unlock(fd)
+
+
+def _install_locked(loader: str | None, sh) -> int:
+    body = _self_body()
+    place_copy_to(copy_path(), body)
+    ver = plugin_version()
+    if ver:
+        with open(copy_version_path(), "w") as f:
+            f.write(ver + "\n")
+    place_copy_to(shellrc_path(), shellrc_body().encode(), 0o644)
+    root = state_root()
+    added, user = os.path.join(root, "rc-added"), os.path.join(root, "rc-user")
+    backups, touched = [], []
+    # 残った囲み（10.17.4 は alias を直に持つ）の中を今の読み込みの行へ置き換える
+    for rc in rc_files():
+        found, _, text = rc_blocks(rc)
+        if found and any(block_inner(text, a, b) != loader_inner() for a, b in found):
+            backups.append(rewrite_blocks(rc, text, loader_inner()))
+            touched.append(rc)
+    if loader:
+        target = loader
+        place_copy_to(loader, loader_body().encode(), 0o644)
+    else:
+        target = sh[1]
+        found, _, text = rc_blocks(target)
+        if not found:
+            if text is not None:
+                backups.append(_backup(target, text))
+            with open(target, "a", encoding="utf-8") as f:
+                if text and not text.endswith("\n"):
+                    f.write("\n")
+                f.write(("\n" if text else "") + BLOCK_OPEN + "\n" + loader_body() + BLOCK_CLOSE + "\n")
+        touched.append(target)
+    for rc in dict.fromkeys(touched):
+        _add_record(added, rc)
+        _add_record(user, rc)
+    bak = f"（バックアップ {'・'.join(backups)}）" if backups else ""
+    out(f"{target} から {shellrc_path()} を読むようにした{bak}。次に開くシェルから効く")
+    out(f"中継の本体 {copy_path()}（版 {ver or '不明'}）")
+    return 0
+
+
+def cmd_uninstall() -> int:
+    """U1〜U6。10.17.4 の自動の囲みも同じ手順で外す。"""
+    for rc in rc_files():
+        if rc_blocks(rc)[1]:
+            out(f"{rc} の囲みに閉じが無い。何も変えていない。直してから打ち直す")
+            return 1
+    try:
+        fd, cfd = _take_both(os.path.isdir(config_dir()))
+    except LockBusy:
+        out("ほかの導入が動いている。少し待ってから打ち直す")
+        return 3
+    except OSError as e:
+        out(f"書けない（{e}）")
+        return 3
+    try:
+        return _uninstall_locked()
+    except OSError as e:
+        out(f"書けない（{e}）")
+        return 3
+    finally:
+        _unlock(cfd)
+        _unlock(fd)
+
+
+def _uninstall_locked() -> int:
+    lines, removed_rc, direct_alias = [], [], False
+    for rc in rc_files():
+        found, _, text = rc_blocks(rc)
+        if not found:
+            continue
+        direct_alias = direct_alias or any(
+            any(x.startswith("alias claude=") for x in block_inner(text, a, b)) for a, b in found)
+        bak = rewrite_blocks(rc, text, None)
+        removed_rc.append(rc)
+        lines.append(f"{rc} の囲みを外した（バックアップ {bak}）")
+    loader = loader_file()
+    for p in ([loader] if loader else []) + [shellrc_path(), copy_version_path(), copy_path(),
+                                               old_copy_path()]:
+        if os.path.lexists(p):
+            os.unlink(p)
+            lines.append(f"{p} を消した")
+    root = state_root()
+    for name in ("rc-skipped", "rc-noticed"):
+        _drop_records(os.path.join(root, name), removed_rc)
+    for rc in removed_rc:
+        _add_record(os.path.join(root, "rc-added"), rc)
+        _add_record(os.path.join(root, "rc-user"), rc)
+    if not lines:
+        out("外すものが無い")
+        return 0
+    for line in lines:
+        out(line)
+    out("開いているシェルでは " + ("unalias claude" if direct_alias else "unset -f claude") + " で外れる")
+    if os.path.islink(os.path.dirname(config_dir())) or loader:
+        out("同じ設定を共有する環境でも、中継を通らなくなる（開いたままのシェルは素の claude へ落ちる）")
+    return 0
+
+
+def _auto_blocks(root: str) -> list[str]:
+    """`rc-added` に載り `rc-user` に載らず、今も囲みがあるパス（10.17.4 の自動の囲み）。"""
+    user = _records(os.path.join(root, "rc-user"))
+    return [p for p in dict.fromkeys(_records(os.path.join(root, "rc-added")))
+            if p not in user and rc_blocks(p)[0]]
+
+
+def _same(path: str, body: bytes) -> str:
+    b = _read_bytes(path)
+    return "無し" if b is None else ("今の版と同じ" if b == body else "今の版と違う")
+
+
+def cmd_status() -> int:
+    body = _self_body()
+    loader = loader_file()
+    root = state_root()
+    auto = _auto_blocks(root)
+    if loader:
+        out(f"読み込み先: {loader}（{'在る' if os.path.exists(loader) else '無い'}）")
+    else:
+        sh = shell_rc()
+        out(f"読み込み先: {sh[1] if sh else '無し（bash と zsh 以外のシェル）'} の囲み")
+    for rc in rc_files():
+        found, unclosed, text = rc_blocks(rc)
+        if unclosed:
+            out(f"{rc}: 閉じの無い囲みがある")
+        elif not found:
+            out(f"{rc}: 囲みは無い")
+        else:
+            direct = any(any(x.startswith("alias claude=") for x in block_inner(text, a, b))
+                         for a, b in found)
+            kind = "直の alias（10.17.4 の形）" if direct else "読み込みの行"
+            who = "。10.17.4 が自動で足した" if rc in auto else ""
+            out(f"{rc}: 囲みがある（{kind}{who}）")
+    out(f"中継の rc {shellrc_path()}: {'在る' if os.path.exists(shellrc_path()) else '無い'}")
+    ver = (_read(copy_version_path()) or "").strip() or "不明"
+    out(f"写し {copy_path()}: {_same(copy_path(), body)}（写しの版 {ver}）")
+    out(f"旧い写し {old_copy_path()}: {_same(old_copy_path(), body)}")
+    return 0
+
+
+def _startup_copy(body: bytes) -> None:
+    """判定 0a。`copy.lock` の中で写しの有無と版を読み直し、後退させずに置き直す。"""
+    dst = copy_path()
+    if not os.path.exists(dst):
+        return
+    cfd = _lock(os.path.join(config_dir(), COPY_LOCK), 1)
+    if cfd is None:
+        return
+    try:
+        cur = _read_bytes(dst)
+        if cur is None or cur == body:
+            return
+        mine = version_key(plugin_version())
+        if mine is None:
+            return
+        theirs = version_key(_read(copy_version_path()))
+        if theirs is not None and theirs > mine:
+            return
+        _write_file(dst, body, 0o755)
+        _write_file(copy_version_path(), (plugin_version() + "\n").encode(), 0o644)
+    finally:
+        _unlock(cfd)
+
+
+def startup_once() -> str | None:
+    root = state_root()
+    if not (os.path.exists(os.path.join(root, "rc-added")) or os.path.exists(copy_path())
+            or os.path.exists(old_copy_path())):
+        return None
+    os.makedirs(root, mode=0o700, exist_ok=True)
+    fd = _lock(os.path.join(root, INSTALL_LOCK), 1)
+    if fd is None:
+        return None
+    try:
+        body = _self_body()
         try:
-            if not _flock_wait(fd, 2):
-                return 0
-            msg = install_once()
-        finally:
-            os.close(fd)
+            _startup_copy(body)
+        except OSError:
+            pass
+        old = old_copy_path()
+        try:
+            if os.path.exists(old) and _read_bytes(old) != body:
+                _write_file(old, body, 0o755)
+        except OSError:
+            pass
+        noticed = _records(os.path.join(root, "rc-noticed"))
+        paths = [p for p in _auto_blocks(root) if p not in noticed]
+        if not paths:
+            return None
+        for p in paths:
+            _add_record(os.path.join(root, "rc-noticed"), p)
+        msg = (f"ndf-relay: {'・'.join(paths)} の alias claude は 10.17.4 が自動で足したもの。"
+               "使い続けるなら何もしなくてよい。外すなら /ndf:install-wrapper uninstall")
+        if os.environ.get("DEVBASE_SHELLRC_DIR"):
+            msg += "。コンテナを作り直した後も使うなら /ndf:install-wrapper"
+        return msg
+    finally:
+        _unlock(fd)
+
+
+def cmd_startup() -> int:
+    """SessionStart hook の本体。シェルの設定・中継の rc・読み込み先のファイルは書かない。"""
+    try:
+        msg = startup_once()
     except Exception:  # SessionStart を止めない
         return 0
     if msg:
         print(json.dumps({"systemMessage": msg}, ensure_ascii=False))
+    return 0
+
+
+# ---------------------------------------------------------------- 質問の印（関門を越えない守り）
+
+
+DENY_REASON = "ndf-relay: 中継が入力を書いている。もう一度 AskUserQuestion を呼ぶ"
+
+
+def cmd_question(action: str) -> int:
+    """`open`: 質問の印を作る（ロックが取れなければ質問を拒否する）。`close`: 消す。"""
+    started = time.time()
+    try:
+        if not sys.stdin.isatty():
+            sys.stdin.read()  # hook の JSON は読み捨てる
+    except (OSError, ValueError):
+        pass
+    try:
+        d = os.environ.get("NDF_RELAY_DIR")
+        if not d or not relay_running(d) or not is_direct_child(d):
+            return 0
+    except Exception:
+        return 0
+    if action == "close":
+        try:
+            remove(os.path.join(d, QUESTION_FILE))
+        except Exception:
+            pass
+        return 0
+    if action != "open":
+        return 0
+    try:
+        fd = os.open(os.path.join(d, QUESTION_LOCK), os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            if not _flock_wait(fd, max(0.0, started + _num("NDF_RELAY_QUESTION_WAIT", 3) - time.time())):
+                raise LockBusy()
+            os.close(os.open(os.path.join(d, QUESTION_FILE), os.O_WRONLY | os.O_CREAT, 0o600))
+        finally:
+            os.close(fd)
+    except Exception:
+        print(json.dumps({"hookSpecificOutput": {
+            "hookEventName": "PreToolUse", "permissionDecision": "deny",
+            "permissionDecisionReason": DENY_REASON}}, ensure_ascii=False))
     return 0
 
 
@@ -1008,7 +1570,8 @@ def cmd_install() -> int:
 
 def main(argv: list[str]) -> int:
     if not argv:
-        print("usage: relay.py run|stop|mark|install", file=sys.stderr)
+        print("usage: relay.py run|stop|mark|install|uninstall|status|startup|question open|close|is-child",
+              file=sys.stderr)
         return 2
     sub, rest = argv[0], argv[1:]
     if sub == "mark":
@@ -1022,6 +1585,14 @@ def main(argv: list[str]) -> int:
         return cmd_stop()
     if sub == "install":
         return cmd_install()
+    if sub == "uninstall":
+        return cmd_uninstall()
+    if sub == "status":
+        return cmd_status()
+    if sub == "startup":
+        return cmd_startup()
+    if sub == "question":
+        return cmd_question(rest[0] if rest else "")
     if sub == "is-child":
         # 文脈量の hook（token-guard.sh）が使う。中継が動いていて、hook を呼んだ claude が
         # 中継の直接の子なら 0（親のたどりは mark と同じ。間の bash / sh は claude でないので飛ぶ）
