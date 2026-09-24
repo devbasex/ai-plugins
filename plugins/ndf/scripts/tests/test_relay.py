@@ -1055,35 +1055,15 @@ def goal_row(sentinel=False, met=False, at=None):
     return json.dumps({"type": "attachment", "timestamp": ts, "attachment": a})
 
 
-def test_run_waits_for_goal_judgement(term):
-    """目標のある区間では、印の後の目標の判定の記録がそろうまで /exit を送らない（AC6）。"""
+def test_run_does_not_wait_for_goal_judgement(term):
+    """目標の判定を待たない（#994）。`/goal clear` の行（met と sentinel の両方）が残っても静まりだけで切り替える。"""
     t = term()
     t.wait_start(1)
-    t.type(f"tr {goal_row(sentinel=True, at='2026-01-01T00:00:00.000Z')}\r")
+    t.type(f"tr {goal_row(sentinel=True, met=True, at='2026-01-01T00:00:00.000Z')}\r")
     t.type("mark next\r")
-    time.sleep(1.5)
-    assert len(t.starts()) == 1
-    t.type(f"tr {goal_row(met=False)}\r")  # 判定が止めを拒んだ（応答は続く）
     t.wait_start(2)
     t.type("/exit\r")
     t.finish()
-
-
-def test_goal_pending_reads_attachment_rows(mod, tmp_path):
-    tp = tmp_path / "t.jsonl"
-    written = time.time()
-    old = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(written - 60))
-    new = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(written + 1))
-    tp.write_text('{"type": "user"}\n')
-    assert not mod.goal_pending(str(tp), written)  # 目標の無い会話
-    tp.write_text(goal_row(sentinel=True, at=old) + "\n")
-    assert mod.goal_pending(str(tp), written)
-    tp.write_text(goal_row(sentinel=True, at=old) + "\n" + goal_row(met=False, at=old) + "\n")
-    assert mod.goal_pending(str(tp), written)  # 判定が印より前
-    tp.write_text(goal_row(sentinel=True, at=old) + "\n" + goal_row(met=False, at=new) + "\n")
-    assert not mod.goal_pending(str(tp), written)
-    tp.write_text(goal_row(sentinel=True, at=old) + "\n" + goal_row(met=True, at=old) + "\n")
-    assert not mod.goal_pending(str(tp), written)  # 目標は終わっている
 
 
 # ---------------------------------------------------------------- 導入（#928）。一時の HOME・XDG_*・CLAUDE_CONFIG_DIR だけで動かす
