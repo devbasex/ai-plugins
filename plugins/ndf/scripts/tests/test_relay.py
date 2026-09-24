@@ -529,6 +529,24 @@ def mod(tmp_path, monkeypatch):
     return m
 
 
+def test_fallback_cwd_uses_nearest_existing_parent(mod, tmp_path):
+    parent = tmp_path / "a"
+    parent.mkdir()
+
+    assert mod.fallback_cwd(str(parent / "b" / "c")) == str(parent)
+
+
+def test_fallback_cwd_uses_existing_parent_when_worktree_main_is_gone(mod, tmp_path):
+    cwd = tmp_path / "gone" / ".worktrees" / "x" / "y"
+
+    assert mod.fallback_cwd(str(cwd)) == str(tmp_path)
+
+
+@pytest.mark.parametrize("cwd", ["nope/deeper", ""])
+def test_fallback_cwd_uses_home_when_relative_path_has_no_existing_parent(mod, tmp_path, cwd):
+    assert mod.fallback_cwd(cwd) == str(tmp_path / "home")
+
+
 def real_claude(tmp_path, name="real"):
     p = tmp_path / name / "claude"
     p.parent.mkdir(parents=True)
