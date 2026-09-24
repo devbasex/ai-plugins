@@ -597,6 +597,9 @@ def mod(tmp_path, monkeypatch):
     (["--unknown-opt", "v", "最初"], ["--unknown-opt", "v"]),
     (["-nfoo", "-rabc", "--session-id=u", "--model", "x"], ["--model", "x"]),
     (["-w", "wt", "--worktree", "--model", "x"], ["--model", "x"]),
+    (["--system-prompt", "--guard", "最初"], ["--system-prompt", "--guard"]),
+    (["--system-prompt", "-guard", "最初"], ["--system-prompt", "-guard"]),
+    (["-n", "-x", "--model", "m"], ["--model", "m"]),
     ([], []),
 ])
 def test_carried_args(mod, args, expected):

@@ -73,6 +73,14 @@ VARIADIC_FLAGS = {
     "--add-dir", "--allowedTools", "--allowed-tools", "--disallowedTools",
     "--disallowed-tools", "--mcp-config", "--betas", "--tools", "--file",
 }
+# 必須の値（`<x>`）を取る選択肢。次の語が `-` で始まっても値として取る（commander と同じ）
+REQUIRED_FLAGS = {
+    "--agent", "--agents", "--append-system-prompt", "--autocompact", "--debug-file", "--effort",
+    "--environment", "--fallback-model", "--input-format", "--json-schema", "--max-budget-usd",
+    "--model", "-n", "--name", "--output-format", "--permission-mode", "--permission-prompts",
+    "--plugin-dir", "--plugin-url", "--remote-control-session-name-prefix", "--session-id",
+    "--setting-sources", "--settings", "--system-prompt", "--system-prompt-snapshot",
+}
 # 会話ごと・区間ごとに変わるもの。次の区間は新しい会話を始めるので引き継がない
 SECTION_FLAGS = {
     "-c", "--continue", "-r", "--resume", "--session-id", "--fork-session", "--from-pr",
@@ -320,7 +328,10 @@ def carried_args(args: list[str]) -> list[str]:
         name = a.split("=", 1)[0] if long else a[:2]  # `-nfoo` は `-n` に値が付いた 1 語
         group = [a]
         one_word = "=" in a if long else len(a) > 2
-        if not one_word and name not in BOOL_FLAGS:
+        if not one_word and name in REQUIRED_FLAGS:
+            group += args[i:i + 1]
+            i += 1
+        elif not one_word and name not in BOOL_FLAGS:
             take_all = name in VARIADIC_FLAGS
             while i < len(args) and not args[i].startswith("-"):
                 group.append(args[i])
