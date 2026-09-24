@@ -915,6 +915,43 @@ def test_stop_marks_running_relays_only(term, tmp_path):
     assert p.returncode == 1
 
 
+def test_stop_without_root_exits_1(tmp_path):
+    """状態の根が無ければ 1 で終わり、何も出さず、根も作らない。"""
+    state = tmp_path / "state"
+    env = isolated_env(tmp_path, XDG_STATE_HOME=state)
+    p = subprocess.run([sys.executable, str(RELAY), "stop"], capture_output=True, text=True,
+                       env=env, timeout=20)
+    assert p.returncode == 1
+    assert p.stdout == ""
+    assert not (state / "ndf" / "relay").exists()
+
+
+def test_stop_prints_dir_name_when_pid_missing_or_empty(tmp_path):
+    """動いている中継の relay.pid が無い・空なら、作業ディレクトリの名前を出す。"""
+    state = tmp_path / "state"
+    env = isolated_env(tmp_path, XDG_STATE_HOME=state)
+    root = state / "ndf" / "relay"
+    locks = []
+    try:
+        for name in ("a-nopid", "b-emptypid"):
+            d = root / name
+            d.mkdir(parents=True)
+            f = open(d / "relay.lock", "a")
+            locks.append(f)
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        (root / "b-emptypid" / "relay.pid").write_text("")
+        p = subprocess.run([sys.executable, str(RELAY), "stop"], capture_output=True, text=True,
+                           env=env, timeout=20)
+    finally:
+        for f in locks:
+            fcntl.flock(f, fcntl.LOCK_UN)
+            f.close()
+    assert p.returncode == 0, p.stderr
+    assert p.stdout.splitlines() == ["a-nopid", "b-emptypid"]
+    assert (root / "a-nopid" / "stop").exists()
+    assert (root / "b-emptypid" / "stop").exists()
+
+
 def test_make_relay_dir_is_new_each_time(mod, tmp_path, monkeypatch):
     """pid が同じでも作業ディレクトリは起動ごとに新しい。親が無くても作る（AC26）。"""
     monkeypatch.setattr(mod.os, "getpid", lambda: 4242)
