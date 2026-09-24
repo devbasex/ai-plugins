@@ -1,23 +1,24 @@
 #!/usr/bin/env bash
-# cross-refactoring: フェーズごとのプロンプトを組み立てて CLI を起動する。
+# cross-refactoring: フェーズごとのプロンプトを組み立てて CLI を起動する（#933）。
 #
-# Usage: launch-cli.sh <runtime> <phase> <ID> [ROUND]
+# Usage: launch-cli.sh <runtime> <phase> <ID>
 #
 #   runtime  claude | codex | agy | kiro
-#   phase    propose | propose-tests | apply | judge-test-changes | fix | final-fix
+#   phase    propose | plan | add-tests | implement | fix | final-fix
 #   ID       状態ファイルの鍵（最初に初期化した Pull Request 番号）
-#   ROUND    propose と final-fix 以外で必須
+#
+# **フェーズの名前は状態・履歴・`limits.py`・雛形で同じ語を使う。** 提案だけが参加者の
+# 全員、残りは実装担当 1 者が担う（決定 1）。
 #
 # **ホストか否かで分岐しない。** ランタイム名だけで分岐する。ホストと同じランタイムが
-# 実装担当になるラウンドでも、ホストのサブエージェント機能は使わず別プロセスの CLI と
-# して起動する。起動そのものは共通層の [../../../scripts/lib/launch-cli.sh] に委譲する。
+# 実装担当になるときでも、ホストのサブエージェント機能は使わず別プロセスの CLI として
+# 起動する。起動そのものは共通層の [../../../scripts/lib/launch-cli.sh] に委譲する。
 
 set -euo pipefail
 
 RUNTIME=${1:?runtime required}
 PHASE=${2:?phase required}
 ID=${3:?ID required}
-ROUND=${4:-}
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 # **`cd` で登らない。** `cd` は `..` を字句で畳むため、Kiro CLI が `.kiro/skills/` へ張った
@@ -41,76 +42,43 @@ load_common_state() {
   SCOPE=$(jq -r '.target_scope | join(" ")' "$STATE")
   MODEL=$(jq -r --arg rt "$RUNTIME" '.models[$rt] // ""' "$STATE")
   BASELINE_TEST=$(jq -r '.baseline_test.command // ""' "$STATE")
-  # 適用と修正の担当には、進行側が群と修正コミットを検証するコマンドを渡す（#880）。
-  # `round_test_command` と同じく、`round_test` が無ければ `baseline_test` を採る。
-  # 最終ゲートの修正（final-fix）は全体のテストで判定するため `BASELINE_TEST` を使う。
-  ROUND_TEST=$(jq -r '.round_test.command // .baseline_test.command // ""' "$STATE")
-  MAX_ITEMS=$(jq -r '.max_items_per_round' "$STATE")
-
-  # ラウンド番号は表示と項目の絞り込みに使う。未指定なら開いている最新ラウンドを採る。
-  [ -n "$ROUND" ] || ROUND=$(jq -r '.rounds | length' "$STATE")
+  # 範囲のテスト。省いた実行では空で、項目の検証は全体のテストから組み立てた語の並びを使う。
+  ROUND_TEST=$(jq -r '.round_test.command // ""' "$STATE")
 }
 
 load_common_state
 
-require_round() {
-  [ "$ROUND" -ge 1 ] 2>/dev/null || { echo "$PHASE には ROUND が必要です" >&2; exit 1; }
+# CLI 側の実行時間の上限。**`start-phase` が予算から導いた上限（監視の上限 + 余裕）を
+# そのまま渡す**（決定 24）。記録が無ければ（`start-phase` を通らない起動）工程名を渡し、
+# 共通層が上限の表（`lib/limits.py`）から導く（#598 / #537）。
+resolve_print_timeout() {
+  local override
+  override=$(jq -r --arg p "$PHASE" '.phases[$p].cli_timeout // empty' "$STATE")
+  if [ -n "$override" ]; then
+    PRINT_TIMEOUT=$override
+  else
+    PRINT_TIMEOUT=$PHASE
+  fi
 }
 
-configure_judge_diff() {
-  # APPLY_ROUND は共通の読み取りより後で決まるため、stem を組む前に先読みする。
-  JUDGE_GROUP=$(jq -r --argjson r "$ROUND" \
-    '[.rounds[] | select(.round == $r)][0].apply_round // 1' "$STATE")
-  RF_TEST_DIFF_PATH=$TMP_DIR/test-diff-r$ROUND-g$JUDGE_GROUP.diff
-  [ -s "$RF_TEST_DIFF_PATH" ] || {
-    echo "判定する差分がありません: $RF_TEST_DIFF_PATH" >&2; exit 1; }
-  export RF_TEST_DIFF_PATH
-}
-
-# CLI 側の実行時間の上限は **工程名** で共通層へ渡す。共通層が上限の表（`lib/limits.py`）から
-# 「監視の上限 + 120 秒」を導く。短いと CLI が先に打ち切り、結果ファイルが残らなかった
-# 場合と区別が付かなくなる（#598 / #537）。**工程名は上限の表の名前へ正規化して渡す**
-# （`propose-tests` は `propose`）。表は別名を持たない。
 configure_phase() {
 case "$PHASE" in
-  propose|propose-tests)
-    # **提案にもラウンド番号を入れる。** 起動時に同名の結果ファイルを消すため、
-    # 番号が無いと 2 巡目の提案が 1 巡目の内容を消してしまう。
-    #
-    # **結果ファイルの名前はテスト整備でも変えない。** ラウンド番号は種類を
-    # またいで通しなので衝突せず、監視の雛形（`{agent}-propose-rf{id}-r<N>`）を
-    # そのまま使える。
-    require_round
-    STEM=$TMP_DIR/$RUNTIME-propose-rf$ID-r$ROUND
+  propose|plan)
+    # 提案と計画は読むだけ。**読み取り用の作業ディレクトリ**（`prepare-worktrees.sh` が
+    # 担当ごとに detach で用意し、HEAD へ同期する）で行う。
+    STEM=$TMP_DIR/$RUNTIME-$PHASE-rf$ID
     WORKDIR=$ROOT/$RUNTIME
-    PRINT_TIMEOUT=propose
     ;;
-  apply|fix)
-    require_round
-    STEM=$TMP_DIR/$RUNTIME-$PHASE-r$ROUND
-    # 適用と修正は常に work/ の中だけで行う。並列適用はしない。
+  add-tests|implement|fix)
+    # 書き換えるフェーズは常に work/ の中だけで行う。並列には起動しない。
+    STEM=$TMP_DIR/$RUNTIME-$PHASE-rf$ID
     WORKDIR=$WORK
-    PRINT_TIMEOUT=$PHASE
-    ;;
-  judge-test-changes)
-    # **テストの差分が振る舞いの変更を含むかの判定**（#443）。機械で決まらない差分だけを
-    # 渡すため、対象は小さい。判定だけを返させるので上限は提案と同じ値（上限の表）でよい。
-    require_round
-    # **名前に適用群を入れる。** 同じ提案ラウンドで複数の群が段 2 を通ると、
-    # 前の群の差分と結果を上書きする。**この時点では `APPLY_ROUND` が未設定である
-    # ため、ここで先に読む**（下の共通の読み取りは `STEM` の後にある）。
-    configure_judge_diff
-    STEM=$TMP_DIR/$RUNTIME-judge-test-changes-r$ROUND-g$JUDGE_GROUP
-    WORKDIR=$WORK
-    PRINT_TIMEOUT=judge-test-changes
     ;;
   final-fix)
-    # **ラウンド番号を名前に入れない。** 最終ゲートは提案ラウンドの外にあり、
-    # 全体のテストの失敗を直す。番号を付けると、どの提案ラウンドの修正なのかと
-    # 読める名前になる。取り込み側（`merge-final-fix`）もこの名前で探す。
+    # **実行の番号を名前に入れない**（今の名前のまま）。取り込み側（`merge-final-fix`）も
+    # この名前で探す。
     STEM=$TMP_DIR/$RUNTIME-final-fix
     WORKDIR=$WORK
-    PRINT_TIMEOUT=final-fix
     ;;
   *)
     echo "未知のフェーズです: $PHASE" >&2
@@ -120,18 +88,17 @@ esac
 }
 
 configure_phase
+resolve_print_timeout
 
 # Skill の配置先はランタイムで違う。**プロンプトに明示パスを必ず書く**ため、
 # ここで解決して雛形へ渡す。kiro は配置しただけでは SKILL.md 本文を読まない。
-# `set -u` 下で未定義参照にならないよう、分岐の前に必ず初期化する。
 resolve_skill_base() {
 SKILL_BASE=
 case "$RUNTIME" in
   claude) SKILL_BASE=.claude/skills ;;
   codex)  SKILL_BASE=.agents/skills ;;
   kiro)   SKILL_BASE=.kiro/skills ;;
-  # agy は codex と同じ `.agents/skills` を読む。配置先は 4 者とも担当ごとの
-  # 作業ツリーの中で、**語彙を読ませないと提案が全件降格する**ため明示パスで読ませる。
+  # agy は codex と同じ `.agents/skills` を読む。
   agy)    SKILL_BASE=.agents/skills ;;
   *)      echo "未知のランタイムです: $RUNTIME" >&2; exit 1 ;;
 esac
@@ -143,36 +110,36 @@ PROMPT=$STEM-prompt.md
 TEMPLATE=$PROMPTS/$PHASE.md
 [ -f "$TEMPLATE" ] || { echo "プロンプト雛形がありません: $TEMPLATE" >&2; exit 1; }
 
-# 採用済みの改善項目（適用 / 修正で使う）。提案の段階ではまだ無い。
-#
-# **渡すのは進行中の適用ラウンド（群）の項目だけである。** 群の中の項目は書き換える
-# ファイルが重ならず、まとめて 1 コミットにできる。群をまたいで渡すと、まだ適用して
-# いない項目まで 1 コミットへ入れさせることになる。
-collect_round_materials() {
-ITEMS_JSON='[]'
-APPLY_ROUND=0
-# ラウンドの種類。適用と修正では、項目が改善項目かテスト項目かで手順が変わる。
-ROUND_KIND=$(jq -r --argjson r "$ROUND" \
-  '[.rounds[] | select(.round == $r)][0].kind // "structure"' "$STATE")
-if [ "$PHASE" = "apply" ] || [ "$PHASE" = "fix" ] || [ "$PHASE" = "judge-test-changes" ]; then
-  APPLY_ROUND=$(jq -r --argjson r "$ROUND" \
-    '[.rounds[] | select(.round == $r)][0].apply_round // 0' "$STATE")
-  ITEMS_JSON=$(jq --argjson r "$ROUND" --argjson a "$APPLY_ROUND" \
-    '[.items[] | select(.round == $r) | select($a == 0 or (.apply_round // 1) == $a)]' \
-    "$STATE")
-fi
-}
-
-collect_excluded_items() {
-# 見送った提案は「対象外」として渡し、毎ラウンド同じ提案が出続けるのを防ぐ。
-# **見送りの記録は種類で形が違う。** 改善項目は `path#symbol`（兆候）、テスト項目は
-# `target`（固定する経路）で指す。null をそのまま並べると読めない一覧になる。
-EXCLUDED=$(jq -r '[.deferred_items[]
-  | if .kind == "test"
-    then "- \(.target) （\(.case)）: \(.defer_reason // "見送り")"
-    else "- \(.path)#\(.symbol) （\(.smell)）: \(.defer_reason // "見送り")"
-    end] | join("\n")' "$STATE")
-[ -n "$EXCLUDED" ] || EXCLUDED="（なし）"
+# フェーズごとに渡す項目。**締め切りは項目ごとの時刻で渡す**（AC12）。
+collect_items() {
+case "$PHASE" in
+  plan)
+    # 候補の全件。`key` は計画の結果が候補を指す鍵（`path#symbol#smell`）。
+    ITEMS_JSON=$(jq '[.candidates[] | {key: "\(.path)#\(.symbol)#\(.smell)", path, symbol,
+      smell, technique, severity, rationale, plan, test_gap, agreed_by: (.proposed_by | length)}]' "$STATE")
+    ;;
+  add-tests)
+    ITEMS_JSON=$(jq '[.items[] | select(.status == "planned" and ((.tests // []) | length) > 0)
+      | {item_id: .id, path, symbol, smell, technique, tests, test_targets,
+         start_deadline: .test_start_deadline, estimate_minutes: .estimate.test}]' "$STATE")
+    ;;
+  implement)
+    ITEMS_JSON=$(jq '[.items[] | select(.status == "planned" or .status == "tested")
+      | {item_id: .id, rank, path, symbol, smell, technique, rationale, plan, tests,
+         start_deadline, estimate_minutes: .estimate.implement,
+         test_command: (.command | join(" "))}]' "$STATE")
+    ;;
+  fix)
+    # 落ちた項目だけ。**同じ語の並びを共有した項目はまとめて 1 つの修正の対象**になる。
+    # 全体のテストで落ちた項目（決定 22）は、落ちたテストだけを走らせ直すコマンドを渡す。
+    ITEMS_JSON=$(jq '[.items[] | select(.status == "failing")
+      | {item_id: .id, path, symbol, technique, plan, fix_count,
+         test_command: ((.whole_test_command // .command) | join(" ")), test_log: .last_log}]' "$STATE")
+    ;;
+  *)
+    ITEMS_JSON='[]'
+    ;;
+esac
 }
 
 build_skill_block() {
@@ -192,66 +159,37 @@ SKILL_EOF
 fi
 }
 
-# 語彙の許容値。**手順書を読ませるだけでは足りない。** 手順書の見出しは日本語なので、
-# 「語彙に限定する」とだけ書くと読んだ側が日本語を語彙と解釈し、語彙外の降格規則で
-# 全件が見送りになる（実測）。検証側が持つ集合を状態ファイル経由で受け取り、
-# **許容値をそのまま列挙する**。
+# 語彙の許容値。**手順書を読ませるだけでは足りない。** 検証側が持つ集合を状態ファイル
+# 経由で受け取り、**許容値をそのまま列挙する**。観点（AC5）も同じ経路で列挙する。
 collect_refactoring_vocabulary() {
 VOCAB_SMELLS=$(jq -r '(.vocabulary.smells // {}) | to_entries[] | "- `\(.key)` — \(.value)"' "$STATE")
 VOCAB_TECHNIQUES=$(jq -r '(.vocabulary.techniques // {}) | to_entries[] | "- `\(.key)` — \(.value)"' "$STATE")
 VOCAB_SEVERITIES=$(jq -r '(.vocabulary.severities // []) | map("`" + . + "`") | join(" / ")' "$STATE")
+VOCAB_VIEWPOINTS=$(jq -r '(.vocabulary.viewpoints // {}) | to_entries[] | "- `\(.key)` — \(.value)"' "$STATE")
 [ -n "$VOCAB_SMELLS" ] || VOCAB_SMELLS="（状態ファイルに語彙がありません。手順書の語彙に従うこと）"
 [ -n "$VOCAB_TECHNIQUES" ] || VOCAB_TECHNIQUES="（同上）"
 [ -n "$VOCAB_SEVERITIES" ] || VOCAB_SEVERITIES="\`critical\` / \`major\` / \`minor\`"
-}
-
-# テスト整備ラウンドの語彙。**構造改善と同じく許容値をそのまま列挙する。**
-# 手順書を読ませるだけでは足りず、語彙外の値が返ると全件が対象外になる。
-collect_test_vocabulary() {
-VOCAB_CASES=$(jq -r '(.test_vocabulary.cases // {}) | to_entries[] | "- `\(.key)` — \(.value)"' "$STATE")
-VOCAB_LEVELS=$(jq -r '(.test_vocabulary.levels // {}) | to_entries[] | "- `\(.key)` — \(.value)"' "$STATE")
-[ -n "$VOCAB_CASES" ] || VOCAB_CASES="- \`normal\` — 代表的な正常系
-- \`branch\` — 各分岐に入る入力
-- \`boundary\` — 境界値（0 件・空・上限）
-- \`error\` — 例外・エラーになる入力"
-[ -n "$VOCAB_LEVELS" ] || VOCAB_LEVELS="- \`unit\` — 単体
-- \`integration\` — 結合
-- \`contract\` — 契約
-- \`e2e\` — 端から端まで"
-export RF_VOCAB_CASES=$VOCAB_CASES RF_VOCAB_LEVELS=$VOCAB_LEVELS
-}
-
-build_round_note() {
-RF_ROUND_NOTE="この適用ラウンドの項目は**構造改善**です。振る舞いを変えずに構造だけを直します。"
-[ "$ROUND_KIND" != "test" ] || RF_ROUND_NOTE="この適用ラウンドの項目は**テスト整備**です。\
-足すのは現状固定テストだけで、**対象のコードは変更しません**。項目の \`target\` が固定する入口、\
-\`case\` が固定する経路の種類、\`level\` がどの階層で固定するかを示します。"
+[ -n "$VOCAB_VIEWPOINTS" ] || VOCAB_VIEWPOINTS="（同上）"
 }
 
 export_prompt_env() {
-export RF_REPO=$REPO RF_PR=$PR RF_ROUND=${ROUND:-} RF_RUNTIME=$RUNTIME
+BUDGET_MINUTES=$(jq -r '.budget_minutes' "$STATE")
+END_AT=$(jq -r '.plan.end_at // ""' "$STATE")
+export RF_REPO=$REPO RF_PR=$PR RF_RUNTIME=$RUNTIME RF_PHASE=$PHASE
 export RF_MODEL=${MODEL:-default} RF_WORKDIR=$WORKDIR RF_STEM=$STEM
 export RF_SCOPE=$SCOPE RF_HEAD_BRANCH=$HEAD_BRANCH RF_BASE_BRANCH=$BASE_BRANCH
-export RF_BASELINE_TEST=$BASELINE_TEST RF_ROUND_TEST=$ROUND_TEST RF_MAX_ITEMS=$MAX_ITEMS
-export RF_SKILL_BLOCK=$SKILL_BLOCK RF_EXCLUDED=$EXCLUDED RF_SKILL_BASE=$SKILL_BASE
+export RF_BASELINE_TEST=$BASELINE_TEST RF_ROUND_TEST=${ROUND_TEST:-（無し。全体のテストから項目ごとに組み立てる）}
+export RF_SKILL_BLOCK=$SKILL_BLOCK RF_SKILL_BASE=$SKILL_BASE
 export RF_ITEMS=$ITEMS_JSON RF_TMP_DIR=$TMP_DIR
-export RF_APPLY_ROUND=$APPLY_ROUND
-export RF_ROUND_KIND=$ROUND_KIND RF_ROUND_NOTE=$RF_ROUND_NOTE
+export RF_BUDGET_MINUTES=$BUDGET_MINUTES RF_END_AT=$END_AT
 export RF_VOCAB_SMELLS=$VOCAB_SMELLS RF_VOCAB_TECHNIQUES=$VOCAB_TECHNIQUES
-export RF_VOCAB_SEVERITIES=$VOCAB_SEVERITIES
+export RF_VOCAB_SEVERITIES=$VOCAB_SEVERITIES RF_VOCAB_VIEWPOINTS=$VOCAB_VIEWPOINTS
 }
 
-collect_prompt_materials() {
-collect_round_materials
-collect_excluded_items
+collect_items
 build_skill_block
-build_round_note
 collect_refactoring_vocabulary
-collect_test_vocabulary
 export_prompt_env
-}
-
-collect_prompt_materials
 
 # 雛形は `${RF_*}` を展開するだけの素の Markdown。コマンド置換は展開しない
 # （プロンプト本文に `$(...)` や backtick が現れても実行させないため）。

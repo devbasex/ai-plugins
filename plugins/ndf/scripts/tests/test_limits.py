@@ -20,7 +20,7 @@ LIMITS = LIB / "limits.py"
 
 PHASES = {
     "review": 1200, "critique": 1200, "propose": 1200, "judge-test-changes": 1200,
-    "apply": 3600, "fix": 3600, "final-fix": 3600,
+    "plan": 1200, "add-tests": 3600, "implement": 3600, "fix": 3600, "final-fix": 3600,
 }
 STALLS = {"codex": 180, "agy": 480, "kiro": 480, "claude": 900}
 
@@ -48,9 +48,9 @@ def test_the_phase_table_holds_the_contract_values(limits) -> None:
     assert limits.PHASE_TIMEOUT == PHASES
 
 
-def test_four_phases_take_1200_and_three_take_3600(limits) -> None:
+def test_five_phases_take_1200_and_four_take_3600(limits) -> None:
     values = sorted(limits.PHASE_TIMEOUT.values())
-    assert values.count(1200) == 4 and values.count(3600) == 3
+    assert values.count(1200) == 5 and values.count(3600) == 4
 
 
 def test_the_agent_table_holds_the_contract_values(limits) -> None:
@@ -72,8 +72,8 @@ def test_stall_is_below_monitor_is_below_cli(limits, phase: str, agent: str) -> 
     assert stall < monitor < cli, (phase, agent, stall, monitor, cli)
 
 
-def test_all_28_pairs_are_covered(limits) -> None:
-    assert len(list(itertools.product(limits.PHASE_TIMEOUT, limits.AGENT_STALL))) == 28
+def test_all_36_pairs_are_covered(limits) -> None:
+    assert len(list(itertools.product(limits.PHASE_TIMEOUT, limits.AGENT_STALL))) == 36
 
 
 def test_check_passes_on_the_table(limits) -> None:
@@ -115,7 +115,7 @@ def test_the_per_agent_environment_wins_over_the_shared_one(limits, monkeypatch)
 
 def test_the_shared_environment_wins_over_the_phase(limits, monkeypatch) -> None:
     monkeypatch.setenv("MONITOR_TIMEOUT", "1800")
-    assert limits.monitor_timeout("apply", "kiro") == 1800
+    assert limits.monitor_timeout("implement", "kiro") == 1800
 
 
 def test_the_phase_default_applies_without_overrides(limits) -> None:
@@ -173,11 +173,11 @@ def test_the_cli_timeout_command_reads_the_environment() -> None:
 
 
 def test_the_monitor_timeout_command_prints_seconds() -> None:
-    r = _run("monitor-timeout", "apply", "codex", MONITOR_TIMEOUT_CODEX="900")
+    r = _run("monitor-timeout", "implement", "codex", MONITOR_TIMEOUT_CODEX="900")
     assert (r.returncode, r.stdout) == (0, "900\n")
 
 
-@pytest.mark.parametrize("phase", ["propose-tests", "reviews", ""])
+@pytest.mark.parametrize("phase", ["propose-tests", "apply", "reviews", ""])
 def test_an_unknown_phase_exits_1(phase: str) -> None:
     """表に無い名前は受けない。別名を持たせると、表の名前と効く上限が 1 対 1 でなくなる。"""
     r = _run("cli-timeout", phase, "agy")

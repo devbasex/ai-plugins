@@ -15,6 +15,11 @@ import statefile
 from . import die
 
 
+def work_dir(state: dict[str, Any]) -> str:
+    """状態から実装用 worktree の場所を返す。"""
+    return str(state["worktrees"]["work"])
+
+
 def default_worktree_base() -> pathlib.Path:
     """作業ディレクトリの親。解決順は cross-review と揃える。
 
@@ -91,22 +96,19 @@ def result_path(state: dict[str, Any], runtime: str, stem: str) -> pathlib.Path:
     return pathlib.Path(state["tmp_dir"]) / f"{stem}-result.json"
 
 
-def stem_for(runtime: str, phase: str, state_id: int, round_no: Optional[int] = None) -> str:
+def stem_for(runtime: str, phase: str, state_id: int) -> str:
     """一時ファイル名の骨格。監視スクリプトの `--stem-template` と揃える。
 
-    **提案にもラウンド番号を入れる。** CLI の起動時に同名の結果ファイルを消すため、
-    番号が無いと 2 巡目の提案が始まった時点で 1 巡目の提案内容が失われる。
-    統合後の採否は状態ファイルに残るが、**各ランタイムが何をどう提案したかは
-    復元できなくなる**（実測）。
+    **フェーズの名前をそのまま入れる**（#933 の実装計画 I3）。ラウンドが無くなり、
+    どのフェーズも 1 回の実行で 1 度だけ起動する（修正は同じ名前で何度も起動し、
+    取り込み済みの判定は試行の番号と結果の中身の組で行う）。
+
+    **最終ゲートの修正だけ実行の番号を持たない。** 名前は今（v10.17.x）と同じで、
+    取り込み側（`merge-final-fix`）もこの名前で探す。
     """
-    if phase == "propose":
-        return f"{runtime}-propose-rf{state_id}-r{round_no}"
-    # **最終ゲートの修正だけラウンド番号を持たない。** Step 7 は提案ラウンドの外に
-    # あり、直すのは全体のテストの失敗である。番号を付けると、どの提案ラウンドの
-    # 修正なのかと読める名前になる。
     if phase == "final-fix":
         return f"{runtime}-final-fix"
-    return f"{runtime}-{phase}-r{round_no}"
+    return f"{runtime}-{phase}-rf{state_id}"
 
 
 def git_out(work: str, args: list[str], strip: bool = True) -> Optional[str]:

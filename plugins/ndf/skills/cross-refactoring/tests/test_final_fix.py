@@ -1,12 +1,13 @@
 """最終ゲート（Step 7）の修正の取り込みのテスト（#436 B5 / PR #447 レビュー指摘）。
 
-**最終ゲートの修正は適用ラウンドの修正と別物である。** 落ちているのは全体のテストで、
-どの改善項目にも提案ラウンドにも属さない。`merge-fix` を流用すると 3 つの壊れ方をする。
+**最終ゲートの修正は検証の中の修正と別物である。** 落ちているのは全体のテストで、
+どの改善項目にも属さない。`merge-fix` を流用すると 3 つの壊れ方をする。
+修正担当は実装担当が担う（#933 の決定 1。輪番は無い）。
 
 | 流用したときに起きること | このファイルで固定するテスト |
 | --- | --- |
 | 「起点 None」で止まり、修正を 1 件も取り込めない | `test_the_gate_records_the_fix_base_before_it_asks_for_a_fix` |
-| 古い起点のせいで正常なコミットまで取り消される | `test_the_gate_does_not_reuse_the_apply_round_fix_base` |
+| 古い起点のせいで正常なコミットまで取り消される | `test_the_gate_does_not_reuse_the_fix_base_of_the_verify_loop` |
 | `Item-Id` を要求して全件が不正になる | `test_the_final_fix_commit_does_not_need_an_item_id` |
 """
 from __future__ import annotations
@@ -14,7 +15,7 @@ from __future__ import annotations
 import sys
 import pytest
 
-from crossref_helpers import make_state, read_state, write_result
+from crossref_helpers import make_state_v2, read_state, write_result
 
 
 def _args(state_id=130):
@@ -22,8 +23,9 @@ def _args(state_id=130):
 
 
 def _gate_state(tmp_path, **over):
-    return make_state(tmp_path, phase="final", outer_round=1,
-                      workflow_step=True, **over)
+    over.setdefault("baseline_test", {"command": "pytest -q", "status": "green",
+                                      "checked_at": "2026-09-24T10:00:00", "seconds": 6.0})
+    return make_state_v2(tmp_path, tmp_path / "work", phase="final", workflow_step=True, **over)
 
 
 @pytest.fixture
@@ -58,7 +60,7 @@ def test_the_gate_records_the_fix_base_before_it_asks_for_a_fix(
     assert e.value.code == 2
     gate = read_state(state_path)["final_gate"]
     assert gate["fix_base_sha"] == "HEADSHA"
-    assert gate["impl"] in ("claude", "codex", "agy", "kiro")
+    assert gate["impl"] == "claude", "修正担当は実装担当"
 
 
 def test_the_gate_emits_the_fix_impl_and_round(
@@ -79,22 +81,16 @@ def test_the_gate_emits_the_fix_impl_and_round(
     assert "FINAL_FIX_ROUND=1" in out
 
 
-def test_the_gate_does_not_reuse_the_apply_round_fix_base(rounds, 
+def test_the_gate_does_not_reuse_the_fix_base_of_the_verify_loop(
     refactor, cmd_gate, tmp_path, env_tmp_dir, gate_spy
 ):
-    """**適用ラウンドの起点は流用しない。**
+    """**検証の中の修正の起点は流用しない。**
 
-    あれは最後の群の検証が落ちた地点である。そこから HEAD までには検証を通った
+    あれは項目の検証が落ちた地点である。そこから HEAD までには検証を通った
     正常なコミットが並ぶため、範囲に含めるとその全部が未申告として取り消される。
     """
-    rounds = [{
-        "round": 1, "kind": "structure", "impl": "codex", "reviewers": [],
-        "impl_model": {}, "reviewer_models": {}, "proposed": {}, "merged": 0,
-        "adopted": 0, "deferred": 0, "items": [], "apply_rounds": [],
-        "apply_round": 0, "fix_rounds": 1, "durations": {}, "reviews": [],
-        "fix_base_sha": "OLDBASE",
-    }]
-    state_path = _gate_state(tmp_path, rounds=rounds)
+    state_path = _gate_state(tmp_path, phases={"fix": {"base_sha": "OLDBASE"}},
+                             fix={"items": [], "base_sha": "OLDBASE"})
     env_tmp_dir(state_path)
     gate_spy["test_code"] = 1
 
@@ -103,7 +99,8 @@ def test_the_gate_does_not_reuse_the_apply_round_fix_base(rounds,
 
     state = read_state(state_path)
     assert state["final_gate"]["fix_base_sha"] == "HEADSHA"
-    assert state["rounds"][0]["fix_base_sha"] == "OLDBASE", "適用側の控えは触らない"
+    assert state["phases"]["fix"]["base_sha"] == "OLDBASE", "検証の側の控えは触らない"
+    assert state["fix"]["base_sha"] == "OLDBASE"
 
 
 def test_the_same_runtime_keeps_fixing_across_fix_rounds(
@@ -120,13 +117,12 @@ def test_the_same_runtime_keeps_fixing_across_fix_rounds(
 
     state = read_state(state_path)
     assert state["final_gate"]["impl"] == "kiro"
-    assert state.get("apply_seq", 0) == 0, "輪番は 2 回目以降で進めない"
 
 
 def test_a_passing_gate_records_no_fix_impl(
     refactor, cmd_gate, tmp_path, env_tmp_dir, gate_spy
 ):
-    """通ったときは担当を決めない。輪番も進めない。"""
+    """通ったときは担当を決めない。"""
     state_path = _gate_state(tmp_path)
     env_tmp_dir(state_path)
 
@@ -134,7 +130,6 @@ def test_a_passing_gate_records_no_fix_impl(
 
     state = read_state(state_path)
     assert "impl" not in state["final_gate"]
-    assert state.get("apply_seq", 0) == 0
 
 
 # ---------- 取り込みは専用の経路 ----------
@@ -190,10 +185,10 @@ def test_a_clean_final_fix_is_taken_in_and_published(
 def test_the_final_fix_commit_does_not_need_an_item_id(
     refactor, cmd_gate, tmp_path, env_tmp_dir, merge_spy
 ):
-    """**`Item-Id` と `Round` は求めない。**
+    """**`Item-Id` は求めない。**
 
-    最終ゲートの修正は改善項目にも提案ラウンドにも属さない。求めると、実在しない
-    番号を実装担当が作ることになる。
+    最終ゲートの修正は改善項目に属さない。求めると、実在しない番号を実装担当が
+    作ることになる。
     """
     state_path = _failing_gate_state(tmp_path)
     env_tmp_dir(state_path)
@@ -304,13 +299,13 @@ def test_the_take_in_needs_the_gate_to_run_first(
 
 # ---------- 名前の取り決め ----------
 
-def test_the_final_fix_result_file_has_no_round_number(paths):
-    """**最終ゲートは提案ラウンドの外にある。** 番号を名前に入れない。
+def test_the_final_fix_result_file_has_no_run_number(paths):
+    """**最終ゲートの修正は実行の番号を名前に入れない**（I3）。
 
     `launch-cli.sh` の `--stem-template "{agent}-final-fix"` と揃える。
     """
     assert paths.stem_for("codex", "final-fix", 130) == "codex-final-fix"
-    assert paths.stem_for("codex", "fix", 130, 2) == "codex-fix-r2"
+    assert paths.stem_for("codex", "fix", 130) == "codex-fix-rf130"
 
 
 # ---------- 起動（launch-cli.sh） ----------
@@ -318,7 +313,7 @@ def test_the_final_fix_result_file_has_no_round_number(paths):
 def _launch_final_fix(tmp_path):
     """`launch-cli.sh` に final-fix のプロンプトを組み立てさせて中身を返す。
 
-    ラウンド番号を渡さずに起動できることも、ここで固定する。
+    実行の番号を名前に入れずに起動できることも、ここで固定する。
     """
     import os
     import pathlib
@@ -326,7 +321,7 @@ def _launch_final_fix(tmp_path):
 
     launch = (pathlib.Path(__file__).resolve().parent.parent
               / "scripts" / "launch-cli.sh")
-    state_path = make_state(tmp_path)
+    state_path = _gate_state(tmp_path)
     for name in ("work", "codex"):
         (tmp_path / name).mkdir(parents=True, exist_ok=True)
     stub_dir = tmp_path / "bin"
@@ -346,10 +341,10 @@ def _launch_final_fix(tmp_path):
         encoding="utf-8")
 
 
-def test_the_final_fix_phase_launches_without_a_round(tmp_path):
-    """**ラウンド番号を要求しない。** Step 7 は提案ラウンドの外にある。"""
+def test_the_final_fix_phase_launches_with_the_whole_test(tmp_path):
+    """全体のテストを渡す。雛形の変数が生のまま残らない。"""
     text = _launch_final_fix(tmp_path)
-    assert "最終ゲート" in text
+    assert "pytest -q" in text
     assert "RF_" not in text, "雛形の変数が生のまま残らない"
 
 
@@ -362,13 +357,13 @@ def test_the_final_fix_prompt_does_not_ask_for_an_item_id(tmp_path):
 
 # ---------- R2-002: 提案フェーズの命名 ----------
 
-def test_the_propose_result_file_carries_the_round_number(paths):
-    """**提案にもラウンド番号を入れる。** 監視の `--stem-template` と揃える。
+def test_the_propose_result_file_carries_the_run_number(paths):
+    """**提案の名前は実行の番号を持つ**（I3）。監視の `--stem-template` と揃える。
 
-    現状固定: `stem_for` の propose 分岐。ラウンド番号が無いと 2 巡目の提案が
-    始まった時点で 1 巡目の提案内容が失われる。
+    番号が無いと、別の実行の提案が同じ一時ディレクトリで混ざる。
     """
-    assert paths.stem_for("codex", "propose", 130, 2) == "codex-propose-rf130-r2"
+    assert paths.stem_for("codex", "propose", 130) == "codex-propose-rf130"
+    assert paths.stem_for("codex", "propose", 131) != paths.stem_for("codex", "propose", 130)
 
 
 # ---------- 最終ゲートの修正で結果が無いとき（#674 / #728 の決定 11） ----------
@@ -430,10 +425,10 @@ def test_the_next_gate_does_not_see_the_reverted_commits(
     assert gate["status"] == "passed"
 
 
-def test_a_usage_limit_on_the_final_fix_jumps_to_the_cap(
+def test_a_usage_limit_on_the_final_fix_stops_the_fix(
     cmd_gate, tmp_path, env_tmp_dir, merge_spy
 ):
-    """AC30: 起動し直しても解けない結末では、修正ラウンドを上限の値にする。"""
+    """AC30 決定 23: 起動し直しても解けない結末では、次の最終ゲートで修正を打ち切る印を立てる。"""
     state_path = _failing_gate_state(tmp_path)
     env_tmp_dir(state_path)
     (state_path.parent / "codex-final-fix-monitor.json").write_text(
@@ -444,7 +439,7 @@ def test_a_usage_limit_on_the_final_fix_jumps_to_the_cap(
         cmd_gate.cmd_merge_final_fix(_args())
 
     assert e.value.code == 2
-    assert read_state(state_path)["final_gate"]["fix_rounds"] == 3
+    assert read_state(state_path)["final_gate"]["no_relaunch"] is True
 
 
 def test_the_gate_after_the_cap_reports_without_reverting(
@@ -500,16 +495,16 @@ def test_the_same_final_fix_attempt_is_closed_only_once(
     assert len(read_state(state_path)["final_gate"]["failed_attempts"]) == 1
 
 
-def test_the_final_fix_agent_comes_from_the_single_rotation_function(
-    patch_lib, cmd_gate, tmp_path, env_tmp_dir, gate_spy
+def test_the_final_fix_agent_is_the_implementer(
+    cmd_gate, tmp_path, env_tmp_dir, gate_spy, capsys
 ):
-    """AC49: 輪番から担当を引く関数を差し替えると、最終ゲートの修正担当も従う。"""
-    state_path = _gate_state(tmp_path)
+    """最終ゲートの修正担当は実装担当（#933 の決定 1）。輪番から引かない。"""
+    state_path = _gate_state(tmp_path, implementer="kiro", implementer_reason="named")
     env_tmp_dir(state_path)
     gate_spy["test_code"] = 1
-    patch_lib("impl_for_seq", lambda state, seq: ("kiro", "auto"))
 
     with pytest.raises(SystemExit):
         cmd_gate.cmd_final_gate(_args())
 
     assert read_state(state_path)["final_gate"]["impl"] == "kiro"
+    assert "FINAL_FIX_IMPL=kiro" in capsys.readouterr().out

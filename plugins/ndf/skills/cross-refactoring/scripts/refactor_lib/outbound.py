@@ -4,12 +4,12 @@
 
 | 規約 | 内容 |
 | --- | --- |
-| 項目の指し方 | **`<ファイル>#<シンボル>` を併記する**（`rounds.item_label`）。内部の識別子だけで書かない |
+| 項目の指し方 | **`<ファイル>#<シンボル>` を併記する**（`items.item_label`）。内部の識別子だけで書かない |
 | 取り消した項目 | **内訳を書かない。** 件数だけ述べ、内訳は改修計画へ譲る |
 | 改修計画の参照 | **生の URL を必ず書く。** Markdown のリンクにしない（利用者の画面で URL を取り出せない） |
 
 対象は Pull Request へ出す**すべての**文章である。実装では検証の結果
-（`verify-round`）・修正の要約（`merge-fix`）・進行の報告（`report`）の 3 つが
+（`verify`）・修正の要約（`merge-fix`）・進行の報告（`report`）の 3 つが
 これにあたる。
 """
 from __future__ import annotations
@@ -17,7 +17,7 @@ from __future__ import annotations
 from typing import Any
 
 from .plan import PLAN_COMMENT, PLAN_FILE, plan_mode
-from .rounds import item_label
+from .items import item_label
 
 
 def plan_reference(state: dict[str, Any]) -> str:
@@ -49,7 +49,7 @@ def dropped_line(state: dict[str, Any], count: int) -> str:
 
 def item_lines(state: dict[str, Any], item_ids: list[str]) -> list[str]:
     """項目を外へ出す形で並べる。**`<ファイル>#<シンボル>` を併記する。**"""
-    by_id = {i.get("item_id"): i for i in state.get("items") or []}
+    by_id = {i.get("id"): i for i in state.get("items") or []}
     lines = []
     for item_id in item_ids:
         item = by_id.get(item_id)

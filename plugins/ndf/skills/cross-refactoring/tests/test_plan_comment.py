@@ -1,7 +1,7 @@
 """改修計画を Pull Request のコメント 1 件へ残す（#436 決定 6 / D3・D4）。
 
 **改修計画は実行の記録であって、リポジトリの知識ではない。** 既定はコメントで、
-ラウンドが進むたびに**同じコメントを編集する**。URL は永続で、マージの後も開ける。
+公開のたびに**同じコメントを編集する**。URL は永続で、マージの後も開ける。
 
 `gh` は呼ばない。`sh` を差し替え、渡した引数と返した JSON だけを見る。
 """
@@ -12,7 +12,7 @@ import json
 
 import pytest
 
-from crossref_helpers import make_state, read_state
+from crossref_helpers import make_state_v2, read_state
 
 
 COMMENT_URL = "https://github.com/devbasex/ai-plugins/pull/130#issuecomment-999"
@@ -20,27 +20,24 @@ COMMENT_URL = "https://github.com/devbasex/ai-plugins/pull/130#issuecomment-999"
 
 def _item(**over):
     base = {
-        "item_id": "R1-001", "round": 1, "path": "src/foo.py",
+        "id": "I-001", "rank": 1, "path": "src/foo.py",
         "symbol": "Foo.handle", "smell": "long_method",
-        "technique": "extract_method", "severity": "major",
+        "technique": "extract_method", "severity": "major", "tier": "high",
         "rationale": "1 関数が 6 段の処理を通しで行っている",
-        "plan": "1. 範囲の確定を切り出す", "test_gap": False,
+        "plan": "1. 範囲の確定を切り出す", "tests": [],
         "estimated_diff_lines": 40, "proposed_by": ["codex", "agy"],
-        "status": "done", "commits": ["abc1234"],
+        "status": "verified", "commits": {"test": None, "implement": "abc1234", "fix": []},
     }
     base.update(over)
     return base
 
 
 def _state(tmp_path, **over):
-    over.setdefault("rounds", [{
-        "round": 1, "impl": "codex", "reviewers": ["agy", "kiro"],
-        "items": ["R1-001"], "reviews": [], "fix_rounds": 0,
-    }])
     over.setdefault("items", [_item()])
     over.setdefault("plan_mode", "comment")
     over.setdefault("plan_file", "")
-    path = make_state(tmp_path, **over)
+    over.setdefault("repo", "devbasex/ai-plugins")
+    path = make_state_v2(tmp_path, tmp_path / "work", **over)
     return path, read_state(path)
 
 
@@ -96,7 +93,7 @@ def test_the_first_publish_creates_a_comment(plan, tmp_path, gh):
 
 
 def test_the_second_publish_edits_the_same_comment(plan, tmp_path, gh):
-    """**同じコメントを編集する。** ラウンドごとに積み増さない。"""
+    """**同じコメントを編集する。** 公開のたびに積み増さない。"""
     calls, responses = gh
     responses["issues/comments/999"] = json.dumps(
         {"id": 999, "html_url": COMMENT_URL})
@@ -131,15 +128,7 @@ def test_the_body_carries_the_marker_and_the_plan(plan, tmp_path):
     _, state = _state(tmp_path)
     body = plan.plan_comment_body(state)
     assert body.startswith(plan.plan_comment_marker(state))
-    assert "R1-001" in body and "src/foo.py" in body
-
-
-def test_the_round_heading_has_no_reviewers(plan, tmp_path):
-    """AC37 — 改修計画のラウンドの見出しにレビュー担当を出さない。古い記録にあっても。"""
-    _, state = _state(tmp_path)
-    body = plan.plan_comment_body(state)
-    assert "## ラウンド 1（実装 codex）" in body
-    assert "レビュー" not in body.split("## ラウンド 1", 1)[1].splitlines()[0]
+    assert "I-001" in body and "src/foo.py" in body
 
 
 def test_a_failed_post_does_not_stop_the_run(plan, tmp_path, gh):
@@ -161,15 +150,17 @@ def test_the_file_mode_does_not_post_a_comment(plan, tmp_path, gh):
 def test_the_plan_lists_the_deferred_items(plan, tmp_path):
     """**内訳を持つのは改修計画だけである**（決定 6-b）。"""
     _, state = _state(tmp_path, deferred_items=[{
-        "item_id": "R1-002", "round": 1, "path": "src/bar.py",
+        "item_id": "I-002", "path": "src/bar.py",
         "symbol": "Bar.run", "smell": "duplication",
-        "defer_reason": "差分予算を超えた",
+        "defer_reason": "not_done", "detail": "実装の締め切りまでにコミットが無い",
     }])
     text = plan.format_plan(state)
-    assert "見送った項目" in text
-    assert "src/bar.py#Bar.run" in text and "差分予算を超えた" in text
+    section = text.split("## 見送った提案", 1)[1]
+    assert "src/bar.py#Bar.run" in section and "not_done" in section
+    assert "実装の締め切りまでにコミットが無い" in section
 
 
 def test_the_plan_says_none_when_nothing_was_deferred(plan, tmp_path):
     _, state = _state(tmp_path)
-    assert "見送った項目" in plan.format_plan(state)
+    section = plan.format_plan(state).split("## 見送った提案", 1)[1]
+    assert "（なし）" in section

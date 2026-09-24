@@ -1,9 +1,12 @@
-"""4 つのフェーズが `agy` を起動し、作業領域と実行時間の上限を渡すこと（#214）。
+"""各フェーズが `agy` を起動し、作業領域と実行時間の上限を渡すこと（#214 / #933 の I2）。
 
 `agy` の実行時間の既定は 300 秒で、**どのフェーズの監視の上限よりも短い**。CLI が
 先に打ち切ると結果ファイルが残らず、監視からは「起動したのに結果が残らなかった」
 場合と区別が付かない。打ち切りの判断を監視の側へ一本化するため、フェーズごとの
 上限を起動時に明示する。
+
+`start-phase` が予算から導いた上限（`phases.<フェーズ>.timeout`）があれば、CLI の上限は
+その秒 + 120 になる（I2）。無ければ上限の表（`lib/limits.py`）の値 + 120 である。
 
 `agy` そのものは起動しない。PATH へ引数を書き出すだけの実行ファイルを置く。
 """
@@ -16,7 +19,7 @@ import time
 
 import pytest
 
-from crossref_helpers import make_state
+from crossref_helpers import git, make_state_v2, read_state
 
 LAUNCH = pathlib.Path(__file__).resolve().parent.parent / "scripts" / "launch-cli.sh"
 RUNTIME = "agy"
@@ -28,115 +31,40 @@ for a in "$@"; do printf '%s\\0' "$a" >> "$NDF_TEST_ARGS_FILE.tmp"; done
 mv "$NDF_TEST_ARGS_FILE.tmp" "$NDF_TEST_ARGS_FILE"
 """
 
-# フェーズごとの監視の上限（上限の表 `lib/limits.py`。`SKILL.md` は `--phase` で渡す）。
-# 起動時の上限はこれより長くする。
-MONITOR_TIMEOUT = {"propose": 1200, "apply": 3600, "fix": 3600}
-
-# フェーズごとの CLI の上限（#598 / #537 の AC36）。監視の上限 + 120 秒。
-# `propose-tests` は `propose` の上限を使う（起動側が工程名を正規化する）。
+# `start-phase` を通らない起動の CLI の上限（#598 / #537 の AC36）。監視の上限（`lib/limits.py`）+ 120 秒。
 CLI_TIMEOUT = {
-    "propose": 1320, "propose-tests": 1320, "judge-test-changes": 1320,
-    "apply": 3720, "fix": 3720, "final-fix": 3720,
+    "propose": 1320, "plan": 1320,
+    "add-tests": 3720, "implement": 3720, "fix": 3720, "final-fix": 3720,
 }
 
-
-def _launch(tmp_path: pathlib.Path, phase: str) -> tuple[list[str], pathlib.Path]:
-    state_path = make_state(tmp_path, runtimes=["codex", RUNTIME, "kiro"])
-    for name in ("work", RUNTIME):
-        (tmp_path / name).mkdir(parents=True, exist_ok=True)
-
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir(exist_ok=True)
-    stub = bin_dir / RUNTIME
-    stub.write_text(STUB, encoding="utf-8")
-    stub.chmod(0o755)
-
-    if phase == "judge-test-changes":
-        # 判定の対象の差分は進行側が先に書き出す。無いと起動しない。
-        (state_path.parent / "test-diff-r1-g1.diff").write_text("diff\n", encoding="utf-8")
-
-    args_file = tmp_path / "args.txt"
-    subprocess.run(
-        [str(LAUNCH), RUNTIME, phase, "130", "1"],
-        env={
-            **os.environ,
-            "CROSS_REFACTORING_TMP_DIR": str(state_path.parent),
-            "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
-            "NDF_TEST_ARGS_FILE": str(args_file),
-        },
-        check=True, capture_output=True, text=True,
-    )
-    for _ in range(200):
-        if args_file.is_file():
-            break
-        time.sleep(0.05)
-    assert args_file.is_file(), f"{phase} で agy が起動されていない"
-    return args_file.read_text(encoding="utf-8").split("\0")[:-1], state_path
-
-
-@pytest.mark.parametrize("phase", sorted(MONITOR_TIMEOUT))
-def test_every_phase_launches_agy(tmp_path, phase: str) -> None:
-    args, _ = _launch(tmp_path, phase)
-    assert args[-1].startswith("-p="), "プロンプトが `-p=` の値で渡っていない"
-
-
-@pytest.mark.parametrize("phase", sorted(MONITOR_TIMEOUT))
-def test_the_workspace_covers_the_workdir_and_the_result_directory(
-    tmp_path, phase: str
-) -> None:
-    """結果ファイルは全ランタイム共通の一時ディレクトリに置く。作業領域へ足す。"""
-    args, state_path = _launch(tmp_path, phase)
-    added = [args[i + 1] for i, a in enumerate(args) if a == "--add-dir"]
-    workdir = tmp_path / ("work" if phase in ("apply", "fix") else RUNTIME)
-    assert added == [str(workdir), str(state_path.parent)]
-
-
-@pytest.mark.parametrize("phase", sorted(MONITOR_TIMEOUT))
-def test_the_print_timeout_covers_the_monitor_timeout(tmp_path, phase: str) -> None:
-    args, _ = _launch(tmp_path, phase)
-    value = int(args[args.index("--print-timeout") + 1].rstrip("s"))
-    assert value >= MONITOR_TIMEOUT[phase], f"{phase} の上限が監視より短い"
-
-
-@pytest.mark.parametrize("phase", sorted(CLI_TIMEOUT))
-def test_the_print_timeout_is_the_monitor_timeout_plus_120(tmp_path, phase: str) -> None:
-    """CLI の上限は上限の表から導く（#598 / #537 の AC36）。"""
-    args, _ = _launch(tmp_path, phase)
-    assert args[args.index("--print-timeout") + 1] == f"{CLI_TIMEOUT[phase]}s"
-
-
-# フェーズごとの作業領域と生成される stem。propose・apply・fix は既存のテストが固定する。
-# ここは残る propose-tests・judge-test-changes・final-fix を固定する。
-#   workdir  --add-dir の先頭。担当 worktree（RUNTIME）か work か
-#   stem     生成されるファイル名の接頭辞（`<stem>-prompt.md` を観測する）
+# フェーズごとの作業ディレクトリ（`--add-dir` の先頭）と、生成されるプロンプトの接頭辞。
+# 提案と計画は担当ごとの読み取り用の作業ディレクトリ、書き換えるフェーズは work で行う。
 WORKDIR_AND_STEM = {
-    "propose-tests": (RUNTIME, "agy-propose-rf130-r1"),
-    "judge-test-changes": ("work", "agy-judge-test-changes-r1-g1"),
+    "propose": (RUNTIME, "agy-propose-rf130"),
+    "plan": (RUNTIME, "agy-plan-rf130"),
+    "add-tests": ("work", "agy-add-tests-rf130"),
+    "implement": ("work", "agy-implement-rf130"),
+    "fix": ("work", "agy-fix-rf130"),
     "final-fix": ("work", "agy-final-fix"),
 }
 
 
-@pytest.mark.parametrize("phase", sorted(WORKDIR_AND_STEM))
-def test_the_workspace_and_stem_for_the_remaining_phases(tmp_path, phase: str) -> None:
-    """propose-tests は担当 worktree、judge-test-changes と final-fix は work worktree を
-    使い、各フェーズ固有の stem を生成する。"""
-    args, state_path = _launch(tmp_path, phase)
-    workdir_name, stem = WORKDIR_AND_STEM[phase]
-    added = [args[i + 1] for i, a in enumerate(args) if a == "--add-dir"]
-    assert added == [str(tmp_path / workdir_name), str(state_path.parent)]
-    assert (state_path.parent / f"{stem}-prompt.md").is_file()
+def _state(tmp_path: pathlib.Path, **overrides) -> pathlib.Path:
+    work = tmp_path / "work"
+    for name in ("work", RUNTIME):
+        (tmp_path / name).mkdir(parents=True, exist_ok=True)
+    return make_state_v2(tmp_path, work, runtimes=["codex", RUNTIME, "kiro"], **overrides)
 
 
-def _run_codex(tmp_path, rounds, *args):
-    state_path = make_state(tmp_path, rounds=rounds)
-    (tmp_path / "work").mkdir(exist_ok=True)
-    (tmp_path / "codex").mkdir(exist_ok=True)
+def _run(state_path: pathlib.Path, tmp_path: pathlib.Path, *args: str) -> tuple[
+        subprocess.CompletedProcess[str], pathlib.Path]:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
+    for name in (RUNTIME, "codex"):
+        stub = bin_dir / name
+        stub.write_text(STUB, encoding="utf-8")
+        stub.chmod(0o755)
     args_file = tmp_path / "args.txt"
-    stub = bin_dir / "codex"
-    stub.write_text(STUB, encoding="utf-8")
-    stub.chmod(0o755)
     result = subprocess.run(
         [str(LAUNCH), *args],
         env={
@@ -145,35 +73,95 @@ def _run_codex(tmp_path, rounds, *args):
             "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
             "NDF_TEST_ARGS_FILE": str(args_file),
         },
-        capture_output=True,
-        text=True,
+        capture_output=True, text=True,
     )
-    return result, state_path, args_file
+    return result, args_file
 
 
-def test_apply_without_a_round_stops_when_no_round_exists(tmp_path):
-    result, state_path, args_file = _run_codex(tmp_path, [], "codex", "apply", "130")
-    assert result.returncode != 0
-    assert not args_file.exists()
-    assert not (state_path.parent / "codex-apply-r0-prompt.md").exists()
-
-
-def test_apply_without_a_round_uses_the_latest_round(tmp_path):
-    result, state_path, args_file = _run_codex(
-        tmp_path, [{"round": 1}, {"round": 2}], "codex", "apply", "130"
-    )
-    assert result.returncode == 0
+def _launch(tmp_path: pathlib.Path, phase: str, **overrides) -> tuple[list[str], pathlib.Path]:
+    state_path = _state(tmp_path, **overrides)
+    result, args_file = _run(state_path, tmp_path, RUNTIME, phase, "130")
+    assert result.returncode == 0, result.stderr
     for _ in range(200):
         if args_file.is_file():
             break
         time.sleep(0.05)
-    assert args_file.exists()
-    assert (state_path.parent / "codex-apply-r2-prompt.md").is_file()
+    assert args_file.is_file(), f"{phase} で agy が起動されていない"
+    return args_file.read_text(encoding="utf-8").split("\0")[:-1], state_path
 
 
-def test_unknown_runtime_stops_before_writing_a_prompt(tmp_path):
-    result, state_path, _ = _run_codex(
-        tmp_path, [{"round": 1}], "unknown", "propose", "130", "1"
-    )
+@pytest.mark.parametrize("phase", sorted(CLI_TIMEOUT))
+def test_every_phase_launches_agy(tmp_path, phase: str) -> None:
+    args, _ = _launch(tmp_path, phase)
+    assert args[-1].startswith("-p="), "プロンプトが `-p=` の値で渡っていない"
+
+
+@pytest.mark.parametrize("phase", sorted(WORKDIR_AND_STEM))
+def test_the_workspace_covers_the_workdir_and_the_result_directory(tmp_path, phase: str) -> None:
+    """結果ファイルは全ランタイム共通の一時ディレクトリに置く。作業領域へ足す。"""
+    args, state_path = _launch(tmp_path, phase)
+    workdir_name, stem = WORKDIR_AND_STEM[phase]
+    added = [args[i + 1] for i, a in enumerate(args) if a == "--add-dir"]
+    assert added == [str(tmp_path / workdir_name), str(state_path.parent)]
+    assert (state_path.parent / f"{stem}-prompt.md").is_file()
+
+
+@pytest.mark.parametrize("phase", sorted(CLI_TIMEOUT))
+def test_the_print_timeout_is_the_monitor_timeout_plus_120(tmp_path, phase: str) -> None:
+    """`start-phase` を通らない起動は上限の表から導く（#598 / #537 の AC36）。"""
+    args, _ = _launch(tmp_path, phase)
+    assert args[args.index("--print-timeout") + 1] == f"{CLI_TIMEOUT[phase]}s"
+
+
+@pytest.mark.parametrize("phase", sorted(CLI_TIMEOUT))
+def test_the_budget_derived_timeout_wins_over_the_table(tmp_path, phase: str) -> None:
+    """I2 I16: `start-phase` が残した `phases.<フェーズ>.cli_timeout` の秒をそのまま渡す。"""
+    args, _ = _launch(tmp_path, phase, phases={phase: {"timeout": 5000, "cli_timeout": 5090}})
+    assert args[args.index("--print-timeout") + 1] == "5090s"
+
+
+def test_a_timeout_of_another_phase_is_not_used(tmp_path) -> None:
+    args, _ = _launch(tmp_path, "fix", phases={"implement": {"timeout": 5000, "cli_timeout": 5090}})
+    assert args[args.index("--print-timeout") + 1] == f"{CLI_TIMEOUT['fix']}s"
+
+
+def test_start_phase_records_the_timeout_that_the_launcher_reads(
+        tmp_path, cmd_setup, env_tmp_dir) -> None:
+    """I1 と I2 の受け渡し: `start-phase` が書いた上限を起動側がそのまま使う。"""
+    import argparse
+
+    state_path = _state(tmp_path, implementer=RUNTIME,
+                        limits={"margin_seconds": 90, "implement_end_at": "2099-01-01T00:00:00+00:00"})
+    env_tmp_dir(state_path)
+    git("init", "-q", cwd=tmp_path / "work")
+    git("-c", "user.email=t@e.st", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init",
+        cwd=tmp_path / "work")
+    cmd_setup.cmd_start_phase(argparse.Namespace(id=130, phase="implement"))
+    record = read_state(state_path)["phases"]["implement"]
+    assert record["cli_timeout"] == record["timeout"] + 90
+
+    result, args_file = _run(state_path, tmp_path, RUNTIME, "implement", "130")
+    assert result.returncode == 0, result.stderr
+    for _ in range(200):
+        if args_file.is_file():
+            break
+        time.sleep(0.05)
+    args = args_file.read_text(encoding="utf-8").split("\0")[:-1]
+    assert args[args.index("--print-timeout") + 1] == f"{record['cli_timeout']}s"
+
+
+def test_unknown_phase_stops_before_writing_a_prompt(tmp_path) -> None:
+    """ラウンド制のフェーズ（`apply` / `propose-tests`）は無くなった。起動しない。"""
+    state_path = _state(tmp_path)
+    for phase in ("apply", "propose-tests"):
+        result, args_file = _run(state_path, tmp_path, RUNTIME, phase, "130")
+        assert result.returncode != 0
+        assert not args_file.exists()
+        assert not list(state_path.parent.glob(f"*{phase}*-prompt.md"))
+
+
+def test_unknown_runtime_stops_before_writing_a_prompt(tmp_path) -> None:
+    state_path = _state(tmp_path)
+    result, _ = _run(state_path, tmp_path, "unknown", "propose", "130")
     assert result.returncode != 0
-    assert not (state_path.parent / "unknown-propose-rf130-r1-prompt.md").exists()
+    assert not (state_path.parent / "unknown-propose-rf130-prompt.md").exists()

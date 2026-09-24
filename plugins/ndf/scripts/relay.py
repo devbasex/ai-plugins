@@ -651,7 +651,7 @@ class Relay:
         self.halted = False
         self.exited = None
         self.saw_question = False
-        self.quiet = _num("NDF_RELAY_QUIET", 15)
+        self.quiet = _num("NDF_RELAY_QUIET", 5)
         self.lock_fd = os.open(self.path(LOCK_FILE), os.O_RDWR | os.O_CREAT, 0o600)
         fcntl.flock(self.lock_fd, fcntl.LOCK_EX)
         with open(self.path(PID_FILE), "w") as f:

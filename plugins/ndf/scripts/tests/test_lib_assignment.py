@@ -72,33 +72,31 @@ def test_the_default_pools_reject_a_host_outside_host_runtimes(assignment, pool,
     assert "ホストになれないランタイムです" in str(excinfo.value)
 
 
-# ---------- 適用の輪番（#727。cross-refactoring が使う） ----------
+# ---------- 実装担当の選び方（#933 の決定 1。cross-refactoring が使う） ----------
 
-def test_impl_assign_rotates_over_the_participants_starting_after_the_host(assignment):
-    """AC34: `participants[round_no % len]`。ホスト claude の既定でも codex から始まる。"""
-    participants = ["claude", "codex", "kiro"]
-    actual = [assignment.impl_assign(r, participants) for r in range(1, 7)]
-    assert actual == ["codex", "kiro", "claude", "codex", "kiro", "claude"]
+def test_choose_implementer_prefers_the_named_participant(assignment):
+    assert assignment.choose_implementer(["claude", "codex", "kiro"], "claude", "kiro") \
+        == ("kiro", "named")
 
 
-def test_impl_assign_with_one_participant_always_returns_that_participant(assignment):
-    participants = ["codex"]
-    assert [assignment.impl_assign(r, participants) for r in (1, 2)] == ["codex", "codex"]
+def test_choose_implementer_uses_the_host_when_it_participates(assignment):
+    assert assignment.choose_implementer(["codex", "claude", "kiro"], "claude") \
+        == ("claude", "host")
 
 
-def test_impl_assign_with_two_participants_rotates_between_them(assignment):
-    participants = ["codex", "kiro"]
-    assert [assignment.impl_assign(r, participants) for r in (1, 2)] == ["kiro", "codex"]
+def test_choose_implementer_falls_back_to_the_first_participant(assignment):
+    """ホストを --exclude で外した実行では、参加者の先頭が担う。"""
+    assert assignment.choose_implementer(["codex", "kiro"], "claude") == ("codex", "first")
 
 
-def test_impl_assign_rejects_a_bad_round(assignment):
+def test_choose_implementer_rejects_a_name_outside_the_participants(assignment):
     with pytest.raises(assignment.AssignmentError):
-        assignment.impl_assign(0, ["claude", "codex"])
+        assignment.choose_implementer(["codex", "kiro"], "claude", "agy")
 
 
-def test_impl_assign_rejects_an_empty_list(assignment):
+def test_choose_implementer_rejects_an_empty_list(assignment):
     with pytest.raises(assignment.AssignmentError):
-        assignment.impl_assign(1, [])
+        assignment.choose_implementer([], "claude")
 
 
 # ---------- 席名からランタイム名への変換（#727） ----------
