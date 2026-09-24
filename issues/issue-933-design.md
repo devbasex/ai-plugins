@@ -63,7 +63,7 @@
 | `refactor_lib/danger.py` | 新しく作る | 危険の印の判定（git の事実から） |
 | `refactor_lib/rounds.py` | 外す | ラウンドと輪番の扱い。ラウンドに依らない関数（`item_key` / `item_label` / `item_kind` / `entry_kind` / `deferred_record` と定数 `TEST` / `STRUCTURE`）は `refactor_lib/items.py` へ移す |
 | `refactor_lib/items.py` | 新しく作る | 項目の鍵・表示・種類・見送りの記録（`rounds.py` から移した関数） |
-| `refactor_lib/proposals.py` / `plan.py` / `measure.py` / `outbound.py` | 変える | import の元を `rounds.py` から `items.py` へ替える。`measure.py` はフェーズ別の所要を読む形へ変える |
+| `refactor_lib/proposals.py` / `plan.py` / `measure.py` / `outbound.py` と `commands/report.py` | 変える | import の元を `rounds.py` から `items.py` へ替える。`measure.py` はフェーズ別の所要を読む形へ変える |
 | `data/allocation-defaults.json` | 新しく作る | 配分テーブルの初期値と、その出所（#917） |
 | `prompts/propose.md` | 変える | 観点を並べた多面的な提案 |
 | `prompts/plan.md` | 新しく作る | 順位付け・足すテスト・限ったテストの対象（`test_targets`） |
@@ -150,7 +150,7 @@ plugins/ndf/scripts/lib/{jev,limits,assignment}.py
 | `schema` | int | 2。無い状態ファイルは旧い形（ラウンド制） |
 | `budget_minutes` | int | 想定最大時間 |
 | `started_at` | 時刻 | `init` の開始（今は記録が無い） |
-| `phase` | 文字列 | `propose` / `plan` / `tests` / `implement` / `verify` / `final` / `done` |
+| `phase` | 文字列 | `propose` / `plan` / `add-tests` / `implement` / `verify` / `final` / `done`。**フェーズの名前は状態・履歴・`launch-cli.sh`・`limits.py`・雛形で同じ語を使う** |
 | `phases.<名前>` | `{started_at, ended_at, seconds}` | フェーズの所要。**進行側の時計で測る**（担当の申告を使わない） |
 | `participants` / `runtimes` / `models` | 今と同じ | 提案の参加者 |
 | `implementer` | 文字列 | 実装担当。`implementer_reason` に決め方（`named` / `host` / `first`） |
@@ -202,7 +202,7 @@ plugins/ndf/scripts/lib/{jev,limits,assignment}.py
 ```json
 {"schema": 1, "run": "rf917-20260923T142912Z", "at": "2026-09-23T15:40:16+09:00",
  "pr": 917, "implementer": "claude", "budget_minutes": 60, "elapsed_seconds": 3200,
- "phases": {"propose": 272, "plan": 180, "tests": 800, "implement": 900, "verify": 120},
+ "phases": {"propose": 272, "plan": 180, "add-tests": 800, "implement": 900, "verify": 120},
  "kinds": {"test": {"count": 5, "seconds": 800},
            "structure/extract_method": {"count": 6, "seconds": 480}},
  "verify": {"items": 11, "seconds": 110}, "fix": {"launches": 1, "seconds": 300},
@@ -401,7 +401,7 @@ stateDiagram-v2
 ### 検証と修正の繰り返し（`verify`）
 
 1. `implemented` の項目ごとに、HEAD で限ったテストを走らせる
-2. 落ちた項目のうち、`fix_count` が上限に達したもの、または残り時間が `fix` に足りないものを取り消す（項目の単位。隣接する変更は今と同じく全件の取り消しへ退避）
+2. 落ちた項目のうち、`fix_count` が上限に達したもの、または修正の残り時間が `fix` に足りないものを取り消す。修正の残り時間は `started_at + budget_minutes − danger_whole_test − final_whole_test − 今` で測る（控えの `fix` を差し引かない終わりから測る。`T` から測ると、控えた修正 1 回分が使われない）（項目の単位。隣接する変更は今と同じく全件の取り消しへ退避）
 3. 残りの落ちた項目があれば `VERIFY=fix` を返す（駆動が修正を 1 回起動する）
 4. 落ちた項目が無くなったら危険の印を判定する。印が 1 つでもあり、`whole_test.ran` が偽なら全体のテストを 1 度走らせる
 5. 全体のテストが落ちたら、印を持つ項目を新しい順に取り消し、`whole_test.reverted` を真にする。**検証の中では走らせ直さない。** 取り消した後の HEAD は最終ゲートが全体のテストで確かめる（下の「最終ゲートとの関係」）
@@ -437,7 +437,7 @@ stateDiagram-v2
 
 | 起動のされ方 | `finalize` を呼ぶ時点 | 追記する条件 |
 | --- | --- | --- |
-| 単独 | `/ndf:cross-review` が終わった後。駆動は `state.py report` の最終ステータスを `--review-status` で渡す | `final-gate` が通り、`--review-status` が `approved` |
+| 単独 | `/ndf:cross-review` が終わった後。駆動は cross-review の状態ファイル（`<cross-review の作業ツリー>/.cross_review/cross-review-pr<番号>-state.json`）の `final` を `jq -r .final` で読み、`--review-status` で渡す（`state.py report` の Markdown は読まない） | `final-gate` が通り、`--review-status` が `approved` |
 | 工程の 1 つ | `final-gate` の直後 | `final-gate` が通った（全体のテストか継続的統合） |
 
 **単独起動で `final-gate` の直後に追記しない。** その時点では `cross-review` の合否が決まっておらず、レビューが収束しなかった実行が履歴に混ざる。`--review-status` を渡さずに単独起動の状態で `finalize` を呼ぶと、追記せずに 0 で終わり、知らせる。
