@@ -100,7 +100,7 @@ conductor からの補足（利用者の方針、2026-09-24）:
 | --- | --- | --- |
 | `plugins/ndf/scripts/relay.py` | 副命令 `notice` を足す | 判定（`is-child` と同じ条件）・秒数の計算・告知の文面。**文面の唯一の定義** |
 | `plugins/ndf/skills/development-workflow/references/context-window.md` | 「新しい会話で戻す」に 2 項目 | 告知は `notice` の 2 行目で書く。切れ目では承認を挟まない |
-| `plugins/ndf/skills/development-workflow/SKILL.md` | 「人手の承認を求める関門」に 1 文 | 区間の切れ目の再起動は関門ではない |
+| `plugins/ndf/skills/development-workflow/SKILL.md` | 「人手の承認を求める関門」に 1 文。区間の切れ目の段落に `notice` の呼び方 | 区間の切れ目の再起動は関門ではない。`'${CLAUDE_PLUGIN_ROOT}/scripts/relay.py'` を置き、Claude Code が置き換えた絶対パスで `notice` を呼ばせる |
 | `plugins/ndf/scripts/token-guard.sh` | 中継の下の拒否文 | `notice` の 2 行目を埋め込み、確認を挟まないと書く |
 | `plugins/ndf/skills/restart/SKILL.md` | 冒頭の例・手順 1・手順 3 の表 | 判定を `notice` に替え、2 行目を示す |
 | `plugins/ndf/scripts/tests/test_relay.py` | テストを足す | `notice` の出力と終了コード |
@@ -171,6 +171,7 @@ plugins/ndf/
 | --- | --- |
 | `relay` | `約 {N} 秒後に自動で新しい会話へ切り替わる。キー入力やスクロールをせずに、そのまま待つ（切り替わらずに ndf-relay: で始まる 1 行が出たら、その案内に従う）` |
 | `outside` | `/exit してから claude を起動し、下の中身を最初の入力として貼り付ける（/ndf:install-wrapper で中継を入れると自動になる）` |
+| `relay`（`NDF_RELAY_QUIET=inf`） | `NDF_RELAY_QUIET が有限でないため、中継は自動で切り替えない。/exit してから claude を起動し、下の中身を最初の入力として貼り付ける` |
 
 `N = ceil(q) + 10`。`q` は `quiet` が有限で正ならその値、負か `nan` なら 0 とする（`inf` は下の表で別に扱う）。
 `max(quiet, 0)` は `nan` を返しうるため使わず、`ceil` の前に `nan` を 0 へ落とす。`quiet` は中継本体と同じ `_num("NDF_RELAY_QUIET", 5)` で読む。数でなければ 5 になる。
@@ -182,7 +183,7 @@ plugins/ndf/
 | `NDF_RELAY_QUIET` | 中継本体の待ち | `notice` の出力 |
 | --- | --- | --- |
 | `nan` | 待たずに切り替える（`経過 < nan` が偽） | `relay`。静まりを 0 として数える（N = 10） |
-| `inf` | 切り替えない | 1 行目は `relay` のまま、2 行目に貼り付けの手順を示す |
+| `inf` | 切り替えない | 1 行目は `relay` のまま、2 行目は上の表の `inf` の行 |
 
 **1 行目は中継の直接の子かだけを表し、`is-child` の判定と常に一致させる。** 自動で切り替わるかは 2 行目が
 表す。1 行目を切り替えの可否で変えると、`token-guard.sh` が中継の子を外と読み、上限を超えた起動を 1 度
@@ -295,14 +296,16 @@ LLM が組み立てた中身をスクリプトが写すだけになり、減る�
 **規則と文面:**
 
 - [ ] AC4: `context-window.md` の「新しい会話で戻す」が、Claude Code では告知を `relay.py notice` の 2 行目で
-  書くと定める。conductor は `python3 "$SCRIPTS/relay.py" notice` で呼ぶ（`$SCRIPTS` は `scripts-lookup.md`）。
-  解決できないか失敗したときは中継の外として扱う。Codex / Kiro / agy は今の「中身を新しい会話へ貼り付ける」のまま。
+  書くと定める。呼び方は `development-workflow` の `SKILL.md` の本文に置く（`restart` の手順 1 と同じ
+  `PLUGIN_ROOT='${CLAUDE_PLUGIN_ROOT}'` の置き換えで解く）。references の文書では `${CLAUDE_PLUGIN_ROOT}` が
+  置き換わらないため、`$SCRIPTS`（`scripts-lookup.md`）には頼らない。解決できないか失敗したときは中継の外として扱う。Codex / Kiro / agy は今の「中身を新しい会話へ貼り付ける」のまま。
   中継の下では、手で入力させる文（「次の 1 行を使って」「貼り付け」）を書かないと定める
 - [ ] AC5: 区間の切れ目の再起動は関門ではないと定める。ブロックの前に承認・確認（`AskUserQuestion` を含む）を
   挟まない。書く先は `context-window.md` の同じ節と、`development-workflow` の `SKILL.md` の関門の節
 - [ ] AC5b: 同じ 2 箇所が、`/goal` の文面の「承認を求める」は関門 2 つだけを指すと定める
 - [ ] AC6: `token-guard.sh` が中継の下で起動を止めたとき、拒否文が `notice` の 2 行目をそのまま含む。
-  「確認を挟まずに出して終える」も含む。中継の外の拒否文は変えない。`NDF_RELAY_QUIET=inf` でも中継の子なら
+  「確認を挟まずに出して終える」も含む。今の固定文「中継がそのブロックで次の区間を起動する」は外し、切り替えの
+  説明は 2 行目に任せる（`inf` のとき固定文と 2 行目が食い違うため）。中継の外の拒否文は変えない。`NDF_RELAY_QUIET=inf` でも中継の子なら
   止め続ける（1 度の通しをしない）
 - [ ] AC7: `restart` の Skill の手順 1 が `relay.py notice` を 1 回実行し、判定と文面を得る。
   `${CLAUDE_PLUGIN_ROOT}` が置き換わらず `relay.py` を呼べないときは、中継の外として扱い、Skill に残した
@@ -320,7 +323,7 @@ LLM が組み立てた中身をスクリプトが写すだけになり、減る�
 
 | 大項目 | 条件 |
 | --- | --- |
-| 運用・保守性 | 秒数と文面の定義は `relay.py` の 1 箇所だけに置く。Skill と hook はそれを呼ぶか写す |
+| 運用・保守性 | 秒数と文面の定義は `relay.py` の 1 箇所だけに置く。Skill と hook はそれを呼ぶか写す。例外は `restart` が `relay.py` を呼べないときの外の文面 1 つ（AC7） |
 | 性能・拡張性 | hook の拒否文を作るときの追加の起動は `python3` 1 回まで（上限を超えて止めるときだけ） |
 
 ### 検証手段
@@ -335,7 +338,7 @@ LLM が組み立てた中身をスクリプトが写すだけになり、減る�
 
 | 区分 | 内容 |
 | --- | --- |
-| 常に行う | 既存テストの実行。文面の定義を `relay.py` に 1 つだけ置く |
+| 常に行う | 既存テストの実行。文面の定義を `relay.py` に 1 つだけ置く（AC7 の外の文面を除く） |
 | 行わない | 中継の静まりの数え方・端末への出力を変える。`.md` の文言を照合するテストを書く（AGENTS.md） |
 
 ### テスト設計
