@@ -141,3 +141,12 @@ def test_unknown_extra_check_exits_2(tmp_path):
     env = {"SERENA_LSP_TABLE": _custom_table(tmp_path, ["no_such_check"])}
     code, _, _ = _check(root, _home(tmp_path, []), _bin(tmp_path), env=env)
     assert code == 2
+
+
+def test_installed_plugins_top_level_array_is_unreadable(tmp_path, monkeypatch):
+    from serena_lsp import check
+    (tmp_path / "plugins").mkdir()
+    (tmp_path / "plugins/installed_plugins.json").write_text("[]")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path))
+    with pytest.raises(check.Unreadable):
+        check.installed_plugins()

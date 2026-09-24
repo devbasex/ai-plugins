@@ -81,3 +81,14 @@ def test_new_language_in_table_is_detected_without_code_change(tmp_path):
                             env={"SERENA_LSP_TABLE": str(custom)})
     assert code == 0
     assert [d["language"] for d in out["detected"]] == ["zig"]
+
+
+@pytest.mark.parametrize("path,expected", [
+    ("Makefile", ""),
+    (".gitignore", ""),
+    ("foo.", "."),
+    ("a\\b\\c.PY", ".py"),
+    ("a.b.ts", ".ts"),
+])
+def test_suffix_boundaries(path, expected):
+    assert table.suffix(path) == expected
