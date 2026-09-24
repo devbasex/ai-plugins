@@ -342,7 +342,7 @@ Pull Request のマージ、制作物承認は本番の提出先への操作に�
 
 ## 自走で工程を通す
 
-**`/goal` の有無によらず、工程を続けて通す**。ただし**上の 2 つの関門の前では 1 度止まり、`AskUserQuestion` で人間の
+**工程を続けて通す。** ただし**上の 2 つの関門の前では 1 度止まり、`AskUserQuestion` で人間の
 承認を待つ**。承認を得るまでマージせず、次の工程へも進まない。
 
 - 設計 Pull Request のマージ（`standard`）— 承認を得るまで実装の工程へ
@@ -370,8 +370,7 @@ PLUGIN_ROOT='${CLAUDE_PLUGIN_ROOT}'; case "$PLUGIN_ROOT" in '$'*) PLUGIN_ROOT= ;
 [ -n "$PLUGIN_ROOT" ] && python3 "$PLUGIN_ROOT/scripts/relay.py" notice || echo outside
 ```
 
-**対話で `/ndf:development-workflow` を呼んだときも 3 層へ出す。** 人がその場にいて指示を変えたい
-ときは、conductor へ伝えれば次の持ち場から反映する。
+**人がその場にいて指示を変えたいときは、conductor へ伝える。** 次の持ち場から反映する。
 
 ## 標準フロー
 

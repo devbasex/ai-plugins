@@ -11,7 +11,7 @@
 | 何を読むか | 正本 |
 | --- | --- |
 | 3 層の責務、持ち場の表、モードごとの組み方、起動の指示、報告の形、続けさせる回数、モデルの基準、委譲の線、並行の本数、到達点の置き直し、中断と再開 | `plugins/ndf/skills/development-workflow/references/agent-layers.md` |
-| 自走の入口（`/goal` の有無によらず 3 層へ出す） | `plugins/ndf/skills/development-workflow/SKILL.md` の「自走で工程を通す」 |
+| 自走の入口 | `plugins/ndf/skills/development-workflow/SKILL.md` の「自走で工程を通す」 |
 | モデルに依る目安とリポジトリに依る固定費の区別、粒度の比の基準、委譲してよい作業の表 | `plugins/ndf/skills/development-workflow/references/context-window.md` |
 | `cross-review` の「メイン」の定義 | `plugins/ndf/skills/cross-review/references/context-budget.md` |
 | 中断した記録の一覧と解除の待ち（`interrupted` / `wait-reset`） | [ndf-context-window-metrics.md](ndf-context-window-metrics.md) と `plugins/ndf/scripts/lib/transcript_agents.py` |
@@ -160,7 +160,7 @@ supervisor 1 つ（1 つの作業ツリー）に当たる。同時に動かす w
 - worker は葉である（深さ 3 を作らない）
 - worker の報告は conductor へ転送されない
 - 規約の文書は固定費の実測値を持たない（比だけを持つ）
-- 3 層へ出すかは `/goal` の有無で決めない。対話で呼んでも 3 層へ出す
+- `/ndf:development-workflow` を呼べば 3 層へ出す
 - 報告の見出しが無い相手を続けさせるのは、同じ相手で 3 回までである
 - 上の層が再開するのは自分の直下だけである
 
