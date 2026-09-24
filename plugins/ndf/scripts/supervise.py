@@ -8,9 +8,9 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
 | 段 | 何をするか | LLM |
 | --- | --- | --- |
 | run   | コマンドを実行して終わるまで待ち、出力をファイルへ残す | 使わない |
-| work  | 1 つの作業（修正・調査）を worker として行わせる | 道具あり（Read/Edit/Write/Bash/Grep/Glob） |
-| judge | 結果ファイルと規則の抜粋だけを渡し、次の段を決めさせる | 道具なし |
-| pr    | push して Draft の Pull Request を作る（スクリプト）。本文は材料（計画の値・コミット・変更の統計・run の結果・設計文書）から LLM が書く。`"body": "template"` なら材料をそのまま本文にする | 本文だけ道具なし |
+| work  | 1 つの作業（修正・調査）を worker として行わせる | Tool あり（Read/Edit/Write/Bash/Grep/Glob） |
+| judge | 結果ファイルと規則の抜粋だけを渡し、次の段を決めさせる | Tool なし |
+| pr    | push して Draft の Pull Request を作る（スクリプト）。本文は材料（計画の値・コミット・変更の統計・run の結果・設計文書）から LLM が書く。`"body": "template"` なら材料をそのまま本文にする | 本文だけTool なし |
 
 使い方:
     supervise.py run <plan.json> [--state-dir DIR]
@@ -67,13 +67,13 @@ WORK_SYSTEM = """あなたは NDF の worker である。1 つの作業だけを
 - 見つけたもの: <件数と場所。無ければ 無し>
 - 次にすること: <1 行。無ければ 無し>"""
 
-PR_SYSTEM = """あなたは Pull Request の本文だけを書く。道具は無い。
+PR_SYSTEM = """あなたは Pull Request の本文だけを書く。Tool は無い。
 渡された材料（コミット・変更の統計・テストの結果・設計文書）だけを根拠に、日本語の Markdown で書く。
 - 先頭に何を変えたかを 1〜3 文。続けて「## 変更の要点」「## テスト」の節
 - 課題を閉じる語（Fix #番号・Closes・Resolves など）を書かない。課題は「#番号」とだけ書く
 - 材料に無いことを書かない。本文だけを返し、前置きや囲みを付けない"""
 
-JUDGE_SYSTEM = """あなたは NDF の持ち場の判断だけを行う。道具は無い。
+JUDGE_SYSTEM = """あなたは NDF の持ち場の判断だけを行う。Tool は無い。
 渡された結果と規則だけを根拠に、次の段を 1 つ選ぶ。
 答えは JSON 1 つだけを返す: {"decision": "<選んだ値>", "reason": "<1 行>"}"""
 
