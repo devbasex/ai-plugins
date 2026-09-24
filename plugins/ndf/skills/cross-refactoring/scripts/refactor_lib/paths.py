@@ -15,11 +15,6 @@ import statefile
 from . import die
 
 
-def work_dir(state: dict[str, Any]) -> str:
-    """状態から実装用 worktree の場所を返す。"""
-    return str(state["worktrees"]["work"])
-
-
 def default_worktree_base() -> pathlib.Path:
     """作業ディレクトリの親。解決順は cross-review と揃える。
 

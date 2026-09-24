@@ -36,7 +36,7 @@ from .gitfacts import (
     commits_in_range,
 )
 from .items import LIVE, REVERTED, find_item, item_shas
-from .paths import git_out, work_dir
+from .paths import git_out
 
 
 def _full(work: str, sha: str) -> str:
@@ -171,7 +171,7 @@ def drop(
     入れるかは呼び出し側が決める**（`test_failed` / `not_done` は見送り、検証の失敗は
     項目の状態だけ）。
     """
-    work = work_dir(state)
+    work = str(state["worktrees"]["work"])
     base = (state.get("plan") or {}).get("base_sha")
     targets = [i for i in item_ids
                if (find_item(state, i, required=False) or {}).get("status") in LIVE]

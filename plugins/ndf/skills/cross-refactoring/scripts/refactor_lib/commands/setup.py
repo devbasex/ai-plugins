@@ -32,7 +32,6 @@ from ..paths import (
     sh,
     state_path,
     tmp_dir_for,
-    work_dir,
 )
 from ..plan import PLAN_COMMENT, PLAN_FILE, PLAN_NONE, normalize_plan_file
 from ..scope import require_scope_covers_tests, round_test_hint
@@ -941,7 +940,7 @@ def cmd_start_phase(args: argparse.Namespace) -> None:
     if phase in ("fix", "final-fix") or not record.get("started_at"):
         record.setdefault("started_at", now)
         record["launch_started_at"] = now
-        record["base_sha"] = git_out(work_dir(state), ["rev-parse", "HEAD"])
+        record["base_sha"] = git_out(str(state["worktrees"]["work"]), ["rev-parse", "HEAD"])
     limits_table = timeline.limits_of(state)
     end = clock.parse(limits_table.get(timeline.PHASE_END_KEYS[phase]))
     timeout = ""
