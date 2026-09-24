@@ -90,7 +90,10 @@ WORK_SYSTEM = """あなたは NDF の worker である。1 つの作業だけを
 - 見つけたもの: <件数と場所。無ければ 無し>
 - 次にすること: <1 行。無ければ 無し>"""
 
-FULL_SYSTEM = """あなたは NDF のフェーズの 1 段を CLI として回している。人は見ていない。
+FULL_SYSTEM = """あなたは NDF のフェーズの 1 段を CLI（claude -p）として回している。人は見ていない。
+- 応答を終えるとこのプロセスは終わり、背景の処理と完了通知は捨てられる。待ちは前景のコマンドで行い
+  （run_in_background・Monitor を使わない。gh pr checks --watch や待ちのスクリプトを前景で実行する）、
+  作業が終わるまで応答を終えない
 - 人間へ問わない（AskUserQuestion を使わない）。Skill の確認は提示して進める
 - 関門に当たる操作（設計 PR のマージ・main への配布・タグ）をしない
 - 課題を閉じる語（Fix #番号・Closes など）をコミットと PR 本文に書かない
@@ -101,6 +104,11 @@ FULL_SYSTEM = """あなたは NDF のフェーズの 1 段を CLI として回�
 - 結果: 完了 / 判断が要る / できなかった
 - 見つけたもの: <件数と場所。無ければ 無し>
 - 次にすること: <1 行。無ければ 無し>"""
+
+REPORT_DONE = re.compile(r"## 作業の報告[\s\S]*?結果:\s*完了")
+RESUME_PROMPT = ("続けて。作業の報告で終えるまで応答を終えない。応答を終えるとこのプロセスは終わり、背景の処理と"
+                 "完了通知は捨てられるので、待ちは前景のコマンドで行う。既に書いたもの（コミット・PR・コメント）を"
+                 "確かめてから続ける。")
 
 PR_SYSTEM = """あなたは Pull Request の本文だけを書く。Tool は無い。
 渡された材料（コミット・変更の統計・テストの結果・設計文書）だけを根拠に、日本語の Markdown で書く。
@@ -114,14 +122,15 @@ JUDGE_SYSTEM = """あなたは NDF の持ち場の判断だけを行う。Tool �
 
 
 def claude_cmd(system: str, tools: str | None, cwd: str, full: bool = False,
-               serena: bool = False) -> list[str]:
+               serena: bool = False, resume: str | None = None) -> list[str]:
     base = shlex.split(os.environ.get("NDF_SUPERVISE_CLAUDE", "claude"))
     if full:
         # Skill を回す段（cross-review など）。設定・プラグイン・Skill・hook をそのまま読む
-        # 新しい文脈の claude -p。本体の会話なのでキャッシュはサブスクリプションなら 1 時間
-        return base + ["-p", "--output-format", "json", "--no-session-persistence",
+        # 新しい文脈の claude -p。本体の会話なのでキャッシュはサブスクリプションなら 1 時間。
+        # 報告が無いまま終わったときに --resume で起こし直すため、会話は残す
+        return base + ["-p", "--output-format", "json",
                        "--permission-mode", "acceptEdits", "--allowed-tools", FULL_TOOLS,
-                       "--append-system-prompt", system]
+                       "--append-system-prompt", system] + (["--resume", resume] if resume else [])
     cmd = base + [
         "-p", "--output-format", "json", "--no-session-persistence",
         "--setting-sources", "", "--strict-mcp-config", "--disable-slash-commands",
@@ -143,11 +152,11 @@ def claude_cmd(system: str, tools: str | None, cwd: str, full: bool = False,
 
 
 def call_claude(system: str, prompt: str, tools: str | None, cwd: str, timeout: int,
-                full: bool = False, serena: bool = False) -> dict:
+                full: bool = False, serena: bool = False, resume: str | None = None) -> dict:
     """claude -p を 1 回呼び、結果の本文と使用量を返す（既定は最小構成）。"""
     started = time.time()
     try:
-        p = subprocess.run(claude_cmd(system, tools, cwd, full, serena), input=prompt, capture_output=True,
+        p = subprocess.run(claude_cmd(system, tools, cwd, full, serena, resume), input=prompt, capture_output=True,
                            text=True, cwd=cwd, timeout=timeout)
     except subprocess.TimeoutExpired:
         return {"ok": False, "text": f"打ち切り（{timeout} 秒）", "usage": {}, "seconds": timeout}
@@ -161,6 +170,7 @@ def call_claude(system: str, prompt: str, tools: str | None, cwd: str, timeout: 
         "usage": data.get("usage") or {},
         "cost": data.get("total_cost_usd"),
         "turns": data.get("num_turns"),
+        "session": data.get("session_id"),
         "seconds": round(time.time() - started, 1),
     }
 
@@ -297,10 +307,21 @@ class Supervisor:
         if step.get("full"):
             # Skill の本文が手順を持つ。プロンプトは Skill の呼び出しをそのまま渡す
             prompt = step["prompt"]
-        res = call_claude(FULL_SYSTEM if step.get("full") else WORK_SYSTEM, prompt, WORK_TOOLS,
-                          step.get("cwd", self.cwd), step.get("timeout", 1800),
-                          full=bool(step.get("full")), serena=bool(step.get("serena")))
+        full = bool(step.get("full"))
+        cwd = step.get("cwd", self.cwd)
+        res = call_claude(FULL_SYSTEM if full else WORK_SYSTEM, prompt, WORK_TOOLS, cwd,
+                          step.get("timeout", 1800), full=full, serena=bool(step.get("serena")))
         self.add_usage("work", res)
+        # 報告が無いまま応答を終えた Skill の段は、同じ会話を起こし直す（supervisor へ SendMessage で
+        # 続けさせていたのと同じ。3 回まで）
+        for _ in range(3):
+            if not full or REPORT_DONE.search(res["text"] or "") or not res.get("session"):
+                break
+            res = call_claude(FULL_SYSTEM, RESUME_PROMPT, WORK_TOOLS, cwd, step.get("timeout", 1800),
+                              full=True, resume=res["session"])
+            self.add_usage("work", res)
+        if full and not REPORT_DONE.search(res["text"] or ""):
+            res["ok"] = False
         self.cur.update(exit=0 if res["ok"] else 1, text=res["text"], seconds=res["seconds"])
         return res["ok"], res["text"]
 
