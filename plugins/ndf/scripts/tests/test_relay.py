@@ -1154,6 +1154,48 @@ def test_install_devbase_rewrites_old_block(tmp_path, home):
     assert (dl / "ndf-relay.sh").exists()
 
 
+def test_install_devbase_loader_with_non_bash_zsh_shell(tmp_path, home):
+    """現状固定: loader あり・SHELL が bash でも zsh でもない（shell_rc が None）とき、
+    既存の定義を探す先は rc_files + .bash_aliases へ切り替わるが、読み込み先は loader に置く。
+    devbase の導入テストは SHELL=/bin/bash、fish のテストは loader 無し（読み込み先なし）のため、
+    この組み合わせは通っていない。"""
+    dl = tmp_path / "shellrc.d"
+    dl.mkdir()
+    rc = home / ".bashrc"
+    rc.write_text("a\n")
+    before = snapshot(rc)
+    p = relay_cmd(tmp_path, "install", SHELL="/usr/bin/fish", DEVBASE_SHELLRC_DIR=dl)
+    assert p.returncode == 0, p.stdout + p.stderr
+    # 読み込み先は loader。bash と zsh 以外でも loader があれば置く
+    assert (dl / "ndf-relay.sh").read_text().endswith(
+        '[ -f "$HOME/.claude/ndf/shellrc" ] && . "$HOME/.claude/ndf/shellrc"\n')
+    # 中継の本体と rc は置かれる
+    assert (cfg(tmp_path) / "relay.py").read_bytes() == RELAY.read_bytes()
+    assert (cfg(tmp_path) / "shellrc").exists()
+    # .bashrc は囲みの対象ではないため変わらない（loader へ置くので snapshot と一致）
+    assert snapshot(rc) == before
+    # 現状固定: 読み込み先が loader のときは rc-added / rc-user を書かない
+    #   （_install_locked の touched.append は else 側だけにあり、loader の分岐では追記しない）
+    assert not (state(tmp_path) / "rc-added").exists()
+    assert not (state(tmp_path) / "rc-user").exists()
+
+
+def test_install_non_bash_zsh_shell_with_bash_aliases_definition_skips(tmp_path, home):
+    """現状固定: loader あり・SHELL が fish でも、探す先が rc_files + .bash_aliases に切り替わるため、
+    ~/.bash_aliases の claude 定義を見つけて終了コード 1 で何も書かない。"""
+    dl = tmp_path / "shellrc.d"
+    dl.mkdir()
+    (home / ".bash_aliases").write_text("alias claude=foo\n")
+    p = relay_cmd(tmp_path, "install", SHELL="/usr/bin/fish", DEVBASE_SHELLRC_DIR=dl)
+    assert p.returncode == 1
+    assert "claude の定義があるため足さない" in p.stdout
+    # 何も書かない: loader も本体も rc も作らない
+    assert not (dl / "ndf-relay.sh").exists()
+    assert not (home / ".claude").exists()
+    assert not state(tmp_path).exists()
+    assert tree(home) == [".bash_aliases"]
+
+
 # -- uninstall（AC6）
 
 
