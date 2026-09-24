@@ -4,11 +4,17 @@
 `serena-hooks remind` と同じにする。数えるのは configure の印のある project.yml の
 採った言語の拡張子だけである。呼び出し側（serena-lsp.py）が例外を握りつぶす。
 """
+import contextlib
 import json
 import os
 import shlex
 import time
 from pathlib import Path
+
+try:
+    import fcntl
+except ImportError:  # POSIX でない環境では直列にしない
+    fcntl = None
 
 from . import check, detect, table
 from . import project_yml as py
@@ -137,12 +143,29 @@ def _load_counts(path: Path) -> dict:
     return dict(EMPTY)
 
 
+@contextlib.contextmanager
+def _locked(path: Path):
+    """同じセッションの PreToolUse を直列にする。読み・判定・書きをこの区間で行い、並列の増分を失わない。"""
+    fd = None
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(path.with_suffix(".lock"), os.O_RDWR | os.O_CREAT, 0o600)
+        if fcntl is not None:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+    except OSError:
+        pass  # 排他が取れなくても hook は止めない
+    try:
+        yield
+    finally:
+        if fd is not None:
+            os.close(fd)
+
 def _save_counts(path: Path, counts: dict, now: float) -> None:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(counts))
-        for old in path.parent.glob("*.json"):
-            if old != path and now - old.stat().st_mtime > 86400:
+        for old in [*path.parent.glob("*.json"), *path.parent.glob("*.lock")]:
+            if old.stem != path.stem and now - old.stat().st_mtime > 86400:
                 old.unlink(missing_ok=True)
     except OSError:
         pass
@@ -231,20 +254,21 @@ def pre_tool_use(payload: dict, client: str):
 
     now = _now()
     path = _state_path(str(payload.get("session_id") or "unknown"))
-    counts = _load_counts(path)
-    if counts["last_deny"] is not None and now - counts["last_deny"] < DENY_INTERVAL:
-        return _allow(tool, payload, client)
-    if kind == "symbolic":
-        _reset(counts)
-        _save_counts(path, counts, now)
-        return _allow(tool, payload, client)
+    with _locked(path):
+        counts = _load_counts(path)
+        if counts["last_deny"] is not None and now - counts["last_deny"] < DENY_INTERVAL:
+            return _allow(tool, payload, client)
+        if kind == "symbolic":
+            _reset(counts)
+            _save_counts(path, counts, now)
+            return _allow(tool, payload, client)
 
-    _bump(counts, kind, PERIODS[kind], now)
-    _bump(counts, "mixed", PERIODS["mixed"], now)
-    if any(counts[k] >= THRESHOLDS[k] for k in THRESHOLDS):
-        _reset(counts)
-        counts["last_deny"] = now
+        _bump(counts, kind, PERIODS[kind], now)
+        _bump(counts, "mixed", PERIODS["mixed"], now)
+        if any(counts[k] >= THRESHOLDS[k] for k in THRESHOLDS):
+            _reset(counts)
+            counts["last_deny"] = now
+            _save_counts(path, counts, now)
+            return _decision("deny", DENY_REASON)
         _save_counts(path, counts, now)
-        return _decision("deny", DENY_REASON)
-    _save_counts(path, counts, now)
     return _allow(tool, payload, client)

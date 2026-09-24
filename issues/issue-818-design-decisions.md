@@ -56,11 +56,19 @@ hook と検査は標準ライブラリだけで動かす（`uvx` を hook の経
 
 `uvx --from serena-agent==1.7.0 python` で Serena の同梱の YAML ライブラリを使う案は採らない。SessionStart の hook から呼ぶと 1 秒の上限（AC23）に収まらない見込みで、注釈の保ち方も Serena の実装に依る。
 
-### 決定 9: SessionStart は食い違いと欠けがあるときだけ知らせ、何も導入しない
+### 決定 9: SessionStart は、設定済みのリポジトリでは食い違いと欠けがあるときだけ、未設定のリポジトリでは未設定だけを知らせ、何も導入しない
 
-毎回出す通知は読み飛ばされる（今の echo と同じ）。導入（`uv tool install`・`npm install -g`・`claude plugin install`）は利用者の手元へ書き込み、ネットワークへ出て、失敗しても気付きにくい（#818 §10）。セッションの開始では検査だけを行い、直すのは Skill の手順で利用者の確認を取ってからにする。
+知らせる中身は、`configure` の印（`mcp_serena_excluded`）の有無で分ける（設計の「hook の振る舞い（SessionStart）」、AC4b・AC17・AC18）。
 
-検証に失敗して外した言語と、`--only` で名指しされなかった言語は、`project.yml` の最上位のキー `mcp_serena_excluded` に残し、突き合わせから除く。残さないと、外した言語が以後も検出で選ばれ、毎回出す通知に戻る。別の状態ファイルに置く案は採らない。`project.yml` を追跡すれば作業ツリーにも同じ記録が揃い、追跡から外すファイルを増やさずに済む。逆向き（`language_servers` にあってしきい値に届かない言語）は知らせない。利用者の名指しを尊重する。
+| リポジトリの状態 | 出すもの |
+| --- | --- |
+| git のリポジトリでない・採る言語が 0 | 何も出さない |
+| 印が無い（`project.yml` が無い・Serena が自動で作った）で、採る言語が 1 つ以上 | 未設定の 1 行と、Skill の名前と「プロジェクトごとに実行する」の 1 行の 2 行だけ。食い違いと欠けの行は出さない |
+| 印がある | 食い違いと欠けがあるときだけ出す。揃っていれば何も出さない |
+
+揃っているリポジトリで毎回出す通知は読み飛ばされる（今の echo と同じ）。未設定の 2 行は、`configure` を打つまで出続けるが、打てば止まる（AC4b）。印の無いリポジトリで食い違いと欠けを出さないのは、Serena が自動で作った `project.yml` と検出の差を毎回知らせないためである（AC18）。導入（`uv tool install`・`npm install -g`・`claude plugin install`）は利用者の手元へ書き込み、ネットワークへ出て、失敗しても気付きにくい（#818 §10）。セッションの開始では検査だけを行い、直すのは Skill の手順で利用者の確認を取ってからにする。
+
+検証に失敗して外した言語と、`--only` で名指しされなかった言語は、`project.yml` の最上位のキー `mcp_serena_excluded` に残し、突き合わせから除く。残さないと、外した言語が以後も検出で選ばれ、印のあるリポジトリで毎回食い違いとして知らせることになる。別の状態ファイルに置く案は採らない。`project.yml` を追跡すれば作業ツリーにも同じ記録が揃い、追跡から外すファイルを増やさずに済む。逆向き（`language_servers` にあってしきい値に届かない言語）は知らせない。利用者の名指しを尊重する。
 
 `language_servers` のブロックの注釈に置く案は採らない。Serena 1.7.0 は項目の欠けた `project.yml` を読むと `ProjectConfig.save` で書き直し、そのとき `language_servers` を作り直して注釈が消える。知らないキーは書き直しの後も残る（2026-09-24 実測。`project create --ls python` の後、ブロックに `# mcp-serena: excluded ...` の行と最上位の `mcp_serena_excluded:` を足し、`encoding:` の行を消して `ProjectConfig.load('.', SerenaConfig.from_config_file())` を打つと、`encoding:` が足され、注釈の行だけが消えた）。このキーは「`configure` で設定した」印も兼ねる。Serena は `--project-from-cwd` で開いた根に `project.yml` が無ければ自動で作るため、ファイルの有無では設定の有無を判定できない。
 

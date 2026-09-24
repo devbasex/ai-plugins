@@ -104,8 +104,12 @@ def test_repo_without_languages_prints_nothing(tmp_path):
 
 
 def test_non_git_directory_prints_nothing(tmp_path):
-    (tmp_path / "plain").mkdir()
-    assert _session_start(tmp_path / "plain", _env(tmp_path)) == ""
+    # 採る言語のファイルがあっても、git のリポジトリでなければ未設定の通知も出さない（AC18）。
+    plain = tmp_path / "plain"
+    for rel, body in files_of(py=30).items():
+        (plain / rel).parent.mkdir(parents=True, exist_ok=True)
+        (plain / rel).write_text(body)
+    assert _session_start(plain, _env(tmp_path)) == ""
 
 
 @pytest.mark.parametrize("excluded", [["bash health_check_exit_1"], ["bash not_selected"]])
@@ -250,6 +254,19 @@ def test_symbolic_serena_tool_resets_but_search_and_diagnostics_do_not(configure
 def test_search_for_pattern_counts_as_grep(configured):
     ctx = configured
     assert [_call(ctx, SERENA + "search_for_pattern") for _ in range(3)] == [None, None, "deny"]
+
+
+def test_parallel_calls_do_not_lose_counts(configured, monkeypatch):
+    # 読みと書きの間を広げても、同じセッションの並列の呼び出しは直列になり、増分を失わない。
+    import threading, time as _time
+    load = hooks._load_counts
+    monkeypatch.setattr(hooks, "_load_counts", lambda path: (_time.sleep(0.2), load(path))[1])
+    threads = [threading.Thread(target=_read, args=(configured, "a.py")) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert load(hooks._state_path("s1"))["read"] == 2
 
 
 def test_unmarked_repo_counts_nothing(configured):

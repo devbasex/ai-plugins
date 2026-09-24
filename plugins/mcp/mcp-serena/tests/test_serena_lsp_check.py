@@ -165,17 +165,20 @@ def test_broken_table_json_exits_2(tmp_path, monkeypatch):
     assert "error" in out
 
 
-def test_table_item_missing_extra_checks_exits_2(tmp_path, monkeypatch):
-    # 対応表の要素に extra_checks キーが欠けている（KeyError）→ Unreadable → 終了コード 2
+def test_table_item_missing_extra_checks_is_rejected_by_validate_exits_2(tmp_path, monkeypatch):
+    # 対応表の要素に extra_checks キーが欠けている → table.load の validate が InvalidTable（ValueError）
+    # で弾く → Unreadable → 終了コード 2。_load_languages の要素の参照（KeyError）までは届かない。
     from serena_lsp import check
     root = _project(tmp_path / "r", ["python"])
+    data = table.load()
+    del data["languages"][0]["extra_checks"]  # extra_checks だけを欠かせ、他は version 1 の形のまま
     table_path = tmp_path / "languages.json"
-    table_path.write_text(json.dumps({"languages": [{"serena": "x"}]}))
+    table_path.write_text(json.dumps(data))
     monkeypatch.setenv("SERENA_LSP_TABLE", str(table_path))
     out, code = check.run(root, runtime="codex")
     assert code == 2
     assert out["missing"] == []
-    assert "error" in out
+    assert "extra_checks の形が違います" in out["error"]
 
 
 def test_flow_form_project_yml_exits_2(tmp_path, monkeypatch):
