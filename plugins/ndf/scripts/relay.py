@@ -678,11 +678,8 @@ class Relay:
     def take_count(self) -> bool:
         if self.count_lock is not None:
             return True
-        fd = os.open(os.path.join(state_root(), COUNT_LOCK), os.O_RDWR | os.O_CREAT, 0o600)
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
-            os.close(fd)
+        fd = _lock(os.path.join(state_root(), COUNT_LOCK), 0)
+        if fd is None:
             return False
         self.count_lock = fd
         return True
@@ -738,13 +735,11 @@ class Relay:
     def write_exit(self, m) -> bool:
         """G3。`question.lock` の中で確かめ直し、`/exit` と改行を 1 回の write で書き、1 秒おいて放す。
         確かめ直しで外れたら書かずに偽を返す（`count.lock` も放す）。"""
-        fd = os.open(self.path(QUESTION_LOCK), os.O_RDWR | os.O_CREAT, 0o600)
+        fd = _lock(self.path(QUESTION_LOCK), 0)
+        if fd is None:
+            self.release_count()
+            return False
         try:
-            try:
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except OSError:
-                self.release_count()
-                return False
             now = self.read_mark()
             if (os.path.exists(self.path(QUESTION_FILE)) or now is None
                     or now.get("written_at") != m.get("written_at")
@@ -1583,10 +1578,11 @@ def cmd_question(action: str) -> int:
     if action != "open":
         return 0
     try:
-        fd = os.open(os.path.join(d, QUESTION_LOCK), os.O_RDWR | os.O_CREAT, 0o600)
+        fd = _lock(os.path.join(d, QUESTION_LOCK),
+                   max(0.0, started + _num("NDF_RELAY_QUESTION_WAIT", 3) - time.time()))
+        if fd is None:
+            raise LockBusy()
         try:
-            if not _flock_wait(fd, max(0.0, started + _num("NDF_RELAY_QUESTION_WAIT", 3) - time.time())):
-                raise LockBusy()
             os.close(os.open(os.path.join(d, QUESTION_FILE), os.O_WRONLY | os.O_CREAT, 0o600))
         finally:
             os.close(fd)
