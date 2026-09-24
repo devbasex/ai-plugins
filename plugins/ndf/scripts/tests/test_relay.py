@@ -689,6 +689,33 @@ def test_run_cwd_fallback_to_main(term, tmp_path):
     t.finish()
 
 
+@pytest.mark.parametrize("case", ["nearest-parent", "home"])
+def test_run_cwd_fallback_outside_worktree(term, tmp_path, case):
+    launch = tmp_path / "launch"
+    launch.mkdir()
+    t = term(env={"NDF_RELAY_QUIET": "1.5"}, cwd=launch)
+    t.wait_start(1)
+    t.type("mark next\r")
+    d = pathlib.Path(t.starts()[0]["relay_dir"])
+    mark = d / "next.json"
+    t.wait(mark.exists, what="印")
+    data = json.loads(mark.read_text())
+    if case == "nearest-parent":
+        original = str(launch / "gone" / "deeper")
+        expected = str(launch)
+    else:
+        original = "gone/deeper"
+        expected = t.env["HOME"]
+    data["cwd"] = original
+    mark.write_text(json.dumps(data))
+    t.wait_start(2)
+    assert t.starts()[1]["cwd"] == expected
+    s2 = events(t.rows(), "start")[1]
+    assert s2["cwd"] == expected and s2["cwd_fallback"] == original
+    t.type("/exit\r")
+    t.finish()
+
+
 def seed_starts(home, n, name="old"):
     d = pathlib.Path(home) / ".local" / "state" / "ndf" / "relay" / name
     d.mkdir(parents=True, exist_ok=True)
