@@ -108,8 +108,12 @@ def _added_ignored_paths(before_text: str, after_text: str) -> list:
     return [p for p in py.read_list(after_text, "ignored_paths") or [] if p not in before]
 
 
+def _excluded_entry(language: str, reason: str) -> str:
+    return f"{language} {reason}"
+
+
 def _not_selected_entries(not_selected: list) -> list:
-    return [f"{lang} not_selected" for lang in not_selected]
+    return [_excluded_entry(lang, "not_selected") for lang in not_selected]
 
 
 def _plan_dry_run(result: dict, original, root: Path, candidates: list, not_selected: list):
@@ -212,7 +216,7 @@ def _verify_each(root: Path, original: str, candidates: list, not_selected: list
             else:
                 failed.append({"language": lang, "reason": outcome["reason"], "log": outcome["log"]})
     finally:
-        excluded = [f"{f['language']} {f['reason']}" for f in failed] + \
+        excluded = [_excluded_entry(f["language"], f["reason"]) for f in failed] + \
             _not_selected_entries(not_selected)
         final = _final_text(original, root, verified, excluded)
         yml.write_text(final)
