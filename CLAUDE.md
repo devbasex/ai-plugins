@@ -81,7 +81,7 @@ python3 plugins/ndf/scripts/instructions-check.py --root .
 
 ## cross-review
 
-`/ndf:cross-review` は既定の母集合（claude / codex / kiro とホスト）のうち使える者から毎ラウンド 2 席を選んで PR レビューを委譲し、新しい指摘が出なくなるまで修正ループを回す。使える者が 2 者に満たなければ同じランタイムの 2 つ目が席を埋める。ホストのランタイムも CLI プロセスとして起動する。agy は ndf 10.17.4 の次の版で既定から外し、`--include agy` で戻す。外すなら `--exclude` で名指しする（既定の母集合に無い者の指定は止めずに無視する）。2 ラウンド目以降は既存コメントの控えを取り直す。agy の progress log を heartbeat に表示するため、無言に見える時間でも `scan` / `analyze` / `post` / `done` などの作業段階を確認できる。
+`/ndf:cross-review` は既定の母集合（claude / codex / kiro とホスト）のうち使える者から毎ラウンド 2 席を選んで PR レビューを委譲し、新しい指摘が出なくなるまで修正ループを回す。使える者が 2 者に満たなければ同じランタイムの 2 つ目が席を埋める。ホストのランタイムも CLI プロセスとして起動する。agy は ndf 10.17.5 の次の版で既定から外し、`--include agy` で戻す。外すなら `--exclude` で名指しする（既定の母集合に無い者の指定は止めずに無視する）。2 ラウンド目以降は既存コメントの控えを取り直す。agy の progress log を heartbeat に表示するため、無言に見える時間でも `scan` / `analyze` / `post` / `done` などの作業段階を確認できる。
 
 追加レビュー観点は以下のどちらかで渡す:
 
