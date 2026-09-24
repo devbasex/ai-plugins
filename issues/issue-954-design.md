@@ -13,7 +13,7 @@
 1. conductor が `設計: #954` を **`ndf:supervisor`**（寿命 5 分）で起動する
 2. supervisor が要求・設計・再構成を通し、設計 Pull Request を出す。文脈は 30 万を超えている
 3. supervisor が `cross-review` を起動しようとする。hook が自分の記録を読み、今の文脈が最初の
-   呼び出しの文脈の 2 倍以上なので 1 度止める。理由の欄に区切りの返し方が出る
+   呼び出しの文脈の 2.5 倍以上なので 1 度止める。理由の欄に区切りの返し方が出る
 4. supervisor が `結果: 区切り`・`次の工程: ドキュメントレビュー` で返す
 5. conductor が同じ `設計: #954` を **`ndf:supervisor-waits`**（寿命 1 時間）で起動し直す。
    起動指示の「前の持ち場の報告」に 4 の報告を入れる
@@ -121,10 +121,12 @@ conductor の受け方（`agent-layers.md` の表へ 1 行足す）:
 
 supervisor の規則に 11 を足す:
 
-> 11. 収束ループの工程（構造改善・実装レビュー・ドキュメントレビュー）を、持ち場の 2 つ目以降の
->     工程として始めるときは、その Skill を起動する前に `結果: 区切り`・`次の工程: <その工程>` で
->     返す。起動の前に済ませること（Pull Request を出す・進行を記録する）は済ませてから返す。
->     Claude Code では hook が止めるので、止められたら返す
+> 11. 収束ループの工程（構造改善・実装レビュー・ドキュメントレビュー）の Skill を起動して hook に
+>     止められたら、同じ起動をやり直さずに `結果: 区切り`・`次の工程: <その工程>` で返す。起動の前に
+>     済ませること（Pull Request を出す・進行を記録する）は、起動の前に済ませておく
+
+**区切るかを supervisor に判断させない。** 規則 11 は hook の判定（F3）に従うだけで、自分から区切らない。
+文脈が短い（C < 2.5P）ときは hook が通し、そのまま続ける。hook の無いランタイムでは区切らない。
 
 **区切りは持ち場の語彙を増やさない。** `description` は同じ `<持ち場>: <課題>` のままで、
 測定（`skill-stats --agents`・`token-usage.py`）の持ち場の判定は変わらない。「持ち場の一覧」では、
@@ -137,16 +139,17 @@ supervisor の規則に 11 を足す:
 | 項目 | 値 |
 | --- | --- |
 | 対象 | 入力に `agent_id` があり、`<記録のディレクトリ>/<セッション>/subagents/agent-<agent_id>.meta.json` の `agentType` が `ndf:supervisor` か `ndf:supervisor-waits` で、Skill の名前が `cross-review` / `cross-refactoring`（`ndf:` の有無を問わない） |
-| P | 同じ記録の最初の assistant 呼び出しの文脈（`input + cache_read + cache_creation`） |
-| C | 同じ記録の最後の assistant 呼び出しの文脈 |
-| 止める条件 | `C ≥ 比 × P`。比の既定は 2（決定 4） |
+| 読む記録 | **supervisor 自身の記録** `${transcript_path%.jsonl}/subagents/agent-<agent_id>.jsonl`。入力の `transcript_path` はサブエージェントの中でも親（conductor）の記録を指すので、そのまま読まない（`token-guard.sh` の既存の注記、`statusline.sh` の組み立てと同じ） |
+| P | 読む記録の最初の assistant 呼び出しの文脈（`input + cache_read + cache_creation`） |
+| C | 読む記録の最後の assistant 呼び出しの文脈 |
+| 止める条件 | `C ≥ 比 × P`。比の既定は 2.5（決定 4） |
 | 止め方 | `permissionDecision: deny`。理由の欄に規則 11 の返し方（`結果: 区切り`・`次の工程`）を出す |
 | 1 度だけ通す | 止めた直後に同じ supervisor が同じ Skill を同じ引数で起動したら通す（conductor の判定と同じ控えの形） |
 | 止めない | `agent_id` が無い（conductor）・`agentType` が supervisor でない（worker・`general-purpose`）・記録か meta が読めない・P か C が読めない |
-| 変える | `NDF_SUPERVISOR_CUT_RATIO`（既定 2）、`NDF_SUPERVISOR_CUT_GUARD=0` で止める |
+| 変える | `NDF_SUPERVISOR_CUT_RATIO`（既定 2.5）。`NDF_SUPERVISOR_CUT_GUARD=0` でこの判定を無効にする |
 
 **`agentType` で見分けるので、`general-purpose` で起動した supervisor（conductor が古い起動の形を
-使った場合）は止めない。** 区切りの規則 11 は文面で残る。
+使った場合）は止めない。** その supervisor は区切らずに続ける（今と同じ費用）。
 
 ### F4: 集計の列
 
@@ -210,11 +213,11 @@ sequenceDiagram
   C->>S1: 設計: #954（ndf:supervisor）
   S1->>S1: 要求・設計・再構成・pr
   S1->>H: Skill cross-review
-  H-->>S1: deny（C ≥ 2P。区切りで返す）
+  H-->>S1: deny（C ≥ 2.5P。区切りで返す）
   S1-->>C: 結果: 区切り / 次の工程: ドキュメントレビュー
   C->>S2: 設計: #954（ndf:supervisor-waits、前の報告）
   S2->>H: Skill cross-review
-  H-->>S2: 通す（C < 2P）
+  H-->>S2: 通す（C < 2.5P）
   S2->>S2: ラウンドの待ち（60 分以内は読み込み）
   S2-->>C: 結果: 関門
 ```
