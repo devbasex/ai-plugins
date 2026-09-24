@@ -24,35 +24,15 @@
 ## Step 0: 準備 + 既存 state 引き継ぎ
 
 ```bash
-# この Skill のディレクトリを決める。候補を順に試し、最初に当たったものを絶対パスで採る。
-# Claude Code は SKILL.md 内の ${CLAUDE_PLUGIN_ROOT} をプラグインルートの絶対パスへ置き換えて
-# から渡す。シングルクォートで囲むのは、置き換えられなかったときにシェルへ展開させないため
-# である（未定義の変数を読まないので `set -u` でも落ちない）。Codex と Kiro CLI は置き換えず、
-# プラグインルートを示す環境変数も置かない（Codex は実測、Kiro CLI は未確認）。置き換えない
-# runtime では、
-# **この bash を実行する前に `<この Skill のディレクトリ>` をランタイムから渡された実際の
-# パスへ置き換えること**。置き換えないまま実行しても、その候補が外れるだけで別の場所を
-# 読むことはない。Kiro CLI は installer が `.kiro/skills/` へ symlink を張るため、置き換え
-# なくてもその位置で当たる。
-SKILL_NAME=cross-review
-PLUGIN_ROOT='${CLAUDE_PLUGIN_ROOT}'
-case "$PLUGIN_ROOT" in '$'*) PLUGIN_ROOT= ;; esac
-SKILL_DIR=
-# 明示的に渡されたディレクトリを `.kiro` より先に見る。逆にすると、Kiro の設定を持つ
-# リポジトリで Codex や Claude Code を動かしたときに別 runtime の Skill を選ぶ。
-for candidate in \
-  ${PLUGIN_ROOT:+"$PLUGIN_ROOT/skills/$SKILL_NAME"} \
-  "<この Skill のディレクトリ>" \
-  ".kiro/skills/$SKILL_NAME" \
-  "$HOME/.kiro/skills/$SKILL_NAME"
-do
-  [ -d "$candidate/scripts" ] || continue
-  # 相対パスのまま持ち回ると、この後 worktree へ移ったときに外れる。ここで絶対パスにする。
-  SKILL_DIR="$(cd "$candidate" && pwd)"
-  break
+# スクリプトの置き場所を解決の入口（scripts/resolve.sh）に尋ねる。入口を探すこの 1 段と
+# 候補の順序は development-workflow/references/scripts-lookup.md にある。
+for R in '${CLAUDE_PLUGIN_ROOT}' "$(git rev-parse --show-toplevel 2>/dev/null)/plugins/ndf" \
+  ~/.claude/plugins/cache/*/ndf/* .kiro/skills/*/../.. ~/.kiro/skills/*/../.. \
+  ~/.codex/{.tmp/,}marketplaces/*/plugins/ndf ~/.gemini/config/plugins/ndf plugins/ndf; do
+  [ -f "$R/scripts/resolve.sh" ] && break; R=
 done
-[ -n "$SKILL_DIR" ] || { echo "この Skill のディレクトリを解決できない" >&2; exit 1; }
-SCRIPTS="$SKILL_DIR/scripts"
+[ -n "$R" ] || { echo "NDF の scripts/resolve.sh が見つからない" >&2; exit 3; }
+SCRIPTS=$(bash "$R/scripts/resolve.sh" scripts cross-review) || exit 3
 
 # state 初期化 / 再開（プリチェック・worktree 作成・既存コメントスナップショットを内部実行）
 # ⚠ `eval "$(スクリプト)"` は、スクリプトが異常終了しても出力が空なら終了コード 0 になる。

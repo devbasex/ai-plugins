@@ -203,7 +203,15 @@ flowchart TD
 各ステップの詳細は `docs/` 参照。メインは以下のテンプレートで scripts/ を呼ぶだけ:
 
 ```bash
-# SKILL_DIR と SCRIPTS の決め方は docs/01 の冒頭にある。同じ 17 行を先に実行する。
+# スクリプトの置き場所を解決の入口（scripts/resolve.sh）に尋ねる。入口を探すこの 1 段と
+# 候補の順序は development-workflow/references/scripts-lookup.md にある。
+for R in '${CLAUDE_PLUGIN_ROOT}' "$(git rev-parse --show-toplevel 2>/dev/null)/plugins/ndf" \
+  ~/.claude/plugins/cache/*/ndf/* .kiro/skills/*/../.. ~/.kiro/skills/*/../.. \
+  ~/.codex/{.tmp/,}marketplaces/*/plugins/ndf ~/.gemini/config/plugins/ndf plugins/ndf; do
+  [ -f "$R/scripts/resolve.sh" ] && break; R=
+done
+[ -n "$R" ] || { echo "NDF の scripts/resolve.sh が見つからない" >&2; exit 3; }
+SCRIPTS=$(bash "$R/scripts/resolve.sh" scripts cross-review) || exit 3
 
 # STATE_PR は state.json のキー (= 最初に init した PR 番号)。rotation 後もパスは
 # 変わらないため常に STATE_PR を渡す。現在の PR は state.json の current_pr を見る。
