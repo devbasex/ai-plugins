@@ -1252,7 +1252,7 @@ def test_the_judge_decision_is_recorded_once(run_init, tmp_path, monkeypatch, cm
 # ---------- フェーズの開始（`start-phase`。#933 の決定 8・実装計画 I1） ----------
 
 @pytest.fixture
-def phase_state(tmp_path, env_tmp_dir, monkeypatch, cmd_setup):
+def phase_state(tmp_path, env_tmp_dir, monkeypatch, cmd_phases):
     """版 2 の状態と、`rev-parse HEAD` が通る作業ディレクトリを用意する。
 
     時計は `set_now` で差し替える。監視の上限の環境変数は外す（表の値で比べる）。
@@ -1272,9 +1272,9 @@ def phase_state(tmp_path, env_tmp_dir, monkeypatch, cmd_setup):
 
     tz = dt.timezone(dt.timedelta(hours=9))
     current = {"now": dt.datetime(2026, 9, 24, 10, 0, 0, tzinfo=tz)}
-    monkeypatch.setattr(cmd_setup.statefile, "now",
+    monkeypatch.setattr(cmd_phases.statefile, "now",
                         lambda: current["now"].replace(tzinfo=None).isoformat(timespec="seconds"))
-    monkeypatch.setattr(cmd_setup.clock, "now", lambda: current["now"])
+    monkeypatch.setattr(cmd_phases.clock, "now", lambda: current["now"])
 
     def set_now(**delta):
         current["now"] = dt.datetime(2026, 9, 24, 10, 0, 0, tzinfo=tz) + dt.timedelta(**delta)
@@ -1288,11 +1288,11 @@ def phase_state(tmp_path, env_tmp_dir, monkeypatch, cmd_setup):
 
 
 @pytest.fixture
-def start_phase(phase_state, cmd_setup, capsys):
+def start_phase(phase_state, cmd_phases, capsys):
     """`start-phase` を呼び、`(状態, PHASE_TIMEOUT の値)` を返す。"""
     def _run(phase):
         capsys.readouterr()
-        cmd_setup.cmd_start_phase(types.SimpleNamespace(id=130, phase=phase))
+        cmd_phases.cmd_start_phase(types.SimpleNamespace(id=130, phase=phase))
         out = capsys.readouterr().out.splitlines()
         # 値は `shlex.quote` を通る（空は `''`）。呼び出し側の `eval` と同じに読む。
         timeout = next(shlex.split(line.split("=", 1)[1]) or [""]
@@ -1371,7 +1371,7 @@ def test_start_phase_without_a_plan_returns_no_timeout(phase_state, start_phase,
     assert timeout == ""
 
 
-def test_start_phase_rejects_an_unknown_phase(phase_state, cmd_setup):
+def test_start_phase_rejects_an_unknown_phase(phase_state, cmd_phases):
     with pytest.raises(SystemExit) as e:
-        cmd_setup.cmd_start_phase(types.SimpleNamespace(id=130, phase="review"))
+        cmd_phases.cmd_start_phase(types.SimpleNamespace(id=130, phase="review"))
     assert e.value.code == refactor_abort()
