@@ -16,7 +16,7 @@
 
 変えた後:
 
-1. 利用者が 1 度 `/mcp-serena:language-servers` を実行する。スクリプトが追跡対象の拡張子を数え、`python`（321 ファイル）と `bash`（71）を採る。`.js` の 4 ファイルはしきい値に届かないので外す
+1. 利用者がこのリポジトリで `/mcp-serena:language-servers` を実行する（**プロジェクトごとに実行する。** 利用者単位で 1 度打てば全部のリポジトリに効くものではない。`project.yml` を追跡すれば、同じリポジトリの他の利用者は打たなくてよい）。スクリプトが追跡対象の拡張子を数え、`python`（321 ファイル）と `bash`（71）を採る。`.js` の 4 ファイルはしきい値に届かないので外す
 2. スクリプトが `.serena/project.yml` を書き、1 言語ずつ起動を検証する。Claude Code 向けには `pyright-lsp` の導入と `pyright-langserver` の有無を検査し、足りないものを知らせる
 3. 以後のセッションで、モデルがコードファイルを `Read` で 3 回続けて開こうとすると、hook が 1 度だけ拒む。拒む理由の文が、シンボル単位の手順（`get_symbols_overview` → `find_symbol` → `find_referencing_symbols`）を示す
 4. 編集の後、Claude Code には pyright の診断が次の手番で届く。Codex は Serena の `get_diagnostics_for_file` で取る
@@ -103,6 +103,7 @@
 
 ### 検出と設定（作業項目 E）
 
+- [ ] AC4b: 導入の Skill は**プロジェクト（リポジトリ）ごとに実行するもの**である。Skill の本文の冒頭・mcp-serena の README・SessionStart の通知の文の 3 箇所に「プロジェクトごとに実行する（利用者単位で 1 回ではない）」ことが書かれ、`configure` を打っていないリポジトリで SessionStart が「このリポジトリでは未設定。`/mcp-serena:language-servers` を打つ」と知らせる（Serena を使うリポジトリの判定は設計の「hook の振る舞い」に従う）
 - [ ] AC5: 検出のスクリプトは、対応表にある言語のうち「ファイル数 10 以上かつ対応表の拡張子のファイル全体の 5% 以上」のものを採る。採らなかった言語と理由（件数・割合）を出力に残す
 - [ ] AC6: 設定のスクリプトは確認を取らずに書く。`.serena/project.yml` が無ければ作り、あれば `language_servers` と `ignored_paths` と外した言語の記録（`mcp_serena_excluded`）だけを書き換え、他のキーと注釈を保つ
 - [ ] AC7: 設定のスクリプトは、採る言語を 1 つずつ起動の検証にかけ、失敗した言語を設定から外す。外した言語と理由を出力と `.serena/project.yml` に残す（`--only` で名指しされなかった言語も同じ）
