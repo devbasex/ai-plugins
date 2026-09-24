@@ -136,15 +136,8 @@ Pull Request が最後かどうかを判断できない。
 定める。** ドキュメントレビューの承認と同じ定義を使い、配布では対象が版になる分だけ項目が変わる
 （版の比較の URL・配布物の差分・**取り消しの手段とその限界**）。
 
-**Claude Code のプラグインの形では、提示物の機械で作れる部分はスクリプトが書き出す。**
-
-```bash
-python3 "$SCRIPTS/release-steps.py" approval-facts --version <版> --prs <PR番号>... [--prev-tag <タグ>] --root .
-```
-
-`status` が `gate`（終了コード 10）なら、`presentation_path` の提示物のうち「配る中身」と
-「検証への配布で確かめたこと」を書き足して利用者へ示し、承認を得てから `next` のコマンドを打つ。
-`stopped`（3 = 前のタグを決められない）なら `--prev-tag` を渡して打ち直す。
+**Claude Code のプラグインの形では、提示物の機械で作れる部分を `release-steps.py approval-facts` が
+書き出す。** 打ち方と `status` の読み方は [references/release-steps.md](references/release-steps.md) にある。
 
 **本番への配布の承認は、この工程の中で必ず求める。** 前の工程（実装レビュー・完了判定）を
 通ったことは承認の代わりにならない。それらは取り込んでよいかの判断で、利用者へ出してよいかの
@@ -196,16 +189,9 @@ python3 "$SCRIPTS/release-steps.py" approval-facts --version <版> --prs <PR番�
 （「開始条件」の対象外の規定にあたる）。**この Pull Request の本文へ「配布の記録」のブロックを
 置く**（下の「出力物」）。
 
-**Claude Code のプラグインの形では、版数と変更履歴はスクリプトが上げる。** 次を打ち、結果 JSON の
-`status` を見る（`ok` = 0 で次へ、`stopped` = 1 / 2 / 3 なら `summary` を読んで直す）。
-
-```bash
-python3 "$SCRIPTS/release-steps.py" bump      --plugin <名前> --to <版> --root .
-python3 "$SCRIPTS/release-steps.py" changelog --version <版> --prs <PR番号>... --root .
-```
-
-`bump` の `items[]` に手で直す箇所が載っていれば直す。ほかの形では、リポジトリに版を上げる
-手順があればそれに従う。
+**Claude Code のプラグインの形では、版数と変更履歴を `release-steps.py bump` / `changelog` が
+上げる**（打ち方は [references/release-steps.md](references/release-steps.md)）。ほかの形では、
+リポジトリに版を上げる手順があればそれに従う。
 
 **LLM が書くのは次の 3 つである。**
 
@@ -245,18 +231,9 @@ Pull Request に入れる。`guide:` の行が出たら、その手引きに従�
 同意を得てから実行する。**公開の仕方は形で変わる**（レジストリへの公開・対象の系への反映・
 署名した配布物の設置・ストアへの提出）。参照先の形ごとのファイルに従う。
 
-**Claude Code のプラグインの形では、公開はスクリプトが行う。** `bump` と `changelog` の変更を
-コミットしてから打ち、結果 JSON の `status` を見る。
-
-```bash
-python3 "$SCRIPTS/release-steps.py" release --version <版> --channel dev --root .   # 検証への配布
-python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --root .  # 本番への配布（承認を得てから）
-```
-
-`dev` は `release/v<版>` → `develop` の Pull Request を作り、チェックを待ってマージする。
-`prod` は続けて `develop` → `main` をマージし、タグと GitHub Release を作る。
-**`--channel prod` は「公開前の提示と承認」で承認を得るまで打たない。** `stopped` なら
-`summary` を報告して止まる。
+**Claude Code のプラグインの形では、公開を `release-steps.py release --channel dev|prod` が行う**
+（打ち方は [references/release-steps.md](references/release-steps.md)）。**`--channel prod` は
+「公開前の提示と承認」で承認を得るまで打たない。** `stopped` なら `summary` を報告して止まる。
 
 **提出は公開ではない形がある。** ストアの審査を経るものは、審査を通って初めて利用者へ届く。
 待っている間はこの工程が続いている状態で、`release-verification` はまだ始められない。
