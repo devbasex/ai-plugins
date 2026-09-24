@@ -20,7 +20,6 @@ ENTRY = PLUGIN / "scripts" / "resolve.sh"
 LOOKUP = PLUGIN / "skills" / "development-workflow" / "references" / "scripts-lookup.md"
 HEADING = "## 入口を探す 1 段"
 TOKEN = "'${CLAUDE_PLUGIN_ROOT}'"
-RUNTIMES = ("claude", "kiro", "codex", "agy")
 
 
 def finder() -> str:
@@ -90,20 +89,39 @@ def link_kiro(project: Path, plugin: Path) -> None:
         (skills / src.name).symlink_to(src, target_is_directory=True)
 
 
-def install(runtime: str, home: Path, project: Path, tmp: Path) -> tuple[Path, dict]:
-    """ランタイムの配布物を置き、期待するルートと実行の条件を返す。"""
-    if runtime == "claude":
-        root = install_claude(home)
-        return root, {"substitute": root, "claude": True}
-    if runtime == "kiro":
-        root = make_plugin(tmp / "kiro-src" / "plugins" / "ndf")
-        link_kiro(project, root)
-        return root, {}
-    if runtime == "codex":
-        root = make_plugin(home / ".codex" / ".tmp" / "marketplaces" / "ai-plugins" / "plugins" / "ndf")
-        return root, {}
+def install_claude_runtime(home: Path, project: Path, tmp: Path) -> tuple[Path, dict]:
+    root = install_claude(home)
+    return root, {"substitute": root, "claude": True}
+
+
+def install_kiro(home: Path, project: Path, tmp: Path) -> tuple[Path, dict]:
+    root = make_plugin(tmp / "kiro-src" / "plugins" / "ndf")
+    link_kiro(project, root)
+    return root, {}
+
+
+def install_codex(home: Path, project: Path, tmp: Path) -> tuple[Path, dict]:
+    root = make_plugin(home / ".codex" / ".tmp" / "marketplaces" / "ai-plugins" / "plugins" / "ndf")
+    return root, {}
+
+
+def install_agy(home: Path, project: Path, tmp: Path) -> tuple[Path, dict]:
     root = make_plugin(home / ".gemini" / "config" / "plugins" / "ndf")
     return root, {}
+
+
+INSTALLERS = {
+    "claude": install_claude_runtime,
+    "kiro": install_kiro,
+    "codex": install_codex,
+    "agy": install_agy,
+}
+RUNTIMES = tuple(INSTALLERS)
+
+
+def install(runtime: str, home: Path, project: Path, tmp: Path) -> tuple[Path, dict]:
+    """ランタイムの配布物を置き、期待するルートと実行の条件を返す。"""
+    return INSTALLERS[runtime](home, project, tmp)
 
 
 @pytest.fixture()
