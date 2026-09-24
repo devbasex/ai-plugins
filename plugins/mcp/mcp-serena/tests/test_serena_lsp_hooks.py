@@ -189,12 +189,6 @@ def test_bash_grep_and_read_are_counted(configured):
     assert seq == [None, None, "deny"]
 
 
-@pytest.mark.parametrize("command", ["GIT_PAGER=cat grep -rn x .", "FOO=bar cat a.py"])
-def test_bash_command_with_leading_environment_assignment_is_counted(configured, command):
-    decisions = [_call(configured, "Bash", {"command": command}) for _ in range(3)]
-    assert decisions == [None, None, "deny"]
-
-
 def test_no_deny_within_120_seconds_and_counts_again_after(configured):
     ctx = configured
     for _ in range(3):

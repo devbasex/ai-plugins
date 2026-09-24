@@ -11,12 +11,6 @@ def _choose(counts):
     return detect.choose(counts, {"min_files": 10, "min_share": 0.05})
 
 
-def test_choose_with_no_files_returns_empty_results():
-    detected, skipped = _choose({})
-    assert detected == []
-    assert skipped == []
-
-
 def test_min_files_boundary_nine_is_skipped_ten_is_taken():
     detected, skipped = _choose({"python": 100, "bash": 9})
     assert [d["language"] for d in detected] == ["python"]

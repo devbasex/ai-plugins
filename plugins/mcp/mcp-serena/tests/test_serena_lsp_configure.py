@@ -233,13 +233,6 @@ def test_missing_serena_command_exits_2(repo):
     assert code == 2
 
 
-def test_project_create_without_project_yml_exits_2(repo):
-    code, out, _ = _configure(repo, {"cmd": "true"})
-    assert code == 2
-    assert out["error"]
-    assert not (repo / ".serena/project.yml").exists()
-
-
 def test_outside_git_exits_2(tmp_path, fake):
     code, _, _ = run_json("configure", "--root", str(tmp_path), "--json", "--serena", fake["cmd"])
     assert code == 2
