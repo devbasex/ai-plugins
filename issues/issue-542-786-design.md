@@ -46,14 +46,14 @@
 | 要素 | 責務 | 変更 |
 | --- | --- | --- |
 | `plugins/ndf/scripts/lib/assignment.py` | 母集合と座席と参加者の解決 | 定数 `DEFAULT_REVIEW_RUNTIMES` を足し、`review_pool` をそれとホストから作る。`resolve_participants` は母集合に無い者の除外を無視し、`Participants.ignored_exclude` に残す。`only` が母集合・`--include`・`--exclude` のどれにも無いときは足す者として扱う（決定 12）。`Participants.to_state()` は `ignored_exclude` を含む 8 項目を返す |
-| `plugins/ndf/skills/cross-review/scripts/state.py` | 状態ファイル・観点・参加者の解決・ラウンドの開始 | 控えの取得を関数 `_fetch_existing_comments` に分け、`start-round` からも呼ぶ。`start-round` が変更の節のファイルを書く。分類 `design` と `DESIGN_REVIEW_TEMPLATE` を足す。`_resolve_reviewers` が無視した除外を 1 行で出す。`report` の参加者の節に「--exclude で指定したが既定の母集合に無かった者」の 1 行を足し、`ignored_exclude` を出す。再開の参加者の作り直しは、`--exclude` を渡さないとき `excluded` と `ignored_exclude` の両方を足し戻す。`ignored_exclude` の名前を `--include` にも渡したときだけ、その名前を足し戻さない（新しい指定を優先する）。`excluded` の名前と `--include` の重なりは今どおり止める |
-| `plugins/ndf/skills/cross-review/scripts/launch-reviewer.sh` | レビューのプロンプトを組んで担当を起動する | 変更の節のファイルがあれば埋め込む。出し切りの指示と、テストと背景の処理を起動しない指示を足す。先頭のコメントの「母集合が 4 者」を「担当は 4 ランタイムのどれでもなりうる」へ直す（`launch-codex.sh`・`launch-agy.sh` の同じコメントも） |
+| `plugins/ndf/skills/cross-review/scripts/state.py` | 状態ファイル・観点・参加者の解決・ラウンドの開始 | 控えの取得を関数 `_fetch_existing_comments` に分け、`start-round` からも呼ぶ。分類 `design` と `DESIGN_REVIEW_TEMPLATE` を足す。`_resolve_reviewers` が無視した除外を 1 行で出す。`report` の参加者の節に「--exclude で指定したが既定の母集合に無かった者」の 1 行を足し、`ignored_exclude` を出す。再開の参加者の作り直しは、`--exclude` を渡さないとき `excluded` と `ignored_exclude` の両方を足し戻す。`ignored_exclude` の名前を `--include` にも渡したときだけ、その名前を足し戻さない（新しい指定を優先する）。`excluded` の名前と `--include` の重なりは今どおり止める |
+| `plugins/ndf/skills/cross-review/scripts/launch-reviewer.sh` | レビューのプロンプトを組んで担当を起動する | 出し切りの指示と、テストと背景の処理を起動しない指示を足す。先頭のコメントの「母集合が 4 者」を「担当は 4 ランタイムのどれでもなりうる」へ直す（`launch-codex.sh`・`launch-agy.sh` の同じコメントも） |
 | `plugins/ndf/skills/fix/scripts/fetch-pr-comments.sh` | 既存コメントの 3 つの取得元を 1 本で取る | 引数 `--strict` を足す。付けたときは 3 つのどれか 1 つでも失敗すれば終了コード 1（付けないときは今どおり 3 つとも失敗したときだけ 1） |
 | `plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/commands/setup.py` | cross-refactoring の参加者の解決 | 無視した除外を 1 行で出す。再開（`_resume`）の作り直しは state.py と同じ規則で `ignored_exclude` も足し戻す |
 | `plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/commands/report.py` | cross-refactoring の完了報告 | cross-review の `report` と同じく「--exclude で指定したが既定の母集合に無かった者」の 1 行を足す |
 | `plugins/ndf/skills/cross-refactoring/tests/test_init.py` | cross-refactoring の `init` のテスト | 「母集合に無い者は外せない」の中断の期待を、無視して続ける期待へ替える |
 | `plugins/ndf/skills/cross-refactoring/prompts/apply.md` | 適用担当のプロンプト | テストを前景で終わるまで待つ指示を足す |
-| 文書 | 使い方と仕様 | `cross-review/docs/01-state-and-review.md`（Step 1 の `start-round` に、控えの取り直し・失敗しても続けること・変更の節のファイルを書く / 消すことを足す）・`cross-review/SKILL.md`・`docs/02-fix-and-rotation.md`・`docs/05-pool-and-convergence.md`・`docs/06-evidence.md`・`docs/specifications/cross-review-participants-and-seats.md`・`plugins/ndf/README.md`・`CLAUDE.md` の cross-review 節。cross-refactoring の `docs/01-state-and-propose.md`（参加者の確定の段）と `docs/specifications/cross-refactoring-participants.md`（中断の表の「名前の矛盾」の行と、203 行の「共通層が返す 7 項目」）。`cross-review/docs/04-contracts.md`（`participants` の 8 項目と一時ファイルの一覧）と確定仕様 `cross-review-participants-and-seats.md` の参加者の記録の表（8 項目）は、`ignored_exclude` と変更の節のファイルを足して 9 項目・一時ファイル 1 つ増へ直す |
+| 文書 | 使い方と仕様 | `cross-review/docs/01-state-and-review.md`（Step 1 の `start-round` に、控えの取り直し・失敗しても続けることを足す）・`cross-review/SKILL.md`・`docs/02-fix-and-rotation.md`・`docs/05-pool-and-convergence.md`・`docs/06-evidence.md`・`docs/specifications/cross-review-participants-and-seats.md`・`plugins/ndf/README.md`・`CLAUDE.md` の cross-review 節。cross-refactoring の `docs/01-state-and-propose.md`（参加者の確定の段）と `docs/specifications/cross-refactoring-participants.md`（中断の表の「名前の矛盾」の行と、203 行の「共通層が返す 7 項目」）。`cross-review/docs/04-contracts.md`（`participants` の 8 項目）と確定仕様 `cross-review-participants-and-seats.md` の参加者の記録の表（8 項目）は、`ignored_exclude` を足して 9 項目へ直す。変更の節のファイル（`start-round` が書く / 消すこと、`04-contracts.md` の一時ファイルの 1 つ増）は決定 4 とともに #934 へ移した |
 | テスト | 下の「テスト設計」 | 既存の母集合のテストを直し、新しい分岐のテストを足す |
 
 変えないもの:
@@ -89,7 +89,7 @@ graph LR
   SU -->|参加者| A
   S -->|控えの取得| F
   F --> G
-  S -->|控え・変更の節・state.json| W
+  S -->|控え・state.json| W
   L -->|読む| W
 ```
 
@@ -288,9 +288,9 @@ sequenceDiagram
   P->>S: start-round
   S->>S: 作業ツリーを head へ同期・ラウンドを開く
   S->>G: **控えを取り直す（2 ラウンド目以降）**
-  S->>S: **変更の節のファイルを書く / 消す**
+  Note over S: 変更の節のファイルを書く / 消す（#934 へ移した）
   P->>L: 席ごとに起動
-  L->>C: プロンプト（控え・**変更の節**・観点・**出し切りの指示**）
+  L->>C: プロンプト（控え・観点・**出し切りの指示**）
   C-->>S: payload / result.json
   P->>S: read-result・verify-findings・critique
   P->>S: judge（変えない）
@@ -306,7 +306,7 @@ sequenceDiagram
 
 | 条件 | 実現方式 |
 | --- | --- |
-| 変更の節は 6,000 バイト以下 | ファイル名だけを並べ、差分の本文を入れない。一覧は 5,000 バイトで打ち切る（長いパスでも超えない）。定型の文は約 600 バイト、「ほか N 件」の行は 30 バイト以下 |
+| 変更の節は 6,000 バイト以下（#934） | ファイル名だけを並べ、差分の本文を入れない。一覧は 5,000 バイトで打ち切る（長いパスでも超えない）。定型の文は約 600 バイト、「ほか N 件」の行は 30 バイト以下 |
 | 控えの増分は同じ実行の前のラウンドの分だけ | 取り直しは `fetch-pr-comments.sh` の全件の取得で、増えるのは前の取得の後に投稿された行だけである |
 
 ## 決定の記録
