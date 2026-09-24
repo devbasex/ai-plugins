@@ -58,7 +58,8 @@ def installed_plugins() -> set:
         raise Unreadable(f"installed_plugins.json を読めません: {exc}") from exc
 
 
-def missing_items(root, runtime: str) -> list:
+def _load_languages() -> dict:
+    """対応表を言語名 → 定義で返す。読めない・知らない extra_checks があれば Unreadable。"""
     try:
         data = table.load()
         langs = table.by_language(data)
@@ -67,34 +68,48 @@ def missing_items(root, runtime: str) -> list:
         raise Unreadable(f"対応表を読めません: {exc}") from exc
     if unknown:
         raise Unreadable(f"対応表に知らない extra_checks があります: {', '.join(sorted(unknown))}")
+    return langs
+
+
+def _load_state(root) -> dict:
     try:
         state = py.load_state(root)
     except py.UnsupportedShape as exc:
         raise Unreadable(str(exc)) from exc
     if state is None:
         raise Unreadable("project.yml がありません")
+    return state
 
+
+def _missing_for_language(name: str, lang: dict, runtime: str, plugins: set) -> list:
     claude = runtime == "claude-code"
-    plugins = installed_plugins() if claude else set()
+    missing = []
+    if claude and lang["claude_plugin"] and lang["claude_plugin"] not in plugins:
+        missing.append({"language": name, "item": "plugin", "name": lang["claude_plugin"],
+                        "install": f"claude plugin install {lang['claude_plugin']}"})
+    if claude:
+        for binary in lang["binaries"]:
+            if not shutil.which(binary["command"]):
+                missing.append({"language": name, "item": "binary", "name": binary["command"],
+                                "install": binary["install"]})
+    for check_name in lang["extra_checks"]:
+        func, runtimes = EXTRA_CHECKS[check_name]
+        if runtime in runtimes:
+            found = func(lang)
+            if found:
+                missing.append({"language": name, **found})
+    return missing
+
+
+def missing_items(root, runtime: str) -> list:
+    langs = _load_languages()
+    state = _load_state(root)
+    plugins = installed_plugins() if runtime == "claude-code" else set()
     missing = []
     for name in state["languages"]:
         lang = langs.get(name)
-        if lang is None:
-            continue
-        if claude and lang["claude_plugin"] and lang["claude_plugin"] not in plugins:
-            missing.append({"language": name, "item": "plugin", "name": lang["claude_plugin"],
-                            "install": f"claude plugin install {lang['claude_plugin']}"})
-        if claude:
-            for binary in lang["binaries"]:
-                if not shutil.which(binary["command"]):
-                    missing.append({"language": name, "item": "binary", "name": binary["command"],
-                                    "install": binary["install"]})
-        for check_name in lang["extra_checks"]:
-            func, runtimes = EXTRA_CHECKS[check_name]
-            if runtime in runtimes:
-                found = func(lang)
-                if found:
-                    missing.append({"language": name, **found})
+        if lang is not None:
+            missing += _missing_for_language(name, lang, runtime, plugins)
     return missing
 
 

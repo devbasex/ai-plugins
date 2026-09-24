@@ -132,6 +132,32 @@ def _write_gitignores(root: Path, result: dict, gitignore: bool, serena_gitignor
     result["written"]["serena_gitignore_added"] = missing
 
 
+def _precheck_yml(yml: Path, local: Path):
+    """(元の project.yml の本文か None, 終了コード 3 の理由か None) を返す。"""
+    try:
+        if local.exists() and py.read_list(local.read_text(), "language_servers") is not None:
+            return None, "project.local.yml が language_servers を持つため書きません"
+        original = yml.read_text() if yml.exists() else None
+        if original is not None:
+            py.read_list(original, "language_servers")
+            py.read_list(original, "ignored_paths")
+            py.read_list(original, EXCLUDED_KEY)
+    except py.UnsupportedShape as exc:
+        return None, f"project.yml の形を読めません: {exc}"
+    return original, None
+
+
+def _create_project(cmd: list, root: Path, candidates: list, timeout: float):
+    """serena project create で project.yml を作り、その本文を返す。作れなければ None。"""
+    yml = root / ".serena/project.yml"
+    ls_args = [a for lang in candidates for a in ("--ls", lang)]
+    try:
+        _run([*cmd, "project", "create", *ls_args, "--name", root.name, str(root)], root, timeout)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return yml.read_text() if yml.exists() else None
+
+
 def configure(root: Path, dry_run=False, gitignore=False, serena_gitignore=False, only=None,
               serena_cmd=SERENA_CMD):
     """(結果の辞書, 終了コード) を返す。"""
@@ -152,16 +178,9 @@ def configure(root: Path, dry_run=False, gitignore=False, serena_gitignore=False
     yml = root / ".serena/project.yml"
     local = root / ".serena/project.local.yml"
     # 終了コード 3 の検査は、書き換えの try / finally に入る前に済ませる
-    try:
-        if local.exists() and py.read_list(local.read_text(), "language_servers") is not None:
-            return {**result, "error": "project.local.yml が language_servers を持つため書きません"}, 3
-        original = yml.read_text() if yml.exists() else None
-        if original is not None:
-            py.read_list(original, "language_servers")
-            py.read_list(original, "ignored_paths")
-            py.read_list(original, EXCLUDED_KEY)
-    except py.UnsupportedShape as exc:
-        return {**result, "error": f"project.yml の形を読めません: {exc}"}, 3
+    original, error = _precheck_yml(yml, local)
+    if error:
+        return {**result, "error": error}, 3
 
     cmd = shlex.split(serena_cmd)
     if dry_run:
@@ -171,14 +190,9 @@ def configure(root: Path, dry_run=False, gitignore=False, serena_gitignore=False
 
     timeout = float(os.environ.get("SERENA_LSP_VERIFY_TIMEOUT", VERIFY_TIMEOUT))
     if original is None:
-        ls_args = [a for lang in candidates for a in ("--ls", lang)]
-        try:
-            _run([*cmd, "project", "create", *ls_args, "--name", root.name, str(root)], root, timeout)
-        except (OSError, subprocess.TimeoutExpired):
-            pass
-        if not yml.exists():
+        original = _create_project(cmd, root, candidates, timeout)
+        if original is None:
             return {**result, "error": "serena project create が project.yml を作りませんでした"}, 2
-        original = yml.read_text()
         result["written"]["created"] = True
 
     verified, failed = [], []

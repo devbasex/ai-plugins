@@ -160,7 +160,7 @@ def _shell_words(command) -> list:
 
 
 def _classify_shell(command, exts: set):
-    words = [w for w in _shell_words(command)]
+    words = _shell_words(command)
     while words and "=" in words[0] and not words[0].startswith("-"):
         words = words[1:]  # 先頭の環境変数の代入
     if not words:
