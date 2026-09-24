@@ -188,6 +188,19 @@ def notes(snap: Snapshot) -> list[str]:
     return out
 
 
+def _diff_table_rows(diffs) -> list[list[str]]:
+    return [[r["version"], str(r["sessions_with_pr"]), str(r["prs"]), tu._m(total),
+             "-" if ratio is None else f"{ratio:+.0%}", tu._m(r["conductor_cost"]), tu._m(r["supervisor_cost"]),
+             tu._m(r["worker_cost"]), tu._m(r["context"]), f"{r['minutes']:.1f}", tu._m(r["codex_input"])]
+            for r, total, ratio in diffs]
+
+
+def _reading_lines(large: list[str]) -> list[str]:
+    if large:
+        return [f"差の大きい版: {', '.join(large)}。手引き（README.md）に従い、版ごとに 1〜3 行をここへ書く。"]
+    return [f"差の大きい版は無い（すべて ±{THRESHOLD:.0%} の内）。読み取りは要らない。"]
+
+
 def render(snap: Snapshot) -> str:
     released, until_s, date, floor, previous = snap.released, snap.until_s, snap.date, snap.floor, snap.previous
     diffs, large, by_version = snap.diffs, snap.large, snap.by_version
@@ -210,19 +223,12 @@ def render(snap: Snapshot) -> str:
            f"±{THRESHOLD:.0%} を超えた版を下の「読み取り」で扱う。", ""]
     out += table(["ndf の版", "会話", "PR", "換算の合計", "前の版との差", "conductor", "supervisor", "worker",
                   "入力", "所要", "codex 入力"],
-                 [[r["version"], str(r["sessions_with_pr"]), str(r["prs"]), tu._m(total),
-                   "-" if ratio is None else f"{ratio:+.0%}", tu._m(r["conductor_cost"]), tu._m(r["supervisor_cost"]),
-                   tu._m(r["worker_cost"]), tu._m(r["context"]), f"{r['minutes']:.1f}", tu._m(r["codex_input"])]
-                  for r, total, ratio in diffs])
+                 _diff_table_rows(diffs))
     out += ["", "## 版と層ごとの呼び出しとキャッシュ（1 起動あたり）", "",
             "P と k と書き込みは 1 起動あたり、書き直しとうち 5 分超は合計の回数である。", ""]
     out += table(["ndf の版", "層", "起動", "P", "k", "書き込み 5 分", "書き込み 1 時間", "書き直し", "うち 5 分超",
                   "1 起動あたりの書き直し"], layer_rows(by_version["per_role"]))
-    out += ["", "## 読み取り", ""]
-    if large:
-        out += [f"差の大きい版: {', '.join(large)}。手引き（README.md）に従い、版ごとに 1〜3 行をここへ書く。"]
-    else:
-        out += [f"差の大きい版は無い（すべて ±{THRESHOLD:.0%} の内）。読み取りは要らない。"]
+    out += ["", "## 読み取り", "", *_reading_lines(large)]
     body = tu.render_md(by_version, ["version"])
     body = "\n".join("#" + line if line.startswith("## ") else line for line in body.splitlines())
     out += ["", "## 集計の出力", "", body]
