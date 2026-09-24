@@ -1512,6 +1512,34 @@ def _startup_copy(body: bytes) -> None:
         _unlock(cfd)
 
 
+def _startup_refresh_old_copy(body: bytes) -> None:
+    """10.17.4 が置いた写しが在れば今の版で置き直す。失敗は従来どおり局所的に無視する。"""
+    old = old_copy_path()
+    try:
+        if os.path.exists(old) and _read_bytes(old) != body:
+            _write_file(old, body, 0o755)
+    except OSError:
+        pass
+
+
+def _startup_record_noticed(root: str) -> list[str]:
+    """まだ知らせていない自動の囲みのパスを集め、`rc-noticed` に記録して返す。"""
+    noticed = _records(os.path.join(root, "rc-noticed"))
+    paths = [p for p in _auto_blocks(root) if p not in noticed]
+    for p in paths:
+        _add_record(os.path.join(root, "rc-noticed"), p)
+    return paths
+
+
+def _startup_notice_message(paths: list[str]) -> str:
+    """自動で足した alias を知らせる通知文を、パスの列から組み立てる。"""
+    msg = (f"ndf-relay: {'・'.join(paths)} の alias claude は 10.17.4 が自動で足したもの。"
+           "使い続けるなら何もしなくてよい。外すなら /ndf:install-wrapper uninstall")
+    if os.environ.get("DEVBASE_SHELLRC_DIR"):
+        msg += "。コンテナを作り直した後も使うなら /ndf:install-wrapper"
+    return msg
+
+
 def startup_once() -> str | None:
     root = state_root()
     if not (os.path.exists(os.path.join(root, "rc-added")) or os.path.exists(copy_path())
@@ -1527,23 +1555,11 @@ def startup_once() -> str | None:
             _startup_copy(body)
         except OSError:
             pass
-        old = old_copy_path()
-        try:
-            if os.path.exists(old) and _read_bytes(old) != body:
-                _write_file(old, body, 0o755)
-        except OSError:
-            pass
-        noticed = _records(os.path.join(root, "rc-noticed"))
-        paths = [p for p in _auto_blocks(root) if p not in noticed]
+        _startup_refresh_old_copy(body)
+        paths = _startup_record_noticed(root)
         if not paths:
             return None
-        for p in paths:
-            _add_record(os.path.join(root, "rc-noticed"), p)
-        msg = (f"ndf-relay: {'・'.join(paths)} の alias claude は 10.17.4 が自動で足したもの。"
-               "使い続けるなら何もしなくてよい。外すなら /ndf:install-wrapper uninstall")
-        if os.environ.get("DEVBASE_SHELLRC_DIR"):
-            msg += "。コンテナを作り直した後も使うなら /ndf:install-wrapper"
-        return msg
+        return _startup_notice_message(paths)
     finally:
         _unlock(fd)
 
