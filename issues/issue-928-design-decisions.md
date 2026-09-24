@@ -112,7 +112,9 @@ Claude Code の中の Bash（対話シェルでない）からも見えるため
 
 **明示の `install` は版を比べずに置く。** 利用者が過去の版へ戻す（`docs/versioning-and-distribution.md`）のは、
 新しい版の不具合から逃げるためである。`startup` の後退防止だけだと、中継の写しは新しい版のまま残る。
-戻した利用者は `/ndf:install-wrapper` を打ち直せば写しも戻る（レビューの指摘）。
+戻した利用者は `/ndf:install-wrapper` を打ち直せば写しも戻る（レビューの指摘）。この Skill を持たない
+10.17.4 以前へ戻すときは、戻す前に `/ndf:install-wrapper uninstall` を打つ。戻した後なら、囲みと
+`~/.claude/ndf/` を手で消す。
 
 **旧い写しには版を持たせない。** `~/.local/share` はコンテナごとで共有されない。
 

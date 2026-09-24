@@ -127,7 +127,7 @@
 
 - [ ] AC27: 写しと中継の rc は Claude Code の設定の親（`${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/`）の下に置く。中継の rc の関数と読み込みの行は `install` の時点で決まるパスを指す（`$HOME` の下なら `"$HOME/..."` の形）。関数は呼んだ時点で写しが無ければ素の `claude` を起こし、読み込みの行は中継の rc が無ければ何もしない。devbase では、コンテナを作り直した後も写しと中継の rc が残る（`~/.claude` が `/persistent/group/.claude` への symlink であることを設計の文書に実測で残す）
 - [ ] AC28: `DEVBASE_SHELLRC_DIR` が在るディレクトリを指すとき、`install` は読み込みの 1 行を `$DEVBASE_SHELLRC_DIR/ndf-relay.sh` に置き、`~/.bashrc`・`~/.zshrc` へ囲みを足さない（10.17.4 の囲みが残っていれば、その中だけを読み込みの行へ置き換える）。`uninstall` はこのファイルも消す。devbase の読み込み（`~/.bashrc`・`~/.zshrc` がこのディレクトリの `*.sh` を読む）は devbasex/devbase#253 で依頼した
-- [ ] AC29: 写しの版（`relay.version`）が SessionStart の hook を動かすプラグインの版より新しければ、hook は写しを置き直さない（同じ親を共有する別のコンテナの古い版が、写しを後退させない）。明示の `install` は版を比べずに置く（過去の版へ戻した利用者が写しも戻せる）。同じ `X.Y.Z` では `-dev.N` を正式版より古いとし、`-dev.N` どうしは `N` を数として比べる
+- [ ] AC29: 写しの版（`relay.version`）が SessionStart の hook を動かすプラグインの版より新しければ、hook は写しを置き直さない（同じ親を共有する別のコンテナの古い版が、写しを後退させない）。明示の `install` は版を比べずに置く（過去の版へ戻した利用者が写しも戻せる）。同じ `X.Y.Z` では `-dev.N` < `-rc.N` < 正式版 とし、同じ接尾辞どうしは `N` を数として比べる
 - [x] AC30: devbasex/devbase へ、永続化されたシェルの設定の読み込みを足す issue を送る。devbasex/devbase#253 として起票した
 
 ### 8. 通しの確かめと退行
