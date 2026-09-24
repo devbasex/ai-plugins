@@ -1,16 +1,16 @@
 # 中継で区間の切れ目を自動にする（Claude Code だけ）
 
-**`/goal /ndf:development-workflow` の区間の切れ目で人が行っていた「`/exit`・起動し直し・
+**`/ndf:development-workflow` の区間の切れ目で人が行っていた「`/exit`・起動し直し・
 次のコマンドの貼り付け」を、中継（`scripts/relay.py`）が行う。** 人が入力するのは関門の答えだけになる。
 
 例: 設計の関門をまたいで実装へ進む。
 
-1. 利用者がいつもどおり `claude` と打つ（`/ndf:install-wrapper` で入れた関数が中継を挟む）。その中で `/goal /ndf:development-workflow #895` を入力する
+1. 利用者がいつもどおり `claude` と打つ（`/ndf:install-wrapper` で入れた関数が中継を挟む）。その中で `/ndf:development-workflow #895` を入力する
 2. conductor が設計の関門で `AskUserQuestion` を出し、利用者が「承認」と答える
 3. conductor が設計 Pull Request をマージし、最後の応答に次のブロックを出して応答を終える
 
    ```ndf-next
-   /goal /ndf:development-workflow #895
+   /ndf:development-workflow #895
    ```
 
 4. 中継がそのブロックを拾い、claude へ `/exit` を入力して終え、プラグインを更新し、
@@ -73,7 +73,7 @@
 擬似端末を作れない環境（Windows）と、導入済みのプラグインの一覧（`plugin list --json`）から ndf の
 名前と版を読めないときは、`ndf-relay: 中継を始めない（<理由>）…` の 1 行を出してから素通しする。
 
-`/goal` を使わない普段の利用では、印が書かれないので中継は何もせず、claude を終えると同じ
+`ndf-next` のブロックを出さない普段の利用では、印が書かれないので中継は何もせず、claude を終えると同じ
 終了コードでシェルへ戻る。
 
 ## 止め方
@@ -92,7 +92,7 @@
 **中継の下で `/ndf:restart [再開用のコマンド]` を打つと、区間の切れ目と同じ経路で切り替わる。**
 claude が再開用のコマンドを `ndf-next` のブロックで出して応答を終え、中継が静まりを待ってから
 `/exit` → プラグインの更新 → 起動を行う。プラグインの更新を反映したいとき・文脈を切りたいときに使う。
-引数が無ければ、`/goal` の目標か、課題番号・作業ツリー・Pull Request を差し込む定型の 1 文で作る。
+引数が無ければ、課題番号・作業ツリー・Pull Request を差し込む定型の 1 文で作る。
 中継の外では、手順の 1 行と貼り付ける中身を示すだけで終わる。
 
 ## 関門を越えない守り
@@ -158,3 +158,14 @@ cat ~/.local/state/ndf/relay/*/log.jsonl | jq -c 'select(.event == "stop")'
 ```
 
 入出力の契約と決定の理由は、ai-plugins の確定仕様 `docs/specifications/ndf-relay-segment-restart.md` にある。
+
+## 付則: `/goal` を付けた場合
+
+区間の最初の入力に `/goal ` を付けると（`/goal /ndf:development-workflow #895`）、その入力は Claude Code の
+目標になる。中継は付けない場合と同じに動く。
+
+| 項目 | 振る舞い |
+| --- | --- |
+| 次の区間へ引き継ぐ | `ndf-next` のブロックの中身の先頭に `/goal ` を付ける（[context-window.md](context-window.md) の「新しい会話で戻す」） |
+| 目標が未達のとき | 判定が止めを拒んで応答が続く。印の後に応答が再開するので、中継は切り替えを取りやめる |
+| `/ndf:restart` の引数が無いとき | 定型の 1 文ではなく、目標の入力をそのまま再開用のコマンドにする |
