@@ -105,8 +105,12 @@ def _added_ignored_paths(before_text: str, after_text: str) -> list:
     return [p for p in py.read_list(after_text, "ignored_paths") or [] if p not in before]
 
 
+def _not_selected_entries(not_selected: list) -> list:
+    return [f"{lang} not_selected" for lang in not_selected]
+
+
 def _plan_dry_run(result: dict, original, root: Path, candidates: list, not_selected: list):
-    planned_excluded = [f"{lang} not_selected" for lang in not_selected]
+    planned_excluded = _not_selected_entries(not_selected)
     planned = _final_text(original or "", root, candidates, planned_excluded)
     result["diff"] = "".join(difflib.unified_diff(
         (original or "").splitlines(True), planned.splitlines(True), "project.yml", "project.yml"))
@@ -208,7 +212,7 @@ def configure(root: Path, dry_run=False, gitignore=False, serena_gitignore=False
                 failed.append({"language": lang, "reason": outcome["reason"], "log": outcome["log"]})
     finally:
         excluded = [f"{f['language']} {f['reason']}" for f in failed] + \
-            [f"{lang} not_selected" for lang in not_selected]
+            _not_selected_entries(not_selected)
         final = _final_text(original, root, verified, excluded)
         yml.write_text(final)
         for sig, handler in previous.items():
