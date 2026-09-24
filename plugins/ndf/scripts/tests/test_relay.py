@@ -1741,7 +1741,10 @@ def question(tmp_path, env_dir, action="open"):
     e = isolated_env(tmp_path)
     if env_dir is not None:
         e["NDF_RELAY_DIR"] = str(env_dir)
-    return subprocess.run([sys.executable, str(RELAY), "question", action], input="{}",
+    command = [sys.executable, str(RELAY), "question"]
+    if action is not None:
+        command.append(action)
+    return subprocess.run(command, input="{}",
                           capture_output=True, text=True, env=e, timeout=20)
 
 
@@ -1784,6 +1787,17 @@ def test_question_close_removes(tmp_path, relay):
     (relay.dir / "question").write_text("")
     quiet_ok(question(tmp_path, relay.dir, "close"))
     assert not (relay.dir / "question").exists()
+
+
+@pytest.mark.parametrize("action", ["bogus", None])
+def test_question_unknown_or_missing_action_keeps_mark(tmp_path, relay, action):
+    mark = relay.dir / "question"
+    quiet_ok(question(tmp_path, relay.dir, action))
+    assert not mark.exists()
+
+    mark.write_text("keep")
+    quiet_ok(question(tmp_path, relay.dir, action))
+    assert mark.read_text() == "keep"
 
 
 def test_guard_exit_queued_behind_question(term):
