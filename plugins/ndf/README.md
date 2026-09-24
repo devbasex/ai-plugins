@@ -89,7 +89,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.17.8）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.17.9-dev.1）
 ```
 
 ### agy
@@ -119,54 +119,46 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.17.8 へ更新するとき
+## v10.17.9-dev.1 へ更新するとき
 
-**`/ndf:cross-refactoring` を、ラウンドを上限まで回す形から、想定最大時間（`--budget-minutes`、既定 30 分）に
-収まる計画を 1 回だけ実行する形へ改めました**（マイルストーン 26、#933）。あわせて中継の静まりの既定を
-15 秒から 5 秒へ短くしました（PR #964）。Skill の追加・削除・改名は無く、公開 Skill の数も変わりません。
-変更点の一覧は [CHANGELOG.md](../../CHANGELOG.md) にあります。
+**同じマーケットプレイスの `mcp-serena` を 2.1.0-dev.1 へ上げ、Claude Code と Codex で言語サーバによる定義・参照・
+診断を使えるようにしました**（マイルストーン 26、#818）。ndf 側の変更は、エージェント定義と 3 つの Skill が
+Serena のツールを正しい名前で指し、ファイルを丸ごと読む代わりにシンボル単位の手順を示すようにしたことだけです。
+Skill の追加・削除・改名は無く、ndf の公開 Skill の数も変わりません。変更点の一覧は [CHANGELOG.md](../../CHANGELOG.md) にあります。
 
-**正式版です。** `main` に載ります。中身は開発版 `10.17.8-dev.1` と同じで、版数の接尾辞だけを
-外しました。
+**開発版です。** `develop` にだけ載ります。取得元へ `#develop` を足す手順は
+[docs/versioning-and-distribution.md の「開発版を試す」](../../docs/versioning-and-distribution.md#開発版を試す)にあります。
 
 | 変わったこと | 中身 |
 | --- | --- |
-| **cross-refactoring は計画を 1 回だけ実行します**（#933） | 参加者の全員が 1 度だけ提案し、実装担当 1 者（`--implementer` → ホスト → 参加者の先頭）が計画・テスト追加・実装・検証/修正を通します。輪番と適用ラウンドは無くなりました |
-| **所要は `--budget-minutes` に収めます**（#933） | 配分テーブル（履歴の直近 10 回。初期値は #917 の実測）で見積もり、「想定最大時間 − 経過 − 控え」に収まる件数だけを採ります。段の監視の上限・テスト 1 回の上限・直しの打ち切りはすべて予算から算術で出し、改修計画の「時間の上限」の表に載ります |
-| **最終ゲートの修正は必ず 1 度試みます**（#933） | 修正 1 回分の控えを計画の時点で予算から差し引き、予算を使い切った後に最終ゲートが落ちても 1 度は直しを試みます。2 回目からは想定最大時間の終わりで打ち切ります |
-| **項目の検証は限ったテストで走らせます**（#933） | 全体のテストは着手前・危険の印（D1〜D5）が立ったときの 1 回・最終ゲートだけです。`--baseline-test` が pytest / jest / vitest でなければ `--round-test` が要ります |
-| **廃止した引数**（#933） | `--max-test-rounds` / `--max-outer-rounds` / `--max-items-per-round` / `--max-fix-rounds` / `--test-timeout` は `⚠ … は廃止しました（#933）` を出して無視します（次の版で外します） |
-| **状態ファイルが新しい形になりました**（#933） | ラウンド制の途中の状態ファイル（`final` が空）では `init` が終了コード 4 で止まり、旧い版で終えるか状態を消して始め直すかを案内します。終わった状態ファイルなら作り直して始めます |
-| **中継の静まりの既定が 5 秒になりました**（PR #964） | 区間の切れ目で `/exit` を送るまでの静まりの待ちです。`NDF_RELAY_QUIET` で変えられます |
+| **Serena のツール名を直しました**（#818） | `corder` / `qa` エージェントが指す Serena のツールを、mcp-serena プラグインが出す `mcp__plugin_mcp-serena_serena__*`（Codex では `mcp__serena__*`）へ揃えました。`director` は memory のツールを使わない旨を明記しました |
+| **シンボル単位の手順を示します**（#818） | `refactoring` / `tdd-cycle` / `problem-solving` と `debugger` エージェントが、Serena が使えるときは `find_symbol` / `find_referencing_symbols` / `replace_symbol_body` で読み書きし、ファイルを丸ごと読まない手順を示します。使えなければ従来どおり Grep と Read を使います |
+| **言語サーバの設定は mcp-serena が担います**（#818） | 導入先のリポジトリごとに `/mcp-serena:language-servers` を 1 度実行します。詳しくは [mcp-serena の README](../mcp/mcp-serena/README.md) の「v2.1.0-dev.1 へ更新するとき」にあります |
 
-**実行中の cross-refactoring は入れ替わりません。** 更新は次の `init` から効きます。
-
-正式版のチャネル（ref を指定せずに登録した取得元）なら、次で入れ替わります。**動いているセッションには
-反映されない**ため、更新したあとは起動し直してください。開発版を試すために `develop` を登録した場合は、
-[docs/versioning-and-distribution.md の「ランタイムごとの取得と導入」](../../docs/versioning-and-distribution.md#ランタイムごとの取得と導入)
-の手順で ref を指定せずに登録し直してから導入します。
+正式版のチャネル（ref を指定せずに登録した取得元）には、正式版を出すまで届きません。`develop` を登録した取得元なら、
+次で入れ替わります。**動いているセッションには反映されない**ため、更新したあとは起動し直してください。
 
 ```bash
 claude plugin marketplace update ai-plugins
 claude plugin update ndf@ai-plugins
+claude plugin update mcp-serena@ai-plugins
 
 codex plugin marketplace upgrade ai-plugins
 codex plugin add ndf@ai-plugins
+codex plugin add mcp-serena@ai-plugins
 ```
 
 ### 手元で確かめる
 
-どれもファイルを読むか関数を呼ぶか使い方を表示するだけで、課題もファイルも書き換えません。`$SCRIPTS` は
+どれもファイルを読むだけで、課題もファイルも書き換えません。`$SCRIPTS` は
 プラグインの `scripts/` の絶対パスで、決め方は
 [development-workflow/references/scripts-lookup.md](skills/development-workflow/references/scripts-lookup.md)
 にあります。
 
 ```bash
-grep -q '"version": "10.17.8"' "$SCRIPTS/../.claude-plugin/plugin.json"; echo "exit=$?"   # 0 なら この版が入っている
-python3 "$SCRIPTS/../skills/cross-refactoring/scripts/refactor.py" init --help 2>/dev/null | grep -q -- '--budget-minutes'; echo "exit=$?"   # 0 なら cross-refactoring が想定最大時間を受け取る
-python3 -B -c 'import sys; sys.path.insert(0, sys.argv[1]); from refactor_lib import budget; sys.exit(budget.reserve(60, False, 5.5).get("final_fix") != 5.5)' "$SCRIPTS/../skills/cross-refactoring/scripts"; echo "exit=$?"   # 0 なら 最終ゲートの修正 1 回分を控えに入れる
-python3 -B -c 'import sys; sys.path.insert(0, sys.argv[1]); from assignment import choose_implementer; sys.exit(choose_implementer(["codex", "claude"], "claude") != ("claude", "host"))' "$SCRIPTS/lib"; echo "exit=$?"   # 0 なら 実装担当をホストに決める（輪番が無い）
-grep -qF '_num("NDF_RELAY_QUIET", 5)' "$SCRIPTS/relay.py"; echo "exit=$?"   # 0 なら 中継の静まりの既定が 5 秒
+grep -q '"version": "10.17.9-dev.1"' "$SCRIPTS/../.claude-plugin/plugin.json"; echo "exit=$?"   # 0 なら この版が入っている
+grep -qF 'mcp__plugin_mcp-serena_serena__' "$SCRIPTS/../agents/qa.md"; echo "exit=$?"   # 0 なら qa エージェントが mcp-serena のツール名を指す
+grep -qF 'find_referencing_symbols' "$SCRIPTS/../skills/refactoring/SKILL.md"; echo "exit=$?"   # 0 なら refactoring がシンボル単位の手順を示す
 ```
 
 ## Playwright テストについて
@@ -338,7 +330,7 @@ agy models   # 認証の確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.17.8/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.17.9-dev.1/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -360,14 +352,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.8/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.9-dev.1/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.17.8  <path>
+# => ndf@ai-plugins  installed, enabled  10.17.9-dev.1  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。

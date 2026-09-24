@@ -9,6 +9,33 @@
 **開発版（接尾辞の付いた版）は載せない。** `9.8.0` は `9.8.0-dev.1` までしか出ておらず、
 その内容は `10.0.0` で届いている。
 
+## [ndf 10.17.9] - 2026-09-24
+
+### 変更
+
+- **エージェント定義が指す Serena のツール名を、mcp-serena プラグインが出す名前へ揃えた**（#818）。`corder` / `qa` は
+  `mcp__plugin_mcp-serena_serena__*`（Codex では `mcp__serena__*`）を指し、`director` は memory のツールを使わない旨を書いた
+- **`refactoring` / `tdd-cycle` / `problem-solving` と `debugger` エージェントが、Serena が使えるときはシンボル単位で
+  読み書きする手順を示すようにした**（#818）。`find_symbol` / `find_referencing_symbols` / `replace_symbol_body` を使い、
+  ファイルを丸ごと読まない。使えなければ Grep と Read を使う
+
+## [mcp-serena 2.1.0] - 2026-09-24
+
+### 追加
+
+- **言語サーバを設定する Skill `/mcp-serena:language-servers` を足した**（#818）。追跡しているファイルの拡張子を数えて
+  言語を採り、`.serena/project.yml` を書き、1 言語ずつ起動を検証する。Claude Code の公式 LSP プラグインと言語サーバの
+  本体の欠けを、導入のコマンドとともに示す
+- **SessionStart の hook が、設定の食い違いと導入の欠けだけを知らせるようにした**（#818）
+- **PreToolUse の hook を足した**（#818）。設定した言語のファイルの grep・読み込みが続くと 1 度だけ止め、シンボル単位の
+  手順を示す。Claude Code の許可のモードが `acceptEdits` / `auto` のとき、Serena のツールを自動で許可する
+- **Codex 向けの起動の定義（`.codex.mcp.json`、`--context codex`）と hook（`hooks/codex.json`）を足した**（#818）
+
+### 変更
+
+- **Serena を `serena-agent==1.7.0` に固定し、`--project-from-cwd` と `no-memories` / `no-onboarding` で起動するようにした**
+  （#818）。Claude Code / Kiro CLI の文脈は `ide-assistant` から `claude-code` へ変えた
+
 ## [ndf 10.17.8] - 2026-09-24
 
 ### 変更
