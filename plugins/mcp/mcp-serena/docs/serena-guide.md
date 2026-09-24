@@ -1,73 +1,68 @@
 # Serena MCP ガイド
 
-Serena MCPはセマンティックコードインテリジェンスツールです。
-コード操作専用。メモリー機能は使用しません。
+Serena はシンボル単位でコードを読み書きするための MCP サーバです。コード操作だけに使い、
+memory は使いません。
 
-## アクティベーション
+## 使い始める前に
 
-プロジェクトで使用する前にアクティベートが必要です。
+**言語サーバの設定はプロジェクトごとに行う。** 使うリポジトリで 1 度
+`/mcp-serena:language-servers` を実行し、`.serena/project.yml` の `language_servers` を
+書きます（詳細は `README.md`）。プロジェクトの有効化は `--project-from-cwd` で自動に行われる
+ため、`activate_project` は呼びません（Claude Code の文脈には無いツールです）。
 
-```
-mcp__plugin_mcp-serena_serena__activate_project /path/to/project
-mcp__plugin_mcp-serena_serena__check_onboarding_performed
-```
+ツール名の接頭辞はランタイムで違います。
 
-## コード探索（推奨順序）
+| ランタイム | 接頭辞 |
+| --- | --- |
+| Claude Code | `mcp__plugin_mcp-serena_serena__` |
+| Codex | `mcp__serena__` |
 
-### 1. ディレクトリ構造の確認
+以下は接頭辞を省いて書きます。
 
-```
-mcp__plugin_mcp-serena_serena__list_dir relative_path="src/" recursive=false
-```
+## コードを読む（推奨の順序）
 
-### 2. シンボル概要の取得（ファイル全体を読む前に）
+ファイルを丸ごと読む前に、シンボルの単位で必要な分だけを読みます。
 
-```
-mcp__plugin_mcp-serena_serena__get_symbols_overview relative_path="path/to/file.py"
-```
+### 1. シンボルの概要（ファイル全体を読む前に）
 
-### 3. シンボル検索
-
-```
-mcp__plugin_mcp-serena_serena__find_symbol name_path="/ClassName/method_name" relative_path="src/" include_body=true
+```text
+get_symbols_overview relative_path="path/to/file.py"
 ```
 
-### 4. パターン検索（シンボル名が不明な場合）
+### 2. シンボルの本体
 
-```
-mcp__plugin_mcp-serena_serena__search_for_pattern substring_pattern="keyword" relative_path="src/"
-```
-
-### 5. リファレンス検索
-
-```
-mcp__plugin_mcp-serena_serena__find_referencing_symbols name_path="/SymbolName" relative_path="src/"
+```text
+find_symbol name_path_pattern="ClassName/method_name" relative_path="src/" include_body=true
 ```
 
-## コード編集
+### 3. 呼び出し元
 
-### シンボル単位の置換
-
-```
-mcp__plugin_mcp-serena_serena__replace_symbol_body name_path="/Class/method" relative_path="file.py" body="new code"
+```text
+find_referencing_symbols name_path="ClassName/method_name" relative_path="src/file.py"
 ```
 
-### シンボルの前後に挿入
+シンボル名が分からないときは、Claude Code では `Grep`、Codex では `search_for_pattern` で
+候補を絞ってから 2 へ進みます。
 
-```
-mcp__plugin_mcp-serena_serena__insert_before_symbol name_path="/FirstSymbol" relative_path="file.py" content="new code"
-mcp__plugin_mcp-serena_serena__insert_after_symbol name_path="/LastSymbol" relative_path="file.py" content="new code"
-```
+## コードを編集する
 
-### シンボル名の変更
+| 目的 | ツール |
+| --- | --- |
+| シンボルの本体を置き換える | `replace_symbol_body` |
+| シンボルの前後に足す | `insert_before_symbol` / `insert_after_symbol` |
+| 名前を変える（参照も追従する） | `rename_symbol` |
+| 参照の無いシンボルを消す | `safe_delete_symbol` |
 
-```
-mcp__plugin_mcp-serena_serena__rename_symbol name_path="/OldName" relative_path="file.py" new_name="NewName"
-```
+## 診断を取る
 
-## 使い分けの原則
+| ランタイム | 手段 |
+| --- | --- |
+| Claude Code（Python / TypeScript / PHP など） | 公式 LSP プラグインの診断が編集の次の手番に届く。呼ぶ手間は無い |
+| Claude Code（Bash） | `get_diagnostics_for_file` |
+| Codex | `get_diagnostics_for_file` |
 
-- ファイル全体を読む前に `get_symbols_overview` で概要を確認
-- シンボル名が分かっている場合は `find_symbol` で直接アクセス
-- シンボル名が不明な場合は `search_for_pattern` で候補を特定
-- 編集は `replace_symbol_body` でシンボル単位で行う（行ベース編集より安全）
+## 誘導の hook
+
+設定した言語のファイルを `Read`・`cat`・`sed -n` などで 3 回続けて読むか、grep を 3 回続ける
+と（混在なら 4 回）、hook が 1 度だけ止めて上の手順を示します。数は止めた時点で戻るため、
+必要ならそのまま同じ操作を続けて構いません。Serena のシンボル系のツールを呼ぶと数が戻ります。

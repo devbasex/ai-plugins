@@ -9,7 +9,7 @@
         "serena",
         "start-mcp-server",
         "--context",
-        "claude-code",
+        "codex",
         "--project-from-cwd",
         "--add-mode",
         "no-memories",

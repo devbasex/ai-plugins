@@ -1,15 +1,26 @@
 {
-  "description": "mcp-serena: Auto-activate Serena on session start",
+  "description": "mcp-serena: 言語サーバの設定の食い違いの通知と、シンボル単位の手順への誘導",
   "hooks": {
     "SessionStart": [
       {
+        "matcher": "startup",
         "hooks": [
           {
             "type": "command",
-            "command": "echo '[mcp-serena] Serena MCPが利用可能です。activate_project でプロジェクトをアクティベートしてください。'",
-            "description": "Output Serena activation reminder",
-            "continueOnError": true,
-            "suppressOutput": false
+            "command": "python3 \"${PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}}/scripts/serena-lsp.py\" hook session-start --client claude-code",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Grep|Read|Bash|mcp__plugin_mcp-serena_serena__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}}/scripts/serena-lsp.py\" hook pre-tool-use --client claude-code",
+            "timeout": 5
           }
         ]
       }

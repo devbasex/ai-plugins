@@ -1,7 +1,7 @@
 {
   "name": "mcp-serena",
-  "version": "2.0.1",
-  "description": "Serena MCP server for semantic code intelligence (symbol search, reference search, refactoring)",
+  "version": "2.1.0",
+  "description": "Serena MCP server (serena-agent 1.7.0) for symbol-level code reading and editing, with a per-project language-server setup skill and hooks that steer repeated grep/reads toward symbol tools",
   "author": {
     "name": "takemi-ohama",
     "url": "https://github.com/takemi-ohama"

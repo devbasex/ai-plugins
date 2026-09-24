@@ -77,6 +77,7 @@ flowchart TD
 ### 1. 構造分析
 
 変更対象の入口・出口・依存を洗い出す。この段階ではコードを直さない。
+Serena が使えるときは、ファイルを丸ごと読まずに `get_symbols_overview` → `find_symbol` → `find_referencing_symbols` の順で入口と呼び出し元を引き、書き換えは `replace_symbol_body` で行う。
 
 | 調べること | 目的 |
 | --- | --- |

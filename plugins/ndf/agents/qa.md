@@ -58,7 +58,7 @@ description: |
   - **用途**: 公開ドキュメント、README、静的HTMLページの品質確認
 
 ### 2. Serena MCP
-- `mcp__plugin_ndf_serena__*` - コードベース分析、シンボル検索、参照チェック
+- `mcp__plugin_mcp-serena_serena__*` - コードベース分析、シンボル検索、参照チェック
 
 ### 3. Chrome DevTools MCP
 - **パフォーマンステスト、動的テスト時のみ使用**
