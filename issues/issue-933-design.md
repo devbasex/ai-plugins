@@ -52,7 +52,7 @@
 | --- | --- | --- |
 | `refactor.py`（入口） | 変える | サブコマンドの登録。ラウンド制のサブコマンドを外し、フェーズのサブコマンドを足す |
 | `commands/setup.py` の `init` | 変える | `--budget-minutes` / `--implementer` を受ける。廃止した引数を知らせて無視する。実装担当を決め、Jev が使えるかを 1 度だけ確かめる。旧い状態ファイルで止める |
-| `commands/propose.py` | 新しく作る（`apply.py` の `merge-proposals` から移す） | `merge-proposals`: 提案の統合・重複の除去・語彙としきい値の検査・候補の上限（30 件）の切り出し |
+| `commands/propose.py` | 新しく作る（`apply.py` の `merge-proposals` から移す） | `merge-proposals`: 鍵（`path` + `symbol` + `smell`）が同じ提案の機械的な統合・語彙としきい値の検査・候補の上限（30 件）の切り出し |
 | `commands/plan.py` | 新しく作る | `merge-plan`: 実装担当の計画を取り込み、順位を決め、見積りを付け、時間に収まる件数を選び、項目ごとの締め切りを出す |
 | `commands/implement.py` | 新しく作る（`apply.py` の取り込みの検査を移す） | `merge-tests` / `merge-implement`: テストの追加と実装の結果を取り込む。コミットと項目の対応を git から検査する |
 | `commands/converge.py` | 変える | `verify`: 項目ごとに限ったテストを走らせ、危険の印を立て、全体のテストを 1 度だけ走らせるかを決める。`merge-fix` / 項目の取り消し |
@@ -61,10 +61,12 @@
 | `refactor_lib/budget.py` | 新しく作る | 見積り・控え・件数の選び方・締め切りの計算（純粋な処理） |
 | `refactor_lib/allocation.py` | 新しく作る | 履歴の読み書きと配分テーブルの集計 |
 | `refactor_lib/danger.py` | 新しく作る | 危険の印の判定（git の事実から） |
-| `refactor_lib/rounds.py` | 外す | ラウンドと輪番の扱い |
+| `refactor_lib/rounds.py` | 外す | ラウンドと輪番の扱い。ラウンドに依らない関数（`item_key` / `item_label` / `item_kind` / `entry_kind` / `deferred_record` と定数 `TEST` / `STRUCTURE`）は `refactor_lib/items.py` へ移す |
+| `refactor_lib/items.py` | 新しく作る | 項目の鍵・表示・種類・見送りの記録（`rounds.py` から移した関数） |
+| `refactor_lib/proposals.py` / `plan.py` / `measure.py` / `outbound.py` | 変える | import の元を `rounds.py` から `items.py` へ替える。`measure.py` はフェーズ別の所要を読む形へ変える |
 | `data/allocation-defaults.json` | 新しく作る | 配分テーブルの初期値と、その出所（#917） |
 | `prompts/propose.md` | 変える | 観点を並べた多面的な提案 |
-| `prompts/plan.md` | 新しく作る | 順位付け・足すテスト・限ったテストのコマンド |
+| `prompts/plan.md` | 新しく作る | 順位付け・足すテスト・限ったテストの対象（`test_targets`） |
 | `prompts/add-tests.md` | 新しく作る（`propose-tests.md` を外す） | 計画が決めたテストだけを足す |
 | `prompts/implement.md` | 新しく作る（`apply.md` を外す） | 計画の順に 1 件ずつ適用し、締め切りを守る |
 | `prompts/fix.md` | 変える | 失敗した項目だけを直す |
@@ -178,11 +180,11 @@ plugins/ndf/scripts/lib/{jev,limits,assignment}.py
 | `kind` | 配分テーブルの種類（`structure/<technique>`）。足すテストは別に `tests` が持つ |
 | `estimate` | `{test, implement, verify}`（分） |
 | `tests[]` | 足すテストの置き場所（空なら足さない） |
-| `test_command` | 限ったテストのコマンド。空なら `--round-test`（省けば `--baseline-test`）を使う |
+| `test_targets` | 限ったテストの対象（パスかノード ID の並び）。進行側がこれから語の並びを組み立てる（下の「実装担当の `plan` の結果ファイル」）。空なら `--round-test`（省けば `--baseline-test`）をそのまま使う |
 | `start_deadline` | 実装に着手してよい最後の時刻 |
 | `status` | 下の状態遷移図 |
 | `commits` | `{test, implement, fix[]}` の SHA |
-| `seconds` | `{test, implement}`。**前のコミットの時刻からこのコミットの時刻までの差**で測る |
+| `seconds` | `{test, implement}`。起点は、そのフェーズで最初の項目なら**そのフェーズの CLI を起動した時刻**（`phases.<名前>.started_at`）、2 件目からは**同じフェーズの直前の項目のコミットの時刻**である。終点はこの項目のコミットの時刻。修正のコミットは項目の所要に入れない |
 | `fix_count` | 修正の回数 |
 | `danger[]` | 立った印（`D1`〜`D5`） |
 
@@ -251,8 +253,8 @@ plugins/ndf/scripts/lib/{jev,limits,assignment}.py
 | `init` | 引数 | `ID` `RUNTIMES` `RUNTIMES_CSV` `IMPL` `WORK` `TMP_DIR` ほか今と同じ。`PHASE`（再開の地点） | 0 / 4 |
 | `merge-proposals` | 参加者の結果ファイル | — | 0 / 2（候補 0 件。最終ゲートへ） |
 | `merge-plan` | 実装担当の `plan` の結果ファイル | `TESTS_NEEDED=0\|1` | 0 / 2（残る項目 0 件。最終ゲートへ） / 4 |
-| `merge-tests` | git の範囲 | — | 0 / 2（残る項目 0 件。足したテストが落ちた項目を見送った結果、テストを足さない項目も残らないとき。最終ゲートへ） |
-| `merge-implement` | git の範囲 | — | 0 / 2（残る項目 0 件。1 件も適用されなかったとき。最終ゲートへ） |
+| `merge-tests` | git の範囲 | — | 0 / 2（残る項目 0 件のとき。最終ゲートへ）。足したテストが今のコードで落ちた項目は、その項目のテストのコミットを取り消して `test_failed` で見送る。計画に無いテストのコミットも取り消す（AC10） |
+| `merge-implement` | git の範囲 | — | 0 / 2（残る項目 0 件。1 件も適用されなかったとき。最終ゲートへ）。コミットの無い項目は `not_done` で見送り、その項目のテストのコミットも取り消す |
 | `verify` | 状態 | `VERIFY=done\|fix` | 0 / 4 |
 | `merge-fix` | git の範囲 | — | 0 |
 | `finalize` | 状態 | — | 0（履歴の追記に失敗しても 0。知らせるだけ） |
@@ -270,14 +272,18 @@ plugins/ndf/scripts/lib/{jev,limits,assignment}.py
 ```json
 {"items": [
   {"key": "src/a.py#Foo.run#long_method", "tier": "high",
-   "tests": ["tests/test_a.py"], "test_command": "pytest tests/test_a.py -q",
+   "tests": ["tests/test_a.py"], "test_targets": ["tests/test_a.py::TestFoo"],
    "merge_into": null, "risk": false}
 ]}
 ```
 
 - `tier` は `high` / `medium` / `low`。候補の全件に付ける
 - `merge_into` は同じ変更だと判断した相手の `key`
-- `test_command` のテストの置き場所は `--scope` のテストの置き場所の中にある（`scope.round_test_roots` の検査を使い回す）。外なら空として扱い、`--round-test` を使う
+- **実装担当はコマンドを返さず、テストの対象（`test_targets`）だけを返す。** 限ったテストのコマンドは進行側が組み立てる。`--round-test`（省けば `--baseline-test`）を `shlex.split` で語に分け、その対象の語を `test_targets` に差し替えた語の並びを `shell=False` で走らせる。対象の語の見分けは `scope.round_test_roots` と同じ規則を使う
+- `test_targets` の各要素は次をすべて満たす。1 つでも満たさなければ、その項目の対象を空として扱い、`--round-test` をそのまま使う（見送らない）
+  - `--scope` のテストの置き場所の中のパスか、そのパスに `::` で続くノード ID である（`scope.round_test_roots` の検査を使い回す）
+  - パスの部分が作業ディレクトリに実在する
+  - シェルの構文の文字（`;` `&` `|` `$` `` ` `` `<` `>` `(` `)` 改行）と空白を含まない
 
 ### Jev の問い（`scripts/lib/jev.py`）
 
@@ -340,11 +346,11 @@ stateDiagram-v2
   [*] --> planned: merge-plan が採る
   [*] --> deferred: 時間・順位・重複ほか
   planned --> tested: テストを足した（足さない項目は飛ばす）
-  planned --> deferred: 足したテストが今のコードで落ちた（test_failed）
+  planned --> deferred: 足したテストが今のコードで落ちた（test_failed。テストのコミットを取り消す）
   planned --> implemented: 実装のコミットがある
   tested --> implemented
   planned --> deferred: 締め切りまでに着手されなかった（not_done）
-  tested --> deferred: 同上
+  tested --> deferred: 同上（テストのコミットを取り消す）
   implemented --> verified: 限ったテストが通った
   implemented --> failing: 落ちた
   failing --> implemented: 修正のコミット
@@ -389,11 +395,13 @@ stateDiagram-v2
 | --- | --- | --- |
 | D1 | 項目のコミットが、項目の `path` と `tests[]` 以外のファイルを触った | `git show --name-only` |
 | D2 | ファイルを消した・名前を変えた | `git diff --name-status` の `D` / `R` |
-| D3 | 触った本番のファイルが `--scope` の外から参照されている。**参照が無いと示せないときも立てる** | 拡張子を除いたファイル名と、項目の `symbol` の名前を `git grep -lw` で `--scope` の外に探す。1 件でも当たれば立てる。触ったファイルがパッケージの入口（`__init__.py` / `index.*` / `mod.rs` など、再 export を持ちうるもの）なら探さずに立てる |
+| D3 | 触った本番のファイルが `--scope` の外から参照されている | 拡張子を除いたファイル名と、項目の `symbol` の名前を `git grep -lw` で `--scope` の外に探す。1 件でも当たれば立てる。触ったファイルがパッケージの入口（`__init__.py` / `index.*` / `mod.rs` など、再 export を持ちうるもの）なら探さずに立てる |
 | D4 | 限ったテストが触った本番のファイルを覆うと示せない | 限ったテストのファイルのどれにも、拡張子を除いたファイル名と `symbol` の名前のどちらも現れなければ立てる |
 | D5 | 公開の入出力が変わりうる | Jev（使えるとき）。使えないときは実装担当の結果の `risk` |
 
-- **D3 と D4 は、覆っていると示せたときだけ印を立てない。** 名前の一致は、別名の import・動的な読み込み・fixture を通じた依存を見落としうる。見落とすのは「参照がある」側ではなく「無い」側なので、名前が当たらない変更は立てる側へ倒す。言語ごとの参照の解決は持たない（決定 20）
+- **D4 は、覆っていると示せたときだけ印を立てない。** 名前が限ったテストに現れない変更は、立てる側へ倒す
+- **D3 は、名前が当たったときとパッケージの入口のときに立てる。** 当たらない（0 件）ときは立てない。名前の一致は、動的な読み込みや文字列で組み立てた import による参照を見落とす。この見落としは**残る危険として受け入れる**。0 件のときにも立てると、`--scope` の外に参照の無い変更でも毎回全体のテストが走り、「原則実施しない」が成り立たない。残る危険は最終ゲート（`cross-review`・継続的統合・全体のテスト）が拾う
+- 言語ごとの参照の解決は持たない（決定 20）
 - **D5 の `risk` は印を立てる側にだけ使う。** 担当の申告で検証を減らすことはしない（結果ファイルの申告を検証に使わない方針を保つ）
 - 印は項目ごとに `items[].danger` へ、全体として走らせた理由は `whole_test.flags` へ残る
 
@@ -418,9 +426,9 @@ stateDiagram-v2
 
 | 大項目 | 実現方式 |
 | --- | --- |
-| 性能・拡張性 | 計画の時点で見積りの合計を使える時間に収める。実装の途中は締め切りで着手を止める。最終ゲートの前までの所要を `report` が想定最大時間と並べて出す |
+| 性能・拡張性 | 計画の時点で見積りの合計を使える時間に収める。実装の途中は締め切りで着手を止める。`init` の開始から、最終ゲートの全体のテスト（走らせたとき）の終わりまでの所要を、`report` が想定最大時間と並べて出す。`cross-review` の所要は含めない |
 | 運用・保守性 | フェーズの所要は進行側の時計、項目の所要はコミットの時刻で測る（担当の申告を使わない）。履歴の行は実行の ID を持ち、初期値のファイルは出所の URL を持つ |
-| 移行性 | 旧い引数は知らせて無視する（1 つの版の間。外すのは次の MINOR 相当の版）。旧い状態は読み替えずに止める |
+| 移行性 | 旧い引数は、この変更を含む版では知らせて無視し、その次の版で外す。旧い状態は読み替えずに止める |
 | セキュリティ | Jev は公開リポジトリに限る。送るのは提案のフィールドと `git diff --stat` の行だけで、差分・ファイルの本文・テストの出力を送らない。鍵は環境変数からだけ読む |
 
 ## テスト設計
@@ -431,7 +439,8 @@ stateDiagram-v2
 | AC4 AC6 | 偽の CLI を使う結合テスト。起動の記録（`launch-cli.sh` の呼び出し）を数える |
 | AC5 | 雛形を展開した結果に観点の語彙の値が並ぶことを、`launch-cli.sh` の展開の単体で見る（文言ではなく、語彙の値の列挙を見る） |
 | AC7 AC8 AC9 | `budget.py` の単体（見積り・控え・飛ばして詰める・締め切り）と `merge-plan` の単体 |
-| AC10 AC11 | git を使う結合（項目に紐づかないテストのコミットの取り消し、1 項目 = 1 コミット） |
+| AC10 AC11 | git を使う結合（項目に紐づかないテスト・`test_failed`・`not_done` のテストのコミットの取り消し、1 項目 = 1 コミット） |
+| AC10b | 語の並びの組み立ての単体（差し替え・シェルの構文の文字・範囲の外・実在しないパスで `--round-test` に戻る）と、`shell=False` で走ることの単体 |
 | AC12 | `merge-implement` の単体（コミットの無い項目が `not_done` になる）と、雛形に締め切りが渡る単体 |
 | AC13 AC14 | `danger.py` の単体（D1〜D5）と `verify` の結合（全体のテストが 2 回走らない） |
 | AC15 AC16 | git を使う結合（項目の単位の取り消し・隣接する変更の退避） |
