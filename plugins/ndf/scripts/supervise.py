@@ -36,6 +36,9 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
 パートに分ける: work の段に `"parts": [{"name": ..., "files": [...]}, ...]` を書くと、パートごとに
 新しい文脈の claude -p の段（`<id>-1`, `<id>-2`, ...）へ展開する。大きな実装は分けて書く。
 
+段ごとの作業場所: run と work の段に `"cwd"` を書くと、その段だけ別の場所で動く（取り込みで PR ごとに
+作業ツリーが違うとき）。
+
 段の遷移:
 - `next` に `end` を書くと、そこで持ち場を完了として終える
 - run: 終了コード 0 なら `next`（無ければ次の段）。0 以外なら `on_fail`（無ければ止まる）
@@ -262,7 +265,7 @@ class Supervisor:
     def do_run(self, step: dict) -> tuple[bool, str]:
         started = time.time()
         try:
-            p = subprocess.run(step["cmd"], shell=True, cwd=self.cwd, capture_output=True,
+            p = subprocess.run(step["cmd"], shell=True, cwd=step.get("cwd", self.cwd), capture_output=True,
                                text=True, timeout=step.get("timeout", 3600))
             code, text = p.returncode, p.stdout + p.stderr
         except subprocess.TimeoutExpired as e:
@@ -276,7 +279,8 @@ class Supervisor:
         if step.get("full"):
             # Skill の本文が手順を持つ。プロンプトは Skill の呼び出しをそのまま渡す
             prompt = step["prompt"]
-        res = call_claude(FULL_SYSTEM if step.get("full") else WORK_SYSTEM, prompt, WORK_TOOLS, self.cwd, step.get("timeout", 1800),
+        res = call_claude(FULL_SYSTEM if step.get("full") else WORK_SYSTEM, prompt, WORK_TOOLS,
+                          step.get("cwd", self.cwd), step.get("timeout", 1800),
                           full=bool(step.get("full")))
         self.add_usage("work", res)
         self.cur.update(exit=0 if res["ok"] else 1, text=res["text"], seconds=res["seconds"])
