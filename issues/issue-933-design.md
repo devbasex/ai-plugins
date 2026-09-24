@@ -244,7 +244,7 @@ plugins/ndf/scripts/lib/{jev,limits,assignment}.py
 | `--budget-minutes N` | 新しい。1 以上の整数。それ以外は終了コード 4 | 60 |
 | `--implementer NAME` | 新しい。参加者の中の 1 者。参加者に無ければ終了コード 4 | 下の決め方 |
 | `--max-fix-rounds N` | 意味が変わる。**1 項目あたり**の修正の上限 | 3 |
-| `--round-test CMD` | 意味は変わらない。**`--baseline-test` の先頭のプログラムが既知の実行器（下の「実装担当の `plan` の結果ファイル」の組み立ての表）でなければ、対象の語の有無にかかわらず必須になる。** 省くと `init` が終了コード 4 で止まる。省いたまま進むと、全項目が `no_target` になり、提案と計画に使った時間の後に何も適用されずに終わるためである | `--baseline-test` を差し替えの元にする |
+| `--round-test CMD` | 意味は変わらない。**`--baseline-test` の実行器が既知の実行器（下の「実装担当の `plan` の結果ファイル」の組み立ての表）でなければ、対象の語の有無にかかわらず必須になる。** 省くと `init` が終了コード 4 で止まる。省いたまま進むと、全項目が `no_target` になり、提案と計画に使った時間の後に何も適用されずに終わるためである | `--baseline-test` を差し替えの元にする |
 | `--max-test-rounds` / `--max-outer-rounds` / `--max-items-per-round` | 廃止。受け取ると `⚠ <引数> は廃止しました（#933）。--budget-minutes で所要を決めます` を標準エラーへ出して無視する | — |
 | そのほか（`--scope` / `--baseline-test` / `--host` / `--exclude` / `--include` / `--require-all` / `--model` / `--ci-check` / `--workflow-step` / `--severity-threshold` / `--test-timeout` / `--sync-command` / `--plan-file`） | 変えない | 今と同じ |
 
@@ -284,9 +284,9 @@ plugins/ndf/scripts/lib/{jev,limits,assignment}.py
 - `tier` は `high` / `medium` / `low`。候補の全件に付ける
 - `merge_into` は同じ変更だと判断した相手の `key`
 - **実装担当はコマンドを返さず、テストの対象（`test_targets`）だけを返す。** 限ったテストのコマンドは進行側が組み立てる。`--round-test`（省けば `--baseline-test`）を差し替えの元とし、`shlex.split` で語に分ける。対象の語の見分けは `scope.round_test_roots` と同じ規則を使う
-- 組み立て方は、**元のコマンドの先頭のプログラム**と対象の語の数で決まる。組み立てた語の並びは `shell=False` で走らせる。**既知の実行器**は、位置引数をテストのファイルのパスとして受け取る `pytest` / `python -m pytest` / `jest` / `npx jest` / `vitest` / `npx vitest` だけである
+- 組み立て方は、**元のコマンドの実行器**と対象の語の数で決まる。組み立てた語の並びは `shell=False` で走らせる。**既知の実行器**は、位置引数をテストのファイルのパスとして受け取る `pytest` / `python -m pytest` / `python3 -m pytest` / `jest` / `vitest` だけである。実行器の前に置く起動の前置き（`uv run [オプション]` / `poetry run` / `npx`）は読み飛ばし、その後ろの語で判定する。`uv run` のオプションの値（`--project <パス>` / `--with <名前>` など）は、`scope.round_test_roots` が `VALUE_OPTIONS` で既に読み分けている規則で飛ばす。たとえば `uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest pytest plugins/ndf/skills/cross-refactoring -q` は、既知の実行器 `pytest` と対象の語 1 つとして読む
 
-  | 先頭のプログラム | 対象の語 | 組み立て |
+  | 実行器（前置きを読み飛ばした後） | 対象の語 | 組み立て |
   | --- | --- | --- |
   | 既知の実行器 | 1 つ以上 | 対象の語を取り除き、その最初の位置へ `test_targets` を並べる |
   | 既知の実行器 | 0 個 | 末尾へ `test_targets` を足す |
@@ -404,6 +404,8 @@ stateDiagram-v2
 1. `implemented` の項目ごとに、HEAD で限ったテストを走らせる
 2. 落ちた項目のうち、`fix_count` が上限に達したもの、または修正の残り時間が `fix` に足りないものを取り消す。修正の残り時間は `started_at + budget_minutes − danger_whole_test − final_whole_test − 今` で測る（控えの `fix` を差し引かない終わりから測る。`T` から測ると、控えた修正 1 回分が使われない）（項目の単位。隣接する変更は今と同じく全件の取り消しへ退避）
 3. 残りの落ちた項目があれば `VERIFY=fix` を返す（駆動が修正を 1 回起動する）
+   - **同じ語の並びを共有した項目は、1 つの修正の対象としてまとめて扱う。** 共有したコマンドが落ちたとき、どの項目が壊したかはその 1 回からは分からない。修正は共有した項目の全部を対象に 1 回起動し、`fix_count` も共有した項目に同じだけ数える
+   - 共有した項目を取り消すとき（上限か残り時間）は、**新しい項目から 1 件ずつ取り消し、そのたびに共有したコマンドを走らせ直し、通った時点で止める。** 通る前に取り消した項目だけが見送りになり、古い項目のコミットは残る（AC15）。走らせ直しは限ったテストで、全体のテストではない
 4. 落ちた項目が無くなったら危険の印を判定する。印が 1 つでもあり、`whole_test.ran` が偽なら全体のテストを 1 度走らせる
 5. 全体のテストが落ちたら、印を持つ項目を新しい順に取り消し、`whole_test.reverted` を真にする。**検証の中では走らせ直さない。** 取り消した後の HEAD は最終ゲートが全体のテストで確かめる（下の「最終ゲートとの関係」）
 6. `VERIFY=done` を返す
@@ -470,10 +472,10 @@ stateDiagram-v2
 | AC5 | 雛形を展開した結果に観点の語彙の値が並ぶことを、`launch-cli.sh` の展開の単体で見る（文言ではなく、語彙の値の列挙を見る） |
 | AC7 AC8 AC9 | `budget.py` の単体（見積り・控え・飛ばして詰める・締め切り）と `merge-plan` の単体 |
 | AC10 AC11 | git を使う結合（項目に紐づかないテスト・`test_failed`・`not_done` のテストのコミットの取り消し、1 項目 = 1 コミット） |
-| AC10b | 語の並びの組み立ての単体（既知の実行器で対象の語を差し替える・対象の語が 0 個なら末尾に足す・既知でない実行器（`make -C backend test`・`cargo test`・ラッパー）は差し替えられない・シェルの構文の文字・範囲の外・実在しないパスで `--round-test` に戻る・`--round-test` が無ければ `no_target` で見送る）と、`shell=False` で走ることの単体 |
+| AC10b | 語の並びの組み立ての単体（既知の実行器で対象の語を差し替える・`uv run --project <パス> --with pytest pytest <対象>` を既知の実行器として読む・対象の語が 0 個なら末尾に足す・既知でない実行器（`make -C backend test`・`cargo test`・ラッパー）は差し替えられない・シェルの構文の文字・範囲の外・実在しないパスで `--round-test` に戻る・`--round-test` が無ければ `no_target` で見送る）と、`shell=False` で走ることの単体 |
 | AC12 | `merge-implement` の単体（コミットの無い項目が `not_done` になる）と、雛形に締め切りが渡る単体 |
 | AC13 AC14 | `danger.py` の単体（D1〜D5）と `verify` の結合（全体のテストが 2 回走らない） |
-| AC15 AC16 | git を使う結合（項目の単位の取り消し・隣接する変更の退避） |
+| AC15 AC16 | git を使う結合（項目の単位の取り消し・隣接する変更の退避・同じ語の並びを共有した項目が落ちたとき、新しい項目から 1 件ずつ取り消して通った時点で止まり、古い項目のコミットが残る） |
 | AC16b | `final-gate` の単体（`whole_test.reverted` が真で `--ci-check` が無いとき、単独起動でも全体のテストを走らせる。落ちたら `final-fix` の経路を返す） |
 | AC17〜AC20 | `allocation.py` の単体（`NDF_METRICS_DIR` を一時ディレクトリへ向ける。#938 の汚染を繰り返さない） |
 | AC17 | `finalize` の単体（工程の 1 つで最終ゲートが通った・通らない、単独起動で `--review-status` が `approved`・それ以外・渡されない） |
