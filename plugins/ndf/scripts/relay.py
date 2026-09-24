@@ -508,14 +508,8 @@ class Relay:
         期限に達すれば None を返す。"""
         master_open = True
         while True:
-            try:
-                wpid, status = os.waitpid(self.pid, os.WNOHANG)
-            except ChildProcessError:
-                wpid, status = self.pid, 0
-            if wpid:
-                self.drain()
-                os.close(self.fd)
-                self.fd = -1
+            status = self._reap()
+            if status is not None:
                 return ("exit", status)
             if until is not None and time.time() >= until:
                 return None
@@ -526,33 +520,58 @@ class Relay:
                 r, _, _ = select.select(fds, [], [], 0.1)
             except InterruptedError:
                 r = []
-            if self.fd in r:
+            master_open = self._relay_ready(r, master_open)
+            result = self._due_tick(tick)
+            if result is not None:
+                return result
+
+    def _reap(self) -> int | None:
+        """子が終わっていれば残りの出力を流して fd を閉じ、終了状態を返す。"""
+        try:
+            wpid, status = os.waitpid(self.pid, os.WNOHANG)
+        except ChildProcessError:
+            wpid, status = self.pid, 0
+        if not wpid:
+            return None
+        self.drain()
+        os.close(self.fd)
+        self.fd = -1
+        return status
+
+    def _relay_ready(self, r: list[int], master_open: bool) -> bool:
+        """読める fd の入出力を転送し、master が開いたままかを返す。"""
+        if self.fd in r:
+            try:
+                data = os.read(self.fd, 65536)
+            except OSError:
+                data = b""
+            if data:
+                self.write_out(data)
+            else:
+                master_open = False
+        if 0 in r:
+            try:
+                data = os.read(0, 4096)
+            except OSError:
+                data = b""
+            if data:
+                self.last_input = time.time()
                 try:
-                    data = os.read(self.fd, 65536)
+                    os.write(self.fd, data)
                 except OSError:
-                    data = b""
-                if data:
-                    self.write_out(data)
-                else:
-                    master_open = False
-            if 0 in r:
-                try:
-                    data = os.read(0, 4096)
-                except OSError:
-                    data = b""
-                if data:
-                    self.last_input = time.time()
-                    try:
-                        os.write(self.fd, data)
-                    except OSError:
-                        pass
-                else:
-                    self.stdin_open = False
-            if tick is not None and time.time() - self.last_tick >= self.poll:
-                self.last_tick = time.time()
-                v = tick()
-                if v is not None:
-                    return ("tick", v)
+                    pass
+            else:
+                self.stdin_open = False
+        return master_open
+
+    def _due_tick(self, tick):
+        """期限の来た tick を実行し、値を返せば ("tick", 値) を返す。"""
+        if tick is not None and time.time() - self.last_tick >= self.poll:
+            self.last_tick = time.time()
+            v = tick()
+            if v is not None:
+                return ("tick", v)
+        return None
 
     def drain(self) -> None:
         while True:
