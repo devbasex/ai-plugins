@@ -34,17 +34,17 @@
 - `/ndf:install-wrapper status` で、読み込み先・囲みの形・写しの版を見られる
 - **devbase では `~/.claude` が同じアカウントグループのコンテナで共有される。** 写しと中継の rc はコンテナを作り直しても残り、導入・取り外しの効果は同じグループの全コンテナに及ぶ
 
-**写しは SessionStart hook が今の版に保つ。** 写しか 10.17.4 の写し（`${XDG_DATA_HOME:-~/.local/share}/ndf/relay.py`）が
+**写しは SessionStart hook が今の版に保つ。** 写しか 10.17.4〜10.17.6 の写し（`${XDG_DATA_HOME:-~/.local/share}/ndf/relay.py`）が
 在れば、起動ごと（新しい会話・`-c`・`--resume`）に今のプラグインの `relay.py` で置き直す。無い写しは作らない。
 写しの版が今のプラグインより新しければ置き直さない（同じ `~/.claude` を共有する古い版のコンテナが写しを
 後退させないため）。
 
-### 10.17.4 から上げた利用者
+### 10.17.4〜10.17.6 から上げた利用者
 
-10.17.4 の SessionStart hook は、`~/.bashrc` か `~/.zshrc` へ alias の囲みを自動で足していた。次の版では:
+10.17.4〜10.17.6 の SessionStart hook は、`~/.bashrc` か `~/.zshrc` へ alias の囲みを自動で足していた。次の版では:
 
-- 起動したときに 1 度だけ「10.17.4 が自動で足したもの。使い続けるなら何もしなくてよい。外すなら `/ndf:install-wrapper uninstall`」と知らせる
-- 何もしなければ、その囲みの alias が指す 10.17.4 の写し（hook が今の版で置き直す）で中継が動く
+- 起動したときに 1 度だけ「10.17.4〜10.17.6 が自動で足したもの。使い続けるなら何もしなくてよい。外すなら `/ndf:install-wrapper uninstall`」と知らせる
+- 何もしなければ、その囲みの alias が指す 10.17.4〜10.17.6 の写し（hook が今の版で置き直す）で中継が動く
 - `/ndf:install-wrapper` を打つと、囲みの中だけを読み込みの 1 行へ置き換える
 - `NDF_RELAY_AUTO` は意味を失った（hook が導入しないため）。置いたままでも害は無い
 
@@ -52,10 +52,10 @@
 
 | したいこと | 手段 |
 | --- | --- |
-| 外す | `/ndf:install-wrapper uninstall`。`~/.bashrc` と `~/.zshrc` の囲みを外し（バックアップの後。囲みの外は変えない）、読み込み先のファイル・中継の rc・写し・10.17.4 の写しを消す。開いているシェルでは `unset -f claude`（10.17.4 の囲みなら `unalias claude`）で外れる |
+| 外す | `/ndf:install-wrapper uninstall`。`~/.bashrc` と `~/.zshrc` の囲みを外し（バックアップの後。囲みの外は変えない）、読み込み先のファイル・中継の rc・写し・10.17.4〜10.17.6 の写しを消す。開いているシェルでは `unset -f claude`（10.17.4〜10.17.6 の囲みなら `unalias claude`）で外れる |
 | 手で外す | 囲みの行を消し、`~/.claude/ndf/` の `relay.py`・`relay.version`・`shellrc` を消す |
 | 過去の版へ戻した | `/ndf:install-wrapper` を打ち直す（明示の導入は版を比べずに今の版を置く） |
-| `/ndf:install-wrapper` を持たない 10.17.4 以前へ戻す | **戻す前に** `/ndf:install-wrapper uninstall` を打つ。戻した後なら囲みと `~/.claude/ndf/` を手で消す |
+| `/ndf:install-wrapper` を持たない 10.17.6 以前へ戻す | **戻す前に** `/ndf:install-wrapper uninstall` を打つ。戻した後なら囲みと `~/.claude/ndf/` を手で消す |
 
 ## 中継を挟まない起動
 

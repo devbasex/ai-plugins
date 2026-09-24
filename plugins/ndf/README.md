@@ -139,7 +139,7 @@ agy plugin list
 | **2 つ目以降の区間へ起動の方針の引数を引き継ぎます**（#936） | 最初の区間の `--dangerously-skip-permissions`・`--model` などを次の区間にも付けます。`--resume`・`--continue`・`--session-id`・`--name`・`--worktree` などと最初のプロンプトは引き継ぎません。引き継いだ引数は記録の `start` の行の `carried` に残ります |
 
 **10.17.4〜10.17.6 で中継が自動で入った利用者へ。** 更新しても `~/.bashrc` / `~/.zshrc` の囲みは
-そのまま残り、次の起動で「10.17.4 が自動で足したもの…」の 1 行が 1 度だけ出ます。
+そのまま残り、次の起動で「10.17.4〜10.17.6 が自動で足したもの…」の 1 行が 1 度だけ出ます。
 
 | したいこと | すること |
 | --- | --- |
@@ -271,7 +271,7 @@ Claude Code の SessionStart hook（`hooks/claude.json`）は上記に加えて�
 - `~/.claude/settings.json` の `cleanupPeriodDays` を 90 日以上に保つ
 - statusline 未設定時に NDF 標準 statusline を設定する
 - 区間の切れ目の中継（`scripts/relay.py`）の写しが在れば今の版で置き直す（`relay.py startup`。
-  版は後退させない）。10.17.4 が自動で足した alias の囲みが残っていれば 1 度だけ知らせる。
+  版は後退させない）。10.17.4〜10.17.6 が自動で足した alias の囲みが残っていれば 1 度だけ知らせる。
   **シェルの設定は書かない。** 中継を入れる・外すのは `/ndf:install-wrapper`（Claude Code だけ）
 
 Claude Code の Stop hook は終了時に Slack 通知スクリプトを実行します。通知に必要な環境変数が

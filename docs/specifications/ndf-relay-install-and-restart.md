@@ -32,7 +32,7 @@
 
 | 順 | 誰が | 何をする |
 | ---: | --- | --- |
-| 1 | 10.17.4 の利用者 | 次の版へ上げて claude を起動する。SessionStart hook の `relay.py startup` が、10.17.4 が置いた旧い写し（`~/.local/share/ndf/relay.py`）を今の版で置き直し、`rc-added` に載った `~/.bashrc` に囲みが残っているのを読んで、「10.17.4 が自動で足したもの…」の 1 行を 1 度だけ出す。シェルの設定は書かない |
+| 1 | 10.17.4 の利用者 | 次の版へ上げて claude を起動する。SessionStart hook の `relay.py startup` が、10.17.4 が置いた旧い写し（`~/.local/share/ndf/relay.py`）を今の版で置き直し、`rc-added` に載った `~/.bashrc` に囲みが残っているのを読んで、「10.17.4〜10.17.6 が自動で足したもの…」の 1 行を 1 度だけ出す。シェルの設定は書かない |
 | 2 | 同じ利用者 | そのまま `claude` と打つ。囲みの alias が、置き直された旧い写しの中継を起こす |
 | 3 | 新しい利用者 | claude の中で `/ndf:install-wrapper` を打つ。写しを `~/.claude/ndf/relay.py`、`claude` の関数を `~/.claude/ndf/shellrc` に置き、`~/.bashrc` をバックアップしてから、`shellrc` を読む 1 行の囲みを足す。次に開いたシェルから効く |
 | 4 | どちらの利用者も | 中継の下で `/ndf:restart` を打つ。claude が再開用のコマンドを `ndf-next` のブロックで出して応答を終え、中継が静まり（15 秒）の後に `/exit` → 更新 → 起動を行う |
@@ -44,12 +44,12 @@
 | 用語 | 意味 |
 | --- | --- |
 | 囲み | シェルの設定の `# >>> ndf relay >>>` から `# <<< ndf relay <<<` までの行 |
-| 自動の囲み | 10.17.4 の SessionStart hook が足した囲み。状態の親の記録 `rc-added` に載り、`rc-user` に載らないパスの、今もある囲み |
+| 自動の囲み | 10.17.4〜10.17.6 の SessionStart hook が足した囲み。状態の親の記録 `rc-added` に載り、`rc-user` に載らないパスの、今もある囲み |
 | 写し | `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/relay.py`。中継の rc の関数が起こす中継の本体 |
 | 写しの版 | 写しの横の `relay.version`。写しを置いたプラグインの版の 1 行 |
 | 中継の rc | `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/shellrc`。`claude` の関数を定義する |
 | 読み込み | 中継の rc を、在るときだけ読む 1 行。読み込み先のファイル（`$DEVBASE_SHELLRC_DIR/ndf-relay.sh`）か、シェルの設定の囲みの中に置く |
-| 旧い写し | `${XDG_DATA_HOME:-~/.local/share}/ndf/relay.py`。10.17.4 が置いた写しで、10.17.4 の囲みの alias が指す |
+| 旧い写し | `${XDG_DATA_HOME:-~/.local/share}/ndf/relay.py`。10.17.4〜10.17.6 が置いた写しで、10.17.4〜10.17.6 の囲みの alias が指す |
 | 状態の親 | `${XDG_STATE_HOME:-~/.local/state}/ndf/relay/`。記録（`rc-added` など）と作業ディレクトリを持つ |
 | 再開用のコマンド | 再起動した claude へ最初の入力として渡す中身（`ndf-next` のブロックの中身と同じ扱い） |
 | 質問の印 | 作業ディレクトリの `question`。質問が表示されているあいだ在る |
