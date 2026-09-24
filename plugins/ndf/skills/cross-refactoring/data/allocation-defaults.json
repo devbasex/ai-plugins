@@ -1,0 +1,12 @@
+{
+  "source": {
+    "url": "https://github.com/devbasex/ai-plugins/pull/917#issuecomment-5796914428",
+    "note": "#917 の実行の要約（launches の実測）から、適用の CLI の実測の秒を件数で割った値。担当の申告は使わない。提案と採否の時間は含めない（#933 決定 9）"
+  },
+  "values": {
+    "test": {"minutes": 2.7, "formula": "テスト整備の適用 1592 秒 ÷ 10 件"},
+    "structure": {"minutes": 1.3, "formula": "構造改善の適用 1126 秒 ÷ 15 件"},
+    "verify": {"minutes": 0.2, "formula": "群の検証の中央値 10.1 秒（群を項目へ読み替える）"},
+    "fix": {"minutes": 5.5, "formula": "#917 は修正 0 回。構造改善の群の適用の中央値 330 秒で代える（未確認）"}
+  }
+}

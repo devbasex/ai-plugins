@@ -22,7 +22,7 @@ from typing import Any, Optional
 
 import statefile
 
-from .. import die, info
+from .. import clock, die, info, timeline
 from ..gitfacts import (
     discard_impl_leftovers,
     flush_pending_push,
@@ -41,54 +41,90 @@ from ..intake import (
     close_without_result,
     discard_unverified,
 )
-from ..paths import git_out, load_state
-from ..rounds import impl_for_seq
-from ..scope import round_test_command
+from ..paths import git_out, load_state, work_dir
 from ..verify import verify_final_fix_commit
-from ..vocabulary import DEFAULT_TEST_TIMEOUT
 from ..verify import unassigned_fix_commits
 
 
 def cmd_final_gate(args: argparse.Namespace) -> None:
-    """Step 7 — 最終ゲートを通す。
+    """最終ゲートを通す（#933 の AC16b・決定 15・決定 16）。
 
     終了コード: 0 = 通過（または `cross-review` を実行する） / 2 = 落ちた
-    （修正ラウンドへ） / 1 = 修正の上限に達した（**取り消さず**報告へ抜ける）。
+    （修正ラウンドへ） / 1 = 修正を打ち切った（想定最大時間の終わり）（**取り消さず**報告へ抜ける）。
 
-    **Step 7 は push 済みの地点である。** 上限に達しても取り消さない。取り消しの
+    **最終ゲートは push 済みの地点である。** 打ち切っても取り消さない。取り消しの
     判断は Pull Request の読み手が持つため、失敗として報告に書く。
 
-    **単独起動でも、群を範囲のテストで検証してきたなら全体のテストを 1 回通す**
-    （#880）。範囲の外への波及を見る機会が、ほかに無いためである。通れば今のとおり
-    `cross-review` へ渡し、落ちれば工程として起動したときと同じ修正ラウンドへ入る。
+    | 起動のされ方 | 見るもの |
+    | --- | --- |
+    | `--ci-check` あり | 継続的統合の結果 |
+    | `--ci-check` なし | HEAD で全体のテストを 1 度。検証の中で通り、取り消しが無く、HEAD が進んでいなければ使い回す |
+
+    単独起動は、通れば `cross-review` へ渡す（`FINAL_GATE=cross-review`）。
     """
     path, state = load_state(args.id)
     gate = state.setdefault("final_gate", {"fix_rounds": 0, "checks": []})
     standalone = not state.get("workflow_step")
+    state["phase"] = "final"
 
-    if standalone and not _round_test_differs(state):
-        _emit_cross_review(
-            path, state, gate, "単独起動のため、Step 7 は /ndf:cross-review を実行します"
-        )
-        return
-
-    passed, detail = _run_and_record_gate_check(state, gate)
+    if _reusable_whole_test(state):
+        gate["whole_test_reused"] = True
+        passed, detail = True, "検証の中で通った全体のテストを使い回しました（HEAD は進んでいません）"
+        gate["mode"] = "test"
+    else:
+        passed, detail = _run_and_record_gate_check(state, gate)
 
     if passed and standalone:
         _emit_cross_review(
             path, state, gate,
-            f"✅ 全体のテストが通りました（{detail}）。Step 7 は /ndf:cross-review を実行します",
+            f"✅ 最終ゲートの検査が通りました（{detail}）。続けて /ndf:cross-review を実行します",
         )
         return
     if passed:
         _gate_passed(path, state, gate, detail)
         return
 
-    limit = safe_int(state.get("max_fix_rounds"), 3)
-    if safe_int(gate.get("fix_rounds")) >= limit:
-        _gate_limit_reached(path, state, gate, detail, limit)
+    stop = _final_fix_stop(state, gate)
+    if stop:
+        _gate_limit_reached(path, state, gate, detail, stop)
         return
-    _gate_failing(path, state, gate, detail, limit)
+    _gate_failing(path, state, gate, detail)
+
+
+def _final_fix_stop(state: dict[str, Any], gate: dict[str, Any]) -> Optional[str]:
+    """最終ゲートの修正を打ち切る理由。続けられれば `None`（決定 23）。
+
+    **回数ではなく時計で決める。** 終わり（`limits.final_end_at` = 開始 + 想定最大時間）を
+    過ぎていれば打ち切る。起動し直しても解けない結末（利用上限）も打ち切る。
+
+    **ただし 1 度も試みていなければ時計で打ち切らない**（決定 26）。修正 1 回分の控え
+    （`plan.reserve.final_fix`）を計画の時点で予算から差し引いてあり、予算を使い切った後に
+    落ちても必ず 1 度は直しを試みる。
+    """
+    if gate.get("no_relaunch"):
+        return "修正担当を起動し直しても解けない結末だった"
+    if safe_int(gate.get("fix_rounds")) == 0:
+        return None
+    end = clock.parse(timeline.limits_of(state).get("final_end_at"))
+    if end is not None and clock.now() >= end:
+        return "想定最大時間の終わりを過ぎた"
+    return None
+
+
+def _reusable_whole_test(state: dict[str, Any]) -> bool:
+    """検証の中の全体のテストを使い回せるか（決定 16）。
+
+    `--ci-check` があれば使い回さない（継続的統合が見る）。検証の中で走って通り、
+    取り消しが無く（`whole_test.reverted` が偽）、その後に HEAD が 1 つも進んでいない
+    ときだけ真。生成物の同期のコミットが積まれていれば HEAD が進んでいるので走らせる。
+    """
+    if str(state.get("ci_check") or "").strip():
+        return False
+    record = state.get("whole_test") or {}
+    if not (record.get("ran") and record.get("status") == "pass") or record.get("reverted"):
+        return False
+    head = git_out(work_dir(state), ["rev-parse", "HEAD"])
+    return bool(head) and head == record.get("head")
 
 
 def _run_and_record_gate_check(
@@ -104,10 +140,11 @@ def _run_and_record_gate_check(
     passed, detail = (
         _ci_gate(state, ci_check) if ci_check else _local_gate(state)
     )
-    _record_gate_check(
-        gate, ci_check or _baseline_command(state), passed, detail,
-        round(time.monotonic() - started, 1),
-    )
+    seconds = round(time.monotonic() - started, 1)
+    _record_gate_check(gate, ci_check or _baseline_command(state), passed, detail, seconds)
+    if not ci_check:
+        # 履歴の `whole_test.final`（AC17）。修正の後に走らせ直したときは足し込む。
+        gate["whole_test_seconds"] = round(float(gate.get("whole_test_seconds") or 0.0) + seconds, 1)
     return passed, detail
 
 
@@ -115,7 +152,11 @@ def _emit_cross_review(
     path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any], message: str
 ) -> None:
     """Step 7 を `cross-review` へ委譲する結末。"""
+    # **検査が通ったことを残す。** 履歴へ追記するかは、この印と `cross-review` の
+    # 最終ステータスの両方で決まる（`finalize`）。
+    gate["checked_mode"] = gate.get("mode")
     gate["mode"] = "cross-review"
+    gate["status"] = "passed"
     statefile.save(path, state)
     info(message)
     statefile.emit(FINAL_GATE="cross-review")
@@ -145,12 +186,12 @@ def _gate_passed(
 
 
 def _gate_limit_reached(
-    path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any], detail: str, limit: int
+    path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any], detail: str, why: str
 ) -> None:
     gate["status"] = "failed"
     statefile.save(path, state)
     info(
-        f"❌ 最終ゲートが通らないまま修正の上限 {limit} に達しました（{detail}）。"
+        f"❌ 最終ゲートが通らないまま修正を打ち切りました（{why} / {detail}）。"
         "**既に push してあるため取り消しません。** 失敗として報告します"
     )
     statefile.emit(FINAL_GATE="failed")
@@ -158,7 +199,7 @@ def _gate_limit_reached(
 
 
 def _gate_failing(
-    path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any], detail: str, limit: int
+    path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any], detail: str,
 ) -> None:
     gate["fix_rounds"] = safe_int(gate.get("fix_rounds")) + 1
     gate["status"] = "failing"
@@ -167,11 +208,11 @@ def _gate_failing(
     # `fix_base_sha` を流用することもできない。あれは最後の群の検証が落ちた地点で
     # あり、そこから HEAD までには**検証を通った正常なコミット**が並ぶ。範囲に含めると
     # 未申告として扱われ、その全部が取り消される。
-    gate["fix_base_sha"] = git_out(str(state["worktrees"]["work"]), ["rev-parse", "HEAD"])
+    gate["fix_base_sha"] = git_out(work_dir(state), ["rev-parse", "HEAD"])
     impl = _final_fix_impl(state, gate)
     statefile.save(path, state)
     info(
-        f"❌ 最終ゲートが落ちました（{detail}）。修正ラウンド {gate['fix_rounds']} / {limit}"
+        f"❌ 最終ゲートが落ちました（{detail}）。修正ラウンド {gate['fix_rounds']}"
         f" — 修正担当は {impl} です"
     )
     statefile.emit(
@@ -184,25 +225,9 @@ def _baseline_command(state: dict[str, Any]) -> str:
     return str((state.get("baseline_test") or {}).get("command") or "")
 
 
-def _round_test_differs(state: dict[str, Any]) -> bool:
-    """群の検証が全体のテストと違うコマンドで行われたか（#880）。"""
-    return round_test_command(state) != _baseline_command(state)
-
-
 def _final_fix_impl(state: dict[str, Any], gate: dict[str, Any]) -> str:
-    """最終ゲートの修正担当を決める。**最初に落ちたときだけ輪番を 1 つ進める。**
-
-    修正ラウンドごとに担当を替えない。適用ラウンドの修正が適用した担当に閉じるのと
-    同じで、直しかけの文脈を持っている者が続けたほうが速い。輪番の通し番号
-    （`apply_seq`）を共有するのは、最終ゲートの修正も**適用と同じ重さの作業**だから
-    である。
-    """
-    impl = str(gate.get("impl") or "")
-    if impl:
-        return impl
-    seq = safe_int(state.get("apply_seq")) + 1
-    impl, _ = impl_for_seq(state, seq)
-    state["apply_seq"] = seq
+    """最終ゲートの修正担当。**実装担当が担う**（#933 の決定 1。輪番は無い）。"""
+    impl = str(gate.get("impl") or state.get("implementer") or "")
     gate["impl"] = impl
     return impl
 
@@ -234,9 +259,9 @@ def _close_failed_final_fix(
 ) -> None:
     """最終ゲートの修正担当が結果を残さなかったときに、取り消して判定へ戻す。
 
-    **修正ラウンドは進めない。** 進めるのは次の最終ゲートで、そこが上限を見る。
-    起動し直しても解けない結末（利用上限）だけは上限の値まで進め、次の最終ゲートを
-    「取り消さず報告」で終わらせる（#728 の決定 11）。
+    **修正ラウンドは進めない。** 進めるのは次の最終ゲートで、そこが打ち切りを見る。
+    起動し直しても解けない結末（利用上限）だけは印（`no_relaunch`）を立て、次の最終
+    ゲートを「取り消さず報告」で終わらせる（#728 の決定 11）。
     """
     closed = close_without_result(path, state, scope, outcome)
     if closed.range_unknown:
@@ -247,7 +272,7 @@ def _close_failed_final_fix(
             code=2,
         )
     if not closed.relaunch_same_agent:
-        gate["fix_rounds"] = safe_int(state.get("max_fix_rounds"), 3)
+        gate["no_relaunch"] = True
     statefile.save(path, state)
     sys.exit(2)
 
@@ -365,7 +390,7 @@ def cmd_merge_final_fix(args: argparse.Namespace) -> None:
             code=4,
         )
 
-    work = str(state["worktrees"]["work"])
+    work = work_dir(state)
     discard_impl_leftovers(state, work)
     flush_pending_push(path, state, gate)
 
@@ -398,8 +423,8 @@ def cmd_merge_final_fix(args: argparse.Namespace) -> None:
 def _local_gate(state: dict[str, Any]) -> tuple[bool, str]:
     """全体のテストを手元で実行する。**全体のテストを呼ぶのは `init` とここだけである。**"""
     command = _baseline_command(state)
-    work = str(state["worktrees"]["work"])
-    timeout = safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT)
+    work = work_dir(state)
+    timeout = timeline.state_test_timeout(state)
     code, timed_out = run_with_timeout(command, work, timeout)
     if timed_out:
         return False, f"{command} が {timeout} 秒で終わりませんでした"
@@ -412,7 +437,7 @@ def _ci_gate(state: dict[str, Any], name: str) -> tuple[bool, str]:
     **結果を得られないときは通過させない**（fail-closed）。照会できなかったことと、
     検査が成功したことは別である。
     """
-    sha = git_out(str(state["worktrees"]["work"]), ["rev-parse", "HEAD"]) or ""
+    sha = git_out(work_dir(state), ["rev-parse", "HEAD"]) or ""
     result: Optional[str] = check_run_result(str(state.get("repo") or ""), sha, name)
     if result is None:
         return False, f"検査 {name} の結果を得られませんでした（{sha[:7]}）"

@@ -3,7 +3,8 @@
 **「テストを足したか」だけでは、期待値の変更を止められない。** 同じ入力に対する期待出力が
 変わっていれば、それは振る舞いの変更である。
 
-判定は 3 段で行う。ここで確かめるのは段 1（機械）と、段 2 へ渡す対象の切り出しである。
+判定は段 1（機械）と、機械で決まらないものを引き継ぐ最終ゲートのレビューで行う（決定 25）。ここで
+確かめるのは段 1 と、引き継ぐ対象の切り出しである。
 """
 from __future__ import annotations
 
@@ -39,7 +40,7 @@ def test_a_path_only_change_is_undecidable(verify) -> None:
     """読み込みの経路だけが変わった差分も、機械では決めない。
 
     **`unchanged` は「同じ」のときだけ返す。** 経路の変更が期待出力へ影響しないことを、
-    機械では確かめられない。段 2 の AI が読む。
+    機械では確かめられない。最終ゲートのレビューが読む。
     """
     before = ["    assert refactor.build(x) == 3\n"]
     after = ["    assert gitfacts.build(x) == 3\n"]
@@ -103,8 +104,8 @@ def test_a_parametrised_value_is_changed(verify) -> None:
 
 # ---------- 検証の経路へ組み込む ----------
 
-def test_a_changed_expectation_fails_the_round(verify) -> None:
-    """期待値が変わった差分は、適用ラウンドの検証で落ちること。"""
+def test_a_changed_expectation_fails_the_intake(verify) -> None:
+    """期待値が変わった差分は、取り込みの検査で落ちること。"""
     problem = verify.verify_test_changes(
         {"tests/test_a.py": (["    assert f(1) == 3\n"], ["    assert f(1) == 4\n"])}
     )
@@ -123,7 +124,7 @@ def test_a_path_only_change_passes(verify) -> None:
 def test_undecidable_diffs_are_collected_for_the_next_stage(verify) -> None:
     """判定できない差分は、落とさずに次の段へ渡す対象として集めること。
 
-    **通ったものとして扱わない。** 戻り値に残ることで、呼ぶ側が段 2 を起動できる。
+    **通ったものとして扱わない。** 戻り値に残ることで、呼ぶ側がレビューへ引き継げる。
     """
     pending = verify.undecidable_test_changes(
         {"tests/test_a.py": (["    assert refactor.f(1) == 3\n"],
@@ -131,70 +132,6 @@ def test_undecidable_diffs_are_collected_for_the_next_stage(verify) -> None:
          "tests/test_b.py": (["    assert g(1) == 3\n"], ["    assert g(1) == 3\n"])}
     )
     assert pending == ["tests/test_a.py"]
-
-
-# ---------- 段 2 の起動 ----------
-
-def test_the_launcher_accepts_the_judging_phase(tmp_path) -> None:
-    """判定のフェーズが受け口にあること。"""
-    import os
-    import subprocess
-    from crossref_helpers import make_state
-
-    launch = pathlib.Path(__file__).resolve().parents[1] / "scripts" / "launch-cli.sh"
-    state_path = make_state(tmp_path)
-    for name in ("work", "codex"):
-        (state_path.parent.parent / name).mkdir(parents=True, exist_ok=True)
-    stub_dir = tmp_path / "bin"
-    stub_dir.mkdir(exist_ok=True)
-    stub = stub_dir / "codex"
-    stub.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-    stub.chmod(0o755)
-    # 判定の対象は進行側が書き出す。**無ければ起動しない。**
-    (state_path.parent / "test-diff-r1-g1.diff").write_text("--- a\n+++ b\n", encoding="utf-8")
-    proc = subprocess.run(
-        [str(launch), "codex", "judge-test-changes", "130", "1"],
-        env={**os.environ, "CROSS_REFACTORING_TMP_DIR": str(state_path.parent),
-             "PATH": f"{stub_dir}{os.pathsep}{os.environ['PATH']}"},
-        capture_output=True, text=True,
-    )
-    assert "未知のフェーズです" not in proc.stderr
-
-
-def test_the_judging_phase_needs_the_diff(tmp_path) -> None:
-    """判定の対象が無ければ起動しないこと。**渡すものが無いまま起動しない。**"""
-    import os
-    import subprocess
-    from crossref_helpers import make_state
-
-    launch = pathlib.Path(__file__).resolve().parents[1] / "scripts" / "launch-cli.sh"
-    state_path = make_state(tmp_path)
-    proc = subprocess.run(
-        [str(launch), "codex", "judge-test-changes", "130", "1"],
-        env={**os.environ, "CROSS_REFACTORING_TMP_DIR": str(state_path.parent)},
-        capture_output=True, text=True,
-    )
-    assert proc.returncode != 0
-    assert "判定する差分がありません" in proc.stderr
-
-
-def test_the_judging_prompt_points_at_the_diff_file() -> None:
-    """プロンプトが、対象の差分の位置と結果の書き出し先を指すこと。"""
-    prompt = (pathlib.Path(__file__).resolve().parents[1]
-              / "prompts" / "judge-test-changes.md").read_text(encoding="utf-8")
-    assert "$RF_TEST_DIFF_PATH" in prompt
-    assert "$RF_STEM-result.json" in prompt
-
-
-def test_the_judging_prompt_asks_for_three_verdicts() -> None:
-    """判定の答えが 3 択であること。**2 択だと迷ったものが片方へ倒れる。**"""
-    prompt = (pathlib.Path(__file__).resolve().parents[1]
-              / "prompts" / "judge-test-changes.md").read_text(encoding="utf-8")
-    for verdict in ("unchanged", "changed", "undecidable"):
-        assert verdict in prompt
-
-
-# ---------- 判定の穴（レビューの指摘） ----------
 
 
 # ---------- 検証への配線（レビューの指摘） ----------
@@ -207,30 +144,42 @@ def test_the_facts_carry_the_test_diff(gitfacts) -> None:
     assert hasattr(gitfacts, "commit_test_changes")
 
 
-def test_the_round_verification_rejects_a_changed_expectation(verify) -> None:
-    """適用ラウンドの検証が、期待値の変更を落とすこと。
+def test_the_implement_intake_rejects_a_changed_expectation(cmd_implement, tmp_path) -> None:
+    """実装の取り込みの検査が、期待値の変更を落とすこと。
 
     **新設した関数を呼ばなければ、手順書だけが「機械が見る」と書いた状態になる。**
     """
-    items = [{"item_id": "R1-001", "technique": "extract_method",
-              "estimated_diff_lines": 100, "path": "src/a.py"}]
+    item = {"id": "I-001", "technique": "extract_method", "estimated_diff_lines": 100,
+            "path": "src/a.py"}
     facts = [{
         "sha": "a" * 40, "exists": True, "diff_lines": 10, "files": ["src/a.py"],
-        "trailers": {"Item-Id": "R1-001", "Round": "1",
-                     "Impl-Runtime": "codex", "Impl-Model": "gpt-5.5"},
+        "trailers": {"Item-Id": "I-001", "Impl-Runtime": "codex", "Impl-Model": "gpt-5.5"},
         "test_status": "pass", "touches_tests": True,
         "test_changes": {"tests/test_a.py": (["    assert f(1) == 3\n"],
                                              ["    assert f(1) == 4\n"])},
     }]
-    problem = verify.verify_apply_round(items, facts)
+    problem = cmd_implement._implement_problem(
+        item, facts, [], [], {"worktrees": {"work": str(tmp_path)}})
     assert problem is not None
     assert "期待" in problem
+
+
+def test_the_fix_intake_rejects_a_changed_expectation(cmd_converge) -> None:
+    """修正の取り込みの検査も、同じ基準で期待値の変更を落とすこと。"""
+    facts = [{
+        "sha": "b" * 40, "exists": True, "diff_lines": 4, "files": ["tests/test_a.py"],
+        "trailers": {"Item-Id": "I-001", "Impl-Runtime": "codex", "Impl-Model": "gpt-5.5"},
+        "test_changes": {"tests/test_a.py": (["    assert f(1) == 3\n"],
+                                             ["    assert f(1) == 4\n"])},
+    }]
+    problems = cmd_converge._fix_problems({"target_scope": ["tests"]}, facts, {"I-001"})
+    assert len(problems) == 1 and "期待" in problems[0]
 
 
 def test_the_round_verification_reports_undecidable_diffs(verify) -> None:
     """判定できない差分を、検証の結果として持ち出せること。
 
-    **落とさないが、通ったものとしても扱わない。** 進行側がこれを段 2 へ渡す。
+    **落とさないが、通ったものとしても扱わない。** 進行側がこれをレビューへ引き継ぐ。
     """
     facts = [{
         "test_changes": {"tests/test_a.py": (["    assert refactor.f(1) == 3\n"],
@@ -239,197 +188,59 @@ def test_the_round_verification_reports_undecidable_diffs(verify) -> None:
     assert verify.pending_test_judgements(facts) == ["tests/test_a.py"]
 
 
-# ---------- 判定を安全側へ倒す（レビューの指摘） ----------
+# ---------- 保留の持ち方（項目ごと。実装計画 I7・決定 25） ----------
 
+@pytest.fixture
+def judged(tmp_path, monkeypatch, refactor, patch_lib, env_tmp_dir, cmd_setup, cmd_implement):
+    """実装で経路だけを変えた項目（機械で決まらない）と、テストに触れない項目の 2 件を取り込んだ状態。"""
+    import argparse
 
-# ---------- 判定結果の取り込み（レビューの指摘） ----------
+    from crossref_helpers import (build_git_flow, commit_with_trailers, git, item_trailers,
+                                  read_state, write_state)
 
-def test_all_unchanged_clears_the_pending_record(verify) -> None:
-    """全件が `unchanged` なら、保留の記録が消えること。"""
-    verdicts = [{"path": "tests/test_a.py", "verdict": "unchanged", "reason": "経路だけ"}]
-    outcome = verify.merge_test_judgements(["tests/test_a.py"], verdicts)
-    assert outcome["pending"] == []
-    assert outcome["problem"] is None
+    flow = build_git_flow(tmp_path, monkeypatch, patch_lib, env_tmp_dir)
+    work = flow["work"]
 
+    def _item(item_id, rank, symbol):
+        return {"id": item_id, "rank": rank, "path": "src/calc.py", "symbol": symbol,
+                "smell": "long_method", "technique": "extract_method", "severity": "major",
+                "proposed_by": ["codex"], "tier": "high", "risk": False, "tests": [],
+                "test_targets": ["tests/test_calc.py"],
+                "command": ["pytest", "-q", "tests/test_calc.py"], "command_source": "targets",
+                "estimate": {"test": 0.0, "implement": 1.3, "verify": 0.2},
+                "start_deadline": "2099-01-01T00:00:00+00:00", "test_start_deadline": None,
+                "status": "planned", "commits": {"test": None, "implement": None, "fix": []},
+                "seconds": {}, "fix_count": 0, "danger": [], "estimated_diff_lines": 20}
 
-def test_a_changed_verdict_fails_the_round(verify) -> None:
-    """1 件でも `changed` があれば、適用ラウンドを落とすこと。"""
-    verdicts = [{"path": "tests/test_a.py", "verdict": "changed", "reason": "270 が 300 に"}]
-    outcome = verify.merge_test_judgements(["tests/test_a.py"], verdicts)
-    assert outcome["problem"] is not None
-    assert "期待" in outcome["problem"]
-
-
-def test_an_undecidable_verdict_is_carried_to_the_review(verify) -> None:
-    """`undecidable` は保留のまま残し、レビューへ引き継ぐこと。"""
-    verdicts = [{"path": "tests/test_a.py", "verdict": "undecidable", "reason": "追えない"}]
-    outcome = verify.merge_test_judgements(["tests/test_a.py"], verdicts)
-    assert outcome["pending"] == ["tests/test_a.py"]
-    assert outcome["problem"] is None
-
-
-def test_a_missing_verdict_is_treated_as_undecidable(verify) -> None:
-    """答えが欠けたものは、判定できないものとして扱うこと。
-
-    **通ったものとして扱わない。** 抜けを `unchanged` に倒すと、判定を返さない
-    ことが通過の手段になる。
-    """
-    outcome = verify.merge_test_judgements(["tests/test_a.py", "tests/test_b.py"],
-                                           [{"path": "tests/test_a.py",
-                                             "verdict": "unchanged", "reason": "経路だけ"}])
-    assert outcome["pending"] == ["tests/test_b.py"]
-
-
-def test_an_unknown_verdict_is_treated_as_undecidable(verify) -> None:
-    """知らない答えも、判定できないものとして扱うこと。"""
-    outcome = verify.merge_test_judgements(
-        ["tests/test_a.py"], [{"path": "tests/test_a.py", "verdict": "maybe"}])
-    assert outcome["pending"] == ["tests/test_a.py"]
-
-
-def test_the_merge_command_clears_or_fails(
-    cmd_apply, tmp_path, env_tmp_dir
-) -> None:
-    """取り込みのサブコマンドが、保留を解くか落とすこと。"""
-    import json
-    from crossref_helpers import make_state, read_state
-
-    state_path = make_state(tmp_path, rounds=[{
-        "round": 1, "impl": "codex", "reviewers": ["agy", "kiro"],
-        "impl_model": {"requested": None, "observed": None}, "reviewer_models": {},
-        "proposed": {}, "items": [], "apply": {"applied": [], "failed": []},
-        "fix_rounds": 0, "durations": {}, "reviews": [],
-        "pending_test_judgements": {"1": ["tests/test_a.py"]},
-    }])
-    env_tmp_dir(state_path)
-    (state_path.parent / "codex-judge-test-changes-r1-g1-result.json").write_text(
-        json.dumps({"verdicts": [{"path": "tests/test_a.py", "verdict": "unchanged",
-                                  "reason": "経路だけ"}]}), encoding="utf-8")
-
-    cmd_apply.cmd_merge_test_judgements(type("A", (), {"id": 130, "round": 1})())
-
-    entry = read_state(state_path)["rounds"][0]
-    assert entry.get("pending_test_judgements", []) == []
-
-
-# ---------- 判定の穴（ラウンド 3 の指摘） ----------
-
-
-# ---------- 保留の持ち方（ラウンド 3 の指摘） ----------
-
-def test_pending_records_do_not_overwrite_each_other(verify) -> None:
-    """群ごとに保留を持ち、後続の群で消えないこと。
-
-    **Step 7 へ引き継ぐ判定が、次の群の検証で失われてはならない。**
-    """
-    entry = {"pending_test_judgements": {"1": ["tests/test_a.py"]}}
-    verify.record_pending_judgements(entry, 2, ["tests/test_b.py"])
-    assert entry["pending_test_judgements"] == {
-        "1": ["tests/test_a.py"], "2": ["tests/test_b.py"]}
-
-
-def test_an_empty_result_clears_only_its_own_group(verify) -> None:
-    """対象が無い群は、自分の分だけを消すこと。"""
-    entry = {"pending_test_judgements": {"1": ["tests/test_a.py"],
-                                         "2": ["tests/test_b.py"]}}
-    verify.record_pending_judgements(entry, 2, [])
-    assert entry["pending_test_judgements"] == {"1": ["tests/test_a.py"]}
-
-
-def test_all_pending_across_groups_is_readable(verify) -> None:
-    """全ての群の保留を、まとめて読めること。"""
-    entry = {"pending_test_judgements": {"1": ["tests/test_a.py"],
-                                         "2": ["tests/test_b.py"]}}
-    assert verify.all_pending_judgements(entry) == ["tests/test_a.py", "tests/test_b.py"]
-
-
-def test_the_merge_command_drops_the_round_on_a_changed_verdict(
-    paths, patch_lib, cmd_apply, tmp_path, env_tmp_dir, monkeypatch
-) -> None:
-    """`changed` のとき、適用ラウンドを取り消して項目へ印を残すこと。
-
-    **`entry["items"]` は項目 ID の並びである。** dict として扱うと落ちる。
-    """
-    import json
-    import subprocess
-
-    from crossref_helpers import make_state, read_state
-    from test_merge_apply import item
-
-    items = [item(item_id="R1-001")]
-    state_path = make_state(tmp_path, items=items, rounds=[{
-        "round": 1, "impl": "codex", "reviewers": ["agy", "kiro"],
-        "impl_model": {"requested": None, "observed": None}, "reviewer_models": {},
-        "proposed": {}, "items": ["R1-001"], "apply_round": 1,
-        "apply_rounds": [{"apply_round": 1, "items": ["R1-001"], "status": "applied"}],
-        "apply": {"applied": ["R1-001"], "failed": []}, "fix_rounds": 0,
-        "durations": {}, "reviews": [],
-        "pending_test_judgements": {"1": ["tests/test_a.py"]},
-    }])
-    env_tmp_dir(state_path)
-    (state_path.parent / "codex-judge-test-changes-r1-g1-result.json").write_text(
-        json.dumps({"verdicts": [{"path": "tests/test_a.py", "verdict": "changed",
-                                  "reason": "270 が 300 に"}]}), encoding="utf-8")
-    monkeypatch.setattr(paths.subprocess, "run",
-                        lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, "", ""))
-    patch_lib("sh", lambda cmd, **k: "")
-    patch_lib("git_out", lambda work, args, **k: "")
-
-    with pytest.raises(SystemExit) as caught:
-        cmd_apply.cmd_merge_test_judgements(type("A", (), {"id": 130, "round": 1})())
-    assert caught.value.code == 2
-
-    state = read_state(state_path)
-    dropped = [i for i in state["items"] if i["item_id"] == "R1-001"]
-    assert dropped and dropped[0]["status"] == "abandoned"
-
-
-def test_dropping_one_group_keeps_the_other_pending(
-    paths, patch_lib, cmd_apply, tmp_path, env_tmp_dir, monkeypatch
-) -> None:
-    """取り消した群の保留だけを消し、他の群の分を残すこと。"""
-    import json
-    import subprocess
-
-    from crossref_helpers import make_state, read_state
-    from test_merge_apply import item
-
-    items = [item(item_id="R1-001")]
-    state_path = make_state(tmp_path, items=items, rounds=[{
-        "round": 1, "impl": "codex", "reviewers": ["agy", "kiro"],
-        "impl_model": {"requested": None, "observed": None}, "reviewer_models": {},
-        "proposed": {}, "items": ["R1-001"], "apply_round": 2,
-        "apply_rounds": [{"apply_round": 2, "items": ["R1-001"], "status": "applied"}],
-        "apply": {"applied": ["R1-001"], "failed": []}, "fix_rounds": 0,
-        "durations": {}, "reviews": [],
-        "pending_test_judgements": {"1": ["tests/test_a.py"],
-                                    "2": ["tests/test_b.py"]},
-    }])
-    env_tmp_dir(state_path)
-    (state_path.parent / "codex-judge-test-changes-r1-g2-result.json").write_text(
-        json.dumps({"verdicts": [{"path": "tests/test_b.py", "verdict": "changed"}]}),
+    state = read_state(flow["path"])
+    state["items"] = [_item("I-001", 1, "add"), _item("I-002", 2, "total")]
+    state["plan"] = {"base_sha": git("rev-parse", "HEAD", cwd=work).stdout.strip(),
+                     "reserve": {"danger_whole_test": 0.1, "final_whole_test": 0.1, "fix": 5.5},
+                     "end_at": "2099-01-01T00:00:00+00:00", "table_source": "defaults"}
+    state["phase"] = "implement"
+    write_state(flow["path"], state)
+    cmd_setup.cmd_start_phase(argparse.Namespace(id=130, phase="implement"))
+    test_file = work / "tests" / "test_calc.py"
+    test_file.write_text(test_file.read_text().replace(
+        "from src.calc import add", "from src import calc").replace("add(1, 2)", "calc.add(1, 2)"),
         encoding="utf-8")
-    monkeypatch.setattr(paths.subprocess, "run",
-                        lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, "", ""))
-    patch_lib("sh", lambda cmd, **k: "")
-    patch_lib("git_out", lambda work, args, **k: "")
-
-    with pytest.raises(SystemExit):
-        cmd_apply.cmd_merge_test_judgements(type("A", (), {"id": 130, "round": 1})())
-
-    entry = read_state(state_path)["rounds"][0]
-    # **先行する群の保留は残る。** レビューへ引き継ぐと決めたものを失わない。
-    assert entry.get("pending_test_judgements") == {"1": ["tests/test_a.py"]}
+    commit_with_trailers(work, "Refactor add", item_trailers("I-001"))
+    (work / "src" / "other.py").write_text("X = 1\n", encoding="utf-8")
+    commit_with_trailers(work, "Refactor total", item_trailers("I-002"))
+    cmd_implement.cmd_merge_implement(argparse.Namespace(id=130))
+    return flow
 
 
-def test_a_verdict_only_clears_the_group_it_covered(verify) -> None:
-    """判定は、それが実際に見た群の保留だけを解くこと。
+def _items(flow):
+    from crossref_helpers import read_state
 
-    **群 1 の `undecidable` を、群 2 の判定で消さない。** 段 2 へ渡すのは
-    その群の差分だけである。
-    """
-    entry = {"pending_test_judgements": {"1": ["tests/test_a.py"],
-                                         "2": ["tests/test_a.py"]}}
-    verify.apply_judgements_to_group(
-        entry, 2, [{"path": "tests/test_a.py", "verdict": "unchanged"}])
-    assert entry["pending_test_judgements"] == {"1": ["tests/test_a.py"]}
+    return {i["id"]: i for i in read_state(flow["path"])["items"]}
+
+
+def test_an_undecidable_test_diff_goes_straight_to_the_review(judged) -> None:
+    """機械で決まらないテストの差分は、LLM へ問わずに項目ごとにレビューへ引き継ぐ（決定 25）。"""
+    items = _items(judged)
+    assert items["I-001"]["review_test_judgements"] == ["tests/test_calc.py"]
+    assert items["I-001"]["status"] == "implemented"
+    assert "review_test_judgements" not in items["I-002"]
+    assert not (judged["path"].parent / "test-diff-rf130.diff").exists()

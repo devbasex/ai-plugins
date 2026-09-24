@@ -531,10 +531,13 @@ def test_ac15_development_repo_makes_everything_fix(tmp_path):
 
 def test_ac18_check_writes_nothing(tmp_path):
     root = make_repo(tmp_path, {"CLAUDE.md": "@none.md\n", "AGENTS.md": "# a\n"})
-    before = {p: p.stat().st_mtime_ns for p in root.rglob("*") if p.is_file()}
+    # `.git` は外す。コミット直後の git の自動保守が `maintenance.lock` を後から作り、揺れる
+    def snapshot():
+        return {p: p.stat().st_mtime_ns for p in root.rglob("*")
+                if p.is_file() and ".git" not in p.relative_to(root).parts}
+    before = snapshot()
     run(root)
-    after = {p: p.stat().st_mtime_ns for p in root.rglob("*") if p.is_file()}
-    assert before == after
+    assert snapshot() == before
 
 
 # --- 宣言があるときの判定（AC48〜AC68） --------------------------------------

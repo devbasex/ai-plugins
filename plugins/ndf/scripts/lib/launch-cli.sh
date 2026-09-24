@@ -16,7 +16,7 @@
 #                  工程名  上限の表（`limits.py`）の工程。`limits.py cli-timeout <工程> <runtime>`
 #                          の値（環境変数で解決した監視の上限 + 120 秒）を使う
 #                  数字    その秒数（従来どおり）
-#                  空      `apply` の工程名と同じ（いちばん長い工程を覆う）
+#                  空      `implement` の工程名と同じ（いちばん長い工程を覆う）
 #                **CLI の上限は監視の上限より長くする。** CLI が先に打ち切ると結果ファイルが
 #                残らず、監視からは起動できなかった場合と区別が付かない（#598 / #537）
 #
@@ -50,7 +50,7 @@ STEM=${4:?output stem required}
 MODEL=${5:-}
 EXTRA_DIR=${6:-}
 # 空なら、いちばん長い工程（適用・修正）を覆う値にする。
-PRINT_TIMEOUT=${7:-apply}
+PRINT_TIMEOUT=${7:-implement}
 
 [ -d "$WORKDIR" ] || { echo "作業ディレクトリがありません: $WORKDIR" >&2; exit 1; }
 [ -s "$PROMPT" ] || { echo "プロンプトが空です: $PROMPT" >&2; exit 1; }
@@ -63,8 +63,8 @@ resolve_print_timeout() {
   case "$PRINT_TIMEOUT" in
     ''|*[!0-9]*)
       # **工程名を先に控える。** 代入に使うと、コマンド置換が失敗した時点で
-      # `PRINT_TIMEOUT` が空になり、案内が渡された工程名ではなく既定の `apply` を出す。
-      local limits phase=${PRINT_TIMEOUT:-apply}
+      # `PRINT_TIMEOUT` が空になり、案内が渡された工程名ではなく既定の `implement` を出す。
+      local limits phase=${PRINT_TIMEOUT:-implement}
       limits=$(dirname -- "${BASH_SOURCE[0]}")/limits.py
       PRINT_TIMEOUT=$(python3 "$limits" cli-timeout "$phase" "$RUNTIME") || {
         echo "CLI の上限を決められません（工程: $phase）" >&2; exit 1; }

@@ -15,8 +15,7 @@ import subprocess
 
 import pytest
 
-from crossref_helpers import make_state, read_state, write_result
-
+from crossref_helpers import make_state_v2, read_state
 
 
 def _git(*args, cwd):
@@ -45,13 +44,8 @@ def _make_work(tmp_path):
     return work
 
 
-def _state_with_sync(tmp_path, work, command="true"):
-    return make_state(
-        tmp_path,
-        worktrees={"work": str(work), "codex": str(tmp_path / "codex"),
-                   "agy": str(tmp_path / "agy"), "kiro": str(tmp_path / "kiro")},
-        sync_command=command,
-    )
+def _state_with_sync(tmp_path, work, command="true", **over):
+    return make_state_v2(tmp_path, work, sync_command=command, **over)
 
 
 # ---------- 変更のパスを 1 文字も欠かさず拾う ----------
@@ -168,11 +162,7 @@ def test_discard_keeps_control_directory(gitfacts, tmp_path):
     (work / ".gitignore").write_text(".cross_refactoring/\n", encoding="utf-8")
     _commit(work, "ignore control dir")
     (work / "src.py").write_text("直しかけ\n", encoding="utf-8")
-    state = read_state(make_state(
-        tmp_path,
-        worktrees={"work": str(work)},
-        tmp_dir=str(control),
-    ))
+    state = read_state(make_state_v2(tmp_path, work, tmp_dir=str(control)))
 
     gitfacts.discard_impl_leftovers(state, str(work))
 
@@ -180,88 +170,75 @@ def test_discard_keeps_control_directory(gitfacts, tmp_path):
     assert _git("status", "--porcelain", cwd=work).stdout == ""
 
 
-def test_merge_fix_continues_when_impl_left_changes(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch):
-    """修正フェーズの置き土産があっても、`merge-fix` は中断しない。
+def _fix_state(tmp_path, work, base):
+    """修正を 1 回起動した直後の版 2 の状態（`verify` が `fix` を書いた後）。"""
+    item = {"id": "I-001", "rank": 1, "path": "src.py", "symbol": "f", "smell": "long_method",
+            "technique": "extract_method", "severity": "major", "proposed_by": ["codex"],
+            "tests": [], "command": ["pytest", "-q"], "status": "failing",
+            "commits": {"test": None, "implement": "x" * 40, "fix": []},
+            "seconds": {}, "fix_count": 0, "danger": [], "estimated_diff_lines": 10}
+    return _state_with_sync(
+        tmp_path, work, phase="fix", items=[item], target_scope=["."],
+        fix={"items": ["I-001"], "base_sha": base},
+        phases={"fix": {"started_at": "2026-09-24T10:00:00+00:00",
+                        "launch_started_at": "2026-09-24T10:00:00+00:00"}},
+    )
+
+
+def test_merge_fix_continues_when_impl_left_changes(patch_lib, refactor, tmp_path, env_tmp_dir):
+    """修正の置き土産があっても、`merge-fix` は中断しない。
 
     実装担当がコミットを作れずに終えると作業ツリーへ差分が残る。これを理由に
     止めると、修正 0 件として先へ進むこともできなくなる。
     """
     work = _make_work(tmp_path)
     head = _git("rev-parse", "HEAD", cwd=work).stdout.strip()
-    state_path = make_state(
-        tmp_path,
-        worktrees={"work": str(work), "codex": str(tmp_path / "codex"),
-                   "agy": str(tmp_path / "agy"), "kiro": str(tmp_path / "kiro")},
-        rounds=[{
-            "round": 1, "impl": "codex", "impl_model": None,
-            "reviewers": ["agy", "kiro"], "reviewer_models": {},
-            "items": ["R1-001"], "adopted": 1, "proposed": 1, "merged": 1,
-            "apply": {"merged_at": "2026-08-18T00:00:00", "applied": ["R1-001"],
-                      "failed": []},
-            "apply_base_sha": head, "apply_progress": [], "drops": [],
-            "reviews": [], "fix_rounds": 0, "fix_attempts": 1,
-            "fix_base_sha": head, "deferred": [], "durations": {},
-            "proposal_keys": [], "pending_drop": [], "pending_push": False,
-            "started_at": "2026-08-18T00:00:00",
-        }],
-        items=[{"item_id": "R1-001", "round": 1, "path": "src.py",
-                "symbol": "f", "smell": "long_method", "technique": "extract_method",
-                "severity": "major", "rationale": "", "plan": "", "test_gap": False,
-                "estimated_diff_lines": 10, "proposed_by": ["codex"],
-                "status": "applied", "commits": []}],
-    )
+    state_path = _fix_state(tmp_path, work, head)
     env_tmp_dir(state_path)
     patch_lib("push_head", lambda state: None)
-    write_result(state_path, "codex-fix-r1",
-                 {"resolved_thread_ids": [], "unresolved": [], "commits": []})
     (work / "src.py").write_text("直しかけ\n", encoding="utf-8")
 
-    refactor.cmd_merge_fix(type("A", (), {"id": 130, "round": 1})())
+    refactor.cmd_merge_fix(type("A", (), {"id": 130})())
 
     assert _git("status", "--porcelain", cwd=work).stdout == ""
-    assert read_state(state_path)["rounds"][0]["fix_rounds"] == 1
+    state = read_state(state_path)
+    assert state["items"][0]["fix_count"] == 1
+    assert state["items"][0]["status"] == "implemented"   # 次の verify が見直す
+    assert state["fix"] is None
 
 
-def test_merge_fix_advances_when_the_range_is_undeterminable(patch_lib, refactor, tmp_path, env_tmp_dir, monkeypatch):
-    """修正の範囲を確定できなくても、修正ラウンドは進めること。
-
-    進めないと `should-abandon` が見送りへ移る条件（`fix_rounds` が上限に達する）を
-    永久に満たさず、修正フェーズと再レビューを無限に往復する。
-    """
+def test_merge_fix_advances_when_the_range_is_undeterminable(patch_lib, refactor, tmp_path, env_tmp_dir):
+    """修正の範囲を確定できなくても、修正の回数は進めること（報告に出す回数）。"""
     work = _make_work(tmp_path)
-    head = _git("rev-parse", "HEAD", cwd=work).stdout.strip()
-    state_path = make_state(
-        tmp_path,
-        worktrees={"work": str(work), "codex": str(tmp_path / "codex"),
-                   "agy": str(tmp_path / "agy"), "kiro": str(tmp_path / "kiro")},
-        rounds=[{
-            "round": 1, "impl": "codex", "impl_model": None,
-            "reviewers": ["agy", "kiro"], "reviewer_models": {},
-            "items": ["R1-001"], "adopted": 1, "proposed": 1, "merged": 1,
-            "apply": {"merged_at": "2026-08-18T00:00:00", "applied": ["R1-001"],
-                      "failed": []},
-            "apply_base_sha": head, "apply_progress": [], "drops": [],
-            "reviews": [], "fix_rounds": 0, "fix_attempts": 1,
-            # **起点が無い**状態。判定が起点を記録しない出口を通ると生じる
-            "fix_base_sha": None, "deferred": [], "durations": {},
-            "proposal_keys": [], "pending_drop": [], "pending_push": False,
-            "started_at": "2026-08-18T00:00:00",
-        }],
-        items=[{"item_id": "R1-001", "round": 1, "path": "src.py",
-                "symbol": "f", "smell": "long_method", "technique": "extract_method",
-                "severity": "major", "rationale": "", "plan": "", "test_gap": False,
-                "estimated_diff_lines": 10, "proposed_by": ["codex"],
-                "status": "applied", "commits": []}],
-    )
+    # **起点が無い**状態。範囲を確定できない。
+    state_path = _fix_state(tmp_path, work, None)
     env_tmp_dir(state_path)
     patch_lib("push_head", lambda state: None)
-    write_result(state_path, "codex-fix-r1",
-                 {"resolved_thread_ids": [], "unresolved": [], "commits": []})
 
-    with pytest.raises(SystemExit) as e:
-        refactor.cmd_merge_fix(type("A", (), {"id": 130, "round": 1})())
+    refactor.cmd_merge_fix(type("A", (), {"id": 130})())
 
-    assert e.value.code == 2
-    assert read_state(state_path)["rounds"][0]["fix_rounds"] == 1, (
-        "範囲を確定できなかったのに修正ラウンドが進んでいない（無限ループになる）"
+    state = read_state(state_path)
+    assert state["items"][0]["fix_count"] == 1, (
+        "範囲を確定できなかったのに修正の回数が進んでいない（無限ループになる）"
     )
+    assert state["fix_stats"]["launches"] == 1
+
+
+def test_merge_fix_reverts_a_commit_for_another_item(patch_lib, refactor, tmp_path, env_tmp_dir):
+    """修正の対象でない項目のコミットを含む範囲は、範囲ごと取り消す。"""
+    work = _make_work(tmp_path)
+    head = _git("rev-parse", "HEAD", cwd=work).stdout.strip()
+    state_path = _fix_state(tmp_path, work, head)
+    env_tmp_dir(state_path)
+    pushed = []
+    patch_lib("push_head", lambda state: pushed.append(True))
+    (work / "src.py").write_text("x = 3\n", encoding="utf-8")
+    _commit(work, "Fix\n\nItem-Id: I-009\nImpl-Runtime: claude\nImpl-Model: m")
+
+    refactor.cmd_merge_fix(type("A", (), {"id": 130})())
+
+    assert (work / "src.py").read_text(encoding="utf-8") == "x = 1\n"
+    state = read_state(state_path)
+    assert state["items"][0]["commits"]["fix"] == []
+    assert state["items"][0]["fix_count"] == 1
+    assert pushed, "取り消しを公開していない"

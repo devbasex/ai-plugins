@@ -2,7 +2,10 @@
 
 **起動のされ方で最終ゲートが変わる**（決定 7）。`development-workflow` の 1 工程と
 して起動したときは `cross-review` を省き、全体のテストで判定する。単独で起動した
-ときは `cross-review` を実行する。見分けは**引数で受け取る**。
+ときは全体のテストの後に `cross-review` を実行する。見分けは**引数で受け取る**。
+
+**`--ci-check` が無ければ、起動のされ方によらず全体のテストを 1 度走らせる**（#933 の
+AC16b）。検証の中で全体のテストが通り、取り消しが無く、HEAD が進んでいなければ使い回す。
 
 **`--ci-check` の扱いは排他である。** 指定があれば手元のテストを実行せず継続的統合の
 成功だけで判定し、無ければ手元のテストだけで判定する。**採った側が失敗した・結果を
@@ -15,11 +18,14 @@ import json
 
 import pytest
 
-from crossref_helpers import make_state, read_state
+from crossref_helpers import make_state_v2, read_state
 
 
 def _state(tmp_path, **over):
-    return make_state(tmp_path, phase="final", outer_round=1, **over)
+    over.setdefault("workflow_step", False)
+    over.setdefault("baseline_test", {"command": "pytest -q", "status": "green",
+                                      "checked_at": "2026-09-24T10:00:00", "seconds": 6.0})
+    return make_state_v2(tmp_path, tmp_path / "work", phase="final", **over)
 
 
 def _args(state_id=130):
@@ -55,18 +61,21 @@ def _run(name, conclusion="success", status="completed"):
 
 # ---------- B2: 起動のされ方で最終ゲートが変わる ----------
 
-def test_a_standalone_run_goes_to_cross_review(
+def test_a_standalone_run_goes_to_cross_review_after_the_whole_test(
     refactor, cmd_gate, tmp_path, env_tmp_dir, spy, capsys
 ):
-    """既定は単独起動。`cross-review` を実行する。"""
+    """既定は単独起動。全体のテストを 1 度通してから `cross-review` を実行する（AC16b）。"""
     state_path = _state(tmp_path)
     env_tmp_dir(state_path)
 
     cmd_gate.cmd_final_gate(_args())
 
     assert "FINAL_GATE=cross-review" in capsys.readouterr().out
-    assert spy["tests"] == [], "単独起動では全体のテストを実行しない"
-    assert read_state(state_path)["final_gate"]["mode"] == "cross-review"
+    assert spy["tests"] == ["pytest -q"]
+    gate = read_state(state_path)["final_gate"]
+    assert gate["mode"] == "cross-review"
+    assert gate["checked_mode"] == "test"
+    assert gate["status"] == "passed"
 
 
 def test_a_workflow_step_run_skips_cross_review_and_runs_the_tests(
@@ -216,10 +225,10 @@ def test_the_fix_cap_reports_the_failure_without_reverting(patch_lib, refactor, 
     取り消しの判断は Pull Request の読み手が持つ。失敗として報告に書く。
     """
     dropped: list = []
-    patch_lib("drop_items",
-                        lambda *a, **k: dropped.append(a) or {})
+    patch_lib("drop", lambda *a, **k: dropped.append(a) or {})
+    patch_lib("revert_range", lambda *a, **k: dropped.append(a))
     state_path = _state(
-        tmp_path, workflow_step=True, max_fix_rounds=2,
+        tmp_path, workflow_step=True, started_at="2000-01-01T00:00:00",
         final_gate={"fix_rounds": 2, "checks": []})
     env_tmp_dir(state_path)
     spy["test_code"] = 1
@@ -228,6 +237,32 @@ def test_the_fix_cap_reports_the_failure_without_reverting(patch_lib, refactor, 
         cmd_gate.cmd_final_gate(_args())
     assert e.value.code == 1, "報告へ抜ける。進行ごと止める中断（4）ではない"
     assert dropped == [], "取り消さない"
+    assert read_state(state_path)["final_gate"]["status"] == "failed"
+
+
+def test_the_first_fix_is_tried_even_after_the_budget_ran_out(cmd_gate, tmp_path, env_tmp_dir, spy):
+    """決定 26: 想定最大時間を使い切った後に落ちても、最終ゲートの修正は必ず 1 度試みる。"""
+    state_path = _state(tmp_path, workflow_step=True, started_at="2000-01-01T00:00:00")
+    env_tmp_dir(state_path)
+    spy["test_code"] = 1
+
+    with pytest.raises(SystemExit) as e:
+        cmd_gate.cmd_final_gate(_args())
+    assert e.value.code == 2, "時計で打ち切らず修正ラウンドへ進む"
+    gate = read_state(state_path)["final_gate"]
+    assert gate["fix_rounds"] == 1 and gate["status"] == "failing"
+
+
+def test_the_second_fix_after_the_budget_ran_out_is_not_tried(cmd_gate, tmp_path, env_tmp_dir, spy):
+    """決定 26: 2 度目からは時計で打ち切る。"""
+    state_path = _state(tmp_path, workflow_step=True, started_at="2000-01-01T00:00:00",
+                        final_gate={"fix_rounds": 1, "checks": []})
+    env_tmp_dir(state_path)
+    spy["test_code"] = 1
+
+    with pytest.raises(SystemExit) as e:
+        cmd_gate.cmd_final_gate(_args())
+    assert e.value.code == 1
     assert read_state(state_path)["final_gate"]["status"] == "failed"
 
 
@@ -241,52 +276,57 @@ def test_the_report_shows_the_final_gate(refactor, tmp_path, env_tmp_dir, capsys
     assert "最終ゲート" in capsys.readouterr().out
 
 
-# ---------- B5: Step 5 は手元のテストを必須とする ----------
+# ---------- B5: 検証は手元のテストを必須とする ----------
 
-def test_the_apply_round_verification_never_uses_the_ci(
-    refactor, tmp_path, env_tmp_dir, spy
+def test_the_verification_never_uses_the_ci(
+    refactor, cmd_setup, cmd_implement, cmd_converge, tmp_path, monkeypatch, patch_lib,
+    env_tmp_dir, capsys
 ):
-    """**継続的統合で代替できるのは Step 7 だけである。**
+    """**継続的統合で代替できるのは最終ゲートだけである。**
 
-    Step 5 は手元の未 push のコミットを検証するため、継続的統合の結果が無い。
+    検証は手元の未 push のコミットを見るため、継続的統合の結果が無い。
     """
-    items = [{
-        "item_id": "R1-001", "round": 1, "path": "src/foo.py", "symbol": "f",
+    import argparse
+
+    from crossref_helpers import (CALC, build_git_flow, commit_with_trailers, git,
+                                  item_trailers, write_state)
+
+    flow = build_git_flow(tmp_path, monkeypatch, patch_lib, env_tmp_dir, ci_check="tests")
+    read_ci: list = []
+    patch_lib("check_run_result", lambda *a, **k: read_ci.append(a) or "success")
+    work = flow["work"]
+    state = read_state(flow["path"])
+    state["items"] = [{
+        "id": "I-001", "rank": 1, "path": "src/calc.py", "symbol": "total",
         "smell": "long_method", "technique": "extract_method", "severity": "major",
-        "status": "applied", "commits": ["sha1"], "apply_round": 1,
-        "test_gap": False, "estimated_diff_lines": 10, "proposed_by": ["codex"],
-    }]
-    state_path = make_state(
-        tmp_path, ci_check="tests", workflow_step=True, items=items,
-        rounds=[{
-            "round": 1, "kind": "structure", "impl": "codex",
-            "reviewers": ["agy", "kiro"],
-            "impl_model": {"requested": None, "observed": None},
-            "reviewer_models": {}, "proposed": {}, "merged": 1, "adopted": 1,
-            "deferred": 0, "items": ["R1-001"],
-            "apply_rounds": [{
-                "apply_round": 1, "impl": "codex", "items": ["R1-001"],
-                "status": "applied", "base_sha": "base0", "head_sha": "sha1",
-                "fix_rounds": 0,
-            }],
-            "apply_round": 1,
-            "apply": {"apply_round": 1, "applied": ["R1-001"], "failed": [],
-                      "merged_at": "2026-08-15T00:00:00"},
-            "fix_rounds": 0, "durations": {}, "reviews": [],
-        }],
-    )
-    env_tmp_dir(state_path)
+        "proposed_by": ["codex"], "tier": "high", "risk": False, "tests": [],
+        "test_targets": ["tests/test_calc.py"], "command": ["pytest", "-q", "tests/test_calc.py"],
+        "command_source": "targets", "estimate": {"test": 0.0, "implement": 1.3, "verify": 0.2},
+        "start_deadline": "2099-01-01T00:00:00+00:00", "test_start_deadline": None,
+        "status": "planned", "commits": {"test": None, "implement": None, "fix": []},
+        "seconds": {}, "fix_count": 0, "danger": [], "estimated_diff_lines": 20}]
+    state["plan"] = {"base_sha": git("rev-parse", "HEAD", cwd=work).stdout.strip(),
+                     "reserve": {"danger_whole_test": 0.1, "final_whole_test": 0.0, "fix": 5.5},
+                     "end_at": "2099-01-01T00:00:00+00:00", "table_source": "defaults"}
+    state["phase"] = "implement"
+    write_state(flow["path"], state)
+    cmd_setup.cmd_start_phase(argparse.Namespace(id=130, phase="implement"))
+    (work / "src" / "calc.py").write_text(CALC.replace(
+        "    result = 0\n    for v in values:\n        result = add(result, v)\n    return result\n",
+        "    return sum(values)\n"), encoding="utf-8")
+    commit_with_trailers(work, "Refactor", item_trailers("I-001"))
+    cmd_implement.cmd_merge_implement(argparse.Namespace(id=130))
 
-    refactor.cmd_verify_round(type("A", (), {"id": 130, "round": 1})())
+    cmd_converge.cmd_verify(argparse.Namespace(id=130))
 
-    assert spy["tests"] == ["pytest -q"], "Step 5 は手元のテストを実行する"
-    assert spy["gh"] == [], "Step 5 で継続的統合は読まない"
+    assert read_state(flow["path"])["items"][0]["status"] == "verified"
+    assert read_ci == [], "検証で継続的統合は読まない"
 
 
 # ---------- 全体テストは最終ゲートで 1 回（#880 の AC3） ----------
 
 ROUND_TEST = {"command": "pytest tests/services -q", "status": "green",
-              "checked_at": "2026-08-15T00:00:00"}
+              "checked_at": "2026-09-24T10:00:00"}
 
 
 def test_a_standalone_run_with_a_round_test_runs_the_baseline_test_once(
@@ -335,16 +375,78 @@ def test_a_standalone_run_whose_baseline_test_fails_enters_the_fix_round(
     assert read_state(state_path)["final_gate"]["fix_rounds"] == 1
 
 
-def test_a_standalone_run_with_the_same_round_test_runs_no_test(
-    refactor, cmd_gate, tmp_path, env_tmp_dir, spy
+# ---------- 検証の中の全体のテストの使い回し（AC16b・決定 16） ----------
+
+PASSED_IN_VERIFY = {"ran": True, "flags": ["D2"], "status": "pass", "seconds": 5.0,
+                    "head": "HEADSHA", "reverted": False}
+
+
+@pytest.mark.parametrize("workflow_step", [False, True])
+def test_a_whole_test_passed_in_verify_at_the_same_head_is_reused(
+    refactor, cmd_gate, tmp_path, env_tmp_dir, spy, capsys, workflow_step
 ):
-    """範囲のテストが全体テストと同じなら、群の検証が全体を見ている。"""
-    state_path = _state(tmp_path, round_test={"command": "pytest -q", "status": "green"})
+    """検証の中で通り、取り消しが無く、HEAD が進んでいなければ走らせずに通す。"""
+    state_path = _state(tmp_path, workflow_step=workflow_step, whole_test=PASSED_IN_VERIFY)
     env_tmp_dir(state_path)
 
     cmd_gate.cmd_final_gate(_args())
 
     assert spy["tests"] == []
+    gate = read_state(state_path)["final_gate"]
+    assert gate["whole_test_reused"] is True
+    assert gate["status"] == "passed"
+    assert gate["checks"] == []
+    expected = "FINAL_GATE=passed" if workflow_step else "FINAL_GATE=cross-review"
+    assert expected in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("whole_test", [
+    {**PASSED_IN_VERIFY, "reverted": True},    # 落ちて印の項目を取り消した
+    {**PASSED_IN_VERIFY, "head": "OLDHEAD"},   # その後に HEAD が進んだ（同期のコミットなど）
+    {**PASSED_IN_VERIFY, "status": "fail"},    # 落ちた
+    {**PASSED_IN_VERIFY, "ran": False},        # 走らなかった
+])
+def test_the_whole_test_runs_unless_it_is_reusable(
+    refactor, cmd_gate, tmp_path, env_tmp_dir, spy, whole_test
+):
+    """`whole_test.reverted` が真なら必ず走らせる。HEAD が進んだときも走らせる。"""
+    state_path = _state(tmp_path, workflow_step=True, whole_test=whole_test)
+    env_tmp_dir(state_path)
+
+    cmd_gate.cmd_final_gate(_args())
+
+    assert spy["tests"] == ["pytest -q"]
+    gate = read_state(state_path)["final_gate"]
+    assert not gate.get("whole_test_reused")
+    assert gate["checks"][-1]["command"] == "pytest -q"
+
+
+def test_a_ci_check_is_not_replaced_by_the_whole_test_in_verify(
+    refactor, cmd_gate, tmp_path, env_tmp_dir, spy
+):
+    """`--ci-check` があれば継続的統合を読む。検証の中の全体のテストでは代えない。"""
+    state_path = _state(tmp_path, workflow_step=True, ci_check="tests",
+                        whole_test=PASSED_IN_VERIFY)
+    env_tmp_dir(state_path)
+    spy["gh_out"] = _check_runs(_run("tests"))
+
+    cmd_gate.cmd_final_gate(_args())
+
+    assert spy["tests"] == []
+    assert len(spy["gh"]) == 1
+    assert not read_state(state_path)["final_gate"].get("whole_test_reused")
+
+
+def test_the_seconds_of_the_final_whole_test_are_kept_for_the_history(
+    refactor, cmd_gate, tmp_path, env_tmp_dir, spy
+):
+    """履歴の `whole_test.final`（AC17）に使う所要を残す。継続的統合のときは残さない。"""
+    state_path = _state(tmp_path, workflow_step=True)
+    env_tmp_dir(state_path)
+
+    cmd_gate.cmd_final_gate(_args())
+
+    assert read_state(state_path)["final_gate"]["whole_test_seconds"] >= 0
 
 
 def test_a_standalone_run_with_a_ci_check_reads_the_ci_instead(
@@ -387,7 +489,7 @@ def test_final_gate_records_a_timed_out_whole_test_and_enters_a_fix_round(
     patch_lib, refactor, cmd_gate, tmp_path, env_tmp_dir, spy, capsys
 ):
     """R2-003 — 全体テストが打ち切りなら失敗として記録し、修正ラウンドへ進む。"""
-    state_path = _state(tmp_path, workflow_step=True, test_timeout=60)
+    state_path = _state(tmp_path, workflow_step=True, limits={"test_timeout": 60})
     env_tmp_dir(state_path)
     # 全体テストの実行を打ち切りへ差し替える（spy の差し替えを上書きする）。
     patch_lib("run_with_timeout",

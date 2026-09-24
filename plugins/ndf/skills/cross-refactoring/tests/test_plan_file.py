@@ -10,8 +10,7 @@ import subprocess
 
 import pytest
 
-from crossref_helpers import make_state, read_state
-
+from crossref_helpers import make_state_v2, read_state
 
 
 def _git(*args, cwd):
@@ -40,28 +39,24 @@ def _make_work(tmp_path):
 
 def _item(**over):
     base = {
-        "item_id": "R1-001", "round": 1, "path": "src/foo.py", "symbol": "Foo.handle",
+        "id": "I-001", "rank": 1, "path": "src/foo.py", "symbol": "Foo.handle",
         "smell": "long_method", "technique": "extract_method", "severity": "major",
+        "tier": "high",
         "rationale": "1 関数が 6 段の処理を通しで行っている",
         "plan": "1. 範囲の確定を切り出す 2. 検証を切り出す",
-        "test_gap": False, "estimated_diff_lines": 40,
-        "proposed_by": ["codex", "agy"], "status": "done", "commits": ["abc1234"],
+        "tests": [], "estimated_diff_lines": 40,
+        "proposed_by": ["codex", "agy"], "status": "verified",
+        "commits": {"test": None, "implement": "abc1234", "fix": []},
     }
     base.update(over)
     return base
 
 
 def _state(tmp_path, work=None, **over):
-    rounds = over.pop("rounds", [{
-        "round": 1, "impl": "codex", "reviewers": ["agy", "kiro"],
-        "items": ["R1-001"], "reviews": [], "fix_rounds": 0,
-    }])
-    items = over.pop("items", [_item()])
-    worktrees = {"work": str(work or tmp_path / "work")}
-    for r in ("codex", "agy", "kiro"):
-        worktrees[r] = str(tmp_path / r)
-    path = make_state(tmp_path, rounds=rounds, items=items,
-                      worktrees=worktrees, **over)
+    over.setdefault("items", [_item()])
+    over.setdefault("implementer", "kiro")
+    over.setdefault("plan", {"available_minutes": 43.5, "table_source": "defaults"})
+    path = make_state_v2(tmp_path, work or tmp_path / "work", **over)
     return path, read_state(path)
 
 
@@ -70,7 +65,7 @@ def _state(tmp_path, work=None, **over):
 def test_plan_names_the_item_and_the_target(plan, tmp_path):
     _, state = _state(tmp_path)
     text = plan.format_plan(state)
-    assert "R1-001" in text and "src/foo.py" in text and "Foo.handle" in text
+    assert "I-001" in text and "src/foo.py" in text and "Foo.handle" in text
 
 
 def test_plan_carries_the_reason_and_the_steps(plan, tmp_path):
@@ -81,75 +76,64 @@ def test_plan_carries_the_reason_and_the_steps(plan, tmp_path):
     assert "1. 範囲の確定を切り出す" in text
 
 
-def test_plan_shows_the_smell_and_the_technique(plan, tmp_path):
+def test_plan_shows_the_smell_the_technique_and_the_tier(plan, tmp_path):
     _, state = _state(tmp_path)
     text = plan.format_plan(state)
-    assert "long_method" in text and "extract_method" in text
+    assert "long_method" in text and "extract_method" in text and "high" in text
 
 
-def test_plan_shows_the_case_and_level_for_a_test_item(plan, tmp_path):
-    """現状固定: テスト項目の表には経路と階層を表示する。"""
-    _, state = _state(tmp_path, items=[_item(kind="test", case="branch", level="unit")])
-
-    text = plan.format_plan(state)
-
-    assert "| branch | unit | — |" in text
-    assert "long_method" not in text
-    assert "extract_method" not in text
+def test_plan_counts_the_commits_of_an_item(plan, tmp_path):
+    """テスト・実装・修正のコミットを足した数を載せる（1 改善項目 = 1 コミットの確かめ）。"""
+    _, state = _state(tmp_path, items=[_item(commits={
+        "test": "t" * 7, "implement": "i" * 7, "fix": ["f" * 7]})])
+    assert "| 採用 | 3 |" in plan.format_plan(state)
 
 
-def test_plan_shows_the_case_for_a_deferred_test_item(plan, tmp_path):
-    """現状固定: 見送りの表は test 種の項目に対し兆候ではなく case を書く。
-
-    `_plan_deferred_section` は test 種のとき `smell` ではなく `case` を「兆候・経路」
-    の列へ出す分岐を持つ。構造項目だけを渡す既存の見送りテストではこの分岐が通らない。
-    """
+def test_plan_lists_the_deferred_proposals_with_their_reason(plan, tmp_path):
+    """見送りの内訳を持つのは改修計画だけである（決定 6-b）。理由と補足を載せる。"""
     _, state = _state(
         tmp_path,
-        rounds=[],
         items=[],
         deferred_items=[{
-            "item_id": "R1-001", "round": 1, "kind": "test",
-            "target": "src/paths.py#load_state", "case": "branch", "level": "unit",
-            "defer_reason": "修正ラウンドの上限",
+            "item_id": "I-002", "path": "src/paths.py", "symbol": "load_state",
+            "smell": "duplicated_code", "defer_reason": "budget",
+            "detail": "想定最大時間に収まらない",
         }],
     )
 
     text = plan.format_plan(state)
 
     assert "`src/paths.py#load_state`" in text
-    assert "branch" in text
-    assert "long_method" not in text
+    assert "budget" in text and "想定最大時間に収まらない" in text
 
 
 def test_plan_records_who_proposed_it(plan, tmp_path):
     _, state = _state(tmp_path)
-    assert "codex" in plan.format_plan(state)
+    assert "codex / agy" in plan.format_plan(state)
 
 
-def test_plan_marks_an_abandoned_item(plan, tmp_path):
+def test_plan_marks_a_reverted_item_with_its_reason(plan, tmp_path):
     """取り消した項目も残す。同じ提案が再び来たときの判断材料になる。"""
-    _, state = _state(tmp_path, items=[_item(status="abandoned", commits=[])])
+    _, state = _state(tmp_path, items=[_item(
+        status="reverted", commits={"test": None, "implement": None, "fix": []},
+        failure_reason="修正の上限に達した")])
     text = plan.format_plan(state)
     assert "取り消し" in text
+    assert "修正の上限に達した" in text
 
 
-def test_plan_groups_items_by_round(rounds, plan, tmp_path):
-    rounds = [
-        {"round": 1, "impl": "codex", "reviewers": ["agy", "kiro"],
-         "items": ["R1-001"], "reviews": [], "fix_rounds": 0},
-        {"round": 2, "impl": "kiro", "reviewers": ["codex", "agy"],
-         "items": ["R2-001"], "reviews": [], "fix_rounds": 0},
-    ]
-    items = [_item(), _item(item_id="R2-001", round=2)]
-    _, state = _state(tmp_path, rounds=rounds, items=items)
+def test_plan_follows_the_order_of_the_items(plan, tmp_path):
+    """項目は計画の順位の順（状態の並び）で載る。"""
+    items = [_item(), _item(id="I-002", rank=2, symbol="Bar.run")]
+    _, state = _state(tmp_path, items=items)
     text = plan.format_plan(state)
-    assert text.index("ラウンド 1") < text.index("ラウンド 2")
+    assert text.index("### I-001") < text.index("### I-002")
 
 
-def test_plan_names_the_implementer_of_each_round(plan, tmp_path):
-    _, state = _state(tmp_path)
-    assert "codex" in plan.format_plan(state)
+def test_plan_names_the_budget_and_the_implementer(plan, tmp_path):
+    _, state = _state(tmp_path, budget_minutes=45)
+    text = plan.format_plan(state)
+    assert "45" in text and "43.5" in text and "kiro" in text
 
 
 def test_plan_is_stable_for_the_same_state(plan, tmp_path):
@@ -167,7 +151,7 @@ def test_the_plan_file_is_written_inside_the_work_dir(gitfacts, tmp_path):
     gitfacts._write_plan_file(state, str(work), "issues/plan.md")
 
     written = (work / "issues" / "plan.md").read_text(encoding="utf-8")
-    assert "R1-001" in written
+    assert "I-001" in written
 
 
 # ---------- 公開 ----------

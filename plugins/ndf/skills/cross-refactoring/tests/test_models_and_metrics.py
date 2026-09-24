@@ -9,8 +9,6 @@ import json
 
 import pytest
 
-from crossref_helpers import make_state, read_state
-
 
 # ---------- モデル指定の解析 ----------
 
@@ -324,57 +322,51 @@ def test_report_survives_empty_state(metrics):
     assert "（記録なし）" in text
 
 
-# ---------- 指定値は全ラウンドで不変 ----------
-
-def test_models_are_fixed_across_rounds(cmd_setup, tmp_path, env_tmp_dir):
-    """`start-round` が状態ファイルの指定値をそのままラウンドへ写すこと。"""
-    state_path = make_state(
-        tmp_path,
-        models={"claude": "opus-5", "codex": "gpt-5.5", "agy": None,
-                "kiro": "claude-opus-5"},
-    )
-    env_tmp_dir(state_path)
-    args = type("A", (), {"id": 130})()
-    for _ in range(3):
-        try:
-            cmd_setup.cmd_start_round(args)
-        except SystemExit:
-            break
-        state = read_state(state_path)
-        entry = state["rounds"][-1]
-        assert entry["impl_model"]["requested"] == state["models"][entry["impl"]]
-        assert "reviewer_models" not in entry
-        # 次のラウンドを開けるように、いま開いたラウンドを閉じる
-        entry["adopted"] = 1
-        state_path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
-
-
 # ---------- 実測モデルを状態へ反映する正常経路（R2-005） ----------
 #
 # 現状固定テスト。モデル文字列の解析（observed_model）と不一致判定
 # （mismatch_warning）は個別に固定されているが、CLI の stdout ログから得た
-# 実測モデルを、適用ラウンドの状態へ反映する正常経路（gitfacts.record_observed_model）
+# 実測モデルを状態の実装担当のモデルへ反映する正常経路（gitfacts.record_observed_model）
 # はどのテストも通していなかった。
 
 
 def test_record_observed_model_saves_the_observed_value(
     gitfacts, tmp_path
 ):
-    """R2-005 — stdout ログの実測モデルを impl_model.observed へ保存する。"""
+    """R2-005 — stdout ログの実測モデルを implementer_model.observed へ保存する。
+
+    指定値を変えない。指定の固定は `init` が持つ（test_init の実装担当のモデル）。
+    """
     tmp_dir = tmp_path / "tmp"
     tmp_dir.mkdir()
-    # 適用フェーズ・ラウンド 1 の骨格は `claude-apply-r1`。
-    (tmp_dir / "claude-apply-r1-stdout.log").write_text(
+    # 実装フェーズの骨格は `claude-implement-rf130`（I3）。
+    (tmp_dir / "claude-implement-rf130-stdout.log").write_text(
         json.dumps({
             "type": "result", "is_error": False,
             "modelUsage": {"claude-opus-5": {"inputTokens": 100}},
         }),
         encoding="utf-8",
     )
-    state = {"id": 130, "tmp_dir": str(tmp_dir)}
-    entry = {"impl_model": {"requested": "claude-opus-5", "observed": None}}
+    state = {"id": 130, "tmp_dir": str(tmp_dir),
+             "implementer_model": {"requested": "claude-opus-5", "observed": None}}
 
-    gitfacts.record_observed_model(entry, "claude", state, "apply", 1)
+    gitfacts.record_observed_model(state, "claude", "implement")
 
     # 現状固定: stdout ログから拾った実測値が保存される。
-    assert entry["impl_model"]["observed"] == "claude-opus-5"
+    assert state["implementer_model"] == {"requested": "claude-opus-5",
+                                          "observed": "claude-opus-5"}
+
+
+def test_record_observed_model_reads_only_the_named_phase(gitfacts, tmp_path):
+    """別のフェーズのログは読まない（名前の幹はフェーズごと）。"""
+    tmp_dir = tmp_path / "tmp"
+    tmp_dir.mkdir()
+    (tmp_dir / "claude-plan-rf130-stdout.log").write_text(
+        json.dumps({"type": "result", "modelUsage": {"claude-opus-5": {"inputTokens": 1}}}),
+        encoding="utf-8")
+    state = {"id": 130, "tmp_dir": str(tmp_dir),
+             "implementer_model": {"requested": None, "observed": None}}
+
+    gitfacts.record_observed_model(state, "claude", "implement")
+
+    assert state["implementer_model"]["observed"] is None
