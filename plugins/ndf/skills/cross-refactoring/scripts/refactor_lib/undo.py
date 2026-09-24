@@ -92,6 +92,70 @@ def _remap(state: dict[str, Any], work: str, mapping: dict[str, str]) -> None:
         commits["fix"] = [mapping.get(_full(work, s), s) for s in commits.get("fix") or []]
 
 
+def _close_commitless(state: dict[str, Any], targets: list[str], reason: str) -> list[str]:
+    """コミットを持たない対象を git に触れず閉じ、残る対象を返す。"""
+    remaining = list(targets)
+    for item_id in [i for i in remaining if not item_shas(find_item(state, i))]:
+        item = find_item(state, item_id)
+        item["status"] = REVERTED
+        item.setdefault("failure_reason", reason)
+        remaining.remove(item_id)
+    return remaining
+
+
+def _replay_without_dropped(
+    work: str, state: dict[str, Any], ordered: list[str], targets: list[str], head: Optional[str],
+) -> dict[str, Any]:
+    """item、widened、all の順で積み直し、採用した方式と対応表を返す。"""
+    owner = _owner(work, state)
+    live = {i for i in owner.values()}
+    dropped = set(targets)
+    mode = "item"
+    mapping = _attempt(work, ordered, owner, live - dropped, head)
+    if mapping is None:
+        files = _files_of(work, state, dropped)
+        widened = {i for i in live
+                   if i not in dropped and _files_of(work, state, [i]) & files}
+        if widened:
+            info(f"⚠ 積み直しが競合したため、同じファイルを触った {len(widened)} 件も取り消します")
+            dropped |= widened
+            mode = "widened"
+            mapping = _attempt(work, ordered, owner, live - dropped, head)
+    if mapping is None:
+        info("⚠ 積み直しが競合したため、計画の項目をすべて取り消します")
+        dropped = set(live)
+        mode = "all"
+        revert_range(work, ordered, head)
+        mapping = {}
+    return {"mode": mode, "dropped": dropped, "mapping": mapping}
+
+
+def _record_drop(
+    state: dict[str, Any], work: str, result: dict[str, Any], context: dict[str, Any],
+) -> dict[str, Any]:
+    """積み直し結果を項目の状態、履歴、pending 状態へ反映する。"""
+    mode, dropped, mapping = result["mode"], result["dropped"], result["mapping"]
+    _remap(state, work, mapping)
+    for item_id in sorted(dropped):
+        item = find_item(state, item_id, required=False)
+        if item is None:
+            continue
+        item["status"] = REVERTED
+        item.setdefault(
+            "failure_reason",
+            context["reason"] if item_id in context["targets"]
+            else f"{context['reason']}（{mode} の取り消しに巻き込まれた）",
+        )
+    record = {
+        "at": statefile.now(), "mode": mode, "reason": context["reason"],
+        "dropped": sorted(dropped), "extra": sorted(context["extra"]),
+        "reverted_commits": len(context["ordered"]), "replayed": len(mapping),
+    }
+    state.setdefault("drops", []).append(record)
+    state["pending_drop"] = None
+    return record
+
+
 def drop(
     path: pathlib.Path,
     state: dict[str, Any],
@@ -111,13 +175,7 @@ def drop(
     base = (state.get("plan") or {}).get("base_sha")
     targets = [i for i in item_ids
                if (find_item(state, i, required=False) or {}).get("status") in LIVE]
-    # **コミットを持たない項目は git を触らずに閉じる。** 範囲を逆再生して積み直すと、
-    # 残す項目の SHA が変わるだけで木は変わらない。
-    for item_id in [i for i in targets if not item_shas(find_item(state, i))]:
-        item = find_item(state, item_id)
-        item["status"] = REVERTED
-        item.setdefault("failure_reason", reason)
-        targets.remove(item_id)
+    targets = _close_commitless(state, targets, reason)
     extra = {_full(work, s) for s in extra_shas}
     if not targets and not extra:
         statefile.save(path, state)
@@ -134,47 +192,11 @@ def drop(
     state["pending_push"] = True
     statefile.save(path, state)
 
-    owner = _owner(work, state)
-    live = {i for i in owner.values()}
-    dropped = set(targets)
-    mode = "item"
-    mapping = _attempt(work, ordered, owner, live - dropped, head)
-    if mapping is None:
-        # 段 2: 同じファイルを触った項目まで広げる。
-        files = _files_of(work, state, dropped)
-        widened = {i for i in live
-                   if i not in dropped and _files_of(work, state, [i]) & files}
-        if widened:
-            info(f"⚠ 積み直しが競合したため、同じファイルを触った {len(widened)} 件も取り消します")
-            dropped |= widened
-            mode = "widened"
-            mapping = _attempt(work, ordered, owner, live - dropped, head)
-    if mapping is None:
-        info("⚠ 積み直しが競合したため、計画の項目をすべて取り消します")
-        dropped = set(live)
-        mode = "all"
-        revert_range(work, ordered, head)
-        mapping = {}
-
-    _remap(state, work, mapping)
-    for item_id in sorted(dropped):
-        item = find_item(state, item_id, required=False)
-        if item is None:
-            continue
-        item["status"] = REVERTED
-        item.setdefault(
-            "failure_reason",
-            reason if item_id in targets else f"{reason}（{mode} の取り消しに巻き込まれた）",
-        )
-    record = {
-        "at": statefile.now(), "mode": mode, "reason": reason,
-        "dropped": sorted(dropped), "extra": sorted(extra),
-        "reverted_commits": len(ordered), "replayed": len(mapping),
-    }
-    state.setdefault("drops", []).append(record)
-    state["pending_drop"] = None
+    result = _replay_without_dropped(work, state, ordered, targets, head)
+    context = {"reason": reason, "targets": targets, "extra": extra, "ordered": ordered}
+    record = _record_drop(state, work, result, context)
     statefile.save(path, state)
-    info(f"↩ 取り消し {len(ordered)} コミット / 積み直し {len(mapping)} コミット（{mode}）")
+    info(f"↩ 取り消し {len(ordered)} コミット / 積み直し {record['replayed']} コミット（{record['mode']}）")
     return record
 
 
