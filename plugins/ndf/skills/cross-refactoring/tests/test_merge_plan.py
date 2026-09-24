@@ -74,11 +74,12 @@ def test_items_carry_rank_estimate_tests_and_targets(planned, cmd_plan, capsys):
 def test_items_that_do_not_fit_are_skipped_and_the_rest_packed(planned, cmd_plan):
     """AC8 / 決定 10: 入らない項目は飛ばし、後ろの小さな項目を詰める。"""
     big, small = _candidate(1, "big"), _candidate(2, "small")
-    # 使える時間 = 14 − 経過 5 − 控え（0.1 + 0.1 + 5.5）≒ 3.3 分。big は 4.2 分、small は 1.5 分。
+    # 使える時間 = 20 − 経過 5 − 控え（0.1 + 0.1 + 5.5 + 最終ゲートの修正 5.5）≒ 3.8 分。
+    # big は 4.2 分、small は 1.5 分。
     path = planned([big, small], [
         _answer(big, tier="high", tests=[f"tests/t{n}.py" for n in range(1)]),
         _answer(small, tier="low"),
-    ], budget_minutes=14)
+    ], budget_minutes=20)
     _run(cmd_plan)
     state = read_state(path)
     assert [i["candidate_id"] for i in state["items"]] == ["C-002"]
@@ -88,6 +89,7 @@ def test_items_that_do_not_fit_are_skipped_and_the_rest_packed(planned, cmd_plan
     assert reserve["danger_whole_test"] == pytest.approx(0.1)
     assert reserve["final_whole_test"] == pytest.approx(0.1)
     assert reserve["fix"] == pytest.approx(5.5)
+    assert reserve["final_fix"] == pytest.approx(5.5)
 
 
 def test_the_final_reserve_is_zero_with_a_ci_check(planned, cmd_plan):

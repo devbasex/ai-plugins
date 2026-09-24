@@ -18,7 +18,7 @@ def timeline(refactor):
 
 START = dt.datetime(2026, 9, 24, 10, 0, 0).astimezone()
 M = dt.timedelta(minutes=1)
-RESERVE = {"danger_whole_test": 1.0, "final_whole_test": 1.0, "fix": 5.5}
+RESERVE = {"danger_whole_test": 1.0, "final_whole_test": 1.0, "fix": 5.5, "final_fix": 5.5}
 
 
 def _items(start_offsets):
@@ -43,9 +43,11 @@ def test_every_limit_follows_the_budget(timeline, budget_minutes):
     # 段の終わり = 最後の項目の完了の締め切り（着手の締め切り + 見積り）
     assert got["add_tests_end_at"] == (START + (b * 0.4 + 2.7) * M).isoformat(timespec="seconds")
     assert got["implement_end_at"] == (START + (b * 0.6 + 1.3) * M).isoformat(timespec="seconds")
-    # 直しの試行の打ち切り = 開始 + B − 全体のテストの控え 2 つ
-    assert got["fix_end_at"] == (START + (b - 2) * M).isoformat(timespec="seconds")
+    # 直しの試行の打ち切り = 開始 + B − 全体のテストの控え 2 つ − 最終ゲートの修正の控え（決定 26）
+    assert got["fix_end_at"] == (START + (b - 2 - 5.5) * M).isoformat(timespec="seconds")
     assert got["final_end_at"] == (START + b * M).isoformat(timespec="seconds")
+    # 最終ゲートの修正の 1 回目に必ず渡す長さ（秒）= 控えの final_fix
+    assert got["final_fix_seconds"] == 330
 
 
 def test_the_test_limit_grows_with_the_measured_whole_test(timeline):
@@ -57,7 +59,7 @@ def test_the_test_limit_grows_with_the_measured_whole_test(timeline):
 def test_values_after_the_plan_are_empty_before_the_plan(timeline):
     got = timeline.compute(START, 30, None)
     assert got["add_tests_end_at"] is None and got["implement_end_at"] is None
-    assert got["fix_end_at"] is None
+    assert got["fix_end_at"] is None and got["final_fix_seconds"] is None
     assert got["propose_end_at"] and got["plan_end_at"] and got["final_end_at"]
 
 

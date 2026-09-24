@@ -105,6 +105,9 @@ def compute(
         "implement_end_at": _iso(_completion(list(items or []), "start_deadline", "implement")),
         "fix_end_at": _iso(budget.fix_end(started_at, b, reserve)) if planned else None,
         "final_end_at": _iso(started_at + _dt.timedelta(minutes=b)),
+        # 最終ゲートの修正の 1 回目に必ず渡す長さ（決定 26）。控えの `final_fix`。
+        "final_fix_seconds": (math.ceil(float(reserve.get("final_fix") or 0.0) * 60)
+                              if planned else None),
     }
 
 
@@ -132,3 +135,19 @@ def state_test_timeout(state: dict[str, Any]) -> int:
 def phase_timeout(end: _dt.datetime, now: _dt.datetime, margin_seconds: int) -> int:
     """段の監視の上限（秒）= 終わりの時刻までの残り + 余裕。終わりを過ぎていれば余裕だけ。"""
     return max(math.ceil((end - now).total_seconds()), 0) + int(margin_seconds)
+
+
+def final_fix_timeout(
+    end: _dt.datetime, now: _dt.datetime, margin_seconds: int,
+    floor_seconds: Optional[int], first: bool,
+) -> int:
+    """最終ゲートの修正の監視の上限（秒）。
+
+    **1 回目は、終わりまでの残りが控え（`final_fix_seconds`）より短くても控えの長さを渡す**
+    （決定 26）。想定最大時間を使い切った後に落ちても、必ず 1 度は直しを試みる。
+    2 回目からは他の段と同じく残り + 余裕である。
+    """
+    left = max(math.ceil((end - now).total_seconds()), 0)
+    if first:
+        left = max(left, int(floor_seconds or 0))
+    return left + int(margin_seconds)

@@ -240,6 +240,32 @@ def test_the_fix_cap_reports_the_failure_without_reverting(patch_lib, refactor, 
     assert read_state(state_path)["final_gate"]["status"] == "failed"
 
 
+def test_the_first_fix_is_tried_even_after_the_budget_ran_out(cmd_gate, tmp_path, env_tmp_dir, spy):
+    """決定 26: 想定最大時間を使い切った後に落ちても、最終ゲートの修正は必ず 1 度試みる。"""
+    state_path = _state(tmp_path, workflow_step=True, started_at="2000-01-01T00:00:00")
+    env_tmp_dir(state_path)
+    spy["test_code"] = 1
+
+    with pytest.raises(SystemExit) as e:
+        cmd_gate.cmd_final_gate(_args())
+    assert e.value.code == 2, "時計で打ち切らず修正ラウンドへ進む"
+    gate = read_state(state_path)["final_gate"]
+    assert gate["fix_rounds"] == 1 and gate["status"] == "failing"
+
+
+def test_the_second_fix_after_the_budget_ran_out_is_not_tried(cmd_gate, tmp_path, env_tmp_dir, spy):
+    """決定 26: 2 度目からは時計で打ち切る。"""
+    state_path = _state(tmp_path, workflow_step=True, started_at="2000-01-01T00:00:00",
+                        final_gate={"fix_rounds": 1, "checks": []})
+    env_tmp_dir(state_path)
+    spy["test_code"] = 1
+
+    with pytest.raises(SystemExit) as e:
+        cmd_gate.cmd_final_gate(_args())
+    assert e.value.code == 1
+    assert read_state(state_path)["final_gate"]["status"] == "failed"
+
+
 def test_the_report_shows_the_final_gate(refactor, tmp_path, env_tmp_dir, capsys):
     state_path = _state(
         tmp_path, workflow_step=True,

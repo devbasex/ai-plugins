@@ -1361,6 +1361,23 @@ def test_start_phase_returns_the_time_left_to_the_end_of_the_phase(
     assert record["timeout"] == expected and record["cli_timeout"] == expected + 180
 
 
+@pytest.mark.parametrize("minutes, rounds, expected", [
+    (70, 1, 330 + 180),        # 終わり（11:00）の後の 1 回目: 控えの final_fix（5.5 分）+ 余裕
+    (58, 1, 330 + 180),        # 残り 2 分 < 控え: 控えの長さを渡す
+    (50, 1, 600 + 180),        # 残り 10 分 > 控え: 残り + 余裕
+    (70, 2, 180),              # 2 回目からは今までどおり（過ぎていれば余裕だけ）
+])
+def test_start_phase_gives_the_first_final_fix_at_least_its_reserve(
+        phase_state, start_phase, minutes, rounds, expected):
+    """決定 26: 最終ゲートの修正の 1 回目は、想定最大時間を過ぎていても控え 1 回分を渡す。"""
+    reserve = dict(PLANNED["plan"]["reserve"], final_fix=5.5)
+    phase_state.edit(plan={"reserve": reserve}, items=PLANNED["items"],
+                     final_gate={"fix_rounds": rounds, "checks": []})
+    phase_state.set_now(minutes=minutes)
+    _, timeout = start_phase("final-fix")
+    assert timeout == str(expected)
+
+
 def test_start_phase_for_the_final_fix_keeps_the_phase(phase_state, start_phase):
     """最終ゲートの修正は状態の段を変えない（再開の地点が狂う）。"""
     phase_state.edit(phase="final")

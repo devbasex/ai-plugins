@@ -34,16 +34,17 @@ def test_item_estimate_uses_technique_and_falls_back(budget):
 
 def test_reserve_matches_the_917_example(budget):
     r = budget.reserve(60, False, 5.5)
-    assert r == {"danger_whole_test": 1.0, "final_whole_test": 1.0, "fix": 5.5}
-    assert budget.reserve_total(r) == pytest.approx(7.5)
-    # 経過 9 分で使える時間は 60 − 9 − 7.5 = 43.5 分（設計の例）
-    assert budget.available_minutes(60, 9, r) == pytest.approx(43.5)
+    # 最終ゲートの修正 1 回分（final_fix）も計画の時点で差し引く（決定 26）
+    assert r == {"danger_whole_test": 1.0, "final_whole_test": 1.0, "fix": 5.5, "final_fix": 5.5}
+    assert budget.reserve_total(r) == pytest.approx(13.0)
+    # 経過 9 分で使える時間は 60 − 9 − 13 = 38 分
+    assert budget.available_minutes(60, 9, r) == pytest.approx(38.0)
 
 
 def test_reserve_ci_check_and_missing_baseline(budget):
     assert budget.reserve(120, True, 5.5)["final_whole_test"] == 0.0
     assert budget.reserve(None, False, 3.0) == {
-        "danger_whole_test": 0.0, "final_whole_test": 0.0, "fix": 3.0}
+        "danger_whole_test": 0.0, "final_whole_test": 0.0, "fix": 3.0, "final_fix": 3.0}
 
 
 def test_rank_key_orders_tier_votes_severity_then_cheaper(budget):
@@ -91,3 +92,10 @@ def test_fix_time_left_does_not_subtract_fix_reserve(budget):
     r = {"danger_whole_test": 1.0, "final_whole_test": 1.0, "fix": 5.5}
     now = START + dt.timedelta(minutes=50)
     assert budget.fix_time_left(START, 60, r, now) == pytest.approx(8.0)
+
+
+def test_fix_time_left_keeps_the_final_fix_reserve_for_the_final_gate(budget):
+    """決定 26: 検証の直しは、最終ゲートの修正 1 回分の控えまで食わない。"""
+    r = {"danger_whole_test": 1.0, "final_whole_test": 1.0, "fix": 5.5, "final_fix": 5.5}
+    now = START + dt.timedelta(minutes=50)
+    assert budget.fix_time_left(START, 60, r, now) == pytest.approx(2.5)

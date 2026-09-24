@@ -200,6 +200,7 @@ _LIMIT_ROWS = (
     ("implement_end_at", "実装の終わり = 最後の項目の完了の締め切り"),
     ("fix_end_at", "直しの試行の打ち切り"),
     ("final_end_at", "最終ゲートの修正の打ち切り（想定最大時間の終わり）"),
+    ("final_fix_seconds", "最終ゲートの修正の 1 回目に必ず渡す長さ（秒。控えの final_fix）"),
     ("init_test_timeout", "着手前のテスト 1 回の上限（秒）"),
     ("test_timeout", "テスト 1 回の上限（秒）"),
     ("margin_seconds", "余裕（秒。段の上限と CLI の上限に足す）"),

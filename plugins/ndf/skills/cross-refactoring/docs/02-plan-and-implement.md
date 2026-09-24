@@ -57,13 +57,14 @@ rf_eval merge-plan "$ID"          # TESTS_NEEDED=0|1。2 = 項目 0 件（最終
    読むだけにする（決定 25）
 9. **実行時の値を書き出す。** 締め切りの節の表の値を `state["limits"]` へ書く（決定 24）
 
-控え（`plan.reserve`）は次の 3 つの和である。
+控え（`plan.reserve`）は次の 4 つの和である。
 
 | 控え | 値 |
 | --- | --- |
 | `danger_whole_test` | 着手前の全体のテストの秒（危険の印が立ったときの 1 回） |
 | `final_whole_test` | 同上（`--ci-check` があれば 0。最終ゲートの全体のテスト） |
 | `fix` | 配分テーブルの `fix`（修正の起動 1 回分） |
+| `final_fix` | 同上（最終ゲートの修正 1 回分。検証の直しには使わせない。決定 26） |
 
 **計画は叩き直しても作り直さない。** 採用の件数・締め切り・控えはこの時点の予算で固定する。
 
@@ -100,7 +101,7 @@ rf_eval merge-plan "$ID"          # TESTS_NEEDED=0|1。2 = 項目 0 件（最終
 
 **時間に関わる数値は、この節の式だけで決まる**（決定 23・24）。B は想定最大時間
 （`--budget-minutes`）、w は着手前の全体のテストの実測秒（`baseline_test.seconds`）、
-開始は `started_at`、R は控え（危険の印と最終ゲートの全体のテスト、修正 1 回）である。
+開始は `started_at`、R は控え（危険の印と最終ゲートの全体のテスト、修正 1 回、最終ゲートの修正 1 回）である。
 係数は `refactor_lib/timeline.py` にだけ置き、実行の途中で数値を決めるために LLM へ問わない。
 
 | 値 | 式 | 書き出す時点 |
@@ -112,9 +113,10 @@ rf_eval merge-plan "$ID"          # TESTS_NEEDED=0|1。2 = 項目 0 件（最終
 | 計画の枠の終わり | `開始 + 0.30·B` | `init` |
 | テストの追加の終わり | 最後の項目の `test_start_deadline + test` の見積り | `merge-plan` |
 | 実装の終わり | 最後の項目の `start_deadline + implement` の見積り | `merge-plan` |
-| 直しの試行の打ち切り | `開始 + B − danger_whole_test − final_whole_test`（`budget.fix_end`） | `merge-plan` |
-| 最終ゲートの修正の打ち切り | `開始 + B` | `init` |
-| 段の監視の上限（`PHASE_TIMEOUT`） | その段の終わりまでの残り + 余裕（過ぎていれば余裕だけ） | `start-phase` |
+| 直しの試行の打ち切り | `開始 + B − danger_whole_test − final_whole_test − final_fix`（`budget.fix_end`） | `merge-plan` |
+| 最終ゲートの修正の打ち切り | `開始 + B`。**ただし 1 回目は打ち切らない**（決定 26） | `init` |
+| 最終ゲートの修正の 1 回目の長さの下限（`final_fix_seconds`） | 控えの `final_fix` | `merge-plan` |
+| 段の監視の上限（`PHASE_TIMEOUT`） | その段の終わりまでの残り + 余裕（過ぎていれば余裕だけ）。最終ゲートの修正の 1 回目は `max(残り, final_fix_seconds) + 余裕` | `start-phase` |
 | 無音の打ち切り（`--stall-timeout`） | 段の監視の上限と同じ | `start-phase` |
 | CLI の上限（`cli_timeout`） | 段の監視の上限 + 余裕 | `start-phase` |
 

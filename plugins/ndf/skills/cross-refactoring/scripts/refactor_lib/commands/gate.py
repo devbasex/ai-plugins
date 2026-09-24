@@ -96,9 +96,15 @@ def _final_fix_stop(state: dict[str, Any], gate: dict[str, Any]) -> Optional[str
 
     **回数ではなく時計で決める。** 終わり（`limits.final_end_at` = 開始 + 想定最大時間）を
     過ぎていれば打ち切る。起動し直しても解けない結末（利用上限）も打ち切る。
+
+    **ただし 1 度も試みていなければ時計で打ち切らない**（決定 26）。修正 1 回分の控え
+    （`plan.reserve.final_fix`）を計画の時点で予算から差し引いてあり、予算を使い切った後に
+    落ちても必ず 1 度は直しを試みる。
     """
     if gate.get("no_relaunch"):
         return "修正担当を起動し直しても解けない結末だった"
+    if safe_int(gate.get("fix_rounds")) == 0:
+        return None
     end = clock.parse(timeline.limits_of(state).get("final_end_at"))
     if end is not None and clock.now() >= end:
         return "想定最大時間の終わりを過ぎた"

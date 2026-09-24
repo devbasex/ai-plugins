@@ -45,6 +45,9 @@ def reserve(baseline_seconds: Optional[float], ci_check: bool, fix_minutes: floa
         "danger_whole_test": whole,
         "final_whole_test": 0.0 if ci_check else whole,
         "fix": float(fix_minutes),
+        # 最終ゲートの修正 1 回分（決定 26）。検証の直しに食わせず、最終ゲートが落ちたとき
+        # 必ず 1 度は直しを試みるための時間である。
+        "final_fix": float(fix_minutes),
     }
 
 
@@ -126,12 +129,14 @@ def fix_end(started_at: _dt.datetime, budget_minutes: int, reserve: dict[str, An
     """修正に使える終わりの時刻。
 
     **控えの `fix` は引かない。** T から測ると、控えておいた修正 1 回分が使われない。
-    全体のテストの控え 2 つだけを差し引いた終わりである。
+    全体のテストの控え 2 つと、最終ゲートの修正の控え（`final_fix`。決定 26）を差し引いた
+    終わりである。`final_fix` を引かないと、検証の直しが最終ゲートの修正の時間まで使う。
     """
     return started_at + _dt.timedelta(
         minutes=budget_minutes
         - float(reserve.get("danger_whole_test") or 0.0)
         - float(reserve.get("final_whole_test") or 0.0)
+        - float(reserve.get("final_fix") or 0.0)
     )
 
 

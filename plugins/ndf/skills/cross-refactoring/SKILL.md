@@ -290,7 +290,7 @@ while :; do
   rf_eval final-gate "$ID"; gate=$?                # FINAL_GATE=...
   case $gate in
     0) break ;;
-    1) echo "⚠ 最終ゲートが通らないまま修正を打ち切りました（想定最大時間の終わり）" >&2; break ;;
+    1) echo "⚠ 最終ゲートが通らないまま修正を打ち切りました（1 度直した後に想定最大時間の終わりを過ぎた）" >&2; break ;;
     2) rf_eval start-phase "$ID" final-fix
        "$SCRIPTS/launch-cli.sh" "$FINAL_FIX_IMPL" final-fix "$ID"
        "$LIB/monitor.py" "$ID" --agents "$FINAL_FIX_IMPL" --tmp-dir "$TMP_DIR" \
