@@ -180,10 +180,10 @@ class FileScan:
     cwd: str = ""
 
 
-def scan_file(path: Path, text: str | None = None) -> FileScan:
+def scan_file(path: Path, text: str | None = None, until: float | None = None) -> FileScan:
     """記録 1 件を読む。応答は message.id で重複を除き、最後の usage を取る。
 
-    `text` を渡すと、読み済みの本文を使ってファイルを読み直さない。
+    `text` を渡すと、読み済みの本文を使ってファイルを読み直さない。`until` より後の時刻の行は読まない。
     """
     s = FileScan()
     per_msg: dict[str, dict] = {}
@@ -199,6 +199,8 @@ def scan_file(path: Path, text: str | None = None) -> FileScan:
         if not isinstance(d, dict):
             continue
         t = parse_ts(d.get("timestamp"))
+        if until is not None and t is not None and t > until:
+            continue
         if t is not None:
             s.times.append(t)
         if not s.cwd and d.get("cwd"):
@@ -290,7 +292,7 @@ def mode_of(modes: Counter) -> str:
     return next(iter(modes)) if len(modes) == 1 else "混在"
 
 
-def read_claude(root: Path, idle_cap: int) -> tuple[list[Session], list, dict]:
+def read_claude(root: Path, idle_cap: int, until: float | None = None) -> tuple[list[Session], list, dict]:
     sessions: list[Session] = []
     seats: list = []
     skipped = Counter()
@@ -300,7 +302,7 @@ def read_claude(root: Path, idle_cap: int) -> tuple[list[Session], list, dict]:
         if not is_seat and "/ai-plugins/ndf/" not in head:
             skipped["ndf の Skill が無い"] += 1
             continue
-        s = scan_file(main, head)  # 判定で読んだ本文を使い、同じファイルを 2 度読まない
+        s = scan_file(main, head, until)  # 判定で読んだ本文を使い、同じファイルを 2 度読まない
         if is_seat or s.cwd.startswith("/tmp/ndf-worktrees/"):
             m = WT_RE.search(s.cwd + "/")
             if m and s.times and s.usage.calls:  # 応答の無い記録（起動に失敗した席）は数えない
@@ -309,7 +311,7 @@ def read_claude(root: Path, idle_cap: int) -> tuple[list[Session], list, dict]:
                                       tokens={"context": s.usage.context, "out": s.usage.out, "cost": s.usage.cost},
                                       usage=s.usage))
             continue
-        subs = [(p, scan_file(p), read_meta(p)) for p in sorted((main.parent / main.stem / "subagents").glob("*.jsonl"))]
+        subs = [(p, scan_file(p, until=until), read_meta(p)) for p in sorted((main.parent / main.stem / "subagents").glob("*.jsonl"))]
         versions = s.versions or [v for _, sub, _ in subs for v in sub.versions]
         if not versions or not s.times:
             skipped["版を判定できない"] += 1
@@ -349,7 +351,7 @@ class External:
     usage: Usage | None = None  # 呼び出しの並びが分かる席だけ（claude・codex）。P・k・書き直しに使う
 
 
-def read_codex(root: Path, idle_cap: int) -> list[External]:
+def read_codex(root: Path, idle_cap: int, until: float | None = None) -> list[External]:
     out = []
     for path in sorted(root.glob("**/rollout-*.jsonl")):
         cwd, model, total, times, calls = "", None, None, [], []
@@ -363,6 +365,8 @@ def read_codex(root: Path, idle_cap: int) -> list[External]:
             if not isinstance(d, dict):
                 continue
             t = parse_ts(d.get("timestamp"))
+            if until is not None and t is not None and t > until:
+                continue
             if t is not None:
                 times.append(t)
             p = d.get("payload") or {}
@@ -380,11 +384,14 @@ def read_codex(root: Path, idle_cap: int) -> list[External]:
         m = WT_RE.search(cwd + "/")
         if not m or not times or total is None:  # token_count の無い記録（起動に失敗した席）は数えない
             continue
-        # codex の input_tokens は cached を含む。キャッシュに当たらなかった分を書き込みとみなす
-        usage = Usage()
-        for _, inp, cached, out_t in calls:
-            usage.add(Usage(1, inp - cached, cached, 0, 0, out_t))
-        usage.record_calls([(t, inp, inp - cached) for t, inp, cached, _ in calls])
+        # codex の input_tokens は cached を含む。キャッシュに当たらなかった分を書き込みとみなす。
+        # 呼び出しごとの値（last_token_usage）が無い記録は、P・k を取れないものとして usage を持たない
+        usage = None
+        if calls:
+            usage = Usage()
+            for _, inp, cached, out_t in calls:
+                usage.add(Usage(1, inp - cached, cached, 0, 0, out_t))
+            usage.record_calls([(t, inp, inp - cached) for t, inp, cached, _ in calls])
         out.append(External("codex", m.group(2)[:2], "/".join(m.groups()), min(times), active_seconds(times, idle_cap),
                             model or "不明", tokens={"input": total.get("input_tokens", 0),
                                                     "cached": total.get("cached_input_tokens", 0),
@@ -392,7 +399,8 @@ def read_codex(root: Path, idle_cap: int) -> list[External]:
     return out
 
 
-def read_kiro(root: Path) -> list[External]:
+def read_kiro(root: Path, until: float | None = None) -> list[External]:
+    """kiro の記録はターンに時刻を持たないため、`until` では作成が後の記録だけを除く。"""
     out = []
     for path in sorted(root.glob("*.json")):
         try:
@@ -401,7 +409,7 @@ def read_kiro(root: Path) -> list[External]:
             continue
         m = WT_RE.search((d.get("cwd") or "") + "/")
         start = parse_ts(d.get("created_at"))
-        if not m or start is None:
+        if not m or start is None or (until is not None and start > until):
             continue
         turns = ((d.get("session_state") or {}).get("conversation_metadata") or {}).get("user_turn_metadatas") or []
         credit = sum(x.get("value", 0) for t in turns for x in (t.get("metering_usage") or []))
@@ -435,11 +443,14 @@ def _k(x: float) -> str:
 
 
 def call_stats(u: Usage, n: int) -> dict:
-    """1 起動あたりの P・k・書き込みの内訳と、書き直しの回数・直前の間隔（分）。"""
+    """1 起動あたりの P・k・書き込みの内訳と、書き直しの回数・量・直前の間隔（分）。
+
+    回数と量は合計で、1 起動あたりではない（`rewrite_tokens / rewrites` が 1 回あたりの量になる）。
+    """
     gap = median(u.gaps)
     return {"p": u.p / n, "k": u.calls / n, "w5": u.w5 / n, "w1h": u.w1h / n,
             "rewrites": u.rewrites, "rewrites_after_5m": sum(1 for g in u.gaps if g > CACHE_5M),
-            "rewrite_tokens": u.rewrite_tokens / n, "rewrite_gap_median": None if gap is None else gap / 60}
+            "rewrite_tokens": u.rewrite_tokens, "rewrite_gap_median": None if gap is None else gap / 60}
 
 
 def _min(x: float | None) -> str:
@@ -499,11 +510,18 @@ def aggregate(sessions: list[Session], by: list[str]) -> dict:
         for (rt, kind, model), es in sorted(ext_groups.items()):
             tok = Counter()
             calls = Usage()
+            with_calls = [e for e in es if e.usage]
             for e in es:
                 tok.update(e.tokens)
-                if e.usage:
-                    calls.add(e.usage)
-            stats = call_stats(calls, len(es)) if any(e.usage for e in es) else {"k": tok.pop("calls", 0) / len(es)}
+            for e in with_calls:
+                calls.add(e.usage)
+            # 呼び出しの並びが分かる席だけを分母にする。分からない席しか無ければ P・k を出さない（kiro はターン数を k に）
+            if with_calls:
+                stats = call_stats(calls, len(with_calls)) | {"call_seats": len(with_calls)}
+            elif "calls" in tok:
+                stats = {"k": tok.pop("calls") / len(es)}
+            else:
+                stats = {}
             external.append(axis | {"runtime": rt, "skill": "cross-review" if kind == "pr" else "cross-refactoring",
                                     "cli_model": model, "count": len(es), **{k: v / len(es) for k, v in tok.items()},
                                     "minutes": sum(e.sec for e in es) / len(es) / 60, **stats})
@@ -555,10 +573,11 @@ def render_md(result: dict, by: list[str]) -> str:
                                         _k(r.get("out", 0)), f"{r.get('credit', 0):.2f}", f"{r['minutes']:.1f}"]
                   for r in result["external"]])
     out += ["", "## 外部 CLI の呼び出しとキャッシュ（1 起動あたり）", "",
-            "codex は input のうち cached に当たらなかった分を書き込みとみなす。kiro は呼び出し回数（ターン数）だけを載せる。", ""]
+            "codex は input のうち cached に当たらなかった分を書き込みとみなし、呼び出しごとの値（last_token_usage）を持つ席だけで数える。"
+            "kiro は呼び出し回数（ターン数）だけを載せる。取れない値は -。", ""]
     out += table(heads + ["ランタイム", "Skill", "モデル", "起動", "P", "k", "書き直し", "5 分超", "間隔"],
                  [[r[a] for a in by] + [r["runtime"], r["skill"], r["cli_model"], str(r["count"]),
-                                        _k(r["p"]) if "p" in r else "-", f"{r['k']:.1f}",
+                                        _k(r["p"]) if "p" in r else "-", f"{r['k']:.1f}" if "k" in r else "-",
                                         str(r.get("rewrites", "-")), str(r.get("rewrites_after_5m", "-")),
                                         _min(r.get("rewrite_gap_median"))]
                   for r in result["external"]])
@@ -575,20 +594,27 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--by", default="version,mode,model", help=f"表の軸（カンマ区切り）: {', '.join(AXES)}")
     ap.add_argument("--idle-cap", type=int, default=IDLE_CAP, help="所要に入れる行の間隔の上限（秒）")
     ap.add_argument("--format", choices=("md", "json"), default="md")
+    ap.add_argument("--until", help="この時刻より後の記録の行を読まない（ISO 8601。例: 2026-09-24T09:00:00Z）。"
+                                     "進行中の会話を含むときに、同じ集計を後から作り直せるようにする")
     args = ap.parse_args(argv)
     by = [a.strip() for a in args.by.split(",") if a.strip()]
     bad = [a for a in by if a not in AXES]
     if bad or not by:
         ap.error(f"--by に使えない軸: {', '.join(bad) or '(空)'}（使える軸: {', '.join(AXES)}）")
 
-    sessions, seats, skipped = read_claude(args.claude_root, args.idle_cap)
-    externals = seats + read_codex(args.codex_root, args.idle_cap) + read_kiro(args.kiro_root)
+    until = None
+    if args.until:
+        until = parse_ts(args.until)
+        if until is None:
+            ap.error(f"--until を時刻として読めない: {args.until}")
+    sessions, seats, skipped = read_claude(args.claude_root, args.idle_cap, until)
+    externals = seats + read_codex(args.codex_root, args.idle_cap, until) + read_kiro(args.kiro_root, until)
     unlinked = link_external(sessions, externals)  # 版で絞る前に寄せる（古い版の会話の分を未対応に数えない）
     if args.min_version:
         floor = version_key(args.min_version)
         sessions = [s for s in sessions if version_key(s.version) >= floor]
     result = aggregate(sessions, by)
-    result["meta"] = {"by": by, "min_version": args.min_version, "sessions": len(sessions),
+    result["meta"] = {"by": by, "min_version": args.min_version, "until": args.until, "sessions": len(sessions),
                       "sessions_with_pr": sum(1 for s in sessions if s.prs), "unlinked_external": unlinked,
                       "skipped": skipped}
     if args.format == "json":

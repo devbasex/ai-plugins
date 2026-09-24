@@ -202,7 +202,7 @@ def test_p_k_and_rewrites_per_role(tmp_path):
     r = rows[("supervisor", "検査")]
     assert (r["count"], r["p"], r["k"]) == (1, 42_000, 6)
     assert (r["rewrites"], r["rewrites_after_5m"]) == (2, 1)
-    assert r["rewrite_tokens"] == 43_000 + 80_000
+    assert r["rewrite_tokens"] == 43_000 + 80_000  # 回数と同じく合計
     assert r["rewrite_gap_median"] == (11 + 1) / 2  # 分
     assert (r["w5"], r["w1h"]) == (12_000 + 1_000 + 43_000 + 30_000 + 15_000 + 80_000, 0)
     # conductor の書き込みは 1 時間（U）。最初の呼び出しは書き直しに数えない
@@ -235,3 +235,21 @@ def test_codex_seat_calls_from_last_token_usage(tmp_path):
 def test_md_has_call_tables(tmp_path):
     out = run(build_calls(tmp_path), "--by", "version").stdout
     assert "| 10.16.0 | supervisor | 検査 | 1 | 42.0k | 6.0 | 0.18M | 0.00M | 2 | 1 | 6.0 |" in out
+
+
+def test_codex_seat_without_per_call_usage_has_no_p_or_k(tmp_path):
+    # build の codex の席は累計だけで last_token_usage を持たない
+    ext = {x["runtime"]: x for x in run_json(build(tmp_path))["external"]}
+    assert "p" not in ext["codex"] and "k" not in ext["codex"]
+    out = run(build(tmp_path / "md"), "--by", "version").stdout
+    assert "| 10.16.0 | codex | cross-review | gpt-x | 1 | - | - | - | - | - |" in out
+
+
+def test_until_drops_later_lines(tmp_path):
+    roots = build_calls(tmp_path)
+    rows = {(x["layer"], x["role"]): x for x in run_json(roots, "--until", _ts(52))["per_role"]}
+    r = rows[("supervisor", "検査")]
+    assert (r["k"], r["rewrites"]) == (3, 1)  # 53 分以降の 3 呼び出しを読まない
+    assert run_json(roots, "--until", _ts(52))["meta"]["until"] == _ts(52)
+    p = run(roots, "--until", "yesterday")
+    assert p.returncode == 2 and "--until" in p.stderr

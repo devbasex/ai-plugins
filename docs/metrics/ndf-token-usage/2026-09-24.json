@@ -486,15 +486,15 @@
    "model": "claude-opus-5-5",
    "cc": "2.1.281",
    "reviewers": "-",
-   "sessions": 7,
-   "sessions_with_pr": 3,
-   "prs": 5,
-   "conductor_cost": 626773.71,
-   "supervisor_cost": 238468.61000000002,
+   "sessions": 4,
+   "sessions_with_pr": 2,
+   "prs": 4,
+   "conductor_cost": 541609.4875,
+   "supervisor_cost": 0.0,
    "worker_cost": 0.0,
-   "context": 7375231.0,
-   "out": 30285.4,
-   "minutes": 25.426373333136244,
+   "context": 6108480.0,
+   "out": 18174.5,
+   "minutes": 22.68599166671435,
    "codex_input": 0.0,
    "codex_out": 0.0,
    "kiro_credit": 0.0,
@@ -521,7 +521,7 @@
    "w1h": 2578646.0,
    "rewrites": 5,
    "rewrites_after_5m": 4,
-   "rewrite_tokens": 2001882.0,
+   "rewrite_tokens": 2001882,
    "rewrite_gap_median": 237.43140000104904
   },
   {
@@ -543,7 +543,7 @@
    "w1h": 0.0,
    "rewrites": 34,
    "rewrites_after_5m": 33,
-   "rewrite_tokens": 393224.44444444444,
+   "rewrite_tokens": 3539020,
    "rewrite_gap_median": 9.154441666603088
   },
   {
@@ -565,7 +565,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -587,7 +587,7 @@
    "w1h": 1447572.0,
    "rewrites": 3,
    "rewrites_after_5m": 2,
-   "rewrite_tokens": 979776.0,
+   "rewrite_tokens": 979776,
    "rewrite_gap_median": 12.244199999173482
   },
   {
@@ -609,7 +609,7 @@
    "w1h": 1691871.0,
    "rewrites": 2,
    "rewrites_after_5m": 2,
-   "rewrite_tokens": 1102604.0,
+   "rewrite_tokens": 1102604,
    "rewrite_gap_median": 920.8006333331267
   },
   {
@@ -631,7 +631,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -653,7 +653,7 @@
    "w1h": 201660.33333333334,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -675,7 +675,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -697,7 +697,7 @@
    "w1h": 165565.8,
    "rewrites": 1,
    "rewrites_after_5m": 1,
-   "rewrite_tokens": 25238.0,
+   "rewrite_tokens": 126190,
    "rewrite_gap_median": 50.053749998410545
   },
   {
@@ -719,7 +719,7 @@
    "w1h": 3157521.0,
    "rewrites": 10,
    "rewrites_after_5m": 10,
-   "rewrite_tokens": 2752984.0,
+   "rewrite_tokens": 2752984,
    "rewrite_gap_median": 117.6529083331426
   },
   {
@@ -741,7 +741,7 @@
    "w1h": 0.0,
    "rewrites": 105,
    "rewrites_after_5m": 103,
-   "rewrite_tokens": 1612609.6,
+   "rewrite_tokens": 32252192,
    "rewrite_gap_median": 9.601866666475932
   },
   {
@@ -763,7 +763,7 @@
    "w1h": 0.0,
    "rewrites": 1,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 218489.0,
+   "rewrite_tokens": 218489,
    "rewrite_gap_median": 0.9806666652361552
   },
   {
@@ -785,7 +785,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -807,7 +807,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -829,7 +829,7 @@
    "w1h": 0.0,
    "rewrites": 6,
    "rewrites_after_5m": 3,
-   "rewrite_tokens": 22287.571428571428,
+   "rewrite_tokens": 624052,
    "rewrite_gap_median": 2.8472166657447815
   },
   {
@@ -851,7 +851,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -873,7 +873,7 @@
    "w1h": 4005263.0,
    "rewrites": 11,
    "rewrites_after_5m": 10,
-   "rewrite_tokens": 7001440.0,
+   "rewrite_tokens": 7001440,
    "rewrite_gap_median": 103.58420000076293
   },
   {
@@ -895,7 +895,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -917,7 +917,7 @@
    "w1h": 108069.0,
    "rewrites": 1,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 31755.0,
+   "rewrite_tokens": 31755,
    "rewrite_gap_median": 0.05196666717529297
   },
   {
@@ -939,7 +939,7 @@
    "w1h": 0.0,
    "rewrites": 2,
    "rewrites_after_5m": 2,
-   "rewrite_tokens": 480261.0,
+   "rewrite_tokens": 480261,
    "rewrite_gap_median": 8.95633333325386
   },
   {
@@ -961,7 +961,7 @@
    "w1h": 468629.0,
    "rewrites": 2,
    "rewrites_after_5m": 2,
-   "rewrite_tokens": 303372.0,
+   "rewrite_tokens": 303372,
    "rewrite_gap_median": 108.22588333288829
   },
   {
@@ -983,7 +983,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -1005,7 +1005,7 @@
    "w1h": 0.0,
    "rewrites": 48,
    "rewrites_after_5m": 48,
-   "rewrite_tokens": 1384953.75,
+   "rewrite_tokens": 5539815,
    "rewrite_gap_median": 9.70316666563352
   },
   {
@@ -1027,7 +1027,7 @@
    "w1h": 0.0,
    "rewrites": 8,
    "rewrites_after_5m": 8,
-   "rewrite_tokens": 2259177.0,
+   "rewrite_tokens": 2259177,
    "rewrite_gap_median": 9.074666666984559
   },
   {
@@ -1049,7 +1049,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -1071,7 +1071,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -1093,7 +1093,7 @@
    "w1h": 90544.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -1115,7 +1115,7 @@
    "w1h": 221127.0,
    "rewrites": 3,
    "rewrites_after_5m": 1,
-   "rewrite_tokens": 84539.33333333333,
+   "rewrite_tokens": 253618,
    "rewrite_gap_median": 0.39121666351954143
   },
   {
@@ -1137,7 +1137,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -1159,7 +1159,7 @@
    "w1h": 894927.0,
    "rewrites": 9,
    "rewrites_after_5m": 8,
-   "rewrite_tokens": 583795.0,
+   "rewrite_tokens": 2335180,
    "rewrite_gap_median": 131.68556666374207
   },
   {
@@ -1181,7 +1181,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -1203,7 +1203,7 @@
    "w1h": 0.0,
    "rewrites": 1,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 154330.0,
+   "rewrite_tokens": 154330,
    "rewrite_gap_median": 3.754433333873749
   },
   {
@@ -1225,7 +1225,7 @@
    "w1h": 0.0,
    "rewrites": 1,
    "rewrites_after_5m": 1,
-   "rewrite_tokens": 92065.0,
+   "rewrite_tokens": 92065,
    "rewrite_gap_median": 14.259783335526784
   },
   {
@@ -1247,7 +1247,7 @@
    "w1h": 0.0,
    "rewrites": 7,
    "rewrites_after_5m": 7,
-   "rewrite_tokens": 292596.5,
+   "rewrite_tokens": 585193,
    "rewrite_gap_median": 9.765533332029978
   },
   {
@@ -1269,7 +1269,7 @@
    "w1h": 0.0,
    "rewrites": 5,
    "rewrites_after_5m": 5,
-   "rewrite_tokens": 233614.0,
+   "rewrite_tokens": 467228,
    "rewrite_gap_median": 8.285316669940949
   },
   {
@@ -1291,7 +1291,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -1313,7 +1313,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -1335,7 +1335,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -1357,7 +1357,7 @@
    "w1h": 783175.0,
    "rewrites": 13,
    "rewrites_after_5m": 13,
-   "rewrite_tokens": 3849785.0,
+   "rewrite_tokens": 3849785,
    "rewrite_gap_median": 15.397449998060862
   },
   {
@@ -1379,7 +1379,7 @@
    "w1h": 0.0,
    "rewrites": 4,
    "rewrites_after_5m": 2,
-   "rewrite_tokens": 78222.625,
+   "rewrite_tokens": 625781,
    "rewrite_gap_median": 3.8312833329041798
   },
   {
@@ -1401,7 +1401,7 @@
    "w1h": 0.0,
    "rewrites": 11,
    "rewrites_after_5m": 9,
-   "rewrite_tokens": 185793.0,
+   "rewrite_tokens": 1300551,
    "rewrite_gap_median": 6.753333330154419
   },
   {
@@ -1423,7 +1423,7 @@
    "w1h": 0.0,
    "rewrites": 11,
    "rewrites_after_5m": 10,
-   "rewrite_tokens": 830640.2,
+   "rewrite_tokens": 4153201,
    "rewrite_gap_median": 7.253083336353302
   },
   {
@@ -1445,7 +1445,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -1467,7 +1467,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -1489,7 +1489,7 @@
    "w1h": 0.0,
    "rewrites": 4,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 51753.5,
+   "rewrite_tokens": 310521,
    "rewrite_gap_median": 0.30546666781107584
   },
   {
@@ -1511,7 +1511,7 @@
    "w1h": 0.0,
    "rewrites": 1,
    "rewrites_after_5m": 1,
-   "rewrite_tokens": 18483.0,
+   "rewrite_tokens": 110898,
    "rewrite_gap_median": 10.585649998982747
   },
   {
@@ -1533,7 +1533,7 @@
    "w1h": 5054625.0,
    "rewrites": 20,
    "rewrites_after_5m": 18,
-   "rewrite_tokens": 6875726.0,
+   "rewrite_tokens": 6875726,
    "rewrite_gap_median": 30.76541666785876
   },
   {
@@ -1555,7 +1555,7 @@
    "w1h": 0.0,
    "rewrites": 6,
    "rewrites_after_5m": 5,
-   "rewrite_tokens": 461189.0,
+   "rewrite_tokens": 922378,
    "rewrite_gap_median": 5.96091666618983
   },
   {
@@ -1577,7 +1577,7 @@
    "w1h": 0.0,
    "rewrites": 10,
    "rewrites_after_5m": 9,
-   "rewrite_tokens": 357961.4,
+   "rewrite_tokens": 1789807,
    "rewrite_gap_median": 8.467825001478195
   },
   {
@@ -1599,7 +1599,7 @@
    "w1h": 0.0,
    "rewrites": 12,
    "rewrites_after_5m": 10,
-   "rewrite_tokens": 319299.75,
+   "rewrite_tokens": 2554398,
    "rewrite_gap_median": 13.266108334064484
   },
   {
@@ -1621,7 +1621,7 @@
    "w1h": 0.0,
    "rewrites": 116,
    "rewrites_after_5m": 115,
-   "rewrite_tokens": 2053207.375,
+   "rewrite_tokens": 16425659,
    "rewrite_gap_median": 9.541458334525426
   },
   {
@@ -1643,7 +1643,7 @@
    "w1h": 0.0,
    "rewrites": 12,
    "rewrites_after_5m": 12,
-   "rewrite_tokens": 573039.6666666666,
+   "rewrite_tokens": 3438238,
    "rewrite_gap_median": 7.578833333651224
   },
   {
@@ -1665,7 +1665,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -1687,7 +1687,7 @@
    "w1h": 0.0,
    "rewrites": 5,
    "rewrites_after_5m": 4,
-   "rewrite_tokens": 12017.098039215687,
+   "rewrite_tokens": 612872,
    "rewrite_gap_median": 6.86715000073115
   },
   {
@@ -1709,7 +1709,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -1731,7 +1731,7 @@
    "w1h": 0.0,
    "rewrites": 3,
    "rewrites_after_5m": 2,
-   "rewrite_tokens": 46085.90909090909,
+   "rewrite_tokens": 506945,
    "rewrite_gap_median": 7.1728000005086265
   },
   {
@@ -1753,7 +1753,7 @@
    "w1h": 139324.5,
    "rewrites": 1,
    "rewrites_after_5m": 1,
-   "rewrite_tokens": 32376.5,
+   "rewrite_tokens": 64753,
    "rewrite_gap_median": 97.40808333158493
   },
   {
@@ -1775,7 +1775,7 @@
    "w1h": 0.0,
    "rewrites": 1,
    "rewrites_after_5m": 1,
-   "rewrite_tokens": 203904.0,
+   "rewrite_tokens": 203904,
    "rewrite_gap_median": 5.811366665363312
   },
   {
@@ -1797,7 +1797,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -1819,7 +1819,7 @@
    "w1h": 0.0,
    "rewrites": 10,
    "rewrites_after_5m": 9,
-   "rewrite_tokens": 470619.0,
+   "rewrite_tokens": 941238,
    "rewrite_gap_median": 9.720841666062674
   },
   {
@@ -1841,7 +1841,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -1863,7 +1863,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -1885,7 +1885,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -1907,7 +1907,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -1929,7 +1929,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -1951,7 +1951,7 @@
    "w1h": 145086.4,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -1973,7 +1973,7 @@
    "w1h": 0.0,
    "rewrites": 4,
    "rewrites_after_5m": 3,
-   "rewrite_tokens": 30515.416666666668,
+   "rewrite_tokens": 366185,
    "rewrite_gap_median": 18.71121666630109
   },
   {
@@ -1995,7 +1995,7 @@
    "w1h": 0.0,
    "rewrites": 1,
    "rewrites_after_5m": 1,
-   "rewrite_tokens": 106103.0,
+   "rewrite_tokens": 106103,
    "rewrite_gap_median": 5.787416664759318
   },
   {
@@ -2017,7 +2017,7 @@
    "w1h": 0.0,
    "rewrites": 8,
    "rewrites_after_5m": 7,
-   "rewrite_tokens": 100202.85714285714,
+   "rewrite_tokens": 701420,
    "rewrite_gap_median": 19.3716916680336
   },
   {
@@ -2039,7 +2039,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -2061,7 +2061,7 @@
    "w1h": 142728.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -2083,7 +2083,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -2105,7 +2105,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -2127,7 +2127,7 @@
    "w1h": 0.0,
    "rewrites": 33,
    "rewrites_after_5m": 20,
-   "rewrite_tokens": 3847306.0,
+   "rewrite_tokens": 11541918,
    "rewrite_gap_median": 6.801800000667572
   },
   {
@@ -2149,7 +2149,7 @@
    "w1h": 0.0,
    "rewrites": 12,
    "rewrites_after_5m": 12,
-   "rewrite_tokens": 128252.94736842105,
+   "rewrite_tokens": 2436806,
    "rewrite_gap_median": 13.953758333126704
   },
   {
@@ -2171,7 +2171,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -2193,7 +2193,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -2215,7 +2215,7 @@
    "w1h": 32995.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -2237,7 +2237,7 @@
    "w1h": 0.0,
    "rewrites": 1,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 6912.0,
+   "rewrite_tokens": 20736,
    "rewrite_gap_median": 0.09863333304723104
   },
   {
@@ -2259,7 +2259,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -2281,7 +2281,7 @@
    "w1h": 211966.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -2303,7 +2303,7 @@
    "w1h": 0.0,
    "rewrites": 1,
    "rewrites_after_5m": 1,
-   "rewrite_tokens": 73339.0,
+   "rewrite_tokens": 73339,
    "rewrite_gap_median": 10.072583333651226
   },
   {
@@ -2325,7 +2325,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -2347,7 +2347,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -2369,7 +2369,7 @@
    "w1h": 0.0,
    "rewrites": 1,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 51341.5,
+   "rewrite_tokens": 102683,
    "rewrite_gap_median": 0.046166666348775226
   },
   {
@@ -2391,7 +2391,7 @@
    "w1h": 0.0,
    "rewrites": 4,
    "rewrites_after_5m": 4,
-   "rewrite_tokens": 1233937.0,
+   "rewrite_tokens": 1233937,
    "rewrite_gap_median": 9.099416667222977
   },
   {
@@ -2413,7 +2413,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -2435,7 +2435,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -2457,7 +2457,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -2479,7 +2479,7 @@
    "w1h": 162999.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -2501,7 +2501,7 @@
    "w1h": 0.0,
    "rewrites": 3,
    "rewrites_after_5m": 1,
-   "rewrite_tokens": 134604.0,
+   "rewrite_tokens": 269208,
    "rewrite_gap_median": 1.795899999141693
   },
   {
@@ -2523,7 +2523,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -2545,7 +2545,7 @@
    "w1h": 0.0,
    "rewrites": 3,
    "rewrites_after_5m": 2,
-   "rewrite_tokens": 307236.5,
+   "rewrite_tokens": 614473,
    "rewrite_gap_median": 6.0013000011444095
   },
   {
@@ -2567,7 +2567,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -2589,7 +2589,7 @@
    "w1h": 0.0,
    "rewrites": 19,
    "rewrites_after_5m": 15,
-   "rewrite_tokens": 2166485.6666666665,
+   "rewrite_tokens": 6499457,
    "rewrite_gap_median": 5.962633335590363
   },
   {
@@ -2611,7 +2611,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -2633,7 +2633,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -2655,7 +2655,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -2677,7 +2677,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -2699,7 +2699,7 @@
    "w1h": 886551.0,
    "rewrites": 1,
    "rewrites_after_5m": 1,
-   "rewrite_tokens": 257469.0,
+   "rewrite_tokens": 257469,
    "rewrite_gap_median": 691.3573666652044
   },
   {
@@ -2721,7 +2721,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -2743,7 +2743,7 @@
    "w1h": 385292.0,
    "rewrites": 1,
    "rewrites_after_5m": 1,
-   "rewrite_tokens": 147139.0,
+   "rewrite_tokens": 147139,
    "rewrite_gap_median": 406.20001666943233
   },
   {
@@ -2765,7 +2765,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -2787,7 +2787,7 @@
    "w1h": 0.0,
    "rewrites": 2,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 74246.66666666667,
+   "rewrite_tokens": 222740,
    "rewrite_gap_median": 1.486266666650772
   },
   {
@@ -2809,7 +2809,7 @@
    "w1h": 0.0,
    "rewrites": 4,
    "rewrites_after_5m": 4,
-   "rewrite_tokens": 177185.0,
+   "rewrite_tokens": 708740,
    "rewrite_gap_median": 8.691608333587647
   },
   {
@@ -2831,7 +2831,7 @@
    "w1h": 0.0,
    "rewrites": 14,
    "rewrites_after_5m": 11,
-   "rewrite_tokens": 516096.3333333333,
+   "rewrite_tokens": 1548289,
    "rewrite_gap_median": 9.881524999936422
   },
   {
@@ -2853,7 +2853,7 @@
    "w1h": 0.0,
    "rewrites": 5,
    "rewrites_after_5m": 5,
-   "rewrite_tokens": 589626.0,
+   "rewrite_tokens": 1179252,
    "rewrite_gap_median": 6.757450000445048
   },
   {
@@ -2875,7 +2875,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -2897,7 +2897,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -2919,7 +2919,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -2941,7 +2941,7 @@
    "w1h": 317701.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -2963,7 +2963,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -2985,7 +2985,7 @@
    "w1h": 0.0,
    "rewrites": 1,
    "rewrites_after_5m": 1,
-   "rewrite_tokens": 127453.0,
+   "rewrite_tokens": 127453,
    "rewrite_gap_median": 5.6558166662851965
   },
   {
@@ -3007,7 +3007,7 @@
    "w1h": 0.0,
    "rewrites": 2,
    "rewrites_after_5m": 1,
-   "rewrite_tokens": 443716.5,
+   "rewrite_tokens": 887433,
    "rewrite_gap_median": 4.978849999109904
   },
   {
@@ -3029,7 +3029,7 @@
    "w1h": 0.0,
    "rewrites": 17,
    "rewrites_after_5m": 14,
-   "rewrite_tokens": 987577.5,
+   "rewrite_tokens": 1975155,
    "rewrite_gap_median": 9.700266667207082
   },
   {
@@ -3051,7 +3051,7 @@
    "w1h": 0.0,
    "rewrites": 4,
    "rewrites_after_5m": 4,
-   "rewrite_tokens": 589692.5,
+   "rewrite_tokens": 1179385,
    "rewrite_gap_median": 6.661449998617172
   },
   {
@@ -3073,7 +3073,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -3095,7 +3095,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -3117,7 +3117,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -3139,7 +3139,7 @@
    "w1h": 276002.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -3161,7 +3161,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -3183,7 +3183,7 @@
    "w1h": 0.0,
    "rewrites": 1,
    "rewrites_after_5m": 1,
-   "rewrite_tokens": 129461.0,
+   "rewrite_tokens": 129461,
    "rewrite_gap_median": 17.65586666663488
   },
   {
@@ -3205,7 +3205,7 @@
    "w1h": 0.0,
    "rewrites": 7,
    "rewrites_after_5m": 6,
-   "rewrite_tokens": 1238008.0,
+   "rewrite_tokens": 1238008,
    "rewrite_gap_median": 5.901450002193451
   },
   {
@@ -3227,7 +3227,7 @@
    "w1h": 0.0,
    "rewrites": 1,
    "rewrites_after_5m": 1,
-   "rewrite_tokens": 314186.0,
+   "rewrite_tokens": 314186,
    "rewrite_gap_median": 5.615699998537699
   },
   {
@@ -3249,7 +3249,7 @@
    "w1h": 0.0,
    "rewrites": 1,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 18650.928571428572,
+   "rewrite_tokens": 261113,
    "rewrite_gap_median": 0.057433334986368816
   },
   {
@@ -3271,7 +3271,7 @@
    "w1h": 219649.0,
    "rewrites": 1,
    "rewrites_after_5m": 1,
-   "rewrite_tokens": 121365.0,
+   "rewrite_tokens": 121365,
    "rewrite_gap_median": 140.7683333317439
   },
   {
@@ -3293,7 +3293,7 @@
    "w1h": 147239.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -3315,7 +3315,7 @@
    "w1h": 0.0,
    "rewrites": 2,
    "rewrites_after_5m": 2,
-   "rewrite_tokens": 234251.0,
+   "rewrite_tokens": 468502,
    "rewrite_gap_median": 7.817725000778834
   },
   {
@@ -3337,7 +3337,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
+   "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
   {
@@ -3348,63 +3348,19 @@
    "reviewers": "-",
    "layer": "conductor",
    "role": "-",
-   "count": 7,
-   "cost": 547050.5428571429,
-   "context": 4392526.571428572,
-   "out": 15128.142857142857,
-   "minutes": 18.987261904421306,
-   "p": 54795.857142857145,
-   "k": 30.714285714285715,
+   "count": 4,
+   "cost": 620009.125,
+   "context": 6298549.5,
+   "out": 18965.0,
+   "minutes": 22.963041666150094,
+   "p": 60426.0,
+   "k": 40.0,
    "w5": 0.0,
-   "w1h": 129088.28571428571,
-   "rewrites": 2,
-   "rewrites_after_5m": 1,
-   "rewrite_tokens": 40971.71428571428,
-   "rewrite_gap_median": 49.88347499966621
-  },
-  {
-   "version": "10.17.7",
-   "mode": "不明",
-   "model": "claude-opus-5-5",
-   "cc": "2.1.281",
-   "reviewers": "-",
-   "layer": "supervisor",
-   "role": "取り込み",
-   "count": 1,
-   "cost": 377541.15,
-   "context": 2662575.0,
-   "out": 20499.0,
-   "minutes": 3.463166666030884,
-   "p": 43671.0,
-   "k": 30.0,
-   "w5": 118217.0,
-   "w1h": 0.0,
-   "rewrites": 0,
+   "w1h": 107783.0,
+   "rewrites": 1,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
-   "rewrite_gap_median": null
-  },
-  {
-   "version": "10.17.7",
-   "mode": "不明",
-   "model": "claude-opus-5-5",
-   "cc": "2.1.281",
-   "reviewers": "-",
-   "layer": "supervisor",
-   "role": "実装",
-   "count": 2,
-   "cost": 407400.95,
-   "context": 2921528.0,
-   "out": 19520.5,
-   "minutes": 3.8523000021775564,
-   "p": 43181.5,
-   "k": 27.5,
-   "w5": 136391.5,
-   "w1h": 0.0,
-   "rewrites": 0,
-   "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
-   "rewrite_gap_median": null
+   "rewrite_tokens": 46695,
+   "rewrite_gap_median": 0.11036666631698608
   }
  ],
  "external": [
@@ -3428,8 +3384,9 @@
    "w1h": 63939.666666666664,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
-   "rewrite_gap_median": null
+   "rewrite_tokens": 0,
+   "rewrite_gap_median": null,
+   "call_seats": 6
   },
   {
    "version": "10.14.0",
@@ -3451,8 +3408,9 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
-   "rewrite_gap_median": null
+   "rewrite_tokens": 0,
+   "rewrite_gap_median": null,
+   "call_seats": 1
   },
   {
    "version": "10.14.0",
@@ -3474,8 +3432,9 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
-   "rewrite_gap_median": null
+   "rewrite_tokens": 0,
+   "rewrite_gap_median": null,
+   "call_seats": 15
   },
   {
    "version": "10.14.0",
@@ -3497,8 +3456,9 @@
    "w1h": 77917.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
-   "rewrite_gap_median": null
+   "rewrite_tokens": 0,
+   "rewrite_gap_median": null,
+   "call_seats": 1
   },
   {
    "version": "10.14.0",
@@ -3520,8 +3480,9 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
-   "rewrite_gap_median": null
+   "rewrite_tokens": 0,
+   "rewrite_gap_median": null,
+   "call_seats": 6
   },
   {
    "version": "10.14.0",
@@ -3543,8 +3504,9 @@
    "w1h": 67442.1875,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
-   "rewrite_gap_median": null
+   "rewrite_tokens": 0,
+   "rewrite_gap_median": null,
+   "call_seats": 16
   },
   {
    "version": "10.14.0",
@@ -3566,8 +3528,9 @@
    "w1h": 0.0,
    "rewrites": 5,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 1943.5691056910568,
-   "rewrite_gap_median": 0.06948333183924357
+   "rewrite_tokens": 239059,
+   "rewrite_gap_median": 0.06948333183924357,
+   "call_seats": 123
   },
   {
    "version": "10.14.0",
@@ -3589,8 +3552,9 @@
    "w1h": 0.0,
    "rewrites": 4,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 2417.125,
-   "rewrite_gap_median": 0.09581666588783264
+   "rewrite_tokens": 135359,
+   "rewrite_gap_median": 0.09581666588783264,
+   "call_seats": 56
   },
   {
    "version": "10.14.0",
@@ -3612,8 +3576,9 @@
    "w1h": 0.0,
    "rewrites": 1,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 1861.4736842105262,
-   "rewrite_gap_median": 0.13544999758402507
+   "rewrite_tokens": 35368,
+   "rewrite_gap_median": 0.13544999758402507,
+   "call_seats": 19
   },
   {
    "version": "10.15.1",
@@ -3635,8 +3600,9 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
-   "rewrite_gap_median": null
+   "rewrite_tokens": 0,
+   "rewrite_gap_median": null,
+   "call_seats": 1
   },
   {
    "version": "10.15.1",
@@ -3658,8 +3624,9 @@
    "w1h": 60995.375,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
-   "rewrite_gap_median": null
+   "rewrite_tokens": 0,
+   "rewrite_gap_median": null,
+   "call_seats": 8
   },
   {
    "version": "10.15.1",
@@ -3681,8 +3648,9 @@
    "w1h": 0.0,
    "rewrites": 1,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 2988.5,
-   "rewrite_gap_median": 0.11995000044504801
+   "rewrite_tokens": 23908,
+   "rewrite_gap_median": 0.11995000044504801,
+   "call_seats": 8
   },
   {
    "version": "10.15.1",
@@ -3704,8 +3672,9 @@
    "w1h": 0.0,
    "rewrites": 3,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 3447.6153846153848,
-   "rewrite_gap_median": 0.17170000076293945
+   "rewrite_tokens": 89638,
+   "rewrite_gap_median": 0.17170000076293945,
+   "call_seats": 26
   },
   {
    "version": "10.15.1",
@@ -3727,8 +3696,9 @@
    "w1h": 56830.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
-   "rewrite_gap_median": null
+   "rewrite_tokens": 0,
+   "rewrite_gap_median": null,
+   "call_seats": 3
   },
   {
    "version": "10.15.1",
@@ -3750,8 +3720,9 @@
    "w1h": 0.0,
    "rewrites": 1,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 5854.583333333333,
-   "rewrite_gap_median": 0.37695000171661375
+   "rewrite_tokens": 70255,
+   "rewrite_gap_median": 0.37695000171661375,
+   "call_seats": 12
   },
   {
    "version": "10.15.1",
@@ -3773,8 +3744,9 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
-   "rewrite_gap_median": null
+   "rewrite_tokens": 0,
+   "rewrite_gap_median": null,
+   "call_seats": 4
   },
   {
    "version": "10.15.1",
@@ -3796,8 +3768,9 @@
    "w1h": 28615.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
-   "rewrite_gap_median": null
+   "rewrite_tokens": 0,
+   "rewrite_gap_median": null,
+   "call_seats": 1
   },
   {
    "version": "10.15.1",
@@ -3819,8 +3792,9 @@
    "w1h": 0.0,
    "rewrites": 4,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 11258.083333333334,
-   "rewrite_gap_median": 0.0918749988079071
+   "rewrite_tokens": 135097,
+   "rewrite_gap_median": 0.0918749988079071,
+   "call_seats": 12
   },
   {
    "version": "10.15.1",
@@ -3842,8 +3816,9 @@
    "w1h": 33846.5,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
-   "rewrite_gap_median": null
+   "rewrite_tokens": 0,
+   "rewrite_gap_median": null,
+   "call_seats": 2
   },
   {
    "version": "10.15.1",
@@ -3865,8 +3840,9 @@
    "w1h": 30661.285714285714,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
-   "rewrite_gap_median": null
+   "rewrite_tokens": 0,
+   "rewrite_gap_median": null,
+   "call_seats": 7
   },
   {
    "version": "10.15.1",
@@ -3888,8 +3864,9 @@
    "w1h": 58804.416666666664,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
-   "rewrite_gap_median": null
+   "rewrite_tokens": 0,
+   "rewrite_gap_median": null,
+   "call_seats": 12
   },
   {
    "version": "10.15.1",
@@ -3911,8 +3888,9 @@
    "w1h": 57907.5,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
-   "rewrite_gap_median": null
+   "rewrite_tokens": 0,
+   "rewrite_gap_median": null,
+   "call_seats": 2
   },
   {
    "version": "10.15.1",
@@ -3934,8 +3912,9 @@
    "w1h": 0.0,
    "rewrites": 1,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 940.2692307692307,
-   "rewrite_gap_median": 0.05798333485921224
+   "rewrite_tokens": 24447,
+   "rewrite_gap_median": 0.05798333485921224,
+   "call_seats": 26
   },
   {
    "version": "10.15.1",
@@ -3957,8 +3936,9 @@
    "w1h": 0.0,
    "rewrites": 5,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 2311.467741935484,
-   "rewrite_gap_median": 0.1330833315849304
+   "rewrite_tokens": 143311,
+   "rewrite_gap_median": 0.1330833315849304,
+   "call_seats": 62
   },
   {
    "version": "10.16.0",
@@ -3980,8 +3960,9 @@
    "w1h": 0.0,
    "rewrites": 1,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 991.4347826086956,
-   "rewrite_gap_median": 0.20884999831517537
+   "rewrite_tokens": 22803,
+   "rewrite_gap_median": 0.20884999831517537,
+   "call_seats": 23
   },
   {
    "version": "10.16.0",
@@ -4003,8 +3984,9 @@
    "w1h": 0.0,
    "rewrites": 2,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 10542.0,
-   "rewrite_gap_median": 0.12860833406448363
+   "rewrite_tokens": 73794,
+   "rewrite_gap_median": 0.12860833406448363,
+   "call_seats": 7
   },
   {
    "version": "10.16.0",
@@ -4054,8 +4036,9 @@
    "w1h": 0.0,
    "rewrites": 3,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 3206.722222222222,
-   "rewrite_gap_median": 0.08366667032241822
+   "rewrite_tokens": 115442,
+   "rewrite_gap_median": 0.08366667032241822,
+   "call_seats": 36
   },
   {
    "version": "10.17.0",
@@ -4077,8 +4060,9 @@
    "w1h": 0.0,
    "rewrites": 1,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 2477.0588235294117,
-   "rewrite_gap_median": 0.5326666673024495
+   "rewrite_tokens": 42110,
+   "rewrite_gap_median": 0.5326666673024495,
+   "call_seats": 17
   },
   {
    "version": "10.17.0",
@@ -4128,8 +4112,9 @@
    "w1h": 0.0,
    "rewrites": 2,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 1852.2280701754387,
-   "rewrite_gap_median": 0.6705250004927318
+   "rewrite_tokens": 105577,
+   "rewrite_gap_median": 0.6705250004927318,
+   "call_seats": 57
   },
   {
    "version": "10.17.1",
@@ -4179,8 +4164,9 @@
    "w1h": 66685.96,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
-   "rewrite_gap_median": null
+   "rewrite_tokens": 0,
+   "rewrite_gap_median": null,
+   "call_seats": 25
   },
   {
    "version": "10.17.3",
@@ -4202,8 +4188,9 @@
    "w1h": 86677.14285714286,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
-   "rewrite_gap_median": null
+   "rewrite_tokens": 0,
+   "rewrite_gap_median": null,
+   "call_seats": 7
   },
   {
    "version": "10.17.3",
@@ -4225,8 +4212,9 @@
    "w1h": 0.0,
    "rewrites": 3,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 2220.027027027027,
-   "rewrite_gap_median": 0.24483333031336466
+   "rewrite_tokens": 82141,
+   "rewrite_gap_median": 0.24483333031336466,
+   "call_seats": 37
   },
   {
    "version": "10.17.3",
@@ -4248,8 +4236,9 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
-   "rewrite_gap_median": null
+   "rewrite_tokens": 0,
+   "rewrite_gap_median": null,
+   "call_seats": 7
   },
   {
    "version": "10.17.3",
@@ -4327,8 +4316,9 @@
    "w1h": 69768.16666666667,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
-   "rewrite_gap_median": null
+   "rewrite_tokens": 0,
+   "rewrite_gap_median": null,
+   "call_seats": 30
   },
   {
    "version": "10.17.3",
@@ -4350,8 +4340,9 @@
    "w1h": 71047.68181818182,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
-   "rewrite_gap_median": null
+   "rewrite_tokens": 0,
+   "rewrite_gap_median": null,
+   "call_seats": 22
   },
   {
    "version": "10.17.3",
@@ -4373,8 +4364,9 @@
    "w1h": 0.0,
    "rewrites": 3,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 2237.5789473684213,
-   "rewrite_gap_median": 0.161899999777476
+   "rewrite_tokens": 85028,
+   "rewrite_gap_median": 0.161899999777476,
+   "call_seats": 38
   },
   {
    "version": "10.17.3",
@@ -4396,8 +4388,9 @@
    "w1h": 0.0,
    "rewrites": 1,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 962.2608695652174,
-   "rewrite_gap_median": 0.11621666351954142
+   "rewrite_tokens": 22132,
+   "rewrite_gap_median": 0.11621666351954142,
+   "call_seats": 23
   },
   {
    "version": "10.17.3",
@@ -4447,8 +4440,9 @@
    "w1h": 66129.28571428571,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
-   "rewrite_gap_median": null
+   "rewrite_tokens": 0,
+   "rewrite_gap_median": null,
+   "call_seats": 7
   },
   {
    "version": "10.17.5",
@@ -4470,8 +4464,9 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
-   "rewrite_gap_median": null
+   "rewrite_tokens": 0,
+   "rewrite_gap_median": null,
+   "call_seats": 16
   },
   {
    "version": "10.17.5",
@@ -4493,8 +4488,9 @@
    "w1h": 0.0,
    "rewrites": 2,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 22834.85714285714,
-   "rewrite_gap_median": 0.17148333191871643
+   "rewrite_tokens": 159844,
+   "rewrite_gap_median": 0.17148333191871643,
+   "call_seats": 7
   },
   {
    "version": "10.17.5",
@@ -4558,8 +4554,9 @@
    "w1h": 92077.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 0.0,
-   "rewrite_gap_median": null
+   "rewrite_tokens": 0,
+   "rewrite_gap_median": null,
+   "call_seats": 6
   },
   {
    "version": "10.17.6",
@@ -4581,8 +4578,9 @@
    "w1h": 0.0,
    "rewrites": 1,
    "rewrites_after_5m": 0,
-   "rewrite_tokens": 2360.2727272727275,
-   "rewrite_gap_median": 0.12176666657129924
+   "rewrite_tokens": 25963,
+   "rewrite_gap_median": 0.12176666657129924,
+   "call_seats": 11
   },
   {
    "version": "10.17.6",
@@ -4608,12 +4606,13 @@
    "reviewers"
   ],
   "min_version": "10.14.0",
-  "sessions": 57,
-  "sessions_with_pr": 30,
+  "until": "2026-09-24T09:00:00Z",
+  "sessions": 54,
+  "sessions_with_pr": 29,
   "unlinked_external": 603,
   "skipped": {
    "ndf の Skill が無い": 359,
-   "版を判定できない": 17
+   "版を判定できない": 20
   }
  }
 }
