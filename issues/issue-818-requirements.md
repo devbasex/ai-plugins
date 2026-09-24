@@ -50,7 +50,7 @@
 ## 前提
 
 - 前提 1: Serena は PyPI の `serena-agent==1.7.0` に固定する。2026-09-24 時点の最新の正式版である（`pypi.org/pypi/serena-agent/json`）
-- 前提 2: 言語サーバの本体は、Serena 側は Serena が自分で入れる（`~/.serena/language_servers/`）。Claude Code の plugin LSP servers 側は利用者が入れる
+- 前提 2: 言語サーバの本体は、Serena 側は Serena が自分で入れる（起動定義の `SERENA_HOME=.serena` により、起動したディレクトリの `.serena/language_servers/`）。Claude Code の plugin LSP servers 側は利用者が入れる
 - 前提 3: Kiro CLI と agy は受け入れ条件の対象にしない。**今と同じ動き（MCP の定義を受け取る）を保つ**ことだけを求める
 - 前提 4: PHP の型の食い違いの診断は、intelephense の無料版が返さない（#818 §5）。PHP の診断は「未解決のシンボル・構文」までを条件にする
 - 前提 5: 効果の見積もりの k と m は #893 の集計の規則（`scripts/token-usage.py` の層・持ち場の判定）で数えた値を使う。#893 の集計スクリプトに k・m の列が入るのを待たない
@@ -98,7 +98,7 @@
 
 - [ ] AC1: Claude Code 用の起動定義は `uvx --from serena-agent==1.7.0 serena start-mcp-server` で起動し、`git+` の URL を含まない。引数は `--context claude-code --project-from-cwd --add-mode no-memories --add-mode no-onboarding --enable-web-dashboard False` である
 - [ ] AC2: Codex 用の起動定義は別のファイルで、`--context codex` を渡す。他の引数は AC1 と同じ
-- [ ] AC3: Claude Code で起動した Serena のツール一覧に、`activate_project`・`onboarding`・memory の 6 ツールが無い。6 ツールは `write_memory` / `read_memory` / `list_memories` / `delete_memory` / `edit_memory` / `rename_memory` である
+- [ ] AC3: Claude Code で起動した Serena のツール一覧に、`activate_project`・`onboarding`・memory の 6 ツール・`get_current_config`・`search_for_pattern` の 10 個が無い。6 ツールは `write_memory` / `read_memory` / `list_memories` / `delete_memory` / `edit_memory` / `rename_memory` である
 - [ ] AC4: このリポジトリの `.serena/project.yml` は `language_servers` が `python` と `bash`、`ignored_paths` に `.worktrees/**` を持つ。検出のスクリプトの出力と食い違わない
 
 ### 検出と設定（作業項目 E）
@@ -110,7 +110,7 @@
 - [ ] AC9: `--dry-run` では検出と差分の表示だけを行い、ファイルを 1 つも書かない
 - [ ] AC10: `.gitignore` は、利用者が `--gitignore` を渡したときだけ書き換える。渡さなければ触らない
 - [ ] AC11: 言語構成の違う 2 つ以上のリポジトリで、検出 → 設定 → 起動の検証 → 導入の検査が通る。少なくとも 1 つは Python 以外が主のもの（例: `/work/carmo-system-serverside`）
-- [ ] AC12: 作業ツリー（`.worktrees/<ブランチ名>`）で起動した Serena が、作業ツリーのプロジェクトを有効にする（`get_current_config` か `find_symbol` の結果のパスで確かめる）
+- [ ] AC12: 作業ツリー（`.worktrees/<ブランチ名>`）で起動した Serena が、作業ツリーのプロジェクトを有効にする（Claude Code は `find_symbol` の結果のパス、Codex は `get_current_config` で確かめる。Claude Code の文脈には `get_current_config` が無い）
 
 ### 導入の検査（作業項目 C）
 
@@ -132,7 +132,7 @@
 ### ランタイムごとの実測（受け入れ）
 
 - [ ] AC24: Claude Code: Python / TypeScript（5 に固定）/ PHP のそれぞれで、編集の後に `<new-diagnostics>` が届く（PHP は未解決のシンボルか構文の誤りで確かめる）
-- [ ] AC25: Codex: `codex exec` から、Python / TypeScript / PHP のそれぞれで `find_referencing_symbols` と `get_diagnostics_for_file` が結果を返す
+- [ ] AC25: Codex: `codex exec` から、Python / TypeScript / PHP のそれぞれで `find_referencing_symbols` と `get_diagnostics_for_file` が結果を返す。あわせて、Codex の hook が実ランタイムで効くこと（SessionStart の通知がモデルに届くこと、採った言語のファイルをシェルで 3 回読むと 3 回目が拒否されること）を記録で確かめる
 - [ ] AC26: #818 §3 の題材を、指示なしの条件（§3 の B / C と同じ）で Claude Code に 3 回ずつ実行し、Serena または `LSP` のツールが使われた回数と、ツール結果の文字数を、§3 の値と並べて示す
 - [ ] AC27: 設計文書の効果の見積もり（持ち場ごと）に、AC26 の実測で置き換えた値を並べる
 
@@ -148,7 +148,7 @@
 | --- | --- |
 | 性能・拡張性 | AC23。Serena の初回の `find_symbol` は、採った言語が 2 つのとき 5 秒以内（#818 §8 の 4 言語で 4.2 秒、1 言語で 0.1 秒） |
 | 可用性 | 1 言語の言語サーバの失敗が、他の言語のシンボル操作を止めない（AC7・AC8）。hook のスクリプトが失敗しても、ツールの呼び出しを止めない（終了コード 0 で何も出さない） |
-| 運用・保守性 | 対応する言語を増やすときに変えるのは対応表だけである。hook とスクリプトは言語の名前を持たない |
+| 運用・保守性 | 対応する言語を増やすときに変えるのは対応表だけである。ただし、既にある種類の追加の検査（`typescript_major_5` / `shellcheck`）で足りない言語は、新しい種類の検査の関数を `check.py` に 1 つ足す。hook とスクリプトは言語の名前で分岐しない |
 | 移行性 | 既に `.serena/project.yml` を持つリポジトリで、`language_servers` と `ignored_paths` 以外を変えない（AC6）。mcp-serena の更新だけでは既存の `project.yml` を書き換えない |
 | セキュリティ | セッションの開始で、ネットワークへ出る導入（`uv tool install`・`npm install -g`・`claude plugin install`）を走らせない。導入は Skill の手順で、利用者の確認を取ってから行う |
 | システム環境 | hook と検査のスクリプトは Python 3 の標準ライブラリだけで動く。`uvx` を要するのは Serena の起動と起動の検証だけである |

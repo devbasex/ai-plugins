@@ -22,11 +22,11 @@ NDF に置く案は採らない。NDF の Skill の数（manifests が持つ）�
 
 ### 決定 3: Codex は `--context codex` で起動し、memory のツールが一覧に残ることを受け入れる（関門で最終決定）
 
-#818 の作業項目 A は、Codex を `codex` の文脈で動かし、`no-memories` / `no-onboarding` を指定すると定める。Serena 1.7.0 の MCP の `tools/list` で実測すると、`codex` の文脈は `--mode` / `--add-mode` を渡してもツールを絞らなかった。返したのは 23 ツールで、`activate_project`・memory の 6 ツール・`onboarding` を含む。`claude-code` の文脈は 14 ツールだった。違いは文脈の `single_project: true` の有無である。
+#818 の作業項目 A は、Codex を `codex` の文脈で動かし、`no-memories` / `no-onboarding` を指定すると定める。Serena 1.7.0 の MCP の `tools/list` で実測すると、`codex` の文脈は `--mode` / `--add-mode` を渡してもツールを絞らなかった。返したのは 23 ツールで、`activate_project`・memory の 6 ツール・`onboarding`・`get_current_config`・`search_for_pattern` の 10 個は `claude-code` の文脈に無い。`claude-code` の文脈は 14 ツールで、`codex` の文脈に無い `replace_content` を持つ。違いは文脈の `single_project: true` の有無である。
 
 **それでも `codex` の文脈を採る。** `claude-code` の文脈のプロンプトは、Claude Code の遅延読み込み（tool search）を前提にした指示を持ち、Codex には当てはまらない。memory のツールは呼ばれない限り費用を生まず、呼んだときにモードが拒むかは実装で確かめる（未確認 U3）。
 
-Codex にも `claude-code` の文脈を渡す案は採らない。ツールは 9 個減るが、Codex に誤った前提の指示が渡る。自前の文脈の YAML を同梱する案も採らない。Codex が `.mcp.json` の中でプラグインのルートを展開するかを確かめられなかった（決定 4）。
+Codex にも `claude-code` の文脈を渡す案は採らない。ツールは差し引き 9 個減る（10 個が消え、`replace_content` が 1 個増える）が、Codex に誤った前提の指示が渡る。自前の文脈の YAML を同梱する案も採らない。Codex が `.mcp.json` の中でプラグインのルートを展開するかを確かめられなかった（決定 4）。
 
 ### 決定 4: 起動のラッパースクリプト（導入済みの Serena を優先する）は作らない（関門で最終決定）
 
@@ -91,7 +91,7 @@ Claude Code の `LSP` ツールと Serena の `get_diagnostics_for_file` も一�
 
 検出・設定の生成・起動の検証・失敗した言語の除外・導入の検査・食い違いの通知・誘導・自動許可はスクリプトが持つ。モデルに残すのは 4 つの判断である: 導入のコマンドを打つか（利用者の確認）、`project.yml` を追跡するか（利用者の確認）、検証に失敗した言語の原因と次の手、検出の誤りを名指しで直すか。境界の一覧は設計の「スクリプトにする範囲」にある。
 
-起動の検証の失敗から、言語サーバのキャッシュを退避して再試行するところまでをスクリプトにする案は採らない。退避は利用者の `~/.serena/` を書き換え、失敗の原因がキャッシュの破損でないとき（依存の不足・ネットワーク）には効かない。
+起動の検証の失敗から、言語サーバのキャッシュを退避して再試行するところまでをスクリプトにする案は採らない。退避は導入先の `.serena/language_servers/`（`SERENA_HOME=.serena`）を書き換え、失敗の原因がキャッシュの破損でないとき（依存の不足・ネットワーク）には効かない。
 
 ### 決定 15: Kiro は Claude Code と同じ起動定義と hook の定義を受け取る
 

@@ -24,7 +24,7 @@ uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest 
 | AC5 | 拡張子の件数の組（9/10 ファイル・4.9%/5.0%・分母に `.md` を含めない）で採否と `skipped.reason` を照らす | 単体 |
 | AC6 | `project.yml` が無い / 雛形どおり / 注釈つき / 流れの形の非空の配列の 4 つで、書き換えの前後の差分が 2 キーだけか（最後は終了コード 3）を照らす | 単体 |
 | AC7 | 偽の `serena` が `bash` だけ 1 を返すとき、`failed` に `bash`、`language_servers` に残りが入る。検証の途中で例外を投げても、最後に通った言語だけが書かれる | 結合 |
-| AC8 | 実機の Serena で `bash` の言語サーバのキャッシュを壊し（`~/.serena` を一時の HOME へ写して壊す）、`configure` の後に `python` の `find_symbol` / `find_referencing_symbols` が通る | 手動 |
+| AC8 | リポジトリの写しを根にし、起動定義と同じ `SERENA_HOME=.serena` で一度 Serena を起動して、言語サーバが `<写し>/.serena/language_servers/static/` に入ったことを確かめる（相対の値は cwd から解決される。Serena 1.7.0 の `SerenaPaths` と `ls_manager.py`）。その配下の `BashLanguageServer` だけを壊し、`configure` の後に、同じ根と `SERENA_HOME` で起動した Serena で `python` の `find_symbol` / `find_referencing_symbols` が通る。`~/.serena` は写しも壊しもしない | 手動 |
 | AC9 | `--dry-run` の前後でリポジトリの全ファイルのハッシュが変わらない | 結合 |
 | AC10 | `--gitignore` なしで `.gitignore` が変わらず、ありで `.serena/project.yml` の行が 1 度だけ足される | 結合 |
 | AC11 | ai-plugins（python + bash）と carmo-system-serverside（python + typescript）の写しで、`configure` → `check` を通す | 手動 |
@@ -32,6 +32,7 @@ uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest 
 | AC13 | `installed_plugins.json` の有無・中身の組と PATH の組で `missing` と終了コード 0 / 1 / 2 を照らす | 単体 |
 | AC14 | 偽の `typescript-language-server` の隣に `typescript` の `package.json`（版 7.0.2 / 5.9.3）を置き、`typescript_major_5` の有無を照らす | 単体 |
 | AC15 | PATH に `shellcheck` が無い / ある で `missing` を照らす | 単体 |
+| 運用・保守性（非機能） | 一時の対応表に、既にある種類の追加の検査（`shellcheck`）を持つ架空の言語を足すと、コードを変えずに `detect` と `check` に載る。知らない `extra_checks` の名前で `check` が終了コード 2 になる | 単体 |
 | AC16 | 配布物の全 `plugin.json` と `marketplace.json` に `lspServers` が無い | 単体 |
 | AC17・AC18 | 食い違いあり / 欠けあり / 揃っている / `project.yml` が無い の 4 つで、SessionStart の出力の有無を照らす | 単体 |
 | AC19 | `.md` / `.json` / `.py`（採った言語）/ `.ts`（採っていない言語）の `Read` を 3 回ずつ送り、拒否が `.py` だけで出る | 単体 |
@@ -40,7 +41,7 @@ uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest 
 | AC22 | `hooks/codex.json` の matcher と、Codex の入力（`tool_name: "Bash"`・`command: "sed -n 1,80p a.py"`）で読み込みとして数えられる | 単体 |
 | AC23 | 1 万ファイルの一時リポジトリで SessionStart を 5 回、PreToolUse を 20 回走らせ、最大の所要を照らす | 結合 |
 | AC24 | Python / TypeScript（`typescript@5`）/ PHP の小さなリポジトリで、隔離した claude に型を壊す編集をさせ、記録の `<new-diagnostics>` を見る | 手動 |
-| AC25 | 同じ 3 つのリポジトリで `codex exec` に `find_referencing_symbols` と `get_diagnostics_for_file` を呼ばせ、記録（`~/.codex/sessions`）で結果を見る | 手動 |
+| AC25 | 同じ 3 つのリポジトリで `codex exec` に `find_referencing_symbols` と `get_diagnostics_for_file` を呼ばせ、記録（`~/.codex/sessions`）で結果を見る。hook は、`project.yml` と食い違う写し（言語を 1 つ抜いたもの）で `codex exec` を走らせて通知の文が記録の文脈に載ることを見る。続けて `sed -n 1,80p <採った言語のファイル>` を 3 回打たせ、3 回目のシェルの呼び出しが拒否の理由の文とともに実行されないことを見る | 手動 |
 | AC26・AC27 | #818 §3 の題材を、`project.yml` を直した ai-plugins の写しで、指示なしの 2 条件（LSP のみ / Serena のみ）× 3 回、`claude -p --output-format stream-json` で走らせ、ツールの呼び出しとツール結果の文字数を数える。`initial_instructions` が読まれた回数も数える | 手動 |
 | AC28・AC29 | `claude plugin validate .`・`bash scripts/build-runtime-plugins.sh --check`・`bash plugins/mcp/mcp-serena/dev.kiro/install.sh --dry-run` の終了コード | 結合（継続的統合） |
 | AC30 | `git ls-files .serena` | 結合（済） |
@@ -52,7 +53,7 @@ uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest 
 | # | 項目 | 内容 | いつ決まるか |
 | --- | --- | --- | --- |
 | U1 | Codex での `.mcp.json` のプラグインルートの展開 | 隔離した Codex で試したが、起動の記録が残らず判定できなかった。決定 4 でラッパーを作らないため、この課題の実装は依存しない | 上流の変化で乗り換えを考えるとき |
-| U2 | Codex の hook の入出力 | SessionStart の `additionalContext` と PreToolUse の `permissionDecision: "deny"` を Codex 0.156 が読むか。Serena 公式の `serena-hooks` は `--client codex` を持つため、読む前提で作る | 実装（AC22・AC25 の手動確認） |
+| U2 | Codex の hook の入出力 | SessionStart の `additionalContext` と PreToolUse の `permissionDecision: "deny"` を Codex 0.156 が読むか。Serena 公式の `serena-hooks` は `--client codex` を持つため、読む前提で作る | 実装（AC25 の手動確認。AC22 は定義と入力の形だけを見る） |
 | U3 | Codex の文脈での memory のツール | `no-memories` のモードで、一覧に残った memory のツールを呼んだときに拒まれるか | 実装（AC25 と同じ手順で 1 度呼ぶ） |
 | U4 | 作業ツリーに `project.yml` が無いときの Serena | `--project-from-cwd` が `.git` を持つ作業ツリーの根を選び、設定を自動で作るのか、主ディレクトリの設定を読むのか | 実装（AC12） |
 | U5 | PHP の型の診断 | intelephense の無料版が型の食い違いを返さないのか、設定で返すのか（#818 の本文の未確認） | 実装（AC24・AC25）。返さなければ前提 4 のまま |

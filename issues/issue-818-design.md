@@ -181,7 +181,7 @@ graph LR
   CC -->|"MCP stdio"| SE["Serena 1.7.0<br/>uvx で起動"]
   CX -->|"MCP stdio"| SE
   CC -->|"plugin LSP"| LS["pyright / typescript-language-server<br/>/ intelephense（利用者が入れる）"]
-  SE --> SLS["~/.serena/language_servers<br/>（Serena が入れる）"]
+  SE --> SLS[".serena/language_servers<br/>（SERENA_HOME=.serena。Serena が入れる）"]
   CC -->|"hook"| CLI["serena-lsp.py"]
   CX -->|"hook"| CLI
   CLI --> PYML["導入先の .serena/project.yml"]
@@ -217,7 +217,7 @@ plugins/mcp/mcp-serena/
 
 ### 対応表（`scripts/languages.json`）
 
-言語を足すときに変えるのはこのファイルだけである。スクリプトは言語の名前を持たない。
+言語を足すときに変えるのはこのファイルだけである。ただし、既にある種類の追加の検査で足りない言語は、`check.py` に検査の関数を 1 つ足す（`extra_checks`）。スクリプトは言語の名前で分岐しない。
 
 ```json
 {
@@ -249,7 +249,7 @@ plugins/mcp/mcp-serena/
 | `extensions` | 小文字の拡張子の配列。言語をまたいで重ならない | 必須・1 件以上 |
 | `claude_plugin` | 公式 LSP プラグインの ID | `null` なら Claude Code の LSP を検査しない（Bash は公式が無い） |
 | `binaries` | 本体のコマンドと導入のコマンド | 空なら本体を検査しない |
-| `extra_checks` | 名前の付いた追加の検査。`check.py` が名前ごとに 1 つの関数を持つ | 空でよい |
+| `extra_checks` | 名前の付いた追加の検査。`check.py` が名前ごとに 1 つの関数を持つ。知らない名前は対応表の破損として `check` を終了コード 2 で止める | 空でよい |
 
 最初の版で載せるのは上の 4 言語と、公式 LSP プラグインがある `go` / `ruby` / `rust` / `java` / `kotlin` / `csharp` / `swift` / `lua` / `cpp`（`clangd-lsp`）である。拡張子と公式プラグインの名前は、`claude-plugins-official` の `marketplace.json` の `lspServers.extensionToLanguage` から写す（2026-09-24 に確認）。
 
@@ -353,8 +353,10 @@ plugins/mcp/mcp-serena/
 
 | 定義 | ツール | 無いもの |
 | --- | ---: | --- |
-| Claude Code（`claude-code`） | 14 | `activate_project`・memory の 6 ツール・`onboarding` |
-| Codex（`codex`） | 23 | 無し。Serena 1.7.0 の `codex` 文脈はモードでツールを絞らない（決定 3） |
+| Claude Code（`claude-code`） | 14 | `activate_project`・memory の 6 ツール・`onboarding`・`get_current_config`・`search_for_pattern`（10 個） |
+| Codex（`codex`） | 23 | `replace_content`（1 個）。Serena 1.7.0 の `codex` 文脈はモードでツールを絞らない（決定 3） |
+
+差の 9 は、`codex` にだけある 10 個から `claude-code` にだけある 1 個を引いた数である。
 
 **`SERENA_HOME` は今の値（`.serena`）を保つ。** 変えると利用者の手元の設定と言語サーバの置き場所が移る。
 
@@ -403,6 +405,7 @@ sequenceDiagram
 ```
 
 - 検証の間、`project.yml` を 1 言語ずつ書き換える。**終わったら必ず最後の値を書く**（例外でも `finally` で、通った言語だけを書く。通った言語が 0 なら元の内容へ戻す）
+- `health-check` は起動定義と同じ `SERENA_HOME=.serena` を渡し、cwd を `--root` にして走らせる。これで、検証する言語サーバのキャッシュが、ランタイムが起動した Serena の使うもの（`<root>/.serena/language_servers/`）と一致する
 - 1 言語の検証に 120 秒の上限を置く。上限に達したら失敗として外す
 - `health-check` は `.serena/logs/health-checks/` にログを書く。Serena 自身の `.serena/.gitignore` が `/logs` を外している
 
