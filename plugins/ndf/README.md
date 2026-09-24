@@ -89,7 +89,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.17.7-dev.1）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.17.7-dev.2）
 ```
 
 ### agy
@@ -119,7 +119,7 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.17.7-dev.1 へ更新するとき
+## v10.17.7-dev.2 へ更新するとき
 
 **中継の導入を利用者の明示の操作にし、再起動のコマンドと、中継が質問の答えを代わりに送らない守りを
 足しました**（マイルストーン 26、#928 #936）。どれも Claude Code だけの変更です。Claude Code 向けの
@@ -137,6 +137,7 @@ agy plugin list
 | **`/ndf:restart` で好きな時点に切り替えられます**（#928） | 中継の下では、claude が再開用のコマンドを `ndf-next` のブロックで出して応答を終え、中継が静まりの後に `/exit` → プラグインの更新 → 起動し直しを行います。中継の外では、`/exit` の後に貼り付ける中身を示します |
 | **中継が質問の答えを代わりに送りません**（#928） | `AskUserQuestion` の PreToolUse / PostToolUse hook が質問の表示中の印を作り・消し、中継は印がある間と、印の後に応答が再開した間は何も書きません。`/exit` と改行は 1 回の書き込みにしました。`NDF_RELAY_AUTO` と `NDF_RELAY_EXIT_GAP` は読まなくなりました（置いたままでも害はありません） |
 | **2 つ目以降の区間へ起動の方針の引数を引き継ぎます**（#936） | 最初の区間の `--dangerously-skip-permissions`・`--model` などを次の区間にも付けます。`--resume`・`--continue`・`--session-id`・`--name`・`--worktree` などと最初のプロンプトは引き継ぎません。引き継いだ引数は記録の `start` の行の `carried` に残ります |
+| **知らせと文書が自動導入の版を正しく書きます**（#953） | 起動時の知らせ・`/ndf:install-wrapper status`・`relay.md`・`install-wrapper` が「10.17.4 が自動で足した」とだけ書いていたのを「10.17.4〜10.17.6」に、`/ndf:install-wrapper` を持たない版へ戻す手順を「10.17.6 以前へ戻す」に直しました |
 
 **10.17.4〜10.17.6 で中継が自動で入った利用者へ。** 更新しても `~/.bashrc` / `~/.zshrc` の囲みは
 そのまま残り、次の起動で「10.17.4〜10.17.6 が自動で足したもの…」の 1 行が 1 度だけ出ます。
@@ -173,12 +174,13 @@ codex plugin add ndf@ai-plugins
 にあります。
 
 ```bash
-grep -q '"version": "10.17.7-dev.1"' "$SCRIPTS/../.claude-plugin/plugin.json"; echo "exit=$?"   # 0 なら この版が入っている
+grep -q '"version": "10.17.7-dev.2"' "$SCRIPTS/../.claude-plugin/plugin.json"; echo "exit=$?"   # 0 なら この版が入っている
 grep -qx 'install-wrapper' "$SCRIPTS/../manifests/claude-skills.txt" && grep -qx 'restart' "$SCRIPTS/../manifests/claude-skills.txt"; echo "exit=$?"   # 0 なら /ndf:install-wrapper と /ndf:restart が配られている
 python3 "$SCRIPTS/relay.py" status >/dev/null 2>&1; echo "exit=$?"   # 0 なら 中継の状態を示せる（何も書かない）
 ! grep -qF 'relay.py install' "$SCRIPTS/../hooks/claude.json"; echo "exit=$?"   # 0 なら SessionStart hook がシェルの設定を書かない
 grep -qF 'relay.py\" question open' "$SCRIPTS/../hooks/claude.json"; echo "exit=$?"   # 0 なら 質問の表示中に中継が入力を書かない守りが入っている
 python3 -B -c 'import sys; sys.path.insert(0, sys.argv[1]); from relay import carried_args; sys.exit(carried_args(["--dangerously-skip-permissions", "--resume", "abc", "続き"]) != ["--dangerously-skip-permissions"])' "$SCRIPTS"; echo "exit=$?"   # 0 なら 2 つ目以降の区間へ起動の方針の引数を引き継ぐ
+grep -qF '10.17.4〜10.17.6 が自動で足したもの' "$SCRIPTS/relay.py"; echo "exit=$?"   # 0 なら 知らせが自動導入の版を 10.17.4〜10.17.6 と書く（#953）
 ```
 
 ## Playwright テストについて
@@ -350,7 +352,7 @@ agy models   # 認証の確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.17.7-dev.1/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.17.7-dev.2/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -372,14 +374,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.7-dev.1/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.7-dev.2/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.17.7-dev.1  <path>
+# => ndf@ai-plugins  installed, enabled  10.17.7-dev.2  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。
