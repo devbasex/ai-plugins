@@ -46,7 +46,7 @@ from ..items import (
 from ..paths import work_dir
 from ..outbound import dropped_line, item_lines, plan_line
 from ..paths import git_out, load_state
-from ..phases import add_phase_seconds, finish_phase
+from ..phases import add_phase_seconds, finish_phase, phase_record
 from ..undo import drop, resume_pending_drop
 from ..verify import (
     verify_commit_basics,
@@ -444,7 +444,7 @@ def _account_fix(state: dict[str, Any], targets: list[dict[str, Any]]) -> None:
         if item.get("status") == FAILING:
             item["status"] = IMPLEMENTED
     stats = state.setdefault("fix_stats", {"launches": 0, "seconds": 0.0})
-    started = ((state.get("phases") or {}).get("fix") or {}).get("launch_started_at")
+    started = phase_record(state, "fix").get("launch_started_at")
     seconds = max(clock.seconds_between(started, clock.now()) or 0.0, 0.0)
     stats["launches"] = int(stats.get("launches") or 0) + 1
     stats["seconds"] = round(float(stats.get("seconds") or 0.0) + seconds, 1)

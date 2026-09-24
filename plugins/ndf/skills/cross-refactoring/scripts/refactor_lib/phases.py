@@ -13,6 +13,11 @@ import statefile
 from . import clock
 
 
+def phase_record(state: dict[str, Any], name: str) -> dict[str, Any]:
+    """名前に対応するフェーズ記録を返す。"""
+    return (state.get("phases") or {}).get(name) or {}
+
+
 def finish_phase(state: dict[str, Any], name: str, started: Optional[str] = None) -> None:
     """フェーズの終わりを書き、所要を秒で残す。**書き済みなら書き換えない。**
 
