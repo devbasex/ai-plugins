@@ -257,8 +257,8 @@ plugins/ndf/scripts/lib/{jev,limits,assignment}.py
 | `init` | 引数 | `ID` `RUNTIMES` `RUNTIMES_CSV` `IMPL` `WORK` `TMP_DIR` ほか今と同じ。`PHASE`（再開の地点） | 0 / 4 |
 | `merge-proposals` | 参加者の結果ファイル | — | 0 / 2（候補 0 件。最終ゲートへ） |
 | `merge-plan` | 実装担当の `plan` の結果ファイル | `TESTS_NEEDED=0\|1` | 0 / 2（残る項目 0 件。最終ゲートへ） / 4 |
-| `merge-tests` | git の範囲 | — | 0 / 2（残る項目 0 件のとき。最終ゲートへ）。足したテストが今のコードで落ちた項目は、その項目のテストのコミットを取り消して `test_failed` で見送る。計画に無いテストのコミットも取り消す（AC10）。**テストの追加の締め切りの後に着手した項目**は `not_done` で見送り、そのテストのコミットを取り消す（着手の時刻の求め方は `merge-implement` と同じ） |
-| `merge-implement` | git の範囲 | — | 0 / 2（残る項目 0 件。1 件も適用されなかったとき。最終ゲートへ）。コミットの無い項目と、**締め切りの後に着手した項目**を `not_done` で見送り、その項目の実装とテストのコミットを取り消す。着手の時刻は項目の所要の起点（フェーズの CLI の起動の時刻か、直前の項目のコミットの時刻）で、git のコミットの時刻から求める。担当の申告は使わない |
+| `merge-tests` | git の範囲 | — | 0 / 2（残る項目 0 件のとき。最終ゲートへ）。足したテストが今のコードで落ちた項目は、その項目のテストのコミットを取り消して `test_failed` で見送る。計画に無いテストのコミットも取り消す（AC10）。**テストの追加の完了の締め切り（着手の締め切り + その項目の `test` の見積り）を過ぎてコミットした項目**は `not_done` で見送り、そのテストのコミットを取り消す |
+| `merge-implement` | git の範囲 | — | 0 / 2（残る項目 0 件。1 件も適用されなかったとき。最終ゲートへ）。コミットの無い項目と、**完了の締め切りを過ぎてコミットした項目**を `not_done` で見送り、その項目の実装とテストのコミットを取り消す。完了の締め切りは着手の締め切りにその項目の実装の見積りを足した時刻で、判定は項目の実装のコミットの時刻で行う（着手の時刻は git から求められないため、完了の時刻で保守的に判定する）。担当の申告は使わない |
 | `verify` | 状態 | `VERIFY=done\|fix` | 0 / 4 |
 | `merge-fix` | git の範囲 | — | 0 |
 | `finalize` | 状態・`--review-status STATUS`（単独起動のときだけ） | — | 0（履歴の追記に失敗しても 0。知らせるだけ）。呼ぶ時点は起動のされ方で変わる（下の「最終ゲートとの関係」）。`final_gate` が通り、単独起動なら渡された `cross-review` の最終ステータスが `approved` のときだけ追記する。ステータスは `final_gate.review_status` に残す。行には最終ゲートの全体のテストの所要を入れ、`cross-review` の所要は入れない。通らなかった・中断した実行は追記しない |
@@ -319,7 +319,7 @@ plugins/ndf/scripts/lib/{jev,limits,assignment}.py
 
 ### 候補の切り出し
 
-`merge-proposals` は、統合した提案を `(賛同した者の数, 重要度)` の降順に並べ、`path` + `symbol` の組の単位で上位 30 組を取る。**取った組の提案は、鍵（`smell`）が違っても全部を計画へ渡す。** 「同じ変更か」の判断（Jev か実装担当の `merge_into`）は、同じ `path` + `symbol` の提案どうしにしか問わない。そのため、計画の中で統合されて減るのは取った組の中の提案だけで、組の数は減らない。外れた組の提案は `rank` で見送る。
+`merge-proposals` は、統合した提案を `(賛同した者の数, 重要度)` の降順に並べ、`path` + `symbol` の組の単位で上位 30 組を取る。**取った組の提案は、鍵（`smell`）が違っても組の中の上位 3 件まで計画へ渡す。** 計画へ渡すのは最大 90 件、Jev の「同じ変更か」は組の中の 2 件の組み合わせだけなので最大 3 × 30 = 90 回である。組の中の 4 件目以降は `rank` で見送る。 「同じ変更か」の判断（Jev か実装担当の `merge_into`）は、同じ `path` + `symbol` の提案どうしにしか問わない。そのため、計画の中で統合されて減るのは取った組の中の提案だけで、組の数は減らない。外れた組の提案は `rank` で見送る。
 
 ## 処理の流れ
 
@@ -420,7 +420,7 @@ stateDiagram-v2
 | --- | --- | --- |
 | D1 | 項目のコミットが、項目の `path` と `tests[]` 以外のファイルを触った | `git show --name-only` |
 | D2 | ファイルを消した・名前を変えた | `git diff --name-status` の `D` / `R` |
-| D3 | 触った本番のファイルが `--scope` の外のコードから参照されている | 探す先は `--scope` の外の**コードのファイルだけ**である（`*.md` / `*.rst` / `*.txt` と `docs/` を除く）。探す語はモジュールの参照の形で、`git grep -lE` の次の 3 つである。親ディレクトリ付きのパス（`refactor_lib/plan`）、同じものをドットで繋いだ形（`refactor_lib\.plan`）、`from` で親から読む形（`refactor_lib import .*\bplan\b`）。`symbol` が修飾名（`Foo.run`）なら修飾名の全体も探す。1 件でも当たれば立てる。触ったファイルがパッケージの入口（`__init__.py` / `index.*` / `mod.rs` など、再 export を持ちうるもの）なら探さずに立てる |
+| D3 | 触った本番のファイルが `--scope` の外のコードから参照されている | 探す先は `--scope` の外の**コードのファイルだけ**である（`*.md` / `*.rst` / `*.txt` と `docs/` を除く）。探す語は、触ったファイルのリポジトリ相対パスから拡張子を落とした**末尾の 2 区切り**（`plugins/.../refactor_lib/plan.py` なら親 `refactor_lib` と語幹 `plan`）から作るモジュールの参照の形で、`git grep -lE` の次の 3 つである。`refactor_lib/plan`、`refactor_lib\.plan`、`refactor_lib import .*\bplan\b`。リポジトリの直下のファイル（親が無い）は `import plan` / `from plan` の形で探す。`symbol` が修飾名（`Foo.run`）なら修飾名の全体も探す。1 件でも当たれば立て、当たった語を `items[].danger` に残す。触ったファイルがパッケージの入口（`__init__.py` / `index.*` / `mod.rs` など、再 export を持ちうるもの）なら探さずに立てる |
 | D4 | 限ったテストが触った本番のファイルを覆うと示せない | 限ったテストのファイルのどれにも、拡張子を除いたファイル名と `symbol` の名前のどちらも現れなければ立てる |
 | D5 | 公開の入出力が変わりうる | Jev（使えるとき）。使えないときは実装担当の結果の `risk` |
 
@@ -444,7 +444,7 @@ stateDiagram-v2
 
 | 起動のされ方 | `finalize` を呼ぶ時点 | 追記する条件 |
 | --- | --- | --- |
-| 単独 | `/ndf:cross-review` が終わった後。駆動は cross-review の状態ファイル（`<cross-review の作業ツリー>/.cross_review/cross-review-pr<番号>-state.json`）の `final` を `jq -r .final` で読み、`--review-status` で渡す（`state.py report` の Markdown は読まない） | `final-gate` が通り、`--review-status` が `approved` |
+| 単独 | `/ndf:cross-review` の最終スイープと `verify-sweep` が終わった後。駆動は cross-review の状態ファイル（`<cross-review の作業ツリー>/.cross_review/cross-review-pr<番号>-state.json`）を `jq` で読み、`final` が `approved`・`sweep.verified` が真・`sweep.remaining_open` が 0・`sweep.commit` が無いときだけ `--review-status approved` を渡し、それ以外は読んだ `final` を渡す（`state.py report` の Markdown は読まない） | `final-gate` が通り、`--review-status` が `approved`。最終スイープが修正のコミットを作った実行は、最後の HEAD が承認されていないため追記しない |
 | 工程の 1 つ | `final-gate` の直後 | `final-gate` が通った（全体のテストか継続的統合） |
 
 **単独起動で `final-gate` の直後に追記しない。** その時点では `cross-review` の合否が決まっておらず、レビューが収束しなかった実行が履歴に混ざる。`--review-status` を渡さずに単独起動の状態で `finalize` を呼ぶと、追記せずに 0 で終わり、知らせる。

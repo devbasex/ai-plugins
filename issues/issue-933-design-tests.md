@@ -10,15 +10,15 @@
 | AC3b | `init` の単体（`--round-test` が無く `--baseline-test` が差し替えられない形のとき終了コード 4） |
 | AC4 AC6 | 偽の CLI を使う結合テスト。起動の記録（`launch-cli.sh` の呼び出し）を数える |
 | AC5 | 雛形を展開した結果に観点の語彙の値が並ぶことを、`launch-cli.sh` の展開の単体で見る（文言ではなく、語彙の値の列挙を見る） |
-| AC7 AC8 AC9 | `budget.py` の単体（見積り・控え・飛ばして詰める・締め切り）と `merge-plan` の単体 |
+| AC7 AC8 AC9 | `budget.py` の単体（見積り・控え・飛ばして詰める・締め切り）と `merge-plan` の単体、`merge-proposals` の単体（組の単位で 30 組・組の中の 3 件まで・外れた提案が `rank` になる） |
 | AC10 AC11 | git を使う結合（項目に紐づかないテスト・`test_failed`・`not_done` のテストのコミットの取り消し、1 項目 = 1 コミット） |
 | AC10b | 語の並びの組み立ての単体（既知の実行器で対象の語を差し替える・`uv run --project <パス> --with pytest pytest <対象>` を既知の実行器として読む・対象の語が 0 個なら末尾に足す・既知でない実行器（`make -C backend test`・`cargo test`・ラッパー）は差し替えられない・シェルの構文の文字・範囲の外・実在しないパスで `--round-test` に戻る・`--round-test` が無ければ `no_target` で見送る）と、`shell=False` で走ることの単体 |
-| AC12 | `merge-implement` の単体（コミットの無い項目が `not_done` になる）と、雛形に締め切りが渡る単体 |
-| AC13 AC14 | `danger.py` の単体（D1〜D5）と `verify` の結合（全体のテストが 2 回走らない） |
+| AC12 | `merge-tests` / `merge-implement` の単体（コミットの無い項目・完了の締め切りを過ぎてコミットした項目が `not_done` になりコミットが取り消される・締め切りの内の項目は残る）と、雛形に締め切りが渡る単体 |
+| AC13 AC14 | `danger.py` の単体（D1〜D5。D3 は末尾 2 区切りから作る 3 つの語・直下のファイル・文書を探さない・パッケージの入口）と `verify` の結合（全体のテストが 2 回走らない） |
 | AC15 AC16 | git を使う結合（項目の単位の取り消し・隣接する変更の退避・同じ語の並びを共有した項目が落ちたとき、新しい項目から 1 件ずつ取り消して通った時点で止まり、古い項目のコミットが残る） |
 | AC16b | `final-gate` の単体（`whole_test.reverted` が真で `--ci-check` が無いとき、単独起動でも全体のテストを走らせる。落ちたら `final-fix` の経路を返す） |
 | AC17〜AC20 | `allocation.py` の単体（`NDF_METRICS_DIR` を一時ディレクトリへ向ける。#938 の汚染を繰り返さない） |
-| AC17 | `finalize` の単体（工程の 1 つで最終ゲートが通った・通らない、単独起動で `--review-status` が `approved`・それ以外・渡されない） |
+| AC17 | `finalize` の単体（工程の 1 つで最終ゲートが通った・通らない、単独起動で `--review-status` が `approved`・それ以外・渡されない）と、駆動が cross-review の状態から `--review-status` を決める単体（`final` が `approved` でも、`sweep.verified` が偽・`sweep.remaining_open` が 1 以上・`sweep.commit` があれば `approved` を渡さない） |
 | AC21 | `assignment.py` の単体 |
 | AC22 AC23 | `jev.py` の単体（HTTP を偽の応答へ差し替える。鍵が無い・`NDF_JEV=0`・非公開・疎通の失敗・呼び出しの失敗・確信度の足りない場合）と、`merge-plan` / `verify` の単体（段と同じ変更かは `merge-plan`、D5 は `verify` で、Jev の答えと実装担当の答えのどちらでも決まる）。`merge-proposals` は鍵が同じ提案の機械的な統合だけを確かめる |
 | AC24 AC25 | 再開の単体（フェーズの飛ばし・旧い状態で止まる） |
