@@ -591,12 +591,13 @@ def test_run_passthrough(mod, tmp_path, monkeypatch, capsys, case):
     assert out.out == "" and out.err == ""
 
 
-@pytest.mark.parametrize("case", ["no-pty", "list-fails", "no-ndf", "list-hangs"])
+@pytest.mark.parametrize("case", ["no-pty", "list-fails", "no-ndf", "list-hangs", "list-bad-json"])
 def test_run_cannot_start_says_then_passthrough(mod, tmp_path, monkeypatch, capsys, case):
     claude = tmp_path / "bin" / "claude"
     claude.parent.mkdir()
     body = {"list-fails": "exit 1", "no-ndf": "echo '[{\"id\": \"x@y\", \"version\": \"1\"}]'",
-            "list-hangs": "sleep 30"}.get(case, "echo '[{\"id\": \"ndf@m\", \"version\": \"1\"}]'")
+            "list-hangs": "sleep 30", "list-bad-json": "echo 'not json at all'"}.get(
+        case, "echo '[{\"id\": \"ndf@m\", \"version\": \"1\"}]'")
     claude.write_text(f"#!/bin/sh\n{body}\n")
     claude.chmod(0o755)
     monkeypatch.setenv("NDF_RELAY_CLAUDE", str(claude))
@@ -608,6 +609,27 @@ def test_run_cannot_start_says_then_passthrough(mod, tmp_path, monkeypatch, caps
         mod.cmd_run([])
     err = capsys.readouterr().err
     assert err.startswith("ndf-relay: 中継を始めない（") and err.count("\n") == 1
+    assert mod.calls[0][1] == [str(claude)]
+
+
+def test_run_relay_dir_oserror_says_then_passthrough(mod, tmp_path, monkeypatch, capsys):
+    """現状固定: 一覧は読めても中継用ディレクトリを作れなければ、案内を標準エラーへ 1 回出して
+    実体へ素通しする（cmd_run の make_relay_dir が OSError になる経路）。"""
+    claude = tmp_path / "bin" / "claude"
+    claude.parent.mkdir()
+    claude.write_text("#!/bin/sh\necho '[{\"id\": \"ndf@m\", \"version\": \"1\"}]'\n")
+    claude.chmod(0o755)
+    monkeypatch.setenv("NDF_RELAY_CLAUDE", str(claude))
+    monkeypatch.setenv("NDF_RELAY_LIST_TIMEOUT", "5")
+    monkeypatch.setattr(mod.os, "isatty", lambda fd: True)
+
+    def boom():
+        raise OSError(mod.errno.EACCES, "no dir")
+    monkeypatch.setattr(mod, "make_relay_dir", boom)
+    with pytest.raises(Execd):
+        mod.cmd_run([])
+    err = capsys.readouterr().err
+    assert err == "ndf-relay: 中継を始めない（作業ディレクトリを作れない）。切れ目では示されたコマンドを手で入力する\n"
     assert mod.calls[0][1] == [str(claude)]
 
 
