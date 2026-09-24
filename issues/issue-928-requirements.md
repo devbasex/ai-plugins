@@ -96,7 +96,7 @@
 
 ### 3. 10.17.4 の自動の囲みの移行
 
-- [ ] AC9: 自動の囲みが残っている利用者が次の版の Claude Code を起動すると、「10.17.4 が自動で足した alias が残っている。使い続けるなら何もしなくてよい。外すなら `/ndf:install-wrapper uninstall`」の 1 行が 1 度だけ出る。2 回目以降の起動では出ない。同じ HOME で 2 つの起動が同時に来ても 1 度だけである。このとき hook はシェルの設定を読むだけで書かない（知らせた記録は状態の親 `${XDG_STATE_HOME:-~/.local/state}/ndf/relay/` にだけ書く）
+- [ ] AC9: 自動の囲みが残っている利用者が次の版の Claude Code を起動すると、「10.17.4 が自動で足した alias が残っている。使い続けるなら何もしなくてよい。外すなら `/ndf:install-wrapper uninstall`」の 1 行が 1 度だけ出る（`DEVBASE_SHELLRC_DIR` があれば「コンテナを作り直した後も使うなら `/ndf:install-wrapper`」を足す）。2 回目以降の起動では出ない。同じ HOME で 2 つの起動が同時に来ても 1 度だけである。このとき hook はシェルの設定を読むだけで書かない（知らせた記録は状態の親 `${XDG_STATE_HOME:-~/.local/state}/ndf/relay/` にだけ書く）
 - [ ] AC10: 自動の囲みを残した利用者の中継は、次の版でもそのまま動く（10.17.4 の囲みの alias は旧い写しを指したまま動く。hook は囲みの中を書き換えない。`NDF_RELAY_*` の意味を変えない）
 - [ ] AC11: 写しか旧い写しが在る利用者では、Claude Code の起動ごと（新しい会話・`-c`・`--resume`）に SessionStart の hook が在る方（両方なら両方）を今の版の `relay.py` と比べ、違えば置き直す（写しは版を後退させない。AC29）。無い方は作らない。シェルの設定は変えない。10.17.4 の写しで動く中継でも、区間の切り替えで起動した claude の hook が置き直し、次に `claude` と打ったときから新しい版で動く
 
@@ -127,7 +127,7 @@
 
 - [ ] AC27: 写しと中継の rc は Claude Code の設定の親（`${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/`）の下に置く。中継の rc の関数と読み込みの行は `install` の時点で決まるパスを指す（`$HOME` の下なら `"$HOME/..."` の形）。関数は呼んだ時点で写しが無ければ素の `claude` を起こし、読み込みの行は中継の rc が無ければ何もしない。devbase では、コンテナを作り直した後も写しと中継の rc が残る（`~/.claude` が `/persistent/group/.claude` への symlink であることを設計の文書に実測で残す）
 - [ ] AC28: `DEVBASE_SHELLRC_DIR` が在るディレクトリを指すとき、`install` は読み込みの 1 行を `$DEVBASE_SHELLRC_DIR/ndf-relay.sh` に置き、`~/.bashrc`・`~/.zshrc` へ囲みを足さない（10.17.4 の囲みが残っていれば、その中だけを読み込みの行へ置き換える）。`uninstall` はこのファイルも消す。devbase の読み込み（`~/.bashrc`・`~/.zshrc` がこのディレクトリの `*.sh` を読む）は devbasex/devbase#253 で依頼した
-- [ ] AC29: 写しの版（`relay.version`）が SessionStart の hook を動かすプラグインの版より新しければ、hook は写しを置き直さない（同じ親を共有する別のコンテナの古い版が、写しを後退させない）。同じ `X.Y.Z` では `-dev.N` を正式版より古いとし、`-dev.N` どうしは `N` を数として比べる
+- [ ] AC29: 写しの版（`relay.version`）が SessionStart の hook を動かすプラグインの版より新しければ、hook は写しを置き直さない（同じ親を共有する別のコンテナの古い版が、写しを後退させない）。明示の `install` は版を比べずに置く（過去の版へ戻した利用者が写しも戻せる）。同じ `X.Y.Z` では `-dev.N` を正式版より古いとし、`-dev.N` どうしは `N` を数として比べる
 - [x] AC30: devbasex/devbase へ、永続化されたシェルの設定の読み込みを足す issue を送る。devbasex/devbase#253 として起票した
 
 ### 8. 通しの確かめと退行
