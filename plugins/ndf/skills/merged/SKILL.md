@@ -124,6 +124,23 @@ python3 "$SCRIPTS/merged-steps.py" cleanup <PR番号>... --root <主ディレク
 - 作業ツリーの未追跡・無視されたファイルは `<共通の git ディレクトリ>/ndf/worktree-trash/` へ退避してから外す。退避先は `reason` に載る。**退避先は自動では消さない**（容量 `du -sh <退避先>` を報告に載せ、消すのは利用者）
 - レビュー用の作業ツリー（システムの一時ディレクトリ配下の `pr<PR番号>`）もスクリプトが外す。cross-review / cross-refactoring の実行の要約は作業ツリーの外にあり、消えない
 
+### マージから行うとき
+
+**マージの承認を得た後に限り、** CI の待ちとマージを同じスクリプトで行える。承認の関門
+（`development-workflow` の Pull Request のマージの承認）はこのコマンドの前に置き、この
+コマンドを承認の代わりにしない。
+
+```bash
+python3 "$SCRIPTS/merged-steps.py" merge-when-green <PR番号> --root <主ディレクトリ> \
+  [--method merge|squash|rebase] [--interval 30] [--timeout 3600] [--no-cleanup]
+```
+
+- CI の検査が全部通るまで待つ。push で先頭のコミットが変わると待ち直す（`items` に `rewait` が載る）
+- 失敗した検査が 1 つでもあれば、マージせずに `stopped`（1）で止まる。`items[].name` が失敗した検査
+- 通れば `gh pr merge --admin` でマージし、続けて上の `cleanup` と同じ後片付けを行う。
+  `status` の読み方は上の表と同じ
+- 上限の時間を過ぎても検査が終わらなければ `stopped`（1）で止まる。`next` のコマンドで打ち直す
+
 ## まとまりの課題を報告する
 
 **この Skill は課題を閉じない。** まとまりの課題が閉じるのは、まとまりの終わりの工程を
