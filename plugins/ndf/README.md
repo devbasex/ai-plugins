@@ -8,7 +8,7 @@ PR 運用、レビュー、調査、実装計画、仕様書化、開発方法�
 
 | ランタイム | 公開 Skill | マニフェスト |
 | --- | --- | --- |
-| Claude Code | 45 個 | `.claude-plugin/plugin.json` |
+| Claude Code | 47 個 | `.claude-plugin/plugin.json` |
 | Codex | 43 個 | `.codex-plugin/plugin.json` |
 | Kiro CLI | 44 個 | `dev.kiro/install.sh`（プラグイン機構が無いため installer で導入） |
 | agy | 43 個 | `dev.agy/plugin.json`（取得元の登録が無いため clone から導入） |
@@ -19,7 +19,7 @@ PR 運用、レビュー、調査、実装計画、仕様書化、開発方法�
 plugins/ndf/
 ├── .claude-plugin/plugin.json   # Claude Code のマニフェスト
 ├── .codex-plugin/plugin.json    # Codex のマニフェスト
-├── skills/                      # 配布 Skill の唯一の実体（45 個）
+├── skills/                      # 配布 Skill の唯一の実体（47 個）
 ├── skills/AUTHORING.md          # Skill 執筆の規約
 ├── manifests/                   # ランタイム別の配布 Skill 一覧
 ├── agents/                      # Claude Code のサブエージェント定義（専門 8 個と worker 1 個）
@@ -89,7 +89,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.17.6）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.17.7）
 ```
 
 ### agy
@@ -119,27 +119,39 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.17.6 へ更新するとき
+## v10.17.7 へ更新するとき
 
-**cross-review のラウンドを減らす変更を入れました**（マイルストーン 26「17 トークン消費の削減」、#542 #786）。
-既定の担当から agy を外し、1 ラウンド目で指摘を出し切らせ、2 ラウンド目以降の担当へ前のラウンドの
-指摘と返信を渡します。Skill の数は変わりません。引数・Skill・スクリプトの削除や改名は無く、
-状態ファイルの移行も要りません（`ignored_exclude` を持たない状態ファイルは空として読みます）。
+**中継の導入を利用者の明示の操作にし、再起動のコマンドと、中継が質問の答えを代わりに送らない守りを
+足しました**（マイルストーン 26、#928 #936）。どれも Claude Code だけの変更です。Claude Code 向けの
+公開 Skill は `install-wrapper` と `restart` を足して 47 個になりました（Codex / Kiro CLI / agy は変わりません）。
+引数・Skill・スクリプトの削除や改名は無く、状態ファイルの移行も要りません。
 変更点の一覧は [CHANGELOG.md](../../CHANGELOG.md) にあります。
 
-**正式版です。** `main` に載ります。中身は開発版 `10.17.6-dev.1` と同じで、版数の接尾辞だけを
+**正式版です。** `main` に載ります。中身は開発版 `10.17.7-dev.2` と同じで、版数の接尾辞だけを
 外しました。
 
 | 変わったこと | 中身 |
 | --- | --- |
-| **cross-review の既定の担当から agy を外しました**（#786） | 既定の母集合は claude / codex / kiro とホストです（ホストが agy なら 4 者）。agy を戻すときは `--include agy` を渡します。`--only` で名指しした者は母集合に無くても参加者になります |
-| **母集合に無い者の `--exclude` を止めずに無視します**（#786） | 前は中断していました。無視した名前は `participants.ignored_exclude` に残り、`ℹ` の 1 行と完了報告の 1 行で知らせます。`--exclude agy` を書いた既存の手順はそのまま通ります。判定は共通層にあるため cross-refactoring も同じく無視になります |
-| **2 ラウンド目以降は既存コメントの控えを取り直します**（#542） | `start-round` が控えを `fetch-pr-comments.sh --strict` で取り直し、同じ実行の前のラウンドの指摘と「対応しました」の返信を担当へ渡します。取得元の 1 つでも失敗すれば前の控えのまま `⚠` の 1 行を出して続けます。`fetch-pr-comments.sh` に `--strict` を足しました（付けなければ終了コードは前と同じです） |
-| **担当へ出し切りと、テスト・背景の処理を起動しない指示を渡します**（#542 #786） | レビューのプロンプトに `## 出し切り` の節（見つけた指摘はこのラウンドですべて出す）と、テストを実行しない・背景で処理を起動しないの 2 行が入ります。cross-refactoring の適用担当には、テストを前景で実行して終わるまで待つ指示が入ります |
-| **設計 Pull Request に設計の観点を渡します**（#542） | `issues/` の `-requirements.md` / `-design.md` / `-design-decisions.md` を含む Pull Request を `design` に分類し、3 文書の食い違い・状態の書き手の衝突・外部ツールの挙動の実測の根拠を見る観点テンプレートを渡します |
+| **SessionStart hook がシェルの設定を書かなくなりました**（#928） | 10.17.4〜10.17.6 は起動のたびに `relay.py install` を走らせ、`~/.bashrc`（zsh なら `~/.zshrc`）へ `alias claude=...` の囲みを 1 度だけ足していました。この版の hook は、在る写しを今の版で置き直す（版は後退させず、無い写しは作らない）のと、自動で足した囲みが残っていれば 1 度だけ知らせるのだけを行います |
+| **中継を入れる・外す・見るのは `/ndf:install-wrapper` です**（#928） | 引数無し（`install`）で、写しを `~/.claude/ndf/relay.py`、`claude` の関数を `~/.claude/ndf/shellrc` に置き、`~/.bashrc` をバックアップしてから `shellrc` を読む 1 行を囲みで足します（`DEVBASE_SHELLRC_DIR` があれば `$DEVBASE_SHELLRC_DIR/ndf-relay.sh` に置きます）。`uninstall` は `~/.bashrc` と `~/.zshrc` の囲みを外して写しと `shellrc` を消し、`status` は何も書かずに状態を示します。明示指示でだけ動きます |
+| **`/ndf:restart` で好きな時点に切り替えられます**（#928） | 中継の下では、claude が再開用のコマンドを `ndf-next` のブロックで出して応答を終え、中継が静まりの後に `/exit` → プラグインの更新 → 起動し直しを行います。中継の外では、`/exit` の後に貼り付ける中身を示します |
+| **中継が質問の答えを代わりに送りません**（#928） | `AskUserQuestion` の PreToolUse / PostToolUse hook が質問の表示中の印を作り・消し、中継は印がある間と、印の後に応答が再開した間は何も書きません。`/exit` と改行は 1 回の書き込みにしました。`NDF_RELAY_AUTO` と `NDF_RELAY_EXIT_GAP` は読まなくなりました（置いたままでも害はありません） |
+| **2 つ目以降の区間へ起動の方針の引数を引き継ぎます**（#936） | 最初の区間の `--dangerously-skip-permissions`・`--model` などを次の区間にも付けます。`--resume`・`--continue`・`--session-id`・`--name`・`--worktree` などと最初のプロンプトは引き継ぎません。引き継いだ引数は記録の `start` の行の `carried` に残ります |
+| **知らせと文書が自動導入の版を正しく書きます**（#953） | 起動時の知らせ・`/ndf:install-wrapper status`・`relay.md`・`install-wrapper` が「10.17.4 が自動で足した」とだけ書いていたのを「10.17.4〜10.17.6」に、`/ndf:install-wrapper` を持たない版へ戻す手順を「10.17.6 以前へ戻す」に直しました |
 
-収束の判定・振動の検知・`max_rounds`・起動し直しの規則は変わりません。手順と引数は
-`skills/cross-review/SKILL.md` と `skills/cross-review/docs/04-contracts.md` にあります。
+**10.17.4〜10.17.6 で中継が自動で入った利用者へ。** 更新しても `~/.bashrc` / `~/.zshrc` の囲みは
+そのまま残り、次の起動で「10.17.4〜10.17.6 が自動で足したもの…」の 1 行が 1 度だけ出ます。
+
+| したいこと | すること |
+| --- | --- |
+| 中継を使い続ける | 何もしなくてよい。囲みの alias が指す写し（`~/.local/share/ndf/relay.py`）は hook が今の版で置き直す |
+| devbase の `alias claude='claude --dangerously-skip-permissions'` を戻す | `/ndf:install-wrapper` を打つ。囲みの中が読み込みの 1 行に替わり、次に開いたシェルから先の alias と組み合わさる |
+| 中継を外す | `/ndf:install-wrapper uninstall`。開いているシェルでは `unalias claude` で外れる |
+| 10.17.6 以前へ戻す | **戻す前に** `/ndf:install-wrapper uninstall` を打つ（戻した後なら、囲みと `~/.claude/ndf/` を手で消す） |
+
+**動いている中継は入れ替わりません。** 質問の守りと引数の引継ぎが効くのは、`/exit` で中継を抜けて
+`claude` と打ち直した後からです。手順と置き場所は `skills/install-wrapper/SKILL.md`・`skills/restart/SKILL.md`・
+`skills/development-workflow/references/relay.md` にあります。
 
 正式版のチャネル（ref を指定せずに登録した取得元）なら、次で入れ替わります。**動いているセッションには
 反映されない**ため、更新したあとは起動し直してください。開発版を試すために `develop` を登録した場合は、
@@ -156,17 +168,19 @@ codex plugin add ndf@ai-plugins
 
 ### 手元で確かめる
 
-どれもファイルを読むか関数を呼ぶだけで、課題もファイルも書き換えません。`$SCRIPTS` はプラグインの
-`scripts/` の絶対パスで、決め方は
+どれもファイルを読むか状態を表示するか関数を呼ぶだけで、課題もファイルも書き換えません。`$SCRIPTS` は
+プラグインの `scripts/` の絶対パスで、決め方は
 [development-workflow/references/scripts-lookup.md](skills/development-workflow/references/scripts-lookup.md)
 にあります。
 
 ```bash
-grep -q '"version": "10.17.6"' "$SCRIPTS/../.claude-plugin/plugin.json"; echo "exit=$?"   # 0 なら この版が入っている
-python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); from lib.assignment import review_pool; sys.exit(review_pool("claude") != ["claude", "codex", "kiro"])' "$SCRIPTS"; echo "exit=$?"   # 0 なら cross-review の既定の母集合から agy が外れている
-grep -qF -- '--strict' "$SCRIPTS/../skills/fix/scripts/fetch-pr-comments.sh"; echo "exit=$?"   # 0 なら 控えの取り直しに使う --strict が入っている
-grep -qF '## 出し切り' "$SCRIPTS/../skills/cross-review/scripts/launch-reviewer.sh"; echo "exit=$?"   # 0 なら 出し切りの指示が入っている
-grep -qF 'def _is_design_doc_path' "$SCRIPTS/../skills/cross-review/scripts/state.py"; echo "exit=$?"   # 0 なら 設計 PR を design に分類する
+grep -q '"version": "10.17.7"' "$SCRIPTS/../.claude-plugin/plugin.json"; echo "exit=$?"   # 0 なら この版が入っている
+grep -qx 'install-wrapper' "$SCRIPTS/../manifests/claude-skills.txt" && grep -qx 'restart' "$SCRIPTS/../manifests/claude-skills.txt"; echo "exit=$?"   # 0 なら /ndf:install-wrapper と /ndf:restart が配られている
+python3 "$SCRIPTS/relay.py" status >/dev/null 2>&1; echo "exit=$?"   # 0 なら 中継の状態を示せる（何も書かない）
+! grep -qF 'relay.py install' "$SCRIPTS/../hooks/claude.json"; echo "exit=$?"   # 0 なら SessionStart hook がシェルの設定を書かない
+grep -qF 'relay.py\" question open' "$SCRIPTS/../hooks/claude.json"; echo "exit=$?"   # 0 なら 質問の表示中に中継が入力を書かない守りが入っている
+python3 -B -c 'import sys; sys.path.insert(0, sys.argv[1]); from relay import carried_args; sys.exit(carried_args(["--dangerously-skip-permissions", "--resume", "abc", "続き"]) != ["--dangerously-skip-permissions"])' "$SCRIPTS"; echo "exit=$?"   # 0 なら 2 つ目以降の区間へ起動の方針の引数を引き継ぐ
+grep -qF '10.17.4〜10.17.6 が自動で足したもの' "$SCRIPTS/relay.py"; echo "exit=$?"   # 0 なら 知らせが自動導入の版を 10.17.4〜10.17.6 と書く（#953）
 ```
 
 ## Playwright テストについて
@@ -258,12 +272,15 @@ Claude Code の SessionStart hook（`hooks/claude.json`）は上記に加えて�
 
 - `~/.claude/settings.json` の `cleanupPeriodDays` を 90 日以上に保つ
 - statusline 未設定時に NDF 標準 statusline を設定する
-- 区間の切れ目の中継（`scripts/relay.py`）を安定した場所へ置き直し、bash / zsh の設定へ
-  `alias claude=...` を印のついた囲みで 1 度だけ足す（`relay.py install`。`NDF_RELAY_AUTO=0` で止まる）
+- 区間の切れ目の中継（`scripts/relay.py`）の写しが在れば今の版で置き直す（`relay.py startup`。
+  版は後退させない）。10.17.4〜10.17.6 が自動で足した alias の囲みが残っていれば 1 度だけ知らせる。
+  **シェルの設定は書かない。** 中継を入れる・外すのは `/ndf:install-wrapper`（Claude Code だけ）
 
 Claude Code の Stop hook は終了時に Slack 通知スクリプトを実行します。通知に必要な環境変数が
 未設定の場合は送信せず終了します。中継の下（`NDF_RELAY_DIR` がある）では、最後の応答の
-`ndf-next` のブロックを中継の印へ写します（`relay.py mark`）。中継の始め方・止め方・上限は
+`ndf-next` のブロックを中継の印へ写します（`relay.py mark`）。`AskUserQuestion` の PreToolUse /
+PostToolUse hook は、中継の下で質問の表示中の印を作る・消します（中継が質問の答えを代わりに
+送らないため）。好きな時点で切り替えるのは `/ndf:restart` です。中継の始め方・止め方・上限は
 `skills/development-workflow/references/relay.md` にあります。
 
 Codex の Stop hook（`hooks/codex.json`）は `NDF_CODEX_SLACK_NOTIFY=true` が設定されている
@@ -335,7 +352,7 @@ agy models   # 認証の確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.17.6/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.17.7/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -357,14 +374,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.6/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.7/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.17.6  <path>
+# => ndf@ai-plugins  installed, enabled  10.17.7  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。
