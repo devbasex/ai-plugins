@@ -1,6 +1,6 @@
 ---
 name: cross-review
-description: "Review a PR with two CLIs picked from every runtime including the host, looping fixes until no new finding appears. Use when a converging multi-AI review is wanted（クロスレビュー・両AIレビュー・収束レビュー）."
+description: "Review a PR with two CLIs picked from claude, codex, kiro and the host (agy only with --include agy), looping fixes until no new finding appears. Use when a converging multi-AI review is wanted（クロスレビュー・両AIレビュー・収束レビュー）."
 argument-hint: "[PR番号] [--host claude|codex|agy|kiro] [--max-rounds N] [--rotate-after K] [--rotate-mode light|squash] [--only RUNTIME] [--exclude NAMES] [--include NAMES] [--require-all] [--focus TEXT] [--extra-instructions-file PATH] [--verify-command CMD] [--verify-exit-code N]"
 allowed-tools:
   - Bash
