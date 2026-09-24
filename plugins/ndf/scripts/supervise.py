@@ -8,7 +8,7 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
 | 段 | 何をするか | LLM |
 | --- | --- | --- |
 | run   | コマンドを実行して終わるまで待ち、出力をファイルへ残す | 使わない |
-| work  | 1 つの作業（修正・調査）を worker として行わせる | Tool あり（Read/Edit/Write/Bash/Grep/Glob） |
+| work  | 1 つの作業（修正・調査）を worker として行わせる | Tool あり（Read/Edit/Write/Bash/Grep/Glob）。`"full": true` なら設定・プラグイン・Skill をそのまま読む claude -p で Skill を回す（cross-review など） |
 | judge | 結果ファイルと規則の抜粋だけを渡し、次の段を決めさせる | Tool なし |
 | pr    | push して Draft の Pull Request を作る（スクリプト）。本文は材料（計画の値・コミット・変更の統計・run の結果・設計文書）から LLM が書く。`"body": "template"` なら材料をそのまま本文にする | 本文だけTool なし |
 
@@ -54,6 +54,7 @@ import time
 from pathlib import Path
 
 WORK_TOOLS = "Read,Edit,Write,Bash,Grep,Glob"
+FULL_TOOLS = "Read,Edit,Write,Bash,Grep,Glob,Skill,Agent,Monitor,SendMessage,ToolSearch"
 TAIL = 6000  # LLM へ渡す出力の末尾の文字数
 
 WORK_SYSTEM = """あなたは NDF の worker である。1 つの作業だけを行う。
@@ -63,6 +64,18 @@ WORK_SYSTEM = """あなたは NDF の worker である。1 つの作業だけを
 - 最後に次の形で終える:
 ## 作業の報告
 - 作業: <種類>
+- 結果: 完了 / 判断が要る / できなかった
+- 見つけたもの: <件数と場所。無ければ 無し>
+- 次にすること: <1 行。無ければ 無し>"""
+
+FULL_SYSTEM = """あなたは NDF のフェーズの 1 段を CLI として回している。人は見ていない。
+- 人間へ問わない（AskUserQuestion を使わない）。Skill の確認は提示して進める
+- 関門に当たる操作（設計 PR のマージ・main への配布・タグ）をしない
+- 課題を閉じる語（Fix #番号・Closes など）をコミットと PR 本文に書かない
+- 待ちは背景起動と完了通知で行い、応答を途中で終えない
+- 最後に次の形で終える:
+## 作業の報告
+- 作業: <Skill 名>
 - 結果: 完了 / 判断が要る / できなかった
 - 見つけたもの: <件数と場所。無ければ 無し>
 - 次にすること: <1 行。無ければ 無し>"""
@@ -78,8 +91,14 @@ JUDGE_SYSTEM = """あなたは NDF の持ち場の判断だけを行う。Tool �
 答えは JSON 1 つだけを返す: {"decision": "<選んだ値>", "reason": "<1 行>"}"""
 
 
-def claude_cmd(system: str, tools: str | None, cwd: str) -> list[str]:
+def claude_cmd(system: str, tools: str | None, cwd: str, full: bool = False) -> list[str]:
     base = shlex.split(os.environ.get("NDF_SUPERVISE_CLAUDE", "claude"))
+    if full:
+        # Skill を回す段（cross-review など）。設定・プラグイン・Skill・hook をそのまま読む
+        # 新しい文脈の claude -p。本体の会話なのでキャッシュはサブスクリプションなら 1 時間
+        return base + ["-p", "--output-format", "json", "--no-session-persistence",
+                       "--permission-mode", "acceptEdits", "--allowed-tools", FULL_TOOLS,
+                       "--append-system-prompt", system]
     cmd = base + [
         "-p", "--output-format", "json", "--no-session-persistence",
         "--setting-sources", "", "--strict-mcp-config", "--disable-slash-commands",
@@ -96,11 +115,12 @@ def claude_cmd(system: str, tools: str | None, cwd: str) -> list[str]:
     return cmd
 
 
-def call_claude(system: str, prompt: str, tools: str | None, cwd: str, timeout: int) -> dict:
-    """最小構成の claude -p を 1 回呼び、結果の本文と使用量を返す。"""
+def call_claude(system: str, prompt: str, tools: str | None, cwd: str, timeout: int,
+                full: bool = False) -> dict:
+    """claude -p を 1 回呼び、結果の本文と使用量を返す（既定は最小構成）。"""
     started = time.time()
     try:
-        p = subprocess.run(claude_cmd(system, tools, cwd), input=prompt, capture_output=True,
+        p = subprocess.run(claude_cmd(system, tools, cwd, full), input=prompt, capture_output=True,
                            text=True, cwd=cwd, timeout=timeout)
     except subprocess.TimeoutExpired:
         return {"ok": False, "text": f"打ち切り（{timeout} 秒）", "usage": {}, "seconds": timeout}
@@ -202,7 +222,11 @@ class Supervisor:
     def do_work(self, step: dict) -> tuple[bool, str]:
         prompt = (f"作業: {step.get('kind', '修正')}\n作業場所: {self.cwd}\n\n"
                   f"{step['prompt']}\n\n## 入力\n{self.inputs_text(step)}")
-        res = call_claude(WORK_SYSTEM, prompt, WORK_TOOLS, self.cwd, step.get("timeout", 1800))
+        if step.get("full"):
+            # Skill の本文が手順を持つ。プロンプトは Skill の呼び出しをそのまま渡す
+            prompt = step["prompt"]
+        res = call_claude(FULL_SYSTEM if step.get("full") else WORK_SYSTEM, prompt, WORK_TOOLS, self.cwd, step.get("timeout", 1800),
+                          full=bool(step.get("full")))
         self.add_usage("work", res)
         self.cur.update(exit=0 if res["ok"] else 1, text=res["text"], seconds=res["seconds"])
         return res["ok"], res["text"]
