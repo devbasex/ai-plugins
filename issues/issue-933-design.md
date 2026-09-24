@@ -157,7 +157,7 @@ plugins/ndf/scripts/lib/{jev,limits,assignment}.py
 | `candidates[]` | 提案 | 統合した提案。`key`・`proposed_by[]`・`severity`・`smell`・`technique`・`path`・`symbol`・`plan` ほか |
 | `plan` | オブジェクト | `available_minutes`・`reserve`（下の表）・`selected[]`・`table_source`（初期値か履歴か） |
 | `items[]` | 項目 | 採った項目。下の表 |
-| `deferred_items[]` | 今と同じ形 | 理由は `budget` / `rank` / `duplicate` / `vocabulary` / `threshold` / `test_failed` / `not_done` |
+| `deferred_items[]` | 今と同じ形 | 理由は `budget` / `rank` / `duplicate` / `vocabulary` / `threshold` / `no_target` / `test_failed` / `not_done` |
 | `whole_test` | `{ran, flags[], status, seconds, head, reverted}` | 検証の中の全体のテスト（最大 1 回）。`reverted`（bool）は、落ちて印を持つ項目を取り消したら真になる。最終ゲートはこのキーを読み、取り消した後の HEAD で全体のテストを走らせるかを決める |
 | `baseline_test` / `round_test` | 今と同じ | 着手前のテスト。`baseline_test.seconds` を控えに使う |
 | `final_gate` / `plan_comment` / `pending_push` / `sync_command` | 今と同じ | 変えない |
@@ -180,7 +180,7 @@ plugins/ndf/scripts/lib/{jev,limits,assignment}.py
 | `kind` | 配分テーブルの種類（`structure/<technique>`）。足すテストは別に `tests` が持つ |
 | `estimate` | `{test, implement, verify}`（分） |
 | `tests[]` | 足すテストの置き場所（空なら足さない） |
-| `test_targets` | 限ったテストの対象（パスかノード ID の並び）。進行側がこれから語の並びを組み立てる（下の「実装担当の `plan` の結果ファイル」）。空なら `--round-test`（省けば `--baseline-test`）をそのまま使う |
+| `test_targets` | 限ったテストの対象（パスかノード ID の並び）。進行側がこれから語の並びを組み立てる（下の「実装担当の `plan` の結果ファイル」）。空か不正なら、`--round-test` があればそれをそのまま使い、無ければ `merge-plan` がその項目を `no_target` で見送る（項目ごとに全体のテストを走らせないため） |
 | `start_deadline` | 実装に着手してよい最後の時刻 |
 | `status` | 下の状態遷移図 |
 | `commits` | `{test, implement, fix[]}` の SHA |
@@ -280,7 +280,8 @@ plugins/ndf/scripts/lib/{jev,limits,assignment}.py
 - `tier` は `high` / `medium` / `low`。候補の全件に付ける
 - `merge_into` は同じ変更だと判断した相手の `key`
 - **実装担当はコマンドを返さず、テストの対象（`test_targets`）だけを返す。** 限ったテストのコマンドは進行側が組み立てる。`--round-test`（省けば `--baseline-test`）を `shlex.split` で語に分け、その対象の語を `test_targets` に差し替えた語の並びを `shell=False` で走らせる。対象の語の見分けは `scope.round_test_roots` と同じ規則を使う
-- `test_targets` の各要素は次をすべて満たす。1 つでも満たさなければ、その項目の対象を空として扱い、`--round-test` をそのまま使う（見送らない）
+- `test_targets` の各要素は次をすべて満たす。1 つでも満たさなければ、その項目の対象を空として扱う。空の項目は、`--round-test` があればそれをそのまま使い、無ければ `merge-plan` が `no_target` で見送る。`--round-test` を省いたときの差し替えの元は `--baseline-test` だが、差し替えた後は対象を絞ったコマンドになる。**差し替えずに `--baseline-test` を項目の検証に使うことはない**（全体のテストは危険の印の 1 回だけ）
+- 同じ検証の回で、組み立てた語の並びが同じ項目どうしは 1 回だけ走らせて結果を共有する
   - `--scope` のテストの置き場所の中のパスか、そのパスに `::` で続くノード ID である（`scope.round_test_roots` の検査を使い回す）
   - パスの部分が作業ディレクトリに実在する
   - シェルの構文の文字（`;` `&` `|` `$` `` ` `` `<` `>` `(` `)` 改行）と空白を含まない
@@ -374,8 +375,10 @@ stateDiagram-v2
 
 - 候補を順位の順にたどり、**入る項目は入れ、入らない項目は飛ばして次を見る**（`budget` の理由で見送る）
 - 順位は `(段, 賛同した者の数, 重要度)` の降順、同じなら見積りの昇順
-- 項目 i の締め切り（実装に着手してよい最後の時刻）: `started_at + budget_minutes − R − Σ_{j≤i} verify_j − implement_i`
-- テストの追加の締め切りも同じ形で出し、`add-tests` の雛形に渡す
+- 締め切りは予算の末尾から逆算する。順位の順に並べた採用の項目を 1..n とし、終わり `T = started_at + budget_minutes − R` とする
+  - 項目 i の実装の締め切り: `T − Σ_{j≥i} (implement_j + verify_j)`。i 以降の未着手の実装と検証が末尾までに収まる最後の時刻である。後順位ほど締め切りが遅い
+  - 項目 i のテストの追加の締め切り: `T − Σ_{j=1..n} (implement_j + verify_j) − Σ_{j≥i} test_j`。テストの追加は実装より前のフェーズなので、実装と検証の全件を先に差し引く
+  - 締め切りは `add-tests` と `implement` の雛形に項目ごとの時刻として渡す
 - **実行中の CLI は時間切れで止めない。** 監視の上限（`limits.py`）はそのまま歯止めとして残す
 
 ## 検証と修正
@@ -419,7 +422,7 @@ stateDiagram-v2
 
 - 同じ `init` を打ち直すと、`schema: 2` の状態の `phase` を `PHASE` として返し、駆動は終わったフェーズを飛ばす。各 `merge-*` は今と同じく取り込み済みの印で冪等にする
 - `schema` を持たず `rounds` を持つ状態で `final` が空なら、終了コード 4 で止まる。案内は「旧い版（v10.17.5 以前）で終えるか、`<状態ファイル>` を消して始め直す」の 1 行である
-- 再開で `--budget-minutes` を渡すと置き換える（`resume_changes` に残る）。`--implementer` は置き換えない（通知だけ）
+- 再開で `--budget-minutes` を渡したとき、置き換えるのは計画のフェーズより前（`phase` が `propose` か `plan` で `merge-plan` が済んでいない）だけである（`resume_changes` に残る）。計画のフェーズ以降は通知だけで置き換えない。採用の件数・締め切り・控えは `merge-plan` の時点の予算で固定されており、予算だけを変えると食い違うためである。`--implementer` は置き換えない（通知だけ）
 - **再開で参加者を作り直した結果、実装担当が参加者から外れたとき**（`--exclude` で外された・認証が通らない）は、計画のフェーズより前なら決め方を当て直し、新しい実装担当と理由を `resume_changes` に残す。計画のフェーズ以降なら終了コード 4 で止める。計画・テスト・実装を担った者が途中で替わると、見積りの前提（担当ごとの所要）と、項目とコミットの対応を読む者が食い違うためである
 
 ## 非機能の実現方式
@@ -440,7 +443,7 @@ stateDiagram-v2
 | AC5 | 雛形を展開した結果に観点の語彙の値が並ぶことを、`launch-cli.sh` の展開の単体で見る（文言ではなく、語彙の値の列挙を見る） |
 | AC7 AC8 AC9 | `budget.py` の単体（見積り・控え・飛ばして詰める・締め切り）と `merge-plan` の単体 |
 | AC10 AC11 | git を使う結合（項目に紐づかないテスト・`test_failed`・`not_done` のテストのコミットの取り消し、1 項目 = 1 コミット） |
-| AC10b | 語の並びの組み立ての単体（差し替え・シェルの構文の文字・範囲の外・実在しないパスで `--round-test` に戻る）と、`shell=False` で走ることの単体 |
+| AC10b | 語の並びの組み立ての単体（差し替え・シェルの構文の文字・範囲の外・実在しないパスで `--round-test` に戻る・`--round-test` が無ければ `no_target` で見送る）と、`shell=False` で走ることの単体 |
 | AC12 | `merge-implement` の単体（コミットの無い項目が `not_done` になる）と、雛形に締め切りが渡る単体 |
 | AC13 AC14 | `danger.py` の単体（D1〜D5）と `verify` の結合（全体のテストが 2 回走らない） |
 | AC15 AC16 | git を使う結合（項目の単位の取り消し・隣接する変更の退避） |
