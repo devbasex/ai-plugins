@@ -138,6 +138,35 @@ def test_claude_code_client_without_plugin_root_prints_nothing(tmp_path, mixed):
     assert _session_start(mixed, _env(tmp_path, plugin_root=False)) == ""
 
 
+def test_extra_check_missing_is_reported_without_item_label(tmp_path):
+    # 現状固定: shellcheck は ITEM_LABELS に無いため else 分岐が「診断に要るもの」の行を出す。
+    repo = make_repo(tmp_path / "r", files_of(sh=12))
+    _yml(repo, ["bash"], [])
+    text = _session_start(repo, _env(tmp_path, plugins=(), binaries=("pyright-langserver",)))
+    assert "bash" in text and "shellcheck" in text
+    assert "/mcp-serena:language-servers" in text
+
+
+def test_broken_installed_plugins_swallows_missing_check(tmp_path, mixed):
+    # 現状固定: installed_plugins.json が壊れていると check.Unreadable を握りつぶし、
+    #          食い違いの行は出るが欠けの行は出ない。
+    _yml(mixed, ["python"], [])
+    env = _env(tmp_path)
+    broken = Path(env["HOME"]) / ".claude/plugins/installed_plugins.json"
+    broken.write_text("{ not json")
+    text = _session_start(mixed, env)
+    assert "bash" in text and "12" in text  # 食い違いの行は出る
+    assert "pyright-lsp" not in text  # 欠けの行は出ない
+    assert "診断に要るもの" not in text
+
+
+def test_unsupported_project_yml_shape_prints_nothing(tmp_path, pyrepo):
+    # 現状固定: language_servers が流れの形（[python]）だと py.UnsupportedShape で何も出さない。
+    (pyrepo / ".serena").mkdir(exist_ok=True)
+    (pyrepo / ".serena/project.yml").write_text("project_name: x\nlanguage_servers: [python]\n")
+    assert _session_start(pyrepo, _env(tmp_path)) == ""
+
+
 # ---- PreToolUse -------------------------------------------------------------
 
 SERENA = "mcp__plugin_mcp-serena_serena__"
