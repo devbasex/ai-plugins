@@ -15,6 +15,8 @@ import json
 import pathlib
 from typing import Any, Optional
 
+from .items import DEFERRED, REVERTED
+
 HISTORY_NAME = "cross-refactoring-allocation.jsonl"
 
 # `.resolve()` を通す。Kiro CLI は `.kiro/skills/<名前>` を symlink にするため、
@@ -203,8 +205,9 @@ def build_row(state: dict[str, Any]) -> dict[str, Any]:
 
     項目の所要は**進行側がコミットの時刻から測った `items[].seconds`** を使う
     （#933 決定 8）。担当の申告は使わない。テストはコミットがある項目だけ、実装も
-    コミットがある項目だけを数える。見送った項目のコミットは取り消されており、
-    数えると所要の無い件数で 1 件あたりが下がる。
+    コミットがある項目だけを数える。取り消し・見送りの項目は数えない。取り消しは
+    コミットの欄を残したまま状態だけを変えるため、欄だけを見ると所要の無い件数で
+    1 件あたりが下がる。
     """
     kinds: dict[str, dict[str, float]] = {}
 
@@ -214,6 +217,8 @@ def build_row(state: dict[str, Any]) -> dict[str, Any]:
         bucket["seconds"] += _num(seconds)
 
     for item in state.get("items") or []:
+        if item.get("status") in (REVERTED, DEFERRED):
+            continue
         commits = item.get("commits") or {}
         seconds = item.get("seconds") or {}
         if commits.get("test"):

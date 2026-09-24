@@ -124,6 +124,17 @@ def test_build_row_and_append_round_trip(allocation, tmp_path):
     assert table["fix"] == pytest.approx(5.0)
 
 
+def test_build_row_skips_reverted_and_deferred_items(allocation):
+    # 取り消し・見送りはコミットの欄を残したまま状態だけが変わる
+    state = _state()
+    for status in ("reverted", "deferred"):
+        state["items"].append(
+            {"id": f"I-{status}", "kind": "structure/extract_method", "status": status,
+             "commits": {"test": "tx", "implement": "ix"},
+             "seconds": {"test": 999, "implement": 999}})
+    assert allocation.build_row(state)["kinds"] == allocation.build_row(_state())["kinds"]
+
+
 def test_build_row_without_stats_writes_zeros(allocation):
     state = _state()
     for key in ("verify_stats", "fix_stats", "ended_at"):
