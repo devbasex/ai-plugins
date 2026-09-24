@@ -382,123 +382,88 @@ def make_relay_dir() -> str:
     raise OSError(errno.EEXIST, "relay dir")
 
 
-class Relay:
-    """前景に常駐し、区間ごとの claude を擬似端末の子として起動する。"""
+class StartLimit:
+    """次の区間を起動してよいかを、1 日の起動数と空回りで決める。`count.lock` を持つ。"""
 
-    def __init__(self, claude: str, relay_dir: str, marketplace: str, version: str):
-        self.claude = claude
-        self.dir = relay_dir
-        self.marketplace = marketplace
-        self.version = version
-        self.env = child_env(relay_dir)
-        self.section = 0
+    def __init__(self, log_path: str):
+        self.log_path = log_path
+        self.lock: int | None = None
+        self.max_starts = int(_num("NDF_RELAY_MAX_STARTS", 20))
+        self.spin = _num("NDF_RELAY_SPIN", 120)
+
+    def take(self) -> bool:
+        if self.lock is not None:
+            return True
+        fd = _lock(os.path.join(state_root(), COUNT_LOCK), 0)
+        if fd is None:
+            return False
+        self.lock = fd
+        return True
+
+    def release(self) -> None:
+        if self.lock is not None:
+            fcntl.flock(self.lock, fcntl.LOCK_UN)
+            os.close(self.lock)
+            self.lock = None
+
+    def refusal(self, written: float, started_at: float) -> tuple[str, str] | None:
+        if self.count_today() >= self.max_starts:
+            return "max-starts", f"1 日の起動回数が上限 {self.max_starts} に達した"
+        if self.spinning(written, started_at):
+            return "spin", f"区間が 3 つ続けて {int(self.spin)} 秒未満で切れ目に達した"
+        return None
+
+    def count_today(self) -> int:
+        today = time.localtime().tm_yday, time.localtime().tm_year
+        n = 0
+        root = state_root()
+        for name in os.listdir(root):
+            try:
+                with open(os.path.join(root, name, LOG_FILE)) as f:
+                    for line in f:
+                        try:
+                            row = json.loads(line)
+                        except ValueError:
+                            continue
+                        if row.get("event") != "start":
+                            continue
+                        t = parse_iso(row.get("at"))
+                        if t is not None:
+                            lt = time.localtime(t)
+                            n += (lt.tm_yday, lt.tm_year) == today
+            except OSError:
+                continue
+        return n
+
+    def spinning(self, written: float, started_at: float) -> bool:
+        ends = []
+        try:
+            with open(self.log_path) as f:
+                for line in f:
+                    try:
+                        row = json.loads(line)
+                    except ValueError:
+                        continue
+                    if row.get("event") == "end":
+                        ends.append(row.get("seconds"))
+        except OSError:
+            return False
+        last = ends[-2:]
+        if len(last) < 2 or not all(isinstance(s, (int, float)) and s < self.spin for s in last):
+            return False
+        return written - started_at < self.spin
+
+
+class Terminal:
+    """端末と子の擬似端末のあいだで入出力を中継し、子の終わりを拾う。"""
+
+    def __init__(self):
         self.pid = 0
         self.fd = -1
-        self.started_at = 0.0
-        self.session_id = ""
-        self.halted = False
         self.last_input = 0.0
         self.last_tick = 0.0
         self.stdin_open = True
-        self.count_lock: int | None = None
-        self.exited = None
-        self.saw_question = False
-        self.quiet = _num("NDF_RELAY_QUIET", 15)
         self.poll = _num("NDF_RELAY_POLL", 2)
-        self.max_starts = int(_num("NDF_RELAY_MAX_STARTS", 20))
-        self.spin = _num("NDF_RELAY_SPIN", 120)
-        self.lock_fd = os.open(self.path(LOCK_FILE), os.O_RDWR | os.O_CREAT, 0o600)
-        fcntl.flock(self.lock_fd, fcntl.LOCK_EX)
-        with open(self.path(PID_FILE), "w") as f:
-            f.write(str(os.getpid()))
-
-    def path(self, name: str) -> str:
-        return os.path.join(self.dir, name)
-
-    # -- 記録
-
-    def log(self, **row) -> None:
-        row = {"event": row.pop("event"), "at": row.pop("at", None) or now_iso(), **row}
-        with open(self.path(LOG_FILE), "a") as f:
-            f.write(json.dumps(row, ensure_ascii=False) + "\n")
-
-    def screen(self, line: str) -> None:
-        """端末は raw なので行の頭へ戻してから書く。"""
-        try:
-            os.write(1, ("\r\n" + line + "\r\n").encode())
-        except OSError:
-            pass
-
-    # -- 子の起動
-
-    def _child_exec(self, sync_r: int, sync_w: int, res_r: int, res_w: int,
-                    args: list[str], cwd: str) -> None:
-        """子側: 親だけが使う fd を閉じ、同期を待って chdir と execve を行う。
-        失敗したら errno を結果 pipe へ書き、127 で終わる。"""
-        try:
-            os.close(sync_w)
-            os.close(res_r)
-            os.read(sync_r, 1)
-            os.chdir(cwd)
-            os.execve(self.claude, [self.claude] + args, self.env)
-        except OSError as e:
-            os.write(res_w, str(e.errno or errno.EIO).encode())
-        finally:
-            os._exit(127)
-
-    @staticmethod
-    def _read_errno(res_r: int) -> bytes:
-        """親側: 結果 pipe を最後まで読む。InterruptedError は読み直す。"""
-        data = b""
-        while True:
-            try:
-                chunk = os.read(res_r, 64)
-            except InterruptedError:
-                continue
-            if not chunk:
-                break
-            data += chunk
-        os.close(res_r)
-        return data
-
-    def spawn(self, args: list[str], cwd: str) -> float:
-        import pty
-        sync_r, sync_w = os.pipe()
-        res_r, res_w = os.pipe()
-        pid, fd = pty.fork()
-        if pid == 0:
-            self._child_exec(sync_r, sync_w, res_r, res_w, args, cwd)
-        os.close(sync_r)
-        os.close(res_w)
-        self.copy_winsize(fd)
-        with open(self.path(CHILD_FILE), "w") as f:
-            f.write(str(pid))
-        at = time.time()
-        os.close(sync_w)
-        data = self._read_errno(res_r)
-        if data:
-            os.waitpid(pid, 0)
-            os.close(fd)
-            raise StartFailed(int(data or errno.EIO))
-        self.pid, self.fd = pid, fd
-        return at
-
-    def start_section(self, args: list[str], cwd: str, command: str, from_session: str,
-                      cwd_fallback: str | None = None) -> None:
-        remove(self.path(MARK_FILE))
-        remove(self.path(QUESTION_FILE))
-        at = self.spawn(args, cwd)
-        self.section += 1
-        self.started_at = at
-        row = dict(event="start", at=now_iso(at), section=self.section, pid=self.pid,
-                   command=command, from_session=from_session,
-                   plugin_version=self.version, cwd=cwd)
-        if cwd_fallback is not None:
-            row["cwd_fallback"] = cwd_fallback
-        self.log(**row)
-        self.release_count()
-
-    # -- 端末
 
     def copy_winsize(self, fd: int | None = None) -> None:
         import termios
@@ -605,6 +570,117 @@ class Relay:
                 return
             data = data[n:]
 
+
+class Relay:
+    """前景に常駐し、区間ごとの claude を擬似端末の子として起動する。"""
+
+    def __init__(self, claude: str, relay_dir: str, marketplace: str, version: str,
+                 term: Terminal, limit: StartLimit):
+        self.claude = claude
+        self.dir = relay_dir
+        self.marketplace = marketplace
+        self.version = version
+        self.env = child_env(relay_dir)
+        self.term = term
+        self.limit = limit
+        self.section = 0
+        self.started_at = 0.0
+        self.session_id = ""
+        self.halted = False
+        self.exited = None
+        self.saw_question = False
+        self.quiet = _num("NDF_RELAY_QUIET", 15)
+        self.lock_fd = os.open(self.path(LOCK_FILE), os.O_RDWR | os.O_CREAT, 0o600)
+        fcntl.flock(self.lock_fd, fcntl.LOCK_EX)
+        with open(self.path(PID_FILE), "w") as f:
+            f.write(str(os.getpid()))
+
+    def path(self, name: str) -> str:
+        return os.path.join(self.dir, name)
+
+    # -- 記録
+
+    def log(self, **row) -> None:
+        row = {"event": row.pop("event"), "at": row.pop("at", None) or now_iso(), **row}
+        with open(self.path(LOG_FILE), "a") as f:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+    def screen(self, line: str) -> None:
+        """端末は raw なので行の頭へ戻してから書く。"""
+        try:
+            os.write(1, ("\r\n" + line + "\r\n").encode())
+        except OSError:
+            pass
+
+    # -- 子の起動
+
+    def _child_exec(self, sync_r: int, sync_w: int, res_r: int, res_w: int,
+                    args: list[str], cwd: str) -> None:
+        """子側: 親だけが使う fd を閉じ、同期を待って chdir と execve を行う。
+        失敗したら errno を結果 pipe へ書き、127 で終わる。"""
+        try:
+            os.close(sync_w)
+            os.close(res_r)
+            os.read(sync_r, 1)
+            os.chdir(cwd)
+            os.execve(self.claude, [self.claude] + args, self.env)
+        except OSError as e:
+            os.write(res_w, str(e.errno or errno.EIO).encode())
+        finally:
+            os._exit(127)
+
+    @staticmethod
+    def _read_errno(res_r: int) -> bytes:
+        """親側: 結果 pipe を最後まで読む。InterruptedError は読み直す。"""
+        data = b""
+        while True:
+            try:
+                chunk = os.read(res_r, 64)
+            except InterruptedError:
+                continue
+            if not chunk:
+                break
+            data += chunk
+        os.close(res_r)
+        return data
+
+    def spawn(self, args: list[str], cwd: str) -> float:
+        import pty
+        sync_r, sync_w = os.pipe()
+        res_r, res_w = os.pipe()
+        pid, fd = pty.fork()
+        if pid == 0:
+            self._child_exec(sync_r, sync_w, res_r, res_w, args, cwd)
+        os.close(sync_r)
+        os.close(res_w)
+        self.term.copy_winsize(fd)
+        with open(self.path(CHILD_FILE), "w") as f:
+            f.write(str(pid))
+        at = time.time()
+        os.close(sync_w)
+        data = self._read_errno(res_r)
+        if data:
+            os.waitpid(pid, 0)
+            os.close(fd)
+            raise StartFailed(int(data or errno.EIO))
+        self.term.pid, self.term.fd = pid, fd
+        return at
+
+    def start_section(self, args: list[str], cwd: str, command: str, from_session: str,
+                      cwd_fallback: str | None = None) -> None:
+        remove(self.path(MARK_FILE))
+        remove(self.path(QUESTION_FILE))
+        at = self.spawn(args, cwd)
+        self.section += 1
+        self.started_at = at
+        row = dict(event="start", at=now_iso(at), section=self.section, pid=self.term.pid,
+                   command=command, from_session=from_session,
+                   plugin_version=self.version, cwd=cwd)
+        if cwd_fallback is not None:
+            row["cwd_fallback"] = cwd_fallback
+        self.log(**row)
+        self.limit.release()
+
     # -- 印の判定
 
     def read_mark(self):
@@ -627,7 +703,7 @@ class Relay:
         if m is None:
             return None
         written = parse_iso(m.get("written_at")) or time.time()
-        latest = max(written, self.last_input)
+        latest = max(written, self.term.last_input)
         tp = m.get("transcript_path") or ""
         snap = file_snap(tp)
         if snap is not None:
@@ -642,11 +718,11 @@ class Relay:
         if os.path.exists(self.path(STOP_FILE)):
             self.halt("stop-file", "停止の印がある")
             return None
-        if not self.take_count():
+        if not self.limit.take():
             return None
-        refusal = self.start_refusal(written)
+        refusal = self.limit.refusal(written, self.started_at)
         if refusal:
-            self.release_count()
+            self.limit.release()
             self.halt(*refusal)
             return None
         m["_snap"] = snap
@@ -655,18 +731,11 @@ class Relay:
     def recheck(self, m) -> tuple[str, str] | None:
         """質問の後に読み直した印で起動する前に、`count.lock`・上限・空回りを判定し直す。"""
         end = time.time() + 5
-        while not self.take_count():
+        while not self.limit.take():
             if time.time() >= end:
                 return "count-lock", "起動の数を数えるロックが取れない"
             time.sleep(0.1)
-        return self.start_refusal(parse_iso(m.get("written_at")) or time.time())
-
-    def start_refusal(self, written: float) -> tuple[str, str] | None:
-        if self.count_today() >= self.max_starts:
-            return "max-starts", f"1 日の起動回数が上限 {self.max_starts} に達した"
-        if self.spinning(written):
-            return "spin", f"区間が 3 つ続けて {int(self.spin)} 秒未満で切れ目に達した"
-        return None
+        return self.limit.refusal(parse_iso(m.get("written_at")) or time.time(), self.started_at)
 
     def halt(self, reason: str, why: str) -> None:
         self.halted = True
@@ -675,61 +744,6 @@ class Relay:
         self.screen(f"ndf-relay: 次の区間を起動しない（{why}）。このまま続けるか、"
                     "/exit して示されたコマンドを手で入力する")
 
-    def take_count(self) -> bool:
-        if self.count_lock is not None:
-            return True
-        fd = _lock(os.path.join(state_root(), COUNT_LOCK), 0)
-        if fd is None:
-            return False
-        self.count_lock = fd
-        return True
-
-    def release_count(self) -> None:
-        if self.count_lock is not None:
-            fcntl.flock(self.count_lock, fcntl.LOCK_UN)
-            os.close(self.count_lock)
-            self.count_lock = None
-
-    def count_today(self) -> int:
-        today = time.localtime().tm_yday, time.localtime().tm_year
-        n = 0
-        root = state_root()
-        for name in os.listdir(root):
-            try:
-                with open(os.path.join(root, name, LOG_FILE)) as f:
-                    for line in f:
-                        try:
-                            row = json.loads(line)
-                        except ValueError:
-                            continue
-                        if row.get("event") != "start":
-                            continue
-                        t = parse_iso(row.get("at"))
-                        if t is not None:
-                            lt = time.localtime(t)
-                            n += (lt.tm_yday, lt.tm_year) == today
-            except OSError:
-                continue
-        return n
-
-    def spinning(self, written: float) -> bool:
-        ends = []
-        try:
-            with open(self.path(LOG_FILE)) as f:
-                for line in f:
-                    try:
-                        row = json.loads(line)
-                    except ValueError:
-                        continue
-                    if row.get("event") == "end":
-                        ends.append(row.get("seconds"))
-        except OSError:
-            return False
-        last = ends[-2:]
-        if len(last) < 2 or not all(isinstance(s, (int, float)) and s < self.spin for s in last):
-            return False
-        return written - self.started_at < self.spin
-
     # -- 切り替え
 
     def write_exit(self, m) -> bool:
@@ -737,23 +751,23 @@ class Relay:
         確かめ直しで外れたら書かずに偽を返す（`count.lock` も放す）。"""
         fd = _lock(self.path(QUESTION_LOCK), 0)
         if fd is None:
-            self.release_count()
+            self.limit.release()
             return False
         try:
             now = self.read_mark()
             if (os.path.exists(self.path(QUESTION_FILE)) or now is None
                     or now.get("written_at") != m.get("written_at")
                     or file_snap(m.get("transcript_path") or "") != m.get("_snap")):
-                self.release_count()
+                self.limit.release()
                 return False
             try:
-                os.write(self.fd, b"/exit\r")
+                os.write(self.term.fd, b"/exit\r")
             except OSError:
                 pass
             # TUI が書いた入力を読み終える前に質問が描かれないよう、1 秒ロックを持つ
             end = time.time() + _num("NDF_RELAY_EXIT_HOLD", 1)
             while time.time() < end:
-                res = self.pump(until=min(end, time.time() + 0.1))
+                res = self.term.pump(until=min(end, time.time() + 0.1))
                 self.saw_question |= os.path.exists(self.path(QUESTION_FILE))
                 if res:
                     self.exited = res
@@ -766,12 +780,12 @@ class Relay:
         """質問中は期限を減らさず、子の通常終了を待つ。"""
         while left > 0:
             t0 = time.time()
-            res = self.pump(until=t0 + min(left, 0.2))
+            res = self.term.pump(until=t0 + min(left, 0.2))
             if res:
                 return res, left, questioned
             if os.path.exists(self.path(QUESTION_FILE)):
                 questioned = True
-                self.release_count()
+                self.limit.release()
                 continue
             left -= time.time() - t0
         return None, left, questioned
@@ -781,10 +795,10 @@ class Relay:
         for sig, how, wait in ((signal.SIGTERM, "sigterm", _num("NDF_RELAY_TERM_WAIT", 10)),
                                (signal.SIGKILL, "sigkill", None)):
             try:
-                os.kill(self.pid, sig)
+                os.kill(self.term.pid, sig)
             except ProcessLookupError:
                 pass
-            res = self.pump(until=None if wait is None else time.time() + wait)
+            res = self.term.pump(until=None if wait is None else time.time() + wait)
             if res:
                 return how, res[1]
         return "sigkill", 0
@@ -813,13 +827,13 @@ class Relay:
         return got[1] if got else None
 
     def give_up(self, reason: str, why: str, command: str, **extra) -> int:
-        self.release_count()
+        self.limit.release()
         self.log(event="stop", section=self.section, reason=reason, **extra)
         self.screen(f"ndf-relay: 次の区間を起動できない（{why}）。次のコマンド:\r\n{command}")
         return 2
 
     def log_end(self, until: float, ended_by: str) -> None:
-        self.log(event="end", section=self.section, pid=self.pid,
+        self.log(event="end", section=self.section, pid=self.term.pid,
                  seconds=round(until - self.started_at, 3), ended_by=ended_by)
 
     def finalize_section(self, m, written: float) -> tuple[dict | None, int | None]:
@@ -830,7 +844,7 @@ class Relay:
         requeued = questioned or again is None or again.get("written_at") != m.get("written_at")
         if requeued:
             # 書いた /exit が質問の答えの後に働いた。答えの後の Stop が印を書き直すか消している
-            self.release_count()
+            self.limit.release()
             if again is None:
                 self.log_end(time.time(), "no-mark")
                 return None, exit_code(status)
@@ -862,7 +876,7 @@ class Relay:
             say(f"claude を起動できない（{os.strerror(e.err)}）")
             return 127
         while True:
-            res = self.pump(tick=self.tick)
+            res = self.term.pump(tick=self.tick)
             if res[0] == "exit":
                 self.log_end(time.time(), "no-mark")
                 return exit_code(res[1])
@@ -886,7 +900,7 @@ class Relay:
                                     command, errno=e.err)
 
     def close(self) -> None:
-        self.release_count()
+        self.limit.release()
         remove(self.path(PID_FILE))
         try:
             fcntl.flock(self.lock_fd, fcntl.LOCK_UN)
@@ -989,7 +1003,9 @@ def cmd_run(args: list[str]) -> int:
     except OSError:
         say("中継を始めない（作業ディレクトリを作れない）。切れ目では示されたコマンドを手で入力する")
         passthrough(claude, args)
-    relay = Relay(claude, relay_dir, got[0], got[1])
+    term = Terminal()
+    relay = Relay(claude, relay_dir, got[0], got[1], term,
+                  StartLimit(os.path.join(relay_dir, LOG_FILE)))
     saved = termios.tcgetattr(0)
 
     def restore() -> None:
@@ -1004,7 +1020,7 @@ def cmd_run(args: list[str]) -> int:
 
     signal.signal(signal.SIGTERM, on_signal)
     signal.signal(signal.SIGHUP, on_signal)
-    signal.signal(signal.SIGWINCH, lambda *_: relay.copy_winsize())
+    signal.signal(signal.SIGWINCH, lambda *_: term.copy_winsize())
     try:
         tty.setraw(0)
         return relay.loop(args)
