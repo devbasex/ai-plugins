@@ -206,8 +206,10 @@ plugins/ndf/scripts/lib/{jev,limits,assignment}.py
  "kinds": {"test": {"count": 5, "seconds": 800},
            "structure/extract_method": {"count": 6, "seconds": 480}},
  "verify": {"items": 6, "seconds": 110}, "fix": {"launches": 1, "seconds": 300},
- "whole_test_seconds": 59}
+ "whole_test": {"init": 59, "danger": null, "final": 61}}
 ```
+
+`whole_test` は全体のテストの秒を、走った場所ごとに分けて持つ（走らなかった場所は `null`）。`init` は着手前、`danger` は危険の印の 1 回、`final` は最終ゲートの 1 回（使い回したときは `null`）である。AC17 の「最終ゲートの全体のテストの所要」は `final` に当たる。控えの `danger_whole_test` / `final_whole_test` は、同じ実行の `init` の秒から見積もる
 
 **配分テーブルは保存しない。** 計画のたびに履歴から集計する（集計の値を別に持つと、履歴と食い違う）。
 
@@ -242,7 +244,7 @@ plugins/ndf/scripts/lib/{jev,limits,assignment}.py
 | `--budget-minutes N` | 新しい。1 以上の整数。それ以外は終了コード 4 | 60 |
 | `--implementer NAME` | 新しい。参加者の中の 1 者。参加者に無ければ終了コード 4 | 下の決め方 |
 | `--max-fix-rounds N` | 意味が変わる。**1 項目あたり**の修正の上限 | 3 |
-| `--round-test CMD` | 意味は変わらない。**`--baseline-test` が差し替えられない形（下の「実装担当の `plan` の結果ファイル」の組み立て方で、対象の語が無く、末尾へ足せる実行器でもない）なら必須になる。** 省くと `init` が終了コード 4 で止まる。省いたまま進むと、全項目が `no_target` になり、提案と計画に使った時間の後に何も適用されずに終わるためである | `--baseline-test` を差し替えの元にする |
+| `--round-test CMD` | 意味は変わらない。**`--baseline-test` の先頭のプログラムが既知の実行器（下の「実装担当の `plan` の結果ファイル」の組み立ての表）でなければ、対象の語の有無にかかわらず必須になる。** 省くと `init` が終了コード 4 で止まる。省いたまま進むと、全項目が `no_target` になり、提案と計画に使った時間の後に何も適用されずに終わるためである | `--baseline-test` を差し替えの元にする |
 | `--max-test-rounds` / `--max-outer-rounds` / `--max-items-per-round` | 廃止。受け取ると `⚠ <引数> は廃止しました（#933）。--budget-minutes で所要を決めます` を標準エラーへ出して無視する | — |
 | そのほか（`--scope` / `--baseline-test` / `--host` / `--exclude` / `--include` / `--require-all` / `--model` / `--ci-check` / `--workflow-step` / `--severity-threshold` / `--test-timeout` / `--sync-command` / `--plan-file`） | 変えない | 今と同じ |
 
