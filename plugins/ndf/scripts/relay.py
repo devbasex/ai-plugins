@@ -788,9 +788,7 @@ class Relay:
             latest = max(latest, snap[1] / 1e9)
         if time.time() - latest < self.quiet:
             return None
-        if goal_pending(tp, written):
-            return None
-        # (4) 質問の表示中は書かない（G1）。(5) 印の後に応答が再開していたら書かない（G2）
+        # (3) 質問の表示中は書かない（G1）。(4) 印の後に応答が再開していたら書かない（G2）
         if os.path.exists(self.path(QUESTION_FILE)) or replied_after(tp, written):
             return None
         if os.path.exists(self.path(STOP_FILE)):
@@ -1023,29 +1021,6 @@ def replied_after(transcript_path: str, written: float) -> bool:
         if t is not None and t > written:
             return True
     return False
-
-
-def goal_pending(transcript_path: str, written: float) -> bool:
-    """会話の記録に `/goal` の目標があり、印より後の判定の記録がまだ無ければ真。
-
-    目標の設定と判定は `type: attachment` の行の `attachment.type: goal_status` に書かれる
-    （Claude Code 2.1.280 で実測）。設定は `sentinel: true`、判定は `met` の真偽を持つ。
-    `met: true` で目標は終わる。判定は command hook（`mark`）より後に書かれる。
-    """
-    has_goal = False
-    judged_at = 0.0
-    for row in _iter_transcript_rows(transcript_path):
-        a = row.get("attachment")
-        if row.get("type") != "attachment" or not isinstance(a, dict) \
-                or a.get("type") != "goal_status":
-            continue
-        if a.get("sentinel"):
-            has_goal, judged_at = True, 0.0
-            continue
-        judged_at = parse_iso(row.get("timestamp")) or judged_at
-        if a.get("met") is True:
-            has_goal = False
-    return has_goal and judged_at <= written
 
 
 def cmd_run(args: list[str]) -> int:
