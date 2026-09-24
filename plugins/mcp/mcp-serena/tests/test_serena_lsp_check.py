@@ -150,3 +150,42 @@ def test_installed_plugins_top_level_array_is_unreadable(tmp_path, monkeypatch):
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path))
     with pytest.raises(check.Unreadable):
         check.installed_plugins()
+
+
+def test_broken_table_json_exits_2(tmp_path, monkeypatch):
+    # 対応表の JSON が壊れている（table.load が ValueError）→ Unreadable → 終了コード 2
+    from serena_lsp import check
+    root = _project(tmp_path / "r", ["python"])
+    broken = tmp_path / "broken.json"
+    broken.write_text("{")
+    monkeypatch.setenv("SERENA_LSP_TABLE", str(broken))
+    out, code = check.run(root, runtime="codex")
+    assert code == 2
+    assert out["missing"] == []
+    assert "error" in out
+
+
+def test_table_item_missing_extra_checks_exits_2(tmp_path, monkeypatch):
+    # 対応表の要素に extra_checks キーが欠けている（KeyError）→ Unreadable → 終了コード 2
+    from serena_lsp import check
+    root = _project(tmp_path / "r", ["python"])
+    table_path = tmp_path / "languages.json"
+    table_path.write_text(json.dumps({"languages": [{"serena": "x"}]}))
+    monkeypatch.setenv("SERENA_LSP_TABLE", str(table_path))
+    out, code = check.run(root, runtime="codex")
+    assert code == 2
+    assert out["missing"] == []
+    assert "error" in out
+
+
+def test_flow_form_project_yml_exits_2(tmp_path, monkeypatch):
+    # project.yml が流れの形の非空配列（UnsupportedShape）→ Unreadable → 終了コード 2
+    from serena_lsp import check
+    monkeypatch.delenv("SERENA_LSP_TABLE", raising=False)
+    root = tmp_path / "r"
+    (root / ".serena").mkdir(parents=True)
+    (root / ".serena/project.yml").write_text("language_servers: [python]\n")
+    out, code = check.run(root, runtime="codex")
+    assert code == 2
+    assert out["missing"] == []
+    assert "error" in out
