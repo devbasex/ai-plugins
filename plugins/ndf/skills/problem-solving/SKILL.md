@@ -100,6 +100,7 @@ description: "Fix bugs and data inconsistencies upstream at the root cause. Use 
 | 外部キー/制約が存在するか | マイグレーション履歴を追跡（追加→削除→再追加の変遷を確認） |
 | 論理削除ポリシーは何か | `SoftDeletes` / `deleted_at` の有無を確認（`delete()` と `forceDelete()` の挙動が異なる） |
 | 環境差異がないか | dev/staging/prod で同じクエリを実行して比較 |
+| 定義と呼び出し元が一致するか | Serena があれば `find_symbol` で定義を、`find_referencing_symbols` で呼び出し元を引く（ファイルを丸ごと読まない） |
 
 ### やってはいけないこと
 

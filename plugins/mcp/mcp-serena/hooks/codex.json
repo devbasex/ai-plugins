@@ -1,0 +1,29 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'if [ -n \"$PLUGIN_ROOT\" ]; then python3 \"$PLUGIN_ROOT/scripts/serena-lsp.py\" hook session-start --client codex; fi; exit 0'",
+            "timeout": 10,
+            "statusMessage": "Checking Serena language servers"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|shell|exec_command|local_shell|mcp__.*serena.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'if [ -n \"$PLUGIN_ROOT\" ]; then python3 \"$PLUGIN_ROOT/scripts/serena-lsp.py\" hook pre-tool-use --client codex; fi; exit 0'",
+            "timeout": 5,
+            "statusMessage": "Counting non-symbolic code reads"
+          }
+        ]
+      }
+    ]
+  }
+}
