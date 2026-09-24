@@ -81,31 +81,6 @@ def _count_failure(state: dict[str, Any]) -> None:
     judge["failures"] = int(judge.get("failures") or 0) + 1
 
 
-def _jev_score(
-    state: dict[str, Any], text: str, question: str,
-    options: list[str], min_confidence: float,
-) -> Optional[str]:
-    if not _jev_usable(state):
-        return None
-    result = jev.ask_score(text, question, options)
-    if result is None:
-        _count_failure(state)
-        return None
-    return result[0] if result[1] >= min_confidence else None
-
-
-def _jev_boolean(
-    state: dict[str, Any], text: str, question: str, min_confidence: float,
-) -> Optional[tuple[bool, bool]]:
-    if not _jev_usable(state):
-        return None
-    result = jev.ask_boolean(text, question)
-    if result is None:
-        _count_failure(state)
-        return None
-    return result[0], result[1] >= min_confidence
-
-
 def _decide_tiers(state: dict[str, Any], answers: dict[str, dict[str, Any]]) -> None:
     """候補の全件に段を付ける。Jev の確信度が下限に満たなければ実装担当の段を使う。"""
     for item in state["candidates"]:
@@ -116,25 +91,30 @@ def _decide_tiers(state: dict[str, Any], answers: dict[str, dict[str, Any]]) -> 
         item["test_targets"] = _strings(answer.get("test_targets"))
         item["risk"] = answer.get("risk") is True
         item["merge_into"] = answer.get("merge_into") if isinstance(answer.get("merge_into"), str) else None
-        result = _jev_score(
-            state,
+        if not _jev_usable(state):
+            continue
+        result = jev.ask_score(
             _proposal_text(item),
             "How valuable is it to apply this behavior-preserving refactoring now?",
             TIERS,
-            JEV_TIER_CONFIDENCE,
         )
-        if result is not None:
-            item["tier"], item["tier_source"] = result, "jev"
+        if result is None:
+            _count_failure(state)
+        elif result[1] >= JEV_TIER_CONFIDENCE:
+            item["tier"], item["tier_source"] = result[0], "jev"
 
 
 def _same_change(state: dict[str, Any], a: dict[str, Any], b: dict[str, Any]) -> bool:
     """同じ変更か。Jev が確信度 0.8 以上で真と答えたら統合、それ以外は実装担当の `merge_into`。"""
-    result = _jev_boolean(
-        state, f"A: {_proposal_text(a)}\nB: {_proposal_text(b)}",
-        "Do proposals A and B describe the same code change?", JEV_DUPLICATE_CONFIDENCE,
-    )
-    if result is not None and result[0] and result[1]:
-        return True
+    if _jev_usable(state):
+        result = jev.ask_boolean(
+            f"A: {_proposal_text(a)}\nB: {_proposal_text(b)}",
+            "Do proposals A and B describe the same code change?",
+        )
+        if result is None:
+            _count_failure(state)
+        elif result[0] and result[1] >= JEV_DUPLICATE_CONFIDENCE:
+            return True
     return b.get("merge_into") == key_text(a) or a.get("merge_into") == key_text(b)
 
 
@@ -181,13 +161,14 @@ def _decide_public_io(state: dict[str, Any], items: list[dict[str, Any]]) -> Non
     """
     for item in items:
         item["public_io"], item["public_io_source"] = bool(item.get("risk")), "runtime"
-        result = _jev_boolean(
-            state, _proposal_text(item),
-            "Could this refactoring change the public input or output of the code?",
-            JEV_RISK_CONFIDENCE,
-        )
-        if result is not None:
-            item["public_io"] = bool(result[0] and result[1])
+        if not _jev_usable(state):
+            continue
+        result = jev.ask_boolean(
+            _proposal_text(item), "Could this refactoring change the public input or output of the code?")
+        if result is None:
+            _count_failure(state)
+        else:
+            item["public_io"] = bool(result[0] and result[1] >= JEV_RISK_CONFIDENCE)
             item["public_io_source"] = "jev"
 
 
