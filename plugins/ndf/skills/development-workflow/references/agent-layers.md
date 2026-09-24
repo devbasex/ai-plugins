@@ -4,9 +4,9 @@
 （conductor）が持ち場ごとにサブエージェント（supervisor）を起動し、supervisor が 1 つの作業を
 サブエージェント（worker）へ出す。
 
-**3 層へ出すのは `/goal` の引数として呼ばれたときだけである。** 対話で
-`/ndf:development-workflow` を呼んだときは人がその場にいて、工程ごとに指示を変えられる。
-対話の進め方はこの文書で変わらない。
+**`/ndf:development-workflow` を呼べば、`/goal` の有無によらず 3 層へ出す**（#996）。`/goal` は
+応答を終えたときに引き戻すだけで、3 層へ出すかの条件ではない。人がその場にいるときも同じで、
+指示を変えたいときは conductor へ伝えれば次の持ち場から反映する。
 
 **この規約は無人でない進行にも効く。** 「上の層が起動した相手」と読めば、人が指示して
 サブエージェントを起動する形にもそのまま当たる。
@@ -15,7 +15,7 @@
 
 | 層 | 何者か | 人間へ問えるか | 起動する相手 | 持たないもの |
 | --- | --- | --- | --- | --- |
-| conductor | 人間と対話しているセッション。`/goal` を受ける | **問える**（`AskUserQuestion`） | supervisor | 工程の Skill の実行。**`development-workflow` と `issue-plan-strategy` 以外を起動しない** |
+| conductor | 人間と対話しているセッション。`/ndf:development-workflow` を受ける | **問える**（`AskUserQuestion`） | supervisor | 工程の Skill の実行。**`development-workflow` と `issue-plan-strategy` 以外を起動しない** |
 | supervisor | 1 つの持ち場（連続する工程の束）を通すサブエージェント | 問えない | worker | 人間への問い、設計 Pull Request のマージ、承認のない本番の操作 |
 | worker | 1 つの作業（調査・修正・検証・集計）を行うサブエージェント | 問えない | 起動しない。**別のサブエージェントを起動しない** | 人間への問い、進行の記録、収束の判定、設計の決定 |
 

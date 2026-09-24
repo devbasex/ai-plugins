@@ -180,7 +180,7 @@ mode: standard
 
 **ドキュメントレビューは、設計だけを載せた Pull Request を実装より先にマージする工程である。**
 新しい Skill は使わず `pr` → `cross-review` → `merged` を順に呼ぶ。**この工程のマージには
-人間の承認が要る**（止まり方は「`/goal` の引数として呼ばれたとき」）。head のブランチ名は
+人間の承認が要る**（止まり方は「自走で工程を通す」）。head のブランチ名は
 `design/` で始め、マージした後は実装用の作業ツリーを作り直す。
 
 **構造改善と実装レビューは、通す工程であって任意ではない。** `standard` と `legacy-refactor` の
@@ -203,7 +203,7 @@ mode: standard
 [references/context-window.md](references/context-window.md) にある。
 
 **conductor は、`context-window.md` の 4 つの切れ目と文脈量の hook（`token-guard.sh`）に止められたときに、
-次の工程を始める引き継ぎの 1 行（`/ndf:development-workflow #<課題>`。3 層では先頭に `/goal `）を、
+次の工程を始める引き継ぎの 1 行（`/ndf:development-workflow #<課題>`。今の区間を `/goal` で始めていたときだけ先頭に `/goal `）を、
 情報文字列 `ndf-next` の囲みのコードブロック 1 つで出す。** 3 層では conductor が `## 持ち場の報告` を
 受け取った時点で出し（supervisor は出さない）、`結果: 関門` なら関門の承認と取り込みの後に出す。
 出す時点・告知・新しい会話が状態を戻す手順は `context-window.md` の「新しい会話で戻す」にある。
@@ -340,9 +340,9 @@ Pull Request のマージ、制作物承認は本番の提出先への操作に�
 
 **並行して走った Pull Request は、関門でまとめて 1 回の承認へ載せる。** 1 本ずつ求めない。
 
-## `/goal` の引数として呼ばれたとき
+## 自走で工程を通す
 
-工程を続けて通す。ただし**上の 2 つの関門の前では 1 度止まり、`AskUserQuestion` で人間の
+**`/goal` の有無によらず、工程を続けて通す**（#996）。ただし**上の 2 つの関門の前では 1 度止まり、`AskUserQuestion` で人間の
 承認を待つ**。承認を得るまでマージせず、次の工程へも進まない。
 
 - 設計 Pull Request のマージ（`standard`）— 承認を得るまで実装の工程へ
@@ -370,8 +370,8 @@ PLUGIN_ROOT='${CLAUDE_PLUGIN_ROOT}'; case "$PLUGIN_ROOT" in '$'*) PLUGIN_ROOT= ;
 [ -n "$PLUGIN_ROOT" ] && python3 "$PLUGIN_ROOT/scripts/relay.py" notice || echo outside
 ```
 
-**対話で `/ndf:development-workflow` を呼んだときは 3 層へ出さない。** 人がその場にいて
-工程ごとに指示を変えられるため、進め方を変えない。
+**対話で `/ndf:development-workflow` を呼んだときも 3 層へ出す。** 人がその場にいて指示を変えたい
+ときは、conductor へ伝えれば次の持ち場から反映する。
 
 ## 標準フロー
 
