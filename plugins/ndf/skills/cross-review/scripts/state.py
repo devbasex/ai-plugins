@@ -769,6 +769,21 @@ def _clean_untracked_files(worktree: str, exclusions: list[str], code: int) -> N
         die(f"追跡対象外のファイルを消せない: {clean.stderr.strip()}", code=code)
 
 
+def _resolve_sync_target(
+    worktree: str, pr: int, head: str | HeadRef,
+) -> tuple[bool, str, str]:
+    """同期する基準を取り込み、手元の有無・対象・表示名を返す。"""
+    if isinstance(head, HeadRef):
+        return _fetch_head(worktree, pr, head), head.oid, head.branch
+
+    # 旧来の呼び出し（ブランチ名だけを渡す経路）。基準は `origin/<branch>` になる。
+    fetch = subprocess.run(
+        ["git", "fetch", "origin", head],
+        capture_output=True, text=True,
+    )
+    return fetch.returncode == 0, f"origin/{head}", head
+
+
 def _sync_worktree(
     worktree: str,
     pr: int,
@@ -802,19 +817,7 @@ def _sync_worktree(
     """
     code = 8 if strict else 1
     exclusions = _sync_exclusions(worktree)
-    if isinstance(head, HeadRef):
-        have_base = _fetch_head(worktree, pr, head)
-        target = head.oid
-        label = head.branch
-    else:
-        # 旧来の呼び出し（ブランチ名だけを渡す経路）。基準は `origin/<branch>` になる。
-        fetch = subprocess.run(
-            ["git", "fetch", "origin", head],
-            capture_output=True, text=True,
-        )
-        have_base = fetch.returncode == 0
-        target = f"origin/{head}"
-        label = head
+    have_base, target, label = _resolve_sync_target(worktree, pr, head)
 
     if have_base:
         if strict and isinstance(head, HeadRef) and _is_synced(

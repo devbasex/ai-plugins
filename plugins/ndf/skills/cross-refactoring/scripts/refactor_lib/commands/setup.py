@@ -800,6 +800,46 @@ def _round_label_and_limit(
     return "提案ラウンド", state["max_outer_rounds"]
 
 
+def _open_or_resume_round(
+    path: pathlib.Path, state: dict[str, Any], kind: str,
+) -> dict[str, Any]:
+    """現在のラウンドを再開し、無ければ新しく作って保存する。"""
+    rounds = state["rounds"]
+    round_no = len(rounds) + 1
+    entry = next((r for r in rounds if r["round"] == round_no), None)
+    if entry is not None:
+        return entry
+
+    entry = _new_round_entry(state, round_no, kind)
+    rounds.append(entry)
+    state["outer_round"] = round_no
+    state["phase"] = "propose"
+    statefile.save(path, state)
+    return entry
+
+
+def _round_output(
+    entry: dict[str, Any], state: dict[str, Any],
+) -> dict[str, Any]:
+    """ラウンド開始時に emit する値を組み立てる。"""
+    kind = entry_kind(entry)
+    return {
+        "ROUND": entry["round"],
+        "ROUND_KIND": kind,
+        # **母集合は繰り返しの中でも返す**（#518-1）。`init` だけが返す形では、
+        # 状態ファイルから再開する経路と、骨組みを抜粋して写す経路の両方で
+        # 未定義になる。出所は `init` と同じ状態ファイルの `runtimes` である。
+        "RUNTIMES": " ".join(state["runtimes"]),
+        "RUNTIMES_CSV": ",".join(state["runtimes"]),
+        # 提案に使う雛形の名前。**結果ファイルの名前は種類で変えない**
+        # （ラウンド番号は通しなので衝突せず、監視の雛形をそのまま使える）。
+        "PROPOSE_PHASE": "propose-tests" if kind == TEST else "propose",
+        "IMPL": entry["impl"],
+        "IMPL_MODEL": entry["impl_model"]["requested"],
+        "MAX_FIX_ROUNDS": state["max_fix_rounds"],
+    }
+
+
 def cmd_start_round(args: argparse.Namespace) -> None:
     """Step 2 — ラウンドを開き、実装担当を返す。
 
@@ -820,40 +860,17 @@ def cmd_start_round(args: argparse.Namespace) -> None:
         info(f"ラウンドの繰り返しは終了しています（{state['final']}）")
         sys.exit(1)
 
-    rounds = state["rounds"]
     kind = round_kind(state)
     if kind == STRUCTURE and len(rounds_of_kind(state.get("rounds") or [], STRUCTURE)) >= state["max_outer_rounds"]:
         finish_outer_rounds(path, state, "max_outer_rounds")
         sys.exit(1)
 
-    round_no = len(rounds) + 1
-    existing = next((r for r in rounds if r["round"] == round_no), None)
-    if existing is None:
-        existing = _new_round_entry(state, round_no, kind)
-        rounds.append(existing)
-        state["outer_round"] = round_no
-        state["phase"] = "propose"
-        statefile.save(path, state)
-
-    kind = entry_kind(existing)
+    entry = _open_or_resume_round(path, state, kind)
+    kind = entry_kind(entry)
     label, limit = _round_label_and_limit(state, kind)
     seq = len(rounds_of_kind(state.get("rounds") or [], kind))
     info(
         f"=== {label} {seq} / {limit} "
-        f"（実装 {existing['impl']}）==="
+        f"（実装 {entry['impl']}）==="
     )
-    statefile.emit(
-        ROUND=round_no,
-        ROUND_KIND=kind,
-        # **母集合は繰り返しの中でも返す**（#518-1）。`init` だけが返す形では、
-        # 状態ファイルから再開する経路と、骨組みを抜粋して写す経路の両方で
-        # 未定義になる。出所は `init` と同じ状態ファイルの `runtimes` である。
-        RUNTIMES=" ".join(state["runtimes"]),
-        RUNTIMES_CSV=",".join(state["runtimes"]),
-        # 提案に使う雛形の名前。**結果ファイルの名前は種類で変えない**
-        # （ラウンド番号は通しなので衝突せず、監視の雛形をそのまま使える）。
-        PROPOSE_PHASE="propose-tests" if kind == TEST else "propose",
-        IMPL=existing["impl"],
-        IMPL_MODEL=existing["impl_model"]["requested"],
-        MAX_FIX_ROUNDS=state["max_fix_rounds"],
-    )
+    statefile.emit(**_round_output(entry, state))
