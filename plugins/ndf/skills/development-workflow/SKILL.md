@@ -202,14 +202,11 @@ mode: standard
 残っているのに後の工程の判断だけが悪くなる。** 切れ目・委譲してよい対象・残量の見方は
 [references/context-window.md](references/context-window.md) にある。
 
-**conductor は、`context-window.md` の 4 つの切れ目で、次の工程を始める引き継ぎの 1 行
-（`/ndf:development-workflow #<課題>`。3 層では先頭に `/goal `）を、情報文字列 `ndf-next` の
-囲みのコードブロック 1 つで出す。** 3 層では conductor が `## 持ち場の報告` を
-受け取った時点で出し、supervisor は出さない。持ち場の境がこの切れ目に当たるためである。
-文脈量の hook（`token-guard.sh`）が起動を止めたときも出す。ただし報告が `結果: 関門` なら
-受け取った時点では出さず、関門の承認と取り込み（設計 Pull Request のマージなど）の後に出す。
-関門の前に会話を切らないためである。**その 1 行で始めた新しい会話が状態を戻す手順は、
-`context-window.md` の「新しい会話で戻す」にある。**
+**conductor は、`context-window.md` の 4 つの切れ目と文脈量の hook（`token-guard.sh`）に止められたときに、
+次の工程を始める引き継ぎの 1 行（`/ndf:development-workflow #<課題>`。3 層では先頭に `/goal `）を、
+情報文字列 `ndf-next` の囲みのコードブロック 1 つで出す。** 3 層では conductor が `## 持ち場の報告` を
+受け取った時点で出し（supervisor は出さない）、`結果: 関門` なら関門の承認と取り込みの後に出す。
+出す時点・告知・新しい会話が状態を戻す手順は `context-window.md` の「新しい会話で戻す」にある。
 
 ## 範囲外の課題を見つけたとき
 
@@ -271,6 +268,8 @@ flowchart TD
 
 **関門の外で工程の側が実行前確認を足さない。** 取り消せる操作は止めずに行い、消した対象と
 戻し方を報告する（例外の基準は `AUTHORING.md` の「実行前確認の要否を決める 3 つの問い」）。
+**区間の切れ目の再起動も関門ではなく、`ndf-next` のブロックの前に承認・確認（`AskUserQuestion` を含む）を
+挟まない。`/goal` の文面が「承認を求める」と書いていても、指すのはこの 2 つの関門だけである。**
 
 | 関門 | いつ | 文書での意味 | 要否の決まり方 |
 | --- | --- | --- | --- |
@@ -363,8 +362,13 @@ Pull Request のマージ、制作物承認は本番の提出先への操作に�
 
 **区間の切れ目の再起動は中継が自動で行う（Claude Code だけ）。** 利用者が `claude` と打つと
 alias が中継を挟み、conductor が出した `ndf-next` のブロックを拾って、`/exit`・プラグインの更新・
-次の区間の起動を行う。中継が無い・止まったときは、今までどおり人がブロックの中身を貼り付ける。
-始め方・止め方・上限は [references/relay.md](references/relay.md) にある。
+次の区間の起動を行う（始め方・止め方・上限は [references/relay.md](references/relay.md)）。
+**ブロックの前に次の Bash を 1 回実行し、2 行目（告知）をブロックの直前へそのまま写す**（1 行目が `outside` か失敗なら中継の外。書き方は `context-window.md` の「新しい会話で戻す」）。
+
+```bash
+PLUGIN_ROOT='${CLAUDE_PLUGIN_ROOT}'; case "$PLUGIN_ROOT" in '$'*) PLUGIN_ROOT= ;; esac
+[ -n "$PLUGIN_ROOT" ] && python3 "$PLUGIN_ROOT/scripts/relay.py" notice || echo outside
+```
 
 **対話で `/ndf:development-workflow` を呼んだときは 3 層へ出さない。** 人がその場にいて
 工程ごとに指示を変えられるため、進め方を変えない。

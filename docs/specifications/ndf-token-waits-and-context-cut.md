@@ -174,7 +174,8 @@ graph TB
   1 度にすると以後の切れ目で止まらない。案内だけを足す形（`additionalContext`）は、規定が読み
   流された実測があるため採らない
 - **中継の直接の子の conductor では 1 度の通しをしない。** `NDF_RELAY_DIR` があり、上限を超えていて、
-  `relay.py is-child` が終了コード 0 なら、上限を超えている限り同じ起動も止め続ける。人の居ない
+  `relay.py notice` の 1 行目が `relay`（`is-child` と同じ判定）なら、上限を超えている限り同じ起動も止め続け、
+  拒否文に `notice` の 2 行目（告知）を埋め込む（[ndf-relay-segment-notice.md](ndf-relay-segment-notice.md)）。人の居ない
   前提で LLM が「続ける」と決めると、上限を超えたまま進むためである。中継の外では 1 度だけ通す
   （[ndf-relay-segment-restart.md](ndf-relay-segment-restart.md) の「文脈の上限で切る」）
 - **文脈量を読めない（記録が無い・`usage` が無い）ときは通す**
