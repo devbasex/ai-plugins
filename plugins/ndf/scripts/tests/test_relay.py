@@ -540,6 +540,21 @@ def mod(tmp_path, monkeypatch):
     return m
 
 
+@pytest.mark.parametrize("tasks", [None, {"status": "running"}, "running"])
+def test_background_running_ignores_non_list_inputs(mod, tasks):
+    assert mod.background_running(tasks) is False
+
+
+def test_background_running_ignores_non_dict_items(mod):
+    assert mod.background_running(["running", 1, None]) is False
+
+
+def test_background_running_detects_running_dict(mod):
+    tasks = [{"status": "queued"}, {"status": "running"}]
+
+    assert mod.background_running(tasks) is True
+
+
 def test_fallback_cwd_uses_nearest_existing_parent(mod, tmp_path):
     parent = tmp_path / "a"
     parent.mkdir()
