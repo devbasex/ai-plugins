@@ -829,26 +829,29 @@ def _open_or_resume_round(
     return entry
 
 
-def _round_output(
-    entry: dict[str, Any], state: dict[str, Any],
-) -> dict[str, Any]:
-    """ラウンド開始時に emit する値を組み立てる。"""
+def _emit_round(entry: dict[str, Any], state: dict[str, Any]) -> None:
+    """ラウンド開始時の値を emit する。
+
+    **キーはキーワード引数で書く。** 手順書の変数の出所を検査する
+    `scripts/check-skill-shell-vars.py` は `emit(...)` のキーワードを読むため、
+    辞書を展開して渡すとキーが見えなくなる。
+    """
     kind = entry_kind(entry)
-    return {
-        "ROUND": entry["round"],
-        "ROUND_KIND": kind,
+    statefile.emit(
+        ROUND=entry["round"],
+        ROUND_KIND=kind,
         # **母集合は繰り返しの中でも返す**（#518-1）。`init` だけが返す形では、
         # 状態ファイルから再開する経路と、骨組みを抜粋して写す経路の両方で
         # 未定義になる。出所は `init` と同じ状態ファイルの `runtimes` である。
-        "RUNTIMES": " ".join(state["runtimes"]),
-        "RUNTIMES_CSV": ",".join(state["runtimes"]),
+        RUNTIMES=" ".join(state["runtimes"]),
+        RUNTIMES_CSV=",".join(state["runtimes"]),
         # 提案に使う雛形の名前。**結果ファイルの名前は種類で変えない**
         # （ラウンド番号は通しなので衝突せず、監視の雛形をそのまま使える）。
-        "PROPOSE_PHASE": "propose-tests" if kind == TEST else "propose",
-        "IMPL": entry["impl"],
-        "IMPL_MODEL": entry["impl_model"]["requested"],
-        "MAX_FIX_ROUNDS": state["max_fix_rounds"],
-    }
+        PROPOSE_PHASE="propose-tests" if kind == TEST else "propose",
+        IMPL=entry["impl"],
+        IMPL_MODEL=entry["impl_model"]["requested"],
+        MAX_FIX_ROUNDS=state["max_fix_rounds"],
+    )
 
 
 def cmd_start_round(args: argparse.Namespace) -> None:
@@ -884,4 +887,4 @@ def cmd_start_round(args: argparse.Namespace) -> None:
         f"=== {label} {seq} / {limit} "
         f"（実装 {entry['impl']}）==="
     )
-    statefile.emit(**_round_output(entry, state))
+    _emit_round(entry, state)
