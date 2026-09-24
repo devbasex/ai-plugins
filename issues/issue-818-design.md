@@ -116,6 +116,20 @@ Skill は導入のコマンドを利用者に示し、確認を取ってから�
 - **`standard` の Pull Request 1 本あたり**（conductor 1・設計 1・実装 1・検査 1・仕上げ 1・取り込み 1・修正の worker 5・調査 1・検証 1 と置く）の差し引きは約 +60k（約 $0.24）。読み込みの無い起動を 0 とした平均で見積もっている
 - 限界: 読み込みのトークンは文字数からの推定で、行番号の接頭辞を含むため多めに出る。`grep -n` の抜粋・`git show` での表示は数えていない
 
+**AC26 の実測で置き換えた値（AC27、2026-09-24、claude-sonnet-5・指示なし・各 3 回）:**
+
+| 条件 | ツール結果の文字数（平均） | Serena / `LSP` の呼び出し | `initial_instructions` | hook の拒否 |
+| --- | ---: | ---: | ---: | ---: |
+| #818 §3 の B（LSP・指示なし） | 49,057 | 0 | - | - |
+| #818 §3 の C（Serena・指示なし） | 49,467 | 0 | 0 | - |
+| L（公式 pyright-lsp だけ） | 8,647 | 0 | 0 | 0 |
+| S（mcp-serena・hook 込み） | 7,714 | 0 | 0 | 2 回（3 回中） |
+
+- **§3 の前提（ファイル全体の `Read`）が成り立たなかった。** 6 回とも `grep` の後に範囲を絞った `Read` か `sed -n` で読み、全体の `Read` は 1 度も起きなかった。§3 の B / C から減った分（約 4 万字）はモデルの読み方の変化で、この課題の効果ではない
+- **誘導の hook は拒否を出したが、Serena へは切り替わらなかった**（S1・S2 は 4 回目の非シンボル操作で拒否。モデルは `Grep` や `sed` へ移って続けた）。S と L の差（約 900 字）は 3 回ずつの揺れの内にある。**r は 0 と置き直す。** 上の持ち場ごとの表の「減る量」は、指示した条件（§3 の D・E）でしか得られない上限として残す
+- **`initial_instructions` は Claude Code では 0 回だった**（Serena を使わなかったため）。費用の側も 0 で、持ち出しにはならない。Codex では Serena を使った 3 回とも最初に読まれ、1 回あたり約 6,480 字だった（未確認 U6）
+- 誘導を効かせるには、拒否の文だけでなく、コード改変系の Skill の 1 行（refactoring / problem-solving / tdd-cycle）が読まれる場面が要る。この課題の範囲では測っていない
+
 ## 構成要素
 
 | 要素 | 区分 | 責務 |
@@ -270,7 +284,7 @@ plugins/mcp/mcp-serena/
 | キー | 書き方 | 他のキー |
 | --- | --- | --- |
 | `language_servers` | 採った言語を、検出の件数の多い順に並べたブロックの配列で置き換える | 触らない。注釈も保つ |
-| `ignored_paths` | `.worktrees/**` が無く、`.worktrees/` が存在するときだけ足す。既存の要素は消さない | 同上 |
+| `ignored_paths` | `.serena/**` は常に、`.worktrees/**` は `.worktrees/` が存在するときだけ、無ければ足す。既存の要素は消さない。`.serena/**` は検証の前に足す（`.serena/.gitignore` の無いリポジトリで、Serena が `.serena/language_servers/` の `.d.ts` を解析対象に選び、TypeScript の検証が落ちた。実装の実機確認で判明） | 同上 |
 | `mcp_serena_excluded` | 外した言語を `<言語> <理由>` の要素で書く（無ければ `[]`）。`configure` が毎回書く | 同上 |
 
 **外した言語は最上位のキー `mcp_serena_excluded` に残す。** 理由は `failed.reason` の値か、`--only` で名指しされなかった `not_selected` である。**このキーがあることが「`configure` で設定した」印である。** Serena 1.7.0 は `--project-from-cwd` で開いた根に `project.yml` が無ければ自動で作る（`ProjectConfig.autogenerate`）ため、ファイルの有無では判定しない。SessionStart の突き合わせは、検出した言語から `language_servers` とこのキーの言語を除いた残りを「設定に無い言語」とする。逆向き（`language_servers` にあってしきい値に届かない言語。`--only` の名指し）は知らせない（決定 9）。

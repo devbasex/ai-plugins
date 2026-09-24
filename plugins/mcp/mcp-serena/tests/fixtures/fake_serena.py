@@ -36,13 +36,16 @@ def main():
         if not gi.exists():
             gi.write_text("/cache\n/project.local.yml\n")
         text = (serena / "project.yml").read_text()
-        langs = [l[2:].strip() for l in text.split("language_servers:", 1)[1].splitlines()[1:]
-                 if l.startswith("- ")]
+        langs = []
+        for line in text.split("language_servers:", 1)[1].splitlines()[1:]:
+            if not line.startswith("- "):
+                break
+            langs.append(line[2:].strip())
         results = dict(kv.split("=") for kv in os.environ.get("FAKE_SERENA_RESULT", "").split(",") if kv)
         logs = serena / "logs/health-checks"
         logs.mkdir(parents=True, exist_ok=True)
         (logs / f"health_check_{time.time_ns()}.log").write_text(",".join(langs))
-        log({"checked": langs})
+        log({"checked": langs, "ignores_serena": ".serena/**" in text.split("ignored_paths:", 1)[1].split("\n\n", 1)[0]})
         outcome = results.get(langs[0] if langs else "", "0")
         if outcome == "hang":
             time.sleep(60)

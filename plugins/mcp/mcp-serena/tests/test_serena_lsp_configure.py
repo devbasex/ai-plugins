@@ -62,6 +62,14 @@ def test_creates_project_yml_when_missing_and_verifies_each_language(repo, fake)
         assert Path(call["cwd"]).resolve() == repo.resolve()
 
 
+def test_serena_dir_is_ignored_before_verification(repo, fake):
+    # 言語サーバのキャッシュ（.serena/language_servers/）を解析対象に選ばせない
+    _configure(repo, fake)
+    checks = [c for c in _calls(fake) if "checked" in c]
+    assert checks and all(c["ignores_serena"] for c in checks)
+    assert ".serena/**" in py.read_list(_yml(repo), "ignored_paths")
+
+
 def test_existing_yml_keeps_other_keys(repo, fake):
     (repo / ".serena").mkdir()
     (repo / ".serena/project.yml").write_text(TEMPLATE)
@@ -197,11 +205,11 @@ def test_serena_gitignore_only_with_flag(repo, fake):
 
 def test_worktrees_ignored_path_added_only_when_dir_exists(repo, fake):
     _configure(repo, fake)
-    assert py.read_list(_yml(repo), "ignored_paths") == []
+    assert py.read_list(_yml(repo), "ignored_paths") == [".serena/**"]
     (repo / ".worktrees").mkdir()
     _configure(repo, fake)
     _configure(repo, fake)
-    assert py.read_list(_yml(repo), "ignored_paths") == [".worktrees/**"]
+    assert py.read_list(_yml(repo), "ignored_paths") == [".serena/**", ".worktrees/**"]
 
 
 @pytest.mark.parametrize("setup", ["flow", "local"])

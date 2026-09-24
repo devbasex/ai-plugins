@@ -60,3 +60,31 @@ uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest 
 | U6 | `initial_instructions` の費用 | 検査・仕上げ・取り込みの supervisor で読まれるか。読まれて持ち出しなら、外す案を別の課題にする（決定 11） | 実装（AC26・AC27） |
 | U7 | 効果の割合 r | 見積もりの r = 0.6 は、指示した条件（#818 §3 の D・E）の値である。誘導の hook だけでどこまで近づくか | 実装（AC26・AC27） |
 | U8 | 10 言語目以降の対応表の値 | `go` / `ruby` などは公式プラグインの定義から写すだけで、起動の検証をこの課題では通さない | 利用者が導入したとき（SessionStart の通知で気付く） |
+
+## 実装での実機の確認（2026-09-24）
+
+記録は実装の Pull Request の本文に要点を載せる。実機の claude / codex は `env -i` と一時の HOME で隔離して動かした。
+
+| 受け入れ条件 | 結果 | 根拠 |
+| --- | --- | --- |
+| AC3 | 通った | `tools/list` で Claude Code の定義は 14 ツール、10 個は無い。Codex の定義は 23 ツール |
+| AC8 | 通った | bash の言語サーバの `cli.js` を壊すと `bash health_check_exit_1` だけが外れ、同じ根の Serena で `find_symbol`（0.1 秒）と `find_referencing_symbols`（2.2 秒）が通った |
+| AC11 | 通った | ai-plugins（python + bash、10 秒）と carmo-system-serverside（typescript 147・python 131・bash 23、19 秒）で `configure` → `check` |
+| AC12 | 通った | 作業ツリーで起動した Serena の根は作業ツリー。初回の `find_symbol` は 3.8 秒、`<作業ツリー>/.serena/language_servers/` は 48M（bash の言語サーバ） |
+| AC24 | 通った | Python（reportAssignmentType）・TypeScript 5.9.3（2322）・PHP（P1006・P1013）で `<new-diagnostics>` が届いた。stream-json には出ない回があり、transcript で確かめた |
+| AC25 | 通った | 3 言語で `find_referencing_symbols` と `get_diagnostics_for_file` が返った。hook は利用者が信頼した後に、通知が文脈に載り 3 回目の `sed -n` が拒否された。Skill から `$ROOT` が解決され `configure --dry-run` が 0 |
+| AC26・AC27 | 実行した。効果は見られなかった | 設計の「効果の見積もり」の末尾 |
+
+| # | 判明したこと |
+| --- | --- |
+| U2 | Codex 0.156 は SessionStart の `additionalContext` と PreToolUse の `deny` を読む。hook の中で `PLUGIN_ROOT` が設定される。**ただしプラグインの hook は信頼されるまで何も表示されずに走らない**（`/hooks` で信頼する。README と Skill に書いた） |
+| U3 | memory のツールは一覧に残るが、呼ぶと `Tool '...' is not active` で拒まれる |
+| U4 | `project.yml` を追跡しない作業ツリーでは、Serena が `language_servers: [python]` だけの設定を作る（bash は採られない）。印が無いので、hook は未設定を知らせる |
+| U5 | intelephense の無料版でも型の食い違い（P1006）を返した。前提 4 より強い |
+| U6 | Claude Code の 3 回では 0 回（Serena が使われなかった）。Codex では Serena を使うたびに最初に読まれ、約 6,480 字 |
+| U7 | hook だけでは Serena へ切り替わらなかった。r = 0 と置き直した（設計の「効果の見積もり」） |
+
+実機の確認で見つけて直したもの: `.serena/.gitignore` の無いリポジトリで TypeScript の検証が落ちる（`ignored_paths` に `.serena/**` を検証の前に足す）。
+
+実機の確認で見つけて直していないもの: `.serena/serena_config.yml` を追跡しているリポジトリ（carmo-system-serverside）では、`SERENA_HOME=.serena` の Serena が起動のたびに書き直し、追跡中のファイルに差分が出る。起動定義の `SERENA_HOME` は今の値を保つ（決定 16）ため、導入先の追跡の方針の問題として扱い、Skill の手順 4 で追跡から外す手段を示す。
+

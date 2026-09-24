@@ -49,6 +49,8 @@ codex plugin add mcp-serena@ai-plugins
 
 Codex では `--context codex` で起動します（`.codex.mcp.json`）。
 
+**Codex では、プラグインの hook は信頼するまで動きません**（Codex 0.156 で実測。何も表示されずに走らないだけになる）。対話の Codex で `/hooks` を開き、mcp-serena の hook を信頼してください。起動時に出る「Review hooks」の案内からも信頼できます。
+
 ### Kiro CLI
 
 repository を clone した後、対象のプロジェクトの根で installer を実行します。

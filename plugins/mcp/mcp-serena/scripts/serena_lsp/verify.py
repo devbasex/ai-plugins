@@ -75,11 +75,20 @@ def _append_lines(path: Path, lines: list) -> None:
     path.write_text(text + "".join(f"{line}\n" for line in lines))
 
 
-def _final_text(text: str, root: Path, verified: list, excluded: list) -> str:
-    text = py.write_list(text, "language_servers", verified)
+def _with_ignores(text: str, root: Path) -> str:
+    """`.serena/**` を常に、`.worktrees/**` は `.worktrees/` があるときだけ ignored_paths へ足す。
+
+    `.serena/` を外さないと、Serena が言語サーバのキャッシュ（`.serena/language_servers/` の
+    `.d.ts` など）を解析対象に選び、検証が失敗する（`.serena/.gitignore` の無い新しいリポジトリ）。
+    """
     ignored = py.read_list(text, "ignored_paths") or []
-    if (root / ".worktrees").is_dir() and ".worktrees/**" not in ignored:
-        text = py.write_list(text, "ignored_paths", ignored + [".worktrees/**"])
+    wanted = [".serena/**"] + ([".worktrees/**"] if (root / ".worktrees").is_dir() else [])
+    added = [p for p in wanted if p not in ignored]
+    return py.write_list(text, "ignored_paths", ignored + added) if added else text
+
+
+def _final_text(text: str, root: Path, verified: list, excluded: list) -> str:
+    text = _with_ignores(py.write_list(text, "language_servers", verified), root)
     return py.write_list(text, EXCLUDED_KEY, excluded)
 
 
@@ -150,10 +159,11 @@ def configure(root: Path, dry_run=False, gitignore=False, serena_gitignore=False
         result["written"]["created"] = True
 
     verified, failed = [], []
+    base = _with_ignores(original, root)
     previous = _signals_to_exception()
     try:
         for lang in candidates:
-            yml.write_text(py.write_list(original, "language_servers", [lang]))
+            yml.write_text(py.write_list(base, "language_servers", [lang]))
             outcome = health_check(root, cmd, timeout)
             if outcome["ok"]:
                 verified.append(lang)

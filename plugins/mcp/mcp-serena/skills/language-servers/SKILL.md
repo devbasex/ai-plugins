@@ -97,6 +97,8 @@ python3 "$ROOT/scripts/serena-lsp.py" check --root . --json
 
 Codex では `--runtime codex` を付ける（Claude Code の LSP の項目を飛ばし、Bash の
 `shellcheck` だけを見る）。
+あわせて、Codex ではプラグインの hook が信頼されるまで動かないことを利用者に示し、対話の
+Codex の `/hooks` で mcp-serena の hook を信頼してもらう（信頼しないと通知も誘導も出ない）。
 
 終了コード 1 のとき、`missing` の要素ごとに `install` のコマンドを利用者に示し、**確認を
 取ってから**打つ。ネットワークへ出て利用者の環境へ書き込むためである。Claude Code の
