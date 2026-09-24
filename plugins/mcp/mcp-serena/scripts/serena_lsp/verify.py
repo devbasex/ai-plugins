@@ -62,10 +62,13 @@ def health_check(root: Path, serena_cmd: list, timeout: float) -> dict:
     return {"ok": False, "reason": f"health_check_exit_{code}", "log": _latest_log(root, started)}
 
 
-def _missing_serena_gitignore(root: Path) -> list:
-    path = root / ".serena/.gitignore"
+def _missing_lines(path: Path, wanted: list) -> list:
     have = set(path.read_text().splitlines()) if path.exists() else set()
-    return [line for line in SERENA_GITIGNORE_LINES if line not in have]
+    return [line for line in wanted if line not in have]
+
+
+def _missing_serena_gitignore(root: Path) -> list:
+    return _missing_lines(root / ".serena/.gitignore", SERENA_GITIGNORE_LINES)
 
 
 def _append_lines(path: Path, lines: list) -> None:
@@ -125,9 +128,9 @@ def _plan_dry_run(result: dict, original, root: Path, candidates: list, not_sele
 def _write_gitignores(root: Path, result: dict, gitignore: bool, serena_gitignore: bool) -> None:
     if gitignore:
         path = root / ".gitignore"
-        have = path.read_text().splitlines() if path.exists() else []
-        if ".serena/project.yml" not in have:
-            _append_lines(path, [".serena/project.yml"])
+        missing = _missing_lines(path, [".serena/project.yml"])
+        if missing:
+            _append_lines(path, missing)
             result["written"]["gitignore"] = True
     # 渡さないときは「足せば足す行」、渡したときは足した行を載せる
     missing = _missing_serena_gitignore(root)
