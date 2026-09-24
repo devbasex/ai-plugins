@@ -20,8 +20,11 @@
 | `q open` / `q close` | `relay.py question open` / `close` を `AskUserQuestion` の hook と同じ形で呼び、出力を `FAKE_DIR/question-<pid>.jsonl` へ書く |
 | `answer [mark <中身>]` | 質問に答えた後の Stop を模す。`relay.py mark` を呼び（中身が無ければブロック無し）、終了コード 0 で終わる |
 | `unq` | 質問の印だけを消す |
+| `stop` | ブロックの無い応答の Stop を模す。`relay.py mark` を呼ぶ |
 
-`FAKE_EXIT_QUESTION=1` なら、最初の `/exit` で終わらずに質問の印を置く（書かれた `/exit` が質問の
+行の中の Esc（`\\x1b`）は読み捨てる（入力待ちの Esc 1 回は何もしない形を模す）。
+
+`FAKE_EXIT_QUESTION=1` なら、最初の `/exit` で終わらずに質問の印と質問の時刻 `asked` を置く（書かれた `/exit` が質問の
 答えの後に働く形を模す）。このとき SIGTERM を受けたら `FAKE_DIR/sigterm-<pid>` を書いて 143 で終わる。
 受けたバイトは読んだ単位ごとに `FAKE_DIR/chunks-<pid>.jsonl` へも書く。
 
@@ -85,6 +88,10 @@ def handle(line):
         if os.environ.get("FAKE_EXIT_QUESTION") == "1" and not PENDING:
             PENDING.append(1)
             open(os.path.join(os.environ["NDF_RELAY_DIR"], "question"), "w").close()
+            with open(os.path.join(os.environ["NDF_RELAY_DIR"], "asked"), "w") as f:  # `question open` と同じ
+                t = time.time()
+                f.write(json.dumps({"at": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(t))
+                                    + f".{int(t * 1000) % 1000:03d}Z"}))
         elif os.environ.get("FAKE_IGNORE_EXIT") != "1":
             sys.exit(0)
     elif line.startswith("mark "):
@@ -106,6 +113,8 @@ def handle(line):
     elif line == "answer" or line.startswith("answer mark "):
         do_mark(line[12:] if line.startswith("answer mark ") else None)
         sys.exit(0)
+    elif line == "stop":
+        do_mark(None)
     elif line == "unq":
         try:
             os.unlink(os.path.join(os.environ["NDF_RELAY_DIR"], "question"))
@@ -143,7 +152,7 @@ def main():
         buf += data
         while b"\r" in buf:
             line, buf = buf.split(b"\r", 1)
-            handle(line.decode(errors="replace"))
+            handle(line.replace(b"\x1b", b"").decode(errors="replace"))
 
 
 if __name__ == "__main__":
