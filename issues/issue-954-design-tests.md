@@ -24,7 +24,7 @@ hook のテストは、一時ディレクトリに偽の会話の記録を作り
 | AC2・AC4 | 文書の変更。文言を照合するテストは書かない（`AGENTS.md`）。設計 Pull Request と実装の `cross-review` が見る | レビュー |
 | AC3 | `env -i` と一時の HOME で隔離した claude（`NPM_CONFIG_PREFIX` なども一時の場所へ）に、`--plugin-dir` で作業ツリーの NDF を渡し、`ndf:supervisor-waits` のサブエージェントを 1 本起動する。記録の `usage.cache_creation` の 1 時間と 5 分を読む。`ndf:supervisor` でも 1 本起動し、逆になることを見る | 手動（実機） |
 | AC5 | 下の「AC5 の入力の表」の入力で止める・通すを照らす。止めたときの理由の欄に `区切り` と `次の工程` が入ること | 単体（偽の記録） |
-| AC6 | 5 分の定義と 1 時間の定義の supervisor を同じ `description`（`設計: #1`）で 1 本ずつ持つ偽の記録で、`per_role` が `agent_type` で 2 行に分かれる（meta に定義の名前が無い側は親の記録の `subagent_type` から引く）。あわせて、間隔 4 分と 6 分の書き直しを 1 回ずつ持ち、量が違う（例 30k と 50k）偽の記録で、`rewrite_tokens_after_5m` が 6 分の側の量だけになる。間隔 6 分で書き直しにならない呼び出し（読み込み 80k）を足すと `read_tokens_after_5m` が 80k になる。時刻を欠く呼び出しはどちらにも足さない。md の表に列が出る | 単体 |
+| AC6 | 5 分の定義と 1 時間の定義の supervisor を同じ `description`（`設計: #1`）で 1 本ずつ持つ偽の記録で、`per_role` が `agent_type` で 2 行に分かれる（meta に定義の名前が無い側は親の記録の `subagent_type` から引く）。あわせて、間隔 4 分と 6 分の書き直しを 1 回ずつ持ち、量が違う（例 30k と 50k）偽の記録で、`rewrite_tokens_after_5m` が 6 分の側の量だけになる。間隔 6 分で書き直しにならない呼び出し（読み込み 80k）を足すと `read_tokens_after_5m` が 80k になる。時刻を欠く呼び出しはどちらにも足さない。同じ持ち場の会話を 2 本集計したとき、2 つのカウンタが各会話の合計になる（`Usage.add()` の合算を通す）。md の表に列が出る | 単体 |
 | AC7〜AC9 | 配布の後、`token-usage.py --min-version <配布した版>` を持ち場ごとに回し、設計の「基準の実測」の表と同じ列で並べる。損益分岐は決定 3 の式で計算し直す | 手動（測定） |
 | AC10 | この設計 Pull Request | レビュー |
 

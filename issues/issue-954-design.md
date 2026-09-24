@@ -57,12 +57,12 @@ F1〜F4 を #954 で実装する。F5 は契約だけをこの設計に置き、
 | `plugins/ndf/agents/supervisor.md` | 新規 | 寿命 5 分の supervisor の定義。本文は規約の正本（`agent-layers.md`）を指すだけ |
 | `plugins/ndf/agents/supervisor-waits.md` | 新規 | 同じ定義に `experimental: { cacheTtl: 1h }` を足したもの |
 | `plugins/ndf/.claude-plugin/plugin.json` | 変更 | `agents` に 2 つを足す。`description` の定義の数を直す |
-| 定義の数を書いた現行の文書 | 変更 | `README.md`・`AGENTS.md`・`plugins/ndf/README.md`・`docs/ndf-plugin-reference.md` のうち「専門 8 個と worker 1 個」の形で数を書く箇所。発表・記事など時点の記録は変えない |
+| 定義の数を書いた現行の文書 | 変更 | 書き方の正本は `docs/specifications/ndf-worker-agent-and-skill-excerpts.md` の「専門エージェントの一覧に入れない」。**supervisor の 2 定義も専門の数に入れず、3 層の定義として別枠にする**（「専門 8 個と、3 層の定義 3 個（supervisor 2・worker 1）」）。直すのは正本の列挙する 5 か所（`README.md` の箇条書き・表を含む、`plugins/ndf/README.md`、`docs/ndf-plugin-reference.md`、`AGENTS.md`、`plugin.json` の `description`）と正本そのもの。発表・記事など時点の記録は変えない |
 | `agent-layers.md` | 変更 | 起動指示の `subagent_type`（区間の先頭の工程で選ぶ）、持ち場の報告の `結果: 区切り` と `次の工程`、conductor の受け方、supervisor の規則 11（区切り） |
 | `context-window.md` | 変更 | 「切ってよい点」の後に、持ち場の中の切れ目として「区切り」を 1 節足す（4 つの切れ目と持ち場の境は変えない） |
 | `waiting.md` | 変更 | 待ちの費用の節に、待ちの後の書き直しと区切り・寿命への参照を 1 段落 |
 | `plugins/ndf/scripts/token-guard.sh` | 変更 | 判定「区切り」を足す（F3） |
-| `scripts/token-usage.py` | 変更 | `rewrite_tokens_after_5m` を足す（F4） |
+| `scripts/token-usage.py` | 変更 | F4 の 3 つ: 列 `rewrite_tokens_after_5m`・`read_tokens_after_5m`、呼び出しの並びへの読み込みの量、`per_role` の軸 `agent_type` |
 | テスト | 新規・変更 | 定義の frontmatter、hook、集計 |
 
 ```mermaid
@@ -141,6 +141,10 @@ supervisor の中で一度も走らない。区切りの判定が止めなけれ
 
 **`ndf:supervisor-waits` は対象にしない。** 1 時間の区間では区切りが損になる（決定 4）。
 
+**判定は安い順に行い、外れた時点で抜ける。** 順序は `NDF_SUPERVISOR_CUT_GUARD` → Skill の名前 → `agent_id` →
+meta の `agentType` → 親の記録の `subagent_type` → P と C である。対象外の Skill（`/ndf:fix` など）では meta も
+記録も読まない。親の記録を読むのは、meta の `agentType` が `ndf:` で始まらないときだけである。
+
 | 項目 | 値 |
 | --- | --- |
 | 対象 | 入力に `agent_id` があり、その supervisor の定義の名前（下の「定義の名前」）が `ndf:supervisor`（寿命 5 分）で、Skill の名前が `cross-review` / `cross-refactoring`（`ndf:` の有無を問わない） |
@@ -151,11 +155,11 @@ supervisor の中で一度も走らない。区切りの判定が止めなけれ
 | 止める条件 | `C ≥ 比 × P`。比の既定は 2.5（決定 4） |
 | 止め方 | `permissionDecision: deny`。理由の欄に規則 11 の返し方（`結果: 区切り`・`次の工程`）を出す |
 | 止め続ける | **条件を満たす間は、同じ起動を何度でも止める。** conductor の判定の「1 度だけ通す」は持たない。supervisor の下には人がおらず、やり直すだけで越えられると、区切るかが LLM の裁量に戻るためである（中継の子の conductor と同じ扱い）。控えのファイルも持たない |
-| 止めない | `agent_id` が無い（conductor）・`agentType` が `ndf:supervisor` でない（`ndf:supervisor-waits`・worker・`general-purpose`）・記録か meta が読めない・P か C が読めない |
+| 止めない | `agent_id` が無い（conductor）・定義の名前が `ndf:supervisor` でない（`ndf:supervisor-waits`・worker・`general-purpose`・取れない）・記録か meta が読めない・P か C が読めない |
 | 変える | `NDF_SUPERVISOR_CUT_RATIO`（既定 2.5）。`NDF_SUPERVISOR_CUT_GUARD=0` でこの判定を無効にする |
 
-**`agentType` で見分けるので、`general-purpose` で起動した supervisor（conductor が古い起動の形を
-使った場合）は止めない。** その supervisor は区切らずに続ける（今と同じ費用）。
+**定義の名前で見分けるので、`subagent_type` を省いて起動した supervisor（conductor が古い起動の形を使った場合）は
+止めない。** その supervisor は区切らずに続ける（今と同じ費用）。
 
 ### F4: 集計の列
 
@@ -173,6 +177,8 @@ supervisor の中で一度も走らない。区切りの判定が止めなけれ
 | 直前の間隔 | `is_rewrite` の分岐の中でだけ求める | 2 回目以降のすべての呼び出しで求める |
 | 書き直しの呼び出し | 量を `rewrite_tokens` へ足す | 加えて、間隔が `CACHE_5M` を超えれば `rewrite_tokens_after_5m` へ足す |
 | 書き直しでない呼び出し | 何もしない | 間隔が `CACHE_5M` を超えれば、読み込みの量を `read_tokens_after_5m` へ足す |
+| 合算（`Usage.add()`） | 足すフィールドをリテラルで列挙する（`rewrite_tokens` まで） | 2 つのカウンタを列挙に足す。足さないと、会話をまたいで合算した `per_role` / `external` で 0 に落ちる |
+| 出力（`call_stats()` と `render_md` の `per_role` / `external` の表） | `rewrite_tokens` も列に出さない | 2 つのカウンタを返り値と表の列に足す |
 
 時刻を欠く呼び出し（`rewrites_untimed` に数えるもの）は、どちらのカウンタにも足さない。
 
@@ -285,7 +291,7 @@ stateDiagram-v2
 | 起動指示の「持ち場」は持ち場の表から全工程を写す | `agent-layers.md`「conductor → supervisor」の必須項目 | `区切り` の後の起動では `次の工程` から写す |
 | `prompt` の中身は「9 項目と、守る規則 10 個」 | 同じ節の引数の表 | 規則 11 を足すので 11 個にする |
 | `plugins/ndf/agents/` は `dev.agy/agents` から参照され、agy にも同じ定義が配られる | `plugins/ndf/dev.agy/agents -> ../agents` | 変えない。agy へも 2 つの定義が届く（決定 11） |
-| 測定の層の判定は `spawnDepth` と `description` で、`agentType` を見ない | `token-usage.py` | 変えない。`description` の形を保つので当てはまる |
+| 測定の層の判定は `spawnDepth` と `description` で、`agentType` を見ない | `token-usage.py` | `per_role` の鍵に `agent_type` を足す（F4）。持ち場の判定（`description` の先頭語）は変えない |
 
 ## 非機能
 
