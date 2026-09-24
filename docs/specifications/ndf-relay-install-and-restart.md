@@ -428,7 +428,7 @@ G1〜G3 はこの課題で既存の `/exit` に入れた。G4〜G7 は送り込�
 
 ## 関連リンク
 
-- [#928](https://github.com/devbasex/ai-plugins/issues/928)（設計は [PR #932](https://github.com/devbasex/ai-plugins/pull/932)）
+- [#928](https://github.com/devbasex/ai-plugins/issues/928)（設計は [PR #932](https://github.com/devbasex/ai-plugins/pull/932)、実装は [PR #944](https://github.com/devbasex/ai-plugins/pull/944)。#936 も同じ PR）
 - [#936](https://github.com/devbasex/ai-plugins/issues/936) — 2 つ目以降の区間へ起動の方針の引数を引き継ぐ
 - [#931](https://github.com/devbasex/ai-plugins/issues/931) — 送り込みの実装（G4〜G7 を入力にする）
 - [devbasex/devbase#253](https://github.com/devbasex/devbase/issues/253) — 永続化されたシェルの設定の読み込み
