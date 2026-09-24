@@ -206,6 +206,20 @@ def test_mark_file_is_private(relay):
     assert relay.next.stat().st_mode & 0o077 == 0
 
 
+def test_mark_missing_fields(relay):
+    """cwd などが無い・null なら印の値は空文字、応答が null ならブロック 0 件として印も質問の印も消す。"""
+    quiet_ok(mark(relay.dir, json.dumps({"last_assistant_message": fence("/goal x"), "cwd": None})))
+    data = json.loads(relay.next.read_text())
+    assert set(data) == {"command", "cwd", "session_id", "transcript_path", "written_at"}
+    assert data["command"] == "/goal x"
+    assert data["cwd"] == data["session_id"] == data["transcript_path"] == ""
+    question = relay.dir / "question"
+    question.write_text("q")
+    quiet_ok(mark(relay.dir, json.dumps({"last_assistant_message": None})))
+    assert not relay.next.exists()
+    assert not question.exists()
+
+
 # ---------------------------------------------------------------- run（擬似端末の上で動かす）
 
 import pty
