@@ -53,7 +53,7 @@ def _warnings(proc: subprocess.CompletedProcess) -> list[str]:
 
 @pytest.mark.parametrize(("phase", "expected"), [
     ("review", 1200), ("critique", 1200), ("propose", 1200),
-    ("judge-test-changes", 1200), ("apply", 3600), ("fix", 3600), ("final-fix", 3600),
+    ("judge-test-changes", 1200), ("implement", 3600), ("fix", 3600), ("final-fix", 3600),
 ])
 def test_the_phase_default_is_the_table_value(tmp_path, phase: str, expected: int) -> None:
     proc = _run(tmp_path, "--phase", phase)
@@ -67,7 +67,7 @@ def test_omitting_the_phase_uses_the_review_value(tmp_path) -> None:
 
 
 def test_the_shared_environment_overrides_the_phase(tmp_path) -> None:
-    proc = _run(tmp_path, "--phase", "apply", env={"MONITOR_TIMEOUT": "1800"})
+    proc = _run(tmp_path, "--phase", "implement", env={"MONITOR_TIMEOUT": "1800"})
     assert _hard_timeout(proc, "agy") == 1800
 
 
@@ -98,14 +98,14 @@ def test_the_table_defaults_do_not_warn(tmp_path) -> None:
     assert _warnings(proc) == []
 
 
-def test_the_apply_stall_of_1800_does_not_warn(tmp_path) -> None:
+def test_the_implement_stall_of_1800_does_not_warn(tmp_path) -> None:
     """cross-refactoring の適用の許容（`IMPL_STALL_TIMEOUT` の既定）は 3600 より小さい。"""
-    proc = _run(tmp_path, "--phase", "apply", "--stall-timeout", "1800")
+    proc = _run(tmp_path, "--phase", "implement", "--stall-timeout", "1800")
     assert _warnings(proc) == []
 
 
 def test_a_stall_equal_to_the_monitor_timeout_warns(tmp_path) -> None:
-    proc = _run(tmp_path, "--phase", "apply", "--stall-timeout", "3600")
+    proc = _run(tmp_path, "--phase", "implement", "--stall-timeout", "3600")
     lines = _warnings(proc)
     assert len(lines) == 1
     assert "agy" in lines[0] and lines[0].count("3600") == 2
@@ -122,8 +122,8 @@ def test_an_environment_override_that_breaks_the_order_warns_per_agent(tmp_path)
 def test_the_warning_does_not_change_the_exit_code_or_stdout(tmp_path) -> None:
     (tmp_path / "quiet").mkdir()
     (tmp_path / "loud").mkdir()
-    quiet = _run(tmp_path / "quiet", "--phase", "apply")
-    loud = _run(tmp_path / "loud", "--phase", "apply", "--stall-timeout", "4000")
+    quiet = _run(tmp_path / "quiet", "--phase", "implement")
+    loud = _run(tmp_path / "loud", "--phase", "implement", "--stall-timeout", "4000")
     assert _warnings(loud) and not _warnings(quiet)
     assert quiet.returncode == loud.returncode == 0
 
