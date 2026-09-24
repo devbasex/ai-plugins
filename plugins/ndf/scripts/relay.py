@@ -836,16 +836,6 @@ class Relay:
             return again, None
         return m, None
 
-    def start_first(self, first_args: list[str]) -> float:
-        """区間 1 を起動して記録し、開始時刻を返す。起動できなければ StartFailed。"""
-        at = self.spawn(first_args, os.getcwd())
-        self.section = 1
-        self.started_at = at
-        self.log(event="start", at=now_iso(at), section=1, pid=self.pid,
-                 command=shlex.join(first_args), from_session="",
-                 plugin_version=self.version, cwd=os.getcwd())
-        return at
-
     def prepare_next(self, m) -> tuple[str, str | None] | None:
         """プラグインを更新し、印から次の区間の (cwd, 退避前の cwd) を決める。更新に失敗したら None。"""
         version = self.update()
@@ -860,9 +850,9 @@ class Relay:
 
     def loop(self, first_args: list[str]) -> int:
         try:
-            self.start_first(first_args)
+            self.start_section(first_args, os.getcwd(), shlex.join(first_args), "")
         except StartFailed as e:
-            self.log(event="stop", section=1, reason="start-failed", errno=e.err)
+            self.log(event="stop", section=self.section + 1, reason="start-failed", errno=e.err)
             say(f"claude を起動できない（{os.strerror(e.err)}）")
             return 127
         while True:
