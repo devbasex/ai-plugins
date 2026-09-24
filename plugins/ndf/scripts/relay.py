@@ -115,11 +115,7 @@ def relay_running(d: str) -> bool:
 
 
 def write_json_atomic(path: str, data) -> None:
-    tmp = f"{path}.{os.getpid()}.tmp"
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as f:
-        json.dump(data, f, ensure_ascii=False)
-    os.replace(tmp, path)
+    _write_file(path, json.dumps(data, ensure_ascii=False).encode(), 0o600)
 
 
 def read_json(path: str):
