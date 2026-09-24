@@ -77,6 +77,7 @@ VARIADIC_FLAGS = {
 SECTION_FLAGS = {
     "-c", "--continue", "-r", "--resume", "--session-id", "--fork-session", "--from-pr",
     "--teleport", "--cloud", "-n", "--name", "--bg", "--background", "--tmux",
+    "-w", "--worktree",
 }
 # 子へ継がせない Claude Code の環境変数（中から起こしたプロセスが継ぐもの）
 DROP_ENV = ("CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_ENTRYPOINT")

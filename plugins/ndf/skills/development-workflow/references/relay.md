@@ -139,7 +139,7 @@ conductor では、文脈量の hook が工程へ入る起動を 1 度の通し�
 `--model`・`--permission-mode`・`--settings`・`--add-dir`・`--mcp-config`・`--plugin-dir` は
 すべての区間に効く。**会話ごと・区間ごとの引数は引き継がない。** 最初のプロンプト・`--` 以後・
 `-c`/`--continue`・`-r`/`--resume`・`--session-id`・`--fork-session`・`--from-pr`・`--teleport`・
-`--cloud`・`-n`/`--name`・`--bg`/`--background`・`--tmux` である。次の区間は新しい会話を
+`--cloud`・`-n`/`--name`・`--bg`/`--background`・`--tmux`・`-w`/`--worktree` である。次の区間は新しい会話を
 始めるので、付けると前の会話へ戻るか、同じ ID を 2 度使うか、区間が端末に出ない。
 引数と値の区切りは `claude` と同じ規則で読み、知らない選択肢は値ごと引き継ぐ。
 

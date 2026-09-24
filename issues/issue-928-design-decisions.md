@@ -133,9 +133,10 @@ alias の展開でシェルの関数 `claude` → `relay.py run --dangerously-sk
 
 **引き継がないのは、位置引数（最初のプロンプト）と `--` 以後、`-c`/`--continue`・`-r`/`--resume`・
 `--session-id`・`--fork-session`・`--from-pr`・`--teleport`・`--cloud`・`-n`/`--name`・
-`--bg`/`--background`・`--tmux` である（値ごと）。** 次の区間は `next` の塊が指す新しい会話を
+`--bg`/`--background`・`--tmux`・`-w`/`--worktree` である（値ごと）。** 次の区間は `next` の塊が指す新しい会話を
 始める。前の会話を指す・会話に名前を付ける・起動の形を変えるものを付けると、前の会話へ戻るか、
-同じ ID を 2 度使うか、区間の起動が端末に出ない。**残りはすべて引き継ぐ。** 利用者の起動の方針
+同じ ID を 2 度使うか、区間の起動が端末に出ない。`-w` は区間ごとに作業ツリーを作り直し、前の区間の
+作業ツリーの中にもう 1 つ作る。**残りはすべて引き継ぐ。** 利用者の起動の方針
 （`--dangerously-skip-permissions`・`--model`・`--permission-mode`・`--settings`・`--add-dir` など）を
 表すためである。**知らない選択肢も値を取る規則のまま引き継ぐ。** 落とすより付けるほうが、devbase の
 `--dangerously-skip-permissions` のような方針を失わない。起動の記録（`log.jsonl` の `start`）には、
