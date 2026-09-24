@@ -24,7 +24,7 @@ hook のテストは、一時ディレクトリに偽の会話の記録を作り
 | AC2・AC4 | 文書の変更。文言を照合するテストは書かない（`AGENTS.md`）。設計 Pull Request と実装の `cross-review` が見る | レビュー |
 | AC3 | `env -i` と一時の HOME で隔離した claude（`NPM_CONFIG_PREFIX` なども一時の場所へ）に、`--plugin-dir` で作業ツリーの NDF を渡し、`ndf:supervisor-waits` のサブエージェントを 1 本起動する。記録の `usage.cache_creation` の 1 時間と 5 分を読む。`ndf:supervisor` でも 1 本起動し、逆になることを見る | 手動（実機） |
 | AC5 | 下の「AC5 の入力の表」の入力で止める・通すを照らす。止めたときの理由の欄に `区切り` と `次の工程` が入ること | 単体（偽の記録） |
-| AC6 | 間隔 4 分と 6 分の書き直しを 1 回ずつ持つ偽の記録で、`rewrite_tokens_after_5m` が 6 分の側の量だけになる。md の表に列が出る | 単体 |
+| AC6 | 間隔 4 分と 6 分の書き直しを 1 回ずつ持ち、量が違う（例 30k と 50k）偽の記録で、`rewrite_tokens_after_5m` が 6 分の側の量だけになる。時刻を欠く書き直しは足さない。md の表に列が出る | 単体 |
 | AC7〜AC9 | 配布の後、`token-usage.py --min-version <配布した版>` を持ち場ごとに回し、設計の「基準の実測」の表と同じ列で並べる。損益分岐は決定 3 の式で計算し直す | 手動（測定） |
 | AC10 | この設計 Pull Request | レビュー |
 
@@ -40,13 +40,16 @@ P は偽の記録の最初の呼び出しの文脈、C は最後の呼び出し�
 | 4 | `ndf:supervisor` | `ndf:cross-refactoring` | 3P | — | 止める |
 | 5 | `ndf:supervisor` | `cross-review` | 2.4P | — | 通す |
 | 6 | `ndf:supervisor` | `pr` | 3P | — | 通す |
-| 7 | `ndf:supervisor` | `cross-review` | 2.5P | 1 の直後の同じ起動 | 通す |
+| 7 | `ndf:supervisor` | `cross-review` | 2.5P | 1 の直後の同じ起動 | 止める（1 度通しを持たない） |
 | 8 | — | `cross-review` | 3P | 入力に `agent_id` が無い（conductor） | 通す |
 | 9 | `ndf:worker` | `cross-review` | 3P | — | 通す |
 | 10 | `general-purpose` | `cross-review` | 3P | — | 通す |
 | 11 | `ndf:supervisor` | `cross-review` | — | meta が無い・記録が空 | 通す |
 | 12 | `ndf:supervisor` | `cross-review` | 3P | `NDF_SUPERVISOR_CUT_GUARD=0` | 通す |
-| 13 | `ndf:supervisor` | `cross-review` | 2.5P | 親の記録（`transcript_path`）の文脈は P の 10 倍・自身の記録は 2.4P | 通す（自身の記録を読むこと） |
+| 13 | `ndf:supervisor` | `cross-review` | 2.4P | 親の記録（`transcript_path`）の最後の文脈は自身の P の 10 倍 | 通す（自身の記録を読むこと） |
+| 14 | `ndf:supervisor` | `cross-review` | 2.5P | 自身の記録が 300 行を超え、最初の呼び出しが末尾 200 行の外にある。末尾 200 行の中の最も古い呼び出しの文脈は 2.4P | 止める（P を先頭から読むこと） |
+| 15 | `ndf:supervisor` | `cross-review` | 2.5P | `NDF_SUPERVISOR_CUT_RATIO=3` | 通す |
+| 16 | `ndf:supervisor` | `cross-review` | 3P | `NDF_SUPERVISOR_CUT_RATIO=3` | 止める |
 
 ## 未確認のまま残ること
 

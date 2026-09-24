@@ -13,7 +13,7 @@
 1. conductor が `設計: #954` を **`ndf:supervisor`**（寿命 5 分）で起動する
 2. supervisor が要求・設計・再構成を通し、設計 Pull Request を出す。文脈は 30 万を超えている
 3. supervisor が `cross-review` を起動しようとする。hook が自分の記録を読み、今の文脈が最初の
-   呼び出しの文脈の 2.5 倍以上なので 1 度止める。理由の欄に区切りの返し方が出る
+   呼び出しの文脈の 2.5 倍以上なので止める。理由の欄に区切りの返し方が出る
 4. supervisor が `結果: 区切り`・`次の工程: ドキュメントレビュー` で返す
 5. conductor が同じ `設計: #954` を **`ndf:supervisor-waits`**（寿命 1 時間）で起動し直す。
    起動指示の「前の持ち場の報告」に 4 の報告を入れる
@@ -58,7 +58,7 @@ F1〜F4 を #954 で実装する。F5 は契約だけをこの設計に置き、
 | `plugins/ndf/agents/supervisor-waits.md` | 新規 | 同じ定義に `experimental: { cacheTtl: 1h }` を足したもの |
 | `plugins/ndf/.claude-plugin/plugin.json` | 変更 | `agents` に 2 つを足す |
 | `agent-layers.md` | 変更 | 起動指示の `subagent_type`（区間の先頭の工程で選ぶ）、持ち場の報告の `結果: 区切り` と `次の工程`、conductor の受け方、supervisor の規則 11（区切り） |
-| `context-window.md` | 変更 | 切れ目 2 を「収束ループの前後」へ広げる（ドキュメントレビューの前を含める） |
+| `context-window.md` | 変更 | 「切ってよい点」の後に、持ち場の中の切れ目として「区切り」を 1 節足す（4 つの切れ目と持ち場の境は変えない） |
 | `waiting.md` | 変更 | 待ちの費用の節に、待ちの後の書き直しと区切り・寿命への参照を 1 段落 |
 | `plugins/ndf/scripts/token-guard.sh` | 変更 | 判定「区切り」を足す（F3） |
 | `scripts/token-usage.py` | 変更 | `rewrite_tokens_after_5m` を足す（F4） |
@@ -140,11 +140,11 @@ supervisor の規則に 11 を足す:
 | --- | --- |
 | 対象 | 入力に `agent_id` があり、`<記録のディレクトリ>/<セッション>/subagents/agent-<agent_id>.meta.json` の `agentType` が `ndf:supervisor` か `ndf:supervisor-waits` で、Skill の名前が `cross-review` / `cross-refactoring`（`ndf:` の有無を問わない） |
 | 読む記録 | **supervisor 自身の記録** `${transcript_path%.jsonl}/subagents/agent-<agent_id>.jsonl`。入力の `transcript_path` はサブエージェントの中でも親（conductor）の記録を指すので、そのまま読まない（`token-guard.sh` の既存の注記、`statusline.sh` の組み立てと同じ） |
-| P | 読む記録の最初の assistant 呼び出しの文脈（`input + cache_read + cache_creation`） |
+| P | 読む記録の**先頭から**最初の assistant 呼び出しを探し、その文脈（`input + cache_read + cache_creation`）を取る。既存の `context_tokens()` は末尾 200 行だけを読んで最後の呼び出しを返すので、P には使えない。先頭から読む走査を別に持つ |
 | C | 読む記録の最後の assistant 呼び出しの文脈 |
 | 止める条件 | `C ≥ 比 × P`。比の既定は 2.5（決定 4） |
 | 止め方 | `permissionDecision: deny`。理由の欄に規則 11 の返し方（`結果: 区切り`・`次の工程`）を出す |
-| 1 度だけ通す | 止めた直後に同じ supervisor が同じ Skill を同じ引数で起動したら通す（conductor の判定と同じ控えの形） |
+| 止め続ける | **条件を満たす間は、同じ起動を何度でも止める。** conductor の判定の「1 度だけ通す」は持たない。supervisor の下には人がおらず、やり直すだけで越えられると、区切るかが LLM の裁量に戻るためである（中継の子の conductor と同じ扱い）。控えのファイルも持たない |
 | 止めない | `agent_id` が無い（conductor）・`agentType` が supervisor でない（worker・`general-purpose`）・記録か meta が読めない・P か C が読めない |
 | 変える | `NDF_SUPERVISOR_CUT_RATIO`（既定 2.5）。`NDF_SUPERVISOR_CUT_GUARD=0` でこの判定を無効にする |
 
@@ -155,7 +155,12 @@ supervisor の規則に 11 を足す:
 
 `token-usage.py` の `per_role` と `external` に `rewrite_tokens_after_5m`（直前の間隔が 5 分を超えた
 書き直しの量の合計）を足す。md の「持ち場ごとの呼び出しとキャッシュ」の表に列を 1 つ足す。
-間隔の判定は今の `rewrites_after_5m` と同じ（`CACHE_5M = 300`）。
+間隔のしきい値は今の `rewrites_after_5m` と同じ（`CACHE_5M = 300`）。
+
+**量と間隔を呼び出しの単位で対応づける。** 今の集計は書き直しの量を `rewrite_tokens` の合計へ、間隔を
+`gaps` の並びへ別々に積み、`rewrites_after_5m` は `gaps` だけから数える。そのため、後から量を間隔で分けられない。
+書き直しを数える箇所（`record_calls` の中の `is_rewrite` の分岐）で、直前の間隔が `CACHE_5M` を超えるときだけ、
+量を別のカウンタ `rewrite_tokens_after_5m` へも足す。間隔が取れない呼び出し（`rewrites_untimed` に数えるもの）は足さない。
 
 ### F5: 候補 1 の契約（#870・#827 が実装する）
 
@@ -179,8 +184,9 @@ drive <PR> [init の引数] [--on-pause <起こす側>]
 持ち場の報告には `待ち`（drive のコマンド 1 行。`無し` が既定）を足す。conductor の動きは次の 2 段である。
 
 1. `結果: 区切り` で `待ち` があれば、そのコマンドを `run_in_background` で起動する
-2. 完了の通知で `次の工程` の supervisor を起動する。「前の持ち場の報告」に drive の結果ファイルのパスを添える**`待ち` の項目は
-drive ができた時点で #870 が足す。** #954 では足さない（使う相手が無い）。
+2. 完了の通知で `次の工程` の supervisor を起動する。「前の持ち場の報告」に drive の結果ファイルのパスを添える
+
+**`待ち` の項目は drive ができた時点で #870 が足す。** #954 では足さない（使う相手が無い）。
 
 ## スクリプトにする範囲
 
@@ -250,7 +256,7 @@ stateDiagram-v2
 | conductor の受け方の表が 3 値だけを扱う | `agent-layers.md`「持ち場の報告」 | `区切り` の行を足す（F2） |
 | `次の持ち場` は「持ち場の語彙のどれか」で、同じ持ち場を想定していない | 同じ表 | `区切り` のときは同じ持ち場と書く |
 | 起動指示の `subagent_type` は「省く（`general-purpose`）」 | `agent-layers.md`「conductor → supervisor」 | F1 の表へ置き換える |
-| 切れ目 2 は「構造改善と実装レビューの前後」だけで、ドキュメントレビューの前を含まない | `context-window.md` | 収束ループの前後へ広げる |
+| 切れ目は 4 つで、それぞれが持ち場の境になる（`agent-layers.md` の「切れ目 → 持ち場の境」の表）。持ち場の中で切る点を想定していない | `context-window.md`「切ってよい点は 4 つある」 | 4 つの切れ目は変えない。**区切りを持ち場の中の切れ目として別の節に置く。** 持ち場の境にならないので、`agent-layers.md` の表と `token-guard-stages.txt` の正（`docs/specifications/ndf-token-waits-and-context-cut.md`）は変えない |
 | 中断の点検の手順 3 は「`最後に記録した工程` の頭から、同じ持ち場の名前で起動し直す」で、`subagent_type` を言わない | `agent-layers.md`「conductor の中断の点検」 | 起動し直すときも F1 の表で選ぶ、と足す |
 | 測定の層の判定は `spawnDepth` と `description` で、`agentType` を見ない | `token-usage.py` | 変えない。`description` の形を保つので当てはまる |
 
