@@ -140,18 +140,18 @@ pause のたびに drive が止まって conductor が supervisor を起こす�
 本文に supervisor の規則を写す案は採らない。規則は起動指示が 10 個（この設計で 11 個）を渡しており、
 定義にも書くと 2 か所を直すことになる。道具も絞らない。supervisor は Skill と Agent を使う。
 
-### 決定 7: 区切りを守らせる hook は定義の名前で supervisor を見分ける。名前は meta の `agentType`、取れなければ親の記録の `subagent_type` から引く
+### 決定 7: 区切りを守らせる hook は、入力の `agent_type` で supervisor を見分ける
 
-hook の入力には、サブエージェントの中でだけ `agent_id` が付く（`token-guard.sh` の既存の判定、
-Claude Code 2.1.280 で実測）。その `agent_id` から `subagents/agent-<ID>.meta.json` の `agentType` を読めば、
-worker と supervisor を見分けられる。ただし今の記録の `agentType` はすべて `general-purpose` で
-（`statusline` の Skill も「見分けに使えない」と書く）、プラグインの定義で起動したときに定義の名前が入るかは
-見ていない（U2）。そこで、`agentType` が `ndf:` で始まらないときは、meta の `toolUseId` を親の記録から探し、
-起動した `Agent` 呼び出しの `subagent_type` を読む。起動の引数は親の記録に必ず残る。
+サブエージェントの中の PreToolUse の入力には `agent_id` と `agent_type` が付き、本体の入力には付かない
+（#829 の実測、Claude Code 2.1.280）。hook は入力だけで定義の名前を知れるので、ファイルを読まずに外れの
+起動を抜けられる。定義の名前の値の形（`ndf:supervisor` か、接頭辞の無い `supervisor` か）は見ていない（U2）。
+
+meta の `agentType` や親の記録の `subagent_type` を hook で読む案は採らない。入力に同じ値があり、親の記録は
+長い。集計（F4）は hook の入力を持たないので、その 2 つから引く。
 
 `description` に 1 時間の印を足して見分ける案は採らない。測定（`skill-stats --agents`・`token-usage.py`）は
-`description` の先頭語で持ち場を読み、印の形を 2 か所で持つことになる。`spawnDepth` で見分ける案も採らない。conductor が直接起動した worker
-（読解だけを出すとき）も深さ 1 になる。
+`description` の先頭語で持ち場を読み、印の形を 2 か所で持つことになる。`spawnDepth` で見分ける案も採らない。
+conductor が直接起動した worker（読解だけを出すとき）も深さ 1 になる。
 
 `general-purpose` を止めないのは、区切りの後に conductor が同じ持ち場を起動し直す形が、この変更を入れた
 版の conductor にしか無いためである。

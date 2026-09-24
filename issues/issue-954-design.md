@@ -70,7 +70,7 @@ flowchart LR
   C[conductor] -->|Agent: subagent_type| S1[supervisor<br/>5 分]
   C -->|Agent: subagent_type| S2[supervisor-waits<br/>1 時間]
   S1 -->|Skill cross-review| G[token-guard.sh<br/>判定: 区切り]
-  G -->|記録を読む| R[(subagents/agent-ID.jsonl<br/>meta.json)]
+  G -->|記録を読む| R[(subagents/agent-ID.jsonl)]
   G -->|止める| S1
   S1 -->|結果: 区切り| C
   S2 -->|Skill cross-review| G
@@ -142,20 +142,20 @@ supervisor の中で一度も走らない。区切りの判定が止めなけれ
 **`ndf:supervisor-waits` は対象にしない。** 1 時間の区間では区切りが損になる（決定 4）。
 
 **判定は安い順に行い、外れた時点で抜ける。** 順序は `NDF_SUPERVISOR_CUT_GUARD` → Skill の名前 → `agent_id` →
-meta の `agentType` → 親の記録の `subagent_type` → P と C である。対象外の Skill（`/ndf:fix` など）では meta も
-記録も読まない。親の記録を読むのは、meta の `agentType` が `ndf:` で始まらないときだけである。
+入力の `agent_type` → P と C である。対象外の Skill（`/ndf:fix` など）では記録を読まない。meta のファイルと
+親の記録は読まない。
 
 | 項目 | 値 |
 | --- | --- |
 | 対象 | 入力に `agent_id` があり、その supervisor の定義の名前（下の「定義の名前」）が `ndf:supervisor`（寿命 5 分）で、Skill の名前が `cross-review` / `cross-refactoring`（`ndf:` の有無を問わない） |
-| 定義の名前 | 1. `<記録のディレクトリ>/<セッション>/subagents/agent-<agent_id>.meta.json` の `agentType` が `ndf:` で始まれば、その値 2. そうでなければ（`general-purpose` か欠けている）、同じ meta の `toolUseId` を親の記録（入力の `transcript_path`）から探し、その `Agent` 呼び出しの `input.subagent_type` 3. どちらも取れなければ判定しない |
+| 定義の名前 | hook の入力の `agent_type`。サブエージェントの中の PreToolUse の入力には `agent_id` と `agent_type` が付き、本体の入力には付かない（#829 の実測、Claude Code 2.1.280。`issues/old/milestone-26-token-waits/issue-829-830-implementation-plan.md`）。無ければ判定しない |
 | 読む記録 | **supervisor 自身の記録** `${transcript_path%.jsonl}/subagents/agent-<agent_id>.jsonl`。入力の `transcript_path` はサブエージェントの中でも親（conductor）の記録を指すので、そのまま読まない（`token-guard.sh` の既存の注記、`statusline.sh` の組み立てと同じ） |
 | P | 読む記録の**先頭から**最初の assistant 呼び出しを探し、その文脈（`input + cache_read + cache_creation`）を取る。既存の `context_tokens()` は末尾 200 行だけを読んで最後の呼び出しを返すので、P には使えない。先頭から読む走査を別に持つ |
 | C | 読む記録の最後の assistant 呼び出しの文脈 |
 | 止める条件 | `C ≥ 比 × P`。比の既定は 2.5（決定 4） |
 | 止め方 | `permissionDecision: deny`。理由の欄に規則 11 の返し方（`結果: 区切り`・`次の工程`）を出す |
 | 止め続ける | **条件を満たす間は、同じ起動を何度でも止める。** conductor の判定の「1 度だけ通す」は持たない。supervisor の下には人がおらず、やり直すだけで越えられると、区切るかが LLM の裁量に戻るためである（中継の子の conductor と同じ扱い）。控えのファイルも持たない |
-| 止めない | `agent_id` が無い（conductor）・定義の名前が `ndf:supervisor` でない（`ndf:supervisor-waits`・worker・`general-purpose`・取れない）・記録か meta が読めない・P か C が読めない |
+| 止めない | `agent_id` が無い（conductor）・定義の名前が `ndf:supervisor` でない（`ndf:supervisor-waits`・worker・`general-purpose`・取れない）・記録が読めない・P か C が読めない |
 | 変える | `NDF_SUPERVISOR_CUT_RATIO`（既定 2.5）。`NDF_SUPERVISOR_CUT_GUARD=0` でこの判定を無効にする |
 
 **定義の名前で見分けるので、`subagent_type` を省いて起動した supervisor（conductor が古い起動の形を使った場合）は
@@ -184,7 +184,9 @@ meta の `agentType` → 親の記録の `subagent_type` → P と C である�
 
 **定義の名前を集計の軸に足す。** 設計の持ち場では前半（5 分）と区切りの後（1 時間）が同じ `description`
 （`設計: #954`）を持つので、今の `per_role` では同じ行に混ざり、AC9 が区間ごとに計算できない。`per_role` の
-鍵に `agent_type`（F3 の「定義の名前」と同じ引き方の値。取れなければ `-`）を足し、md の表にも列を足す。
+鍵に `agent_type` を足し、md の表にも列を足す。集計は hook の入力を持たないので、値は記録から引く。
+`subagents/agent-<ID>.meta.json` の `agentType` が `ndf:` で始まればその値、そうでなければ meta の `toolUseId` を
+親の記録から探し、その `Agent` 呼び出しの `input.subagent_type` を使う。どちらも取れなければ `-` にする。
 
 **あわせて `read_tokens_after_5m`（直前の間隔が 5 分を超えた呼び出しの読み込みの量の合計）を足す。** 1 時間の区間では
 5 分を超える待ちの後の呼び出しが読み込みになり、`is_rewrite` に当たらない。`rewrite_tokens_after_5m` だけでは、
@@ -277,7 +279,7 @@ stateDiagram-v2
 | 集め方 | 範囲 |
 | --- | --- |
 | 検索した語 | `結果`・`完了`・`関門`・`止まった`・`general-purpose` |
-| 検索した文書 | `agent-layers.md`・`SKILL.md`・`context-window.md`・`relay.md`・`waiting.md` |
+| 検索した文書 | `agent-layers.md`・`SKILL.md`・`context-window.md`・`relay.md`・`waiting.md`・`docs/specifications/ndf-agent-layers-unattended-run.md` |
 | 検索したスクリプト | `scripts/` の `.py` / `.sh`。`結果` を読むものは無い |
 
 | 規則 | どこ | 変える内容 |
@@ -290,6 +292,7 @@ stateDiagram-v2
 | 「落ちた層ごとの割り当て」の supervisor の行も「`最後に記録した工程` の頭から新しい supervisor」で、`subagent_type` を言わない | `agent-layers.md`「落ちた層ごとの割り当て」 | 同じく F1 の表で選ぶ、と足す |
 | 起動指示の「持ち場」は持ち場の表から全工程を写す | `agent-layers.md`「conductor → supervisor」の必須項目 | `区切り` の後の起動では `次の工程` から写す |
 | `prompt` の中身は「9 項目と、守る規則 10 個」 | 同じ節の引数の表 | 規則 11 を足すので 11 個にする |
+| 確定仕様の起動の指示は「守る規則 10 個」「`subagent_type` と `model` は省く」 | `docs/specifications/ndf-agent-layers-unattended-run.md`「起動の指示」 | 「規則 11 個・`subagent_type` は F1 の表で選ぶ」へ直す |
 | `plugins/ndf/agents/` は `dev.agy/agents` から参照され、agy にも同じ定義が配られる | `plugins/ndf/dev.agy/agents -> ../agents` | 変えない。agy へも 2 つの定義が届く（決定 11） |
 | 測定の層の判定は `spawnDepth` と `description` で、`agentType` を見ない | `token-usage.py` | `per_role` の鍵に `agent_type` を足す（F4）。持ち場の判定（`description` の先頭語）は変えない |
 
