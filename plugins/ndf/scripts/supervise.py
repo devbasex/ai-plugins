@@ -10,7 +10,7 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
 | run   | コマンドを実行して終わるまで待ち、出力をファイルへ残す | 使わない |
 | work  | 1 つの作業（修正・調査）を worker として行わせる | 道具あり（Read/Edit/Write/Bash/Grep/Glob） |
 | judge | 結果ファイルと規則の抜粋だけを渡し、次の段を決めさせる | 道具なし |
-| pr    | push して Draft の Pull Request を作る。本文は計画の値・コミット・変更の統計・run の結果から組む | 使わない |
+| pr    | push して Draft の Pull Request を作る（スクリプト）。本文は材料（計画の値・コミット・変更の統計・run の結果・設計文書）から LLM が書く。`"body": "template"` なら材料をそのまま本文にする | 本文だけ道具なし |
 
 使い方:
     supervise.py run <plan.json> [--state-dir DIR]
@@ -66,6 +66,12 @@ WORK_SYSTEM = """あなたは NDF の worker である。1 つの作業だけを
 - 結果: 完了 / 判断が要る / できなかった
 - 見つけたもの: <件数と場所。無ければ 無し>
 - 次にすること: <1 行。無ければ 無し>"""
+
+PR_SYSTEM = """あなたは Pull Request の本文だけを書く。道具は無い。
+渡された材料（コミット・変更の統計・テストの結果・設計文書）だけを根拠に、日本語の Markdown で書く。
+- 先頭に何を変えたかを 1〜3 文。続けて「## 変更の要点」「## テスト」の節
+- 課題を閉じる語（Fix #番号・Closes・Resolves など）を書かない。課題は「#番号」とだけ書く
+- 材料に無いことを書かない。本文だけを返し、前置きや囲みを付けない"""
 
 JUDGE_SYSTEM = """あなたは NDF の持ち場の判断だけを行う。道具は無い。
 渡された結果と規則だけを根拠に、次の段を 1 つ選ぶ。
@@ -241,6 +247,18 @@ class Supervisor:
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 """
+        if step.get("body", "llm") == "llm":
+            design = ""
+            for d in step.get("docs", []):
+                f = Path(self.cwd) / d
+                if f.is_file():
+                    design += f"\n### {d}\n" + f.read_text()[:TAIL]
+            res = call_claude(PR_SYSTEM, f"課題: {issues}\n要約の手がかり: {step.get('summary', '')}\n\n"
+                              f"## 材料\n{body}\n## 設計文書（抜粋）{design or ' 無し'}",
+                              None, self.cwd, step.get("timeout", 600))
+            self.add_usage("judge", res)
+            if res["ok"] and res["text"].strip():
+                body = res["text"].strip() + "\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
         found = subprocess.run(["gh", "pr", "list", "--head", branch, "--state", "open", "--json", "url",
                                 "--jq", ".[0].url"], cwd=self.cwd, capture_output=True, text=True).stdout.rstrip()
         if found:
