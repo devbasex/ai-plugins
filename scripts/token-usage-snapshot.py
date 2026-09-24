@@ -222,6 +222,36 @@ def parse_until(value: str | None) -> tuple[str, float]:
     return value, t
 
 
+def resolve_floor(out: Path, released: str, until: float, min_version: str | None) -> tuple[tuple[str, dict] | None, str | None]:
+    records = read_records(out) if out.is_dir() else []
+    prev = previous_record(records, released, until)
+    return prev, min_version or (last_version(prev[1]) if prev else None)
+
+
+def build(args, floor: str, prev, until_s: str, until: float, date: str) -> tuple[dict, str, list[str]]:
+    sessions, unlinked, skipped = tu.collect(args.claude_root, args.codex_root, args.kiro_root,
+                                             until=until, min_version=floor)
+    meta = {"by": list(tu.AXES), "min_version": floor, "until": until_s, "sessions": len(sessions),
+            "sessions_with_pr": sum(1 for s in sessions if s.prs), "unlinked_external": unlinked,
+            "skipped": skipped, "released": args.released, "previous": prev[0] if prev else None}
+    full = tu.aggregate(sessions, list(tu.AXES)) | {"meta": meta}
+    by_version = tu.aggregate(sessions, ["version"]) | {"meta": meta | {"by": ["version"]}}
+    diffs = diff_rows(by_version["per_pr"])
+    large = [f"{r['version']}（{ratio:+.0%}）" for r, _, ratio in diffs if ratio is not None and abs(ratio) > THRESHOLD]
+    md = render(released=args.released, until_s=until_s, date=date, floor=floor,
+                previous=prev[0].removesuffix(".json") + ".md" if prev else None, diffs=diffs, large=large,
+                by_version=by_version, sessions=sessions, changelog=args.changelog, until=until)
+    return full, md, large
+
+
+def write_record(out: Path, date: str, released: str, full: dict, md: str) -> str:
+    out.mkdir(parents=True, exist_ok=True)
+    name = target_name(out, date, released)
+    (out / f"{name}.json").write_text(json.dumps(full, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    (out / f"{name}.md").write_text(md, encoding="utf-8")
+    return name
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="版ごとのトークン消費と所要時間の記録を書き出す")
     home = Path(os.path.expanduser("~"))
@@ -243,28 +273,12 @@ def main(argv: list[str] | None = None) -> int:
     date = datetime.fromtimestamp(until, timezone.utc).strftime("%Y-%m-%d")
 
     try:
-        records = read_records(args.out) if args.out.is_dir() else []
-        prev = previous_record(records, args.released, until)
-        floor = args.min_version or (last_version(prev[1]) if prev else None)
+        prev, floor = resolve_floor(args.out, args.released, until, args.min_version)
         if not floor:
             print("前の記録が無い。--min-version で表の最初の版を渡す", file=sys.stderr)
             return 2
-        sessions, unlinked, skipped = tu.collect(args.claude_root, args.codex_root, args.kiro_root,
-                                                 until=until, min_version=floor)
-        meta = {"by": list(tu.AXES), "min_version": floor, "until": until_s, "sessions": len(sessions),
-                "sessions_with_pr": sum(1 for s in sessions if s.prs), "unlinked_external": unlinked,
-                "skipped": skipped, "released": args.released, "previous": prev[0] if prev else None}
-        full = tu.aggregate(sessions, list(tu.AXES)) | {"meta": meta}
-        by_version = tu.aggregate(sessions, ["version"]) | {"meta": meta | {"by": ["version"]}}
-        diffs = diff_rows(by_version["per_pr"])
-        large = [f"{r['version']}（{ratio:+.0%}）" for r, _, ratio in diffs if ratio is not None and abs(ratio) > THRESHOLD]
-        md = render(released=args.released, until_s=until_s, date=date, floor=floor,
-                    previous=prev[0].removesuffix(".json") + ".md" if prev else None, diffs=diffs, large=large,
-                    by_version=by_version, sessions=sessions, changelog=args.changelog, until=until)
-        args.out.mkdir(parents=True, exist_ok=True)
-        name = target_name(args.out, date, args.released)
-        (args.out / f"{name}.json").write_text(json.dumps(full, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
-        (args.out / f"{name}.md").write_text(md, encoding="utf-8")
+        full, md, large = build(args, floor, prev, until_s, until, date)
+        name = write_record(args.out, date, args.released, full, md)
     except OSError as e:
         print(f"記録を読めない・書けない: {e.strerror or e}", file=sys.stderr)
         return 1
