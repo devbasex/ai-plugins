@@ -26,7 +26,7 @@ uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest 
 | AC7 | 偽の `serena` が `bash` だけ 1 を返すとき、`failed` に `bash`、`language_servers` に残りが入り、`mcp_serena_excluded` に `bash health_check_exit_1` が入る。`--only python` では検出された残りが `not_selected` で入る。検証の途中で例外を投げても、SIGTERM を送っても、最後に通った言語だけが書かれる。すべて失敗すると `language_servers: []` と全言語の記録が書かれる。偽の `serena` が受けた環境変数と cwd を記録し、`project create` と `health-check` のどちらも `SERENA_HOME=.serena`・cwd が根であることを照らす | 結合 |
 | AC8 | リポジトリの写しを根にし、起動定義と同じ `SERENA_HOME=.serena` で一度 Serena を起動して、言語サーバが `<写し>/.serena/language_servers/static/` に入ったことを確かめる（相対の値は cwd から解決される。Serena 1.7.0 の `SerenaPaths` と `ls_manager.py`）。その配下の `BashLanguageServer` だけを壊し、`configure` の後に、同じ根と `SERENA_HOME` で起動した Serena で `python` の `find_symbol` / `find_referencing_symbols` が通る。`~/.serena` は写しも壊しもしない | 手動 |
 | AC9 | `--dry-run` の前後でリポジトリの全ファイルのハッシュが変わらない | 結合 |
-| AC10 | `--gitignore` なしで `.gitignore` が変わらず、ありで `.serena/project.yml` の行が 1 度だけ足される。`.serena/.gitignore` が Serena 1.7.0 の 2 行（`/cache` `/project.local.yml`）のとき、`--serena-gitignore` なしで変わらず `serena_gitignore_added` に 3 行が載り、ありで 3 行が 1 度だけ足されて `git status --porcelain .serena` に `serena_config.yml`・`logs/` が出ない | 結合 |
+| AC10 | `--gitignore` なしで `.gitignore` が変わらず、ありで `.serena/project.yml` の行が 1 度だけ足される。`.serena/.gitignore` が Serena 1.7.0 の 2 行（`/cache` `/project.local.yml`）のとき、`--serena-gitignore` なしで変わらず `serena_gitignore_added` に 3 行が載り、ありで 3 行が 1 度だけ足されて `git status --porcelain .serena` に `serena_config.yml`・`logs/`・`language_servers/`・`cache/` が出ない。`.serena/` が無い根で `--serena-gitignore` なしに走らせると、`.serena/.gitignore` は `project create` が作った 2 行のまま | 結合 |
 | AC11 | ai-plugins（python + bash）と carmo-system-serverside（python + typescript）の写しで、`configure` → `check` を通す | 手動 |
 | AC12 | `project.yml` を追跡した状態で `.worktrees/<名前>` の作業ツリーで起動した Serena の `find_symbol` の結果が作業ツリーのパスを指す。作業ツリーでの初回の `find_symbol` の所要と、`<作業ツリー>/.serena/language_servers/` の大きさを記録する（決定 16） | 手動 |
 | AC13 | `installed_plugins.json` の有無・中身の組（無い → 1、壊れた JSON → 2 を含む）と PATH の組で `missing` と終了コード 0 / 1 / 2 を照らす。`--runtime codex` では壊れた JSON でも 2 にならない | 単体 |
@@ -34,7 +34,7 @@ uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest 
 | AC15 | PATH に `shellcheck` が無い / ある で `missing` を照らす | 単体 |
 | 運用・保守性（非機能） | 一時の対応表に、既にある種類の追加の検査（`shellcheck`）を持つ架空の言語を足すと、コードを変えずに `detect` と `check` に載る。知らない `extra_checks` の名前で `check` が終了コード 2 になる | 単体 |
 | AC16 | 配布物の全 `plugin.json` と `marketplace.json` に `lspServers` が無い | 単体 |
-| AC17・AC18 | 食い違いあり / 欠けあり / 揃っている / `project.yml` が無い / Serena が自動で作った印の無い `project.yml` / 検証に失敗して外した言語がある / `--only` で外した言語がある / `--only` でしきい値未満の言語を名指しした の 8 つで、SessionStart の出力の有無を照らす（前の 2 つ以外は、揃っていれば何も出さない）。印の無い `project.yml` では PreToolUse も数えない。`--client codex` で Claude Code の LSP の欠けを出さない。環境に `CLAUDE_PLUGIN_ROOT` が無い `--client claude-code` は何も出さない | 単体 |
+| AC17・AC18 | 食い違いあり / 欠けあり / 揃っている / `project.yml` が無い / Serena が自動で作った印の無い `project.yml` / 検証に失敗して外した言語がある / `--only` で外した言語がある / `--only` でしきい値未満の言語を名指しした / `project.local.yml` が `language_servers` を上書きし外した言語が `project.yml` にある（外した言語を知らせない）の 9 つで、SessionStart の出力の有無を照らす（前の 2 つ以外は、揃っていれば何も出さない）。印の無い `project.yml` では PreToolUse も数えない。`--client codex` で Claude Code の LSP の欠けを出さない。環境に `CLAUDE_PLUGIN_ROOT` が無い `--client claude-code` は何も出さない | 単体 |
 | AC19 | `.md` / `.json` / `.py`（採った言語）/ `.ts`（採っていない言語）の `Read` を 3 回ずつ送り、拒否が `.py` だけで出る | 単体 |
 | AC20 | grep 3・読み込み 3・混在 4（grep 2 回 + 読み込み 2 回）で拒否し、数が 0 に戻る。拒否から 119 秒は拒否せず、120 秒で再び数える。前回から 1001 秒空けた 3 回目の読み込みでは拒否しない（時刻を差し替える）。`search_for_pattern` と `get_diagnostics_for_file` の呼び出しでは数が戻らない | 単体 |
 | AC21 | `permission_mode` が `acceptEdits` / `auto` / `default` / `bypassPermissions` のとき、Serena のツールで `allow` が出るのは前の 2 つだけ | 単体 |
@@ -43,7 +43,7 @@ uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest 
 | AC24 | Python / TypeScript（`typescript@5`）/ PHP の小さなリポジトリで、隔離した claude に型を壊す編集をさせ、記録の `<new-diagnostics>` を見る | 手動 |
 | AC25 | 同じ 3 つのリポジトリで `codex exec` に `find_referencing_symbols` と `get_diagnostics_for_file` を呼ばせ、記録（`~/.codex/sessions`）で結果を見る。hook は、`project.yml` と食い違う写し（言語を 1 つ抜いたもの）で `codex exec` を走らせて通知の文が記録の文脈に載ることを見る。続けて `sed -n 1,80p <採った言語のファイル>` を 3 回打たせ、3 回目のシェルの呼び出しが拒否の理由の文とともに実行されないことを見る。Skill は `codex exec` から呼ばせ、`$ROOT` が解決されて `configure --dry-run` が終了コード 0 で返ることを見る | 手動 |
 | AC26・AC27 | #818 §3 の題材を、`project.yml` を直した ai-plugins の写しで、指示なしの 2 条件（LSP のみ / Serena のみ）× 3 回、`claude -p --output-format stream-json` で走らせ、ツールの呼び出しとツール結果の文字数を数える。`initial_instructions` が読まれた回数も数える | 手動 |
-| AC28・AC29 | `claude plugin validate .`・`bash scripts/build-runtime-plugins.sh --check`・`bash plugins/mcp/mcp-serena/dev.kiro/install.sh --dry-run` の終了コード。installer が一時の HOME に生成した `agentSpawn` のコマンドを `CLAUDE_PLUGIN_ROOT` の無い環境で走らせ、何も出ない | 結合（継続的統合） |
+| AC28・AC29 | `claude plugin validate .`・`bash scripts/build-runtime-plugins.sh --check`・`bash plugins/mcp/mcp-serena/dev.kiro/install.sh --dry-run` の終了コード。`--dry-run` は生成の前に終わるため、別に一時のプロジェクトを `--project` に渡して dry-run なしで走らせ、生成された `<一時のプロジェクト>/.kiro/agents/default.json` の `agentSpawn` のコマンドを `CLAUDE_PLUGIN_ROOT` の無い環境で走らせ、何も出ない | 結合（継続的統合） |
 | AC30 | `git ls-files .serena` | 結合（済） |
 
 `.md` の文言を照合するテストは書かない（`AGENTS.md`）。Skill の `SKILL.md` は `python3 scripts/check-skill-frontmatter.py` と `check-markdown-links.py` が見る。

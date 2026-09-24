@@ -108,7 +108,7 @@
 - [ ] AC7: 設定のスクリプトは、採る言語を 1 つずつ起動の検証にかけ、失敗した言語を設定から外す。外した言語と理由を出力と `.serena/project.yml` に残す（`--only` で名指しされなかった言語も同じ）
 - [ ] AC8: 壊れた言語サーバが 1 つある状態で設定のスクリプトを走らせると、その言語だけが外れ、残りの言語で `find_symbol` と `find_referencing_symbols` が通る
 - [ ] AC9: `--dry-run` では検出と差分の表示だけを行い、ファイルを 1 つも書かない
-- [ ] AC10: `.gitignore` は利用者が `--gitignore` を、`.serena/.gitignore` は `--serena-gitignore` を渡したときだけ書き換える。渡さなければ触らない。`--serena-gitignore` の後、導入先の `git status --porcelain .serena` に `serena_config.yml`・`logs/`・`language_servers/`・`cache/` が出ない
+- [ ] AC10: `.gitignore` は利用者が `--gitignore` を、`.serena/.gitignore` は `--serena-gitignore` を渡したときだけ書き換える。渡さなければ `configure` 自身は触らない（`project.yml` が無いときに `serena project create` が作る Serena の既定の `.serena/.gitignore` は許す）。`--serena-gitignore` の後、導入先の `git status --porcelain .serena` に `serena_config.yml`・`logs/`・`language_servers/`・`cache/` が出ない
 - [ ] AC11: 言語構成の違う 2 つ以上のリポジトリで、検出 → 設定 → 起動の検証 → 導入の検査が通る。少なくとも 1 つは Python 以外が主のもの（例: `/work/carmo-system-serverside`）
 - [ ] AC12: `project.yml` が作業ツリーにある（追跡している。決定 12）とき、作業ツリー（`.worktrees/<ブランチ名>`）で起動した Serena が、作業ツリーのプロジェクトを有効にする（Claude Code は `find_symbol` の結果のパス、Codex は `get_current_config` で確かめる。Claude Code の文脈には `get_current_config` が無い）。追跡しないときの振る舞いは U4 の解消を待つ
 

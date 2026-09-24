@@ -265,7 +265,7 @@ plugins/mcp/mcp-serena/
 
 **外した言語は最上位のキー `mcp_serena_excluded` に残す。** 理由は `failed.reason` の値か、`--only` で名指しされなかった `not_selected` である。**このキーがあることが「`configure` で設定した」印である。** Serena 1.7.0 は `--project-from-cwd` で開いた根に `project.yml` が無ければ自動で作る（`ProjectConfig.autogenerate`）ため、ファイルの有無では判定しない。SessionStart の突き合わせは、検出した言語から `language_servers` とこのキーの言語を除いた残りを「設定に無い言語」とする。逆向き（`language_servers` にあってしきい値に届かない言語。`--only` の名指し）は知らせない（決定 9）。
 
-**`project.local.yml` の `language_servers` は `project.yml` を上書きする**（Serena 1.7.0 の `ProjectConfig.load`）。`check` と hook は、そこに `language_servers` があればその値を採った言語として読む。`configure` はそこに `language_servers` を見つけたら書かずに終了コード 3 で止め、理由を出力に載せる。
+**`project.local.yml` の `language_servers` は `project.yml` を上書きする**（Serena 1.7.0 の `ProjectConfig.load`）。`check` と hook は、そこに `language_servers` があればその値を採った言語として読む。印と外した言語（`mcp_serena_excluded`）は常に `project.yml` から読む。`configure` はそこに `language_servers` を見つけたら書かずに終了コード 3 で止め、理由を出力に載せる。
 
 - 無いときは `serena project create --ls <言語> ... --name <ディレクトリ名> <root>` で作る（非対話。#818 §8）。作った後に同じ書き換えを通す。環境と cwd は `health-check` と同じにする（「処理の流れ: 導入」）
 - 書き換えは行単位で行う。対象のキーの行からインデントの無い次のキーまでを 1 ブロックとして置き換える。ブロックの形（`key: []` / `key:` の後に `- 値` の行）以外（流れの形の非空の配列・アンカー）を見つけたら書かずに終了コード 3 で止める
@@ -434,6 +434,7 @@ sequenceDiagram
   end
 ```
 
+- 終了コード 3 の検査（`project.local.yml` の `language_servers`・読めない形）は、書き換えの `try` / `finally` に入る前に済ませて返す。3 で止まるときは `finally` を通らず、何も書かない
 - 検証の間、`project.yml` を 1 言語ずつ書き換える。**終わったら必ず最後の値を書く**（例外でも `finally` で、通った言語だけを書く。通った言語が 0 なら `language_servers: []` と、失敗した言語を `mcp_serena_excluded` に書く）。SIGTERM / SIGINT は例外へ変えて同じ `finally` を通す。SIGKILL で 1 言語のまま残っても、SessionStart が「設定に無い言語」として知らせ、`configure` の打ち直しで直る
 - `configure` が起動する `serena` のすべて（`project create` と `health-check`）に、起動定義と同じ `SERENA_HOME=.serena` を渡し、cwd を `--root` にする。既定の `~/.serena` で走らせると利用者の全体の設定を書き換え得る。これで、検証する言語サーバのキャッシュが、ランタイムが起動した Serena の使うもの（`<root>/.serena/language_servers/`）と一致する
 - 1 言語の検証に 120 秒の上限を置く。上限に達したら失敗として外す
@@ -472,7 +473,7 @@ sequenceDiagram
 
 | 大項目 | 実現方式 |
 | --- | --- |
-| 性能 | SessionStart は `git ls-files -z` を 1 回と、設定のファイル（`project.yml`・`project.local.yml`・対応表・`installed_plugins.json`）を読むだけにする。PreToolUse は `project.yml`（あれば `project.local.yml`）と数の記録を読むだけにし、`git` を呼ばない。採った言語の拡張子は `project.yml` の `language_servers` と対応表から毎回求める（キャッシュを持たない） |
+| 性能 | SessionStart は `git ls-files -z` を 1 回と、設定のファイル（`project.yml`・`project.local.yml`・対応表・`--runtime claude-code` のときだけ `installed_plugins.json`）を読むだけにする。PreToolUse は `project.yml`（あれば `project.local.yml`）と数の記録を読むだけにし、`git` を呼ばない。採った言語の拡張子は `project.yml` の `language_servers` と対応表から毎回求める（キャッシュを持たない） |
 | 可用性 | 1 言語ずつの検証で、壊れた言語を設定から外す（AC7）。hook は例外を握りつぶして 0 で終わる |
 | 運用・保守性 | 言語の追加は `languages.json` の 1 要素。追加の検査だけは `check.py` に名前付きの関数を足す |
 | 移行性 | mcp-serena の更新は `project.yml` を書き換えない。既存の利用者は、SessionStart の通知を見て Skill を 1 度打つ |
