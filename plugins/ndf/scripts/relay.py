@@ -1294,6 +1294,11 @@ def block_inner(body: str, a: int, b: int) -> list[str]:
     return [x.rstrip("\r") for x in body.split("\n")[a + 1:b]]
 
 
+def has_direct_alias(text: str, found: list[tuple[int, int]]) -> bool:
+    return any(any(x.startswith("alias claude=") for x in block_inner(text, a, b))
+               for a, b in found)
+
+
 def place_copy_to(dst: str, body: bytes, mode: int = 0o755) -> bool:
     if _read_bytes(dst) == body:
         return False
@@ -1435,8 +1440,7 @@ def _uninstall_locked() -> int:
         found, _, text = rc_blocks(rc)
         if not found:
             continue
-        direct_alias = direct_alias or any(
-            any(x.startswith("alias claude=") for x in block_inner(text, a, b)) for a, b in found)
+        direct_alias = direct_alias or has_direct_alias(text, found)
         bak = rewrite_blocks(rc, text, None)
         removed_rc.append(rc)
         lines.append(f"{rc} の囲みを外した（バックアップ {bak}）")
@@ -1492,8 +1496,7 @@ def cmd_status() -> int:
         elif not found:
             out(f"{rc}: 囲みは無い")
         else:
-            direct = any(any(x.startswith("alias claude=") for x in block_inner(text, a, b))
-                         for a, b in found)
+            direct = has_direct_alias(text, found)
             kind = "直の alias（10.17.4 の形）" if direct else "読み込みの行"
             who = "。10.17.4 が自動で足した" if rc in auto else ""
             out(f"{rc}: 囲みがある（{kind}{who}）")
