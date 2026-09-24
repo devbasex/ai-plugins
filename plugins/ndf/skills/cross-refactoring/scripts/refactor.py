@@ -60,12 +60,8 @@ from refactor_lib.commands.report import (  # noqa: E402
     cmd_report,
     cmd_status,
 )
-from refactor_lib.commands.setup import (  # noqa: E402
-    PHASE_NAMES,
-    cmd_init,
-    cmd_start_phase,
-    runtime_list,
-)
+from refactor_lib.commands.phases import PHASE_NAMES, cmd_start_phase  # noqa: E402
+from refactor_lib.commands.setup import cmd_init, runtime_list  # noqa: E402
 from refactor_lib.measure import summary_extra  # noqa: E402
 
 import run_metrics  # noqa: E402
