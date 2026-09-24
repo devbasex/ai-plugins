@@ -172,7 +172,9 @@ plugins/ndf/
 | `relay` | `約 {N} 秒後に自動で新しい会話へ切り替わる。キー入力やスクロールをせずに、そのまま待つ（切り替わらずに ndf-relay: で始まる 1 行が出たら、その案内に従う）` |
 | `outside` | `/exit してから claude を起動し、下の中身を最初の入力として貼り付ける（/ndf:install-wrapper で中継を入れると自動になる）` |
 
-`N = ceil(quiet) + 10`。`quiet` は `_num("NDF_RELAY_QUIET", 5)` で読み、負なら 5 とする。10 は切り替えの
+`N = ceil(max(quiet, 0)) + 10`。`quiet` は中継本体と同じ `_num("NDF_RELAY_QUIET", 5)` で読む。数でなければ 5 になる。
+負の値は丸めない。中継本体は負の静まりを待たずに通すため、待つ秒数を 0 として数え、告知と実際の待ちを
+そろえる。10 は切り替えの
 目安（前提 2）で、`relay.py` の定数 `SWITCH_ESTIMATE` に置く。
 
 ### 処理の流れ
@@ -275,7 +277,8 @@ LLM が組み立てた中身をスクリプトが写すだけになり、減る�
 | --- | --- | --- | --- | --- |
 | AC1 | 中継の直接の子で実行する | `relay` | 告知の 1 文。N は `NDF_RELAY_QUIET`（既定 5）の切り上げ + 10（既定で 15） | 0 |
 | AC2 | `NDF_RELAY_DIR` が無い・中継が動いていない・直接の子でない | `outside` | 貼り付けの手順の 1 文 | 0 |
-| AC3 | `NDF_RELAY_QUIET` が数でない・負 | AC1 と同じ | N を既定 5 で数える（中継本体の `_num` と同じ） | 0 |
+| AC3 | `NDF_RELAY_QUIET` が数でない | AC1 と同じ | N を既定 5 で数える（中継本体の `_num` と同じ。N = 15） | 0 |
+| AC3b | `NDF_RELAY_QUIET` が負 | AC1 と同じ | 静まりを 0 として数える（中継本体は負の静まりを待たない。N = 10） | 0 |
 
 **規則と文面:**
 
@@ -323,7 +326,7 @@ LLM が組み立てた中身をスクリプトが写すだけになり、減る�
 | --- | --- |
 | AC1 | `test_relay.py`: 中継の作業ディレクトリと `child.pid` を用意した子として `notice` を実行し、1 行目 `relay`・2 行目の秒数（既定 15、`NDF_RELAY_QUIET=7.5` で 18）・終了コード 0 |
 | AC2 | `test_relay.py`: `NDF_RELAY_DIR` 無し・中継停止・直接の子でない、の 3 通りで 1 行目 `outside`・終了コード 0 |
-| AC3 | `test_relay.py`: `NDF_RELAY_QUIET=abc` と `-3` で秒数 15 |
+| AC3・AC3b | `test_relay.py`: `NDF_RELAY_QUIET=abc` で秒数 15、`-3` で秒数 10 |
 | AC4・AC5・AC5b・AC7・AC7b | レビューで読む（文言を照合するテストは書かない。AGENTS.md） |
 | AC6 | `test_token_guard.py`: 中継の下で上限を超えたとき、拒否文に `notice` の 2 行目が含まれる。外では従来の拒否文と一致する |
 | AC8 | 既存の `test_relay.py` の `is-child` と `run` のテストが変わらず通る |
