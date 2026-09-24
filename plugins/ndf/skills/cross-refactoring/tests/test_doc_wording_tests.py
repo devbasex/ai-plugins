@@ -1,8 +1,8 @@
-"""適用ラウンドの検証が、`.md` の文言を固定するテストの追加を弾くことのテスト（#723）。
+"""テストの追加と実装の取り込みが、`.md` の文言を固定するテストの追加を弾くことのテスト（#723 / #933）。
 
 **提案の基準だけでは、実装担当が書いたテストに混じったときに止まらない。** 取り込みで
 `target` が `.md` の提案を見送るのに加えて、追加したテストの行が**追跡している `.md`**
-を指していれば群を取り消す。`.md` で終わる文字列をすべて弾く形は採らない
+を指していればその項目を取り消す（実装計画 I5）。`.md` で終わる文字列をすべて弾く形は採らない
 （一時ファイルの `.md` を入力に渡すテストは残す）。
 """
 from __future__ import annotations
@@ -24,8 +24,7 @@ def _fact(changes: dict, sha: str = "abc1234") -> dict:
     return {
         "sha": sha, "exists": True, "test_status": "pass", "touches_tests": True,
         "diff_lines": 3, "files": sorted(changes),
-        "trailers": {"Item-Id": "T1-001", "Round": "1",
-                     "Impl-Runtime": "codex", "Impl-Model": "gpt-5.5"},
+        "trailers": {"Item-Id": "I-001", "Impl-Runtime": "codex", "Impl-Model": "gpt-5.5"},
         "test_changes": changes,
     }
 
@@ -47,7 +46,7 @@ def test_only_literals_naming_a_tracked_markdown_hit(verify):
 
 
 def test_a_literal_only_in_unchanged_lines_does_not_hit(verify):
-    """見るのは追加行だけ。既存の行の文字列は、この群が足したものではない。"""
+    """見るのは追加行だけ。既存の行の文字列は、この項目が足したものではない。"""
     facts = [_fact({
         "tests/test_old.py": _change(['P = "README.md"\n'], ["def test_x():\n", "    pass\n"]),
     })]
@@ -98,7 +97,7 @@ def _commit_test(work, body: str) -> str:
 def test_an_added_line_using_a_constant_imported_from_a_helper_hits(verify, gitfacts, repo):
     """同じディレクトリの補助モジュールから import した定数も追う。
 
-    補助モジュールはこの群で触っていないため、git から読む。
+    補助モジュールはこのコミットで触っていないため、git から読む。
     """
     sha = _commit_test(repo, (
         "from doc_helpers import DOC, TMP\n\n"
@@ -124,24 +123,30 @@ def test_the_tracked_markdown_list_comes_from_git(gitfacts, repo):
     assert gitfacts.tracked_markdown(str(repo)) == ["README.md"]
 
 
-# ---------- 適用ラウンドの検証への配線 ----------
+# ---------- テストの追加と実装の取り込みへの配線 ----------
 
-def test_the_apply_round_fails_with_the_reason(verify):
-    items = [{"item_id": "T1-001", "technique": "", "estimated_diff_lines": 100,
-              "path": "tests/test_full.py"}]
-    facts = [_fact({
-        "tests/test_full.py": _change([], ['    p = ROOT / "README.md"\n']),
-    })]
-    problem = verify.verify_apply_round(items, facts, tracked_md=TRACKED)
+ITEM = {"id": "I-001", "technique": "", "estimated_diff_lines": 100, "path": "tests/test_full.py"}
+
+
+def _state(tmp_path) -> dict:
+    return {"worktrees": {"work": str(tmp_path)}}
+
+
+def test_the_implement_intake_rejects_the_item_with_the_reason(cmd_implement, tmp_path):
+    facts = [_fact({"tests/test_full.py": _change([], ['    p = ROOT / "README.md"\n'])})]
+    problem = cmd_implement._implement_problem(ITEM, facts, [], TRACKED, _state(tmp_path))
     assert problem is not None
     assert problem.startswith(REASON)
     assert "tests/test_full.py: README.md" in problem
 
 
-def test_the_apply_round_passes_a_temporary_markdown(verify):
-    items = [{"item_id": "T1-001", "technique": "", "estimated_diff_lines": 100,
-              "path": "tests/test_tmp.py"}]
-    facts = [_fact({
-        "tests/test_tmp.py": _change([], ['    p = tmp_path / "a.md"\n']),
-    })]
-    assert verify.verify_apply_round(items, facts, tracked_md=TRACKED) is None
+def test_the_implement_intake_passes_a_temporary_markdown(cmd_implement, tmp_path):
+    facts = [_fact({"tests/test_tmp.py": _change([], ['    p = tmp_path / "a.md"\n'])})]
+    assert cmd_implement._implement_problem(ITEM, facts, [], TRACKED, _state(tmp_path)) is None
+
+
+def test_the_add_tests_intake_rejects_the_item_with_the_reason(cmd_implement, tmp_path):
+    facts = [_fact({"tests/test_full.py": _change([], ['    p = ROOT / "README.md"\n'])})]
+    facts[0]["files"] = ["tests/test_full.py"]
+    problem = cmd_implement._test_commit_problem(facts, [], TRACKED, _state(tmp_path))
+    assert problem is not None and problem.startswith(REASON)

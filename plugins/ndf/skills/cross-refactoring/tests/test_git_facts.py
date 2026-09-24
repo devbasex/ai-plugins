@@ -43,7 +43,7 @@ def _commit(repo, message, files):
 
 
 TRAILERS = (
-    "\n\nItem-Id: R1-001\nRound: 1\nImpl-Runtime: codex\nImpl-Model: gpt-5.5"
+    "\n\nItem-Id: I-001\nImpl-Runtime: codex\nImpl-Model: gpt-5.5"
 )
 
 
@@ -64,8 +64,7 @@ def test_facts_come_from_a_real_repository(gitfacts, work):
     assert [f["sha"] for f in facts] == [first, second]
     assert all(f["exists"] for f in facts)
     assert facts[0]["trailers"] == {
-        "Item-Id": "R1-001", "Round": "1",
-        "Impl-Runtime": "codex", "Impl-Model": "gpt-5.5",
+        "Item-Id": "I-001", "Impl-Runtime": "codex", "Impl-Model": "gpt-5.5",
     }
     # 現状固定テストの追加が先行している
     assert facts[0]["touches_tests"] is True
@@ -158,8 +157,8 @@ def test_failing_test_is_detected_by_running_it(gitfacts, work):
     assert base != sha
 
 
-def test_fix_commits_pass_verification_through_real_git(verify, gitfacts, work):
-    """修正コミットが git 経由の検証を通ること。
+def test_fix_commits_pass_verification_through_real_git(cmd_converge, gitfacts, work):
+    """修正コミットが git 経由の検証を通ること（`merge-fix` の検査）。
 
     範囲に空集合を渡していた頃は、全ての修正コミットが必ず不正扱いになっていた。
     """
@@ -170,7 +169,10 @@ def test_fix_commits_pass_verification_through_real_git(verify, gitfacts, work):
     facts = gitfacts.collect_commit_facts(
         str(work), [sha], set(ordered), "true", "main"
     )
-    assert verify.verify_fix_commit(facts[0]) is None
+    state = {"target_scope": ["src", "tests"]}
+    assert cmd_converge._fix_problems(state, facts, {"I-001"}) == []
+    # 修正の対象でない項目のコミットは弾く（`Item-Id` だけで対応づける。I4）
+    assert cmd_converge._fix_problems(state, facts, {"I-002"})
 
 
 def test_revert_order_comes_from_history_not_from_the_claim(gitfacts, work):
@@ -197,7 +199,7 @@ def test_reverting_in_history_order_succeeds(gitfacts, work):
     second = _commit(work, "two", {"src/a.py": "a = 2\n"})
 
     state = {"worktrees": {"work": str(work)}}
-    item = {"item_id": "R1-001", "commits": [first, second]}   # 古い順の申告
+    item = {"item_id": "I-001", "commits": [first, second]}   # 古い順の申告
     assert gitfacts.revert_item_commits(state, item) == 2
     assert item["reverted"] is True
 
@@ -300,7 +302,7 @@ def test_read_result_returns_a_value_when_the_file_is_missing(gitfacts, tmp_path
     （#728）。何で終わるかは読んだ側（取り込み）が決める。
     """
     state = {"id": 130, "tmp_dir": str(tmp_path)}
-    outcome = gitfacts.read_result(state, "claude", "apply", 1)
+    outcome = gitfacts.read_result(state, "claude", "implement")
 
     assert outcome.payload is None
     assert outcome.reason == "missing"
@@ -311,16 +313,16 @@ def test_read_result_returns_a_value_when_the_file_is_missing(gitfacts, tmp_path
 
 def test_read_result_returns_unparsable_for_broken_json(gitfacts, tmp_path):
     """JSON として読めない結果ファイルは、理由 `unparsable` の結果なしになる。"""
-    (tmp_path / "claude-apply-r1-result.json").write_text(
+    (tmp_path / "claude-implement-rf130-result.json").write_text(
         '{"items": [', encoding="utf-8")
     state = {"id": 130, "tmp_dir": str(tmp_path)}
 
-    outcome = gitfacts.read_result(state, "claude", "apply", 1)
+    outcome = gitfacts.read_result(state, "claude", "implement")
 
     assert (outcome.payload, outcome.reason) == (None, "unparsable")
 
 
-@pytest.mark.parametrize("body", ['[{"item_id": "R1-001"}]', "42"])
+@pytest.mark.parametrize("body", ['[{"item_id": "I-001"}]', "42"])
 def test_read_result_returns_unparsable_when_the_json_is_not_an_object(
     gitfacts, tmp_path, body
 ):
@@ -329,49 +331,37 @@ def test_read_result_returns_unparsable_when_the_json_is_not_an_object(
     呼び出し側は `payload.get(...)` を呼ぶため、辞書でないものを渡すと
     `AttributeError` になって進行が止まる。読み込みの時点で結果なしへ寄せる。
     """
-    (tmp_path / "claude-apply-r1-result.json").write_text(body, encoding="utf-8")
+    (tmp_path / "claude-implement-rf130-result.json").write_text(body, encoding="utf-8")
     state = {"id": 130, "tmp_dir": str(tmp_path)}
 
-    outcome = gitfacts.read_result(state, "claude", "apply", 1)
+    outcome = gitfacts.read_result(state, "claude", "implement")
 
     assert (outcome.payload, outcome.reason) == (None, "unparsable")
 
 
 def test_read_result_reads_the_stem_of_each_phase(gitfacts, tmp_path):
-    """名前の幹は工程ごとに変わる。最終ゲートの修正だけラウンド番号を持たない。"""
-    (tmp_path / "codex-fix-r2-result.json").write_text('{"ok": 1}', encoding="utf-8")
+    """名前の幹は工程ごとに変わる。最終ゲートの修正だけ実行の番号を持たない（I3）。"""
+    (tmp_path / "codex-fix-rf130-result.json").write_text('{"ok": 1}', encoding="utf-8")
     (tmp_path / "codex-final-fix-result.json").write_text('{"ok": 2}', encoding="utf-8")
+    (tmp_path / "codex-plan-rf130-result.json").write_text('{"ok": 3}', encoding="utf-8")
     state = {"id": 130, "tmp_dir": str(tmp_path)}
 
-    assert gitfacts.read_result(state, "codex", "fix", 2).payload == {"ok": 1}
+    assert gitfacts.read_result(state, "codex", "fix").payload == {"ok": 1}
     assert gitfacts.read_result(state, "codex", "final-fix").payload == {"ok": 2}
+    assert gitfacts.read_result(state, "codex", "plan").payload == {"ok": 3}
+    assert gitfacts.read_result(state, "codex", "implement").reason == "missing"
 
 
-def test_find_item_returns_none_for_a_missing_id_when_not_required(gitfacts):
+def test_find_item_returns_none_for_a_missing_id_when_not_required(items):
     """現状固定: `required=False` で存在しない項目 ID を探すと None を返す。
 
-    取り消しや積み直しの経路（`_commit_owner` など）は、状態に残っていない
-    項目 ID を渡しても落とさずに読み飛ばせることを前提にしている。
+    取り消しや積み直しの経路は、状態に残っていない項目 ID を渡しても落とさずに
+    読み飛ばせることを前提にしている。
     """
-    state = {"items": [{"item_id": "R1-001"}, {"item_id": "R1-002"}]}
+    state = {"items": [{"id": "I-001"}, {"id": "I-002"}]}
 
-    assert gitfacts.find_item(state, "R9-999", required=False) is None
-
-
-def test_scoped_item_ids_falls_back_to_all_items_when_apply_round_is_missing(
-    gitfacts,
-):
-    """現状固定: 現在の適用ラウンドの群がなければ entry 全体の項目を返す。"""
-    entry = {
-        "apply_round": 3,
-        "items": ["R2-003", "R2-001", "R2-002"],
-        "apply_rounds": [
-            {"apply_round": 1, "items": ["R2-001"]},
-            {"apply_round": 2, "items": ["R2-002"]},
-        ],
-    }
-
-    assert gitfacts.scoped_item_ids(entry) == ["R2-003", "R2-001", "R2-002"]
+    assert items.find_item(state, "I-999", required=False) is None
+    assert items.find_item(state, "I-002") == {"id": "I-002"}
 
 
 def test_revert_item_commits_failure_message_includes_item_id(gitfacts, work, capsys):
@@ -380,14 +370,14 @@ def test_revert_item_commits_failure_message_includes_item_id(gitfacts, work, ca
     second = _commit(work, "two", {"src/a.py": "a = 2\n"})
 
     state = {"worktrees": {"work": str(work)}}
-    item = {"item_id": "R1-001", "commits": [first]}
+    item = {"item_id": "I-001", "commits": [first]}
 
     with pytest.raises(SystemExit) as e:
         gitfacts.revert_item_commits(state, item)
 
     assert e.value.code == 4
     err = capsys.readouterr().err
-    assert "❌ R1-001 のコミット" in err
+    assert "❌ I-001 のコミット" in err
     assert "を取り消せませんでした" in err
     assert f"（HEAD を {second} へ戻しました）" in err
     assert _git("rev-parse", "HEAD", cwd=work).stdout.strip() == second

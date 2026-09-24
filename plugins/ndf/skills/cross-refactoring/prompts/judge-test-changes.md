@@ -44,13 +44,14 @@ assert price(order) == (
 ```json
 {
   "verdicts": [
-    {"path": "tests/test_a.py", "verdict": "unchanged", "reason": "取り込み元だけが変わった"},
-    {"path": "tests/test_b.py", "verdict": "changed", "reason": "270 が 300 になっている"},
-    {"path": "tests/test_c.py", "verdict": "undecidable", "reason": "フィクスチャの中身を追えない"}
+    {"item_id": "I-001", "path": "tests/test_a.py", "verdict": "unchanged", "reason": "取り込み元だけが変わった"},
+    {"item_id": "I-002", "path": "tests/test_b.py", "verdict": "changed", "reason": "270 が 300 になっている"},
+    {"item_id": "I-002", "path": "tests/test_c.py", "verdict": "undecidable", "reason": "フィクスチャの中身を追えない"}
   ]
 }
 ```
 
+- `item_id` は差分の見出し（`# I-001`）の項目。**同じファイルが 2 つの項目に現れたら、項目ごとに 1 件ずつ書く**
 - `verdict` は `unchanged` / `changed` / `undecidable` のいずれか
 - `reason` は 1 文。**何を見てそう決めたか**を書く
 - **対象のすべてのファイルについて 1 件ずつ書く。** 抜けたものは `undecidable` として扱われます

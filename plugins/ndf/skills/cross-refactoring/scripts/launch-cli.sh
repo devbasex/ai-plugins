@@ -88,6 +88,9 @@ esac
 }
 
 configure_phase
+# 段 2 の判定の材料は `merge-implement` が書き出す。**渡すものが無いまま起動しない。**
+[ "$PHASE" != judge-test-changes ] || [ -s "$TMP_DIR/test-diff-rf$ID.diff" ] || {
+  echo "判定する差分がありません: $TMP_DIR/test-diff-rf$ID.diff" >&2; exit 1; }
 resolve_print_timeout
 
 # Skill の配置先はランタイムで違う。**プロンプトに明示パスを必ず書く**ため、

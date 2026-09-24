@@ -12,19 +12,21 @@ from __future__ import annotations
 
 import pytest
 
-from crossref_helpers import make_state, read_state
+from crossref_helpers import make_state_v2, read_state
 
 COMMENT_URL = "https://github.com/devbasex/ai-plugins/pull/130#issuecomment-999"
 
 
 def _item(**over):
     base = {
-        "item_id": "R1-001", "round": 1, "path": "src/foo.py",
+        "id": "I-001", "rank": 1, "path": "src/foo.py",
         "symbol": "Foo.handle", "smell": "long_method",
-        "technique": "extract_method", "severity": "major",
-        "rationale": "理由", "plan": "手順", "test_gap": False,
+        "technique": "extract_method", "severity": "major", "tier": "high",
+        "rationale": "理由", "plan": "手順", "tests": [],
+        "estimate": {"test": 0.0, "implement": 1.3, "verify": 0.2},
         "estimated_diff_lines": 40, "proposed_by": ["codex"],
-        "status": "done", "commits": ["abc1234"],
+        "status": "verified", "fix_count": 0, "danger": [],
+        "commits": {"test": None, "implement": "abc1234", "fix": []},
     }
     base.update(over)
     return base
@@ -35,7 +37,7 @@ def _state(tmp_path, **over):
     over.setdefault("plan_file", "")
     over.setdefault("plan_comment", {"id": 999, "url": COMMENT_URL})
     over.setdefault("items", [_item()])
-    path = make_state(tmp_path, **over)
+    path = make_state_v2(tmp_path, tmp_path / "work", **over)
     return path, read_state(path)
 
 
@@ -69,21 +71,8 @@ def test_the_file_mode_points_at_the_file(outbound, tmp_path):
 
 def test_an_item_is_named_with_its_file_and_symbol(outbound, tmp_path):
     _, state = _state(tmp_path)
-    assert outbound.item_lines(state, ["R1-001"]) == [
-        "R1-001 `src/foo.py#Foo.handle`"
-    ]
-
-
-def test_a_test_item_is_named_with_its_target(outbound, tmp_path):
-    """テスト項目の `path` はテストを足す先。指すのは固定する入口である。"""
-    _, state = _state(tmp_path, items=[{
-        "item_id": "R1-001", "round": 1, "kind": "test",
-        "path": "tests/test_foo.py", "target": "src/foo.py#Foo.handle",
-        "case": "branch", "level": "unit", "proposed_by": ["codex"],
-        "status": "done", "commits": [],
-    }])
-    assert outbound.item_lines(state, ["R1-001"]) == [
-        "R1-001 `src/foo.py#Foo.handle`"
+    assert outbound.item_lines(state, ["I-001"]) == [
+        "I-001 `src/foo.py#Foo.handle`"
     ]
 
 
@@ -100,15 +89,17 @@ def test_the_report_does_not_list_the_deferred_breakdown(refactor, tmp_path,
                                                          env_tmp_dir, capsys):
     """D2 — 進行の報告は件数だけを述べ、内訳は改修計画へ譲る。"""
     path, _ = _state(tmp_path, deferred_items=[{
-        "item_id": "R1-002", "round": 1, "path": "src/bar.py",
+        "item_id": "I-002", "path": "src/bar.py",
         "symbol": "Bar.run", "smell": "duplication",
-        "defer_reason": "差分予算を超えた",
+        "defer_reason": "budget", "detail": "想定最大時間に収まらない",
     }])
     env_tmp_dir(path)
     refactor.cmd_report(type("A", (), {"id": 130, "metrics": False})())
     out = capsys.readouterr().out
-    assert "件数: 1 件" in out
-    assert "差分予算を超えた" not in out, "内訳を書いている"
+    assert "見送り: 1 件" in out
+    assert "budget 1" in out             # 理由別の件数（AC26）
+    assert "src/bar.py#Bar.run" not in out, "内訳を書いている"
+    assert "想定最大時間に収まらない" not in out, "内訳を書いている"
     assert COMMENT_URL in out, "改修計画の生の URL が無い"
 
 
@@ -138,4 +129,4 @@ def test_an_unknown_item_id_is_returned_without_a_label(outbound, tmp_path):
     参照をスキップし `str(item_id)` をそのまま返すフォールバックを固定する。
     """
     _, state = _state(tmp_path, items=[])
-    assert outbound.item_lines(state, ["R1-099"]) == ["R1-099"]
+    assert outbound.item_lines(state, ["I-099"]) == ["I-099"]

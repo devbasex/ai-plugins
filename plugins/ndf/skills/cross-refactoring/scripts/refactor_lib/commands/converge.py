@@ -400,7 +400,11 @@ def cmd_merge_test_judgements(args: argparse.Namespace) -> None:
     verdicts = _read_verdicts(state)
     changed = []
     for item in pending:
-        outcome = merge_test_judgements(item["pending_test_judgements"], verdicts)
+        # **答えは項目ごとに引く。** 2 つの項目が同じテストのファイルを保留にしていると、
+        # パスだけで引けば片方の差分への `changed` が両方を取り消す。`item_id` の無い答えは
+        # 旧い形として、その項目の答えにも数える。
+        mine = [v for v in verdicts if v.get("item_id") in (None, "", item["id"])]
+        outcome = merge_test_judgements(item["pending_test_judgements"], mine)
         item.pop("pending_test_judgements", None)
         if outcome["problem"]:
             item["failure_reason"] = outcome["problem"]

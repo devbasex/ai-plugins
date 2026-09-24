@@ -120,6 +120,7 @@ def drop(
         targets.remove(item_id)
     extra = {_full(work, s) for s in extra_shas}
     if not targets and not extra:
+        statefile.save(path, state)
         return {"mode": "skip", "dropped": [], "reverted_commits": 0, "replayed": 0}
 
     head = git_out(work, ["rev-parse", "HEAD"])
