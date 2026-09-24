@@ -931,7 +931,12 @@ def _fetch_existing_comments(repo: str, pr: int, path: pathlib.Path, *,
     すると、前のラウンドの指摘が重複の検出から消えるためである（#542 の決定 6）。
     """
     cmd = [str(FETCH_COMMENTS_SCRIPT), *(["--strict"] if strict else []), repo, str(pr)]
-    r = subprocess.run(cmd, capture_output=True, text=True)
+    # 起動できない（スクリプトが無い・実行権が無い）ときも失敗の理由として返す。例外で
+    # 抜けると、呼び出し側が「失敗したら前の控えのまま進める」を選べない。
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True)
+    except OSError as e:
+        return f"起動できません: {e}"[:200]
     if r.returncode != 0:
         return (r.stderr or "").strip()[:200] or f"終了コード {r.returncode}"
     tmp = path.with_name(path.name + ".tmp")
@@ -2445,6 +2450,16 @@ def cmd_start_round(args: argparse.Namespace) -> None:
     round_no = total + 1
     round_in_pr = sum(1 for r in st["rounds"] if r["pr"] == pr) + 1
 
+    # 既存コメントの控えを取り直す（#542 の決定 6）。通しの 1 ラウンド目は `init` が取った
+    # 直後のため取り直さない。失敗しても前の控えのまま進める（前の控えでも今と同じ条件で
+    # レビューできる）。**round エントリを保存する前に取る。** 保存の後で取ると、取得の
+    # 途中の割り込みで結果の無い round だけが残り、再実行が前のラウンドの検査で止まる。
+    if round_no >= 2:
+        error = _fetch_existing_comments(
+            str(st.get("repo") or ""), int(pr), _existing_comments_path(args.pr), strict=True)
+        if error is not None:
+            info(f"⚠ 既存コメントの控えを取り直せませんでした（{error}）。前の控えのまま進めます")
+
     # round エントリを開く。head の commit を記録するのは、起動スクリプト 2 本と
     # 収束の判定が同じ値を読むためである。**2 本が同じ値を別々に取っていた分が 0 になる。**
     # **担当はラウンドを開くときに決めて残す。** 後から輪番を引き直すと、状態ファイルの
@@ -2460,15 +2475,6 @@ def cmd_start_round(args: argparse.Namespace) -> None:
         entry["head_sha"] = head.oid
     st["rounds"].append(entry)
     _save(args.pr, st)
-
-    # 既存コメントの控えを取り直す（#542 の決定 6）。通しの 1 ラウンド目は `init` が取った
-    # 直後のため取り直さない。失敗しても前の控えのまま進める（前の控えでも今と同じ条件で
-    # レビューできる）。
-    if round_no >= 2:
-        error = _fetch_existing_comments(
-            str(st.get("repo") or ""), int(pr), _existing_comments_path(args.pr), strict=True)
-        if error is not None:
-            info(f"⚠ 既存コメントの控えを取り直せませんでした（{error}）。前の控えのまま進めます")
 
     info(f"=== Round {round_no} / {max_r} (PR #{pr}, round_in_pr={round_in_pr}"
          f", レビュー: {' + '.join(reviewers)}) ===")

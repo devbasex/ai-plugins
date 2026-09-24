@@ -171,3 +171,32 @@ def test_init_aborts_without_a_state_file_when_the_fetch_fails(
     assert e.value.code != 0
     assert not (tmp_path / f"cross-review-pr{PR}-state.json").exists()
     assert fake_fetch() == [f"{REPO} {PR}"]
+
+
+def test_a_refetch_that_cannot_start_keeps_going(
+        start, repo, tmp_path, fake_fetch, state_mod, monkeypatch, capsys):
+    """取得の起動が OSError を送出しても `⚠` で続け、round を 1 つだけ開く（PR #930 の指摘）。"""
+    head = _git(repo, "rev-parse", "HEAD")
+    _existing(tmp_path).write_text("[PR-COMMENT] [bot] old\n", encoding="utf-8")
+    monkeypatch.setattr(state_mod, "FETCH_COMMENTS_SCRIPT", tmp_path / "missing.sh")
+    start.write_state([{"round": 1, "pr": PR, "head_sha": head, "reviewers": ["codex"]}])
+    start(head)
+    assert _existing(tmp_path).read_text(encoding="utf-8") == "[PR-COMMENT] [bot] old\n"
+    assert "⚠ 既存コメントの控えを取り直せませんでした" in capsys.readouterr().err
+    st = json.loads((tmp_path / f"cross-review-pr{PR}-state.json").read_text())
+    assert len(st["rounds"]) == 2
+
+
+def test_an_interrupted_refetch_does_not_open_a_round(
+        start, repo, tmp_path, state_mod, monkeypatch):
+    """取得の途中で割り込まれても、結果の無い round を状態ファイルへ残さない。"""
+    head = _git(repo, "rev-parse", "HEAD")
+
+    def interrupted(*a, **k):
+        raise KeyboardInterrupt
+    monkeypatch.setattr(state_mod, "_fetch_existing_comments", interrupted)
+    start.write_state([{"round": 1, "pr": PR, "head_sha": head, "reviewers": ["codex"]}])
+    with pytest.raises(KeyboardInterrupt):
+        start(head)
+    st = json.loads((tmp_path / f"cross-review-pr{PR}-state.json").read_text())
+    assert len(st["rounds"]) == 1

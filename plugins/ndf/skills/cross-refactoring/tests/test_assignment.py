@@ -1,7 +1,7 @@
 """担当の決定（ホスト判定 / 母集合の既定 / 輪番 / 席）のテスト。
 
 cross-refactoring は提案と適用を 1 つの参加者の一覧で回し（#727 の決定 5）、
-cross-review はホストを含む全ランタイムの母集合から 2 席を決める。母集合の既定は Skill ごとに違う。
+cross-review は claude / codex / kiro とホストの母集合（ホストが agy なら 4 者）から 2 席を決める。母集合の既定は Skill ごとに違う。
 """
 from __future__ import annotations
 

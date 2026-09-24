@@ -407,7 +407,7 @@ graph TD
 | 使える者の解決が、通らない者を外して続け、外した者へ確認を呼ばず、名前の矛盾と欠けを例外にすること | `plugins/ndf/scripts/tests/test_lib_participants.py` |
 | 認証の確認が失敗で例外を上げず、理由を返すこと。起動できない 2 形（読めないディレクトリを含む検索のパス・実行形式でないファイル）でも理由を返すこと | 同 `test_auth_probe.py` |
 | 2 つの開始の手順が、読めないディレクトリを含む検索のパスで、欠けた者を外して始まること | `plugins/ndf/skills/cross-review/tests/test_state_review_pool.py` / `plugins/ndf/skills/cross-refactoring/tests/test_init.py` |
-| 席の埋め方が 3 者で従来の値と一致し、2 / 1 / 0 者で規則どおりに埋めること。席の名前の形。cross-review の参加の母集合が 4 つのホストのどれでも全ランタイムであること | `plugins/ndf/skills/cross-refactoring/tests/test_assignment.py` |
+| 席の埋め方が 3 者で従来の値と一致し、2 / 1 / 0 者で規則どおりに埋めること。席の名前の形。cross-review の参加の母集合の既定が、4 つのホストのどれでも claude / codex / kiro とホストであること（ホストが agy なら 4 者。`test_review_pool_is_the_default_three_and_the_host`） | `plugins/ndf/skills/cross-refactoring/tests/test_assignment.py` |
 | ホストが claude で agy を外すと使える者が 3 者になり、ラウンド 1〜3 で 3 通りの組を 1 度ずつ取ること。4 つのホストのどれでも初期化の出力の母集合にホストが入ること。ホストを外す指定が通ること | `plugins/ndf/skills/cross-review/tests/test_state_review_pool.py` |
 | 使える者が 1 者なら埋め合わせが空で同じランタイムの 2 つ目が席を埋め、0 者なら終了コード 1 で終わり、どちらでもホストを別に確かめないこと | 同 |
 | #892 の前に作った状態ファイル（参加者の記録を持つもの、ホストだけを持つもの）の再開で、席が変更の前と同じであること。後者は 4 つのホスト × ラウンド 1〜12 で固定する | 同 |
