@@ -27,7 +27,8 @@
 `init` が内部で行うこと。
 
 1. **引数の検査** — `--budget-minutes` は 1 以上の整数でなければ止める（終了コード 4。
-   argparse の 2 にしない）。廃止した 3 引数は `⚠ <引数> は廃止しました（#933）` の 1 行を
+   argparse の 2 にしない）。廃止した 5 引数（`--max-test-rounds` / `--max-outer-rounds` / `--max-items-per-round` /
+   `--max-fix-rounds` / `--test-timeout`）は `⚠ <引数> は廃止しました（#933）` の 1 行を
    出して値を使わない。`--round-test` が無く、`--baseline-test` の実行器が既知
    （`pytest` / `python -m pytest` / `python3 -m pytest` / `jest` / `vitest`。前置きの
    `uv run` / `poetry run` / `npx` は読み飛ばす）でなければ止める。提案と計画に時間を
