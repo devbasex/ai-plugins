@@ -6,9 +6,9 @@
 """
 from __future__ import annotations
 
-import subprocess
-
 import pytest
+
+from crossref_helpers import run_git
 
 REQUIRED = ("Item-Id", "Impl-Runtime", "Impl-Model")
 
@@ -24,23 +24,18 @@ Co-Authored-By: Claude Opus 5 <noreply@example.test>
 """
 
 
-def _git(*args, cwd):
-    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True,
-                          check=True)
-
-
 @pytest.fixture
 def repo(tmp_path):
     """コミットを積める一時リポジトリ。"""
     path = tmp_path / "repo"
     path.mkdir()
-    _git("init", "-q", "-b", "main", cwd=path)
-    _git("config", "user.email", "t@e.st", cwd=path)
-    _git("config", "user.name", "test", cwd=path)
+    run_git("init", "-q", "-b", "main", cwd=path)
+    run_git("config", "user.email", "t@e.st", cwd=path)
+    run_git("config", "user.name", "test", cwd=path)
     (path / "src").mkdir()
     (path / "src" / "foo.py").write_text("x = 1\n", encoding="utf-8")
-    _git("add", "-A", cwd=path)
-    _git("commit", "-qm", "init", cwd=path)
+    run_git("add", "-A", cwd=path)
+    run_git("commit", "-qm", "init", cwd=path)
     return path
 
 
@@ -52,9 +47,9 @@ def commit(repo):
     def _make(message: str) -> str:
         counter["n"] += 1
         (repo / "src" / f"f{counter['n']}.py").write_text("y = 1\n", encoding="utf-8")
-        _git("add", "-A", cwd=repo)
-        _git("commit", "-q", "-m", message, cwd=repo)
-        return _git("rev-parse", "HEAD", cwd=repo).stdout.strip()
+        run_git("add", "-A", cwd=repo)
+        run_git("commit", "-q", "-m", message, cwd=repo)
+        return run_git("rev-parse", "HEAD", cwd=repo).stdout.strip()
 
     return _make
 

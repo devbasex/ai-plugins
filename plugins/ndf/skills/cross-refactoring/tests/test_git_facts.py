@@ -6,15 +6,9 @@
 from __future__ import annotations
 
 import json
-import subprocess
-
 import pytest
 
-
-
-def _git(*args, cwd):
-    return subprocess.run(["git", *args], cwd=cwd, capture_output=True,
-                          text=True, check=True)
+from crossref_helpers import run_git
 
 
 @pytest.fixture
@@ -22,13 +16,13 @@ def work(tmp_path):
     """1 コミットだけある作業ディレクトリ。"""
     repo = tmp_path / "repo"
     repo.mkdir()
-    _git("init", "-q", "-b", "main", cwd=repo)
-    _git("config", "user.email", "t@e.st", cwd=repo)
-    _git("config", "user.name", "test", cwd=repo)
+    run_git("init", "-q", "-b", "main", cwd=repo)
+    run_git("config", "user.email", "t@e.st", cwd=repo)
+    run_git("config", "user.name", "test", cwd=repo)
     (repo / "src").mkdir()
     (repo / "src" / "foo.py").write_text("def f():\n    return 1\n")
-    _git("add", "-A", cwd=repo)
-    _git("commit", "-qm", "init", cwd=repo)
+    run_git("add", "-A", cwd=repo)
+    run_git("commit", "-qm", "init", cwd=repo)
     return repo
 
 
@@ -37,9 +31,9 @@ def _commit(repo, message, files):
         path = repo / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(body)
-    _git("add", "-A", cwd=repo)
-    _git("commit", "-qm", message, cwd=repo)
-    return _git("rev-parse", "HEAD", cwd=repo).stdout.strip()
+    run_git("add", "-A", cwd=repo)
+    run_git("commit", "-qm", message, cwd=repo)
+    return run_git("rev-parse", "HEAD", cwd=repo).stdout.strip()
 
 
 TRAILERS = (
@@ -48,7 +42,7 @@ TRAILERS = (
 
 
 def test_facts_come_from_a_real_repository(gitfacts, work):
-    base = _git("rev-parse", "HEAD", cwd=work).stdout.strip()
+    base = run_git("rev-parse", "HEAD", cwd=work).stdout.strip()
     first = _commit(work, "Test: 現状固定テストを足す" + TRAILERS,
                     {"tests/test_foo.py": "def test_f():\n    assert True\n"})
     second = _commit(work, "Refactor: extract_method" + TRAILERS,
@@ -72,7 +66,7 @@ def test_facts_come_from_a_real_repository(gitfacts, work):
     assert facts[0]["diff_lines"] > 0 and facts[1]["diff_lines"] > 0
     assert all(f["test_status"] == "pass" for f in facts)
     # テスト実行のあとも元のブランチへ戻っている
-    assert _git("rev-parse", "--abbrev-ref", "HEAD", cwd=work).stdout.strip() == "main"
+    assert run_git("rev-parse", "--abbrev-ref", "HEAD", cwd=work).stdout.strip() == "main"
 
 
 def test_commit_test_changes_reads_an_added_test(gitfacts, work):
@@ -121,7 +115,7 @@ def test_commit_test_changes_reads_a_deleted_test(gitfacts, work):
 
 
 def test_missing_trailers_are_seen_as_missing(verify, gitfacts, work):
-    base = _git("rev-parse", "HEAD", cwd=work).stdout.strip()
+    base = run_git("rev-parse", "HEAD", cwd=work).stdout.strip()
     sha = _commit(work, "Refactor: トレーラーなし", {"src/foo.py": "def f():\n    return 2\n"})
     facts = gitfacts.collect_commit_facts(
         str(work), [sha], {sha}, "true", "main"
@@ -133,7 +127,7 @@ def test_missing_trailers_are_seen_as_missing(verify, gitfacts, work):
 
 def test_commit_outside_the_range_is_rejected(gitfacts, work):
     """起点より前のコミットを申告しても実在扱いにしない。"""
-    old = _git("rev-parse", "HEAD", cwd=work).stdout.strip()
+    old = run_git("rev-parse", "HEAD", cwd=work).stdout.strip()
     base = _commit(work, "Chore: 起点" + TRAILERS, {"src/bar.py": "y = 1\n"})
     new = _commit(work, "Refactor: 対象" + TRAILERS, {"src/foo.py": "def f():\n    return 3\n"})
 
@@ -147,13 +141,13 @@ def test_commit_outside_the_range_is_rejected(gitfacts, work):
 
 def test_failing_test_is_detected_by_running_it(gitfacts, work):
     """`test_status` は実際に走らせて決まる。申告では決まらない。"""
-    base = _git("rev-parse", "HEAD", cwd=work).stdout.strip()
+    base = run_git("rev-parse", "HEAD", cwd=work).stdout.strip()
     sha = _commit(work, "Refactor: 壊した" + TRAILERS, {"src/foo.py": "def f():\n    return 9\n"})
     facts = gitfacts.collect_commit_facts(
         str(work), [sha], {sha}, "false", "main"
     )
     assert facts[0]["test_status"] == "fail"
-    assert _git("rev-parse", "--abbrev-ref", "HEAD", cwd=work).stdout.strip() == "main"
+    assert run_git("rev-parse", "--abbrev-ref", "HEAD", cwd=work).stdout.strip() == "main"
     assert base != sha
 
 
@@ -162,7 +156,7 @@ def test_fix_commits_pass_verification_through_real_git(cmd_converge, gitfacts, 
 
     範囲に空集合を渡していた頃は、全ての修正コミットが必ず不正扱いになっていた。
     """
-    base = _git("rev-parse", "HEAD", cwd=work).stdout.strip()
+    base = run_git("rev-parse", "HEAD", cwd=work).stdout.strip()
     sha = _commit(work, "Fix: レビュー指摘の反映" + TRAILERS,
                   {"src/foo.py": "def f():\n    return 1  # 直した\n"})
     ordered = gitfacts.commits_in_range(str(work), base, "HEAD")
@@ -194,7 +188,7 @@ def test_revert_order_tolerates_unknown_shas(gitfacts, work):
 
 def test_reverting_in_history_order_succeeds(gitfacts, work):
     """履歴順に戻せば、同じファイルを触る連続コミットでも競合しない。"""
-    base = _git("rev-parse", "HEAD", cwd=work).stdout.strip()
+    base = run_git("rev-parse", "HEAD", cwd=work).stdout.strip()
     first = _commit(work, "one", {"src/a.py": "a = 1\n"})
     second = _commit(work, "two", {"src/a.py": "a = 2\n"})
 
@@ -205,18 +199,18 @@ def test_reverting_in_history_order_succeeds(gitfacts, work):
 
     # 取り消し後は着手前の状態へ戻る（このファイルは base に存在しない）
     assert not (work / "src" / "a.py").exists()
-    diff = _git("diff", "--name-only", base, "HEAD", cwd=work).stdout.strip()
+    diff = run_git("diff", "--name-only", base, "HEAD", cwd=work).stdout.strip()
     assert diff == "", f"着手前との差分が残っている: {diff}"
 
 
 def test_run_test_at_missing_commit_preserves_branch(gitfacts, work):
     """現状固定: 存在しない SHA は missing を返し、元のブランチを保つ。"""
-    branch = _git("rev-parse", "--abbrev-ref", "HEAD", cwd=work).stdout.strip()
+    branch = run_git("rev-parse", "--abbrev-ref", "HEAD", cwd=work).stdout.strip()
 
     status = gitfacts.run_test_at(str(work), "0" * 40, "true", branch, 60)
 
     assert status == "missing"
-    assert _git("rev-parse", "--abbrev-ref", "HEAD", cwd=work).stdout.strip() == branch
+    assert run_git("rev-parse", "--abbrev-ref", "HEAD", cwd=work).stdout.strip() == branch
 
 
 def test_hanging_test_is_cut_off(gitfacts, work):
@@ -230,7 +224,7 @@ def test_hanging_test_is_cut_off(gitfacts, work):
         str(work), sha, "sleep 30", "main", timeout=1
     )
     assert status == "fail"
-    assert _git("rev-parse", "--abbrev-ref", "HEAD", cwd=work).stdout.strip() == "main"
+    assert run_git("rev-parse", "--abbrev-ref", "HEAD", cwd=work).stdout.strip() == "main"
 
 
 def test_cutting_off_returns_once_the_group_is_gone(gitfacts, work):
@@ -380,7 +374,7 @@ def test_revert_item_commits_failure_message_includes_item_id(gitfacts, work, ca
     assert "❌ I-001 のコミット" in err
     assert "を取り消せませんでした" in err
     assert f"（HEAD を {second} へ戻しました）" in err
-    assert _git("rev-parse", "HEAD", cwd=work).stdout.strip() == second
+    assert run_git("rev-parse", "HEAD", cwd=work).stdout.strip() == second
 
 
 def test_revert_range_failure_message_has_no_item_id_prefix(gitfacts, work, capsys):
@@ -396,7 +390,7 @@ def test_revert_range_failure_message_has_no_item_id_prefix(gitfacts, work, caps
     assert "❌ コミット" in err
     assert "を取り消せませんでした" in err
     assert f"（HEAD を {second} へ戻しました）" in err
-    assert _git("rev-parse", "HEAD", cwd=work).stdout.strip() == second
+    assert run_git("rev-parse", "HEAD", cwd=work).stdout.strip() == second
 
 
 def test_check_run_result_characterization(gitfacts, monkeypatch):
@@ -483,4 +477,3 @@ def test_check_run_result_characterization(gitfacts, monkeypatch):
         }),
     )
     assert gitfacts.check_run_result("repo", "sha", "ci") == "success"
-

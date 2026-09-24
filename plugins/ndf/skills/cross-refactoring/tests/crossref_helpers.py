@@ -169,10 +169,13 @@ def test_total():
 '''
 
 
-def git(*args: str, cwd: Any) -> "subprocess.CompletedProcess[str]":
+def run_git(*args: str, cwd: Any) -> "subprocess.CompletedProcess[str]":
     import subprocess
 
     return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True)
+
+
+git = run_git
 
 
 def commit_with_trailers(repo: pathlib.Path, message: str, trailers: dict[str, str]) -> str:

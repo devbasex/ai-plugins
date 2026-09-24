@@ -2,19 +2,15 @@
 from __future__ import annotations
 
 import importlib
-import subprocess
 
 import pytest
+
+from crossref_helpers import run_git
 
 
 @pytest.fixture(scope="module")
 def danger(refactor):
     return importlib.import_module("refactor_lib.danger")
-
-
-def _git(*args, cwd):
-    return subprocess.run(["git", *args], cwd=cwd, capture_output=True,
-                          text=True, check=True).stdout.strip()
 
 
 def _write(repo, rel, text):
@@ -24,18 +20,18 @@ def _write(repo, rel, text):
 
 
 def _commit(repo, message="c"):
-    _git("add", "-A", cwd=repo)
-    _git("commit", "-q", "-m", message, cwd=repo)
-    return _git("rev-parse", "HEAD", cwd=repo)
+    run_git("add", "-A", cwd=repo)
+    run_git("commit", "-q", "-m", message, cwd=repo)
+    return run_git("rev-parse", "HEAD", cwd=repo).stdout.strip()
 
 
 @pytest.fixture
 def repo(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
-    _git("init", "-q", "-b", "main", cwd=repo)
-    _git("config", "user.email", "t@e.st", cwd=repo)
-    _git("config", "user.name", "test", cwd=repo)
+    run_git("init", "-q", "-b", "main", cwd=repo)
+    run_git("config", "user.email", "t@e.st", cwd=repo)
+    run_git("config", "user.name", "test", cwd=repo)
     _write(repo, "src/refactor_lib/plan.py", "def run():\n    return 1\n")
     _write(repo, "src/refactor_lib/__init__.py", "")
     _write(repo, "src/refactor_lib/other.py", "x = 1\n")
@@ -59,7 +55,7 @@ def test_d2_detects_delete_and_rename(danger, repo):
     _write(repo, "src/refactor_lib/other.py", "x = 2\n")
     modified = _commit(repo)
     assert not danger.d2(str(repo), [modified])
-    _git("mv", "src/refactor_lib/other.py", "src/refactor_lib/moved.py", cwd=repo)
+    run_git("mv", "src/refactor_lib/other.py", "src/refactor_lib/moved.py", cwd=repo)
     renamed = _commit(repo)
     assert danger.d2(str(repo), [modified, renamed])
     (repo / "src/refactor_lib/moved.py").unlink()
