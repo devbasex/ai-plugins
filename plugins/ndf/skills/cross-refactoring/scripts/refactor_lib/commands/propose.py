@@ -16,7 +16,7 @@ import statefile
 from .. import info
 from ..items import defer, item_label
 from ..paths import load_state, result_path, stem_for
-from ..phases import finish_phase, phase_record
+from ..phases import finish_phase
 from ..proposals import build_candidates
 
 
@@ -66,7 +66,7 @@ def cmd_merge_proposals(args: argparse.Namespace) -> None:
     なら前回の結果をそのまま返す。
     """
     path, state = load_state(args.id)
-    if phase_record(state, "propose").get("ended_at"):
+    if (state.get("phases") or {}).get("propose", {}).get("ended_at"):
         info(f"↻ 提案は取り込み済みです（候補 {len(state.get('candidates') or [])} 件）")
         if not state.get("candidates"):
             sys.exit(2)

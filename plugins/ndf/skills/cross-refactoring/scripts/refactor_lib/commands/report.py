@@ -16,7 +16,6 @@ from ..measure import summary_extra
 from ..outbound import plan_reference
 from ..plan import baseline_line
 from ..paths import load_state
-from ..phases import phase_record
 from ..vocabulary import DEFER_REASONS
 
 # `cross-review` の最終ステータスのうち、追記してよいもの。
@@ -118,7 +117,7 @@ def _elapsed_seconds(state: dict[str, Any]) -> float:
     gate = state.get("final_gate") or {}
     checks = gate.get("checks") or []
     end = checks[-1].get("at") if checks else None
-    end = end or phase_record(state, "verify").get("ended_at")
+    end = end or ((state.get("phases") or {}).get("verify") or {}).get("ended_at")
     return max(clock.seconds_between(state.get("started_at"), end or clock.now()) or 0.0, 0.0)
 
 
@@ -194,7 +193,7 @@ def _whole_detail(whole: dict[str, Any]) -> str:
 def _phase_table(state: dict[str, Any]) -> str:
     lines = ["| フェーズ | 所要（分） |", "| --- | ---: |"]
     for name in ("propose", "plan", "add-tests", "implement", "verify", "fix"):
-        record = phase_record(state, name)
+        record = (state.get("phases") or {}).get(name) or {}
         seconds = record.get("seconds")
         lines.append(f"| {name} | {'—' if seconds is None else f'{seconds / 60:.1f}'} |")
     final = (state.get("final_gate") or {}).get("whole_test_seconds")
