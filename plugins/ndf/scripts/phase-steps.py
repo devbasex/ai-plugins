@@ -585,6 +585,234 @@ def cmd_changelog(a):
     return 0
 
 
+# --- release ---------------------------------------------------------------
+
+def gh_json(root, args, what):
+    p = run(["gh", *args], cwd=root, check=False)
+    if p.returncode != 0:
+        raise StepError(f"{what} が失敗: {p.stderr.strip()[:300]}")
+    try:
+        return json.loads(p.stdout or "null")
+    except ValueError:
+        raise StepError(f"{what} の出力を読めない")
+
+
+def owner_repo(root):
+    slug = repo_slug(root)
+    if not slug or "--" not in slug:
+        raise StepError("リポジトリの owner/name を決められない")
+    return slug.replace("--", "/", 1)
+
+
+def changelog_section(root, version, plugin="ndf"):
+    """CHANGELOG.md の `## [<plugin> <基底の版>]` の節の本文（見出しを除く）を返す。"""
+    cl = root / "CHANGELOG.md"
+    if not cl.is_file():
+        return ""
+    lines = cl.read_text(encoding="utf-8").split("\n")
+    head = f"## [{plugin} {base_of(version)}]"
+    at = next((i for i, l in enumerate(lines) if l == head or l.startswith(head + " ")), None)
+    if at is None:
+        return ""
+    end = next((i for i in range(at + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
+    return "\n".join(lines[at + 1:end]).strip()
+
+
+def run_checks(root):
+    """リリース前の検査を回し、[(名前, 通ったか, 末尾の出力)] を返す。"""
+    res = []
+    for name, cmd in (("check-doc-staleness", ["python3", "scripts/check-doc-staleness.py", "--root", str(root)]),
+                      ("validate-runtime-plugins", ["bash", "scripts/validate-runtime-plugins.sh"])):
+        if not (root / cmd[1]).is_file():
+            res.append((name, None, "スクリプトが無い"))
+            continue
+        p = run(cmd, cwd=root, check=False)
+        tail = "\n".join((p.stdout + p.stderr).strip().split("\n")[-3:])
+        res.append((name, p.returncode == 0, tail))
+    return res
+
+
+def find_pr(root, head, base, states=("OPEN",)):
+    """head → base の PR を探す。states の順に最初に見つかった {number, state} を返す。"""
+    items = gh_json(root, ["pr", "list", "--head", head, "--base", base, "--state", "all",
+                           "--json", "number,state", "--limit", "20"], "gh pr list") or []
+    for st in states:
+        for it in items:
+            if it.get("state") == st:
+                return it
+    return None
+
+
+def create_pr(root, base, head, title, body):
+    p = run(["gh", "pr", "create", "--base", base, "--head", head, "--title", title, "--body", body],
+            cwd=root, check=False)
+    if p.returncode != 0:
+        raise StepError(f"gh pr create（{head} → {base}）が失敗: {p.stderr.strip()[:300]}")
+    m = re.search(r"/pull/(\d+)", p.stdout)
+    if not m:
+        raise StepError(f"作った PR の番号を読めない: {p.stdout.strip()[:200]}")
+    return int(m.group(1))
+
+
+def pr_check_buckets(root, n):
+    p = run(["gh", "pr", "checks", str(n), "--json", "name,bucket"], cwd=root, check=False)
+    try:
+        return json.loads(p.stdout or "[]") or []
+    except ValueError:
+        return []
+
+
+def wait_and_merge(root, n):
+    """PR のチェックを待ち、全部 pass ならマージする。落ちたら失敗したチェック名で StepError。"""
+    import time
+    # 作った直後はチェックがまだ現れないので、現れるまで待つ
+    for _ in range(20):
+        if pr_check_buckets(root, n):
+            break
+        time.sleep(15)
+    else:
+        raise StepError(f"PR #{n} にチェックが現れない")
+    run(["gh", "pr", "checks", str(n), "--watch", "-i", "30"], cwd=root, check=False)
+    checks = pr_check_buckets(root, n)
+    bad = [c.get("name") for c in checks if c.get("bucket") not in ("pass", "skipping")]
+    if not checks or bad:
+        raise StepError(f"PR #{n} のチェックが通らない: {', '.join(map(str, bad)) or 'チェックが無い'}")
+    p = run(["gh", "pr", "merge", str(n), "--admin", "--merge"], cwd=root, check=False)
+    if p.returncode != 0:
+        raise StepError(f"gh pr merge {n} が失敗: {p.stderr.strip()[:300]}")
+    return merge_commit_of(root, n)
+
+
+def merge_commit_of(root, n):
+    d = gh_json(root, ["pr", "view", str(n), "--json", "mergeCommit"], f"gh pr view {n}") or {}
+    return ((d.get("mergeCommit") or {}).get("oid")) or None
+
+
+def cmd_release(a):
+    root = git_root(a.root)
+    ver = a.version
+    plugins = [s.strip() for s in a.plugins.split(",") if s.strip()]
+    branch = git(root, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+    if branch != f"release/v{ver}":
+        raise StepError(f"作業ツリーのブランチが release/v{ver} でない: {branch}")
+    if git(root, "status", "--porcelain", "--untracked-files=no").stdout.strip():
+        raise StepError("作業ツリーにコミットしていない変更がある（bump と changelog をコミットしてから呼ぶ）")
+
+    git(root, "push", "-q", "-u", "origin", "HEAD")
+
+    # 開発版の PR（release/v<版> → develop）
+    pr = find_pr(root, branch, "develop", states=("OPEN", "MERGED"))
+    if pr is None:
+        section = changelog_section(root, ver)
+        checks = run_checks(root)
+        mark = {True: "pass", False: "fail", None: "skip"}
+        body = "\n".join([
+            f"ndf v{ver} のリリース（{a.channel}）。対象の plugin: {', '.join(plugins)}",
+            "",
+            "## 含む PR",
+            "",
+            section or "（CHANGELOG.md に該当の節が無い）",
+            "",
+            "## 検査の結果",
+            "",
+            *[f"- {name}: {mark[ok]}" + (f"（{tail.splitlines()[-1]}）" if tail else "") for name, ok, tail in checks],
+            "",
+            "🤖 Generated with [Claude Code](https://claude.com/claude-code)",
+        ])
+        release_pr = create_pr(root, "develop", branch, f"Release: ndf v{ver}", body)
+        pr = {"number": release_pr, "state": "OPEN"}
+    release_pr = pr["number"]
+    if pr["state"] == "OPEN":
+        release_commit = wait_and_merge(root, release_pr)
+    else:
+        release_commit = merge_commit_of(root, release_pr)
+
+    out = {"status": "ok", "release_pr": release_pr, "main_pr": None, "tag": None,
+           "merge_commit": release_commit, "plugins": plugins}
+    if a.channel == "dev":
+        emit(out)
+        return 0
+
+    # 本番: develop → main、タグ、GitHub Release
+    tag = f"ndf--v{ver}"
+    git(root, "fetch", "-q", "origin", "--tags")
+    if git(root, "rev-parse", "-q", "--verify", f"refs/tags/{tag}", check=False).returncode == 0:
+        raise StepError(f"タグ {tag} は既にある")
+    mp = find_pr(root, "develop", "main", states=("OPEN",))
+    if mp is None:
+        main_pr = create_pr(root, "main", "develop", f"Release: ndf v{ver} を main へ",
+                            f"ndf v{ver} を main へ出す（開発版の PR #{release_pr}）。\n\n"
+                            "🤖 Generated with [Claude Code](https://claude.com/claude-code)")
+    else:
+        main_pr = mp["number"]
+    merge = wait_and_merge(root, main_pr)
+    git(root, "fetch", "-q", "origin")
+    if not merge:
+        merge = git(root, "rev-parse", "origin/main").stdout.strip()
+    git(root, "tag", "-a", tag, merge, "-m", f"ndf v{ver}")
+    git(root, "push", "-q", "origin", tag)
+
+    notes = changelog_section(root, ver) or f"ndf v{ver}"
+    with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8") as f:
+        f.write(notes + "\n")
+        notes_file = f.name
+    try:
+        p = run(["gh", "release", "create", tag, "--title", f"ndf v{ver}", "--notes-file", notes_file,
+                 "--latest"], cwd=root, check=False)
+    finally:
+        os.unlink(notes_file)
+    if p.returncode != 0:
+        raise StepError(f"gh release create {tag} が失敗: {p.stderr.strip()[:300]}")
+
+    out.update({"main_pr": main_pr, "tag": tag, "merge_commit": merge})
+    emit(out)
+    return 0
+
+
+# --- approval-facts --------------------------------------------------------
+
+def cmd_approval_facts(a):
+    root = git_root(a.root)
+    repo = owner_repo(root)
+    git(root, "fetch", "-q", "origin", "--tags")
+    cur_tag = f"ndf--v{a.version}"
+    prev = a.prev_tag
+    if not prev:
+        tags = git(root, "tag", "--list", "ndf--v*", "--sort=-v:refname").stdout.split()
+        prev = next((t for t in tags if t != cur_tag and "-" not in t[len("ndf--v"):]), None)
+        if not prev:
+            raise StepError("前のタグを決められない（--prev-tag を渡す）")
+    dev = git(root, "rev-parse", "origin/develop").stdout.strip()
+
+    stat = git(root, "diff", "--shortstat", "origin/main...origin/develop").stdout.strip()
+    files = int(m.group(1)) if (m := re.search(r"(\d+) files? changed", stat)) else 0
+    ins = int(m.group(1)) if (m := re.search(r"(\d+) insertions?", stat)) else 0
+    dels = int(m.group(1)) if (m := re.search(r"(\d+) deletions?", stat)) else 0
+
+    out = [
+        f"## ndf v{a.version} の本番承認の事実",
+        "",
+        f"- 版の比較: https://github.com/{repo}/compare/{prev}...{dev}",
+        f"- `main...develop` の差分: {files} ファイル / +{ins} / −{dels}",
+        "",
+        "| PR | タイトル | 状態 | マージコミット | CI |",
+        "|---|---|---|---|---|",
+    ]
+    for n in a.prs:
+        d = gh_json(root, ["pr", "view", str(n), "--json", "number,title,state,mergeCommit,url"],
+                    f"gh pr view {n}") or {}
+        oid = (d.get("mergeCommit") or {}).get("oid") or ""
+        checks = pr_check_buckets(root, n)
+        passed = sum(1 for c in checks if c.get("bucket") == "pass")
+        title = str(d.get("title", "")).replace("|", "\\|")
+        url = d.get("url") or f"https://github.com/{repo}/pull/{n}"
+        out.append(f"| [#{n}]({url}) | {title} | {d.get('state', '')} | "
+                   f"{('`' + oid[:8] + '`') if oid else '—'} | {passed}/{len(checks)} |")
+    print("\n".join(out))
+    emit({"status": "ok"})
+    return 0
+
+
 # --- 入口 ------------------------------------------------------------------
 
 def build_parser():
@@ -612,6 +840,18 @@ def build_parser():
     p.add_argument("--prs", nargs="+", required=True, type=int, metavar="PR番号")
     p.add_argument("--plugin", default="ndf")
     p.set_defaults(func=cmd_changelog)
+
+    p = sub.add_parser("release", help="release/v<版> を develop へマージし、prod なら main へ出してタグと Release を作る")
+    p.add_argument("--version", required=True, type=version_arg)
+    p.add_argument("--channel", required=True, choices=("dev", "prod"))
+    p.add_argument("--plugins", default="ndf", help="カンマ区切り（例 ndf,mcp-serena）")
+    p.set_defaults(func=cmd_release)
+
+    p = sub.add_parser("approval-facts", help="本番承認の提示物のうち機械で作れる部分を Markdown で出す")
+    p.add_argument("--version", required=True, type=version_arg)
+    p.add_argument("--prs", nargs="+", required=True, type=int, metavar="PR番号")
+    p.add_argument("--prev-tag")
+    p.set_defaults(func=cmd_approval_facts)
 
     return ap
 
