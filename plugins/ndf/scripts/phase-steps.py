@@ -271,6 +271,320 @@ def update_index(index, text, name, link, title):
     index.write_text(body, encoding="utf-8")
 
 
+# --- bump ------------------------------------------------------------------
+
+VERSION_RE = re.compile(r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?$")
+
+
+def version_arg(s):
+    if not VERSION_RE.match(s):
+        raise argparse.ArgumentTypeError(f"版の形が X.Y.Z[-接尾辞] でない: {s}")
+    return s
+
+
+def base_of(v):
+    return v.split("-", 1)[0]
+
+
+def plugin_dir(root, name):
+    if name in ("ndf", "playwright-kit"):
+        d = root / "plugins" / name
+    else:
+        d = root / "plugins" / "mcp" / name
+    if not (d / ".claude-plugin" / "plugin.json").is_file():
+        raise StepError(f"プラグインが無い: {name}（{d.relative_to(root)}/.claude-plugin/plugin.json）")
+    return d
+
+
+def ver_pat(v):
+    """版の文字列を、前後に版の続きが無いときだけ当てる正規表現にする。"""
+    return r"(?:(?<=v)|(?<![0-9A-Za-z.\-]))" + re.escape(v) + r"(?![0-9A-Za-z\-]|\.[0-9A-Za-z])"
+
+
+class Editor:
+    """行単位で旧版を新版へ直す。書き換えたファイルと、見つからなかった箇所を集める。"""
+
+    def __init__(self, root, old, new):
+        self.root, self.old, self.new = root, old, new
+        self.files, self.manual = [], []
+
+    def lines(self, path):
+        return path.read_text(encoding="utf-8").split("\n")
+
+    def save(self, path, lines):
+        path.write_text("\n".join(lines), encoding="utf-8")
+        rel = path.relative_to(self.root).as_posix()
+        if rel not in self.files:
+            self.files.append(rel)
+
+    def sub(self, path, line_re, what, count=1, start=0, stop=None, required=True):
+        """line_re に合う行の中の旧版を新版へ。直した行数を返す。"""
+        if not path.is_file():
+            if required:
+                self.manual.append(f"{path.relative_to(self.root).as_posix()} が無い（{what}）")
+            return 0
+        lines = self.lines(path)
+        stop = len(lines) if stop is None else stop
+        done, already = 0, 0
+        rx = re.compile(line_re)
+        for i in range(start, stop):
+            if done >= count:
+                break
+            if not rx.search(lines[i]):
+                continue
+            new_line = re.sub(ver_pat(self.old), self.new, lines[i])
+            if new_line != lines[i]:
+                lines[i] = new_line
+                done += 1
+            elif re.search(ver_pat(self.new), lines[i]):
+                already += 1
+        if done:
+            self.save(path, lines)
+        if required and done + already < count:
+            self.manual.append(
+                f"{path.relative_to(self.root).as_posix()}: {what} の旧版 {self.old} が"
+                f" {count} 箇所見つからず {done + already} 箇所だけ（手で直す）")
+        return done
+
+
+def bump_update_heading(ed, readme):
+    """README の更新案内の見出しを足す（基底が同じなら書き換える）。"""
+    rel = readme.relative_to(ed.root).as_posix()
+    if not readme.is_file():
+        ed.manual.append(f"{rel} が無い（更新案内の見出し）")
+        return
+    lines = ed.lines(readme)
+    old_h, new_h = f"## v{ed.old} へ更新するとき", f"## v{ed.new} へ更新するとき"
+    if new_h in lines:
+        return
+    if base_of(ed.old) == base_of(ed.new):
+        if old_h in lines:
+            lines[lines.index(old_h)] = new_h
+            ed.save(readme, lines)
+        else:
+            ed.manual.append(f"{rel}: 見出し「{old_h}」が無い（「{new_h}」を手で足す）")
+        return
+    if old_h in lines:
+        at = lines.index(old_h)
+    else:
+        rx = re.compile(r"^## (?:以前の版: )?v\S+ へ更新するとき$")
+        at = next((i for i, l in enumerate(lines) if rx.match(l)), None)
+        if at is None:
+            ed.manual.append(f"{rel}: 更新案内の見出しが無い（「{new_h}」を手で足す）")
+            return
+        ed.manual.append(f"{rel}: 見出し「{old_h}」が無いため、最初の更新案内の見出しの前へ足した")
+    lines[at:at] = [new_h, ""]
+    ed.save(readme, lines)
+
+
+def bump_versioning_doc(ed):
+    """docs/versioning-and-distribution.md の「版の付け方と開発版の配布」章の正式版の版数（#991 / #978 と同じ位置）。"""
+    doc = ed.root / "docs" / "versioning-and-distribution.md"
+    rel = "docs/versioning-and-distribution.md"
+    ob, nb = base_of(ed.old), base_of(ed.new)
+    if ob == nb:
+        return
+    if not doc.is_file():
+        ed.manual.append(f"{rel} が無い（この章は手で直す）")
+        return
+    lines = ed.lines(doc)
+    targets = [
+        (re.compile(r"^\| 正式版 \| `([^`]+)` \|"), "正式版の表の行"),
+        (re.compile(r"`([^`]+)` の次を開発するなら"), "接尾辞の例"),
+    ]
+    changed = False
+    for rx, what in targets:
+        hits = [i for i, l in enumerate(lines) if rx.search(l)]
+        if len(hits) != 1:
+            ed.manual.append(f"{rel}: 「版の付け方と開発版の配布」章の{what}が特定できない（この章は手で直す）")
+            continue
+        i = hits[0]
+        cur = rx.search(lines[i]).group(1)
+        if cur == nb:
+            continue
+        if cur != ob:
+            ed.manual.append(f"{rel}: {what}の版が {cur} で旧版 {ob} と違う（この章は手で直す）")
+            continue
+        lines[i] = lines[i].replace(f"`{ob}`", f"`{nb}`", 1)
+        changed = True
+    if changed:
+        ed.save(doc, lines)
+
+
+def marketplace_range(lines, name):
+    """marketplace.json の中で、その plugin の項目の行の範囲（name の行から次の name の行まで）。"""
+    rx = re.compile(r'^\s*"name"\s*:\s*"([^"]+)"')
+    start = None
+    for i, l in enumerate(lines):
+        m = rx.match(l)
+        if not m:
+            continue
+        if start is not None:
+            return start, i
+        if m.group(1) == name:
+            start = i
+    return (start, len(lines)) if start is not None else (None, None)
+
+
+def run_staleness(root, expected=()):
+    """check-doc-staleness.py を走らせる。expected に合う ERROR だけなら通ったと見なす。"""
+    script = root / "scripts" / "check-doc-staleness.py"
+    if not script.is_file():
+        return None, "scripts/check-doc-staleness.py が無い"
+    p = run([sys.executable, str(script), "--root", str(root)], cwd=root, check=False)
+    if p.returncode == 0:
+        return True, "ok"
+    out = (p.stdout + p.stderr).strip().splitlines()
+    errors = [l for l in out if l.startswith("ERROR")]
+    rest = [l for l in errors if not any(x in l for x in expected)]
+    if errors and not rest:
+        return True, "ok（後の段で直す分だけ: " + " / ".join(errors)[:800] + "）"
+    return False, " / ".join((rest or out)[-10:])[:1000]
+
+
+def cmd_bump(a):
+    root = git_root(a.root)
+    pdir = plugin_dir(root, a.plugin)
+    try:
+        old = json.loads((pdir / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))["version"]
+    except (OSError, ValueError, KeyError) as e:
+        raise StepError(f"旧版を plugin.json から読めない: {e}")
+    new = a.to
+    if old == new:
+        raise StepError(f"旧版と新版が同じ: {old}")
+    ed = Editor(root, old, new)
+    desc_re = r'^\s*"description"\s*:.*\(v' + re.escape(old) + r"\)"
+
+    # plugin の定義
+    for rel, required in ((".claude-plugin/plugin.json", True), (".codex-plugin/plugin.json", False),
+                          ("dev.agy/plugin.json", False), ("plugin.json", False)):
+        f = pdir / rel
+        if not f.is_file():
+            continue
+        ed.sub(f, r'^\s*"version"\s*:', f"{rel} の version")
+        text = f.read_text(encoding="utf-8")
+        if f"(v{old})" in text:
+            ed.sub(f, desc_re, f"{rel} の description")
+
+    # マーケットプレイス
+    mp = root / ".claude-plugin" / "marketplace.json"
+    if mp.is_file():
+        s, e = marketplace_range(ed.lines(mp), a.plugin)
+        if s is None:
+            ed.manual.append(f".claude-plugin/marketplace.json に {a.plugin} の項目が無い")
+        elif any(f"(v{old})" in l for l in ed.lines(mp)[s:e]):
+            ed.sub(mp, desc_re, "marketplace.json の description", start=s, stop=e)
+
+    # 根の README
+    readme = root / "README.md"
+    rows = [l for l in (ed.lines(readme) if readme.is_file() else []) if l.startswith(f"| **{a.plugin}** |")]
+    if rows:
+        ed.sub(readme, r"^\| \*\*" + re.escape(a.plugin) + r"\*\* \|", "README.md のプラグイン一覧表")
+    elif a.plugin in ("ndf", "playwright-kit"):
+        ed.manual.append(f"README.md のプラグイン一覧表に {a.plugin} の行が無い")
+    if a.plugin == "ndf":
+        ed.sub(readme, r"\*\*NDFプラグイン v", "README.md の概要の版")
+        ed.sub(root / "AGENTS.md", r"主要プラグインです（v", "AGENTS.md の版")
+        nr = pdir / "README.md"
+        ed.sub(nr, r"（Kiro CLI用 / v", "plugins/ndf/README.md の Kiro の確認例")
+        ed.sub(nr, r"/plugins/cache/ai-plugins/ndf/", "plugins/ndf/README.md の Codex のパス例", count=2)
+        ed.sub(nr, r"ndf@ai-plugins\s+installed", "plugins/ndf/README.md の codex plugin list の出力例")
+        bump_versioning_doc(ed)
+
+    bump_update_heading(ed, pdir / "README.md")
+
+    # 新しい見出しを古い見出しの前に足すと「更新案内の見出しが 2 個ある」が出る。古い節は本文を書く後の段が片付ける
+    expected = []
+    if base_of(old) != base_of(new):
+        expected.append(f"更新案内の見出しが 2 個ある（v{new} / v{old}）")
+        ed.manual.append(f"{pdir.relative_to(root).as_posix()}/README.md: 更新案内の v{old} の節を片付ける（見出しを 1 つにする）")
+    ok, summary = run_staleness(root, expected)
+    if ok is None:
+        ed.manual.append(summary)
+    status = "fail" if ok is False else "ok"
+    out = {"status": status, "plugin": a.plugin, "from": old, "to": new,
+           "files": ed.files, "manual": ed.manual, "staleness": summary}
+    if status == "fail":
+        out["reason"] = "check-doc-staleness.py が失敗"
+    emit(out)
+    return 0 if status == "ok" else 1
+
+
+# --- changelog -------------------------------------------------------------
+
+def pr_titles(root, prs):
+    items = []
+    for n in prs:
+        p = run(["gh", "pr", "view", str(n), "--json", "title"], cwd=root, check=False)
+        if p.returncode != 0:
+            raise StepError(f"gh pr view {n} が失敗: {p.stderr.strip()[:200]}")
+        try:
+            title = json.loads(p.stdout)["title"].strip()
+        except (ValueError, KeyError, AttributeError):
+            raise StepError(f"gh pr view {n} の出力を読めない")
+        items.append((n, f"- {title}（#{n}）"))
+    return items
+
+
+def cmd_changelog(a):
+    root = git_root(a.root)
+    items = pr_titles(root, a.prs)
+    sections = []
+
+    # CHANGELOG.md（見出しは基底の版。開発版の接尾辞は載せない）
+    cl = root / "CHANGELOG.md"
+    if not cl.is_file():
+        raise StepError("CHANGELOG.md が無い")
+    lines = cl.read_text(encoding="utf-8").split("\n")
+    ver = base_of(a.version)
+    head = f"## [{a.plugin} {ver}]"
+    at = next((i for i, l in enumerate(lines) if l == head or l.startswith(head + " ")), None)
+    if at is None:
+        first = next((i for i, l in enumerate(lines) if l.startswith("## [")), len(lines))
+        today = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+        block = [f"{head} - {today}", ""] + [b for _, b in items] + [""]
+        if first == len(lines) and lines and lines[-1] != "":
+            block = [""] + block
+        lines[first:first] = block
+        sections.append({"file": "CHANGELOG.md", "heading": block[0] if block[0] else block[1],
+                         "added": [n for n, _ in items]})
+    else:
+        end = next((i for i in range(at + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
+        body = "\n".join(lines[at:end])
+        add = [(n, b) for n, b in items if f"#{n}）" not in body and f"#{n})" not in body]
+        ins = end
+        while ins - 1 > at and lines[ins - 1].strip() == "":
+            ins -= 1
+        lines[ins:ins] = [b for _, b in add]
+        sections.append({"file": "CHANGELOG.md", "heading": lines[at], "added": [n for n, _ in add]})
+    cl.write_text("\n".join(lines), encoding="utf-8")
+
+    # plugin の README の更新案内
+    try:
+        pdir = plugin_dir(root, a.plugin)
+    except StepError:
+        pdir = None
+    readme = pdir / "README.md" if pdir else None
+    h = f"## v{a.version} へ更新するとき"
+    if readme and readme.is_file():
+        rl = readme.read_text(encoding="utf-8").split("\n")
+        if h in rl:
+            i = rl.index(h)
+            nxt = next((j for j in range(i + 1, len(rl)) if rl[j].strip()), None)
+            if nxt is None or rl[nxt].startswith("## "):
+                rel = readme.relative_to(root).as_posix()
+                rl[i + 1:i + 1] = [""] + [b for _, b in items] + [""]
+                # 見出しの直後に空行が重なったら 1 つにする
+                j = i + 2 + len(items) + 1
+                while j < len(rl) and rl[j] == "" and rl[j - 1] == "":
+                    del rl[j]
+                readme.write_text("\n".join(rl), encoding="utf-8")
+                sections.append({"file": rel, "heading": h, "added": [n for n, _ in items]})
+
+    emit({"status": "ok", "sections": sections})
+    return 0
+
+
 # --- 入口 ------------------------------------------------------------------
 
 def build_parser():
@@ -287,6 +601,17 @@ def build_parser():
     p.add_argument("--design", nargs="+", required=True)
     p.add_argument("--title")
     p.set_defaults(func=cmd_spec_finalize)
+
+    p = sub.add_parser("bump", help="plugin の版数を持つ箇所を旧版から新版へ上げる")
+    p.add_argument("--plugin", required=True, help="ndf / playwright-kit / plugins/mcp の名前（例 mcp-serena）")
+    p.add_argument("--to", required=True, type=version_arg)
+    p.set_defaults(func=cmd_bump)
+
+    p = sub.add_parser("changelog", help="CHANGELOG.md と plugin の README の更新案内へ PR のタイトルを並べる")
+    p.add_argument("--version", required=True, type=version_arg)
+    p.add_argument("--prs", nargs="+", required=True, type=int, metavar="PR番号")
+    p.add_argument("--plugin", default="ndf")
+    p.set_defaults(func=cmd_changelog)
 
     return ap
 
