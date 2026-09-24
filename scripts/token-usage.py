@@ -588,6 +588,21 @@ def render_md(result: dict, by: list[str]) -> str:
     return "\n".join(out) + "\n"
 
 
+def collect(claude_root: Path, codex_root: Path, kiro_root: Path, idle_cap: int = IDLE_CAP,
+            until: float | None = None, min_version: str | None = None) -> tuple[list[Session], int, dict]:
+    """記録を 1 回読み、外部 CLI を寄せてから版で絞る。（会話, 寄せ先の無い外部 CLI の件数, 読み飛ばした件数）を返す。
+
+    `token-usage-snapshot.py` が読み込みを 1 回にするために関数として呼ぶ。
+    """
+    sessions, seats, skipped = read_claude(claude_root, idle_cap, until)
+    externals = seats + read_codex(codex_root, idle_cap, until) + read_kiro(kiro_root, until)
+    unlinked = link_external(sessions, externals)  # 版で絞る前に寄せる（古い版の会話の分を未対応に数えない）
+    if min_version:
+        floor = version_key(min_version)
+        sessions = [s for s in sessions if version_key(s.version) >= floor]
+    return sessions, unlinked, skipped
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="ndf の版ごとのトークン消費と所要時間を集計する")
     home = Path(os.path.expanduser("~"))
@@ -613,12 +628,8 @@ def main(argv: list[str] | None = None) -> int:
             ap.error(f"--until を時刻として読めない: {args.until}")
         if datetime.fromisoformat(args.until.replace("Z", "+00:00")).tzinfo is None:  # 機械の時間帯で打ち切りが変わる
             ap.error(f"--until に時間帯を付ける（例: 2026-09-24T09:00:00Z）: {args.until}")
-    sessions, seats, skipped = read_claude(args.claude_root, args.idle_cap, until)
-    externals = seats + read_codex(args.codex_root, args.idle_cap, until) + read_kiro(args.kiro_root, until)
-    unlinked = link_external(sessions, externals)  # 版で絞る前に寄せる（古い版の会話の分を未対応に数えない）
-    if args.min_version:
-        floor = version_key(args.min_version)
-        sessions = [s for s in sessions if version_key(s.version) >= floor]
+    sessions, unlinked, skipped = collect(args.claude_root, args.codex_root, args.kiro_root, args.idle_cap, until,
+                                          args.min_version)
     result = aggregate(sessions, by)
     result["meta"] = {"by": by, "min_version": args.min_version, "until": args.until, "sessions": len(sessions),
                       "sessions_with_pr": sum(1 for s in sessions if s.prs), "unlinked_external": unlinked,
