@@ -193,44 +193,129 @@ def test_only_none_clears_the_narrowing(resume, tmp_path, capsys):
 # ---------------- 外す者・足す者（AC28） ----------------
 
 def test_exclude_reruns_the_probe_and_drops_the_name(resume, state_mod, tmp_path):
-    """AC28: `--exclude agy` は確認をやり直し、使える者から agy を外す。
+    """AC28: `--exclude kiro` は確認をやり直し、使える者から kiro を外す。
 
-    作り直しは保存された `pool` ではなく今の母集合（#892 でホストを含む）から解決する。
+    作り直しは保存された `pool` ではなく今の母集合（claude / codex / kiro とホスト）から解決する。
     """
     _state(tmp_path)
+    st = resume("--exclude", "kiro")
+    assert resume.calls == [["claude", "codex"]]
+    assert st["participants"]["excluded"] == ["kiro"]
+    assert st["participants"]["available"] == ["claude", "codex"]
+    assert "kiro" not in _seats(state_mod, tmp_path)
+
+
+def test_exclude_agy_on_resume_is_ignored(resume, tmp_path):
+    """#786 の AC4: 既定の母集合に無い agy の除外は `ignored_exclude` に残り、`excluded` は空。"""
+    _state(tmp_path)
     st = resume("--exclude", "agy")
-    assert resume.calls == [["claude", "codex", "kiro"]]
-    assert st["participants"]["excluded"] == ["agy"]
+    assert st["participants"]["excluded"] == []
+    assert st["participants"]["ignored_exclude"] == ["agy"]
     assert st["participants"]["available"] == ["claude", "codex", "kiro"]
-    assert "agy" not in _seats(state_mod, tmp_path)
 
 
 def test_the_participants_are_recorded_as_one_change(resume, tmp_path):
     """決定 16: 参加者の作り直しは、項目ごとではなく 1 件として積む。"""
     _state(tmp_path)
-    st = resume("--exclude", "agy")
+    st = resume("--exclude", "kiro")
     changes = [c for c in st["resume_changes"] if c["field"] == "participants"]
     assert len(changes) == 1
     assert changes[0]["from"]["excluded"] == []
-    assert changes[0]["to"]["excluded"] == ["agy"]
+    assert changes[0]["to"]["excluded"] == ["kiro"]
 
 
 def test_exclude_none_clears_the_exclusions(resume, tmp_path):
     """AC28: `--exclude none` は外す者を空へ戻す。"""
-    _state(tmp_path, participants=_participants(excluded=["agy"], available=["codex", "kiro"]))
+    _state(tmp_path, participants=_participants(excluded=["kiro"], available=["codex"]))
     st = resume("--exclude", "none")
     assert st["participants"]["excluded"] == []
-    assert st["participants"]["available"] == ["claude", "codex", "agy", "kiro"]
+    assert st["participants"]["available"] == ["claude", "codex", "kiro"]
 
 
 def test_unpassed_arguments_come_from_the_state_file(resume, tmp_path):
     """AC28 後半: 渡さなかった引数は状態ファイルの値で補う（決定 14）。"""
     _state(tmp_path, participants=_participants(
-        included=["claude"], available=["claude", "codex", "agy", "kiro"]))
-    st = resume("--exclude", "agy")
+        included=["claude"], available=["claude", "codex", "kiro"]))
+    st = resume("--exclude", "kiro")
     assert st["participants"]["included"] == ["claude"]
-    assert st["participants"]["excluded"] == ["agy"]
+    assert st["participants"]["excluded"] == ["kiro"]
+    assert st["participants"]["available"] == ["claude", "codex"]
+
+
+def _started_with_exclude_agy(tmp_path):
+    return _state(tmp_path, participants=_participants(
+        pool=["claude", "codex", "kiro"], excluded=[], ignored_exclude=["agy"],
+        available=["claude", "codex", "kiro"]))
+
+
+def test_ignored_exclusions_survive_a_resume_without_exclude(resume, state_mod, tmp_path, capsys):
+    """#786 の AC4d: `--exclude agy` で始めた実行を `--include codex` だけで再開しても残り、報告に出る。"""
+    _started_with_exclude_agy(tmp_path)
+    st = resume("--include", "codex")
+    assert st["participants"]["ignored_exclude"] == ["agy"]
+    assert st["participants"]["excluded"] == []
+    st["final"] = "approved"
+    (tmp_path / f"cross-review-pr{PR}-state.json").write_text(
+        json.dumps(st, ensure_ascii=False), encoding="utf-8")
+    capsys.readouterr()
+    state_mod.cmd_report(type("A", (), {"pr": PR})())
+    assert "- --exclude で指定したが既定の母集合に無かった者: agy" in capsys.readouterr().out
+
+
+def test_real_and_ignored_exclusions_survive_a_resume_without_exclude(resume, tmp_path):
+    """現状固定: 実際の除外と母集合外の除外を同時に持つ状態も再開できる。"""
+    _state(tmp_path, participants=_participants(
+        pool=["claude", "codex", "kiro"], excluded=["kiro"],
+        ignored_exclude=["agy"], available=["claude", "codex"]))
+
+    st = resume("--require-all")
+
+    assert st["participants"]["excluded"] == ["kiro"]
+    assert st["participants"]["ignored_exclude"] == ["agy"]
+    assert st["participants"]["available"] == ["claude", "codex"]
+    assert resume.calls == [["claude", "codex"]]
+
+
+def test_include_wins_over_an_ignored_exclusion(resume, tmp_path):
+    """#786 の AC4d: 無視した除外の名前を `--include` で渡すと、足し戻さずに参加者へ戻す。"""
+    _started_with_exclude_agy(tmp_path)
+    st = resume("--include", "agy")
+    assert st["participants"]["ignored_exclude"] == []
+    assert st["participants"]["available"] == ["claude", "codex", "agy", "kiro"]
+
+
+def test_only_wins_over_an_ignored_exclusion(resume, state_mod, tmp_path):
+    """#786 の決定 12: `--exclude agy` で始めた実行を `--only agy` で再開すると、agy 1 者で回る。
+
+    再開時の 1 者指定も新しい指定であり、無視した除外を足し戻して矛盾で止めない。
+    """
+    _started_with_exclude_agy(tmp_path)
+    st = resume("--only", "agy")
+    assert st["only"] == "agy"
+    assert st["participants"]["ignored_exclude"] == []
+    assert st["participants"]["available"] == ["agy"]
+    assert _seats(state_mod, tmp_path) == ["agy"]
+
+
+def test_include_of_a_real_exclusion_still_conflicts(resume, tmp_path):
+    """外した者（`excluded`）と `--include` の重なりは今どおり止める。"""
+    path = _state(tmp_path, participants=_participants(
+        pool=["claude", "codex", "kiro"], excluded=["kiro"], available=["claude", "codex"]))
+    before = path.read_text(encoding="utf-8")
+    with pytest.raises(SystemExit) as e:
+        resume("--include", "kiro")
+    assert e.value.code == 1
+    assert path.read_text(encoding="utf-8") == before
+
+
+def test_only_none_after_only_agy_returns_to_the_default_three(resume, state_mod, tmp_path):
+    """#786 の AC4b: `--only agy` で始めた実行を `--only none` で再開すると、既定の 3 者へ戻る。"""
+    _state(tmp_path, only="agy", participants=_participants(
+        pool=["claude", "codex", "kiro"], available=["agy"]))
+    st = resume("--only", "none")
+    assert st["only"] is None
     assert st["participants"]["available"] == ["claude", "codex", "kiro"]
+    assert "agy" not in _seats(state_mod, tmp_path)
 
 
 def test_require_all_alone_rebuilds_the_participants(resume, tmp_path):
@@ -238,7 +323,7 @@ def test_require_all_alone_rebuilds_the_participants(resume, tmp_path):
     _state(tmp_path)
     st = resume("--require-all")
     assert st["participants"]["require_all"] is True
-    assert resume.calls == [["claude", "codex", "agy", "kiro"]]
+    assert resume.calls == [["claude", "codex", "kiro"]]
 
 
 def test_a_failed_rebuild_leaves_the_state_untouched(resume, state_mod, tmp_path, monkeypatch):

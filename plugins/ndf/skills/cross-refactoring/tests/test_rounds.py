@@ -89,6 +89,19 @@ def test_advance_with_no_rounds_leaves_the_state_unchanged(cmd_report, tmp_path,
     assert read_state(state_path) == before
 
 
+def test_advance_stops_when_already_final(cmd_report, tmp_path, env_tmp_dir):
+    """終了済みなら状態を書き換えずに終了コード 1 で止まる（R2-002 の現状固定）。"""
+    state_path = make_state(tmp_path, final="no_more_proposals", rounds=[round_of(1)])
+    env_tmp_dir(state_path)
+    before = read_state(state_path)
+
+    with pytest.raises(SystemExit) as e:
+        cmd_report.cmd_advance(_args())
+
+    assert e.value.code == 1
+    assert read_state(state_path) == before
+
+
 def test_advance_continues_when_progress_is_made(cmd_report, tmp_path, env_tmp_dir):
     state_path = make_state(tmp_path, rounds=[round_of(1)])
     env_tmp_dir(state_path)
@@ -230,6 +243,21 @@ def test_report_prints_the_participants(cmd_report, tmp_path, env_tmp_dir, capsy
     assert "- --include で足した者: agy" in out
     assert "- 確認を通らなかった者: agy（Not logged in）" in out
     assert "max_outer_rounds: 3 → 5" in out
+
+
+def test_report_prints_an_ignored_exclusion(cmd_report, tmp_path, env_tmp_dir, capsys):
+    """#786 の AC4d — `--exclude` で指定したが既定の母集合に無かった者を 1 行で出す。"""
+    state_path = make_state(
+        tmp_path, runtimes=["claude", "codex", "kiro"],
+        participants={
+            "pool": ["claude", "codex", "kiro"], "included": [], "excluded": [],
+            "ignored_exclude": ["agy"], "available": ["claude", "codex", "kiro"],
+            "unavailable": {}, "probe_skipped": False, "require_all": False,
+        },
+    )
+    env_tmp_dir(state_path)
+    cmd_report.cmd_report(_report_args())
+    assert "- --exclude で指定したが既定の母集合に無かった者: agy" in capsys.readouterr().out
 
 
 def test_report_says_no_record_for_an_older_state(cmd_report, tmp_path, env_tmp_dir, capsys):

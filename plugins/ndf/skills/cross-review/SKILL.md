@@ -1,6 +1,6 @@
 ---
 name: cross-review
-description: "Review a PR with two CLIs picked from every runtime including the host, looping fixes until no new finding appears. Use when a converging multi-AI review is wanted（クロスレビュー・両AIレビュー・収束レビュー）."
+description: "Review a PR with two CLIs picked from claude, codex, kiro and the host (agy only with --include agy), looping fixes until no new finding appears. Use when a converging multi-AI review is wanted（クロスレビュー・両AIレビュー・収束レビュー）."
 argument-hint: "[PR番号] [--host claude|codex|agy|kiro] [--max-rounds N] [--rotate-after K] [--rotate-mode light|squash] [--only RUNTIME] [--exclude NAMES] [--include NAMES] [--require-all] [--focus TEXT] [--extra-instructions-file PATH] [--verify-command CMD] [--verify-exit-code N]"
 allowed-tools:
   - Bash
@@ -13,14 +13,16 @@ allowed-tools:
 
 # クロスレビュー収束ループ
 
-PR を**ホストを含む全ランタイムから選んだ 2 者**にレビューさせ、**新しい指摘が出なくなるまで**
+PR を**既定の母集合（claude / codex / kiro とホスト）から選んだ 2 者**にレビューさせ、**新しい指摘が出なくなるまで**
 `/ndf:pr-review` と `/ndf:fix` を自動で回す。
 
-母集合は全ランタイム（ホストを含む 4 者）で、そのうち使える者から毎ラウンド 2 席を埋める
+既定の母集合は claude / codex / kiro とホストで、agy は `--include agy` で戻す（#786。agy は
+テストを背景で起動したまま結果を残さずに終わることがある）。そのうち使える者から毎ラウンド 2 席を埋める
 （実装は共通層の `lib/assignment.py`）。**1 者が使えなくても始まり**、使える者が 1 者なら
 その者と同じランタイムの 2 つ目で埋める（`docs/05`）。**ホストも輪番に入れる**のは、
 レビュー担当を CLI プロセスとして起動するためである。ホストと同じランタイムでも、ホストの
-会話の作業文脈は持ち込まれない。外したい相手は `--exclude` で名指しする。
+会話の作業文脈は持ち込まれない。外したい相手は `--exclude` で名指しする（既定の母集合に無い者の
+指定は止めずに無視し、`ℹ` の 1 行で知らせる）。
 
 /goalの引数として呼ばれた場合は、新しい指摘が出なくなるまで/cross-reviewを繰り返す。
   * 担当のいずれかが不具合などで実行できなくなった場合は異常終了とする
@@ -61,7 +63,8 @@ state.json の読み書きや AI launcher 起動・完了待ちは全て委譲�
 | 長尺PR対策 | **`--rotate-after` ラウンドで PR をローテーション**（default=light: 同ブランチで PR 巻き直し / squash: 新ブランチ + squash 統合） |
 | 振動検知 | 前のラウンドと**同じ箇所を指す指摘**が 50% 以上なら中断（測り方は `docs/01` の Step 4） |
 | 終了基準 | **新しい指摘が出なくなったら収束**。全員 `APPROVE` は最も止まらない参加者に律速される。3 つの層の順序は `docs/01` の「終了基準」 |
-| レビュワーの母集合 | **ホストを含む全ランタイム**の 4 者から、使える者を決めて毎ラウンド 2 席。使える者の解決と席の埋め方は `docs/05` |
+| レビュワーの母集合 | **claude / codex / kiro とホスト**（agy は `--include agy`）から、使える者を決めて毎ラウンド 2 席。使える者の解決と席の埋め方は `docs/05` |
+| 2 ラウンド目以降 | 既存コメントの控えを取り直す（`docs/01` の Step 1） |
 
 ## 引数
 
@@ -72,9 +75,9 @@ state.json の読み書きや AI launcher 起動・完了待ちは全て委譲�
 | `--rotate-after K` | この round 数で未収束なら PR ローテーション | `8` |
 | `--rotate-mode light\|squash` | ローテーション方式。`light`: 同ブランチで旧 PR を close → 新 PR (title/body は現状の差分・実装から再生成)。`squash`: squash 統合 + 新ブランチ + `(rotated)` suffix | `light` |
 | `--host claude\|codex\|agy\|kiro` | この収束ループを起動している CLI。母集合には残る（外すなら `--exclude`） | 環境変数から推定。**推定できなければ失敗する** |
-| `--only RUNTIME` | 1 者だけで回す。**そのラウンドの担当を 1 者へ絞り、席の埋め合わせを行わない。** 外した者を指定したときと、その 1 者が確認を通らないときは `init` が弾く | 担当 2 者 |
-| `--exclude NAMES` | 母集合から外す者。カンマ区切りで複数、繰り返しも可。再開で `none` を渡すと空へ戻す | なし |
-| `--include NAMES` | 母集合に足す者。既定の母集合が全ランタイムのため、ホストを含め指定しても結果は変わらない（エラーにはしない）。書き方は `--exclude` と同じ | なし |
+| `--only RUNTIME` | 1 者だけで回す。**そのラウンドの担当を 1 者へ絞り、席の埋め合わせを行わない。** 既定の母集合に無い者（agy）も名指しできる。外した者を指定したときと、その 1 者が確認を通らないときは `init` が弾く | 担当 2 者 |
+| `--exclude NAMES` | 母集合から外す者。カンマ区切りで複数、繰り返しも可。既定の母集合に無い者の指定は止めずに無視し、`ℹ` の 1 行と完了報告の 1 行で知らせる。再開で `none` を渡すと空へ戻す | なし |
+| `--include NAMES` | 母集合に足す者。agy を戻すときに使う。既に母集合にいる者（ホストを含む）を指定しても結果は変わらない（エラーにはしない）。書き方は `--exclude` と同じ | なし |
 | `--require-all` | 確認を通らない者が 1 者でもいれば `init` を失敗させる。全員が揃わないなら始めたくない運用向け | 使える者で始める |
 | `--focus TEXT` | 自動レビュー観点に上乗せして**そのラウンドのレビュー担当 2 者**に渡す追加観点。短い重点チェック向け | なし |
 | `--extra-instructions-file PATH` | 自動レビュー観点に上乗せして**そのラウンドのレビュー担当 2 者**に渡す追加観点を UTF-8 テキストファイルから読む。長いチェックリスト向け | なし |
@@ -88,7 +91,7 @@ state.json の読み書きや AI launcher 起動・完了待ちは全て委譲�
 /ndf:cross-review 123 --max-rounds 4 --rotate-after 2
 /ndf:cross-review 123 --rotate-mode squash
 /ndf:cross-review 123 --only codex
-/ndf:cross-review 123 --exclude agy --include claude --require-all
+/ndf:cross-review 123 --include agy --exclude kiro --require-all
 /ndf:cross-review 123 --focus "ドキュメントとコードの整合性を重点的に確認"
 /ndf:cross-review 123 --extra-instructions-file /tmp/review-focus.md
 /ndf:cross-review 123 --verify-command "pytest" --verify-exit-code 1
@@ -104,6 +107,7 @@ state.json の読み書きや AI launcher 起動・完了待ちは全て委譲�
 
 - `common`: PR 全体の目的、変更範囲、保守性、テスト、ロールバック容易性
 - `docs_only`: ドキュメントのみ PR。企画・説明の妥当性、コード/設定/コマンド/他 docs との整合性
+- `design`: 設計 PR（`issues/` の `-requirements.md` / `-design.md` / `-design-decisions.md`）。3 文書の対応、状態の書き手と読み手の矛盾、外部ツールの挙動の断定に実測の根拠があるか
 - `code`: 設計、正確性、可読性、冗長・重複、言語らしさ、セキュリティ、関数/ファイルの責務とサイズ
 - `db_migration`: データ設計、型、NULL/default/制約/index、既存データ、backfill、ロールバック
 - `test`: テストの仕様性、境界値、失敗系、flaky リスク
@@ -139,7 +143,7 @@ state.json の読み書きや AI launcher 起動・完了待ちは全て委譲�
 | 1 | 自分の PR 判定（422 回避） | `gh api user` と `gh pr view --json author` を比較し `is_own_pr` / `event_downgrade` を state.json に書く |
 | 2 | worktree 分離 | `git worktree add <worktree-base>/<owner>--<repo>/pr<PR> <head>` を冪等実行（`<worktree-base>` は `NDF_WORKTREE_BASE` env > `<システム tmpdir>/ndf-worktrees` の優先順で解決）。パスが存在しても現リポジトリの登録済み worktree でなければ `.stale-<ts>` に退避して作り直す。**流用するときは PR の head へ揃える**（前回の実行の残りをレビューさせない。再開の経路も同じ）。`gh pr view --json headRefName,headRefOid,isCrossRepository` で取った基準のコミットへ hard reset し、追跡対象外のファイルを消す（tmp ディレクトリは `-e` で除外。フォーク PR は `refs/pull/<PR>/head` から取り込む）。**同じ同期を `start-round` がラウンドごとに行う。** 作成時と再開時だけでは、修正を作業ツリーの外で行って push したときに 1 つ前の内容をレビューする。head と一致していて変更が無ければ何も発行せず、追跡対象の変更・未 push のコミット・基準を取り込めないときは **exit 8** で止める（1 はループを抜ける値なので使わない）。解決した head branch は `state.json` へ書き戻す（巻き直しで古くなるため）。条件と理由は `docs/01-state-and-review.md` の「ラウンドの開始時の同期」にある |
 | 3 | agy の作業領域 | `launch-agy.sh` が `--add-dir` で作業ツリーを宣言する。**tmp dir は `<worktree>/.cross_review/`** を採用し、宣言する作業領域を 1 つに保つ |
-| 4 | 既存コメント差分 | `fix/scripts/fetch-pr-comments.sh` で 3 ソース (インラインコメント / レビュー body / PR レベルコメント) を一括取得し `$TMP_DIR/cross-review-pr<PR>-existing-comments.txt` に保存。agy プロンプトには **内容をインライン埋め込み**、codex プロンプトには path を渡す |
+| 4 | 既存コメント差分 | `fix/scripts/fetch-pr-comments.sh` で 3 ソース (インラインコメント / レビュー body / PR レベルコメント) を一括取得し `$TMP_DIR/cross-review-pr<PR>-existing-comments.txt` に保存し、担当のプロンプトへ**内容をインライン埋め込み**する。**2 ラウンド目以降は `start-round` が `--strict` で取り直す**（1 ソースでも失敗したら前の控えのまま `⚠` で続ける） |
 
 `<worktree-base>` の解決順と worktree の実パスの形は [docs/04-contracts.md](docs/04-contracts.md) の「`<worktree-base>` の解決順」にある。
 

@@ -129,7 +129,8 @@ def resolve_participants(
 
     母集合の既定は `refactor_pool(host)`（codex / kiro とホスト）。確認は止めない確認
     （`auth.probe_auth`）で、通らない者は外して続ける。名前の矛盾・全員を要する指定で
-    欠け・使える者が 0 者は、この工程の中断（終了コード 4）へ写す。状態ファイルは
+    欠け・使える者が 0 者は、この工程の中断（終了コード 4）へ写す。母集合に無い者の
+    除外は中断せず、`ℹ` の 1 行を出して続ける（#786 の決定 2）。状態ファイルは
     この関数の後に書かれるため、失敗したときは作られも書き換えられもしない。
     """
     try:
@@ -144,6 +145,9 @@ def resolve_participants(
         raise
     info(f"ホスト: {host} / 母集合: {' / '.join(pool)}"
          f" / 使える者: {' / '.join(resolved.available) or 'なし'}")
+    if resolved.ignored_exclude:
+        info(f"ℹ --exclude {','.join(resolved.ignored_exclude)} は既定の母集合に無いため"
+             f"無視しました（母集合: {', '.join(pool)}）")
     for name, reason in resolved.unavailable.items():
         info(f"⚠ {name} を担当から外しました（{reason}）")
     if not resolved.available:
@@ -539,6 +543,36 @@ def _save_initial_state(
     return state
 
 
+def _rebuild_participants(
+    state: dict[str, Any],
+    include: Optional[list[str]],
+    exclude: Optional[list[str]],
+    require_all: Optional[bool],
+) -> None:
+    """再開時の指定を補完し、参加者と作業ツリーの記録を作り直す。"""
+    recorded = state.get("participants") or {}
+    include_eff = include if include is not None else list(recorded.get("included") or [])
+    # `--exclude` を渡さない再開では、外した者と無視した除外の両方を足し戻す（#786 の AC4d。
+    # 規則は cross-review と共通の `assignment.recorded_exclusions`）
+    exclude_eff = (exclude if exclude is not None
+                   else assignment.recorded_exclusions(recorded, include_eff))
+    participants = resolve_participants(
+        str(state["host"]),
+        include_eff,
+        exclude_eff,
+        bool(require_all) if require_all is not None else bool(recorded.get("require_all")),
+    )
+    state.setdefault("resume_changes", []).append({
+        "at": statefile.now(), "field": "participants",
+        "from": state.get("participants"), "to": participants,
+    })
+    state["participants"] = participants
+    state["runtimes"] = list(participants["available"])
+    worktrees = state.setdefault("worktrees", {})
+    for runtime in state["runtimes"]:
+        worktrees.setdefault(runtime, str(pathlib.Path(state["worktree_root"]) / runtime))
+
+
 def _resume(
     state_file: pathlib.Path,
     state: dict[str, Any],
@@ -564,22 +598,7 @@ def _resume(
 
     require_all = getattr(args, "require_all", None)
     if include is not None or exclude is not None or require_all is not None:
-        recorded = state.get("participants") or {}
-        participants = resolve_participants(
-            str(state["host"]),
-            include if include is not None else list(recorded.get("included") or []),
-            exclude if exclude is not None else list(recorded.get("excluded") or []),
-            bool(require_all) if require_all is not None else bool(recorded.get("require_all")),
-        )
-        state.setdefault("resume_changes", []).append({
-            "at": statefile.now(), "field": "participants",
-            "from": state.get("participants"), "to": participants,
-        })
-        state["participants"] = participants
-        state["runtimes"] = list(participants["available"])
-        worktrees = state.setdefault("worktrees", {})
-        for runtime in state["runtimes"]:
-            worktrees.setdefault(runtime, str(pathlib.Path(state["worktree_root"]) / runtime))
+        _rebuild_participants(state, include, exclude, require_all)
 
     _apply_post_event(state, is_own_pr)
     statefile.save(state_file, state)
@@ -789,6 +808,49 @@ def _round_label_and_limit(
     return "提案ラウンド", state["max_outer_rounds"]
 
 
+def _open_or_resume_round(
+    path: pathlib.Path, state: dict[str, Any], kind: str,
+) -> dict[str, Any]:
+    """現在のラウンドを再開し、無ければ新しく作って保存する。"""
+    rounds = state["rounds"]
+    round_no = len(rounds) + 1
+    entry = next((r for r in rounds if r["round"] == round_no), None)
+    if entry is not None:
+        return entry
+
+    entry = _new_round_entry(state, round_no, kind)
+    rounds.append(entry)
+    state["outer_round"] = round_no
+    state["phase"] = "propose"
+    statefile.save(path, state)
+    return entry
+
+
+def _emit_round(entry: dict[str, Any], state: dict[str, Any]) -> None:
+    """ラウンド開始時の値を emit する。
+
+    **キーはキーワード引数で書く。** 手順書の変数の出所を検査する
+    `scripts/check-skill-shell-vars.py` は `emit(...)` のキーワードを読むため、
+    辞書を展開して渡すとキーが見えなくなる。
+    """
+    kind = entry_kind(entry)
+    statefile.emit(
+        ROUND=entry["round"],
+        ROUND_KIND=kind,
+        # **母集合は繰り返しの中でも返す**（#518-1）。`init` だけが返す形では、
+        # 状態ファイルから再開する経路と、骨組みを抜粋して写す経路の両方で
+        # 未定義になる。出所は `init` と同じ状態ファイルの `runtimes` である。
+        RUNTIMES=" ".join(state["runtimes"]),
+        RUNTIMES_CSV=",".join(state["runtimes"]),
+        # 提案に使う雛形の名前。**結果ファイルの名前は種類で変えない**
+        # （ラウンド番号は通しなので衝突せず、監視の雛形をそのまま使える）。
+        PROPOSE_PHASE="propose-tests" if kind == TEST else "propose",
+        IMPL=entry["impl"],
+        IMPL_MODEL=entry["impl_model"]["requested"],
+        MAX_FIX_ROUNDS=state["max_fix_rounds"],
+    )
+
+
 def cmd_start_round(args: argparse.Namespace) -> None:
     """Step 2 — ラウンドを開き、実装担当を返す。
 
@@ -809,40 +871,17 @@ def cmd_start_round(args: argparse.Namespace) -> None:
         info(f"ラウンドの繰り返しは終了しています（{state['final']}）")
         sys.exit(1)
 
-    rounds = state["rounds"]
     kind = round_kind(state)
     if kind == STRUCTURE and len(rounds_of_kind(state.get("rounds") or [], STRUCTURE)) >= state["max_outer_rounds"]:
         finish_outer_rounds(path, state, "max_outer_rounds")
         sys.exit(1)
 
-    round_no = len(rounds) + 1
-    existing = next((r for r in rounds if r["round"] == round_no), None)
-    if existing is None:
-        existing = _new_round_entry(state, round_no, kind)
-        rounds.append(existing)
-        state["outer_round"] = round_no
-        state["phase"] = "propose"
-        statefile.save(path, state)
-
-    kind = entry_kind(existing)
+    entry = _open_or_resume_round(path, state, kind)
+    kind = entry_kind(entry)
     label, limit = _round_label_and_limit(state, kind)
     seq = len(rounds_of_kind(state.get("rounds") or [], kind))
     info(
         f"=== {label} {seq} / {limit} "
-        f"（実装 {existing['impl']}）==="
+        f"（実装 {entry['impl']}）==="
     )
-    statefile.emit(
-        ROUND=round_no,
-        ROUND_KIND=kind,
-        # **母集合は繰り返しの中でも返す**（#518-1）。`init` だけが返す形では、
-        # 状態ファイルから再開する経路と、骨組みを抜粋して写す経路の両方で
-        # 未定義になる。出所は `init` と同じ状態ファイルの `runtimes` である。
-        RUNTIMES=" ".join(state["runtimes"]),
-        RUNTIMES_CSV=",".join(state["runtimes"]),
-        # 提案に使う雛形の名前。**結果ファイルの名前は種類で変えない**
-        # （ラウンド番号は通しなので衝突せず、監視の雛形をそのまま使える）。
-        PROPOSE_PHASE="propose-tests" if kind == TEST else "propose",
-        IMPL=existing["impl"],
-        IMPL_MODEL=existing["impl_model"]["requested"],
-        MAX_FIX_ROUNDS=state["max_fix_rounds"],
-    )
+    _emit_round(entry, state)

@@ -3,6 +3,8 @@
 要求と受け入れ条件は [issue-542-786-requirements.md](issue-542-786-requirements.md) にある。決定の理由は
 [issue-542-786-design-decisions.md](issue-542-786-design-decisions.md) にある。この文書は「どう作るか」だけを扱う。
 
+> **決定 4 と AC9〜AC11 は #934 へ移した**（2026-09-23 利用者の判断。決定 3 の効果を確かめてから入れる）。F4・「前のラウンドからの変更の節」の節・AC9〜AC11 のテスト設計は #934 のための記録として残し、PR #930 では実装しない。
+
 ## 例: 同じ PR の 2 ラウンド目で担当が受け取るもの
 
 設計 PR（`issues/issue-900-design.md` を変える）の 1 ラウンド目で major 3 件・minor 2 件が出て、修正が
@@ -34,7 +36,7 @@
 | F1 | 既定の母集合を claude / codex / kiro とホストにする | `init`（cross-review） |
 | F2 | 既定の母集合に無い者を外す指定を、止めずに無視する | `init`（cross-review / cross-refactoring） |
 | F3 | ラウンドの開始ごとに既存コメントの控えを取り直す | `start-round` |
-| F4 | 前のラウンドからの変更の節を書く | `start-round` → `launch-reviewer.sh` |
+| F4 | 前のラウンドからの変更の節を書く（#934 へ移した） | `start-round` → `launch-reviewer.sh` |
 | F5 | 出し切りの指示・テストと背景の処理を起動しない指示をプロンプトに入れる | `launch-reviewer.sh` |
 | F6 | 設計 PR を分類し、設計向けの観点を渡す | `init`（観点の組み立て） |
 | F7 | 適用担当に、背景で起動したテストを残して終わらないよう求める | cross-refactoring の適用のプロンプト |
@@ -44,14 +46,14 @@
 | 要素 | 責務 | 変更 |
 | --- | --- | --- |
 | `plugins/ndf/scripts/lib/assignment.py` | 母集合と座席と参加者の解決 | 定数 `DEFAULT_REVIEW_RUNTIMES` を足し、`review_pool` をそれとホストから作る。`resolve_participants` は母集合に無い者の除外を無視し、`Participants.ignored_exclude` に残す。`only` が母集合・`--include`・`--exclude` のどれにも無いときは足す者として扱う（決定 12）。`Participants.to_state()` は `ignored_exclude` を含む 8 項目を返す |
-| `plugins/ndf/skills/cross-review/scripts/state.py` | 状態ファイル・観点・参加者の解決・ラウンドの開始 | 控えの取得を関数 `_fetch_existing_comments` に分け、`start-round` からも呼ぶ。`start-round` が変更の節のファイルを書く。分類 `design` と `DESIGN_REVIEW_TEMPLATE` を足す。`_resolve_reviewers` が無視した除外を 1 行で出す。`report` の参加者の節に「--exclude で指定したが既定の母集合に無かった者」の 1 行を足し、`ignored_exclude` を出す。再開の参加者の作り直しは、`--exclude` を渡さないとき `excluded` と `ignored_exclude` の両方を足し戻す。`ignored_exclude` の名前を `--include` にも渡したときだけ、その名前を足し戻さない（新しい指定を優先する）。`excluded` の名前と `--include` の重なりは今どおり止める |
-| `plugins/ndf/skills/cross-review/scripts/launch-reviewer.sh` | レビューのプロンプトを組んで担当を起動する | 変更の節のファイルがあれば埋め込む。出し切りの指示と、テストと背景の処理を起動しない指示を足す。先頭のコメントの「母集合が 4 者」を「担当は 4 ランタイムのどれでもなりうる」へ直す（`launch-codex.sh`・`launch-agy.sh` の同じコメントも） |
+| `plugins/ndf/skills/cross-review/scripts/state.py` | 状態ファイル・観点・参加者の解決・ラウンドの開始 | 控えの取得を関数 `_fetch_existing_comments` に分け、`start-round` からも呼ぶ。分類 `design` と `DESIGN_REVIEW_TEMPLATE` を足す。`_resolve_reviewers` が無視した除外を 1 行で出す。`report` の参加者の節に「--exclude で指定したが既定の母集合に無かった者」の 1 行を足し、`ignored_exclude` を出す。再開の参加者の作り直しは、`--exclude` を渡さないとき `excluded` と `ignored_exclude` の両方を足し戻す。`ignored_exclude` の名前を `--include` か `--only` に渡したときだけ、その名前を足し戻さない（新しい指定を優先する。`--exclude agy` で始めた実行を `--only agy` で再開すると、矛盾で止まらず agy 1 者で回る）。`excluded` の名前と `--include` の重なりは今どおり止める |
+| `plugins/ndf/skills/cross-review/scripts/launch-reviewer.sh` | レビューのプロンプトを組んで担当を起動する | 出し切りの指示と、テストと背景の処理を起動しない指示を足す。先頭のコメントの「母集合が 4 者」を「担当は 4 ランタイムのどれでもなりうる」へ直す（`launch-codex.sh`・`launch-agy.sh` の同じコメントも） |
 | `plugins/ndf/skills/fix/scripts/fetch-pr-comments.sh` | 既存コメントの 3 つの取得元を 1 本で取る | 引数 `--strict` を足す。付けたときは 3 つのどれか 1 つでも失敗すれば終了コード 1（付けないときは今どおり 3 つとも失敗したときだけ 1） |
 | `plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/commands/setup.py` | cross-refactoring の参加者の解決 | 無視した除外を 1 行で出す。再開（`_resume`）の作り直しは state.py と同じ規則で `ignored_exclude` も足し戻す |
 | `plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/commands/report.py` | cross-refactoring の完了報告 | cross-review の `report` と同じく「--exclude で指定したが既定の母集合に無かった者」の 1 行を足す |
 | `plugins/ndf/skills/cross-refactoring/tests/test_init.py` | cross-refactoring の `init` のテスト | 「母集合に無い者は外せない」の中断の期待を、無視して続ける期待へ替える |
 | `plugins/ndf/skills/cross-refactoring/prompts/apply.md` | 適用担当のプロンプト | テストを前景で終わるまで待つ指示を足す |
-| 文書 | 使い方と仕様 | `cross-review/docs/01-state-and-review.md`（Step 1 の `start-round` に、控えの取り直し・失敗しても続けること・変更の節のファイルを書く / 消すことを足す）・`cross-review/SKILL.md`・`docs/02-fix-and-rotation.md`・`docs/05-pool-and-convergence.md`・`docs/06-evidence.md`・`docs/specifications/cross-review-participants-and-seats.md`・`plugins/ndf/README.md`・`CLAUDE.md` の cross-review 節。cross-refactoring の `docs/01-state-and-propose.md`（参加者の確定の段）と `docs/specifications/cross-refactoring-participants.md`（中断の表の「名前の矛盾」の行と、203 行の「共通層が返す 7 項目」）。`cross-review/docs/04-contracts.md`（`participants` の 8 項目と一時ファイルの一覧）と確定仕様 `cross-review-participants-and-seats.md` の参加者の記録の表（8 項目）は、`ignored_exclude` と変更の節のファイルを足して 9 項目・一時ファイル 1 つ増へ直す |
+| 文書 | 使い方と仕様 | `cross-review/docs/01-state-and-review.md`（Step 1 の `start-round` に、控えの取り直し・失敗しても続けることを足す）・`cross-review/SKILL.md`・`docs/02-fix-and-rotation.md`・`docs/05-pool-and-convergence.md`・`docs/06-evidence.md`・`docs/specifications/cross-review-participants-and-seats.md`・`plugins/ndf/README.md`・`CLAUDE.md` の cross-review 節。cross-refactoring の `docs/01-state-and-propose.md`（参加者の確定の段）と `docs/specifications/cross-refactoring-participants.md`（中断の表の「名前の矛盾」の行と、203 行の「共通層が返す 7 項目」）。`cross-review/docs/04-contracts.md`（`participants` の 8 項目）と確定仕様 `cross-review-participants-and-seats.md` の参加者の記録の表（8 項目）は、`ignored_exclude` を足して 9 項目へ直す。変更の節のファイル（`start-round` が書く / 消すこと、`04-contracts.md` の一時ファイルの 1 つ増）は決定 4 とともに #934 へ移した |
 | テスト | 下の「テスト設計」 | 既存の母集合のテストを直し、新しい分岐のテストを足す |
 
 変えないもの:
@@ -87,7 +89,7 @@ graph LR
   SU -->|参加者| A
   S -->|控えの取得| F
   F --> G
-  S -->|控え・変更の節・state.json| W
+  S -->|控え・state.json| W
   L -->|読む| W
 ```
 
@@ -205,7 +207,7 @@ def _fetch_existing_comments(repo: str, pr: int, path: pathlib.Path, *, strict: 
 | 呼ぶ場所 | 失敗したとき |
 | --- | --- |
 | `init` の新規開始（今の場所）。`strict=False` で呼ぶ | 今と同じく、3 つとも失敗したときだけ `die`（終了コード 1）。1〜2 つの失敗は今どおり続ける |
-| `start-round`（状態ファイルの通しで 2 ラウンド目以降。ラウンドを開いた後、担当を起動する前）。`strict=True` で呼ぶ（`--strict` を付け、出力を一時の名前のファイルへ書いてから、成功したときだけ控えへ改名する） | 3 つの取得元のどれか 1 つでも失敗したら（終了コード 1）、前の控えを残し、`⚠ 既存コメントの控えを取り直せませんでした（<理由の先頭 200 字>）。前の控えのまま進めます` を標準エラーへ出して続ける |
+| `start-round`（状態ファイルの通しで 2 ラウンド目以降。round エントリを状態ファイルへ保存する前。PR #930 のレビューで、保存の後に取ると割り込みで結果の無い round だけが残るため前へ移した）。起動できない（`OSError`）ときも失敗の理由として返す。`strict=True` で呼ぶ（`--strict` を付け、出力を一時の名前のファイルへ書いてから、成功したときだけ控えへ改名する） | 3 つの取得元のどれか 1 つでも失敗したら（終了コード 1）、前の控えを残し、`⚠ 既存コメントの控えを取り直せませんでした（<理由の先頭 200 字>）。前の控えのまま進めます` を標準エラーへ出して続ける |
 
 | 項目 | 値 |
 | --- | --- |
@@ -217,6 +219,8 @@ def _fetch_existing_comments(repo: str, pr: int, path: pathlib.Path, *, strict: 
 控えの形（1 行 1 件、`[PR-COMMENT]` などの接頭辞）は変えない。
 
 ### 前のラウンドからの変更の節（`state.py start-round` → `launch-reviewer.sh`）
+
+> #934 へ移した（決定 4）。PR #930 では実装しない。
 
 `start-round` はラウンドを開いた後に `$TMP_DIR/cross-review-pr<STATE_PR>-round<ROUND>-changes.md` を扱う。
 
@@ -282,11 +286,12 @@ sequenceDiagram
   participant L as launch-reviewer.sh
   participant C as 担当 2 者
   P->>S: start-round
-  S->>S: 作業ツリーを head へ同期・ラウンドを開く
+  S->>S: 作業ツリーを head へ同期
   S->>G: **控えを取り直す（2 ラウンド目以降）**
-  S->>S: **変更の節のファイルを書く / 消す**
+  S->>S: ラウンドを開く（round を状態ファイルへ保存）
+  Note over S: 変更の節のファイルを書く / 消す（#934 へ移した）
   P->>L: 席ごとに起動
-  L->>C: プロンプト（控え・**変更の節**・観点・**出し切りの指示**）
+  L->>C: プロンプト（控え・観点・**出し切りの指示**）
   C-->>S: payload / result.json
   P->>S: read-result・verify-findings・critique
   P->>S: judge（変えない）
@@ -302,7 +307,7 @@ sequenceDiagram
 
 | 条件 | 実現方式 |
 | --- | --- |
-| 変更の節は 6,000 バイト以下 | ファイル名だけを並べ、差分の本文を入れない。一覧は 5,000 バイトで打ち切る（長いパスでも超えない）。定型の文は約 600 バイト、「ほか N 件」の行は 30 バイト以下 |
+| 変更の節は 6,000 バイト以下（#934） | ファイル名だけを並べ、差分の本文を入れない。一覧は 5,000 バイトで打ち切る（長いパスでも超えない）。定型の文は約 600 バイト、「ほか N 件」の行は 30 バイト以下 |
 | 控えの増分は同じ実行の前のラウンドの分だけ | 取り直しは `fetch-pr-comments.sh` の全件の取得で、増えるのは前の取得の後に投稿された行だけである |
 
 ## 決定の記録
@@ -319,12 +324,12 @@ sequenceDiagram
 | AC4 | 同上: `--include agy` の座席が今の既定の輪番と一致する。`--exclude agy` が例外を出さず `ignored_exclude == ["agy"]`、`available` に agy が無い。`test_state_review_pool.py`: `init --exclude agy` が終了コード 0 で `ℹ` の行を出し、状態ファイルに `ignored_exclude` が残る。綴りの誤りは今どおり 2 |
 | AC4b | `test_lib_assignment.py`: `only="agy"` で `include` 無しでも参加者が `[agy]` になり、`included` は空。`only="agy", exclude=["agy"]` は今どおり `AssignmentError`。`only="typo"` は `probe` を呼ぶ前に `AssignmentError`。`test_state_resume_args.py`: `--only agy` で始めた実行を `--only none` で再開すると、参加者が既定の 3 者に戻る |
 | AC4c | cross-refactoring の `test_init.py`: `{"exclude": [["agy"]]}` が中断せず `ℹ` の行を出す。重なりの指定は今どおり終了コード 4。報告のテスト: その状態から作った完了報告に「既定の母集合に無かった者: agy」の行が出る |
-| AC4d | 上の表の `test_the_report_lists_who_took_part` の書き換え。`test_state_resume_args.py`: `--exclude agy` で始めた実行を `--include codex` だけで再開しても、`ignored_exclude == ["agy"]` が残り報告に出る。`--exclude agy` で始めて `--include agy` で再開すると agy が参加者に戻る。`--exclude kiro` で始めて `--include kiro` で再開すると今どおり止まる。cross-refactoring の `test_init.py` の再開のテスト: `--exclude agy` で始めて `--include` だけで再開しても `ignored_exclude == ["agy"]` が残り、完了報告に出る |
+| AC4d | 上の表の `test_the_report_lists_who_took_part` の書き換え。`test_state_resume_args.py`: `--exclude agy` で始めた実行を `--include codex` だけで再開しても、`ignored_exclude == ["agy"]` が残り報告に出る。`--exclude agy` で始めて `--include agy` で再開すると agy が参加者に戻る。`--exclude kiro` で始めて `--include kiro` で再開すると今どおり止まる。`test_only_wins_over_an_ignored_exclusion`: `--exclude agy` で始めた実行を `--only agy` で再開すると、矛盾で止まらず参加者が `[agy]` の 1 者になる。cross-refactoring の `test_init.py` の再開のテスト: `--exclude agy` で始めて `--include` だけで再開しても `ignored_exclude == ["agy"]` が残り、完了報告に出る |
 | AC5 | 目で見る。`grep -rn "4 者" plugins/ndf/skills/cross-review CLAUDE.md plugins/ndf/README.md docs/specifications/cross-review-participants-and-seats.md` の当たりのうち、現行の説明は 0 件。出た版の変更点の記録（`plugins/ndf/README.md` の 10.17.3 の更新案内）は書き換えない |
 | AC6 AC7 AC8 | 目で見る（文言）。`test_launch_reviewer_prompt_context.py` の既存の組み立てのテストが通る |
-| AC9 | `start-round` のテスト（新規 `test_state_round_changes.py`）: 一時の git リポジトリで 2 つの head を作り、2 ラウンド目で変更の節のファイルが書かれ、2 つの SHA とファイル名が入る。`launch-reviewer.sh` の組み立てで、ファイルがあるときプロンプトに節が入る |
-| AC10 | 同上: 1 ラウンド目・同じ head・`head_sha` の無いラウンドでファイルが無く、前の起動の残りも消える。プロンプトに節が入らない |
-| AC11 | 同上: 53 ファイルの差分で一覧が 50 件と「ほか 3 件」。名前が 200 バイトのファイル 40 件の差分で、一覧が 5,000 バイトで打ち切られ、ファイルの大きさが 6,000 バイト以下 |
+| AC9（#934） | `start-round` のテスト（新規 `test_state_round_changes.py`）: 一時の git リポジトリで 2 つの head を作り、2 ラウンド目で変更の節のファイルが書かれ、2 つの SHA とファイル名が入る。`launch-reviewer.sh` の組み立てで、ファイルがあるときプロンプトに節が入る |
+| AC10（#934） | 同上: 1 ラウンド目・同じ head・`head_sha` の無いラウンドでファイルが無く、前の起動の残りも消える。プロンプトに節が入らない |
+| AC11（#934） | 同上: 53 ファイルの差分で一覧が 50 件と「ほか 3 件」。名前が 200 バイトのファイル 40 件の差分で、一覧が 5,000 バイトで打ち切られ、ファイルの大きさが 6,000 バイト以下 |
 | AC12 AC12b | 同上: `fetch-pr-comments.sh` を差し替えた偽物で、2 ラウンド目の `start-round` が呼び、控えが新しい中身になる。1 ラウンド目では呼ばない。`set-current-pr` の後の `start-round` は新しい PR の番号で呼ぶ |
 | AC12a | 同上: 偽物の `fetch-pr-comments.sh --strict` が 3 つのうち 1 つの失敗で 1 を返すと、控えが前の中身のまま残る。`init`（`strict=False`）では 1 つの失敗でも控えを書いて続け、3 つとも失敗すると終了コード 1。`fix` の側のテスト: `--strict` 無しでは今どおり 1 つの失敗で 0 |
 | AC13 | 同上: 偽物が失敗すると `start-round` が終了コード 0 で `⚠` の行を出し、控えは前の中身のまま |
