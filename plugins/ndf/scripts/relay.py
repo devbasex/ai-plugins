@@ -887,26 +887,31 @@ def file_snap(path: str) -> tuple[int, int] | None:
     return st.st_size, st.st_mtime_ns
 
 
-def replied_after(transcript_path: str, written: float) -> bool:
-    """会話の記録に、印より後の `assistant` か `user` の行があれば真（G2）。"""
+def _iter_transcript_rows(transcript_path: str):
+    """会話の記録から JSON object の行だけを返す。"""
     if not transcript_path:
-        return False
+        return
     try:
         with open(transcript_path, errors="replace") as f:
             for line in f:
-                if '"assistant"' not in line and '"user"' not in line:
-                    continue
                 try:
                     row = json.loads(line)
                 except ValueError:
                     continue
-                if not isinstance(row, dict) or row.get("type") not in ("assistant", "user"):
-                    continue
-                t = parse_iso(row.get("timestamp"))
-                if t is not None and t > written:
-                    return True
+                if isinstance(row, dict):
+                    yield row
     except OSError:
-        return False
+        return
+
+
+def replied_after(transcript_path: str, written: float) -> bool:
+    """会話の記録に、印より後の `assistant` か `user` の行があれば真（G2）。"""
+    for row in _iter_transcript_rows(transcript_path):
+        if row.get("type") not in ("assistant", "user"):
+            continue
+        t = parse_iso(row.get("timestamp"))
+        if t is not None and t > written:
+            return True
     return False
 
 
@@ -917,31 +922,19 @@ def goal_pending(transcript_path: str, written: float) -> bool:
     （Claude Code 2.1.280 で実測）。設定は `sentinel: true`、判定は `met` の真偽を持つ。
     `met: true` で目標は終わる。判定は command hook（`mark`）より後に書かれる。
     """
-    if not transcript_path:
-        return False
     has_goal = False
     judged_at = 0.0
-    try:
-        with open(transcript_path, errors="replace") as f:
-            for line in f:
-                if "goal_status" not in line:
-                    continue
-                try:
-                    row = json.loads(line)
-                except ValueError:
-                    continue
-                a = row.get("attachment") if isinstance(row, dict) else None
-                if row.get("type") != "attachment" or not isinstance(a, dict) \
-                        or a.get("type") != "goal_status":
-                    continue
-                if a.get("sentinel"):
-                    has_goal, judged_at = True, 0.0
-                    continue
-                judged_at = parse_iso(row.get("timestamp")) or judged_at
-                if a.get("met") is True:
-                    has_goal = False
-    except OSError:
-        return False
+    for row in _iter_transcript_rows(transcript_path):
+        a = row.get("attachment")
+        if row.get("type") != "attachment" or not isinstance(a, dict) \
+                or a.get("type") != "goal_status":
+            continue
+        if a.get("sentinel"):
+            has_goal, judged_at = True, 0.0
+            continue
+        judged_at = parse_iso(row.get("timestamp")) or judged_at
+        if a.get("met") is True:
+            has_goal = False
     return has_goal and judged_at <= written
 
 
