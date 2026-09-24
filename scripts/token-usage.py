@@ -209,29 +209,42 @@ def scan_file(path: Path, text: str | None = None, until: float | None = None) -
             s.keys.add("/".join(key))
         msg = d.get("message") or {}
         if d.get("type") == "assistant":
-            model = msg.get("model")
-            if model and model != "<synthetic>":
-                s.models[model] += 1
-                if d.get("version"):
-                    s.cc[d["version"]] += 1
-                if msg.get("id") and msg.get("usage"):
-                    per_msg[msg["id"]] = msg["usage"]
-                    msg_meta.setdefault(msg["id"], (t, model))
-            for c in msg.get("content") or []:
-                if isinstance(c, dict) and c.get("type") == "tool_use" and c.get("name") == "Bash":
-                    cmd = (c.get("input") or {}).get("command", "")
-                    bash_cmds[c.get("id")] = cmd
-                    s.modes.update(MODE_RE.findall(cmd))
+            _scan_assistant(d, msg, t, s, per_msg, msg_meta, bash_cmds)
         elif d.get("type") == "user":
-            content = msg.get("content")
-            if d.get("isMeta"):
-                m = VERSION_RE.search(_text(content))
-                if m:
-                    s.versions.append(m.group(1))
-            if isinstance(content, list):
-                for c in content:
-                    if isinstance(c, dict) and c.get("type") == "tool_result" and "gh pr create" in bash_cmds.get(c.get("tool_use_id"), ""):
-                        s.prs.update(PR_URL_RE.findall(_text(c.get("content"))))
+            _scan_user(d, msg, s, bash_cmds)
+    _tally_usage(s, per_msg, msg_meta)
+    return s
+
+
+def _scan_assistant(d: dict, msg: dict, t: float | None, s: FileScan, per_msg: dict, msg_meta: dict, bash_cmds: dict) -> None:
+    model = msg.get("model")
+    if model and model != "<synthetic>":
+        s.models[model] += 1
+        if d.get("version"):
+            s.cc[d["version"]] += 1
+        if msg.get("id") and msg.get("usage"):
+            per_msg[msg["id"]] = msg["usage"]
+            msg_meta.setdefault(msg["id"], (t, model))
+    for c in msg.get("content") or []:
+        if isinstance(c, dict) and c.get("type") == "tool_use" and c.get("name") == "Bash":
+            cmd = (c.get("input") or {}).get("command", "")
+            bash_cmds[c.get("id")] = cmd
+            s.modes.update(MODE_RE.findall(cmd))
+
+
+def _scan_user(d: dict, msg: dict, s: FileScan, bash_cmds: dict) -> None:
+    content = msg.get("content")
+    if d.get("isMeta"):
+        m = VERSION_RE.search(_text(content))
+        if m:
+            s.versions.append(m.group(1))
+    if isinstance(content, list):
+        for c in content:
+            if isinstance(c, dict) and c.get("type") == "tool_result" and "gh pr create" in bash_cmds.get(c.get("tool_use_id"), ""):
+                s.prs.update(PR_URL_RE.findall(_text(c.get("content"))))
+
+
+def _tally_usage(s: FileScan, per_msg: dict, msg_meta: dict) -> None:
     calls = []
     for mid, u in per_msg.items():
         cc = u.get("cache_creation") or {}
@@ -246,7 +259,6 @@ def scan_file(path: Path, text: str | None = None, until: float | None = None) -
         calls.append((t, row.context, w5 + w1h))
     # 時刻の無い応答は元の順のまま末尾へ置く（sorted は安定）
     s.usage.record_calls(sorted(calls, key=lambda c: (c[0] is None, c[0] or 0)))
-    return s
 
 
 @dataclass
