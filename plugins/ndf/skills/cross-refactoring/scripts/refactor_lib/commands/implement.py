@@ -27,8 +27,6 @@ from ..gitfacts import (
     collect_commit_facts,
     commit_time,
     commits_in_range,
-    discard_impl_leftovers,
-    flush_pending_push,
     push_with_retry_marker,
     record_observed_model,
     run_with_timeout,
@@ -47,7 +45,8 @@ from ..items import (
 )
 from ..paths import git_out, load_state
 from ..phases import finish_phase
-from ..undo import drop, resume_pending_drop
+from ..undo import drop
+from .intake import prepare_intake
 from ..verify import (
     verify_commit_basics,
     verify_diff_budget,
@@ -181,10 +180,7 @@ def _recalled(state: dict[str, Any], phase: str) -> Optional[Intake]:
 
 
 def _prepare(path: pathlib.Path, state: dict[str, Any]) -> None:
-    """取り込みの前の片づけ。やり残した取り消しと公開を先に済ませ、未コミットの変更を捨てる。"""
-    discard_impl_leftovers(state, str(state["worktrees"]["work"]))
-    resume_pending_drop(path, state)
-    flush_pending_push(path, state, state)
+    prepare_intake(path, state)
 
 
 def _finish(path: pathlib.Path, state: dict[str, Any], phase: str) -> None:

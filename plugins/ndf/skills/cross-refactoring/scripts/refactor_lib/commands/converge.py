@@ -29,7 +29,6 @@ from ..gitfacts import (
     commit_trailers,
     commits_in_range,
     discard_impl_leftovers,
-    flush_pending_push,
     push_with_retry_marker,
     read_result,
     record_observed_model,
@@ -48,7 +47,8 @@ from ..items import (
 from ..outbound import dropped_line, item_lines, plan_line
 from ..paths import git_out, load_state
 from ..phases import add_phase_seconds, finish_phase
-from ..undo import drop, resume_pending_drop
+from ..undo import drop
+from .intake import prepare_intake
 from ..verify import (
     verify_commit_basics,
     collect_test_changes,
@@ -240,9 +240,7 @@ def _whole_test(path: pathlib.Path, state: dict[str, Any], flags: list[str]) -> 
 # ---------- verify ----------
 
 def _prepare(path: pathlib.Path, state: dict[str, Any]) -> None:
-    discard_impl_leftovers(state, str(state["worktrees"]["work"]))
-    resume_pending_drop(path, state)
-    flush_pending_push(path, state, state)
+    prepare_intake(path, state)
 
 
 def cmd_verify(args: argparse.Namespace) -> None:
