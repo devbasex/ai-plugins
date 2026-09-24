@@ -11,6 +11,7 @@ from . import detect, table
 from . import project_yml as py
 
 VERIFY_TIMEOUT = 120
+SERENA_CMD = "uvx --from serena-agent==1.7.0 serena"
 SERENA_GITIGNORE_LINES = ["/serena_config.yml", "/logs", "/language_servers", "/cache"]
 EXCLUDED_KEY = "mcp_serena_excluded"
 
@@ -132,7 +133,7 @@ def _write_gitignores(root: Path, result: dict, gitignore: bool, serena_gitignor
 
 
 def configure(root: Path, dry_run=False, gitignore=False, serena_gitignore=False, only=None,
-              serena_cmd="uvx --from serena-agent==1.7.0 serena"):
+              serena_cmd=SERENA_CMD):
     """(結果の辞書, 終了コード) を返す。"""
     root = Path(root)
     data = table.load()

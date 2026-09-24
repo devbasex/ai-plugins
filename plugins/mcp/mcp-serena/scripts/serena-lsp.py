@@ -73,6 +73,8 @@ def cmd_hook(args) -> int:
 
 
 def main(argv=None) -> int:
+    from serena_lsp import verify
+
     parser = argparse.ArgumentParser(prog="serena-lsp.py")
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -88,7 +90,7 @@ def main(argv=None) -> int:
     p.add_argument("--gitignore", action="store_true")
     p.add_argument("--serena-gitignore", action="store_true")
     p.add_argument("--only")
-    p.add_argument("--serena", default="uvx --from serena-agent==1.7.0 serena")
+    p.add_argument("--serena", default=verify.SERENA_CMD)
     p.set_defaults(func=cmd_configure)
 
     p = sub.add_parser("check", help="導入の欠けを検査する")

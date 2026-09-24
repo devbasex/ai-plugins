@@ -58,6 +58,11 @@ def _context(event: str, lines: list) -> dict:
     return {"hookSpecificOutput": {"hookEventName": event, "additionalContext": "\n".join(lines)}}
 
 
+def _decision(decision: str, reason: str) -> dict:
+    return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": decision,
+                                   "permissionDecisionReason": reason}}
+
+
 def _unconfigured_lines(detected: list) -> list:
     if not detected:
         return []
@@ -200,8 +205,7 @@ def _reset(counts: dict) -> None:
 
 def _allow(tool: str, payload: dict, client: str):
     if client == "claude-code" and "serena" in tool.lower() and payload.get("permission_mode") in AUTO_ALLOW_MODES:
-        return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow",
-                                       "permissionDecisionReason": f"{PREFIX} Serena のツールを自動で許可しました"}}
+        return _decision("allow", f"{PREFIX} Serena のツールを自動で許可しました")
     return None
 
 
@@ -240,7 +244,6 @@ def pre_tool_use(payload: dict, client: str):
         _reset(counts)
         counts["last_deny"] = now
         _save_counts(path, counts, now)
-        return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
-                                       "permissionDecisionReason": DENY_REASON}}
+        return _decision("deny", DENY_REASON)
     _save_counts(path, counts, now)
     return _allow(tool, payload, client)
