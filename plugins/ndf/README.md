@@ -89,7 +89,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.17.6-dev.1）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.17.6）
 ```
 
 ### agy
@@ -119,7 +119,7 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.17.6-dev.1 へ更新するとき
+## v10.17.6 へ更新するとき
 
 **cross-review のラウンドを減らす変更を入れました**（マイルストーン 26「17 トークン消費の削減」、#542 #786）。
 既定の担当から agy を外し、1 ラウンド目で指摘を出し切らせ、2 ラウンド目以降の担当へ前のラウンドの
@@ -127,8 +127,8 @@ agy plugin list
 状態ファイルの移行も要りません（`ignored_exclude` を持たない状態ファイルは空として読みます）。
 変更点の一覧は [CHANGELOG.md](../../CHANGELOG.md) にあります。
 
-**開発版です。** `develop` にだけ載ります。取得元へ `#develop` を足す手順は
-[docs/versioning-and-distribution.md の「開発版を試す」](../../docs/versioning-and-distribution.md#開発版を試す)にあります。
+**正式版です。** `main` に載ります。中身は開発版 `10.17.6-dev.1` と同じで、版数の接尾辞だけを
+外しました。
 
 | 変わったこと | 中身 |
 | --- | --- |
@@ -141,8 +141,8 @@ agy plugin list
 収束の判定・振動の検知・`max_rounds`・起動し直しの規則は変わりません。手順と引数は
 `skills/cross-review/SKILL.md` と `skills/cross-review/docs/04-contracts.md` にあります。
 
-開発版のチャネル（`develop` を登録した取得元）なら、次で入れ替わります。**動いているセッションには
-反映されない**ため、更新したあとは起動し直してください。正式版へ戻すときは
+正式版のチャネル（ref を指定せずに登録した取得元）なら、次で入れ替わります。**動いているセッションには
+反映されない**ため、更新したあとは起動し直してください。開発版を試すために `develop` を登録した場合は、
 [docs/versioning-and-distribution.md の「ランタイムごとの取得と導入」](../../docs/versioning-and-distribution.md#ランタイムごとの取得と導入)
 の手順で ref を指定せずに登録し直してから導入します。
 
@@ -162,7 +162,7 @@ codex plugin add ndf@ai-plugins
 にあります。
 
 ```bash
-grep -q '"version": "10.17.6-dev.1"' "$SCRIPTS/../.claude-plugin/plugin.json"; echo "exit=$?"   # 0 なら この版が入っている
+grep -q '"version": "10.17.6"' "$SCRIPTS/../.claude-plugin/plugin.json"; echo "exit=$?"   # 0 なら この版が入っている
 python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); from lib.assignment import review_pool; sys.exit(review_pool("claude") != ["claude", "codex", "kiro"])' "$SCRIPTS"; echo "exit=$?"   # 0 なら cross-review の既定の母集合から agy が外れている
 grep -qF -- '--strict' "$SCRIPTS/../skills/fix/scripts/fetch-pr-comments.sh"; echo "exit=$?"   # 0 なら 控えの取り直しに使う --strict が入っている
 grep -qF '## 出し切り' "$SCRIPTS/../skills/cross-review/scripts/launch-reviewer.sh"; echo "exit=$?"   # 0 なら 出し切りの指示が入っている
@@ -335,7 +335,7 @@ agy models   # 認証の確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.17.6-dev.1/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.17.6/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -357,14 +357,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.6-dev.1/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.6/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.17.6-dev.1  <path>
+# => ndf@ai-plugins  installed, enabled  10.17.6  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。
