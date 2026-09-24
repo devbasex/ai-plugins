@@ -21,6 +21,7 @@ PHASE=${2:?phase required}
 ID=${3:?ID required}
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+. "$SCRIPT_DIR/lib/runtime-skill-path.sh"
 # **`cd` で登らない。** `cd` は `..` を字句で畳むため、Kiro CLI が `.kiro/skills/` へ張った
 # symlink の手前へ戻る。文字列のまま渡してカーネルに解決させる（バッチ 06 の契約）。
 LIB=$SCRIPT_DIR/../../../scripts/lib
@@ -96,15 +97,10 @@ resolve_print_timeout
 # Skill の配置先はランタイムで違う。**プロンプトに明示パスを必ず書く**ため、
 # ここで解決して雛形へ渡す。kiro は配置しただけでは SKILL.md 本文を読まない。
 resolve_skill_base() {
-SKILL_BASE=
-case "$RUNTIME" in
-  claude) SKILL_BASE=.claude/skills ;;
-  codex)  SKILL_BASE=.agents/skills ;;
-  kiro)   SKILL_BASE=.kiro/skills ;;
-  # agy は codex と同じ `.agents/skills` を読む。
-  agy)    SKILL_BASE=.agents/skills ;;
-  *)      echo "未知のランタイムです: $RUNTIME" >&2; exit 1 ;;
-esac
+SKILL_BASE=$(skill_dir_for "$RUNTIME") || {
+  echo "未知のランタイムです: $RUNTIME" >&2
+  exit 1
+}
 }
 
 resolve_skill_base
