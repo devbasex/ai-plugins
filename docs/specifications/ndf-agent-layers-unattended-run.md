@@ -1,6 +1,6 @@
 # 工程を conductor / supervisor / worker の 3 層で通す
 
-`/goal /ndf:development-workflow <指示>` で呼ばれたとき、工程を 3 層のサブエージェントへ出し、
+`/ndf:development-workflow <指示>` で呼ばれたとき、工程を 3 層のサブエージェントへ出し、
 2 つの関門以外を無人で通す運転を決めた。あわせて、利用上限（429）で中断した層を上の層が
 **通知ではなく記録から**見分け、解除時刻を過ぎてから直下だけを再開する手順を置いた。この文書は、
 決めたことの理由と、層の間で交わす報告と指示の契約を残す。
@@ -11,7 +11,7 @@
 | 何を読むか | 正本 |
 | --- | --- |
 | 3 層の責務、持ち場の表、モードごとの組み方、起動の指示、報告の形、続けさせる回数、モデルの基準、委譲の線、並行の本数、到達点の置き直し、中断と再開 | `plugins/ndf/skills/development-workflow/references/agent-layers.md` |
-| `/goal` の入口（3 層へ出すのは `/goal` の引数のときだけ） | `plugins/ndf/skills/development-workflow/SKILL.md` の「`/goal` の引数として呼ばれたとき」 |
+| 自走の入口 | `plugins/ndf/skills/development-workflow/SKILL.md` の「自走で工程を通す」 |
 | モデルに依る目安とリポジトリに依る固定費の区別、粒度の比の基準、委譲してよい作業の表 | `plugins/ndf/skills/development-workflow/references/context-window.md` |
 | `cross-review` の「メイン」の定義 | `plugins/ndf/skills/cross-review/references/context-budget.md` |
 | 中断した記録の一覧と解除の待ち（`interrupted` / `wait-reset`） | [ndf-context-window-metrics.md](ndf-context-window-metrics.md) と `plugins/ndf/scripts/lib/transcript_agents.py` |
@@ -38,7 +38,7 @@ supervisor は自分の worker を再開する。
 | 用語 | 意味 |
 | --- | --- |
 | セッション | 会話を保持しているプロセス。1 つのセッションが 1 つの context window を持つ |
-| conductor | 人間と対話しているセッション。`/goal` を受け、supervisor を起動し、報告を受け取り、関門で人間に問う |
+| conductor | 人間と対話しているセッション。`/ndf:development-workflow` を受け、supervisor を起動し、報告を受け取り、関門で人間に問う |
 | supervisor | 1 つの持ち場（連続する工程の束）を通すサブエージェント。工程の Skill を起動し、進行を記録し、worker を起動する |
 | worker | 1 つの作業を行うサブエージェント。終われば消え、supervisor には作業の報告だけが残る。別のサブエージェントを起動しない |
 | 持ち場 | supervisor 1 つが通す工程の束。`設計` / `実装` / `検査` / `取り込み` / `仕上げ` |
@@ -138,10 +138,11 @@ supervisor と worker が同じ作業や外部への書き込みを重ねる。�
 いなくても起きるため、並行の本数を扱う `parallel-work.md` へ置くと並行しないときに読まれない。
 無人でない進行にも同じ手順が効くよう、対象を「上の層が起動した相手」と書く。
 
-**`/goal` の節は入口だけを残し、細部を参照文書へ移す。** `development-workflow/SKILL.md` は分割の
+**自走の節は入口だけを残し、細部を参照文書へ移す。** `development-workflow/SKILL.md` は分割の
 基準（500 行）に達していた。「到達点を置き直す」の小節を `agent-layers.md` へ移し、節には 3 層へ
-出すことと参照先だけを残した（500 行 → 478 行）。**`/goal` でない呼び出しでは 3 層へ出さない。**
-対話では人がその場にいて、工程ごとに指示を変えられる。
+出すことと参照先だけを残した（500 行 → 478 行）。**`/goal` の有無によらず 3 層へ出す。**
+人がその場にいて指示を変えたいときは、conductor へ伝えれば次の持ち場から反映する。`/goal` は
+無人で続けるかどうか（引き継ぎの 1 行の先頭に `/goal ` を付けるか）だけを分ける。
 
 **識別子とファイル名は層の側を揃え、量を指す名前は `window` のまま残す。** `agent-layers.md` /
 `transcript_agents.py` / `--agents` / `AgentRecord` は層の語、`context-window.md` / `--window-limit` /
@@ -160,7 +161,7 @@ supervisor 1 つ（1 つの作業ツリー）に当たる。同時に動かす w
 - worker は葉である（深さ 3 を作らない）
 - worker の報告は conductor へ転送されない
 - 規約の文書は固定費の実測値を持たない（比だけを持つ）
-- 3 層へ出すのは `/goal` の引数として呼ばれたときだけで、対話での呼び出しは変えない
+- `/ndf:development-workflow` を呼べば 3 層へ出す
 - 報告の見出しが無い相手を続けさせるのは、同じ相手で 3 回までである
 - 上の層が再開するのは自分の直下だけである
 
@@ -265,7 +266,7 @@ supervisor と直接起動した worker を一覧し、`resets_passed` が真の
 | 「メイン」の定義が supervisor を指す | 同上 |
 | `context-window.md` にモデルに依る目安とリポジトリに依る固定費の区別があり、規約の文書に固定費の実測値が無い | 同上 |
 | 3 つの規約の文書に「窓」「親」が無い | 同上 |
-| 3 層へ出すのは `/goal` だけ、関門以外は提示して進める | 同上 |
+| `/ndf:development-workflow` を呼べば 3 層へ出す、関門以外は提示して進める | 同上 |
 | 関門の数・承認の形が変わらない | `test_workflow_guard.py` が無改変で通る（`test_approval_gates.py` は #885 で削除） |
 | 実機での無人の通過（人の入力の数、conductor の報告の持ち場の一覧と記録の `SendMessage` の数の一致） | リリース後テスト（`light` の課題 1 件を `/goal` で通し、次のまとまりで `standard` を含む複数の課題を関門 2 つと振り返りまで通す） |
 | 上限からの再開そのもの | リリース後テスト（上限を意図して起こせないため、発生した実行の記録を読む） |

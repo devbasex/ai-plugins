@@ -220,7 +220,7 @@ graph TB
 Kiro では、それぞれの README が示す Skill の起動の書き方に読み替える。
 
 **conductor は `context-window.md` の 4 つの切れ目と、文脈量の hook が拒否したときにこの 1 行を
-出す。** 出す形は情報文字列 `ndf-next` の囲みのコードブロック 1 つで、3 層（`/goal`）では中身の先頭を
+出す。** 出す形は情報文字列 `ndf-next` の囲みのコードブロック 1 つで、今の区間を `/goal` で始めていたときだけ中身の先頭を
 `/goal ` にする（形の定義は `context-window.md` の「新しい会話で戻す」だけに置く）。中継の下では
 中継がこのブロックを拾って次の会話を自動で起動し、中継が無ければ人が中身を貼り付ける
 （[ndf-relay-segment-restart.md](ndf-relay-segment-restart.md)）。 3 層では supervisor の持ち場の境がこの切れ目に当たるため、conductor が `## 持ち場の報告`
@@ -356,7 +356,7 @@ worker の 2 回目の通知は、写しを読んだ後に届いても読み直�
 | --- | --- |
 | sleep | 同じ条件の until ループを `run_in_background: true` で起動して完了通知を待つこと。出来事を 1 つずつ受けるなら `Monitor`。規約 `waiting.md`。`NDF_SLEEP_GUARD=0` |
 | 連続 Read | 書き終わりを待つなら until ループを `run_in_background: true` で起動するか、背景の処理の完了通知を待つこと。`tasks/*.output` は読まない。規約 `waiting.md`。`NDF_READ_REPEAT_GUARD=0` |
-| 文脈量 | 文脈量と上限、次のコマンドを `ndf-next` のブロック 1 つで示すこと（中身は引き継ぎの 1 行、3 層なら先頭に `/goal `）、続けるなら同じ起動をもう一度行うこと。中継の直接の子では、止め続けること・動いている supervisor の報告を待ってから引継ぎ文書を更新してブロックを出すこと。規約 `context-window.md`。`NDF_CONTEXT_GUARD=0` と `NDF_CONTEXT_LIMIT` |
+| 文脈量 | 文脈量と上限、次のコマンドを `ndf-next` のブロック 1 つで示すこと（中身は引き継ぎの 1 行、`/goal` で始めた区間なら先頭に `/goal `）、続けるなら同じ起動をもう一度行うこと。中継の直接の子では、止め続けること・動いている supervisor の報告を待ってから引継ぎ文書を更新してブロックを出すこと。規約 `context-window.md`。`NDF_CONTEXT_GUARD=0` と `NDF_CONTEXT_LIMIT` |
 
 ### 4 ランタイム
 
