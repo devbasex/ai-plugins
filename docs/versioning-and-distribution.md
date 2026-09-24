@@ -197,6 +197,11 @@ git fetch origin && git diff --stat origin/develop origin/main   # 空である�
 **`main` を進めるのが `release` の「本番への配布」である。** そちらには承認が要る。`develop`
 へのマージは「検証への配布」にあたり、承認なしで進めてよい（`/ndf:release`）。
 
+**正式版の配布の Pull Request には、版ごとのトークン消費の記録が載る。** `release` の手順 3 で
+`.ndf/release.json` の段（`scripts/token-usage-snapshot.py --released <版>`）が走り、
+`docs/metrics/ndf-token-usage/<集計日>.md` / `.json` を書く。前の行との比が ±30% を超えた版の
+読み取りだけを、[手引き](metrics/ndf-token-usage/README.md) に従って書き足す。開発版の配布では残さない。
+
 **正式版を出したらリリースタグを打つ。** 利用者が過去の版へ戻るときの目印になる。
 
 ```bash

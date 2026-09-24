@@ -1,0 +1,14 @@
+{
+  "$schema": "https://raw.githubusercontent.com/devbasex/ai-plugins/main/plugins/ndf/skills/release/schemas/release.schema.json",
+  "version": 1,
+  "steps": [
+    {
+      "name": "トークン消費の記録",
+      "stage": "production",
+      "command": ["python3", "scripts/token-usage-snapshot.py", "--released", "{version}"],
+      "writes": ["docs/metrics/ndf-token-usage/"],
+      "guide": "docs/metrics/ndf-token-usage/README.md",
+      "timeout_seconds": 600
+    }
+  ]
+}
