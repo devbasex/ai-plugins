@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""持ち場をスクリプトで駆動する（#827 の試作）。
+"""フェーズをスクリプトで駆動する。
 
 supervisor（サブエージェント）の代わりに、このスクリプトが持ち場の手順を順に進める。
 判断の要らない段（コマンドの実行・待ち・進行の記録）はスクリプトが行い、LLM は
@@ -14,12 +14,22 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
 
 使い方:
     supervise.py run <plan.json> [--state-dir DIR] [--from <段の id>]
+    supervise.py new impl --issue N --worktree DIR --tests PATH... --title T [--prompt-file F] [--branch B] [--out F]
+    supervise.py new check --pr N --worktree DIR [--issue N...] [--scope PATH...] [--out F]
+    supervise.py queue <plan.json>... [--max 3]   # 空いた枠へ順に流す
+    supervise.py note <引き継ぎ文書.md> --report <report.md> [--next 次の欄] [--section 見出しの語]
+    supervise.py sync-check [--root DIR] [--commit]   # 生成物の同期と検査 4 本
     supervise.py example            # 計画の例を出す
+
+new / queue / note / sync-check の結果は lib/step_result.py の形の 1 行の JSON（status を見る）。
 
 計画（JSON）:
     {
       "持ち場": "検査", "課題": [818], "モード": "standard",
       "作業場所": "/abs/worktree",
+      "branch": "feat/issue-818-x",         # 省略可。作業場所が無ければ起動時に作業ツリーを作る
+      "起点": "origin/develop",             # branch から作るときの起点（既定 origin/develop）
+      "リポジトリ": "/abs/repo",             # 作業ツリーの元（省略時は作業場所の /.worktrees/ より前）
       "記録": "/abs/projects-sync.sh",      # 省略可。stage を記録する
       "規則": "判断の規則の抜粋（文字列）",   # judge へ毎回渡す
       "上限": 30,                           # 実行する段の数の上限（ループの歯止め）
@@ -38,8 +48,21 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
 
 Serena: work の段に `"serena": true` を書くと Serena の MCP だけを載せる（大きなコードを何度も読む実装向け）。
 
+課題の本文: work の段に `"issues": [858]`（`true` なら計画の `課題`）を書くと、`gh issue view` の題と本文を
+プロンプトの先頭へ入れる。
+
 段ごとの作業場所: run と work の段に `"cwd"` を書くと、その段だけ別の場所で動く（取り込みで PR ごとに
 作業ツリーが違うとき）。
+
+run の段:
+- `"preset"`: 定型のコマンド。`sync-check`（生成物の同期と検査 4 本）・`assess`（構造改善の要否）・
+  `doc-lint`（追加した行の書き方の検査）。`cmd` を書けばそちらを使う
+- `cmd` の `{pr}` は pr の段で作った Pull Request の URL に置き換わる
+- `"rerun_failed": true`: 失敗したら落ちたテストだけ（`pytest --lf`）を走らせ直し、通れば成功として進む
+- `"skip_to": "<段の id>"`: 終了コードが `skip_code`（既定 3。`refactor.py assess` の「飛ばしてよい」）なら
+  その段へ進む
+- pytest の成果物（`reports/`）を作らない（`PYTEST_ADDOPTS` に `-p no:playwright-kit` を足す）。
+  作らせるときは `"reports": true`
 
 段の遷移:
 - `next` に `end` を書くと、そこで持ち場を完了として終える
@@ -61,6 +84,9 @@ import sys
 import time
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+from step_result import emit, result  # noqa: E402
+
 WORK_TOOLS = "Read,Edit,Write,Bash,Grep,Glob"
 # work の段に載せる MCP は Serena だけ（mcp-serena の .mcp.json と同じ起動）。シンボル単位で読み・直し、
 # 大きなファイルの全文を読まずに済ませる。Tool の定義で起動の固定費が約 1.1 万増える（実測: 1 関数の修正で
@@ -73,6 +99,25 @@ SERENA_MCP = {"mcpServers": {"serena": {
     "env": {"SERENA_HOME": ".serena"}}}}
 FULL_TOOLS = "Read,Edit,Write,Bash,Grep,Glob,Skill,Agent,Monitor,SendMessage,ToolSearch"
 TAIL = 6000  # LLM へ渡す出力の末尾の文字数
+SELF = Path(__file__).resolve()
+
+# run の段の定型（"preset"）。作業場所（リポジトリの根）で動く
+PRESETS = {
+    "sync-check": f"python3 {SELF} sync-check --commit",
+    "assess": "python3 plugins/ndf/skills/cross-refactoring/scripts/refactor.py assess --base origin/develop",
+    "doc-lint": "python3 plugins/ndf/scripts/doc-lint.py --base origin/develop",
+}
+# sync-check が順に回すコマンド（生成物の同期 → 検査 4 本）
+SYNC_CHECKS = [
+    ("build", "bash scripts/build-runtime-plugins.sh"),
+    ("frontmatter", "python3 scripts/check-skill-frontmatter.py"),
+    ("line-limit", "python3 scripts/check-doc-line-limit.py"),
+    ("links", "python3 scripts/check-markdown-links.py"),
+    ("instructions", "python3 plugins/ndf/scripts/instructions-check.py --root ."),
+]
+PYTEST = ("uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest --with pytest-xdist "
+          "pytest {paths} -q -n 4")
+NO_REPORTS = "-p no:playwright-kit"  # playwright-kit の plugin が reports/ を書く
 
 WORK_SYSTEM = """あなたは NDF の worker である。1 つの作業だけを行う。
 - 人間へ問わない。別のサブエージェントを起動しない。進行を記録しない
@@ -290,20 +335,86 @@ class Supervisor:
         return self.order[i] if i < len(self.order) else None
 
     # --- 段 ---
+    @staticmethod
+    def is_skip(step: dict, code: int | None) -> bool:
+        return bool(step.get("skip_to")) and code == step.get("skip_code", 3)
+
+    def ensure_worktree(self) -> str | None:
+        """計画に branch があり作業場所が無ければ、作業ツリーを作る。誤りの文を返す（無ければ None）。"""
+        branch = self.plan.get("branch")
+        wt = Path(self.cwd)
+        if not branch or wt.exists():
+            return None
+        repo = self.plan.get("リポジトリ") or (str(wt).split("/.worktrees/")[0] if "/.worktrees/" in str(wt)
+                                             else None)
+        if not repo:
+            return "作業ツリーの元のリポジトリが分からない（計画に リポジトリ を書く）"
+        base = self.plan.get("起点", "origin/develop")
+        if base.startswith("origin/"):
+            subprocess.run(["git", "-C", repo, "fetch", "-q", "origin"], capture_output=True, text=True)
+        has = subprocess.run(["git", "-C", repo, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"],
+                             capture_output=True, text=True).returncode == 0
+        cmd = ["git", "-C", repo, "worktree", "add", "-q"] + ([str(wt), branch] if has
+                                                             else ["-b", branch, str(wt), base])
+        p = subprocess.run(cmd, capture_output=True, text=True)
+        if p.returncode != 0:
+            return f"作業ツリーを作れない: {p.stderr.strip()[:300]}"
+        return None
+
+    def run_cmd(self, step: dict, extra_addopts: str = "") -> tuple[int, str]:
+        cmd = step.get("cmd") or PRESETS.get(step.get("preset", ""), "")
+        if not cmd:
+            return 2, f"段 {step['id']} に cmd も知っている preset も無い"
+        if "{pr}" in cmd:
+            if not self.plan.get("Pull Request"):
+                return 2, "cmd の {pr} を置き換える Pull Request がまだ無い"
+            cmd = cmd.replace("{pr}", self.plan["Pull Request"])
+        env = dict(os.environ)
+        addopts = [env.get("PYTEST_ADDOPTS", "")]
+        if not step.get("reports"):
+            addopts.append(NO_REPORTS)
+        addopts.append(extra_addopts)
+        env["PYTEST_ADDOPTS"] = " ".join(a for a in addopts if a)
+        try:
+            p = subprocess.run(cmd, shell=True, cwd=step.get("cwd", self.cwd), capture_output=True,
+                               text=True, timeout=step.get("timeout", 3600), env=env)
+            return p.returncode, p.stdout + p.stderr
+        except subprocess.TimeoutExpired as e:
+            return 124, f"打ち切り（{e.timeout} 秒）"
+
     def do_run(self, step: dict) -> tuple[bool, str]:
         started = time.time()
-        try:
-            p = subprocess.run(step["cmd"], shell=True, cwd=step.get("cwd", self.cwd), capture_output=True,
-                               text=True, timeout=step.get("timeout", 3600))
-            code, text = p.returncode, p.stdout + p.stderr
-        except subprocess.TimeoutExpired as e:
-            code, text = 124, f"打ち切り（{e.timeout} 秒）"
+        code, text = self.run_cmd(step)
+        if code not in (0, 124) and step.get("rerun_failed") and not self.is_skip(step, code):
+            # 落ちたテストだけを走らせ直す。通れば揺れとして成功にする
+            code2, text2 = self.run_cmd(step, "--lf")
+            self.cur["rerun"] = {"exit": code2}
+            text = f"{text}\n\n## 落ちたテストだけの再実行（exit={code2}）\n{text2}"
+            if code2 == 0:
+                code, text = 0, text + "\n再実行で通った（揺れとして進む）"
         self.cur.update(exit=code, text=text, seconds=round(time.time() - started, 1))
         return code == 0, text
 
+    def issue_text(self, step: dict) -> str:
+        nums = step.get("issues")
+        if nums is True:
+            nums = self.plan.get("課題", [])
+        parts = []
+        for n in nums or []:
+            p = subprocess.run(["gh", "issue", "view", str(n), "--json", "title,body"], cwd=self.cwd,
+                               capture_output=True, text=True)
+            try:
+                d = json.loads(p.stdout)
+                parts.append(f"## 課題 #{n}: {d.get('title', '')}\n\n{d.get('body', '')}")
+            except json.JSONDecodeError:
+                parts.append(f"## 課題 #{n}\n\n（本文を取れない。gh issue view {n} で読む）")
+        return "\n\n".join(parts)
+
     def do_work(self, step: dict) -> tuple[bool, str]:
+        issues = self.issue_text(step)
         prompt = (f"作業: {step.get('kind', '修正')}\n作業場所: {self.cwd}\n\n"
-                  f"{step['prompt']}\n\n## 入力\n{self.inputs_text(step)}")
+                  + (f"{issues}\n\n## 指示\n" if issues else "")
+                  + f"{step['prompt']}\n\n## 入力\n{self.inputs_text(step)}")
         if step.get("full"):
             # Skill の本文が手順を持つ。プロンプトは Skill の呼び出しをそのまま渡す
             prompt = step["prompt"]
@@ -418,6 +529,9 @@ class Supervisor:
         result, reason = "完了", "無し"
         limit = self.plan.get("上限", 30)
         n = 0
+        err = self.ensure_worktree()
+        if err:
+            return self.report("止まった", err)
         while sid:
             n += 1
             if n > limit:
@@ -446,7 +560,10 @@ class Supervisor:
             else:
                 do = {"run": self.do_run, "work": self.do_work, "pr": self.do_pr}[step["type"]]
                 ok, _ = do(step)
-                if ok:
+                if step["type"] == "run" and self.is_skip(step, self.cur.get("exit")):
+                    nxt = None if step["skip_to"] == "end" else step["skip_to"]
+                    self.cur["skipped"] = True
+                elif ok:
                     nxt = self.next_of(sid, step)
                 elif step.get("on_fail"):
                     nxt = step["on_fail"]
@@ -510,6 +627,191 @@ EXAMPLE = {
 }
 
 
+def sync_check(root: str, commit: bool) -> dict:
+    """生成物を同期し、検査 4 本を回す。同期で変わったファイルは commit なら 1 つのコミットにする。"""
+    items, failed = [], []
+    for name, cmd in SYNC_CHECKS:
+        p = subprocess.run(cmd, shell=True, cwd=root, capture_output=True, text=True)
+        out = (p.stdout + p.stderr).strip()
+        items.append({"name": name, "result": "ok" if p.returncode == 0 else "failed", "exit": p.returncode,
+                      "tail": out[-1500:] if p.returncode else ""})
+        if p.returncode:
+            failed.append(name)
+    changed = subprocess.run(["git", "status", "--porcelain"], cwd=root, capture_output=True,
+                             text=True).stdout.splitlines()
+    if commit and changed and "build" not in failed:
+        subprocess.run(["git", "add", "-A"], cwd=root, capture_output=True, text=True)
+        c = subprocess.run(["git", "commit", "-q", "-m", "Update: 生成物を同期する"], cwd=root,
+                           capture_output=True, text=True)
+        items.append({"name": "commit", "result": "ok" if c.returncode == 0 else "failed",
+                      "exit": c.returncode, "files": len(changed)})
+        if c.returncode:
+            failed.append("commit")
+    summary = f"失敗: {', '.join(failed)}" if failed else "同期と検査 4 本が通った"
+    return result("supervise-sync-check", "stopped" if failed else "ok", summary, items,
+                  {"failed": len(failed), "changed": len(changed)})
+
+
+RULE_IMPL = ("限ったテストや全体テストが落ちたら（落ちたテストだけの再実行でも落ちた後）、変更に起因するなら fix、"
+             "環境や変更に無関係なら次の段（限ったテストなら test-all、全体テストなら doc-lint）。"
+             "2 回直しても同じ失敗なら stop。")
+RULE_CHECK = ("全体テストが落ちたら（落ちたテストだけの再実行でも落ちた後）、変更に起因するなら fix、"
+              "変更に無関係なら ready。2 回直しても同じなら stop。")
+FIX_PROMPT = "失敗した箇所を直してコミットする（push しない）。変更に起因しない失敗は直さない。"
+MERGE_CMD = "python3 plugins/ndf/scripts/merged-steps.py merge-when-green {pr}"
+
+
+def plan_impl(a) -> dict:
+    n = a.issue[0]
+    prompt = Path(a.prompt_file).read_text() if a.prompt_file else (a.prompt or f"課題 #{n} を実装する。")
+    tests = " ".join(a.tests)
+    plan = {
+        "持ち場": "実装", "課題": a.issue, "モード": a.mode, "作業場所": a.worktree,
+        "規則": RULE_IMPL, "上限": 20,
+        "steps": [
+            {"id": "impl", "type": "work", "kind": "実装", "serena": True, "stage": "実装", "issues": True,
+             "timeout": 3600, "prompt": prompt, "next": "sync"},
+            {"id": "sync", "type": "run", "preset": "sync-check", "stage": "実装", "on_fail": "fix-sync",
+             "next": "test-limited"},
+            {"id": "fix-sync", "type": "work", "kind": "修正", "inputs": ["sync"], "prompt": FIX_PROMPT,
+             "next": "sync"},
+            {"id": "test-limited", "type": "run", "stage": "完了判定", "timeout": 900, "rerun_failed": True,
+             "cmd": PYTEST.format(paths=tests), "on_fail": "judge", "next": "test-all"},
+            {"id": "judge", "type": "judge", "inputs": ["test-limited", "test-all"],
+             "question": "テストの失敗を直すか（fix）、限ったテストの失敗が変更に無関係なら全体テストへ（test-all）、"
+                         "全体テストの失敗が変更に無関係なら文書の検査へ（doc-lint）、止めるか（stop）",
+             "choices": ["fix", "test-all", "doc-lint", "stop"]},
+            {"id": "fix", "type": "work", "kind": "修正", "inputs": ["test-limited", "test-all"],
+             "prompt": FIX_PROMPT, "next": "test-limited"},
+            {"id": "test-all", "type": "run", "stage": "完了判定", "timeout": 1800, "rerun_failed": True,
+             "cmd": PYTEST.format(paths="."), "on_fail": "judge", "next": "doc-lint"},
+            {"id": "doc-lint", "type": "run", "preset": "doc-lint", "stage": "完了判定", "on_fail": "fix-doc",
+             "next": "pr"},
+            {"id": "fix-doc", "type": "work", "kind": "修正", "inputs": ["doc-lint"],
+             "prompt": "ヒットした行を今の決まりだけを書く形へ直してコミットする（push しない）。", "next": "doc-lint"},
+            {"id": "pr", "type": "pr", "stage": "Pull Request", "base": a.base, "title": a.title,
+             "summary": a.summary or "", "next": "merge"},
+            {"id": "merge", "type": "run", "timeout": 7200, "cmd": MERGE_CMD, "next": "end"},
+        ],
+    }
+    if a.branch:
+        plan["branch"] = a.branch
+    return plan
+
+
+def plan_check(a) -> dict:
+    pr = a.pr
+    scope = (" --scope " + " ".join(a.scope)) if a.scope else ""
+    return {
+        "持ち場": "検査", "課題": a.issue or [], "モード": a.mode, "作業場所": a.worktree,
+        "規則": RULE_CHECK, "上限": 12, "Pull Request": str(pr),
+        "steps": [
+            {"id": "assess", "type": "run", "preset": "assess", "stage": "構造改善", "skip_to": "review",
+             "on_fail": "refactor", "next": "refactor"},
+            {"id": "refactor", "type": "work", "full": True, "kind": "構造改善", "stage": "構造改善",
+             "timeout": 3600, "prompt": f"/ndf:cross-refactoring {pr}{scope}", "next": "review"},
+            {"id": "review", "type": "work", "full": True, "kind": "実装レビュー", "stage": "実装レビュー",
+             "timeout": 3600, "prompt": f"/ndf:cross-review {pr} --max-rounds 4\n\n"
+                                        "終わったら、ラウンド数・指摘の件数・未解決の件数を報告する。待ちは前景で行う。",
+             "next": "test-all"},
+            {"id": "test-all", "type": "run", "stage": "完了判定", "timeout": 1800, "rerun_failed": True,
+             "cmd": "git pull -q --rebase && " + PYTEST.format(paths="."), "on_fail": "judge", "next": "ready"},
+            {"id": "judge", "type": "judge", "inputs": ["test-all"],
+             "question": "全体テストの失敗を直す（fix）か、変更に無関係として進める（ready）か、止める（stop）か",
+             "choices": ["fix", "ready", "stop"]},
+            {"id": "fix", "type": "work", "kind": "修正", "inputs": ["test-all"],
+             "prompt": "失敗したテストを直してコミットし、git push する。", "next": "test-all"},
+            {"id": "ready", "type": "run", "cmd": f"git push -q; gh pr ready {pr}", "next": "merge"},
+            {"id": "merge", "type": "run", "timeout": 7200, "cmd": MERGE_CMD, "next": "end"},
+        ],
+    }
+
+
+def cmd_new(a) -> dict:
+    plan = plan_impl(a) if a.kind == "impl" else plan_check(a)
+    key = a.issue[0] if a.kind == "impl" else f"{a.pr}-check"
+    out = Path(a.out or f"plan-{key}.json")
+    out.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n")
+    return result("supervise-new", "ok", f"計画を書いた: {out}",
+                  [{"path": str(out), "kind": a.kind, "steps": [s["id"] for s in plan["steps"]]}],
+                  {"steps": len(plan["steps"])})
+
+
+def report_result(text: str) -> str:
+    m = re.search(r"^- 結果: (\S+)", text, re.M)
+    return m.group(1) if m else "不明"
+
+
+def state_dir_of(plan: str) -> Path:
+    return Path(plan).parent / (Path(plan).stem + "-state")
+
+
+def cmd_queue(plans: list[str], max_: int, poll: float = 1.0) -> dict:
+    """計画を同時に max_ 本まで走らせ、空いた枠へ順に流す。"""
+    pending, running, items = list(plans), {}, []
+    while pending or running:
+        while pending and len(running) < max_:
+            plan = pending.pop(0)
+            log = open(Path(plan).with_suffix(".log"), "w")
+            running[plan] = (subprocess.Popen([sys.executable, str(SELF), "run", plan], stdout=log,
+                                              stderr=subprocess.STDOUT), log, time.time())
+        for plan, (proc, log, started) in list(running.items()):
+            if proc.poll() is None:
+                continue
+            log.close()
+            rep = state_dir_of(plan) / "report.md"
+            res = report_result(rep.read_text()) if rep.is_file() else "報告なし"
+            items.append({"plan": plan, "result": res, "exit": proc.returncode, "report": str(rep),
+                          "seconds": round(time.time() - started, 1)})
+            del running[plan]
+        if running:
+            time.sleep(poll)
+    stopped = [i for i in items if i["result"] not in ("完了", "関門")]
+    gates = [i for i in items if i["result"] == "関門"]
+    status = "stopped" if stopped else "gate" if gates else "ok"
+    summary = f"{len(items)} 本: 完了 {len(items) - len(stopped) - len(gates)} / 関門 {len(gates)} / 止まった {len(stopped)}"
+    return result("supervise-queue", status, summary, items,
+                  {"plans": len(items), "stopped": len(stopped), "gate": len(gates), "max": max_})
+
+
+def note_row(report: str, next_text: str) -> str:
+    def field(name: str) -> str:
+        m = re.search(rf"^- {name}: (.*)$", report, re.M)
+        return m.group(1).strip() if m else ""
+    cost = re.search(r"/ \$([0-9.]+)\s*$", field("LLM の使用量"))
+    pr = field("Pull Request")
+    state = f"{field('持ち場')}: {field('結果')}"
+    extra = [x for x in ((pr if pr and pr != "無し" else ""), (f"${cost.group(1)}" if cost else "")) if x]
+    if extra:
+        state += "（" + "、".join(extra) + "）"
+    if field("結果") != "完了" and field("理由") not in ("", "無し"):
+        state += f"。理由: {field('理由')}"
+    return f"| {field('課題') or '—'} | {state} | {next_text or '—'} |"
+
+
+def cmd_note(doc: str, report_path: str, next_text: str, section: str) -> dict:
+    """引き継ぎ文書の、見出しに section を含む節の最初の表の末尾へ 1 行を足す。"""
+    lines = Path(doc).read_text().splitlines()
+    head = next((i for i, l in enumerate(lines) if l.startswith("#") and section in l), None)
+    if head is None:
+        return result("supervise-note", "stopped", f"見出しに「{section}」を含む節が無い", [], {})
+    last = None
+    for i in range(head + 1, len(lines)):
+        if lines[i].startswith("#"):
+            break
+        if lines[i].startswith("|"):
+            last = i
+        elif last is not None:
+            break
+    if last is None:
+        return result("supervise-note", "stopped", f"節「{lines[head].lstrip('# ')}」に表が無い", [], {})
+    row = note_row(Path(report_path).read_text(), next_text)
+    lines.insert(last + 1, row)
+    Path(doc).write_text("\n".join(lines) + "\n")
+    return result("supervise-note", "ok", "表へ 1 行を足した", [{"path": doc, "line": last + 2, "row": row}],
+                  {"rows": 1})
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -518,13 +820,51 @@ def main() -> int:
     r.add_argument("--state-dir")
     r.add_argument("--from", dest="start", help="この段から始める（途中から再開するとき）")
     sub.add_parser("example")
+    n = sub.add_parser("new", help="雛形から計画を作る")
+    n.add_argument("kind", choices=["impl", "check"])
+    n.add_argument("--issue", type=int, nargs="+", default=[])
+    n.add_argument("--pr", type=int)
+    n.add_argument("--worktree", required=True)
+    n.add_argument("--tests", nargs="+", default=[], help="impl: 限ったテストの範囲")
+    n.add_argument("--scope", nargs="+", default=[], help="check: 構造改善の範囲")
+    n.add_argument("--title", help="impl: PR の題名")
+    n.add_argument("--summary")
+    n.add_argument("--prompt", help="impl: 実装の指示文")
+    n.add_argument("--prompt-file", help="impl: 実装の指示文のファイル")
+    n.add_argument("--branch", help="作業場所が無ければ作る作業ツリーのブランチ")
+    n.add_argument("--base", default="develop")
+    n.add_argument("--mode", default="standard")
+    n.add_argument("--out")
+    q = sub.add_parser("queue", help="計画を同時に --max 本まで順に流す")
+    q.add_argument("plans", nargs="+")
+    q.add_argument("--max", type=int, default=3)
+    q.add_argument("--poll", type=float, default=5.0)
+    t = sub.add_parser("note", help="報告から引き継ぎ文書の表へ 1 行を足す")
+    t.add_argument("doc")
+    t.add_argument("--report", required=True)
+    t.add_argument("--next", default="")
+    t.add_argument("--section", default="今の会話の進み")
+    c = sub.add_parser("sync-check", help="生成物の同期と検査 4 本")
+    c.add_argument("--root", default=".")
+    c.add_argument("--commit", action="store_true", help="同期で変わったファイルをコミットする")
     a = ap.parse_args()
     if a.cmd == "example":
         print(json.dumps(EXAMPLE, ensure_ascii=False, indent=2))
         return 0
+    if a.cmd == "new":
+        if a.kind == "impl" and not (a.issue and a.tests and a.title):
+            ap.error("new impl には --issue・--tests・--title が要る")
+        if a.kind == "check" and not a.pr:
+            ap.error("new check には --pr が要る")
+        emit(cmd_new(a))
+    if a.cmd == "queue":
+        emit(cmd_queue(a.plans, max(1, a.max), a.poll))
+    if a.cmd == "note":
+        emit(cmd_note(a.doc, a.report, a.next, a.section))
+    if a.cmd == "sync-check":
+        emit(sync_check(a.root, a.commit))
     plan = json.loads(Path(a.plan).read_text())
-    state = Path(a.state_dir) if a.state_dir else Path(a.plan).parent / (
-        Path(a.plan).stem + "-state")
+    state = Path(a.state_dir) if a.state_dir else state_dir_of(a.plan)
     text = Supervisor(plan, state).run(a.start)
     print(text)
     return 0 if "結果: 完了" in text or "結果: 関門" in text else 3
