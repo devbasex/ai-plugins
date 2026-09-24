@@ -186,9 +186,8 @@ def _decide_public_io(state: dict[str, Any], items: list[dict[str, Any]]) -> Non
             "Could this refactoring change the public input or output of the code?",
             JEV_RISK_CONFIDENCE,
         )
-        if result is not None:
-            item["public_io"] = bool(result[0] and result[1])
-            item["public_io_source"] = "jev"
+        if result is not None and result[1]:
+            item["public_io"], item["public_io_source"] = bool(result[0]), "jev"
 
 
 def _allocation_table(state: dict[str, Any]) -> dict[str, Any]:

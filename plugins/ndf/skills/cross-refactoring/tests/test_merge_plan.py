@@ -233,3 +233,17 @@ def test_d5_falls_back_to_the_runtime_risk_without_jev(planned, cmd_plan):
     _run(cmd_plan)
     item = read_state(path)["items"][0]
     assert (item["public_io"], item["public_io_source"]) == (True, "runtime")
+
+
+def test_d5_keeps_the_runtime_risk_when_jev_is_not_confident(planned, cmd_plan, monkeypatch):
+    """決定 2: 確信度 0.7 未満の Jev の答えは使わず、実装担当の `risk` を残す。"""
+    a, b = _candidate(1, "f"), _candidate(2, "g")
+    path = _jev_state(planned, [a, b], [_answer(a, risk=True), _answer(b)])
+    monkeypatch.setattr(cmd_plan.jev, "ask_score", lambda *a, **k: None)
+    monkeypatch.setattr(cmd_plan.jev, "ask_boolean",
+                        lambda text, question, *a, **k: (
+                            (True, 0.6) if "public input" in question else (False, 0.9)))
+    _run(cmd_plan)
+    items = {i["symbol"]: i for i in read_state(path)["items"]}
+    assert (items["f"]["public_io"], items["f"]["public_io_source"]) == (True, "runtime")
+    assert (items["g"]["public_io"], items["g"]["public_io_source"]) == (False, "runtime")
