@@ -102,6 +102,34 @@ def test_an_item_without_commits_is_closed_without_touching_git(tmp_path, undo):
     assert git("rev-parse", "HEAD", cwd=work).stdout.strip() == head
 
 
+def test_an_unowned_extra_commit_is_removed_while_item_commits_are_replayed(tmp_path, undo):
+    """現状固定: extra_shas は消え、項目に属する履歴だけが積み直される。"""
+    work, base, c1, c2 = _repo(tmp_path, 30)
+    path = _state(tmp_path, work, base, c1, c2)
+    state = read_state(path)
+    (work / "src" / "extra.py").write_text("unowned\n", encoding="utf-8")
+    extra = commit_with_trailers(work, "unowned", {})
+
+    record = undo.drop(path, state, [], "計画外", [extra])
+
+    assert record == {
+        "at": record["at"],
+        "mode": "item",
+        "reason": "計画外",
+        "dropped": [],
+        "extra": [extra],
+        "reverted_commits": 3,
+        "replayed": 2,
+    }
+    assert not (work / "src" / "extra.py").exists()
+    items = {i["id"]: i for i in read_state(path)["items"]}
+    assert items["I-001"]["status"] == "implemented"
+    assert items["I-002"]["status"] == "implemented"
+    assert items["I-001"]["commits"]["implement"] != c1
+    assert items["I-002"]["commits"]["implement"] != c2
+    assert read_state(path)["pending_drop"] is None
+
+
 def test_an_interrupted_drop_is_redone_on_resume(tmp_path, undo):
     """印（`pending_drop`）が残ったまま再開したら、同じ取り消しをやり直す。"""
     work, base, c1, c2 = _repo(tmp_path, 30)
