@@ -16,7 +16,7 @@
 | AC12 | `merge-tests` / `merge-implement` の単体（コミットの無い項目・完了の締め切りを過ぎてコミットした項目が `not_done` になりコミットが取り消される・締め切りの内の項目は残る）と、雛形に締め切りが渡る単体 |
 | AC13 AC14 | `danger.py` の単体（D1〜D5。D3 は末尾 2 区切りから作る 3 つの語・直下のファイル・文書を探さない・パッケージの入口）と `verify` の結合（全体のテストが 2 回走らない） |
 | AC15 AC16 | git を使う結合（項目の単位の取り消し・隣接する変更の退避・同じ語の並びを共有した項目が落ちたとき、新しい項目から 1 件ずつ取り消して通った時点で止まり、古い項目のコミットが残る） |
-| AC16b | `final-gate` の単体（`whole_test.reverted` が真で `--ci-check` が無いとき、単独起動でも全体のテストを走らせる。落ちたら `final-fix` の経路を返す） |
+| AC16b | `final-gate` の単体（`--ci-check` が無いとき、単独起動でも工程の 1 つでも全体のテストを走らせる。検証の中で通り取り消しが無く HEAD が進んでいなければ使い回す。`whole_test.reverted` が真なら必ず走らせる。落ちたら `final-fix` の経路を返す） |
 | AC17〜AC20 | `allocation.py` の単体（`NDF_METRICS_DIR` を一時ディレクトリへ向ける。#938 の汚染を繰り返さない） |
 | AC17 | `finalize` の単体（工程の 1 つで最終ゲートが通った・通らない、単独起動で `--review-status` が `approved`・それ以外・渡されない）と、駆動が cross-review の状態から `--review-status` を決める単体（`final` が `approved` でも、`sweep.verified` が偽・`sweep.remaining_open` が 1 以上・`sweep.commit` があれば `approved` を渡さない） |
 | AC21 | `assignment.py` の単体 |
