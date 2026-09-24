@@ -86,6 +86,7 @@
 | 引数の型（カンマ区切りの名前と予約語 `none`）は cross-refactoring の初期化の部品が持つ | 共通層へ移すと cross-review の状態の部品も触ることになる |
 | 完了報告の参加者の節は cross-review と同じ行の形にし、埋め合わせの行を持たない | cross-refactoring に席は無い |
 | モデルの指定の警告は参加者だけを対象にする | 既定で外れる agy へ警告を出すと、使わない者の指定まで読み手に見せる |
+| 母集合に無い者を外す指定は中断せずに無視し、1 行で知らせる（#786） | 判定は共通層にあり、cross-review の既定から agy を外したことに合わせて変わった。同じ引数の意味を Skill ごとに変えない |
 | 呼び手の無くなった共通層の旧関数 4 つを消し、残らないことをテストで固定する | 片方の Skill にだけ古い形が残ると、使える者を決める規則が 2 か所になる |
 
 ## 仕様
@@ -176,6 +177,11 @@
 
 **作り直しの失敗は、状態ファイルを書き換える前に起きる。** 終了コード 4 で止まる。
 
+**外す者の指定を渡さない作り直しは、外した者と無視した除外（`ignored_exclude`）の両方を記録から
+足し戻す**（#786。規則は共通層の `recorded_exclusions` で、cross-review と同じ）。無視した名前を足す
+者の指定に渡したときだけ、その名前は足し戻さない。外した者と足す者の指定の重なりは今どおり
+終了コード 4 で止まる。
+
 ### 完了報告の「参加した者」
 
 ```text
@@ -244,6 +250,8 @@
 | 結果なしの試行の交代先が参加者の数の範囲で選ばれること | `cross-refactoring/tests/test_apply_attempts.py` |
 | 手順書と指示書の語が新しい参加者と輪番を書くこと | 文書を読んで確かめる（照合していたテストは #885 で削除） |
 | 旧関数 4 つが共通層と両 Skill の部品に残らないこと | `scripts/tests/test_shared_lib_layout.py` |
+| 母集合に無い者を外す指定（`agy`）で中断せず `ℹ` の行を出し、重なりは終了コード 4 のままであること。外す者の指定を渡さない再開で無視した除外が残り、足す者の指定に渡した名前だけが足し戻されないこと（#786） | `cross-refactoring/tests/test_init.py` |
+| 完了報告に「--exclude で指定したが既定の母集合に無かった者」の行が出ること | `cross-refactoring/tests/test_rounds.py` |
 
 ## 関連リンク
 
@@ -251,6 +259,7 @@
 - [issue #736](https://github.com/devbasex/ai-plugins/issues/736) — 指示書の提案ラウンドの上限の既定
 - [issue #727](https://github.com/devbasex/ai-plugins/issues/727) — 使える者から担当を割り当てる共通層
 - [PR #800](https://github.com/devbasex/ai-plugins/pull/800) — 実装
+- [issue #786](https://github.com/devbasex/ai-plugins/issues/786) / [PR #930](https://github.com/devbasex/ai-plugins/pull/930) — 母集合に無い者の外す指定を無視する。適用担当にテストを前景で待たせる指示は [ラウンドで担当が受け取るもの](cross-review-round-inputs.md) が持つ
 - [使える者だけで始める収束ループ](cross-review-participants-and-seats.md) — 共通層の契約と cross-review 側
 - [結果なしの取り込み](cross-refactoring-apply-intake.md) — 適用ラウンドの開き直しと試行の上限
 - [`cross-refactoring` の手順](../../plugins/ndf/skills/cross-refactoring/SKILL.md)
