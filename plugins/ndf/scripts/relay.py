@@ -785,6 +785,10 @@ class Relay:
         self.screen(f"ndf-relay: 次の区間を起動できない（{why}）。次のコマンド:\r\n{command}")
         return 2
 
+    def log_end(self, until: float, ended_by: str) -> None:
+        self.log(event="end", section=self.section, pid=self.pid,
+                 seconds=round(until - self.started_at, 3), ended_by=ended_by)
+
     def finalize_section(self, m, written: float) -> tuple[dict | None, int | None]:
         """`/exit` の後の後処理。子を終わらせ、読み直した印から続ける印か終了コードを決める。
         `event="end"` はここで 1 度だけ記録する。続けるなら (印, None)、終わるなら (None, 終了コード)。"""
@@ -795,11 +799,9 @@ class Relay:
             # 書いた /exit が質問の答えの後に働いた。答えの後の Stop が印を書き直すか消している
             self.release_count()
             if again is None:
-                self.log(event="end", section=self.section, pid=self.pid,
-                         seconds=round(time.time() - self.started_at, 3), ended_by="no-mark")
+                self.log_end(time.time(), "no-mark")
                 return None, exit_code(status)
-        self.log(event="end", section=self.section, pid=self.pid,
-                 seconds=round(written - self.started_at, 3), ended_by=ended_by)
+        self.log_end(written, ended_by)
         if requeued:
             why = self.recheck(again)
             if why:
@@ -822,8 +824,7 @@ class Relay:
         while True:
             res = self.pump(tick=self.tick)
             if res[0] == "exit":
-                self.log(event="end", section=self.section, pid=self.pid,
-                         seconds=round(time.time() - self.started_at, 3), ended_by="no-mark")
+                self.log_end(time.time(), "no-mark")
                 return exit_code(res[1])
             m = res[1]
             if not self.write_exit(m):
