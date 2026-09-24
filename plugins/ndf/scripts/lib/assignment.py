@@ -245,6 +245,27 @@ def resolve_participants(
     )
 
 
+def recorded_exclusions(
+    recorded: Mapping[str, Any],
+    include: Iterable[str],
+    only: Optional[str] = None,
+) -> list[str]:
+    """`--exclude` を渡さない再開で使う除外。外した者と、無視した除外の両方を足し戻す。
+
+    `recorded` は状態ファイルの `participants`。無視した除外（`ignored_exclude`）を落とすと、
+    `--exclude agy` で始めた実行を別の引数で再開しただけで、完了報告から「母集合に
+    無かった者」が消える（#786 の AC4d）。**無視した名前を `include` か `only` にも
+    渡したときだけ、その名前を足し戻さない。** 新しい指定を優先する（`only` は決定 12。
+    `--only agy` は `--include agy` 無しで agy 1 者で回る）。外した者（`excluded`）と
+    `include` の重なりは今どおり矛盾として止める。1 者指定を持たない呼び出し側は
+    `only` を渡さない。
+    """
+    wanted = set(include) | ({only} if only is not None else set())
+    excluded = list(recorded.get("excluded") or [])
+    ignored = [n for n in (recorded.get("ignored_exclude") or []) if n not in wanted]
+    return excluded + ignored
+
+
 def seat_runtime(seat: str) -> str:
     """席の名前からランタイム名を引く。形は `SEAT_PATTERN`（`kiro` / `kiro-2`）。
 

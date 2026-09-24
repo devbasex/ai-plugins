@@ -237,3 +237,24 @@ def test_only_agy_without_include_and_its_conflicts(assignment):
         assignment.resolve_participants(
             pool, host="claude", only="typo", probe=lambda n: called.append(n) or ({}, True))
     assert called == []
+
+
+@pytest.mark.parametrize("include, only, expected", [
+    ([], None, ["kiro", "agy"]),
+    (["agy"], None, ["kiro"]),
+    ([], "agy", ["kiro"]),
+    (["kiro"], None, ["kiro", "agy"]),
+])
+def test_recorded_exclusions_restores_both_kinds_unless_newly_named(
+        assignment, include, only, expected):
+    """#786 の AC4d / 決定 12: 外した者と無視した除外を足し戻す。無視した名前は新しい指定が勝つ。
+
+    外した者（`excluded`）は `include` に重なっても残す（矛盾は `resolve_participants` が止める）。
+    """
+    recorded = {"excluded": ["kiro"], "ignored_exclude": ["agy"]}
+    assert assignment.recorded_exclusions(recorded, include, only) == expected
+
+
+def test_recorded_exclusions_of_an_old_state_is_empty(assignment):
+    """記録を持たない状態ファイル（`participants` が空）でも空で返す。"""
+    assert assignment.recorded_exclusions({}, []) == []

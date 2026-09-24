@@ -284,6 +284,19 @@ def test_include_wins_over_an_ignored_exclusion(resume, tmp_path):
     assert st["participants"]["available"] == ["claude", "codex", "agy", "kiro"]
 
 
+def test_only_wins_over_an_ignored_exclusion(resume, state_mod, tmp_path):
+    """#786 の決定 12: `--exclude agy` で始めた実行を `--only agy` で再開すると、agy 1 者で回る。
+
+    再開時の 1 者指定も新しい指定であり、無視した除外を足し戻して矛盾で止めない。
+    """
+    _started_with_exclude_agy(tmp_path)
+    st = resume("--only", "agy")
+    assert st["only"] == "agy"
+    assert st["participants"]["ignored_exclude"] == []
+    assert st["participants"]["available"] == ["agy"]
+    assert _seats(state_mod, tmp_path) == ["agy"]
+
+
 def test_include_of_a_real_exclusion_still_conflicts(resume, tmp_path):
     """外した者（`excluded`）と `--include` の重なりは今どおり止める。"""
     path = _state(tmp_path, participants=_participants(
