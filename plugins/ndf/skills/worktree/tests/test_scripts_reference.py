@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -21,7 +22,9 @@ SKILLS_ROOT = SKILL_DIR.parent
 LOOKUP_REFERENCE = (
     SKILLS_ROOT / "development-workflow" / "references" / "scripts-lookup.md"
 )
-LOOKUP_HEADING = "## 候補の並び"
+LOOKUP_HEADING = "## 入口を探す 1 段"
+# 解決の入口の実物。配置を作るたびに写す。
+RESOLVE_ENTRY = Path(__file__).resolve().parents[3] / "scripts" / "resolve.sh"
 # Claude Code が SKILL.md の中で置き換える語。テストでも同じ置き換えを行う。
 PLUGIN_ROOT_TOKEN = "'${CLAUDE_PLUGIN_ROOT}'"
 
@@ -67,6 +70,9 @@ def resolve(cwd: Path, home: Path, plugin_root: Path | None = None) -> str:
     env = os.environ.copy()
     env["LC_ALL"] = "C"
     env["HOME"] = str(home)
+    # 呼んだ側のランタイムの手がかりを持ち込まない。
+    env.pop("CLAUDECODE", None)
+    env.pop("CLAUDE_PLUGIN_ROOT", None)
     got = subprocess.run(
         ["bash", "-c", f'set -uo pipefail\n{snippet}\nprintf "%s\\n" "$SCRIPTS"\n'],
         cwd=str(cwd), env=env, capture_output=True, text=True,
@@ -78,6 +84,7 @@ def resolve(cwd: Path, home: Path, plugin_root: Path | None = None) -> str:
 def make_plugin(root: Path) -> Path:
     """プラグインの配布物を作る。`worktree` の手順が呼ぶスクリプトを持つ。"""
     (root / "scripts").mkdir(parents=True, exist_ok=True)
+    shutil.copy(RESOLVE_ENTRY, root / "scripts" / "resolve.sh")
     for name in ("projects-sync.sh", "worktree-setup.sh"):
         (root / "scripts" / name).write_text("#!/usr/bin/env bash\n", encoding="utf-8")
     for name in ("development-workflow", "worktree"):

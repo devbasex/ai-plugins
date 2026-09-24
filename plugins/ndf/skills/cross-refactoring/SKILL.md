@@ -127,7 +127,15 @@ allowed-tools:
   起動しない**（2 は判定できなかったことを示し、飛ばしてよいとは読まない）
 
 ```bash
-SCRIPTS="<この Skill のディレクトリ>/scripts"
+# スクリプトの置き場所を解決の入口（scripts/resolve.sh）に尋ねる。入口を探すこの 1 段と
+# 候補の順序は development-workflow/references/scripts-lookup.md にある。
+for R in '${CLAUDE_PLUGIN_ROOT}' "$(git rev-parse --show-toplevel 2>/dev/null)/plugins/ndf" \
+  ~/.claude/plugins/cache/*/ndf/* .kiro/skills/*/../.. ~/.kiro/skills/*/../.. \
+  ~/.codex/{.tmp/,}marketplaces/*/plugins/ndf ~/.gemini/config/plugins/ndf plugins/ndf; do
+  [ -f "$R/scripts/resolve.sh" ] && break; R=
+done
+[ -n "$R" ] || { echo "NDF の scripts/resolve.sh が見つからない" >&2; exit 3; }
+SCRIPTS=$(bash "$R/scripts/resolve.sh" scripts cross-refactoring) || exit 3
 python3 "$SCRIPTS/refactor.py" assess --base origin/develop; echo "exit=$?"
 ```
 
@@ -176,31 +184,17 @@ flowchart TD
 （単独起動の終わりの `cross-review` を除く）。
 
 ```bash
-# この Skill のディレクトリを決める。候補を順に試し、最初に当たったものを絶対パスで採る。
-# Claude Code は SKILL.md 内の ${CLAUDE_PLUGIN_ROOT} をプラグインルートの絶対パスへ置き換えて
-# から渡す。シングルクォートで囲むのは、置き換えられなかったときにシェルへ展開させないため
-# である。Codex と Kiro CLI は置き換えないため、**この bash を実行する前に
-# `<この Skill のディレクトリ>` をランタイムから渡された実際のパスへ置き換えること**。
-# 置き換えないまま実行しても、その候補が外れるだけで別の場所を読むことはない。
-SKILL_NAME=cross-refactoring
-PLUGIN_ROOT='${CLAUDE_PLUGIN_ROOT}'
-case "$PLUGIN_ROOT" in '$'*) PLUGIN_ROOT= ;; esac
-SKILL_DIR=
-for candidate in \
-  ${PLUGIN_ROOT:+"$PLUGIN_ROOT/skills/$SKILL_NAME"} \
-  "<この Skill のディレクトリ>" \
-  ".kiro/skills/$SKILL_NAME" \
-  "$HOME/.kiro/skills/$SKILL_NAME"
-do
-  [ -d "$candidate/scripts" ] || continue
-  SKILL_DIR="$(cd "$candidate" && pwd)"
-  break
+# スクリプトの置き場所を解決の入口（scripts/resolve.sh）に尋ねる。入口を探すこの 1 段と
+# 候補の順序は development-workflow/references/scripts-lookup.md にある。
+for R in '${CLAUDE_PLUGIN_ROOT}' "$(git rev-parse --show-toplevel 2>/dev/null)/plugins/ndf" \
+  ~/.claude/plugins/cache/*/ndf/* .kiro/skills/*/../.. ~/.kiro/skills/*/../.. \
+  ~/.codex/{.tmp/,}marketplaces/*/plugins/ndf ~/.gemini/config/plugins/ndf plugins/ndf; do
+  [ -f "$R/scripts/resolve.sh" ] && break; R=
 done
-[ -n "$SKILL_DIR" ] || { echo "この Skill のディレクトリを解決できない" >&2; exit 1; }
-SCRIPTS="$SKILL_DIR/scripts"
-# 収束ループの共通層はプラグインルート直下にある。`..` は文字列のまま渡してカーネルに
-# 解決させるため、Kiro CLI が `.kiro/skills/` へ張ったリンクからでも実体側へ届く。
-LIB="$SKILL_DIR/../../scripts/lib"
+[ -n "$R" ] || { echo "NDF の scripts/resolve.sh が見つからない" >&2; exit 3; }
+SCRIPTS=$(bash "$R/scripts/resolve.sh" scripts cross-refactoring) || exit 3
+# 収束ループの共通層はプラグインルート直下にある。
+LIB="$(bash "$R/scripts/resolve.sh" scripts)/lib" || exit 3
 
 # **中断（終了コード 4）は握り潰さない。** 取り消しに失敗した状態を「項目 0 件」と
 # 同じ扱いにすると、検証を通っていない変更を Pull Request に残したまま先へ進む。
