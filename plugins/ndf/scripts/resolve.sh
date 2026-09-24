@@ -92,23 +92,27 @@ kiro_candidates() {
   done
 }
 
-find_root() {
-  local top candidate
+# 候補を順序どおりに 1 行ずつ書く（順序はヘッダの 1〜6 と最後の入口自身）。
+candidates() {
+  local top
   if top=$(git rev-parse --show-toplevel 2>/dev/null); then
-    emit_if_plugin "$top/plugins/ndf" && return 0
+    printf '%s\n' "$top/plugins/ndf"
   fi
-  while IFS= read -r candidate; do
-    emit_if_plugin "$candidate" && return 0
-  done < <(claude_candidates; kiro_candidates)
-  for candidate in \
+  claude_candidates
+  kiro_candidates
+  printf '%s\n' \
     "${HOME:-}/.codex/.tmp/marketplaces/"*/plugins/ndf \
     "${HOME:-}/.codex/marketplaces/"*/plugins/ndf \
     "${HOME:-}/.gemini/config/plugins/ndf" \
     "plugins/ndf" \
     "$SELF_ROOT"
-  do
+}
+
+find_root() {
+  local candidate
+  while IFS= read -r candidate; do
     emit_if_plugin "$candidate" && return 0
-  done
+  done < <(candidates)
   return 1
 }
 
