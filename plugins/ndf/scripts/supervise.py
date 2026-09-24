@@ -33,6 +33,9 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
       ]
     }
 
+パートに分ける: work の段に `"parts": [{"name": ..., "files": [...]}, ...]` を書くと、パートごとに
+新しい文脈の claude -p の段（`<id>-1`, `<id>-2`, ...）へ展開する。大きな実装は分けて書く。
+
 段の遷移:
 - `next` に `end` を書くと、そこで持ち場を完了として終える
 - run: 終了コード 0 なら `next`（無ければ次の段）。0 以外なら `on_fail`（無ければ止まる）
@@ -60,6 +63,9 @@ TAIL = 6000  # LLM へ渡す出力の末尾の文字数
 WORK_SYSTEM = """あなたは NDF の worker である。1 つの作業だけを行う。
 - 人間へ問わない。別のサブエージェントを起動しない。進行を記録しない
 - 作業場所の外を触らない。push しない
+- ファイルは全文を読まない。grep -n で位置を探し、Read の offset / limit で要る範囲だけを読む
+  （200 行未満のファイルと、これから書き換える関数の周りは除く）。同じ範囲を読み直さない
+- テストや検査の出力は、失敗した箇所と要約だけを読む（`| tail`・`-q`・`--tb=short`）
 - 判断が要るときは、作業をせずに「結果: 判断が要る」と理由を書いて終える
 - 最後に次の形で終える:
 ## 作業の報告
@@ -133,6 +139,7 @@ def call_claude(system: str, prompt: str, tools: str | None, cwd: str, timeout: 
         "text": data.get("result") or p.stderr[-TAIL:],
         "usage": data.get("usage") or {},
         "cost": data.get("total_cost_usd"),
+        "turns": data.get("num_turns"),
         "seconds": round(time.time() - started, 1),
     }
 
@@ -147,9 +154,43 @@ def parse_decision(text: str) -> dict:
     return {"decision": "stop", "reason": f"判断の答えを読めない: {(text or '')[:200]}"}
 
 
+def expand_parts(steps: list[dict]) -> list[dict]:
+    """work の段の `parts` を、パートごとに別の claude -p の段へ展開する。
+
+    1 つの文脈で全部を書くと、文脈が育つほど往復ごとの読み直しが増える（大きさ × 回数）。
+    パートごとに新しい文脈で起動し、前のパートの成果はコミットから読ませる。
+    `parts`: [{"name": "release-steps", "files": ["plugins/.../release-steps.py", ...]}, ...]
+    """
+    out = []
+    for s in steps:
+        parts = s.get("parts")
+        if s.get("type") != "work" or not parts:
+            out.append(s)
+            continue
+        for i, part in enumerate(parts, 1):
+            p = {k: v for k, v in s.items() if k not in ("parts", "id", "next")}
+            p["id"] = f"{s['id']}-{i}"
+            if i < len(parts):
+                p["next"] = f"{s['id']}-{i + 1}"
+            elif s.get("next"):
+                p["next"] = s["next"]
+            p["prompt"] = (s["prompt"] + f"\n\n## このパート（{i}/{len(parts)}: {part['name']}）\n"
+                           f"触るのは次のファイルだけ: {', '.join(part['files'])}。"
+                           "他のパートは別の作業が受け持つ。前のパートの成果は git log と該当ファイルの要る範囲で確かめる。"
+                           "このパートの変更をコミットして終える。")
+            out.append(p)
+        # 元の id を指す遷移は最初のパートへ
+        for t in steps:
+            for key in ("next", "on_fail"):
+                if t.get(key) == s["id"]:
+                    t[key] = f"{s['id']}-1"
+    return out
+
+
 class Supervisor:
     def __init__(self, plan: dict, state_dir: Path):
         self.plan = plan
+        plan["steps"] = expand_parts(plan["steps"])
         self.steps = {s["id"]: s for s in plan["steps"]}
         self.order = [s["id"] for s in plan["steps"]]
         self.cwd = plan["作業場所"]
@@ -192,6 +233,16 @@ class Supervisor:
         self.llm["cache_write"] += u.get("cache_creation_input_tokens", 0)
         self.llm["output"] += u.get("output_tokens", 0)
         self.llm["cost"] += res.get("cost") or 0.0
+        # 段ごとの内訳（往復の回数・トークン・費用）。同じ段で複数回呼べば足し合わせる
+        c = self.cur.setdefault("llm", {"calls": 0, "turns": 0, "input": 0, "cache_read": 0,
+                                        "cache_write": 0, "output": 0, "cost": 0.0})
+        c["calls"] += 1
+        c["turns"] += res.get("turns") or 0
+        c["input"] += u.get("input_tokens", 0)
+        c["cache_read"] += u.get("cache_read_input_tokens", 0)
+        c["cache_write"] += u.get("cache_creation_input_tokens", 0)
+        c["output"] += u.get("output_tokens", 0)
+        c["cost"] = round(c["cost"] + (res.get("cost") or 0.0), 4)
 
     def next_of(self, sid: str, step: dict) -> str | None:
         """成功したときの次の段。`next` が無ければ並びの次へ進むが、失敗したときにだけ通る段
@@ -370,6 +421,10 @@ class Supervisor:
         l = self.llm
         steps = " → ".join(f"{e['id']}" + (f"[{e['decision']}]" if "decision" in e else
                                            f"(exit={e.get('exit')})") for e in self.log)
+        rows = "\n".join(
+            f"| {e['id']} | {e['llm']['turns']} | {e.get('seconds', '')} | {e['llm']['cache_read']} | "
+            f"{e['llm']['cache_write']} | {e['llm']['output']} | ${e['llm']['cost']:.3f} |"
+            for e in self.log if e.get("llm")) or "| 無し | | | | | | |"
         text = f"""## 持ち場の報告
 
 - 持ち場: {self.plan.get('持ち場')}
@@ -385,6 +440,10 @@ class Supervisor:
 - 通った段: {steps}
 - LLM の使用量: 入力 {l['input']} / cache read {l['cache_read']} / cache write {l['cache_write']} / 出力 {l['output']} / ${l['cost']:.3f}
 - 記録: {self.dir}
+
+| 段 | 往復 | 秒 | cache read | cache write | 出力 | 費用 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+{rows}
 """
         (self.dir / "report.md").write_text(text)
         return text
