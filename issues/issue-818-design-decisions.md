@@ -40,7 +40,7 @@ Codex にも `claude-code` の文脈を渡す案は採らない。ツールは�
 
 ### 決定 6: 誘導の hook は公式の `serena-hooks` を使わず、標準ライブラリで自前に持つ
 
-公式の `serena-hooks remind` は、コードファイルを固定の拡張子の一覧で判定する（`.json` / `.yaml` / `.toml` / `.html` / `.css` を含む 60 個）。Serena が扱わない言語の読み込みまで拒否し、`project.yml` の無いリポジトリでも拒否する。自前の hook は、`project.yml` の採った言語の拡張子だけを数える（AC19）。閾値と待ちの秒数は公式と同じにする。
+公式の `serena-hooks remind` は、コードファイルを固定の拡張子の一覧で判定する（`.json` / `.yaml` / `.toml` / `.html` / `.css` を含む 60 個）。Serena が扱わない言語の読み込みまで拒否し、`configure` で設定していないリポジトリでも拒否する。自前の hook は、`configure` の印（`mcp_serena_excluded`）のある `project.yml` の採った言語の拡張子だけを数える（AC19）。閾値・待ちの秒数・数の有効期間・数を戻さないツール名の部分文字列は公式と同じにする。
 
 公式を `uvx` で呼ぶ案は採らない。起動は温まっていれば 0.06 秒で速さの問題は無いが、拡張子を絞れない。公式の `activate` も使わない。`--project-from-cwd` で有効化は済んでおり、`activate` はモデルに `activate_project` と `initial_instructions` を促す。
 
@@ -52,7 +52,7 @@ Serena の内部の API（`SolidLanguageServer`）で言語を 1 つずつ起動
 
 ### 決定 8: `project.yml` は行単位で書き換え、YAML のライブラリを使わない
 
-hook と検査は標準ライブラリだけで動かす（`uvx` を hook の経路に入れない）。書き換えるのは `language_servers` と `ignored_paths` の 2 つの最上位のキーだけで、Serena の雛形はどちらもブロックの形の配列で書く。**知らない形（流れの形の非空の配列・アンカー）を見つけたら書かずに止める**（終了コード 3）。注釈と他のキーは 1 バイトも変えない。
+hook と検査は標準ライブラリだけで動かす（`uvx` を hook の経路に入れない）。書き換えるのは `language_servers` と `ignored_paths` と `mcp_serena_excluded` の 3 つの最上位のキーだけで、Serena の雛形は前の 2 つをブロックの形の配列で書く。**知らない形（流れの形の非空の配列・アンカー）を見つけたら書かずに止める**（終了コード 3）。注釈と他のキーは 1 バイトも変えない。
 
 `uvx --from serena-agent==1.7.0 python` で Serena の同梱の YAML ライブラリを使う案は採らない。SessionStart の hook から呼ぶと 1 秒の上限（AC23）に収まらない見込みで、注釈の保ち方も Serena の実装に依る。
 
@@ -60,7 +60,9 @@ hook と検査は標準ライブラリだけで動かす（`uvx` を hook の経
 
 毎回出す通知は読み飛ばされる（今の echo と同じ）。導入（`uv tool install`・`npm install -g`・`claude plugin install`）は利用者の手元へ書き込み、ネットワークへ出て、失敗しても気付きにくい（#818 §10）。セッションの開始では検査だけを行い、直すのは Skill の手順で利用者の確認を取ってからにする。
 
-検証に失敗して外した言語と、`--only` で名指しされなかった言語は、`project.yml` の `language_servers` のブロックに注釈として残し、突き合わせから除く。残さないと、外した言語が以後も検出で選ばれ、毎回出す通知に戻る。別の状態ファイルに置く案は採らない。`project.yml` を追跡すれば作業ツリーにも同じ記録が揃い、追跡から外すファイルを増やさずに済む。
+検証に失敗して外した言語と、`--only` で名指しされなかった言語は、`project.yml` の最上位のキー `mcp_serena_excluded` に残し、突き合わせから除く。残さないと、外した言語が以後も検出で選ばれ、毎回出す通知に戻る。別の状態ファイルに置く案は採らない。`project.yml` を追跡すれば作業ツリーにも同じ記録が揃い、追跡から外すファイルを増やさずに済む。逆向き（`language_servers` にあってしきい値に届かない言語）は知らせない。利用者の名指しを尊重する。
+
+`language_servers` のブロックの注釈に置く案は採らない。Serena 1.7.0 は項目の欠けた `project.yml` を読むと `ProjectConfig.save` で書き直し、そのとき `language_servers` を作り直して注釈が消える。知らないキーは書き直しの後も残る（2026-09-24 実測。`project create --ls python` の後、ブロックに `# mcp-serena: excluded ...` の行と最上位の `mcp_serena_excluded:` を足し、`encoding:` の行を消して `ProjectConfig.load('.', SerenaConfig.from_config_file())` を打つと、`encoding:` が足され、注釈の行だけが消えた）。このキーは「`configure` で設定した」印も兼ねる。Serena は `--project-from-cwd` で開いた根に `project.yml` が無ければ自動で作るため、ファイルの有無では設定の有無を判定できない。
 
 ### 決定 10: エージェント定義は、#818 では Serena の行だけを直す。構成の整理は #877 と #869 に残す
 
@@ -83,7 +85,7 @@ Claude Code の `LSP` ツールと Serena の `get_diagnostics_for_file` も一�
 
 ### 決定 12: `.serena/project.yml` を追跡するかは利用者が選び、既定では `.gitignore` に触らない
 
-作業ツリー（`.worktrees/<ブランチ名>`）で Serena を使うには、作業ツリーにも `project.yml` が要る。追跡していれば作業ツリーを作った時点で揃う。追跡しないと、作業ツリーの中で `--project-from-cwd` が作業ツリーの根を選び、`project.yml` が無い状態になる（そのときの Serena の振る舞いは未確認 U4）。Skill はこの違いを示して選ばせ、追跡しないと決めたときだけ `--gitignore` を渡す。
+作業ツリー（`.worktrees/<ブランチ名>`）で Serena を使うには、作業ツリーにも `project.yml` が要る。追跡していれば作業ツリーを作った時点で揃う。追跡しないと、作業ツリーの中で `--project-from-cwd` が作業ツリーの根を選び、Serena が印の無い `project.yml` を自動で作る（hook は数えも知らせもしない。そこで選ばれる言語は未確認 U4）。Skill はこの違いを示して選ばせ、追跡しないと決めたときだけ `--gitignore` を渡す。
 
 `.serena/` の他のファイルは追跡しない側に倒す。Serena 1.7.0 が作る `.serena/.gitignore` は `/cache` と `/project.local.yml` だけで、`SERENA_HOME=.serena` で作られる `serena_config.yml`（このリポジトリの `.gitignore` は「認証の秘密を持つため追跡しない」として外している）・`logs/`・`language_servers/` が追跡の候補に残る（2026-09-24 実測）。これも `.gitignore` の書き換えなので、Skill が確認を取ってから `--serena-gitignore` を渡す。
 
@@ -99,7 +101,7 @@ Claude Code の `LSP` ツールと Serena の `get_diagnostics_for_file` も一�
 
 ### 決定 15: Kiro は Claude Code と同じ起動定義と hook の定義を受け取る
 
-Kiro の installer（生成物）は `.mcp.json` と `hooks/hooks.json` を読む。Serena には Kiro の文脈が無い。今の `ide-assistant` は `claude-code` の旧名で、Kiro の動きは変わらない。hook は Kiro のイベント名の変換で PreToolUse がそのまま残り、Kiro が読まない名前なら動かない。hook のスクリプトは知らない入力で何も出さずに 0 で終わる。Kiro 専用の定義を足す案は、Kiro の受け入れを確かめる手段が無いため、この課題では採らない（前提 3）。
+Kiro の installer（生成物）は `.mcp.json` と `hooks/hooks.json` を読む。Serena には Kiro の文脈が無い。今の `ide-assistant` は `claude-code` の旧名で、Kiro の動きは変わらない。hook は Kiro のイベント名の変換で PreToolUse がそのまま残り、Kiro が読まない名前なら動かない。SessionStart は `agentSpawn` へ写され、`--client claude-code` のまま走る。そのままでは `installed_plugins.json` の無い Kiro の利用者に「Claude Code の LSP が足りません」を毎回出すため、`--client claude-code` の hook は環境に `CLAUDE_PLUGIN_ROOT` が無ければ何も出さない（Claude Code は hook に置き、Kiro は置かない）。hook のスクリプトは知らない入力で何も出さずに 0 で終わる。Kiro 専用の定義を足す案は、Kiro の受け入れを確かめる手段が無いため、この課題では採らない（前提 3）。
 
 ### 決定 16: `SERENA_HOME` は `.serena`（cwd からの相対）のまま保ち、作業ツリーごとの言語サーバの取得を受け入れる
 

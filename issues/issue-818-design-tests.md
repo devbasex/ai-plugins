@@ -22,8 +22,8 @@ uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest 
 | AC3 | Claude Code の起動定義で Serena を起動し、MCP の `tools/list` の名前を照らす | 手動（実機の Serena） |
 | AC4 | このリポジトリで `detect --json` の `detected` と `project.yml` の `language_servers` を照らす | 結合 |
 | AC5 | 拡張子の件数の組（9/10 ファイル・4.9%/5.0%・分母に `.md` を含めない）で採否と `skipped.reason` を照らす | 単体 |
-| AC6 | `project.yml` が無い / 雛形どおり / 注釈つき / 流れの形の非空の配列の 4 つで、書き換えの前後の差分が 2 キーだけか（最後は終了コード 3）を照らす | 単体 |
-| AC7 | 偽の `serena` が `bash` だけ 1 を返すとき、`failed` に `bash`、`language_servers` に残りが入り、ブロックに `# mcp-serena: excluded bash health_check_exit_1` の行が入る。`--only python` では検出された残りが `not_selected` で入る。検証の途中で例外を投げても、最後に通った言語だけが書かれる。偽の `serena` が受けた環境変数と cwd を記録し、`project create` と `health-check` のどちらも `SERENA_HOME=.serena`・cwd が根であることを照らす | 結合 |
+| AC6 | `project.yml` が無い / 雛形どおり / 注釈つき / 流れの形の非空の配列 / `project.local.yml` に `language_servers` がある の 5 つで、書き換えの前後の差分が 3 キーだけか（後の 2 つは書かずに終了コード 3）を照らす | 単体 |
+| AC7 | 偽の `serena` が `bash` だけ 1 を返すとき、`failed` に `bash`、`language_servers` に残りが入り、`mcp_serena_excluded` に `bash health_check_exit_1` が入る。`--only python` では検出された残りが `not_selected` で入る。検証の途中で例外を投げても、SIGTERM を送っても、最後に通った言語だけが書かれる。すべて失敗すると `language_servers: []` と全言語の記録が書かれる。偽の `serena` が受けた環境変数と cwd を記録し、`project create` と `health-check` のどちらも `SERENA_HOME=.serena`・cwd が根であることを照らす | 結合 |
 | AC8 | リポジトリの写しを根にし、起動定義と同じ `SERENA_HOME=.serena` で一度 Serena を起動して、言語サーバが `<写し>/.serena/language_servers/static/` に入ったことを確かめる（相対の値は cwd から解決される。Serena 1.7.0 の `SerenaPaths` と `ls_manager.py`）。その配下の `BashLanguageServer` だけを壊し、`configure` の後に、同じ根と `SERENA_HOME` で起動した Serena で `python` の `find_symbol` / `find_referencing_symbols` が通る。`~/.serena` は写しも壊しもしない | 手動 |
 | AC9 | `--dry-run` の前後でリポジトリの全ファイルのハッシュが変わらない | 結合 |
 | AC10 | `--gitignore` なしで `.gitignore` が変わらず、ありで `.serena/project.yml` の行が 1 度だけ足される。`.serena/.gitignore` が Serena 1.7.0 の 2 行（`/cache` `/project.local.yml`）のとき、`--serena-gitignore` なしで変わらず `serena_gitignore_added` に 3 行が載り、ありで 3 行が 1 度だけ足されて `git status --porcelain .serena` に `serena_config.yml`・`logs/` が出ない | 結合 |
@@ -34,16 +34,16 @@ uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest 
 | AC15 | PATH に `shellcheck` が無い / ある で `missing` を照らす | 単体 |
 | 運用・保守性（非機能） | 一時の対応表に、既にある種類の追加の検査（`shellcheck`）を持つ架空の言語を足すと、コードを変えずに `detect` と `check` に載る。知らない `extra_checks` の名前で `check` が終了コード 2 になる | 単体 |
 | AC16 | 配布物の全 `plugin.json` と `marketplace.json` に `lspServers` が無い | 単体 |
-| AC17・AC18 | 食い違いあり / 欠けあり / 揃っている / `project.yml` が無い / 検証に失敗して外した言語がある / `--only` で外した言語がある の 6 つで、SessionStart の出力の有無を照らす（後の 2 つは何も出さない）。`--client codex` で Claude Code の LSP の欠けを出さない | 単体 |
+| AC17・AC18 | 食い違いあり / 欠けあり / 揃っている / `project.yml` が無い / Serena が自動で作った印の無い `project.yml` / 検証に失敗して外した言語がある / `--only` で外した言語がある / `--only` でしきい値未満の言語を名指しした の 8 つで、SessionStart の出力の有無を照らす（前の 2 つ以外は、揃っていれば何も出さない）。印の無い `project.yml` では PreToolUse も数えない。`--client codex` で Claude Code の LSP の欠けを出さない。環境に `CLAUDE_PLUGIN_ROOT` が無い `--client claude-code` は何も出さない | 単体 |
 | AC19 | `.md` / `.json` / `.py`（採った言語）/ `.ts`（採っていない言語）の `Read` を 3 回ずつ送り、拒否が `.py` だけで出る | 単体 |
-| AC20 | grep 3・読み込み 3・混在 4（grep 2 回 + 読み込み 2 回）で拒否し、数が 0 に戻る。拒否から 119 秒は拒否せず、120 秒で再び数える（時刻を差し替える） | 単体 |
+| AC20 | grep 3・読み込み 3・混在 4（grep 2 回 + 読み込み 2 回）で拒否し、数が 0 に戻る。拒否から 119 秒は拒否せず、120 秒で再び数える。前回から 1001 秒空けた 3 回目の読み込みでは拒否しない（時刻を差し替える）。`search_for_pattern` と `get_diagnostics_for_file` の呼び出しでは数が戻らない | 単体 |
 | AC21 | `permission_mode` が `acceptEdits` / `auto` / `default` / `bypassPermissions` のとき、Serena のツールで `allow` が出るのは前の 2 つだけ | 単体 |
 | AC22 | `hooks/codex.json` の matcher と、Codex の入力（`tool_name: "Bash"`・`command: "sed -n 1,80p a.py"`）で読み込みとして数えられる | 単体 |
 | AC23 | 1 万ファイルの一時リポジトリで SessionStart を 5 回、PreToolUse を 20 回走らせ、最大の所要を照らす | 結合 |
 | AC24 | Python / TypeScript（`typescript@5`）/ PHP の小さなリポジトリで、隔離した claude に型を壊す編集をさせ、記録の `<new-diagnostics>` を見る | 手動 |
 | AC25 | 同じ 3 つのリポジトリで `codex exec` に `find_referencing_symbols` と `get_diagnostics_for_file` を呼ばせ、記録（`~/.codex/sessions`）で結果を見る。hook は、`project.yml` と食い違う写し（言語を 1 つ抜いたもの）で `codex exec` を走らせて通知の文が記録の文脈に載ることを見る。続けて `sed -n 1,80p <採った言語のファイル>` を 3 回打たせ、3 回目のシェルの呼び出しが拒否の理由の文とともに実行されないことを見る。Skill は `codex exec` から呼ばせ、`$ROOT` が解決されて `configure --dry-run` が終了コード 0 で返ることを見る | 手動 |
 | AC26・AC27 | #818 §3 の題材を、`project.yml` を直した ai-plugins の写しで、指示なしの 2 条件（LSP のみ / Serena のみ）× 3 回、`claude -p --output-format stream-json` で走らせ、ツールの呼び出しとツール結果の文字数を数える。`initial_instructions` が読まれた回数も数える | 手動 |
-| AC28・AC29 | `claude plugin validate .`・`bash scripts/build-runtime-plugins.sh --check`・`bash plugins/mcp/mcp-serena/dev.kiro/install.sh --dry-run` の終了コード | 結合（継続的統合） |
+| AC28・AC29 | `claude plugin validate .`・`bash scripts/build-runtime-plugins.sh --check`・`bash plugins/mcp/mcp-serena/dev.kiro/install.sh --dry-run` の終了コード。installer が一時の HOME に生成した `agentSpawn` のコマンドを `CLAUDE_PLUGIN_ROOT` の無い環境で走らせ、何も出ない | 結合（継続的統合） |
 | AC30 | `git ls-files .serena` | 結合（済） |
 
 `.md` の文言を照合するテストは書かない（`AGENTS.md`）。Skill の `SKILL.md` は `python3 scripts/check-skill-frontmatter.py` と `check-markdown-links.py` が見る。
@@ -55,7 +55,7 @@ uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest 
 | U1 | Codex での `.mcp.json` のプラグインルートの展開 | 隔離した Codex で試したが、起動の記録が残らず判定できなかった。決定 4 でラッパーを作らないため、この課題の実装は依存しない | 上流の変化で乗り換えを考えるとき |
 | U2 | Codex の hook の入出力 | SessionStart の `additionalContext` と PreToolUse の `permissionDecision: "deny"` を Codex 0.156 が読むか。Serena 公式の `serena-hooks` は `--client codex` を持つため、読む前提で作る | 実装（AC25 の手動確認。AC22 は定義と入力の形だけを見る） |
 | U3 | Codex の文脈での memory のツール | `no-memories` のモードで、一覧に残った memory のツールを呼んだときに拒まれるか | 実装（AC25 と同じ手順で 1 度呼ぶ） |
-| U4 | 作業ツリーに `project.yml` が無いときの Serena | `--project-from-cwd` が `.git` を持つ作業ツリーの根を選び、設定を自動で作るのか、主ディレクトリの設定を読むのか | 実装（AC12） |
+| U4 | 作業ツリーに `project.yml` が無いときの Serena | `--project-from-cwd` が作業ツリーの根を選んで印の無い設定を自動で作るとき（Serena 1.7.0 の `ProjectConfig.autogenerate`）、どの言語が選ばれるか | 実装（AC12） |
 | U5 | PHP の型の診断 | intelephense の無料版が型の食い違いを返さないのか、設定で返すのか（#818 の本文の未確認） | 実装（AC24・AC25）。返さなければ前提 4 のまま |
 | U6 | `initial_instructions` の費用 | 検査・仕上げ・取り込みの supervisor で読まれるか。読まれて持ち出しなら、外す案を別の課題にする（決定 11） | 実装（AC26・AC27） |
 | U7 | 効果の割合 r | 見積もりの r = 0.6 は、指示した条件（#818 §3 の D・E）の値である。誘導の hook だけでどこまで近づくか | 実装（AC26・AC27） |

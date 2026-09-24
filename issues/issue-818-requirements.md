@@ -104,7 +104,7 @@
 ### 検出と設定（作業項目 E）
 
 - [ ] AC5: 検出のスクリプトは、対応表にある言語のうち「ファイル数 10 以上かつ対応表の拡張子のファイル全体の 5% 以上」のものを採る。採らなかった言語と理由（件数・割合）を出力に残す
-- [ ] AC6: 設定のスクリプトは確認を取らずに書く。`.serena/project.yml` が無ければ作り、あれば `language_servers` と `ignored_paths` だけを書き換え、他のキーと注釈を保つ
+- [ ] AC6: 設定のスクリプトは確認を取らずに書く。`.serena/project.yml` が無ければ作り、あれば `language_servers` と `ignored_paths` と外した言語の記録（`mcp_serena_excluded`）だけを書き換え、他のキーと注釈を保つ
 - [ ] AC7: 設定のスクリプトは、採る言語を 1 つずつ起動の検証にかけ、失敗した言語を設定から外す。外した言語と理由を出力と `.serena/project.yml` に残す（`--only` で名指しされなかった言語も同じ）
 - [ ] AC8: 壊れた言語サーバが 1 つある状態で設定のスクリプトを走らせると、その言語だけが外れ、残りの言語で `find_symbol` と `find_referencing_symbols` が通る
 - [ ] AC9: `--dry-run` では検出と差分の表示だけを行い、ファイルを 1 つも書かない
@@ -122,7 +122,7 @@
 ### hook（作業項目 B・D・E）
 
 - [ ] AC17: SessionStart の hook は、検出の結果と `.serena/project.yml` が食い違うとき（設定のスクリプトが外した言語として記録したものは食い違いに数えない）、または導入の検査に欠けがあるときだけ 1 行以上を出す。揃っているときは何も出さない
-- [ ] AC18: SessionStart の hook は、`.serena/project.yml` が無いリポジトリ（Serena を設定していない）では何も出さない
+- [ ] AC18: SessionStart の hook は、`.serena/project.yml` が無いか、設定のスクリプトが書いた印（`mcp_serena_excluded`）の無いリポジトリ（Serena が自動で作った設定を含む）では何も出さない
 - [ ] AC19: PreToolUse の hook は、`.serena/project.yml` の採った言語の拡張子のファイルについてだけ数える。`.md` や `.json` の読み込みでは拒否しない
 - [ ] AC20: PreToolUse の hook は、`grep` 3 回・コードファイルの読み込み 3 回・混在 4 回のどれかに達したとき 1 度だけ拒否し、数を戻す。拒否から 120 秒は拒否しない
 - [ ] AC21: PreToolUse の hook は、Claude Code の許可のモードが `acceptEdits` か `auto` のとき、Serena のツールの呼び出しを許可する。それ以外のモードでは何も返さない
@@ -149,7 +149,7 @@
 | 性能・拡張性 | AC23。Serena の初回の `find_symbol` は、採った言語が 2 つのとき 5 秒以内（#818 §8 の 4 言語で 4.2 秒、1 言語で 0.1 秒） |
 | 可用性 | 1 言語の言語サーバの失敗が、他の言語のシンボル操作を止めない（AC7・AC8）。hook のスクリプトが失敗しても、ツールの呼び出しを止めない（終了コード 0 で何も出さない） |
 | 運用・保守性 | 対応する言語を増やすときに変えるのは対応表だけである。ただし、既にある種類の追加の検査（`typescript_major_5` / `shellcheck`）で足りない言語は、新しい種類の検査の関数を `check.py` に 1 つ足す。hook とスクリプトは言語の名前で分岐しない |
-| 移行性 | 既に `.serena/project.yml` を持つリポジトリで、`language_servers` と `ignored_paths` 以外を変えない（AC6）。mcp-serena の更新だけでは既存の `project.yml` を書き換えない |
+| 移行性 | 既に `.serena/project.yml` を持つリポジトリで、`language_servers`・`ignored_paths`・`mcp_serena_excluded` 以外を変えない（AC6）。mcp-serena の更新だけでは既存の `project.yml` を書き換えない |
 | セキュリティ | セッションの開始で、ネットワークへ出る導入（`uv tool install`・`npm install -g`・`claude plugin install`）を走らせない。導入は Skill の手順で、利用者の確認を取ってから行う |
 | システム環境 | hook と検査のスクリプトは Python 3 の標準ライブラリだけで動く。`uvx` を要するのは Serena の起動と起動の検証だけである |
 
@@ -184,4 +184,4 @@
 | --- | --- |
 | 常に行う | 対応表を唯一の正本にする。設定を書いた後に起動を検証する |
 | 確認してから行う | 公式 LSP プラグインと言語サーバ本体の導入、`.gitignore` と `.serena/.gitignore` の書き換え、Serena の言語サーバのキャッシュの退避 |
-| 行わない | セッションの開始での導入。確認なしの `.gitignore` と `.serena/.gitignore` の書き換え。`project.yml` の `language_servers` / `ignored_paths` 以外の書き換え |
+| 行わない | セッションの開始での導入。確認なしの `.gitignore` と `.serena/.gitignore` の書き換え。`project.yml` の `language_servers` / `ignored_paths` / `mcp_serena_excluded` 以外の書き換え |
