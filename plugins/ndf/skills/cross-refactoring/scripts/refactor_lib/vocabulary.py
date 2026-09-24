@@ -185,6 +185,7 @@ ITEM_STATUS_LABELS = {
     "failing": "修正中",
     "verified": "採用",
     "reverted": "取り消し",
+    "deferred": "見送り",
 }
 
 # 実差分行数が見積りのこの倍数を超えたら範囲の逸脱とみなす。

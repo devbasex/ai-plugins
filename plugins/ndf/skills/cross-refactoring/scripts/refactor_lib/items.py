@@ -17,6 +17,7 @@ IMPLEMENTED = "implemented"
 FAILING = "failing"
 VERIFIED = "verified"
 REVERTED = "reverted"
+DEFERRED = "deferred"     # 締め切り・足したテストの失敗で見送った（取り消しと別に数える）
 
 # 取り消しの対象になりうる（コミットを持ちうる）状態。
 LIVE = (PLANNED, TESTED, IMPLEMENTED, FAILING, VERIFIED)

@@ -114,7 +114,8 @@ def test_a_test_failing_on_the_current_code_defers_the_item_as_test_failed(
     _call(cmd_implement, "cmd_merge_tests")
 
     assert _deferred(flow) == {"I-001": "test_failed"}
-    assert _items(flow)["I-001"]["status"] == "reverted"
+    # 見送った項目は取り消しと別に数える（設計の状態遷移 planned --> deferred）。
+    assert _items(flow)["I-001"]["status"] == "deferred"
     assert _items(flow)["I-002"]["status"] == "planned"
     assert not (work / "tests" / "test_total.py").exists()
 
@@ -143,6 +144,7 @@ def test_a_test_commit_after_its_completion_deadline_is_not_done(flow, cmd_setup
     _call(cmd_implement, "cmd_merge_tests")
 
     assert _deferred(flow) == {"I-001": "not_done"}
+    assert _items(flow)["I-001"]["status"] == "deferred"
     assert not (work / "tests" / "test_total.py").exists()
 
 
@@ -209,6 +211,7 @@ def test_one_commit_per_item_and_a_missing_item_is_not_done(flow, cmd_setup, cmd
     assert items["I-001"]["commits"]["implement"] == sha
     assert items["I-001"]["seconds"]["implement"] is not None
     assert _deferred(flow) == {"I-002": "not_done"}
+    assert items["I-002"]["status"] == "deferred"
 
 
 def test_two_commits_for_one_item_reject_it(flow, cmd_setup, cmd_implement):

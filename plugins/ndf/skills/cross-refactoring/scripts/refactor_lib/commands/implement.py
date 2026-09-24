@@ -36,6 +36,7 @@ from ..gitfacts import (
     tracked_markdown,
 )
 from ..items import (
+    DEFERRED,
     IMPLEMENTED,
     LIVE,
     PLANNED,
@@ -146,10 +147,14 @@ def _settle(
     done = any(d.get("reason") == label for d in state.get("drops") or [])
     if (targets or intake.extra) and not done:
         drop(path, state, targets, label, intake.extra)
-    for item_id, reason in intake.not_done.items():
-        defer(state, find_item(state, item_id), DEFER_NOT_DONE, reason)
-    for item_id, reason in intake.test_failed.items():
-        defer(state, find_item(state, item_id), DEFER_TEST_FAILED, reason)
+    # 見送った項目は `drop` が付けた `reverted` を `deferred` へ改める。取り消しと見送りの
+    # 両方に数えると、報告の件数の和が項目の数を超える（設計の状態遷移）。
+    for reason_code, found in ((DEFER_NOT_DONE, intake.not_done),
+                               (DEFER_TEST_FAILED, intake.test_failed)):
+        for item_id, reason in found.items():
+            item = find_item(state, item_id)
+            defer(state, item, reason_code, reason)
+            item["status"] = DEFERRED
     for item_id, reason in intake.rejected.items():
         info(f"❌ {item_id} {item_label(find_item(state, item_id))}: {reason}")
     if intake.extra:
