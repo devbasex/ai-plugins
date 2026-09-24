@@ -10,6 +10,7 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
 | run   | コマンドを実行して終わるまで待ち、出力をファイルへ残す | 使わない |
 | work  | 1 つの作業（修正・調査）を worker として行わせる | 道具あり（Read/Edit/Write/Bash/Grep/Glob） |
 | judge | 結果ファイルと規則の抜粋だけを渡し、次の段を決めさせる | 道具なし |
+| pr    | push して Draft の Pull Request を作る。本文は計画の値・コミット・変更の統計・run の結果から組む | 使わない |
 
 使い方:
     supervise.py run <plan.json> [--state-dir DIR]
@@ -192,6 +193,69 @@ class Supervisor:
         self.cur.update(exit=0 if res["ok"] else 1, text=res["text"], seconds=res["seconds"])
         return res["ok"], res["text"]
 
+    def git(self, *args: str) -> str:
+        return subprocess.run(["git", *args], cwd=self.cwd, capture_output=True, text=True).stdout.rstrip()
+
+    def do_pr(self, step: dict) -> tuple[bool, str]:
+        """push して Draft の Pull Request を作る。既にあれば本文だけを書き直す。LLM を使わない。"""
+        base = step.get("base", "develop")
+        branch = self.git("rev-parse", "--abbrev-ref", "HEAD")
+        push = subprocess.run(["git", "push", "-q", "-u", "origin", "HEAD"], cwd=self.cwd,
+                              capture_output=True, text=True)
+        if push.returncode != 0:
+            self.cur.update(exit=push.returncode, text=push.stderr)
+            return False, push.stderr
+        rng = f"origin/{base}..HEAD"
+        commits = self.git("log", "--reverse", "--format=- %s", rng) or "- （無し）"
+        stat = self.git("diff", "--stat", rng).splitlines()
+        tests = []
+        for sid, r in self.results.items():
+            if r.get("type") == "run":
+                last = next((l for l in reversed(r.get("text", "").splitlines()) if l.strip()), "")
+                tests.append(f"| {sid} | {r.get('exit')} | {last[:120]} |")
+        issues = " ".join(f"#{i}" for i in self.plan.get("課題", []))
+        docs = "\n".join(f"- `{d}`" for d in step.get("docs", [])) or "- 無し"
+        title = step.get("title") or (self.git("log", "--reverse", "--format=%s", rng).splitlines() or [branch])[0]
+        body = f"""{step.get('summary', '')}
+
+## 課題と設計
+
+- 課題: {issues}
+{docs}
+
+## コミット
+
+{commits}
+
+## 変更の統計
+
+```text
+{chr(10).join(stat[-15:])}
+```
+
+## テスト（supervise.py の run の段）
+
+| 段 | exit | 最後の行 |
+| --- | ---: | --- |
+{chr(10).join(tests) or '| 無し | | |'}
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+"""
+        found = subprocess.run(["gh", "pr", "list", "--head", branch, "--state", "open", "--json", "url",
+                                "--jq", ".[0].url"], cwd=self.cwd, capture_output=True, text=True).stdout.rstrip()
+        if found:
+            p = subprocess.run(["gh", "pr", "edit", found, "--body", body], cwd=self.cwd,
+                               capture_output=True, text=True)
+            url = found
+        else:
+            p = subprocess.run(["gh", "pr", "create", "--draft", "--base", base, "--title", title,
+                                "--body", body], cwd=self.cwd, capture_output=True, text=True)
+            url = p.stdout.strip().splitlines()[-1] if p.stdout.strip() else ""
+        if url:
+            self.plan["Pull Request"] = url
+        self.cur.update(exit=p.returncode, text=(url + "\n" + p.stderr).strip())
+        return p.returncode == 0, url
+
     def do_judge(self, step: dict) -> dict:
         choices = step.get("choices")
         prompt = (f"持ち場: {self.plan.get('持ち場')} / 課題: {self.plan.get('課題')}\n"
@@ -236,7 +300,8 @@ class Supervisor:
                 else:
                     result, reason, nxt = "止まった", f"判断が知らない値を返した: {dec}", None
             else:
-                ok, _ = self.do_run(step) if step["type"] == "run" else self.do_work(step)
+                do = {"run": self.do_run, "work": self.do_work, "pr": self.do_pr}[step["type"]]
+                ok, _ = do(step)
                 if ok:
                     nxt = self.next_of(sid, step)
                 elif step.get("on_fail"):
@@ -281,11 +346,14 @@ EXAMPLE = {
     "上限": 10,
     "steps": [
         {"id": "test", "type": "run", "cmd": "pytest -q", "stage": "完了判定", "on_fail": "judge-test",
-         "next": "end"},
+         "next": "pr"},
         {"id": "judge-test", "type": "judge", "inputs": ["test"],
          "question": "テストの失敗を直すか止めるか", "choices": ["fix", "stop"]},
         {"id": "fix", "type": "work", "kind": "修正", "inputs": ["test"],
          "prompt": "失敗したテストを直してコミットする（push しない）", "next": "test"},
+        {"id": "pr", "type": "pr", "stage": "Pull Request", "base": "develop",
+         "title": "変更の要約（#0）", "summary": "何を変えたかの 1〜2 文", "docs": ["issues/issue-0-design.md"],
+         "next": "end"},
     ],
 }
 
