@@ -246,45 +246,32 @@ def _run_added_tests(state: dict[str, Any], intake: Intake) -> None:
             intake.extra.append(fact["sha"])
 
 
-def _intake_phase(
-    state: dict[str, Any], live_predicate: Any, problem_fn: Any,
-    start_key: str, estimate_key: str, intake: Intake,
-) -> Intake:
-    phase = "add-tests" if estimate_key == "test" else "implement"
-    label = "テストの追加" if estimate_key == "test" else "実装"
-    facts = _facts(state, _phase_commits(state, phase))
+def _intake_tests(state: dict[str, Any]) -> Intake:
+    intake = Intake()
+    facts = _facts(state, _phase_commits(state, "add-tests"))
     for fact in facts:
         fact["time"] = commit_time(work_dir(state), fact["sha"])
-    by_item = _group_by_item(state, facts, live_predicate, intake)
+    by_item = _group_by_item(state, facts, lambda item: bool(item.get("tests")), intake)
+    scope = list(state.get("target_scope") or [])
+    tracked = tracked_markdown(work_dir(state))
     for item in live_items(state):
-        if not live_predicate(item):
+        if not item.get("tests"):
             continue
         commits = by_item.get(item["id"]) or []
         if not commits:
-            intake.not_done[item["id"]] = f"{label}の締め切りまでにコミットが無い"
+            intake.not_done[item["id"]] = "テストの追加の締め切りまでにコミットが無い"
             continue
-        problem = problem_fn(item, commits)
+        problem = _test_commit_problem(commits, scope, tracked, state)
         if problem:
             intake.rejected[item["id"]] = problem
-        elif _deadline_passed(item, start_key, estimate_key, commits[0]["time"]):
-            intake.not_done[item["id"]] = f"{label}の完了の締め切りを過ぎてコミットした"
+        elif _deadline_passed(item, "test_start_deadline", "test", commits[0]["time"]):
+            intake.not_done[item["id"]] = "テストの追加の完了の締め切りを過ぎてコミットした"
         else:
             intake.accepted[item["id"]] = commits[0]
             continue
         # 採らないコミットは項目の記録に載らない。取り消しの対象として明示する。
         intake.extra.extend(c["sha"] for c in commits)
     return intake
-
-
-def _intake_tests(state: dict[str, Any]) -> Intake:
-    intake = Intake()
-    scope = list(state.get("target_scope") or [])
-    tracked = tracked_markdown(work_dir(state))
-    return _intake_phase(
-        state, lambda item: bool(item.get("tests")),
-        lambda _item, commits: _test_commit_problem(commits, scope, tracked, state),
-        "test_start_deadline", "test", intake,
-    )
 
 
 def _test_commit_problem(
@@ -372,13 +359,30 @@ def _implement_problem(
 def _intake_implement(state: dict[str, Any]) -> Intake:
     intake = Intake()
     work = work_dir(state)
+    facts = _facts(state, _phase_commits(state, "implement"))
+    for fact in facts:
+        fact["time"] = commit_time(work, fact["sha"])
+    by_item = _group_by_item(state, facts, lambda item: item.get("status") in (PLANNED, TESTED), intake)
     scope = list(state.get("target_scope") or [])
     tracked = tracked_markdown(work)
-    return _intake_phase(
-        state, lambda item: item.get("status") in (PLANNED, TESTED),
-        lambda item, commits: _implement_problem(item, commits, scope, tracked, state),
-        "start_deadline", "implement", intake,
-    )
+    for item in live_items(state):
+        if item.get("status") not in (PLANNED, TESTED):
+            continue
+        commits = by_item.get(item["id"]) or []
+        if not commits:
+            intake.not_done[item["id"]] = "実装の締め切りまでにコミットが無い"
+            continue
+        problem = _implement_problem(item, commits, scope, tracked, state)
+        if problem:
+            intake.rejected[item["id"]] = problem
+        elif _deadline_passed(item, "start_deadline", "implement", commits[0]["time"]):
+            intake.not_done[item["id"]] = "実装の完了の締め切りを過ぎてコミットした"
+        else:
+            intake.accepted[item["id"]] = commits[0]
+            continue
+        # 採らないコミットは項目の記録に載らない。取り消しの対象として明示する。
+        intake.extra.extend(c["sha"] for c in commits)
+    return intake
 
 
 def cmd_merge_implement(args: argparse.Namespace) -> None:
