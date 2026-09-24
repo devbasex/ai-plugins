@@ -136,3 +136,89 @@ def make_state_v2(tmp_path: pathlib.Path, work: pathlib.Path, **overrides: Any) 
 
 def write_state(path: pathlib.Path, state: dict[str, Any]) -> None:
     path.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+# ---------- 版 2 の git を使う結合テストの土台（#933） ----------
+
+CALC = '''def add(a, b):
+    return a + b
+
+
+def total(values):
+    result = 0
+    for v in values:
+        result = add(result, v)
+    return result
+'''
+
+TEST_CALC = '''from src.calc import add
+
+
+def test_add():
+    assert add(1, 2) == 3
+'''
+
+TEST_TOTAL = '''from src.calc import total
+
+
+def test_total():
+    assert total([1, 2, 3]) == 6
+'''
+
+
+def git(*args: str, cwd: Any) -> "subprocess.CompletedProcess[str]":
+    import subprocess
+
+    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True)
+
+
+def commit_with_trailers(repo: pathlib.Path, message: str, trailers: dict[str, str]) -> str:
+    git("add", "-A", cwd=repo)
+    body = message + ("\n\n" + "\n".join(f"{k}: {v}" for k, v in trailers.items()) if trailers else "")
+    git("commit", "-qm", body, cwd=repo)
+    return git("rev-parse", "HEAD", cwd=repo).stdout.strip()
+
+
+def item_trailers(item_id: str) -> dict[str, str]:
+    return {"Item-Id": item_id, "Impl-Runtime": "claude", "Impl-Model": "default"}
+
+
+def build_git_flow(tmp_path: pathlib.Path, monkeypatch: Any, patch_lib: Any,
+                   env_tmp_dir: Any, **state_overrides: Any) -> dict[str, Any]:
+    """書き込み用の作業ディレクトリ・`pytest` の起動口・版 2 の状態を用意する。
+
+    `pytest` は PATH の先頭に置いた起動口で走らせる（限ったテストはシェルを通さずに
+    語の並びで走るため）。公開（push）は差し替え、公開した HEAD を `pushed` に積む。
+    """
+    import os
+    import sys
+
+    work = tmp_path / "work"
+    (work / "src").mkdir(parents=True)
+    (work / "tests").mkdir()
+    git("init", "-q", str(work), cwd=tmp_path)
+    git("config", "user.email", "t@e.st", cwd=work)
+    git("config", "user.name", "test", cwd=work)
+    (work / "src" / "__init__.py").write_text("", encoding="utf-8")
+    (work / "src" / "calc.py").write_text(CALC, encoding="utf-8")
+    (work / "tests" / "test_calc.py").write_text(TEST_CALC, encoding="utf-8")
+    # 内側の pytest が作る報告とキャッシュは追跡しない（作業ツリーを汚さない）。
+    (work / ".gitignore").write_text("__pycache__/\n.pytest_cache/\nreports/\n", encoding="utf-8")
+    commit_with_trailers(work, "init", {})
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    runner = bin_dir / "pytest"
+    runner.write_text(
+        f"#!/bin/sh\nexec {sys.executable} -m pytest -p no:cacheprovider \"$@\"\n", encoding="utf-8")
+    runner.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    metrics = tmp_path / "metrics"
+    monkeypatch.setenv("NDF_METRICS_DIR", str(metrics))
+
+    pushed: list[str] = []
+    patch_lib("push_head", lambda state: pushed.append(
+        git("rev-parse", "HEAD", cwd=state["worktrees"]["work"]).stdout.strip()))
+    path = make_state_v2(tmp_path, work, **state_overrides)
+    env_tmp_dir(path)
+    return {"work": work, "path": path, "pushed": pushed, "metrics": metrics}

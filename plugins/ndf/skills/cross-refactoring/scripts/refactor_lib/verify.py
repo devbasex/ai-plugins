@@ -104,7 +104,7 @@ def verify_commit_trailers(
     return None
 
 
-def _verify_commit_basics(
+def verify_commit_basics(
     commit: dict[str, Any],
     scope: Optional[Iterable[str]],
     missing_reason: str,
@@ -155,7 +155,7 @@ def verify_final_fix_commit(
 
     **対象範囲は見る。** 最終ゲートでも `--scope` の外を触ってよい理由は無い。
     """
-    return _verify_commit_basics(
+    return verify_commit_basics(
         commit,
         scope,
         f"コミット {commit.get('sha', '?')} が最終ゲートの修正の範囲に存在しません",
@@ -174,7 +174,7 @@ def diff_budget_factor(technique: Optional[str]) -> int:
     return DIFF_BUDGET_FACTOR
 
 
-def _verify_diff_budget(
+def verify_diff_budget(
     items: list[dict[str, Any]], facts: list[dict[str, Any]],
 ) -> Optional[str]:
     """実差分が、見積の行数から決まる差分予算に収まっているか。"""

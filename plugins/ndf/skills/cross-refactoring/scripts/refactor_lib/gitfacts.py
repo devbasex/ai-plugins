@@ -575,19 +575,19 @@ def revert_item_commits(
     # 途中で失敗したら**着手前の HEAD まで戻す**。1 項目が複数のコミットを持つとき、
     # 先行して成功した取り消しだけが履歴に残ると、再実行で不整合になって進めなくなる。
     before = git_out(work, ["rev-parse", "HEAD"])
-    _revert_range(work, shas, before, prefix=f"{item['item_id']} の")
+    revert_range(work, shas, before, prefix=f"{item['item_id']} の")
     item["reverted"] = True
     return len(shas)
 
 
-def _reset_hard(work: str, sha: Optional[str]) -> None:
+def reset_hard(work: str, sha: Optional[str]) -> None:
     """着手前の HEAD へ戻す。半端な履歴を Pull Request に残さないための後始末。"""
     if sha:
         subprocess.run(["git", "reset", "--hard", sha], cwd=work,
                        capture_output=True, text=True)
 
 
-def _revert_range(
+def revert_range(
     work: str, ordered: list[str], before: Optional[str], prefix: str = ""
 ) -> None:
     """範囲を**新しい順に**全て取り消す。失敗したら着手前へ戻して中断する。
@@ -603,14 +603,14 @@ def _revert_range(
         if r.returncode != 0:
             subprocess.run(["git", "revert", "--abort"], cwd=work,
                            capture_output=True, text=True)
-            _reset_hard(work, before)
+            reset_hard(work, before)
             die(
                 f"{prefix}コミット {sha} を取り消せませんでした: {r.stderr.strip()[:400]}"
                 f"（HEAD を {before} へ戻しました）"
             )
 
 
-def _replay_commits(work: str, shas: list[str]) -> Optional[dict[str, str]]:
+def replay_commits(work: str, shas: list[str]) -> Optional[dict[str, str]]:
     """残す項目のコミットを**古い順に**積み直し、`{元の SHA: 新しい SHA}` を返す。
 
     競合したら `None` を返す。**ここで中断しない。** どの項目を残せるか決められない

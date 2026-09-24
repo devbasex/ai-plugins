@@ -23,7 +23,7 @@ import statefile
 
 from .. import budget, clock, danger, info
 from ..gitfacts import (
-    _revert_range,
+    revert_range,
     collect_commit_facts,
     commit_files,
     commit_trailers,
@@ -50,7 +50,7 @@ from ..paths import git_out, load_state
 from ..phases import add_phase_seconds, finish_phase
 from ..undo import drop, resume_pending_drop
 from ..verify import (
-    _verify_commit_basics,
+    verify_commit_basics,
     collect_test_changes,
     merge_test_judgements,
     verify_test_changes,
@@ -251,6 +251,12 @@ def cmd_verify(args: argparse.Namespace) -> None:
     終了コード: 0（`VERIFY` で分岐する）/ 4 = 中断（取り消しの失敗など）。
     """
     path, state = load_state(args.id)
+    if state.get("fix"):
+        # **取り込んでいない修正を先に取り込む。** 修正の後に落ちて再開すると、修正の
+        # コミットが項目に結ばれないまま HEAD に残り、検証だけが先に進む。
+        info("↻ 取り込んでいない修正があります。先に取り込みます")
+        cmd_merge_fix(args)
+        path, state = load_state(args.id)
     _prepare(path, state)
     state["phase"] = "verify"
     started = time.monotonic()
@@ -308,7 +314,7 @@ def _fix_problems(
         if item_id not in allowed:
             problems.append(f"コミット {fact['sha'][:7]} の Item-Id（{item_id or 'なし'}）は修正の対象ではありません")
             continue
-        problem = _verify_commit_basics(fact, scope, "コミットが範囲にありません", check_test=False)
+        problem = verify_commit_basics(fact, scope, "コミットが範囲にありません", check_test=False)
         problem = problem or verify_test_changes(collect_test_changes([fact]))
         if problem:
             problems.append(problem)
@@ -346,7 +352,7 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
             info(f"❌ {problem}")
         state["pending_push"] = True
         statefile.save(path, state)
-        _revert_range(work, ordered, head)
+        revert_range(work, ordered, head)
         info(f"↩ 修正の範囲 {len(ordered)} コミットを取り消しました")
     elif ordered:
         for sha in reversed(ordered):

@@ -49,8 +49,8 @@ from ..paths import git_out, load_state
 from ..phases import finish_phase
 from ..undo import drop, resume_pending_drop
 from ..verify import (
-    _verify_commit_basics,
-    _verify_diff_budget,
+    verify_commit_basics,
+    verify_diff_budget,
     collect_test_changes,
     doc_wording_tests,
     pending_test_judgements,
@@ -209,6 +209,7 @@ def _run_added_tests(state: dict[str, Any], intake: Intake) -> None:
             results[key] = (not timed_out) and code == 0
         if not results[key]:
             intake.test_failed[item_id] = f"足したテストが今のコードで通りません（{' '.join(words)}）"
+            intake.extra.append(fact["sha"])
 
 
 def _intake_tests(state: dict[str, Any]) -> Intake:
@@ -233,6 +234,9 @@ def _intake_tests(state: dict[str, Any]) -> Intake:
             intake.not_done[item["id"]] = "テストの追加の完了の締め切りを過ぎてコミットした"
         else:
             intake.accepted[item["id"]] = commits[0]
+            continue
+        # 採らないコミットは項目の記録に載らない。取り消しの対象として明示する。
+        intake.extra.extend(c["sha"] for c in commits)
     return intake
 
 
@@ -245,7 +249,7 @@ def _test_commit_problem(
     if len(commits) > 1:
         return f"テストの追加が {len(commits)} コミットあります（1 項目 = 1 コミット）"
     commit = commits[0]
-    problem = _verify_commit_basics(commit, scope, "コミットが範囲にありません", check_test=False)
+    problem = verify_commit_basics(commit, scope, "コミットが範囲にありません", check_test=False)
     if problem:
         return problem
     others = [f for f in commit.get("files") or [] if not is_test_path(f)]
@@ -296,7 +300,7 @@ def _implement_problem(
     """実装のコミットが手順を満たすか。適用の検査（v10.17.x）を項目の単位で掛ける。"""
     if len(commits) > 1:
         return f"実装が {len(commits)} コミットあります（1 改善項目 = 1 コミット）"
-    problem = _verify_commit_basics(commits[0], scope, "コミットが範囲にありません", check_test=False)
+    problem = verify_commit_basics(commits[0], scope, "コミットが範囲にありません", check_test=False)
     if problem:
         return problem
     problem = verify_test_changes(collect_test_changes(commits))
@@ -305,7 +309,7 @@ def _implement_problem(
     hits = doc_wording_tests(commits, tracked, str(state["worktrees"]["work"]))
     if hits:
         return "文書の文言を固定するテストは足さない（" + "、".join(f"{p}: {l}" for p, l in hits) + "）"
-    return _verify_diff_budget([item], commits)
+    return verify_diff_budget([item], commits)
 
 
 def _intake_implement(state: dict[str, Any]) -> Intake:
@@ -331,6 +335,9 @@ def _intake_implement(state: dict[str, Any]) -> Intake:
             intake.not_done[item["id"]] = "実装の完了の締め切りを過ぎてコミットした"
         else:
             intake.accepted[item["id"]] = commits[0]
+            continue
+        # 採らないコミットは項目の記録に載らない。取り消しの対象として明示する。
+        intake.extra.extend(c["sha"] for c in commits)
     return intake
 
 

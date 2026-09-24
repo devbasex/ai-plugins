@@ -1,6 +1,6 @@
-"""担当の決定（ホスト判定 / 母集合の既定 / 輪番 / 席）のテスト。
+"""担当の決定（ホスト判定 / 母集合の既定 / 実装担当 / 席）のテスト。
 
-cross-refactoring は提案と適用を 1 つの参加者の一覧で回し（#727 の決定 5）、
+cross-refactoring は提案を参加者の全員が、計画以降を実装担当 1 者が通し（#933 の決定 1）、
 cross-review は claude / codex / kiro とホストの母集合（ホストが agy なら 4 者）から 2 席を決める。母集合の既定は Skill ごとに違う。
 """
 from __future__ import annotations
@@ -78,42 +78,54 @@ def test_no_runtime_is_excluded_from_applying(assignment):
     assert not hasattr(assignment, "IMPL_EXCLUDED")
 
 
-# ---------- 適用の輪番（cross-refactoring） ----------
+# ---------- 実装担当（cross-refactoring。#933 の決定 1） ----------
 
 @pytest.mark.parametrize("host", HOSTS)
-def test_every_participant_implements_within_one_cycle(assignment, host):
-    """参加者の数のラウンドで、参加者が 1 度ずつ適用担当になる（#727 の決定 7）。"""
+def test_the_host_implements_when_it_participates(assignment, host):
+    """名指しが無ければ、参加者にいるホストが実装担当になる。"""
     participants = assignment.refactor_pool(host)
-    impls = [assignment.impl_assign(r, participants) for r in range(1, len(participants) + 1)]
-    assert sorted(impls) == sorted(participants)
+    assert assignment.choose_implementer(participants, host) == (host, "host")
 
 
-@pytest.mark.parametrize("host", HOSTS)
-def test_the_host_does_not_implement_first(assignment, host):
-    """ラウンド 1 は参加者の 2 番目から始まる。ホストが最初に適用する形にならない。"""
-    participants = assignment.refactor_pool(host)
-    if participants[0] == host:
-        assert assignment.impl_assign(1, participants) != host
+def test_the_first_participant_implements_when_the_host_is_out(assignment):
+    """ホストが参加者にいなければ（外した場合）、参加者の先頭が実装担当になる。"""
+    assert assignment.choose_implementer(["codex", "kiro"], "claude") == ("codex", "first")
 
 
-@pytest.mark.parametrize("host", HOSTS)
-def test_assignment_is_deterministic(assignment, host):
-    """再開しても担当が変わらないこと（同じ入力なら同じ結果）。"""
-    participants = assignment.refactor_pool(host)
-    for round_no in range(1, 13):
-        assert assignment.impl_assign(round_no, participants) == \
-            assignment.impl_assign(round_no, participants)
+def test_a_named_implementer_wins_over_the_host(assignment):
+    assert assignment.choose_implementer(
+        ["claude", "codex", "kiro"], "claude", "kiro") == ("kiro", "named")
 
 
-def test_round_number_must_be_positive(assignment):
+def test_a_named_implementer_outside_the_participants_is_rejected(assignment):
+    """AC21 — 誰が実装したかが指定と食い違うため、代わりの者を選ばずに止める。"""
     with pytest.raises(assignment.AssignmentError):
-        assignment.impl_assign(0, ["claude", "codex", "kiro"])
+        assignment.choose_implementer(["claude", "codex", "kiro"], "claude", "agy")
+
+
+def test_no_participant_cannot_choose_an_implementer(assignment):
+    with pytest.raises(assignment.AssignmentError):
+        assignment.choose_implementer([], "claude")
+
+
+@pytest.mark.parametrize("host", HOSTS)
+def test_the_implementer_is_deterministic(assignment, host):
+    """再開しても担当が変わらないこと（同じ入力なら同じ結果。状態に依らない）。"""
+    participants = assignment.refactor_pool(host)
+    assert assignment.choose_implementer(participants, host) == \
+        assignment.choose_implementer(list(participants), host)
+
+
+def test_the_rotation_is_gone(assignment):
+    """輪番は持たない。1 回の実行を同じ 1 者が通す（#933 の決定 1）。"""
+    assert not hasattr(assignment, "impl_assign")
+    assert not hasattr(assignment, "impl_for_seq")
 
 
 # ---------- 固定の順（#214） ----------
 
-# `gemini` があった位置へ `agy` を入れた（#214）。並べ替えると同じラウンド番号でも
-# 担当が変わり、これまでの記録と突き合わせられなくなる。
+# `gemini` があった位置へ `agy` を入れた（#214）。並べ替えると、母集合の並びと
+# 実装担当の「参加者の先頭」、レビューの席が変わり、これまでの記録と突き合わせられなくなる。
 
 
 def test_the_participant_list_keeps_the_replaced_position(assignment):

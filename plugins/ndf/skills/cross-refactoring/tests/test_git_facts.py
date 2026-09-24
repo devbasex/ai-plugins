@@ -394,12 +394,12 @@ def test_revert_item_commits_failure_message_includes_item_id(gitfacts, work, ca
 
 
 def test_revert_range_failure_message_has_no_item_id_prefix(gitfacts, work, capsys):
-    """現状固定: _revert_range 失敗時は項目 ID 接頭辞のないエラー文を出して中断する。"""
+    """現状固定: revert_range 失敗時は項目 ID 接頭辞のないエラー文を出して中断する。"""
     first = _commit(work, "one", {"src/a.py": "a = 1\n"})
     second = _commit(work, "two", {"src/a.py": "a = 2\n"})
 
     with pytest.raises(SystemExit) as e:
-        gitfacts._revert_range(str(work), [first], second)
+        gitfacts.revert_range(str(work), [first], second)
 
     assert e.value.code == 4
     err = capsys.readouterr().err

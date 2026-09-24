@@ -10,89 +10,23 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
-import pathlib
-import subprocess
-import sys
 
 import pytest
 
-from crossref_helpers import make_state_v2, read_state, write_result, write_state
-
-CALC = '''def add(a, b):
-    return a + b
-
-
-def total(values):
-    result = 0
-    for v in values:
-        result = add(result, v)
-    return result
-'''
-
-TEST_CALC = '''from src.calc import add
-
-
-def test_add():
-    assert add(1, 2) == 3
-'''
-
-TEST_TOTAL = '''from src.calc import total
-
-
-def test_total():
-    assert total([1, 2, 3]) == 6
-'''
-
-
-def _git(*args, cwd):
-    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True)
-
-
-def _commit(repo, message, trailers):
-    _git("add", "-A", cwd=repo)
-    body = message + "\n\n" + "\n".join(f"{k}: {v}" for k, v in trailers.items())
-    _git("commit", "-qm", body, cwd=repo)
-    return _git("rev-parse", "HEAD", cwd=repo).stdout.strip()
-
-
-def _trailers(item_id):
-    return {"Item-Id": item_id, "Impl-Runtime": "claude", "Impl-Model": "default"}
+from crossref_helpers import (
+    CALC,
+    build_git_flow,
+    TEST_TOTAL,
+    commit_with_trailers as _commit,
+    item_trailers as _trailers,
+    read_state,
+    write_result,
+)
 
 
 @pytest.fixture
 def flow(tmp_path, monkeypatch, refactor, patch_lib, env_tmp_dir):
-    """書き込み用の作業ディレクトリ・`pytest` の起動口・版 2 の状態を用意する。"""
-    work = tmp_path / "work"
-    (work / "src").mkdir(parents=True)
-    (work / "tests").mkdir()
-    _git("init", "-q", str(work), cwd=tmp_path)
-    _git("config", "user.email", "t@e.st", cwd=work)
-    _git("config", "user.name", "test", cwd=work)
-    (work / "src" / "__init__.py").write_text("", encoding="utf-8")
-    (work / "src" / "calc.py").write_text(CALC, encoding="utf-8")
-    (work / "tests" / "test_calc.py").write_text(TEST_CALC, encoding="utf-8")
-    (work / ".gitignore").write_text("__pycache__/\n.pytest_cache/\nreports/\n", encoding="utf-8")
-    _commit(work, "init", {})
-
-    # `pytest` を既知の実行器として走らせる。**シェルを通さない**（AC10b）ため、PATH に置く。
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    runner = bin_dir / "pytest"
-    runner.write_text(f"#!/bin/sh\nexec {sys.executable} -m pytest -p no:cacheprovider \"$@\"\n",
-                      encoding="utf-8")
-    runner.chmod(0o755)
-    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
-    metrics = tmp_path / "metrics"
-    monkeypatch.setenv("NDF_METRICS_DIR", str(metrics))
-    monkeypatch.delenv("AI_GATEWAY_API_KEY", raising=False)
-
-    pushed = []
-    patch_lib("push_head", lambda state: pushed.append(
-        _git("rev-parse", "HEAD", cwd=state["worktrees"]["work"]).stdout.strip()))
-    path = make_state_v2(tmp_path, work)
-    env_tmp_dir(path)
-    return {"work": work, "path": path, "pushed": pushed, "metrics": metrics}
+    return build_git_flow(tmp_path, monkeypatch, patch_lib, env_tmp_dir)
 
 
 def _call(refactor_module, name, **kwargs):

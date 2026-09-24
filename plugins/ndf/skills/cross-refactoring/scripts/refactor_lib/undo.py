@@ -29,9 +29,9 @@ import statefile
 
 from . import info
 from .gitfacts import (
-    _reset_hard,
-    _replay_commits,
-    _revert_range,
+    reset_hard,
+    replay_commits,
+    revert_range,
     commit_files,
     commits_in_range,
 )
@@ -72,11 +72,11 @@ def _attempt(
     競合したときは HEAD を `before`（取り消しの前）へ戻してから返す。呼び出し側が
     広げた範囲でやり直せるようにするためである。
     """
-    _revert_range(work, ordered, before)
+    revert_range(work, ordered, before)
     replay = [s for s in reversed(ordered) if owner.get(s) in keep]
-    mapping = _replay_commits(work, replay)
+    mapping = replay_commits(work, replay)
     if mapping is None:
-        _reset_hard(work, before)
+        reset_hard(work, before)
     return mapping
 
 
@@ -111,6 +111,13 @@ def drop(
     base = (state.get("plan") or {}).get("base_sha")
     targets = [i for i in item_ids
                if (find_item(state, i, required=False) or {}).get("status") in LIVE]
+    # **コミットを持たない項目は git を触らずに閉じる。** 範囲を逆再生して積み直すと、
+    # 残す項目の SHA が変わるだけで木は変わらない。
+    for item_id in [i for i in targets if not item_shas(find_item(state, i))]:
+        item = find_item(state, item_id)
+        item["status"] = REVERTED
+        item.setdefault("failure_reason", reason)
+        targets.remove(item_id)
     extra = {_full(work, s) for s in extra_shas}
     if not targets and not extra:
         return {"mode": "skip", "dropped": [], "reverted_commits": 0, "replayed": 0}
@@ -145,7 +152,7 @@ def drop(
         info("⚠ 積み直しが競合したため、計画の項目をすべて取り消します")
         dropped = set(live)
         mode = "all"
-        _revert_range(work, ordered, head)
+        revert_range(work, ordered, head)
         mapping = {}
 
     _remap(state, work, mapping)

@@ -140,3 +140,18 @@ def env_tmp_dir(monkeypatch):
     def _set(state_path: pathlib.Path) -> None:
         monkeypatch.setenv("CROSS_REFACTORING_TMP_DIR", str(state_path.parent))
     return _set
+
+
+@pytest.fixture(autouse=True)
+def _isolate_outside_world(tmp_path, monkeypatch):
+    """テストの外へ届く 2 つを、テストごとに塞ぐ（#933）。
+
+    - **Jev の鍵を外す。** 鍵を持つ環境（devbase）で走らせると、`init` と計画が実際の
+      Vercel AI Gateway へ問い合わせる。Jev を使う経路のテストは偽の応答を差し込む
+    - **配分の履歴と実行の要約の置き場所を、このテストの一時ディレクトリへ向ける。**
+      根の `conftest.py` もセッションの一時ディレクトリへ向けるが、テストどうしで
+      履歴が混ざると集計のテストが順序に依存する。利用者の `~/.local/state` へは
+      どちらの場合も書かない（#938）
+    """
+    monkeypatch.delenv("AI_GATEWAY_API_KEY", raising=False)
+    monkeypatch.setenv("NDF_METRICS_DIR", str(tmp_path / "ndf-metrics"))

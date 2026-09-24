@@ -754,7 +754,13 @@ def _notify_view(
     """
     view = dict(state)
     view["baseline_test"] = (state.get("baseline_test") or {}).get("command")
-    view["round_test"] = (state.get("round_test") or {}).get("command")
+    # 範囲のテストを省いた（または全体のテストと同じ文字列だった）実行は `None` を持つ。
+    # 同じ文字列を渡し直した再開を「違う」と知らせないため、全体のテストと同じなら同じと読む。
+    recorded = (state.get("round_test") or {}).get("command")
+    given_round = getattr(args, "round_test", None)
+    if recorded is None and given_round == view["baseline_test"]:
+        recorded = given_round
+    view["round_test"] = recorded
     given = argparse.Namespace(**{f.arg: getattr(args, f.arg, None) for f in RESUME_NOTIFY_FIELDS})
     if given.model is not None:
         given.model = model_spec
