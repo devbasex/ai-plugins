@@ -13,7 +13,7 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
 | pr    | push して Draft の Pull Request を作る（スクリプト）。本文は材料（計画の値・コミット・変更の統計・run の結果・設計文書）から LLM が書く。`"body": "template"` なら材料をそのまま本文にする | 本文だけTool なし |
 
 使い方:
-    supervise.py run <plan.json> [--state-dir DIR]
+    supervise.py run <plan.json> [--state-dir DIR] [--from <段の id>]
     supervise.py example            # 計画の例を出す
 
 計画（JSON）:
@@ -174,10 +174,18 @@ class Supervisor:
         self.llm["cost"] += res.get("cost") or 0.0
 
     def next_of(self, sid: str, step: dict) -> str | None:
+        """成功したときの次の段。`next` が無ければ並びの次へ進むが、失敗したときにだけ通る段
+        （どこかの `on_fail` が指す段と、そこから `next` で戻る段）は飛ばす。"""
         if step.get("next"):
             return None if step["next"] == "end" else step["next"]
-        i = self.order.index(sid)
-        return self.order[i + 1] if i + 1 < len(self.order) else None
+        fail_only = {s["on_fail"] for s in self.steps.values() if s.get("on_fail")}
+        fail_only |= {s["id"] for s in self.steps.values()
+                      if s["type"] == "work" and s.get("next") in self.steps and s.get("inputs")
+                      and any(self.steps.get(i, {}).get("on_fail") for i in s["inputs"])}
+        i = self.order.index(sid) + 1
+        while i < len(self.order) and self.order[i] in fail_only:
+            i += 1
+        return self.order[i] if i < len(self.order) else None
 
     # --- 段 ---
     def do_run(self, step: dict) -> tuple[bool, str]:
@@ -287,8 +295,8 @@ class Supervisor:
         return d
 
     # --- 駆動 ---
-    def run(self) -> str:
-        sid = self.order[0]
+    def run(self, start: str | None = None) -> str:
+        sid = start or self.order[0]
         result, reason = "完了", "無し"
         limit = self.plan.get("上限", 30)
         n = 0
@@ -382,6 +390,7 @@ def main() -> int:
     r = sub.add_parser("run")
     r.add_argument("plan")
     r.add_argument("--state-dir")
+    r.add_argument("--from", dest="start", help="この段から始める（途中から再開するとき）")
     sub.add_parser("example")
     a = ap.parse_args()
     if a.cmd == "example":
@@ -390,7 +399,7 @@ def main() -> int:
     plan = json.loads(Path(a.plan).read_text())
     state = Path(a.state_dir) if a.state_dir else Path(a.plan).parent / (
         Path(a.plan).stem + "-state")
-    text = Supervisor(plan, state).run()
+    text = Supervisor(plan, state).run(a.start)
     print(text)
     return 0 if "結果: 完了" in text or "結果: 関門" in text else 3
 
