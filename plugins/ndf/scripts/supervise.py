@@ -36,6 +36,8 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
 パートに分ける: work の段に `"parts": [{"name": ..., "files": [...]}, ...]` を書くと、パートごとに
 新しい文脈の claude -p の段（`<id>-1`, `<id>-2`, ...）へ展開する。大きな実装は分けて書く。
 
+Serena: work の段に `"serena": true` を書くと Serena の MCP だけを載せる（大きなコードを何度も読む実装向け）。
+
 段ごとの作業場所: run と work の段に `"cwd"` を書くと、その段だけ別の場所で動く（取り込みで PR ごとに
 作業ツリーが違うとき）。
 
@@ -60,13 +62,24 @@ import time
 from pathlib import Path
 
 WORK_TOOLS = "Read,Edit,Write,Bash,Grep,Glob"
+# work の段に載せる MCP は Serena だけ（mcp-serena の .mcp.json と同じ起動）。シンボル単位で読み・直し、
+# 大きなファイルの全文を読まずに済ませる。Tool の定義で起動の固定費が約 1.1 万増える（実測: 1 関数の修正で
+# $0.047 → $0.131）ため既定では載せず、段に "serena": true を書いたときだけ載せる
+SERENA_MCP = {"mcpServers": {"serena": {
+    "type": "stdio", "command": "uvx",
+    "args": ["--from", "serena-agent==1.7.0", "serena", "start-mcp-server", "--context", "claude-code",
+             "--project-from-cwd", "--add-mode", "no-memories", "--add-mode", "no-onboarding",
+             "--enable-web-dashboard", "False"],
+    "env": {"SERENA_HOME": ".serena"}}}}
 FULL_TOOLS = "Read,Edit,Write,Bash,Grep,Glob,Skill,Agent,Monitor,SendMessage,ToolSearch"
 TAIL = 6000  # LLM へ渡す出力の末尾の文字数
 
 WORK_SYSTEM = """あなたは NDF の worker である。1 つの作業だけを行う。
 - 人間へ問わない。別のサブエージェントを起動しない。進行を記録しない
 - 作業場所の外を触らない。push しない
-- ファイルは全文を読まない。grep -n で位置を探し、Read の offset / limit で要る範囲だけを読む
+- Serena の Tool（mcp__serena__*）があれば、コードはシンボル単位（get_symbols_overview / find_symbol /
+  replace_symbol_body など）で読み・直す。Serena の memory と onboarding は使わない
+- それ以外のファイルは全文を読まない。grep -n で位置を探し、Read の offset / limit で要る範囲だけを読む
   （200 行未満のファイルと、これから書き換える関数の周りは除く）。同じ範囲を読み直さない
 - テストや検査の出力は、失敗した箇所と要約だけを読む（`| tail`・`-q`・`--tb=short`）
 - 判断が要るときは、作業をせずに「結果: 判断が要る」と理由を書いて終える
@@ -100,7 +113,8 @@ JUDGE_SYSTEM = """あなたは NDF の持ち場の判断だけを行う。Tool �
 答えは JSON 1 つだけを返す: {"decision": "<選んだ値>", "reason": "<1 行>"}"""
 
 
-def claude_cmd(system: str, tools: str | None, cwd: str, full: bool = False) -> list[str]:
+def claude_cmd(system: str, tools: str | None, cwd: str, full: bool = False,
+               serena: bool = False) -> list[str]:
     base = shlex.split(os.environ.get("NDF_SUPERVISE_CLAUDE", "claude"))
     if full:
         # Skill を回す段（cross-review など）。設定・プラグイン・Skill・hook をそのまま読む
@@ -114,7 +128,11 @@ def claude_cmd(system: str, tools: str | None, cwd: str, full: bool = False) -> 
         "--system-prompt", system,
     ]
     if tools:
-        cmd += ["--tools", tools, "--allowed-tools", tools, "--permission-mode", "acceptEdits",
+        allowed = tools
+        if serena:
+            cmd += ["--mcp-config", json.dumps(SERENA_MCP)]
+            allowed += ",mcp__serena"
+        cmd += ["--tools", tools, "--allowed-tools", allowed, "--permission-mode", "acceptEdits",
                 "--add-dir", cwd]
     else:
         cmd += ["--tools", ""]
@@ -125,11 +143,11 @@ def claude_cmd(system: str, tools: str | None, cwd: str, full: bool = False) -> 
 
 
 def call_claude(system: str, prompt: str, tools: str | None, cwd: str, timeout: int,
-                full: bool = False) -> dict:
+                full: bool = False, serena: bool = False) -> dict:
     """claude -p を 1 回呼び、結果の本文と使用量を返す（既定は最小構成）。"""
     started = time.time()
     try:
-        p = subprocess.run(claude_cmd(system, tools, cwd, full), input=prompt, capture_output=True,
+        p = subprocess.run(claude_cmd(system, tools, cwd, full, serena), input=prompt, capture_output=True,
                            text=True, cwd=cwd, timeout=timeout)
     except subprocess.TimeoutExpired:
         return {"ok": False, "text": f"打ち切り（{timeout} 秒）", "usage": {}, "seconds": timeout}
@@ -281,7 +299,7 @@ class Supervisor:
             prompt = step["prompt"]
         res = call_claude(FULL_SYSTEM if step.get("full") else WORK_SYSTEM, prompt, WORK_TOOLS,
                           step.get("cwd", self.cwd), step.get("timeout", 1800),
-                          full=bool(step.get("full")))
+                          full=bool(step.get("full")), serena=bool(step.get("serena")))
         self.add_usage("work", res)
         self.cur.update(exit=0 if res["ok"] else 1, text=res["text"], seconds=res["seconds"])
         return res["ok"], res["text"]
