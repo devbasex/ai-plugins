@@ -6,6 +6,16 @@
 
 ## 例: このリポジトリで導入の Skill を 1 回通すと
 
+**この Skill はプロジェクト（リポジトリ）ごとに実行しなければならない。** プラグインを入れただけでは、どのリポジトリでも言語サーバは設定されない。言語の設定（`.serena/project.yml`）はリポジトリごとに持つためで、利用者（マシン・コンテナ）単位で 1 回打てば済むものではない。
+
+| 何が | 単位 | いつ |
+| --- | --- | --- |
+| この Skill の実行（言語の検出・`project.yml` の書き込み・1 言語ずつの起動の検証） | **プロジェクト** | リポジトリごとに最初の 1 回。以後は SessionStart の通知が食い違い（設定に無い言語・欠けた LSP）を知らせたときに打ち直す |
+| `project.yml` を追跡するか | プロジェクト | この Skill が利用者に聞く。追跡すれば、同じリポジトリの他の利用者は打たずに同じ設定を使える（言語サーバの本体は各自に要る） |
+| 言語サーバの本体と Claude Code の LSP プラグインの導入 | 利用者（マシン・コンテナ） | この Skill は欠けを検査して導入のコマンドを示すだけで、自分では入れない |
+
+この Skill を打っていないリポジトリでは、誘導の hook は何も数えない（「hook の振る舞い」）。この要件は Skill の本文の冒頭・mcp-serena の README・SessionStart の通知の文の 3 箇所に書く。
+
 `/mcp-serena:language-servers` を実行すると、Skill は次の 3 行を順に打ち、出力を読んで判断だけをする。
 
 ```bash
@@ -383,6 +393,7 @@ Skill は Claude Code・Codex・Kiro へ同じファイルを配る。`${CLAUDE_
 | 3 | `.kiro/skills/language-servers` の 2 つ上 | Kiro（installer の symlink） |
 
 - 候補は `cd -P` で実体へ解決してから 2 つ上がる（symlink のまま上がると `.kiro/` を指す）。`scripts/serena-lsp.py` がある最初の候補を採り、どれも当たらなければ止まる
+- **冒頭に「プロジェクト（リポジトリ）ごとに実行する。利用者単位で 1 回ではない」と書く**（「例」の表）
 - 打つ順は「例」の 3 行。`serena_gitignore_added` が空でなければ確認を取り、`--serena-gitignore` をつけて打ち直す
 - `configure` は言語の数 × 120 秒かかり得るため、Bash ツールの上限を指定して打つ（Claude Code は `timeout` に 600000）
 - `language_servers` が変わったら、Serena の再接続を示す（Claude Code は `/mcp` の再接続かセッションのやり直し、Codex はセッションのやり直し）。起動中の Serena は起動時の `project.yml` の言語で動いている
