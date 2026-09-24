@@ -63,7 +63,7 @@
 
 | 要素 | 責務 |
 | --- | --- |
-| `plugins/ndf/scripts/relay.py` | 中継の本体。副命令 `run` / `stop` / `mark`、導入の `install` / `uninstall` / `status` / `startup`、質問の印の `question`、文脈量の hook と `/ndf:restart` が使う `is-child` を持つ。標準ライブラリだけで書く |
+| `plugins/ndf/scripts/relay.py` | 中継の本体。副命令 `run` / `stop` / `mark`、導入の `install` / `uninstall` / `status` / `startup`、質問の印の `question`、中継の直接の子かを返す `is-child`、文脈量の hook と `/ndf:restart` と conductor が使う区間の切れ目の告知 `notice`（[ndf-relay-segment-notice.md](ndf-relay-segment-notice.md)）を持つ。標準ライブラリだけで書く |
 | `plugins/ndf/hooks/claude.json` の `Stop` | `NDF_RELAY_DIR` があるときだけ `python3 <root>/scripts/relay.py mark` を呼ぶ（既存の Slack 通知の後、`timeout` 5 秒、`continueOnError: true`）。無ければ `python3` を起こさない |
 | `plugins/ndf/hooks/claude.json` の `SessionStart`（`matcher: startup\|resume`） | 写しか記録があるときだけ `relay.py startup` を呼ぶ。シェルの設定は書かない（[導入の仕様](ndf-relay-install-and-restart.md)） |
 | `plugins/ndf/hooks/claude.json` の `PreToolUse` / `PostToolUse`（`matcher: AskUserQuestion`） | `NDF_RELAY_DIR` があるときだけ `relay.py question open` / `close` を呼ぶ（`timeout` 10 秒） |
@@ -128,7 +128,7 @@ graph TB
 | 文脈の上限は既存の文脈量の hook が作り、中継の下では 1 度の通しをやめる | 上限の値と読み方を 1 つにし、測る側と止める側を食い違わせない。人の居ない前提で LLM が「続ける」と決めると上限を超えたまま進む。Stop hook で上限を見て応答を続けさせると、文で尋ねた関門まで承認の前に切る |
 | 背景の処理が動いている Stop では印を書かない。判定は `background_tasks` の `status: running` だけで行う | 動いているあいだに切ると、その処理（supervisor を含む）が子の claude と一緒に終わる。背景の Bash もサブエージェントも同じ形で載る。conductor が自分で数えると数え違えて子を失う |
 | 次の区間の中身は `/goal` を含めたまま位置引数 1 つで渡す | `/goal ...` の複数行の位置引数でも、改行ごと 1 つの条件として目標が設定される |
-| 文脈量の hook は `relay.py is-child` で中継の直接の子かを見る | bash の hook に親のたどりを写すと、2 つの実装が食い違う |
+| 文脈量の hook は `relay.py notice` の 1 行目（`is-child` と同じ判定）で中継の直接の子かを見る | bash の hook に親のたどりを写すと、2 つの実装が食い違う |
 | 質問が表示されているあいだと、印の後に応答が再開したあいだは子の端末へ書かない。`/exit` と改行は質問の hook と同じロックの中で 1 回の write で書く（#928） | 質問の表示中に書いた `\r` は選択肢 1 を決める（実測）。10.17.6 までの 1 秒あけた `/exit` と `\r` のあいだに質問が出ると、`\r` が答えになる（[導入の仕様](ndf-relay-install-and-restart.md)の「関門を越えない守り」） |
 | 待ちの秒数と打ち切りはすべて環境変数で短くできる | 擬似端末の上の単体テストを数十秒で終える |
 
@@ -165,7 +165,8 @@ graph TB
 | `stop` | 無し | 0: 動いている中継に停止の印を置いた（1 つ以上）/ 1: 動いている中継が無い | 置いた中継の pid を 1 行ずつ |
 | `mark` | 標準入力に Stop hook の JSON | 常に 0 | 無し |
 | `install` / `uninstall` / `status` / `startup` / `question` | [導入の仕様](ndf-relay-install-and-restart.md)の副命令の表 | 同左 | 同左 |
-| `is-child` | 無し（内部用。`relay.md` に載せない。`/ndf:restart` が呼ぶ） | 0: 中継が動いていて、呼んだ claude が中継の直接の子 / 1: それ以外 | 無し |
+| `is-child` | 無し（内部用。`relay.md` に載せない） | 0: 中継が動いていて、呼んだ claude が中継の直接の子 / 1: それ以外 | 無し |
+| `notice` | 無し（内部用。文脈量の hook・`/ndf:restart`・conductor が呼ぶ） | 常に 0 | 1 行目 `relay` / `outside`（`is-child` と同じ判定）、2 行目に告知の 1 文。[告知の仕様](ndf-relay-segment-notice.md)の契約の表 |
 
 副命令が無い・知らない副命令は、使い方を標準エラーへ出して終了コード 2 で終わる。
 
@@ -291,7 +292,7 @@ stateDiagram-v2
 | 誰が | 何をする |
 | --- | --- |
 | 文脈量の hook | conductor が工程へ入る起動（工程 Skill・持ち場の Agent）で上限を超えていれば止める。これが「前の持ち場の報告を受け取った後で、次の持ち場を起動する前」の切りの良いところに当たる |
-| 文脈量の hook（中継の下） | `NDF_RELAY_DIR` があり、上限を超えていて、`relay.py is-child` が 0 なら、同じ起動の 1 度の通しをしない。理由の欄は「新しい持ち場を起動せず、動いている supervisor の報告を待ち、引継ぎ文書を更新し、`ndf-next` のブロックを出して終える」を示す。中継の外では今までどおり 1 度だけ通す |
+| 文脈量の hook（中継の下） | `NDF_RELAY_DIR` があり、上限を超えていて、`relay.py notice` の 1 行目が `relay` なら、同じ起動の 1 度の通しをしない。理由の欄は「新しい持ち場を起動せず、動いている supervisor の報告を待ち、引継ぎ文書を更新し、`ndf-next` のブロックを出して終える」と、ブロックの直前に書く `notice` の 2 行目、承認や確認を挟まないことを示す。中継の外では今までどおり 1 度だけ通す |
 | conductor | 背景の supervisor の報告をすべて受け取ってから、引継ぎ文書（`/goal` の指示が名指ししたもの。無ければ書かない）を更新し、ブロックを出して終える。中身は `/goal /ndf:development-workflow #<課題>`、名指しの引継ぎ文書があれば「<文書> の続きから」 |
 | Stop hook と中継 | 背景の処理が残っていれば印を書かない。すべて終わった後の Stop で印が書かれ、中継がほかの切れ目と同じく次の区間を起動する |
 

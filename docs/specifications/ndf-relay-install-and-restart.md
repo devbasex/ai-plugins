@@ -95,7 +95,7 @@
 | `NDF_RELAY_AUTO` を読まない | hook の自動の導入を止める変数で、意味が無くなった。明示の `install` に効かせると、置いたままの利用者が打っても何も起きない |
 | 再起動は `ndf-next` のブロックと既存の中継の経路で行い、中継に「今すぐ再起動」の副命令を足さない | 同じ経路なら、答え待ち・背景の処理・目標の判定・静まり・上限・空回りと守りがそのまま効く。Skill の Bash から中継へ直接送ると、応答を終える前に `/exit` が入る |
 | `/ndf:restart` はモデルも起動できる | 中継の下で起きることは conductor が切れ目で出すブロックと同じで、新しい権限を足さない |
-| 中継の下かは `relay.py is-child` で決める。`NDF_RELAY_DIR` の有無だけでは決めない | conductor が Bash から起こした `claude -p` も `NDF_RELAY_DIR` を継ぐ。`mark` と判定をそろえ、ブロックを出したのに切り替わらない状態を作らない |
+| 中継の下かは `relay.py notice` の 1 行目（`is-child` と同じ判定）で決める。`NDF_RELAY_DIR` の有無だけでは決めない | conductor が Bash から起こした `claude -p` も `NDF_RELAY_DIR` を継ぐ。`mark` と判定をそろえ、ブロックを出したのに切り替わらない状態を作らない |
 | 中継の外の `/ndf:restart` は、シェルの 1 行（`claude "..."`）ではなく貼り付ける中身を示す | 再開用のコマンドは引用符・`$(...)`・改行を含みうる。シェルへ貼ると引用が壊れて別のコマンドが動きうる |
 | 再開用のコマンドに承認・同意・判断の結果を書かない | 次の区間の claude はそれを人の入力として読むため、関門を越える経路になる。承認は課題の本文と Pull Request から次の区間が読み直す |
 | 関門を越えない守り（G1〜G3）は、送り込みを待たずに既存の `/exit` に入れる | 質問の表示中に中継が書いた `\r` が選択肢 1 を決めると実測で分かった。10.17.4〜10.17.6 の切れ目の `/exit` にも経路があり、`/ndf:restart` はそれを利用者が打てる形で増やす |
@@ -259,13 +259,13 @@ sh -c 'R="${XDG_STATE_HOME:-$HOME/.local/state}/ndf/relay/rc-added"; C="${XDG_DA
 | `install-wrapper` | `argument-hint: "install \| uninstall \| status"`・`disable-model-invocation: true`・`allowed-tools: [Bash]` | 無し・`install` → `install`、`uninstall`・`status` はそのまま。それ以外は使い方を示して何もしない。`relay.py` を 1 回だけ実行し、出力と終了コードをそのまま示す |
 | `restart` | `argument-hint: "[再開用のコマンド]"`・`allowed-tools: [Bash]`（モデルも起動できる） | 下の表 |
 
-`/ndf:restart` は、ブロックを出す前に必ず `[ -n "${NDF_RELAY_DIR:-}" ] && python3 <root>/scripts/relay.py is-child`
-を実行して中継の下かを決める。
+`/ndf:restart` は、ブロックを出す前に必ず `python3 <root>/scripts/relay.py notice` を 1 回実行し、1 行目で中継の下かを決め、
+2 行目を告知として示す（契約は [ndf-relay-segment-notice.md](ndf-relay-segment-notice.md)）。1 行しか出ない（`relay.py` を呼べない）ときは中継の外として扱う。
 
 | 判定 | すること |
 | --- | --- |
-| 中継の下 | 「中継が静まりを待ってから切り替える」と示し、応答の最後に `ndf-next` のブロックを **ちょうど 1 つ** 置いて応答を終える。背景の処理を起こさない。`/goal` の判定が応答を続けさせたら、続いた応答の最後に同じブロックを出し直す |
-| 中継の外 | ブロックを出さず、「`/exit` してから `claude` を起動し、下の中身を最初の入力として貼り付ける（`/ndf:install-wrapper` で中継を入れると自動になる）」の 1 行と、中身を情報文字列 `text` の囲みで示す |
+| 中継の下 | `notice` の 2 行目を言い換えずに示し、応答の最後に `ndf-next` のブロックを **ちょうど 1 つ** 置いて応答を終える。背景の処理を起こさない。`/goal` の判定が応答を続けさせたら、続いた応答の最後に同じブロックを出し直す |
+| 中継の外 | ブロックを出さず、`notice` の 2 行目（無ければ「`/exit` してから `claude` を起動し、下の中身を最初の入力として貼り付ける（`/ndf:install-wrapper` で中継を入れると自動になる）」）の 1 行と、中身を情報文字列 `text` の囲みで示す |
 
 **再開用のコマンド**は引数があればそのまま（利用者の入力として扱い書き換えない）。無ければ、`/goal` の
 目標の入力をそのまま（引継ぎ文書の名指しがあれば「<文書> の続きから」を足す）、次に課題番号・作業ツリーの
