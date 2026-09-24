@@ -543,6 +543,39 @@ def _save_initial_state(
     return state
 
 
+def _rebuild_participants(
+    state: dict[str, Any],
+    include: Optional[list[str]],
+    exclude: Optional[list[str]],
+    require_all: Optional[bool],
+) -> None:
+    """再開時の指定を補完し、参加者と作業ツリーの記録を作り直す。"""
+    recorded = state.get("participants") or {}
+    include_eff = include if include is not None else list(recorded.get("included") or [])
+    # `--exclude` を渡さない再開では、外した者と無視した除外の両方を足し戻す。無視した
+    # 名前を `--include` にも渡したときだけ足し戻さない（新しい指定を優先。#786 の AC4d。
+    # cross-review の `_recorded_exclusions` と同じ規則）
+    exclude_eff = exclude if exclude is not None else (
+        list(recorded.get("excluded") or [])
+        + [n for n in (recorded.get("ignored_exclude") or []) if n not in include_eff]
+    )
+    participants = resolve_participants(
+        str(state["host"]),
+        include_eff,
+        exclude_eff,
+        bool(require_all) if require_all is not None else bool(recorded.get("require_all")),
+    )
+    state.setdefault("resume_changes", []).append({
+        "at": statefile.now(), "field": "participants",
+        "from": state.get("participants"), "to": participants,
+    })
+    state["participants"] = participants
+    state["runtimes"] = list(participants["available"])
+    worktrees = state.setdefault("worktrees", {})
+    for runtime in state["runtimes"]:
+        worktrees.setdefault(runtime, str(pathlib.Path(state["worktree_root"]) / runtime))
+
+
 def _resume(
     state_file: pathlib.Path,
     state: dict[str, Any],
@@ -568,29 +601,7 @@ def _resume(
 
     require_all = getattr(args, "require_all", None)
     if include is not None or exclude is not None or require_all is not None:
-        recorded = state.get("participants") or {}
-        include_eff = include if include is not None else list(recorded.get("included") or [])
-        # `--exclude` を渡さない再開では、外した者と無視した除外の両方を足し戻す。無視した
-        # 名前を `--include` にも渡したときだけ足し戻さない（新しい指定を優先。#786 の AC4d。
-        # cross-review の `_recorded_exclusions` と同じ規則）
-        exclude_eff = exclude if exclude is not None else (
-            list(recorded.get("excluded") or [])
-            + [n for n in (recorded.get("ignored_exclude") or []) if n not in include_eff])
-        participants = resolve_participants(
-            str(state["host"]),
-            include_eff,
-            exclude_eff,
-            bool(require_all) if require_all is not None else bool(recorded.get("require_all")),
-        )
-        state.setdefault("resume_changes", []).append({
-            "at": statefile.now(), "field": "participants",
-            "from": state.get("participants"), "to": participants,
-        })
-        state["participants"] = participants
-        state["runtimes"] = list(participants["available"])
-        worktrees = state.setdefault("worktrees", {})
-        for runtime in state["runtimes"]:
-            worktrees.setdefault(runtime, str(pathlib.Path(state["worktree_root"]) / runtime))
+        _rebuild_participants(state, include, exclude, require_all)
 
     _apply_post_event(state, is_own_pr)
     statefile.save(state_file, state)

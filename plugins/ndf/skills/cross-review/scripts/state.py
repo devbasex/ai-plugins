@@ -932,6 +932,21 @@ def _now() -> str:
     return _dt.datetime.now(_dt.timezone.utc).astimezone().isoformat(timespec="seconds")
 
 
+def _normalize_pr_file_status(value: object) -> str:
+    """GitHub の変更種別を分類用の一文字へ正規化する。"""
+    status = str(value or "modified").lower()
+    status_map = {
+        "added": "A",
+        "modified": "M",
+        "deleted": "D",
+        "removed": "D",
+        "renamed": "R",
+        "copied": "C",
+        "changed": "M",
+    }
+    return status_map.get(status, status[:1].upper() or "M")
+
+
 def _parse_pr_files_payload(output: str) -> list[dict[str, Any]]:
     """`gh pr view --json files` の JSON を分類用の最小構造に正規化する。"""
     try:
@@ -942,14 +957,6 @@ def _parse_pr_files_payload(output: str) -> list[dict[str, Any]]:
     if not isinstance(files, list):
         return []
 
-    status_map = {
-        "ADDED": "A",
-        "MODIFIED": "M",
-        "DELETED": "D",
-        "RENAMED": "R",
-        "COPIED": "C",
-        "CHANGED": "M",
-    }
     entries: list[dict[str, Any]] = []
     for f in files:
         if not isinstance(f, dict):
@@ -957,8 +964,7 @@ def _parse_pr_files_payload(output: str) -> list[dict[str, Any]]:
         path = f.get("path")
         if not isinstance(path, str) or not path:
             continue
-        change_type = str(f.get("changeType") or "MODIFIED").upper()
-        status = status_map.get(change_type, change_type[:1] or "M")
+        status = _normalize_pr_file_status(f.get("changeType"))
         paths = []
         previous = f.get("previousPath") or f.get("previous_filename")
         if isinstance(previous, str) and previous and previous != path:
@@ -970,20 +976,12 @@ def _parse_pr_files_payload(output: str) -> list[dict[str, Any]]:
 
 def _parse_pr_files_api_lines(output: str) -> list[dict[str, Any]]:
     """GitHub API の PR files を TSV(JSON jq) 出力から分類用構造に変換する。"""
-    status_map = {
-        "added": "A",
-        "modified": "M",
-        "removed": "D",
-        "renamed": "R",
-        "copied": "C",
-        "changed": "M",
-    }
     entries: list[dict[str, Any]] = []
     for raw in output.splitlines():
         if not raw.strip():
             continue
         cols = raw.split("\t")
-        status_raw = cols[0].strip().lower() if cols else "modified"
+        status_raw = cols[0].strip() if cols else "modified"
         path = cols[1].strip() if len(cols) > 1 else ""
         previous = cols[2].strip() if len(cols) > 2 else ""
         if not path:
@@ -992,7 +990,7 @@ def _parse_pr_files_api_lines(output: str) -> list[dict[str, Any]]:
         if previous and previous != path:
             paths.append(previous)
         paths.append(path)
-        entries.append({"status": status_map.get(status_raw, status_raw[:1].upper() or "M"), "paths": paths})
+        entries.append({"status": _normalize_pr_file_status(status_raw), "paths": paths})
     return entries
 
 

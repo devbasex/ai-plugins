@@ -59,18 +59,18 @@ SHA=$(jq -r '(.rounds[-1].head_sha // "")' "$STATE")
 }
 
 prepare_prompt_context() {
+STEM=$TMP_DIR/$SEAT-review-pr$STATE_PR
 # 前ラウンドの結果を残さない。担当が止まって今ラウンドの result.json が
 # 書かれなかったとき、state.py read-result が**前ラウンドの結果を読んで**
 # 同じ判定を繰り返す事故を防ぐ。
 # 一時の名前のファイルも消す。前の起動が書きかけで止まった残りを、改名の対象に
 # しないため。
-rm -f "$TMP_DIR/$SEAT-review-pr$STATE_PR-result.json" \
-      "$TMP_DIR/$SEAT-review-pr$STATE_PR-result.json.tmp" \
-      "$TMP_DIR/$SEAT-review-pr$STATE_PR-round$ROUND-payload.json" \
-      "$TMP_DIR/$SEAT-review-pr$STATE_PR-round$ROUND-payload.json.tmp" \
-      "$TMP_DIR/$SEAT-review-pr$STATE_PR-round$ROUND-api-payload.json"
+rm -f "$STEM-result.json" \
+      "$STEM-result.json.tmp" \
+      "$STEM-round$ROUND-payload.json" \
+      "$STEM-round$ROUND-payload.json.tmp" \
+      "$STEM-round$ROUND-api-payload.json"
 
-STEM=$TMP_DIR/$SEAT-review-pr$STATE_PR
 PROMPT=$STEM-prompt.md
 # 既存コメントは **プロンプトにインライン埋め込み** する。
 # tmp dir は `<worktree>/.cross_review/` を使うが、埋め込みなら読み取りの往復が
