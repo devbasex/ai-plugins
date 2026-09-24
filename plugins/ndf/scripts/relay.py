@@ -617,13 +617,10 @@ class Relay:
             return None
         if not self.take_count():
             return None
-        if self.count_today() >= self.max_starts:
+        refusal = self.start_refusal(written)
+        if refusal:
             self.release_count()
-            self.halt("max-starts", f"1 日の起動回数が上限 {self.max_starts} に達した")
-            return None
-        if self.spinning(written):
-            self.release_count()
-            self.halt("spin", f"区間が 3 つ続けて {int(self.spin)} 秒未満で切れ目に達した")
+            self.halt(*refusal)
             return None
         m["_snap"] = snap
         return m
@@ -635,9 +632,12 @@ class Relay:
             if time.time() >= end:
                 return "count-lock", "起動の数を数えるロックが取れない"
             time.sleep(0.1)
+        return self.start_refusal(parse_iso(m.get("written_at")) or time.time())
+
+    def start_refusal(self, written: float) -> tuple[str, str] | None:
         if self.count_today() >= self.max_starts:
             return "max-starts", f"1 日の起動回数が上限 {self.max_starts} に達した"
-        if self.spinning(parse_iso(m.get("written_at")) or time.time()):
+        if self.spinning(written):
             return "spin", f"区間が 3 つ続けて {int(self.spin)} 秒未満で切れ目に達した"
         return None
 
