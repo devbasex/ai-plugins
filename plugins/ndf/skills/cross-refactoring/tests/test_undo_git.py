@@ -11,6 +11,9 @@
 """
 from __future__ import annotations
 
+import copy
+import json
+
 import pytest
 
 from crossref_helpers import commit_with_trailers, git, item_trailers, make_state_v2, read_state
@@ -140,4 +143,29 @@ def test_an_interrupted_drop_is_redone_on_resume(tmp_path, undo):
     undo.resume_pending_drop(path, state)
 
     assert "line3-by-I-001" not in (work / "src" / "foo.py").read_text(encoding="utf-8")
+    assert read_state(path)["pending_drop"] is None
+
+
+def test_a_drop_interrupted_after_replay_keeps_the_remaining_item_on_resume(tmp_path, undo):
+    """積み直しの後・状態の保存の前に落ちても、再開で残す項目を失わない。
+
+    取り消しは revert と cherry-pick を積むだけで履歴を書き換えないため、中断後も
+    旧 SHA は起点から HEAD の範囲に残り、状態の所有者表と対応が付く。
+    """
+    work, base, c1, c2 = _repo(tmp_path, 30)
+    path = _state(tmp_path, work, base, c1, c2)
+    before = copy.deepcopy(read_state(path))
+    undo.drop(path, read_state(path), ["I-001"], "中断")
+    # git は積み直しまで進み、状態は着手直後（印だけ立った旧 SHA のまま）で残った
+    before["pending_drop"] = {"items": ["I-001"], "extra": [], "reason": "中断"}
+    path.write_text(json.dumps(before, ensure_ascii=False), encoding="utf-8")
+
+    undo.resume_pending_drop(path, read_state(path))
+
+    assert "line3-by-I-001" not in (work / "src" / "foo.py").read_text(encoding="utf-8")
+    assert "changed-by-I-002" in (work / "src" / "foo.py").read_text(encoding="utf-8")
+    items = {i["id"]: i for i in read_state(path)["items"]}
+    assert items["I-001"]["status"] == "reverted"
+    assert items["I-002"]["status"] == "implemented"
+    assert git("rev-parse", "HEAD", cwd=work).stdout.strip() == items["I-002"]["commits"]["implement"]
     assert read_state(path)["pending_drop"] is None
