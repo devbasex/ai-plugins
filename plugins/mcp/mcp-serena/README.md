@@ -101,6 +101,37 @@ bash plugins/mcp/mcp-serena/dev.kiro/install.sh
 - Serena の memory は使いません。知識は `docs/` に、手順は `skills/` に置いてください
 - 使い方の詳細は `docs/serena-guide.md` を参照してください
 
+## v2.1.0-dev.1 へ更新するとき
+
+**開発版です。** `develop` にだけ載ります（ndf 10.17.9-dev.1 と同じ配布。#818）。
+
+| 変わったこと | 中身 |
+| --- | --- |
+| **Serena の版を固定しました** | `uvx --from serena-agent==1.7.0` で起動します。以前は GitHub の最新を取っていました |
+| **起動の文脈を変えました** | Claude Code / Kiro CLI は `--context claude-code`、Codex は `--context codex`（`.codex.mcp.json`）で起動し、`--project-from-cwd` で起動したディレクトリのプロジェクトを自動で有効にします。`activate_project` を呼ぶ必要はありません |
+| **memory と onboarding のツールを出しません** | `--add-mode no-memories` / `no-onboarding` で起動します。知識は `docs/` に、手順は `skills/` に置きます |
+| **言語サーバの設定の Skill を足しました** | `/mcp-serena:language-servers`。リポジトリごとに 1 度実行します（「最初に: 言語サーバの設定はプロジェクトごとに行う」） |
+| **hook を入れ替えました** | SessionStart は設定の食い違いと導入の欠けだけを知らせます。PreToolUse は設定した言語のファイルの grep・読み込みが続くと 1 度だけ止め、シンボル単位の手順を示します（「hook」） |
+
+**Codex では hook を信頼し直してください。** hook の定義が変わったため、対話の Codex で `/hooks` を開いて
+mcp-serena の hook を信頼するまで動きません。更新したあとは Claude Code / Codex を起動し直してください。
+
+```bash
+claude plugin marketplace update ai-plugins
+claude plugin update mcp-serena@ai-plugins
+
+codex plugin marketplace upgrade ai-plugins
+codex plugin add mcp-serena@ai-plugins
+```
+
+手元で確かめるコマンドです。`$ROOT` は導入先の `mcp-serena` のディレクトリで、どれもファイルを書き換えません。
+
+```bash
+grep -q '"version": "2.1.0-dev.1"' "$ROOT/.claude-plugin/plugin.json"; echo "exit=$?"   # 0 なら この版が入っている
+grep -qF 'serena-agent==1.7.0' "$ROOT/.mcp.json"; echo "exit=$?"   # 0 なら Serena の版が固定されている
+python3 "$ROOT/scripts/serena-lsp.py" detect --json >/dev/null; echo "exit=$?"   # 0 なら 言語の検出が動く（今いるリポジトリを数えるだけ）
+```
+
 ## 以前の版: v2.0.1 へ更新するとき
 
 Claude Code の起動時に出ていた `hooks.json: unknown key ... ignored` の警告を消しました。
