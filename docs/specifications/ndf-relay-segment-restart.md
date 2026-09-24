@@ -227,7 +227,7 @@ stateDiagram-v2
 | 中継する | 端末の属性を保存して標準入力を raw にし、`select` で標準入力 → マスタ、マスタ → 標準出力を流す（Ctrl-C もバイトのまま子へ届く）。SIGWINCH で端末の大きさをマスタへ `TIOCSWINSZ` で写す。`NDF_RELAY_POLL` 秒（既定 2）ごとに印を見る。1 つ目の区間は今の作業ディレクトリで `<本物の claude> <run の引数>` を起動する |
 | 静まりを待つ | 次がそろうまで待つ。(1) 印の `written_at`・`transcript_path` の更新時刻・利用者の最後の入力の時刻のうち最も遅いものから `NDF_RELAY_QUIET` 秒。(2) 印が消えていない。(3) 質問の印が無い。(4) 会話の記録に印より後の `assistant` / `user` の行が無い。目標の判定は待たない（下の「目標の判定の記録」） |
 | 続けさせる | 停止の印・1 日の起動回数・空回りのどれかに当たるか、判定の中で例外が起きたら、`/exit` を入力しない。`stop` の行を書き、印を消し、`ndf-relay:` の 1 行を出す。以後は入出力を中継するだけで、次の印では何もしない。子が終わると `end`（`no-mark`）を書いて子の終了コードで終わる |
-| 終わらせる | `question.lock` の中で (4)(5) と記録の大きさ・更新時刻を確かめ直し、子の端末へ `/exit\r` を 1 回の write で書いて `NDF_RELAY_EXIT_HOLD` 秒（既定 1）後に放す。`NDF_RELAY_EXIT_WAIT` 秒（既定 30。質問の印がある間は数えない）で終わらなければ SIGTERM、`NDF_RELAY_TERM_WAIT` 秒（既定 10）でも終わらなければ SIGKILL を送り、終わりを `waitpid` で確かめてから `end` を書く |
+| 終わらせる | `question.lock` の中で (3)(4) と記録の大きさ・更新時刻を確かめ直し、子の端末へ `/exit\r` を 1 回の write で書いて `NDF_RELAY_EXIT_HOLD` 秒（既定 1）後に放す。`NDF_RELAY_EXIT_WAIT` 秒（既定 30。質問の印がある間は数えない）で終わらなければ SIGTERM、`NDF_RELAY_TERM_WAIT` 秒（既定 10）でも終わらなければ SIGKILL を送り、終わりを `waitpid` で確かめてから `end` を書く |
 | 起動する | `claude plugin marketplace update <名前>` → `claude plugin update ndf@<名前> -y` → `claude plugin list --json` で版を読む。どれかが 0 以外・打ち切り・版が読めなければ `update-failed`。作業ディレクトリは印の `cwd`、消えていればパスの `/.worktrees/` の手前（主ディレクトリ）、無ければ在る最も近い親、それも無ければ HOME。区切りの 1 行を出し、`<本物の claude> <起動の方針の引数> <印の中身>`（中身は 1 つの引数）を起動する。exec に失敗したら `start-failed` |
 
 **更新と起動に失敗したときは、`stop` の行を書き、次のコマンドの中身を画面に出して終了コード 2 で
@@ -376,7 +376,7 @@ hook が止めるのは工程へ入る起動だけで、持ち場の中の Bash 
 | --- | --- |
 | Claude Code の Stop hook の入力 | `last_assistant_message`・`background_tasks`（`status`）・`cwd`・`session_id`・`transcript_path`。`stop_hook_active` は見ない |
 | Claude Code の CLI | `claude plugin list --json`（`id` が `<プラグイン>@<マーケットプレイス>`、`version`）・`claude plugin marketplace update <名前>`・`claude plugin update ndf@<名前> -y`（端末でなければ `-y` が要る）。区間の起動は位置引数の最初の入力（スラッシュコマンドと `/goal` も入力として働く） |
-| 会話の記録 | `transcript_path` の更新時刻と `goal_status` の attachment の行 |
+| 会話の記録 | `transcript_path` の更新時刻と、印より後の `assistant` / `user` の行（`goal_status` の attachment の行は読まない） |
 
 **前提にしている Claude Code の振る舞い**（2.1.280・Linux で実測）: Stop hook は応答が終わるたびに
 発火し、`AskUserQuestion` の答えを待つあいだと claude の終了では発火しない。`/goal` の判定は Stop hook
@@ -426,7 +426,8 @@ hook が止めるのは工程へ入る起動だけで、持ち場の中の Bash 
   出さずに終わること。切れ目で `/exit\r` → 子の終わり → `marketplace update` → `plugin update -y` →
   `plugin list --json` → 区切りの 1 行 → 次の子の起動（中身が 1 つの引数）の順になり、3 つ目の区間まで
   続くこと。記録の `start` と `end` のキーと `plugin_version` の値が合うこと。利用者の入力・記録の更新・
-  目標の判定待ちのあいだは `/exit` を送らず、印が消えれば取りやめること
+  印の後の応答の再開のあいだは `/exit` を送らず、印が消えれば取りやめること。`/goal clear` の行が残っても
+  静まりだけで切り替えること
 - 端末: キー入力（`\x03` を含む）と大きさの変化が子へ届くこと。子の終わり・例外・SIGTERM・SIGHUP の後に
   端末の属性が戻り、例外でも子を巻き込まないこと
 - 落とし先と上限: 消えた作業ツリーから主ディレクトリで起動し `cwd_fallback` が載ること。今日の `start` が
