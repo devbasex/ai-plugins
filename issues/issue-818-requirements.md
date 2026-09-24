@@ -105,23 +105,23 @@
 
 - [ ] AC5: 検出のスクリプトは、対応表にある言語のうち「ファイル数 10 以上かつ対応表の拡張子のファイル全体の 5% 以上」のものを採る。採らなかった言語と理由（件数・割合）を出力に残す
 - [ ] AC6: 設定のスクリプトは確認を取らずに書く。`.serena/project.yml` が無ければ作り、あれば `language_servers` と `ignored_paths` だけを書き換え、他のキーと注釈を保つ
-- [ ] AC7: 設定のスクリプトは、採る言語を 1 つずつ起動の検証にかけ、失敗した言語を設定から外す。外した言語と理由を出力に残す
+- [ ] AC7: 設定のスクリプトは、採る言語を 1 つずつ起動の検証にかけ、失敗した言語を設定から外す。外した言語と理由を出力と `.serena/project.yml` に残す（`--only` で名指しされなかった言語も同じ）
 - [ ] AC8: 壊れた言語サーバが 1 つある状態で設定のスクリプトを走らせると、その言語だけが外れ、残りの言語で `find_symbol` と `find_referencing_symbols` が通る
 - [ ] AC9: `--dry-run` では検出と差分の表示だけを行い、ファイルを 1 つも書かない
-- [ ] AC10: `.gitignore` は、利用者が `--gitignore` を渡したときだけ書き換える。渡さなければ触らない
+- [ ] AC10: `.gitignore` は利用者が `--gitignore` を、`.serena/.gitignore` は `--serena-gitignore` を渡したときだけ書き換える。渡さなければ触らない。`--serena-gitignore` の後、導入先の `git status --porcelain .serena` に `serena_config.yml`・`logs/`・`language_servers/`・`cache/` が出ない
 - [ ] AC11: 言語構成の違う 2 つ以上のリポジトリで、検出 → 設定 → 起動の検証 → 導入の検査が通る。少なくとも 1 つは Python 以外が主のもの（例: `/work/carmo-system-serverside`）
-- [ ] AC12: 作業ツリー（`.worktrees/<ブランチ名>`）で起動した Serena が、作業ツリーのプロジェクトを有効にする（Claude Code は `find_symbol` の結果のパス、Codex は `get_current_config` で確かめる。Claude Code の文脈には `get_current_config` が無い）
+- [ ] AC12: `project.yml` が作業ツリーにある（追跡している。決定 12）とき、作業ツリー（`.worktrees/<ブランチ名>`）で起動した Serena が、作業ツリーのプロジェクトを有効にする（Claude Code は `find_symbol` の結果のパス、Codex は `get_current_config` で確かめる。Claude Code の文脈には `get_current_config` が無い）。追跡しないときの振る舞いは U4 の解消を待つ
 
 ### 導入の検査（作業項目 C）
 
-- [ ] AC13: 導入の検査のスクリプトは、採った言語ごとに、公式 LSP プラグインの導入（`~/.claude/plugins/installed_plugins.json`）と本体のコマンドの有無を報告する。欠けがあれば終了コード 1、揃っていれば 0、読めなければ 2
+- [ ] AC13: 導入の検査のスクリプトは、採った言語ごとに、公式 LSP プラグインの導入（`~/.claude/plugins/installed_plugins.json`）と本体のコマンドの有無を報告する。欠けがあれば終了コード 1（`installed_plugins.json` が無いときを含む）、揃っていれば 0、読めなければ 2（`installed_plugins.json` が JSON として読めないときを含む）
 - [ ] AC14: TypeScript を採ったリポジトリで、`typescript-language-server` が解決する `typescript` の版が 5 でないとき、検査が知らせる
 - [ ] AC15: Bash を採ったリポジトリで `shellcheck` が無いとき、検査が知らせる
 - [ ] AC16: NDF と `mcp-serena` のどちらも `lspServers` を宣言しない
 
 ### hook（作業項目 B・D・E）
 
-- [ ] AC17: SessionStart の hook は、検出の結果と `.serena/project.yml` が食い違うとき、または導入の検査に欠けがあるときだけ 1 行以上を出す。揃っているときは何も出さない
+- [ ] AC17: SessionStart の hook は、検出の結果と `.serena/project.yml` が食い違うとき（設定のスクリプトが外した言語として記録したものは食い違いに数えない）、または導入の検査に欠けがあるときだけ 1 行以上を出す。揃っているときは何も出さない
 - [ ] AC18: SessionStart の hook は、`.serena/project.yml` が無いリポジトリ（Serena を設定していない）では何も出さない
 - [ ] AC19: PreToolUse の hook は、`.serena/project.yml` の採った言語の拡張子のファイルについてだけ数える。`.md` や `.json` の読み込みでは拒否しない
 - [ ] AC20: PreToolUse の hook は、`grep` 3 回・コードファイルの読み込み 3 回・混在 4 回のどれかに達したとき 1 度だけ拒否し、数を戻す。拒否から 120 秒は拒否しない
@@ -132,7 +132,7 @@
 ### ランタイムごとの実測（受け入れ）
 
 - [ ] AC24: Claude Code: Python / TypeScript（5 に固定）/ PHP のそれぞれで、編集の後に `<new-diagnostics>` が届く（PHP は未解決のシンボルか構文の誤りで確かめる）
-- [ ] AC25: Codex: `codex exec` から、Python / TypeScript / PHP のそれぞれで `find_referencing_symbols` と `get_diagnostics_for_file` が結果を返す。あわせて、Codex の hook が実ランタイムで効くこと（SessionStart の通知がモデルに届くこと、採った言語のファイルをシェルで 3 回読むと 3 回目が拒否されること）を記録で確かめる
+- [ ] AC25: Codex: `codex exec` から、Python / TypeScript / PHP のそれぞれで `find_referencing_symbols` と `get_diagnostics_for_file` が結果を返す。Skill が Codex から `serena-lsp.py` に届くことも確かめる。あわせて、Codex の hook が実ランタイムで効くこと（SessionStart の通知がモデルに届くこと、採った言語のファイルをシェルで 3 回読むと 3 回目が拒否されること）を記録で確かめる
 - [ ] AC26: #818 §3 の題材を、指示なしの条件（§3 の B / C と同じ）で Claude Code に 3 回ずつ実行し、Serena または `LSP` のツールが使われた回数と、ツール結果の文字数を、§3 の値と並べて示す
 - [ ] AC27: 設計文書の効果の見積もり（持ち場ごと）に、AC26 の実測で置き換えた値を並べる
 
@@ -183,5 +183,5 @@
 | 区分 | 内容 |
 | --- | --- |
 | 常に行う | 対応表を唯一の正本にする。設定を書いた後に起動を検証する |
-| 確認してから行う | 公式 LSP プラグインと言語サーバ本体の導入、`.gitignore` の書き換え、Serena の言語サーバのキャッシュの退避 |
-| 行わない | セッションの開始での導入。確認なしの `.gitignore` の書き換え。`project.yml` の `language_servers` / `ignored_paths` 以外の書き換え |
+| 確認してから行う | 公式 LSP プラグインと言語サーバ本体の導入、`.gitignore` と `.serena/.gitignore` の書き換え、Serena の言語サーバのキャッシュの退避 |
+| 行わない | セッションの開始での導入。確認なしの `.gitignore` と `.serena/.gitignore` の書き換え。`project.yml` の `language_servers` / `ignored_paths` 以外の書き換え |

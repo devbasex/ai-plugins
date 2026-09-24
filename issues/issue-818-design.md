@@ -14,6 +14,8 @@ python3 "$ROOT/scripts/serena-lsp.py" check --root . --json       # Claude Code 
 python3 "$ROOT/scripts/serena-lsp.py" configure --root . --gitignore  # 利用者が「追跡しない」を選んだときだけ
 ```
 
+`$ROOT` は mcp-serena のプラグインルートで、SKILL.md の冒頭で決める（「Skill の契約」）。
+
 1 行目の出力（要点）:
 
 ```json
@@ -30,7 +32,7 @@ python3 "$ROOT/scripts/serena-lsp.py" configure --root . --gitignore  # 利用�
 {"language": "python", "item": "plugin", "install": "claude plugin install pyright-lsp@claude-plugins-official"}
 ```
 
-Skill は導入のコマンドを利用者に示し、確認を取ってから打つ。**判断はここだけである。**
+Skill は導入のコマンドを利用者に示し、確認を取ってから打つ。**判断はここだけである。** `language_servers` が変わったときは、Serena の再接続を利用者に示す（「処理の流れ: 導入」）。
 
 ## 機能一覧
 
@@ -260,7 +262,9 @@ plugins/mcp/mcp-serena/
 | `language_servers` | 採った言語を、検出の件数の多い順に並べたブロックの配列で置き換える | 触らない。注釈も保つ |
 | `ignored_paths` | `.worktrees/**` が無く、`.worktrees/` が存在するときだけ足す。既存の要素は消さない | 同上 |
 
-- 無いときは `serena project create --ls <言語> ... --name <ディレクトリ名> <root>` で作る（非対話。#818 §8）。作った後に同じ書き換えを通す
+**外した言語は `language_servers` のブロックの注釈に残す。** 1 言語 1 行で `  # mcp-serena: excluded <言語> <理由>` と書く。理由は `failed.reason` の値か、`--only` で名指しされなかった `not_selected` である。`configure` はブロックを書き換えるたびにこの行も作り直す。SessionStart の突き合わせは、検出した言語から `language_servers` とこの注釈の言語を除いた残りを「設定に無い言語」とする（決定 9）。
+
+- 無いときは `serena project create --ls <言語> ... --name <ディレクトリ名> <root>` で作る（非対話。#818 §8）。作った後に同じ書き換えを通す。環境と cwd は `health-check` と同じにする（「処理の流れ: 導入」）
 - 書き換えは行単位で行う。対象のキーの行からインデントの無い次のキーまでを 1 ブロックとして置き換える。ブロックの形（`key: []` / `key:` の後に `- 値` の行）以外（流れの形の非空の配列・アンカー）を見つけたら書かずに終了コード 3 で止める
 
 ### hook の数の記録
@@ -279,14 +283,16 @@ plugins/mcp/mcp-serena/
 | サブコマンド | 引数 | 書くもの | 終了コード |
 | --- | --- | --- | --- |
 | `detect` | `--root DIR` `--json` | 無し | 0 検出できた（採る言語が 0 でも 0）/ 2 `git` が使えない・リポジトリでない |
-| `configure` | `--root DIR` `--json` `--dry-run` `--gitignore` `--only LANG,...` `--serena CMD` | `.serena/project.yml`、`--gitignore` のときだけ `.gitignore` | 0 書いた（外した言語があっても 0）/ 1 検証を通った言語が 0 / 2 `git` か `uvx` が使えない / 3 `project.yml` の形が読めない |
-| `check` | `--root DIR` `--json` `--runtime claude-code\|codex` | 無し | 0 揃っている / 1 欠けがある / 2 読めない（`project.yml` が無い・対応表が壊れている） |
+| `configure` | `--root DIR` `--json` `--dry-run` `--gitignore` `--serena-gitignore` `--only LANG,...` `--serena CMD` | `.serena/project.yml`、`--gitignore` のときだけ `.gitignore`、`--serena-gitignore` のときだけ `.serena/.gitignore` | 0 書いた（外した言語があっても 0）/ 1 検証を通った言語が 0 / 2 `git` か `uvx` が使えない / 3 `project.yml` の形が読めない |
+| `check` | `--root DIR` `--json` `--runtime claude-code\|codex` | 無し | 0 揃っている / 1 欠けがある / 2 読めない（`project.yml` が無い・対応表が壊れている・`installed_plugins.json` が JSON として読めない） |
 | `hook session-start` | `--client claude-code\|codex` | 無し | 常に 0 |
 | `hook pre-tool-use` | `--client claude-code\|codex` | 数の記録 | 常に 0 |
 
 - `--only` は検出を飛ばして言語を名指しする（検出の誤りを利用者が直すとき）
 - `--serena` は Serena の起動の前半を差し替える（既定 `uvx --from serena-agent==1.7.0 serena`）。テストは偽のコマンドを渡す
-- `--runtime codex` の `check` は、Claude Code の LSP の項目を飛ばし、Bash の shellcheck だけを見る（Codex は Serena が言語サーバを入れる）
+- `--runtime codex` の `check` は、Claude Code の LSP の項目を飛ばし、Bash の shellcheck だけを見る（Codex は Serena が言語サーバを入れる）。`installed_plugins.json` も読まない
+- `installed_plugins.json` が無いときは、どのプラグインも入っていないとして終了コード 1 にする。あるのに JSON として読めないときは、欠けを判定できないので 2 にする
+- `--serena-gitignore` は `.serena/.gitignore` に `/serena_config.yml` `/logs` `/language_servers` `/cache` のうち無い行だけを足す。Serena 1.7.0 が作る `.serena/.gitignore` は `/cache` と `/project.local.yml` の 2 行だけで、`SERENA_HOME=.serena` で作られる `serena_config.yml`・`logs/`・`language_servers/` は追跡の候補に残る（2026-09-24、空のリポジトリで `project create` と `health-check` を打って実測）
 
 ### `configure` / `check` の JSON
 
@@ -296,7 +302,8 @@ plugins/mcp/mcp-serena/
  "skipped": [{"language": "typescript", "files": 4, "share": 0.01, "reason": "below_threshold"}],
  "verified": ["python"],
  "failed": [{"language": "bash", "reason": "health_check_exit_1", "log": "/abs/.serena/logs/health-checks/..."}],
- "written": {"created": false, "language_servers": ["python"], "ignored_paths_added": [], "gitignore": false},
+ "written": {"created": false, "language_servers": ["python"], "excluded": ["bash"], "ignored_paths_added": [],
+             "gitignore": false, "serena_gitignore_added": ["/serena_config.yml", "/logs"]},
  "missing": [{"language": "python", "item": "plugin", "name": "pyright-lsp@claude-plugins-official",
               "install": "claude plugin install pyright-lsp@claude-plugins-official"}]}
 ```
@@ -305,6 +312,7 @@ plugins/mcp/mcp-serena/
 - `failed.reason` は `health_check_exit_<n>` / `timeout`（1 言語 120 秒）/ `serena_unavailable`
 - `missing.item` は `plugin` / `binary` / `typescript_major_5` / `shellcheck`
 - `detect` は `detected` と `skipped` だけ、`check` は `missing` だけを持つ
+- `--serena-gitignore` を渡さないときも、`serena_gitignore_added` に「足せば足す行」を載せる。Skill はこれが空でなければ利用者に確認を取る
 
 ## 入出力の契約: hook と起動定義
 
@@ -323,6 +331,7 @@ plugins/mcp/mcp-serena/
 | --- | --- | --- |
 | grep | `Grep`、または `Bash` のコマンドの先頭の語が `grep` / `rg` / `ag` / `ack` | コマンドの先頭の語が `grep` / `rg` / `ag` / `ack` |
 | 読み込み | `Read` の `file_path` の拡張子が採った言語のもの、または `Bash` で右の列と同じ形のもの | 先頭の語が `cat` / `head` / `tail` / `sed` / `less` / `nl` で、引数のどれかの拡張子が採った言語のもの |
+| 混在 | grep と読み込みのどちらでも 1 増える（grep 2 回と読み込み 2 回で 4。Serena 1.7.0 の `hooks.py` の `n_recent_non_symbolic_uses` と同じ） | 同じ |
 | 数を戻す | Serena のシンボル系のツール（名前に `serena` を含み、`list_` や `read_file` を含まない）の呼び出し | 同じ |
 
 - 閾値と待ちは Serena 公式の `serena-hooks remind` と同じ（grep 3・読み込み 3・混在 4・拒否の後 120 秒）
@@ -358,7 +367,21 @@ plugins/mcp/mcp-serena/
 
 差の 9 は、`codex` にだけある 10 個から `claude-code` にだけある 1 個を引いた数である。
 
-**`SERENA_HOME` は今の値（`.serena`）を保つ。** 変えると利用者の手元の設定と言語サーバの置き場所が移る。
+**`SERENA_HOME` は今の値（`.serena`）を保つ（決定 16）。** 作業ツリーごとに言語サーバを取得し直す費用を受け入れる。
+
+### Skill の契約（`skills/language-servers/SKILL.md`）
+
+Skill は Claude Code・Codex・Kiro へ同じファイルを配る。`${CLAUDE_PLUGIN_ROOT}` を置き換えるのは Claude Code だけなので、冒頭の bash で `$ROOT` を NDF の Skill と同じ手順で決める（`plugins/ndf/skills/fix/SKILL.md` の「コメントの取得」）。
+
+| 順 | 候補 | 当たるランタイム |
+| --- | --- | --- |
+| 1 | `PLUGIN_ROOT='${CLAUDE_PLUGIN_ROOT}'`。`$` で始まったまま（置き換えられなかった）なら空にする | Claude Code |
+| 2 | `<この Skill のディレクトリ>` の 2 つ上。モデルがランタイムから渡された Skill の実際のパスへ置き換えてから打つ | Codex |
+| 3 | `.kiro/skills/language-servers` の 2 つ上 | Kiro（installer の symlink） |
+
+- 候補は `cd -P` で実体へ解決してから 2 つ上がる（symlink のまま上がると `.kiro/` を指す）。`scripts/serena-lsp.py` がある最初の候補を採り、どれも当たらなければ止まる
+- 打つ順は「例」の 3 行。`serena_gitignore_added` が空でなければ確認を取り、`--serena-gitignore` をつけて打ち直す
+- `language_servers` が変わったら、Serena の再接続を示す（Claude Code は `/mcp` の再接続かセッションのやり直し、Codex はセッションのやり直し）。起動中の Serena は起動時の `project.yml` の言語で動いている
 
 ### hook 定義
 
@@ -402,12 +425,15 @@ sequenceDiagram
   alt failed がある
     M->>M: ログを読み、キャッシュの退避と再試行を提案する
   end
+  alt language_servers が変わった
+    M->>M: Serena の再接続を利用者に示す
+  end
 ```
 
 - 検証の間、`project.yml` を 1 言語ずつ書き換える。**終わったら必ず最後の値を書く**（例外でも `finally` で、通った言語だけを書く。通った言語が 0 なら元の内容へ戻す）
-- `health-check` は起動定義と同じ `SERENA_HOME=.serena` を渡し、cwd を `--root` にして走らせる。これで、検証する言語サーバのキャッシュが、ランタイムが起動した Serena の使うもの（`<root>/.serena/language_servers/`）と一致する
+- `configure` が起動する `serena` のすべて（`project create` と `health-check`）に、起動定義と同じ `SERENA_HOME=.serena` を渡し、cwd を `--root` にする。既定の `~/.serena` で走らせると利用者の全体の設定を書き換え得る。これで、検証する言語サーバのキャッシュが、ランタイムが起動した Serena の使うもの（`<root>/.serena/language_servers/`）と一致する
 - 1 言語の検証に 120 秒の上限を置く。上限に達したら失敗として外す
-- `health-check` は `.serena/logs/health-checks/` にログを書く。Serena 自身の `.serena/.gitignore` が `/logs` を外している
+- `health-check` は `.serena/logs/health-checks/` にログを書く。Serena 1.7.0 の `.serena/.gitignore` は `/logs` を外さないため、追跡から外すのは `--serena-gitignore` である
 
 ## 処理の流れ: セッション
 
@@ -419,7 +445,7 @@ sequenceDiagram
   R->>S: 起動（--project-from-cwd）
   R->>H: SessionStart
   H->>H: project.yml を読む（無ければ終わる）
-  H->>H: 検出と突き合わせ・PATH と導入の記録を見る
+  H->>H: 検出と突き合わせ・check（--runtime は --client の値）
   H-->>R: 食い違いがあるときだけ通知
   loop ツールの呼び出し
     R->>H: PreToolUse
@@ -434,6 +460,7 @@ sequenceDiagram
 ```
 
 - 2 つの図に現れない要素は、文書と定義の変更である（`README.md`・`serena-guide.md`・`SKILL.md`・エージェント定義・`plugin.json`・`marketplace.json`・生成物の `dev.kiro/install.sh`）。`table` と `languages.json` は `detect` と `check` の中で読まれる
+- SessionStart は `--client` の値をそのまま `check` の `--runtime` に渡す（`codex` なら Claude Code の LSP の項目を見ない）。`check` が 2 を返したときは導入の欠けの行を出さない
 - SessionStart の検査は PATH と `installed_plugins.json` を読むだけで、`claude` も `serena` も起動しない（AC23）
 - hook の中で例外が出たら、何も出さずに 0 で終わる
 
@@ -445,5 +472,5 @@ sequenceDiagram
 | 可用性 | 1 言語ずつの検証で、壊れた言語を設定から外す（AC7）。hook は例外を握りつぶして 0 で終わる |
 | 運用・保守性 | 言語の追加は `languages.json` の 1 要素。追加の検査だけは `check.py` に名前付きの関数を足す |
 | 移行性 | mcp-serena の更新は `project.yml` を書き換えない。既存の利用者は、SessionStart の通知を見て Skill を 1 度打つ |
-| セキュリティ | 導入のコマンドは出力に載せるだけで、スクリプトは打たない。`.gitignore` は `--gitignore` のときだけ書く |
+| セキュリティ | 導入のコマンドは出力に載せるだけで、スクリプトは打たない。`.gitignore` は `--gitignore`、`.serena/.gitignore` は `--serena-gitignore` のときだけ書く。`serena_config.yml` を追跡の候補から外す手段を Skill が示す |
 | システム環境 | スクリプトは Python 3 の標準ライブラリだけを使う。`uvx` が無いときの `configure` は終了コード 2 で止める。hook は `uvx` を呼ばない |

@@ -60,6 +60,8 @@ hook と検査は標準ライブラリだけで動かす（`uvx` を hook の経
 
 毎回出す通知は読み飛ばされる（今の echo と同じ）。導入（`uv tool install`・`npm install -g`・`claude plugin install`）は利用者の手元へ書き込み、ネットワークへ出て、失敗しても気付きにくい（#818 §10）。セッションの開始では検査だけを行い、直すのは Skill の手順で利用者の確認を取ってからにする。
 
+検証に失敗して外した言語と、`--only` で名指しされなかった言語は、`project.yml` の `language_servers` のブロックに注釈として残し、突き合わせから除く。残さないと、外した言語が以後も検出で選ばれ、毎回出す通知に戻る。別の状態ファイルに置く案は採らない。`project.yml` を追跡すれば作業ツリーにも同じ記録が揃い、追跡から外すファイルを増やさずに済む。
+
 ### 決定 10: エージェント定義は、#818 では Serena の行だけを直す。構成の整理は #877 と #869 に残す
 
 #877（知識系 Skill とエージェント定義の整理）と #869（`corder.md` の置き換え）は、同じファイルを構成ごと変える。#818 が直すのは次の 2 種類の行だけにする。
@@ -83,6 +85,8 @@ Claude Code の `LSP` ツールと Serena の `get_diagnostics_for_file` も一�
 
 作業ツリー（`.worktrees/<ブランチ名>`）で Serena を使うには、作業ツリーにも `project.yml` が要る。追跡していれば作業ツリーを作った時点で揃う。追跡しないと、作業ツリーの中で `--project-from-cwd` が作業ツリーの根を選び、`project.yml` が無い状態になる（そのときの Serena の振る舞いは未確認 U4）。Skill はこの違いを示して選ばせ、追跡しないと決めたときだけ `--gitignore` を渡す。
 
+`.serena/` の他のファイルは追跡しない側に倒す。Serena 1.7.0 が作る `.serena/.gitignore` は `/cache` と `/project.local.yml` だけで、`SERENA_HOME=.serena` で作られる `serena_config.yml`（このリポジトリの `.gitignore` は「認証の秘密を持つため追跡しない」として外している）・`logs/`・`language_servers/` が追跡の候補に残る（2026-09-24 実測）。これも `.gitignore` の書き換えなので、Skill が確認を取ってから `--serena-gitignore` を渡す。
+
 ### 決定 13: クラス図を作らない
 
 作るスクリプトは関数の集まりで、型を定義しない。データの形は JSON（対応表・出力・数の記録）と YAML のキーで、設計の「データ構造」と「入出力の契約」の 2 節が持つ。
@@ -96,3 +100,16 @@ Claude Code の `LSP` ツールと Serena の `get_diagnostics_for_file` も一�
 ### 決定 15: Kiro は Claude Code と同じ起動定義と hook の定義を受け取る
 
 Kiro の installer（生成物）は `.mcp.json` と `hooks/hooks.json` を読む。Serena には Kiro の文脈が無い。今の `ide-assistant` は `claude-code` の旧名で、Kiro の動きは変わらない。hook は Kiro のイベント名の変換で PreToolUse がそのまま残り、Kiro が読まない名前なら動かない。hook のスクリプトは知らない入力で何も出さずに 0 で終わる。Kiro 専用の定義を足す案は、Kiro の受け入れを確かめる手段が無いため、この課題では採らない（前提 3）。
+
+### 決定 16: `SERENA_HOME` は `.serena`（cwd からの相対）のまま保ち、作業ツリーごとの言語サーバの取得を受け入れる
+
+相対の値は Serena を起動した cwd から解決される（Serena 1.7.0 の `SerenaPaths`）。`.worktrees/<ブランチ名>` で起動したセッションは作業ツリーごとに `.serena/language_servers/` を持ち、作業ツリーを作るたびに、取得を伴う言語サーバの取得と初回の起動（#818 §8）をやり直す。`AGENTS.md` は開発を作業ツリーで行うと定めるので、この費用は作業ツリーの数だけ繰り返される。大きさは AC12 の手動確認で測る。
+
+それでも今の値を保つ。変えると、既に使っている利用者の手元の設定と言語サーバの置き場所が移る。共有する案は次の理由で採らない。
+
+| 案 | 採らない理由 |
+| --- | --- |
+| `~/.serena` | 公式の `serena` と利用者の全体の設定（`serena_config.yml`）を共有する。`configure` の検証が全体の設定を書き換え得る |
+| 絶対パス（`${HOME}/...` などの展開） | `.mcp.json` の中の展開に頼る。Codex で展開を確かめられていない（決定 4・U1） |
+
+AC12 の測定で費用が大きいと分かったら、共有する置き場所を別の課題で考える。
