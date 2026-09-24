@@ -348,33 +348,28 @@ class Editor:
 
 
 def bump_update_heading(ed, readme):
-    """README の更新案内の見出しを足す（基底が同じなら書き換える）。"""
+    """README の更新案内の見出しを新しい版へ書き換える。
+
+    検査（check-doc-staleness）は更新案内の見出しを現行の版の 1 つだけに求めるため、足さずに書き換える。
+    本文は前の版の説明のまま残るので、changelog が PR の一覧へ差し替え、後の LLM の段が説明を書く。
+    """
     rel = readme.relative_to(ed.root).as_posix()
     if not readme.is_file():
         ed.manual.append(f"{rel} が無い（更新案内の見出し）")
         return
     lines = ed.lines(readme)
-    old_h, new_h = f"## v{ed.old} へ更新するとき", f"## v{ed.new} へ更新するとき"
+    new_h = f"## v{ed.new} へ更新するとき"
     if new_h in lines:
         return
-    if base_of(ed.old) == base_of(ed.new):
-        if old_h in lines:
-            lines[lines.index(old_h)] = new_h
-            ed.save(readme, lines)
-        else:
-            ed.manual.append(f"{rel}: 見出し「{old_h}」が無い（「{new_h}」を手で足す）")
+    rx = re.compile(r"^## v\S+ へ更新するとき$")
+    at = next((i for i, l in enumerate(lines) if rx.match(l)), None)
+    if at is None:
+        ed.manual.append(f"{rel}: 更新案内の見出しが無い（「{new_h}」を手で足す）")
         return
-    if old_h in lines:
-        at = lines.index(old_h)
-    else:
-        rx = re.compile(r"^## (?:以前の版: )?v\S+ へ更新するとき$")
-        at = next((i for i, l in enumerate(lines) if rx.match(l)), None)
-        if at is None:
-            ed.manual.append(f"{rel}: 更新案内の見出しが無い（「{new_h}」を手で足す）")
-            return
-        ed.manual.append(f"{rel}: 見出し「{old_h}」が無いため、最初の更新案内の見出しの前へ足した")
-    lines[at:at] = [new_h, ""]
+    lines[at] = new_h
     ed.save(readme, lines)
+    if base_of(ed.old) != base_of(ed.new):
+        ed.manual.append(f"{rel}: 更新案内の本文を v{ed.new} の変更へ書き直す（changelog が PR の一覧へ差し替える）")
 
 
 def bump_versioning_doc(ed):
@@ -569,15 +564,13 @@ def cmd_changelog(a):
     if readme and readme.is_file():
         rl = readme.read_text(encoding="utf-8").split("\n")
         if h in rl:
+            # 見出しから次の同じ深さの見出しまでを、この版の PR の一覧へ差し替える
+            # （前の版の説明が残らないように。利用者向けの説明は後の LLM の段が書く）
             i = rl.index(h)
-            nxt = next((j for j in range(i + 1, len(rl)) if rl[j].strip()), None)
-            if nxt is None or rl[nxt].startswith("## "):
+            end = next((j for j in range(i + 1, len(rl)) if rl[j].startswith("## ")), len(rl))
+            if not any(f"（#{n}）" in l for l in rl[i:end] for n, _ in items):
                 rel = readme.relative_to(root).as_posix()
-                rl[i + 1:i + 1] = [""] + [b for _, b in items] + [""]
-                # 見出しの直後に空行が重なったら 1 つにする
-                j = i + 2 + len(items) + 1
-                while j < len(rl) and rl[j] == "" and rl[j - 1] == "":
-                    del rl[j]
+                rl[i + 1:end] = [""] + [b for _, b in items] + [""]
                 readme.write_text("\n".join(rl), encoding="utf-8")
                 sections.append({"file": rel, "heading": h, "added": [n for n, _ in items]})
 
@@ -1067,41 +1060,44 @@ def build_parser():
     ap = argparse.ArgumentParser(prog="phase-steps.py", description=__doc__)
     ap.add_argument("--root", help="対象のリポジトリの根（既定はカレントの git の根）")
     sub = ap.add_subparsers(dest="cmd", required=True)
+    # --root はサブコマンドの前でも後でも受ける（run の段で書く位置を問わない）
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--root", default=argparse.SUPPRESS, help="対象のリポジトリの根")
 
-    p = sub.add_parser("cleanup", help="マージ済みの PR の作業ツリーとローカルブランチを片付ける")
+    p = sub.add_parser("cleanup", parents=[common], help="マージ済みの PR の作業ツリーとローカルブランチを片付ける")
     p.add_argument("prs", nargs="+", type=int, metavar="PR番号")
     p.set_defaults(func=cmd_cleanup)
 
-    p = sub.add_parser("spec-finalize", help="設計を消し、確定仕様を索引へ載せてコミットする")
+    p = sub.add_parser("spec-finalize", parents=[common], help="設計を消し、確定仕様を索引へ載せてコミットする")
     p.add_argument("--spec", required=True)
     p.add_argument("--design", nargs="+", required=True)
     p.add_argument("--title")
     p.set_defaults(func=cmd_spec_finalize)
 
-    p = sub.add_parser("bump", help="plugin の版数を持つ箇所を旧版から新版へ上げる")
+    p = sub.add_parser("bump", parents=[common], help="plugin の版数を持つ箇所を旧版から新版へ上げる")
     p.add_argument("--plugin", required=True, help="ndf / playwright-kit / plugins/mcp の名前（例 mcp-serena）")
     p.add_argument("--to", required=True, type=version_arg)
     p.set_defaults(func=cmd_bump)
 
-    p = sub.add_parser("changelog", help="CHANGELOG.md と plugin の README の更新案内へ PR のタイトルを並べる")
+    p = sub.add_parser("changelog", parents=[common], help="CHANGELOG.md と plugin の README の更新案内へ PR のタイトルを並べる")
     p.add_argument("--version", required=True, type=version_arg)
     p.add_argument("--prs", nargs="+", required=True, type=int, metavar="PR番号")
     p.add_argument("--plugin", default="ndf")
     p.set_defaults(func=cmd_changelog)
 
-    p = sub.add_parser("release", help="release/v<版> を develop へマージし、prod なら main へ出してタグと Release を作る")
+    p = sub.add_parser("release", parents=[common], help="release/v<版> を develop へマージし、prod なら main へ出してタグと Release を作る")
     p.add_argument("--version", required=True, type=version_arg)
     p.add_argument("--channel", required=True, choices=("dev", "prod"))
     p.add_argument("--plugins", default="ndf", help="カンマ区切り（例 ndf,mcp-serena）")
     p.set_defaults(func=cmd_release)
 
-    p = sub.add_parser("approval-facts", help="本番承認の提示物のうち機械で作れる部分を Markdown で出す")
+    p = sub.add_parser("approval-facts", parents=[common], help="本番承認の提示物のうち機械で作れる部分を Markdown で出す")
     p.add_argument("--version", required=True, type=version_arg)
     p.add_argument("--prs", nargs="+", required=True, type=int, metavar="PR番号")
     p.add_argument("--prev-tag")
     p.set_defaults(func=cmd_approval_facts)
 
-    p = sub.add_parser("verify-install", help="隔離した HOME で ref から導入し、版と中身を確かめる")
+    p = sub.add_parser("verify-install", parents=[common], help="隔離した HOME で ref から導入し、版と中身を確かめる")
     p.add_argument("--ref", required=True, choices=("develop", "main"))
     p.add_argument("--expect", required=True, type=version_arg)
     p.add_argument("--plugins", default="ndf", help="カンマ区切り（例 ndf,mcp-serena）")
