@@ -89,7 +89,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.17.9-dev.1）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.17.9）
 ```
 
 ### agy
@@ -119,24 +119,26 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.17.9-dev.1 へ更新するとき
+## v10.17.9 へ更新するとき
 
-**同じマーケットプレイスの `mcp-serena` を 2.1.0-dev.1 へ上げ、Claude Code と Codex で言語サーバによる定義・参照・
+**同じマーケットプレイスの `mcp-serena` を 2.1.0 へ上げ、Claude Code と Codex で言語サーバによる定義・参照・
 診断を使えるようにしました**（マイルストーン 26、#818）。ndf 側の変更は、エージェント定義と 3 つの Skill が
 Serena のツールを正しい名前で指し、ファイルを丸ごと読む代わりにシンボル単位の手順を示すようにしたことだけです。
 Skill の追加・削除・改名は無く、ndf の公開 Skill の数も変わりません。変更点の一覧は [CHANGELOG.md](../../CHANGELOG.md) にあります。
 
-**開発版です。** `develop` にだけ載ります。取得元へ `#develop` を足す手順は
-[docs/versioning-and-distribution.md の「開発版を試す」](../../docs/versioning-and-distribution.md#開発版を試す)にあります。
+**正式版です。** `main` に載ります。中身は開発版 `10.17.9-dev.1` と同じで、版数の接尾辞だけを
+外しました。
 
 | 変わったこと | 中身 |
 | --- | --- |
 | **Serena のツール名を直しました**（#818） | `corder` / `qa` エージェントが指す Serena のツールを、mcp-serena プラグインが出す `mcp__plugin_mcp-serena_serena__*`（Codex では `mcp__serena__*`）へ揃えました。`director` は memory のツールを使わない旨を明記しました |
 | **シンボル単位の手順を示します**（#818） | `refactoring` / `tdd-cycle` / `problem-solving` と `debugger` エージェントが、Serena が使えるときは `find_symbol` / `find_referencing_symbols` / `replace_symbol_body` で読み書きし、ファイルを丸ごと読まない手順を示します。使えなければ従来どおり Grep と Read を使います |
-| **言語サーバの設定は mcp-serena が担います**（#818） | 導入先のリポジトリごとに `/mcp-serena:language-servers` を 1 度実行します。詳しくは [mcp-serena の README](../mcp/mcp-serena/README.md) の「v2.1.0-dev.1 へ更新するとき」にあります |
+| **言語サーバの設定は mcp-serena が担います**（#818） | 導入先のリポジトリごとに `/mcp-serena:language-servers` を 1 度実行します。詳しくは [mcp-serena の README](../mcp/mcp-serena/README.md) の「v2.1.0 へ更新するとき」にあります |
 
-正式版のチャネル（ref を指定せずに登録した取得元）には、正式版を出すまで届きません。`develop` を登録した取得元なら、
-次で入れ替わります。**動いているセッションには反映されない**ため、更新したあとは起動し直してください。
+正式版のチャネル（ref を指定せずに登録した取得元）なら、次で入れ替わります。**動いているセッションには
+反映されない**ため、更新したあとは起動し直してください。開発版を試すために `develop` を登録した場合は、
+[docs/versioning-and-distribution.md の「ランタイムごとの取得と導入」](../../docs/versioning-and-distribution.md#ランタイムごとの取得と導入)
+の手順で ref を指定せずに登録し直してから導入します。
 
 ```bash
 claude plugin marketplace update ai-plugins
@@ -156,7 +158,7 @@ codex plugin add mcp-serena@ai-plugins
 にあります。
 
 ```bash
-grep -q '"version": "10.17.9-dev.1"' "$SCRIPTS/../.claude-plugin/plugin.json"; echo "exit=$?"   # 0 なら この版が入っている
+grep -q '"version": "10.17.9"' "$SCRIPTS/../.claude-plugin/plugin.json"; echo "exit=$?"   # 0 なら この版が入っている
 grep -qF 'mcp__plugin_mcp-serena_serena__' "$SCRIPTS/../agents/qa.md"; echo "exit=$?"   # 0 なら qa エージェントが mcp-serena のツール名を指す
 grep -qF 'find_referencing_symbols' "$SCRIPTS/../skills/refactoring/SKILL.md"; echo "exit=$?"   # 0 なら refactoring がシンボル単位の手順を示す
 ```
@@ -330,7 +332,7 @@ agy models   # 認証の確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.17.9-dev.1/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.17.9/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -352,14 +354,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.9-dev.1/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.9/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.17.9-dev.1  <path>
+# => ndf@ai-plugins  installed, enabled  10.17.9  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。

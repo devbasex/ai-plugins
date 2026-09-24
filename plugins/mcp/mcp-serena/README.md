@@ -101,9 +101,9 @@ bash plugins/mcp/mcp-serena/dev.kiro/install.sh
 - Serena の memory は使いません。知識は `docs/` に、手順は `skills/` に置いてください
 - 使い方の詳細は `docs/serena-guide.md` を参照してください
 
-## v2.1.0-dev.1 へ更新するとき
+## v2.1.0 へ更新するとき
 
-**開発版です。** `develop` にだけ載ります（ndf 10.17.9-dev.1 と同じ配布。#818）。
+**正式版です。** `main` に載ります（ndf 10.17.9 と同じ配布。#818）。中身は開発版 `2.1.0-dev.1` と同じで、版数の接尾辞だけを外しました。
 
 | 変わったこと | 中身 |
 | --- | --- |
@@ -127,7 +127,7 @@ codex plugin add mcp-serena@ai-plugins
 手元で確かめるコマンドです。`$ROOT` は導入先の `mcp-serena` のディレクトリで、どれもファイルを書き換えません。
 
 ```bash
-grep -q '"version": "2.1.0-dev.1"' "$ROOT/.claude-plugin/plugin.json"; echo "exit=$?"   # 0 なら この版が入っている
+grep -q '"version": "2.1.0"' "$ROOT/.claude-plugin/plugin.json"; echo "exit=$?"   # 0 なら この版が入っている
 grep -qF 'serena-agent==1.7.0' "$ROOT/.mcp.json"; echo "exit=$?"   # 0 なら Serena の版が固定されている
 python3 "$ROOT/scripts/serena-lsp.py" detect --json >/dev/null; echo "exit=$?"   # 0 なら 言語の検出が動く（今いるリポジトリを数えるだけ）
 ```
