@@ -118,13 +118,12 @@ def test_the_real_skeleton_passes():
     """現行の `cross-refactoring` の骨組みが通ること。"""
     skill = REPO_ROOT / "plugins/ndf/skills/cross-refactoring"
     result = run("--skill-dir", str(skill), "--external", "PR,SCOPE,BASELINE,HOST,"
-                 "MAX_TEST,MAX_OUTER,MAX_FIX,MAX_ITEMS,CI_CHECK,WORKFLOW_STEP,"
-                 "MODEL_ARGS,SYNC_COMMAND,PLAN_FILE")
+                 "MAX_FIX,CI_CHECK,WORKFLOW_STEP,MODEL_ARGS,SYNC_COMMAND,PLAN_FILE")
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_the_real_skeleton_gets_the_pool_from_start_round():
-    """母集合の出所が `start-round` にあること（#518-1 の直しそのもの）。"""
+def test_the_real_skeleton_gets_the_pool_from_init():
+    """母集合の出所が `init` にあること（#518-1。#933 でラウンドの入口が無くなった）。"""
     skill = REPO_ROOT / "plugins/ndf/skills/cross-refactoring"
     result = run("--skill-dir", str(skill), "--show-sources", "RUNTIMES")
-    assert "start-round" in result.stdout, result.stdout + result.stderr
+    assert "init" in result.stdout, result.stdout + result.stderr

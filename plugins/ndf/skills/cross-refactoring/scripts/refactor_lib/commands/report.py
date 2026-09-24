@@ -1,97 +1,72 @@
-"""提案ラウンドの収束判定と、状態の出力。
-
-`advance` / `status` / `report` を持つ。
-"""
+"""実行の終わりと報告（`finalize` / `status` / `report`、#933 の F8 と AC26）。"""
 from __future__ import annotations
 
 import argparse
 import pathlib
-import sys
+from collections import Counter
 from typing import Any
 
-import metrics as metrics_lib
 import models as models_lib
 import run_metrics
 import statefile
 
-from .. import info
-from ..gitfacts import safe_int
+from .. import allocation, clock, info, timeline
+from ..items import item_label
 from ..measure import summary_extra
 from ..outbound import plan_reference
+from ..plan import baseline_line
 from ..paths import load_state
-from ..proposals import duplicate_rate
-from ..rounds import finish_outer_rounds, STRUCTURE, TEST, entry_kind, item_kind, item_label, rounds_of_kind
-from ..vocabulary import DEFAULT_MAX_TEST_ROUNDS, DUPLICATE_RATE_THRESHOLD
+from ..phases import phase_record
+from ..vocabulary import DEFER_REASONS
+
+# `cross-review` の最終ステータスのうち、追記してよいもの。
+APPROVED = "approved"
 
 
-def cmd_advance(args: argparse.Namespace) -> None:
-    """ラウンドの繰り返しを続けるか判定する。
+def _gate_passed(state: dict[str, Any]) -> bool:
+    return (state.get("final_gate") or {}).get("status") == "passed"
 
-    終了コード: 0 = 続ける / 1 = 終了。
 
-    **テスト整備ラウンドから提案ラウンドへの切り替えもここで決める。** 判定を
-    1 か所へ置き、ラウンドを開く側は宣言に従うだけにする。**テスト整備の側で
-    終了はしない**（構造改善の提案ラウンドがこの後に続く）。
+def cmd_finalize(args: argparse.Namespace) -> None:
+    """最終ゲートが通った実行だけ、履歴へ 1 行追記する（AC17）。**失敗しても 0 で終わる。**
 
-    提案ラウンドの終了条件は 3 つ。採用 0 件 / 上限到達 / 前ラウンドとの提案
-    重複率がしきい値以上。**同じ提案が毎ラウンド出続けて終わらない**ことを防ぐ。
+    | 起動のされ方 | 追記する条件 |
+    | --- | --- |
+    | 単独 | 最終ゲートの検査が通り、`--review-status` が `approved` |
+    | 工程の 1 つ | 最終ゲートが通った（全体のテストか継続的統合） |
+
+    **単独起動で `--review-status` を渡さなければ追記しない。** その時点では
+    `cross-review` の合否が決まっておらず、収束しなかった実行が履歴に混ざる。
     """
     path, state = load_state(args.id)
-    rounds = state["rounds"]
-    if state.get("final"):
-        info(f"終了済みです（{state['final']}）")
-        sys.exit(1)
-    if not rounds:
-        return
-    last = rounds[-1]
-    if entry_kind(last) == TEST:
-        _advance_test_rounds(path, state, last)
-        return
-    if len(rounds_of_kind(rounds, STRUCTURE)) >= state["max_outer_rounds"]:
-        finish_outer_rounds(path, state, "max_outer_rounds")
-        sys.exit(1)
-    if last.get("adopted") == 0:
-        finish_outer_rounds(path, state, "no_more_proposals")
-        sys.exit(1)
-    previous = rounds_of_kind(rounds[:-1], STRUCTURE)
-    if previous:
-        # **同じ種類どうしで測る。** 鍵の形が種類で違うため、テスト整備ラウンドを
-        # 相手にすると重なりが常に 0 になり、収束の判定が働かない。
-        rate = duplicate_rate(
-            [tuple(k) for k in last.get("proposal_keys") or []],
-            [tuple(k) for k in previous[-1].get("proposal_keys") or []],
-        )
-        if rate >= DUPLICATE_RATE_THRESHOLD:
-            info(f"提案の重複率が {rate:.0%} で、前ラウンドとほぼ同じです")
-            finish_outer_rounds(path, state, "duplicate_proposals")
-            sys.exit(1)
-
-
-def _advance_test_rounds(
-    path: pathlib.Path, state: dict[str, Any], last: dict[str, Any]
-) -> None:
-    """テスト整備ラウンドを続けるか、構造改善の提案ラウンドへ移るかを決める。
-
-    収束の条件は**採用 0 件**（提案ラウンドと同じ形）。上限に達したときは採用が
-    残っていても移る。**どちらで移ったかを記録する**（収束して終わったのか、
-    歯止めで止まったのかを報告で読み分けるため）。
-    """
-    done = len(rounds_of_kind(state["rounds"], TEST))
-    limit = safe_int(state.get("max_test_rounds"), DEFAULT_MAX_TEST_ROUNDS)
-    if last.get("adopted") == 0:
-        reason = "no_more_test_proposals"
-        note = "足すべきテストの提案が出なくなりました"
-    elif done >= limit:
-        reason = "max_test_rounds"
-        note = f"テスト整備ラウンドが上限 {limit} に達しました"
+    gate = state.setdefault("final_gate", {"fix_rounds": 0, "checks": []})
+    standalone = not state.get("workflow_step")
+    status = getattr(args, "review_status", None)
+    if status is not None:
+        gate["review_status"] = status
+    state["phase"] = "done"
+    state.setdefault("ended_at", statefile.now())
+    ok = _gate_passed(state) and (not standalone or status == APPROVED)
+    if state.get("history_written"):
+        info("↻ 履歴へは追記済みです")
+    elif not ok:
+        why = ("cross-review の最終ステータスが渡されていない" if standalone and status is None
+               else f"最終ゲートが通っていない（{gate.get('status') or gate.get('mode')} / {status}）")
+        info(f"ℹ 配分の履歴へは追記しません（{why}）")
     else:
-        info(f"テスト整備ラウンド {done} / {limit} — 続けます")
-        return
-    state["round_kind"] = STRUCTURE
-    state["test_rounds_final"] = reason
+        _append_history(state)
     statefile.save(path, state)
-    info(f"{note}。構造改善の提案ラウンドへ進みます")
 
+
+def _append_history(state: dict[str, Any]) -> None:
+    try:
+        target = allocation.history_path(run_metrics.metrics_dir(), str(state["repo"]))
+        allocation.append_row(target, allocation.build_row(state))
+    except OSError as exc:
+        info(f"⚠ 配分の履歴へ追記できませんでした（{exc}）。進行は止めません")
+        return
+    state["history_written"] = True
+    info(f"📈 配分の履歴へ 1 行追記しました: {target}")
 
 
 def cmd_status(args: argparse.Namespace) -> None:
@@ -99,91 +74,164 @@ def cmd_status(args: argparse.Namespace) -> None:
     _, state = load_state(args.id)
     print(f"# cross-refactoring rf{state['id']}（{state['repo']} #{state['current_pr']}）")
     print(f"ホスト: {state['host']}（{state['host_detection']}）")
-    # **母集合は 1 つである**（#727 の決定 5）。提案と適用は同じ参加者で回す。
-    print(f"参加者（提案と適用）: {' / '.join(state['runtimes'])}")
-    print(f"局面: {state['phase']} / 提案ラウンド {state['outer_round']} "
-          f"/ {state['max_outer_rounds']}")
-    print(f"終了理由: {state.get('final') or '（未終了）'}")
+    print(f"参加者（提案）: {' / '.join(state['runtimes'])} / 実装担当: {state.get('implementer')}")
+    print(f"フェーズ: {state.get('phase')} / 想定最大時間: {state.get('budget_minutes')} 分")
     print()
-    print(_round_table(state))
+    print(_item_table(state))
 
 
 def cmd_report(args: argparse.Namespace) -> None:
-    """Step 8 — ラウンド表・項目表・見送り項目・指標を出す。"""
+    """完了報告（AC26）。フェーズ別の所要・想定最大時間との差・採用と見送りの件数（理由別）・
+    全体のテスト・Jev の使用を並べる。"""
     path, state = load_state(args.id)
     _print_header(state)
     print()
-    print("## ラウンド")
+    print("## フェーズ別の所要")
     print()
-    print(_round_table(state))
+    print(_phase_table(state))
     print()
     print("## 改善項目")
     print()
     print(_item_table(state))
     print()
     _print_participants(state)
-    # **取り消した項目の内訳は書かない**（#436 決定 6-b）。件数だけ述べ、内訳は
-    # 改修計画へ譲る。同じ一覧を 2 か所に置くと、片方だけが古くなる。
     print()
     _print_deferred(state)
+    print()
+    _print_fixed_values()
     if args.metrics:
-        _print_metrics(state)
+        print()
+        print("## 種類別の件数と所要")
+        print()
+        print(_kind_table(state))
     # **最後の行に置く**（#662 の AC23）。作業ツリーを消した後に要約を探す手がかりになる。
     print()
-    _print_run_metrics(path, state)
+    print(run_metrics.report_line(path, state, "cross-refactoring", summary_extra))
+
+
+def _elapsed_seconds(state: dict[str, Any]) -> float:
+    """`init` の開始から、最終ゲートの全体のテストの終わりまで（非機能の条件）。
+
+    `cross-review` の所要は含めない。終わりは最終ゲートの最後の検査、無ければ検証の
+    終わり、それも無ければ今。
+    """
+    gate = state.get("final_gate") or {}
+    checks = gate.get("checks") or []
+    end = checks[-1].get("at") if checks else None
+    end = end or phase_record(state, "verify").get("ended_at")
+    return max(clock.seconds_between(state.get("started_at"), end or clock.now()) or 0.0, 0.0)
 
 
 def _print_header(state: dict[str, Any]) -> None:
-    """見出し行と実行メタ情報（対象範囲・終了理由・改修計画・着手前テスト等）を出す。"""
+    budget_seconds = int(state.get("budget_minutes") or 0) * 60
+    elapsed = _elapsed_seconds(state)
+    judge = state.get("judge") or {}
+    whole = state.get("whole_test") or {}
+    gate = state.get("final_gate") or {}
     print(f"# cross-refactoring 実行報告 — {state['repo']} #{state['current_pr']}")
     print()
-    print(f"- ホスト: {state['host']}（{state['host_detection']}）")
     print(f"- 対象範囲: {', '.join(state['target_scope']) or '（未指定）'}")
-    print(f"- 終了理由: {state.get('final') or '（未終了）'}")
-    # **生の URL で書く**（#436 決定 6-b）。Markdown のリンクにすると、読み手の
-    # 画面から URL を取り出せない。
+    print(f"- 想定最大時間: {state.get('budget_minutes')} 分 / 所要: {elapsed / 60:.1f} 分"
+          f"（差 {(budget_seconds - elapsed) / 60:+.1f} 分。cross-review を除く）")
+    print(f"- 実装担当: {state.get('implementer')}（{state.get('implementer_reason')}）"
+          f" / モデル: {models_lib.label((state.get('implementer_model') or {}).get('requested'))}")
+    jev_line = "使った" if judge.get("kind") == "jev" else f"使わなかった（{judge.get('reason')}）"
+    print(f"- 判断に Jev を: {jev_line} / 呼び出しの失敗 {judge.get('failures', 0)} 回")
+    print(f"- 着手前の全体のテスト: {baseline_line(state.get('baseline_test') or {})}")
+    if whole.get("ran"):
+        print(f"- 検証の中の全体のテスト: 走らせた（印 {', '.join(whole.get('flags') or [])} / "
+              f"{whole.get('status')}{_whole_detail(whole)}）")
+    else:
+        print("- 検証の中の全体のテスト: 走らせなかった（危険の印が立たなかった）")
+    print(f"- 最終ゲート: {gate.get('mode') or '—'}（{gate.get('status') or '未実行'}"
+          f"{' / 検証の結果を使い回した' if gate.get('whole_test_reused') else ''}"
+          f" / 修正 {gate.get('fix_rounds', 0)} 回）")
+    print(f"- 監視が止めた段: {_stopped_line(state)}")
+    print(f"- 配分テーブル: {(state.get('plan') or {}).get('table_source') or '—'}")
     print(f"- 改修計画: {plan_reference(state)}")
-    if state.get("test_rounds_final"):
-        print(f"- テスト整備の終わり方: {state['test_rounds_final']}")
-    baseline = state.get("baseline_test") or {}
-    print(f"- 着手前のテスト: {baseline.get('command') or '（未指定）'}"
-          f"（{baseline.get('status')}）")
-    gate = state.get("final_gate") or {}
-    if gate:
-        print(f"- 最終ゲート: {gate.get('mode') or '—'}"
-              f"（{gate.get('status') or '未実行'}"
-              f" / 修正 {gate.get('fix_rounds', 0)} 回）")
 
 
-def _participant_failed_label(p: dict[str, Any]) -> str:
-    """確認を通らなかった参加者の表示を返す。"""
-    unavailable = p.get("unavailable") or {}
-    if unavailable:
-        return " / ".join(f"{n}（{d}）" for n, d in unavailable.items())
-    if p.get("probe_skipped"):
-        return "確認を飛ばした（NDF_SKIP_AUTH_CHECK）"
-    return "なし"
+def _stopped_line(state: dict[str, Any]) -> str:
+    """段の上限で監視が CLI を止めた段（決定 23）。止めていなければ「なし」。"""
+    stopped = [f"{name}（上限 {record['stopped'].get('timeout')} 秒）"
+               for name, record in (state.get("phases") or {}).items()
+               if isinstance(record, dict) and record.get("stopped")]
+    return " / ".join(stopped) or "なし"
+
+
+def _print_fixed_values() -> None:
+    """想定最大時間から導かず、固定のまま残した値（決定 24）。"""
+    print("## 固定のまま残した値")
+    print()
+    for name, value, why in timeline.FIXED_VALUES:
+        print(f"- {name}: {value}（{why}）")
+
+
+# 全体のテストが落ちたときの結末（決定 22）。
+_RESOLUTIONS = {
+    "kept": "変更が原因の失敗は無く、取り消さなかった",
+    "fixing": "直しの途中",
+    "fixed": "直して通った",
+    "narrowed": "直らず、印の項目を新しい順に取り消した",
+    "reverted_all": "落ちたテストを取り出せず、印の項目をまとめて取り消した",
+}
+
+
+def _whole_detail(whole: dict[str, Any]) -> str:
+    """落ちたときの見分けと結末。取り出せなかったときは理由を添える。"""
+    if whole.get("status") != "fail":
+        return ""
+    if not whole.get("resolution"):
+        return " / 印の項目を取り消した" if whole.get("reverted") else ""
+    counts = ""
+    if whole.get("failed_tests") is not None:
+        counts = (f" / 揺れ {len(whole.get('flaky') or [])}・元からの失敗 "
+                  f"{len(whole.get('preexisting') or [])}・変更が原因 {len(whole.get('caused') or [])}")
+    why = f"（{whole['unparsed_reason']}）" if whole.get("unparsed_reason") else ""
+    return f"{counts} / {_RESOLUTIONS.get(whole['resolution'], whole['resolution'])}{why}"
+
+
+def _phase_table(state: dict[str, Any]) -> str:
+    lines = ["| フェーズ | 所要（分） |", "| --- | ---: |"]
+    for name in ("propose", "plan", "add-tests", "implement", "verify", "fix"):
+        record = phase_record(state, name)
+        seconds = record.get("seconds")
+        lines.append(f"| {name} | {'—' if seconds is None else f'{seconds / 60:.1f}'} |")
+    final = (state.get("final_gate") or {}).get("whole_test_seconds")
+    lines.append(f"| 最終ゲートの全体のテスト | {'—' if final is None else f'{final / 60:.1f}'} |")
+    return "\n".join(lines)
+
+
+def _item_table(state: dict[str, Any]) -> str:
+    items = state.get("items") or []
+    if not items:
+        return "（改善項目なし）"
+    lines = [
+        "| ID | 対象 | 兆候 | 手法 | 段 | 見積り（分） | 状態 | 危険の印 | 修正 |",
+        "| --- | --- | --- | --- | --- | ---: | --- | --- | ---: |",
+    ]
+    for item in items:
+        estimate = sum(float(v or 0) for v in (item.get("estimate") or {}).values())
+        lines.append(
+            f"| {item['id']} | {item_label(item)} | {item.get('smell')} | {item.get('technique')} | "
+            f"{item.get('tier')} | {estimate:.1f} | {item.get('status')} | "
+            f"{', '.join(item.get('danger') or []) or '—'} | {item.get('fix_count', 0)} |"
+        )
+    return "\n".join(lines)
 
 
 def _print_participants(state: dict[str, Any]) -> None:
-    """「参加した者」の節を出す（#727 の F6）。
-
-    途中から誰を外したか・誰が確認を通らなかったかを、完了報告だけで読めるように
-    する。参加者の記録を持たない状態ファイル（この変更の前に始めた実行）では
-    「記録なし」と出す。
-    """
+    """「参加した者」の節（#727 の F6）。"""
     print("## 参加した者")
     print()
-    p = state.get("participants")
-    if not p:
-        print("- 使える者: 記録なし")
-        print()
-        return
+    p = state.get("participants") or {}
 
     def _names(values: Any) -> str:
         return " / ".join(values) if values else "なし"
 
-    failed = _participant_failed_label(p)
+    unavailable = p.get("unavailable") or {}
+    failed = (" / ".join(f"{n}（{d}）" for n, d in unavailable.items()) if unavailable
+              else "確認を飛ばした（NDF_SKIP_AUTH_CHECK）" if p.get("probe_skipped") else "なし")
     print(f"- 母集合: {_names(p.get('pool'))}")
     print(f"- 使える者: {_names(p.get('available'))}")
     print(f"- --exclude で外した者: {_names(p.get('excluded'))}")
@@ -193,80 +241,38 @@ def _print_participants(state: dict[str, Any]) -> None:
     changes = state.get("resume_changes") or []
     if not changes:
         print("- 再開で変えた値: なし")
-    else:
-        print("- 再開で変えた値:")
-        for c in changes:
-            print(f"  - {c.get('at')} {c.get('field')}: "
-                  f"{_change_value(c.get('from'))} → {_change_value(c.get('to'))}")
-    print()
+        return
+    print("- 再開で変えた値:")
+    for c in changes:
+        print(f"  - {c.get('at')} {c.get('field')}: {_change_value(c.get('from'))} → {_change_value(c.get('to'))}")
 
 
 def _change_value(value: Any) -> str:
-    """再開で変えた値の 1 つを 1 行へ収める。参加者の記録は使える者だけを出す。"""
     if isinstance(value, dict) and "available" in value:
         return " / ".join(value.get("available") or []) or "なし"
     return str(value)
 
 
 def _print_deferred(state: dict[str, Any]) -> None:
-    """見送り節（件数と改修計画への参照）を出す。"""
-    print("## 見送った提案")
+    """見送りの件数（理由別）。**内訳は改修計画にある**（#436 決定 6-b）。"""
+    deferred = state.get("deferred_items") or []
+    counts = Counter(d.get("defer_reason") for d in deferred)
+    reverted = [i for i in state.get("items") or [] if i.get("status") == "reverted"]
+    print("## 見送った提案と取り消した項目")
     print()
-    print(f"- 件数: {len(state['deferred_items'])} 件")
+    print(f"- 採用: {sum(1 for i in state.get('items') or [] if i.get('status') == 'verified')} 件"
+          f" / 取り消し: {len(reverted)} 件 / 見送り: {len(deferred)} 件")
+    print("- 見送りの理由別: " + " / ".join(f"{r} {counts.get(r, 0)}" for r in DEFER_REASONS))
     print(f"- 内訳: 改修計画にある — {plan_reference(state)}")
 
 
-def _print_metrics(state: dict[str, Any]) -> None:
-    """指標節を出す（`args.metrics` が真のときだけ呼ぶ）。"""
-    print()
-    print("# 指標")
-    print()
-    print(metrics_lib.format_report(metrics_lib.aggregate(state)))
-
-
-def _print_run_metrics(path: pathlib.Path, state: dict[str, Any]) -> None:
-    """run_metrics の要約 1 行を出す。"""
-    print(run_metrics.report_line(path, state, "cross-refactoring", summary_extra))
-
-
-def _round_table(state: dict[str, Any]) -> str:
-    """ラウンド表。**レビュー担当の列を持たない**（#727 の決定 6）。
-
-    レビュー工程は #436 で消えた。古い状態ファイルがレビュー担当を持っていても出さない。
-    """
-    lines = [
-        "| R | 種類 | 実装担当 | モデル | 採用 | 適用 | 見送り | 修正 |",
-        "| --- | --- | --- | --- | ---: | ---: | ---: | ---: |",
-    ]
-    for entry in state["rounds"]:
-        lines.append(
-            f"| {entry['round']} | "
-            f"{'テスト整備' if entry_kind(entry) == TEST else '構造改善'} | "
-            f"{entry.get('impl', '—')} | "
-            f"{models_lib.label((entry.get('impl_model') or {}).get('requested'))} | "
-            f"{entry.get('adopted', 0)} | {len(entry.get('apply', {}).get('applied', []))} | "
-            f"{len(entry.get('apply', {}).get('failed', []))} | {entry.get('fix_rounds', 0)} |"
-        )
-    return "\n".join(lines) if state["rounds"] else "（ラウンドなし）"
-
-
-def _item_table(state: dict[str, Any]) -> str:
-    if not state["items"]:
-        return "（改善項目なし）"
-    lines = [
-        "| ID | 対象 | 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |",
-        "| --- | --- | --- | --- | --- | --- | --- | ---: |",
-    ]
-    for item in state["items"]:
-        if item_kind(item) == TEST:
-            first, second, severity = item.get("case"), item.get("level"), "—"
-        else:
-            first, second = item.get("smell"), item.get("technique")
-            severity = item.get("severity") or "—"
-        lines.append(
-            f"| {item['item_id']} | {item_label(item)} | "
-            f"{first or '—'} | {second or '—'} | {severity} | "
-            f"{'/'.join(item.get('proposed_by', []))} | {item['status']} | "
-            f"{len(item.get('commits') or [])} |"
-        )
+def _kind_table(state: dict[str, Any]) -> str:
+    """種類別の件数と所要（実装計画 I10）。履歴へ書く行と同じ値。"""
+    row = allocation.build_row(state)
+    lines = ["| 種類 | 件数 | 秒 |", "| --- | ---: | ---: |"]
+    for kind, value in sorted((row.get("kinds") or {}).items()):
+        lines.append(f"| {kind} | {value.get('count')} | {value.get('seconds')} |")
+    verify, fix = row.get("verify") or {}, row.get("fix") or {}
+    lines.append(f"| verify | {verify.get('items')} | {verify.get('seconds')} |")
+    lines.append(f"| fix | {fix.get('launches')} | {fix.get('seconds')} |")
     return "\n".join(lines)

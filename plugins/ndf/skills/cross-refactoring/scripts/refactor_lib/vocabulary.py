@@ -63,42 +63,19 @@ SMELLS: dict[str, str] = _read_table("兆候", "日本語の名前")
 
 TECHNIQUES: dict[str, str] = _read_table("手法", "日本語の名前")
 
-# テスト整備ラウンドの語彙。**新しい語彙は作らない**（#436 決定 9）。値は既存の
-# 3 本の参照が持つ分類をそのまま使う。閉じるのは 2 つだけで、17 種の兆候に当たる
-# ものは要らない。テスト整備の提案の中身は「どの経路が固定されていないか」で
-# あって、悪さの分類ではない。
-
-# 固定する経路の種類。出所は `refactoring/references/characterization-tests.md` の
-# 「分岐を洗い出して固定する」の表である。
-TEST_CASES: dict[str, str] = {
-    "normal": "代表的な正常系",
-    "branch": "各分岐に入る入力",
-    "boundary": "境界値（0 件・空・上限）",
-    "error": "例外・エラーになる入力",
+# 提案の観点（#933 の AC5）。**「多面的に」を観点の一覧として示す。** 一覧が無いと、
+# 参加者は目についた兆候に偏る（#917 では `long_method` が 10 件）。観点は兆候の語彙を
+# 探す入口であって、語彙そのものではない（提案の `smell` は兆候の語彙から選ぶ）。
+VIEWPOINTS: dict[str, str] = {
+    "duplication": "重複 — 同じ知識・同じ手順が 2 か所以上にある",
+    "mixed_responsibility": "責務の混在 — 1 つの関数・クラスが別々の理由で変わる",
+    "branching": "分岐の表し方 — 同じ条件の分岐が散らばる・種類ごとの分岐が伸び続ける",
+    "naming": "名前 — 名前が中身と食い違う・同じものを別の名前で呼ぶ",
+    "dependency_direction": "依存の向き — 下の層が上の層を読む・循環する・知りすぎる",
+    "testability": "テストの書きにくさ — 外部への依存や隠れた状態のせいで単体で試せない",
+    "data_shape": "データの形 — 基本型の羅列・いつも一緒に渡る引数の組",
+    "size": "大きさ — 長すぎる関数・大きすぎるクラス・長い引数の列",
 }
-
-# どの階層で固定するか。出所は `tdd-cycle/references/testing-levels.md` である。
-# **並びは階層の低い順**で、同じ経路に複数の階層が挙がったときは低い方を採る
-# （「上の階層へ持ち上げない」）。
-TEST_LEVELS: dict[str, str] = {
-    "unit": "単体",
-    "integration": "結合",
-    "contract": "契約",
-    "e2e": "端から端まで",
-}
-
-
-def test_vocabulary() -> dict[str, Any]:
-    """テスト整備の提案プロンプトへ**そのまま列挙する**ための語彙集合。
-
-    構造改善の `vocabulary()` と同じ形にする。手順書を読ませるだけでは足りず、
-    許容値を列挙しないと語彙外の値が返って全件降格する（実測）。
-    """
-    return {
-        "cases": dict(TEST_CASES),
-        "levels": dict(TEST_LEVELS),
-    }
-
 
 # 重要度。語彙外の提案は `unknown` へ降格し、しきい値で自動的に落ちるようにする。
 SEVERITY_ORDER = {"unknown": 0, "minor": 1, "major": 2, "critical": 3}
@@ -120,26 +97,50 @@ def vocabulary() -> dict[str, Any]:
         "smells": dict(SMELLS),
         "techniques": dict(TECHNIQUES),
         "severities": list(SEVERITIES),
+        "viewpoints": dict(VIEWPOINTS),
     }
 
 
-# 1 つの群に対して適用担当を起動し直す上限。**引数を足さない**（#647）。
-# 2 回目は別の担当が試す。2 回とも結果を残さなければ、担当ではなく群の側を疑える。
-# 3 回以上にしても、壊れた CLI に当たる確率が上がるだけである。
-MAX_APPLY_ATTEMPTS = 2
+# 想定最大時間の既定（分）。2026-09-24 利用者の指示で 30 分（#754 の指針「60 分以内」の中に収める）。
+DEFAULT_BUDGET_MINUTES = 30
 
-# 無進捗と見なすまでの余白。テストの制限時間（`--test-timeout`）へ足した値を
-# 起動が `IMPL_STALL_TIMEOUT` として出す。適用と修正の担当はテストを 1 回実行し、
-# その間は何も出力しないため、制限時間そのままでは打ち切られる（#553）。
-IMPL_STALL_MARGIN = 900
+# 計画へ渡す候補の上限（決定 17）。`path` + `symbol` の組を上位から 30 組、組の中は
+# 上位 3 件まで。計画の入力と Jev の「同じ変更か」の問いの数（最大 90 回）を抑える。
+CANDIDATE_GROUPS = 30
+CANDIDATES_PER_GROUP = 3
 
-# 適用と修正のコミットに必須のトレーラー。1 つでも欠けたら当該項目を失敗にする。
-# 自由文で「codex が実装」と書かせると集計に使えないため、必ずトレーラー形式にする。
-REQUIRED_TRAILERS = ("Item-Id", "Round", "Impl-Runtime", "Impl-Model")
+# Jev の答えを使う確信度の下限（設計の「Jev の問い」の表）。下回ったら実装担当の答えを使う。
+JEV_TIER_CONFIDENCE = 0.6
+JEV_DUPLICATE_CONFIDENCE = 0.8
+JEV_RISK_CONFIDENCE = 0.7
 
-# 最終ゲート（Step 7）の修正コミットに必須のトレーラー。**`Item-Id` と `Round` は
-# 求めない。** 最終ゲートが直すのは全体のテストの失敗であって、改善項目にも提案
-# ラウンドにも属さない。書かせると、実在しない項目番号を実装担当が作ることになる。
+# 見送りの理由（#933 の AC9）。**この 8 つに限る。** 検証で取り消した項目は見送りではなく
+# 項目の状態（`reverted`）で表す。
+DEFER_BUDGET = "budget"
+DEFER_RANK = "rank"
+DEFER_DUPLICATE = "duplicate"
+DEFER_VOCABULARY = "vocabulary"
+DEFER_THRESHOLD = "threshold"
+DEFER_NO_TARGET = "no_target"
+DEFER_TEST_FAILED = "test_failed"
+DEFER_NOT_DONE = "not_done"
+DEFER_REASONS = (
+    DEFER_BUDGET, DEFER_RANK, DEFER_DUPLICATE, DEFER_VOCABULARY, DEFER_THRESHOLD,
+    DEFER_NO_TARGET, DEFER_TEST_FAILED, DEFER_NOT_DONE,
+)
+
+# フェーズの名前（#933）。**状態・履歴・`launch-cli.sh`・`limits.py`・雛形で同じ語を使う。**
+PHASES = ("propose", "plan", "add-tests", "implement", "verify", "final", "done")
+
+# テストの追加・実装・修正のコミットに必須のトレーラー。1 つでも欠けたら当該項目を
+# 失敗にする。自由文で「codex が実装」と書かせると集計に使えないため、必ずトレーラー
+# 形式にする。**項目とコミットの対応は `Item-Id` だけで決める**（#933 の実装計画 I4）。
+# ラウンドが無くなったため `Round` は求めない。
+REQUIRED_TRAILERS = ("Item-Id", "Impl-Runtime", "Impl-Model")
+
+# 最終ゲートの修正コミットに必須のトレーラー。**`Item-Id` は求めない。** 最終ゲートが
+# 直すのは全体のテストの失敗であって、改善項目に属さない。書かせると、実在しない
+# 項目番号を実装担当が作ることになる。
 FINAL_FIX_TRAILERS = ("Impl-Runtime", "Impl-Model")
 
 # 適用で必ず配置する Skill。ここに無いものは配らない。
@@ -170,11 +171,13 @@ PLAN_COMMIT_MESSAGE = (
 
 # 改善項目の状態を、Pull Request を読む側に通じる語へ置き換える。
 ITEM_STATUS_LABELS = {
-    "pending": "未着手",
-    "applied": "検証中",
-    "done": "採用",
-    "abandoned": "取り消し",
-    "blocked": "着手せず",
+    "planned": "未着手",
+    "tested": "テストを追加済み",
+    "implemented": "検証中",
+    "failing": "修正中",
+    "verified": "採用",
+    "reverted": "取り消し",
+    "deferred": "見送り",
 }
 
 # 実差分行数が見積りのこの倍数を超えたら範囲の逸脱とみなす。
@@ -198,32 +201,3 @@ EXTRACTION_TECHNIQUES: frozenset[str] = frozenset(
     if factor == str(EXTRACTION_DIFF_BUDGET_FACTOR)
 )
 
-# 1 改善項目が履歴に残せるコミット数。
-#
-# **手順を 1 手ずつ進めることと、その途中経過を履歴に残すことは別である。**
-# 手ごとにテストを回して安全に進めるのは変わらないが、残すのは項目単位の
-# 1 コミットだけにする。刻んだままだと Pull Request を読む側が改善項目と履歴を
-# 1 対 1 で辿れず、取り消しと積み直しのコミットも件数に比例して増える
-# （実測: 採用 12 件に対して適用 34 コミット、取り消しと積み直しで 25 コミット）。
-MAX_COMMITS_PER_ITEM = 1
-
-# 現状固定テストが要る項目だけは 2 コミットを許す。テストと実装を 1 コミットへ
-# 混ぜると、「テストを先に足した」ことを履歴から確かめられなくなる。
-MAX_COMMITS_PER_ITEM_WITH_TEST_GAP = 2
-
-# テスト 1 回あたりの上限（秒）。生成されたコードやテストが無限ループに入ると、
-# 待ち続けて**進行全体が止まる**。打ち切って失敗として扱う。
-DEFAULT_TEST_TIMEOUT = 900
-
-# 提案の重複率がこの割合を超えたら、提案ラウンドの繰り返しを収束とみなす。
-DUPLICATE_RATE_THRESHOLD = 0.7
-
-# テスト整備ラウンドの既定の上限。**構造改善より少ない。** 母集合の増え方が違う
-# ためである。構造を変えると新しい兆候が見えて提案の母集合は増えるが、テストが
-# 薄い経路の集合は対象のコードを変えないため最初から確定している。2 回目に出るのは
-# 1 回目の挙げ漏らしだけである。**上限は歯止めであって、回数の指定ではない。**
-DEFAULT_MAX_TEST_ROUNDS = 2
-
-# レビュー結果の形式不正で差し戻せる回数。超えたら変更要求として扱う。
-# 差し戻しを無限に繰り返すと、形式を満たせないランタイムでループが止まらなくなる。
-MAX_INVALID_REVIEWS = 1

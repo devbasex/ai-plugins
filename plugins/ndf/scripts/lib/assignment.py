@@ -10,7 +10,7 @@
 参加者は「母集合の既定 ∪ 足す者 − 外す者」で決め（`resolve_participants`）、確認を
 通った者だけを使える者（`available`）として記録する。担当の単位は席の名前
 （`SEAT_PATTERN`。`claude-2` のように同じランタイムの 2 つ目を表す）で、cross-review の
-2 席は `review_seats` が、cross-refactoring の適用担当は `impl_assign` が決める（#727）。
+2 席は `review_seats` が、cross-refactoring の実装担当は `choose_implementer` が決める（#933）。
 cross-refactoring は提案と適用を同じ参加者で回し、レビュー担当を持たない。
 """
 from __future__ import annotations
@@ -313,16 +313,25 @@ def review_seats(round_no: int, available: list[str], fallback: list[str]) -> li
     return [fallback[0], f"{fallback[0]}-2"]
 
 
-def impl_assign(round_no: int, participants: list[str]) -> str:
-    """cross-refactoring の適用担当 1 者を決める: `participants[round_no % len]`。
+def choose_implementer(
+    participants: list[str], host: str, named: Optional[str] = None,
+) -> tuple[str, str]:
+    """cross-refactoring の実装担当 1 者と、その決め方を返す（#933 の決定 1）。
 
-    式はこの関数より前の輪番（4 者の固定の順を `round_no % 4` で引く式）と同じで、
-    除数だけを参加者の数にする（設計の決定 7）。
-    ラウンド 1 が `participants[1]` から始まるため、ホスト claude の既定
-    （claude / codex / kiro）でもホストが最初に適用する形にならない。
+    決め方は「名指し（`named`）→ ホストが参加者にいればホスト → 参加者の先頭」で、
+    戻り値の 2 つ目は `named` / `host` / `first` のどれかである。状態に依らないため、
+    同じ参加者と同じ指定なら再開しても同じ者になる。
+
+    **輪番は持たない。** 1 回の実行の計画・テスト追加・実装・修正を同じ 1 者が通す。
+    名指しが参加者に無いときは中断する（誰が実装したかが指定と食い違うため）。
     """
-    if round_no < 1:
-        raise AssignmentError(f"ラウンド番号は 1 以上です: {round_no}")
     if not participants:
-        raise AssignmentError("適用担当を選べる参加者がいません")
-    return participants[round_no % len(participants)]
+        raise AssignmentError("実装担当を選べる参加者がいません")
+    if named:
+        if named not in participants:
+            raise AssignmentError(
+                f"--implementer {named} は参加者にいません（参加者: {', '.join(participants)}）")
+        return named, "named"
+    if host in participants:
+        return host, "host"
+    return participants[0], "first"

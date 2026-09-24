@@ -12,7 +12,7 @@
 表の既定値では、全工程 × 全担当の組で「無進捗の許容 < 監視の上限 < CLI の上限」が成り立つ
 （`check`）。上書きした結果が崩れたときは、監視が担当ごとに警告する。
 
-cross-refactoring の `apply` / `fix` / `final-fix` には、骨組みが `--stall-timeout` を引数で
+cross-refactoring の `add-tests` / `implement` / `fix` / `final-fix` には、骨組みが `--stall-timeout` を引数で
 渡す（テスト 1 回を含む無出力の最長が工程で決まるため）。その許容はこの表に持たない。
 
 Usage:
@@ -33,8 +33,12 @@ PHASE_TIMEOUT = {
     "review": 1200,
     "critique": 1200,
     "propose": 1200,
+    # cross-refactoring の 5 フェーズ（#933）。計画は提案と同じ桁。テストの追加と実装の
+    # 値は既定の下限で、駆動が予算から導いた上限を `--timeout` で渡す。
+    "plan": 1200,
     "judge-test-changes": 1200,
-    "apply": 3600,
+    "add-tests": 3600,
+    "implement": 3600,
     "fix": 3600,
     "final-fix": 3600,
 }

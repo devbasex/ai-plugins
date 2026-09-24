@@ -75,7 +75,7 @@ def _launch_lib(tmp_path: pathlib.Path, seventh: str | None, **env: str) -> subp
 
 @pytest.mark.parametrize(("phase", "expected"), [
     ("review", "1320s"), ("critique", "1320s"), ("propose", "1320s"),
-    ("judge-test-changes", "1320s"), ("apply", "3720s"), ("fix", "3720s"),
+    ("judge-test-changes", "1320s"), ("implement", "3720s"), ("fix", "3720s"),
     ("final-fix", "3720s"),
 ])
 def test_a_phase_name_derives_the_cli_timeout(tmp_path, phase: str, expected: str) -> None:
@@ -103,13 +103,13 @@ def test_a_number_is_used_as_seconds(tmp_path) -> None:
     assert _print_timeout(_recorded(tmp_path)) == "900s"
 
 
-def test_an_empty_value_takes_the_apply_value(tmp_path) -> None:
+def test_an_empty_value_takes_the_implement_value(tmp_path) -> None:
     r = _launch_lib(tmp_path, "")
     assert r.returncode == 0, r.stderr
     assert _print_timeout(_recorded(tmp_path)) == "3720s"
 
 
-def test_an_omitted_value_takes_the_apply_value(tmp_path) -> None:
+def test_an_omitted_value_takes_the_implement_value(tmp_path) -> None:
     r = _launch_lib(tmp_path, None)
     assert r.returncode == 0, r.stderr
     assert _print_timeout(_recorded(tmp_path)) == "3720s"
