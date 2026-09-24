@@ -181,7 +181,11 @@ plugins/ndf/
 | `NDF_RELAY_QUIET` | 中継本体の待ち | `notice` の出力 |
 | --- | --- | --- |
 | `nan` | 待たずに切り替える（`経過 < nan` が偽） | `relay`。静まりを 0 として数える（N = 10） |
-| `inf` | 切り替えない | `outside`。自動では切り替わらないため、貼り付けの手順を示す |
+| `inf` | 切り替えない | 1 行目は `relay` のまま、2 行目に貼り付けの手順を示す |
+
+**1 行目は中継の直接の子かだけを表し、`is-child` の判定と常に一致させる。** 自動で切り替わるかは 2 行目が
+表す。1 行目を切り替えの可否で変えると、`token-guard.sh` が中継の子を外と読み、上限を超えた起動を 1 度
+通してしまう（「上限を超えたら hook が止める」の中継の下の規則が外れる）。
 
 ### 処理の流れ
 
@@ -285,17 +289,20 @@ LLM が組み立てた中身をスクリプトが写すだけになり、減る�
 | AC2 | `NDF_RELAY_DIR` が無い・中継が動いていない・直接の子でない | `outside` | 貼り付けの手順の 1 文 | 0 |
 | AC3 | `NDF_RELAY_QUIET` が数でない | AC1 と同じ | N を既定 5 で数える（中継本体の `_num` と同じ。N = 15） | 0 |
 | AC3b | `NDF_RELAY_QUIET` が負 | AC1 と同じ | 静まりを 0 として数える（中継本体は負の静まりを待たない。N = 10） | 0 |
-| AC3c | `NDF_RELAY_QUIET` が `nan` / `inf` | `relay` / `outside` | `nan` は静まりを 0 として数える（N = 10）。`inf` は貼り付けの手順 | 0 |
+| AC3c | `NDF_RELAY_QUIET` が `nan` / `inf` | `relay` | `nan` は静まりを 0 として数える（N = 10）。`inf` は貼り付けの手順 | 0 |
 
 **規則と文面:**
 
-- [ ] AC4: `context-window.md` の「新しい会話で戻す」が、告知を `relay.py notice` の 2 行目で書くと定める。
+- [ ] AC4: `context-window.md` の「新しい会話で戻す」が、Claude Code では告知を `relay.py notice` の 2 行目で
+  書くと定める。conductor は `python3 "$SCRIPTS/relay.py" notice` で呼ぶ（`$SCRIPTS` は `scripts-lookup.md`）。
+  解決できないか失敗したときは中継の外として扱う。Codex / Kiro / agy は今の「中身を新しい会話へ貼り付ける」のまま。
   中継の下では、手で入力させる文（「次の 1 行を使って」「貼り付け」）を書かないと定める
 - [ ] AC5: 区間の切れ目の再起動は関門ではないと定める。ブロックの前に承認・確認（`AskUserQuestion` を含む）を
   挟まない。書く先は `context-window.md` の同じ節と、`development-workflow` の `SKILL.md` の関門の節
 - [ ] AC5b: 同じ 2 箇所が、`/goal` の文面の「承認を求める」は関門 2 つだけを指すと定める
 - [ ] AC6: `token-guard.sh` が中継の下で起動を止めたとき、拒否文が `notice` の 2 行目をそのまま含む。
-  「確認を挟まずに出して終える」も含む。中継の外の拒否文は変えない
+  「確認を挟まずに出して終える」も含む。中継の外の拒否文は変えない。`NDF_RELAY_QUIET=inf` でも中継の子なら
+  止め続ける（1 度の通しをしない）
 - [ ] AC7: `restart` の Skill の手順 1 が `relay.py notice` を 1 回実行し、判定と文面を得る。
   `${CLAUDE_PLUGIN_ROOT}` が置き換わらず `relay.py` を呼べないときは、中継の外として扱い、Skill に残した
   外の文面（今の手順 3 の外の行と同じ）を示す
@@ -336,9 +343,9 @@ LLM が組み立てた中身をスクリプトが写すだけになり、減る�
 | --- | --- |
 | AC1 | `test_relay.py`: 中継の作業ディレクトリと `child.pid` を用意した子として `notice` を実行し、1 行目 `relay`・2 行目の秒数（既定 15、`NDF_RELAY_QUIET=7.5` で 18）・終了コード 0 |
 | AC2 | `test_relay.py`: `NDF_RELAY_DIR` 無し・中継停止・直接の子でない、の 3 通りで 1 行目 `outside`・終了コード 0 |
-| AC3・AC3b・AC3c | `test_relay.py`: `NDF_RELAY_QUIET=abc` で秒数 15、`-3` と `nan` で秒数 10、`inf` で `outside` |
+| AC3・AC3b・AC3c | `test_relay.py`: `NDF_RELAY_QUIET=abc` で秒数 15、`-3` と `nan` で秒数 10、`inf` で 1 行目 `relay`・2 行目が貼り付けの手順 |
 | AC4・AC5・AC5b・AC7・AC7b | レビューで読む（文言を照合するテストは書かない。AGENTS.md） |
-| AC6 | `test_token_guard.py`: 中継の下で上限を超えたとき、拒否文に `notice` の 2 行目が含まれる。外では従来の拒否文と一致する |
+| AC6 | `test_token_guard.py`: 中継の下で上限を超えたとき、拒否文に `notice` の 2 行目が含まれる。`NDF_RELAY_QUIET=inf` でも同じ起動を 2 度続けて止める。外では従来の拒否文と一致する |
 | AC8 | 既存の `test_relay.py` の `is-child` と `run` のテストが変わらず通る |
 | AC9 | 検証手段のテストのコマンドが全件通る |
 
