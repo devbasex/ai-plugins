@@ -18,7 +18,7 @@
 
 **手順と引数の表は
 [`cross-refactoring` の SKILL.md](../../plugins/ndf/skills/cross-refactoring/SKILL.md)と
-[`docs/`](../../plugins/ndf/skills/cross-refactoring/docs/02-apply-and-review.md)が正である。**
+[`docs/`](../../plugins/ndf/skills/cross-refactoring/docs/02-plan-and-implement.md)が正である。**
 ここに書き写さない。この文書が扱うのは、そこに書かない決定の理由と、進行の内部の契約である。
 
 ## 用語
@@ -405,6 +405,6 @@ graph TD
 - [PR #796](https://github.com/devbasex/ai-plugins/pull/796) — 実装
 - [起動 1 回の結末の語彙と起動し直しの可否](cross-review-launch-outcome.md)
 - [参加する CLI と席の決め方](cross-review-participants-and-seats.md)
-- [`cross-refactoring` の適用と検証の手順](../../plugins/ndf/skills/cross-refactoring/docs/02-apply-and-review.md)
-- [`cross-refactoring` の修正と報告の手順](../../plugins/ndf/skills/cross-refactoring/docs/04-fix-and-report.md)
+- [`cross-refactoring` の適用と検証の手順](../../plugins/ndf/skills/cross-refactoring/docs/02-plan-and-implement.md)
+- [`cross-refactoring` の修正と報告の手順](../../plugins/ndf/skills/cross-refactoring/docs/04-verify-and-report.md)
 - [`cross-refactoring` の手順](../../plugins/ndf/skills/cross-refactoring/SKILL.md)

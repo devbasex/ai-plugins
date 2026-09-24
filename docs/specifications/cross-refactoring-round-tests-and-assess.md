@@ -30,7 +30,7 @@ SIGKILL が届く（#883）。
 
 **手順と引数の表は
 [`cross-refactoring` の SKILL.md](../../plugins/ndf/skills/cross-refactoring/SKILL.md)・
-[`docs/`](../../plugins/ndf/skills/cross-refactoring/docs/02-apply-and-review.md)と、
+[`docs/`](../../plugins/ndf/skills/cross-refactoring/docs/02-plan-and-implement.md)と、
 `development-workflow` の
 [`workflow-modes.md`](../../plugins/ndf/skills/development-workflow/references/workflow-modes.md)
 「構造改善の退避先」・

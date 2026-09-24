@@ -43,8 +43,7 @@ DEFAULT_SKILLS = ("plugins/ndf/skills/cross-refactoring",)
 
 # 骨組みの外から渡る値。利用者が引数として与えるものと、この Skill の入口が決めるもの。
 DEFAULT_EXTERNAL = (
-    "PR", "SCOPE", "BASELINE", "HOST", "MAX_TEST", "MAX_OUTER", "MAX_FIX",
-    "MAX_ITEMS", "CI_CHECK", "WORKFLOW_STEP", "MODEL_ARGS", "SYNC_COMMAND",
+    "PR", "SCOPE", "BASELINE", "HOST", "MAX_FIX", "CI_CHECK", "WORKFLOW_STEP", "MODEL_ARGS", "SYNC_COMMAND",
     "PLAN_FILE", "ROTATE_MODE", "ONLY", "FOCUS", "EXTRA_INSTRUCTIONS_FILE",
     "INITIAL_PR", "MAX_ROUNDS", "ROTATE_AFTER",
 )
