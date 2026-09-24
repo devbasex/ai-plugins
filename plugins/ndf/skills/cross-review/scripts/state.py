@@ -1881,186 +1881,6 @@ class _InitialStateContext(NamedTuple):
     manual_extra_review: str
 
 
-def _resolve_pr_and_ownership(
-    pr: object, repo: str, worktree: str, args_worktree: str | None
-) -> _InitPRContext | None:
-    # 新規 init: プリチェック。
-    # **作成者・head・base は REST の 1 回でまとめて取る。** 項目ごとに `gh pr view` を
-    # 投げていた分（GraphQL 3 点）と、リポジトリ名の解決（同 1 点）が 0 点になる。
-    meta = _fetch_pr_metadata(pr, repo)
-    if meta is None:
-        die(f"PR #{pr} のメタデータを取得できません（リポジトリ名: {repo}）")
-        return None
-    if meta.repo != repo:
-        repo = meta.repo
-        if not args_worktree:
-            worktree = str(_default_worktree_base() / _repo_slug(repo) / f"pr{pr}")
-    if meta.rate_remaining is not None:
-        info(f"ℹ GitHub REST の残量: {meta.rate_remaining}")
-
-    me = _sh(["gh", "api", "user", "--jq", ".login"])
-    author = meta.author
-    is_own = (me == author)
-    event_downgrade = is_own
-    if is_own:
-        info(f"⚠ 自分の PR (author={me}) — REQUEST_CHANGES → COMMENT 強制ダウングレード")
-
-    return _InitPRContext(
-        repo=repo,
-        worktree=worktree,
-        meta=meta,
-        me=me,
-        author=author,
-        is_own=is_own,
-        event_downgrade=event_downgrade,
-    )
-
-
-def _prepare_review_instructions(
-    pr: object, repo: str, manual_extra_review: str
-) -> _InitReviewContext:
-    changed_files = _fetch_changed_files(pr, repo)
-    auto_review_categories = _classify_changed_files(changed_files)
-    auto_review = _auto_review_instructions(auto_review_categories)
-    review_instructions = _combined_review_instructions(auto_review, manual_extra_review)
-    return _InitReviewContext(
-        changed_files=changed_files,
-        auto_review_categories=auto_review_categories,
-        auto_review=auto_review,
-        review_instructions=review_instructions,
-    )
-
-
-def _prepare_worktree_and_comments(
-    worktree: str, pr: object, head_branch: str, repo: str
-) -> _InitWorkspaceContext:
-    # worktree 分離 — _tmp_dir() より先に worktree を作成/確認する
-    if not pathlib.Path(worktree).exists():
-        _create_worktree(worktree, pr, head_branch)
-    elif _is_registered_worktree(worktree):
-        info(f"↻ 既存 worktree 流用: {worktree}")
-        _sync_worktree(worktree, pr, head_branch)
-    else:
-        # パスは存在するが現リポジトリの worktree ではない (別リポジトリの残骸等)。
-        # 流用すると git 操作が壊れるため退避して作り直す。
-        stale = f"{worktree}.stale-{time.strftime('%Y%m%d%H%M%S')}"
-        pathlib.Path(worktree).rename(stale)
-        info(f"⚠ 現リポジトリの worktree でないため退避: {stale}")
-        _create_worktree(worktree, pr, head_branch)
-
-    # worktree 作成/確認後に _tmp_dir() を呼ぶ (ここで .cross_review/ が作られる)
-    tmp_dir = _tmp_dir(worktree)
-    state_file = tmp_dir / f"cross-review-pr{pr}-state.json"
-
-    # 既存コメントスナップショット（重複指摘防止）。
-    # 3 ソース (インラインコメント / レビュー body / PR レベルコメント) を
-    # fix skill の共有スクリプトで一括取得する。
-    existing_path = tmp_dir / f"cross-review-pr{pr}-existing-comments.txt"
-    error = _fetch_existing_comments(repo, int(pr), existing_path, strict=False)
-    if error is not None:
-        die(f"既存コメント取得失敗 (重複検出無効のため中断): {error}")
-
-    return _InitWorkspaceContext(
-        tmp_dir=tmp_dir,
-        state_file=state_file,
-    )
-
-
-def _prepare_initial_assignment(args: argparse.Namespace) -> _InitialAssignment:
-    """担当ホストを確定し、起動対象の認証を検査する。"""
-    # **ホストを先に確定する。** 状態ファイルの `host` として残り、出力にも出る。
-    # 推定できないときに既定を置かない（間違ったまま一周してしまう）。
-    try:
-        host, host_source = assignment.detect_host(getattr(args, "host", None))
-    except assignment.AssignmentError as e:
-        die(str(e))
-        raise
-    info(f"ホストの判定: {host}（{host_source}）")
-    # 使える者の解決は共通層が持つ（#727）。通らない者は外して続け、使える者が
-    # 1 者なら同じランタイムの 2 つ目で席を埋める。名前の矛盾と 0 者は終了コード 1。
-    participants = _resolve_reviewers(host, args)
-    return _InitialAssignment(
-        host=host, host_source=host_source, participants=participants)
-
-
-def _build_initial_review_state(
-    args: argparse.Namespace,
-    ctx: _InitialStateContext,
-) -> dict[str, Any]:
-    """確定済みの材料から、副作用なしに初期状態を組み立てる。"""
-    host, host_source, participants = ctx.assignment
-    only, _include, _exclude = _normalize_participant_args(args)
-    return {
-        "started_at": _now(),
-        "host": host,
-        "host_source": host_source,
-        # 引数の既定は未指定（`None`）で、新規の経路がここで定数を置く（決定 13）
-        "max_rounds": args.max_rounds if args.max_rounds is not None else 12,
-        "rotate_after": args.rotate_after if args.rotate_after is not None else 8,
-        "only": only,
-        "participants": participants,
-        "resume_changes": [],
-        "current_pr": ctx.pr,
-        "worktree_path": ctx.pr_ctx.worktree,
-        "tmp_dir": str(ctx.ws_ctx.tmp_dir),
-        "repo": ctx.pr_ctx.repo,
-        "head_branch": ctx.pr_ctx.meta.head_branch,
-        "base_branch": ctx.pr_ctx.meta.base_branch,
-        "pr_author": ctx.pr_ctx.author,
-        "viewer_login": ctx.pr_ctx.me,
-        "is_own_pr": ctx.pr_ctx.is_own,
-        "event_downgrade": ctx.pr_ctx.event_downgrade,
-        "changed_files": ctx.review_ctx.changed_files,
-        "auto_review_categories": ctx.review_ctx.auto_review_categories,
-        "auto_review_instructions": ctx.review_ctx.auto_review,
-        "manual_extra_review_instructions": ctx.manual_extra_review,
-        "extra_review_instructions": ctx.manual_extra_review,
-        "review_instructions": ctx.review_ctx.review_instructions,
-        "pr_history": [{"pr": ctx.pr, "opened_at": _now(), "closed_at": None, "rounds": 0}],
-        "rounds": [],
-        "deferred_nits": [],
-        "rejected_findings": [],
-        "review_findings": [],
-        "evidence_rounds": [],
-        "verify_commands": list(getattr(args, "verify_command", None) or []),
-        "verify_exit_codes": list(getattr(args, "verify_exit_code", None) or []),
-        "carried_over": None,
-        "final": None,
-    }
-
-
-def _finalize_initial_state(
-    args: argparse.Namespace,
-    pr: object,
-    pr_ctx: _InitPRContext,
-    review_ctx: _InitReviewContext,
-    ws_ctx: _InitWorkspaceContext,
-    manual_extra_review: str,
-) -> None:
-    initial_assignment = _prepare_initial_assignment(args)
-    context = _InitialStateContext(
-        pr, pr_ctx, review_ctx, ws_ctx, initial_assignment, manual_extra_review
-    )
-    state = _build_initial_review_state(args, context)
-    _write_state(ws_ctx.state_file, state)
-    info(f"✅ state 初期化: {ws_ctx.state_file}")
-    _print_init_result(
-        _InitResult(
-            pr=pr,
-            worktree=pr_ctx.worktree,
-            tmp_dir=ws_ctx.tmp_dir,
-            repo=pr_ctx.repo,
-            head_branch=pr_ctx.meta.head_branch,
-            base_branch=pr_ctx.meta.base_branch,
-            is_own=pr_ctx.is_own,
-            event_downgrade=pr_ctx.event_downgrade,
-            has_extra=bool(review_ctx.review_instructions),
-            carried_count=0,
-            resumed=False,
-        )
-    )
-
-
 def _init_new_state(
     args: argparse.Namespace,
     pr: object,
@@ -2069,7 +1889,182 @@ def _init_new_state(
     manual_extra_review: str,
 ) -> None:
     """新規 init 経路: プリチェック → worktree 作成 → state 構築 → 出力。"""
-    pr_ctx =_resolve_pr_and_ownership(pr, repo, worktree, args.worktree)
+
+    def _resolve_pr_and_ownership(
+        pr: object, repo: str, worktree: str, args_worktree: str | None
+    ) -> _InitPRContext | None:
+        # 新規 init: プリチェック。
+        # **作成者・head・base は REST の 1 回でまとめて取る。** 項目ごとに `gh pr view` を
+        # 投げていた分（GraphQL 3 点）と、リポジトリ名の解決（同 1 点）が 0 点になる。
+        meta = _fetch_pr_metadata(pr, repo)
+        if meta is None:
+            die(f"PR #{pr} のメタデータを取得できません（リポジトリ名: {repo}）")
+            return None
+        if meta.repo != repo:
+            repo = meta.repo
+            if not args_worktree:
+                worktree = str(_default_worktree_base() / _repo_slug(repo) / f"pr{pr}")
+        if meta.rate_remaining is not None:
+            info(f"ℹ GitHub REST の残量: {meta.rate_remaining}")
+
+        me = _sh(["gh", "api", "user", "--jq", ".login"])
+        author = meta.author
+        is_own = (me == author)
+        event_downgrade = is_own
+        if is_own:
+            info(f"⚠ 自分の PR (author={me}) — REQUEST_CHANGES → COMMENT 強制ダウングレード")
+
+        return _InitPRContext(
+            repo=repo,
+            worktree=worktree,
+            meta=meta,
+            me=me,
+            author=author,
+            is_own=is_own,
+            event_downgrade=event_downgrade,
+        )
+
+    def _prepare_review_instructions(
+        pr: object, repo: str, manual_extra_review: str
+    ) -> _InitReviewContext:
+        changed_files = _fetch_changed_files(pr, repo)
+        auto_review_categories = _classify_changed_files(changed_files)
+        auto_review = _auto_review_instructions(auto_review_categories)
+        review_instructions = _combined_review_instructions(auto_review, manual_extra_review)
+        return _InitReviewContext(
+            changed_files=changed_files,
+            auto_review_categories=auto_review_categories,
+            auto_review=auto_review,
+            review_instructions=review_instructions,
+        )
+
+    def _prepare_worktree_and_comments(
+        worktree: str, pr: object, head_branch: str, repo: str
+    ) -> _InitWorkspaceContext:
+        # worktree 分離 — _tmp_dir() より先に worktree を作成/確認する
+        if not pathlib.Path(worktree).exists():
+            _create_worktree(worktree, pr, head_branch)
+        elif _is_registered_worktree(worktree):
+            info(f"↻ 既存 worktree 流用: {worktree}")
+            _sync_worktree(worktree, pr, head_branch)
+        else:
+            # パスは存在するが現リポジトリの worktree ではない (別リポジトリの残骸等)。
+            # 流用すると git 操作が壊れるため退避して作り直す。
+            stale = f"{worktree}.stale-{time.strftime('%Y%m%d%H%M%S')}"
+            pathlib.Path(worktree).rename(stale)
+            info(f"⚠ 現リポジトリの worktree でないため退避: {stale}")
+            _create_worktree(worktree, pr, head_branch)
+
+        # worktree 作成/確認後に _tmp_dir() を呼ぶ (ここで .cross_review/ が作られる)
+        tmp_dir = _tmp_dir(worktree)
+        state_file = tmp_dir / f"cross-review-pr{pr}-state.json"
+
+        # 既存コメントスナップショット（重複指摘防止）。
+        # 3 ソース (インラインコメント / レビュー body / PR レベルコメント) を
+        # fix skill の共有スクリプトで一括取得する。
+        existing_path = tmp_dir / f"cross-review-pr{pr}-existing-comments.txt"
+        error = _fetch_existing_comments(repo, int(pr), existing_path, strict=False)
+        if error is not None:
+            die(f"既存コメント取得失敗 (重複検出無効のため中断): {error}")
+
+        return _InitWorkspaceContext(
+            tmp_dir=tmp_dir,
+            state_file=state_file,
+        )
+
+    def _prepare_initial_assignment(args: argparse.Namespace) -> _InitialAssignment:
+        """担当ホストを確定し、起動対象の認証を検査する。"""
+        # **ホストを先に確定する。** 状態ファイルの `host` として残り、出力にも出る。
+        # 推定できないときに既定を置かない（間違ったまま一周してしまう）。
+        try:
+            host, host_source = assignment.detect_host(getattr(args, "host", None))
+        except assignment.AssignmentError as e:
+            die(str(e))
+            raise
+        info(f"ホストの判定: {host}（{host_source}）")
+        # 使える者の解決は共通層が持つ（#727）。通らない者は外して続け、使える者が
+        # 1 者なら同じランタイムの 2 つ目で席を埋める。名前の矛盾と 0 者は終了コード 1。
+        participants = _resolve_reviewers(host, args)
+        return _InitialAssignment(
+            host=host, host_source=host_source, participants=participants)
+
+    def _build_initial_review_state(
+        args: argparse.Namespace,
+        ctx: _InitialStateContext,
+    ) -> dict[str, Any]:
+        """確定済みの材料から、副作用なしに初期状態を組み立てる。"""
+        host, host_source, participants = ctx.assignment
+        only, _include, _exclude = _normalize_participant_args(args)
+        return {
+            "started_at": _now(),
+            "host": host,
+            "host_source": host_source,
+            # 引数の既定は未指定（`None`）で、新規の経路がここで定数を置く（決定 13）
+            "max_rounds": args.max_rounds if args.max_rounds is not None else 12,
+            "rotate_after": args.rotate_after if args.rotate_after is not None else 8,
+            "only": only,
+            "participants": participants,
+            "resume_changes": [],
+            "current_pr": ctx.pr,
+            "worktree_path": ctx.pr_ctx.worktree,
+            "tmp_dir": str(ctx.ws_ctx.tmp_dir),
+            "repo": ctx.pr_ctx.repo,
+            "head_branch": ctx.pr_ctx.meta.head_branch,
+            "base_branch": ctx.pr_ctx.meta.base_branch,
+            "pr_author": ctx.pr_ctx.author,
+            "viewer_login": ctx.pr_ctx.me,
+            "is_own_pr": ctx.pr_ctx.is_own,
+            "event_downgrade": ctx.pr_ctx.event_downgrade,
+            "changed_files": ctx.review_ctx.changed_files,
+            "auto_review_categories": ctx.review_ctx.auto_review_categories,
+            "auto_review_instructions": ctx.review_ctx.auto_review,
+            "manual_extra_review_instructions": ctx.manual_extra_review,
+            "extra_review_instructions": ctx.manual_extra_review,
+            "review_instructions": ctx.review_ctx.review_instructions,
+            "pr_history": [{"pr": ctx.pr, "opened_at": _now(), "closed_at": None, "rounds": 0}],
+            "rounds": [],
+            "deferred_nits": [],
+            "rejected_findings": [],
+            "review_findings": [],
+            "evidence_rounds": [],
+            "verify_commands": list(getattr(args, "verify_command", None) or []),
+            "verify_exit_codes": list(getattr(args, "verify_exit_code", None) or []),
+            "carried_over": None,
+            "final": None,
+        }
+
+    def _finalize_initial_state(
+        args: argparse.Namespace,
+        pr: object,
+        pr_ctx: _InitPRContext,
+        review_ctx: _InitReviewContext,
+        ws_ctx: _InitWorkspaceContext,
+        manual_extra_review: str,
+    ) -> None:
+        initial_assignment = _prepare_initial_assignment(args)
+        context = _InitialStateContext(
+            pr, pr_ctx, review_ctx, ws_ctx, initial_assignment, manual_extra_review
+        )
+        state = _build_initial_review_state(args, context)
+        _write_state(ws_ctx.state_file, state)
+        info(f"✅ state 初期化: {ws_ctx.state_file}")
+        _print_init_result(
+            _InitResult(
+                pr=pr,
+                worktree=pr_ctx.worktree,
+                tmp_dir=ws_ctx.tmp_dir,
+                repo=pr_ctx.repo,
+                head_branch=pr_ctx.meta.head_branch,
+                base_branch=pr_ctx.meta.base_branch,
+                is_own=pr_ctx.is_own,
+                event_downgrade=pr_ctx.event_downgrade,
+                has_extra=bool(review_ctx.review_instructions),
+                carried_count=0,
+                resumed=False,
+            )
+        )
+
+    pr_ctx = _resolve_pr_and_ownership(pr, repo, worktree, args.worktree)
     if pr_ctx is None:
         return
 
