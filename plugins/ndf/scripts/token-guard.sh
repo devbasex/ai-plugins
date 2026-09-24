@@ -126,12 +126,30 @@ context_tokens() {
     ] | last // empty' 2>/dev/null
 }
 
+# 中継の判定と告知の文面を relay.py notice の 1 回の起動で得る（1 行目が判定、2 行目が告知。#980）。
+# 中継の下なら告知を出して 0、外なら 1 を返す
+relay_notice() {
+  local out
+  out=$(python3 "$HERE/relay.py" notice 2>/dev/null) || return 1
+  [ "${out%%$'\n'*}" = relay ] || return 1
+  printf '%s\n' "$out" | sed -n 2p
+}
+
+# 日付・版数・小数（2026-09-23 / v10.16.1 / 2.0.3）は課題番号ではないので先に取り除く。
+# 範囲（#829-830 / 829-830）は残し、#829 #830 として案内する
+issue_refs() {
+  local refs
+  refs=$(printf '%s\n' "$1" | sed -E 's/[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}//g; s/[0-9]+(\.[0-9]+)+//g' | grep -oE '(^|[^0-9A-Za-z_/])#?[0-9]+\b' \
+    | grep -oE '[0-9]+' | sed 's/^/#/' | tr '\n' ' ')
+  printf '%s' "${refs% }"
+}
+
 guard_context() {
   [ "${NDF_CONTEXT_GUARD:-1}" = 0 ] && exit 0
   # サブエージェントの中の起動は見ない。agent_id はサブエージェントの中でだけ付く
   # （Claude Code 2.1.280 で実測。サブエージェントの transcript_path は親の記録を指す）
   [ -n "$(field '.agent_id')" ] && exit 0
-  local tp sid key words total limit dir mark issues skill relayed
+  local tp sid key words total limit dir mark issues skill relayed notice
   tp=$(field '.transcript_path')
   case "$tp" in */subagents/*) exit 0 ;; esac
   sid=$(field '.session_id')
@@ -157,9 +175,9 @@ guard_context() {
   # 中継（relay.py）の直接の子の conductor では 1 度の通しをやめ、上限を超えている限り止め
   # 続ける。人が居ない前提で LLM が「続ける」と決めて上限を超えたまま進むことを止める（#895）
   relayed=0
-  if [ -n "${NDF_RELAY_DIR:-}" ] && [ "$total" -gt "$limit" ] && command -v python3 >/dev/null 2>&1 \
-     && python3 "$HERE/relay.py" is-child >/dev/null 2>&1; then
-    relayed=1
+  notice=
+  if [ -n "${NDF_RELAY_DIR:-}" ] && [ "$total" -gt "$limit" ] && command -v python3 >/dev/null 2>&1; then
+    if notice=$(relay_notice); then relayed=1; fi
   fi
   if [ "$relayed" = 0 ] && [ "$(jq -r '.key // empty' "$mark" 2>/dev/null)" = "$key" ]; then
     rm -f "$mark" 2>/dev/null
@@ -167,14 +185,10 @@ guard_context() {
   fi
   [ "$total" -gt "$limit" ] || exit 0
   write_json "$mark" "$(jq -cn --arg k "$key" '{key:$k}')"
-  # 日付・版数・小数（2026-09-23 / v10.16.1 / 2.0.3）は課題番号ではないので先に取り除く。
-  # 範囲（#829-830 / 829-830）は残し、#829 #830 として案内する
-  issues=$(printf '%s\n' "$words" | sed -E 's/[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}//g; s/[0-9]+(\.[0-9]+)+//g' | grep -oE '(^|[^0-9A-Za-z_/])#?[0-9]+\b' \
-    | grep -oE '[0-9]+' | sed 's/^/#/' | tr '\n' ' ')
-  issues=${issues% }
+  issues=$(issue_refs "$words")
   local next="/ndf:development-workflow ${issues:-<課題番号>}"
   if [ "$relayed" = 1 ]; then
-    deny "会話の文脈が ${total} トークンで、上限 ${limit} を超えた。中継の下なので、上限を超えている限りこの起動を止め続ける。新しい持ち場を起動せず、動いている supervisor の報告を待ってから、引継ぎ文書（/goal の指示が名指ししたもの。無ければ書かない）を更新し、次のコマンドを情報文字列 ndf-next の囲みのコードブロック 1 つで出して応答を終える（中身: /goal ${next}、名指しの引継ぎ文書があれば「<文書> の続きから」）。<課題番号> のままなら、進めている課題の番号を補う。中継がそのブロックで次の区間を起動する。規約: ${CONTEXT_DOC}（止めるなら NDF_CONTEXT_GUARD=0、上限は NDF_CONTEXT_LIMIT）"
+    deny "会話の文脈が ${total} トークンで、上限 ${limit} を超えた。中継の下なので、上限を超えている限りこの起動を止め続ける。新しい持ち場を起動せず、動いている supervisor の報告を待ってから、引継ぎ文書（/goal の指示が名指ししたもの。無ければ書かない）を更新し、次のコマンドを情報文字列 ndf-next の囲みのコードブロック 1 つで出して応答を終える（中身: /goal ${next}、名指しの引継ぎ文書があれば「<文書> の続きから」）。<課題番号> のままなら、進めている課題の番号を補う。ブロックの直前に次の 1 文をそのまま書き、承認や確認を挟まずに出して終える: ${notice}。規約: ${CONTEXT_DOC}（止めるなら NDF_CONTEXT_GUARD=0、上限は NDF_CONTEXT_LIMIT）"
   fi
   deny "会話の文脈が ${total} トークンで、上限 ${limit} を超えた。この工程は新しい会話で始める。次のコマンドを情報文字列 ndf-next の囲みのコードブロック 1 つで示して応答を終える。中身: ${next}（3 層で進めているなら /goal ${next}）。<課題番号> のままなら、進めている課題の番号を補って示す。このまま続けると利用者が決めたら、同じ起動をもう一度行うと 1 度だけ通る。規約: ${CONTEXT_DOC}（止めるなら NDF_CONTEXT_GUARD=0、上限は NDF_CONTEXT_LIMIT）"
 }
