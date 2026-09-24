@@ -762,24 +762,22 @@ class Relay:
         finally:
             os.close(fd)
 
-    def end_child(self) -> tuple[str, int, bool]:
-        """`/exit` の後の待ち。(終わり方, 子の wait の状態, 待ちのあいだに質問が出たか) を返す。
-        30 秒で SIGTERM、さらに 10 秒で SIGKILL。質問の印がある間は秒を数えず、`count.lock` を放す。"""
-        questioned, self.saw_question = self.saw_question, False
-        if self.exited:
-            res, self.exited = self.exited, None
-            return "mark", res[1], questioned
-        left = _num("NDF_RELAY_EXIT_WAIT", 30)
+    def wait_for_normal_exit(self, left: float, questioned: bool):
+        """質問中は期限を減らさず、子の通常終了を待つ。"""
         while left > 0:
             t0 = time.time()
             res = self.pump(until=t0 + min(left, 0.2))
             if res:
-                return "mark", res[1], questioned
+                return res, left, questioned
             if os.path.exists(self.path(QUESTION_FILE)):
                 questioned = True
                 self.release_count()
                 continue
             left -= time.time() - t0
+        return None, left, questioned
+
+    def stop_child(self) -> tuple[str, int]:
+        """SIGTERM、SIGKILL の順に子を停止し、終了理由と wait 状態を返す。"""
         for sig, how, wait in ((signal.SIGTERM, "sigterm", _num("NDF_RELAY_TERM_WAIT", 10)),
                                (signal.SIGKILL, "sigkill", None)):
             try:
@@ -788,8 +786,21 @@ class Relay:
                 pass
             res = self.pump(until=None if wait is None else time.time() + wait)
             if res:
-                return how, res[1], questioned
-        return "sigkill", 0, questioned
+                return how, res[1]
+        return "sigkill", 0
+
+    def end_child(self) -> tuple[str, int, bool]:
+        """`/exit` の後の待ち。(終わり方, 子の wait の状態, 待ちのあいだに質問が出たか) を返す。
+        30 秒で SIGTERM、さらに 10 秒で SIGKILL。質問の印がある間は秒を数えず、`count.lock` を放す。"""
+        questioned, self.saw_question = self.saw_question, False
+        if self.exited:
+            res, self.exited = self.exited, None
+            return "mark", res[1], questioned
+        res, _, questioned = self.wait_for_normal_exit(_num("NDF_RELAY_EXIT_WAIT", 30), questioned)
+        if res:
+            return "mark", res[1], questioned
+        ended_by, status = self.stop_child()
+        return ended_by, status, questioned
 
     def update(self) -> str | None:
         t = _num("NDF_RELAY_UPDATE_TIMEOUT", 120)
