@@ -28,6 +28,7 @@ import os
 import re
 import sys
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -150,7 +151,23 @@ def layer_rows(per_role: list[dict]) -> list[list[str]]:
     return rows
 
 
-def notes(diffs, sessions, changelog: Path, floor: str, released: str, until: float) -> list[str]:
+@dataclass
+class Snapshot:
+    released: str
+    until_s: str
+    until: float
+    date: str
+    floor: str
+    previous: str | None
+    diffs: list
+    large: list[str]
+    by_version: dict
+    sessions: list
+    changelog: Path
+
+
+def notes(snap: Snapshot) -> list[str]:
+    diffs, sessions, changelog, until = snap.diffs, snap.sessions, snap.changelog, snap.until
     shown = {r["version"] for r, _, _ in diffs}
     few = [f"{r['version']}（{r['sessions_with_pr']} 件）" for r, _, _ in diffs if r["sessions_with_pr"] <= FEW_SESSIONS]
     out = [f"- **PR を作った会話が {FEW_SESSIONS} 件以下の版:** {', '.join(few) or '無し'}。"
@@ -160,7 +177,7 @@ def notes(diffs, sessions, changelog: Path, floor: str, released: str, until: fl
     except OSError:
         out.append(f"- **CHANGELOG.md にあって表に出ない版:** 確かめていない（{changelog.name} を読めない）")
     else:
-        lo, hi = tu.version_key(floor), tu.version_key(released)
+        lo, hi = tu.version_key(snap.floor), tu.version_key(snap.released)
         missing = sorted({v for v in listed if safe_key(v) is not None and lo <= safe_key(v) <= hi and v not in shown},
                          key=tu.version_key)
         out.append(f"- **CHANGELOG.md にあって表に出ない版:** {', '.join(missing) or '無し'}。"
@@ -171,7 +188,9 @@ def notes(diffs, sessions, changelog: Path, floor: str, released: str, until: fl
     return out
 
 
-def render(*, released, until_s, date, floor, previous, diffs, large, by_version, sessions, changelog, until) -> str:
+def render(snap: Snapshot) -> str:
+    released, until_s, date, floor, previous = snap.released, snap.until_s, snap.date, snap.floor, snap.previous
+    diffs, large, by_version = snap.diffs, snap.large, snap.by_version
     cmd = f"python3 scripts/token-usage-snapshot.py --released {released} --until {until_s} --min-version {floor}"
     out = [f"# ndf の版ごとのトークン消費と所要時間（{date} 集計・{released} の配布）", "",
            f"**{released} を正式版として出したときの記録である。** 打ち切りの時刻は `{until_s}`。"
@@ -185,7 +204,7 @@ def render(*, released, until_s, date, floor, previous, diffs, large, by_version
            f"python3 scripts/token-usage.py --min-version {floor} --until {until_s} --by version   # 末尾の「集計の出力」",
            "```", "",
            "## 比べるときの注意", "",
-           *notes(diffs, sessions, changelog, floor, released, until), "",
+           *notes(snap), "",
            "## 版ごとの差（PR 1 本あたり）", "",
            f"換算の合計は conductor・supervisor・worker の換算の和。前の版との差は、表の 1 つ上の行との比である。"
            f"±{THRESHOLD:.0%} を超えた版を下の「読み取り」で扱う。", ""]
@@ -238,9 +257,9 @@ def build(args, floor: str, prev, until_s: str, until: float, date: str) -> tupl
     by_version = tu.aggregate(sessions, ["version"]) | {"meta": meta | {"by": ["version"]}}
     diffs = diff_rows(by_version["per_pr"])
     large = [f"{r['version']}（{ratio:+.0%}）" for r, _, ratio in diffs if ratio is not None and abs(ratio) > THRESHOLD]
-    md = render(released=args.released, until_s=until_s, date=date, floor=floor,
-                previous=prev[0].removesuffix(".json") + ".md" if prev else None, diffs=diffs, large=large,
-                by_version=by_version, sessions=sessions, changelog=args.changelog, until=until)
+    md = render(Snapshot(args.released, until_s, until, date, floor,
+                         prev[0].removesuffix(".json") + ".md" if prev else None, diffs, large,
+                         by_version, sessions, args.changelog))
     return full, md, large
 
 
