@@ -1209,6 +1209,31 @@ def test_install_lock_busy_changes_nothing(tmp_path, home):
     assert not (state(tmp_path) / "rc-added").exists()
 
 
+def test_install_config_dir_oserror_changes_nothing(tmp_path, home):
+    """現状固定: 設定ディレクトリを作れなければ（親が通常ファイル）、書けない旨を出して
+    終了コード 3 で終わり、シェル設定・写し・版ファイル・記録ファイルを新たに作らない
+    （cmd_install の os.makedirs(config_dir()) が OSError になる経路）。"""
+    rc = home / ".bashrc"
+    rc.write_text("a\n")
+    # CLAUDE_CONFIG_DIR の親を通常ファイルにする。config_dir() = <file>/sub/ndf の makedirs が失敗する
+    parent = tmp_path / "afile"
+    parent.write_text("x\n")
+    before = snapshot(rc)
+    p = relay_cmd(tmp_path, "install", CLAUDE_CONFIG_DIR=parent / "sub")
+    assert p.returncode == 3
+    assert "書けない（" in p.stdout
+    # シェル設定は変わらない
+    assert snapshot(rc) == before
+    # 設定ディレクトリ配下の成果物（写し・版ファイル・rc）は作られない
+    assert not (parent / "sub").exists()
+    assert not (cfg(tmp_path) / "relay.py").exists()
+    assert not (cfg(tmp_path) / "relay.version").exists()
+    assert not (cfg(tmp_path) / "shellrc").exists()
+    # 記録ファイルも作られない
+    assert not (state(tmp_path) / "rc-added").exists()
+    assert not (state(tmp_path) / "rc-user").exists()
+
+
 def shell_run(tmp_path, script, rcfile):
     """隔離した HOME で、rcfile を読んだ対話でない bash に script を実行させる。"""
     e = isolated_env(tmp_path)
