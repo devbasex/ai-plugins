@@ -101,8 +101,8 @@ def vocabulary() -> dict[str, Any]:
     }
 
 
-# 想定最大時間の既定（分）。#933 の依頼と #754 の指針「60 分以内」。
-DEFAULT_BUDGET_MINUTES = 60
+# 想定最大時間の既定（分）。2026-09-24 利用者の指示で 30 分（#754 の指針「60 分以内」の中に収める）。
+DEFAULT_BUDGET_MINUTES = 30
 
 # 1 項目あたりの修正の上限の既定（#933 の AC3。群あたりから項目あたりへ意味が変わった）。
 DEFAULT_MAX_FIX_ROUNDS = 3

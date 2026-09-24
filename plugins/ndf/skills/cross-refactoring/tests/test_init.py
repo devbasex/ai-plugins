@@ -458,7 +458,7 @@ def test_a_new_run_fills_the_caps_with_their_defaults(run_init, tmp_path):
     run_init(_args(tmp_path, max_fix_rounds=None, test_timeout=None,
                    severity_threshold=None, workflow_step=None))
     _, state = _state_of(tmp_path)
-    assert state["budget_minutes"] == 60
+    assert state["budget_minutes"] == 30
     assert state["max_fix_rounds"] == 3
     assert state["test_timeout"] == 900
     assert state["severity_threshold"] == "minor"
@@ -1137,7 +1137,7 @@ def test_resume_before_the_plan_replaces_the_budget(run_init, tmp_path, capsys):
     _, state = _state_of(tmp_path)
     assert state["budget_minutes"] == 120
     assert [c["field"] for c in state["resume_changes"]] == ["budget_minutes"]
-    assert "budget_minutes: 60 → 120" in capsys.readouterr().err
+    assert "budget_minutes: 30 → 120" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("phase, plan", [
@@ -1156,7 +1156,7 @@ def test_resume_after_the_plan_only_notifies_the_budget(
 
     run_init(_args(tmp_path, budget_minutes="120"))
     _, after = _state_of(tmp_path)
-    assert after["budget_minutes"] == 60
+    assert after["budget_minutes"] == 30
     assert after["resume_changes"] == []
     assert "ℹ --budget-minutes は再開では反映しません" in capsys.readouterr().err
 

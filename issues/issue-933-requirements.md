@@ -97,7 +97,7 @@
 
 ### 引数と既定
 
-- [ ] AC1: `--budget-minutes N` を受け取る。省くと 60 になる。1 以上の整数でなければ `init` が終了コード 4 で止める
+- [ ] AC1: `--budget-minutes N` を受け取る。省くと 30 になる（2026-09-24 利用者の指示で 60 から変更）。1 以上の整数でなければ `init` が終了コード 4 で止める
 - [ ] AC2: `--max-test-rounds` / `--max-outer-rounds` / `--max-items-per-round` を渡すと、廃止を知らせる 1 行を標準エラーへ出し、値を使わずに続ける（終了コード 0）
 - [ ] AC3: `--max-fix-rounds` は「1 項目あたりの修正の上限」として残る（既定 3）
 - [ ] AC3b: `--round-test` が無く、`--baseline-test` が差し替えられない形（実行器が既知の実行器（`pytest` / `python -m pytest` / `python3 -m pytest` / `jest` / `vitest`。前置きの `uv run [オプション]` / `poetry run` / `npx` は読み飛ばす）でない。`npm test`・`make -C backend test`・`cargo test`・ラッパーなど）なら、`init` は提案の前に終了コード 4 で止まり、`--round-test` を求める
