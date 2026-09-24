@@ -4661,6 +4661,41 @@ def _read_sweep_result(pr: int, file: str | None) -> dict[str, Any]:
     return sweep
 
 
+def _reconcile_sweep_result(
+    sweep: dict[str, Any], declared: int, threads: list | None
+) -> tuple[int, bool, Any]:
+    """申告された残件数と GitHub 上の未解決スレッドから (残件数, 照会できたか, 理由) を決める。"""
+    if threads is None:
+        info(
+            "⚠ 未解決の指摘を確認できません — 申告された残件数"
+            f"（{declared} 件）をそのまま採用します"
+        )
+        remaining, verified = declared, False
+    else:
+        remaining, verified = len(threads), True
+
+    reason = sweep.get("remaining_reason") or sweep.get("reason")
+    if remaining > 0 and not reason:
+        reason = "理由の記載なし"
+    return remaining, verified, reason
+
+
+def _sweep_record(
+    sweep: dict[str, Any], declared: int, remaining: int, verified: bool, reason: Any
+) -> dict[str, Any]:
+    """状態ファイルへ保存する最終スイープの記録を作る。"""
+    return {
+        "declared_remaining_open": declared,
+        "remaining_open": remaining,
+        "remaining_reason": reason if remaining > 0 else None,
+        "verified": verified,
+        "resolved": sweep.get("resolved"),
+        "fixed_in_sweep": sweep.get("fixed_in_sweep"),
+        "commit": sweep.get("commit"),
+        "checked_at": _now(),
+    }
+
+
 def cmd_verify_sweep(args: argparse.Namespace) -> None:
     """Step 7.5 後段 — 最終スイープの後に未解決の指摘が残っていないかを確かめる。
 
@@ -4676,28 +4711,8 @@ def cmd_verify_sweep(args: argparse.Namespace) -> None:
     declared = _as_count(sweep.get("remaining_open"))
     current_pr = int(st.get("current_pr") or pr)
     threads = _fetch_unresolved_threads(str(st.get("repo") or ""), current_pr)
-    if threads is None:
-        info(
-            "⚠ 未解決の指摘を確認できません — 申告された残件数"
-            f"（{declared} 件）をそのまま採用します"
-        )
-        remaining, verified = declared, False
-    else:
-        remaining, verified = len(threads), True
-
-    reason = sweep.get("remaining_reason") or sweep.get("reason")
-    if remaining > 0 and not reason:
-        reason = "理由の記載なし"
-    st["sweep"] = {
-        "declared_remaining_open": declared,
-        "remaining_open": remaining,
-        "remaining_reason": reason if remaining > 0 else None,
-        "verified": verified,
-        "resolved": sweep.get("resolved"),
-        "fixed_in_sweep": sweep.get("fixed_in_sweep"),
-        "commit": sweep.get("commit"),
-        "checked_at": _now(),
-    }
+    remaining, verified, reason = _reconcile_sweep_result(sweep, declared, threads)
+    st["sweep"] = _sweep_record(sweep, declared, remaining, verified, reason)
     _save(pr, st)
 
     print(f"REMAINING_OPEN={remaining}")
