@@ -47,6 +47,7 @@ from ..items import (
     item_label,
     live_items,
 )
+from ..paths import work_dir
 from ..paths import git_out, load_state
 from ..phases import finish_phase
 from ..undo import drop, resume_pending_drop
@@ -74,7 +75,7 @@ class Intake:
 
 def _phase_commits(state: dict[str, Any], phase: str) -> list[str]:
     """フェーズの起点から HEAD までのコミットを**古い順**で返す。確定できなければ中断。"""
-    work = str(state["worktrees"]["work"])
+    work = work_dir(state)
     base = ((state.get("phases") or {}).get(phase) or {}).get("base_sha")
     head = git_out(work, ["rev-parse", "HEAD"]) or ""
     ordered = commits_in_range(work, base, head)
@@ -88,7 +89,7 @@ def _phase_commits(state: dict[str, Any], phase: str) -> list[str]:
 def _facts(state: dict[str, Any], shas: list[str]) -> list[dict[str, Any]]:
     """コミットの事実（トレーラー・ファイル・差分行数・テストの差分）。テストは走らせない。"""
     return collect_commit_facts(
-        str(state["worktrees"]["work"]), shas, set(shas), "", state["head_branch"],
+        work_dir(state), shas, set(shas), "", state["head_branch"],
     )
 
 
@@ -187,7 +188,7 @@ def _recalled(state: dict[str, Any], phase: str) -> Optional[Intake]:
 
 def _prepare(path: pathlib.Path, state: dict[str, Any]) -> None:
     """取り込みの前の片づけ。やり残した取り消しと公開を先に済ませ、未コミットの変更を捨てる。"""
-    discard_impl_leftovers(state, str(state["worktrees"]["work"]))
+    discard_impl_leftovers(state, work_dir(state))
     resume_pending_drop(path, state)
     flush_pending_push(path, state, state)
 
@@ -215,7 +216,7 @@ def _test_words(state: dict[str, Any], item: dict[str, Any], files: list[str]) -
     """
     if item.get("command_source") == "targets":
         return list(item["command"])
-    work = str(state["worktrees"]["work"])
+    work = work_dir(state)
     source = (state.get("round_test") or {}).get("command") or \
         (state.get("baseline_test") or {}).get("command")
     tests = [f for f in files if testcmd.valid_targets([f], work, list(state.get("target_scope") or []))]
@@ -228,7 +229,7 @@ def _test_words(state: dict[str, Any], item: dict[str, Any], files: list[str]) -
 
 def _run_added_tests(state: dict[str, Any], intake: Intake) -> None:
     """足したテストが今のコードで通るかを確かめる（決定 13）。同じ語の並びは 1 回だけ走らせる。"""
-    work = str(state["worktrees"]["work"])
+    work = work_dir(state)
     timeout = timeline.state_test_timeout(state)
     results: dict[tuple[str, ...], bool] = {}
     for item_id, fact in intake.accepted.items():
@@ -249,10 +250,10 @@ def _intake_tests(state: dict[str, Any]) -> Intake:
     intake = Intake()
     facts = _facts(state, _phase_commits(state, "add-tests"))
     for fact in facts:
-        fact["time"] = commit_time(str(state["worktrees"]["work"]), fact["sha"])
+        fact["time"] = commit_time(work_dir(state), fact["sha"])
     by_item = _group_by_item(state, facts, lambda item: bool(item.get("tests")), intake)
     scope = list(state.get("target_scope") or [])
-    tracked = tracked_markdown(str(state["worktrees"]["work"]))
+    tracked = tracked_markdown(work_dir(state))
     for item in live_items(state):
         if not item.get("tests"):
             continue
@@ -288,7 +289,7 @@ def _test_commit_problem(
     others = [f for f in commit.get("files") or [] if not is_test_path(f)]
     if others:
         return f"テストの追加がテスト以外のファイルを変えています（{', '.join(others[:5])}）"
-    hits = doc_wording_tests(commits, tracked, str(state["worktrees"]["work"]))
+    hits = doc_wording_tests(commits, tracked, work_dir(state))
     if hits:
         return _doc_wording_reason(hits)
     return None
@@ -349,7 +350,7 @@ def _implement_problem(
     problem = verify_test_changes(collect_test_changes(commits))
     if problem:
         return problem
-    hits = doc_wording_tests(commits, tracked, str(state["worktrees"]["work"]))
+    hits = doc_wording_tests(commits, tracked, work_dir(state))
     if hits:
         return _doc_wording_reason(hits)
     return verify_diff_budget([item], commits)
@@ -357,7 +358,7 @@ def _implement_problem(
 
 def _intake_implement(state: dict[str, Any]) -> Intake:
     intake = Intake()
-    work = str(state["worktrees"]["work"])
+    work = work_dir(state)
     facts = _facts(state, _phase_commits(state, "implement"))
     for fact in facts:
         fact["time"] = commit_time(work, fact["sha"])

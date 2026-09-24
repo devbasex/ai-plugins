@@ -25,7 +25,7 @@ from typing import Any, Optional
 
 from . import info, timeline
 from .gitfacts import run_with_timeout
-from .paths import git_out
+from .paths import git_out, work_dir
 from .testcmd import failed_nodes, rerun_command
 
 
@@ -80,7 +80,7 @@ def baseline_head(state: dict[str, Any]) -> Optional[str]:
 def classify(state: dict[str, Any], whole_log: pathlib.Path, timed_out: bool) -> dict[str, Any]:
     """全体のテストの失敗を分ける。取り出せなければ `unparsed_reason` だけを返す。"""
     command = str((state.get("baseline_test") or {}).get("command") or "")
-    work = str(state["worktrees"]["work"])
+    work = work_dir(state)
     timeout = timeline.state_test_timeout(state)
     tmp = pathlib.Path(state["tmp_dir"])
     if timed_out:
