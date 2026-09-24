@@ -57,7 +57,7 @@
 | `commands/implement.py` | 新しく作る（`apply.py` の取り込みの検査を移す） | `merge-tests` / `merge-implement`: テストの追加と実装の結果を取り込む。コミットと項目の対応を git から検査する |
 | `commands/converge.py` | 変える | `verify`: 項目ごとに限ったテストを走らせ、危険の印を立て、全体のテストを 1 度だけ走らせるかを決める。`merge-fix` / 項目の取り消し |
 | `commands/report.py` | 変える | `finalize`: 履歴へ 1 行追記する。`report`: フェーズ別の所要・想定最大時間との差・見送りの理由別の件数 |
-| `commands/gate.py` | 少し変える | 最終ゲート。検証の中で通った全体のテストを使い回す判定を足す |
+| `commands/gate.py` | 少し変える | 最終ゲート。検証の中で通った全体のテストを使い回す判定と、取り消しの後の確かめ（`whole_test.reverted`）を足す。最終ゲートの修正（`final-fix`）の担当は輪番（`impl_for_seq`）ではなく実装担当（`implementer`）にする（`_final_fix_impl` を替える） |
 | `refactor_lib/budget.py` | 新しく作る | 見積り・控え・件数の選び方・締め切りの計算（純粋な処理） |
 | `refactor_lib/allocation.py` | 新しく作る | 履歴の読み書きと配分テーブルの集計 |
 | `refactor_lib/danger.py` | 新しく作る | 危険の印の判定（git の事実から） |
@@ -279,12 +279,21 @@ plugins/ndf/scripts/lib/{jev,limits,assignment}.py
 
 - `tier` は `high` / `medium` / `low`。候補の全件に付ける
 - `merge_into` は同じ変更だと判断した相手の `key`
-- **実装担当はコマンドを返さず、テストの対象（`test_targets`）だけを返す。** 限ったテストのコマンドは進行側が組み立てる。`--round-test`（省けば `--baseline-test`）を `shlex.split` で語に分け、その対象の語を `test_targets` に差し替えた語の並びを `shell=False` で走らせる。対象の語の見分けは `scope.round_test_roots` と同じ規則を使う
-- `test_targets` の各要素は次をすべて満たす。1 つでも満たさなければ、その項目の対象を空として扱う。空の項目は、`--round-test` があればそれをそのまま使い、無ければ `merge-plan` が `no_target` で見送る。`--round-test` を省いたときの差し替えの元は `--baseline-test` だが、差し替えた後は対象を絞ったコマンドになる。**差し替えずに `--baseline-test` を項目の検証に使うことはない**（全体のテストは危険の印の 1 回だけ）
-- 同じ検証の回で、組み立てた語の並びが同じ項目どうしは 1 回だけ走らせて結果を共有する
+- **実装担当はコマンドを返さず、テストの対象（`test_targets`）だけを返す。** 限ったテストのコマンドは進行側が組み立てる。`--round-test`（省けば `--baseline-test`）を差し替えの元とし、`shlex.split` で語に分ける。対象の語の見分けは `scope.round_test_roots` と同じ規則を使う
+- 組み立て方は、元のコマンドの対象の語の数で決まる。組み立てた語の並びは `shell=False` で走らせる
+
+  | 元のコマンドの対象の語 | 組み立て |
+  | --- | --- |
+  | 1 つ以上 | 対象の語を取り除き、その最初の位置へ `test_targets` を並べる |
+  | 0 個で、元が `pytest` / `python -m pytest` / `jest` / `vitest` / `go test` / `cargo test` / `npx jest` のように対象を末尾の引数で受け取るもの | 末尾へ `test_targets` を足す |
+  | 0 個で、それ以外（`bash scripts/run-scope-tests.sh` のようなラッパーなど） | 差し替えられない。その項目の対象を空として扱う |
+
+- `test_targets` の各要素は次をすべて満たす。1 つでも満たさなければ、その項目の対象を空として扱う
   - `--scope` のテストの置き場所の中のパスか、そのパスに `::` で続くノード ID である（`scope.round_test_roots` の検査を使い回す）
   - パスの部分が作業ディレクトリに実在する
   - シェルの構文の文字（`;` `&` `|` `$` `` ` `` `<` `>` `(` `)` 改行）と空白を含まない
+- 対象が空の項目は、`--round-test` があればそれをそのまま使い、無ければ `merge-plan` が `no_target` で見送る。**差し替えずに `--baseline-test` を項目の検証に使うことはない**（全体のテストは危険の印の 1 回だけ）
+- 同じ検証の回で、組み立てた語の並びが同じ項目どうしは 1 回だけ走らせて結果を共有する
 
 ### Jev の問い（`scripts/lib/jev.py`）
 
@@ -422,6 +431,7 @@ stateDiagram-v2
 
 - 同じ `init` を打ち直すと、`schema: 2` の状態の `phase` を `PHASE` として返し、駆動は終わったフェーズを飛ばす。各 `merge-*` は今と同じく取り込み済みの印で冪等にする
 - `schema` を持たず `rounds` を持つ状態で `final` が空なら、終了コード 4 で止まる。案内は「旧い版（v10.17.5 以前）で終えるか、`<状態ファイル>` を消して始め直す」の 1 行である
+- `schema` を持たず `rounds` を持つ状態で `final` が入っている（終わった旧い実行）なら、今と同じく再開の対象にしない。新しく始め、状態ファイルを版 2 の形で作り直す
 - 再開で `--budget-minutes` を渡したとき、置き換えるのは計画のフェーズより前（`phase` が `propose` か `plan` で `merge-plan` が済んでいない）だけである（`resume_changes` に残る）。計画のフェーズ以降は通知だけで置き換えない。採用の件数・締め切り・控えは `merge-plan` の時点の予算で固定されており、予算だけを変えると食い違うためである。`--implementer` は置き換えない（通知だけ）
 - **再開で参加者を作り直した結果、実装担当が参加者から外れたとき**（`--exclude` で外された・認証が通らない）は、計画のフェーズより前なら決め方を当て直し、新しい実装担当と理由を `resume_changes` に残す。計画のフェーズ以降なら終了コード 4 で止める。計画・テスト・実装を担った者が途中で替わると、見積りの前提（担当ごとの所要）と、項目とコミットの対応を読む者が食い違うためである
 
@@ -443,14 +453,14 @@ stateDiagram-v2
 | AC5 | 雛形を展開した結果に観点の語彙の値が並ぶことを、`launch-cli.sh` の展開の単体で見る（文言ではなく、語彙の値の列挙を見る） |
 | AC7 AC8 AC9 | `budget.py` の単体（見積り・控え・飛ばして詰める・締め切り）と `merge-plan` の単体 |
 | AC10 AC11 | git を使う結合（項目に紐づかないテスト・`test_failed`・`not_done` のテストのコミットの取り消し、1 項目 = 1 コミット） |
-| AC10b | 語の並びの組み立ての単体（差し替え・シェルの構文の文字・範囲の外・実在しないパスで `--round-test` に戻る・`--round-test` が無ければ `no_target` で見送る）と、`shell=False` で走ることの単体 |
+| AC10b | 語の並びの組み立ての単体（対象の語の差し替え・対象の語が 0 個の実行器へ末尾に足す・ラッパーは差し替えられない・シェルの構文の文字・範囲の外・実在しないパスで `--round-test` に戻る・`--round-test` が無ければ `no_target` で見送る）と、`shell=False` で走ることの単体 |
 | AC12 | `merge-implement` の単体（コミットの無い項目が `not_done` になる）と、雛形に締め切りが渡る単体 |
 | AC13 AC14 | `danger.py` の単体（D1〜D5）と `verify` の結合（全体のテストが 2 回走らない） |
 | AC15 AC16 | git を使う結合（項目の単位の取り消し・隣接する変更の退避） |
 | AC16b | `final-gate` の単体（`whole_test.reverted` が真で `--ci-check` が無いとき、単独起動でも全体のテストを走らせる。落ちたら `final-fix` の経路を返す） |
 | AC17〜AC20 | `allocation.py` の単体（`NDF_METRICS_DIR` を一時ディレクトリへ向ける。#938 の汚染を繰り返さない） |
 | AC21 | `assignment.py` の単体 |
-| AC22 AC23 | `jev.py` の単体（HTTP を偽の応答へ差し替える。鍵が無い・`NDF_JEV=0`・非公開・疎通の失敗・呼び出しの失敗・確信度の足りない場合）と、`merge-proposals` / `merge-plan` / `verify` の単体（段・同じ変更か・D5 の 3 つの経路が Jev の答えと実装担当の答えのどちらでも決まる） |
+| AC22 AC23 | `jev.py` の単体（HTTP を偽の応答へ差し替える。鍵が無い・`NDF_JEV=0`・非公開・疎通の失敗・呼び出しの失敗・確信度の足りない場合）と、`merge-plan` / `verify` の単体（段と同じ変更かは `merge-plan`、D5 は `verify` で、Jev の答えと実装担当の答えのどちらでも決まる）。`merge-proposals` は鍵が同じ提案の機械的な統合だけを確かめる |
 | AC24 AC25 | 再開の単体（フェーズの飛ばし・旧い状態で止まる） |
 | AC26 | `report` の単体 |
 | AC27 AC28 | 既存のテストのうちラウンド制に依らないもの（`test_scope_*`・`test_assess`・`test_sync_*`・`test_plan_comment*` ほか）をそのまま通す |
