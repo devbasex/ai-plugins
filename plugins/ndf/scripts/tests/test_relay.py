@@ -1989,3 +1989,30 @@ def test_notice_broken_relay_dir_is_outside(tmp_path):
     f = tmp_path / "not-a-dir"
     f.write_text("x")
     assert notice_lines(notice(f)) == ["outside", NOTICE_OUTSIDE]
+
+
+def is_child(env_dir):
+    e = {k: v for k, v in os.environ.items() if not k.startswith("NDF_")}
+    if env_dir is not None:
+        e["NDF_RELAY_DIR"] = str(env_dir)
+    return subprocess.run([sys.executable, str(RELAY), "is-child"], capture_output=True,
+                          text=True, env=e, timeout=20)
+
+
+@pytest.mark.parametrize("case,expected", [
+    ("relay", "relay"),
+    ("no-dir", "outside"),
+    ("not-running", "outside"),
+    ("not-direct-child", "outside"),
+], ids=["relay", "no-dir", "not-running", "not-direct-child"])
+def test_is_child_matches_notice(tmp_path, relay, case, expected):
+    env_dir = relay.dir
+    if case == "no-dir":
+        env_dir = None
+    elif case == "not-running":
+        relay.release()
+    elif case == "not-direct-child":
+        (relay.dir / "child.pid").write_text("999999")
+    first, _ = notice_lines(notice(env_dir))
+    assert first == expected
+    assert (is_child(env_dir).returncode == 0) == (first == "relay")
