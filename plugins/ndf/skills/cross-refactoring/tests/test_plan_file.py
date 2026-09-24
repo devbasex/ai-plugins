@@ -6,24 +6,31 @@
 """
 from __future__ import annotations
 
+import subprocess
+
 import pytest
 
-from crossref_helpers import make_state_v2, read_state, run_git
+from crossref_helpers import make_state_v2, read_state
+
+
+def _git(*args, cwd):
+    return subprocess.run(["git", *args], cwd=cwd, capture_output=True,
+                          text=True, check=True)
 
 
 def _commit(repo, message):
-    run_git("add", "-A", cwd=repo)
-    run_git("commit", "-qm", message, cwd=repo)
+    _git("add", "-A", cwd=repo)
+    _git("commit", "-qm", message, cwd=repo)
 
 
 def _make_work(tmp_path):
     work = tmp_path / "work"
     (work / "generated").mkdir(parents=True)
-    run_git("init", "-q", "-b", "main", str(work), cwd=tmp_path)
+    _git("init", "-q", "-b", "main", str(work), cwd=tmp_path)
     # 検査の対象（`refactor.py`）が自分でコミットする。**身元はテストが用意する。**
     # 実行した人の全体設定に頼ると、身元の無い実行環境で落ちる（#235）。
-    run_git("config", "user.email", "t@e.st", cwd=work)
-    run_git("config", "user.name", "test", cwd=work)
+    _git("config", "user.email", "t@e.st", cwd=work)
+    _git("config", "user.name", "test", cwd=work)
     (work / "src.py").write_text("x = 1\n", encoding="utf-8")
     (work / "generated" / "out.py").write_text("x = 1\n", encoding="utf-8")
     _commit(work, "init")
@@ -157,8 +164,8 @@ def test_the_plan_lands_in_one_commit_with_the_generated_files(gitfacts, tmp_pat
 
     gitfacts._sync_generated(state)
 
-    subject = run_git("log", "-1", "--format=%s", cwd=work).stdout.strip()
-    files = run_git("show", "--name-only", "--format=", "HEAD", cwd=work).stdout.split()
+    subject = _git("log", "-1", "--format=%s", cwd=work).stdout.strip()
+    files = _git("show", "--name-only", "--format=", "HEAD", cwd=work).stdout.split()
     assert "issues/plan.md" in files and "generated/out.py" in files
     assert subject and "cross-refactoring" in subject
 
@@ -172,7 +179,7 @@ def test_a_repository_without_a_sync_command_still_records_the_plan(
 
     gitfacts._sync_generated(state)
 
-    files = run_git("show", "--name-only", "--format=", "HEAD", cwd=work).stdout.split()
+    files = _git("show", "--name-only", "--format=", "HEAD", cwd=work).stdout.split()
     assert "issues/plan.md" in files
 
 
@@ -182,11 +189,11 @@ def test_an_unchanged_plan_does_not_add_a_commit(gitfacts, tmp_path):
     _, state = _state(tmp_path, work=work, plan_file="issues/plan.md",
                       sync_command=None)
     gitfacts._sync_generated(state)
-    before = run_git("rev-parse", "HEAD", cwd=work).stdout.strip()
+    before = _git("rev-parse", "HEAD", cwd=work).stdout.strip()
 
     gitfacts._sync_generated(state)
 
-    assert run_git("rev-parse", "HEAD", cwd=work).stdout.strip() == before
+    assert _git("rev-parse", "HEAD", cwd=work).stdout.strip() == before
 
 
 def test_an_empty_plan_file_setting_turns_the_record_off(gitfacts, tmp_path):

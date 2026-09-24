@@ -19,7 +19,10 @@ RUNTIMES = ["codex", "agy", "kiro"]
 
 
 
-from crossref_helpers import run_git
+def _git(*args, cwd):
+    return subprocess.run(
+        ["git", *args], cwd=cwd, capture_output=True, text=True, check=True
+    )
 
 
 @pytest.fixture
@@ -30,23 +33,23 @@ def repo(tmp_path):
     subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
     subprocess.run(["git", "clone", "-q", str(origin), str(work_repo)],
                    check=True, capture_output=True)
-    run_git("config", "user.email", "t@e.st", cwd=work_repo)
-    run_git("config", "user.name", "test", cwd=work_repo)
+    _git("config", "user.email", "t@e.st", cwd=work_repo)
+    _git("config", "user.name", "test", cwd=work_repo)
     (work_repo / "src").mkdir()
     (work_repo / "src" / "foo.py").write_text("def f():\n    pass\n")
-    run_git("add", "-A", cwd=work_repo)
-    run_git("commit", "-qm", "init", cwd=work_repo)
-    run_git("branch", "-M", "main", cwd=work_repo)
-    run_git("push", "-q", "origin", "main", cwd=work_repo)
-    run_git("checkout", "-qb", "refactor/target", cwd=work_repo)
+    _git("add", "-A", cwd=work_repo)
+    _git("commit", "-qm", "init", cwd=work_repo)
+    _git("branch", "-M", "main", cwd=work_repo)
+    _git("push", "-q", "origin", "main", cwd=work_repo)
+    _git("checkout", "-qb", "refactor/target", cwd=work_repo)
     (work_repo / "src" / "bar.py").write_text("x = 1\n")
-    run_git("add", "-A", cwd=work_repo)
-    run_git("commit", "-qm", "wip", cwd=work_repo)
-    run_git("push", "-q", "origin", "refactor/target", cwd=work_repo)
-    run_git("checkout", "-q", "main", cwd=work_repo)
+    _git("add", "-A", cwd=work_repo)
+    _git("commit", "-qm", "wip", cwd=work_repo)
+    _git("push", "-q", "origin", "refactor/target", cwd=work_repo)
+    _git("checkout", "-q", "main", cwd=work_repo)
 
     root = tmp_path / "rf130"
-    run_git("worktree", "add", "-q", str(root / "work"), "refactor/target", cwd=work_repo)
+    _git("worktree", "add", "-q", str(root / "work"), "refactor/target", cwd=work_repo)
     tmp_dir = root / "work" / ".cross_refactoring"
     tmp_dir.mkdir(parents=True)
     state = {
@@ -86,14 +89,14 @@ def test_creates_detached_worktrees_for_participants(repo):
     _run(repo)
     for rt in RUNTIMES:
         assert (repo["root"] / rt).is_dir()
-        head = run_git("rev-parse", "--abbrev-ref", "HEAD", cwd=repo["root"] / rt)
+        head = _git("rev-parse", "--abbrev-ref", "HEAD", cwd=repo["root"] / rt)
         assert head.stdout.strip() == "HEAD", f"{rt} が detach されていない"
 
 
 def test_work_is_the_only_checked_out_branch(repo):
     """同一ブランチを 2 つの作業ディレクトリへ checkout できないため。"""
     _run(repo)
-    head = run_git("rev-parse", "--abbrev-ref", "HEAD", cwd=repo["root"] / "work")
+    head = _git("rev-parse", "--abbrev-ref", "HEAD", cwd=repo["root"] / "work")
     assert head.stdout.strip() == "refactor/target"
 
 
@@ -117,7 +120,7 @@ def test_work_gets_all_three_impl_runtime_locations(repo):
 
 def test_provisioning_does_not_touch_the_pull_request_diff(repo):
     _run(repo)
-    status = run_git("status", "--short", cwd=repo["root"] / "work")
+    status = _git("status", "--short", cwd=repo["root"] / "work")
     assert status.stdout.strip() == "", f"差分に現れている: {status.stdout}"
 
 
@@ -128,7 +131,7 @@ def test_provisioning_does_not_touch_the_repository_itself(repo):
     _run(repo)
     after = common_exclude.read_text() if common_exclude.exists() else ""
     assert before == after
-    status = run_git("status", "--short", cwd=repo["repo"])
+    status = _git("status", "--short", cwd=repo["repo"])
     assert status.stdout.strip() == ""
 
 
@@ -142,10 +145,10 @@ def test_existing_skill_is_not_overwritten(repo):
     tracked = work / ".agents" / "skills" / "refactoring"
     tracked.mkdir(parents=True)
     (tracked / "SKILL.md").write_text("利用者の設定\n", encoding="utf-8")
-    run_git("add", "-A", cwd=work)
-    run_git("-c", "user.email=t@e.st", "-c", "user.name=test",
+    _git("add", "-A", cwd=work)
+    _git("-c", "user.email=t@e.st", "-c", "user.name=test",
          "commit", "-qm", "add own skill", cwd=work)
-    run_git("push", "-q", "origin", "HEAD:refactor/target", cwd=work)
+    _git("push", "-q", "origin", "HEAD:refactor/target", cwd=work)
 
     _run(repo)
 
@@ -191,7 +194,7 @@ def test_missing_skill_fails_the_run(repo, monkeypatch, tmp_path):
 def test_second_run_is_idempotent(repo):
     _run(repo)
     _run(repo)
-    status = run_git("status", "--short", cwd=repo["root"] / "work")
+    status = _git("status", "--short", cwd=repo["root"] / "work")
     assert status.stdout.strip() == ""
 
 
@@ -208,10 +211,10 @@ def test_stale_directory_is_moved_aside(repo):
 
 def test_sync_moves_readonly_worktrees_to_a_sha(repo):
     _run(repo)
-    sha = run_git("rev-parse", "HEAD~1", cwd=repo["root"] / "work").stdout.strip()
+    sha = _git("rev-parse", "HEAD~1", cwd=repo["root"] / "work").stdout.strip()
     _run(repo, "sync", sha)
     for rt in RUNTIMES:
-        head = run_git("rev-parse", "HEAD", cwd=repo["root"] / rt).stdout.strip()
+        head = _git("rev-parse", "HEAD", cwd=repo["root"] / rt).stdout.strip()
         assert head == sha
 
 
@@ -251,7 +254,7 @@ def test_empty_destination_is_provisioned(repo):
 
 def test_the_worktree_keeps_its_diff_clean(repo):
     _run(repo)
-    status = run_git("status", "--short", cwd=repo["root"] / "agy")
+    status = _git("status", "--short", cwd=repo["root"] / "agy")
     assert status.stdout.strip() == "", f"差分に現れている: {status.stdout}"
 
 

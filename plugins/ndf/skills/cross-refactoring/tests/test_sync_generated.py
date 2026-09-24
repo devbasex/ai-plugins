@@ -11,26 +11,33 @@
 """
 from __future__ import annotations
 
+import subprocess
+
 import pytest
 
-from crossref_helpers import make_state_v2, read_state, run_git
+from crossref_helpers import make_state_v2, read_state
+
+
+def _git(*args, cwd):
+    return subprocess.run(["git", *args], cwd=cwd, capture_output=True,
+                          text=True, check=True)
 
 
 def _commit(repo, message):
-    run_git("add", "-A", cwd=repo)
-    run_git("commit", "-qm", message, cwd=repo)
-    return run_git("rev-parse", "HEAD", cwd=repo).stdout.strip()
+    _git("add", "-A", cwd=repo)
+    _git("commit", "-qm", message, cwd=repo)
+    return _git("rev-parse", "HEAD", cwd=repo).stdout.strip()
 
 
 def _make_work(tmp_path):
     """`work` を本物のリポジトリとして作り、状態ファイルを添えて返す。"""
     work = tmp_path / "work"
     (work / "generated").mkdir(parents=True)
-    run_git("init", "-q", "-b", "main", str(work), cwd=tmp_path)
+    _git("init", "-q", "-b", "main", str(work), cwd=tmp_path)
     # 検査の対象（`refactor.py`）が自分でコミットする。**身元はテストが用意する。**
     # 実行した人の全体設定に頼ると、身元の無い実行環境で落ちる（#235）。
-    run_git("config", "user.email", "t@e.st", cwd=work)
-    run_git("config", "user.name", "test", cwd=work)
+    _git("config", "user.email", "t@e.st", cwd=work)
+    _git("config", "user.name", "test", cwd=work)
     (work / "src.py").write_text("x = 1\n", encoding="utf-8")
     (work / "generated" / "out.py").write_text("x = 1\n", encoding="utf-8")
     _commit(work, "init")
@@ -68,7 +75,7 @@ def test_every_changed_path_is_addable(paths, gitfacts, tmp_path):
     paths = gitfacts._dirty_paths(state, str(work))
 
     assert paths == ["generated/out.py", "src.py"]
-    run_git("add", "--", *paths, cwd=work)
+    _git("add", "--", *paths, cwd=work)
 
 
 # ---------- 同期コミット ----------
@@ -81,20 +88,20 @@ def test_sync_commits_generated_changes(vocabulary, gitfacts, tmp_path):
 
     gitfacts._sync_generated(state)
 
-    assert run_git("status", "--porcelain", cwd=work).stdout == ""
-    subject = run_git("log", "-1", "--format=%s", cwd=work).stdout.strip()
+    assert _git("status", "--porcelain", cwd=work).stdout == ""
+    subject = _git("log", "-1", "--format=%s", cwd=work).stdout.strip()
     assert subject == vocabulary.SYNC_COMMIT_MESSAGE.splitlines()[0]
 
 
 def test_sync_without_changes_makes_no_commit(gitfacts, tmp_path):
     """差分が出ない同期はコミットを作らない。"""
     work = _make_work(tmp_path)
-    before = run_git("rev-parse", "HEAD", cwd=work).stdout.strip()
+    before = _git("rev-parse", "HEAD", cwd=work).stdout.strip()
     state = read_state(_state_with_sync(tmp_path, work, command="true"))
 
     gitfacts._sync_generated(state)
 
-    assert run_git("rev-parse", "HEAD", cwd=work).stdout.strip() == before
+    assert _git("rev-parse", "HEAD", cwd=work).stdout.strip() == before
 
 
 # ---------- 同期の後段で落ちたとき ----------
@@ -113,7 +120,7 @@ def test_failure_after_sync_discards_produced_changes(refactor_lib, patch_lib, r
     with pytest.raises(SystemExit):
         gitfacts._sync_generated(state)
 
-    assert run_git("status", "--porcelain", cwd=work).stdout == ""
+    assert _git("status", "--porcelain", cwd=work).stdout == ""
 
 
 def test_failed_sync_command_discards_partial_changes(gitfacts, tmp_path):
@@ -125,7 +132,7 @@ def test_failed_sync_command_discards_partial_changes(gitfacts, tmp_path):
     with pytest.raises(SystemExit):
         gitfacts._sync_generated(state)
 
-    assert run_git("status", "--porcelain", cwd=work).stdout == ""
+    assert _git("status", "--porcelain", cwd=work).stdout == ""
 
 
 # ---------- 実装担当が残した未コミット変更 ----------
@@ -142,7 +149,7 @@ def test_leftover_changes_are_discarded_before_merge(gitfacts, tmp_path):
 
     gitfacts.discard_impl_leftovers(state, str(work))
 
-    assert run_git("status", "--porcelain", cwd=work).stdout == ""
+    assert _git("status", "--porcelain", cwd=work).stdout == ""
     assert (work / "src.py").read_text(encoding="utf-8") == "x = 1\n"
 
 
@@ -160,7 +167,7 @@ def test_discard_keeps_control_directory(gitfacts, tmp_path):
     gitfacts.discard_impl_leftovers(state, str(work))
 
     assert (control / "keep.json").exists()
-    assert run_git("status", "--porcelain", cwd=work).stdout == ""
+    assert _git("status", "--porcelain", cwd=work).stdout == ""
 
 
 def _fix_state(tmp_path, work, base):
@@ -185,7 +192,7 @@ def test_merge_fix_continues_when_impl_left_changes(patch_lib, refactor, tmp_pat
     止めると、修正 0 件として先へ進むこともできなくなる。
     """
     work = _make_work(tmp_path)
-    head = run_git("rev-parse", "HEAD", cwd=work).stdout.strip()
+    head = _git("rev-parse", "HEAD", cwd=work).stdout.strip()
     state_path = _fix_state(tmp_path, work, head)
     env_tmp_dir(state_path)
     patch_lib("push_head", lambda state: None)
@@ -193,7 +200,7 @@ def test_merge_fix_continues_when_impl_left_changes(patch_lib, refactor, tmp_pat
 
     refactor.cmd_merge_fix(type("A", (), {"id": 130})())
 
-    assert run_git("status", "--porcelain", cwd=work).stdout == ""
+    assert _git("status", "--porcelain", cwd=work).stdout == ""
     state = read_state(state_path)
     assert state["items"][0]["fix_count"] == 1
     assert state["items"][0]["status"] == "implemented"   # 次の verify が見直す
@@ -220,7 +227,7 @@ def test_merge_fix_advances_when_the_range_is_undeterminable(patch_lib, refactor
 def test_merge_fix_reverts_a_commit_for_another_item(patch_lib, refactor, tmp_path, env_tmp_dir):
     """修正の対象でない項目のコミットを含む範囲は、範囲ごと取り消す。"""
     work = _make_work(tmp_path)
-    head = run_git("rev-parse", "HEAD", cwd=work).stdout.strip()
+    head = _git("rev-parse", "HEAD", cwd=work).stdout.strip()
     state_path = _fix_state(tmp_path, work, head)
     env_tmp_dir(state_path)
     pushed = []

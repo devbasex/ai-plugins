@@ -15,10 +15,13 @@ import types
 
 import pytest
 
-from crossref_helpers import run_git
-
 
 HEAD_BRANCH = "refactor/target"
+
+
+def _git(*args, cwd):
+    return subprocess.run(["git", *args], cwd=cwd, capture_output=True,
+                          text=True, check=True)
 
 
 @pytest.fixture
@@ -33,22 +36,22 @@ def origin_repo(tmp_path):
     subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
     subprocess.run(["git", "clone", "-q", str(origin), str(repo)],
                    check=True, capture_output=True)
-    run_git("config", "user.email", "t@e.st", cwd=repo)
-    run_git("config", "user.name", "test", cwd=repo)
+    _git("config", "user.email", "t@e.st", cwd=repo)
+    _git("config", "user.name", "test", cwd=repo)
     (repo / "src").mkdir()
     (repo / "src" / "foo.py").write_text("def f():\n    pass\n")
-    run_git("add", "-A", cwd=repo)
-    run_git("commit", "-qm", "init", cwd=repo)
-    run_git("branch", "-M", "main", cwd=repo)
-    run_git("push", "-q", "origin", "main", cwd=repo)
-    run_git("checkout", "-qb", HEAD_BRANCH, cwd=repo)
+    _git("add", "-A", cwd=repo)
+    _git("commit", "-qm", "init", cwd=repo)
+    _git("branch", "-M", "main", cwd=repo)
+    _git("push", "-q", "origin", "main", cwd=repo)
+    _git("checkout", "-qb", HEAD_BRANCH, cwd=repo)
     (repo / "src" / "bar.py").write_text("x = 1\n")
-    run_git("add", "-A", cwd=repo)
-    run_git("commit", "-qm", "wip", cwd=repo)
-    run_git("push", "-q", "origin", HEAD_BRANCH, cwd=repo)
+    _git("add", "-A", cwd=repo)
+    _git("commit", "-qm", "wip", cwd=repo)
+    _git("push", "-q", "origin", HEAD_BRANCH, cwd=repo)
     # ローカルの head ブランチを消し、origin にだけある状態にする
-    run_git("checkout", "-q", "main", cwd=repo)
-    run_git("branch", "-qD", HEAD_BRANCH, cwd=repo)
+    _git("checkout", "-q", "main", cwd=repo)
+    _git("branch", "-qD", HEAD_BRANCH, cwd=repo)
     return repo
 
 
@@ -675,12 +678,12 @@ def test_existing_worktree_is_synced_to_origin(run_init, tmp_path, origin_repo):
     subprocess.run(["git", "clone", "-q", "-b", HEAD_BRANCH,
                     str(tmp_path / "origin.git"), str(clone)],
                    check=True, capture_output=True)
-    run_git("config", "user.email", "t@e.st", cwd=clone)
-    run_git("config", "user.name", "test", cwd=clone)
+    _git("config", "user.email", "t@e.st", cwd=clone)
+    _git("config", "user.name", "test", cwd=clone)
     (clone / "src" / "baz.py").write_text("z = 1\n")
-    run_git("add", "-A", cwd=clone)
-    run_git("commit", "-qm", "advance", cwd=clone)
-    run_git("push", "-q", "origin", HEAD_BRANCH, cwd=clone)
+    _git("add", "-A", cwd=clone)
+    _git("commit", "-qm", "advance", cwd=clone)
+    _git("push", "-q", "origin", HEAD_BRANCH, cwd=clone)
 
     run_init(_args(tmp_path))
 
@@ -695,20 +698,20 @@ def test_diverged_worktree_stops_the_run(run_init, tmp_path):
     run_init(_args(tmp_path))
     work = tmp_path / "rf130" / "work"
     (work / "src" / "local.py").write_text("local = 1\n")
-    run_git("add", "-A", cwd=work)
-    run_git("-c", "user.email=t@e.st", "-c", "user.name=test",
+    _git("add", "-A", cwd=work)
+    _git("-c", "user.email=t@e.st", "-c", "user.name=test",
          "commit", "-qm", "local only", cwd=work)
 
     clone = tmp_path / "advance2"
     subprocess.run(["git", "clone", "-q", "-b", HEAD_BRANCH,
                     str(tmp_path / "origin.git"), str(clone)],
                    check=True, capture_output=True)
-    run_git("config", "user.email", "t@e.st", cwd=clone)
-    run_git("config", "user.name", "test", cwd=clone)
+    _git("config", "user.email", "t@e.st", cwd=clone)
+    _git("config", "user.name", "test", cwd=clone)
     (clone / "src" / "remote.py").write_text("remote = 1\n")
-    run_git("add", "-A", cwd=clone)
-    run_git("commit", "-qm", "remote only", cwd=clone)
-    run_git("push", "-q", "origin", HEAD_BRANCH, cwd=clone)
+    _git("add", "-A", cwd=clone)
+    _git("commit", "-qm", "remote only", cwd=clone)
+    _git("push", "-q", "origin", HEAD_BRANCH, cwd=clone)
 
     with pytest.raises(SystemExit):
         run_init(_args(tmp_path))
@@ -1262,8 +1265,8 @@ def phase_state(tmp_path, env_tmp_dir, monkeypatch, cmd_setup):
 
     work = tmp_path / "work"
     work.mkdir()
-    run_git("init", "-q", cwd=work)
-    run_git("-c", "user.email=t@e.st", "-c", "user.name=test",
+    _git("init", "-q", cwd=work)
+    _git("-c", "user.email=t@e.st", "-c", "user.name=test",
          "commit", "-q", "--allow-empty", "-m", "init", cwd=work)
     path = make_state_v2(tmp_path, work, started_at="2026-09-24T10:00:00+09:00")
     env_tmp_dir(path)

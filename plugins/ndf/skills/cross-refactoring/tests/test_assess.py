@@ -11,9 +11,12 @@ import sys
 
 import pytest
 
-from crossref_helpers import run_git
-
 _SCRIPT = pathlib.Path(__file__).resolve().parents[1] / "scripts" / "refactor.py"
+
+
+def _git(*args, cwd):
+    return subprocess.run(["git", *args], cwd=cwd, capture_output=True,
+                          text=True, check=True)
 
 
 def _lines(n: int, prefix: str = "x") -> str:
@@ -25,15 +28,15 @@ def repo(tmp_path):
     """起点のコミット（ブランチ `base`）だけがある作業ディレクトリ。"""
     work = tmp_path / "repo"
     work.mkdir()
-    run_git("init", "-q", "-b", "main", cwd=work)
-    run_git("config", "user.email", "t@e.st", cwd=work)
-    run_git("config", "user.name", "test", cwd=work)
+    _git("init", "-q", "-b", "main", cwd=work)
+    _git("config", "user.email", "t@e.st", cwd=work)
+    _git("config", "user.name", "test", cwd=work)
     (work / "src").mkdir()
     (work / "src" / "a.py").write_text(_lines(12, "a"))
     (work / "README.md").write_text("# readme\n")
-    run_git("add", "-A", cwd=work)
-    run_git("commit", "-qm", "init", cwd=work)
-    run_git("branch", "base", cwd=work)
+    _git("add", "-A", cwd=work)
+    _git("commit", "-qm", "init", cwd=work)
+    _git("branch", "base", cwd=work)
     return work
 
 
@@ -42,8 +45,8 @@ def _commit(work: pathlib.Path, files: dict[str, str]) -> None:
         path = work / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(body)
-    run_git("add", "-A", cwd=work)
-    run_git("commit", "-qm", "change", cwd=work)
+    _git("add", "-A", cwd=work)
+    _git("commit", "-qm", "change", cwd=work)
 
 
 def _assess(work: pathlib.Path, *extra: str) -> tuple[int, list[str]]:
@@ -92,7 +95,7 @@ def test_eleven_lines_of_production_code_pass(repo):
 
 def test_rename_counts_both_paths(repo):
     """rename は旧パスの削除と新パスの追加として、両方のパスで判定する。"""
-    run_git("mv", "src/a.py", "src/b.py", cwd=repo)
+    _git("mv", "src/a.py", "src/b.py", cwd=repo)
     _commit(repo, {"src/b.py": _lines(12, "a") + "extra = 1\n"})
     rc, out = _assess(repo, "--base", "base")
     assert rc == 0
@@ -120,8 +123,8 @@ def test_binary_production_file_counts_as_zero_lines(repo):
     """numstat が `-` を返すコード拡張子のバイナリも、現状どおり 0 行と数える。"""
     path = repo / "src" / "binary.py"
     path.write_bytes(b"before\0after")
-    run_git("add", "-A", cwd=repo)
-    run_git("commit", "-qm", "change", cwd=repo)
+    _git("add", "-A", cwd=repo)
+    _git("commit", "-qm", "change", cwd=repo)
 
     rc, out = _assess(repo, "--base", "base")
 
