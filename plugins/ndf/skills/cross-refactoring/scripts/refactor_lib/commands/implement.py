@@ -49,7 +49,7 @@ from ..items import (
 )
 from ..paths import work_dir
 from ..paths import git_out, load_state
-from ..phases import finish_phase
+from ..phases import finish_phase, phase_record
 from ..undo import drop, resume_pending_drop
 from ..verify import (
     verify_commit_basics,
@@ -76,7 +76,7 @@ class Intake:
 def _phase_commits(state: dict[str, Any], phase: str) -> list[str]:
     """フェーズの起点から HEAD までのコミットを**古い順**で返す。確定できなければ中断。"""
     work = work_dir(state)
-    base = ((state.get("phases") or {}).get(phase) or {}).get("base_sha")
+    base = phase_record(state, phase).get("base_sha")
     head = git_out(work, ["rev-parse", "HEAD"]) or ""
     ordered = commits_in_range(work, base, head)
     if ordered is None:
@@ -125,7 +125,7 @@ def _record_seconds(
     state: dict[str, Any], phase: str, key: str, accepted: dict[str, dict[str, Any]],
 ) -> None:
     """項目の所要。起点は最初の項目ならフェーズの開始、2 件目からは直前の項目のコミット（設計）。"""
-    previous = ((state.get("phases") or {}).get(phase) or {}).get("started_at")
+    previous = phase_record(state, phase).get("started_at")
     ordered = sorted(accepted.items(), key=lambda kv: clock.parse(kv[1]["time"]) or clock.now())
     for item_id, fact in ordered:
         seconds = clock.seconds_between(previous, fact["time"])
@@ -178,7 +178,7 @@ def _remember(path: pathlib.Path, state: dict[str, Any], phase: str, intake: Int
 
 
 def _recalled(state: dict[str, Any], phase: str) -> Optional[Intake]:
-    saved = ((state.get("phases") or {}).get(phase) or {}).get("intake")
+    saved = phase_record(state, phase).get("intake")
     if not isinstance(saved, dict):
         return None
     return Intake(extra=list(saved.get("extra") or []), rejected=dict(saved.get("rejected") or {}),
@@ -315,7 +315,7 @@ def cmd_merge_tests(args: argparse.Namespace) -> None:
     """
     path, state = load_state(args.id)
     _prepare(path, state)
-    if ((state.get("phases") or {}).get("add-tests") or {}).get("ended_at"):
+    if phase_record(state, "add-tests").get("ended_at"):
         info("↻ テストの追加は取り込み済みです")
         if not live_items(state):
             sys.exit(2)
@@ -391,7 +391,7 @@ def cmd_merge_implement(args: argparse.Namespace) -> None:
     """
     path, state = load_state(args.id)
     _prepare(path, state)
-    if ((state.get("phases") or {}).get("implement") or {}).get("ended_at"):
+    if phase_record(state, "implement").get("ended_at"):
         info("↻ 実装は取り込み済みです")
         if not live_items(state):
             sys.exit(2)
