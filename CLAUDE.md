@@ -59,7 +59,7 @@ python3 plugins/ndf/scripts/instructions-check.py --root .
 
 ## cross-refactoring
 
-**v10.17.7 の次の版で、`/ndf:cross-refactoring` はラウンドを上限まで回す形から、想定最大時間（`--budget-minutes`、既定 30 分）に収まる計画を 1 回だけ実行する形へ変わる（#933）。** 参加者の全員が 1 度だけ多面的に提案し、実装担当 1 者（`--implementer` → ホスト → 参加者の先頭）が計画・テスト追加・実装・検証/修正を通す。参加者の既定は **codex / kiro とホスト（ホストが codex / kiro なら 2 者）** で、`--exclude` / `--include` で名指しで変える（agy は `--include agy` で戻す）。レビューは最終ゲートの `cross-review` が担う。
+**`/ndf:cross-refactoring` は、想定最大時間（`--budget-minutes`、既定 30 分）に収まる計画を 1 回だけ実行する（#933）。** 参加者の全員が 1 度だけ多面的に提案し、実装担当 1 者（`--implementer` → ホスト → 参加者の先頭）が計画・テスト追加・実装・検証/修正を通す。参加者の既定は **codex / kiro とホスト（ホストが codex / kiro なら 2 者）** で、`--exclude` / `--include` で名指しで変える（agy は `--include agy` で戻す）。レビューは最終ゲートの `cross-review` が担う。
 
 ```bash
 /ndf:cross-refactoring 130 --scope src/services tests/services --round-test "pytest tests/services -q" --baseline-test "pytest -q"
