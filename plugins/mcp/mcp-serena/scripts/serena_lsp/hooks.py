@@ -16,8 +16,8 @@ from . import project_yml as py
 SKILL = "/mcp-serena:language-servers"
 PREFIX = "[mcp-serena]"
 
-GREP_THRESHOLD, READ_THRESHOLD, MIXED_THRESHOLD = 3, 3, 4
-GREP_PERIOD, READ_PERIOD, MIXED_PERIOD = 1000, 1000, 2000
+THRESHOLDS = {"grep": 3, "read": 3, "mixed": 4}
+PERIODS = {"grep": 1000, "read": 1000, "mixed": 2000}
 DENY_INTERVAL = 120
 NON_SYMBOLIC = ("pattern", "read", "diagnostics", "memory", "onboarding", "config", "list_file",
                 "find_file", "shell", "dashboard", "restart_language_server")
@@ -198,7 +198,7 @@ def _bump(counts: dict, kind: str, period: int, now: float) -> None:
 
 
 def _reset(counts: dict) -> None:
-    for kind in ("grep", "read", "mixed"):
+    for kind in THRESHOLDS:
         counts[kind] = 0
         counts[f"last_{kind}"] = None
 
@@ -238,9 +238,9 @@ def pre_tool_use(payload: dict, client: str):
         _save_counts(path, counts, now)
         return _allow(tool, payload, client)
 
-    _bump(counts, kind, GREP_PERIOD if kind == "grep" else READ_PERIOD, now)
-    _bump(counts, "mixed", MIXED_PERIOD, now)
-    if counts["grep"] >= GREP_THRESHOLD or counts["read"] >= READ_THRESHOLD or counts["mixed"] >= MIXED_THRESHOLD:
+    _bump(counts, kind, PERIODS[kind], now)
+    _bump(counts, "mixed", PERIODS["mixed"], now)
+    if any(counts[k] >= THRESHOLDS[k] for k in THRESHOLDS):
         _reset(counts)
         counts["last_deny"] = now
         _save_counts(path, counts, now)
