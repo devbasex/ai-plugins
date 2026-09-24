@@ -281,7 +281,7 @@ def _test_commit_problem(
         return f"テストの追加がテスト以外のファイルを変えています（{', '.join(others[:5])}）"
     hits = doc_wording_tests(commits, tracked, str(state["worktrees"]["work"]))
     if hits:
-        return "文書の文言を固定するテストは足さない（" + "、".join(f"{p}: {l}" for p, l in hits) + "）"
+        return _doc_wording_reason(hits)
     return None
 
 
@@ -322,6 +322,10 @@ def cmd_merge_tests(args: argparse.Namespace) -> None:
 
 # ---------- 実装 ----------
 
+def _doc_wording_reason(hits: list[tuple[str, int]]) -> str:
+    return "文書の文言を固定するテストは足さない（" + "、".join(f"{p}: {l}" for p, l in hits) + "）"
+
+
 def _implement_problem(
     item: dict[str, Any], commits: list[dict[str, Any]], scope: list[str],
     tracked: list[str], state: dict[str, Any],
@@ -337,7 +341,7 @@ def _implement_problem(
         return problem
     hits = doc_wording_tests(commits, tracked, str(state["worktrees"]["work"]))
     if hits:
-        return "文書の文言を固定するテストは足さない（" + "、".join(f"{p}: {l}" for p, l in hits) + "）"
+        return _doc_wording_reason(hits)
     return verify_diff_budget([item], commits)
 
 
