@@ -259,7 +259,7 @@ plugins/ndf/scripts/lib/{jev,limits,assignment}.py
 | `merge-implement` | git の範囲 | — | 0 / 2（残る項目 0 件。1 件も適用されなかったとき。最終ゲートへ）。コミットの無い項目は `not_done` で見送り、その項目のテストのコミットも取り消す |
 | `verify` | 状態 | `VERIFY=done\|fix` | 0 / 4 |
 | `merge-fix` | git の範囲 | — | 0 |
-| `finalize` | 状態 | — | 0（履歴の追記に失敗しても 0。知らせるだけ）。`final-gate` の後に呼ぶ。`final_gate` が通った（`cross-review` へ渡すときを含む）ときだけ追記し、最終ゲートの全体のテストの所要も行に入れる。通らなかった・中断した実行は追記しない |
+| `finalize` | 状態・`--review-status STATUS`（単独起動のときだけ） | — | 0（履歴の追記に失敗しても 0。知らせるだけ）。呼ぶ時点は起動のされ方で変わる（下の「最終ゲートとの関係」）。`final_gate` が通り、単独起動なら渡された `cross-review` の最終ステータスが `approved` のときだけ追記する。ステータスは `final_gate.review_status` に残す。行には最終ゲートの全体のテストの所要を入れ、`cross-review` の所要は入れない。通らなかった・中断した実行は追記しない |
 | `final-gate` / `merge-final-fix` / `report` / `status` / `assess` | 今と同じ | 今と同じ | 今と同じ |
 
 外すサブコマンドは次の 7 つである。
@@ -347,7 +347,10 @@ sequenceDiagram
     end
   end
   D->>R: final-gate
-  D->>R: finalize（最終ゲートが通ったときだけ履歴へ追記）
+  opt 単独起動
+    D->>D: /ndf:cross-review（収束まで）
+  end
+  D->>R: finalize（最終ゲートが通ったときだけ履歴へ追記。単独起動は cross-review の最終ステータスを渡す）
 ```
 
 **駆動の bash は繰り返しを 1 つしか持たない**（検証と修正）。今の二重の繰り返し（ラウンドと適用ラウンド）は無くなる。
@@ -430,6 +433,15 @@ stateDiagram-v2
 | `--ci-check` あり（単独・工程の 1 つ） | 継続的統合の結果 | 取り消した後の HEAD も継続的統合が確かめる |
 | 工程の 1 つ・`--ci-check` なし | 全体のテスト（想定最大時間の内。控えに入れる） | **検証の中で走って通り（取り消しが無く）、その後に HEAD が生成物の同期のコミットしか進んでいなければ、走らせずに通す** |
 
+### 履歴へ追記する時点
+
+| 起動のされ方 | `finalize` を呼ぶ時点 | 追記する条件 |
+| --- | --- | --- |
+| 単独 | `/ndf:cross-review` が終わった後。駆動は `state.py report` の最終ステータスを `--review-status` で渡す | `final-gate` が通り、`--review-status` が `approved` |
+| 工程の 1 つ | `final-gate` の直後 | `final-gate` が通った（全体のテストか継続的統合） |
+
+**単独起動で `final-gate` の直後に追記しない。** その時点では `cross-review` の合否が決まっておらず、レビューが収束しなかった実行が履歴に混ざる。`--review-status` を渡さずに単独起動の状態で `finalize` を呼ぶと、追記せずに 0 で終わり、知らせる。
+
 ### 再開
 
 - 同じ `init` を打ち直すと、`schema: 2` の状態の `phase` を `PHASE` として返し、駆動は終わったフェーズを飛ばす。各 `merge-*` は今と同じく取り込み済みの印で冪等にする
@@ -463,6 +475,7 @@ stateDiagram-v2
 | AC15 AC16 | git を使う結合（項目の単位の取り消し・隣接する変更の退避） |
 | AC16b | `final-gate` の単体（`whole_test.reverted` が真で `--ci-check` が無いとき、単独起動でも全体のテストを走らせる。落ちたら `final-fix` の経路を返す） |
 | AC17〜AC20 | `allocation.py` の単体（`NDF_METRICS_DIR` を一時ディレクトリへ向ける。#938 の汚染を繰り返さない） |
+| AC17 | `finalize` の単体（工程の 1 つで最終ゲートが通った・通らない、単独起動で `--review-status` が `approved`・それ以外・渡されない） |
 | AC21 | `assignment.py` の単体 |
 | AC22 AC23 | `jev.py` の単体（HTTP を偽の応答へ差し替える。鍵が無い・`NDF_JEV=0`・非公開・疎通の失敗・呼び出しの失敗・確信度の足りない場合）と、`merge-plan` / `verify` の単体（段と同じ変更かは `merge-plan`、D5 は `verify` で、Jev の答えと実装担当の答えのどちらでも決まる）。`merge-proposals` は鍵が同じ提案の機械的な統合だけを確かめる |
 | AC24 AC25 | 再開の単体（フェーズの飛ばし・旧い状態で止まる） |
