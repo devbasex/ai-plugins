@@ -27,6 +27,7 @@ standard（既存の中継の振る舞いを変え、Skill 2 つと hook を足�
 - Codex / Kiro / agy への配布
 - 確定仕様 `docs/specifications/ndf-relay-segment-restart.md` の改訂（確定仕様化の工程で行う）
 - 版上げ（release が行う）
+- `ensure-retention.sh`・`statusline-switch.sh` が `CLAUDE_CONFIG_DIR` を見ないこと（実機検証で見つけた。#943 として起票）
 
 ## 受け入れ条件
 

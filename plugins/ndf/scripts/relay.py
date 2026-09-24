@@ -1525,7 +1525,8 @@ def cmd_startup() -> int:
 # ---------------------------------------------------------------- 質問の印（関門を越えない守り）
 
 
-DENY_REASON = "ndf-relay: 中継が入力を書いている。もう一度 AskUserQuestion を呼ぶ"
+DENY_REASON = ("ndf-relay: 中継が入力を書いている最中だったため、質問を出さなかった。"
+               "利用者へ返さずに、同じ AskUserQuestion を今すぐもう一度呼ぶ")
 
 
 def cmd_question(action: str) -> int:

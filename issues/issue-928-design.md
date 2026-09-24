@@ -313,7 +313,7 @@ sh -c 'R="${XDG_STATE_HOME:-$HOME/.local/state}/ndf/relay/rc-added"; C="${XDG_DA
 | `mark`（Stop） | 既存の判定の 4（直接の子）を通った | 印の判定の前に消す。Stop が起きたなら質問は表示されていない。`Esc` で取り消して `PostToolUse` が来なかった印もここで消える |
 
 **ロックが取れないとき、`question open` は質問を出させない。** 標準出力へ `PreToolUse` の拒否
-（`{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "ndf-relay: 中継が入力を書いている。もう一度 AskUserQuestion を呼ぶ"}}`）を出して
+（`{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "ndf-relay: 中継が入力を書いている最中だったため、質問を出さなかった。利用者へ返さずに、同じ AskUserQuestion を今すぐもう一度呼ぶ"}}`）を出して
 終了コード 0 で終わる。質問は描かれず、モデルは理由を受けて呼び直す。**印を作って質問を描かせる形は
 採らない**（中継がまだロックを持っていれば、書く `/exit\r` が質問に届く。決定 17）。中継が落ちると
 OS がロックを放すので、取れないのは中継が 3 秒を超えて持つときだけである。
@@ -484,14 +484,15 @@ devbasex/devbase#253 が入る前の devbase では、`install` は囲みを使�
 | 項目 | 内容 |
 | --- | --- |
 | `/restart` の名前の衝突 | Claude Code の組み込みや主要プラグインに `restart` を末尾に持つ Skill・コマンドがあるかは、実装の時点で `/` メニューに打って確かめる（AUTHORING の「外部 Skill 名の末尾要素にしない」）。衝突すれば `relay-restart` へ寄せる |
+| `/ndf:restart` の判定の手順 | **実測（2026-09-24・haiku）: モデルが手順 1（`is-child`）の Bash を飛ばしてブロックだけを出した。** 中継の外では `mark` が `NDF_RELAY_DIR` の無さで抜けるので害は無い（落ちる形）。Skill の本文で「必ず実行する」と強めた |
 | `/goal` の下の再起動 | 目標の判定が再起動の応答を「未達」として続けさせたとき、モデルがブロックを出し直すかは実機の通し（AC21）で 1 度見る。出し直さなければ印が消え、中継は切り替えない（落ちる形であって壊れない） |
 | macOS | `uninstall` の置き換えと権限の保持は Linux でだけ確かめる |
 | devbase 以外の永続化 | 写しを `~/.claude` の下に置けば残ることは devbase でだけ確かめた。ほかの環境で `~/.claude` を作り直す運用は想定しない |
 | zsh での関数の形 | `function claude { ... }` が先の alias と組み合わさることは bash でだけ確かめた。zsh は実装の時点で確かめる |
 | コンテナの間の `flock` | 名前付きボリューム上の `copy.lock` の `flock` が 2 つのコンテナの間で効くかは、実装の時点で devbase の 2 つのコンテナから確かめる。効かなければ置き換えを `rename` の原子性だけに頼り、後退を防ぐのは比較だけになる |
 | devbase の読み込み先の名前 | `DEVBASE_SHELLRC_DIR` と `~/.shellrc.d/*.sh` は devbasex/devbase#253 で出した案である。devbase が別の名前を選べば、実装の持ち場が E1・U1 の変数名を合わせる |
-| hook の待ちの中で書いた `/exit` | 中継がロックを持つ間に質問の hook が待つと、書いた `/exit` は hook の実行中に届き、質問の前に claude を終わらせる（実測。答えは残らない）。関門は答えられないが、その質問は失われる。**質問の `tool_use` の行が `PreToolUse` の hook より前に会話の記録へ書かれるかは確かめていない。** 書かれるなら G3 の段 3 の記録の大きさの確かめで書かずに戻れる。実装の時点で本物の記録で確かめる |
+| hook の待ちの中で書いた `/exit` | 中継がロックを持つ間に質問の hook が待つと、書いた `/exit` は hook の実行中に届き、質問の前に claude を終わらせる（実測。答えは残らない）。関門は答えられないが、その質問は失われる。**実装の時点の実測（2026-09-24・2.1.281）: 質問の `tool_use` の行は `PreToolUse` の hook が終わった後に書かれる。** G3 の段 3 の記録の大きさの確かめでは hook の実行中の質問を検知できず、排他は `question.lock` だけが担う |
 | 再開用のコマンドの中身 | 引数なしの再開用のコマンドを定型（`/goal ...` の入力そのもの・番号とパスと URL だけの 1 文）に限ったが、守るのはモデルで、機械の検査は無い。引数で渡された中身は利用者の入力として扱い、検査しない |
-| `AskUserQuestion` の拒否 | `PreToolUse` の `permissionDecision: deny` が `AskUserQuestion` でも質問を描かせずに理由をモデルへ返すかは、実装の時点で本物の Claude Code で 1 度確かめる |
+| `AskUserQuestion` の拒否 | **実測（2026-09-24・2.1.281）: 質問は描かれず、理由が `tool_result` のエラーとしてモデルへ返る。** haiku は呼び直さずに利用者へ「もう一度試して」と返して応答を終えた（関門は越えないが、その質問は失われる）。理由の文を「利用者へ返さずに、同じ AskUserQuestion を今すぐもう一度呼ぶ」へ強めた。呼び直すかはモデルに依る |
 | 書いた入力を TUI が読む時間 | 1 秒で読み終えるかは、実機の通し（AC21）で `question.lock` を持つ秒を変えて 1 度見る。実測では、応答の途中に書いた `/clear` は 1 秒後の画面で待ち行列に入っていた |
-| 会話の記録の行の型 | (5) が数える `assistant` / `user` の行が、印の後の Stop hook の記録（`system` など）を含まないことを、実装の時点で本物の記録で確かめる |
+| 会話の記録の行の型 | **実測（2026-09-24・2.1.281）: 印の後の Stop hook の記録は `system`（`stop_hook_summary`・`turn_duration`）で、(5) は数えない。** `user` には人の入力のほか `tool_result`・Skill の本文の注入も入るが、どれも応答が再開した印なので (5) の判定は変わらない |
