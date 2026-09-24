@@ -17,15 +17,33 @@
 
 段はシェルを通さずに `--root` を作業ディレクトリにして実行する。段が変えたパスは、段の前後の
 `git status --porcelain -uall` に出たパスの内容の要約（`git hash-object`）を比べて決める。
+
+配布の決まった手順（#862。試作は #827 の phase-steps.py）も同じスクリプトに置く。結果は
+`lib/step_result.py` の形の 1 行の JSON で、終了コードは 0 = ok / 1 = 失敗（stopped）/
+2 = 読めない / 3 = 前提が無い / 10 = 本番への配布の承認が要る（approval-facts）。
+
+    python3 release-steps.py bump           --plugin <名前> --to <版> [--root <dir>]
+    python3 release-steps.py changelog      --version <版> --prs <PR番号>... [--plugin ndf] [--root <dir>]
+    python3 release-steps.py release        --version <版> --channel dev|prod [--plugins ndf,...] [--root <dir>]
+    python3 release-steps.py approval-facts --version <版> --prs <PR番号>... [--prev-tag <タグ>] [--root <dir>]
 """
 from __future__ import annotations
 
 import argparse
 import json
+import os
+import re
 import subprocess
 import sys
+import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+from step_result import (EXIT_GATE, EXIT_PRECONDITION, StepError, approval_present, base_of,  # noqa: E402
+                         common_parser, emit, gh_json, git, git_root, main_with, plugin_dir,
+                         repo_slug, result, run, today, version_arg)
 
 DECLARATION = ".ndf/release.json"
 SUPPORTED_VERSIONS = (1,)
@@ -218,8 +236,489 @@ def _head_digest(root: Path, path: str) -> str | None:
         return None
 
 
-def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description="リポジトリが宣言した配布の段を走らせる")
+# ---------- 配布の決まった手順（#862） ----------
+
+TOOL = "release"
+
+
+def ver_pat(v):
+    """版の文字列を、前後に版の続きが無いときだけ当てる正規表現にする。"""
+    return r"(?:(?<=v)|(?<![0-9A-Za-z.\-]))" + re.escape(v) + r"(?![0-9A-Za-z\-]|\.[0-9A-Za-z])"
+
+
+class Editor:
+    """行単位で旧版を新版へ直す。書き換えたファイルと、見つからなかった箇所を集める。"""
+
+    def __init__(self, root, old, new):
+        self.root, self.old, self.new = root, old, new
+        self.files, self.manual = [], []
+
+    def lines(self, path):
+        return path.read_text(encoding="utf-8").split("\n")
+
+    def save(self, path, lines):
+        path.write_text("\n".join(lines), encoding="utf-8")
+        rel = path.relative_to(self.root).as_posix()
+        if rel not in self.files:
+            self.files.append(rel)
+
+    def sub(self, path, line_re, what, count=1, start=0, stop=None, required=True):
+        """line_re に合う行の中の旧版を新版へ。直した行数を返す。"""
+        if not path.is_file():
+            if required:
+                self.manual.append(f"{path.relative_to(self.root).as_posix()} が無い（{what}）")
+            return 0
+        lines = self.lines(path)
+        stop = len(lines) if stop is None else stop
+        done, already = 0, 0
+        rx = re.compile(line_re)
+        for i in range(start, stop):
+            if done >= count:
+                break
+            if not rx.search(lines[i]):
+                continue
+            new_line = re.sub(ver_pat(self.old), self.new, lines[i])
+            if new_line != lines[i]:
+                lines[i] = new_line
+                done += 1
+            elif re.search(ver_pat(self.new), lines[i]):
+                already += 1
+        if done:
+            self.save(path, lines)
+        if required and done + already < count:
+            self.manual.append(
+                f"{path.relative_to(self.root).as_posix()}: {what} の旧版 {self.old} が"
+                f" {count} 箇所見つからず {done + already} 箇所だけ（手で直す）")
+        return done
+
+
+def bump_update_heading(ed, readme):
+    """README の更新案内の見出しを新しい版へ書き換える（検査は見出しを現行の版の 1 つだけに求める）。"""
+    rel = readme.relative_to(ed.root).as_posix()
+    if not readme.is_file():
+        ed.manual.append(f"{rel} が無い（更新案内の見出し）")
+        return
+    lines = ed.lines(readme)
+    new_h = f"## v{ed.new} へ更新するとき"
+    if new_h in lines:
+        return
+    rx = re.compile(r"^## v\S+ へ更新するとき$")
+    at = next((i for i, l in enumerate(lines) if rx.match(l)), None)
+    if at is None:
+        ed.manual.append(f"{rel}: 更新案内の見出しが無い（「{new_h}」を手で足す）")
+        return
+    lines[at] = new_h
+    ed.save(readme, lines)
+    if base_of(ed.old) != base_of(ed.new):
+        ed.manual.append(f"{rel}: 更新案内の本文を v{ed.new} の変更へ書き直す（changelog が PR の一覧へ差し替える）")
+
+
+def bump_versioning_doc(ed):
+    """docs/versioning-and-distribution.md の「版の付け方と開発版の配布」章の正式版の版数。"""
+    doc = ed.root / "docs" / "versioning-and-distribution.md"
+    rel = "docs/versioning-and-distribution.md"
+    ob, nb = base_of(ed.old), base_of(ed.new)
+    if ob == nb:
+        return
+    if not doc.is_file():
+        ed.manual.append(f"{rel} が無い（この章は手で直す）")
+        return
+    lines = ed.lines(doc)
+    targets = [
+        (re.compile(r"^\| 正式版 \| `([^`]+)` \|"), "正式版の表の行"),
+        (re.compile(r"`([^`]+)` の次を開発するなら"), "接尾辞の例"),
+    ]
+    changed = False
+    for rx, what in targets:
+        hits = [i for i, l in enumerate(lines) if rx.search(l)]
+        if len(hits) != 1:
+            ed.manual.append(f"{rel}: 「版の付け方と開発版の配布」章の{what}が特定できない（この章は手で直す）")
+            continue
+        i = hits[0]
+        cur = rx.search(lines[i]).group(1)
+        if cur == nb:
+            continue
+        if cur != ob:
+            ed.manual.append(f"{rel}: {what}の版が {cur} で旧版 {ob} と違う（この章は手で直す）")
+            continue
+        lines[i] = lines[i].replace(f"`{ob}`", f"`{nb}`", 1)
+        changed = True
+    if changed:
+        ed.save(doc, lines)
+
+
+def marketplace_range(lines, name):
+    """marketplace.json の中で、その plugin の項目の行の範囲（name の行から次の name の行まで）。"""
+    rx = re.compile(r'^\s*"name"\s*:\s*"([^"]+)"')
+    start = None
+    for i, l in enumerate(lines):
+        m = rx.match(l)
+        if not m:
+            continue
+        if start is not None:
+            return start, i
+        if m.group(1) == name:
+            start = i
+    return (start, len(lines)) if start is not None else (None, None)
+
+
+def run_staleness(root, expected=()):
+    """check-doc-staleness.py を走らせる。expected に合う ERROR だけなら通ったと見なす。"""
+    script = root / "scripts" / "check-doc-staleness.py"
+    if not script.is_file():
+        return None, "scripts/check-doc-staleness.py が無い"
+    p = run([sys.executable, str(script), "--root", str(root)], cwd=root, check=False)
+    if p.returncode == 0:
+        return True, "ok"
+    out = (p.stdout + p.stderr).strip().splitlines()
+    errors = [l for l in out if l.startswith("ERROR")]
+    rest = [l for l in errors if not any(x in l for x in expected)]
+    if errors and not rest:
+        return True, "ok（後の段で直す分だけ: " + " / ".join(errors)[:800] + "）"
+    return False, " / ".join((rest or out)[-10:])[:1000]
+
+
+def cmd_bump(a):
+    root = git_root(a.root)
+    pdir = plugin_dir(root, a.plugin)
+    try:
+        old = json.loads((pdir / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))["version"]
+    except (OSError, ValueError, KeyError) as e:
+        raise StepError(f"旧版を plugin.json から読めない: {e}", 2)
+    new = a.to
+    if old == new:
+        raise StepError(f"旧版と新版が同じ: {old}")
+    ed = Editor(root, old, new)
+    desc_re = r'^\s*"description"\s*:.*\(v' + re.escape(old) + r"\)"
+
+    for rel, _ in ((".claude-plugin/plugin.json", True), (".codex-plugin/plugin.json", False),
+                   ("dev.agy/plugin.json", False), ("plugin.json", False)):
+        f = pdir / rel
+        if not f.is_file():
+            continue
+        ed.sub(f, r'^\s*"version"\s*:', f"{rel} の version")
+        if f"(v{old})" in f.read_text(encoding="utf-8"):
+            ed.sub(f, desc_re, f"{rel} の description")
+
+    mp = root / ".claude-plugin" / "marketplace.json"
+    if mp.is_file():
+        s, e = marketplace_range(ed.lines(mp), a.plugin)
+        if s is None:
+            ed.manual.append(f".claude-plugin/marketplace.json に {a.plugin} の項目が無い")
+        elif any(f"(v{old})" in l for l in ed.lines(mp)[s:e]):
+            ed.sub(mp, desc_re, "marketplace.json の description", start=s, stop=e)
+
+    readme = root / "README.md"
+    rows = [l for l in (ed.lines(readme) if readme.is_file() else []) if l.startswith(f"| **{a.plugin}** |")]
+    if rows:
+        ed.sub(readme, r"^\| \*\*" + re.escape(a.plugin) + r"\*\* \|", "README.md のプラグイン一覧表")
+    elif a.plugin in ("ndf", "playwright-kit"):
+        ed.manual.append(f"README.md のプラグイン一覧表に {a.plugin} の行が無い")
+    if a.plugin == "ndf":
+        ed.sub(readme, r"\*\*NDFプラグイン v", "README.md の概要の版")
+        ed.sub(root / "AGENTS.md", r"主要プラグインです（v", "AGENTS.md の版")
+        nr = pdir / "README.md"
+        ed.sub(nr, r"（Kiro CLI用 / v", "plugins/ndf/README.md の Kiro の確認例")
+        ed.sub(nr, r"/plugins/cache/ai-plugins/ndf/", "plugins/ndf/README.md の Codex のパス例", count=2)
+        ed.sub(nr, r"ndf@ai-plugins\s+installed", "plugins/ndf/README.md の codex plugin list の出力例")
+        bump_versioning_doc(ed)
+
+    bump_update_heading(ed, pdir / "README.md")
+
+    expected = []
+    if base_of(old) != base_of(new):
+        expected.append(f"更新案内の見出しが 2 個ある（v{new} / v{old}）")
+        ed.manual.append(f"{pdir.relative_to(root).as_posix()}/README.md: 更新案内の v{old} の節を片付ける（見出しを 1 つにする）")
+    ok, summary = run_staleness(root, expected)
+    if ok is None:
+        ed.manual.append(summary)
+    items = ([{"kind": "file", "name": f, "result": "updated"} for f in ed.files]
+             + [{"kind": "manual", "name": m, "result": "manual"} for m in ed.manual])
+    metrics = {"plugin": a.plugin, "from": old, "to": new, "staleness": summary}
+    if ok is False:
+        emit(result(TOOL, "stopped", f"{old} → {new} の後に check-doc-staleness.py が失敗", items, metrics))
+    emit(result(TOOL, "ok", f"{a.plugin} を {old} → {new} へ上げた（{len(ed.files)} ファイル・手で直す {len(ed.manual)} 件）",
+                items, metrics, next="items の manual を手で直す" if ed.manual else None))
+
+
+def pr_titles(root, prs):
+    items = []
+    for n in prs:
+        d = gh_json(root, ["pr", "view", str(n), "--json", "title"], f"gh pr view {n}")
+        try:
+            title = d["title"].strip()
+        except (TypeError, KeyError, AttributeError):
+            raise StepError(f"gh pr view {n} の出力を読めない", 2)
+        items.append((n, f"- {title}（#{n}）"))
+    return items
+
+
+def cmd_changelog(a):
+    root = git_root(a.root)
+    cl = root / "CHANGELOG.md"
+    if not cl.is_file():
+        raise StepError("CHANGELOG.md が無い", EXIT_PRECONDITION)
+    items = pr_titles(root, a.prs)
+    sections = []
+
+    # CHANGELOG.md（見出しは基底の版。開発版の接尾辞は載せない）
+    lines = cl.read_text(encoding="utf-8").split("\n")
+    head = f"## [{a.plugin} {base_of(a.version)}]"
+    at = next((i for i, l in enumerate(lines) if l == head or l.startswith(head + " ")), None)
+    if at is None:
+        first = next((i for i, l in enumerate(lines) if l.startswith("## [")), len(lines))
+        block = [f"{head} - {today()}", ""] + [b for _, b in items] + [""]
+        if first == len(lines) and lines and lines[-1] != "":
+            block = [""] + block
+        lines[first:first] = block
+        sections.append({"kind": "section", "name": "CHANGELOG.md", "result": "added",
+                         "heading": block[0] or block[1], "added": [n for n, _ in items]})
+    else:
+        end = next((i for i in range(at + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
+        body = "\n".join(lines[at:end])
+        add = [(n, b) for n, b in items if f"#{n}）" not in body and f"#{n})" not in body]
+        ins = end
+        while ins - 1 > at and lines[ins - 1].strip() == "":
+            ins -= 1
+        lines[ins:ins] = [b for _, b in add]
+        sections.append({"kind": "section", "name": "CHANGELOG.md", "result": "added",
+                         "heading": lines[at], "added": [n for n, _ in add]})
+    cl.write_text("\n".join(lines), encoding="utf-8")
+
+    # plugin の README の更新案内: 見出しから次の同じ深さの見出しまでを、この版の PR の一覧へ差し替える
+    try:
+        pdir = plugin_dir(root, a.plugin)
+    except StepError:
+        pdir = None
+    readme = pdir / "README.md" if pdir else None
+    h = f"## v{a.version} へ更新するとき"
+    if readme and readme.is_file():
+        rl = readme.read_text(encoding="utf-8").split("\n")
+        if h in rl:
+            i = rl.index(h)
+            end = next((j for j in range(i + 1, len(rl)) if rl[j].startswith("## ")), len(rl))
+            if not any(f"（#{n}）" in l for l in rl[i:end] for n, _ in items):
+                rl[i + 1:end] = [""] + [b for _, b in items] + [""]
+                readme.write_text("\n".join(rl), encoding="utf-8")
+                sections.append({"kind": "section", "name": readme.relative_to(root).as_posix(),
+                                 "result": "replaced", "heading": h, "added": [n for n, _ in items]})
+
+    readme_done = any(s["result"] == "replaced" for s in sections)
+    emit(result(TOOL, "ok", f"{len(a.prs)} 件の PR を {len(sections)} 箇所へ並べた", sections,
+                {"version": a.version, "prs": len(a.prs)},
+                next="更新案内の本文を利用者向けの説明へ書き直す" if readme_done else None))
+
+
+def owner_repo(root):
+    slug = repo_slug(root)
+    if not slug or "--" not in slug:
+        raise StepError("リポジトリの owner/name を決められない", EXIT_PRECONDITION)
+    return slug.replace("--", "/", 1)
+
+
+def changelog_section(root, version, plugin="ndf"):
+    """CHANGELOG.md の `## [<plugin> <基底の版>]` の節の本文（見出しを除く）を返す。"""
+    cl = root / "CHANGELOG.md"
+    if not cl.is_file():
+        return ""
+    lines = cl.read_text(encoding="utf-8").split("\n")
+    head = f"## [{plugin} {base_of(version)}]"
+    at = next((i for i, l in enumerate(lines) if l == head or l.startswith(head + " ")), None)
+    if at is None:
+        return ""
+    end = next((i for i in range(at + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
+    return "\n".join(lines[at + 1:end]).strip()
+
+
+def run_checks(root):
+    """リリース前の検査を回し、[(名前, 通ったか, 末尾の出力)] を返す。"""
+    res = []
+    for name, cmd in (("check-doc-staleness", ["python3", "scripts/check-doc-staleness.py", "--root", str(root)]),
+                      ("validate-runtime-plugins", ["bash", "scripts/validate-runtime-plugins.sh"])):
+        if not (root / cmd[1]).is_file():
+            res.append((name, None, "スクリプトが無い"))
+            continue
+        p = run(cmd, cwd=root, check=False)
+        res.append((name, p.returncode == 0, "\n".join((p.stdout + p.stderr).strip().split("\n")[-3:])))
+    return res
+
+
+def find_pr(root, head, base, states=("OPEN",)):
+    """head → base の PR を探す。states の順に最初に見つかった {number, state} を返す。"""
+    items = gh_json(root, ["pr", "list", "--head", head, "--base", base, "--state", "all",
+                           "--json", "number,state", "--limit", "20"], "gh pr list") or []
+    for st in states:
+        for it in items:
+            if it.get("state") == st:
+                return it
+    return None
+
+
+def create_pr(root, base, head, title, body):
+    p = run(["gh", "pr", "create", "--base", base, "--head", head, "--title", title, "--body", body],
+            cwd=root, check=False)
+    if p.returncode != 0:
+        raise StepError(f"gh pr create（{head} → {base}）が失敗: {p.stderr.strip()[:300]}")
+    m = re.search(r"/pull/(\d+)", p.stdout)
+    if not m:
+        raise StepError(f"作った PR の番号を読めない: {p.stdout.strip()[:200]}", 2)
+    return int(m.group(1))
+
+
+def pr_check_buckets(root, n):
+    p = run(["gh", "pr", "checks", str(n), "--json", "name,bucket"], cwd=root, check=False)
+    try:
+        return json.loads(p.stdout or "[]") or []
+    except ValueError:
+        return []
+
+
+def wait_and_merge(root, n):
+    """PR のチェックを待ち（上限あり）、全部 pass ならマージする。落ちたら失敗したチェック名で止める。"""
+    for _ in range(20):  # 作った直後はチェックがまだ現れないので、現れるまで待つ（上限 5 分）
+        if pr_check_buckets(root, n):
+            break
+        time.sleep(15)
+    else:
+        raise StepError(f"PR #{n} にチェックが現れない")
+    run(["gh", "pr", "checks", str(n), "--watch", "-i", "30"], cwd=root, check=False)
+    checks = pr_check_buckets(root, n)
+    bad = [c.get("name") for c in checks if c.get("bucket") not in ("pass", "skipping")]
+    if not checks or bad:
+        raise StepError(f"PR #{n} のチェックが通らない: {', '.join(map(str, bad)) or 'チェックが無い'}")
+    p = run(["gh", "pr", "merge", str(n), "--admin", "--merge"], cwd=root, check=False)
+    if p.returncode != 0:
+        raise StepError(f"gh pr merge {n} が失敗: {p.stderr.strip()[:300]}")
+    return merge_commit_of(root, n)
+
+
+def merge_commit_of(root, n):
+    d = gh_json(root, ["pr", "view", str(n), "--json", "mergeCommit"], f"gh pr view {n}") or {}
+    return ((d.get("mergeCommit") or {}).get("oid")) or None
+
+
+def cmd_release(a):
+    root = git_root(a.root)
+    ver = a.version
+    plugins = [s.strip() for s in a.plugins.split(",") if s.strip()]
+    branch = git(root, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+    if branch != f"release/v{ver}":
+        raise StepError(f"作業ツリーのブランチが release/v{ver} でない: {branch}", EXIT_PRECONDITION)
+    if git(root, "status", "--porcelain", "--untracked-files=no").stdout.strip():
+        raise StepError("作業ツリーにコミットしていない変更がある（bump と changelog をコミットしてから呼ぶ）",
+                        EXIT_PRECONDITION)
+
+    git(root, "push", "-q", "-u", "origin", "HEAD")
+
+    # 開発版の PR（release/v<版> → develop）
+    pr = find_pr(root, branch, "develop", states=("OPEN", "MERGED"))
+    if pr is None:
+        section = changelog_section(root, ver)
+        mark = {True: "pass", False: "fail", None: "skip"}
+        body = "\n".join([
+            f"ndf v{ver} のリリース（{a.channel}）。対象の plugin: {', '.join(plugins)}",
+            "", "## 含む PR", "", section or "（CHANGELOG.md に該当の節が無い）", "", "## 検査の結果", "",
+            *[f"- {name}: {mark[ok]}" + (f"（{tail.splitlines()[-1]}）" if tail else "")
+              for name, ok, tail in run_checks(root)],
+            "", "🤖 Generated with [Claude Code](https://claude.com/claude-code)",
+        ])
+        pr = {"number": create_pr(root, "develop", branch, f"Release: ndf v{ver}", body), "state": "OPEN"}
+    release_pr = pr["number"]
+    release_commit = wait_and_merge(root, release_pr) if pr["state"] == "OPEN" else merge_commit_of(root, release_pr)
+
+    metrics = {"channel": a.channel, "version": ver, "release_pr": release_pr, "main_pr": None, "tag": None,
+               "merge_commit": release_commit, "plugins": ",".join(plugins)}
+    items = [{"kind": "pr", "name": f"#{release_pr}", "result": "merged", "base": "develop"}]
+    if a.channel == "dev":
+        emit(result(TOOL, "ok", f"ndf v{ver} を develop へ出した（#{release_pr}）", items, metrics))
+
+    # 本番: develop → main、タグ、GitHub Release（利用者の承認を得てから呼ぶ）
+    tag = f"ndf--v{ver}"
+    git(root, "fetch", "-q", "origin", "--tags")
+    if git(root, "rev-parse", "-q", "--verify", f"refs/tags/{tag}", check=False).returncode == 0:
+        raise StepError(f"タグ {tag} は既にある")
+    mp = find_pr(root, "develop", "main", states=("OPEN",))
+    main_pr = mp["number"] if mp else create_pr(
+        root, "main", "develop", f"Release: ndf v{ver} を main へ",
+        f"ndf v{ver} を main へ出す（開発版の PR #{release_pr}）。\n\n"
+        "🤖 Generated with [Claude Code](https://claude.com/claude-code)")
+    merge = wait_and_merge(root, main_pr)
+    git(root, "fetch", "-q", "origin")
+    if not merge:
+        merge = git(root, "rev-parse", "origin/main").stdout.strip()
+    git(root, "tag", "-a", tag, merge, "-m", f"ndf v{ver}")
+    git(root, "push", "-q", "origin", tag)
+
+    notes = changelog_section(root, ver) or f"ndf v{ver}"
+    with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8") as f:
+        f.write(notes + "\n")
+        notes_file = f.name
+    try:
+        p = run(["gh", "release", "create", tag, "--title", f"ndf v{ver}", "--notes-file", notes_file,
+                 "--latest"], cwd=root, check=False)
+    finally:
+        os.unlink(notes_file)
+    if p.returncode != 0:
+        raise StepError(f"gh release create {tag} が失敗: {p.stderr.strip()[:300]}")
+
+    metrics.update({"main_pr": main_pr, "tag": tag, "merge_commit": merge})
+    items += [{"kind": "pr", "name": f"#{main_pr}", "result": "merged", "base": "main"},
+              {"kind": "tag", "name": tag, "result": "pushed"},
+              {"kind": "release", "name": tag, "result": "created"}]
+    emit(result(TOOL, "ok", f"ndf v{ver} を main へ出し、{tag} と GitHub Release を作った", items, metrics))
+
+
+def cmd_approval_facts(a):
+    root = git_root(a.root)
+    repo = owner_repo(root)
+    git(root, "fetch", "-q", "origin", "--tags")
+    cur_tag = f"ndf--v{a.version}"
+    prev = a.prev_tag
+    if not prev:
+        tags = git(root, "tag", "--list", "ndf--v*", "--sort=-v:refname").stdout.split()
+        prev = next((t for t in tags if t != cur_tag and "-" not in t[len("ndf--v"):]), None)
+        if not prev:
+            raise StepError("前のタグを決められない（--prev-tag を渡す）", EXIT_PRECONDITION)
+    dev = git(root, "rev-parse", "origin/develop").stdout.strip()
+
+    stat = git(root, "diff", "--shortstat", "origin/main...origin/develop").stdout.strip()
+    files = int(m.group(1)) if (m := re.search(r"(\d+) files? changed", stat)) else 0
+    ins = int(m.group(1)) if (m := re.search(r"(\d+) insertions?", stat)) else 0
+    dels = int(m.group(1)) if (m := re.search(r"(\d+) deletions?", stat)) else 0
+
+    items, rows = [], []
+    for n in a.prs:
+        d = gh_json(root, ["pr", "view", str(n), "--json", "number,title,state,mergeCommit,url"],
+                    f"gh pr view {n}") or {}
+        oid = (d.get("mergeCommit") or {}).get("oid") or ""
+        checks = pr_check_buckets(root, n)
+        passed = sum(1 for c in checks if c.get("bucket") == "pass")
+        url = d.get("url") or f"https://github.com/{repo}/pull/{n}"
+        items.append({"kind": "pr", "name": f"#{n}", "result": str(d.get("state", "")).lower() or "unknown",
+                      "url": url, "title": d.get("title", ""), "merge_commit": oid,
+                      "checks_passed": passed, "checks": len(checks)})
+        rows.append(f"#{n} {d.get('title', '')}（{d.get('state', '')}・"
+                    f"{oid[:8] if oid else '—'}・CI {passed}/{len(checks)}）")
+
+    compare = f"https://github.com/{repo}/compare/{prev}...{dev}"
+    path = approval_present(
+        TOOL, f"v{a.version}", title=f"ndf v{a.version} の本番への配布",
+        targets=[{"url": compare, "title": f"{prev} → develop（{dev[:8]}）", "base_head": "main ← develop"}],
+        change=f"`main...develop` の差分 {files} ファイル / +{ins} / −{dels}",
+        judge=[("版数", a.version), ("含む PR", "\n".join(rows) or "—"),
+               ("配る中身", "（LLM が更新案内から書き足す）"),
+               ("検証への配布で確かめたこと", "（LLM が release-verification の結果から書き足す）")],
+        consent=[f"ndf v{a.version} を main へ出し、タグ {cur_tag} と GitHub Release を作る"],
+        rollback=(f"タグ {cur_tag} と GitHub Release を消し、main を {prev} の内容へ戻す PR を出す。"
+                  "導入済みの利用者の環境は利用者の側の操作（前の版の導入し直し）でしか戻せない。"))
+    emit(result(TOOL, "gate", f"ndf v{a.version} の本番承認の提示物を書いた（PR {len(a.prs)} 件）", items,
+                {"files": files, "insertions": ins, "deletions": dels, "prev_tag": prev, "compare": compare},
+                path, f"利用者の承認を得たら release-steps.py release --version {a.version} --channel prod"),
+         EXIT_GATE)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    ap = argparse.ArgumentParser(description="リポジトリが宣言した配布の段と、配布の決まった手順を走らせる")
     sub = ap.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("run", help="段階に合う段を順に実行する")
     r.add_argument("--root", type=Path, default=Path("."))
@@ -228,7 +727,38 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--dry-run", action="store_true")
     c = sub.add_parser("check", help="宣言を読むだけ")
     c.add_argument("--root", type=Path, default=Path("."))
+
+    common = common_parser()
+    p = sub.add_parser("bump", parents=[common], help="plugin の版数を持つ箇所を旧版から新版へ上げる")
+    p.add_argument("--plugin", required=True, help="ndf / playwright-kit / plugins/mcp の名前（例 mcp-serena）")
+    p.add_argument("--to", required=True, type=version_arg)
+    p.set_defaults(func=cmd_bump)
+
+    p = sub.add_parser("changelog", parents=[common], help="CHANGELOG.md と plugin の README の更新案内へ PR のタイトルを並べる")
+    p.add_argument("--version", required=True, type=version_arg)
+    p.add_argument("--prs", nargs="+", required=True, type=int, metavar="PR番号")
+    p.add_argument("--plugin", default="ndf")
+    p.set_defaults(func=cmd_changelog)
+
+    p = sub.add_parser("release", parents=[common], help="release/v<版> を develop へマージし、prod なら main へ出してタグと Release を作る")
+    p.add_argument("--version", required=True, type=version_arg)
+    p.add_argument("--channel", required=True, choices=("dev", "prod"))
+    p.add_argument("--plugins", default="ndf", help="カンマ区切り（例 ndf,mcp-serena）")
+    p.set_defaults(func=cmd_release)
+
+    p = sub.add_parser("approval-facts", parents=[common], help="本番承認の提示物のうち機械で作れる部分を書き出す")
+    p.add_argument("--version", required=True, type=version_arg)
+    p.add_argument("--prs", nargs="+", required=True, type=int, metavar="PR番号")
+    p.add_argument("--prev-tag")
+    p.set_defaults(func=cmd_approval_facts)
+    return ap
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = build_parser()
     args = ap.parse_args(argv)
+    if args.cmd not in ("run", "check"):
+        return main_with(ap, lambda a: TOOL, argv)
     root = args.root.resolve()
     try:
         if args.cmd == "check":
