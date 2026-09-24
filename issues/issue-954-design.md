@@ -56,7 +56,8 @@ F1〜F4 を #954 で実装する。F5 は契約だけをこの設計に置き、
 | --- | --- | --- |
 | `plugins/ndf/agents/supervisor.md` | 新規 | 寿命 5 分の supervisor の定義。本文は規約の正本（`agent-layers.md`）を指すだけ |
 | `plugins/ndf/agents/supervisor-waits.md` | 新規 | 同じ定義に `experimental: { cacheTtl: 1h }` を足したもの |
-| `plugins/ndf/.claude-plugin/plugin.json` | 変更 | `agents` に 2 つを足す |
+| `plugins/ndf/.claude-plugin/plugin.json` | 変更 | `agents` に 2 つを足す。`description` の定義の数を直す |
+| 定義の数を書いた現行の文書 | 変更 | `README.md`・`AGENTS.md`・`plugins/ndf/README.md`・`docs/ndf-plugin-reference.md` のうち「専門 8 個と worker 1 個」の形で数を書く箇所。発表・記事など時点の記録は変えない |
 | `agent-layers.md` | 変更 | 起動指示の `subagent_type`（区間の先頭の工程で選ぶ）、持ち場の報告の `結果: 区切り` と `次の工程`、conductor の受け方、supervisor の規則 11（区切り） |
 | `context-window.md` | 変更 | 「切ってよい点」の後に、持ち場の中の切れ目として「区切り」を 1 節足す（4 つの切れ目と持ち場の境は変えない） |
 | `waiting.md` | 変更 | 待ちの費用の節に、待ちの後の書き直しと区切り・寿命への参照を 1 段落 |
@@ -117,7 +118,7 @@ conductor の受け方（`agent-layers.md` の表へ 1 行足す）:
 
 | 見出しの有無 | `結果` | conductor の動き |
 | --- | --- | --- |
-| ある | `区切り` | 同じ持ち場を、`次の工程` から通す supervisor として起動し直す。`subagent_type` は上の表で選び、「前の持ち場の報告」に区切りの報告を入れる。関門を問わない |
+| ある | `区切り` | 同じ持ち場を、`次の工程` から通す supervisor として起動し直す。`subagent_type` は上の表で選び、起動指示の「持ち場」の工程の一覧は `次の工程` から写す。「前の持ち場の報告」に区切りの報告を入れる。関門を問わない。**同じ `次の工程` の `区切り` が続けて 2 回返ったら、`止まった` と同じに扱う**（区切りの後の supervisor が最初の Skill の前に文脈を伸ばすと、区切りが際限なく続くため） |
 
 supervisor の規則に 11 を足す:
 
@@ -134,18 +135,22 @@ supervisor の規則に 11 を足す:
 
 ### F3: hook の判定「区切り」
 
-`token-guard.sh` の PreToolUse `Skill` に判定を 1 つ足す。
+`token-guard.sh` の PreToolUse `Skill` に判定を 1 つ足す。**`Skill` のとき、区切りの判定を今の `guard_context` より先に、
+`NDF_CONTEXT_GUARD` とは独立に呼ぶ。** `guard_context` は `agent_id` があると抜けるので、その中や後ろに置くと
+supervisor の中で一度も走らない。区切りの判定が止めなければ、今のとおり `guard_context` へ進む。
+
+**`ndf:supervisor-waits` は対象にしない。** 1 時間の区間では区切りが損になる（決定 4）。
 
 | 項目 | 値 |
 | --- | --- |
-| 対象 | 入力に `agent_id` があり、`<記録のディレクトリ>/<セッション>/subagents/agent-<agent_id>.meta.json` の `agentType` が `ndf:supervisor` か `ndf:supervisor-waits` で、Skill の名前が `cross-review` / `cross-refactoring`（`ndf:` の有無を問わない） |
+| 対象 | 入力に `agent_id` があり、`<記録のディレクトリ>/<セッション>/subagents/agent-<agent_id>.meta.json` の `agentType` が `ndf:supervisor`（寿命 5 分）で、Skill の名前が `cross-review` / `cross-refactoring`（`ndf:` の有無を問わない） |
 | 読む記録 | **supervisor 自身の記録** `${transcript_path%.jsonl}/subagents/agent-<agent_id>.jsonl`。入力の `transcript_path` はサブエージェントの中でも親（conductor）の記録を指すので、そのまま読まない（`token-guard.sh` の既存の注記、`statusline.sh` の組み立てと同じ） |
 | P | 読む記録の**先頭から**最初の assistant 呼び出しを探し、その文脈（`input + cache_read + cache_creation`）を取る。既存の `context_tokens()` は末尾 200 行だけを読んで最後の呼び出しを返すので、P には使えない。先頭から読む走査を別に持つ |
 | C | 読む記録の最後の assistant 呼び出しの文脈 |
 | 止める条件 | `C ≥ 比 × P`。比の既定は 2.5（決定 4） |
 | 止め方 | `permissionDecision: deny`。理由の欄に規則 11 の返し方（`結果: 区切り`・`次の工程`）を出す |
 | 止め続ける | **条件を満たす間は、同じ起動を何度でも止める。** conductor の判定の「1 度だけ通す」は持たない。supervisor の下には人がおらず、やり直すだけで越えられると、区切るかが LLM の裁量に戻るためである（中継の子の conductor と同じ扱い）。控えのファイルも持たない |
-| 止めない | `agent_id` が無い（conductor）・`agentType` が supervisor でない（worker・`general-purpose`）・記録か meta が読めない・P か C が読めない |
+| 止めない | `agent_id` が無い（conductor）・`agentType` が `ndf:supervisor` でない（`ndf:supervisor-waits`・worker・`general-purpose`）・記録か meta が読めない・P か C が読めない |
 | 変える | `NDF_SUPERVISOR_CUT_RATIO`（既定 2.5）。`NDF_SUPERVISOR_CUT_GUARD=0` でこの判定を無効にする |
 
 **`agentType` で見分けるので、`general-purpose` で起動した supervisor（conductor が古い起動の形を
@@ -161,6 +166,11 @@ supervisor の規則に 11 を足す:
 `gaps` の並びへ別々に積み、`rewrites_after_5m` は `gaps` だけから数える。そのため、後から量を間隔で分けられない。
 書き直しを数える箇所（`record_calls` の中の `is_rewrite` の分岐）で、直前の間隔が `CACHE_5M` を超えるときだけ、
 量を別のカウンタ `rewrite_tokens_after_5m` へも足す。間隔が取れない呼び出し（`rewrites_untimed` に数えるもの）は足さない。
+
+**あわせて `read_tokens_after_5m`（直前の間隔が 5 分を超えた呼び出しの読み込みの量の合計）を足す。** 1 時間の区間では
+5 分を超える待ちの後の呼び出しが読み込みになり、`is_rewrite` に当たらない。`rewrite_tokens_after_5m` だけでは、
+1 時間にしたことで書き直しを免れた量が見えず、AC9 の再計算が必ず「満たさない」になる。AC9 の得の側は、
+1 時間の区間では `read_tokens_after_5m` から、5 分の区間では `rewrite_tokens_after_5m` から計算する。
 
 ### F5: 候補 1 の契約（#870・#827 が実装する）
 
@@ -258,6 +268,10 @@ stateDiagram-v2
 | 起動指示の `subagent_type` は「省く（`general-purpose`）」 | `agent-layers.md`「conductor → supervisor」 | F1 の表へ置き換える |
 | 切れ目は 4 つで、それぞれが持ち場の境になる（`agent-layers.md` の「切れ目 → 持ち場の境」の表）。持ち場の中で切る点を想定していない | `context-window.md`「切ってよい点は 4 つある」 | 4 つの切れ目は変えない。**区切りを持ち場の中の切れ目として別の節に置く。** 持ち場の境にならないので、`agent-layers.md` の表と `token-guard-stages.txt` の正（`docs/specifications/ndf-token-waits-and-context-cut.md`）は変えない |
 | 中断の点検の手順 3 は「`最後に記録した工程` の頭から、同じ持ち場の名前で起動し直す」で、`subagent_type` を言わない | `agent-layers.md`「conductor の中断の点検」 | 起動し直すときも F1 の表で選ぶ、と足す |
+| 「落ちた層ごとの割り当て」の supervisor の行も「`最後に記録した工程` の頭から新しい supervisor」で、`subagent_type` を言わない | `agent-layers.md`「落ちた層ごとの割り当て」 | 同じく F1 の表で選ぶ、と足す |
+| 起動指示の「持ち場」は持ち場の表から全工程を写す | `agent-layers.md`「conductor → supervisor」の必須項目 | `区切り` の後の起動では `次の工程` から写す |
+| `prompt` の中身は「9 項目と、守る規則 10 個」 | 同じ節の引数の表 | 規則 11 を足すので 11 個にする |
+| `plugins/ndf/agents/` は `dev.agy/agents` から参照され、agy にも同じ定義が配られる | `plugins/ndf/dev.agy/agents -> ../agents` | 変えない。agy へも 2 つの定義が届く（決定 11） |
 | 測定の層の判定は `spawnDepth` と `description` で、`agentType` を見ない | `token-usage.py` | 変えない。`description` の形を保つので当てはまる |
 
 ## 非機能
