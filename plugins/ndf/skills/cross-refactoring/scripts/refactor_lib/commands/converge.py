@@ -321,6 +321,62 @@ def _fix_problems(
     return problems
 
 
+def _inspect_fix_commits(
+    state: dict[str, Any], work: str, fix: dict[str, Any], targets: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """修正の起点からコミットを集め、取り込み可否の材料を返す。"""
+    head = git_out(work, ["rev-parse", "HEAD"]) or ""
+    ordered = commits_in_range(work, fix.get("base_sha"), head)
+    if ordered is None:
+        return {
+            "head": head,
+            "ordered": [],
+            "problems": [f"修正の範囲を確定できません（起点 {fix.get('base_sha')}）"],
+        }
+    facts = collect_commit_facts(work, ordered, set(ordered), "", state["head_branch"])
+    return {
+        "head": head,
+        "ordered": ordered,
+        "problems": _fix_problems(state, facts, {t["id"] for t in targets}),
+    }
+
+
+def _apply_fix_result(
+    path: pathlib.Path, state: dict[str, Any], work: str, result: dict[str, Any],
+) -> None:
+    """違反した修正を取り消し、または採用したコミットを項目へ関連付ける。"""
+    ordered = result["ordered"]
+    problems = result["problems"]
+    if problems and ordered:
+        for problem in problems:
+            info(f"❌ {problem}")
+        state["pending_push"] = True
+        statefile.save(path, state)
+        revert_range(work, ordered, result["head"])
+        info(f"↩ 修正の範囲 {len(ordered)} コミットを取り消しました")
+        return
+    if ordered:
+        for sha in reversed(ordered):
+            item_id = str(commit_trailers(work, sha).get("Item-Id") or "").strip()
+            item = find_item(state, item_id, required=False)
+            if item is not None:
+                item["commits"]["fix"].append(sha)
+
+
+def _account_fix(state: dict[str, Any], targets: list[dict[str, Any]]) -> None:
+    """修正回数、項目状態、修正フェーズの所要時間を更新する。"""
+    for item in targets:
+        item["fix_count"] = int(item.get("fix_count") or 0) + 1
+        if item.get("status") == FAILING:
+            item["status"] = IMPLEMENTED
+    stats = state.setdefault("fix_stats", {"launches": 0, "seconds": 0.0})
+    started = ((state.get("phases") or {}).get("fix") or {}).get("launch_started_at")
+    seconds = max(clock.seconds_between(started, clock.now()) or 0.0, 0.0)
+    stats["launches"] = int(stats.get("launches") or 0) + 1
+    stats["seconds"] = round(float(stats.get("seconds") or 0.0) + seconds, 1)
+    add_phase_seconds(state, "fix", seconds)
+
+
 def cmd_merge_fix(args: argparse.Namespace) -> None:
     """修正の結果を取り込む。取り込んだ項目は `implemented` へ戻り、次の `verify` が見直す。
 
@@ -337,44 +393,16 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
         info("↻ 取り込む修正はありません")
         return
     record_observed_model(state, str(state["implementer"]), "fix")
-    head = git_out(work, ["rev-parse", "HEAD"]) or ""
-    ordered = commits_in_range(work, fix.get("base_sha"), head)
     targets = [find_item(state, i, required=False) for i in fix.get("items") or []]
     targets = [t for t in targets if t is not None]
-    if ordered is None:
-        problems = [f"修正の範囲を確定できません（起点 {fix.get('base_sha')}）"]
-        ordered = []
-    else:
-        facts = collect_commit_facts(work, ordered, set(ordered), "", state["head_branch"])
-        problems = _fix_problems(state, facts, {t["id"] for t in targets})
-    if problems and ordered:
-        for problem in problems:
-            info(f"❌ {problem}")
-        state["pending_push"] = True
-        statefile.save(path, state)
-        revert_range(work, ordered, head)
-        info(f"↩ 修正の範囲 {len(ordered)} コミットを取り消しました")
-    elif ordered:
-        for sha in reversed(ordered):
-            item_id = str(commit_trailers(work, sha).get("Item-Id") or "").strip()
-            item = find_item(state, item_id, required=False)
-            if item is not None:
-                item["commits"]["fix"].append(sha)
-    for item in targets:
-        item["fix_count"] = int(item.get("fix_count") or 0) + 1
-        if item.get("status") == FAILING:
-            item["status"] = IMPLEMENTED
-    stats = state.setdefault("fix_stats", {"launches": 0, "seconds": 0.0})
-    started = ((state.get("phases") or {}).get("fix") or {}).get("launch_started_at")
-    seconds = max(clock.seconds_between(started, clock.now()) or 0.0, 0.0)
-    stats["launches"] = int(stats.get("launches") or 0) + 1
-    stats["seconds"] = round(float(stats.get("seconds") or 0.0) + seconds, 1)
-    add_phase_seconds(state, "fix", seconds)
+    result = _inspect_fix_commits(state, work, fix, targets)
+    _apply_fix_result(path, state, work, result)
+    _account_fix(state, targets)
     state["fix"] = None
     statefile.save(path, state)
     if state.get("pending_push"):
         push_with_retry_marker(path, state, state)
-    info(f"修正を取り込みました（{len(ordered)} コミット / 対象 {len(targets)} 件）。{plan_line(state)}")
+    info(f"修正を取り込みました（{len(result['ordered'])} コミット / 対象 {len(targets)} 件）。{plan_line(state)}")
 
 
 # ---------- merge-test-judgements ----------
