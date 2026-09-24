@@ -521,6 +521,7 @@
    "w1h": 2578646.0,
    "rewrites": 5,
    "rewrites_after_5m": 4,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 2001882,
    "rewrite_gap_median": 237.43140000104904
   },
@@ -543,6 +544,7 @@
    "w1h": 0.0,
    "rewrites": 34,
    "rewrites_after_5m": 33,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 3539020,
    "rewrite_gap_median": 9.154441666603088
   },
@@ -565,6 +567,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -587,6 +590,7 @@
    "w1h": 1447572.0,
    "rewrites": 3,
    "rewrites_after_5m": 2,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 979776,
    "rewrite_gap_median": 12.244199999173482
   },
@@ -609,6 +613,7 @@
    "w1h": 1691871.0,
    "rewrites": 2,
    "rewrites_after_5m": 2,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 1102604,
    "rewrite_gap_median": 920.8006333331267
   },
@@ -631,6 +636,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -653,6 +659,7 @@
    "w1h": 201660.33333333334,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -675,6 +682,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -697,6 +705,7 @@
    "w1h": 165565.8,
    "rewrites": 1,
    "rewrites_after_5m": 1,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 126190,
    "rewrite_gap_median": 50.053749998410545
   },
@@ -719,6 +728,7 @@
    "w1h": 3157521.0,
    "rewrites": 10,
    "rewrites_after_5m": 10,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 2752984,
    "rewrite_gap_median": 117.6529083331426
   },
@@ -741,6 +751,7 @@
    "w1h": 0.0,
    "rewrites": 105,
    "rewrites_after_5m": 103,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 32252192,
    "rewrite_gap_median": 9.601866666475932
   },
@@ -763,6 +774,7 @@
    "w1h": 0.0,
    "rewrites": 1,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 218489,
    "rewrite_gap_median": 0.9806666652361552
   },
@@ -785,6 +797,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -807,6 +820,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -829,6 +843,7 @@
    "w1h": 0.0,
    "rewrites": 6,
    "rewrites_after_5m": 3,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 624052,
    "rewrite_gap_median": 2.8472166657447815
   },
@@ -851,6 +866,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -873,6 +889,7 @@
    "w1h": 4005263.0,
    "rewrites": 11,
    "rewrites_after_5m": 10,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 7001440,
    "rewrite_gap_median": 103.58420000076293
   },
@@ -895,6 +912,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -917,6 +935,7 @@
    "w1h": 108069.0,
    "rewrites": 1,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 31755,
    "rewrite_gap_median": 0.05196666717529297
   },
@@ -939,6 +958,7 @@
    "w1h": 0.0,
    "rewrites": 2,
    "rewrites_after_5m": 2,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 480261,
    "rewrite_gap_median": 8.95633333325386
   },
@@ -961,6 +981,7 @@
    "w1h": 468629.0,
    "rewrites": 2,
    "rewrites_after_5m": 2,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 303372,
    "rewrite_gap_median": 108.22588333288829
   },
@@ -983,6 +1004,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -1005,6 +1027,7 @@
    "w1h": 0.0,
    "rewrites": 48,
    "rewrites_after_5m": 48,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 5539815,
    "rewrite_gap_median": 9.70316666563352
   },
@@ -1027,6 +1050,7 @@
    "w1h": 0.0,
    "rewrites": 8,
    "rewrites_after_5m": 8,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 2259177,
    "rewrite_gap_median": 9.074666666984559
   },
@@ -1049,6 +1073,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -1071,6 +1096,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -1093,6 +1119,7 @@
    "w1h": 90544.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -1115,6 +1142,7 @@
    "w1h": 221127.0,
    "rewrites": 3,
    "rewrites_after_5m": 1,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 253618,
    "rewrite_gap_median": 0.39121666351954143
   },
@@ -1137,6 +1165,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -1159,6 +1188,7 @@
    "w1h": 894927.0,
    "rewrites": 9,
    "rewrites_after_5m": 8,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 2335180,
    "rewrite_gap_median": 131.68556666374207
   },
@@ -1181,6 +1211,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -1203,6 +1234,7 @@
    "w1h": 0.0,
    "rewrites": 1,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 154330,
    "rewrite_gap_median": 3.754433333873749
   },
@@ -1225,6 +1257,7 @@
    "w1h": 0.0,
    "rewrites": 1,
    "rewrites_after_5m": 1,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 92065,
    "rewrite_gap_median": 14.259783335526784
   },
@@ -1247,6 +1280,7 @@
    "w1h": 0.0,
    "rewrites": 7,
    "rewrites_after_5m": 7,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 585193,
    "rewrite_gap_median": 9.765533332029978
   },
@@ -1269,6 +1303,7 @@
    "w1h": 0.0,
    "rewrites": 5,
    "rewrites_after_5m": 5,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 467228,
    "rewrite_gap_median": 8.285316669940949
   },
@@ -1291,6 +1326,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -1313,6 +1349,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -1335,6 +1372,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -1357,6 +1395,7 @@
    "w1h": 783175.0,
    "rewrites": 13,
    "rewrites_after_5m": 13,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 3849785,
    "rewrite_gap_median": 15.397449998060862
   },
@@ -1379,6 +1418,7 @@
    "w1h": 0.0,
    "rewrites": 4,
    "rewrites_after_5m": 2,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 625781,
    "rewrite_gap_median": 3.8312833329041798
   },
@@ -1401,6 +1441,7 @@
    "w1h": 0.0,
    "rewrites": 11,
    "rewrites_after_5m": 9,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 1300551,
    "rewrite_gap_median": 6.753333330154419
   },
@@ -1423,6 +1464,7 @@
    "w1h": 0.0,
    "rewrites": 11,
    "rewrites_after_5m": 10,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 4153201,
    "rewrite_gap_median": 7.253083336353302
   },
@@ -1445,6 +1487,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -1467,6 +1510,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -1489,6 +1533,7 @@
    "w1h": 0.0,
    "rewrites": 4,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 310521,
    "rewrite_gap_median": 0.30546666781107584
   },
@@ -1511,6 +1556,7 @@
    "w1h": 0.0,
    "rewrites": 1,
    "rewrites_after_5m": 1,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 110898,
    "rewrite_gap_median": 10.585649998982747
   },
@@ -1533,6 +1579,7 @@
    "w1h": 5054625.0,
    "rewrites": 20,
    "rewrites_after_5m": 18,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 6875726,
    "rewrite_gap_median": 30.76541666785876
   },
@@ -1555,6 +1602,7 @@
    "w1h": 0.0,
    "rewrites": 6,
    "rewrites_after_5m": 5,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 922378,
    "rewrite_gap_median": 5.96091666618983
   },
@@ -1577,6 +1625,7 @@
    "w1h": 0.0,
    "rewrites": 10,
    "rewrites_after_5m": 9,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 1789807,
    "rewrite_gap_median": 8.467825001478195
   },
@@ -1599,6 +1648,7 @@
    "w1h": 0.0,
    "rewrites": 12,
    "rewrites_after_5m": 10,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 2554398,
    "rewrite_gap_median": 13.266108334064484
   },
@@ -1621,6 +1671,7 @@
    "w1h": 0.0,
    "rewrites": 116,
    "rewrites_after_5m": 115,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 16425659,
    "rewrite_gap_median": 9.541458334525426
   },
@@ -1643,6 +1694,7 @@
    "w1h": 0.0,
    "rewrites": 12,
    "rewrites_after_5m": 12,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 3438238,
    "rewrite_gap_median": 7.578833333651224
   },
@@ -1665,6 +1717,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -1687,6 +1740,7 @@
    "w1h": 0.0,
    "rewrites": 5,
    "rewrites_after_5m": 4,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 612872,
    "rewrite_gap_median": 6.86715000073115
   },
@@ -1709,6 +1763,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -1731,6 +1786,7 @@
    "w1h": 0.0,
    "rewrites": 3,
    "rewrites_after_5m": 2,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 506945,
    "rewrite_gap_median": 7.1728000005086265
   },
@@ -1753,6 +1809,7 @@
    "w1h": 139324.5,
    "rewrites": 1,
    "rewrites_after_5m": 1,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 64753,
    "rewrite_gap_median": 97.40808333158493
   },
@@ -1775,6 +1832,7 @@
    "w1h": 0.0,
    "rewrites": 1,
    "rewrites_after_5m": 1,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 203904,
    "rewrite_gap_median": 5.811366665363312
   },
@@ -1797,6 +1855,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -1819,6 +1878,7 @@
    "w1h": 0.0,
    "rewrites": 10,
    "rewrites_after_5m": 9,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 941238,
    "rewrite_gap_median": 9.720841666062674
   },
@@ -1841,6 +1901,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -1863,6 +1924,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -1885,6 +1947,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -1907,6 +1970,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -1929,6 +1993,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -1951,6 +2016,7 @@
    "w1h": 145086.4,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -1973,6 +2039,7 @@
    "w1h": 0.0,
    "rewrites": 4,
    "rewrites_after_5m": 3,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 366185,
    "rewrite_gap_median": 18.71121666630109
   },
@@ -1995,6 +2062,7 @@
    "w1h": 0.0,
    "rewrites": 1,
    "rewrites_after_5m": 1,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 106103,
    "rewrite_gap_median": 5.787416664759318
   },
@@ -2017,6 +2085,7 @@
    "w1h": 0.0,
    "rewrites": 8,
    "rewrites_after_5m": 7,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 701420,
    "rewrite_gap_median": 19.3716916680336
   },
@@ -2039,6 +2108,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -2061,6 +2131,7 @@
    "w1h": 142728.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -2083,6 +2154,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -2105,6 +2177,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -2127,6 +2200,7 @@
    "w1h": 0.0,
    "rewrites": 33,
    "rewrites_after_5m": 20,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 11541918,
    "rewrite_gap_median": 6.801800000667572
   },
@@ -2149,6 +2223,7 @@
    "w1h": 0.0,
    "rewrites": 12,
    "rewrites_after_5m": 12,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 2436806,
    "rewrite_gap_median": 13.953758333126704
   },
@@ -2171,6 +2246,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -2193,6 +2269,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -2215,6 +2292,7 @@
    "w1h": 32995.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -2237,6 +2315,7 @@
    "w1h": 0.0,
    "rewrites": 1,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 20736,
    "rewrite_gap_median": 0.09863333304723104
   },
@@ -2259,6 +2338,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -2281,6 +2361,7 @@
    "w1h": 211966.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -2303,6 +2384,7 @@
    "w1h": 0.0,
    "rewrites": 1,
    "rewrites_after_5m": 1,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 73339,
    "rewrite_gap_median": 10.072583333651226
   },
@@ -2325,6 +2407,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -2347,6 +2430,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -2369,6 +2453,7 @@
    "w1h": 0.0,
    "rewrites": 1,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 102683,
    "rewrite_gap_median": 0.046166666348775226
   },
@@ -2391,6 +2476,7 @@
    "w1h": 0.0,
    "rewrites": 4,
    "rewrites_after_5m": 4,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 1233937,
    "rewrite_gap_median": 9.099416667222977
   },
@@ -2413,6 +2499,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -2435,6 +2522,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -2457,6 +2545,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -2479,6 +2568,7 @@
    "w1h": 162999.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -2501,6 +2591,7 @@
    "w1h": 0.0,
    "rewrites": 3,
    "rewrites_after_5m": 1,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 269208,
    "rewrite_gap_median": 1.795899999141693
   },
@@ -2523,6 +2614,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -2545,6 +2637,7 @@
    "w1h": 0.0,
    "rewrites": 3,
    "rewrites_after_5m": 2,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 614473,
    "rewrite_gap_median": 6.0013000011444095
   },
@@ -2567,6 +2660,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -2589,6 +2683,7 @@
    "w1h": 0.0,
    "rewrites": 19,
    "rewrites_after_5m": 15,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 6499457,
    "rewrite_gap_median": 5.962633335590363
   },
@@ -2611,6 +2706,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -2633,6 +2729,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -2655,6 +2752,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -2677,6 +2775,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -2699,6 +2798,7 @@
    "w1h": 886551.0,
    "rewrites": 1,
    "rewrites_after_5m": 1,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 257469,
    "rewrite_gap_median": 691.3573666652044
   },
@@ -2721,6 +2821,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -2743,6 +2844,7 @@
    "w1h": 385292.0,
    "rewrites": 1,
    "rewrites_after_5m": 1,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 147139,
    "rewrite_gap_median": 406.20001666943233
   },
@@ -2765,6 +2867,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -2787,6 +2890,7 @@
    "w1h": 0.0,
    "rewrites": 2,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 222740,
    "rewrite_gap_median": 1.486266666650772
   },
@@ -2809,6 +2913,7 @@
    "w1h": 0.0,
    "rewrites": 4,
    "rewrites_after_5m": 4,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 708740,
    "rewrite_gap_median": 8.691608333587647
   },
@@ -2831,6 +2936,7 @@
    "w1h": 0.0,
    "rewrites": 14,
    "rewrites_after_5m": 11,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 1548289,
    "rewrite_gap_median": 9.881524999936422
   },
@@ -2853,6 +2959,7 @@
    "w1h": 0.0,
    "rewrites": 5,
    "rewrites_after_5m": 5,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 1179252,
    "rewrite_gap_median": 6.757450000445048
   },
@@ -2875,6 +2982,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -2897,6 +3005,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -2919,6 +3028,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -2941,6 +3051,7 @@
    "w1h": 317701.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -2963,6 +3074,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -2985,6 +3097,7 @@
    "w1h": 0.0,
    "rewrites": 1,
    "rewrites_after_5m": 1,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 127453,
    "rewrite_gap_median": 5.6558166662851965
   },
@@ -3007,6 +3120,7 @@
    "w1h": 0.0,
    "rewrites": 2,
    "rewrites_after_5m": 1,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 887433,
    "rewrite_gap_median": 4.978849999109904
   },
@@ -3029,6 +3143,7 @@
    "w1h": 0.0,
    "rewrites": 17,
    "rewrites_after_5m": 14,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 1975155,
    "rewrite_gap_median": 9.700266667207082
   },
@@ -3051,6 +3166,7 @@
    "w1h": 0.0,
    "rewrites": 4,
    "rewrites_after_5m": 4,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 1179385,
    "rewrite_gap_median": 6.661449998617172
   },
@@ -3073,6 +3189,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -3095,6 +3212,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -3117,6 +3235,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -3139,6 +3258,7 @@
    "w1h": 276002.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -3161,6 +3281,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -3183,6 +3304,7 @@
    "w1h": 0.0,
    "rewrites": 1,
    "rewrites_after_5m": 1,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 129461,
    "rewrite_gap_median": 17.65586666663488
   },
@@ -3205,6 +3327,7 @@
    "w1h": 0.0,
    "rewrites": 7,
    "rewrites_after_5m": 6,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 1238008,
    "rewrite_gap_median": 5.901450002193451
   },
@@ -3227,6 +3350,7 @@
    "w1h": 0.0,
    "rewrites": 1,
    "rewrites_after_5m": 1,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 314186,
    "rewrite_gap_median": 5.615699998537699
   },
@@ -3249,6 +3373,7 @@
    "w1h": 0.0,
    "rewrites": 1,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 261113,
    "rewrite_gap_median": 0.057433334986368816
   },
@@ -3271,6 +3396,7 @@
    "w1h": 219649.0,
    "rewrites": 1,
    "rewrites_after_5m": 1,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 121365,
    "rewrite_gap_median": 140.7683333317439
   },
@@ -3293,6 +3419,7 @@
    "w1h": 147239.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -3315,6 +3442,7 @@
    "w1h": 0.0,
    "rewrites": 2,
    "rewrites_after_5m": 2,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 468502,
    "rewrite_gap_median": 7.817725000778834
   },
@@ -3337,6 +3465,7 @@
    "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null
   },
@@ -3359,6 +3488,7 @@
    "w1h": 107783.0,
    "rewrites": 1,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 46695,
    "rewrite_gap_median": 0.11036666631698608
   }
@@ -3384,6 +3514,7 @@
    "w1h": 63939.666666666664,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null,
    "call_seats": 6
@@ -3404,10 +3535,9 @@
    "minutes": 3.200633335113525,
    "p": 29081.0,
    "k": 31.0,
-   "w5": 0.0,
-   "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null,
    "call_seats": 1
@@ -3428,10 +3558,9 @@
    "minutes": 3.06670111099879,
    "p": 19851.333333333332,
    "k": 19.2,
-   "w5": 0.0,
-   "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null,
    "call_seats": 15
@@ -3456,6 +3585,7 @@
    "w1h": 77917.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null,
    "call_seats": 1
@@ -3476,10 +3606,9 @@
    "minutes": 2.6283250007364485,
    "p": 20512.333333333332,
    "k": 14.833333333333334,
-   "w5": 0.0,
-   "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null,
    "call_seats": 6
@@ -3504,6 +3633,7 @@
    "w1h": 67442.1875,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null,
    "call_seats": 16
@@ -3524,10 +3654,9 @@
    "minutes": 2.953438888946523,
    "p": 24564.243902439026,
    "k": 14.577235772357724,
-   "w5": 0.0,
-   "w1h": 0.0,
    "rewrites": 5,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 239059,
    "rewrite_gap_median": 0.06948333183924357,
    "call_seats": 123
@@ -3548,10 +3677,9 @@
    "minutes": 2.5471107145150502,
    "p": 24014.10714285714,
    "k": 15.642857142857142,
-   "w5": 0.0,
-   "w1h": 0.0,
    "rewrites": 4,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 135359,
    "rewrite_gap_median": 0.09581666588783264,
    "call_seats": 56
@@ -3572,10 +3700,9 @@
    "minutes": 1.8199026321109975,
    "p": 19631.78947368421,
    "k": 13.842105263157896,
-   "w5": 0.0,
-   "w1h": 0.0,
    "rewrites": 1,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 35368,
    "rewrite_gap_median": 0.13544999758402507,
    "call_seats": 19
@@ -3596,10 +3723,9 @@
    "minutes": 1.9686833341916403,
    "p": 19992.0,
    "k": 14.0,
-   "w5": 0.0,
-   "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null,
    "call_seats": 1
@@ -3624,6 +3750,7 @@
    "w1h": 60995.375,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null,
    "call_seats": 8
@@ -3644,10 +3771,9 @@
    "minutes": 2.5637395828962326,
    "p": 23552.375,
    "k": 13.375,
-   "w5": 0.0,
-   "w1h": 0.0,
    "rewrites": 1,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 23908,
    "rewrite_gap_median": 0.11995000044504801,
    "call_seats": 8
@@ -3668,10 +3794,9 @@
    "minutes": 3.6780769231991894,
    "p": 20062.80769230769,
    "k": 15.26923076923077,
-   "w5": 0.0,
-   "w1h": 0.0,
    "rewrites": 3,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 89638,
    "rewrite_gap_median": 0.17170000076293945,
    "call_seats": 26
@@ -3696,6 +3821,7 @@
    "w1h": 56830.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null,
    "call_seats": 3
@@ -3716,10 +3842,9 @@
    "minutes": 2.5960527767737704,
    "p": 21870.166666666668,
    "k": 11.416666666666666,
-   "w5": 0.0,
-   "w1h": 0.0,
    "rewrites": 1,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 70255,
    "rewrite_gap_median": 0.37695000171661375,
    "call_seats": 12
@@ -3740,10 +3865,9 @@
    "minutes": 2.8842125008503596,
    "p": 20094.0,
    "k": 13.25,
-   "w5": 0.0,
-   "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null,
    "call_seats": 4
@@ -3768,6 +3892,7 @@
    "w1h": 28615.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null,
    "call_seats": 1
@@ -3788,10 +3913,9 @@
    "minutes": 2.660337499446339,
    "p": 20117.166666666668,
    "k": 14.75,
-   "w5": 0.0,
-   "w1h": 0.0,
    "rewrites": 4,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 135097,
    "rewrite_gap_median": 0.0918749988079071,
    "call_seats": 12
@@ -3816,6 +3940,7 @@
    "w1h": 33846.5,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null,
    "call_seats": 2
@@ -3840,6 +3965,7 @@
    "w1h": 30661.285714285714,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null,
    "call_seats": 7
@@ -3864,6 +3990,7 @@
    "w1h": 58804.416666666664,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null,
    "call_seats": 12
@@ -3888,6 +4015,7 @@
    "w1h": 57907.5,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null,
    "call_seats": 2
@@ -3908,10 +4036,9 @@
    "minutes": 2.439963460885562,
    "p": 24310.5,
    "k": 11.23076923076923,
-   "w5": 0.0,
-   "w1h": 0.0,
    "rewrites": 1,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 24447,
    "rewrite_gap_median": 0.05798333485921224,
    "call_seats": 26
@@ -3932,10 +4059,9 @@
    "minutes": 5.073164247376945,
    "p": 24079.209677419356,
    "k": 23.016129032258064,
-   "w5": 0.0,
-   "w1h": 0.0,
    "rewrites": 5,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 143311,
    "rewrite_gap_median": 0.1330833315849304,
    "call_seats": 62
@@ -3956,10 +4082,9 @@
    "minutes": 2.407446376655413,
    "p": 24675.260869565216,
    "k": 11.434782608695652,
-   "w5": 0.0,
-   "w1h": 0.0,
    "rewrites": 1,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 22803,
    "rewrite_gap_median": 0.20884999831517537,
    "call_seats": 23
@@ -3980,10 +4105,9 @@
    "minutes": 5.469504761695862,
    "p": 24147.0,
    "k": 27.142857142857142,
-   "w5": 0.0,
-   "w1h": 0.0,
    "rewrites": 2,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 73794,
    "rewrite_gap_median": 0.12860833406448363,
    "call_seats": 7
@@ -4000,7 +4124,7 @@
    "count": 23,
    "credit": 2.758761418891052,
    "minutes": 2.282608695652174,
-   "k": 1.0
+   "turns": 1.0
   },
   {
    "version": "10.16.0",
@@ -4014,7 +4138,7 @@
    "count": 7,
    "credit": 2.1913072790807866,
    "minutes": 4.747619047619048,
-   "k": 1.0
+   "turns": 1.0
   },
   {
    "version": "10.16.0",
@@ -4032,10 +4156,9 @@
    "minutes": 2.330662963125441,
    "p": 19910.75,
    "k": 11.444444444444445,
-   "w5": 0.0,
-   "w1h": 0.0,
    "rewrites": 3,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 115442,
    "rewrite_gap_median": 0.08366667032241822,
    "call_seats": 36
@@ -4056,10 +4179,9 @@
    "minutes": 2.8591921572591743,
    "p": 24081.823529411766,
    "k": 14.117647058823529,
-   "w5": 0.0,
-   "w1h": 0.0,
    "rewrites": 1,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 42110,
    "rewrite_gap_median": 0.5326666673024495,
    "call_seats": 17
@@ -4076,7 +4198,7 @@
    "count": 18,
    "credit": 2.5272875570480924,
    "minutes": 2.011111111111111,
-   "k": 1.0
+   "turns": 1.0
   },
   {
    "version": "10.17.0",
@@ -4090,7 +4212,7 @@
    "count": 2,
    "credit": 0.0,
    "minutes": 0.0,
-   "k": 0.0
+   "turns": 0.0
   },
   {
    "version": "10.17.1",
@@ -4108,10 +4230,9 @@
    "minutes": 2.351745613485749,
    "p": 26092.40350877193,
    "k": 10.982456140350877,
-   "w5": 0.0,
-   "w1h": 0.0,
    "rewrites": 2,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 105577,
    "rewrite_gap_median": 0.6705250004927318,
    "call_seats": 57
@@ -4128,7 +4249,7 @@
    "count": 55,
    "credit": 3.032393746591286,
    "minutes": 2.376060606060606,
-   "k": 1.0
+   "turns": 1.0
   },
   {
    "version": "10.17.1",
@@ -4142,7 +4263,7 @@
    "count": 2,
    "credit": 0.0,
    "minutes": 0.0,
-   "k": 0.0
+   "turns": 0.0
   },
   {
    "version": "10.17.3",
@@ -4164,6 +4285,7 @@
    "w1h": 66685.96,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null,
    "call_seats": 25
@@ -4188,6 +4310,7 @@
    "w1h": 86677.14285714286,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null,
    "call_seats": 7
@@ -4208,10 +4331,9 @@
    "minutes": 2.597157657468641,
    "p": 25181.783783783783,
    "k": 13.486486486486486,
-   "w5": 0.0,
-   "w1h": 0.0,
    "rewrites": 3,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 82141,
    "rewrite_gap_median": 0.24483333031336466,
    "call_seats": 37
@@ -4232,10 +4354,9 @@
    "minutes": 5.15709285736084,
    "p": 24447.0,
    "k": 23.0,
-   "w5": 0.0,
-   "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null,
    "call_seats": 7
@@ -4252,7 +4373,7 @@
    "count": 38,
    "credit": 3.448744703923365,
    "minutes": 2.696491228070175,
-   "k": 1.0
+   "turns": 1.0
   },
   {
    "version": "10.17.3",
@@ -4266,7 +4387,7 @@
    "count": 1,
    "credit": 0.0,
    "minutes": 0.0,
-   "k": 0.0
+   "turns": 0.0
   },
   {
    "version": "10.17.3",
@@ -4280,7 +4401,7 @@
    "count": 6,
    "credit": 4.815202940961858,
    "minutes": 3.188888888888889,
-   "k": 1.0
+   "turns": 1.0
   },
   {
    "version": "10.17.3",
@@ -4294,7 +4415,7 @@
    "count": 5,
    "credit": 0.0,
    "minutes": 0.0,
-   "k": 0.0
+   "turns": 0.0
   },
   {
    "version": "10.17.3",
@@ -4316,6 +4437,7 @@
    "w1h": 69768.16666666667,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null,
    "call_seats": 30
@@ -4340,6 +4462,7 @@
    "w1h": 71047.68181818182,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null,
    "call_seats": 22
@@ -4360,10 +4483,9 @@
    "minutes": 1.8134644737369137,
    "p": 26987.0,
    "k": 12.447368421052632,
-   "w5": 0.0,
-   "w1h": 0.0,
    "rewrites": 3,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 85028,
    "rewrite_gap_median": 0.161899999777476,
    "call_seats": 38
@@ -4384,10 +4506,9 @@
    "minutes": 3.2195500002391095,
    "p": 24539.043478260868,
    "k": 20.217391304347824,
-   "w5": 0.0,
-   "w1h": 0.0,
    "rewrites": 1,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 22132,
    "rewrite_gap_median": 0.11621666351954142,
    "call_seats": 23
@@ -4404,7 +4525,7 @@
    "count": 42,
    "credit": 3.051602313065624,
    "minutes": 2.153968253968254,
-   "k": 1.0
+   "turns": 1.0
   },
   {
    "version": "10.17.3",
@@ -4418,7 +4539,7 @@
    "count": 22,
    "credit": 4.440375105563094,
    "minutes": 2.7181818181818183,
-   "k": 1.0
+   "turns": 1.0
   },
   {
    "version": "10.17.5",
@@ -4440,6 +4561,7 @@
    "w1h": 66129.28571428571,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null,
    "call_seats": 7
@@ -4460,10 +4582,9 @@
    "minutes": 1.6301520831882954,
    "p": 26847.25,
    "k": 12.9375,
-   "w5": 0.0,
-   "w1h": 0.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null,
    "call_seats": 16
@@ -4484,10 +4605,9 @@
    "minutes": 4.481149999868302,
    "p": 25078.571428571428,
    "k": 32.857142857142854,
-   "w5": 0.0,
-   "w1h": 0.0,
    "rewrites": 2,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 159844,
    "rewrite_gap_median": 0.17148333191871643,
    "call_seats": 7
@@ -4504,7 +4624,7 @@
    "count": 17,
    "credit": 3.113578248980587,
    "minutes": 2.2323529411764707,
-   "k": 1.0
+   "turns": 1.0
   },
   {
    "version": "10.17.5",
@@ -4518,7 +4638,7 @@
    "count": 1,
    "credit": 4.486941824212272,
    "minutes": 2.216666666666667,
-   "k": 1.0
+   "turns": 1.0
   },
   {
    "version": "10.17.5",
@@ -4532,7 +4652,7 @@
    "count": 1,
    "credit": 0.0,
    "minutes": 0.0,
-   "k": 0.0
+   "turns": 0.0
   },
   {
    "version": "10.17.6",
@@ -4554,6 +4674,7 @@
    "w1h": 92077.0,
    "rewrites": 0,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 0,
    "rewrite_gap_median": null,
    "call_seats": 6
@@ -4574,10 +4695,9 @@
    "minutes": 1.9056484850970181,
    "p": 23067.0,
    "k": 12.909090909090908,
-   "w5": 0.0,
-   "w1h": 0.0,
    "rewrites": 1,
    "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
    "rewrite_tokens": 25963,
    "rewrite_gap_median": 0.12176666657129924,
    "call_seats": 11
@@ -4594,7 +4714,7 @@
    "count": 10,
    "credit": 3.5072272789552237,
    "minutes": 2.5516666666666667,
-   "k": 1.0
+   "turns": 1.0
   }
  ],
  "meta": {

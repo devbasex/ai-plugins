@@ -162,8 +162,8 @@ class Usage:
             elif is_rewrite(write, context):
                 self.rewrites += 1
                 self.rewrite_tokens += write
-                if t is not None and prev is not None:
-                    self.gaps.append(t - prev)
+                # 時刻の欠けた書き直しも None として積み、回数と間隔の分母を揃える
+                self.gaps.append(t - prev if t is not None and prev is not None else None)
             prev = t
 
 
@@ -447,9 +447,11 @@ def call_stats(u: Usage, n: int) -> dict:
 
     回数と量は合計で、1 起動あたりではない（`rewrite_tokens / rewrites` が 1 回あたりの量になる）。
     """
-    gap = median(u.gaps)
+    known = [g for g in u.gaps if g is not None]
+    gap = median(known)
     return {"p": u.p / n, "k": u.calls / n, "w5": u.w5 / n, "w1h": u.w1h / n,
-            "rewrites": u.rewrites, "rewrites_after_5m": sum(1 for g in u.gaps if g > CACHE_5M),
+            "rewrites": u.rewrites, "rewrites_after_5m": sum(1 for g in known if g > CACHE_5M),
+            "rewrites_untimed": len(u.gaps) - len(known),
             "rewrite_tokens": u.rewrite_tokens, "rewrite_gap_median": None if gap is None else gap / 60}
 
 
@@ -518,8 +520,10 @@ def aggregate(sessions: list[Session], by: list[str]) -> dict:
             # 呼び出しの並びが分かる席だけを分母にする。分からない席しか無ければ P・k を出さない（kiro はターン数を k に）
             if with_calls:
                 stats = call_stats(calls, len(with_calls)) | {"call_seats": len(with_calls)}
-            elif "calls" in tok:
-                stats = {"k": tok.pop("calls") / len(es)}
+                if rt == "codex":  # codex は書き込みを記録しない（キャッシュに当たらなかった分は書き直しの判定にだけ使う）
+                    stats.pop("w5"), stats.pop("w1h")
+            elif "calls" in tok:  # kiro のターン数は利用者のターンで、呼び出し回数 k ではない
+                stats = {"turns": tok.pop("calls") / len(es)}
             else:
                 stats = {}
             external.append(axis | {"runtime": rt, "skill": "cross-review" if kind == "pr" else "cross-refactoring",
@@ -574,7 +578,7 @@ def render_md(result: dict, by: list[str]) -> str:
                   for r in result["external"]])
     out += ["", "## 外部 CLI の呼び出しとキャッシュ（1 起動あたり）", "",
             "codex は input のうち cached に当たらなかった分を書き込みとみなし、呼び出しごとの値（last_token_usage）を持つ席だけで数える。"
-            "kiro は呼び出し回数（ターン数）だけを載せる。取れない値は -。", ""]
+            "kiro は呼び出し回数を記録しない（利用者のターン数は JSON の turns）。取れない値は -。", ""]
     out += table(heads + ["ランタイム", "Skill", "モデル", "起動", "P", "k", "書き直し", "5 分超", "間隔"],
                  [[r[a] for a in by] + [r["runtime"], r["skill"], r["cli_model"], str(r["count"]),
                                         _k(r["p"]) if "p" in r else "-", f"{r['k']:.1f}" if "k" in r else "-",
@@ -607,6 +611,8 @@ def main(argv: list[str] | None = None) -> int:
         until = parse_ts(args.until)
         if until is None:
             ap.error(f"--until を時刻として読めない: {args.until}")
+        if datetime.fromisoformat(args.until.replace("Z", "+00:00")).tzinfo is None:  # 機械の時間帯で打ち切りが変わる
+            ap.error(f"--until に時間帯を付ける（例: 2026-09-24T09:00:00Z）: {args.until}")
     sessions, seats, skipped = read_claude(args.claude_root, args.idle_cap, until)
     externals = seats + read_codex(args.codex_root, args.idle_cap, until) + read_kiro(args.kiro_root, until)
     unlinked = link_external(sessions, externals)  # 版で絞る前に寄せる（古い版の会話の分を未対応に数えない）

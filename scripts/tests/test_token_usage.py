@@ -209,6 +209,7 @@ def test_p_k_and_rewrites_per_role(tmp_path):
     c = rows[("conductor", "-")]
     assert (c["p"], c["k"], c["rewrites"], c["w1h"], c["w5"]) == (1210, 4, 0, 800, 0)
     assert c["rewrite_gap_median"] is None
+    assert r["rewrites_untimed"] == 0
 
 
 def test_codex_seat_calls_from_last_token_usage(tmp_path):
@@ -228,8 +229,9 @@ def test_codex_seat_calls_from_last_token_usage(tmp_path):
     ext = {x["runtime"]: x for x in run_json(roots)["external"]}
     c = ext["codex"]
     assert (c["p"], c["k"], c["rewrites"], c["rewrites_after_5m"], c["rewrite_gap_median"]) == (30_000, 3, 1, 1, 8)
-    assert ext["kiro"]["k"] == 1  # kiro はターン数だけ
-    assert "p" not in ext["kiro"]
+    assert "w5" not in c and "w1h" not in c  # codex は書き込みを記録しない
+    assert ext["kiro"]["turns"] == 1  # kiro はターン数だけで、呼び出し回数 k は出さない
+    assert "p" not in ext["kiro"] and "k" not in ext["kiro"]
 
 
 def test_md_has_call_tables(tmp_path):
@@ -251,5 +253,30 @@ def test_until_drops_later_lines(tmp_path):
     r = rows[("supervisor", "検査")]
     assert (r["k"], r["rewrites"]) == (3, 1)  # 53 分以降の 3 呼び出しを読まない
     assert run_json(roots, "--until", _ts(52))["meta"]["until"] == _ts(52)
-    p = run(roots, "--until", "yesterday")
-    assert p.returncode == 2 and "--until" in p.stderr
+    for bad in ("yesterday", "2026-09-10T00:52:00"):  # 時間帯の無い値は機械で打ち切りが変わるため拒む
+        p = run(roots, "--until", bad)
+        assert p.returncode == 2 and "--until" in p.stderr, bad
+
+
+def test_until_applies_to_codex_lines_and_kiro_creation(tmp_path):
+    roots = build(tmp_path)
+
+    def tc(minute, total_in, inp):
+        return {"timestamp": _ts(minute), "type": "event_msg", "payload": {"type": "token_count", "info": {
+            "total_token_usage": {"input_tokens": total_in, "cached_input_tokens": 0, "output_tokens": 1},
+            "last_token_usage": {"input_tokens": inp, "cached_input_tokens": 0, "output_tokens": 1}}}}
+    _jsonl(roots["codex"] / "2026/09/10/rollout-a.jsonl", [
+        {"timestamp": _ts(30), "type": "session_meta", "payload": {"cwd": WT}},
+        tc(31, 1000, 1000), tc(33, 3000, 2000), tc(40, 6000, 3000)])
+    # 打ち切りの後も席を会話へ寄せられるよう、会話の行を打ち切りの直前に 1 つ足す
+    with open(roots["claude"] / "-work-x" / f"{SID}.jsonl", "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(_assistant(34, "m5", U)) + "\n")
+    r = run_json(roots, "--until", _ts(35))
+    ext = {x["runtime"]: x for x in r["external"]}
+    assert (ext["codex"]["k"], ext["codex"]["p"]) == (2, 1000)  # 40 分の呼び出しを読まない
+    [row] = r["per_pr"]
+    assert row["codex_input"] == 3000  # 累計も打ち切りの前の値
+    # kiro の記録は 31 分に作られたため、30 分で打ち切ると除かれる
+    r = run_json(roots, "--until", _ts(30))
+    assert "kiro" not in {x["runtime"] for x in r["external"]}
+    assert r["per_pr"][0]["kiro_credit"] == 0
