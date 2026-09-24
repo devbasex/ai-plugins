@@ -220,6 +220,14 @@ def is_direct_child(d: str, start: int | None = None) -> bool:
     return False
 
 
+def under_relay() -> str | None:
+    """`NDF_RELAY_DIR` があり、中継が動いていて、hook を呼んだ claude が中継の直接の子ならその場所を返す。"""
+    d = os.environ.get("NDF_RELAY_DIR")
+    if d and relay_running(d) and is_direct_child(d):
+        return d
+    return None
+
+
 # ---------------------------------------------------------------- mark
 
 
@@ -1684,8 +1692,8 @@ def cmd_question(action: str) -> int:
     except (OSError, ValueError):
         pass
     try:
-        d = os.environ.get("NDF_RELAY_DIR")
-        if not d or not relay_running(d) or not is_direct_child(d):
+        d = under_relay()
+        if d is None:
             return 0
     except Exception:
         return 0
@@ -1725,8 +1733,7 @@ def notice_lines() -> tuple[str, str]:
     outside = ("/exit してから claude を起動し、下の中身を最初の入力として貼り付ける"
                "（/ndf:install-wrapper で中継を入れると自動になる）")
     try:
-        d = os.environ.get("NDF_RELAY_DIR")
-        if not (d and relay_running(d) and is_direct_child(d)):
+        if under_relay() is None:
             return "outside", outside
         quiet = quiet_seconds()
     except Exception:
@@ -1779,8 +1786,7 @@ def main(argv: list[str]) -> int:
     if sub == "is-child":
         # 文脈量の hook（token-guard.sh）が使う。中継が動いていて、hook を呼んだ claude が
         # 中継の直接の子なら 0（親のたどりは mark と同じ。間の bash / sh は claude でないので飛ぶ）
-        d = os.environ.get("NDF_RELAY_DIR")
-        return 0 if d and relay_running(d) and is_direct_child(d) else 1
+        return 0 if under_relay() else 1
     if sub == "notice":
         return cmd_notice()
     print(f"relay.py: 未知の副命令 {sub}", file=sys.stderr)
