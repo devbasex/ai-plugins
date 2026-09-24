@@ -41,7 +41,7 @@ from ..intake import (
     close_without_result,
     discard_unverified,
 )
-from ..paths import git_out, load_state
+from ..paths import git_out, load_state, work_dir
 from ..verify import verify_final_fix_commit
 from ..verify import unassigned_fix_commits
 
@@ -117,7 +117,7 @@ def _reusable_whole_test(state: dict[str, Any]) -> bool:
     record = state.get("whole_test") or {}
     if not (record.get("ran") and record.get("status") == "pass") or record.get("reverted"):
         return False
-    head = git_out(str(state["worktrees"]["work"]), ["rev-parse", "HEAD"])
+    head = git_out(work_dir(state), ["rev-parse", "HEAD"])
     return bool(head) and head == record.get("head")
 
 
@@ -202,7 +202,7 @@ def _gate_failing(
     # `fix_base_sha` を流用することもできない。あれは最後の群の検証が落ちた地点で
     # あり、そこから HEAD までには**検証を通った正常なコミット**が並ぶ。範囲に含めると
     # 未申告として扱われ、その全部が取り消される。
-    gate["fix_base_sha"] = git_out(str(state["worktrees"]["work"]), ["rev-parse", "HEAD"])
+    gate["fix_base_sha"] = git_out(work_dir(state), ["rev-parse", "HEAD"])
     impl = _final_fix_impl(state, gate)
     statefile.save(path, state)
     info(
@@ -384,7 +384,7 @@ def cmd_merge_final_fix(args: argparse.Namespace) -> None:
             code=4,
         )
 
-    work = str(state["worktrees"]["work"])
+    work = work_dir(state)
     discard_impl_leftovers(state, work)
     flush_pending_push(path, state, gate)
 
@@ -417,7 +417,7 @@ def cmd_merge_final_fix(args: argparse.Namespace) -> None:
 def _local_gate(state: dict[str, Any]) -> tuple[bool, str]:
     """全体のテストを手元で実行する。**全体のテストを呼ぶのは `init` とここだけである。**"""
     command = _baseline_command(state)
-    work = str(state["worktrees"]["work"])
+    work = work_dir(state)
     timeout = timeline.state_test_timeout(state)
     code, timed_out = run_with_timeout(command, work, timeout)
     if timed_out:
@@ -431,7 +431,7 @@ def _ci_gate(state: dict[str, Any], name: str) -> tuple[bool, str]:
     **結果を得られないときは通過させない**（fail-closed）。照会できなかったことと、
     検査が成功したことは別である。
     """
-    sha = git_out(str(state["worktrees"]["work"]), ["rev-parse", "HEAD"]) or ""
+    sha = git_out(work_dir(state), ["rev-parse", "HEAD"]) or ""
     result: Optional[str] = check_run_result(str(state.get("repo") or ""), sha, name)
     if result is None:
         return False, f"検査 {name} の結果を得られませんでした（{sha[:7]}）"

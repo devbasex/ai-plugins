@@ -43,6 +43,7 @@ from ..items import (
     item_shas,
     live_items,
 )
+from ..paths import work_dir
 from ..outbound import dropped_line, item_lines, plan_line
 from ..paths import git_out, load_state
 from ..phases import add_phase_seconds, finish_phase
@@ -59,7 +60,7 @@ from ..verify import (
 def _run(state: dict[str, Any], words: list[str], log: pathlib.Path) -> bool:
     """語の並びをシェルを通さずに走らせる（AC10b）。打ち切りは失敗。"""
     timeout = timeline.state_test_timeout(state)
-    code, timed_out = run_with_timeout(list(words), str(state["worktrees"]["work"]),
+    code, timed_out = run_with_timeout(list(words), work_dir(state),
                                        timeout, output=log)
     return (not timed_out) and code == 0
 
@@ -162,7 +163,7 @@ def _test_files(state: dict[str, Any], item: dict[str, Any]) -> Optional[list[st
     round_test = (state.get("round_test") or {}).get("command")
     if not round_test:
         return None
-    return danger.limited_test_files_from_round_test(round_test, str(state["worktrees"]["work"]))
+    return danger.limited_test_files_from_round_test(round_test, work_dir(state))
 
 
 def _d5(item: dict[str, Any]) -> bool:
@@ -176,7 +177,7 @@ def _d5(item: dict[str, Any]) -> bool:
 
 def _flag_items(state: dict[str, Any]) -> list[str]:
     """検証を通った項目に危険の印を付け、立った印の集合を返す。**付け済みの項目は見直さない。**"""
-    work = str(state["worktrees"]["work"])
+    work = work_dir(state)
     scope = list(state.get("target_scope") or [])
     flags: list[str] = []
     for item in live_items(state):
@@ -205,7 +206,7 @@ def _whole_test(path: pathlib.Path, state: dict[str, Any], flags: list[str]) -> 
     if not flags or record.get("ran"):
         return False
     command = str((state.get("baseline_test") or {}).get("command") or "")
-    work = str(state["worktrees"]["work"])
+    work = work_dir(state)
     info(f"⚠ 危険の印（{', '.join(flags)}）が立ったため、全体のテストを 1 度走らせます: {command}")
     started = time.monotonic()
     log = pathlib.Path(state["tmp_dir"]) / "verify-whole-test.log"
@@ -302,7 +303,7 @@ def _recheck_whole(path: pathlib.Path, state: dict[str, Any], record: dict[str, 
 # ---------- verify ----------
 
 def _prepare(path: pathlib.Path, state: dict[str, Any]) -> None:
-    discard_impl_leftovers(state, str(state["worktrees"]["work"]))
+    discard_impl_leftovers(state, work_dir(state))
     resume_pending_drop(path, state)
     flush_pending_push(path, state, state)
 
@@ -354,7 +355,7 @@ def _to_fix(
     """落ちた項目を修正へ回す（`VERIFY=fix`）。修正の起点は今の HEAD。"""
     state["fix"] = {
         "items": [i["id"] for i in failing],
-        "base_sha": git_out(str(state["worktrees"]["work"]), ["rev-parse", "HEAD"]),
+        "base_sha": git_out(work_dir(state), ["rev-parse", "HEAD"]),
         "attempt": int((state.get("fix_stats") or {}).get("launches") or 0) + 1,
     }
     _account(state, started)
@@ -459,7 +460,7 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     数える（報告に出す）。往復を止めるのは締め切りである（決定 23）。
     """
     path, state = load_state(args.id)
-    work = str(state["worktrees"]["work"])
+    work = work_dir(state)
     discard_impl_leftovers(state, work)
     fix = state.get("fix")
     if not fix:

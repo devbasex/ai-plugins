@@ -19,7 +19,7 @@ import statefile
 from .. import allocation, budget, clock, info, testcmd, timeline
 from ..gitfacts import read_result, record_observed_model
 from ..items import PLANNED, defer, group_key, item_kind, item_label, key_text
-from ..paths import git_out, load_state
+from ..paths import git_out, load_state, work_dir
 from ..phases import elapsed_minutes, finish_phase
 from ..vocabulary import (
     DEFER_BUDGET,
@@ -184,7 +184,7 @@ def _allocation_table(state: dict[str, Any]) -> dict[str, Any]:
 
 def _limited_commands(state: dict[str, Any], items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """項目ごとの限ったテストの語の並びを決める。決まらない項目は `no_target` で見送る（AC10b）。"""
-    work = str(state["worktrees"]["work"])
+    work = work_dir(state)
     source_state = {
         "round_test": (state.get("round_test") or {}).get("command"),
         "baseline_test": (state.get("baseline_test") or {}).get("command"),
@@ -270,7 +270,7 @@ def cmd_merge_plan(args: argparse.Namespace) -> None:
     state["items"] = _plan_items(state, selected, end)
     _decide_public_io(state, state["items"])
     state["plan"] = {
-        "base_sha": git_out(str(state["worktrees"]["work"]), ["rev-parse", "HEAD"]),
+        "base_sha": git_out(work_dir(state), ["rev-parse", "HEAD"]),
         "elapsed_minutes": round(elapsed, 2),
         "available_minutes": round(available, 2),
         "reserve": reserve,
