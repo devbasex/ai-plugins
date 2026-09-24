@@ -72,7 +72,8 @@
 | `prompts/fix.md` | 変える | 失敗した項目だけを直す |
 | `launch-cli.sh` | 変える | フェーズの名前（`propose` / `plan` / `add-tests` / `implement` / `fix` / `final-fix`）と雛形の対応 |
 | 共通層 `scripts/lib/jev.py` | 新しく作る | Jev の呼び出し・疎通の確認・失敗時に `None` を返す |
-| 共通層 `scripts/lib/limits.py` | 変える | `plan` / `add-tests` / `implement` の監視の上限を足す |
+| 共通層 `scripts/lib/limits.py` | 変える | 工程 `apply` を `implement` へ改め、`plan`（1200 秒。`propose` と同じ）と `add-tests` を足す。`add-tests` と `implement` の表の値は既定の下限で、駆動は予算から導いた上限を `--timeout` で渡す（下の「時間の決め方」）。`fix` / `final-fix` は今の値のまま |
+| `commands/apply.py` | 外す | 中身は `propose.py`（提案の統合）と `implement.py`（取り込みの検査）へ移す。群と適用ラウンドの扱いは移さない |
 | 共通層 `scripts/lib/assignment.py` | 変える | 輪番（`impl_assign`）を外し、実装担当の選び方を足す |
 | `SKILL.md` と `docs/01〜04` | 書き直す | 5 フェーズの形。駆動の bash は短くなる |
 | 確定仕様 `docs/specifications/cross-refactoring-participants.md` / `cross-refactoring-round-tests-and-assess.md` / `cross-refactoring-apply-intake.md` と `docs/specifications/README.md` の索引 | 改める（`plan-to-spec` の工程） | 輪番・廃止する 3 引数・全体のテストを 2 回に限る記述・適用ラウンドの開き直しは、この変更で過去の仕様になる。現行の仕様を新しい確定仕様へ移し、旧い 3 本には「#933 で置き換えた」と先頭に書く |
@@ -241,8 +242,9 @@ plugins/ndf/scripts/lib/{jev,limits,assignment}.py
 | `--budget-minutes N` | 新しい。1 以上の整数。それ以外は終了コード 4 | 60 |
 | `--implementer NAME` | 新しい。参加者の中の 1 者。参加者に無ければ終了コード 4 | 下の決め方 |
 | `--max-fix-rounds N` | 意味が変わる。**1 項目あたり**の修正の上限 | 3 |
+| `--round-test CMD` | 意味は変わらない。**`--baseline-test` が差し替えられない形（下の「実装担当の `plan` の結果ファイル」の組み立て方で、対象の語が無く、末尾へ足せる実行器でもない）なら必須になる。** 省くと `init` が終了コード 4 で止まる。省いたまま進むと、全項目が `no_target` になり、提案と計画に使った時間の後に何も適用されずに終わるためである | `--baseline-test` を差し替えの元にする |
 | `--max-test-rounds` / `--max-outer-rounds` / `--max-items-per-round` | 廃止。受け取ると `⚠ <引数> は廃止しました（#933）。--budget-minutes で所要を決めます` を標準エラーへ出して無視する | — |
-| そのほか（`--scope` / `--baseline-test` / `--round-test` / `--host` / `--exclude` / `--include` / `--require-all` / `--model` / `--ci-check` / `--workflow-step` / `--severity-threshold` / `--test-timeout` / `--sync-command` / `--plan-file`） | 変えない | 今と同じ |
+| そのほか（`--scope` / `--baseline-test` / `--host` / `--exclude` / `--include` / `--require-all` / `--model` / `--ci-check` / `--workflow-step` / `--severity-threshold` / `--test-timeout` / `--sync-command` / `--plan-file`） | 変えない | 今と同じ |
 
 **実装担当の決め方:** `--implementer` → ホストが参加者にいればホスト → 参加者の先頭。`init` で決めて状態へ書き、再開で変えない。
 
@@ -257,7 +259,7 @@ plugins/ndf/scripts/lib/{jev,limits,assignment}.py
 | `merge-implement` | git の範囲 | — | 0 / 2（残る項目 0 件。1 件も適用されなかったとき。最終ゲートへ）。コミットの無い項目は `not_done` で見送り、その項目のテストのコミットも取り消す |
 | `verify` | 状態 | `VERIFY=done\|fix` | 0 / 4 |
 | `merge-fix` | git の範囲 | — | 0 |
-| `finalize` | 状態 | — | 0（履歴の追記に失敗しても 0。知らせるだけ） |
+| `finalize` | 状態 | — | 0（履歴の追記に失敗しても 0。知らせるだけ）。`final-gate` の後に呼ぶ。`final_gate` が通った（`cross-review` へ渡すときを含む）ときだけ追記し、最終ゲートの全体のテストの所要も行に入れる。通らなかった・中断した実行は追記しない |
 | `final-gate` / `merge-final-fix` / `report` / `status` / `assess` | 今と同じ | 今と同じ | 今と同じ |
 
 外すサブコマンドは次の 7 つである。
@@ -285,7 +287,8 @@ plugins/ndf/scripts/lib/{jev,limits,assignment}.py
   | 元のコマンドの対象の語 | 組み立て |
   | --- | --- |
   | 1 つ以上 | 対象の語を取り除き、その最初の位置へ `test_targets` を並べる |
-  | 0 個で、元が `pytest` / `python -m pytest` / `jest` / `vitest` / `go test` / `cargo test` / `npx jest` のように対象を末尾の引数で受け取るもの | 末尾へ `test_targets` を足す |
+  | 0 個で、元が末尾の位置引数をテストのファイルのパスとして受け取る実行器（`pytest` / `python -m pytest` / `jest` / `npx jest` / `vitest` / `npx vitest`） | 末尾へ `test_targets` を足す |
+  | 0 個で、末尾の位置引数をパスとして読まない実行器（`cargo test` はテスト名の絞り込み、`go test` はパッケージ） | 差し替えられない。その項目の対象を空として扱う（パスを足すと、対象のテストを走らせずに通りうるため） |
   | 0 個で、それ以外（`bash scripts/run-scope-tests.sh` のようなラッパーなど） | 差し替えられない。その項目の対象を空として扱う |
 
 - `test_targets` の各要素は次をすべて満たす。1 つでも満たさなければ、その項目の対象を空として扱う
@@ -343,8 +346,8 @@ sequenceDiagram
       D->>R: merge-fix
     end
   end
-  D->>R: finalize（履歴へ追記）
   D->>R: final-gate
+  D->>R: finalize（最終ゲートが通ったときだけ履歴へ追記）
 ```
 
 **駆動の bash は繰り返しを 1 つしか持たない**（検証と修正）。今の二重の繰り返し（ラウンドと適用ラウンド）は無くなる。
@@ -385,10 +388,10 @@ stateDiagram-v2
 - 候補を順位の順にたどり、**入る項目は入れ、入らない項目は飛ばして次を見る**（`budget` の理由で見送る）
 - 順位は `(段, 賛同した者の数, 重要度)` の降順、同じなら見積りの昇順
 - 締め切りは予算の末尾から逆算する。順位の順に並べた採用の項目を 1..n とし、終わり `T = started_at + budget_minutes − R` とする
-  - 項目 i の実装の締め切り: `T − Σ_{j≥i} (implement_j + verify_j)`。i 以降の未着手の実装と検証が末尾までに収まる最後の時刻である。後順位ほど締め切りが遅い
+  - 項目 i の実装の締め切り: `T − Σ_{j≥i} implement_j − Σ_{j=1..n} verify_j`。検証は実装のフェーズの後に全件をまとめて走らせるため、i より前の項目の検証も末尾の側に残る。後順位ほど締め切りが遅い
   - 項目 i のテストの追加の締め切り: `T − Σ_{j=1..n} (implement_j + verify_j) − Σ_{j≥i} test_j`。テストの追加は実装より前のフェーズなので、実装と検証の全件を先に差し引く
   - 締め切りは `add-tests` と `implement` の雛形に項目ごとの時刻として渡す
-- **実行中の CLI は時間切れで止めない。** 監視の上限（`limits.py`）はそのまま歯止めとして残す
+- **実行中の CLI は時間切れで止めない。** そのため `add-tests` と `implement` の監視の上限（`--timeout`）は予算から導き、締め切りより先に監視が CLI を止めないようにする。上限は `max(表の値, T − 起動の時刻) + 600` 秒である（`T` は上の終わりの時刻、600 秒は最後の項目が締め切りの直前に着手した分の余裕）。無進捗の許容（`--stall-timeout`）は今の値のまま歯止めとして残す
 
 ## 検証と修正
 
@@ -449,6 +452,7 @@ stateDiagram-v2
 | 受け入れ条件 | 何で確かめるか |
 | --- | --- |
 | AC1〜AC3 | `init` の単体（引数の検査・廃止の知らせ・`max_fix_rounds` の意味） |
+| AC3b | `init` の単体（`--round-test` が無く `--baseline-test` が差し替えられない形のとき終了コード 4） |
 | AC4 AC6 | 偽の CLI を使う結合テスト。起動の記録（`launch-cli.sh` の呼び出し）を数える |
 | AC5 | 雛形を展開した結果に観点の語彙の値が並ぶことを、`launch-cli.sh` の展開の単体で見る（文言ではなく、語彙の値の列挙を見る） |
 | AC7 AC8 AC9 | `budget.py` の単体（見積り・控え・飛ばして詰める・締め切り）と `merge-plan` の単体 |
