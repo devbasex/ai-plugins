@@ -205,7 +205,7 @@ plugins/ndf/scripts/lib/{jev,limits,assignment}.py
  "phases": {"propose": 272, "plan": 180, "add-tests": 800, "implement": 900, "verify": 120},
  "kinds": {"test": {"count": 5, "seconds": 800},
            "structure/extract_method": {"count": 6, "seconds": 480}},
- "verify": {"items": 11, "seconds": 110}, "fix": {"launches": 1, "seconds": 300},
+ "verify": {"items": 6, "seconds": 110}, "fix": {"launches": 1, "seconds": 300},
  "whole_test_seconds": 59}
 ```
 
@@ -215,7 +215,7 @@ plugins/ndf/scripts/lib/{jev,limits,assignment}.py
 | --- | --- | --- |
 | `test` | 直近 10 行の Σ秒 ÷ Σ件数 | 初期値 |
 | `structure/<technique>` | 同上 | `structure/*` をまとめた値 → 初期値 |
-| `verify` | 直近 10 行の Σ秒 ÷ Σ項目 | 初期値 |
+| `verify` | 直近 10 行の Σ秒 ÷ Σ項目。項目は `items[]` のうち検証した改善項目の数で、足したテストは数えない | 初期値 |
 | `fix` | 直近 10 行の Σ秒 ÷ Σ起動 | 初期値 |
 
 - 「直近 10 行」は**その種類を含む行**の直近 10 行である。種類ごとに数えるため、珍しい手法も 10 回分まで遡れる
@@ -282,14 +282,13 @@ plugins/ndf/scripts/lib/{jev,limits,assignment}.py
 - `tier` は `high` / `medium` / `low`。候補の全件に付ける
 - `merge_into` は同じ変更だと判断した相手の `key`
 - **実装担当はコマンドを返さず、テストの対象（`test_targets`）だけを返す。** 限ったテストのコマンドは進行側が組み立てる。`--round-test`（省けば `--baseline-test`）を差し替えの元とし、`shlex.split` で語に分ける。対象の語の見分けは `scope.round_test_roots` と同じ規則を使う
-- 組み立て方は、元のコマンドの対象の語の数で決まる。組み立てた語の並びは `shell=False` で走らせる
+- 組み立て方は、**元のコマンドの先頭のプログラム**と対象の語の数で決まる。組み立てた語の並びは `shell=False` で走らせる。**既知の実行器**は、位置引数をテストのファイルのパスとして受け取る `pytest` / `python -m pytest` / `jest` / `npx jest` / `vitest` / `npx vitest` だけである
 
-  | 元のコマンドの対象の語 | 組み立て |
-  | --- | --- |
-  | 1 つ以上 | 対象の語を取り除き、その最初の位置へ `test_targets` を並べる |
-  | 0 個で、元が末尾の位置引数をテストのファイルのパスとして受け取る実行器（`pytest` / `python -m pytest` / `jest` / `npx jest` / `vitest` / `npx vitest`） | 末尾へ `test_targets` を足す |
-  | 0 個で、末尾の位置引数をパスとして読まない実行器（`cargo test` はテスト名の絞り込み、`go test` はパッケージ） | 差し替えられない。その項目の対象を空として扱う（パスを足すと、対象のテストを走らせずに通りうるため） |
-  | 0 個で、それ以外（`bash scripts/run-scope-tests.sh` のようなラッパーなど） | 差し替えられない。その項目の対象を空として扱う |
+  | 先頭のプログラム | 対象の語 | 組み立て |
+  | --- | --- | --- |
+  | 既知の実行器 | 1 つ以上 | 対象の語を取り除き、その最初の位置へ `test_targets` を並べる |
+  | 既知の実行器 | 0 個 | 末尾へ `test_targets` を足す |
+  | それ以外（`make -C backend test`・`npm --prefix backend test`・`cargo test`・`go test`・`bash scripts/run-scope-tests.sh` など） | 問わない | 差し替えられない。その項目の対象を空として扱う。オプションの値（`-C backend` の `backend`）を対象の語と読み違えて壊れたコマンドを組み立てないためと、`cargo test`（テスト名の絞り込み）・`go test`（パッケージ）のように位置引数をパスとして読まない実行器で、対象のテストを走らせずに通るのを避けるためである |
 
 - `test_targets` の各要素は次をすべて満たす。1 つでも満たさなければ、その項目の対象を空として扱う
   - `--scope` のテストの置き場所の中のパスか、そのパスに `::` で続くノード ID である（`scope.round_test_roots` の検査を使い回す）
@@ -431,7 +430,7 @@ stateDiagram-v2
 | --- | --- | --- |
 | 単独・`--ci-check` なし | `cross-review`（想定最大時間の外） | **検証の中の全体のテストが落ちて項目を取り消したとき（`whole_test.reverted`）だけ、`cross-review` の前に全体のテストを 1 度走らせる**（想定最大時間の内。控えの `final_whole_test`）。落ちたら今の最終ゲートの修正（`final-fix`）へ進む |
 | `--ci-check` あり（単独・工程の 1 つ） | 継続的統合の結果 | 取り消した後の HEAD も継続的統合が確かめる |
-| 工程の 1 つ・`--ci-check` なし | 全体のテスト（想定最大時間の内。控えに入れる） | **検証の中で走って通り（取り消しが無く）、その後に HEAD が生成物の同期のコミットしか進んでいなければ、走らせずに通す** |
+| 工程の 1 つ・`--ci-check` なし | 全体のテスト（想定最大時間の内。控えに入れる） | **検証の中で走って通り（取り消しが無く）、その後に HEAD が 1 つも進んでいなければ、走らせずに通す。** 生成物の同期（`--sync-command`）のコミットも、その全体のテストが見ていないため、進んでいれば走らせる |
 
 ### 履歴へ追記する時点
 
@@ -469,7 +468,7 @@ stateDiagram-v2
 | AC5 | 雛形を展開した結果に観点の語彙の値が並ぶことを、`launch-cli.sh` の展開の単体で見る（文言ではなく、語彙の値の列挙を見る） |
 | AC7 AC8 AC9 | `budget.py` の単体（見積り・控え・飛ばして詰める・締め切り）と `merge-plan` の単体 |
 | AC10 AC11 | git を使う結合（項目に紐づかないテスト・`test_failed`・`not_done` のテストのコミットの取り消し、1 項目 = 1 コミット） |
-| AC10b | 語の並びの組み立ての単体（対象の語の差し替え・対象の語が 0 個の実行器へ末尾に足す・ラッパーは差し替えられない・シェルの構文の文字・範囲の外・実在しないパスで `--round-test` に戻る・`--round-test` が無ければ `no_target` で見送る）と、`shell=False` で走ることの単体 |
+| AC10b | 語の並びの組み立ての単体（既知の実行器で対象の語を差し替える・対象の語が 0 個なら末尾に足す・既知でない実行器（`make -C backend test`・`cargo test`・ラッパー）は差し替えられない・シェルの構文の文字・範囲の外・実在しないパスで `--round-test` に戻る・`--round-test` が無ければ `no_target` で見送る）と、`shell=False` で走ることの単体 |
 | AC12 | `merge-implement` の単体（コミットの無い項目が `not_done` になる）と、雛形に締め切りが渡る単体 |
 | AC13 AC14 | `danger.py` の単体（D1〜D5）と `verify` の結合（全体のテストが 2 回走らない） |
 | AC15 AC16 | git を使う結合（項目の単位の取り消し・隣接する変更の退避） |
