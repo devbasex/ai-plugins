@@ -19,7 +19,7 @@
 
 - **利用者のシェル設定を書き換えるのを、利用者の明示の操作だけにする。** 導入・更新・取り外しを
   1 つのコマンドが持つ
-- **10.17.4 が黙って足した囲みを、利用者が知って選べる状態にする。** 知らせずに残すことも、知らせずに
+- **10.17.4〜10.17.6 が黙って足した囲みを、利用者が知って選べる状態にする。** 知らせずに残すことも、知らせずに
   消すこともしない
 - **再起動を 1 つのコマンドに畳む。** プラグインの更新の反映・文脈を切りたいときにも、区間の切れ目と
   同じ経路で切り替える
@@ -28,11 +28,11 @@
 - **devbase の `alias claude` が足す引数（`--dangerously-skip-permissions`）を、2 つ目以降の区間でも
   落とさない**（#936）
 
-**例: 10.17.4 を入れた利用者・新しい利用者・devbase の利用者。**
+**例: 10.17.4〜10.17.6 を入れた利用者・新しい利用者・devbase の利用者。**
 
 | 順 | 誰が | 何をする |
 | ---: | --- | --- |
-| 1 | 10.17.4 の利用者 | 次の版へ上げて claude を起動する。SessionStart hook の `relay.py startup` が、10.17.4 が置いた旧い写し（`~/.local/share/ndf/relay.py`）を今の版で置き直し、`rc-added` に載った `~/.bashrc` に囲みが残っているのを読んで、「10.17.4〜10.17.6 が自動で足したもの…」の 1 行を 1 度だけ出す。シェルの設定は書かない |
+| 1 | 10.17.4〜10.17.6 の利用者 | 次の版へ上げて claude を起動する。SessionStart hook の `relay.py startup` が、10.17.4〜10.17.6 が置いた旧い写し（`~/.local/share/ndf/relay.py`）を今の版で置き直し、`rc-added` に載った `~/.bashrc` に囲みが残っているのを読んで、「10.17.4〜10.17.6 が自動で足したもの…」の 1 行を 1 度だけ出す。シェルの設定は書かない |
 | 2 | 同じ利用者 | そのまま `claude` と打つ。囲みの alias が、置き直された旧い写しの中継を起こす |
 | 3 | 新しい利用者 | claude の中で `/ndf:install-wrapper` を打つ。写しを `~/.claude/ndf/relay.py`、`claude` の関数を `~/.claude/ndf/shellrc` に置き、`~/.bashrc` をバックアップしてから、`shellrc` を読む 1 行の囲みを足す。次に開いたシェルから効く |
 | 4 | どちらの利用者も | 中継の下で `/ndf:restart` を打つ。claude が再開用のコマンドを `ndf-next` のブロックで出して応答を終え、中継が静まり（15 秒）の後に `/exit` → 更新 → 起動を行う |
@@ -76,22 +76,22 @@
 | SessionStart hook はシェルの設定を書かない。導入は明示指示専用の `/ndf:install-wrapper` だけにする（`disable-model-invocation: true`） | 利用者のシェル設定を黙って書き換えない。モデルが自分の判断で書き換えることも frontmatter で止める。書く前にバックアップを取り `uninstall` で戻せるので、実行前の確認は置かない |
 | Skill の名前は `install-wrapper` にする | 利用者の指示の `install_wrapper` は Agent Skills 仕様の名前の規約（小文字英数とハイフンのみ）と `check-skill-frontmatter.py` に反する。語を残して区切りだけ替えた名前が、覚えた名前から最も遠くない |
 | 導入・取り外し・状態の表示を 1 つの Skill の引数で分ける | `statusline` の `status \| set \| restore` の前例に合わせる。別の Skill にすると同じ囲みと記録を 2 つの本文が説明し、片方だけが古くなる |
-| 10.17.4 の自動の囲みは残し、1 度だけ知らせる | hook が消すのはまた黙った書き換えになり、中継を使い始めた利用者の `claude` が版の更新で変わる。リリースノートだけでは読まない利用者が知る手段が無い |
-| 知らせには、`/ndf:install-wrapper` で入れ直せば別のファイルの `alias claude` が戻ることも書く（#936） | 10.17.4 の囲みの alias は、devbase の `alias claude='claude --dangerously-skip-permissions'` を上書きしている。入れ直すと囲みの中が読み込みの 1 行になり、関数が先の alias と組み合わさる。hook が囲みを書き換える動きは足さない |
-| 写しの置き直しは SessionStart hook で、写しが在るときだけ行う | 10.17.4 の写しの `run` は新しい版の処理を持たず、`run` に追従を置いても届かない。新しい版の処理を確実に走らせられるのは新しい版のプラグインが呼ぶ hook である。無い写しは作らない。キャッシュのパスを直に指す案は #895 の決定（古い版に固定される）のとおり採らない |
+| 10.17.4〜10.17.6 の自動の囲みは残し、1 度だけ知らせる | hook が消すのはまた黙った書き換えになり、中継を使い始めた利用者の `claude` が版の更新で変わる。リリースノートだけでは読まない利用者が知る手段が無い |
+| 知らせには、`/ndf:install-wrapper` で入れ直せば別のファイルの `alias claude` が戻ることも書く（#936） | 10.17.4〜10.17.6 の囲みの alias は、devbase の `alias claude='claude --dangerously-skip-permissions'` を上書きしている。入れ直すと囲みの中が読み込みの 1 行になり、関数が先の alias と組み合わさる。hook が囲みを書き換える動きは足さない |
+| 写しの置き直しは SessionStart hook で、写しが在るときだけ行う | 10.17.4〜10.17.6 の写しの `run` は新しい版の処理を持たず、`run` に追従を置いても届かない。新しい版の処理を確実に走らせられるのは新しい版のプラグインが呼ぶ hook である。無い写しは作らない。キャッシュのパスを直に指す案は #895 の決定（古い版に固定される）のとおり採らない |
 | 写しと中継の rc を Claude Code の設定の親（`${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/`）に置く | devbase で永続化されるのは各 AI CLI の設定の親だけである（`~/.claude` は `/persistent/group/.claude` への symlink。2026-09-23 に `readlink -f` と `findmnt` で実測）。`~/.local/share`・`~/.local/state`・`~/.bashrc` はコンテナの層にあり、作り直しで消える。`/persistent/...` を直に指すと devbase の配置に依る |
 | `claude` の定義は中継の rc に書き、シェルの設定には読む 1 行だけを置く | 定義の形が変わっても書き換えるのは ndf が持つ中継の rc だけで済む（利用者の判断。2026-09-23） |
 | 定義は alias でなく関数にし、呼んだ時点で写しが無ければ素の `claude` を起こす | alias は写しの有無をシェルの起動時にしか見ない。共有する別のコンテナの `uninstall` が写しを消すと、開いたままのシェルの `claude` が失敗する |
 | 関数は `function claude { ... }` の形で書く | 先に `alias claude=...` があると `claude() { ... }` の定義の行が alias で展開されて壊れる。`function` の後の名前は展開されず、先の alias は呼び出しの時に展開されて引数が関数へ渡る（bash 5 で確かめた） |
 | パスは `install` の時点で決め、`${CLAUDE_CONFIG_DIR:-...}` をファイルに残さない | 残すと、隔離した `CLAUDE_CONFIG_DIR` で `claude` を打ったときに写しを見失う |
-| 旧い写しと状態の親は動かさない | 旧い写しを動かすと 10.17.4 の囲みの alias が壊れる。状態の親の記録はこのコンテナの `~/.bashrc` のパスを持つので、シェルの設定と同じく作り直しで消える場所に置けば食い違わない |
+| 旧い写しと状態の親は動かさない | 旧い写しを動かすと 10.17.4〜10.17.6 の囲みの alias が壊れる。状態の親の記録はこのコンテナの `~/.bashrc` のパスを持つので、シェルの設定と同じく作り直しで消える場所に置けば食い違わない |
 | devbase では、devbase が読み込む汎用のディレクトリへ `ndf-relay.sh` を置く（devbasex/devbase#253 で依頼） | devbase の `~/.bashrc` はイメージの層にあり、ndf の側だけでは作り直しで消えない読み込みを置けない。devbase が ndf の内部のパスを知らずに済み、ほかのツールも同じ場所を使える。場所は環境変数 `DEVBASE_SHELLRC_DIR` で見つける（対話でないシェルからも見える） |
 | devbase 以外（変数が無い）では `install` がシェルの設定へ囲みを足す。作り直しのたびの再導入の案内は採らない | 明示の操作なので案内だけにしない。再導入の案内は作り直すたびに打ち直しを求め、`uninstall` した利用者にも「外した」印が消えて出る |
 | `uninstall` は写しと中継の rc も消す | 関数は呼んだ時点で写しを見るので、共有する別のコンテナの `claude` を壊さない。残すと `startup` が使われない写しを置き直し続ける |
-| `uninstall` は `$SHELL` に依らず bash と zsh の両方の設定を見る | 10.17.4 は起動した時点の `$SHELL` で足した。囲みの行は固有なので、両方を見ても関係の無い行を外さない |
+| `uninstall` は `$SHELL` に依らず bash と zsh の両方の設定を見る | 10.17.4〜10.17.6 は起動した時点の `$SHELL` で足した。囲みの行は固有なので、両方を見ても関係の無い行を外さない |
 | 写しの横に版を書き、新しい版の写しを古い版の `startup` は置き直さない | 写しの親はコンテナの間で共有される。中身の違いだけで置き直すと、古い版のコンテナが守り（G1〜G3）の無い写しへ戻す。版は `plugin.json` が既に持つので、`relay.py` に版の定数を持たせない |
 | 明示の `install` は版を比べずに置く | 過去の版へ戻した利用者は、`/ndf:install-wrapper` を打ち直せば写しも戻せる |
-| 明示の `install` は「消したら足し直さない」「案内は 1 度だけ」を持たない。触れたパスは `rc-added` に残して `rc-user` に足す | 明示の起動は利用者の意図そのものなので、打たれるたびに同じ判定をする。`rc-added` から除くと、10.17.4 へ戻した利用者が囲みを手で消したとき 10.17.4 の hook が足し直す。自動か明示かは `rc-user` で分ける |
+| 明示の `install` は「消したら足し直さない」「案内は 1 度だけ」を持たない。触れたパスは `rc-added` に残して `rc-user` に足す | 明示の起動は利用者の意図そのものなので、打たれるたびに同じ判定をする。`rc-added` から除くと、10.17.6 以前へ戻した利用者が囲みを手で消したとき 10.17.4〜10.17.6 の hook が足し直す。自動か明示かは `rc-user` で分ける |
 | `NDF_RELAY_AUTO` を読まない | hook の自動の導入を止める変数で、意味が無くなった。明示の `install` に効かせると、置いたままの利用者が打っても何も起きない |
 | 再起動は `ndf-next` のブロックと既存の中継の経路で行い、中継に「今すぐ再起動」の副命令を足さない | 同じ経路なら、答え待ち・背景の処理・目標の判定・静まり・上限・空回りと守りがそのまま効く。Skill の Bash から中継へ直接送ると、応答を終える前に `/exit` が入る |
 | `/ndf:restart` はモデルも起動できる | 中継の下で起きることは conductor が切れ目で出すブロックと同じで、新しい権限を足さない |
@@ -134,7 +134,7 @@
 | 中継の rc | `<親>/shellrc`（`0644`） | `install` | 残る |
 | 読み込み先のファイル | `$DEVBASE_SHELLRC_DIR/ndf-relay.sh`（`0644`） | `install`（変数が在るディレクトリを指すとき） | 残る（devbasex/devbase#253 の後） |
 | 読み込みの囲み | `~/.bashrc`・`${ZDOTDIR:-$HOME}/.zshrc` | `install`（変数が無いとき） | 消える |
-| 旧い写し | `${XDG_DATA_HOME:-$HOME/.local/share}/ndf/relay.py` | 10.17.4 の hook（新しい版は置かない） | 消える |
+| 旧い写し | `${XDG_DATA_HOME:-$HOME/.local/share}/ndf/relay.py` | 10.17.4〜10.17.6 の hook（新しい版は置かない） | 消える |
 | 状態の親 | `${XDG_STATE_HOME:-$HOME/.local/state}/ndf/relay/` | 変えない | 消える |
 | `copy.lock` | `<親>/` | `install`・`uninstall`・`startup` | 残る（共有） |
 
@@ -142,10 +142,10 @@
 
 | 記録 | 書く側 | 意味 |
 | --- | --- | --- |
-| `rc-added` | 10.17.4 の `install`、今の `install` / `uninstall` | 囲みを足した・触れたパス。今の版は除かない（10.17.4 の hook が足し直さないため） |
+| `rc-added` | 10.17.4〜10.17.6 の `install`、今の `install` / `uninstall` | 囲みを足した・触れたパス。今の版は除かない（10.17.4〜10.17.6 の hook が足し直さないため） |
 | `rc-user` | `install` / `uninstall` | 利用者が明示に導入か取り外しをしたパス。自動の囲みとして扱わない |
 | `rc-noticed` | `startup`（`uninstall` が外したパスを除く） | 自動の囲みを知らせたパス |
-| `rc-skipped` | 10.17.4 の `install`（`uninstall` が外したパスを除く） | 既存の定義で足さなかったパス |
+| `rc-skipped` | 10.17.4〜10.17.6 の `install`（`uninstall` が外したパスを除く） | 既存の定義で足さなかったパス |
 
 **devbase では `/persistent/group` が同じアカウントグループのコンテナで共有される**（devbasex/devbase#116）。
 `install` と `uninstall` の効果は同じグループの全コンテナに及ぶ。
@@ -165,7 +165,7 @@ function claude {
 [ -f "$HOME/.claude/ndf/shellrc" ] && . "$HOME/.claude/ndf/shellrc"
 ```
 
-10.17.4 の囲みは alias を直に持ち、旧い写しを指す。
+10.17.4〜10.17.6 の囲みは alias を直に持ち、旧い写しを指す。
 
 ```bash
 # >>> ndf relay >>>
@@ -234,7 +234,7 @@ sh -c 'R="${XDG_STATE_HOME:-$HOME/.local/state}/ndf/relay/rc-added"; C="${XDG_DA
 | 0b | 旧い写しが在り、中身が自分と違う | 版を見ずに置き直す（コンテナごとの場所で共有されない）。無ければ作らない |
 | 1 | 自動の囲みのうち `rc-noticed` に無いパスがある | そのパスを `rc-noticed` に足して知らせる。無ければ何も出さない |
 
-知らせの 1 行: `ndf-relay: <パス>（2 つなら・で並べる） の alias claude は 10.17.4 が自動で足したもの。
+知らせの 1 行: `ndf-relay: <パス>（2 つなら・で並べる） の alias claude は 10.17.4〜10.17.6 が自動で足したもの。
 使い続けるなら何もしなくてよい。外すなら /ndf:install-wrapper uninstall。` に、別のファイルの
 `alias claude`（devbase の `--dangerously-skip-permissions` など）を上書きしていることと
 `/ndf:install-wrapper` で入れ直せばその alias が戻ることを続ける。`DEVBASE_SHELLRC_DIR` があれば
@@ -374,12 +374,12 @@ G1〜G3 はこの課題で既存の `/exit` に入れた。G4〜G7 は送り込�
 
 ## 運用
 
-- **移行:** 10.17.4 の囲みは旧い写しを指したまま動き、hook は囲みの中を書き換えない（向け直すのは明示の
-  `install` だけ）。囲みの開きと閉じの行・状態の親のファイル名は 10.17.4 と同じなので、10.17.4 へ戻しても
+- **移行:** 10.17.4〜10.17.6 の囲みは旧い写しを指したまま動き、hook は囲みの中を書き換えない（向け直すのは明示の
+  `install` だけ）。囲みの開きと閉じの行・状態の親のファイル名は 10.17.4〜10.17.6 と同じなので、それらの版へ戻しても
   新しい版の囲みは「既にある」と読まれる
 - **過去の版へ戻したら `/ndf:install-wrapper` を打ち直す。** `startup` は新しい版の写しを古い版で置き直さない。
-  **`/ndf:install-wrapper` を持たない 10.17.4 以前へ戻すときは、戻す前に `uninstall` を打つ**（戻した後なら
-  囲みと `~/.claude/ndf/` を手で消す）。読み込み先のファイルだけで入れた利用者が 10.17.4 へ戻すと、10.17.4 の
+  **`/ndf:install-wrapper` を持たない 10.17.6 以前へ戻すときは、戻す前に `uninstall` を打つ**（戻した後なら
+  囲みと `~/.claude/ndf/` を手で消す）。読み込み先のファイルだけで入れた利用者が 10.17.6 以前へ戻すと、10.17.4〜10.17.6 の
   hook が `~/.bashrc` に自動の囲みを足しうる
 - **devbasex/devbase#253 の前の devbase** では `install` は囲みを使い、コンテナを作り直すと囲みが消えて写しと
   中継の rc だけが残る（知らせは出さない）。打ち直すか、#253 の後に打てば読み込み先のファイルへ移る
@@ -409,11 +409,11 @@ G1〜G3 はこの課題で既存の `/exit` に入れた。G4〜G7 は送り込�
 | SessionStart に `install` が無く、`startup\|resume` の 1 件であること。`AskUserQuestion` の 2 件の `timeout` が 10 であること。Codex / Kiro / agy の hook の定義に差分が無いこと | `test_hook_definition_no_install`、`git diff` |
 | 空の HOME で `startup` の hook が何も書かず何も出さないこと | `test_startup_hook_writes_nothing_on_clean_home` |
 | `install` が bash / zsh（`ZDOTDIR`）で写し・写しの版・中継の rc・囲み・バックアップを作り、2 回目は足さず、空の HOME・末尾の改行が無い設定・`rc-added` の記録がある状態からも足すこと | `test_install_bash_first_then_idempotent` ほか `test_install_*` |
-| 10.17.4 の囲みの中だけが置き換わり、囲みの外がバイトで同じこと | `test_install_rewrites_old_block_inner_only`・`test_install_devbase_rewrites_old_block` |
+| 10.17.4〜10.17.6 の囲みの中だけが置き換わり、囲みの外がバイトで同じこと | `test_install_rewrites_old_block_inner_only`・`test_install_devbase_rewrites_old_block` |
 | 既存の定義（`~/.bash_aliases` を含む）・fish・閉じの無い囲み・引用できないパスで何も書かず 1、ロックの保持・書けない親で何も変えず 3 | `test_install_existing_definition_skips` ほか |
 | 写しを消すと関数が素の `claude` を起こし、先の alias の引数が中継へ渡ること | `test_install_function_falls_back_when_copy_removed`・`test_install_function_receives_alias_args` |
 | `DEVBASE_SHELLRC_DIR` で `ndf-relay.sh` ができ、シェルの設定が変わらないこと | `test_install_devbase_loader`・`test_install_devbase_loader_with_non_bash_zsh_shell` |
-| `uninstall` が両方の囲みを外して囲みの外を変えず、ファイルと記録を表のとおりにし、閉じの無い囲みで何も変えず、10.17.4 の状態（`<親>` が無い）から `<親>` を作らずに外すこと | `test_uninstall_*` |
+| `uninstall` が両方の囲みを外して囲みの外を変えず、ファイルと記録を表のとおりにし、閉じの無い囲みで何も変えず、10.17.4〜10.17.6 の状態（`<親>` が無い）から `<親>` を作らずに外すこと | `test_uninstall_*` |
 | `status` が各状態を示し何も書かないこと | `test_status_reports_and_writes_nothing` |
 | 自動の囲みの知らせが 1 度だけ、同時の 2 起動でも 1 つで、devbase の案内が付き、囲みが無い・明示に触れたパスでは出ないこと | `test_startup_notices_auto_block_once`・`test_startup_notice_*`・`test_startup_no_notice` |
 | 在る写しと旧い写しだけを置き直し、版を後退させず、新旧の同時の `startup` で新しい版が残り、明示の `install` は戻せ、`uninstall` の後は写しを作らないこと | `test_startup_refreshes_existing_copies_only`・`test_startup_never_downgrades`・`test_startup_concurrent_new_wins`・`test_explicit_install_can_downgrade`・`test_startup_after_uninstall_creates_nothing` |
