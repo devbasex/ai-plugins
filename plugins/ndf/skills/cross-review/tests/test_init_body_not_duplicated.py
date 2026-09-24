@@ -27,14 +27,30 @@ SINGLE_CALL = (
     "_tmp_dir",
 )
 
+# `_init_new_state` から切り出した段。呼び出しの数は、本体とこの段を合わせて数える。
+INIT_STEPS = (
+    "_resolve_pr_and_ownership",
+    "_prepare_review_instructions",
+    "_prepare_worktree_and_comments",
+    "_prepare_initial_assignment",
+    "_build_initial_review_state",
+    "_finalize_initial_state",
+)
+
 
 @pytest.fixture(scope="module")
-def init_new_state() -> ast.FunctionDef:
+def top_level_functions() -> dict[str, ast.FunctionDef]:
     tree = ast.parse(STATE_PY.read_text(encoding="utf-8"))
-    for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef) and node.name == "_init_new_state":
-            return node
-    raise AssertionError("_init_new_state が見つからない")
+    return {
+        node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)
+    }
+
+
+@pytest.fixture(scope="module")
+def init_new_state(top_level_functions: dict[str, ast.FunctionDef]) -> ast.FunctionDef:
+    if "_init_new_state" not in top_level_functions:
+        raise AssertionError("_init_new_state が見つからない")
+    return top_level_functions["_init_new_state"]
 
 
 def test_no_statement_appears_twice(init_new_state: ast.FunctionDef) -> None:
@@ -51,9 +67,18 @@ def test_no_statement_appears_twice(init_new_state: ast.FunctionDef) -> None:
 
 
 @pytest.mark.parametrize("name", SINGLE_CALL)
-def test_the_call_appears_once(init_new_state: ast.FunctionDef, name: str) -> None:
+def test_the_call_appears_once(
+    top_level_functions: dict[str, ast.FunctionDef], name: str
+) -> None:
+    missing = [
+        step for step in ("_init_new_state", *INIT_STEPS)
+        if step not in top_level_functions
+    ]
+    assert not missing, f"{missing} が見つからない"
     calls = [
-        node for node in ast.walk(init_new_state)
+        node
+        for step in ("_init_new_state", *INIT_STEPS)
+        for node in ast.walk(top_level_functions[step])
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Name)
         and node.func.id == name
