@@ -28,7 +28,6 @@ MODE=${2:-prepare}
 SYNC_SHA=${3:-}
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-. "$SCRIPT_DIR/lib/runtime-skill-path.sh"
 # `<...>/skills/cross-refactoring/scripts` の 2 つ上が Skill の置き場所。
 # 共通編集元でも各ランタイムの配布物でも同じ形なので、環境変数に頼らずに解決できる。
 SKILLS_ROOT=$(cd -- "$SCRIPT_DIR/../.." && pwd)
@@ -64,6 +63,16 @@ REQUIRED_SKILLS=("${LINES[@]+"${LINES[@]}"}")
 # （agy は codex と同じ `.agents/skills` を読む）。どのランタイムでも
 # **スメルと手法の語彙を読ませないと提案が語彙外になり全件降格する**ので、
 # プロンプトの明示パスで読ませる。
+skill_dir_for() {
+  case "$1" in
+    claude) echo ".claude/skills" ;;
+    codex)  echo ".agents/skills" ;;
+    kiro)   echo ".kiro/skills" ;;
+    agy)    echo ".agents/skills" ;;
+    *)      echo ""; return 1 ;;
+  esac
+}
+
 # 現リポジトリに登録済みの作業ディレクトリか。存在しても別リポジトリの残骸なら
 # 流用すると git 操作が壊れるため、必ず確認してから使う。
 is_registered_worktree() {
