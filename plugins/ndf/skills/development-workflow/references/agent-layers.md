@@ -4,7 +4,7 @@
 （conductor）が持ち場ごとにサブエージェント（supervisor）を起動し、supervisor が 1 つの作業を
 サブエージェント（worker）へ出す。
 
-**`/ndf:development-workflow` を呼べば、`/goal` の有無によらず 3 層へ出す**（#996）。`/goal` は
+**`/ndf:development-workflow` を呼べば、`/goal` の有無によらず 3 層へ出す**。`/goal` は
 応答を終えたときに引き戻すだけで、3 層へ出すかの条件ではない。人がその場にいるときも同じで、
 指示を変えたいときは conductor へ伝えれば次の持ち場から反映する。
 
