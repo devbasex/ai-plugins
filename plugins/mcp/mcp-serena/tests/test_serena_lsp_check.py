@@ -37,9 +37,8 @@ def _home(tmp_path, plugins=None, raw=None):
 
 
 def _check(root, home, bindir, *extra, env=None):
-    e = {"HOME": str(home), "PATH": str(bindir)}
+    e = {"HOME": str(home), "PATH": str(bindir), "CLAUDE_CONFIG_DIR": ""}
     e.update(env or {})
-    e.pop("CLAUDE_CONFIG_DIR", None)
     return run_json("check", "--root", str(root), "--json", *extra, env=e)
 
 
@@ -70,6 +69,20 @@ def test_no_installed_plugins_json_counts_as_missing(tmp_path):
     assert _items(out) == [("python", "plugin")]
 
 
+def test_claude_config_dir_overrides_home(tmp_path):
+    root = _project(tmp_path / "r", ["python"])
+    home = _home(tmp_path, [])
+    config = tmp_path / "config"
+    (config / "plugins").mkdir(parents=True)
+    (config / "plugins/installed_plugins.json").write_text(json.dumps({
+        "version": 2,
+        "plugins": {"pyright-lsp@claude-plugins-official": [{"scope": "user"}]},
+    }))
+    code, out, _ = _check(root, home, _bin(tmp_path, "pyright-langserver"),
+                          env={"CLAUDE_CONFIG_DIR": str(config)})
+    assert (code, out["missing"]) == (0, [])
+
+
 def test_broken_installed_plugins_json_exits_2_but_not_for_codex(tmp_path):
     root = _project(tmp_path / "r", ["python"])
     home = _home(tmp_path, raw="{broken")
@@ -83,6 +96,20 @@ def test_missing_project_yml_exits_2(tmp_path):
     (tmp_path / "r").mkdir()
     code, _, _ = _check(tmp_path / "r", _home(tmp_path, []), _bin(tmp_path))
     assert code == 2
+
+
+def test_unreadable_language_servers_shape_exits_2_without_missing_items(tmp_path):
+    root = _project(tmp_path / "r", ["python"])
+    (root / ".serena/project.yml").write_text("language_servers: [python]\n")
+    code, out, _ = _check(root, _home(tmp_path, []), _bin(tmp_path))
+    assert (code, out["missing"]) == (2, [])
+
+
+def test_unknown_language_is_skipped(tmp_path):
+    root = _project(tmp_path / "r", ["nosuchlang", "python"])
+    code, out, _ = _check(root, _home(tmp_path, []), _bin(tmp_path))
+    assert code == 1
+    assert _items(out) == [("python", "binary"), ("python", "plugin")]
 
 
 def test_local_override_languages_are_checked(tmp_path):
