@@ -165,43 +165,41 @@ def _create_project(cmd: list, root: Path, candidates: list, timeout: float):
     return yml.read_text() if yml.exists() else None
 
 
-def configure(root: Path, dry_run=False, gitignore=False, serena_gitignore=False, only=None,
-              serena_cmd=SERENA_CMD):
-    """(結果の辞書, 終了コード) を返す。"""
-    root = Path(root)
-    data = table.load()
-    result = {"root": str(root), "detected": [], "skipped": [], "verified": [], "failed": [],
-              "written": {"created": False, "language_servers": [], "excluded": [],
-                          "ignored_paths_added": [], "gitignore": False, "serena_gitignore_added": []}}
-    try:
-        detected, skipped = detect.detect(root, data)
-    except detect.GitUnavailable as exc:
-        return {**result, "error": f"git を使えません: {exc}"}, 2
-    result["detected"], result["skipped"] = detected, skipped
+def _select(detected: list, only):
+    """(検証する言語, 検出したが選ばなかった言語) を返す。"""
     found = [d["language"] for d in detected]
     candidates = list(only) if only else found
-    not_selected = [lang for lang in found if lang not in candidates]
+    return candidates, [lang for lang in found if lang not in candidates]
 
+
+def _prepare(result: dict, root: Path, candidates: list, not_selected: list, dry_run, serena_cmd):
+    """検証の前の段階。(途中で終える (結果, 終了コード) か None, 元の本文, コマンド, 待ち時間) を返す。"""
     yml = root / ".serena/project.yml"
     local = root / ".serena/project.local.yml"
     # 終了コード 3 の検査は、書き換えの try / finally に入る前に済ませる
     original, error = _precheck_yml(yml, local)
     if error:
-        return {**result, "error": error}, 3
+        return ({**result, "error": error}, 3), None, None, None
 
     cmd = shlex.split(serena_cmd)
     if dry_run:
-        return _plan_dry_run(result, original, root, candidates, not_selected)
+        return _plan_dry_run(result, original, root, candidates, not_selected), None, None, None
     if not shutil.which(cmd[0]):
-        return {**result, "error": f"{cmd[0]} が見つかりません"}, 2
+        return ({**result, "error": f"{cmd[0]} が見つかりません"}, 2), None, None, None
 
     timeout = float(os.environ.get("SERENA_LSP_VERIFY_TIMEOUT", VERIFY_TIMEOUT))
     if original is None:
         original = _create_project(cmd, root, candidates, timeout)
         if original is None:
-            return {**result, "error": "serena project create が project.yml を作りませんでした"}, 2
+            return ({**result, "error": "serena project create が project.yml を作りませんでした"}, 2), \
+                None, None, None
         result["written"]["created"] = True
+    return None, original, cmd, timeout
 
+
+def _verify_each(root: Path, original: str, candidates: list, not_selected: list, cmd: list, timeout: float):
+    """1 言語ずつ検証し、中断されても finally で確定の値を書く。(verified, failed, excluded, final) を返す。"""
+    yml = root / ".serena/project.yml"
     verified, failed = [], []
     base = _with_ignores(original, root)
     previous = _signals_to_exception()
@@ -220,7 +218,29 @@ def configure(root: Path, dry_run=False, gitignore=False, serena_gitignore=False
         yml.write_text(final)
         for sig, handler in previous.items():
             signal.signal(sig, handler)
+    return verified, failed, excluded, final
 
+
+def configure(root: Path, dry_run=False, gitignore=False, serena_gitignore=False, only=None,
+              serena_cmd=SERENA_CMD):
+    """(結果の辞書, 終了コード) を返す。"""
+    root = Path(root)
+    data = table.load()
+    result = {"root": str(root), "detected": [], "skipped": [], "verified": [], "failed": [],
+              "written": {"created": False, "language_servers": [], "excluded": [],
+                          "ignored_paths_added": [], "gitignore": False, "serena_gitignore_added": []}}
+    try:
+        detected, skipped = detect.detect(root, data)
+    except detect.GitUnavailable as exc:
+        return {**result, "error": f"git を使えません: {exc}"}, 2
+    result["detected"], result["skipped"] = detected, skipped
+    candidates, not_selected = _select(detected, only)
+
+    stop, original, cmd, timeout = _prepare(result, root, candidates, not_selected, dry_run, serena_cmd)
+    if stop:
+        return stop
+
+    verified, failed, excluded, final = _verify_each(root, original, candidates, not_selected, cmd, timeout)
     result["verified"], result["failed"] = verified, failed
     result["written"].update(
         language_servers=verified, excluded=excluded,

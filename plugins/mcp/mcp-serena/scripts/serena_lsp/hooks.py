@@ -14,6 +14,7 @@ from . import check, detect, table
 from . import project_yml as py
 
 SKILL = "/mcp-serena:language-servers"
+CLIENT_CLAUDE_CODE = "claude-code"
 PREFIX = "[mcp-serena]"
 
 THRESHOLDS = {"grep": 3, "read": 3, "mixed": 4}
@@ -41,7 +42,7 @@ def _now() -> float:
 
 def _skip_for_client(client: str) -> bool:
     # Kiro は hooks.json を --client claude-code のまま写す。CLAUDE_PLUGIN_ROOT は Claude Code だけが置く
-    return client == "claude-code" and not os.environ.get("CLAUDE_PLUGIN_ROOT")
+    return client == CLIENT_CLAUDE_CODE and not os.environ.get("CLAUDE_PLUGIN_ROOT")
 
 
 def find_root(cwd) -> Path:
@@ -181,7 +182,7 @@ def _classify(tool: str, tool_input: dict, client: str, exts: set):
         if not any(s in lower for s in NON_SYMBOLIC):
             return "symbolic"
         return None
-    if client == "claude-code":
+    if client == CLIENT_CLAUDE_CODE:
         if tool == "Grep":
             return "grep"
         if tool == "Read":
@@ -204,7 +205,7 @@ def _reset(counts: dict) -> None:
 
 
 def _allow(tool: str, payload: dict, client: str):
-    if client == "claude-code" and "serena" in tool.lower() and payload.get("permission_mode") in AUTO_ALLOW_MODES:
+    if client == CLIENT_CLAUDE_CODE and "serena" in tool.lower() and payload.get("permission_mode") in AUTO_ALLOW_MODES:
         return _decision("allow", f"{PREFIX} Serena のツールを自動で許可しました")
     return None
 

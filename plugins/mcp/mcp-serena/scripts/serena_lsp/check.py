@@ -7,6 +7,8 @@ from pathlib import Path
 from . import project_yml as py
 from . import table
 
+CLAUDE_CODE = "claude-code"
+
 
 class Unreadable(Exception):
     """欠けを判定できない（project.yml が無い・対応表が壊れている・installed_plugins.json が壊れている）。"""
@@ -41,8 +43,8 @@ def _shellcheck(lang: dict):
 
 # 名前 → (検査の関数, 当てるランタイム)。既にある種類で足りない言語だけ、ここへ関数を 1 つ足す
 EXTRA_CHECKS = {
-    "typescript_major_5": (_typescript_major_5, {"claude-code"}),
-    "shellcheck": (_shellcheck, {"claude-code", "codex"}),
+    "typescript_major_5": (_typescript_major_5, {CLAUDE_CODE}),
+    "shellcheck": (_shellcheck, {CLAUDE_CODE, "codex"}),
 }
 
 
@@ -62,13 +64,12 @@ def _load_languages() -> dict:
     """対応表を言語名 → 定義で返す。読めない・知らない extra_checks があれば Unreadable。"""
     try:
         data = table.load()
-        langs = table.by_language(data)
-        unknown = {c for lang in data["languages"] for c in lang["extra_checks"]} - set(EXTRA_CHECKS)
-    except (OSError, ValueError, KeyError, TypeError) as exc:
+    except (OSError, ValueError) as exc:
         raise Unreadable(f"対応表を読めません: {exc}") from exc
+    unknown = {c for lang in data["languages"] for c in lang["extra_checks"]} - set(EXTRA_CHECKS)
     if unknown:
         raise Unreadable(f"対応表に知らない extra_checks があります: {', '.join(sorted(unknown))}")
-    return langs
+    return table.by_language(data)
 
 
 def _load_state(root) -> dict:
@@ -82,7 +83,7 @@ def _load_state(root) -> dict:
 
 
 def _missing_for_language(name: str, lang: dict, runtime: str, plugins: set) -> list:
-    claude = runtime == "claude-code"
+    claude = runtime == CLAUDE_CODE
     missing = []
     if claude and lang["claude_plugin"] and lang["claude_plugin"] not in plugins:
         missing.append({"language": name, "item": "plugin", "name": lang["claude_plugin"],
@@ -104,7 +105,7 @@ def _missing_for_language(name: str, lang: dict, runtime: str, plugins: set) -> 
 def missing_items(root, runtime: str) -> list:
     langs = _load_languages()
     state = _load_state(root)
-    plugins = installed_plugins() if runtime == "claude-code" else set()
+    plugins = installed_plugins() if runtime == CLAUDE_CODE else set()
     missing = []
     for name in state["languages"]:
         lang = langs.get(name)
@@ -113,7 +114,7 @@ def missing_items(root, runtime: str) -> list:
     return missing
 
 
-def run(root, runtime="claude-code"):
+def run(root, runtime=CLAUDE_CODE):
     try:
         missing = missing_items(root, runtime)
     except Unreadable as exc:
