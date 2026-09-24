@@ -8,7 +8,7 @@ PR 運用、レビュー、調査、実装計画、仕様書化、開発方法�
 
 | ランタイム | 公開 Skill | マニフェスト |
 | --- | --- | --- |
-| Claude Code | 45 個 | `.claude-plugin/plugin.json` |
+| Claude Code | 47 個 | `.claude-plugin/plugin.json` |
 | Codex | 43 個 | `.codex-plugin/plugin.json` |
 | Kiro CLI | 44 個 | `dev.kiro/install.sh`（プラグイン機構が無いため installer で導入） |
 | agy | 43 個 | `dev.agy/plugin.json`（取得元の登録が無いため clone から導入） |
@@ -19,7 +19,7 @@ PR 運用、レビュー、調査、実装計画、仕様書化、開発方法�
 plugins/ndf/
 ├── .claude-plugin/plugin.json   # Claude Code のマニフェスト
 ├── .codex-plugin/plugin.json    # Codex のマニフェスト
-├── skills/                      # 配布 Skill の唯一の実体（45 個）
+├── skills/                      # 配布 Skill の唯一の実体（47 個）
 ├── skills/AUTHORING.md          # Skill 執筆の規約
 ├── manifests/                   # ランタイム別の配布 Skill 一覧
 ├── agents/                      # Claude Code のサブエージェント定義（専門 8 個と worker 1 個）
@@ -258,12 +258,15 @@ Claude Code の SessionStart hook（`hooks/claude.json`）は上記に加えて�
 
 - `~/.claude/settings.json` の `cleanupPeriodDays` を 90 日以上に保つ
 - statusline 未設定時に NDF 標準 statusline を設定する
-- 区間の切れ目の中継（`scripts/relay.py`）を安定した場所へ置き直し、bash / zsh の設定へ
-  `alias claude=...` を印のついた囲みで 1 度だけ足す（`relay.py install`。`NDF_RELAY_AUTO=0` で止まる）
+- 区間の切れ目の中継（`scripts/relay.py`）の写しが在れば今の版で置き直す（`relay.py startup`。
+  版は後退させない）。10.17.4 が自動で足した alias の囲みが残っていれば 1 度だけ知らせる。
+  **シェルの設定は書かない。** 中継を入れる・外すのは `/ndf:install-wrapper`（Claude Code だけ）
 
 Claude Code の Stop hook は終了時に Slack 通知スクリプトを実行します。通知に必要な環境変数が
 未設定の場合は送信せず終了します。中継の下（`NDF_RELAY_DIR` がある）では、最後の応答の
-`ndf-next` のブロックを中継の印へ写します（`relay.py mark`）。中継の始め方・止め方・上限は
+`ndf-next` のブロックを中継の印へ写します（`relay.py mark`）。`AskUserQuestion` の PreToolUse /
+PostToolUse hook は、中継の下で質問の表示中の印を作る・消します（中継が質問の答えを代わりに
+送らないため）。好きな時点で切り替えるのは `/ndf:restart` です。中継の始め方・止め方・上限は
 `skills/development-workflow/references/relay.md` にあります。
 
 Codex の Stop hook（`hooks/codex.json`）は `NDF_CODEX_SLACK_NOTIFY=true` が設定されている

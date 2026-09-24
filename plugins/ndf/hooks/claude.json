@@ -26,6 +26,32 @@
             "suppressOutput": false
           }
         ]
+      },
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c '[ -n \"${NDF_RELAY_DIR:-}\" ] || exit 0; ROOT=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; [ -n \"$ROOT\" ] || exit 0; exec python3 \"$ROOT/scripts/relay.py\" question open'",
+            "description": "NDF: under the relay, mark that a question is shown so the relay never types into it",
+            "timeout": 10,
+            "continueOnError": true
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c '[ -n \"${NDF_RELAY_DIR:-}\" ] || exit 0; ROOT=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; [ -n \"$ROOT\" ] || exit 0; exec python3 \"$ROOT/scripts/relay.py\" question close'",
+            "description": "NDF: under the relay, clear the question mark after the answer",
+            "timeout": 10,
+            "continueOnError": true
+          }
+        ]
       }
     ],
     "SessionStart": [
@@ -52,11 +78,16 @@
             "description": "NDF: report stray changes in the main directory and follow the active worktree branch",
             "continueOnError": true,
             "suppressOutput": false
-          },
+          }
+        ]
+      },
+      {
+        "matcher": "startup|resume",
+        "hooks": [
           {
             "type": "command",
-            "command": "python3 ${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/relay.py install",
-            "description": "NDF: place the relay in a stable location and add the claude alias to the shell rc once",
+            "command": "sh -c 'R=\"${XDG_STATE_HOME:-$HOME/.local/state}/ndf/relay/rc-added\"; C=\"${XDG_DATA_HOME:-$HOME/.local/share}/ndf/relay.py\"; N=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/ndf/relay.py\"; [ -f \"$R\" ] || [ -f \"$C\" ] || [ -f \"$N\" ] || exit 0; ROOT=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; [ -n \"$ROOT\" ] || exit 0; python3 \"$ROOT/scripts/relay.py\" startup; exit 0'",
+            "description": "NDF: refresh an existing relay copy (never downgrade) and tell once about the alias 10.17.4 added automatically",
             "timeout": 5,
             "continueOnError": true,
             "suppressOutput": false
