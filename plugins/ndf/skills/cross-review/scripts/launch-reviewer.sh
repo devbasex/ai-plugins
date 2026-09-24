@@ -8,8 +8,9 @@
 # 引数 STATE_PR は state.json の key (= 最初に init した PR 番号)。
 # レビュー対象の PR は state.json の `current_pr` を読む。
 #
-# **ランタイムごとにファイルを分けない。** 母集合が 4 者になったとき、担当ごとに
-# 起動スクリプトを持つと同じ内容が 4 本に散る。CLI ごとの違い（プロンプトの渡し方・
+# **ランタイムごとにファイルを分けない。** 担当は 4 ランタイムのどれでもなりうる
+# （既定の母集合は claude / codex / kiro とホストで、agy は `--include agy` で足す）。
+# 担当ごとに起動スクリプトを持つと同じ内容が 4 本に散る。CLI ごとの違い（プロンプトの渡し方・
 # 作業領域の宣言・実行時間の上限）は共通層の `lib/launch-cli.sh` が 1 箇所で持つ。
 #
 # 注意:
@@ -58,18 +59,18 @@ SHA=$(jq -r '(.rounds[-1].head_sha // "")' "$STATE")
 }
 
 prepare_prompt_context() {
+STEM=$TMP_DIR/$SEAT-review-pr$STATE_PR
 # 前ラウンドの結果を残さない。担当が止まって今ラウンドの result.json が
 # 書かれなかったとき、state.py read-result が**前ラウンドの結果を読んで**
 # 同じ判定を繰り返す事故を防ぐ。
 # 一時の名前のファイルも消す。前の起動が書きかけで止まった残りを、改名の対象に
 # しないため。
-rm -f "$TMP_DIR/$SEAT-review-pr$STATE_PR-result.json" \
-      "$TMP_DIR/$SEAT-review-pr$STATE_PR-result.json.tmp" \
-      "$TMP_DIR/$SEAT-review-pr$STATE_PR-round$ROUND-payload.json" \
-      "$TMP_DIR/$SEAT-review-pr$STATE_PR-round$ROUND-payload.json.tmp" \
-      "$TMP_DIR/$SEAT-review-pr$STATE_PR-round$ROUND-api-payload.json"
+rm -f "$STEM-result.json" \
+      "$STEM-result.json.tmp" \
+      "$STEM-round$ROUND-payload.json" \
+      "$STEM-round$ROUND-payload.json.tmp" \
+      "$STEM-round$ROUND-api-payload.json"
 
-STEM=$TMP_DIR/$SEAT-review-pr$STATE_PR
 PROMPT=$STEM-prompt.md
 # 既存コメントは **プロンプトにインライン埋め込み** する。
 # tmp dir は `<worktree>/.cross_review/` を使うが、埋め込みなら読み取りの往復が
@@ -116,6 +117,10 @@ workspace 外を読まなくて済むよう、以下にインライン展開す�
 $EXISTING_INLINE
 \`\`\`
 $EXTRA_REVIEW_BLOCK
+
+## 出し切り
+- **見つけた指摘はこのラウンドですべて出す。次のラウンドへ回さない。** 重要度が minor のものも書く
+  （出すのは修正アクションのある指摘だけで、下の「含めてはいけないもの」は変わらない）
 
 ## 指摘に **含めてはいけないもの**（Resolve 負荷を増やすため）
 - ❌ **「良い点」/「Strengths」/「評価できる点」** — 総評にも書かない
@@ -189,6 +194,10 @@ $EXTRA_REVIEW_BLOCK
   - **担当は並列に起動する。** 他の担当の指摘を読むと、独立に見つけた指摘と区別できなく
     なる。同じ指摘が 2 者から出たことに意味があるのは、互いを見ていない場合だけである
 - **リポジトリ編集禁止。PR・GitHub・git への書き込みもしない**
+- **テストを実行しない。** 実行して確かめる手順は \`suggested_check\` に書く
+  （進行側の \`verify-findings\` が実行する）
+- **背景で処理を起動しない。** 起動した処理の終わりを待たずに結果のファイルを書かないまま
+  終わると、結果が無い担当として扱われる
 - worktree 外のパスは、上の 2 つのファイルと進捗マーカー以外に触らない
 EOF
 }

@@ -137,6 +137,11 @@ DOCS_ONLY_REVIEW_TEMPLATE = """## 自動追加レビュー観点: ドキュメ�
 - ドキュメント間で用語、前提、バージョン、責務分担が矛盾していないか。
 - 追加・更新された説明が必要十分で、曖昧な表現や未検証の断定がないか。"""
 
+DESIGN_REVIEW_TEMPLATE = """## 自動追加レビュー観点: 設計 PR
+- 要求・設計・決定の記録の 3 文書で、受け入れ条件ごとに設計の要素とテスト設計の行があるか。決定で退けた案が他の節に残っていないか。
+- 状態（ファイル・環境変数・状態ファイルの項目・引数）ごとに、書き手と読み手を並べる。同じ状態を 2 つの経路が書く・読む側が書く側より先に動く・失敗した書き手の後に読む、の矛盾が無いか。
+- 外部コマンド・外部ツールの挙動（優先順位・終了コード・一致の範囲）を断定する記述に、実測の根拠（コマンドと出力）があるか。"""
+
 CODE_REVIEW_TEMPLATE = """## 自動追加レビュー観点: コード変更 PR
 - 設計、正確性、可読性、保守性、単純さを確認する。不要に複雑な分岐、責務の混在、過剰な抽象化がないか。
 - 冗長・重複コード、既存ヘルパや標準 API で置き換えられる処理、言語・フレームワークらしくない実装がないか。
@@ -541,6 +546,18 @@ def _classify_ci(runs: list[dict[str, Any]]) -> CiClassification:
     return CiClassification(code_failed, meta_failed, pending)
 
 
+def _classify_failed_names(names: list[str]) -> CiClassification:
+    """申告された失敗名の一覧を振り分ける薄い入口。
+
+    修正の担当が申告するのは、完了した失敗の名前だけである。分類層の入力の形
+    （`name` / `status` / `conclusion`）と、完了・失敗を表す文字列（`completed` /
+    `failure`）を握るのはここ 1 か所にする。呼び出し側は失敗名の一覧を渡すだけでよい。
+    """
+    return _classify_ci(
+        [{"name": str(n), "status": "completed", "conclusion": "failure"} for n in names]
+    )
+
+
 def _fetch_check_runs(repo: str, sha: str) -> list[dict[str, Any]] | None:
     """head の commit に対する検査ジョブの一覧を返す。照会できなければ `None`。
 
@@ -764,6 +781,21 @@ def _clean_untracked_files(worktree: str, exclusions: list[str], code: int) -> N
         die(f"追跡対象外のファイルを消せない: {clean.stderr.strip()}", code=code)
 
 
+def _resolve_sync_target(
+    worktree: str, pr: int, head: str | HeadRef,
+) -> tuple[bool, str, str]:
+    """同期する基準を取り込み、手元の有無・対象・表示名を返す。"""
+    if isinstance(head, HeadRef):
+        return _fetch_head(worktree, pr, head), head.oid, head.branch
+
+    # 旧来の呼び出し（ブランチ名だけを渡す経路）。基準は `origin/<branch>` になる。
+    fetch = subprocess.run(
+        ["git", "fetch", "origin", head],
+        capture_output=True, text=True,
+    )
+    return fetch.returncode == 0, f"origin/{head}", head
+
+
 def _sync_worktree(
     worktree: str,
     pr: int,
@@ -797,19 +829,7 @@ def _sync_worktree(
     """
     code = 8 if strict else 1
     exclusions = _sync_exclusions(worktree)
-    if isinstance(head, HeadRef):
-        have_base = _fetch_head(worktree, pr, head)
-        target = head.oid
-        label = head.branch
-    else:
-        # 旧来の呼び出し（ブランチ名だけを渡す経路）。基準は `origin/<branch>` になる。
-        fetch = subprocess.run(
-            ["git", "fetch", "origin", head],
-            capture_output=True, text=True,
-        )
-        have_base = fetch.returncode == 0
-        target = f"origin/{head}"
-        label = head
+    have_base, target, label = _resolve_sync_target(worktree, pr, head)
 
     if have_base:
         if strict and isinstance(head, HeadRef) and _is_synced(
@@ -897,8 +917,51 @@ def _existing_comments_path(pr: int) -> pathlib.Path:
     return _resolve_tmp_dir(pr) / f"cross-review-pr{pr}-existing-comments.txt"
 
 
+# 既存コメントの 3 ソースを一括で取る fix skill の共有スクリプト。テストが偽物へ差し替える。
+FETCH_COMMENTS_SCRIPT = (pathlib.Path(__file__).resolve().parent.parent.parent
+                         / "fix" / "scripts" / "fetch-pr-comments.sh")
+
+
+def _fetch_existing_comments(repo: str, pr: int, path: pathlib.Path, *,
+                             strict: bool) -> str | None:
+    """既存コメントの控えを取り、成功なら `path` へ書いて None、失敗なら理由の文を返す。
+
+    `strict=True` は `--strict` を付け（3 ソースのどれか 1 つの失敗でも失敗にする）、一時の
+    名前へ書いてから成功したときだけ `path` へ改名する。一部だけの控えで前の控えを上書き
+    すると、前のラウンドの指摘が重複の検出から消えるためである（#542 の決定 6）。
+    """
+    cmd = [str(FETCH_COMMENTS_SCRIPT), *(["--strict"] if strict else []), repo, str(pr)]
+    # 起動できない（スクリプトが無い・実行権が無い）ときも失敗の理由として返す。例外で
+    # 抜けると、呼び出し側が「失敗したら前の控えのまま進める」を選べない。
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True)
+    except OSError as e:
+        return f"起動できません: {e}"[:200]
+    if r.returncode != 0:
+        return (r.stderr or "").strip()[:200] or f"終了コード {r.returncode}"
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(r.stdout, encoding="utf-8")
+    tmp.replace(path)
+    return None
+
+
 def _now() -> str:
     return _dt.datetime.now(_dt.timezone.utc).astimezone().isoformat(timespec="seconds")
+
+
+def _normalize_pr_file_status(value: object) -> str:
+    """GitHub の変更種別を分類用の一文字へ正規化する。"""
+    status = str(value or "modified").lower()
+    status_map = {
+        "added": "A",
+        "modified": "M",
+        "deleted": "D",
+        "removed": "D",
+        "renamed": "R",
+        "copied": "C",
+        "changed": "M",
+    }
+    return status_map.get(status, status[:1].upper() or "M")
 
 
 def _parse_pr_files_payload(output: str) -> list[dict[str, Any]]:
@@ -911,14 +974,6 @@ def _parse_pr_files_payload(output: str) -> list[dict[str, Any]]:
     if not isinstance(files, list):
         return []
 
-    status_map = {
-        "ADDED": "A",
-        "MODIFIED": "M",
-        "DELETED": "D",
-        "RENAMED": "R",
-        "COPIED": "C",
-        "CHANGED": "M",
-    }
     entries: list[dict[str, Any]] = []
     for f in files:
         if not isinstance(f, dict):
@@ -926,8 +981,7 @@ def _parse_pr_files_payload(output: str) -> list[dict[str, Any]]:
         path = f.get("path")
         if not isinstance(path, str) or not path:
             continue
-        change_type = str(f.get("changeType") or "MODIFIED").upper()
-        status = status_map.get(change_type, change_type[:1] or "M")
+        status = _normalize_pr_file_status(f.get("changeType"))
         paths = []
         previous = f.get("previousPath") or f.get("previous_filename")
         if isinstance(previous, str) and previous and previous != path:
@@ -939,20 +993,12 @@ def _parse_pr_files_payload(output: str) -> list[dict[str, Any]]:
 
 def _parse_pr_files_api_lines(output: str) -> list[dict[str, Any]]:
     """GitHub API の PR files を TSV(JSON jq) 出力から分類用構造に変換する。"""
-    status_map = {
-        "added": "A",
-        "modified": "M",
-        "removed": "D",
-        "renamed": "R",
-        "copied": "C",
-        "changed": "M",
-    }
     entries: list[dict[str, Any]] = []
     for raw in output.splitlines():
         if not raw.strip():
             continue
         cols = raw.split("\t")
-        status_raw = cols[0].strip().lower() if cols else "modified"
+        status_raw = cols[0].strip() if cols else "modified"
         path = cols[1].strip() if len(cols) > 1 else ""
         previous = cols[2].strip() if len(cols) > 2 else ""
         if not path:
@@ -961,7 +1007,7 @@ def _parse_pr_files_api_lines(output: str) -> list[dict[str, Any]]:
         if previous and previous != path:
             paths.append(previous)
         paths.append(path)
-        entries.append({"status": status_map.get(status_raw, status_raw[:1].upper() or "M"), "paths": paths})
+        entries.append({"status": _normalize_pr_file_status(status_raw), "paths": paths})
     return entries
 
 
@@ -1110,7 +1156,16 @@ def _is_infra_path(path: str) -> bool:
     )
 
 
+# 設計 PR の文書の名前（#542 の決定 5）。`design` の成果物が `issues/` に置く 3 文書。
+DESIGN_DOC_SUFFIXES = ("-requirements.md", "-design.md", "-design-decisions.md")
+
+
+def _is_design_doc_path(path: str) -> bool:
+    return path.startswith("issues/") and path.endswith(DESIGN_DOC_SUFFIXES)
+
+
 PATH_CATEGORY_RULES = (
+    ("design", _is_design_doc_path),
     ("code", _is_code_path),
     ("db_migration", _is_migration_path),
     ("test", _is_test_path),
@@ -1131,6 +1186,7 @@ PATH_CATEGORY_RULES = (
 CATEGORY_TEMPLATES = {
     "common": COMMON_REVIEW_TEMPLATE,
     "docs_only": DOCS_ONLY_REVIEW_TEMPLATE,
+    "design": DESIGN_REVIEW_TEMPLATE,
     "code": CODE_REVIEW_TEMPLATE,
     "db_migration": DB_MIGRATION_REVIEW_TEMPLATE,
     "test": TEST_REVIEW_TEMPLATE,
@@ -1624,10 +1680,12 @@ def _apply_resume_args_block(st: dict[str, Any], args: argparse.Namespace) -> bo
         except assignment.AssignmentError as e:
             die(str(e), code=1)
             raise
+        include_eff = include if include is not None else list(recorded.get("included") or [])
         rebuild = argparse.Namespace(
             only=st.get("only"),
-            include=include if include is not None else list(recorded.get("included") or []),
-            exclude=exclude if exclude is not None else list(recorded.get("excluded") or []),
+            include=include_eff,
+            exclude=(exclude if exclude is not None
+                     else assignment.recorded_exclusions(recorded, include_eff, st.get("only"))),
             require_all=(args.require_all if getattr(args, "require_all", None) is not None
                          else bool(recorded.get("require_all"))),
         )
@@ -1909,16 +1967,10 @@ def _init_new_state(
         # 既存コメントスナップショット（重複指摘防止）。
         # 3 ソース (インラインコメント / レビュー body / PR レベルコメント) を
         # fix skill の共有スクリプトで一括取得する。
-        fetch_script = pathlib.Path(__file__).resolve().parent.parent.parent / "fix" / "scripts" / "fetch-pr-comments.sh"
-        r = subprocess.run(
-            [str(fetch_script), repo, str(pr)],
-            capture_output=True, text=True,
-        )
         existing_path = tmp_dir / f"cross-review-pr{pr}-existing-comments.txt"
-        if r.returncode == 0:
-            existing_path.write_text(r.stdout, encoding="utf-8")
-        else:
-            die(f"既存コメント取得失敗 (重複検出無効のため中断): {r.stderr.strip()[:200]}")
+        error = _fetch_existing_comments(repo, int(pr), existing_path, strict=False)
+        if error is not None:
+            die(f"既存コメント取得失敗 (重複検出無効のため中断): {error}")
 
         return _InitWorkspaceContext(
             tmp_dir=tmp_dir,
@@ -2149,9 +2201,10 @@ def _normalize_participant_args(
 
 
 def _resolve_reviewers(host: str, args: argparse.Namespace) -> dict[str, Any]:
-    """使える者を決め、状態ファイルの `participants`（`fallback` を含む 8 項目）を返す。
+    """使える者を決め、状態ファイルの `participants`（`fallback` を含む 9 項目）を返す。
 
-    母集合は `review_pool(host)`（ホストを含む全ランタイム、#892）。確認は止めない確認
+    母集合は `review_pool(host)`（claude / codex / kiro とホスト、#786）。母集合に無い者の
+    除外は止めずに無視し、`ℹ` の 1 行を出す（決定 2）。確認は止めない確認
     （`auth.probe_auth`）で、通らない者は外して続ける。**ホストを別に確かめて埋め合わせに
     使うことはしない**（ホストは既に母集合で確かめている）。`fallback` は常に空で、使える者が
     1 者なら `review_seats` が `<その者>-2` で席を埋める。名前の矛盾・`--require-all` で
@@ -2172,6 +2225,9 @@ def _resolve_reviewers(host: str, args: argparse.Namespace) -> dict[str, Any]:
     available = resolved.available
     info(f"ホスト: {host} / 母集合: {' / '.join(pool)}"
          f" / 使える者: {' / '.join(available) or 'なし'}")
+    if resolved.ignored_exclude:
+        info(f"ℹ --exclude {','.join(resolved.ignored_exclude)} は既定の母集合に無いため"
+             f"無視しました（母集合: {', '.join(pool)}）")
     for name, reason in resolved.unavailable.items():
         info(f"⚠ {name} を担当から外しました（{reason}）")
 
@@ -2380,6 +2436,16 @@ def cmd_start_round(args: argparse.Namespace) -> None:
 
     round_no = total + 1
     round_in_pr = sum(1 for r in st["rounds"] if r["pr"] == pr) + 1
+
+    # 既存コメントの控えを取り直す（#542 の決定 6）。通しの 1 ラウンド目は `init` が取った
+    # 直後のため取り直さない。失敗しても前の控えのまま進める（前の控えでも今と同じ条件で
+    # レビューできる）。**round エントリを保存する前に取る。** 保存の後で取ると、取得の
+    # 途中の割り込みで結果の無い round だけが残り、再実行が前のラウンドの検査で止まる。
+    if round_no >= 2:
+        error = _fetch_existing_comments(
+            str(st.get("repo") or ""), int(pr), _existing_comments_path(args.pr), strict=True)
+        if error is not None:
+            info(f"⚠ 既存コメントの控えを取り直せませんでした（{error}）。前の控えのまま進めます")
 
     # round エントリを開く。head の commit を記録するのは、起動スクリプト 2 本と
     # 収束の判定が同じ値を読むためである。**2 本が同じ値を別々に取っていた分が 0 になる。**
@@ -2844,18 +2910,7 @@ def cmd_read_result(args: argparse.Namespace) -> None:
     agent = args.agent
     pr = args.pr
     rfile = pathlib.Path(args.file or _resolve_tmp_dir(pr) / f"{agent}-review-pr{pr}-result.json")
-    r = _read_review_result_file(pr, agent, rfile)
-
-    intent = r.get("event") or r.get("intent")
-
-    if intent is None:
-        _die_no_result(
-            pr,
-            agent,
-            "no_verdict",
-            f"{agent}: result.json に event / intent フィールドが無い ({rfile})。"
-            " launcher prompt のスキーマ違反の可能性。",
-        )
+    r = _validate_review_result(pr, agent, rfile)
 
     st = _load(pr)
     if not st.get("rounds"):
@@ -2884,6 +2939,52 @@ def cmd_read_result(args: argparse.Namespace) -> None:
     if posted.failed:
         die(f"{agent}: レビューを投稿できませんでした ({posted.detail})")
 
+    collected = _record_review_post(st, agent, pr, r, posted)
+    _save(pr, st)
+    if posted.review_url:
+        print(f"POSTED review_url={posted.review_url}")
+    print(f"INLINE={posted.posted_inline} BODY={posted.posted_body}"
+          f" QUEUED={posted.queued}")
+    print(f"FINDINGS={collected}")
+    info(f"✅ {agent}: intent={posted.intent} posted_as={posted.posted_as}"
+         f" comments={posted.posted_inline}")
+
+
+def _validate_review_result(
+    pr: int, agent: str, rfile: pathlib.Path
+) -> dict[str, Any]:
+    """結果ファイルを読み、`event` / `intent` を検証して中身を返す。
+
+    判定の値を持たないときは `NO_RESULT` をラウンドへ残してから止める（終了コードは
+    現行のまま。無い・判定の値を持たないときは 1、JSON として読めないときは 3）。
+    """
+    r = _read_review_result_file(pr, agent, rfile)
+    intent = r.get("event") or r.get("intent")
+    if intent is None:
+        _die_no_result(
+            pr,
+            agent,
+            "no_verdict",
+            f"{agent}: result.json に event / intent フィールドが無い ({rfile})。"
+            " launcher prompt のスキーマ違反の可能性。",
+        )
+    return r
+
+
+def _record_review_post(
+    st: dict[str, Any],
+    agent: str,
+    pr: int,
+    r: dict[str, Any],
+    posted: Any,
+) -> int:
+    """投稿の結果をラウンドへ書き戻し、指摘を取り込んで件数を返す。
+
+    **指摘そのものは別に積む**（#156）。`comments` は送れたインラインの数で、
+    総評へ移した指摘はそこに現れない。
+    """
+    last = st["rounds"][-1]
+    round_no = last.get("round")
     last[agent] = {
         "intent": posted.intent,
         "posted_as": posted.posted_as,
@@ -2894,17 +2995,7 @@ def cmd_read_result(args: argparse.Namespace) -> None:
         "posted_inline": posted.posted_inline,
         "posted_body": posted.posted_body,
     }
-    # **指摘そのものは別に積む**（#156）。`comments` は送れたインラインの数で、
-    # 総評へ移した指摘はそこに現れない。
-    collected = _collect_review_findings(st, agent, pr, round_no)
-    _save(pr, st)
-    if posted.review_url:
-        print(f"POSTED review_url={posted.review_url}")
-    print(f"INLINE={posted.posted_inline} BODY={posted.posted_body}"
-          f" QUEUED={posted.queued}")
-    print(f"FINDINGS={collected}")
-    info(f"✅ {agent}: intent={posted.intent} posted_as={posted.posted_as}"
-         f" comments={posted.posted_inline}")
+    return _collect_review_findings(st, agent, pr, round_no)
 
 
 def _round_ci(st: dict[str, Any], last: dict[str, Any], pr: int) -> dict[str, Any]:
@@ -4081,6 +4172,50 @@ def _new_finding_count(st: dict[str, Any], pr: int) -> tuple[int, bool]:
     return new, True
 
 
+class _OscillationOverlap(NamedTuple):
+    """現ラウンドの指摘が前ラウンドとどれだけ重なるかの集計。
+
+    件数の合計（`overlap_count`）と、現ラウンドの件数で割った比（`ratio`）を持つ。
+    副作用を持たず、状態ファイルにも表示にも触れない。
+    """
+
+    exact: int
+    near: int
+    same_body: int
+    overlap_count: int
+    total: int
+    ratio: float
+
+
+def _oscillation_overlap(
+    curr: list[tuple[str, int, str]],
+    prev: list[tuple[str, int, str]],
+) -> _OscillationOverlap:
+    """現ラウンドの指摘キーを前ラウンドと突き合わせ、一致の内訳と重複率を返す。
+
+    一致の判定は `_finding_match_kind`（位置・近傍・本文の優先順）に任せる。この関数は
+    種別ごとの件数を数えるだけで、`curr` が空でないことは呼び出し側が保証する。
+    """
+    exact = near = same_body = 0
+    for key in curr:
+        kind = _finding_match_kind(key, prev)
+        if kind == "exact":
+            exact += 1
+        elif kind == "near":
+            near += 1
+        elif kind == "body":
+            same_body += 1
+    overlap_count = exact + near + same_body
+    return _OscillationOverlap(
+        exact=exact,
+        near=near,
+        same_body=same_body,
+        overlap_count=overlap_count,
+        total=len(curr),
+        ratio=overlap_count / len(curr),
+    )
+
+
 def cmd_check_oscillation(args: argparse.Namespace) -> None:
     """Step 4 — 同じ箇所の指摘の重なりを計算。
 
@@ -4107,40 +4242,24 @@ def cmd_check_oscillation(args: argparse.Namespace) -> None:
         info("⏭ round_in_pr<2: 振動検知スキップ")
         sys.exit(2)  # continue
 
-    prev_round_no = same_pr[-2]["round"]
-    curr_round_no = same_pr[-1]["round"]
-
-    def collect_keys(round_no: int) -> list[tuple[str, int, str]]:
-        """そのラウンドの指摘を (ファイル, 行, 正規化した本文) の並びで返す。"""
-        return _finding_keys(st, pr, round_no)
-
-    prev = collect_keys(prev_round_no)
-    curr = collect_keys(curr_round_no)
+    prev = _finding_keys(st, pr, same_pr[-2]["round"])
+    curr = _finding_keys(st, pr, same_pr[-1]["round"])
     if not curr:
         info("⏭ 現ラウンドの payload なし: 振動検知スキップ")
         sys.exit(2)
 
-    exact = near = same_body = 0
-    for key in curr:
-        kind = _finding_match_kind(key, prev)
-        if kind == "exact":
-            exact += 1
-        elif kind == "near":
-            near += 1
-        elif kind == "body":
-            same_body += 1
-    overlap_count = exact + near + same_body
-    ratio = overlap_count / len(curr)
+    overlap = _oscillation_overlap(curr, prev)
     info(
-        f"振動検知: overlap={overlap_count}/{len(curr)} ({ratio:.0%})"
-        f" 位置={exact} 近傍={near} 本文={same_body}"
+        f"振動検知: overlap={overlap.overlap_count}/{overlap.total}"
+        f" ({overlap.ratio:.0%})"
+        f" 位置={overlap.exact} 近傍={overlap.near} 本文={overlap.same_body}"
     )
 
-    if ratio >= 0.5:
+    if overlap.ratio >= 0.5:
         st["final"] = "oscillation"
         st["ended_at"] = _now()
         _save(pr, st)
-        die(f"振動検知 — 同一箇所が {ratio:.0%} 重複。中断。", code=4)
+        die(f"振動検知 — 同一箇所が {overlap.ratio:.0%} 重複。中断。", code=4)
     sys.exit(2)
 
 
@@ -4432,9 +4551,7 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     # 振り分けは `_classify_ci` が 1 か所で持つ。ここが読むのは修正の担当が申告した
     # 失敗の名前で、進行側が照会し直す段ではない。申告は完了した失敗として渡す。
     failed = fix.get("ci_failed_checks") or []
-    classified = _classify_ci(
-        [{"name": str(n), "status": "completed", "conclusion": "failure"} for n in failed]
-    )
+    classified = _classify_failed_names(failed)
 
     if classified.code_failed:
         st["final"] = "error"
@@ -4545,6 +4662,41 @@ def _read_sweep_result(pr: int, file: str | None) -> dict[str, Any]:
     return sweep
 
 
+def _reconcile_sweep_result(
+    sweep: dict[str, Any], declared: int, threads: list | None
+) -> tuple[int, bool, Any]:
+    """申告された残件数と GitHub 上の未解決スレッドから (残件数, 照会できたか, 理由) を決める。"""
+    if threads is None:
+        info(
+            "⚠ 未解決の指摘を確認できません — 申告された残件数"
+            f"（{declared} 件）をそのまま採用します"
+        )
+        remaining, verified = declared, False
+    else:
+        remaining, verified = len(threads), True
+
+    reason = sweep.get("remaining_reason") or sweep.get("reason")
+    if remaining > 0 and not reason:
+        reason = "理由の記載なし"
+    return remaining, verified, reason
+
+
+def _sweep_record(
+    sweep: dict[str, Any], declared: int, remaining: int, verified: bool, reason: Any
+) -> dict[str, Any]:
+    """状態ファイルへ保存する最終スイープの記録を作る。"""
+    return {
+        "declared_remaining_open": declared,
+        "remaining_open": remaining,
+        "remaining_reason": reason if remaining > 0 else None,
+        "verified": verified,
+        "resolved": sweep.get("resolved"),
+        "fixed_in_sweep": sweep.get("fixed_in_sweep"),
+        "commit": sweep.get("commit"),
+        "checked_at": _now(),
+    }
+
+
 def cmd_verify_sweep(args: argparse.Namespace) -> None:
     """Step 7.5 後段 — 最終スイープの後に未解決の指摘が残っていないかを確かめる。
 
@@ -4560,28 +4712,8 @@ def cmd_verify_sweep(args: argparse.Namespace) -> None:
     declared = _as_count(sweep.get("remaining_open"))
     current_pr = int(st.get("current_pr") or pr)
     threads = _fetch_unresolved_threads(str(st.get("repo") or ""), current_pr)
-    if threads is None:
-        info(
-            "⚠ 未解決の指摘を確認できません — 申告された残件数"
-            f"（{declared} 件）をそのまま採用します"
-        )
-        remaining, verified = declared, False
-    else:
-        remaining, verified = len(threads), True
-
-    reason = sweep.get("remaining_reason") or sweep.get("reason")
-    if remaining > 0 and not reason:
-        reason = "理由の記載なし"
-    st["sweep"] = {
-        "declared_remaining_open": declared,
-        "remaining_open": remaining,
-        "remaining_reason": reason if remaining > 0 else None,
-        "verified": verified,
-        "resolved": sweep.get("resolved"),
-        "fixed_in_sweep": sweep.get("fixed_in_sweep"),
-        "commit": sweep.get("commit"),
-        "checked_at": _now(),
-    }
+    remaining, verified, reason = _reconcile_sweep_result(sweep, declared, threads)
+    st["sweep"] = _sweep_record(sweep, declared, remaining, verified, reason)
     _save(pr, st)
 
     print(f"REMAINING_OPEN={remaining}")
@@ -4649,6 +4781,7 @@ def _print_participants(st: dict) -> None:
     print(f"- 母集合: {_names(p.get('pool'))}")
     print(f"- 使える者: {_names(p.get('available'))}")
     print(f"- --exclude で外した者: {_names(p.get('excluded'))}")
+    print(f"- --exclude で指定したが既定の母集合に無かった者: {_names(p.get('ignored_exclude'))}")
     print(f"- --include で足した者: {_names(p.get('included'))}")
     print(f"- 確認を通らなかった者: {failed}")
     print(f"- 席の埋め合わせ: {_names(p.get('fallback'))}")

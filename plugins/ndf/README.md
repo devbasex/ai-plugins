@@ -89,7 +89,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.17.5）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.17.6）
 ```
 
 ### agy
@@ -119,25 +119,27 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.17.5 へ更新するとき
+## v10.17.6 へ更新するとき
 
-**cross-refactoring を是正しました**（マイルストーン 26「17 トークン消費の削減」、#880 #883 #494 #723）。
-群ごとの検証を範囲のテストで走らせて全体のテストの回数を減らし、構造改善を飛ばしてよいかを
-差分から判定できるようにしました。Skill の数は変わりません。引数・Skill・スクリプトの削除や改名は無く、
-状態ファイルの移行も要りません（`round_test` を持たない前の実行は、再開しても前と同じ検証をします）。
+**cross-review のラウンドを減らす変更を入れました**（マイルストーン 26「17 トークン消費の削減」、#542 #786）。
+既定の担当から agy を外し、1 ラウンド目で指摘を出し切らせ、2 ラウンド目以降の担当へ前のラウンドの
+指摘と返信を渡します。Skill の数は変わりません。引数・Skill・スクリプトの削除や改名は無く、
+状態ファイルの移行も要りません（`ignored_exclude` を持たない状態ファイルは空として読みます）。
 変更点の一覧は [CHANGELOG.md](../../CHANGELOG.md) にあります。
 
-**正式版です。** `main` に載ります。中身は開発版 `10.17.5-dev.1` と同じで、版数の接尾辞だけを
+**正式版です。** `main` に載ります。中身は開発版 `10.17.6-dev.1` と同じで、版数の接尾辞だけを
 外しました。
 
 | 変わったこと | 中身 |
 | --- | --- |
-| **群の検証を範囲のテストで走らせます**（#880） | `init` に `--round-test CMD` を足しました。群の検証と修正ラウンドの修正のコミットは範囲のテストで検証し、全体のテスト（`--baseline-test`）は `init` と最終ゲートの 2 回だけ走らせます。範囲のテストが `--scope` のテストの置き場所を走らせなければ `init` が終了コード 4 で止まります。`--round-test` を省くと前と同じく全体のテストが群ごとに走り、全体のテストが範囲より広ければ 1 行の案内が出ます。単独の起動でも、2 つのテストが違えば最終ゲートで全体のテストを 1 回走らせます。検証と最終ゲートの記録に `seconds` が入ります |
-| **テストの打ち切りが子の終了で戻ります**（#883） | 打ち切りの点検で親シェルを先に回収するため、子が終わった時点で戻ります（上限 1 秒の `exec sleep 30` で約 6 秒 → 約 1.2 秒）。SIGTERM を無視する子が残れば、猶予の後にグループへ SIGKILL を送ります |
-| **構造改善を飛ばしてよいかを差分から判定します**（#494） | `refactor.py assess --base <ref>` を足しました。`<ref>...HEAD` の本番コードの変更が無いか 10 行以下（`--max-lines`）なら終了コード 3（飛ばしてよい）、それ以外は 0（通す）、ref を解けないなどは 2（判定できない。飛ばさない）です。`development-workflow` の構造改善の手順は assess → `--round-test` → `--baseline-test` の順になりました |
-| **`.md` の文言を固定するテストを採りません**（#723） | テスト整備の提案のうち `target` が `.md` を指すものは見送りへ入ります。適用ラウンドで、追跡している `.md` を指すテストを足したコミットは群ごと取り消します |
+| **cross-review の既定の担当から agy を外しました**（#786） | 既定の母集合は claude / codex / kiro とホストです（ホストが agy なら 4 者）。agy を戻すときは `--include agy` を渡します。`--only` で名指しした者は母集合に無くても参加者になります |
+| **母集合に無い者の `--exclude` を止めずに無視します**（#786） | 前は中断していました。無視した名前は `participants.ignored_exclude` に残り、`ℹ` の 1 行と完了報告の 1 行で知らせます。`--exclude agy` を書いた既存の手順はそのまま通ります。判定は共通層にあるため cross-refactoring も同じく無視になります |
+| **2 ラウンド目以降は既存コメントの控えを取り直します**（#542） | `start-round` が控えを `fetch-pr-comments.sh --strict` で取り直し、同じ実行の前のラウンドの指摘と「対応しました」の返信を担当へ渡します。取得元の 1 つでも失敗すれば前の控えのまま `⚠` の 1 行を出して続けます。`fetch-pr-comments.sh` に `--strict` を足しました（付けなければ終了コードは前と同じです） |
+| **担当へ出し切りと、テスト・背景の処理を起動しない指示を渡します**（#542 #786） | レビューのプロンプトに `## 出し切り` の節（見つけた指摘はこのラウンドですべて出す）と、テストを実行しない・背景で処理を起動しないの 2 行が入ります。cross-refactoring の適用担当には、テストを前景で実行して終わるまで待つ指示が入ります |
+| **設計 Pull Request に設計の観点を渡します**（#542） | `issues/` の `-requirements.md` / `-design.md` / `-design-decisions.md` を含む Pull Request を `design` に分類し、3 文書の食い違い・状態の書き手の衝突・外部ツールの挙動の実測の根拠を見る観点テンプレートを渡します |
 
-手順と引数は `skills/cross-refactoring/SKILL.md` と `skills/development-workflow/references/stage-notes.md` にあります。
+収束の判定・振動の検知・`max_rounds`・起動し直しの規則は変わりません。手順と引数は
+`skills/cross-review/SKILL.md` と `skills/cross-review/docs/04-contracts.md` にあります。
 
 正式版のチャネル（ref を指定せずに登録した取得元）なら、次で入れ替わります。**動いているセッションには
 反映されない**ため、更新したあとは起動し直してください。開発版を試すために `develop` を登録した場合は、
@@ -154,17 +156,17 @@ codex plugin add ndf@ai-plugins
 
 ### 手元で確かめる
 
-どれもファイルを読むか使い方を表示するだけで、課題もファイルも書き換えません。`$SCRIPTS` はプラグインの
+どれもファイルを読むか関数を呼ぶだけで、課題もファイルも書き換えません。`$SCRIPTS` はプラグインの
 `scripts/` の絶対パスで、決め方は
 [development-workflow/references/scripts-lookup.md](skills/development-workflow/references/scripts-lookup.md)
 にあります。
 
 ```bash
-RF="$SCRIPTS/../skills/cross-refactoring/scripts"
-grep -q '"version": "10.17.5"' "$SCRIPTS/../.claude-plugin/plugin.json"; echo "exit=$?"   # 0 なら この版が入っている
-python3 "$RF/refactor.py" init --help | grep -qF -- '--round-test'; echo "exit=$?"   # 0 なら 範囲のテストを渡せる
-python3 "$RF/refactor.py" assess --help >/dev/null 2>&1; echo "exit=$?"   # 0 なら 構造改善を飛ばせるかの判定が入っている
-grep -qF 'def doc_wording_tests' "$RF/refactor_lib/verify.py"; echo "exit=$?"   # 0 なら 文言固定テストを適用で弾く
+grep -q '"version": "10.17.6"' "$SCRIPTS/../.claude-plugin/plugin.json"; echo "exit=$?"   # 0 なら この版が入っている
+python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); from lib.assignment import review_pool; sys.exit(review_pool("claude") != ["claude", "codex", "kiro"])' "$SCRIPTS"; echo "exit=$?"   # 0 なら cross-review の既定の母集合から agy が外れている
+grep -qF -- '--strict' "$SCRIPTS/../skills/fix/scripts/fetch-pr-comments.sh"; echo "exit=$?"   # 0 なら 控えの取り直しに使う --strict が入っている
+grep -qF '## 出し切り' "$SCRIPTS/../skills/cross-review/scripts/launch-reviewer.sh"; echo "exit=$?"   # 0 なら 出し切りの指示が入っている
+grep -qF 'def _is_design_doc_path' "$SCRIPTS/../skills/cross-review/scripts/state.py"; echo "exit=$?"   # 0 なら 設計 PR を design に分類する
 ```
 
 ## Playwright テストについて
@@ -296,7 +298,7 @@ npm install -g @openai/codex
 codex login
 ```
 
-`/ndf:pr-review <PR番号> agy` や `/ndf:cross-review` で agy 委譲を使う場合は、利用環境に
+`/ndf:pr-review <PR番号> agy` や `/ndf:cross-review --include agy` で agy 委譲を使う場合は、利用環境に
 Antigravity CLI をインストールしてログインします。ログインの手順は初回の対話起動にあり、
 `agy models` が終了コード 0 で終われば認証済みです。
 
@@ -333,7 +335,7 @@ agy models   # 認証の確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.17.5/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.17.6/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -355,14 +357,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.5/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.6/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.17.5  <path>
+# => ndf@ai-plugins  installed, enabled  10.17.6  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。

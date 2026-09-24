@@ -202,3 +202,19 @@ def test_combined_review_instructions_puts_auto_before_manual(state_mod):
     assert state_mod._combined_review_instructions("auto", "manual") == "auto\n\nmanual"
     assert state_mod._combined_review_instructions("auto", "") == "auto"
     assert state_mod._combined_review_instructions("", "manual") == "manual"
+
+
+def test_design_pr_adds_the_design_template(state_mod):
+    """#542 の AC14: 設計の文書を含む PR は common / docs_only に design が加わる。"""
+    for name in ("issue-1-design.md", "issue-1-requirements.md", "issue-1-design-decisions.md"):
+        categories = state_mod._classify_changed_files(
+            [{"status": "M", "paths": [f"issues/{name}"]}])
+        assert categories == ["common", "docs_only", "design"], name
+    assert state_mod.CATEGORY_TEMPLATES["design"] in state_mod._auto_review_instructions(categories)
+
+
+def test_other_docs_are_not_design(state_mod):
+    """#542 の AC16: `issues/` の他の文書や `issues/` の外の設計文書は design にしない。"""
+    for path in ("issues/notes.md", "docs/x-design.md", "issues/issue-1-implementation-plan.md"):
+        categories = state_mod._classify_changed_files([{"status": "M", "paths": [path]}])
+        assert "design" not in categories, path
