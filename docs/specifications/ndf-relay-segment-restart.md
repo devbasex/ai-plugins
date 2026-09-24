@@ -110,7 +110,7 @@ graph TB
 | 区間の終わりは、最後の応答の `ndf-next` のブロック 1 つで決める | Stop hook に `last_assistant_message` が来る。情報文字列を `text` にしないのは説明の例と取り違えないためで、外側の囲みの中も数えない。引継ぎ文書の見出しは置き場所も名前も決まっておらず、記録の `goal_status` は `/goal` の無い区間に現れない |
 | 関門は区間の中で `AskUserQuestion` のまま受け、ブロックは承認と取り込みの後に出す | 答えを待つあいだは Stop が起きないので、中継は関門を知らなくてよい。画面の文言から関門を読むと、Claude Code の版で文言が変わったときに関門の前で切る |
 | `stop_hook_active` を見ない。印は最新の Stop で置き換えるか消し、中継は静まってから動く | `/goal` の判定が止めを拒むと応答が続き、`stop_hook_active` が真の Stop こそ区間の最後でありうる。利用者の入力も見るのは、打っている途中に `/exit` を混ぜないためである |
-| `/goal` の目標の判定を待たない | 未達の判定は止めを拒んで応答を再開させ、「印の後に応答が再開した」で印が無効になる。判定の記録の行の形（`/goal clear` は `met: true` と `sentinel: true` の両方を持つ行を書く）に切り替えが左右されない |
+| `/goal` の目標が未達のときは、印の後の応答の再開で切り替えを取りやめる | 未達の判定は止めを拒んで応答を再開させる。応答の行は形が決まっており、判定の記録の行（`/goal clear` は `met: true` と `sentinel: true` の両方を持つ行を書く）の形に切り替えが左右されない |
 | 前の区間は子の端末へ `/exit` を入力して終わらせる。30 秒で終わらなければ SIGTERM、さらに 10 秒で SIGKILL | `/exit` は人の終了と同じ終わり方（終了コード 0・SessionEnd の理由 `prompt_input_exit`）になる。Stop hook の `{"continue": false}` はプロセスを終わらせない。子が終わらないまま次を起動すると claude が 2 つ動く |
 | 印を書くのは、中継が起動した子の claude だけにする | conductor が Bash から起こす `claude -p` も `NDF_RELAY_DIR` を継ぎ、Stop hook が走る。環境変数だけでは見分けられないため、親をたどって最初に当たる claude が `child.pid` と一致するかで見る |
 | プラグインは切れ目ごとに毎回更新し、失敗したら次の区間を起動しない | 配布の直後かを判定する材料が無い。版が変わっていなければ更新は数秒で何も変えない。古い版で始めると、配布した hook と Skill で進んだと記録が誤って示す |
@@ -225,7 +225,7 @@ stateDiagram-v2
 | 段 | すること |
 | --- | --- |
 | 中継する | 端末の属性を保存して標準入力を raw にし、`select` で標準入力 → マスタ、マスタ → 標準出力を流す（Ctrl-C もバイトのまま子へ届く）。SIGWINCH で端末の大きさをマスタへ `TIOCSWINSZ` で写す。`NDF_RELAY_POLL` 秒（既定 2）ごとに印を見る。1 つ目の区間は今の作業ディレクトリで `<本物の claude> <run の引数>` を起動する |
-| 静まりを待つ | 次がそろうまで待つ。(1) 印の `written_at`・`transcript_path` の更新時刻・利用者の最後の入力の時刻のうち最も遅いものから `NDF_RELAY_QUIET` 秒。(2) 印が消えていない。(3) 質問の印が無い。(4) 会話の記録に印より後の `assistant` / `user` の行が無い。目標の判定は待たない（下の「目標の判定の記録」） |
+| 静まりを待つ | 次がそろうまで待つ。(1) 印の `written_at`・`transcript_path` の更新時刻・利用者の最後の入力の時刻のうち最も遅いものから `NDF_RELAY_QUIET` 秒。(2) 印が消えていない。(3) 質問の印が無い。(4) 会話の記録に印より後の `assistant` / `user` の行が無い（`/goal` の目標が未達のときもこの条件で取りやめる。下の「目標の判定の記録」） |
 | 続けさせる | 停止の印・1 日の起動回数・空回りのどれかに当たるか、判定の中で例外が起きたら、`/exit` を入力しない。`stop` の行を書き、印を消し、`ndf-relay:` の 1 行を出す。以後は入出力を中継するだけで、次の印では何もしない。子が終わると `end`（`no-mark`）を書いて子の終了コードで終わる |
 | 終わらせる | `question.lock` の中で (3)(4) と記録の大きさ・更新時刻を確かめ直し、子の端末へ `/exit\r` を 1 回の write で書いて `NDF_RELAY_EXIT_HOLD` 秒（既定 1）後に放す。`NDF_RELAY_EXIT_WAIT` 秒（既定 30。質問の印がある間は数えない）で終わらなければ SIGTERM、`NDF_RELAY_TERM_WAIT` 秒（既定 10）でも終わらなければ SIGKILL を送り、終わりを `waitpid` で確かめてから `end` を書く |
 | 起動する | `claude plugin marketplace update <名前>` → `claude plugin update ndf@<名前> -y` → `claude plugin list --json` で版を読む。どれかが 0 以外・打ち切り・版が読めなければ `update-failed`。作業ディレクトリは印の `cwd`、消えていればパスの `/.worktrees/` の手前（主ディレクトリ）、無ければ在る最も近い親、それも無ければ HOME。区切りの 1 行を出し、`<本物の claude> <起動の方針の引数> <印の中身>`（中身は 1 つの引数）を起動する。exec に失敗したら `start-failed` |
@@ -279,8 +279,8 @@ stateDiagram-v2
 ### 目標の判定の記録
 
 `/goal` の目標の設定と判定は、会話の記録の `type: "attachment"` の行の `attachment.type:
-"goal_status"` に書かれる。**中継はこの行を読まない。**未達の判定は止めを拒んで応答を
-続けさせるため、印の後に応答が再開したことで印が無効になり、判定を別に待つ必要が無い。
+"goal_status"` に書かれる。未達の判定は止めを拒んで応答を
+続けさせ、印の後に応答が再開したことで印が無効になる。中継が見るのはこの応答の行である。
 `/goal clear` はこの行を `met: true` と `sentinel: true` の両方を持つ形で書く（Claude Code 2.1.282）。
 
 ### 文脈の上限で切る
@@ -376,7 +376,7 @@ hook が止めるのは工程へ入る起動だけで、持ち場の中の Bash 
 | --- | --- |
 | Claude Code の Stop hook の入力 | `last_assistant_message`・`background_tasks`（`status`）・`cwd`・`session_id`・`transcript_path`。`stop_hook_active` は見ない |
 | Claude Code の CLI | `claude plugin list --json`（`id` が `<プラグイン>@<マーケットプレイス>`、`version`）・`claude plugin marketplace update <名前>`・`claude plugin update ndf@<名前> -y`（端末でなければ `-y` が要る）。区間の起動は位置引数の最初の入力（スラッシュコマンドと `/goal` も入力として働く） |
-| 会話の記録 | `transcript_path` の更新時刻と、印より後の `assistant` / `user` の行（`goal_status` の attachment の行は読まない） |
+| 会話の記録 | `transcript_path` の更新時刻と、印より後の `assistant` / `user` の行 |
 
 **前提にしている Claude Code の振る舞い**（2.1.280・Linux で実測）: Stop hook は応答が終わるたびに
 発火し、`AskUserQuestion` の答えを待つあいだと claude の終了では発火しない。`/goal` の判定は Stop hook
