@@ -4169,6 +4169,50 @@ def _new_finding_count(st: dict[str, Any], pr: int) -> tuple[int, bool]:
     return new, True
 
 
+class _OscillationOverlap(NamedTuple):
+    """現ラウンドの指摘が前ラウンドとどれだけ重なるかの集計。
+
+    件数の合計（`overlap_count`）と、現ラウンドの件数で割った比（`ratio`）を持つ。
+    副作用を持たず、状態ファイルにも表示にも触れない。
+    """
+
+    exact: int
+    near: int
+    same_body: int
+    overlap_count: int
+    total: int
+    ratio: float
+
+
+def _oscillation_overlap(
+    curr: list[tuple[str, int, str]],
+    prev: list[tuple[str, int, str]],
+) -> _OscillationOverlap:
+    """現ラウンドの指摘キーを前ラウンドと突き合わせ、一致の内訳と重複率を返す。
+
+    一致の判定は `_finding_match_kind`（位置・近傍・本文の優先順）に任せる。この関数は
+    種別ごとの件数を数えるだけで、`curr` が空でないことは呼び出し側が保証する。
+    """
+    exact = near = same_body = 0
+    for key in curr:
+        kind = _finding_match_kind(key, prev)
+        if kind == "exact":
+            exact += 1
+        elif kind == "near":
+            near += 1
+        elif kind == "body":
+            same_body += 1
+    overlap_count = exact + near + same_body
+    return _OscillationOverlap(
+        exact=exact,
+        near=near,
+        same_body=same_body,
+        overlap_count=overlap_count,
+        total=len(curr),
+        ratio=overlap_count / len(curr),
+    )
+
+
 def cmd_check_oscillation(args: argparse.Namespace) -> None:
     """Step 4 — 同じ箇所の指摘の重なりを計算。
 
@@ -4195,40 +4239,24 @@ def cmd_check_oscillation(args: argparse.Namespace) -> None:
         info("⏭ round_in_pr<2: 振動検知スキップ")
         sys.exit(2)  # continue
 
-    prev_round_no = same_pr[-2]["round"]
-    curr_round_no = same_pr[-1]["round"]
-
-    def collect_keys(round_no: int) -> list[tuple[str, int, str]]:
-        """そのラウンドの指摘を (ファイル, 行, 正規化した本文) の並びで返す。"""
-        return _finding_keys(st, pr, round_no)
-
-    prev = collect_keys(prev_round_no)
-    curr = collect_keys(curr_round_no)
+    prev = _finding_keys(st, pr, same_pr[-2]["round"])
+    curr = _finding_keys(st, pr, same_pr[-1]["round"])
     if not curr:
         info("⏭ 現ラウンドの payload なし: 振動検知スキップ")
         sys.exit(2)
 
-    exact = near = same_body = 0
-    for key in curr:
-        kind = _finding_match_kind(key, prev)
-        if kind == "exact":
-            exact += 1
-        elif kind == "near":
-            near += 1
-        elif kind == "body":
-            same_body += 1
-    overlap_count = exact + near + same_body
-    ratio = overlap_count / len(curr)
+    overlap = _oscillation_overlap(curr, prev)
     info(
-        f"振動検知: overlap={overlap_count}/{len(curr)} ({ratio:.0%})"
-        f" 位置={exact} 近傍={near} 本文={same_body}"
+        f"振動検知: overlap={overlap.overlap_count}/{overlap.total}"
+        f" ({overlap.ratio:.0%})"
+        f" 位置={overlap.exact} 近傍={overlap.near} 本文={overlap.same_body}"
     )
 
-    if ratio >= 0.5:
+    if overlap.ratio >= 0.5:
         st["final"] = "oscillation"
         st["ended_at"] = _now()
         _save(pr, st)
-        die(f"振動検知 — 同一箇所が {ratio:.0%} 重複。中断。", code=4)
+        die(f"振動検知 — 同一箇所が {overlap.ratio:.0%} 重複。中断。", code=4)
     sys.exit(2)
 
 
