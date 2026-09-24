@@ -546,6 +546,18 @@ def _classify_ci(runs: list[dict[str, Any]]) -> CiClassification:
     return CiClassification(code_failed, meta_failed, pending)
 
 
+def _classify_failed_names(names: list[str]) -> CiClassification:
+    """申告された失敗名の一覧を振り分ける薄い入口。
+
+    修正の担当が申告するのは、完了した失敗の名前だけである。分類層の入力の形
+    （`name` / `status` / `conclusion`）と、完了・失敗を表す文字列（`completed` /
+    `failure`）を握るのはここ 1 か所にする。呼び出し側は失敗名の一覧を渡すだけでよい。
+    """
+    return _classify_ci(
+        [{"name": str(n), "status": "completed", "conclusion": "failure"} for n in names]
+    )
+
+
 def _fetch_check_runs(repo: str, sha: str) -> list[dict[str, Any]] | None:
     """head の commit に対する検査ジョブの一覧を返す。照会できなければ `None`。
 
@@ -4546,9 +4558,7 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     # 振り分けは `_classify_ci` が 1 か所で持つ。ここが読むのは修正の担当が申告した
     # 失敗の名前で、進行側が照会し直す段ではない。申告は完了した失敗として渡す。
     failed = fix.get("ci_failed_checks") or []
-    classified = _classify_ci(
-        [{"name": str(n), "status": "completed", "conclusion": "failure"} for n in failed]
-    )
+    classified = _classify_failed_names(failed)
 
     if classified.code_failed:
         st["final"] = "error"
