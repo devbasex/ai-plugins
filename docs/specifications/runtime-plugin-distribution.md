@@ -102,7 +102,7 @@ MCP plugin も `plugins/mcp/<plugin-name>` の 1 ディレクトリにまとめ�
 | runtime | 読むもの | 導入方式 |
 |---|---|---|
 | Claude Code | `.claude-plugin/plugin.json` と `.mcp.json`（自動探索） | Claude marketplace |
-| Codex | `.codex-plugin/plugin.json` の `mcpServers: "./.mcp.json"` | Codex marketplace |
+| Codex | `.codex-plugin/plugin.json` の `mcpServers: "./.mcp.json"`（Codex だけ起動の引数を変えるプラグインは `"./.codex.mcp.json"`。mcp-serena の `--context codex`） | Codex marketplace |
 | Kiro CLI | `dev.kiro/install.sh` が `.mcp.json` を読んで導入先へ合成する | installer |
 
 ルートの `plugin.json`（Agent Plugins 形式）は置かない。Agent Plugins 1.0.0 の `mcp.json` は

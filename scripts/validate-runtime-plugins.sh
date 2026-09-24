@@ -374,7 +374,7 @@ for family in families:
             )
 
 # MCP プラグインも 1 ディレクトリにまとめた。runtime ごとの配布物は無く、
-# 3 runtime が同じ .mcp.json を読む。
+# 3 runtime が同じ .mcp.json を読む（Codex だけ .codex.mcp.json を読ませる例外がある）。
 for mcp in sorted((root / "plugins/mcp").iterdir()):
     if not mcp.is_dir():
         continue
@@ -388,14 +388,16 @@ for mcp in sorted((root / "plugins/mcp").iterdir()):
     if not (mcp / "dev.kiro/install.sh").is_file():
         errors.append(f"Kiro MCP installer missing: plugins/mcp/{mcp.name}/dev.kiro/install.sh")
     # Codex は .mcp.json を manifest の mcpServers から読む。指定が無いと
-    # サーバが 1 つも登録されない。
+    # サーバが 1 つも登録されない。Codex だけ別の起動定義を読ませるときは
+    # `./.codex.mcp.json` を指す（mcp-serena の `--context codex`。#818）。
     codex_manifest = mcp / ".codex-plugin/plugin.json"
     if codex_manifest.is_file():
         declared = read_json(codex_manifest).get("mcpServers")
-        if declared != "./.mcp.json":
+        allowed = ("./.mcp.json", "./.codex.mcp.json")
+        if declared not in allowed or not (mcp / declared).is_file():
             errors.append(
                 f"plugins/mcp/{mcp.name}/.codex-plugin/plugin.json の mcpServers が "
-                f"`./.mcp.json` でない（実際: {declared!r}）"
+                f"実在する `./.mcp.json` か `./.codex.mcp.json` でない（実際: {declared!r}）"
             )
 
 if errors:
