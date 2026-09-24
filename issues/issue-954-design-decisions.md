@@ -140,11 +140,17 @@ pause のたびに drive が止まって conductor が supervisor を起こす�
 本文に supervisor の規則を写す案は採らない。規則は起動指示が 10 個（この設計で 11 個）を渡しており、
 定義にも書くと 2 か所を直すことになる。道具も絞らない。supervisor は Skill と Agent を使う。
 
-### 決定 7: 区切りを守らせる hook は `agentType` で supervisor を見分け、`general-purpose` は止めない
+### 決定 7: 区切りを守らせる hook は定義の名前で supervisor を見分ける。名前は meta の `agentType`、取れなければ親の記録の `subagent_type` から引く
 
 hook の入力には、サブエージェントの中でだけ `agent_id` が付く（`token-guard.sh` の既存の判定、
 Claude Code 2.1.280 で実測）。その `agent_id` から `subagents/agent-<ID>.meta.json` の `agentType` を読めば、
-worker と supervisor を見分けられる。`spawnDepth` で見分ける案は採らない。conductor が直接起動した worker
+worker と supervisor を見分けられる。ただし今の記録の `agentType` はすべて `general-purpose` で
+（`statusline` の Skill も「見分けに使えない」と書く）、プラグインの定義で起動したときに定義の名前が入るかは
+見ていない（U2）。そこで、`agentType` が `ndf:` で始まらないときは、meta の `toolUseId` を親の記録から探し、
+起動した `Agent` 呼び出しの `subagent_type` を読む。起動の引数は親の記録に必ず残る。
+
+`description` に 1 時間の印を足して見分ける案は採らない。測定（`skill-stats --agents`・`token-usage.py`）は
+`description` の先頭語で持ち場を読み、印の形を 2 か所で持つことになる。`spawnDepth` で見分ける案も採らない。conductor が直接起動した worker
 （読解だけを出すとき）も深さ 1 になる。
 
 `general-purpose` を止めないのは、区切りの後に conductor が同じ持ち場を起動し直す形が、この変更を入れた
@@ -157,15 +163,16 @@ worker と supervisor を見分けられる。`spawnDepth` で見分ける案は
 寿命の中に収まるが、呼び出しが倍になり、これも一定の間隔で起きる待ちである。1 時間の区間では 540 秒でも
 切れないので、縮める理由が無い。
 
-### 決定 9: 待ちの後の書き直しの量を、集計の列として足す
+### 決定 9: 集計に待ちの後の書き直しと読み込みの量の 2 列と、定義の名前の軸を足す
 
 決定 3 の損益分岐は待ちの後の書き直しの量を要るが、今の集計は回数（`rewrites_after_5m`）と量の合計
 （`rewrite_tokens`）しか出さない。この設計では回数の比で按分して推定した。AC9 の再計算を推定に頼らない
-ため、量の列を足す。
+ため、`rewrite_tokens_after_5m` を足す。1 時間の区間では待ちの後が読み込みになり書き直しに数えられないので、
+得の側を測る `read_tokens_after_5m` も足す。5 分と 1 時間の区間を分けて計算するため、定義の名前を軸に足す。
 
 ### 決定 10: クラス図を作らない
 
-型を足さない。変えるのは Markdown の定義 2 つ、hook の判定 1 つ、集計の列 1 つである。
+型を足さない。変えるのは Markdown の定義 2 つ、hook の判定 1 つ、集計の列 2 つと軸 1 つである。
 
 
 ### 決定 11: supervisor の定義は `plugins/ndf/agents/` に置き、agy へも配られることを受け入れる

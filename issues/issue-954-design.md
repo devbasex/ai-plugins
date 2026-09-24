@@ -143,7 +143,8 @@ supervisor の中で一度も走らない。区切りの判定が止めなけれ
 
 | 項目 | 値 |
 | --- | --- |
-| 対象 | 入力に `agent_id` があり、`<記録のディレクトリ>/<セッション>/subagents/agent-<agent_id>.meta.json` の `agentType` が `ndf:supervisor`（寿命 5 分）で、Skill の名前が `cross-review` / `cross-refactoring`（`ndf:` の有無を問わない） |
+| 対象 | 入力に `agent_id` があり、その supervisor の定義の名前（下の「定義の名前」）が `ndf:supervisor`（寿命 5 分）で、Skill の名前が `cross-review` / `cross-refactoring`（`ndf:` の有無を問わない） |
+| 定義の名前 | 1. `<記録のディレクトリ>/<セッション>/subagents/agent-<agent_id>.meta.json` の `agentType` が `ndf:` で始まれば、その値 2. そうでなければ（`general-purpose` か欠けている）、同じ meta の `toolUseId` を親の記録（入力の `transcript_path`）から探し、その `Agent` 呼び出しの `input.subagent_type` 3. どちらも取れなければ判定しない |
 | 読む記録 | **supervisor 自身の記録** `${transcript_path%.jsonl}/subagents/agent-<agent_id>.jsonl`。入力の `transcript_path` はサブエージェントの中でも親（conductor）の記録を指すので、そのまま読まない（`token-guard.sh` の既存の注記、`statusline.sh` の組み立てと同じ） |
 | P | 読む記録の**先頭から**最初の assistant 呼び出しを探し、その文脈（`input + cache_read + cache_creation`）を取る。既存の `context_tokens()` は末尾 200 行だけを読んで最後の呼び出しを返すので、P には使えない。先頭から読む走査を別に持つ |
 | C | 読む記録の最後の assistant 呼び出しの文脈 |
@@ -164,8 +165,20 @@ supervisor の中で一度も走らない。区切りの判定が止めなけれ
 
 **量と間隔を呼び出しの単位で対応づける。** 今の集計は書き直しの量を `rewrite_tokens` の合計へ、間隔を
 `gaps` の並びへ別々に積み、`rewrites_after_5m` は `gaps` だけから数える。そのため、後から量を間隔で分けられない。
-書き直しを数える箇所（`record_calls` の中の `is_rewrite` の分岐）で、直前の間隔が `CACHE_5M` を超えるときだけ、
-量を別のカウンタ `rewrite_tokens_after_5m` へも足す。間隔が取れない呼び出し（`rewrites_untimed` に数えるもの）は足さない。
+構造を次のとおり変える。
+
+| 箇所 | 今 | 変えた後 |
+| --- | --- | --- |
+| 呼び出しの並び（`scan_file` が `record_calls` へ渡す） | （時刻, 文脈, 書き込み）の 3 つ | （時刻, 文脈, 書き込み, 読み込み）の 4 つ。読み込みは `cache_read_input_tokens`。並びを作る箇所をすべて直す |
+| 直前の間隔 | `is_rewrite` の分岐の中でだけ求める | 2 回目以降のすべての呼び出しで求める |
+| 書き直しの呼び出し | 量を `rewrite_tokens` へ足す | 加えて、間隔が `CACHE_5M` を超えれば `rewrite_tokens_after_5m` へ足す |
+| 書き直しでない呼び出し | 何もしない | 間隔が `CACHE_5M` を超えれば、読み込みの量を `read_tokens_after_5m` へ足す |
+
+時刻を欠く呼び出し（`rewrites_untimed` に数えるもの）は、どちらのカウンタにも足さない。
+
+**定義の名前を集計の軸に足す。** 設計の持ち場では前半（5 分）と区切りの後（1 時間）が同じ `description`
+（`設計: #954`）を持つので、今の `per_role` では同じ行に混ざり、AC9 が区間ごとに計算できない。`per_role` の
+鍵に `agent_type`（F3 の「定義の名前」と同じ引き方の値。取れなければ `-`）を足し、md の表にも列を足す。
 
 **あわせて `read_tokens_after_5m`（直前の間隔が 5 分を超えた呼び出しの読み込みの量の合計）を足す。** 1 時間の区間では
 5 分を超える待ちの後の呼び出しが読み込みになり、`is_rewrite` に当たらない。`rewrite_tokens_after_5m` だけでは、
@@ -233,7 +246,7 @@ sequenceDiagram
   S1-->>C: 結果: 区切り / 次の工程: ドキュメントレビュー
   C->>S2: 設計: #954（ndf:supervisor-waits、前の報告）
   S2->>H: Skill cross-review
-  H-->>S2: 通す（C < 2.5P）
+  H-->>S2: 通す（ndf:supervisor-waits は判定しない）
   S2->>S2: ラウンドの待ち（60 分以内は読み込み）
   S2-->>C: 結果: 関門
 ```
