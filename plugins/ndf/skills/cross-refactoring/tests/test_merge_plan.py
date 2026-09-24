@@ -169,8 +169,9 @@ def test_jev_duplicate_needs_confidence_and_only_asks_within_a_group(planned, cm
     asked = []
     monkeypatch.setattr(cmd_plan.jev, "ask_score", lambda *a, **k: None)
 
-    def boolean(text, *args, **kwargs):
-        asked.append(text)
+    def boolean(text, question, *args, **kwargs):
+        if "same code change" in question:
+            asked.append(text)
         return (True, 0.85)
 
     monkeypatch.setattr(cmd_plan.jev, "ask_boolean", boolean)
@@ -193,3 +194,42 @@ def test_the_plan_is_not_rebuilt_on_resume(planned, cmd_plan):
     write_state(path, state)
     _run(cmd_plan)
     assert read_state(path)["plan"] == first
+
+
+# ---------- 実行時の値を計画の終わりまでに書き出す（決定 24・25） ----------
+
+def test_the_plan_writes_every_runtime_value_to_the_state(planned, cmd_plan):
+    """計画の後の段は、状態ファイルの値と時計の比較だけで進む。値はすべて計画で出そろう。"""
+    a, b = _candidate(1, "f"), _candidate(2, "g")
+    path = planned([a, b], [_answer(a, tests=["tests/test_new.py"], test_targets=["tests/test_new.py"]),
+                            _answer(b)])
+    _run(cmd_plan)
+    state = read_state(path)
+    limits = state["limits"]
+    for key in ("margin_seconds", "init_test_timeout", "test_timeout", "propose_end_at",
+                "plan_end_at", "add_tests_end_at", "implement_end_at", "fix_end_at", "final_end_at"):
+        assert limits[key] is not None, key
+    for item in state["items"]:
+        assert item["start_deadline"] and "public_io" in item
+
+
+def test_d5_is_decided_by_jev_at_the_plan(planned, cmd_plan, monkeypatch):
+    """決定 25: 公開の入出力が変わりうるか（D5）は計画の時点で Jev に問い、答えを項目に残す。"""
+    a, b = _candidate(1, "f"), _candidate(2, "g")
+    path = _jev_state(planned, [a, b], [_answer(a, risk=True), _answer(b)])
+    monkeypatch.setattr(cmd_plan.jev, "ask_score", lambda *a, **k: None)
+    monkeypatch.setattr(cmd_plan.jev, "ask_boolean",
+                        lambda text, question, *a, **k: (
+                            ('"g"' in text, 0.9) if "public input" in question else (False, 0.9)))
+    _run(cmd_plan)
+    items = {i["symbol"]: i for i in read_state(path)["items"]}
+    assert (items["f"]["public_io"], items["f"]["public_io_source"]) == (False, "jev")
+    assert (items["g"]["public_io"], items["g"]["public_io_source"]) == (True, "jev")
+
+
+def test_d5_falls_back_to_the_runtime_risk_without_jev(planned, cmd_plan):
+    a = _candidate(1, "f")
+    path = planned([a], [_answer(a, risk=True)])
+    _run(cmd_plan)
+    item = read_state(path)["items"][0]
+    assert (item["public_io"], item["public_io_source"]) == (True, "runtime")

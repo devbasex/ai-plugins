@@ -3,9 +3,8 @@
 **純粋な処理だけを置く。** 今の時刻は内部で取らず、引数で受ける。時刻を内部で取ると、
 締め切りの計算がテストで再現できない。値の単位は、断りの無い限り分である。
 
-**実行中の CLI は時間切れで止めない**（#933 決定 4）。止めると作業ディレクトリに
-半端な変更が残る。代わりに、計画で見積りを収め、実装の中は項目ごとの締め切りで
-着手を止める。
+計画で見積りを収め、実装の中は項目ごとの締め切りで着手を止める。段の監視の上限は
+`timeline` がこの締め切りから導く（決定 23。決定 4 の「実行中の CLI を止めない」を改めた）。
 """
 from __future__ import annotations
 
@@ -123,29 +122,24 @@ def deadlines(selected: list[dict[str, Any]], T: _dt.datetime) -> list[dict[str,
     return result
 
 
-def phase_timeout(table_seconds: int, T: _dt.datetime, now: _dt.datetime, margin: int = 600) -> int:
-    """`add-tests` と `implement` の監視の上限（秒）。
+def fix_end(started_at: _dt.datetime, budget_minutes: int, reserve: dict[str, Any]) -> _dt.datetime:
+    """修正に使える終わりの時刻。
 
-    締め切りより先に監視が CLI を止めないよう、T までの残りを下限にする。`margin` は
-    最後の項目が締め切りの直前に着手した分の余裕である。
+    **控えの `fix` は引かない。** T から測ると、控えておいた修正 1 回分が使われない。
+    全体のテストの控え 2 つだけを差し引いた終わりである。
     """
-    return max(int(table_seconds), int((T - now).total_seconds())) + int(margin)
+    return started_at + _dt.timedelta(
+        minutes=budget_minutes
+        - float(reserve.get("danger_whole_test") or 0.0)
+        - float(reserve.get("final_whole_test") or 0.0)
+    )
 
 
 def fix_time_left(
     started_at: _dt.datetime, budget_minutes: int, reserve: dict[str, Any], now: _dt.datetime
 ) -> float:
-    """修正に使える残り（分）。
-
-    **控えの `fix` は引かない。** T から測ると、控えておいた修正 1 回分が使われない。
-    全体のテストの控え 2 つだけを差し引いた終わりから測る。
-    """
-    end = started_at + _dt.timedelta(
-        minutes=budget_minutes
-        - float(reserve.get("danger_whole_test") or 0.0)
-        - float(reserve.get("final_whole_test") or 0.0)
-    )
-    return (end - now).total_seconds() / 60
+    """修正に使える残り（分）。終わりは `fix_end`。"""
+    return (fix_end(started_at, budget_minutes, reserve) - now).total_seconds() / 60
 
 
 def available_minutes(budget_minutes: int, elapsed_minutes: float, reserve: dict[str, Any]) -> float:

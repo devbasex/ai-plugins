@@ -60,14 +60,13 @@ def _args(tmp_path, **over):
         # **テストの置き場所を含める**（#436 決定 5）。含めないと `init` の関門で
         # 止まる。関門そのものは `test_scope_gate.py` で見る。
         "pr": 130, "scope": ["src", "tests"], "host": "claude",
-        "max_fix_rounds": 3, "ci_check": None, "workflow_step": False,
+        "ci_check": None, "workflow_step": False,
         "severity_threshold": "minor", "model": None, "baseline_test": "true",
         # **範囲のテストを既定で渡す**（#933 の AC3b）。`true` は既知の実行器でないため、
         # `--round-test` が無いと提案の前に止まる。全体のテストと同じ文字列なので、
         # 実行は 1 回で済む。関門そのものは下の AC3b のテストで見る。
         "round_test": "true",
         "sync_command": None, "plan_file": None,
-        "test_timeout": 60,
         "worktree_root": str(tmp_path / "rf130"),
     }
     base.update(over)
@@ -451,20 +450,24 @@ def test_the_caps_are_unset_in_the_arguments(patch_lib, refactor, monkeypatch):
 
 
 def test_a_new_run_fills_the_caps_with_their_defaults(run_init, tmp_path):
-    """AC1 — 新規の初期化が現行の既定（予算 60 分 / 修正 3 / テスト 900 秒）へ置き換える。
+    """AC1 決定 24 — 新規の初期化が現行の既定（予算 30 分）へ置き換え、上限の表を書き出す。
 
-    ラウンド制の上限（提案・テスト整備・採用の件数）は状態に載せない（#933 の決定 5）。
+    ラウンド制の上限（提案・テスト整備・採用の件数）と、修正の回数・テスト 1 回の上限の
+    固定値は状態に載せない（#933 の決定 5・決定 24）。
     """
-    run_init(_args(tmp_path, max_fix_rounds=None, test_timeout=None,
-                   severity_threshold=None, workflow_step=None))
+    run_init(_args(tmp_path, severity_threshold=None, workflow_step=None))
     _, state = _state_of(tmp_path)
     assert state["budget_minutes"] == 30
-    assert state["max_fix_rounds"] == 3
-    assert state["test_timeout"] == 900
     assert state["severity_threshold"] == "minor"
     assert state["workflow_step"] is False
+    limits = state["limits"]
+    assert limits["init_test_timeout"] == 180 and limits["margin_seconds"] == 90
+    # 着手前の全体のテスト（`true`）はほぼ 0 秒なので、下限の 0.01·B が効く
+    assert limits["test_timeout"] == 18
+    for key in ("propose_end_at", "plan_end_at", "final_end_at"):
+        assert limits[key], key
     for key in ("max_outer_rounds", "max_test_rounds", "max_items_per_round",
-                "outer_round", "round_kind", "rounds"):
+                "outer_round", "round_kind", "rounds", "max_fix_rounds", "test_timeout"):
         assert key not in state, key
 
 
@@ -496,7 +499,8 @@ def test_an_invalid_budget_is_not_an_argparse_error(patch_lib, refactor, monkeyp
 
 # ---------- 廃止した引数（#933 の AC2） ----------
 
-@pytest.mark.parametrize("arg", ["max_test_rounds", "max_outer_rounds", "max_items_per_round"])
+@pytest.mark.parametrize("arg", ["max_test_rounds", "max_outer_rounds", "max_items_per_round",
+                                 "max_fix_rounds", "test_timeout"])
 def test_a_deprecated_argument_is_announced_and_ignored(run_init, tmp_path, capsys, arg):
     """AC2 — 渡すと「廃止」と引数名を標準エラーへ出し、止めずに初期化を終える。"""
     run_init(_args(tmp_path, **{arg: "2"}))
@@ -653,28 +657,10 @@ def test_init_emits_shell_assignments(run_init, tmp_path, capsys):
     assert "IMPL=claude" in out.splitlines()
 
 
-def test_init_emits_the_stall_timeout_for_the_implementer(run_init, tmp_path, capsys):
-    """AC40: 無進捗の許容は、テストの制限時間に 900 秒を足した値である。
-
-    適用と修正の担当はテストを 1 回実行し、その間は何も出力しない。制限時間
-    そのままでは実行中に打ち切られる。
-    """
-    args = _args(tmp_path)
-    args.test_timeout = 900          # `--test-timeout` の既定
-
-    run_init(args)
-
-    assert "IMPL_STALL_TIMEOUT=1800" in capsys.readouterr().out
-
-
-def test_the_stall_timeout_follows_the_test_timeout(run_init, tmp_path, capsys):
-    """AC40: テストの制限時間を変えると、無進捗の許容も一緒に動く。"""
-    args = _args(tmp_path)
-    args.test_timeout = 1200
-
-    run_init(args)
-
-    assert "IMPL_STALL_TIMEOUT=2100" in capsys.readouterr().out
+def test_init_no_longer_emits_a_fixed_stall_timeout(run_init, tmp_path, capsys):
+    """決定 24: 無音の許容は段の上限と同じ値を `start-phase` が返す。`init` は出さない。"""
+    run_init(_args(tmp_path))
+    assert "IMPL_STALL_TIMEOUT=" not in capsys.readouterr().out
 
 
 def test_existing_worktree_is_synced_to_origin(run_init, tmp_path, origin_repo):
@@ -751,20 +737,13 @@ def test_init_records_the_vocabulary_for_the_prompt(run_init, tmp_path, vocabula
 
 # ---------- 再開（#727 / #648 の決定 13〜16） ----------
 
-@pytest.mark.parametrize("arg, value", [
-    ("max_fix_rounds", 6), ("test_timeout", 1200),
-])
-def test_resume_reflects_a_changed_cap(run_init, tmp_path, capsys, arg, value):
-    """AC38 — 上限は再開で渡せば反映し、`旧 → 新` を 1 行出し、記録に 1 件積む。"""
-    run_init(_args(tmp_path))
-    _, before = _state_of(tmp_path)
-    capsys.readouterr()
-
-    run_init(_args(tmp_path, **{arg: value}))
+def test_resume_before_the_plan_rebuilds_the_limits_from_the_new_budget(run_init, tmp_path):
+    """決定 24 — 計画の前に予算を置き換えた再開は、上限の表を新しい予算で組み直す。"""
+    run_init(_args(tmp_path, budget_minutes="30"))
+    run_init(_args(tmp_path, budget_minutes="10"))
     _, after = _state_of(tmp_path)
-    assert after[arg] == value
-    assert f"{arg}: {before[arg]} → {value}" in capsys.readouterr().err
-    assert [c["field"] for c in after["resume_changes"]] == [arg]
+    assert after["budget_minutes"] == 10
+    assert after["limits"]["init_test_timeout"] == 60 and after["limits"]["margin_seconds"] == 30
 
 
 @pytest.mark.parametrize("over, option", [
@@ -806,7 +785,7 @@ def test_resume_without_arguments_changes_nothing(run_init, tmp_path, capsys, te
              probe={"kiro": "Not logged in"})
     _, after = _state_of(tmp_path)
     assert run_init.probed == [], "担当に関わる引数を渡していないのに確かめ直している"
-    for key in ("budget_minutes", "max_fix_rounds", "test_timeout", "models",
+    for key in ("budget_minutes", "limits", "models",
                 "runtimes", "participants", "implementer"):
         assert after[key] == before[key], key
     assert "再開では反映しません" not in capsys.readouterr().err
@@ -1037,12 +1016,12 @@ def test_init_aborts_when_the_baseline_test_times_out(run_init, tmp_path, timeou
     """R2-001 — 着手前のテストが打ち切りで止まる経路（setup.py 630-634）。"""
     timeout_calls.timed_out.add("true")
     with pytest.raises(SystemExit) as e:
-        run_init(_args(tmp_path, baseline_test="true", test_timeout=60))
+        run_init(_args(tmp_path, baseline_test="true", budget_minutes="10"))
     # 現状固定: `die` の既定の終了コード（打ち切り）。
     assert e.value.code == refactor_abort()
     # 状態ファイルは打ち切りの後の保存に届かないため書かれない。
     assert not _state_path(tmp_path).exists()
-    # 出力は文言の完全一致を取らず、打ち切った秒数（60）が含まれることだけを見る。
+    # 出力は文言の完全一致を取らず、打ち切った秒数（予算 10 分の 0.1 = 60）が含まれることだけを見る。
     assert "60" in capsys.readouterr().err
 
 
@@ -1052,7 +1031,7 @@ def test_init_aborts_when_the_round_test_times_out(run_init, tmp_path, timeout_c
     timeout_calls.timed_out.add("pytest -q -k scope")
     with pytest.raises(SystemExit) as e:
         run_init(_args(tmp_path, round_test="pytest -q -k scope", baseline_test="true",
-                       test_timeout=60))
+                       budget_minutes="10"))
     # 現状固定: 範囲のテストの打ち切りは ABORT。
     assert e.value.code == refactor_abort()
     assert not _state_path(tmp_path).exists()
@@ -1289,7 +1268,7 @@ def phase_state(tmp_path, env_tmp_dir, monkeypatch, cmd_setup):
     _git("init", "-q", cwd=work)
     _git("-c", "user.email=t@e.st", "-c", "user.name=test",
          "commit", "-q", "--allow-empty", "-m", "init", cwd=work)
-    path = make_state_v2(tmp_path, work)
+    path = make_state_v2(tmp_path, work, started_at="2026-09-24T10:00:00+09:00")
     env_tmp_dir(path)
     for name in ("MONITOR_TIMEOUT", "MONITOR_TIMEOUT_CLAUDE"):
         monkeypatch.delenv(name, raising=False)
@@ -1335,7 +1314,11 @@ def test_start_phase_records_the_start_once(phase_state, start_phase):
 
     phase_state.set_now(minutes=5)
     state, _ = start_phase("propose")
-    assert state["phases"]["propose"] == first
+    again = state["phases"]["propose"]
+    assert (again["started_at"], again["launch_started_at"], again["base_sha"]) == (
+        first["started_at"], first["launch_started_at"], first["base_sha"])
+    # 上限は起動のたびに残りから出し直す（再開の起動が枠を越えない）
+    assert again["timeout"] == first["timeout"] - 300
 
 
 def test_start_phase_rewrites_the_launch_start_for_fix(phase_state, start_phase):
@@ -1350,33 +1333,44 @@ def test_start_phase_rewrites_the_launch_start_for_fix(phase_state, start_phase)
     assert record["launch_started_at"] == "2026-09-24T10:07:00"
 
 
-@pytest.mark.parametrize("phase", ["add-tests", "implement"])
-@pytest.mark.parametrize("end_minutes, expected", [
-    (120, 7200 + 600),    # 締め切りまでの残りが表の値（3600）より長い
-    (10, 3600 + 600),     # 残りが短ければ表の値
+# 予算 60 分・開始 10:00。余裕は 0.05·B = 180 秒（決定 24）。
+PLANNED = {
+    "plan": {"reserve": {"danger_whole_test": 1.0, "final_whole_test": 1.0, "fix": 5.5}},
+    "items": [{"start_deadline": "2026-09-24T10:30:00+09:00",
+               "test_start_deadline": "2026-09-24T10:20:00+09:00",
+               "estimate": {"test": 3.0, "implement": 2.0, "verify": 0.2}}],
+}
+
+
+@pytest.mark.parametrize("phase, planned, expected", [
+    ("propose", False, 12 * 60 + 180),       # 提案の枠の終わり 10:12
+    ("plan", False, 18 * 60 + 180),          # 計画の枠の終わり 10:18
+    ("add-tests", True, 23 * 60 + 180),      # 最後の項目の完了の締め切り 10:20 + 3 分
+    ("implement", True, 32 * 60 + 180),      # 10:30 + 2 分
+    ("fix", True, 58 * 60 + 180),            # 開始 + 60 − 全体のテストの控え 2 分
+    ("final-fix", False, 60 * 60 + 180),     # 想定最大時間の終わり 11:00
 ])
-def test_start_phase_derives_the_timeout_from_the_plan_end(
-        phase_state, start_phase, phase, end_minutes, expected):
-    """`max(表の値, 締め切り − 今) + 600` を返し、記録にも残す。"""
-    import datetime as dt
-    end = dt.datetime(2026, 9, 24, 10, 0, 0, tzinfo=phase_state.tz) + dt.timedelta(
-        minutes=end_minutes)
-    phase_state.edit(plan={"end_at": end.isoformat(timespec="seconds")})
+def test_start_phase_returns_the_time_left_to_the_end_of_the_phase(
+        phase_state, start_phase, phase, planned, expected):
+    """決定 23・24: 監視の上限は、その段の終わりまでの残り + 余裕。CLI の上限は + 余裕。"""
+    if planned:
+        phase_state.edit(**PLANNED)
     state, timeout = start_phase(phase)
     assert timeout == str(expected)
-    assert state["phases"][phase]["timeout"] == expected
+    record = state["phases"][phase]
+    assert record["timeout"] == expected and record["cli_timeout"] == expected + 180
 
 
-@pytest.mark.parametrize("phase", ["propose", "plan", "fix", "judge-test-changes"])
-def test_start_phase_returns_no_timeout_for_other_phases(phase_state, start_phase, phase):
-    phase_state.edit(plan={"end_at": "2026-09-24T12:00:00+09:00"})
-    state, timeout = start_phase(phase)
-    assert timeout == ""
-    assert "timeout" not in state["phases"][phase]
+def test_start_phase_for_the_final_fix_keeps_the_phase(phase_state, start_phase):
+    """最終ゲートの修正は状態の段を変えない（再開の地点が狂う）。"""
+    phase_state.edit(phase="final")
+    state, _ = start_phase("final-fix")
+    assert state["phase"] == "final"
 
 
-def test_start_phase_without_a_plan_returns_no_timeout(phase_state, start_phase):
-    _, timeout = start_phase("implement")
+@pytest.mark.parametrize("phase", ["add-tests", "implement", "fix"])
+def test_start_phase_without_a_plan_returns_no_timeout(phase_state, start_phase, phase):
+    _, timeout = start_phase(phase)
     assert timeout == ""
 
 

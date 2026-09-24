@@ -228,7 +228,7 @@ def test_the_fix_cap_reports_the_failure_without_reverting(patch_lib, refactor, 
     patch_lib("drop", lambda *a, **k: dropped.append(a) or {})
     patch_lib("revert_range", lambda *a, **k: dropped.append(a))
     state_path = _state(
-        tmp_path, workflow_step=True, max_fix_rounds=2,
+        tmp_path, workflow_step=True, started_at="2000-01-01T00:00:00",
         final_gate={"fix_rounds": 2, "checks": []})
     env_tmp_dir(state_path)
     spy["test_code"] = 1
@@ -463,7 +463,7 @@ def test_final_gate_records_a_timed_out_whole_test_and_enters_a_fix_round(
     patch_lib, refactor, cmd_gate, tmp_path, env_tmp_dir, spy, capsys
 ):
     """R2-003 — 全体テストが打ち切りなら失敗として記録し、修正ラウンドへ進む。"""
-    state_path = _state(tmp_path, workflow_step=True, test_timeout=60)
+    state_path = _state(tmp_path, workflow_step=True, limits={"test_timeout": 60})
     env_tmp_dir(state_path)
     # 全体テストの実行を打ち切りへ差し替える（spy の差し替えを上書きする）。
     patch_lib("run_with_timeout",

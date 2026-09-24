@@ -23,11 +23,10 @@ import shutil
 import tempfile
 from typing import Any, Optional
 
-from . import info
-from .gitfacts import run_with_timeout, safe_int
+from . import info, timeline
+from .gitfacts import run_with_timeout
 from .paths import git_out
 from .testcmd import failed_nodes, rerun_command
-from .vocabulary import DEFAULT_TEST_TIMEOUT
 
 
 def _read(log: pathlib.Path) -> str:
@@ -82,7 +81,7 @@ def classify(state: dict[str, Any], whole_log: pathlib.Path, timed_out: bool) ->
     """全体のテストの失敗を分ける。取り出せなければ `unparsed_reason` だけを返す。"""
     command = str((state.get("baseline_test") or {}).get("command") or "")
     work = str(state["worktrees"]["work"])
-    timeout = safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT)
+    timeout = timeline.state_test_timeout(state)
     tmp = pathlib.Path(state["tmp_dir"])
     if timed_out:
         return {"unparsed_reason": "全体のテストが打ち切られ、落ちたテストを取り出せなかった"}

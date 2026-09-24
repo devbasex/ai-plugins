@@ -187,8 +187,38 @@ def format_plan(state: dict[str, Any]) -> str:
         lines.extend(["（採用した改善項目なし）", ""])
     for item in items:
         lines.extend(_plan_item_section(item))
+    lines.extend(limits_section(state.get("limits") or {}))
     lines.extend(_plan_deferred_section(state))
     return "\n".join(lines).rstrip() + "\n"
+
+
+# 上限の表の行（決定 24）。式は `docs/02-plan-and-implement.md` の「締め切り」の節にある。
+_LIMIT_ROWS = (
+    ("propose_end_at", "提案の枠の終わり（監視の上限 = 残り + 余裕）"),
+    ("plan_end_at", "計画の枠の終わり（同上）"),
+    ("add_tests_end_at", "テストの追加の終わり = 最後の項目の完了の締め切り"),
+    ("implement_end_at", "実装の終わり = 最後の項目の完了の締め切り"),
+    ("fix_end_at", "直しの試行の打ち切り"),
+    ("final_end_at", "最終ゲートの修正の打ち切り（想定最大時間の終わり）"),
+    ("init_test_timeout", "着手前のテスト 1 回の上限（秒）"),
+    ("test_timeout", "テスト 1 回の上限（秒）"),
+    ("margin_seconds", "余裕（秒。段の上限と CLI の上限に足す）"),
+)
+
+
+def limits_section(limits: dict[str, Any]) -> list[str]:
+    """実行時の値の表。読み手が実行の前にすべての時刻を見られるようにする（決定 24）。
+
+    無音の打ち切りは段の監視の上限と同じ値のため、行を分けない。
+    """
+    if not limits:
+        return []
+    lines = ["## 時間の上限", "", "| 値 | 中身 |", "| --- | --- |"]
+    for key, label in _LIMIT_ROWS:
+        value = limits.get(key)
+        lines.append(f"| {label} | {'—' if value is None else value} |")
+    lines.extend(["", "無音の打ち切りは段の監視の上限と同じ値である。項目ごとの締め切りは各項目の節にある。", ""])
+    return lines
 
 
 def _plan_deferred_section(state: dict[str, Any]) -> list[str]:
@@ -235,6 +265,14 @@ def _plan_item_section(item: dict[str, Any]) -> list[str]:
         f"**手順**: {item.get('plan') or '（記録なし）'}",
         "",
     ]
+    deadlines = [f"{label} {item[key]}" for key, label in (
+        ("test_start_deadline", "テストの追加の着手"), ("start_deadline", "実装の着手"))
+        if item.get(key)]
+    if deadlines:
+        lines.extend([f"**締め切り**: {' / '.join(deadlines)}", ""])
+    if item.get("review_test_judgements"):
+        paths = ", ".join(f"`{p}`" for p in item["review_test_judgements"])
+        lines.extend([f"**レビューで確かめるテストの差分**: {paths}（機械で期待値が変わったか決まらなかった）", ""])
     if item.get("failure_reason"):
         lines.extend([f"**取り消した理由**: {item['failure_reason']}", ""])
     return lines

@@ -214,7 +214,7 @@ def unassigned_fix_commits(
 # **「テストを足したか」だけでは、期待値の変更を止められない**（#443）。同じ入力に対する
 # 期待出力が変わっていれば、それは振る舞いの変更である。
 #
-# 判定は 3 段で行う。ここが担うのは段 1（機械）で、決まらないものは段 2（AI）へ渡す。
+# ここが担うのは段 1（機械）で、決まらないものは最終ゲートのレビューへ引き継ぐ（決定 25）。
 #
 # **機械が「変わっていない」と言える範囲を最小にする。** 差分の意味を機械で読もうとすると
 # 穴が開く。実測で 5 回続けて別の抜けが見つかった。
@@ -225,7 +225,7 @@ def unassigned_fix_commits(
 # | `EXPECTED = 4` を足して既存を残す | 外側の行が減らない |
 # | 値を定数へ抽出する | `assert` の行から値が消える |
 #
-# **決められないものを決めない。** 段 2 の AI が読む。
+# **決められないものを決めない。** 最終ゲートのレビューが読む。
 
 # 値そのもの。数値・文字列・真偽・None を指す。
 _LITERAL = re.compile(
@@ -253,7 +253,7 @@ def assertion_change(before: Iterable[str], after: Iterable[str]) -> str:
     | `undecidable` | **機械では決まらない** | それ以外すべて |
 
     **`unchanged` は「同じ」のときだけ返す。** 経路だけの変更も、行の並べ替えも、
-    テストの追加も、機械では期待出力への影響を否定できない。段 2 の AI が読む。
+    テストの追加も、機械では期待出力への影響を否定できない。最終ゲートのレビューが読む。
     """
     rows_before, rows_after = list(before), list(after)
     if rows_before == rows_after:
@@ -268,7 +268,7 @@ def undecidable_test_changes(
 ) -> list[str]:
     """機械では判定できないテストの差分を、ファイルの順で返す。
 
-    **呼ぶ側はこれを段 2（AI エージェント）へ渡す。** 空でないまま通さない。
+    **呼ぶ側はこれを最終ゲートのレビューへ引き継ぐ。** 空でないまま通さない。
     """
     return sorted(
         path for path, (before, after) in changes.items()
@@ -303,7 +303,7 @@ def verify_test_changes(
     """テストの差分に、期待値の変更が含まれていないかを見る。
 
     **判定できないものはここでは落とさない。** `undecidable_test_changes` が集め、
-    呼ぶ側が段 2 へ渡す。
+    呼ぶ側がレビューへ引き継ぐ。
     """
     changed = sorted(
         path for path, (before, after) in changes.items()
@@ -315,47 +315,12 @@ def verify_test_changes(
 
 
 def pending_test_judgements(facts: Iterable[dict[str, Any]]) -> list[str]:
-    """段 2（AI エージェント）へ渡すテストを、ファイルの順で返す。
+    """機械（段 1）で決まらないテストを、ファイルの順で返す。最終ゲートのレビューへ引き継ぐ（決定 25）。
 
     **機械で決まらなかったものだけが残る。** 空でないまま収束させない。
     """
     changes = collect_test_changes(facts)
     return undecidable_test_changes(changes)
-
-
-def _answers_by_path(verdicts: Iterable[dict[str, Any]]) -> dict[str, str]:
-    """段 2 の答えを、対象ファイルから引ける形にする。"""
-    return {
-        str(verdict.get("path")): str(verdict.get("verdict"))
-        for verdict in verdicts
-        if isinstance(verdict, dict) and verdict.get("path")
-    }
-
-
-def merge_test_judgements(
-    pending: Iterable[str], verdicts: Iterable[dict[str, Any]],
-) -> dict[str, Any]:
-    """段 2（AI エージェント）の答えを取り込み、次にどうするかを返す。
-
-    | 戻り値の項目 | 中身 |
-    | --- | --- |
-    | `problem` | `changed` が 1 件でもあれば失敗の理由。無ければ `None` |
-    | `pending` | レビューへ引き継ぐもの（`undecidable` と、答えが欠けたもの） |
-
-    **答えが欠けたものを `unchanged` に倒さない。** 倒すと、判定を返さないことが
-    通過の手段になる。知らない答えも同じ扱いにする。
-    """
-    answers = _answers_by_path(verdicts)
-    changed = sorted(p for p in pending if answers.get(p) == "changed")
-    if changed:
-        return {
-            "problem": _changed_test_message(changed),
-            "pending": [],
-        }
-    return {
-        "problem": None,
-        "pending": sorted(p for p in pending if answers.get(p) != "unchanged"),
-    }
 
 
 # ---------- 文書の文言を固定するテスト（#723） ----------

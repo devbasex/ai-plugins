@@ -22,7 +22,7 @@ from typing import Any, Optional
 
 import statefile
 
-from .. import die, info
+from .. import clock, die, info, timeline
 from ..gitfacts import (
     discard_impl_leftovers,
     flush_pending_push,
@@ -43,7 +43,6 @@ from ..intake import (
 )
 from ..paths import git_out, load_state
 from ..verify import verify_final_fix_commit
-from ..vocabulary import DEFAULT_TEST_TIMEOUT
 from ..verify import unassigned_fix_commits
 
 
@@ -51,9 +50,9 @@ def cmd_final_gate(args: argparse.Namespace) -> None:
     """最終ゲートを通す（#933 の AC16b・決定 15・決定 16）。
 
     終了コード: 0 = 通過（または `cross-review` を実行する） / 2 = 落ちた
-    （修正ラウンドへ） / 1 = 修正の上限に達した（**取り消さず**報告へ抜ける）。
+    （修正ラウンドへ） / 1 = 修正を打ち切った（想定最大時間の終わり）（**取り消さず**報告へ抜ける）。
 
-    **最終ゲートは push 済みの地点である。** 上限に達しても取り消さない。取り消しの
+    **最終ゲートは push 済みの地点である。** 打ち切っても取り消さない。取り消しの
     判断は Pull Request の読み手が持つため、失敗として報告に書く。
 
     | 起動のされ方 | 見るもの |
@@ -85,11 +84,25 @@ def cmd_final_gate(args: argparse.Namespace) -> None:
         _gate_passed(path, state, gate, detail)
         return
 
-    limit = safe_int(state.get("max_fix_rounds"), 3)
-    if safe_int(gate.get("fix_rounds")) >= limit:
-        _gate_limit_reached(path, state, gate, detail, limit)
+    stop = _final_fix_stop(state, gate)
+    if stop:
+        _gate_limit_reached(path, state, gate, detail, stop)
         return
-    _gate_failing(path, state, gate, detail, limit)
+    _gate_failing(path, state, gate, detail)
+
+
+def _final_fix_stop(state: dict[str, Any], gate: dict[str, Any]) -> Optional[str]:
+    """最終ゲートの修正を打ち切る理由。続けられれば `None`（決定 23）。
+
+    **回数ではなく時計で決める。** 終わり（`limits.final_end_at` = 開始 + 想定最大時間）を
+    過ぎていれば打ち切る。起動し直しても解けない結末（利用上限）も打ち切る。
+    """
+    if gate.get("no_relaunch"):
+        return "修正担当を起動し直しても解けない結末だった"
+    end = clock.parse(timeline.limits_of(state).get("final_end_at"))
+    if end is not None and clock.now() >= end:
+        return "想定最大時間の終わりを過ぎた"
+    return None
 
 
 def _reusable_whole_test(state: dict[str, Any]) -> bool:
@@ -167,12 +180,12 @@ def _gate_passed(
 
 
 def _gate_limit_reached(
-    path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any], detail: str, limit: int
+    path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any], detail: str, why: str
 ) -> None:
     gate["status"] = "failed"
     statefile.save(path, state)
     info(
-        f"❌ 最終ゲートが通らないまま修正の上限 {limit} に達しました（{detail}）。"
+        f"❌ 最終ゲートが通らないまま修正を打ち切りました（{why} / {detail}）。"
         "**既に push してあるため取り消しません。** 失敗として報告します"
     )
     statefile.emit(FINAL_GATE="failed")
@@ -180,7 +193,7 @@ def _gate_limit_reached(
 
 
 def _gate_failing(
-    path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any], detail: str, limit: int
+    path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any], detail: str,
 ) -> None:
     gate["fix_rounds"] = safe_int(gate.get("fix_rounds")) + 1
     gate["status"] = "failing"
@@ -193,7 +206,7 @@ def _gate_failing(
     impl = _final_fix_impl(state, gate)
     statefile.save(path, state)
     info(
-        f"❌ 最終ゲートが落ちました（{detail}）。修正ラウンド {gate['fix_rounds']} / {limit}"
+        f"❌ 最終ゲートが落ちました（{detail}）。修正ラウンド {gate['fix_rounds']}"
         f" — 修正担当は {impl} です"
     )
     statefile.emit(
@@ -240,9 +253,9 @@ def _close_failed_final_fix(
 ) -> None:
     """最終ゲートの修正担当が結果を残さなかったときに、取り消して判定へ戻す。
 
-    **修正ラウンドは進めない。** 進めるのは次の最終ゲートで、そこが上限を見る。
-    起動し直しても解けない結末（利用上限）だけは上限の値まで進め、次の最終ゲートを
-    「取り消さず報告」で終わらせる（#728 の決定 11）。
+    **修正ラウンドは進めない。** 進めるのは次の最終ゲートで、そこが打ち切りを見る。
+    起動し直しても解けない結末（利用上限）だけは印（`no_relaunch`）を立て、次の最終
+    ゲートを「取り消さず報告」で終わらせる（#728 の決定 11）。
     """
     closed = close_without_result(path, state, scope, outcome)
     if closed.range_unknown:
@@ -253,7 +266,7 @@ def _close_failed_final_fix(
             code=2,
         )
     if not closed.relaunch_same_agent:
-        gate["fix_rounds"] = safe_int(state.get("max_fix_rounds"), 3)
+        gate["no_relaunch"] = True
     statefile.save(path, state)
     sys.exit(2)
 
@@ -405,7 +418,7 @@ def _local_gate(state: dict[str, Any]) -> tuple[bool, str]:
     """全体のテストを手元で実行する。**全体のテストを呼ぶのは `init` とここだけである。**"""
     command = _baseline_command(state)
     work = str(state["worktrees"]["work"])
-    timeout = safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT)
+    timeout = timeline.state_test_timeout(state)
     code, timed_out = run_with_timeout(command, work, timeout)
     if timed_out:
         return False, f"{command} が {timeout} 秒で終わりませんでした"

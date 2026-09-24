@@ -22,7 +22,7 @@ from typing import Any, Optional
 
 import statefile
 
-from .. import clock, die, info, testcmd
+from .. import clock, die, info, testcmd, timeline
 from ..gitfacts import (
     collect_commit_facts,
     commit_time,
@@ -30,6 +30,7 @@ from ..gitfacts import (
     discard_impl_leftovers,
     flush_pending_push,
     push_with_retry_marker,
+    note_stopped,
     record_observed_model,
     run_with_timeout,
     safe_int,
@@ -57,7 +58,7 @@ from ..verify import (
     pending_test_judgements,
     verify_test_changes,
 )
-from ..vocabulary import DEFAULT_TEST_TIMEOUT, DEFER_NOT_DONE, DEFER_TEST_FAILED
+from ..vocabulary import DEFER_NOT_DONE, DEFER_TEST_FAILED
 
 
 @dataclass
@@ -88,7 +89,6 @@ def _facts(state: dict[str, Any], shas: list[str]) -> list[dict[str, Any]]:
     """コミットの事実（トレーラー・ファイル・差分行数・テストの差分）。テストは走らせない。"""
     return collect_commit_facts(
         str(state["worktrees"]["work"]), shas, set(shas), "", state["head_branch"],
-        safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT),
     )
 
 
@@ -229,7 +229,7 @@ def _test_words(state: dict[str, Any], item: dict[str, Any], files: list[str]) -
 def _run_added_tests(state: dict[str, Any], intake: Intake) -> None:
     """足したテストが今のコードで通るかを確かめる（決定 13）。同じ語の並びは 1 回だけ走らせる。"""
     work = str(state["worktrees"]["work"])
-    timeout = safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT)
+    timeout = timeline.state_test_timeout(state)
     results: dict[tuple[str, ...], bool] = {}
     for item_id, fact in intake.accepted.items():
         words = _test_words(state, find_item(state, item_id), list(fact.get("files") or []))
@@ -309,6 +309,7 @@ def cmd_merge_tests(args: argparse.Namespace) -> None:
     intake = _recalled(state, "add-tests")
     if intake is None:
         record_observed_model(state, str(state["implementer"]), "add-tests")
+        note_stopped(state, str(state["implementer"]), "add-tests")
         intake = _intake_tests(state)
         _run_added_tests(state, intake)
         for item_id, fact in intake.accepted.items():
@@ -383,35 +384,25 @@ def _intake_implement(state: dict[str, Any]) -> Intake:
     return intake
 
 
-def _write_judge_diff(state: dict[str, Any], pending: dict[str, list[str]]) -> None:
-    """段 2 へ渡す差分を書き出す。項目ごとに、実装のコミットのテストの差分だけ。"""
-    work = str(state["worktrees"]["work"])
-    chunks = []
-    for item_id, paths in sorted(pending.items()):
-        sha = find_item(state, item_id)["commits"]["implement"]
-        diff = git_out(work, ["show", "--format=", sha, "--", *paths], strip=False) or ""
-        chunks.append(f"# {item_id}\n{diff}")
-    out = pathlib.Path(state["tmp_dir"]) / f"test-diff-rf{state['id']}.diff"
-    out.write_text("\n".join(chunks), encoding="utf-8")
-
-
 def cmd_merge_implement(args: argparse.Namespace) -> None:
     """実装を取り込む。
 
     終了コード: 0 = 取り込んだ / 2 = 残る項目 0 件（最終ゲートへ）/ 4 = 範囲を確定できない。
-    出力: `JUDGE_NEEDED=0|1`（段 2 の判定を待つテストの差分があるか）。
+
+    **テストの差分のうち段 1 で決まらないものは、最終ゲートのレビューへ引き継ぐ**
+    （`review_test_judgements`。決定 25）。計画の後に判断のために LLM を起動しない。
     """
     path, state = load_state(args.id)
     _prepare(path, state)
     if ((state.get("phases") or {}).get("implement") or {}).get("ended_at"):
         info("↻ 実装は取り込み済みです")
-        statefile.emit(JUDGE_NEEDED=1 if _pending(state) else 0)
         if not live_items(state):
             sys.exit(2)
         return
     intake = _recalled(state, "implement")
     if intake is None:
         record_observed_model(state, str(state["implementer"]), "implement")
+        note_stopped(state, str(state["implementer"]), "implement")
         intake = _intake_implement(state)
         for item_id, fact in intake.accepted.items():
             item = find_item(state, item_id)
@@ -420,23 +411,16 @@ def cmd_merge_implement(args: argparse.Namespace) -> None:
             item["diff_lines"] = safe_int(fact.get("diff_lines"))
             pending = pending_test_judgements([fact])
             if pending:
-                item["pending_test_judgements"] = pending
+                item["review_test_judgements"] = pending
         _record_seconds(state, "implement", "implement", intake.accepted)
         _remember(path, state, "implement", intake)
     else:
         info("↻ 実装の結論は記録済みです。取り消しと見送りだけをやり直します")
     _settle(path, state, intake, "実装の取り込み")
-    pending = _pending(state)
-    if pending:
-        _write_judge_diff(state, pending)
+    carried = [i["id"] for i in live_items(state) if i.get("review_test_judgements")]
     info(f"実装: 採用 {len(intake.accepted)} 件 / not_done {len(intake.not_done)} 件 / "
          f"手順違反 {len(intake.rejected)} 件")
-    statefile.emit(JUDGE_NEEDED=1 if pending else 0)
+    if carried:
+        info(f"{len(carried)} 件のテストの差分は機械で決まらないため、最終ゲートのレビューへ"
+             f"引き継ぎます（改修計画に載ります）: {', '.join(carried)}")
     _finish(path, state, "implement")
-
-
-def _pending(state: dict[str, Any]) -> dict[str, list[str]]:
-    return {
-        i["id"]: list(i["pending_test_judgements"])
-        for i in live_items(state) if i.get("pending_test_judgements")
-    }

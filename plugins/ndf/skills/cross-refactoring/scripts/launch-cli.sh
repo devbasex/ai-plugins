@@ -4,7 +4,7 @@
 # Usage: launch-cli.sh <runtime> <phase> <ID>
 #
 #   runtime  claude | codex | agy | kiro
-#   phase    propose | plan | add-tests | implement | fix | judge-test-changes | final-fix
+#   phase    propose | plan | add-tests | implement | fix | final-fix
 #   ID       状態ファイルの鍵（最初に初期化した Pull Request 番号）
 #
 # **フェーズの名前は状態・履歴・`limits.py`・雛形で同じ語を使う。** 提案だけが参加者の
@@ -48,14 +48,14 @@ load_common_state() {
 
 load_common_state
 
-# CLI 側の実行時間の上限。**`start-phase` が予算から導いた上限があればその秒数を渡す**
-# （テストの追加と実装。締め切りより先に CLI が止まらないため）。無ければ工程名を渡し、
-# 共通層が上限の表（`lib/limits.py`）から「監視の上限 + 120 秒」を導く（#598 / #537）。
+# CLI 側の実行時間の上限。**`start-phase` が予算から導いた上限（監視の上限 + 余裕）を
+# そのまま渡す**（決定 24）。記録が無ければ（`start-phase` を通らない起動）工程名を渡し、
+# 共通層が上限の表（`lib/limits.py`）から導く（#598 / #537）。
 resolve_print_timeout() {
   local override
-  override=$(jq -r --arg p "$PHASE" '.phases[$p].timeout // empty' "$STATE")
+  override=$(jq -r --arg p "$PHASE" '.phases[$p].cli_timeout // empty' "$STATE")
   if [ -n "$override" ]; then
-    PRINT_TIMEOUT=$((override + 120))
+    PRINT_TIMEOUT=$override
   else
     PRINT_TIMEOUT=$PHASE
   fi
@@ -69,7 +69,7 @@ case "$PHASE" in
     STEM=$TMP_DIR/$RUNTIME-$PHASE-rf$ID
     WORKDIR=$ROOT/$RUNTIME
     ;;
-  add-tests|implement|fix|judge-test-changes)
+  add-tests|implement|fix)
     # 書き換えるフェーズは常に work/ の中だけで行う。並列には起動しない。
     STEM=$TMP_DIR/$RUNTIME-$PHASE-rf$ID
     WORKDIR=$WORK
@@ -88,9 +88,6 @@ esac
 }
 
 configure_phase
-# 段 2 の判定の材料は `merge-implement` が書き出す。**渡すものが無いまま起動しない。**
-[ "$PHASE" != judge-test-changes ] || [ -s "$TMP_DIR/test-diff-rf$ID.diff" ] || {
-  echo "判定する差分がありません: $TMP_DIR/test-diff-rf$ID.diff" >&2; exit 1; }
 resolve_print_timeout
 
 # Skill の配置先はランタイムで違う。**プロンプトに明示パスを必ず書く**ため、
@@ -187,7 +184,6 @@ export RF_ITEMS=$ITEMS_JSON RF_TMP_DIR=$TMP_DIR
 export RF_BUDGET_MINUTES=$BUDGET_MINUTES RF_END_AT=$END_AT
 export RF_VOCAB_SMELLS=$VOCAB_SMELLS RF_VOCAB_TECHNIQUES=$VOCAB_TECHNIQUES
 export RF_VOCAB_SEVERITIES=$VOCAB_SEVERITIES RF_VOCAB_VIEWPOINTS=$VOCAB_VIEWPOINTS
-export RF_TEST_DIFF_PATH=$TMP_DIR/test-diff-rf$ID.diff
 }
 
 collect_items

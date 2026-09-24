@@ -10,7 +10,7 @@ import models as models_lib
 import run_metrics
 import statefile
 
-from .. import allocation, clock, info
+from .. import allocation, clock, info, timeline
 from ..items import item_label
 from ..measure import summary_extra
 from ..outbound import plan_reference
@@ -96,6 +96,8 @@ def cmd_report(args: argparse.Namespace) -> None:
     _print_participants(state)
     print()
     _print_deferred(state)
+    print()
+    _print_fixed_values()
     if args.metrics:
         print()
         print("## 種類別の件数と所要")
@@ -143,8 +145,25 @@ def _print_header(state: dict[str, Any]) -> None:
     print(f"- 最終ゲート: {gate.get('mode') or '—'}（{gate.get('status') or '未実行'}"
           f"{' / 検証の結果を使い回した' if gate.get('whole_test_reused') else ''}"
           f" / 修正 {gate.get('fix_rounds', 0)} 回）")
+    print(f"- 監視が止めた段: {_stopped_line(state)}")
     print(f"- 配分テーブル: {(state.get('plan') or {}).get('table_source') or '—'}")
     print(f"- 改修計画: {plan_reference(state)}")
+
+
+def _stopped_line(state: dict[str, Any]) -> str:
+    """段の上限で監視が CLI を止めた段（決定 23）。止めていなければ「なし」。"""
+    stopped = [f"{name}（上限 {record['stopped'].get('timeout')} 秒）"
+               for name, record in (state.get("phases") or {}).items()
+               if isinstance(record, dict) and record.get("stopped")]
+    return " / ".join(stopped) or "なし"
+
+
+def _print_fixed_values() -> None:
+    """想定最大時間から導かず、固定のまま残した値（決定 24）。"""
+    print("## 固定のまま残した値")
+    print()
+    for name, value, why in timeline.FIXED_VALUES:
+        print(f"- {name}: {value}（{why}）")
 
 
 # 全体のテストが落ちたときの結末（決定 22）。

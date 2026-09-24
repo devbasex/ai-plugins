@@ -219,7 +219,7 @@ def test_narrowing_stops_as_soon_as_the_failed_tests_pass(
     _existing_tests(flow, {"tests/test_total.py": TEST_TOTAL})
     _implement(flow, cmd_setup, cmd_implement,
                {"I-001": _touch_other("other"), "I-002": _break_total},
-               max_fix_rounds=0)
+               started_at="2000-01-01T00:00:00+00:00")
     capsys.readouterr()
 
     _call(cmd_converge, "cmd_verify")

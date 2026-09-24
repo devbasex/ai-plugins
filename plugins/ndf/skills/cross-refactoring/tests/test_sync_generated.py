@@ -208,10 +208,7 @@ def test_merge_fix_continues_when_impl_left_changes(patch_lib, refactor, tmp_pat
 
 
 def test_merge_fix_advances_when_the_range_is_undeterminable(patch_lib, refactor, tmp_path, env_tmp_dir):
-    """修正の範囲を確定できなくても、修正の回数は進めること。
-
-    進めないと上限（`--max-fix-rounds`）に届かず、検証と修正を無限に往復する。
-    """
+    """修正の範囲を確定できなくても、修正の回数は進めること（報告に出す回数）。"""
     work = _make_work(tmp_path)
     # **起点が無い**状態。範囲を確定できない。
     state_path = _fix_state(tmp_path, work, None)

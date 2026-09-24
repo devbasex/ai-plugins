@@ -18,11 +18,10 @@ import models as models_lib
 import statefile
 from monitor_outcome import LaunchOutcome, read_launch_outcome
 
-from . import die, info
+from . import die, info, timeline
 from .paths import git_out, sh, stem_for
 from .plan import format_plan, normalize_plan_file, publish_plan_comment
 from .vocabulary import (
-    DEFAULT_TEST_TIMEOUT,
     PLAN_COMMIT_MESSAGE,
     SYNC_AND_PLAN_COMMIT_MESSAGE,
     SYNC_COMMIT_MESSAGE,
@@ -347,7 +346,7 @@ def _kill_process_group(
 
 def run_test_at(
     work: str, sha: str, command: str, head_branch: str,
-    timeout: int = DEFAULT_TEST_TIMEOUT, kill_grace: float = 5.0,
+    timeout: int, kill_grace: float = 5.0,
 ) -> str:
     """指定コミットを取り出してテストを実行し `pass` / `fail` を返す。
 
@@ -374,9 +373,11 @@ def run_test_at(
 
 def collect_commit_facts(
     work: str, shas: list[str], in_range: set[str], test_command: str,
-    head_branch: str, test_timeout: int = DEFAULT_TEST_TIMEOUT,
+    head_branch: str, test_timeout: int = 0,
 ) -> list[dict[str, Any]]:
     """申告されたコミットについて、git と実際のテスト実行から事実を集める。
+
+    `test_timeout` はテストコマンドを渡したときだけ使う（今の呼び出し元はどれも渡さない）。
 
     `in_range` は信頼できる起点から HEAD までのコミット集合。ここに無い SHA は
     `exists=False` として返す。実体が無いものにテストを走らせても意味がない。
@@ -775,7 +776,7 @@ def _run_sync_command(state: dict[str, Any], work: str, command: str) -> None:
     検査を壊したまま進むことになる。
     """
     code, timed_out = run_with_timeout(
-        command, work, safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT)
+        command, work, timeline.state_test_timeout(state)
     )
     if not (timed_out or code != 0):
         return
@@ -973,6 +974,28 @@ def read_result(state: dict[str, Any], runtime: str, phase: str) -> LaunchOutcom
     取り消されないまま残る（#728）。
     """
     return read_launch_outcome(state["tmp_dir"], stem_for(runtime, phase, state["id"]))
+
+
+# 監視が CLI を止めた結末（段の上限。無進捗の許容も同じ値を渡す）。
+STOPPED_REASONS = frozenset({"timeout", "stalled"})
+
+
+def note_stopped(state: dict[str, Any], runtime: str, phase: str) -> None:
+    """監視が段の上限で CLI を止めていたら、フェーズの記録に残す（決定 23）。
+
+    **取り込みは止めたかどうかで変えない。** 未コミットの変更は取り込みの前に捨て
+    （`discard_impl_leftovers`）、コミット済みの項目は git の時刻による判定へそのまま
+    流す。止めたことは `phases.<段>.stopped` に残り、報告に 1 行出る。
+    """
+    monitor = read_result(state, runtime, phase).monitor or {}
+    reason = str(monitor.get("reason") or "")
+    if reason not in STOPPED_REASONS:
+        return
+    record = state.setdefault("phases", {}).setdefault(phase, {})
+    record["stopped"] = {"reason": reason, "timeout": record.get("timeout"),
+                         "at": monitor.get("ended_at")}
+    info(f"⏰ 監視が {phase} の CLI を上限（{record.get('timeout')} 秒）で止めました。"
+         "未コミットの変更は捨て、コミット済みの項目は締め切りで判定します")
 
 
 def record_observed_model(state: dict[str, Any], runtime: str, phase: str) -> None:

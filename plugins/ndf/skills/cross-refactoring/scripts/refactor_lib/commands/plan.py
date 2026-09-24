@@ -16,7 +16,7 @@ import jev
 import run_metrics
 import statefile
 
-from .. import allocation, budget, clock, info, testcmd
+from .. import allocation, budget, clock, info, testcmd, timeline
 from ..gitfacts import read_result, record_observed_model
 from ..items import PLANNED, defer, group_key, item_kind, item_label, key_text
 from ..paths import git_out, load_state
@@ -26,6 +26,7 @@ from ..vocabulary import (
     DEFER_DUPLICATE,
     DEFER_NO_TARGET,
     JEV_DUPLICATE_CONFIDENCE,
+    JEV_RISK_CONFIDENCE,
     JEV_TIER_CONFIDENCE,
 )
 
@@ -151,6 +152,26 @@ def _merge_duplicates(state: dict[str, Any]) -> list[dict[str, Any]]:
     return kept
 
 
+def _decide_public_io(state: dict[str, Any], items: list[dict[str, Any]]) -> None:
+    """採った項目ごとに、公開の入出力が変わりうるか（D5）を**計画の時点で**決める（決定 25）。
+
+    Jev が確信度 0.7 以上で答えればその答え、使えなければ実装担当の `risk` を使う。
+    検証の段は、ここで決めた値を読むだけで、LLM へ問わない。差分はまだ無いため、
+    Jev へ送るのは提案の文だけである。
+    """
+    for item in items:
+        item["public_io"], item["public_io_source"] = bool(item.get("risk")), "runtime"
+        if not _jev_usable(state):
+            continue
+        result = jev.ask_boolean(
+            _proposal_text(item), "Could this refactoring change the public input or output of the code?")
+        if result is None:
+            _count_failure(state)
+        else:
+            item["public_io"] = bool(result[0] and result[1] >= JEV_RISK_CONFIDENCE)
+            item["public_io_source"] = "jev"
+
+
 def _allocation_table(state: dict[str, Any]) -> dict[str, Any]:
     """配分テーブルを履歴から集計する（決定 7）。読めなければ初期値で、1 行知らせる（AC20）。"""
     base = run_metrics.metrics_dir()
@@ -247,6 +268,7 @@ def cmd_merge_plan(args: argparse.Namespace) -> None:
     end = budget.end_time(clock.parse(state["started_at"]), int(state["budget_minutes"]),
                           budget.reserve_total(reserve))
     state["items"] = _plan_items(state, selected, end)
+    _decide_public_io(state, state["items"])
     state["plan"] = {
         "base_sha": git_out(str(state["worktrees"]["work"]), ["rev-parse", "HEAD"]),
         "elapsed_minutes": round(elapsed, 2),
@@ -257,6 +279,8 @@ def cmd_merge_plan(args: argparse.Namespace) -> None:
         "selected": [i["id"] for i in state["items"]],
         "end_at": clock.iso(end),
     }
+    # **実行時の値をすべて書き出す**（決定 24）。以後の段は、この表と時計の比較だけで進む。
+    state["limits"] = timeline.of_state(state)
     finish_phase(state, "plan")
     if not state["items"]:
         state["phase"] = "final"

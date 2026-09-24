@@ -104,9 +104,6 @@ def vocabulary() -> dict[str, Any]:
 # 想定最大時間の既定（分）。2026-09-24 利用者の指示で 30 分（#754 の指針「60 分以内」の中に収める）。
 DEFAULT_BUDGET_MINUTES = 30
 
-# 1 項目あたりの修正の上限の既定（#933 の AC3。群あたりから項目あたりへ意味が変わった）。
-DEFAULT_MAX_FIX_ROUNDS = 3
-
 # 計画へ渡す候補の上限（決定 17）。`path` + `symbol` の組を上位から 30 組、組の中は
 # 上位 3 件まで。計画の入力と Jev の「同じ変更か」の問いの数（最大 90 回）を抑える。
 CANDIDATE_GROUPS = 30
@@ -134,11 +131,6 @@ DEFER_REASONS = (
 
 # フェーズの名前（#933）。**状態・履歴・`launch-cli.sh`・`limits.py`・雛形で同じ語を使う。**
 PHASES = ("propose", "plan", "add-tests", "implement", "verify", "final", "done")
-
-# 無進捗と見なすまでの余白。テストの制限時間（`--test-timeout`）へ足した値を
-# 起動が `IMPL_STALL_TIMEOUT` として出す。適用と修正の担当はテストを 1 回実行し、
-# その間は何も出力しないため、制限時間そのままでは打ち切られる（#553）。
-IMPL_STALL_MARGIN = 900
 
 # テストの追加・実装・修正のコミットに必須のトレーラー。1 つでも欠けたら当該項目を
 # 失敗にする。自由文で「codex が実装」と書かせると集計に使えないため、必ずトレーラー
@@ -209,6 +201,3 @@ EXTRACTION_TECHNIQUES: frozenset[str] = frozenset(
     if factor == str(EXTRACTION_DIFF_BUDGET_FACTOR)
 )
 
-# テスト 1 回あたりの上限（秒）。生成されたコードやテストが無限ループに入ると、
-# 待ち続けて**進行全体が止まる**。打ち切って失敗として扱う。
-DEFAULT_TEST_TIMEOUT = 900

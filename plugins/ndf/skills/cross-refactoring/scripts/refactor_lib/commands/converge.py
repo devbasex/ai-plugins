@@ -1,9 +1,9 @@
-"""検証と修正（`verify` / `merge-fix` / `merge-test-judgements`、#933 の F6 F7）。
+"""検証と修正（`verify` / `merge-fix`、#933 の F6 F7）。
 
 **検証は HEAD で項目ごとの限ったテストを走らせる**（決定 14）。同じ語の並びの項目は
 1 回だけ走らせて結果を共有する。全体のテストは、危険の印が立ったときに検証の中で
 1 度だけ走らせる。落ちたら落ちたテストだけを走らせ直して揺れ・元からの失敗・変更が
-原因を見分け、変更が原因なら修正へ回す。締め切りか修正の上限に達しても通らなければ、
+原因を見分け、変更が原因なら修正へ回す。修正の締め切りまでに通らなければ、
 印の項目を新しい順に 1 件ずつ取り消し、通った時点で止める（決定 22。決定 15 を改めた）。
 
 | 返す値 | 意味 | 駆動がすること |
@@ -14,15 +14,13 @@
 from __future__ import annotations
 
 import argparse
-import json
 import pathlib
 import time
 from typing import Any, Optional
 
-import jev
 import statefile
 
-from .. import budget, clock, danger, info, triage
+from .. import budget, clock, danger, info, timeline, triage
 from ..gitfacts import (
     revert_range,
     collect_commit_facts,
@@ -31,11 +29,10 @@ from ..gitfacts import (
     commits_in_range,
     discard_impl_leftovers,
     flush_pending_push,
+    note_stopped,
     push_with_retry_marker,
-    read_result,
     record_observed_model,
     run_with_timeout,
-    safe_int,
 )
 from ..items import (
     FAILING,
@@ -53,17 +50,15 @@ from ..undo import drop, resume_pending_drop
 from ..verify import (
     verify_commit_basics,
     collect_test_changes,
-    merge_test_judgements,
     verify_test_changes,
 )
-from ..vocabulary import DEFAULT_MAX_FIX_ROUNDS, DEFAULT_TEST_TIMEOUT, JEV_RISK_CONFIDENCE
 
 
 # ---------- 限ったテスト ----------
 
 def _run(state: dict[str, Any], words: list[str], log: pathlib.Path) -> bool:
     """語の並びをシェルを通さずに走らせる（AC10b）。打ち切りは失敗。"""
-    timeout = safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT)
+    timeout = timeline.state_test_timeout(state)
     code, timed_out = run_with_timeout(list(words), str(state["worktrees"]["work"]),
                                        timeout, output=log)
     return (not timed_out) and code == 0
@@ -121,37 +116,32 @@ def _revert_shared(
     return False
 
 
-def _fix_stop(state: dict[str, Any], group: list[dict[str, Any]]) -> Optional[str]:
-    """この群の修正を打ち切る理由（`limit` / `time`）。続けられれば `None`。
+def _fix_stop(state: dict[str, Any]) -> bool:
+    """修正の試行を打ち切るか。**回数ではなく時計で決める**（決定 23）。
 
-    **限ったテストの修正と全体のテストの直しが同じ判定を使う**（決定 22）。締め切りは
-    `budget.fix_time_left` と控えの `fix`、上限は `--max-fix-rounds` である。
+    修正に使える残り（`budget.fix_time_left`）が控えの `fix`（修正 1 回の見積り）に
+    足りなければ打ち切る。限ったテストの修正と全体のテストの直しが同じ判定を使う
+    （決定 22）。1 回の修正 = 実装担当の 1 起動で、次の試行の前にここで時計を見る。
     """
-    limit = safe_int(state.get("max_fix_rounds"), DEFAULT_MAX_FIX_ROUNDS)
-    if any(int(i.get("fix_count") or 0) >= limit for i in group):
-        return "limit"
     reserve = (state.get("plan") or {}).get("reserve") or {}
     left = budget.fix_time_left(clock.parse(state["started_at"]), int(state["budget_minutes"]),
                                 reserve, clock.now())
-    return "time" if left < float(reserve.get("fix") or 0.0) else None
+    return left < float(reserve.get("fix") or 0.0)
 
 
-def _stop_reason(state: dict[str, Any], stop: str, what: str) -> str:
-    limit = safe_int(state.get("max_fix_rounds"), DEFAULT_MAX_FIX_ROUNDS)
-    return (f"修正の上限 {limit} 回に達しても{what}が通らなかった" if stop == "limit"
-            else "修正に使える時間が残っていなかった")
+STOP_REASON = "修正に使える時間の内に通らなかった"
 
 
 def _give_up(path: pathlib.Path, state: dict[str, Any]) -> None:
-    """修正の上限か残り時間が尽きた項目を取り消す（設計の「検証と修正の繰り返し」2）。"""
+    """修正に使える時間が尽きたら、落ちた項目を取り消す（設計の「検証と修正の繰り返し」2）。"""
+    if not _fix_stop(state):
+        return
     groups: dict[tuple[str, ...], list[dict[str, Any]]] = {}
     for item in live_items(state):
         if item.get("status") == FAILING:
             groups.setdefault(tuple(item.get("command") or []), []).append(item)
     for group in groups.values():
-        stop = _fix_stop(state, group)
-        if stop:
-            _revert_shared(path, state, group, _stop_reason(state, stop, "限ったテスト"))
+        _revert_shared(path, state, group, f"限ったテストが{STOP_REASON}")
 
 
 # ---------- 危険の印 ----------
@@ -175,35 +165,13 @@ def _test_files(state: dict[str, Any], item: dict[str, Any]) -> Optional[list[st
     return danger.limited_test_files_from_round_test(round_test, str(state["worktrees"]["work"]))
 
 
-def _diff_stat(work: str, item: dict[str, Any]) -> str:
-    """Jev へ送る `git diff --stat` の行。**差分の本文は送らない**（非機能の条件）。"""
-    lines = []
-    for sha in item_shas(item):
-        out = git_out(work, ["show", "--stat", "--format=", sha]) or ""
-        lines.extend(line for line in out.splitlines() if line.strip())
-    return "\n".join(lines)
+def _d5(item: dict[str, Any]) -> bool:
+    """公開の入出力が変わりうるか。**計画の時点で決めた値を読むだけで、LLM へ問わない**（決定 25）。
 
-
-def _d5(state: dict[str, Any], item: dict[str, Any]) -> bool:
-    """公開の入出力が変わりうるか。Jev が確信度 0.7 以上で真なら立てる。使えなければ `risk`。
-
-    **`risk` は印を立てる側にだけ使う**（決定 14）。申告で検証を減らさない。
+    計画の前に作った状態ファイル（`public_io` を持たない）は実装担当の `risk` を使う。
+    `risk` は印を立てる側にだけ使う（決定 14）。
     """
-    if (state.get("judge") or {}).get("kind") == "jev":
-        text = json.dumps({
-            "path": item.get("path"), "symbol": item.get("symbol"),
-            "smell": item.get("smell"), "technique": item.get("technique"),
-            "rationale": item.get("rationale"), "plan": item.get("plan"),
-            "agreed_by": len(item.get("proposed_by") or []),
-            "diff_stat": _diff_stat(str(state["worktrees"]["work"]), item),
-        }, ensure_ascii=False)
-        result = jev.ask_boolean(
-            text, "Could this refactoring change the public input or output of the code?")
-        if result is not None:
-            return bool(result[0] and result[1] >= JEV_RISK_CONFIDENCE)
-        judge = state["judge"]
-        judge["failures"] = int(judge.get("failures") or 0) + 1
-    return bool(item.get("risk"))
+    return bool(item.get("public_io", item.get("risk")))
 
 
 def _flag_items(state: dict[str, Any]) -> list[str]:
@@ -217,7 +185,7 @@ def _flag_items(state: dict[str, Any]) -> list[str]:
         if not item.get("danger_checked"):
             found = danger.item_flags(
                 work, item, item_shas(item), _item_files(work, item), scope,
-                _test_files(state, item), _d5(state, item))
+                _test_files(state, item), _d5(item))
             item["danger"], item["danger_hits"] = found["flags"], found["hits"]
             item["danger_checked"] = True
         flags.extend(f for f in item.get("danger") or [] if f not in flags)
@@ -241,8 +209,7 @@ def _whole_test(path: pathlib.Path, state: dict[str, Any], flags: list[str]) -> 
     info(f"⚠ 危険の印（{', '.join(flags)}）が立ったため、全体のテストを 1 度走らせます: {command}")
     started = time.monotonic()
     log = pathlib.Path(state["tmp_dir"]) / "verify-whole-test.log"
-    code, timed_out = run_with_timeout(command, work,
-                                       safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT),
+    code, timed_out = run_with_timeout(command, work, timeline.state_test_timeout(state),
                                        output=log)
     passed = (not timed_out) and code == 0
     record.update({
@@ -294,21 +261,20 @@ def _whole_items(state: dict[str, Any], record: dict[str, Any]) -> list[dict[str
 def _fix_or_narrow(
     path: pathlib.Path, state: dict[str, Any], record: dict[str, Any], log: pathlib.Path,
 ) -> bool:
-    """締め切りと上限の内なら印の項目を修正へ回し（真）、外なら絞って取り消す（偽）。
+    """締め切りの内なら印の項目を修正へ回し（真）、過ぎていれば絞って取り消す（偽）。
 
     **1 回の修正 = 実装担当の 1 起動である。** 次の試行の前にここで時計を見るため、
     締め切りを担当の申告に頼らない。
     """
     items = _whole_items(state, record)
-    stop = _fix_stop(state, items) if items else "limit"
-    if stop is None:
+    if items and not _fix_stop(state):
         for item in items:
             item["status"] = FAILING
             item["last_log"] = str(log)
             item["whole_test_command"] = list(record.get("rerun_command") or [])
         info(f"🔧 変更が原因の失敗を直しに回します（印の項目 {len(items)} 件）")
         return True
-    reason = f"危険の印で走らせた全体のテストで落ちたテストが通らないまま、{_stop_reason(state, stop, '落ちたテスト')}"
+    reason = f"危険の印で走らせた全体のテストで落ちたテストが{STOP_REASON}"
     passed = _revert_shared(path, state, items, reason, command=list(record.get("rerun_command") or []))
     record["reverted"] = True
     record["resolution"] = "narrowed"
@@ -490,7 +456,7 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     **結果ファイルの申告は使わない。** 修正の起点から HEAD までのコミットを `Item-Id`
     で読み、修正の対象の項目のものだけを受け取る。1 件でも手順を外れたら範囲ごと
     取り消す（どのコミットが安全かを決められないため）。どちらの場合も修正の回数は
-    進める（進めないと上限に届かず、検証と修正を往復し続ける）。
+    数える（報告に出す）。往復を止めるのは締め切りである（決定 23）。
     """
     path, state = load_state(args.id)
     work = str(state["worktrees"]["work"])
@@ -500,6 +466,7 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
         info("↻ 取り込む修正はありません")
         return
     record_observed_model(state, str(state["implementer"]), "fix")
+    note_stopped(state, str(state["implementer"]), "fix")
     targets = [find_item(state, i, required=False) for i in fix.get("items") or []]
     targets = [t for t in targets if t is not None]
     result = _inspect_fix_commits(state, work, fix, targets)
@@ -510,46 +477,3 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     if state.get("pending_push"):
         push_with_retry_marker(path, state, state)
     info(f"修正を取り込みました（{len(result['ordered'])} コミット / 対象 {len(targets)} 件）。{plan_line(state)}")
-
-
-# ---------- merge-test-judgements ----------
-
-def _read_verdicts(state: dict[str, Any]) -> list[dict[str, Any]]:
-    outcome = read_result(state, str(state["implementer"]), "judge-test-changes")
-    found = (outcome.payload or {}).get("verdicts")
-    return [v for v in found if isinstance(v, dict)] if isinstance(found, list) else []
-
-
-def cmd_merge_test_judgements(args: argparse.Namespace) -> None:
-    """段 2（AI エージェント）の答えを取り込む（#443、実装計画 I7）。
-
-    `changed` の項目は取り消す。`undecidable` と答えの欠けたものは保留を解かず、
-    最終ゲートのレビューへ引き継ぐ（`review_test_judgements`）。**答えが欠けたものを
-    `unchanged` に倒さない。**
-    """
-    path, state = load_state(args.id)
-    pending = [i for i in live_items(state) if i.get("pending_test_judgements")]
-    if not pending:
-        info("判定を待っているテストはありません")
-        return
-    verdicts = _read_verdicts(state)
-    changed = []
-    for item in pending:
-        # **答えは項目ごとに引く。** 2 つの項目が同じテストのファイルを保留にしていると、
-        # パスだけで引けば片方の差分への `changed` が両方を取り消す。`item_id` の無い答えは
-        # 旧い形として、その項目の答えにも数える。
-        mine = [v for v in verdicts if v.get("item_id") in (None, "", item["id"])]
-        outcome = merge_test_judgements(item["pending_test_judgements"], mine)
-        item.pop("pending_test_judgements", None)
-        if outcome["problem"]:
-            item["failure_reason"] = outcome["problem"]
-            changed.append(item["id"])
-        elif outcome["pending"]:
-            item["review_test_judgements"] = outcome["pending"]
-    statefile.save(path, state)
-    if changed:
-        drop(path, state, changed, "段 2 の判定でテストの期待する振る舞いが変わっていた")
-        info(f"❌ 期待する振る舞いを変えた項目 {len(changed)} 件を取り消しました")
-    carried = [i["id"] for i in live_items(state) if i.get("review_test_judgements")]
-    if carried:
-        info(f"{len(carried)} 件のテストの差分はレビューへ引き継ぎます: {', '.join(carried)}")

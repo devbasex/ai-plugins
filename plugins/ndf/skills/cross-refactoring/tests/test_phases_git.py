@@ -6,7 +6,7 @@
 | AC11 | 1 改善項目 = 1 コミット（テストを足す項目は 2 コミット）。2 コミット以上は取り消す |
 | AC12 | コミットの無い項目・完了の締め切りを過ぎた項目は `not_done`。テストのコミットも取り消す |
 | AC13 AC14 | 検証は限ったテストだけ。全体のテストは印が立ったときに 1 度だけ（落ちたときの扱いは `test_whole_test_triage_git.py`） |
-| AC15 AC16 | 修正の上限で項目だけを取り消す。共有した項目は新しい方から 1 件ずつ |
+| AC15 AC16 | 修正の締め切りで項目だけを取り消す。共有した項目は新しい方から 1 件ずつ |
 | AC16b | 最終ゲートは、検証の中の全体のテストが通り HEAD が進んでいなければ使い回す |
 | AC17 | 単独起動は `cross-review` が `approved` のときだけ履歴へ追記する |
 """
@@ -300,9 +300,9 @@ def test_a_failing_item_goes_to_fix_and_returns_after_the_fix(
     assert stats["launches"] == 1
 
 
-def test_an_item_at_the_fix_limit_is_reverted_alone(
+def test_an_item_without_time_to_fix_is_reverted_alone(
         flow, cmd_setup, cmd_implement, cmd_converge, capsys):
-    """AC15: 上限に達した項目だけを取り消し、他の項目のコミットは残す。"""
+    """AC15 決定 23: 修正に使える時間が尽きたら落ちた項目だけを取り消し、他の項目のコミットは残す。"""
     work = flow["work"]
     first = _item("I-001", 1, symbol="add", targets=["tests/test_calc.py"])
     broken = _item("I-002", 2, targets=["tests/test_total.py"], tests=["tests/test_total.py"])
@@ -314,9 +314,7 @@ def test_an_item_at_the_fix_limit_is_reverted_alone(
     commit_with_trailers(work, "Refactor total", item_trailers("I-002"))
     _call(cmd_implement, "cmd_merge_implement")
     state = read_state(flow["path"])
-    for item in state["items"]:
-        if item["id"] == "I-002":
-            item["fix_count"] = 3
+    state["started_at"] = PAST
     write_state(flow["path"], state)
 
     capsys.readouterr()
@@ -332,7 +330,7 @@ def test_an_item_at_the_fix_limit_is_reverted_alone(
 
 def test_items_sharing_a_command_are_reverted_newest_first_until_it_passes(
         flow, cmd_setup, cmd_implement, cmd_converge, capsys):
-    """AC15: 同じ語の並びを共有した項目は新しい方から 1 件ずつ取り消し、通った時点で止める。"""
+    """AC15: 同じ語の並びを共有した項目は新しい方から 1 件ずつ取り消し、通った時点で止める（時間切れ）。"""
     work = flow["work"]
     older = _item("I-001", 1, symbol="add", targets=["tests/test_calc.py"])
     newer = _item("I-002", 2, targets=["tests/test_calc.py"])
@@ -346,8 +344,7 @@ def test_items_sharing_a_command_are_reverted_newest_first_until_it_passes(
     commit_with_trailers(work, "Refactor total", item_trailers("I-002"))
     _call(cmd_implement, "cmd_merge_implement")
     state = read_state(flow["path"])
-    for item in state["items"]:
-        item["fix_count"] = 3
+    state["started_at"] = PAST
     write_state(flow["path"], state)
 
     capsys.readouterr()
@@ -383,7 +380,7 @@ def test_the_whole_test_runs_once_when_a_danger_flag_is_raised_and_the_gate_reus
 
 def test_a_whole_test_failure_left_unfixed_reverts_the_flagged_item_and_the_gate_runs_again(
         flow, cmd_setup, cmd_implement, cmd_converge, cmd_gate):
-    """決定 22: 直せない（上限 0 回）なら印の項目を取り消す。全体のテストは検証の中で
+    """決定 22: 直す時間が無ければ印の項目を取り消す。全体のテストは検証の中で
     走らせ直さず、最終ゲートが走らせる。"""
     work = flow["work"]
 
@@ -397,7 +394,7 @@ def test_a_whole_test_failure_left_unfixed_reverts_the_flagged_item_and_the_gate
     commit_with_trailers(work, "既存のテスト", {})
     _verify_phase(flow, cmd_setup, cmd_implement, item, change=rename_and_break_outside)
     state = read_state(flow["path"])
-    state["max_fix_rounds"] = 0
+    state["started_at"] = PAST
     write_state(flow["path"], state)
     _call(cmd_converge, "cmd_verify")
     state = read_state(flow["path"])
@@ -466,3 +463,32 @@ def test_a_resumed_intake_reuses_its_conclusion_and_does_not_drop_twice(
     assert git("rev-parse", "HEAD", cwd=work).stdout.strip() == head
     assert _items(flow)["I-001"]["status"] == "implemented"
     assert len(read_state(flow["path"])["drops"]) == 1
+
+
+# ---------- 監視が段の上限で CLI を止めたとき（決定 23 / I15） ----------
+
+def test_a_phase_stopped_by_the_monitor_is_taken_in_by_the_deadline_and_reported(
+        flow, cmd_setup, cmd_implement, cmd_report, capsys):
+    """止めたときは未コミットの変更を捨て、コミット済みの項目は git の時刻で判定し、報告に出す。"""
+    work = flow["work"]
+    done = _item("I-001", 1, symbol="add")
+    late = _item("I-002", 2, deadline=PAST)
+    _implement_phase(flow, cmd_setup, done, late)
+    _write(work, "src/other.py", "X = 1\n")
+    commit_with_trailers(work, "Refactor add", item_trailers("I-001"))
+    _refactor_total(work)
+    commit_with_trailers(work, "Refactor total", item_trailers("I-002"))
+    _write(work, "src/half.py", "Y = 1\n")                   # 止められた時点の書きかけ
+    (flow["path"].parent / "claude-implement-rf130-monitor.json").write_text(
+        json.dumps({"reason": "timeout", "ended_at": "2026-09-24T10:40:00"}), encoding="utf-8")
+
+    _call(cmd_implement, "cmd_merge_implement")
+
+    state = read_state(flow["path"])
+    assert state["phases"]["implement"]["stopped"]["reason"] == "timeout"
+    assert not (work / "src" / "half.py").exists()
+    assert _items(flow)["I-001"]["status"] == "implemented"
+    assert _deferred(flow).get("I-002") == "not_done"
+    capsys.readouterr()
+    _call(cmd_report, "cmd_report", metrics=False)
+    assert "implement（上限" in capsys.readouterr().out

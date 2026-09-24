@@ -3,7 +3,8 @@
 **「テストを足したか」だけでは、期待値の変更を止められない。** 同じ入力に対する期待出力が
 変わっていれば、それは振る舞いの変更である。
 
-判定は 3 段で行う。ここで確かめるのは段 1（機械）と、段 2 へ渡す対象の切り出しである。
+判定は段 1（機械）と、機械で決まらないものを引き継ぐ最終ゲートのレビューで行う（決定 25）。ここで
+確かめるのは段 1 と、引き継ぐ対象の切り出しである。
 """
 from __future__ import annotations
 
@@ -39,7 +40,7 @@ def test_a_path_only_change_is_undecidable(verify) -> None:
     """読み込みの経路だけが変わった差分も、機械では決めない。
 
     **`unchanged` は「同じ」のときだけ返す。** 経路の変更が期待出力へ影響しないことを、
-    機械では確かめられない。段 2 の AI が読む。
+    機械では確かめられない。最終ゲートのレビューが読む。
     """
     before = ["    assert refactor.build(x) == 3\n"]
     after = ["    assert gitfacts.build(x) == 3\n"]
@@ -123,7 +124,7 @@ def test_a_path_only_change_passes(verify) -> None:
 def test_undecidable_diffs_are_collected_for_the_next_stage(verify) -> None:
     """判定できない差分は、落とさずに次の段へ渡す対象として集めること。
 
-    **通ったものとして扱わない。** 戻り値に残ることで、呼ぶ側が段 2 を起動できる。
+    **通ったものとして扱わない。** 戻り値に残ることで、呼ぶ側がレビューへ引き継げる。
     """
     pending = verify.undecidable_test_changes(
         {"tests/test_a.py": (["    assert refactor.f(1) == 3\n"],
@@ -131,67 +132,6 @@ def test_undecidable_diffs_are_collected_for_the_next_stage(verify) -> None:
          "tests/test_b.py": (["    assert g(1) == 3\n"], ["    assert g(1) == 3\n"])}
     )
     assert pending == ["tests/test_a.py"]
-
-
-# ---------- 段 2 の起動 ----------
-
-def _launch_judge(tmp_path, with_diff: bool):
-    import os
-    import subprocess
-    from crossref_helpers import make_state_v2
-
-    launch = pathlib.Path(__file__).resolve().parents[1] / "scripts" / "launch-cli.sh"
-    for name in ("work", "codex"):
-        (tmp_path / name).mkdir(parents=True, exist_ok=True)
-    state_path = make_state_v2(tmp_path, tmp_path / "work", implementer="codex")
-    stub_dir = tmp_path / "bin"
-    stub_dir.mkdir(exist_ok=True)
-    stub = stub_dir / "codex"
-    stub.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-    stub.chmod(0o755)
-    if with_diff:
-        # 判定の対象は進行側（`merge-implement`）が書き出す。**無ければ起動しない。**
-        (state_path.parent / "test-diff-rf130.diff").write_text("--- a\n+++ b\n", encoding="utf-8")
-    proc = subprocess.run(
-        [str(launch), "codex", "judge-test-changes", "130"],
-        env={**os.environ, "CROSS_REFACTORING_TMP_DIR": str(state_path.parent),
-             "PATH": f"{stub_dir}{os.pathsep}{os.environ['PATH']}"},
-        capture_output=True, text=True,
-    )
-    return proc, state_path
-
-
-def test_the_launcher_accepts_the_judging_phase(tmp_path) -> None:
-    """判定のフェーズが受け口にあり、差分の置き場所をプロンプトへ渡すこと。"""
-    proc, state_path = _launch_judge(tmp_path, with_diff=True)
-    assert proc.returncode == 0, proc.stderr
-    prompt = (state_path.parent / "codex-judge-test-changes-rf130-prompt.md").read_text(
-        encoding="utf-8")
-    assert str(state_path.parent / "test-diff-rf130.diff") in prompt
-
-
-def test_the_judging_phase_needs_the_diff(tmp_path) -> None:
-    """判定の対象が無ければ起動しないこと。**渡すものが無いまま起動しない。**"""
-    proc, state_path = _launch_judge(tmp_path, with_diff=False)
-    assert proc.returncode != 0
-    assert "判定する差分がありません" in proc.stderr
-    assert not (state_path.parent / "codex-judge-test-changes-rf130-prompt.md").exists()
-
-
-def test_the_judging_prompt_points_at_the_diff_file() -> None:
-    """プロンプトが、対象の差分の位置と結果の書き出し先を指すこと。"""
-    prompt = (pathlib.Path(__file__).resolve().parents[1]
-              / "prompts" / "judge-test-changes.md").read_text(encoding="utf-8")
-    assert "$RF_TEST_DIFF_PATH" in prompt
-    assert "$RF_STEM-result.json" in prompt
-
-
-def test_the_judging_prompt_asks_for_three_verdicts() -> None:
-    """判定の答えが 3 択であること。**2 択だと迷ったものが片方へ倒れる。**"""
-    prompt = (pathlib.Path(__file__).resolve().parents[1]
-              / "prompts" / "judge-test-changes.md").read_text(encoding="utf-8")
-    for verdict in ("unchanged", "changed", "undecidable"):
-        assert verdict in prompt
 
 
 # ---------- 検証への配線（レビューの指摘） ----------
@@ -239,7 +179,7 @@ def test_the_fix_intake_rejects_a_changed_expectation(cmd_converge) -> None:
 def test_the_round_verification_reports_undecidable_diffs(verify) -> None:
     """判定できない差分を、検証の結果として持ち出せること。
 
-    **落とさないが、通ったものとしても扱わない。** 進行側がこれを段 2 へ渡す。
+    **落とさないが、通ったものとしても扱わない。** 進行側がこれをレビューへ引き継ぐ。
     """
     facts = [{
         "test_changes": {"tests/test_a.py": (["    assert refactor.f(1) == 3\n"],
@@ -248,56 +188,11 @@ def test_the_round_verification_reports_undecidable_diffs(verify) -> None:
     assert verify.pending_test_judgements(facts) == ["tests/test_a.py"]
 
 
-# ---------- 判定結果の取り込み（レビューの指摘） ----------
-
-def test_all_unchanged_clears_the_pending_record(verify) -> None:
-    """全件が `unchanged` なら、保留の記録が消えること。"""
-    verdicts = [{"path": "tests/test_a.py", "verdict": "unchanged", "reason": "経路だけ"}]
-    outcome = verify.merge_test_judgements(["tests/test_a.py"], verdicts)
-    assert outcome["pending"] == []
-    assert outcome["problem"] is None
-
-
-def test_a_changed_verdict_fails_the_round(verify) -> None:
-    """1 件でも `changed` があれば、適用ラウンドを落とすこと。"""
-    verdicts = [{"path": "tests/test_a.py", "verdict": "changed", "reason": "270 が 300 に"}]
-    outcome = verify.merge_test_judgements(["tests/test_a.py"], verdicts)
-    assert outcome["problem"] is not None
-    assert "期待" in outcome["problem"]
-
-
-def test_an_undecidable_verdict_is_carried_to_the_review(verify) -> None:
-    """`undecidable` は保留のまま残し、レビューへ引き継ぐこと。"""
-    verdicts = [{"path": "tests/test_a.py", "verdict": "undecidable", "reason": "追えない"}]
-    outcome = verify.merge_test_judgements(["tests/test_a.py"], verdicts)
-    assert outcome["pending"] == ["tests/test_a.py"]
-    assert outcome["problem"] is None
-
-
-def test_a_missing_verdict_is_treated_as_undecidable(verify) -> None:
-    """答えが欠けたものは、判定できないものとして扱うこと。
-
-    **通ったものとして扱わない。** 抜けを `unchanged` に倒すと、判定を返さない
-    ことが通過の手段になる。
-    """
-    outcome = verify.merge_test_judgements(["tests/test_a.py", "tests/test_b.py"],
-                                           [{"path": "tests/test_a.py",
-                                             "verdict": "unchanged", "reason": "経路だけ"}])
-    assert outcome["pending"] == ["tests/test_b.py"]
-
-
-def test_an_unknown_verdict_is_treated_as_undecidable(verify) -> None:
-    """知らない答えも、判定できないものとして扱うこと。"""
-    outcome = verify.merge_test_judgements(
-        ["tests/test_a.py"], [{"path": "tests/test_a.py", "verdict": "maybe"}])
-    assert outcome["pending"] == ["tests/test_a.py"]
-
-
-# ---------- 保留の持ち方と取り込み（項目ごと。実装計画 I7） ----------
+# ---------- 保留の持ち方（項目ごと。実装計画 I7・決定 25） ----------
 
 @pytest.fixture
 def judged(tmp_path, monkeypatch, refactor, patch_lib, env_tmp_dir, cmd_setup, cmd_implement):
-    """実装で経路だけを変えた項目（段 2 待ち）と、テストに触れない項目の 2 件を取り込んだ状態。"""
+    """実装で経路だけを変えた項目（機械で決まらない）と、テストに触れない項目の 2 件を取り込んだ状態。"""
     import argparse
 
     from crossref_helpers import (build_git_flow, commit_with_trailers, git, item_trailers,
@@ -336,84 +231,16 @@ def judged(tmp_path, monkeypatch, refactor, patch_lib, env_tmp_dir, cmd_setup, c
     return flow
 
 
-def _verdicts(flow, verdicts):
-    import json
-
-    (flow["path"].parent / "claude-judge-test-changes-rf130-result.json").write_text(
-        json.dumps({"verdicts": verdicts}), encoding="utf-8")
-
-
 def _items(flow):
     from crossref_helpers import read_state
 
     return {i["id"]: i for i in read_state(flow["path"])["items"]}
 
 
-def test_the_implement_intake_records_pending_per_item_and_writes_the_diff(judged) -> None:
-    """保留は項目ごとに持つ。判定の材料（項目ごとのテストの差分）を書き出す。"""
-    items = _items(judged)
-    assert items["I-001"]["pending_test_judgements"] == ["tests/test_calc.py"]
-    assert "pending_test_judgements" not in items["I-002"]
-    diff = (judged["path"].parent / "test-diff-rf130.diff").read_text(encoding="utf-8")
-    assert "# I-001" in diff and "tests/test_calc.py" in diff
-    assert "# I-002" not in diff
-
-
-def test_the_merge_command_clears_an_unchanged_verdict(judged, cmd_converge) -> None:
-    import argparse
-
-    _verdicts(judged, [{"path": "tests/test_calc.py", "verdict": "unchanged", "reason": "経路だけ"}])
-    cmd_converge.cmd_merge_test_judgements(argparse.Namespace(id=130))
-    items = _items(judged)
-    assert "pending_test_judgements" not in items["I-001"]
-    assert "review_test_judgements" not in items["I-001"]
-    assert items["I-001"]["status"] == "implemented"
-
-
-def test_the_merge_command_carries_a_missing_verdict_to_the_review(judged, cmd_converge) -> None:
-    """答えが欠けたものは `unchanged` に倒さず、レビューへ引き継ぐ。"""
-    import argparse
-
-    _verdicts(judged, [])
-    cmd_converge.cmd_merge_test_judgements(argparse.Namespace(id=130))
+def test_an_undecidable_test_diff_goes_straight_to_the_review(judged) -> None:
+    """機械で決まらないテストの差分は、LLM へ問わずに項目ごとにレビューへ引き継ぐ（決定 25）。"""
     items = _items(judged)
     assert items["I-001"]["review_test_judgements"] == ["tests/test_calc.py"]
     assert items["I-001"]["status"] == "implemented"
-
-
-def test_the_merge_command_drops_only_the_item_with_a_changed_verdict(judged, cmd_converge) -> None:
-    """`changed` の項目だけを取り消し、他の項目のコミットは残す。"""
-    import argparse
-
-    _verdicts(judged, [{"path": "tests/test_calc.py", "verdict": "changed", "reason": "3 が 4 に"}])
-    cmd_converge.cmd_merge_test_judgements(argparse.Namespace(id=130))
-    items = _items(judged)
-    assert items["I-001"]["status"] == "reverted"
-    assert "期待" in items["I-001"]["failure_reason"]
-    assert items["I-002"]["status"] == "implemented"
-    work = judged["work"]
-    assert "from src.calc import add" in (work / "tests" / "test_calc.py").read_text()
-    assert (work / "src" / "other.py").exists()
-
-
-def test_judgements_are_read_per_item(cmd_converge, tmp_path, env_tmp_dir):
-    """同じファイルを保留にした 2 項目では、`changed` はその `item_id` の項目だけに効く。"""
-    import argparse
-
-    from crossref_helpers import make_state_v2, read_state, write_result
-
-    items = [
-        {"id": f"I-00{n}", "rank": n, "status": "implemented", "path": "src/a.py",
-         "pending_test_judgements": ["tests/test_x.py"],
-         "commits": {"test": None, "implement": None, "fix": []}}
-        for n in (1, 2)
-    ]
-    path = make_state_v2(tmp_path, tmp_path / "work", items=items)
-    env_tmp_dir(path)
-    write_result(path, "claude-judge-test-changes-rf130", {"verdicts": [
-        {"item_id": "I-001", "path": "tests/test_x.py", "verdict": "unchanged"},
-        {"item_id": "I-002", "path": "tests/test_x.py", "verdict": "changed"},
-    ]})
-    cmd_converge.cmd_merge_test_judgements(argparse.Namespace(id=130))
-    status = {i["id"]: i["status"] for i in read_state(path)["items"]}
-    assert status == {"I-001": "implemented", "I-002": "reverted"}
+    assert "review_test_judgements" not in items["I-002"]
+    assert not (judged["path"].parent / "test-diff-rf130.diff").exists()

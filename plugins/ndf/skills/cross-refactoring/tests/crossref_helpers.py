@@ -6,6 +6,7 @@ conftest.py へ置くと、複数の Skill のテストを同時に実行した�
 """
 from __future__ import annotations
 
+import datetime as _dt
 import json
 import pathlib
 from typing import Any
@@ -79,7 +80,9 @@ def make_state_v2(tmp_path: pathlib.Path, work: pathlib.Path, **overrides: Any) 
     state = {
         "schema": 2,
         "id": state_id,
-        "started_at": "2026-09-24T10:00:00",
+        # **開始は今の少し前に置く。** 固定の時刻にすると、その時刻から想定最大時間が
+        # 過ぎた後に走らせたテストだけが、修正の締め切りと最終ゲートの打ち切りで落ちる。
+        "started_at": (_dt.datetime.now() - _dt.timedelta(minutes=1)).isoformat(timespec="seconds"),
         "budget_minutes": 60,
         "repo": "acme/demo",
         "current_pr": state_id,

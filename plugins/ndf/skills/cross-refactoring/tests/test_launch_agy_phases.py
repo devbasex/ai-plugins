@@ -31,9 +31,9 @@ for a in "$@"; do printf '%s\\0' "$a" >> "$NDF_TEST_ARGS_FILE.tmp"; done
 mv "$NDF_TEST_ARGS_FILE.tmp" "$NDF_TEST_ARGS_FILE"
 """
 
-# フェーズごとの CLI の上限（#598 / #537 の AC36）。監視の上限（`lib/limits.py`）+ 120 秒。
+# `start-phase` を通らない起動の CLI の上限（#598 / #537 の AC36）。監視の上限（`lib/limits.py`）+ 120 秒。
 CLI_TIMEOUT = {
-    "propose": 1320, "plan": 1320, "judge-test-changes": 1320,
+    "propose": 1320, "plan": 1320,
     "add-tests": 3720, "implement": 3720, "fix": 3720, "final-fix": 3720,
 }
 
@@ -45,7 +45,6 @@ WORKDIR_AND_STEM = {
     "add-tests": ("work", "agy-add-tests-rf130"),
     "implement": ("work", "agy-implement-rf130"),
     "fix": ("work", "agy-fix-rf130"),
-    "judge-test-changes": ("work", "agy-judge-test-changes-rf130"),
     "final-fix": ("work", "agy-final-fix"),
 }
 
@@ -81,9 +80,6 @@ def _run(state_path: pathlib.Path, tmp_path: pathlib.Path, *args: str) -> tuple[
 
 def _launch(tmp_path: pathlib.Path, phase: str, **overrides) -> tuple[list[str], pathlib.Path]:
     state_path = _state(tmp_path, **overrides)
-    if phase == "judge-test-changes":
-        # 判定の対象の差分は進行側（`merge-implement`）が先に書き出す。無いと起動しない。
-        (state_path.parent / "test-diff-rf130.diff").write_text("diff\n", encoding="utf-8")
     result, args_file = _run(state_path, tmp_path, RUNTIME, phase, "130")
     assert result.returncode == 0, result.stderr
     for _ in range(200):
@@ -112,20 +108,20 @@ def test_the_workspace_covers_the_workdir_and_the_result_directory(tmp_path, pha
 
 @pytest.mark.parametrize("phase", sorted(CLI_TIMEOUT))
 def test_the_print_timeout_is_the_monitor_timeout_plus_120(tmp_path, phase: str) -> None:
-    """上限を導いていないフェーズは上限の表から導く（#598 / #537 の AC36）。"""
+    """`start-phase` を通らない起動は上限の表から導く（#598 / #537 の AC36）。"""
     args, _ = _launch(tmp_path, phase)
     assert args[args.index("--print-timeout") + 1] == f"{CLI_TIMEOUT[phase]}s"
 
 
-@pytest.mark.parametrize("phase", ["add-tests", "implement"])
+@pytest.mark.parametrize("phase", sorted(CLI_TIMEOUT))
 def test_the_budget_derived_timeout_wins_over_the_table(tmp_path, phase: str) -> None:
-    """I2: `start-phase` が残した `phases.<フェーズ>.timeout` の秒 + 120 を渡す。"""
-    args, _ = _launch(tmp_path, phase, phases={phase: {"timeout": 5000}})
-    assert args[args.index("--print-timeout") + 1] == "5120s"
+    """I2 I16: `start-phase` が残した `phases.<フェーズ>.cli_timeout` の秒をそのまま渡す。"""
+    args, _ = _launch(tmp_path, phase, phases={phase: {"timeout": 5000, "cli_timeout": 5090}})
+    assert args[args.index("--print-timeout") + 1] == "5090s"
 
 
 def test_a_timeout_of_another_phase_is_not_used(tmp_path) -> None:
-    args, _ = _launch(tmp_path, "fix", phases={"implement": {"timeout": 5000}})
+    args, _ = _launch(tmp_path, "fix", phases={"implement": {"timeout": 5000, "cli_timeout": 5090}})
     assert args[args.index("--print-timeout") + 1] == f"{CLI_TIMEOUT['fix']}s"
 
 
@@ -135,14 +131,14 @@ def test_start_phase_records_the_timeout_that_the_launcher_reads(
     import argparse
 
     state_path = _state(tmp_path, implementer=RUNTIME,
-                        plan={"end_at": "2099-01-01T00:00:00+00:00"})
+                        limits={"margin_seconds": 90, "implement_end_at": "2099-01-01T00:00:00+00:00"})
     env_tmp_dir(state_path)
     git("init", "-q", cwd=tmp_path / "work")
     git("-c", "user.email=t@e.st", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init",
         cwd=tmp_path / "work")
     cmd_setup.cmd_start_phase(argparse.Namespace(id=130, phase="implement"))
-    recorded = read_state(state_path)["phases"]["implement"]["timeout"]
-    assert recorded > CLI_TIMEOUT["implement"]
+    record = read_state(state_path)["phases"]["implement"]
+    assert record["cli_timeout"] == record["timeout"] + 90
 
     result, args_file = _run(state_path, tmp_path, RUNTIME, "implement", "130")
     assert result.returncode == 0, result.stderr
@@ -151,7 +147,7 @@ def test_start_phase_records_the_timeout_that_the_launcher_reads(
             break
         time.sleep(0.05)
     args = args_file.read_text(encoding="utf-8").split("\0")[:-1]
-    assert args[args.index("--print-timeout") + 1] == f"{recorded + 120}s"
+    assert args[args.index("--print-timeout") + 1] == f"{record['cli_timeout']}s"
 
 
 def test_unknown_phase_stops_before_writing_a_prompt(tmp_path) -> None:

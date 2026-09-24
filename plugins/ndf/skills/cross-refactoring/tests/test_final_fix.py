@@ -425,10 +425,10 @@ def test_the_next_gate_does_not_see_the_reverted_commits(
     assert gate["status"] == "passed"
 
 
-def test_a_usage_limit_on_the_final_fix_jumps_to_the_cap(
+def test_a_usage_limit_on_the_final_fix_stops_the_fix(
     cmd_gate, tmp_path, env_tmp_dir, merge_spy
 ):
-    """AC30: 起動し直しても解けない結末では、修正ラウンドを上限の値にする。"""
+    """AC30 決定 23: 起動し直しても解けない結末では、次の最終ゲートで修正を打ち切る印を立てる。"""
     state_path = _failing_gate_state(tmp_path)
     env_tmp_dir(state_path)
     (state_path.parent / "codex-final-fix-monitor.json").write_text(
@@ -439,7 +439,7 @@ def test_a_usage_limit_on_the_final_fix_jumps_to_the_cap(
         cmd_gate.cmd_merge_final_fix(_args())
 
     assert e.value.code == 2
-    assert read_state(state_path)["final_gate"]["fix_rounds"] == 3
+    assert read_state(state_path)["final_gate"]["no_relaunch"] is True
 
 
 def test_the_gate_after_the_cap_reports_without_reverting(

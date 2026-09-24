@@ -87,14 +87,6 @@ def test_end_time_and_deadlines(budget):
     assert out[1]["test_start_deadline"] is None
 
 
-def test_phase_timeout_never_below_time_to_T(budget):
-    T = START + dt.timedelta(minutes=50)
-    assert budget.phase_timeout(1200, T, START) == 3000 + 600
-    assert budget.phase_timeout(4000, T, START, margin=0) == 4000
-    # T を過ぎても表の値は下回らない
-    assert budget.phase_timeout(1200, T, T + dt.timedelta(minutes=5)) == 1800
-
-
 def test_fix_time_left_does_not_subtract_fix_reserve(budget):
     r = {"danger_whole_test": 1.0, "final_whole_test": 1.0, "fix": 5.5}
     now = START + dt.timedelta(minutes=50)

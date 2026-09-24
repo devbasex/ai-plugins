@@ -18,13 +18,12 @@ from typing import Any, Iterable, Optional
 import assignment
 import auth
 import jev
-import limits
 import models as models_lib
 import statefile
 
 from .. import ABORT, die, info
-from ..gitfacts import run_with_timeout, safe_int
-from .. import budget, clock
+from ..gitfacts import run_with_timeout
+from .. import clock, timeline
 from ..paths import (
     git_out,
     default_worktree_base,
@@ -39,10 +38,7 @@ from ..scope import require_scope_covers_tests, round_test_hint
 from ..testcmd import is_known
 from ..vocabulary import (
     DEFAULT_BUDGET_MINUTES,
-    DEFAULT_MAX_FIX_ROUNDS,
     DEFAULT_SEVERITY_THRESHOLD,
-    DEFAULT_TEST_TIMEOUT,
-    IMPL_STALL_MARGIN,
     REQUIRED_SKILLS,
     vocabulary,
 )
@@ -50,11 +46,14 @@ from ..vocabulary import (
 # 状態ファイルの版（#933）。無い状態ファイルは v10.17.x までのラウンド制の形である。
 SCHEMA = 2
 
-# 廃止した引数（決定 5）。この変更を含む版では知らせて無視し、その次の版で外す。
-DEPRECATED_ARGS = ("max_test_rounds", "max_outer_rounds", "max_items_per_round")
+# 廃止した引数（決定 5・決定 24）。この変更を含む版では知らせて無視し、その次の版で外す。
+# 修正の回数（`--max-fix-rounds`）とテスト 1 回の上限（`--test-timeout`）は、想定最大
+# 時間から逆算する（決定 24）。
+DEPRECATED_ARGS = ("max_test_rounds", "max_outer_rounds", "max_items_per_round",
+                   "max_fix_rounds", "test_timeout")
 
 # 開始を記録するフェーズ（CLI を起動するもの）。
-PHASE_NAMES = ("propose", "plan", "add-tests", "implement", "fix", "judge-test-changes")
+PHASE_NAMES = ("propose", "plan", "add-tests", "implement", "fix", "final-fix")
 
 # 計画のフェーズより前（予算と実装担当を当て直してよい間）のフェーズ。
 BEFORE_PLAN = ("propose", "plan")
@@ -68,19 +67,13 @@ NONE_WORD = "none"
 # （#727 の決定 13）。
 NEW_RUN_DEFAULTS: dict[str, Any] = {
     "budget_minutes": DEFAULT_BUDGET_MINUTES,
-    "max_fix_rounds": DEFAULT_MAX_FIX_ROUNDS,
-    "test_timeout": DEFAULT_TEST_TIMEOUT,
     "severity_threshold": DEFAULT_SEVERITY_THRESHOLD,
     "workflow_step": False,
 }
 
-# 再開で渡した引数の反映の表（#727 の決定 13）。**状態ファイルに載る引数は、この 2 つの
-# 表のどちらかに必ず載る。** `replace` は状態へ書いて記録へ積み、`notify` は状態と違う
+# 再開で渡した引数の反映の表（#727 の決定 13）。**状態ファイルに載る引数は、この表の
+# どれかに必ず載る。** `replace` は状態へ書いて記録へ積み、`notify` は状態と違う
 # ときだけ「反映しない」と知らせる。
-RESUME_REPLACE_FIELDS = tuple(
-    statefile.ResumeField(key, key, "replace")
-    for key in ("max_fix_rounds", "test_timeout")
-)
 # 予算は計画のフェーズより前だけ置き換える（設計の「再開」）。採用の件数・締め切り・
 # 控えは `merge-plan` の時点の予算で固定されるため、それ以降は知らせるだけにする。
 RESUME_BUDGET_REPLACE = (statefile.ResumeField("budget_minutes", "budget_minutes", "replace"),)
@@ -346,7 +339,6 @@ def _build_initial_state(
         # 定義は検証側（この CLI）にあり、状態ファイル経由で起動側へ渡す。
         "vocabulary": vocabulary(),
         "skills": {"required": list(REQUIRED_SKILLS)},
-        "max_fix_rounds": args.max_fix_rounds,
         # 最終ゲートで手元のテストの代わりに見る検査の名前。**排他である**
         # （指定があれば手元のテストを実行しない）。
         "ci_check": args.ci_check,
@@ -364,7 +356,6 @@ def _build_initial_state(
         "plan_file": normalize_plan_file(args.plan_file),
         # 編集する先のコメント。**印で引き当て直せる**ので、失っても積み増さない。
         "plan_comment": None,
-        "test_timeout": args.test_timeout,
         "phase": "propose",
         # フェーズの所要。**進行側の時計で測る**（決定 8）。
         "phases": {},
@@ -570,8 +561,10 @@ def _verify_init(
     if hint:
         info(hint)
 
-    baseline = _run_baseline_test(args.baseline_test, prep.work, args.test_timeout)
-    round_record = _run_round_test(prep.round_test, baseline, prep.work, args.test_timeout)
+    # 着手前のテストの上限は予算から導く（決定 24。全体のテストの実測はまだ無い）。
+    timeout = timeline.init_test_timeout(args.budget_minutes)
+    baseline = _run_baseline_test(args.baseline_test, prep.work, timeout)
+    round_record = _run_round_test(prep.round_test, baseline, prep.work, timeout)
     return participants, baseline, round_record
 
 
@@ -634,6 +627,8 @@ def _save_initial_state(
         round_test=round_record,
     )
     state = _build_initial_state(args, context)
+    # **実行時の値を書き出す**（決定 24）。計画の後の値は `merge-plan` が足す。
+    state["limits"] = timeline.of_state(state)
     info(f"   実装担当: {context.implementer}（{context.implementer_reason}）")
     # GitHub は自分の Pull Request への `APPROVE` と `REQUEST_CHANGES` を
     # `HTTP 422` で拒む。判定はそのまま結果ファイルへ残し、**投稿の event だけ**
@@ -694,8 +689,6 @@ def _resume(
     書き込みの前に中断するため、状態ファイルは変わらない。
     """
     info(f"↻ 前回中断した状態から再開します（フェーズ {state.get('phase')}）")
-    for line in statefile.apply_resume_args(state, args, RESUME_REPLACE_FIELDS):
-        info(line)
     budget_spec = RESUME_BUDGET_REPLACE if _before_plan(state) else RESUME_BUDGET_NOTIFY
     for line in statefile.apply_resume_args(state, args, budget_spec):
         info(line)
@@ -709,6 +702,9 @@ def _resume(
         _recheck_implementer(state)
 
     _apply_post_event(state, is_own_pr)
+    # **予算を置き換えたら上限の表を組み直す**（計画の前だけ。計画の後は表を変えない）。
+    if not state.get("plan"):
+        state["limits"] = timeline.of_state(state)
     statefile.save(state_file, state)
     _emit_init(state)
 
@@ -792,12 +788,6 @@ def _emit_init(state: dict[str, Any]) -> None:
         HEAD_BRANCH=state["head_branch"],
         BASE_BRANCH=state["base_branch"],
         SCOPE=" ".join(state["target_scope"]),
-        # テストの追加・実装・修正・最終ゲートの修正の担当はテストを 1 回実行し、その間は
-        # 何も出力しない。テストの制限時間そのままでは、実行中に打ち切られる（#553）。
-        IMPL_STALL_TIMEOUT=(
-            safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT)
-            + IMPL_STALL_MARGIN
-        ),
     )
 
 
@@ -870,9 +860,7 @@ def _is_registered_worktree(path: pathlib.Path) -> bool:
     return any(line == f"worktree {target}" for line in out.splitlines())
 
 
-def _run_baseline_test(
-    command: str, work: pathlib.Path, timeout: int = DEFAULT_TEST_TIMEOUT
-) -> dict[str, Any]:
+def _run_baseline_test(command: str, work: pathlib.Path, timeout: int) -> dict[str, Any]:
     """着手前のテストを実行して記録する。
 
     失敗している状態で構造改善に入ると、**壊したのか元から壊れていたのか**
@@ -903,8 +891,7 @@ def _run_baseline_test(
 
 
 def _run_round_test(
-    command: Optional[str], baseline: dict[str, Any], work: pathlib.Path,
-    timeout: int = DEFAULT_TEST_TIMEOUT,
+    command: Optional[str], baseline: dict[str, Any], work: pathlib.Path, timeout: int,
 ) -> dict[str, Any]:
     """範囲のテストを着手前に 1 回実行して記録する（#880）。
 
@@ -934,15 +921,15 @@ def _run_round_test(
 
 
 def cmd_start_phase(args: argparse.Namespace) -> None:
-    """フェーズの開始を進行側の時計で記録する（決定 8、実装計画 I1）。
+    """フェーズの開始を進行側の時計で記録し、監視の上限を返す（決定 8・決定 23、I1 I15）。
 
     **記録済みなら書き換えない。** 再開で同じフェーズを起動し直しても、所要の起点は
-    最初の起動の時刻のままにする。修正（`fix`）だけは起動のたびに起点を書き直し、
-    所要は `merge-fix` が足し込む。
+    最初の起動の時刻のままにする。修正（`fix` / `final-fix`）だけは起動のたびに起点を
+    書き直し、所要は取り込みが足し込む。
 
-    `add-tests` / `implement` では、監視と CLI の上限を予算から導いて `PHASE_TIMEOUT`
-    として返す（設計の「時間の決め方」）。締め切りより先に監視が CLI を止めないため
-    である。他のフェーズは空を返し、上限の表の値を使う。
+    監視の上限（`PHASE_TIMEOUT`）は、状態ファイルの上限の表（`limits`）にあるその段の
+    終わりの時刻までの残り + 余裕である。無進捗の許容も同じ値を渡す（決定 24）。CLI の
+    上限（`cli_timeout`）は監視の上限 + 余裕で、`launch-cli.sh` が読む。
     """
     path, state = load_state(args.id)
     phase = args.phase
@@ -950,17 +937,21 @@ def cmd_start_phase(args: argparse.Namespace) -> None:
         die(f"未知のフェーズです: {phase}（{' / '.join(PHASE_NAMES)}）")
     record = state.setdefault("phases", {}).setdefault(phase, {})
     now = statefile.now()
-    if phase == "fix" or not record.get("started_at"):
+    if phase in ("fix", "final-fix") or not record.get("started_at"):
         record.setdefault("started_at", now)
         record["launch_started_at"] = now
         record["base_sha"] = git_out(str(state["worktrees"]["work"]), ["rev-parse", "HEAD"])
+    limits_table = timeline.limits_of(state)
+    end = clock.parse(limits_table.get(timeline.PHASE_END_KEYS[phase]))
     timeout = ""
-    if phase in ("add-tests", "implement") and state.get("plan"):
-        table = limits.monitor_timeout(phase, str(state["implementer"]))
-        end = clock.parse((state["plan"] or {}).get("end_at"))
-        if end is not None:
-            timeout = str(budget.phase_timeout(table, end, clock.now()))
-            record["timeout"] = int(timeout)
-    state["phase"] = phase
+    if end is not None:
+        margin = int(limits_table["margin_seconds"])
+        seconds = timeline.phase_timeout(end, clock.now(), margin)
+        record["timeout"] = seconds
+        record["cli_timeout"] = seconds + margin
+        timeout = str(seconds)
+    # 最終ゲートの修正は状態の段（`final`）を変えない。再開の地点が狂う。
+    if phase != "final-fix":
+        state["phase"] = phase
     statefile.save(path, state)
     statefile.emit(PHASE_TIMEOUT=timeout)

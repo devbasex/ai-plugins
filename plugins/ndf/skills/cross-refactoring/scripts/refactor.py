@@ -46,7 +46,6 @@ except Exception as _exc:                        # 取り込みそのものが�
 from refactor_lib.commands.assess import DEFAULT_MAX_LINES, cmd_assess  # noqa: E402
 from refactor_lib.commands.converge import (  # noqa: E402
     cmd_merge_fix,
-    cmd_merge_test_judgements,
     cmd_verify,
 )
 from refactor_lib.commands.gate import cmd_final_gate, cmd_merge_final_fix  # noqa: E402
@@ -83,9 +82,7 @@ def _write_run_summary(path: pathlib.Path, state: dict) -> None:
 statefile.register_after_save(_write_run_summary)
 from refactor_lib.vocabulary import (  # noqa: E402
     DEFAULT_BUDGET_MINUTES,
-    DEFAULT_MAX_FIX_ROUNDS,
     DEFAULT_SEVERITY_THRESHOLD,
-    DEFAULT_TEST_TIMEOUT,
     SEVERITY_ORDER,
 )
 
@@ -127,11 +124,10 @@ def add_init_parser(sub: argparse._SubParsersAction) -> None:
                       choices=list(assignment.ALL_RUNTIMES),
                       help="計画・テスト追加・実装・修正を通す 1 者。参加者の中から選ぶ。"
                            "既定はホスト（参加者にいれば）→ 参加者の先頭")
-    init.add_argument("--max-fix-rounds", type=int, default=None,
-                      help="1 項目あたりの修正の上限 "
-                           f"(default: {DEFAULT_MAX_FIX_ROUNDS})")
-    # 廃止した引数（決定 5）。**受け取って知らせ、値は使わない。** 次の版で外す。
-    for name in ("--max-test-rounds", "--max-outer-rounds", "--max-items-per-round"):
+    # 廃止した引数（決定 5・決定 24）。**受け取って知らせ、値は使わない。** 次の版で外す。
+    # 修正の回数とテスト 1 回の上限は、想定最大時間から逆算する（決定 24）。
+    for name in ("--max-test-rounds", "--max-outer-rounds", "--max-items-per-round",
+                 "--max-fix-rounds", "--test-timeout"):
         init.add_argument(name, default=None, help=argparse.SUPPRESS)
     init.add_argument("--ci-check", default=None, metavar="NAME",
                       help="最終ゲートで手元のテストの代わりに見る検査の名前。"
@@ -142,9 +138,6 @@ def add_init_parser(sub: argparse._SubParsersAction) -> None:
                       help=f"この重要度未満は採用しない (default: {DEFAULT_SEVERITY_THRESHOLD})")
     init.add_argument("--model", action="append", metavar="RUNTIME=MODEL",
                       help="ランタイムごとのモデル指定。繰り返し指定できる")
-    init.add_argument("--test-timeout", type=int, default=None,
-                      help="テスト 1 回あたりの上限秒数。超えたら失敗として扱う "
-                           f"(default: {DEFAULT_TEST_TIMEOUT})")
     init.add_argument("--sync-command", default=None,
                       help="生成物を同期するコマンド。**push の直前**に進行側が実行し、"
                            "差分があれば進行側のコミットとして積む。"
@@ -188,8 +181,6 @@ def add_id_commands(sub: argparse._SubParsersAction) -> None:
         ("merge-implement", cmd_merge_implement, "実装の取り込み（1 項目 = 1 コミット / not_done）"),
         ("verify", cmd_verify, "項目ごとの限ったテストと危険の印。VERIFY=done|fix"),
         ("merge-fix", cmd_merge_fix, "修正の取り込み"),
-        ("merge-test-judgements", cmd_merge_test_judgements,
-         "テストの差分の判定（段 2）の答えを取り込む"),
         ("final-gate", cmd_final_gate,
          "最終ゲート。--ci-check があれば継続的統合、無ければ全体のテスト"),
         ("merge-final-fix", cmd_merge_final_fix, "最終ゲートの修正結果の取り込み"),

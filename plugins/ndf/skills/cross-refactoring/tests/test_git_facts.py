@@ -59,7 +59,7 @@ def test_facts_come_from_a_real_repository(gitfacts, work):
     assert ordered == [second, first], "新しい順で返っていない"
 
     facts = gitfacts.collect_commit_facts(
-        str(work), [first, second], set(ordered), "true", "main"
+        str(work), [first, second], set(ordered), "true", "main", 60
     )
     assert [f["sha"] for f in facts] == [first, second]
     assert all(f["exists"] for f in facts)
@@ -213,7 +213,7 @@ def test_run_test_at_missing_commit_preserves_branch(gitfacts, work):
     """現状固定: 存在しない SHA は missing を返し、元のブランチを保つ。"""
     branch = _git("rev-parse", "--abbrev-ref", "HEAD", cwd=work).stdout.strip()
 
-    status = gitfacts.run_test_at(str(work), "0" * 40, "true", branch)
+    status = gitfacts.run_test_at(str(work), "0" * 40, "true", branch, 60)
 
     assert status == "missing"
     assert _git("rev-parse", "--abbrev-ref", "HEAD", cwd=work).stdout.strip() == branch
