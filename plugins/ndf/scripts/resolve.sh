@@ -92,12 +92,9 @@ kiro_candidates() {
   done
 }
 
-# 候補を順序どおりに 1 行ずつ書く（順序はヘッダの 1〜6 と最後の入口自身）。
+# 1 を除く候補を順序どおりに 1 行ずつ書く（順序はヘッダの 2〜6 と最後の入口自身）。
+# 1 は find_root が先に試す。最頻の経路で python3 などを起動しないためである。
 candidates() {
-  local top
-  if top=$(git rev-parse --show-toplevel 2>/dev/null); then
-    printf '%s\n' "$top/plugins/ndf"
-  fi
   claude_candidates
   kiro_candidates
   printf '%s\n' \
@@ -109,7 +106,10 @@ candidates() {
 }
 
 find_root() {
-  local candidate
+  local candidate top
+  if top=$(git rev-parse --show-toplevel 2>/dev/null); then
+    emit_if_plugin "$top/plugins/ndf" && return 0
+  fi
   while IFS= read -r candidate; do
     emit_if_plugin "$candidate" && return 0
   done < <(candidates)
