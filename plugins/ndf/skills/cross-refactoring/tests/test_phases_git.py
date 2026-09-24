@@ -437,3 +437,25 @@ def test_a_failed_gate_does_not_append_history(flow, cmd_gate, cmd_report, monke
         _call(cmd_gate, "cmd_final_gate")
     _call(cmd_report, "cmd_finalize", review_status=None)
     assert not (flow["metrics"] / "acme--demo" / "cross-refactoring-allocation.jsonl").exists()
+
+
+def test_a_resumed_intake_reuses_its_conclusion_and_does_not_drop_twice(
+        flow, cmd_setup, cmd_implement):
+    """取り消しの後に落ちて再開しても、積み直したコミットを 2 コミット目と数えない。"""
+    work = flow["work"]
+    _implement_phase(flow, cmd_setup, _item("I-001", 1), _item("I-002", 2, symbol="add"))
+    _refactor_total(work)
+    commit_with_trailers(work, "Refactor", item_trailers("I-001"))
+    _write(work, "src/other.py", "X = 1\n")
+    commit_with_trailers(work, "計画に無い", {"Impl-Runtime": "claude", "Impl-Model": "m"})
+    _call(cmd_implement, "cmd_merge_implement")
+    head = git("rev-parse", "HEAD", cwd=work).stdout.strip()
+    state = read_state(flow["path"])
+    state["phases"]["implement"].pop("ended_at")      # 終わりを書く前に落ちたことにする
+    write_state(flow["path"], state)
+
+    _call(cmd_implement, "cmd_merge_implement")
+
+    assert git("rev-parse", "HEAD", cwd=work).stdout.strip() == head
+    assert _items(flow)["I-001"]["status"] == "implemented"
+    assert len(read_state(flow["path"])["drops"]) == 1

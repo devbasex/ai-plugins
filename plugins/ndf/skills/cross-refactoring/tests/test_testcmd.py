@@ -110,3 +110,18 @@ def test_limited_command_sources(testcmd, work):
     assert testcmd.limited_command(no_round, [], w) == (None, "none")
     unknown = dict(no_round, baseline_test={"command": "make test"})
     assert testcmd.limited_command(unknown, ["tests/unit/test_a.py"], w) == (None, "none")
+
+
+def test_a_test_the_item_adds_may_be_a_target_before_it_exists(testcmd, work):
+    """I11: 計画の時点では足すテストがまだ無い。その項目の `tests` にあれば対象に使える。"""
+    w, scope = str(work), ["src", "tests"]
+    assert not testcmd.valid_targets(["tests/unit/test_new.py"], w, scope)
+    assert testcmd.valid_targets(["tests/unit/test_new.py::test_x"], w, scope,
+                                 planned=["tests/unit/test_new.py"])
+    # 足すテストでも範囲の外・シェルの文字は通さない
+    assert not testcmd.valid_targets(["src/new_test.py"], w, scope, planned=["src/new_test.py"])
+    assert not testcmd.valid_targets(["tests/unit/t;x.py"], w, scope, planned=["tests/unit/t;x.py"])
+    base = {"target_scope": scope, "baseline_test": {"command": "pytest -q"}, "round_test": None}
+    assert testcmd.limited_command(base, ["tests/unit/test_new.py"], w,
+                                   ["tests/unit/test_new.py"]) == (
+        ["pytest", "-q", "tests/unit/test_new.py"], "targets")

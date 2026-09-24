@@ -140,7 +140,11 @@ def _settle(
     for item_id, reason in {**intake.not_done, **intake.test_failed}.items():
         find_item(state, item_id)["failure_reason"] = reason
     targets = sorted({*intake.rejected, *intake.not_done, *intake.test_failed})
-    if targets or intake.extra:
+    # **同じ取り込みの取り消しを 2 度行わない。** 途中で落ちた取り消しは入口の
+    # `resume_pending_drop` がやり直している。済んだ取り消しをもう一度行うと、範囲の
+    # 逆再生と積み直しで履歴だけが伸びる。
+    done = any(d.get("reason") == label for d in state.get("drops") or [])
+    if (targets or intake.extra) and not done:
         drop(path, state, targets, label, intake.extra)
     for item_id, reason in intake.not_done.items():
         defer(state, find_item(state, item_id), DEFER_NOT_DONE, reason)
@@ -150,6 +154,30 @@ def _settle(
         info(f"❌ {item_id} {item_label(find_item(state, item_id))}: {reason}")
     if intake.extra:
         info(f"↩ どの項目にも属さないコミット {len(intake.extra)} 件を取り消しました")
+
+
+def _remember(path: pathlib.Path, state: dict[str, Any], phase: str, intake: Intake) -> None:
+    """取り込みの結論を、取り消しの前に保存する。
+
+    **取り消しの途中で落ちて再開すると、範囲に取り消しと積み直しのコミットが混ざる。**
+    積み直したコミットは元と同じ `Item-Id` を持つため、読み直すと 1 項目に 2 コミットと
+    数えてしまう。結論を先に残し、再開ではそれを使って取り消しと見送りだけをやり直す。
+    """
+    record = state.setdefault("phases", {}).setdefault(phase, {})
+    record["intake"] = {
+        "extra": list(intake.extra), "rejected": dict(intake.rejected),
+        "not_done": dict(intake.not_done), "test_failed": dict(intake.test_failed),
+    }
+    statefile.save(path, state)
+
+
+def _recalled(state: dict[str, Any], phase: str) -> Optional[Intake]:
+    saved = ((state.get("phases") or {}).get(phase) or {}).get("intake")
+    if not isinstance(saved, dict):
+        return None
+    return Intake(extra=list(saved.get("extra") or []), rejected=dict(saved.get("rejected") or {}),
+                  not_done=dict(saved.get("not_done") or {}),
+                  test_failed=dict(saved.get("test_failed") or {}))
 
 
 def _prepare(path: pathlib.Path, state: dict[str, Any]) -> None:
@@ -273,17 +301,22 @@ def cmd_merge_tests(args: argparse.Namespace) -> None:
         if not live_items(state):
             sys.exit(2)
         return
-    record_observed_model(state, str(state["implementer"]), "add-tests")
-    intake = _intake_tests(state)
-    _run_added_tests(state, intake)
-    for item_id, fact in intake.accepted.items():
-        if item_id in intake.test_failed:
-            continue
-        item = find_item(state, item_id)
-        item["commits"]["test"] = fact["sha"]
-        item["status"] = TESTED
-    _record_seconds(state, "add-tests", "test",
-                    {k: v for k, v in intake.accepted.items() if k not in intake.test_failed})
+    intake = _recalled(state, "add-tests")
+    if intake is None:
+        record_observed_model(state, str(state["implementer"]), "add-tests")
+        intake = _intake_tests(state)
+        _run_added_tests(state, intake)
+        for item_id, fact in intake.accepted.items():
+            if item_id in intake.test_failed:
+                continue
+            item = find_item(state, item_id)
+            item["commits"]["test"] = fact["sha"]
+            item["status"] = TESTED
+        _record_seconds(state, "add-tests", "test",
+                        {k: v for k, v in intake.accepted.items() if k not in intake.test_failed})
+        _remember(path, state, "add-tests", intake)
+    else:
+        info("↻ テストの追加の結論は記録済みです。取り消しと見送りだけをやり直します")
     _settle(path, state, intake, "テストの追加の取り込み")
     kept = [i for i in live_items(state) if i.get("status") == TESTED]
     info(f"テストの追加: 採用 {len(kept)} 件 / test_failed {len(intake.test_failed)} 件 / "
@@ -367,17 +400,22 @@ def cmd_merge_implement(args: argparse.Namespace) -> None:
         if not live_items(state):
             sys.exit(2)
         return
-    record_observed_model(state, str(state["implementer"]), "implement")
-    intake = _intake_implement(state)
-    for item_id, fact in intake.accepted.items():
-        item = find_item(state, item_id)
-        item["commits"]["implement"] = fact["sha"]
-        item["status"] = IMPLEMENTED
-        item["diff_lines"] = safe_int(fact.get("diff_lines"))
-        pending = pending_test_judgements([fact])
-        if pending:
-            item["pending_test_judgements"] = pending
-    _record_seconds(state, "implement", "implement", intake.accepted)
+    intake = _recalled(state, "implement")
+    if intake is None:
+        record_observed_model(state, str(state["implementer"]), "implement")
+        intake = _intake_implement(state)
+        for item_id, fact in intake.accepted.items():
+            item = find_item(state, item_id)
+            item["commits"]["implement"] = fact["sha"]
+            item["status"] = IMPLEMENTED
+            item["diff_lines"] = safe_int(fact.get("diff_lines"))
+            pending = pending_test_judgements([fact])
+            if pending:
+                item["pending_test_judgements"] = pending
+        _record_seconds(state, "implement", "implement", intake.accepted)
+        _remember(path, state, "implement", intake)
+    else:
+        info("↻ 実装の結論は記録済みです。取り消しと見送りだけをやり直します")
     _settle(path, state, intake, "実装の取り込み")
     pending = _pending(state)
     if pending:
