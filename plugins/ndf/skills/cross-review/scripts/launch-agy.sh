@@ -3,7 +3,7 @@
 #
 # Usage: launch-agy.sh <STATE_PR> <ROUND>
 #
-# **実体は `launch-reviewer.sh` にある。** 母集合が 4 者になったため、起動の手順は
+# **実体は `launch-reviewer.sh` にある。** 担当は 4 ランタイムのどれでもなりうるため、起動の手順は
 # ランタイム名を引数に取る 1 本へ寄せた。この名前は既存の呼び出し側（手順書・監視の
 # 設定）が使い続けられるように残す。
 set -euo pipefail

@@ -111,3 +111,4 @@ def test_leftover_temporary_files_are_removed_before_launch(tmp_path) -> None:
     _prompt(tmp_path)
     assert not (tmp_path / f"codex-review-pr{PR}-result.json.tmp").exists()
     assert not (tmp_path / f"codex-review-pr{PR}-round1-payload.json.tmp").exists()
+

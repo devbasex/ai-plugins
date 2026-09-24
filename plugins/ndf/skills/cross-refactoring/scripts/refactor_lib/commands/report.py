@@ -155,6 +155,16 @@ def _print_header(state: dict[str, Any]) -> None:
               f" / 修正 {gate.get('fix_rounds', 0)} 回）")
 
 
+def _participant_failed_label(p: dict[str, Any]) -> str:
+    """確認を通らなかった参加者の表示を返す。"""
+    unavailable = p.get("unavailable") or {}
+    if unavailable:
+        return " / ".join(f"{n}（{d}）" for n, d in unavailable.items())
+    if p.get("probe_skipped"):
+        return "確認を飛ばした（NDF_SKIP_AUTH_CHECK）"
+    return "なし"
+
+
 def _print_participants(state: dict[str, Any]) -> None:
     """「参加した者」の節を出す（#727 の F6）。
 
@@ -173,16 +183,11 @@ def _print_participants(state: dict[str, Any]) -> None:
     def _names(values: Any) -> str:
         return " / ".join(values) if values else "なし"
 
-    unavailable = p.get("unavailable") or {}
-    if unavailable:
-        failed = " / ".join(f"{n}（{d}）" for n, d in unavailable.items())
-    elif p.get("probe_skipped"):
-        failed = "確認を飛ばした（NDF_SKIP_AUTH_CHECK）"
-    else:
-        failed = "なし"
+    failed = _participant_failed_label(p)
     print(f"- 母集合: {_names(p.get('pool'))}")
     print(f"- 使える者: {_names(p.get('available'))}")
     print(f"- --exclude で外した者: {_names(p.get('excluded'))}")
+    print(f"- --exclude で指定したが既定の母集合に無かった者: {_names(p.get('ignored_exclude'))}")
     print(f"- --include で足した者: {_names(p.get('included'))}")
     print(f"- 確認を通らなかった者: {failed}")
     changes = state.get("resume_changes") or []
