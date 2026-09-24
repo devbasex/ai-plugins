@@ -35,7 +35,7 @@
 | 1 | 10.17.4〜10.17.6 の利用者 | 次の版へ上げて claude を起動する。SessionStart hook の `relay.py startup` が、10.17.4〜10.17.6 が置いた旧い写し（`~/.local/share/ndf/relay.py`）を今の版で置き直し、`rc-added` に載った `~/.bashrc` に囲みが残っているのを読んで、「10.17.4〜10.17.6 が自動で足したもの…」の 1 行を 1 度だけ出す。シェルの設定は書かない |
 | 2 | 同じ利用者 | そのまま `claude` と打つ。囲みの alias が、置き直された旧い写しの中継を起こす |
 | 3 | 新しい利用者 | claude の中で `/ndf:install-wrapper` を打つ。写しを `~/.claude/ndf/relay.py`、`claude` の関数を `~/.claude/ndf/shellrc` に置き、`~/.bashrc` をバックアップしてから、`shellrc` を読む 1 行の囲みを足す。次に開いたシェルから効く |
-| 4 | どちらの利用者も | 中継の下で `/ndf:restart` を打つ。claude が再開用のコマンドを `ndf-next` のブロックで出して応答を終え、中継が静まり（15 秒）の後に `/exit` → 更新 → 起動を行う |
+| 4 | どちらの利用者も | 中継の下で `/ndf:restart` を打つ。claude が再開用のコマンドを `ndf-next` のブロックで出して応答を終え、中継が静まり（5 秒）の後に `/exit` → 更新 → 起動を行う |
 | 5 | 外したい利用者 | `/ndf:install-wrapper uninstall`。`~/.bashrc` と `~/.zshrc` の囲みを外し（バックアップの後）、`shellrc`・写し・旧い写しを消す |
 | 6 | devbase の利用者（devbasex/devbase#253 の後） | `/ndf:install-wrapper` を打つ。`DEVBASE_SHELLRC_DIR` があるので、`~/.bashrc` ではなく `$DEVBASE_SHELLRC_DIR/ndf-relay.sh` に読み込みの 1 行を置く。コンテナを作り直しても写し・`shellrc`・`ndf-relay.sh` は `/persistent/group` に残る |
 

@@ -1903,3 +1903,16 @@ def test_guard_exit_wait_resumes_after_question(term):
     assert events(t.rows(), "end")[0]["ended_by"] == "sigterm"
     t.type("quit 0\r")
     t.finish()
+
+
+def test_relay_quiet_defaults_to_five_seconds(mod, tmp_path, monkeypatch):
+    """`NDF_RELAY_QUIET` が無ければ静まりの待ちは 5 秒（#964）。有れば値に従う。"""
+    relay_dir = tmp_path / "relay"
+    relay_dir.mkdir()
+    r = mod.Relay("claude", str(relay_dir), "m", "v", None, None)
+    os.close(r.lock_fd)
+    assert r.quiet == 5
+    monkeypatch.setenv("NDF_RELAY_QUIET", "0.3")
+    r = mod.Relay("claude", str(relay_dir), "m", "v", None, None)
+    os.close(r.lock_fd)
+    assert r.quiet == 0.3
