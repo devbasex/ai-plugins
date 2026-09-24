@@ -435,29 +435,24 @@ class Relay:
 
     # -- 子の起動
 
-    def spawn(self, args: list[str], cwd: str) -> float:
-        import pty
-        sync_r, sync_w = os.pipe()
-        res_r, res_w = os.pipe()
-        pid, fd = pty.fork()
-        if pid == 0:
-            try:
-                os.close(sync_w)
-                os.close(res_r)
-                os.read(sync_r, 1)
-                os.chdir(cwd)
-                os.execve(self.claude, [self.claude] + args, self.env)
-            except OSError as e:
-                os.write(res_w, str(e.errno or errno.EIO).encode())
-            finally:
-                os._exit(127)
-        os.close(sync_r)
-        os.close(res_w)
-        self.copy_winsize(fd)
-        with open(self.path(CHILD_FILE), "w") as f:
-            f.write(str(pid))
-        at = time.time()
-        os.close(sync_w)
+    def _child_exec(self, sync_r: int, sync_w: int, res_r: int, res_w: int,
+                    args: list[str], cwd: str) -> None:
+        """子側: 親だけが使う fd を閉じ、同期を待って chdir と execve を行う。
+        失敗したら errno を結果 pipe へ書き、127 で終わる。"""
+        try:
+            os.close(sync_w)
+            os.close(res_r)
+            os.read(sync_r, 1)
+            os.chdir(cwd)
+            os.execve(self.claude, [self.claude] + args, self.env)
+        except OSError as e:
+            os.write(res_w, str(e.errno or errno.EIO).encode())
+        finally:
+            os._exit(127)
+
+    @staticmethod
+    def _read_errno(res_r: int) -> bytes:
+        """親側: 結果 pipe を最後まで読む。InterruptedError は読み直す。"""
         data = b""
         while True:
             try:
@@ -468,6 +463,23 @@ class Relay:
                 break
             data += chunk
         os.close(res_r)
+        return data
+
+    def spawn(self, args: list[str], cwd: str) -> float:
+        import pty
+        sync_r, sync_w = os.pipe()
+        res_r, res_w = os.pipe()
+        pid, fd = pty.fork()
+        if pid == 0:
+            self._child_exec(sync_r, sync_w, res_r, res_w, args, cwd)
+        os.close(sync_r)
+        os.close(res_w)
+        self.copy_winsize(fd)
+        with open(self.path(CHILD_FILE), "w") as f:
+            f.write(str(pid))
+        at = time.time()
+        os.close(sync_w)
+        data = self._read_errno(res_r)
         if data:
             os.waitpid(pid, 0)
             os.close(fd)
