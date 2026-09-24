@@ -160,6 +160,7 @@ def _locked(path: Path):
         if fd is not None:
             os.close(fd)
 
+
 def _save_counts(path: Path, counts: dict, now: float) -> None:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
