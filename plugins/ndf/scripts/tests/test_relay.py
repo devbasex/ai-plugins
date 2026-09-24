@@ -6,7 +6,7 @@
 - `run`: 端末の前景に常駐し、claude を擬似端末の子として起動する。要らなければ素通しする
 - `stop`: 動いている中継に停止の印を置く
 - `install` / `uninstall` / `status`: `/ndf:install-wrapper` の本体（#928）
-- `startup`: SessionStart hook の本体。在る写しを置き直し、10.17.4 の自動の囲みを 1 度だけ知らせる
+- `startup`: SessionStart hook の本体。在る写しを置き直し、10.17.4〜10.17.6 の自動の囲みを 1 度だけ知らせる
 - `question open` / `close`: 質問の表示中の印（関門を越えない守り）
 
 **利用者の手元の設定は書き換えない。** 導入の副命令と `run` は、テストごとの一時の HOME と
@@ -1186,7 +1186,7 @@ def test_install_from_empty_home_and_no_trailing_newline(tmp_path, home):
 
 
 def test_install_even_if_rc_added_recorded(tmp_path, home):
-    """10.17.4 の rc-added があっても明示の導入は足す（利用者が消した後でも打てば足る）。"""
+    """10.17.4〜10.17.6 の rc-added があっても明示の導入は足す（利用者が消した後でも打てば足る）。"""
     rc = home / ".bashrc"
     rc.write_text("a\n")
     state(tmp_path).mkdir(parents=True)
@@ -1447,7 +1447,7 @@ def test_uninstall_unclosed_changes_nothing(tmp_path, home):
 
 
 def test_uninstall_from_1017_4_state(tmp_path, home):
-    """10.17.4 の自動の導入だけの状態（rc-added あり・<親> 無し）から外れ、<親> を作らない。"""
+    """10.17.4〜10.17.6 の自動の導入だけの状態（rc-added あり・<親> 無し）から外れ、<親> を作らない。"""
     rc = home / ".bashrc"
     rc.write_text("a\n\n" + OLD_BLOCK)
     st = state(tmp_path)
@@ -1481,12 +1481,12 @@ def test_status_reports_and_writes_nothing(tmp_path, home):
     before = tree(home)
     p = relay_cmd(tmp_path, "status")
     assert p.returncode == 0
-    assert "直の alias（10.17.4 の形）。10.17.4 が自動で足した" in p.stdout
+    assert "直の alias（10.17.4〜10.17.6 の形）。10.17.4〜10.17.6 が自動で足した" in p.stdout
     assert f"写し {cfg(tmp_path)}/relay.py: 無し" in p.stdout
     assert tree(home) == before
     assert relay_cmd(tmp_path, "install").returncode == 0
     p = relay_cmd(tmp_path, "status")
-    assert "読み込みの行" in p.stdout and "10.17.4 が自動で足した" not in p.stdout
+    assert "読み込みの行" in p.stdout and "10.17.4〜10.17.6 が自動で足した" not in p.stdout
     assert f"写し {cfg(tmp_path)}/relay.py: 今の版と同じ" in p.stdout
 
 
@@ -1531,7 +1531,7 @@ def test_startup_notices_auto_block_once(tmp_path, home):
     before = snapshot(rc)
     p = run_hook(tmp_path, HOOK_STARTUP)
     msg = json.loads(p.stdout)["systemMessage"]
-    assert f"{rc} の alias claude は 10.17.4 が自動で足したもの" in msg
+    assert f"{rc} の alias claude は 10.17.4〜10.17.6 が自動で足したもの" in msg
     assert "/ndf:install-wrapper uninstall" in msg and "作り直した後" not in msg
     assert run_hook(tmp_path, HOOK_STARTUP).stdout == ""
     assert snapshot(rc) == before
@@ -1577,7 +1577,7 @@ def test_startup_no_notice(tmp_path, home, case):
 def test_startup_refreshes_existing_copies_only(tmp_path, home):
     old = home / ".local" / "share" / "ndf" / "relay.py"
     old.parent.mkdir(parents=True)
-    old.write_text("# 10.17.4 の写し\n")
+    old.write_text("# 10.17.4〜10.17.6 の写し\n")
     rc = home / ".bashrc"
     rc.write_text("a\n")
     before = snapshot(rc)

@@ -87,7 +87,7 @@
           {
             "type": "command",
             "command": "sh -c 'R=\"${XDG_STATE_HOME:-$HOME/.local/state}/ndf/relay/rc-added\"; C=\"${XDG_DATA_HOME:-$HOME/.local/share}/ndf/relay.py\"; N=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/ndf/relay.py\"; [ -f \"$R\" ] || [ -f \"$C\" ] || [ -f \"$N\" ] || exit 0; ROOT=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; [ -n \"$ROOT\" ] || exit 0; python3 \"$ROOT/scripts/relay.py\" startup; exit 0'",
-            "description": "NDF: refresh an existing relay copy (never downgrade) and tell once about the alias 10.17.4 added automatically",
+            "description": "NDF: refresh an existing relay copy (never downgrade) and tell once about the alias 10.17.4-10.17.6 added automatically",
             "timeout": 5,
             "continueOnError": true,
             "suppressOutput": false

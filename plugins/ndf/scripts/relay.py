@@ -9,7 +9,7 @@
 | `stop` | 動いている中継すべてに停止の印を置く |
 | `mark` | Stop hook の本体。最後の応答の `ndf-next` のブロックを印 `next.json` へ写す |
 | `install` / `uninstall` / `status` | `/ndf:install-wrapper` の本体。写しと中継の rc を `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/` に置き、シェルの設定へ読み込みの 1 行を足す・外す・状態を示す（#928） |
-| `startup` | SessionStart hook の本体。在る写しを今の版で置き直し（版は後退させない）、10.17.4 が自動で足した囲みを 1 度だけ知らせる。シェルの設定は書かない |
+| `startup` | SessionStart hook の本体。在る写しを今の版で置き直し（版は後退させない）、10.17.4〜10.17.6 が自動で足した囲みを 1 度だけ知らせる。シェルの設定は書かない |
 | `question open` / `question close` | `AskUserQuestion` の `PreToolUse` / `PostToolUse` hook の本体。質問の表示中の印を作る・消す（関門を越えない守り） |
 | `is-child` | 中継の直接の子の claude から呼ばれていれば 0 |
 
@@ -1146,7 +1146,7 @@ def shellrc_path() -> str:
 
 
 def old_copy_path() -> str:
-    """10.17.4 が置いた写し。10.17.4 の囲みの alias が指す。"""
+    """10.17.4〜10.17.6 が置いた写し。10.17.4〜10.17.6 の囲みの alias が指す。"""
     return os.path.join(data_dir(), "relay.py")
 
 
@@ -1446,7 +1446,7 @@ def _install_locked(loader: str | None, sh) -> int:
     root = state_root()
     added, user = os.path.join(root, "rc-added"), os.path.join(root, "rc-user")
     backups, touched = [], []
-    # 残った囲み（10.17.4 は alias を直に持つ）の中を今の読み込みの行へ置き換える
+    # 残った囲み（10.17.4〜10.17.6 は alias を直に持つ）の中を今の読み込みの行へ置き換える
     for rc in rc_files():
         found, _, text = rc_blocks(rc)
         if found and any(block_inner(text, a, b) != loader_inner() for a, b in found):
@@ -1476,7 +1476,7 @@ def _install_locked(loader: str | None, sh) -> int:
 
 
 def cmd_uninstall() -> int:
-    """U1〜U6。10.17.4 の自動の囲みも同じ手順で外す。"""
+    """U1〜U6。10.17.4〜10.17.6 の自動の囲みも同じ手順で外す。"""
     for rc in rc_files():
         if rc_blocks(rc)[1]:
             out(f"{rc} の囲みに閉じが無い。何も変えていない。直してから打ち直す")
@@ -1533,7 +1533,7 @@ def _uninstall_locked() -> int:
 
 
 def _auto_blocks(root: str) -> list[str]:
-    """`rc-added` に載り `rc-user` に載らず、今も囲みがあるパス（10.17.4 の自動の囲み）。"""
+    """`rc-added` に載り `rc-user` に載らず、今も囲みがあるパス（10.17.4〜10.17.6 の自動の囲み）。"""
     user = _records(os.path.join(root, "rc-user"))
     return [p for p in dict.fromkeys(_records(os.path.join(root, "rc-added")))
             if p not in user and rc_blocks(p)[0]]
@@ -1562,8 +1562,8 @@ def cmd_status() -> int:
             out(f"{rc}: 囲みは無い")
         else:
             direct = has_direct_alias(text, found)
-            kind = "直の alias（10.17.4 の形）" if direct else "読み込みの行"
-            who = "。10.17.4 が自動で足した" if rc in auto else ""
+            kind = "直の alias（10.17.4〜10.17.6 の形）" if direct else "読み込みの行"
+            who = "。10.17.4〜10.17.6 が自動で足した" if rc in auto else ""
             out(f"{rc}: 囲みがある（{kind}{who}）")
     out(f"中継の rc {shellrc_path()}: {'在る' if os.path.exists(shellrc_path()) else '無い'}")
     ver = (_read(copy_version_path()) or "").strip() or "不明"
@@ -1597,7 +1597,7 @@ def _startup_copy(body: bytes) -> None:
 
 
 def _startup_refresh_old_copy(body: bytes) -> None:
-    """10.17.4 が置いた写しが在れば今の版で置き直す。失敗は従来どおり局所的に無視する。"""
+    """10.17.4〜10.17.6 が置いた写しが在れば今の版で置き直す。失敗は従来どおり局所的に無視する。"""
     old = old_copy_path()
     try:
         if os.path.exists(old) and _read_bytes(old) != body:
@@ -1617,7 +1617,7 @@ def _startup_record_noticed(root: str) -> list[str]:
 
 def _startup_notice_message(paths: list[str]) -> str:
     """自動で足した alias を知らせる通知文を、パスの列から組み立てる。"""
-    msg = (f"ndf-relay: {'・'.join(paths)} の alias claude は 10.17.4 が自動で足したもの。"
+    msg = (f"ndf-relay: {'・'.join(paths)} の alias claude は 10.17.4〜10.17.6 が自動で足したもの。"
            "使い続けるなら何もしなくてよい。外すなら /ndf:install-wrapper uninstall。"
            "この alias は別のファイルが定義した alias claude（devbase の "
            "--dangerously-skip-permissions など）を上書きしている。/ndf:install-wrapper で"
