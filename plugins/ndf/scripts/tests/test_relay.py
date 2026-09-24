@@ -154,6 +154,17 @@ def test_mark_does_nothing(tmp_path, relay, case):
     assert not relay.next.exists()
 
 
+@pytest.mark.parametrize("data", ["[]", '"text"', "null"])
+def test_mark_ignores_non_object_json(relay, data):
+    """構文上は正しくても最上位がオブジェクトでなければ、前の印も質問の印も残す。"""
+    relay.next.write_text('{"command": "keep"}')
+    question = relay.dir / "question"
+    question.write_text("q")
+    quiet_ok(mark(relay.dir, data))
+    assert relay.next.read_text() == '{"command": "keep"}'
+    assert question.read_text() == "q"
+
+
 def test_mark_not_direct_child_claude_keeps_mark(tmp_path, relay):
     """conductor が Bash から起こした `claude -p` の Stop は、前の印を消さない（AC4b）。"""
     relay.next.write_text('{"command": "keep"}')
