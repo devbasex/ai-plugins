@@ -11,7 +11,6 @@ import posixpath
 import re
 
 from collections import Counter
-from dataclasses import dataclass
 
 from typing import Any, Iterable, Optional
 
@@ -21,8 +20,6 @@ from .vocabulary import (
     DIFF_BUDGET_FACTOR,
     EXTRACTION_DIFF_BUDGET_FACTOR,
     EXTRACTION_TECHNIQUES,
-    MAX_COMMITS_PER_ITEM,
-    MAX_COMMITS_PER_ITEM_WITH_TEST_GAP,
     FINAL_FIX_TRAILERS,
     REQUIRED_TRAILERS,
 )
@@ -116,16 +113,15 @@ def _verify_commit_basics(
 ) -> Optional[str]:
     """コミット 1 件が手順を満たしているかを検証する。問題があれば理由を返す。
 
-    適用（`verify_apply_round`）と修正（`verify_fix_commit`）で**同じ基準**を使う。
+    実装・テストの追加（`commands/implement.py`）と修正（`commands/converge.py`）で
+    **同じ基準**を使う。
     片方だけ直されると基準が食い違い、緩い側から手順を外れた変更が入る。
 
-    実体が無いときの理由文だけは呼び出し側から渡す。範囲の呼び方が適用
-    （base..head）と修正（修正ラウンドの範囲）で違うためである。
+    実体が無いときの理由文だけは呼び出し側から渡す。
 
-    **適用ではテストの合否を見ない**（`check_test=False`）。適用そのものが
-    通らないことと、テストが落ちることは扱いが違う。前者はその群を取り消し、
-    後者は修正ラウンドを回す。テストは `verify-round` が適用ラウンドの単位で
-    1 度だけ実行する（決定 3）。
+    **取り込みではテストの合否を見ない**（`check_test=False`）。手順を外れたことと、
+    テストが落ちることは扱いが違う。前者はその項目を取り消し、後者は修正へ回す。
+    テストは `verify` が項目の単位で走らせる（決定 14）。
     """
     if not commit.get("exists", True):
         return missing_reason
@@ -143,34 +139,19 @@ def _verify_commit_basics(
     return None
 
 
-def verify_fix_commit(
-    commit: dict[str, Any], scope: Optional[Iterable[str]] = None
-) -> Optional[str]:
-    """修正コミットを適用と同じ基準で検証する。問題があれば理由を返す。
-
-    適用側だけ厳しくして修正側を素通しにすると、**レビュー指摘への対応という
-    名目で手順を外れた変更が入り、そのまま収束済みになる**。
-    """
-    return _verify_commit_basics(
-        commit,
-        scope,
-        f"コミット {commit.get('sha', '?')} が対象の範囲に存在しません",
-    )
-
-
 def verify_final_fix_commit(
     commit: dict[str, Any], scope: Optional[Iterable[str]] = None
 ) -> Optional[str]:
     """最終ゲート（Step 7）の修正コミットを検証する。問題があれば理由を返す。
 
-    適用や修正ラウンドと**見る先が 2 つだけ違う**。
+    実装と修正の取り込みと**見る先が 2 つだけ違う**。
 
     - **テストの合否を見ない**（`check_test=False`）。`--ci-check` を指定した実行では
       手元のテストを 1 度も走らせないと決めてある（#436 決定 11 の排他）。ここで
       コミットごとに走らせると、その排他をこの経路だけが破ることになる。合否は
       直後の `final-gate` が採った側（手元のテスト / 継続的統合）で 1 度だけ見る。
-    - **`Item-Id` と `Round` を求めない**。最終ゲートの失敗は全体のテストのもので、
-      どの改善項目にも提案ラウンドにも紐づかない。
+    - **`Item-Id` を求めない**。最終ゲートの失敗は全体のテストのもので、
+      どの改善項目にも紐づかない。
 
     **対象範囲は見る。** 最終ゲートでも `--scope` の外を触ってよい理由は無い。
     """
@@ -193,21 +174,6 @@ def diff_budget_factor(technique: Optional[str]) -> int:
     return DIFF_BUDGET_FACTOR
 
 
-def _verify_test_gap_present(
-    items: list[dict[str, Any]], facts: list[dict[str, Any]],
-) -> Optional[str]:
-    """テストが乏しい項目を含む群で、現状固定テストの追加が先行しているか。"""
-    if any(i.get("test_gap") for i in items):
-        # テストが乏しいと申告された項目は、現状固定テストの追加が先行していること。
-        # 「テストを足した」かどうかは、そのコミットがテストの置き場所を触ったかで見る。
-        if not facts[0].get("touches_tests"):
-            return (
-                "テストが乏しい項目を含むのに、現状固定テストの追加が伴っていません"
-                f"（先頭コミット {facts[0].get('sha', '?')} がテストを触っていません）"
-            )
-    return None
-
-
 def _verify_diff_budget(
     items: list[dict[str, Any]], facts: list[dict[str, Any]],
 ) -> Optional[str]:
@@ -226,142 +192,6 @@ def _verify_diff_budget(
         )
     return None
 
-
-def _verify_apply_commit_count(facts: list[dict[str, Any]]) -> Optional[str]:
-    """適用ラウンドのコミットが 1 件に収まっているか。
-
-    数えるのは**実在するコミットの数**である。同じコミットを群の全項目が
-    申告するのは正しい形なので、重ねた申告では落とさない。
-    """
-    count = len({c.get("sha") for c in facts})
-    if count > 1:
-        return (
-            f"適用ラウンドのコミットが {count} 件あります"
-            "（残すのは適用ラウンド = 1 コミット。"
-            "群の中の項目はまとめて 1 つのコミットにします）"
-        )
-    return None
-
-
-def verify_apply_round(
-    items: list[dict[str, Any]], facts: list[dict[str, Any]],
-    scope: Optional[Iterable[str]] = None,
-    work: Optional[str] = None,
-    tracked_md: Iterable[str] = (),
-) -> Optional[str]:
-    """適用ラウンド 1 つ分の適用結果を検証する。問題があれば失敗理由を返す。
-
-    **判定の単位は適用ラウンドである**（決定 3）。群の中は 1 コミットであり、
-    分離しても取り消せないため、**失敗を項目までは特定しない**。1 件の失敗は
-    群の全件を巻き込む（「群の中の道連れ」）。分離を細かくしたい利用者は
-    `--max-items-per-round` を下げる。
-
-    `facts` は `collect_commit_facts()` が git から作る。振る舞い不変そのものは
-    ここでは確かめない（テストは `verify-round` が実行する）が、**手順が守られたかは
-    結果から確かめられる**。
-
-    `tracked_md` は追跡している `.md` の一覧（`tracked_markdown()`）、`work` は
-    補助モジュールを git から読む作業ディレクトリである（`doc_wording_tests`）。
-    """
-    context = _ApplyRoundContext(items, facts, scope, work, tracked_md)
-    for stage in _APPLY_ROUND_STAGES:
-        problem = stage(context)
-        if problem:
-            return problem
-    return None
-
-
-@dataclass
-class _ApplyRoundContext:
-    """`verify_apply_round` の各段が受け取る入力。"""
-
-    items: list[dict[str, Any]]
-    facts: list[dict[str, Any]]
-    scope: Optional[Iterable[str]]
-    work: Optional[str]
-    tracked_md: Iterable[str]
-
-
-def _apply_round_basics(context: _ApplyRoundContext) -> Optional[str]:
-    """コミットの実在と、各コミットの基礎検査。"""
-    if not context.facts:
-        return (
-            "コミットが 1 件もありません"
-            "（適用ラウンド = 1 コミットの前提を満たしていません）"
-        )
-
-    for commit in context.facts:
-        problem = _verify_commit_basics(
-            commit,
-            context.scope,
-            f"コミット {commit.get('sha', '?')} が base..head の範囲にありません"
-            "（申告だけで実体がありません）",
-            check_test=False,
-        )
-        if problem:
-            return problem
-    return None
-
-
-def _apply_round_test_protection(context: _ApplyRoundContext) -> Optional[str]:
-    """現状固定テストの有無と、テストの期待値の変更。"""
-    problem = _verify_test_gap_present(context.items, context.facts)
-    if problem:
-        return problem
-
-    # **テストの期待値が変わっていないか**（#443）。段 1（機械）で決まるものだけを
-    # ここで落とす。決まらないものは `pending_test_judgements` が集め、進行側が
-    # 段 2（AI エージェント）へ渡す。
-    changes = collect_test_changes(context.facts)
-    return verify_test_changes(changes)
-
-
-def _apply_round_diff_constraints(context: _ApplyRoundContext) -> Optional[str]:
-    """文言固定テスト・差分予算・コミット粒度。"""
-    # **文書の文言を固定するテストを足していないか**（#723）。
-    hits = doc_wording_tests(context.facts, context.tracked_md, context.work)
-    if hits:
-        return (
-            "文書の文言を固定するテストは足さない"
-            f"（{'、'.join(f'{path}: {literal}' for path, literal in hits)}）"
-        )
-
-    problem = _verify_diff_budget(context.items, context.facts)
-    if problem:
-        return problem
-
-    # 粒度は最後に見る。トレーラーや範囲の問題を粒度の失敗で覆い隠さない。
-    return _verify_apply_commit_count(context.facts)
-
-
-# 検査の順序そのものが規則である。先の段の問題を後の段の失敗で覆い隠さない。
-_APPLY_ROUND_STAGES = (
-    _apply_round_basics,
-    _apply_round_test_protection,
-    _apply_round_diff_constraints,
-)
-
-
-def commit_limit_for(item: dict[str, Any]) -> int:
-    """その項目が履歴に残せるコミット数。"""
-    if item.get("test_gap"):
-        return MAX_COMMITS_PER_ITEM_WITH_TEST_GAP
-    return MAX_COMMITS_PER_ITEM
-
-
-def verify_commit_granularity(item: dict[str, Any], count: int) -> Optional[str]:
-    """項目のコミット数が上限に収まっているか。超えていれば理由を返す。
-
-    修正コミットが項目ごとに刻まれていないかを見る（`_verify_fix_commits`）。
-    適用の側は適用ラウンドの単位で数えるため、この関数は通らない。
-    """
-    limit = commit_limit_for(item)
-    if count <= limit:
-        return None
-    return (
-        f"項目 {item['item_id']} のコミットが {count} 件あります"
-        f"（残すのは 1 項目 = 1 コミット。現状固定テストが要る項目だけ 2 コミットまで）"
-    )
 
 def unassigned_fix_commits(
     work: str, reported_shas: list[str], ordered_range: list[str]
@@ -526,58 +356,6 @@ def merge_test_judgements(
         "problem": None,
         "pending": sorted(p for p in pending if answers.get(p) != "unchanged"),
     }
-
-
-def record_pending_judgements(
-    entry: dict[str, Any], group: int, pending: Iterable[str],
-) -> None:
-    """保留を**適用群ごと**に記録する（#443）。
-
-    **群をまたいで上書きしない。** 前の群で段 2 が `undecidable` と答えたものは、
-    次の群の検証を通ってもレビューへ引き継ぐまで残る。
-    """
-    records = entry.get("pending_test_judgements")
-    if not isinstance(records, dict):        # 群ごとに持たない古い形は捨てる
-        records = {}
-    listed = sorted(pending)
-    if listed:
-        records[str(group)] = listed
-    else:
-        records.pop(str(group), None)
-    if records:
-        entry["pending_test_judgements"] = records
-    else:
-        entry.pop("pending_test_judgements", None)
-
-
-def all_pending_judgements(entry: dict[str, Any]) -> list[str]:
-    """全ての群の保留を、重複を除いてファイルの順で返す。"""
-    records = entry.get("pending_test_judgements")
-    if not isinstance(records, dict):
-        return []
-    return sorted({path for paths in records.values() for path in paths})
-
-
-def apply_judgements_to_group(
-    entry: dict[str, Any], group: int, verdicts: Iterable[dict[str, Any]],
-) -> list[str]:
-    """判定の答えを、**それが見た群の保留にだけ**適用する（#443）。
-
-    段 2 へ渡すのはその群の差分であるため、答えも同じ群にしか効かない。
-    別の群で同じファイルが保留のまま残っていても、そちらは解かない。
-
-    レビューへ引き継ぐものを返す。
-    """
-    records = entry.get("pending_test_judgements")
-    if not isinstance(records, dict):
-        return []
-    answers = _answers_by_path(verdicts)
-    remaining = sorted(
-        path for path in records.get(str(group), [])
-        if answers.get(path) != "unchanged"
-    )
-    record_pending_judgements(entry, group, remaining)
-    return remaining
 
 
 # ---------- 文書の文言を固定するテスト（#723） ----------

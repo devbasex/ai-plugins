@@ -12,7 +12,6 @@ import shutil
 import signal
 import subprocess
 import time
-from dataclasses import dataclass
 from typing import Any, Optional
 
 import models as models_lib
@@ -238,7 +237,8 @@ def commit_touches_tests(work: str, sha: str) -> bool:
 
 
 def run_with_timeout(
-    command: str, cwd: str, timeout: int, kill_grace: float = 5.0
+    command: "str | list[str]", cwd: str, timeout: int, kill_grace: float = 5.0,
+    output: Optional[pathlib.Path] = None,
 ) -> tuple[Optional[int], bool]:
     """テストコマンドを実行し `(終了コード, 打ち切ったか)` を返す。
 
@@ -246,11 +246,26 @@ def run_with_timeout(
     `shell=True` のまま `subprocess.run(timeout=...)` を使うと、終了するのは
     シェルだけで、pytest などの子プロセスは走り続ける。残ったプロセスは同じ
     作業ディレクトリを書き換え続けるため、直後の `git checkout` と競合する。
+
+    **語の並び（`list`）はシェルを通さずに走らせる**（#933 の AC10b）。限ったテストは
+    進行側が `test_targets` から組み立てた語の並びで、シェルの構文を解釈させない。
+    文字列は利用者が渡したコマンド（`--baseline-test` / `--round-test`）で、今と同じく
+    シェルで走らせる。
+
+    `output` を渡すと標準出力と標準エラーをそのファイルへ書く（修正担当へ渡す材料）。
     """
-    proc = subprocess.Popen(
-        command, shell=True, cwd=cwd, start_new_session=True,
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-    )
+    sink = open(output, "wb") if output is not None else None
+    try:
+        proc = subprocess.Popen(
+            command, shell=isinstance(command, str), cwd=cwd, start_new_session=True,
+            stdout=sink if sink is not None else subprocess.PIPE,
+            stderr=subprocess.STDOUT if sink is not None else subprocess.PIPE,
+        )
+    except OSError as exc:
+        if sink is not None:
+            sink.write(f"起動できませんでした: {exc}\n".encode("utf-8"))
+            sink.close()
+        return 127, False
     try:
         proc.communicate(timeout=timeout)
         return proc.returncode, False
@@ -266,6 +281,19 @@ def run_with_timeout(
         except subprocess.TimeoutExpired:
             proc.kill()
         return None, True
+    finally:
+        if sink is not None:
+            sink.close()
+
+
+def commit_time(work: str, sha: str) -> Optional[str]:
+    """コミットの時刻（コミッターの時刻、ISO 8601）。読めなければ `None`。
+
+    **項目の所要と締め切りの判定はこの時刻で行う**（決定 8・決定 12）。担当の申告を
+    使わない。作成者の時刻は `--date` や rebase で過去へ戻せるため、コミットを作った
+    時点を表すコミッターの時刻を採る。
+    """
+    return git_out(work, ["log", "-1", "--format=%cI", sha])
 
 
 def _process_group_alive(pgid: int) -> bool:
@@ -603,217 +631,6 @@ def _replay_commits(work: str, shas: list[str]) -> Optional[dict[str, str]]:
     return mapping
 
 
-def scoped_item_ids(entry: dict[str, Any]) -> list[str]:
-    """取り消しと積み直しの対象になる項目 ID。
-
-    適用ラウンド（群）を持つ状態ファイルでは**進行中の群の項目だけ**を返す。
-    1 件の失敗が群の外の項目を巻き込まないようにするためである（受け入れ条件 A4）。
-    群を持たない状態ファイル（この版より前）は、ラウンド全体を 1 つの群として読む。
-    """
-    groups = entry.get("apply_rounds")
-    if not groups:
-        return list(entry.get("items") or [])
-    current = entry.get("apply_round") or 1
-    for group in groups:
-        if group.get("apply_round") == current:
-            return list(group.get("items") or [])
-    return list(entry.get("items") or [])
-
-
-def _commit_owner(
-    work: str, state: dict[str, Any], entry: dict[str, Any]
-) -> dict[str, str]:
-    """このラウンドの `コミット → 改善項目 ID` の対応。完全な SHA へ正規化する。
-
-    どの項目にも属さないコミット（過去の取り消しなど）はここに現れない。
-    積み直しの対象から外すために、**属さないこと**を判定できる形にしておく。
-    """
-    owner: dict[str, str] = {}
-    for item_id in scoped_item_ids(entry):
-        item = find_item(state, item_id, required=False)
-        if item is None:
-            continue
-        for sha in item.get("commits") or []:
-            if not isinstance(sha, str) or not sha.strip():
-                continue
-            full = git_out(work, ["rev-parse", "--verify", f"{sha.strip()}^{{commit}}"])
-            owner[full or sha.strip()] = item_id
-    return owner
-
-
-def _pending_drop_item_ids(state: dict[str, Any], drop_ids: list[str]) -> list[str]:
-    """drop_ids から、まだ取り消されていない項目 ID だけを返す。"""
-    return [
-        i for i in drop_ids
-        if not (find_item(state, i, required=False) or {}).get("reverted")
-    ]
-
-
-@dataclass
-class _DropPlan:
-    """取り消しと積み直しの計画。`drop_items` が組み立て、実行と記録の段へ渡す。
-
-    `ordered` は取り消す範囲（新しい順）、`replay` は積み直す SHA（古い順）、
-    `owner` は `コミット → 改善項目 ID` の対応である。
-    """
-
-    pending: list[str]
-    ordered: list[str]
-    owner: dict[str, str]
-    keep_ids: list[str]
-    replay: list[str]
-
-
-def _drop_summary(
-    mode: str, dropped: list[str], reverted: int, replayed: int
-) -> dict[str, Any]:
-    """取り消しの結果の形。戻り値と `entry.drops` の記録が同じ鍵を持つ。"""
-    return {"mode": mode, "dropped": dropped,
-            "reverted": reverted, "replayed": replayed}
-
-
-def _drop_replay_plan(
-    state: dict[str, Any], entry: dict[str, Any], pending: list[str],
-    ordered: list[str],
-) -> _DropPlan:
-    """残す項目 (`keep_ids`) と積み直す SHA (`replay`) を求める。
-
-    `ordered` は新しい順なので、積み直しは反転して古い順にする。
-    **どの項目にも属さないコミット（過去の取り消しなど）は積み直さない。**
-    """
-    work = state["worktrees"]["work"]
-    owner = _commit_owner(work, state, entry)
-    drop = set(pending)
-    keep_ids = [
-        i for i in scoped_item_ids(entry)
-        if i not in drop
-        and not (find_item(state, i, required=False) or {}).get("reverted")
-    ]
-    replay = [s for s in reversed(ordered) if owner.get(s) in keep_ids]
-    return _DropPlan(pending, ordered, owner, keep_ids, replay)
-
-
-def _dry_run_drop_plan(plan: _DropPlan) -> dict[str, Any]:
-    """dry-run 時の出力と戻り値を作る。実際の revert/cherry-pick は行わない。"""
-    for sha in plan.ordered:
-        info(f"（dry-run）git revert --no-edit {sha}")
-    for sha in plan.replay:
-        info(f"（dry-run）git cherry-pick {sha}")
-    return _drop_summary("item", plan.pending, len(plan.ordered), len(plan.replay))
-
-
-def _execute_drop_replay(
-    work: str, plan: _DropPlan, head: Optional[str],
-) -> tuple[dict[str, str], str]:
-    """範囲を取り消して残す項目を積み直す。積み直しに失敗したら round モードへ退避する。
-
-    戻り値は `(mapping, mode)`。`mapping` は積み直し後の SHA 対応
-    （`round` モードでは空）。
-    """
-    _revert_range(work, plan.ordered, head)
-    # 取り消しが済んだ地点。積み直しに失敗したらここへ戻せばよい。
-    reverted_head = git_out(work, ["rev-parse", "HEAD"])
-    mapping = _replay_commits(work, plan.replay)
-    if mapping is None:
-        info("⚠ 残す項目を積み直せませんでした。このラウンドは全件取り消します")
-        # **着手前まで戻して取り消しをやり直さない。** 同じ範囲に対する取り消しが
-        # 2 組できて履歴が無駄に汚れる。積み直す前の地点へ戻すだけでよい。
-        _reset_hard(work, reverted_head)
-        return {}, "round"
-    return mapping, "item"
-
-
-def _record_drop_result(
-    state: dict[str, Any],
-    entry: dict[str, Any],
-    plan: _DropPlan,
-    mapping: dict[str, str],
-    mode: str,
-) -> dict[str, Any]:
-    """item の reverted/commits と entry.drops を更新し、結果を返す。"""
-    scoped = scoped_item_ids(entry)
-    dropped = list(scoped) if mode == "round" else plan.pending
-    for item_id in scoped:
-        item = find_item(state, item_id, required=False)
-        if item is None:
-            continue
-        if mode == "round" or item_id not in plan.keep_ids:
-            item["reverted"] = True
-            continue
-        # **積み直しで SHA が変わる。** 記録を更新しないと、次の取り消しが
-        # 履歴に無い SHA を指してしまう。
-        item["commits"] = [mapping[s] for s in plan.replay if plan.owner.get(s) == item_id]
-
-    entry.setdefault("drops", []).append({
-        "at": statefile.now(),
-        **_drop_summary(mode, dropped, len(plan.ordered), len(mapping)),
-    })
-    info(
-        f"↩ 取り消し {len(plan.ordered)} コミット / 積み直し {len(mapping)} コミット"
-        f"（{'ラウンド全件へ退避' if mode == 'round' else '項目単位'}）"
-    )
-    return _drop_summary(mode, dropped, len(plan.ordered), len(mapping))
-
-
-def _drop_legacy_by_item(
-    state: dict[str, Any], pending: list[str], dry_run: bool = False,
-) -> dict[str, Any]:
-    """起点を記録していない状態ファイル（旧版）で、項目のコミットだけを戻す。
-
-    積み直しの起点（`apply_base_sha`）が無いため範囲を確定できない。従来どおり
-    項目のコミットを新しい順に取り消すだけで、残す項目の積み直しは行わない。
-    """
-    info("⚠ 適用の範囲を確定できないため、項目のコミットだけを取り消します")
-    reverted = 0
-    for item_id in pending:
-        reverted += revert_item_commits(state, find_item(state, item_id), dry_run)
-    return _drop_summary("item", pending, reverted, 0)
-
-
-def drop_items(
-    state: dict[str, Any], entry: dict[str, Any], drop_ids: list[str],
-    dry_run: bool = False,
-) -> dict[str, Any]:
-    """改善項目を取り消し、残す項目を積み直す。
-
-    **範囲を新しい順に全て戻してから、残す項目を古い順に積み直す。** 項目のコミット
-    だけを戻すと、取り消し対象より新しい**別項目**のコミットが同じ箇所を触っている
-    ときに必ず競合する（実測では採用 5 件のうち 4 件が同一ファイルの隣接領域を
-    変更しており、取り消しが競合して進行が止まった）。
-
-    積み直しが競合したときは着手前 HEAD へ戻し、**ラウンド全件の取り消しへ退避する**。
-    どの項目を残せるか決められない以上、半端な履歴を残すより全件捨てる方が安全である。
-
-    戻り値の `mode` は次の 3 つ。
-
-    | 値 | 意味 |
-    | --- | --- |
-    | `item` | 項目単位で取り消し、残す項目を積み直した |
-    | `round` | 積み直せず、ラウンド全件を取り消した（退避） |
-    | `skip` | 取り消すものが無かった（取り消し済み） |
-    """
-    work = state["worktrees"]["work"]
-    pending = _pending_drop_item_ids(state, drop_ids)
-    if not pending:
-        info("↩ 取り消し対象は取り消し済みです")
-        return _drop_summary("skip", [], 0, 0)
-
-    head = git_out(work, ["rev-parse", "HEAD"])
-    ordered = commits_in_range(work, entry.get("apply_base_sha"), head or "HEAD")
-    if ordered is None:
-        # 起点を記録していない状態ファイル（旧版）では積み直せない。
-        return _drop_legacy_by_item(state, pending, dry_run)
-
-    plan = _drop_replay_plan(state, entry, pending, ordered)
-
-    if dry_run:
-        return _dry_run_drop_plan(plan)
-
-    mapping, mode = _execute_drop_replay(work, plan, head)
-
-    return _record_drop_result(state, entry, plan, mapping, mode)
-
-
 def _order_newest_first(work: str, shas: list[str]) -> list[str]:
     """コミットを **git の履歴順（新しい順）** に並べ替える。
 
@@ -1144,59 +961,27 @@ def flush_pending_push(
     statefile.save(path, state)
 
 
-def current_round(state: dict[str, Any]) -> dict[str, Any]:
-    if not state["rounds"]:
-        die("提案ラウンドが開かれていません。先に start-round を実行してください")
-    return state["rounds"][-1]
-
-
-def round_of(state: dict[str, Any], round_no: int) -> dict[str, Any]:
-    for entry in state["rounds"]:
-        if entry["round"] == round_no:
-            return entry
-    die(f"ラウンド {round_no} がありません")
-    raise SystemExit(1)
-
-
-def find_item(
-    state: dict[str, Any], item_id: Optional[str], required: bool = True
-) -> Any:
-    for item in state["items"]:
-        if item["item_id"] == item_id:
-            return item
-    if required:
-        die(f"改善項目 {item_id} がありません")
-    return None
-
-
-def read_result(
-    state: dict[str, Any], runtime: str, phase: str, round_no: Optional[int] = None
-) -> LaunchOutcome:
+def read_result(state: dict[str, Any], runtime: str, phase: str) -> LaunchOutcome:
     """起動 1 回の結末を読む。**失敗しない。**
 
     結果ファイルの名前の幹をここで 1 度だけ組み、共通層（`read_launch_outcome`）へ
-    渡す。3 つの取り込みが同じ組み立てを通るため、監視へ渡した名前の雛形
+    渡す。取り込みが同じ組み立てを通るため、監視へ渡した名前の雛形
     （`--stem-template`）と食い違う幹で読むことがない。
 
     **中断も出力もしない。** 結果を読めなかったときに何をするかは、読んだ側
     （取り込み）が終了コードとして決める。ここで `die` すると、未検証のコミットが
     取り消されないまま残る（#728）。
     """
-    return read_launch_outcome(
-        state["tmp_dir"], stem_for(runtime, phase, state["id"], round_no)
-    )
+    return read_launch_outcome(state["tmp_dir"], stem_for(runtime, phase, state["id"]))
 
 
-def record_observed_model(
-    entry: dict[str, Any], runtime: str,
-    state: dict[str, Any], phase: str, round_no: Optional[int],
-) -> None:
+def record_observed_model(state: dict[str, Any], runtime: str, phase: str) -> None:
     """実装担当の CLI の出力から、実際に使われたモデル名を拾って記録する。
 
     取れるのは claude だけである。取れないランタイムは `None` のままにし、
-    報告では既定モデルのラウンドとして集計から区別する。
+    報告では既定モデルの実行として区別する。
     """
-    stem = stem_for(runtime, phase, state["id"], round_no)
+    stem = stem_for(runtime, phase, state["id"])
     stdout_log = pathlib.Path(state["tmp_dir"]) / f"{stem}-stdout.log"
     if not stdout_log.exists():
         return
@@ -1205,35 +990,8 @@ def record_observed_model(
     )
     if not observed:
         return
-    entry["impl_model"]["observed"] = observed
-    requested = entry["impl_model"]["requested"]
-    warning = models_lib.mismatch_warning(runtime, requested, observed)
+    model = state.setdefault("implementer_model", {"requested": None, "observed": None})
+    model["observed"] = observed
+    warning = models_lib.mismatch_warning(runtime, model.get("requested"), observed)
     if warning:
         info(warning)
-
-
-# ---------- 取り消しの実行 ----------
-#
-# **`drop_items` を直に使うため、ここへ置く。** ラウンドの側（`rounds`）へ置くと
-# `rounds → gitfacts → plan → rounds` の循環になる（#441 で実測）。
-
-def run_drop(
-    path: pathlib.Path, state: dict[str, Any], entry: dict[str, Any],
-    targets: list[str],
-) -> dict[str, Any]:
-    """取り消しを、中断しても再開できる形で実行する。
-
-    `pending_drop` と `pending_push` を立ててから入り、**戻ったらすぐ保存する**。
-    保存しないまま落ちると、積み直しで変わった SHA と取り消し済みの印が失われ、
-    次の実行は**履歴に無い SHA を相手に**取り消しをやり直すことになる。
-
-    印はここでは消さない。**呼び出し側が完了の記録と同じ保存で消す。** 先に消すと、
-    完了を記録する前に落ちたときに、次の実行が「取り消し済みだが未完了」の状態を
-    見分けられなくなる。
-    """
-    entry["pending_drop"] = list(targets)
-    entry["pending_push"] = True
-    statefile.save(path, state)
-    result = drop_items(state, entry, list(targets))
-    statefile.save(path, state)
-    return result

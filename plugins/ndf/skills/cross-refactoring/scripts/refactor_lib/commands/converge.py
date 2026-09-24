@@ -1,661 +1,410 @@
-"""検証（テスト）と修正の工程。
+"""検証と修正（`verify` / `merge-fix` / `merge-test-judgements`、#933 の F6 F7）。
 
-`verify-round` / `should-abandon` / `abandon-items` / `merge-fix` を持つ。
+**検証は HEAD で項目ごとの限ったテストを走らせる**（決定 14）。同じ語の並びの項目は
+1 回だけ走らせて結果を共有する。全体のテストは、危険の印が立ったときに検証の中で
+1 度だけ走らせる。落ちたら印を持つ項目を取り消し、検証の中では走らせ直さない
+（決定 15。取り消した後の HEAD は最終ゲートが確かめる）。
 
-**Step 5 の判定はテストの結果で決まる**（#436 決定 3）。2 CLI のレビューは
-起動しない。判定の単位は適用ラウンドで、失敗を項目までは特定しない。
+| 返す値 | 意味 | 駆動がすること |
+| --- | --- | --- |
+| `VERIFY=fix` | 直す項目が残った | 修正を 1 回起動し、`merge-fix` の後に `verify` へ戻る |
+| `VERIFY=done` | 残った項目の限ったテストがすべて通った | 最終ゲートへ |
 """
 from __future__ import annotations
 
 import argparse
-import hashlib
+import json
 import pathlib
-import sys
 import time
-from dataclasses import dataclass
 from typing import Any, Optional
 
+import jev
 import statefile
 
-from .. import die, info
+from .. import budget, clock, danger, info
 from ..gitfacts import (
-    run_drop,
+    _revert_range,
+    collect_commit_facts,
+    commit_files,
+    commit_trailers,
+    commits_in_range,
     discard_impl_leftovers,
-    drop_items,
-    find_item,
     flush_pending_push,
     push_with_retry_marker,
     read_result,
-    reported_shas,
-    round_of,
+    record_observed_model,
     run_with_timeout,
     safe_int,
-    collect_commit_facts,
-    commits_in_range,
-    resolved_threads_on_github,
 )
-from ..intake import (
-    IntakeScope,
-    already_closed,
-    close_without_result,
-    discard_unverified,
+from ..items import (
+    FAILING,
+    IMPLEMENTED,
+    VERIFIED,
+    find_item,
+    item_label,
+    item_shas,
+    live_items,
 )
 from ..outbound import dropped_line, item_lines, plan_line
-from ..paths import git_out, load_state, result_path, stem_for
-from ..rounds import (
-    append_deferred_abandoned_items,
-    current_group,
-    phase_after_group,
-    prepare_fix_phase,
-)
-from ..scope import round_test_command
+from ..paths import git_out, load_state
+from ..phases import add_phase_seconds, finish_phase
+from ..undo import drop, resume_pending_drop
 from ..verify import (
-    unassigned_fix_commits,
-    verify_commit_granularity,
-    verify_fix_commit,
+    _verify_commit_basics,
+    collect_test_changes,
+    merge_test_judgements,
+    verify_test_changes,
 )
-from ..vocabulary import DEFAULT_TEST_TIMEOUT
+from ..vocabulary import DEFAULT_MAX_FIX_ROUNDS, DEFAULT_TEST_TIMEOUT, JEV_RISK_CONFIDENCE
 
 
-def _verification_record(
-    group: dict[str, Any],
-    entry: dict[str, Any],
-    command: str,
-    code: int,
-    timed_out: bool,
-    passed: bool,
-    seconds: float,
-) -> dict[str, Any]:
-    """検証 1 回分の記録を作る。**状態は変えない。**
+# ---------- 限ったテスト ----------
 
-    判定を作る段と、判定を状態へ反映する段を分ける。合否そのものは呼び出し側が
-    決めており、ここは何を記録に残すかだけを持つ。
-
-    **所要の秒数を残す**（#880）。範囲のテストへ寄せた効果は、状態ファイルから
-    測れなければ確かめられない。
-    """
-    return {
-        "apply_round": group["apply_round"],
-        "fix_round": entry.get("fix_rounds", 0),
-        "at": statefile.now(),
-        "command": command,
-        "status": "pass" if passed else "fail",
-        "exit_code": code,
-        "timed_out": timed_out,
-        "seconds": seconds,
-    }
-
-
-def _record_verify_pass(
-    path: pathlib.Path,
-    state: dict[str, Any],
-    entry: dict[str, Any],
-    group: dict[str, Any],
-    applied: list[str],
-    command: str,
-) -> None:
-    """テストが通った適用ラウンドを状態へ反映し、結果を出力する。"""
-    for item_id in applied:
-        find_item(state, item_id)["status"] = "done"
-    group["status"] = "verified"
-    state["phase"] = phase_after_group(entry)
-    statefile.save(path, state)
-    info(f"✅ 適用ラウンド {group['apply_round']} のテストが通りました（{command}）")
-    # **外へ出す文章の規約**（#436 決定 6-b）。項目は `<ファイル>#<シンボル>`
-    # を併記し、改修計画は生の URL で添える。
-    for line in item_lines(state, applied):
-        info(f"   {line}")
-    info(f"   {plan_line(state)}")
-
-
-def _record_verify_fail(
-    path: pathlib.Path,
-    state: dict[str, Any],
-    entry: dict[str, Any],
-    command: str,
-    code: int,
-    timed_out: bool,
-    timeout: int,
-) -> None:
-    """失敗した適用ラウンドを修正フェーズへ移し、結果を出力する。"""
-    # **修正ラウンドの起点をここで記録する。** 記録せずに戻すと `merge-fix` が
-    # 範囲を確定できずに弾かれ、`fix_rounds` が進まない。`should-abandon` は
-    # `fix_rounds` で見送りを決めるため、上限へ永久に到達しなくなる。
-    prepare_fix_phase(state, entry)
-    statefile.save(path, state)
-    if timed_out:
-        info(f"❌ テストが {timeout} 秒で終わりませんでした（{command}）")
-    else:
-        info(f"❌ テストが失敗しました（{command} / 終了コード {code}）")
-    info(f"   {plan_line(state)}")
-    sys.exit(2)
-
-
-def cmd_verify_round(args: argparse.Namespace) -> None:
-    """Step 5 — 適用ラウンドの結果を**テストで**検証する。
-
-    終了コード: 0 = テストが通った / 2 = 落ちた（修正ラウンドへ）。
-
-    **2 CLI のレビューは起動しない**（決定 3）。`--round-test` が指す範囲の
-    テストを作業ディレクトリの HEAD で実行し、その合否で決める（#880）。全体の
-    テストは着手前と最終ゲートにしか走らせない。
-
-    **失敗をどの項目に紐づけるかは決めない。** 適用ラウンドの中は 1 コミットで
-    あり、分離しても取り消せない。判定の単位と取り消しの単位を一致させる。
-
-    **継続的統合では代替しない。** 手元の未 push のコミットではなく push 済みの
-    先端に対する結果しか読めないためである。代替できるのは Step 7 だけである。
-    """
-    path, state = load_state(args.id)
-    entry = round_of(state, args.round)
-    group = current_group(entry)
-    applied = list((entry.get("apply") or {}).get("applied") or [])
-    if not applied:
-        die(
-            f"適用ラウンド {group['apply_round']} に検証する項目がありません。"
-            "先に `merge-apply` を通してください",
-            code=2,
-        )
-
-    command = round_test_command(state)
-    work = str(state["worktrees"]["work"])
+def _run(state: dict[str, Any], words: list[str], log: pathlib.Path) -> bool:
+    """語の並びをシェルを通さずに走らせる（AC10b）。打ち切りは失敗。"""
     timeout = safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT)
+    code, timed_out = run_with_timeout(list(words), str(state["worktrees"]["work"]),
+                                       timeout, output=log)
+    return (not timed_out) and code == 0
+
+
+def _log_path(state: dict[str, Any], item_id: str) -> pathlib.Path:
+    return pathlib.Path(state["tmp_dir"]) / f"verify-{item_id}.log"
+
+
+def _run_limited(state: dict[str, Any], items: list[dict[str, Any]]) -> None:
+    """項目ごとに限ったテストを走らせ、`verified` / `failing` にする。同じ語の並びは 1 回だけ。"""
+    results: dict[tuple[str, ...], tuple[bool, pathlib.Path]] = {}
+    for item in items:
+        key = tuple(item.get("command") or [])
+        if key not in results:
+            log = _log_path(state, item["id"])
+            results[key] = (_run(state, list(key), log), log)
+        passed, log = results[key]
+        item["status"] = VERIFIED if passed else FAILING
+        item["last_log"] = str(log)
+        item["verify_runs"] = int(item.get("verify_runs") or 0) + 1
+
+
+def _newest_first(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """新しい項目から。実装は順位の順に積まれるため、順位の大きい方が新しい。"""
+    return sorted(items, key=lambda i: int(i.get("rank") or 0), reverse=True)
+
+
+def _revert_shared(
+    path: pathlib.Path, state: dict[str, Any], group: list[dict[str, Any]], reason: str,
+) -> None:
+    """同じ語の並びを共有した項目を、新しい方から 1 件ずつ取り消す（AC15）。
+
+    取り消すたびに共有したコマンドを走らせ直し、通った時点で止める。通る前に取り消した
+    項目だけが見送り（`reverted`）になり、古い項目のコミットは残る。走らせ直すのは
+    限ったテストで、全体のテストではない。
+    """
+    remaining = _newest_first(group)
+    while remaining:
+        target = remaining.pop(0)
+        target["failure_reason"] = reason
+        drop(path, state, [target["id"]], reason)
+        remaining = [i for i in remaining if i.get("status") in (FAILING, IMPLEMENTED, VERIFIED)]
+        if not remaining:
+            return
+        if _run(state, list(remaining[0].get("command") or []), _log_path(state, remaining[0]["id"])):
+            for item in remaining:
+                item["status"] = VERIFIED
+            return
+
+
+def _give_up(path: pathlib.Path, state: dict[str, Any]) -> None:
+    """修正の上限か残り時間が尽きた項目を取り消す（設計の「検証と修正の繰り返し」2）。"""
+    limit = safe_int(state.get("max_fix_rounds"), DEFAULT_MAX_FIX_ROUNDS)
+    plan = state.get("plan") or {}
+    reserve = plan.get("reserve") or {}
+    left = budget.fix_time_left(clock.parse(state["started_at"]), int(state["budget_minutes"]),
+                                reserve, clock.now())
+    no_time = left < float(reserve.get("fix") or 0.0)
+    groups: dict[tuple[str, ...], list[dict[str, Any]]] = {}
+    for item in live_items(state):
+        if item.get("status") == FAILING:
+            groups.setdefault(tuple(item.get("command") or []), []).append(item)
+    for group in groups.values():
+        exhausted = any(int(i.get("fix_count") or 0) >= limit for i in group)
+        if not (exhausted or no_time):
+            continue
+        reason = (f"修正の上限 {limit} 回に達しても限ったテストが通らなかった" if exhausted
+                  else "修正に使える時間が残っていなかった")
+        _revert_shared(path, state, group, reason)
+
+
+# ---------- 危険の印 ----------
+
+def _item_files(work: str, item: dict[str, Any]) -> list[str]:
+    files: list[str] = []
+    for sha in item_shas(item):
+        for f in commit_files(work, sha):
+            if f not in files:
+                files.append(f)
+    return files
+
+
+def _test_files(state: dict[str, Any], item: dict[str, Any]) -> Optional[list[str]]:
+    """D4 で見る限ったテストのファイル（決定 21）。"""
+    if item.get("command_source") == "targets":
+        return danger.limited_test_files_from_targets(list(item.get("test_targets") or []))
+    round_test = (state.get("round_test") or {}).get("command")
+    if not round_test:
+        return None
+    return danger.limited_test_files_from_round_test(round_test, str(state["worktrees"]["work"]))
+
+
+def _diff_stat(work: str, item: dict[str, Any]) -> str:
+    """Jev へ送る `git diff --stat` の行。**差分の本文は送らない**（非機能の条件）。"""
+    lines = []
+    for sha in item_shas(item):
+        out = git_out(work, ["show", "--stat", "--format=", sha]) or ""
+        lines.extend(line for line in out.splitlines() if line.strip())
+    return "\n".join(lines)
+
+
+def _d5(state: dict[str, Any], item: dict[str, Any]) -> bool:
+    """公開の入出力が変わりうるか。Jev が確信度 0.7 以上で真なら立てる。使えなければ `risk`。
+
+    **`risk` は印を立てる側にだけ使う**（決定 14）。申告で検証を減らさない。
+    """
+    if (state.get("judge") or {}).get("kind") == "jev":
+        text = json.dumps({
+            "path": item.get("path"), "symbol": item.get("symbol"),
+            "smell": item.get("smell"), "technique": item.get("technique"),
+            "rationale": item.get("rationale"), "plan": item.get("plan"),
+            "agreed_by": len(item.get("proposed_by") or []),
+            "diff_stat": _diff_stat(str(state["worktrees"]["work"]), item),
+        }, ensure_ascii=False)
+        result = jev.ask_boolean(
+            text, "Could this refactoring change the public input or output of the code?")
+        if result is not None:
+            return bool(result[0] and result[1] >= JEV_RISK_CONFIDENCE)
+        judge = state["judge"]
+        judge["failures"] = int(judge.get("failures") or 0) + 1
+    return bool(item.get("risk"))
+
+
+def _flag_items(state: dict[str, Any]) -> list[str]:
+    """検証を通った項目に危険の印を付け、立った印の集合を返す。**付け済みの項目は見直さない。**"""
+    work = str(state["worktrees"]["work"])
+    scope = list(state.get("target_scope") or [])
+    flags: list[str] = []
+    for item in live_items(state):
+        if item.get("status") != VERIFIED:
+            continue
+        if not item.get("danger_checked"):
+            found = danger.item_flags(
+                work, item, item_shas(item), _item_files(work, item), scope,
+                _test_files(state, item), _d5(state, item))
+            item["danger"], item["danger_hits"] = found["flags"], found["hits"]
+            item["danger_checked"] = True
+        flags.extend(f for f in item.get("danger") or [] if f not in flags)
+    return sorted(flags)
+
+
+def _whole_test(path: pathlib.Path, state: dict[str, Any], flags: list[str]) -> None:
+    """危険の印が立ったら全体のテストを 1 度だけ走らせる（AC13 AC14）。落ちたら印の項目を取り消す。"""
+    record = state.setdefault("whole_test", {})
+    if not flags or record.get("ran"):
+        return
+    command = str((state.get("baseline_test") or {}).get("command") or "")
+    work = str(state["worktrees"]["work"])
+    info(f"⚠ 危険の印（{', '.join(flags)}）が立ったため、全体のテストを 1 度走らせます: {command}")
     started = time.monotonic()
-    code, timed_out = run_with_timeout(command, work, timeout)
-    seconds = round(time.monotonic() - started, 1)
+    log = pathlib.Path(state["tmp_dir"]) / "verify-whole-test.log"
+    code, timed_out = run_with_timeout(command, work,
+                                       safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT),
+                                       output=log)
     passed = (not timed_out) and code == 0
-
-    entry.setdefault("verifications", []).append(
-        _verification_record(group, entry, command, code, timed_out, passed, seconds)
-    )
-
+    record.update({
+        "ran": True, "flags": flags, "status": "pass" if passed else "fail",
+        "seconds": round(time.monotonic() - started, 1),
+        "head": git_out(work, ["rev-parse", "HEAD"]), "reverted": False,
+    })
+    statefile.save(path, state)
     if passed:
-        _record_verify_pass(path, state, entry, group, applied, command)
+        info("✅ 全体のテストが通りました")
         return
-
-    _record_verify_fail(path, state, entry, command, code, timed_out, timeout)
-
-
-def cmd_should_abandon(args: argparse.Namespace) -> None:
-    """Step 6 — この適用ラウンドの修正の上限に達したか。
-
-    終了コード: 0 = 見送りへ移る / 2 = まだ修正できる。
-
-    `--max-fix-rounds` は**1 つの適用ラウンドあたり**の上限である。数え直しは
-    `next-apply-round` が群を開くときに行う。
-    """
-    _, state = load_state(args.id)
-    entry = round_of(state, args.round)
-    limit = state["max_fix_rounds"]
-    if entry["fix_rounds"] >= limit:
-        info(f"修正ラウンドが上限 {limit} に達しました。未解決の項目を見送ります")
-        return
-    info(f"修正ラウンド {entry['fix_rounds']} / {limit} — まだ修正します")
-    sys.exit(2)
+    flagged = [i for i in _newest_first(live_items(state)) if i.get("danger")]
+    reason = f"危険の印（{', '.join(flags)}）で走らせた全体のテストが落ちた"
+    for item in flagged:
+        item["failure_reason"] = reason
+    drop(path, state, [i["id"] for i in flagged], reason)
+    record["reverted"] = True
+    info(f"↩ {dropped_line(state, len(flagged))}。取り消した後の HEAD は最終ゲートが全体のテストで確かめます")
 
 
-def _record_deferred_abandoned_items(
-    state: dict[str, Any], targets: list[str]
-) -> None:
-    """取り消し対象項目の status を abandoned に更新し、未登録なら deferred_items に追記する。"""
-    items = []
-    for item_id in targets:
-        item = find_item(state, item_id)
-        item["status"] = "abandoned"
-        item.setdefault(
-            "failure_reason", "修正ラウンドの上限に達してもテストが通らなかった")
-        items.append(item)
-    append_deferred_abandoned_items(
-        state, items, "修正ラウンドの上限に達してもテストが通らなかった")
+# ---------- verify ----------
+
+def _prepare(path: pathlib.Path, state: dict[str, Any]) -> None:
+    discard_impl_leftovers(state, str(state["worktrees"]["work"]))
+    resume_pending_drop(path, state)
+    flush_pending_push(path, state, state)
 
 
-def _resume_abandon_leftovers(
-    path: pathlib.Path, state: dict[str, Any], entry: dict[str, Any]
-) -> None:
-    """やり残した取り消しを push の再送より先に片づける。
+def cmd_verify(args: argparse.Namespace) -> None:
+    """項目を限ったテストで検証する。出力は `VERIFY=done|fix`。
 
-    先に push すると、取り消しが途中の HEAD をそのまま Pull Request へ反映して
-    しまう。取り消しが残っていれば再実行し、無ければ保留の push だけ流す。
-    """
-    if entry.get("pending_drop"):
-        info("↻ 前回終わらなかった取り消しを再実行します")
-        run_drop(path, state, entry, list(entry["pending_drop"]))
-    else:
-        flush_pending_push(path, state, entry)
-
-
-def _abandon_no_targets(
-    path: pathlib.Path, state: dict[str, Any], entry: dict[str, Any],
-    group: dict[str, Any], dry_run: bool,
-) -> None:
-    """取り消す項目が無い群を処理済みとして記録する。"""
-    info("取り消す項目はありません")
-    if not dry_run:
-        group["abandoned"] = []
-        entry["abandoned"] = []
-        statefile.save(path, state)
-
-
-def _complete_abandon(
-    path: pathlib.Path, state: dict[str, Any], entry: dict[str, Any],
-    group: dict[str, Any], targets: list[str],
-) -> None:
-    """取り消しを実行し、見送りの記録・状態の更新・push を行う。
-
-    見送りの記録と印の解除を**同じ保存で**行う。保存してから push するので、
-    push が失敗しても記録とローカルの git が食い違わない。
-    """
-    run_drop(path, state, entry, targets)
-
-    _record_deferred_abandoned_items(state, targets)
-
-    # **内訳は書かない。件数だけ述べ、内訳は改修計画へ譲る**（#436 決定 6-b）。
-    info(f"↩ 適用ラウンド {group['apply_round']}: {dropped_line(state, len(targets))}")
-    group["abandoned"] = targets
-    group["status"] = "dropped"
-    entry["abandoned"] = targets
-    entry["pending_drop"] = []
-    entry["apply_base_sha"] = git_out(
-        state["worktrees"]["work"], ["rev-parse", "HEAD"])
-    group["base_sha"] = entry["apply_base_sha"]
-    state["phase"] = phase_after_group(entry)
-    push_with_retry_marker(path, state, entry)
-
-
-def cmd_abandon_items(args: argparse.Namespace) -> None:
-    """Step 6 — テストが通らなかった適用ラウンドを取り消す。
-
-    **取り消しの単位は適用ラウンドである**（決定 2）。群の中は 1 コミットなので、
-    どの項目が落としたのかを特定しても分離して取り消せない。**他の群には及ばない**
-    （受け入れ条件 A4）。既に検証を通った群は Pull Request に残る。
+    終了コード: 0（`VERIFY` で分岐する）/ 4 = 中断（取り消しの失敗など）。
     """
     path, state = load_state(args.id)
-    entry = round_of(state, args.round)
-    group = current_group(entry)
-    if not args.dry_run:
-        _resume_abandon_leftovers(path, state, entry)
+    _prepare(path, state)
+    state["phase"] = "verify"
+    started = time.monotonic()
+    _run_limited(state, [i for i in live_items(state) if i.get("status") == IMPLEMENTED])
+    statefile.save(path, state)
+    _give_up(path, state)
 
-    # 取り消し自体は `reverted` で冪等だが、見送りの記録は重複しうる。
-    if group.get("abandoned") is not None:
-        info(f"↻ 適用ラウンド {group['apply_round']} の見送りは処理済みです"
-             f"（{len(group['abandoned'])} 件）")
-        return
-
-    targets = list((entry.get("apply") or {}).get("applied") or [])
-    if not targets:
-        _abandon_no_targets(path, state, entry, group, args.dry_run)
-        return
-
-    if args.dry_run:
-        drop_items(state, entry, targets, dry_run=True)
-        info("（dry-run）状態ファイルは更新していません")
-        return
-
-    _complete_abandon(path, state, entry, group, targets)
-
-
-def _fix_merge_key(entry: dict[str, Any], result: pathlib.Path) -> str:
-    """修正結果の取り込み済み判定に使う鍵を作る。
-
-    **叩き直しても二重に取り込まない。** 修正は同じラウンドで何度も回るため、
-    「このラウンドで処理済みか」では判定できない。**入力が前回と同じか**で見る。
-    次の修正ラウンドでは結果ファイルが上書きされ、HEAD も進むので鍵が変わる。
-    鍵は**試行番号と結果ファイルの内容**から作る。
-
-    - HEAD は混ぜない。検証に失敗して取り消すと HEAD が変わるため、鍵が一致せず
-      同じ申告を再処理してしまう。
-    - 内容だけでも足りない。次の修正ラウンドが同じ JSON（コミットなし・同じ
-      未解決 ID など）を返すと過去のラウンドと衝突し、`fix_rounds` が進まないまま
-      同じ修正を起動し続ける。
-    - ファイルの更新時刻も使わない。粒度が環境によって違い、書き直しても同じ値に
-      なりうる。
-
-    修正の前には必ず `verify-round` が走るので、そこで進めた試行番号が
-    **実行単位の識別子**になる。叩き直しただけなら番号は変わらない。
-    """
-    attempt = entry.get("fix_attempts", 0)
-    return f"{attempt}:" + hashlib.sha256(result.read_bytes()).hexdigest()
-
-
-def _already_merged_fix_result(
-    entry: dict[str, Any], merge_key: str
-) -> bool:
-    """この修正結果を取り込み済みなら真を返し、鍵の一覧を更新する。"""
-    merged_keys = entry.setdefault("fix_merged_keys", [])
-    if merge_key in merged_keys:
-        info(
-            f"↻ この修正結果は取り込み済みです"
-            f"（修正ラウンド {entry['fix_rounds']}）"
-        )
-        return True
-    return False
-
-
-def _resolved_fix_thread_ids(payload: dict[str, Any], repo: str, pr: int) -> set[str]:
-    """自己申告と GitHub 側の解決状態を突き合わせ、両方が解決と言う ID だけ返す。
-
-    自己申告をそのまま信じない。解決 API に失敗・未実行でも「解決済み」と
-    書けてしまい、未解決の指摘が取り消し対象から外れる。GitHub 側の
-    `isResolved` と突き合わせ、**両方が解決と言っているものだけ**を反映する。
-    """
-    raw_claimed = payload.get("resolved_thread_ids")
-    # 文字列は 1 文字ずつに分解され、数値や真偽値は反復できずに落ちる。
-    # **配列であることを先に確かめる。**
-    claimed = {
-        t for t in (raw_claimed if isinstance(raw_claimed, list) else [])
-        if isinstance(t, str) and t.strip()
-    }
-    if raw_claimed is not None and not isinstance(raw_claimed, list):
-        info(f"⚠ resolved_thread_ids が配列ではありません（{type(raw_claimed).__name__}）。"
-             "解決の申告は無かったものとして扱います")
-    actual = resolved_threads_on_github(repo, pr)
-    if actual is None:
-        info("⚠ レビュースレッドの解決状態を取得できませんでした。"
-             "自己申告は採用せず、未解決のまま扱います")
-        return set()
-    resolved = claimed & actual
-    for thread_id in sorted(claimed - actual):
-        info(f"⚠ {thread_id} は解決済みと申告されましたが、GitHub では未解決です")
-    return resolved
-
-
-
-def _verify_fix_commits(
-    facts: list[dict[str, Any]], scope: list[str]
-) -> tuple[list[str], list[tuple[str, str]]]:
-    """修正コミットを検証し、問題点の一覧と受理した (item_id, sha) を返す。
-
-    **不正なコミットが 1 件でもあれば、修正ラウンドの範囲ごと取り消す。**
-    状態を記録しないだけでは、未検証の変更が Pull Request に残り続ける
-    （見送りの対象にもならない）。どのコミットが安全かは決められないので、
-    適用フェーズの未割当コミットと同じ扱いにする。
-    """
-    problems: list[str] = []
-    accepted: list[tuple[str, str]] = []      # (item_id, sha)
-    seen: dict[str, set[str]] = {}            # item_id -> 実在するコミットの集合
-    for commit in facts:
-        item_id = (commit.get("trailers") or {}).get("Item-Id")
-        problem = verify_fix_commit(commit, scope)
-        if problem:
-            problems.append(problem)
-            info(f"❌ 修正コミットが手順を満たしていません: {problem}")
-            continue
-        seen.setdefault(item_id, set()).add(commit["sha"])
-        accepted.append((item_id, commit["sha"]))
-
-    # 粒度は 1 件ずつの検証が済んでから見る。壊れたコミットの理由を
-    # 粒度の失敗で覆い隠さない。
-    for item_id, shas in seen.items():
-        problem = verify_commit_granularity({"item_id": item_id}, len(shas))
-        if problem:
-            problems.append(problem)
-            info(f"❌ 修正コミットが手順を満たしていません: {problem}")
-    return problems, accepted
-
-
-def _mark_resolved_fix_findings(entry: dict[str, Any], resolved: set[str]) -> None:
-    """GitHub 側で解決済みになった thread に対応する指摘へ、解決の印を付ける。"""
-    for review in entry["reviews"]:
-        for finding in review["findings"]:
-            if finding.get("thread_id") not in resolved:
-                continue
-            finding["resolved"] = True
-
-
-def _record_accepted_fix_commits(
-    state: dict[str, Any], accepted: list[tuple[str, str]]
-) -> None:
-    """検証を通った修正コミットを、対応する改善項目へ紐づける。
-
-    見送り済みなどで項目が見つからないコミットは、紐づけ先が無いので飛ばす。
-    """
-    for item_id, sha in accepted:
-        item = find_item(state, item_id, required=False)
-        if item is not None:
-            item.setdefault("commits", []).append(sha)
-
-
-def _revert_invalid_fix_round(
-    path: pathlib.Path,
-    state: dict[str, Any],
-    scope: IntakeScope,
-    ordered_range: list[str],
-) -> set[str]:
-    """検証を通らない修正ラウンドの範囲を取り消し、採用する解決スレッドを返す。
-
-    取り消した以上、解決の申告も採らないので**常に空集合を返す**。
-    """
-    # 取り消しの本体は 3 つの取り込みで共有する（`intake.discard_unverified`）。
-    # **push は保存のあと。** ここで push して失敗すると、取り消しコミットは
-    # ローカルに残るのに起点の更新が保存されず、叩き直しで二重に取り消してしまう。
-    discard_unverified(path, state, scope, ordered_range)
-    info("⚠ 修正を取り消したため、解決の申告は採用しません")
-    return set()
-
-
-@dataclass
-class FixExecutionContext:
-    """修正の取り込み 1 回分に属する値の組。"""
-
-    path: pathlib.Path
-    state: dict[str, Any]
-    entry: dict[str, Any]
-    scope: IntakeScope
-    work: str
-
-
-def _resolve_fix_range(ctx: FixExecutionContext, head_now: str) -> list[str]:
-    """修正の範囲を**オーケストレータが記録した起点**から確定して返す。
-
-    起点は `verify-round` がテストの失敗を返したときの HEAD である。確定できない
-    ときは修正ラウンドを 1 つ進めて保存したうえで `die` する。
-    """
-    entry = ctx.entry
-    ordered_range = commits_in_range(ctx.work, entry.get("fix_base_sha"), head_now)
-    if ordered_range is None:
-        # **修正ラウンドは進める。** 進めないと `should-abandon` が見送りへ移る
-        # 条件（`fix_rounds` が上限に達する）を永久に満たさず、修正フェーズと
-        # 再レビューを無限に往復する。この修正は採らないので、範囲外の記録は
-        # 何も足さない。
-        entry["fix_rounds"] += 1
-        statefile.save(ctx.path, ctx.state)
-        die(
-            "修正の範囲を確定できませんでした"
-            f"（起点 {entry.get('fix_base_sha')} / HEAD {head_now}）。"
-            "検証できない修正は採りません",
-            code=2,
-        )
-    return ordered_range
-
-
-def _inspect_fix_commits(
-    state: dict[str, Any],
-    work: str,
-    payload: dict[str, Any],
-    ordered_range: list[str],
-) -> tuple[list[str], list[str], list[tuple[str, str]]]:
-    """修正コミットを **git と実際のテスト実行から**検証する。
-
-    結果ファイルの申告で済ませると、手順を満たさない変更が収束済みになれてしまう。
-    未割当コミットの一覧・問題点の一覧・受理した (item_id, sha) を返す。
-
-    **コミットごとに走らせるのは範囲のテストである**（#880）。
-    """
-    claimed_shas = reported_shas(payload)
-    unassigned = unassigned_fix_commits(work, claimed_shas, ordered_range)
-
-    facts = collect_commit_facts(
-        work, claimed_shas, set(ordered_range),
-        round_test_command(state) or "true", state["head_branch"],
-        safe_int(state.get("test_timeout"), DEFAULT_TEST_TIMEOUT),
-    )
-
-    problems, accepted = _verify_fix_commits(facts, state.get("target_scope") or [])
-
-    if unassigned:
-        info(
-            f"❌ どの申告にも含まれていない修正コミットが {len(unassigned)} 件あります"
-            f"（{', '.join(s[:7] for s in unassigned[:5])}）"
-        )
-    return unassigned, problems, accepted
-
-
-def _settle_fix_round(
-    ctx: FixExecutionContext,
-    ordered_range: list[str],
-    resolved: set[str],
-    unassigned: list[str],
-    problems: list[str],
-    accepted: list[tuple[str, str]],
-) -> None:
-    """検証結果に応じて修正ラウンドを取り消すか受理し、解決の印を付ける。"""
-    if unassigned or problems:
-        resolved = _revert_invalid_fix_round(
-            ctx.path, ctx.state, ctx.scope, ordered_range
-        )
-    else:
-        _record_accepted_fix_commits(ctx.state, accepted)
-
-    _mark_resolved_fix_findings(ctx.entry, resolved)
-
-
-def _fix_scope(entry: dict[str, Any], impl: str) -> IntakeScope:
-    """修正の取り込み 1 回分の範囲の値。
-
-    起点と公開の保留の印は提案ラウンドの控えが持ち、結末の記録は**その群**が持つ。
-    記録を群に置くのは、担当が群ごとに決まるためである。
-    """
-    return IntakeScope(
-        holder=entry,
-        base_key="fix_base_sha",
-        records=current_group(entry),
-        phase="fix",
-        attempt=safe_int(entry.get("fix_attempts")),
-        impl=impl,
-        label=f"R{entry['round']}-fix{safe_int(entry.get('fix_rounds')) + 1}",
-    )
-
-
-def _close_failed_fix(
-    path: pathlib.Path,
-    state: dict[str, Any],
-    entry: dict[str, Any],
-    scope: IntakeScope,
-    outcome: Any,
-) -> None:
-    """修正の担当が結果を残さなかったときに、取り消して修正ラウンドを進める。
-
-    **必ず修正ラウンドを進める。** 進めないと見送りの判定が上限に達する条件を
-    満たさず、検証と修正を往復し続ける（#647）。起動し直しても解けない結末
-    （利用上限）では上限の値まで進め、次の判定で見送りへ移す（#728 の決定 10）。
-    """
-    closed = close_without_result(path, state, scope, outcome)
-    if closed.range_unknown:
-        entry["fix_rounds"] = safe_int(entry.get("fix_rounds")) + 1
+    failing = [i for i in live_items(state) if i.get("status") == FAILING]
+    if failing:
+        state["fix"] = {
+            "items": [i["id"] for i in failing],
+            "base_sha": git_out(str(state["worktrees"]["work"]), ["rev-parse", "HEAD"]),
+            "attempt": int((state.get("fix_stats") or {}).get("launches") or 0) + 1,
+        }
+        _account(state, started)
         statefile.save(path, state)
-        die(
-            "修正の範囲を確定できませんでした"
-            f"（起点 {entry.get('fix_base_sha')}）。検証できない修正は採りません",
-            code=2,
-        )
-    limit = safe_int(state.get("max_fix_rounds"), 3)
-    if closed.relaunch_same_agent:
-        entry["fix_rounds"] = safe_int(entry.get("fix_rounds")) + 1
-    else:
-        entry["fix_rounds"] = limit
+        info(f"❌ 限ったテストが落ちた項目 {len(failing)} 件を修正へ回します")
+        for line in item_lines(state, [i["id"] for i in failing]):
+            info(f"   {line}")
+        statefile.emit(VERIFY="fix")
+        return
+
+    _whole_test(path, state, _flag_items(state))
+    _account(state, started)
+    finish_phase(state, "verify")
+    state["phase"] = "final"
     statefile.save(path, state)
-    info(f"修正ラウンド {entry['fix_rounds']} / {limit}")
-    sys.exit(2)
+    push_with_retry_marker(path, state, state)
+    kept = [i["id"] for i in live_items(state)]
+    info(f"✅ 検証を終えました（残った項目 {len(kept)} 件）。{plan_line(state)}")
+    for line in item_lines(state, kept):
+        info(f"   {line}")
+    statefile.emit(VERIFY="done")
 
 
-def _fetch_fix_result(
-    ctx: FixExecutionContext, impl: str, round_no: int,
-) -> tuple[Optional[dict[str, Any]], Optional[str]]:
-    """修正結果を取得し、`(payload, merge_key)` を返す。
-
-    結果を残さなかった試行は `_close_failed_fix` が終了させる。取り込み済みの
-    結果なら `(None, None)` を返し、呼び出し側が何もせず戻れるようにする。
-    """
-    state, entry = ctx.state, ctx.entry
-    outcome = read_result(state, impl, "fix", round_no)
-    if outcome.payload is None:
-        _close_failed_fix(ctx.path, state, entry, ctx.scope, outcome)
-    payload = outcome.payload
-
-    result = result_path(state, impl, stem_for(impl, "fix", state["id"], round_no))
-    merge_key = _fix_merge_key(entry, result)
-    if _already_merged_fix_result(entry, merge_key):
-        return None, None
-    return payload, merge_key
+def _account(state: dict[str, Any], started: float) -> None:
+    """検証の所要を足し込む（配分テーブルの `verify`）。項目は検証した改善項目の数。"""
+    seconds = time.monotonic() - started
+    stats = state.setdefault("verify_stats", {"items": 0, "seconds": 0.0})
+    stats["seconds"] = round(float(stats.get("seconds") or 0.0) + seconds, 1)
+    stats["items"] = sum(1 for i in state.get("items") or [] if int(i.get("verify_runs") or 0) > 0)
+    add_phase_seconds(state, "verify", seconds)
 
 
-def _confirm_and_settle_fix(
-    ctx: FixExecutionContext, head_now: str, payload: dict[str, Any],
-) -> set[str]:
-    """Git 範囲を確定し、修正コミットを検証して取り消すか受理する。
+# ---------- merge-fix ----------
 
-    採用した解決スレッドの集合を返す（取り込みの通知に使う）。
-    """
-    state = ctx.state
-    resolved = _resolved_fix_thread_ids(payload, state["repo"], state["current_pr"])
-    ordered_range = _resolve_fix_range(ctx, head_now)
-    unassigned, problems, accepted = _inspect_fix_commits(
-        state, ctx.work, payload, ordered_range
-    )
-    _settle_fix_round(
-        ctx, ordered_range, resolved, unassigned, problems, accepted,
-    )
-    return resolved
-
-
-def _record_and_publish_fix(
-    ctx: FixExecutionContext,
-    merge_key: str, payload: dict[str, Any], resolved: set[str],
-) -> None:
-    """取り込み済みの鍵・修正回数・所要時間を記録し、保存して公開する。"""
-    path, state, entry = ctx.path, ctx.state, ctx.entry
-    entry["fix_merged_keys"].append(merge_key)
-    entry["fix_rounds"] += 1
-    entry.setdefault("durations", {})["fix"] = (
-        entry.get("durations", {}).get("fix", 0)
-        + safe_int(payload.get("elapsed_seconds"))
-    )
-    statefile.save(path, state)
-    # **取り消したかどうかに関わらず公開する。** 実装担当は push しないため、
-    # ここで公開しないと再レビューが Pull Request 上の差分を見られない。
-    push_with_retry_marker(path, state, entry)
-    info(
-        f"修正を取り込みました（解決 {len(resolved)} スレッド / "
-        f"修正ラウンド {entry['fix_rounds']}）。{plan_line(state)}"
-    )
+def _fix_problems(
+    state: dict[str, Any], facts: list[dict[str, Any]], allowed: set[str],
+) -> list[str]:
+    """修正のコミットが手順を満たすか。**1 件でも外れたら修正の範囲ごと取り消す。**"""
+    scope = list(state.get("target_scope") or [])
+    problems = []
+    for fact in facts:
+        item_id = str((fact.get("trailers") or {}).get("Item-Id") or "")
+        if item_id not in allowed:
+            problems.append(f"コミット {fact['sha'][:7]} の Item-Id（{item_id or 'なし'}）は修正の対象ではありません")
+            continue
+        problem = _verify_commit_basics(fact, scope, "コミットが範囲にありません", check_test=False)
+        problem = problem or verify_test_changes(collect_test_changes([fact]))
+        if problem:
+            problems.append(problem)
+    return problems
 
 
 def cmd_merge_fix(args: argparse.Namespace) -> None:
-    """Step 6 — 修正結果を取り込み、修正ラウンドを 1 つ進める。
+    """修正の結果を取り込む。取り込んだ項目は `implemented` へ戻り、次の `verify` が見直す。
 
-    終了コード: 0 = 取り込んだ / 2 = 範囲を確定できない、または担当が結果を
-    残さなかった（どちらも修正ラウンドは進む） / 4 = 群が無い。
+    **結果ファイルの申告は使わない。** 修正の起点から HEAD までのコミットを `Item-Id`
+    で読み、修正の対象の項目のものだけを受け取る。1 件でも手順を外れたら範囲ごと
+    取り消す（どのコミットが安全かを決められないため）。どちらの場合も修正の回数は
+    進める（進めないと上限に届かず、検証と修正を往復し続ける）。
     """
     path, state = load_state(args.id)
-    entry = round_of(state, args.round)
-    discard_impl_leftovers(state, state["worktrees"]["work"])
-    flush_pending_push(path, state, entry)
-    # **担当は群から読む。** 骨組みが起動するのは群の担当であり、提案ラウンドの
-    # 担当とは限らない。食い違うと結果ファイルを一度も引けない（#728 の決定 10）。
-    group = current_group(entry)
-    impl = group.get("impl") or entry["impl"]
-    scope = _fix_scope(entry, impl)
-    if already_closed(scope):
-        info("↻ この修正の試行は結果なしとして記録済みです")
-        sys.exit(2)
-
-    ctx = FixExecutionContext(
-        path, state, entry, scope, state["worktrees"]["work"]
-    )
-    payload, merge_key = _fetch_fix_result(ctx, impl, args.round)
-    if payload is None:
+    work = str(state["worktrees"]["work"])
+    discard_impl_leftovers(state, work)
+    fix = state.get("fix")
+    if not fix:
+        info("↻ 取り込む修正はありません")
         return
+    record_observed_model(state, str(state["implementer"]), "fix")
+    head = git_out(work, ["rev-parse", "HEAD"]) or ""
+    ordered = commits_in_range(work, fix.get("base_sha"), head)
+    targets = [find_item(state, i, required=False) for i in fix.get("items") or []]
+    targets = [t for t in targets if t is not None]
+    if ordered is None:
+        problems = [f"修正の範囲を確定できません（起点 {fix.get('base_sha')}）"]
+        ordered = []
+    else:
+        facts = collect_commit_facts(work, ordered, set(ordered), "", state["head_branch"])
+        problems = _fix_problems(state, facts, {t["id"] for t in targets})
+    if problems and ordered:
+        for problem in problems:
+            info(f"❌ {problem}")
+        state["pending_push"] = True
+        statefile.save(path, state)
+        _revert_range(work, ordered, head)
+        info(f"↩ 修正の範囲 {len(ordered)} コミットを取り消しました")
+    elif ordered:
+        for sha in reversed(ordered):
+            item_id = str(commit_trailers(work, sha).get("Item-Id") or "").strip()
+            item = find_item(state, item_id, required=False)
+            if item is not None:
+                item["commits"]["fix"].append(sha)
+    for item in targets:
+        item["fix_count"] = int(item.get("fix_count") or 0) + 1
+        if item.get("status") == FAILING:
+            item["status"] = IMPLEMENTED
+    stats = state.setdefault("fix_stats", {"launches": 0, "seconds": 0.0})
+    started = ((state.get("phases") or {}).get("fix") or {}).get("launch_started_at")
+    seconds = max(clock.seconds_between(started, clock.now()) or 0.0, 0.0)
+    stats["launches"] = int(stats.get("launches") or 0) + 1
+    stats["seconds"] = round(float(stats.get("seconds") or 0.0) + seconds, 1)
+    add_phase_seconds(state, "fix", seconds)
+    state["fix"] = None
+    statefile.save(path, state)
+    if state.get("pending_push"):
+        push_with_retry_marker(path, state, state)
+    info(f"修正を取り込みました（{len(ordered)} コミット / 対象 {len(targets)} 件）。{plan_line(state)}")
 
-    head_now = git_out(ctx.work, ["rev-parse", "HEAD"]) or ""
-    resolved = _confirm_and_settle_fix(ctx, head_now, payload)
-    _record_and_publish_fix(ctx, merge_key, payload, resolved)
+
+# ---------- merge-test-judgements ----------
+
+def _read_verdicts(state: dict[str, Any]) -> list[dict[str, Any]]:
+    outcome = read_result(state, str(state["implementer"]), "judge-test-changes")
+    found = (outcome.payload or {}).get("verdicts")
+    return [v for v in found if isinstance(v, dict)] if isinstance(found, list) else []
+
+
+def cmd_merge_test_judgements(args: argparse.Namespace) -> None:
+    """段 2（AI エージェント）の答えを取り込む（#443、実装計画 I7）。
+
+    `changed` の項目は取り消す。`undecidable` と答えの欠けたものは保留を解かず、
+    最終ゲートのレビューへ引き継ぐ（`review_test_judgements`）。**答えが欠けたものを
+    `unchanged` に倒さない。**
+    """
+    path, state = load_state(args.id)
+    pending = [i for i in live_items(state) if i.get("pending_test_judgements")]
+    if not pending:
+        info("判定を待っているテストはありません")
+        return
+    verdicts = _read_verdicts(state)
+    changed = []
+    for item in pending:
+        outcome = merge_test_judgements(item["pending_test_judgements"], verdicts)
+        item.pop("pending_test_judgements", None)
+        if outcome["problem"]:
+            item["failure_reason"] = outcome["problem"]
+            changed.append(item["id"])
+        elif outcome["pending"]:
+            item["review_test_judgements"] = outcome["pending"]
+    statefile.save(path, state)
+    if changed:
+        drop(path, state, changed, "段 2 の判定でテストの期待する振る舞いが変わっていた")
+        info(f"❌ 期待する振る舞いを変えた項目 {len(changed)} 件を取り消しました")
+    carried = [i["id"] for i in live_items(state) if i.get("review_test_judgements")]
+    if carried:
+        info(f"{len(carried)} 件のテストの差分はレビューへ引き継ぎます: {', '.join(carried)}")

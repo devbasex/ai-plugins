@@ -44,10 +44,11 @@ def refactor() -> types.ModuleType:
 # 別のオブジェクトになり、差し替えが入口側へ伝わらない。
 
 _MODULES = (
-    "commands.apply", "commands.converge", "commands.gate",
-    "commands.report", "commands.setup",
-    "gitfacts", "intake", "outbound", "paths", "plan", "proposals",
-    "rounds", "scope", "verify", "vocabulary",
+    "commands.converge", "commands.gate", "commands.implement", "commands.plan",
+    "commands.propose", "commands.report", "commands.setup",
+    "allocation", "budget", "clock", "danger", "gitfacts", "intake", "items",
+    "outbound", "paths", "phases", "plan", "proposals", "scope", "testcmd", "undo",
+    "verify", "vocabulary",
 )
 
 

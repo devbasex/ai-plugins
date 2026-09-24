@@ -1,7 +1,7 @@
 """改修計画の置き場所と本文（#436 決定 6）。
 
 **改修計画は実行の記録であって、リポジトリの知識ではない。** 既定の置き場所は
-**対象の Pull Request のコメント 1 件**で、ラウンドが進むたびに同じコメントを
+**対象の Pull Request のコメント 1 件**で、公開のたびに同じコメントを
 編集する。ファイルとして残すのは `--plan-file` を明示したときだけである。
 
 | 置き場所 | URL の安定 | 差分に混ざるか | 更新の手数 |
@@ -17,7 +17,7 @@ from typing import Any, Optional
 
 from . import die, info
 from .paths import sh
-from .rounds import TEST, item_kind, item_label
+from .items import item_label
 from .vocabulary import ITEM_STATUS_LABELS
 
 # 置き場所の 3 態。**宣言の無い状態ファイルは書き出し先から読む**（この版より前で
@@ -154,87 +154,75 @@ def format_plan(state: dict[str, Any]) -> str:
     だったのかも見えない。ここで差分の中へ置く。
     """
     baseline = state.get("baseline_test") or {}
+    plan = state.get("plan") or {}
     lines = [
         f"# 改修計画 — {state['repo']} #{state['current_pr']}",
         "",
-        "`/ndf:cross-refactoring` が提案し、適用した改善項目の記録である。",
+        "`/ndf:cross-refactoring` が提案し、計画し、適用した改善項目の記録である。",
         "理由と手順は提案の時点でしか残らないため、公開の直前に書き出している。",
         "",
         f"- 対象範囲: {', '.join(state.get('target_scope') or []) or '（未指定）'}",
         f"- 着手前のテスト: {baseline.get('command') or '（未指定）'}",
+        f"- 想定最大時間: {state.get('budget_minutes')} 分"
+        f" / 計画の時点で使えた時間: {plan.get('available_minutes', '—')} 分",
+        f"- 実装担当: {state.get('implementer') or '—'}",
+        "",
+        "## 改善項目",
         "",
     ]
-    for entry in state.get("rounds") or []:
-        lines.extend(_plan_round_section(state, entry))
-    if not (state.get("rounds") or []):
-        lines.append("（改善項目なし）")
+    items = state.get("items") or []
+    if not items:
+        lines.extend(["（採用した改善項目なし）", ""])
+    for item in items:
+        lines.extend(_plan_item_section(item))
     lines.extend(_plan_deferred_section(state))
     return "\n".join(lines).rstrip() + "\n"
 
 
 def _plan_deferred_section(state: dict[str, Any]) -> list[str]:
-    """見送った項目の内訳。**内訳を持つのはここだけである**（決定 6-b）。
+    """見送った提案の内訳。**内訳を持つのはここだけである**（決定 6-b）。
 
     Pull Request へ出す他の文章は件数だけを述べ、内訳はこの節へ譲る。同じ一覧を
     2 か所に置くと、片方だけが古くなる。
     """
     deferred = state.get("deferred_items") or []
-    lines = ["## 見送った項目", ""]
+    lines = ["## 見送った提案", ""]
     if not deferred:
         lines.extend(["（なし）", ""])
         return lines
     lines.extend([
-        "| ラウンド | 対象 | 兆候・経路 | 理由 |",
+        "| 対象 | 兆候 | 理由 | 補足 |",
         "| --- | --- | --- | --- |",
     ])
     for item in deferred:
-        kind_label = item.get("case") if item_kind(item) == TEST else item.get("smell")
         lines.append(
-            f"| {item.get('round', '—')} | `{item_label(item)}` | "
-            f"{kind_label or '—'} | {item.get('defer_reason', '—')} |"
+            f"| `{item_label(item)}` | {item.get('smell') or '—'} | "
+            f"{item.get('defer_reason', '—')} | {item.get('detail') or '—'} |"
         )
     lines.append("")
     return lines
 
 
-def _plan_round_section(state: dict[str, Any], entry: dict[str, Any]) -> list[str]:
-    """1 ラウンド分の見出しと、そのラウンドの改善項目を並べる。"""
-    lines = [
-        f"## ラウンド {entry['round']}（実装 {entry.get('impl', '—')}）",
-        "",
-    ]
-    items = [i for i in state.get("items") or [] if i.get("round") == entry["round"]]
-    if not items:
-        lines.extend(["（採用した改善項目なし）", ""])
-        return lines
-    for item in items:
-        lines.extend(_plan_item_section(item))
-    return lines
-
-
 def _plan_item_section(item: dict[str, Any]) -> list[str]:
-    """項目 1 件の見出し・要約表・理由・手順。
-
-    テスト項目は兆候と手法を持たない（決定 9）。代わりに固定する経路の種類と
-    階層を同じ位置へ書く。
-    """
+    """項目 1 件の見出し・要約表・理由・手順。"""
     status = ITEM_STATUS_LABELS.get(item.get("status"), item.get("status") or "—")
-    if item_kind(item) == TEST:
-        first, second, severity = item.get("case"), item.get("level"), "—"
-    else:
-        first, second = item.get("smell"), item.get("technique")
-        severity = item.get("severity") or "—"
-    return [
-        f"### {item['item_id']} — `{item_label(item)}`",
+    commits = item.get("commits") or {}
+    count = len([s for s in (commits.get("test"), commits.get("implement"),
+                             *(commits.get("fix") or [])) if s])
+    lines = [
+        f"### {item['id']} — `{item_label(item)}`",
         "",
-        "| 兆候・経路 | 手法・階層 | 重要度 | 提案元 | 状態 | コミット |",
-        "| --- | --- | --- | --- | --- | ---: |",
-        f"| {first or '—'} | {second or '—'} | {severity} | "
-        f"{' / '.join(item.get('proposed_by') or []) or '—'} | {status} | "
-        f"{len(item.get('commits') or [])} |",
+        "| 兆候 | 手法 | 重要度 | 段 | 提案元 | 状態 | コミット |",
+        "| --- | --- | --- | --- | --- | --- | ---: |",
+        f"| {item.get('smell') or '—'} | {item.get('technique') or '—'} | "
+        f"{item.get('severity') or '—'} | {item.get('tier') or '—'} | "
+        f"{' / '.join(item.get('proposed_by') or []) or '—'} | {status} | {count} |",
         "",
         f"**なぜ**: {item.get('rationale') or '（記録なし）'}",
         "",
         f"**手順**: {item.get('plan') or '（記録なし）'}",
         "",
     ]
+    if item.get("failure_reason"):
+        lines.extend([f"**取り消した理由**: {item['failure_reason']}", ""])
+    return lines
