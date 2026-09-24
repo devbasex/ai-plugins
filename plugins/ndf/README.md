@@ -89,7 +89,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.17.8-dev.1）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.17.8）
 ```
 
 ### agy
@@ -119,15 +119,15 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.17.8-dev.1 へ更新するとき
+## v10.17.8 へ更新するとき
 
 **`/ndf:cross-refactoring` を、ラウンドを上限まで回す形から、想定最大時間（`--budget-minutes`、既定 30 分）に
 収まる計画を 1 回だけ実行する形へ改めました**（マイルストーン 26、#933）。あわせて中継の静まりの既定を
 15 秒から 5 秒へ短くしました（PR #964）。Skill の追加・削除・改名は無く、公開 Skill の数も変わりません。
 変更点の一覧は [CHANGELOG.md](../../CHANGELOG.md) にあります。
 
-**開発版です。** `develop` にだけ載ります。取得元へ `#develop` を足す手順は
-[docs/versioning-and-distribution.md の「開発版を試す」](../../docs/versioning-and-distribution.md#開発版を試す)にあります。
+**正式版です。** `main` に載ります。中身は開発版 `10.17.8-dev.1` と同じで、版数の接尾辞だけを
+外しました。
 
 | 変わったこと | 中身 |
 | --- | --- |
@@ -141,8 +141,10 @@ agy plugin list
 
 **実行中の cross-refactoring は入れ替わりません。** 更新は次の `init` から効きます。
 
-開発版のチャネル（`#develop` を付けて登録した取得元）なら、次で入れ替わります。**動いているセッションには
-反映されない**ため、更新したあとは起動し直してください。
+正式版のチャネル（ref を指定せずに登録した取得元）なら、次で入れ替わります。**動いているセッションには
+反映されない**ため、更新したあとは起動し直してください。開発版を試すために `develop` を登録した場合は、
+[docs/versioning-and-distribution.md の「ランタイムごとの取得と導入」](../../docs/versioning-and-distribution.md#ランタイムごとの取得と導入)
+の手順で ref を指定せずに登録し直してから導入します。
 
 ```bash
 claude plugin marketplace update ai-plugins
@@ -160,7 +162,7 @@ codex plugin add ndf@ai-plugins
 にあります。
 
 ```bash
-grep -q '"version": "10.17.8-dev.1"' "$SCRIPTS/../.claude-plugin/plugin.json"; echo "exit=$?"   # 0 なら この版が入っている
+grep -q '"version": "10.17.8"' "$SCRIPTS/../.claude-plugin/plugin.json"; echo "exit=$?"   # 0 なら この版が入っている
 python3 "$SCRIPTS/../skills/cross-refactoring/scripts/refactor.py" init --help 2>/dev/null | grep -q -- '--budget-minutes'; echo "exit=$?"   # 0 なら cross-refactoring が想定最大時間を受け取る
 python3 -B -c 'import sys; sys.path.insert(0, sys.argv[1]); from refactor_lib import budget; sys.exit(budget.reserve(60, False, 5.5).get("final_fix") != 5.5)' "$SCRIPTS/../skills/cross-refactoring/scripts"; echo "exit=$?"   # 0 なら 最終ゲートの修正 1 回分を控えに入れる
 python3 -B -c 'import sys; sys.path.insert(0, sys.argv[1]); from assignment import choose_implementer; sys.exit(choose_implementer(["codex", "claude"], "claude") != ("claude", "host"))' "$SCRIPTS/lib"; echo "exit=$?"   # 0 なら 実装担当をホストに決める（輪番が無い）
@@ -336,7 +338,7 @@ agy models   # 認証の確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.17.8-dev.1/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.17.8/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -358,14 +360,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.8-dev.1/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.8/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.17.8-dev.1  <path>
+# => ndf@ai-plugins  installed, enabled  10.17.8  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。
