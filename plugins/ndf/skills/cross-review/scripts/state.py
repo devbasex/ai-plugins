@@ -2904,18 +2904,7 @@ def cmd_read_result(args: argparse.Namespace) -> None:
     agent = args.agent
     pr = args.pr
     rfile = pathlib.Path(args.file or _resolve_tmp_dir(pr) / f"{agent}-review-pr{pr}-result.json")
-    r = _read_review_result_file(pr, agent, rfile)
-
-    intent = r.get("event") or r.get("intent")
-
-    if intent is None:
-        _die_no_result(
-            pr,
-            agent,
-            "no_verdict",
-            f"{agent}: result.json に event / intent フィールドが無い ({rfile})。"
-            " launcher prompt のスキーマ違反の可能性。",
-        )
+    r = _validate_review_result(pr, agent, rfile)
 
     st = _load(pr)
     if not st.get("rounds"):
@@ -2944,6 +2933,52 @@ def cmd_read_result(args: argparse.Namespace) -> None:
     if posted.failed:
         die(f"{agent}: レビューを投稿できませんでした ({posted.detail})")
 
+    collected = _record_review_post(st, agent, pr, r, posted)
+    _save(pr, st)
+    if posted.review_url:
+        print(f"POSTED review_url={posted.review_url}")
+    print(f"INLINE={posted.posted_inline} BODY={posted.posted_body}"
+          f" QUEUED={posted.queued}")
+    print(f"FINDINGS={collected}")
+    info(f"✅ {agent}: intent={posted.intent} posted_as={posted.posted_as}"
+         f" comments={posted.posted_inline}")
+
+
+def _validate_review_result(
+    pr: int, agent: str, rfile: pathlib.Path
+) -> dict[str, Any]:
+    """結果ファイルを読み、`event` / `intent` を検証して中身を返す。
+
+    判定の値を持たないときは `NO_RESULT` をラウンドへ残してから止める（終了コードは
+    現行のまま。無い・判定の値を持たないときは 1、JSON として読めないときは 3）。
+    """
+    r = _read_review_result_file(pr, agent, rfile)
+    intent = r.get("event") or r.get("intent")
+    if intent is None:
+        _die_no_result(
+            pr,
+            agent,
+            "no_verdict",
+            f"{agent}: result.json に event / intent フィールドが無い ({rfile})。"
+            " launcher prompt のスキーマ違反の可能性。",
+        )
+    return r
+
+
+def _record_review_post(
+    st: dict[str, Any],
+    agent: str,
+    pr: int,
+    r: dict[str, Any],
+    posted: Any,
+) -> int:
+    """投稿の結果をラウンドへ書き戻し、指摘を取り込んで件数を返す。
+
+    **指摘そのものは別に積む**（#156）。`comments` は送れたインラインの数で、
+    総評へ移した指摘はそこに現れない。
+    """
+    last = st["rounds"][-1]
+    round_no = last.get("round")
     last[agent] = {
         "intent": posted.intent,
         "posted_as": posted.posted_as,
@@ -2954,17 +2989,7 @@ def cmd_read_result(args: argparse.Namespace) -> None:
         "posted_inline": posted.posted_inline,
         "posted_body": posted.posted_body,
     }
-    # **指摘そのものは別に積む**（#156）。`comments` は送れたインラインの数で、
-    # 総評へ移した指摘はそこに現れない。
-    collected = _collect_review_findings(st, agent, pr, round_no)
-    _save(pr, st)
-    if posted.review_url:
-        print(f"POSTED review_url={posted.review_url}")
-    print(f"INLINE={posted.posted_inline} BODY={posted.posted_body}"
-          f" QUEUED={posted.queued}")
-    print(f"FINDINGS={collected}")
-    info(f"✅ {agent}: intent={posted.intent} posted_as={posted.posted_as}"
-         f" comments={posted.posted_inline}")
+    return _collect_review_findings(st, agent, pr, round_no)
 
 
 def _round_ci(st: dict[str, Any], last: dict[str, Any], pr: int) -> dict[str, Any]:
