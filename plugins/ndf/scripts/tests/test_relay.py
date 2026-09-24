@@ -391,7 +391,7 @@ def test_run_switches_to_next_section(term, tmp_path):
     t.type("mark /goal 次の段\r")
     t.wait_start(2)
     first, second = t.starts()[:2]
-    assert second["argv"] == ["/goal 次の段"]
+    assert second["argv"] == ["--model", "haiku", "/goal 次の段"]
     assert t.child_input(0).endswith(b"/exit\r")
     assert t.calls() == [["list", "--json"], ["marketplace", "update", "mk"],
                          ["update", "ndf@mk", "-y"], ["list", "--json"]]
@@ -408,6 +408,32 @@ def test_run_switches_to_next_section(term, tmp_path):
     assert s2["from_session"] == f"s{first['pid']}"
     assert s2["section"] == 2 and s2["pid"] == second["pid"]
     assert e1["ended_by"] == "mark" and e1["section"] == 1
+    t.type("quit 0\r")
+    assert t.finish() == 0
+
+
+def test_run_carries_policy_args_through_shell_function(term, tmp_path):
+    """alias の展開 → シェルの関数 → 中継と渡った引数のうち、起動の方針だけを 2 つ目の
+    区間へ引き継ぐ。区間ごとの引数（会話・名前・最初のプロンプト・`--` 以後）は落とす（#936）。"""
+    assert relay_cmd(tmp_path, "install", NDF_RELAY_CLAUDE=FAKE).returncode == 0
+    shellrc = cfg(tmp_path) / "shellrc"
+    script = ("shopt -s expand_aliases\n"
+              f". {shellrc}\n"
+              "alias claude='claude --dangerously-skip-permissions'\n"
+              "claude --model x --add-dir a b --resume id -c --session-id u -n nm 最初 -- --verbose\n")
+    t = term(cmd=["bash", "--norc", "--noprofile", "-c", script])
+    t.wait_start(1)
+    first = t.starts()[0]
+    assert first["argv"] == ["--dangerously-skip-permissions", "--model", "x", "--add-dir", "a", "b",
+                             "--resume", "id", "-c", "--session-id", "u", "-n", "nm", "最初",
+                             "--", "--verbose"]
+    t.type("mark /goal 次の段\r")
+    t.wait_start(2)
+    carried = ["--dangerously-skip-permissions", "--model", "x", "--add-dir", "a", "b"]
+    assert t.starts()[1]["argv"] == [*carried, "/goal 次の段"]
+    s2 = events(t.rows(), "start")[1]
+    assert s2["command"] == "/goal 次の段"
+    assert s2["carried"] == carried
     t.type("quit 0\r")
     assert t.finish() == 0
 
@@ -552,6 +578,29 @@ def mod(tmp_path, monkeypatch):
     monkeypatch.setattr(m.os, "execve", fake_execve)
     m.calls = calls
     return m
+
+
+@pytest.mark.parametrize("args, expected", [
+    (["--dangerously-skip-permissions"], ["--dangerously-skip-permissions"]),
+    (["--model", "x", "最初"], ["--model", "x"]),
+    (["--model=x", "--resume=abc", "最初"], ["--model=x"]),
+    (["--add-dir", "a", "b", "--verbose"], ["--add-dir", "a", "b", "--verbose"]),
+    (["--mcp-config", "a.json", "b.json", "--permission-mode", "plan"],
+     ["--mcp-config", "a.json", "b.json", "--permission-mode", "plan"]),
+    (["--resume", "id", "--model", "x"], ["--model", "x"]),
+    (["-r", "--model", "x"], ["--model", "x"]),
+    (["-c", "--dangerously-skip-permissions", "最初"], ["--dangerously-skip-permissions"]),
+    (["--session-id", "u", "--fork-session", "-n", "nm", "--name", "nm2", "--bg", "--background",
+      "--tmux", "--from-pr", "12", "--teleport", "--cloud", "desc", "--continue"], []),
+    (["--dangerously-skip-permissions", "--", "--model", "x"], ["--dangerously-skip-permissions"]),
+    (["--debug", "api", "--verbose", "最初"], ["--debug", "api", "--verbose"]),
+    (["--unknown-opt", "v", "最初"], ["--unknown-opt", "v"]),
+    (["-nfoo", "-rabc", "--session-id=u", "--model", "x"], ["--model", "x"]),
+    ([], []),
+])
+def test_carried_args(mod, args, expected):
+    """最初の区間の引数から、2 つ目以降の区間へ引き継ぐものを選ぶ（#936）。"""
+    assert mod.carried_args(args) == expected
 
 
 @pytest.mark.parametrize("tasks", [None, {"status": "running"}, "running"])

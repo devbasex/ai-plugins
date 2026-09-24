@@ -57,6 +57,27 @@ SUBCOMMANDS = {
     "logs", "mcp", "plugin", "plugins", "project", "respawn", "rm", "setup-token",
     "stop", "kill", "ultrareview", "update", "upgrade",
 }
+# 2 つ目以降の区間へ引き継ぐ引数の解析（#936・決定 22）。Claude Code 2.1.281 の `claude --help` から写す。
+# 値を取らない選択肢。これ以外の `-` で始まる選択肢は、次の語が `-` で始まらなければ値として取る
+BOOL_FLAGS = {
+    "--allow-dangerously-skip-permissions", "--ax-screen-reader", "--bg", "--background",
+    "--bare", "--brief", "--chrome", "--no-chrome", "-c", "--continue",
+    "--dangerously-skip-permissions", "--disable-slash-commands",
+    "--exclude-dynamic-system-prompt-sections", "--fork-session", "--forward-subagent-text",
+    "--ide", "--include-hook-events", "--include-partial-messages",
+    "--no-session-persistence", "--replay-user-messages", "--restricted", "--safe-mode",
+    "--strict-mcp-config", "--tmux", "--verbose",
+}
+# 可変長（`<x...>`）の選択肢。後続の `-` で始まらない語をすべて取る
+VARIADIC_FLAGS = {
+    "--add-dir", "--allowedTools", "--allowed-tools", "--disallowedTools",
+    "--disallowed-tools", "--mcp-config", "--betas", "--tools", "--file",
+}
+# 会話ごと・区間ごとに変わるもの。次の区間は新しい会話を始めるので引き継がない
+SECTION_FLAGS = {
+    "-c", "--continue", "-r", "--resume", "--session-id", "--fork-session", "--from-pr",
+    "--teleport", "--cloud", "-n", "--name", "--bg", "--background", "--tmux",
+}
 # 子へ継がせない Claude Code の環境変数（中から起こしたプロセスが継ぐもの）
 DROP_ENV = ("CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_ENTRYPOINT")
 
@@ -279,6 +300,35 @@ def needs_no_relay(args: list[str]) -> bool:
     if any(a in PASS_FLAGS or a.startswith("--print=") for a in args):
         return True
     return bool(args) and args[0] in SUBCOMMANDS
+
+
+def carried_args(args: list[str]) -> list[str]:
+    """最初の区間の引数から、2 つ目以降の区間の先頭に付ける起動の方針を選ぶ（#936）。
+
+    commander と同じ規則で選択肢と値を区切り、位置引数・`--` 以後・`SECTION_FLAGS` を
+    値ごと落とす。未知の選択肢は値を取る規則のまま引き継ぐ。"""
+    out, i = [], 0
+    while i < len(args):
+        a = args[i]
+        i += 1
+        if a == "--":
+            break
+        if not a.startswith("-") or a == "-":
+            continue  # 位置引数（最初のプロンプト）
+        long = a.startswith("--")
+        name = a.split("=", 1)[0] if long else a[:2]  # `-nfoo` は `-n` に値が付いた 1 語
+        group = [a]
+        one_word = "=" in a if long else len(a) > 2
+        if not one_word and name not in BOOL_FLAGS:
+            take_all = name in VARIADIC_FLAGS
+            while i < len(args) and not args[i].startswith("-"):
+                group.append(args[i])
+                i += 1
+                if not take_all:
+                    break
+        if name not in SECTION_FLAGS:
+            out += group
+    return out
 
 
 def say(msg: str) -> None:
@@ -667,10 +717,10 @@ class Relay:
         return at
 
     def start_section(self, args: list[str], cwd: str, command: str, from_session: str,
-                      cwd_fallback: str | None = None) -> None:
+                      cwd_fallback: str | None = None, carried: list[str] | None = None) -> None:
         remove(self.path(MARK_FILE))
         remove(self.path(QUESTION_FILE))
-        at = self.spawn(args, cwd)
+        at = self.spawn([*(carried or []), *args], cwd)
         self.section += 1
         self.started_at = at
         row = dict(event="start", at=now_iso(at), section=self.section, pid=self.term.pid,
@@ -678,6 +728,8 @@ class Relay:
                    plugin_version=self.version, cwd=cwd)
         if cwd_fallback is not None:
             row["cwd_fallback"] = cwd_fallback
+        if carried is not None:
+            row["carried"] = carried
         self.log(**row)
         self.limit.release()
 
@@ -869,6 +921,7 @@ class Relay:
         return cwd, fb
 
     def loop(self, first_args: list[str]) -> int:
+        carried = carried_args(first_args)
         try:
             self.start_section(first_args, os.getcwd(), shlex.join(first_args), "")
         except StartFailed as e:
@@ -894,7 +947,7 @@ class Relay:
             cwd, fb = nxt
             self.screen(f"── ndf-relay: 区間 {self.section + 1} ──")
             try:
-                self.start_section([command], cwd, command, m.get("session_id") or "", fb)
+                self.start_section([command], cwd, command, m.get("session_id") or "", fb, carried)
             except StartFailed as e:
                 return self.give_up("start-failed", f"claude を起動できない（{os.strerror(e.err)}）",
                                     command, errno=e.err)
@@ -1553,7 +1606,10 @@ def _startup_record_noticed(root: str) -> list[str]:
 def _startup_notice_message(paths: list[str]) -> str:
     """自動で足した alias を知らせる通知文を、パスの列から組み立てる。"""
     msg = (f"ndf-relay: {'・'.join(paths)} の alias claude は 10.17.4 が自動で足したもの。"
-           "使い続けるなら何もしなくてよい。外すなら /ndf:install-wrapper uninstall")
+           "使い続けるなら何もしなくてよい。外すなら /ndf:install-wrapper uninstall。"
+           "この alias は別のファイルが定義した alias claude（devbase の "
+           "--dangerously-skip-permissions など）を上書きしている。/ndf:install-wrapper で"
+           "入れ直せば囲みの中が読み込みの 1 行に替わり、その alias が戻る")
     if os.environ.get("DEVBASE_SHELLRC_DIR"):
         msg += "。コンテナを作り直した後も使うなら /ndf:install-wrapper"
     return msg

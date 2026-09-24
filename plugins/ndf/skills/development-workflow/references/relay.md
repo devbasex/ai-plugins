@@ -134,9 +134,14 @@ conductor では、文脈量の hook が工程へ入る起動を 1 度の通し�
 
 ## 区間をまたいで設定を保つ
 
-**2 つ目以降の区間は、ブロックの中身だけで起動する。** 最初の `claude` に付けた引数
-（`--model`・`--resume`・`-c` など）は引き継がない。捨てた会話へ戻らないためである。
-モデルなどを保つときは、設定か環境変数（`ANTHROPIC_MODEL` など）で与える。
+**2 つ目以降の区間は、最初の `claude` に付けた起動の方針の引数を先頭に付け、ブロックの
+中身で起動する。** alias（devbase の `--dangerously-skip-permissions` など）や手で付けた
+`--model`・`--permission-mode`・`--settings`・`--add-dir`・`--mcp-config`・`--plugin-dir` は
+すべての区間に効く。**会話ごと・区間ごとの引数は引き継がない。** 最初のプロンプト・`--` 以後・
+`-c`/`--continue`・`-r`/`--resume`・`--session-id`・`--fork-session`・`--from-pr`・`--teleport`・
+`--cloud`・`-n`/`--name`・`--bg`/`--background`・`--tmux` である。次の区間は新しい会話を
+始めるので、付けると前の会話へ戻るか、同じ ID を 2 度使うか、区間が端末に出ない。
+引数と値の区切りは `claude` と同じ規則で読み、知らない選択肢は値ごと引き継ぐ。
 
 ## 記録の読み方
 
@@ -144,7 +149,7 @@ conductor では、文脈量の hook が工程へ入る起動を 1 度の通し�
 
 | `event` | いつ | 主なキー |
 | --- | --- | --- |
-| `start` | 区間を起動した | `section`・`pid`・`command`・`from_session`・`plugin_version`（起動の直前に読んだ版）・`cwd`（印の作業ディレクトリが消えていたら `cwd_fallback` に元の値） |
+| `start` | 区間を起動した | `section`・`pid`・`command`・`from_session`・`plugin_version`（起動の直前に読んだ版）・`cwd`（印の作業ディレクトリが消えていたら `cwd_fallback` に元の値）・`carried`（2 つ目以降の区間だけ。ブロックの中身の前に付けた引数） |
 | `end` | 区間が終わった | `seconds`（起動から印まで。印なしなら終わりまで）・`ended_by`（`mark` / `no-mark` / `sigterm` / `sigkill`） |
 | `stop` | 次の区間を起動しないと決めた | `reason`（`stop-file` / `max-starts` / `spin` / `update-failed` / `start-failed` / `error`） |
 

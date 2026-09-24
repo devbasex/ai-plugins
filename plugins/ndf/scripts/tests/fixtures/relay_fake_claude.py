@@ -25,7 +25,7 @@
 答えの後に働く形を模す）。このとき SIGTERM を受けたら `FAKE_DIR/sigterm-<pid>` を書いて 143 で終わる。
 受けたバイトは読んだ単位ごとに `FAKE_DIR/chunks-<pid>.jsonl` へも書く。
 
-最初の位置引数が `mark ` で始まれば、起動の直後にその行を 1 度実行する。
+最後の引数（区間のプロンプト）が `mark ` で始まれば、起動の直後にその行を 1 度実行する。
 """
 import fcntl
 import json
@@ -129,8 +129,8 @@ def main():
                          "claudecode": os.environ.get("CLAUDECODE"),
                          "depth": os.environ.get("NDF_RELAY_DEPTH")})
     open(transcript(), "a").close()
-    if args and args[0].startswith("mark "):
-        do_mark(args[0][5:])
+    if args and args[-1].startswith("mark "):
+        do_mark(args[-1][5:])
     tty.setraw(0)
     buf = b""
     raw = open(os.path.join(D, f"input-{os.getpid()}"), "ab", buffering=0)
