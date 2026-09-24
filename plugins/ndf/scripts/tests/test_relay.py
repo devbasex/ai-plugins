@@ -1916,3 +1916,76 @@ def test_relay_quiet_defaults_to_five_seconds(mod, tmp_path, monkeypatch):
     r = mod.Relay("claude", str(relay_dir), "m", "v", None, None)
     os.close(r.lock_fd)
     assert r.quiet == 0.3
+
+
+# ---------------------------------------------------------------- notice（#980 AC1〜AC3c）
+
+WAIT_TAIL = "キー入力やスクロールをせずに、そのまま待つ（切り替わらずに ndf-relay: で始まる 1 行が出たら、その案内に従う）"
+NOTICE_OUTSIDE = ("/exit してから claude を起動し、下の中身を最初の入力として貼り付ける"
+                  "（/ndf:install-wrapper で中継を入れると自動になる）")
+NOTICE_SOON = "まもなく自動で新しい会話へ切り替わる。" + WAIT_TAIL
+NOTICE_INF = ("NDF_RELAY_QUIET が有限でないため、中継は自動で切り替えない。"
+              "/exit してから claude を起動し、下の中身を最初の入力として貼り付ける")
+
+
+def notice_in(n):
+    return f"約 {n} 秒後に自動で新しい会話へ切り替わる。" + WAIT_TAIL
+
+
+def notice(env_dir, quiet=None):
+    e = {k: v for k, v in os.environ.items() if not k.startswith("NDF_")}
+    if env_dir is not None:
+        e["NDF_RELAY_DIR"] = str(env_dir)
+    if quiet is not None:
+        e["NDF_RELAY_QUIET"] = quiet
+    return subprocess.run([sys.executable, str(RELAY), "notice"], capture_output=True,
+                          text=True, env=e, timeout=20)
+
+
+def notice_lines(proc):
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stderr == ""
+    lines = proc.stdout.splitlines()
+    assert len(lines) == 2, proc.stdout
+    return lines
+
+
+@pytest.mark.parametrize("quiet,expected", [
+    (None, notice_in(5)),
+    ("6.4", notice_in(6)),
+    ("abc", notice_in(5)),
+    ("2.5", notice_in(2)),
+    ("0", NOTICE_SOON),
+    ("-3", NOTICE_SOON),
+    ("nan", NOTICE_SOON),
+    ("-inf", NOTICE_SOON),
+    ("inf", NOTICE_INF),
+], ids=["default", "6.4", "abc", "2.5", "0", "-3", "nan", "-inf", "inf"])
+def test_notice_under_relay(relay, quiet, expected):
+    first, second = notice_lines(notice(relay.dir, quiet))
+    assert first == "relay"
+    assert second == expected
+    assert "約 0 秒後" not in second
+
+
+def test_notice_without_relay_dir():
+    assert notice_lines(notice(None)) == ["outside", NOTICE_OUTSIDE]
+
+
+def test_notice_relay_not_running(relay):
+    relay.release()
+    assert notice_lines(notice(relay.dir)) == ["outside", NOTICE_OUTSIDE]
+
+
+def test_notice_not_direct_child(tmp_path):
+    r = Relay(tmp_path, child_pid=1)
+    try:
+        assert notice_lines(notice(r.dir, "5")) == ["outside", NOTICE_OUTSIDE]
+    finally:
+        r.release()
+
+
+def test_notice_broken_relay_dir_is_outside(tmp_path):
+    f = tmp_path / "not-a-dir"
+    f.write_text("x")
+    assert notice_lines(notice(f)) == ["outside", NOTICE_OUTSIDE]

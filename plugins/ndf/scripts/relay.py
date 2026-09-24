@@ -12,6 +12,7 @@
 | `startup` | SessionStart hook の本体。在る写しを今の版で置き直し（版は後退させない）、10.17.4〜10.17.6 が自動で足した囲みを 1 度だけ知らせる。シェルの設定は書かない |
 | `question open` / `question close` | `AskUserQuestion` の `PreToolUse` / `PostToolUse` hook の本体。質問の表示中の印を作る・消す（関門を越えない守り） |
 | `is-child` | 中継の直接の子の claude から呼ばれていれば 0 |
+| `notice` | 区間の切れ目の告知。1 行目に `relay` か `outside`（`is-child` と同じ判定）、2 行目に告知の 1 文を出す（#980） |
 
 **標準ライブラリだけで書く。** 印と作業ディレクトリの形（`next.json` のキーと
 `NDF_RELAY_DIR` のファイル）は版をまたいで変えない。hook は区間ごとに新しい版で動き、
@@ -1707,12 +1708,47 @@ def cmd_question(action: str) -> int:
     return 0
 
 
+# ---------------------------------------------------------------- 区間の切れ目の告知（#980）
+
+
+def notice_lines() -> tuple[str, str]:
+    """区間の切れ目の告知。文面と秒数の唯一の定義。
+
+    1 行目は `is-child` と同じ判定（中継の直接の子か）。自動で切り替わるかは 2 行目が表す。
+    秒数は中継本体の静まり（`NDF_RELAY_QUIET`）そのもので、切り替えの時間は足さない。
+    """
+    outside = ("/exit してから claude を起動し、下の中身を最初の入力として貼り付ける"
+               "（/ndf:install-wrapper で中継を入れると自動になる）")
+    try:
+        d = os.environ.get("NDF_RELAY_DIR")
+        if not (d and relay_running(d) and is_direct_child(d)):
+            return "outside", outside
+        quiet = _num("NDF_RELAY_QUIET", 5)
+    except Exception:
+        return "outside", outside
+    if quiet == float("inf"):
+        return "relay", ("NDF_RELAY_QUIET が有限でないため、中継は自動で切り替えない。"
+                         "/exit してから claude を起動し、下の中身を最初の入力として貼り付ける")
+    # 中継本体は負・nan・-inf の静まりを待たずに通すので、0 として数える
+    q = quiet if quiet == quiet and quiet > 0 else 0.0
+    n = round(q)
+    when = f"約 {n} 秒後に" if n > 0 else "まもなく"
+    return "relay", (f"{when}自動で新しい会話へ切り替わる。キー入力やスクロールをせずに、そのまま待つ"
+                     "（切り替わらずに ndf-relay: で始まる 1 行が出たら、その案内に従う）")
+
+
+def cmd_notice() -> int:
+    for line in notice_lines():
+        print(line)
+    return 0
+
+
 # ---------------------------------------------------------------- main
 
 
 def main(argv: list[str]) -> int:
     if not argv:
-        print("usage: relay.py run|stop|mark|install|uninstall|status|startup|question open|close|is-child",
+        print("usage: relay.py run|stop|mark|install|uninstall|status|startup|question open|close|is-child|notice",
               file=sys.stderr)
         return 2
     sub, rest = argv[0], argv[1:]
@@ -1740,6 +1776,8 @@ def main(argv: list[str]) -> int:
         # 中継の直接の子なら 0（親のたどりは mark と同じ。間の bash / sh は claude でないので飛ぶ）
         d = os.environ.get("NDF_RELAY_DIR")
         return 0 if d and relay_running(d) and is_direct_child(d) else 1
+    if sub == "notice":
+        return cmd_notice()
     print(f"relay.py: 未知の副命令 {sub}", file=sys.stderr)
     return 2
 

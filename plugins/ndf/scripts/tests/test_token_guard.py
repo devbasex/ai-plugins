@@ -717,3 +717,41 @@ def test_context_reason_asks_for_ndf_next_block(tmp_path, state):
     tp = transcript(tmp_path, 250_000)
     reason = denied(run(skill(tp), state))
     assert "ndf-next" in reason
+
+
+# ---------------------------------------------------------------- 中継の下の告知（#980 AC6）
+
+import sys  # noqa: E402
+
+RELAY_PY = ROOT / "scripts" / "relay.py"
+
+
+def notice_line(env):
+    e = {k: v for k, v in os.environ.items() if not k.startswith("NDF_")}
+    e.update(env)
+    out = subprocess.run([sys.executable, str(RELAY_PY), "notice"], capture_output=True,
+                         text=True, env=e, timeout=20).stdout.splitlines()
+    assert out[0] == "relay"
+    return out[1]
+
+
+@pytest.mark.parametrize("quiet", [None, "inf"])
+def test_context_under_relay_reason_carries_notice(tmp_path, state, relay_dir, quiet):
+    tp = transcript(tmp_path, 250_000)
+    env = {"NDF_RELAY_DIR": str(relay_dir)}
+    if quiet is not None:
+        env["NDF_RELAY_QUIET"] = quiet
+    first = denied(run(agent(tp), state, env))
+    second = denied(run(agent(tp), state, env))
+    assert first and second
+    line = notice_line(env)
+    assert line in first and line in second
+    assert "確認を挟まずに" in second
+    assert "中継がそのブロックで次の区間を起動する" not in second
+
+
+def test_context_outside_relay_reason_has_no_notice(tmp_path, state):
+    tp = transcript(tmp_path, 250_000)
+    reason = denied(run(agent(tp), state))
+    assert "1 度だけ通る" in reason
+    assert "自動で新しい会話へ切り替わる" not in reason
