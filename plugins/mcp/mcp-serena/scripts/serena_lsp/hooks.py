@@ -58,28 +58,17 @@ def _context(event: str, lines: list) -> dict:
     return {"hookSpecificOutput": {"hookEventName": event, "additionalContext": "\n".join(lines)}}
 
 
-def session_start(payload: dict, client: str):
-    if _skip_for_client(client) or not isinstance(payload.get("cwd"), str):
-        return None
-    root = find_root(payload["cwd"])
-    try:
-        state = py.load_state(root)
-    except py.UnsupportedShape:
-        return None
-    try:
-        detected, _ = detect.detect(root, table.load())
-    except detect.GitUnavailable:
-        return None
+def _unconfigured_lines(detected: list) -> list:
+    if not detected:
+        return []
+    found = "・".join(f"{d['language']} {d['files']}" for d in detected)
+    return [
+        f"{PREFIX} このリポジトリでは言語サーバが未設定です（検出: {found}）",
+        f"{PREFIX} {SKILL} をこのリポジトリで実行してください（プロジェクトごとに実行します。利用者単位で 1 回ではありません）",
+    ]
 
-    if state is None or not state["marked"]:
-        if not detected:
-            return None
-        found = "・".join(f"{d['language']} {d['files']}" for d in detected)
-        return _context("SessionStart", [
-            f"{PREFIX} このリポジトリでは言語サーバが未設定です（検出: {found}）",
-            f"{PREFIX} {SKILL} をこのリポジトリで実行してください（プロジェクトごとに実行します。利用者単位で 1 回ではありません）",
-        ])
 
+def _configured_lines(root: Path, client: str, state: dict, detected: list) -> list:
     lines = []
     known = set(state["languages"]) | set(state["excluded"])
     for d in detected:
@@ -95,10 +84,29 @@ def session_start(payload: dict, client: str):
             lines.append(f"{PREFIX} Claude Code の LSP が足りません: {name}（{ITEM_LABELS[item['item']]}）")
         else:
             lines.append(f"{PREFIX} {item['language']} の診断に要るものが足りません: {name}")
-    if not lines:
+    if lines:
+        lines.append(f"{PREFIX} {SKILL} で直せます（プロジェクトごとに実行します）")
+    return lines
+
+
+def session_start(payload: dict, client: str):
+    if _skip_for_client(client) or not isinstance(payload.get("cwd"), str):
         return None
-    lines.append(f"{PREFIX} {SKILL} で直せます（プロジェクトごとに実行します）")
-    return _context("SessionStart", lines)
+    root = find_root(payload["cwd"])
+    try:
+        state = py.load_state(root)
+    except py.UnsupportedShape:
+        return None
+    try:
+        detected, _ = detect.detect(root, table.load())
+    except detect.GitUnavailable:
+        return None
+
+    if state is None or not state["marked"]:
+        lines = _unconfigured_lines(detected)
+    else:
+        lines = _configured_lines(root, client, state, detected)
+    return _context("SessionStart", lines) if lines else None
 
 
 # ---- PreToolUse -------------------------------------------------------------

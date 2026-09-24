@@ -99,6 +99,38 @@ def _signals_to_exception():
     return previous
 
 
+def _added_ignored_paths(before_text: str, after_text: str) -> list:
+    before = py.read_list(before_text, "ignored_paths") or []
+    return [p for p in py.read_list(after_text, "ignored_paths") or [] if p not in before]
+
+
+def _plan_dry_run(result: dict, original, root: Path, candidates: list, not_selected: list):
+    planned_excluded = [f"{lang} not_selected" for lang in not_selected]
+    planned = _final_text(original or "", root, candidates, planned_excluded)
+    result["diff"] = "".join(difflib.unified_diff(
+        (original or "").splitlines(True), planned.splitlines(True), "project.yml", "project.yml"))
+    result["written"].update(
+        language_servers=candidates, excluded=planned_excluded, created=original is None,
+        ignored_paths_added=_added_ignored_paths(original or "", planned),
+        serena_gitignore_added=_missing_serena_gitignore(root))
+    result["dry_run"] = True
+    return result, 0 if candidates else 1
+
+
+def _write_gitignores(root: Path, result: dict, gitignore: bool, serena_gitignore: bool) -> None:
+    if gitignore:
+        path = root / ".gitignore"
+        have = path.read_text().splitlines() if path.exists() else []
+        if ".serena/project.yml" not in have:
+            _append_lines(path, [".serena/project.yml"])
+            result["written"]["gitignore"] = True
+    # 渡さないときは「足せば足す行」、渡したときは足した行を載せる
+    missing = _missing_serena_gitignore(root)
+    if serena_gitignore and missing:
+        _append_lines(root / ".serena/.gitignore", missing)
+    result["written"]["serena_gitignore_added"] = missing
+
+
 def configure(root: Path, dry_run=False, gitignore=False, serena_gitignore=False, only=None,
               serena_cmd="uvx --from serena-agent==1.7.0 serena"):
     """(結果の辞書, 終了コード) を返す。"""
@@ -132,17 +164,7 @@ def configure(root: Path, dry_run=False, gitignore=False, serena_gitignore=False
 
     cmd = shlex.split(serena_cmd)
     if dry_run:
-        planned_excluded = [f"{lang} not_selected" for lang in not_selected]
-        planned = _final_text(original or "", root, candidates, planned_excluded)
-        result["diff"] = "".join(difflib.unified_diff(
-            (original or "").splitlines(True), planned.splitlines(True), "project.yml", "project.yml"))
-        before_ignored = py.read_list(original or "", "ignored_paths") or []
-        result["written"].update(
-            language_servers=candidates, excluded=planned_excluded, created=original is None,
-            ignored_paths_added=[p for p in py.read_list(planned, "ignored_paths") or [] if p not in before_ignored],
-            serena_gitignore_added=_missing_serena_gitignore(root))
-        result["dry_run"] = True
-        return result, 0 if candidates else 1
+        return _plan_dry_run(result, original, root, candidates, not_selected)
     if not shutil.which(cmd[0]):
         return {**result, "error": f"{cmd[0]} が見つかりません"}, 2
 
@@ -177,21 +199,10 @@ def configure(root: Path, dry_run=False, gitignore=False, serena_gitignore=False
         for sig, handler in previous.items():
             signal.signal(sig, handler)
 
-    before_ignored = py.read_list(original, "ignored_paths") or []
     result["verified"], result["failed"] = verified, failed
     result["written"].update(
         language_servers=verified, excluded=excluded,
-        ignored_paths_added=[p for p in py.read_list(final, "ignored_paths") or [] if p not in before_ignored])
+        ignored_paths_added=_added_ignored_paths(original, final))
 
-    if gitignore:
-        path = root / ".gitignore"
-        have = path.read_text().splitlines() if path.exists() else []
-        if ".serena/project.yml" not in have:
-            _append_lines(path, [".serena/project.yml"])
-            result["written"]["gitignore"] = True
-    # 渡さないときは「足せば足す行」、渡したときは足した行を載せる
-    missing = _missing_serena_gitignore(root)
-    if serena_gitignore and missing:
-        _append_lines(root / ".serena/.gitignore", missing)
-    result["written"]["serena_gitignore_added"] = missing
+    _write_gitignores(root, result, gitignore, serena_gitignore)
     return result, 0 if verified else 1
