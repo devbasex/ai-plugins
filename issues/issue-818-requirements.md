@@ -123,7 +123,7 @@
 ### hook（作業項目 B・D・E）
 
 - [ ] AC17: SessionStart の hook は、検出の結果と `.serena/project.yml` が食い違うとき（設定のスクリプトが外した言語として記録したものは食い違いに数えない）、または導入の検査に欠けがあるときだけ 1 行以上を出す。揃っているときは何も出さない
-- [ ] AC18: SessionStart の hook は、`.serena/project.yml` が無いか、設定のスクリプトが書いた印（`mcp_serena_excluded`）の無いリポジトリ（Serena が自動で作った設定を含む）では何も出さない
+- [ ] AC18: SessionStart の hook は、`.serena/project.yml` が無いか、設定のスクリプトが書いた印（`mcp_serena_excluded`）の無いリポジトリ（Serena が自動で作った設定を含む）では、食い違いと導入の欠けの行を出さない。出すのは、採る言語が 1 つ以上検出されたときの未設定の通知（AC4b）の 2 行だけで、採る言語が無いか git のリポジトリでなければ何も出さない（実装の計画で AC4b との食い違いを解消した。設計の「hook の振る舞い」）
 - [ ] AC19: PreToolUse の hook は、`.serena/project.yml` の採った言語の拡張子のファイルについてだけ数える。`.md` や `.json` の読み込みでは拒否しない
 - [ ] AC20: PreToolUse の hook は、`grep` 3 回・コードファイルの読み込み 3 回・混在 4 回のどれかに達したとき 1 度だけ拒否し、数を戻す。拒否から 120 秒は拒否しない
 - [ ] AC21: PreToolUse の hook は、Claude Code の許可のモードが `acceptEdits` か `auto` のとき、Serena のツールの呼び出しを許可する。それ以外のモードでは何も返さない

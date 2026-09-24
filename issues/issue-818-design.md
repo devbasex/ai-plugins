@@ -352,6 +352,16 @@ plugins/mcp/mcp-serena/
 - 誘導の文（`permissionDecisionReason`）は 3 行に収める。読む手順は `get_symbols_overview` → `find_symbol`（`include_body`）→ `find_referencing_symbols`、編集は `replace_symbol_body` と、ツール名で示す
 - 数を戻したので続けてよいことも、同じ文に書く
 
+### hook の振る舞い（SessionStart）
+
+AC4b（未設定を知らせる）と AC18（印の無いリポジトリで食い違いを知らせない）を、リポジトリの状態で分ける。実装の計画で決めた（[issue-818-implementation-plan.md](issue-818-implementation-plan.md)）。
+
+| リポジトリの状態 | 出すもの |
+| --- | --- |
+| git のリポジトリでない・採る言語が 0 | 何も出さない |
+| 印（`mcp_serena_excluded`）が無い（`project.yml` が無い・Serena が自動で作った）で、採る言語が 1 つ以上 | 未設定の 1 行と、Skill の名前と「プロジェクトごとに実行する」の 1 行。食い違いと欠けの行は出さない |
+| 印がある | 食い違いと欠けがあるときだけ、下の形で出す |
+
 **通知の文（SessionStart）:** 食い違いと欠けを 1 項目 1 行で出し、最後に Skill の名前を 1 行出す。
 
 ```text

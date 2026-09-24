@@ -85,7 +85,7 @@ fi
 - 未インストールなら `npm install -g @openai/codex` → `codex login`
 
 ### Serena MCP
-- `mcp__serena__*` - シンボル検索、リファレンス検索、コード編集
+- `mcp__plugin_mcp-serena_serena__*`（Claude Code。Codex では `mcp__serena__*`）- シンボル検索、リファレンス検索、コード編集
 - **memory系は使用禁止**（NDFポリシー）
 
 ### Context7 MCP

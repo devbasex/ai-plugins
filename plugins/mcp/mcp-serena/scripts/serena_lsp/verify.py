@@ -123,11 +123,15 @@ def configure(root: Path, dry_run=False, gitignore=False, serena_gitignore=False
 
     cmd = shlex.split(serena_cmd)
     if dry_run:
-        planned = _final_text(original or "", root, candidates, [f"{l} not_selected" for l in not_selected])
+        planned_excluded = [f"{lang} not_selected" for lang in not_selected]
+        planned = _final_text(original or "", root, candidates, planned_excluded)
         result["diff"] = "".join(difflib.unified_diff(
             (original or "").splitlines(True), planned.splitlines(True), "project.yml", "project.yml"))
-        result["written"].update(language_servers=candidates, created=original is None,
-                                 serena_gitignore_added=_missing_serena_gitignore(root))
+        before_ignored = py.read_list(original or "", "ignored_paths") or []
+        result["written"].update(
+            language_servers=candidates, excluded=planned_excluded, created=original is None,
+            ignored_paths_added=[p for p in py.read_list(planned, "ignored_paths") or [] if p not in before_ignored],
+            serena_gitignore_added=_missing_serena_gitignore(root))
         result["dry_run"] = True
         return result, 0 if candidates else 1
     if not shutil.which(cmd[0]):

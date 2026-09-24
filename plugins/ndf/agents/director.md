@@ -356,7 +356,7 @@ Task(subagent_type="general-purpose", prompt="複雑なタスク", description="
 - `general-purpose` - 複雑な検索、マルチステップタスク
 
 ### 直接使用可能なMCPツール
-- Serena MCP - コード構造理解、シンボル編集、メモリー管理
+- Serena MCP - コード構造理解、シンボル編集（memory のツールは使わない）
 - BigQuery MCP - 簡単なクエリなら直接実行可
 - その他のMCPツール - 必要に応じて直接使用
 

@@ -160,6 +160,14 @@ def test_dry_run_writes_nothing(repo, fake):
     assert "bash" in out["diff"]
 
 
+def test_dry_run_reports_planned_exclusions(repo, fake):
+    code, out, _ = _configure(repo, fake, "--dry-run", "--only", "python")
+    assert code == 0
+    assert out["written"]["language_servers"] == ["python"]
+    assert out["written"]["excluded"] == ["bash not_selected"]
+    assert not (repo / ".serena").exists()
+
+
 def test_gitignore_only_with_flag(repo, fake):
     (repo / ".gitignore").write_text("node_modules/\n")
     _configure(repo, fake)

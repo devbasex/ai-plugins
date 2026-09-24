@@ -152,7 +152,7 @@
     {
       "name": "mcp-serena",
       "source": "./plugins/mcp/mcp-serena",
-      "description": "Serena MCP server for semantic code intelligence (symbol search, reference search, refactoring)",
+      "description": "Serena MCP server (serena-agent 1.7.0) for symbol-level code reading and editing, with a per-project language-server setup skill and hooks that steer repeated grep/reads toward symbol tools",
       "policy": {
         "installation": "AVAILABLE",
         "authentication": "ON_INSTALL"
