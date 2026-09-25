@@ -244,6 +244,11 @@ def test_a_step_name_does_not_map_for_a_worker_or_the_old_form(mod) -> None:
     assert mod.role_of("実装 #540 実行計画", "supervisor") == "その他"
 
 
+def test_unphased_supervisors_counts_only_supervisors_left_as_other(mod, records) -> None:
+    # sess-a の supervisor のうち x1 だけが `その他`。worker の `その他` は数えない
+    assert mod.unphased_supervisors(list(records.values())) == 1
+
+
 def test_the_parent_is_resolved_through_the_tool_use_id(records) -> None:
     # 深さ 2 の記録は起動元の supervisor を指し、conductor が起動したものは null になる
     assert records["w1"].parent_agent_id == "s1"

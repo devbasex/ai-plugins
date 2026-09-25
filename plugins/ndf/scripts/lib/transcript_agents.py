@@ -186,6 +186,11 @@ def role_of(description: str | None, layer: str) -> str:
     return head if head in TASKS else OTHER
 
 
+def unphased_supervisors(records: list[AgentRecord]) -> int:
+    """フェーズが読めなかった（`その他` に落ちた）supervisor の件数を返す（#768）。"""
+    return sum(1 for r in records if r.layer == "supervisor" and r.role == OTHER)
+
+
 # ---------- 記録 1 件を読む ----------
 
 def _iter_lines(path: pathlib.Path) -> tuple[list[dict], int]:
