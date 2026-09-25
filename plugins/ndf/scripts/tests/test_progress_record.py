@@ -170,3 +170,26 @@ def test_a_new_note_is_appended_to_the_existing_record(fake_gh):
     run(fake_gh, "123", "設計", "--note", "PR #379")
     written = fake_gh.written.read_text(encoding="utf-8")
     assert "- [x] 設計 — 2026-01-01 00:00 / PR #379" in written
+
+
+def test_the_confirmation_line_works_with_a_strict_sed(fake_gh):
+    """BSD sed（macOS）でも確認の行が出る（#946）。
+
+    BSD sed は `{...}` の最後のコマンドの後に `;` を要する。Linux の上で確かめるため、
+    `;` の無い `p}` を誤りとする `sed` を PATH の先頭に置き、残りは本物へ渡す。
+    """
+    real_sed = shutil.which("sed")
+    (fake_gh.bin / "sed").write_text(
+        "#!/usr/bin/env bash\n"
+        'for a in "$@"; do\n'
+        '  case "$a" in *[a-z]\\}*) echo "sed: extra characters at the end of p command" >&2; exit 1 ;; esac\n'
+        "done\n"
+        f'exec {real_sed} "$@"\n',
+        encoding="utf-8",
+    )
+    (fake_gh.bin / "sed").chmod(0o755)
+    fake_gh.body.write_text("# 課題\n\n本文\n", encoding="utf-8")
+    out = run(fake_gh, "123", "-", "--mode", "standard")
+    assert out.returncode == 0, out.stderr
+    assert "sed:" not in out.stderr
+    assert "#123 進行の見出し = モード: standard" in out.stdout
