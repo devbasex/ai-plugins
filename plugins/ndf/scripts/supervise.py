@@ -116,6 +116,10 @@ run の段:
   判断の段で stop が出そう）。worker の行の語と繰り返し、段の結果からスクリプトで分ける。
   `queue` はこの行を標準出力の `{"tool": "supervise-queue", "event": "attention", ...}` で知らせる
 
+作業ディレクトリ（`<state-dir>/work/`。起動時に作る）: work と judge の段のプロンプトに渡す。worker は
+作業ファイル（スクリプト・初期化の出力・プロンプト）をここに置く。計画ごとに別なので、並行する計画どうしで
+同じ名前のファイルを上書きし合わない
+
 最後に `## フェーズの報告` を標準出力と `<state-dir>/report.md` へ書く。conductor はこの
 スクリプトを背景の Bash で起動し、終わりの通知で報告を読む。
 """
@@ -233,6 +237,10 @@ PROGRESS_PROMPT = """## 途中の報告
 {{"kind": "worker", "at": "<ISO 8601 の時刻>", "text": "<1 行の要約>"}}
 例: printf '%s\\n' '{{"kind": "worker", "at": "'"$(date -Iseconds)"'", "text": "テストを 2 件足した"}}' >> {path}
 止まった・関門に当たった・同じ失敗を繰り返しているときは、text にそのことを書く。"""
+WORKDIR_PROMPT = """## 作業ディレクトリ
+作業ディレクトリ: {path}
+作業ファイル（スクリプト・初期化の出力・プロンプト・長い出力）はここに置く（ここだけは作業場所の外でも書いてよい）。
+共有の scratchpad や /tmp の直下には置かない（並行する計画と同じ名前で上書きし合う）。"""
 # worker の途中の報告を分ける語（スクリプトで見る。LLM は使わない）
 PROGRESS_STOP = re.compile(r"止まった|止まる|進めない|進められない|判断が要る|できなかった|stuck", re.I)
 PROGRESS_GATE = re.compile(r"関門|承認が要る|承認を待つ")
@@ -519,6 +527,9 @@ class Supervisor:
         self.cwd = plan["作業場所"]
         self.dir = state_dir
         self.dir.mkdir(parents=True, exist_ok=True)
+        # 計画ごとの作業ディレクトリ。状態ディレクトリの下なので並行する計画どうしで重ならない
+        self.work = (self.dir / "work").resolve()
+        self.work.mkdir(parents=True, exist_ok=True)
         self.results: dict[str, dict] = {}
         self.log: list[dict] = []
         self.llm = {"work": 0, "judge": 0, "input": 0, "cache_read": 0, "cache_write": 0,
@@ -826,6 +837,7 @@ class Supervisor:
         prompt = (f"作業: {step.get('kind', '修正')}\n作業場所: {cwd}\n\n"
                   + (f"{issues}\n\n## 指示\n" if issues else "")
                   + f"{step['prompt']}\n\n## 入力\n{self.inputs_text(step)}\n\n"
+                  + WORKDIR_PROMPT.format(path=self.work) + "\n\n"
                   + PROGRESS_PROMPT.format(path=self.progress.resolve()))
         if step.get("full"):
             # Skill の本文が手順を持つ。プロンプトは Skill の呼び出しをそのまま渡す
@@ -1002,6 +1014,7 @@ class Supervisor:
         prompt = (f"フェーズ: {self.plan.get('フェーズ')} / 課題: {self.plan.get('課題')}\n"
                   f"問い: {step['question']}\n"
                   + (f"選べる値: {', '.join(choices)}（関門なら gate、止めるなら stop）\n" if choices else "")
+                  + f"作業ディレクトリ: {self.work}（worker の作業ファイルの置き場所）\n"
                   + f"\n## 規則\n{self.plan.get('規則', '（無し）')}\n\n## 結果\n{self.inputs_text(step)}")
         res = self.claude(JUDGE_SYSTEM, prompt, None, self.cwd, step.get("timeout", 600))
         self.add_usage("judge", res)
