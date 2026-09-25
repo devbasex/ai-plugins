@@ -117,3 +117,48 @@ def test_resume_lists_mark_skipped_of_previous_and_current_section(tmp_path):
     item = json.loads(p.stdout.strip().splitlines()[-1])["items"][0]
     assert [(r["section"], r["reason"]) for r in item["mark_skipped"]] == [(2, "background"), (3, "blocks")]
     assert "b5rbmp9yj" in p.stdout and "背景の作業が残った" in p.stdout
+
+
+# ---------- mvv-gate.py: 判定の 4 つの分岐と記録 ----------
+
+
+def fake_claude(tmp_path: Path, text: str) -> str:
+    out = tmp_path / "out.json"
+    out.write_text(json.dumps({"result": text, "total_cost_usd": 0.01, "duration_ms": 1500}))
+    fake = tmp_path / "claude"
+    fake.write_text(f"#!/bin/sh\ncat > {tmp_path / 'prompt.txt'}\ncat {out}\n")
+    fake.chmod(0o755)
+    return str(fake)
+
+
+def run(tmp_path: Path, text: str) -> tuple[int, dict, list[dict]]:
+    mvv = tmp_path / "mvv.md"
+    mvv.write_text("## Mission\n速くする\n")
+    material = tmp_path / "approval.md"
+    material.write_text("# 配布\n")
+    log = tmp_path / "log.jsonl"
+    p = subprocess.run([sys.executable, str(EXP / "mvv-gate.py"), "check", "--mvv", str(mvv), "--gate", "release",
+                        "--material", str(material), "--log", str(log)],
+                       capture_output=True, text=True, env={"PATH": "/usr/bin:/bin",
+                                                            "NDF_MVV_CLAUDE": fake_claude(tmp_path, text)})
+    rows = [json.loads(ln) for ln in log.read_text().splitlines()] if log.exists() else []
+    return p.returncode, json.loads(p.stdout.splitlines()[-1]), rows
+
+
+def test_follow_passes_the_gate_and_is_logged(tmp_path):
+    code, out, rows = run(tmp_path, '{"verdict": "follow", "reasons": ["Value 1"], "boundary": []}')
+    assert (code, out["status"]) == (0, "ok")
+    assert rows[0]["passed"] is True and rows[0]["reasons"] == ["Value 1"] and rows[0]["cost_usd"] == 0.01
+    assert "速くする" in (tmp_path / "prompt.txt").read_text()
+
+
+@pytest.mark.parametrize("text", [
+    '{"verdict": "not_follow", "reasons": ["Value 2"], "boundary": []}',
+    '{"verdict": "unknown", "reasons": [], "boundary": []}',
+    '{"verdict": "follow", "reasons": [], "boundary": ["認証の変更"]}',
+    "判定できませんでした",
+])
+def test_anything_but_a_clean_follow_asks_the_user(tmp_path, text):
+    code, out, rows = run(tmp_path, text)
+    assert (code, out["status"]) == (10, "gate")
+    assert rows[0]["passed"] is False
