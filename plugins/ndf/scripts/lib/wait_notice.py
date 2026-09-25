@@ -234,6 +234,9 @@ def classify_event(runtime: str, hook_input: dict, transcript_text: str = "", ke
             return _from_text(hook_input.get("last_assistant_message") or transcript_text, key)
         return None
     if runtime == "kiro":
+        # 入口は stop フックにだけ置く。名前の付いたほかの事象は応答の途中でありうるため待ちにしない。
+        if event and event.lower() != "stop":
+            return None
         return _from_text(hook_input.get("assistant_response") or transcript_text, key)
     return None
 

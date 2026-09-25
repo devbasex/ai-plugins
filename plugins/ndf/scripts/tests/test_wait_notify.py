@@ -481,6 +481,25 @@ def test_kiro_stop(world, slack):
     assert text.startswith("【承認待ち】") and "再開: kiro-cli chat --resume" in text
 
 
+def test_kiro_same_text_in_other_conversations_is_notified(world, slack):
+    for conv in ("k1", "k2"):
+        world.run("kiro", {"hook_event_name": "stop", "conversation_id": conv,
+                           "assistant_response": "この方針で進めてよいですか。"})
+    assert len(slack.wait_for(2)) == 2
+
+
+def test_kiro_without_session_falls_back_to_window(world, slack):
+    world.run("kiro", {"hook_event_name": "stop", "assistant_response": "この方針で進めてよいですか。"})
+    slack.wait_for(1)
+    [record] = [json.loads(f.read_text()) for f in world.state.glob("*.json")]
+    assert record["key"] == ":window"
+
+
+def test_kiro_non_stop_event_is_not_a_wait():
+    hook_input = {"hook_event_name": "preToolUse", "assistant_response": "この方針で進めてよいですか。"}
+    assert wn.classify_event("kiro", hook_input) is None
+
+
 # ---------------------------------------------------------------------------
 # 外の系の失敗（I9〜I12）と速さ
 # ---------------------------------------------------------------------------
