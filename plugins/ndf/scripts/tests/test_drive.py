@@ -369,4 +369,5 @@ def test_new_check_with_scope_uses_drive_steps(tmp_path):
     assert steps["refactor"]["type"] == "drive" and "--workflow-step" in steps["refactor"]["args"]
     assert steps["review"]["type"] == "drive" and steps["review"]["drive"] == "cross-review"
     a.scope = []
-    assert sv.plan_check(a)["steps"][1]["type"] == "work"
+    refactor = sv.plan_check(a)["steps"][1]
+    assert refactor["type"] == "drive" and "gh pr diff 998 --name-only" in refactor["args"]

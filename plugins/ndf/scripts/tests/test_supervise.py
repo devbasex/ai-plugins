@@ -654,7 +654,7 @@ def test_new_release_requires_version():
 def test_new_mission_writes_waves_in_order(tmp_path):
     out = tmp_path / "m"
     p = cli("new", "mission", "--name", "v10-18", "--worktree", str(tmp_path), "--issue", "11", "12",
-            "--design", "11", "--out", str(out))
+            "--design", "11", "--version", "10.18.0-dev.1", "--out", str(out))
     assert p.returncode == 0, p.stderr
     res = json.loads(p.stdout)
     assert res["status"] == "ok"
@@ -693,13 +693,15 @@ def test_new_mission_writes_waves_in_order(tmp_path):
 
 def test_new_mission_without_design_skips_gate(tmp_path):
     out = tmp_path / "m"
-    p = cli("new", "mission", "--name", "m", "--worktree", str(tmp_path), "--issue", "1", "--out", str(out))
+    p = cli("new", "mission", "--name", "m", "--worktree", str(tmp_path), "--issue", "1",
+            "--version", "10.18.0-dev.1", "--out", str(out))
     assert p.returncode == 0, p.stderr
     names = [w["name"] for w in json.loads((out / "mission.json").read_text())["波"]]
     assert names == ["ミッションのブランチ", "実装", "検査", "配布"]
 
 
-@pytest.mark.parametrize("args", [["--issue", "1"], ["--name", "a b", "--issue", "1"], ["--name", "m"]])
+@pytest.mark.parametrize("args", [["--issue", "1"], ["--name", "a b", "--issue", "1"], ["--name", "m"],
+                                  ["--name", "m", "--issue", "1"]])
 def test_new_mission_rejects_bad_args(tmp_path, args):
     assert cli("new", "mission", "--worktree", str(tmp_path), *args).returncode == 2
 
@@ -1116,3 +1118,28 @@ def test_run_from_restores_pr_from_previous_report(tmp_path):
     s = sv.Supervisor(plan, state)
     assert "結果: 完了" in s.run(start="b")
     assert "n=1066" in s.results["b"]["text"]
+
+
+def test_new_check_without_scope_drives_over_the_pr_directories(tmp_path):
+    out = tmp_path / "c.json"
+    p = cli("new", "check", "--pr", "999", "--worktree", "/w", "--out", str(out))
+    assert p.returncode == 0, p.stderr
+    refactor = next(s for s in json.loads(out.read_text())["steps"] if s["id"] == "refactor")
+    assert refactor["type"] == "drive" and not refactor.get("full")
+    assert "gh pr diff 999 --name-only" in refactor["args"]
+
+
+def test_new_mission_check_and_release_run_without_a_whole_skill(tmp_path):
+    out = tmp_path / "m"
+    p = cli("new", "mission", "--name", "m", "--worktree", str(tmp_path), "--issue", "1",
+            "--version", "10.18.0-dev.1", "--out", str(out))
+    assert p.returncode == 0, p.stderr
+    waves = {w["name"]: w for w in json.loads((out / "mission.json").read_text())["波"]}
+    for name in ("検査", "配布"):
+        for path in waves[name]["plans"]:
+            assert not [s for s in json.loads(Path(path).read_text())["steps"] if s.get("full")], path
+    release = json.loads(Path(waves["配布"]["plans"][0]).read_text())
+    assert release["フェーズ"] == "配布（開発版）" and "{queue_prs}" in json.dumps(release, ensure_ascii=False)
+    # 配布は検査の queue が --then で流す（検査の PR を --prs へ渡すため）
+    assert waves["検査"]["command"].endswith("--then " + waves["配布"]["plans"][0])
+    assert "command" not in waves["配布"] and waves["配布"]["then_of"] == "検査"

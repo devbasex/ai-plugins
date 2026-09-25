@@ -21,9 +21,9 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
                              [--issue N...] [--prev-tag T] [--repo DIR] [--out F]
         # --prs-from-queue: queue が --then でこの計画を流す前に、先行の計画の報告の Pull Request を集めて
         # --prs に足す（--prs の固定の番号と併用できる）。prod の段の最後は後片付け（merged-steps.py cleanup）
-    supervise.py new mission --name M --worktree <リポジトリの根> --issue N... [--design N...] [--tests PATH...] [--out DIR]
+    supervise.py new mission --name M --worktree <リポジトリの根> --issue N... --version <開発版> [--design N...] [--tests PATH...] [--out DIR]
         # 並列の設計 → 関門 1 → ミッションのブランチ → 並列の実装（ミッションのブランチへ集める）→ 検査 1 回 → 配布
-        # を波ごとの計画ファイルと mission.json へ書き出す。波の中は queue --max 3 で流す
+        # を波ごとの計画ファイルと mission.json へ書き出す。波の中は queue --max 3 で流す。配布は検査の queue が --then で流す
     supervise.py queue <plan.json>... [--max 3] [--then <plan.json>...] [--done <パス>]
         # 空いた枠へ順に流す。作業ツリーは起動の前に 1 本ずつ作る。--then の計画は前の計画がすべて完了のときだけ
         # 続けて流す（実装の queue の後の配布など）。終わると結果の JSON を --done（省けば最初の計画の
@@ -1375,17 +1375,15 @@ def plan_impl(a, out: Path | None = None) -> dict:
 
 def plan_check(a) -> dict:
     pr = a.pr
-    if a.scope:
-        # 範囲が決まっていれば駆動で回す（最終ゲートは全体のテスト）
-        refactor = {"id": "refactor", "type": "drive", "drive": "cross-refactoring", "kind": "構造改善",
-                    "stage": "構造改善", "timeout": 3600,
-                    "args": f"{pr} --workflow-step --scope {' '.join(map(shlex.quote, a.scope))} "
-                            f"--baseline-test {shlex.quote(PYTEST.format(paths='.'))}",
-                    "next": "review"}
-    else:
-        # 範囲を決める判断が要るので Skill ごと回す
-        refactor = {"id": "refactor", "type": "work", "full": True, "kind": "構造改善", "stage": "構造改善",
-                    "timeout": 3600, "prompt": f"/ndf:cross-refactoring {pr}", "next": "review"}
+    # 範囲の指定が無ければ、PR が変えたファイルのディレクトリ（根を除く）を範囲にする。段はシェルで動く
+    scope = (" ".join(map(shlex.quote, a.scope)) if a.scope else
+             f"$(gh pr diff {pr} --name-only | xargs -n1 dirname | sort -u | grep -vx '\\.')")
+    # 駆動で回す（最終ゲートは全体のテスト）
+    refactor = {"id": "refactor", "type": "drive", "drive": "cross-refactoring", "kind": "構造改善",
+                "stage": "構造改善", "timeout": 3600,
+                "args": f"{pr} --workflow-step --scope {scope} "
+                        f"--baseline-test {shlex.quote(PYTEST.format(paths='.'))}",
+                "next": "review"}
     return {
         "フェーズ": "検査", "課題": a.issue or [], "モード": a.mode, "作業場所": a.worktree,
         "規則": RULE_CHECK, "上限": 12, "Pull Request": str(pr),
@@ -1586,11 +1584,12 @@ def plan_mission_check(a, repo: str) -> dict:
 
 
 def plan_mission_release(a, repo: str) -> dict:
-    return {
-        "フェーズ": "取り込み", "課題": a.issue, "モード": a.mode, "作業場所": repo, "規則": "", "上限": 3,
-        "steps": [{"id": "release", "type": "work", "full": True, "kind": "配布", "stage": "配布",
-                   "timeout": 3600, "prompt": "/ndf:release", "next": "end"}],
-    }
+    """開発版の配布。検査の queue が --then で流し、検査の PR を --prs へ渡す。"""
+    ns = argparse.Namespace(
+        version=a.version, prs=[], prs_from_queue=True, channel="dev", repo=repo, prev_tag=None,
+        worktree=f"{repo}/.worktrees/release/v{a.version}", branch=f"release/v{a.version}",
+        issue=a.issue, mode=a.mode)
+    return plan_release(ns)
 
 
 def mission_plans(a) -> list[dict]:
@@ -1604,7 +1603,7 @@ def mission_plans(a) -> list[dict]:
         {"name": "ミッションのブランチ", "plans": {"mission-branch": plan_mission_branch(a, repo)}},
         {"name": "実装", "plans": {f"impl-{n}": plan_mission_impl(a, n, repo) for n in a.issue}},
         {"name": "検査", "plans": {"check": plan_mission_check(a, repo)}},
-        {"name": "配布", "plans": {"release": plan_mission_release(a, repo)}},
+        {"name": "配布", "plans": {"release": plan_mission_release(a, repo)}, "then_of": "検査"},
     ]
     return waves
 
@@ -1625,8 +1624,14 @@ def cmd_new_mission(a) -> dict:
                 p.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n")
                 paths.append(str(p))
             entry["plans"] = paths
-            entry["command"] = (f"python3 {shlex.quote(str(SELF))} queue "
-                                + " ".join(map(shlex.quote, paths)) + " --max 3")
+            if "then_of" in wave:
+                # 前の波の queue が --then で続けて流す
+                entry["then_of"] = wave["then_of"]
+                prev = next(e for e in index if e["name"] == wave["then_of"])
+                prev["command"] += " --then " + " ".join(map(shlex.quote, paths))
+            else:
+                entry["command"] = (f"python3 {shlex.quote(str(SELF))} queue "
+                                    + " ".join(map(shlex.quote, paths)) + " --max 3")
         index.append(entry)
         items.append(entry)
     manifest = out / "mission.json"
@@ -1977,8 +1982,8 @@ def main() -> int:
         print(json.dumps(EXAMPLE, ensure_ascii=False, indent=2))
         return 0
     if a.cmd == "new" and a.kind == "mission":
-        if not (a.name and a.issue):
-            ap.error("new mission には --name・--issue が要る")
+        if not (a.name and a.issue and a.version):
+            ap.error("new mission には --name・--issue・--version（開発版の版）が要る")
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", a.name):
             ap.error("--name は英数字・. _ - だけで書く（ブランチ名 mission/<名前> に使う）")
         emit(cmd_new_mission(a))
