@@ -6,9 +6,9 @@ GitHub への問い合わせは `gh` を PATH で差し替えて作り物へ向�
 from __future__ import annotations
 
 import json
+import resource
 import shlex
 import subprocess
-import time
 from pathlib import Path
 
 import pytest
@@ -527,12 +527,17 @@ def test_split_does_not_mark_the_last_newline() -> None:
 
 
 def test_split_finishes_quickly_on_a_long_body() -> None:
-    """非機能: 36KB の本文で 0.1 秒以内。演算子を引用の外に置き、区切りの判定を通す。"""
+    """非機能: 36KB の本文で 0.1 秒以内。演算子を引用の外に置き、区切りの判定を通す。
+
+    測るのは子の bash が使った CPU 時間。壁時計は並列の実行で CPU の順番待ちを含み、揺れる。
+    """
     body = "| 表 | x; y && z 2>&1 |\n" * 1500
     assert len(body.encode("utf-8")) >= 36000
-    started = time.monotonic()
+    before = resource.getrusage(resource.RUSAGE_CHILDREN)
     split(body)
-    assert time.monotonic() - started < 0.1
+    after = resource.getrusage(resource.RUSAGE_CHILDREN)
+    used = (after.ru_utime - before.ru_utime) + (after.ru_stime - before.ru_stime)
+    assert used < 0.1
 
 
 def test_a_stage_glued_to_a_semicolon_is_recorded(repo: Path, state: Path) -> None:

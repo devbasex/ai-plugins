@@ -124,7 +124,7 @@ git merge "origin/$dev_base" --no-edit || {
 git push -u origin "$DEPLOY_BRANCH"
 gh pr create --base "$ARGUMENTS" --head "$DEPLOY_BRANCH" \
   --title "$DEPLOY_BRANCH → $ARGUMENTS" \
-  --body "$(cat <<'EOF'
+  --body "$(cat <<EOF
 ## Summary
 - 環境デプロイ用PR
 - 元ブランチ: $FEATURE_BRANCH

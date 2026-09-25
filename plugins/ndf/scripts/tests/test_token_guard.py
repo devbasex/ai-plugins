@@ -43,6 +43,11 @@ def state(tmp_path, monkeypatch):
     return base
 
 
+# 並列の試験では、ロックの待ちの上限を延ばす。既定の 1 秒では、負荷の高い runner で
+# 待ちが上限を超えて 1 回分が数えられず、試験がときどき落ちる（#950）。
+PARALLEL_ENV = {"NDF_TOKEN_GUARD_LOCK_WAIT": "10"}
+
+
 def run(payload, state_dir, env=None, raw=None):
     e = {k: v for k, v in os.environ.items() if not k.startswith("NDF_")}
     e.pop("CLAUDE_PLUGIN_DATA", None)
@@ -302,7 +307,7 @@ def test_repeat_read_env(tmp_path, state):
 def test_parallel_reads_do_not_lose_updates(tmp_path, state):
     f = tmp_path / "out.txt"
     f.write_text("")
-    env = {"NDF_READ_REPEAT_LIMIT": "10"}
+    env = {"NDF_READ_REPEAT_LIMIT": "10", **PARALLEL_ENV}
     run(read(f), state, env)
     threads = [threading.Thread(target=run, args=(read(f), state, env)) for _ in range(2)]
     for t in threads:
@@ -599,7 +604,7 @@ def test_context_parallel_second_call_passes_once(tmp_path, state):
     results = []
 
     def go():
-        results.append(denied(run(skill(tp), state)))
+        results.append(denied(run(skill(tp), state, PARALLEL_ENV)))
 
     threads = [threading.Thread(target=go) for _ in range(2)]
     for t in threads:

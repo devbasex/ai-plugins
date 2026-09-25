@@ -182,10 +182,11 @@ rotate_close_and_create() {
   local new_pr=${new_pr_url##*/}
 
   echo "✅ 新 PR #$new_pr: $new_pr_url" >&2
-  # eval される契約。ブランチ名 / URL に shell メタ文字が混ざっても安全なよう %q で escape
-  printf 'NEW_PR=%q\n'      "$new_pr"
-  printf 'NEW_PR_URL=%q\n'  "$new_pr_url"
-  printf 'NEW_BRANCH=%q\n'  "$new_branch"
+  # eval される契約。ブランチ名 / URL に shell メタ文字が混ざっても安全なよう %q で escape。
+  # 標準出力は cmd_execute が fd 3 へ退避している（途中のコマンドの出力は標準エラーへ）。
+  printf 'NEW_PR=%q\n'      "$new_pr"     >&3
+  printf 'NEW_PR_URL=%q\n'  "$new_pr_url" >&3
+  printf 'NEW_BRANCH=%q\n'  "$new_branch" >&3
 }
 
 # light モード本体: 同ブランチで旧 PR を close → 同 head/base で新 PR 作成。
@@ -346,6 +347,9 @@ cmd_execute() {
         ;;
     esac
   done
+  # 標準出力は eval される。git push が起こす hook などの出力が混ざらないよう、
+  # 途中のコマンドの標準出力はすべて標準エラーへ向け、結果の変数だけを fd 3 から出す（#942）。
+  exec 3>&1 1>&2
   case $mode in
     light)  execute_light  "$state_pr" ;;
     squash) execute_squash "$state_pr" ;;
@@ -379,6 +383,7 @@ case $1 in
       echo "    rotate-pr.sh prepare $1" >&2
       echo "    rotate-pr.sh execute $1 --mode light|squash" >&2
       echo "  (本実行は --mode squash 相当で継続します)" >&2
+      exec 3>&1 1>&2
       execute_squash "$1"
     else
       usage

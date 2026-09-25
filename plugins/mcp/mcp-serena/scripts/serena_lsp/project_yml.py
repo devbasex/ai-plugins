@@ -93,6 +93,26 @@ def write_list(text: str, key: str, values: list) -> str:
     return "\n".join(new_lines) + ("\n" if text.endswith("\n") else "")
 
 
+def append_list(text: str, key: str, values: list) -> str:
+    """無い要素だけをキーのブロックの末尾へ足す。**既存の行は注釈と引用符ごと残す。**
+
+    要素の字下げは既存の最後の要素に合わせる。キーが無いか空（`key: []`）なら
+    write_list と同じ形で書く。
+    """
+    current = read_list(text, key)  # 読めない形なら書く前に止める
+    added = [v for v in values if v not in (current or [])]
+    if not added:
+        return text
+    if not current:
+        return write_list(text, key, added)
+    lines = text.splitlines()
+    start, end, _ = _find_block(lines, key)
+    items = [line for line in lines[start + 1:end] if line.lstrip().startswith("- ")]
+    indent = items[-1][:len(items[-1]) - len(items[-1].lstrip())]
+    new_lines = lines[:end] + [f"{indent}- {v}" for v in added] + lines[end:]
+    return "\n".join(new_lines) + ("\n" if text.endswith("\n") else "")
+
+
 def strip_blocks(text: str, keys) -> str:
     """keys のブロックを取り除いた残り（書き換えの前後の比較に使う）。"""
     lines = text.splitlines()

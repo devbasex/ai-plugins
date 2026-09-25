@@ -296,7 +296,8 @@ def _reply(comment_id: Any, body: str) -> dict[str, Any] | None:
 
 
 def _fix_summary_body(fix: dict[str, Any], round_no: int | None,
-                      resolved: int, deferred: int, rejected: int) -> str:
+                      resolved: int, deferred: int, rejected: int,
+                      body_notes: list[str] | None = None) -> str:
     commit = str(fix.get("fix_commit") or fix.get("commit_sha") or "(なし)")
     head = (FIX_HEAD.format(round_no=round_no, commit=commit) if round_no is not None
             else FIX_HEAD_NO_ROUND.format(commit=commit))
@@ -309,6 +310,8 @@ def _fix_summary_body(fix: dict[str, Any], round_no: int | None,
         f"決着: {resolved} 件 / 見送り: {deferred} 件 / 却下: {rejected} 件",
         f"CI: {fix.get('ci_status') or 'NONE'}",
     ]
+    if body_notes:
+        lines += ["", "レビュー本文の指摘への返事:", *body_notes]
     note = str(fix.get("ci_note") or "").strip()
     if note:
         lines += ["", note]
@@ -316,8 +319,15 @@ def _fix_summary_body(fix: dict[str, Any], round_no: int | None,
 
 
 def _reply_items(resolved: list[dict[str, Any]], deferred: list[dict[str, Any]],
-                 rejected: list[dict[str, Any]], commit: str) -> list[dict[str, Any]]:
-    """決着・見送り・却下の各要素へ付ける返信の項目を、その順に組み立てる。"""
+                 rejected: list[dict[str, Any]],
+                 commit: str) -> tuple[list[dict[str, Any]], list[str]]:
+    """決着・見送り・却下の各要素へ付ける返信の項目を、その順に組み立てる。
+
+    返すのは (返信の項目, まとめへ載せる行)。**スレッドを持たない要素（レビュー本文の
+    指摘）には返信を積まず、まとめへ載せる。** 本文の指摘の `comment_id` はレビューの
+    ID で、GitHub はレビューへの返信を受け付けない。送れない項目が待ち行列の先頭に
+    残ると、後ろの決着とまとめまで止まる（#962）。
+    """
     # (要素の列, 返信の定型句, 理由を取り出すキー)。決着は理由の代わりにコミットを添える
     reply_rules = (
         (resolved, "対応しました。", None),
@@ -325,16 +335,22 @@ def _reply_items(resolved: list[dict[str, Any]], deferred: list[dict[str, Any]],
         (rejected, "この指摘は採らない判断です。", "reason_for_rejection"),
     )
     items: list[dict[str, Any]] = []
+    body_notes: list[str] = []
     for entries, lead, reason_key in reply_rules:
         for entry in entries:
             if reason_key is None:
                 note = f"（{commit}）" if commit else ""
             else:
                 note = str(entry.get(reason_key) or entry.get("reason") or "")
-            reply = _reply(entry.get("comment_id"), f"{lead}{note}".strip())
+            text = f"{lead}{note}".strip()
+            if not entry.get("thread_id"):
+                summary = str(entry.get("summary") or "").strip()
+                body_notes.append(f"- {summary}: {text}" if summary else f"- {text}")
+                continue
+            reply = _reply(entry.get("comment_id"), text)
             if reply:
                 items.append(reply)
-    return items
+    return items, body_notes
 
 
 def _closing_thread_items(resolved: list[dict[str, Any]], deferred: list[dict[str, Any]],
@@ -366,12 +382,12 @@ def fix_posts(result_path: pathlib.Path | str, repo: str, pr: int,
     rejected = _dict_items(fix.get("rejected"))
     commit = str(fix.get("fix_commit") or fix.get("commit_sha") or "")
 
-    items = _reply_items(resolved, deferred, rejected, commit)
+    items, body_notes = _reply_items(resolved, deferred, rejected, commit)
     items += _closing_thread_items(resolved, deferred, rejected)
     items.append({
         "kind": "pr-comment",
         "fields": {"body": _fix_summary_body(fix, round_no, len(resolved),
-                                             len(deferred), len(rejected))},
+                                             len(deferred), len(rejected), body_notes)},
         "extra": {"ident": f"fix-summary-{round_no if round_no is not None else commit}"},
     })
     return items

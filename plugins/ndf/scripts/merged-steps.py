@@ -339,7 +339,9 @@ def cmd_merge_when_green(a):
     n = a.pr
     deadline = time.monotonic() + a.timeout
     items, waits = [], 0
-    green_sha = None  # 通った状態を 1 度見た先頭のコミット。2 度続けて通れば確定とする
+    green_sha = None  # pending を見ずに通った状態を 1 度見た先頭のコミット。確かめ直して通れば確定とする
+    pending_sha = None  # pending を見た先頭のコミット。見た後に全部が通れば検査は走り終えている
+    empty_since = None  # rollup が空のままになった時刻（検査が載る前か、CI の無いリポジトリか）
     last_sha = None
     stale_since, rerun_done = {}, set()  # 取り残しを見た時刻（チェックの名前ごと）/ 再実行したチェック
     queued_runs = 0
@@ -364,7 +366,7 @@ def cmd_merge_when_green(a):
             # push で CI が走り直した。前のコミットで見た結果は使わない
             items.append({"kind": "restart", "name": sha or "?", "result": "rewait",
                           "reason": f"先頭のコミットが {str(last_sha)[:8]} から {str(sha)[:8]} へ変わった"})
-            green_sha = None
+            green_sha = pending_sha = empty_since = None
             stale_since, rerun_done = {}, set()
         last_sha = sha
         pending, failed, passed = check_states(info.get("statusCheckRollup"))
@@ -373,13 +375,21 @@ def cmd_merge_when_green(a):
                         items + [{"kind": "check", "name": f, "result": "failed"} for f in failed],
                         {"failed": len(failed), "pending": len(pending), "passed": len(passed), "waits": waits},
                         next=f"gh pr checks {n} で失敗を読み、直して push してから打ち直す"))
-        if not pending:
-            if green_sha == sha:
+        wait = a.interval
+        if not pending and not passed:
+            # 検査がまだ載っていない。--no-checks-after 秒を過ぎても空なら CI の無いリポジトリとみなす
+            empty_since = empty_since if empty_since is not None else time.monotonic()
+            if time.monotonic() - empty_since >= a.no_checks_after:
+                items.append({"kind": "check", "name": "(none)", "result": "no_checks"})
+                break
+        elif not pending:
+            if pending_sha == sha or green_sha == sha:
                 items += [{"kind": "check", "name": c, "result": "passed"} for c in passed]
                 break
-            green_sha = sha  # 走り出す前の検査を見落とさないよう、もう 1 度確かめる
+            green_sha = sha  # pending を見ずに通っている。走り出す前の検査を見落とさないよう、短い間隔で 1 度確かめる
+            wait = a.recheck
         else:
-            green_sha = None
+            green_sha, pending_sha, empty_since = None, sha, None
             count = watch_stuck_checks(root, n, info, a, items, stale_since, rerun_done, waits)
             if count is not None:
                 queued_runs = count  # 最後に見た待ち行列の件数
@@ -390,7 +400,7 @@ def cmd_merge_when_green(a):
                          "queued_runs": queued_runs},
                         next=f"打ち直す: merged-steps.py merge-when-green {n}"))
         waits += 1
-        time.sleep(a.interval)
+        time.sleep(wait)
 
     if not any(i["kind"] == "pr" and i["result"] == "already_merged" for i in items):
         cmd = ["gh", "pr", "merge", str(n), "--admin", f"--{a.method}"]
@@ -421,7 +431,11 @@ def build_parser():
                        help="CI が通るまで待ち、--admin でマージして後片付けまで行う")
     m.add_argument("pr", type=int, metavar="PR番号")
     m.add_argument("--method", choices=("merge", "squash", "rebase"), default="merge")
-    m.add_argument("--interval", type=float, default=30.0, help="CI を読み直す間隔（秒）")
+    m.add_argument("--interval", type=float, default=10.0, help="CI を読み直す間隔（秒）")
+    m.add_argument("--recheck", type=float, default=5.0,
+                   help="pending を見ずに通っていたとき、確かめ直すまでの間隔（秒）")
+    m.add_argument("--no-checks-after", type=float, default=60.0,
+                   help="rollup が空のままこの秒数を過ぎたら、CI の無いリポジトリとしてマージする")
     m.add_argument("--timeout", type=float, default=3600.0, help="CI を待つ上限（秒）")
     m.add_argument("--stale-after", type=float, default=300.0,
                    help="実行が終わったのにチェックが pending のまま続けば、ジョブを 1 度だけ再実行するまでの秒数")

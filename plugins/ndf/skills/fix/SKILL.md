@@ -167,6 +167,8 @@ FIX=$(bash "$R/scripts/resolve.sh" scripts fix) || exit 3
 | `rejected` | `rejected` | 理由（`reason_for_rejection`）の返信。決着しない。`path` / `line` / `severity` を持ち、次のラウンドの再提出と照合される |
 | （すべて） | | 対応件数・決着・見送り・却下・CI を並べた PR のまとめ |
 
+- `thread_id` を持たない要素（レビュー本文の指摘）には返信を送らず、理由を PR のまとめへ
+  載せる。GitHub はレビュー本文への返信を受け付けないためである
 - `ci_failed_checks` は `cross-review` 側で code-related と meta-only に分類され、メタチェックのみ
   失敗ならループを継続する。code-related ではない失敗の補足は雛形の `ci_note` に書く
 - まとめの参照（`summary_comment_url`）は投稿する側が記録へ書く

@@ -237,6 +237,9 @@ SENTENCE_SPLIT_RE = re.compile(r"(?<=[.。])\s*")
 ARGUMENTS_VAR_RE = re.compile(r"\$\{?ARGUMENTS\}?")
 ARGUMENTS_HEADING_RE = re.compile(r"^#{1,6}\s.*\b(?:arguments?|options?)\b", re.MULTILINE | re.IGNORECASE)
 ARGUMENTS_TEXT_RE = re.compile(r"引数")
+# Claude Code は Skill の本文の `$0` `$1` …（`${1}` も）を起動時の引数へ置き換える。
+# bash の関数や awk の位置引数として書くと起動引数に化ける（#990）。
+POSITIONAL_ARG_RE = re.compile(r"\$\{?[0-9]")
 
 
 def takes_arguments(fm: dict[str, str], body: str) -> bool:
@@ -409,6 +412,12 @@ def check_skill(s: dict) -> list[Finding]:
         add("error", "portability/legacy-trigger",
             "廃止した旧書式のトリガ宣言（Triggers: / 明示トリガ:）が残っている。"
             "末尾の全角括弧へ `（語・語）` の形で並べる")
+
+    positional = sorted({m.group(0) for m in POSITIONAL_ARG_RE.finditer(s["body"])})
+    if positional:
+        add("error", "portability/positional-arg",
+            f"本文に位置引数（{', '.join(positional)}）がある。Claude Code が起動時の引数へ"
+            "置き換えるため、名前付きの変数で受けるか処理をスクリプトへ移す")
 
     # --- 運用 ---
     if len(desc) > DESCRIPTION_OPS_MAX:

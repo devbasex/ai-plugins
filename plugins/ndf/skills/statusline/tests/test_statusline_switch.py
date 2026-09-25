@@ -47,6 +47,7 @@ def _run_ensure(home: Path) -> subprocess.CompletedProcess:
     """隔離 HOME で `statusline-switch.sh ensure` を実行する。"""
     env = os.environ.copy()
     env["HOME"] = str(home)
+    env.pop("CLAUDE_CONFIG_DIR", None)
     return subprocess.run(
         ["bash", str(SWITCH), "ensure"],
         capture_output=True,
@@ -203,3 +204,20 @@ def test_user_custom_gets_no_refresh_interval(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr
     assert "refreshInterval" not in _settings(tmp_path)["statusLine"]
+
+
+def test_ensure_writes_settings_under_claude_config_dir(tmp_path: Path) -> None:
+    """CLAUDE_CONFIG_DIR があれば、その下の settings.json へ書き、~/.claude/settings.json は作らない。"""
+    home = tmp_path / "home"
+    cfg = tmp_path / "cfg"
+    home.mkdir()
+    env = os.environ.copy()
+    env["HOME"] = str(home)
+    env["CLAUDE_CONFIG_DIR"] = str(cfg)
+    result = subprocess.run(
+        ["bash", str(SWITCH), "ensure"], capture_output=True, text=True, env=env,
+    )
+    assert result.returncode == 0, result.stderr
+    written = json.loads((cfg / "settings.json").read_text())
+    assert written["statusLine"]["command"] == NDF_COMMAND
+    assert not (home / ".claude" / "settings.json").exists()

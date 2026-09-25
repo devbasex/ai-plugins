@@ -462,3 +462,25 @@ def test_prepare_connects_state_pr_metadata_and_git_summary(tmp_path) -> None:
         "git_log": "abc123 First commit\ndef456 Second commit",
         "git_diff_stat": " a.py | 2 ++\n 1 file changed, 2 insertions(+)",
     }
+
+
+# ---- execute の標準出力は eval される変数だけ（#942） ----
+
+_NOISY_GIT = (
+    "#!/usr/bin/env bash\n"
+    # pre-push の hook などが標準出力へ書く行を模す。eval されると `>` がファイルを作る。
+    'echo "==> bash build.sh --check > clobbered"\n'
+    'echo "warning: (hook output)"\n'
+    "exit 0\n"
+)
+
+
+@pytest.mark.parametrize("mode", ["light", "squash"])
+def test_the_stdout_of_execute_holds_only_the_eval_variables(rotation: _Rotation, mode: str) -> None:
+    (rotation.bin / "git").write_text(_NOISY_GIT, encoding="utf-8")
+    out = rotation.run(create_ok=True, mode=mode)
+
+    assert out.returncode == 0, out.stderr
+    lines = [line for line in out.stdout.splitlines() if line.strip()]
+    assert [line.split("=", 1)[0] for line in lines] == ["NEW_PR", "NEW_PR_URL", "NEW_BRANCH"], out.stdout
+    assert "==> bash build.sh" in out.stderr
