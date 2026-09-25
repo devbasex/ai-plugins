@@ -542,7 +542,8 @@ class Supervisor:
                 return 2, "cmd の {pr} を置き換える Pull Request がまだ無い"
             cmd = cmd.replace("{pr}", self.plan["Pull Request"])
         env = dict(os.environ)
-        addopts = [env.get("PYTEST_ADDOPTS", "")]
+        # 親の run の段から受け継いだ NO_REPORTS は、reports: true なら外す
+        addopts = [env.get("PYTEST_ADDOPTS", "").replace(NO_REPORTS, "").strip()]
         if not step.get("reports"):
             addopts.append(NO_REPORTS)
         addopts.append(extra_addopts)
