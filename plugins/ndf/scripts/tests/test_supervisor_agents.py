@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import json
 import pathlib
 import re
 
@@ -60,3 +61,8 @@ def test_the_definitions_do_not_restrict_tools():
         fm = top_level(split(path)[0])
         assert "tools" not in fm
         assert "disallowedTools" not in fm
+
+
+def test_the_definitions_are_distributed():
+    manifest = json.loads((PLUGIN / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+    assert {"./agents/supervisor.md", "./agents/supervisor-waits.md"} <= set(manifest["agents"])
