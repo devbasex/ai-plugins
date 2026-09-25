@@ -27,7 +27,7 @@
 
 | 時点 | 所要 | 経過 |
 | --- | ---: | ---: |
-| `init`（着手前の全体のテスト 1 回と範囲のテスト 1 回） | 約 1.5 分 | 1.5 分 |
+| `init`（着手前の全体のテスト 1 回とラウンドのテスト 1 回） | 約 1.5 分 | 1.5 分 |
 | 提案（3 者が並行。律速は codex） | 約 4.5 分 | 6 分 |
 | 計画（実装担当 claude が 1 回） | 約 3 分 | 9 分 |
 
@@ -63,8 +63,8 @@
 | 時間の上限の表 | `state["limits"]` | 余裕・テスト 1 回の上限・段ごとの終わりの時刻。`init` と `merge-plan` が書く |
 | 段の監視の上限 | `PHASE_TIMEOUT` / `phases.<段>.timeout` | その段の終わりまでの残り + 余裕。無音の打ち切りも同じ値 |
 | 判断の主 | `judge` | Jev を使うか（`kind`）、使わなかった理由（`reason`）、呼び出しの失敗の数（`failures`） |
-| 限ったテスト | `items[].command` | 項目が触った箇所に限ったテスト。組み立ては検証の確定仕様 |
-| 危険の印 | `items[].danger`（D1〜D5） | 限ったテストで覆えない変更。立ったら全体のテストを 1 度走らせる（検証の確定仕様） |
+| 範囲テスト | `items[].command` | 項目が触った箇所の範囲テスト。組み立ては検証の確定仕様 |
+| 危険の印 | `items[].danger`（D1〜D5） | 範囲テストで覆えない変更。立ったら全体のテストを 1 度走らせる（検証の確定仕様） |
 
 ## 対象範囲
 
@@ -151,13 +151,13 @@
 | --- | --- | --- |
 | `--budget-minutes N` | 1 以上の整数。それ以外は `init` が終了コード 4（argparse の 2 にしない） | 30（`vocabulary.DEFAULT_BUDGET_MINUTES`） |
 | `--implementer NAME` | 参加者の中の 1 者。参加者に無ければ終了コード 4 | 下の決め方 |
-| `--round-test CMD` | 限ったテストを組み立てる元。**`--baseline-test` の実行器が既知でなければ必須**（無ければ提案の前に終了コード 4） | `--baseline-test` を元にする |
+| `--round-test CMD` | 範囲テストを組み立てる元。**`--baseline-test` の実行器が既知でなければ必須**（無ければ提案の前に終了コード 4） | `--baseline-test` を元にする |
 | `--max-test-rounds` / `--max-outer-rounds` / `--max-items-per-round` / `--max-fix-rounds` / `--test-timeout` | 廃止。受け取ると標準エラーへ `⚠ <引数> は廃止しました（#933）。--budget-minutes で所要を決めます` を出し、値を使わずに続ける（`setup.DEPRECATED_ARGS`） | — |
 | そのほか（`--scope` / `--baseline-test` / `--host` / `--exclude` / `--include` / `--require-all` / `--model` / `--ci-check` / `--workflow-step` / `--severity-threshold` / `--sync-command` / `--plan-file`） | 変わらない | — |
 
 既知の実行器は `pytest` / `python -m pytest` / `python3 -m pytest` / `jest` / `vitest` で、前置きの
 `uv run [オプション]` / `poetry run` / `npx` は読み飛ばす（`testcmd.is_known`）。既知でない実行器
-（`npm test`・`make -C backend test`・`cargo test`・ラッパー）から限ったテストを組み立てると、
+（`npm test`・`make -C backend test`・`cargo test`・ラッパー）から範囲テストを組み立てると、
 提案と計画に時間を使った後に全項目が `no_target` になるため、着手前に止める。
 
 ### 実装担当の決め方
@@ -191,15 +191,15 @@
 ### 計画の取り込み（`merge-plan`）
 
 実装担当は候補の全件について `tier`（`high` / `medium` / `low`）・`tests`（足すテストの
-置き場所）・`test_targets`（限ったテストの対象）・`merge_into`（同じ変更の相手の `key`）・
+置き場所）・`test_targets`（範囲テストの対象）・`merge_into`（同じ変更の相手の `key`）・
 `risk`（公開の入出力が変わりうるか）を返す。**コマンドは返さない。** 計画を読めなくても止めず、
-段は既定の `medium`（または Jev）、テストは足さず、限ったテストは `--round-test` をそのまま使う。
+段は既定の `medium`（または Jev）、テストは足さず、範囲テストは `--round-test` をそのまま使う。
 
 | 順 | すること |
 | ---: | --- |
 | 1 | 段を決める（Jev か実装担当。下の「Jev の使い方」） |
 | 2 | 同じ変更を統合する。統合された候補は `duplicate` で見送り、賛同した者を統合先へ足す |
-| 3 | 限ったテストを組み立てる。組み立てられず `--round-test` も無い候補は `no_target` で見送る |
+| 3 | 範囲テストを組み立てる。組み立てられず `--round-test` も無い候補は `no_target` で見送る |
 | 4 | 見積もる。`test`（足すテストがあるときだけ）+ `structure/<手法>` + `verify` |
 | 5 | 順位を決める。（段, 賛同した者の数, 重要度）の降順、同じなら見積りの合計の昇順（`budget.rank_key`） |
 | 6 | 使える時間に収まる項目を選ぶ。入らない項目は飛ばして次を見る（`budget.select`。`budget` で見送る） |
@@ -246,7 +246,7 @@
 
 **提案と計画の枠を予算の比率にしたのは**、#917 を 60 分に当てた例（提案 4.5 分・計画 3 分）の
 倍の余裕があり、配分テーブルは提案と計画の所要を持たないためである。**テスト 1 回の上限を
-3·w にしたのは**、限ったテストは全体のテストの部分で w を超えることは本来無く、3 倍は負荷の
+3·w にしたのは**、範囲テストは全体のテストの部分で w を超えることは本来無く、3 倍は負荷の
 揺れの幅だからである。
 
 ### 段の監視の上限
@@ -428,7 +428,7 @@
 - [#917 の実行の記録](https://github.com/devbasex/ai-plugins/pull/917#issuecomment-5796914428) — 初期値の出所
 - [検証と最終ゲートの確定仕様](cross-refactoring-verify-and-final-gate.md)
 - [cross-refactoring の参加者](cross-refactoring-participants.md)
-- [範囲のテストと assess](cross-refactoring-round-tests-and-assess.md)
+- [ラウンドのテストと assess](cross-refactoring-round-tests-and-assess.md)
 - [取り込みの共通手順](cross-refactoring-apply-intake.md)
 - [`cross-refactoring` の手順](../../plugins/ndf/skills/cross-refactoring/SKILL.md)
 - [`cross-refactoring` の計画・テスト追加・実装](../../plugins/ndf/skills/cross-refactoring/docs/02-plan-and-implement.md)

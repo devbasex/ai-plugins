@@ -332,7 +332,7 @@ ROUND_TEST = {"command": "pytest tests/services -q", "status": "green",
 def test_a_standalone_run_with_a_round_test_runs_the_baseline_test_once(
     refactor, cmd_gate, tmp_path, env_tmp_dir, spy, capsys
 ):
-    """AC3 — 単独起動でも、範囲のテストで検証してきたなら全体テストを 1 回通す。"""
+    """AC3 — 単独起動でも、ラウンドのテストで検証してきたなら全体テストを 1 回通す。"""
     state_path = _state(tmp_path, round_test=ROUND_TEST)
     env_tmp_dir(state_path)
 

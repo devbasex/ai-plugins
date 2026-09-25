@@ -1,4 +1,4 @@
-"""限ったテストの語の並びの組み立て（#933 I8）。"""
+"""範囲テストの語の並びの組み立て（#933 I8）。"""
 from __future__ import annotations
 
 import importlib

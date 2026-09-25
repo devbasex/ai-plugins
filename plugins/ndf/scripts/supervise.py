@@ -1773,8 +1773,8 @@ def sync_check(root: str, commit: bool, checks: list[tuple[str, str]] | None = N
                   {"failed": len(failed), "changed": len(changed)})
 
 
-RULE_IMPL = ("限ったテストや全体テストが落ちたら（落ちたテストだけの再実行でも落ちた後）、変更に起因するなら fix、"
-             "環境や変更に無関係なら次の段（限ったテストなら pr、全体テストなら doc-lint）。"
+RULE_IMPL = ("範囲テストや全体テストが落ちたら（落ちたテストだけの再実行でも落ちた後）、変更に起因するなら fix、"
+             "環境や変更に無関係なら次の段（範囲テストなら pr、全体テストなら doc-lint）。"
              "2 回直しても同じ失敗なら stop。")
 RULE_CHECK = ("全体テストが落ちたら（落ちたテストだけの再実行でも落ちた後）、変更に起因するなら fix、"
               "変更に無関係なら ready。2 回直しても同じなら stop。")
@@ -1907,7 +1907,7 @@ def plan_impl(a, out: Path | None = None) -> dict:
         {"id": "test-limited", "type": "run", "stage": "完了判定", "timeout": 900, "rerun_failed": True,
          "cmd": with_paths(a.test_cmd, tests), "on_fail": "judge", "next": "pr"},
         {"id": "judge", "type": "judge", "inputs": ["test-limited", "test-all"],
-         "question": "テストの失敗を直すか（fix）、限ったテストの失敗が変更に無関係なら PR へ（pr）、"
+         "question": "テストの失敗を直すか（fix）、範囲テストの失敗が変更に無関係なら PR へ（pr）、"
                      "全体テストの失敗が変更に無関係なら文書の検査へ（doc-lint）、止めるか（stop）",
          "choices": ["fix", "pr", "doc-lint", "stop"]},
         {"id": "fix", "type": "work", "kind": "修正", "inputs": ["test-limited", "test-all"],
@@ -2929,7 +2929,7 @@ def main() -> int:
     n.add_argument("--issue", type=int, nargs="+", default=[])
     n.add_argument("--pr", type=int)
     n.add_argument("--worktree", required=True)
-    n.add_argument("--tests", nargs="+", default=[], help="impl: 限ったテストの範囲")
+    n.add_argument("--tests", nargs="+", default=[], help="impl: 範囲テストの対象")
     n.add_argument("--scope", nargs="+", default=[], help="check: 構造改善の範囲")
     n.add_argument("--title", help="impl: PR の題名")
     n.add_argument("--summary")

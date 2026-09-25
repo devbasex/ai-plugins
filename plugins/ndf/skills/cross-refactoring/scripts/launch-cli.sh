@@ -42,7 +42,7 @@ load_common_state() {
   SCOPE=$(jq -r '.target_scope | join(" ")' "$STATE")
   MODEL=$(jq -r --arg rt "$RUNTIME" '.models[$rt] // ""' "$STATE")
   BASELINE_TEST=$(jq -r '.baseline_test.command // ""' "$STATE")
-  # 範囲のテスト。省いた実行では空で、項目の検証は全体のテストから組み立てた語の並びを使う。
+  # ラウンドのテスト。省いた実行では空で、項目の検証は全体のテストから組み立てた語の並びを使う。
   ROUND_TEST=$(jq -r '.round_test.command // ""' "$STATE")
 }
 

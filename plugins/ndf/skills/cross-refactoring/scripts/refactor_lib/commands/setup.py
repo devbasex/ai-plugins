@@ -417,13 +417,13 @@ def _normalize_args(args: argparse.Namespace) -> None:
             option = "--" + name.replace("_", "-")
             print(f"⚠ {option} は廃止しました（#933）。--budget-minutes で所要を決めます",
                   file=sys.stderr, flush=True)
-    # AC3b: 範囲のテストが無く、全体のテストから限ったテストを組み立てられないなら、
+    # AC3b: ラウンドのテストが無く、全体のテストから範囲テストを組み立てられないなら、
     # 提案と計画に時間を使った後で全項目が `no_target` になる。着手前に止める。
     if not getattr(args, "round_test", None) and not is_known(args.baseline_test):
         die(
             f"--baseline-test（{args.baseline_test}）からは項目ごとのテストを組み立てられません"
             "（既知の実行器: pytest / python -m pytest / jest / vitest）。"
-            "--round-test で範囲のテストを渡してください"
+            "--round-test でラウンドのテストを渡してください"
         )
 
 
@@ -550,7 +550,7 @@ def _resume_if_pending(
 def _verify_init(
     args: argparse.Namespace, inputs: _InitInputs, prep: _InitPreparation
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
-    """参加者を確定し、着手前のテストと範囲のテストを実行する。"""
+    """参加者を確定し、着手前のテストとラウンドのテストを実行する。"""
     # **確認は着手前のテストより先に行う。** 使える者がいなければ、テストに時間を
     # 使わずに止める。
     participants = resolve_participants(
@@ -753,7 +753,7 @@ def _notify_view(
     """
     view = dict(state)
     view["baseline_test"] = (state.get("baseline_test") or {}).get("command")
-    # 範囲のテストを省いた（または全体のテストと同じ文字列だった）実行は `None` を持つ。
+    # ラウンドのテストを省いた（または全体のテストと同じ文字列だった）実行は `None` を持つ。
     # 同じ文字列を渡し直した再開を「違う」と知らせないため、全体のテストと同じなら同じと読む。
     recorded = (state.get("round_test") or {}).get("command")
     given_round = getattr(args, "round_test", None)
@@ -896,12 +896,12 @@ def _run_baseline_test(command: str, work: pathlib.Path, timeout: int) -> dict[s
 def _run_round_test(
     command: Optional[str], baseline: dict[str, Any], work: pathlib.Path, timeout: int,
 ) -> dict[str, Any]:
-    """範囲のテストを着手前に 1 回実行して記録する（#880）。
+    """ラウンドのテストを着手前に 1 回実行して記録する（#880）。
 
     **省いたとき、または全体テストと同じ文字列のときは実行しない。** 同じコマンドを
     2 度走らせても判定は変わらず、時間だけが掛かる。全体テストの結果を写す。
 
-    **失敗は全体テストと別に止める。** 全体テストが通っても範囲のテストが通らない
+    **失敗は全体テストと別に止める。** 全体テストが通ってもラウンドのテストが通らない
     （テストが 1 件も集まらない終了コード 5 を含む）なら、群の検証が初回から落ちる。
     """
     if not command or command == baseline["command"]:
@@ -911,13 +911,13 @@ def _run_round_test(
                 "checked_at": baseline["checked_at"]}
     code, timed_out = run_with_timeout(command, str(work), timeout)
     if timed_out:
-        die(f"範囲のテストが {timeout} 秒で終わりませんでした（{command}）。打ち切りました")
+        die(f"ラウンドのテストが {timeout} 秒で終わりませんでした（{command}）。打ち切りました")
         raise SystemExit(ABORT)
     if code != 0:
         die(
-            f"範囲のテストが成功しません（{command} / 終了コード {code}）。"
+            f"ラウンドのテストが成功しません（{command} / 終了コード {code}）。"
             "--round-test が --scope のテストの置き場所を走らせるかを確かめてください"
         )
         raise SystemExit(ABORT)
-    info(f"✅ 着手前の範囲のテスト成功: {command}")
+    info(f"✅ 着手前のラウンドのテスト成功: {command}")
     return {"command": command, "status": "green", "checked_at": statefile.now()}

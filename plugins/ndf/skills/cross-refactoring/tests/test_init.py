@@ -62,7 +62,7 @@ def _args(tmp_path, **over):
         "pr": 130, "scope": ["src", "tests"], "host": "claude",
         "ci_check": None, "workflow_step": False,
         "severity_threshold": "minor", "model": None, "baseline_test": "true",
-        # **範囲のテストを既定で渡す**（#933 の AC3b）。`true` は既知の実行器でないため、
+        # **ラウンドのテストを既定で渡す**（#933 の AC3b）。`true` は既知の実行器でないため、
         # `--round-test` が無いと提案の前に止まる。全体のテストと同じ文字列なので、
         # 実行は 1 回で済む。関門そのものは下の AC3b のテストで見る。
         "round_test": "true",
@@ -899,7 +899,7 @@ def test_a_failed_rebuild_leaves_the_state_untouched(run_init, tmp_path):
     assert path.read_text(encoding="utf-8") == before
 
 
-# ---------- 範囲のテスト `--round-test`（#880 の AC1・AC4・AC5） ----------
+# ---------- ラウンドのテスト `--round-test`（#880 の AC1・AC4・AC5） ----------
 
 @pytest.fixture
 def test_calls(patch_lib):
@@ -930,7 +930,7 @@ def test_init_records_the_round_test(run_init, tmp_path, test_calls):
     assert state["round_test"]["command"] == "pytest -q -k scope"
     assert state["round_test"]["status"] == "green"
     assert state["baseline_test"]["command"] == "true"
-    assert test_calls.seen == ["true", "pytest -q -k scope"], "全体テストの後に範囲のテストを 1 回"
+    assert test_calls.seen == ["true", "pytest -q -k scope"], "全体テストの後にラウンドのテストを 1 回"
 
 
 def test_an_omitted_round_test_is_recorded_as_omitted_and_runs_once(
@@ -956,7 +956,7 @@ def test_a_round_test_equal_to_the_baseline_test_runs_once(run_init, tmp_path, t
 
 @pytest.mark.parametrize("command", ["false", "exit 5"])
 def test_init_stops_when_the_round_test_fails(run_init, tmp_path, command):
-    """AC4 — 範囲のテストが成功しなければ止める。集まらない終了コード 5 も失敗。"""
+    """AC4 — ラウンドのテストが成功しなければ止める。集まらない終了コード 5 も失敗。"""
     with pytest.raises(SystemExit) as e:
         run_init(_args(tmp_path, round_test=command, baseline_test="true"))
     assert e.value.code == refactor_abort()
@@ -999,7 +999,7 @@ def test_resume_notifies_a_changed_round_test(run_init, tmp_path, capsys):
 
 # ---------- 打ち切り（run_with_timeout の timed_out=True）（R2-001） ----------
 #
-# 現状固定テスト。着手前のテストと範囲のテストが「打ち切り」で止まる 2 経路
+# 現状固定テスト。着手前のテストとラウンドのテストが「打ち切り」で止まる 2 経路
 # （setup.py の `_run_baseline_test` / `_run_round_test` の timed_out=True）は
 # どのテストも通していなかった。失敗（終了コード非 0）とは別の分岐なので、現状の
 # 終了コードと、状態ファイルが書かれないことをそのまま記録する。
@@ -1038,16 +1038,16 @@ def test_init_aborts_when_the_baseline_test_times_out(run_init, tmp_path, timeou
 
 
 def test_init_aborts_when_the_round_test_times_out(run_init, tmp_path, timeout_calls, capsys):
-    """R2-001 — 範囲のテストが打ち切りで止まる経路（setup.py 662-663）。"""
-    # 着手前のテストは通し、範囲のテストだけ打ち切る。
+    """R2-001 — ラウンドのテストが打ち切りで止まる経路（setup.py 662-663）。"""
+    # 着手前のテストは通し、ラウンドのテストだけ打ち切る。
     timeout_calls.timed_out.add("pytest -q -k scope")
     with pytest.raises(SystemExit) as e:
         run_init(_args(tmp_path, round_test="pytest -q -k scope", baseline_test="true",
                        budget_minutes="10"))
-    # 現状固定: 範囲のテストの打ち切りは ABORT。
+    # 現状固定: ラウンドのテストの打ち切りは ABORT。
     assert e.value.code == refactor_abort()
     assert not _state_path(tmp_path).exists()
-    # 着手前のテストを通したあと、範囲のテストで止まる順序。
+    # 着手前のテストを通したあと、ラウンドのテストで止まる順序。
     assert timeout_calls.seen == ["true", "pytest -q -k scope"]
     assert "60" in capsys.readouterr().err
 

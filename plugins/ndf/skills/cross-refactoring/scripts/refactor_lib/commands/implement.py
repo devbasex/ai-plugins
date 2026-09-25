@@ -210,7 +210,7 @@ def _finish(path: pathlib.Path, state: dict[str, Any], phase: str) -> None:
 def _test_words(state: dict[str, Any], item: dict[str, Any], files: list[str]) -> Optional[list[str]]:
     """足したテストを今のコードで走らせる語の並び。
 
-    項目の限ったテストが対象から組み立てたものならそれを使う。`--round-test` をそのまま
+    項目の範囲テストが対象から組み立てたものならそれを使う。`--round-test` をそのまま
     使う項目は、元が既知の実行器なら足したテストのファイルへ差し替え、無理なら
     `--round-test` をそのまま走らせる。
     """

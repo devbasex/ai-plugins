@@ -141,7 +141,7 @@ def test_item_flags_combines(danger, repo):
     item = {"path": "src/refactor_lib/plan.py", "symbol": "build_all", "tests": []}
     files = ["src/refactor_lib/plan.py", "src/refactor_lib/other.py"]
     out = danger.item_flags(str(repo), item, [sha], files, SCOPE, ["tests/test_plan.py"], True)
-    # other.py の名前は限ったテストに現れない → D4
+    # other.py の名前は範囲テストに現れない → D4
     assert out == {"flags": ["D1", "D4", "D5"], "hits": []}
 
     only = danger.item_flags(str(repo), item, [sha], ["src/refactor_lib/plan.py"],

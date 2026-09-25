@@ -5,7 +5,7 @@
 | AC10 | 足したテストが今のコードで落ちた項目は `test_failed`、項目に紐づかないコミットは取り消す |
 | AC11 | 1 改善項目 = 1 コミット（テストを足す項目は 2 コミット）。2 コミット以上は取り消す |
 | AC12 | コミットの無い項目・完了の締め切りを過ぎた項目は `not_done`。テストのコミットも取り消す |
-| AC13 AC14 | 検証は限ったテストだけ。全体のテストは印が立ったときに 1 度だけ（落ちたときの扱いは `test_whole_test_triage_git.py`） |
+| AC13 AC14 | 検証は範囲テストだけ。全体のテストは印が立ったときに 1 度だけ（落ちたときの扱いは `test_whole_test_triage_git.py`） |
 | AC15 AC16 | 修正の締め切りで項目だけを取り消す。共有した項目は新しい方から 1 件ずつ |
 | AC16b | 最終ゲートは、検証の中の全体のテストが通り HEAD が進んでいなければ使い回す |
 | AC17 | 単独起動は `cross-review` が `approved` のときだけ履歴へ追記する |
@@ -385,7 +385,7 @@ def test_a_whole_test_failure_left_unfixed_reverts_the_flagged_item_and_the_gate
     work = flow["work"]
 
     def rename_and_break_outside(w):
-        # `total` を消す（限ったテスト tests/test_calc.py は `add` しか見ない）。
+        # `total` を消す（範囲テスト tests/test_calc.py は `add` しか見ない）。
         git("rm", "-q", "src/__init__.py", cwd=w)
         _write(w, "src/calc.py", "def add(a, b):\n    return a + b\n")
 

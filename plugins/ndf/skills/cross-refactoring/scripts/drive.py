@@ -30,7 +30,7 @@ from drive_pause import Stop  # noqa: E402
 TOOL = "cross-refactoring-drive"
 ORDER = ("propose", "plan", "add-tests", "implement", "verify", "final", "done")
 CR_DRIVE = HERE.parents[1] / "cross-review" / "scripts" / "drive.py"
-FOCUS = ("項目をまたいだ整合を見る。個々の改善項目の妥当性は限ったテストで判定済みのため対象外とする。"
+FOCUS = ("項目をまたいだ整合を見る。個々の改善項目の妥当性は範囲テストで判定済みのため対象外とする。"
          "複数の項目で触った箇所の重複・打ち消し・命名の揺れ、取り消した項目の残骸、生成物と配布物の同期を確かめる")
 
 

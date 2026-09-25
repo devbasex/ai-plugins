@@ -53,7 +53,7 @@ def _answer(c, **over):
 
 
 def test_items_carry_rank_estimate_tests_and_targets(planned, cmd_plan, capsys):
-    """AC7: 採った項目は順位・見積り・足すテスト・限ったテストの対象を持つ。"""
+    """AC7: 採った項目は順位・見積り・足すテスト・範囲テストの対象を持つ。"""
     a, b = _candidate(1, "f"), _candidate(2, "g", agreed=("codex", "kiro"))
     path = planned([a, b], [_answer(a, tier="high", tests=["tests/test_new.py"],
                                     test_targets=["tests/test_new.py"]),

@@ -57,7 +57,7 @@ def margin(budget_minutes: int) -> int:
 
 
 def init_test_timeout(budget_minutes: int) -> int:
-    """着手前の全体のテストと範囲のテスト 1 回の上限（秒）。"""
+    """着手前の全体のテストとラウンドのテスト 1 回の上限（秒）。"""
     return _seconds(budget_minutes, INIT_TEST_SHARE)
 
 

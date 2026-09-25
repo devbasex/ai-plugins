@@ -1,6 +1,6 @@
 """検証と修正（`verify` / `merge-fix`、#933 の F6 F7）。
 
-**検証は HEAD で項目ごとの限ったテストを走らせる**（決定 14）。同じ語の並びの項目は
+**検証は HEAD で項目ごとの範囲テストを走らせる**（決定 14）。同じ語の並びの項目は
 1 回だけ走らせて結果を共有する。全体のテストは、危険の印が立ったときに検証の中で
 1 度だけ走らせる。落ちたら落ちたテストだけを走らせ直して揺れ・元からの失敗・変更が
 原因を見分け、変更が原因なら修正へ回す。修正の締め切りまでに通らなければ、
@@ -9,7 +9,7 @@
 | 返す値 | 意味 | 駆動がすること |
 | --- | --- | --- |
 | `VERIFY=fix` | 直す項目が残った | 修正を 1 回起動し、`merge-fix` の後に `verify` へ戻る |
-| `VERIFY=done` | 残った項目の限ったテストがすべて通った | 最終ゲートへ |
+| `VERIFY=done` | 残った項目の範囲テストがすべて通った | 最終ゲートへ |
 """
 from __future__ import annotations
 
@@ -54,7 +54,7 @@ from ..verify import (
 )
 
 
-# ---------- 限ったテスト ----------
+# ---------- 範囲テスト ----------
 
 def _run(state: dict[str, Any], words: list[str], log: pathlib.Path) -> bool:
     """語の並びをシェルを通さずに走らせる（AC10b）。打ち切りは失敗。"""
@@ -69,7 +69,7 @@ def _log_path(state: dict[str, Any], item_id: str) -> pathlib.Path:
 
 
 def _run_limited(state: dict[str, Any], items: list[dict[str, Any]]) -> None:
-    """項目ごとに限ったテストを走らせ、`verified` / `failing` にする。同じ語の並びは 1 回だけ。"""
+    """項目ごとに範囲テストを走らせ、`verified` / `failing` にする。同じ語の並びは 1 回だけ。"""
     results: dict[tuple[str, ...], tuple[bool, pathlib.Path]] = {}
     for item in items:
         key = tuple(item.get("command") or [])
@@ -79,7 +79,7 @@ def _run_limited(state: dict[str, Any], items: list[dict[str, Any]]) -> None:
         passed, log = results[key]
         item["status"] = VERIFIED if passed else FAILING
         item["last_log"] = str(log)
-        # 全体のテストの直しで渡したコマンドは、限ったテストの結果で置き換わる。
+        # 全体のテストの直しで渡したコマンドは、範囲テストの結果で置き換わる。
         item.pop("whole_test_command", None)
         item["verify_runs"] = int(item.get("verify_runs") or 0) + 1
 
@@ -97,7 +97,7 @@ def _revert_shared(
 
     取り消すたびに共有したコマンドを走らせ直し、通った時点で止める。通る前に取り消した
     項目だけが見送り（`reverted`）になり、古い項目のコミットは残る。走らせ直すのは
-    限ったテスト（`command` を渡せば全体のテストで落ちたテストだけ）で、全体のテストではない。
+    範囲テスト（`command` を渡せば全体のテストで落ちたテストだけ）で、全体のテストではない。
     通った時点で止めたら真、全件を取り消したら偽を返す。
     """
     remaining = _newest_first(group)
@@ -120,7 +120,7 @@ def _fix_stop(state: dict[str, Any]) -> bool:
     """修正の試行を打ち切るか。**回数ではなく時計で決める**（決定 23）。
 
     修正に使える残り（`budget.fix_time_left`）が控えの `fix`（修正 1 回の見積り）に
-    足りなければ打ち切る。限ったテストの修正と全体のテストの直しが同じ判定を使う
+    足りなければ打ち切る。範囲テストの修正と全体のテストの直しが同じ判定を使う
     （決定 22）。1 回の修正 = 実装担当の 1 起動で、次の試行の前にここで時計を見る。
     """
     reserve = (state.get("plan") or {}).get("reserve") or {}
@@ -141,7 +141,7 @@ def _give_up(path: pathlib.Path, state: dict[str, Any]) -> None:
         if item.get("status") == FAILING:
             groups.setdefault(tuple(item.get("command") or []), []).append(item)
     for group in groups.values():
-        _revert_shared(path, state, group, f"限ったテストが{STOP_REASON}")
+        _revert_shared(path, state, group, f"範囲テストが{STOP_REASON}")
 
 
 # ---------- 危険の印 ----------
@@ -156,7 +156,7 @@ def _item_files(work: str, item: dict[str, Any]) -> list[str]:
 
 
 def _test_files(state: dict[str, Any], item: dict[str, Any]) -> Optional[list[str]]:
-    """D4 で見る限ったテストのファイル（決定 21）。"""
+    """D4 で見る範囲テストのファイル（決定 21）。"""
     if item.get("command_source") == "targets":
         return danger.limited_test_files_from_targets(list(item.get("test_targets") or []))
     round_test = (state.get("round_test") or {}).get("command")
@@ -308,7 +308,7 @@ def _prepare(path: pathlib.Path, state: dict[str, Any]) -> None:
 
 
 def cmd_verify(args: argparse.Namespace) -> None:
-    """項目を限ったテストで検証する。出力は `VERIFY=done|fix`。
+    """項目を範囲テストで検証する。出力は `VERIFY=done|fix`。
 
     終了コード: 0（`VERIFY` で分岐する）/ 4 = 中断（取り消しの失敗など）。
     """
@@ -328,7 +328,7 @@ def cmd_verify(args: argparse.Namespace) -> None:
 
     failing = [i for i in live_items(state) if i.get("status") == FAILING]
     if failing:
-        _to_fix(path, state, failing, started, "限ったテストが落ちた項目")
+        _to_fix(path, state, failing, started, "範囲テストが落ちた項目")
         return
 
     if _whole_test(path, state, _flag_items(state)):

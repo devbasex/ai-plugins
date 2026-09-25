@@ -1,6 +1,6 @@
 """計画の取り込み（`merge-plan`、#933 の F3）。
 
-実装担当の計画（段・足すテスト・限ったテストの対象・同じ変更か・公開の入出力が
+実装担当の計画（段・足すテスト・範囲テストの対象・同じ変更か・公開の入出力が
 変わりうるか）を読み、Jev が使えるときは段と「同じ変更か」を Jev に問う。そのうえで
 順位を決め、配分テーブルで見積もり、想定最大時間に収まる件数を選び、項目ごとの
 締め切りを出す。**数え上げと比較はスクリプトが行う**（決定 11）。
@@ -38,7 +38,7 @@ DEFAULT_TIER = "medium"
 def _read_plan_answers(state: dict[str, Any]) -> dict[str, dict[str, Any]]:
     """実装担当の計画を `鍵 → 答え` で返す。読めなければ空（全候補を既定で扱う）。
 
-    **計画が読めなくても止めない。** 段は Jev か既定の段で、テストは足さず、限ったテストは
+    **計画が読めなくても止めない。** 段は Jev か既定の段で、テストは足さず、範囲テストは
     `--round-test` をそのまま使う形で進める。止めると提案に使った時間が丸ごと無駄になる。
     """
     impl = str(state["implementer"])
@@ -201,7 +201,7 @@ def _allocation_table(state: dict[str, Any]) -> dict[str, Any]:
 
 
 def _limited_commands(state: dict[str, Any], items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """項目ごとの限ったテストの語の並びを決める。決まらない項目は `no_target` で見送る（AC10b）。"""
+    """項目ごとの範囲テストの語の並びを決める。決まらない項目は `no_target` で見送る（AC10b）。"""
     work = work_dir(state)
     source_state = {
         "round_test": (state.get("round_test") or {}).get("command"),
@@ -214,7 +214,7 @@ def _limited_commands(state: dict[str, Any], items: list[dict[str, Any]]) -> lis
             source_state, item.get("test_targets") or [], work, item.get("tests") or [])
         if words is None:
             defer(state, item, DEFER_NO_TARGET,
-                  "限ったテストを組み立てられず、--round-test も無い")
+                  "範囲テストを組み立てられず、--round-test も無い")
             continue
         item["command"], item["command_source"] = list(words), origin
         kept.append(item)

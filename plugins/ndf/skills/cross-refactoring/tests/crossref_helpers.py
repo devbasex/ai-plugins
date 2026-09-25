@@ -190,7 +190,7 @@ def build_git_flow(tmp_path: pathlib.Path, monkeypatch: Any, patch_lib: Any,
                    env_tmp_dir: Any, **state_overrides: Any) -> dict[str, Any]:
     """書き込み用の作業ディレクトリ・`pytest` の起動口・版 2 の状態を用意する。
 
-    `pytest` は PATH の先頭に置いた起動口で走らせる（限ったテストはシェルを通さずに
+    `pytest` は PATH の先頭に置いた起動口で走らせる（範囲テストはシェルを通さずに
     語の並びで走るため）。公開（push）は差し替え、公開した HEAD を `pushed` に積む。
     """
     import os

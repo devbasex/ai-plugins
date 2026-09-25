@@ -144,7 +144,7 @@ def round_test_roots(command: str, work: str) -> list[str]:
     """`--round-test` の実行集合の起点を返す（#880）。空なら全体を走らせるとみなす。
 
     `baseline_search_roots` と違い、**テストの置き場所に当たる実在するファイルも起点に
-    数える。** 範囲のテストは 1 ファイルを名指しすることがあり、それを限定なしと読むと
+    数える。** ラウンドのテストは 1 ファイルを名指しすることがあり、それを限定なしと読むと
     範囲の置き場所を走らせないコマンドが関門を通る。
 
     数えない語は 3 つある。先頭の語（プログラム名）と `-` で始まる語、値を取ると
@@ -243,7 +243,7 @@ def round_test_hint(
     example = f"{_example_program(baseline_test, roots)} {' '.join(locations)}".strip()
     return (
         "ℹ --baseline-test は --scope より広い範囲を走らせます。"
-        "群ごとの検証を短くするには --round-test に範囲のテストを渡します"
+        "群ごとの検証を短くするには --round-test にラウンドのテストを渡します"
         f"（例: {example}）"
     )
 
@@ -254,7 +254,7 @@ def scope_problem(
     """関門に引っかかる理由を返す。問題が無ければ `None`。
 
     `round_test` が真なら、`command` を `--round-test` として読む（#880）。群の検証が
-    走らせるのは範囲のテストであり、足したテストが入るべき実行集合はこちらである。
+    走らせるのはラウンドのテストであり、足したテストが入るべき実行集合はこちらである。
     """
     listed = list(scope)
     locations = test_locations(listed, work)
