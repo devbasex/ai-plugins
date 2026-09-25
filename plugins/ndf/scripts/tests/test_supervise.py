@@ -863,6 +863,17 @@ def test_worker_lines_are_sorted_into_attention(tmp_path, monkeypatch):
     assert "worker 5（形が違う 1）" in text and "conductor 向け 2" in text
 
 
+def test_worker_lines_with_different_issue_numbers_are_not_repeats(tmp_path, monkeypatch):
+    """課題番号だけが違う報告（#943 → #946 → #906 をコミットした）は繰り返しに数えない。同じ番号の 3 度目は数える。"""
+    w = lambda t: json.dumps({"kind": "worker", "at": "2026-01-01T00:00:00+09:00", "text": t}, ensure_ascii=False)
+    fake_worker(tmp_path, monkeypatch, [w("#943 をコミットした"), w("#946 をコミットした"), w("#906 をコミットした"),
+                                        w("#942 を直した"), w("#942 を直した"), w("#942 を直した")], sleep=0.5)
+    s, _ = run_plan(tmp_path, [{"id": "impl", "type": "work", "prompt": "実装する", "next": "end"}],
+                    report_interval=0.3)
+    att = [r for r in progress(s) if r["kind"] == "attention"]
+    assert [(a["reason"], a["text"]) for a in att] == [("止まった（同じ報告の繰り返し）", "#942 を直した")]
+
+
 def test_repeated_failure_before_judge_is_attention(tmp_path, seq):
     seq[0]({"out": {"result": '{"decision": "t", "reason": "もう 1 度"}', "usage": {}, "total_cost_usd": 0.0}})
     s, _ = run_plan(tmp_path, [

@@ -588,7 +588,7 @@ class Supervisor:
 
     def classify_worker(self, text: str) -> None:
         """worker の 1 行を語と繰り返しで分け、conductor の判断が要るものだけを attention にする。"""
-        norm = re.sub(r"\d+", "#", text.strip())
+        norm = re.sub(r"(?<![#\d])\d+", "N", text.strip())  # 件数や秒は畳み、課題番号（#906）は残す
         n = self.worker_counts[norm] = self.worker_counts.get(norm, 0) + 1
         if PROGRESS_GATE.search(text):
             self.attention("関門", text)
