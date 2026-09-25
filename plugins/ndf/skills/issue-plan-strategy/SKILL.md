@@ -140,7 +140,7 @@ git checkout -b release/<PLAN-ID> origin/<default-branch>
 git push -u origin release/<PLAN-ID>
 ```
 
-release ブランチは統合先であって作業場所ではないため、メインディレクトリで作ってよい。
+release ブランチは統合先であり作業場所にならないため、メインディレクトリで作ってよい。
 **実装を載せる個別 PR ブランチは Step 5 のworktree で開く** (`/ndf:worktree`)。
 
 ### レビュアー視点の原則 (release PR body の大前提)

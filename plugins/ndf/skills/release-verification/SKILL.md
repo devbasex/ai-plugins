@@ -61,7 +61,7 @@ allowed-tools:
 
 ### 1. 対象の版を確かめ、利用者と同じ導入をやり直す
 
-**手元の worktreeではなく、導入経路をたどった側を見る。** Claude Code のプラグインの形では、
+**導入経路をたどった側を見る。手元の worktree は見ない。** Claude Code のプラグインの形では、
 次を打ち、結果 JSON の `status` を見る。
 
 ```bash
