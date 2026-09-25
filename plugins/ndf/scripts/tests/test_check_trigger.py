@@ -271,7 +271,7 @@ def test_since_overrides_the_tag(repo, env):
 
 def state_dir(tmp_path: Path, log: list[dict]) -> Path:
     d = tmp_path / "plan-state"
-    d.mkdir(exist_ok=True)
+    d.mkdir(parents=True, exist_ok=True)
     (d / "state.json").write_text(json.dumps({"log": log, "llm": {}}))
     return d
 
@@ -396,6 +396,51 @@ def test_stats_closes_a_review_only_range_at_the_next_full_check(repo, env):
     code, out, _ = call(repo, env, "stats")
     rows = {r["id"]: r for r in out["items"]}
     assert code == 0 and rows["m-r"]["escapes_after"] == 0 and rows["m-1"]["escapes_after"] == 1
+
+
+def record_merged(repo, env, tmp_path, name, pr, *flags):
+    st = state_dir(tmp_path / name, [])
+    call(repo, env, "prepare", "--id", name, "--state", str(st), *flags)
+    gh_set(env, states={str(pr): "MERGED"})
+    code, out, _ = call(repo, env, "record", "--id", name, "--pr", str(pr), "--state", str(st), *flags)
+    assert code == 0, out
+    return json.loads((st / "check.json").read_text())["to"], out
+
+
+def forget_local_records(env):
+    for f in (Path(env["CLAUDE_PLUGIN_DATA"]) / "checks").glob("*.jsonl"):
+        f.unlink()
+
+
+def test_a_lost_local_record_still_starts_at_the_last_check_on_origin(repo, env, tmp_path):
+    merge_pr(repo, 11, "feat/a", {"app/a.py": 1})
+    to, out = record_merged(repo, env, tmp_path, "m-1", 30)
+    assert out["metrics"]["pushed"] == ["check-done/review", "check-done/check"]
+    assert git(repo, "rev-parse", "origin/check-done/check") == to
+    merge_pr(repo, 12, "feat/b", {"app/b.py": 1})
+    forget_local_records(env)
+    _, full, _ = call(repo, env, "eval")
+    _, rv, _ = call(repo, env, "eval", "--review")
+    assert full["metrics"]["from"] == rv["metrics"]["from"] == to and full["metrics"]["prs"] == 1
+
+
+def test_review_only_moves_only_the_review_branch_on_origin(repo, env, tmp_path):
+    merge_pr(repo, 11, "feat/a", {"app/a.py": 1})
+    to, out = record_merged(repo, env, tmp_path, "m-review", 31, "--review")
+    assert out["metrics"]["pushed"] == ["check-done/review"]
+    forget_local_records(env)
+    _, rv, _ = call(repo, env, "eval", "--review")
+    _, full, _ = call(repo, env, "eval")
+    assert rv["metrics"]["from"] == to and full["metrics"]["from"] != to and full["metrics"]["prs"] == 1
+
+
+def test_a_failed_check_leaves_the_branch_on_origin(repo, env, tmp_path):
+    merge_pr(repo, 11, "feat/a", {"app/a.py": 1})
+    st = state_dir(tmp_path / "f", [{"id": "review", "exit": 1}])
+    call(repo, env, "prepare", "--id", "m-2", "--state", str(st))
+    call(repo, env, "record", "--id", "m-2", "--state", str(st), "--failed")
+    assert subprocess.run(["git", "-C", str(repo), "rev-parse", "--verify", "-q", "origin/check-done/review"],
+                          capture_output=True).returncode != 0
 
 
 def test_review_and_final_are_exclusive(repo, env):
