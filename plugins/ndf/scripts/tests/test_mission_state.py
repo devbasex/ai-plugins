@@ -215,6 +215,27 @@ def test_update_twice_is_same(r6):
     assert run("update", r6["mission"], "--done", r6["pdone"]).stdout == out1
 
 
+def test_init_stops_on_other_shape_json(r6):
+    """同じパスに supervise.py new mission の目録（別の形の JSON）があれば、上書きせずに止まる（#1082）。"""
+    catalog = {"ミッション": "m", "ブランチ": "fix/x", "波": [{"計画": ["a.json"]}]}
+    path = Path(r6["mission"])
+    path.write_text(json.dumps(catalog, ensure_ascii=False))
+    before = path.read_bytes()
+    p = run("init", r6["mission"], "--name", "m")
+    assert p.returncode != 0
+    out = json.loads(p.stdout)
+    assert out["status"] == "stopped" and r6["mission"] in out["summary"]
+    assert path.read_bytes() == before
+
+
+def test_init_overwrites_own_state(r6):
+    """同じ形（状態のファイル）なら、これまでどおり作り直す。"""
+    init(r6)
+    out = ok("init", r6["mission"], "--name", "作り直し")
+    assert out["status"] == "ok"
+    assert json.loads(Path(r6["mission"]).read_text())["name"] == "作り直し"
+
+
 def test_gate_and_status(r6):
     init(r6)
     ok("update", r6["mission"], "--done", r6["pdone"])

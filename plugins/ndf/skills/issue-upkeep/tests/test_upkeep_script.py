@@ -218,6 +218,10 @@ def test_candidates_limit_caps_one_run(env):
     kept = [i["number"] for i in out["items"] if i.get("result") == "candidate"]
     assert len(kept) == 2 and out["metrics"]["candidates"] == 2
     assert len(out["metrics"]["deferred"]) == 4
+    # 上限を超えた候補は items に載せない。載せると判定の対象として求められる。
+    issues = [i["number"] for i in out["items"] if i["kind"] == "issue"]
+    assert issues == kept
+    assert not set(issues) & set(out["metrics"]["deferred"])
 
 
 def test_apply_writes_only_what_differs(env):

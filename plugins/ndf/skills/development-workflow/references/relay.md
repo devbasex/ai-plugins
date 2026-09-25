@@ -132,7 +132,7 @@ conductor では、文脈量の hook が工程へ入る起動を 1 度の通し�
 ## 切れ目の引継ぎ文書と ndf-next はスクリプトで作る
 
 **conductor は引継ぎ文書の「今の会話の進み」の表と `ndf-next` の文面を手で書かない。**
-`scripts/mission-state.py` が、ミッションの状態のファイル `mission.json`（計画の出力先に置く）から作る。LLM は呼ばない。
+`scripts/mission-state.py` が、ミッションの状態のファイル `mission.json`（計画の出力先に置く）から作る。LLM は呼ばない。同じパスに別の形の JSON（`supervise.py new mission` の目録など）があると、`init` は上書きせずに終了コード 1 で止まる。
 
 例: 区間 7 の実装 3 本と開発版・本番を流す。
 
