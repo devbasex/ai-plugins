@@ -27,6 +27,7 @@ NDF が配る工程・関門・モード・段の語。development-workflow/refe
 | モデルの段 | 設計 PR のレビューの 1 ラウンド目。ドメインモデルの節だけを見る | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 詳細の段 | 設計 PR のレビューの 2 ラウンド目以降。確定したモデルを前提に残りを見る | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 仕様の写し | 課題の本文にある要求を、設計 PR と一緒にコミットする `issues/` のファイル | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| チェイン | queue が `--then` でつないだ計画の列（実装 → 検査 → 実装レビュー → 開発版 → 本番）。列の 1 つ分がステージ。「鎖」とは書かない（1 文字の語は照合できないため廃止の語に入れていない） | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 
 ## NDF の Slack 通知（`ndf-notification`）
 
