@@ -24,7 +24,7 @@
 | ランタイム | 待ち方 |
 | --- | --- |
 | Claude Code | **条件の until ループを Bash の `run_in_background: true` で起動し、完了通知を 1 回受ける。** 出来事を 1 つずつ受けるなら `Monitor`。サブエージェントは完了通知を待つ |
-| Codex / Kiro / agy | 1 回の前景の until ループ。600 秒を超えるなら `bg-wait.sh` |
+| Codex / Kiro / agy | 1 回の前景の until ループ。600 秒を超えるなら共通層の `scripts/lib/bg-wait.sh`（`run` で背景に起動し、`wait` を 124 のあいだ別の呼び出しとして打ち直す） |
 
 **1 回で足りる待ちは `Monitor` ではなく `run_in_background` にする。** `Monitor` は出来事の
 たびに通知が届き、その都度文脈を読む。終わりだけを知りたい待ちでは通知が 1 回で済む

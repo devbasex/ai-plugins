@@ -3,6 +3,7 @@
 Claude Code の Bash ツールは 1 回 600 秒で打ち切る。監視の上限は 1200 秒あるため、
 監視を背景で起動し（`run`）、540 秒以内に区切った待ち（`wait`）を呼び直す。rc ファイルが
 あるので、待ちの呼び出しをまたいでも終了コードを失わない（設計の決定 13）。
+置き場所は共通層の `scripts/lib/` で、cross-review と cross-refactoring の駆動の待ちが使う（#731）。
 """
 from __future__ import annotations
 
@@ -14,7 +15,7 @@ import time
 
 import pytest
 
-BG_WAIT = pathlib.Path(__file__).resolve().parents[1] / "scripts" / "bg-wait.sh"
+BG_WAIT = pathlib.Path(__file__).resolve().parents[3] / "scripts" / "lib" / "bg-wait.sh"
 
 pytestmark = pytest.mark.skipif(
     any(shutil.which(c) is None for c in ("bash", "sleep", "cat", "tail", "mv", "rm")),

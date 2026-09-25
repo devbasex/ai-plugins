@@ -12,7 +12,7 @@
 | `scripts/launch-reviewer.sh` | Step 2 — レビュワー起動の入口（4 ランタイム共通） |
 | `scripts/monitor.py` | Step 2 — レビュワーのプロセス多軸監視（`--agents` で担当を渡す） |
 | `scripts/wait-review.sh` | Step 2 — `monitor.py` の薄ラッパ（互換用） |
-| `scripts/bg-wait.sh` | Step 2 / 2.5 — Bash の 1 回（600 秒）に収まらない監視と反証を背景で起動し、540 秒以内の wait を 124 のあいだ**別の Bash の呼び出しで**呼び直す |
+| 共通層の `scripts/lib/bg-wait.sh` | Step 2 / 2.5 — Bash の 1 回（600 秒）に収まらない監視と反証を背景で起動し、540 秒以内の wait を 124 のあいだ**別の Bash の呼び出しで**呼び直す |
 | `scripts/state.py read-result` | Step 2.4 — result.json マージ |
 | `scripts/state.py unresolved-threads` | PR 上の未解決の指摘を数える（順序を持たない補助） |
 | `scripts/state.py judge` | Step 3 — intent + 引き継いだ指摘の判定 |
@@ -33,6 +33,7 @@ for R in '${CLAUDE_PLUGIN_ROOT}' "$(git rev-parse --show-toplevel 2>/dev/null)/p
 done
 [ -n "$R" ] || { echo "NDF の scripts/resolve.sh が見つからない" >&2; exit 3; }
 SCRIPTS=$(bash "$R/scripts/resolve.sh" scripts cross-review) || exit 3
+LIB=$(bash "$R/scripts/resolve.sh" scripts)/lib || exit 3   # 共通層（bg-wait.sh）
 
 # state 初期化 / 再開（プリチェック・worktree 作成・既存コメントスナップショットを内部実行）
 # ⚠ `eval "$(スクリプト)"` は、スクリプトが異常終了しても出力が空なら終了コード 0 になる。
@@ -152,10 +153,10 @@ done
 
 # monitor.py が多軸で完了判定。exit code で失敗種別を分岐。上限は `--phase review`（1200 秒）。
 # ⚠ 位置引数の `both` は codex / agy の 2 者だけを指す。担当の一覧は `--agents` で渡す。
-"$SCRIPTS/bg-wait.sh" run "$TMP_DIR/review.rc" -- "$SCRIPTS/monitor.py" "$STATE_PR" --phase review --agents "$REVIEWERS_CSV"
+"$LIB/bg-wait.sh" run "$TMP_DIR/review.rc" -- "$SCRIPTS/monitor.py" "$STATE_PR" --phase review --agents "$REVIEWERS_CSV"
 # 待ちは 1 回 540 秒以内。**124 が返るあいだ、この 2 行を別の Bash の呼び出しとして呼び直す。**
 # 繰り返しを 1 回の呼び出しへ書くと、2 回目の待ちで合計が 600 秒を超えてホストに打ち切られる。
-"$SCRIPTS/bg-wait.sh" wait "$TMP_DIR/review.rc"; RC=$?
+"$LIB/bg-wait.sh" wait "$TMP_DIR/review.rc"; RC=$?
 if [ "$RC" -ne 0 ] && [ "$RC" -ne 124 ]; then
   case $RC in
     2) echo "❌ timeout"      ;;  # hard timeout 超過

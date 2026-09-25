@@ -977,7 +977,7 @@ def test_prod_release_ends_with_cleanup(tmp_path):
         sid = steps[sid]["next"]
     assert order[-2:] == ["verify", "cleanup"]
     cmd = steps["cleanup"]["cmd"]
-    assert "merged-steps.py cleanup" in cmd and "--head release/v10.17.99" in cmd and "1060" in cmd
+    assert "merged-steps.py cleanup" in cmd and "release/v10.17.99" in cmd and "--base main" not in cmd and "1060" in cmd
     assert steps["cleanup"]["cwd"] == "/r" and "cleanup" in steps["judge"]["choices"]
     dev = {s["id"] for s in json.loads(release_plan(tmp_path, "dev", "10.17.99-dev.1", "--prs", "1").read_text())[
         "steps"]}
@@ -1103,3 +1103,16 @@ def test_pr_body_from_llm_keeps_user_changes_section(tmp_path, monkeypatch):
     assert "結果: 完了" in sv.Supervisor(plan, tmp_path / "state").run()
     got = body.read_text()
     assert "## 利用者向けの変化\n\n- 題名だけ" in got and "本文。" in got
+
+
+def test_run_from_restores_pr_from_previous_report(tmp_path):
+    """--from で再開すると、状態ディレクトリの前の報告の Pull Request を {pr} に使う。"""
+    state = tmp_path / "state"
+    state.mkdir()
+    (state / "report.md").write_text("## フェーズの報告\n\n- Pull Request: https://github.com/o/r/pull/1066\n")
+    plan = {"フェーズ": "試験", "課題": [731], "作業場所": str(tmp_path),
+            "steps": [{"id": "a", "type": "run", "cmd": "false", "next": "b"},
+                      {"id": "b", "type": "run", "cmd": "echo n={pr}", "next": "end"}]}
+    s = sv.Supervisor(plan, state)
+    assert "結果: 完了" in s.run(start="b")
+    assert "n=1066" in s.results["b"]["text"]

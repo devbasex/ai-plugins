@@ -1080,6 +1080,12 @@ class Supervisor:
     # --- 駆動 ---
     def run(self, start: str | None = None) -> str:
         sid = start or self.order[0]
+        if start and not self.plan.get("Pull Request"):
+            # 途中から再開するときは、前の実行の報告に残った Pull Request を {pr} に使う
+            prev = self.dir / "report.md"
+            m = re.search(r"^- Pull Request: (\S*/pull/\d+)", prev.read_text(), re.M) if prev.is_file() else None
+            if m:
+                self.plan["Pull Request"] = m.group(1)
         result, reason = "完了", "無し"
         limit = self.plan.get("上限", 30)
         n = 0
@@ -1450,12 +1456,13 @@ def plan_release(a) -> dict:
          "on_fail": "judge", "next": "facts" if dev else "cleanup"},
     ]
     if not dev:
-        # 後片付け: 配布の PR（release/v{v} → main）とミッションの PR（--prs）のブランチと作業ツリー
+        # 後片付け: 配布の PR（head が release/v{v} で始まる。開発版の release/v{v}-dev.N も含む。宛先は develop）と
+        # ミッションの PR（--prs）のブランチと作業ツリー
         run_ids.append("cleanup")
         steps.append(
             {"id": "cleanup", "type": "run", "stage": "後片付け", "cwd": repo,
-             "cmd": f"sh -c '{MERGED_PY} cleanup $(gh pr list --head release/v{v} --base main --state merged "
-                    f"--json number --jq \".[].number\") {prs}'",
+             "cmd": f"sh -c '{MERGED_PY} cleanup $(gh pr list --state merged --limit 30 --json number,headRefName "
+                    f"--jq \".[] | select(.headRefName | startswith(\\\"release/v{v}\\\")) | .number\") {prs}'",
              "on_fail": "judge", "next": "end"})
     if dev:
         approval = f"issues/approval-ndf-v{base}.md"
@@ -1691,7 +1698,7 @@ def progress_size(plan: str) -> int:
 
 
 def queue_prs(items: list[dict]) -> list[str]:
-    """完了した計画の報告の Pull Request を番号にして、重ねずに順に返す。"""
+    """完了した計画の報告の Pull Request を番号にして、重ねずに番号の順に返す（計画の終わった順に依らない）。"""
     out: list[str] = []
     for i in items:
         rep = Path(i.get("report") or "")
@@ -1701,7 +1708,7 @@ def queue_prs(items: list[dict]) -> list[str]:
         n = pr_number(m.group(1).strip()) if m else ""
         if n and n not in out:
             out.append(n)
-    return out
+    return sorted(out, key=int)
 
 
 def fill_queue_prs(plan: str, prs: list[str]) -> str | None:
