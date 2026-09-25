@@ -1,4 +1,4 @@
-"""supervise.py の段（run の定型・再実行・飛ばす遷移・課題の本文）と副命令（new / queue / note / sync-check）。
+"""supervise.py のステップ（run の定型・再実行・飛ばす遷移・課題の本文）と副命令（new / queue / note / sync-check）。
 
 gh と claude は PATH の先頭に置いた偽物で置き換える。実機の claude は起動しない。
 """
@@ -307,7 +307,7 @@ def foreign_repo(tmp_path, supervise=None):
 
 
 def run_cmds(plan):
-    """run の段のコマンドから、配布したスクリプトの置き場（絶対パス）を除いたもの。"""
+    """run のステップのコマンドから、配布したスクリプトの置き場（絶対パス）を除いたもの。"""
     return [s.get("cmd", "").replace(str(SCRIPTS), "<scripts>").replace(str(SCRIPTS.parent / "skills"), "<skills>")
             for s in plan["steps"] if s["type"] == "run"]
 
@@ -396,7 +396,7 @@ def test_new_impl_writes_plan(tmp_path):
     assert steps["merge"]["probe"]["cmd"].endswith("merged-steps.py probe --pr {pr} --act")
     assert "plugins/ndf/scripts/tests" in steps["test-limited"]["cmd"] and steps["test-limited"]["rerun_failed"]
     assert plan["branch"] == "feat/issue-858-x"
-    # 段の遷移がすべて知っている段を指す
+    # ステップの遷移がすべて知っているステップを指す
     for s in plan["steps"]:
         for k in ("next", "on_fail", "skip_to"):
             if k in s:
@@ -575,7 +575,7 @@ def test_sync_check_without_declaration_stops(tmp_path):
     assert res["status"] == "stopped" and "sync_checks" in res["summary"] and res["items"] == []
 
 
-# --- 利用上限（待ち・認証の切り替え）・関門の終了コード・段の作業場所・配布の雛形 ---
+# --- 利用上限（待ち・認証の切り替え）・関門の終了コード・ステップの作業場所・配布の雛形 ---
 
 # 呼ばれるたびに responses の次の 1 件を返す偽の claude。呼ばれた順と、足された認証の変数を記録する
 SEQ_CLAUDE = """import json, os, sys
@@ -724,7 +724,7 @@ def test_run_gate_exit_goes_next_and_copies_presentation(tmp_path):
     assert copied.read_text() == "# 提示物\n"
     assert s.results["facts"]["gate"] is True and "rerun" not in s.results["facts"]
     assert "after" in s.results and "bad" not in s.results
-    assert "結果: 関門" in text and f"提示物: {copied}" in text and "関門: 段 facts（exit=10）" in text
+    assert "結果: 関門" in text and f"提示物: {copied}" in text and "関門: ステップ facts（exit=10）" in text
 
 
 def test_run_gate_without_gate_next_uses_next(tmp_path):
@@ -780,11 +780,11 @@ def test_new_mission_writes_waves_in_order(tmp_path):
     assert res["status"] == "ok"
     manifest = json.loads((out / "mission.json").read_text())
     assert manifest["ブランチ"] == "mission/v10-18"
-    assert [w["name"] for w in manifest["波"]] == ["設計", "関門 1", "ミッションのブランチ", "実装", "検査", "配布"]
-    waves = {w["name"]: w for w in manifest["波"]}
+    assert [w["name"] for w in manifest["ステージ"]] == ["設計", "関門 1", "ミッションのブランチ", "実装", "検査", "配布"]
+    waves = {w["name"]: w for w in manifest["ステージ"]}
     assert "plans" not in waves["関門 1"] and waves["関門 1"]["gate"]
     assert len(waves["実装"]["plans"]) == 2 and waves["実装"]["command"].endswith("--max 3")
-    for w in manifest["波"]:
+    for w in manifest["ステージ"]:
         for path in w.get("plans", []):
             plan = json.loads(Path(path).read_text())
             steps = {s["id"]: s for s in plan["steps"]}
@@ -816,7 +816,7 @@ def test_new_mission_without_design_skips_gate(tmp_path):
     p = cli("new", "mission", "--name", "m", "--worktree", str(tmp_path), "--issue", "1",
             "--version", "10.18.0-dev.1", "--out", str(out))
     assert p.returncode == 0, p.stderr
-    names = [w["name"] for w in json.loads((out / "mission.json").read_text())["波"]]
+    names = [w["name"] for w in json.loads((out / "mission.json").read_text())["ステージ"]]
     assert names == ["ミッションのブランチ", "実装", "検査", "配布"]
 
 
@@ -904,7 +904,7 @@ def test_pr_body_stat_is_from_merge_base(tmp_path, monkeypatch):
 
 
 def test_pr_base_from_declaration(tmp_path, monkeypatch):
-    # 段にも計画にも base が無ければ、作業場所の .ndf/worktree.json の base_branch を起点にする
+    # ステップにも計画にも base が無ければ、作業場所の .ndf/worktree.json の base_branch を起点にする
     root, body = pr_repo(tmp_path, monkeypatch)
     git(root, "checkout", "-q", "develop")
     git(root, "branch", "-q", "trunk")
@@ -990,12 +990,12 @@ def test_step_lines_and_alive_line(tmp_path):
     assert all({"at", "type", "exit", "seconds", "cost"} <= set(r) for r in steps)
     alive = [r for r in rows if r["kind"] == "alive"]
     assert alive and alive[0]["step"] == "a" and alive[0]["worker"] == "無し"
-    assert rows.index(alive[0]) < rows.index(steps[0])  # 段の途中で書く
+    assert rows.index(alive[0]) < rows.index(steps[0])  # ステップの途中で書く
     assert "LLM へ回した 0 回" in text
 
 
 def test_alive_line_carries_run_step_last_stderr_line(tmp_path):
-    """run の段の待ちの間、alive の行に stderr の最後の行を last_output として載せる。"""
+    """run のステップの待ちの間、alive の行に stderr の最後の行を last_output として載せる。"""
     cmd = "echo 'CI のランナー待ち（待ち行列 9 件、待ち 1 件）' >&2; sleep 0.6; echo 結果"
     s, text = run_plan(tmp_path, [{"id": "merge", "type": "run", "cmd": cmd, "next": "end"}],
                        report_interval=0.2)
@@ -1048,7 +1048,7 @@ def test_repeated_failure_before_judge_is_attention(tmp_path, seq):
         {"id": "t", "type": "run", "cmd": "exit 1", "on_fail": "j"},
         {"id": "j", "type": "judge", "question": "直すか", "choices": ["t", "stop"]}], 上限=4)
     att = [r for r in progress(s) if r["kind"] == "attention"]
-    assert [a["reason"] for a in att] == ["判断の段で stop が出そう"]
+    assert [a["reason"] for a in att] == ["judge のステップで stop が出そう"]
 
 
 def test_queue_notifies_attention(tmp_path):
@@ -1070,7 +1070,7 @@ def test_queue_notifies_attention(tmp_path):
 
 
 def test_work_and_judge_prompts_get_separate_work_dirs_per_plan(tmp_path, monkeypatch):
-    """並行する 2 つの計画の work の段は、状態ディレクトリの下の別々の作業ディレクトリを渡される。"""
+    """並行する 2 つの計画の work のステップは、状態ディレクトリの下の別々の作業ディレクトリを渡される。"""
     fake = tmp_path / "fake_claude.py"
     fake.write_text(FAKE_CLAUDE.format(py=PY))
     log = tmp_path / "claude.log"
@@ -1300,7 +1300,7 @@ def test_new_mission_check_and_release_run_without_a_whole_skill(tmp_path):
     p = cli("new", "mission", "--name", "m", "--worktree", str(tmp_path), "--issue", "1",
             "--version", "10.18.0-dev.1", "--out", str(out))
     assert p.returncode == 0, p.stderr
-    waves = {w["name"]: w for w in json.loads((out / "mission.json").read_text())["波"]}
+    waves = {w["name"]: w for w in json.loads((out / "mission.json").read_text())["ステージ"]}
     for name in ("検査", "配布"):
         for path in waves[name]["plans"]:
             assert not [s for s in json.loads(Path(path).read_text())["steps"] if s.get("full")], path

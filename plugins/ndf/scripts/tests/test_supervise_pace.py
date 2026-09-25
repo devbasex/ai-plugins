@@ -1,7 +1,7 @@
 """supervise.py の `pace: fast`（#1078）: 計画の組み立て（new mission --pace fast・new check --since-last・
-new close・new release --mvv・new impl --escape-of）と実行（実行の条件・--then の段・{queue_pr:<名>}・gate_as_ok）。
+new close・new release --mvv・new impl --escape-of）と実行（実行の条件・--then のステージ・{queue_pr:<名>}・gate_as_ok）。
 
-実機の claude と gh は呼ばない（計画の形と、run の段だけの計画を流して見る）。
+実機の claude と gh は呼ばない（計画の形と、run のステップだけの計画を流して見る）。
 """
 from __future__ import annotations
 
@@ -71,8 +71,8 @@ def test_fast_mission_puts_check_then_dev_then_prod_after_the_implementation(tmp
     assert p.returncode == 0, p.stdout + p.stderr
     manifest = load(out / "mission.json")
     assert manifest["進め方"] == "fast" and manifest["状態"].endswith("mission-state.json")
-    waves = {w["name"]: w for w in manifest["波"]}
-    assert [w["name"] for w in manifest["波"]] == ["設計", "関門 1", "実装", "検査", "開発版", "本番"]
+    waves = {w["name"]: w for w in manifest["ステージ"]}
+    assert [w["name"] for w in manifest["ステージ"]] == ["設計", "関門 1", "実装", "検査", "開発版", "本番"]
     cmd = waves["実装"]["command"]
     check, dev, prod = waves["検査"]["plans"][0], waves["開発版"]["plans"][0], waves["本番"]["plans"][0]
     assert cmd.index("--then " + check) < cmd.index("--then " + dev) < cmd.index("--then " + prod)
@@ -161,8 +161,8 @@ def test_close_runs_spec_close_and_retro_once_each_in_order(tmp_path):
             "--out", str(out))
     assert p.returncode == 0, p.stdout + p.stderr
     manifest = load(out / "mission.json")
-    waves = {w["name"]: w for w in manifest["波"]}
-    assert [w["name"] for w in manifest["波"]] == ["最終の検査", "開発版", "本番", "まとめ"]
+    waves = {w["name"]: w for w in manifest["ステージ"]}
+    assert [w["name"] for w in manifest["ステージ"]] == ["最終の検査", "開発版", "本番", "まとめ"]
     final = load(waves["最終の検査"]["plans"][0])
     assert "--final" in final["実行の条件"]["cmd"]
     for name in ("開発版", "本番"):
@@ -208,7 +208,7 @@ def test_impl_escape_of_records_after_the_merge(tmp_path):
     assert s["escape"]["next"] == "end"
 
 
-# ---------- 実行: 実行の条件・--then の段・{queue_pr:<名>}・gate_as_ok ----------
+# ---------- 実行: 実行の条件・--then のステージ・{queue_pr:<名>}・gate_as_ok ----------
 
 
 def plan_file(tmp_path, name, steps, **extra) -> str:

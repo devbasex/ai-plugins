@@ -1,7 +1,7 @@
 # 進め方 `pace: fast`
 
 SKILL.md の「進め方（`pace`）」の続きである。区分の表と関門の表は SKILL.md にあり、この文書は
-使ってよい条件・宣言の形・計画の波・検査のトリガー・MVV の判定・記録の読み方を持つ。
+使ってよい条件・宣言の形・計画のステージ・検査のトリガー・MVV の判定・記録の読み方を持つ。
 
 ## 具体例: マイルストーン 26 の 2026-09-25 の区間
 
@@ -47,7 +47,7 @@ SKILL.md の「進め方（`pace`）」の続きである。区分の表と関�
 | `triggers.score` / `common_weight` / `lines` / `escapes` / `hours` | 数 | 15 / 2 / 5000 / 2 / 24 | トリガーの閾値 |
 
 glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。どの領域にも当たらないファイルは、ディレクトリの
-先頭 3 段（例 `plugins/ndf/skills`）を領域の名前にする。
+先頭 3 階層（例 `plugins/ndf/skills`）を領域の名前にする。
 
 ## ミッションを始める
 
@@ -63,24 +63,24 @@ glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。どの
 `--mvv <ファイル>` を渡すと、マイルストーンから写さずにそのファイルを使う。**承認の後に MVV を書き換えると
 ハッシュが食い違い、判定は利用者の承認へ戻る。**
 
-## 計画の波
+## 計画のステージ
 
 `normal` のミッションとの違いは 4 点である。ミッションのブランチを作らない。実装の Pull Request が develop へ
-直接入る（閉じる語を書かない）。検査に実行の条件が付く。関門の波が MVV の判定の段へ入る。
+直接入る（閉じる語を書かない）。検査に実行の条件が付く。関門のステージが MVV の判定のステップへ入る。
 
-| 波 | 計画 | 流し方 |
+| ステージ | 計画 | 流し方 |
 | --- | --- | --- |
 | 設計 | `design-<N>`（review の後に `mvv` → `approve`（ラベル `design-approved` と判定のコメント）→ `merge`） | `queue --max 3` |
 | 関門 1 | 無し。設計の計画がすべて `完了` なら通過し、`関門` を返した計画の Pull Request だけ利用者の承認を取ってマージする | conductor |
 | 実装 | `impl-<N>`（`base` は develop） | `queue <実装>... --max 3 --then <検査> --then <開発版> --then <本番>` |
-| 検査 | `check`（実行の条件 `check-trigger.py eval --id <ミッション>-1`） | 1 段目の `--then` |
-| 開発版 | `release`（`facts` は `gate_as_ok`） | 2 段目の `--then` |
-| 本番 | `release-prod`（先頭が `mvv` の段） | 3 段目。`関門` なら queue の結果が `gate` になり、承認の後に `run <計画> --from bump` で続ける |
+| 検査 | `check`（実行の条件 `check-trigger.py eval --id <ミッション>-1`） | 1 つ目の `--then` |
+| 開発版 | `release`（`facts` は `gate_as_ok`） | 2 つ目の `--then` |
+| 本番 | `release-prod`（先頭が `mvv` のステップ） | 3 つ目の `--then`。`関門` なら queue の結果が `gate` になり、承認の後に `run <計画> --from bump` で続ける |
 
 **ミッションの終わり**は `supervise.py new close --name M --worktree <根> --issue N... --version <開発版> --prod <正式版>
 --state <状態>` が組む。最終の検査（実行の条件 `eval --final`）→ 開発版と本番（実行の条件 `changed --id <M>-final`。
 最終の検査で変更があったときだけ）→ まとめ（`spec` 確定仕様化 → Pull Request → `close` 後片付け → `retro` 振り返り）
-を `--then` の段で流す。`close` の段は `mission-close.py --record-pr {queue_pr:release-prod} --issues <課題>
+を `--then` のステージで流す。`close` のステップは `mission-close.py --record-pr {queue_pr:release-prod} --issues <課題>
 --with-verification` で、本番が飛ばされたときは `--record-pr 0`（本番の記録なし）になる。まとめの計画は課題すべてへ
 工程を記録するため、控えの報告が `まとめる:` から `記録あり:` へ移る。
 
@@ -110,20 +110,20 @@ glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。どの
 範囲は**前回の検査の時点（`check-base/<名>`）を宛先にした Pull Request** で表す。`cross-refactoring` と
 `cross-review` は Pull Request 1 本を入力に取るため、駆動を変えずに差分全体を見られる。
 
-| 段 | 内容 |
+| ステップ | 内容 |
 | --- | --- |
 | `prepare` | `check-trigger.py prepare`: `check-base/<名>` を `from` に作って送る（残っていれば付け直す）。範囲を状態ディレクトリの `check.json` へ |
 | `pr` → `assess` → `refactor` → `review` → `test-all` | いつもの検査と同じ。`refactor` の範囲は `check-trigger.py scope`（共通層 → 逃げた不具合の領域 → その他） |
 | `finish` | 宛先を起点のブランチへ付け替える。検査で変更が無ければ Pull Request を閉じて `record` へ飛ぶ |
 | `ready` → `merge` → `record` | マージして検査の記録を足し、`check-base/<名>` を消す |
-| `abort` / `abort-before-pr` | 落ちた run の段の行き先。`result: failed` と落ちた段を記録し、`check-base/<名>` を消し、Pull Request を閉じて止まる |
+| `abort` / `abort-before-pr` | 落ちた run のステップの行き先。`result: failed` と落ちたステップを記録し、`check-base/<名>` を消し、Pull Request を閉じて止まる |
 
 **`failed` の後の次の評価は同じ `from` から数え直すため、範囲を取りこぼさない。**
 
 ## 逃げた不具合の記録
 
 **マージ済みの変更の不具合をその場で直すと決めたら、`new impl --escape-of <持ち込んだ PR>` で計画を組む。**
-マージの後に `check-trigger.py escape` の段が入り、直した Pull Request が触った領域を記録する。持ち込んだ
+マージの後に `check-trigger.py escape` のステップが入り、直した Pull Request が触った領域を記録する。持ち込んだ
 Pull Request が分からなければ `0`（不明）を渡す。`fix/` のブランチの本数では数えない。
 前から起票されていた不具合が大半で、題名で数えると重なりのトリガーが毎回立つ。
 

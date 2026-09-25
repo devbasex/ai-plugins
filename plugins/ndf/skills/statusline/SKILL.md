@@ -33,7 +33,7 @@ NDF 標準 statusline (project_dir + メインとサブエージェントのコ�
 引数に応じて以下のコマンドを実行する:
 
 ```bash
-# スクリプトの置き場所を解決の入口（scripts/resolve.sh）に尋ねる。入口を探すこの 1 段と
+# スクリプトの置き場所を解決の入口（scripts/resolve.sh）に尋ねる。入口を探すこのコマンドと
 # 候補の順序は development-workflow/references/scripts-lookup.md にある。
 for R in '${CLAUDE_PLUGIN_ROOT}' "$(git rev-parse --show-toplevel 2>/dev/null)/plugins/ndf" \
   ~/.claude/plugins/cache/*/ndf/* .kiro/skills/*/../.. ~/.kiro/skills/*/../.. \

@@ -1,6 +1,6 @@
 """supervise.py の遅れの見張り: 一次の調査・決まった手・LLM の判定・打ち切り・所要の履歴・history / expected。
 
-claude は NDF_SUPERVISE_CLAUDE の偽物で置き換える。待ちの秒は段の expected と report_interval で縮める。
+claude は NDF_SUPERVISE_CLAUDE の偽物で置き換える。待ちの秒はステップの expected と report_interval で縮める。
 """
 from __future__ import annotations
 

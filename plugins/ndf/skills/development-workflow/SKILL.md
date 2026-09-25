@@ -107,7 +107,7 @@ git diff --stat            # 変更済みなら
 NULL 許容列の追加）は `standard` として扱う。判定に迷う場合と境界事例は
 [references/workflow-modes.md](references/workflow-modes.md) を参照する。
 
-**`documentation` に決まったら、2 段目で 6 つのタイプのうち 1 つを選ぶ。** 判定の条件と
+**`documentation` に決まったら、続けて 6 つのタイプのうち 1 つを選ぶ。** 判定の条件と
 境界事例は [references/document-types.md](references/document-types.md) にある。**`README.md`
 と `docs/` の変更はこのモードに当たらない**（判定を分けるのは読み手で、リポジトリの外にいる
 人へ渡すものだけが当たる）。
@@ -180,7 +180,7 @@ pace: fast
 主ディレクトリのままでよい。
 
 **ドキュメント再構成は、書き上げた設計文書を章立てから組み直す工程である。**
-`document-restructuring` が測る・並べ替える・整える・測り直すの 4 段を持つ。**レビューの前に
+`document-restructuring` が測る・並べ替える・整える・測り直すの 4 つの手順を持つ。**レビューの前に
 置く。** 後に置くと、レビュー担当が構成の指摘と内容の指摘を同時に出すことになり、どちらの
 指摘なのかが混ざる。
 
@@ -322,7 +322,7 @@ Pull Request のマージ、制作物承認は本番の提出先への操作に�
 実行の前で、単位ごとの取り消しの手段を添える。**取り消せない単位を含むときは、そのことを
 先に示す。**
 
-**どのブランチが本番のチャネルかは、リポジトリが宣言する。** 読み取りの順序は次の 2 段である。
+**どのブランチが本番のチャネルかは、リポジトリが宣言する。** 読み取りの順序は次の 2 つである。
 
 1. `.ndf/worktree.json` の `production_branch`
 2. **宣言が無ければ既定ブランチ**（`origin` の HEAD が指すもの）
@@ -493,7 +493,7 @@ flowchart TD
 - [references/projects-tracking.md](references/projects-tracking.md) — 進行を GitHub Projects へ記録する設定と値の一覧
 - [references/stage-completeness.md](references/stage-completeness.md) — 通過工程の控えと報告、承認の印の作り方
 - [references/parallel-work.md](references/parallel-work.md) — 並行開発の 4 つの形、工程が動く単位、任せるうえでの下限
-- [references/pace.md](references/pace.md) — 進め方 `pace: fast` の条件・宣言・計画の波・検査のトリガー・MVV の判定
+- [references/pace.md](references/pace.md) — 進め方 `pace: fast` の条件・宣言・計画のステージ・検査のトリガー・MVV の判定
 - [references/approval-request.md](references/approval-request.md) — 承認を求めるときに提示するもの
 - [references/operation-run.md](references/operation-run.md) — `operation` の実行の範囲・記録・失敗したときの扱い
 - [references/context-window.md](references/context-window.md) — context window のカットポイント、委譲する対象としない対象、残量の見方

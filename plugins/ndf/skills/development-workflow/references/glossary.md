@@ -66,7 +66,7 @@ flowchart TB
 | ステップ | 計画の `steps` の 1 要素。型は run / work / drive / judge / pr の 5 つ | `"id"`・`"type"`・`"next"`、`supervise.py run <計画> --from <ステップの id>` | 段 | [supervise.py](../../../scripts/supervise.py) の docstring |
 | queue | 計画を空いた枠へ順に流す副命令。同時に `--max` 本まで流し、終わると結果を done へ書く | `supervise.py queue <plan.json>... --max 3 --then <plan.json>... --done <パス>` | — | [supervise.py](../../../scripts/supervise.py) の docstring |
 | チェイン | queue が `--then` でつないだ計画の列（実装 → 開発版 → 本番） | `--then`、`new release --prs-from-queue` | 鎖 | [relay.md](relay.md) の「カットポイントの引継ぎ文書と ndf-next はスクリプトで作る」 |
-| ステージ | チェインの中の計画のまとまり 1 つ。中は queue で並列に流し、前のステージがすべて完了したときだけ次のステージが流れる。`new mission` はステージごとに計画を書き出す（設計・関門 1・実装・検査・開発版・本番） | `--then` の 1 回分、`then_of` | 波・段 | [pace.md](pace.md) の「計画の波」 |
+| ステージ | チェインの中の計画のまとまり 1 つ。中は queue で並列に流し、前のステージがすべて完了したときだけ次のステージが流れる。`new mission` はステージごとに計画を書き出す（設計・関門 1・実装・検査・開発版・本番） | `--then` の 1 回分、`then_of` | 波・段 | [pace.md](pace.md) の「計画のステージ」 |
 | 区間 | ラッパーが起動する claude の 1 回の起動（1 つの会話）。ndf-next のブロックで次の区間へ切り替わる | 区間の境の行 `── ndf-relay: 区間 2 ──`、`log.jsonl` の `section` | — | [relay.md](relay.md) |
 | context window | 1 回の会話が保持する文脈の全体と、その量 | `NDF_CONTEXT_LIMIT`（既定 200,000） | — | [context-window.md](context-window.md) の「用語」 |
 | カットポイント | context window を切ってよい 4 点。3 層ではフェーズの境になる | — | 切れ目 | [context-window.md](context-window.md) の「切ってよい点は 4 つある」 |

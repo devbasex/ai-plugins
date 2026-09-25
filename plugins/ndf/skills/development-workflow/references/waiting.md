@@ -69,26 +69,26 @@
 
 | `kind` | 書く時点 | 中身 | conductor の読み方 |
 | --- | --- | --- | --- |
-| `step` | 段の切り替わりごと | `step`・`type`・`exit`・`seconds`・`cost`・`next`・`summary` | 起きたときに末尾を読む。これだけでは起きない |
+| `step` | ステップの切り替わりごと | `step`・`type`・`exit`・`seconds`・`cost`・`next`・`summary` | 起きたときに末尾を読む。これだけでは起きない |
 | `alive` | 最後の行から計画の `"report_interval"`（既定 600 秒）動きが無いとき | `step`・`elapsed`・`worker`（worker の最後の報告） | 同上 |
-| `worker` | work の段の worker が区切り（課題を読み終えた・テストを足した・実装を 1 つ終えた・コミットした）ごと | `text`（1 行の要約） | 同上 |
-| `slow` | run・work・drive の段の経過が想定時間を超え、一次の調査を流すたび | `step`・`round`・`elapsed`・`expected`・`basis`・`probe`（`name`・`class`・`action`・`summary`）・`act`・`by`（`rule` / `llm`）・`llm`・`next_check` | `step` と同じ |
-| `attention` | conductor の判断が要るとき | `step`・`reason`（`止まった` / `関門` / `同じ失敗の繰り返し` / `判断の段で stop が出そう` / `遅れ`）・`text` | **この行が足されたら起きて読む** |
+| `worker` | work のステップの worker が区切り（課題を読み終えた・テストを足した・実装を 1 つ終えた・コミットした）ごと | `text`（1 行の要約） | 同上 |
+| `slow` | run・work・drive のステップの経過が想定時間を超え、一次の調査を流すたび | `step`・`round`・`elapsed`・`expected`・`basis`・`probe`（`name`・`class`・`action`・`summary`）・`act`・`by`（`rule` / `llm`）・`llm`・`next_check` | `step` と同じ |
+| `attention` | conductor の判断が要るとき | `step`・`reason`（`止まった` / `関門` / `同じ失敗の繰り返し` / `judge のステップで stop が出そう` / `遅れ`）・`text` | **この行が足されたら起きて読む** |
 
 - **conductor 向けの行は `attention` だけである。** supervise.py が worker の行の語（止まった・関門・
-  失敗）と繰り返し、段の結果からスクリプトで分ける。`step` / `alive` / `worker` / `slow` は起こさない
+  失敗）と繰り返し、ステップの結果からスクリプトで分ける。`step` / `alive` / `worker` / `slow` は起こさない
   （起こすたびに conductor の文脈の全体を読み直すため）
 - `queue` は `attention` の行を標準出力の 1 行 `{"tool": "supervise-queue", "event": "attention", ...}`
   で知らせる。最後の行は結果の JSON のままである
 - `attention` で起きたら、その行と `progress.jsonl` の末尾だけを読み、止めるか続けるかを決める。
   続けるなら同じ待ちを起動し直す。フェーズの報告は `report.md` で読む
-- **遅れの見張りは supervise.py が段の待ちの中で行う。** 想定は同じ段（フェーズ, 段の id）の直近 10 回の
+- **遅れの見張りは supervise.py がステップの待ちの中で行う。** 想定は同じステップ（フェーズ, ステップの id）の直近 10 回の
   所要の中央値 × 3（下限 300 秒。履歴が 3 回未満なら 900 秒）。超えたら一次の調査を流し、決まった手
   （待ち直し・取り残しの再実行）で解けなければ Tool なしの `claude -p` が retry / fix / stop / wait を選ぶ。
-  `attention`（reason `遅れ`）は、調査が手を打ったとき・判定へ回したとき・段を打ち切ったとき・判定の
-  回数が上限に達したときだけ書く。打ち切った段の終了コードは 125
+  `attention`（reason `遅れ`）は、調査が手を打ったとき・判定へ回したとき・ステップを打ち切ったとき・判定の
+  回数が上限に達したときだけ書く。打ち切ったステップの終了コードは 125
 - `## フェーズの報告` の `途中の報告` の欄が、行の種類ごとの数（`遅れの調査` を含む）と、LLM へ回した
-  回数・費用を持つ。手を打った段は `- 遅れ:` の行に並ぶ
+  回数・費用を持つ。手を打ったステップは `- 遅れ:` の行に並ぶ
 - 待ちのコマンドは下のとおり
 
 **conductor は `report.md` と、`progress.jsonl` の `attention` の行の数を 1 つの until ループで待つ。**
@@ -103,7 +103,7 @@ until [ -s "$1/report.md" ] || [ "$(c "$1")" -gt "$2" ]; do sleep 5; done' _ "$S
 
 - `queue` で流すときは、この until ループの代わりに `supervise.py wait` で待つ（次の節）
 - 起きたら `attention` の行と `progress.jsonl` の末尾だけを読む。続けるなら数を取り直して同じ待ちを起動する
-- 124（上限の 3600 秒）で終わったら、`progress.jsonl` の最後の行（`alive` なら段と経過）を 1 度読み、
+- 124（上限の 3600 秒）で終わったら、`progress.jsonl` の最後の行（`alive` ならステップと経過）を 1 度読み、
   同じ待ちを起動し直す
 
 ### queue の待ち（supervise.py wait）
@@ -134,11 +134,11 @@ queue の終わりだけである。** 計画の組み立て・待ちの見張�
 
 1. 実装の計画を並べ、開発版の配布の計画を `new release --channel dev --prs-from-queue` で作る
    （固定の PR があれば `--prs 1052` を併せて渡す）。queue は `--then` の計画を流す前に、先行の計画の
-   報告の `Pull Request` の番号を changelog・approval-facts の段の `--prs` へ入れる。
+   報告の `Pull Request` の番号を changelog・approval-facts のステップの `--prs` へ入れる。
    先行の報告に Pull Request が 1 件も無ければ、配布の計画は `流さなかった` になる
 2. `queue <実装の計画>... --then <開発版の計画> --done <パス>` と `wait <パス>` を背景で起動する
-3. `wait` が 0 で終わり、queue の結果が `gate`（開発版の facts の段の関門 2）なら、提示物を添えて本番の承認を取る
-4. 承認の後、`queue <本番の計画> --done <パス>` と `wait <パス>` を背景で起動する。本番の計画の段の最後は
+3. `wait` が 0 で終わり、queue の結果が `gate`（開発版の facts のステップの関門 2）なら、提示物を添えて本番の承認を取る
+4. 承認の後、`queue <本番の計画> --done <パス>` と `wait <パス>` を背景で起動する。本番の計画のステップの最後は
    後片付け（`merged-steps.py cleanup`）で、配布の PR（`release/v<版>` → main）とミッションの PR（`--prs`）の
    ブランチ・作業ツリーを片付ける。`git branch -D` が要るブランチがあれば関門で止まる
 5. `wait` が 0 で終わったら、引継ぎ文書を `supervise.py note` で更新し、`ndf-next` を出す
@@ -149,7 +149,7 @@ queue の終わりだけである。** 計画の組み立て・待ちの見張�
 約 2 秒後の完了通知で再開して報告を出し直し、親には通知が 2 回届いた）。親が 1 回目を
 結果と読むと、報告の無いフェーズを受け取る。supervisor と worker は待ちで応答を終えない
 （[agent-layers.md](agent-layers.md) の規則）。背景の処理を起動した後は、同じ応答の中で
-他の作業を進め、通知を受けてから次の段へ進む。他の作業が無いまま待つときの手は #656 が扱う。
+他の作業を進め、通知を受けてから次の作業へ進む。他の作業が無いまま待つときの手は #656 が扱う。
 親の側の手は、受け取る層ごとに次の節が持つ。
 
 ### 途中の通知を受けたとき

@@ -117,8 +117,8 @@ STATE_KEYS = ("plans", "done", "gates", "goal_template")
 def other_shape(path: str) -> str:
     """既存のファイルが状態の形でなければ、その理由を返す。無い・空・状態の形なら空。
 
-    supervise.py new mission の目録（`ミッション` / `ブランチ` / `波`）も同じ名前で書かれる。
-    同じ場所へ置くと、上書きで波の目録が消える（#1082）。
+    supervise.py new mission の目録（`ミッション` / `ブランチ` / `ステージ`）も同じ名前で書かれる。
+    同じ場所へ置くと、上書きでステージの目録が消える（#1082）。
     """
     p = Path(path)
     if not p.exists():

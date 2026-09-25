@@ -217,7 +217,7 @@ def test_update_twice_is_same(r6):
 
 def test_init_stops_on_other_shape_json(r6):
     """同じパスに supervise.py new mission の目録（別の形の JSON）があれば、上書きせずに止まる（#1082）。"""
-    catalog = {"ミッション": "m", "ブランチ": "fix/x", "波": [{"計画": ["a.json"]}]}
+    catalog = {"ミッション": "m", "ブランチ": "fix/x", "ステージ": [{"計画": ["a.json"]}]}
     path = Path(r6["mission"])
     path.write_text(json.dumps(catalog, ensure_ascii=False))
     before = path.read_bytes()

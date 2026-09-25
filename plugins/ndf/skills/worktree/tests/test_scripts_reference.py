@@ -22,7 +22,7 @@ SKILLS_ROOT = SKILL_DIR.parent
 LOOKUP_REFERENCE = (
     SKILLS_ROOT / "development-workflow" / "references" / "scripts-lookup.md"
 )
-LOOKUP_HEADING = "## 入口を探す 1 段"
+LOOKUP_HEADING = "## 入口を探すコマンド"
 # 解決の入口の実物。配置を作るたびに写す。
 RESOLVE_ENTRY = Path(__file__).resolve().parents[3] / "scripts" / "resolve.sh"
 # Claude Code が SKILL.md の中で置き換える語。テストでも同じ置き換えを行う。

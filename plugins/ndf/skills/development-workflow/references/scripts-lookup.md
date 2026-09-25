@@ -1,7 +1,7 @@
 # `$SCRIPTS` を決める
 
 プラグインの `scripts/` の位置は 4 ランタイムで別々である。**候補を順に試す処理は
-`scripts/resolve.sh`（解決の入口）1 本が持つ。** Skill はこの入口を探す 1 段だけを持ち、
+`scripts/resolve.sh`（解決の入口）1 本が持つ。** Skill はこの入口を探すコマンドだけを持ち、
 あとは入口に尋ねる。
 
 ```bash
@@ -38,7 +38,7 @@ SCRIPTS=$(bash "$R/scripts/resolve.sh" scripts fix)           # skills/<Skill名
 
 **2 で入口自身の位置を条件付きで採るのは、参照ファイルの `${CLAUDE_PLUGIN_ROOT}` が
 置き換わらないためである**（#590）。Claude Code が置き換えるのは `SKILL.md` の本文だけで、
-参照ファイルを読んだ bash では下の 1 段が Codex の控えの入口を拾うことがある。入口は
+参照ファイルを読んだ bash では下のコマンドが Codex の控えの入口を拾うことがある。入口は
 自分へ届いた道が `~/.codex` / `~/.gemini` / `.kiro/skills` / `~/.claude/plugins/cache` を
 通ったかを見て、通っていれば自分を採らず Claude Code の導入の記録へ戻る。通っていなければ
 `claude --plugin-dir <パス>` で読み込んだ実体として採る。
@@ -47,11 +47,11 @@ SCRIPTS=$(bash "$R/scripts/resolve.sh" scripts fix)           # skills/<Skill名
 入れない。** 版ごとにディレクトリが分かれ、`*` で受けると辞書順になって `10.10.0` が
 `10.2.0` より前に来る。版の比較をこの手順へ持ち込むと、手順そのものが読めない長さになる。
 
-## 入口を探す 1 段
+## 入口を探すコマンド
 
 入口はプラグインルート直下の `scripts/` に置く。Skill の下に置くと、その Skill を配らない
 配布先（agy）で届かない（`scripts/lib/README.md` の「プラグインルート直下に置く理由」）。
-入口を探す段は、上の候補から「入口が 1 つあればよい」ところまで削った形である。どの入口が
+入口を探すコマンドは、上の候補から「入口が 1 つあればよい」ところまで削った形である。どの入口が
 当たっても、順序は入口の側が決め直す。
 
 ```bash
@@ -88,9 +88,9 @@ SKILL_DIR=$(bash "$R/scripts/resolve.sh" skill fix) || exit 3
 手順書がこの値を受け取る場合は、「この文書が受け取る値」の表で宣言する（`worktree` の
 `SKILL.md` がその形である）。
 
-「入口を探す 1 段」の bash はそのままテストの対象になっている。
+「入口を探すコマンド」の bash はそのままテストの対象になっている。
 `development-workflow/tests/test_projects_scripts_lookup.py` と
 `worktree/tests/test_scripts_reference.py` がこの節の bash のコードブロックを読み出し、
 4 ランタイムの配置を作った上で実行する。入口そのものの順序は
 `scripts/tests/test_resolve.py` が 4 ランタイム × 開発中 / 配布済みの組み合わせで確かめる。
-**候補を足すときは入口とこの 1 段の両方を直し、3 つのテストへ配置を足す。**
+**候補を足すときは入口とこのコマンドの両方を直し、3 つのテストへ配置を足す。**

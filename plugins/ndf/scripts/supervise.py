@@ -2,21 +2,21 @@
 """フェーズをスクリプトで駆動する。
 
 supervisor（サブエージェント）の代わりに、このスクリプトがフェーズの手順を順に進める。
-判断の要らない段（コマンドの実行・待ち・進行の記録）はスクリプトが行い、LLM は
-次の 2 つの段でだけ、毎回新しい最小構成の `claude -p` として起動する。
+判断の要らないステップ（コマンドの実行・待ち・進行の記録）はスクリプトが行い、LLM は
+次の 2 つのステップでだけ、毎回新しい最小構成の `claude -p` として起動する。
 
-| 段 | 何をするか | LLM |
+| ステップ | 何をするか | LLM |
 | --- | --- | --- |
 | run   | コマンドを実行して終わるまで待ち、出力をファイルへ残す | 使わない |
 | work  | 1 つの作業（修正・調査）を worker として行わせる | Tool あり（Read/Edit/Write/Bash/Grep/Glob）。`"full": true` なら設定・プラグイン・Skill をそのまま読む claude -p で Skill を回す（cross-review など） |
 | drive | 駆動（cross-review / cross-refactoring の drive.py）を run として回し、`pause` のときだけ worker に判断・修正をさせて駆動へ返す | pause のときだけ（work と同じ最小構成） |
-| judge | 結果ファイルと規則の抜粋だけを渡し、次の段を決めさせる | Tool なし |
-| pr    | push して Draft の Pull Request を作る（スクリプト）。本文は材料（計画の値・コミット・変更の統計・run の結果・設計文書）から LLM が書く。`"body": "template"` なら材料をそのまま本文にする。本文には必ず「## 利用者向けの変化」の節を置く（段の `changes`、無ければ `summary`、それも無ければ題名から。配布の説明文の材料）。末尾の署名は本文に無いときだけ足す | 本文だけTool なし |
+| judge | 結果ファイルと規則の抜粋だけを渡し、次のステップを決めさせる | Tool なし |
+| pr    | push して Draft の Pull Request を作る（スクリプト）。本文は材料（計画の値・コミット・変更の統計・run の結果・設計文書）から LLM が書く。`"body": "template"` なら材料をそのまま本文にする。本文には必ず「## 利用者向けの変化」の節を置く（ステップの `changes`、無ければ `summary`、それも無ければ題名から。配布の説明文の材料）。末尾の署名は本文に無いときだけ足す | 本文だけTool なし |
 
 使い方:
-    supervise.py run <plan.json> [--state-dir DIR] [--from <段の id>] [--slow K=V]...
-    supervise.py history import <progress.jsonl>... [--history F]   # 既存の段の所要を遅れの見張りの履歴へ取り込む
-    supervise.py expected <plan.json> [--history F] [--slow K=V]...  # 計画の段ごとの想定時間と根拠を出す
+    supervise.py run <plan.json> [--state-dir DIR] [--from <ステップの id>] [--slow K=V]...
+    supervise.py history import <progress.jsonl>... [--history F]   # 既存のステップの所要を遅れの見張りの履歴へ取り込む
+    supervise.py expected <plan.json> [--history F] [--slow K=V]...  # 計画のステップごとの想定時間と根拠を出す
     supervise.py new impl --issue N --worktree DIR --tests PATH... --title T [--files PATH...] [--changes TEXT] [--prompt-file F] [--branch B] [--out F]
     supervise.py new impl ... --escape-of <PR番号|0>   # マージの後に逃げた不具合を記録する（check-trigger.py escape）
     supervise.py new check --pr N --worktree DIR [--issue N...] [--scope PATH...] [--out F]
@@ -26,19 +26,19 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
     supervise.py new release --version V (--prs N... | --prs-from-queue) --channel dev|prod --worktree DIR
                              [--issue N...] [--prev-tag T] [--repo DIR] [--out F]
         # --prs-from-queue: queue が --then でこの計画を流す前に、先行の計画の報告の Pull Request を集めて
-        # --prs に足す（--prs の固定の番号と併用できる）。prod の段の最後は後片付け（merged-steps.py cleanup）
+        # --prs に足す（--prs の固定の番号と併用できる）。prod のステップの最後は後片付け（merged-steps.py cleanup）
     supervise.py new release ... --mvv <ミッションの状態>
-        # prod: 先頭に MVV の判定（mvv-gate.py）の段を置く。dev: approval-facts の段を gate_as_ok にする
+        # prod: 先頭に MVV の判定（mvv-gate.py）のステップを置く。dev: approval-facts のステップを gate_as_ok にする
     supervise.py new mission --name M --worktree <リポジトリの根> --issue N... --version <開発版> [--design N...] [--tests PATH...] [--out DIR]
         # 並列の設計 → 関門 1 → ミッションのブランチ → 並列の実装（ミッションのブランチへ集める）→ 検査 1 回 → 配布
-        # を波ごとの計画ファイルと mission.json へ書き出す。波の中は queue --max 3 で流す。配布は検査の queue が --then で流す
+        # をステージごとの計画ファイルと mission.json へ書き出す。ステージの中は queue --max 3 で流す。配布は検査の queue が --then で流す
         # --pace fast --state <ミッションの状態>: 使ってよい条件を確かめ、設計（関門 1 は MVV の判定）→ 実装（develop へ直接）
         # → 検査（実行の条件）→ 開発版 → 本番（関門 2 は MVV の判定）を書く。条件に外れれば計画を書かずに止まる
     supervise.py new close --name M --worktree <根> --issue N... --version <開発版> --prod <正式版> --state <状態> [--out DIR]
         # ミッションの終わり: 最終の検査 → 開発版 → 本番（最終の検査で変更があったときだけ）→ 確定仕様化・閉じる・振り返り
     supervise.py queue <plan.json>... [--max 3] [--then <plan.json>...]... [--done <パス>]
         # 空いた枠へ順に流す。作業ツリーは起動の前に 1 本ずつ作る。--then の計画は前の計画がすべて完了のときだけ
-        # 続けて流す（実装の queue の後の配布など）。--then を繰り返すと段になり、段は前の段がすべて完了のときだけ
+        # 続けて流す（実装の queue の後の配布など）。--then を繰り返すとステージになり、ステージは前のステージがすべて完了のときだけ
         # 流れる。終わると結果の JSON を --done（省けば最初の計画の
         # <計画>-state/queue-done.json）へ書く。始めに流す計画の一覧を done の隣（<done>.plans.json）へ書く
     supervise.py wait <done のパス> [--timeout 秒] [--poll 秒]
@@ -56,13 +56,13 @@ new / queue / wait / note / sync-check の結果は lib/step_result.py の形の
       "作業場所": "/abs/worktree",
       "branch": "feat/issue-818-x",         # 省略可。作業場所が無ければ起動時に作業ツリーを作る
       "起点": "origin/main",                # branch から作るときの起点（既定 origin/<base_branch>）
-      "base_branch": "main",                # 起点のブランチ。pr の段の宛先と preset の {base}（既定は .ndf/worktree.json）
-      "no_reports": "-p no:x",              # run の段の PYTEST_ADDOPTS に足す（既定は .ndf/supervise.json の test.no_reports）
+      "base_branch": "main",                # 起点のブランチ。pr のステップの宛先と preset の {base}（既定は .ndf/worktree.json）
+      "no_reports": "-p no:x",              # run のステップの PYTEST_ADDOPTS に足す（既定は .ndf/supervise.json の test.no_reports）
       "リポジトリ": "/abs/repo",             # 作業ツリーの元（省略時は作業場所の /.worktrees/ より前）
                                             # git worktree add が .git/config の lock で落ちたら 5 回までやり直す
       "記録": "/abs/projects-sync.sh",      # 省略可。stage を記録する
       "規則": "判断の規則の抜粋（文字列）",   # judge へ毎回渡す
-      "上限": 30,                           # 実行する段の数の上限（ループの歯止め）
+      "上限": 30,                           # 実行するステップの数の上限（ループの歯止め）
       "steps": [
         {"id": "test", "type": "run", "cmd": "pytest -q", "stage": "完了判定",
          "timeout": 1800, "on_fail": "judge-test", "next": "end"},
@@ -73,65 +73,65 @@ new / queue / wait / note / sync-check の結果は lib/step_result.py の形の
       ]
     }
 
-パートに分ける: work の段に `"parts": [{"name": ..., "files": [...]}, ...]` を書くと、パートごとに
-新しい文脈の claude -p の段（`<id>-1`, `<id>-2`, ...）へ展開する。大きな実装は分けて書く。
+パートに分ける: work のステップに `"parts": [{"name": ..., "files": [...]}, ...]` を書くと、パートごとに
+新しい文脈の claude -p のステップ（`<id>-1`, `<id>-2`, ...）へ展開する。大きな実装は分けて書く。
 
-Serena: work の段に `"serena": true` を書くと Serena の MCP だけを載せる（大きなコードを何度も読む実装向け）。
+Serena: work のステップに `"serena": true` を書くと Serena の MCP だけを載せる（大きなコードを何度も読む実装向け）。
 
-課題の本文: work の段に `"issues": [858]`（`true` なら計画の `課題`）を書くと、`gh issue view` の題と本文を
+課題の本文: work のステップに `"issues": [858]`（`true` なら計画の `課題`）を書くと、`gh issue view` の題と本文を
 プロンプトの先頭へ入れる。
 
-worker のランタイム: work と drive の段に `"runtime": "codex"`（`kiro` / `agy` / `claude`）を書くと、worker を
+worker のランタイム: work と drive のステップに `"runtime": "codex"`（`kiro` / `agy` / `claude`）を書くと、worker を
 `external-ai.py run` で起動する（起動・上限つきの待ち・回収はそのコマンドが持つ）。書かなければ最小構成の claude -p。
 
-drive の段: `cmd`（または `"drive": "cross-review" | "cross-refactoring"` と `"args"`）を打ち、最後の行の JSON を読む。
+drive のステップ: `cmd`（または `"drive": "cross-review" | "cross-refactoring"` と `"args"`）を打ち、最後の行の JSON を読む。
 - `status` が `ok` なら成功。`metrics`（ラウンド数・指摘・未解決・適用・取り消しなど）を報告の「件数」へ載せる
 - `gate` なら `items[0]` の `prompt_file` を worker に渡し、`result_file` を書かせてから同じコマンドを打ち直す。
   `command` を持つ pause（最終ゲートの cross-review）は、その駆動を同じ形で回し、`metrics.review_status` を
   `result_file` へ書く
 - `stopped`・結果ファイルが書かれない・`"max_pauses"`（既定 12）を超える、のどれかなら失敗
 
-段ごとの作業場所: run と work の段に `"cwd"` を書くと、その段だけ別の場所で動く（取り込みで PR ごとに
-作業ツリーが違うとき）。work の段では worker へ渡す「作業場所」もその `cwd` になる。
+ステップごとの作業場所: run と work のステップに `"cwd"` を書くと、そのステップだけ別の場所で動く（取り込みで PR ごとに
+作業ツリーが違うとき）。work のステップでは worker へ渡す「作業場所」もその `cwd` になる。
 
 宣言（リポジトリの根の `.ndf/`。new は作業場所 → 元のリポジトリ → 今のディレクトリの順に探す。引数が先に効く）:
 - `worktree.json` の `base_branch`（起点のブランチ。PR の宛先・差分の起点）と `production_branch`（本番のブランチ）
 - `supervise.json`（無ければ、要る雛形は「宣言が無い」と止まる）:
       {"version": 1,
        "test": {"command": "<テストのコマンド。{paths} を範囲に置き換える>", "all": "<全体の範囲（既定 .）>",
-                "no_reports": "<run の段の PYTEST_ADDOPTS に足す。省略可>"},
-       "sync_checks": [{"name": "<名前>", "command": "<同期か検査のコマンド>"}, ...],   # 省略可。無ければ sync の段を置かない
+                "no_reports": "<run のステップの PYTEST_ADDOPTS に足す。省略可>"},
+       "sync_checks": [{"name": "<名前>", "command": "<同期か検査のコマンド>"}, ...],   # 省略可。無ければ sync のステップを置かない
        "release": {"form": "package-plugin", "plugin": "<名前>", "runtimes": ["claude", ...]}}
-  テストの範囲の選び方（--tests）と配布してよいかの判断は、宣言にせず conductor と judge の段に残す
+  テストの範囲の選び方（--tests）と配布してよいかの判断は、宣言にせず conductor と judge のステップに残す
 
 配布の雛形（new release）: 形（`release.form`）ごとにある。無い形は /ndf:release で配る。
 - `package-plugin`（Claude Code のプラグイン）: dev は bump → changelog → 説明文 → sync-check → release →
   verify-install（起点のブランチ）→ approval-facts → 提示物の説明文。approval-facts の提示物は
   `issues/approval-<plugin>-v<正式版>.md` へ写す。prod は bump → changelog → 説明文 → トークン消費の記録 →
   sync-check → release → verify-install（本番のブランチ）→ 後片付け。sync-check は同期と検査の宣言があるときだけ
-落ちた run の段は judge が fix・同じ段のやり直し・stop を選ぶ。計画のスクリプトは、このスクリプトの置き場からの
+落ちた run のステップは judge が fix・同じステップのやり直し・stop を選ぶ。計画のスクリプトは、このスクリプトの置き場からの
 絶対パスで呼ぶ（利用者のリポジトリにプラグインの中身が無くても動く）。
 
 利用上限: claude -p（work・drive の worker・judge・pr）が利用上限（session limit・HTTP 429・
 `api_error_status: 429`・「You've hit your limit … resets …」。lib/monitor.py の USAGE LIMIT の表と同じ文言）で
-落ちたら、段の失敗とは区別する（on_fail・judge へ回さない）。段の結果に `"limit": true` と読めた解除時刻を残す。
+落ちたら、ステップの失敗とは区別する（on_fail・judge へ回さない）。ステップの結果に `"limit": true` と読めた解除時刻を残す。
 - 環境変数 `NDF_SUPERVISE_CLAUDE_FALLBACK`（`KEY=VALUE` を空白区切り。例 `CLAUDE_CODE_USE_BEDROCK=1`）が
   あれば、それを環境に足した同じ claude -p で 1 度だけ起動し直す。報告に `認証: 切り替え（<変数名>）` を書く
 - それでも上限なら、解除時刻 + 1 分まで（読めなければ計画の `"limit_retry_seconds"`、既定 900 秒）待って
   同じ呼び出しを起動し直す。待ちは LLM を使わない（time.sleep）。queue の枠は待ちの間も保つ
 - 待ちの合計が計画の `"limit_wait_max"`（既定 10800 秒）を超えるなら `結果: 止まった`・`理由: 利用上限`
 
-run の段:
+run のステップ:
 - `"preset"`: 定型のコマンド。`sync-check`（宣言した同期と検査）・`assess`（構造改善の要否）・
   `doc-lint`（追加した行の書き方の検査）。`cmd` を書けばそちらを使う
-- `cmd` の `{pr}` は Pull Request の番号に、`{pr_url}` は URL に置き換わる（drive の段の `args` も同じ）。
-  Pull Request は pr の段で作ったもの、または計画の `"Pull Request"`（URL なら末尾の数字を番号として読む）
+- `cmd` の `{pr}` は Pull Request の番号に、`{pr_url}` は URL に置き換わる（drive のステップの `args` も同じ）。
+  Pull Request は pr のステップで作ったもの、または計画の `"Pull Request"`（URL なら末尾の数字を番号として読む）
 - `"rerun_failed": true`: 失敗したら落ちたテストだけ（`pytest --lf`）を走らせ直し、通れば成功として進む
-- `"skip_to": "<段の id>"`: 終了コードが `skip_code`（既定 3。`refactor.py assess` の「飛ばしてよい」）なら
-  その段へ進む
-- 終了コード 10〜19（共通の契約の関門）は失敗にしない。段の結果に `gate` を残して `"gate_next"`（無ければ
+- `"skip_to": "<ステップの id>"`: 終了コードが `skip_code`（既定 3。`refactor.py assess` の「飛ばしてよい」）なら
+  そのステップへ進む
+- 終了コード 10〜19（共通の契約の関門）は失敗にしない。ステップの結果に `gate` を残して `"gate_next"`（無ければ
   `next`）へ進み、最後まで進めば報告は `結果: 関門`。結果 JSON の `presentation_path` を報告の `提示物` に写す。
-  `"presentation_to": "<パス>"` があれば提示物をそのパス（段の作業場所から）へ写し、そちらを載せる
+  `"presentation_to": "<パス>"` があれば提示物をそのパス（ステップの作業場所から）へ写し、そちらを載せる
 - テストの成果物を作らない（計画の `no_reports` を `PYTEST_ADDOPTS` に足す）。作らせるときは `"reports": true`
 - `cmd` の `{base}` は起点のブランチ（計画か .ndf/worktree.json の `base_branch`）に置き換わる。
   `{state_dir}` は計画の状態ディレクトリに置き換わる
@@ -141,50 +141,50 @@ run の段:
 元のリポジトリで打つ。0 なら流す。`skip_code` なら作業ツリーを作らず、報告を `結果: 完了`・
 `理由: 実行の条件に当たらない（<summary>）` で書いて終える。ほかは `結果: 止まった`。`--from` で再開するときは打たない。
 
-queue の置き換え: `{queue_prs}` は前のすべての段の Pull Request（空白区切り）、`{queue_pr:<計画名>}` は
-名前（ファイル名の stem か、その末尾の `-<計画名>`）が一致する計画の Pull Request 1 本（前の段に無ければ
+queue の置き換え: `{queue_prs}` は前のすべてのステージの Pull Request（空白区切り）、`{queue_pr:<計画名>}` は
+名前（ファイル名の stem か、その末尾の `-<計画名>`）が一致する計画の Pull Request 1 本（前のステージに無ければ
 同じディレクトリの計画の報告。無い・飛ばされたなら `0`）
 
-段の遷移:
+ステップの遷移:
 - `next` に `end` を書くと、そこでフェーズを完了として終える
-- run: 終了コード 0 なら `next`（無ければ次の段）。10〜19 は関門として `gate_next` か `next`。
+- run: 終了コード 0 なら `next`（無ければ次のステップ）。10〜19 は関門として `gate_next` か `next`。
   それ以外の 0 以外なら `on_fail`（無ければ止まる）
-- work: 終了後に `next`（無ければ次の段）
-- judge: 答えの `decision` が段の id ならその段へ、`next` なら次の段へ、`stop` なら止まる、
+- work: 終了後に `next`（無ければ次のステップ）
+- judge: 答えの `decision` がステップの id ならそのステップへ、`next` なら次のステップへ、`stop` なら止まる、
   `gate` なら関門として止まる。`choices` を渡すとその中から選ばせる
 
 途中の報告（`<state-dir>/progress.jsonl`。1 行 1 つの JSON。LLM は使わない）:
-- `"kind": "step"`: 段の切り替わりごとに 1 行（at・step・type・exit・seconds・cost・next・summary）
+- `"kind": "step"`: ステップの切り替わりごとに 1 行（at・step・type・exit・seconds・cost・next・summary）
 - `"kind": "alive"`: 最後の行から計画の `"report_interval"`（既定 600 秒）動きが無いとき（step・elapsed・
-  worker の最後の報告。run の段なら stderr の最後の行を last_output に）。長い段（work・run・drive）の
-  待ちは区切って見るので、段の途中でも書く
-- `"kind": "worker"`: work の段の worker が区切りごとに追記する 1 行（プロンプトに書き方と置き場を渡す）
-- `"kind": "slow"`: 段の経過が想定を超え、一次の調査を流すたびに 1 行（下の「遅れの見張り」）
+  worker の最後の報告。run のステップなら stderr の最後の行を last_output に）。長いステップ（work・run・drive）の
+  待ちは区切って見るので、ステップの途中でも書く
+- `"kind": "worker"`: work のステップの worker が区切りごとに追記する 1 行（プロンプトに書き方と置き場を渡す）
+- `"kind": "slow"`: ステップの経過が想定を超え、一次の調査を流すたびに 1 行（下の「遅れの見張り」）
 - `"kind": "attention"`: conductor の判断が要る出来事（reason が 止まった・関門・同じ失敗の繰り返し・
-  判断の段で stop が出そう・遅れ）。worker の行の語と繰り返し、段の結果からスクリプトで分ける。
+  judge のステップで stop が出そう・遅れ）。worker の行の語と繰り返し、ステップの結果からスクリプトで分ける。
   `queue` はこの行を標準出力の `{"tool": "supervise-queue", "event": "attention", ...}` で知らせる
 
-作業ディレクトリ（`<state-dir>/work/`。起動時に作る）: work と judge の段のプロンプトに渡す。worker は
+作業ディレクトリ（`<state-dir>/work/`。起動時に作る）: work と judge のステップのプロンプトに渡す。worker は
 作業ファイル（スクリプト・初期化の出力・プロンプト）をここに置く。計画ごとに別なので、並行する計画どうしで
 同じ名前のファイルを上書きし合わない
 
-遅れの見張り（run・work・drive の段。LLM は決まった手で解けないときだけ）:
-- 想定: 段の `"expected": <秒>` があればそれ。無ければ同じ段（フェーズ, 段の id）の直近 `window` 件の所要の
+遅れの見張り（run・work・drive のステップ。LLM は決まった手で解けないときだけ）:
+- 想定: ステップの `"expected": <秒>` があればそれ。無ければ同じステップ（フェーズ, ステップの id）の直近 `window` 件の所要の
   中央値 × `factor`（下限 `floor`）、履歴が `min_samples` 件に満たなければ `default`。所要の履歴は成功と関門の
-  段だけを `<git の共通ディレクトリ>/ndf/step-history.jsonl`（git でなければ `<state-dir>/`）へ積む
-- 経過（利用上限の待ちを除く）が想定を超えると、段の `"probe"` で一次の調査を流す。`"output"`（run・drive の
+  ステップだけを `<git の共通ディレクトリ>/ndf/step-history.jsonl`（git でなければ `<state-dir>/`）へ積む
+- 経過（利用上限の待ちを除く）が想定を超えると、ステップの `"probe"` で一次の調査を流す。`"output"`（run・drive の
   既定。stderr が伸びたか）/ `"worker"`（work の既定。worker の行かコミットが足されたか）/
   `{"cmd": "<コマンド>"}`（シェルを通さずに打ち、最後の行の JSON の `metrics.action` を読む。`{pr}` `{base}`
   `{branch}` `{state_dir}` を置き換える）/ `false`（調べずに判定へ）
 - `action` が `wait` か `remedied` なら、`max_waits` 回まで想定の秒だけ待ち直す。`retry` / `fix` / `stop` はそのまま
   打つ。`judge`（読めない調査も）と待ち直しの上限では、Tool なしの claude -p が retry / fix / stop / wait を選ぶ
-  （段ごとに `max_llm` 回まで。超えたら見張りを止めて段の timeout まで待つ。答えが読めなければ wait）
-- retry は同じ段を打ち直す（`max_retry` を超えると stop）。fix は `on_fail` へ、stop は `結果: 止まった`・
-  `理由: 遅れ: <理由>`。打ち切った段は子のプロセスグループごと止め、終了コードは 125
+  （ステップごとに `max_llm` 回まで。超えたら見張りを止めてステップの timeout まで待つ。答えが読めなければ wait）
+- retry は同じステップを打ち直す（`max_retry` を超えると stop）。fix は `on_fail` へ、stop は `結果: 止まった`・
+  `理由: 遅れ: <理由>`。打ち切ったステップは子のプロセスグループごと止め、終了コードは 125
 - 設定は `--slow K=V` → 計画の `"slow"` → `.ndf/supervise.json` の `"slow"` → 既定の順に先に効く。鍵は
   `enabled`（true）・`window`（10）・`min_samples`（3）・`factor`（3.0）・`floor`（300）・`default`（900）・
   `max_waits`（3）・`max_llm`（2）・`max_retry`（1）・`probe_timeout`（120）・`judge_timeout`（300）・`history`。
-  知らない鍵・形の違う値は段を始める前に `結果: 止まった`・`理由: slow の設定が読めない（<鍵>）`
+  知らない鍵・形の違う値はステップを始める前に `結果: 止まった`・`理由: slow の設定が読めない（<鍵>）`
 
 最後に `## フェーズの報告` を標準出力と `<state-dir>/report.md` へ書く。conductor はこの
 スクリプトを背景の Bash で起動し、終わりの通知で報告を読む。
@@ -213,9 +213,9 @@ from pace import PaceError, read_pace  # noqa: E402
 import slow_step as ss  # noqa: E402  遅れの見張りの材料
 
 WORK_TOOLS = "Read,Edit,Write,Bash,Grep,Glob"
-# work の段に載せる MCP は Serena だけ（mcp-serena の .mcp.json と同じ起動）。シンボル単位で読み・直し、
+# work のステップに載せる MCP は Serena だけ（mcp-serena の .mcp.json と同じ起動）。シンボル単位で読み・直し、
 # 大きなファイルの全文を読まずに済ませる。Tool の定義で起動の固定費が約 1.1 万増える（実測: 1 関数の修正で
-# $0.047 → $0.131）ため既定では載せず、段に "serena": true を書いたときだけ載せる
+# $0.047 → $0.131）ため既定では載せず、ステップに "serena": true を書いたときだけ載せる
 SERENA_MCP = {"mcpServers": {"serena": {
     "type": "stdio", "command": "uvx",
     "args": ["--from", "serena-agent==1.7.0", "serena", "start-mcp-server", "--context", "claude-code",
@@ -233,7 +233,7 @@ EXTERNAL_AI = SKILLS / "external-ai" / "scripts" / "external-ai.py"
 
 HERE = SELF.parent  # 配布したスクリプトの置き場。計画のコマンドはここからの絶対パスで書く
 
-# run の段の定型（"preset"）。作業場所（リポジトリの根）で動く。{base} は起点のブランチ
+# run のステップの定型（"preset"）。作業場所（リポジトリの根）で動く。{base} は起点のブランチ
 PRESETS = {
     "sync-check": f"python3 {SELF} sync-check --commit",
     "assess": f"python3 {SKILLS / 'cross-refactoring' / 'scripts' / 'refactor.py'} assess --base origin/{{base}}",
@@ -320,7 +320,7 @@ WORK_SYSTEM = """あなたは NDF の worker である。1 つの作業だけを
 - 見つけたもの: <件数と場所。無ければ 無し>
 - 次にすること: <1 行。無ければ 無し>"""
 
-FULL_SYSTEM = """あなたは NDF のフェーズの 1 段を CLI（claude -p）として回している。人は見ていない。
+FULL_SYSTEM = """あなたは NDF のフェーズの 1 ステップを CLI（claude -p）として回している。人は見ていない。
 - 応答を終えるとこのプロセスは終わり、背景の処理と完了通知は捨てられる。待ちは前景のコマンドで行い
   （run_in_background・Monitor を使わない。gh pr checks --watch や待ちのスクリプトを前景で実行する）、
   作業が終わるまで応答を終えない
@@ -350,19 +350,19 @@ PR_SYSTEM = """あなたは Pull Request の本文だけを書く。Tool は無�
 - 材料に無いことを書かない。本文だけを返し、前置きや囲みを付けない"""
 
 JUDGE_SYSTEM = """あなたは NDF のフェーズの判断だけを行う。Tool は無い。
-渡された結果と規則だけを根拠に、次の段を 1 つ選ぶ。
+渡された結果と規則だけを根拠に、次のステップを 1 つ選ぶ。
 答えは JSON 1 つだけを返す: {"decision": "<選んだ値>", "reason": "<1 行>"}"""
 
-SLOW_SYSTEM = """あなたは NDF のフェーズの、想定より遅い段への手だけを決める。Tool は無い。
-渡された材料（段の定義・経過と想定・一次の調査・出力の末尾・履歴）だけを根拠に、次の 4 つから 1 つを選ぶ。
-- retry: 段を止めて同じ段を打ち直す / fix: 段を止めて on_fail の段へ進む / stop: 計画を止める
-- wait: 段をそのまま待ち直す（wait_seconds に次に確かめるまでの秒を付けてよい）
+SLOW_SYSTEM = """あなたは NDF のフェーズの、想定より遅いステップへの手だけを決める。Tool は無い。
+渡された材料（ステップの定義・経過と想定・一次の調査・出力の末尾・履歴）だけを根拠に、次の 4 つから 1 つを選ぶ。
+- retry: ステップを止めて同じステップを打ち直す / fix: ステップを止めて on_fail のステップへ進む / stop: 計画を止める
+- wait: ステップをそのまま待ち直す（wait_seconds に次に確かめるまでの秒を付けてよい）
 答えは JSON 1 つだけを返す: {"decision": "retry|fix|stop|wait", "reason": "<1 行>", "wait_seconds": <秒>}"""
-SLOW_EXIT = 125  # 遅れの見張りが段を打ち切った（124 の打ち切り・10〜19 の関門と分ける）
+SLOW_EXIT = 125  # 遅れの見張りがステップを打ち切った（124 の打ち切り・10〜19 の関門と分ける）
 
 
 class SlowAction(Exception):
-    """遅れの見張りが段を打ち切るときに投げる。action は retry / fix / stop。"""
+    """遅れの見張りがステップを打ち切るときに投げる。action は retry / fix / stop。"""
 
     def __init__(self, action: str, reason: str, summary: str = ""):
         super().__init__(f"{action}: {reason}")
@@ -371,7 +371,7 @@ class SlowAction(Exception):
 
 @dataclass
 class SlowWatch:
-    """走っている段 1 つの見張りの状態。段の開始で作り、段の終わりで捨てる。"""
+    """走っているステップ 1 つの見張りの状態。ステップの開始で作り、ステップの終わりで捨てる。"""
     step_id: str
     type: str
     started: float
@@ -412,7 +412,7 @@ def now_iso() -> str:
 
 
 def kill_group(p: subprocess.Popen) -> None:
-    """子をプロセスグループごと止める（shell=True の段の孫も残さない）。止まらなければ 5 秒で見切る。"""
+    """子をプロセスグループごと止める（shell=True のステップの孫も残さない）。止まらなければ 5 秒で見切る。"""
     try:
         os.killpg(p.pid, signal.SIGKILL)
     except OSError:
@@ -425,7 +425,7 @@ def kill_group(p: subprocess.Popen) -> None:
 
 def run_ticking(cmd, tick=None, every: float = TICK, timeout: float | None = None, input: str | None = None,
                 err_path: Path | None = None, **kw) -> subprocess.CompletedProcess:
-    """subprocess.run と同じく待つが、every 秒ごとに tick() を呼ぶ（長い段の待ちの中で進行を書く）。
+    """subprocess.run と同じく待つが、every 秒ごとに tick() を呼ぶ（長いステップの待ちの中で進行を書く）。
 
     err_path を渡すと stderr をそのファイルへ書かせる（待ちの間に最後の行を読めるように）。
     子は新しいセッションで起こす。打ち切りは子のプロセスグループを止めて subprocess.TimeoutExpired を投げる。
@@ -470,7 +470,7 @@ def claude_cmd(system: str, tools: str | None, cwd: str, full: bool = False,
                serena: bool = False, resume: str | None = None) -> list[str]:
     base = shlex.split(os.environ.get("NDF_SUPERVISE_CLAUDE", "claude"))
     if full:
-        # Skill を回す段（cross-review など）。設定・プラグイン・Skill・hook をそのまま読む
+        # Skill を回すステップ（cross-review など）。設定・プラグイン・Skill・hook をそのまま読む
         # 新しい文脈の claude -p。本体の会話なのでキャッシュはサブスクリプションなら 1 時間。
         # 報告が無いまま終わったときに --resume で起こし直すため、会話は残す
         return base + ["-p", "--output-format", "json",
@@ -533,7 +533,7 @@ def call_claude(system: str, prompt: str, tools: str | None, cwd: str, timeout: 
 
 
 def is_gate(code: int | None) -> bool:
-    """run の段の終了コード 10〜19 は共通の契約の関門（lib/step_result.py の EXIT_GATE）。"""
+    """run のステップの終了コード 10〜19 は共通の契約の関門（lib/step_result.py の EXIT_GATE）。"""
     return code is not None and 10 <= code <= 19
 
 
@@ -584,7 +584,7 @@ def fallback_env() -> dict:
 
 
 class UsageLimit(Exception):
-    """利用上限の待ちが最大を超えた。段の失敗とは区別して止まる。"""
+    """利用上限の待ちが最大を超えた。ステップの失敗とは区別して止まる。"""
 
 
 def parse_decision(text: str) -> dict:
@@ -614,7 +614,7 @@ def counts_text(counts: dict) -> str:
 
 
 def expand_parts(steps: list[dict]) -> list[dict]:
-    """work の段の `parts` を、パートごとに別の claude -p の段へ展開する。
+    """work のステップの `parts` を、パートごとに別の claude -p のステップへ展開する。
 
     1 つの文脈で全部を書くと、文脈が育つほど往復ごとの読み直しが増える（大きさ × 回数）。
     パートごとに新しい文脈で起動し、前のパートの成果はコミットから読ませる。
@@ -654,7 +654,7 @@ CHANGES_HEADING = "## 利用者向けの変化"  # 配布の説明文（release-
 
 
 def user_changes(step: dict, title: str) -> str:
-    """PR 本文の「利用者向けの変化」の節。段の changes（無ければ summary、それも無ければ題名）から組む。"""
+    """PR 本文の「利用者向けの変化」の節。ステップの changes（無ければ summary、それも無ければ題名）から組む。"""
     text = (step.get("changes") or step.get("summary") or title or "").strip()
     lines = [l.strip() for l in text.splitlines() if l.strip()] or ["無し"]
     items = [l if l.startswith(("- ", "* ")) else f"- {l}" for l in lines]
@@ -743,7 +743,7 @@ class Supervisor:
         self.llm = {"work": 0, "judge": 0, "input": 0, "cache_read": 0, "cache_write": 0,
                     "output": 0, "cost": 0.0}
         self.last_stage = "無し"
-        self.gates: list[dict] = []      # run の段が返した関門（終了コード 10〜19）
+        self.gates: list[dict] = []      # run のステップが返した関門（終了コード 10〜19）
         self.switched: list[str] = []    # 利用上限で足した認証の変数の名前
         self.cur: dict = {}
         self.fail_counts: dict[str, int] = {}
@@ -759,13 +759,13 @@ class Supervisor:
         self.attention_keys: set[str] = set()
         self.pcount = {"step": 0, "alive": 0, "worker": 0, "malformed": 0, "attention": 0, "slow": 0, "llm": 0,
                        "llm_cost": 0.0}
-        # 遅れの見張り（run・work・drive の段の待ちの中で動く）
+        # 遅れの見張り（run・work・drive のステップの待ちの中で動く）
         self.slow_args = list(slow_args or [])
         self.plan_path = str(Path(plan_path).resolve()) if plan_path else ""
         self.slow_cfg = ss.SlowConfig()
         self.history: Path | None = None
         self.watch: SlowWatch | None = None
-        self.slow_carry: SlowWatch | None = None  # 見張りの retry で打ち直す段へ引き継ぐ見張り
+        self.slow_carry: SlowWatch | None = None  # 見張りの retry で打ち直すステップへ引き継ぐ見張り
         self.slow_busy = False     # 調査と判定の間（判定の claude -p の tick から見張りを呼ばない）
         self.slow_paused = False   # 利用上限の待ちの間（経過に入れない）
         self.slow_events: list[dict] = []
@@ -849,7 +849,7 @@ class Supervisor:
         self.check_slow()
 
     def run_last_output(self) -> str | None:
-        """run の段が stderr へ書いた最後の空でない行（run の段の待ちの間だけ）。"""
+        """run のステップが stderr へ書いた最後の空でない行（run のステップの待ちの間だけ）。"""
         path = getattr(self, "run_log", None)
         try:
             text = path.read_text(encoding="utf-8", errors="replace") if path else ""
@@ -859,7 +859,7 @@ class Supervisor:
 
     # --- 遅れの見張り ---
     def resolve_slow(self) -> ss.SlowConfig:
-        """引数 → 計画の slow → 宣言の slow → 既定で設定を重ね、段の expected と probe の形を確かめる。"""
+        """引数 → 計画の slow → 宣言の slow → 既定で設定を重ね、ステップの expected と probe の形を確かめる。"""
         try:
             decl = read_decl(decl_roots(self.cwd, self.plan.get("リポジトリ")), SUPERVISE_DECL).get("slow")
         except DeclError:
@@ -868,15 +868,15 @@ class Supervisor:
         for s in self.steps.values():
             exp = s.get("expected")
             if exp is not None and (isinstance(exp, bool) or not isinstance(exp, (int, float)) or exp <= 0):
-                raise ss.SlowConfigError(f"段 {s['id']} の expected")
+                raise ss.SlowConfigError(f"ステップ {s['id']} の expected")
             probe = s.get("probe", "output")
             if not (probe in ("output", "worker") or probe is False
                     or (isinstance(probe, dict) and isinstance(probe.get("cmd"), str) and probe["cmd"])):
-                raise ss.SlowConfigError(f"段 {s['id']} の probe")
+                raise ss.SlowConfigError(f"ステップ {s['id']} の probe")
         return cfg
 
     def start_watch(self, step: dict, carry: SlowWatch | None = None) -> SlowWatch | None:
-        """段の見張りを始める。run・work・drive の段だけ。carry は見張りの retry で打ち直す前の見張り。"""
+        """ステップの見張りを始める。run・work・drive のステップだけ。carry は見張りの retry で打ち直す前の見張り。"""
         if step["type"] not in ss.WATCHED_TYPES or not self.slow_cfg.enabled:
             return None
         if carry:
@@ -892,7 +892,7 @@ class Supervisor:
                          commits=commits)
 
     def end_watch(self) -> None:
-        """段の終わり。成功か関門なら所要（利用上限の待ちを除く）を履歴へ積み、見張りを捨てる。"""
+        """ステップの終わり。成功か関門なら所要（利用上限の待ちを除く）を履歴へ積み、見張りを捨てる。"""
         w, self.watch = self.watch, None
         if not w or not self.history or not ss.keeps(self.cur.get("exit")) or self.cur.get("slow"):
             return
@@ -931,7 +931,7 @@ class Supervisor:
         if w.llm_calls >= cfg.max_llm:
             w.off = True
             self.slow_write({**base, "round": w.round, "act": "off", "by": "rule"})
-            self.attention("遅れ", f"段 {sid} の遅れの判定が上限 {cfg.max_llm} 回に達した。段の timeout まで待つ")
+            self.attention("遅れ", f"ステップ {sid} の遅れの判定が上限 {cfg.max_llm} 回に達した。ステップの timeout まで待つ")
             return
         w.round += 1
         probe = self.slow_probe(w)
@@ -944,7 +944,7 @@ class Supervisor:
             w.next_check = round(el + w.expected, 1)
             self.slow_write({**line, "act": "wait", "by": "rule", "next_check": w.next_check})
             if action == "remedied":
-                self.attention("遅れ", f"段 {sid} が想定 {exp} 秒を超えた（{round(el)} 秒）: {brief['summary']}。待ち直す")
+                self.attention("遅れ", f"ステップ {sid} が想定 {exp} 秒を超えた（{round(el)} 秒）: {brief['summary']}。待ち直す")
             return
         llm = None
         if action in ("retry", "fix", "stop"):
@@ -956,7 +956,7 @@ class Supervisor:
             llm = {"reason": reason, "cost": d.get("cost") or 0.0, "seconds": d.get("seconds")}
             act = d["decision"] if d["ok"] else "wait"
             if not d["ok"]:
-                self.attention("遅れ", f"段 {sid} の遅れの判定を読めない（{reason[:200]}）")
+                self.attention("遅れ", f"ステップ {sid} の遅れの判定を読めない（{reason[:200]}）")
         if act == "retry" and w.retries >= cfg.max_retry:
             act, reason = "stop", f"{reason}（retry の上限 {cfg.max_retry} 回を超えた）"
         if llm:
@@ -970,10 +970,10 @@ class Supervisor:
             w.next_check = round(el + wait_s, 1)
             self.slow_write({**line, "act": "wait", "by": by, "next_check": w.next_check})
             if llm and d["ok"]:
-                self.attention("遅れ", f"段 {sid} が想定 {exp} 秒を超えた（{round(el)} 秒）: 判定 wait（{reason}）")
+                self.attention("遅れ", f"ステップ {sid} が想定 {exp} 秒を超えた（{round(el)} 秒）: 判定 wait（{reason}）")
             return
         self.slow_write({**line, "act": act, "by": by})
-        self.attention("遅れ", f"段 {sid} を打ち切った（{act}）: {reason}")
+        self.attention("遅れ", f"ステップ {sid} を打ち切った（{act}）: {reason}")
         raise SlowAction(act, reason, str(brief.get("summary") or ""))
 
     def probe_values(self, step: dict) -> dict:
@@ -987,7 +987,7 @@ class Supervisor:
                 "state_dir": str(self.dir)}
 
     def slow_probe(self, w: SlowWatch) -> dict:
-        """段の probe（既定は run・drive が output、work が worker）で一次の調査を流す。"""
+        """ステップの probe（既定は run・drive が output、work が worker）で一次の調査を流す。"""
         step = self.steps[w.step_id]
         kind = step.get("probe", "worker" if w.type == "work" else "output")
         if kind is False:
@@ -1024,13 +1024,13 @@ class Supervisor:
         hist = ss.read_history(self.history, self.plan.get("フェーズ") or "?", w.step_id,
                                self.slow_cfg.window) if self.history else []
         prompt = (f"フェーズ: {self.plan.get('フェーズ')} / 課題: {self.plan.get('課題')}\n"
-                  f"## 段\n{json.dumps(spec, ensure_ascii=False)}\n\n"
+                  f"## ステップ\n{json.dumps(spec, ensure_ascii=False)}\n\n"
                   f"## 経過と想定\n経過 {el} 秒 / 想定 {round(w.expected, 1)} 秒 / 根拠 "
                   f"{json.dumps(w.basis, ensure_ascii=False)}\n\n"
                   f"## 一次の調査（古い順）\n" + "\n".join(json.dumps(p, ensure_ascii=False) for p in w.probes)
                   + f"\n\n## 出力の末尾\n{tail or '（出力なし）'}\n\n"
-                  f"## 同じ段の履歴の所要（秒、古い順）\n{hist or '無し'}\n\n"
-                  "## 手の意味\nretry = 段を止めて同じ段を打ち直す / fix = 段を止めて on_fail へ / "
+                  f"## 同じステップの履歴の所要（秒、古い順）\n{hist or '無し'}\n\n"
+                  "## 手の意味\nretry = ステップを止めて同じステップを打ち直す / fix = ステップを止めて on_fail へ / "
                   "stop = 計画を止める / wait = 待ち直す（wait_seconds を付けてよい）")
         res = self.claude(SLOW_SYSTEM, prompt, None, str(self.work), int(self.slow_cfg.judge_timeout))
         self.add_usage("judge", res)
@@ -1050,7 +1050,7 @@ class Supervisor:
                 "wait_seconds": d.get("wait_seconds")}
 
     def step_line(self, nxt: str | None) -> None:
-        """段の切り替わりの 1 行（id・type・exit・秒・費用・次・要約）。"""
+        """ステップの切り替わりの 1 行（id・type・exit・秒・費用・次・要約）。"""
         c = self.cur
         text = c.get("text", "") or ""
         summary = c.get("decision") or next((l for l in reversed(text.splitlines()) if l.strip()), "")
@@ -1082,7 +1082,7 @@ class Supervisor:
         for sid in step.get("inputs", []):
             r = self.results.get(sid)
             if r:
-                parts.append(f"### 段 {sid}（exit={r.get('exit')}）\n{r['text'][-TAIL:]}")
+                parts.append(f"### ステップ {sid}（exit={r.get('exit')}）\n{r['text'][-TAIL:]}")
         return "\n\n".join(parts) or "（入力なし）"
 
     def add_usage(self, kind: str, res: dict) -> None:
@@ -1093,7 +1093,7 @@ class Supervisor:
         self.llm["cache_write"] += u.get("cache_creation_input_tokens", 0)
         self.llm["output"] += u.get("output_tokens", 0)
         self.llm["cost"] += res.get("cost") or 0.0
-        # 段ごとの内訳（往復の回数・トークン・費用）。同じ段で複数回呼べば足し合わせる
+        # ステップごとの内訳（往復の回数・トークン・費用）。同じステップで複数回呼べば足し合わせる
         c = self.cur.setdefault("llm", {"calls": 0, "turns": 0, "input": 0, "cache_read": 0,
                                         "cache_write": 0, "output": 0, "cost": 0.0})
         c["calls"] += 1
@@ -1159,8 +1159,8 @@ class Supervisor:
                 timespec="minutes")
 
     def next_of(self, sid: str, step: dict) -> str | None:
-        """成功したときの次の段。`next` が無ければ並びの次へ進むが、失敗したときにだけ通る段
-        （どこかの `on_fail` が指す段と、そこから `next` で戻る段）は飛ばす。"""
+        """成功したときの次のステップ。`next` が無ければ並びの次へ進むが、失敗したときにだけ通るステップ
+        （どこかの `on_fail` が指すステップと、そこから `next` で戻るステップ）は飛ばす。"""
         if step.get("next"):
             return None if step["next"] == "end" else step["next"]
         fail_only = {s["on_fail"] for s in self.steps.values() if s.get("on_fail")}
@@ -1172,7 +1172,7 @@ class Supervisor:
             i += 1
         return self.order[i] if i < len(self.order) else None
 
-    # --- 段 ---
+    # --- ステップ ---
     @staticmethod
     def is_skip(step: dict, code: int | None) -> bool:
         return bool(step.get("skip_to")) and code == step.get("skip_code", 3)
@@ -1216,7 +1216,7 @@ class Supervisor:
     def run_cmd(self, step: dict, extra_addopts: str = "") -> tuple[int, str]:
         cmd = step.get("cmd") or PRESETS.get(step.get("preset", ""), "")
         if not cmd:
-            return 2, f"段 {step['id']} に cmd も知っている preset も無い"
+            return 2, f"ステップ {step['id']} に cmd も知っている preset も無い"
         cmd, err = self.fill_pr(cmd)
         if err:
             return 2, err
@@ -1227,7 +1227,7 @@ class Supervisor:
             cmd = cmd.replace("{base}", base)
         cmd = cmd.replace("{state_dir}", str(self.dir))
         env = dict(os.environ)
-        # 親の run の段から受け継いだ no_reports は、reports: true なら外す
+        # 親の run のステップから受け継いだ no_reports は、reports: true なら外す
         no_reports = self.no_reports()
         inherited = env.get("PYTEST_ADDOPTS", "")
         addopts = [(inherited.replace(no_reports, "") if no_reports else inherited).strip()]
@@ -1312,7 +1312,7 @@ class Supervisor:
         else:
             res = self.call_worker(step, prompt, cwd, step["id"])
         self.add_usage("work", res)
-        # 報告が無いまま応答を終えた Skill の段は、同じ会話を起こし直す（supervisor へ SendMessage で
+        # 報告が無いまま応答を終えた Skill のステップは、同じ会話を起こし直す（supervisor へ SendMessage で
         # 続けさせていたのと同じ。3 回まで）
         for _ in range(3):
             if not full or REPORT_DONE.search(res["text"] or "") or not res.get("session"):
@@ -1373,7 +1373,7 @@ class Supervisor:
         started = time.time()
         cmd = self.drive_cmd(step)
         if not cmd:
-            self.cur.update(exit=2, text=f"段 {step['id']} に cmd も知っている drive も無い")
+            self.cur.update(exit=2, text=f"ステップ {step['id']} に cmd も知っている drive も無い")
             return False, self.cur["text"]
         cmd, err = self.fill_pr(cmd)
         if err:
@@ -1392,7 +1392,7 @@ class Supervisor:
         """push して Draft の Pull Request を作る。既にあれば本文だけを書き直す。LLM を使わない。"""
         base = step.get("base") or self.base_branch()
         if not base:
-            msg = "PR の宛先（起点のブランチ）が分からない（段の base、計画か .ndf/worktree.json の base_branch）"
+            msg = "PR の宛先（起点のブランチ）が分からない（ステップの base、計画か .ndf/worktree.json の base_branch）"
             self.cur.update(exit=2, text=msg)
             return False, msg
         branch = self.git("rev-parse", "--abbrev-ref", "HEAD")
@@ -1434,9 +1434,9 @@ class Supervisor:
 {chr(10).join(stat[-15:])}
 ```
 
-## テスト（supervise.py の run の段）
+## テスト（supervise.py の run のステップ）
 
-| 段 | exit | 最後の行 |
+| ステップ | exit | 最後の行 |
 | --- | ---: | --- |
 {chr(10).join(tests) or '| 無し | | |'}
 
@@ -1475,7 +1475,7 @@ class Supervisor:
         return p.returncode == 0, url
 
     def passed_stages(self, step: dict | None = None) -> list[str]:
-        """通した工程（段の stage）を通った順に重ねずに返す。step を渡せばその段の工程も含める。"""
+        """通した工程（ステップの stage）を通った順に重ねずに返す。step を渡せばそのステップの工程も含める。"""
         stages: list[str] = []
         ids = [e.get("id") for e in self.log] + ([step["id"]] if step else [])
         for sid in ids:
@@ -1524,11 +1524,11 @@ class Supervisor:
         while sid:
             n += 1
             if n > limit:
-                result, reason = "止まった", f"段の数が上限 {limit} を超えた"
+                result, reason = "止まった", f"ステップの数が上限 {limit} を超えた"
                 break
             step = self.steps.get(sid)
             if step is None:
-                result, reason = "止まった", f"知らない段: {sid}"
+                result, reason = "止まった", f"知らないステップ: {sid}"
                 break
             self.record_stage(step.get("stage"))
             self.cur = {"id": sid, "type": step["type"]}
@@ -1571,14 +1571,14 @@ class Supervisor:
                     elif step.get("on_fail"):
                         nxt = step["on_fail"]
                     else:
-                        result, reason, nxt = "止まった", f"段 {sid} が失敗した（exit={self.cur['exit']}）", None
+                        result, reason, nxt = "止まった", f"ステップ {sid} が失敗した（exit={self.cur['exit']}）", None
             except UsageLimit as e:
-                # 利用上限は段の失敗と区別する（on_fail・judge へ回さない）
+                # 利用上限はステップの失敗と区別する（on_fail・judge へ回さない）
                 self.cur.setdefault("exit", 1)
                 self.cur["text"] = str(e)
                 result, reason, nxt = "止まった", "利用上限", None
             except SlowAction as e:
-                # 遅れの見張りが段を打ち切った（子はプロセスグループごと止めてある）
+                # 遅れの見張りがステップを打ち切った（子はプロセスグループごと止めてある）
                 self.cur.update(exit=SLOW_EXIT, seconds=round(time.time() - self.step_started, 1),
                                 text=f"遅れで打ち切った（{e.action}）: {e.reason}"
                                      + (f"\n一次の調査: {e.summary}" if e.summary else ""))
@@ -1597,8 +1597,8 @@ class Supervisor:
                     and (self.cur.get("slow") or {}).get("act") != "retry"):
                 fails = self.fail_counts[sid] = self.fail_counts.get(sid, 0) + 1
                 if fails >= 2 and (self.steps.get(nxt) or {}).get("type") == "judge":
-                    self.attention("判断の段で stop が出そう",
-                                   f"段 {sid} が {fails} 回落ちた（exit={self.cur.get('exit')}）。次は判断の段 {nxt}")
+                    self.attention("judge のステップで stop が出そう",
+                                   f"ステップ {sid} が {fails} 回落ちた（exit={self.cur.get('exit')}）。次は judge のステップ {nxt}")
             self.out_path(n, sid).write_text(self.cur.get("text", ""))
             self.log.append({k: v for k, v in self.cur.items() if k != "text"})
             (self.dir / "state.json").write_text(json.dumps(
@@ -1607,7 +1607,7 @@ class Supervisor:
         if result == "完了" and self.gates:
             result = "関門"
             if reason == "無し":
-                reason = "; ".join(f"段 {g['id']} が関門を返した（exit={g['exit']}）" for g in self.gates)
+                reason = "; ".join(f"ステップ {g['id']} が関門を返した（exit={g['exit']}）" for g in self.gates)
         return self.report(result, reason)
 
     def check_condition(self, cond: dict) -> str | None:
@@ -1649,13 +1649,13 @@ class Supervisor:
         return path
 
     def take_gate(self, step: dict) -> None:
-        """run の段の関門を残す。提示物（結果 JSON の presentation_path）は `presentation_to` があれば写す。"""
+        """run のステップの関門を残す。提示物（結果 JSON の presentation_path）は `presentation_to` があれば写す。"""
         path = self.copy_presentation(step)
         self.cur["gate"] = True
         if path:
             self.cur["presentation"] = path
         self.gates.append({"id": step["id"], "exit": self.cur.get("exit"), "presentation": path})
-        self.attention("関門", f"段 {step['id']} が関門を返した（exit={self.cur.get('exit')}）"
+        self.attention("関門", f"ステップ {step['id']} が関門を返した（exit={self.cur.get('exit')}）"
                        + (f"。提示物 {path}" if path else ""))
 
     def report(self, result: str, reason: str) -> str:
@@ -1674,7 +1674,7 @@ class Supervisor:
                 counts[e["id"]] = e["counts"]
         counts_line = "; ".join(f"{k}: {counts_text(v)}" for k, v in counts.items()) or "無し"
         if self.gates:
-            gate_line = "; ".join(f"段 {g['id']}（exit={g['exit']}）" for g in self.gates)
+            gate_line = "; ".join(f"ステップ {g['id']}（exit={g['exit']}）" for g in self.gates)
         else:
             gate_line = "本番の系へ届く操作" if result == "関門" else "無し"
         presented = ", ".join([*(g["presentation"] for g in self.gates if g.get("presentation")),
@@ -1704,15 +1704,15 @@ class Supervisor:
 - Pull Request: {self.plan.get('Pull Request', '無し')}
 - 最後に記録した工程: {self.last_stage}
 - 使った worker: 修正 {l['work']}（claude -p）/ 判断 {l['judge']}（claude -p）
-{extra}- 途中の報告: 段 {pc['step']} / まだ動いている {pc['alive']} / worker {pc['worker']}（形が違う {pc['malformed']}）/ conductor 向け {pc['attention']} / 遅れの調査 {pc['slow']} / LLM へ回した {pc['llm']} 回・${pc['llm_cost']:.3f}（{self.progress}）
+{extra}- 途中の報告: ステップ {pc['step']} / まだ動いている {pc['alive']} / worker {pc['worker']}（形が違う {pc['malformed']}）/ conductor 向け {pc['attention']} / 遅れの調査 {pc['slow']} / LLM へ回した {pc['llm']} 回・${pc['llm_cost']:.3f}（{self.progress}）
 - 提示物: {presented}
 - 理由: {reason}
-- 通った段: {steps}
+- 通ったステップ: {steps}
 - 件数: {counts_line}
 - LLM の使用量: 入力 {l['input']} / cache read {l['cache_read']} / cache write {l['cache_write']} / 出力 {l['output']} / ${l['cost']:.3f}
 - 記録: {self.dir}
 
-| 段 | 往復 | 秒 | cache read | cache write | 出力 | 費用 |
+| ステップ | 往復 | 秒 | cache read | cache write | 出力 | 費用 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 {rows}
 """
@@ -1774,13 +1774,13 @@ def sync_check(root: str, commit: bool, checks: list[tuple[str, str]] | None = N
 
 
 RULE_IMPL = ("範囲テストや全体テストが落ちたら（落ちたテストだけの再実行でも落ちた後）、変更に起因するなら fix、"
-             "環境や変更に無関係なら次の段（範囲テストなら pr、全体テストなら doc-lint）。"
+             "環境や変更に無関係なら次のステップ（範囲テストなら pr、全体テストなら doc-lint）。"
              "2 回直しても同じ失敗なら stop。")
 RULE_CHECK = ("全体テストが落ちたら（落ちたテストだけの再実行でも落ちた後）、変更に起因するなら fix、"
               "変更に無関係なら ready。2 回直しても同じなら stop。")
 FIX_PROMPT = "失敗した箇所を直してコミットする（push しない）。変更に起因しない失敗は直さない。"
 MERGE_CMD = f"python3 {HERE / 'merged-steps.py'} merge-when-green {{pr}}"
-# マージの待ちの段の一次の調査（遅れたとき PR の検査を分け、取り残しを再実行する）
+# マージの待ちのステップの一次の調査（遅れたとき PR の検査を分け、取り残しを再実行する）
 MERGE_PROBE = {"cmd": f"python3 {HERE / 'merged-steps.py'} probe --pr {{pr}} --act"}
 
 # 雛形が宣言から受けるもの。引数が宣言より先に効く
@@ -1794,7 +1794,7 @@ def apply_decls(a) -> None:
     - 起点のブランチ（a.base）: --base → worktree.json の base_branch
     - 本番のブランチ（a.production_branch）: --production-branch → worktree.json の production_branch
     - テスト（a.test_cmd・a.test_all・a.no_reports）: --test-cmd・--test-all → supervise.json の test
-    - 同期と検査（a.sync_checks）: supervise.json の sync_checks（無ければ計画に sync の段を置かない）
+    - 同期と検査（a.sync_checks）: supervise.json の sync_checks（無ければ計画に sync のステップを置かない）
     - 配布（a.release）: supervise.json の release
     """
     roots = decl_roots(a.worktree, getattr(a, "repo", None))
@@ -1828,7 +1828,7 @@ def decl_fields(a) -> dict:
 
 
 def with_decls(plan: dict, a) -> dict:
-    """計画に起点のブランチと、テストに成果物を作らせない指定を書く（run の段と pr の段が読む）。"""
+    """計画に起点のブランチと、テストに成果物を作らせない指定を書く（run のステップと pr のステップが読む）。"""
     plan["base_branch"] = a.base
     if getattr(a, "no_reports", ""):
         plan["no_reports"] = a.no_reports
@@ -1896,7 +1896,7 @@ def plan_impl(a, out: Path | None = None) -> dict:
         {"id": "impl", "type": "work", "kind": "実装", "serena": True, "stage": "実装", "issues": True,
          "timeout": 3600, "prompt": prompt, "next": "sync" if sync else "test-limited"},
     ]
-    if sync:  # 同期と検査の宣言が無いプロジェクトでは段を置かない
+    if sync:  # 同期と検査の宣言が無いプロジェクトではステップを置かない
         steps += [
             {"id": "sync", "type": "run", "preset": "sync-check", "stage": "実装", "on_fail": "fix-sync",
              "next": "test-limited"},
@@ -1912,7 +1912,7 @@ def plan_impl(a, out: Path | None = None) -> dict:
          "choices": ["fix", "pr", "doc-lint", "stop"]},
         {"id": "fix", "type": "work", "kind": "修正", "inputs": ["test-limited", "test-all"],
          "prompt": FIX_PROMPT, "next": "test-limited"},
-        # Draft の PR を全体テストの前に出し、CI と手元の全体テストを並べる。直した後は pr の段が push して本文を更新する
+        # Draft の PR を全体テストの前に出し、CI と手元の全体テストを並べる。直した後は pr のステップが push して本文を更新する
         {"id": "pr", "type": "pr", "stage": "Pull Request", "base": a.base, "title": a.title,
          "summary": a.summary or "", "changes": getattr(a, "changes", None) or "", "next": "test-all"},
         {"id": "test-all", "type": "run", "stage": "完了判定", "timeout": 1800, "rerun_failed": True,
@@ -1944,7 +1944,7 @@ def plan_impl(a, out: Path | None = None) -> dict:
 
 def plan_check(a) -> dict:
     pr = a.pr
-    # 範囲の指定が無ければ、PR が変えたファイルのディレクトリ（根を除く）を範囲にする。段はシェルで動く
+    # 範囲の指定が無ければ、PR が変えたファイルのディレクトリ（根を除く）を範囲にする。ステップはシェルで動く
     scope = (" ".join(map(shlex.quote, a.scope)) if a.scope else
              f"$(gh pr diff {pr} --name-only | xargs -n1 dirname | sort -u | grep -vx '\\.')")
     # 駆動で回す（最終ゲートは全体のテスト）
@@ -1987,7 +1987,7 @@ def plan_check_since(a) -> dict:
     範囲は「前回の検査の時点（check-base/<名>）を宛先にした Pull Request」で表す。cross-refactoring と
     cross-review は Pull Request 1 本を入力に取るため、駆動を変えずに差分全体を見られる。検査の後に宛先を
     起点のブランチへ付け替えると、差分は検査の修正だけになる。実行の条件（check-trigger.py eval）が
-    立ったときだけ流れ、作業ツリー（check/<名>）はその後に作る。落ちた run の段は abort へ行き、
+    立ったときだけ流れ、作業ツリー（check/<名>）はその後に作る。落ちた run のステップは abort へ行き、
     失敗の記録・check-base の削除・検査の Pull Request を閉じる後始末をしてから止まる。"""
     repo = str(Path(a.worktree).resolve())
     name = a.id
@@ -2048,13 +2048,13 @@ def plan_check_since(a) -> dict:
     return with_decls(plan, a)
 
 
-RULE_RELEASE_DEV = ("run の段が落ちたら、出力を読んで直せるもの（版数の書き漏れ・文書の形）は fix。外部の待ち（CI・ネットワーク）"
-                    "の揺れなら同じ段をもう一度（retry）。認証や権限の不足・タグの重複は stop。")
-RULE_RELEASE_PROD = ("利用者は関門 2 を承認した。run の段が落ちたら、直せるもの（版数の書き漏れ・文書の形）は fix。"
-                     "外部の待ち（CI・ネットワーク）の揺れなら同じ段をもう一度。タグの重複・権限の不足は stop。")
-RULE_RELEASE_PROD_MVV = ("関門 2 は利用者か MVV の判定が承認した（先頭の mvv の段が 0 を返したときだけ先へ進む）。"
-                         "run の段が落ちたら、直せるもの（版数の書き漏れ・文書の形）は fix。"
-                         "外部の待ち（CI・ネットワーク）の揺れなら同じ段をもう一度。タグの重複・権限の不足は stop。")
+RULE_RELEASE_DEV = ("run のステップが落ちたら、出力を読んで直せるもの（版数の書き漏れ・文書の形）は fix。外部の待ち（CI・ネットワーク）"
+                    "の揺れなら同じステップをもう一度（retry）。認証や権限の不足・タグの重複は stop。")
+RULE_RELEASE_PROD = ("利用者は関門 2 を承認した。run のステップが落ちたら、直せるもの（版数の書き漏れ・文書の形）は fix。"
+                     "外部の待ち（CI・ネットワーク）の揺れなら同じステップをもう一度。タグの重複・権限の不足は stop。")
+RULE_RELEASE_PROD_MVV = ("関門 2 は利用者か MVV の判定が承認した（先頭の mvv のステップが 0 を返したときだけ先へ進む）。"
+                         "run のステップが落ちたら、直せるもの（版数の書き漏れ・文書の形）は fix。"
+                         "外部の待ち（CI・ネットワーク）の揺れなら同じステップをもう一度。タグの重複・権限の不足は stop。")
 MVV_PY = f"python3 {HERE / 'mvv-gate.py'}"
 STEPS_PY = f"python3 {HERE / 'release-steps.py'}"
 VERIFY_PY = f"python3 {HERE / 'release-verification-steps.py'}"
@@ -2154,11 +2154,11 @@ def plan_release_package_plugin(a) -> dict:
         ]
     steps += [
         {"id": "judge", "type": "judge", "inputs": run_ids,
-         "question": "落ちた段を直す（fix）か、同じ段をもう一度（retry）か、止める（stop）か。retry なら decision に"
-                     "落ちた段の id を返す",
+         "question": "落ちたステップを直す（fix）か、同じステップをもう一度（retry）か、止める（stop）か。retry なら decision に"
+                     "落ちたステップの id を返す",
          "choices": ["fix", *run_ids, "stop"]},
         {"id": "fix", "type": "work", "kind": "修正", "inputs": run_ids,
-         "prompt": "落ちた段の出力を読み、原因を直してコミットする（push しない）。直したら次は落ちた段からやり直す。",
+         "prompt": "落ちたステップの出力を読み、原因を直してコミットする（push しない）。直したら次は落ちたステップからやり直す。",
          "next": after_notes},
     ]
     if mvv and not dev:
@@ -2290,7 +2290,7 @@ def plan_mission_release(a, repo: str) -> dict:
 
 
 def plan_fast_design(a, n: int, repo: str) -> dict:
-    """pace: fast の設計: 関門 1 の judge を MVV の判定の段へ替える。従えばラベルとコメントを付けてマージする。"""
+    """pace: fast の設計: 関門 1 の judge を MVV の判定のステップへ替える。従えばラベルとコメントを付けてマージする。"""
     plan = plan_mission_design(a, n, repo)
     state = shlex.quote(str(Path(a.state).resolve()))
     note = "{state_dir}/work/mvv-note.md"
@@ -2306,14 +2306,14 @@ def plan_fast_design(a, n: int, repo: str) -> dict:
                 "gh pr ready {pr}'", "next": "merge"},
         {"id": "merge", "type": "run", "timeout": 7200, "cmd": MERGE_CMD, "probe": MERGE_PROBE, "next": "end"},
     ]
-    plan["規則"] = ("設計の cross-review は上限 3 ラウンドで関門 1 の判定（mvv の段）へ渡す（収束を待たない）。"
+    plan["規則"] = ("設計の cross-review は上限 3 ラウンドで関門 1 の判定（mvv のステップ）へ渡す（収束を待たない）。"
                   "駆動そのものが失敗したら gate。")
     return plan
 
 
 def plan_fast_impl(a, n: int, repo: str) -> dict:
     """pace: fast の実装: 課題の作業ツリーを起点のブランチから切り、Pull Request を起点のブランチへ直接入れる。
-    閉じる語は書かない（課題はミッションの終わりの close の段が閉じる）。"""
+    閉じる語は書かない（課題はミッションの終わりの close のステップが閉じる）。"""
     branch = f"feat/issue-{n}-{a.name}"
     ns = argparse.Namespace(**{
         **decl_fields(a), "issue": [n], "prompt": None, "prompt_file": None, "tests": a.tests or ["."],
@@ -2346,8 +2346,8 @@ def prod_version(version: str) -> str:
 
 
 def fast_mission_plans(a) -> list[dict]:
-    """pace: fast のミッションの波。ミッションのブランチを作らず、実装は起点のブランチへ直接入れる。
-    実装の queue が --then の段で 検査（実行の条件）→ 開発版 → 本番（先頭が MVV の判定）を順に流す。"""
+    """pace: fast のミッションのステージ。ミッションのブランチを作らず、実装は起点のブランチへ直接入れる。
+    実装の queue が --then のステージで 検査（実行の条件）→ 開発版 → 本番（先頭が MVV の判定）を順に流す。"""
     repo = str(Path(a.worktree).resolve())
     waves = []
     if a.design:
@@ -2395,7 +2395,7 @@ def close_plan(a, repo: str) -> dict:
 
 
 def close_waves(a) -> list[dict]:
-    """ミッションの終わりの波。最終の検査で変更があったときだけ開発版と本番が流れる。"""
+    """ミッションの終わりのステージ。最終の検査で変更があったときだけ開発版と本番が流れる。"""
     repo = str(Path(a.worktree).resolve())
     final = f"{a.name}-final"
     changed = {"cmd": f"{CHECK_PY} changed --id {final} --root {shlex.quote(repo)}", "skip_code": 3}
@@ -2455,7 +2455,7 @@ def mvv_refusal(state_path: str | None) -> str | None:
 
 
 def mission_plans(a) -> list[dict]:
-    """ミッションの波を順に返す。波の中の計画は queue --max 3 で同時に流してよい。"""
+    """ミッションのステージを順に返す。ステージの中の計画は queue --max 3 で同時に流してよい。"""
     if getattr(a, "pace", "normal") == "fast":
         return fast_mission_plans(a)
     repo = str(Path(a.worktree).resolve())
@@ -2473,8 +2473,8 @@ def mission_plans(a) -> list[dict]:
 
 
 def cmd_new_mission(a, waves: list[dict] | None = None) -> dict:
-    """ミッションの計画を波ごとのファイルへ書き出す。波は番号の順に queue で流す。
-    then_of の波は、その波の queue へ --then の段として足す（段は書いた順に流れる）。"""
+    """ミッションの計画をステージごとのファイルへ書き出す。ステージは番号の順に queue で流す。
+    then_of のステージは、そのステージの queue へ --then のステージとして足す（ステージは書いた順に流れる）。"""
     fast = waves is None and getattr(a, "pace", "normal") == "fast"
     if fast:
         why = fast_refusal(a)
@@ -2497,7 +2497,7 @@ def cmd_new_mission(a, waves: list[dict] | None = None) -> dict:
                 paths.append(str(p))
             entry["plans"] = paths
             if "then_of" in wave:
-                # 前の波の queue が --then で続けて流す
+                # 前のステージの queue が --then で続けて流す
                 entry["then_of"] = wave["then_of"]
                 prev = next(e for e in index if e["name"] == wave["then_of"])
                 prev["command"] += " --then " + " ".join(map(shlex.quote, paths))
@@ -2512,11 +2512,11 @@ def cmd_new_mission(a, waves: list[dict] | None = None) -> dict:
         head.update({"進め方": "fast", "状態": str(Path(a.state).resolve())})
     else:
         head["ブランチ"] = mission_branch(a.name)
-    manifest.write_text(json.dumps({**head, "波": index}, ensure_ascii=False, indent=2) + "\n")
+    manifest.write_text(json.dumps({**head, "ステージ": index}, ensure_ascii=False, indent=2) + "\n")
     plans = sum(len(e.get("plans", [])) for e in index)
-    return result("supervise-new", "ok", f"ミッション {a.name} の計画を {plans} 本・{len(index)} 波で書いた: {manifest}",
+    return result("supervise-new", "ok", f"ミッション {a.name} の計画を {plans} 本・{len(index)} ステージで書いた: {manifest}",
                   items, {"waves": len(index), "plans": plans, "manifest": str(manifest)},
-                  next="波の番号の順に command を打つ。関門の波では承認を取ってから次へ進む")
+                  next="ステージの番号の順に command を打つ。関門のステージでは承認を取ってから次へ進む")
 
 
 def report_result(text: str) -> str:
@@ -2580,7 +2580,7 @@ def progress_size(plan: str) -> int:
 
 def queue_prs(items: list[dict]) -> list[str]:
     """完了した計画の報告の Pull Request を番号にして、重ねずに番号の順に返す（計画の終わった順に依らない）。
-    配布の計画（フェーズが「配布」で始まる）の Pull Request は含めない（開発版の後に本番を段で流すとき）。"""
+    配布の計画（フェーズが「配布」で始まる）の Pull Request は含めない（開発版の後に本番をステージで流すとき）。"""
     out: list[str] = []
     for i in items:
         rep = Path(i.get("report") or "")
@@ -2633,8 +2633,8 @@ def named(plan: str, name: str) -> bool:
 
 
 def fill_queue_pr(plan: str, items: list[dict]) -> str | None:
-    """計画の {queue_pr:<名>} を、前の段の名前の一致する計画の Pull Request 1 本で置き換える。
-    前の段に無ければ同じディレクトリの計画の報告を読む（関門の後に単独で流すとき）。無い・飛ばされたなら 0。"""
+    """計画の {queue_pr:<名>} を、前のステージの名前の一致する計画の Pull Request 1 本で置き換える。
+    前のステージに無ければ同じディレクトリの計画の報告を読む（関門の後に単独で流すとき）。無い・飛ばされたなら 0。"""
     try:
         text = Path(plan).read_text()
     except OSError as e:
@@ -2712,8 +2712,8 @@ def cmd_queue(plans: list[str], max_: int, poll: float = 1.0, then: list | None 
     then の計画は、前の計画がすべて 完了 のときだけ同じ枠（max_）で続けて流す。1 本でも 完了 でなければ
     流さず、items に 流さなかった と理由を残す。then の計画の QUEUE_PRS（new release --prs-from-queue）は、
     流す前に前の計画の報告の Pull Request の番号で置き換える。
-    then は段の並び（[[計画...], [計画...]]）でもよい。段は前のすべての段が 完了 のときだけ流し、QUEUE_PRS は
-    前のすべての段の Pull Request、{queue_pr:<名>} は前の段の名前の一致する計画の Pull Request 1 本で置き換える。
+    then はステージの並び（[[計画...], [計画...]]）でもよい。ステージは前のすべてのステージが 完了 のときだけ流し、QUEUE_PRS は
+    前のすべてのステージの Pull Request、{queue_pr:<名>} は前のステージの名前の一致する計画の Pull Request 1 本で置き換える。
     始めに流す計画の一覧を done の隣へ書き（wait が読む）、終わったら（後続を含めて）結果の JSON を done へ書く。"""
     stages = [list(t) for t in then] if then and not isinstance(then[0], str) else ([list(then)] if then else [])
     done_path = queue_done_path(plans, done)
@@ -2733,7 +2733,7 @@ def cmd_queue(plans: list[str], max_: int, poll: float = 1.0, then: list | None 
         if not_done:
             ran_bad = [i for i in not_done if i["result"] != NOT_RUN]
             reason = ("前の計画が完了していない: " + "、".join(f"{i['plan']}（{i['result']}）" for i in ran_bad)
-                      if ran_bad else "前の段を流さなかった")
+                      if ran_bad else "前のステージを流さなかった")
             items += [{"plan": p, "result": NOT_RUN, "reason": reason} for p in stage]
             continue
         prs, runnable, skipped_then = queue_prs(items), [], []
@@ -2805,7 +2805,7 @@ def cmd_wait(done: str, timeout: float, poll: float = 5.0, clock=time.time, slee
                 write_atomic(cursor_path, json.dumps({"started": listing.get("started"), "offsets": offsets},
                                                      ensure_ascii=False) + "\n")
                 first = found[0]
-                summary = (f"attention {len(found)} 件: {first['plan']} の段 {first.get('step')}"
+                summary = (f"attention {len(found)} 件: {first['plan']} のステップ {first.get('step')}"
                            f"（{first.get('reason')}）: {first.get('text')}")
                 return summary, result("supervise-wait", "gate", summary, found,
                                        {"event": "attention", "attention": len(found), "done": str(done_path)},
@@ -2857,7 +2857,7 @@ def cmd_note(doc: str, report_path: str, next_text: str, section: str) -> dict:
 
 
 def cmd_history_import(paths: list[str], history: str | None) -> dict:
-    """既存の progress.jsonl の段の所要を履歴へ取り込む。"""
+    """既存の progress.jsonl のステップの所要を履歴へ取り込む。"""
     if history:
         target = Path(history)
     else:
@@ -2878,7 +2878,7 @@ def cmd_history_import(paths: list[str], history: str | None) -> dict:
 
 
 def cmd_expected(plan_path: str, history: str | None, slow_pairs: list[str]) -> tuple[dict, int | None]:
-    """計画の段ごとの想定と根拠を出す（run・work・drive の段）。"""
+    """計画のステップごとの想定と根拠を出す（run・work・drive のステップ）。"""
     try:
         plan = normalize_plan(json.loads(Path(plan_path).read_text()))
         steps = expand_parts(list(plan["steps"]))
@@ -2900,7 +2900,7 @@ def cmd_expected(plan_path: str, history: str | None, slow_pairs: list[str]) -> 
             continue
         value, basis = ss.expected_for(ss.read_history(target, phase, st["id"], cfg.window), cfg, st.get("expected"))
         items.append({"kind": "step", "name": st["id"], "type": st["type"], "expected": value, "basis": basis})
-    return result("supervise-expected", "ok", f"{len(items)} 段の想定を出した（フェーズ {phase}・履歴 {target}）",
+    return result("supervise-expected", "ok", f"{len(items)} ステップの想定を出した（フェーズ {phase}・履歴 {target}）",
                   items, {"history": str(target), "enabled": cfg.enabled}), None
 
 
@@ -2910,15 +2910,15 @@ def main() -> int:
     r = sub.add_parser("run")
     r.add_argument("plan")
     r.add_argument("--state-dir")
-    r.add_argument("--from", dest="start", help="この段から始める（途中から再開するとき）")
+    r.add_argument("--from", dest="start", help="このステップから始める（途中から再開するとき）")
     r.add_argument("--slow", action="append", default=[], metavar="K=V",
                    help="遅れの見張りの設定を上書きする（計画と .ndf/supervise.json の slow より先に効く。繰り返せる）")
-    hp = sub.add_parser("history", help="段の所要の履歴（遅れの見張りの想定の材料）")
+    hp = sub.add_parser("history", help="ステップの所要の履歴（遅れの見張りの想定の材料）")
     hs = hp.add_subparsers(dest="hcmd", required=True)
-    hi = hs.add_parser("import", help="既存の progress.jsonl の段の所要を履歴へ取り込む")
+    hi = hs.add_parser("import", help="既存の progress.jsonl のステップの所要を履歴へ取り込む")
     hi.add_argument("progress", nargs="+")
     hi.add_argument("--history", help="履歴のファイル（既定は <git の共通ディレクトリ>/ndf/step-history.jsonl）")
-    ex = sub.add_parser("expected", help="計画の段ごとの想定時間と根拠を出す")
+    ex = sub.add_parser("expected", help="計画のステップごとの想定時間と根拠を出す")
     ex.add_argument("plan")
     ex.add_argument("--history")
     ex.add_argument("--slow", action="append", default=[], metavar="K=V")
@@ -2972,8 +2972,8 @@ def main() -> int:
     q.add_argument("--max", type=int, default=3)
     q.add_argument("--poll", type=float, default=5.0)
     q.add_argument("--then", nargs="+", action="append", default=[], metavar="PLAN",
-                   help="前の計画がすべて完了したときだけ続けて流す計画（例: 配布の計画）。繰り返すと段になり、"
-                        "段は前のすべての段が完了のときだけ流れる")
+                   help="前の計画がすべて完了したときだけ続けて流す計画（例: 配布の計画）。繰り返すとステージになり、"
+                        "ステージは前のすべてのステージが完了のときだけ流れる")
     q.add_argument("--done", help="終わったときに結果の JSON を書く所（省けば最初の計画の状態ディレクトリの "
                                   "queue-done.json）。待つ側は wait <このパス> で待つ")
     w = sub.add_parser("wait", help="queue の終わりか attention の行まで待つ（done = 0 / attention = 20 / 上限 = 3）")
