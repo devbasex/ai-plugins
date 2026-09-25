@@ -399,6 +399,10 @@ def test_revert_range_failure_message_has_no_item_id_prefix(gitfacts, work, caps
     assert _git("rev-parse", "HEAD", cwd=work).stdout.strip() == second
 
 
+def _check_runs(*runs):
+    return json.dumps({"total_count": len(runs), "check_runs": list(runs)})
+
+
 def test_check_run_result_characterization(gitfacts, monkeypatch):
     """check_run_result の公開契約を固定する現状固定テスト。"""
     # 1. 引数が空なら None
@@ -417,70 +421,78 @@ def test_check_run_result_characterization(gitfacts, monkeypatch):
     monkeypatch.setattr(gitfacts, "sh", lambda *args, **kwargs: "not-json{")
     assert gitfacts.check_run_result("repo", "sha", "ci") is None
 
-    # 4. check_runs 欠損（非 dict、または check_runs がリストでない）なら None
+    # 4. check_runs 欠損（非 dict、または check_runs がリストでない）・0 件なら None
     monkeypatch.setattr(gitfacts, "sh", lambda *args, **kwargs: "[]")
     assert gitfacts.check_run_result("repo", "sha", "ci") is None
 
-    monkeypatch.setattr(gitfacts, "sh", lambda *args, **kwargs: json.dumps({"check_runs": "not-a-list"}))
+    monkeypatch.setattr(gitfacts, "sh", lambda *args, **kwargs: json.dumps(
+        {"total_count": 1, "check_runs": "not-a-list"}))
+    assert gitfacts.check_run_result("repo", "sha", "ci") is None
+
+    monkeypatch.setattr(gitfacts, "sh", lambda *args, **kwargs: _check_runs())
     assert gitfacts.check_run_result("repo", "sha", "ci") is None
 
     # 5. 対象名なし（一致する name がない）なら None
-    monkeypatch.setattr(
-        gitfacts,
-        "sh",
-        lambda *args, **kwargs: json.dumps({
-            "check_runs": [{"name": "other", "status": "completed", "conclusion": "success"}]
-        }),
-    )
+    monkeypatch.setattr(gitfacts, "sh", lambda *args, **kwargs: _check_runs(
+        {"name": "other", "status": "completed", "conclusion": "success"}))
     assert gitfacts.check_run_result("repo", "sha", "ci") is None
 
-    # 6. 未完了（status != completed）なら "pending"
-    monkeypatch.setattr(
-        gitfacts,
-        "sh",
-        lambda *args, **kwargs: json.dumps({
-            "check_runs": [
-                {"name": "ci", "status": "in_progress", "conclusion": None},
-                {"name": "ci", "status": "completed", "conclusion": "success"},
-            ]
-        }),
-    )
+    # 6. 最新の実行が未完了（status != completed）なら "pending"
+    monkeypatch.setattr(gitfacts, "sh", lambda *args, **kwargs: _check_runs(
+        {"name": "ci", "status": "completed", "conclusion": "success",
+         "started_at": "2026-09-25T01:00:00Z", "completed_at": "2026-09-25T01:05:00Z"},
+        {"name": "ci", "status": "in_progress", "conclusion": None,
+         "started_at": "2026-09-25T02:00:00Z"},
+    ))
     assert gitfacts.check_run_result("repo", "sha", "ci") == "pending"
 
-    # 7. 失敗（completed だが conclusion != success）ならその結論（または unknown）
-    monkeypatch.setattr(
-        gitfacts,
-        "sh",
-        lambda *args, **kwargs: json.dumps({
-            "check_runs": [
-                {"name": "ci", "status": "completed", "conclusion": "failure"},
-                {"name": "ci", "status": "completed", "conclusion": "success"},
-            ]
-        }),
-    )
+    # 7. 最新の実行が失敗ならその結論（または unknown）
+    monkeypatch.setattr(gitfacts, "sh", lambda *args, **kwargs: _check_runs(
+        {"name": "ci", "status": "completed", "conclusion": "success",
+         "completed_at": "2026-09-25T01:00:00Z"},
+        {"name": "ci", "status": "completed", "conclusion": "failure",
+         "completed_at": "2026-09-25T02:00:00Z"},
+    ))
     assert gitfacts.check_run_result("repo", "sha", "ci") == "failure"
 
-    monkeypatch.setattr(
-        gitfacts,
-        "sh",
-        lambda *args, **kwargs: json.dumps({
-            "check_runs": [
-                {"name": "ci", "status": "completed", "conclusion": None},
-            ]
-        }),
-    )
+    monkeypatch.setattr(gitfacts, "sh", lambda *args, **kwargs: _check_runs(
+        {"name": "ci", "status": "completed", "conclusion": None}))
     assert gitfacts.check_run_result("repo", "sha", "ci") == "unknown"
 
-    # 8. 全成功なら "success"
-    monkeypatch.setattr(
-        gitfacts,
-        "sh",
-        lambda *args, **kwargs: json.dumps({
-            "check_runs": [
-                {"name": "ci", "status": "completed", "conclusion": "success"},
-                {"name": "ci", "status": "COMPLETED", "conclusion": "SUCCESS"},
-            ]
-        }),
-    )
+    # 8. 成功なら "success"（大文字でも）
+    monkeypatch.setattr(gitfacts, "sh", lambda *args, **kwargs: _check_runs(
+        {"name": "ci", "status": "COMPLETED", "conclusion": "SUCCESS"}))
     assert gitfacts.check_run_result("repo", "sha", "ci") == "success"
 
+
+def test_check_run_result_reads_the_latest_run_after_a_rerun(gitfacts, monkeypatch):
+    """同名の検査が failure → success の順に 2 件あるとき success を返す（#632）。
+
+    本文の編集で同じワークフローが別の check suite として走ると、前の suite の失敗が
+    `check-runs` に残る。前の失敗を数えると、最終ゲートが修正ラウンドへ回る。
+    """
+    monkeypatch.setattr(gitfacts, "sh", lambda *args, **kwargs: _check_runs(
+        {"id": 1, "name": "check", "status": "completed", "conclusion": "failure",
+         "started_at": "2026-09-25T02:09:30Z", "completed_at": "2026-09-25T02:09:44Z"},
+        {"id": 2, "name": "check", "status": "completed", "conclusion": "success",
+         "started_at": "2026-09-25T02:14:20Z", "completed_at": "2026-09-25T02:14:31Z"},
+    ))
+    assert gitfacts.check_run_result("repo", "sha", "check") == "success"
+
+
+def test_check_run_result_reads_every_page(gitfacts, monkeypatch):
+    """1 ページに収まらない一覧は total_count に届くまで読む。"""
+    pages = {
+        "1": {"total_count": 2, "check_runs": [
+            {"name": "ci", "status": "completed", "conclusion": "failure",
+             "completed_at": "2026-09-25T01:00:00Z"}]},
+        "2": {"total_count": 2, "check_runs": [
+            {"name": "ci", "status": "completed", "conclusion": "success",
+             "completed_at": "2026-09-25T02:00:00Z"}]},
+    }
+
+    def _sh(cmd, *args, **kwargs):
+        return json.dumps(pages[cmd[-1].rsplit("page=", 1)[1]])
+
+    monkeypatch.setattr(gitfacts, "sh", _sh)
+    assert gitfacts.check_run_result("repo", "sha", "ci") == "success"

@@ -12,8 +12,10 @@ import shutil
 import signal
 import subprocess
 import time
+from types import SimpleNamespace
 from typing import Any, Optional
 
+import gh_parts
 import models as models_lib
 import statefile
 from monitor_outcome import LaunchOutcome, read_launch_outcome
@@ -476,73 +478,42 @@ def resolved_threads_on_github(repo: str, pr: int) -> Optional[set[str]]:
             return resolved
 
 
-# 継続的統合の照会は `commits/{sha}/check-runs` の 1 回だけにする。**併記された状態
+# 継続的統合の照会は `commits/{sha}/check-runs` だけにする。**併記された状態
 # （`commits/{sha}/status`）は使わない。** GitHub Actions は検査ジョブを記録し commit の
 # 状態を記録しないため、すべて成功した commit でも `pending` を返す。保留として読むと、
 # 通っている検査で通過できなくなる。
-CHECK_RUNS_PER_PAGE = 100
+#
+# ページの読み方と、同名の検査ジョブを名前ごとの最新の実行へ畳む処理は共通層の
+# `gh_parts`（`pr-info --with checks` と cross-review の判定が使う実装）が持つ（#632）。
 
 
-def _parse_check_runs(raw_json: Optional[str]) -> Optional[list[dict[str, Any]]]:
-    """API 出力から check_runs のリストを検証して返す。"""
-    if not raw_json:
+def _gh_api_get(path: str) -> Optional[SimpleNamespace]:
+    """`gh api <path>` の JSON を `.body` に持つ応答。照会できなければ `None`。"""
+    out = sh(["gh", "api", path], check=False)
+    if not out:
         return None
     try:
-        body = json.loads(raw_json)
+        return SimpleNamespace(body=json.loads(out))
     except json.JSONDecodeError:
         return None
-    runs = body.get("check_runs") if isinstance(body, dict) else None
-    if not isinstance(runs, list):
-        return None
-    return [r for r in runs if isinstance(r, dict)]
-
-
-def _filter_check_runs_by_name(
-    runs: list[dict[str, Any]], name: str
-) -> list[dict[str, Any]]:
-    """名前が一致する run を選別する。"""
-    return [
-        r for r in runs
-        if str(r.get("name") or "") == name
-    ]
-
-
-def _aggregate_check_run_results(matched: list[dict[str, Any]]) -> Optional[str]:
-    """matched runs を pending・失敗結論・success の順で集約する。"""
-    if not matched:
-        return None
-    if any(str(r.get("status") or "").lower() != "completed" for r in matched):
-        return "pending"
-    for run in matched:
-        conclusion = str(run.get("conclusion") or "").lower()
-        if conclusion != "success":
-            return conclusion or "unknown"
-    return "success"
 
 
 def check_run_result(repo: str, sha: str, name: str) -> Optional[str]:
-    """名前が一致した検査ジョブの結果を 1 つの語で返す。
+    """名前が一致した検査ジョブの、最新の実行の結果を 1 つの語で返す。
 
-    - すべて完了して結論が `success` なら `"success"`
-    - 未完了があれば `"pending"`
-    - それ以外は最初に見つけた失敗の結論（`"failure"` など）
+    - 完了して結論が `success` なら `"success"`
+    - 未完了なら `"pending"`
+    - それ以外はその結論（`"failure"` など。空なら `"unknown"`）
     - **照会できない・名前が一致する検査が 1 件も無いときは `None`**
 
     **「照会できなかった」と「成功した」を区別する。** 呼び出し側は `None` を
     通過させない（fail-closed）。名前で絞るのは、別の検査の成功で通さないためである。
+    別の実行で成功した同名の検査の、前の実行の失敗は数えない。
     """
     if not repo or not sha or not name:
         return None
-    out = sh(
-        ["gh", "api", f"repos/{repo}/commits/{sha}/check-runs"
-                      f"?per_page={CHECK_RUNS_PER_PAGE}"],
-        check=False,
-    )
-    runs = _parse_check_runs(out)
-    if runs is None:
-        return None
-    matched = _filter_check_runs_by_name(runs, name)
-    return _aggregate_check_run_results(matched)
+    runs = gh_parts.fetch_check_runs(repo, sha, rest_get=_gh_api_get)
+    return gh_parts.check_result(runs, name)
 
 
 def revert_item_commits(

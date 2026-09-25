@@ -254,14 +254,17 @@ def _run_order(indexed: tuple[int, dict[str, Any]]) -> tuple[str, int, int]:
         run_id = int(run.get("id") or 0)
     except (TypeError, ValueError):
         run_id = 0
-    return (str(run.get("started_at") or run.get("completed_at") or ""), run_id, i)
+    # ISO 8601 の UTC（`Z` 付き）は文字列の比較で時刻の順になる。
+    stamp = max(str(run.get("completed_at") or ""), str(run.get("started_at") or ""))
+    return (stamp, run_id, i)
 
 
 def fold_check_runs(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """同名の検査ジョブを、名前ごとの最新の実行 1 件へ畳む（#632）。
 
     再実行で `failure` → `success` になった検査は `success` として返す。新しさは
-    開始時刻 → 実行の番号（`id` は増える一方）→ 一覧の中の順で決める。
+    `completed_at` と `started_at` の新しい方 → 実行の番号（`id` は増える一方）→
+    一覧の中の順で決める。
     並びは最初に現れた名前の順を保つ。
     """
     latest: dict[str, tuple[int, dict[str, Any]]] = {}

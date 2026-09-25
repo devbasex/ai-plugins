@@ -377,3 +377,16 @@ def test_review_post_stops_when_the_viewer_is_unknown(fake, tmp_path):
                                queue_dir=str(tmp_path / "q"))
 
     assert (obj["status"], code) == ("stopped", 3)
+
+
+def test_fold_takes_the_newer_of_completed_and_started_times():
+    """新しさは `completed_at` と `started_at` の新しい方で決める（#632）。
+
+    長く走って後に終わった失敗は、後に始まって先に終わった成功より新しい。
+    """
+    long_failure = {"id": 1, "name": "t", "status": "completed", "conclusion": "failure",
+                    "started_at": "2026-09-25T01:00:00Z", "completed_at": "2026-09-25T03:00:00Z"}
+    short_success = {"id": 2, "name": "t", "status": "completed", "conclusion": "success",
+                     "started_at": "2026-09-25T02:00:00Z", "completed_at": "2026-09-25T02:10:00Z"}
+    assert gp.check_result([long_failure, short_success], "t") == "failure"
+    assert gp.check_result([short_success, long_failure], "t") == "failure"
