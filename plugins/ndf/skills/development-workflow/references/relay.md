@@ -129,6 +129,23 @@ conductor では、文脈量の hook が工程へ入る起動を 1 度の通し�
 （[context-window.md](context-window.md) の「上限を超えたら hook が止める」）。背景の処理
 （supervisor を含む）が動いているあいだの応答では印を書かない。
 
+## 切れ目の引継ぎ文書と ndf-next はスクリプトで作る
+
+**conductor は引継ぎ文書の「今の会話の進み」の表と `ndf-next` の文面を手で書かない。**
+`scripts/mission-state.py` が、ミッションの状態のファイル `mission.json`（計画の出力先に置く）から作る。LLM は呼ばない。
+
+例: 区間 7 の実装 3 本と開発版・本番を流す。
+
+1. 計画を作った後に 1 度: `mission-state.py init /tmp/ndf-sv/r7/mission.json --name <ミッション> --milestone 26 --plan 実装=<plan.json> ... --plan 開発版=<plan.json> --plan 本番=<plan.json> --done <queue の done> --dev <開発版> --prod <本番> --goal @<雛形>`（雛形は次の区間の `/goal` の文面。`{heading}`・`{dev}`・`{prod}`・`{milestone}`・`{name}`・`{issues}` を差し込む）
+2. 関門を承認したら: `mission-state.py gate <mission.json> "関門 2" --what "本番 <版>"`
+3. 切れ目では次の順に呼ぶ:
+   - `mission-state.py update <mission.json> [--done <done>] [--next <plan.json>=<行の「次」>]`（done と報告から状態・PR・秒・費用を埋める。何度走らせても同じ）
+   - `mission-state.py render <mission.json> <引継ぎ文書> --section 今の会話の進み`（節の本文だけを置き換える。新しい区間なら `--demote 前の会話の進み --heading "今の会話の進み（<時刻>）"` で今の節を下げて新しい節を足す）
+   - `mission-state.py next <mission.json> --doc <引継ぎ文書> --replace`（「次に実行するコマンド」の節を置き換え、同じ `ndf-next` の囲みを最後の応答に出す）
+
+`mission-state.py status <mission.json>` は端末向けに 1 行ずつ（ミッション・状態・次）を出す。
+節が見つからないときは文書を変えずに `"status": "stopped"` と理由を返す。
+
 ## 落ちたときの続け方
 
 中継が次の区間を起動しないと決めたときは、`ndf-relay:` で始まる 1 行が画面に出る。
