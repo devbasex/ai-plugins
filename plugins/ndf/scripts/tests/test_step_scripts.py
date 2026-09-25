@@ -128,6 +128,17 @@ def test_cleanup_all_merged_is_ok(repo, env, tmp_path):
     assert out["metrics"]["removed_worktrees"] == 1 and out["metrics"]["deleted_branches"] == 1
 
 
+
+def test_cleanup_from_inside_the_worktree_it_removes(repo, env, tmp_path):
+    # 計画の merge のステップは作業場所（消す作業ツリー）で打つ。消した後も主ディレクトリから続ける
+    write(repo, ".ndf/worktree.json", json.dumps({"base_branch": "main"}))
+    wx = tmp_path / "wx"
+    git(repo, "worktree", "add", "-q", "-b", "feature/x", str(wx))
+    env["FAKE_GH_PRS"] = json.dumps({"1": {"headRefName": "feature/x", "state": "MERGED"}})
+    code, out, err = call("merged-steps.py", ["cleanup", "1", "--root", str(wx)], env, cwd=repo)
+    assert code == 0, (out, err)
+    assert not wx.exists() and "feature/x" not in git(repo, "branch", "--list")
+
 # --- spec-finalize（plan-to-spec-steps.py） ---------------------------------
 
 def spec_repo(repo):
