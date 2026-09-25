@@ -39,6 +39,7 @@ import statefile  # noqa: E402  再開の反映（#727 / #648）
 import run_metrics  # noqa: E402  実行の要約（#662）
 import monitor_outcome  # noqa: E402  起動 1 回の結末（#729）
 import result_posts  # noqa: E402  結果ファイルを投稿へ変える層（#730）
+import gh_parts  # noqa: E402  PR の取得の部品（#849）
 
 # 区分の定義は scripts 配下の共有モジュールに 1 か所だけ置く（#156、#732）。
 # `measure.py` も同じ定義を読み、両者の一致は `test_measure.py` が固定する。
@@ -307,37 +308,10 @@ def _git_toplevel() -> str | None:
 # 項目をまとめる先を REST にして、GraphQL の消費を実行ごと・ラウンドごとに 0 点へ寄せる。
 
 
-class RestResponse(NamedTuple):
-    """`gh api -i` の 1 回の応答。ヘッダと本文を組で持つ。
-
-    残量（`x-ratelimit-remaining`）は**通常の要求の応答ヘッダからしか読めない**。
-    `gh api rate_limit` は同じ時刻でも消費を反映しない（実測）。読むためだけの
-    呼び出しを置かず、毎回の応答から拾う。
-    """
-
-    headers: dict[str, str]
-    body: Any
-    rate_remaining: int | None
-    rate_reset: str | None
-
-
-def _parse_rest_headers(text: str) -> tuple[dict[str, str], str]:
-    """`gh api -i` の出力を、ヘッダの辞書と本文へ分ける。
-
-    状態行だけが `\r` を持たず、以降のヘッダは `\r\n` で終わる（実測）。行末の
-    違いで分けられなくなるため、空行そのものを区切りとして読む。
-    """
-    headers: dict[str, str] = {}
-    lines = text.splitlines(keepends=True)
-    body_at = len(lines)
-    for i, line in enumerate(lines):
-        if not line.strip():
-            body_at = i + 1
-            break
-        name, sep, value = line.partition(":")
-        if sep:
-            headers[name.strip().lower()] = value.strip()
-    return headers, "".join(lines[body_at:])
+# 応答の形とヘッダの読み方は共通層（`gh_parts`、#849）が持つ。残量は通常の要求の
+# 応答ヘッダからしか読めない（`gh api rate_limit` は同じ時刻でも消費を反映しない、実測）。
+RestResponse = gh_parts.RestResponse
+_parse_rest_headers = gh_parts.parse_rest_headers
 
 
 def _gh_rest(path: str) -> RestResponse | None:
@@ -570,30 +544,15 @@ def _fetch_check_runs(repo: str, sha: str) -> list[dict[str, Any]] | None:
     `total_count` はページの件数ではなく全体の件数を返す。読み切らないまま
     `_classify_ci` へ渡すと、後ろのページにある失敗が無いものとして扱われる。
     100 件で収まるリポジトリは 1 回で終わり、呼び出し回数は変わらない。
+
+    **同名の検査ジョブは名前ごとの最新の実行へ畳む**（#632）。再実行で `failure` →
+    `success` になった検査を失敗として数えない。読み方と畳み方は共通層の `gh_parts`
+    （`pr-info --with checks` と同じ実装）が持ち、ここは REST の呼び出しだけを渡す。
     """
-    if not repo or not sha:
-        return None
-    base = f"repos/{repo}/commits/{sha}/check-runs?per_page={CHECK_RUNS_PER_PAGE}"
-    runs: list[dict[str, Any]] = []
-    total: int | None = None
-    for page in range(1, CHECK_RUNS_MAX_PAGES + 1):
-        resp = _gh_rest(f"{base}&page={page}")
-        if resp is None or not isinstance(resp.body, dict):
-            return None
-        if total is None:
-            try:
-                total = int(resp.body.get("total_count") or 0)
-            except (TypeError, ValueError):
-                return None
-            if total <= 0:
-                return None
-        chunk = resp.body.get("check_runs")
-        if not isinstance(chunk, list) or not chunk:
-            break
-        runs.extend(r for r in chunk if isinstance(r, dict))
-        if len(runs) >= total:
-            break
-    return runs or None
+    runs = gh_parts.fetch_check_runs(
+        repo, sha, rest_get=lambda path: _gh_rest(path),
+        per_page=CHECK_RUNS_PER_PAGE, max_pages=CHECK_RUNS_MAX_PAGES)
+    return gh_parts.fold_check_runs(runs) if runs else None
 
 
 class HeadRef(NamedTuple):
@@ -2503,28 +2462,6 @@ def _as_count(value: object) -> int:
         return 0
 
 
-# Pull Request 上の未解決の指摘（Resolve されていない review thread）を数えるための問い合わせ。
-# `--paginate` に載せるため、カーソルと `pageInfo` を持たせる。
-_UNRESOLVED_THREADS_QUERY = """
-query($owner: String!, $name: String!, $pr: Int!, $endCursor: String) {
-  repository(owner: $owner, name: $name) {
-    pullRequest(number: $pr) {
-      reviewThreads(first: 100, after: $endCursor) {
-        pageInfo { hasNextPage endCursor }
-        nodes { id isResolved path line }
-      }
-    }
-  }
-}
-"""
-
-_UNRESOLVED_THREADS_JQ = (
-    ".data.repository.pullRequest.reviewThreads.nodes[]"
-    " | select(.isResolved == false)"
-    ' | [.id, (.path // ""), (.line // "" | tostring)] | @tsv'
-)
-
-
 def _review_exists(repo: str, pr: int, review_url: str | None) -> bool | None:
     """`review_url` の指すレビューが GitHub 側にあるか。
 
@@ -2578,29 +2515,14 @@ def _fetch_unresolved_threads(repo: str, pr: int) -> list[dict[str, Any]] | None
     Returns:
       未解決の指摘の一覧（`{"id", "path", "line"}`）。0 件なら空の一覧。
       取得できなければ `None`。
+
+    取得は共通層の `gh_parts.unresolved_threads` が持つ。ここは `thread_id` を `id` へ
+    写すだけで、出力の形は変えない。
     """
-    owner, sep, name = str(repo or "").partition("/")
-    if not (owner and sep and name):
+    threads = gh_parts.unresolved_threads(repo, pr, output=lambda cmd: _gh_output(cmd))
+    if threads is None:
         return None
-    out = _gh_output([
-        "gh", "api", "graphql", "--paginate",
-        "-F", f"owner={owner}", "-F", f"name={name}", "-F", f"pr={int(pr)}",
-        "-f", f"query={_UNRESOLVED_THREADS_QUERY}",
-        "--jq", _UNRESOLVED_THREADS_JQ,
-    ])
-    if out is None:
-        return None
-    threads: list[dict[str, Any]] = []
-    for line in out.splitlines():
-        if not line.strip():
-            continue
-        cols = line.split("\t")
-        threads.append({
-            "id": cols[0],
-            "path": cols[1] if len(cols) > 1 else "",
-            "line": cols[2] if len(cols) > 2 else "",
-        })
-    return threads
+    return [{"id": t["thread_id"], "path": t["path"], "line": t["line"]} for t in threads]
 
 
 def _thread_ids(value: Any) -> list[str]:
