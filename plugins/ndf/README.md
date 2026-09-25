@@ -89,7 +89,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.17.15）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.17.16-dev.1）
 ```
 
 ### agy
@@ -119,18 +119,31 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.17.15 へ更新するとき
+## v10.17.16-dev.1 へ更新するとき
 
-- `merged-steps.py merge-when-green` は、実行が終わっているのに GitHub 側で pending のまま取り残されたチェックを見分け、
-  そのジョブを 1 度だけ再実行します。再実行でも動かなければ止まって知らせます。ランナー待ちの間は待ち行列の件数を出し、
-  `supervise.py` の alive の行には run の段の最後の出力が `last_output` として載ります。
-- `supervise.py queue` に `--then` と `--done` があります。`--then` は前の計画がすべて完了したときだけ後続の計画を続けて流し、
-  1 本でも止まった・関門に当たったときは流さずに理由を残します。`--done` は queue の終わりに結果の JSON をファイルへ書きます。
-  queue の終わりはこのファイルを待ちます。プロセス名（`pgrep -f`）では待ちません。
-- 中継の下で ndf-next を出したとき背景の作業が残っていれば、Stop hook が 1 度だけ止めて、作業の id とコマンドと
-  `TaskStop` での止め方を知らせます。印を書かなかった Stop は中継の `log.jsonl` に `mark_skipped` として残り、
-  `experimental/resume.py` が並べます。
-- corder・qa エージェントと qa-security-scan の Codex 連携は、`external-ai.py run` の 1 行で起動・上限つきの待ち・回収を行います。
+### 追加
+
+- **token-guard のロックを待つ上限は、環境変数 `NDF_TOKEN_GUARD_LOCK_WAIT` で変えられる**
+- **SKILL.md の本文で位置引数（`$0`〜`$9`）を使っていないかを検査で確かめる**
+
+### 変更
+
+- **`merged-steps.py merge-when-green` は、同じ先頭のコミットで pending を見た後にすべてのチェックが通れば、その周でマージする**。
+  pending を見ずに通っていたときだけ、5 秒後に 1 度確かめ直してからマージする。チェックを読み直す間隔は 10 秒
+- **cross-review はレビュー本文の指摘へ返信を積まず、まとめのコメントへ載せる**
+- **google-drive のアップロードの既定は非公開**。引数が足りないときは終了コード 2 で終わる
+- **mcp-serena の configure は `ignored_paths` へ要素を足すだけで、既存の注釈と引用符をそのまま残す**
+
+### 修正
+
+- **`supervise.py` は、課題番号だけが違う worker の報告を別の報告として扱い、同じ報告の繰り返しとは数えない**
+- **`CLAUDE_CONFIG_DIR` を設定した環境では、`settings.json` をその下で読み書きする**
+- **進行の記録の確認と一覧の判定は、macOS の BSD sed と `pipefail` の下でも通る**
+- **cross-review の `rotate-pr.sh execute` の出力は結果の変数だけになる**
+- **instructions-check は段落の途中にある版の印も拾う**
+- **macOS の bash では、中継の読み込みの行を `~/.bash_profile` へ足す**。status は、読まれない読み込み先に行があれば警告する
+- **cross-refactoring の init は、着手前のテストより前に開始の時刻を取る**
+- **deploy が作る PR の本文では、元のブランチと環境名が展開される**
 
 ## Playwright テストについて
 
@@ -301,7 +314,7 @@ agy models   # 認証の確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.17.15/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.17.16-dev.1/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -323,14 +336,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.15/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.16-dev.1/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.17.15  <path>
+# => ndf@ai-plugins  installed, enabled  10.17.16-dev.1  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。
