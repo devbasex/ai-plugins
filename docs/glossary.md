@@ -27,3 +27,15 @@ NDF が配る工程・関門・モード・段の語。development-workflow/refe
 | モデルの段 | 設計 PR のレビューの 1 ラウンド目。ドメインモデルの節だけを見る | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 詳細の段 | 設計 PR のレビューの 2 ラウンド目以降。確定したモデルを前提に残りを見る | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 仕様の写し | 課題の本文にある要求を、設計 PR と一緒にコミットする `issues/` のファイル | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+
+## NDF の Slack 通知（`ndf-notification`）
+
+利用者の手を待つ時点・その種類・通知の本文と戻り先
+
+| 語 | 意味 | 廃止した語 | 正本 |
+| --- | --- | --- | --- |
+| 待ちの通知 | 利用者の回答か承認が無いと進まない時点で、Slack へ送る知らせ | — | `issues/issue-821-wait-notify-design.md` |
+| 回答待ち | 利用者に問いへの答え（選択・情報・指示）を求めている待ち | — | `issues/issue-821-wait-notify-design.md` |
+| 承認待ち | 利用者に操作の許可（ツールの実行・計画・マージ・配布など）を求めている待ち | — | `issues/issue-821-wait-notify-design.md` |
+| 待ちの鍵 | 1 つの待ちを見分ける値。transcript の最後の assistant の項目の `uuid` | — | `issues/issue-821-wait-notify-design.md` |
+| 戻り先 | 通知から当該セッションへ戻る手段。ホスト名・cwd の行と、作れればセッションの URL か再開のコマンド | — | `issues/issue-821-wait-notify-design.md` |
