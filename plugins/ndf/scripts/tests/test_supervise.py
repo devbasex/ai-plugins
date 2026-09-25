@@ -98,14 +98,35 @@ def test_rerun_failed_still_failing_goes_to_on_fail(tmp_path):
     assert [e["id"] for e in s.log] == ["t", "after"]
 
 
-def test_run_step_disables_pytest_reports(tmp_path, monkeypatch):
-    # 外側の supervise が足した PYTEST_ADDOPTS を引き継がない
+@pytest.mark.parametrize("where", ["plan", "declaration"])
+def test_run_step_disables_pytest_reports(tmp_path, monkeypatch, where):
+    # 計画の no_reports（無ければ作業場所の .ndf/supervise.json の test.no_reports）を足し、
+    # 外側の supervise が足したものを引き継がない
+    monkeypatch.setenv("PYTEST_ADDOPTS", "-p no:x")
+    extra = {"no_reports": "-p no:x"} if where == "plan" else {}
+    if where == "declaration":
+        (tmp_path / ".ndf").mkdir()
+        (tmp_path / ".ndf" / "supervise.json").write_text('{"version": 1, "test": {"no_reports": "-p no:x"}}')
+    s, _ = run_plan(tmp_path, [{"id": "t", "type": "run", "cmd": 'echo "[$PYTEST_ADDOPTS]"', "next": "end"}],
+                    **extra)
+    assert "[-p no:x]" in s.results["t"]["text"]
+    s, _ = run_plan(tmp_path, [{"id": "t", "type": "run", "cmd": 'echo "[$PYTEST_ADDOPTS]"', "reports": True,
+                                "next": "end"}], **extra)
+    assert "no:x" not in s.results["t"]["text"]
+
+
+def test_run_step_without_no_reports_adds_nothing(tmp_path, monkeypatch):
     monkeypatch.delenv("PYTEST_ADDOPTS", raising=False)
     s, _ = run_plan(tmp_path, [{"id": "t", "type": "run", "cmd": 'echo "[$PYTEST_ADDOPTS]"', "next": "end"}])
-    assert "-p no:playwright-kit" in s.results["t"]["text"]
-    s, _ = run_plan(tmp_path, [{"id": "t", "type": "run", "cmd": 'echo "[$PYTEST_ADDOPTS]"', "reports": True,
-                                "next": "end"}])
-    assert "no:playwright-kit" not in s.results["t"]["text"]
+    assert "[]" in s.results["t"]["text"]
+
+
+def test_preset_fills_base_branch(tmp_path, monkeypatch):
+    monkeypatch.setitem(sv.PRESETS, "echo-base", "echo base={base}")
+    s, _ = run_plan(tmp_path, [{"id": "t", "type": "run", "preset": "echo-base", "next": "end"}], base_branch="trunk")
+    assert "base=trunk" in s.results["t"]["text"]
+    s, _ = run_plan(tmp_path, [{"id": "t", "type": "run", "preset": "echo-base", "next": "end"}])
+    assert s.results["t"]["exit"] == 2 and "base_branch" in s.results["t"]["text"]
 
 
 def test_skip_to_jumps_over_steps(tmp_path):
@@ -263,8 +284,99 @@ def test_queue_creates_worktrees_in_order_before_run(tmp_path, monkeypatch):
         assert git(repo / ".worktrees" / b, "rev-parse", "--abbrev-ref", "HEAD").strip() == b
 
 
+REPO = SCRIPTS.parents[2]  # このリポジトリの根（.ndf/ の宣言を持つ）
+
+
 def cli(*args, cwd=None):
-    return subprocess.run([PY, str(SUPERVISE), *args], capture_output=True, text=True, cwd=cwd)
+    """既定ではこのリポジトリの根で打つ（作業場所に宣言が無いとき、今のディレクトリの .ndf/ を読む）。"""
+    return subprocess.run([PY, str(SUPERVISE), *args], capture_output=True, text=True, cwd=cwd or REPO)
+
+
+AI_PLUGINS_WORDS = ("plugins/", "playwright-kit", "build-runtime-plugins", "claude,codex,kiro", "develop",
+                    "scripts/check-")
+
+
+def foreign_repo(tmp_path, supervise=None):
+    """main だけ・pytest でない・プラグインを配らないリポジトリを模す。"""
+    root = tmp_path / "other"
+    (root / ".ndf").mkdir(parents=True)
+    (root / ".ndf" / "worktree.json").write_text('{"version": 1, "base_branch": "main"}\n')
+    if supervise is not None:
+        (root / ".ndf" / "supervise.json").write_text(json.dumps(supervise))
+    return root
+
+
+def run_cmds(plan):
+    """run の段のコマンドから、配布したスクリプトの置き場（絶対パス）を除いたもの。"""
+    return [s.get("cmd", "").replace(str(SCRIPTS), "<scripts>").replace(str(SCRIPTS.parent / "skills"), "<skills>")
+            for s in plan["steps"] if s["type"] == "run"]
+
+
+def test_new_impl_in_other_repo_uses_declarations_only(tmp_path):
+    root = foreign_repo(tmp_path, {"version": 1, "test": {"command": "npm test -- {paths}", "all": "src"}})
+    out = tmp_path / "plan.json"
+    p = cli("new", "impl", "--issue", "1", "--worktree", str(root), "--tests", "src/a.test.js", "--title", "T",
+            "--out", str(out), cwd=root)
+    assert p.returncode == 0, p.stderr
+    plan = json.loads(out.read_text())
+    steps = {s["id"]: s for s in plan["steps"]}
+    assert "sync" not in steps and steps["impl"]["next"] == "test-limited"
+    assert steps["test-limited"]["cmd"] == "npm test -- src/a.test.js"
+    assert steps["test-all"]["cmd"] == "npm test -- src"
+    assert steps["pr"]["base"] == "main" and plan["base_branch"] == "main" and "no_reports" not in plan
+    for cmd in run_cmds(plan):
+        assert not any(w in cmd for w in AI_PLUGINS_WORDS), cmd
+    # 配布したスクリプトは置き場からの絶対パスで呼ぶ
+    assert steps["merge"]["cmd"].startswith(f"python3 {SCRIPTS / 'merged-steps.py'} ")
+    assert sv.PRESETS["doc-lint"].startswith(f"python3 {SCRIPTS / 'doc-lint.py'} ")
+
+
+def test_new_impl_without_declaration_stops(tmp_path):
+    root = tmp_path / "bare"
+    root.mkdir()
+    p = cli("new", "impl", "--issue", "1", "--worktree", str(root), "--tests", "t", "--title", "T",
+            "--out", str(tmp_path / "p.json"), cwd=root)
+    assert p.returncode == 2 and "base_branch" in p.stderr and "test.command" in p.stderr
+    assert not (tmp_path / "p.json").exists()
+    # 引数で渡せば宣言が無くても作れる
+    p = cli("new", "impl", "--issue", "1", "--worktree", str(root), "--tests", "t", "--title", "T",
+            "--base", "trunk", "--test-cmd", "make test", "--out", str(tmp_path / "p.json"), cwd=root)
+    assert p.returncode == 0, p.stderr
+    steps = {s["id"]: s for s in json.loads((tmp_path / "p.json").read_text())["steps"]}
+    assert steps["test-limited"]["cmd"] == "make test t" and steps["pr"]["base"] == "trunk"
+
+
+def test_new_release_needs_release_form(tmp_path):
+    root = foreign_repo(tmp_path, {"version": 1, "release": {"form": "service"}})
+    wt = f"{root}/.worktrees/release/v1"
+    p = cli("new", "release", "--version", "1.0.0", "--prs", "3", "--channel", "dev", "--worktree", wt,
+            "--out", str(tmp_path / "r.json"), cwd=root)
+    assert p.returncode == 2 and "service" in p.stderr and "/ndf:release" in p.stderr
+    root2 = foreign_repo(tmp_path / "b", {"version": 1})
+    p = cli("new", "release", "--version", "1.0.0", "--prs", "3", "--channel", "dev",
+            "--worktree", f"{root2}/.worktrees/release/v1", "--out", str(tmp_path / "r.json"), cwd=root2)
+    assert p.returncode == 2 and "release.form" in p.stderr
+
+
+def test_new_release_package_plugin_from_declaration(tmp_path):
+    root = foreign_repo(tmp_path, {"version": 1, "release": {"form": "package-plugin", "plugin": "foo",
+                                                             "runtimes": ["claude"]}})
+    (root / ".ndf" / "worktree.json").write_text('{"version": 1, "base_branch": "main", '
+                                                 '"production_branch": "stable"}\n')
+    wt = f"{root}/.worktrees/release/v1"
+    for channel, ref in (("dev", "main"), ("prod", "stable")):
+        out = tmp_path / f"{channel}.json"
+        p = cli("new", "release", "--version", "1.0.0", "--prs", "3", "--channel", channel, "--worktree", wt,
+                "--out", str(out), cwd=root)
+        assert p.returncode == 0, p.stderr
+        plan = json.loads(out.read_text())
+        st = {s["id"]: s for s in plan["steps"]}
+        assert "sync" not in st and st["notes"]["next"] in ("release", "snapshot")
+        assert "--plugin foo" in st["bump"]["cmd"] and f"--ref {ref} " in st["verify"]["cmd"]
+        assert "--runtimes claude'" in st["verify"]["cmd"] and "origin main" in st["verify"]["cmd"]
+        assert plan["記録"] == str(SCRIPTS / "projects-sync.sh") and plan["起点"] == "origin/main"
+        for cmd in run_cmds(plan):
+            assert not any(w in cmd for w in AI_PLUGINS_WORDS), cmd
 
 
 def test_new_impl_writes_plan(tmp_path):
@@ -438,7 +550,9 @@ def test_note_without_section_stops(tmp_path):
 
 def test_sync_check_reports_each_check(tmp_path, monkeypatch):
     git(tmp_path, "init", "-q")
-    monkeypatch.setattr(sv, "SYNC_CHECKS", [("build", "echo gen > gen.txt"), ("links", "exit 1")])
+    (tmp_path / ".ndf").mkdir()
+    (tmp_path / ".ndf" / "supervise.json").write_text(json.dumps({"version": 1, "sync_checks": [
+        {"name": "build", "command": "echo gen > gen.txt"}, {"name": "links", "command": "exit 1"}]}))
     res = sv.sync_check(str(tmp_path), commit=False)
     assert res["status"] == "stopped" and res["summary"] == "失敗: links"
     assert [i["result"] for i in res["items"]] == ["ok", "failed"]
@@ -449,10 +563,14 @@ def test_sync_check_commits_generated(tmp_path, monkeypatch):
     git(tmp_path, "init", "-q")
     git(tmp_path, "config", "user.email", "a@b")
     git(tmp_path, "config", "user.name", "a")
-    monkeypatch.setattr(sv, "SYNC_CHECKS", [("build", "echo gen > gen.txt")])
-    res = sv.sync_check(str(tmp_path), commit=True)
+    res = sv.sync_check(str(tmp_path), commit=True, checks=[("build", "echo gen > gen.txt")])
     assert res["status"] == "ok"
     assert git(tmp_path, "log", "--format=%s").strip() == "Update: 生成物を同期する"
+
+
+def test_sync_check_without_declaration_stops(tmp_path):
+    res = sv.sync_check(str(tmp_path), commit=False)
+    assert res["status"] == "stopped" and "sync_checks" in res["summary"] and res["items"] == []
 
 
 # --- 利用上限（待ち・認証の切り替え）・関門の終了コード・段の作業場所・配布の雛形 ---
@@ -760,6 +878,52 @@ def test_pr_body_ends_with_mode_and_passed_stages(tmp_path, monkeypatch):
     assert lines[-2] == "モード: standard / 通した工程: 実装 → 完了判定 → Pull Request"
     assert lines[-1].startswith("🤖 Generated with")
     assert sum(sv.PR_FOOTER in l for l in lines) == 1
+
+
+def advance_develop(root):
+    """feat/x を切った後に develop を進める（他の PR が取り込まれた形）。"""
+    git(root, "checkout", "-q", "develop")
+    (root / "other.txt").write_text("other\n")
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", "Add: other")
+    git(root, "push", "-q", "origin", "develop")
+    git(root, "checkout", "-q", "feat/x")
+
+
+def test_pr_body_stat_is_from_merge_base(tmp_path, monkeypatch):
+    # 起点より古いブランチでも、他の PR の変更（other.txt）を変更の統計へ載せない
+    root, body = pr_repo(tmp_path, monkeypatch)
+    advance_develop(root)
+    plan = {"フェーズ": "実装", "課題": [1], "作業場所": str(root), "steps": [
+        {"id": "pr", "type": "pr", "stage": "Pull Request", "base": "develop", "body": "template", "next": "end"}]}
+    assert "結果: 完了" in sv.Supervisor(plan, tmp_path / "state").run()
+    got = body.read_text()
+    assert "b.txt" in got and "other.txt" not in got, got
+
+
+def test_pr_base_from_declaration(tmp_path, monkeypatch):
+    # 段にも計画にも base が無ければ、作業場所の .ndf/worktree.json の base_branch を起点にする
+    root, body = pr_repo(tmp_path, monkeypatch)
+    git(root, "checkout", "-q", "develop")
+    git(root, "branch", "-q", "trunk")
+    git(root, "push", "-q", "origin", "trunk")
+    git(root, "checkout", "-q", "feat/x")
+    advance_develop(root)
+    (root / ".ndf").mkdir()
+    (root / ".ndf" / "worktree.json").write_text('{"version": 1, "base_branch": "trunk"}\n')
+    plan = {"フェーズ": "実装", "課題": [1], "作業場所": str(root), "steps": [
+        {"id": "pr", "type": "pr", "stage": "Pull Request", "body": "template", "next": "end"}]}
+    assert "結果: 完了" in sv.Supervisor(plan, tmp_path / "state").run()
+    assert "other.txt" not in body.read_text()
+
+
+def test_pr_without_base_stops(tmp_path, monkeypatch):
+    root, body = pr_repo(tmp_path, monkeypatch)
+    plan = {"フェーズ": "実装", "課題": [1], "作業場所": str(root), "steps": [
+        {"id": "pr", "type": "pr", "stage": "Pull Request", "body": "template", "next": "end"}]}
+    s = sv.Supervisor(plan, tmp_path / "state")
+    assert "結果: 完了" not in s.run()
+    assert "base_branch" in s.results["pr"]["text"]
 
 
 @pytest.mark.parametrize("llm_footer", [True, False])

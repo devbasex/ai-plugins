@@ -17,6 +17,7 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
     supervise.py run <plan.json> [--state-dir DIR] [--from <段の id>]
     supervise.py new impl --issue N --worktree DIR --tests PATH... --title T [--files PATH...] [--changes TEXT] [--prompt-file F] [--branch B] [--out F]
     supervise.py new check --pr N --worktree DIR [--issue N...] [--scope PATH...] [--out F]
+        # new の共通: [--base B] [--test-cmd CMD] [--test-all PATH] [--production-branch B]（宣言より先に効く。下の「宣言」）
     supervise.py new release --version V (--prs N... | --prs-from-queue) --channel dev|prod --worktree DIR
                              [--issue N...] [--prev-tag T] [--repo DIR] [--out F]
         # --prs-from-queue: queue が --then でこの計画を流す前に、先行の計画の報告の Pull Request を集めて
@@ -32,7 +33,7 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
         # queue の終わり（done）か、queue が流す計画の attention の行まで待つ。出力は要約の 1 行と結果の JSON。
         # 終了コード: done = 0 / attention = 20 / 上限 = 3。attention の後にもう一度打つと、その続きから待つ
     supervise.py note <引き継ぎ文書.md> --report <report.md> [--next 次の欄] [--section 見出しの語]
-    supervise.py sync-check [--root DIR] [--commit]   # 生成物の同期と検査 4 本
+    supervise.py sync-check [--root DIR] [--commit]   # 宣言した同期と検査（.ndf/supervise.json の sync_checks）
     supervise.py example            # 計画の例を出す
 
 new / queue / wait / note / sync-check の結果は lib/step_result.py の形の 1 行の JSON（status を見る）。
@@ -42,7 +43,9 @@ new / queue / wait / note / sync-check の結果は lib/step_result.py の形の
       "フェーズ": "検査", "課題": [818], "モード": "standard",
       "作業場所": "/abs/worktree",
       "branch": "feat/issue-818-x",         # 省略可。作業場所が無ければ起動時に作業ツリーを作る
-      "起点": "origin/develop",             # branch から作るときの起点（既定 origin/develop）
+      "起点": "origin/main",                # branch から作るときの起点（既定 origin/<base_branch>）
+      "base_branch": "main",                # 起点のブランチ。pr の段の宛先と preset の {base}（既定は .ndf/worktree.json）
+      "no_reports": "-p no:x",              # run の段の PYTEST_ADDOPTS に足す（既定は .ndf/supervise.json の test.no_reports）
       "リポジトリ": "/abs/repo",             # 作業ツリーの元（省略時は作業場所の /.worktrees/ より前）
                                             # git worktree add が .git/config の lock で落ちたら 5 回までやり直す
       "記録": "/abs/projects-sync.sh",      # 省略可。stage を記録する
@@ -79,10 +82,23 @@ drive の段: `cmd`（または `"drive": "cross-review" | "cross-refactoring"` 
 段ごとの作業場所: run と work の段に `"cwd"` を書くと、その段だけ別の場所で動く（取り込みで PR ごとに
 作業ツリーが違うとき）。work の段では worker へ渡す「作業場所」もその `cwd` になる。
 
-配布の雛形（new release）: dev は bump → changelog → 説明文 → sync-check → release → verify-install（develop）
-→ approval-facts → 提示物の説明文。approval-facts の提示物は `issues/approval-ndf-v<正式版>.md` へ写す。
-prod は bump → changelog → 説明文 → トークン消費の記録 → sync-check → release → verify-install（main）。
-落ちた run の段は judge が fix・同じ段のやり直し・stop を選ぶ。
+宣言（リポジトリの根の `.ndf/`。new は作業場所 → 元のリポジトリ → 今のディレクトリの順に探す。引数が先に効く）:
+- `worktree.json` の `base_branch`（起点のブランチ。PR の宛先・差分の起点）と `production_branch`（本番のブランチ）
+- `supervise.json`（無ければ、要る雛形は「宣言が無い」と止まる）:
+      {"version": 1,
+       "test": {"command": "<テストのコマンド。{paths} を範囲に置き換える>", "all": "<全体の範囲（既定 .）>",
+                "no_reports": "<run の段の PYTEST_ADDOPTS に足す。省略可>"},
+       "sync_checks": [{"name": "<名前>", "command": "<同期か検査のコマンド>"}, ...],   # 省略可。無ければ sync の段を置かない
+       "release": {"form": "package-plugin", "plugin": "<名前>", "runtimes": ["claude", ...]}}
+  テストの範囲の選び方（--tests）と配布してよいかの判断は、宣言にせず conductor と judge の段に残す
+
+配布の雛形（new release）: 形（`release.form`）ごとにある。無い形は /ndf:release で配る。
+- `package-plugin`（Claude Code のプラグイン）: dev は bump → changelog → 説明文 → sync-check → release →
+  verify-install（起点のブランチ）→ approval-facts → 提示物の説明文。approval-facts の提示物は
+  `issues/approval-<plugin>-v<正式版>.md` へ写す。prod は bump → changelog → 説明文 → トークン消費の記録 →
+  sync-check → release → verify-install（本番のブランチ）→ 後片付け。sync-check は同期と検査の宣言があるときだけ
+落ちた run の段は judge が fix・同じ段のやり直し・stop を選ぶ。計画のスクリプトは、このスクリプトの置き場からの
+絶対パスで呼ぶ（利用者のリポジトリにプラグインの中身が無くても動く）。
 
 利用上限: claude -p（work・drive の worker・judge・pr）が利用上限（session limit・HTTP 429・
 `api_error_status: 429`・「You've hit your limit … resets …」。lib/monitor.py の USAGE LIMIT の表と同じ文言）で
@@ -94,7 +110,7 @@ prod は bump → changelog → 説明文 → トークン消費の記録 → sy
 - 待ちの合計が計画の `"limit_wait_max"`（既定 10800 秒）を超えるなら `結果: 止まった`・`理由: 利用上限`
 
 run の段:
-- `"preset"`: 定型のコマンド。`sync-check`（生成物の同期と検査 4 本）・`assess`（構造改善の要否）・
+- `"preset"`: 定型のコマンド。`sync-check`（宣言した同期と検査）・`assess`（構造改善の要否）・
   `doc-lint`（追加した行の書き方の検査）。`cmd` を書けばそちらを使う
 - `cmd` の `{pr}` は Pull Request の番号に、`{pr_url}` は URL に置き換わる（drive の段の `args` も同じ）。
   Pull Request は pr の段で作ったもの、または計画の `"Pull Request"`（URL なら末尾の数字を番号として読む）
@@ -104,8 +120,8 @@ run の段:
 - 終了コード 10〜19（共通の契約の関門）は失敗にしない。段の結果に `gate` を残して `"gate_next"`（無ければ
   `next`）へ進み、最後まで進めば報告は `結果: 関門`。結果 JSON の `presentation_path` を報告の `提示物` に写す。
   `"presentation_to": "<パス>"` があれば提示物をそのパス（段の作業場所から）へ写し、そちらを載せる
-- pytest の成果物（`reports/`）を作らない（`PYTEST_ADDOPTS` に `-p no:playwright-kit` を足す）。
-  作らせるときは `"reports": true`
+- テストの成果物を作らない（計画の `no_reports` を `PYTEST_ADDOPTS` に足す）。作らせるときは `"reports": true`
+- `cmd` の `{base}` は起点のブランチ（計画か .ndf/worktree.json の `base_branch`）に置き換わる
 
 段の遷移:
 - `next` に `end` を書くと、そこでフェーズを完了として終える
@@ -169,23 +185,73 @@ DRIVES = {"cross-review": SKILLS / "cross-review" / "scripts" / "drive.py",
           "cross-refactoring": SKILLS / "cross-refactoring" / "scripts" / "drive.py"}
 EXTERNAL_AI = SKILLS / "external-ai" / "scripts" / "external-ai.py"
 
-# run の段の定型（"preset"）。作業場所（リポジトリの根）で動く
+HERE = SELF.parent  # 配布したスクリプトの置き場。計画のコマンドはここからの絶対パスで書く
+
+# run の段の定型（"preset"）。作業場所（リポジトリの根）で動く。{base} は起点のブランチ
 PRESETS = {
     "sync-check": f"python3 {SELF} sync-check --commit",
-    "assess": "python3 plugins/ndf/skills/cross-refactoring/scripts/refactor.py assess --base origin/develop",
-    "doc-lint": "python3 plugins/ndf/scripts/doc-lint.py --base origin/develop",
+    "assess": f"python3 {SKILLS / 'cross-refactoring' / 'scripts' / 'refactor.py'} assess --base origin/{{base}}",
+    "doc-lint": f"python3 {HERE / 'doc-lint.py'} --base origin/{{base}}",
 }
-# sync-check が順に回すコマンド（生成物の同期 → 検査 4 本）
-SYNC_CHECKS = [
-    ("build", "bash scripts/build-runtime-plugins.sh"),
-    ("frontmatter", "python3 scripts/check-skill-frontmatter.py"),
-    ("line-limit", "python3 scripts/check-doc-line-limit.py"),
-    ("links", "python3 scripts/check-markdown-links.py"),
-    ("instructions", "python3 plugins/ndf/scripts/instructions-check.py --root ."),
-]
-PYTEST = ("uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest --with pytest-xdist "
-          "pytest {paths} -q -n 4")
-NO_REPORTS = "-p no:playwright-kit"  # playwright-kit の plugin が reports/ を書く
+
+# プロジェクトごとの宣言（リポジトリの根の .ndf/）。形は DECLARATIONS の節にある
+WORKTREE_DECL = "worktree.json"    # base_branch（起点のブランチ）・production_branch（本番のブランチ）
+SUPERVISE_DECL = "supervise.json"  # test・sync_checks・release
+
+
+class DeclError(Exception):
+    """宣言が読めない・形が違う。"""
+
+
+def read_decl(roots, name: str) -> dict:
+    """roots の順に .ndf/<name> を探し、最初に見つかった宣言を返す。どこにも無ければ {}。"""
+    for r in roots:
+        f = Path(r) / ".ndf" / name
+        if not f.is_file():
+            continue
+        try:
+            d = json.loads(f.read_text(encoding="utf-8"))
+        except ValueError as e:
+            raise DeclError(f"{f}: JSON として読めない: {e}") from e
+        if not isinstance(d, dict):
+            raise DeclError(f"{f}: 最上位はオブジェクトで書く")
+        return d
+    return {}
+
+
+def decl_roots(worktree: str, repo: str | None = None) -> list[Path]:
+    """宣言を探す場所: 作業場所 → 元のリポジトリ（--repo か作業場所の /.worktrees/ より前）→ 今のディレクトリ。"""
+    roots = [Path(worktree)]
+    if repo:
+        roots.append(Path(repo))
+    if "/.worktrees/" in str(worktree):
+        roots.append(Path(str(worktree).split("/.worktrees/")[0]))
+    roots.append(Path.cwd())
+    return roots
+
+
+def declared_base(roots) -> str | None:
+    """.ndf/worktree.json の base_branch。無ければ None。"""
+    try:
+        v = read_decl(roots, WORKTREE_DECL).get("base_branch")
+    except DeclError:
+        return None
+    return v if isinstance(v, str) and v else None
+
+
+def sync_checks_of(decl: dict) -> list[tuple[str, str]]:
+    """.ndf/supervise.json の sync_checks を [(名前, コマンド)] で返す。"""
+    checks = decl.get("sync_checks") or []
+    if not isinstance(checks, list) or not all(
+            isinstance(c, dict) and isinstance(c.get("name"), str) and isinstance(c.get("command"), str)
+            for c in checks):
+        raise DeclError("supervise.json: sync_checks は {\"name\", \"command\"} の並びで書く")
+    return [(c["name"], c["command"]) for c in checks]
+
+
+def with_paths(cmd: str, paths: str) -> str:
+    """テストのコマンドの {paths} を範囲に置き換える。{paths} が無ければ末尾に足す。"""
+    return cmd.replace("{paths}", paths) if "{paths}" in cmd else f"{cmd} {paths}"
 LIMIT_RETRY = 900      # 利用上限の解除時刻が読めないときの待ち（秒）。計画の "limit_retry_seconds"
 LIMIT_WAIT_MAX = 10800  # 利用上限の待ちの最大（秒）。計画の "limit_wait_max"
 # claude の古い形の上限の文言（`Claude AI usage limit reached|<解除の UNIX 時刻>`）
@@ -530,7 +596,12 @@ def ensure_worktree(plan: dict, sleep=time.sleep) -> str | None:
     repo = plan.get("リポジトリ") or (str(wt).split("/.worktrees/")[0] if "/.worktrees/" in str(wt) else None)
     if not repo:
         return "作業ツリーの元のリポジトリが分からない（計画に リポジトリ を書く）"
-    base = plan.get("起点", "origin/develop")
+    base = plan.get("起点")
+    if not base:
+        b = plan.get("base_branch") or declared_base([repo])
+        if not b:
+            return "作業ツリーの起点が分からない（計画の 起点 か base_branch、または .ndf/worktree.json の base_branch）"
+        base = f"origin/{b}"
     if base.startswith("origin/"):
         subprocess.run(["git", "-C", repo, "fetch", "-q", "origin"], capture_output=True, text=True)
     p = None
@@ -807,6 +878,21 @@ class Supervisor:
             cmd = cmd.replace("{pr_url}", url)
         return cmd.replace("{pr}", number), None
 
+    def base_branch(self) -> str | None:
+        """起点のブランチ。計画の base_branch、無ければ作業場所の .ndf/worktree.json の base_branch。"""
+        return self.plan.get("base_branch") or declared_base([self.cwd])
+
+    def no_reports(self) -> str:
+        """テストに成果物を作らせない PYTEST_ADDOPTS。計画の no_reports、無ければ .ndf/supervise.json の
+        test.no_reports。どちらも無ければ足さない。"""
+        if "no_reports" in self.plan:
+            return str(self.plan["no_reports"] or "")
+        try:
+            test = read_decl([self.cwd], SUPERVISE_DECL).get("test") or {}
+        except DeclError:
+            return ""
+        return str(test.get("no_reports") or "") if isinstance(test, dict) else ""
+
     def run_cmd(self, step: dict, extra_addopts: str = "") -> tuple[int, str]:
         cmd = step.get("cmd") or PRESETS.get(step.get("preset", ""), "")
         if not cmd:
@@ -814,11 +900,18 @@ class Supervisor:
         cmd, err = self.fill_pr(cmd)
         if err:
             return 2, err
+        if "{base}" in cmd:
+            base = self.base_branch()
+            if not base:
+                return 2, "cmd の {base} を置き換える起点のブランチが無い（計画か .ndf/worktree.json の base_branch）"
+            cmd = cmd.replace("{base}", base)
         env = dict(os.environ)
-        # 親の run の段から受け継いだ NO_REPORTS は、reports: true なら外す
-        addopts = [env.get("PYTEST_ADDOPTS", "").replace(NO_REPORTS, "").strip()]
-        if not step.get("reports"):
-            addopts.append(NO_REPORTS)
+        # 親の run の段から受け継いだ no_reports は、reports: true なら外す
+        no_reports = self.no_reports()
+        inherited = env.get("PYTEST_ADDOPTS", "")
+        addopts = [(inherited.replace(no_reports, "") if no_reports else inherited).strip()]
+        if no_reports and not step.get("reports"):
+            addopts.append(no_reports)
         addopts.append(extra_addopts)
         env["PYTEST_ADDOPTS"] = " ".join(a for a in addopts if a)
         self.run_log = self.dir / "run-stderr.log"
@@ -976,16 +1069,22 @@ class Supervisor:
 
     def do_pr(self, step: dict) -> tuple[bool, str]:
         """push して Draft の Pull Request を作る。既にあれば本文だけを書き直す。LLM を使わない。"""
-        base = step.get("base", "develop")
+        base = step.get("base") or self.base_branch()
+        if not base:
+            msg = "PR の宛先（起点のブランチ）が分からない（段の base、計画か .ndf/worktree.json の base_branch）"
+            self.cur.update(exit=2, text=msg)
+            return False, msg
         branch = self.git("rev-parse", "--abbrev-ref", "HEAD")
         push = subprocess.run(["git", "push", "-q", "-u", "origin", "HEAD"], cwd=self.cwd,
                               capture_output=True, text=True)
         if push.returncode != 0:
             self.cur.update(exit=push.returncode, text=push.stderr)
             return False, push.stderr
+        subprocess.run(["git", "fetch", "-q", "origin", base], cwd=self.cwd, capture_output=True, text=True)
         rng = f"origin/{base}..HEAD"
         commits = self.git("log", "--reverse", "--format=- %s", rng) or "- （無し）"
-        stat = self.git("diff", "--stat", rng).splitlines()
+        # 変更の統計は起点との merge-base から数える（起点より古いブランチで、他の PR の変更を削除として載せない）
+        stat = self.git("diff", "--stat", f"origin/{base}...HEAD").splitlines()
         tests = []
         for sid, r in self.results.items():
             if r.get("type") == "run":
@@ -1242,17 +1341,27 @@ EXAMPLE = {
          "question": "テストの失敗を直すか止めるか", "choices": ["fix", "stop"]},
         {"id": "fix", "type": "work", "kind": "修正", "inputs": ["test"],
          "prompt": "失敗したテストを直してコミットする（push しない）", "next": "test"},
-        {"id": "pr", "type": "pr", "stage": "Pull Request", "base": "develop",
+        {"id": "pr", "type": "pr", "stage": "Pull Request", "base": "main",
          "title": "変更の要約（#0）", "summary": "何を変えたかの 1〜2 文", "docs": ["issues/issue-0-design.md"],
          "next": "end"},
     ],
 }
 
 
-def sync_check(root: str, commit: bool) -> dict:
-    """生成物を同期し、検査 4 本を回す。同期で変わったファイルは commit なら 1 つのコミットにする。"""
+def sync_check(root: str, commit: bool, checks: list[tuple[str, str]] | None = None) -> dict:
+    """宣言（.ndf/supervise.json の sync_checks）の同期と検査を順に回す。同期で変わったファイルは commit なら
+    1 つのコミットにする。宣言が無ければ回さずに止まる。"""
+    if checks is None:
+        try:
+            checks = sync_checks_of(read_decl([root], SUPERVISE_DECL))
+        except DeclError as e:
+            return result("supervise-sync-check", "stopped", str(e), [], {"failed": 0, "changed": 0})
+    if not checks:
+        return result("supervise-sync-check", "stopped",
+                      f"同期と検査の宣言が無い（{root}/.ndf/{SUPERVISE_DECL} の sync_checks）", [],
+                      {"failed": 0, "changed": 0})
     items, failed = [], []
-    for name, cmd in SYNC_CHECKS:
+    for name, cmd in checks:
         p = subprocess.run(cmd, shell=True, cwd=root, capture_output=True, text=True)
         out = (p.stdout + p.stderr).strip()
         items.append({"name": name, "result": "ok" if p.returncode == 0 else "failed", "exit": p.returncode,
@@ -1269,7 +1378,7 @@ def sync_check(root: str, commit: bool) -> dict:
                       "exit": c.returncode, "files": len(changed)})
         if c.returncode:
             failed.append("commit")
-    summary = f"失敗: {', '.join(failed)}" if failed else "同期と検査 4 本が通った"
+    summary = f"失敗: {', '.join(failed)}" if failed else f"同期と検査 {len(checks)} 本が通った"
     return result("supervise-sync-check", "stopped" if failed else "ok", summary, items,
                   {"failed": len(failed), "changed": len(changed)})
 
@@ -1280,7 +1389,58 @@ RULE_IMPL = ("限ったテストや全体テストが落ちたら（落ちたテ
 RULE_CHECK = ("全体テストが落ちたら（落ちたテストだけの再実行でも落ちた後）、変更に起因するなら fix、"
               "変更に無関係なら ready。2 回直しても同じなら stop。")
 FIX_PROMPT = "失敗した箇所を直してコミットする（push しない）。変更に起因しない失敗は直さない。"
-MERGE_CMD = "python3 plugins/ndf/scripts/merged-steps.py merge-when-green {pr}"
+MERGE_CMD = f"python3 {HERE / 'merged-steps.py'} merge-when-green {{pr}}"
+
+# 雛形が宣言から受けるもの。引数が宣言より先に効く
+NEEDS = {"impl": ("base", "test"), "check": ("base", "test"), "release": ("base", "release"),
+         "mission": ("base", "test", "release")}
+
+
+def apply_decls(a) -> None:
+    """引数に無いものを .ndf/ の宣言から埋める。雛形に要るのにどちらにも無ければ DeclError。
+
+    - 起点のブランチ（a.base）: --base → worktree.json の base_branch
+    - 本番のブランチ（a.production_branch）: --production-branch → worktree.json の production_branch
+    - テスト（a.test_cmd・a.test_all・a.no_reports）: --test-cmd・--test-all → supervise.json の test
+    - 同期と検査（a.sync_checks）: supervise.json の sync_checks（無ければ計画に sync の段を置かない）
+    - 配布（a.release）: supervise.json の release
+    """
+    roots = decl_roots(a.worktree, getattr(a, "repo", None))
+    wt = read_decl(roots, WORKTREE_DECL)
+    sv = read_decl(roots, SUPERVISE_DECL)
+    test = sv.get("test") or {}
+    if not isinstance(test, dict):
+        raise DeclError("supervise.json: test はオブジェクトで書く")
+    a.base = getattr(a, "base", None) or wt.get("base_branch") or None
+    a.production_branch = getattr(a, "production_branch", None) or wt.get("production_branch") or None
+    a.test_cmd = getattr(a, "test_cmd", None) or test.get("command") or None
+    a.test_all = getattr(a, "test_all", None) or test.get("all") or "."
+    a.no_reports = test.get("no_reports") or ""
+    a.sync_checks = sync_checks_of(sv)
+    a.release = sv.get("release") or None
+    missing = {
+        "base": (not a.base, f"起点のブランチ（--base か .ndf/{WORKTREE_DECL} の base_branch）"),
+        "test": (not a.test_cmd, f"テストのコマンド（--test-cmd か .ndf/{SUPERVISE_DECL} の test.command）"),
+        "release": (not isinstance(a.release, dict) or not a.release.get("form"),
+                    f"配布の形（.ndf/{SUPERVISE_DECL} の release.form）"),
+    }
+    lack = [missing[k][1] for k in NEEDS[a.kind] if missing[k][0]]
+    if lack:
+        raise DeclError(f"new {a.kind} に要る宣言が無い: " + "・".join(lack))
+
+
+def decl_fields(a) -> dict:
+    """ミッションの雛形が各計画へ引き継ぐ、宣言から埋めた値。"""
+    return {k: getattr(a, k) for k in ("base", "production_branch", "test_cmd", "test_all", "no_reports",
+                                       "sync_checks", "release")}
+
+
+def with_decls(plan: dict, a) -> dict:
+    """計画に起点のブランチと、テストに成果物を作らせない指定を書く（run の段と pr の段が読む）。"""
+    plan["base_branch"] = a.base
+    if getattr(a, "no_reports", ""):
+        plan["no_reports"] = a.no_reports
+    return plan
 IMPL_RULES = ("共通:\n"
               "- 文書には今の決まりだけを書く。.md の文言を照合するテストは書かない\n"
               "- コミットの件名と本文に課題を閉じる語（Closes / Fixes / Resolves）を書かない。"
@@ -1339,41 +1499,49 @@ def plan_impl(a, out: Path | None = None) -> dict:
         out = Path(a.out or f"plan-{a.issue[0]}.json")
     prompt = impl_prompt(a, out)
     tests = " ".join(a.tests)
-    plan = {
-        "フェーズ": "実装", "課題": a.issue, "モード": a.mode, "作業場所": a.worktree,
-        "規則": RULE_IMPL, "上限": 20,
-        "steps": [
-            {"id": "impl", "type": "work", "kind": "実装", "serena": True, "stage": "実装", "issues": True,
-             "timeout": 3600, "prompt": prompt, "next": "sync"},
+    sync = bool(getattr(a, "sync_checks", None))
+    steps = [
+        {"id": "impl", "type": "work", "kind": "実装", "serena": True, "stage": "実装", "issues": True,
+         "timeout": 3600, "prompt": prompt, "next": "sync" if sync else "test-limited"},
+    ]
+    if sync:  # 同期と検査の宣言が無いプロジェクトでは段を置かない
+        steps += [
             {"id": "sync", "type": "run", "preset": "sync-check", "stage": "実装", "on_fail": "fix-sync",
              "next": "test-limited"},
             {"id": "fix-sync", "type": "work", "kind": "修正", "inputs": ["sync"], "prompt": FIX_PROMPT,
              "next": "sync"},
-            {"id": "test-limited", "type": "run", "stage": "完了判定", "timeout": 900, "rerun_failed": True,
-             "cmd": PYTEST.format(paths=tests), "on_fail": "judge", "next": "pr"},
-            {"id": "judge", "type": "judge", "inputs": ["test-limited", "test-all"],
-             "question": "テストの失敗を直すか（fix）、限ったテストの失敗が変更に無関係なら PR へ（pr）、"
-                         "全体テストの失敗が変更に無関係なら文書の検査へ（doc-lint）、止めるか（stop）",
-             "choices": ["fix", "pr", "doc-lint", "stop"]},
-            {"id": "fix", "type": "work", "kind": "修正", "inputs": ["test-limited", "test-all"],
-             "prompt": FIX_PROMPT, "next": "test-limited"},
-            # Draft の PR を全体テストの前に出し、CI と手元の全体テストを並べる。直した後は pr の段が push して本文を更新する
-            {"id": "pr", "type": "pr", "stage": "Pull Request", "base": a.base, "title": a.title,
-             "summary": a.summary or "", "changes": getattr(a, "changes", None) or "", "next": "test-all"},
-            {"id": "test-all", "type": "run", "stage": "完了判定", "timeout": 1800, "rerun_failed": True,
-             "cmd": PYTEST.format(paths="."), "on_fail": "judge", "next": "doc-lint"},
-            {"id": "doc-lint", "type": "run", "preset": "doc-lint", "stage": "完了判定", "on_fail": "fix-doc",
-             "next": "ready"},
-            {"id": "fix-doc", "type": "work", "kind": "修正", "inputs": ["doc-lint"],
-             "prompt": "ヒットした行を今の決まりだけを書く形へ直してコミットする（push しない）。", "next": "doc-lint"},
-            {"id": "ready", "type": "run", "cmd": "sh -c 'git push -q && gh pr ready {pr}'", "next": "merge"},
-            {"id": "merge", "type": "run", "timeout": 7200, "cmd": MERGE_CMD, "next": "end"},
-        ],
+        ]
+    steps += [
+        {"id": "test-limited", "type": "run", "stage": "完了判定", "timeout": 900, "rerun_failed": True,
+         "cmd": with_paths(a.test_cmd, tests), "on_fail": "judge", "next": "pr"},
+        {"id": "judge", "type": "judge", "inputs": ["test-limited", "test-all"],
+         "question": "テストの失敗を直すか（fix）、限ったテストの失敗が変更に無関係なら PR へ（pr）、"
+                     "全体テストの失敗が変更に無関係なら文書の検査へ（doc-lint）、止めるか（stop）",
+         "choices": ["fix", "pr", "doc-lint", "stop"]},
+        {"id": "fix", "type": "work", "kind": "修正", "inputs": ["test-limited", "test-all"],
+         "prompt": FIX_PROMPT, "next": "test-limited"},
+        # Draft の PR を全体テストの前に出し、CI と手元の全体テストを並べる。直した後は pr の段が push して本文を更新する
+        {"id": "pr", "type": "pr", "stage": "Pull Request", "base": a.base, "title": a.title,
+         "summary": a.summary or "", "changes": getattr(a, "changes", None) or "", "next": "test-all"},
+        {"id": "test-all", "type": "run", "stage": "完了判定", "timeout": 1800, "rerun_failed": True,
+         "cmd": with_paths(a.test_cmd, a.test_all), "on_fail": "judge", "next": "doc-lint"},
+        {"id": "doc-lint", "type": "run", "preset": "doc-lint", "stage": "完了判定", "on_fail": "fix-doc",
+         "next": "ready"},
+        {"id": "fix-doc", "type": "work", "kind": "修正", "inputs": ["doc-lint"],
+         "prompt": "ヒットした行を今の決まりだけを書く形へ直してコミットする（push しない）。", "next": "doc-lint"},
+        {"id": "ready", "type": "run", "cmd": "sh -c 'git push -q && gh pr ready {pr}'", "next": "merge"},
+        {"id": "merge", "type": "run", "timeout": 7200, "cmd": MERGE_CMD, "next": "end"},
+    ]
+    plan = {
+        "フェーズ": "実装", "課題": a.issue, "モード": a.mode, "作業場所": a.worktree,
+        "規則": RULE_IMPL, "上限": 20, "steps": steps,
     }
+    with_decls(plan, a)
     if getattr(a, "files", None):
         plan["触るファイル"] = a.files
     if a.branch:
         plan["branch"] = a.branch
+        plan["起点"] = f"origin/{a.base}"
     return plan
 
 
@@ -1386,9 +1554,9 @@ def plan_check(a) -> dict:
     refactor = {"id": "refactor", "type": "drive", "drive": "cross-refactoring", "kind": "構造改善",
                 "stage": "構造改善", "timeout": 3600,
                 "args": f"{pr} --workflow-step --scope {scope} "
-                        f"--baseline-test {shlex.quote(PYTEST.format(paths='.'))}",
+                        f"--baseline-test {shlex.quote(with_paths(a.test_cmd, a.test_all))}",
                 "next": "review"}
-    return {
+    return with_decls({
         "フェーズ": "検査", "課題": a.issue or [], "モード": a.mode, "作業場所": a.worktree,
         "規則": RULE_CHECK, "上限": 12, "Pull Request": str(pr),
         "steps": [
@@ -1398,7 +1566,8 @@ def plan_check(a) -> dict:
             {"id": "review", "type": "drive", "drive": "cross-review", "kind": "実装レビュー",
              "stage": "実装レビュー", "timeout": 3600, "args": f"{pr} --max-rounds 4", "next": "test-all"},
             {"id": "test-all", "type": "run", "stage": "完了判定", "timeout": 1800, "rerun_failed": True,
-             "cmd": "git pull -q --rebase && " + PYTEST.format(paths="."), "on_fail": "judge", "next": "ready"},
+             "cmd": "git pull -q --rebase && " + with_paths(a.test_cmd, a.test_all), "on_fail": "judge",
+             "next": "ready"},
             {"id": "judge", "type": "judge", "inputs": ["test-all"],
              "question": "全体テストの失敗を直す（fix）か、変更に無関係として進める（ready）か、止める（stop）か",
              "choices": ["fix", "ready", "stop"]},
@@ -1407,58 +1576,84 @@ def plan_check(a) -> dict:
             {"id": "ready", "type": "run", "cmd": f"git push -q; gh pr ready {pr}", "next": "merge"},
             {"id": "merge", "type": "run", "timeout": 7200, "cmd": MERGE_CMD, "next": "end"},
         ],
-    }
+    }, a)
 
 
 RULE_RELEASE_DEV = ("run の段が落ちたら、出力を読んで直せるもの（版数の書き漏れ・文書の形）は fix。外部の待ち（CI・ネットワーク）"
                     "の揺れなら同じ段をもう一度（retry）。認証や権限の不足・タグの重複は stop。")
 RULE_RELEASE_PROD = ("利用者は関門 2 を承認した。run の段が落ちたら、直せるもの（版数の書き漏れ・文書の形）は fix。"
                      "外部の待ち（CI・ネットワーク）の揺れなら同じ段をもう一度。タグの重複・権限の不足は stop。")
-STEPS_PY = "python3 plugins/ndf/scripts/release-steps.py"
-VERIFY_PY = "python3 plugins/ndf/scripts/release-verification-steps.py"
-MERGED_PY = "python3 plugins/ndf/scripts/merged-steps.py"
+STEPS_PY = f"python3 {HERE / 'release-steps.py'}"
+VERIFY_PY = f"python3 {HERE / 'release-verification-steps.py'}"
+MERGED_PY = f"python3 {HERE / 'merged-steps.py'}"
 QUEUE_PRS = "{queue_prs}"  # queue が --then の計画を流す前に、先行の計画の Pull Request の番号へ置き換える
 
 
 def plan_release(a) -> dict:
-    """配布の計画。dev: bump → changelog → 説明文 → sync-check → release → verify-install → approval-facts
-    → 提示物の欄。prod: bump → changelog → 説明文 → 消費の記録 → sync-check → release → verify-install。
+    """配布の計画。形（.ndf/supervise.json の release.form）ごとの雛形へ渡す。知らない形なら DeclError。"""
+    form = (a.release or {}).get("form")
+    maker = RELEASE_FORMS.get(form)
+    if not maker:
+        raise DeclError(f"配布の形 {form!r} の雛形が無い（雛形のある形: {', '.join(RELEASE_FORMS)}）。"
+                        "その形は /ndf:release で配る")
+    return maker(a)
+
+
+def plan_release_package_plugin(a) -> dict:
+    """Claude Code のプラグインを配る形（package-plugin）の計画。宣言の release は
+    {"form": "package-plugin", "plugin": <名前>, "runtimes": [<導入を確かめるランタイム>...]}。
+    dev: bump → changelog → 説明文 → sync-check → release → verify-install（起点のブランチ）→ approval-facts
+    → 提示物の欄。prod: bump → changelog → 説明文 → 消費の記録 → sync-check → release → verify-install
+    （本番のブランチ）→ 後片付け。sync-check は同期と検査の宣言があるときだけ置く。
     説明文と提示物の欄は release-steps.py notes が PR 本文の「利用者向けの変化」から組む（LLM を使わない）。"""
+    rel = a.release
+    plugin, runtimes = rel.get("plugin"), rel.get("runtimes")
+    if not isinstance(plugin, str) or not plugin:
+        raise DeclError("supervise.json: release.plugin（配るプラグインの名前）が要る")
+    if not isinstance(runtimes, list) or not runtimes or not all(isinstance(r, str) for r in runtimes):
+        raise DeclError("supervise.json: release.runtimes（導入を確かめるランタイムの並び）が要る")
     v, dev = a.version, a.channel == "dev"
+    if not dev and not a.production_branch:
+        raise DeclError(f"本番の配布に要る本番のブランチが無い（--production-branch か .ndf/{WORKTREE_DECL} の "
+                        "production_branch）")
+    rts = ",".join(runtimes)
     base = re.sub(r"-.*$", "", v)  # 開発版の本番承認の提示物は正式版の番号で作る
     # --prs-from-queue なら、queue が先行の計画の Pull Request の番号で QUEUE_PRS を置き換える
     prs = " ".join([*map(str, a.prs), *([QUEUE_PRS] if getattr(a, "prs_from_queue", False) else [])])
     repo = a.repo or (a.worktree.split("/.worktrees/")[0] if "/.worktrees/" in a.worktree else None)
-    run_ids = ["bump", "changelog", "notes"] + ([] if dev else ["snapshot"]) + ["sync", "release", "verify"] + (
-        ["facts", "explain"] if dev else [])
+    sync = bool(getattr(a, "sync_checks", None))
+    after_notes = "sync" if sync else "release"
+    run_ids = ["bump", "changelog", "notes"] + ([] if dev else ["snapshot"]) + (["sync"] if sync else []) + [
+        "release", "verify"] + (["facts", "explain"] if dev else [])
     # 説明文は PR 本文の「利用者向けの変化」から機械で組む（節が無い PR は題名）
     notes = (f"sh -c '{STEPS_PY} notes --version {v} --prs {prs} && git add -A && "
-             f"(git diff --cached --quiet || git commit -q -m \"Release: ndf v{v}\")'")
+             f"(git diff --cached --quiet || git commit -q -m \"Release: {plugin} v{v}\")'")
     steps = [
-        {"id": "bump", "type": "run", "stage": "配布", "cmd": f"{STEPS_PY} bump --plugin ndf --to {v}",
+        {"id": "bump", "type": "run", "stage": "配布", "cmd": f"{STEPS_PY} bump --plugin {plugin} --to {v}",
          "on_fail": "judge", "next": "changelog"},
         {"id": "changelog", "type": "run", "cmd": f"{STEPS_PY} changelog --version {v} --prs {prs}",
          "on_fail": "judge", "next": "notes"},
         {"id": "notes", "type": "run", "stage": "配布", "cmd": notes, "on_fail": "judge",
-         "next": "sync" if dev else "snapshot"},
+         "next": after_notes if dev else "snapshot"},
     ]
     if not dev:
         steps.append({"id": "snapshot", "type": "run", "stage": "配布", "timeout": 900,
                       "cmd": f"sh -c '{STEPS_PY} run --root . --stage production --version {v} && git add -A && "
-                             f"(git diff --cached --quiet || git commit -q -m \"Release: ndf v{v} のトークン消費の記録\")'",
-                      "on_fail": "judge", "next": "sync"})
-    ref = "develop" if dev else "main"
+                             f"(git diff --cached --quiet || git commit -q -m \"Release: {plugin} v{v} のトークン消費の記録\")'",
+                      "on_fail": "judge", "next": after_notes})
+    ref = a.base if dev else a.production_branch
+    if sync:
+        steps.append({"id": "sync", "type": "run", "preset": "sync-check", "on_fail": "judge", "next": "release"})
     steps += [
-        {"id": "sync", "type": "run", "preset": "sync-check", "on_fail": "judge", "next": "release"},
         {"id": "release", "type": "run", "stage": "配布", "timeout": 2400 if dev else 3000,
          "cmd": f"{STEPS_PY} release --version {v} --channel {a.channel}", "on_fail": "judge", "next": "verify"},
         {"id": "verify", "type": "run", "stage": "配布" if dev else "リリース後テスト", "timeout": 1500, "cwd": repo,
-         "cmd": f"sh -c 'git pull -q --ff-only origin develop && {VERIFY_PY} verify-install --ref {ref} "
-                f"--expect {v} --runtimes claude,codex,kiro'",
+         "cmd": f"sh -c 'git pull -q --ff-only origin {a.base} && {VERIFY_PY} verify-install --ref {ref} "
+                f"--expect {v} --runtimes {rts}'",
          "on_fail": "judge", "next": "facts" if dev else "cleanup"},
     ]
     if not dev:
-        # 後片付け: 配布の PR（head が release/v{v} で始まる。開発版の release/v{v}-dev.N も含む。宛先は develop）と
+        # 後片付け: 配布の PR（head が release/v{v} で始まる。開発版の release/v{v}-dev.N も含む。宛先は起点のブランチ）と
         # ミッションの PR（--prs）のブランチと作業ツリー
         run_ids.append("cleanup")
         steps.append(
@@ -1467,7 +1662,7 @@ def plan_release(a) -> dict:
                     f"--jq \".[] | select(.headRefName | startswith(\\\"release/v{v}\\\")) | .number\") {prs}'",
              "on_fail": "judge", "next": "end"})
     if dev:
-        approval = f"issues/approval-ndf-v{base}.md"
+        approval = f"issues/approval-{plugin}-v{base}.md"
         prev = f" --prev-tag {a.prev_tag}" if a.prev_tag else ""
         steps += [
             {"id": "facts", "type": "run", "cwd": repo,
@@ -1475,7 +1670,7 @@ def plan_release(a) -> dict:
              "presentation_to": approval, "on_fail": "judge", "gate_next": "explain", "next": "explain"},
             {"id": "explain", "type": "run", "cwd": repo,
              "cmd": f"{STEPS_PY} notes --version {v} --prs {prs} --approval {approval} "
-                    f"--verified claude,codex,kiro --ref develop",
+                    f"--verified {rts} --ref {a.base}",
              "on_fail": "judge", "next": "end"},
         ]
     steps += [
@@ -1485,17 +1680,22 @@ def plan_release(a) -> dict:
          "choices": ["fix", *run_ids, "stop"]},
         {"id": "fix", "type": "work", "kind": "修正", "inputs": run_ids,
          "prompt": "落ちた段の出力を読み、原因を直してコミットする（push しない）。直したら次は落ちた段からやり直す。",
-         "next": "sync"},
+         "next": after_notes},
     ]
     plan = {
         "フェーズ": f"配布（{'開発版' if dev else '本番'}）", "課題": a.issue, "モード": a.mode, "作業場所": a.worktree,
-        "branch": a.branch or f"release/v{v}", "規則": RULE_RELEASE_DEV if dev else RULE_RELEASE_PROD, "上限": 20,
-        "steps": steps,
+        "branch": a.branch or f"release/v{v}", "起点": f"origin/{a.base}",
+        "規則": RULE_RELEASE_DEV if dev else RULE_RELEASE_PROD, "上限": 20, "steps": steps,
     }
+    with_decls(plan, a)
     if repo:
         plan["リポジトリ"] = repo
-        plan["記録"] = f"{repo}/plugins/ndf/scripts/projects-sync.sh"
+        plan["記録"] = str(HERE / "projects-sync.sh")
     return plan
+
+
+# 配布の形（release の form-<形>.md）ごとの雛形。無い形は /ndf:release で配る
+RELEASE_FORMS = {"package-plugin": plan_release_package_plugin}
 
 
 def cmd_new(a) -> dict:
@@ -1544,7 +1744,7 @@ def plan_mission_design(a, n: int, repo: str) -> dict:
 
 
 def plan_mission_branch(a, repo: str) -> dict:
-    """ミッションのブランチを起点（develop）から切り、origin へ送る。"""
+    """ミッションのブランチを起点のブランチから切り、origin へ送る。"""
     mb = mission_branch(a.name)
     wt = f"{repo}/.worktrees/{mb}"
     cmd = (f"bash {shlex.quote(str(WORKTREE_SETUP))} create {shlex.quote(mb)} && "
@@ -1560,19 +1760,21 @@ def plan_mission_impl(a, n: int, repo: str) -> dict:
     """実装のフェーズ: 課題の作業ツリーをミッションのブランチから切り、課題の PR をミッションのブランチへ集める。"""
     mb = mission_branch(a.name)
     branch = f"feat/issue-{n}-{a.name}"
-    ns = argparse.Namespace(
-        issue=[n], prompt=None, prompt_file=None, tests=a.tests or ["."], mode=a.mode,
-        worktree=f"{repo}/.worktrees/{branch}", base=mb, title=f"#{n} を実装する（ミッション {a.name}）",
-        summary=f"#{n}（ミッション {a.name} のブランチへ集める）", branch=branch)
+    ns = argparse.Namespace(**{
+        **decl_fields(a), "issue": [n], "prompt": None, "prompt_file": None, "tests": a.tests or ["."],
+        "mode": a.mode, "worktree": f"{repo}/.worktrees/{branch}", "base": mb,
+        "title": f"#{n} を実装する（ミッション {a.name}）", "summary": f"#{n}（ミッション {a.name} のブランチへ集める）",
+        "branch": branch})
     plan = plan_impl(ns)
     plan.update({"起点": f"origin/{mb}", "リポジトリ": repo})
     return plan
 
 
 def plan_mission_check(a, repo: str) -> dict:
-    """検査のフェーズ: ミッションのブランチから develop へ PR を 1 本出し、構造改善・cross-review・完了判定を 1 回通す。"""
+    """検査のフェーズ: ミッションのブランチから起点のブランチへ PR を 1 本出し、構造改善・cross-review・完了判定を 1 回通す。"""
     mb = mission_branch(a.name)
-    ns = argparse.Namespace(pr="{pr}", scope=a.scope, issue=a.issue, mode=a.mode, worktree=f"{repo}/.worktrees/{mb}")
+    ns = argparse.Namespace(**decl_fields(a), pr="{pr}", scope=a.scope, issue=a.issue, mode=a.mode,
+                            worktree=f"{repo}/.worktrees/{mb}")
     plan = plan_check(ns)
     plan.pop("Pull Request", None)
     closes = "\n".join(f"Closes #{i}" for i in a.issue)
@@ -1581,7 +1783,7 @@ def plan_mission_check(a, repo: str) -> dict:
         {"id": "collect", "type": "run", "stage": "実装", "timeout": 600,
          "cmd": f"git pull -q --ff-only origin {shlex.quote(mb)}", "next": "pr"},
         {"id": "pr", "type": "pr", "stage": "Pull Request", "base": a.base, "title": f"ミッション {a.name}",
-         "body": "template", "summary": f"ミッション {a.name} の課題を develop へ取り込む。\n\n{closes}",
+         "body": "template", "summary": f"ミッション {a.name} の課題を {a.base} へ取り込む。\n\n{closes}",
          "next": "assess"},
     ] + plan["steps"]
     return plan
@@ -1590,7 +1792,7 @@ def plan_mission_check(a, repo: str) -> dict:
 def plan_mission_release(a, repo: str) -> dict:
     """開発版の配布。検査の queue が --then で流し、検査の PR を --prs へ渡す。"""
     ns = argparse.Namespace(
-        version=a.version, prs=[], prs_from_queue=True, channel="dev", repo=repo, prev_tag=None,
+        **decl_fields(a), version=a.version, prs=[], prs_from_queue=True, channel="dev", repo=repo, prev_tag=None,
         worktree=f"{repo}/.worktrees/release/v{a.version}", branch=f"release/v{a.version}",
         issue=a.issue, mode=a.mode)
     return plan_release(ns)
@@ -1949,7 +2151,12 @@ def main() -> int:
                    help="impl: 触るファイル。同じ出力先の、まだ終わっていない他の計画の指示文へ除外として載る")
     n.add_argument("--changes", help="impl: PR 本文の「利用者向けの変化」の材料（配布の説明文になる）")
     n.add_argument("--branch", help="作業場所が無ければ作る作業ツリーのブランチ")
-    n.add_argument("--base", default="develop")
+    n.add_argument("--base", help="起点のブランチ（PR の宛先。既定は .ndf/worktree.json の base_branch）")
+    n.add_argument("--production-branch",
+                   help="release prod: 本番のブランチ（既定は .ndf/worktree.json の production_branch）")
+    n.add_argument("--test-cmd", help="impl / check: テストのコマンド。{paths} を範囲に置き換える"
+                                      "（既定は .ndf/supervise.json の test.command）")
+    n.add_argument("--test-all", help="impl / check: 全体テストの範囲（既定は .ndf/supervise.json の test.all か .）")
     n.add_argument("--mode", default="standard")
     n.add_argument("--version", help="release: 配る版（例 10.17.11-dev.1）")
     n.add_argument("--prs", type=int, nargs="+", default=[], help="release: 含む PR")
@@ -1978,7 +2185,7 @@ def main() -> int:
     t.add_argument("--report", required=True)
     t.add_argument("--next", default="")
     t.add_argument("--section", default="今の会話の進み")
-    c = sub.add_parser("sync-check", help="生成物の同期と検査 4 本")
+    c = sub.add_parser("sync-check", help="宣言した同期と検査（.ndf/supervise.json の sync_checks）")
     c.add_argument("--root", default=".")
     c.add_argument("--commit", action="store_true", help="同期で変わったファイルをコミットする")
     a = ap.parse_args()
@@ -1990,7 +2197,11 @@ def main() -> int:
             ap.error("new mission には --name・--issue・--version（開発版の版）が要る")
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", a.name):
             ap.error("--name は英数字・. _ - だけで書く（ブランチ名 mission/<名前> に使う）")
-        emit(cmd_new_mission(a))
+        try:
+            apply_decls(a)
+            emit(cmd_new_mission(a))
+        except DeclError as e:
+            ap.error(str(e))
     if a.cmd == "new":
         if a.kind == "impl" and not (a.issue and a.tests and a.title):
             ap.error("new impl には --issue・--tests・--title が要る")
@@ -2000,7 +2211,11 @@ def main() -> int:
             ap.error("new release には --version・--prs（か --prs-from-queue）・--channel が要る")
         if a.kind == "release" and not (a.repo or "/.worktrees/" in a.worktree):
             ap.error("new release には --repo が要る（作業場所が /.worktrees/ の下に無い）")
-        emit(cmd_new(a))
+        try:
+            apply_decls(a)
+            emit(cmd_new(a))
+        except DeclError as e:
+            ap.error(str(e))
     if a.cmd == "queue":
         emit(cmd_queue(a.plans, max(1, a.max), a.poll, a.then, a.done))
     if a.cmd == "wait":
