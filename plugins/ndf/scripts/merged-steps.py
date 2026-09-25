@@ -102,6 +102,19 @@ def remove_worktree(root, path, label):
     return False, f"worktree remove --force が失敗: {p.stderr.strip()[:300]}"
 
 
+def same_untracked(main_dir, pull):
+    """pull を止めた未追跡のファイルが、すべて上流の内容と同じならその一覧を返す。1 つでも違えば空。"""
+    if "untracked working tree files would be overwritten" not in pull.stderr:
+        return []
+    rels = [l.strip() for l in pull.stderr.splitlines() if l.startswith("\t")]
+    for rel in rels:
+        up = run(["git", "-C", main_dir, "show", f"@{{u}}:{rel}"], check=False)
+        path = Path(main_dir) / rel
+        if up.returncode != 0 or not path.is_file() or path.read_text(errors="replace") != up.stdout:
+            return []
+    return rels
+
+
 def base_branch(main_dir):
     try:
         f = Path(main_dir) / ".ndf" / "worktree.json"
@@ -188,6 +201,13 @@ def cleanup(root, prs):
         add("main_dir", main_dir, "kept", f"主ディレクトリが {base} でなく {cur or 'detached'} のため pull しない")
     else:
         pull = run(["git", "-C", main_dir, "pull", "--ff-only"], check=False)
+        same = same_untracked(main_dir, pull) if pull.returncode != 0 else []
+        if same:
+            # 取り込む内容と同じ未追跡のファイル（手元の写し）だけが邪魔をしたときは、消して取り込み直す
+            for rel in same:
+                (Path(main_dir) / rel).unlink()
+                add("untracked", rel, "removed", "取り込む内容と同じ")
+            pull = run(["git", "-C", main_dir, "pull", "--ff-only"], check=False)
         if pull.returncode != 0:
             pull_err = f"主ディレクトリの git pull --ff-only が失敗: {pull.stderr.strip()[:300]}"
             add("main_dir", main_dir, "stopped", pull_err)
