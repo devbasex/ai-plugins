@@ -11,7 +11,7 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
 | work  | 1 つの作業（修正・調査）を worker として行わせる | Tool あり（Read/Edit/Write/Bash/Grep/Glob）。`"full": true` なら設定・プラグイン・Skill をそのまま読む claude -p で Skill を回す（cross-review など） |
 | drive | 駆動（cross-review / cross-refactoring の drive.py）を run として回し、`pause` のときだけ worker に判断・修正をさせて駆動へ返す | pause のときだけ（work と同じ最小構成） |
 | judge | 結果ファイルと規則の抜粋だけを渡し、次の段を決めさせる | Tool なし |
-| pr    | push して Draft の Pull Request を作る（スクリプト）。本文は材料（計画の値・コミット・変更の統計・run の結果・設計文書）から LLM が書く。`"body": "template"` なら材料をそのまま本文にする | 本文だけTool なし |
+| pr    | push して Draft の Pull Request を作る（スクリプト）。本文は材料（計画の値・コミット・変更の統計・run の結果・設計文書）から LLM が書く。`"body": "template"` なら材料をそのまま本文にする。末尾の署名は本文に無いときだけ足す | 本文だけTool なし |
 
 使い方:
     supervise.py run <plan.json> [--state-dir DIR] [--from <段の id>]
@@ -139,6 +139,7 @@ SERENA_MCP = {"mcpServers": {"serena": {
              "--enable-web-dashboard", "False"],
     "env": {"SERENA_HOME": ".serena"}}}}
 FULL_TOOLS = "Read,Edit,Write,Bash,Grep,Glob,Skill,Agent,Monitor,SendMessage,ToolSearch"
+PR_FOOTER = "🤖 Generated with [Claude Code](https://claude.com/claude-code)"  # PR 本文の末尾の署名（1 度だけ）
 TAIL = 6000  # LLM へ渡す出力の末尾の文字数
 SELF = Path(__file__).resolve()
 SKILLS = SELF.parent.parent / "skills"
@@ -806,7 +807,7 @@ class Supervisor:
 | --- | ---: | --- |
 {chr(10).join(tests) or '| 無し | | |'}
 
-🤖 Generated with [Claude Code](https://claude.com/claude-code)
+{PR_FOOTER}
 """
         if step.get("body", "llm") == "llm":
             design = ""
@@ -819,7 +820,9 @@ class Supervisor:
                               None, self.cwd, step.get("timeout", 600))
             self.add_usage("judge", res)
             if res["ok"] and res["text"].strip():
-                body = res["text"].strip() + "\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+                body = res["text"].strip() + "\n"
+                if PR_FOOTER not in body:
+                    body = body.rstrip() + f"\n\n{PR_FOOTER}\n"
         body = with_mode_line(body, self.plan.get("モード"), self.passed_stages(step))
         found = subprocess.run(["gh", "pr", "list", "--head", branch, "--state", "open", "--json", "url",
                                 "--jq", ".[0].url"], cwd=self.cwd, capture_output=True, text=True).stdout.rstrip()

@@ -133,6 +133,11 @@ agy plugin list
 - **`cross-review` は設計 PR を既定で 3 ラウンドまで回し、2 ラウンド目からは前のラウンドからの差分だけを見る**。
   設計文書が 1,000 行を超えると知らせる
 - **`supervise.py` の `run` の段は worker の作業場所を cwd にして動く**
+- **`supervise.py queue` は計画の作業ツリーを起動の前に 1 本ずつ作る**。`git worktree add` が `.git/config` の
+  lock で落ちたら 5 回までやり直す
+- **`supervise.py` の `cmd` / `args` の `{pr}` は Pull Request の番号、`{pr_url}` は URL に置き換わる**
+- **`merged-steps.py merge-when-green` は draft の PR を `gh pr ready` で外してからマージする**。
+  `supervise.py` の `pr` の段は、本文に署名の行が無いときだけ足す
 
 ### 追加
 

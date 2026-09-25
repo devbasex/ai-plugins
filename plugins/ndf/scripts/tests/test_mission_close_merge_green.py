@@ -54,6 +54,13 @@ elif a[:2] == ["pr", "merge"]:
     if code == 0:
         for s in st.get("pr_seq", {{}}).get(a[2], []):
             s["state"] = "MERGED"
+elif a[:2] == ["pr", "ready"]:
+    code = st.get("ready_code", 0)
+    if code == 0:
+        for s in st.get("pr_seq", {{}}).get(a[2], []):
+            s["isDraft"] = False
+    else:
+        sys.stderr.write("ready failed\n")
 elif a[:2] == ["issue", "view"]:
     key = f"{{opt('--repo')}}#{{a[2]}}"
     seq = st.get("issues", {{}}).get(key)
@@ -338,6 +345,37 @@ def test_merge_when_green_merge_failure_stops(repo, gh):
     gh.set(merge_code=1, pr_seq={"5": [{"state": "OPEN", "headRefOid": "a", "statusCheckRollup": []}]})
     code, out, err = call("merged-steps.py", ["merge-when-green", "5", "--interval", "0"], gh.env, repo)
     assert code == 1 and "gh pr merge" in out["summary"]
+
+
+def test_merge_when_green_readies_draft_before_merge(repo, gh):
+    draft = {"state": "OPEN", "isDraft": True, "headRefOid": "a", "statusCheckRollup": [run_("t")]}
+    merged = {"headRefName": "feat/x", "state": "MERGED", "mergeCommit": {"oid": "c"}}
+    gh.set(pr_seq={"5": [draft, dict(draft), dict(draft), merged]})
+    git(repo, "checkout", "-q", "-b", "other")
+    code, out, err = call("merged-steps.py", ["merge-when-green", "5", "--interval", "0", "--root", str(repo)],
+                          gh.env, repo)
+    assert code == 0, (out, err)
+    assert [i for i in out["items"] if i["kind"] == "pr"] == [
+        {"kind": "pr", "name": "#5", "result": "ready"},
+        {"kind": "pr", "name": "#5", "result": "merged", "method": "merge"}]
+    calls = [c[:2] for c in gh.get()["calls"] if c[0] == "pr" and c[1] in ("ready", "merge")]
+    assert calls == [["pr", "ready"], ["pr", "merge"]]
+
+
+def test_merge_when_green_not_draft_does_not_ready(repo, gh):
+    gh.set(pr_seq={"5": [{"state": "OPEN", "isDraft": False, "headRefOid": "a", "statusCheckRollup": []}]})
+    code, out, err = call("merged-steps.py", ["merge-when-green", "5", "--interval", "0", "--no-cleanup"],
+                          gh.env, repo)
+    assert code == 0, (out, err)
+    assert not [c for c in gh.get()["calls"] if c[:2] == ["pr", "ready"]]
+
+
+def test_merge_when_green_ready_failure_stops(repo, gh):
+    gh.set(ready_code=1, pr_seq={"5": [{"state": "OPEN", "isDraft": True, "headRefOid": "a",
+                                        "statusCheckRollup": []}]})
+    code, out, err = call("merged-steps.py", ["merge-when-green", "5", "--interval", "0"], gh.env, repo)
+    assert code == 1 and "gh pr ready" in out["summary"]
+    assert not [c for c in gh.get()["calls"] if c[:2] == ["pr", "merge"]]
 
 
 # --- 退避がファイルシステムをまたぐ ----------------------------------------------

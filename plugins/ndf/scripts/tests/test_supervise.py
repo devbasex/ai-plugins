@@ -662,7 +662,8 @@ sys.exit(1)
 """
 
 
-def test_pr_body_ends_with_mode_and_passed_stages(tmp_path, monkeypatch):
+def pr_repo(tmp_path, monkeypatch):
+    """develop から切った feat/x を持つリポジトリと、pr create の本文を書き出す偽の gh を用意する。"""
     origin = tmp_path / "origin.git"
     subprocess.run(["git", "init", "-q", "--bare", "-b", "develop", str(origin)], check=True)
     root = tmp_path / "repo"
@@ -687,6 +688,11 @@ def test_pr_body_ends_with_mode_and_passed_stages(tmp_path, monkeypatch):
     body = tmp_path / "body.txt"
     monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
     monkeypatch.setenv("FAKE_GH_BODY", str(body))
+    return root, body
+
+
+def test_pr_body_ends_with_mode_and_passed_stages(tmp_path, monkeypatch):
+    root, body = pr_repo(tmp_path, monkeypatch)
     plan = {"フェーズ": "実装", "課題": [1], "モード": "standard", "作業場所": str(root), "steps": [
         {"id": "impl", "type": "run", "cmd": "true", "stage": "実装", "next": "test"},
         {"id": "test", "type": "run", "cmd": "true", "stage": "完了判定", "next": "pr"},
@@ -697,3 +703,21 @@ def test_pr_body_ends_with_mode_and_passed_stages(tmp_path, monkeypatch):
     lines = [l for l in body.read_text().splitlines() if l.strip()]
     assert lines[-2] == "モード: standard / 通した工程: 実装 → 完了判定 → Pull Request"
     assert lines[-1].startswith("🤖 Generated with")
+    assert sum(sv.PR_FOOTER in l for l in lines) == 1
+
+
+@pytest.mark.parametrize("llm_footer", [True, False])
+def test_pr_body_from_llm_has_one_footer(tmp_path, monkeypatch, llm_footer):
+    root, body = pr_repo(tmp_path, monkeypatch)
+    text = "## 概要\n\n本文。" + (f"\n\n{sv.PR_FOOTER}" if llm_footer else "")
+    fake = tmp_path / "claude.py"
+    fake.write_text("import json, sys\nsys.stdin.read()\n"
+                    f"print(json.dumps({{'result': {text!r}, 'usage': {{}}, 'total_cost_usd': 0}}))\n")
+    monkeypatch.setenv("NDF_SUPERVISE_CLAUDE", f"{PY} {fake}")
+    plan = {"フェーズ": "実装", "課題": [1], "作業場所": str(root), "steps": [
+        {"id": "pr", "type": "pr", "stage": "Pull Request", "base": "develop", "next": "end"}]}
+    s = sv.Supervisor(plan, tmp_path / "state")
+    assert "結果: 完了" in s.run()
+    got = body.read_text()
+    assert "本文。" in got and got.count(sv.PR_FOOTER) == 1
+    assert got.rstrip().endswith(sv.PR_FOOTER)
