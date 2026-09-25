@@ -98,7 +98,9 @@ def test_rerun_failed_still_failing_goes_to_on_fail(tmp_path):
     assert [e["id"] for e in s.log] == ["t", "after"]
 
 
-def test_run_step_disables_pytest_reports(tmp_path):
+def test_run_step_disables_pytest_reports(tmp_path, monkeypatch):
+    # 外側の supervise が足した PYTEST_ADDOPTS を引き継がない
+    monkeypatch.delenv("PYTEST_ADDOPTS", raising=False)
     s, _ = run_plan(tmp_path, [{"id": "t", "type": "run", "cmd": 'echo "[$PYTEST_ADDOPTS]"', "next": "end"}])
     assert "-p no:playwright-kit" in s.results["t"]["text"]
     s, _ = run_plan(tmp_path, [{"id": "t", "type": "run", "cmd": 'echo "[$PYTEST_ADDOPTS]"', "reports": True,
