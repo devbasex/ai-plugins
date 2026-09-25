@@ -132,7 +132,7 @@ python3 "$SCRIPTS/merged-steps.py" cleanup <PR番号>... --root <主ディレク
 
 ```bash
 python3 "$SCRIPTS/merged-steps.py" merge-when-green <PR番号> --root <主ディレクトリ> \
-  [--method merge|squash|rebase] [--interval 30] [--timeout 3600] [--no-cleanup]
+  [--method merge|squash|rebase] [--interval 30] [--timeout 3600] [--stale-after 300] [--no-cleanup]
 ```
 
 - CI の検査が全部通るまで待つ。push で先頭のコミットが変わると待ち直す（`items` に `rewait` が載る）
@@ -140,6 +140,14 @@ python3 "$SCRIPTS/merged-steps.py" merge-when-green <PR番号> --root <主ディ
 - 通れば `gh pr merge --admin` でマージし、続けて上の `cleanup` と同じ後片付けを行う。
   `status` の読み方は上の表と同じ
 - 上限の時間を過ぎても検査が終わらなければ `stopped`（1）で止まる。`next` のコマンドで打ち直す
+- 実行が終わった（`completed`）のに検査が pending のまま `--stale-after` 秒続けば、GitHub 側で
+  取り残された検査とみなし、そのジョブを `gh run rerun <run> --job <job>` で **1 度だけ**再実行する
+  （`items` に `{"kind": "check", "result": "rerun", "run": ..., "job": ...}` が載る）。
+  再実行した同じ検査が再び取り残されたら `stopped`（1）で止まる（`items` の `result` は `stuck`）
+- ジョブが `queued` のままランナーを待つ間は、待ちの 1 周ごとに stderr へ
+  `merge-when-green: CI のランナー待ち（待ち行列 N 件、待ち M 件）` を出す。最後に見た待ち行列の件数は
+  `metrics.queued_runs` に残る。supervise.py の run の段で動かすと、この行が `progress.jsonl` の
+  `alive` の行の `last_output` に載る
 
 ## ミッションの課題を報告する
 
