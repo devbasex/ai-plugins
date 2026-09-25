@@ -108,7 +108,7 @@ worker（読解）は深さ 1 に現れるため、`description` の先頭語が
 | キー | 型 | 取り方 |
 | --- | --- | --- |
 | `layer` | 文字列 | 深さと `description` から決める。0 = `conductor`。2 以上 = `worker`。1 は、先頭語が作業の種類の語彙にあれば `worker`、それ以外は `supervisor` |
-| `role` | 文字列 | conductor は `-`。supervisor は `.meta.json` の `description` の最初の `: ` より前がフェーズの語彙にあればその値。worker は同じ位置が作業の種類の語彙にあればその値。当たらなければ `その他`。`: ` が無ければ文字列全体を先頭語にする |
+| `role` | 文字列 | conductor は `-`。supervisor は `.meta.json` の `description` の最初の `: ` より前がフェーズの語彙にあればその値、工程名（`transcript_agents.STEP_PHASES`。`agent-layers.md` のフェーズの表の「通す工程」の列を写したもの）にあればその工程を通すフェーズ。worker は同じ位置が作業の種類の語彙にあればその値。当たらなければ `その他`。`: ` が無ければ文字列全体を先頭語にする |
 | `agent_id` | 文字列 / null | ファイル名の `agent-<ID>`。conductor は null |
 | `depth` | 整数 | conductor 0。ほかは `.meta.json` の `spawnDepth`（整数でなければ 0） |
 | `model` | 文字列 / null | 合成でない応答の `message.model` のうち最も多いもの |
@@ -184,8 +184,9 @@ worker（読解）は深さ 1 に現れるため、`description` の先頭語が
 どの行にも入らない。
 
 `json` は `agents`（記録ごとの行、`agent_id` を除く）/ `agent_summary` / `layer_totals` / `totals`
-（`records` / `fixed_sum` / `work_sum` / `total_spend`）/ `role_usage` / `excluded` / `meta.window_limit`
-を持つ。
+（`records` / `fixed_sum` / `work_sum` / `total_spend`）/ `role_usage` / `excluded` / `unphased_supervisors` / `meta.window_limit`
+を持つ。`markdown` は束ねの表の下に、フェーズが読めなかった（`その他` に落ちた）supervisor の件数を
+1 行出す（`json` の `unphased_supervisors`）。
 
 ### 振り返りの記録へ貼る表
 
