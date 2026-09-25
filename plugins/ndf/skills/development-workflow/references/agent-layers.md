@@ -142,6 +142,30 @@ supervisor が守る規則:
 10. モードを上げるべきだと分かったら、進めずに `結果: 止まった` で返す。`到達点` が置き直されて
     いて、その到達点に達したときは、関門を返さずに `結果: 完了`・`次のフェーズ: 無し` で返す
 
+#### supervise.py で回すときの待ち方
+
+**フェーズを `supervise.py run` / `queue` で回すとき、conductor は `report.md` が揃うか、
+`progress.jsonl` に conductor 向けの行が足されるまでを 1 回の背景の待ちで待つ。**
+`progress.jsonl` は計画の状態ディレクトリ（`<計画>-state/`）に置かれ、1 行が 1 つの JSON である。
+書くのは supervise.py と worker で、LLM は使わない。
+
+| `kind` | 書く時点 | 中身 | conductor の読み方 |
+| --- | --- | --- | --- |
+| `step` | 段の切り替わりごと | `step`・`type`・`exit`・`seconds`・`cost`・`next`・`summary` | 起きたときに末尾を読む。これだけでは起きない |
+| `alive` | 最後の行から計画の `"report_interval"`（既定 600 秒）動きが無いとき | `step`・`elapsed`・`worker`（worker の最後の報告） | 同上 |
+| `worker` | work の段の worker が区切り（課題を読み終えた・テストを足した・実装を 1 つ終えた・コミットした）ごと | `text`（1 行の要約） | 同上 |
+| `attention` | conductor の判断が要るとき | `step`・`reason`（`止まった` / `関門` / `同じ失敗の繰り返し` / `判断の段で stop が出そう`）・`text` | **この行が足されたら起きて読む** |
+
+- **conductor 向けの行は `attention` だけである。** supervise.py が worker の行の語（止まった・関門・
+  失敗）と繰り返し、段の結果からスクリプトで分ける。`step` / `alive` / `worker` は起こさない
+  （起こすたびに conductor の文脈の全体を読み直すため）
+- `queue` は `attention` の行を標準出力の 1 行 `{"tool": "supervise-queue", "event": "attention", ...}`
+  で知らせる。最後の行は結果の JSON のままである
+- `attention` で起きたら、その行と `progress.jsonl` の末尾だけを読み、止めるか続けるかを決める。
+  続けるなら同じ待ちを起動し直す。フェーズの報告は `report.md` で読む
+- `## フェーズの報告` の `途中の報告` の欄が、行の種類ごとの数と、LLM へ回した回数・費用を持つ
+- 待ちのコマンドは [waiting.md](waiting.md) の「supervise.py の途中の報告」に従う
+
 ### supervisor → worker
 
 | 引数 | 値 |

@@ -47,6 +47,26 @@
 | 既に起動したプロセス・書き終わりを待つファイル | 終わりを待つ until ループ（例: `until [ -s out.md ]; do sleep 5; done`）を `run_in_background: true` で起動する |
 | Pull Request の検査 | `gh pr checks <番号> --watch` を `run_in_background: true` で起動する |
 | 新しいコメントを 1 件ずつ | `Monitor` |
+| `supervise.py run` / `queue` | `report.md` が揃うか、`progress.jsonl` に `attention` の行が足されるまでの until ループを `run_in_background: true` で起動する（下の節） |
+
+### supervise.py の途中の報告
+
+**conductor は `report.md` と、`progress.jsonl` の `attention` の行の数を 1 つの until ループで待つ。**
+行の種類と読み方は [agent-layers.md](agent-layers.md) の「supervise.py で回すときの待ち方」が持つ。
+`step` / `alive` / `worker` の行では起きない。
+
+```bash
+# Bash の run_in_background: true で起動する（前景で打たない）。S は計画の状態ディレクトリ
+S="<計画>-state"; n=$(cat "$S/progress.jsonl" 2>/dev/null | grep -c '"kind": "attention"')
+timeout 3600 bash -c 'c() { cat "$1/progress.jsonl" 2>/dev/null | grep -c "\"kind\": \"attention\""; }
+until [ -s "$1/report.md" ] || [ "$(c "$1")" -gt "$2" ]; do sleep 5; done' _ "$S" "$n"; rc=$?; echo "exit=$rc"; exit "$rc"
+```
+
+- `queue` で流すときは、`queue` の出力のファイルに `"event": "attention"` の行が足されるか、
+  `queue` が終わる（完了通知）までを待つ。`queue` そのものを背景で起動していれば、終わりは完了通知で届く
+- 起きたら `attention` の行と `progress.jsonl` の末尾だけを読む。続けるなら数を取り直して同じ待ちを起動する
+- 124（上限の 3600 秒）で終わったら、`progress.jsonl` の最後の行（`alive` なら段と経過）を 1 度読み、
+  同じ待ちを起動し直す
 
 **サブエージェントは、背景の処理を残したまま応答を終えない。** 完了通知で再開はされるが、
 **親には応答を終えた時点で 1 度「終わった」と通知が届き、途中の文面が結果として渡る**
