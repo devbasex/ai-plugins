@@ -48,7 +48,7 @@ echo 'kernel.unprivileged_userns_clone=1' | sudo tee /etc/sysctl.d/00-local-user
 
 ## 起動コマンド
 
-`external-ai.py run codex` が次の形で起動する（共通層の `launch-cli.sh`）。プロンプトは **stdin へ流し**、
+`external-ai.py run codex` が次の形で起動する（共通ライブラリの `launch-cli.sh`）。プロンプトは **stdin へ流し**、
 `-C` で作業ディレクトリを渡す。
 
 ```bash
