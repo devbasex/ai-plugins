@@ -772,6 +772,16 @@ def test_step_lines_and_alive_line(tmp_path):
     assert "LLM へ回した 0 回" in text
 
 
+def test_alive_line_carries_run_step_last_stderr_line(tmp_path):
+    """run の段の待ちの間、alive の行に stderr の最後の行を last_output として載せる。"""
+    cmd = "echo 'CI のランナー待ち（待ち行列 9 件、待ち 1 件）' >&2; sleep 0.6; echo 結果"
+    s, text = run_plan(tmp_path, [{"id": "merge", "type": "run", "cmd": cmd, "next": "end"}],
+                       report_interval=0.2)
+    assert "結果: 完了" in text
+    alive = [r for r in progress(s) if r["kind"] == "alive"]
+    assert alive and alive[-1]["last_output"] == "CI のランナー待ち（待ち行列 9 件、待ち 1 件）"
+
+
 def test_no_alive_line_within_interval(tmp_path):
     s, _ = run_plan(tmp_path, [{"id": "a", "type": "run", "cmd": "sleep 0.3", "next": "end"}])
     assert [r["kind"] for r in progress(s)] == ["step"]

@@ -110,7 +110,8 @@ run の段:
 途中の報告（`<state-dir>/progress.jsonl`。1 行 1 つの JSON。LLM は使わない）:
 - `"kind": "step"`: 段の切り替わりごとに 1 行（at・step・type・exit・seconds・cost・next・summary）
 - `"kind": "alive"`: 最後の行から計画の `"report_interval"`（既定 600 秒）動きが無いとき（step・elapsed・
-  worker の最後の報告）。長い段（work・run・drive）の待ちは区切って見るので、段の途中でも書く
+  worker の最後の報告。run の段なら stderr の最後の行を last_output に）。長い段（work・run・drive）の
+  待ちは区切って見るので、段の途中でも書く
 - `"kind": "worker"`: work の段の worker が区切りごとに追記する 1 行（プロンプトに書き方と置き場を渡す）
 - `"kind": "attention"`: conductor の判断が要る出来事（reason が 止まった・関門・同じ失敗の繰り返し・
   判断の段で stop が出そう）。worker の行の語と繰り返し、段の結果からスクリプトで分ける。
@@ -252,24 +253,36 @@ def now_iso() -> str:
 
 
 def run_ticking(cmd, tick=None, every: float = TICK, timeout: float | None = None, input: str | None = None,
-                **kw) -> subprocess.CompletedProcess:
+                err_path: Path | None = None, **kw) -> subprocess.CompletedProcess:
     """subprocess.run と同じく待つが、every 秒ごとに tick() を呼ぶ（長い段の待ちの中で進行を書く）。
 
+    err_path を渡すと stderr をそのファイルへ書かせる（待ちの間に最後の行を読めるように）。
     打ち切りは subprocess.TimeoutExpired を投げる。"""
-    p = subprocess.Popen(cmd, stdin=subprocess.PIPE if input is not None else subprocess.DEVNULL,
-                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, **kw)
+    errf = open(err_path, "w", encoding="utf-8") if err_path else None
+    try:
+        p = subprocess.Popen(cmd, stdin=subprocess.PIPE if input is not None else subprocess.DEVNULL,
+                             stdout=subprocess.PIPE, stderr=errf or subprocess.PIPE, text=True, **kw)
+    except BaseException:
+        if errf:
+            errf.close()
+        raise
     deadline = time.time() + timeout if timeout else None
     first = True
     while True:
         wait = every if deadline is None else max(0.01, min(every, deadline - time.time()))
         try:
             out, err = p.communicate(input if first else None, timeout=wait)
+            if errf:
+                errf.close()
+                err = Path(err_path).read_text(encoding="utf-8", errors="replace")
             return subprocess.CompletedProcess(cmd, p.returncode, out, err)
         except subprocess.TimeoutExpired:
             first = False
             if deadline is not None and time.time() >= deadline:
                 p.kill()
                 p.communicate()
+                if errf:
+                    errf.close()
                 raise subprocess.TimeoutExpired(cmd, timeout)
             if tick:
                 tick()
@@ -618,9 +631,21 @@ class Supervisor:
         """子プロセスの待ちの間に呼ぶ。worker の行を分け、動きが無ければ「まだ動いている」を足す。"""
         self.read_worker_lines()
         if time.time() - self.last_line_at >= self.interval:
-            self.progress_write({"kind": "alive", "step": self.cur.get("id"), "type": self.cur.get("type"),
-                                 "elapsed": round(time.time() - self.step_started, 1),
-                                 "worker": self.worker_last or "無し"})
+            line = {"kind": "alive", "step": self.cur.get("id"), "type": self.cur.get("type"),
+                    "elapsed": round(time.time() - self.step_started, 1), "worker": self.worker_last or "無し"}
+            last = self.run_last_output()
+            if last:
+                line["last_output"] = last
+            self.progress_write(line)
+
+    def run_last_output(self) -> str | None:
+        """run の段が stderr へ書いた最後の空でない行（run の段の待ちの間だけ）。"""
+        path = getattr(self, "run_log", None)
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace") if path else ""
+        except OSError:
+            return None
+        return next((l.strip()[:300] for l in reversed(text.splitlines()) if l.strip()), None)
 
     def step_line(self, nxt: str | None) -> None:
         """段の切り替わりの 1 行（id・type・exit・秒・費用・次・要約）。"""
@@ -774,12 +799,15 @@ class Supervisor:
             addopts.append(NO_REPORTS)
         addopts.append(extra_addopts)
         env["PYTEST_ADDOPTS"] = " ".join(a for a in addopts if a)
+        self.run_log = self.dir / "run-stderr.log"
         try:
             p = run_ticking(cmd, self.tick, self.every, shell=True, cwd=step.get("cwd", self.cwd),
-                            timeout=step.get("timeout", 3600), env=env)
+                            timeout=step.get("timeout", 3600), env=env, err_path=self.run_log)
             return p.returncode, p.stdout + p.stderr
         except subprocess.TimeoutExpired as e:
             return 124, f"打ち切り（{e.timeout} 秒）"
+        finally:
+            self.run_log = None
 
     def do_run(self, step: dict) -> tuple[bool, str]:
         started = time.time()
