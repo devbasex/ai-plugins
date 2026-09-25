@@ -37,6 +37,9 @@
 - **出力ファイルの繰り返しの読み直し。** 変わっていないファイルの同じ範囲を続けて読む形
 - **サブエージェントの `tasks/*.output` を読むこと。** 会話の記録の全体で、読むと文脈を埋める。
   完了通知を待つ
+- **プロセス名で待つこと（`pgrep -f` / `pkill -f`）。** 待つ側のコマンド行にも同じ文字列が入るので、
+  自分に一致して終わらない。Claude Code は背景の Bash を `bash -c … eval '…'` で包み、単引用符を
+  `'"'"'` に置き換えるため、元のコマンドの文字列での一致もあてにならない。終わりはファイルで待つ
 
 ## 待つ相手ごとの手
 
@@ -48,6 +51,8 @@
 | Pull Request の検査 | `gh pr checks <番号> --watch` を `run_in_background: true` で起動する |
 | 新しいコメントを 1 件ずつ | `Monitor` |
 | `supervise.py run` / `queue` | `report.md` が揃うか、`progress.jsonl` に `attention` の行が足されるまでの until ループを `run_in_background: true` で起動する（下の節） |
+| `queue` の終わり | `until [ -s <done のパス> ]; do sleep 10; done` を `run_in_background: true` で起動する。done のパスは `queue --done` で渡した所（省けば最初の計画の `<計画>-state/queue-done.json`）。queue は始めに古い done を消し、後続（`--then`）を含めて終わったときに結果の JSON を書く |
+| queue の後に続ける計画（配布など） | 手で連鎖を組まず、`queue <実装の計画>... --then <後続の計画>` で渡す。後続は前の計画がすべて `完了` のときだけ流れ、1 本でも `止まった` / `関門` なら `流さなかった` と理由が結果に残る |
 
 ### supervise.py の途中の報告
 
@@ -139,6 +144,17 @@ timeout 3600 bash -c 'until [ -e "$1.done" ]; do sleep 5; done' _ "<置き場所
 - 途中の通知でない通知（報告の見出しが無く、背景の処理も残っていない）は、今のまま
   「報告が無いまま終わったとき」の規則で扱う
 - 待つ間に問い合わせを繰り返さない。起動は 1 回で、通知も 1 回である（「許す待ち方」）
+
+## 背景の作業を止める
+
+**背景の作業を止めるのは `TaskStop <task id>`。** task id は起動したときの応答と完了通知にある。
+`pkill -f` / `pgrep -f` で止めたり、止まったかを確かめたりしない（上の「禁じる待ち方」と同じ理由で
+一致しない。確かめる側の `grep -v pgrep` は、`pgrep` を含む待ちのコマンド行ごと結果から除く）。
+止まったかは完了通知（`failed` / `killed`）で確かめる。
+
+背景の作業が残っていると、中継の Stop hook（`relay.py mark`）は `ndf-next` の印を書かない。そのときは
+Stop を 1 度だけ止め、動いている作業を並べて知らせる。supervisor や `supervise.py queue` のように
+止めてはいけない作業なら、止めずに終わりを待ってから `ndf-next` を出し直す。
 
 ## hook
 
