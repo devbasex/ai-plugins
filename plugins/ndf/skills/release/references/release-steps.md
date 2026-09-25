@@ -97,16 +97,24 @@ python3 "$SCRIPTS/release-steps.py" approval-facts --version <版> --prs <PR番�
 # 手順 3: 版数と変更履歴を上げる
 python3 "$SCRIPTS/release-steps.py" bump      --plugin <名前> --to <版> --root .
 python3 "$SCRIPTS/release-steps.py" changelog --version <版> --prs <PR番号>... --root .
+python3 "$SCRIPTS/release-steps.py" notes     --version <版> --prs <PR番号>... --root .
+# 手順 2 の提示物の欄を埋める（検証への配布の後）
+python3 "$SCRIPTS/release-steps.py" notes     --version <版> --prs <PR番号>... --approval <提示物> \
+  --verified claude,codex,kiro --ref develop --root .
 # 手順 4: 公開する（bump と changelog の変更をコミットしてから）
 python3 "$SCRIPTS/release-steps.py" release --version <版> --channel dev --root .   # 検証への配布
 python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --root .  # 本番への配布（承認を得てから）
 ```
 
-- `approval-facts`: `gate` なら `presentation_path` の提示物へ「配る中身」と「検証への配布で
-  確かめたこと」を書き足して利用者へ示し、承認を得てから `next` のコマンドを打つ。`stopped`
+- `approval-facts`: `gate` なら `presentation_path` の提示物の「配る中身」と「検証への配布で
+  確かめたこと」を `notes --approval` で埋めて利用者へ示し、承認を得てから `next` のコマンドを打つ。`stopped`
   （3 = 前のタグを決められない）なら `--prev-tag` を渡して打ち直す
 - `bump`: `items[]` に手で直す箇所が載っていれば直す
 - `changelog`: 見出しと PR のタイトルを並べるだけで、本文は書かない
+- `notes`: 各 PR の本文の `## 利用者向けの変化` の箇条（末尾に `（#番号）`）で、CHANGELOG.md の版の節と
+  plugin の README の `## v<版> へ更新するとき` の節を組み直す。節が無い・「無し」の PR は題名で代える
+  （`metrics.fallback` が件数）。`--approval` を渡すと CHANGELOG と README は変えず、提示物の 2 つの欄と、
+  PR の本文の `## 未検証・残る危険` を集めた節を書く。`stopped`（3）は changelog や approval-facts を先に打つ
 - `release`: `dev` は `release/v<版>` → `develop` の Pull Request を作り、チェックを待ってマージする。
   `prod` は続けて `develop` → `main` をマージし、タグと GitHub Release を作る。`items[]`
   （マージした Pull Request・タグ・GitHub Release）が完了の事実の照会の結果である。

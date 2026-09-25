@@ -7,6 +7,7 @@
     python3 pr-steps.py create --title T --body-file F [--draft] [--base B] [--root DIR]
     python3 pr-steps.py update --body-file F [--title T] [--pr N] [--root DIR]
     python3 pr-steps.py report [PR番号] [--root DIR]
+    python3 pr-steps.py template --out F [--force]
 
 結果は lib/step_result.py の形の 1 行の JSON。終了コードは 0 = ok / 1 = 違反（閉じる語がコミット
 メッセージにある・push や作成が失敗）/ 2 = 読めない / 3 = 前提が無い（既定ブランチにいる・起点が
@@ -34,6 +35,21 @@ CLOSING = re.compile(r"\b(close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s*"
                      r"(https?://github\.com/[\w.-]+/[\w.-]+/issues/\d+|[\w.-]+/[\w.-]+#\d+|#\d+)", re.I)
 # credential helper が応答しない環境の退避（lib/git-credential.sh と同じ値）
 CREDENTIAL_FALLBACK = ["-c", "credential.helper=", "-c", "credential.helper=!gh auth git-credential"]
+CHANGES_HEADING = "## 利用者向けの変化"  # 配布の CHANGELOG と更新案内の材料（release-steps.py notes が読む）
+BODY_TEMPLATE = f"""<何を変えたかを 1〜3 文>
+
+## Summary
+
+- <変更の要点>
+
+{CHANGES_HEADING}
+
+- <利用者に何ができるようになるか・使い方が変わる点。今の決まりだけを書く。見える変化が無ければ「無し」>
+
+## Test plan
+
+- [x] `<実行したコマンド>` exit=0
+"""
 STAT_RE = re.compile(r"(\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:, (\d+) deletions?\(-\))?")
 
 
@@ -310,7 +326,28 @@ def upsert(a, must_exist):
     items = [{"kind": "pr", "name": url, "result": action}]
     if sync_exit is not None:
         items.append({"kind": "decisions", "name": "pr-body-decisions.sh sync", "result": f"exit={sync_exit}"})
-    emit(result(TOOL, "ok", f"PR #{number} を{'更新した' if action == 'updated' else '作った'}: {url}", items, metrics))
+    nxt = None
+    if not branch.startswith("design/"):
+        has = has_user_changes(body)
+        metrics["user_changes"] = has
+        items.append({"kind": "section", "name": CHANGES_HEADING, "result": "ok" if has else "missing"})
+        if not has:
+            nxt = f"本文に {CHANGES_HEADING} の節を足して update する（無いと配布の説明文が題名になる）"
+    emit(result(TOOL, "ok", f"PR #{number} を{'更新した' if action == 'updated' else '作った'}: {url}", items, metrics,
+                next=nxt))
+
+
+def has_user_changes(body):
+    return any(l.strip() == CHANGES_HEADING for l in (body or "").splitlines())
+
+
+def cmd_template(a):
+    out = Path(a.out)
+    if out.exists() and not a.force:
+        raise StepError(f"{out} が既にある（書き直すなら --force）", EXIT_PRECONDITION)
+    out.write_text(BODY_TEMPLATE, encoding="utf-8")
+    emit(result(TOOL, "ok", f"PR 本文の雛形を書いた: {out}", [{"kind": "file", "name": str(out), "result": "written"}],
+                {"sections": [l for l in BODY_TEMPLATE.splitlines() if l.startswith("## ")]}))
 
 
 def cmd_create(a):
@@ -428,6 +465,10 @@ def build_parser():
     p = sub.add_parser("report", parents=[common_parser()], help="完了報告の材料を集める")
     p.add_argument("pr", nargs="?", type=int)
     p.set_defaults(func=cmd_report)
+    p = sub.add_parser("template", help=f"PR 本文の雛形（Summary・{CHANGES_HEADING}・Test plan）を書き出す")
+    p.add_argument("--out", required=True)
+    p.add_argument("--force", action="store_true")
+    p.set_defaults(func=cmd_template)
     return ap
 
 

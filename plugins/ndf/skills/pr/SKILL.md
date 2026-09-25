@@ -86,8 +86,13 @@ credential helper が応答しない環境の退避（`gh auth git-credential` �
 ### 4. PR の作成・更新
 
 本文を日本語で書いてファイルに置く。`.github/pull_request_template.md` があればその構造に従い、
-`## Summary` と `## Test plan` を持ち、機密情報を含めない。更新のときはブランチの全コミット
-（`git log origin/<base>..HEAD`）を反映し、既存の関連リンクを保つ。
+`## Summary`・`## 利用者向けの変化`・`## Test plan` を持ち、機密情報を含めない。更新のときはブランチの全コミット
+（`git log origin/<base>..HEAD`）を反映し、既存の関連リンクを保つ。雛形は
+`python3 "$SCRIPTS/pr-steps.py" template --out /tmp/pr-body.md` が書く。
+
+**`## 利用者向けの変化` は配布の CHANGELOG と更新案内へそのまま載る**（`release-steps.py notes` が組む）。
+利用者に何ができるようになるか・使い方が変わる点を箇条書きにし、今の決まりだけを書く。見える変化が無ければ
+「- 無し」と書く（配布の説明文は題名で代わる）。節の無い本文では、`create` / `update` の `next` が節を足すよう求める。
 
 ```bash
 python3 "$SCRIPTS/pr-steps.py" create --title "<タイトル>" --body-file /tmp/pr-body.md [--draft] [--base <base>] \
