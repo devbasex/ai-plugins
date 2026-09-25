@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import importlib
-import pathlib
 import shlex
 
 import pytest
@@ -13,8 +12,6 @@ def testcmd(refactor):
     return importlib.import_module("refactor_lib.testcmd")
 
 
-# このリポジトリの根（tests → cross-refactoring → skills → ndf → plugins → 根）。
-REPO = pathlib.Path(__file__).resolve().parents[5]
 REPO_COMMAND = ("uv run --project plugins/playwright-kit/skills/playwright-kit-ops "
                 "--with pytest pytest plugins/ndf/skills/cross-refactoring -q")
 
@@ -52,15 +49,27 @@ def test_unknown_runners(testcmd, command):
     assert not testcmd.is_known(command)
 
 
-def test_repo_round_test_command_reads_one_target(testcmd):
+@pytest.fixture
+def repo_layout(tmp_path):
+    """このリポジトリの手順が指す 2 つのディレクトリだけを持つ根。
+
+    本物の根は使わない。導入先へ写した Skill から走らせても同じ結果になるようにする（#975）。
+    """
+    for rel in ("plugins/playwright-kit/skills/playwright-kit-ops",
+                "plugins/ndf/skills/cross-refactoring"):
+        (tmp_path / rel).mkdir(parents=True)
+    return tmp_path
+
+
+def test_repo_round_test_command_reads_one_target(testcmd, repo_layout):
     """このリポジトリの手順が使う形を、そのまま通す。"""
     words = shlex.split(REPO_COMMAND)
     idx = testcmd.runner_index(words)
     assert words[idx] == "pytest"
     # --project の値・--with の値（pytest）は対象でない。対象は Skill のディレクトリ 1 つ
-    assert testcmd.target_indices(words, idx, str(REPO)) == [7]
+    assert testcmd.target_indices(words, idx, str(repo_layout)) == [7]
     target = "plugins/ndf/skills/cross-refactoring/tests/test_budget.py::test_reserve_matches_the_917_example"
-    assert testcmd.build(REPO_COMMAND, [target], str(REPO)) == [
+    assert testcmd.build(REPO_COMMAND, [target], str(repo_layout)) == [
         "uv", "run", "--project", "plugins/playwright-kit/skills/playwright-kit-ops",
         "--with", "pytest", "pytest", target, "-q"]
 
