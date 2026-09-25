@@ -22,6 +22,13 @@
 | final | --final を渡し、範囲に PR が 1 本以上ある（ミッションの終わり） |
 | review | --review を渡し、前回のレビューからの範囲に PR が 1 本以上ある（開発版ごとの実装レビュー。ほかのトリガーは見ない） |
 
+**範囲の起点（前回の検査）は、origin の `check-done/review`（`--review`）か `check-done/check`（それ以外）→
+手元の記録 → `--since` → 正式版のタグ → 起点のブランチとの分岐点の順に決める。** `record` が結果 merged / no_change の
+とき `to` をこのブランチへ送る（構造改善を含む検査は両方、`--review` は `check-done/review` だけ）。落ちた検査は
+送らないため、次の回は同じ起点から数え直す。ブランチは origin にあるため、手元の記録が消えても、別のマシンから
+続けても、検査を通らずに配布された変更を範囲から落とさない。初めて使うリポジトリでは、どこまで見たかを
+`--since <ref>` で渡す。
+
 **`--review` は実装レビューだけの検査である。** 範囲の起点は、レビューだけの回を含む前回の検査である。記録には
 `only: review` が付き、構造改善を含む検査（`--review` 無し）の範囲の起点にはならない。レビューを開発版ごとに
 通しても、構造改善のトリガーは前回の構造改善からの差分で数える。
@@ -56,6 +63,7 @@ TOOL = "check-trigger"
 MERGE_SUBJECT = re.compile(r"^Merge pull request #(\d+) from [^/\s]+/(\S+)")
 SKIP_BRANCHES = ("release/", "check/")
 BASE_PREFIX = "check-base/"
+DONE_PREFIX = "check-done/"  # 見終えた位置を origin に残すブランチ（review = 実装レビュー、check = 構造改善を含む検査）
 ENDED = ("merged", "no_change")  # 前回の検査になる check の終わり方
 
 
@@ -231,10 +239,22 @@ def last_check(events: list[dict], review: bool = False) -> dict | None:
     return ended[-1] if ended else None
 
 
+def done_branch(review: bool) -> str:
+    return DONE_PREFIX + ("review" if review else "check")
+
+
 def range_start(root: Path, events: list[dict], since: str | None,
                 review: bool = False) -> tuple[str, datetime, str]:
-    """(from のコミット, 期限の起点, 決め方)。"""
+    """(from のコミット, 期限の起点, 決め方)。
+
+    **origin の `check-done/*` を手元の記録より先に見る。** 手元の記録は置き場が消えれば失われ、別のマシンからは
+    見えない。失われたまま正式版のタグへ戻ると、検査を通らずに配布された変更が範囲から外れる。"""
     prev = last_check(events, review)
+    ref = f"refs/remotes/origin/{done_branch(review)}"
+    done = git(root, "rev-parse", "--verify", "-q", f"{ref}^{{commit}}", check=False)
+    if done:
+        at = parse_at(prev["at"]) if prev and prev["to"] == done else commit_time(root, done)
+        return done, at, f"origin/{done_branch(review)}"
     if prev:
         return prev["to"], parse_at(prev["at"]), f"前回の検査 {prev.get('id', '')}"
     if since:
@@ -450,7 +470,24 @@ def cmd_record(a, root: Path) -> tuple[dict, int]:
     except OSError as e:
         raise Stop(f"検査の記録へ書けない: {e}", EXIT_VIOLATION)
     delete_base(root, a.id)
-    return result(TOOL, "ok", f"検査 {a.id} を記録した（{res}・#{a.pr}）", [row], {}), EXIT_OK
+    pushed, unpushed = push_done(root, row["to"], a.review)
+    note = f"・origin の {' / '.join(pushed)} を進めた" if pushed else ""
+    if unpushed:
+        note += f"・{' / '.join(unpushed)} を送れない（次の範囲は手元の記録から決まる）"
+    return result(TOOL, "ok", f"検査 {a.id} を記録した（{res}・#{a.pr}）{note}", [row],
+                  {"pushed": pushed, "unpushed": unpushed}), EXIT_OK
+
+
+def push_done(root: Path, to: str, review: bool) -> tuple[list[str], list[str]]:
+    """見終えた位置を origin の check-done/* へ送る。構造改善を含む検査は実装レビューも通すため両方を進める。"""
+    if not to:
+        return [], []
+    pushed, unpushed = [], []
+    for name in [done_branch(True)] + ([] if review else [done_branch(False)]):
+        ok = subprocess.run(["git", "-C", str(root), "push", "-q", "-f", "origin", f"{to}:refs/heads/{name}"],
+                            capture_output=True, text=True).returncode == 0
+        (pushed if ok else unpushed).append(name)
+    return pushed, unpushed
 
 
 def cmd_escape(a, root: Path) -> tuple[dict, int]:

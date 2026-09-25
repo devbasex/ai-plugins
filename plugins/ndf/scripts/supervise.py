@@ -20,9 +20,9 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
     supervise.py new impl --issue N --worktree DIR --tests PATH... --title T [--files PATH...] [--changes TEXT] [--prompt-file F] [--branch B] [--out F]
     supervise.py new impl ... --escape-of <PR番号|0>   # マージの後に逃げた不具合を記録する（check-trigger.py escape）
     supervise.py new check --pr N --worktree DIR [--issue N...] [--scope PATH...] [--out F]
-    supervise.py new check --since-last --id <名> --worktree <リポジトリの根> [--mission <状態>] [--final] [--out F]
+    supervise.py new check --since-last --id <名> --worktree <リポジトリの根> [--mission <状態>] [--final] [--since-ref R] [--out F]
         # 前回の検査からの差分を範囲にする検査（pace: fast）。実行の条件 check-trigger.py eval が立ったときだけ流れる
-    supervise.py new check --since-last --review-only --id <名> --worktree <リポジトリの根> [--mission <状態>] [--out F]
+    supervise.py new check --since-last --review-only --id <名> --worktree <リポジトリの根> [--mission <状態>] [--since-ref R] [--out F]
         # 実装レビューだけ（開発版ごと）。前回のレビューから PR が 1 本以上で流れ、構造改善のトリガーの起点は動かさない
         # new の共通: [--base B] [--test-cmd CMD] [--test-all PATH] [--production-branch B]（宣言より先に効く。下の「宣言」）
     supervise.py new release --version V (--prs N... | --prs-from-queue) --channel dev|prod --worktree DIR
@@ -2007,16 +2007,17 @@ def plan_check_since(a) -> dict:
     repo = str(Path(a.worktree).resolve())
     review_only = getattr(a, "review_only", False)
     flag = " --review" if review_only else ""
+    if getattr(a, "since_ref", None):
+        flag += f" --since {shlex.quote(a.since_ref)}"
     name = a.id
     tests_all = shlex.quote(with_paths(a.test_cmd, a.test_all))
     state = "{state_dir}"
     scope = f"$({CHECK_PY} scope --id {name} --state {state} --root .)"
     cond = f"git -C {shlex.quote(repo)} fetch -q origin && {CHECK_PY} eval --id {name} --root {shlex.quote(repo)}"
-    if review_only:
-        cond += flag
-    elif getattr(a, "final", False):
+    cond += flag
+    if getattr(a, "final", False):
         cond += " --final"
-    record = f"{CHECK_PY} record --id {name} --state {state} --root .{flag}"
+    record = f"{CHECK_PY} record --id {name} --state {state} --root .{' --review' if review_only else ''}"
     steps = [
         {"id": "prepare", "type": "run", "stage": "構造改善", "timeout": 600,
          "cmd": f"{CHECK_PY} prepare --id {name} --state {state} --root .{flag}", "on_fail": "abort-before-pr",
@@ -3006,6 +3007,8 @@ def main() -> int:
     n.add_argument("--since-last", action="store_true", help="check: 前回の検査からの差分を範囲にする（--pr と排他）")
     n.add_argument("--id", help="check --since-last: 検査の名前（ブランチ check/<名>）")
     n.add_argument("--final", action="store_true", help="check --since-last: ミッションの終わりの検査")
+    n.add_argument("--since-ref", help="check --since-last: 前回の検査の位置が origin にも手元の記録にも無いときの"
+                                       "範囲の起点（初めて使うリポジトリで、どこまで見たか）")
     n.add_argument("--review-only", action="store_true",
                    help="check --since-last: 実装レビューだけ（開発版ごと。構造改善はトリガーが立ったときの検査）")
     n.add_argument("--mission", help="check --since-last: ミッションの状態（課題を読む）")
