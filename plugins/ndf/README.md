@@ -89,7 +89,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.17.25）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.17.26）
 ```
 
 ### agy
@@ -119,21 +119,23 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.17.25 へ更新するとき
+## v10.17.26 へ更新するとき
 
-- cross-refactoring の検証は、テストのコメントの中の値の減少を期待値の変更として扱わず、改善項目を取り消さない（#1130）
-- テストを整理する改善項目で値の出現数が減っても、期待値の変更として扱わず、改善項目を取り消さない（#1130）
-- 機械で判定できない変化は、最終ゲートのレビューで確認する（#1130）
-- 利用者の環境は変わらない。devbase のコンテナで NDF のテストを走らせても、中継の読み込みファイル（`~/.shellrc.d/ndf-relay.sh`）が消えなくなる。（#1131）
-- 設計の工程を持つモードでは、プロジェクトの用語集の宣言 `.ndf/glossary.json` が無いと設計へ進まず、用語集を作る手順を示す（#1135）
-- glossary.py で用語集の生成・語のチェック・差分の確認ができる（#1135）
-- 要求の仕様は課題の本文を正とし、spec-copy.py が写しと本文の食い違いを返す（#1135）
-- 設計 PR のレビューはモデルの段、詳細の段の順に 2 段で進む（#1135）
-- `pace: fast` で進めると、開発版を出す前に毎回、前回のレビューからの差分へ cross-review が 1 回通る。構造改善（cross-refactoring）は今までどおりトリガーが立ったときだけ流れ、レビューを通しても構造改善のトリガーは数え直しにならない。（#1137）
-- 無し（検査の修正だけ）（#1138）
-- `pace: fast` の実装レビューと検査は、前回の検査で見終えた位置から数える。レビューを通らずに配布された変更も、次のレビューで必ず見る。初めて使うリポジトリでは `new check --since-last --since-ref <ref>` で起点を渡せる。（#1139）
-- `pace: fast` の検査と実装レビューの途中に別の Pull Request がマージされても、検査の Pull Request が衝突で閉じられなくなる。（#1143）
-- 無し（テストだけ）。（#1144）
+- Fix: 中身の変わらない版を入れると複製の版の記録が古いまま残る（#1149）
+- Docs: 複数 PR のマージ順の提示物に、strict の保護での取り込みの段を足す（#1150）
+- mcp-serena の hook は grep や読み込みが続いてもツールの実行を拒否せず、案内だけを出します。拒否で 1 手番を失うことはありません（#1151）
+- 設計: #821（#1152）
+- Fix: 設計の計画で cross-review の直しに追いつかずに push が拒まれる（#1153）
+- Fix: 設計の計画が決定の節を同期せず、利用者の承認で再開すると approve が止まる（#1154）
+- Slack 通知は、回答待ち・承認待ちになったときだけ届く（#1155）
+- Claude Code と Codex の hook は、どちらも待ちの通知を送る入口を使う（#1155）
+- Kiro の導入スクリプトと導入時の確かめは、待ちの通知を前提にしている（#1155）
+- `plugins/ndf/README.md` と Kiro の文書は、待ちの通知の使い方を説明している（#1155）
+- 無し（検査の修正だけ）（#1156）
+- Fix: 用語集の語の正本を確定仕様に限り、確定前は pending_source に置く（#1157）
+- Fix: sleep の hook の案内を NDF の待ちとマージのスクリプトへ向ける（#1158）
+- 用語集の仕組みの確定仕様を `docs/specifications/ndf-ubiquitous-language.md` で読める（#1159）
+- 無し（検査の修正だけ）（#1160）
 
 ## Playwright テストについて
 
@@ -229,14 +231,14 @@ Claude Code の SessionStart hook（`hooks/claude.json`）は上記に加えて�
   版は後退させない）。10.17.4〜10.17.6 が自動で足した alias の囲みが残っていれば 1 度だけ知らせる。
   **シェルの設定は書かない。** ラッパーを入れる・外すのは `/ndf:install-wrapper`（Claude Code だけ）
 
-Claude Code の Stop hook は終了時に Slack 通知スクリプトを実行します。通知に必要な環境変数が
-未設定の場合は送信せず終了します。ラッパーの下（`NDF_RELAY_DIR` がある）では、最後の応答の
+Claude Code の Stop・Notification・PermissionRequest hook と `AskUserQuestion` の PreToolUse hook は、
+利用者の回答か承認を待つときだけ Slack へ知らせます（下の「Slack 通知」）。ラッパーの下（`NDF_RELAY_DIR` がある）では、最後の応答の
 `ndf-next` のブロックをラッパーの合図へ写します（`relay.py mark`）。`AskUserQuestion` の PreToolUse /
 PostToolUse hook は、ラッパーの下で質問の表示中の合図を作る・消します（ラッパーが質問の答えを代わりに
 送らないため）。好きな時点で切り替えるのは `/ndf:restart` です。ラッパーの始め方・止め方・上限は
 `skills/development-workflow/references/relay.md` にあります。
 
-Codex の Stop hook（`hooks/codex.json`）は `NDF_CODEX_SLACK_NOTIFY=true` が設定されている
+Codex の Stop・PermissionRequest hook（`hooks/codex.json`）は `NDF_CODEX_SLACK_NOTIFY=true` が設定されている
 場合だけ Slack 通知を送ります。**Codex の hook は Codex 側で明示的に有効化するまで実行され
 ません。** `~/.codex/config.toml` の `[hooks.state]` に対象 hook の `enabled = true` が要ります。
 `/hooks` で対象 hook を確認し、利用するプロジェクトで有効化してください。
@@ -245,7 +247,60 @@ Kiro CLI では installer が `.kiro/agents/ndf.json` の `hooks` を生成し�
 
 ## Slack 通知
 
-利用プロジェクト側で以下の環境変数を設定します。
+利用者の回答か承認が無いと進まない時点でだけ、Slack へ知らせます。応答が終わっても、待っていなければ
+送りません。たとえば応答が「この設計でマージしてよいですか。」で終わると、次の本文が届きます。
+
+```text
+【承認待ち】[ai-plugins] この設計でマージしてよいですか。
+セッション: https://claude.ai/code/session_01AbCdEf
+host: devbase-01 / cwd: /work/ai-plugins
+PR: https://github.com/devbasex/ai-plugins/pull/1150
+```
+
+同じ応答が「設計 PR を出しました。レビューの結果を待ちます。」で終わった場合は、何も送りません。
+
+### 送る時点
+
+| ランタイム | 時点 | 印 |
+| --- | --- | --- |
+| Claude Code | ツールの権限確認（`Notification` の `permission_prompt`） | 【承認待ち】 |
+| Claude Code | 計画の承認（`ExitPlanMode` の `PermissionRequest`） | 【承認待ち】 |
+| Claude Code | 選択式の問い（`AskUserQuestion`）・MCP の入力フォーム（`elicitation_dialog` / `elicitation_url_dialog`） | 【回答待ち】 |
+| Claude Code・Codex・Kiro | 応答が文で回答か承認を求めて終わる（`Stop` / `stop`） | 【回答待ち】か【承認待ち】 |
+| Codex | ツールの実行の承認（`PermissionRequest`） | 【承認待ち】 |
+
+Codex の選択式の問いと、Kiro の承認の画面・選択式の問いは、捉える hook が無いため送りません。
+
+- **文で求めているかは、応答の最後の 3 行の形で決めます。** 問いの形（`？` `ですか` `ますか` など）、
+  依頼の形（`ください` `お願いします` `よければ` など）、利用者の返事を待つと述べる文（`承認を待っています` など）が
+  あれば待ちです。コード・引用・表・見出しは見ません。承認の語（`承認` `マージ` `進めて` `てよいですか` など）を
+  含めば【承認待ち】、含まなければ【回答待ち】です。語の並びは `scripts/lib/wait_notice.py` にあります
+- **同じ待ちは 1 回だけ送ります。** `AskUserQuestion` や `ExitPlanMode` の後に届く `permission_prompt` は
+  同じ待ちとして送りません。放置の通知（`idle_prompt`）は捉えません
+- **非対話の `claude -p`（`CLAUDE_CODE_ENTRYPOINT` が `sdk-` で始まる）では送りません。** Codex の `codex exec` と
+  Kiro の非対話の実行は対話と見分けられないため、問いの形で終われば通知が出ることがあります
+- 本文の 1 行目は種類の印・リポジトリ名・求めている文（200 字まで）です。要約は作りません
+
+### 戻り先と関連 URL
+
+| 場合 | 載る行 |
+| --- | --- |
+| Claude Code の Remote Control 中・クラウドのセッション | `セッション: https://claude.ai/code/<ID>` |
+| Claude Code のそれ以外 | `再開: claude --resume <session_id>` |
+| Codex | `再開: codex resume <session_id>` |
+| Kiro | `再開: kiro-cli chat --resume-id <ID>`。ID が無ければ `再開: kiro-cli chat --resume`（cwd で打つ） |
+
+どの場合も `host: <ホスト名> / cwd: <cwd>` の行を足します。
+
+- 【回答待ち】には、応答に出た issue（GitHub の `/issues/<n>` と `#<n>`）と Redmine の URL を 3 件まで載せます。
+  `#<n>` は `origin` が GitHub を指すときだけ URL にします
+- 【承認待ち】には PR の URL を先頭に載せます。応答に無ければ、現在のブランチの PR を `gh pr view` で補います
+- Redmine は `REDMINE_URL` のホストの URL と `Redmine #<n>` を採ります。`REDMINE_URL` が無ければ載せません
+
+### 設定
+
+利用プロジェクト側で以下の環境変数を設定します。`.env` は cwd から git のトップまで上へ探し、無ければ
+プラグインの置き場から上へ探します。既に環境にある値は上書きしません。
 
 ```bash
 SLACK_BOT_TOKEN=xoxb-...
@@ -255,8 +310,20 @@ SLACK_USER_MENTION=<@U0123456789>
 NDF_CODEX_SLACK_NOTIFY=true
 ```
 
-`SLACK_USER_MENTION` は任意です。機密値は `.env` などで管理し、リポジトリへコミットしないで
-ください。
+| 変数 | 意味 |
+| --- | --- |
+| `SLACK_BOT_TOKEN` / `SLACK_CHANNEL_ID` | 必須。無ければ何も送りません |
+| `SLACK_USER_MENTION` | 任意。メンション付きを送って通知を鳴らし、メンション無しを送り直してから前者を消します |
+| `NDF_CODEX_SLACK_NOTIFY` | Codex だけ必須。`true` のときだけ Codex で動きます |
+| `NDF_SLACK_NOTIFY_DONE` | 任意。`true` なら待ちでない応答の終わりも【完了】として送ります（本文は最後の段落の先頭 200 字） |
+| `REDMINE_URL` | 任意。Redmine の URL を見分けるホスト（例 `https://redmine.example.com`） |
+| `DEBUG_SLACK_NOTIFY` | 任意。`true` なら `~/.claude/logs/wait-notify-<日付>.log` へ判定の理由を書きます |
+
+機密値は `.env` などで管理し、リポジトリへコミットしないでください。通知の記録（同じ待ちを 2 度送らないための
+直前の 1 件）は `${XDG_STATE_HOME:-~/.local/state}/ndf/wait-notify/` にセッションごとに置き、7 日で消します。
+
+**Kiro は `install.sh --with-slack` を打ち直してください。** 通知の入口は `scripts/wait-notify.py` の 1 本です。
+`stop` hook が配布物に無い `scripts/slack-notify.js` を指す `.kiro/agents/ndf.json` では、通知が届きません。
 
 ## 外部 AI 委譲
 
@@ -305,7 +372,7 @@ agy models   # 認証の確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.17.25/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.17.26/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -327,14 +394,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.25/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.26/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.17.25  <path>
+# => ndf@ai-plugins  installed, enabled  10.17.26  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。

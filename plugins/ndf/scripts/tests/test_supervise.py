@@ -801,10 +801,11 @@ def test_new_mission_writes_waves_in_order(tmp_path):
     assert design["branch"].startswith("design/")
     # 設計の工程の入口で用語集を見る（#1111）。止まったら on_fail を置かずに止まる
     ds = {s["id"]: s for s in design["steps"]}
-    assert [s["id"] for s in design["steps"]] == ["glossary", "design", "pr", "review", "glossary-check",
+    assert [s["id"] for s in design["steps"]] == ["glossary", "design", "pr", "review", "sync-review", "glossary-check",
                                                   "fix-glossary", "glossary-recheck", "push-glossary", "gate"]
     assert "glossary.py gate --mode" in ds["glossary"]["cmd"] and "on_fail" not in ds["glossary"]
-    assert ds["review"]["next"] == "glossary-check"
+    assert ds["review"]["next"] == "sync-review" and ds["sync-review"]["next"] == "glossary-check"
+    assert "--ff-only" in ds["sync-review"]["cmd"]  # レビューが push した直しに追いついてから語を見る
     assert "check --diff origin/develop" in ds["glossary-check"]["cmd"]
     assert ds["glossary-check"]["on_fail"] == "fix-glossary" and ds["fix-glossary"]["next"] == "glossary-recheck"
     assert ds["glossary-recheck"]["on_fail"] == ds["glossary-recheck"]["next"] == "push-glossary"

@@ -149,6 +149,34 @@ def test_i3_term_pointing_to_unknown_context_is_schema(repo):
     assert code == 1 and rules_of(out) == ["schema"]
 
 
+def test_source_outside_declared_spec_paths_is_unconfirmed(repo):
+    """check.source_paths を宣言すると、語の正本は確定仕様だけを指す。空と URL は見ない。"""
+    d = declaration()
+    d["check"]["source_paths"] = ["docs/specifications/*.md"]
+    write_json(repo, ".ndf/glossary.json", d)
+    g = shop_glossary()
+    g["terms"][0]["source"] = "issues/issue-1-design.md"
+    g["terms"][1]["source"] = "https://example.com/spec"
+    write_json(repo, DEFAULT_SOURCE, g)
+    run(repo, "render")
+    code, out, _ = run(repo, "check", "--rules", "structure")
+    assert code == 1 and rules_of(out) == ["unconfirmed_source"] and out["items"][0]["term"] == "注文"
+    g["terms"][0]["source"] = "docs/specifications/ordering.md"
+    write_json(repo, DEFAULT_SOURCE, g)
+    run(repo, "render")
+    code, out, err = run(repo, "check", "--rules", "structure")
+    assert code == 0, (out, err)
+
+
+def test_source_paths_absent_does_not_check_sources(repo):
+    g = shop_glossary()
+    g["terms"][0]["source"] = "issues/issue-1-design.md"
+    write_json(repo, DEFAULT_SOURCE, g)
+    run(repo, "render")
+    code, out, err = run(repo, "check", "--rules", "structure")
+    assert code == 0, (out, err)
+
+
 def test_i4_glossary_changed_without_render_is_stale_document(repo):
     g = shop_glossary()
     g["terms"].append({"term": "返品", "context": "ordering", "meaning": "受け取った品を戻すこと"})
@@ -407,6 +435,29 @@ def test_structure_rules_skip_words(repo):
 def test_one_letter_deprecated_word_is_schema(repo):
     g = shop_glossary()
     g["terms"][0]["deprecated"] = ["品"]
+    write_json(repo, DEFAULT_SOURCE, g)
+    run(repo, "render")
+    code, out, _ = run(repo, "check", "--rules", "structure")
+    assert code == 1 and rules_of(out) == ["schema"]
+
+
+def test_pending_source_pointing_to_a_missing_design_is_schema(repo):
+    g = shop_glossary()
+    g["terms"][0]["pending_source"] = "issues/gone-design.md"
+    write_json(repo, DEFAULT_SOURCE, g)
+    run(repo, "render")
+    code, out, _ = run(repo, "check", "--rules", "structure")
+    assert code == 1 and rules_of(out) == ["schema"] and "gone-design.md" in out["items"][0]["detail"]
+    write(repo, "issues/gone-design.md", "# 設計\n")
+    assert run(repo, "check", "--rules", "structure")[0] == 0
+
+
+@pytest.mark.parametrize("pending", ["/etc/hosts", "../outside-design.md", "./issues/x-design.md"])
+def test_pending_source_outside_or_unnormalized_is_schema(repo, pending):
+    """spec-finalize が照合できない書き方（絶対パス・..・./ 付き）は、ファイルがあっても落とす。"""
+    write(repo, "issues/x-design.md", "# 設計\n")
+    g = shop_glossary()
+    g["terms"][0]["pending_source"] = pending
     write_json(repo, DEFAULT_SOURCE, g)
     run(repo, "render")
     code, out, _ = run(repo, "check", "--rules", "structure")

@@ -2086,6 +2086,8 @@ RULE_RELEASE_PROD_MVV = ("関門 2 は利用者か MVV 判定が承認した（�
                          "外部の待ち（CI・ネットワーク）の揺れなら同じステップをもう一度。タグの重複・権限の不足は stop。")
 MVV_PY = f"python3 {HERE / 'mvv-gate.py'}"
 GLOSSARY_PY = f"python3 {HERE / 'glossary.py'}"
+# 設計の PR の本文の「決めたこと」を設計文書の決定へ合わせてから push する（CI の pr-body-decisions が見る）
+PUSH_DESIGN = f"git push -q && bash {HERE / 'pr-body-decisions.sh'} sync {{pr}}"
 STEPS_PY = f"python3 {HERE / 'release-steps.py'}"
 VERIFY_PY = f"python3 {HERE / 'release-verification-steps.py'}"
 MERGED_PY = f"python3 {HERE / 'merged-steps.py'}"
@@ -2261,19 +2263,23 @@ def plan_mission_design(a, n: int, repo: str) -> dict:
             # --max-rounds を渡さない。設計の分類の既定（3 ラウンド・前のラウンドからの変更だけ）で回る
             {"id": "review", "type": "drive", "drive": "cross-review", "kind": "ドキュメントレビュー",
              "stage": "ドキュメントレビュー", "timeout": 3600, "args": "{pr}", "on_fail": "gate",
-             "next": "glossary-check"},
+             "next": "sync-review"},
+            # レビューの直しは別の場所から PR のブランチへ push される。追いついてから語を見て push する
+            {"id": "sync-review", "type": "run", "stage": "ドキュメントレビュー", "timeout": 120,
+             "cmd": "git fetch -q && git merge -q --ff-only '@{u}'", "next": "glossary-check"},
             # 語のチェック。当たりは 1 回だけ直し、残った当たりは関門 1 の提示へ載せる
             {"id": "glossary-check", "type": "run", "stage": "ドキュメントレビュー", "timeout": 120,
              "cmd": glossary_check, "on_fail": "fix-glossary", "next": "push-glossary"},
             {"id": "fix-glossary", "type": "work", "kind": "修正", "stage": "ドキュメントレビュー",
              "inputs": ["glossary-check"], "timeout": 1800, "next": "glossary-recheck",
-             "prompt": "語のチェックの当たりを直す。未登録の語は用語集へ足すか、用語集の語へ言い換える。廃止した語は"
+             "prompt": "語のチェックの当たりを直す。未登録の語は用語集へ足す（source は空にし、pending_source に"
+                       "設計文書のパスを書く）か、用語集の語へ言い換える。廃止した語は"
                        "用語集の語へ言い換える。用語集を変えたら `glossary.py render` で文書を作り直し、コミットする"
                        "（push しない）。利用者が採るかを決めるべき語は直さずに「判断が要る」と報告する。"},
             {"id": "glossary-recheck", "type": "run", "stage": "ドキュメントレビュー", "timeout": 120,
              "cmd": glossary_check, "on_fail": "push-glossary", "next": "push-glossary"},
             {"id": "push-glossary", "type": "run", "stage": "ドキュメントレビュー", "timeout": 300,
-             "cmd": "git push -q", "next": "gate"},
+             "cmd": PUSH_DESIGN, "next": "gate"},
             {"id": "gate", "type": "judge", "inputs": ["review", "glossary-recheck"],
              "question": "関門 1（設計 Pull Request のマージ）へ渡す（gate）か、止める（stop）か。glossary-recheck に"
                          "語のチェックの当たりが残っていれば、関門 1 の提示に載せる",
@@ -2350,13 +2356,15 @@ def plan_fast_design(a, n: int, repo: str) -> dict:
             s["on_fail"] = "push-glossary-gate"
     plan["steps"] += [
         {"id": "push-glossary-gate", "type": "run", "stage": "ドキュメントレビュー", "timeout": 300,
-         "cmd": "git push -q", "next": "gate"},
+         "cmd": PUSH_DESIGN, "next": "gate"},
         {"id": "mvv", "type": "run", "stage": "設計", "timeout": 900,
          "cmd": f"{MVV_PY} check --mission {state} --gate design --pr {{pr}} --mode {a.mode} --root . --note {note}",
          "next": "approve", "gate_next": "end"},
         {"id": "approve", "type": "run",
-         "cmd": f"sh -c 'gh pr edit {{pr}} --add-label design-approved && gh pr comment {{pr}} --body-file {note} && "
-                "gh pr ready {pr}'", "next": "merge"},
+         # 控えは mvv が従うときだけ書く。関門を利用者が承認して --from approve で続けたときは無い
+         "cmd": f"sh -c 'gh pr edit {{pr}} --add-label design-approved && "
+                f"{{ [ ! -f {note} ] || gh pr comment {{pr}} --body-file {note}; }} && gh pr ready {{pr}}'",
+         "next": "merge"},
         {"id": "merge", "type": "run", "timeout": 7200, "cmd": MERGE_CMD, "probe": MERGE_PROBE, "next": "end"},
     ]
     plan["規則"] = ("設計の cross-review は上限 3 ラウンドで関門 1 の判定（mvv のステップ）へ渡す（収束を待たない）。"

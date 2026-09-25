@@ -68,7 +68,7 @@ while [ "$#" -gt 0 ]; do
       echo "  --scope SCOPE    workspace（既定, プロジェクトの .kiro/）または global（~/.kiro/）"
       echo "  --set-default    kiro-cli の既定エージェントを ndf に切り替える（オプトイン）"
       echo "  -y, --yes        --set-default の確認プロンプトを省略する"
-      echo "  --with-slack     stopフックにSlack通知を追加"
+      echo "  --with-slack     stopフックに回答・承認待ちのSlack通知を追加"
       echo "  --with-codex     Codex MCPサーバ設定と直接実行用プロンプトを追加"
       echo "  --dry-run        書き込みを行わず実行内容を表示"
       echo "  -h, --help       このヘルプを表示"
@@ -416,11 +416,11 @@ hooks["userPromptSubmit"] = [
 ]
 
 if with_slack == "true":
-    slack_script = Path(plugin_dir) / "scripts" / "slack-notify.js"
+    notify_script = Path(plugin_dir) / "scripts" / "wait-notify.py"
     hooks["stop"] = [
         {
-            "command": f"node {shlex.quote(str(slack_script))} session_end",
-            "timeout_ms": 70000,
+            "command": f"python3 {shlex.quote(str(notify_script))} --runtime kiro",
+            "timeout_ms": 15000,
         }
     ]
 else:

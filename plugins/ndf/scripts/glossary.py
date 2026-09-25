@@ -78,6 +78,7 @@ class Declaration:
             raise unreadable(f"{DECLARATION} の version は 1: {raw.get('version')!r}")
         if raw.get("format") not in FORMATS:
             raise unreadable(f"{DECLARATION} の format は {' / '.join(FORMATS)}: {raw.get('format')!r}")
+        self.root = root
         self.source = raw.get("source")
         self.document = raw.get("document")
         self.source_path = inside(root, self.source, "source")
@@ -87,13 +88,16 @@ class Declaration:
             raise unreadable(f"{DECLARATION} の check はオブジェクトで書く")
         paths = check.get("paths", [])
         sections = check.get("term_sections", DEFAULT_TERM_SECTIONS)
-        for name, value in (("check.paths", paths), ("check.term_sections", sections)):
+        source_paths = check.get("source_paths", [])
+        for name, value in (("check.paths", paths), ("check.term_sections", sections),
+                            ("check.source_paths", source_paths)):
             if not isinstance(value, list) or not all(isinstance(v, str) and v for v in value):
                 raise unreadable(f"{DECLARATION} の {name} は文字列の配列で書く")
         for pat in paths:
             inside(root, pat, "check.paths")
         self.paths = paths
         self.term_sections = sections
+        self.source_paths = source_paths  # 語の正本（terms[].source）に認めるパス。空なら見ない
 
 
 def read_json(path: Path, label: str):
@@ -168,6 +172,17 @@ def render_text(g: dict, source: str) -> str:
 
 # --- 用語集の形 --------------------------------------------------------------------
 
+def pending_problem(root: Path, rel: str) -> str | None:
+    """pending_source は根の内側の正規の相対パスで設計文書を指す。spec-finalize はこの形でだけ照合する。"""
+    try:
+        inside(root, rel, "pending_source")
+    except StepError:
+        return "は根の内側の相対パスで書く（絶対パス・.. は受けない）"
+    if Path(rel).as_posix() != rel:
+        return f"は正規の形で書く（{Path(rel).as_posix()}）"
+    return None if (root / rel).is_file() else "が指す設計文書が無い"
+
+
 def structure_findings(g: dict, decl: Declaration) -> list[dict]:
     items = []
 
@@ -200,6 +215,15 @@ def structure_findings(g: dict, decl: Declaration) -> list[dict]:
             hit("schema", t["term"], f"terms[{i}] の deprecated は文字列の配列で書く")
         if "source" in t and not isinstance(t["source"], str):
             hit("schema", t["term"], f"terms[{i}] の source は文字列で書く")
+        elif "pending_source" in t and not isinstance(t["pending_source"], str):
+            hit("schema", t["term"], f"terms[{i}] の pending_source は文字列で書く")
+        elif decl.source_paths and t.get("source") and "://" not in t["source"] and \
+                not matches(t["source"], decl.source_paths):
+            hit("unconfirmed_source", t["term"],
+                f"terms[{i}] の source が確定仕様を指さない: {t['source']}（check.source_paths に当たるパスへ移す。"
+                "確定前は source を空にし、plan-to-spec が確定仕様を書いたときに入れる）")
+        if isinstance(t.get("pending_source"), str) and (problem := pending_problem(decl.root, t["pending_source"])):
+            hit("schema", t["term"], f"terms[{i}] の pending_source {problem}: {t['pending_source']}")
         if t["context"] not in ids:
             hit("schema", t["term"], f"terms[{i}] の context が宣言されていない: {t['context']}")
         for w in deprecated_of(t):

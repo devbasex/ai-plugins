@@ -19,7 +19,7 @@
 （1%）はしきい値に届かないので外す。`.serena/project.yml` を書き、1 言語ずつ起動を検証し、
 Claude Code 向けには `pyright-lsp` の導入と `pyright-langserver` の有無をチェックして足りないものを
 知らせる。以後のセッションで、モデルが採った言語のファイルを `Read` で 3 回続けて開こうと
-すると hook が 1 度だけ拒み、シンボル単位の手順を示す。
+すると、hook が `Read` を止めずにシンボル単位の手順を 1 度だけ添える。
 
 **この Skill はプロジェクト（リポジトリ）ごとに実行する。利用者単位で 1 回ではない。** 言語の
 設定（`.serena/project.yml`）はリポジトリごとに持つためである。
@@ -50,7 +50,7 @@ Claude Code 向けには `pyright-lsp` の導入と `pyright-langserver` の有�
 | 設定済みの目印 | `mcp_serena_excluded` のキーの有無 | このキーがあることが「`configure` で設定した」目印。空の配列でも目印になる |
 | 導入のチェック | `check` | 公式 LSP プラグイン・本体・追加のチェック（TypeScript の版・shellcheck）が揃っているかを見ること |
 | 追加のチェック | `extra_checks` | 対応表が名前で指し、`check.py` の `EXTRA_CHECKS` が関数を持つチェック |
-| 誘導 | PreToolUse の `deny` | grep やコードファイルの読み込みが続いたとき 1 度だけ拒み、シンボル単位の手順を示すこと |
+| 誘導 | PreToolUse の `additionalContext` | grep やコードファイルの読み込みが続いたとき、ツールの実行を止めずにシンボル単位の手順を 1 度だけ添えること |
 | 数の記録 | `<session_id>.json` | 誘導のためにセッションごとに数える grep・読み込み・混在の回数と時刻 |
 
 ## 対象範囲
@@ -62,7 +62,7 @@ Claude Code 向けには `pyright-lsp` の導入と `pyright-langserver` の有�
 | hook（SessionStart の通知、PreToolUse の誘導と自動許可）。Claude Code と Codex の 2 つの定義 | NDF・mcp-serena に `lspServers` を持たせること |
 | `language-servers` の Skill（`mcp-serena` プラグインに置く） | Kiro CLI と agy の hook・文脈の調整（今と同じく MCP の定義を受け取るだけ） |
 | NDF のコード改変系 Skill（`refactoring` / `problem-solving` / `tdd-cycle`）の 1 行と、エージェント定義（`corder` / `qa` / `director` / `debugger`）の Serena の行 | エージェント定義の構成の整理（#877 #869）、devbase のコンテナへの導入（devbasex/devbase#236） |
-| このリポジトリの `.serena/project.yml`（`python` + `bash`、`.worktrees/**` と `.serena/**` を外す） | 誘導が拒んでも Serena へ切り替わらない問題（#971） |
+| このリポジトリの `.serena/project.yml`（`python` + `bash`、`.worktrees/**` と `.serena/**` を外す） | 誘導の案内の効果の測り直し |
 
 ## 決定と理由
 
@@ -87,8 +87,8 @@ Claude Code 向けには `pyright-lsp` の導入と `pyright-langserver` の有�
 | 15 | Kiro は Claude Code と同じ起動定義と hook の定義を受け取る。`--client claude-code` の hook は `CLAUDE_PLUGIN_ROOT` が無ければ何も出さない | Serena に Kiro の文脈は無い。Kiro の installer が SessionStart を `agentSpawn` へ写すため、そのままでは `installed_plugins.json` の無い Kiro に LSP の欠けを毎回出す |
 | 16 | `SERENA_HOME` は `.serena`（cwd からの相対）のまま保ち、作業ツリーごとの言語サーバの取得を受け入れる | 変えると既存の利用者の設定と言語サーバの置き場所が移る。`~/.serena` は公式と全体の設定を共有し、絶対パスは `.mcp.json` の展開に頼る |
 
-**効果の実測（2026-09-24、claude-sonnet-5・指示なし・各 3 回）では、誘導の hook は拒んだが
-モデルは Serena へ切り替わらなかった。** 作り直しは #971 に分けた。
+**誘導は拒まず、止めない案内にする。** 拒んでもモデルは Serena へ切り替わらず、
+同じ grep を打ち直すなど 1 手番を無駄にするだけになる。
 
 ### スクリプトとモデルの境界
 
@@ -112,7 +112,7 @@ Claude Code 向けには `pyright-lsp` の導入と `pyright-langserver` の有�
 | `configure` が起動する `serena` は起動定義と同じ `SERENA_HOME=.serena` と cwd `--root` で動く | 既定の `~/.serena` で走らせると利用者の全体の設定を書き換え得るため、環境は常に上書きする |
 | `.gitignore` は `--gitignore`、`.serena/.gitignore` は `--serena-gitignore` のときだけ書く | 渡さないときは足すべき行を `serena_gitignore_added` に載せるだけ。`project create` が作る Serena の既定の `.serena/.gitignore` は許す |
 | セッションの開始でネットワークへ出る導入を走らせない。スクリプトは導入のコマンドを出力に載せるだけで打たない | — |
-| hook はツールの呼び出しを止めない（誘導の `deny` を除く） | 例外・読めない入力・`project.yml` の読めない形では何も出さずに終了コード 0 |
+| hook はツールの呼び出しを止めない（誘導も `permissionDecision` を付けない） | 例外・読めない入力・`project.yml` の読めない形では何も出さずに終了コード 0 |
 | 設定済みの目印の無いリポジトリでは PreToolUse は数えない | Serena が `--project-from-cwd` で自動で作った `project.yml` も目印が無いので数えない |
 | 言語を足すときに変えるのは対応表だけで、hook とスクリプトは言語の名前で分岐しない | 既にある種類で足りない追加のチェックだけは `check.py` の `EXTRA_CHECKS` に関数を 1 つ足す。知らない名前は対応表の破損として `check` が終了コード 2 |
 | hook とチェックは Python 3 の標準ライブラリだけで動き、`uvx` を呼ばない | `uvx` を要するのは Serena の起動と `configure` の検証だけ |
@@ -296,8 +296,8 @@ hook は、環境に `CLAUDE_PLUGIN_ROOT` が無ければ何も出さずに 0 �
 | hook | 入力（標準入力の JSON） | 出力 |
 | --- | --- | --- |
 | SessionStart | `cwd` | 通知があるとき `{"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": "<通知>"}}`。無ければ何も出さない |
-| PreToolUse（Claude Code） | `session_id` `tool_name` `tool_input` `permission_mode` `cwd` | 拒否は `permissionDecision: "deny"` と `permissionDecisionReason`、許可は `"allow"`、どちらでもなければ何も出さない |
-| PreToolUse（Codex） | `session_id` `tool_name` `tool_input.command`（文字列か配列）`cwd` | 拒否だけ。許可は返さない |
+| PreToolUse（Claude Code） | `session_id` `tool_name` `tool_input` `permission_mode` `cwd` | 案内は `additionalContext` だけ（`permissionDecision` を付けない）、許可は `permissionDecision: "allow"`、どちらでもなければ何も出さない |
+| PreToolUse（Codex） | `session_id` `tool_name` `tool_input.command`（文字列か配列）`cwd` | 案内だけ（Claude Code と同じ形）。許可は返さない |
 
 根は `cwd` から上へたどり、`.serena/project.yml` か `.git` を持つ最初のディレクトリにする。
 
@@ -336,8 +336,8 @@ hook は、環境に `CLAUDE_PLUGIN_ROOT` が無ければ何も出さずに 0 �
 | 数を戻す | 名前に `serena` を含み、`pattern` / `read` / `diagnostics` / `memory` / `onboarding` / `config` / `list_file` / `find_file` / `shell` / `dashboard` / `restart_language_server` のどれも含まないツール | 同じ |
 
 - シェルの語は `shlex` で分け、先頭の環境変数の代入を飛ばす。配列の `bash|sh|zsh -c|-lc <文字列>` は中の文字列を分ける
-- grep 3・読み込み 3・混在 4 のどれかに達したら 1 度だけ拒み、数を 0 に戻して拒んだ時刻を残す。
-  拒んでから 120 秒は数えも拒みもしない
+- grep 3・読み込み 3・混在 4 のどれかに達したら、そのツールを止めずに案内を 1 度だけ添え、数を 0 に戻して案内した時刻を残す。
+  案内してから 120 秒は数えも案内もしない
 - 数には有効期間があり、前回の同じ種類から grep と読み込みは 1000 秒、混在は 2000 秒を過ぎたら 1 から数え直す
 - 同じセッションの PreToolUse は数の記録のロック（`fcntl.flock`）で直列にし、並列の増分を失わない
 - 誘導の文は 3 行に収め、読む手順（`get_symbols_overview` → `find_symbol`（`include_body`）→
@@ -417,7 +417,7 @@ SKILL.md が正である。`configure` は言語の数 × 120 秒かかり得る
 | 項目 | 値 |
 | --- | --- |
 | 置き場所 | `${XDG_STATE_HOME:-$HOME/.local/state}/mcp-serena/hooks/<session_id>.json`（と同名の `.lock`）。`session_id` は英数字・`-`・`_` だけを残す |
-| 中身 | `{"grep": 0, "read": 0, "mixed": 0, "last_grep": null, "last_read": null, "last_mixed": null, "last_deny": null}`（`last_*` は UNIX 秒） |
+| 中身 | `{"grep": 0, "read": 0, "mixed": 0, "last_grep": null, "last_read": null, "last_mixed": null, "last_notice": null}`（`last_*` は UNIX 秒） |
 | 消す時点 | 書くたびに、同じディレクトリの 1 日より古い `.json` と `.lock` を消す。SessionEnd の hook は置かない |
 | 壊れているとき | 無いものとして 0 から数え直す |
 
@@ -442,7 +442,7 @@ uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest 
 | `--dry-run` が何も書かないこと、`--gitignore` / `--serena-gitignore` を渡したときだけ書くこと、終了コード 2・3 | 同 `test_serena_lsp_configure.py` |
 | `check` の終了コード 0 / 1 / 2（`installed_plugins.json` が無い・壊れている・最上位が配列、`project.yml` が無い、知らない `extra_checks`）と、`--runtime codex` が Claude Code の項目を飛ばすこと、TypeScript の版・shellcheck | 同 `tests/test_serena_lsp_check.py` |
 | SessionStart がリポジトリの状態ごとに決まった行だけを出すこと（未設定・食い違い・欠け・外した言語・名指し・`project.local.yml` の上書き・Codex・`CLAUDE_PLUGIN_ROOT` の無い環境） | 同 `tests/test_serena_lsp_hooks.py` |
-| 採った言語の拡張子だけを数え、grep 3・読み込み 3・混在 4 で拒み、120 秒・1000 秒の境界、数を戻すツールと戻さないツール、並列で数を失わないこと、自動許可のモード、Codex のシェルの入力 | 同 `test_serena_lsp_hooks.py` |
+| 採った言語の拡張子だけを数え、grep 3・読み込み 3・混在 4 で止めずに案内し、120 秒・1000 秒の境界、数を戻すツールと戻さないツール、並列で数を失わないこと、自動許可のモード、Codex のシェルの入力 | 同 `test_serena_lsp_hooks.py` |
 | 1 万ファイルのリポジトリで SessionStart 1 秒以内・PreToolUse 0.2 秒以内 | 同 `tests/test_serena_lsp_hook_speed.py` |
 | Kiro の installer が生成した `agentSpawn` のコマンドが `CLAUDE_PLUGIN_ROOT` の無い環境で何も出さないこと | 同 `tests/test_serena_lsp_kiro.py` |
 | このリポジトリの `project.yml` が検出と食い違わないこと | 同 `tests/test_serena_lsp_this_repo.py` |
@@ -457,13 +457,14 @@ uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest 
 | 言語構成の違う 2 リポジトリで `configure` → `check` が通ること | ai-plugins（python + bash、10 秒）と Python 以外が主のリポジトリ（typescript + python + bash、19 秒） |
 | 作業ツリーで起動した Serena が作業ツリーを根にすること | 初回の `find_symbol` 3.8 秒、言語サーバ 48M |
 | Claude Code に編集の後の診断が届くこと（Python / TypeScript 5 / PHP） | `<new-diagnostics>` が届いた。intelephense の無料版も型の食い違い（P1006）を返した |
-| Codex で `find_referencing_symbols` と `get_diagnostics_for_file` が返り、hook の通知と拒否が効き、Skill から `$ROOT` が解決されること | いずれも通った。hook は `/hooks` で信頼した後に効いた |
+| Codex で `find_referencing_symbols` と `get_diagnostics_for_file` が返り、hook の通知が効き、Skill から `$ROOT` が解決されること | いずれも通った。hook は `/hooks` で信頼した後に効いた |
+| Codex（0.157.0）の PreToolUse が `permissionDecision` の無い `additionalContext` を、コマンドを止めずにモデルへ渡すこと | 2026-09-25 に確かめた。コマンドは走り、モデルは渡した文を引用した |
 
 ## 関連リンク
 
 - [issue #818](https://github.com/devbasex/ai-plugins/issues/818) — Claude Code と Codex で言語サーバを使えるようにする
 - [PR #957](https://github.com/devbasex/ai-plugins/pull/957)（設計） / [PR #972](https://github.com/devbasex/ai-plugins/pull/972)（実装）
-- [issue #971](https://github.com/devbasex/ai-plugins/issues/971) — 誘導が拒んでも Serena へ切り替わらない
+- [issue #971](https://github.com/devbasex/ai-plugins/issues/971) — 誘導を拒否から止めない案内へ変える
 - [issue #877](https://github.com/devbasex/ai-plugins/issues/877) / [issue #869](https://github.com/devbasex/ai-plugins/issues/869) — エージェント定義の整理（決定 10）
 - [`language-servers` の手順](../../plugins/mcp/mcp-serena/skills/language-servers/SKILL.md)
 - [mcp-serena の README](../../plugins/mcp/mcp-serena/README.md)

@@ -25,7 +25,7 @@ PREFIX = "[mcp-serena]"
 
 THRESHOLDS = {"grep": 3, "read": 3, "mixed": 4}
 PERIODS = {"grep": 1000, "read": 1000, "mixed": 2000}
-DENY_INTERVAL = 120
+NOTICE_INTERVAL = 120
 NON_SYMBOLIC = ("pattern", "read", "diagnostics", "memory", "onboarding", "config", "list_file",
                 "find_file", "shell", "dashboard", "restart_language_server")
 GREP_COMMANDS = {"grep", "rg", "ag", "ack", "fgrep", "egrep"}
@@ -35,10 +35,9 @@ SHELLS = {"bash", "sh", "zsh"}
 AUTO_ALLOW_MODES = {"acceptEdits", "auto"}
 ITEM_LABELS = {"plugin": "プラグイン", "binary": "本体", "typescript_major_5": "TypeScript の版"}
 
-DENY_REASON = (
+NOTICE = (
     f"{PREFIX} コードの grep / 読み込みが続いています。Serena でシンボル単位に読むと量が減ります。\n"
-    "読む: get_symbols_overview → find_symbol（include_body）→ find_referencing_symbols。編集: replace_symbol_body\n"
-    "数を戻したので、必要ならこのまま同じ操作を続けてよい。"
+    "読む: get_symbols_overview → find_symbol（include_body）→ find_referencing_symbols。編集: replace_symbol_body"
 )
 
 
@@ -130,7 +129,7 @@ def _state_path(session_id: str) -> Path:
 
 
 EMPTY = {"grep": 0, "read": 0, "mixed": 0, "last_grep": None, "last_read": None, "last_mixed": None,
-         "last_deny": None}
+         "last_notice": None}
 
 
 def _load_counts(path: Path) -> dict:
@@ -257,7 +256,7 @@ def pre_tool_use(payload: dict, client: str):
     path = _state_path(str(payload.get("session_id") or "unknown"))
     with _locked(path):
         counts = _load_counts(path)
-        if counts["last_deny"] is not None and now - counts["last_deny"] < DENY_INTERVAL:
+        if counts["last_notice"] is not None and now - counts["last_notice"] < NOTICE_INTERVAL:
             return _allow(tool, payload, client)
         if kind == "symbolic":
             _reset(counts)
@@ -268,8 +267,8 @@ def pre_tool_use(payload: dict, client: str):
         _bump(counts, "mixed", PERIODS["mixed"], now)
         if any(counts[k] >= THRESHOLDS[k] for k in THRESHOLDS):
             _reset(counts)
-            counts["last_deny"] = now
+            counts["last_notice"] = now
             _save_counts(path, counts, now)
-            return _decision("deny", DENY_REASON)
+            return _context("PreToolUse", [NOTICE])  # 止めずに案内だけを渡す（Claude Code・Codex とも）
         _save_counts(path, counts, now)
     return _allow(tool, payload, client)

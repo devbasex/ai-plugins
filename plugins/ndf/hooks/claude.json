@@ -36,6 +36,13 @@
             "description": "NDF: under the relay, mark that a question is shown so the relay never types into it",
             "timeout": 10,
             "continueOnError": true
+          },
+          {
+            "type": "command",
+            "command": "sh -c 'ROOT=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; [ -n \"$ROOT\" ] || exit 0; python3 \"$ROOT/scripts/wait-notify.py\" --runtime claude; exit 0'",
+            "description": "NDF: notify Slack that a question waits for an answer",
+            "timeout": 10,
+            "continueOnError": true
           }
         ]
       }
@@ -48,6 +55,34 @@
             "type": "command",
             "command": "sh -c '[ -n \"${NDF_RELAY_DIR:-}\" ] || exit 0; ROOT=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; [ -n \"$ROOT\" ] || exit 0; exec python3 \"$ROOT/scripts/relay.py\" question close'",
             "description": "NDF: under the relay, clear the question mark after the answer",
+            "timeout": 10,
+            "continueOnError": true
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "permission_prompt|elicitation_dialog|elicitation_url_dialog",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'ROOT=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; [ -n \"$ROOT\" ] || exit 0; python3 \"$ROOT/scripts/wait-notify.py\" --runtime claude; exit 0'",
+            "description": "NDF: notify Slack that a permission prompt or input form waits",
+            "timeout": 10,
+            "continueOnError": true
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "matcher": "ExitPlanMode",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'ROOT=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; [ -n \"$ROOT\" ] || exit 0; python3 \"$ROOT/scripts/wait-notify.py\" --runtime claude; exit 0'",
+            "description": "NDF: notify Slack that a plan waits for approval",
             "timeout": 10,
             "continueOnError": true
           }
@@ -100,8 +135,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh -c 'ROOT=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; if [ -n \"$ROOT\" ]; then node \"$ROOT/scripts/slack-notify.js\" session_end; fi; exit 0'",
-            "description": "Send Slack notification when Claude Code exits",
+            "command": "sh -c 'ROOT=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; [ -n \"$ROOT\" ] || exit 0; python3 \"$ROOT/scripts/wait-notify.py\" --runtime claude; exit 0'",
+            "description": "NDF: notify Slack when the reply ends waiting for an answer or approval",
+            "timeout": 15,
             "continueOnError": true
           },
           {

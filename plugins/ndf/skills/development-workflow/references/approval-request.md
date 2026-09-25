@@ -161,6 +161,20 @@ echo "exit=$rc"
 
 **順序が無いときは、無いと書く。** 書かないと読む側が推測する。
 
+**起点のブランチが「マージ前に最新を取り込む」を求めるなら、2 本目以降に取り込みの段を書く。**
+先の 1 本をマージした時点で後続はすべて `BEHIND` になり、`gh pr merge` は
+`the head branch is not up to date with the base branch` で拒む。`git merge-tree` でコンフリクトが
+無くても、この段は減らない。2 本目以降は「起点の取り込み → push → CI の success → マージ」とし、
+CI 1 回の所要 × (本数 − 1) を所要に足す。求めるかどうかは次の 2 つのどちらかが `true` を返すかで見る。
+
+```bash
+gh api repos/<所有者>/<リポジトリ>/branches/<起点>/protection --jq '.required_status_checks.strict'
+gh api repos/<所有者>/<リポジトリ>/rules/branches/<起点> \
+  --jq '[.[] | select(.type=="required_status_checks") | .parameters.strict_required_status_checks_policy] | any'
+```
+
+前者は branch protection、後者は ruleset である。保護が無いと前者は `Branch not protected`（HTTP 404）で終わる。
+
 ## 止まる手段
 
 **`AskUserQuestion` に限る。** `/goal` は停止の判定をターンの終わりに行うため、文中に
