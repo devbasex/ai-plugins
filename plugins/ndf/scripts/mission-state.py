@@ -5,7 +5,7 @@ LLM を呼ばない。入力は supervise.py queue の done の JSON と各計�
 
 | 副命令 | 何をする |
 | --- | --- |
-| `init <mission.json> --name <名> [--milestone M] [--issue N]... [--plan <種類>=<plan.json>]... [--done <done.json>]... [--dev <版>] [--prod <版>] [--goal <雛形の文字列か @ファイル>]` | 状態のファイルを作る |
+| `init <mission.json> --name <名> [--milestone M] [--issue N]... [--plan <種類>=<plan.json>]... [--done <done.json>]... [--dev <版>] [--prod <版>] [--goal <雛形の文字列か @ファイル>]` | 状態のファイルを作る。同じパスに別の形の JSON があれば上書きせずに止まる（終了コード 1） |
 | `update <mission.json> [--done <done.json>]... [--next <plan.json>=<文>]...` | done の JSON と報告を読み、行の状態・PR・秒・費用を埋める。何度走らせても同じ結果 |
 | `gate <mission.json> <関門の名> --what <何を> [--at <ISO 8601>]` | 関門の承認の時刻を書く |
 | `render <mission.json> <引継ぎ文書> --section <見出しの語> [--demote <前の節の語> --heading <新しい見出し>]` | 見出しに語を含む節の本文を置き換える。節の外は変えない |
@@ -100,7 +100,39 @@ def default_label(kind: str, issues: list[int], m: dict) -> str:
 # ---------------------------------------------------------------- init / update / gate
 
 
+STATE_KEYS = ("plans", "done", "gates", "goal_template")
+
+
+def other_shape(path: str) -> str:
+    """既存のファイルが状態の形でなければ、その理由を返す。無い・空・状態の形なら空。
+
+    supervise.py new mission の目録（`ミッション` / `ブランチ` / `波`）も同じ名前で書かれる。
+    同じ場所へ置くと、上書きで波の目録が消える（#1082）。
+    """
+    p = Path(path)
+    if not p.exists():
+        return ""
+    text = p.read_text()
+    if not text.strip():
+        return ""
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return "JSON として読めない"
+    if not isinstance(data, dict):
+        return "オブジェクトでない"
+    missing = [k for k in STATE_KEYS if k not in data]
+    if missing:
+        return "状態の鍵（" + " / ".join(missing) + "）が無い"
+    return ""
+
+
 def cmd_init(a) -> dict:
+    why = other_shape(a.mission)
+    if why:
+        return result("stopped", f"別の形の JSON があるため上書きしない（{why}）: {a.mission}。"
+                      " 状態のファイルは別の名前か別の場所に置く",
+                      metrics={"path": a.mission, "reason": why})
     goal = a.goal or ""
     if goal.startswith("@"):
         goal = Path(goal[1:]).read_text().rstrip("\n")
