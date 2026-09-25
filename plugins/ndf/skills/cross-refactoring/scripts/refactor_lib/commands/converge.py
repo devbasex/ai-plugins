@@ -39,7 +39,6 @@ from ..items import (
     IMPLEMENTED,
     VERIFIED,
     find_item,
-    item_label,
     item_shas,
     live_items,
 )

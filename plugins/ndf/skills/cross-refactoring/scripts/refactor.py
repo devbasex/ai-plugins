@@ -38,7 +38,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 # 重複排除が効かない。取り込みの時点で読むため、ここで捕まえて理由だけを出す
 # （トレースバックを見せても、直す手がかりにならない）。
 try:
-    from refactor_lib.vocabulary import VocabularyUnavailable  # noqa: E402
+    pass  # noqa: E402
 except Exception as _exc:                        # 取り込みそのものが失敗した
     print(f"ERROR: {_exc}", file=sys.stderr)
     sys.exit(4)

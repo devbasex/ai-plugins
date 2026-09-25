@@ -46,3 +46,19 @@ def test_the_report_carries_phases_reasons_whole_test_and_judge(tmp_path, cmd_re
     assert "60 分" in out
     # --metrics は種類別の件数と所要
     assert "structure/extract_method" in out
+
+
+def test_the_report_gives_the_gap_between_the_budget_and_the_elapsed_time(tmp_path, cmd_report,
+                                                                          env_tmp_dir, capsys):
+    """所要は `init` の開始から最終ゲートの最後の検査まで。差は想定最大時間からの残り。"""
+    path = make_state_v2(
+        tmp_path, tmp_path / "work",
+        started_at="2026-09-24T10:00:00", budget_minutes=60,
+        final_gate={"mode": "test", "status": "passed", "fix_rounds": 0,
+                    "checks": [{"at": "2026-09-24T10:45:00"}]},
+    )
+    env_tmp_dir(path)
+    cmd_report.cmd_report(argparse.Namespace(id=130, metrics=False))
+    out = capsys.readouterr().out
+    assert "所要: 45.0 分" in out
+    assert "差 +15.0 分" in out

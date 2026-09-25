@@ -27,7 +27,6 @@ from .. import timeline
 from ..paths import (
     git_out,
     default_worktree_base,
-    load_state,
     repo_slug,
     sh,
     state_path,
