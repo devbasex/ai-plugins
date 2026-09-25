@@ -111,7 +111,7 @@
     {
       "term": "待ちの鍵",
       "context": "ndf-notification",
-      "meaning": "1 つの待ちを見分ける値。transcript の最後の assistant の項目の `uuid`",
+      "meaning": "1 つの待ちを見分ける値。Claude Code では transcript の最後の user の項目の `uuid`（利用者が答える・許可すると変わる）",
       "source": "issues/issue-821-wait-notify-design.md"
     },
     {

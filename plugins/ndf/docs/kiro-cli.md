@@ -13,7 +13,7 @@ Kiro CLI 固有の詳細です。導入の手順そのものは
 | `--scope workspace\|global` | `workspace`（既定）はプロジェクトの `.kiro/`、`global` は `~/.kiro/` へ導入する |
 | `--set-default` | `kiro-cli` の既定エージェントを `ndf` に切り替える（オプトイン） |
 | `-y`, `--yes` | `--set-default` の確認プロンプトを省略する |
-| `--with-slack` | stop フックに Slack 通知を追加する |
+| `--with-slack` | stop フックに回答・承認待ちの Slack 通知（`scripts/wait-notify.py --runtime kiro`）を追加する |
 | `--with-codex` | Codex MCP サーバ設定（`ndf.json` の `mcpServers.codex`）と、Codex CLI 直接実行用プロンプトを追加する |
 | `--dry-run` | 書き込みを行わず実行内容を表示する |
 
