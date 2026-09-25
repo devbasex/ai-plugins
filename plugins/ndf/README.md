@@ -89,7 +89,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.17.25）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.17.26-dev.1）
 ```
 
 ### agy
@@ -119,21 +119,14 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.17.25 へ更新するとき
+## v10.17.26-dev.1 へ更新するとき
 
-- cross-refactoring の検証は、テストのコメントの中の値の減少を期待値の変更として扱わず、改善項目を取り消さない（#1130）
-- テストを整理する改善項目で値の出現数が減っても、期待値の変更として扱わず、改善項目を取り消さない（#1130）
-- 機械で判定できない変化は、最終ゲートのレビューで確認する（#1130）
-- 利用者の環境は変わらない。devbase のコンテナで NDF のテストを走らせても、中継の読み込みファイル（`~/.shellrc.d/ndf-relay.sh`）が消えなくなる。（#1131）
-- 設計の工程を持つモードでは、プロジェクトの用語集の宣言 `.ndf/glossary.json` が無いと設計へ進まず、用語集を作る手順を示す（#1135）
-- glossary.py で用語集の生成・語のチェック・差分の確認ができる（#1135）
-- 要求の仕様は課題の本文を正とし、spec-copy.py が写しと本文の食い違いを返す（#1135）
-- 設計 PR のレビューはモデルの段、詳細の段の順に 2 段で進む（#1135）
-- `pace: fast` で進めると、開発版を出す前に毎回、前回のレビューからの差分へ cross-review が 1 回通る。構造改善（cross-refactoring）は今までどおりトリガーが立ったときだけ流れ、レビューを通しても構造改善のトリガーは数え直しにならない。（#1137）
-- 無し（検査の修正だけ）（#1138）
-- `pace: fast` の実装レビューと検査は、前回の検査で見終えた位置から数える。レビューを通らずに配布された変更も、次のレビューで必ず見る。初めて使うリポジトリでは `new check --since-last --since-ref <ref>` で起点を渡せる。（#1139）
-- `pace: fast` の検査と実装レビューの途中に別の Pull Request がマージされても、検査の Pull Request が衝突で閉じられなくなる。（#1143）
-- 無し（テストだけ）。（#1144）
+- Slack 通知は、回答待ち・承認待ちになったときだけ届く（#1155）
+- Claude Code と Codex の hook は、どちらも待ちの通知を送る入口を使う（#1155）
+- Kiro の導入スクリプトと導入時の確かめは、待ちの通知を前提にしている（#1155）
+- `plugins/ndf/README.md` と Kiro の文書は、待ちの通知の使い方を説明している（#1155）
+- 無し（検査の修正だけ）（#1156）
+- 無し（検査の修正だけ）（#1160）
 
 ## Playwright テストについて
 
@@ -370,7 +363,7 @@ agy models   # 認証の確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.17.25/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.17.26-dev.1/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -392,14 +385,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.25/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.26-dev.1/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.17.25  <path>
+# => ndf@ai-plugins  installed, enabled  10.17.26-dev.1  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。
