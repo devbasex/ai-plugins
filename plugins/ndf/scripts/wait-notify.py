@@ -200,10 +200,10 @@ def wait_key(runtime: str, hook_input: dict, transcript: tuple[str, str] | None)
         digest = hashlib.sha1(tool_input.encode()).hexdigest()[:12]
         return f"{hook_input['turn_id']}:{hook_input.get('hook_event_name')}:{digest}", False
     # Kiro は応答本文のハッシュを鍵にする。セッションの識別子が無いと別セッションの同じ文面を
-    # 期限なく止めるため、識別子があるときだけ窓なしの鍵にする。
-    if runtime == "kiro" and session and hook_input.get("assistant_response"):
+    # 期限なく止めるため、そのときは同じ文面だけを 60 秒の窓で止める。
+    if runtime == "kiro" and hook_input.get("assistant_response"):
         digest = hashlib.sha1(str(hook_input["assistant_response"]).encode()).hexdigest()[:16]
-        return f"{session}:{digest}", False
+        return (f"{session}:{digest}", False) if session else (f"{digest}:window", True)
     # 受け皿: 主鍵が取れないとき、同じセッションの 60 秒の内は 2 件目を止める粗い保険。
     # 窓の内に続いた本来別の待ち（codex の turn_id が無い入力など）も止まり、通知は来ない。
     # 「通知が来ない」を調べるときは、ログの `skip: already notified <session>:window` を見る。
@@ -211,8 +211,12 @@ def wait_key(runtime: str, hook_input: dict, transcript: tuple[str, str] | None)
 
 
 def session_of(hook_input: dict) -> str:
-    """セッションの識別子（Kiro は `conversation_id` のことがある）。無ければ空。"""
-    return str(hook_input.get("session_id") or hook_input.get("conversation_id") or "")
+    """セッションの識別子。無ければ空。
+
+    Kiro の stop の標準入力には識別子が無く、環境変数 `KIRO_SESSION_ID` で渡る（worktree-guard.sh と同じ）。
+    """
+    return str(hook_input.get("session_id") or hook_input.get("conversation_id")
+               or os.environ.get("KIRO_SESSION_ID") or "")
 
 
 # ---------------------------------------------------------------------------

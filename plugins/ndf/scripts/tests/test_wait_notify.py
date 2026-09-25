@@ -104,7 +104,7 @@ esac
 echo "$FAKE_GH_URL"
 """)
     base_env = {k: v for k, v in os.environ.items()
-                if not k.startswith(("CLAUDE", "SLACK_", "NDF_", "XDG_", "REDMINE", "DEBUG_SLACK", "FAKE_GH"))}
+                if not k.startswith(("CLAUDE", "SLACK_", "NDF_", "XDG_", "REDMINE", "DEBUG_SLACK", "FAKE_GH", "KIRO_"))}
     base_env.update({
         "HOME": str(home),
         "XDG_STATE_HOME": str(tmp_path / "state"),
@@ -488,11 +488,19 @@ def test_kiro_same_text_in_other_conversations_is_notified(world, slack):
     assert len(slack.wait_for(2)) == 2
 
 
-def test_kiro_without_session_falls_back_to_window(world, slack):
-    world.run("kiro", {"hook_event_name": "stop", "assistant_response": "この方針で進めてよいですか。"})
-    slack.wait_for(1)
+def test_kiro_session_from_env_is_the_key(world, slack):
+    for sid in ("k1", "k2"):
+        world.run("kiro", {"hook_event_name": "stop", "assistant_response": "この方針で進めてよいですか。"},
+                  env={"KIRO_SESSION_ID": sid})
+    assert len(slack.wait_for(2)) == 2
+
+
+def test_kiro_without_session_windows_only_the_same_text(world, slack):
+    for text in ("この方針で進めてよいですか。", "この方針で進めてよいですか。", "次はどちらにしますか。"):
+        world.run("kiro", {"hook_event_name": "stop", "assistant_response": text})
+    assert len(slack.wait_for(2)) == 2
     [record] = [json.loads(f.read_text()) for f in world.state.glob("*.json")]
-    assert record["key"] == ":window"
+    assert record["key"].endswith(":window") and record["key"] != ":window"
 
 
 def test_kiro_non_stop_event_is_not_a_wait():
