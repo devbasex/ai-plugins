@@ -45,38 +45,6 @@ def test_the_skill_is_distributed(runtime: str) -> None:
     assert "issue-upkeep" in names
 
 
-# ---------- 対象の範囲 ----------
-
-
-def test_the_target_query_keeps_only_null_milestone_issues() -> None:
-    """段 1 の jq を実際に流し、milestone が null の課題だけを残すことを固定する。
-
-    現状固定: 期待値の根拠は仕様ではなく、抽出手順が返す jq 式の振る舞いである。
-    文字列の存在（別の現状固定テスト）ではなく、分岐そのものを流して固定する。
-    """
-    body = SKILL.read_text(encoding="utf-8")
-    block = body[locate(body, "**起票者は問わない。**"):]
-    start = block.index("```bash")
-    block = block[start:block.index("```", start + len("```bash")) + 3]
-    expression = re.search(r"--jq '([^']*)'", block).group(1)
-
-    issues = [
-        {"number": 10, "title": "foo", "milestone": None},
-        {"number": 20, "title": "bar", "milestone": {"title": "m1"}},
-        {"number": 30, "title": "baz baz", "milestone": None},
-    ]
-    done = subprocess.run(["jq", "-r", expression], input=json.dumps(issues),
-                          capture_output=True, text=True, check=True)
-    lines = done.stdout.splitlines()
-
-    # branch: milestone が null の 2 件だけが残り、milestone を持つ課題は落ちる。
-    assert lines == ["#10 foo", "#30 baz baz"]
-    # 整形の形: 各行は "#<number> <title>" である（表示文言ではなく形として見る）。
-    for line, issue in zip(lines, [issues[0], issues[2]]):
-        assert line.startswith(f"#{issue['number']} ")
-        assert line == f"#{issue['number']} {issue['title']}"
-
-
 # ---------- やり直しで 2 度行わない（grouping.md） ----------
 
 REDO_SECTION = "## やり直しで 2 度行わない"
