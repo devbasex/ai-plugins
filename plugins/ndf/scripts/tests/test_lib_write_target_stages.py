@@ -103,3 +103,21 @@ def test_the_public_entry_point_keeps_its_output(
     command: str, base: str, targets: list[str], rc: int,
 ) -> None:
     assert _extract(command, base) == (targets, rc)
+
+
+@pytest.mark.parametrize(
+    ("command", "targets", "rc"),
+    [
+        pytest.param("cp a ~/.local/state/x.md", ["/home/u/.local/state/x.md"], 0, id="tilde_slash"),
+        pytest.param("echo hi > ~", ["/home/u"], 0, id="tilde_alone"),
+        pytest.param("echo hi > ~other/x.md", [], 1, id="tilde_user"),
+    ],
+)
+def test_a_leading_tilde_is_the_home_directory(
+    command: str, targets: list[str], rc: int, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # bash は引用符の無い語の先頭の `~` を $HOME へ展開する。起点へ継ぎ足すと、
+    # リポジトリの外への書き込みを主ディレクトリの編集として案内する。
+    # `~user` は利用者の家を引かないと決められないため出さない。
+    monkeypatch.setenv("HOME", "/home/u")
+    assert _extract(command, "/base") == (targets, rc)
