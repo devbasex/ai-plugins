@@ -9,6 +9,25 @@
 **開発版（接尾辞の付いた版）は載せない。** `9.8.0` は `9.8.0-dev.1` までしか出ておらず、
 その内容は `10.0.0` で届いている。
 
+## [ndf 10.17.14] - 2026-09-25
+
+### 追加
+
+- **試行の `experimental/phase_cost.py` はフェーズと段ごとの費用と所要を集計する**
+
+### 変更
+
+- **cross-review と cross-refactoring の SKILL.md は `drive.py` を呼ぶ 1 行と、止まった地点（pause）ごとの手だけを書く**。
+  pause の種類と終了コードの表は共通層の `scripts/lib/drive_pause.py` の 1 か所にある
+- **cross-review の修正の指示文は `/ndf:fix` の呼び出しと、PR 固有の穴埋めだけで成る**
+- **supervisor の起動指示に作業ディレクトリの項目がある**。`supervise.py` は計画ごとの作業ディレクトリを worker へ渡し、
+  並行する supervisor と計画は作業ファイルを上書きし合わない
+- **試行の境界のテストが見るのは、既定で動くもの（コード・hook・設定と、skills・agents の本文）だけである**
+
+### 修正
+
+- **`skill-stats --agents` は工程名で書かれた supervisor の description をフェーズへ写し、フェーズが読めなかった supervisor の件数を出す**
+
 ## [ndf 10.17.13] - 2026-09-25
 
 ### 追加
