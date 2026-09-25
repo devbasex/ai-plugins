@@ -117,3 +117,41 @@ def test_resume_lists_mark_skipped_of_previous_and_current_section(tmp_path):
     item = json.loads(p.stdout.strip().splitlines()[-1])["items"][0]
     assert [(r["section"], r["reason"]) for r in item["mark_skipped"]] == [(2, "background"), (3, "blocks")]
     assert "b5rbmp9yj" in p.stdout and "背景の作業が残った" in p.stdout
+
+
+def _body_repo(tmp_path):
+    """origin（bare）と clone を作り、clone に origin/develop へ載っていないファイルを 1 つ置く。"""
+    run = lambda *a, cwd=None: subprocess.run(a, cwd=cwd, check=True, capture_output=True, text=True)
+    bare, clone = tmp_path / "origin.git", tmp_path / "clone"
+    run("git", "init", "-q", "--bare", "-b", "develop", str(bare))
+    run("git", "clone", "-q", str(bare), str(clone))
+    for k, v in (("user.email", "t@t"), ("user.name", "t")):
+        run("git", "config", k, v, cwd=clone)
+    (clone / "docs").mkdir()
+    (clone / "docs" / "pushed.md").write_text("x\n")
+    (clone / ".ndf").mkdir()
+    (clone / ".ndf" / "worktree.json").write_text('{"base_branch": "develop"}\n')
+    run("git", "add", "-A", cwd=clone)
+    run("git", "commit", "-qm", "init", cwd=clone)
+    run("git", "push", "-q", "origin", "HEAD:develop", cwd=clone)
+    (clone / "issues").mkdir()
+    (clone / "issues" / "local-only.md").write_text("y\n")
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    (bindir / "gh").write_text("#!/bin/sh\necho called >> \"$FAKE_GH_LOG\"\n")
+    (bindir / "gh").chmod(0o755)
+    env = dict(os.environ, PATH=f"{bindir}:{os.environ['PATH']}", FAKE_GH_LOG=str(tmp_path / "gh.log"))
+    return clone, env
+
+
+def test_issue_body_refuses_paths_only_on_this_machine(tmp_path):
+    # 手元にだけあって GitHub から読めないファイルを本文が指すと、書き込む前に止める
+    clone, env = _body_repo(tmp_path)
+    body = tmp_path / "body.md"
+    body.write_text("要求は `issues/local-only.md` にある。仕様は `docs/pushed.md`。新しく `docs/new.md` を作る\n")
+    p = subprocess.run([sys.executable, str(EXP / "issue-body.py"), "set", "1", str(body)],
+                       cwd=clone, env=env, capture_output=True, text=True)
+    out = json.loads(p.stdout.strip().splitlines()[-1])
+    assert p.returncode == 1 and out["status"] == "stopped"
+    assert [i["path"] for i in out["items"]] == ["issues/local-only.md"]
+    assert not (tmp_path / "gh.log").exists()  # gh は呼ばない
