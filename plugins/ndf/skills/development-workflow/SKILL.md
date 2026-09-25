@@ -29,6 +29,8 @@ hooks:
 - **モードの違う課題を 1 つのミッションへ混ぜない。** 混ざるなら高い方のモードで進めるか、ミッションを分ける
 - **ミッションの大きさは、同時に回せる本数（フェーズは 3 本まで）と配布の間隔（1 版を 1〜2 日）で切る。**
   並列の形と下限は [references/parallel-work.md](references/parallel-work.md) にある
+- **`pace: fast` では、判定する単位は実装の Pull Request 1 本になる。** ミッションのブランチを作らず、
+  実装の Pull Request が develop へ直接入る（「進め方」の節）
 
 **代わりに工程の順序が変わる。** ミッションに何が入るかが決まらないと判定できない
 ため、**要求と受け入れ条件 → モード判定 → 作業場所の用意**の順になる。`light` にも
@@ -116,6 +118,7 @@ NULL 許容列の追加）は `standard` として扱う。判定に迷う場合
 
 ```text
 mode: standard
+pace: fast
 根拠: 注文確定の振る舞いを変更する。公開 API とスキーマは変えない
 宣言: あり
 必須工程: worktree → requirements-design → implementation-plan → tdd-cycle
@@ -127,6 +130,7 @@ mode: standard
 
 工程の並びは「モードごとに起動する Skill」の表から読む。この例は出力の形を示すもので、
 基準ではない。
+`pace:` の行は `fast` を指定したときだけ出す（既定の `normal` では出さない）。
 
 判定基準の本文を出力へ貼らない。呼び出し側が基準を写し取ると、この Skill が唯一の
 置き場所である前提が崩れる。
@@ -160,7 +164,8 @@ mode: standard
 **表の工程はミッションの中で 1 回ずつ動き、中は並列にする。** 設計 Pull Request は主題ごとに同時に開いて
 並列で回し（1 本の設計文書は 1,000 行以下）、関門 1 でまとめて 1 回承認する。実装は課題ごとの作業ツリーで並列に
 進めてミッションのブランチへ集め、構造改善・実装レビュー・完了判定はミッションの develop 宛て Pull Request で
-1 回通す。工程ごとの単位は [references/parallel-work.md](references/parallel-work.md) の「工程が動く単位」にある。
+1 回通す。`fast` では完了判定は課題ごと、構造改善と実装レビューはトリガーの範囲で通す。工程ごとの単位は
+[references/parallel-work.md](references/parallel-work.md) の「工程が動く単位」にある。
 
 **`operation` の「実装」は実行そのものを指す。** 行は増やさない。呼ぶのは `tdd-cycle` でも
 `refactoring` でもなく、[references/operation-run.md](references/operation-run.md) が定める
@@ -185,7 +190,7 @@ mode: standard
 `design/` で始め、マージした後は実装用の作業ツリーを作り直す。
 
 **構造改善と実装レビューは、通す工程であって任意ではない。** `standard` と `legacy-refactor` の
-構造改善は `cross-refactoring` を通す。
+構造改善は `cross-refactoring` を通す。`fast` でも通し、時機だけをトリガーへ移す。
 **実装レビューは 4 モードとも通す。** Pull Request を出す以上、その差分は誰かがレビューする。
 `light` は「本番の振る舞いも本番コードの構造も変えない」変更だが、**変えないことの確認**が
 要る。実装レビューの工程は**明示的に呼ぶ**（自然文で「レビューして」と依頼すると、Claude Code では組み込みの
@@ -212,20 +217,7 @@ mode: standard
 ## 範囲外の課題を見つけたとき
 
 この変更の受け入れ条件にも、直す対象にも含まれない課題は、**見つけたその場で `out-of-scope` が
-issue にする**。順序を持たないため、複数の工程から呼ばれる。
-
-```mermaid
-flowchart TD
-    H[実装] -.-> S[起票]
-    R[構造改善] -.-> S
-    V[実装レビュー] -.-> S
-    K[完了判定] -.-> S
-    S -.番号.-> T[振り返り]
-```
-
-- 判断は 3 択に限る（起票する / 範囲内へ入れる / 起票しない）。3 つ目も理由を 1 行残す
-- 迷ったら起票する側へ倒す。後で閉じるほうが、拾い直すより安い
-- `retrospective` は起票された課題の一覧を作り、残っていないものを拾う
+issue にする**。呼び出し元・3 択の判断・振り返りでの拾い方は `out-of-scope` の SKILL.md にある。
 
 ## 進行を盤面へ記録する
 
@@ -243,29 +235,36 @@ flowchart TD
 
 ## 工程の飛ばしとマージを機械で見る
 
-この Skill が呼ばれた会話の単位に、tool 実行前の判定が 1 つ登録される（frontmatter の
-`hooks`）。判定は 2 つで、どちらも進行の記録のコマンドとマージのコマンドを読むだけである。
+この Skill の frontmatter の `hooks` が、進行の記録のコマンドを通過工程として積み（記録の無い工程は案内するだけで
+拒否しない）、承認の印（ラベル `design-approved`）の無い設計 Pull Request のマージだけを拒否する。判定の 2 つ・
+有効にする操作・控えの読み方・`fast` の工程の出し方は [references/stage-completeness.md](references/stage-completeness.md) にある。
 
-| 何を見るか | 何をするか |
-| --- | --- |
-| 進行の記録のコマンド | 通過工程として積む。配布の記録へ進んだ時点で、記録の無い必須の工程を案内する |
-| 設計 Pull Request のマージ | 承認の印（ラベル `design-approved`）が無ければ拒否する |
+## 進め方（`pace`）
 
-**記録の無い工程は拒否しない。** 記録されていないことは、その工程を通っていないことと
-同じではない。記録の側が遅れているだけの状態でマージや配布が止まると、正当な操作が止まる。
+**`pace` はモードとは別の軸で、「どう通すか」を決める。** 既定の `normal` は上の工程表のとおりに動く。
+`fast` を指定したときだけ工程が次の区分に分かれ、モードが対象外（—）とする工程は対象外のままである。
 
-**設計 Pull Request のマージだけは拒否へ踏み込む。** 引き金は接頭辞と承認の印の 2 つが
-そろったときに限られ、印が付けば同じコマンドがそのまま通る。編集は続けても元へ戻せるが、
-マージは戻せない。設計を実装より先に確定させる工程は、マージが済んだ時点で意味を失う。
+| 区分 | 工程表の行 | いつ通すか |
+| --- | --- | --- |
+| その場で通す | 作業場所の用意 / 計画 / 実装 / 完了判定 / Pull Request / 後片付け / 配布 / リリース後テスト | 課題ごと。実装の計画が限ったテスト → Draft の Pull Request（CI と並べる）→ 全体テスト → doc-lint → マージまでを通す。配布は開発版と verify-install まで。本番は下の関門 2 に従う |
+| トリガーで通す | 構造改善 / 実装レビュー | 検査のトリガーが立ったとき、次の開発版の前に 1 回。範囲は前回の検査からの差分 |
+| ミッションの終わりにまとめる | 確定仕様化 / 振り返り（受け入れ条件の確認と課題を閉じる作業を含む） | ミッションの終わりに 1 回ずつ |
+| 省かない | 要求と受け入れ条件 / 設計 / ドキュメント再構成 / ドキュメントレビュー | モードの定めどおり。設計の承認が要る変更は設計 Pull Request を出す。200 行以内の不具合はその場で直す |
 
-**承認の印がリポジトリに定義されていること自体が、この仕組みの宣言である。** 定義される
-までは拒否が働かない。有効にする操作と控えの読み方は
-[references/stage-completeness.md](references/stage-completeness.md) にある。
+| 関門 | `normal` | `fast` |
+| --- | --- | --- |
+| 関門 1（設計 Pull Request のマージ） | 利用者が承認する | `mvv-gate.py` が「従う」と判定し、越えない線に当たらなければ省く。ほかは利用者が承認する |
+| 関門 2（本番の系へ届く操作） | 利用者が承認する | 同上 |
+
+**`fast` は `supervise.py new mission --pace fast` が使ってよい条件（開発版のチャネル・導入の確認・`.ndf/pace.json`
+の許可・モード・MVV の承認）を機械で確かめ、1 つでも欠ければ断る。** そのときは `normal` で進める。条件・
+トリガー・MVV の承認と判定・越えない線・記録の読み方は [references/pace.md](references/pace.md) にある。
 
 ## 人手の承認を求める関門
 
 **関門は 2 つで、増やさない。** どちらも取り消せない操作である。増やすほど「承認したこと」の
-意味が薄れ、通過の回数が増えるほど内容を読まずに通す動きが入る。
+意味が薄れ、通過の回数が増えるほど内容を読まずに通す動きが入る。`fast` でも数は変えず、MVV の承認を 2 つの関門の
+事前の許可として扱う（条件は `AGENTS.md` と [references/pace.md](references/pace.md)）。
 
 **関門の外で工程の側が実行前確認を足さない。** 取り消せる操作は止めずに行い、消した対象と
 戻し方を報告する（例外の基準は `AUTHORING.md` の「実行前確認の要否を決める 3 つの問い」）。
@@ -344,7 +343,7 @@ Pull Request のマージ、制作物承認は本番の提出先への操作に�
 ## 自走で工程を通す
 
 **工程を続けて通す。** ただし**上の 2 つの関門の前では 1 度止まり、`AskUserQuestion` で人間の
-承認を待つ**。承認を得るまでマージせず、次の工程へも進まない。
+承認を待つ**。承認を得るまでマージせず、次の工程へも進まない。`fast` では MVV の判定が「従う」を返した関門だけ止まらない。
 
 - 設計 Pull Request のマージ（`standard`）— 承認を得るまで実装の工程へ
   進まない
@@ -494,6 +493,7 @@ flowchart TD
 - [references/projects-tracking.md](references/projects-tracking.md) — 進行を GitHub Projects へ記録する設定と値の一覧
 - [references/stage-completeness.md](references/stage-completeness.md) — 通過工程の控えと報告、承認の印の作り方
 - [references/parallel-work.md](references/parallel-work.md) — 並行開発の 4 つの形、工程が動く単位、任せるうえでの下限
+- [references/pace.md](references/pace.md) — 進め方 `pace: fast` の条件・宣言・計画の波・検査のトリガー・MVV の判定
 - [references/approval-request.md](references/approval-request.md) — 承認を求めるときに提示するもの
 - [references/operation-run.md](references/operation-run.md) — `operation` の実行の範囲・記録・失敗したときの扱い
 - [references/context-window.md](references/context-window.md) — context window の切れ目、委譲する対象としない対象、残量の見方
