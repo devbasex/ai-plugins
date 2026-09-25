@@ -8,13 +8,7 @@ init → 提案 → 計画 → テスト追加 → 実装 → 検証と修正 �
 同じコマンドを打ち直すと続きから進む（init が終わったフェーズを返し、最終ゲートの後の進みは
 `$TMP_DIR/drive-rf<ID>.json`）。
 
-| 終了コード | status | 意味 | 起こす側がすること |
-| --- | --- | --- | --- |
-| 0 | ok | 完了（報告は items[0].report） | 件数（metrics）を報告へ写す |
-| 23 | gate | 最終ゲートの cross-review 待ち | prompt_file の指示で cross-review を回し、result_file を書かせて打ち直す |
-| 1 | stopped | 中断（metrics.exit に元の終了コード。4 = refactor.py の中断） | 理由（summary）を報告する |
-
-表の番号（20 fix / 21 sweep / 22 title・body / 23 cross-review）は cross-review の drive.py と同じ。
+止まるときの JSON の形と終了コードの表は共通層の `scripts/lib/drive_pause.py` にある（使うのは 23 だけ。中断の `metrics.exit` が 4 なら refactor.py の中断）。
 件数（metrics）は状態ファイルから数える: items / adopted / reverted / deferred / fix_rounds（項目の修正の回数の和）/ final_gate。
 """
 from __future__ import annotations
@@ -30,20 +24,14 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 LIB = HERE.parents[2] / "scripts" / "lib"
 sys.path.insert(0, str(LIB))
-import step_result as sr  # noqa: E402
+import drive_pause as dp  # noqa: E402
+from drive_pause import Stop  # noqa: E402
 
 TOOL = "cross-refactoring-drive"
-PAUSES = {"fix": 20, "sweep": 21, "newtext": 22, "cross-review": 23}
 ORDER = ("propose", "plan", "add-tests", "implement", "verify", "final", "done")
 CR_DRIVE = HERE.parents[1] / "cross-review" / "scripts" / "drive.py"
 FOCUS = ("項目をまたいだ整合を見る。個々の改善項目の妥当性は限ったテストで判定済みのため対象外とする。"
          "複数の項目で触った箇所の重複・打ち消し・命名の揺れ、取り消した項目の残骸、生成物と配布物の同期を確かめる")
-
-
-class Stop(Exception):
-    def __init__(self, msg: str, code: int = 1):
-        super().__init__(msg)
-        self.code = code
 
 
 def call(cmd: list[str], env: dict | None = None, cwd: str | None = None) -> tuple[int, str]:
@@ -183,8 +171,8 @@ class Drive:
 
     def done(self, extra: dict | None = None) -> dict:
         c = {**self.counts(), **(extra or {})}
-        return sr.result(TOOL, "ok", f"計画の実行が終わった（項目 {c['items']}・採用 {c['adopted']}・"
-                         f"取り消し {c['reverted']}・見送り {c['deferred']}）", [{"report": str(self.report())}], c)
+        return dp.done(TOOL, f"計画の実行が終わった（項目 {c['items']}・採用 {c['adopted']}・"
+                       f"取り消し {c['reverted']}・見送り {c['deferred']}）", self.report(), c)
 
     def run(self) -> dict:
         self.rf("init", str(self.pr), *self.init_args)
@@ -230,10 +218,7 @@ class Drive:
    sweep.commit が null なら approved、それ以外は final の値
 3. 結果ファイルへ `{{"review_status": "<最終ステータス>"}}` を書く: {res}
 """)
-        item = {"pause": "cross-review", "prompt_file": str(pf), "result_file": str(res), "round": 0,
-                "command": cmd}
-        return sr.result(TOOL, "gate", "最終ゲートの cross-review 待ち。prompt_file の指示で result_file を書き、"
-                         "同じコマンドを打ち直す", [item], self.counts(), next="cross-review")
+        return dp.pause(TOOL, "cross-review", pf, res, 0, self.counts(), command=cmd)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -241,13 +226,7 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("pr", type=int)
     a, rest = ap.parse_known_args(argv)
     d = Drive(a.pr, rest)
-    try:
-        out = d.run()
-    except Stop as e:
-        m = d.counts() if "TMP_DIR" in d.v and "ID" in d.v else {}
-        sr.emit(sr.result(TOOL, "stopped", str(e), [], {**m, "exit": e.code}), 1)
-    code = PAUSES.get(out.get("next"), 0) if out["status"] == "gate" else 0
-    sr.emit(out, code)
+    dp.main(TOOL, d.run, lambda: d.counts() if "TMP_DIR" in d.v and "ID" in d.v else {})
 
 
 if __name__ == "__main__":
