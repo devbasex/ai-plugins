@@ -38,6 +38,27 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 
 ## 手順
 
+**手順 0・3a・3b は `standard` のときだけ通す。** `light` / `operation` / `documentation` では飛ばす
+（この 3 モードの工程と所要を変えない）。`$SCRIPTS` の決め方は `development-workflow` の
+`references/scripts-lookup.md` にある。
+
+### 0. 用語集を用意する（`standard`）
+
+プロジェクトのユビキタス言語を、要求と設計より先に用意する。宣言と用語集の形は
+[references/glossary-format.md](references/glossary-format.md) にある。
+
+1. `python3 "$SCRIPTS/glossary.py" gate --mode standard` を打つ
+   - 0: 宣言と用語集が揃っている。手順 1 へ進む
+   - 1: 宣言か用語集が無い。下の 2〜4 を行う
+   - 2: 宣言か用語集が壊れている。作り直さずに止まり、利用者へ直す箇所を示す（上書きすると採った語が消える）
+2. `python3 "$SCRIPTS/glossary.py" init` で、宣言・ほぼ空の用語集・人が読む文書を作る（欠けたものだけを作る）
+3. `python3 "$SCRIPTS/glossary.py" candidates` で語の候補を集める
+   - 1 件以上（既に文書かコードのあるプロジェクト）: 候補から領域の語を選び、語・意味・コンテキストの案を添えて
+     利用者へ一覧で示す
+   - 0 件（スクラッチのプロジェクト）: 依頼文から語とコンテキストを大まかに起こし、同じ形で示す
+4. 利用者が採った語だけを用語集のファイルへ書き、`python3 "$SCRIPTS/glossary.py" render` で文書を作り直す。
+   採る語が 0 件でもよい（ほぼ空の用語集のまま設計へ進める）
+
 ### 1. 依頼を要約せずに写す
 
 最初に依頼文を**原文のまま**記録する。要約は解釈を含み、後から「そう言っていない」と
@@ -68,6 +89,29 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 
 前提は「前提: 対象は既存の管理画面利用者のみで、外部公開はしない」のように、後から
 成否を判定できる文で書く。「たぶん〜だろう」は前提ではない。
+
+### 3a. ドメインイベントを時間の順に書き出す（`standard`）
+
+変更で起きることを過去形で時間の順に並べ、要求の抜けを探す（イベントストーミング）。
+
+1. イベントに番号（`E1`…）を振り、引き金・失敗したとき・順序の前提を書く
+2. 次のイベントを、前提か受け入れ条件か未決へ移す
+   - 引き金の無いイベント
+   - 失敗の経路の無いイベント
+   - ほかのイベントの順序を仮定しているイベント
+3. 一覧は仕様の「ドメインイベント」の節に残す。設計のドメインモデルの節が同じ番号を引き継ぐ
+
+### 3b. 語を用語集と突き合わせる（`standard`）
+
+受け入れ条件を書く前に、下書きの語を用語集と突き合わせる。
+
+1. ここまでの下書きを作業ディレクトリの一時ファイルに書き、
+   `python3 "$SCRIPTS/glossary.py" check --file <下書き>` を打つ
+2. 当たった語を分ける
+   - `unregistered`（「用語」の表にあって用語集に無い語）: 採るなら用語集へ足し、採らないなら用語集の語へ言い換える
+   - `deprecated`（廃止した語）: 用語集の語へ言い換える
+3. 用語集を変えたら `render` で文書を作り直し、当たりが 0 件になるまで繰り返す。採るかを決められない語は
+   利用者へ一覧で示す
 
 ### 4. 成功条件を観測可能な形へ変換する
 
@@ -104,9 +148,19 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 
 ### 7. 仕様として残す
 
-雛形は [references/spec-template.md](references/spec-template.md)。置き場所は `issues/` 配下とし、
-`implementation-plan` が同じ変更の実装計画のファイルを作る場合は**同一ファイル内の別の節**にする。
-仕様と分解を別ファイルに分けると、片方だけが更新されて食い違う。
+雛形は [references/spec-template.md](references/spec-template.md)。**仕様の正は課題の本文である。**
+課題を読む人が GitHub の上で受け入れ条件を読めるように、要求の全文を本文へ書く
+（`gh issue edit <番号> --body-file <ファイル>`）。本文にファイルのパスだけを書かない。
+
+`standard` では、設計と要求を同じ差分でレビューするために、本文の写しを `issues/` に置く。
+
+1. `python3 "$SCRIPTS/spec-copy.py" write <課題> issues/issue-<番号>-requirements.md` で写しを作る
+   （本文の `## 進行` より前の全文）
+2. 写しは設計 PR と一緒にコミットする。本文を直したら `write` で写しを作り直す（手で直さない）
+3. 設計 PR を出す前に `spec-copy.py check <課題> <写し>` が 0 であることを確かめる（`design` の手順 5）
+
+`implementation-plan` が同じ変更の実装計画を作る場合は、写しの**別の節**にする。写しにしか無い節は
+`check` が許す。仕様と分解を別ファイルに分けると、片方だけが更新されて食い違う。
 
 ## 曖昧なまま実装しない
 
@@ -140,6 +194,7 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 - [references/acceptance-criteria.md](references/acceptance-criteria.md) — 受け入れ条件の形式と性質
 - [references/nonfunctional-requirements.md](references/nonfunctional-requirements.md) — 非機能の 6 大項目の書き方・例・該当の判定
 - [references/spec-template.md](references/spec-template.md) — 仕様の雛形
+- [references/glossary-format.md](references/glossary-format.md) — 用語集の宣言・用語集・人が読む文書の形と、語のチェックの規則
 - [references/document-requirements.md](references/document-requirements.md) — 読み手へ渡す文書の受け入れ条件
 
 この工程に入ったら記録のコマンド `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "要求と受け入れ条件"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「記録のコマンド」を使う）。
