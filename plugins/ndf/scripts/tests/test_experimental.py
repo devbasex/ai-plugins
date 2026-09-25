@@ -10,24 +10,40 @@ import pytest
 SCRIPTS = Path(__file__).resolve().parents[1]
 EXP = SCRIPTS / "experimental"
 PLUGIN = SCRIPTS.parent
-TEXT_SUFFIXES = {".py", ".sh", ".md", ".json", ".txt", ".toml", ".yaml", ".yml"}
+
+
+CODE_SUFFIXES = {".py", ".sh", ".json"}
+
+
+def default_behaviour_files():
+    """既定で動くもの: コード・hook・設定と、LLM が手順として読む Skill とエージェントの本文。
+    README・CHANGELOG のような利用者向けの説明は、試行の置き場を紹介してよいので見ない。"""
+    for p in PLUGIN.rglob("*"):
+        if not p.is_file() or EXP in p.parents or "__pycache__" in p.parts or p == Path(__file__):
+            continue
+        rel = p.relative_to(PLUGIN).parts
+        if p.suffix in CODE_SUFFIXES or (p.suffix == ".md" and rel[0] in ("skills", "agents")):
+            yield p
 
 
 def test_stable_side_does_not_reference_experimental():
-    """既定の振る舞いに試行が漏れないよう、プラグインの安定側は experimental/ を参照しない。"""
+    """既定の振る舞いに試行が漏れないよう、既定で動くものは experimental/ を参照しない。"""
     hits = []
-    for p in PLUGIN.rglob("*"):
-        if not p.is_file() or p.suffix not in TEXT_SUFFIXES or EXP in p.parents:
-            continue
-        if p == Path(__file__) or "__pycache__" in p.parts:
-            continue
+    for p in default_behaviour_files():
         try:
             text = p.read_text()
         except (UnicodeDecodeError, OSError):
             continue
-        if "scripts/experimental" in text or ("experimental/" in text and p.suffix in {".py", ".sh"}):
+        if "experimental/" in text:
             hits.append(str(p.relative_to(PLUGIN)))
     assert hits == []
+
+
+def test_default_behaviour_files_cover_skills_and_skip_readme():
+    files = {str(p.relative_to(PLUGIN)) for p in default_behaviour_files()}
+    assert "skills/development-workflow/SKILL.md" in files
+    assert "scripts/supervise.py" in files
+    assert "README.md" not in files
 
 
 def fake_gh(tmp_path, view_body):
