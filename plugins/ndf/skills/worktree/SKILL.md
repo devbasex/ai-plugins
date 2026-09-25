@@ -9,7 +9,7 @@ allowed-tools:
 
 # worktree で開発する
 
-開発の変更は、リポジトリを clone したディレクトリではなく git の worktree の中で行う。
+開発の変更は、git の worktree の中で行い、リポジトリを clone したディレクトリには加えない。
 並行して複数の作業を進めても、互いの変更が同じ作業ディレクトリで混ざらない状態を保つ。
 
 ## 用語
@@ -228,7 +228,7 @@ git -C "$main_dir" reset --hard HEAD
 追跡されていないファイルは差分に含まれない。`git -C "$main_dir" status --short` の
 `??` 行を見て、必要なものを worktree へ複製してからメインディレクトリ側を削除する。
 
-移送の後、両側の状態を確認する。メインディレクトリが元へ戻り、worktree に変更が
+移送の後、両側の状態を確認する。メインディレクトリが元へ戻り、worktree に差分が
 載っていることを `git status --short` で見る。
 
 ## 4. worktree を一覧する
