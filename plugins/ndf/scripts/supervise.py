@@ -2261,7 +2261,10 @@ def plan_mission_design(a, n: int, repo: str) -> dict:
             # --max-rounds を渡さない。設計の分類の既定（3 ラウンド・前のラウンドからの変更だけ）で回る
             {"id": "review", "type": "drive", "drive": "cross-review", "kind": "ドキュメントレビュー",
              "stage": "ドキュメントレビュー", "timeout": 3600, "args": "{pr}", "on_fail": "gate",
-             "next": "glossary-check"},
+             "next": "sync-review"},
+            # レビューの直しは別の場所から PR のブランチへ push される。追いついてから語を見て push する
+            {"id": "sync-review", "type": "run", "stage": "ドキュメントレビュー", "timeout": 120,
+             "cmd": "git fetch -q && git merge -q --ff-only '@{u}'", "next": "glossary-check"},
             # 語のチェック。当たりは 1 回だけ直し、残った当たりは関門 1 の提示へ載せる
             {"id": "glossary-check", "type": "run", "stage": "ドキュメントレビュー", "timeout": 120,
              "cmd": glossary_check, "on_fail": "fix-glossary", "next": "push-glossary"},
