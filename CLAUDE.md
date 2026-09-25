@@ -64,19 +64,18 @@ python3 plugins/ndf/scripts/instructions-check.py --root .
 ```bash
 /ndf:cross-refactoring 130 --scope src/services tests/services --round-test "pytest tests/services -q" --baseline-test "pytest -q"
 /ndf:cross-refactoring 130 --scope src tests --baseline-test "pytest -q" --budget-minutes 30
-/ndf:cross-refactoring 130 --scope src tests --baseline-test "pytest -q" --include agy --exclude kiro
 ```
 
 - `--scope` は必須。提案が発散して PR が肥大するのを防ぐ。**検証にも効く**ので、現状固定テストの置き場所も含める
-- リファクタリング計画は配分テーブル（履歴の直近 10 回から集計。初期値は #917）で見積もり、「想定最大時間 − 経過 − バッファ」に収まる件数だけを採る。見送った提案は理由（`budget` / `rank` / `duplicate` / `vocabulary` / `threshold` / `no_target` / `test_failed` / `not_done`）とともにリファクタリング計画に残る
-- 項目の検証は**範囲テスト**（`--round-test` か `--baseline-test` の対象をリファクタリング計画の `test_targets` へ差し替えたもの）で走らせる。全体のテストは着手前・危険フラグ（D1〜D5）が立ったときの 1 回・最終ゲートだけ。危険フラグの 1 回が落ちたら落ちたテストだけを走らせ直して揺れ・元からの失敗を除き、変更が原因なら締め切りまで直す。直らなければ危険フラグの項目を新しい順に絞って取り消す。`--baseline-test` が pytest / jest / vitest でなければ `--round-test` は必須
-- 時間に関わる数値（手順の上限・テスト 1 回の上限・無音の打ち切り・直しの打ち切り）はすべて `--budget-minutes` から算術で出し、計画の終わりまでに状態ファイルとリファクタリング計画へ書き出す。監視はその手順の終わり + 余裕で CLI を止め、修正は回数でなく締め切りまで試みる。計画の後で LLM が動くのは作業の CLI だけ
+- 計画は配分テーブル（履歴の直近 10 回から集計。初期値は #917）で見積もり、「想定最大時間 − 経過 − バッファ」に収まる件数だけを採る。見送った提案は理由（`budget` / `rank` / `duplicate` / `vocabulary` / `threshold` / `no_target` / `test_failed` / `not_done`）とともに計画に残る
+- 項目の検証は**範囲テスト**（`--round-test` か `--baseline-test` の対象を計画の `test_targets` へ差し替えたもの）で走らせる。全体のテストは着手前・危険フラグ（D1〜D5）が立ったときの 1 回・最終ゲートだけ。危険フラグの 1 回が落ちたら落ちたテストだけ走らせ直して揺れ・元からの失敗を除き、変更が原因なら締め切りまで直す。直らなければ危険フラグの項目を新しい順に絞って取り消す。`--baseline-test` が pytest / jest / vitest でなければ `--round-test` は必須
+- 時間に関わる数値（手順の上限・テスト 1 回の上限・無音の打ち切り・直しの打ち切り）はすべて `--budget-minutes` から算術で出し、計画の終わりまでに状態ファイルと計画へ書き出す。監視はその手順の終わり + 余裕で CLI を止め、修正は回数でなく締め切りまで試みる。計画の後で LLM が動くのは作業の CLI だけ
 - 廃止: `--max-test-rounds` / `--max-outer-rounds` / `--max-items-per-round` / `--max-fix-rounds` / `--test-timeout` は知らせて無視する
 - ホストと同じランタイムが実装担当になる場合も、サブエージェントではなく **CLI プロセス**として起動する
 - 収束しない改善項目は **項目単位で取り消す**。同一ファイルの隣接行を触る項目どうしは git だけでは分離できないため、同じファイルを触った項目まで取り消しを広げる
 - 生成物・配布物の同期は **オーケストレーターの責務**。同期の手順は `--sync-command "bash scripts/build-runtime-plugins.sh"` のように渡す
 - 公開するのは **オーケストレーターだけ**。実装担当は push しない
-- 履歴に残るのは **1 改善項目 = 1 コミット**。リファクタリング計画がテストを足すと決めた項目だけ 2 コミット
+- 履歴に残るのは **1 改善項目 = 1 コミット**。計画がテストを足すと決めた項目だけ 2 コミット
 - Jev は `AI_GATEWAY_API_KEY` があり公開リポジトリのときだけ使う（グレード・同じ変更か・D5）。使えなければ実装担当が判断する（`NDF_JEV=0` で止める）
 - `init` が参加者の認証状態を確認し、通らない者を外して続ける。全員が揃わないなら止めたいときは `--require-all`。誤検知するときは `NDF_SKIP_AUTH_CHECK=1`
 
