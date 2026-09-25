@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -104,8 +105,29 @@ def test_fast_mission_puts_check_then_dev_then_prod_after_the_implementation(tmp
     # 直し切れずに残った当たりは mvv を通さず、当たりを入力に持つ関門 1 の judge へ回る
     assert ds["glossary-recheck"]["on_fail"] == "push-glossary-gate" and ds["glossary-recheck"]["next"] == "push-glossary"
     assert ds["push-glossary-gate"]["next"] == "gate" and "glossary-recheck" in ds["gate"]["inputs"]
+    for i in ("push-glossary", "push-glossary-gate"):  # 本文の「決めたこと」を設計文書に合わせる
+        assert ds[i]["cmd"].startswith("git push -q && ") and "pr-body-decisions.sh sync {pr}" in ds[i]["cmd"]
+    approve_runs_with_or_without_note(tmp_path, ds["approve"]["cmd"])
     for path in [*waves["設計"]["plans"], *waves["実装"]["plans"], check, review, dev, prod]:
         assert_transitions_exist(load(path))
+
+
+def approve_runs_with_or_without_note(tmp_path, cmd):
+    """控え（mvv が従うときだけ書く）が無ければコメントを飛ばし、あれば付ける。どちらも ready まで進む。"""
+    bin_dir, log = tmp_path / "fake-bin", tmp_path / "gh.log"
+    bin_dir.mkdir()
+    (bin_dir / "gh").write_text(f'#!/bin/sh\necho "$*" >> {log}\n')
+    (bin_dir / "gh").chmod(0o755)
+    env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"}
+    state_dir = tmp_path / "approve-state"
+    (state_dir / "work").mkdir(parents=True)
+    run = cmd.replace("{pr}", "7").replace("{state_dir}", str(state_dir))
+    assert subprocess.run(run, shell=True, env=env).returncode == 0
+    assert [l.split()[:2] for l in log.read_text().splitlines()] == [["pr", "edit"], ["pr", "ready"]]
+    log.unlink()
+    (state_dir / "work" / "mvv-note.md").write_text("判定\n")
+    assert subprocess.run(run, shell=True, env=env).returncode == 0
+    assert [l.split()[:2] for l in log.read_text().splitlines()] == [["pr", "edit"], ["pr", "comment"], ["pr", "ready"]]
 
 
 @pytest.mark.parametrize("change", ["unapproved", "changed"])
