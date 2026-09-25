@@ -462,7 +462,9 @@ def cmd_candidates(a):
                 if term:
                     add(term, "table", f"{rel}:{n}")
                 for m in BOLD.finditer(body):
-                    add(m.group(1).strip(), "bold", f"{rel}:{n}")
+                    word = m.group(1).strip()
+                    if not word.endswith((":", "：")):  # 「対象:」のような見出しの札は語ではない
+                        add(word, "bold", f"{rel}:{n}")
         else:
             for n, line in enumerate(lines, 1):
                 for m in TYPE_NAME.finditer(line):
