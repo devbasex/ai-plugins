@@ -175,9 +175,11 @@ import os
 import re
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import time
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -187,6 +189,7 @@ from step_result import emit, result  # noqa: E402
 from monitor import USAGE_LIMIT_FATAL  # noqa: E402  利用上限の文言の表
 from pr_mode import with_mode_line  # noqa: E402
 from pace import PaceError, read_pace  # noqa: E402
+import slow_step as ss  # noqa: E402  遅れの見張りの材料
 
 WORK_TOOLS = "Read,Edit,Write,Bash,Grep,Glob"
 # work の段に載せる MCP は Serena だけ（mcp-serena の .mcp.json と同じ起動）。シンボル単位で読み・直し、
@@ -329,6 +332,42 @@ JUDGE_SYSTEM = """あなたは NDF のフェーズの判断だけを行う。Too
 渡された結果と規則だけを根拠に、次の段を 1 つ選ぶ。
 答えは JSON 1 つだけを返す: {"decision": "<選んだ値>", "reason": "<1 行>"}"""
 
+SLOW_SYSTEM = """あなたは NDF のフェーズの、想定より遅い段への手だけを決める。Tool は無い。
+渡された材料（段の定義・経過と想定・一次の調査・出力の末尾・履歴）だけを根拠に、次の 4 つから 1 つを選ぶ。
+- retry: 段を止めて同じ段を打ち直す / fix: 段を止めて on_fail の段へ進む / stop: 計画を止める
+- wait: 段をそのまま待ち直す（wait_seconds に次に確かめるまでの秒を付けてよい）
+答えは JSON 1 つだけを返す: {"decision": "retry|fix|stop|wait", "reason": "<1 行>", "wait_seconds": <秒>}"""
+SLOW_EXIT = 125  # 遅れの見張りが段を打ち切った（124 の打ち切り・10〜19 の関門と分ける）
+
+
+class SlowAction(Exception):
+    """遅れの見張りが段を打ち切るときに投げる。action は retry / fix / stop。"""
+
+    def __init__(self, action: str, reason: str, summary: str = ""):
+        super().__init__(f"{action}: {reason}")
+        self.action, self.reason, self.summary = action, reason, summary
+
+
+@dataclass
+class SlowWatch:
+    """走っている段 1 つの見張りの状態。段の開始で作り、段の終わりで捨てる。"""
+    step_id: str
+    type: str
+    started: float
+    expected: float
+    basis: dict
+    next_check: float
+    waits: int = 0
+    llm_calls: int = 0
+    off: bool = False
+    out_size: int = 0
+    worker_seen: int = 0
+    commits: int | None = None
+    round: int = 0
+    retries: int = 0
+    paused: float = 0.0
+    probes: list = field(default_factory=list)
+
 REPORT_INTERVAL = 600  # 最後の行から動きが無いときに「まだ動いている」を足すまでの秒数。計画の "report_interval"
 TICK = 5.0             # 子プロセスの待ちを区切って見る秒数の上限
 PROGRESS_PROMPT = """## 途中の報告
@@ -351,40 +390,59 @@ def now_iso() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
+def kill_group(p: subprocess.Popen) -> None:
+    """子をプロセスグループごと止める（shell=True の段の孫も残さない）。止まらなければ 5 秒で見切る。"""
+    try:
+        os.killpg(p.pid, signal.SIGKILL)
+    except OSError:
+        p.kill()
+    try:
+        p.communicate(timeout=5)
+    except (subprocess.TimeoutExpired, ValueError, OSError):
+        pass
+
+
 def run_ticking(cmd, tick=None, every: float = TICK, timeout: float | None = None, input: str | None = None,
                 err_path: Path | None = None, **kw) -> subprocess.CompletedProcess:
     """subprocess.run と同じく待つが、every 秒ごとに tick() を呼ぶ（長い段の待ちの中で進行を書く）。
 
     err_path を渡すと stderr をそのファイルへ書かせる（待ちの間に最後の行を読めるように）。
-    打ち切りは subprocess.TimeoutExpired を投げる。"""
+    子は新しいセッションで起こす。打ち切りは子のプロセスグループを止めて subprocess.TimeoutExpired を投げる。
+    tick() が例外を投げたら（遅れの見張りの打ち切り）、子のプロセスグループを止めてから投げ直す。"""
     errf = open(err_path, "w", encoding="utf-8") if err_path else None
     try:
         p = subprocess.Popen(cmd, stdin=subprocess.PIPE if input is not None else subprocess.DEVNULL,
-                             stdout=subprocess.PIPE, stderr=errf or subprocess.PIPE, text=True, **kw)
+                             stdout=subprocess.PIPE, stderr=errf or subprocess.PIPE, text=True,
+                             start_new_session=True, **kw)
     except BaseException:
         if errf:
             errf.close()
         raise
     deadline = time.time() + timeout if timeout else None
     first = True
-    while True:
-        wait = every if deadline is None else max(0.01, min(every, deadline - time.time()))
-        try:
-            out, err = p.communicate(input if first else None, timeout=wait)
-            if errf:
-                errf.close()
-                err = Path(err_path).read_text(encoding="utf-8", errors="replace")
-            return subprocess.CompletedProcess(cmd, p.returncode, out, err)
-        except subprocess.TimeoutExpired:
-            first = False
-            if deadline is not None and time.time() >= deadline:
-                p.kill()
-                p.communicate()
+    try:
+        while True:
+            wait = every if deadline is None else max(0.01, min(every, deadline - time.time()))
+            try:
+                out, err = p.communicate(input if first else None, timeout=wait)
                 if errf:
                     errf.close()
-                raise subprocess.TimeoutExpired(cmd, timeout)
-            if tick:
-                tick()
+                    err = Path(err_path).read_text(encoding="utf-8", errors="replace")
+                return subprocess.CompletedProcess(cmd, p.returncode, out, err)
+            except subprocess.TimeoutExpired:
+                first = False
+                if deadline is not None and time.time() >= deadline:
+                    kill_group(p)
+                    raise subprocess.TimeoutExpired(cmd, timeout) from None
+                if tick:
+                    try:
+                        tick()
+                    except BaseException:
+                        kill_group(p)
+                        raise
+    finally:
+        if errf and not errf.closed:
+            errf.close()
 
 
 def claude_cmd(system: str, tools: str | None, cwd: str, full: bool = False,
@@ -647,7 +705,8 @@ def ensure_worktree(plan: dict, sleep=time.sleep) -> str | None:
 
 
 class Supervisor:
-    def __init__(self, plan: dict, state_dir: Path):
+    def __init__(self, plan: dict, state_dir: Path, slow_args: list[str] | None = None,
+                 plan_path: str | None = None):
         self.plan = normalize_plan(plan)
         plan["steps"] = expand_parts(plan["steps"])
         self.steps = {s["id"]: s for s in plan["steps"]}
@@ -677,8 +736,20 @@ class Supervisor:
         self.worker_last = ""
         self.worker_counts: dict[str, int] = {}
         self.attention_keys: set[str] = set()
-        self.pcount = {"step": 0, "alive": 0, "worker": 0, "malformed": 0, "attention": 0, "llm": 0,
+        self.pcount = {"step": 0, "alive": 0, "worker": 0, "malformed": 0, "attention": 0, "slow": 0, "llm": 0,
                        "llm_cost": 0.0}
+        # 遅れの見張り（run・work・drive の段の待ちの中で動く）
+        self.slow_args = list(slow_args or [])
+        self.plan_path = str(Path(plan_path).resolve()) if plan_path else ""
+        self.slow_cfg = ss.SlowConfig()
+        self.history: Path | None = None
+        self.watch: SlowWatch | None = None
+        self.slow_carry: SlowWatch | None = None  # 見張りの retry で打ち直す段へ引き継ぐ見張り
+        self.slow_busy = False     # 調査と判定の間（判定の claude -p の tick から見張りを呼ばない）
+        self.slow_paused = False   # 利用上限の待ちの間（経過に入れない）
+        self.slow_events: list[dict] = []
+        self.worker_recent: list[str] = []
+        self.worker_last_at: float | None = None
 
     # --- 途中の報告 ---
     def progress_write(self, rec: dict) -> None:
@@ -740,6 +811,8 @@ class Supervisor:
                 continue
             self.pcount["worker"] += 1
             self.worker_last = d["text"].strip()[:300]
+            self.worker_last_at = time.time()
+            self.worker_recent = (self.worker_recent + [self.worker_last])[-5:]
             self.classify_worker(self.worker_last)
 
     def tick(self) -> None:
@@ -752,6 +825,7 @@ class Supervisor:
             if last:
                 line["last_output"] = last
             self.progress_write(line)
+        self.check_slow()
 
     def run_last_output(self) -> str | None:
         """run の段が stderr へ書いた最後の空でない行（run の段の待ちの間だけ）。"""
@@ -761,6 +835,198 @@ class Supervisor:
         except OSError:
             return None
         return next((l.strip()[:300] for l in reversed(text.splitlines()) if l.strip()), None)
+
+    # --- 遅れの見張り ---
+    def resolve_slow(self) -> ss.SlowConfig:
+        """引数 → 計画の slow → 宣言の slow → 既定で設定を重ね、段の expected と probe の形を確かめる。"""
+        try:
+            decl = read_decl(decl_roots(self.cwd, self.plan.get("リポジトリ")), SUPERVISE_DECL).get("slow")
+        except DeclError:
+            raise ss.SlowConfigError(SUPERVISE_DECL) from None
+        cfg = ss.resolve_config(ss.parse_overrides(self.slow_args), self.plan.get("slow"), decl)
+        for s in self.steps.values():
+            exp = s.get("expected")
+            if exp is not None and (isinstance(exp, bool) or not isinstance(exp, (int, float)) or exp <= 0):
+                raise ss.SlowConfigError(f"段 {s['id']} の expected")
+            probe = s.get("probe", "output")
+            if not (probe in ("output", "worker") or probe is False
+                    or (isinstance(probe, dict) and isinstance(probe.get("cmd"), str) and probe["cmd"])):
+                raise ss.SlowConfigError(f"段 {s['id']} の probe")
+        return cfg
+
+    def start_watch(self, step: dict, carry: SlowWatch | None = None) -> SlowWatch | None:
+        """段の見張りを始める。run・work・drive の段だけ。carry は見張りの retry で打ち直す前の見張り。"""
+        if step["type"] not in ss.WATCHED_TYPES or not self.slow_cfg.enabled:
+            return None
+        if carry:
+            expected, basis, retries = carry.expected, carry.basis, carry.retries + 1
+        else:
+            hist = ss.read_history(self.history, self.plan.get("フェーズ") or "?", step["id"],
+                                   self.slow_cfg.window) if self.history else []
+            expected, basis = ss.expected_for(hist, self.slow_cfg, step.get("expected"))
+            retries = 0
+        commits = ss.commit_count(step.get("cwd", self.cwd)) if step["type"] == "work" else None
+        return SlowWatch(step_id=step["id"], type=step["type"], started=time.time(), expected=expected,
+                         basis=basis, next_check=expected, retries=retries, worker_seen=self.pcount["worker"],
+                         commits=commits)
+
+    def end_watch(self) -> None:
+        """段の終わり。成功か関門なら所要（利用上限の待ちを除く）を履歴へ積み、見張りを捨てる。"""
+        w, self.watch = self.watch, None
+        if not w or not self.history or not ss.keeps(self.cur.get("exit")) or self.cur.get("slow"):
+            return
+        seconds = max(0.0, time.time() - w.started - w.paused)
+        err = ss.append_history(self.history, ss.history_record(
+            self.plan.get("フェーズ"), w.step_id, w.type, seconds, self.cur["exit"], self.plan_path, now_iso()))
+        if err:
+            self.cur["slow_history"] = err
+
+    def slow_elapsed(self) -> float:
+        w = self.watch
+        return time.time() - w.started - w.paused if w else 0.0
+
+    def slow_write(self, rec: dict) -> None:
+        self.slow_events.append(dict(rec))
+        self.progress_write(rec)
+
+    def check_slow(self) -> None:
+        """tick の中で呼ぶ。経過が次の確認に達したら一次の調査を流し、手を決めて打つ。"""
+        w = self.watch
+        if not w or w.off or self.slow_busy or self.slow_paused:
+            return
+        el = self.slow_elapsed()
+        if el < w.next_check:
+            return
+        self.slow_busy = True
+        try:
+            self.handle_slow(w, round(el, 1))
+        finally:
+            self.slow_busy = False
+
+    def handle_slow(self, w: SlowWatch, el: float) -> None:
+        cfg, sid = self.slow_cfg, w.step_id
+        exp = round(w.expected, 1)
+        base = {"kind": "slow", "step": sid, "type": w.type, "elapsed": el, "expected": exp, "basis": w.basis}
+        if w.llm_calls >= cfg.max_llm:
+            w.off = True
+            self.slow_write({**base, "round": w.round, "act": "off", "by": "rule"})
+            self.attention("遅れ", f"段 {sid} の遅れの判定が上限 {cfg.max_llm} 回に達した。段の timeout まで待つ")
+            return
+        w.round += 1
+        probe = self.slow_probe(w)
+        brief = {k: probe.get(k) for k in ("name", "class", "action", "summary")}
+        w.probes.append(brief)
+        line = {**base, "round": w.round, "probe": brief}
+        action = probe.get("action")
+        if action in ("wait", "remedied") and w.waits < cfg.max_waits:
+            w.waits += 1
+            w.next_check = round(el + w.expected, 1)
+            self.slow_write({**line, "act": "wait", "by": "rule", "next_check": w.next_check})
+            if action == "remedied":
+                self.attention("遅れ", f"段 {sid} が想定 {exp} 秒を超えた（{round(el)} 秒）: {brief['summary']}。待ち直す")
+            return
+        llm = None
+        if action in ("retry", "fix", "stop"):
+            act, by, reason = action, "rule", str(brief.get("summary") or "")
+        else:
+            w.llm_calls += 1
+            d = self.judge_slow(w, el)
+            by, reason = "llm", d["reason"]
+            llm = {"reason": reason, "cost": d.get("cost") or 0.0, "seconds": d.get("seconds")}
+            act = d["decision"] if d["ok"] else "wait"
+            if not d["ok"]:
+                self.attention("遅れ", f"段 {sid} の遅れの判定を読めない（{reason[:200]}）")
+        if act == "retry" and w.retries >= cfg.max_retry:
+            act, reason = "stop", f"{reason}（retry の上限 {cfg.max_retry} 回を超えた）"
+        if llm:
+            line["llm"] = llm
+        if act == "wait":
+            w.waits = 0
+            wait_s = w.expected
+            if llm and d["ok"] and isinstance(d.get("wait_seconds"), (int, float)) \
+                    and not isinstance(d["wait_seconds"], bool):
+                wait_s = min(max(float(d["wait_seconds"]), 60.0), w.expected)
+            w.next_check = round(el + wait_s, 1)
+            self.slow_write({**line, "act": "wait", "by": by, "next_check": w.next_check})
+            if llm and d["ok"]:
+                self.attention("遅れ", f"段 {sid} が想定 {exp} 秒を超えた（{round(el)} 秒）: 判定 wait（{reason}）")
+            return
+        self.slow_write({**line, "act": act, "by": by})
+        self.attention("遅れ", f"段 {sid} を打ち切った（{act}）: {reason}")
+        raise SlowAction(act, reason, str(brief.get("summary") or ""))
+
+    def probe_values(self, step: dict) -> dict:
+        """probe の cmd の置き換え: {pr} {base} {branch} {state_dir}。"""
+        cwd = step.get("cwd", self.cwd)
+        origin = str(self.plan.get("起点") or "")
+        base = origin[len("origin/"):] if origin.startswith("origin/") else (origin or self.base_branch() or "")
+        branch = subprocess.run(["git", "branch", "--show-current"], cwd=cwd, capture_output=True,
+                                text=True).stdout.strip() if Path(cwd).is_dir() else ""
+        return {"pr": pr_number(self.plan.get("Pull Request")), "base": base, "branch": branch,
+                "state_dir": str(self.dir)}
+
+    def slow_probe(self, w: SlowWatch) -> dict:
+        """段の probe（既定は run・drive が output、work が worker）で一次の調査を流す。"""
+        step = self.steps[w.step_id]
+        kind = step.get("probe", "worker" if w.type == "work" else "output")
+        if kind is False:
+            return {"name": "none", "class": "unknown", "action": "judge", "summary": "調べずに判定へ回す（probe: false）"}
+        if isinstance(kind, dict):
+            return ss.probe_cmd(kind["cmd"], self.probe_values(step), step.get("cwd", self.cwd),
+                                self.slow_cfg.probe_timeout)
+        if kind == "worker":
+            self.read_worker_lines()
+            new_lines = self.pcount["worker"] - w.worker_seen
+            w.worker_seen = self.pcount["worker"]
+            c = ss.commit_count(step.get("cwd", self.cwd))
+            new_commits = c - w.commits if c is not None and w.commits is not None else 0
+            w.commits = c
+            since = time.time() - self.worker_last_at if self.worker_last_at else None
+            return ss.probe_worker(new_lines, new_commits, self.worker_last, since)
+        probe, w.out_size = ss.probe_output(getattr(self, "run_log", None), w.out_size)
+        return probe
+
+    def judge_slow(self, w: SlowWatch, el: float) -> dict:
+        """材料を最小構成の claude -p（Tool なし）に渡し、retry / fix / stop / wait から 1 つを選ばせる。
+        返り値: {"ok", "decision", "reason", "wait_seconds", "cost", "seconds"}。読めなければ ok が偽。"""
+        step = self.steps[w.step_id]
+        spec = {k: step.get(k) for k in ("id", "type", "cmd", "kind", "timeout") if step.get(k) is not None}
+        spec["on_fail"] = bool(step.get("on_fail"))
+        if w.type == "work":
+            tail = "\n".join(self.worker_recent) or "（worker の行なし）"
+        else:
+            try:
+                log = getattr(self, "run_log", None)
+                tail = log.read_text(encoding="utf-8", errors="replace")[-TAIL:] if log else ""
+            except OSError:
+                tail = ""
+        hist = ss.read_history(self.history, self.plan.get("フェーズ") or "?", w.step_id,
+                               self.slow_cfg.window) if self.history else []
+        prompt = (f"フェーズ: {self.plan.get('フェーズ')} / 課題: {self.plan.get('課題')}\n"
+                  f"## 段\n{json.dumps(spec, ensure_ascii=False)}\n\n"
+                  f"## 経過と想定\n経過 {el} 秒 / 想定 {round(w.expected, 1)} 秒 / 根拠 "
+                  f"{json.dumps(w.basis, ensure_ascii=False)}\n\n"
+                  f"## 一次の調査（古い順）\n" + "\n".join(json.dumps(p, ensure_ascii=False) for p in w.probes)
+                  + f"\n\n## 出力の末尾\n{tail or '（出力なし）'}\n\n"
+                  f"## 同じ段の履歴の所要（秒、古い順）\n{hist or '無し'}\n\n"
+                  "## 手の意味\nretry = 段を止めて同じ段を打ち直す / fix = 段を止めて on_fail へ / "
+                  "stop = 計画を止める / wait = 待ち直す（wait_seconds を付けてよい）")
+        res = self.claude(SLOW_SYSTEM, prompt, None, str(self.work), int(self.slow_cfg.judge_timeout))
+        self.add_usage("judge", res)
+        self.pcount["llm"] += 1
+        self.pcount["llm_cost"] += res.get("cost") or 0.0
+        out = {"ok": False, "cost": res.get("cost"), "seconds": res.get("seconds")}
+        if not res.get("ok"):
+            return {**out, "decision": "wait", "reason": str(res.get("text") or "")[:200]}
+        m = re.search(r"\{.*\}", res.get("text") or "", re.S)
+        try:
+            d = json.loads(m.group(0)) if m else None
+        except json.JSONDecodeError:
+            d = None
+        if not isinstance(d, dict) or d.get("decision") not in ss.DECISIONS:
+            return {**out, "decision": "wait", "reason": f"答えを読めない: {(res.get('text') or '')[:200]}"}
+        return {**out, "ok": True, "decision": d["decision"], "reason": str(d.get("reason") or "")[:300],
+                "wait_seconds": d.get("wait_seconds")}
 
     def step_line(self, nxt: str | None) -> None:
         """段の切り替わりの 1 行（id・type・exit・秒・費用・次・要約）。"""
@@ -850,10 +1116,17 @@ class Supervisor:
                 raise UsageLimit(f"利用上限の待ちが最大 {wait_max} 秒を超える（待った {round(waited)} 秒、"
                                  f"次の待ち {round(wait)} 秒）: {(res.get('text') or '')[:200]}")
             short = os.environ.get("NDF_SUPERVISE_LIMIT_SLEEP")
-            until = time.time() + (min(wait, float(short)) if short else wait)
-            while time.time() < until:  # 待ちの間も「まだ動いている」を書く
-                time.sleep(max(0.0, min(self.every, until - time.time())))
-                self.tick()
+            paused_at = time.time()
+            until = paused_at + (min(wait, float(short)) if short else wait)
+            self.slow_paused = True  # 上限の待ちは遅れと見なさない（待った秒を経過から引く）
+            try:
+                while time.time() < until:  # 待ちの間も「まだ動いている」を書く
+                    time.sleep(max(0.0, min(self.every, until - time.time())))
+                    self.tick()
+            finally:
+                self.slow_paused = False
+                if self.watch:
+                    self.watch.paused += time.time() - paused_at
             waited += wait
             self.cur["limit_waited"] = round(self.cur.get("limit_waited", 0) + wait, 1)
 
@@ -954,7 +1227,7 @@ class Supervisor:
     def do_run(self, step: dict) -> tuple[bool, str]:
         started = time.time()
         code, text = self.run_cmd(step)
-        if (code not in (0, 124) and not is_gate(code) and step.get("rerun_failed")
+        if (code not in (0, 124, SLOW_EXIT) and not is_gate(code) and step.get("rerun_failed")
                 and not self.is_skip(step, code)):
             # 落ちたテストだけを走らせ直す。通れば揺れとして成功にする
             code2, text2 = self.run_cmd(step, "--lf")
@@ -1215,6 +1488,10 @@ class Supervisor:
         result, reason = "完了", "無し"
         limit = self.plan.get("上限", 30)
         n = 0
+        try:
+            self.slow_cfg = self.resolve_slow()
+        except ss.SlowConfigError as e:
+            return self.report("止まった", f"slow の設定が読めない（{e.args[0]}）")
         if self.plan.get("実行の条件") and not start:
             skipped = self.check_condition(self.plan["実行の条件"])
             if skipped:
@@ -1222,6 +1499,7 @@ class Supervisor:
         err = self.ensure_worktree()
         if err:
             return self.report("止まった", err)
+        self.history = ss.history_path(self.cwd, self.dir, self.slow_cfg.history)
         while sid:
             n += 1
             if n > limit:
@@ -1234,6 +1512,8 @@ class Supervisor:
             self.record_stage(step.get("stage"))
             self.cur = {"id": sid, "type": step["type"]}
             self.step_started = time.time()
+            carry, self.slow_carry = self.slow_carry, None
+            self.watch = self.start_watch(step, carry if carry and carry.step_id == sid else None)
             try:
                 if step["type"] == "judge":
                     d = self.do_judge(step)
@@ -1276,10 +1556,24 @@ class Supervisor:
                 self.cur.setdefault("exit", 1)
                 self.cur["text"] = str(e)
                 result, reason, nxt = "止まった", "利用上限", None
+            except SlowAction as e:
+                # 遅れの見張りが段を打ち切った（子はプロセスグループごと止めてある）
+                self.cur.update(exit=SLOW_EXIT, seconds=round(time.time() - self.step_started, 1),
+                                text=f"遅れで打ち切った（{e.action}）: {e.reason}"
+                                     + (f"\n一次の調査: {e.summary}" if e.summary else ""))
+                self.cur["slow"] = {"act": e.action, "reason": e.reason}
+                if e.action == "retry":
+                    nxt, self.slow_carry = sid, self.watch
+                elif e.action == "fix" and step.get("on_fail"):
+                    nxt = step["on_fail"]
+                else:
+                    result, reason, nxt = "止まった", f"遅れ: {e.reason}", None
+            self.end_watch()
             self.results[sid] = dict(self.cur)
             self.read_worker_lines()
             self.step_line(nxt)
-            if self.cur.get("exit") not in (0, None) and not is_gate(self.cur.get("exit")) and nxt:
+            if (self.cur.get("exit") not in (0, None) and not is_gate(self.cur.get("exit")) and nxt
+                    and (self.cur.get("slow") or {}).get("act") != "retry"):
                 fails = self.fail_counts[sid] = self.fail_counts.get(sid, 0) + 1
                 if fails >= 2 and (self.steps.get(nxt) or {}).get("type") == "judge":
                     self.attention("判断の段で stop が出そう",
@@ -1373,6 +1667,12 @@ class Supervisor:
             extra += "- 利用上限: " + "; ".join(
                 f"{e['id']} {e.get('limit_hits', 1)} 回（待ち {e.get('limit_waited', 0)} 秒"
                 + (f"・解除 {e['limit_resets']}" if e.get("limit_resets") else "") + "）" for e in limited) + "\n"
+        acted = [e for e in self.slow_events
+                 if e.get("act") != "wait" or e.get("by") == "llm" or (e.get("probe") or {}).get("action") == "remedied"]
+        if acted:
+            extra += "- 遅れ: " + "; ".join(
+                f"{e['step']} {e.get('round', 0)} 回目 {e['act']}（{e['by']}"
+                + (f"・{e['probe']['class']}" if e.get("probe") else "") + "）" for e in acted) + "\n"
         text = f"""## フェーズの報告
 
 - フェーズ: {self.plan.get('フェーズ')}
@@ -1383,7 +1683,7 @@ class Supervisor:
 - Pull Request: {self.plan.get('Pull Request', '無し')}
 - 最後に記録した工程: {self.last_stage}
 - 使った worker: 修正 {l['work']}（claude -p）/ 判断 {l['judge']}（claude -p）
-{extra}- 途中の報告: 段 {pc['step']} / まだ動いている {pc['alive']} / worker {pc['worker']}（形が違う {pc['malformed']}）/ conductor 向け {pc['attention']} / LLM へ回した {pc['llm']} 回・${pc['llm_cost']:.3f}（{self.progress}）
+{extra}- 途中の報告: 段 {pc['step']} / まだ動いている {pc['alive']} / worker {pc['worker']}（形が違う {pc['malformed']}）/ conductor 向け {pc['attention']} / 遅れの調査 {pc['slow']} / LLM へ回した {pc['llm']} 回・${pc['llm_cost']:.3f}（{self.progress}）
 - 提示物: {presented}
 - 理由: {reason}
 - 通った段: {steps}
@@ -1459,6 +1759,8 @@ RULE_CHECK = ("全体テストが落ちたら（落ちたテストだけの再�
               "変更に無関係なら ready。2 回直しても同じなら stop。")
 FIX_PROMPT = "失敗した箇所を直してコミットする（push しない）。変更に起因しない失敗は直さない。"
 MERGE_CMD = f"python3 {HERE / 'merged-steps.py'} merge-when-green {{pr}}"
+# マージの待ちの段の一次の調査（遅れたとき PR の検査を分け、取り残しを再実行する）
+MERGE_PROBE = {"cmd": f"python3 {HERE / 'merged-steps.py'} probe --pr {{pr}} --act"}
 
 # 雛形が宣言から受けるもの。引数が宣言より先に効く
 NEEDS = {"impl": ("base", "test"), "check": ("base", "test"), "release": ("base", "release"),
@@ -1599,7 +1901,7 @@ def plan_impl(a, out: Path | None = None) -> dict:
         {"id": "fix-doc", "type": "work", "kind": "修正", "inputs": ["doc-lint"],
          "prompt": "ヒットした行を今の決まりだけを書く形へ直してコミットする（push しない）。", "next": "doc-lint"},
         {"id": "ready", "type": "run", "cmd": "sh -c 'git push -q && gh pr ready {pr}'", "next": "merge"},
-        {"id": "merge", "type": "run", "timeout": 7200, "cmd": MERGE_CMD, "next": "end"},
+        {"id": "merge", "type": "run", "timeout": 7200, "cmd": MERGE_CMD, "probe": MERGE_PROBE, "next": "end"},
     ]
     if getattr(a, "escape_of", None) is not None:
         # その場で直した不具合を「逃げた不具合」として記録する（検査のトリガーの材料。#1078）
@@ -1648,7 +1950,7 @@ def plan_check(a) -> dict:
             {"id": "fix", "type": "work", "kind": "修正", "inputs": ["test-all"],
              "prompt": "失敗したテストを直してコミットし、git push する。", "next": "test-all"},
             {"id": "ready", "type": "run", "cmd": f"git push -q; gh pr ready {pr}", "next": "merge"},
-            {"id": "merge", "type": "run", "timeout": 7200, "cmd": MERGE_CMD, "next": "end"},
+            {"id": "merge", "type": "run", "timeout": 7200, "cmd": MERGE_CMD, "probe": MERGE_PROBE, "next": "end"},
         ],
     }, a)
 
@@ -1705,7 +2007,8 @@ def plan_check_since(a) -> dict:
          "next": "ready"},
         {"id": "ready", "type": "run", "cmd": "sh -c 'git push -q && gh pr ready {pr}'", "on_fail": "abort",
          "next": "merge"},
-        {"id": "merge", "type": "run", "timeout": 7200, "cmd": MERGE_CMD, "on_fail": "abort", "next": "record"},
+        {"id": "merge", "type": "run", "timeout": 7200, "cmd": MERGE_CMD, "probe": MERGE_PROBE, "on_fail": "abort",
+         "next": "record"},
         {"id": "record", "type": "run", "cmd": f"{record} --pr {{pr}}", "on_fail": "abort", "next": "end"},
         {"id": "abort", "type": "run", "cmd": f"{record} --failed --pr {{pr}}", "next": "end"},
         {"id": "abort-before-pr", "type": "run", "cmd": f"{record} --failed", "next": "end"},
@@ -1795,7 +2098,9 @@ def plan_release_package_plugin(a) -> dict:
         steps.append({"id": "sync", "type": "run", "preset": "sync-check", "on_fail": "judge", "next": "release"})
     steps += [
         {"id": "release", "type": "run", "stage": "配布", "timeout": 2400 if dev else 3000,
-         "cmd": f"{STEPS_PY} release --version {v} --channel {a.channel}", "on_fail": "judge", "next": "verify"},
+         "cmd": f"{STEPS_PY} release --version {v} --channel {a.channel}", "on_fail": "judge", "next": "verify",
+         # 配布の PR（release/v<版> → 起点）と、本番では続く 起点 → 本番 の PR の検査を調べる
+         "probe": {"cmd": f"{MERGED_PY} probe --head {{branch}} --head {{base}} --act"}},
         {"id": "verify", "type": "run", "stage": "配布" if dev else "リリース後テスト", "timeout": 1500, "cwd": repo,
          "cmd": f"sh -c 'git pull -q --ff-only origin {a.base} && {VERIFY_PY} verify-install --ref {ref} "
                 f"--expect {v} --runtimes {rts}'",
@@ -1978,7 +2283,7 @@ def plan_fast_design(a, n: int, repo: str) -> dict:
         {"id": "approve", "type": "run",
          "cmd": f"sh -c 'gh pr edit {{pr}} --add-label design-approved && gh pr comment {{pr}} --body-file {note} && "
                 "gh pr ready {pr}'", "next": "merge"},
-        {"id": "merge", "type": "run", "timeout": 7200, "cmd": MERGE_CMD, "next": "end"},
+        {"id": "merge", "type": "run", "timeout": 7200, "cmd": MERGE_CMD, "probe": MERGE_PROBE, "next": "end"},
     ]
     plan["規則"] = ("設計の cross-review は上限 3 ラウンドで関門 1 の判定（mvv の段）へ渡す（収束を待たない）。"
                   "駆動そのものが失敗したら gate。")
@@ -2056,7 +2361,7 @@ def close_plan(a, repo: str) -> dict:
              "summary": f"ミッション {a.name}（{refs}）の計画と設計を docs/ へ移す。issues/ と docs/ だけを触る",
              "changes": "無し（文書の置き場所だけ）", "next": "ready"},
             {"id": "ready", "type": "run", "cmd": "sh -c 'git push -q && gh pr ready {pr}'", "next": "merge"},
-            {"id": "merge", "type": "run", "timeout": 7200, "cmd": MERGE_CMD, "next": "close"},
+            {"id": "merge", "type": "run", "timeout": 7200, "cmd": MERGE_CMD, "probe": MERGE_PROBE, "next": "close"},
             {"id": "close", "type": "run", "stage": "後片付け", "cwd": repo, "timeout": 900,
              "cmd": f"python3 {HERE / 'mission-close.py'} --record-pr {{queue_pr:release-prod}} --issues {issues} "
                     f"--with-verification --label {shlex.quote(f'ミッション {a.name}の後片付け')}", "next": "retro"},
@@ -2530,6 +2835,54 @@ def cmd_note(doc: str, report_path: str, next_text: str, section: str) -> dict:
                   {"rows": 1})
 
 
+def cmd_history_import(paths: list[str], history: str | None) -> dict:
+    """既存の progress.jsonl の段の所要を履歴へ取り込む。"""
+    if history:
+        target = Path(history)
+    else:
+        try:
+            conf = (read_decl([Path.cwd()], SUPERVISE_DECL).get("slow") or {}).get("history")
+        except (DeclError, AttributeError):
+            conf = None
+        target = ss.history_path(Path.cwd(), Path(paths[0]).resolve().parent, conf)
+    try:
+        got = ss.import_progress(paths, target)
+    except OSError as e:
+        return result("supervise-history", "stopped", str(e))
+    items = [{"kind": "file", "name": u, "result": "unreadable"} for u in got["unreadable"]]
+    if len(got["unreadable"]) == len(paths):
+        return result("supervise-history", "stopped", "progress.jsonl を 1 本も読めない", items)
+    return result("supervise-history", "ok", f"{got['added']} 行を {target} へ取り込んだ（重複 {got['skipped']} 行）",
+                  items, {"added": got["added"], "skipped": got["skipped"], "history": str(target)})
+
+
+def cmd_expected(plan_path: str, history: str | None, slow_pairs: list[str]) -> tuple[dict, int | None]:
+    """計画の段ごとの想定と根拠を出す（run・work・drive の段）。"""
+    try:
+        plan = normalize_plan(json.loads(Path(plan_path).read_text()))
+        steps = expand_parts(list(plan["steps"]))
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        return result("supervise-expected", "stopped", f"計画を読めない: {e}"), 2
+    wt = Path(str(plan.get("作業場所") or "."))
+    repo = plan.get("リポジトリ") or (str(wt).split("/.worktrees/")[0] if "/.worktrees/" in str(wt) else None)
+    try:
+        decl = read_decl(decl_roots(str(wt), repo), SUPERVISE_DECL).get("slow")
+        cfg = ss.resolve_config(ss.parse_overrides(slow_pairs), plan.get("slow"), decl)
+    except (DeclError, ss.SlowConfigError) as e:
+        return result("supervise-expected", "stopped", f"slow の設定が読めない（{e.args[0]}）"), 2
+    cwd = wt if wt.is_dir() else Path(repo) if repo else None
+    target = Path(history) if history else ss.history_path(cwd, state_dir_of(plan_path), cfg.history)
+    phase = plan.get("フェーズ") or "?"
+    items = []
+    for st in steps:
+        if st.get("type") not in ss.WATCHED_TYPES:
+            continue
+        value, basis = ss.expected_for(ss.read_history(target, phase, st["id"], cfg.window), cfg, st.get("expected"))
+        items.append({"kind": "step", "name": st["id"], "type": st["type"], "expected": value, "basis": basis})
+    return result("supervise-expected", "ok", f"{len(items)} 段の想定を出した（フェーズ {phase}・履歴 {target}）",
+                  items, {"history": str(target), "enabled": cfg.enabled}), None
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -2537,6 +2890,17 @@ def main() -> int:
     r.add_argument("plan")
     r.add_argument("--state-dir")
     r.add_argument("--from", dest="start", help="この段から始める（途中から再開するとき）")
+    r.add_argument("--slow", action="append", default=[], metavar="K=V",
+                   help="遅れの見張りの設定を上書きする（計画と .ndf/supervise.json の slow より先に効く。繰り返せる）")
+    hp = sub.add_parser("history", help="段の所要の履歴（遅れの見張りの想定の材料）")
+    hs = hp.add_subparsers(dest="hcmd", required=True)
+    hi = hs.add_parser("import", help="既存の progress.jsonl の段の所要を履歴へ取り込む")
+    hi.add_argument("progress", nargs="+")
+    hi.add_argument("--history", help="履歴のファイル（既定は <git の共通ディレクトリ>/ndf/step-history.jsonl）")
+    ex = sub.add_parser("expected", help="計画の段ごとの想定時間と根拠を出す")
+    ex.add_argument("plan")
+    ex.add_argument("--history")
+    ex.add_argument("--slow", action="append", default=[], metavar="K=V")
     sub.add_parser("example")
     n = sub.add_parser("new", help="雛形から計画を作る。release の計画は、実装の queue へ --then で渡すと"
                                    "実装がすべて完了した後に続けて流れる")
@@ -2654,9 +3018,13 @@ def main() -> int:
         emit(cmd_note(a.doc, a.report, a.next, a.section))
     if a.cmd == "sync-check":
         emit(sync_check(a.root, a.commit))
+    if a.cmd == "history":
+        emit(cmd_history_import(a.progress, a.history))
+    if a.cmd == "expected":
+        emit(*cmd_expected(a.plan, a.history, a.slow))
     plan = json.loads(Path(a.plan).read_text())
     state = Path(a.state_dir) if a.state_dir else state_dir_of(a.plan)
-    text = Supervisor(plan, state).run(a.start)
+    text = Supervisor(plan, state, a.slow, a.plan).run(a.start)
     print(text)
     return 0 if "結果: 完了" in text or "結果: 関門" in text else 3
 
