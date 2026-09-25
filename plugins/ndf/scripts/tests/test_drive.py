@@ -75,10 +75,11 @@ class FakeReview:
                 return 0, f"ROUND={n}\nREVIEWERS='codex kiro'\nREVIEWERS_CSV=codex,kiro\n"
             if sub == "judge":
                 rc = self.judges.pop(0)
+                rc, out = rc if isinstance(rc, tuple) else (rc, "")
                 if rc == 0:
                     self.state["final"] = "approved"
                     self.save()
-                return rc, ""
+                return rc, out
             if sub == "check-oscillation":
                 return 2, ""
             if sub == "merge-fix":
@@ -131,6 +132,16 @@ def test_review_drive_pauses_for_fix_then_sweep_then_finishes(tmp_path, monkeypa
         (2, 8, 2, 1, 1, "approved")
     assert any(c[0] == "result_posts.py" for c in fake.calls)
     assert Path(out["items"][0]["report"]).read_text() == "## 報告\n"
+
+
+def test_review_drive_goes_from_model_stage_to_detail_without_fix(tmp_path, monkeypatch, capsys):
+    """設計 PR のモデルの段が承認されたら、修正を挟まずに詳細の段のラウンドへ進む（#1111）。"""
+    fake = FakeReview(tmp_path, judges=[(2, "MODEL_CONFIRMED=1\n"), 0])
+    monkeypatch.setattr(cr, "call", fake)
+    code, out = run_main(cr, ["5"], capsys)
+    assert code == 21 and out["items"][0]["pause"] == "sweep"
+    assert [c[1] for c in fake.calls if c[0] == "state.py"].count("start-round") == 2
+    assert not any(c[:2] in (("state.py", "merge-fix"), ("state.py", "check-oscillation")) for c in fake.calls)
 
 
 def test_review_drive_light_rotation_pauses_for_newtext(tmp_path, monkeypatch, capsys):

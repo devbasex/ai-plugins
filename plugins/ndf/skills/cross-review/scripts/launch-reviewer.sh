@@ -47,7 +47,11 @@ STATE=$TMP_DIR/cross-review-pr$STATE_PR-state.json
 load_context() {
 WORKTREE=$(jq -r '.worktree_path' "$STATE")
 REPO=$(jq -r '.repo' "$STATE")
-EXTRA_REVIEW_INSTRUCTIONS=$(jq -r '.review_instructions // .extra_review_instructions // ""' "$STATE")
+# 設計 PR は段（モデル / 詳細、#1111）ごとの観点を持つ。そのラウンドの段の観点を選び、段の観点を
+# 持たない状態ファイル（再開）は今の review_instructions を使う
+EXTRA_REVIEW_INSTRUCTIONS=$(jq -r --arg r "$ROUND" '
+  ((.rounds // []) | map(select((.round | tostring) == $r)) | last | .stage // "") as $s
+  | ((.review_instructions_by_stage // {})[$s]) // .review_instructions // .extra_review_instructions // ""' "$STATE")
 # PR (=current_pr) は gh コマンドのレビュー対象 PR 番号として使う。
 # tmp パス側は STATE_PR で固定 (monitor.py / state.py との読み書き整合のため)。
 PR=$(jq -r '.current_pr' "$STATE")

@@ -200,7 +200,7 @@ GitHub と git の送信をしない。結果ファイル: {self.path('sweep')}
         self.env["CROSS_REVIEW_TMP_DIR"] = self.v["TMP_DIR"]
 
     def review_round(self) -> str:
-        """1 ラウンド。戻り値: fix / done。"""
+        """1 ラウンド。戻り値: fix / round（修正を挟まずに次のラウンド）/ done。"""
         rc, out = self.st("start-round", str(self.pr))
         if rc == 1:
             return "done"
@@ -233,6 +233,8 @@ GitHub と git の送信をしない。結果ファイル: {self.path('sweep')}
             return "done"
         if jrc != 2:
             raise Stop(f"state.py judge が終了コード {jrc} で止まった", jrc)
+        if parse_vars(jout).get("MODEL_CONFIRMED") == "1":
+            return "round"  # 設計 PR のモデルの段が承認された。修正を挟まずに詳細の段へ進む（#1111）
         orc, _ = self.st("check-oscillation", str(self.pr))
         if orc == 4:
             return "done"  # final = oscillation。最終スイープへ
@@ -311,6 +313,8 @@ GitHub と git の送信をしない。結果ファイル: {self.path('sweep')}
                     return self.finish(ds)
                 return self.pause(ds, "sweep", self.sweep_prompt())
             nxt = self.review_round()
+            if nxt == "round":
+                continue
             if nxt == "fix":
                 return self.pause(ds, "fix", self.fix_prompt())
             ds["stage"] = "sweep-start"
