@@ -270,3 +270,33 @@ def test_phase_steps_forwards_exit_code(repo, env):
 def test_phase_steps_rejects_bad_calls_with_2(env, args):
     p = subprocess.run([PY, str(SCRIPTS / "phase-steps.py"), *args], capture_output=True, text=True, env=env)
     assert p.returncode == 2 and p.stdout == ""
+
+
+def clone_with_upstream(tmp_path, repo):
+    """repo を origin にした主ディレクトリ（develop）と、origin へ a.md を足したコミットを返す。"""
+    main = tmp_path / "main"
+    git(tmp_path, "clone", "-q", "-b", "develop", str(repo), str(main))
+    for k, v in (("user.email", "t@example.com"), ("user.name", "t"), ("commit.gpgsign", "false")):
+        git(main, "config", k, v)
+    write(repo, "a.md", "写し\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "a")
+    return main
+
+
+@pytest.mark.parametrize("local, pulled", [("写し\n", True), ("別の中身\n", False)])
+def test_cleanup_pull_removes_untracked_file_equal_to_upstream(repo, env, tmp_path, local, pulled):
+    main = clone_with_upstream(tmp_path, repo)
+    write(main, "a.md", local)  # 取り込む内容と同じ（または違う）未追跡のファイル
+    env["FAKE_GH_PRS"] = json.dumps({"1": {"headRefName": "feature/gone", "state": "MERGED"}})
+    code, out, err = call("merged-steps.py", ["cleanup", "1", "--root", str(main)], env)
+    by = {(i["kind"], i["name"]): i for i in out["items"]}
+    if pulled:
+        assert code == 0, err
+        assert by[("untracked", "a.md")]["result"] == "removed"
+        assert by[("main_dir", str(main))]["result"] == "pulled"
+        assert git(main, "log", "-1", "--format=%s").strip() == "a"
+    else:
+        assert code != 0
+        assert ("untracked", "a.md") not in by and by[("main_dir", str(main))]["result"] == "stopped"
+        assert (main / "a.md").read_text(encoding="utf-8") == "別の中身\n"

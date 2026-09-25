@@ -957,6 +957,9 @@ for t in lines:
         f.write(t + "\\n")
     time.sleep(0.15)
 time.sleep({sleep})
+until, deadline = {until!r}, time.time() + 20
+while until and until not in open(path).read() and time.time() < deadline:
+    time.sleep(0.05)  # 負荷のある CI でも、supervisor がこの行を書くまで終わらない
 print(json.dumps({{"result": "## 作業の報告\\n- 結果: 完了", "usage": {{}}, "total_cost_usd": 0.01,
                   "num_turns": 1}}))
 """
@@ -972,9 +975,10 @@ def progress(s):
     return rows
 
 
-def fake_worker(tmp_path, monkeypatch, lines, sleep=0.0):
+def fake_worker(tmp_path, monkeypatch, lines, sleep=0.0, until=None):
+    """until を渡すと、progress.jsonl にその文字列が現れるまで worker は終わらない。"""
     f = tmp_path / "fake_worker.py"
-    f.write_text(FAKE_WORKER.format(py=PY, lines=lines, sleep=sleep))
+    f.write_text(FAKE_WORKER.format(py=PY, lines=lines, sleep=sleep, until=until))
     monkeypatch.setenv("NDF_SUPERVISE_CLAUDE", f"{PY} {f}")
 
 
@@ -1019,7 +1023,8 @@ def test_worker_lines_are_sorted_into_attention(tmp_path, monkeypatch):
     w = lambda t: json.dumps({"kind": "worker", "at": "2026-01-01T00:00:00+09:00", "text": t}, ensure_ascii=False)
     fake_worker(tmp_path, monkeypatch, [
         w("課題の本文を読み終えた"), "形の違う行", w("テストが 3 件落ちた"), w("テストが 4 件落ちた"),
-        w("関門に当たった: 本番の配布"), w("実装を 1 つ終えた")], sleep=0.5)
+        w("関門に当たった: 本番の配布"), w("実装を 1 つ終えた")], sleep=0.5,
+        until='"worker": "実装を 1 つ終えた"')
     s, text = run_plan(tmp_path, [{"id": "impl", "type": "work", "prompt": "実装する", "next": "end"}],
                        report_interval=0.3)
     rows = progress(s)
