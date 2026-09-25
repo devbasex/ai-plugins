@@ -18,10 +18,11 @@
 | [worktree-common.sh](worktree-common.sh) | 作業ツリーの判定・台帳・書き込み先の推定 | `worktree` / hook |
 | [projects-common.sh](projects-common.sh) | GitHub Projects の盤面への記録 | `development-workflow` |
 | [lock-common.sh](lock-common.sh) | 排他の取得と解放（#293） | 上の 2 つと `development-workflow` |
-| [monitor.py](monitor.py) | 別プロセスの多軸監視。対象と命名規則を引数で受ける | 収束ループの 2 つ |
+| [monitor.py](monitor.py) | 別プロセスの多軸監視。対象と命名規則を引数で受ける | 収束ループの 2 つ / `external-ai.py` |
 | [limits.py](limits.py) | 監視の上限（工程ごと）・無進捗の許容（担当ごと）・CLI の上限（監視の上限 + 120 秒）の表。既定値はここだけが持つ（#598 / #537） | 同上 |
 | [monitor_outcome.py](monitor_outcome.py) | 監視の結果の理由の語彙（9 語）と起動し直しの可否、結果ファイル・監視の記録の読み書き（#662）、起動 1 回の結末を 1 つの値として読む `read_launch_outcome`（#729） | 同上 |
 | [launch-cli.sh](launch-cli.sh) | claude / codex / agy / kiro をランタイム名で分岐して背景起動する | 同上 |
+| （`skills/external-ai/scripts/external-ai.py`） | 上の 2 つと `auth.py` / `limits.py` を束ね、外部 CLI 1 回の起動・上限つきの待ち・回収（結果ファイル → stdout → stderr）を 1 本で行う。結果は `step_result` の形 | `external-ai` / `corder` / supervisor の worker |
 | [_tmpdir.sh](_tmpdir.sh) | 一時ディレクトリの解決。環境変数名とディレクトリ名を引数で受ける | 同上 |
 | [statefile.py](statefile.py) | 状態ファイルの読み書きと KEY=VALUE 出力、保存の後の差し込み口、再開で渡した引数の反映（#727） | 同上 |
 | [auth.py](auth.py) | 参加する CLI の認証の確認。止めずに結果だけを返す形を持つ（#727） | 同上 |

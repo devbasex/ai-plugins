@@ -190,7 +190,7 @@ def test_new_check_uses_assess_skip(tmp_path):
     assert p.returncode == 0, p.stderr
     steps = {s["id"]: s for s in json.loads(out.read_text())["steps"]}
     assert steps["assess"]["skip_to"] == "review"
-    assert "--scope a.py" in steps["refactor"]["prompt"]
+    assert "--scope a.py" in steps["refactor"]["args"]
 
 
 def test_new_impl_requires_title():
