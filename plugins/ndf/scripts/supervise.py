@@ -107,6 +107,15 @@ run の段:
 - judge: 答えの `decision` が段の id ならその段へ、`next` なら次の段へ、`stop` なら止まる、
   `gate` なら関門として止まる。`choices` を渡すとその中から選ばせる
 
+途中の報告（`<state-dir>/progress.jsonl`。1 行 1 つの JSON。LLM は使わない）:
+- `"kind": "step"`: 段の切り替わりごとに 1 行（at・step・type・exit・seconds・cost・next・summary）
+- `"kind": "alive"`: 最後の行から計画の `"report_interval"`（既定 600 秒）動きが無いとき（step・elapsed・
+  worker の最後の報告）。長い段（work・run・drive）の待ちは区切って見るので、段の途中でも書く
+- `"kind": "worker"`: work の段の worker が区切りごとに追記する 1 行（プロンプトに書き方と置き場を渡す）
+- `"kind": "attention"`: conductor の判断が要る出来事（reason が 止まった・関門・同じ失敗の繰り返し・
+  判断の段で stop が出そう）。worker の行の語と繰り返し、段の結果からスクリプトで分ける。
+  `queue` はこの行を標準出力の `{"tool": "supervise-queue", "event": "attention", ...}` で知らせる
+
 最後に `## フェーズの報告` を標準出力と `<state-dir>/report.md` へ書く。conductor はこの
 スクリプトを背景の Bash で起動し、終わりの通知で報告を読む。
 """
@@ -216,6 +225,47 @@ JUDGE_SYSTEM = """あなたは NDF のフェーズの判断だけを行う。Too
 渡された結果と規則だけを根拠に、次の段を 1 つ選ぶ。
 答えは JSON 1 つだけを返す: {"decision": "<選んだ値>", "reason": "<1 行>"}"""
 
+REPORT_INTERVAL = 600  # 最後の行から動きが無いときに「まだ動いている」を足すまでの秒数。計画の "report_interval"
+TICK = 5.0             # 子プロセスの待ちを区切って見る秒数の上限
+PROGRESS_PROMPT = """## 途中の報告
+区切り（課題の本文を読み終えた・テストを足した・実装を 1 つ終えた・コミットした）ごとに、次の 1 行の JSON を
+{path} へ追記する（このファイルだけは作業場所の外でも追記してよい。書き換えず、末尾へ足す）:
+{{"kind": "worker", "at": "<ISO 8601 の時刻>", "text": "<1 行の要約>"}}
+例: printf '%s\\n' '{{"kind": "worker", "at": "'"$(date -Iseconds)"'", "text": "テストを 2 件足した"}}' >> {path}
+止まった・関門に当たった・同じ失敗を繰り返しているときは、text にそのことを書く。"""
+# worker の途中の報告を分ける語（スクリプトで見る。LLM は使わない）
+PROGRESS_STOP = re.compile(r"止まった|止まる|進めない|進められない|判断が要る|できなかった|stuck", re.I)
+PROGRESS_GATE = re.compile(r"関門|承認が要る|承認を待つ")
+PROGRESS_FAIL = re.compile(r"失敗|落ちた|落ちる|エラー|\berror\b|\bfailed\b|traceback", re.I)
+
+
+def now_iso() -> str:
+    return datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+def run_ticking(cmd, tick=None, every: float = TICK, timeout: float | None = None, input: str | None = None,
+                **kw) -> subprocess.CompletedProcess:
+    """subprocess.run と同じく待つが、every 秒ごとに tick() を呼ぶ（長い段の待ちの中で進行を書く）。
+
+    打ち切りは subprocess.TimeoutExpired を投げる。"""
+    p = subprocess.Popen(cmd, stdin=subprocess.PIPE if input is not None else subprocess.DEVNULL,
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, **kw)
+    deadline = time.time() + timeout if timeout else None
+    first = True
+    while True:
+        wait = every if deadline is None else max(0.01, min(every, deadline - time.time()))
+        try:
+            out, err = p.communicate(input if first else None, timeout=wait)
+            return subprocess.CompletedProcess(cmd, p.returncode, out, err)
+        except subprocess.TimeoutExpired:
+            first = False
+            if deadline is not None and time.time() >= deadline:
+                p.kill()
+                p.communicate()
+                raise subprocess.TimeoutExpired(cmd, timeout)
+            if tick:
+                tick()
+
 
 def claude_cmd(system: str, tools: str | None, cwd: str, full: bool = False,
                serena: bool = False, resume: str | None = None) -> list[str]:
@@ -249,16 +299,16 @@ def claude_cmd(system: str, tools: str | None, cwd: str, full: bool = False,
 
 def call_claude(system: str, prompt: str, tools: str | None, cwd: str, timeout: int,
                 full: bool = False, serena: bool = False, resume: str | None = None,
-                env: dict | None = None) -> dict:
+                env: dict | None = None, tick=None, every: float = TICK) -> dict:
     """claude -p を 1 回呼び、結果の本文と使用量を返す（既定は最小構成）。
 
     `env` は環境に足す変数（認証の切り替え）。利用上限で落ちたら `"limit": true` と、読めれば
-    解除の時刻（UNIX 時刻）を `"resets_at"` に残す。
+    解除の時刻（UNIX 時刻）を `"resets_at"` に残す。`tick` は待ちの間に every 秒ごとに呼ぶ。
     """
     started = time.time()
     try:
-        p = subprocess.run(claude_cmd(system, tools, cwd, full, serena, resume), input=prompt, capture_output=True,
-                           text=True, cwd=cwd, timeout=timeout, env={**os.environ, **env} if env else None)
+        p = run_ticking(claude_cmd(system, tools, cwd, full, serena, resume), tick, every, input=prompt,
+                        cwd=cwd, timeout=timeout, env={**os.environ, **env} if env else None)
     except subprocess.TimeoutExpired:
         return {"ok": False, "text": f"打ち切り（{timeout} 秒）", "usage": {}, "seconds": timeout}
     try:
@@ -476,6 +526,99 @@ class Supervisor:
         self.last_stage = "無し"
         self.gates: list[dict] = []      # run の段が返した関門（終了コード 10〜19）
         self.switched: list[str] = []    # 利用上限で足した認証の変数の名前
+        self.cur: dict = {}
+        self.fail_counts: dict[str, int] = {}
+        # 途中の報告（progress.jsonl）。LLM を使わずスクリプトで書き・分ける
+        self.progress = self.dir / "progress.jsonl"
+        self.interval = float(self.plan.get("report_interval", REPORT_INTERVAL))
+        self.every = max(0.05, min(TICK, self.interval / 4))
+        self.progress_seen = self.progress.stat().st_size if self.progress.is_file() else 0
+        self.last_line_at = time.time()
+        self.step_started = time.time()
+        self.worker_last = ""
+        self.worker_counts: dict[str, int] = {}
+        self.attention_keys: set[str] = set()
+        self.pcount = {"step": 0, "alive": 0, "worker": 0, "malformed": 0, "attention": 0, "llm": 0,
+                       "llm_cost": 0.0}
+
+    # --- 途中の報告 ---
+    def progress_write(self, rec: dict) -> None:
+        rec = {"kind": rec.pop("kind"), "at": now_iso(), **rec}
+        with open(self.progress, "a") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        self.progress_seen = self.progress.stat().st_size
+        self.last_line_at = time.time()
+        if rec["kind"] in self.pcount:
+            self.pcount[rec["kind"]] += 1
+
+    def attention(self, reason: str, text: str) -> None:
+        """conductor の判断が要る出来事を 1 行残す（同じ理由と文は 1 度だけ）。"""
+        key = f"{reason}\n{text}"
+        if key in self.attention_keys:
+            return
+        self.attention_keys.add(key)
+        self.progress_write({"kind": "attention", "step": self.cur.get("id"), "reason": reason, "text": text[:300]})
+
+    def classify_worker(self, text: str) -> None:
+        """worker の 1 行を語と繰り返しで分け、conductor の判断が要るものだけを attention にする。"""
+        norm = re.sub(r"\d+", "#", text.strip())
+        n = self.worker_counts[norm] = self.worker_counts.get(norm, 0) + 1
+        if PROGRESS_GATE.search(text):
+            self.attention("関門", text)
+        elif PROGRESS_STOP.search(text):
+            self.attention("止まった", text)
+        elif PROGRESS_FAIL.search(text) and n >= 2:
+            self.attention("同じ失敗の繰り返し", text)
+        elif n >= 3:
+            self.attention("止まった（同じ報告の繰り返し）", text)
+
+    def read_worker_lines(self) -> None:
+        """前に読んだ所から後の progress.jsonl を読み、worker の行を分ける。"""
+        if not self.progress.is_file() or self.progress.stat().st_size <= self.progress_seen:
+            return
+        with open(self.progress, "rb") as f:
+            f.seek(self.progress_seen)
+            data = f.read()
+        end = data.rfind(b"\n") + 1  # 書きかけの行は次に読む
+        if not end:
+            return
+        self.progress_seen += end
+        self.last_line_at = time.time()
+        for raw in data[:end].decode("utf-8", "replace").splitlines():
+            if not raw.strip():
+                continue
+            try:
+                d = json.loads(raw)
+            except json.JSONDecodeError:
+                d = None
+            if not isinstance(d, dict):
+                self.pcount["malformed"] += 1
+                continue
+            if d.get("kind") != "worker":
+                continue  # supervise.py が書いた行
+            if not isinstance(d.get("text"), str) or not d["text"].strip():
+                self.pcount["malformed"] += 1
+                continue
+            self.pcount["worker"] += 1
+            self.worker_last = d["text"].strip()[:300]
+            self.classify_worker(self.worker_last)
+
+    def tick(self) -> None:
+        """子プロセスの待ちの間に呼ぶ。worker の行を分け、動きが無ければ「まだ動いている」を足す。"""
+        self.read_worker_lines()
+        if time.time() - self.last_line_at >= self.interval:
+            self.progress_write({"kind": "alive", "step": self.cur.get("id"), "type": self.cur.get("type"),
+                                 "elapsed": round(time.time() - self.step_started, 1),
+                                 "worker": self.worker_last or "無し"})
+
+    def step_line(self, nxt: str | None) -> None:
+        """段の切り替わりの 1 行（id・type・exit・秒・費用・次・要約）。"""
+        c = self.cur
+        text = c.get("text", "") or ""
+        summary = c.get("decision") or next((l for l in reversed(text.splitlines()) if l.strip()), "")
+        self.progress_write({"kind": "step", "step": c.get("id"), "type": c.get("type"), "exit": c.get("exit"),
+                             "seconds": c.get("seconds"), "cost": (c.get("llm") or {}).get("cost", 0.0),
+                             "next": nxt or "end", "summary": summary.strip()[:160]})
 
     # --- 共通 ---
     def out_path(self, n: int, sid: str) -> Path:
@@ -531,6 +674,7 @@ class Supervisor:
         wait_max = self.plan.get("limit_wait_max", LIMIT_WAIT_MAX)
         fallback = fallback_env()
         tried_fallback, waited = False, 0.0
+        kw = {"tick": self.tick, "every": self.every, **kw}
         while True:
             res = call_claude(system, prompt, tools, cwd, timeout, **kw)
             if res.get("limit"):
@@ -551,7 +695,10 @@ class Supervisor:
                 raise UsageLimit(f"利用上限の待ちが最大 {wait_max} 秒を超える（待った {round(waited)} 秒、"
                                  f"次の待ち {round(wait)} 秒）: {(res.get('text') or '')[:200]}")
             short = os.environ.get("NDF_SUPERVISE_LIMIT_SLEEP")
-            time.sleep(min(wait, float(short)) if short else wait)
+            until = time.time() + (min(wait, float(short)) if short else wait)
+            while time.time() < until:  # 待ちの間も「まだ動いている」を書く
+                time.sleep(max(0.0, min(self.every, until - time.time())))
+                self.tick()
             waited += wait
             self.cur["limit_waited"] = round(self.cur.get("limit_waited", 0) + wait, 1)
 
@@ -617,8 +764,8 @@ class Supervisor:
         addopts.append(extra_addopts)
         env["PYTEST_ADDOPTS"] = " ".join(a for a in addopts if a)
         try:
-            p = subprocess.run(cmd, shell=True, cwd=step.get("cwd", self.cwd), capture_output=True,
-                               text=True, timeout=step.get("timeout", 3600), env=env)
+            p = run_ticking(cmd, self.tick, self.every, shell=True, cwd=step.get("cwd", self.cwd),
+                            timeout=step.get("timeout", 3600), env=env)
             return p.returncode, p.stdout + p.stderr
         except subprocess.TimeoutExpired as e:
             return 124, f"打ち切り（{e.timeout} 秒）"
@@ -665,7 +812,7 @@ class Supervisor:
                "--phase", step.get("phase", "implement"), "--workdir", cwd,
                "--timeout", str(step.get("timeout", 1800))]
         try:
-            p = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd, timeout=step.get("timeout", 1800) + 120)
+            p = run_ticking(cmd, self.tick, self.every, cwd=cwd, timeout=step.get("timeout", 1800) + 120)
             out = last_json(p.stdout) or {}
         except subprocess.TimeoutExpired:
             out = {"status": "stopped", "summary": "打ち切り"}
@@ -678,7 +825,8 @@ class Supervisor:
         cwd = step.get("cwd", self.cwd)
         prompt = (f"作業: {step.get('kind', '修正')}\n作業場所: {cwd}\n\n"
                   + (f"{issues}\n\n## 指示\n" if issues else "")
-                  + f"{step['prompt']}\n\n## 入力\n{self.inputs_text(step)}")
+                  + f"{step['prompt']}\n\n## 入力\n{self.inputs_text(step)}\n\n"
+                  + PROGRESS_PROMPT.format(path=self.progress.resolve()))
         if step.get("full"):
             # Skill の本文が手順を持つ。プロンプトは Skill の呼び出しをそのまま渡す
             prompt = step["prompt"]
@@ -881,6 +1029,7 @@ class Supervisor:
                 break
             self.record_stage(step.get("stage"))
             self.cur = {"id": sid, "type": step["type"]}
+            self.step_started = time.time()
             try:
                 if step["type"] == "judge":
                     d = self.do_judge(step)
@@ -919,6 +1068,13 @@ class Supervisor:
                 self.cur["text"] = str(e)
                 result, reason, nxt = "止まった", "利用上限", None
             self.results[sid] = dict(self.cur)
+            self.read_worker_lines()
+            self.step_line(nxt)
+            if self.cur.get("exit") not in (0, None) and not is_gate(self.cur.get("exit")) and nxt:
+                fails = self.fail_counts[sid] = self.fail_counts.get(sid, 0) + 1
+                if fails >= 2 and (self.steps.get(nxt) or {}).get("type") == "judge":
+                    self.attention("判断の段で stop が出そう",
+                                   f"段 {sid} が {fails} 回落ちた（exit={self.cur.get('exit')}）。次は判断の段 {nxt}")
             self.out_path(n, sid).write_text(self.cur.get("text", ""))
             self.log.append({k: v for k, v in self.cur.items() if k != "text"})
             (self.dir / "state.json").write_text(json.dumps(
@@ -944,9 +1100,13 @@ class Supervisor:
         if path:
             self.cur["presentation"] = path
         self.gates.append({"id": step["id"], "exit": self.cur.get("exit"), "presentation": path})
+        self.attention("関門", f"段 {step['id']} が関門を返した（exit={self.cur.get('exit')}）"
+                       + (f"。提示物 {path}" if path else ""))
 
     def report(self, result: str, reason: str) -> str:
         l = self.llm
+        self.read_worker_lines()
+        pc = self.pcount
         steps = " → ".join(f"{e['id']}" + (f"[{e['decision']}]" if "decision" in e else
                                            f"(exit={e.get('exit')})") for e in self.log)
         rows = "\n".join(
@@ -981,7 +1141,8 @@ class Supervisor:
 - Pull Request: {self.plan.get('Pull Request', '無し')}
 - 最後に記録した工程: {self.last_stage}
 - 使った worker: 修正 {l['work']}（claude -p）/ 判断 {l['judge']}（claude -p）
-{extra}- 提示物: {presented}
+{extra}- 途中の報告: 段 {pc['step']} / まだ動いている {pc['alive']} / worker {pc['worker']}（形が違う {pc['malformed']}）/ conductor 向け {pc['attention']} / LLM へ回した {pc['llm']} 回・${pc['llm_cost']:.3f}（{self.progress}）
+- 提示物: {presented}
 - 理由: {reason}
 - 通った段: {steps}
 - 件数: {counts_line}
@@ -1360,9 +1521,34 @@ def state_dir_of(plan: str) -> Path:
     return Path(plan).parent / (Path(plan).stem + "-state")
 
 
+def notify_attention(plan: str, offset: int) -> int:
+    """計画の progress.jsonl の offset から後の attention の行を標準出力へ知らせ、読んだ所を返す。"""
+    prog = state_dir_of(plan) / "progress.jsonl"
+    if not prog.is_file() or prog.stat().st_size <= offset:
+        return offset
+    with open(prog, "rb") as f:
+        f.seek(offset)
+        data = f.read()
+    end = data.rfind(b"\n") + 1
+    for raw in data[:end].decode("utf-8", "replace").splitlines():
+        try:
+            d = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(d, dict) and d.get("kind") == "attention":
+            print(json.dumps({"tool": "supervise-queue", "event": "attention", "plan": plan,
+                              "progress": str(prog), **{k: d.get(k) for k in ("at", "step", "reason", "text")}},
+                             ensure_ascii=False), flush=True)
+    return offset + end
+
+
 def cmd_queue(plans: list[str], max_: int, poll: float = 1.0) -> dict:
-    """計画を同時に max_ 本まで走らせ、空いた枠へ順に流す。"""
+    """計画を同時に max_ 本まで走らせ、空いた枠へ順に流す。
+
+    走っている計画の progress.jsonl に conductor 向けの行（"kind": "attention"）が足されたら、
+    標準出力へ 1 行の JSON（"event": "attention"）で知らせる。最後の行は従来どおり結果の JSON。"""
     pending, running, items = list(plans), {}, []
+    seen: dict[str, int] = {}
     while pending or running:
         while pending and len(running) < max_:
             plan = pending.pop(0)
@@ -1372,12 +1558,17 @@ def cmd_queue(plans: list[str], max_: int, poll: float = 1.0) -> dict:
                 ensure_worktree(json.loads(Path(plan).read_text()))
             except (OSError, ValueError, KeyError):
                 pass
+            prog = state_dir_of(plan) / "progress.jsonl"
+            seen[plan] = prog.stat().st_size if prog.is_file() else 0  # 前の実行の行は知らせない
             log = open(Path(plan).with_suffix(".log"), "w")
             running[plan] = (subprocess.Popen([sys.executable, str(SELF), "run", plan], stdout=log,
                                               stderr=subprocess.STDOUT), log, time.time())
+        for plan in list(running):
+            seen[plan] = notify_attention(plan, seen[plan])
         for plan, (proc, log, started) in list(running.items()):
             if proc.poll() is None:
                 continue
+            seen[plan] = notify_attention(plan, seen[plan])
             log.close()
             rep = state_dir_of(plan) / "report.md"
             res = report_result(rep.read_text()) if rep.is_file() else "報告なし"
