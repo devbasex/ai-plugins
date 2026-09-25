@@ -101,7 +101,7 @@ bash plugins/mcp/mcp-serena/dev.kiro/install.sh
 - Serena の memory は使いません。知識は `docs/` に、手順は `skills/` に置いてください
 - 使い方の詳細は `docs/serena-guide.md` を参照してください
 
-## v2.1.0 へ更新するとき
+## v2.1.1 へ更新するとき
 
 **正式版です。** `main` に載ります（ndf 10.17.9 と同じ配布。#818）。中身は開発版 `2.1.0-dev.1` と同じで、版数の接尾辞だけを外しました。
 
