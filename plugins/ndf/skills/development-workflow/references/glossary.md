@@ -135,7 +135,7 @@ flowchart TB
 
 | 語 | 意味 | 英語や識別子 | 正本 |
 | --- | --- | --- | --- |
-| 検査 | 構造改善・実装レビュー・完了判定・Pull Request を通すフェーズ。`fast` ではトリガーが立ったときだけ、前回の検査からの差分に流す | `new check`、`new check --since-last --id <名>` | [agent-layers.md](agent-layers.md) の「フェーズ」、[pace.md](pace.md) の「検査の計画」 |
+| 検査 | 構造改善・実装レビュー・完了判定・Pull Request を通すフェーズ。`fast` ではトリガーが立ったときだけ、前回の検査からの差分に流す。実装レビューだけは開発版ごとに流す（`--review-only`） | `new check`、`new check --since-last --id <名>`、`new check --since-last --review-only --id <名>` | [agent-layers.md](agent-layers.md) の「フェーズ」、[pace.md](pace.md) の「検査の計画」 |
 | チェック | 機械が合否を返すもの。CI のジョブと、`mvv-gate.py`・`doc-lint.py` などのスクリプト | CI の checks、結果 JSON の `status` | [merged](../../merged/SKILL.md) の `merge-when-green`、各スクリプトの docstring |
 | 構造改善 | 振る舞いを変えずに構造を直す工程 | `/ndf:cross-refactoring`、計画の `refactor` のステップ | [../SKILL.md](../SKILL.md) の「モードごとに起動する Skill」 |
 | 実装レビュー | 実装の差分をレビューし、新しい指摘が出なくなるまで直す工程 | `/ndf:cross-review`（`legacy-refactor` は `pr-review`）、計画の `review` のステップ | [../SKILL.md](../SKILL.md) の「モードごとに起動する Skill」 |

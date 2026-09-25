@@ -349,6 +349,40 @@ def test_record_merged_moves_the_start_of_the_next_range(repo, env, tmp_path):
     assert call(repo, env, "changed", "--id", "m-1")[0] == 0
 
 
+def test_review_fires_on_one_pr_without_the_other_triggers(repo, env):
+    write_decl(repo, {**TRIGGERS, "score": 99, "lines": 10_000})
+    assert call(repo, env, "eval", "--review")[0] == 3
+    merge_pr(repo, 11, "feat/a", {"app/a.py": 1})
+    assert call(repo, env, "eval")[0] == 3
+    code, out, _ = call(repo, env, "eval", "--review")
+    assert code == 0 and out["items"] == [{"trigger": "review", "value": 1, "threshold": 1}]
+
+
+def test_review_only_record_moves_the_review_range_but_not_the_check_range(repo, env, tmp_path):
+    first = merge_pr(repo, 11, "feat/a", {"app/a.py": 1})
+    st = state_dir(tmp_path, [{"id": "review", "exit": 0, "counts": {"findings": 1, "unresolved": 0}}])
+    call(repo, env, "prepare", "--id", "m-review", "--state", str(st), "--review")
+    gh_set(env, states={"31": "MERGED"})
+    code, out, _ = call(repo, env, "record", "--id", "m-review", "--pr", "31", "--state", str(st), "--review")
+    assert code == 0, out
+    assert events(env, "check")[-1]["only"] == "review"
+    code, rv, _ = call(repo, env, "eval", "--review")
+    assert code == 3 and rv["metrics"]["from"] == first and rv["metrics"]["prs"] == 0
+    _, full, _ = call(repo, env, "eval")
+    assert full["metrics"]["from"] != first and full["metrics"]["prs"] == 1
+
+
+def test_a_full_check_also_starts_the_next_review_range(repo, env, tmp_path):
+    to = merge_pr(repo, 11, "feat/a", {"app/a.py": 1})
+    append_event(env, repo, {"kind": "check", "at": iso(0), "id": "m-1", "from": "", "to": to, "result": "merged"})
+    code, rv, _ = call(repo, env, "eval", "--review")
+    assert code == 3 and rv["metrics"]["from"] == to
+
+
+def test_review_and_final_are_exclusive(repo, env):
+    assert call(repo, env, "eval", "--review", "--final")[0] == 2
+
+
 def test_changed_reads_no_change_skipped_and_missing(repo, env, tmp_path):
     assert call(repo, env, "changed", "--id", "none")[0] == 2
     call(repo, env, "eval", "--id", "quiet", "--final")      # 範囲が空で立たない
