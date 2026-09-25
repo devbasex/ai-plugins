@@ -265,7 +265,7 @@ eval "$JUDGE_VARS"
 
 `NO_RESULT` は `read-result` が書き込む。理由は `no_result_reason` に、監視が残した詳細（err.log の
 抜粋、最大 200 文字）は `monitor_detail` に残る（監視の結果ファイルがあったときだけ）。理由の語彙と
-起動し直しの可否を持つのは共通ライブラリの `monitor_outcome.py` だけで、`read-result` はその値を写す（#729）。
+起動し直しの可否を持つのは共通ライブラリの `monitor_outcome.py` だけで、`read-result` はその値を写す。
 
 | 理由 | 何が起きたか | 起動し直し | `read-result` の終了コード |
 | --- | --- | --- | --- |
@@ -369,7 +369,7 @@ eval "$UNRESOLVED_VARS"
 
 GitHub の利用回数の上限に達すると投稿は失敗する。**失敗をそのまま止める側へ倒すと、
 レビューを 1 巡も進められない。** 上限のときだけ投稿する内容をローカルへ積み、回復した
-後に順に流す（#291）。仕組みは共通ライブラリの `post_queue.py` にある。
+後に順に流す。仕組みは共通ライブラリの `post_queue.py` にある。
 
 置き場所は状態ファイルと同じ `<worktree>/.cross_review/pending/` で、1 項目 1 ファイルの
 JSON である。名前は `<連番 4 桁>-<種別>-<識別子>.json` で、**順序はこの連番だけが決める**。
