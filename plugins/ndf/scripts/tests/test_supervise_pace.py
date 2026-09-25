@@ -145,6 +145,10 @@ def test_check_since_last_has_a_condition_and_every_failure_reaches_abort(tmp_pa
     s = steps_of(plan)
     assert s["pr"]["base"] == "check-base/m-3" and s["pr"]["body"] == "template"
     assert "check-trigger.py scope --id m-3" in s["refactor"]["args"]
+    # 起点のブランチを取り込んで送ってから測る（検査の間に進んだ起点と finish の付け替えの後に衝突しない）
+    cmd = s["test-all"]["cmd"]
+    base = plan["起点"].removeprefix("origin/")
+    assert cmd.index(f"git merge -q --no-edit origin/{base}") < cmd.index("git push -q") < cmd.index("pytest")
     assert s["finish"]["skip_to"] == "record" and s["record"]["next"] == "end"
     for step in plan["steps"]:
         if step["type"] == "run" and not step["id"].startswith("abort"):
