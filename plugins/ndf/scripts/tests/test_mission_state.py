@@ -386,3 +386,14 @@ def test_mvv_approval_and_the_gate_by_the_judgement(tmp_path):
 def test_mvv_approval_without_an_mvv_stops(r6):
     init(r6)
     assert run("gate", r6["mission"], "MVV", "--what", "x").returncode == 1
+
+
+def test_update_adds_plans_from_done_without_init_plan(r6):
+    ok("init", r6["mission"], "--name", "計画を渡さない", "--dev", "10.17.17-dev.1", "--prod", "10.17.17")
+    out = ok("update", r6["mission"], "--done", r6["done"], "--done", r6["pdone"])
+    rows = {i["plan"]: i for i in out["items"]}
+    assert set(rows) == {r6["a"], r6["b"], r6["prod"]}
+    assert (rows[r6["a"]]["result"], rows[r6["a"]]["pr"]) == ("完了", "#1056")
+    m = json.loads(Path(r6["mission"]).read_text())
+    assert {p["plan"]: p["label"] for p in m["plans"]}[r6["prod"]] == "本番 10.17.17"
+    assert {p["plan"]: p["kind"] for p in m["plans"]}[r6["a"]] == "実装"

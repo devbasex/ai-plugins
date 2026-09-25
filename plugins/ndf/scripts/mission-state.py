@@ -92,6 +92,18 @@ def plan_issues(plan: str) -> list[int]:
         return []
 
 
+PHASE_KINDS = {"配布（開発版）": "開発版", "配布（本番）": "本番"}
+
+
+def plan_kind(plan: str) -> str:
+    """計画の「フェーズ」から表の行の種類を決める（配布の 2 つは開発版・本番）。"""
+    try:
+        phase = str(json.loads(Path(plan).read_text()).get("フェーズ") or "")
+    except (OSError, ValueError, AttributeError):
+        phase = ""
+    return PHASE_KINDS.get(phase, phase or "計画")
+
+
 def parse_pair(text: str, flag: str) -> tuple[str, str]:
     key, sep, value = text.partition("=")
     if not sep or not key or not value:
@@ -261,6 +273,14 @@ def cmd_update(a) -> dict:
             m["done"].append(d)
     nexts = dict(parse_pair(t, "--next") for t in (a.next or []))
     items = done_items(m)
+    known = {p["plan"] for p in m["plans"]}
+    for plan in items:
+        # init で --plan を渡さなかった計画も、done に載った時点で表の行にする
+        if plan not in known:
+            issues = plan_issues(plan)
+            kind = plan_kind(plan)
+            m["plans"].append({"kind": kind, "plan": plan, "issues": issues,
+                               "label": default_label(kind, issues, m), "next": ""})
     for p in m["plans"]:
         if p["plan"] in nexts:
             p["next"] = nexts[p["plan"]]
