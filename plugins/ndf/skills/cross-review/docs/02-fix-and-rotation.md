@@ -32,7 +32,7 @@
 | 既存コメントの控え | `$TMP_DIR/cross-review-pr<PR>-existing-comments.txt` |
 | 戻り値ファイル | `$TMP_DIR/fix-pr<PR>-result.json`。環境変数 `CROSS_REVIEW_TMP_DIR` を渡すと `/ndf:fix` がここへ書く |
 
-**送信・返信・決着・まとめは取り込み（`state.py merge-fix`）が行う**（#730）。worker は
+**送信・返信・決着・まとめは取り込み（`state.py merge-fix`）が行う**。worker は
 GitHub と git へ書かない。取り込みは現在の頭を指定して送り（`git push origin HEAD:<ブランチ名>`）、
 戻り値ファイルが報告したコミットが送り先に載ったことを確かめてから、`resolved_threads` /
 `deferred` / `rejected` の配列から返信と決着を、件数からまとめを組み立てて待ち行列で送る。

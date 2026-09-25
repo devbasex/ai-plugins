@@ -16,5 +16,4 @@
 | 最終ゲート | `--ci-check` があれば継続的統合、無ければ全体のテスト。単独起動はその後に `cross-review` |
 | 状態の永続化 | `<work>/.cross_refactoring/cross-refactoring-rf<番号>-state.json`（版 2）。中断・再開可能 |
 
-**push が credential helper の不全で落ちたときは、進行側が退避して 1 度だけやり直す**
-（#524）。退避の値は共通層（`<プラグインルート>/scripts/lib/git-credential.sh`）が持つ。
+**push が credential helper の不全で落ちたときは、進行側が退避して 1 度だけやり直す**。退避の値は共通層（`<プラグインルート>/scripts/lib/git-credential.sh`）が持つ。
