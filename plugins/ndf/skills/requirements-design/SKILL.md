@@ -44,14 +44,14 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 
 ### 0. 用語集を用意する（`standard`）
 
-プロジェクトのユビキタス言語を、要求と設計より先に用意する。宣言と用語集の形は
+プロジェクトのユビキタス言語を、要求と設計より先に用意する。用語集の設定と用語集の形は
 [references/glossary-format.md](references/glossary-format.md) にある。
 
 1. `python3 "$SCRIPTS/glossary.py" gate --mode standard` を打つ
-   - 0: 宣言と用語集が揃っている。手順 1 へ進む
-   - 1: 宣言か用語集が無い。下の 2〜4 を行う
-   - 2: 宣言か用語集が壊れている。作り直さずに止まり、利用者へ直す箇所を示す（上書きすると採った語が消える）
-2. `python3 "$SCRIPTS/glossary.py" init` で、宣言・ほぼ空の用語集・人が読む文書を作る（欠けたものだけを作る）
+   - 0: 用語集の設定と用語集が揃っている。手順 1 へ進む
+   - 1: 用語集の設定か用語集が無い。下の 2〜4 を行う
+   - 2: 用語集の設定か用語集が壊れている。作り直さずに止まり、利用者へ直す箇所を示す（上書きすると採った語が消える）
+2. `python3 "$SCRIPTS/glossary.py" init` で、用語集の設定・ほぼ空の用語集・人が読む文書を作る（欠けたものだけを作る）
 3. `python3 "$SCRIPTS/glossary.py" candidates` で語の候補を集める
    - 1 件以上（既に文書かコードのあるプロジェクト）: 候補から領域の語を選び、語・意味・コンテキストの案を添えて
      利用者へ一覧で示す
@@ -194,7 +194,7 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 - [references/acceptance-criteria.md](references/acceptance-criteria.md) — 受け入れ条件の形式と性質
 - [references/nonfunctional-requirements.md](references/nonfunctional-requirements.md) — 非機能の 6 大項目の書き方・例・該当の判定
 - [references/spec-template.md](references/spec-template.md) — 仕様の雛形
-- [references/glossary-format.md](references/glossary-format.md) — 用語集の宣言・用語集・人が読む文書の形と、語のチェックの規則
+- [references/glossary-format.md](references/glossary-format.md) — 用語集の設定・用語集・人が読む文書の形と、用語チェックの規則
 - [references/document-requirements.md](references/document-requirements.md) — 読み手へ渡す文書の受け入れ条件
 
 この工程に入ったら記録のコマンド `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "要求と受け入れ条件"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「記録のコマンド」を使う）。

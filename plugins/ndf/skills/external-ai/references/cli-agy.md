@@ -39,7 +39,7 @@ Error: -p took "--dangerously-skip-permissions" as its prompt, so the intended p
 left as an argument and ignored.
 ```
 
-`external-ai.py run agy` が次の形で起動する（共通層の `launch-cli.sh`）。`--print-timeout` は
+`external-ai.py run agy` が次の形で起動する（共通ライブラリの `launch-cli.sh`）。`--print-timeout` は
 工程の監視の上限 + 120 秒、`--add-dir` は作業ディレクトリと結果ファイルの置き場所である。
 
 ```bash
@@ -81,7 +81,7 @@ mode cannot prompt for, so it was auto-denied.
 
 > ⚠️ **`--dangerously-skip-permissions` のセキュリティ注意**: 全 tool の自動承認は、任意の
 > シェル実行とファイル編集を無確認で許可する。コンテナ・仮想機械・継続的統合の実行環境・
-> 隔離した作業ツリーのいずれかの**中でだけ**使う。プロンプトへ「リポジトリ編集禁止」と
+> 隔離した worktree のいずれかの**中でだけ**使う。プロンプトへ「リポジトリ編集禁止」と
 > 書くことは有効だが、隔離の代わりにはならない。
 
 ## 実行時間の上限には単位を付ける
@@ -118,7 +118,7 @@ $ agy --output-format json -p="1+1は？数字だけ答えて"
 
 ## 完了検知
 
-sentinel を出さないため、**プロセスの終了**と結果ファイルを見る。共通層の `scripts/lib/monitor.py` が
+sentinel を出さないため、**プロセスの終了**と結果ファイルを見る。共通ライブラリの `scripts/lib/monitor.py` が
 pidfile と結果ファイルで判定し、上限で必ず終わる。`external-ai.py run agy` と `/ndf:cross-review` の
 `launch-agy.sh` がこの監視を使う。
 
