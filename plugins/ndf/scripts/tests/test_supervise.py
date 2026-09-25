@@ -1143,3 +1143,12 @@ def test_new_mission_check_and_release_run_without_a_whole_skill(tmp_path):
     # 配布は検査の queue が --then で流す（検査の PR を --prs へ渡すため）
     assert waves["検査"]["command"].endswith("--then " + waves["配布"]["plans"][0])
     assert "command" not in waves["配布"] and waves["配布"]["then_of"] == "検査"
+
+
+def test_new_impl_with_several_issues_refers_to_all_of_them(tmp_path):
+    out = tmp_path / "p.json"
+    p = cli("new", "impl", "--issue", "898", "913", "922", "--worktree", "/w", "--tests", "t.py",
+            "--title", "T", "--out", str(out))
+    assert p.returncode == 0, p.stderr
+    head = json.loads(out.read_text())["steps"][0]["prompt"].splitlines()[0]
+    assert "#898・#913・#922" in head

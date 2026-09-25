@@ -1318,7 +1318,11 @@ def impl_prompt(a, out: Path | None) -> str:
     elif a.prompt:
         head = a.prompt.rstrip()
     else:
-        head = f"課題 #{n} を実装する。本文は `gh issue view {n}` で読む（何をするか と 受け入れ条件）。"
+        if len(a.issue) == 1:
+            head = f"課題 #{n} を実装する。本文は `gh issue view {n}` で読む（何をするか と 受け入れ条件）。"
+        else:
+            refs = "・".join(f"#{i}" for i in a.issue)
+            head = f"課題 {refs} を実装する。本文はそれぞれ `gh issue view <番号>` で読む（何をするか と 受け入れ条件）。"
         if getattr(a, "files", None):
             head += "\n触る範囲: " + "、".join(a.files)
     parts = [head]
