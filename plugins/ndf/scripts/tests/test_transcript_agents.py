@@ -661,3 +661,30 @@ def test_wait_reset_never_wakes_before_the_reset_time(mod) -> None:
     assert slept == 1
     assert sleeper.slept == [1]
     assert code == 0
+
+
+# ---------- #764: .meta.json が読めない配下の記録を conductor に数えない ----------
+
+def _session_without_meta(tmp_path: pathlib.Path) -> pathlib.Path:
+    src = FIXTURES / "projects" / "-work-sample"
+    dst = tmp_path / "projects" / "-work-sample"
+    (dst / "sess-z" / "subagents").mkdir(parents=True)
+    shutil.copy(src / "sess-d.jsonl", dst / "sess-z.jsonl")
+    shutil.copy(src / "sess-d" / "subagents" / "agent-d1.jsonl",
+                dst / "sess-z" / "subagents" / "agent-x.jsonl")
+    return tmp_path
+
+
+def test_a_sub_record_without_meta_is_not_a_conductor(mod, tmp_path) -> None:
+    root = _session_without_meta(tmp_path)
+    layers = {r.agent_id or "conductor": r.layer for r in mod.read_session("sess-z", root=root)}
+    assert layers == {"conductor": "conductor", "x": mod.OTHER}
+
+
+def test_a_sub_record_without_meta_is_reported(tmp_path) -> None:
+    root = _session_without_meta(tmp_path)
+    p = run("list", "--session", "sess-z", "--format", "json",
+            env={"CLAUDE_CONFIG_DIR": str(root)})
+    assert p.returncode == 0, p.stderr
+    assert [ln for ln in p.stderr.splitlines() if ".meta.json" in ln] == [
+        "[transcript-agents] 層が読めない記録（.meta.json が無いか壊れている）: 1 件"]
