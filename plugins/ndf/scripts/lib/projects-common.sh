@@ -91,11 +91,14 @@ _pj_in_list() { grep -Fxq -- "$2" <<<"$1"; }
 pj_is_stage() { _pj_in_list "$PJ_STAGES" "${1:-}"; }
 pj_is_mode() { _pj_in_list "$PJ_MODES" "${1:-}"; }
 pj_is_status() { _pj_in_list "$PJ_STATUSES" "${1:-}"; }
+# 進め方（#1078）。盤面のフィールドは持たず、issue の本文の見出し行と控えにだけ書く。
+PJ_PACES=$'normal\nfast'
+pj_is_pace() { _pj_in_list "$PJ_PACES" "${1:-}"; }
 
 # キーが取る値の種類。single-select は一覧で照合し、text は照合しない。
 pj_key_kind() {
   case "${1:-}" in
-    stage|mode|status) printf 'select\n' ;;
+    stage|mode|status|pace) printf 'select\n' ;;
     worktree|plan) printf 'text\n' ;;
     *) return 1 ;;
   esac
@@ -107,6 +110,7 @@ pj_is_valid_value() {
   case "$key" in
     stage) pj_is_stage "$value" ;;
     mode) pj_is_mode "$value" ;;
+    pace) pj_is_pace "$value" ;;
     status) pj_is_status "$value" ;;
     worktree|plan) [ -n "$value" ] ;;
     *) return 1 ;;

@@ -16,18 +16,28 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
 使い方:
     supervise.py run <plan.json> [--state-dir DIR] [--from <段の id>]
     supervise.py new impl --issue N --worktree DIR --tests PATH... --title T [--files PATH...] [--changes TEXT] [--prompt-file F] [--branch B] [--out F]
+    supervise.py new impl ... --escape-of <PR番号|0>   # マージの後に逃げた不具合を記録する（check-trigger.py escape）
     supervise.py new check --pr N --worktree DIR [--issue N...] [--scope PATH...] [--out F]
+    supervise.py new check --since-last --id <名> --worktree <リポジトリの根> [--mission <状態>] [--final] [--out F]
+        # 前回の検査からの差分を範囲にする検査（pace: fast）。実行の条件 check-trigger.py eval が立ったときだけ流れる
         # new の共通: [--base B] [--test-cmd CMD] [--test-all PATH] [--production-branch B]（宣言より先に効く。下の「宣言」）
     supervise.py new release --version V (--prs N... | --prs-from-queue) --channel dev|prod --worktree DIR
                              [--issue N...] [--prev-tag T] [--repo DIR] [--out F]
         # --prs-from-queue: queue が --then でこの計画を流す前に、先行の計画の報告の Pull Request を集めて
         # --prs に足す（--prs の固定の番号と併用できる）。prod の段の最後は後片付け（merged-steps.py cleanup）
+    supervise.py new release ... --mvv <ミッションの状態>
+        # prod: 先頭に MVV の判定（mvv-gate.py）の段を置く。dev: approval-facts の段を gate_as_ok にする
     supervise.py new mission --name M --worktree <リポジトリの根> --issue N... --version <開発版> [--design N...] [--tests PATH...] [--out DIR]
         # 並列の設計 → 関門 1 → ミッションのブランチ → 並列の実装（ミッションのブランチへ集める）→ 検査 1 回 → 配布
         # を波ごとの計画ファイルと mission.json へ書き出す。波の中は queue --max 3 で流す。配布は検査の queue が --then で流す
-    supervise.py queue <plan.json>... [--max 3] [--then <plan.json>...] [--done <パス>]
+        # --pace fast --state <ミッションの状態>: 使ってよい条件を確かめ、設計（関門 1 は MVV の判定）→ 実装（develop へ直接）
+        # → 検査（実行の条件）→ 開発版 → 本番（関門 2 は MVV の判定）を書く。条件に外れれば計画を書かずに止まる
+    supervise.py new close --name M --worktree <根> --issue N... --version <開発版> --prod <正式版> --state <状態> [--out DIR]
+        # ミッションの終わり: 最終の検査 → 開発版 → 本番（最終の検査で変更があったときだけ）→ 確定仕様化・閉じる・振り返り
+    supervise.py queue <plan.json>... [--max 3] [--then <plan.json>...]... [--done <パス>]
         # 空いた枠へ順に流す。作業ツリーは起動の前に 1 本ずつ作る。--then の計画は前の計画がすべて完了のときだけ
-        # 続けて流す（実装の queue の後の配布など）。終わると結果の JSON を --done（省けば最初の計画の
+        # 続けて流す（実装の queue の後の配布など）。--then を繰り返すと段になり、段は前の段がすべて完了のときだけ
+        # 流れる。終わると結果の JSON を --done（省けば最初の計画の
         # <計画>-state/queue-done.json）へ書く。始めに流す計画の一覧を done の隣（<done>.plans.json）へ書く
     supervise.py wait <done のパス> [--timeout 秒] [--poll 秒]
         # queue の終わり（done）か、queue が流す計画の attention の行まで待つ。出力は要約の 1 行と結果の JSON。
@@ -121,7 +131,17 @@ run の段:
   `next`）へ進み、最後まで進めば報告は `結果: 関門`。結果 JSON の `presentation_path` を報告の `提示物` に写す。
   `"presentation_to": "<パス>"` があれば提示物をそのパス（段の作業場所から）へ写し、そちらを載せる
 - テストの成果物を作らない（計画の `no_reports` を `PYTEST_ADDOPTS` に足す）。作らせるときは `"reports": true`
-- `cmd` の `{base}` は起点のブランチ（計画か .ndf/worktree.json の `base_branch`）に置き換わる
+- `cmd` の `{base}` は起点のブランチ（計画か .ndf/worktree.json の `base_branch`）に置き換わる。
+  `{state_dir}` は計画の状態ディレクトリに置き換わる
+- `"gate_as_ok": true`: 終了コード 10〜19 を関門として数えず、提示物だけを写して `next` へ進む
+
+実行の条件（計画の `"実行の条件": {"cmd": "...", "skip_code": 3}`）: run と queue が作業ツリーを作る前に
+元のリポジトリで打つ。0 なら流す。`skip_code` なら作業ツリーを作らず、報告を `結果: 完了`・
+`理由: 実行の条件に当たらない（<summary>）` で書いて終える。ほかは `結果: 止まった`。`--from` で再開するときは打たない。
+
+queue の置き換え: `{queue_prs}` は前のすべての段の Pull Request（空白区切り）、`{queue_pr:<計画名>}` は
+名前（ファイル名の stem か、その末尾の `-<計画名>`）が一致する計画の Pull Request 1 本（前の段に無ければ
+同じディレクトリの計画の報告。無い・飛ばされたなら `0`）
 
 段の遷移:
 - `next` に `end` を書くと、そこでフェーズを完了として終える
@@ -149,6 +169,7 @@ run の段:
 スクリプトを背景の Bash で起動し、終わりの通知で報告を読む。
 """
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -165,6 +186,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 from step_result import emit, result  # noqa: E402
 from monitor import USAGE_LIMIT_FATAL  # noqa: E402  利用上限の文言の表
 from pr_mode import with_mode_line  # noqa: E402
+from pace import PaceError, read_pace  # noqa: E402
 
 WORK_TOOLS = "Read,Edit,Write,Bash,Grep,Glob"
 # work の段に載せる MCP は Serena だけ（mcp-serena の .mcp.json と同じ起動）。シンボル単位で読み・直し、
@@ -760,7 +782,11 @@ class Supervisor:
         rec = self.plan.get("記録")
         if not rec:
             return
+        pace_first = self.plan.get("進め方") == "fast" and not getattr(self, "pace_recorded", False)
+        self.pace_recorded = True
         for issue in self.plan.get("課題", []):
+            if pace_first:  # 控えと本文の見出し行へ進め方を先に書く（まとめる工程を記録なしと数えない）
+                subprocess.run(["bash", rec, str(issue), "pace", "fast"], cwd=self.cwd, capture_output=True, text=True)
             subprocess.run(["bash", rec, str(issue), "stage", stage], cwd=self.cwd,
                            capture_output=True, text=True)
 
@@ -905,6 +931,7 @@ class Supervisor:
             if not base:
                 return 2, "cmd の {base} を置き換える起点のブランチが無い（計画か .ndf/worktree.json の base_branch）"
             cmd = cmd.replace("{base}", base)
+        cmd = cmd.replace("{state_dir}", str(self.dir))
         env = dict(os.environ)
         # 親の run の段から受け継いだ no_reports は、reports: true なら外す
         no_reports = self.no_reports()
@@ -1188,6 +1215,10 @@ class Supervisor:
         result, reason = "完了", "無し"
         limit = self.plan.get("上限", 30)
         n = 0
+        if self.plan.get("実行の条件") and not start:
+            skipped = self.check_condition(self.plan["実行の条件"])
+            if skipped:
+                return skipped
         err = self.ensure_worktree()
         if err:
             return self.report("止まった", err)
@@ -1225,6 +1256,11 @@ class Supervisor:
                     if step["type"] == "run" and self.is_skip(step, self.cur.get("exit")):
                         nxt = None if step["skip_to"] == "end" else step["skip_to"]
                         self.cur["skipped"] = True
+                    elif step["type"] == "run" and is_gate(self.cur.get("exit")) and step.get("gate_as_ok"):
+                        # 関門として数えない（MVV の判定が前もって通した関門 2 の提示物など）。提示物だけを写す
+                        self.cur["presentation"] = self.copy_presentation(step)
+                        self.cur["gate_as_ok"] = True
+                        nxt = self.next_of(sid, step)
                     elif step["type"] == "run" and is_gate(self.cur.get("exit")):
                         self.take_gate(step)
                         gnext = step.get("gate_next")
@@ -1259,8 +1295,34 @@ class Supervisor:
                 reason = "; ".join(f"段 {g['id']} が関門を返した（exit={g['exit']}）" for g in self.gates)
         return self.report(result, reason)
 
-    def take_gate(self, step: dict) -> None:
-        """run の段の関門を残す。提示物（結果 JSON の presentation_path）は `presentation_to` があれば写す。"""
+    def check_condition(self, cond: dict) -> str | None:
+        """計画の実行の条件を、作業ツリーを作る前に打つ。流すなら None、流さないなら報告を返す。"""
+        cmd = str(cond.get("cmd") or "").replace("{state_dir}", str(self.dir))
+        wt = Path(self.plan["作業場所"])
+        cwd = self.plan.get("リポジトリ") or (str(wt) if wt.is_dir() else
+                                          str(wt).split("/.worktrees/")[0] if "/.worktrees/" in str(wt) else None)
+        if cwd and not Path(cwd).is_dir():
+            cwd = None
+        started = time.time()
+        try:
+            p = subprocess.run(cmd, shell=True, cwd=cwd, capture_output=True, text=True,
+                               timeout=cond.get("timeout", 900))
+            code, text = p.returncode, p.stdout + p.stderr
+        except subprocess.TimeoutExpired as e:
+            code, text = 124, f"打ち切り（{e.timeout} 秒）"
+        out = last_json(text) or {}
+        summary = str(out.get("summary") or text.strip()[-200:] or f"exit={code}")
+        self.progress_write({"kind": "step", "step": "実行の条件", "type": "run", "exit": code,
+                             "seconds": round(time.time() - started, 1), "summary": summary[:300]})
+        if code == 0:
+            return None
+        if code == cond.get("skip_code", 3):
+            return self.report("完了", f"実行の条件に当たらない（{summary}）")
+        self.attention("止まった", f"実行の条件を判定できない（exit={code}）: {summary}")
+        return self.report("止まった", f"実行の条件を判定できない（exit={code}: {summary}）")
+
+    def copy_presentation(self, step: dict) -> str | None:
+        """結果 JSON の presentation_path を、`presentation_to` があればそこへ写してパスを返す。"""
         out = last_json(self.cur.get("text", "")) or {}
         path = out.get("presentation_path")
         dest = step.get("presentation_to")
@@ -1269,6 +1331,11 @@ class Supervisor:
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(path, target)
             path = str(target)
+        return path
+
+    def take_gate(self, step: dict) -> None:
+        """run の段の関門を残す。提示物（結果 JSON の presentation_path）は `presentation_to` があれば写す。"""
+        path = self.copy_presentation(step)
         self.cur["gate"] = True
         if path:
             self.cur["presentation"] = path
@@ -1295,7 +1362,9 @@ class Supervisor:
             gate_line = "; ".join(f"段 {g['id']}（exit={g['exit']}）" for g in self.gates)
         else:
             gate_line = "本番の系へ届く操作" if result == "関門" else "無し"
-        presented = ", ".join(g["presentation"] for g in self.gates if g.get("presentation")) or "無し"
+        presented = ", ".join([*(g["presentation"] for g in self.gates if g.get("presentation")),
+                               *(e["presentation"] for e in self.log if e.get("gate_as_ok") and e.get("presentation"))
+                               ]) or "無し"
         extra = ""
         if self.switched:
             extra += f"- 認証: 切り替え（{', '.join(self.switched)}）\n"
@@ -1532,6 +1601,11 @@ def plan_impl(a, out: Path | None = None) -> dict:
         {"id": "ready", "type": "run", "cmd": "sh -c 'git push -q && gh pr ready {pr}'", "next": "merge"},
         {"id": "merge", "type": "run", "timeout": 7200, "cmd": MERGE_CMD, "next": "end"},
     ]
+    if getattr(a, "escape_of", None) is not None:
+        # その場で直した不具合を「逃げた不具合」として記録する（検査のトリガーの材料。#1078）
+        steps[-1]["next"] = "escape"
+        steps.append({"id": "escape", "type": "run", "cmd": f"{CHECK_PY} escape --pr {{pr}} --of {a.escape_of}",
+                      "next": "end"})
     plan = {
         "フェーズ": "実装", "課題": a.issue, "モード": a.mode, "作業場所": a.worktree,
         "規則": RULE_IMPL, "上限": 20, "steps": steps,
@@ -1579,10 +1653,85 @@ def plan_check(a) -> dict:
     }, a)
 
 
+RULE_CHECK_SINCE = ("全体テストが落ちたら（落ちたテストだけの再実行でも落ちた後）、検査の修正に起因するなら fix、"
+                    "修正に無関係なら finish。2 回直しても同じなら stop。")
+CHECK_PY = f"python3 {HERE / 'check-trigger.py'}"
+
+
+def plan_check_since(a) -> dict:
+    """前回の検査からの差分を範囲にする検査（pace: fast。#1078）。
+
+    範囲は「前回の検査の時点（check-base/<名>）を宛先にした Pull Request」で表す。cross-refactoring と
+    cross-review は Pull Request 1 本を入力に取るため、駆動を変えずに差分全体を見られる。検査の後に宛先を
+    起点のブランチへ付け替えると、差分は検査の修正だけになる。実行の条件（check-trigger.py eval）が
+    立ったときだけ流れ、作業ツリー（check/<名>）はその後に作る。落ちた run の段は abort へ行き、
+    失敗の記録・check-base の削除・検査の Pull Request を閉じる後始末をしてから止まる。"""
+    repo = str(Path(a.worktree).resolve())
+    name = a.id
+    tests_all = shlex.quote(with_paths(a.test_cmd, a.test_all))
+    state = "{state_dir}"
+    scope = f"$({CHECK_PY} scope --id {name} --state {state} --root .)"
+    cond = f"git -C {shlex.quote(repo)} fetch -q origin && {CHECK_PY} eval --id {name} --root {shlex.quote(repo)}"
+    if getattr(a, "final", False):
+        cond += " --final"
+    record = f"{CHECK_PY} record --id {name} --state {state} --root ."
+    steps = [
+        {"id": "prepare", "type": "run", "stage": "構造改善", "timeout": 600,
+         "cmd": f"{CHECK_PY} prepare --id {name} --state {state} --root .", "on_fail": "abort-before-pr",
+         "next": "pr"},
+        {"id": "pr", "type": "pr", "stage": "構造改善", "base": f"check-base/{name}", "title": f"検査: {name}",
+         "body": "template", "on_fail": "abort-before-pr",
+         "summary": (f"前回の検査からの差分に構造改善と実装レビューを 1 回ずつ通す（{name}）。範囲・立ったトリガー・"
+                     f"先に見る範囲は `{CHECK_PY} scope --id {name}` と状態ディレクトリの check.json にある。"
+                     "検査の後に宛先を起点のブランチへ付け替える"),
+         "changes": "無し（検査の修正だけ）", "next": "assess"},
+        {"id": "assess", "type": "run", "preset": "assess", "stage": "構造改善", "skip_to": "review",
+         "on_fail": "refactor", "next": "refactor"},
+        {"id": "refactor", "type": "drive", "drive": "cross-refactoring", "kind": "構造改善", "stage": "構造改善",
+         "timeout": 3600, "args": f"{{pr}} --workflow-step --scope {scope} --baseline-test {tests_all}",
+         "next": "review"},
+        {"id": "review", "type": "drive", "drive": "cross-review", "kind": "実装レビュー", "stage": "実装レビュー",
+         "timeout": 3600, "args": "{pr} --max-rounds 4", "next": "test-all"},
+        {"id": "test-all", "type": "run", "stage": "完了判定", "timeout": 1800, "rerun_failed": True,
+         "cmd": "git pull -q --rebase && " + with_paths(a.test_cmd, a.test_all), "on_fail": "judge",
+         "next": "finish"},
+        {"id": "judge", "type": "judge", "inputs": ["test-all"],
+         "question": "全体テストの失敗を直す（fix）か、修正に無関係として進める（finish）か、止める（stop）か",
+         "choices": ["fix", "finish", "stop"]},
+        {"id": "fix", "type": "work", "kind": "修正", "inputs": ["test-all"],
+         "prompt": "失敗したテストを直してコミットし、git push する。", "next": "test-all"},
+        {"id": "finish", "type": "run", "stage": "Pull Request",
+         "cmd": f"{CHECK_PY} finish --id {name} --pr {{pr}} --root .", "skip_to": "record", "on_fail": "abort",
+         "next": "ready"},
+        {"id": "ready", "type": "run", "cmd": "sh -c 'git push -q && gh pr ready {pr}'", "on_fail": "abort",
+         "next": "merge"},
+        {"id": "merge", "type": "run", "timeout": 7200, "cmd": MERGE_CMD, "on_fail": "abort", "next": "record"},
+        {"id": "record", "type": "run", "cmd": f"{record} --pr {{pr}}", "on_fail": "abort", "next": "end"},
+        {"id": "abort", "type": "run", "cmd": f"{record} --failed --pr {{pr}}", "next": "end"},
+        {"id": "abort-before-pr", "type": "run", "cmd": f"{record} --failed", "next": "end"},
+    ]
+    issues = list(a.issue or [])
+    if not issues and getattr(a, "mission", None):
+        try:
+            issues = [int(i) for i in json.loads(Path(a.mission).read_text()).get("issues", [])]
+        except (OSError, ValueError, TypeError):
+            issues = []
+    plan = {
+        "フェーズ": "検査", "課題": issues, "モード": a.mode, "作業場所": f"{repo}/.worktrees/check/{name}",
+        "branch": f"check/{name}", "起点": f"origin/{a.base}", "リポジトリ": repo, "規則": RULE_CHECK_SINCE,
+        "上限": 20, "実行の条件": {"cmd": cond, "skip_code": 3}, "steps": steps,
+    }
+    return with_decls(plan, a)
+
+
 RULE_RELEASE_DEV = ("run の段が落ちたら、出力を読んで直せるもの（版数の書き漏れ・文書の形）は fix。外部の待ち（CI・ネットワーク）"
                     "の揺れなら同じ段をもう一度（retry）。認証や権限の不足・タグの重複は stop。")
 RULE_RELEASE_PROD = ("利用者は関門 2 を承認した。run の段が落ちたら、直せるもの（版数の書き漏れ・文書の形）は fix。"
                      "外部の待ち（CI・ネットワーク）の揺れなら同じ段をもう一度。タグの重複・権限の不足は stop。")
+RULE_RELEASE_PROD_MVV = ("関門 2 は利用者か MVV の判定が承認した（先頭の mvv の段が 0 を返したときだけ先へ進む）。"
+                         "run の段が落ちたら、直せるもの（版数の書き漏れ・文書の形）は fix。"
+                         "外部の待ち（CI・ネットワーク）の揺れなら同じ段をもう一度。タグの重複・権限の不足は stop。")
+MVV_PY = f"python3 {HERE / 'mvv-gate.py'}"
 STEPS_PY = f"python3 {HERE / 'release-steps.py'}"
 VERIFY_PY = f"python3 {HERE / 'release-verification-steps.py'}"
 MERGED_PY = f"python3 {HERE / 'merged-steps.py'}"
@@ -1661,13 +1810,17 @@ def plan_release_package_plugin(a) -> dict:
              "cmd": f"sh -c '{MERGED_PY} cleanup $(gh pr list --state merged --limit 30 --json number,headRefName "
                     f"--jq \".[] | select(.headRefName | startswith(\\\"release/v{v}\\\")) | .number\") {prs}'",
              "on_fail": "judge", "next": "end"})
+    approval = f"issues/approval-{plugin}-v{base}.md"
+    mvv = getattr(a, "mvv", None)
     if dev:
-        approval = f"issues/approval-{plugin}-v{base}.md"
         prev = f" --prev-tag {a.prev_tag}" if a.prev_tag else ""
+        facts = {"id": "facts", "type": "run", "cwd": repo,
+                 "cmd": f"{STEPS_PY} approval-facts --version {base} --prs {prs}{prev}",
+                 "presentation_to": approval, "on_fail": "judge", "gate_next": "explain", "next": "explain"}
+        if mvv:
+            facts["gate_as_ok"] = True  # 関門 2 は本番の計画の先頭で MVV が判定する
         steps += [
-            {"id": "facts", "type": "run", "cwd": repo,
-             "cmd": f"{STEPS_PY} approval-facts --version {base} --prs {prs}{prev}",
-             "presentation_to": approval, "on_fail": "judge", "gate_next": "explain", "next": "explain"},
+            facts,
             {"id": "explain", "type": "run", "cwd": repo,
              "cmd": f"{STEPS_PY} notes --version {v} --prs {prs} --approval {approval} "
                     f"--verified {rts} --ref {a.base}",
@@ -1682,10 +1835,20 @@ def plan_release_package_plugin(a) -> dict:
          "prompt": "落ちた段の出力を読み、原因を直してコミットする（push しない）。直したら次は落ちた段からやり直す。",
          "next": after_notes},
     ]
+    if mvv and not dev:
+        # 関門 2 を MVV で判定する。関門（10）なら報告は 結果: 関門 で止まり、conductor が承認を取ってから
+        # run <計画> --from bump で続ける
+        material = f"{repo}/{approval}" if repo else approval
+        steps.insert(0, {"id": "mvv", "type": "run", "timeout": 900,
+                         "cmd": f"{MVV_PY} check --mission {shlex.quote(str(Path(mvv).resolve()))} --gate release "
+                                f"--material {shlex.quote(material)} --pr {prs} --mode {a.mode}"
+                                + (f" --root {shlex.quote(repo)}" if repo else ""),
+                         "next": "bump", "gate_next": "end"})
+    rule = RULE_RELEASE_DEV if dev else RULE_RELEASE_PROD_MVV if mvv else RULE_RELEASE_PROD
     plan = {
         "フェーズ": f"配布（{'開発版' if dev else '本番'}）", "課題": a.issue, "モード": a.mode, "作業場所": a.worktree,
         "branch": a.branch or f"release/v{v}", "起点": f"origin/{a.base}",
-        "規則": RULE_RELEASE_DEV if dev else RULE_RELEASE_PROD, "上限": 20, "steps": steps,
+        "規則": rule, "上限": 20, "steps": steps,
     }
     with_decls(plan, a)
     if repo:
@@ -1699,8 +1862,10 @@ RELEASE_FORMS = {"package-plugin": plan_release_package_plugin}
 
 
 def cmd_new(a) -> dict:
-    plan = {"impl": plan_impl, "check": plan_check, "release": plan_release}[a.kind](a)
-    key = {"impl": lambda: a.issue[0], "check": lambda: f"{a.pr}-check",
+    since = a.kind == "check" and getattr(a, "since_last", False)
+    maker = plan_check_since if since else {"impl": plan_impl, "check": plan_check, "release": plan_release}[a.kind]
+    plan = maker(a)
+    key = {"impl": lambda: a.issue[0], "check": lambda: f"{a.id}-check" if since else f"{a.pr}-check",
            "release": lambda: f"release-{a.version}"}[a.kind]()
     out = Path(a.out or f"plan-{key}.json")
     out.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n")
@@ -1798,8 +1963,175 @@ def plan_mission_release(a, repo: str) -> dict:
     return plan_release(ns)
 
 
+def plan_fast_design(a, n: int, repo: str) -> dict:
+    """pace: fast の設計: 関門 1 の judge を MVV の判定の段へ替える。従えばラベルとコメントを付けてマージする。"""
+    plan = plan_mission_design(a, n, repo)
+    state = shlex.quote(str(Path(a.state).resolve()))
+    note = "{state_dir}/work/mvv-note.md"
+    for s in plan["steps"]:
+        if s["id"] == "review":
+            s["next"] = "mvv"
+    plan["steps"] += [
+        {"id": "mvv", "type": "run", "stage": "設計", "timeout": 900,
+         "cmd": f"{MVV_PY} check --mission {state} --gate design --pr {{pr}} --mode {a.mode} --root . --note {note}",
+         "next": "approve", "gate_next": "end"},
+        {"id": "approve", "type": "run",
+         "cmd": f"sh -c 'gh pr edit {{pr}} --add-label design-approved && gh pr comment {{pr}} --body-file {note} && "
+                "gh pr ready {pr}'", "next": "merge"},
+        {"id": "merge", "type": "run", "timeout": 7200, "cmd": MERGE_CMD, "next": "end"},
+    ]
+    plan["規則"] = ("設計の cross-review は上限 3 ラウンドで関門 1 の判定（mvv の段）へ渡す（収束を待たない）。"
+                  "駆動そのものが失敗したら gate。")
+    return plan
+
+
+def plan_fast_impl(a, n: int, repo: str) -> dict:
+    """pace: fast の実装: 課題の作業ツリーを起点のブランチから切り、Pull Request を起点のブランチへ直接入れる。
+    閉じる語は書かない（課題はミッションの終わりの close の段が閉じる）。"""
+    branch = f"feat/issue-{n}-{a.name}"
+    ns = argparse.Namespace(**{
+        **decl_fields(a), "issue": [n], "prompt": None, "prompt_file": None, "tests": a.tests or ["."],
+        "mode": a.mode, "worktree": f"{repo}/.worktrees/{branch}", "title": f"#{n} を実装する（ミッション {a.name}）",
+        "summary": f"#{n}（ミッション {a.name}。課題はミッションの終わりに閉じる）", "branch": branch})
+    plan = plan_impl(ns)
+    plan.update({"起点": f"origin/{a.base}", "リポジトリ": repo, "進め方": "fast"})
+    return plan
+
+
+def plan_fast_check(a, repo: str, name: str, final: bool = False) -> dict:
+    ns = argparse.Namespace(**decl_fields(a), id=name, worktree=repo, issue=a.issue, mode=a.mode,
+                            mission=getattr(a, "state", None), final=final)
+    return plan_check_since(ns)
+
+
+def plan_fast_release(a, repo: str, version: str, channel: str, condition: dict | None = None) -> dict:
+    ns = argparse.Namespace(
+        **decl_fields(a), version=version, prs=[], prs_from_queue=True, channel=channel, repo=repo, prev_tag=None,
+        worktree=f"{repo}/.worktrees/release/v{version}", branch=f"release/v{version}", issue=a.issue, mode=a.mode,
+        mvv=a.state)
+    plan = plan_release(ns)
+    if condition:
+        plan["実行の条件"] = condition
+    return plan
+
+
+def prod_version(version: str) -> str:
+    return re.sub(r"-.*$", "", version)
+
+
+def fast_mission_plans(a) -> list[dict]:
+    """pace: fast のミッションの波。ミッションのブランチを作らず、実装は起点のブランチへ直接入れる。
+    実装の queue が --then の段で 検査（実行の条件）→ 開発版 → 本番（先頭が MVV の判定）を順に流す。"""
+    repo = str(Path(a.worktree).resolve())
+    waves = []
+    if a.design:
+        waves.append({"name": "設計", "plans": {f"design-{n}": plan_fast_design(a, n, repo) for n in a.design}})
+        waves.append({"name": "関門 1", "gate": "設計の計画がすべて完了なら通過する。結果が関門の計画の Pull Request だけ、"
+                                              "利用者の承認を取ってマージする"})
+    waves += [
+        {"name": "実装", "plans": {f"impl-{n}": plan_fast_impl(a, n, repo) for n in a.issue}},
+        {"name": "検査", "plans": {"check": plan_fast_check(a, repo, f"{a.name}-1")}, "then_of": "実装"},
+        {"name": "開発版", "plans": {"release": plan_fast_release(a, repo, a.version, "dev")}, "then_of": "実装"},
+        {"name": "本番", "plans": {"release-prod": plan_fast_release(a, repo, prod_version(a.version), "prod")},
+         "then_of": "実装"},
+    ]
+    return waves
+
+
+def close_plan(a, repo: str) -> dict:
+    """ミッションの終わりのまとめ: 確定仕様化 → Pull Request → 課題を閉じる → 振り返りを 1 回ずつ。"""
+    issues = ",".join(map(str, a.issue))
+    refs = " ".join(f"#{i}" for i in a.issue)
+    branch = f"spec/{a.name}"
+    stats = f"{CHECK_PY} stats --root {shlex.quote(repo)}"
+    return with_decls({
+        "フェーズ": "まとめ", "課題": a.issue, "モード": a.mode, "作業場所": f"{repo}/.worktrees/{branch}",
+        "branch": branch, "起点": f"origin/{a.base}", "リポジトリ": repo, "記録": str(HERE / "projects-sync.sh"),
+        "規則": "", "上限": 12, "進め方": "fast",
+        "steps": [
+            {"id": "spec", "type": "work", "full": True, "kind": "確定仕様化", "stage": "確定仕様化", "timeout": 3600,
+             "prompt": f"/ndf:plan-to-spec {refs}。課題の issues/ の計画と設計を docs/ へ移し、コミットする"
+                       "（push しない）。移すものが無ければ何もしない。", "next": "pr"},
+            {"id": "pr", "type": "pr", "stage": "Pull Request", "base": a.base, "title": f"確定仕様化: ミッション {a.name}",
+             "summary": f"ミッション {a.name}（{refs}）の計画と設計を docs/ へ移す。issues/ と docs/ だけを触る",
+             "changes": "無し（文書の置き場所だけ）", "next": "ready"},
+            {"id": "ready", "type": "run", "cmd": "sh -c 'git push -q && gh pr ready {pr}'", "next": "merge"},
+            {"id": "merge", "type": "run", "timeout": 7200, "cmd": MERGE_CMD, "next": "close"},
+            {"id": "close", "type": "run", "stage": "後片付け", "cwd": repo, "timeout": 900,
+             "cmd": f"python3 {HERE / 'mission-close.py'} --record-pr {{queue_pr:release-prod}} --issues {issues} "
+                    f"--with-verification --label {shlex.quote(f'ミッション {a.name}の後片付け')}", "next": "retro"},
+            {"id": "retro", "type": "work", "full": True, "kind": "振り返り", "stage": "振り返り", "timeout": 3600,
+             "prompt": f"/ndf:retrospective ミッション {a.name}（{refs}）。材料に検査の記録の集計（`{stats}` の出力: "
+                       "トリガーが立った回数・検査ごとの指摘の件数・検査の後に逃げた不具合の件数）を使い、閾値の"
+                       "見直しが要るかを書く。", "next": "end"},
+        ],
+    }, a)
+
+
+def close_waves(a) -> list[dict]:
+    """ミッションの終わりの波。最終の検査で変更があったときだけ開発版と本番が流れる。"""
+    repo = str(Path(a.worktree).resolve())
+    final = f"{a.name}-final"
+    changed = {"cmd": f"{CHECK_PY} changed --id {final} --root {shlex.quote(repo)}", "skip_code": 3}
+    return [
+        {"name": "最終の検査", "plans": {"check": plan_fast_check(a, repo, final, final=True)}},
+        {"name": "開発版", "plans": {"release": plan_fast_release(a, repo, a.version, "dev", changed)},
+         "then_of": "最終の検査"},
+        {"name": "本番", "plans": {"release-prod": plan_fast_release(a, repo, a.prod, "prod", changed)},
+         "then_of": "最終の検査"},
+        {"name": "まとめ", "plans": {"close": close_plan(a, repo)}, "then_of": "最終の検査"},
+    ]
+
+
+def fast_refusal(a) -> str | None:
+    """pace: fast を使ってよい条件を確かめる。外れた理由を返す（満たせば None）。"""
+    roots = decl_roots(a.worktree, getattr(a, "repo", None))
+    try:
+        pace = next((read_pace(r) for r in roots if (r / ".ndf" / "pace.json").is_file()), None)
+    except PaceError as e:
+        return str(e)
+    if pace is None:
+        return "進め方の宣言（.ndf/pace.json）が無い"
+    if not pace["fast"]["enabled"]:
+        return ".ndf/pace.json の fast.enabled が true でない"
+    if not pace["fast"]["verify"]:
+        return ".ndf/pace.json の fast.verify（導入の確認のコマンド）が無い"
+    if a.mode not in pace["fast"]["modes"]:
+        return f"モード {a.mode} は fast に入れられない（入れられるモード: {' / '.join(pace['fast']['modes'])}）"
+    prod = a.production_branch
+    if not prod:
+        head = subprocess.run(["git", "-C", str(roots[0]), "symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
+                              capture_output=True, text=True).stdout.strip()
+        prod = head[len("origin/"):] if head.startswith("origin/") else None
+    if not prod or prod == a.base:
+        return "開発版のチャネルが無い（起点のブランチと本番のブランチが同じか、本番のブランチが分からない）"
+    return mvv_refusal(a.state)
+
+
+def mvv_refusal(state_path: str | None) -> str | None:
+    """MVV の承認の記録があり、そのハッシュが今の MVV と一致するか。外れた理由を返す。"""
+    if not state_path:
+        return "--pace fast には --state（ミッションの状態）が要る"
+    try:
+        state = json.loads(Path(state_path).read_text())
+    except (OSError, ValueError) as e:
+        return f"ミッションの状態を読めない: {e}"
+    mvv = state.get("mvv") or {}
+    approval = next((g for g in state.get("gates") or [] if g.get("name") == "MVV"), None)
+    if not mvv.get("path") or not Path(mvv["path"]).is_file():
+        return "ミッションの状態に MVV が無い（mission-state.py init --pace fast --milestone M で写す）"
+    if not approval or not approval.get("sha256"):
+        return "MVV の承認の記録が無い（利用者の承認を得てから mission-state.py gate <状態> MVV を打つ）"
+    now = hashlib.sha256(Path(mvv["path"]).read_bytes()).hexdigest()
+    if not (now == mvv.get("sha256") == approval["sha256"]):
+        return "MVV のハッシュが承認の記録と一致しない（承認の後に MVV が変わった）"
+    return None
+
+
 def mission_plans(a) -> list[dict]:
     """ミッションの波を順に返す。波の中の計画は queue --max 3 で同時に流してよい。"""
+    if getattr(a, "pace", "normal") == "fast":
+        return fast_mission_plans(a)
     repo = str(Path(a.worktree).resolve())
     waves = []
     if a.design:
@@ -1814,12 +2146,20 @@ def mission_plans(a) -> list[dict]:
     return waves
 
 
-def cmd_new_mission(a) -> dict:
-    """ミッションの計画を波ごとのファイルへ書き出す。波は番号の順に queue で流す。"""
+def cmd_new_mission(a, waves: list[dict] | None = None) -> dict:
+    """ミッションの計画を波ごとのファイルへ書き出す。波は番号の順に queue で流す。
+    then_of の波は、その波の queue へ --then の段として足す（段は書いた順に流れる）。"""
+    fast = waves is None and getattr(a, "pace", "normal") == "fast"
+    if fast:
+        why = fast_refusal(a)
+        if why:
+            return result("supervise-new", "stopped", f"pace: fast を使えない: {why}。計画を書かない", [],
+                          {"pace": "fast"}, next="normal で進める（--pace を渡さない）か、条件を満たしてから打ち直す")
+    waves = waves if waves is not None else mission_plans(a)
     out = Path(a.out or f"mission-{a.name}")
     out.mkdir(parents=True, exist_ok=True)
     items, index = [], []
-    for i, wave in enumerate(mission_plans(a), 1):
+    for i, wave in enumerate(waves, 1):
         entry = {"wave": i, "name": wave["name"]}
         if "gate" in wave:
             entry["gate"] = wave["gate"]
@@ -1841,8 +2181,12 @@ def cmd_new_mission(a) -> dict:
         index.append(entry)
         items.append(entry)
     manifest = out / "mission.json"
-    manifest.write_text(json.dumps({"ミッション": a.name, "ブランチ": mission_branch(a.name), "波": index},
-                                   ensure_ascii=False, indent=2) + "\n")
+    head = {"ミッション": a.name}
+    if getattr(a, "state", None):
+        head.update({"進め方": "fast", "状態": str(Path(a.state).resolve())})
+    else:
+        head["ブランチ"] = mission_branch(a.name)
+    manifest.write_text(json.dumps({**head, "波": index}, ensure_ascii=False, indent=2) + "\n")
     plans = sum(len(e.get("plans", [])) for e in index)
     return result("supervise-new", "ok", f"ミッション {a.name} の計画を {plans} 本・{len(index)} 波で書いた: {manifest}",
                   items, {"waves": len(index), "plans": plans, "manifest": str(manifest)},
@@ -1909,11 +2253,14 @@ def progress_size(plan: str) -> int:
 
 
 def queue_prs(items: list[dict]) -> list[str]:
-    """完了した計画の報告の Pull Request を番号にして、重ねずに番号の順に返す（計画の終わった順に依らない）。"""
+    """完了した計画の報告の Pull Request を番号にして、重ねずに番号の順に返す（計画の終わった順に依らない）。
+    配布の計画（フェーズが「配布」で始まる）の Pull Request は含めない（開発版の後に本番を段で流すとき）。"""
     out: list[str] = []
     for i in items:
         rep = Path(i.get("report") or "")
         if i.get("result") != "完了" or not rep.is_file():
+            continue
+        if re.search(r"^- フェーズ: 配布", rep.read_text(), re.M):
             continue
         m = re.search(r"^- Pull Request: (.*)$", rep.read_text(), re.M)
         n = pr_number(m.group(1).strip()) if m else ""
@@ -1931,8 +2278,54 @@ def fill_queue_prs(plan: str, prs: list[str]) -> str | None:
     if QUEUE_PRS not in text:
         return None
     if not prs:
-        return "--prs-from-queue の計画だが、先行の計画の報告に Pull Request が無い"
+        try:
+            conditional = bool(json.loads(text).get("実行の条件"))
+        except ValueError:
+            conditional = False
+        if not conditional:
+            return "--prs-from-queue の計画だが、先行の計画の報告に Pull Request が無い"
+        # 実行の条件のある計画（最終の検査で変更が無ければ飛ぶ配布）は、条件に判断を任せる
     write_atomic(Path(plan), text.replace(QUEUE_PRS, " ".join(prs)))
+    return None
+
+
+QUEUE_PR = re.compile(r"\{queue_pr:([A-Za-z0-9._-]+)\}")  # 名前の一致する計画の Pull Request 1 本
+
+
+def plan_pr(item: dict) -> str:
+    """完了した計画の報告の Pull Request の番号。無ければ空。"""
+    rep = Path(item.get("report") or "")
+    if item.get("result") != "完了" or not rep.is_file():
+        return ""
+    m = re.search(r"^- Pull Request: (.*)$", rep.read_text(), re.M)
+    return pr_number(m.group(1).strip()) if m else ""
+
+
+def named(plan: str, name: str) -> bool:
+    stem = Path(plan).stem
+    return stem == name or stem.endswith(f"-{name}")
+
+
+def fill_queue_pr(plan: str, items: list[dict]) -> str | None:
+    """計画の {queue_pr:<名>} を、前の段の名前の一致する計画の Pull Request 1 本で置き換える。
+    前の段に無ければ同じディレクトリの計画の報告を読む（関門の後に単独で流すとき）。無い・飛ばされたなら 0。"""
+    try:
+        text = Path(plan).read_text()
+    except OSError as e:
+        return f"計画を読めない: {e}"
+    names = set(QUEUE_PR.findall(text))
+    if not names:
+        return None
+    for name in names:
+        hits = [i for i in items if named(i.get("plan", ""), name)]
+        if not hits:
+            hits = [{"plan": str(f), "result": report_result((state_dir_of(str(f)) / "report.md").read_text()),
+                     "report": str(state_dir_of(str(f)) / "report.md")}
+                    for f in sorted(Path(plan).parent.glob("*.json"))
+                    if str(f) != plan and named(str(f), name) and (state_dir_of(str(f)) / "report.md").is_file()]
+        prs = [n for n in (plan_pr(i) for i in hits) if n]
+        text = text.replace(f"{{queue_pr:{name}}}", prs[-1] if prs else "0")
+    write_atomic(Path(plan), text)
     return None
 
 
@@ -1954,8 +2347,10 @@ def run_batch(plans: list[str], max_: int, poll: float) -> list[dict]:
             # 作業ツリーは queue の側で順に作る（同時の git worktree add は .git/config の lock で落ちる）。
             # 作れなかったときの報告は run が同じ誤りで書く
             try:
-                ensure_worktree(json.loads(Path(plan).read_text()))
-            except (OSError, ValueError, KeyError):
+                data = json.loads(Path(plan).read_text())
+                if not data.get("実行の条件"):  # 条件のある計画は run が条件を打ってから作る
+                    ensure_worktree(data)
+            except (OSError, ValueError, KeyError, AttributeError):
                 pass
             prog = state_dir_of(plan) / "progress.jsonl"
             seen[plan] = prog.stat().st_size if prog.is_file() else 0  # 前の実行の行は知らせない
@@ -1982,7 +2377,7 @@ def run_batch(plans: list[str], max_: int, poll: float) -> list[dict]:
 NOT_RUN = "流さなかった"
 
 
-def cmd_queue(plans: list[str], max_: int, poll: float = 1.0, then: list[str] | None = None,
+def cmd_queue(plans: list[str], max_: int, poll: float = 1.0, then: list | None = None,
               done: str | None = None) -> dict:
     """計画を同時に max_ 本まで走らせ、空いた枠へ順に流す。
 
@@ -1991,30 +2386,38 @@ def cmd_queue(plans: list[str], max_: int, poll: float = 1.0, then: list[str] | 
     then の計画は、前の計画がすべて 完了 のときだけ同じ枠（max_）で続けて流す。1 本でも 完了 でなければ
     流さず、items に 流さなかった と理由を残す。then の計画の QUEUE_PRS（new release --prs-from-queue）は、
     流す前に前の計画の報告の Pull Request の番号で置き換える。
+    then は段の並び（[[計画...], [計画...]]）でもよい。段は前のすべての段が 完了 のときだけ流し、QUEUE_PRS は
+    前のすべての段の Pull Request、{queue_pr:<名>} は前の段の名前の一致する計画の Pull Request 1 本で置き換える。
     始めに流す計画の一覧を done の隣へ書き（wait が読む）、終わったら（後続を含めて）結果の JSON を done へ書く。"""
-    then = then or []
+    stages = [list(t) for t in then] if then and not isinstance(then[0], str) else ([list(then)] if then else [])
     done_path = queue_done_path(plans, done)
     done_path.unlink(missing_ok=True)  # 前の queue の終わりを待つ側が読まないように、始めに消す
     wait_cursor_path(done_path).unlink(missing_ok=True)
-    all_plans = [*plans, *then]
+    all_plans = [*plans, *(p for st in stages for p in st)]
     write_atomic(queue_plans_path(done_path), json.dumps(
         {"started": now_iso(), "plans": all_plans, "offsets": {p: progress_size(p) for p in all_plans}},
         ensure_ascii=False) + "\n")
-    items = run_batch(plans, max_, poll)
-    if then:
+    first, early = [], []
+    for p in plans:
+        err = fill_queue_pr(p, [])
+        (early if err else first).append({"plan": p, "result": NOT_RUN, "reason": err} if err else p)
+    items = early + run_batch(first, max_, poll)
+    for stage in stages:
         not_done = [i for i in items if i["result"] != "完了"]
         if not_done:
-            reason = "前の計画が完了していない: " + "、".join(f"{i['plan']}（{i['result']}）" for i in not_done)
-            items += [{"plan": p, "result": NOT_RUN, "reason": reason} for p in then]
-        else:
-            prs, runnable, skipped_then = queue_prs(items), [], []
-            for p in then:
-                err = fill_queue_prs(p, prs)
-                if err:
-                    skipped_then.append({"plan": p, "result": NOT_RUN, "reason": err})
-                else:
-                    runnable.append(p)
-            items += skipped_then + (run_batch(runnable, max_, poll) if runnable else [])
+            ran_bad = [i for i in not_done if i["result"] != NOT_RUN]
+            reason = ("前の計画が完了していない: " + "、".join(f"{i['plan']}（{i['result']}）" for i in ran_bad)
+                      if ran_bad else "前の段を流さなかった")
+            items += [{"plan": p, "result": NOT_RUN, "reason": reason} for p in stage]
+            continue
+        prs, runnable, skipped_then = queue_prs(items), [], []
+        for p in stage:
+            err = fill_queue_prs(p, prs) or fill_queue_pr(p, items)
+            if err:
+                skipped_then.append({"plan": p, "result": NOT_RUN, "reason": err})
+            else:
+                runnable.append(p)
+        items += skipped_then + (run_batch(runnable, max_, poll) if runnable else [])
     ran = [i for i in items if i["result"] != NOT_RUN]
     skipped = len(items) - len(ran)
     stopped = [i for i in ran if i["result"] not in ("完了", "関門")]
@@ -2137,7 +2540,7 @@ def main() -> int:
     sub.add_parser("example")
     n = sub.add_parser("new", help="雛形から計画を作る。release の計画は、実装の queue へ --then で渡すと"
                                    "実装がすべて完了した後に続けて流れる")
-    n.add_argument("kind", choices=["impl", "check", "release", "mission"])
+    n.add_argument("kind", choices=["impl", "check", "release", "mission", "close"])
     n.add_argument("--issue", type=int, nargs="+", default=[])
     n.add_argument("--pr", type=int)
     n.add_argument("--worktree", required=True)
@@ -2168,12 +2571,24 @@ def main() -> int:
     n.add_argument("--out")
     n.add_argument("--name", help="mission: ミッションの名前（ブランチは mission/<名前>）")
     n.add_argument("--design", type=int, nargs="+", default=[], help="mission: 設計 PR を出す課題")
+    n.add_argument("--pace", choices=["normal", "fast"], default="normal",
+                   help="mission: 進め方（fast は使ってよい条件と MVV の承認を確かめる）")
+    n.add_argument("--state", help="mission --pace fast / close: ミッションの状態（mission-state.py のファイル）")
+    n.add_argument("--since-last", action="store_true", help="check: 前回の検査からの差分を範囲にする（--pr と排他）")
+    n.add_argument("--id", help="check --since-last: 検査の名前（ブランチ check/<名>）")
+    n.add_argument("--final", action="store_true", help="check --since-last: ミッションの終わりの検査")
+    n.add_argument("--mission", help="check --since-last: ミッションの状態（課題を読む）")
+    n.add_argument("--mvv", help="release: 関門 2 を MVV で判定する（ミッションの状態）")
+    n.add_argument("--escape-of", type=int, help="impl: 直す不具合を持ち込んだ PR（分からなければ 0）")
+    n.add_argument("--prod", help="close: 本番の版（例 10.18.0）")
+    n.add_argument("--milestone", help="close: マイルストーン（振り返りの材料）")
     q = sub.add_parser("queue", help="計画を同時に --max 本まで順に流す")
     q.add_argument("plans", nargs="+")
     q.add_argument("--max", type=int, default=3)
     q.add_argument("--poll", type=float, default=5.0)
-    q.add_argument("--then", nargs="+", default=[], metavar="PLAN",
-                   help="前の計画がすべて完了したときだけ続けて流す計画（例: 配布の計画）")
+    q.add_argument("--then", nargs="+", action="append", default=[], metavar="PLAN",
+                   help="前の計画がすべて完了したときだけ続けて流す計画（例: 配布の計画）。繰り返すと段になり、"
+                        "段は前のすべての段が完了のときだけ流れる")
     q.add_argument("--done", help="終わったときに結果の JSON を書く所（省けば最初の計画の状態ディレクトリの "
                                   "queue-done.json）。待つ側は wait <このパス> で待つ")
     w = sub.add_parser("wait", help="queue の終わりか attention の行まで待つ（done = 0 / attention = 20 / 上限 = 3）")
@@ -2192,21 +2607,34 @@ def main() -> int:
     if a.cmd == "example":
         print(json.dumps(EXAMPLE, ensure_ascii=False, indent=2))
         return 0
-    if a.cmd == "new" and a.kind == "mission":
+    if a.cmd == "new" and a.kind in ("mission", "close"):
         if not (a.name and a.issue and a.version):
-            ap.error("new mission には --name・--issue・--version（開発版の版）が要る")
+            ap.error(f"new {a.kind} には --name・--issue・--version（開発版の版）が要る")
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", a.name):
             ap.error("--name は英数字・. _ - だけで書く（ブランチ名 mission/<名前> に使う）")
+        if a.kind == "close" and not (a.prod and a.state):
+            ap.error("new close には --prod（本番の版）と --state（ミッションの状態）が要る")
+        if a.kind == "mission" and a.pace == "normal":
+            a.state = None
         try:
+            if a.kind == "close":
+                a.kind = "mission"  # 宣言の要るもの（base・test・release）は mission と同じ
+                apply_decls(a)
+                emit(cmd_new_mission(a, close_waves(a)))
             apply_decls(a)
-            emit(cmd_new_mission(a))
+            res = cmd_new_mission(a)
+            emit(res, 1 if res["status"] == "stopped" else None)
         except DeclError as e:
             ap.error(str(e))
     if a.cmd == "new":
         if a.kind == "impl" and not (a.issue and a.tests and a.title):
             ap.error("new impl には --issue・--tests・--title が要る")
-        if a.kind == "check" and not a.pr:
-            ap.error("new check には --pr が要る")
+        if a.kind == "check" and a.since_last and a.pr:
+            ap.error("new check の --since-last と --pr は同時に渡せない")
+        if a.kind == "check" and a.since_last and not a.id:
+            ap.error("new check --since-last には --id（検査の名前）が要る")
+        if a.kind == "check" and not (a.pr or a.since_last):
+            ap.error("new check には --pr か --since-last が要る")
         if a.kind == "release" and not (a.version and (a.prs or a.prs_from_queue) and a.channel):
             ap.error("new release には --version・--prs（か --prs-from-queue）・--channel が要る")
         if a.kind == "release" and not (a.repo or "/.worktrees/" in a.worktree):

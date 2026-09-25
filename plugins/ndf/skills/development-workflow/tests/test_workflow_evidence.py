@@ -318,3 +318,13 @@ def test_a_multi_line_body_keeps_every_closing_word(repo: Path) -> None:
     assert result.stdout.split() == [
         "devbasex/ai-plugins", "418", "devbasex/ai-plugins", "420"
     ], result.stderr
+
+
+def test_fast_does_not_ask_for_the_refactoring_before_the_pr(repo: Path, state: Path) -> None:
+    """#1078: fast では構造改善をトリガーで通すため、Pull Request の作成時に求めない。"""
+    before = tuple(s for s in STANDARD_BEFORE_PR if s != "構造改善")
+    seed(repo, state, 1078, "standard", before)
+    run_stage_check("record", "1078", "pace", "fast", cwd=repo, env=base_env(state))
+    assert guard(repo, state, create("Closes #1078")).stdout.strip() == ""
+    seed(repo, state, 1079, "standard", before)
+    assert "構造改善" in context(guard(repo, state, create("Closes #1079")))
