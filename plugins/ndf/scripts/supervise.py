@@ -1692,7 +1692,7 @@ def progress_size(plan: str) -> int:
 
 
 def queue_prs(items: list[dict]) -> list[str]:
-    """完了した計画の報告の Pull Request を番号にして、重ねずに順に返す。"""
+    """完了した計画の報告の Pull Request を番号にして、重ねずに番号の順に返す（計画の終わった順に依らない）。"""
     out: list[str] = []
     for i in items:
         rep = Path(i.get("report") or "")
@@ -1702,7 +1702,7 @@ def queue_prs(items: list[dict]) -> list[str]:
         n = pr_number(m.group(1).strip()) if m else ""
         if n and n not in out:
             out.append(n)
-    return out
+    return sorted(out, key=int)
 
 
 def fill_queue_prs(plan: str, prs: list[str]) -> str | None:
