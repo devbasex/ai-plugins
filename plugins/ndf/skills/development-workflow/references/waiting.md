@@ -19,6 +19,12 @@
 | `run_in_background` で起動し、完了通知を待つ | 0（通知が 1 回） | 待つ時間に依らない |
 | `Monitor` で出来事を 1 つずつ受ける | 出来事の数 | 出来事の数 × 文脈 |
 
+**待ちの後の最初の呼び出しは、キャッシュが切れていれば文脈の全体を書き直す。** 背景で待っても
+呼び出しは増えないが、待ちがキャッシュの寿命（サブエージェントは既定で 5 分）を超えると、戻った
+呼び出しが文脈の全体を書き込みの単価（入力の 1.25 倍）で払う。そのため収束ループを通す supervisor は
+寿命 1 時間の定義で起動し、寿命 5 分の supervisor が長い文脈のまま収束ループへ入るのを hook が止める
+（[context-window.md](context-window.md) の「フェーズの中の区切り」と「supervisor の定義を選ぶ」）。
+
 ## 許す待ち方
 
 | ランタイム | 待ち方 |
@@ -201,12 +207,14 @@ Stop を 1 度だけ止め、動いている作業を並べて知らせる。sup
 | --- | --- | --- | --- |
 | sleep | 前景の Bash で、コマンドの位置（先頭の代入語 `X=1` と、`timeout 590` / `nohup` / `env` などの前置きの後ろを含む）の `sleep` が `while` / `until` のループの本体にある（秒数が変数でも止める）か、秒数が上限を超える。コメント・引用・ヒアドキュメントの本文は見ず、コマンドの位置にある `bash -c` / `sh -c` / `zsh -c` / `dash -c` / `eval` の中身は見る（`echo bash -c ...` のような引数の中の語は見ない） | `NDF_SLEEP_GUARD=0` | `NDF_SLEEP_MAX_SEC`（既定 5） |
 | 連続 Read | 同じ `file_path`・`offset`・`limit` の Read が、ファイルの大きさ・更新時刻・inode が変わらないまま上限の回数に達する | `NDF_READ_REPEAT_GUARD=0` | `NDF_READ_REPEAT_LIMIT`（既定 3） |
+| 区切り | 寿命 5 分の supervisor（入力の `agent_type` が `ndf:supervisor`）が `cross-review` / `cross-refactoring` の Skill を起動し、自身の記録の今の文脈が最初の呼び出しの文脈の比以上ある（やり直しても止め続ける）。PreToolUse の `Skill` で動く | `NDF_SUPERVISOR_CUT_GUARD=0` | `NDF_SUPERVISOR_CUT_RATIO`（既定 1.5） |
 
 - **止めないもの:** `run_in_background: true` の Bash、`Monitor` の中の `sleep`、ループの本体の
   外の上限以下の `sleep`、`for` のループの中の上限以下の `sleep`、末尾の `&` でバックグラウンドになる `sleep`（`sleep 30 >/tmp/x &` のようにリダイレクトを挟んでもよい。`sleep 30 && echo x &` のようなリストや、`(sleep 30) &`・`{ sleep 30; } &`・`while ...; do sleep 1; done &` のように sleep を囲む複合コマンドの全体が背景になる形も含む。`bash -c 'sleep 30' &`・`eval 'sleep 30' &` のように `bash -c` / `eval` の外側が背景になる形も含む。`2>&1` / `&>` の `&` は背景と読まない）
 - **判定が失敗したときは止めない**（入力が読めない・`jq` や `python3` が無い・控えを書けない）
 - 同じ hook が、文脈が上限を超えた conductor の工程の起動も止める（[context-window.md](context-window.md)
-  の「上限を超えたら hook が止める」）
+  の「上限を超えたら hook が止める」）と、寿命 5 分の supervisor が長い文脈のまま収束ループを
+  始めるのも止める（同じ文書の「フェーズの中の区切り」）
 
 **hook を置くのは Claude Code だけである。**
 

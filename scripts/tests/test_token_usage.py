@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -236,7 +237,7 @@ def test_codex_seat_calls_from_last_token_usage(tmp_path):
 
 def test_md_has_call_tables(tmp_path):
     out = run(build_calls(tmp_path), "--by", "version").stdout
-    assert "| 10.16.0 | supervisor | 検査 | 1 | 42.0k | 6.0 | 0.18M | 0.00M | 2 | 1 | 6.0 |" in out
+    assert "| 10.16.0 | supervisor | 検査 | - | 1 | 42.0k | 6.0 | 0.18M | 0.00M | 2 | 1 | 0.04M | 0.00M | 6.0 |" in out
 
 
 def test_codex_seat_without_per_call_usage_has_no_p_or_k(tmp_path):
@@ -280,3 +281,91 @@ def test_until_applies_to_codex_lines_and_kiro_creation(tmp_path):
     r = run_json(roots, "--until", _ts(30))
     assert "kiro" not in {x["runtime"] for x in r["external"]}
     assert r["per_pr"][0]["kiro_credit"] == 0
+
+
+# ---------- 待ちの後の書き直しと読み込みの量・定義の名前（#954 の AC6） ----------
+
+def _agent(tid: str, subagent_type: str, description: str) -> dict:
+    return {"type": "tool_use", "id": tid, "name": "Agent",
+            "input": {"subagent_type": subagent_type, "description": description, "prompt": "…"}}
+
+
+def build_waits(tmp: Path) -> dict:
+    """同じ description（設計: #1）の supervisor 2 本。片方は meta の agentType に定義の名前を持ち、
+    もう片方は general-purpose で、親の記録の Agent 呼び出しの subagent_type から引く。"""
+    roots = build(tmp)
+    proj = roots["claude"] / "-work-x"
+    with open(proj / f"{SID}.jsonl", "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(_assistant(39, "m9", U, [_agent("toolu_w", "ndf:supervisor-waits", "設計: #1")])) + "\n")
+    sub = proj / SID / "subagents"
+    # 5 分の定義: 4 分の間隔で 30k、6 分の間隔で 50k を書き直し、6 分の間隔で 80k を読み込む。時刻の無い書き直しも 1 回
+    _jsonl(sub / "agent-b1.jsonl", [
+        _assistant(40, "b1", _u(0, 0, w5=40_000)),
+        _assistant(44, "b2", _u(0, 10_000, w5=30_000)),   # 4 分: 書き直し 30k（5 分以内）
+        _assistant(50, "b3", _u(0, 5_000, w5=50_000)),    # 6 分: 書き直し 50k（5 分超）
+        _assistant(56, "b4", _u(0, 80_000, w5=1_000)),    # 6 分: 読み込み 80k（書き直しでない）
+        {"type": "assistant", "message": {"id": "b5", "model": "claude-opus-5", "usage": _u(0, 0, w5=90_000)}},
+    ])
+    (sub / "agent-b1.meta.json").write_text(json.dumps(
+        {"description": "設計: #1", "spawnDepth": 1, "agentType": "ndf:supervisor"}), encoding="utf-8")
+    # 1 時間の定義: 10 分空いても読み込みで済む
+    _jsonl(sub / "agent-b2.jsonl", [
+        _assistant(60, "c1", _u(0, 0, w1h=40_000)),
+        _assistant(70, "c2", _u(0, 40_000, w1h=500)),
+    ])
+    (sub / "agent-b2.meta.json").write_text(json.dumps(
+        {"description": "設計: #1", "spawnDepth": 1, "agentType": "general-purpose", "toolUseId": "toolu_w"}),
+        encoding="utf-8")
+    return roots
+
+
+def test_per_role_splits_by_agent_type(tmp_path):
+    rows = run_json(build_waits(tmp_path))["per_role"]
+    got = {x["agent_type"]: x for x in rows if (x["layer"], x["role"]) == ("supervisor", "設計")}
+    assert set(got) == {"ndf:supervisor", "ndf:supervisor-waits"}
+    assert got["ndf:supervisor-waits"]["w1h"] > 0 and got["ndf:supervisor-waits"]["w5"] == 0
+    # 定義の名前が取れない起動は -
+    assert {x["agent_type"] for x in rows if x["role"] == "実装"} == {"-"}
+
+
+def test_after_5m_amounts_split_by_gap(tmp_path):
+    rows = run_json(build_waits(tmp_path))["per_role"]
+    got = {x["agent_type"]: x for x in rows if x["role"] == "設計"}
+    short, long = got["ndf:supervisor"], got["ndf:supervisor-waits"]
+    assert short["rewrites"] == 3 and short["rewrites_untimed"] == 1
+    assert short["rewrite_tokens_after_5m"] == 50_000  # 4 分の 30k と時刻の無い 90k は足さない
+    assert short["read_tokens_after_5m"] == 80_000
+    assert (long["rewrite_tokens_after_5m"], long["read_tokens_after_5m"]) == (0, 40_000)
+
+
+def test_after_5m_amounts_add_up_across_sessions(tmp_path):
+    roots = build_waits(tmp_path)
+    proj = roots["claude"] / "-work-x"
+    sid2 = "99999999-2222-3333-4444-555555555555"
+    shutil.copy(proj / f"{SID}.jsonl", proj / f"{sid2}.jsonl")
+    shutil.copytree(proj / SID, proj / sid2)
+    rows = run_json(roots)["per_role"]
+    got = {x["agent_type"]: x for x in rows if x["role"] == "設計"}
+    assert got["ndf:supervisor"]["count"] == 2
+    assert got["ndf:supervisor"]["rewrite_tokens_after_5m"] == 2 * 50_000
+    assert got["ndf:supervisor"]["read_tokens_after_5m"] == 2 * 80_000
+
+
+def test_external_has_after_5m_columns(tmp_path):
+    roots = build_waits(tmp_path)
+
+    def tc(minute, total_in, inp, cached):
+        return {"timestamp": _ts(minute), "type": "event_msg", "payload": {"type": "token_count", "info": {
+            "total_token_usage": {"input_tokens": total_in, "cached_input_tokens": 0, "output_tokens": 1},
+            "last_token_usage": {"input_tokens": inp, "cached_input_tokens": cached, "output_tokens": 1}}}}
+    _jsonl(roots["codex"] / "2026/09/10/rollout-a.jsonl", [
+        {"timestamp": _ts(30), "type": "session_meta", "payload": {"cwd": WT}},
+        tc(31, 30_000, 30_000, 0),
+        tc(40, 70_000, 40_000, 5_000),    # 9 分空いて 35k を書き直す
+        tc(50, 120_000, 50_000, 45_000),  # 10 分空いて 45k を読み込む
+    ])
+    c = {x["runtime"]: x for x in run_json(roots)["external"]}["codex"]
+    assert (c["rewrite_tokens_after_5m"], c["read_tokens_after_5m"]) == (35_000, 45_000)
+    out = run(roots, "--by", "version").stdout
+    assert "5 分超の書き直し | 5 分超の読み込み" in out
+    assert "| 10.16.0 | supervisor | 設計 | ndf:supervisor | 1 |" in out

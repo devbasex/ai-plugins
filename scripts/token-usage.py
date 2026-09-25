@@ -127,6 +127,8 @@ class Usage:
     `read_cost` は cache read に呼び出しごとのモデルの倍率を掛けた値（モデルが混ざっても換算がずれない）。
     `p` は起動ごとの固定費（記録ごとの最初の呼び出しの文脈）の合計、`rewrites` は 2 回目以降の呼び出しの
     うち全体の書き直しに当たる回数、`gaps` はその直前の呼び出しとの間隔（秒）。
+    `rewrite_tokens_after_5m` は直前の間隔が 5 分を超えた書き直しの量、`read_tokens_after_5m` は直前の
+    間隔が 5 分を超えた書き直しでない呼び出しの読み込みの量（1 時間の寿命で書き直しを免れた分）。
     """
     calls: int = 0
     inp: int = 0
@@ -138,6 +140,8 @@ class Usage:
     p: int = 0
     rewrites: int = 0
     rewrite_tokens: int = 0
+    rewrite_tokens_after_5m: int = 0
+    read_tokens_after_5m: int = 0
     gaps: list = field(default_factory=list)
 
     @property
@@ -149,21 +153,33 @@ class Usage:
         return sum(WEIGHTS[k] * getattr(self, k) for k in WEIGHTS) + self.read_cost
 
     def add(self, other: Usage) -> None:
-        for k in ("calls", "inp", "read", "w5", "w1h", "out", "read_cost", "p", "rewrites", "rewrite_tokens"):
+        for k in ("calls", "inp", "read", "w5", "w1h", "out", "read_cost", "p", "rewrites", "rewrite_tokens",
+                  "rewrite_tokens_after_5m", "read_tokens_after_5m"):
             setattr(self, k, getattr(self, k) + getattr(other, k))
         self.gaps.extend(other.gaps)
 
-    def record_calls(self, calls: list[tuple[float | None, int, int]]) -> None:
-        """呼び出しの並び（時刻・文脈・書き込み）から P と書き直しを数える。時刻の順に並べて渡す。"""
+    def record_calls(self, calls: list[tuple[float | None, int, int, int]]) -> None:
+        """呼び出しの並び（時刻・文脈・書き込み・読み込み）から P と書き直しを数える。時刻の順に並べて渡す。
+
+        時刻を欠く呼び出しは、間隔で分ける 2 つの量のどちらにも足さない。
+        """
         prev = None
-        for i, (t, context, write) in enumerate(calls):
+        for i, (t, context, write, read) in enumerate(calls):
             if i == 0:
                 self.p += context
-            elif is_rewrite(write, context):
+                prev = t
+                continue
+            gap = t - prev if t is not None and prev is not None else None
+            after = gap is not None and gap > CACHE_5M
+            if is_rewrite(write, context):
                 self.rewrites += 1
                 self.rewrite_tokens += write
+                if after:
+                    self.rewrite_tokens_after_5m += write
                 # 時刻の欠けた書き直しも None として積み、回数と間隔の分母を揃える
-                self.gaps.append(t - prev if t is not None and prev is not None else None)
+                self.gaps.append(gap)
+            elif after:
+                self.read_tokens_after_5m += read
             prev = t
 
 
@@ -178,6 +194,7 @@ class FileScan:
     prs: set = field(default_factory=set)
     keys: set = field(default_factory=set)
     cwd: str = ""
+    agent_types: dict = field(default_factory=dict)  # Agent / Task の tool_use.id -> input.subagent_type
 
 
 def scan_file(path: Path, text: str | None = None, until: float | None = None) -> FileScan:
@@ -226,6 +243,10 @@ def _scan_assistant(d: dict, msg: dict, t: float | None, s: FileScan, per_msg: d
             per_msg[msg["id"]] = msg["usage"]
             msg_meta.setdefault(msg["id"], (t, model))
     for c in msg.get("content") or []:
+        if isinstance(c, dict) and c.get("type") == "tool_use" and c.get("name") in ("Agent", "Task"):
+            sub_type = (c.get("input") or {}).get("subagent_type")
+            if c.get("id") and sub_type:
+                s.agent_types[c["id"]] = sub_type
         if isinstance(c, dict) and c.get("type") == "tool_use" and c.get("name") == "Bash":
             cmd = (c.get("input") or {}).get("command", "")
             bash_cmds[c.get("id")] = cmd
@@ -256,7 +277,7 @@ def _tally_usage(s: FileScan, per_msg: dict, msg_meta: dict) -> None:
         if row.context == 0:
             continue
         s.usage.add(row)
-        calls.append((t, row.context, w5 + w1h))
+        calls.append((t, row.context, w5 + w1h, read))
     # 時刻の無い応答は元の順のまま末尾へ置く（sorted は安定）
     s.usage.record_calls(sorted(calls, key=lambda c: (c[0] is None, c[0] or 0)))
 
@@ -279,7 +300,7 @@ class Session:
     start: float
     end: float
     active: float
-    roles: dict  # (層, フェーズ) -> Role
+    roles: dict  # (層, フェーズ, 定義の名前) -> Role
     external: list = field(default_factory=list)
 
     @property
@@ -296,6 +317,15 @@ def read_meta(path: Path) -> dict:
         return json.loads(path.with_name(path.name[:-6] + ".meta.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
+
+
+def agent_type_of(meta: dict, launched: dict) -> str:
+    """サブエージェントの定義の名前。meta の agentType が ndf: で始まればその値、そうでなければ起動した
+    Agent 呼び出しの subagent_type（meta の toolUseId で引く）。どちらも取れなければ -。"""
+    at = meta.get("agentType") or ""
+    if at.startswith("ndf:"):
+        return at
+    return launched.get(meta.get("toolUseId")) or "-"
 
 
 def mode_of(modes: Counter) -> str:
@@ -328,8 +358,11 @@ def read_claude(root: Path, idle_cap: int, until: float | None = None) -> tuple[
         if not versions or not s.times:
             skipped["版を判定できない"] += 1
             continue
+        launched = dict(s.agent_types)
+        for _, sub, _ in subs:  # worker は supervisor の記録の Agent 呼び出しで起動される
+            launched.update(sub.agent_types)
         roles: dict = defaultdict(Role)
-        c = roles[("conductor", "-")]
+        c = roles[("conductor", "-", "-")]
         c.usage.add(s.usage)
         c.n += 1
         c.sec += active_seconds(s.times, idle_cap)
@@ -337,7 +370,7 @@ def read_claude(root: Path, idle_cap: int, until: float | None = None) -> tuple[
         for _, sub, meta in subs:
             depth = int(meta.get("spawnDepth") or 1)
             layer = layer_of(depth, meta.get("description"))
-            r = roles[(layer, role_of(meta.get("description"), layer))]
+            r = roles[(layer, role_of(meta.get("description"), layer), agent_type_of(meta, launched))]
             r.usage.add(sub.usage)
             r.n += 1
             r.sec += (max(sub.times) - min(sub.times)) if sub.times else 0
@@ -403,7 +436,7 @@ def read_codex(root: Path, idle_cap: int, until: float | None = None) -> list[Ex
             usage = Usage()
             for _, inp, cached, out_t in calls:
                 usage.add(Usage(1, inp - cached, cached, 0, 0, out_t))
-            usage.record_calls([(t, inp, inp - cached) for t, inp, cached, _ in calls])
+            usage.record_calls([(t, inp, inp - cached, cached) for t, inp, cached, _ in calls])
         out.append(External("codex", m.group(2)[:2], "/".join(m.groups()), min(times), active_seconds(times, idle_cap),
                             model or "不明", tokens={"input": total.get("input_tokens", 0),
                                                     "cached": total.get("cached_input_tokens", 0),
@@ -464,7 +497,8 @@ def call_stats(u: Usage, n: int) -> dict:
     return {"p": u.p / n, "k": u.calls / n, "w5": u.w5 / n, "w1h": u.w1h / n,
             "rewrites": u.rewrites, "rewrites_after_5m": sum(1 for g in known if g > CACHE_5M),
             "rewrites_untimed": len(u.gaps) - len(known),
-            "rewrite_tokens": u.rewrite_tokens, "rewrite_gap_median": None if gap is None else gap / 60}
+            "rewrite_tokens": u.rewrite_tokens, "rewrite_tokens_after_5m": u.rewrite_tokens_after_5m,
+            "read_tokens_after_5m": u.read_tokens_after_5m, "rewrite_gap_median": None if gap is None else gap / 60}
 
 
 def _min(x: float | None) -> str:
@@ -490,7 +524,7 @@ def aggregate(sessions: list[Session], by: list[str]) -> dict:
             total = Usage()
             ext = Counter()
             for s in with_pr:
-                for (layer, _), r in s.roles.items():
+                for (layer, *_), r in s.roles.items():
                     layer_cost[layer] += r.usage.cost
                     total.add(r.usage)
                 for e in s.external:
@@ -513,8 +547,8 @@ def aggregate(sessions: list[Session], by: list[str]) -> dict:
                 roles[rk].n += r.n
                 roles[rk].sec += r.sec
         layer_order = {"conductor": 0, "supervisor": 1, "worker": 2}
-        for (layer, role), r in sorted(roles.items(), key=lambda x: (layer_order[x[0][0]], x[0][1])):
-            per_role.append(axis | {"layer": layer, "role": role, "count": r.n, "cost": r.usage.cost / r.n,
+        for (layer, role, agent_type), r in sorted(roles.items(), key=lambda x: (layer_order[x[0][0]], x[0][1], x[0][2])):
+            per_role.append(axis | {"layer": layer, "role": role, "agent_type": agent_type, "count": r.n, "cost": r.usage.cost / r.n,
                                     "context": r.usage.context / r.n, "out": r.usage.out / r.n,
                                     "minutes": r.sec / r.n / 60, **call_stats(r.usage, r.n)})
         ext_groups: dict = defaultdict(list)
@@ -560,7 +594,9 @@ def render_md(result: dict, by: list[str]) -> str:
     calls_legend = (f"P は起動ごとの固定費（最初の呼び出しの文脈）、k は呼び出し回数（どちらも 1 起動あたり）。"
                     f"書き直しは 2 回目以降の呼び出しのうち、書き込みが文脈の {REWRITE_SHARE:.0%} を超え、かつ "
                     f"{REWRITE_MIN // 1000}k を超えたものの回数（合計）。5 分超はそのうち直前の呼び出しとの間隔が "
-                    f"{CACHE_5M // 60} 分を超えた回数、間隔は直前の間隔の中央値（分）。")
+                    f"{CACHE_5M // 60} 分を超えた回数、間隔は直前の間隔の中央値（分）。"
+                    f"5 分超の書き直し・読み込みは、直前の間隔が {CACHE_5M // 60} 分を超えた呼び出しの書き直しの量と、"
+                    "書き直しでない呼び出しの読み込みの量（どちらも合計）。定義はサブエージェントの定義の名前。")
     out = [summary, "", legend, "", "## PR 1 本あたり", ""]
     rows = []
     for r in result["per_pr"]:
@@ -573,13 +609,15 @@ def render_md(result: dict, by: list[str]) -> str:
     out += table(heads + ["会話", "PR", "conductor 換算", "supervisor 換算", "worker 換算", "入力", "出力", "所要",
                           "codex 入力", "codex 出力", "kiro credit", "claude 席 換算"], rows)
     out += ["", "## フェーズごと（1 起動あたり）", ""]
-    out += table(heads + ["層", "フェーズ", "起動", "換算", "入力", "出力", "所要"],
-                 [[r[a] for a in by] + [r["layer"], r["role"], str(r["count"]), _m(r["cost"]), _m(r["context"]),
+    out += table(heads + ["層", "フェーズ", "定義", "起動", "換算", "入力", "出力", "所要"],
+                 [[r[a] for a in by] + [r["layer"], r["role"], r["agent_type"], str(r["count"]), _m(r["cost"]), _m(r["context"]),
                                         _k(r["out"]), f"{r['minutes']:.1f}"] for r in result["per_role"]])
     out += ["", "## フェーズごとの呼び出しとキャッシュ", "", calls_legend, ""]
-    out += table(heads + ["層", "フェーズ", "起動", "P", "k", "書き込み 5 分", "書き込み 1 時間", "書き直し", "5 分超", "間隔"],
-                 [[r[a] for a in by] + [r["layer"], r["role"], str(r["count"]), _k(r["p"]), f"{r['k']:.1f}",
+    out += table(heads + ["層", "フェーズ", "定義", "起動", "P", "k", "書き込み 5 分", "書き込み 1 時間", "書き直し", "5 分超",
+                          "5 分超の書き直し", "5 分超の読み込み", "間隔"],
+                 [[r[a] for a in by] + [r["layer"], r["role"], r["agent_type"], str(r["count"]), _k(r["p"]), f"{r['k']:.1f}",
                                         _m(r["w5"]), _m(r["w1h"]), str(r["rewrites"]), str(r["rewrites_after_5m"]),
+                                        _m(r["rewrite_tokens_after_5m"]), _m(r["read_tokens_after_5m"]),
                                         _min(r["rewrite_gap_median"])] for r in result["per_role"]])
     out += ["", "## 外部 CLI（1 起動あたり）", "",
             "kiro はトークン数を記録しない（値が 0）ため credit だけを載せる。agy は読まない。", ""]
@@ -591,10 +629,13 @@ def render_md(result: dict, by: list[str]) -> str:
     out += ["", "## 外部 CLI の呼び出しとキャッシュ（1 起動あたり）", "",
             "codex は input のうち cached に当たらなかった分を書き込みとみなし、呼び出しごとの値（last_token_usage）を持つ席だけで数える。"
             "kiro は呼び出し回数を記録しない（利用者のターン数は JSON の turns）。取れない値は -。", ""]
-    out += table(heads + ["ランタイム", "Skill", "モデル", "起動", "P", "k", "書き直し", "5 分超", "間隔"],
+    out += table(heads + ["ランタイム", "Skill", "モデル", "起動", "P", "k", "書き直し", "5 分超", "5 分超の書き直し",
+                          "5 分超の読み込み", "間隔"],
                  [[r[a] for a in by] + [r["runtime"], r["skill"], r["cli_model"], str(r["count"]),
                                         _k(r["p"]) if "p" in r else "-", f"{r['k']:.1f}" if "k" in r else "-",
                                         str(r.get("rewrites", "-")), str(r.get("rewrites_after_5m", "-")),
+                                        _m(r["rewrite_tokens_after_5m"]) if "rewrite_tokens_after_5m" in r else "-",
+                                        _m(r["read_tokens_after_5m"]) if "read_tokens_after_5m" in r else "-",
                                         _min(r.get("rewrite_gap_median"))]
                   for r in result["external"]])
     return "\n".join(out) + "\n"
