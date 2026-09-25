@@ -519,6 +519,13 @@ def test_kiro_without_session_windows_only_the_same_text(world, slack):
     assert record["key"].endswith(":window") and record["key"] != ":window"
 
 
+def test_kiro_window_stops_only_the_consecutive_same_text(world, slack):
+    """記録は 1 セッションに最後の 1 鍵だけ。A→B→A の 2 度目の A は窓の内でも届く。"""
+    for text in ("この方針で進めてよいですか。", "次はどちらにしますか。", "この方針で進めてよいですか。"):
+        world.run("kiro", {"hook_event_name": "stop", "assistant_response": text}, env={"KIRO_SESSION_ID": "k1"})
+    assert len(slack.wait_for(3)) == 3
+
+
 def test_leftover_kiro_session_is_not_used_by_other_runtimes(world, slack):
     world.run("codex", {"hook_event_name": "Stop", "last_assistant_message": "どちらにしますか。"},
               env={"NDF_CODEX_SLACK_NOTIFY": "true", "KIRO_SESSION_ID": "k9"})

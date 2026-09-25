@@ -199,7 +199,8 @@ def wait_key(runtime: str, hook_input: dict, transcript: tuple[str, str] | None)
         tool_input = json.dumps(hook_input.get("tool_input"), sort_keys=True, ensure_ascii=False)
         digest = hashlib.sha1(tool_input.encode()).hexdigest()[:12]
         return f"{hook_input['turn_id']}:{hook_input.get('hook_event_name')}:{digest}", False
-    # Kiro は応答本文のハッシュを鍵にし、同じ文面だけを 60 秒の窓で止める。Kiro には応じると
+    # Kiro は応答本文のハッシュを鍵にし、連続した同じ文面を 60 秒の窓で止める（記録は 1 セッションに
+    # 最後の 1 鍵だけで、A→B→A のように間に別の文面が入ると止まらない）。Kiro には応じると
     # 変わる値が無く、窓なしでは同じセッションで答えた後の同じ問いまで期限なく止まる。
     if runtime == "kiro" and hook_input.get("assistant_response"):
         digest = hashlib.sha1(str(hook_input["assistant_response"]).encode()).hexdigest()[:16]

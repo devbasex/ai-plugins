@@ -52,15 +52,25 @@ def update_index(index, text, name, link, title):
     index.write_text(body, encoding="utf-8")
 
 
-def promote_glossary(root: Path, removed: set, spec_rel: str) -> list:
-    """消した設計を pending_source に持つ語の source を確定仕様へ移し、render して git add する。"""
+def glossary_source(root: Path) -> str | None:
+    """用語集の正本の相対パス。宣言が無ければ None。宣言が壊れていれば設計を消す前に止める。"""
     decl = root / ".ndf" / "glossary.json"
     if not decl.is_file():
+        return None
+    try:
+        rel = json.loads(decl.read_text(encoding="utf-8")).get("source")
+    except (ValueError, AttributeError):
+        rel = None
+    if not isinstance(rel, str) or not (root / rel).is_file():
+        raise StepError(f"用語集の宣言（.ndf/glossary.json）の source が読めない: {rel!r}", EXIT_PRECONDITION)
+    return rel
+
+
+def promote_glossary(root: Path, rel: str | None, removed: set, spec_rel: str) -> list:
+    """消した設計を pending_source に持つ語の source を確定仕様へ移し、render して git add する。"""
+    if rel is None:
         return []
-    rel = json.loads(decl.read_text(encoding="utf-8")).get("source")
-    path = root / rel if isinstance(rel, str) else None
-    if path is None or not path.is_file():
-        return []
+    path = root / rel
     g = json.loads(path.read_text(encoding="utf-8"))
     moved = [t for t in g.get("terms", []) if isinstance(t, dict) and t.get("pending_source") in removed]
     if not moved:
@@ -83,6 +93,7 @@ def cmd_spec_finalize(a):
     if not spec.is_file():
         raise StepError(f"確定仕様のファイルが無い: {a.spec}", EXIT_PRECONDITION)
     spec_rel = spec.relative_to(root).as_posix()
+    glossary = glossary_source(root)
     items = []
 
     for d in a.design:
@@ -93,7 +104,7 @@ def cmd_spec_finalize(a):
         git(root, "rm", "-q", "--", rel)
         items.append({"kind": "design", "name": rel, "result": "removed"})
 
-    items += promote_glossary(root, {i["name"] for i in items}, spec_rel)
+    items += promote_glossary(root, glossary, {i["name"] for i in items}, spec_rel)
 
     index = root / "docs" / "specifications" / "README.md"
     if index.is_file():

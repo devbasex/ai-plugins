@@ -58,7 +58,7 @@
 | 新しいコメントを 1 件ずつ | `Monitor` |
 | `supervise.py run` | `report.md` が揃うか、`progress.jsonl` に `attention` の行が足されるまでの until ループを `run_in_background: true` で起動する（下の節） |
 | `supervise.py queue` | `supervise.py wait <done のパス>` を `run_in_background: true` で 1 回起動する。queue の終わり（done）か、queue が流す計画の `attention` の行で終わる（下の節）。done のパスは `queue --done` で渡した所（省けば最初の計画の `<計画>-state/queue-done.json`） |
-| Pull Request の CI とマージ | `merged-steps.py merge-when-green <PR 番号>` を `run_in_background: true` で 1 回起動する。CI がまだ現れない間も待ち、緑になればマージする。`gh pr checks --watch` と `gh pr merge` を手でつながない |
+| Pull Request の CI とマージ | `merged-steps.py merge-when-green <PR 番号>` を `run_in_background: true` で 1 回起動する。CI がまだ現れない間も待ち、緑になればマージする。マージの承認を得た後に限る。CI を待つだけなら `gh pr checks <PR 番号> --watch` を同じく背景で起動する。`gh pr checks --watch` と `gh pr merge` を手でつながない |
 | queue の後に続ける計画（配布など） | 手でチェインを組まず、`queue <実装の計画>... --then <後続の計画>` で渡す。後続は前の計画がすべて `完了` のときだけ流れ、1 本でも `止まった` / `関門` なら `流さなかった` と理由が結果に残る。配布の計画を `new release --prs-from-queue` で作れば、実装の PR の番号を知らずに渡せる |
 
 ### supervise.py の途中の報告

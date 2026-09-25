@@ -194,6 +194,21 @@ def test_spec_finalize_promotes_glossary_terms_of_the_removed_design(repo, env):
     assert check.returncode == 0, check.stdout
 
 
+@pytest.mark.parametrize("decl", ['{"version": 1}', '{"source": "docs/glossary/none.json"}', "not json"])
+def test_spec_finalize_stops_on_a_broken_glossary_declaration(repo, env, decl):
+    """宣言があるのに正本が読めなければ、設計を消す前に止める。"""
+    spec_repo(repo)
+    write(repo, ".ndf/glossary.json", decl)
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "decl")
+    code, _, _ = call("plan-to-spec-steps.py",
+                      ["spec-finalize", "--spec", "docs/specifications/x.md",
+                       "--design", "docs/design/x-design.md", "--root", str(repo)], env)
+    assert code == 3
+    assert (repo / "docs/design/x-design.md").is_file()
+    assert git(repo, "status", "--porcelain").strip() == ""
+
+
 def test_spec_finalize_missing_spec_is_precondition(repo, env):
     code, out, _ = call("plan-to-spec-steps.py",
                         ["spec-finalize", "--spec", "nope.md", "--design", "keep.txt", "--root", str(repo)], env)
