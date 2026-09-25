@@ -9,6 +9,7 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
 | --- | --- | --- |
 | run   | コマンドを実行して終わるまで待ち、出力をファイルへ残す | 使わない |
 | work  | 1 つの作業（修正・調査）を worker として行わせる | Tool あり（Read/Edit/Write/Bash/Grep/Glob）。`"full": true` なら設定・プラグイン・Skill をそのまま読む claude -p で Skill を回す（cross-review など） |
+| drive | 駆動（cross-review / cross-refactoring の drive.py）を run として回し、`pause` のときだけ worker に判断・修正をさせて駆動へ返す | pause のときだけ（work と同じ最小構成） |
 | judge | 結果ファイルと規則の抜粋だけを渡し、次の段を決めさせる | Tool なし |
 | pr    | push して Draft の Pull Request を作る（スクリプト）。本文は材料（計画の値・コミット・変更の統計・run の結果・設計文書）から LLM が書く。`"body": "template"` なら材料をそのまま本文にする | 本文だけTool なし |
 
@@ -50,6 +51,16 @@ Serena: work の段に `"serena": true` を書くと Serena の MCP だけを載
 
 課題の本文: work の段に `"issues": [858]`（`true` なら計画の `課題`）を書くと、`gh issue view` の題と本文を
 プロンプトの先頭へ入れる。
+
+worker のランタイム: work と drive の段に `"runtime": "codex"`（`kiro` / `agy` / `claude`）を書くと、worker を
+`external-ai.py run` で起動する（起動・上限つきの待ち・回収はそのコマンドが持つ）。書かなければ最小構成の claude -p。
+
+drive の段: `cmd`（または `"drive": "cross-review" | "cross-refactoring"` と `"args"`）を打ち、最後の行の JSON を読む。
+- `status` が `ok` なら成功。`metrics`（ラウンド数・指摘・未解決・適用・取り消しなど）を報告の「件数」へ載せる
+- `gate` なら `items[0]` の `prompt_file` を worker に渡し、`result_file` を書かせてから同じコマンドを打ち直す。
+  `command` を持つ pause（最終ゲートの cross-review）は、その駆動を同じ形で回し、`metrics.review_status` を
+  `result_file` へ書く
+- `stopped`・結果ファイルが書かれない・`"max_pauses"`（既定 12）を超える、のどれかなら失敗
 
 段ごとの作業場所: run と work の段に `"cwd"` を書くと、その段だけ別の場所で動く（取り込みで PR ごとに
 作業ツリーが違うとき）。
@@ -100,6 +111,10 @@ SERENA_MCP = {"mcpServers": {"serena": {
 FULL_TOOLS = "Read,Edit,Write,Bash,Grep,Glob,Skill,Agent,Monitor,SendMessage,ToolSearch"
 TAIL = 6000  # LLM へ渡す出力の末尾の文字数
 SELF = Path(__file__).resolve()
+SKILLS = SELF.parent.parent / "skills"
+DRIVES = {"cross-review": SKILLS / "cross-review" / "scripts" / "drive.py",
+          "cross-refactoring": SKILLS / "cross-refactoring" / "scripts" / "drive.py"}
+EXTERNAL_AI = SKILLS / "external-ai" / "scripts" / "external-ai.py"
 
 # run の段の定型（"preset"）。作業場所（リポジトリの根）で動く
 PRESETS = {
@@ -228,6 +243,22 @@ def parse_decision(text: str) -> dict:
         except json.JSONDecodeError:
             pass
     return {"decision": "stop", "reason": f"判断の答えを読めない: {(text or '')[:200]}"}
+
+
+def last_json(text: str) -> dict | None:
+    """出力の最後の JSON の行（step_result の形）を読む。"""
+    for line in reversed((text or "").splitlines()):
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                return json.loads(line)
+            except json.JSONDecodeError:
+                continue
+    return None
+
+
+def counts_text(counts: dict) -> str:
+    return " / ".join(f"{k} {v}" for k, v in counts.items() if v is not None) or "無し"
 
 
 def expand_parts(steps: list[dict]) -> list[dict]:
@@ -410,6 +441,27 @@ class Supervisor:
                 parts.append(f"## 課題 #{n}\n\n（本文を取れない。gh issue view {n} で読む）")
         return "\n\n".join(parts)
 
+    def call_worker(self, step: dict, prompt: str, cwd: str, name: str) -> dict:
+        """worker を 1 回起動する。`runtime` があれば external-ai.py run、無ければ最小構成の claude -p。"""
+        rt = step.get("runtime")
+        if not rt or rt == "claude-p":
+            return call_claude(WORK_SYSTEM, prompt, WORK_TOOLS, cwd, step.get("timeout", 1800),
+                               serena=bool(step.get("serena")))
+        pf, of = self.dir / f"{name}-prompt.md", self.dir / f"{name}-output.md"
+        pf.write_text(WORK_SYSTEM + "\n\n" + prompt)
+        started = time.time()
+        cmd = [sys.executable, str(EXTERNAL_AI), "run", rt, "--prompt-file", str(pf), "--output-file", str(of),
+               "--phase", step.get("phase", "implement"), "--workdir", cwd,
+               "--timeout", str(step.get("timeout", 1800))]
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd, timeout=step.get("timeout", 1800) + 120)
+            out = last_json(p.stdout) or {}
+        except subprocess.TimeoutExpired:
+            out = {"status": "stopped", "summary": "打ち切り"}
+        text = of.read_text() if of.is_file() else out.get("summary", "")
+        return {"ok": out.get("status") == "ok", "text": text, "usage": {}, "cost": None, "turns": None,
+                "seconds": round(time.time() - started, 1), "runtime": rt}
+
     def do_work(self, step: dict) -> tuple[bool, str]:
         issues = self.issue_text(step)
         prompt = (f"作業: {step.get('kind', '修正')}\n作業場所: {self.cwd}\n\n"
@@ -420,8 +472,10 @@ class Supervisor:
             prompt = step["prompt"]
         full = bool(step.get("full"))
         cwd = step.get("cwd", self.cwd)
-        res = call_claude(FULL_SYSTEM if full else WORK_SYSTEM, prompt, WORK_TOOLS, cwd,
-                          step.get("timeout", 1800), full=full, serena=bool(step.get("serena")))
+        if full:
+            res = call_claude(FULL_SYSTEM, prompt, WORK_TOOLS, cwd, step.get("timeout", 1800), full=True)
+        else:
+            res = self.call_worker(step, prompt, cwd, step["id"])
         self.add_usage("work", res)
         # 報告が無いまま応答を終えた Skill の段は、同じ会話を起こし直す（supervisor へ SendMessage で
         # 続けさせていたのと同じ。3 回まで）
@@ -435,6 +489,67 @@ class Supervisor:
             res["ok"] = False
         self.cur.update(exit=0 if res["ok"] else 1, text=res["text"], seconds=res["seconds"])
         return res["ok"], res["text"]
+
+    def drive_cmd(self, step: dict) -> str:
+        if step.get("cmd"):
+            return step["cmd"]
+        script = DRIVES.get(step.get("drive", ""))
+        return f"python3 {script} {step.get('args', '')}".strip() if script else ""
+
+    def drive_loop(self, step: dict, cmd: str, depth: int = 0) -> tuple[bool, dict | None, str]:
+        """駆動を打ち、pause のたびに worker へ渡して打ち直す。(成功, 最後の結果, 出力) を返す。"""
+        cwd = step.get("cwd", self.cwd)
+        texts = []
+        for _ in range(step.get("max_pauses", 12) + 1):
+            code, text = self.run_cmd({**step, "cmd": cmd})
+            texts.append(text)
+            out = last_json(text)
+            if out is None:
+                return False, None, "\n".join(texts) + f"\n駆動の結果 JSON を読めない（exit={code}）"
+            if out.get("status") == "ok":
+                return True, out, "\n".join(texts)
+            item = (out.get("items") or [{}])[0]
+            if out.get("status") != "gate" or not item.get("result_file"):
+                return False, out, "\n".join(texts)
+            kind = item.get("pause", out.get("next", "pause"))
+            self.cur.setdefault("pauses", []).append(kind)
+            res_file = Path(item["result_file"])
+            if item.get("command") and depth == 0:
+                ok, sub, sub_text = self.drive_loop(step, item["command"], depth + 1)
+                texts.append(sub_text)
+                if not ok:
+                    return False, sub, "\n".join(texts) + f"\n{kind} の駆動が止まった"
+                res_file.write_text(json.dumps({"review_status": (sub.get("metrics") or {}).get("review_status")
+                                                or "unknown"}))
+                continue
+            pf = item.get("prompt_file")
+            if not pf or not Path(pf).is_file():
+                return False, out, "\n".join(texts) + f"\n{kind} の prompt_file が無い"
+            prompt = (f"作業: {kind}\n作業場所: {cwd}\n\n{Path(pf).read_text()}\n\n"
+                      f"終えたら結果ファイル {res_file} を書く。")
+            res = self.call_worker(step, prompt, cwd, f"{step['id']}-{kind}-{len(self.cur['pauses'])}")
+            self.add_usage("work", res)
+            texts.append(f"## {kind} の worker\n{res['text'][-TAIL:]}")
+            if not res_file.is_file():
+                return False, out, "\n".join(texts) + f"\n{kind} の worker が結果ファイルを書かなかった"
+        return False, None, "\n".join(texts) + f"\npause が上限 {step.get('max_pauses', 12)} を超えた"
+
+    def do_drive(self, step: dict) -> tuple[bool, str]:
+        started = time.time()
+        cmd = self.drive_cmd(step)
+        if not cmd:
+            self.cur.update(exit=2, text=f"段 {step['id']} に cmd も知っている drive も無い")
+            return False, self.cur["text"]
+        if "{pr}" in cmd:
+            if not self.plan.get("Pull Request"):
+                self.cur.update(exit=2, text="cmd の {pr} を置き換える Pull Request がまだ無い")
+                return False, self.cur["text"]
+            cmd = cmd.replace("{pr}", self.plan["Pull Request"])
+        ok, out, text = self.drive_loop(step, cmd)
+        if out:
+            self.cur["counts"] = out.get("metrics") or {}
+        self.cur.update(exit=0 if ok else 1, text=text, seconds=round(time.time() - started, 1))
+        return ok, text
 
     def git(self, *args: str) -> str:
         return subprocess.run(["git", *args], cwd=self.cwd, capture_output=True, text=True).stdout.rstrip()
@@ -558,7 +673,8 @@ class Supervisor:
                 else:
                     result, reason, nxt = "止まった", f"判断が知らない値を返した: {dec}", None
             else:
-                do = {"run": self.do_run, "work": self.do_work, "pr": self.do_pr}[step["type"]]
+                do = {"run": self.do_run, "work": self.do_work, "pr": self.do_pr,
+                      "drive": self.do_drive}[step["type"]]
                 ok, _ = do(step)
                 if step["type"] == "run" and self.is_skip(step, self.cur.get("exit")):
                     nxt = None if step["skip_to"] == "end" else step["skip_to"]
@@ -585,6 +701,11 @@ class Supervisor:
             f"| {e['id']} | {e['llm']['turns']} | {e.get('seconds', '')} | {e['llm']['cache_read']} | "
             f"{e['llm']['cache_write']} | {e['llm']['output']} | ${e['llm']['cost']:.3f} |"
             for e in self.log if e.get("llm")) or "| 無し | | | | | | |"
+        counts = {}
+        for e in self.log:
+            if "counts" in e:
+                counts[e["id"]] = e["counts"]
+        counts_line = "; ".join(f"{k}: {counts_text(v)}" for k, v in counts.items()) or "無し"
         text = f"""## 持ち場の報告
 
 - 持ち場: {self.plan.get('持ち場')}
@@ -598,6 +719,7 @@ class Supervisor:
 - 提示物: 無し
 - 理由: {reason}
 - 通った段: {steps}
+- 件数: {counts_line}
 - LLM の使用量: 入力 {l['input']} / cache read {l['cache_read']} / cache write {l['cache_write']} / 出力 {l['output']} / ${l['cost']:.3f}
 - 記録: {self.dir}
 
@@ -701,19 +823,26 @@ def plan_impl(a) -> dict:
 
 def plan_check(a) -> dict:
     pr = a.pr
-    scope = (" --scope " + " ".join(a.scope)) if a.scope else ""
+    if a.scope:
+        # 範囲が決まっていれば駆動で回す（最終ゲートは全体のテスト）
+        refactor = {"id": "refactor", "type": "drive", "drive": "cross-refactoring", "kind": "構造改善",
+                    "stage": "構造改善", "timeout": 3600,
+                    "args": f"{pr} --workflow-step --scope {' '.join(map(shlex.quote, a.scope))} "
+                            f"--baseline-test {shlex.quote(PYTEST.format(paths='.'))}",
+                    "next": "review"}
+    else:
+        # 範囲を決める判断が要るので Skill ごと回す
+        refactor = {"id": "refactor", "type": "work", "full": True, "kind": "構造改善", "stage": "構造改善",
+                    "timeout": 3600, "prompt": f"/ndf:cross-refactoring {pr}", "next": "review"}
     return {
         "持ち場": "検査", "課題": a.issue or [], "モード": a.mode, "作業場所": a.worktree,
         "規則": RULE_CHECK, "上限": 12, "Pull Request": str(pr),
         "steps": [
             {"id": "assess", "type": "run", "preset": "assess", "stage": "構造改善", "skip_to": "review",
              "on_fail": "refactor", "next": "refactor"},
-            {"id": "refactor", "type": "work", "full": True, "kind": "構造改善", "stage": "構造改善",
-             "timeout": 3600, "prompt": f"/ndf:cross-refactoring {pr}{scope}", "next": "review"},
-            {"id": "review", "type": "work", "full": True, "kind": "実装レビュー", "stage": "実装レビュー",
-             "timeout": 3600, "prompt": f"/ndf:cross-review {pr} --max-rounds 4\n\n"
-                                        "終わったら、ラウンド数・指摘の件数・未解決の件数を報告する。待ちは前景で行う。",
-             "next": "test-all"},
+            refactor,
+            {"id": "review", "type": "drive", "drive": "cross-review", "kind": "実装レビュー",
+             "stage": "実装レビュー", "timeout": 3600, "args": f"{pr} --max-rounds 4", "next": "test-all"},
             {"id": "test-all", "type": "run", "stage": "完了判定", "timeout": 1800, "rerun_failed": True,
              "cmd": "git pull -q --rebase && " + PYTEST.format(paths="."), "on_fail": "judge", "next": "ready"},
             {"id": "judge", "type": "judge", "inputs": ["test-all"],

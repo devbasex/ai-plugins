@@ -37,15 +37,8 @@ PR を**既定の母集合（claude / codex / kiro とホスト）から選ん�
 - [docs/04-contracts.md](docs/04-contracts.md) — 状態ファイルの形式と AI への入出力の契約（手順の途中では読まない）
 - [docs/05-pool-and-convergence.md](docs/05-pool-and-convergence.md) — 誰がレビューし、いつ止めるか（母集合・担当の輪番・認証・終了基準の 3 層）
 - [docs/06-evidence.md](docs/06-evidence.md) — 指摘に求める根拠と反証条件、独立発見の規約、効果の測定（4 つの方式と限界）
-- [scripts/state.py](scripts/state.py) — state.json 操作（uv 自己完結スクリプト、stdlib のみ）
-- [scripts/launch-reviewer.sh](scripts/launch-reviewer.sh) — レビュワー起動の入口（4 ランタイム共通）。`launch-codex.sh` / `launch-agy.sh` はここへの薄い委譲
-- [scripts/monitor.py](scripts/monitor.py) — codex/agy プロセス多軸監視 (sentinel / pidfile / 早期エラー / stall / hard timeout / result.json)
-- [scripts/wait-review.sh](scripts/wait-review.sh) — `monitor.py` の薄ラッパ（互換用）
-- [scripts/rotate-pr.sh](scripts/rotate-pr.sh) — PR ローテーション
-- [scripts/measure.py](scripts/measure.py) — 効果の測定（状態ファイル 1 つを読む）。**状態を保存するたびに実行の要約として呼ばれ**、出力が作業ツリーの外の要約の `measure` に残る（#662。手順から手で呼ぶ必要は無い）
-
-メインセッションからは `$SCRIPTS/state.py <subcommand>` 形式で呼ぶだけで、
-state.json の読み書きや AI launcher 起動・完了待ちは全て委譲される。
+- [scripts/drive.py](scripts/drive.py) — 収束ループの駆動（LLM が要る地点で pause を返して止まる）
+- [scripts/state.py](scripts/state.py) — state.json 操作。起動・監視・巻き直しは `launch-reviewer.sh` / `monitor.py` / `rotate-pr.sh`、効果の測定は `measure.py`（状態を保存するたびに呼ばれる）
 
 ## 設計方針
 
@@ -97,30 +90,8 @@ state.json の読み書きや AI launcher 起動・完了待ちは全て委譲�
 /ndf:cross-review 123 --verify-command "pytest" --verify-exit-code 1
 ```
 
-### 自動レビュー観点テンプレート
-
-`state.py init` は GitHub API の `pulls/<PR>/files --paginate` で変更ファイルを全件取得して分類し、
-そのラウンドのレビュー担当に同じ追加観点を渡す。`--focus` /
-`--extra-instructions-file` は、この自動テンプレートの後ろに上乗せされる。
-
-自動カテゴリ:
-
-- `common`: PR 全体の目的、変更範囲、保守性、テスト、ロールバック容易性
-- `docs_only`: ドキュメントのみ PR。企画・説明の妥当性、コード/設定/コマンド/他 docs との整合性
-- `design`: 設計 PR（`issues/` の `-requirements.md` / `-design.md` / `-design-decisions.md`）。3 文書の対応、状態の書き手と読み手の矛盾、外部ツールの挙動の断定に実測の根拠があるか
-- `code`: 設計、正確性、可読性、冗長・重複、言語らしさ、セキュリティ、関数/ファイルの責務とサイズ
-- `db_migration`: データ設計、型、NULL/default/制約/index、既存データ、backfill、ロールバック
-- `test`: テストの仕様性、境界値、失敗系、flaky リスク
-- `dependency`: 依存追加/更新、lockfile、ライセンス、互換性、セキュリティ
-- `config_ci`: CI/設定、権限、secret、cache、環境差分
-- `api_contract`: API 契約、互換性、schema、status、エラー形式、認可
-- `auth_security`: 認証/認可、secret/PII、CSRF/CORS/session/JWT/OAuth
-- `frontend`: UI 状態、アクセシビリティ、レスポンシブ、状態管理、表示文言
-- `performance`: N+1、I/O、メモリ、ロック、cache、queue、冪等性
-- `deletion_rename`: 削除/リネーム参照漏れ、後方互換、移行手順
-- `generated`: 生成物、lockfile、再生成手順、差分ノイズ
-- `i18n`: 翻訳キー、fallback、変数展開、表示幅、文言整合
-- `infra`: IaC / Docker / Kubernetes 等の権限、secret、公開範囲、ロールバック
+`init` は変更ファイルを分類して自動のレビュー観点を組み立て、`--focus` / `--extra-instructions-file` をその後ろに
+上乗せする。分類の一覧は [docs/04-contracts.md](docs/04-contracts.md) の「自動レビュー観点テンプレート」にある。
 
 ### `--rotate-mode` の選び方
 
@@ -133,241 +104,55 @@ state.json の読み書きや AI launcher 起動・完了待ちは全て委譲�
 - `gh` CLI が認証済み。担当になる CLI は `init` が起動前に確かめ、通らない者は外して続ける（誤検知するときは `NDF_SKIP_AUTH_CHECK=1`）
 - `Agent(subagent_type="general-purpose", ...)` でサブエージェントを起動可能
 
-## 事前確認（`state.py init` が自動実施）
+## 事前確認
 
-ループ開始前に **4 つのプリチェック** が必要だが、すべて `scripts/state.py init`
-が内部で実施する。メインは結果を KEY=VALUE 形式で受け取るだけで良い。
-
-| # | 対策 | スクリプト側で何をするか |
-|---|---|---|
-| 1 | 自分の PR 判定（422 回避） | `gh api user` と `gh pr view --json author` を比較し `is_own_pr` / `event_downgrade` を state.json に書く |
-| 2 | worktree 分離 | `git worktree add <worktree-base>/<owner>--<repo>/pr<PR> <head>` を冪等実行（`<worktree-base>` は `NDF_WORKTREE_BASE` env > `<システム tmpdir>/ndf-worktrees` の優先順で解決）。パスが存在しても現リポジトリの登録済み worktree でなければ `.stale-<ts>` に退避して作り直す。**流用するときは PR の head へ揃える**（前回の実行の残りをレビューさせない。再開の経路も同じ）。`gh pr view --json headRefName,headRefOid,isCrossRepository` で取った基準のコミットへ hard reset し、追跡対象外のファイルを消す（tmp ディレクトリは `-e` で除外。フォーク PR は `refs/pull/<PR>/head` から取り込む）。**同じ同期を `start-round` がラウンドごとに行う。** 作成時と再開時だけでは、修正を作業ツリーの外で行って push したときに 1 つ前の内容をレビューする。head と一致していて変更が無ければ何も発行せず、追跡対象の変更・未 push のコミット・基準を取り込めないときは **exit 8** で止める（1 はループを抜ける値なので使わない）。解決した head branch は `state.json` へ書き戻す（巻き直しで古くなるため）。条件と理由は `docs/01-state-and-review.md` の「ラウンドの開始時の同期」にある |
-| 3 | agy の作業領域 | `launch-agy.sh` が `--add-dir` で作業ツリーを宣言する。**tmp dir は `<worktree>/.cross_review/`** を採用し、宣言する作業領域を 1 つに保つ |
-| 4 | 既存コメント差分 | `fix/scripts/fetch-pr-comments.sh` で 3 ソース (インラインコメント / レビュー body / PR レベルコメント) を一括取得し `$TMP_DIR/cross-review-pr<PR>-existing-comments.txt` に保存し、担当のプロンプトへ**内容をインライン埋め込み**する。**2 ラウンド目以降は `start-round` が `--strict` で取り直す**（1 ソースでも失敗したら前の控えのまま `⚠` で続ける） |
-
-`<worktree-base>` の解決順と worktree の実パスの形は [docs/04-contracts.md](docs/04-contracts.md) の「`<worktree-base>` の解決順」にある。
-
-### intent / posted_as の両保持（最重要）
-
-GitHub は **自分の PR には `REQUEST_CHANGES` でレビューを投稿できない**
-（`HTTP 422`）。state.json には **両方** を保持する:
-
-```json
-"codex": {
-  "intent": "REQUEST_CHANGES",   // AI の本来判定。ループ収束判定に使う
-  "posted_as": "COMMENT",        // 投稿する側が送信の時点で落とした形
-  "comments": 5, "review_url": "..."
-}
-```
-
-格下げは投稿する側（取り込み）が送信の時点で行う。担当は本来の判定だけを書く。
-`state.py judge` は `intent` を見るので、ダウングレード投稿してもループは続行する。
+自分の PR の判定・作業ツリーの分離・agy の作業領域・既存コメントの控えの 4 つは `state.py init` が行う。
+中身と `intent` / `posted_as` の両保持は [docs/04-contracts.md](docs/04-contracts.md) の「事前確認」にある。
 
 ## 全体フロー
 
-```mermaid
-flowchart TD
-    Start([事前確認 / loop 開始前に 1 回だけ]):::phase --> Init["worktree 作成 + state.json 初期化<br/>・自分の PR 判定 → event downgrade 設定<br/>・&lt;worktree-base&gt;/pr&lt;PR&gt; を用意<br/>・既存コメントスナップショット保存"]
-    Init --> Round["Round N start<br/>current_pr = PR#"]:::phase
+1 ラウンドは「2 席の並列レビュー → 根拠の検証 → 判定（`intent` ベース）」で、一方でも REQUEST_CHANGES なら
+修正 → 収束チェック（`max-rounds`・振動・CI の失敗・`rotate-after` の巻き直し）→ 次のラウンドへ進む。結果を残さなかった
+席は同じラウンドで 1 度だけ起動し直す。ループを抜けたら（`final` がどの値でも）最終スイープで open thread を 0 にし、
+`verify-sweep` が GitHub 側の実数で確かめる。
 
-    Round -.並列バックグラウンド.-> Seats["レビュー担当 2 席（start-round が返す）<br/>launch-reviewer.sh &lt;席&gt; を席ごとに起動<br/>→ 指摘の控え + &lt;席&gt;-review-pr&lt;PR&gt;-result.json<br/>read-result が組み立てて投稿（先頭: round N / 席 / intent）"]
-    Seats --> Decide{"判定 (intent ベース)"}
+## 実行
 
-    Decide -->|"結果なし (2 度目は final = error)"| Relaunch["結果を残さなかった側だけ<br/>同じラウンドで 1 度起動し直す"]
-    Relaunch --> Decide
-    Decide -->|"両席 APPROVE / --only で外した席"| Approved([final = approved]):::ok
-    Decide -->|一方でも REQUEST_CHANGES| Fix["Agent (general-purpose)<br/>/ndf:fix &lt;PR&gt; --defer-nit を worktree 内で実行<br/>・critical/major/minor 修正 + コミット（送らない）<br/>→ $TMP_DIR/fix-pr&lt;#&gt;-result.json<br/>merge-fix が送信・返信・決着・まとめ"]
-
-    Fix --> Check{収束チェック}
-    Check -->|max-rounds 到達| MaxR([final = max_rounds]):::stop
-    Check -->|振動検知 50% 重複| Osc([final = oscillation]):::stop
-    Check -->|CI failure code-related| Err([final = error]):::stop
-    Check -->|"CI failure meta-only (Assignees 等)"| Round
-    Check -->|round_in_pr >= rotate-after| Rotate["PR rotation<br/>light (default): 同ブランチで巻き直し<br/>squash (opt-in): 新ブランチ + squash 統合<br/>light は Agent が title/body 再生成"]
-    Check -->|それ以外| Round
-    Rotate --> Round
-
-    Approved --> Sweep["最終スイープ (必須)<br/>Agent (general-purpose)<br/>/ndf:fix &lt;PR&gt; を再実行<br/>・残 open review thread を全て確認<br/>・修正可能な minor/nit は修正 + コミット<br/>・判断保留 nit も決着を求める<br/>→ 共通層が送信・返信・決着 → open thread 0"]
-    MaxR --> Sweep
-    Osc --> Sweep
-    Err --> Sweep
-    Sweep --> Report[ラウンドサマリ報告<br/>+ 残 deferred nit を参考として列挙]
-
-    classDef phase fill:#eef,stroke:#557
-    classDef ok fill:#dfd,stroke:#383
-    classDef stop fill:#fdd,stroke:#933
-```
-
-## 実行ステップ概要（メインの bash 骨組み）
-
-各ステップの詳細は `docs/` 参照。メインは以下のテンプレートで scripts/ を呼ぶだけ:
+収束ループは `scripts/drive.py`（この SKILL.md と同じ置き場所の `scripts/`）が進める。メインはこのコマンドを
+打ち、最後の行の結果 JSON（`step_result` の形）の `status` を見る。**値のある引数だけを渡す**（再開で渡した
+引数の扱いは [docs/04-contracts.md](docs/04-contracts.md) の「再開で渡した引数の扱い」）。
 
 ```bash
-# スクリプトの置き場所を解決の入口（scripts/resolve.sh）に尋ねる。入口を探すこの 1 段と
-# 候補の順序は development-workflow/references/scripts-lookup.md にある。
-for R in '${CLAUDE_PLUGIN_ROOT}' "$(git rev-parse --show-toplevel 2>/dev/null)/plugins/ndf" \
-  ~/.claude/plugins/cache/*/ndf/* .kiro/skills/*/../.. ~/.kiro/skills/*/../.. \
-  ~/.codex/{.tmp/,}marketplaces/*/plugins/ndf ~/.gemini/config/plugins/ndf plugins/ndf; do
-  [ -f "$R/scripts/resolve.sh" ] && break; R=
-done
-[ -n "$R" ] || { echo "NDF の scripts/resolve.sh が見つからない" >&2; exit 3; }
-SCRIPTS=$(bash "$R/scripts/resolve.sh" scripts cross-review) || exit 3
-
-# STATE_PR は state.json のキー (= 最初に init した PR 番号)。rotation 後もパスは
-# 変わらないため常に STATE_PR を渡す。現在の PR は state.json の current_pr を見る。
-STATE_PR=$INITIAL_PR
-
-# ROTATE_MODE は引数 --rotate-mode (default=light)。light は Step 6b で title/body を生成。
-ROTATE_MODE=${ROTATE_MODE:-light}
-
-# Step 0: state 初期化 / 再開
-# ⚠ eval はコマンド置換の終了コードを潰す。変数で受けてから eval する（docs/01 参照）。**値のある引数だけを渡す**（常に渡すと、再開のたびに指定していない既定値で上書きする）。再開で渡した引数がどう扱われるか（反映する / 参加者を作り直す / 反映しない）は `docs/04-contracts.md` の「再開で渡した引数の扱い」にある。
-INIT_VARS=$("$SCRIPTS/state.py" init "$STATE_PR" \
-          ${MAX_ROUNDS:+--max-rounds "$MAX_ROUNDS"} ${ROTATE_AFTER:+--rotate-after "$ROTATE_AFTER"} \
-          ${HOST:+--host "$HOST"} \
-          ${ONLY:+--only "$ONLY"} \
-          ${EXCLUDE:+--exclude "$EXCLUDE"} ${INCLUDE:+--include "$INCLUDE"} ${REQUIRE_ALL:+--require-all} \
-          ${FOCUS:+--focus "$FOCUS"} \
-          ${VERIFY_COMMAND:+--verify-command "$VERIFY_COMMAND"} ${VERIFY_EXIT_CODE:+--verify-exit-code "$VERIFY_EXIT_CODE"} \
-          ${EXTRA_INSTRUCTIONS_FILE:+--extra-instructions-file "$EXTRA_INSTRUCTIONS_FILE"}) || exit $?
-eval "$INIT_VARS"
-# eval で TMP_DIR がセットされる。後続スクリプトに env として伝播させる。
-export CROSS_REVIEW_TMP_DIR="$TMP_DIR"
-cd "$WORKTREE"
-
-while :; do
-  # Step 1: round 開始判定 (exit 1=max_rounds 到達でループを抜ける / 5=後始末が未了 / 8=同期できず中断)
-  ROUND_VARS=$("$SCRIPTS/state.py" start-round "$STATE_PR") || { RC=$?; [ "$RC" -eq 1 ] && break; exit "$RC"; }
-  eval "$ROUND_VARS"
-
-  # Step 2: 並列レビュー（担当は start-round が REVIEWERS / REVIEWERS_CSV で返す）
-  # **シェル変数で絞り直さない。** 返る一覧は 1 者指定と席の埋め合わせを反映済みである。
-  # **起動し直しも同じ経路を通す**（#583）。7 のときは名前の出た担当だけを入れて先頭へ戻る。
-  AGENTS=$REVIEWERS; AGENTS_CSV=$REVIEWERS_CSV; RELAUNCHED=
-  while :; do
-  for r in $AGENTS; do "$SCRIPTS/launch-reviewer.sh" "$r" "$STATE_PR" "$ROUND"; done
-  # 監視: 上限は上限の表（review 1200 秒 / stall は席のランタイム別 codex 180・agy 480・kiro 480・claude 900）。失敗時は kill して返す。担当は `--agents` で渡す。
-  #   Bash の 1 回 600 秒に収まらないため背景で起動し、wait（1 回 540 秒以内）を 124 のあいだ **別の Bash の呼び出しで** 呼び直す。**繰り返しを 1 回の呼び出しへ書かない**（2 回目の待ちで合計が 600 秒を超え、ホストに打ち切られる。docs/01）。
-  #   監視と取り込みの終了コードは読まない。結果なしは NO_RESULT として state に残り、Step 3 が受け取る。
-  "$SCRIPTS/bg-wait.sh" run "$TMP_DIR/review.rc" -- "$SCRIPTS/monitor.py" "$STATE_PR" --phase review --agents "$AGENTS_CSV"
-  "$SCRIPTS/bg-wait.sh" wait "$TMP_DIR/review.rc"   # 124 = まだ。**この 1 行を別の Bash の呼び出しとして呼び直す**
-  # 取り込みがレビューを投稿する（担当は投稿しない、#730）。出力は件数と参照だけ。
-  for r in $AGENTS; do "$SCRIPTS/state.py" read-result "$STATE_PR" "$r" || true; done
-
-  # Step 2.5: 根拠の検証（#156）。順序と理由は docs/06-evidence.md の「走らせる順序」。
-  #   飛ばすと、判定が読む区分が統合も実行の結果も反映しないまま決まる。
-  # ⚠ 起動 → 監視 → 取り込みは critique-round.sh が持つ。**未起動の担当を監視へ渡さない**
-  #   （渡すと 30 秒待って PIDFILE_BAD (exit 6) が返る）ことと、有効な反証が揃わないときに同じラウンドで 1 度だけ取り直すことを、この 1 本が引き受ける。
-  "$SCRIPTS/state.py" verify-findings "$STATE_PR"
-  "$SCRIPTS/bg-wait.sh" run "$TMP_DIR/critique.rc" -- "$SCRIPTS/critique-round.sh" "$STATE_PR" "$ROUND" $REVIEWERS
-  "$SCRIPTS/bg-wait.sh" wait "$TMP_DIR/critique.rc"  # 同上。124 のあいだ、別の呼び出しとして呼び直す
-
-  # Step 3: 判定 (0=収束 / 2=修正へ / 7=結果なし / 8=待ち行列に残あり / 1=中断)。引き継いだ指摘が残っていれば、
-  #   両者が承認しても 2 を返して修正の工程へ回す。置換の終了コードは変数で受けてから読む。
-  JUDGE_VARS=$("$SCRIPTS/state.py" judge "$STATE_PR"); JUDGE_RC=$?; eval "$JUDGE_VARS"
-  if [ "$JUDGE_RC" -eq 8 ]; then  # 上限で積んだ投稿が残っている。流してから判定し直す（7 より先に見る）
-    "$SCRIPTS/state.py" flush "$STATE_PR"
-    JUDGE_VARS=$("$SCRIPTS/state.py" judge "$STATE_PR"); JUDGE_RC=$?; eval "$JUDGE_VARS"
-  fi
-  if [ "$JUDGE_RC" -eq 7 ] && [ -z "$RELAUNCHED" ]; then  # 同じラウンドで 1 度だけ起動し直す
-    AGENTS=$RELAUNCH_AGENTS; AGENTS_CSV=$RELAUNCH_AGENTS_CSV; RELAUNCHED=1; continue
-  fi
-  break
-  done
-  case $JUDGE_RC in 0) break ;; 2) : ;; *) exit "$JUDGE_RC" ;; esac   # 1=結果なしのまま中断
-  # 8 のまま残るのは上限が続いているとき。state は残るので、回復後に同じ引数で再開する。
-
-  # Step 4: 振動検知 (4=oscillation)
-  "$SCRIPTS/state.py" check-oscillation "$STATE_PR" || [ $? -eq 2 ] || exit 4
-
-  # Step 5: 修正サブエージェント起動 (Agent tool) → $TMP_DIR/fix-pr<STATE_PR>-result.json
-  #   - メインで Agent(subagent_type=general-purpose, ...) を呼ぶ。docs/02 参照
-  #   - tmp パスは launcher / monitor.py と同じく **STATE_PR ベース** で統一
-  # Step 5 後段: fix 戻り値マージ + CI 分類 (3=code-fail で中断)
-  "$SCRIPTS/state.py" merge-fix "$STATE_PR"
-
-  # Step 6: PR ローテーション判定 (0=rotate/2=keep)。state.json の current_pr を内部更新。
-  if "$SCRIPTS/state.py" should-rotate "$STATE_PR"; then
-    # Step 6a: 旧 PR の素材 (title/body/isDraft + git log/diff stat) を dump
-    PREPARE_VARS=$("$SCRIPTS/rotate-pr.sh" prepare "$STATE_PR") || exit $?; eval "$PREPARE_VARS"
-
-    # Step 6b: light モードのみ。**メインセッション側で Agent(subagent_type="general-purpose") を起動して**
-    #   prepare.json を読ませ、現状の差分・実装を反映した title/body を
-    #   $TMP_DIR/rotate-pr<STATE_PR>-newtext.json に書き出させる。
-    #   詳細プロンプトは docs/02-fix-and-rotation.md Step 6b 参照。
-    #   squash モードでは Step 6b 不要。
-    #
-    #   ⚠ Bash 単体では Agent ツールを呼べない。下記のフローは「メイン会話セッション側で」
-    #   実行される前提なので、bash の while ループそのものは pseudo-code として読み、
-    #   実際には以下の 3 段階を **メインが順に駆動する** こと:
-    #     (1) bash 側で `rotate-pr.sh prepare $STATE_PR` を実行 (これは普通の bash)
-    #     (2) メインが Agent(...) を起動して newtext.json を書かせる (bash の外)
-    #     (3) bash 側で `rotate-pr.sh execute $STATE_PR --mode light` を実行
-    #   下記の if exit 10 は **誤ってメイン介在なしで Step 6c に進むことを防ぐガード** であり、
-    #   exit 10 を観測したらメインは Step 6b の Agent を起動し、newtext.json が
-    #   生成されてから **同じ STATE_PR で Step 6c (execute) を直接呼び直す**。
-    #   state.json は完全に再開可能 (prepare.json はそのまま再利用される)。
-    NEWTEXT_JSON="$TMP_DIR/rotate-pr$STATE_PR-newtext.json"
-    if [ "$ROTATE_MODE" = "light" ] && [ ! -s "$NEWTEXT_JSON" ]; then
-      echo "⏸  light モード: メインセッションで Agent(general-purpose) を起動し" >&2
-      echo "    $NEWTEXT_JSON を生成してから rotate-pr.sh execute $STATE_PR --mode light を実行してください" >&2
-      echo "    (docs/02-fix-and-rotation.md Step 6b 参照 / 再開プロトコルは下記 '## 再開プロトコル')" >&2
-      exit 10
-    fi
-
-    # Step 6c: 実行。NEW_PR / NEW_PR_URL / NEW_BRANCH を eval で取り込む。
-    ROTATE_VARS=$("$SCRIPTS/rotate-pr.sh" execute "$STATE_PR" --mode "$ROTATE_MODE") || exit $?; eval "$ROTATE_VARS"
-
-    "$SCRIPTS/state.py" set-current-pr "$STATE_PR" "$NEW_PR" --head-branch "$NEW_BRANCH"
-    # NOTE: STATE_PR は変えない。次ループの scripts も $STATE_PR を渡す。
-  fi
-done
-
-# Step 7.5: 最終スイープ (必須) — どの終了経路でも、ループを抜けた直後に **メインが
-#   Agent(general-purpose) を起動** して /ndf:fix を再実行し、$TMP_DIR/sweep-pr$STATE_PR-result.json
-#   を書かせる（プロンプトは docs/02 の Step 7.5）。担当はコミットまでで、送信・返信・決着は
-#   次の 1 行が行う（#730）。最終 APPROVE ラウンドの minor/nit はここで拾う。
-python3 "$SCRIPTS/../../../scripts/lib/result_posts.py" fix --pr "${CURRENT_PR:-$PR}" \
-  --result "$TMP_DIR/sweep-pr$STATE_PR-result.json" --worktree "$WORKTREE" || exit $?
-
-# Step 7.5 後段: 最終スイープの結果を GitHub 側の実数で検証する (必須)
-#   exit 0 = 未解決の指摘なし / exit 6 = 残っている (件数と理由を完了報告へ含めて続行)
-#   それ以外の終了コードは検証そのものの失敗。報告へ進まずここで止める。
-"$SCRIPTS/state.py" verify-sweep "$STATE_PR" || { RC=$?; [ "$RC" -eq 6 ] || exit "$RC"; }
-
-# Step 8: 終了処理 (deferred nit + ラウンドサマリ + スイープ結果)
-"$SCRIPTS/state.py" report "$STATE_PR"
+python3 <この Skill の置き場所>/scripts/drive.py <PR> [--rotate-mode light|squash] [--max-rounds N] [--rotate-after K] \
+  [--host H] [--only R] [--exclude N] [--include N] [--require-all] [--focus TEXT] \
+  [--verify-command CMD] [--verify-exit-code N] [--extra-instructions-file PATH]
 ```
 
-各ステップの内容と契約（state.json / result.json スキーマ等）の詳細は:
+待ちはコマンドの中で行う（レビュー 1 ラウンドで 20 分を超えうる）。Claude Code では `run_in_background` で起動し、
+完了通知を 1 回受ける。
 
-- Step 0〜4 — [docs/01-state-and-review.md](docs/01-state-and-review.md)
-- Step 5〜8 (最終スイープ Step 7.5 含む) — [docs/02-fix-and-rotation.md](docs/02-fix-and-rotation.md)
+| status（終了コード） | 意味 | メインがすること |
+| --- | --- | --- |
+| `ok`（0） | 最終スイープと検証まで終わった | `items[0].report` と `metrics` を「作業完了報告」へ写す |
+| `gate`（20）`pause: fix` | 一方でも REQUEST_CHANGES | Agent(general-purpose) に `items[0].prompt_file` を渡し、`result_file` を書かせてから同じコマンドを打ち直す |
+| `gate`（21）`pause: sweep` | ループを抜けた（どの `final` でも） | 同上（最終スイープ） |
+| `gate`（22）`pause: newtext` | light の巻き直し | 同上（新しい title / body） |
+| `stopped`（1） | 中断（`metrics.exit` に元の終了コード） | `summary` を報告して止まる |
+
+**pause の JSON はファイルのパスだけを載せる。** プロンプトは `/ndf:fix` の呼び出しと PR 固有の値
+（リポジトリ・ブランチ・前ラウンドのレビュー・戻り値ファイル）だけを持ち、方針と戻り値の形は
+[docs/02-fix-and-rotation.md](docs/02-fix-and-rotation.md) を指す。**修正はメインで書かない**（担当はコミット
+までで、送信・返信・決着は駆動の取り込みが行う）。
+
+再開は同じコマンドを打ち直すだけである。進みは `$TMP_DIR/drive-pr<PR>.json` と state.json にあり、pause の
+結果ファイルがあればその続きから進む。`metrics` は state.json から数えた件数（`rounds` / `prs` / `findings` /
+`fixed` / `deferred` / `rejected` / `unresolved` / `final` / `review_status`）である。
+
+各段の中身と契約は次にある。
+
+- 初期化・ラウンド・判定・振動 — [docs/01-state-and-review.md](docs/01-state-and-review.md)
+- 修正・巻き直し・最終スイープ・終了処理 — [docs/02-fix-and-rotation.md](docs/02-fix-and-rotation.md)
 - 状態ファイルと入出力の契約 — [docs/04-contracts.md](docs/04-contracts.md)
-
-## light モード rotation の再開プロトコル (exit 10 を観測した時)
-
-bash ループは Agent tool を呼べないため、light モードでは Step 6b の介入が必須。
-メインセッションはループ全体を 1 回の bash で完結させず、以下のように駆動する:
-
-1. **通常のループ実行** — Step 0〜6a まで bash で進めると、newtext.json が未生成の
-   ため `exit 10` で停止する。state.json には prepare.json までの状態が
-   永続化されているので **そのまま再開可能**。
-2. **Step 6b (Agent 起動)** — メインが Agent(subagent_type=`general-purpose`) を
-   起動し、prepare.json を読ませて `$TMP_DIR/rotate-pr$STATE_PR-newtext.json` を
-   書き出させる (プロンプトテンプレートは docs/02-fix-and-rotation.md Step 6b)。
-3. **Step 6c (execute) を直接呼ぶ** — メインが bash で以下を実行:
-
-    ```bash
-    ROTATE_VARS=$("$SCRIPTS/rotate-pr.sh" execute "$STATE_PR" --mode light) || exit $?; eval "$ROTATE_VARS"
-    "$SCRIPTS/state.py" set-current-pr "$STATE_PR" "$NEW_PR" --head-branch "$NEW_BRANCH"
-    ```
-
-4. **ループ再開** — Step 7 (次ラウンド) からループ全体を再開する。`STATE_PR` は
-   不変なので、`start-round` 以降は通常通り進む。
-
-> ⚠ exit 10 はエラーではなく **メイン介入待ちの一時停止シグナル**。final ステータスには
-> 反映しない (中断扱いではない)。次回 round カウントにも影響しない。
 
 ## レビュー出力の制約と運用の切り分け
 
@@ -388,33 +173,15 @@ bash ループは Agent tool を呼べないため、light モードでは Step 
 
 ## 作業完了報告（必須）
 
-ループ終了後、メインからユーザへの報告:
+駆動の結果（`status: ok`）の `items[0].report`（`state.py report` の出力）と `metrics` を材料に、次を報告する。
 
-- **最終ステータス**: `approved` / `max_rounds` / `oscillation` / `error`
-- **総ラウンド数 / PR 数**: 例: `5 rounds / 2 PRs (rotated 1 回)`
-- **PR 履歴**: 各 PR 番号 + closed/open 状態 + round 数
-- **各ラウンドのサマリ表**:
+- **最終ステータス**（`final`: `approved` / `max_rounds` / `oscillation` / `error`）・**ラウンド数 / PR 数**（`rounds` / `prs`）
+- **各ラウンドのサマリ表**（round・PR・担当と判定・fix・CI。担当はラウンドごとに変わるため、担当と判定を 1 つの列にする）
+- **最終スイープ結果**: `resolved` / `fixed_in_sweep` / `remaining_open`（`unresolved`）。**0 が正常**で、0 でなければ理由を書く
+- **残 deferred nit**・**rejected 件数**・**最終 PR URL**
+- **検証**（スイープの結果ファイルの `verification`）: 実行したコマンドと終了コード。実行しなかったときはその理由
 
-  | round | PR | レビュー | fix | CI |
-  |---|---|---|---|---|
-  | 1 | #123 | agy=REQUEST_CHANGES (5) / kiro=REQUEST_CHANGES (3) | abc123 (5 fixed, 2 deferred) | ✅ |
-  | 2 | #123 | codex=REQUEST_CHANGES (2) / kiro=APPROVE (0) | def456 (2 fixed) | ✅ |
-  | 3 | #145 | codex=APPROVE (0) / agy=APPROVE (0) | — | — |
-
-  **担当はラウンドごとに変わる。** 席の名前（`claude-2` のような 2 つ目を含む）を取りうる
-  ため、担当と判定を 1 つの列へまとめる。
-
-- **最終スイープ結果** (Step 7.5): `sweep-pr<STATE_PR>-result.json` の `resolved` /
-  `fixed_in_sweep` / `remaining_open`。**`remaining_open` は 0 が正常**（残 open
-  thread あり = 取りこぼし）。0 にできなかった場合は理由を明記
-- **残 deferred nit リスト**（Step 7.5 で Resolve 済み。再対応が要るものがあれば参考列挙）
-- **rejected 件数**（bot 誤指摘で却下したもの）
-- **最終 PR URL**
-- **検証**（`verification`）: 最終スイープの後に実行した検証コマンドと終了コード。
-  実行しなかった場合はその理由（レビューが収束していても、検証を通していない変更は残る）
-
-詳細は PR 上のインラインコメントと state.json に残っているため、本報告では
-繰り返さない。
+詳細は PR 上のインラインコメントと state.json に残っているため、本報告では繰り返さない。
 
 この工程に入ったら記録のコマンド `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "実装レビュー"` を 1 行打つ（issue の本文と盤面の両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「記録のコマンド」を使う）。
 設計だけを載せた Pull Request で呼ばれたときは `"ドキュメントレビュー"` を記録する。

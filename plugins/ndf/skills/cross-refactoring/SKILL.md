@@ -127,16 +127,7 @@ allowed-tools:
   起動しない**（2 は判定できなかったことを示し、飛ばしてよいとは読まない）
 
 ```bash
-# スクリプトの置き場所を解決の入口（scripts/resolve.sh）に尋ねる。入口を探すこの 1 段と
-# 候補の順序は development-workflow/references/scripts-lookup.md にある。
-for R in '${CLAUDE_PLUGIN_ROOT}' "$(git rev-parse --show-toplevel 2>/dev/null)/plugins/ndf" \
-  ~/.claude/plugins/cache/*/ndf/* .kiro/skills/*/../.. ~/.kiro/skills/*/../.. \
-  ~/.codex/{.tmp/,}marketplaces/*/plugins/ndf ~/.gemini/config/plugins/ndf plugins/ndf; do
-  [ -f "$R/scripts/resolve.sh" ] && break; R=
-done
-[ -n "$R" ] || { echo "NDF の scripts/resolve.sh が見つからない" >&2; exit 3; }
-SCRIPTS=$(bash "$R/scripts/resolve.sh" scripts cross-refactoring) || exit 3
-python3 "$SCRIPTS/refactor.py" assess --base origin/develop; echo "exit=$?"
+python3 <この Skill の置き場所>/scripts/refactor.py assess --base origin/develop; echo "exit=$?"
 ```
 
 - Jev を使うには、環境変数 `AI_GATEWAY_API_KEY` があり、対象が公開リポジトリであること。
@@ -180,137 +171,33 @@ flowchart TD
 
 ## 実行
 
-進行全体を 1 本の bash で駆動する。参加者が全て CLI なので、途中でホストへ戻る必要がない
-（単独起動の終わりの `cross-review` を除く）。
+進行は `scripts/drive.py`（この SKILL.md と同じ置き場所の `scripts/`）が進める。参加者が全て CLI なので、止まるのは
+単独起動の最終ゲート（`cross-review`）だけである。メインが決めるのは `--scope` / `--baseline-test` /
+`--round-test` / `--sync-command` で、決めたらこのコマンドを打ち、最後の行の結果 JSON（`step_result` の形）の
+`status` を見る。
 
 ```bash
-# スクリプトの置き場所を解決の入口（scripts/resolve.sh）に尋ねる。入口を探すこの 1 段と
-# 候補の順序は development-workflow/references/scripts-lookup.md にある。
-for R in '${CLAUDE_PLUGIN_ROOT}' "$(git rev-parse --show-toplevel 2>/dev/null)/plugins/ndf" \
-  ~/.claude/plugins/cache/*/ndf/* .kiro/skills/*/../.. ~/.kiro/skills/*/../.. \
-  ~/.codex/{.tmp/,}marketplaces/*/plugins/ndf ~/.gemini/config/plugins/ndf plugins/ndf; do
-  [ -f "$R/scripts/resolve.sh" ] && break; R=
-done
-[ -n "$R" ] || { echo "NDF の scripts/resolve.sh が見つからない" >&2; exit 3; }
-SCRIPTS=$(bash "$R/scripts/resolve.sh" scripts cross-refactoring) || exit 3
-# 収束ループの共通層はプラグインルート直下にある。
-LIB="$(bash "$R/scripts/resolve.sh" scripts)/lib" || exit 3
-
-# **中断（終了コード 4）は握り潰さない。** 取り消しに失敗した状態を「項目 0 件」と
-# 同じ扱いにすると、検証を通っていない変更を Pull Request に残したまま先へ進む。
-rf() {
-  "$SCRIPTS/refactor.py" "$@"; local rc=$?
-  if [ $rc -eq 4 ]; then
-    echo "❌ cross-refactoring を中断しました（refactor.py $1）" >&2
-    exit 4
-  fi
-  return $rc
-}
-
-# 出力を `eval` する呼び出しは**別の関数にする**。`eval "$(rf ...)"` と書くと `rf` は
-# コマンド置換のサブシェルで動くため、`exit 4` はサブシェルしか終わらせない。
-rf_eval() {
-  local out rc
-  out=$("$SCRIPTS/refactor.py" "$@"); rc=$?
-  if [ $rc -eq 4 ]; then
-    echo "❌ cross-refactoring を中断しました（refactor.py $1）" >&2
-    exit 4
-  fi
-  eval "$out"
-  return $rc
-}
-
-rf_eval init "$PR" --scope $SCOPE \
-        --baseline-test "$BASELINE" ${ROUND_TEST:+--round-test "$ROUND_TEST"} \
-        ${BUDGET:+--budget-minutes "$BUDGET"} ${IMPLEMENTER:+--implementer "$IMPLEMENTER"} \
-        ${HOST:+--host "$HOST"} ${EXCLUDE:+--exclude "$EXCLUDE"} ${INCLUDE:+--include "$INCLUDE"} \
-        ${REQUIRE_ALL:+--require-all} \
-        ${CI_CHECK:+--ci-check "$CI_CHECK"} ${WORKFLOW_STEP:+--workflow-step} \
-        ${SEVERITY:+--severity-threshold "$SEVERITY"} \
-        ${SYNC_COMMAND:+--sync-command "$SYNC_COMMAND"} ${PLAN_FILE+--plan-file "$PLAN_FILE"} \
-        $MODEL_ARGS
-export CROSS_REFACTORING_TMP_DIR="$TMP_DIR"
-"$SCRIPTS/prepare-worktrees.sh" "$ID"
-
-# **終わったフェーズを飛ばす**（AC24）。`PHASE` は init が返す再開の地点である。
-todo() {
-  local p
-  for p in propose plan add-tests implement verify final done; do
-    [ "$p" = "$PHASE" ] && return 0
-    [ "$p" = "$1" ] && return 1
-  done
-}
-# 実装担当 1 者のフェーズを起動して待つ。上限は start-phase が状態ファイルの上限の表から
-# 返す（PHASE_TIMEOUT = その段の終わりまでの残り + 余裕）。無音の許容も同じ値にする（決定 24）。
-impl_phase() {
-  rf_eval start-phase "$ID" "$1"
-  "$SCRIPTS/launch-cli.sh" "$IMPL" "$1" "$ID"
-  "$LIB/monitor.py" "$ID" --agents "$IMPL" --tmp-dir "$TMP_DIR" \
-      --stem-template "{agent}-$1-rf$ID" --phase "$1" \
-      ${PHASE_TIMEOUT:+--timeout "$PHASE_TIMEOUT" --stall-timeout "$PHASE_TIMEOUT"}
-}
-
-GO_FINAL=
-if todo propose; then
-  "$SCRIPTS/prepare-worktrees.sh" "$ID" sync "$(git -C "$WORK" rev-parse HEAD)"
-  rf_eval start-phase "$ID" propose
-  for a in $RUNTIMES; do "$SCRIPTS/launch-cli.sh" "$a" propose "$ID"; done
-  "$LIB/monitor.py" "$ID" --agents "$RUNTIMES_CSV" --tmp-dir "$TMP_DIR" \
-      --stem-template "{agent}-propose-rf$ID" --phase propose \
-      ${PHASE_TIMEOUT:+--timeout "$PHASE_TIMEOUT" --stall-timeout "$PHASE_TIMEOUT"}
-  rf merge-proposals "$ID" || GO_FINAL=1          # 2 = 候補 0 件
-fi
-if [ -z "$GO_FINAL" ]; then
-  todo plan && impl_phase plan
-  rf_eval merge-plan "$ID" || GO_FINAL=1           # TESTS_NEEDED。2 = 項目 0 件
-fi
-if [ -z "$GO_FINAL" ] && [ "$TESTS_NEEDED" = 1 ] && todo add-tests; then
-  impl_phase add-tests
-  rf merge-tests "$ID" || GO_FINAL=1              # 2 = 残る項目 0 件
-fi
-if [ -z "$GO_FINAL" ]; then
-  todo implement && impl_phase implement
-  rf merge-implement "$ID" || GO_FINAL=1           # 2 = 残る項目 0 件
-fi
-while [ -z "$GO_FINAL" ]; do                        # 検証と修正の繰り返し（唯一の繰り返し）
-  rf_eval verify "$ID"                             # VERIFY=done|fix。締め切りは verify が時計で見る
-  [ "$VERIFY" = fix ] || break
-  impl_phase fix
-  rf merge-fix "$ID"
-done
-
-# 最終ゲート。**起動のされ方で判定の相手が変わる**（docs/04）。
-while :; do
-  rf_eval final-gate "$ID"; gate=$?                # FINAL_GATE=...
-  case $gate in
-    0) break ;;
-    1) echo "⚠ 最終ゲートが通らないまま修正を打ち切りました（1 度直した後に想定最大時間の終わりを過ぎた）" >&2; break ;;
-    2) rf_eval start-phase "$ID" final-fix
-       "$SCRIPTS/launch-cli.sh" "$FINAL_FIX_IMPL" final-fix "$ID"
-       "$LIB/monitor.py" "$ID" --agents "$FINAL_FIX_IMPL" --tmp-dir "$TMP_DIR" \
-           --stem-template "{agent}-final-fix" --phase final-fix \
-           ${PHASE_TIMEOUT:+--timeout "$PHASE_TIMEOUT" --stall-timeout "$PHASE_TIMEOUT"}
-       rf merge-final-fix "$ID" ;;
-    *) exit $gate ;;
-  esac
-done
-# 工程の 1 つとして起動したとき: ここで履歴へ追記する（最終ゲートが通った実行だけ）
-[ "$FINAL_GATE" = cross-review ] || rf finalize "$ID"
+python3 <この Skill の置き場所>/scripts/drive.py <PR> --scope <範囲...> --baseline-test "<全体のテスト>" \
+  [「引数」の表のうち値のあるもの]
 ```
 
-**`FINAL_GATE=cross-review` のとき（単独起動）は、続けて `/ndf:cross-review <PR>` を実行し、
-その最終ステータスを渡して `finalize` を呼ぶ。** 手順は
-[docs/04-verify-and-report.md](docs/04-verify-and-report.md) の「単独起動の終わり」にある。
-その後 Draft を解除し、`refactor.py report "$ID"` の出力を報告する。
+待ちはコマンドの中で行う（フェーズの上限は `start-phase` が状態ファイルの上限の表から返す）。Claude Code では
+`run_in_background` で起動し、完了通知を 1 回受ける。
 
-### 終了コード
-
-| コード | 意味 | 進行 |
+| status（終了コード） | 意味 | メインがすること |
 | --- | --- | --- |
-| 0 | 正常 | 続ける |
-| 1 | 最終ゲートの修正の上限（`final-gate`） | 報告へ抜ける |
-| 2 | 判定の結果（候補 0 件 / 残る項目 0 件 / 最終ゲートの失敗） | 各コマンドの表に従う |
-| **4** | **中断**（予算の指定の誤り・`--round-test` が要る・旧い状態ファイル・取り消しの失敗・範囲を確定できない など） | **進行ごと止める** |
+| `ok`（0） | finalize まで終わった | `items[0].report`（`refactor.py report` の出力）と `metrics` を「完了報告」へ写す |
+| `gate`（23）`pause: cross-review` | 単独起動の最終ゲート | `items[0].prompt_file` の指示で `items[0].command`（cross-review の駆動）を回し、`result_file` へ最終ステータスを書いてから同じコマンドを打ち直す。続けて Draft を解除する |
+| `stopped`（1） | 中断（`metrics.exit` に元の終了コード。4 = 予算の指定の誤り・`--round-test` が要る・旧い状態ファイル・取り消しの失敗・範囲を確定できない など） | `summary` を報告して止まる。**握り潰さない**（検証を通っていない変更が残る） |
+
+pause の番号（20 fix / 21 sweep / 22 title・body / 23 cross-review）は cross-review の駆動と同じ表である。
+再開は同じコマンドを打ち直すだけである（`init` が終わったフェーズを返し、最終ゲートの後の進みは
+`$TMP_DIR/drive-rf<ID>.json`）。`metrics` は状態ファイルから数えた件数（`items` / `adopted` / `reverted` /
+`deferred` / `fix_rounds` / `final_gate` / `review_status`）である。
+
+最終ゲートの判定の相手は起動のされ方で変わる（[docs/04-verify-and-report.md](docs/04-verify-and-report.md)）。
+`--workflow-step` なら全体のテスト（`--ci-check` なら継続的統合）で判定して finalize まで進み、単独起動なら
+cross-review の最終ステータスを受けてから finalize を呼ぶ。
 
 ## アンチパターン
 

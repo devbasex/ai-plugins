@@ -257,16 +257,13 @@ Pull Request に残る。**修正の回数はここでは進めない。** 進�
 ```
 
 **cross-review が終わったら、その最終ステータスを渡して `finalize` を呼ぶ。** 読むのは
-cross-review の状態ファイルで、`state.py report` の Markdown は読まない。最終スイープが
-修正のコミットを作った実行は、最後の HEAD が承認されていないため `approved` を渡さない。
+cross-review の状態ファイルで、`state.py report` の Markdown は読まない。`final` が `approved` で、最終スイープが
+検証済み（`sweep.verified`）・残り 0・修正のコミット無し（`sweep.commit` が null）のときだけ `approved` を渡す。
+`final` が `approved` でもそれ以外なら `unverified`（最後の HEAD は承認されていない）、他は `final` の値を渡す。
+cross-review の駆動は、この値を結果の `metrics.review_status` に載せる。
 
-```bash
-CR_STATE="<cross-review の作業ツリー>/.cross_review/cross-review-pr$PR-state.json"
-REVIEW_STATUS=$(jq -r 'if .final == "approved" and (.sweep.verified == true)
-    and ((.sweep.remaining_open // 0) == 0) and (.sweep.commit == null)
-  then "approved" else (.final // "unknown") end' "$CR_STATE")
-"$SCRIPTS/refactor.py" finalize "$ID" --review-status "$REVIEW_STATUS"
-```
+`drive.py` はこの地点で `pause: cross-review` を返して止まる。結果ファイルへ `{"review_status": "<値>"}` を書いて
+打ち直すと、`finalize <ID> --review-status <値>` を呼んで終わる。
 
 ## 配分テーブル
 
