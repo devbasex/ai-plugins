@@ -43,6 +43,13 @@ issue のことではない。
 
 ## 手順
 
+### 0. 用語集が揃っているかを確かめる（`standard` / `legacy-refactor`）
+
+`python3 "$SCRIPTS/glossary.py" gate --mode <モード>` を打つ（`$SCRIPTS` の決め方は `development-workflow` の
+`references/scripts-lookup.md`）。**0 以外なら設計へ進まない。** 出力の `items` の 3 行（`init` のコマンド・候補の
+集め方・`requirements-design` の手順 0）を示して止まる。1 は宣言か用語集が無い、2 は壊れている。
+ほかのモードは 0 を返し、この手順で止まらない。
+
 ### 1. 触る領域を決める
 
 受け入れ条件と対象範囲を読み、触る領域を決める。**「すべての変更」の行が指す参照に加えて、
@@ -57,6 +64,7 @@ issue のことではない。
 | 呼び出される約束（API・イベント・コマンド）を変える | [references/interface-api.md](references/interface-api.md) |
 | 画面を追加・変更する | [references/interface-ui.md](references/interface-ui.md) |
 | 非機能の条件が仕様にある | [references/nonfunctional.md](references/nonfunctional.md) |
+| ドメインモデルの節を書く（`standard` は必ず。ほかは集約・不変条件・ドメインイベントを変えるとき） | [references/domain-model.md](references/domain-model.md) |
 | **読み手へ渡す文書を作る**（`documentation`） | 共通の [references/layout-common.md](references/layout-common.md) と、出力の形に当たる参照 1 つ（[slide](references/layout-slide.md) / [document](references/layout-document.md) / [spreadsheet](references/layout-spreadsheet.md) / [page](references/layout-page.md)） |
 
 触らない領域の参照は読まない。
@@ -64,13 +72,22 @@ issue のことではない。
 **`documentation` で形態固有の参照を決めるのは、触る領域ではなく出力の形である。**
 
 **`light` / `operation` では、この表が起動の条件も決める。** 「すべての変更」以外の領域が
-1 つ以上該当するときにこの Skill を通し、1 つも当たらなければ通さない。「すべての変更」の行を
-数に入れないのは、入れると常に該当し、条件が条件でなくなるためである。
+1 つ以上該当するときにこの Skill を通し、1 つも当たらなければ通さない。「すべての変更」の行と
+「ドメインモデルの節を書く」の行は数に入れない。「すべての変更」の行は入れると常に該当し、条件が
+条件でなくなる。ドメインモデルの行は、入れるとこの 2 モードの起動が増える。
 
 ### 2. 設計文書を書く
 
 雛形は [references/design-template.md](references/design-template.md) にある。節の並びと、
 各節が `implementation-plan` のどのタスクへつながるかもそこにある。
+
+**ドメインモデルの節を最初に書く。** 変更が属するコンテキスト・変える集約とその持ち主・不変条件・
+ドメインイベント・用語を、機能一覧より先に決める。書き方は
+[references/domain-model.md](references/domain-model.md) にある。
+
+**書いた後に語を用語集と突き合わせる。** `python3 "$SCRIPTS/glossary.py" check --file <設計文書>` を打ち、
+新しい語・意味の変わった語・廃止する語を、同じ変更の中で用語集へ反映して `glossary.py render` で文書を
+作り直す。構成要素の名前などを語として新しく使うときは、ドメインモデルの節の「用語」の表に書く。
 
 **タスクを機械的に導けるだけの情報を書く。** 導けない設計は、次の工程が成立しない。
 
@@ -94,7 +111,7 @@ issue のことではない。
 ### 4. 進む前に文書の内部整合を突き合わせる
 
 **[references/design-template.md](references/design-template.md) の「進む前に突き合わせる対」
-の 6 つを通す。** いずれも同じ文書の中だけで確かめられるもので、外部の情報を必要としない。
+の 7 つを通す。** いずれも同じ文書の中だけで確かめられるもので、外部の情報を必要としない。
 
 ### 5. 設計 Pull Request を出す
 
@@ -104,6 +121,13 @@ issue のことではない。
 
 `standard` では、**実装より先に設計をレビューへ通す**。設計の誤りを実装した
 後で直す費用が大きいためである。
+
+**出す前に、要求の写しが課題の本文と一致しているかを確かめる。**
+`python3 "$SCRIPTS/spec-copy.py" check <課題> issues/issue-<番号>-requirements.md` が 0 であること。1 なら
+本文が正なので、`spec-copy.py write` で写しを作り直す。
+
+設計 PR の cross-review は、1 ラウンド目でドメインモデルの節だけを見て（モデルの段）、2 ラウンド目以降で
+残りを見る（詳細の段）。関門 1 は詳細の段の後の 1 回だけである。
 
 ```text
 pr → cross-review → merged → worktree（実装用に作り直す）

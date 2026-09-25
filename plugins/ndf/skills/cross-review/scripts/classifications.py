@@ -74,3 +74,38 @@ def oversized_design_docs(root, paths, limit: int = DESIGN_DOC_MAX_LINES) -> lis
         if lines > limit:
             out.append({"path": p, "lines": lines})
     return out
+
+
+# --- 設計 PR のレビューの段（#1111） -------------------------------------------------
+#
+# 設計 PR の 1 ラウンド目はドメインモデルの節だけを見る（モデルの段）。2 ラウンド目以降は、確定した
+# モデルを前提に残りを見る（詳細の段）。設計文書にドメインモデルの節が無ければ 1 ラウンド目から詳細の段。
+# モデルの段の APPROVE では抜けない。関門の数とラウンドの上限は変えない。
+
+REVIEW_STAGES = ("model", "detail")
+DOMAIN_MODEL_HEADING = "## ドメインモデル"
+
+
+def review_stage(kind: str, round_no: int, has_model: bool) -> str | None:
+    """そのラウンドの段。`design` の 1 ラウンド目で `has_model` なら model、ほかの design は detail、code は None。"""
+    if kind != "design":
+        return None
+    return "model" if round_no == 1 and has_model else "detail"
+
+
+def has_domain_model(root, paths) -> bool:
+    """変更した設計文書のどれかに見出し `## ドメインモデル` があるか。読めないものは飛ばす。"""
+    from pathlib import Path
+
+    from_root = Path(root) if root else None
+    for p in dict.fromkeys(paths or ()):
+        if not (isinstance(p, str) and p.endswith(DESIGN_DOC_FILE_SUFFIXES)):
+            continue
+        f = from_root / p if from_root else Path(p)
+        try:
+            with open(f, encoding="utf-8", errors="replace") as fh:
+                if any(line.rstrip() == DOMAIN_MODEL_HEADING for line in fh):
+                    return True
+        except OSError:
+            continue
+    return False

@@ -155,3 +155,22 @@ def test_issue_body_refuses_paths_only_on_this_machine(tmp_path):
     assert p.returncode == 1 and out["status"] == "stopped"
     assert [i["path"] for i in out["items"]] == ["issues/local-only.md"]
     assert not (tmp_path / "gh.log").exists()  # gh は呼ばない
+
+
+def test_review_terms_count_counts_findings_without_replies(tmp_path):
+    """review-terms-count.py: 返信を除いた指摘を、語・定義と食い違いの語の並びで数える（1 件が両方に当たりうる）。"""
+    comments = [
+        {"id": 1, "body": "この語の定義が表と食い違う"},
+        {"id": 2, "body": "終了コードが 2 になる"},
+        {"id": 3, "body": "名前が揺れている"},
+        {"id": 4, "in_reply_to_id": 1, "body": "定義を直した"},
+    ]
+    reviews = [{"body": "## 🤖 cross-review | round 1 | codex | COMMENT"},
+               {"body": "## 🤖 cross-review | round 3 | kiro | APPROVE"}, {"body": "ok"}]
+    (tmp_path / "c.json").write_text(json.dumps(comments, ensure_ascii=False))
+    (tmp_path / "r.json").write_text(json.dumps(reviews, ensure_ascii=False))
+    p = subprocess.run([sys.executable, str(EXP / "review-terms-count.py"), "--comments-file", str(tmp_path / "c.json"),
+                        "--reviews-file", str(tmp_path / "r.json")], capture_output=True, text=True)
+    assert p.returncode == 0, p.stderr
+    m = json.loads(p.stdout.strip().splitlines()[-1])["metrics"]
+    assert m == {"findings": 3, "terms": 2, "mismatch": 1, "rounds": 3}

@@ -96,6 +96,11 @@ issue と Pull Request の両方で検索する。**
 | 範囲 | 実装計画のファイルと起票した課題 | 範囲を広げた判断、外した判断 |
 | 工程 | 実際に通った工程 | 飛ばした工程と、その結果 |
 | context window | `/ndf:skill-stats --agents --session <conductor のセッション>` | 層ごとの固定費と実作業、束ねる候補・割る候補・worker を使いすぎの目印 |
+| 用語集 | `python3 "$SCRIPTS/glossary.py" diff --base <起点> --head <終点>` | その変更で足された語・廃止された語・意味の変わった語（コンテキストごと） |
+
+**用語集の変化は、その変更の起点と終点の 2 つの版で `glossary.py diff` を打って取る。** 起点と終点は
+「Pull Request の番号を特定する」で決めた Pull Request の base と merge のコミットである。宣言の無い
+プロジェクトでは `items` が空になり、投稿に何も載せない。
 
 **context window の値は測って取る。** 記憶や体感で書かない。ミッションを複数のセッションで
 通したときは `--session` を繰り返して 1 つの表にする。**目印の判定は記録ごとの比で行われる**
@@ -265,6 +270,13 @@ gh api "/repos/$RECORD_REPO/commits/$(git rev-parse "origin/$record_base")/pulls
 
 （`束ねる候補` / `割る候補` / `worker を使いすぎ` の目印が付いた行ごとに、束ねる・割る・
 worker を減らす・そのままのどれにするかと、その理由を 1 行）
+
+## 用語集の変化
+
+（`glossary.py diff` の結果。0 件なら節ごと書かない。コンテキストごとに 1 行）
+
+| コンテキスト | 足した語 | 廃止した語 | 意味を変えた語 |
+| --- | --- | --- | --- |
 
 ## 次に変えること
 

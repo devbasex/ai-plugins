@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "format": "json",
+  "source": "docs/glossary/glossary.json",
+  "document": "docs/glossary.md",
+  "check": {
+    "paths": [
+      "issues/*-requirements.md",
+      "issues/*-design.md",
+      "issues/*-design-decisions.md"
+    ],
+    "term_sections": [
+      "用語"
+    ]
+  }
+}

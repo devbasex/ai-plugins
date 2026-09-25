@@ -2066,6 +2066,7 @@ RULE_RELEASE_PROD_MVV = ("関門 2 は利用者か MVV 判定が承認した（�
                          "run のステップが落ちたら、直せるもの（版数の書き漏れ・文書の形）は fix。"
                          "外部の待ち（CI・ネットワーク）の揺れなら同じステップをもう一度。タグの重複・権限の不足は stop。")
 MVV_PY = f"python3 {HERE / 'mvv-gate.py'}"
+GLOSSARY_PY = f"python3 {HERE / 'glossary.py'}"
 STEPS_PY = f"python3 {HERE / 'release-steps.py'}"
 VERIFY_PY = f"python3 {HERE / 'release-verification-steps.py'}"
 MERGED_PY = f"python3 {HERE / 'merged-steps.py'}"
@@ -2224,10 +2225,14 @@ def mission_branch(name: str) -> str:
 def plan_mission_design(a, n: int, repo: str) -> dict:
     """設計のフェーズ: 設計文書を書き、設計 PR を出し、cross-review（設計の既定 3 ラウンド）の後に関門 1 で止まる。"""
     branch = f"design/issue-{n}"
+    glossary_check = f"{GLOSSARY_PY} check --diff origin/{shlex.quote(a.base)} --root ."
     return {
         "フェーズ": "設計", "課題": [n], "モード": a.mode, "作業場所": f"{repo}/.worktrees/{branch}",
         "branch": branch, "起点": f"origin/{a.base}", "リポジトリ": repo, "規則": RULE_DESIGN, "上限": 12,
         "steps": [
+            # 設計の工程の入口の検査（#1111 の I5）。0 以外は on_fail を置かずに止まり、作る手順は結果の summary に載る
+            {"id": "glossary", "type": "run", "stage": "設計", "timeout": 120,
+             "cmd": f"{GLOSSARY_PY} gate --mode {shlex.quote(a.mode)} --root .", "next": "design"},
             {"id": "design", "type": "work", "full": True, "kind": "設計", "stage": "設計", "issues": True,
              "timeout": 3600, "next": "pr",
              "prompt": f"/ndf:design #{n}。設計文書は 1,000 行以下にする（超える主題は設計を 2 本に分けると報告する）。"
@@ -2236,9 +2241,23 @@ def plan_mission_design(a, n: int, repo: str) -> dict:
              "summary": f"#{n} の設計（ミッション {a.name}）", "next": "review"},
             # --max-rounds を渡さない。設計の分類の既定（3 ラウンド・前のラウンドからの変更だけ）で回る
             {"id": "review", "type": "drive", "drive": "cross-review", "kind": "ドキュメントレビュー",
-             "stage": "ドキュメントレビュー", "timeout": 3600, "args": "{pr}", "on_fail": "gate", "next": "gate"},
-            {"id": "gate", "type": "judge", "inputs": ["review"],
-             "question": "関門 1（設計 Pull Request のマージ）へ渡す（gate）か、止める（stop）か",
+             "stage": "ドキュメントレビュー", "timeout": 3600, "args": "{pr}", "on_fail": "gate",
+             "next": "glossary-check"},
+            # 語のチェック。当たりは 1 回だけ直し、残った当たりは関門 1 の提示へ載せる
+            {"id": "glossary-check", "type": "run", "stage": "ドキュメントレビュー", "timeout": 120,
+             "cmd": glossary_check, "on_fail": "fix-glossary", "next": "push-glossary"},
+            {"id": "fix-glossary", "type": "work", "kind": "修正", "stage": "ドキュメントレビュー",
+             "inputs": ["glossary-check"], "timeout": 1800, "next": "glossary-recheck",
+             "prompt": "語のチェックの当たりを直す。未登録の語は用語集へ足すか、用語集の語へ言い換える。廃止した語は"
+                       "用語集の語へ言い換える。用語集を変えたら `glossary.py render` で文書を作り直し、コミットする"
+                       "（push しない）。利用者が採るかを決めるべき語は直さずに「判断が要る」と報告する。"},
+            {"id": "glossary-recheck", "type": "run", "stage": "ドキュメントレビュー", "timeout": 120,
+             "cmd": glossary_check, "on_fail": "push-glossary", "next": "push-glossary"},
+            {"id": "push-glossary", "type": "run", "stage": "ドキュメントレビュー", "timeout": 300,
+             "cmd": "git push -q", "next": "gate"},
+            {"id": "gate", "type": "judge", "inputs": ["review", "glossary-recheck"],
+             "question": "関門 1（設計 Pull Request のマージ）へ渡す（gate）か、止める（stop）か。glossary-recheck に"
+                         "語のチェックの当たりが残っていれば、関門 1 の提示に載せる",
              "choices": ["gate", "stop"]},
         ],
     }
@@ -2305,7 +2324,7 @@ def plan_fast_design(a, n: int, repo: str) -> dict:
     state = shlex.quote(str(Path(a.state).resolve()))
     note = "{state_dir}/work/mvv-note.md"
     for s in plan["steps"]:
-        if s["id"] == "review":
+        if s["id"] == "push-glossary":
             s["next"] = "mvv"
     plan["steps"] += [
         {"id": "mvv", "type": "run", "stage": "設計", "timeout": 900,

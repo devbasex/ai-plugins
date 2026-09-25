@@ -1,0 +1,30 @@
+name: Glossary
+
+# プロジェクトの用語集（.ndf/glossary.json が指すもの）を Pull Request ごとに確かめる。
+#
+# CI は変更のモードを知らない。設計のブランチ（head が design/ で始まる）では語の規則まで見る
+# （--rules all: 追加した行の廃止した語・未登録の語）。ほかのブランチでは用語集の形と文書の一致だけを
+# 見る（--rules structure）。light の Pull Request が issues/ の文書を足しても、語の規則で落とさない。
+# 見る文書は宣言の check.paths（設計の文書）に限る。
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check the glossary and the added lines
+        # ブランチ名はシェルの本文へ埋めず、環境変数で渡す
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          rules=structure
+          case "$HEAD_REF" in design/*) rules=all ;; esac
+          python3 plugins/ndf/scripts/glossary.py check --diff "origin/$BASE_REF" --rules "$rules"
