@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ミッションの状態を mission.json に持ち、引継ぎ文書の節・status・ndf-next を生成する（#1063）。
+r"""ミッションの状態を mission.json に持ち、引継ぎ文書の節・status・ndf-next を生成する（#1063）。
 
 LLM を呼ばない。入力は supervise.py queue の done の JSON と各計画の report.md だけである。
 

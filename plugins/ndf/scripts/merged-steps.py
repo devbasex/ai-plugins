@@ -14,6 +14,12 @@ merge-when-green: PR が draft なら `gh pr ready` で外し、CI の検査が�
 あれば、チェックの表示が pending のままでも待たずにその結論で扱う。ジョブがランナーを待つ間は、
 待ち行列の件数を待ちの 1 周ごとに stderr へ 1 行出す。
 
+    python3 merged-steps.py probe (--pr N | --head <ブランチ>...) [--act] [--root <dir>]
+
+probe: 開いた PR の検査を読み、強い順に failed（fix）/ stale（取り残し。--act なら再実行して remedied）/
+stale_again（再実行しても取り残し）/ settled・queued・running（wait）/ passed・none（judge）の 1 つに分ける。
+`metrics` に class・action・prs・queued_runs を持つ。書き込みは --act の再実行だけ。終了コードは 0 = 調べた。
+
 結果は lib/step_result.py の形の 1 行の JSON。終了コードは 0 = ok / 10 = `git branch -D` が要る
 ブランチがある（同意が要る。提示物を書く）/ 1 = 取り込み・CI・マージが失敗 / 2 = 読めない。
 """
@@ -116,6 +122,8 @@ def cleanup(root, prs):
 
     wts = list_worktrees(root)
     main_dir = wts[0]["path"] if wts else str(root)
+    # root が消す作業ツリーのこともある（計画の merge のステップ）。以後は主ディレクトリから打つ
+    root = main_dir
     slug = repo_slug(root)
     wt_base = Path(os.environ.get("NDF_WORKTREE_BASE") or Path(tempfile.gettempdir()) / "ndf-worktrees")
 
@@ -260,14 +268,15 @@ def probe_checks(root, rollup):
     """pending の CheckRun ごとに、属する実行とジョブの状態を読む。
 
     返り値: (stale, queued, settled)。stale は実行が completed なのにチェックが pending で、ジョブの結論も
-    無い (名前, run, job)。settled は実行が completed でジョブに結論がある (名前, run, job, 結論) で、
+    無い (名前, run, job, attempt)。attempt は実行の試行の番号で、2 以上なら既に再実行している。
+    settled は実行が completed でジョブに結論がある (名前, run, job, 結論) で、
     チェックの表示が更新されていないだけなので結論で扱う。queued はジョブが queued のままランナーを
     待つチェックの名前。読めない実行は飛ばす。
     """
     stale, queued, settled, runs = [], [], [], {}
     for name, run_id, job_id in pending_check_runs(rollup):
         if run_id not in runs:
-            p = run(["gh", "run", "view", run_id, "--json", "status,jobs"], cwd=root, check=False)
+            p = run(["gh", "run", "view", run_id, "--json", "status,attempt,jobs"], cwd=root, check=False)
             try:
                 runs[run_id] = json.loads(p.stdout) if p.returncode == 0 else None
             except ValueError:
@@ -281,7 +290,7 @@ def probe_checks(root, rollup):
             if conclusion:
                 settled.append((name, run_id, job_id, conclusion.lower()))
             else:
-                stale.append((name, run_id, job_id))
+                stale.append((name, run_id, job_id, int(info.get("attempt") or 1)))
         elif job is not None and (job.get("status") or "").lower() == "queued":
             queued.append(name)
     return stale, queued, settled
@@ -311,10 +320,10 @@ def watch_stuck_checks(root, n, probed, a, items, stale_since, rerun_done, waits
     """
     stale, queued = probed
     now = time.monotonic()
-    names = {name for name, _, _ in stale}
+    names = {name for name, *_ in stale}
     for k in [k for k in stale_since if k not in names]:
         del stale_since[k]
-    for name, run_id, job_id in stale:
+    for name, run_id, job_id, *_ in stale:
         since = stale_since.setdefault(name, now)
         if now - since < a.stale_after:
             continue
@@ -440,6 +449,113 @@ def cmd_merge_when_green(a):
     emit(result(TOOL, status, f"#{n} をマージした。{summary}", items + citems, metrics, path, nxt))
 
 
+# --- probe --------------------------------------------------------------------
+
+# 分類は強い順。PR が 2 つ以上に当たれば上を採り、複数の PR は最も上の分類で全体を表す
+PROBE_CLASSES = ("failed", "stale", "stale_again", "settled", "queued", "running", "passed", "none")
+PROBE_ACTIONS = {"failed": "fix", "stale": "judge", "stale_again": "judge", "settled": "wait", "queued": "wait",
+                 "running": "wait", "passed": "judge", "none": "judge"}
+
+
+def probe_prs(root, a):
+    """調べる開いた PR の番号。--pr はそのまま、--head は開いた PR を探す。"""
+    if a.pr:
+        return [str(n) for n in a.pr]
+    out = []
+    for head in a.head or []:
+        p = run(["gh", "pr", "list", "--head", head, "--state", "open", "--json", "number"], cwd=root, check=False)
+        try:
+            out += [str(d["number"]) for d in json.loads(p.stdout)] if p.returncode == 0 else []
+        except (ValueError, KeyError, TypeError):
+            continue
+    return list(dict.fromkeys(out))
+
+
+def probe_one(root, n, act, items):
+    """1 本の PR の検査を分類する。(分類, 手) を返し、根拠を items に足す。読めなければ None。"""
+    p = run(["gh", "pr", "view", n, "--json", "number,state,statusCheckRollup"], cwd=root, check=False)
+    try:
+        info = json.loads(p.stdout) if p.returncode == 0 else None
+    except ValueError:
+        info = None
+    if not isinstance(info, dict) or info.get("state") != "OPEN":
+        return None
+    rollup = info.get("statusCheckRollup")
+    pending, failed, passed = check_states(rollup)
+    stale, queued, settled = probe_checks(root, rollup) if pending else ([], [], [])
+    failed += [s[0] for s in settled if s[3].upper() in FAIL_CONCLUSIONS]
+    first = [s for s in stale if s[3] <= 1]
+    again = [s for s in stale if s[3] > 1]
+    if failed:
+        cls = "failed"
+        items += [{"kind": "check", "pr": int(n), "name": f, "result": "failed"} for f in failed]
+    elif first:
+        cls = "stale"
+    elif again:
+        cls = "stale_again"
+        items += [{"kind": "check", "pr": int(n), "name": s[0], "result": "stale_again", "run": s[1], "job": s[2],
+                   "attempt": s[3]} for s in again]
+    elif settled:
+        cls = "settled"
+        items += [{"kind": "check", "pr": int(n), "name": s[0], "result": "settled", "run": s[1], "job": s[2],
+                   "conclusion": s[3]} for s in settled]
+    elif queued:
+        cls = "queued"
+        items += [{"kind": "check", "pr": int(n), "name": q, "result": "queued"} for q in queued]
+    elif pending:
+        cls = "running"
+        items += [{"kind": "check", "pr": int(n), "name": c, "result": "running"} for c in pending]
+    else:
+        cls = "passed"
+    action = PROBE_ACTIONS[cls]
+    if cls == "stale":
+        done = True
+        for name, run_id, job_id, attempt in first:
+            item = {"kind": "check", "pr": int(n), "name": name, "result": "stale", "run": run_id, "job": job_id,
+                    "attempt": attempt}
+            if act:
+                r = run(["gh", "run", "rerun", run_id, "--job", job_id], cwd=root, check=False)
+                item["result"] = "rerun" if r.returncode == 0 else "rerun_failed"
+                if r.returncode != 0:
+                    done = False
+                    item["reason"] = r.stderr.strip()[:300]
+            items.append(item)
+        action = "remedied" if act and done else "judge"
+    return cls, action
+
+
+def cmd_probe(a):
+    """開いた PR の検査を読み、取り残し・ランナー待ち・失敗・実行中に分ける（一次の調査）。"""
+    if not a.pr and not a.head:
+        emit(result(TOOL, "stopped", "--pr か --head が要る"), 2)
+    root = git_root(a.root)
+    items, found = [], []
+    for n in probe_prs(root, a):
+        got = probe_one(root, n, a.act, items)
+        if got:
+            found.append((int(n), *got))
+    if not found:
+        cls, action = "none", "judge"
+    else:
+        _, cls, action = min(found, key=lambda f: PROBE_CLASSES.index(f[1]))
+    queued_runs = (queued_run_count(root) or 0) if cls == "queued" else 0
+    prs = [f[0] for f in found]
+    names = ", ".join(i["name"] for i in items if i.get("kind") == "check") or "無し"
+    summary = {
+        "failed": f"失敗したチェックがある: {names}",
+        "stale": ("取り残されたチェックを再実行した: " if action == "remedied" else "取り残されたチェックがある: ") + names,
+        "stale_again": f"再実行したチェックが再び取り残された: {names}",
+        "settled": f"実行は終わりジョブに結論がある（表示だけが pending）: {names}",
+        "queued": f"ジョブがランナーを待っている（待ち行列 {queued_runs} 件）: {names}",
+        "running": f"実行中のチェックがある: {names}",
+        "passed": "すべてのチェックが通っている（待つ側が抜けていない）",
+        "none": "開いた PR が無い・読めない",
+    }[cls]
+    pr_text = " ".join(f"#{n}" for n in prs)
+    emit(result(TOOL, "ok", f"{pr_text} {summary}".strip(), items,
+                {"class": cls, "action": action, "prs": prs, "queued_runs": queued_runs}), 0)
+
+
 def build_parser():
     ap = argparse.ArgumentParser(prog="merged-steps.py", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -462,6 +578,12 @@ def build_parser():
                    help="実行が終わったのにチェックが pending のまま続けば、ジョブを 1 度だけ再実行するまでの秒数")
     m.add_argument("--no-cleanup", action="store_true", help="マージだけ行い、後片付けをしない")
     m.set_defaults(func=cmd_merge_when_green)
+    pr = sub.add_parser("probe", parents=[common_parser()],
+                        help="開いた PR の検査を分類する（遅れの一次の調査）。--act なら取り残しを再実行する")
+    pr.add_argument("--pr", type=int, action="append", default=[], metavar="PR番号")
+    pr.add_argument("--head", action="append", default=[], metavar="ブランチ")
+    pr.add_argument("--act", action="store_true", help="取り残されたジョブを gh run rerun --job で再実行する")
+    pr.set_defaults(func=cmd_probe)
     return ap
 
 

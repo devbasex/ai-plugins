@@ -98,7 +98,7 @@ UPKEEP=$(bash "$R/scripts/resolve.sh" scripts issue-upkeep) || exit 3
 
 ### 段 1: 対象を選ぶ
 
-4 つの経路で集め、重複を除く。**対象は open の課題だけである。**
+5 つの経路で集め、重複を除く。**対象は open の課題だけである。**
 
 | 経路 | 取り方 | 拾えるもの |
 | --- | --- | --- |
@@ -106,6 +106,7 @@ UPKEEP=$(bash "$R/scripts/resolve.sh" scripts issue-upkeep) || exit 3
 | 担当が足す | 差分に現れない前提の変化（運用の開始、外部の状態、版が上がった外部コマンド） | 実在するようになったブランチのような、差分に出ないもの |
 | マイルストーン | このミッションで閉じた課題が属するマイルストーンと、**マイルストーンの付いていない open の課題すべて** | 完了したマイルストーン、どのマイルストーンへも割り当てられていない課題 |
 | 親 issue | このミッションで閉じた親 issue の子 issue（`gh api repos/<所有者>/<リポジトリ>/issues/<親の番号>/sub_issues` と、本文で親 issue を指す課題） | 原因が直った後も open のまま残る子 issue |
+| コミットの件名 | 前の配布から今までのコミットの件名が `#番号` で指す課題 | 直して配布したのに閉じ忘れた課題。差分のパスに現れない課題も拾う |
 
 **子 issue は閉じないため、親 issue が閉じた後も open のまま残る。** 子 issue は親と別の
 マイルストーンにいることがあり、ほかの 3 経路では拾えない。拾った後は既存の「閉じてよい」が
@@ -121,8 +122,9 @@ UPKEEP=$(bash "$R/scripts/resolve.sh" scripts issue-upkeep) || exit 3
 python3 "$UPKEEP/upkeep.py" candidates --since-ref <前の配布のタグ> [--all] [--add 12,34] [--limit N]
 ```
 
-機械の候補・マイルストーン・親 issue の 3 経路は `candidates` が集める（`items[].routes` が
-`diff-path` / `diff-identifier` / `no-milestone` / `closed-milestone` / `sub-issue`）。担当が足す
+機械の候補・マイルストーン・親 issue・コミットの件名の 4 経路は `candidates` が集める（`items[].routes` が
+`diff-path` / `diff-identifier` / `no-milestone` / `closed-milestone` / `sub-issue` /
+`commit-subject`）。`commit-subject` の候補は上限で切るときも先に残す。担当が足す
 経路の課題は `--add` で渡す（`manual`）。候補ごとに `updated_at` と本文の要約値（`digest`）を
 返し、段 3 の照合に使う。未完了が 0 件になったマイルストーンは `kind: milestone` の項目で返る。
 

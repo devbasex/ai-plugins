@@ -373,6 +373,7 @@ def test_new_release_package_plugin_from_declaration(tmp_path):
         st = {s["id"]: s for s in plan["steps"]}
         assert "sync" not in st and st["notes"]["next"] in ("release", "snapshot")
         assert "--plugin foo" in st["bump"]["cmd"] and f"--ref {ref} " in st["verify"]["cmd"]
+        assert st["release"]["probe"]["cmd"].endswith("probe --head {branch} --head {base} --act")
         assert "--runtimes claude'" in st["verify"]["cmd"] and "origin main" in st["verify"]["cmd"]
         assert plan["記録"] == str(SCRIPTS / "projects-sync.sh") and plan["起点"] == "origin/main"
         for cmd in run_cmds(plan):
@@ -392,6 +393,7 @@ def test_new_impl_writes_plan(tmp_path):
     steps = {s["id"]: s for s in plan["steps"]}
     assert steps["impl"]["issues"] is True and steps["impl"]["prompt"].startswith("指示\n")
     assert steps["sync"]["preset"] == "sync-check"
+    assert steps["merge"]["probe"]["cmd"].endswith("merged-steps.py probe --pr {pr} --act")
     assert "plugins/ndf/scripts/tests" in steps["test-limited"]["cmd"] and steps["test-limited"]["rerun_failed"]
     assert plan["branch"] == "feat/issue-858-x"
     # 段の遷移がすべて知っている段を指す

@@ -72,16 +72,23 @@
 | `step` | 段の切り替わりごと | `step`・`type`・`exit`・`seconds`・`cost`・`next`・`summary` | 起きたときに末尾を読む。これだけでは起きない |
 | `alive` | 最後の行から計画の `"report_interval"`（既定 600 秒）動きが無いとき | `step`・`elapsed`・`worker`（worker の最後の報告） | 同上 |
 | `worker` | work の段の worker が区切り（課題を読み終えた・テストを足した・実装を 1 つ終えた・コミットした）ごと | `text`（1 行の要約） | 同上 |
-| `attention` | conductor の判断が要るとき | `step`・`reason`（`止まった` / `関門` / `同じ失敗の繰り返し` / `判断の段で stop が出そう`）・`text` | **この行が足されたら起きて読む** |
+| `slow` | run・work・drive の段の経過が想定時間を超え、一次の調査を流すたび | `step`・`round`・`elapsed`・`expected`・`basis`・`probe`（`name`・`class`・`action`・`summary`）・`act`・`by`（`rule` / `llm`）・`llm`・`next_check` | `step` と同じ |
+| `attention` | conductor の判断が要るとき | `step`・`reason`（`止まった` / `関門` / `同じ失敗の繰り返し` / `判断の段で stop が出そう` / `遅れ`）・`text` | **この行が足されたら起きて読む** |
 
 - **conductor 向けの行は `attention` だけである。** supervise.py が worker の行の語（止まった・関門・
-  失敗）と繰り返し、段の結果からスクリプトで分ける。`step` / `alive` / `worker` は起こさない
+  失敗）と繰り返し、段の結果からスクリプトで分ける。`step` / `alive` / `worker` / `slow` は起こさない
   （起こすたびに conductor の文脈の全体を読み直すため）
 - `queue` は `attention` の行を標準出力の 1 行 `{"tool": "supervise-queue", "event": "attention", ...}`
   で知らせる。最後の行は結果の JSON のままである
 - `attention` で起きたら、その行と `progress.jsonl` の末尾だけを読み、止めるか続けるかを決める。
   続けるなら同じ待ちを起動し直す。フェーズの報告は `report.md` で読む
-- `## フェーズの報告` の `途中の報告` の欄が、行の種類ごとの数と、LLM へ回した回数・費用を持つ
+- **遅れの見張りは supervise.py が段の待ちの中で行う。** 想定は同じ段（フェーズ, 段の id）の直近 10 回の
+  所要の中央値 × 3（下限 300 秒。履歴が 3 回未満なら 900 秒）。超えたら一次の調査を流し、決まった手
+  （待ち直し・取り残しの再実行）で解けなければ Tool なしの `claude -p` が retry / fix / stop / wait を選ぶ。
+  `attention`（reason `遅れ`）は、調査が手を打ったとき・判定へ回したとき・段を打ち切ったとき・判定の
+  回数が上限に達したときだけ書く。打ち切った段の終了コードは 125
+- `## フェーズの報告` の `途中の報告` の欄が、行の種類ごとの数（`遅れの調査` を含む）と、LLM へ回した
+  回数・費用を持つ。手を打った段は `- 遅れ:` の行に並ぶ
 - 待ちのコマンドは下のとおり
 
 **conductor は `report.md` と、`progress.jsonl` の `attention` の行の数を 1 つの until ループで待つ。**

@@ -89,7 +89,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.17.22）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.17.23）
 ```
 
 ### agy
@@ -119,14 +119,18 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.17.22 へ更新するとき
+## v10.17.23 へ更新するとき
 
-- cross-review と cross-refactoring の判定は、同じ名前の検査ジョブを最新の実行の結論で見る。後で成功した検査より前の失敗では、修正のラウンドを回さない（#1098）
-- レビュー本文の指摘を見送った場合も、スレッドの決着と修正のまとめが投稿される（#1098）
-- `pace: fast` を選ぶと、MVV の判定が従うときに関門 1・2 を止まらずに通り、構造改善と実装レビューは `check-trigger.py` のトリガーが立ったときだけ次の開発版の前に 1 回通る。確定仕様化・受け入れ条件の確認・振り返りはミッションの終わりに new close の計画で流れる（#1099）
-- 配布の PR の CI の待ちに上限（3600 秒）が付く（#1101）
-- 実行が終わってジョブに結論があれば、チェックの表示が pending のままでも待たずにその結論で扱う。success なら通し、failure なら失敗で止める。結論の無い取り残しだけを 1 度再実行する（#1101）
-- 配布のブランチ（`release/**`）への push では、`Runtime plugin validation` と `Runtime plugin smoke` が走らない。PR 側の実行が同じコミットを見る（#1101）
+- `supervise.py` は、段ごとの想定時間より遅れた段を見つけます。その段を一次の調査にかけ、介入します。（#1115）
+- 遅れの見張りの挙動は設定で変えられます。（#1115）
+- `merged-steps.py probe` で、PR の検査が進まない理由を調べられます。理由は「取り残し」「ランナー待ち」「失敗」の 3 つに分けて示します。（#1115）
+- 設計: #1102（#1109）
+- runtime-smoke が落ちたとき、継続的統合のログで失敗の理由を読める（成果物の `generated-tree.txt` も失敗時に残る）（#1106）
+- Python 3.14 で NDF のスクリプトを動かしても SyntaxWarning が出ない（#1106）
+- issue-upkeep の候補に、前の配布からのコミットの件名が指す課題が `commit-subject` の経路で上がる。閉じ忘れを拾える（#1108）
+- 開発ワークフローの語の意味と正本を 1 か所で引ける（`plugins/ndf/skills/development-workflow/references/glossary.md`。SKILL.md と `docs/ndf-plugin-reference.md` から案内する）（#1110）
+- 作業ツリーの中から `merged-steps.py cleanup` / `merge-when-green` を打っても、その作業ツリーを消した後に止まらない（設計と実装の計画の merge のステップが完了で終わる）（#1112）
+- `issue-body.py set` が、GitHub から読めない参照を持つ本文を書き込む前に止める（試行。既定の振る舞いは変わらない）（#1116）
 
 ## Playwright テストについて
 
@@ -298,7 +302,7 @@ agy models   # 認証の確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.17.22/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.17.23/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -320,14 +324,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.22/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.23/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.17.22  <path>
+# => ndf@ai-plugins  installed, enabled  10.17.23  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。
