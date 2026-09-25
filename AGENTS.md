@@ -28,6 +28,7 @@
 - 必ずfeatureブランチを作成して作業
 - Pull Requestを通じてレビュー・マージ
 - ユーザーの許可なくPRを承認しない
+  - `pace: fast` は MVV の承認・ハッシュの一致・判定の記録がそろった関門 1・2 だけ、MVV の承認を許可として扱う（越えない線は除く。条件は `plugins/ndf/skills/development-workflow/references/pace.md`）。approve はしない
 
 ### 版と配布の方針
 

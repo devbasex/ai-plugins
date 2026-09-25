@@ -54,6 +54,13 @@ legacy-refactor\t3
 standard\t4
 documentation\t5'
 
+# 進め方（#1078）。`fast` では次の工程を課題ごとに求めない。トリガーの工程は検査のトリガーが
+# 立ったときに前回の検査からの差分へ通し、まとめる工程はミッションの終わりに 1 回通す。
+# 並びは SKILL.md の「進め方」の表と同じである。
+WF_PACES=$'normal\tfast'
+WF_FAST_TRIGGER_STAGES=$'構造改善\n実装レビュー'
+WF_FAST_DEFERRED_STAGES=$'確定仕様化\n振り返り'
+
 # 報告の引き金になる工程。ここへ進んだ時点で、記録の無い必須の工程を案内する。
 WF_REPORT_STAGE='配布'
 
@@ -85,6 +92,27 @@ wf_is_stage() {
   while IFS= read -r stage; do
     [ "$stage" = "$want" ] && return 0
   done < <(wf_stages)
+  return 1
+}
+
+wf_is_pace() {
+  local want="${1:-}"
+  [ -n "$want" ] || return 1
+  case $'\t'"$WF_PACES"$'\t' in
+    *$'\t'"$want"$'\t'*) return 0 ;;
+  esac
+  return 1
+}
+
+# fast のときの工程の区分を返す（trigger / deferred）。当たらなければ 1 を返す。
+wf_fast_class() {
+  local stage="${1:-}" line
+  while IFS= read -r line; do
+    [ "$line" = "$stage" ] && { printf 'trigger\n'; return 0; }
+  done <<<"$WF_FAST_TRIGGER_STAGES"
+  while IFS= read -r line; do
+    [ "$line" = "$stage" ] && { printf 'deferred\n'; return 0; }
+  done <<<"$WF_FAST_DEFERRED_STAGES"
   return 1
 }
 
@@ -352,13 +380,16 @@ wf_parse_pr_create() {
 
 # 控えに記録の無い、Pull Request の作成までに求める工程を 1 行 1 件返す。
 _wf_missing_before_pr() {
-  local mode="${1:-}" content="${2:-}" stage class
+  local mode="${1:-}" content="${2:-}" stage class pace
   local -a recorded=()
+  pace=$(_wf_read_pace "$content")
   while IFS= read -r stage; do
     recorded+=("$stage")
   done < <(_wf_recorded_lines "$content")
   while IFS= read -r stage; do
     _wf_contains "$stage" ${recorded[@]+"${recorded[@]}"} && continue
+    # fast のトリガー・まとめる工程は、Pull Request の作成の時点で求めない
+    if [ "$pace" = "fast" ] && wf_fast_class "$stage" >/dev/null; then continue; fi
     class=$(wf_stage_class "$mode" "$stage") || continue
     [ "$class" = "R" ] || continue
     printf '%s\n' "$stage"
@@ -680,6 +711,13 @@ _wf_read_mode() {
   jq -r '.mode // empty' <<<"${1:-}" 2>/dev/null
 }
 
+# 控えから記録された進め方を取り出す。記録が無ければ normal と読む。
+_wf_read_pace() {
+  local pace
+  pace=$(jq -r '.pace // empty' <<<"${1:-}" 2>/dev/null)
+  printf '%s\n' "${pace:-normal}"
+}
+
 # 控えへ 1 件積む。**排他を取れないときは書き込みそのものを行わない。**
 # 飛ばしても終了コード 0 で返って工程は続き、飛ばした工程は報告の「記録なし」に含まれる。
 wf_record() {
@@ -701,6 +739,9 @@ wf_record() {
     mode) updated=$(printf '%s' "$content" \
       | jq --arg r "$slug" --argjson i "$issue" --arg v "$value" --arg t "$now" \
         '.repo = $r | .issue = $i | .mode = $v | .stages = (.stages // []) | .updated_at = $t' 2>/dev/null) ;;
+    pace) updated=$(printf '%s' "$content" \
+      | jq --arg r "$slug" --argjson i "$issue" --arg v "$value" --arg t "$now" \
+        '.repo = $r | .issue = $i | .pace = $v | .stages = (.stages // []) | .updated_at = $t' 2>/dev/null) ;;
     *) wf_lock_release "$lock"; return 0 ;;
   esac
   if [ -n "$updated" ]; then
@@ -759,24 +800,35 @@ wf_join() {
 WF_CLASS_PRESENT='present'         # 記録あり
 WF_CLASS_MISSING='missing'         # 必須で記録なし
 WF_CLASS_CONDITIONAL='conditional' # 条件付き
+WF_CLASS_TRIGGER='trigger'         # fast: トリガーで通す（記録を求めない）
+WF_CLASS_DEFERRED='deferred'       # fast: ミッションの終わりにまとめる（記録を求めない）
 
 # frontier までの各工程を分類し、'class<TAB>stage' を 1 行 1 件で返す。
 # class は WF_CLASS_* のいずれか。
 # recorded 配列・mode・frontier を引数で受け取る。
+# pace が fast なら、必須か条件付きのトリガー・まとめる工程を WF_CLASS_TRIGGER / WF_CLASS_DEFERRED にする。
+# まとめる工程は、先へ進んだ記録（frontier）より後にあっても出す（ミッションの終わりに通すため）。
 _wf_classify_stages() {
-  local mode="$1" frontier="$2"
-  shift 2
+  local mode="$1" frontier="$2" pace="$3"
+  shift 3
   local -a recorded=("$@")
-  local stage class index=0
+  local stage class index=0 fast
   while IFS= read -r stage; do
     index=$((index + 1))
-    [ "$index" -le "$frontier" ] || break
     if _wf_contains "$stage" ${recorded[@]+"${recorded[@]}"}; then
-      printf '%s\t%s\n' "$WF_CLASS_PRESENT" "$stage"
+      [ "$index" -le "$frontier" ] && printf '%s\t%s\n' "$WF_CLASS_PRESENT" "$stage"
       continue
     fi
     [ -n "$mode" ] || continue
     class=$(wf_stage_class "$mode" "$stage") || continue
+    if [ "$pace" = "fast" ] && fast=$(wf_fast_class "$stage") && { [ "$class" = "R" ] || [ "$class" = "C" ]; }; then
+      case "$fast" in
+        trigger) [ "$index" -le "$frontier" ] && printf '%s\t%s\n' "$WF_CLASS_TRIGGER" "$stage" ;;
+        deferred) printf '%s\t%s\n' "$WF_CLASS_DEFERRED" "$stage" ;;
+      esac
+      continue
+    fi
+    [ "$index" -le "$frontier" ] || continue
     case "$class" in
       R) printf '%s\t%s\n' "$WF_CLASS_MISSING" "$stage" ;;
       C) printf '%s\t%s\n' "$WF_CLASS_CONDITIONAL" "$stage" ;;
@@ -786,8 +838,8 @@ _wf_classify_stages() {
 
 # 通過工程を報告する。**終了コードで工程を止めない。**
 wf_report() {
-  local slug="${1:-}" issue="${2:-}" file content mode stage class frontier
-  local -a recorded=() present=() missing=() conditional=()
+  local slug="${1:-}" issue="${2:-}" file content mode pace stage class frontier
+  local -a recorded=() present=() missing=() conditional=() trigger=() deferred=()
 
   command -v jq >/dev/null 2>&1 || { wf_report_empty "$issue"; return 0; }
   file=$(wf_state_file "$slug" "$issue") || { wf_report_empty "$issue"; return 0; }
@@ -800,6 +852,7 @@ wf_report() {
     return 0
   fi
   mode=$(_wf_read_mode "$content")
+  pace=$(_wf_read_pace "$content")
   frontier=$(_wf_frontier "${recorded[@]}")
 
   while IFS=$'\t' read -r class stage; do
@@ -807,10 +860,14 @@ wf_report() {
       "$WF_CLASS_PRESENT") present+=("$stage") ;;
       "$WF_CLASS_MISSING") missing+=("$stage") ;;
       "$WF_CLASS_CONDITIONAL") conditional+=("$stage") ;;
+      "$WF_CLASS_TRIGGER") trigger+=("$stage") ;;
+      "$WF_CLASS_DEFERRED") deferred+=("$stage") ;;
     esac
-  done < <(_wf_classify_stages "$mode" "$frontier" "${recorded[@]}")
+  done < <(_wf_classify_stages "$mode" "$frontier" "$pace" "${recorded[@]}")
 
-  if [ -n "$mode" ]; then
+  if [ -n "$mode" ] && [ "$pace" = "fast" ]; then
+    printf '#%s の通過工程（%s・進め方 fast）\n' "$issue" "$mode"
+  elif [ -n "$mode" ]; then
     printf '#%s の通過工程（%s）\n' "$issue" "$mode"
   else
     printf '#%s の通過工程（モード不明）\n' "$issue"
@@ -818,6 +875,9 @@ wf_report() {
   printf '  記録あり: %s\n' "$(wf_join "${present[@]+"${present[@]}"}")"
   [ "${#missing[@]}" -gt 0 ] && printf '  記録なし: %s\n' "$(wf_join "${missing[@]}")"
   [ "${#conditional[@]}" -gt 0 ] && printf '  条件付き: %s\n' "$(wf_join "${conditional[@]}")"
+  [ "${#trigger[@]}" -gt 0 ] && printf '  トリガー: %s（検査のトリガーが立ったときに前回の検査からの差分へ通す）\n' \
+    "$(wf_join "${trigger[@]}")"
+  [ "${#deferred[@]}" -gt 0 ] && printf '  まとめる: %s（ミッションの終わりに 1 回通す）\n' "$(wf_join "${deferred[@]}")"
   if [ -z "$mode" ]; then
     printf 'モードの記録が無いため、必須の工程は判定しません。\n'
   elif [ "${#missing[@]}" -eq 0 ] && [ "${#conditional[@]}" -eq 0 ]; then

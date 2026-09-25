@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "fast": {
+    "enabled": true,
+    "modes": ["light", "standard", "legacy-refactor"],
+    "verify": "python3 plugins/ndf/scripts/release-verification-steps.py verify-install --ref develop --runtimes claude,codex,kiro"
+  },
+  "areas": [
+    {"name": "駆動", "common": true,
+     "paths": ["plugins/ndf/scripts/supervise.py", "plugins/ndf/scripts/mission-state.py", "plugins/ndf/scripts/relay.py",
+               "plugins/ndf/skills/*/scripts/drive.py"]},
+    {"name": "共通の部品と結果の契約", "common": true, "paths": ["plugins/ndf/scripts/lib/**"]},
+    {"name": "hook", "common": true, "paths": ["plugins/ndf/hooks/**", "plugins/ndf/scripts/*-guard.sh"]},
+    {"name": "配布の手順", "common": true,
+     "paths": ["plugins/ndf/scripts/release-steps.py", "plugins/ndf/scripts/release-verification-steps.py",
+               "plugins/ndf/scripts/merged-steps.py", "scripts/build-runtime-plugins.sh"]}
+  ],
+  "boundary_paths": ["plugins/ndf/scripts/lib/auth.py", "plugins/ndf/scripts/lib/git-credential.sh",
+                     "plugins/ndf/skills/google-auth/**", ".github/workflows/**", "**/.env*"],
+  "triggers": {"score": 15, "common_weight": 2, "lines": 5000, "escapes": 2, "hours": 24}
+}
