@@ -42,6 +42,28 @@ TASKS = ("調査", "修正", "検証", "集計")                        # 作業
 OTHER = "その他"
 NO_ROLE = "-"
 
+# 工程名 → フェーズ（#768）。`development-workflow/references/agent-layers.md` のフェーズの表の
+# 「通す工程」の列を写した。括弧の注記と `。` より後ろを落とした行名で引く。2 つのフェーズに
+# 現れる行名（`作業場所の用意`・`配布`）は表で先に現れるフェーズへ写す。表との一致はテストが確かめる。
+STEP_PHASES = {
+    "要求と受け入れ条件": "設計",
+    "作業場所の用意": "設計",
+    "ドキュメント再構成": "設計",
+    "ドキュメントレビュー": "設計",
+    "ドキュメントレビューの後片付け": "実装",
+    "計画": "実装",
+    "構造改善": "検査",
+    "実装レビュー": "検査",
+    "完了判定": "検査",
+    "Pull Request": "検査",
+    "確定仕様化": "取り込み",
+    "ミッションの Pull Request のマージ": "取り込み",
+    "後片付け": "取り込み",
+    "配布": "取り込み",
+    "リリース後テスト": "仕上げ",
+    "振り返り": "仕上げ",
+}
+
 ENDINGS = ("completed", "in_progress", "rate_limit", "api_error")
 
 SYNTHETIC_MODEL = "<synthetic>"
@@ -149,12 +171,24 @@ def layer_of(depth: int, description: str | None) -> str:
 
 
 def role_of(description: str | None, layer: str) -> str:
-    """フェーズ（supervisor）または作業の種類（worker）を返す。"""
+    """フェーズ（supervisor）または作業の種類（worker）を返す。
+
+    supervisor の先頭語が工程名（`STEP_PHASES`）なら、その工程を通すフェーズへ写す（#768）。
+    `: ` を持たない古い形（例 `実装 #540 実行計画`）は全体が語彙に当たらず `その他` に落ちる。
+    """
     if layer == "conductor":
         return NO_ROLE
-    vocabulary = POSTS if layer == "supervisor" else TASKS
     head = head_word(description)
-    return head if head in vocabulary else OTHER
+    if layer == "supervisor":
+        if head in POSTS:
+            return head
+        return STEP_PHASES.get(head, OTHER)
+    return head if head in TASKS else OTHER
+
+
+def unphased_supervisors(records: list[AgentRecord]) -> int:
+    """フェーズが読めなかった（`その他` に落ちた）supervisor の件数を返す（#768）。"""
+    return sum(1 for r in records if r.layer == "supervisor" and r.role == OTHER)
 
 
 # ---------- 記録 1 件を読む ----------
