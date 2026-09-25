@@ -65,7 +65,7 @@ jobs:
         if: env.SKIP_HEAVY != 'true'
         run: bash scripts/runtime-smoke-test.sh --runtime "${{ matrix.runtime }}" --with-secrets=off
       - name: Upload smoke artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always() && env.SKIP_HEAVY != 'true'
         with:
           name: runtime-smoke-${{ matrix.runtime }}
