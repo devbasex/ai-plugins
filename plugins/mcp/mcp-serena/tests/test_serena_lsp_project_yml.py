@@ -83,3 +83,27 @@ def test_missing_key_is_appended():
     assert out == "encoding: utf-8\nmcp_serena_excluded: []\n"
     out2 = py.write_list("encoding: utf-8", "mcp_serena_excluded", ["x y"])
     assert out2 == "encoding: utf-8\nmcp_serena_excluded:\n- x y\n"
+
+
+def test_appending_keeps_the_comments_and_quotes_of_the_existing_items():
+    """既存の要素の行は 1 バイトも変えず、足す要素だけをブロックの末尾へ置く（#984）。"""
+    text = ("ignored_paths: # 注釈\n- data/**\n- \"build/**\"   # 生成物\n"
+            "# 次のキーの注釈\nencoding: utf-8\n")
+    out = py.append_list(text, "ignored_paths", [".serena/**"])
+    assert out == ("ignored_paths: # 注釈\n- data/**\n- \"build/**\"   # 生成物\n- .serena/**\n"
+                   "# 次のキーの注釈\nencoding: utf-8\n")
+    assert py.read_list(out, "ignored_paths") == ["data/**", "build/**", ".serena/**"]
+
+
+def test_appending_follows_the_indent_of_the_existing_items():
+    out = py.append_list("ignored_paths:\n  - a/**\nread_only: false\n", "ignored_paths", ["b"])
+    assert out == "ignored_paths:\n  - a/**\n  - b\nread_only: false\n"
+
+
+@pytest.mark.parametrize(("text", "expected"), [
+    ("ignored_paths: []\nencoding: utf-8\n", "ignored_paths:\n- b\nencoding: utf-8\n"),
+    ("encoding: utf-8\n", "encoding: utf-8\nignored_paths:\n- b\n"),
+    ("ignored_paths:\n- b\n", "ignored_paths:\n- b\n"),
+])
+def test_appending_to_an_empty_or_missing_key(text, expected):
+    assert py.append_list(text, "ignored_paths", ["b"]) == expected
