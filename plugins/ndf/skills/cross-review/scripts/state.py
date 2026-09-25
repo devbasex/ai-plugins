@@ -44,6 +44,7 @@ import result_posts  # noqa: E402  結果ファイルを投稿へ変える層（
 # `measure.py` も同じ定義を読み、両者の一致は `test_measure.py` が固定する。
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from classifications import COUNTED_CLASSIFICATIONS  # noqa: E402
+from classifications import default_max_rounds, oversized_design_docs, review_kind  # noqa: E402
 
 
 # ---------------- helpers ----------------
@@ -1609,6 +1610,17 @@ class _InitResult(NamedTuple):
     resumed: bool
 
 
+def _warn_oversized_design_docs(worktree: object, changed_files: list[dict[str, Any]]) -> list[dict]:
+    """行数の上限を超える設計文書を知らせる（#1005）。**止めない。** 超えた文書の一覧を返す。"""
+    paths = [entry for entry in changed_files or [] if isinstance(entry, str)]
+    paths += [p for entry in changed_files or [] if isinstance(entry, dict)
+              for p in entry.get("paths", []) if isinstance(p, str)]
+    over = oversized_design_docs(str(worktree) if worktree else None, paths)
+    for doc in over:
+        info(f"⚠️ 設計文書が {doc['lines']} 行ある（上限 1,000 行）: {doc['path']}。主題を分けて設計を 2 本にする")
+    return over
+
+
 def _print_init_result(result: _InitResult) -> None:
     """cmd_init の 2 経路（再開・新規）が共有する末尾の出力ブロック。
 
@@ -2000,12 +2012,15 @@ def _init_new_state(
         """確定済みの材料から、副作用なしに初期状態を組み立てる。"""
         host, host_source, participants = ctx.assignment
         only, _include, _exclude = _normalize_participant_args(args)
+        # 分類（design / code）ごとに上限の既定を変える（#1005）。設計は 3 ラウンドで関門 1 へ渡す
+        kind = review_kind(ctx.pr_ctx.meta.head_branch, ctx.review_ctx.auto_review_categories)
         return {
             "started_at": _now(),
             "host": host,
             "host_source": host_source,
             # 引数の既定は未指定（`None`）で、新規の経路がここで定数を置く（決定 13）
-            "max_rounds": args.max_rounds if args.max_rounds is not None else 12,
+            "review_kind": kind,
+            "max_rounds": args.max_rounds if args.max_rounds is not None else default_max_rounds(kind),
             "rotate_after": args.rotate_after if args.rotate_after is not None else 8,
             "only": only,
             "participants": participants,
@@ -2051,6 +2066,8 @@ def _init_new_state(
             pr, pr_ctx, review_ctx, ws_ctx, initial_assignment, manual_extra_review
         )
         state = _build_initial_review_state(args, context)
+        state["design_doc_oversize"] = _warn_oversized_design_docs(
+            pr_ctx.worktree, review_ctx.changed_files)
         _write_state(ws_ctx.state_file, state)
         info(f"✅ state 初期化: {ws_ctx.state_file}")
         _print_init_result(
@@ -3286,7 +3303,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
 
 
 # 指摘の位置がずれても同じ箇所として数える幅。修正で前後にずれる幅として、同じ処理の
-# まとまりの中の移動を拾い、隣の指摘まで巻き込まない値を採る。**この値の根拠となる実測は
+# 範囲の中の移動を拾い、隣の指摘まで巻き込まない値を採る。**この値の根拠となる実測は
 # まだ無い。** 出力へ内訳を出すのは、実測を集めるためである。
 OSCILLATION_NEAR_LINES = 3
 # 本文を比べる長さ。先頭だけを見るのは、末尾の言い回しの揺れで別物にならないようにするため。

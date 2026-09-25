@@ -90,9 +90,15 @@ credential helper が応答しない環境の退避（`gh auth git-credential` �
 （`git log origin/<base>..HEAD`）を反映し、既存の関連リンクを保つ。
 
 ```bash
-python3 "$SCRIPTS/pr-steps.py" create --title "<タイトル>" --body-file /tmp/pr-body.md [--draft] [--base <base>]
-python3 "$SCRIPTS/pr-steps.py" update --body-file /tmp/pr-body.md [--title "<タイトル>"]
+python3 "$SCRIPTS/pr-steps.py" create --title "<タイトル>" --body-file /tmp/pr-body.md [--draft] [--base <base>] \
+  --mode <モード> --stages "<通した工程をカンマ区切り>"
+python3 "$SCRIPTS/pr-steps.py" update --body-file /tmp/pr-body.md [--title "<タイトル>"] \
+  --mode <モード> --stages "<通した工程をカンマ区切り>"
 ```
+
+- `--mode` と `--stages` を渡すと、本文の末尾に `モード: <mode> / 通した工程: <工程> → <工程>` の
+  1 行を書く（既にあれば置き換える）。モードは `development-workflow` が判定した値、工程は工程表の
+  行の名前である。**この 1 行は省かない。** 配布後の不具合の起票数と突き合わせる材料になる
 
 - `create` は OPEN の PR があれば更新として振る舞う（`metrics.action`）
 - 本文末尾の `<!-- I want to review in Japanese. -->`、GraphQL の上限での REST への退避、
@@ -114,11 +120,23 @@ python3 "$SCRIPTS/pr-steps.py" report <番号>
 URL は最終行に生のまま置く（Markdown リンクにすると利用者の画面では番号しか表示されない）。
 コミット履歴は報告に含めない。
 
+## ミッションのブランチ宛てと develop 宛て
+
+**宛て先で、Pull Request の役割が変わる。** `plan` の `metrics.target` と `metrics.review` が区分を返す。
+
+| 宛て先 | 何の Pull Request か | 実装レビュー | `metrics` |
+| --- | --- | --- | --- |
+| `mission/<名前>` | 課題の Pull Request。課題の作業ツリーからミッションのブランチへ集める | 通さない。緑になったらミッションのブランチへ取り込む | `target: mission` / `review: false` |
+| develop（宣言の `base_branch`） | ミッションの Pull Request（ミッションで 1 本）か、ミッションのブランチを経ない単独の Pull Request | 通す（構造改善・`cross-review`・完了判定を 1 回） | `target: develop` / `review: true` |
+
+課題の Pull Request は `--base mission/<名前>` で出す。ミッションの Pull Request は、ミッションの
+ブランチの作業ツリーから `--base` を省いて出し、本文にミッションが閉じる課題を番号ごとに書く。
+
 ## 閉じる語は本文だけに書く
 
 **閉じる語（`Closes` / `Fixes` / `Resolves`）は Pull Request の本文だけに、番号ごとに書く。** コミット
-メッセージに書くと、マージでそのコミットが指す課題だけが先に閉じ、まとまりが割れる。**本文の閉じる語は
-外さない**（`stage-completeness.md` と `progress-tracking` の「まとまりを閉じる」が本文を入力にする）。
+メッセージに書くと、マージでそのコミットが指す課題だけが先に閉じ、ミッションが割れる。**本文の閉じる語は
+外さない**（`stage-completeness.md` と `progress-tracking` の「ミッションを閉じる」が本文を入力にする）。
 
 ## 設計 Pull Request の本文
 

@@ -20,21 +20,17 @@ hooks:
 
 ## 判定する単位
 
-**モードを判定する単位は Pull Request である。** 課題ではない。1 つの Pull Request に
-対しモードは 1 つで、その Pull Request が閉じる課題すべての控えへ同じ値を書く。
+**工程はミッション単位で 1 回ずつ通す。** ミッションは 1 つの版として出す課題の束で、複数の設計と実装を含む。
+**モードを判定する単位は、ミッションの develop 宛て Pull Request である。** モードは 1 つで、ミッションが閉じる
+課題すべての控えへ同じ値を書く。数える対象が 1 つになる。
 
-**束ねたときにどのモードを採るかの規約は置かない。** 束ね方を変えるたびに同じ判断が
-要るためである。**判定の単位を Pull Request にすれば、数える対象が 1 つになる。**
+- **ミッションのブランチ（`mission/<名前>`）を develop から切り、課題ごとの作業ツリーはそこから切る。**
+  課題の Pull Request はミッションのブランチへ集め、develop への Pull Request はミッションで 1 本にする
+- **モードの違う課題を 1 つのミッションへ混ぜない。** 混ざるなら高い方のモードで進めるか、ミッションを分ける
+- **ミッションの大きさは、同時に回せる本数（フェーズは 3 本まで）と配布の間隔（1 版を 1〜2 日）で切る。**
+  並列の形と下限は [references/parallel-work.md](references/parallel-work.md) にある
 
-- **触るファイルが重ならないなら、分けてよい。** 束ねる理由は競合の回避であって、
-  モードを混ぜたいからではない
-- **モードの違う課題を 1 本の Pull Request へ混ぜない。** 混ざるなら高い方のモードで
-  進めるか、Pull Request を分ける
-- 分割の粒度・束ね方・並行度そのものは担当の判断に任せる。**複数の課題を渡されうる。**
-  4 つの形（1 : 1 / 1 : N / N : 1 / N : M）と、任せるうえでの下限は
-  [references/parallel-work.md](references/parallel-work.md) にある
-
-**代わりに工程の順序が変わる。** Pull Request に何が入るかが決まらないと判定できない
+**代わりに工程の順序が変わる。** ミッションに何が入るかが決まらないと判定できない
 ため、**要求と受け入れ条件 → モード判定 → 作業場所の用意**の順になる。`light` にも
 要求と受け入れ条件が掛かる。その費用は受け入れる。判定の入力が無いまま判定する状態の
 ほうが高くつく。
@@ -161,6 +157,11 @@ mode: standard
 範囲外の課題の起票（`out-of-scope`）はこの表に載らない。工程ではないため、モードで要否を
 決めない（「範囲外の課題を見つけたとき」を参照）。
 
+**表の工程はミッションの中で 1 回ずつ動き、中は並列にする。** 設計 Pull Request は主題ごとに同時に開いて
+並列で回し（1 本の設計文書は 1,000 行以下）、関門 1 でまとめて 1 回承認する。実装は課題ごとの作業ツリーで並列に
+進めてミッションのブランチへ集め、構造改善・実装レビュー・完了判定はミッションの develop 宛て Pull Request で
+1 回通す。工程ごとの単位は [references/parallel-work.md](references/parallel-work.md) の「工程が動く単位」にある。
+
 **`operation` の「実装」は実行そのものを指す。** 行は増やさない。呼ぶのは `tdd-cycle` でも
 `refactoring` でもなく、[references/operation-run.md](references/operation-run.md) が定める
 手順である。実行の範囲・記録・失敗したときの止め方はそちらが持つ。**この工程は「本番の系へ
@@ -204,7 +205,7 @@ mode: standard
 
 **conductor は、`context-window.md` の 4 つの切れ目と文脈量の hook（`token-guard.sh`）に止められたときに、
 次の工程を始める引き継ぎの 1 行（`/ndf:development-workflow #<課題>`。今の区間を `/goal` で始めていたときだけ先頭に `/goal `）を、
-情報文字列 `ndf-next` の囲みのコードブロック 1 つで出す。** 3 層では conductor が `## 持ち場の報告` を
+情報文字列 `ndf-next` の囲みのコードブロック 1 つで出す。** 3 層では conductor が `## フェーズの報告` を
 受け取った時点で出し（supervisor は出さない）、`結果: 関門` なら関門の承認と取り込みの後に出す。
 出す時点・告知・新しい会話が状態を戻す手順は `context-window.md` の「新しい会話で戻す」にある。
 
@@ -351,8 +352,8 @@ Pull Request のマージ、制作物承認は本番の提出先への操作に�
   `operation` の実行も同じで、本番の系へ届く単位は承認を得るまで実行しない
 
 **工程は 3 層（conductor / supervisor / worker）へ出す。** 人間と対話しているセッション
-（conductor）が持ち場ごとに supervisor を起動し、supervisor が 1 つの作業を worker へ出す。
-**関門で止まれるのは conductor だけである。** 持ち場の表・起動の指示・報告の形・モデルの
+（conductor）がフェーズごとに supervisor を起動し、supervisor が 1 つの作業を worker へ出す。
+**関門で止まれるのは conductor だけである。** フェーズの表・起動の指示・報告の形・モデルの
 基準・他者の承認が要るときの到達点の置き直しは
 [references/agent-layers.md](references/agent-layers.md) にある。
 
@@ -370,7 +371,7 @@ PLUGIN_ROOT='${CLAUDE_PLUGIN_ROOT}'; case "$PLUGIN_ROOT" in '$'*) PLUGIN_ROOT= ;
 [ -n "$PLUGIN_ROOT" ] && python3 "$PLUGIN_ROOT/scripts/relay.py" notice || echo outside
 ```
 
-**人がその場にいて指示を変えたいときは、conductor へ伝える。** 次の持ち場から反映する。
+**人がその場にいて指示を変えたいときは、conductor へ伝える。** 次のフェーズから反映する。
 
 ## 標準フロー
 
@@ -496,4 +497,4 @@ flowchart TD
 - [references/approval-request.md](references/approval-request.md) — 承認を求めるときに提示するもの
 - [references/operation-run.md](references/operation-run.md) — `operation` の実行の範囲・記録・失敗したときの扱い
 - [references/context-window.md](references/context-window.md) — context window の切れ目、委譲する対象としない対象、残量の見方
-- [references/agent-layers.md](references/agent-layers.md) — 3 層（conductor / supervisor / worker）の責務、持ち場、報告の形
+- [references/agent-layers.md](references/agent-layers.md) — 3 層（conductor / supervisor / worker）の責務、フェーズ、報告の形

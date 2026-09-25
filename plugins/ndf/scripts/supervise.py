@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """フェーズをスクリプトで駆動する。
 
-supervisor（サブエージェント）の代わりに、このスクリプトが持ち場の手順を順に進める。
+supervisor（サブエージェント）の代わりに、このスクリプトがフェーズの手順を順に進める。
 判断の要らない段（コマンドの実行・待ち・進行の記録）はスクリプトが行い、LLM は
 次の 2 つの段でだけ、毎回新しい最小構成の `claude -p` として起動する。
 
@@ -17,6 +17,11 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
     supervise.py run <plan.json> [--state-dir DIR] [--from <段の id>]
     supervise.py new impl --issue N --worktree DIR --tests PATH... --title T [--prompt-file F] [--branch B] [--out F]
     supervise.py new check --pr N --worktree DIR [--issue N...] [--scope PATH...] [--out F]
+    supervise.py new release --version V --prs N... --channel dev|prod --worktree DIR [--issue N...]
+                             [--prev-tag T] [--repo DIR] [--out F]
+    supervise.py new mission --name M --worktree <リポジトリの根> --issue N... [--design N...] [--tests PATH...] [--out DIR]
+        # 並列の設計 → 関門 1 → ミッションのブランチ → 並列の実装（ミッションのブランチへ集める）→ 検査 1 回 → 配布
+        # を波ごとの計画ファイルと mission.json へ書き出す。波の中は queue --max 3 で流す
     supervise.py queue <plan.json>... [--max 3]   # 空いた枠へ順に流す
     supervise.py note <引き継ぎ文書.md> --report <report.md> [--next 次の欄] [--section 見出しの語]
     supervise.py sync-check [--root DIR] [--commit]   # 生成物の同期と検査 4 本
@@ -26,7 +31,7 @@ new / queue / note / sync-check の結果は lib/step_result.py の形の 1 行�
 
 計画（JSON）:
     {
-      "持ち場": "検査", "課題": [818], "モード": "standard",
+      "フェーズ": "検査", "課題": [818], "モード": "standard",
       "作業場所": "/abs/worktree",
       "branch": "feat/issue-818-x",         # 省略可。作業場所が無ければ起動時に作業ツリーを作る
       "起点": "origin/develop",             # branch から作るときの起点（既定 origin/develop）
@@ -63,7 +68,21 @@ drive の段: `cmd`（または `"drive": "cross-review" | "cross-refactoring"` 
 - `stopped`・結果ファイルが書かれない・`"max_pauses"`（既定 12）を超える、のどれかなら失敗
 
 段ごとの作業場所: run と work の段に `"cwd"` を書くと、その段だけ別の場所で動く（取り込みで PR ごとに
-作業ツリーが違うとき）。
+作業ツリーが違うとき）。work の段では worker へ渡す「作業場所」もその `cwd` になる。
+
+配布の雛形（new release）: dev は bump → changelog → 説明文 → sync-check → release → verify-install（develop）
+→ approval-facts → 提示物の説明文。approval-facts の提示物は `issues/approval-ndf-v<正式版>.md` へ写す。
+prod は bump → changelog → 説明文 → トークン消費の記録 → sync-check → release → verify-install（main）。
+落ちた run の段は judge が fix・同じ段のやり直し・stop を選ぶ。
+
+利用上限: claude -p（work・drive の worker・judge・pr）が利用上限（session limit・HTTP 429・
+`api_error_status: 429`・「You've hit your limit … resets …」。lib/monitor.py の USAGE LIMIT の表と同じ文言）で
+落ちたら、段の失敗とは区別する（on_fail・judge へ回さない）。段の結果に `"limit": true` と読めた解除時刻を残す。
+- 環境変数 `NDF_SUPERVISE_CLAUDE_FALLBACK`（`KEY=VALUE` を空白区切り。例 `CLAUDE_CODE_USE_BEDROCK=1`）が
+  あれば、それを環境に足した同じ claude -p で 1 度だけ起動し直す。報告に `認証: 切り替え（<変数名>）` を書く
+- それでも上限なら、解除時刻 + 1 分まで（読めなければ計画の `"limit_retry_seconds"`、既定 900 秒）待って
+  同じ呼び出しを起動し直す。待ちは LLM を使わない（time.sleep）。queue の枠は待ちの間も保つ
+- 待ちの合計が計画の `"limit_wait_max"`（既定 10800 秒）を超えるなら `結果: 止まった`・`理由: 利用上限`
 
 run の段:
 - `"preset"`: 定型のコマンド。`sync-check`（生成物の同期と検査 4 本）・`assess`（構造改善の要否）・
@@ -72,17 +91,21 @@ run の段:
 - `"rerun_failed": true`: 失敗したら落ちたテストだけ（`pytest --lf`）を走らせ直し、通れば成功として進む
 - `"skip_to": "<段の id>"`: 終了コードが `skip_code`（既定 3。`refactor.py assess` の「飛ばしてよい」）なら
   その段へ進む
+- 終了コード 10〜19（共通の契約の関門）は失敗にしない。段の結果に `gate` を残して `"gate_next"`（無ければ
+  `next`）へ進み、最後まで進めば報告は `結果: 関門`。結果 JSON の `presentation_path` を報告の `提示物` に写す。
+  `"presentation_to": "<パス>"` があれば提示物をそのパス（段の作業場所から）へ写し、そちらを載せる
 - pytest の成果物（`reports/`）を作らない（`PYTEST_ADDOPTS` に `-p no:playwright-kit` を足す）。
   作らせるときは `"reports": true`
 
 段の遷移:
-- `next` に `end` を書くと、そこで持ち場を完了として終える
-- run: 終了コード 0 なら `next`（無ければ次の段）。0 以外なら `on_fail`（無ければ止まる）
+- `next` に `end` を書くと、そこでフェーズを完了として終える
+- run: 終了コード 0 なら `next`（無ければ次の段）。10〜19 は関門として `gate_next` か `next`。
+  それ以外の 0 以外なら `on_fail`（無ければ止まる）
 - work: 終了後に `next`（無ければ次の段）
 - judge: 答えの `decision` が段の id ならその段へ、`next` なら次の段へ、`stop` なら止まる、
   `gate` なら関門として止まる。`choices` を渡すとその中から選ばせる
 
-最後に `## 持ち場の報告` を標準出力と `<state-dir>/report.md` へ書く。conductor はこの
+最後に `## フェーズの報告` を標準出力と `<state-dir>/report.md` へ書く。conductor はこの
 スクリプトを背景の Bash で起動し、終わりの通知で報告を読む。
 """
 import argparse
@@ -90,13 +113,18 @@ import json
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import time
+from datetime import datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 from step_result import emit, result  # noqa: E402
+from monitor import USAGE_LIMIT_FATAL  # noqa: E402  利用上限の文言の表
+from pr_mode import with_mode_line  # noqa: E402
 
 WORK_TOOLS = "Read,Edit,Write,Bash,Grep,Glob"
 # work の段に載せる MCP は Serena だけ（mcp-serena の .mcp.json と同じ起動）。シンボル単位で読み・直し、
@@ -133,6 +161,11 @@ SYNC_CHECKS = [
 PYTEST = ("uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest --with pytest-xdist "
           "pytest {paths} -q -n 4")
 NO_REPORTS = "-p no:playwright-kit"  # playwright-kit の plugin が reports/ を書く
+LIMIT_RETRY = 900      # 利用上限の解除時刻が読めないときの待ち（秒）。計画の "limit_retry_seconds"
+LIMIT_WAIT_MAX = 10800  # 利用上限の待ちの最大（秒）。計画の "limit_wait_max"
+# claude の古い形の上限の文言（`Claude AI usage limit reached|<解除の UNIX 時刻>`）
+LIMIT_EPOCH = re.compile(r"usage limit reached\|(\d{9,11})", re.I)
+LIMIT_RESETS = re.compile(r"resets?(?:\s+at)?\s+(\d{1,2})(?::(\d{2}))?\s*([ap]m)?(?:\s*\(([^)]+)\))?", re.I)
 
 WORK_SYSTEM = """あなたは NDF の worker である。1 つの作業だけを行う。
 - 人間へ問わない。別のサブエージェントを起動しない。進行を記録しない
@@ -176,7 +209,7 @@ PR_SYSTEM = """あなたは Pull Request の本文だけを書く。Tool は無�
 - 課題を閉じる語（Fix #番号・Closes・Resolves など）を書かない。課題は「#番号」とだけ書く
 - 材料に無いことを書かない。本文だけを返し、前置きや囲みを付けない"""
 
-JUDGE_SYSTEM = """あなたは NDF の持ち場の判断だけを行う。Tool は無い。
+JUDGE_SYSTEM = """あなたは NDF のフェーズの判断だけを行う。Tool は無い。
 渡された結果と規則だけを根拠に、次の段を 1 つ選ぶ。
 答えは JSON 1 つだけを返す: {"decision": "<選んだ値>", "reason": "<1 行>"}"""
 
@@ -212,27 +245,94 @@ def claude_cmd(system: str, tools: str | None, cwd: str, full: bool = False,
 
 
 def call_claude(system: str, prompt: str, tools: str | None, cwd: str, timeout: int,
-                full: bool = False, serena: bool = False, resume: str | None = None) -> dict:
-    """claude -p を 1 回呼び、結果の本文と使用量を返す（既定は最小構成）。"""
+                full: bool = False, serena: bool = False, resume: str | None = None,
+                env: dict | None = None) -> dict:
+    """claude -p を 1 回呼び、結果の本文と使用量を返す（既定は最小構成）。
+
+    `env` は環境に足す変数（認証の切り替え）。利用上限で落ちたら `"limit": true` と、読めれば
+    解除の時刻（UNIX 時刻）を `"resets_at"` に残す。
+    """
     started = time.time()
     try:
         p = subprocess.run(claude_cmd(system, tools, cwd, full, serena, resume), input=prompt, capture_output=True,
-                           text=True, cwd=cwd, timeout=timeout)
+                           text=True, cwd=cwd, timeout=timeout, env={**os.environ, **env} if env else None)
     except subprocess.TimeoutExpired:
         return {"ok": False, "text": f"打ち切り（{timeout} 秒）", "usage": {}, "seconds": timeout}
     try:
         data = json.loads(p.stdout)
     except json.JSONDecodeError:
         data = {"result": p.stdout, "is_error": p.returncode != 0}
+    if not isinstance(data, dict):
+        data = {"result": p.stdout, "is_error": p.returncode != 0}
+    ok = p.returncode == 0 and not data.get("is_error")
+    text = data.get("result") or p.stderr[-TAIL:]
+    limit = not ok and is_usage_limit("\n".join([str(data.get("result") or ""), p.stderr, p.stdout]))
     return {
-        "ok": p.returncode == 0 and not data.get("is_error"),
-        "text": data.get("result") or p.stderr[-TAIL:],
+        "ok": ok,
+        "text": text,
         "usage": data.get("usage") or {},
         "cost": data.get("total_cost_usd"),
         "turns": data.get("num_turns"),
         "session": data.get("session_id"),
         "seconds": round(time.time() - started, 1),
+        "limit": limit,
+        "resets_at": limit_reset_at("\n".join([str(data.get("result") or ""), p.stderr])) if limit else None,
     }
+
+
+def is_gate(code: int | None) -> bool:
+    """run の段の終了コード 10〜19 は共通の契約の関門（lib/step_result.py の EXIT_GATE）。"""
+    return code is not None and 10 <= code <= 19
+
+
+def is_usage_limit(text: str) -> bool:
+    """利用上限で落ちたか。lib/monitor.py の USAGE LIMIT の表と同じ文言で照合する。"""
+    return any(rx.search(text or "") for rx in USAGE_LIMIT_FATAL) or bool(LIMIT_EPOCH.search(text or ""))
+
+
+def limit_reset_at(text: str, now: float | None = None) -> float | None:
+    """上限の文言から解除の時刻（UNIX 時刻）を読む。読めなければ None。
+
+    読む形: `usage limit reached|<UNIX 時刻>` と `resets 3pm (Asia/Tokyo)` / `resets at 15:30`。
+    時刻だけの形は、今より後の最初のその時刻（時間帯が無ければ手元の時間帯）とする。
+    """
+    now = time.time() if now is None else now
+    m = LIMIT_EPOCH.search(text or "")
+    if m:
+        return float(m.group(1))
+    m = LIMIT_RESETS.search(text or "")
+    if not m:
+        return None
+    hour, minute, ampm, zone = int(m.group(1)), int(m.group(2) or 0), (m.group(3) or "").lower(), m.group(4)
+    if ampm:
+        if not 1 <= hour <= 12:
+            return None
+        hour = hour % 12 + (12 if ampm == "pm" else 0)
+    if hour > 23 or minute > 59:
+        return None
+    try:
+        tz = ZoneInfo(zone.strip()) if zone else None
+    except (KeyError, ValueError):
+        tz = None
+    cur = datetime.fromtimestamp(now, tz) if tz else datetime.fromtimestamp(now).astimezone()
+    at = cur.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if at.timestamp() <= now:
+        at += timedelta(days=1)
+    return at.timestamp()
+
+
+def fallback_env() -> dict:
+    """NDF_SUPERVISE_CLAUDE_FALLBACK（`KEY=VALUE` を空白区切り）を読む。"""
+    out = {}
+    for tok in shlex.split(os.environ.get("NDF_SUPERVISE_CLAUDE_FALLBACK", "")):
+        k, sep, v = tok.partition("=")
+        if sep and k:
+            out[k] = v
+    return out
+
+
+class UsageLimit(Exception):
+    """利用上限の待ちが最大を超えた。段の失敗とは区別して止まる。"""
 
 
 def parse_decision(text: str) -> dict:
@@ -294,9 +394,21 @@ def expand_parts(steps: list[dict]) -> list[dict]:
     return out
 
 
+# 計画の旧いキー（持ち場）を今のキー（フェーズ）へ読み替える。旧い計画の JSON も読めるようにする
+PLAN_KEY_ALIASES = {"持ち場": "フェーズ", "次の持ち場": "次のフェーズ"}
+
+
+def normalize_plan(plan: dict) -> dict:
+    for old, new in PLAN_KEY_ALIASES.items():
+        if old in plan:
+            value = plan.pop(old)
+            plan.setdefault(new, value)
+    return plan
+
+
 class Supervisor:
     def __init__(self, plan: dict, state_dir: Path):
-        self.plan = plan
+        self.plan = normalize_plan(plan)
         plan["steps"] = expand_parts(plan["steps"])
         self.steps = {s["id"]: s for s in plan["steps"]}
         self.order = [s["id"] for s in plan["steps"]]
@@ -308,6 +420,8 @@ class Supervisor:
         self.llm = {"work": 0, "judge": 0, "input": 0, "cache_read": 0, "cache_write": 0,
                     "output": 0, "cost": 0.0}
         self.last_stage = "無し"
+        self.gates: list[dict] = []      # run の段が返した関門（終了コード 10〜19）
+        self.switched: list[str] = []    # 利用上限で足した認証の変数の名前
 
     # --- 共通 ---
     def out_path(self, n: int, sid: str) -> Path:
@@ -350,6 +464,49 @@ class Supervisor:
         c["cache_write"] += u.get("cache_creation_input_tokens", 0)
         c["output"] += u.get("output_tokens", 0)
         c["cost"] = round(c["cost"] + (res.get("cost") or 0.0), 4)
+
+    def claude(self, system: str, prompt: str, tools: str | None, cwd: str, timeout: int, **kw) -> dict:
+        """claude -p を呼ぶ唯一の口（work / drive の worker / judge / pr）。利用上限をここで扱う。
+
+        上限に当たったら、NDF_SUPERVISE_CLAUDE_FALLBACK があればその変数を足して 1 度だけ起動し直す。
+        それでも上限なら、解除の時刻 + 1 分（読めなければ "limit_retry_seconds"）まで待って同じ呼び出しを
+        起動し直す。待ちの合計が "limit_wait_max" を超えるなら UsageLimit を投げる。
+        待ちの実際の秒数は NDF_SUPERVISE_LIMIT_SLEEP で短くできる（試験用）。
+        """
+        retry = self.plan.get("limit_retry_seconds", LIMIT_RETRY)
+        wait_max = self.plan.get("limit_wait_max", LIMIT_WAIT_MAX)
+        fallback = fallback_env()
+        tried_fallback, waited = False, 0.0
+        while True:
+            res = call_claude(system, prompt, tools, cwd, timeout, **kw)
+            if res.get("limit"):
+                self.note_limit(res)
+                if fallback and not tried_fallback:
+                    tried_fallback = True
+                    for k in fallback:
+                        if k not in self.switched:
+                            self.switched.append(k)
+                    self.cur["auth"] = "切り替え（" + ", ".join(fallback) + "）"
+                    res = call_claude(system, prompt, tools, cwd, timeout, env=fallback, **kw)
+                    if res.get("limit"):
+                        self.note_limit(res)
+            if not res.get("limit"):
+                return res
+            wait = max(0.0, res["resets_at"] + 60 - time.time()) if res.get("resets_at") else float(retry)
+            if waited + wait > wait_max:
+                raise UsageLimit(f"利用上限の待ちが最大 {wait_max} 秒を超える（待った {round(waited)} 秒、"
+                                 f"次の待ち {round(wait)} 秒）: {(res.get('text') or '')[:200]}")
+            short = os.environ.get("NDF_SUPERVISE_LIMIT_SLEEP")
+            time.sleep(min(wait, float(short)) if short else wait)
+            waited += wait
+            self.cur["limit_waited"] = round(self.cur.get("limit_waited", 0) + wait, 1)
+
+    def note_limit(self, res: dict) -> None:
+        self.cur["limit"] = True
+        self.cur["limit_hits"] = self.cur.get("limit_hits", 0) + 1
+        if res.get("resets_at"):
+            self.cur["limit_resets"] = datetime.fromtimestamp(res["resets_at"]).astimezone().isoformat(
+                timespec="minutes")
 
     def next_of(self, sid: str, step: dict) -> str | None:
         """成功したときの次の段。`next` が無ければ並びの次へ進むが、失敗したときにだけ通る段
@@ -401,7 +558,8 @@ class Supervisor:
                 return 2, "cmd の {pr} を置き換える Pull Request がまだ無い"
             cmd = cmd.replace("{pr}", self.plan["Pull Request"])
         env = dict(os.environ)
-        addopts = [env.get("PYTEST_ADDOPTS", "")]
+        # 親の run の段から受け継いだ NO_REPORTS は、reports: true なら外す
+        addopts = [env.get("PYTEST_ADDOPTS", "").replace(NO_REPORTS, "").strip()]
         if not step.get("reports"):
             addopts.append(NO_REPORTS)
         addopts.append(extra_addopts)
@@ -416,7 +574,8 @@ class Supervisor:
     def do_run(self, step: dict) -> tuple[bool, str]:
         started = time.time()
         code, text = self.run_cmd(step)
-        if code not in (0, 124) and step.get("rerun_failed") and not self.is_skip(step, code):
+        if (code not in (0, 124) and not is_gate(code) and step.get("rerun_failed")
+                and not self.is_skip(step, code)):
             # 落ちたテストだけを走らせ直す。通れば揺れとして成功にする
             code2, text2 = self.run_cmd(step, "--lf")
             self.cur["rerun"] = {"exit": code2}
@@ -445,7 +604,7 @@ class Supervisor:
         """worker を 1 回起動する。`runtime` があれば external-ai.py run、無ければ最小構成の claude -p。"""
         rt = step.get("runtime")
         if not rt or rt == "claude-p":
-            return call_claude(WORK_SYSTEM, prompt, WORK_TOOLS, cwd, step.get("timeout", 1800),
+            return self.claude(WORK_SYSTEM, prompt, WORK_TOOLS, cwd, step.get("timeout", 1800),
                                serena=bool(step.get("serena")))
         pf, of = self.dir / f"{name}-prompt.md", self.dir / f"{name}-output.md"
         pf.write_text(WORK_SYSTEM + "\n\n" + prompt)
@@ -464,16 +623,16 @@ class Supervisor:
 
     def do_work(self, step: dict) -> tuple[bool, str]:
         issues = self.issue_text(step)
-        prompt = (f"作業: {step.get('kind', '修正')}\n作業場所: {self.cwd}\n\n"
+        cwd = step.get("cwd", self.cwd)
+        prompt = (f"作業: {step.get('kind', '修正')}\n作業場所: {cwd}\n\n"
                   + (f"{issues}\n\n## 指示\n" if issues else "")
                   + f"{step['prompt']}\n\n## 入力\n{self.inputs_text(step)}")
         if step.get("full"):
             # Skill の本文が手順を持つ。プロンプトは Skill の呼び出しをそのまま渡す
             prompt = step["prompt"]
         full = bool(step.get("full"))
-        cwd = step.get("cwd", self.cwd)
         if full:
-            res = call_claude(FULL_SYSTEM, prompt, WORK_TOOLS, cwd, step.get("timeout", 1800), full=True)
+            res = self.claude(FULL_SYSTEM, prompt, WORK_TOOLS, cwd, step.get("timeout", 1800), full=True)
         else:
             res = self.call_worker(step, prompt, cwd, step["id"])
         self.add_usage("work", res)
@@ -482,7 +641,7 @@ class Supervisor:
         for _ in range(3):
             if not full or REPORT_DONE.search(res["text"] or "") or not res.get("session"):
                 break
-            res = call_claude(FULL_SYSTEM, RESUME_PROMPT, WORK_TOOLS, cwd, step.get("timeout", 1800),
+            res = self.claude(FULL_SYSTEM, RESUME_PROMPT, WORK_TOOLS, cwd, step.get("timeout", 1800),
                               full=True, resume=res["session"])
             self.add_usage("work", res)
         if full and not REPORT_DONE.search(res["text"] or ""):
@@ -605,12 +764,13 @@ class Supervisor:
                 f = Path(self.cwd) / d
                 if f.is_file():
                     design += f"\n### {d}\n" + f.read_text()[:TAIL]
-            res = call_claude(PR_SYSTEM, f"課題: {issues}\n要約の手がかり: {step.get('summary', '')}\n\n"
+            res = self.claude(PR_SYSTEM, f"課題: {issues}\n要約の手がかり: {step.get('summary', '')}\n\n"
                               f"## 材料\n{body}\n## 設計文書（抜粋）{design or ' 無し'}",
                               None, self.cwd, step.get("timeout", 600))
             self.add_usage("judge", res)
             if res["ok"] and res["text"].strip():
                 body = res["text"].strip() + "\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+        body = with_mode_line(body, self.plan.get("モード"), self.passed_stages(step))
         found = subprocess.run(["gh", "pr", "list", "--head", branch, "--state", "open", "--json", "url",
                                 "--jq", ".[0].url"], cwd=self.cwd, capture_output=True, text=True).stdout.rstrip()
         if found:
@@ -626,13 +786,23 @@ class Supervisor:
         self.cur.update(exit=p.returncode, text=(url + "\n" + p.stderr).strip())
         return p.returncode == 0, url
 
+    def passed_stages(self, step: dict | None = None) -> list[str]:
+        """通した工程（段の stage）を通った順に重ねずに返す。step を渡せばその段の工程も含める。"""
+        stages: list[str] = []
+        ids = [e.get("id") for e in self.log] + ([step["id"]] if step else [])
+        for sid in ids:
+            stage = (self.steps.get(sid) or {}).get("stage")
+            if stage and stage not in stages:
+                stages.append(stage)
+        return stages
+
     def do_judge(self, step: dict) -> dict:
         choices = step.get("choices")
-        prompt = (f"持ち場: {self.plan.get('持ち場')} / 課題: {self.plan.get('課題')}\n"
+        prompt = (f"フェーズ: {self.plan.get('フェーズ')} / 課題: {self.plan.get('課題')}\n"
                   f"問い: {step['question']}\n"
                   + (f"選べる値: {', '.join(choices)}（関門なら gate、止めるなら stop）\n" if choices else "")
                   + f"\n## 規則\n{self.plan.get('規則', '（無し）')}\n\n## 結果\n{self.inputs_text(step)}")
-        res = call_claude(JUDGE_SYSTEM, prompt, None, self.cwd, step.get("timeout", 600))
+        res = self.claude(JUDGE_SYSTEM, prompt, None, self.cwd, step.get("timeout", 600))
         self.add_usage("judge", res)
         d = parse_decision(res["text"]) if res["ok"] else {"decision": "stop", "reason": res["text"][:200]}
         self.cur.update(exit=0, text=json.dumps(d, ensure_ascii=False), seconds=res["seconds"])
@@ -658,40 +828,69 @@ class Supervisor:
                 break
             self.record_stage(step.get("stage"))
             self.cur = {"id": sid, "type": step["type"]}
-            if step["type"] == "judge":
-                d = self.do_judge(step)
-                dec = d.get("decision", "stop")
-                self.cur["decision"] = dec
-                if dec == "next":
-                    nxt = self.next_of(sid, step)
-                elif dec == "stop":
-                    result, reason, nxt = "止まった", d.get("reason", "判断が止めた"), None
-                elif dec == "gate":
-                    result, reason, nxt = "関門", d.get("reason", ""), None
-                elif dec in self.steps:
-                    nxt = dec
+            try:
+                if step["type"] == "judge":
+                    d = self.do_judge(step)
+                    dec = d.get("decision", "stop")
+                    self.cur["decision"] = dec
+                    if dec == "next":
+                        nxt = self.next_of(sid, step)
+                    elif dec == "stop":
+                        result, reason, nxt = "止まった", d.get("reason", "判断が止めた"), None
+                    elif dec == "gate":
+                        result, reason, nxt = "関門", d.get("reason", ""), None
+                    elif dec in self.steps:
+                        nxt = dec
+                    else:
+                        result, reason, nxt = "止まった", f"判断が知らない値を返した: {dec}", None
                 else:
-                    result, reason, nxt = "止まった", f"判断が知らない値を返した: {dec}", None
-            else:
-                do = {"run": self.do_run, "work": self.do_work, "pr": self.do_pr,
-                      "drive": self.do_drive}[step["type"]]
-                ok, _ = do(step)
-                if step["type"] == "run" and self.is_skip(step, self.cur.get("exit")):
-                    nxt = None if step["skip_to"] == "end" else step["skip_to"]
-                    self.cur["skipped"] = True
-                elif ok:
-                    nxt = self.next_of(sid, step)
-                elif step.get("on_fail"):
-                    nxt = step["on_fail"]
-                else:
-                    result, reason, nxt = "止まった", f"段 {sid} が失敗した（exit={self.cur['exit']}）", None
+                    do = {"run": self.do_run, "work": self.do_work, "pr": self.do_pr,
+                          "drive": self.do_drive}[step["type"]]
+                    ok, _ = do(step)
+                    if step["type"] == "run" and self.is_skip(step, self.cur.get("exit")):
+                        nxt = None if step["skip_to"] == "end" else step["skip_to"]
+                        self.cur["skipped"] = True
+                    elif step["type"] == "run" and is_gate(self.cur.get("exit")):
+                        self.take_gate(step)
+                        gnext = step.get("gate_next")
+                        nxt = (None if gnext == "end" else gnext) if gnext else self.next_of(sid, step)
+                    elif ok:
+                        nxt = self.next_of(sid, step)
+                    elif step.get("on_fail"):
+                        nxt = step["on_fail"]
+                    else:
+                        result, reason, nxt = "止まった", f"段 {sid} が失敗した（exit={self.cur['exit']}）", None
+            except UsageLimit as e:
+                # 利用上限は段の失敗と区別する（on_fail・judge へ回さない）
+                self.cur.setdefault("exit", 1)
+                self.cur["text"] = str(e)
+                result, reason, nxt = "止まった", "利用上限", None
             self.results[sid] = dict(self.cur)
             self.out_path(n, sid).write_text(self.cur.get("text", ""))
             self.log.append({k: v for k, v in self.cur.items() if k != "text"})
             (self.dir / "state.json").write_text(json.dumps(
                 {"log": self.log, "llm": self.llm}, ensure_ascii=False, indent=1))
             sid = nxt
+        if result == "完了" and self.gates:
+            result = "関門"
+            if reason == "無し":
+                reason = "; ".join(f"段 {g['id']} が関門を返した（exit={g['exit']}）" for g in self.gates)
         return self.report(result, reason)
+
+    def take_gate(self, step: dict) -> None:
+        """run の段の関門を残す。提示物（結果 JSON の presentation_path）は `presentation_to` があれば写す。"""
+        out = last_json(self.cur.get("text", "")) or {}
+        path = out.get("presentation_path")
+        dest = step.get("presentation_to")
+        if path and dest and Path(path).is_file():
+            target = Path(step.get("cwd", self.cwd)) / dest
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(path, target)
+            path = str(target)
+        self.cur["gate"] = True
+        if path:
+            self.cur["presentation"] = path
+        self.gates.append({"id": step["id"], "exit": self.cur.get("exit"), "presentation": path})
 
     def report(self, result: str, reason: str) -> str:
         l = self.llm
@@ -706,17 +905,30 @@ class Supervisor:
             if "counts" in e:
                 counts[e["id"]] = e["counts"]
         counts_line = "; ".join(f"{k}: {counts_text(v)}" for k, v in counts.items()) or "無し"
-        text = f"""## 持ち場の報告
+        if self.gates:
+            gate_line = "; ".join(f"段 {g['id']}（exit={g['exit']}）" for g in self.gates)
+        else:
+            gate_line = "本番の系へ届く操作" if result == "関門" else "無し"
+        presented = ", ".join(g["presentation"] for g in self.gates if g.get("presentation")) or "無し"
+        extra = ""
+        if self.switched:
+            extra += f"- 認証: 切り替え（{', '.join(self.switched)}）\n"
+        limited = [e for e in self.log if e.get("limit")]
+        if limited:
+            extra += "- 利用上限: " + "; ".join(
+                f"{e['id']} {e.get('limit_hits', 1)} 回（待ち {e.get('limit_waited', 0)} 秒"
+                + (f"・解除 {e['limit_resets']}" if e.get("limit_resets") else "") + "）" for e in limited) + "\n"
+        text = f"""## フェーズの報告
 
-- 持ち場: {self.plan.get('持ち場')}
+- フェーズ: {self.plan.get('フェーズ')}
 - 課題: {' '.join('#' + str(i) for i in self.plan.get('課題', []))}
 - 結果: {result}
-- 関門: {'本番の系へ届く操作' if result == '関門' else '無し'}
-- 次の持ち場: {self.plan.get('次の持ち場', '無し') if result == '完了' else '無し'}
+- 関門: {gate_line}
+- 次のフェーズ: {self.plan.get('次のフェーズ', '無し') if result == '完了' else '無し'}
 - Pull Request: {self.plan.get('Pull Request', '無し')}
 - 最後に記録した工程: {self.last_stage}
 - 使った worker: 修正 {l['work']}（claude -p）/ 判断 {l['judge']}（claude -p）
-- 提示物: 無し
+{extra}- 提示物: {presented}
 - 理由: {reason}
 - 通った段: {steps}
 - 件数: {counts_line}
@@ -732,7 +944,7 @@ class Supervisor:
 
 
 EXAMPLE = {
-    "持ち場": "検査", "課題": [0], "モード": "light", "作業場所": "/abs/worktree",
+    "フェーズ": "検査", "課題": [0], "モード": "light", "作業場所": "/abs/worktree",
     "規則": "テストが落ちたら、失敗が変更に起因するなら fix、環境や揺れなら stop。",
     "上限": 10,
     "steps": [
@@ -788,7 +1000,7 @@ def plan_impl(a) -> dict:
     prompt = Path(a.prompt_file).read_text() if a.prompt_file else (a.prompt or f"課題 #{n} を実装する。")
     tests = " ".join(a.tests)
     plan = {
-        "持ち場": "実装", "課題": a.issue, "モード": a.mode, "作業場所": a.worktree,
+        "フェーズ": "実装", "課題": a.issue, "モード": a.mode, "作業場所": a.worktree,
         "規則": RULE_IMPL, "上限": 20,
         "steps": [
             {"id": "impl", "type": "work", "kind": "実装", "serena": True, "stage": "実装", "issues": True,
@@ -835,7 +1047,7 @@ def plan_check(a) -> dict:
         refactor = {"id": "refactor", "type": "work", "full": True, "kind": "構造改善", "stage": "構造改善",
                     "timeout": 3600, "prompt": f"/ndf:cross-refactoring {pr}", "next": "review"}
     return {
-        "持ち場": "検査", "課題": a.issue or [], "モード": a.mode, "作業場所": a.worktree,
+        "フェーズ": "検査", "課題": a.issue or [], "モード": a.mode, "作業場所": a.worktree,
         "規則": RULE_CHECK, "上限": 12, "Pull Request": str(pr),
         "steps": [
             {"id": "assess", "type": "run", "preset": "assess", "stage": "構造改善", "skip_to": "review",
@@ -856,14 +1068,234 @@ def plan_check(a) -> dict:
     }
 
 
+RULE_RELEASE_DEV = ("run の段が落ちたら、出力を読んで直せるもの（版数の書き漏れ・文書の形）は fix。外部の待ち（CI・ネットワーク）"
+                    "の揺れなら同じ段をもう一度（retry）。認証や権限の不足・タグの重複は stop。")
+RULE_RELEASE_PROD = ("利用者は関門 2 を承認した。run の段が落ちたら、直せるもの（版数の書き漏れ・文書の形）は fix。"
+                     "外部の待ち（CI・ネットワーク）の揺れなら同じ段をもう一度。タグの重複・権限の不足は stop。")
+NO_HISTORY = "以前との比較（「以前は」「〜によらず」「〜ではなくなった」）や課題番号の由来の括弧は書かない。今の決まりだけを書く。"
+STEPS_PY = "python3 plugins/ndf/scripts/release-steps.py"
+VERIFY_PY = "python3 plugins/ndf/scripts/release-verification-steps.py"
+
+
+def plan_release(a) -> dict:
+    """配布の計画。dev: bump → changelog → 説明文 → sync-check → release → verify-install → approval-facts
+    → 提示物の説明文。prod: bump → changelog → 説明文 → 消費の記録 → sync-check → release → verify-install。"""
+    v, dev = a.version, a.channel == "dev"
+    base = re.sub(r"-.*$", "", v)  # 開発版の本番承認の提示物は正式版の番号で作る
+    prs = " ".join(map(str, a.prs))
+    repo = a.repo or (a.worktree.split("/.worktrees/")[0] if "/.worktrees/" in a.worktree else None)
+    run_ids = ["bump", "changelog"] + ([] if dev else ["snapshot"]) + ["sync", "release", "verify"] + (
+        ["facts"] if dev else [])
+    commit = f"git add -A && git commit -m 'Release: ndf v{v}' でコミットする（件名に課題を閉じる語を書かない）。"
+    if dev:
+        notes = (f"CHANGELOG.md の {v} の節と plugins/ndf/README.md の更新案内（この版の見出しの下）に、PR の題名の一覧が"
+                 "並んでいる。これを利用者向けの説明へ書き直す: 何ができるようになったか・使い方が変わる点。"
+                 f"{NO_HISTORY}書いたら {commit}")
+    else:
+        notes = (f"この作業ツリーは release/v{v}（本番の版上げ）。plugins/ndf/README.md の更新案内の節と CHANGELOG.md の "
+                 f"[ndf {v}] の節を確かめ、開発版の見出し（v{v}-dev.N）や「開発版です」の断りが残っていれば v{v} の"
+                 "正式版の形に直す。changelog の段が PR の題名の一覧へ差し替えていたら、直前の開発版の節にあった"
+                 "利用者向けの説明を戻す。git log -p -1 -- plugins/ndf/README.md で前の文を見てよい。"
+                 f"{NO_HISTORY}書いたら {commit}")
+    steps = [
+        {"id": "bump", "type": "run", "stage": "配布", "cmd": f"{STEPS_PY} bump --plugin ndf --to {v}",
+         "on_fail": "judge", "next": "changelog"},
+        {"id": "changelog", "type": "run", "cmd": f"{STEPS_PY} changelog --version {v} --prs {prs}",
+         "on_fail": "judge", "next": "notes"},
+        {"id": "notes", "type": "work", "kind": "説明文", "inputs": ["changelog"], "prompt": notes,
+         "next": "sync" if dev else "snapshot"},
+    ]
+    if not dev:
+        steps.append({"id": "snapshot", "type": "run", "stage": "配布", "timeout": 900,
+                      "cmd": f"sh -c '{STEPS_PY} run --root . --stage production --version {v} && git add -A && "
+                             f"(git diff --cached --quiet || git commit -q -m \"Release: ndf v{v} のトークン消費の記録\")'",
+                      "on_fail": "judge", "next": "sync"})
+    ref = "develop" if dev else "main"
+    steps += [
+        {"id": "sync", "type": "run", "preset": "sync-check", "on_fail": "judge", "next": "release"},
+        {"id": "release", "type": "run", "stage": "配布", "timeout": 2400 if dev else 3000,
+         "cmd": f"{STEPS_PY} release --version {v} --channel {a.channel}", "on_fail": "judge", "next": "verify"},
+        {"id": "verify", "type": "run", "stage": "配布" if dev else "リリース後テスト", "timeout": 1500, "cwd": repo,
+         "cmd": f"sh -c 'git pull -q --ff-only origin develop && {VERIFY_PY} verify-install --ref {ref} "
+                f"--expect {v} --runtimes claude,codex,kiro'",
+         "on_fail": "judge", "next": "facts" if dev else "end"},
+    ]
+    if dev:
+        approval = f"issues/approval-ndf-v{base}.md"
+        prev = f" --prev-tag {a.prev_tag}" if a.prev_tag else ""
+        steps += [
+            {"id": "facts", "type": "run", "cwd": repo,
+             "cmd": f"{STEPS_PY} approval-facts --version {base} --prs {prs}{prev}",
+             "presentation_to": approval, "on_fail": "judge", "gate_next": "explain", "next": "explain"},
+            {"id": "explain", "type": "work", "kind": "説明文", "cwd": repo, "inputs": ["verify", "facts"],
+             "prompt": (f"{approval} は本番承認（関門 2）の提示物で、機械で作れる部分（対象・PR と CI・同意の項目・"
+                        "戻し方）が入っている。次を書く。(1) 表の「配る中身」の欄: plugins/ndf/README.md の"
+                        f"「v{v} へ更新するとき」の節と CHANGELOG.md の {base} の節から、利用者に何ができるようになるかを"
+                        "3〜6 項目に。(2) 表の「検証への配布で確かめたこと」の欄: 入力の verify の結果（Claude Code・"
+                        f"Codex・Kiro の 3 経路で develop から ndf {v} を導入し、版と中身が一致したか）を 2〜3 行に。"
+                        "(3) 「同意を求めること」の前に節「## 未検証・残る危険」を足す: 通していない検査フェーズ・"
+                        "この配布で初めて実機で使った手順・本番配布の後でしか確かめられないこと。PR の本文と入力から"
+                        f"読めることだけを書く。{NO_HISTORY}コミットしない。"),
+             "next": "end"},
+        ]
+    steps += [
+        {"id": "judge", "type": "judge", "inputs": run_ids,
+         "question": "落ちた段を直す（fix）か、同じ段をもう一度（retry）か、止める（stop）か。retry なら decision に"
+                     "落ちた段の id を返す",
+         "choices": ["fix", *run_ids, "stop"]},
+        {"id": "fix", "type": "work", "kind": "修正", "inputs": run_ids,
+         "prompt": "落ちた段の出力を読み、原因を直してコミットする（push しない）。直したら次は落ちた段からやり直す。",
+         "next": "sync"},
+    ]
+    plan = {
+        "フェーズ": f"配布（{'開発版' if dev else '本番'}）", "課題": a.issue, "モード": a.mode, "作業場所": a.worktree,
+        "branch": a.branch or f"release/v{v}", "規則": RULE_RELEASE_DEV if dev else RULE_RELEASE_PROD, "上限": 20,
+        "steps": steps,
+    }
+    if repo:
+        plan["リポジトリ"] = repo
+        plan["記録"] = f"{repo}/plugins/ndf/scripts/projects-sync.sh"
+    return plan
+
+
 def cmd_new(a) -> dict:
-    plan = plan_impl(a) if a.kind == "impl" else plan_check(a)
-    key = a.issue[0] if a.kind == "impl" else f"{a.pr}-check"
+    plan = {"impl": plan_impl, "check": plan_check, "release": plan_release}[a.kind](a)
+    key = {"impl": lambda: a.issue[0], "check": lambda: f"{a.pr}-check",
+           "release": lambda: f"release-{a.version}"}[a.kind]()
     out = Path(a.out or f"plan-{key}.json")
     out.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n")
     return result("supervise-new", "ok", f"計画を書いた: {out}",
                   [{"path": str(out), "kind": a.kind, "steps": [s["id"] for s in plan["steps"]]}],
                   {"steps": len(plan["steps"])})
+
+
+RULE_DESIGN = ("設計の cross-review は上限 3 ラウンドで関門 1 へ渡す（収束を待たない）。レビューが ok か、"
+               "上限・振動で打ち切られたなら gate。駆動そのものが失敗したら stop。")
+WORKTREE_SETUP = SELF.parent / "worktree-setup.sh"
+
+
+def mission_branch(name: str) -> str:
+    return f"mission/{name}"
+
+
+def plan_mission_design(a, n: int, repo: str) -> dict:
+    """設計のフェーズ: 設計文書を書き、設計 PR を出し、cross-review（設計の既定 3 ラウンド）の後に関門 1 で止まる。"""
+    branch = f"design/issue-{n}"
+    return {
+        "フェーズ": "設計", "課題": [n], "モード": a.mode, "作業場所": f"{repo}/.worktrees/{branch}",
+        "branch": branch, "起点": f"origin/{a.base}", "リポジトリ": repo, "規則": RULE_DESIGN, "上限": 12,
+        "steps": [
+            {"id": "design", "type": "work", "full": True, "kind": "設計", "stage": "設計", "issues": True,
+             "timeout": 3600, "next": "pr",
+             "prompt": f"/ndf:design #{n}。設計文書は 1,000 行以下にする（超える主題は設計を 2 本に分けると報告する）。"
+                       "コミットする（push しない）。"},
+            {"id": "pr", "type": "pr", "stage": "ドキュメントレビュー", "base": a.base, "title": f"設計: #{n}",
+             "summary": f"#{n} の設計（ミッション {a.name}）", "next": "review"},
+            # --max-rounds を渡さない。設計の分類の既定（3 ラウンド・前のラウンドからの変更だけ）で回る
+            {"id": "review", "type": "drive", "drive": "cross-review", "kind": "ドキュメントレビュー",
+             "stage": "ドキュメントレビュー", "timeout": 3600, "args": "{pr}", "on_fail": "gate", "next": "gate"},
+            {"id": "gate", "type": "judge", "inputs": ["review"],
+             "question": "関門 1（設計 Pull Request のマージ）へ渡す（gate）か、止める（stop）か",
+             "choices": ["gate", "stop"]},
+        ],
+    }
+
+
+def plan_mission_branch(a, repo: str) -> dict:
+    """ミッションのブランチを起点（develop）から切り、origin へ送る。"""
+    mb = mission_branch(a.name)
+    wt = f"{repo}/.worktrees/{mb}"
+    cmd = (f"bash {shlex.quote(str(WORKTREE_SETUP))} create {shlex.quote(mb)} && "
+           f"git -C {shlex.quote(wt)} push -q -u origin {shlex.quote(mb)}")
+    return {
+        "フェーズ": "実装", "課題": a.issue, "モード": a.mode, "作業場所": repo, "規則": "", "上限": 3,
+        "steps": [{"id": "mission-branch", "type": "run", "stage": "作業場所の用意", "timeout": 600,
+                   "cmd": cmd, "next": "end"}],
+    }
+
+
+def plan_mission_impl(a, n: int, repo: str) -> dict:
+    """実装のフェーズ: 課題の作業ツリーをミッションのブランチから切り、課題の PR をミッションのブランチへ集める。"""
+    mb = mission_branch(a.name)
+    branch = f"feat/issue-{n}-{a.name}"
+    ns = argparse.Namespace(
+        issue=[n], prompt=None, prompt_file=None, tests=a.tests or ["."], mode=a.mode,
+        worktree=f"{repo}/.worktrees/{branch}", base=mb, title=f"#{n} を実装する（ミッション {a.name}）",
+        summary=f"#{n}（ミッション {a.name} のブランチへ集める）", branch=branch)
+    plan = plan_impl(ns)
+    plan.update({"起点": f"origin/{mb}", "リポジトリ": repo})
+    return plan
+
+
+def plan_mission_check(a, repo: str) -> dict:
+    """検査のフェーズ: ミッションのブランチから develop へ PR を 1 本出し、構造改善・cross-review・完了判定を 1 回通す。"""
+    mb = mission_branch(a.name)
+    ns = argparse.Namespace(pr="{pr}", scope=a.scope, issue=a.issue, mode=a.mode, worktree=f"{repo}/.worktrees/{mb}")
+    plan = plan_check(ns)
+    plan.pop("Pull Request", None)
+    closes = "\n".join(f"Closes #{i}" for i in a.issue)
+    plan.update({"branch": mb, "起点": f"origin/{mb}", "リポジトリ": repo})
+    plan["steps"] = [
+        {"id": "collect", "type": "run", "stage": "実装", "timeout": 600,
+         "cmd": f"git pull -q --ff-only origin {shlex.quote(mb)}", "next": "pr"},
+        {"id": "pr", "type": "pr", "stage": "Pull Request", "base": a.base, "title": f"ミッション {a.name}",
+         "body": "template", "summary": f"ミッション {a.name} の課題を develop へ取り込む。\n\n{closes}",
+         "next": "assess"},
+    ] + plan["steps"]
+    return plan
+
+
+def plan_mission_release(a, repo: str) -> dict:
+    return {
+        "フェーズ": "取り込み", "課題": a.issue, "モード": a.mode, "作業場所": repo, "規則": "", "上限": 3,
+        "steps": [{"id": "release", "type": "work", "full": True, "kind": "配布", "stage": "配布",
+                   "timeout": 3600, "prompt": "/ndf:release", "next": "end"}],
+    }
+
+
+def mission_plans(a) -> list[dict]:
+    """ミッションの波を順に返す。波の中の計画は queue --max 3 で同時に流してよい。"""
+    repo = str(Path(a.worktree).resolve())
+    waves = []
+    if a.design:
+        waves.append({"name": "設計", "plans": {f"design-{n}": plan_mission_design(a, n, repo) for n in a.design}})
+        waves.append({"name": "関門 1", "gate": "設計 Pull Request をまとめて承認してマージする"})
+    waves += [
+        {"name": "ミッションのブランチ", "plans": {"mission-branch": plan_mission_branch(a, repo)}},
+        {"name": "実装", "plans": {f"impl-{n}": plan_mission_impl(a, n, repo) for n in a.issue}},
+        {"name": "検査", "plans": {"check": plan_mission_check(a, repo)}},
+        {"name": "配布", "plans": {"release": plan_mission_release(a, repo)}},
+    ]
+    return waves
+
+
+def cmd_new_mission(a) -> dict:
+    """ミッションの計画を波ごとのファイルへ書き出す。波は番号の順に queue で流す。"""
+    out = Path(a.out or f"mission-{a.name}")
+    out.mkdir(parents=True, exist_ok=True)
+    items, index = [], []
+    for i, wave in enumerate(mission_plans(a), 1):
+        entry = {"wave": i, "name": wave["name"]}
+        if "gate" in wave:
+            entry["gate"] = wave["gate"]
+        else:
+            paths = []
+            for key, plan in wave["plans"].items():
+                p = out / f"{i}-{key}.json"
+                p.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n")
+                paths.append(str(p))
+            entry["plans"] = paths
+            entry["command"] = (f"python3 {shlex.quote(str(SELF))} queue "
+                                + " ".join(map(shlex.quote, paths)) + " --max 3")
+        index.append(entry)
+        items.append(entry)
+    manifest = out / "mission.json"
+    manifest.write_text(json.dumps({"ミッション": a.name, "ブランチ": mission_branch(a.name), "波": index},
+                                   ensure_ascii=False, indent=2) + "\n")
+    plans = sum(len(e.get("plans", [])) for e in index)
+    return result("supervise-new", "ok", f"ミッション {a.name} の計画を {plans} 本・{len(index)} 波で書いた: {manifest}",
+                  items, {"waves": len(index), "plans": plans, "manifest": str(manifest)},
+                  next="波の番号の順に command を打つ。関門の波では承認を取ってから次へ進む")
 
 
 def report_result(text: str) -> str:
@@ -909,7 +1341,7 @@ def note_row(report: str, next_text: str) -> str:
         return m.group(1).strip() if m else ""
     cost = re.search(r"/ \$([0-9.]+)\s*$", field("LLM の使用量"))
     pr = field("Pull Request")
-    state = f"{field('持ち場')}: {field('結果')}"
+    state = f"{field('フェーズ') or field('持ち場')}: {field('結果')}"  # 旧い報告（持ち場）も読む
     extra = [x for x in ((pr if pr and pr != "無し" else ""), (f"${cost.group(1)}" if cost else "")) if x]
     if extra:
         state += "（" + "、".join(extra) + "）"
@@ -950,7 +1382,7 @@ def main() -> int:
     r.add_argument("--from", dest="start", help="この段から始める（途中から再開するとき）")
     sub.add_parser("example")
     n = sub.add_parser("new", help="雛形から計画を作る")
-    n.add_argument("kind", choices=["impl", "check"])
+    n.add_argument("kind", choices=["impl", "check", "release", "mission"])
     n.add_argument("--issue", type=int, nargs="+", default=[])
     n.add_argument("--pr", type=int)
     n.add_argument("--worktree", required=True)
@@ -963,7 +1395,14 @@ def main() -> int:
     n.add_argument("--branch", help="作業場所が無ければ作る作業ツリーのブランチ")
     n.add_argument("--base", default="develop")
     n.add_argument("--mode", default="standard")
+    n.add_argument("--version", help="release: 配る版（例 10.17.11-dev.1）")
+    n.add_argument("--prs", type=int, nargs="+", default=[], help="release: 含む PR")
+    n.add_argument("--channel", choices=["dev", "prod"], help="release: 開発版（dev）か本番（prod）か")
+    n.add_argument("--prev-tag", help="release dev: approval-facts の前のタグ（省略時は自動）")
+    n.add_argument("--repo", help="release: 元のリポジトリ（省略時は作業場所の /.worktrees/ より前）")
     n.add_argument("--out")
+    n.add_argument("--name", help="mission: ミッションの名前（ブランチは mission/<名前>）")
+    n.add_argument("--design", type=int, nargs="+", default=[], help="mission: 設計 PR を出す課題")
     q = sub.add_parser("queue", help="計画を同時に --max 本まで順に流す")
     q.add_argument("plans", nargs="+")
     q.add_argument("--max", type=int, default=3)
@@ -980,11 +1419,21 @@ def main() -> int:
     if a.cmd == "example":
         print(json.dumps(EXAMPLE, ensure_ascii=False, indent=2))
         return 0
+    if a.cmd == "new" and a.kind == "mission":
+        if not (a.name and a.issue):
+            ap.error("new mission には --name・--issue が要る")
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", a.name):
+            ap.error("--name は英数字・. _ - だけで書く（ブランチ名 mission/<名前> に使う）")
+        emit(cmd_new_mission(a))
     if a.cmd == "new":
         if a.kind == "impl" and not (a.issue and a.tests and a.title):
             ap.error("new impl には --issue・--tests・--title が要る")
         if a.kind == "check" and not a.pr:
             ap.error("new check には --pr が要る")
+        if a.kind == "release" and not (a.version and a.prs and a.channel):
+            ap.error("new release には --version・--prs・--channel が要る")
+        if a.kind == "release" and not (a.repo or "/.worktrees/" in a.worktree):
+            ap.error("new release には --repo が要る（作業場所が /.worktrees/ の下に無い）")
         emit(cmd_new(a))
     if a.cmd == "queue":
         emit(cmd_queue(a.plans, max(1, a.max), a.poll))

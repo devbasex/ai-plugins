@@ -4,7 +4,7 @@
 
 **この Skill の「メイン」は、収束ループを駆動している supervisor を指す。** `state.py` の
 骨組みを回している層のことであり、conductor（人間と対話しているセッション）ではない。
-3 層で通すとき `cross-review` を回すのは設計と検査の持ち場の supervisor である（3 層の
+3 層で通すとき `cross-review` を回すのは設計と検査のフェーズの supervisor である（3 層の
 責務は `development-workflow` の `references/agent-layers.md` にある）。3 層へ出さない進行
 では、骨組みを回している会話そのものがこれに当たる。
 

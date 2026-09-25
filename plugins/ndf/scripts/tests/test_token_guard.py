@@ -4,7 +4,7 @@
 
 - 前景の `sleep` で待つ Bash（ループの本体にあるか、秒数が上限を超える）
 - 変わらないファイルの同じ範囲を続けて読み直す Read
-- 文脈が上限を超えた conductor が工程へ入る起動（工程 Skill・持ち場の supervisor）
+- 文脈が上限を超えた conductor が工程へ入る起動（工程 Skill・フェーズの supervisor）
 
 **判定が失敗してもツールを止めない。** 拒否は `permissionDecision: deny` で返し、終了コードは
 常に 0 にする。

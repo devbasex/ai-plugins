@@ -1,7 +1,7 @@
 # 会話の記録から context window を 3 層で測る
 
 conductor / supervisor / worker の会話の記録を層の単位で読み、記録 1 件ごとの固定費・最大充填・
-実作業と、層ごとの合計、持ち場ごとの worker の使い方を出せるようにした。同じ読み取りで、利用上限
+実作業と、層ごとの合計、フェーズごとの worker の使い方を出せるようにした。同じ読み取りで、利用上限
 （429）で中断した記録の一覧と解除の待ちも行う。この文書は、記録を読む部品（`transcript_agents.py`）
 の値の取り方と、`skill-stats --agents` の出力の契約を残す。**値の取り方はこの文書が正である。**
 
@@ -16,15 +16,15 @@ conductor / supervisor / worker の会話の記録を層の単位で読み、記
 ## 概要
 
 **新しい保存先を作らず、Claude Code が書く会話の記録だけを読む。** 記録（`<セッション>.jsonl` と
-`subagents/agent-<id>.jsonl` と `.meta.json`）が層・持ち場・モデル・トークン・時刻・中断・起動元を
+`subagents/agent-<id>.jsonl` と `.meta.json`）が層・フェーズ・モデル・トークン・時刻・中断・起動元を
 すべて持つ。部品は標準ライブラリだけで、ネットワークを呼ばない。
 
-**層は深さで決め、持ち場と作業の種類は `description` の先頭語から取る。** 出力に出すのは語彙の値
+**層は深さで決め、フェーズと作業の種類は `description` の先頭語から取る。** 出力に出すのは語彙の値
 だけで、`: ` の後ろ・パス・本文・プロンプトは出さない。
 
 **粒度の基準は supervisor に当て、worker には別の印を置く。** 「実作業が固定費を上回るなら単独、
-下回るなら束ねる」は持ち場（分割と結合の単位）に当てる。worker は使い捨ての読解で実作業が固定費を
-下回ってよく、代わりに 1 つの持ち場について supervisor と worker の固定費の合計が supervisor の
+下回るなら束ねる」はフェーズ（分割と結合の単位）に当てる。worker は使い捨ての読解で実作業が固定費を
+下回ってよく、代わりに 1 つのフェーズについて supervisor と worker の固定費の合計が supervisor の
 実作業を上回ったら `worker を使いすぎ` の印を付ける。
 
 **層ごとの合計を出し、層を増やした費用を見えるようにする。** 総消費を下げること自体は目的にしない。
@@ -43,7 +43,7 @@ conductor / supervisor / worker の会話の記録を層の単位で読み、記
 | 起動元（`parent_agent_id`） | その記録を起動した相手。`.meta.json` の `toolUseId` と同じ id の `tool_use`（`name` が `Agent`）を含む記録 |
 | 余白（`--margin`） | 解除時刻の後、実際に呼べるまでの猶予。既定 60 秒 |
 
-層・持ち場・作業の種類の語彙は [ndf-agent-layers-unattended-run.md](ndf-agent-layers-unattended-run.md) の
+層・フェーズ・作業の種類の語彙は [ndf-agent-layers-unattended-run.md](ndf-agent-layers-unattended-run.md) の
 「用語」と同じである。
 
 ## 背景
@@ -108,7 +108,7 @@ worker（読解）は深さ 1 に現れるため、`description` の先頭語が
 | キー | 型 | 取り方 |
 | --- | --- | --- |
 | `layer` | 文字列 | 深さと `description` から決める。0 = `conductor`。2 以上 = `worker`。1 は、先頭語が作業の種類の語彙にあれば `worker`、それ以外は `supervisor` |
-| `role` | 文字列 | conductor は `-`。supervisor は `.meta.json` の `description` の最初の `: ` より前が持ち場の語彙にあればその値。worker は同じ位置が作業の種類の語彙にあればその値。当たらなければ `その他`。`: ` が無ければ文字列全体を先頭語にする |
+| `role` | 文字列 | conductor は `-`。supervisor は `.meta.json` の `description` の最初の `: ` より前がフェーズの語彙にあればその値。worker は同じ位置が作業の種類の語彙にあればその値。当たらなければ `その他`。`: ` が無ければ文字列全体を先頭語にする |
 | `agent_id` | 文字列 / null | ファイル名の `agent-<ID>`。conductor は null |
 | `depth` | 整数 | conductor 0。ほかは `.meta.json` の `spawnDepth`（整数でなければ 0） |
 | `model` | 文字列 / null | 合成でない応答の `message.model` のうち最も多いもの |
@@ -144,7 +144,7 @@ worker（読解）は深さ 1 に現れるため、`description` の先頭語が
 
 | コマンド | 引数 | 出力 | 終了コード |
 | --- | --- | --- | --- |
-| `list` | `--session <ID>`（必須、繰り返し可）/ `--layer <層>` / `--format md\|json` | そのセッションの 3 層すべての記録。列は 層 / 持ち場 / 深さ / モデル / 固定費 / 最大充填 / 実作業 / 応答数 / 所要（分） / 終わり方 / 中断 と `agent_id` | 0。記録が 1 件も無ければ 0 で空の一覧と理由 1 行 |
+| `list` | `--session <ID>`（必須、繰り返し可）/ `--layer <層>` / `--format md\|json` | そのセッションの 3 層すべての記録。列は 層 / フェーズ / 深さ / モデル / 固定費 / 最大充填 / 実作業 / 応答数 / 所要（分） / 終わり方 / 中断 と `agent_id` | 0。記録が 1 件も無ければ 0 で空の一覧と理由 1 行 |
 | `interrupted` | `--session` / `--layer` / `--depth <数>` / `--agent <agent_id>`（繰り返し可）/ `--parent <agent_id>` / `--now <ISO 8601>`（テスト用）/ `--format` | `ending` が `rate_limit` の記録だけ。`resets_passed`（真偽）を足す。`--depth 1` は conductor の直下（supervisor と直接起動した worker） | 0 |
 | `wait-reset` | `--session` / `--layer` / `--depth` / `--margin <秒>`（既定 60）/ `--max-sleep <秒>`（既定なし） | 眠った秒数と、起きた時点で読み直した中断した記録の数を 1 行 | 0 = 解除時刻を過ぎた。3 = `--max-sleep` で区切った（まだ解除前。`--max-sleep 0` でも未来の解除時刻があれば 3）。2 = 引数の誤り（負の秒数を含む） |
 
@@ -165,21 +165,21 @@ worker（読解）は深さ 1 に現れるため、`description` の先頭語が
 | 表 | 列 | 出す条件 |
 | --- | --- | --- |
 | 記録ごとの context window | `list` の列（`agent_id` を除く） | `--session` のときだけ |
-| 層・持ち場・モデルごとの束ね | 層 / 持ち場 / モデル / 件数 / 固定費の中央値 / 実作業の中央値 / 実作業 < 固定費 / 最大充填の最大 / 印 | 常に。応答数が 3 に満たない記録と `fixed` が無い記録はこの表からだけ外し、外した件数を表の下に 1 行出す |
+| 層・フェーズ・モデルごとの束ね | 層 / フェーズ / モデル / 件数 / 固定費の中央値 / 実作業の中央値 / 実作業 < 固定費 / 最大充填の最大 / 印 | 常に。応答数が 3 に満たない記録と `fixed` が無い記録はこの表からだけ外し、外した件数を表の下に 1 行出す |
 | 層ごとの合計 | 層 / 件数 / 固定費の合計 / 実作業の合計 / 総消費 | 常に。最後の行は 3 層を合算した `合計`。件数は外す前の全件。記録が無い層の行は出さない |
-| 持ち場ごとの worker の使い方 | 持ち場 / supervisor / supervisor の実作業 / worker の件数 / supervisor と worker の固定費の合計 / 印 | `--session` のときだけ |
+| フェーズごとの worker の使い方 | フェーズ / supervisor / supervisor の実作業 / worker の件数 / supervisor と worker の固定費の合計 / 印 | `--session` のときだけ |
 
 `実作業 < 固定費` は、実作業が**同じ記録の**固定費を下回った記録の件数である。
 
 | 印 | 条件 |
 | --- | --- |
-| `束ねる候補` | 層が `supervisor` の行にだけ付く。`実作業 < 固定費` の件数 > 件数の半分。持ち場が `設計` の行には付けない（設計の持ち場はどのモードでも関門を返すため作る） |
+| `束ねる候補` | 層が `supervisor` の行にだけ付く。`実作業 < 固定費` の件数 > 件数の半分。フェーズが `設計` の行には付けない（設計のフェーズはどのモードでも関門を返すため作る） |
 | `割る候補` | 最大充填の最大 > `--window-limit`。両方付くときは `・` で連結する |
 | `worker を使いすぎ` | supervisor と配下の worker の固定費の合計 > その supervisor の実作業 |
 
-**持ち場ごとの worker の使い方の行は、起動元（`parent_agent_id`）ごとに 1 つで、配下の worker を
-1 件以上持つ supervisor だけを行にする。** 同じ持ち場を工程の頭からやり直したときは supervisor が 2 つに
-なるため 2 行になる。`supervisor` の列には持ち場の中の連番（起動の早い順）を出し、`agent_id` は出さない。
+**フェーズごとの worker の使い方の行は、起動元（`parent_agent_id`）ごとに 1 つで、配下の worker を
+1 件以上持つ supervisor だけを行にする。** 同じフェーズを工程の頭からやり直したときは supervisor が 2 つに
+なるため 2 行になる。`supervisor` の列にはフェーズの中の連番（起動の早い順）を出し、`agent_id` は出さない。
 連番は worker を持たない supervisor も消費する。conductor が直接起動した worker（起動元が null）は
 どの行にも入らない。
 
@@ -192,7 +192,7 @@ worker（読解）は深さ 1 に現れるため、`description` の先頭語が
 `retrospective` の記録の雛形「何が起きたか」の後ろに `## context window の大きさ` を置き、
 `skill-stats --agents --session <conductor のセッション>` の 2 つ目・3 つ目・4 つ目の表をそのまま貼る。
 印の付いた行ごとに、束ねる・割る・worker を減らす・そのままのどれにするかと理由を 1 行書く。
-まとまりを複数のセッションで通したときは `--session` を繰り返して 1 つの表にする。印の判定は記録ごとの
+ミッションを複数のセッションで通したときは `--session` を繰り返して 1 つの表にする。印の判定は記録ごとの
 比で行うため、固定費の違うセッションを束ねても判定の意味は変わらない。
 
 ## テスト観点

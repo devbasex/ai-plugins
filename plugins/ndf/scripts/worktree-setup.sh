@@ -4,6 +4,10 @@
 #   init [--force]   宣言ファイル (.ndf/worktree.json) を作る
 #   status           導入の状態を出す
 #   check            宣言の状態を終了コードで返す（読み取り専用）
+#   create <ブランチ> [--from <起点>]
+#                    `.worktrees/<ブランチ>` に作業ツリーを作る。起点の既定は宣言の
+#                    base_branch。課題の作業ツリーはミッションのブランチ（mission/<名前>）を
+#                    --from に渡して切る。ミッションのブランチそのものは --from を省いて切る
 #
 # 作業ツリー運用の仕組みは、リポジトリ側に宣言ファイルがあるときだけ動く。
 # 無ければ hook もコマンドも何も出力せず終了コード 0 で終わる。**このスクリプトは
@@ -22,14 +26,30 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 SUBCOMMAND="${1:-init}"
 FORCE=0
+CREATE_BRANCH=
+FROM_BRANCH=
 shift 2>/dev/null || true
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --force) FORCE=1; shift ;;
+    --from)
+      [ "$#" -ge 2 ] && [ -n "$2" ] || { printf '%s\n' "--from に起点のブランチを渡してください" >&2; exit 1; }
+      FROM_BRANCH="$2"; shift 2 ;;
     --) shift ;;
-    *) printf '知らない引数です: %s\n' "$1" >&2; exit 1 ;;
+    -*) printf '知らない引数です: %s\n' "$1" >&2; exit 1 ;;
+    *)
+      if [ "$SUBCOMMAND" = create ] && [ -z "$CREATE_BRANCH" ]; then
+        CREATE_BRANCH="$1"; shift
+      else
+        printf '知らない引数です: %s\n' "$1" >&2; exit 1
+      fi
+      ;;
   esac
 done
+if [ -n "$FROM_BRANCH" ] && [ "$SUBCOMMAND" != create ]; then
+  printf '%s\n' "--from は create だけが受け取ります" >&2
+  exit 1
+fi
 
 command -v git >/dev/null 2>&1 || { printf '%s\n' "git が要ります" >&2; exit 1; }
 # 宣言の読み取りは jq を使う。無いと、書いた後の確認も status の判定もできない。
@@ -273,12 +293,65 @@ do_check() {
   esac
 }
 
+# --- create -----------------------------------------------------------------
+
+# 作業ツリーを `.worktrees/<ブランチ>` に作り、そのパスを出力する。
+#
+# 起点は --from があればそれ、無ければ宣言の base_branch（無ければ既定ブランチ）で
+# ある。**宣言の base_branch は書き換えない。** ミッションのブランチは develop から
+# 切り、課題の作業ツリーは --from にミッションのブランチを渡して切る。
+# 起点の名前が origin にもローカルにも無いときは作らずに 1 で終わる。
+do_create() {
+  local branch="$CREATE_BRANCH" base target start
+  if [ -z "$branch" ]; then
+    printf '%s\n' "使い方: worktree-setup.sh create <ブランチ> [--from <起点>]" >&2
+    return 1
+  fi
+  git check-ref-format --branch "$branch" >/dev/null 2>&1 || {
+    printf 'ブランチ名として使えません: %s\n' "$branch" >&2
+    return 1
+  }
+  if ! git -C "$MAIN_DIR" check-ignore -q "$WT_WORKTREE_DIR/" 2>/dev/null; then
+    printf '%s/ が .gitignore に登録されていません。作る前に登録してください\n' "$WT_WORKTREE_DIR" >&2
+    return 1
+  fi
+  target="$MAIN_DIR/$WT_WORKTREE_DIR/$branch"
+  if [ -e "$target" ]; then
+    printf '作業ツリーの置き場所が既にあります: %s\n' "$target" >&2
+    return 1
+  fi
+
+  # 取得に失敗しても止めない。origin の無いリポジトリでもローカルのブランチから切れる。
+  GIT_TERMINAL_PROMPT=0 git -C "$MAIN_DIR" fetch -q origin >/dev/null 2>&1 || true
+
+  if [ -n "$FROM_BRANCH" ]; then
+    base="$FROM_BRANCH"
+    wt_branch_exists "$MAIN_DIR" "$base" || {
+      printf '起点のブランチがありません: %s\n' "$base" >&2
+      return 1
+    }
+  else
+    base=$(wt_base_branch "$MAIN_DIR") || return 1
+  fi
+  start="origin/$base"
+  git -C "$MAIN_DIR" show-ref --verify --quiet "refs/remotes/origin/$base" || start="$base"
+
+  if git -C "$MAIN_DIR" show-ref --verify --quiet "refs/heads/$branch"; then
+    git -C "$MAIN_DIR" worktree add -q "$target" "$branch" >&2 || return 1
+  else
+    git -C "$MAIN_DIR" worktree add -q --no-track -b "$branch" "$target" "$start" >&2 || return 1
+  fi
+  printf '作業ツリー: %s\n' "$target"
+  printf '起点: %s\n' "$base"
+}
+
 case "$SUBCOMMAND" in
   init) do_init ;;
   status) do_status ;;
   check) do_check ;;
+  create) do_create ;;
   *)
-    printf '使い方: worktree-setup.sh <init|status|check> [--force]\n' >&2
+    printf '使い方: worktree-setup.sh <init|status|check> [--force] | create <ブランチ> [--from <起点>]\n' >&2
     exit 1
     ;;
 esac

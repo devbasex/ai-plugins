@@ -286,3 +286,43 @@ def test_report_without_pr_is_precondition(repo, env):
 def test_bad_calls_exit_2(repo, env, args):
     code, _, _ = call(args, env, repo)
     assert code == 2
+
+
+# --- ミッションの宛て先とモードの 1 行（#1005） --------------------------------------
+
+def test_plan_mission_base_is_accepted_without_review(repo, env):
+    git(repo, "push", "-q", "origin", "develop:mission/m1")
+    git(repo, "fetch", "-q", "origin")
+    code, out, err = call(["plan", "--base", "mission/m1"], env, repo)
+    assert code == 0, err
+    assert out["metrics"]["target"] == "mission" and out["metrics"]["review"] is False
+
+
+def test_plan_develop_base_needs_review(repo, env):
+    code, out, err = call(["plan"], env, repo)
+    assert code == 0, err
+    assert out["metrics"]["target"] == "develop" and out["metrics"]["review"] is True
+
+
+def test_create_writes_mode_line_before_review_mark(repo, env, tmp_path):
+    b = body_file(tmp_path)
+    code, out, err = call(["create", "--title", "題", "--body-file", str(b), "--base", "mission/m1",
+                           "--mode", "standard", "--stages", "設計,実装"], env, repo)
+    assert code == 0, err
+    create = next(c for c in gh_calls(env) if c[:2] == ["pr", "create"])
+    assert create[create.index("--base") + 1] == "mission/m1"
+    lines = [l for l in Path(create[create.index("--body-file") + 1]).read_text().splitlines() if l.strip()]
+    assert lines[-2:] == ["モード: standard / 通した工程: 設計 → 実装", "<!-- I want to review in Japanese. -->"]
+
+
+def test_update_replaces_existing_mode_line(repo, env, tmp_path):
+    env["FAKE_GH_PRS"] = json.dumps({"feature/x": [{"number": 7, "url": "https://github.com/o/r/pull/7",
+                                                    "isDraft": True, "baseRefName": "develop"}]})
+    b = body_file(tmp_path, "## Summary\n\n- 要点\n\nモード: light / 通した工程: 実装\n")
+    code, _, err = call(["update", "--body-file", str(b), "--mode", "standard",
+                         "--stages", "構造改善,実装レビュー"], env, repo)
+    assert code == 0, err
+    edit = next(c for c in gh_calls(env) if c[:2] == ["pr", "edit"])
+    sent = Path(edit[edit.index("--body-file") + 1]).read_text()
+    assert [l for l in sent.splitlines() if l.startswith("モード: ")] == [
+        "モード: standard / 通した工程: 構造改善 → 実装レビュー"]

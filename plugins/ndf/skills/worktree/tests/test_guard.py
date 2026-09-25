@@ -403,7 +403,7 @@ def test_unresolvable_cd_is_silent_for_relative_paths(
 
 
 def test_cd_inside_a_block_is_reflected(main_repo: Path, worktree: Path) -> None:
-    """条件分岐やまとまりの中で作業ツリーへ移った場合も案内を出さない。
+    """条件分岐やグループの中で作業ツリーへ移った場合も案内を出さない。
 
     `then` / `do` / `{` の後ろを命令の位置として数えないと、中の `cd` を移動として
     追えず、移動前の位置を指した案内が出る（#186 の誤検知が残る）。
@@ -421,7 +421,7 @@ def test_cd_inside_a_block_is_reflected(main_repo: Path, worktree: Path) -> None
 
 
 def test_write_inside_a_block_without_cd_is_still_detected(main_repo: Path) -> None:
-    """まとまりの中でも、移動を伴わない相対パスの書き換えは案内する。"""
+    """グループの中でも、移動を伴わない相対パスの書き換えは案内する。"""
     declared(main_repo)
     command = "if true; then sed -i 's/a/b/' plugins/ndf/README.md; fi"
     result = run_guard(bash_command(command, "s-blk-x"), cwd=main_repo)

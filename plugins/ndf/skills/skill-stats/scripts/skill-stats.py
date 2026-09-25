@@ -523,7 +523,7 @@ def measured_records(records: list) -> list:
 
 
 def summarize_agents(records: list, window_limit: int) -> tuple[list[dict], int]:
-    """層と持ち場（worker は作業の種類）とモデルの組ごとに束ねる（AC29）。"""
+    """層とフェーズ（worker は作業の種類）とモデルの組ごとに束ねる（AC29）。"""
     kept = measured_records(records)
     groups: dict[tuple[str, str, str], list] = defaultdict(list)
     for r in kept:
@@ -534,7 +534,7 @@ def summarize_agents(records: list, window_limit: int) -> tuple[list[dict], int]
         below = sum(1 for r in items if r.work < r.fixed)
         peak_max = max(r.peak for r in items)
         marks: list[str] = []
-        # **束ねる候補は supervisor の行にだけ付く。** 設計の持ち場は、作るときはどの
+        # **束ねる候補は supervisor の行にだけ付く。** 設計のフェーズは、作るときはどの
         # モードでも必ず関門を返すため対象にしない（契約の印の表）。
         if layer == "supervisor" and role != "設計" and below > len(items) / 2:
             marks.append("束ねる候補")
@@ -580,7 +580,7 @@ def layer_totals(records: list) -> tuple[list[dict], dict]:
 
 
 def role_usage(records: list) -> list[dict]:
-    """持ち場ごとの worker の使い方（AC37）。**行は起動元ごとに 1 つである。**"""
+    """フェーズごとの worker の使い方（AC37）。**行は起動元ごとに 1 つである。**"""
     supervisors = [r for r in records if r.layer == "supervisor"]
     supervisors.sort(key=lambda r: (r.started_at or "", r.agent_id or ""))
     workers: dict[str, list] = defaultdict(list)
@@ -599,7 +599,7 @@ def role_usage(records: list) -> list[dict]:
         work = s.work or 0
         rows.append({
             "role": s.role,
-            "supervisor": seq[s.role],   # 持ち場の中の連番。識別子は出さない
+            "supervisor": seq[s.role],   # フェーズの中の連番。識別子は出さない
             "supervisor_work": work,
             "workers": len(mine),
             "fixed_sum": fixed_sum,
@@ -611,9 +611,9 @@ def role_usage(records: list) -> list[dict]:
 
 def format_agent_summary_section(summary: list[dict], excluded: int) -> list[str]:
     lines = [
-        "## 層・持ち場・モデルごとの束ね",
+        "## 層・フェーズ・モデルごとの束ね",
         "",
-        "| 層 | 持ち場 | モデル | 件数 | 固定費の中央値 | 実作業の中央値 "
+        "| 層 | フェーズ | モデル | 件数 | 固定費の中央値 | 実作業の中央値 "
         "| 実作業 < 固定費 | 最大充填の最大 | 印 |",
         "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |",
     ]
@@ -649,9 +649,9 @@ def format_layer_totals_section(totals_rows: list[dict], totals: dict) -> list[s
 
 def format_role_usage_section(usage: list[dict]) -> list[str]:
     lines = [
-        "## 持ち場ごとの worker の使い方",
+        "## フェーズごとの worker の使い方",
         "",
-        "| 持ち場 | supervisor | supervisor の実作業 | worker の件数 "
+        "| フェーズ | supervisor | supervisor の実作業 | worker の件数 "
         "| supervisor と worker の固定費の合計 | 印 |",
         "| --- | ---: | ---: | ---: | ---: | --- |",
     ]

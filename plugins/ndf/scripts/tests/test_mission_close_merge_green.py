@@ -1,4 +1,4 @@
-"""bundle-close.py と merged-steps.py merge-when-green、退避のファイルシステムまたぎ。
+"""mission-close.py と merged-steps.py merge-when-green、退避のファイルシステムまたぎ。
 
 gh は PATH の先頭に置いた偽物で置き換える。偽物は FAKE_GH_STATE の JSON ファイルを読み書きし、
 呼ばれた引数を calls に積む。
@@ -134,9 +134,9 @@ def call(script, args, env, cwd):
     return p.returncode, out, p.stderr
 
 
-# --- bundle-close --------------------------------------------------------------
+# --- mission-close --------------------------------------------------------------
 
-DIST_PROD = "## 配布の記録\n段階: 本番（2026-09-24 承認）\n版: 1.0.0 → 1.1.0（MINOR）\nまとまり: PR #11 / #12\n"
+DIST_PROD = "## 配布の記録\n段階: 本番（2026-09-24 承認）\n版: 1.0.0 → 1.1.0（MINOR）\nミッション: PR #11 / #12\n"
 
 
 def verify_block(ver, rows):
@@ -149,47 +149,47 @@ def issues_of(out):
     return {f"{i['repo']}#{i['number']}": i for i in out["items"] if i["kind"] == "issue"}
 
 
-def test_bundle_close_four_outcomes(repo, gh):
-    gh.set(records={"20": {"body": "old\n## 配布の記録\n段階: 検証\nまとまり: PR #99\n",
+def test_mission_close_four_outcomes(repo, gh):
+    gh.set(records={"20": {"body": "old\n## 配布の記録\n段階: 検証\nミッション: PR #99\n",
                            "comments": [{"body": DIST_PROD}]}},
            bodies={"11": "Fixes #1, closes #2", "12": "Resolves #3 and fixes other/x#4"},
            issues={"o/r#1": ["OPEN"], "o/r#2": ["CLOSED"], "o/r#3": ["OPEN"], "other/x#4": [None]})
-    code, out, err = call("bundle-close.py", ["--record-pr", "20", "--repo", "o/r", "--label", "M26の振り返り"],
+    code, out, err = call("mission-close.py", ["--record-pr", "20", "--repo", "o/r", "--label", "M26の振り返り"],
                           gh.env, repo)
     res = issues_of(out)
     assert res["o/r#1"]["result"] == "closed" and res["o/r#1"]["cmd"] == "gh issue reopen 1 --repo o/r"
     assert res["o/r#2"]["result"] == "already_closed"
     assert res["o/r#3"]["result"] == "closed"
     assert res["other/x#4"]["result"] == "failed" and "before" in res["other/x#4"]["reason"]
-    assert code == 1 and out["status"] == "stopped" and out["tool"] == "bundle-close"
+    assert code == 1 and out["status"] == "stopped" and out["tool"] == "mission-close"
     assert ["pr", "view", "99", "--repo", "o/r", "--json", "body", "-q", ".body"] not in gh.get()["calls"]
 
 
-def test_bundle_close_failed_when_close_does_not_take(repo, gh):
+def test_mission_close_failed_when_close_does_not_take(repo, gh):
     gh.set(records={"20": {"body": DIST_PROD, "comments": []}}, bodies={"11": "Fixes #1", "12": ""},
            issues={"o/r#1": ["OPEN"]}, close_works=False)
-    code, out, err = call("bundle-close.py", ["--record-pr", "20", "--repo", "o/r"], gh.env, repo)
+    code, out, err = call("mission-close.py", ["--record-pr", "20", "--repo", "o/r"], gh.env, repo)
     it = issues_of(out)["o/r#1"]
     assert code == 1 and it["result"] == "failed" and it["cmd"] == "gh issue close 1 --repo o/r"
 
 
-def test_bundle_close_kept_open_before_production(repo, gh):
-    gh.set(records={"20": {"body": "## 配布の記録\n段階: 検証（止めた）\n版: 1.0.0 → 1.1.0-dev.1\nまとまり: PR #11\n",
+def test_mission_close_kept_open_before_production(repo, gh):
+    gh.set(records={"20": {"body": "## 配布の記録\n段階: 検証（止めた）\n版: 1.0.0 → 1.1.0-dev.1\nミッション: PR #11\n",
                            "comments": []}},
            bodies={"11": "Fixes #1"}, issues={"o/r#1": ["OPEN"]})
-    code, out, err = call("bundle-close.py", ["--record-pr", "20", "--repo", "o/r"], gh.env, repo)
+    code, out, err = call("mission-close.py", ["--record-pr", "20", "--repo", "o/r"], gh.env, repo)
     assert code == 0 and out["status"] == "ok"
     assert issues_of(out)["o/r#1"]["result"] == "kept_open"
     assert "closed" not in gh.get()
 
 
-def test_bundle_close_verification_per_issue(repo, gh):
+def test_mission_close_verification_per_issue(repo, gh):
     body = DIST_PROD + "\n" + verify_block("1.1.0-dev.1", [("#1", "不合格")])
     gh.set(records={"20": {"body": body, "comments": [
         {"body": verify_block("1.1.0", [("#1", "合格"), ("#1", "合格（再試行）"), ("#2", "保留")])}]}},
         bodies={"11": "Fixes #1", "12": "Fixes #2 fixes #3"},
         issues={"o/r#1": ["OPEN"], "o/r#2": ["OPEN"], "o/r#3": ["OPEN"]})
-    code, out, err = call("bundle-close.py", ["--record-pr", "20", "--repo", "o/r", "--with-verification"],
+    code, out, err = call("mission-close.py", ["--record-pr", "20", "--repo", "o/r", "--with-verification"],
                           gh.env, repo)
     res = issues_of(out)
     assert res["o/r#1"]["result"] == "closed"
@@ -198,24 +198,24 @@ def test_bundle_close_verification_per_issue(repo, gh):
     assert code == 0 and gh.get()["closed"] == ["o/r#1"]
 
 
-def test_bundle_close_no_verification_record_keeps_all(repo, gh):
+def test_mission_close_no_verification_record_keeps_all(repo, gh):
     gh.set(records={"20": {"body": DIST_PROD, "comments": []}},
            bodies={"11": "Fixes #1", "12": ""}, issues={"o/r#1": ["OPEN"]})
-    code, out, err = call("bundle-close.py", ["--record-pr", "20", "--repo", "o/r", "--with-verification"],
+    code, out, err = call("mission-close.py", ["--record-pr", "20", "--repo", "o/r", "--with-verification"],
                           gh.env, repo)
     assert code == 0 and issues_of(out)["o/r#1"]["reason"] == "本番の版のリリース後テストの記録が無い"
 
 
-def test_bundle_close_empty_list_is_2(repo, gh):
+def test_mission_close_empty_list_is_2(repo, gh):
     gh.set(records={"20": {"body": "## 配布の記録\n段階: 配布なし（文書だけ）\n", "comments": []}})
-    code, out, err = call("bundle-close.py", ["--record-pr", "20", "--repo", "o/r"], gh.env, repo)
+    code, out, err = call("mission-close.py", ["--record-pr", "20", "--repo", "o/r"], gh.env, repo)
     assert code == 2 and out["status"] == "stopped"
 
 
-def test_bundle_close_dry_run_writes_nothing(repo, gh):
+def test_mission_close_dry_run_writes_nothing(repo, gh):
     gh.set(records={"20": {"body": "## 配布の記録\n段階: 配布なし（文書だけ）\n", "comments": []}},
            bodies={"11": "Fixes #1"}, issues={"o/r#1": ["OPEN"]})
-    code, out, err = call("bundle-close.py", ["--record-pr", "20", "--repo", "o/r", "--prs", "11", "--dry-run"],
+    code, out, err = call("mission-close.py", ["--record-pr", "20", "--repo", "o/r", "--prs", "11", "--dry-run"],
                           gh.env, repo)
     assert code == 0 and issues_of(out)["o/r#1"]["result"] == "would_close"
     assert "closed" not in gh.get()
@@ -224,8 +224,8 @@ def test_bundle_close_dry_run_writes_nothing(repo, gh):
 MULTI_GENERATION_RECORD = """## 配布の記録
 
 段階: 本番（2026-09-01 10:00 に承認）
-版: 10.13.0 → 10.14.0（MINOR: 旧まとまり）
-まとまり: PR #700
+版: 10.13.0 → 10.14.0（MINOR: 旧ミッション）
+ミッション: PR #700
 
 ## リリース後テスト
 
@@ -235,8 +235,8 @@ MULTI_GENERATION_RECORD = """## 配布の記録
 ## 配布の記録
 
 段階: 本番（2026-09-18 10:00 に承認）
-版: 10.14.0 → 10.15.0（MINOR: 新まとまり）
-まとまり: PR #717 / #718
+版: 10.14.0 → 10.15.0（MINOR: 新ミッション）
+ミッション: PR #717 / #718
 
 ## リリース後テスト
 
@@ -256,17 +256,40 @@ MULTI_GENERATION_RECORD = """## 配布の記録
 
 
 def test_parse_record_selects_latest_distribution_and_matching_release_test():
-    spec = importlib.util.spec_from_file_location("bundle_close", SCRIPTS / "bundle-close.py")
+    spec = importlib.util.spec_from_file_location("mission_close", SCRIPTS / "mission-close.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     rec = mod.parse_record(MULTI_GENERATION_RECORD)
     assert rec["stage"] == "本番（2026-09-18 10:00 に承認）"
-    assert rec["version"] == "10.15.0" and rec["bundle_prs"] == [717, 718]
+    assert rec["version"] == "10.15.0" and rec["mission_prs"] == [717, 718]
     assert rec["verify_block"].endswith("合否: 合格（選ぶ記録）")
 
 
-def test_bundle_close_bad_call_is_3(repo, gh):
+def load_mission_close():
+    spec = importlib.util.spec_from_file_location("mission_close", SCRIPTS / "mission-close.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_parse_record_reads_old_list_line():
+    """旧い記録の `まとまり:` の行も PR の一覧として読む。"""
+    rec = load_mission_close().parse_record("## 配布の記録\n段階: 配布なし\nまとまり: PR #5 / #6\n")
+    assert rec["mission_prs"] == [5, 6]
+
+
+def test_old_name_passes_through_to_new_name(repo, gh):
+    """旧名の bundle-close.py は案内を stderr に出し、引数をそのまま mission-close.py へ渡す。"""
+    gh.set(records={"20": {"body": DIST_PROD, "comments": []}}, bodies={"11": "", "12": ""})
+    code, out, err = call("bundle-close.py", ["--record-pr", "20", "--repo", "o/r", "--dry-run"], gh.env, repo)
+    assert "mission-close.py" in err
+    assert out["tool"] == "mission-close"
     p = subprocess.run([PY, str(SCRIPTS / "bundle-close.py")], capture_output=True, text=True, env=gh.env, cwd=repo)
+    assert p.returncode == 3
+
+
+def test_mission_close_bad_call_is_3(repo, gh):
+    p = subprocess.run([PY, str(SCRIPTS / "mission-close.py")], capture_output=True, text=True, env=gh.env, cwd=repo)
     assert p.returncode == 3
 
 

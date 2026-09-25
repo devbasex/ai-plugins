@@ -186,7 +186,7 @@ def test_the_layer_and_the_role_come_from_depth_and_description(
 def test_role_of_reads_only_the_head_word(mod) -> None:
     assert mod.role_of("設計: #550 #657", "supervisor") == "設計"
     assert mod.role_of("調査: 既存の規約の突き合わせ", "worker") == "調査"
-    # 持ち場の語彙は supervisor、作業の種類の語彙は worker にだけ当たる
+    # フェーズの語彙は supervisor、作業の種類の語彙は worker にだけ当たる
     assert mod.role_of("調査: 何か", "supervisor") == "その他"
     assert mod.role_of("設計: 何か", "worker") == "その他"
     assert mod.role_of("G2 設計 #540", "supervisor") == "その他"
@@ -244,7 +244,7 @@ def test_the_markdown_output_has_the_contract_columns() -> None:
     assert p.returncode == 0, p.stderr
     header = next(line for line in p.stdout.splitlines() if line.startswith("| 層 "))
     assert header.split("|")[1:-1] == [
-        " 層 ", " 持ち場 ", " 深さ ", " モデル ", " 固定費 ", " 最大充填 ",
+        " 層 ", " フェーズ ", " 深さ ", " モデル ", " 固定費 ", " 最大充填 ",
         " 実作業 ", " 応答数 ", " 所要（分） ", " 終わり方 ", " 中断 ", " agent_id ",
     ]
 
@@ -443,7 +443,7 @@ def test_the_interrupted_table_shows_the_reset_time() -> None:
     assert p.returncode == 0, p.stderr
     header = next(line for line in p.stdout.splitlines() if line.startswith("| 層 "))
     assert header.split("|")[1:-1] == [
-        " 層 ", " 持ち場 ", " 深さ ", " 終わり方 ", " 上限の種類 ",
+        " 層 ", " フェーズ ", " 深さ ", " 終わり方 ", " 上限の種類 ",
         " 解除時刻 ", " 解除済み ", " 起動元 ", " agent_id ",
     ]
     assert EARLY in p.stdout and LATE in p.stdout
