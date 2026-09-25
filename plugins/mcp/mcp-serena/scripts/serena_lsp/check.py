@@ -1,4 +1,4 @@
-"""check: 導入の検査（公式 LSP プラグイン・本体・追加の検査）。導入のコマンドは載せるだけで打たない。"""
+"""check: 導入のチェック（公式 LSP プラグイン・本体・追加のチェック）。導入のコマンドは載せるだけで打たない。"""
 import json
 import os
 import shutil
@@ -41,7 +41,7 @@ def _shellcheck(lang: dict):
             "install": "apt-get install shellcheck（macOS は brew install shellcheck）"}
 
 
-# 名前 → (検査の関数, 当てるランタイム)。既にある種類で足りない言語だけ、ここへ関数を 1 つ足す
+# 名前 → (チェックの関数, 当てるランタイム)。既にある種類で足りない言語だけ、ここへ関数を 1 つ足す
 EXTRA_CHECKS = {
     "typescript_major_5": (_typescript_major_5, {CLAUDE_CODE}),
     "shellcheck": (_shellcheck, {CLAUDE_CODE, "codex"}),

@@ -1,13 +1,13 @@
-"""区間の切れ目で claude を起動し直す中継（#895）。
+"""カットポイントで claude を起動し直すラッパー（#895）。
 
 `relay.py` の副命令:
 
-- `mark`: Stop hook の本体。最後の応答の `ndf-next` のブロックを印 `next.json` へ写す
+- `mark`: Stop hook の本体。最後の応答の `ndf-next` のブロックを合図 `next.json` へ写す
 - `run`: 端末の前景に常駐し、claude を擬似端末の子として起動する。要らなければ素通しする
-- `stop`: 動いている中継に停止の印を置く
+- `stop`: 動いているラッパーに停止の合図を置く
 - `install` / `uninstall` / `status`: `/ndf:install-wrapper` の本体（#928）
-- `startup`: SessionStart hook の本体。在る写しを置き直し、10.17.4〜10.17.6 の自動の囲みを 1 度だけ知らせる
-- `question open` / `close`: 質問の表示中の印（関門を越えない守り）
+- `startup`: SessionStart hook の本体。在る複製を置き直し、10.17.4〜10.17.6 の自動の囲みを 1 度だけ知らせる
+- `question open` / `close`: 質問の表示中の合図（関門を越えない守り）
 
 **利用者の手元の設定は書き換えない。** 導入の副命令と `run` は、テストごとの一時の HOME と
 `XDG_*`・`CLAUDE_CONFIG_DIR` の下でだけ動かす（`isolated_env`）。
@@ -49,7 +49,7 @@ def fence(body, info="ndf-next", ticks=3):
 
 
 class Relay:
-    """動いている中継に見立てた作業ディレクトリ。`relay.lock` を持ち、`child.pid` を書く。"""
+    """動いているラッパーに見立てた作業ディレクトリ。`relay.lock` を持ち、`child.pid` を書く。"""
 
     def __init__(self, tmp_path, child_pid=None):
         self.dir = tmp_path / "relay-dir"
@@ -156,7 +156,7 @@ def test_mark_does_nothing(tmp_path, relay, case):
 
 @pytest.mark.parametrize("data", ["[]", '"text"', "null"])
 def test_mark_ignores_non_object_json(relay, data):
-    """構文上は正しくても最上位がオブジェクトでなければ、前の印も質問の印も残す。"""
+    """構文上は正しくても最上位がオブジェクトでなければ、前の合図も質問の合図も残す。"""
     relay.next.write_text('{"command": "keep"}')
     question = relay.dir / "question"
     question.write_text("q")
@@ -166,9 +166,9 @@ def test_mark_ignores_non_object_json(relay, data):
 
 
 def test_mark_not_direct_child_claude_keeps_mark(tmp_path, relay):
-    """conductor が Bash から起こした `claude -p` の Stop は、前の印を消さない（AC4b）。"""
+    """conductor が Bash から起こした `claude -p` の Stop は、前の合図を消さない（AC4b）。"""
     relay.next.write_text('{"command": "keep"}')
-    # 名前が claude のラッパーを間に挟む。mark から見て最初の claude はこのラッパーになる
+    # 名前が claude の別のスクリプトを間に挟む。mark から見て最初の claude はこのスクリプトになる
     wrapper = tmp_path / "bin" / "claude"
     wrapper.parent.mkdir()
     wrapper.write_text(f"#!{sys.executable}\nimport subprocess, sys\n"
@@ -184,7 +184,7 @@ def test_mark_not_direct_child_claude_keeps_mark(tmp_path, relay):
 
 
 def test_mark_keeps_previous_when_no_block(relay):
-    """ブロックの無い Stop（目標が未達で応答が続いた）でも、背景の処理が無ければ前の印を残す。"""
+    """ブロックの無い Stop（目標が未達で応答が続いた）でも、背景の処理が無ければ前の合図を残す。"""
     quiet_ok(mark(relay.dir, stop_input(fence("/goal x"))))
     before = relay.next.read_text()
     quiet_ok(mark(relay.dir, stop_input("続きの応答")))
@@ -198,7 +198,7 @@ def test_mark_clears_previous_when_two_blocks(relay):
 
 
 def test_mark_background_running_clears(relay):
-    """背景の処理が動いているあいだは印を書かず、前の印を消す（AC24）。"""
+    """背景の処理が動いているあいだは合図を書かず、前の合図を消す（AC24）。"""
     quiet_ok(mark(relay.dir, stop_input(fence("/goal x"))))
     running = [{"id": "b1", "type": "shell", "status": "running"}]
     p = mark(relay.dir, stop_input(fence("/goal x"), background_tasks=running))
@@ -236,7 +236,7 @@ def test_mark_holds_stop_once_and_lists_tasks(relay):
     assert [(r["section"], r["reason"], r["held"]) for r in rows] == [(2, "background", True),
                                                                       (2, "background", False)]
     assert rows[0]["tasks"] == [{"id": "bxl0kh7gi", "type": "shell", "command": WATCH["command"][:80]}]
-    # TaskStop の後に出し直した ndf-next で印が書かれる
+    # TaskStop の後に出し直した ndf-next で合図が書かれる
     quiet_ok(mark(relay.dir, stop_input(fence("/goal x"))))
     assert json.loads(relay.next.read_text())["command"] == "/goal x"
 
@@ -275,7 +275,7 @@ def test_mark_file_is_private(relay):
 
 
 def test_mark_missing_fields(relay):
-    """cwd などが無い・null なら印の値は空文字、応答が null ならブロック 0 件として印を残し、質問の印を消す。"""
+    """cwd などが無い・null なら合図の値は空文字、応答が null ならブロック 0 件として合図を残し、質問の合図を消す。"""
     quiet_ok(mark(relay.dir, json.dumps({"last_assistant_message": fence("/goal x"), "cwd": None})))
     data = json.loads(relay.next.read_text())
     assert set(data) == {"command", "cwd", "session_id", "transcript_path", "written_at"}
@@ -388,7 +388,7 @@ class Term:
         try:
             return self.proc.wait(timeout)
         except subprocess.TimeoutExpired:
-            raise AssertionError(f"中継が終わらない\n画面: {self.text[-2000:]}\n記録: {self.rows()}")
+            raise AssertionError(f"ラッパーが終わらない\n画面: {self.text[-2000:]}\n記録: {self.rows()}")
 
     def close(self):
         if self.proc.poll() is None:
@@ -420,7 +420,7 @@ def events(rows, kind):
 
 
 def test_run_no_mark_exits_with_child_code(term):
-    """印が無いまま claude が終わると、中継も何も出さずに同じ終了コードで終わる（AC12・AC19）。"""
+    """合図が無いまま claude が終わると、ラッパーも何も出さずに同じ終了コードで終わる（AC12・AC19）。"""
     t = term()
     t.wait_start(1)
     t.type("quit 3\r")
@@ -453,13 +453,13 @@ def test_run_signal_exit_code(term):
 
 
 def test_run_switches_to_next_section(term, tmp_path):
-    """印を受けると /exit と \\r を入力し、更新して次の区間を起動する（AC6・AC8・AC19）。"""
+    """合図を受けると /exit と \\r を入力し、更新して次の区間を起動する（AC6・AC8・AC19）。"""
     t = term("--model", "haiku", env={"FAKE_VERSION_AFTER": "2.0.0"})
     t.wait_start(1)
-    t.type("mark /goal 次の段\r")
+    t.type("mark /goal 次のステップ\r")
     t.wait_start(2)
     first, second = t.starts()[:2]
-    assert second["argv"] == ["--model", "haiku", "/goal 次の段"]
+    assert second["argv"] == ["--model", "haiku", "/goal 次のステップ"]
     assert t.child_input(0).endswith(b"/exit\r")
     assert t.calls() == [["list", "--json"], ["marketplace", "update", "mk"],
                          ["update", "ndf@mk", "-y"], ["list", "--json"]]
@@ -472,7 +472,7 @@ def test_run_switches_to_next_section(term, tmp_path):
     assert s1["command"] == "--model haiku"
     assert s1["plugin_version"] == "1.0.0"
     assert s2["plugin_version"] == "2.0.0"
-    assert s2["command"] == "/goal 次の段"
+    assert s2["command"] == "/goal 次のステップ"
     assert s2["from_session"] == f"s{first['pid']}"
     assert s2["section"] == 2 and s2["pid"] == second["pid"]
     assert e1["ended_by"] == "mark" and e1["section"] == 1
@@ -481,7 +481,7 @@ def test_run_switches_to_next_section(term, tmp_path):
 
 
 def test_run_carries_policy_args_through_shell_function(term, tmp_path):
-    """alias の展開 → シェルの関数 → 中継と渡った引数のうち、起動の方針だけを 2 つ目の
+    """alias の展開 → シェルの関数 → ラッパーと渡った引数のうち、起動の方針だけを 2 つ目の
     区間へ引き継ぐ。区間ごとの引数（会話・名前・最初のプロンプト・`--` 以後）は落とす（#936）。"""
     assert relay_cmd(tmp_path, "install", NDF_RELAY_CLAUDE=FAKE).returncode == 0
     shellrc = cfg(tmp_path) / "shellrc"
@@ -495,12 +495,12 @@ def test_run_carries_policy_args_through_shell_function(term, tmp_path):
     assert first["argv"] == ["--dangerously-skip-permissions", "--model", "x", "--add-dir", "a", "b",
                              "--resume", "id", "-c", "--session-id", "u", "-n", "nm", "最初",
                              "--", "--verbose"]
-    t.type("mark /goal 次の段\r")
+    t.type("mark /goal 次のステップ\r")
     t.wait_start(2)
     carried = ["--dangerously-skip-permissions", "--model", "x", "--add-dir", "a", "b"]
-    assert t.starts()[1]["argv"] == [*carried, "/goal 次の段"]
+    assert t.starts()[1]["argv"] == [*carried, "/goal 次のステップ"]
     s2 = events(t.rows(), "start")[1]
-    assert s2["command"] == "/goal 次の段"
+    assert s2["command"] == "/goal 次のステップ"
     assert s2["carried"] == carried
     t.type("quit 0\r")
     assert t.finish() == 0
@@ -521,7 +521,7 @@ def test_run_chain_three_sections(term):
 
 
 def test_run_waits_for_user_input_quiet(term):
-    """利用者の入力から静まりの秒数がたつまで /exit を送らない（AC6）。"""
+    """利用者の入力から静止の秒数がたつまで /exit を送らない（AC6）。"""
     t = term(env={"NDF_RELAY_QUIET": "1.5"})
     t.wait_start(1)
     t.type("mark x\r")
@@ -547,12 +547,12 @@ def test_run_waits_for_transcript_quiet(term):
 
 
 def test_run_mark_removed_cancels(term):
-    """印が消えたら（次の Stop にブロックが無い）切り替えない（AC4b・AC6）。"""
+    """合図が消えたら（次の Stop にブロックが無い）切り替えない（AC4b・AC6）。"""
     t = term(env={"NDF_RELAY_QUIET": "1"})
     t.wait_start(1)
     t.type("mark x\r")
     d = pathlib.Path(t.starts()[0]["relay_dir"])
-    t.wait(lambda: (d / "next.json").exists(), what="印")
+    t.wait(lambda: (d / "next.json").exists(), what="合図")
     (d / "next.json").unlink()
     time.sleep(2)
     assert len(t.starts()) == 1
@@ -758,12 +758,12 @@ def test_run_cannot_start_says_then_passthrough(mod, tmp_path, monkeypatch, caps
     with pytest.raises(Execd):
         mod.cmd_run([])
     err = capsys.readouterr().err
-    assert err.startswith("ndf-relay: 中継を始めない（") and err.count("\n") == 1
+    assert err.startswith("ndf-relay: ラッパーを始めない（") and err.count("\n") == 1
     assert mod.calls[0][1] == [str(claude)]
 
 
 def test_run_relay_dir_oserror_says_then_passthrough(mod, tmp_path, monkeypatch, capsys):
-    """現状固定: 一覧は読めても中継用ディレクトリを作れなければ、案内を標準エラーへ 1 回出して
+    """現状固定: 一覧は読めてもラッパー用ディレクトリを作れなければ、案内を標準エラーへ 1 回出して
     実体へ素通しする（cmd_run の make_relay_dir が OSError になる経路）。"""
     claude = tmp_path / "bin" / "claude"
     claude.parent.mkdir()
@@ -779,12 +779,12 @@ def test_run_relay_dir_oserror_says_then_passthrough(mod, tmp_path, monkeypatch,
     with pytest.raises(Execd):
         mod.cmd_run([])
     err = capsys.readouterr().err
-    assert err == "ndf-relay: 中継を始めない（作業ディレクトリを作れない）。切れ目では示されたコマンドを手で入力する\n"
+    assert err == "ndf-relay: ラッパーを始めない（作業ディレクトリを作れない）。カットポイントでは示されたコマンドを手で入力する\n"
     assert mod.calls[0][1] == [str(claude)]
 
 
 def test_resolve_skips_wrappers(mod, tmp_path, monkeypatch):
-    """`claude` という名前で中継を呼ぶラッパーを飛ばし、本物を選ぶ（AC20）。"""
+    """`claude` という名前でラッパーを呼ぶ別のスクリプトを飛ばし、本物を選ぶ（AC20）。"""
     wrapper = tmp_path / "wrap" / "claude"
     wrapper.parent.mkdir()
     wrapper.write_text(f'#!/bin/sh\nexec python3 "{RELAY}" run "$@"\n')
@@ -802,7 +802,7 @@ def test_resolve_skips_wrappers(mod, tmp_path, monkeypatch):
 
 
 def test_resolve_keeps_unreadable_claude(mod, tmp_path, monkeypatch):
-    """読めない（実行だけできる）claude は中継と見なさずに選ぶ。飛ばし損ねは深さの変数が止める。"""
+    """読めない（実行だけできる）claude はラッパーと見なさずに選ぶ。飛ばし損ねは深さの変数が止める。"""
     real = real_claude(tmp_path)
     real.chmod(0o111)
     if os.access(real, os.R_OK):
@@ -851,7 +851,7 @@ def test_run_cwd_fallback_to_main(term, tmp_path):
     t.wait_start(1)
     t.type("mark next\r")
     d = pathlib.Path(t.starts()[0]["relay_dir"])
-    t.wait(lambda: (d / "next.json").exists(), what="印")
+    t.wait(lambda: (d / "next.json").exists(), what="合図")
     wt.rmdir()
     t.wait_start(2)
     assert t.starts()[1]["cwd"] == str(main)
@@ -870,7 +870,7 @@ def test_run_cwd_fallback_outside_worktree(term, tmp_path, case):
     t.type("mark next\r")
     d = pathlib.Path(t.starts()[0]["relay_dir"])
     mark = d / "next.json"
-    t.wait(mark.exists, what="印")
+    t.wait(mark.exists, what="合図")
     data = json.loads(mark.read_text())
     if case == "nearest-parent":
         original = str(launch / "gone" / "deeper")
@@ -914,7 +914,7 @@ def test_run_max_starts_keeps_section(term):
 
 
 def test_run_max_starts_race_one_wins(tmp_path):
-    """残り 1 枠を 2 つの中継が取り合っても、起動するのは 1 つだけ（AC10）。"""
+    """残り 1 枠を 2 つのラッパーが取り合っても、起動するのは 1 つだけ（AC10）。"""
     home = tmp_path / "shared-home"
     home.mkdir()
     ts = []
@@ -927,7 +927,7 @@ def test_run_max_starts_race_one_wins(tmp_path):
             t.wait_start(1)
         for t in ts:
             t.type("mark next\r")
-        # HOME を共有するので t.rows() は両方の記録を含む。自分の中継の記録だけを見る。
+        # HOME を共有するので t.rows() は両方の記録を含む。自分のラッパーの記録だけを見る。
         # 負けた側の stop は勝った側の start の記録の後に出るが、勝った側の子が
         # starts.jsonl へ書くのはさらに後になりうる。両方が決まるまで待つ
         def own(t):
@@ -948,7 +948,7 @@ def test_run_max_starts_race_one_wins(tmp_path):
 
 
 def test_run_spin_stops_third(term):
-    """3 つ続けて短い区間なら 3 つ目の印で切り替えない。1 つ目の区間も数える（AC11）。"""
+    """3 つ続けて短い区間なら 3 つ目の合図で切り替えない。1 つ目の区間も数える（AC11）。"""
     t = term(env={"NDF_RELAY_SPIN": "3"})
     t.wait_start(1)
     t.type("mark mark mark 終点\r")
@@ -983,7 +983,7 @@ def test_run_sigkill_when_child_ignores_exit(term):
     t.wait_start(2)
     e1 = events(t.rows(), "end")[0]
     assert e1["ended_by"] == "sigkill"
-    assert e1["seconds"] < 1.5  # 印の written_at まで。/exit の後の待ちを含めない
+    assert e1["seconds"] < 1.5  # 合図の written_at まで。/exit の後の待ちを含めない
     os.kill(t.starts()[1]["pid"], signal.SIGKILL)
     t.finish()
 
@@ -1055,7 +1055,7 @@ def test_stop_marks_running_relays_only(term, tmp_path):
     assert p.stdout.split() == [str(t.proc.pid)]
     assert not (dead / "stop").exists() and not (alive_other / "stop").exists()
     t.type("mark next\r")
-    t.wait(lambda: events(t.rows(), "stop"), what="停止の印")
+    t.wait(lambda: events(t.rows(), "stop"), what="停止の合図")
     assert events(t.rows(), "stop")[0]["reason"] == "stop-file"
     assert len(t.starts()) == 1
     t.type("/exit\r")
@@ -1077,7 +1077,7 @@ def test_stop_without_root_exits_1(tmp_path):
 
 
 def test_stop_prints_dir_name_when_pid_missing_or_empty(tmp_path):
-    """動いている中継の relay.pid が無い・空なら、作業ディレクトリの名前を出す。"""
+    """動いているラッパーの relay.pid が無い・空なら、作業ディレクトリの名前を出す。"""
     state = tmp_path / "state"
     env = isolated_env(tmp_path, XDG_STATE_HOME=state)
     root = state / "ndf" / "relay"
@@ -1129,10 +1129,10 @@ def iso_now():
 
 
 def mark_then_goal_unmet(t):
-    """印を書き、目標が未達の判定の行を足し、ブロックの無い Stop を模す。印の場所を返す。"""
+    """合図を書き、目標が未達の判定の行を足し、ブロックの無い Stop を模す。合図の場所を返す。"""
     t.type("mark next\r")
     d = pathlib.Path(t.starts()[0]["relay_dir"])
-    t.wait(lambda: (d / "next.json").exists(), what="印")
+    t.wait(lambda: (d / "next.json").exists(), what="合図")
     time.sleep(0.05)
     t.type(f"tr {goal_row(met=False, at=iso_now())}\r")
     t.type("stop\r")
@@ -1169,19 +1169,19 @@ def test_run_switches_when_goal_unmet(term):
 
 @pytest.mark.parametrize("case", ["user", "question", "background"])
 def test_run_goal_unmet_cancelled(term, case):
-    """印の後に利用者が入力したとき・質問が出たとき・背景の処理が起動したときは切り替えない。"""
+    """合図の後に利用者が入力したとき・質問が出たとき・背景の処理が起動したときは切り替えない。"""
     t = term(env={"NDF_RELAY_QUIET": "0.5", "NDF_RELAY_ESC_WAIT": "0.3"})
     t.wait_start(1)
     t.type("mark next\r")
     d = pathlib.Path(t.starts()[0]["relay_dir"])
-    t.wait(lambda: (d / "next.json").exists(), what="印")
+    t.wait(lambda: (d / "next.json").exists(), what="合図")
     time.sleep(0.05)
     if case == "user":
         row = {"type": "user", "timestamp": iso_now(), "message": {"content": "続けて"}}
         t.type(f"tr {json.dumps(row, ensure_ascii=False)}\r")
     elif case == "question":
         t.type("q open\r")
-        t.wait(lambda: (d / "question").exists(), what="質問の印")
+        t.wait(lambda: (d / "question").exists(), what="質問の合図")
         t.type("q close\r")
     else:
         row = {"type": "assistant", "timestamp": iso_now(), "message": {"content": [
@@ -1197,7 +1197,7 @@ def test_run_goal_unmet_cancelled(term, case):
 
 
 def test_run_does_not_wait_for_goal_judgement(term):
-    """目標の判定を待たない（#994）。`/goal clear` の行（met と sentinel の両方）が残っても静まりだけで切り替える。"""
+    """目標の判定を待たない（#994）。`/goal clear` の行（met と sentinel の両方）が残っても静止だけで切り替える。"""
     t = term()
     t.wait_start(1)
     t.type(f"tr {goal_row(sentinel=True, met=True, at='2026-01-01T00:00:00.000Z')}\r")
@@ -1283,7 +1283,7 @@ def test_install_bash_first_then_idempotent(tmp_path, home):
     assert '"$HOME/.claude/ndf/relay.py" run "$@"' in shellrc and 'command claude "$@"' in shellrc
     body = rc.read_text()
     assert body == ("export A=1\n\n# >>> ndf relay >>>\n"
-                    "# ndf の中継（/ndf:install-wrapper uninstall で外れる）\n"
+                    "# ndf のラッパー（/ndf:install-wrapper uninstall で外れる）\n"
                     '[ -f "$HOME/.claude/ndf/shellrc" ] && . "$HOME/.claude/ndf/shellrc"\n'
                     "# <<< ndf relay <<<\n")
     backups = list(home.glob(".bashrc.ndf-bak-*"))
@@ -1399,7 +1399,7 @@ def test_install_lock_busy_changes_nothing(tmp_path, home):
 
 def test_install_config_dir_oserror_changes_nothing(tmp_path, home):
     """現状固定: 設定ディレクトリを作れなければ（親が通常ファイル）、書けない旨を出して
-    終了コード 3 で終わり、シェル設定・写し・版ファイル・記録ファイルを新たに作らない
+    終了コード 3 で終わり、シェル設定・複製・版ファイル・記録ファイルを新たに作らない
     （cmd_install の os.makedirs(config_dir()) が OSError になる経路）。"""
     rc = home / ".bashrc"
     rc.write_text("a\n")
@@ -1412,7 +1412,7 @@ def test_install_config_dir_oserror_changes_nothing(tmp_path, home):
     assert "書けない（" in p.stdout
     # シェル設定は変わらない
     assert snapshot(rc) == before
-    # 設定ディレクトリ配下の成果物（写し・版ファイル・rc）は作られない
+    # 設定ディレクトリ配下の成果物（複製・版ファイル・rc）は作られない
     assert not (parent / "sub").exists()
     assert not (cfg(tmp_path) / "relay.py").exists()
     assert not (cfg(tmp_path) / "relay.version").exists()
@@ -1446,7 +1446,7 @@ def test_install_function_falls_back_when_copy_removed(tmp_path, home):
 
 
 def test_install_function_receives_alias_args(tmp_path, home):
-    """先に alias claude='claude --x' がある rc の後に中継の rc を読むと、--x が中継へ渡る。"""
+    """先に alias claude='claude --x' がある rc の後にラッパーの rc を読むと、--x がラッパーへ渡る。"""
     assert relay_cmd(tmp_path, "install").returncode == 0
     pre = tmp_path / "pre.sh"
     pre.write_text("alias claude='claude --x'\n")
@@ -1494,7 +1494,7 @@ def test_install_devbase_loader_with_non_bash_zsh_shell(tmp_path, home):
     # 読み込み先は loader。bash と zsh 以外でも loader があれば置く
     assert (dl / "ndf-relay.sh").read_text().endswith(
         '[ -f "$HOME/.claude/ndf/shellrc" ] && . "$HOME/.claude/ndf/shellrc"\n')
-    # 中継の本体と rc は置かれる
+    # ラッパーの本体と rc は置かれる
     assert (cfg(tmp_path) / "relay.py").read_bytes() == RELAY.read_bytes()
     assert (cfg(tmp_path) / "shellrc").exists()
     # .bashrc は囲みの対象ではないため変わらない（loader へ置くので snapshot と一致）
@@ -1603,12 +1603,12 @@ def test_status_reports_and_writes_nothing(tmp_path, home):
     p = relay_cmd(tmp_path, "status")
     assert p.returncode == 0
     assert "直の alias（10.17.4〜10.17.6 の形）。10.17.4〜10.17.6 が自動で足した" in p.stdout
-    assert f"写し {cfg(tmp_path)}/relay.py: 無し" in p.stdout
+    assert f"複製 {cfg(tmp_path)}/relay.py: 無し" in p.stdout
     assert tree(home) == before
     assert relay_cmd(tmp_path, "install").returncode == 0
     p = relay_cmd(tmp_path, "status")
     assert "読み込みの行" in p.stdout and "10.17.4〜10.17.6 が自動で足した" not in p.stdout
-    assert f"写し {cfg(tmp_path)}/relay.py: 今の版と同じ" in p.stdout
+    assert f"複製 {cfg(tmp_path)}/relay.py: 今の版と同じ" in p.stdout
 
 
 # -- macOS の bash はログインシェルの設定へ足す（#966）
@@ -1778,15 +1778,15 @@ def test_startup_no_notice(tmp_path, home, case):
 def test_startup_refreshes_existing_copies_only(tmp_path, home):
     old = home / ".local" / "share" / "ndf" / "relay.py"
     old.parent.mkdir(parents=True)
-    old.write_text("# 10.17.4〜10.17.6 の写し\n")
+    old.write_text("# 10.17.4〜10.17.6 の複製\n")
     rc = home / ".bashrc"
     rc.write_text("a\n")
     before = snapshot(rc)
     assert run_hook(tmp_path, HOOK_STARTUP).returncode == 0
     assert old.read_bytes() == RELAY.read_bytes()
-    assert not (home / ".claude").exists()  # 無い写しは作らない
+    assert not (home / ".claude").exists()  # 無い複製は作らない
     cfg(tmp_path).mkdir(parents=True)
-    (cfg(tmp_path) / "relay.py").write_text("# 古い写し\n")
+    (cfg(tmp_path) / "relay.py").write_text("# 古い複製\n")
     (cfg(tmp_path) / "relay.version").write_text("10.17.4\n")
     assert run_hook(tmp_path, HOOK_STARTUP).returncode == 0
     assert (cfg(tmp_path) / "relay.py").read_bytes() == RELAY.read_bytes()
@@ -1806,7 +1806,7 @@ def test_startup_refreshes_existing_copies_only(tmp_path, home):
 def test_startup_never_downgrades(tmp_path, home, copy_ver, plugin_ver, replaced):
     relay = plugin_root(tmp_path, plugin_ver)
     cfg(tmp_path).mkdir(parents=True)
-    (cfg(tmp_path) / "relay.py").write_text("# 写し\n")
+    (cfg(tmp_path) / "relay.py").write_text("# 複製\n")
     if copy_ver is not None:
         (cfg(tmp_path) / "relay.version").write_text(copy_ver + "\n")
     assert relay_cmd(tmp_path, "startup", relay=relay).returncode == 0
@@ -1826,11 +1826,11 @@ def test_explicit_install_can_downgrade(tmp_path, home):
 
 
 def test_startup_concurrent_new_wins(tmp_path, home):
-    """状態の親を分けた（2 つのコンテナの模擬）新旧の startup が同時に走っても、写しは新しい版で終わる。"""
+    """状態の親を分けた（2 つのコンテナの模擬）新旧の startup が同時に走っても、複製は新しい版で終わる。"""
     new = plugin_root(tmp_path, "10.18.0", "new")
     old = plugin_root(tmp_path, "10.17.5", "old")
     cfg(tmp_path).mkdir(parents=True)
-    (cfg(tmp_path) / "relay.py").write_text("# 写し\n")
+    (cfg(tmp_path) / "relay.py").write_text("# 複製\n")
     (cfg(tmp_path) / "relay.version").write_text("10.17.0\n")
     procs = []
     for i, r in enumerate([old, new, old, new]):
@@ -1872,19 +1872,19 @@ def question_rows(t, n=0):
 
 
 def test_guard_question_blocks_exit(term):
-    """G1: 印の後に質問が出たら /exit を書かない。答えた後の Stop がブロックを出せば切り替わる。"""
+    """G1: 合図の後に質問が出たら /exit を書かない。答えた後の Stop がブロックを出せば切り替わる。"""
     t = term(env={"NDF_RELAY_QUIET": "1.5"})
     t.wait_start(1)
-    t.type("mark 次\r")  # 印の後に応答が再開して質問が出た形
+    t.type("mark 次\r")  # 合図の後に応答が再開して質問が出た形
     t.type("q open\r")
-    t.wait(lambda: question_rows(t), what="質問の印")
+    t.wait(lambda: question_rows(t), what="質問の合図")
     assert question_rows(t)[0] == {"action": "open", "stdout": "", "code": 0}
     d = pathlib.Path(t.starts()[0]["relay_dir"])
     assert (d / "question").exists() and (d / "next.json").exists()
     time.sleep(3)
     assert len(t.starts()) == 1 and b"/exit" not in t.child_input(0)
     t.type("q close\r")
-    t.wait(lambda: not (d / "question").exists(), what="印が消える")
+    t.wait(lambda: not (d / "question").exists(), what="合図が消える")
     t.type("mark 次\r")
     t.wait_start(2)
     assert t.child_input(0).endswith(b"/exit\r")
@@ -1893,12 +1893,12 @@ def test_guard_question_blocks_exit(term):
 
 
 def test_guard_mark_clears_question(term):
-    """Esc で取り消して PostToolUse が来なくても、次の Stop（mark）が質問の印を消す。"""
+    """Esc で取り消して PostToolUse が来なくても、次の Stop（mark）が質問の合図を消す。"""
     t = term(env={"NDF_RELAY_QUIET": "0.5"})
     t.wait_start(1)
     t.type("q open\r")
     d = pathlib.Path(t.starts()[0]["relay_dir"])
-    t.wait(lambda: (d / "question").exists(), what="質問の印")
+    t.wait(lambda: (d / "question").exists(), what="質問の合図")
     t.type("mark 次\r")
     t.wait_start(2)
     t.type("/exit\r")
@@ -1910,16 +1910,16 @@ def iso_after(seconds):
 
 
 def test_guard_reply_after_mark_blocks(term):
-    """G2: 印より後の assistant の行があれば、その印では書かない。attachment の行では止まらない。"""
+    """G2: 合図より後の assistant の行があれば、その合図では書かない。attachment の行では止まらない。"""
     t = term(env={"NDF_RELAY_QUIET": "0.5"})
     t.wait_start(1)
     t.type("mark 次\r")
     d = pathlib.Path(t.starts()[0]["relay_dir"])
-    t.wait(lambda: (d / "next.json").exists(), what="印")
+    t.wait(lambda: (d / "next.json").exists(), what="合図")
     t.type("tr " + json.dumps({"type": "assistant", "timestamp": iso_after(2)}) + "\r")
     time.sleep(2.5)
     assert len(t.starts()) == 1 and b"/exit" not in t.child_input(0)
-    t.type("mark 次\r")  # 次の Stop が印を書き直す
+    t.type("mark 次\r")  # 次の Stop が合図を書き直す
     t.wait_start(2)
     t.type("/exit\r")
     t.finish()
@@ -1930,7 +1930,7 @@ def test_guard_attachment_row_does_not_block(term):
     t.wait_start(1)
     t.type("mark 次\r")
     d = pathlib.Path(t.starts()[0]["relay_dir"])
-    t.wait(lambda: (d / "next.json").exists(), what="印")
+    t.wait(lambda: (d / "next.json").exists(), what="合図")
     t.type("tr " + json.dumps({"type": "attachment", "timestamp": iso_after(2),
                                "attachment": {"type": "other"}}) + "\r")
     t.wait_start(2)
@@ -1953,14 +1953,14 @@ def test_guard_single_write(term):
 
 
 def test_guard_lock_held_then_question_appears(term):
-    """G3: 質問の hook がロックを持つ間は書かない。持つ間に印が置かれたら、確かめ直しで書かない。"""
+    """G3: 質問の hook がロックを持つ間は書かない。持つ間に合図が置かれたら、確かめ直しで書かない。"""
     t = term(env={"NDF_RELAY_QUIET": "0.3"})
     t.wait_start(1)
     d = pathlib.Path(t.starts()[0]["relay_dir"])
     with open(d / "question.lock", "a") as f:
         fcntl.flock(f, fcntl.LOCK_EX)
         t.type("mark 次\r")
-        t.wait(lambda: (d / "next.json").exists(), what="印")
+        t.wait(lambda: (d / "next.json").exists(), what="合図")
         time.sleep(1.5)
         assert b"/exit" not in t.child_input(0)
         (d / "question").write_text("")
@@ -1974,7 +1974,7 @@ def test_guard_lock_held_then_question_appears(term):
 
 
 def test_guard_question_open_waits_for_relay_lock(tmp_path, relay):
-    """中継が question.lock を持つ間、question open は放されるまで待ち、放された後に印を作る。"""
+    """ラッパーが question.lock を持つ間、question open は放されるまで待ち、放された後に合図を作る。"""
     lock = open(relay.dir / "question.lock", "a")
     fcntl.flock(lock, fcntl.LOCK_EX)
     p = subprocess.Popen([sys.executable, str(RELAY), "question", "open"], stdin=subprocess.PIPE,
@@ -2056,7 +2056,7 @@ def test_question_unknown_or_missing_action_keeps_mark(tmp_path, relay, action):
 
 def test_guard_exit_queued_behind_question(term):
     """AC25b: /exit の後に質問が出たら SIGTERM までの秒を数えず、count.lock を放す。
-    答えの後の Stop が印を書き直していれば、その中身で起動する。"""
+    答えの後の Stop が合図を書き直していれば、その中身で起動する。"""
     t = term(env={"FAKE_EXIT_QUESTION": "1", "NDF_RELAY_EXIT_WAIT": "1", "NDF_RELAY_TERM_WAIT": "1"})
     t.wait_start(1)
     t.type("mark 前の中身\r")
@@ -2066,7 +2066,7 @@ def test_guard_exit_queued_behind_question(term):
     pid = t.starts()[0]["pid"]
     assert not (t.fake_dir / f"sigterm-{pid}").exists()
     with open(pathlib.Path(t.env["HOME"]) / ".local" / "state" / "ndf" / "relay" / "count.lock", "a") as f:
-        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)  # 別の中継が取れる
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)  # 別のラッパーが取れる
         fcntl.flock(f, fcntl.LOCK_UN)
     t.type("answer mark 答えの後\r")
     t.wait_start(2)
@@ -2076,7 +2076,7 @@ def test_guard_exit_queued_behind_question(term):
 
 
 def test_guard_exit_queued_then_no_mark(term):
-    """答えの後の Stop が印を消していれば、次の区間を起動せず子の終了コードで終わる。"""
+    """答えの後の Stop が合図を消していれば、次の区間を起動せず子の終了コードで終わる。"""
     t = term(env={"FAKE_EXIT_QUESTION": "1", "NDF_RELAY_EXIT_WAIT": "1"})
     t.wait_start(1)
     t.type("mark 前\r")
@@ -2089,7 +2089,7 @@ def test_guard_exit_queued_then_no_mark(term):
 
 
 def test_guard_exit_wait_resumes_after_question(term):
-    """質問の印が消えた後から数え始め、SIGTERM に至る。"""
+    """質問の合図が消えた後から数え始め、SIGTERM に至る。"""
     t = term(env={"FAKE_EXIT_QUESTION": "1", "NDF_RELAY_EXIT_WAIT": "1", "NDF_RELAY_TERM_WAIT": "1"})
     t.wait_start(1)
     t.type("mark 前\r")
@@ -2100,14 +2100,14 @@ def test_guard_exit_wait_resumes_after_question(term):
     assert not (t.fake_dir / f"sigterm-{pid}").exists()
     t.type("unq\r")
     t.wait(lambda: (t.fake_dir / f"sigterm-{pid}").exists(), timeout=10, what="SIGTERM")
-    t.wait_start(2)  # 印は残っているので、読み直した印で起動する
+    t.wait_start(2)  # 合図は残っているので、読み直した合図で起動する
     assert events(t.rows(), "end")[0]["ended_by"] == "sigterm"
     t.type("quit 0\r")
     t.finish()
 
 
 def test_relay_quiet_defaults_to_five_seconds(mod, tmp_path, monkeypatch):
-    """`NDF_RELAY_QUIET` が無ければ静まりの待ちは 5 秒（#964）。有れば値に従う。"""
+    """`NDF_RELAY_QUIET` が無ければ静止の待ちは 5 秒（#964）。有れば値に従う。"""
     relay_dir = tmp_path / "relay"
     relay_dir.mkdir()
     r = mod.Relay("claude", str(relay_dir), "m", "v", None, None)
@@ -2123,19 +2123,19 @@ def test_relay_quiet_defaults_to_five_seconds(mod, tmp_path, monkeypatch):
 
 WAIT_TAIL = "キー入力やスクロールをせずに、そのまま待つ（切り替わらずに ndf-relay: で始まる 1 行が出たら、その案内に従う）"
 NOTICE_OUTSIDE = ("/exit してから claude を起動し、下の中身を最初の入力として貼り付ける"
-                  "（/ndf:install-wrapper で中継を入れると自動になる）")
+                  "（/ndf:install-wrapper でラッパーを入れると自動になる）")
 NOTICE_SOON = "まもなく自動で新しい会話へ切り替わる。" + WAIT_TAIL
-NOTICE_ENDED = ("中継は既に終わっている。"
+NOTICE_ENDED = ("ラッパーは既に終わっている。"
                 "/exit してから claude を起動し、下の中身を最初の入力として貼り付ける")
 
 
 def notice_not_child(pid):
-    return (f"中継は元の会話（子 pid {pid}）しか見ていないため、この会話で出した ndf-next は自動では拾われない。"
+    return (f"ラッパーは元の会話（子 pid {pid}）しか見ていないため、この会話で出した ndf-next は自動では拾われない。"
             "元の会話へ戻って同じ ndf-next を出すか、元の会話を /exit してから"
             " claude を起動し、下の中身を最初の入力として貼り付ける")
 
 
-NOTICE_INF = ("NDF_RELAY_QUIET が有限でないため、中継は自動で切り替えない。"
+NOTICE_INF = ("NDF_RELAY_QUIET が有限でないため、ラッパーは自動で切り替えない。"
               "/exit してから claude を起動し、下の中身を最初の入力として貼り付ける")
 
 
@@ -2200,7 +2200,7 @@ def test_notice_not_direct_child_without_child_pid(relay):
     # fork したセッションで child.pid が読めなくても、原因と対処を書く（#1016）
     (relay.dir / "child.pid").write_text("x")
     second = notice_lines(notice(relay.dir))[1]
-    assert second.startswith("中継は元の会話しか見ていないため")
+    assert second.startswith("ラッパーは元の会話しか見ていないため")
 
 
 @pytest.mark.parametrize("case,expected", [

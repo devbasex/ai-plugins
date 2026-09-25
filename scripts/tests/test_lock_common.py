@@ -5,7 +5,7 @@
 あり、そちらは書き換えない。ここでは共通ファイルが 1 つであること・4 つの配布先
 ランタイムの配置で読み込めること・読み込めないときに書き込みへ進まないことを見る。
 
-`scripts/tests/` へ置くのは、検査の対象が 2 つの Skill と配布の経路にまたがるためである。
+`scripts/tests/` へ置くのは、チェックの対象が 2 つの Skill と配布の経路にまたがるためである。
 """
 from __future__ import annotations
 
@@ -59,7 +59,7 @@ def test_the_two_stage_gate_lives_in_one_file() -> None:
 
 
 def test_no_other_file_holds_the_gate_of_the_second_stage() -> None:
-    """A1: 握りの印を作る関門も、共通ファイルの外に写しを持たない。"""
+    """A1: 握りの目印を作る関門も、共通ファイルの外に複製を持たない。"""
     holders = sorted(
         p.relative_to(ROOT).as_posix()
         for p in _shell_files()
@@ -110,7 +110,7 @@ def test_the_existing_names_take_and_release_the_lock(
     assert "again=0" in got.stdout, got
 
 
-# --- A4: 待ちの上限の上書きは工程の控えの側だけに効く -----------------------
+# --- A4: 待ちの上限の上書きは工程の通過記録の側だけに効く -----------------------
 
 def _held_lock(path: Path) -> Path:
     """生きている持ち主がいるロックを作る。陳腐化と読まれないため、上限まで待つ。"""
@@ -122,7 +122,7 @@ def _held_lock(path: Path) -> Path:
 
 
 def test_the_timeout_override_reaches_only_the_stage_state(tmp_path: Path) -> None:
-    """A4: `NDF_STAGE_LOCK_TIMEOUT` は控えの側だけを縮め、台帳の既定は 5 秒のまま。"""
+    """A4: `NDF_STAGE_LOCK_TIMEOUT` は通過記録の側だけを縮め、台帳の既定は 5 秒のまま。"""
     env = os.environ.copy()
     env["NDF_STAGE_LOCK_TIMEOUT"] = "1"
 
@@ -194,7 +194,7 @@ def test_the_common_file_is_reached_from_every_layout(tmp_path: Path, layout) ->
 
     assert "reached=yes" in got.stdout, got
     assert "rc=0" in got.stdout, got
-    assert (lock / "held").is_file(), "握りの印が作られていない"
+    assert (lock / "held").is_file(), "握りの目印が作られていない"
 
 
 def test_the_libraries_do_not_locate_the_common_file_with_cd(tmp_path: Path) -> None:
@@ -216,10 +216,10 @@ def test_the_libraries_do_not_locate_the_common_file_with_cd(tmp_path: Path) -> 
 # --- A6: 共通ファイルを読み込めないとき -------------------------------------
 
 def test_a_missing_common_file_stops_the_write_but_not_the_step(tmp_path: Path) -> None:
-    """A6: 共通ファイルが無くても工程は続き、控えへは書かない。
+    """A6: 共通ファイルが無くても工程は続き、通過記録へは書かない。
 
     **排他を取れないことと、排他なしで書くことは別である。** 取得できないときの
-    分岐は寄せる前から控えの側が持っており、そこへ合流させる。
+    分岐は寄せる前から通過記録の側が持っており、そこへ合流させる。
     """
     skill = _flat_layout(tmp_path)
     (skill.parents[1] / "scripts" / "lib" / "lock-common.sh").unlink()
@@ -237,7 +237,7 @@ def test_a_missing_common_file_stops_the_write_but_not_the_step(tmp_path: Path) 
 
     assert "sourced=ok" in got.stdout, got
     assert "rc=0" in got.stdout, got
-    assert list((state / "stages").glob("*.json")) == [], "排他を取れないまま控えへ書いた"
+    assert list((state / "stages").glob("*.json")) == [], "排他を取れないまま通過記録へ書いた"
 
 
 # --- A7: 同時に走らせても持ち主は 1 つ --------------------------------------

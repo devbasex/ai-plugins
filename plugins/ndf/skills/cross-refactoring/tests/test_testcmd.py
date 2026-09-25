@@ -1,4 +1,4 @@
-"""限ったテストの語の並びの組み立て（#933 I8）。"""
+"""範囲テストの語の並びの組み立て（#933 I8）。"""
 from __future__ import annotations
 
 import importlib
@@ -122,7 +122,7 @@ def test_limited_command_sources(testcmd, work):
 
 
 def test_a_test_the_item_adds_may_be_a_target_before_it_exists(testcmd, work):
-    """I11: 計画の時点では足すテストがまだ無い。その項目の `tests` にあれば対象に使える。"""
+    """I11: 改修計画の時点では足すテストがまだ無い。その項目の `tests` にあれば対象に使える。"""
     w, scope = str(work), ["src", "tests"]
     assert not testcmd.valid_targets(["tests/unit/test_new.py"], w, scope)
     assert testcmd.valid_targets(["tests/unit/test_new.py::test_x"], w, scope,

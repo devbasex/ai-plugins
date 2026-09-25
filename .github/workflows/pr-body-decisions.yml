@@ -6,7 +6,7 @@ name: PR body decisions
 # **本文の編集（edited）でも起動する。** 進行側が本文や設計文書を手順を通らずに直したとき、
 # 機械で食い違いを見つけられるのはここだけである。sync で直した結果もここで緑に戻る。
 #
-# ruleset の必須の検査にはしていない（#545 の決定 8）。必須にするかは利用者が決める。
+# ruleset の必須のチェックにはしていない（#545 の決定 8）。必須にするかは利用者が決める。
 on:
   pull_request:
     types: [opened, synchronize, edited, reopened]

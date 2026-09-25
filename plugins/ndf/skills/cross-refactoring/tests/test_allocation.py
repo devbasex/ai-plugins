@@ -110,7 +110,7 @@ def test_build_row_and_append_round_trip(allocation, tmp_path):
                             "structure/extract_method": {"count": 2, "seconds": 120}}
     assert row["verify"] == {"items": 2, "seconds": 20}
     assert row["fix"] == {"launches": 1, "seconds": 300}
-    # 走らなかった危険の印の全体のテストは null
+    # 走らなかった危険フラグの全体のテストは null
     assert row["whole_test"] == {"init": 59, "danger": None, "final": 61}
 
     path = allocation.history_path(tmp_path, "devbasex/ai-plugins")

@@ -96,7 +96,7 @@ Serena が使えるときは、ファイルを丸ごと読まずに `get_symbols
 固定テストを書くと、既存の不具合が「正解」として固定されることがある。気づいた時点で
 次のどちらかにする。
 
-- **不具合として別に扱う**（固定テストにコメントで印を付け、修正は別の変更で行う）
+- **不具合として別に扱う**（固定テストにコメントで目印を付け、修正は別の変更で行う）
 - 直ちに直す必要がある場合は、構造改善を止めて `problem-solving` へ移る
 
 構造改善のついでに振る舞いを直さない。直すなら、そのための差分を分ける。
@@ -154,7 +154,7 @@ Serena が使えるときは、ファイルを丸ごと読まずに `get_symbols
   - [references/lang-typescript.md](references/lang-typescript.md)
   - [references/lang-php.md](references/lang-php.md)
   - 一覧にない言語は、`data-representation.md` の判定表から自分で対応付ける
-- [references/test-changes.md](references/test-changes.md) — テストをどこまで変えてよいか。判定の 3 段と、段階の分け方
+- [references/test-changes.md](references/test-changes.md) — テストをどこまで変えてよいか。一次〜三次の判定と、段階の分け方
 - [references/vocabulary.md](references/vocabulary.md) — 兆候と手法の呼び名。**識別子を持つ唯一の場所**
 - [references/characterization-tests.md](references/characterization-tests.md) — 現状固定テストの作り方
 - `/ndf:cross-refactoring` — 発見と検証を別のランタイムへ分ける形。**この Skill は
@@ -163,5 +163,5 @@ Serena が使えるときは、ファイルを丸ごと読まずに `get_symbols
   工程表は `standard` と `legacy-refactor` の構造改善にそちらを置く。適用を担う側は
   この Skill を手順として読む
 
-この工程に入ったら記録のコマンド `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "構造改善"` を 1 行打つ（issue の本文と盤面の両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「記録のコマンド」を使う）。
+この工程に入ったら記録のコマンド `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "構造改善"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「記録のコマンド」を使う）。
 

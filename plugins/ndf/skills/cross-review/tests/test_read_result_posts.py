@@ -1,17 +1,17 @@
-"""指摘の取り込みが、控えからレビューを組み立てて送る（#730 #583）。
+"""指摘の取り込みが、指摘のファイルからレビューを組み立てて送る（#730 #583）。
 
-**書き込みはレビューを回す側だけが行う。** 担当は指摘の控えと結果ファイルを書いて
+**書き込みはレビューを回す側だけが行う。** 担当は指摘のファイルと結果ファイルを書いて
 終わり、取り込みがそこから投稿を組み立て、待ち行列を通して送り、送信の応答を記録に
 する。担当の申告と GitHub の実数を突き合わせる処理は無くなる。
 
 | 何を確かめるか | 受け入れ条件 |
 | --- | --- |
-| 控えから投稿が組み立ち、1 回の呼び出しで送られる | AC5 |
+| 指摘のファイルから投稿が組み立ち、1 回の呼び出しで送られる | AC5 |
 | 応答に本文が出ない | AC6 |
 | 投稿の後・記録の前で止めた実行をやり直しても増えない | AC12 |
 | 記録の URL と件数が送信の応答から来る | AC15 |
 | インラインが 0 件でも結果なしにならない | AC17 |
-| 控えが無ければ投稿を 0 件にする | AC3 |
+| 指摘のファイルが無ければ投稿を 0 件にする | AC3 |
 """
 from __future__ import annotations
 
@@ -126,7 +126,7 @@ def test_no_body_reaches_the_answer(tmp_dir, state_mod, fake_gh, capsys) -> None
 
 
 def test_the_body_is_sent_from_the_note(tmp_dir, state_mod, fake_gh) -> None:
-    """本文は控えから組み立てて送る。先頭行がラウンドと席を持つ（AC5・AC10）。"""
+    """本文は指摘のファイルから組み立てて送る。先頭行がラウンドと席を持つ（AC5・AC10）。"""
     _seed(tmp_dir)
     _note(tmp_dir)
     _result(tmp_dir)
@@ -188,7 +188,7 @@ def test_findings_without_an_inline_are_still_a_result(
 
 
 def test_a_note_alone_is_treated_as_no_result(tmp_dir, state_mod, fake_gh) -> None:
-    """控えだけがあって結果ファイルが無ければ、投稿を 0 件にする（AC3・AC4）。"""
+    """指摘のファイルだけがあって結果ファイルが無ければ、投稿を 0 件にする（AC3・AC4）。"""
     _seed(tmp_dir)
     _note(tmp_dir)
     fake_gh.set_rules([_NO_PRIOR, _ACCEPT])
@@ -217,7 +217,7 @@ def test_only_what_is_sent_is_downgraded_on_ones_own_pull_request(
 
 def test_a_reviewer_that_wrote_nothing_adds_no_review(
         tmp_dir, state_mod, fake_gh) -> None:
-    """控えも結果も書かずに終わった担当では、レビューが 1 件も増えない（AC4）。"""
+    """指摘のファイルも結果も書かずに終わった担当では、レビューが 1 件も増えない（AC4）。"""
     _seed(tmp_dir)
     # 書きかけの一時の名前だけが残った状態も、正式の名前が無ければ結果なしである。
     (tmp_dir / f"{AGENT}-review-pr{PR}-round{ROUND}-payload.json.tmp").write_text("{")

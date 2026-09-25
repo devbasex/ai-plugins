@@ -98,7 +98,7 @@ def refactor_lib(refactor: types.ModuleType) -> types.ModuleType:
 def patch_lib(refactor, monkeypatch):
     """`refactor_lib` の全モジュールで、その名前を持つものを差し替える。
 
-    **取り込みは値の写しである。** `from .paths import sh` と書いたモジュールは、
+    **取り込みは値の複製である。** `from .paths import sh` と書いたモジュールは、
     定義元の `paths.sh` を差し替えても元の値を呼び続ける。差し替えたい対象が
     どのモジュールで使われているかはテストからは決まらないため、その名前を
     持つモジュールすべてへ当てる。
@@ -151,7 +151,7 @@ def env_tmp_dir(monkeypatch):
 def _isolate_outside_world(tmp_path, monkeypatch):
     """テストの外へ届く 2 つを、テストごとに塞ぐ（#933）。
 
-    - **Jev の鍵を外す。** 鍵を持つ環境（devbase）で走らせると、`init` と計画が実際の
+    - **Jev の鍵を外す。** 鍵を持つ環境（devbase）で走らせると、`init` と改修計画が実際の
       Vercel AI Gateway へ問い合わせる。Jev を使う経路のテストは偽の応答を差し込む
     - **配分の履歴と実行の要約の置き場所を、このテストの一時ディレクトリへ向ける。**
       根の `conftest.py` もセッションの一時ディレクトリへ向けるが、テストどうしで

@@ -1,7 +1,7 @@
-"""配布の段の実行（`release-steps.py`、#893）。
+"""配布のコマンドの実行（`release-steps.py`、#893）。
 
 一時ディレクトリに最小のリポジトリ（`git init` と `.ndf/release.json`）を作り、`--root` で渡す。
-段のコマンドは `sys.executable -c ...` で書き、シェルを通さない。
+配布のコマンドは `sys.executable -c ...` で書き、シェルを通さない。
 """
 from __future__ import annotations
 
@@ -84,7 +84,7 @@ def test_only_matching_stage_runs_and_version_is_substituted(repo, tmp_path):
     assert p.returncode == 0, p.stdout + p.stderr
     assert (repo / "out" / "new.md").read_text() == "1.2.3"
     assert not (repo / "out" / "verify.md").exists()
-    assert "段: 記録 → 0" in p.stdout
+    assert "コマンド: 記録 → 0" in p.stdout
     assert "out/new.md" in p.stdout
 
 
@@ -206,7 +206,7 @@ def test_this_repository_declares_one_production_step():
     assert run(REPO_ROOT, "check").returncode == 0
     p = run(REPO_ROOT, "run", "--stage", "production", "--version", "10.17.9", "--dry-run")
     assert p.returncode == 0, p.stderr
-    assert p.stdout.count("段: ") == 1
+    assert p.stdout.count("コマンド: ") == 1
     assert "--released 10.17.9" in p.stdout
 
 
@@ -270,7 +270,7 @@ def notes_repo(repo: Path) -> Path:
 
 
 PR_BODIES = {
-    11: {"title": "題名 A", "body": "要約\n\n## 利用者向けの変化\n\n- 計画を課題番号だけで作れる\n- 段の順が変わる\n  （続き）\n\n"
+    11: {"title": "題名 A", "body": "要約\n\n## 利用者向けの変化\n\n- 計画を課題番号だけで作れる\n- ステップの順が変わる\n  （続き）\n\n"
                                   "## 未検証・残る危険\n\n- 実機の CI とは未照合\n\n## テスト\n\n- ok\n"},
     12: {"title": "題名 B", "body": "節の無い本文\n"},
 }
@@ -284,7 +284,7 @@ def test_notes_builds_changelog_and_readme_from_user_changes(repo, tmp_path):
     assert p.returncode == 0, p.stdout + p.stderr
     res = json.loads(p.stdout.strip().splitlines()[-1])
     assert res["status"] == "ok" and res["metrics"]["fallback"] == 1
-    want = "- 計画を課題番号だけで作れる（#11）\n- 段の順が変わる （続き）（#11）\n- 題名 B（#12）\n"
+    want = "- 計画を課題番号だけで作れる（#11）\n- ステップの順が変わる （続き）（#11）\n- 題名 B（#12）\n"
     cl = (repo / "CHANGELOG.md").read_text(encoding="utf-8")
     assert f"## [ndf 1.2.3] - 2026-01-01\n\n{want}\n## [ndf 1.2.2]" in cl
     assert "題名 A（#11）" not in cl and "- 前の版" in cl
@@ -306,7 +306,7 @@ def test_notes_fills_approval_cells(repo, tmp_path):
                        capture_output=True, text=True, env=env)
     assert p.returncode == 0, p.stdout + p.stderr
     text = approval.read_text(encoding="utf-8")
-    assert "| 配る中身 | - 計画を課題番号だけで作れる（#11）<br>- 段の順が変わる （続き）（#11）<br>- 題名 B（#12） |" in text
+    assert "| 配る中身 | - 計画を課題番号だけで作れる（#11）<br>- ステップの順が変わる （続き）（#11）<br>- 題名 B（#12） |" in text
     assert "| 検証への配布で確かめたこと | Claude Code・Codex・Kiro の 3 経路で develop から ndf 1.2.3-dev.1 を導入し" in text
     assert "## 未検証・残る危険\n\n- 実機の CI とは未照合（#11）\n\n## 同意を求めること" in text
     assert (repo / "CHANGELOG.md").read_text(encoding="utf-8") == before
@@ -319,3 +319,37 @@ def test_notes_without_changelog_section_is_precondition(repo, tmp_path):
     p = subprocess.run([PY, str(SCRIPT), "notes", "--root", str(repo), "--version", "1.2.3", "--prs", "12"],
                        capture_output=True, text=True, env=env)
     assert p.returncode == 3
+
+
+def test_notes_and_changelog_skip_unmerged_prs(repo, tmp_path):
+    pdir = notes_repo(repo)
+    env = fake_gh(tmp_path, {**PR_BODIES, 13: {"title": "未マージ", "body": "## 利用者向けの変化\n\n- 載らない\n",
+                                               "state": "OPEN"}})
+    p = subprocess.run([PY, str(SCRIPT), "notes", "--root", str(repo), "--version", "1.2.3-dev.1", "--prs", "12", "13"],
+                       capture_output=True, text=True, env=env)
+    assert p.returncode == 0, p.stdout + p.stderr
+    res = json.loads(p.stdout.strip().splitlines()[-1])
+    assert res["metrics"]["unmerged"] == [13] and res["metrics"]["prs"] == 1
+    assert {"kind": "pr", "name": "#13", "result": "skipped", "reason": "マージされていない"} in res["items"]
+    assert "#13" not in (repo / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert "#13" not in (pdir / "README.md").read_text(encoding="utf-8")
+    p = subprocess.run([PY, str(SCRIPT), "changelog", "--root", str(repo), "--version", "1.2.3-dev.1", "--prs", "12", "13"],
+                       capture_output=True, text=True, env=env)
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert json.loads(p.stdout.strip().splitlines()[-1])["metrics"]["unmerged"] == [13]
+    assert "#13" not in (repo / "CHANGELOG.md").read_text(encoding="utf-8")
+
+
+def test_notes_and_changelog_stop_when_no_pr_is_merged(repo, tmp_path):
+    pdir = notes_repo(repo)
+    env = fake_gh(tmp_path, {13: {"title": "未マージ", "body": "## 利用者向けの変化\n\n- 載らない\n", "state": "OPEN"}})
+    approval = repo / "issues" / "approval.md"
+    approval.parent.mkdir()
+    approval.write_text("| 配る中身 | 前の中身 |\n| 検証への配布で確かめたこと | 前の確認 |\n", encoding="utf-8")
+    files = [repo / "CHANGELOG.md", pdir / "README.md", approval]
+    before = [f.read_bytes() for f in files]
+    base = ["--root", str(repo), "--version", "1.2.3-dev.1", "--prs", "13"]
+    for args in (["notes", *base], ["notes", *base, "--approval", "issues/approval.md"], ["changelog", *base]):
+        p = subprocess.run([PY, str(SCRIPT), *args], capture_output=True, text=True, env=env)
+        assert p.returncode == 3, args
+        assert [f.read_bytes() for f in files] == before, args

@@ -134,7 +134,7 @@ CREATE_HEADING = "### 2-3. 作成して移る"
 def create_snippet() -> str:
     """作業ツリーを作る手順の bash を取り出す。
 
-    手順を写し取ると、写しだけが正しくて配布された手順が外れている状態を作れてしまう。
+    手順を写し取ると、複製だけが正しくて配布された手順が外れている状態を作れてしまう。
     """
     text = SKILL.read_text(encoding="utf-8")
     head = text.index(CREATE_HEADING)

@@ -5,7 +5,7 @@
 `argparse` の `help` の 2 か所にあり、片方だけが実装から離れていた。
 
 `argparse` の parser は `main()` の中で組み立てられるため、`--help` を副プロセスで
-実行して出力を見る。利用者が読むものをそのまま検査できる。
+実行して出力を見る。利用者が読むものをそのままチェックできる。
 """
 from __future__ import annotations
 

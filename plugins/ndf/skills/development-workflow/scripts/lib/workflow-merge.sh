@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# NDF plugin: 設計 Pull Request のマージを承認の印に縛る判定（#266）。
+# NDF plugin: 設計 Pull Request のマージを承認ラベルに縛る判定（#266）。
 #
 # `workflow-common.sh` が読み込む。単独では使わない（分割・JSON・リポジトリの解決を
 # そちらへ置いているため）。**この層は通信を行う唯一の場所である。**
@@ -72,8 +72,8 @@ wf_looks_like_merge_text() {
 
 wf_deny_missing_label() {
   local num="${1:-<番号>}" head="${2:-}"
-  printf '設計 Pull Request #%s（head: %s）は承認の印が付いていないためマージしません。\n' "$num" "$head"
-  printf '人間の承認を得てから、承認の印（ラベル %s）を付けてください。付けば同じコマンドがそのまま通ります。\n' \
+  printf '設計 Pull Request #%s（head: %s）は承認ラベルが付いていないためマージしません。\n' "$num" "$head"
+  printf '人間の承認を得てから、承認ラベル（ラベル %s）を付けてください。付けば同じコマンドがそのまま通ります。\n' \
     "$WF_APPROVAL_LABEL"
   printf '  gh pr edit %s --add-label %s\n' "$num" "$WF_APPROVAL_LABEL"
   printf '設計 Pull Request でない場合は、head のブランチ名を %s 以外へ変えてください。\n' "$WF_DESIGN_PREFIX"
@@ -87,7 +87,7 @@ wf_deny_undetermined() {
   printf '確かめられなかった値: %s\n' "$what"
   printf '番号を書いて実行し直すと判定できることがあります。\n'
   printf '  gh pr merge %s --squash\n' "$num"
-  printf '承認の印（ラベル %s）を付ける手順:\n' "$WF_APPROVAL_LABEL"
+  printf '承認ラベル（ラベル %s）を付ける手順:\n' "$WF_APPROVAL_LABEL"
   printf '  gh pr edit %s --add-label %s\n' "$num" "$WF_APPROVAL_LABEL"
   printf '設計 Pull Request でない場合は、head のブランチ名を %s 以外へ変えてください。\n' "$WF_DESIGN_PREFIX"
 }
@@ -95,11 +95,11 @@ wf_deny_undetermined() {
 _wf_require_merge_tools() {
   local num="${1:-}"
   command -v jq >/dev/null 2>&1 || {
-    wf_deny_undetermined "$num" '承認の印（判定に要る jq が無い）'; return 1; }
+    wf_deny_undetermined "$num" '承認ラベル（判定に要る jq が無い）'; return 1; }
   command -v git >/dev/null 2>&1 || {
-    wf_deny_undetermined "$num" '承認の印（判定に要る git が無い）'; return 1; }
+    wf_deny_undetermined "$num" '承認ラベル（判定に要る git が無い）'; return 1; }
   command -v gh >/dev/null 2>&1 || {
-    wf_deny_undetermined "$num" '承認の印（判定に要る gh が無い）'; return 1; }
+    wf_deny_undetermined "$num" '承認ラベル（判定に要る gh が無い）'; return 1; }
   return 0
 }
 
@@ -128,7 +128,7 @@ _wf_resolve_pr_info() {
   # head のブランチ名・ラベルが同じ応答で返る。
   if [ -n "$num" ]; then
     json=$(gh api "/repos/$slug/pulls/$num" 2>/dev/null) || {
-      wf_deny_undetermined "$num" 'head のブランチ名と承認の印（Pull Request の問い合わせに失敗）'; return 1; }
+      wf_deny_undetermined "$num" 'head のブランチ名と承認ラベル（Pull Request の問い合わせに失敗）'; return 1; }
   else
     json=$(_wf_resolve_pr_by_branch "$slug") || { printf '%s\n' "$json"; return 1; }
   fi
@@ -141,14 +141,14 @@ _wf_verify_approval_label() {
   local slug="${1:-}" num="${2:-}" head="${3:-}" json="${4:-}" out rc
   jq -e --arg l "$WF_APPROVAL_LABEL" 'any(.labels[]?; .name == $l)' <<<"$json" >/dev/null 2>&1 && return 0
 
-  # 印が無い。**定義そのものが無いことを確かめられたときだけ通す**（決定 6）。
+  # 承認ラベルが無い。**定義そのものが無いことを確かめられたときだけ通す**（決定 6）。
   # ラベルの定義が、この仕組みを有効にする宣言を兼ねる。
   out=$(gh api "/repos/$slug/labels/$WF_APPROVAL_LABEL" 2>&1)
   rc=$?
   if [ "$rc" -ne 0 ]; then
     case "$out" in
       *404*) return 0 ;;
-      *) wf_deny_undetermined "$num" "承認の印（ラベル $WF_APPROVAL_LABEL）の定義の有無"; return 1 ;;
+      *) wf_deny_undetermined "$num" "承認ラベル（ラベル $WF_APPROVAL_LABEL）の定義の有無"; return 1 ;;
     esac
   fi
 

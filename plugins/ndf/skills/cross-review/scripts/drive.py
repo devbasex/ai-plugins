@@ -159,7 +159,7 @@ class Drive:
 - ブランチ: {s.get('head_branch')} / ベース: {s.get('base_branch')}
 - 前ラウンドのレビュー（件数はそのラウンドで投稿した数。対象は reviewThreads を数え直して決める）:
 {reviews}
-- 既存コメントの控え: {self.tmp}/cross-review-pr{self.pr}-existing-comments.txt
+- 既存コメントのスナップショット: {self.tmp}/cross-review-pr{self.pr}-existing-comments.txt
 
 コミットまでで、送らない。GitHub へ書かない（送信・返信・決着は取り込みが行う）。
 戻り値ファイル: {self.path('fix')}（環境変数 `CROSS_REVIEW_TMP_DIR={self.tmp}` を渡すと `/ndf:fix` がここへ書く）
@@ -190,7 +190,7 @@ GitHub と git の送信をしない。結果ファイル: {self.path('sweep')}
 出力ファイル（JSON: {{"title": ..., "body": ...}}）: {self.path('newtext')}
 """
 
-    # --- 段 ---
+    # --- ステップ ---
     def init(self) -> None:
         out = self.must(call([sys.executable, str(HERE / "state.py"), "init", str(self.pr), *self.init_args],
                              self.env), "state.py init")
@@ -315,7 +315,7 @@ GitHub と git の送信をしない。結果ファイル: {self.path('sweep')}
                 return self.pause(ds, "fix", self.fix_prompt())
             ds["stage"] = "sweep-start"
             self.save_ds(ds)
-        raise Stop("段の数が上限を超えた", 1)
+        raise Stop("ステップの数が上限を超えた", 1)
 
 
 def main(argv: list[str] | None = None) -> None:

@@ -1,4 +1,4 @@
-"""doc-lint.py（#870 B2）: 起点からの追加行だけに書き方の検査を掛ける。"""
+"""doc-lint.py（#870 B2）: 起点からの追加行だけに書き方のチェックを掛ける。"""
 from __future__ import annotations
 
 import json

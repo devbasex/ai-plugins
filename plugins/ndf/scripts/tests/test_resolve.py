@@ -1,6 +1,6 @@
 """`scripts/resolve.sh`（解決の入口）が 4 ランタイム × 開発中 / 配布済みで当たることを確かめる。
 
-入口を探す 1 段は `development-workflow/references/scripts-lookup.md` の「入口を探す 1 段」の
+入口を探すコマンドは `development-workflow/references/scripts-lookup.md` の「入口を探すコマンド」の
 bash のコードブロックにある。テストはそのブロックを読み出し、入口の実物を写した配置の上で
 実行する。配置は一時の HOME とディレクトリに作り、実ユーザの導入物を拾わない。
 """
@@ -18,7 +18,7 @@ import pytest
 PLUGIN = Path(__file__).resolve().parents[2]
 ENTRY = PLUGIN / "scripts" / "resolve.sh"
 LOOKUP = PLUGIN / "skills" / "development-workflow" / "references" / "scripts-lookup.md"
-HEADING = "## 入口を探す 1 段"
+HEADING = "## 入口を探すコマンド"
 TOKEN = "'${CLAUDE_PLUGIN_ROOT}'"
 RUNTIMES = ("claude", "kiro", "codex", "agy")
 
@@ -43,7 +43,7 @@ def base_env(home: Path, claude: bool) -> dict[str, str]:
 
 def run_finder(cwd: Path, home: Path, *, substitute: Path | None = None,
                claude: bool = False) -> str:
-    """入口を探す 1 段を実行し、決まった `$SCRIPTS` を返す（見つからなければ空）。"""
+    """入口を探すコマンドを実行し、決まった `$SCRIPTS` を返す（見つからなければ空）。"""
     snippet = finder()
     if substitute is not None:
         snippet = snippet.replace(TOKEN, f"'{substitute}'", 1)
@@ -142,7 +142,7 @@ def test_development(runtime, tmp_path, home) -> None:
 
 
 def test_issue_590_old_codex_copy_is_not_taken(home, project) -> None:
-    """#590: 参照ファイルで置き換わらなくても、Claude Code では Codex の古い控えを採らない。"""
+    """#590: 参照ファイルで置き換わらなくても、Claude Code では Codex の古い複製を採らない。"""
     make_plugin(home / ".codex" / ".tmp" / "marketplaces" / "ai-plugins" / "plugins" / "ndf",
                 entry=False)
     root = install_claude(home)
@@ -150,7 +150,7 @@ def test_issue_590_old_codex_copy_is_not_taken(home, project) -> None:
 
 
 def test_issue_590_codex_entry_defers_to_claude_record(home, project) -> None:
-    """Codex の控えが入口を持っていても、Claude Code の中では導入の記録へ戻る。"""
+    """Codex の複製が入口を持っていても、Claude Code の中では導入の記録へ戻る。"""
     codex = home / ".codex" / ".tmp" / "marketplaces" / "ai-plugins" / "plugins" / "ndf"
     make_plugin(codex)
     root = install_claude(home)

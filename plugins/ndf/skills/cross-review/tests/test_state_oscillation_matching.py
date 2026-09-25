@@ -71,7 +71,7 @@ def test_a_line_that_moved_by_one_counts_as_the_same_place(tmp_dir, state_mod, c
     """行が 1 行ずれても同じ箇所として数える。これが従来は拾えなかった形である。"""
     code = _run(
         tmp_dir, state_mod,
-        [{"path": "a.py", "line": 10, "body": "引数の検査が抜けている"}],
+        [{"path": "a.py", "line": 10, "body": "引数のチェックが抜けている"}],
         [{"path": "a.py", "line": 11, "body": "まったく別の指摘の文面"}],
     )
     assert code == 4
@@ -82,8 +82,8 @@ def test_the_same_body_far_away_counts_as_the_same_place(tmp_dir, state_mod, cap
     """行が離れていても、同じファイルで本文が同じなら同じ箇所として数える。"""
     code = _run(
         tmp_dir, state_mod,
-        [{"path": "a.py", "line": 10, "body": "引数の検査が抜けている"}],
-        [{"path": "a.py", "line": 400, "body": "引数の検査が抜けている"}],
+        [{"path": "a.py", "line": 10, "body": "引数のチェックが抜けている"}],
+        [{"path": "a.py", "line": 400, "body": "引数のチェックが抜けている"}],
     )
     assert code == 4
     assert "本文=1" in capsys.readouterr().err
@@ -92,7 +92,7 @@ def test_the_same_body_far_away_counts_as_the_same_place(tmp_dir, state_mod, cap
 def test_a_different_place_is_not_counted(tmp_dir, state_mod, capsys):
     code = _run(
         tmp_dir, state_mod,
-        [{"path": "a.py", "line": 10, "body": "引数の検査が抜けている"}],
+        [{"path": "a.py", "line": 10, "body": "引数のチェックが抜けている"}],
         [{"path": "b.py", "line": 10, "body": "戻り値の型が合っていない"}],
     )
     assert code == 2
@@ -102,7 +102,7 @@ def test_a_different_place_is_not_counted(tmp_dir, state_mod, capsys):
 def test_a_line_far_enough_away_is_not_counted(tmp_dir, state_mod):
     code = _run(
         tmp_dir, state_mod,
-        [{"path": "a.py", "line": 10, "body": "引数の検査が抜けている"}],
+        [{"path": "a.py", "line": 10, "body": "引数のチェックが抜けている"}],
         [{"path": "a.py", "line": 14, "body": "戻り値の型が合っていない"}],
     )
     assert code == 2
@@ -115,7 +115,7 @@ def test_two_japanese_bodies_do_not_collapse_into_one(tmp_dir, state_mod):
     """
     code = _run(
         tmp_dir, state_mod,
-        [{"path": "a.py", "line": 10, "body": "引数の検査が抜けている"}],
+        [{"path": "a.py", "line": 10, "body": "引数のチェックが抜けている"}],
         [{"path": "a.py", "line": 400, "body": "戻り値の型が合っていない"}],
     )
     assert code == 2
@@ -155,7 +155,7 @@ def test_the_threshold_stays_at_half(tmp_dir, state_mod):
 
 
 def test_the_body_normalization_keeps_letters_of_any_language(state_mod):
-    assert state_mod._normalized_body("引数の検査が抜けている（`a.py:10`）") == "引数の検査が抜けているapy10"
+    assert state_mod._normalized_body("引数のチェックが抜けている（`a.py:10`）") == "引数のチェックが抜けているapy10"
     assert state_mod._normalized_body(None) == ""
     assert state_mod._normalized_body("!!!") == ""
 

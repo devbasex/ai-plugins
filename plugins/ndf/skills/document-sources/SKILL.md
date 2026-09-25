@@ -25,7 +25,7 @@ allowed-tools:
 | Google Drive からの取得 | `google-drive` |
 | システムごとの取得の手順 | `document-systems` の `system-<名前>.md` |
 | SQL による集計 | 対象リポジトリの手段（`ndf:data-analyst` エージェントなど） |
-| 書かれた値と出所の突き合わせ | **`quality-gates` の事実確認の段**（この Skill ではない） |
+| 書かれた値と出所の突き合わせ | **`quality-gates` の事実確認の手順**（この Skill の外） |
 
 **取得の手段を持つと、システムが増えるたびにこの Skill が太る。**
 
@@ -51,7 +51,7 @@ allowed-tools:
 | 時点 | 取得した日時 |
 | 手段 | 画面 / クエリ / API のどれで取ったか |
 
-書き方と、値と出典を結ぶ印は
+書き方と、値と出典を結ぶ目印は
 [references/source-record.md](references/source-record.md) にある。
 
 ## 出所の無い値を拒否しない
@@ -92,7 +92,7 @@ allowed-tools:
 
 ## 一致しなかったとき
 
-**事実確認（`quality-gates` の段）で値と出所が食い違ったら、この工程へ戻る。**
+**事実確認（`quality-gates` の手順）で値と出所が食い違ったら、この工程へ戻る。**
 本文の値を出所に合わせて直すのではなく、**どちらが正しいかを出所を取り直して決める**。
 取り直した結果、出所の側が変わっていたなら、時点を更新して両方を直す。
 
@@ -101,7 +101,7 @@ allowed-tools:
 **出所を当たる過程で、この文書の範囲外の問題（数値の定義の食い違い、集計の誤りなど）に
 気づいたら、その場で `/ndf:out-of-scope` が issue にする。**
 
-この工程に入ったら記録のコマンド `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "素材の収集と出典の確定"` を 1 行打つ（issue の本文と盤面の両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「記録のコマンド」を使う）。
+この工程に入ったら記録のコマンド `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "素材の収集と出典の確定"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「記録のコマンド」を使う）。
 
 ## 関連
 

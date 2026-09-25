@@ -1,7 +1,7 @@
 """実行の入口。`init` と `start-phase` を持つ。
 
 対象の Pull Request の文脈・参加者と実装担当の決定・Jev を使うかの判定・作業ツリーの
-用意・状態ファイル（版 2）の初期化と再開と、フェーズの開始の記録を扱う（#933）。
+用意・状態ファイル（版 2）の初期化と再開と、手順の開始の記録を扱う（#933）。
 """
 from __future__ import annotations
 
@@ -51,8 +51,8 @@ SCHEMA = 2
 DEPRECATED_ARGS = ("max_test_rounds", "max_outer_rounds", "max_items_per_round",
                    "max_fix_rounds", "test_timeout")
 
-# 開始を記録するフェーズ（CLI を起動するもの）。
-# 計画のフェーズより前（予算と実装担当を当て直してよい間）のフェーズ。
+# 開始を記録する手順（CLI を起動するもの）。
+# 改修計画の手順より前（予算と実装担当を当て直してよい間）の手順。
 BEFORE_PLAN = ("propose", "plan")
 
 
@@ -71,8 +71,8 @@ NEW_RUN_DEFAULTS: dict[str, Any] = {
 # 再開で渡した引数の反映の表（#727 の決定 13）。**状態ファイルに載る引数は、この表の
 # どれかに必ず載る。** `replace` は状態へ書いて記録へ積み、`notify` は状態と違う
 # ときだけ「反映しない」と知らせる。
-# 予算は計画のフェーズより前だけ置き換える（設計の「再開」）。採用の件数・締め切り・
-# 控えは `merge-plan` の時点の予算で固定されるため、それ以降は知らせるだけにする。
+# 予算は改修計画の手順より前だけ置き換える（設計の「再開」）。採用の件数・締め切り・
+# 予備時間は `merge-plan` の時点の予算で固定されるため、それ以降は知らせるだけにする。
 RESUME_BUDGET_REPLACE = (statefile.ResumeField("budget_minutes", "budget_minutes", "replace"),)
 RESUME_BUDGET_NOTIFY = (statefile.ResumeField("budget_minutes", "budget_minutes", "notify"),)
 RESUME_NOTIFY_FIELDS = (
@@ -320,7 +320,7 @@ def _build_initial_state(
         "target_scope": list(args.scope),
         "host": ctx.host,
         "host_detection": ctx.detection,
-        # **提案は参加者の全員、計画以降は実装担当 1 者**（#933 の決定 1）。
+        # **提案は参加者の全員、改修計画以降は実装担当 1 者**（#933 の決定 1）。
         "runtimes": runtimes,
         "participants": ctx.participants,
         "implementer": ctx.implementer,
@@ -337,7 +337,7 @@ def _build_initial_state(
         # 定義は検証側（この CLI）にあり、状態ファイル経由で起動側へ渡す。
         "vocabulary": vocabulary(),
         "skills": {"required": list(REQUIRED_SKILLS)},
-        # 最終ゲートで手元のテストの代わりに見る検査の名前。**排他である**
+        # 最終ゲートで手元のテストの代わりに見るチェックの名前。**排他である**
         # （指定があれば手元のテストを実行しない）。
         "ci_check": args.ci_check,
         # 最終ゲートの分かれ道。**単独起動が既定である。**
@@ -352,10 +352,10 @@ def _build_initial_state(
         # `--plan-file` を明示したときだけファイルにし、空文字なら記録しない。
         "plan_mode": _plan_mode_of(args.plan_file),
         "plan_file": normalize_plan_file(args.plan_file),
-        # 編集する先のコメント。**印で引き当て直せる**ので、失っても積み増さない。
+        # 編集する先のコメント。**目印で引き当て直せる**ので、失っても積み増さない。
         "plan_comment": None,
         "phase": "propose",
-        # フェーズの所要。**進行側の時計で測る**（決定 8）。
+        # 手順の所要。**進行側の時計で測る**（決定 8）。
         "phases": {},
         "candidates": [],
         "plan": None,
@@ -375,7 +375,7 @@ def _build_initial_state(
 def cmd_init(args: argparse.Namespace) -> None:
     """Step 0 — ホスト・参加者・実装担当を確定し、作業ディレクトリと状態を用意する。
 
-    **提案は参加者の全員、計画以降は実装担当 1 者が通す**（#933 の決定 1）。前回の状態が
+    **提案は参加者の全員、改修計画以降は実装担当 1 者が通す**（#933 の決定 1）。前回の状態が
     残っていれば再開し、渡した引数を反映の表に従って扱う。旧い形（ラウンド制）で
     終わっていない状態ファイルは読み替えずに止める（決定 18）。
     """
@@ -396,13 +396,13 @@ def cmd_init(args: argparse.Namespace) -> None:
     participants, baseline, round_record = _verify_init(args, inputs, prep)
     state = _save_initial_state(args, inputs, prep, participants, baseline, round_record,
                                 started_at)
-    # **出力は入口から直接呼ぶ。** 手順書の変数の出所の検査
-    # （`scripts/check-skill-shell-vars.py`）は `cmd_*` からヘルパーを 1 段だけたどる。
+    # **出力は入口から直接呼ぶ。** 手順書の変数の出所のチェック
+    # （`scripts/check-skill-shell-vars.py`）は `cmd_*` からヘルパーを 1 階層だけたどる。
     _emit_init(state)
 
 
 def _normalize_args(args: argparse.Namespace) -> None:
-    """予算の検査と、廃止した引数の知らせ。**提案の前に止める**（AC1 AC2 AC3b）。"""
+    """予算のチェックと、廃止した引数の知らせ。**提案の前に止める**（AC1 AC2 AC3b）。"""
     raw = getattr(args, "budget_minutes", None)
     if raw is not None:
         try:
@@ -417,13 +417,13 @@ def _normalize_args(args: argparse.Namespace) -> None:
             option = "--" + name.replace("_", "-")
             print(f"⚠ {option} は廃止しました（#933）。--budget-minutes で所要を決めます",
                   file=sys.stderr, flush=True)
-    # AC3b: 範囲のテストが無く、全体のテストから限ったテストを組み立てられないなら、
-    # 提案と計画に時間を使った後で全項目が `no_target` になる。着手前に止める。
+    # AC3b: ラウンドのテストが無く、全体のテストから範囲テストを組み立てられないなら、
+    # 提案と改修計画に時間を使った後で全項目が `no_target` になる。着手前に止める。
     if not getattr(args, "round_test", None) and not is_known(args.baseline_test):
         die(
             f"--baseline-test（{args.baseline_test}）からは項目ごとのテストを組み立てられません"
             "（既知の実行器: pytest / python -m pytest / jest / vitest）。"
-            "--round-test で範囲のテストを渡してください"
+            "--round-test でラウンドのテストを渡してください"
         )
 
 
@@ -550,7 +550,7 @@ def _resume_if_pending(
 def _verify_init(
     args: argparse.Namespace, inputs: _InitInputs, prep: _InitPreparation
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
-    """参加者を確定し、着手前のテストと範囲のテストを実行する。"""
+    """参加者を確定し、着手前のテストとラウンドのテストを実行する。"""
     # **確認は着手前のテストより先に行う。** 使える者がいなければ、テストに時間を
     # 使わずに止める。
     participants = resolve_participants(
@@ -593,7 +593,7 @@ def decide_judge(repo: str) -> dict[str, Any]:
     """この実行で Jev を使うかを 1 度だけ決める（決定 2・AC22 AC23）。"""
     judge = jev.decide(lambda: _repo_is_public(repo))
     if judge["kind"] == "jev":
-        info("✅ 判断の一部（段・同じ変更か・D5）を Jev に問います")
+        info("✅ 判断の一部（等級・同じ変更か・D5）を Jev に問います")
     else:
         info(f"ℹ Jev は使いません（{judge['reason']}）。判断は実装担当が行います")
     return judge
@@ -630,7 +630,7 @@ def _save_initial_state(
         started_at=started_at,
     )
     state = _build_initial_state(args, context)
-    # **実行時の値を書き出す**（決定 24）。計画の後の値は `merge-plan` が足す。
+    # **実行時の値を書き出す**（決定 24）。改修計画の後の値は `merge-plan` が足す。
     state["limits"] = timeline.of_state(state)
     info(f"   実装担当: {context.implementer}（{context.implementer_reason}）")
     # GitHub は自分の Pull Request への `APPROVE` と `REQUEST_CHANGES` を
@@ -686,12 +686,12 @@ def _resume(
 ) -> None:
     """前回中断した状態から再開する（#727 / #648 の決定 13〜16、#933 の「再開」）。
 
-    上限は渡せば反映し、状態に載る他の引数は状態と違えば知らせる。予算は計画の
-    フェーズより前だけ置き換える。足す者・外す者・全員を要する指定のどれかを渡した
+    上限は渡せば反映し、状態に載る他の引数は状態と違えば知らせる。予算は改修計画の
+    手順より前だけ置き換える。足す者・外す者・全員を要する指定のどれかを渡した
     ときだけ確かめ直し、**渡さなかった値は記録から補う**。作り直しが失敗したときは
     書き込みの前に中断するため、状態ファイルは変わらない。
     """
-    info(f"↻ 前回中断した状態から再開します（フェーズ {state.get('phase')}）")
+    info(f"↻ 前回中断した状態から再開します（手順 {state.get('phase')}）")
     budget_spec = RESUME_BUDGET_REPLACE if _before_plan(state) else RESUME_BUDGET_NOTIFY
     for line in statefile.apply_resume_args(state, args, budget_spec):
         info(line)
@@ -705,7 +705,7 @@ def _resume(
         _recheck_implementer(state)
 
     _apply_post_event(state, is_own_pr)
-    # **予算を置き換えたら上限の表を組み直す**（計画の前だけ。計画の後は表を変えない）。
+    # **予算を置き換えたら上限の表を組み直す**（改修計画の前だけ。改修計画の後は表を変えない）。
     if not state.get("plan"):
         state["limits"] = timeline.of_state(state)
     statefile.save(state_file, state)
@@ -713,21 +713,21 @@ def _resume(
 
 
 def _before_plan(state: dict[str, Any]) -> bool:
-    """計画を取り込む前か（予算と実装担当を当て直してよい間）。"""
+    """改修計画を取り込む前か（予算と実装担当を当て直してよい間）。"""
     return state.get("phase") in BEFORE_PLAN and not state.get("plan")
 
 
 def _recheck_implementer(state: dict[str, Any]) -> None:
     """参加者を作り直した結果、実装担当が外れていないかを確かめる（設計の「再開」）。
 
-    計画の前なら決め方を当て直して記録に積む。計画の後なら止める。計画・テスト・実装を
+    改修計画の前なら決め方を当て直して記録に積む。改修計画の後なら止める。改修計画・テスト・実装を
     担った者が途中で替わると、見積りの前提と、項目とコミットの対応を読む者が食い違う。
     """
     current = state.get("implementer")
     if current in state["runtimes"]:
         return
     if not _before_plan(state):
-        die(f"実装担当 {current} が参加者から外れました。計画の後は実装担当を替えられません")
+        die(f"実装担当 {current} が参加者から外れました。改修計画の後は実装担当を替えられません")
     implementer, reason = _choose_implementer(
         state["participants"], str(state["host"]), state.get("implementer_named"))
     state.setdefault("resume_changes", []).append({
@@ -745,7 +745,7 @@ def _notify_view(
     state: dict[str, Any], args: argparse.Namespace,
     model_spec: dict[str, Optional[str]],
 ) -> tuple[dict[str, Any], argparse.Namespace]:
-    """「知らせる」の比較を、状態と引数の形を揃えて行うための写しを返す。
+    """「知らせる」の比較を、状態と引数の形を揃えて行うための複製を返す。
 
     状態は着手前のテストを `{command, status, checked_at}` で、モデルを全ランタイムの
     辞書で、作業ディレクトリ root を解決済みのパスで持つ。引数の形のまま比べると、
@@ -753,7 +753,7 @@ def _notify_view(
     """
     view = dict(state)
     view["baseline_test"] = (state.get("baseline_test") or {}).get("command")
-    # 範囲のテストを省いた（または全体のテストと同じ文字列だった）実行は `None` を持つ。
+    # ラウンドのテストを省いた（または全体のテストと同じ文字列だった）実行は `None` を持つ。
     # 同じ文字列を渡し直した再開を「違う」と知らせないため、全体のテストと同じなら同じと読む。
     recorded = (state.get("round_test") or {}).get("command")
     given_round = getattr(args, "round_test", None)
@@ -779,10 +779,10 @@ def _emit_init(state: dict[str, Any]) -> None:
         HOST=state["host"],
         RUNTIMES=" ".join(state["runtimes"]),
         RUNTIMES_CSV=",".join(state["runtimes"]),
-        # 計画・テスト追加・実装・修正を通す 1 者（決定 1）。再開しても変わらない。
+        # 改修計画・テスト追加・実装・修正を通す 1 者（決定 1）。再開しても変わらない。
         IMPL=state["implementer"],
         IMPL_MODEL=(state.get("implementer_model") or {}).get("requested") or "",
-        # 再開の地点。駆動は終わったフェーズを飛ばす（AC24）。
+        # 再開の地点。駆動は終わった手順を飛ばす（AC24）。
         PHASE=state.get("phase") or "propose",
         BUDGET_MINUTES=state["budget_minutes"],
         WORKTREE_ROOT=state["worktree_root"],
@@ -886,8 +886,8 @@ def _run_baseline_test(command: str, work: pathlib.Path, timeout: int) -> dict[s
             "先に直してから開始してください"
         )
     info(f"✅ 着手前のテスト成功: {command}（{seconds} 秒）")
-    # **所要を残す。** 危険の印と最終ゲートの全体のテストの控えを、この秒から見積もる。
-    # **HEAD も残す。** 危険の印の全体のテストが落ちたとき、元からの失敗かをこの SHA で
+    # **所要を残す。** 危険フラグと最終ゲートの全体のテストの予備時間を、この秒から見積もる。
+    # **HEAD も残す。** 危険フラグの全体のテストが落ちたとき、元からの失敗かをこの SHA で
     # 見分け（決定 22）、報告と改修計画に基準として出す。
     return {"command": command, "status": status, "checked_at": statefile.now(),
             "seconds": seconds, "head": git_out(str(work), ["rev-parse", "HEAD"])}
@@ -896,12 +896,12 @@ def _run_baseline_test(command: str, work: pathlib.Path, timeout: int) -> dict[s
 def _run_round_test(
     command: Optional[str], baseline: dict[str, Any], work: pathlib.Path, timeout: int,
 ) -> dict[str, Any]:
-    """範囲のテストを着手前に 1 回実行して記録する（#880）。
+    """ラウンドのテストを着手前に 1 回実行して記録する（#880）。
 
     **省いたとき、または全体テストと同じ文字列のときは実行しない。** 同じコマンドを
     2 度走らせても判定は変わらず、時間だけが掛かる。全体テストの結果を写す。
 
-    **失敗は全体テストと別に止める。** 全体テストが通っても範囲のテストが通らない
+    **失敗は全体テストと別に止める。** 全体テストが通ってもラウンドのテストが通らない
     （テストが 1 件も集まらない終了コード 5 を含む）なら、群の検証が初回から落ちる。
     """
     if not command or command == baseline["command"]:
@@ -911,13 +911,13 @@ def _run_round_test(
                 "checked_at": baseline["checked_at"]}
     code, timed_out = run_with_timeout(command, str(work), timeout)
     if timed_out:
-        die(f"範囲のテストが {timeout} 秒で終わりませんでした（{command}）。打ち切りました")
+        die(f"ラウンドのテストが {timeout} 秒で終わりませんでした（{command}）。打ち切りました")
         raise SystemExit(ABORT)
     if code != 0:
         die(
-            f"範囲のテストが成功しません（{command} / 終了コード {code}）。"
+            f"ラウンドのテストが成功しません（{command} / 終了コード {code}）。"
             "--round-test が --scope のテストの置き場所を走らせるかを確かめてください"
         )
         raise SystemExit(ABORT)
-    info(f"✅ 着手前の範囲のテスト成功: {command}")
+    info(f"✅ 着手前のラウンドのテスト成功: {command}")
     return {"command": command, "status": "green", "checked_at": statefile.now()}

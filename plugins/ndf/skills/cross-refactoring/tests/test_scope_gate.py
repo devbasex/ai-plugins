@@ -210,7 +210,7 @@ def test_a_node_id_counts_its_file_as_a_round_test_root(scope, tmp_path, command
 
 
 def test_a_node_id_narrower_than_the_scope_stops(refactor_lib, scope, tmp_path):
-    """範囲のテストの置き場所の一部しか走らせないノード ID は関門で止める。"""
+    """ラウンドのテストの置き場所の一部しか走らせないノード ID は関門で止める。"""
     _services(tmp_path)
     problem = scope.scope_problem(
         ["src", "tests/services"], "pytest tests/services/test_one.py::test_a",

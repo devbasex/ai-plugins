@@ -6,7 +6,7 @@
                             [--interval 秒] [--timeout 秒] [--stale-after 秒] [--no-cleanup] [--root <dir>]
 
 cleanup: マージ済みの PR の作業ツリーとローカルブランチを外し、主ディレクトリを取り込む。
-merge-when-green: PR が draft なら `gh pr ready` で外し、CI の検査が全部通るまで待ち
+merge-when-green: PR が draft なら `gh pr ready` で外し、CI のチェックが全部通るまで待ち
 （push で先頭のコミットが変われば待ち直す）、
 失敗があれば止まり、通れば `gh pr merge --admin` でマージして cleanup まで行う。
 実行が終わったのにチェックが pending のまま --stale-after 秒続けば、そのジョブを 1 度だけ
@@ -16,7 +16,7 @@ merge-when-green: PR が draft なら `gh pr ready` で外し、CI の検査が�
 
     python3 merged-steps.py probe (--pr N | --head <ブランチ>...) [--act] [--root <dir>]
 
-probe: 開いた PR の検査を読み、強い順に failed（fix）/ stale（取り残し。--act なら再実行して remedied）/
+probe: 開いた PR のチェックを読み、強い順に failed（fix）/ stale（取り残し。--act なら再実行して remedied）/
 stale_again（再実行しても取り残し）/ settled・queued・running（wait）/ passed・none（judge）の 1 つに分ける。
 `metrics` に class・action・prs・queued_runs を持つ。書き込みは --act の再実行だけ。終了コードは 0 = 調べた。
 
@@ -100,6 +100,19 @@ def remove_worktree(root, path, label):
     if p.returncode == 0:
         return True, f"退避先 {trash}"
     return False, f"worktree remove --force が失敗: {p.stderr.strip()[:300]}"
+
+
+def same_untracked(main_dir, pull):
+    """pull を止めた未追跡のファイルが、すべて上流の内容と同じならその一覧を返す。1 つでも違えば空。"""
+    if "untracked working tree files would be overwritten" not in pull.stderr:
+        return []
+    rels = [l.strip() for l in pull.stderr.splitlines() if l.startswith("\t")]
+    for rel in rels:
+        up = run(["git", "-C", main_dir, "show", f"@{{u}}:{rel}"], check=False)
+        path = Path(main_dir) / rel
+        if up.returncode != 0 or not path.is_file() or path.read_text(errors="replace") != up.stdout:
+            return []
+    return rels
 
 
 def base_branch(main_dir):
@@ -188,6 +201,13 @@ def cleanup(root, prs):
         add("main_dir", main_dir, "kept", f"主ディレクトリが {base} でなく {cur or 'detached'} のため pull しない")
     else:
         pull = run(["git", "-C", main_dir, "pull", "--ff-only"], check=False)
+        same = same_untracked(main_dir, pull) if pull.returncode != 0 else []
+        if same:
+            # 取り込む内容と同じ未追跡のファイル（手元の写し）だけが邪魔をしたときは、消して取り込み直す
+            for rel in same:
+                (Path(main_dir) / rel).unlink()
+                add("untracked", rel, "removed", "取り込む内容と同じ")
+            pull = run(["git", "-C", main_dir, "pull", "--ff-only"], check=False)
         if pull.returncode != 0:
             pull_err = f"主ディレクトリの git pull --ff-only が失敗: {pull.stderr.strip()[:300]}"
             add("main_dir", main_dir, "stopped", pull_err)
@@ -356,8 +376,8 @@ def cmd_merge_when_green(a):
     deadline = time.monotonic() + a.timeout
     items, waits = [], 0
     green_sha = None  # pending を見ずに通った状態を 1 度見た先頭のコミット。確かめ直して通れば確定とする
-    pending_sha = None  # pending を見た先頭のコミット。見た後に全部が通れば検査は走り終えている
-    empty_since = None  # rollup が空のままになった時刻（検査が載る前か、CI の無いリポジトリか）
+    pending_sha = None  # pending を見た先頭のコミット。見た後に全部が通ればチェックは走り終えている
+    empty_since = None  # rollup が空のままになった時刻（チェックが載る前か、CI の無いリポジトリか）
     last_sha = None
     stale_since, rerun_done = {}, set()  # 取り残しを見た時刻（チェックの名前ごと）/ 再実行したチェック
     queued_runs = 0
@@ -371,7 +391,7 @@ def cmd_merge_when_green(a):
             emit(result(TOOL, "stopped", f"#{n} が OPEN でない（{state}）",
                         [{"kind": "pr", "name": f"#{n}", "result": "stopped", "reason": f"state={state}"}]))
         if info.get("isDraft"):
-            # draft のままではマージできない。ready で走り出す検査も待つよう、待ちの前に外す
+            # draft のままではマージできない。ready で走り出すチェックも待つよう、待ちの前に外す
             p = run(["gh", "pr", "ready", str(n)], cwd=root, check=False)
             if p.returncode != 0:
                 emit(result(TOOL, "stopped", f"gh pr ready が失敗: {p.stderr.strip()[:300]}",
@@ -407,7 +427,7 @@ def cmd_merge_when_green(a):
                         next=f"gh pr checks {n} で失敗を読み、直して push してから打ち直す"))
         wait = a.interval
         if not pending and not passed:
-            # 検査がまだ載っていない。--no-checks-after 秒を過ぎても空なら CI の無いリポジトリとみなす
+            # チェックがまだ載っていない。--no-checks-after 秒を過ぎても空なら CI の無いリポジトリとみなす
             empty_since = empty_since if empty_since is not None else time.monotonic()
             if time.monotonic() - empty_since >= a.no_checks_after:
                 items.append({"kind": "check", "name": "(none)", "result": "no_checks"})
@@ -416,7 +436,7 @@ def cmd_merge_when_green(a):
             if pending_sha == sha or green_sha == sha:
                 items += [{"kind": "check", "name": c, "result": "passed"} for c in passed]
                 break
-            green_sha = sha  # pending を見ずに通っている。走り出す前の検査を見落とさないよう、短い間隔で 1 度確かめる
+            green_sha = sha  # pending を見ずに通っている。走り出す前のチェックを見落とさないよう、短い間隔で 1 度確かめる
             wait = a.recheck
         else:
             green_sha, pending_sha, empty_since = None, sha, None
@@ -472,7 +492,7 @@ def probe_prs(root, a):
 
 
 def probe_one(root, n, act, items):
-    """1 本の PR の検査を分類する。(分類, 手) を返し、根拠を items に足す。読めなければ None。"""
+    """1 本の PR のチェックを分類する。(分類, 手) を返し、根拠を items に足す。読めなければ None。"""
     p = run(["gh", "pr", "view", n, "--json", "number,state,statusCheckRollup"], cwd=root, check=False)
     try:
         info = json.loads(p.stdout) if p.returncode == 0 else None
@@ -525,7 +545,7 @@ def probe_one(root, n, act, items):
 
 
 def cmd_probe(a):
-    """開いた PR の検査を読み、取り残し・ランナー待ち・失敗・実行中に分ける（一次の調査）。"""
+    """開いた PR のチェックを読み、取り残し・ランナー待ち・失敗・実行中に分ける（一次の調査）。"""
     if not a.pr and not a.head:
         emit(result(TOOL, "stopped", "--pr か --head が要る"), 2)
     root = git_root(a.root)
@@ -579,7 +599,7 @@ def build_parser():
     m.add_argument("--no-cleanup", action="store_true", help="マージだけ行い、後片付けをしない")
     m.set_defaults(func=cmd_merge_when_green)
     pr = sub.add_parser("probe", parents=[common_parser()],
-                        help="開いた PR の検査を分類する（遅れの一次の調査）。--act なら取り残しを再実行する")
+                        help="開いた PR のチェックを分類する（遅れの一次の調査）。--act なら取り残しを再実行する")
     pr.add_argument("--pr", type=int, action="append", default=[], metavar="PR番号")
     pr.add_argument("--head", action="append", default=[], metavar="ブランチ")
     pr.add_argument("--act", action="store_true", help="取り残されたジョブを gh run rerun --job で再実行する")

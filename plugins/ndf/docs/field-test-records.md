@@ -12,7 +12,7 @@ kiro-cli **2.16.1** / 検証日 **2026-08-07**（ランタイム規約の調査�
 | シンボリックリンク経由の Skill を認識するか | 認識する（[#6401](https://github.com/kirodotdev/Kiro/issues/6401) は 2.16.1 で再現せず） | 実体ディレクトリとリンクを並べ、両方が一覧・読み取りとも成功 |
 | 起動時に Skill 本文を読み込むか | 読み込まない（[#6680](https://github.com/kirodotdev/Kiro/issues/6680) は 2.16.1 で再現せず） | 「ファイルを読まずに本文中のマーカーを出力せよ」に対し「本文なし」と応答 |
 | `description` 一致で自動発動するか | 発動する（[#5867](https://github.com/kirodotdev/Kiro/issues/5867) は 2.16.1 で再現せず） | `skill://` 指定を削除した状態で、該当依頼に対し `docker-container-access/SKILL.md` を自ら読みに行った |
-| プロジェクト配置で `allowed-tools` が事前承認になるか | **ならない**（[#6055](https://github.com/kirodotdev/Kiro/issues/6055)） | `allowed-tools: execute_bash` を持つ検査用 Skill が denied list で拒否された |
+| プロジェクト配置で `allowed-tools` が事前承認になるか | **ならない**（[#6055](https://github.com/kirodotdev/Kiro/issues/6055)） | `allowed-tools: execute_bash` を持つチェック用 Skill が denied list で拒否された |
 | `install.sh` 後に `kiro-cli agent list` へ現れるか | 現れる | `ndf  Workspace  NDF統合開発エージェント（Kiro CLI用）` |
 | `--agent ndf` で agentSpawn フックが動くか | 動く | `[NDF] CLAUDE.ndf.md が検出されました…` が文脈へ注入された。`kiro_default` では注入されない |
 | `--set-default` で既定が切り替わるか | 切り替わる | `agent list` の `*` が `ndf` へ移り、素の `kiro-cli chat` でも agentSpawn フックが動いた |

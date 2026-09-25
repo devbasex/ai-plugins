@@ -5,7 +5,7 @@
 | `development-workflow` の 1 工程 | `cross-review` を省き、**全体のテスト**で判定 | `--workflow-step` |
 | 単独 | `cross-review` を実行 | 既定 |
 
-**引数で受け取る。** 環境変数や控えの読み取りは、起動元が違っても同じ値になりうる。
+**引数で受け取る。** 環境変数や記録の読み取りは、起動元が違っても同じ値になりうる。
 呼ぶ側が明示する形にすれば、判定が 1 か所で済む。
 
 **テストで見つからない誤りを拾う工程は消えない。** 工程として起動したときに省いた
@@ -77,7 +77,7 @@ def cmd_final_gate(args: argparse.Namespace) -> None:
     if passed and standalone:
         _emit_cross_review(
             path, state, gate,
-            f"✅ 最終ゲートの検査が通りました（{detail}）。続けて /ndf:cross-review を実行します",
+            f"✅ 最終ゲートのチェックが通りました（{detail}）。続けて /ndf:cross-review を実行します",
         )
         return
     if passed:
@@ -97,8 +97,8 @@ def _final_fix_stop(state: dict[str, Any], gate: dict[str, Any]) -> Optional[str
     **回数ではなく時計で決める。** 終わり（`limits.final_end_at` = 開始 + 想定最大時間）を
     過ぎていれば打ち切る。起動し直しても解けない結末（利用上限）も打ち切る。
 
-    **ただし 1 度も試みていなければ時計で打ち切らない**（決定 26）。修正 1 回分の控え
-    （`plan.reserve.final_fix`）を計画の時点で予算から差し引いてあり、予算を使い切った後に
+    **ただし 1 度も試みていなければ時計で打ち切らない**（決定 26）。修正 1 回分の予備時間
+    （`plan.reserve.final_fix`）を改修計画の時点で予算から差し引いてあり、予算を使い切った後に
     落ちても必ず 1 度は直しを試みる。
     """
     if gate.get("no_relaunch"):
@@ -130,7 +130,7 @@ def _reusable_whole_test(state: dict[str, Any]) -> bool:
 def _run_and_record_gate_check(
     state: dict[str, Any], gate: dict[str, Any]
 ) -> tuple[bool, str]:
-    """最終ゲートの検査を 1 回走らせ、`checks` へ記録して結果を返す。"""
+    """最終ゲートのチェックを 1 回走らせ、`checks` へ記録して結果を返す。"""
     # **排他である。** `--ci-check` があれば手元のテストを実行せず継続的統合の成功
     # だけで判定し、無ければ手元のテストだけで判定する。「どちらか一方が通れば通過」
     # とはしない（OR で採ると、手元のテストの失敗を継続的統合の成功が覆す）。
@@ -152,7 +152,7 @@ def _emit_cross_review(
     path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any], message: str
 ) -> None:
     """Step 7 を `cross-review` へ委譲する結末。"""
-    # **検査が通ったことを残す。** 履歴へ追記するかは、この印と `cross-review` の
+    # **チェックが通ったことを残す。** 履歴へ追記するかは、この目印と `cross-review` の
     # 最終ステータスの両方で決まる（`finalize`）。
     gate["checked_mode"] = gate.get("mode")
     gate["mode"] = "cross-review"
@@ -165,7 +165,7 @@ def _emit_cross_review(
 def _record_gate_check(
     gate: dict[str, Any], command: str, passed: bool, detail: str, seconds: float
 ) -> None:
-    """最終ゲートの検査 1 件を `checks` へ追記する。"""
+    """最終ゲートのチェック 1 件を `checks` へ追記する。"""
     gate.setdefault("checks", []).append({
         "at": statefile.now(),
         "mode": gate["mode"],
@@ -204,7 +204,7 @@ def _gate_failing(
     gate["fix_rounds"] = safe_int(gate.get("fix_rounds")) + 1
     gate["status"] = "failing"
     # **修正の起点と担当をここで記録する。** 記録しないと `merge-final-fix` が範囲を
-    # 確定できず、修正コミットを 1 件も取り込めない。適用ラウンドの控えにある
+    # 確定できず、修正コミットを 1 件も取り込めない。適用ラウンドの記録にある
     # `fix_base_sha` を流用することもできない。あれは最後の群の検証が落ちた地点で
     # あり、そこから HEAD までには**検証を通った正常なコミット**が並ぶ。範囲に含めると
     # 未申告として扱われ、その全部が取り消される。
@@ -235,7 +235,7 @@ def _final_fix_impl(state: dict[str, Any], gate: dict[str, Any]) -> str:
 def _final_fix_scope(gate: dict[str, Any], impl: str) -> IntakeScope:
     """最終ゲートの修正の取り込み 1 回分の範囲の値。
 
-    起点も結末の記録も最終ゲートの控えが持つ。改善項目にも提案ラウンドにも
+    起点も結末の記録も最終ゲートの記録が持つ。改善項目にも提案ラウンドにも
     属さないため、群は関わらない。
     """
     rounds = safe_int(gate.get("fix_rounds"))
@@ -260,7 +260,7 @@ def _close_failed_final_fix(
     """最終ゲートの修正担当が結果を残さなかったときに、取り消して判定へ戻す。
 
     **修正ラウンドは進めない。** 進めるのは次の最終ゲートで、そこが打ち切りを見る。
-    起動し直しても解けない結末（利用上限）だけは印（`no_relaunch`）を立て、次の最終
+    起動し直しても解けない結末（利用上限）だけはフラグ（`no_relaunch`）を立て、次の最終
     ゲートを「取り消さず報告」で終わらせる（#728 の決定 11）。
     """
     closed = close_without_result(path, state, scope, outcome)
@@ -362,7 +362,7 @@ def _apply_final_fix_verdict(
 def cmd_merge_final_fix(args: argparse.Namespace) -> None:
     """Step 7 — 最終ゲートの修正結果を取り込む。
 
-    **`merge-fix` では代用できない。** あちらは適用ラウンド（群）の控えを読み、
+    **`merge-fix` では代用できない。** あちらは適用ラウンド（群）の記録を読み、
     範囲の起点・担当・改善項目の 3 つをそこから取る。最終ゲートにはそのどれも無い。
     実際に流用すると次の 3 つが起きる。
 
@@ -416,7 +416,7 @@ def cmd_merge_final_fix(args: argparse.Namespace) -> None:
     statefile.save(path, state)
     # **取り消したかどうかに関わらず公開する。** 最終ゲートは push 済みの地点なので、
     # 公開しないと Pull Request の内容と手元の HEAD が食い違ったまま次の判定へ入る。
-    # `--ci-check` の実行では、push しないと読む対象の検査そのものが動かない。
+    # `--ci-check` の実行では、push しないと読む対象のチェックそのものが動かない。
     push_with_retry_marker(path, state, gate)
 
 
@@ -435,10 +435,10 @@ def _ci_gate(state: dict[str, Any], name: str) -> tuple[bool, str]:
     """継続的統合の結果で判定する。**読むのは `check-runs` の 1 回だけ。**
 
     **結果を得られないときは通過させない**（fail-closed）。照会できなかったことと、
-    検査が成功したことは別である。
+    チェックが成功したことは別である。
     """
     sha = git_out(work_dir(state), ["rev-parse", "HEAD"]) or ""
     result: Optional[str] = check_run_result(str(state.get("repo") or ""), sha, name)
     if result is None:
-        return False, f"検査 {name} の結果を得られませんでした（{sha[:7]}）"
-    return result == "success", f"検査 {name} の結論は {result} でした（{sha[:7]}）"
+        return False, f"チェック {name} の結果を得られませんでした（{sha[:7]}）"
+    return result == "success", f"チェック {name} の結論は {result} でした（{sha[:7]}）"

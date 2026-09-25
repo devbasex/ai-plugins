@@ -1,15 +1,15 @@
 ---
 name: implementation-plan
-description: "Create or update an implementation plan under issues/ before coding. Use when a change spans files, adds a feature, or migrates the DB（実装プラン・実装を開始・設計書を作成）."
+description: "Create or update an implementation plan under issues/ before coding. Use when a change spans files, adds a feature, or migrates the DB（実装計画・実装を開始・設計書を作成）."
 ---
 
-# 実装プランガイド
+# 実装計画ガイド
 
 ## 基本方針
 
-実装の開始時およびPR作成時に、`issues/` 配下に実装プランファイルが存在するか確認し、なければ作成する。プランを残すことで後任エンジニアや将来の自分が変更意図を追跡できる。
+実装の開始時およびPR作成時に、`issues/` 配下に実装計画のファイルが存在するか確認し、なければ作成する。プランを残すことで後任エンジニアや将来の自分が変更意図を追跡できる。
 
-## 実装プランが必要なケース
+## 実装計画が必要なケース
 
 以下のいずれかに該当する場合は作成する:
 
@@ -19,7 +19,7 @@ description: "Create or update an implementation plan under issues/ before codin
 - DBマイグレーションを伴う変更
 - 複数のタスクに分解できる作業
 
-## 実装プランが不要なケース
+## 実装計画が不要なケース
 
 以下のような軽微な変更では不要:
 
@@ -38,15 +38,15 @@ description: "Create or update an implementation plan under issues/ before codin
 - タスクIDがある場合: `issues/TASK-1234_concise-description.md`
 - タスクIDがない場合: `issues/{feature-name}.md`
 
-## PR作成時のプランファイル生成
+## PR作成時の実装計画のファイル生成
 
-PR作成時に `issues/` にプランファイルが存在しない場合、以下の情報源からプランファイルを生成する:
+PR作成時に `issues/` に実装計画のファイルが存在しない場合、以下の情報源から実装計画のファイルを生成する:
 
 1. **会話履歴** - それまでのやりとりから要件・背景・方針を抽出
 2. **git log** - コミット履歴からタスクの流れと変更概要を把握
 3. **git diff** - 実際の変更内容から修正対象ファイルと変更内容を特定
 
-これらを組み合わせて、下記フォーマットに沿ったプランファイルを作成してからPRを作成する。
+これらを組み合わせて、下記フォーマットに沿った実装計画のファイルを作成してからPRを作成する。
 
 ## 前段の Skill との関係
 
@@ -55,15 +55,15 @@ PR作成時に `issues/` にプランファイルが存在しない場合、以�
 | どの工程が必要か（モード判定） | `development-workflow` |
 | 何を満たすか（受け入れ条件・仕様） | `requirements-design` |
 | どう作るか（データ構造・入出力の契約・決定の理由） | `design` |
-| **どう分解するか（このプラン）** | この Skill |
+| **どう分解するか（この実装計画）** | この Skill |
 | どう作るか（失敗するテスト → 実装） | `tdd-cycle` |
 | 満たしたと言えるか（証跡） | `quality-gates` |
 
 受け入れ条件が未確定のままタスクを並べない。分解の単位は受け入れ条件に紐づく。
 設計文書がある場合は、その節（構成要素・データ構造・入出力の契約・テスト設計）からタスクを導く。
-これらの Skill が導入されていない環境では、プラン内に受け入れ条件と検証手段を直接書く。
+これらの Skill が導入されていない環境では、実装計画の中に受け入れ条件と検証手段を直接書く。
 
-## プランのフォーマット
+## 実装計画のフォーマット
 
 不要な節は削る。空の見出しを残さない。
 
@@ -177,15 +177,15 @@ PR作成時に `issues/` にプランファイルが存在しない場合、以�
 
 ## ワークフロー
 
-1. 実装の依頼を受けたら、まずプランが必要か判断する
-2. 必要な場合は `issues/` にプランファイルを作成してから実装を開始する
-3. PR作成時にプランファイルが存在しない場合、必要であれば会話履歴・git log・git diffからプランファイルを生成してからPRを作成する
+1. 実装の依頼を受けたら、まず実装計画が必要か判断する
+2. 必要な場合は `issues/` に実装計画のファイルを作成してから実装を開始する
+3. PR作成時に実装計画のファイルが存在しない場合、必要であれば会話履歴・git log・git diffから実装計画のファイルを生成してからPRを作成する
 
-## プランと PR Body の関係
+## 実装計画と PR Body の関係
 
-- プランファイル = 「なぜ」「どう分解するか」を残す永続的な記録
+- 実装計画のファイル = 「なぜ」「どう分解するか」を残す永続的な記録
 - PR body = 「何をやったか」「どうテストするか」のレビュー用サマリ
 
 同じ内容をコピーせず、PR bodyでは「詳細は `issues/xxx.md` 参照」と誘導してもよい。
 
-この工程に入ったら記録のコマンド `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "計画"` を 1 行打つ（issue の本文と盤面の両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「記録のコマンド」を使う）。
+この工程に入ったら記録のコマンド `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "計画"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「記録のコマンド」を使う）。

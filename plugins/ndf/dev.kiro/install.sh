@@ -203,8 +203,8 @@ cleanup_managed_prompts() {
   done
 }
 
-# 配布元の prompt を .kiro/prompts/ へコピーする。codex.md の有無の検査はコピーと
-# 案内の出力を終えた後に行う（検査より前の標準出力と配置を変えないため）。
+# 配布元の prompt を .kiro/prompts/ へコピーする。codex.md の有無のチェックはコピーと
+# 案内の出力を終えた後に行う（チェックより前の標準出力と配置を変えないため）。
 install_prompts() {
   local prompt_file prompt_name
   while IFS= read -r prompt_file; do
@@ -453,7 +453,7 @@ for key, value in existing.items():
         config[key] = value
         kept.append(key)
 # hooks / mcpServers が dict 以外（配列や文字列）だと .items() で落ちるため、
-# 壊れた JSON と同じく警告して引き継ぎ対象から外す。
+# 壊れた JSON と同じく警告して引継ぎ対象から外す。
 for section, target, managed in (
     ("hooks", hooks, managed_hooks),
     ("mcpServers", servers, managed_servers),

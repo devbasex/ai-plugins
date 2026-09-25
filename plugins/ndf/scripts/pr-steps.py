@@ -408,7 +408,7 @@ def cmd_report(a):
     done = sum(1 for l in plan_lines if re.match(r"\s*- \[[xX]\]", l))
     script = SCRIPTS / "pr-body-decisions.sh"
     dec = run(["bash", str(script), "check", str(number)], cwd=root, check=False).returncode if script.is_file() else None
-    dec_text = f"exit={dec}" + ("（本文の決めたことを確かめられていない）" if dec == 2 else "") if dec is not None else "検査なし"
+    dec_text = f"exit={dec}" + ("（本文の決めたことを確かめられていない）" if dec == 2 else "") if dec is not None else "チェックなし"
     text = "\n".join([
         f"PR #{v['number']} {v['title']}", "",
         f"- ベース / ソース: {v['baseRefName']} ← {v['headRefName']}（ドラフト: {'あり' if v.get('isDraft') else 'なし'}）",
@@ -440,7 +440,7 @@ def build_parser():
     p = sub.add_parser("plan", parents=[common_parser()], help="ブランチ・起点・既存 PR・変更量を集める")
     p.add_argument("--draft", action="store_true")
     p.add_argument("--base", help="起点のブランチ（既定は .ndf/worktree.json の base_branch か既定ブランチ）")
-    p.add_argument("--message", help="使う予定のコミットメッセージ（閉じる語を検査する）")
+    p.add_argument("--message", help="使う予定のコミットメッセージ（閉じる語をチェックする）")
     p.add_argument("--force", action="store_true", help="起点が main 以外でも進める")
     p.set_defaults(func=cmd_plan)
     p = sub.add_parser("commit", parents=[common_parser()], help="すべての変更をコミットする")

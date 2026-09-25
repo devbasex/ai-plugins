@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""エージェント向け指示書を適切に保つ検査（#554）。
+"""エージェント向け指示書を適切に保つチェック（#554）。
 
 指示書（既定では `AGENTS.md` / `CLAUDE.md` / `KIRO.md`）は、**根に置いたものをそのランタイムの
 全セッションと全サブエージェントが毎回読む**。何を書いてもよい場所ではなく、毎回の読み込みの量を
@@ -11,10 +11,10 @@
 
 **判定の強さはリポジトリ側の宣言（`.ndf/instructions.json`）が決める。** 宣言が無くても
 動くのは、リポジトリの性質によらず誤りである「参照先の無い即時読み込み」と、落とさずに
-数える「読み込みの量」「指示の数」だけである。宣言を書くまで使えない検査は、入れた利用者が
+数える「読み込みの量」「指示の数」だけである。宣言を書くまで使えないチェックは、入れた利用者が
 最初に外す。
 
-**この検査はどのファイルも書き換えず、課題も立てない。** 指摘へ扱いの印（`直す` / `起票` /
+**このチェックはどのファイルも書き換えず、課題も立てない。** 指摘へ扱いの目印（`直す` / `起票` /
 `報告`）を載せるまでで、書き込みと投稿は呼び出し側が行う。
 
     python3 instructions-check.py --root .
@@ -51,7 +51,7 @@ DEFAULT_FILES = ["AGENTS.md", "CLAUDE.md", "KIRO.md"]
 # 即時読み込みの記法を解釈する指示書。Codex / Kiro はただの文字列として扱うため、
 # 解釈しない指示書へこの判定を掛けると、書いてよい文字列で落ちる。
 DEFAULT_IMPORT_SYNTAX = ["CLAUDE.md"]
-# たどる深さの上限。根拠は Claude Code のドキュメント（memory）が最大 4 段と書いていること。
+# たどる深さの上限。根拠は Claude Code のドキュメント（memory）が最大 4 階層と書いていること。
 DEFAULT_IMPORT_DEPTH = 4
 DEFAULT_REVIEW_INTERVAL_DAYS = 90
 SUPPORTED_DECLARATION_VERSIONS = (1,)
@@ -82,7 +82,7 @@ VERSION_AT_START = re.compile(
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
 FENCE_RE = re.compile(r"^\s*(```|~~~)")
 BULLET_RE = re.compile(r"^\s*(?:[-*+]\s+|\d+\.\s+)")
-# 段落の書き出しから読み飛ばす印（箇条書きの記号と強調）。
+# 段落の書き出しから読み飛ばす目印（箇条書きの記号と強調）。
 LEAD_RE = re.compile(r"^\s*(?:[-*+]\s+|\d+\.\s+)?[*_~]*")
 # 即時読み込みの参照。**`@` の直前が行頭・空白・`*`・`_`・`~` のものだけを参照とする**
 # （Claude Code 2.1.274 で 8 通りを実測した範囲）。
@@ -857,7 +857,7 @@ def _inline_pending_findings(target: Target, text: str, latest: str, marker: str
             findings.append(Finding(
                 "released-version-paragraph",
                 f"段落の途中の「{version} {marker}」が指す版は既に出ている（最新は {latest}）。"
-                "変更が入った版へ書き換えるか、印を最新の版へ進める",
+                "変更が入った版へ書き換えるか、目印を最新の版へ進める",
                 target.scope, display_path(target), number, target.source))
             break
     return findings
@@ -940,7 +940,7 @@ class _Parser(argparse.ArgumentParser):
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = _Parser(description="エージェント向け指示書を適切に保つ検査")
+    parser = _Parser(description="エージェント向け指示書を適切に保つチェック")
     parser.add_argument("--root", default=".", help="リポジトリの根（既定は現在地）")
     parser.add_argument("--scope", action="append", choices=SCOPES,
                         help="走査するスコープ（重ねて指定できる。既定は project）")
@@ -974,7 +974,7 @@ def main(argv: list[str] | None = None) -> int:
 
 @dataclass
 class Measurements:
-    """対象ごとの計測と判定の結果。段の間で持ち回る。"""
+    """対象ごとの計測と判定の結果。手順の間で持ち回る。"""
 
     findings: list[Finding] = field(default_factory=list)
     sizes: dict[str, int] = field(default_factory=dict)

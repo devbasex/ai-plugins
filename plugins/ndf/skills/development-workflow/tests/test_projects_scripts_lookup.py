@@ -1,7 +1,7 @@
 """`$SCRIPTS` の解決が 4 ランタイムの配置で当たることを検証する。
 
 解決の手順は `references/scripts-lookup.md` の bash のコードブロックにしかない。
-テストはそのブロックを読み出して実行する。手順を写し取ると、写しだけが正しくて配布された
+テストはそのブロックを読み出して実行する。手順を写し取ると、複製だけが正しくて配布された
 手順が外れている状態を作れてしまう。
 
 外部への通信は行わない。配置は `tmp_path` の上に作る。
@@ -19,7 +19,7 @@ import pytest
 REFERENCE = (
     Path(__file__).resolve().parents[1] / "references" / "scripts-lookup.md"
 )
-HEADING = "## 入口を探す 1 段"
+HEADING = "## 入口を探すコマンド"
 # 解決の入口の実物。配置を作るたびに写す。
 RESOLVE_ENTRY = Path(__file__).resolve().parents[3] / "scripts" / "resolve.sh"
 # Claude Code が SKILL.md の中で置き換える語。テストでも同じ置き換えを行う。

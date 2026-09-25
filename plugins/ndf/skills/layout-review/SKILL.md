@@ -92,7 +92,7 @@ allowed-tools:
 | 原因 | 戻す先 |
 | --- | --- |
 | 版面の決め方（余白・文字の大きさ・1 枚あたりの情報量） | 体裁設計（`design` の `layout-<出力の形>.md`） |
-| 生成の経路（変換器の設定、指示の与え方） | 配布の生成の段（`release` の `form-<出力の形>.md`） |
+| 生成の経路（変換器の設定、指示の与え方） | 配布の生成の手順（`release` の `form-<出力の形>.md`） |
 | 内容が多すぎて収まらない | **執筆へ戻す**（主張の数を減らす） |
 
 ## 見た結果を残す
@@ -118,7 +118,7 @@ allowed-tools:
 版面の外の課題（内容の誤り、別の文書の不整合）に気づいたら、その場で `/ndf:out-of-scope` が
 issue にする。**この工程では直さない。**
 
-この工程に入ったら記録のコマンド `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "体裁レビュー"` を 1 行打つ（issue の本文と盤面の両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「記録のコマンド」を使う）。
+この工程に入ったら記録のコマンド `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "体裁レビュー"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「記録のコマンド」を使う）。
 
 ## 関連
 

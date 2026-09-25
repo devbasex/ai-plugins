@@ -158,7 +158,7 @@ def test_failing_test_is_detected_by_running_it(gitfacts, work):
 
 
 def test_fix_commits_pass_verification_through_real_git(cmd_converge, gitfacts, work):
-    """修正コミットが git 経由の検証を通ること（`merge-fix` の検査）。
+    """修正コミットが git 経由の検証を通ること（`merge-fix` のチェック）。
 
     範囲に空集合を渡していた頃は、全ての修正コミットが必ず不正扱いになっていた。
     """
@@ -466,7 +466,7 @@ def test_check_run_result_characterization(gitfacts, monkeypatch):
 
 
 def test_check_run_result_reads_the_latest_run_after_a_rerun(gitfacts, monkeypatch):
-    """同名の検査が failure → success の順に 2 件あるとき success を返す（#632）。
+    """同名のチェックが failure → success の順に 2 件あるとき success を返す（#632）。
 
     本文の編集で同じワークフローが別の check suite として走ると、前の suite の失敗が
     `check-runs` に残る。前の失敗を数えると、最終ゲートが修正ラウンドへ回る。

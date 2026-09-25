@@ -1,4 +1,4 @@
-"""説明文書の検査（`scripts/check-doc-staleness.py`）のテスト補助。
+"""説明文書のチェック（`scripts/check-doc-staleness.py`）のテスト補助。
 
 実物の `README.md` / `AGENTS.md` / `docs/versioning-and-distribution.md` /
 `plugins/ndf/README.md` は書き換えない。代わりに、
@@ -35,11 +35,11 @@ MANIFESTS = {
     "agy": ["alpha", "bravo"],
 }
 
-# 記号（G〜M）は `issues/parallel-batch-03/04-issue-209.md` の「検査する記載」に対応する。
+# 記号（G〜M）は `issues/parallel-batch-03/04-issue-209.md` の「チェックする記載」に対応する。
 # G: 概要の版数 / H: プラグイン一覧表の版数の列
 ROOT_README = """# Fixture Marketplace
 
-**NDFプラグイン v9.3.0** の検査用の最小構成です。
+**NDFプラグイン v9.3.0** のチェック用の最小構成です。
 
 - **公開Skills**: Claude Code向け core 5個、Kiro向け core 4個、Codex向け core 3個、agy向け core 2個に分離。
 - **元Skills（5個）**:
@@ -51,7 +51,7 @@ ROOT_README = """# Fixture Marketplace
 
 | プラグイン名 | バージョン | 説明 |
 |------------|----------|------|
-| **ndf** | 9.3.0 | 検査用の最小構成 |
+| **ndf** | 9.3.0 | チェック用の最小構成 |
 | **fixture-kit** | 1.4.2 | 一覧表の行ごとの突き合わせを確かめるための 2 つ目 |
 
 ### NDF v9.0.0 の主な変更（非互換）
@@ -79,8 +79,8 @@ v8.5.4 で古い経路を廃止した。それより前の版（8.4.0 以前）�
 
 VERSIONING_MD_PATH = "docs/versioning-and-distribution.md"
 
-# J: 版の付け方の章（区間の検査）。章は `## ` で書き、章 2 が位置決めになる。
-# 章 2 より後ろの章に囲んだ古い版数を置き、区間の外を走査しないことを雛形そのもので示す。
+# J: 版の付け方の章（節のチェック）。章は `## ` で書き、章 2 が位置決めになる。
+# 章 2 より後ろの章に囲んだ古い版数を置き、節の外を走査しないことを雛形そのもので示す。
 # 版の形の表の 3 行と次の開発の例は、正本の章 2 と同じ関係に置く。開発版と公開前の確認版の
 # 行は正式版より新しい基底を指し、次の開発の例の右側は左側より新しい基底の開発版である（#566）。
 VERSIONING_MD = """# Fixture Versioning
@@ -242,7 +242,7 @@ def retarget_version(root: Path, version: str) -> None:
     """木の現行版を指す記載を、`plugin.json` ごとまとめて別の版へ揃える。
 
     `bump_plugin_version` が `plugin.json` だけを動かして食い違いを作るのに対し、こちらは
-    突き合わせ先もすべて動かし、その版で検査が通る状態を作る。接尾辞の付いた版で通ることは、
+    突き合わせ先もすべて動かし、その版でチェックが通る状態を作る。接尾辞の付いた版で通ることは、
     版数を書く箇所がすべて揃った木でしか確かめられない。
     """
     old_base, new_base = base_of(VERSION), base_of(version)
@@ -272,7 +272,7 @@ def retarget_version(root: Path, version: str) -> None:
 
 
 def run_check(root: Path) -> subprocess.CompletedProcess[str]:
-    """検査を子プロセスとして実行し、終了コードと出力を観測する。"""
+    """チェックを子プロセスとして実行し、終了コードと出力を観測する。"""
     return subprocess.run(
         [sys.executable, str(CHECKER), "--root", str(root)],
         capture_output=True,

@@ -30,15 +30,15 @@ def report(phase: str, issues: str, res: str, pr: str, cost: str, reason: str = 
 - Pull Request: {pr}
 - 最後に記録した工程: Pull Request
 - 使った worker: 修正 1（claude -p）/ 判断 1（claude -p）
-- 途中の報告: 段 7 / まだ動いている 0 / worker 4（形が違う 0）/ conductor 向け 0 / LLM へ回した 0 回・$0.000（x）
+- 途中の報告: ステップ 7 / まだ動いている 0 / worker 4（形が違う 0）/ conductor 向け 0 / LLM へ回した 0 回・$0.000（x）
 - 提示物: 無し
 - 理由: {reason}
-- 通った段: impl(exit=0) → pr(exit=0)
+- 通ったステップ: impl(exit=0) → pr(exit=0)
 - 件数: 無し
 - LLM の使用量: 入力 56 / cache read 1423577 / cache write 78735 / 出力 24980 / ${cost}
 - 記録: x
 
-| 段 | 往復 | 秒 | cache read | cache write | 出力 | 費用 |
+| ステップ | 往復 | 秒 | cache read | cache write | 出力 | 費用 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | impl | 41 | 296.0 | 1423577 | 75699 | 24486 | $1.153 |
 """
@@ -61,7 +61,7 @@ def r6(tmp_path):
                    report("実装", "#1053", "完了", "https://github.com/devbasex/ai-plugins/pull/1056", "1.178"))
     b = write_plan(tmp_path, "plan-1054", [1054], "実装",
                    report("実装", "#1054", "止まった", "https://github.com/devbasex/ai-plugins/pull/1058", "2.170",
-                          reason="merge の段で衝突"))
+                          reason="merge のステップで衝突"))
     prod = write_plan(tmp_path, "plan-release-prod", [1053, 1054], "配布（本番）",
                       report("配布（本番）", "#1053 #1054", "完了", "無し", "0.000"))
     dev = write_plan(tmp_path, "plan-release-dev", [1053, 1054], "配布（開発版）", None)
@@ -115,7 +115,7 @@ DOC = """# 引継ぎ
 
 ## 今の会話の進み（06:53〜07:33 UTC）
 
-| ミッション | 状態 | 次 |
+| 計画 | 状態 | 次 |
 | --- | --- | --- |
 | 古い行 | 古い | — |
 
@@ -139,11 +139,11 @@ DOC = """# 引継ぎ
 
 def test_update_fills_rows_and_render_writes_table(r6):
     init(r6)
-    out = ok("update", r6["mission"], "--done", r6["pdone"], "--next", f"{r6['a']}=次のミッションから鎖で流す")
+    out = ok("update", r6["mission"], "--done", r6["pdone"], "--next", f"{r6['a']}=次のミッションからチェインで流す")
     rows = {i["plan"]: i for i in out["items"]}
     assert (rows[r6["a"]]["result"], rows[r6["a"]]["pr"], rows[r6["a"]]["seconds"], rows[r6["a"]]["cost"]) == \
         ("完了", "#1056", 586.4, 1.178)
-    assert (rows[r6["b"]]["result"], rows[r6["b"]]["exit"], rows[r6["b"]]["reason"]) == ("止まった", 3, "merge の段で衝突")
+    assert (rows[r6["b"]]["result"], rows[r6["b"]]["exit"], rows[r6["b"]]["reason"]) == ("止まった", 3, "merge のステップで衝突")
     assert rows[r6["dev"]]["result"] == "まだ"
     assert (rows[r6["prod"]]["result"], rows[r6["prod"]]["pr"], rows[r6["prod"]]["seconds"]) == ("完了", "", 300.3)
 
@@ -151,8 +151,8 @@ def test_update_fills_rows_and_render_writes_table(r6):
     doc.write_text(DOC)
     ok("render", r6["mission"], str(doc), "--section", "今の会話の進み")
     text = doc.read_text()
-    assert "| 実装 #1053 | 完了 | #1056 | 586.4 | $1.178 | 次のミッションから鎖で流す |" in text
-    assert "| 実装 #1054 | 止まった（exit=3）。理由: merge の段で衝突 | #1058 | 816 | $2.170 | — |" in text
+    assert "| 実装 #1053 | 完了 | #1056 | 586.4 | $1.178 | 次のミッションからチェインで流す |" in text
+    assert "| 実装 #1054 | 止まった（exit=3）。理由: merge のステップで衝突 | #1058 | 816 | $2.170 | — |" in text
     assert "| 開発版 10.17.17-dev.1 | まだ | — | — | — | — |" in text
     assert "| 本番 10.17.17 | 完了 | — | 300.3 | $0.000 | — |" in text
     assert "古い行" not in text
@@ -217,7 +217,7 @@ def test_update_twice_is_same(r6):
 
 def test_init_stops_on_other_shape_json(r6):
     """同じパスに supervise.py new mission の目録（別の形の JSON）があれば、上書きせずに止まる（#1082）。"""
-    catalog = {"ミッション": "m", "ブランチ": "fix/x", "波": [{"計画": ["a.json"]}]}
+    catalog = {"ミッション": "m", "ブランチ": "fix/x", "ステージ": [{"計画": ["a.json"]}]}
     path = Path(r6["mission"])
     path.write_text(json.dumps(catalog, ensure_ascii=False))
     before = path.read_bytes()
@@ -380,9 +380,34 @@ def test_mvv_approval_and_the_gate_by_the_judgement(tmp_path):
     assert (g["関門 2"]["by"], g["関門 2"]["verdict"], g["関門 2"]["reasons"], g["関門 2"]["log"]) == \
         ("mvv", "follow", ["Value 1"], "/x/mvv-gate.jsonl")
     p = run("status", str(mission))
-    assert "関門 2: MVV の判定 " in p.stdout
+    assert "関門 2: MVV 判定 " in p.stdout
 
 
 def test_mvv_approval_without_an_mvv_stops(r6):
     init(r6)
     assert run("gate", r6["mission"], "MVV", "--what", "x").returncode == 1
+
+
+def test_update_adds_plans_from_done_without_init_plan(r6):
+    ok("init", r6["mission"], "--name", "計画を渡さない", "--dev", "10.17.17-dev.1", "--prod", "10.17.17")
+    out = ok("update", r6["mission"], "--done", r6["done"], "--done", r6["pdone"])
+    rows = {i["plan"]: i for i in out["items"]}
+    assert set(rows) == {r6["a"], r6["b"], r6["prod"]}
+    assert (rows[r6["a"]]["result"], rows[r6["a"]]["pr"]) == ("完了", "#1056")
+    m = json.loads(Path(r6["mission"]).read_text())
+    assert {p["plan"]: p["label"] for p in m["plans"]}[r6["prod"]] == "本番 10.17.17"
+    assert {p["plan"]: p["kind"] for p in m["plans"]}[r6["a"]] == "実装"
+
+
+def load_mission_state():
+    spec = importlib.util.spec_from_file_location("mission_state", SCRIPT)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+@pytest.mark.parametrize("key", ["フェーズ", "持ち場"])
+def test_plan_kind_reads_the_old_key_too(tmp_path, key):
+    plan = tmp_path / "plan.json"
+    plan.write_text(json.dumps({key: "配布（開発版）"}, ensure_ascii=False))
+    assert load_mission_state().plan_kind(str(plan)) == "開発版"

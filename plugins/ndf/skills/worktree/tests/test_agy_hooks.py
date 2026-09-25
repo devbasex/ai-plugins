@@ -2,7 +2,7 @@
 
 agy は案内を作る時点と渡せる時点が離れている。**tool 実行前の hook がモデルへ文言を返す口
 （`reason`）は、拒否のときにしか働かない**（設計の決定 4 の実測）。NDF の誘導は操作を止め
-ないため、案内はセッションの控えへ積み、次のモデル呼び出しの前に `PreInvocation` が
+ないため、案内はセッションの記録へ積み、次のモデル呼び出しの前に `PreInvocation` が
 `injectSteps[].userMessage` で渡す。
 
 セッション開始時にあたる事象も無いため、モデル呼び出しの通し番号（`invocationNum`）が 0 の
@@ -101,7 +101,7 @@ def injected(result: dict) -> str:
 
 
 def test_protected_edit_is_queued_and_allowed(main_repo: Path, tmp_path: Path) -> None:
-    """主ディレクトリの編集は控えへ積まれ、tool の実行は止まらない。"""
+    """主ディレクトリの編集は記録へ積まれ、tool の実行は止まらない。"""
     declared(main_repo)
     tmpdir = tmp_path / "state"
     tmpdir.mkdir()
@@ -131,7 +131,7 @@ def test_pending_reaches_the_next_invocation(main_repo: Path, tmp_path: Path) ->
 
 
 def test_pending_is_delivered_once(main_repo: Path, tmp_path: Path) -> None:
-    """取り出した案内は控えから消える。同じ案内を毎回渡さない。"""
+    """取り出した案内は記録から消える。同じ案内を毎回渡さない。"""
     declared(main_repo)
     tmpdir = tmp_path / "state"
     tmpdir.mkdir()
@@ -206,7 +206,7 @@ def test_later_invocation_does_not_repeat_the_report(main_repo: Path, tmp_path: 
 def test_edit_inside_the_worktree_queues_nothing(
     main_repo: Path, worktree: Path, tmp_path: Path
 ) -> None:
-    """作業ツリーの中の編集は控えへ積まれない。"""
+    """作業ツリーの中の編集は記録へ積まれない。"""
     declared(main_repo)
     tmpdir = tmp_path / "state"
     tmpdir.mkdir()
@@ -219,7 +219,7 @@ def test_edit_inside_the_worktree_queues_nothing(
 
 
 def test_allowed_path_queues_nothing(main_repo: Path, tmp_path: Path) -> None:
-    """許可されたパスの編集は控えへ積まれない。"""
+    """許可されたパスの編集は記録へ積まれない。"""
     declared(main_repo)
     tmpdir = tmp_path / "state"
     tmpdir.mkdir()

@@ -13,8 +13,8 @@ Skill の挙動仕様は本ディレクトリでは管理しない。Skill に�
 | [mcp-redash-multi-environment.md](mcp-redash-multi-environment.md) | Redash MCP の suffix 付きマルチ環境 plugin |
 | [ndf-knowledge-and-kiro.md](ndf-knowledge-and-kiro.md) | NDF 知識構造（`AGENTS.md` と版と配布の正本、README の役割）、Serena 分離、Kiro CLI 対応 |
 | [runtime-plugin-distribution.md](runtime-plugin-distribution.md) | Claude Code / Codex / Kiro 向け plugin 配布 |
-| [runtime-plugin-container-smoke.md](runtime-plugin-container-smoke.md) | runtime 分離 plugin の container smoke test（hooks 定義の検査を含む） |
-| [doc-consistency-checks.md](doc-consistency-checks.md) | 説明文書の検査（リンクの照合と版数の例） |
+| [runtime-plugin-container-smoke.md](runtime-plugin-container-smoke.md) | runtime 分離 plugin の container smoke test（hooks 定義のチェックを含む） |
+| [doc-consistency-checks.md](doc-consistency-checks.md) | 説明文書のチェック（リンクの照合と版数の例） |
 
 ## 対象外
 

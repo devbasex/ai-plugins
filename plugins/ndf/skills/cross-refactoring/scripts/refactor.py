@@ -6,7 +6,7 @@
 """cross-refactoring の状態管理 CLI。
 
 `<work>/.cross_refactoring/cross-refactoring-rf<ID>-state.json` の初期化・読み書きと、
-5 フェーズ（提案 → 計画 → テスト追加 → 実装 → 検証/修正）の取り込みと判定を
+5 つの手順（提案 → 改修計画 → テスト追加 → 実装 → 検証/修正）の取り込みと判定を
 1 つの CLI に集約する（#933）。
 
 サブコマンドの一覧と役割は `--help` が持つ。ここには写さない（片方だけが古くなるため）。
@@ -114,11 +114,11 @@ def add_init_parser(sub: argparse._SubParsersAction) -> None:
     # **所要の上限を時間で渡す**（#933 の決定 4）。目安の上限で、実行中の CLI は止めない。
     # 1 以上の整数でなければ `init` が終了コード 4 で止める（argparse の 2 にしない）。
     init.add_argument("--budget-minutes", default=None, metavar="N",
-                      help="想定最大時間（分）。この時間に収まる計画を 1 回だけ実行する "
+                      help="想定最大時間（分）。この時間に収まる改修計画を 1 回だけ実行する "
                            f"(default: {DEFAULT_BUDGET_MINUTES})")
     init.add_argument("--implementer", default=None,
                       choices=list(assignment.ALL_RUNTIMES),
-                      help="計画・テスト追加・実装・修正を通す 1 者。参加者の中から選ぶ。"
+                      help="改修計画・テスト追加・実装・修正を通す 1 者。参加者の中から選ぶ。"
                            "既定はホスト（参加者にいれば）→ 参加者の先頭")
     # 廃止した引数（決定 5・決定 24）。**受け取って知らせ、値は使わない。** 次の版で外す。
     # 修正の回数とテスト 1 回の上限は、想定最大時間から逆算する（決定 24）。
@@ -126,7 +126,7 @@ def add_init_parser(sub: argparse._SubParsersAction) -> None:
                  "--max-fix-rounds", "--test-timeout"):
         init.add_argument(name, default=None, help=argparse.SUPPRESS)
     init.add_argument("--ci-check", default=None, metavar="NAME",
-                      help="最終ゲートで手元のテストの代わりに見る検査の名前。"
+                      help="最終ゲートで手元のテストの代わりに見るチェックの名前。"
                            "**指定すると手元のテストは実行しない**（排他）。"
                            "指定が無ければ手元のテストで判定する")
     init.add_argument("--severity-threshold", default=None,
@@ -148,15 +148,15 @@ def add_init_parser(sub: argparse._SubParsersAction) -> None:
                            "公開のたびに同じコメントを編集する。"
                            "空文字を渡すと記録しない")
     init.add_argument("--baseline-test", required=True,
-                      help="着手前・危険の印が立ったとき・最終ゲートで実行する全体のテスト。"
+                      help="着手前・危険フラグが立ったとき・最終ゲートで実行する全体のテスト。"
                            "振る舞い不変を示す手段が無い書き換えは構造改善ではないため必須")
-    # **項目の検証は限ったテストで行う**（#880 / #933 の AC10b）。対象の語を計画の
+    # **項目の検証は範囲テストで行う**（#880 / #933 の AC10b）。対象の語を改修計画の
     # `test_targets` に差し替えて組み立てる元になり、組み立てられない項目はそのまま使う。
     init.add_argument("--round-test", default=None, metavar="CMD",
-                      help="範囲のテスト。項目ごとの限ったテストを組み立てる元で、"
+                      help="ラウンドのテスト。項目ごとの範囲テストを組み立てる元で、"
                            "組み立てられない項目はそのまま走らせる。--baseline-test が "
                            "pytest / jest / vitest でなければ必須")
-    # **起動のされ方は引数で受け取る**（#436 決定 7）。環境変数や控えの読み取りは、
+    # **起動のされ方は引数で受け取る**（#436 決定 7）。環境変数や記録の読み取りは、
     # 起動元が違っても同じ値になりうる。呼ぶ側が明示すれば判定が 1 か所で済む。
     init.add_argument("--workflow-step", action="store_true", default=None,
                       help="`development-workflow` の 1 工程として起動したことを"
@@ -172,10 +172,10 @@ def add_id_commands(sub: argparse._SubParsersAction) -> None:
         ("merge-proposals", cmd_merge_proposals,
          "提案の統合・語彙としきい値・候補の切り出し（30 組 × 組の中 3 件）"),
         ("merge-plan", cmd_merge_plan,
-         "計画の取り込み・段と同じ変更か（Jev）・見積り・件数・締め切り"),
+         "改修計画の取り込み・等級と同じ変更か（Jev）・見積り・件数・締め切り"),
         ("merge-tests", cmd_merge_tests, "テストの追加の取り込み（test_failed / not_done）"),
         ("merge-implement", cmd_merge_implement, "実装の取り込み（1 項目 = 1 コミット / not_done）"),
-        ("verify", cmd_verify, "項目ごとの限ったテストと危険の印。VERIFY=done|fix"),
+        ("verify", cmd_verify, "項目ごとの範囲テストと危険フラグ。VERIFY=done|fix"),
         ("merge-fix", cmd_merge_fix, "修正の取り込み"),
         ("final-gate", cmd_final_gate,
          "最終ゲート。--ci-check があれば継続的統合、無ければ全体のテスト"),
@@ -186,7 +186,7 @@ def add_id_commands(sub: argparse._SubParsersAction) -> None:
         sp.add_argument("id", type=int)
         sp.set_defaults(func=func)
 
-    sp = sub.add_parser("start-phase", help="フェーズの開始を記録し、上限（PHASE_TIMEOUT）を返す")
+    sp = sub.add_parser("start-phase", help="手順の開始を記録し、上限（PHASE_TIMEOUT）を返す")
     sp.add_argument("id", type=int)
     sp.add_argument("phase", choices=list(PHASE_NAMES))
     sp.set_defaults(func=cmd_start_phase)
@@ -216,7 +216,7 @@ def add_assess_parser(sub: argparse._SubParsersAction) -> None:
 def add_report_parser(sub: argparse._SubParsersAction) -> None:
     """`report` を登録する。"""
     rp = sub.add_parser(
-        "report", help="完了報告 — フェーズ別の所要・項目・見送りの理由別・全体のテスト・Jev")
+        "report", help="完了報告 — 手順別の所要・項目・見送りの理由別・全体のテスト・Jev")
     rp.add_argument("id", type=int)
     rp.add_argument("--metrics", action="store_true",
                     help="種類別の件数と所要（配分の履歴へ書く値）も出す")

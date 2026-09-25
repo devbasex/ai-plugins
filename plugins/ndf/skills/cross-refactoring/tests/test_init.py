@@ -62,7 +62,7 @@ def _args(tmp_path, **over):
         "pr": 130, "scope": ["src", "tests"], "host": "claude",
         "ci_check": None, "workflow_step": False,
         "severity_threshold": "minor", "model": None, "baseline_test": "true",
-        # **範囲のテストを既定で渡す**（#933 の AC3b）。`true` は既知の実行器でないため、
+        # **ラウンドのテストを既定で渡す**（#933 の AC3b）。`true` は既知の実行器でないため、
         # `--round-test` が無いと提案の前に止まる。全体のテストと同じ文字列なので、
         # 実行は 1 回で済む。関門そのものは下の AC3b のテストで見る。
         "round_test": "true",
@@ -504,7 +504,7 @@ def test_an_invalid_budget_stops_before_anything_runs(run_init, tmp_path, test_c
 
 
 def test_an_invalid_budget_is_not_an_argparse_error(patch_lib, refactor, monkeypatch):
-    """AC1 — 型の検査は `init` が行う。argparse の終了コード 2 にしない。"""
+    """AC1 — 型のチェックは `init` が行う。argparse の終了コード 2 にしない。"""
     captured = _parsed_init_args(patch_lib, refactor, monkeypatch, "--budget-minutes", "abc")
     assert captured["budget_minutes"] == "abc"
 
@@ -615,7 +615,7 @@ def test_the_ci_check_is_not_set_by_default(patch_lib, refactor, monkeypatch):
 
 
 def test_init_starts_at_the_propose_phase(run_init, tmp_path):
-    """版 2 の状態は提案のフェーズから始まり、計画はまだ無い（#933）。"""
+    """版 2 の状態は提案の手順から始まり、改修計画はまだ無い（#933）。"""
     run_init(_args(tmp_path))
     _, state = _state_of(tmp_path)
     assert state["schema"] == 2
@@ -670,7 +670,7 @@ def test_init_emits_shell_assignments(run_init, tmp_path, capsys):
 
 
 def test_init_no_longer_emits_a_fixed_stall_timeout(run_init, tmp_path, capsys):
-    """決定 24: 無音の許容は段の上限と同じ値を `start-phase` が返す。`init` は出さない。"""
+    """決定 24: 無音の許容は手順の上限と同じ値を `start-phase` が返す。`init` は出さない。"""
     run_init(_args(tmp_path))
     assert "IMPL_STALL_TIMEOUT=" not in capsys.readouterr().out
 
@@ -750,7 +750,7 @@ def test_init_records_the_vocabulary_for_the_prompt(run_init, tmp_path, vocabula
 # ---------- 再開（#727 / #648 の決定 13〜16） ----------
 
 def test_resume_before_the_plan_rebuilds_the_limits_from_the_new_budget(run_init, tmp_path):
-    """決定 24 — 計画の前に予算を置き換えた再開は、上限の表を新しい予算で組み直す。"""
+    """決定 24 — 改修計画の前に予算を置き換えた再開は、上限の表を新しい予算で組み直す。"""
     run_init(_args(tmp_path, budget_minutes="30"))
     run_init(_args(tmp_path, budget_minutes="10"))
     _, after = _state_of(tmp_path)
@@ -899,7 +899,7 @@ def test_a_failed_rebuild_leaves_the_state_untouched(run_init, tmp_path):
     assert path.read_text(encoding="utf-8") == before
 
 
-# ---------- 範囲のテスト `--round-test`（#880 の AC1・AC4・AC5） ----------
+# ---------- ラウンドのテスト `--round-test`（#880 の AC1・AC4・AC5） ----------
 
 @pytest.fixture
 def test_calls(patch_lib):
@@ -930,7 +930,7 @@ def test_init_records_the_round_test(run_init, tmp_path, test_calls):
     assert state["round_test"]["command"] == "pytest -q -k scope"
     assert state["round_test"]["status"] == "green"
     assert state["baseline_test"]["command"] == "true"
-    assert test_calls.seen == ["true", "pytest -q -k scope"], "全体テストの後に範囲のテストを 1 回"
+    assert test_calls.seen == ["true", "pytest -q -k scope"], "全体テストの後にラウンドのテストを 1 回"
 
 
 def test_an_omitted_round_test_is_recorded_as_omitted_and_runs_once(
@@ -956,7 +956,7 @@ def test_a_round_test_equal_to_the_baseline_test_runs_once(run_init, tmp_path, t
 
 @pytest.mark.parametrize("command", ["false", "exit 5"])
 def test_init_stops_when_the_round_test_fails(run_init, tmp_path, command):
-    """AC4 — 範囲のテストが成功しなければ止める。集まらない終了コード 5 も失敗。"""
+    """AC4 — ラウンドのテストが成功しなければ止める。集まらない終了コード 5 も失敗。"""
     with pytest.raises(SystemExit) as e:
         run_init(_args(tmp_path, round_test=command, baseline_test="true"))
     assert e.value.code == refactor_abort()
@@ -999,7 +999,7 @@ def test_resume_notifies_a_changed_round_test(run_init, tmp_path, capsys):
 
 # ---------- 打ち切り（run_with_timeout の timed_out=True）（R2-001） ----------
 #
-# 現状固定テスト。着手前のテストと範囲のテストが「打ち切り」で止まる 2 経路
+# 現状固定テスト。着手前のテストとラウンドのテストが「打ち切り」で止まる 2 経路
 # （setup.py の `_run_baseline_test` / `_run_round_test` の timed_out=True）は
 # どのテストも通していなかった。失敗（終了コード非 0）とは別の分岐なので、現状の
 # 終了コードと、状態ファイルが書かれないことをそのまま記録する。
@@ -1038,16 +1038,16 @@ def test_init_aborts_when_the_baseline_test_times_out(run_init, tmp_path, timeou
 
 
 def test_init_aborts_when_the_round_test_times_out(run_init, tmp_path, timeout_calls, capsys):
-    """R2-001 — 範囲のテストが打ち切りで止まる経路（setup.py 662-663）。"""
-    # 着手前のテストは通し、範囲のテストだけ打ち切る。
+    """R2-001 — ラウンドのテストが打ち切りで止まる経路（setup.py 662-663）。"""
+    # 着手前のテストは通し、ラウンドのテストだけ打ち切る。
     timeout_calls.timed_out.add("pytest -q -k scope")
     with pytest.raises(SystemExit) as e:
         run_init(_args(tmp_path, round_test="pytest -q -k scope", baseline_test="true",
                        budget_minutes="10"))
-    # 現状固定: 範囲のテストの打ち切りは ABORT。
+    # 現状固定: ラウンドのテストの打ち切りは ABORT。
     assert e.value.code == refactor_abort()
     assert not _state_path(tmp_path).exists()
-    # 着手前のテストを通したあと、範囲のテストで止まる順序。
+    # 着手前のテストを通したあと、ラウンドのテストで止まる順序。
     assert timeout_calls.seen == ["true", "pytest -q -k scope"]
     assert "60" in capsys.readouterr().err
 
@@ -1120,7 +1120,7 @@ def test_resume_emits_the_phase_to_resume_from(run_init, tmp_path, capsys):
 # ---------- 予算の再開での扱い（設計の「再開」） ----------
 
 def test_resume_before_the_plan_replaces_the_budget(run_init, tmp_path, capsys):
-    """計画の前（phase が propose / plan で plan が無い）なら置き換えて記録に積む。"""
+    """改修計画の前（phase が propose / plan で plan が無い）なら置き換えて記録に積む。"""
     run_init(_args(tmp_path))
     capsys.readouterr()
 
@@ -1138,7 +1138,7 @@ def test_resume_before_the_plan_replaces_the_budget(run_init, tmp_path, capsys):
 ])
 def test_resume_after_the_plan_only_notifies_the_budget(
         run_init, tmp_path, capsys, phase, plan):
-    """計画の後は置き換えず、「反映しない」の 1 行だけを出す。"""
+    """改修計画の後は置き換えず、「反映しない」の 1 行だけを出す。"""
     run_init(_args(tmp_path))
     _, state = _state_of(tmp_path)
     state["phase"], state["plan"] = phase, plan
@@ -1186,7 +1186,7 @@ def test_a_named_implementer_outside_the_participants_stops(run_init, tmp_path):
 
 
 def test_resume_before_the_plan_reassigns_a_dropped_implementer(run_init, tmp_path, capsys):
-    """計画の前に実装担当が参加者から外れたら、決め方を当て直して記録に積む。"""
+    """改修計画の前に実装担当が参加者から外れたら、決め方を当て直して記録に積む。"""
     run_init(_args(tmp_path), probe={})
     capsys.readouterr()
 
@@ -1200,7 +1200,7 @@ def test_resume_before_the_plan_reassigns_a_dropped_implementer(run_init, tmp_pa
 
 
 def test_resume_after_the_plan_stops_when_the_implementer_is_dropped(run_init, tmp_path):
-    """計画の後に実装担当が外れたら終了コード 4 で止め、状態を書き換えない。"""
+    """改修計画の後に実装担当が外れたら終了コード 4 で止め、状態を書き換えない。"""
     run_init(_args(tmp_path), probe={})
     _, state = _state_of(tmp_path)
     state["phase"], state["plan"] = "add-tests", {"end_at": "2026-09-24T11:00:00"}
@@ -1264,7 +1264,7 @@ def test_the_judge_decision_is_recorded_once(run_init, tmp_path, monkeypatch, cm
     assert calls == [1]
 
 
-# ---------- フェーズの開始（`start-phase`。#933 の決定 8・実装計画 I1） ----------
+# ---------- 手順の開始（`start-phase`。#933 の決定 8・実装計画 I1） ----------
 
 @pytest.fixture
 def phase_state(tmp_path, env_tmp_dir, monkeypatch, cmd_phases):
@@ -1356,15 +1356,15 @@ PLANNED = {
 
 @pytest.mark.parametrize("phase, planned, expected", [
     ("propose", False, 12 * 60 + 180),       # 提案の枠の終わり 10:12
-    ("plan", False, 18 * 60 + 180),          # 計画の枠の終わり 10:18
+    ("plan", False, 18 * 60 + 180),          # 改修計画の枠の終わり 10:18
     ("add-tests", True, 23 * 60 + 180),      # 最後の項目の完了の締め切り 10:20 + 3 分
     ("implement", True, 32 * 60 + 180),      # 10:30 + 2 分
-    ("fix", True, 58 * 60 + 180),            # 開始 + 60 − 全体のテストの控え 2 分
+    ("fix", True, 58 * 60 + 180),            # 開始 + 60 − 全体のテストの予備時間 2 分
     ("final-fix", False, 60 * 60 + 180),     # 想定最大時間の終わり 11:00
 ])
 def test_start_phase_returns_the_time_left_to_the_end_of_the_phase(
         phase_state, start_phase, phase, planned, expected):
-    """決定 23・24: 監視の上限は、その段の終わりまでの残り + 余裕。CLI の上限は + 余裕。"""
+    """決定 23・24: 監視の上限は、その手順の終わりまでの残り + 余裕。CLI の上限は + 余裕。"""
     if planned:
         phase_state.edit(**PLANNED)
     state, timeout = start_phase(phase)
@@ -1374,14 +1374,14 @@ def test_start_phase_returns_the_time_left_to_the_end_of_the_phase(
 
 
 @pytest.mark.parametrize("minutes, rounds, expected", [
-    (70, 1, 330 + 180),        # 終わり（11:00）の後の 1 回目: 控えの final_fix（5.5 分）+ 余裕
-    (58, 1, 330 + 180),        # 残り 2 分 < 控え: 控えの長さを渡す
-    (50, 1, 600 + 180),        # 残り 10 分 > 控え: 残り + 余裕
+    (70, 1, 330 + 180),        # 終わり（11:00）の後の 1 回目: 予備時間の final_fix（5.5 分）+ 余裕
+    (58, 1, 330 + 180),        # 残り 2 分 < 予備時間: 予備時間の長さを渡す
+    (50, 1, 600 + 180),        # 残り 10 分 > 予備時間: 残り + 余裕
     (70, 2, 180),              # 2 回目からは今までどおり（過ぎていれば余裕だけ）
 ])
 def test_start_phase_gives_the_first_final_fix_at_least_its_reserve(
         phase_state, start_phase, minutes, rounds, expected):
-    """決定 26: 最終ゲートの修正の 1 回目は、想定最大時間を過ぎていても控え 1 回分を渡す。"""
+    """決定 26: 最終ゲートの修正の 1 回目は、想定最大時間を過ぎていても予備時間 1 回分を渡す。"""
     reserve = dict(PLANNED["plan"]["reserve"], final_fix=5.5)
     phase_state.edit(plan={"reserve": reserve}, items=PLANNED["items"],
                      final_gate={"fix_rounds": rounds, "checks": []})
@@ -1391,7 +1391,7 @@ def test_start_phase_gives_the_first_final_fix_at_least_its_reserve(
 
 
 def test_start_phase_for_the_final_fix_keeps_the_phase(phase_state, start_phase):
-    """最終ゲートの修正は状態の段を変えない（再開の地点が狂う）。"""
+    """最終ゲートの修正は状態の手順を変えない（再開の地点が狂う）。"""
     phase_state.edit(phase="final")
     state, _ = start_phase("final-fix")
     assert state["phase"] == "final"

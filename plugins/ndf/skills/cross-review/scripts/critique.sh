@@ -172,6 +172,6 @@ resolve_print_timeout
 
 # **接頭辞は絶対パスで渡す。** `launch-cli.sh` は作業ツリーへ `cd` してから
 # `<stem>.pid` と `<stem>-stdout.log` を作る。相対の値を渡すと、作業ツリーの直下に
-# 成果物が落ちて差分に現れる。控えは `$TMP_DIR` の下へ集める。
+# 成果物が落ちて差分に現れる。記録は `$TMP_DIR` の下へ集める。
 "$SCRIPT_DIR/../../../scripts/lib/launch-cli.sh" "$RUNTIME" "$WORKTREE" "$PROMPT" \
   "$STEM" "" "$TMP_DIR" "$PRINT_TIMEOUT"

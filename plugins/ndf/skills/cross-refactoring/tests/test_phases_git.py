@@ -5,7 +5,7 @@
 | AC10 | 足したテストが今のコードで落ちた項目は `test_failed`、項目に紐づかないコミットは取り消す |
 | AC11 | 1 改善項目 = 1 コミット（テストを足す項目は 2 コミット）。2 コミット以上は取り消す |
 | AC12 | コミットの無い項目・完了の締め切りを過ぎた項目は `not_done`。テストのコミットも取り消す |
-| AC13 AC14 | 検証は限ったテストだけ。全体のテストは印が立ったときに 1 度だけ（落ちたときの扱いは `test_whole_test_triage_git.py`） |
+| AC13 AC14 | 検証は範囲テストだけ。全体のテストは危険フラグが立ったときに 1 度だけ（落ちたときの扱いは `test_whole_test_triage_git.py`） |
 | AC15 AC16 | 修正の締め切りで項目だけを取り消す。共有した項目は新しい方から 1 件ずつ |
 | AC16b | 最終ゲートは、検証の中の全体のテストが通り HEAD が進んでいなければ使い回す |
 | AC17 | 単独起動は `cross-review` が `approved` のときだけ履歴へ追記する |
@@ -149,14 +149,14 @@ def test_a_test_commit_after_its_completion_deadline_is_not_done(flow, cmd_setup
 
 
 def test_a_commit_without_a_planned_item_is_reverted_alone(flow, cmd_setup, cmd_implement):
-    """AC10: 計画に無いテストのコミットだけを取り消し、項目のテストは残す。"""
+    """AC10: 改修計画に無いテストのコミットだけを取り消し、項目のテストは残す。"""
     work = flow["work"]
     _plan(flow, _item("I-001", 1, tests=["tests/test_total.py"], targets=["tests/test_total.py"]))
     _call(cmd_setup, "cmd_start_phase", phase="add-tests")
     _write(work, "tests/test_total.py", TEST_TOTAL)
     kept = commit_with_trailers(work, "Test", item_trailers("I-001"))
     _write(work, "tests/test_extra.py", "def test_x():\n    assert True\n")
-    commit_with_trailers(work, "Test: 計画に無い", {"Impl-Runtime": "claude", "Impl-Model": "m"})
+    commit_with_trailers(work, "Test: 改修計画に無い", {"Impl-Runtime": "claude", "Impl-Model": "m"})
 
     _call(cmd_implement, "cmd_merge_tests")
 
@@ -249,7 +249,7 @@ def test_a_commit_outside_the_scope_rejects_the_item(flow, cmd_setup, cmd_implem
 
 
 def test_a_changed_expectation_rejects_the_item(flow, cmd_setup, cmd_implement):
-    """期待値を変えた実装は振る舞いの変更として取り消す（#443 の段 1）。"""
+    """期待値を変えた実装は振る舞いの変更として取り消す（#443 の一次の判定）。"""
     work = flow["work"]
     _implement_phase(flow, cmd_setup, _item("I-001", 1), _item("I-002", 2, symbol="add"))
     _write(work, "src/calc.py", CALC.replace("return a + b", "return a + b + 0"))
@@ -380,12 +380,12 @@ def test_the_whole_test_runs_once_when_a_danger_flag_is_raised_and_the_gate_reus
 
 def test_a_whole_test_failure_left_unfixed_reverts_the_flagged_item_and_the_gate_runs_again(
         flow, cmd_setup, cmd_implement, cmd_converge, cmd_gate):
-    """決定 22: 直す時間が無ければ印の項目を取り消す。全体のテストは検証の中で
+    """決定 22: 直す時間が無ければ危険フラグの項目を取り消す。全体のテストは検証の中で
     走らせ直さず、最終ゲートが走らせる。"""
     work = flow["work"]
 
     def rename_and_break_outside(w):
-        # `total` を消す（限ったテスト tests/test_calc.py は `add` しか見ない）。
+        # `total` を消す（範囲テスト tests/test_calc.py は `add` しか見ない）。
         git("rm", "-q", "src/__init__.py", cwd=w)
         _write(w, "src/calc.py", "def add(a, b):\n    return a + b\n")
 
@@ -451,7 +451,7 @@ def test_a_resumed_intake_reuses_its_conclusion_and_does_not_drop_twice(
     _refactor_total(work)
     commit_with_trailers(work, "Refactor", item_trailers("I-001"))
     _write(work, "src/other.py", "X = 1\n")
-    commit_with_trailers(work, "計画に無い", {"Impl-Runtime": "claude", "Impl-Model": "m"})
+    commit_with_trailers(work, "改修計画に無い", {"Impl-Runtime": "claude", "Impl-Model": "m"})
     _call(cmd_implement, "cmd_merge_implement")
     head = git("rev-parse", "HEAD", cwd=work).stdout.strip()
     state = read_state(flow["path"])
@@ -465,7 +465,7 @@ def test_a_resumed_intake_reuses_its_conclusion_and_does_not_drop_twice(
     assert len(read_state(flow["path"])["drops"]) == 1
 
 
-# ---------- 監視が段の上限で CLI を止めたとき（決定 23 / I15） ----------
+# ---------- 監視が手順の上限で CLI を止めたとき（決定 23 / I15） ----------
 
 def test_a_phase_stopped_by_the_monitor_is_taken_in_by_the_deadline_and_reported(
         flow, cmd_setup, cmd_implement, cmd_report, capsys):

@@ -113,12 +113,12 @@ def test_an_unowned_extra_commit_is_removed_while_item_commits_are_replayed(tmp_
     (work / "src" / "extra.py").write_text("unowned\n", encoding="utf-8")
     extra = commit_with_trailers(work, "unowned", {})
 
-    record = undo.drop(path, state, [], "計画外", [extra])
+    record = undo.drop(path, state, [], "改修計画外", [extra])
 
     assert record == {
         "at": record["at"],
         "mode": "item",
-        "reason": "計画外",
+        "reason": "改修計画外",
         "dropped": [],
         "extra": [extra],
         "reverted_commits": 3,
@@ -134,7 +134,7 @@ def test_an_unowned_extra_commit_is_removed_while_item_commits_are_replayed(tmp_
 
 
 def test_an_interrupted_drop_is_redone_on_resume(tmp_path, undo):
-    """印（`pending_drop`）が残ったまま再開したら、同じ取り消しをやり直す。"""
+    """フラグ（`pending_drop`）が残ったまま再開したら、同じ取り消しをやり直す。"""
     work, base, c1, c2 = _repo(tmp_path, 30)
     path = _state(tmp_path, work, base, c1, c2)
     state = read_state(path)
@@ -156,7 +156,7 @@ def test_a_drop_interrupted_after_replay_keeps_the_remaining_item_on_resume(tmp_
     path = _state(tmp_path, work, base, c1, c2)
     before = copy.deepcopy(read_state(path))
     undo.drop(path, read_state(path), ["I-001"], "中断")
-    # git は積み直しまで進み、状態は着手直後（印だけ立った旧 SHA のまま）で残った
+    # git は積み直しまで進み、状態は着手直後（フラグだけ立った旧 SHA のまま）で残った
     before["pending_drop"] = {"items": ["I-001"], "extra": [], "reason": "中断"}
     path.write_text(json.dumps(before, ensure_ascii=False), encoding="utf-8")
 
@@ -172,9 +172,9 @@ def test_a_drop_interrupted_after_replay_keeps_the_remaining_item_on_resume(tmp_
 
 
 def test_a_replay_conflict_without_a_shared_file_drops_every_item(tmp_path, undo):
-    """広げる相手が無いまま積み直しが競合したら、計画の項目をすべて取り消す（`all`）。
+    """広げる相手が無いまま積み直しが競合したら、改修計画の項目をすべて取り消す（`all`）。
 
-    残す I-002 は、取り消す計画外のコミットの隣の行を触っている。I-002 は I-001 と
+    残す I-002 は、取り消す改修計画外のコミットの隣の行を触っている。I-002 は I-001 と
     同じファイルを触らないため広げる相手にならず、積み直しは競合する。
     """
     work, base, c1, _ = _repo(tmp_path, 30)

@@ -3,7 +3,7 @@
 起票先を決める基準を持つのはこの Skill だけである。`retrospective` は参照だけを持つ。
 判定の基準を持つ場所を 1 つにする考え方は `development-workflow` のモード判定と同じである。
 
-読み取れないこと自体も失敗として扱う。表の書き方を変えるだけでこの検査を無効にできる形に
+読み取れないこと自体も失敗として扱う。表の書き方を変えるだけでこのチェックを無効にできる形に
 しない。
 """
 from __future__ import annotations
@@ -27,10 +27,10 @@ from issue_target_helpers import (
 
 @pytest.mark.parametrize("runtime", sorted(RUNTIME_LAYOUTS))
 def test_the_second_stage_resolves_on_every_runtime(runtime: str, tmp_path: Path) -> None:
-    """段 2 は、手順書の表が挙げるどの位置でも配布元を決める（#306）。
+    """手順 2 は、手順書の表が挙げるどの位置でも配布元を決める（#306）。
 
     Kiro と agy は取得元を持たず、clone した作業ディレクトリがその位置になる。表だけを
-    読む検査では、bash がその位置を見ていないことに気づけない。
+    読むチェックでは、bash がその位置を見ていないことに気づけない。
     """
     home, cwd = runtime_layout(tmp_path, runtime)
 
@@ -64,7 +64,7 @@ def test_the_working_directory_is_dropped_when_it_does_not_carry_ndf(tmp_path: P
 
 
 def test_two_names_fall_through_to_the_third_stage(tmp_path: Path) -> None:
-    """取得元と現在地が違う配布元を指すときは、推測せず段 3 へ倒す。"""
+    """取得元と現在地が違う配布元を指すときは、推測せず手順 3 へ倒す。"""
     home, _ = runtime_layout(tmp_path, "claude")
     fork = make_clone(tmp_path / "fork", "https://github.com/example/ai-plugins.git")
 

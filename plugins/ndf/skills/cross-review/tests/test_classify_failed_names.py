@@ -10,7 +10,7 @@ from __future__ import annotations
 
 def test_failed_names_split_matches_the_explicit_mapping(state_mod):
     """失敗名の写像を寄せても、`_classify_ci` を直接呼んだ結果と一致する。"""
-    names = ["pytest", "check_pr_requirements", "我々の知らない検査", "labels"]
+    names = ["pytest", "check_pr_requirements", "我々の知らないチェック", "labels"]
 
     got = state_mod._classify_failed_names(names)
 
@@ -20,7 +20,7 @@ def test_failed_names_split_matches_the_explicit_mapping(state_mod):
 
     assert got == expected
     # 分岐そのものも固定する（申告された失敗はすべて completed 扱い）。
-    assert got.code_failed == ["pytest", "我々の知らない検査"]
+    assert got.code_failed == ["pytest", "我々の知らないチェック"]
     assert got.meta_failed == ["check_pr_requirements", "labels"]
     assert got.pending == []
 

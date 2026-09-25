@@ -371,7 +371,7 @@ def test_oracle_counts_a_null_position_as_unmatched(measure_mod):
 def test_oracle_does_not_count_a_finding_without_an_id(measure_mod):
     """`finding_id` を持たない指摘は結ばない（#558 レビュー）。
 
-    `str(None)` を返すと、呼び出し側の `finding_id is None` の検査をすり抜け、
+    `str(None)` を返すと、呼び出し側の `finding_id is None` のチェックをすり抜け、
     上限の方式の集合へ文字列 `"None"` が入る。**上限が 1 件多く見え、他の方式の
     再現率がその分だけ低く出る。** 結べなかったものとして `unmatched` へ数える。
     """
@@ -581,9 +581,9 @@ def test_four_methods_come_from_one_record(measure_mod):
 
 
 def test_proposed_limits_the_denominator_to_marked_rounds(measure_mod):
-    """受け入れ条件 7。**分母も印のあるラウンドに限る。**
+    """受け入れ条件 7。**分母も目印のあるラウンドに限る。**
 
-    分子だけを絞ると、印の混ざった記録で再現率が過小に出る。全ラウンドの上限
+    分子だけを絞ると、目印の混ざった記録で再現率が過小に出る。全ラウンドの上限
     （2 件）で割ると、**拾えるものを全部拾っても 0.5 にしかならない。**
     """
     st = _state(
@@ -607,7 +607,7 @@ def test_proposed_limits_the_denominator_to_marked_rounds(measure_mod):
 
 
 def test_proposed_reports_all_rounds_when_every_round_is_marked(measure_mod):
-    """印が全ラウンドに付いていれば、分母は他の 3 つと同じである。
+    """目印が全ラウンドに付いていれば、分母は他の 3 つと同じである。
 
     添えないと、読む側が `proposed` の再現率を他の 3 つと同じ分母の値として読む。
     """
@@ -629,7 +629,7 @@ def test_proposed_reports_all_rounds_when_every_round_is_marked(measure_mod):
 
 
 def test_proposed_normalizes_duplicate_and_invalid_evidence_rounds(measure_mod):
-    """現状固定: 有効な番号は型をそろえて一つの印にし、不正値は無視する。"""
+    """現状固定: 有効な番号は型をそろえて一つの目印にし、不正値は無視する。"""
     st = _state(
         evidence_rounds=["1", 1, "invalid", None],
         rounds=[
@@ -684,7 +684,7 @@ def test_the_counted_classifications_match_the_state_script(measure_mod, state_m
 
 
 def test_proposed_ignores_findings_from_unmarked_rounds(measure_mod):
-    """印の無いラウンドの指摘を母集合へ入れない。
+    """目印の無いラウンドの指摘を母集合へ入れない。
 
     入れると、区分の付かない指摘が `insufficient_evidence` として落ち、方式の
     再現率が実際より低く出る。
@@ -708,7 +708,7 @@ def test_proposed_ignores_findings_from_unmarked_rounds(measure_mod):
 
 
 def test_proposed_is_null_when_no_round_carries_the_evidence_mark(measure_mod):
-    """印を持つラウンドが無ければ、この変更の方式は計算できない。
+    """目印を持つラウンドが無ければ、この変更の方式は計算できない。
 
     **キーは常に置く。** 省くと、読む側が「0 件」と「計算できない」を区別できず、
     欠けたキーを読んで落ちる。
@@ -779,7 +779,7 @@ def test_of_oracle_is_null_when_the_oracle_is_empty(measure_mod):
 
 
 def test_proposed_base_is_zero_when_marked_rounds_fixed_nothing(measure_mod):
-    """印のあるラウンドに修正された指摘が 1 件も無いとき。
+    """目印のあるラウンドに修正された指摘が 1 件も無いとき。
 
     分母は `0` で、再現率は `null` である。**`found` と `matched` は数えた件数を
     そのまま出す。**

@@ -1,4 +1,4 @@
-"""MCP プラグインの Codex の定義（`mcpServers`）の検査。
+"""MCP プラグインの Codex の定義（`mcpServers`）のチェック。
 
 Codex だけ別の起動定義を読ませるプラグインがある（mcp-serena の `.codex.mcp.json`。#818）。
 指す先が実在すれば通し、無い・形が違えば落とす。

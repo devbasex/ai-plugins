@@ -11,7 +11,7 @@
 
 「版数と説明だけ」の判定:
 - DOC_FILES と DOC_RE の文書は中身を問わない（CHANGELOG・README の更新案内・版数を持つ文書・
-  配布の段が書く記録）
+  配布のコマンドが書く記録）
 - MANIFEST_RE に合う JSON は、変わった行が全部 `"version"` か `"description"` の行
 - それ以外のファイルが 1 つでも変われば省かない
 
@@ -35,7 +35,7 @@ DOC_FILES = {
 }
 DOC_RE = re.compile(
     r"^(plugins/.+/README\.md"
-    # 本番の配布の段（.ndf/release.json）が書く記録。テストもコードも読まない
+    # 本番の配布のコマンド（.ndf/release.json）が書く記録。テストもコードも読まない
     r"|docs/metrics/ndf-token-usage/[^/]+\.(md|json))$"
 )
 MANIFEST_RE = re.compile(

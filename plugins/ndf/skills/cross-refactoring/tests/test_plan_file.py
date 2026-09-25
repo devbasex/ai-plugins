@@ -1,8 +1,8 @@
 """改修計画をリポジトリ内のファイルへ残すテスト。
 
 提案の理由と手順は状態ファイルにしか残らず、そのディレクトリは差分から除外される。
-**Pull Request を読む側からは、なぜ直したのかも、どう直す計画だったのかも見えない。**
-計画を差分の中へ置き、公開は生成物の同期と同じ経路（進行側の 1 コミット）に乗せる。
+**Pull Request を読む側からは、なぜ直したのかも、どう直す改修計画だったのかも見えない。**
+改修計画を差分の中へ置き、公開は生成物の同期と同じ経路（進行側の 1 コミット）に乗せる。
 """
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ def _make_work(tmp_path):
     work = tmp_path / "work"
     (work / "generated").mkdir(parents=True)
     _git("init", "-q", "-b", "main", str(work), cwd=tmp_path)
-    # 検査の対象（`refactor.py`）が自分でコミットする。**身元はテストが用意する。**
+    # チェックの対象（`refactor.py`）が自分でコミットする。**身元はテストが用意する。**
     # 実行した人の全体設定に頼ると、身元の無い実行環境で落ちる（#235）。
     _git("config", "user.email", "t@e.st", cwd=work)
     _git("config", "user.name", "test", cwd=work)
@@ -42,7 +42,7 @@ def _item(**over):
         "id": "I-001", "rank": 1, "path": "src/foo.py", "symbol": "Foo.handle",
         "smell": "long_method", "technique": "extract_method", "severity": "major",
         "tier": "high",
-        "rationale": "1 関数が 6 段の処理を通しで行っている",
+        "rationale": "1 関数が 6 つの処理を通しで行っている",
         "plan": "1. 範囲の確定を切り出す 2. 検証を切り出す",
         "tests": [], "estimated_diff_lines": 40,
         "proposed_by": ["codex", "agy"], "status": "verified",
@@ -60,7 +60,7 @@ def _state(tmp_path, work=None, **over):
     return path, read_state(path)
 
 
-# ---------- 計画の本文 ----------
+# ---------- 改修計画の本文 ----------
 
 def test_plan_names_the_item_and_the_target(plan, tmp_path):
     _, state = _state(tmp_path)
@@ -72,7 +72,7 @@ def test_plan_carries_the_reason_and_the_steps(plan, tmp_path):
     """なぜ直すのか・どう直すのかは、提案の時点でしか残らない。"""
     _, state = _state(tmp_path)
     text = plan.format_plan(state)
-    assert "1 関数が 6 段の処理を通しで行っている" in text
+    assert "1 関数が 6 つの処理を通しで行っている" in text
     assert "1. 範囲の確定を切り出す" in text
 
 
@@ -123,7 +123,7 @@ def test_plan_marks_a_reverted_item_with_its_reason(plan, tmp_path):
 
 
 def test_plan_follows_the_order_of_the_items(plan, tmp_path):
-    """項目は計画の順位の順（状態の並び）で載る。"""
+    """項目は改修計画の順位の順（状態の並び）で載る。"""
     items = [_item(), _item(id="I-002", rank=2, symbol="Bar.run")]
     _, state = _state(tmp_path, items=items)
     text = plan.format_plan(state)
@@ -171,7 +171,7 @@ def test_the_plan_file_is_written_inside_the_work_dir(gitfacts, tmp_path):
 # ---------- 公開 ----------
 
 def test_the_plan_lands_in_one_commit_with_the_generated_files(gitfacts, tmp_path):
-    """計画書と生成物で 2 コミットに分けない。"""
+    """改修計画書と生成物で 2 コミットに分けない。"""
     work = _make_work(tmp_path)
     _, state = _state(tmp_path, work=work, plan_file="issues/plan.md",
                       sync_command="printf 'x = 2\\n' > generated/out.py")
@@ -211,7 +211,7 @@ def test_an_unchanged_plan_does_not_add_a_commit(gitfacts, tmp_path):
 
 
 def test_an_empty_plan_file_setting_turns_the_record_off(gitfacts, tmp_path):
-    """計画を差分へ入れたくないリポジトリのために、無効にできる。"""
+    """改修計画を差分へ入れたくないリポジトリのために、無効にできる。"""
     work = _make_work(tmp_path)
     _, state = _state(tmp_path, work=work, plan_file="", sync_command=None)
 

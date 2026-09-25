@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """mcp-serena の入口。サブコマンド detect / configure / check / hook。
 
-判断の要らない手順（言語の検出・project.yml の書き換え・起動の検証・導入の検査・hook）を
+判断の要らない手順（言語の検出・project.yml の書き換え・起動の検証・導入のチェック・hook）を
 ここに置き、モデル（Skill）には判断だけを残す。Python 3 の標準ライブラリだけで動く。
 """
 import argparse
@@ -93,7 +93,7 @@ def main(argv=None) -> int:
     p.add_argument("--serena", default=verify.SERENA_CMD)
     p.set_defaults(func=cmd_configure)
 
-    p = sub.add_parser("check", help="導入の欠けを検査する")
+    p = sub.add_parser("check", help="導入の欠けをチェックする")
     p.add_argument("--root", default=".")
     p.add_argument("--json", action="store_true")
     p.add_argument("--runtime", choices=["claude-code", "codex"], default="claude-code")

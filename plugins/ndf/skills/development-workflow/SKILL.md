@@ -1,6 +1,6 @@
 ---
 name: development-workflow
-description: "Classify a change into 4 workflow modes and route it to the required steps. Use when deciding how much process a change needs（モード判定・工程の振り分け）."
+description: "Classify a change into 5 workflow modes and route it to the required steps. Use when deciding how much process a change needs（モード判定・工程の振り分け）."
 hooks:
   PreToolUse:
     - matcher: "Bash"
@@ -12,7 +12,7 @@ hooks:
 
 # 開発ワークフローの振り分け
 
-変更内容をモードへ分類し、必要な工程だけを起動する。**全変更にフル工程を課さない。** 段・鎖・区間などの語の意味は [references/glossary.md](references/glossary.md) にある。
+変更内容をモードへ分類し、必要な工程だけを起動する。**全変更にフル工程を課さない。** ステップ・チェイン・区間などの語の意味は [references/glossary.md](references/glossary.md) にある。
 
 **判定基準を持つのはこの Skill だけである。** 他の Skill とエージェント定義は判定結果を
 受け取る側に徹する。同じ基準を複数箇所へ書くと、モードを追加・変更したときに片方だけが
@@ -20,9 +20,9 @@ hooks:
 
 ## 判定する単位
 
-**工程はミッション単位で 1 回ずつ通す。** ミッションは 1 つの版として出す課題の束で、複数の設計と実装を含む。
+**工程はミッション単位で 1 回ずつ通す。** ミッションは 1 つの版として出す課題と Pull Request の束で、複数の設計と実装を含む。
 **モードを判定する単位は、ミッションの develop 宛て Pull Request である。** モードは 1 つで、ミッションが閉じる
-課題すべての控えへ同じ値を書く。数える対象が 1 つになる。
+課題すべての通過記録へ同じ値を書く。数える対象が 1 つになる。
 
 - **ミッションのブランチ（`mission/<名前>`）を develop から切り、課題ごとの作業ツリーはそこから切る。**
   課題の Pull Request はミッションのブランチへ集め、develop への Pull Request はミッションで 1 本にする
@@ -37,7 +37,7 @@ hooks:
 要求と受け入れ条件が掛かる。その費用は受け入れる。判定の入力が無いまま判定する状態の
 ほうが高くつく。
 
-**モード判定は工程表の行を持たない。** 盤面へ記録する工程の値を増やさないためである。
+**モード判定は工程表の行を持たない。** ボードへ記録する工程の値を増やさないためである。
 
 ## この文書が受け取る値
 
@@ -107,7 +107,7 @@ git diff --stat            # 変更済みなら
 NULL 許容列の追加）は `standard` として扱う。判定に迷う場合と境界事例は
 [references/workflow-modes.md](references/workflow-modes.md) を参照する。
 
-**`documentation` に決まったら、2 段目で 6 つのタイプのうち 1 つを選ぶ。** 判定の条件と
+**`documentation` に決まったら、続けて 6 つのタイプのうち 1 つを選ぶ。** 判定の条件と
 境界事例は [references/document-types.md](references/document-types.md) にある。**`README.md`
 と `docs/` の変更はこのモードに当たらない**（判定を分けるのは読み手で、リポジトリの外にいる
 人へ渡すものだけが当たる）。
@@ -180,7 +180,7 @@ pace: fast
 主ディレクトリのままでよい。
 
 **ドキュメント再構成は、書き上げた設計文書を章立てから組み直す工程である。**
-`document-restructuring` が測る・並べ替える・整える・測り直すの 4 段を持つ。**レビューの前に
+`document-restructuring` が測る・並べ替える・整える・測り直すの 4 つの手順を持つ。**レビューの前に
 置く。** 後に置くと、レビュー担当が構成の指摘と内容の指摘を同時に出すことになり、どちらの
 指摘なのかが混ざる。
 
@@ -191,12 +191,12 @@ pace: fast
 
 **構造改善と実装レビューは、通す工程であって任意ではない。** `standard` と `legacy-refactor` の
 構造改善は `cross-refactoring` を通す。`fast` でも通し、時機だけをトリガーへ移す。
-**実装レビューは 4 モードとも通す。** Pull Request を出す以上、その差分は誰かがレビューする。
+**実装レビューは 5 つのモードとも通す。** Pull Request を出す以上、その差分は誰かがレビューする。
 `light` は「本番の振る舞いも本番コードの構造も変えない」変更だが、**変えないことの確認**が
 要る。実装レビューの工程は**明示的に呼ぶ**（自然文で「レビューして」と依頼すると、Claude Code では組み込みの
 `code-review` が起動して判定の投稿経路が変わる）。
 
-**マージは取り込みであって配布ではない。** `release` は 4 モードすべてで通す。**自動で進めて
+**マージは取り込みで、配布に数えない。** `release` は 5 つのモードすべてで通す。**自動で進めて
 よいのは検証への配布までで、本番への配布は承認を得るまで進めない。**
 
 工程ごとの理由・条件・例外は
@@ -205,11 +205,11 @@ pace: fast
 
 **工程は 1 つの context window で通し切らなくてよい。** 判定したモードと通った工程は会話の
 外へ残るため、文脈を捨てても現在地から続けられる。**長い文脈のまま進めると、記録は
-残っているのに後の工程の判断だけが悪くなる。** 切れ目・委譲してよい対象・残量の見方は
+残っているのに後の工程の判断だけが悪くなる。** カットポイント・委譲してよい対象・残量の見方は
 [references/context-window.md](references/context-window.md) にある。
 
-**conductor は、`context-window.md` の 4 つの切れ目と文脈量の hook（`token-guard.sh`）に止められたときに、
-次の工程を始める引き継ぎの 1 行（`/ndf:development-workflow #<課題>`。今の区間を `/goal` で始めていたときだけ先頭に `/goal `）を、
+**conductor は、`context-window.md` の 4 つのカットポイントと文脈量の hook（`token-guard.sh`）に止められたときに、
+次の工程を始める引継ぎの 1 行（`/ndf:development-workflow #<課題>`。今の区間を `/goal` で始めていたときだけ先頭に `/goal `）を、
 情報文字列 `ndf-next` の囲みのコードブロック 1 つで出す。** 3 層では conductor が `## フェーズの報告` を
 受け取った時点で出し（supervisor は出さない）、`結果: 関門` なら関門の承認と取り込みの後に出す。
 出す時点・告知・新しい会話が状態を戻す手順は `context-window.md` の「新しい会話で戻す」にある。
@@ -219,15 +219,15 @@ pace: fast
 この変更の受け入れ条件にも、直す対象にも含まれない課題は、**見つけたその場で `out-of-scope` が
 issue にする**。呼び出し元・3 択の判断・振り返りでの拾い方は `out-of-scope` の SKILL.md にある。
 
-## 進行を盤面へ記録する
+## 進行をボードへ記録する
 
 判定したモードと、いま何番目の工程にいるかは会話の中にしか残らない。セッションが変わると
 引き継がれない。**リポジトリが `.ndf/projects.json` を持つ場合に限り**、これを GitHub Projects の
-盤面へ残す。
+ボードへ残す。
 
 - 判定の結果（モード）は、作業場所を用意した時点で記録する
-- 工程の切れ目を持つ Skill が、自分の工程に入った時点で進行を書き込む
-- 盤面の値は**この工程表の行名と一致させる**。工程を足したときは、同じ表から盤面側も更新する
+- カットポイントを持つ Skill が、自分の工程に入った時点で進行を書き込む
+- ボードの値は**この工程表の行名と一致させる**。工程を足したときは、同じ表からボード側も更新する
 
 **この仕組みは任意である。** 宣言が無ければ何も起きず、工程はそのまま通る。進行管理が
 理由で開発が止まってはいけない。設定と値の一覧は
@@ -236,8 +236,8 @@ issue にする**。呼び出し元・3 択の判断・振り返りでの拾い�
 ## 工程の飛ばしとマージを機械で見る
 
 この Skill の frontmatter の `hooks` が、進行の記録のコマンドを通過工程として積み（記録の無い工程は案内するだけで
-拒否しない）、承認の印（ラベル `design-approved`）の無い設計 Pull Request のマージだけを拒否する。判定の 2 つ・
-有効にする操作・控えの読み方・`fast` の工程の出し方は [references/stage-completeness.md](references/stage-completeness.md) にある。
+拒否しない）、承認ラベル（ラベル `design-approved`）の無い設計 Pull Request のマージだけを拒否する。判定の 2 つ・
+有効にする操作・通過記録の読み方・`fast` の工程の出し方は [references/stage-completeness.md](references/stage-completeness.md) にある。
 
 ## 進め方（`pace`）
 
@@ -246,7 +246,7 @@ issue にする**。呼び出し元・3 択の判断・振り返りでの拾い�
 
 | 区分 | 工程表の行 | いつ通すか |
 | --- | --- | --- |
-| その場で通す | 作業場所の用意 / 計画 / 実装 / 完了判定 / Pull Request / 後片付け / 配布 / リリース後テスト | 課題ごと。実装の計画が限ったテスト → Draft の Pull Request（CI と並べる）→ 全体テスト → doc-lint → マージまでを通す。配布は開発版と verify-install まで。本番は下の関門 2 に従う |
+| その場で通す | 作業場所の用意 / 計画 / 実装 / 完了判定 / Pull Request / 後片付け / 配布 / リリース後テスト | 課題ごと。実装の計画が範囲テスト → Draft の Pull Request（CI と並べる）→ 全体テスト → doc-lint → マージまでを通す。配布は開発版と verify-install まで。本番は下の関門 2 に従う |
 | トリガーで通す | 構造改善 / 実装レビュー | 検査のトリガーが立ったとき、次の開発版の前に 1 回。範囲は前回の検査からの差分 |
 | ミッションの終わりにまとめる | 確定仕様化 / 振り返り（受け入れ条件の確認と課題を閉じる作業を含む） | ミッションの終わりに 1 回ずつ |
 | 省かない | 要求と受け入れ条件 / 設計 / ドキュメント再構成 / ドキュメントレビュー | モードの定めどおり。設計の承認が要る変更は設計 Pull Request を出す。200 行以内の不具合はその場で直す |
@@ -268,7 +268,7 @@ issue にする**。呼び出し元・3 択の判断・振り返りでの拾い�
 
 **関門の外で工程の側が実行前確認を足さない。** 取り消せる操作は止めずに行い、消した対象と
 戻し方を報告する（例外の基準は `AUTHORING.md` の「実行前確認の要否を決める 3 つの問い」）。
-**区間の切れ目の再起動も関門ではなく、`ndf-next` のブロックの前に承認・確認（`AskUserQuestion` を含む）を
+**カットポイントの再起動も関門に数えず、`ndf-next` のブロックの前に承認・確認（`AskUserQuestion` を含む）を
 挟まない。`/goal` の文面が「承認を求める」と書いていても、指すのはこの 2 つの関門だけである。**
 
 | 関門 | いつ | 文書での意味 | 要否の決まり方 |
@@ -322,7 +322,7 @@ Pull Request のマージ、制作物承認は本番の提出先への操作に�
 実行の前で、単位ごとの取り消しの手段を添える。**取り消せない単位を含むときは、そのことを
 先に示す。**
 
-**どのブランチが本番のチャネルかは、リポジトリが宣言する。** 読み取りの順序は次の 2 段である。
+**どのブランチが本番のチャネルかは、リポジトリが宣言する。** 読み取りの順序は次の 2 つである。
 
 1. `.ndf/worktree.json` の `production_branch`
 2. **宣言が無ければ既定ブランチ**（`origin` の HEAD が指すもの）
@@ -343,7 +343,7 @@ Pull Request のマージ、制作物承認は本番の提出先への操作に�
 ## 自走で工程を通す
 
 **工程を続けて通す。** ただし**上の 2 つの関門の前では 1 度止まり、`AskUserQuestion` で人間の
-承認を待つ**。承認を得るまでマージせず、次の工程へも進まない。`fast` では MVV の判定が「従う」を返した関門だけ止まらない。
+承認を待つ**。承認を得るまでマージせず、次の工程へも進まない。`fast` では MVV 判定が「従う」を返した関門だけ止まらない。
 
 - 設計 Pull Request のマージ（`standard`）— 承認を得るまで実装の工程へ
   進まない
@@ -360,10 +360,10 @@ Pull Request のマージ、制作物承認は本番の提出先への操作に�
 絶対パスで書く。** supervisor はこの 1 行で進行を記録し、この Skill も `progress-tracking` も
 起動しない（形とキーごとの打つ時点は `agent-layers.md` の「conductor → supervisor」）。
 
-**区間の切れ目の再起動は中継が自動で行う（Claude Code だけ）。** 利用者が `claude` と打つと
-alias が中継を挟み、conductor が出した `ndf-next` のブロックを拾って、`/exit`・プラグインの更新・
+**カットポイントの再起動はラッパーが自動で行う（Claude Code だけ）。** 利用者が `claude` と打つと
+alias がラッパーを挟み、conductor が出した `ndf-next` のブロックを拾って、`/exit`・プラグインの更新・
 次の区間の起動を行う（始め方・止め方・上限は [references/relay.md](references/relay.md)）。
-**ブロックの前に次の Bash を 1 回実行し、2 行目（告知）をブロックの直前へそのまま写す**（1 行目が `outside` か失敗なら中継の外。書き方は `context-window.md` の「新しい会話で戻す」）。
+**ブロックの前に次の Bash を 1 回実行し、2 行目（告知）をブロックの直前へそのまま写す**（1 行目が `outside` か失敗ならラッパーの外。書き方は `context-window.md` の「新しい会話で戻す」）。
 
 ```bash
 PLUGIN_ROOT='${CLAUDE_PLUGIN_ROOT}'; case "$PLUGIN_ROOT" in '$'*) PLUGIN_ROOT= ;; esac
@@ -491,10 +491,10 @@ flowchart TD
 
 - [references/workflow-modes.md](references/workflow-modes.md) — 判定の境界事例とモード別の詳細
 - [references/projects-tracking.md](references/projects-tracking.md) — 進行を GitHub Projects へ記録する設定と値の一覧
-- [references/stage-completeness.md](references/stage-completeness.md) — 通過工程の控えと報告、承認の印の作り方
+- [references/stage-completeness.md](references/stage-completeness.md) — 通過記録と報告、承認ラベルの作り方
 - [references/parallel-work.md](references/parallel-work.md) — 並行開発の 4 つの形、工程が動く単位、任せるうえでの下限
-- [references/pace.md](references/pace.md) — 進め方 `pace: fast` の条件・宣言・計画の波・検査のトリガー・MVV の判定
+- [references/pace.md](references/pace.md) — 進め方 `pace: fast` の条件・宣言・計画のステージ・検査のトリガー・MVV 判定
 - [references/approval-request.md](references/approval-request.md) — 承認を求めるときに提示するもの
 - [references/operation-run.md](references/operation-run.md) — `operation` の実行の範囲・記録・失敗したときの扱い
-- [references/context-window.md](references/context-window.md) — context window の切れ目、委譲する対象としない対象、残量の見方
+- [references/context-window.md](references/context-window.md) — context window のカットポイント、委譲する対象としない対象、残量の見方
 - [references/agent-layers.md](references/agent-layers.md) — 3 層（conductor / supervisor / worker）の責務、フェーズ、報告の形

@@ -95,7 +95,7 @@ def test_a_workflow_step_run_skips_cross_review_and_runs_the_tests(
 
 
 def test_the_launch_mode_comes_from_the_argument(refactor, monkeypatch):
-    """決定 7 — 環境変数や控えの読み取りではなく、呼ぶ側が引数で伝える。"""
+    """決定 7 — 環境変数や記録の読み取りではなく、呼ぶ側が引数で伝える。"""
     captured = {}
     # **入口の名前を差し替える。** `main()` は `refactor.py` が取り込んだ `cmd_init` を呼ぶ。
     monkeypatch.setattr(refactor, "cmd_init", lambda args: captured.update(vars(args)))
@@ -152,7 +152,7 @@ def test_a_failed_ci_check_does_not_pass(cmd_gate, tmp_path, env_tmp_dir, spy):
 
 @pytest.mark.parametrize("payload", [
     "",                                        # 照会そのものができない
-    '{"total_count": 0, "check_runs": []}',    # 検査が 1 件も無い
+    '{"total_count": 0, "check_runs": []}',    # チェックが 1 件も無い
     "not json",                                # 応答を解釈できない
 ])
 def test_no_result_does_not_pass(cmd_gate, tmp_path, env_tmp_dir, spy, payload):
@@ -179,7 +179,7 @@ def test_an_unfinished_ci_check_does_not_pass(cmd_gate, tmp_path, env_tmp_dir, s
 def test_a_named_check_that_is_missing_does_not_pass(
     refactor, cmd_gate, tmp_path, env_tmp_dir, spy
 ):
-    """名前が一致しない検査の成功で通さない。"""
+    """名前が一致しないチェックの成功で通さない。"""
     state_path = _state(tmp_path, workflow_step=True, ci_check="tests")
     env_tmp_dir(state_path)
     spy["gh_out"] = _check_runs(_run("lint"))
@@ -332,7 +332,7 @@ ROUND_TEST = {"command": "pytest tests/services -q", "status": "green",
 def test_a_standalone_run_with_a_round_test_runs_the_baseline_test_once(
     refactor, cmd_gate, tmp_path, env_tmp_dir, spy, capsys
 ):
-    """AC3 — 単独起動でも、範囲のテストで検証してきたなら全体テストを 1 回通す。"""
+    """AC3 — 単独起動でも、ラウンドのテストで検証してきたなら全体テストを 1 回通す。"""
     state_path = _state(tmp_path, round_test=ROUND_TEST)
     env_tmp_dir(state_path)
 
@@ -401,7 +401,7 @@ def test_a_whole_test_passed_in_verify_at_the_same_head_is_reused(
 
 
 @pytest.mark.parametrize("whole_test", [
-    {**PASSED_IN_VERIFY, "reverted": True},    # 落ちて印の項目を取り消した
+    {**PASSED_IN_VERIFY, "reverted": True},    # 落ちて危険フラグの項目を取り消した
     {**PASSED_IN_VERIFY, "head": "OLDHEAD"},   # その後に HEAD が進んだ（同期のコミットなど）
     {**PASSED_IN_VERIFY, "status": "fail"},    # 落ちた
     {**PASSED_IN_VERIFY, "ran": False},        # 走らなかった

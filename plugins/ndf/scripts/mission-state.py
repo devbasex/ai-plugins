@@ -92,6 +92,19 @@ def plan_issues(plan: str) -> list[int]:
         return []
 
 
+PHASE_KINDS = {"配布（開発版）": "開発版", "配布（本番）": "本番"}
+
+
+def plan_kind(plan: str) -> str:
+    """計画の「フェーズ」（旧キー「持ち場」も読む）から表の行の種類を決める（配布の 2 つは開発版・本番）。"""
+    try:
+        data = json.loads(Path(plan).read_text())
+        phase = str(data.get("フェーズ") or data.get("持ち場") or "")
+    except (OSError, ValueError, AttributeError):
+        phase = ""
+    return PHASE_KINDS.get(phase, phase or "計画")
+
+
 def parse_pair(text: str, flag: str) -> tuple[str, str]:
     key, sep, value = text.partition("=")
     if not sep or not key or not value:
@@ -117,8 +130,8 @@ STATE_KEYS = ("plans", "done", "gates", "goal_template")
 def other_shape(path: str) -> str:
     """既存のファイルが状態の形でなければ、その理由を返す。無い・空・状態の形なら空。
 
-    supervise.py new mission の目録（`ミッション` / `ブランチ` / `波`）も同じ名前で書かれる。
-    同じ場所へ置くと、上書きで波の目録が消える（#1082）。
+    supervise.py new mission の目録（`ミッション` / `ブランチ` / `ステージ`）も同じ名前で書かれる。
+    同じ場所へ置くと、上書きでステージの目録が消える（#1082）。
     """
     p = Path(path)
     if not p.exists():
@@ -173,7 +186,7 @@ def init_mvv(a) -> tuple[dict | None, dict | None]:
             return None, result("stopped", f"MVV のファイルが無い: {a.mvv}", exit=EXIT_PRECONDITION)
         return {"path": str(path), "sha256": sha256_of(path)}, None
     if not a.milestone:
-        return None, result("stopped", "--pace fast には --milestone（MVV の写し元）か --mvv が要る",
+        return None, result("stopped", "--pace fast には --milestone（MVV の複製元）か --mvv が要る",
                             exit=EXIT_UNREADABLE)
     try:
         text = mvv_sections(milestone_description(a.milestone, a.repo))
@@ -261,6 +274,14 @@ def cmd_update(a) -> dict:
             m["done"].append(d)
     nexts = dict(parse_pair(t, "--next") for t in (a.next or []))
     items = done_items(m)
+    known = {p["plan"] for p in m["plans"]}
+    for plan in items:
+        # init で --plan を渡さなかった計画も、done に載った時点で表の行にする
+        if plan not in known:
+            issues = plan_issues(plan)
+            kind = plan_kind(plan)
+            m["plans"].append({"kind": kind, "plan": plan, "issues": issues,
+                               "label": default_label(kind, issues, m), "next": ""})
     for p in m["plans"]:
         if p["plan"] in nexts:
             p["next"] = nexts[p["plan"]]
@@ -297,7 +318,7 @@ def cmd_gate(a) -> dict:
     gates.append(entry)
     m["gates"] = gates
     save(a.mission, m)
-    who = "MVV の判定" if a.by == "mvv" else "承認"
+    who = "MVV 判定" if a.by == "mvv" else "承認"
     return result("ok", f"{a.name} の{who}を書いた（{at}）", gates, {"gates": len(gates)})
 
 
@@ -306,7 +327,7 @@ def cmd_gate(a) -> dict:
 
 def gate_word(g: dict) -> str:
     """関門を誰が通したか。記録に by が無ければ利用者の承認。"""
-    return "MVV の判定" if g.get("by") == "mvv" else "承認"
+    return "MVV 判定" if g.get("by") == "mvv" else "承認"
 
 
 def row_of(p: dict) -> dict:
@@ -336,7 +357,7 @@ def cell(text: str) -> str:
 
 def section_body(m: dict) -> str:
     """節の本文（見出しの次の行から）。空行で始まり、空行で終わる。"""
-    lines = ["", "| ミッション | 状態 | PR | 秒 | 費用 | 次 |", "| --- | --- | --- | ---: | ---: | --- |"]
+    lines = ["", "| 計画 | 状態 | PR | 秒 | 費用 | 次 |", "| --- | --- | --- | ---: | ---: | --- |"]
     for p in m.get("plans", []):
         r = row_of(p)
         lines.append("| " + " | ".join(cell(x) for x in (

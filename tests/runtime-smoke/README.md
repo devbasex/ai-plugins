@@ -33,11 +33,11 @@ bash scripts/runtime-smoke-test.sh --runtime claude --with-secrets=auto \
 
 The authenticated GitHub workflow accepts `BIGQUERY_KEY_FILE_JSON` as a protected secret and writes it to a temporary file before passing it through `--secret-file`.
 
-## hooks 定義の検査
+## hooks 定義のチェック
 
 `assertions/assert-hook-definitions.sh <claude|codex>` は、hooks 定義をランタイム自身に読ませ、
 読み込みの報告（警告・誤り）が 1 件でもあれば落とす。受け取るキーの一覧はこちらで持たない。
-決定の理由は [Runtime Plugin Container Smoke Test 仕様](../../docs/specifications/runtime-plugin-container-smoke.md#hooks-定義の検査) にある。
+決定の理由は [Runtime Plugin Container Smoke Test 仕様](../../docs/specifications/runtime-plugin-container-smoke.md#hooks-定義のチェック) にある。
 
 | ランタイム | 読ませ方 | 報告として扱うもの | 「読まれた」の判定 |
 | --- | --- | --- | --- |
@@ -49,7 +49,7 @@ The authenticated GitHub workflow accepts `BIGQUERY_KEY_FILE_JSON` as a protecte
 - **先に陽性対照（`fixtures/hooks-positive-control/`）を読ませる。** Claude Code にはマッチャーグループの `description` を、Codex には読めない `type` を持たせてある。報告が出なければ、本物の判定より前に落とす
 - 判定に使ったログと応答は `hook-definitions/` に残る（成功したときだけ成果物へ写される）
 
-Codex は今のところ未知キーを報告しない。Codex の検査が落とすのは、読めない定義と、hooks が 1 つも登録されない定義である。
+Codex は今のところ未知キーを報告しない。Codex のチェックが落とすのは、読めない定義と、hooks が 1 つも登録されない定義である。
 
 ### 陽性対照で落ちたとき
 
@@ -63,4 +63,4 @@ Codex は今のところ未知キーを報告しない。Codex の検査が落�
    docker build --no-cache -f tests/runtime-smoke/Containerfile.codex -t ai-plugins-runtime-smoke-codex .
    ```
 
-2. **ランタイムが報告の形を変えた。** 継続的統合でも落ちるなら、`hook-definitions/<ランタイム>-positive-control.*` のログと応答を読み、検査の拾い方を新しい形に合わせる
+2. **ランタイムが報告の形を変えた。** 継続的統合でも落ちるなら、`hook-definitions/<ランタイム>-positive-control.*` のログと応答を読み、チェックの拾い方を新しい形に合わせる

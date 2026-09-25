@@ -1,7 +1,7 @@
 """版数の書式が 1 か所にあることと、その書式の振る舞いを固定する。
 
-書式を 2 か所に持つと、片方だけを直したときに一方の検査だけが新しい書式を読める状態に
-なる。ここでは、共有の定義が拾う値と、2 つの検査が自分で書式を持っていないことの両方を
+書式を 2 か所に持つと、片方だけを直したときに一方のチェックだけが新しい書式を読める状態に
+なる。ここでは、共有の定義が拾う値と、2 つのチェックが自分で書式を持っていないことの両方を
 確かめる。
 """
 from __future__ import annotations
@@ -21,7 +21,7 @@ from version_pattern import VERSION_IN_DESCRIPTION, VERSION_VALUE  # noqa: E402
 VALIDATE = REPO_ROOT / "scripts/validate-runtime-plugins.sh"
 SHARED = REPO_ROOT / "scripts/lib/version_pattern.py"
 
-# 版数の数字 3 つを直接書いた正規表現。どちらの検査にも残っていないことを確かめる。
+# 版数の数字 3 つを直接書いた正規表現。どちらのチェックにも残っていないことを確かめる。
 INLINE_PATTERN = r"\d+\.\d+\.\d+"
 
 
@@ -66,7 +66,7 @@ def test_the_manifest_checker_stops_when_the_shared_definition_is_missing(tmp_pa
 
 
 def test_the_document_checker_stops_when_the_shared_definition_is_missing(tmp_path: Path) -> None:
-    """説明文書の検査も、自分の隣に定義が無ければ止まる。"""
+    """説明文書のチェックも、自分の隣に定義が無ければ止まる。"""
     copied = tmp_path / "check-doc-staleness.py"
     copied.write_text(CHECKER.read_text(encoding="utf-8"), encoding="utf-8")
     result = subprocess.run(

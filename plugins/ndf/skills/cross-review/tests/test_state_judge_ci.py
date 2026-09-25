@@ -1,6 +1,6 @@
 """収束の判定が継続的統合を見る（#327）。
 
-判定は 2 つの外部 AI の判定だけを読んでおり、検査ジョブが落ちていても両者が承認すれば
+判定は 2 つの外部 AI の判定だけを読んでおり、チェックジョブが落ちていても両者が承認すれば
 収束していた。**収束の直前に 1 度だけ照会する。**
 
 | 照会の結果 | 終了コード | 状態ファイルへ残すもの |
@@ -38,7 +38,7 @@ def tmp_dir(monkeypatch, tmp_path, state_mod):
 
 @pytest.fixture()
 def check_runs(monkeypatch, state_mod):
-    """検査ジョブの照会を差し替え、呼ばれた回数を数える。"""
+    """チェックジョブの照会を差し替え、呼ばれた回数を数える。"""
     calls: list[tuple[str, str]] = []
 
     def _set(runs):
@@ -131,7 +131,7 @@ def test_all_green_converges(tmp_dir, state_mod, check_runs):
     assert _read(tmp_dir)["rounds"][-1]["ci"]["verdict"] == "success"
 
 
-# ---------------- 条件 4: 実行中の検査ジョブを失敗として扱わない ----------------
+# ---------------- 条件 4: 実行中のチェックジョブを失敗として扱わない ----------------
 
 def test_a_running_check_is_not_a_failure(tmp_dir, state_mod, check_runs, capsys):
     check_runs([_run("pytest", status="in_progress", conclusion=""), _run("lint")])
@@ -165,7 +165,7 @@ def test_an_unavailable_query_still_converges(tmp_dir, state_mod, check_runs):
 
 
 def test_no_check_run_is_treated_as_unavailable(tmp_dir, state_mod, real_github, monkeypatch):
-    """検査ジョブを 1 件も持たないリポジトリでも収束する。
+    """チェックジョブを 1 件も持たないリポジトリでも収束する。
 
     `_fetch_check_runs` は `total_count` が 0 のとき `None` を返す。ここでは
     REST の応答そのものから、その扱いになることを見る。
@@ -207,7 +207,7 @@ def test_the_query_runs_only_on_the_converging_branch(tmp_dir, state_mod, check_
 
 
 def test_the_query_is_skipped_when_no_result_relaunches(tmp_dir, state_mod, check_runs):
-    """結果なしの検査の方が先である。照会は収束の枝の前にだけ置く。"""
+    """結果なしのチェックの方が先である。照会は収束の枝の前にだけ置く。"""
     calls = check_runs([_run("pytest")])
     _write(tmp_dir, _state([_approved_round(codex={})]))
 

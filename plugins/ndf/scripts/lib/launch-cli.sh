@@ -57,7 +57,7 @@ PRINT_TIMEOUT=${7:-implement}
 mkdir -p "$(dirname "$STEM")"
 
 # 工程名を CLI の上限の秒数へ解決する。**表に無い名前は起動せずに終える。**
-# 上限の表は `limits.py` だけが持つ（値を使うのは agy だけだが、名前の検査は全ランタイムで行う）。
+# 上限の表は `limits.py` だけが持つ（値を使うのは agy だけだが、名前のチェックは全ランタイムで行う）。
 # **`cd` で登らない。** 表の位置は文字列のまま渡す（Kiro CLI の symlink を字句で畳まない）。
 resolve_print_timeout() {
   case "$PRINT_TIMEOUT" in

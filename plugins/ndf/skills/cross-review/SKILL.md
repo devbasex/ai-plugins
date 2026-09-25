@@ -108,7 +108,7 @@ PR を**既定の母集合（claude / codex / kiro とホスト）から選ん�
 
 ## 事前確認
 
-自分の PR の判定・作業ツリーの分離・agy の作業領域・既存コメントの控えの 4 つは `state.py init` が行う。
+自分の PR の判定・作業ツリーの分離・agy の作業領域・既存コメントのスナップショットの 4 つは `state.py init` が行う。
 中身と `intent` / `posted_as` の両保持は [docs/04-contracts.md](docs/04-contracts.md) の「事前確認」にある。
 
 ## 全体フロー
@@ -138,7 +138,7 @@ bash ../../scripts/lib/bg-wait.sh run "$RC" -- python3 scripts/drive.py <PR> [�
 bash ../../scripts/lib/bg-wait.sh wait "$RC"   # 1 回 540 秒以内。124 = まだ終わっていない
 ```
 
-待ち方の規約は [waiting.md](../development-workflow/references/waiting.md)、待ちから戻った後に同じ応答で次の段へ
+待ち方の規約は [waiting.md](../development-workflow/references/waiting.md)、待ちから戻った後に同じ応答で次の手順へ
 進む規則は [agent-layers.md](../development-workflow/references/agent-layers.md) の supervisor の規則にある。
 JSON の形と終了コードの表は共通層の `scripts/lib/drive_pause.py` にある。
 

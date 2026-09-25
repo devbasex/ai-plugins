@@ -1,4 +1,4 @@
-"""修正の記録が無いまま次のラウンドを開始させない検査のテスト。
+"""修正の記録が無いまま次のラウンドを開始させないチェックのテスト。
 
 進行側が手で修正して次のラウンドへ進めると、修正の工程（Step 5）が担う返信と
 Resolve が飛ばされる。飛ばされたまま進むと、未解決の指摘が残ったまま承認まで到達する。
@@ -9,7 +9,7 @@ Resolve が飛ばされる。飛ばされたまま進むと、未解決の指摘
 | --- | --- |
 | 前のラウンドが修正必須の判定で、修正の記録が無い | 終了コード 5 で止める |
 | 前のラウンドで Resolve したと申告されたスレッドが、GitHub 側で未解決のまま | 終了コード 5 で止める |
-| 未解決の指摘を取得できない | 検査を行わず、確認できなかったことを残して進む |
+| 未解決の指摘を取得できない | チェックを行わず、確認できなかったことを残して進む |
 """
 from __future__ import annotations
 
@@ -119,7 +119,7 @@ def test_an_approved_previous_round_needs_no_fix_record(tmp_dir, state_mod, unre
 
 
 def test_the_first_round_is_not_checked(tmp_dir, state_mod, monkeypatch):
-    """前のラウンドが無ければ検査しない。GitHub も見に行かない。"""
+    """前のラウンドが無ければチェックしない。GitHub も見に行かない。"""
     monkeypatch.setattr(
         state_mod, "_fetch_unresolved_threads",
         lambda repo, pr: pytest.fail("前のラウンドが無いのに GitHub を呼んでいる"),
@@ -176,7 +176,7 @@ def test_the_check_queries_the_pull_request_the_claim_belongs_to(tmp_dir, state_
 
     Step 6 の `set-current-pr` は次の `start-round` より先に走るため、この時点の
     `current_pr` は新しい Pull Request を指す。そちらへ問い合わせると、旧 Pull Request の
-    未解決スレッドが一覧に現れず、検査が素通りする。
+    未解決スレッドが一覧に現れず、チェックが素通りする。
     """
     asked: list[int] = []
 

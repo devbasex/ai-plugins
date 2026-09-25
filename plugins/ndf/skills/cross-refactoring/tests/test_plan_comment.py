@@ -23,7 +23,7 @@ def _item(**over):
         "id": "I-001", "rank": 1, "path": "src/foo.py",
         "symbol": "Foo.handle", "smell": "long_method",
         "technique": "extract_method", "severity": "major", "tier": "high",
-        "rationale": "1 関数が 6 段の処理を通しで行っている",
+        "rationale": "1 関数が 6 つの処理を通しで行っている",
         "plan": "1. 範囲の確定を切り出す", "tests": [],
         "estimated_diff_lines": 40, "proposed_by": ["codex", "agy"],
         "status": "verified", "commits": {"test": None, "implement": "abc1234", "fix": []},
@@ -108,7 +108,7 @@ def test_the_second_publish_edits_the_same_comment(plan, tmp_path, gh):
 
 
 def test_a_lost_record_is_recovered_from_the_marker(plan, tmp_path, gh):
-    """控えが失われても、印で引き当て直す。引き当てないとコメントが積まれる。"""
+    """記録が失われても、目印で引き当て直す。引き当てないとコメントが積まれる。"""
     calls, responses = gh
     _, state = _state(tmp_path)
     marker = plan.plan_comment_marker(state)

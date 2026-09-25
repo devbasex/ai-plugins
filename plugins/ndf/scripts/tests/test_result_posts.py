@@ -1,12 +1,12 @@
 """結果ファイルを投稿へ変える層（#730 #583）。
 
-担当が書いた指摘の控えと結果ファイルを読み、GitHub へ送る投稿を組み立てる。
+担当が書いた指摘のファイルと結果ファイルを読み、GitHub へ送る投稿を組み立てる。
 **本文は引数にも標準出力にも出さない。** 受け取るのはファイルのパスだけで、本文は
 この層の中だけを通る。
 
 | 何を確かめるか | 受け入れ条件 |
 | --- | --- |
-| 控えと結果からレビューの投稿が組み立つ | AC5 |
+| 指摘のファイルと結果からレビューの投稿が組み立つ | AC5 |
 | 本文が引数に現れない | AC5 |
 | 自分の Pull Request では送った形だけを落とす | AC32 |
 | 位置を解決できない拒まれ方で、インラインを総評へ退避する | AC16 |
@@ -107,7 +107,7 @@ def fake_gh(monkeypatch, tmp_path) -> FakeGh:
     return FakeGh(tmp_path / "gh-calls.log", tmp_path / "gh-rules.json", monkeypatch)
 
 
-# ---------------- 控えと結果ファイル ----------------
+# ---------------- 指摘のファイルと結果ファイル ----------------
 
 def _files(tmp_path: pathlib.Path, comments: list[dict] | None = None,
            summary: str = "設計の筋は通っている。", event: str = "REQUEST_CHANGES",
@@ -267,7 +267,7 @@ def test_the_inlines_move_to_the_summary_when_the_position_is_not_resolved(
     last = fake_gh.sent()[-1]
     assert "comments" not in last
     assert "戻り値を確かめる" in last["body"]
-    # 控えには送れた先が残る。
+    # 指摘のファイルには送れた先が残る。
     note = json.loads(payload.read_text(encoding="utf-8"))
     assert [c["posted_to"] for c in note["comments"]] == ["body", "body"]
 
@@ -289,7 +289,7 @@ def test_a_position_rejection_of_an_earlier_item_is_not_taken_as_ours(
         tmp_path, fake_gh) -> None:
     """先に積まれた項目の位置エラーで、今回の分を退避しない。
 
-    先客を消して今回分を二重に積むと、未投稿のまま控えへ送れた先を書き、取り込みを
+    先客を消して今回分を二重に積むと、未投稿のまま指摘のファイルへ送れた先を書き、取り込みを
     成功扱いにしてしまう。今回分が送れていない限り、失敗として残す。
     """
     earlier = post_queue.enqueue(
@@ -311,7 +311,7 @@ def test_a_position_rejection_of_an_earlier_item_is_not_taken_as_ours(
     assert outcome.review_url is None
     note = json.loads(payload.read_text(encoding="utf-8"))
     assert all("posted_to" not in comment for comment in note["comments"])
-    # 先客は残り、今回分は 1 件だけ（退避した写しを足さない）。
+    # 先客は残り、今回分は 1 件だけ（退避した複製を足さない）。
     queued = [item for _, item in _queue(tmp_path).items()]
     assert [i["seq"] for i in queued][0] == earlier_seq
     assert len(queued) == 2
@@ -320,9 +320,9 @@ def test_a_position_rejection_of_an_earlier_item_is_not_taken_as_ours(
 
 def test_a_failed_write_of_the_note_keeps_it_whole_and_stops_the_take_in(
         tmp_path, fake_gh, monkeypatch) -> None:
-    """控えの書き戻しが途中で落ちても控えは元のまま読め、取り込みは失敗として止まる。
+    """指摘のファイルの書き戻しが途中で落ちても指摘のファイルは元のまま読め、取り込みは失敗として止まる。
 
-    半端な控えを残すと、再実行で読めずに空として扱われ、記録済みの指摘を 0 件で
+    半端な指摘のファイルを残すと、再実行で読めずに空として扱われ、記録済みの指摘を 0 件で
     置き換える。
     """
     fake_gh.set_rules([
@@ -345,14 +345,14 @@ def test_a_failed_write_of_the_note_keeps_it_whole_and_stops_the_take_in(
         seat=SEAT, head_sha=SHA, is_own_pr=False, actor=ACTOR)
 
     assert outcome.failed is True
-    assert "控え" in outcome.detail
+    assert "指摘のファイル" in outcome.detail
     assert payload.read_text(encoding="utf-8") == original
     assert [p.name for p in payload.parent.iterdir() if p.name.endswith(".tmp")] == []
 
 
 def test_a_rate_limited_review_remains_queued_without_marking_the_note(
         tmp_path, fake_gh) -> None:
-    """現状固定。上限時は失敗にせず、未投稿の要求と控えをそのまま残す。"""
+    """現状固定。上限時は失敗にせず、未投稿の要求と指摘のファイルをそのまま残す。"""
     fake_gh.set_rules([
         {"match": "pulls/730/reviews?", "stdout": "[]"},
         _RATE_LIMITED,

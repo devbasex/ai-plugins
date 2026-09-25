@@ -1,7 +1,7 @@
-"""説明文書の検査が `scripts/validate-runtime-plugins.sh` から呼ばれていることを固定する。
+"""説明文書のチェックが `scripts/validate-runtime-plugins.sh` から呼ばれていることを固定する。
 
-検査そのものが正しくても、既存の検査から呼ばれていなければ CI では実行されない。
-配線が外れたことを、実物の検査を丸ごと動かさずに検出する。
+チェックそのものが正しくても、既存のチェックから呼ばれていなければ CI では実行されない。
+配線が外れたことを、実物のチェックを丸ごと動かさずに検出する。
 
 確かめたいのは**呼び出しの形**であって、ファイル名に触れた行の中身ではない。呼び出し行の
 近くで参照先を説明することはむしろ望ましいため、候補からコメント行を除く。
@@ -15,7 +15,7 @@ CHECKER_NAME = "scripts/check-doc-staleness.py"
 
 
 def invocation_lines(body: str) -> list[str]:
-    """説明文書の検査を起動している行。コメント行は候補から除く。"""
+    """説明文書のチェックを起動している行。コメント行は候補から除く。"""
     return [
         line
         for line in body.splitlines()
@@ -48,7 +48,7 @@ def test_a_body_without_the_call_has_no_candidate() -> None:
 
 
 def test_validate_passes_the_repository_root() -> None:
-    """`--root` を渡さないと、検査は自分の位置から根を推測することになる。"""
+    """`--root` を渡さないと、チェックは自分の位置から根を推測することになる。"""
     lines = invocation_lines(VALIDATE.read_text(encoding="utf-8"))
     assert lines, f"{VALIDATE} に {CHECKER_NAME} の呼び出し行が無い"
     for line in lines:

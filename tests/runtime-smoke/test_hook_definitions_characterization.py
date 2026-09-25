@@ -1,4 +1,4 @@
-"""hooks 定義の検査（assert-hook-definitions.sh / codex-hooks-list.py）の判定分岐を固定する。
+"""hooks 定義のチェック（assert-hook-definitions.sh / codex-hooks-list.py）の判定分岐を固定する。
 
 本体は bash の assert-characterization.sh にあり、claude / codex をスタブへ置き換えて走る。
 実機のスモークに混ぜると、ランタイムごとに同じ単体テストが重ねて走るため、ここから 1 回だけ起動する。

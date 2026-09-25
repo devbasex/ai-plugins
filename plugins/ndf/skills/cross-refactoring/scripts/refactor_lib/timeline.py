@@ -5,8 +5,8 @@
 `docs/02-plan-and-implement.md` の「締め切り」の節にまとめてある。実行の途中で数値を
 決めるために LLM へ問わない。
 
-値は `init`（計画の前の値）と `merge-plan`（計画の後の値）が `state["limits"]` へ書き
-出す。以後の段は、書き出した値と時計の比較だけで進み、止まる。
+値は `init`（改修計画の前の値）と `merge-plan`（改修計画の後の値）が `state["limits"]` へ書き
+出す。以後の手順は、書き出した値と時計の比較だけで進み、止まる。
 
 **純粋な処理だけを置く。** 今の時刻は引数で受ける。
 """
@@ -20,9 +20,9 @@ from . import budget, clock
 
 # 係数（決定 24）。B と w に掛ける比率で、秒や分の固定値は持たない。
 PROPOSE_SHARE = 0.20      # 提案の枠の終わり = 開始 + 0.20·B
-PLAN_SHARE = 0.10         # 計画の枠の終わり = 提案の枠の終わり + 0.10·B
+PLAN_SHARE = 0.10         # 改修計画の枠の終わり = 提案の枠の終わり + 0.10·B
 INIT_TEST_SHARE = 0.10    # 着手前のテスト 1 回の上限 = 0.10·B（w はまだ測れていない）
-MARGIN_SHARE = 0.05       # 余裕 = 0.05·B（段の上限と CLI の上限に足す）
+MARGIN_SHARE = 0.05       # 余裕 = 0.05·B（手順の上限と CLI の上限に足す）
 TEST_FACTOR = 3.0         # テスト 1 回の上限 = max(3·w, 0.01·B)
 TEST_FLOOR_SHARE = 0.01
 
@@ -32,11 +32,11 @@ FIXED_VALUES = (
     ("monitor.py の SIGTERM の猶予", "3 秒", "監視が止めた CLI へ SIGKILL を送るまでの待ち"),
     ("monitor.py の RESULT_AGE_GRACE", "30 秒", "結果ファイルを書き終えたとみなす経過"),
     ("monitor.py の見回りの間隔", "15 秒", "監視の 1 周期"),
-    ("jev.py の PROBE_TIMEOUT / ASK_TIMEOUT", "10 秒 / 20 秒", "計画までの Jev の通信 1 回の待ち"),
+    ("jev.py の PROBE_TIMEOUT / ASK_TIMEOUT", "10 秒 / 20 秒", "改修計画までの Jev の通信 1 回の待ち"),
     ("auth.py の AUTH_PROBE_TIMEOUT", "120 秒", "init の参加者の認証の確認 1 回の待ち"),
 )
 
-# 段ごとの終わりの時刻のキー。`start-phase` がここから監視の上限を出す。
+# 手順ごとの終わりの時刻のキー。`start-phase` がここから監視の上限を出す。
 PHASE_END_KEYS = {
     "propose": "propose_end_at",
     "plan": "plan_end_at",
@@ -52,12 +52,12 @@ def _seconds(budget_minutes: int, share: float) -> int:
 
 
 def margin(budget_minutes: int) -> int:
-    """余裕（秒）。段の上限と CLI の上限に足す。"""
+    """余裕（秒）。手順の上限と CLI の上限に足す。"""
     return _seconds(budget_minutes, MARGIN_SHARE)
 
 
 def init_test_timeout(budget_minutes: int) -> int:
-    """着手前の全体のテストと範囲のテスト 1 回の上限（秒）。"""
+    """着手前の全体のテストとラウンドのテスト 1 回の上限（秒）。"""
     return _seconds(budget_minutes, INIT_TEST_SHARE)
 
 
@@ -70,7 +70,7 @@ def test_timeout(budget_minutes: int, baseline_seconds: Optional[float]) -> int:
 
 
 def _completion(items: list[dict[str, Any]], start_key: str, estimate_key: str) -> Optional[_dt.datetime]:
-    """その段の最後の項目の完了の締め切り（着手の締め切り + 見積り）。項目が無ければ `None`。"""
+    """その手順の最後の項目の完了の締め切り（着手の締め切り + 見積り）。項目が無ければ `None`。"""
     ends = []
     for item in items:
         start = clock.parse(item.get(start_key))
@@ -89,7 +89,7 @@ def compute(
     started_at: _dt.datetime, budget_minutes: int, baseline_seconds: Optional[float],
     items: Optional[list[dict[str, Any]]] = None, reserve: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
-    """実行時の値の表。`items` と `reserve`（計画の後）が無ければ、その行は `None`。"""
+    """実行時の値の表。`items` と `reserve`（改修計画の後）が無ければ、その行は `None`。"""
     b = int(budget_minutes)
     propose_end = started_at + _dt.timedelta(minutes=b * PROPOSE_SHARE)
     plan_end = propose_end + _dt.timedelta(minutes=b * PLAN_SHARE)
@@ -105,14 +105,14 @@ def compute(
         "implement_end_at": _iso(_completion(list(items or []), "start_deadline", "implement")),
         "fix_end_at": _iso(budget.fix_end(started_at, b, reserve)) if planned else None,
         "final_end_at": _iso(started_at + _dt.timedelta(minutes=b)),
-        # 最終ゲートの修正の 1 回目に必ず渡す長さ（決定 26）。控えの `final_fix`。
+        # 最終ゲートの修正の 1 回目に必ず渡す長さ（決定 26）。予備時間の `final_fix`。
         "final_fix_seconds": (math.ceil(float(reserve.get("final_fix") or 0.0) * 60)
                               if planned else None),
     }
 
 
 def of_state(state: dict[str, Any]) -> dict[str, Any]:
-    """状態の値から表を組む。計画の後なら項目と控えも使う。"""
+    """状態の値から表を組む。改修計画の後なら項目と予備時間も使う。"""
     plan = state.get("plan") or None
     return compute(
         clock.parse(state["started_at"]), int(state["budget_minutes"]),
@@ -133,7 +133,7 @@ def state_test_timeout(state: dict[str, Any]) -> int:
 
 
 def phase_timeout(end: _dt.datetime, now: _dt.datetime, margin_seconds: int) -> int:
-    """段の監視の上限（秒）= 終わりの時刻までの残り + 余裕。終わりを過ぎていれば余裕だけ。"""
+    """手順の監視の上限（秒）= 終わりの時刻までの残り + 余裕。終わりを過ぎていれば余裕だけ。"""
     return max(math.ceil((end - now).total_seconds()), 0) + int(margin_seconds)
 
 
@@ -143,9 +143,9 @@ def final_fix_timeout(
 ) -> int:
     """最終ゲートの修正の監視の上限（秒）。
 
-    **1 回目は、終わりまでの残りが控え（`final_fix_seconds`）より短くても控えの長さを渡す**
+    **1 回目は、終わりまでの残りが予備時間（`final_fix_seconds`）より短くても予備時間の長さを渡す**
     （決定 26）。想定最大時間を使い切った後に落ちても、必ず 1 度は直しを試みる。
-    2 回目からは他の段と同じく残り + 余裕である。
+    2 回目からは他の手順と同じく残り + 余裕である。
     """
     left = max(math.ceil((end - now).total_seconds()), 0)
     if first:

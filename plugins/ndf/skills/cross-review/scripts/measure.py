@@ -244,7 +244,7 @@ def _find_best_match(
         return None, True
     finding_id = newest_candidates[0].get("finding_id")
     if finding_id is None:
-        # **`str(None)` を返さない。** 呼び出し側の `finding_id is None` の検査を
+        # **`str(None)` を返さない。** 呼び出し側の `finding_id is None` のチェックを
         # すり抜け、上限の方式の集合へ文字列 `"None"` が入る。上限が 1 件多く
         # 見え、他の方式の再現率がその分だけ低く出る。
         return None, False
@@ -424,9 +424,9 @@ def _majority(representatives: list[dict[str, Any]],
 
 
 def _evidence_rounds(st: dict[str, Any]) -> set[int]:
-    """証拠集約（統合・実行検証・反証）を通ったラウンドの印。
+    """証拠集約（統合・実行検証・反証）を通ったラウンドの目印。
 
-    印の無いラウンドの指摘は区分を持たないか、持っていても反証を結ぶ前の値である。
+    目印の無いラウンドの指摘は区分を持たないか、持っていても反証を結ぶ前の値である。
     """
     marked: set[int] = set()
     for value in st.get("evidence_rounds") or []:
@@ -437,7 +437,7 @@ def _evidence_rounds(st: dict[str, Any]) -> set[int]:
 
 
 def _all_rounds_marked(st: dict[str, Any], marked: set[int]) -> bool:
-    """記録のラウンドがすべて印を持つか。
+    """記録のラウンドがすべて目印を持つか。
 
     すべて持つなら、この変更の方式の分母は他の 3 つと同じ集合になる。
     """
@@ -452,16 +452,16 @@ def _scoped_oracle_ids(
     oracle_ids: set[str] | None,
     marked: set[int],
 ) -> set[str] | None:
-    """上限の方式の集合を、印のあるラウンドの指摘だけへ絞る（#156）。
+    """上限の方式の集合を、目印のあるラウンドの指摘だけへ絞る（#156）。
 
-    分母を全ラウンドのままにすると、印の混ざった記録で再現率が過小に出る。分子と
-    同じ母集合（印のあるラウンド）へ絞るため、`finding_id` から `round` を引いて
+    分母を全ラウンドのままにすると、目印の混ざった記録で再現率が過小に出る。分子と
+    同じ母集合（目印のあるラウンド）へ絞るため、`finding_id` から `round` を引いて
     `marked` に含まれるものだけを残す。
 
     Returns:
       - `oracle_ids` が `None`（上限を計算できない）なら `None` を返す。
       - `marked` が全ラウンドを覆うなら、絞り込みの結果は `oracle_ids` と同じになる。
-      - 一部のラウンドだけが印を持つなら、そのラウンドの指摘だけが残る。
+      - 一部のラウンドだけが目印を持つなら、そのラウンドの指摘だけが残る。
     """
     if oracle_ids is None:
         return None
@@ -476,12 +476,12 @@ def _proposed(st: dict[str, Any], representatives: list[dict[str, Any]],
               oracle_ids: set[str] | None) -> dict[str, Any]:
     """この変更の方式。**読むのは証拠集約を通ったラウンドだけである。**
 
-    印の無いラウンドを母集合へ入れると、区分の付かない指摘が
+    目印の無いラウンドを母集合へ入れると、区分の付かない指摘が
     `insufficient_evidence` として落ち、方式の再現率が実際より低く出る。
 
-    **分母も印のあるラウンドに限る**（絞り込みは `_scoped_oracle_ids` が持つ）。
-    分子だけを絞ると、印の混ざった記録で再現率が過小に出る。印の無い round 1 と
-    印のある round 2 に修正された指摘が 1 件ずつあるとき、採れるのは round 2 の
+    **分母も目印のあるラウンドに限る**（絞り込みは `_scoped_oracle_ids` が持つ）。
+    分子だけを絞ると、目印の混ざった記録で再現率が過小に出る。目印の無い round 1 と
+    目印のある round 2 に修正された指摘が 1 件ずつあるとき、採れるのは round 2 の
     1 件だけであり、全ラウンドの上限（2 件）で割ると**拾えるものを全部拾っても
     0.5 にしかならない**。
 

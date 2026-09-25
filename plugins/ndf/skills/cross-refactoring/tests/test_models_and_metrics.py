@@ -339,7 +339,7 @@ def test_record_observed_model_saves_the_observed_value(
     """
     tmp_dir = tmp_path / "tmp"
     tmp_dir.mkdir()
-    # 実装フェーズの骨格は `claude-implement-rf130`（I3）。
+    # 実装手順の骨格は `claude-implement-rf130`（I3）。
     (tmp_dir / "claude-implement-rf130-stdout.log").write_text(
         json.dumps({
             "type": "result", "is_error": False,
@@ -358,7 +358,7 @@ def test_record_observed_model_saves_the_observed_value(
 
 
 def test_record_observed_model_reads_only_the_named_phase(gitfacts, tmp_path):
-    """別のフェーズのログは読まない（名前の幹はフェーズごと）。"""
+    """別の手順のログは読まない（名前の幹は手順ごと）。"""
     tmp_dir = tmp_path / "tmp"
     tmp_dir.mkdir()
     (tmp_dir / "claude-plan-rf130-stdout.log").write_text(

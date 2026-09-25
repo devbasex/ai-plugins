@@ -90,7 +90,7 @@ def test_resume_records_the_carried_over_threads(state_mod, unresolved):
 
 
 def test_resume_without_unresolved_threads_records_nothing(state_mod, unresolved):
-    """未解決の指摘が 0 件なら引き継ぎは無い。収束の振る舞いは現行のまま。"""
+    """未解決の指摘が 0 件なら引継ぎは無い。収束の振る舞いは現行のまま。"""
     unresolved([])
     st = _state(carried_over={"count": 3, "thread_ids": ["PRRT_x"], "fixed_in_round": None})
 
@@ -172,7 +172,7 @@ def test_without_carried_over_threads_the_verdict_is_unchanged(tmp_dir, state_mo
 
 
 def test_judge_records_the_verdict_on_the_round(tmp_dir, state_mod):
-    """次のラウンドの検査が読めるよう、判定の結果をラウンドへ残す。"""
+    """次のラウンドのチェックが読めるよう、判定の結果をラウンドへ残す。"""
     _write(tmp_dir, _state(carried_over={
         "count": 1, "thread_ids": ["PRRT_a"], "fixed_in_round": None,
     }))

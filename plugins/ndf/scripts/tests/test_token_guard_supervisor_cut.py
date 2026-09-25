@@ -1,4 +1,4 @@
-"""token-guard.sh の判定「区切り」（#954 の AC5）。
+"""token-guard.sh の判定「スイッチポイント」（#954 の AC5）。
 
 寿命 5 分の supervisor（入力の agent_type が ndf:supervisor）が cross-review / cross-refactoring を
 起動するとき、自身の記録の最初の呼び出しの文脈 P と最後の呼び出しの文脈 C を比べ、C ≥ 比 × P なら止める。
@@ -91,7 +91,7 @@ def test_cut_by_ratio(tmp_path, agent_type, skill, ratio, env, stop):
     reason = run(payload(tp, skill=skill, agent_type=agent_type), tmp_path, env)
     if stop:
         assert reason is not None
-        assert "結果: 区切り" in reason and "次の工程" in reason
+        assert "結果: スイッチポイント" in reason and "次の工程" in reason
     else:
         assert reason is None
 

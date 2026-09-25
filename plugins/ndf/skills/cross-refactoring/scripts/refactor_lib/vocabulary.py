@@ -104,8 +104,8 @@ def vocabulary() -> dict[str, Any]:
 # 想定最大時間の既定（分）。2026-09-24 利用者の指示で 30 分（#754 の指針「60 分以内」の中に収める）。
 DEFAULT_BUDGET_MINUTES = 30
 
-# 計画へ渡す候補の上限（決定 17）。`path` + `symbol` の組を上位から 30 組、組の中は
-# 上位 3 件まで。計画の入力と Jev の「同じ変更か」の問いの数（最大 90 回）を抑える。
+# 改修計画へ渡す候補の上限（決定 17）。`path` + `symbol` の組を上位から 30 組、組の中は
+# 上位 3 件まで。改修計画の入力と Jev の「同じ変更か」の問いの数（最大 90 回）を抑える。
 CANDIDATE_GROUPS = 30
 CANDIDATES_PER_GROUP = 3
 
@@ -129,7 +129,7 @@ DEFER_REASONS = (
     DEFER_NO_TARGET, DEFER_TEST_FAILED, DEFER_NOT_DONE,
 )
 
-# フェーズの名前（#933）。**状態・履歴・`launch-cli.sh`・`limits.py`・雛形で同じ語を使う。**
+# 手順の名前（#933）。**状態・履歴・`launch-cli.sh`・`limits.py`・雛形で同じ語を使う。**
 PHASES = ("propose", "plan", "add-tests", "implement", "verify", "final", "done")
 
 # テストの追加・実装・修正のコミットに必須のトレーラー。1 つでも欠けたら当該項目を
@@ -150,11 +150,11 @@ REQUIRED_SKILLS = ("refactoring", "tdd-cycle", "quality-gates")
 SYNC_COMMIT_MESSAGE = (
     "Chore: 生成物を同期する（cross-refactoring 進行側）\n\n"
     "実装担当は対象範囲だけを変更するため、生成物が同期されない。\n"
-    "同期を検査する pre-push を持つリポジトリでも push できるよう、\n"
+    "同期をチェックする pre-push を持つリポジトリでも push できるよう、\n"
     "公開の直前に進行側がまとめて生成する。"
 )
 
-# 計画と生成物を 1 つのコミットへまとめたときのメッセージ。
+# 改修計画と生成物を 1 つのコミットへまとめたときのメッセージ。
 SYNC_AND_PLAN_COMMIT_MESSAGE = (
     "Chore: 生成物と改修計画を同期する（cross-refactoring 進行側）\n\n"
     "実装担当は対象範囲だけを変更するため、生成物が同期されない。\n"

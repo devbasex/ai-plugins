@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# NDF plugin: 通過工程の控えを記録し、報告する（#221）。
+# NDF plugin: 通過記録を記録し、報告する（#221）。
 #
 #   stage-check.sh record <課題番号> <stage|mode|pace> <値>
 #   stage-check.sh report <課題番号>
@@ -29,9 +29,9 @@ case "$ISSUE" in
   ''|*[!0-9]*) printf 'ERROR: 課題番号が数値ではありません: %s\n' "${ISSUE:-（無し）}" >&2; usage; exit 2 ;;
 esac
 
-# リポジトリを特定できないときは何もしない。控えは課題番号だけでは一意にならない。
+# リポジトリを特定できないときは何もしない。通過記録は課題番号だけでは一意にならない。
 SLUG=$(wf_repo_slug ".") || {
-  printf 'NOTE: origin の URL を取れないため、進行の控えは扱いません\n' >&2
+  printf 'NOTE: origin の URL を取れないため、通過記録は扱いません\n' >&2
   exit 0
 }
 

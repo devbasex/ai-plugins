@@ -85,10 +85,10 @@ CLAUDE_MONTHLY_SPEND = ("You've hit your monthly spend limit. Run /usage-credits
                         "this chat.")
 CLAUDE_BARE_LIMIT = "You've hit your limit"
 
-# 実物として一致すべき 7 行（codex 2 形 + claude 5 形）。行頭の印の有無は codex が決める。
+# 実物として一致すべき 7 行（codex 2 形 + claude 5 形）。行頭の目印の有無は codex が決める。
 MEASURED_USAGE_LIMIT_LINES = [
     ("codex 利用上限", CODEX_USAGE_LIMIT),
-    ("codex 利用上限 行頭の印あり", CODEX_USAGE_LIMIT_PREFIXED),
+    ("codex 利用上限 行頭の目印あり", CODEX_USAGE_LIMIT_PREFIXED),
     ("codex 再試行の上限 429", CODEX_RETRY_429),
     ("claude 週", CLAUDE_WEEKLY),
     ("claude セッション", CLAUDE_SESSION),

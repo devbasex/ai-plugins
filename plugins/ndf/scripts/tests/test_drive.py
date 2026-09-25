@@ -1,4 +1,4 @@
-"""cross-review / cross-refactoring の drive.py と、supervise.py の drive の段・worker のランタイム。
+"""cross-review / cross-refactoring の drive.py と、supervise.py の drive のステップ・worker のランタイム。
 
 駆動が呼ぶスクリプトは `call` を差し替えて模す。gh と claude は PATH の先頭に置いた偽物。実機の claude は起動しない。
 """
@@ -241,7 +241,7 @@ def test_review_status_requires_clean_sweep():
     assert cr.review_status({"final": "max_rounds"}) == "max_rounds"
 
 
-# --- supervise.py の drive の段 ------------------------------------------------
+# --- supervise.py の drive のステップ ------------------------------------------------
 
 FAKE_DRIVE = """#!{py}
 import json, sys

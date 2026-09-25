@@ -135,25 +135,25 @@ python3 "$SCRIPTS/merged-steps.py" merge-when-green <PR番号> --root <主ディ
   [--method merge|squash|rebase] [--interval 10] [--recheck 5] [--no-checks-after 60] [--timeout 3600] [--stale-after 300] [--no-cleanup]
 ```
 
-- CI の検査が全部通るまで待つ。push で先頭のコミットが変わると待ち直す（`items` に `rewait` が載る）
+- CI のチェックが全部通るまで待つ。push で先頭のコミットが変わると待ち直す（`items` に `rewait` が載る）
 - 同じ先頭のコミットで pending を見た後に全部が通れば、その周でマージする。pending を見ずに通って
   いたときだけ `--recheck` 秒後に 1 度確かめ直す。rollup が空のうちはマージせず、`--no-checks-after`
   秒を過ぎても空なら CI の無いリポジトリとしてマージする（`items` に `no_checks` が載る）
-- 失敗した検査が 1 つでもあれば、マージせずに `stopped`（1）で止まる。`items[].name` が失敗した検査
+- 失敗したチェックが 1 つでもあれば、マージせずに `stopped`（1）で止まる。`items[].name` が失敗したチェック
 - 通れば `gh pr merge --admin` でマージし、続けて上の `cleanup` と同じ後片付けを行う。
   `status` の読み方は上の表と同じ
-- 上限の時間を過ぎても検査が終わらなければ `stopped`（1）で止まる。`next` のコマンドで打ち直す
-- 実行が終わった（`completed`）のに検査が pending のまま `--stale-after` 秒続けば、GitHub 側で
-  取り残された検査とみなし、そのジョブを `gh run rerun <run> --job <job>` で **1 度だけ**再実行する
+- 上限の時間を過ぎてもチェックが終わらなければ `stopped`（1）で止まる。`next` のコマンドで打ち直す
+- 実行が終わった（`completed`）のにチェックが pending のまま `--stale-after` 秒続けば、GitHub 側で
+  取り残されたチェックとみなし、そのジョブを `gh run rerun <run> --job <job>` で **1 度だけ**再実行する
   （`items` に `{"kind": "check", "result": "rerun", "run": ..., "job": ...}` が載る）。
-  再実行した同じ検査が再び取り残されたら `stopped`（1）で止まる（`items` の `result` は `stuck`）
+  再実行した同じチェックが再び取り残されたら `stopped`（1）で止まる（`items` の `result` は `stuck`）
 - ジョブが `queued` のままランナーを待つ間は、待ちの 1 周ごとに stderr へ
   `merge-when-green: CI のランナー待ち（待ち行列 N 件、待ち M 件）` を出す。最後に見た待ち行列の件数は
-  `metrics.queued_runs` に残る。supervise.py の run の段で動かすと、この行が `progress.jsonl` の
+  `metrics.queued_runs` に残る。supervise.py の run のステップで動かすと、この行が `progress.jsonl` の
   `alive` の行の `last_output` に載る
 
-**待ちが遅れたときの一次の調査は `probe` で行う。** supervise.py の `merge` と `release` の段が、経過が
-想定を超えたときに打つ（段の `probe`）。
+**待ちが遅れたときの一次の調査は `probe` で行う。** supervise.py の `merge` と `release` のステップが、経過が
+想定を超えたときに打つ（ステップの `probe`）。
 
 ```bash
 python3 "$SCRIPTS/merged-steps.py" probe (--pr <PR番号> | --head <ブランチ>...) [--act] --root <主ディレクトリ>
@@ -161,8 +161,8 @@ python3 "$SCRIPTS/merged-steps.py" probe (--pr <PR番号> | --head <ブランチ
 
 | `metrics.class` | 何を見たか | `metrics.action` |
 | --- | --- | --- |
-| `failed` | 失敗の結論の検査がある | `fix` |
-| `stale` | 実行が completed なのに検査が pending でジョブの結論が無く、実行の `attempt` が 1 | `--act` なら `gh run rerun <run> --job <job>` を打って `remedied`。打てない・`--act` が無ければ `judge` |
+| `failed` | 失敗の結論のチェックがある | `fix` |
+| `stale` | 実行が completed なのにチェックが pending でジョブの結論が無く、実行の `attempt` が 1 | `--act` なら `gh run rerun <run> --job <job>` を打って `remedied`。打てない・`--act` が無ければ `judge` |
 | `stale_again` | 同じ形で `attempt` が 2 以上（既に再実行した） | `judge` |
 | `settled` | 実行が completed でジョブに結論があり、表示だけが pending | `wait` |
 | `queued` | ジョブがランナーを待っている | `wait` |
@@ -184,7 +184,7 @@ python3 "$SCRIPTS/merged-steps.py" probe (--pr <PR番号> | --head <ブランチ
 ```bash
 # $SCRIPTS の決め方は development-workflow の references/scripts-lookup.md にある。
 # 閉じる語の読み取りは、どの Skill にも属さない共通層（$SCRIPTS/lib/）にある。
-# **gate も同じ実体を読む**ため、Skill の下に写しは無い。
+# **gate も同じ実体を読む**ため、Skill の下に複製は無い。
 CLOSING="$SCRIPTS/lib/closing-issues.sh"
 
 # 1. 本文から閉じる語が指す先を取り出す（<所有者>/<リポジトリ> と <番号> をタブ区切りで出す）
@@ -252,7 +252,7 @@ bash "$SCRIPTS/../skills/development-workflow/scripts/stage-check.sh" report <is
 - 記録が無ければ 1 行だけ返る。**すべての工程を欠落として並べない**
 - 記録の無い必須の工程があれば、その名前と、記録するコマンドが出力に載る
 - 実施済みであれば記録してから先へ進む。実施していなければ、その工程へ戻る
-- 控えの読み方と、記録が無いときの扱いは
+- 通過記録の読み方と、記録が無いときの扱いは
   [references/stage-completeness.md](../development-workflow/references/stage-completeness.md) にある
 
 ## 作業完了報告（必須）
@@ -305,7 +305,7 @@ bash "$SCRIPTS/../skills/development-workflow/scripts/stage-check.sh" report <is
 どのブランチが本番のチャネルかはリポジトリが宣言する（`.ndf/worktree.json` の
 `production_branch`。宣言が無ければ既定ブランチ）。
 
-この工程に入ったら記録のコマンド `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "後片付け"` を 1 行打つ（issue の本文と盤面の両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「記録のコマンド」を使う）。
+この工程に入ったら記録のコマンド `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "後片付け"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「記録のコマンド」を使う）。
 
 ## 関連
 

@@ -100,7 +100,7 @@ def _no_github(monkeypatch) -> None:
 
     **state.py の内部関数の差し替えは持たない。** それは `state_mod` を利用する
     テストだけが必要とする（`_no_github_state`）。ここに混ぜると、monitor.py や
-    measure.py だけを検査するテストまで state.py を読み込む。
+    measure.py だけをチェックするテストまで state.py を読み込む。
     """
     real = subprocess.run
 
@@ -120,10 +120,10 @@ def _no_github_state(request, monkeypatch) -> None:
     """state.py の GitHub 照会を既定で「確かめられなかった」に倒す。
 
     **`state_mod` を要求するテストだけへ適用する。** monitor.py や measure.py だけを
-    検査するテストは `state_mod` を要求しないため、この差し替えを通らず state.py を
+    チェックするテストは `state_mod` を要求しないため、この差し替えを通らず state.py を
     読み込まない。要求するテストでは従来どおり実 GitHub 呼び出しを防ぐ。
 
-    判定は収束を止めない側へ倒すため、検査ジョブを見ない既存のテストは期待値を
+    判定は収束を止めない側へ倒すため、チェックジョブを見ない既存のテストは期待値を
     変えずに通る。
     """
     if "state_mod" not in request.fixturenames:
@@ -133,7 +133,7 @@ def _no_github_state(request, monkeypatch) -> None:
     monkeypatch.setattr(state_mod, "_fetch_pr_metadata", lambda pr, repo=None: None)
     # **取り込みはレビューを投稿する**（#730）。投稿を見ないテストでは、組み立てまでを
     # 本物で通し、送信だけを「届いた」に置き換える。偽の `gh` を要求するテストは
-    # 送信も含めて検査するため置き換えない。
+    # 送信も含めてチェックするため置き換えない。
     if "fake_gh" not in request.fixturenames:
         rp = state_mod.result_posts
         monkeypatch.setattr(rp, "post_review", _post_review_offline(rp))
@@ -174,7 +174,7 @@ def real_github(monkeypatch, state_mod):
 #
 # 待ち行列は上限の応答の形（終了コード・標準出力の `message`・標準エラーの
 # `(HTTP <番号>)`）で判断する。差し替えを関数の単位で行うと、その形そのものを
-# 検査できない。**実物の `subprocess.run` で、模した `gh` を起動する。**
+# チェックできない。**実物の `subprocess.run` で、模した `gh` を起動する。**
 #
 # 上の見張り（`_no_github`）は `subprocess.run` を差し替えて `gh` の実行を落とす。
 # ここで素の実装へ戻すため、**この fixture を使うテストだけ**が見張りの外に出る。

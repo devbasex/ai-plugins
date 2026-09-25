@@ -1,4 +1,4 @@
-"""取得を控えの内側へ入れる（#291、受け入れ条件 1〜3）。
+"""取得をキャッシュの内側へ入れる（#291、受け入れ条件 1〜3）。
 
 上限に達すると入口の取得で止まり、レビューを 1 巡も進められなかった。値を 2 つに分け、
 変わらない値は一度取って状態ファイルへ持つ。
@@ -9,7 +9,7 @@
 | 変わらない | 自分のログイン名・作成者・`base_branch` | 一度取って状態ファイルへ持つ |
 | ラウンドごとに変わる | `head_branch` / 変更ファイル / 未解決スレッド | 取れなければ進行を止めない |
 
-**再開の入口では、控えの対象を 1 つも読み直さない。** 残るのはラウンドごとに変わる値の
+**再開の入口では、キャッシュの対象を 1 つも読み直さない。** 残るのはラウンドごとに変わる値の
 取得だけで、それらは取得できなくても進む側へ倒してある（`_fetch_unresolved_threads` /
 `_sync_worktree`）。
 """
@@ -24,7 +24,7 @@ import pytest
 PR = 2912
 REPO = "devbasex/ai-plugins"
 
-# 控えの対象。再開の入口でこれらを読み直すと、上限のときに入口で止まる。
+# キャッシュの対象。再開の入口でこれらを読み直すと、上限のときに入口で止まる。
 CACHED_LOOKUPS = ("repo view", "api user", f"pulls/{PR}")
 
 
@@ -39,7 +39,7 @@ def _seed_resumable(tmp_dir: pathlib.Path) -> None:
         "current_pr": PR,
         "repo": REPO,
         "tmp_dir": str(tmp_dir),
-        # 控えとして持っている値。再開ではこれを読み、GitHub へは問い合わせない。
+        # キャッシュとして持っている値。再開ではこれを読み、GitHub へは問い合わせない。
         "head_branch": "feat/x",
         "base_branch": "develop",
         "pr_author": "takemi",
@@ -75,7 +75,7 @@ def test_the_repository_falls_back_to_gh_only_when_git_cannot_answer(
     assert state_mod._repo_from_git() is None
 
 
-# ---- 受け入れ条件 1 / 3: 再開の入口は控えを読み直さない ----
+# ---- 受け入れ条件 1 / 3: 再開の入口はキャッシュを読み直さない ----
 
 
 def test_the_resume_path_does_not_look_up_the_cached_values(
@@ -117,7 +117,7 @@ def test_the_resume_survives_the_rate_limit(state_mod, fake_gh, tmp_dir,
     assert f"REPO='{REPO}'" in out or f"REPO={REPO}" in out
 
 
-# ---- 自分のログイン名を控えにする ----
+# ---- 自分のログイン名をキャッシュにする ----
 
 
 def test_the_viewer_login_is_kept_in_the_state(state_mod, tmp_dir, monkeypatch,
@@ -144,14 +144,14 @@ def test_the_viewer_login_is_kept_in_the_state(state_mod, tmp_dir, monkeypatch,
     saved = json.loads(
         (tmp_dir / f"cross-review-pr{PR}-state.json").read_text(encoding="utf-8"))
     assert saved["viewer_login"] == "takemi"
-# ---- 控えを GitHub より先に読む ----
+# ---- キャッシュを GitHub より先に読む ----
 
 
 def test_the_repository_comes_from_the_resume_state_before_github(
         state_mod, fake_gh, tmp_dir, monkeypatch, capsys) -> None:
-    """`origin` を読めない環境でも、控えの `repo` を先に読む。
+    """`origin` を読めない環境でも、キャッシュの `repo` を先に読む。
 
-    落とし先が `gh repo view` だけだと、上限に達している環境では控えを探す前に
+    落とし先が `gh repo view` だけだと、上限に達している環境ではキャッシュを探す前に
     止まる。**#291 が塞ごうとしている状態そのものである。**
     """
     _seed_resumable(tmp_dir)

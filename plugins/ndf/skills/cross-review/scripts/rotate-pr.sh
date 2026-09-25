@@ -84,7 +84,7 @@ load_state() {
   [ -s "$STATE_FILE" ] || { echo "state.json not found: $STATE_FILE" >&2; exit 1; }
   WORKTREE=$(jq -r '.worktree_path' "$STATE_FILE")
   OLD_PR=$(jq -r '.current_pr' "$STATE_FILE")
-  # 待ち行列の宛先と、冪等の照合に使う投稿者。どちらも state の控えから読む。
+  # 待ち行列の宛先と、冪等の照合に使う投稿者。どちらも state のキャッシュから読む。
   REPO=$(jq -r '.repo // ""' "$STATE_FILE")
   VIEWER=$(jq -r '.viewer_login // ""' "$STATE_FILE")
   ROUND_IN_PR=$(jq --argjson p "$OLD_PR" '[.rounds[] | select(.pr == $p)] | length' "$STATE_FILE")

@@ -68,7 +68,7 @@ def assert_no_bare_cd_error(proc: subprocess.CompletedProcess) -> None:
 def test_missing_prerequisite_stops_with_path_error(
     tmp_path: Path, missing_path: Path, extra_args: tuple[str, ...]
 ) -> None:
-    # 現状固定: 必須パスの種類や検査位置によらず、同じ形式のエラー 1 行と
+    # 現状固定: 必須パスの種類やチェック位置によらず、同じ形式のエラー 1 行と
     # 終了コード 1 で停止する。
     plugin_dir = tmp_path / "ndf"
     shutil.copytree(INSTALLER.parents[1], plugin_dir)
@@ -311,13 +311,13 @@ def test_reinstall_removes_deprecated_prompts_and_keeps_user_prompt(tmp_path: Pa
 @pytest.mark.parametrize(
     ("existing", "warn_marker"),
     [
-        # 不正 JSON: 読み込みが例外になり、読めない旨で引き継ぎを断念する。
+        # 不正 JSON: 読み込みが例外になり、読めない旨で引継ぎを断念する。
         ("{ not json", "を読めないため引き継ぎません"),
-        # JSON オブジェクト以外（配列）: dict でないため引き継ぎを断念する。
+        # JSON オブジェクト以外（配列）: dict でないため引継ぎを断念する。
         ("[]", "が JSON オブジェクトではないため引き継ぎません"),
-        # hooks がオブジェクト以外（配列）: その節だけ引き継ぎを断念する。
+        # hooks がオブジェクト以外（配列）: その節だけ引継ぎを断念する。
         ('{"hooks": []}', "の hooks が JSON オブジェクトではないため引き継ぎません"),
-        # mcpServers がオブジェクト以外（文字列）: その節だけ引き継ぎを断念する。
+        # mcpServers がオブジェクト以外（文字列）: その節だけ引継ぎを断念する。
         ('{"mcpServers": "x"}', "の mcpServers が JSON オブジェクトではないため引き継ぎません"),
     ],
 )
@@ -325,7 +325,7 @@ def test_reinstall_with_malformed_agent_config_warns_and_continues(
     tmp_path: Path, existing: str, warn_marker: str
 ) -> None:
     # 既存 ndf.json が不正 JSON・JSON オブジェクト以外・hooks / mcpServers が
-    # オブジェクト以外のとき、引き継ぎを断念して警告を出しつつ導入を続ける経路を固定する。
+    # オブジェクト以外のとき、引継ぎを断念して警告を出しつつ導入を続ける経路を固定する。
     # 終了コードは 0 で、出力された ndf.json は JSON オブジェクトとして読め、
     # テンプレート由来の agentSpawn と userPromptSubmit を必ず持つ。
     project = tmp_path / "project"
@@ -336,7 +336,7 @@ def test_reinstall_with_malformed_agent_config_warns_and_continues(
     proc = run("--project", str(project), "--yes", home=tmp_path)
 
     assert proc.returncode == 0, proc.stderr
-    # 引き継ぎ断念の警告は Python 側の print で標準出力へ出る。
+    # 引継ぎ断念の警告は Python 側の print で標準出力へ出る。
     assert f"WARN: 既存の {agent_file} {warn_marker}" in proc.stdout
     assert_no_bare_cd_error(proc)
 

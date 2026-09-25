@@ -179,7 +179,7 @@ def test_broken_registry_is_treated_as_empty(main_repo: Path) -> None:
 WF_LIB = Path(__file__).resolve().parents[3] / "skills/development-workflow/scripts/lib/workflow-common.sh"
 
 # 実装は `scripts/lib/lock-common.sh` の 1 箇所にあり、2 つの読み込む側が既存の名前へ
-# 結んでいる（#293）。**両方の読み込む側へ同じ検査をかける。** 例外は競合試験で、
+# 結んでいる（#293）。**両方の読み込む側へ同じチェックをかける。** 例外は競合試験で、
 # 共通実装に対して 1 通りだけ回す（下の `test_many_at_once_never_share_the_critical_section`）。
 LOCK_LIBS = [
     pytest.param(LIB, "wt_lock_acquire", "wt_lock_release", id="worktree"),
@@ -285,14 +285,14 @@ def test_the_lock_does_not_leave_noclobber_on_the_caller(
 
 
 def _run_lock_lib(lib: Path, snippet: str) -> subprocess.CompletedProcess:
-    """`lib` を読み込んだうえで `snippet` を bash で実行する。2 つの読み込む側へ同じ検査をかける。"""
+    """`lib` を読み込んだうえで `snippet` を bash で実行する。2 つの読み込む側へ同じチェックをかける。"""
     return subprocess.run(
         ["bash", "-c", f'set -uo pipefail\n. "{lib}"\n{snippet}\n'],
         capture_output=True, text=True,
     )
 
 
-# 判定と取り除きは接頭辞だけが違う。両方の読み込む側へ同じ検査をかける。
+# 判定と取り除きは接頭辞だけが違う。両方の読み込む側へ同じチェックをかける。
 LOCK_HELPERS = [
     pytest.param(LIB, "_wt", id="worktree"),
     pytest.param(WF_LIB, "_wf", id="workflow"),
@@ -346,7 +346,7 @@ def test_a_lock_that_changed_hands_is_never_moved_out(
     # 名前の付け替えは、外へ出す側も戻す側も親のディレクトリの更新時刻を動かす。
     # ロックの中へ関門を置く手は動かさないため、外へ出したことだけを拾える。
     assert holder.stat().st_mtime_ns == parent_before, "外へ出した跡が親のディレクトリに残った"
-    assert (lock / "held").exists(), "持ち主の握りの印が失われた"
+    assert (lock / "held").exists(), "持ち主の握りの目印が失われた"
     assert (lock / "token").read_text(encoding="utf-8").strip() == "new-owner"
     assert (lock / "pid").read_text(encoding="utf-8").strip() == "999999"
 

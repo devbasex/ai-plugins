@@ -90,9 +90,9 @@ def ask_score(
     state: str, instructions: str, criteria: list[str], *,
     post: Post = _post, timeout: int = ASK_TIMEOUT,
 ) -> Optional[tuple[str, float]]:
-    """段階の問い。`(選ばれた段, 確信度)` を返す。失敗は `None`。
+    """段階の問い。`(選ばれた等級, 確信度)` を返す。失敗は `None`。
 
-    段は `probabilities` の最大の位置で決める（`score` は位置の期待値で、段の名前へ
+    等級は `probabilities` の最大の位置で決める（`score` は位置の期待値で、等級の名前へ
     そのまま戻せない）。確信度は応答の `confidence` を使い、無ければ最大の確率を使う。
     """
     body = {"model": MODEL, "state": state,
