@@ -208,3 +208,22 @@ def test_this_repository_declares_one_production_step():
     assert p.returncode == 0, p.stderr
     assert p.stdout.count("段: ") == 1
     assert "--released 10.17.9" in p.stdout
+
+
+def test_wait_and_merge_watches_checks_with_short_interval(monkeypatch):
+    """配布の PR のチェックは短い間隔で読み直し、通った後のマージまでの遅れを小さくする。"""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("release_steps_mod", SCRIPT)
+    mod = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, "release_steps_mod", mod)
+    spec.loader.exec_module(mod)
+    calls, sleeps = [], []
+    seq = [[], [{"name": "t", "bucket": "pending"}], [{"name": "t", "bucket": "pass"}]]
+    monkeypatch.setattr(mod, "pr_check_buckets", lambda root, n: seq.pop(0) if len(seq) > 1 else seq[0])
+    monkeypatch.setattr(mod.time, "sleep", lambda s: sleeps.append(s))
+    monkeypatch.setattr(mod, "run", lambda cmd, **kw: calls.append(cmd) or subprocess.CompletedProcess(cmd, 0, "", ""))
+    monkeypatch.setattr(mod, "merge_commit_of", lambda root, n: "c")
+    assert mod.wait_and_merge(".", 5) == "c"
+    watch = next(c for c in calls if "--watch" in c)
+    assert float(watch[watch.index("-i") + 1]) <= 5
+    assert sleeps and max(sleeps) <= 5

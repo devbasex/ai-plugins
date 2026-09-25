@@ -575,13 +575,14 @@ def pr_check_buckets(root, n):
 
 def wait_and_merge(root, n):
     """PR のチェックを待ち（上限あり）、全部 pass ならマージする。落ちたら失敗したチェック名で止める。"""
-    for _ in range(20):  # 作った直後はチェックがまだ現れないので、現れるまで待つ（上限 5 分）
+    for _ in range(100):  # 作った直後はチェックがまだ現れないので、現れるまで待つ（上限 5 分）
         if pr_check_buckets(root, n):
             break
-        time.sleep(15)
+        time.sleep(3)
     else:
         raise StepError(f"PR #{n} にチェックが現れない")
-    run(["gh", "pr", "checks", str(n), "--watch", "-i", "30"], cwd=root, check=False)
+    # 読み直しの間隔がそのまま「通ってからマージまでの遅れ」になるので短くする
+    run(["gh", "pr", "checks", str(n), "--watch", "-i", "5"], cwd=root, check=False)
     checks = pr_check_buckets(root, n)
     bad = [c.get("name") for c in checks if c.get("bucket") not in ("pass", "skipping")]
     if not checks or bad:
