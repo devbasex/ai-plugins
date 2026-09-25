@@ -100,7 +100,7 @@
 ### 席の名前
 
 **担当の単位は席の名前である。** 形は `<ランタイム名>` か `<ランタイム名>-<2〜9>` で、
-正規表現にすると `^(claude|codex|agy|kiro)(-[2-9])?$`（共通層の `assignment.SEAT_PATTERN`）。
+正規表現にすると `^(claude|codex|agy|kiro)(-[2-9])?$`（共通ライブラリの `assignment.SEAT_PATTERN`）。
 接尾辞の付いた名前は、使える者が足りないラウンドで立てる**同じランタイムの 2 つ目**を指す。
 
 | 現れる場所 | 値の例 |
@@ -212,16 +212,16 @@
   理由に総評へ移した件数（#730）。`comments` は `posted_inline` と同じ値
 - `rounds[].fix.summary_comment_url` — 修正のまとめの投稿の応答が返した参照（#730）
 - `rounds[].verdict` の `queued` — 通ったが待ち行列に投稿が残っているラウンド。収束させない
-- `rounds[].verdict` の `model_confirmed` — 設計 PR のモデルの段で両席が承認したラウンド。抜けずに、修正を
-  挟まずに詳細の段のラウンドへ進む（`judge` は `MODEL_CONFIRMED=1` を出して終了コード 2）
-- `rounds[].stage` — 設計 PR のラウンドの段（`model` / `detail`）。`start-round` が
+- `rounds[].verdict` の `model_confirmed` — 設計 PR のモデルレビューで両席が承認したラウンド。抜けずに、修正を
+  挟まずに詳細レビューのラウンドへ進む（`judge` は `MODEL_CONFIRMED=1` を出して終了コード 2）
+- `rounds[].stage` — 設計 PR のラウンドのレビューの種類（`model` / `detail`）。`start-round` が
   `classifications.review_stage(review_kind, round, design_has_model)` で決めて残し、`STAGE=` で出す。
   1 ラウンド目で `design_has_model` が真なら `model`、ほかの設計 PR は `detail`。実装 PR は持たない
 - `design_has_model` — 設計 PR の変更した設計文書（`-design.md` / `-design-decisions.md`）のどれかに見出し
   `## ドメインモデル` があるか。`init` が決める
-- `review_instructions_by_stage` — 設計 PR の段ごとの観点（`{"model": ..., "detail": ...}`）。`model` は
-  モデルの段の観点と手動の観点、`detail` は `review_instructions` と同じ値。`launch-reviewer.sh` がそのラウンドの
-  `stage` の値を「追加レビュー観点」へ差し込み、この項目か段の無い状態ファイルは `review_instructions` を使う
+- `review_instructions_by_stage` — 設計 PR のレビューの種類ごとの観点（`{"model": ..., "detail": ...}`）。`model` は
+  モデルレビューの観点と手動の観点、`detail` は `review_instructions` と同じ値。`launch-reviewer.sh` がそのラウンドの
+  `stage` の値を「追加レビュー観点」へ差し込み、この項目かレビューの種類の無い状態ファイルは `review_instructions` を使う
 - `sweep` — 最終スイープ後の検証結果。`remaining_open` は GitHub 側で数え直した実数で、
   `declared_remaining_open` は結果ファイルの申告値。両者が食い違う場合は実数を採る
 
@@ -270,8 +270,8 @@ launcher が生成するプロンプトに以下を強制している:
 ## AI が書き出すファイル契約
 
 各 launcher は AI に以下 2 ファイルの書き出しを指示する。**どちらも一時の名前（末尾
-`.tmp`）で書き終えてから、指摘のファイル → 結果ファイルの順に改名させる**。結果ファイルが
-正式の名前で現れたことが、2 つとも書き終えた目印になる。指摘のファイルだけが正式の名前で結果ファイルが
+`.tmp`）で書き終えてから、指摘ファイル → 結果ファイルの順に改名させる**。結果ファイルが
+正式の名前で現れたことが、2 つとも書き終えた目印になる。指摘ファイルだけが正式の名前で結果ファイルが
 無い状態は、結果なしとして扱い投稿を 0 件にする。
 
 | ファイル | 内容 |
@@ -281,7 +281,7 @@ launcher が生成するプロンプトに以下を強制している:
 
 **`comments[]` が持つのは、その担当が出した指摘の全件である**（#156）。位置を持つ指摘は
 インラインとして送られ、位置を持たない指摘と、差分の外を理由に拒まれた要求の指摘は総評へ
-入る。送れた先（`posted_to`）は投稿する側が指摘のファイルへ書き戻す。記録の `comments` は送れた
+入る。送れた先（`posted_to`）は投稿する側が指摘ファイルへ書き戻す。記録の `comments` は送れた
 インラインの数で、指摘の件数とは一致しない。
 
 | 項目 | 何を書くか | 無いときの扱い |
@@ -316,12 +316,12 @@ launcher が生成するプロンプトに以下を強制している:
 ## 投稿の種別ごとの契約
 
 **GitHub へ書くのはレビューを回す側だけで、すべて待ち行列（`scripts/lib/post_queue.py`）を
-通る**（#730）。組み立てと送信は共通層の `scripts/lib/result_posts.py` が持つ。送る前に同じ
+通る**（#730）。組み立てと送信は共通ライブラリの `scripts/lib/result_posts.py` が持つ。送る前に同じ
 ものが先にあるかを照合し、あれば送らずに先客を応答として返す。
 
 | 種別 | 積む側 | 組み立ての元 | 二度書かない照合の鍵 |
 | --- | --- | --- | --- |
-| `review-post` | 指摘の取り込み（`read-result`） | 指摘のファイルと結果ファイル | 投稿者と、本文の先頭行の `## 🤖 cross-review \| round <R> \| <席> \|` までの前方一致（判定の語を含めない） |
+| `review-post` | 指摘の取り込み（`read-result`） | 指摘ファイルと結果ファイル | 投稿者と、本文の先頭行の `## 🤖 cross-review \| round <R> \| <席> \|` までの前方一致（判定の語を含めない） |
 | `review-reply` | 修正の取り込み（`merge-fix`）/ 単独の `fix` | 修正の結果ファイルの `resolved_threads` / `deferred` / `rejected` | 返信先の指摘の識別子と、本文の先頭 80 文字 |
 | `thread-resolve` | 同上 | `resolved_threads`（と、`resolve` が真の見送り・却下） | スレッドの識別子と、すでに決着しているかどうか |
 | `pr-comment` | 同上（修正のまとめ）/ 巻き直し（`rotate-pr.sh`） | 修正の結果ファイルの件数とコミット | 投稿者と、本文の先頭 80 文字（まとめはラウンドとコミットを含む） |
@@ -363,7 +363,7 @@ round エントリを状態ファイルへ保存する前に次を行う。**失
 CLI 自身の上限で結果を書かずに終わったときは `NO_RESULT` のまま `cli_timeout`（#729）。
 監視の標準出力と終了コードは変わらない。
 
-結果の取り込みは結果ファイルを自前で開かず、共通層の `monitor_outcome.read_launch_outcome(tmp_dir,
+結果の取り込みは結果ファイルを自前で開かず、共通ライブラリの `monitor_outcome.read_launch_outcome(tmp_dir,
 "<agent>-review-pr<PR>", result_path)` が返す値（使える結果 `payload` / 理由 `reason` / 監視の詳細
 `detail` / 起動し直しの可否 `relaunch_same_agent`）を読む。結果なしのときは
 `rounds[-1].<agent>` に `intent: "NO_RESULT"`、`no_result_reason: <reason>`、監視の結果ファイルが
@@ -371,9 +371,9 @@ CLI 自身の上限で結果を書かずに終わったときは `NO_RESULT` の
 書かない）。理由の一覧は [01-state-and-review.md](01-state-and-review.md) の「結果を残さなかった
 レビュアーの扱い」にある。
 
-**要約の置き場所は作業ツリーの外である。** `NDF_METRICS_DIR` → `$XDG_STATE_HOME/ndf/metrics` →
+**要約の置き場所は worktree の外である。** `NDF_METRICS_DIR` → `$XDG_STATE_HOME/ndf/metrics` →
 `$HOME/.local/state/ndf/metrics` の順に決まり、`NDF_METRICS=0` のときは書かない。`state.py report`
-の最後の行が、書いた要約のパスか書かなかった理由を出す。束ねるのは共通層の `run_metrics.py aggregate`
+の最後の行が、書いた要約のパスか書かなかった理由を出す。束ねるのは共通ライブラリの `run_metrics.py aggregate`
 （`--since` / `--until` / `--repo` / `--kind` / `--version` / `--by total|round-count|reason`）である。
 
 ## `<worktree-base>` の解決順
@@ -401,8 +401,8 @@ worktree の実パスは `<base>/<owner>--<repo>/pr<PR>` 形式で、リポジ�
 | # | 対策 | スクリプト側で何をするか |
 |---|---|---|
 | 1 | 自分の PR 判定（422 回避） | `gh api user` と `gh pr view --json author` を比較し `is_own_pr` / `event_downgrade` を state.json に書く |
-| 2 | worktree 分離 | `git worktree add <worktree-base>/<owner>--<repo>/pr<PR> <head>` を冪等実行（`<worktree-base>` は `NDF_WORKTREE_BASE` env > `<システム tmpdir>/ndf-worktrees` の優先順で解決）。パスが存在しても現リポジトリの登録済み worktree でなければ `.stale-<ts>` に退避して作り直す。**流用するときは PR の head へ揃える**（前回の実行の残りをレビューさせない。再開の経路も同じ）。`gh pr view --json headRefName,headRefOid,isCrossRepository` で取った基準のコミットへ hard reset し、追跡対象外のファイルを消す（tmp ディレクトリは `-e` で除外。フォーク PR は `refs/pull/<PR>/head` から取り込む）。**同じ同期を `start-round` がラウンドごとに行う。** 作成時と再開時だけでは、修正を作業ツリーの外で行って push したときに 1 つ前の内容をレビューする。head と一致していて変更が無ければ何も発行せず、追跡対象の変更・未 push のコミット・基準を取り込めないときは **exit 8** で止める（1 はループを抜ける値なので使わない）。解決した head branch は `state.json` へ書き戻す（巻き直しで古くなるため）。条件と理由は `docs/01-state-and-review.md` の「ラウンドの開始時の同期」にある |
-| 3 | agy の作業領域 | `launch-agy.sh` が `--add-dir` で作業ツリーを宣言する。**tmp dir は `<worktree>/.cross_review/`** を採用し、宣言する作業領域を 1 つに保つ |
+| 2 | worktree 分離 | `git worktree add <worktree-base>/<owner>--<repo>/pr<PR> <head>` を冪等実行（`<worktree-base>` は `NDF_WORKTREE_BASE` env > `<システム tmpdir>/ndf-worktrees` の優先順で解決）。パスが存在しても現リポジトリの登録済み worktree でなければ `.stale-<ts>` に退避して作り直す。**流用するときは PR の head へ揃える**（前回の実行の残りをレビューさせない。再開の経路も同じ）。`gh pr view --json headRefName,headRefOid,isCrossRepository` で取った基準のコミットへ hard reset し、追跡対象外のファイルを消す（tmp ディレクトリは `-e` で除外。フォーク PR は `refs/pull/<PR>/head` から取り込む）。**同じ同期を `start-round` がラウンドごとに行う。** 作成時と再開時だけでは、修正を worktree の外で行って push したときに 1 つ前の内容をレビューする。head と一致していて変更が無ければ何も発行せず、追跡対象の変更・未 push のコミット・基準を取り込めないときは **exit 8** で止める（1 はループを抜ける値なので使わない）。解決した head branch は `state.json` へ書き戻す（巻き直しで古くなるため）。条件と理由は `docs/01-state-and-review.md` の「ラウンドの開始時の同期」にある |
+| 3 | agy の作業領域 | `launch-agy.sh` が `--add-dir` で worktree を宣言する。**tmp dir は `<worktree>/.cross_review/`** を採用し、宣言する作業領域を 1 つに保つ |
 | 4 | 既存コメント差分 | `fix/scripts/fetch-pr-comments.sh` で 3 ソース (インラインコメント / レビュー body / PR レベルコメント) を一括取得し `$TMP_DIR/cross-review-pr<PR>-existing-comments.txt` に保存し、担当のプロンプトへ**内容をインライン埋め込み**する。**2 ラウンド目以降は `start-round` が `--strict` で取り直す**（1 ソースでも失敗したら前のスナップショットのまま `⚠` で続ける） |
 
 `<worktree-base>` の解決順と worktree の実パスの形はこの文書の「`<worktree-base>` の解決順」にある。
@@ -433,16 +433,16 @@ GitHub は **自分の PR には `REQUEST_CHANGES` でレビューを投稿で�
 
 - `common`: PR 全体の目的、変更範囲、保守性、テスト、ロールバック容易性
 - `docs_only`: ドキュメントのみ PR。企画・説明の妥当性、コード/設定/コマンド/他 docs との整合性
-- `design`: 設計 PR（`issues/` の `-requirements.md` / `-design.md` / `-design-decisions.md`）。3 文書の対応、状態の書き手と読み手の矛盾、外部ツールの挙動の断定に実測の根拠があるか、用語集どおりか、不変条件を破っていないか、コンテキストの境界を越えていないか。2 段で渡す（下の「設計 PR の 2 段」）
+- `design`: 設計 PR（`issues/` の `-requirements.md` / `-design.md` / `-design-decisions.md`）。3 文書の対応、状態の書き手と読み手の矛盾、外部ツールの挙動の断定に実測の根拠があるか、用語集どおりか、不変条件を破っていないか、コンテキストの境界を越えていないか。モデルレビューと詳細レビューに分けて渡す（下の「設計 PR のモデルレビューと詳細レビュー」）
 
-### 設計 PR の 2 段
+### 設計 PR のモデルレビューと詳細レビュー
 
-| 段 | ラウンド | 見るもの | 渡す観点 |
+| レビュー | ラウンド | 見るもの | 渡す観点 |
 | --- | --- | --- | --- |
-| モデル（`model`） | 1 ラウンド目（`design_has_model` が真のとき） | ドメインモデルの節と、用語集の差分だけ | コンテキストの関係の宣言・集約の持ち主・不変条件どうしの矛盾・ドメインイベントの受け手・用語の表と用語集の一致。節の外への指摘は書かない |
-| 詳細（`detail`） | 2 ラウンド目以降（節が無ければ 1 ラウンド目から） | 残りの節 | `design` の観点。ドメインモデルの節は確定したものとして扱う |
+| モデルレビュー（`model`） | 1 ラウンド目（`design_has_model` が真のとき） | ドメインモデルの節と、用語集の差分だけ | コンテキストの関係の宣言・集約の持ち主・不変条件どうしの矛盾・ドメインイベントの受け手・用語の表と用語集の一致。節の外への指摘は書かない |
+| 詳細レビュー（`detail`） | 2 ラウンド目以降（節が無ければ 1 ラウンド目から） | 残りの節 | `design` の観点。ドメインモデルの節は確定したものとして扱う |
 
-モデルの段で両席が承認しても抜けない。関門の数とラウンドの上限（設計は 3）は変えない。
+モデルレビューで両席が承認しても抜けない。承認ゲートの数とラウンドの上限（設計は 3）は変えない。
 - `code`: 設計、正確性、可読性、冗長・重複、言語らしさ、セキュリティ、関数/ファイルの責務とサイズ
 - `db_migration`: データ設計、型、NULL/default/制約/index、既存データ、backfill、ロールバック
 - `test`: テストの仕様性、境界値、失敗系、flaky リスク
