@@ -119,8 +119,10 @@ def _launch(tmp_path, state, round_no):
     (tmp_dir / f"cross-review-pr{PR}-state.json").write_text(json.dumps({**state, "worktree_path": str(worktree)}))
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
-    (bin_dir / "codex").write_text("#!/bin/sh\nexit 0\n")
-    (bin_dir / "codex").chmod(0o755)
+    codex = bin_dir / "codex"
+    if not codex.exists():  # 前の起動の codex が背景で動いている間に書き直すと ETXTBSY になる
+        codex.write_text("#!/bin/sh\nexit 0\n")
+        codex.chmod(0o755)
     subprocess.run(["bash", str(SCRIPTS / "launch-reviewer.sh"), "codex", str(PR), str(round_no)],
                    env={**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
                         "CROSS_REVIEW_TMP_DIR": str(tmp_dir)},
