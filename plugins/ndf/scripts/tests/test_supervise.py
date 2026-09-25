@@ -640,9 +640,9 @@ def test_new_release_dev_and_prod(tmp_path):
     plan = json.loads((tmp_path / "p.json").read_text())
     st = {s["id"]: s for s in plan["steps"]}
     assert [s["id"] for s in plan["steps"]] == ["bump", "changelog", "notes", "snapshot", "sync", "release",
-                                                "verify", "judge", "fix"]
+                                                "verify", "cleanup", "judge", "fix"]
     assert "--ref main" in st["verify"]["cmd"] and st["verify"]["stage"] == "リリース後テスト"
-    assert st["verify"]["next"] == "end" and "facts" not in st
+    assert st["verify"]["next"] == "cleanup" and "facts" not in st
 
 
 def test_new_release_requires_version():
@@ -921,3 +921,108 @@ def test_work_and_judge_prompts_get_separate_work_dirs_per_plan(tmp_path, monkey
     assert f"作業ディレクトリ: {dirs[0]}" in prompts[0] and str(dirs[1]) not in prompts[0]
     assert f"作業ディレクトリ: {dirs[1]}" in prompts[1] and str(dirs[0]) not in prompts[1]
     assert dirs[0] != dirs[1]
+
+
+def release_plan(tmp_path, channel, version, *extra):
+    out = tmp_path / f"release-{channel}.json"
+    p = cli("new", "release", "--version", version, "--channel", channel, *extra,
+            "--worktree", f"/r/.worktrees/release/v{version}", "--out", str(out))
+    assert p.returncode == 0, p.stderr
+    return out
+
+
+def test_queue_then_fills_prs_from_reports(tmp_path, fakes, monkeypatch):
+    impl = []
+    for name, pr in (("i1", "https://github.com/o/r/pull/1101"), ("i2", "1102")):
+        f = tmp_path / f"{name}.json"
+        f.write_text(json.dumps({"フェーズ": "試験", "課題": [], "作業場所": str(tmp_path), "Pull Request": pr,
+                                 "steps": [{"id": "w", "type": "work", "prompt": "作る", "next": "end"}]}))
+        impl.append(str(f))
+    rel = release_plan(tmp_path, "dev", "10.17.99-dev.1", "--prs", "1052", "--prs-from-queue")
+    assert sv.QUEUE_PRS in rel.read_text()
+    real, seen = sv.run_batch, {}
+
+    def batch(plans, m, poll):
+        if str(rel) in plans:  # 後続の配布は流さず、流す時の計画を読む
+            seen.update({s["id"]: s for s in json.loads(rel.read_text())["steps"]})
+            return [{"plan": p, "result": "完了"} for p in plans]
+        return real(plans, m, poll)
+    monkeypatch.setattr(sv, "run_batch", batch)
+    done = tmp_path / "done.json"
+    res = sv.cmd_queue(impl, 3, poll=0.1, then=[str(rel)], done=str(done))
+    assert res["status"] == "ok", res
+    assert "--prs 1052 1101 1102" in seen["changelog"]["cmd"] and "--prs 1052 1101 1102" in seen["facts"]["cmd"]
+    assert json.loads(sv.queue_plans_path(done).read_text())["plans"] == [*impl, str(rel)]
+
+
+def test_queue_then_prs_from_queue_without_pr_is_not_run(tmp_path, monkeypatch):
+    a = queue_plan(tmp_path, "a", "true")
+    rel = release_plan(tmp_path, "dev", "10.17.99-dev.1", "--prs-from-queue")
+    res = sv.cmd_queue([a], 3, poll=0.1, then=[str(rel)])
+    last = res["items"][-1]
+    assert last["result"] == sv.NOT_RUN and "Pull Request" in last["reason"]
+
+
+def test_new_release_requires_prs_or_from_queue(tmp_path):
+    p = cli("new", "release", "--version", "1.0.0", "--channel", "prod", "--worktree", "/r/.worktrees/x")
+    assert p.returncode == 2
+
+
+def test_prod_release_ends_with_cleanup(tmp_path):
+    steps = {s["id"]: s for s in json.loads(release_plan(tmp_path, "prod", "10.17.99", "--prs", "1060").read_text())[
+        "steps"]}
+    order, sid = [], "bump"
+    while sid != "end":
+        order.append(sid)
+        sid = steps[sid]["next"]
+    assert order[-2:] == ["verify", "cleanup"]
+    cmd = steps["cleanup"]["cmd"]
+    assert "merged-steps.py cleanup" in cmd and "--head release/v10.17.99" in cmd and "1060" in cmd
+    assert steps["cleanup"]["cwd"] == "/r" and "cleanup" in steps["judge"]["choices"]
+    dev = {s["id"] for s in json.loads(release_plan(tmp_path, "dev", "10.17.99-dev.1", "--prs", "1").read_text())[
+        "steps"]}
+    assert "cleanup" not in dev
+
+
+def wait_setup(tmp_path, plans):
+    done = tmp_path / "q" / "done.json"
+    sv.write_atomic(sv.queue_plans_path(done), json.dumps(
+        {"started": "t0", "plans": plans, "offsets": {p: sv.progress_size(p) for p in plans}}))
+    return done
+
+
+def wait_cli(done, *args):
+    p = cli("wait", str(done), "--poll", "0.05", *args)
+    lines = p.stdout.splitlines()
+    assert len(lines) == 2, p.stdout + p.stderr
+    return p.returncode, lines[0], json.loads(lines[1])
+
+
+def test_wait_returns_0_on_done(tmp_path):
+    done = wait_setup(tmp_path, [])
+    sv.write_atomic(done, json.dumps({"tool": "supervise-queue", "status": "gate", "summary": "1 本: 関門 1"}))
+    code, summary, res = wait_cli(done)
+    assert code == sv.WAIT_DONE == 0 and "関門 1" in summary
+    assert res["metrics"]["event"] == "done" and res["metrics"]["queue_status"] == "gate"
+
+
+def test_wait_returns_20_on_attention_then_continues(tmp_path):
+    plan = queue_plan(tmp_path, "a", "true")
+    prog = sv.state_dir_of(plan) / "progress.jsonl"
+    prog.parent.mkdir()
+    prog.write_text(json.dumps({"kind": "attention", "step": "old", "text": "前の queue"}) + "\n")
+    done = wait_setup(tmp_path, [plan])
+    with open(prog, "a") as f:
+        f.write(json.dumps({"kind": "step", "step": "t"}) + "\n")
+        f.write(json.dumps({"kind": "attention", "step": "facts", "reason": "関門", "text": "提示物"}) + "\n")
+    code, summary, res = wait_cli(done, "--timeout", "5")
+    assert code == sv.WAIT_ATTENTION == 20 and "facts" in summary
+    assert [i["step"] for i in res["items"]] == ["facts"]
+    # 同じ行は 2 度知らせず、続きから待つ（ここでは上限まで）
+    code, _, res = wait_cli(done, "--timeout", "0.2")
+    assert code == sv.WAIT_TIMEOUT == 3 and res["metrics"]["event"] == "timeout"
+
+
+def test_wait_returns_3_on_timeout_before_queue_starts(tmp_path):
+    code, summary, res = wait_cli(tmp_path / "none.json", "--timeout", "0.1")
+    assert code == 3 and res["status"] == "stopped"
