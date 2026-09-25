@@ -177,18 +177,16 @@ def _pwk_body_check_autouse(request) -> Iterator[None]:
             # page が既に閉じられている場合などは黙殺
             pass
 
-        if not ev.body_check_violations:
-            return
+        if ev.body_check_violations:
+            _write_jsonl(ev)
 
-        _write_jsonl(ev)
-
-        ev.log_lines.append(
-            f"[body_check] {len(ev.body_check_violations)} 件の違反: "
-            + _format_violation_summary(ev.body_check_violations)
-        )
-
-        if config.body_check.fail_on_match:
-            pytest.fail(
-                f"[body_check] {len(ev.body_check_violations)} 件の本文エラーを検出: "
+            ev.log_lines.append(
+                f"[body_check] {len(ev.body_check_violations)} 件の違反: "
                 + _format_violation_summary(ev.body_check_violations)
             )
+
+            if config.body_check.fail_on_match:
+                pytest.fail(
+                    f"[body_check] {len(ev.body_check_violations)} 件の本文エラーを検出: "
+                    + _format_violation_summary(ev.body_check_violations)
+                )
