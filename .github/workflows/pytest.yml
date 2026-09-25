@@ -27,11 +27,38 @@ on:
       - "pyproject.toml"
 
 jobs:
+  # 配布の PR（版数と説明だけの差分、または develop で通ったコミットを進めるだけの main 宛の
+  # PR）では重いジョブを省く（#1055）。判定は scripts/ci-heavy-skip.py が差分と develop の
+  # push の結果から行う。push では常に回す（develop で通ったという記録を省かない結果にするため）
+  ci-scope:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      skip: ${{ steps.decide.outputs.skip }}
+    steps:
+      - uses: actions/checkout@v4
+        if: github.event_name == 'pull_request'
+        with:
+          fetch-depth: 0
+      - id: decide
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python3 scripts/ci-heavy-skip.py --workflow pytest.yml
+          --base "${{ github.event.pull_request.base.sha }}"
+          --head "${{ github.event.pull_request.head.sha }}"
+
   # ファイル単位で 2 つのジョブへ分けて回す（#882）。割り当ては根の conftest.py が
   # SHARD_TOTAL / SHARD_INDEX から決める。各ジョブの中は -n auto で runner のコア数だけ
   # 並列に回す（pytest-xdist は --project が指す pyproject.toml の依存に入っている）
   pytest-shard:
     name: pytest (${{ matrix.shard }}/2)
+    needs: ci-scope
+    # 判定が落ちても回す（省くのは判定が skip=true を返したときだけ）
+    if: ${{ !cancelled() && needs.ci-scope.outputs.skip != 'true' }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -56,10 +83,13 @@ jobs:
 
   # ruleset の必須の検査は `pytest` という名前の結果を 1 つ待つ。分けたジョブの結果を
   # ここで 1 つにまとめる。名前を変えると ruleset の変更が要る。
-  # always() で分けたジョブが落ちても走らせ、失敗・取り消しを失敗として返す
+  # always() で分けたジョブが落ちても走らせ、失敗・取り消しを失敗として返す。
+  # 判定が省いたときは分けたジョブが skipped になり、ここは成功を返す
   pytest:
-    needs: pytest-shard
+    needs: [ci-scope, pytest-shard]
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - run: test "${{ needs.pytest-shard.result }}" = success
+      - run: >-
+          test "${{ needs.pytest-shard.result }}" = success ||
+          { test "${{ needs.ci-scope.outputs.skip }}" = true && test "${{ needs.pytest-shard.result }}" = skipped; }

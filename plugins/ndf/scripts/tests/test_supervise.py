@@ -276,9 +276,9 @@ def test_new_impl_writes_plan(tmp_path):
     assert res["status"] == "ok"
     plan = json.loads(out.read_text())
     ids = [s["id"] for s in plan["steps"]]
-    assert ids[0] == "impl" and ids.index("test-limited") < ids.index("test-all") < ids.index("pr") < ids.index("merge")
+    assert ids[0] == "impl" and ids.index("test-limited") < ids.index("pr") < ids.index("test-all") < ids.index("merge")
     steps = {s["id"]: s for s in plan["steps"]}
-    assert steps["impl"]["issues"] is True and steps["impl"]["prompt"] == "指示"
+    assert steps["impl"]["issues"] is True and steps["impl"]["prompt"].startswith("指示\n")
     assert steps["sync"]["preset"] == "sync-check"
     assert "plugins/ndf/scripts/tests" in steps["test-limited"]["cmd"] and steps["test-limited"]["rerun_failed"]
     assert plan["branch"] == "feat/issue-858-x"
@@ -640,9 +640,9 @@ def test_new_release_dev_and_prod(tmp_path):
     plan = json.loads((tmp_path / "p.json").read_text())
     st = {s["id"]: s for s in plan["steps"]}
     assert [s["id"] for s in plan["steps"]] == ["bump", "changelog", "notes", "snapshot", "sync", "release",
-                                                "verify", "judge", "fix"]
+                                                "verify", "cleanup", "judge", "fix"]
     assert "--ref main" in st["verify"]["cmd"] and st["verify"]["stage"] == "リリース後テスト"
-    assert st["verify"]["next"] == "end" and "facts" not in st
+    assert st["verify"]["next"] == "cleanup" and "facts" not in st
 
 
 def test_new_release_requires_version():
@@ -921,3 +921,185 @@ def test_work_and_judge_prompts_get_separate_work_dirs_per_plan(tmp_path, monkey
     assert f"作業ディレクトリ: {dirs[0]}" in prompts[0] and str(dirs[1]) not in prompts[0]
     assert f"作業ディレクトリ: {dirs[1]}" in prompts[1] and str(dirs[0]) not in prompts[1]
     assert dirs[0] != dirs[1]
+
+
+def release_plan(tmp_path, channel, version, *extra):
+    out = tmp_path / f"release-{channel}.json"
+    p = cli("new", "release", "--version", version, "--channel", channel, *extra,
+            "--worktree", f"/r/.worktrees/release/v{version}", "--out", str(out))
+    assert p.returncode == 0, p.stderr
+    return out
+
+
+def test_queue_then_fills_prs_from_reports(tmp_path, fakes, monkeypatch):
+    impl = []
+    for name, pr in (("i1", "https://github.com/o/r/pull/1101"), ("i2", "1102")):
+        f = tmp_path / f"{name}.json"
+        f.write_text(json.dumps({"フェーズ": "試験", "課題": [], "作業場所": str(tmp_path), "Pull Request": pr,
+                                 "steps": [{"id": "w", "type": "work", "prompt": "作る", "next": "end"}]}))
+        impl.append(str(f))
+    rel = release_plan(tmp_path, "dev", "10.17.99-dev.1", "--prs", "1052", "--prs-from-queue")
+    assert sv.QUEUE_PRS in rel.read_text()
+    real, seen = sv.run_batch, {}
+
+    def batch(plans, m, poll):
+        if str(rel) in plans:  # 後続の配布は流さず、流す時の計画を読む
+            seen.update({s["id"]: s for s in json.loads(rel.read_text())["steps"]})
+            return [{"plan": p, "result": "完了"} for p in plans]
+        return real(plans, m, poll)
+    monkeypatch.setattr(sv, "run_batch", batch)
+    done = tmp_path / "done.json"
+    res = sv.cmd_queue(impl, 3, poll=0.1, then=[str(rel)], done=str(done))
+    assert res["status"] == "ok", res
+    assert "--prs 1052 1101 1102" in seen["changelog"]["cmd"] and "--prs 1052 1101 1102" in seen["facts"]["cmd"]
+    assert json.loads(sv.queue_plans_path(done).read_text())["plans"] == [*impl, str(rel)]
+
+
+def test_queue_then_prs_from_queue_without_pr_is_not_run(tmp_path, monkeypatch):
+    a = queue_plan(tmp_path, "a", "true")
+    rel = release_plan(tmp_path, "dev", "10.17.99-dev.1", "--prs-from-queue")
+    res = sv.cmd_queue([a], 3, poll=0.1, then=[str(rel)])
+    last = res["items"][-1]
+    assert last["result"] == sv.NOT_RUN and "Pull Request" in last["reason"]
+
+
+def test_new_release_requires_prs_or_from_queue(tmp_path):
+    p = cli("new", "release", "--version", "1.0.0", "--channel", "prod", "--worktree", "/r/.worktrees/x")
+    assert p.returncode == 2
+
+
+def test_prod_release_ends_with_cleanup(tmp_path):
+    steps = {s["id"]: s for s in json.loads(release_plan(tmp_path, "prod", "10.17.99", "--prs", "1060").read_text())[
+        "steps"]}
+    order, sid = [], "bump"
+    while sid != "end":
+        order.append(sid)
+        sid = steps[sid]["next"]
+    assert order[-2:] == ["verify", "cleanup"]
+    cmd = steps["cleanup"]["cmd"]
+    assert "merged-steps.py cleanup" in cmd and "--head release/v10.17.99" in cmd and "1060" in cmd
+    assert steps["cleanup"]["cwd"] == "/r" and "cleanup" in steps["judge"]["choices"]
+    dev = {s["id"] for s in json.loads(release_plan(tmp_path, "dev", "10.17.99-dev.1", "--prs", "1").read_text())[
+        "steps"]}
+    assert "cleanup" not in dev
+
+
+def wait_setup(tmp_path, plans):
+    done = tmp_path / "q" / "done.json"
+    sv.write_atomic(sv.queue_plans_path(done), json.dumps(
+        {"started": "t0", "plans": plans, "offsets": {p: sv.progress_size(p) for p in plans}}))
+    return done
+
+
+def wait_cli(done, *args):
+    p = cli("wait", str(done), "--poll", "0.05", *args)
+    lines = p.stdout.splitlines()
+    assert len(lines) == 2, p.stdout + p.stderr
+    return p.returncode, lines[0], json.loads(lines[1])
+
+
+def test_wait_returns_0_on_done(tmp_path):
+    done = wait_setup(tmp_path, [])
+    sv.write_atomic(done, json.dumps({"tool": "supervise-queue", "status": "gate", "summary": "1 本: 関門 1"}))
+    code, summary, res = wait_cli(done)
+    assert code == sv.WAIT_DONE == 0 and "関門 1" in summary
+    assert res["metrics"]["event"] == "done" and res["metrics"]["queue_status"] == "gate"
+
+
+def test_wait_returns_20_on_attention_then_continues(tmp_path):
+    plan = queue_plan(tmp_path, "a", "true")
+    prog = sv.state_dir_of(plan) / "progress.jsonl"
+    prog.parent.mkdir()
+    prog.write_text(json.dumps({"kind": "attention", "step": "old", "text": "前の queue"}) + "\n")
+    done = wait_setup(tmp_path, [plan])
+    with open(prog, "a") as f:
+        f.write(json.dumps({"kind": "step", "step": "t"}) + "\n")
+        f.write(json.dumps({"kind": "attention", "step": "facts", "reason": "関門", "text": "提示物"}) + "\n")
+    code, summary, res = wait_cli(done, "--timeout", "5")
+    assert code == sv.WAIT_ATTENTION == 20 and "facts" in summary
+    assert [i["step"] for i in res["items"]] == ["facts"]
+    # 同じ行は 2 度知らせず、続きから待つ（ここでは上限まで）
+    code, _, res = wait_cli(done, "--timeout", "0.2")
+    assert code == sv.WAIT_TIMEOUT == 3 and res["metrics"]["event"] == "timeout"
+
+
+def test_wait_returns_3_on_timeout_before_queue_starts(tmp_path):
+    code, summary, res = wait_cli(tmp_path / "none.json", "--timeout", "0.1")
+    assert code == 3 and res["status"] == "stopped"
+
+# --- 機械で組む指示文と説明文（#1054）---
+
+def test_new_impl_builds_prompt_from_issue_and_excludes_other_plans(tmp_path):
+    other = tmp_path / "plan-1053.json"
+    other.write_text(json.dumps({"フェーズ": "実装", "課題": [1053], "触るファイル": ["a.py", "b.py"], "steps": []}))
+    done = tmp_path / "plan-1050.json"
+    done.write_text(json.dumps({"フェーズ": "実装", "課題": [1050], "触るファイル": ["done.py"], "steps": []}))
+    (tmp_path / "plan-1050-state").mkdir()
+    (tmp_path / "plan-1050-state" / "report.md").write_text("## フェーズの報告\n\n- 結果: 完了\n")
+    out = tmp_path / "plan-1054.json"
+    p = cli("new", "impl", "--issue", "1054", "--worktree", "/w", "--tests", "t", "--title", "Add: x",
+            "--files", "c.py", "--out", str(out))
+    assert p.returncode == 0, p.stderr
+    plan = json.loads(out.read_text())
+    prompt = plan["steps"][0]["prompt"]
+    assert "gh issue view 1054" in prompt and "c.py" in prompt
+    assert "並行して別の計画が次を触る。それらは変えない: a.py, b.py（#1053）" in prompt
+    assert "done.py" not in prompt
+    assert "Closes" in prompt and "push しない" in prompt and "今の決まりだけ" in prompt
+    assert plan["触るファイル"] == ["c.py"]
+    # --prompt を渡しても共通の規則と除外は足す
+    p = cli("new", "impl", "--issue", "1054", "--worktree", "/w", "--tests", "t", "--title", "Add: x",
+            "--prompt", "指示", "--out", str(out))
+    prompt = json.loads(out.read_text())["steps"][0]["prompt"]
+    assert prompt.startswith("指示\n") and "a.py, b.py（#1053）" in prompt and "push しない" in prompt
+
+
+def test_new_impl_opens_pr_before_test_all(tmp_path):
+    out = tmp_path / "plan.json"
+    p = cli("new", "impl", "--issue", "1", "--worktree", "/w", "--tests", "t", "--title", "T", "--out", str(out))
+    assert p.returncode == 0, p.stderr
+    steps = json.loads(out.read_text())["steps"]
+    st = {s["id"]: s for s in steps}
+    assert st["test-limited"]["next"] == "pr" and st["pr"]["next"] == "test-all"
+    assert st["doc-lint"]["next"] == "ready" and st["ready"]["next"] == "merge"
+    assert "git push" in st["ready"]["cmd"] and "gh pr ready {pr}" in st["ready"]["cmd"]
+    assert st["fix"]["next"] == "test-limited"
+    assert set(st["judge"]["choices"]) <= set(st) | {"stop"}
+
+
+def test_new_release_notes_and_explain_are_run_steps(tmp_path):
+    p = cli("new", "release", "--version", "10.17.11-dev.1", "--prs", "995", "997", "--channel", "dev",
+            "--worktree", "/r/.worktrees/release/v10.17.11-dev.1", "--out", str(tmp_path / "d.json"))
+    assert p.returncode == 0, p.stderr
+    st = {s["id"]: s for s in json.loads((tmp_path / "d.json").read_text())["steps"]}
+    assert not [s for s in st.values() if s["type"] == "work" and s["id"] in ("notes", "explain")]
+    assert "release-steps.py notes --version 10.17.11-dev.1 --prs 995 997" in st["notes"]["cmd"]
+    assert "git commit" in st["notes"]["cmd"]
+    assert "--approval issues/approval-ndf-v10.17.11.md" in st["explain"]["cmd"]
+    assert "notes" in st["judge"]["choices"] and "explain" in st["judge"]["choices"]
+    p = cli("new", "release", "--version", "10.17.11", "--prs", "995", "--channel", "prod",
+            "--worktree", "/r/.worktrees/release/v10.17.11", "--out", str(tmp_path / "p.json"))
+    st = {s["id"]: s for s in json.loads((tmp_path / "p.json").read_text())["steps"]}
+    assert st["notes"]["type"] == "run" and st["notes"]["next"] == "snapshot"
+
+
+def test_pr_body_has_user_changes_section(tmp_path, monkeypatch):
+    root, body = pr_repo(tmp_path, monkeypatch)
+    plan = {"フェーズ": "実装", "課題": [1], "作業場所": str(root), "steps": [
+        {"id": "pr", "type": "pr", "base": "develop", "body": "template", "title": "T",
+         "changes": "計画を課題番号だけで作れる", "next": "end"}]}
+    assert "結果: 完了" in sv.Supervisor(plan, tmp_path / "state").run()
+    assert "## 利用者向けの変化\n\n- 計画を課題番号だけで作れる\n" in body.read_text()
+
+
+def test_pr_body_from_llm_keeps_user_changes_section(tmp_path, monkeypatch):
+    root, body = pr_repo(tmp_path, monkeypatch)
+    fake = tmp_path / "claude.py"
+    fake.write_text("import json, sys\nsys.stdin.read()\n"
+                    "print(json.dumps({'result': '## 概要\\n\\n本文。', 'usage': {}, 'total_cost_usd': 0}))\n")
+    monkeypatch.setenv("NDF_SUPERVISE_CLAUDE", f"{PY} {fake}")
+    plan = {"フェーズ": "実装", "課題": [1], "作業場所": str(root), "steps": [
+        {"id": "pr", "type": "pr", "base": "develop", "title": "題名だけ", "next": "end"}]}
+    assert "結果: 完了" in sv.Supervisor(plan, tmp_path / "state").run()
+    got = body.read_text()
+    assert "## 利用者向けの変化\n\n- 題名だけ" in got and "本文。" in got

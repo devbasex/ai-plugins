@@ -26,6 +26,12 @@
     python3 release-steps.py changelog      --version <版> --prs <PR番号>... [--plugin ndf] [--root <dir>]
     python3 release-steps.py release        --version <版> --channel dev|prod [--plugins ndf,...] [--root <dir>]
     python3 release-steps.py approval-facts --version <版> --prs <PR番号>... [--prev-tag <タグ>] [--root <dir>]
+    python3 release-steps.py notes          --version <版> --prs <PR番号>... [--approval <提示物>]
+                                            [--verified claude,codex,kiro] [--ref develop] [--plugin ndf] [--root <dir>]
+
+notes は PR 本文の `## 利用者向けの変化` の節（無い・「無し」の PR は題名）から、CHANGELOG.md の版の節と
+plugin の README の `## v<版> へ更新するとき` の節を組み直す。`--approval` を渡すと、代わりに本番承認の提示物の
+「配る中身」「検証への配布で確かめたこと」の欄と、PR 本文の `## 未検証・残る危険` を集めた節を書く。
 """
 from __future__ import annotations
 
@@ -575,13 +581,14 @@ def pr_check_buckets(root, n):
 
 def wait_and_merge(root, n):
     """PR のチェックを待ち（上限あり）、全部 pass ならマージする。落ちたら失敗したチェック名で止める。"""
-    for _ in range(20):  # 作った直後はチェックがまだ現れないので、現れるまで待つ（上限 5 分）
+    for _ in range(100):  # 作った直後はチェックがまだ現れないので、現れるまで待つ（上限 5 分）
         if pr_check_buckets(root, n):
             break
-        time.sleep(15)
+        time.sleep(3)
     else:
         raise StepError(f"PR #{n} にチェックが現れない")
-    run(["gh", "pr", "checks", str(n), "--watch", "-i", "30"], cwd=root, check=False)
+    # 読み直しの間隔がそのまま「通ってからマージまでの遅れ」になるので短くする
+    run(["gh", "pr", "checks", str(n), "--watch", "-i", "5"], cwd=root, check=False)
     checks = pr_check_buckets(root, n)
     bad = [c.get("name") for c in checks if c.get("bucket") not in ("pass", "skipping")]
     if not checks or bad:
@@ -706,8 +713,8 @@ def cmd_approval_facts(a):
         targets=[{"url": compare, "title": f"{prev} → develop（{dev[:8]}）", "base_head": "main ← develop"}],
         change=f"`main...develop` の差分 {files} ファイル / +{ins} / −{dels}",
         judge=[("版数", a.version), ("含む PR", "\n".join(rows) or "—"),
-               ("配る中身", "（LLM が更新案内から書き足す）"),
-               ("検証への配布で確かめたこと", "（LLM が release-verification の結果から書き足す）")],
+               ("配る中身", NOTES_PENDING),
+               ("検証への配布で確かめたこと", NOTES_PENDING)],
         consent=[f"ndf v{a.version} を main へ出し、タグ {cur_tag} と GitHub Release を作る"],
         rollback=(f"タグ {cur_tag} と GitHub Release を消し、main を {prev} の内容へ戻す PR を出す。"
                   "導入済みの利用者の環境は利用者の側の操作（前の版の導入し直し）でしか戻せない。"))
@@ -715,6 +722,136 @@ def cmd_approval_facts(a):
                 {"files": files, "insertions": ins, "deletions": dels, "prev_tag": prev, "compare": compare},
                 path, f"利用者の承認を得たら release-steps.py release --version {a.version} --channel prod"),
          EXIT_GATE)
+
+
+CHANGES_HEADING = "## 利用者向けの変化"
+RISKS_HEADING = "## 未検証・残る危険"
+NOTES_PENDING = "（release-steps.py notes --approval が PR 本文の「利用者向けの変化」から書く）"
+RUNTIME_NAMES = {"claude": "Claude Code", "codex": "Codex", "kiro": "Kiro", "agy": "Antigravity"}
+
+
+def body_section(body, heading):
+    """Markdown の本文から heading の節の中身の行（空行を除く）を返す。"""
+    out, inside = [], False
+    for line in (body or "").splitlines():
+        if line.startswith("## "):
+            inside = line.strip() == heading
+            continue
+        if inside and line.strip():
+            out.append(line.rstrip())
+    return out
+
+
+def change_items(lines, n):
+    """節の行を「- 本文（#n）」の箇条へ直す。続きの行（字下げ）は前の項目へつなぐ。「無し」だけなら空。"""
+    items = []
+    for line in lines:
+        text = line.strip()
+        bullet = re.match(r"^[-*]\s+(.*)$", text)
+        if bullet or not items or not line[:1].isspace():
+            items.append((bullet.group(1) if bullet else text).strip())
+        else:
+            items[-1] += " " + text
+    items = [i for i in items if i and i not in ("無し", "なし")]
+    return [i if f"#{n}" in i else f"{i}（#{n}）" for i in items]
+
+
+def pr_notes(root, prs):
+    """PR ごとに (番号, 利用者向けの変化の箇条, 未検証・残る危険の箇条, 題名で代えたか) を返す。"""
+    out = []
+    for n in prs:
+        d = gh_json(root, ["pr", "view", str(n), "--json", "title,body"], f"gh pr view {n}")
+        if not isinstance(d, dict) or not isinstance(d.get("title"), str):
+            raise StepError(f"gh pr view {n} の出力を読めない", 2)
+        body = d.get("body") or ""
+        items = change_items(body_section(body, CHANGES_HEADING), n)
+        risks = change_items(body_section(body, RISKS_HEADING), n)
+        out.append((n, items or [f"{d['title'].strip()}（#{n}）"], risks, not items))
+    return out
+
+
+def replace_section(lines, at, block):
+    """lines[at] の見出しから次の `## ` までの中身を block に差し替える。"""
+    end = next((j for j in range(at + 1, len(lines)) if lines[j].startswith("## ")), len(lines))
+    lines[at + 1:end] = [""] + block + [""]
+
+
+def write_notes(root, version, plugin, bullets):
+    items = []
+    cl = root / "CHANGELOG.md"
+    if not cl.is_file():
+        raise StepError("CHANGELOG.md が無い", EXIT_PRECONDITION)
+    lines = cl.read_text(encoding="utf-8").split("\n")
+    head = f"## [{plugin} {base_of(version)}]"
+    at = next((i for i, l in enumerate(lines) if l == head or l.startswith(head + " ")), None)
+    if at is None:
+        raise StepError(f"CHANGELOG.md に {head} の節が無い（先に changelog を走らせる）", EXIT_PRECONDITION)
+    replace_section(lines, at, bullets)
+    cl.write_text("\n".join(lines), encoding="utf-8")
+    items.append({"kind": "section", "name": "CHANGELOG.md", "result": "replaced", "heading": lines[at],
+                  "lines": len(bullets)})
+    try:
+        pdir = plugin_dir(root, plugin)
+    except StepError:
+        pdir = None
+    readme = pdir / "README.md" if pdir else None
+    h = f"## v{version} へ更新するとき"
+    if readme and readme.is_file():
+        rl = readme.read_text(encoding="utf-8").split("\n")
+        if h in rl:
+            replace_section(rl, rl.index(h), bullets)
+            readme.write_text("\n".join(rl), encoding="utf-8")
+            items.append({"kind": "section", "name": readme.relative_to(root).as_posix(), "result": "replaced",
+                          "heading": h, "lines": len(bullets)})
+    return items
+
+
+def cell(text):
+    return text.replace("|", "\\|").replace("\n", "<br>")
+
+
+def write_approval(path, version, bullets, risks, verified, ref):
+    if not path.is_file():
+        raise StepError(f"提示物 {path} が無い（先に approval-facts を走らせる）", EXIT_PRECONDITION)
+    names = "・".join(RUNTIME_NAMES.get(r, r) for r in verified)
+    check = (f"{names} の {len(verified)} 経路で {ref} から ndf {version} を導入し、版と中身が一致した"
+             f"（release-verification-steps.py verify-install）" if verified else "—")
+    rows = {"配る中身": "\n".join(bullets) or "—", "検証への配布で確かめたこと": check}
+    lines = path.read_text(encoding="utf-8").split("\n")
+    done = []
+    for i, line in enumerate(lines):
+        for key, value in rows.items():
+            if line.startswith(f"| {key} |"):
+                lines[i] = f"| {key} | {cell(value)} |"
+                done.append(key)
+    missing = [k for k in rows if k not in done]
+    if missing:
+        raise StepError(f"提示物に欄が無い: {', '.join(missing)}", EXIT_PRECONDITION)
+    if RISKS_HEADING not in lines:
+        at = next((i for i, l in enumerate(lines) if l == "## 同意を求めること"), len(lines))
+        lines[at:at] = [RISKS_HEADING, "", *(risks or ["- PR の本文に記載が無い"]), ""]
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return [{"kind": "cell", "name": k, "result": "written"} for k in rows] + [
+        {"kind": "section", "name": RISKS_HEADING, "result": "written", "lines": len(risks)}]
+
+
+def cmd_notes(a):
+    root = git_root(a.root)
+    notes = pr_notes(root, a.prs)
+    bullets = [f"- {i}" for _, items, _, _ in notes for i in items]
+    risks = [f"- {i}" for _, _, rs, _ in notes for i in rs]
+    fallback = sum(1 for *_, by_title in notes if by_title)
+    if a.approval:
+        path = Path(a.approval)
+        path = path if path.is_absolute() else root / path
+        verified = [r for r in (a.verified or "").split(",") if r]
+        items = write_approval(path, a.version, bullets, risks, verified, a.ref)
+        emit(result(TOOL, "ok", f"提示物の欄を {len(a.prs)} 件の PR から書いた", items,
+                    {"version": a.version, "prs": len(a.prs), "lines": len(bullets), "approval": str(path)}))
+        return
+    items = write_notes(root, a.version, a.plugin, bullets)
+    emit(result(TOOL, "ok", f"{len(a.prs)} 件の PR の利用者向けの変化を {len(items)} 箇所へ書いた", items,
+                {"version": a.version, "prs": len(a.prs), "lines": len(bullets), "fallback": fallback}))
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -751,6 +888,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--prs", nargs="+", required=True, type=int, metavar="PR番号")
     p.add_argument("--prev-tag")
     p.set_defaults(func=cmd_approval_facts)
+
+    p = sub.add_parser("notes", parents=[common],
+                       help="PR 本文の「利用者向けの変化」から CHANGELOG と更新案内（--approval なら提示物の欄）を組む")
+    p.add_argument("--version", required=True, type=version_arg)
+    p.add_argument("--prs", nargs="+", required=True, type=int, metavar="PR番号")
+    p.add_argument("--plugin", default="ndf")
+    p.add_argument("--approval", help="本番承認の提示物。渡すと「配る中身」「検証への配布で確かめたこと」の欄を書く")
+    p.add_argument("--verified", default="", help="--approval: 導入を確かめた経路（カンマ区切り。例 claude,codex,kiro）")
+    p.add_argument("--ref", default="develop", help="--approval: 検証への配布で導入した ref")
+    p.set_defaults(func=cmd_notes)
     return ap
 
 

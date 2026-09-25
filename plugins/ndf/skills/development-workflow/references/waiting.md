@@ -50,9 +50,9 @@
 | 既に起動したプロセス・書き終わりを待つファイル | 終わりを待つ until ループ（例: `until [ -s out.md ]; do sleep 5; done`）を `run_in_background: true` で起動する |
 | Pull Request の検査 | `gh pr checks <番号> --watch` を `run_in_background: true` で起動する |
 | 新しいコメントを 1 件ずつ | `Monitor` |
-| `supervise.py run` / `queue` | `report.md` が揃うか、`progress.jsonl` に `attention` の行が足されるまでの until ループを `run_in_background: true` で起動する（下の節） |
-| `queue` の終わり | `until [ -s <done のパス> ]; do sleep 10; done` を `run_in_background: true` で起動する。done のパスは `queue --done` で渡した所（省けば最初の計画の `<計画>-state/queue-done.json`）。queue は始めに古い done を消し、後続（`--then`）を含めて終わったときに結果の JSON を書く |
-| queue の後に続ける計画（配布など） | 手で連鎖を組まず、`queue <実装の計画>... --then <後続の計画>` で渡す。後続は前の計画がすべて `完了` のときだけ流れ、1 本でも `止まった` / `関門` なら `流さなかった` と理由が結果に残る |
+| `supervise.py run` | `report.md` が揃うか、`progress.jsonl` に `attention` の行が足されるまでの until ループを `run_in_background: true` で起動する（下の節） |
+| `supervise.py queue` | `supervise.py wait <done のパス>` を `run_in_background: true` で 1 回起動する。queue の終わり（done）か、queue が流す計画の `attention` の行で終わる（下の節）。done のパスは `queue --done` で渡した所（省けば最初の計画の `<計画>-state/queue-done.json`） |
+| queue の後に続ける計画（配布など） | 手で連鎖を組まず、`queue <実装の計画>... --then <後続の計画>` で渡す。後続は前の計画がすべて `完了` のときだけ流れ、1 本でも `止まった` / `関門` なら `流さなかった` と理由が結果に残る。配布の計画を `new release --prs-from-queue` で作れば、実装の PR の番号を知らずに渡せる |
 
 ### supervise.py の途中の報告
 
@@ -88,11 +88,47 @@ timeout 3600 bash -c 'c() { cat "$1/progress.jsonl" 2>/dev/null | grep -c "\"kin
 until [ -s "$1/report.md" ] || [ "$(c "$1")" -gt "$2" ]; do sleep 5; done' _ "$S" "$n"; rc=$?; echo "exit=$rc"; exit "$rc"
 ```
 
-- `queue` で流すときは、`queue` の出力のファイルに `"event": "attention"` の行が足されるか、
-  `queue` が終わる（完了通知）までを待つ。`queue` そのものを背景で起動していれば、終わりは完了通知で届く
+- `queue` で流すときは、この until ループの代わりに `supervise.py wait` で待つ（次の節）
 - 起きたら `attention` の行と `progress.jsonl` の末尾だけを読む。続けるなら数を取り直して同じ待ちを起動する
 - 124（上限の 3600 秒）で終わったら、`progress.jsonl` の最後の行（`alive` なら段と経過）を 1 度読み、
   同じ待ちを起動し直す
+
+### queue の待ち（supervise.py wait）
+
+**conductor は queue を背景で起動し、`supervise.py wait <done のパス>` を `run_in_background: true` で
+1 回起動する。** 待ちの見張り（until ループ・`attention` の読み取り・上限）を手で書かない。
+
+```bash
+# どちらも Bash の run_in_background: true で起動する。queue を起動した後に wait を打つ
+python3 plugins/ndf/scripts/supervise.py queue plan-1101.json plan-1102.json --then plan-release-dev.json --done q/done.json
+python3 plugins/ndf/scripts/supervise.py wait q/done.json
+```
+
+| 終わり方 | 終了コード | 次にすること |
+| --- | --- | --- |
+| queue が終わった（done に結果の JSON が書かれた） | 0 | 結果の JSON の `items[0]`（queue の結果）の `status` を見る。`gate` なら関門の計画の `report.md` を読んで提示する |
+| queue が流す計画の `progress.jsonl` に `attention` の行が足された | 20 | その行（結果の `items`）と `progress.jsonl` の末尾だけを読み、止めるか続けるかを決める。続けるなら同じ `wait` を打つ。知らせた行の続きから待つ |
+| 上限（`--timeout`、既定 10800 秒）に達した | 3 | queue の `<計画>.log` と `progress.jsonl` の最後の行を 1 度読み、同じ `wait` を打つ |
+
+- 出力は要約の 1 行と結果の JSON の 1 行だけである
+- queue は始めに流す計画の一覧（`--then` を含む）と読み始める所を done の隣の `<done>.plans.json` へ書き、
+  wait はそれを読む。知らせた `attention` の続きは `<done>.wait.json` に残る
+
+### 1 ミッションの流し方
+
+**1 ミッション（実装 → 開発版 → 関門 2 → 本番 → 後片付け）で conductor が起きるのは、関門・`attention`・
+queue の終わりだけである。** 計画の組み立て・待ちの見張り・次の計画の起動のために起きない。
+
+1. 実装の計画を並べ、開発版の配布の計画を `new release --channel dev --prs-from-queue` で作る
+   （固定の PR があれば `--prs 1052` を併せて渡す）。queue は `--then` の計画を流す前に、先行の計画の
+   報告の `Pull Request` の番号を changelog・approval-facts の段の `--prs` へ入れる。
+   先行の報告に Pull Request が 1 件も無ければ、配布の計画は `流さなかった` になる
+2. `queue <実装の計画>... --then <開発版の計画> --done <パス>` と `wait <パス>` を背景で起動する
+3. `wait` が 0 で終わり、queue の結果が `gate`（開発版の facts の段の関門 2）なら、提示物を添えて本番の承認を取る
+4. 承認の後、`queue <本番の計画> --done <パス>` と `wait <パス>` を背景で起動する。本番の計画の段の最後は
+   後片付け（`merged-steps.py cleanup`）で、配布の PR（`release/v<版>` → main）とミッションの PR（`--prs`）の
+   ブランチ・作業ツリーを片付ける。`git branch -D` が要るブランチがあれば関門で止まる
+5. `wait` が 0 で終わったら、引継ぎ文書を `supervise.py note` で更新し、`ndf-next` を出す
 
 **サブエージェントは、背景の処理を残したまま応答を終えない。** 完了通知で再開はされるが、
 **親には応答を終えた時点で 1 度「終わった」と通知が届き、途中の文面が結果として渡る**

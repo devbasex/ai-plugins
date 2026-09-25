@@ -57,11 +57,11 @@ semver の順序で除外されるのは、プラグイン間の依存解決（`
 
 | 版 | 形 | 意味 |
 | --- | --- | --- |
-| 正式版 | `10.17.16` | 利用者が常用してよい |
+| 正式版 | `10.17.17` | 利用者が常用してよい |
 | 開発版 | `10.18.0-dev.1` | 検証中。入れたくない利用者は取得を控えられる |
 | 公開前の確認版 | `10.18.0-rc.1` | 正式版の候補。残るのは確認だけ |
 
-- 接尾辞は**次に出す正式版の版数へ付ける**。`10.17.16` の次を開発するなら `10.18.0-dev.1`
+- 接尾辞は**次に出す正式版の版数へ付ける**。`10.17.17` の次を開発するなら `10.18.0-dev.1`
 - 連番は開発版を出すたびに増やす。**同じ版数で中身を差し替えない**。差し替えると、利用者の
   手元にある版と `main` の版が同じ番号で別物になり、何を確かめたのかが分からなくなる
 - **正式版を出すときは接尾辞を外す。** `10.18.0-dev.3` の次は `10.18.0`
@@ -193,6 +193,21 @@ git fetch origin && git diff --stat origin/develop origin/main   # 空である�
 
 **Pull Request のベースは `develop` である。** 既定ブランチが `main` であるため、`gh pr create`
 は指定しないと `main` を宛先にする。**`--base develop` を必ず付ける。**
+
+**配布の Pull Request では、重い検査（`pytest` と `runtime-smoke (*)`）を省く。** 同じ中身を
+2 度試さないためである。判定は各 workflow の `ci-scope` のジョブが `scripts/ci-heavy-skip.py` で
+行い、次のどちらかのときだけ省く。
+
+- 差分が版数と説明だけ（版上げの `release/v<版>` → `develop`）。説明は `CHANGELOG.md`・
+  `README.md`・`AGENTS.md`・`plugins/**/README.md`・この文書・`docs/metrics/ndf-token-usage/`
+  の記録で、`plugin.json` と `marketplace.json` は `version` / `description` の行だけ
+- `develop` への push でその workflow を通ったコミットがあり、head がそこから版数と説明しか
+  変えていない（`develop` → `main`）。`main` の側に `develop` へ無い変更があれば省かない
+
+コードやテストを 1 行でも変えた差分では省かない。`develop` / `main` への push では常に回す。
+省いても必須の検査の名前は変わらず、結果は成功で返る。`pytest` はまとめのジョブが、
+`runtime-smoke (*)` はステップだけを飛ばしたジョブが返す。版数の整合の検査
+（`runtime-plugin-validate` など）は常に回す。
 
 **`main` を進めるのが `release` の「本番への配布」である。** そちらには承認が要る。`develop`
 へのマージは「検証への配布」にあたり、承認なしで進めてよい（`/ndf:release`）。

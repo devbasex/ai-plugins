@@ -18,19 +18,55 @@ on:
       - ".github/workflows/runtime-plugin-smoke.yml"
 
 jobs:
+  # 配布の PR（版数と説明だけの差分、または develop で通ったコミットを進めるだけの main 宛の
+  # PR）では smoke を省く（#1055）。判定は scripts/ci-heavy-skip.py が行う。push では常に回す
+  ci-scope:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      skip: ${{ steps.decide.outputs.skip }}
+    steps:
+      - uses: actions/checkout@v4
+        if: github.event_name == 'pull_request'
+        with:
+          fetch-depth: 0
+      - id: decide
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python3 scripts/ci-heavy-skip.py --workflow runtime-plugin-smoke.yml
+          --base "${{ github.event.pull_request.base.sha }}"
+          --head "${{ github.event.pull_request.head.sha }}"
+
+  # 省くときもジョブは起動し、ステップだけを飛ばして成功を返す。ruleset の必須の検査は
+  # matrix を展開した名前（runtime-smoke (claude) など）を待つ。ジョブごと飛ばすと
+  # matrix が展開されず、その名前の結果が返らない
   runtime-smoke:
+    needs: ci-scope
+    # 判定が落ちても回す（省くのは判定が skip=true を返したときだけ）
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         runtime: [claude, codex, kiro, agy]
+    env:
+      SKIP_HEAVY: ${{ needs.ci-scope.outputs.skip == 'true' }}
     steps:
+      - name: Skip (release PR with version and description changes only)
+        if: env.SKIP_HEAVY == 'true'
+        run: echo "判定が重いジョブを省いた（ci-scope の出力を見る）"
       - uses: actions/checkout@v4
+        if: env.SKIP_HEAVY != 'true'
       - name: Run unauthenticated runtime smoke
+        if: env.SKIP_HEAVY != 'true'
         run: bash scripts/runtime-smoke-test.sh --runtime "${{ matrix.runtime }}" --with-secrets=off
       - name: Upload smoke artifacts
         uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && env.SKIP_HEAVY != 'true'
         with:
           name: runtime-smoke-${{ matrix.runtime }}
           path: tmp/runtime-smoke/${{ matrix.runtime }}
