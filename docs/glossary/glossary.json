@@ -22,43 +22,43 @@
       "term": "ユビキタス言語",
       "context": "project-glossary",
       "meaning": "プロジェクトの関係者とエージェントが、要求・設計・コードで同じ意味に使う語の集まり",
-      "source": "issues/issue-1111-requirements.md"
+      "pending_source": "issues/issue-1111-requirements.md"
     },
     {
       "term": "用語集",
       "context": "project-glossary",
       "meaning": "ユビキタス言語を持つ構造化ファイル（正）と、そこから作る人が読む Markdown の文書。どちらもプロジェクトのリポジトリに置く",
-      "source": "issues/issue-1111-requirements.md"
+      "pending_source": "issues/issue-1111-requirements.md"
     },
     {
       "term": "コンテキスト",
       "context": "project-glossary",
       "meaning": "語の意味が 1 つに決まる範囲（境界づけられたコンテキスト）",
-      "source": "issues/issue-1111-requirements.md"
+      "pending_source": "issues/issue-1111-requirements.md"
     },
     {
       "term": "ドメインモデルの節",
       "context": "project-glossary",
       "meaning": "設計文書の先頭に置く節。変更が属するコンテキスト・変える集約とその持ち主・不変条件・ドメインイベントを書く",
-      "source": "issues/issue-1111-requirements.md"
+      "pending_source": "issues/issue-1111-requirements.md"
     },
     {
       "term": "廃止した語",
       "context": "project-glossary",
       "meaning": "用語集で別の語へ置き換えた語。文書に出たら落とす",
-      "source": "issues/issue-1111-requirements.md"
+      "pending_source": "issues/issue-1111-requirements.md"
     },
     {
       "term": "不変条件",
       "context": "project-glossary",
       "meaning": "集約がいつも満たす条件。設計のドメインモデルの節に書き、実装の前にテストにする",
-      "source": "issues/issue-1111-requirements.md"
+      "pending_source": "issues/issue-1111-requirements.md"
     },
     {
       "term": "未登録の語",
       "context": "project-glossary",
       "meaning": "用語として書かれているのに用語集に無い語。見出しが「用語」の節の表の 1 列目に書いた語を指す",
-      "source": "issues/issue-1111-requirements.md"
+      "pending_source": "issues/issue-1111-requirements.md"
     },
     {
       "term": "用語集の宣言",
@@ -94,31 +94,31 @@
       "term": "待ちの通知",
       "context": "ndf-notification",
       "meaning": "利用者の回答か承認が無いと進まない時点で、Slack へ送る知らせ",
-      "source": "issues/issue-821-wait-notify-design.md"
+      "pending_source": "issues/issue-821-wait-notify-design.md"
     },
     {
       "term": "回答待ち",
       "context": "ndf-notification",
       "meaning": "利用者に問いへの答え（選択・情報・指示）を求めている待ち",
-      "source": "issues/issue-821-wait-notify-design.md"
+      "pending_source": "issues/issue-821-wait-notify-design.md"
     },
     {
       "term": "承認待ち",
       "context": "ndf-notification",
       "meaning": "利用者に操作の許可（ツールの実行・計画・マージ・配布など）を求めている待ち",
-      "source": "issues/issue-821-wait-notify-design.md"
+      "pending_source": "issues/issue-821-wait-notify-design.md"
     },
     {
       "term": "待ちの鍵",
       "context": "ndf-notification",
       "meaning": "1 つの待ちを見分ける値。transcript の最後の assistant の項目の `uuid`",
-      "source": "issues/issue-821-wait-notify-design.md"
+      "pending_source": "issues/issue-821-wait-notify-design.md"
     },
     {
       "term": "戻り先",
       "context": "ndf-notification",
       "meaning": "通知から当該セッションへ戻る手段。ホスト名・cwd の行と、作れればセッションの URL か再開のコマンド",
-      "source": "issues/issue-821-wait-notify-design.md"
+      "pending_source": "issues/issue-821-wait-notify-design.md"
     }
   ]
 }
