@@ -61,7 +61,7 @@ ai-plugins には今、宣言も用語集も無い。この設計の後で、`st
 | 集約 | 持ち主（書き換えてよいもの） | 根 | エンティティ | 値オブジェクト |
 | --- | --- | --- | --- | --- |
 | 用語集 | プロジェクトの変更（Pull Request）。NDF のスクリプトは `init` と `render` だけが書く | 用語集のファイル（`source`） | コンテキスト（`id` で識別）・用語（コンテキストと語の組で識別） | 意味・廃止した語・正本 |
-| 用語集の宣言 | プロジェクトの変更。`glossary.py init` が初めの 1 回を書く | `.ndf/glossary.json` | — | 形式・置き場・検査の対象・規則ごとの強さ |
+| 用語集の宣言 | プロジェクトの変更。`glossary.py init` が初めの 1 回を書く | `.ndf/glossary.json` | — | 形式・置き場・検査の対象 |
 
 **人が読む文書は集約に入れない。** 用語集から導く写しで、独立して変わらない（不変条件 I4）。
 
@@ -95,7 +95,7 @@ ai-plugins には今、宣言も用語集も無い。この設計の後で、`st
 
 | 用語 | 意味 | 用語集への反映 |
 | --- | --- | --- |
-| 用語集の宣言 | `.ndf/glossary.json`。用語集の置き場・形式・検査の対象・規則ごとの強さを持つ | 追加（`ndf-workflow`） |
+| 用語集の宣言 | `.ndf/glossary.json`。用語集の置き場・形式・検査の対象を持つ | 追加（`ndf-workflow`） |
 | 語のチェック | `glossary.py check`。用語集の形と、文書の追加した行の語を見る | 追加（`ndf-workflow`） |
 | モデルの段 | 設計 PR のレビューの 1 ラウンド目。ドメインモデルの節だけを見る | 追加（`ndf-workflow`） |
 | 詳細の段 | 設計 PR のレビューの 2 ラウンド目以降。確定したモデルを前提に残りを見る | 追加（`ndf-workflow`） |
@@ -251,7 +251,9 @@ erDiagram
 | `document` | 文字列 | 許さない | 人が読む文書のパス |
 | `check.paths` | 文字列の配列 | 許す | 追加した行を見る文書の glob。空は「どの文書も語を見ない」（形と文書の一致は見る） |
 | `check.term_sections` | 文字列の配列 | 許す | 未登録の語とみなす表を持つ節の見出し。無いときは `["用語"]` |
-| `check.rules` | オブジェクト | 許す | 規則ごとの強さ。キーは `schema` / `duplicate` / `stale_document` / `deprecated` / `unregistered`、値は `error` か `off`。無いキーは `error` |
+
+**規則を止める項目は持たない。** 利用者の決定は「すべて落とす」で、当たった規則は必ず落とす。
+宣言が変えられるのは、どの文書を見るか（`check.paths`）と、どの表を語とみなすか（`check.term_sections`）である。
 
 ### 用語集（`source` が指すファイル）
 
@@ -319,13 +321,21 @@ erDiagram
 `tool: "glossary"`）で標準出力の最後の行に出す。** 語と行の一覧は `items` に入る。`--root` の既定は
 `.`、宣言はそこの `.ndf/glossary.json` から読む。
 
+- **`init` は欠けたものだけを作る。** 宣言があればその `source` / `document` を置き場とし、
+  `--source` / `--document` は宣言が無いときだけ使う。宣言・用語集・文書のどれが欠けた状態から
+  打っても、次の `gate` が 0 になる。在るファイルは読めなくても書き換えない（失敗の経路）
+- **パスはリポジトリの境界の内側に限る。** 宣言の `source` / `document`・`check.paths` と
+  `--source` / `--document` は、絶対パス・`..` を含むもの・シンボリックリンクを解いて `--root` の
+  外を指すものを受けない。どの副命令も、ファイルを読み書きする前にこれを確かめ、違反は
+  何も書かずに終了コード 2 で止める
+
 | 副命令 | 入力 | 出力（`items`） | 終了コード |
 | --- | --- | --- | --- |
 | `gate --mode M` | モード | 止めたときは作る手順の 3 行（`init` のコマンド・候補の集め方・`requirements-design` の手順 0 の場所） | 0 = 通す（`M` が `standard` / `legacy-refactor` 以外、または宣言と用語集が読める）。1 = 宣言か用語集が無い。2 = あるが読めない |
-| `init [--source P] [--document P]` | 置き場（既定 `docs/glossary/glossary.json`・`docs/glossary.md`） | 作ったファイル | 0 = 作った、または既にある（上書きしない）。2 = 書けない |
+| `init [--source P] [--document P]` | 置き場（既定 `docs/glossary/glossary.json`・`docs/glossary.md`） | 作ったファイル | 0 = 3 つのうち欠けたものを作った、またはすべてある（上書きしない）。2 = 書けない・既にある宣言が読めない・置き場が境界を越える |
 | `candidates [--limit N]` | 追跡しているファイル（`git ls-files`） | `{term, count, kind, first}`。`kind` は `table`（`term_sections` の節の表の 1 列目）・`bold`（12 字以下の太字で 3 回以上）・`type`（`class` / `interface` / `struct` / `enum` / `type X =` の型の名前）。用語集に既にある語は除く | 0。候補が 0 件なら `summary` に「スクラッチ」と書く |
 | `render [--check]` | 用語集 | 書いた文書。`--check` は書かずに一致を見る | 0 = 書いた・一致した。1 = `--check` で一致しない。2 = 読めない |
-| `check [--diff BASE \| --file P...] [--rules all\|structure]` | 起点の ref か、ファイル | `{rule, path, line, term, detail}`。`rule` は宣言の `check.rules` のキー | 0 = 当たりなし（`off` の規則は数えない）。1 = 当たりあり。2 = 宣言・用語集が読めない。宣言が無ければ 0 で `summary` に「宣言が無い」 |
+| `check [--diff BASE \| --file P...] [--rules all\|structure]` | 起点の ref か、ファイル | `{rule, path, line, term, detail}`。`rule` は下の規則の名前 | 0 = 当たりなし。1 = 当たりあり。2 = 宣言・用語集が読めない。宣言が無ければ 0 で `summary` に「宣言が無い」 |
 | `diff --base REF [--head REF]` | 2 つの版（`--head` の既定は作業ツリー） | `{change, context, term, before, after}`。`change` は `added` / `meaning_changed` / `deprecated` / `removed` | 0。どちらかの版に用語集が無ければ、無い側を空として比べる |
 
 **`check` の規則。** `--rules structure` は上の 3 つだけ、`all` は 5 つすべてを見る。
@@ -339,13 +349,18 @@ erDiagram
 | `unregistered` | 追加した行のうち `term_sections` の節の表の 1 列目 | 生きた語としてどのコンテキストにも無い |
 
 - **未登録の語とみなすのは、見出しが `term_sections`（既定 `用語`）の節の表の 1 列目だけである。**
-  要求の「用語」の節と、設計のドメインモデルの節の「用語」の小見出しがこれに当たる（決定 3）
+  要求の「用語」の節と、設計のドメインモデルの節の「用語」の小見出しがこれに当たる（決定 3）。
+  受け入れ条件 6 の「新しい語を使う」は、この表に語を書くことを指す（要求は何を用語として書いたと
+  みなすかを設計に任せている）。本文や別の表でだけ使った語は当てない。設計とレビューの修正で
+  構成要素の名前などを語として新しく使うときは、同じ変更でこの表に書く（設計の手順 2）
 - 照合から外すもの: コードブロック・インラインコード・宣言の `document` の文書。廃止した語を
   説明のために書くときはインラインコードで囲む
 - 廃止した語の出現が、生きた語の出現の内側にあるとき（`ステージ` と `ステージング`）は当てない
 - 英数字だけの語は単語の境界（`\b`）で照合する
-- `--diff` の追加した行の求め方は `doc-lint.py` の `added_lines` と同じにする。`merge-base` からの
-  `--unified=0` で求め、追跡していないファイルは全行とする。見るのは `check.paths` に当たるファイルだけである
+- `--diff BASE` は、まず `git merge-base BASE HEAD` で起点を解き、その起点へ `doc-lint.py` の
+  `added_lines` と同じ `git diff --unified=0` を打つ（`added_lines` は渡された ref との 2 点比較で、
+  merge-base を取らない。同じにするのは差分の取り方だけである）。これで `BASE` が先へ進んでも、
+  ほかの変更が足した行を当てない。追跡していないファイルは全行とする。見るのは `check.paths` に当たるファイルだけである
 - 当たりは標準エラーへも `ERROR: <path>:<line>: <rule>: <term>` の 1 行ずつで出す
 
 ### `spec-copy.py`
