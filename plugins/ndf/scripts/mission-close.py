@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """mission-close.py: ミッションを閉じる（progress-tracking の「ミッションを閉じる」の手順）。
 
-    python3 mission-close.py --record-pr <PR番号> [--prs 1,2] [--with-verification]
+    python3 mission-close.py --record-pr <PR番号> [--prs 1,2] [--issues 3,4] [--with-verification]
                              [--label "<マイルストーン>の<工程名>"] [--dry-run] [--root <dir>]
 
 1. 記録の PR の本文とコメントを読み、最後の「## 配布の記録」ブロックを取る
 2. ミッションの PR の一覧（--prs、無ければブロックの `ミッション:` の行）の本文から、閉じる語が
-   指す課題を集める（lib/closing-issues.sh）
+   指す課題を集める（lib/closing-issues.sh）。--issues の課題（記録のリポジトリ）を足す
+   （`pace: fast` の実装 PR は閉じる語を持たない）
 3. 閉じる条件 1（本番への配布まで済んだ、または配布なし）と、--with-verification のときは
    条件 2（その課題の受け入れ条件がすべて合格）を課題ごとに判定する
 4. 条件を満たす課題ごとに (a) 状態を読む → (b) 記録のリポジトリの課題なら盤面を Done →
@@ -16,8 +17,10 @@
 {kind:"issue", repo, number, result, reason?, cmd?}。result は
 closed / already_closed / failed / kept_open（--dry-run では would_close）。盤面の NOTE は
 {kind:"board_note"} の項目に載る。
-終了コード: 0 = 失敗なし / 1 = 失敗あり（issue-upkeep へ進まない）/ 2 = 一覧が取れない /
-3 = 呼び出しの誤り。
+`--record-pr 0` は「本番の記録なし」（最終の検査で変更が無く本番を飛ばした）。配布の記録を読まず、
+閉じる条件も見ずに --issues の課題を閉じる。--issues と一緒のときだけ受ける。
+終了コード: 0 = 失敗なし / 1 = 失敗あり（issue-upkeep へ進まない）/ 2 = 一覧が取れない・
+--record-pr 0 に --issues が無い / 3 = 呼び出しの誤り。
 """
 from __future__ import annotations
 
@@ -197,6 +200,9 @@ def close_one(root, repo, n, record_repo, comment, notes):
 
 
 def cmd_close(a):
+    if a.record_pr == 0 and not a.issues:
+        emit(result(TOOL, "stopped", "--record-pr 0（本番の記録なし）は --issues と一緒に渡す", [], {"issues": 0},
+                    next="閉じる課題を --issues で渡して打ち直す"), EXIT_UNREADABLE)
     root = git_root(a.root)
     record_repo = a.repo
     if not record_repo:
@@ -204,21 +210,29 @@ def cmd_close(a):
         record_repo = p.stdout.strip()
         if p.returncode != 0 or not record_repo:
             raise StepError("記録のリポジトリを決められない（--repo を渡す）", EXIT_PRECONDITION)
-    rec = parse_record(read_record(root, record_repo, a.record_pr))
-    prs = a.prs or rec["mission_prs"]
-    if not prs:
+    given = [(record_repo, n) for n in a.issues or []]
+    if a.record_pr == 0:
+        rec = {"found": True, "stage": "配布なし（本番の記録なし）", "mission_prs": [], "verify_block": None}
+        prs = []
+    else:
+        rec = parse_record(read_record(root, record_repo, a.record_pr))
+        prs = a.prs or rec["mission_prs"]
+    if not prs and not given:
         emit(result(TOOL, "stopped", "ミッションの PR の一覧が取れない。推測せず運用者に一覧を聞く",
                     [], {"issues": 0}, next="運用者に一覧を聞き、--prs で渡して打ち直す"), EXIT_UNREADABLE)
-    issues = mission_issues(root, record_repo, prs)
+    issues = mission_issues(root, record_repo, prs) if prs else []
+    issues += [k for k in given if k not in issues]
 
     stage = rec["stage"] or ""
     kept_all = None
-    if not rec["found"] or not stage:
+    if a.record_pr == 0:
+        pass  # 本番の記録なし: 閉じる条件（配布とリリース後テスト）を見ない
+    elif not rec["found"] or not stage:
         kept_all = "配布の記録が読めない"
     elif not (stage.startswith("本番") or stage.startswith("配布なし")):
         kept_all = "本番への配布の前（本番への配布の後に閉じる）"
     verdicts = None
-    if kept_all is None and a.with_verification:
+    if kept_all is None and a.with_verification and a.record_pr != 0:
         blk = rec["verify_block"]
         if blk is None:
             kept_all = ("配布なしの後のリリース後テストの記録が無い" if stage.startswith("配布なし")
@@ -276,8 +290,10 @@ def pr_list(s):
 
 def build_parser():
     ap = Parser(prog="mission-close.py", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--record-pr", type=int, required=True, help="配布の記録を置いた PR の番号")
+    ap.add_argument("--record-pr", type=int, required=True,
+                    help="配布の記録を置いた PR の番号。0 は本番の記録なし（--issues と一緒に渡す）")
     ap.add_argument("--prs", type=pr_list, help="ミッションの PR の番号（カンマ区切り）。省けば配布の記録から読む")
+    ap.add_argument("--issues", type=pr_list, help="閉じる課題の番号（カンマ区切り）。PR の閉じる語と和を取る")
     ap.add_argument("--repo", help="記録のリポジトリ（owner/name）。省けば gh repo view で決める")
     ap.add_argument("--with-verification", action="store_true", help="リリース後テストを通る経路（閉じる条件 2 を見る）")
     ap.add_argument("--label", help="閉じるときのコメントに入れる「<マイルストーン>の<工程名>」")

@@ -31,7 +31,8 @@ OPTIONAL = ("presentation_path", "next")
 EXIT_OK = 0
 EXIT_VIOLATION = 1      # 検査で違反あり・手順が失敗した
 EXIT_UNREADABLE = 2     # 読めない・呼び出しの誤り（「一致」「0 件」と読ませない）
-EXIT_PRECONDITION = 3   # 前提が無い（宣言・認証・対象のファイル）
+EXIT_PRECONDITION = 3   # 前提が無い（宣言・認証・対象のファイル）、または各スクリプトが定めた正常な否定の結果
+                        # （立たない・変更なし・飛ばしてよい）。読めないときは 2 で返し、3 と混ぜない
 EXIT_GATE = 10          # 10〜19: 関門（人の同意が要る）
 EXIT_PAUSE = 20         # 20〜29: LLM の判断待ち
 
