@@ -84,3 +84,29 @@ python3 "$SCRIPTS/release-steps.py" run --root . --stage production --version 2.
 ```
 
 `--dry-run` は実行せず、走らせる段と、版を置き換えた後のコマンドを出す。
+
+## Claude Code のプラグインの形のサブコマンド
+
+宣言の段とは別に、Claude Code のプラグインの形では配布の手順そのものをスクリプトが行う。
+どれも結果 JSON を出し、`status` と終了コードで読む（`ok` = 0 で次へ、`gate` = 10 で承認を得る、
+`stopped` = 1 / 2 / 3 なら `summary` を読んで直すか報告して止まる）。
+
+```bash
+# 手順 2: 公開前の提示物のうち機械で作れる部分を書き出す
+python3 "$SCRIPTS/release-steps.py" approval-facts --version <版> --prs <PR番号>... [--prev-tag <タグ>] --root .
+# 手順 3: 版数と変更履歴を上げる
+python3 "$SCRIPTS/release-steps.py" bump      --plugin <名前> --to <版> --root .
+python3 "$SCRIPTS/release-steps.py" changelog --version <版> --prs <PR番号>... --root .
+# 手順 4: 公開する（bump と changelog の変更をコミットしてから）
+python3 "$SCRIPTS/release-steps.py" release --version <版> --channel dev --root .   # 検証への配布
+python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --root .  # 本番への配布（承認を得てから）
+```
+
+- `approval-facts`: `gate` なら `presentation_path` の提示物へ「配る中身」と「検証への配布で
+  確かめたこと」を書き足して利用者へ示し、承認を得てから `next` のコマンドを打つ。`stopped`
+  （3 = 前のタグを決められない）なら `--prev-tag` を渡して打ち直す
+- `bump`: `items[]` に手で直す箇所が載っていれば直す
+- `changelog`: 見出しと PR のタイトルを並べるだけで、本文は書かない
+- `release`: `dev` は `release/v<版>` → `develop` の Pull Request を作り、チェックを待ってマージする。
+  `prod` は続けて `develop` → `main` をマージし、タグと GitHub Release を作る。`items[]`
+  （マージした Pull Request・タグ・GitHub Release）が完了の事実の照会の結果である

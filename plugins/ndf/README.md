@@ -89,7 +89,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.17.10）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.17.11）
 ```
 
 ### agy
@@ -119,25 +119,34 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.17.10 へ更新するとき
+## v10.17.11 へ更新するとき
 
-**中継（`relay.py`）の下で区間の切れ目に出す告知を固定し、配布のたびにリポジトリが宣言した段を
-走らせられるようにしました**（マイルストーン 26、#980 / #893）。Skill の追加・削除・改名は無く、
-公開 Skill の数も変わりません。変更点の一覧は [CHANGELOG.md](../../CHANGELOG.md) にあります。
+**正式版です。** `main` に載ります。変更点の一覧は [CHANGELOG.md](../../CHANGELOG.md) にあります。
 
-**正式版です。** `main` に載ります。中身は開発版 `10.17.10-dev.1` と同じで、版数の接尾辞だけを
-外しました。
+### 変更
 
-| 変わったこと | 中身 |
-| --- | --- |
-| **区間の切れ目の告知を `relay.py notice` が出します**（#980） | 1 行目に `relay` / `outside`、2 行目に告知の 1 文を出します。中継の下では「約 N 秒後に自動で新しい会話へ切り替わる。キー入力やスクロールをせずに、そのまま待つ」（N は `NDF_RELAY_QUIET`、既定 5）、中継の外では `/exit` してから貼り付ける手順です。`restart` と `token-guard.sh` の拒否文がこの 2 行目を使います |
-| **区間の切れ目の再起動に確認を挟みません**（#980） | `development-workflow` の関門の節に「区間の切れ目の再起動は関門ではない」を足しました。関門の前に会話を切らない規則は変わりません |
-| **配布の段を宣言で持てます**（#893） | リポジトリの `.ndf/release.json` に段を書くと、`release` の手順 3 で `release-steps.py run --stage <production\|verification> --version <版>` が書いた順に走らせます。書いてよい場所（`writes`）の外を変えた段は失敗にします。宣言が無いリポジトリでは何も起きません |
+- **`development-workflow` は conductor → supervisor → worker の 3 層で進める**。/goal を付けたときも、
+  作業の分け方と承認の関門は同じである
+- **中継は区間の切れ目で新しい会話へ切り替える。/goal の目標の判定は待たず、目標が未達のままでも切り替える**。
+  切り替えた後の会話は引き継ぎ文書から作業を続ける
+
+### 追加
+
+- **Skill のスクリプトの置き場所を `scripts/resolve.sh` の 1 コマンドで引ける**。`resolve.sh scripts <Skill名>` などで
+  絶対パスを出し、見つからなければ終了コード 3 で理由を出す
+- **各 Skill の手順をスクリプトで回せる**。`merged` / `pr` / `plan-to-spec` / `release` / `release-verification` は
+  `*-steps.py`（`merged-steps.py`・`pr-steps.py`・`plan-to-spec-steps.py`・`release-steps.py`・
+  `release-verification-steps.py`）、`fix` は `fix-steps.py` で文脈を集める。`progress-tracking` の手順も
+  スクリプトで進める。どのスクリプトも結果を同じ形の JSON（`tool` / `status` / `summary` / `items` / `next`）で返す
+- **まとまりを閉じる作業を `bundle-close.py` で行える**。CI を待ってからのマージもスクリプトで行う
+- **`supervise.py` に副命令 `new` / `queue` / `note` / `sync-check` を足した**。`new` は雛形から計画を作り、`queue` は
+  計画を同時に `--max` 本まで順に流し、`note` は報告から引き継ぎ文書の表へ 1 行を足し、`sync-check` は生成物の同期と
+  検査 4 本を走らせる
+- **`supervise.py` の計画に `drive` の段を書ける**。外部 CLI の起動と `cross-review` / `cross-refactoring` の収束ループを
+  スクリプトが回し、判断や修正が要るとき（`pause`）だけ worker が入る
 
 正式版のチャネル（ref を指定せずに登録した取得元）なら、次で入れ替わります。**動いているセッションには
-反映されない**ため、更新したあとは起動し直してください。開発版を試すために `develop` を登録した場合は、
-[docs/versioning-and-distribution.md の「ランタイムごとの取得と導入」](../../docs/versioning-and-distribution.md#ランタイムごとの取得と導入)
-の手順で ref を指定せずに登録し直してから導入します。
+反映されない**ため、更新したあとは起動し直してください。
 
 ```bash
 claude plugin marketplace update ai-plugins
@@ -145,19 +154,6 @@ claude plugin update ndf@ai-plugins
 
 codex plugin marketplace upgrade ai-plugins
 codex plugin add ndf@ai-plugins
-```
-
-### 手元で確かめる
-
-どれもファイルを読むか告知の文を出すか使い方を表示するだけで、課題もファイルも書き換えません。`$SCRIPTS` は
-プラグインの `scripts/` の絶対パスで、決め方は
-[development-workflow/references/scripts-lookup.md](skills/development-workflow/references/scripts-lookup.md)
-にあります。
-
-```bash
-grep -q '"version": "10.17.10"' "$SCRIPTS/../.claude-plugin/plugin.json"; echo "exit=$?"   # 0 なら この版が入っている
-python3 "$SCRIPTS/relay.py" notice 2>/dev/null | grep -qxE 'relay|outside'; echo "exit=$?"   # 0 なら 区間の切れ目の告知を relay.py notice が出す
-python3 "$SCRIPTS/release-steps.py" --help >/dev/null 2>&1; echo "exit=$?"   # 0 なら 配布の段を走らせる release-steps.py がある
 ```
 
 ## Playwright テストについて
@@ -329,7 +325,7 @@ agy models   # 認証の確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.17.10/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.17.11/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -351,14 +347,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.10/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.11/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.17.10  <path>
+# => ndf@ai-plugins  installed, enabled  10.17.11  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。

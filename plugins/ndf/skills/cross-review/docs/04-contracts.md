@@ -383,3 +383,57 @@ worktree の実パスは `<base>/<owner>--<repo>/pr<PR>` 形式で、リポジ�
 解決した実パスは `state.json` の `worktree_path` に書かれるため、後続スクリプトや
 サブエージェント prompt は state.json から読めば追従できる。
 
+## 事前確認
+
+ループ開始前に **4 つのプリチェック** が必要だが、すべて `scripts/state.py init`
+が内部で実施する。メインは結果を KEY=VALUE 形式で受け取るだけで良い。
+
+| # | 対策 | スクリプト側で何をするか |
+|---|---|---|
+| 1 | 自分の PR 判定（422 回避） | `gh api user` と `gh pr view --json author` を比較し `is_own_pr` / `event_downgrade` を state.json に書く |
+| 2 | worktree 分離 | `git worktree add <worktree-base>/<owner>--<repo>/pr<PR> <head>` を冪等実行（`<worktree-base>` は `NDF_WORKTREE_BASE` env > `<システム tmpdir>/ndf-worktrees` の優先順で解決）。パスが存在しても現リポジトリの登録済み worktree でなければ `.stale-<ts>` に退避して作り直す。**流用するときは PR の head へ揃える**（前回の実行の残りをレビューさせない。再開の経路も同じ）。`gh pr view --json headRefName,headRefOid,isCrossRepository` で取った基準のコミットへ hard reset し、追跡対象外のファイルを消す（tmp ディレクトリは `-e` で除外。フォーク PR は `refs/pull/<PR>/head` から取り込む）。**同じ同期を `start-round` がラウンドごとに行う。** 作成時と再開時だけでは、修正を作業ツリーの外で行って push したときに 1 つ前の内容をレビューする。head と一致していて変更が無ければ何も発行せず、追跡対象の変更・未 push のコミット・基準を取り込めないときは **exit 8** で止める（1 はループを抜ける値なので使わない）。解決した head branch は `state.json` へ書き戻す（巻き直しで古くなるため）。条件と理由は `docs/01-state-and-review.md` の「ラウンドの開始時の同期」にある |
+| 3 | agy の作業領域 | `launch-agy.sh` が `--add-dir` で作業ツリーを宣言する。**tmp dir は `<worktree>/.cross_review/`** を採用し、宣言する作業領域を 1 つに保つ |
+| 4 | 既存コメント差分 | `fix/scripts/fetch-pr-comments.sh` で 3 ソース (インラインコメント / レビュー body / PR レベルコメント) を一括取得し `$TMP_DIR/cross-review-pr<PR>-existing-comments.txt` に保存し、担当のプロンプトへ**内容をインライン埋め込み**する。**2 ラウンド目以降は `start-round` が `--strict` で取り直す**（1 ソースでも失敗したら前の控えのまま `⚠` で続ける） |
+
+`<worktree-base>` の解決順と worktree の実パスの形はこの文書の「`<worktree-base>` の解決順」にある。
+
+### intent / posted_as の両保持（最重要）
+
+GitHub は **自分の PR には `REQUEST_CHANGES` でレビューを投稿できない**
+（`HTTP 422`）。state.json には **両方** を保持する:
+
+```json
+"codex": {
+  "intent": "REQUEST_CHANGES",   // AI の本来判定。ループ収束判定に使う
+  "posted_as": "COMMENT",        // 投稿する側が送信の時点で落とした形
+  "comments": 5, "review_url": "..."
+}
+```
+
+格下げは投稿する側（取り込み）が送信の時点で行う。担当は本来の判定だけを書く。
+`state.py judge` は `intent` を見るので、ダウングレード投稿してもループは続行する。
+
+## 自動レビュー観点テンプレート
+
+`state.py init` は GitHub API の `pulls/<PR>/files --paginate` で変更ファイルを全件取得して分類し、
+そのラウンドのレビュー担当に同じ追加観点を渡す。`--focus` /
+`--extra-instructions-file` は、この自動テンプレートの後ろに上乗せされる。
+
+自動カテゴリ:
+
+- `common`: PR 全体の目的、変更範囲、保守性、テスト、ロールバック容易性
+- `docs_only`: ドキュメントのみ PR。企画・説明の妥当性、コード/設定/コマンド/他 docs との整合性
+- `design`: 設計 PR（`issues/` の `-requirements.md` / `-design.md` / `-design-decisions.md`）。3 文書の対応、状態の書き手と読み手の矛盾、外部ツールの挙動の断定に実測の根拠があるか
+- `code`: 設計、正確性、可読性、冗長・重複、言語らしさ、セキュリティ、関数/ファイルの責務とサイズ
+- `db_migration`: データ設計、型、NULL/default/制約/index、既存データ、backfill、ロールバック
+- `test`: テストの仕様性、境界値、失敗系、flaky リスク
+- `dependency`: 依存追加/更新、lockfile、ライセンス、互換性、セキュリティ
+- `config_ci`: CI/設定、権限、secret、cache、環境差分
+- `api_contract`: API 契約、互換性、schema、status、エラー形式、認可
+- `auth_security`: 認証/認可、secret/PII、CSRF/CORS/session/JWT/OAuth
+- `frontend`: UI 状態、アクセシビリティ、レスポンシブ、状態管理、表示文言
+- `performance`: N+1、I/O、メモリ、ロック、cache、queue、冪等性
+- `deletion_rename`: 削除/リネーム参照漏れ、後方互換、移行手順
+- `generated`: 生成物、lockfile、再生成手順、差分ノイズ
+- `i18n`: 翻訳キー、fallback、変数展開、表示幅、文言整合
+- `infra`: IaC / Docker / Kubernetes 等の権限、secret、公開範囲、ロールバック

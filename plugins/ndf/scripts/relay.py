@@ -47,6 +47,7 @@ INSTALL_LOCK = "install.lock"
 COPY_LOCK = "copy.lock"
 QUESTION_FILE = "question"
 QUESTION_LOCK = "question.lock"
+ASKED_FILE = "asked"
 
 BLOCK_OPEN = "# >>> ndf relay >>>"
 BLOCK_CLOSE = "# <<< ndf relay <<<"
@@ -261,6 +262,16 @@ def background_running(tasks) -> bool:
     return any(isinstance(t, dict) and t.get("status") == "running" for t in tasks)
 
 
+def asked_after(d: str, mark_path: str) -> bool:
+    """印を書いた後に質問が出ていれば真。"""
+    m = read_json(mark_path)
+    asked = read_json(os.path.join(d, ASKED_FILE))
+    if not isinstance(m, dict) or not isinstance(asked, dict):
+        return False
+    w, a = parse_iso(m.get("written_at")), parse_iso(asked.get("at"))
+    return w is not None and a is not None and a >= w
+
+
 def cmd_mark() -> int:
     d = os.environ.get("NDF_RELAY_DIR")
     if not d or not relay_running(d):
@@ -275,8 +286,13 @@ def cmd_mark() -> int:
     remove(os.path.join(d, QUESTION_FILE))
     path = os.path.join(d, MARK_FILE)
     blocks = next_blocks(str(data.get("last_assistant_message") or ""))
-    if len(blocks) != 1 or background_running(data.get("background_tasks")):
+    if background_running(data.get("background_tasks")) or len(blocks) > 1:
         remove(path)
+        return 0
+    if not blocks:
+        # 印の後に応答が続いた（目標が未達など）。質問が出ていなければ前の印を残す
+        if asked_after(d, path):
+            remove(path)
         return 0
     write_json_atomic(path, {
         "command": blocks[0],
@@ -783,15 +799,19 @@ class Relay:
         written = parse_iso(m.get("written_at")) or time.time()
         latest = max(written, self.term.last_input)
         tp = m.get("transcript_path") or ""
-        snap = file_snap(tp)
+        unmet, cancel = after_mark(tp, written)
+        # 目標が未達で応答が続くあいだは、会話の記録の更新を静まりに数えない
+        snap = None if unmet else file_snap(tp)
         if snap is not None:
             latest = max(latest, snap[1] / 1e9)
         if time.time() - latest < self.quiet:
             return None
-        if goal_pending(tp, written):
+        # (3) 質問の表示中と、印の後に質問が出たときは書かない（G1）。(4) 印の後に利用者の入力か背景の処理の起動があれば
+        # 書かない。目標が未達の判定が無ければ、印の後の応答の再開でも書かない（G2）
+        if (os.path.exists(self.path(QUESTION_FILE)) or cancel
+                or asked_after(self.dir, self.path(MARK_FILE))):
             return None
-        # (4) 質問の表示中は書かない（G1）。(5) 印の後に応答が再開していたら書かない（G2）
-        if os.path.exists(self.path(QUESTION_FILE)) or replied_after(tp, written):
+        if not unmet and replied_after(tp, written):
             return None
         if os.path.exists(self.path(STOP_FILE)):
             self.halt("stop-file", "停止の印がある")
@@ -804,6 +824,7 @@ class Relay:
             self.halt(*refusal)
             return None
         m["_snap"] = snap
+        m["_unmet"] = unmet
         return m
 
     def recheck(self, m) -> tuple[str, str] | None:
@@ -824,20 +845,46 @@ class Relay:
 
     # -- 切り替え
 
+    def _still_due(self, m) -> bool:
+        """`/exit` を書く直前の確かめ直し。質問が無く、印が同じで、取りやめの行が無いか。"""
+        now = self.read_mark()
+        if (os.path.exists(self.path(QUESTION_FILE)) or now is None
+                or now.get("written_at") != m.get("written_at")
+                or asked_after(self.dir, self.path(MARK_FILE))):
+            return False
+        tp = m.get("transcript_path") or ""
+        if m.get("_unmet"):
+            return not after_mark(tp, parse_iso(m.get("written_at")) or 0)[1]
+        return file_snap(tp) == m.get("_snap")
+
     def write_exit(self, m) -> bool:
         """G3。`question.lock` の中で確かめ直し、`/exit` と改行を 1 回の write で書き、1 秒おいて放す。
+        目標が未達の判定の後なら、先に Esc を書いて 1 秒おき、確かめ直してから `/exit` を書く。
         確かめ直しで外れたら書かずに偽を返す（`count.lock` も放す）。"""
         fd = _lock(self.path(QUESTION_LOCK), 0)
         if fd is None:
             self.limit.release()
             return False
         try:
-            now = self.read_mark()
-            if (os.path.exists(self.path(QUESTION_FILE)) or now is None
-                    or now.get("written_at") != m.get("written_at")
-                    or file_snap(m.get("transcript_path") or "") != m.get("_snap")):
+            if not self._still_due(m):
                 self.limit.release()
                 return False
+            if m.get("_unmet"):
+                # 応答の途中なら Esc で止める（入力待ちの Esc 1 回は何もしない。2 回は巻き戻しを開く）
+                try:
+                    os.write(self.term.fd, b"\x1b")
+                except OSError:
+                    pass
+                esc_at = time.time()
+                end = esc_at + _num("NDF_RELAY_ESC_WAIT", 1)
+                while time.time() < end:
+                    res = self.term.pump(until=min(end, time.time() + 0.1))
+                    if res:
+                        self.exited = res
+                        return True
+                if self.term.last_input > esc_at or not self._still_due(m):
+                    self.limit.release()
+                    return False
             try:
                 os.write(self.term.fd, b"/exit\r")
             except OSError:
@@ -1025,27 +1072,51 @@ def replied_after(transcript_path: str, written: float) -> bool:
     return False
 
 
-def goal_pending(transcript_path: str, written: float) -> bool:
-    """会話の記録に `/goal` の目標があり、印より後の判定の記録がまだ無ければ真。
+def _is_user_prompt(row: dict) -> bool:
+    """利用者が入力した行か。hook の差し戻し（`isMeta`）と Tool の結果は除く。"""
+    if row.get("type") != "user" or row.get("isMeta"):
+        return False
+    content = (row.get("message") or {}).get("content") if isinstance(row.get("message"), dict) else None
+    if isinstance(content, str):
+        return True
+    if isinstance(content, list):
+        items = [c for c in content if isinstance(c, dict)]
+        if not items or any(c.get("type") == "tool_result" for c in items):
+            return False
+        # Esc で応答を止めた記録（中継が書いた Esc でも出る）は入力に数えない
+        return not all(str(c.get("text") or "").startswith("[Request interrupted by user")
+                       for c in items)
+    return False
 
-    目標の設定と判定は `type: attachment` の行の `attachment.type: goal_status` に書かれる
-    （Claude Code 2.1.280 で実測）。設定は `sentinel: true`、判定は `met` の真偽を持つ。
-    `met: true` で目標は終わる。判定は command hook（`mark`）より後に書かれる。
-    """
-    has_goal = False
-    judged_at = 0.0
+
+def _starts_background(row: dict) -> bool:
+    """背景の処理を起動する Tool の呼び出し（`run_in_background` が真）を含む `assistant` の行か。"""
+    if row.get("type") != "assistant" or not isinstance(row.get("message"), dict):
+        return False
+    content = row["message"].get("content")
+    if not isinstance(content, list):
+        return False
+    return any(isinstance(c, dict) and c.get("type") == "tool_use"
+               and isinstance(c.get("input"), dict) and c["input"].get("run_in_background")
+               for c in content)
+
+
+def after_mark(transcript_path: str, written: float) -> tuple[bool, bool]:
+    """印より後の会話の記録を見て (目標が未達と判定された, 切り替えを取りやめる) を返す。
+    取りやめるのは、利用者の入力か背景の処理の起動の行があるとき。"""
+    unmet = cancel = False
     for row in _iter_transcript_rows(transcript_path):
+        t = parse_iso(row.get("timestamp"))
+        if t is None or t <= written:
+            continue
         a = row.get("attachment")
-        if row.get("type") != "attachment" or not isinstance(a, dict) \
-                or a.get("type") != "goal_status":
-            continue
-        if a.get("sentinel"):
-            has_goal, judged_at = True, 0.0
-            continue
-        judged_at = parse_iso(row.get("timestamp")) or judged_at
-        if a.get("met") is True:
-            has_goal = False
-    return has_goal and judged_at <= written
+        if (row.get("type") == "attachment" and isinstance(a, dict)
+                and a.get("type") == "goal_status" and a.get("met") is False
+                and not a.get("sentinel")):
+            unmet = True
+        if _is_user_prompt(row) or _starts_background(row):
+            cancel = True
+    return unmet, cancel
 
 
 def cmd_run(args: list[str]) -> int:
@@ -1712,6 +1783,8 @@ def cmd_question(action: str) -> int:
             raise LockBusy()
         try:
             os.close(os.open(os.path.join(d, QUESTION_FILE), os.O_WRONLY | os.O_CREAT, 0o600))
+            # 質問が出た時刻を残す。これより前の印では切り替えない
+            write_json_atomic(os.path.join(d, ASKED_FILE), {"at": now_iso()})
         finally:
             os.close(fd)
     except Exception:

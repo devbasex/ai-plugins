@@ -183,10 +183,17 @@ def test_mark_not_direct_child_claude_keeps_mark(tmp_path, relay):
         assert relay.next.read_text() == '{"command": "keep"}'
 
 
-def test_mark_clears_previous_when_no_block(relay):
+def test_mark_keeps_previous_when_no_block(relay):
+    """ブロックの無い Stop（目標が未達で応答が続いた）でも、背景の処理が無ければ前の印を残す。"""
     quiet_ok(mark(relay.dir, stop_input(fence("/goal x"))))
-    assert relay.next.exists()
+    before = relay.next.read_text()
     quiet_ok(mark(relay.dir, stop_input("続きの応答")))
+    assert relay.next.read_text() == before
+
+
+def test_mark_clears_previous_when_two_blocks(relay):
+    quiet_ok(mark(relay.dir, stop_input(fence("/goal x"))))
+    quiet_ok(mark(relay.dir, stop_input(fence("a") + "\n" + fence("b"))))
     assert not relay.next.exists()
 
 
@@ -207,7 +214,7 @@ def test_mark_file_is_private(relay):
 
 
 def test_mark_missing_fields(relay):
-    """cwd などが無い・null なら印の値は空文字、応答が null ならブロック 0 件として印も質問の印も消す。"""
+    """cwd などが無い・null なら印の値は空文字、応答が null ならブロック 0 件として印を残し、質問の印を消す。"""
     quiet_ok(mark(relay.dir, json.dumps({"last_assistant_message": fence("/goal x"), "cwd": None})))
     data = json.loads(relay.next.read_text())
     assert set(data) == {"command", "cwd", "session_id", "transcript_path", "written_at"}
@@ -216,7 +223,7 @@ def test_mark_missing_fields(relay):
     question = relay.dir / "question"
     question.write_text("q")
     quiet_ok(mark(relay.dir, json.dumps({"last_assistant_message": None})))
-    assert not relay.next.exists()
+    assert relay.next.exists()
     assert not question.exists()
 
 
@@ -1055,35 +1062,88 @@ def goal_row(sentinel=False, met=False, at=None):
     return json.dumps({"type": "attachment", "timestamp": ts, "attachment": a})
 
 
-def test_run_waits_for_goal_judgement(term):
-    """目標のある区間では、印の後の目標の判定の記録がそろうまで /exit を送らない（AC6）。"""
-    t = term()
-    t.wait_start(1)
-    t.type(f"tr {goal_row(sentinel=True, at='2026-01-01T00:00:00.000Z')}\r")
+def iso_now():
+    t = time.time()
+    return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(t)) + f".{int(t * 1000) % 1000:03d}Z"
+
+
+def mark_then_goal_unmet(t):
+    """印を書き、目標が未達の判定の行を足し、ブロックの無い Stop を模す。印の場所を返す。"""
     t.type("mark next\r")
-    time.sleep(1.5)
-    assert len(t.starts()) == 1
-    t.type(f"tr {goal_row(met=False)}\r")  # 判定が止めを拒んだ（応答は続く）
-    t.wait_start(2)
+    d = pathlib.Path(t.starts()[0]["relay_dir"])
+    t.wait(lambda: (d / "next.json").exists(), what="印")
+    time.sleep(0.05)
+    t.type(f"tr {goal_row(met=False, at=iso_now())}\r")
+    t.type("stop\r")
+    return d
+
+
+def test_run_switches_when_goal_unmet(term):
+    """目標が未達で応答が続き、続いた応答の Stop にブロックが無くても、会話の記録が動き続けても
+    切り替える。Esc を書いてから /exit を書く。"""
+    t = term(env={"NDF_RELAY_QUIET": "1", "NDF_RELAY_ESC_WAIT": "0.5"})
+    t.wait_start(1)
+    tp = t.fake_dir / f"transcript-{t.starts()[0]['pid']}.jsonl"
+    mark_then_goal_unmet(t)
+    stop = threading.Event()
+
+    def keep_writing():
+        while not stop.is_set():
+            with open(tp, "a") as f:
+                f.write(json.dumps({"type": "assistant", "timestamp": iso_now(),
+                                    "message": {"content": [{"type": "text", "text": "続き"}]}}) + "\n")
+            time.sleep(0.2)
+    th = threading.Thread(target=keep_writing, daemon=True)
+    th.start()
+    try:
+        t.wait_start(2)
+    finally:
+        stop.set()
+    assert t.starts()[1]["argv"] == ["next"]
+    got = t.child_input(0)
+    assert got.endswith(b"\x1b/exit\r") and got.count(b"\x1b") == 1
     t.type("/exit\r")
     t.finish()
 
 
-def test_goal_pending_reads_attachment_rows(mod, tmp_path):
-    tp = tmp_path / "t.jsonl"
-    written = time.time()
-    old = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(written - 60))
-    new = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(written + 1))
-    tp.write_text('{"type": "user"}\n')
-    assert not mod.goal_pending(str(tp), written)  # 目標の無い会話
-    tp.write_text(goal_row(sentinel=True, at=old) + "\n")
-    assert mod.goal_pending(str(tp), written)
-    tp.write_text(goal_row(sentinel=True, at=old) + "\n" + goal_row(met=False, at=old) + "\n")
-    assert mod.goal_pending(str(tp), written)  # 判定が印より前
-    tp.write_text(goal_row(sentinel=True, at=old) + "\n" + goal_row(met=False, at=new) + "\n")
-    assert not mod.goal_pending(str(tp), written)
-    tp.write_text(goal_row(sentinel=True, at=old) + "\n" + goal_row(met=True, at=old) + "\n")
-    assert not mod.goal_pending(str(tp), written)  # 目標は終わっている
+@pytest.mark.parametrize("case", ["user", "question", "background"])
+def test_run_goal_unmet_cancelled(term, case):
+    """印の後に利用者が入力したとき・質問が出たとき・背景の処理が起動したときは切り替えない。"""
+    t = term(env={"NDF_RELAY_QUIET": "0.5", "NDF_RELAY_ESC_WAIT": "0.3"})
+    t.wait_start(1)
+    t.type("mark next\r")
+    d = pathlib.Path(t.starts()[0]["relay_dir"])
+    t.wait(lambda: (d / "next.json").exists(), what="印")
+    time.sleep(0.05)
+    if case == "user":
+        row = {"type": "user", "timestamp": iso_now(), "message": {"content": "続けて"}}
+        t.type(f"tr {json.dumps(row, ensure_ascii=False)}\r")
+    elif case == "question":
+        t.type("q open\r")
+        t.wait(lambda: (d / "question").exists(), what="質問の印")
+        t.type("q close\r")
+    else:
+        row = {"type": "assistant", "timestamp": iso_now(), "message": {"content": [
+            {"type": "tool_use", "name": "Bash", "input": {"command": "x", "run_in_background": True}}]}}
+        t.type(f"tr {json.dumps(row)}\r")
+    t.type(f"tr {goal_row(met=False, at=iso_now())}\r")
+    t.type("stop\r")
+    time.sleep(2.5)
+    assert len(t.starts()) == 1
+    assert b"/exit" not in t.child_input(0)
+    t.type("quit 0\r")
+    assert t.finish() == 0
+
+
+def test_run_does_not_wait_for_goal_judgement(term):
+    """目標の判定を待たない（#994）。`/goal clear` の行（met と sentinel の両方）が残っても静まりだけで切り替える。"""
+    t = term()
+    t.wait_start(1)
+    t.type(f"tr {goal_row(sentinel=True, met=True, at='2026-01-01T00:00:00.000Z')}\r")
+    t.type("mark next\r")
+    t.wait_start(2)
+    t.type("/exit\r")
+    t.finish()
 
 
 # ---------------------------------------------------------------- 導入（#928）。一時の HOME・XDG_*・CLAUDE_CONFIG_DIR だけで動かす
@@ -1671,7 +1731,7 @@ def question_rows(t, n=0):
 
 
 def test_guard_question_blocks_exit(term):
-    """G1: 質問の印がある間は、印があって静まっても /exit を書かない。答えた後の Stop で切り替わる。"""
+    """G1: 印の後に質問が出たら /exit を書かない。答えた後の Stop がブロックを出せば切り替わる。"""
     t = term(env={"NDF_RELAY_QUIET": "1.5"})
     t.wait_start(1)
     t.type("mark 次\r")  # 印の後に応答が再開して質問が出た形

@@ -11,12 +11,12 @@ description: "Delegate coding, review, or research to the codex, agy, kiro-cli, 
 `claude` CLI（Claude Code のヘッドレス実行）をローカルから直接起動し、
 コード生成・独立第二意見レビュー・大規模コードベース調査を外部 AI に委譲する。
 
-**手順の大半は 4 つの CLI で共通**であり、本ファイルはその共通手順を規定する。
-起動フラグ・完了検知・出力回収など **CLI 固有の差分は補助ファイルに分離** している。
+起動・上限つきの待ち・回収は `scripts/external-ai.py` の 1 本が 4 つの CLI をまとめて行う。
+起動フラグ・完了検知・出力回収など **CLI 固有の事情は補助ファイルに分離** している。
 
 | 補助ファイル | 内容 |
 |---|---|
-| [references/cli-codex.md](references/cli-codex.md) | Codex CLI のインストール、サンドボックス制約、`codex exec` の起動、sentinel 完了検知、最終 message 欠落対策 |
+| [references/cli-codex.md](references/cli-codex.md) | Codex CLI のインストール、サンドボックス制約、`codex exec` の起動の形、sentinel 完了検知、最終 message 欠落対策 |
 | [references/cli-agy.md](references/cli-agy.md) | agy CLI のインストール、作業領域の宣言、`-p=<本文>` の渡し方、実行時間の上限、プロセス終了による完了検知 |
 | [references/cli-kiro.md](references/cli-kiro.md) | Kiro CLI の非対話実行、**終了コードが成否を表さない**こと、ANSI エスケープ除去、ツール絞り込みを使わない理由、Skill 本文を読ませる明示指定 |
 | [references/cli-claude.md](references/cli-claude.md) | `claude -p` のヘッドレス実行、root 実行での権限モード制約、`--output-format json` による完了検知と実測モデルの取得 |
@@ -27,7 +27,7 @@ description: "Delegate coding, review, or research to the codex, agy, kiro-cli, 
 
 ## NDF との関係
 
-- Claude Code 版の `corder` エージェントは本スキルの手順で Codex CLI を呼び出す
+- Claude Code 版の `corder` エージェントは Codex CLI を呼び出す
 - `/ndf:pr-review <PR番号> codex` / `/ndf:pr-review <PR番号> agy` の委譲先として利用される
 - `/ndf:cross-review` は codex / agy を**並列に起動**して両者の APPROVE 収束を待つ
 - v4.0.0 で Codex MCP サーバは廃止。`mcp__codex__*` ツールは存在しない
@@ -77,119 +77,46 @@ description: "Delegate coding, review, or research to the codex, agy, kiro-cli, 
 
 | 観点 | `corder` エージェント経由 | 本スキルで直接 CLI 起動 |
 |---|---|---|
-| 使い勝手 | エージェントに委譲するだけ | プロンプト書き出し・起動・PID 管理を自分で制御 |
+| 使い勝手 | エージェントに委譲するだけ | プロンプトを書き、`external-ai.py run` を 1 行打つ |
 | プロンプト制御 | corder 側で整形 | 自由に設計可 |
 | スケジュール連携 | 難しい | `/schedule` / `Monitor` と組み合わせやすい |
 
-迷ったら `corder` 経由。プロンプト細部や非同期タイミングを自分で握りたい場合のみ直接起動する。
+迷ったら `corder` 経由。プロンプトの細部を自分で握りたい場合に直接起動する。
 
 ## 共通の実行手順
 
-CLI 固有のコマンドラインは補助ファイルを参照し、流れは以下で統一する。
+LLM が決めるのは **どの CLI に渡すか**（上の表）と **プロンプトの中身**、**結果の解釈**だけである。
+起動・上限つきの待ち・回収は次のコマンドが行う。
 
-### 1. 前提確認
+1. プロンプトをファイルへ書く（ファイル書き込みツールで。テンプレートは「プロンプト設計」）
+2. 次を打つ（`$SKILL_DIR` はこの Skill のディレクトリ）。Claude Code では Bash の
+   `run_in_background: true` で起動し、完了通知を 1 回受ける
 
-インストールとログイン状態を確認する。未インストール時のセットアップ手順は補助ファイルに記載。
+   ```bash
+   python3 "$SKILL_DIR/scripts/external-ai.py" run codex \
+     --prompt-file "$TMP/review-prompt.md" --output-file "$TMP/codex-review.md" \
+     --phase review --workdir "$PWD" [--model M]
+   ```
 
-```bash
-which codex    && codex --version
-which agy      && agy --version
-which kiro-cli && kiro-cli --version
-which claude   && claude --version
-```
+3. 最後の 1 行の JSON の `status` を見る
 
-### 2. プロンプトを一時ファイルへ書き出す
+| `status` | `metrics.outcome` | 次の手 |
+|---|---|---|
+| `ok` | `ok` | `metrics.result` のファイルを読む（`metrics.source` は `file` / `stdout`） |
+| `stopped` | `no_result` | `next` の stderr の末尾を読み、プロンプトを直すか別の CLI へ渡す |
+| `stopped` | `timeout` / `stalled` | 読むファイルを絞るか観点を分けて渡し直す |
+| `stopped` | `usage_limit` | 同じ CLI では解けない。別の CLI へ渡す |
+| `stopped` | `auth` / `missing_cli` | 補助ファイルのログイン・インストールの手順を行う（終了コード 3） |
+| `stopped` | `early_error` / `launch_failed` | `metrics.detail` を読む |
 
-長いプロンプトをシェル引数へ直接渡すとエスケープが破綻する。**必ず一時ファイル経由**にする。
-
-```bash
-cat > /tmp/external-ai-prompt.md <<'EOF'
-## タスク
-以下のファイルを読み込み、設計意図とコードの整合性をレビューしてください。
-
-## 対象ファイル（絶対パスで指定）
-/absolute/path/to/design.md
-EOF
-```
-
-エージェントから実行する場合は、ファイル書き込みツールでプロンプトを作ってから、
-シェル実行ツールのバックグラウンド実行オプションで CLI を起動する。
-
-### 3. バックグラウンドで起動する
-
-多くのエージェントハーネスはシェル実行に 2〜3 分のタイムアウトを課す。
-外部 AI は数分〜10 分かかるため、**フォアグラウンド実行は禁止**。`&` で必ず非同期化し、
-stdout と stderr を別ファイルへリダイレクトする。
-
-```bash
-<CLI 固有の起動コマンド> \
-  > /tmp/external-ai-stdout.md \
-  2> /tmp/external-ai-err.log &
-PID=$!
-```
-
-stderr には思考ログや警告が出る。Codex では数千行になるため、必ずファイルへ逃がす。
-
-### 4. 完了を検知する
-
-検知方法は CLI で異なる。**PID の存在だけで判定しない**（Codex は zombie 化して `ps -p` が
-0 を返し続けることがある）。
-
-| CLI | 脱出条件 |
-|---|---|
-| Codex | stderr に `^tokens used$` が現れる（[references/cli-codex.md](references/cli-codex.md)） |
-| agy | プロセスが終了する（[references/cli-agy.md](references/cli-agy.md)） |
-| Kiro | **結果ファイルが書かれる。** 終了コードは成否を表さない（[references/cli-kiro.md](references/cli-kiro.md)） |
-| Claude | プロセスが終了し、JSON の `is_error` が偽（[references/cli-claude.md](references/cli-claude.md)） |
-
-### 5. 成果物を三段フォールバックで回収する
-
-外部 AI の最終出力は、CLI とモデルの都合で欠落しうる。**stdout だけに依存しない**。
-プロンプト側で「最終結果を指定ファイルへ書き出すこと」を必ず指示し（手順 6 のテンプレート参照）、
-回収側は次の順で拾う。
-
-```bash
-# STDOUT      = CLI の `>` リダイレクト先
-# OUTPUT_FILE = プロンプト指示でツールに書き出させた保険ファイル（task ごとに固有名）
-STDOUT=/tmp/external-ai-stdout.md
-OUTPUT_FILE=/tmp/external-ai-output-pr13734-review.md
-
-# PRIMARY / SECONDARY は CLI ごとに下表の順で割り当てる
-PRIMARY="$OUTPUT_FILE"; SECONDARY="$STDOUT"   # Codex の場合
-# PRIMARY="$STDOUT"; SECONDARY="$OUTPUT_FILE" # agy の場合
-
-if [ -s "$PRIMARY" ]; then
-    cp "$PRIMARY" ./result.md
-elif [ -s "$SECONDARY" ]; then
-    cp "$SECONDARY" ./result.md
-else
-    echo "WARN: 外部 AI の最終出力を回収できませんでした。stderr 末尾を確認:" >&2
-    tail -200 /tmp/external-ai-err.log
-fi
-```
-
-| CLI | 優先 (`PRIMARY`) | 次点 (`SECONDARY`) | 最後の手段 |
-|---|---|---|---|
-| Codex | `OUTPUT_FILE` | `STDOUT` | stderr 末尾 |
-| agy | `STDOUT` | `OUTPUT_FILE` | stderr |
-| Kiro | `OUTPUT_FILE` | `STDOUT` | stderr 末尾（**ANSI 除去後**） |
-| Claude | `OUTPUT_FILE` | `STDOUT`（JSON の `result`） | stderr |
-
-Codex は最終 assistant message を返さずにセッションを終える既知挙動があるため、
-ファイルを優先する。agy は stdout が信頼できるため stdout を優先する。
-Kiro は終了コードが使えないので、**ファイルが書かれたことが唯一の確実な完了の証拠**になる。
-
-### 6. 待機間隔のチューニング
-
-エージェントの context cache TTL は通常 5 分。これを超えると prompt cache がミスして
-再送料金が発生する。
-
-- **短い間隔**: 60〜270 秒（TTL 内に収まる、軽量）
-- **長い間隔**: 1200 秒以上（1 回のキャッシュミスを長時間で償却）
-- **避ける**: 300 秒前後（キャッシュミス + 短時間待機の最悪の組み合わせ）
-
-Codex（5〜10 分）は 270 秒ポーリングか 1200 秒一括待ち、agy（数十秒〜5 分）は
-60〜270 秒ポーリングでよい。
+- 使えるかだけを先に知りたいときは `external-ai.py check <runtime>`（CLI の有無と認証）
+- 上限は `limits.py` の工程の値（`--phase`）で、`--timeout` / `--stall-timeout` で狭められる。
+  上限を超えると CLI を止めて必ず終わる
+- 回収は結果ファイル → stdout（claude は JSON の `result`、kiro は ANSI を除く） → stderr の末尾の順で、
+  回収した本文は `--output-file` に置く。プロンプトに出力先の指示が無ければ末尾へ足す
+- 監視の記録は `metrics.stem` の `-monitor.json` にあり、`metrics.monitor_status` / `metrics.reason` と一致する
+- 一時ファイルは `NDF_EXTERNAL_AI_TMP_DIR`（既定は一時ディレクトリの `ndf/external-ai/`）に、
+  起動ごとに固有の名前で置く
 
 ## プロンプト設計
 
@@ -200,8 +127,8 @@ Codex（5〜10 分）は 270 秒ポーリングか 1200 秒一括待ち、agy（
 3. **出力形式の指定**（Markdown テンプレートを提示）
 4. **スコープ外の明示**（脱線防止）
 5. **出力サイズの目安**（例: 400〜500 行）
-6. **最終出力先ファイルの指定**: `/tmp/<cli>-output-タスク名.md` のような明示パスへ書き出させる。
-   Codex は `apply_patch`、agy は `write_to_file` を使う。**stdout のみへの出力は不可**
+6. **最終出力先ファイルの指定**: `--output-file` に渡すパスへ書き出させる。
+   Codex は `apply_patch`、agy は `write_to_file` を使う
 7. **assistant message の強制**: 「tool 呼び出しのみで終了せず、最後に必ず 1 回出力すること」
 
 ### レビュー依頼テンプレート
@@ -225,7 +152,7 @@ Codex（5〜10 分）は 270 秒ポーリングか 1200 秒一括待ち、agy（
 - 既存レビューで対応済みの事項（重複指摘を避けるため）
 
 ## 出力先（必須）
-最終結果を `/tmp/<cli>-output-タスク名.md` に書き出したうえで、stdout にも同内容を出力すること。
+最終結果を `--output-file` のパス に書き出したうえで、stdout にも同内容を出力すること。
 
 ## 出力形式
 # タイトル
@@ -263,7 +190,7 @@ Codex（5〜10 分）は 270 秒ポーリングか 1200 秒一括待ち、agy（
 - [ ] 型チェック / lint がパスする
 
 **必須**: ファイル編集は実際に行い、最後に変更ファイル一覧と要点を
-`/tmp/<cli>-output-タスク名.md` に書き出したうえで、stdout にも同内容を出力すること。
+`--output-file` のパス に書き出したうえで、stdout にも同内容を出力すること。
 tool 呼び出しのみで終了せず、最後に必ず assistant message として 1 回出力すること。
 ```
 
@@ -273,17 +200,16 @@ CLI 固有の症状（サンドボックス失敗、承認モードによるハ�
 
 | 症状 | 原因 | 対処 |
 |---|---|---|
-| 完了通知が来たのに出力が空 | `&` で起動したラッパーシェルだけが終了し、本体はまだ実行中 | 手順 4 の脱出条件で待ち直す。PID の存在で判定しない |
+| `no_result` で終わる | tool 呼び出しだけで終わった | プロンプトに出力先と「最後に必ず 1 回出力する」を書く |
 | 出力の末尾が途切れる | モデルの出力トークン上限 | プロンプトで「400 行以内」など出力サイズを指定、または観点を絞って分割実行 |
-| 実行が 15 分以上終わらない | 調査範囲が広すぎる、探索ループに入った | 読むべきファイルを明示リスト化し、スコープ外を明記。必要なら `kill` して再実行 |
-| 「ファイルを読めません」と返る | 相対パス指定で cwd が想定と違う | プロンプトには**絶対パス**を書き、CLI 側でも作業ディレクトリを明示する |
-| 認証エラー | ログインセッション失効 | 各 CLI のログイン手順をやり直す（補助ファイル参照） |
-| ハーネスのシェルタイムアウトで kill される | フォアグラウンド実行のまま長尺タスクを走らせた | 手順 3 のとおり必ずバックグラウンド化する |
+| `timeout` / `stalled` で終わる | 調査範囲が広すぎる、探索ループに入った | 読むべきファイルを明示リスト化し、スコープ外を明記して渡し直す |
+| 「ファイルを読めません」と返る | 相対パス指定で cwd が想定と違う | プロンプトには**絶対パス**を書き、`--workdir` を渡す |
+| `auth` で終わる | ログインセッション失効 | 各 CLI のログイン手順をやり直す（補助ファイル参照） |
 
 ## 既知の制約とコスト
 
 1. **ログイン状態**: 初回はログインが必要。未ログインだと即座に失敗する
-2. **stderr の肥大**: 思考ログや警告が出るため必ず `2> /tmp/...` へリダイレクトする
+2. **stderr の肥大**: 思考ログや警告が出る。`external-ai.py` が `<stem>-err.log` へ逃がす
 3. **API コスト**: トークン従量課金。1 セッションで数千〜数万トークン消費することがあり、短時間で済むタスクには使わない
 4. **機密情報**: コードが外部 API へ送信される。社外秘コードの扱いは組織ポリシーに従う
 5. **モデル選択**: 既定モデルは時期により変動する。安定性が要るときは明示指定する

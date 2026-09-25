@@ -45,7 +45,6 @@ IGNORED_DIRS = {"__pycache__", ".pytest_cache", "tests"}
 # 既に知っている参照。**共通層ではなく Skill の本体どうしの参照**であるため、置き場所を
 # 移すだけでは解けない。解くには双方の Skill の設計が要る（#344）。
 EXCEPTIONS: dict[tuple[str, str], str] = {
-    ("plugins/ndf/skills/fix/SKILL.md", "cross-review"): "#344",
     ("plugins/ndf/skills/cross-review/scripts/state.py", "fix"): "#344",
     # `google-drive` は `google-auth` の資格情報を使う。**4 つの manifest すべてが
     # 両方を載せている**ため、配る先で相手が欠けることが起きない。その条件は
@@ -58,6 +57,11 @@ EXCEPTIONS: dict[tuple[str, str], str] = {
     # `scripts/tests/test_refactoring_codistribution.py` が固定する。
     ("plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/vocabulary.py",
      "refactoring"): "#444",
+    # `cross-refactoring` の drive は最終ゲートで `cross-review` の drive を起動させる
+    # （#870）。**4 つの manifest すべてが両方を載せている**ため、配る先で相手が
+    # 欠けることが起きない。その条件は
+    # `scripts/tests/test_cross_review_codistribution.py` が固定する。
+    ("plugins/ndf/skills/cross-refactoring/scripts/drive.py", "cross-review"): "#870",
 }
 
 # Markdown の行内リンクの飛び先。読み手への案内であるため走査から外す。

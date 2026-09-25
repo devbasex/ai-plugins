@@ -33,34 +33,15 @@ NDF 標準 statusline (project_dir + メインとサブエージェントのコ�
 引数に応じて以下のコマンドを実行する:
 
 ```bash
-# この Skill のディレクトリを決める。候補を順に試し、最初に当たったものを絶対パスで採る。
-# Claude Code は SKILL.md 内の ${CLAUDE_PLUGIN_ROOT} をプラグインルートの絶対パスへ置き換えて
-# から渡す。シングルクォートで囲むのは、置き換えられなかったときにシェルへ展開させないため
-# である（未定義の変数を読まないので `set -u` でも落ちない）。置き換えない runtime では、
-# **この bash を実行する前に `<この Skill のディレクトリ>` をランタイムから渡された実際の
-# パスへ置き換えること**。置き換えないまま実行しても、その候補が外れるだけで別の場所を
-# 読むことはない。Kiro CLI は installer が `.kiro/skills/` へ symlink を張るため、置き換え
-# なくてもその位置で当たる。
-SKILL_NAME=statusline
-PLUGIN_ROOT='${CLAUDE_PLUGIN_ROOT}'
-case "$PLUGIN_ROOT" in '$'*) PLUGIN_ROOT= ;; esac
-SKILL_DIR=
-# 明示的に渡されたディレクトリを `.kiro` より先に見る。逆にすると、Kiro の設定を持つ
-# リポジトリで Codex や Claude Code を動かしたときに別 runtime の Skill を選ぶ。
-for candidate in \
-  ${PLUGIN_ROOT:+"$PLUGIN_ROOT/skills/$SKILL_NAME"} \
-  "<この Skill のディレクトリ>" \
-  ".kiro/skills/$SKILL_NAME" \
-  "$HOME/.kiro/skills/$SKILL_NAME"
-do
-  # この Skill だけはプラグインルート直下の scripts/ を呼ぶ。Skill ディレクトリの 2 つ上が
-  # プラグインルートで、Kiro CLI が張った symlink 越しでも解決先を経由して届く。
-  [ -f "$candidate/../../scripts/statusline-switch.sh" ] || continue
-  SKILL_DIR="$(cd "$candidate" && pwd)"
-  break
+# スクリプトの置き場所を解決の入口（scripts/resolve.sh）に尋ねる。入口を探すこの 1 段と
+# 候補の順序は development-workflow/references/scripts-lookup.md にある。
+for R in '${CLAUDE_PLUGIN_ROOT}' "$(git rev-parse --show-toplevel 2>/dev/null)/plugins/ndf" \
+  ~/.claude/plugins/cache/*/ndf/* .kiro/skills/*/../.. ~/.kiro/skills/*/../.. \
+  ~/.codex/{.tmp/,}marketplaces/*/plugins/ndf ~/.gemini/config/plugins/ndf plugins/ndf; do
+  [ -f "$R/scripts/resolve.sh" ] && break; R=
 done
-[ -n "$SKILL_DIR" ] || { echo "この Skill のディレクトリを解決できない" >&2; exit 1; }
-SWITCH="$SKILL_DIR/../../scripts/statusline-switch.sh"
+[ -n "$R" ] || { echo "NDF の scripts/resolve.sh が見つからない" >&2; exit 3; }
+SWITCH="$(bash "$R/scripts/resolve.sh" scripts)/statusline-switch.sh" || exit 3
 
 # 状態確認 (引数なし or status)
 bash "$SWITCH" status
