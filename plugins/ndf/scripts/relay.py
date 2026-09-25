@@ -12,7 +12,7 @@
 | `startup` | SessionStart hook の本体。在る写しを今の版で置き直し（版は後退させない）、10.17.4〜10.17.6 が自動で足した囲みを 1 度だけ知らせる。シェルの設定は書かない |
 | `question open` / `question close` | `AskUserQuestion` の `PreToolUse` / `PostToolUse` hook の本体。質問の表示中の印を作る・消す（関門を越えない守り） |
 | `is-child` | 中継の直接の子の claude から呼ばれていれば 0 |
-| `notice` | 区間の切れ目の告知。1 行目に `relay` か `outside`（`is-child` と同じ判定）、2 行目に告知の 1 文を出す（#980） |
+| `notice` | 区間の切れ目の告知。1 行目に `relay` か `outside`（`is-child` と同じ判定）、2 行目に告知の 1 文を出す（#980）。外のときの 2 行目は理由（中継が無い・終わっている・直接の子でない）で変わる（#1016） |
 
 **標準ライブラリだけで書く。** 印と作業ディレクトリの形（`next.json` のキーと
 `NDF_RELAY_DIR` のファイル）は版をまたいで変えない。hook は区間ごとに新しい版で動き、
@@ -221,12 +221,39 @@ def is_direct_child(d: str, start: int | None = None) -> bool:
     return False
 
 
+def relay_position() -> str:
+    """中継との位置を返す。`relay`（直接の子）か、外である理由（`no-dir` / `not-running` / `not-child`）。
+
+    `not-child` は中継が動いているのに hook を呼んだ claude が `child.pid` でないとき
+    （fork したセッション・bg-pty-host の下・別の入口。#1016）。
+    """
+    d = os.environ.get("NDF_RELAY_DIR")
+    if not d or not os.path.isdir(d):
+        return "no-dir"
+    if not relay_running(d):
+        return "not-running"
+    if not is_direct_child(d):
+        return "not-child"
+    return "relay"
+
+
 def under_relay() -> str | None:
     """`NDF_RELAY_DIR` があり、中継が動いていて、hook を呼んだ claude が中継の直接の子ならその場所を返す。"""
-    d = os.environ.get("NDF_RELAY_DIR")
-    if d and relay_running(d) and is_direct_child(d):
-        return d
+    if relay_position() == "relay":
+        return os.environ.get("NDF_RELAY_DIR")
     return None
+
+
+def relay_child_pid() -> int | None:
+    """中継が起動した子の pid（`child.pid`）。読めなければ None。"""
+    d = os.environ.get("NDF_RELAY_DIR")
+    if not d:
+        return None
+    try:
+        with open(os.path.join(d, CHILD_FILE)) as f:
+            return int(f.read().strip())
+    except (OSError, ValueError):
+        return None
 
 
 # ---------------------------------------------------------------- mark
@@ -1801,12 +1828,23 @@ def notice_lines() -> tuple[str, str]:
     """区間の切れ目の告知。文面と秒数の唯一の定義。
 
     1 行目は `is-child` と同じ判定（中継の直接の子か）。自動で切り替わるかは 2 行目が表す。
+    外のときは 2 行目を理由（`relay_position()`）で変え、原因と対処を書く（#1016）。
     秒数は中継本体の静まり（`NDF_RELAY_QUIET`）そのもので、切り替えの時間は足さない。
     """
     outside = ("/exit してから claude を起動し、下の中身を最初の入力として貼り付ける"
                "（/ndf:install-wrapper で中継を入れると自動になる）")
     try:
-        if under_relay() is None:
+        pos = relay_position()
+        if pos == "not-running":
+            return "outside", ("中継は既に終わっている。"
+                               "/exit してから claude を起動し、下の中身を最初の入力として貼り付ける")
+        if pos == "not-child":
+            child = relay_child_pid()
+            who = f"元の会話（子 pid {child}）" if child is not None else "元の会話"
+            return "outside", (f"中継は{who}しか見ていないため、この会話で出した ndf-next は自動では拾われない。"
+                               "元の会話へ戻って同じ ndf-next を出すか、元の会話を /exit してから"
+                               " claude を起動し、下の中身を最初の入力として貼り付ける")
+        if pos != "relay":
             return "outside", outside
         quiet = quiet_seconds()
     except Exception:
