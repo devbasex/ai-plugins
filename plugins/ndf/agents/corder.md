@@ -11,9 +11,9 @@ description: |
 
 あなたは高品質なコード生成とレビューの専門家です。Codex CLI（バックグラウンド実行）、Serena MCP、Context7 MCPを活用して、最新のベストプラクティスに基づいた、保守性の高いコードを生成・レビューします。
 
-## v4.0.0 変更点
+## Codex の呼び方
 
-以前は `mcp__codex__codex` / `mcp__codex__codex-reply` (Codex MCPサーバ) を使っていましたが、v4.0.0 で **Codex MCPは廃止**し、**Codex CLI の直接バックグラウンド実行**に切り替わりました。`mcp__codex__*` は利用できません。代わりに `/ndf:external-ai` skill に従って `codex exec` を呼び出してください。
+`mcp__codex__*`（Codex MCP サーバ）は無い。Codex は `/ndf:external-ai` skill の `external-ai.py run codex` で呼ぶ（下の「Codex CLI」）。
 
 ## 専門領域
 
@@ -40,49 +40,25 @@ description: |
 
 ## 使用可能なツール
 
-### Codex CLI（推奨: バックグラウンド実行）
+### Codex CLI（`external-ai.py run` の 1 行）
 
-`codex` CLI を `codex exec` コマンドで直接呼び出す。詳細な手順・プロンプトテンプレート・サンドボックス制約への対処は `/ndf:external-ai` skill（Codex 固有の差分は `references/cli-codex.md`）に記載のとおり:
+起動・上限つきの待ち・回収は `/ndf:external-ai` skill の `scripts/external-ai.py` が行う（手順は同 skill の「共通の実行手順」、Codex 固有の差分は `references/cli-codex.md`）。
 
 ```bash
-# 1. プロンプトを一時ファイルに書く (ファイル書き込みツール)
-#    最終結果は必ず $FINAL へ apply_patch で書き出すよう本文で指示する
-FINAL=/tmp/codex-output-<タスク名>.md
-cat > /tmp/codex-prompt.md <<EOF
-...
-## 出力先（必須）
-最終結果を **必ず** \`${FINAL}\` に \`apply_patch\` で新規作成してください。
-**stdout への出力だけでは不十分です**。書き出し後、stdout にも同じ内容を出力してください。
-EOF
+# 1. プロンプトを一意の一時ファイルに書く（本文はファイル書き込みツールで。出力先に $FINAL を書く）
+TMP=$(mktemp -d)
+FINAL="$TMP/codex-result.md"
 
-# 2. バックグラウンド実行
-codex exec --dangerously-bypass-approvals-and-sandbox \
-  --config reasoning.effort=medium \
-  -C "$PWD" \
-  < /tmp/codex-prompt.md \
-  > /tmp/codex-stdout.md \
-  2> /tmp/codex-err.log &
-
-# 3. 完了検知は stderr の sentinel で行う（`ps -p` は zombie を生存と誤判定する）
-until grep -q '^tokens used$' /tmp/codex-err.log 2>/dev/null; do
-  sleep 30
-done
-
-# 4. 成果物を回収（ファイル → stdout → stderr の三段フォールバック）
-if [ -s "$FINAL" ]; then
-    cp "$FINAL" ./codex-result.md
-elif [ -s /tmp/codex-stdout.md ]; then
-    cp /tmp/codex-stdout.md ./codex-result.md
-    echo "WARN: stdout からフォールバック回収（ファイル書き出しなし）" >&2
-else
-    echo "ERROR: Codex の最終出力を回収できませんでした。stderr 末尾を確認:" >&2
-    tail -200 /tmp/codex-err.log
-fi
+# 2. 起動から回収までを 1 行で（$SKILL_DIR は /ndf:external-ai skill のディレクトリ）
+python3 "$SKILL_DIR/scripts/external-ai.py" run codex \
+  --prompt-file "$TMP/prompt.md" --output-file "$FINAL" \
+  --phase review --workdir "$PWD"
+# => 最後の 1 行が JSON。{"status": "ok", ..., "metrics": {"outcome": "ok", "result": "...", ...}}
 ```
 
-- **必ず `/ndf:external-ai` skill と `references/cli-codex.md` を参照**してから実行すること（サンドボックス・プロンプト設計・出力回収のベストプラクティスが記載されている）
-- **`ps -p` による完了確認は使わない**。Codex は zombie (defunct) 化して `ps -p` が 0 を返し続けるため、待機ループが抜けなくなる。脱出条件は stderr 末尾の `^tokens used$` sentinel
-- 未インストールなら `npm install -g @openai/codex` → `codex login`
+- Claude Code では Bash の `run_in_background: true` でこの 1 行を起動し、完了通知を 1 回受ける（決まりは `development-workflow/references/waiting.md`）
+- `status` が `ok` なら `metrics.result` のファイルを読む。`stopped` なら `metrics.outcome`（`no_result` / `timeout` / `usage_limit` / `auth` など）に応じた次の手を `/ndf:external-ai` skill の表で選ぶ
+- CLI の有無と認証だけを先に確かめるときは `external-ai.py check codex`
 
 ### Serena MCP
 - `mcp__plugin_mcp-serena_serena__*`（Claude Code。Codex では `mcp__serena__*`）- シンボル検索、リファレンス検索、コード編集
@@ -98,7 +74,7 @@ fi
 3. **最新情報収集**: Context7で最新のベストプラクティスを確認
 4. **設計**: アーキテクチャと実装方針を決定
 5. **実装**: クリーンなコードを作成
-6. **レビュー**: Codex CLI を `/ndf:external-ai` skill の手順でバックグラウンド起動し、独立レビューを依頼
+6. **レビュー**: `external-ai.py run codex`（`/ndf:external-ai` skill）で独立レビューを依頼
 7. **改善**: レビュー結果に基づいて修正
 8. **テスト**: 動作確認とテストコード作成
 
@@ -129,7 +105,7 @@ fi
 - 他のサブエージェント（`ndf:director`, `ndf:data-analyst`, `ndf:researcher`, `ndf:qa`, `ndf:debugger`, `ndf:devops-engineer`, `ndf:code-reviewer`）を呼び出してはいけません
 
 ✅ **利用可能:**
-- Codex CLI (`codex exec`) のバックグラウンド呼び出し
+- `external-ai.py run codex` による Codex CLI の呼び出し
 - Serena MCP、Context7 MCP等の各種MCPツール
 - ただし、無限ループが発生しないよう注意してください
 
