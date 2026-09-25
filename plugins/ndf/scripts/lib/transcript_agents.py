@@ -396,9 +396,12 @@ def read_file(path: pathlib.Path, meta: dict | None = None) -> tuple[AgentRecord
     rows, skipped = _iter_lines(path)
 
     depth = meta.get("spawnDepth")
-    depth = int(depth) if isinstance(depth, int) else 0
     description = meta.get("description")
-    layer = layer_of(depth, description)
+    if isinstance(depth, int):
+        layer = layer_of(depth, description)
+    else:
+        # `.meta.json` が無いか壊れている配下の記録。深さ 0 にすると conductor に数えてしまう（#764）
+        depth, layer = -1, OTHER
 
     agent_id = None
     if path.name.startswith("agent-"):
@@ -442,7 +445,7 @@ def read_session(
     conductor_path, sub_paths = session_paths(session, root)
     records: list[AgentRecord] = []
     subs: list[tuple[AgentRecord, dict]] = []
-    skipped = 0
+    skipped = no_meta = 0
 
     if conductor_path is not None:
         record, n = read_file(conductor_path, {"spawnDepth": 0})
@@ -454,12 +457,14 @@ def read_session(
         record, n = read_file(path, meta)
         record.session = session
         skipped += n
+        no_meta += record.layer == OTHER
         records.append(record)
         subs.append((record, meta))
     _link_parent_agents(records, subs)
 
     if counter is not None:
         counter["skipped"] = counter.get("skipped", 0) + skipped
+        counter["no_meta"] = counter.get("no_meta", 0) + no_meta
     return records
 
 
@@ -714,6 +719,9 @@ def _report_skipped(counter: dict, sessions: list[str], found: bool) -> int:
     skipped = counter.get("skipped", 0)
     if skipped:
         print(f"[transcript-agents] 読めない行を飛ばした: {skipped} 件", file=sys.stderr)
+    if counter.get("no_meta"):
+        print("[transcript-agents] 層が読めない記録（.meta.json が無いか壊れている）: "
+              f"{counter['no_meta']} 件", file=sys.stderr)
     if not found:
         print(
             "[transcript-agents] 記録が見つからない: "
