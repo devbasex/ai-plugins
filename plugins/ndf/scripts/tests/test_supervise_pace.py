@@ -98,6 +98,7 @@ def test_fast_mission_puts_check_then_dev_then_prod_after_the_implementation(tmp
     ds = steps_of(design)
     assert "--gate design" in ds["mvv"]["cmd"] and ds["mvv"]["next"] == "approve" and ds["mvv"]["gate_next"] == "end"
     assert "design-approved" in ds["approve"]["cmd"] and ds["approve"]["next"] == "merge"
+    assert ds["review"]["next"] == "glossary-check" and ds["push-glossary"]["next"] == "mvv"  # 語のチェックの後で判定する
     for path in [*waves["設計"]["plans"], *waves["実装"]["plans"], check, review, dev, prod]:
         assert_transitions_exist(load(path))
 

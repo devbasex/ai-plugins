@@ -212,6 +212,16 @@
   理由に総評へ移した件数（#730）。`comments` は `posted_inline` と同じ値
 - `rounds[].fix.summary_comment_url` — 修正のまとめの投稿の応答が返した参照（#730）
 - `rounds[].verdict` の `queued` — 通ったが待ち行列に投稿が残っているラウンド。収束させない
+- `rounds[].verdict` の `model_confirmed` — 設計 PR のモデルの段で両席が承認したラウンド。抜けずに、修正を
+  挟まずに詳細の段のラウンドへ進む（`judge` は `MODEL_CONFIRMED=1` を出して終了コード 2）
+- `rounds[].stage` — 設計 PR のラウンドの段（`model` / `detail`）。`start-round` が
+  `classifications.review_stage(review_kind, round, design_has_model)` で決めて残し、`STAGE=` で出す。
+  1 ラウンド目で `design_has_model` が真なら `model`、ほかの設計 PR は `detail`。実装 PR は持たない
+- `design_has_model` — 設計 PR の変更した設計文書（`-design.md` / `-design-decisions.md`）のどれかに見出し
+  `## ドメインモデル` があるか。`init` が決める
+- `review_instructions_by_stage` — 設計 PR の段ごとの観点（`{"model": ..., "detail": ...}`）。`model` は
+  モデルの段の観点と手動の観点、`detail` は `review_instructions` と同じ値。`launch-reviewer.sh` がそのラウンドの
+  `stage` の値を「追加レビュー観点」へ差し込み、この項目か段の無い状態ファイルは `review_instructions` を使う
 - `sweep` — 最終スイープ後の検証結果。`remaining_open` は GitHub 側で数え直した実数で、
   `declared_remaining_open` は結果ファイルの申告値。両者が食い違う場合は実数を採る
 
@@ -423,7 +433,16 @@ GitHub は **自分の PR には `REQUEST_CHANGES` でレビューを投稿で�
 
 - `common`: PR 全体の目的、変更範囲、保守性、テスト、ロールバック容易性
 - `docs_only`: ドキュメントのみ PR。企画・説明の妥当性、コード/設定/コマンド/他 docs との整合性
-- `design`: 設計 PR（`issues/` の `-requirements.md` / `-design.md` / `-design-decisions.md`）。3 文書の対応、状態の書き手と読み手の矛盾、外部ツールの挙動の断定に実測の根拠があるか
+- `design`: 設計 PR（`issues/` の `-requirements.md` / `-design.md` / `-design-decisions.md`）。3 文書の対応、状態の書き手と読み手の矛盾、外部ツールの挙動の断定に実測の根拠があるか、用語集どおりか、不変条件を破っていないか、コンテキストの境界を越えていないか。2 段で渡す（下の「設計 PR の 2 段」）
+
+### 設計 PR の 2 段
+
+| 段 | ラウンド | 見るもの | 渡す観点 |
+| --- | --- | --- | --- |
+| モデル（`model`） | 1 ラウンド目（`design_has_model` が真のとき） | ドメインモデルの節と、用語集の差分だけ | コンテキストの関係の宣言・集約の持ち主・不変条件どうしの矛盾・ドメインイベントの受け手・用語の表と用語集の一致。節の外への指摘は書かない |
+| 詳細（`detail`） | 2 ラウンド目以降（節が無ければ 1 ラウンド目から） | 残りの節 | `design` の観点。ドメインモデルの節は確定したものとして扱う |
+
+モデルの段で両席が承認しても抜けない。関門の数とラウンドの上限（設計は 3）は変えない。
 - `code`: 設計、正確性、可読性、冗長・重複、言語らしさ、セキュリティ、関数/ファイルの責務とサイズ
 - `db_migration`: データ設計、型、NULL/default/制約/index、既存データ、backfill、ロールバック
 - `test`: テストの仕様性、境界値、失敗系、flaky リスク

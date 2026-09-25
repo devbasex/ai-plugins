@@ -1,0 +1,89 @@
+{
+  "version": 1,
+  "contexts": [
+    {
+      "id": "project-glossary",
+      "name": "プロジェクトの用語集",
+      "meaning": "各プロジェクトが持つユビキタス言語。語・意味・コンテキスト・廃止した語・正本"
+    },
+    {
+      "id": "ndf-workflow",
+      "name": "NDF の開発ワークフロー",
+      "meaning": "NDF が配る工程・関門・モード・段の語。development-workflow/references/glossary.md が持つ"
+    }
+  ],
+  "terms": [
+    {
+      "term": "ユビキタス言語",
+      "context": "project-glossary",
+      "meaning": "プロジェクトの関係者とエージェントが、要求・設計・コードで同じ意味に使う語の集まり",
+      "source": "issues/issue-1111-requirements.md"
+    },
+    {
+      "term": "用語集",
+      "context": "project-glossary",
+      "meaning": "ユビキタス言語を持つ構造化ファイル（正）と、そこから作る人が読む Markdown の文書。どちらもプロジェクトのリポジトリに置く",
+      "source": "issues/issue-1111-requirements.md"
+    },
+    {
+      "term": "コンテキスト",
+      "context": "project-glossary",
+      "meaning": "語の意味が 1 つに決まる範囲（境界づけられたコンテキスト）",
+      "source": "issues/issue-1111-requirements.md"
+    },
+    {
+      "term": "ドメインモデルの節",
+      "context": "project-glossary",
+      "meaning": "設計文書の先頭に置く節。変更が属するコンテキスト・変える集約とその持ち主・不変条件・ドメインイベントを書く",
+      "source": "issues/issue-1111-requirements.md"
+    },
+    {
+      "term": "廃止した語",
+      "context": "project-glossary",
+      "meaning": "用語集で別の語へ置き換えた語。文書に出たら落とす",
+      "source": "issues/issue-1111-requirements.md"
+    },
+    {
+      "term": "不変条件",
+      "context": "project-glossary",
+      "meaning": "集約がいつも満たす条件。設計のドメインモデルの節に書き、実装の前にテストにする",
+      "source": "issues/issue-1111-requirements.md"
+    },
+    {
+      "term": "未登録の語",
+      "context": "project-glossary",
+      "meaning": "用語として書かれているのに用語集に無い語。見出しが「用語」の節の表の 1 列目に書いた語を指す",
+      "source": "issues/issue-1111-requirements.md"
+    },
+    {
+      "term": "用語集の宣言",
+      "context": "ndf-workflow",
+      "meaning": "`.ndf/glossary.json`。用語集の置き場・形式・検査の対象を持つ",
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "語のチェック",
+      "context": "ndf-workflow",
+      "meaning": "`glossary.py check`。用語集の形と、文書の追加した行の語を見る",
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "モデルの段",
+      "context": "ndf-workflow",
+      "meaning": "設計 PR のレビューの 1 ラウンド目。ドメインモデルの節だけを見る",
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "詳細の段",
+      "context": "ndf-workflow",
+      "meaning": "設計 PR のレビューの 2 ラウンド目以降。確定したモデルを前提に残りを見る",
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "仕様の写し",
+      "context": "ndf-workflow",
+      "meaning": "課題の本文にある要求を、設計 PR と一緒にコミットする `issues/` のファイル",
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    }
+  ]
+}

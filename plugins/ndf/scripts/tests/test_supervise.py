@@ -799,8 +799,20 @@ def test_new_mission_writes_waves_in_order(tmp_path):
     review = next(s for s in design["steps"] if s["id"] == "review")
     assert "--max-rounds" not in review["args"]  # 設計の既定（3 ラウンド）に任せる
     assert design["branch"].startswith("design/")
+    # 設計の工程の入口で用語集を見る（#1111）。止まったら on_fail を置かずに止まる
+    ds = {s["id"]: s for s in design["steps"]}
+    assert [s["id"] for s in design["steps"]] == ["glossary", "design", "pr", "review", "glossary-check",
+                                                  "fix-glossary", "glossary-recheck", "push-glossary", "gate"]
+    assert "glossary.py gate --mode" in ds["glossary"]["cmd"] and "on_fail" not in ds["glossary"]
+    assert ds["review"]["next"] == "glossary-check"
+    assert "check --diff origin/develop" in ds["glossary-check"]["cmd"]
+    assert ds["glossary-check"]["on_fail"] == "fix-glossary" and ds["fix-glossary"]["next"] == "glossary-recheck"
+    assert ds["glossary-recheck"]["on_fail"] == ds["glossary-recheck"]["next"] == "push-glossary"
+    assert ds["push-glossary"]["next"] == "gate"
+    assert [s["id"] for s in design["steps"] if s["type"] == "judge"] == ["gate"]  # 関門の数は変わらない
+    assert "glossary-recheck" in ds["gate"]["inputs"]
 
-    impl = json.loads(Path(waves["実装"]["plans"][0]).read_text())
+    impl =json.loads(Path(waves["実装"]["plans"][0]).read_text())
     assert impl["起点"] == "origin/mission/v10-18"
     assert next(s for s in impl["steps"] if s["type"] == "pr")["base"] == "mission/v10-18"
 

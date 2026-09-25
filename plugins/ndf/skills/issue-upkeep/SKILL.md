@@ -332,8 +332,14 @@ python3 "$UPKEEP/upkeep.py" apply --plan plan.json [--max-waits N]
 | 反映 | 直した件数・閉じた件数・返した件数 |
 | 未設定のまま残った課題 | 件数と理由（主題が合わず重要度も低い / 1 件しか残らない / 複数に当てはまる） |
 | 待った回数 | 外部への書き込みの制限に当たった回数と、待った長さ |
+| 用語集の変化 | 足された語の数・廃止された語の数と、語の並び（`glossary.py diff` の結果）。宣言の無いプロジェクトでは書かない |
 
-対象・区分の内訳・反映・待った回数の値は `report` が記録から返す。
+対象・区分の内訳・反映・待った回数の値は `report` が記録から返す。用語集の変化は、棚卸の対象の期間の
+起点（直近の本番のタグ）と終点（`HEAD`）で `glossary.py diff` を打って取る。
+
+```bash
+python3 "$SCRIPTS/glossary.py" diff --base "$(git describe --tags --abbrev=0)" --head HEAD
+```
 
 ```bash
 python3 "$UPKEEP/upkeep.py" report
