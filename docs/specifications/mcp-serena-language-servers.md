@@ -87,8 +87,8 @@ Claude Code 向けには `pyright-lsp` の導入と `pyright-langserver` の有�
 | 15 | Kiro は Claude Code と同じ起動定義と hook の定義を受け取る。`--client claude-code` の hook は `CLAUDE_PLUGIN_ROOT` が無ければ何も出さない | Serena に Kiro の文脈は無い。Kiro の installer が SessionStart を `agentSpawn` へ写すため、そのままでは `installed_plugins.json` の無い Kiro に LSP の欠けを毎回出す |
 | 16 | `SERENA_HOME` は `.serena`（cwd からの相対）のまま保ち、作業ツリーごとの言語サーバの取得を受け入れる | 変えると既存の利用者の設定と言語サーバの置き場所が移る。`~/.serena` は公式と全体の設定を共有し、絶対パスは `.mcp.json` の展開に頼る |
 
-**誘導は拒まず、止めない案内にする（#971）。** 2026-09-24 の実測（claude-sonnet-5・指示なし・各 3 回）で、
-拒否の後もモデルは Serena へ切り替わらず、同じ grep を打ち直すなど 1 手番を無駄にするだけだった。
+**誘導は拒まず、止めない案内にする。** 拒んでもモデルは Serena へ切り替わらず、
+同じ grep を打ち直すなど 1 手番を無駄にするだけになる。
 
 ### スクリプトとモデルの境界
 
