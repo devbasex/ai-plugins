@@ -1,0 +1,109 @@
+{
+ "per_pr": [
+  {
+   "version": "10.17.17",
+   "mode": "light",
+   "model": "claude-opus-5-5",
+   "cc": "2.1.282",
+   "reviewers": "-",
+   "sessions": 1,
+   "sessions_with_pr": 1,
+   "prs": 3,
+   "conductor_cost": 440890.3500000001,
+   "supervisor_cost": 0.0,
+   "worker_cost": 0.0,
+   "context": 3931452.3333333335,
+   "out": 14380.666666666666,
+   "minutes": 19.978794444931875,
+   "codex_input": 0.0,
+   "codex_out": 0.0,
+   "kiro_credit": 0.0,
+   "claude_seat_cost": 0.0
+  },
+  {
+   "version": "10.17.18",
+   "mode": "不明",
+   "model": "claude-opus-5-5",
+   "cc": "2.1.282",
+   "reviewers": "-",
+   "sessions": 2,
+   "sessions_with_pr": 0,
+   "prs": 0
+  }
+ ],
+ "per_role": [
+  {
+   "version": "10.17.17",
+   "mode": "light",
+   "model": "claude-opus-5-5",
+   "cc": "2.1.282",
+   "reviewers": "-",
+   "layer": "conductor",
+   "role": "-",
+   "agent_type": "-",
+   "count": 1,
+   "cost": 1322671.0500000003,
+   "context": 11794357.0,
+   "out": 43142.0,
+   "minutes": 59.936383334795636,
+   "p": 29185.0,
+   "k": 93.0,
+   "w5": 430884.0,
+   "w1h": 0.0,
+   "rewrites": 2,
+   "rewrites_after_5m": 2,
+   "rewrites_untimed": 0,
+   "rewrite_tokens": 248445,
+   "rewrite_tokens_after_5m": 248445,
+   "read_tokens_after_5m": 0,
+   "rewrite_gap_median": 46.41459166606267
+  },
+  {
+   "version": "10.17.18",
+   "mode": "不明",
+   "model": "claude-opus-5-5",
+   "cc": "2.1.282",
+   "reviewers": "-",
+   "layer": "conductor",
+   "role": "-",
+   "agent_type": "-",
+   "count": 2,
+   "cost": 389331.175,
+   "context": 2384037.5,
+   "out": 19364.0,
+   "minutes": 4.657883334159851,
+   "p": 45258.5,
+   "k": 23.0,
+   "w5": 144388.0,
+   "w1h": 0.0,
+   "rewrites": 0,
+   "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
+   "rewrite_tokens": 0,
+   "rewrite_tokens_after_5m": 0,
+   "read_tokens_after_5m": 0,
+   "rewrite_gap_median": null
+  }
+ ],
+ "external": [],
+ "meta": {
+  "by": [
+   "version",
+   "mode",
+   "model",
+   "cc",
+   "reviewers"
+  ],
+  "min_version": "10.17.17",
+  "until": "2026-09-25T09:59:00Z",
+  "sessions": 3,
+  "sessions_with_pr": 1,
+  "unlinked_external": 687,
+  "skipped": {
+   "ndf の Skill が無い": 358,
+   "版を判定できない": 17
+  },
+  "released": "10.17.19",
+  "previous": "2026-09-25-8.json"
+ }
+}
