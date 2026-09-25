@@ -1841,15 +1841,17 @@ def _startup_copy(body: bytes) -> None:
         return
     try:
         cur = _read_bytes(dst)
-        if cur is None or cur == body:
+        if cur is None:
             return
         mine = version_key(plugin_version())
         if mine is None:
             return
         theirs = version_key(_read(copy_version_path()))
-        if theirs is not None and theirs > mine:
+        # 中身が同じでも、版の記録が古ければ書き直す（中身の変わらない版を入れたとき）
+        if theirs is not None and (theirs >= mine if cur == body else theirs > mine):
             return
-        _write_file(dst, body, 0o755)
+        if cur != body:
+            _write_file(dst, body, 0o755)
         _write_file(copy_version_path(), (plugin_version() + "\n").encode(), 0o644)
     finally:
         _unlock(cfd)

@@ -1819,6 +1819,16 @@ def test_startup_never_downgrades(tmp_path, home, copy_ver, plugin_ver, replaced
         assert (cfg(tmp_path) / "relay.version").read_text().strip() == plugin_ver
 
 
+def test_startup_records_version_when_copy_is_same(tmp_path, home):
+    """中身が同じ複製でも、版の記録が古ければ今の版へ書き直す（中身が変わらない版を入れたとき）。"""
+    relay = plugin_root(tmp_path, "10.17.25")
+    cfg(tmp_path).mkdir(parents=True)
+    (cfg(tmp_path) / "relay.py").write_bytes(relay.read_bytes())
+    (cfg(tmp_path) / "relay.version").write_text("10.17.24\n")
+    assert relay_cmd(tmp_path, "startup", relay=relay).returncode == 0
+    assert (cfg(tmp_path) / "relay.version").read_text().strip() == "10.17.25"
+
+
 def test_explicit_install_can_downgrade(tmp_path, home):
     new = plugin_root(tmp_path, "10.18.0", "new")
     old = plugin_root(tmp_path, "10.17.5", "old")
