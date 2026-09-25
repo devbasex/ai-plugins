@@ -17,20 +17,25 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
     supervise.py run <plan.json> [--state-dir DIR] [--from <段の id>]
     supervise.py new impl --issue N --worktree DIR --tests PATH... --title T [--prompt-file F] [--branch B] [--out F]
     supervise.py new check --pr N --worktree DIR [--issue N...] [--scope PATH...] [--out F]
-    supervise.py new release --version V --prs N... --channel dev|prod --worktree DIR [--issue N...]
-                             [--prev-tag T] [--repo DIR] [--out F]
+    supervise.py new release --version V (--prs N... | --prs-from-queue) --channel dev|prod --worktree DIR
+                             [--issue N...] [--prev-tag T] [--repo DIR] [--out F]
+        # --prs-from-queue: queue が --then でこの計画を流す前に、先行の計画の報告の Pull Request を集めて
+        # --prs に足す（--prs の固定の番号と併用できる）。prod の段の最後は後片付け（merged-steps.py cleanup）
     supervise.py new mission --name M --worktree <リポジトリの根> --issue N... [--design N...] [--tests PATH...] [--out DIR]
         # 並列の設計 → 関門 1 → ミッションのブランチ → 並列の実装（ミッションのブランチへ集める）→ 検査 1 回 → 配布
         # を波ごとの計画ファイルと mission.json へ書き出す。波の中は queue --max 3 で流す
     supervise.py queue <plan.json>... [--max 3] [--then <plan.json>...] [--done <パス>]
         # 空いた枠へ順に流す。作業ツリーは起動の前に 1 本ずつ作る。--then の計画は前の計画がすべて完了のときだけ
         # 続けて流す（実装の queue の後の配布など）。終わると結果の JSON を --done（省けば最初の計画の
-        # <計画>-state/queue-done.json）へ書く。待つ側は until [ -s <パス> ] で待つ
+        # <計画>-state/queue-done.json）へ書く。始めに流す計画の一覧を done の隣（<done>.plans.json）へ書く
+    supervise.py wait <done のパス> [--timeout 秒] [--poll 秒]
+        # queue の終わり（done）か、queue が流す計画の attention の行まで待つ。出力は要約の 1 行と結果の JSON。
+        # 終了コード: done = 0 / attention = 20 / 上限 = 3。attention の後にもう一度打つと、その続きから待つ
     supervise.py note <引き継ぎ文書.md> --report <report.md> [--next 次の欄] [--section 見出しの語]
     supervise.py sync-check [--root DIR] [--commit]   # 生成物の同期と検査 4 本
     supervise.py example            # 計画の例を出す
 
-new / queue / note / sync-check の結果は lib/step_result.py の形の 1 行の JSON（status を見る）。
+new / queue / wait / note / sync-check の結果は lib/step_result.py の形の 1 行の JSON（status を見る）。
 
 計画（JSON）:
     {
@@ -1333,6 +1338,8 @@ RULE_RELEASE_PROD = ("利用者は関門 2 を承認した。run の段が落ち
 NO_HISTORY = "以前との比較（「以前は」「〜によらず」「〜ではなくなった」）や課題番号の由来の括弧は書かない。今の決まりだけを書く。"
 STEPS_PY = "python3 plugins/ndf/scripts/release-steps.py"
 VERIFY_PY = "python3 plugins/ndf/scripts/release-verification-steps.py"
+MERGED_PY = "python3 plugins/ndf/scripts/merged-steps.py"
+QUEUE_PRS = "{queue_prs}"  # queue が --then の計画を流す前に、先行の計画の Pull Request の番号へ置き換える
 
 
 def plan_release(a) -> dict:
@@ -1340,7 +1347,8 @@ def plan_release(a) -> dict:
     → 提示物の説明文。prod: bump → changelog → 説明文 → 消費の記録 → sync-check → release → verify-install。"""
     v, dev = a.version, a.channel == "dev"
     base = re.sub(r"-.*$", "", v)  # 開発版の本番承認の提示物は正式版の番号で作る
-    prs = " ".join(map(str, a.prs))
+    # --prs-from-queue なら、queue が先行の計画の Pull Request の番号で QUEUE_PRS を置き換える
+    prs = " ".join([*map(str, a.prs), *([QUEUE_PRS] if getattr(a, "prs_from_queue", False) else [])])
     repo = a.repo or (a.worktree.split("/.worktrees/")[0] if "/.worktrees/" in a.worktree else None)
     run_ids = ["bump", "changelog"] + ([] if dev else ["snapshot"]) + ["sync", "release", "verify"] + (
         ["facts"] if dev else [])
@@ -1376,8 +1384,16 @@ def plan_release(a) -> dict:
         {"id": "verify", "type": "run", "stage": "配布" if dev else "リリース後テスト", "timeout": 1500, "cwd": repo,
          "cmd": f"sh -c 'git pull -q --ff-only origin develop && {VERIFY_PY} verify-install --ref {ref} "
                 f"--expect {v} --runtimes claude,codex,kiro'",
-         "on_fail": "judge", "next": "facts" if dev else "end"},
+         "on_fail": "judge", "next": "facts" if dev else "cleanup"},
     ]
+    if not dev:
+        # 後片付け: 配布の PR（release/v{v} → main）とミッションの PR（--prs）のブランチと作業ツリー
+        run_ids.append("cleanup")
+        steps.append(
+            {"id": "cleanup", "type": "run", "stage": "後片付け", "cwd": repo,
+             "cmd": f"sh -c '{MERGED_PY} cleanup $(gh pr list --head release/v{v} --base main --state merged "
+                    f"--json number --jq \".[].number\") {prs}'",
+             "on_fail": "judge", "next": "end"})
     if dev:
         approval = f"issues/approval-ndf-v{base}.md"
         prev = f" --prev-tag {a.prev_tag}" if a.prev_tag else ""
@@ -1567,30 +1583,82 @@ def state_dir_of(plan: str) -> Path:
     return Path(plan).parent / (Path(plan).stem + "-state")
 
 
-def notify_attention(plan: str, offset: int) -> int:
-    """計画の progress.jsonl の offset から後の attention の行を標準出力へ知らせ、読んだ所を返す。"""
-    prog = state_dir_of(plan) / "progress.jsonl"
+def attention_lines(prog: Path, offset: int) -> tuple[list[dict], int]:
+    """progress.jsonl の offset から後の、書き終わった attention の行と、読んだ所を返す。"""
     if not prog.is_file() or prog.stat().st_size <= offset:
-        return offset
+        return [], offset
     with open(prog, "rb") as f:
         f.seek(offset)
         data = f.read()
     end = data.rfind(b"\n") + 1
+    found = []
     for raw in data[:end].decode("utf-8", "replace").splitlines():
         try:
             d = json.loads(raw)
         except json.JSONDecodeError:
             continue
         if isinstance(d, dict) and d.get("kind") == "attention":
-            print(json.dumps({"tool": "supervise-queue", "event": "attention", "plan": plan,
-                              "progress": str(prog), **{k: d.get(k) for k in ("at", "step", "reason", "text")}},
-                             ensure_ascii=False), flush=True)
-    return offset + end
+            found.append(d)
+    return found, offset + end
+
+
+def notify_attention(plan: str, offset: int) -> int:
+    """計画の progress.jsonl の offset から後の attention の行を標準出力へ知らせ、読んだ所を返す。"""
+    prog = state_dir_of(plan) / "progress.jsonl"
+    found, offset = attention_lines(prog, offset)
+    for d in found:
+        print(json.dumps({"tool": "supervise-queue", "event": "attention", "plan": plan,
+                          "progress": str(prog), **{k: d.get(k) for k in ("at", "step", "reason", "text")}},
+                         ensure_ascii=False), flush=True)
+    return offset
 
 
 def queue_done_path(plans: list[str], done: str | None) -> Path:
     """queue の終わりに結果の JSON を書く所。省けば最初の計画の状態ディレクトリの queue-done.json。"""
     return Path(done) if done else state_dir_of(plans[0]) / "queue-done.json"
+
+
+def queue_plans_path(done: Path) -> Path:
+    """queue が始めに流す計画の一覧を書く所（done の隣）。wait が読む。"""
+    return done.with_suffix(".plans.json")
+
+
+def wait_cursor_path(done: Path) -> Path:
+    """wait が attention をどこまで知らせたかを残す所（done の隣）。"""
+    return done.with_suffix(".wait.json")
+
+
+def progress_size(plan: str) -> int:
+    prog = state_dir_of(plan) / "progress.jsonl"
+    return prog.stat().st_size if prog.is_file() else 0
+
+
+def queue_prs(items: list[dict]) -> list[str]:
+    """完了した計画の報告の Pull Request を番号にして、重ねずに順に返す。"""
+    out: list[str] = []
+    for i in items:
+        rep = Path(i.get("report") or "")
+        if i.get("result") != "完了" or not rep.is_file():
+            continue
+        m = re.search(r"^- Pull Request: (.*)$", rep.read_text(), re.M)
+        n = pr_number(m.group(1).strip()) if m else ""
+        if n and n not in out:
+            out.append(n)
+    return out
+
+
+def fill_queue_prs(plan: str, prs: list[str]) -> str | None:
+    """計画の QUEUE_PRS を prs で置き換えて書き戻す。置き換えられなければ理由を返す。"""
+    try:
+        text = Path(plan).read_text()
+    except OSError as e:
+        return f"計画を読めない: {e}"
+    if QUEUE_PRS not in text:
+        return None
+    if not prs:
+        return "--prs-from-queue の計画だが、先行の計画の報告に Pull Request が無い"
+    write_atomic(Path(plan), text.replace(QUEUE_PRS, " ".join(prs)))
+    return None
 
 
 def write_atomic(path: Path, text: str) -> None:
@@ -1646,9 +1714,17 @@ def cmd_queue(plans: list[str], max_: int, poll: float = 1.0, then: list[str] | 
     走っている計画の progress.jsonl に conductor 向けの行（"kind": "attention"）が足されたら、
     標準出力へ 1 行の JSON（"event": "attention"）で知らせる。最後の行は従来どおり結果の JSON。
     then の計画は、前の計画がすべて 完了 のときだけ同じ枠（max_）で続けて流す。1 本でも 完了 でなければ
-    流さず、items に 流さなかった と理由を残す。終わったら（後続を含めて）結果の JSON を done へ書く。"""
+    流さず、items に 流さなかった と理由を残す。then の計画の QUEUE_PRS（new release --prs-from-queue）は、
+    流す前に前の計画の報告の Pull Request の番号で置き換える。
+    始めに流す計画の一覧を done の隣へ書き（wait が読む）、終わったら（後続を含めて）結果の JSON を done へ書く。"""
+    then = then or []
     done_path = queue_done_path(plans, done)
     done_path.unlink(missing_ok=True)  # 前の queue の終わりを待つ側が読まないように、始めに消す
+    wait_cursor_path(done_path).unlink(missing_ok=True)
+    all_plans = [*plans, *then]
+    write_atomic(queue_plans_path(done_path), json.dumps(
+        {"started": now_iso(), "plans": all_plans, "offsets": {p: progress_size(p) for p in all_plans}},
+        ensure_ascii=False) + "\n")
     items = run_batch(plans, max_, poll)
     if then:
         not_done = [i for i in items if i["result"] != "完了"]
@@ -1656,7 +1732,14 @@ def cmd_queue(plans: list[str], max_: int, poll: float = 1.0, then: list[str] | 
             reason = "前の計画が完了していない: " + "、".join(f"{i['plan']}（{i['result']}）" for i in not_done)
             items += [{"plan": p, "result": NOT_RUN, "reason": reason} for p in then]
         else:
-            items += run_batch(then, max_, poll)
+            prs, runnable, skipped_then = queue_prs(items), [], []
+            for p in then:
+                err = fill_queue_prs(p, prs)
+                if err:
+                    skipped_then.append({"plan": p, "result": NOT_RUN, "reason": err})
+                else:
+                    runnable.append(p)
+            items += skipped_then + (run_batch(runnable, max_, poll) if runnable else [])
     ran = [i for i in items if i["result"] != NOT_RUN]
     skipped = len(items) - len(ran)
     stopped = [i for i in ran if i["result"] not in ("完了", "関門")]
@@ -1671,6 +1754,64 @@ def cmd_queue(plans: list[str], max_: int, poll: float = 1.0, then: list[str] | 
                   "max": max_, "done": str(done_path)}, next=nxt)
     write_atomic(done_path, json.dumps(res, ensure_ascii=False) + "\n")
     return res
+
+
+WAIT_DONE, WAIT_ATTENTION, WAIT_TIMEOUT = 0, 20, 3  # 20 は共通の契約の「LLM の判断待ち」、3 は前提が無い
+
+
+def cmd_wait(done: str, timeout: float, poll: float = 5.0, clock=time.time, sleep=time.sleep) -> tuple[str, dict, int]:
+    """queue の終わり（done）か、queue が流す計画の attention の行まで待つ。(要約, 結果, 終了コード) を返す。
+
+    計画の一覧と読み始める所は queue が done の隣に書いた <done>.plans.json から読む。知らせた attention の
+    続きは <done>.wait.json に残し、次の wait はそこから読む（同じ行を 2 度知らせない）。"""
+    done_path = Path(done)
+    plans_path, cursor_path = queue_plans_path(done_path), wait_cursor_path(done_path)
+    start = clock()
+    while True:
+        if done_path.is_file() and done_path.stat().st_size > 0 and not (
+                plans_path.is_file() and plans_path.stat().st_mtime > done_path.stat().st_mtime):
+            try:
+                res = json.loads(done_path.read_text())
+            except (OSError, json.JSONDecodeError):
+                res = None
+            if isinstance(res, dict):
+                summary = f"queue が終わった（{res.get('status')}）: {res.get('summary')}"
+                return summary, result("supervise-wait", "ok", summary, [res],
+                                       {"event": "done", "queue_status": res.get("status"), "done": str(done_path)},
+                                       next=res.get("next")), WAIT_DONE
+        try:
+            listing = json.loads(plans_path.read_text())
+        except (OSError, json.JSONDecodeError):
+            listing = None
+        if isinstance(listing, dict):
+            offsets = dict(listing.get("offsets") or {})
+            try:
+                cur = json.loads(cursor_path.read_text())
+                if cur.get("started") == listing.get("started"):
+                    offsets.update(cur.get("offsets") or {})
+            except (OSError, json.JSONDecodeError, AttributeError):
+                pass
+            found = []
+            for plan in listing.get("plans") or []:
+                prog = state_dir_of(plan) / "progress.jsonl"
+                lines, offsets[plan] = attention_lines(prog, int(offsets.get(plan, 0)))
+                found += [{"plan": plan, "progress": str(prog),
+                           **{k: d.get(k) for k in ("at", "step", "reason", "text")}} for d in lines]
+            if found:
+                write_atomic(cursor_path, json.dumps({"started": listing.get("started"), "offsets": offsets},
+                                                     ensure_ascii=False) + "\n")
+                first = found[0]
+                summary = (f"attention {len(found)} 件: {first['plan']} の段 {first.get('step')}"
+                           f"（{first.get('reason')}）: {first.get('text')}")
+                return summary, result("supervise-wait", "gate", summary, found,
+                                       {"event": "attention", "attention": len(found), "done": str(done_path)},
+                                       next="attention を読んで対処し、もう一度 wait を打つ（続きから待つ）"), WAIT_ATTENTION
+        if clock() - start >= timeout:
+            summary = f"{timeout:g} 秒待ったが queue が終わらず attention も無い"
+            return summary, result("supervise-wait", "stopped", summary, [],
+                                   {"event": "timeout", "timeout": timeout, "done": str(done_path)},
+                                   next="queue の <計画>.log と progress.jsonl を見て、続けるならもう一度 wait を打つ"), WAIT_TIMEOUT
+        sleep(poll)
 
 
 def note_row(report: str, next_text: str) -> str:
@@ -1736,6 +1877,8 @@ def main() -> int:
     n.add_argument("--mode", default="standard")
     n.add_argument("--version", help="release: 配る版（例 10.17.11-dev.1）")
     n.add_argument("--prs", type=int, nargs="+", default=[], help="release: 含む PR")
+    n.add_argument("--prs-from-queue", action="store_true",
+                   help="release: queue が --then で流す前に、先行の計画の報告の Pull Request を --prs に足す")
     n.add_argument("--channel", choices=["dev", "prod"], help="release: 開発版（dev）か本番（prod）か")
     n.add_argument("--prev-tag", help="release dev: approval-facts の前のタグ（省略時は自動）")
     n.add_argument("--repo", help="release: 元のリポジトリ（省略時は作業場所の /.worktrees/ より前）")
@@ -1749,7 +1892,11 @@ def main() -> int:
     q.add_argument("--then", nargs="+", default=[], metavar="PLAN",
                    help="前の計画がすべて完了したときだけ続けて流す計画（例: 配布の計画）")
     q.add_argument("--done", help="終わったときに結果の JSON を書く所（省けば最初の計画の状態ディレクトリの "
-                                  "queue-done.json）。待つ側は until [ -s <このパス> ] で待つ")
+                                  "queue-done.json）。待つ側は wait <このパス> で待つ")
+    w = sub.add_parser("wait", help="queue の終わりか attention の行まで待つ（done = 0 / attention = 20 / 上限 = 3）")
+    w.add_argument("done", help="queue の --done のパス（省いた queue なら <最初の計画>-state/queue-done.json）")
+    w.add_argument("--timeout", type=float, default=10800.0, help="待つ上限（秒）")
+    w.add_argument("--poll", type=float, default=5.0)
     t = sub.add_parser("note", help="報告から引き継ぎ文書の表へ 1 行を足す")
     t.add_argument("doc")
     t.add_argument("--report", required=True)
@@ -1773,13 +1920,17 @@ def main() -> int:
             ap.error("new impl には --issue・--tests・--title が要る")
         if a.kind == "check" and not a.pr:
             ap.error("new check には --pr が要る")
-        if a.kind == "release" and not (a.version and a.prs and a.channel):
-            ap.error("new release には --version・--prs・--channel が要る")
+        if a.kind == "release" and not (a.version and (a.prs or a.prs_from_queue) and a.channel):
+            ap.error("new release には --version・--prs（か --prs-from-queue）・--channel が要る")
         if a.kind == "release" and not (a.repo or "/.worktrees/" in a.worktree):
             ap.error("new release には --repo が要る（作業場所が /.worktrees/ の下に無い）")
         emit(cmd_new(a))
     if a.cmd == "queue":
         emit(cmd_queue(a.plans, max(1, a.max), a.poll, a.then, a.done))
+    if a.cmd == "wait":
+        summary, res, code = cmd_wait(a.done, a.timeout, a.poll)
+        print(summary, flush=True)
+        emit(res, code)
     if a.cmd == "note":
         emit(cmd_note(a.doc, a.report, a.next, a.section))
     if a.cmd == "sync-check":
