@@ -366,6 +366,8 @@ def test_locator_for_codex_and_kiro():
     assert wn.build_locator("kiro", {"session_id": "k1"}, {}, "h", "/w").lines()[0] == \
         "再開: kiro-cli chat --resume-id k1"
     assert wn.build_locator("kiro", {}, {}, "h", "/w").lines() == ["再開: kiro-cli chat --resume", "host: h / cwd: /w"]
+    assert wn.build_locator("kiro", {}, {"KIRO_SESSION_ID": "k2"}, "h", "/w").lines()[0] == \
+        "再開: kiro-cli chat --resume-id k2"
 
 
 # ---------------------------------------------------------------------------
@@ -492,6 +494,20 @@ def test_kiro_session_from_env_is_the_key(world, slack):
     for sid in ("k1", "k2"):
         world.run("kiro", {"hook_event_name": "stop", "assistant_response": "この方針で進めてよいですか。"},
                   env={"KIRO_SESSION_ID": sid})
+    texts = slack.wait_for(2)
+    assert sorted(x for t in texts for x in t.splitlines() if x.startswith("再開:")) == \
+        ["再開: kiro-cli chat --resume-id k1", "再開: kiro-cli chat --resume-id k2"]
+
+
+def test_kiro_same_text_in_one_session_is_windowed(world, slack):
+    world.run("kiro", {"hook_event_name": "stop", "assistant_response": "この方針で進めてよいですか。"},
+              env={"KIRO_SESSION_ID": "k1"})
+    [f] = list(world.state.glob("*.json"))
+    record = json.loads(f.read_text())
+    record["sent_at"] = 0
+    f.write_text(json.dumps(record))
+    world.run("kiro", {"hook_event_name": "stop", "assistant_response": "この方針で進めてよいですか。"},
+              env={"KIRO_SESSION_ID": "k1"})
     assert len(slack.wait_for(2)) == 2
 
 

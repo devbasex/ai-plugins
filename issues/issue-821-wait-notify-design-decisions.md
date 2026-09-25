@@ -116,14 +116,16 @@ transcript を持たない Codex と Kiro は、入力から取れるもので�
 | --- | --- | --- | --- |
 | Claude Code | transcript の最後の user の `uuid` | なし | `<セッションの ID>:window`（60 秒） |
 | Codex | `<turn_id>:<事象の名前>:<tool_input のハッシュ>` | なし | `<セッションの ID>:window`（60 秒） |
-| Kiro | `<セッションの ID>:<応答本文のハッシュ>` | なし | `<応答本文のハッシュ>:window`（60 秒） |
+| Kiro | `<セッションの ID>:<応答本文のハッシュ>` | 60 秒 | `<応答本文のハッシュ>:window`（60 秒） |
 
 Codex の鍵に事象の名前を入れるのは、同じ turn の内で `PermissionRequest` と `Stop` が別の待ちとして
 続くためである。Codex には Claude の `permission_prompt` のように同じ待ちへ重ねて届く事象が無く、名前で
 分けても 2 度送らない。Kiro のセッションの ID は、stop の標準入力（`hook_event_name`・`cwd`・
 `assistant_response` だけ）には無く、環境変数 `KIRO_SESSION_ID` から取る（`worktree-guard.sh` と同じ）。
-取れないときの鍵に応答本文のハッシュを残すのは、同じ cwd で続いた別の問いを止めず、同じ文面の重複だけを
-60 秒止めるためである。
+Kiro の鍵はどちらも窓で扱う。Kiro には Claude の user の項目のように応じると変わる値が無く、窓なしでは
+同じセッションで答えた後に同じ文面で問われた 2 件目が期限なく止まる。取れないときの鍵に応答本文のハッシュを
+残すのは、同じ cwd で続いた別の問いを止めず、同じ文面の重複だけを 60 秒止めるためである。戻り先の
+`kiro-cli chat --resume-id` も同じ `KIRO_SESSION_ID` から組む。
 
 ### 決定 6: 非対話の実行では送らない
 

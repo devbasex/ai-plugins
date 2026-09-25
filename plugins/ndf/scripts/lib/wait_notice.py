@@ -260,7 +260,7 @@ def build_locator(runtime: str, hook_input: dict, env: dict, host: str, cwd: str
     if runtime == "codex":
         return Locator(host, cwd, resume=f"codex resume {sid}" if sid else None)
     if runtime == "kiro":
-        kid = sid or str(hook_input.get("conversation_id") or "")
+        kid = sid or str(hook_input.get("conversation_id") or env.get("KIRO_SESSION_ID") or "")
         return Locator(host, cwd, resume=f"kiro-cli chat --resume-id {kid}" if kid else "kiro-cli chat --resume")
     return Locator(host, cwd)
 

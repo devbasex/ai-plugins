@@ -199,11 +199,11 @@ def wait_key(runtime: str, hook_input: dict, transcript: tuple[str, str] | None)
         tool_input = json.dumps(hook_input.get("tool_input"), sort_keys=True, ensure_ascii=False)
         digest = hashlib.sha1(tool_input.encode()).hexdigest()[:12]
         return f"{hook_input['turn_id']}:{hook_input.get('hook_event_name')}:{digest}", False
-    # Kiro は応答本文のハッシュを鍵にする。セッションの識別子が無いと別セッションの同じ文面を
-    # 期限なく止めるため、そのときは同じ文面だけを 60 秒の窓で止める。
+    # Kiro は応答本文のハッシュを鍵にし、同じ文面だけを 60 秒の窓で止める。Kiro には応じると
+    # 変わる値が無く、窓なしでは同じセッションで答えた後の同じ問いまで期限なく止まる。
     if runtime == "kiro" and hook_input.get("assistant_response"):
         digest = hashlib.sha1(str(hook_input["assistant_response"]).encode()).hexdigest()[:16]
-        return (f"{session}:{digest}", False) if session else (f"{digest}:window", True)
+        return (f"{session}:{digest}" if session else f"{digest}:window"), True
     # 受け皿: 主鍵が取れないとき、同じセッションの 60 秒の内は 2 件目を止める粗い保険。
     # 窓の内に続いた本来別の待ち（codex の turn_id が無い入力など）も止まり、通知は来ない。
     # 「通知が来ない」を調べるときは、ログの `skip: already notified <session>:window` を見る。
