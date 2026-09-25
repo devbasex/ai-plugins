@@ -6,7 +6,8 @@
                             [--interval 秒] [--timeout 秒] [--no-cleanup] [--root <dir>]
 
 cleanup: マージ済みの PR の作業ツリーとローカルブランチを外し、主ディレクトリを取り込む。
-merge-when-green: CI の検査が全部通るまで待ち（push で先頭のコミットが変われば待ち直す）、
+merge-when-green: PR が draft なら `gh pr ready` で外し、CI の検査が全部通るまで待ち
+（push で先頭のコミットが変われば待ち直す）、
 失敗があれば止まり、通れば `gh pr merge --admin` でマージして cleanup まで行う。
 
 結果は lib/step_result.py の形の 1 行の JSON。終了コードは 0 = ok / 10 = `git branch -D` が要る
@@ -236,7 +237,7 @@ def check_states(rollup):
 
 
 def pr_state(root, n):
-    return gh_json(root, ["pr", "view", str(n), "--json", "state,headRefOid,statusCheckRollup,mergeStateStatus"],
+    return gh_json(root, ["pr", "view", str(n), "--json", "state,isDraft,headRefOid,statusCheckRollup,mergeStateStatus"],
                    f"gh pr view {n}")
 
 
@@ -256,6 +257,14 @@ def cmd_merge_when_green(a):
         if state != "OPEN":
             emit(result(TOOL, "stopped", f"#{n} が OPEN でない（{state}）",
                         [{"kind": "pr", "name": f"#{n}", "result": "stopped", "reason": f"state={state}"}]))
+        if info.get("isDraft"):
+            # draft のままではマージできない。ready で走り出す検査も待つよう、待ちの前に外す
+            p = run(["gh", "pr", "ready", str(n)], cwd=root, check=False)
+            if p.returncode != 0:
+                emit(result(TOOL, "stopped", f"gh pr ready が失敗: {p.stderr.strip()[:300]}",
+                            items + [{"kind": "pr", "name": f"#{n}", "result": "stopped",
+                                      "reason": p.stderr.strip()[:300]}], {"waits": waits}))
+            items.append({"kind": "pr", "name": f"#{n}", "result": "ready"})
         if last_sha is not None and sha != last_sha:
             # push で CI が走り直した。前のコミットで見た結果は使わない
             items.append({"kind": "restart", "name": sha or "?", "result": "rewait",
@@ -283,7 +292,7 @@ def cmd_merge_when_green(a):
         waits += 1
         time.sleep(a.interval)
 
-    if not any(i["kind"] == "pr" for i in items):
+    if not any(i["kind"] == "pr" and i["result"] == "already_merged" for i in items):
         cmd = ["gh", "pr", "merge", str(n), "--admin", f"--{a.method}"]
         p = run(cmd, cwd=root, check=False)
         if p.returncode != 0:

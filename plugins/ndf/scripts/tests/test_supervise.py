@@ -131,7 +131,46 @@ def test_preset_and_pr_placeholder(tmp_path, monkeypatch):
                                {"id": "b", "type": "run", "cmd": "echo pr={pr}", "next": "end"}],
                     **{"Pull Request": "https://example/pull/9"})
     assert "preset-ran" in s.results["a"]["text"]
-    assert "pr=https://example/pull/9" in s.results["b"]["text"]
+    assert "pr=9" in s.results["b"]["text"]
+
+
+@pytest.mark.parametrize("value", ["https://github.com/o/r/pull/9", "https://github.com/o/r/pull/9/", "9", 9])
+def test_pr_placeholder_is_number_and_pr_url_is_url(tmp_path, value):
+    steps = [{"id": "b", "type": "run", "cmd": "echo n={pr} u={pr_url}", "next": "end"}]
+    if isinstance(value, str) and "/pull/" in value:
+        s, _ = run_plan(tmp_path, steps, **{"Pull Request": value})
+        assert f"n=9 u={value}" in s.results["b"]["text"]
+    else:
+        s, _ = run_plan(tmp_path, [{**steps[0], "cmd": "echo n={pr}"}], **{"Pull Request": value})
+        assert "n=9" in s.results["b"]["text"]
+
+
+def test_pr_url_from_number_asks_gh(tmp_path, monkeypatch):
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    (bindir / "gh").write_text(f"#!{PY}\nimport sys\nprint('https://github.com/o/r/pull/' + sys.argv[3])\n")
+    (bindir / "gh").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
+    s, _ = run_plan(tmp_path, [{"id": "b", "type": "run", "cmd": "echo u={pr_url}", "next": "end"}],
+                    **{"Pull Request": "12"})
+    assert "u=https://github.com/o/r/pull/12" in s.results["b"]["text"]
+
+
+def test_drive_args_get_pr_number(tmp_path, monkeypatch):
+    drive = tmp_path / "drive.py"
+    drive.write_text("import json, sys\nprint(json.dumps({'status': 'ok', 'argv': sys.argv[1:]}))\n")
+    monkeypatch.setitem(sv.DRIVES, "fake", drive)
+    s, text = run_plan(tmp_path, [{"id": "d", "type": "drive", "drive": "fake", "args": "{pr} --max-rounds 4",
+                                   "next": "end"}], **{"Pull Request": "https://github.com/o/r/pull/77"})
+    assert "結果: 完了" in text, text
+    assert '"argv": ["77", "--max-rounds", "4"]' in s.results["d"]["text"]
+
+
+@pytest.mark.parametrize("drive", ["cross-review", "cross-refactoring"])
+def test_real_drives_take_pr_number_not_url(drive):
+    # drive の args の {pr} は番号になる。2 つの駆動は URL を引数の解析で拒む
+    p = subprocess.run([PY, str(sv.DRIVES[drive]), "https://github.com/o/r/pull/77"], capture_output=True, text=True)
+    assert p.returncode == 2 and "invalid int value" in p.stderr
 
 
 def test_pr_placeholder_without_pr_fails(tmp_path):
@@ -156,6 +195,72 @@ def test_branch_without_repo_stops(tmp_path):
     plan = {"フェーズ": "試験", "課題": [], "作業場所": str(tmp_path / "nowhere"), "branch": "feat/x",
             "steps": [{"id": "t", "type": "run", "cmd": "true"}]}
     assert "リポジトリ" in sv.Supervisor(plan, tmp_path / "state").run()
+
+
+def clone_repo(tmp_path):
+    """origin を持つ clone を作る。origin/main を起点にすると worktree add が upstream を .git/config へ書く。"""
+    origin = tmp_path / "origin"
+    origin.mkdir()
+    git(origin, "init", "-q", "-b", "main")
+    git(origin, "-c", "user.email=a@b", "-c", "user.name=a", "commit", "-q", "--allow-empty", "-m", "init")
+    repo = tmp_path / "repo"
+    subprocess.run(["git", "clone", "-q", str(origin), str(repo)], check=True)
+    return repo
+
+
+def wt_plan(repo, branch, **extra):
+    return {"フェーズ": "試験", "課題": [], "作業場所": str(repo / ".worktrees" / branch), "branch": branch,
+            "起点": "origin/main", "steps": [{"id": "t", "type": "run", "cmd": "true", "next": "end"}], **extra}
+
+
+def test_ensure_worktree_retries_config_lock(tmp_path):
+    # 1 回目は branch を作った後の upstream の書き込みで落ちる。やり直しは在る branch を使って作れる
+    repo = clone_repo(tmp_path)
+    (repo / ".git" / "config.lock").write_text("")
+    waits = []
+    plan = wt_plan(repo, "feat/a")
+    assert sv.ensure_worktree(plan, sleep=waits.append) is None
+    assert len(waits) == 1 and 0.5 <= waits[0] <= 2
+    assert git(Path(plan["作業場所"]), "rev-parse", "--abbrev-ref", "HEAD").strip() == "feat/a"
+
+
+def test_ensure_worktree_gives_up_after_retries(tmp_path, monkeypatch):
+    repo = clone_repo(tmp_path)
+    real = subprocess.run
+
+    def run(cmd, **kw):
+        if "worktree" in cmd and "add" in cmd:
+            return subprocess.CompletedProcess(cmd, 255, "", "error: could not lock config file .git/config: File exists")
+        return real(cmd, **kw)
+
+    monkeypatch.setattr(sv.subprocess, "run", run)
+    waits = []
+    err = sv.ensure_worktree(wt_plan(repo, "feat/a"), sleep=waits.append)
+    assert err.startswith("作業ツリーを作れない") and "could not lock config file" in err
+    assert len(waits) == sv.WORKTREE_LOCK_RETRIES
+
+
+def test_ensure_worktree_other_error_does_not_retry(tmp_path):
+    repo = clone_repo(tmp_path)
+    waits = []
+    err = sv.ensure_worktree(wt_plan(repo, "feat/a", 起点="origin/nothing"), sleep=waits.append)
+    assert err.startswith("作業ツリーを作れない") and waits == []
+
+
+def test_queue_creates_worktrees_in_order_before_run(tmp_path, monkeypatch):
+    repo = clone_repo(tmp_path)
+    plans, calls = [], []
+    for b in ("feat/a", "feat/b", "feat/c"):
+        f = tmp_path / f"{b.replace('/', '-')}.json"
+        f.write_text(json.dumps(wt_plan(repo, b)))
+        plans.append(str(f))
+    real = sv.ensure_worktree
+    monkeypatch.setattr(sv, "ensure_worktree", lambda plan, **kw: calls.append(plan["branch"]) or real(plan, **kw))
+    res = sv.cmd_queue(plans, 3, poll=0.1)
+    assert calls == ["feat/a", "feat/b", "feat/c"]
+    assert res["status"] == "ok", res
+    for b in ("feat/a", "feat/b", "feat/c"):
+        assert git(repo / ".worktrees" / b, "rev-parse", "--abbrev-ref", "HEAD").strip() == b
 
 
 def cli(*args, cwd=None):
@@ -557,7 +662,8 @@ sys.exit(1)
 """
 
 
-def test_pr_body_ends_with_mode_and_passed_stages(tmp_path, monkeypatch):
+def pr_repo(tmp_path, monkeypatch):
+    """develop から切った feat/x を持つリポジトリと、pr create の本文を書き出す偽の gh を用意する。"""
     origin = tmp_path / "origin.git"
     subprocess.run(["git", "init", "-q", "--bare", "-b", "develop", str(origin)], check=True)
     root = tmp_path / "repo"
@@ -582,6 +688,11 @@ def test_pr_body_ends_with_mode_and_passed_stages(tmp_path, monkeypatch):
     body = tmp_path / "body.txt"
     monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
     monkeypatch.setenv("FAKE_GH_BODY", str(body))
+    return root, body
+
+
+def test_pr_body_ends_with_mode_and_passed_stages(tmp_path, monkeypatch):
+    root, body = pr_repo(tmp_path, monkeypatch)
     plan = {"フェーズ": "実装", "課題": [1], "モード": "standard", "作業場所": str(root), "steps": [
         {"id": "impl", "type": "run", "cmd": "true", "stage": "実装", "next": "test"},
         {"id": "test", "type": "run", "cmd": "true", "stage": "完了判定", "next": "pr"},
@@ -592,3 +703,124 @@ def test_pr_body_ends_with_mode_and_passed_stages(tmp_path, monkeypatch):
     lines = [l for l in body.read_text().splitlines() if l.strip()]
     assert lines[-2] == "モード: standard / 通した工程: 実装 → 完了判定 → Pull Request"
     assert lines[-1].startswith("🤖 Generated with")
+    assert sum(sv.PR_FOOTER in l for l in lines) == 1
+
+
+@pytest.mark.parametrize("llm_footer", [True, False])
+def test_pr_body_from_llm_has_one_footer(tmp_path, monkeypatch, llm_footer):
+    root, body = pr_repo(tmp_path, monkeypatch)
+    text = "## 概要\n\n本文。" + (f"\n\n{sv.PR_FOOTER}" if llm_footer else "")
+    fake = tmp_path / "claude.py"
+    fake.write_text("import json, sys\nsys.stdin.read()\n"
+                    f"print(json.dumps({{'result': {text!r}, 'usage': {{}}, 'total_cost_usd': 0}}))\n")
+    monkeypatch.setenv("NDF_SUPERVISE_CLAUDE", f"{PY} {fake}")
+    plan = {"フェーズ": "実装", "課題": [1], "作業場所": str(root), "steps": [
+        {"id": "pr", "type": "pr", "stage": "Pull Request", "base": "develop", "next": "end"}]}
+    s = sv.Supervisor(plan, tmp_path / "state")
+    assert "結果: 完了" in s.run()
+    got = body.read_text()
+    assert "本文。" in got and got.count(sv.PR_FOOTER) == 1
+    assert got.rstrip().endswith(sv.PR_FOOTER)
+
+
+# --- 途中の報告（progress.jsonl）---
+
+FAKE_WORKER = """#!{py}
+import json, re, sys, time
+prompt = sys.stdin.read()
+path = re.search(r"^(\\S+progress\\.jsonl) へ追記する", prompt, re.M).group(1)
+lines = {lines!r}
+for t in lines:
+    with open(path, "a") as f:
+        f.write(t + "\\n")
+    time.sleep(0.15)
+time.sleep({sleep})
+print(json.dumps({{"result": "## 作業の報告\\n- 結果: 完了", "usage": {{}}, "total_cost_usd": 0.01,
+                  "num_turns": 1}}))
+"""
+
+
+def progress(s):
+    rows = []
+    for l in (s.dir / "progress.jsonl").read_text().splitlines():
+        try:
+            rows.append(json.loads(l))
+        except json.JSONDecodeError:
+            pass  # worker が書いた形の違う行
+    return rows
+
+
+def fake_worker(tmp_path, monkeypatch, lines, sleep=0.0):
+    f = tmp_path / "fake_worker.py"
+    f.write_text(FAKE_WORKER.format(py=PY, lines=lines, sleep=sleep))
+    monkeypatch.setenv("NDF_SUPERVISE_CLAUDE", f"{PY} {f}")
+
+
+def test_step_lines_and_alive_line(tmp_path):
+    s, text = run_plan(tmp_path, [{"id": "a", "type": "run", "cmd": "sleep 0.6"},
+                                  {"id": "b", "type": "run", "cmd": "echo 最後の行", "next": "end"}],
+                       report_interval=0.2)
+    assert "結果: 完了" in text
+    rows = progress(s)
+    steps = [r for r in rows if r["kind"] == "step"]
+    assert [r["step"] for r in steps] == ["a", "b"]
+    assert steps[0]["next"] == "b" and steps[1]["next"] == "end" and steps[1]["summary"] == "最後の行"
+    assert all({"at", "type", "exit", "seconds", "cost"} <= set(r) for r in steps)
+    alive = [r for r in rows if r["kind"] == "alive"]
+    assert alive and alive[0]["step"] == "a" and alive[0]["worker"] == "無し"
+    assert rows.index(alive[0]) < rows.index(steps[0])  # 段の途中で書く
+    assert "LLM へ回した 0 回" in text
+
+
+def test_no_alive_line_within_interval(tmp_path):
+    s, _ = run_plan(tmp_path, [{"id": "a", "type": "run", "cmd": "sleep 0.3", "next": "end"}])
+    assert [r["kind"] for r in progress(s)] == ["step"]
+
+
+def test_work_prompt_has_progress_instructions(tmp_path, fakes):
+    s, _ = run_plan(tmp_path, [{"id": "impl", "type": "work", "prompt": "実装する", "next": "end"}])
+    prompt = fakes.read_text()
+    assert "## 途中の報告" in prompt and str((s.dir / "progress.jsonl").resolve()) in prompt
+
+
+def test_worker_lines_are_sorted_into_attention(tmp_path, monkeypatch):
+    w = lambda t: json.dumps({"kind": "worker", "at": "2026-01-01T00:00:00+09:00", "text": t}, ensure_ascii=False)
+    fake_worker(tmp_path, monkeypatch, [
+        w("課題の本文を読み終えた"), "形の違う行", w("テストが 3 件落ちた"), w("テストが 4 件落ちた"),
+        w("関門に当たった: 本番の配布"), w("実装を 1 つ終えた")], sleep=0.5)
+    s, text = run_plan(tmp_path, [{"id": "impl", "type": "work", "prompt": "実装する", "next": "end"}],
+                       report_interval=0.3)
+    rows = progress(s)
+    att = [r for r in rows if r["kind"] == "attention"]
+    assert [a["reason"] for a in att] == ["同じ失敗の繰り返し", "関門"]
+    assert all(a["step"] == "impl" for a in att)
+    alive = [r for r in rows if r["kind"] == "alive"]
+    assert alive and alive[-1]["worker"] == "実装を 1 つ終えた"
+    assert "worker 5（形が違う 1）" in text and "conductor 向け 2" in text
+
+
+def test_repeated_failure_before_judge_is_attention(tmp_path, seq):
+    seq[0]({"out": {"result": '{"decision": "t", "reason": "もう 1 度"}', "usage": {}, "total_cost_usd": 0.0}})
+    s, _ = run_plan(tmp_path, [
+        {"id": "t", "type": "run", "cmd": "exit 1", "on_fail": "j"},
+        {"id": "j", "type": "judge", "question": "直すか", "choices": ["t", "stop"]}], 上限=4)
+    att = [r for r in progress(s) if r["kind"] == "attention"]
+    assert [a["reason"] for a in att] == ["判断の段で stop が出そう"]
+
+
+def test_queue_notifies_attention(tmp_path):
+    f = tmp_path / "p.json"
+    prog = tmp_path / "p-state" / "progress.jsonl"
+    prog.parent.mkdir()
+    prog.write_text(json.dumps({"kind": "attention", "reason": "前の実行"}) + "\n")
+    line = json.dumps({"kind": "worker", "at": "x", "text": "進めない: 権限が無い"}, ensure_ascii=False)
+    f.write_text(json.dumps({"フェーズ": "試験", "課題": [], "作業場所": str(tmp_path), "report_interval": 0.2,
+                             "steps": [{"id": "t", "type": "run",
+                                        "cmd": f"echo '{line}' >> {prog}; sleep 0.5", "next": "end"}]}))
+    p = cli("queue", str(f), "--poll", "0.1")
+    assert p.returncode == 0, p.stdout + p.stderr
+    out = [json.loads(l) for l in p.stdout.splitlines()]
+    events = [o for o in out if o.get("event") == "attention"]
+    assert len(events) == 1 and events[0]["reason"] == "止まった" and events[0]["step"] == "t"
+    assert events[0]["tool"] == "supervise-queue" and events[0]["plan"] == str(f)
+    assert out[-1]["status"] == "ok"

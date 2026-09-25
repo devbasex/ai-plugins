@@ -76,6 +76,23 @@
 
 **正式版を出したらリリースタグを打つ。** 利用者が過去の版へ戻るときの目印になる（手順は正本の「正式版を出す」）。
 
+### 安定と試行
+
+**NDF の変更は、安定と試行の 2 つの経路に分ける。** 思いつきを実践で早く試すためである。
+すべての変更に同じ工程を課すと、試す前に課題の順番待ちと配布の待ちが入る。
+
+| | 安定 | 試行 |
+| --- | --- | --- |
+| 何が当たるか | 既定で働くもの。hook・Skill 本文の手順・結果 JSON の契約・配布と版・関門 | 呼んだときだけ働くもの。補助のスクリプト・計画の新しい選択肢・閾値・conductor の手順の工夫 |
+| 置き場 | 今の場所 | `plugins/ndf/scripts/experimental/` |
+| 経路 | `development-workflow` のモードどおり | その場で実装し、手元で 1 回使ってから PR → CI → マージ。モードは `light` として扱い、課題は起票しない |
+| 記録 | 課題と Pull Request | [docs/ndf-experiments.md](docs/ndf-experiments.md) の台帳に 1 行 |
+
+- **試行は、マージの前から作業ツリーのパスで呼んでよい。** 配布を待たずに実践で使うためである
+- **安定側から試行側を参照しない。** 参照すると既定の振る舞いに試行が漏れる。`plugins/ndf/scripts/tests/test_experimental.py` が落とす
+- **効いた試行は安定の経路で本体へ移す。** 使われなかった試行は消す。どちらも台帳の「行き先」に書く
+- 試行を足すと決めるのは conductor でよい。既定の振る舞いを変えたくなった時点で安定の経路へ移る
+
 ### セキュリティ要件
 
 **絶対にコミットしてはいけないもの**:
@@ -117,6 +134,7 @@ ai-plugins/
 | [docs/plugin-development-guide.md](docs/plugin-development-guide.md) | プラグイン開発ガイド（構造、plugin.json、検証） |
 | [docs/versioning-and-distribution.md](docs/versioning-and-distribution.md) | 版と配布（チャネル、版の付け方、ランタイムごとの取得と導入、版数を持つ 15 箇所、過去の版へ戻る）。版数の扱いの正本 |
 | [docs/ndf-plugin-reference.md](docs/ndf-plugin-reference.md) | NDFプラグイン詳細リファレンス |
+| [docs/ndf-experiments.md](docs/ndf-experiments.md) | NDF の試行の台帳（試している仕組み・使った結果・行き先） |
 | [docs/specifications/](docs/specifications/) | 完了済みplan/issue由来の確定仕様 |
 | [docs/presentations/](docs/presentations/) | 勉強会などで使うスライド資料（Marp形式）とビルド手順。**発表日時点の記録で、以後の構成変更には追随しない** |
 | [docs/articles/](docs/articles/README.md) | 社外ブログへ載せる記事の正本。**書いた日時点の記録で、以後の構成変更には追随しない** |
@@ -126,7 +144,7 @@ ai-plugins/
 
 ## NDFプラグインについて
 
-**NDFプラグイン**は、このマーケットプレイスの主要プラグインです（v10.17.12）。plugin 名は全ランタイムで `ndf` を維持し、配布物は `plugins/ndf/` の1ディレクトリにまとまっています。
+**NDFプラグイン**は、このマーケットプレイスの主要プラグインです（v10.17.13）。plugin 名は全ランタイムで `ndf` を維持し、配布物は `plugins/ndf/` の1ディレクトリにまとまっています。
 - Skill の実体は `plugins/ndf/skills/` の1箇所。配布先は `plugins/ndf/manifests/*-skills.txt` が決める
 - Claude Code版は 8個の専門サブエージェントと 3 層の worker の定義 1 個、公開Skills、PreToolUse/SessionStart/Stopフックを提供
 - Codex版は Codex向け公開Skillsと任意Slack通知hookを提供

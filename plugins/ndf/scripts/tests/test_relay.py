@@ -1984,6 +1984,16 @@ WAIT_TAIL = "キー入力やスクロールをせずに、そのまま待つ（�
 NOTICE_OUTSIDE = ("/exit してから claude を起動し、下の中身を最初の入力として貼り付ける"
                   "（/ndf:install-wrapper で中継を入れると自動になる）")
 NOTICE_SOON = "まもなく自動で新しい会話へ切り替わる。" + WAIT_TAIL
+NOTICE_ENDED = ("中継は既に終わっている。"
+                "/exit してから claude を起動し、下の中身を最初の入力として貼り付ける")
+
+
+def notice_not_child(pid):
+    return (f"中継は元の会話（子 pid {pid}）しか見ていないため、この会話で出した ndf-next は自動では拾われない。"
+            "元の会話へ戻って同じ ndf-next を出すか、元の会話を /exit してから"
+            " claude を起動し、下の中身を最初の入力として貼り付ける")
+
+
 NOTICE_INF = ("NDF_RELAY_QUIET が有限でないため、中継は自動で切り替えない。"
               "/exit してから claude を起動し、下の中身を最初の入力として貼り付ける")
 
@@ -2034,15 +2044,40 @@ def test_notice_without_relay_dir():
 
 def test_notice_relay_not_running(relay):
     relay.release()
-    assert notice_lines(notice(relay.dir)) == ["outside", NOTICE_OUTSIDE]
+    assert notice_lines(notice(relay.dir)) == ["outside", NOTICE_ENDED]
 
 
 def test_notice_not_direct_child(tmp_path):
     r = Relay(tmp_path, child_pid=1)
     try:
-        assert notice_lines(notice(r.dir, "5")) == ["outside", NOTICE_OUTSIDE]
+        assert notice_lines(notice(r.dir, "5")) == ["outside", notice_not_child(1)]
     finally:
         r.release()
+
+
+def test_notice_not_direct_child_without_child_pid(relay):
+    # fork したセッションで child.pid が読めなくても、原因と対処を書く（#1016）
+    (relay.dir / "child.pid").write_text("x")
+    second = notice_lines(notice(relay.dir))[1]
+    assert second.startswith("中継は元の会話しか見ていないため")
+
+
+@pytest.mark.parametrize("case,expected", [
+    ("no-dir", NOTICE_OUTSIDE),
+    ("not-running", NOTICE_ENDED),
+    ("not-child", notice_not_child(999999)),
+], ids=["no-dir", "not-running", "not-child"])
+def test_notice_outside_reason(relay, case, expected):
+    # 外である理由ごとに 2 行目が変わる。1 行目は outside のまま（#1016）
+    env_dir = relay.dir
+    if case == "no-dir":
+        env_dir = None
+    elif case == "not-running":
+        relay.release()
+    else:
+        (relay.dir / "child.pid").write_text("999999")
+    assert notice_lines(notice(env_dir)) == ["outside", expected]
+    assert is_child(env_dir).returncode == 1
 
 
 def test_notice_broken_relay_dir_is_outside(tmp_path):

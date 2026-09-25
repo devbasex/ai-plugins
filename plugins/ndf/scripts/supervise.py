@@ -11,7 +11,7 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
 | work  | 1 つの作業（修正・調査）を worker として行わせる | Tool あり（Read/Edit/Write/Bash/Grep/Glob）。`"full": true` なら設定・プラグイン・Skill をそのまま読む claude -p で Skill を回す（cross-review など） |
 | drive | 駆動（cross-review / cross-refactoring の drive.py）を run として回し、`pause` のときだけ worker に判断・修正をさせて駆動へ返す | pause のときだけ（work と同じ最小構成） |
 | judge | 結果ファイルと規則の抜粋だけを渡し、次の段を決めさせる | Tool なし |
-| pr    | push して Draft の Pull Request を作る（スクリプト）。本文は材料（計画の値・コミット・変更の統計・run の結果・設計文書）から LLM が書く。`"body": "template"` なら材料をそのまま本文にする | 本文だけTool なし |
+| pr    | push して Draft の Pull Request を作る（スクリプト）。本文は材料（計画の値・コミット・変更の統計・run の結果・設計文書）から LLM が書く。`"body": "template"` なら材料をそのまま本文にする。末尾の署名は本文に無いときだけ足す | 本文だけTool なし |
 
 使い方:
     supervise.py run <plan.json> [--state-dir DIR] [--from <段の id>]
@@ -22,7 +22,7 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
     supervise.py new mission --name M --worktree <リポジトリの根> --issue N... [--design N...] [--tests PATH...] [--out DIR]
         # 並列の設計 → 関門 1 → ミッションのブランチ → 並列の実装（ミッションのブランチへ集める）→ 検査 1 回 → 配布
         # を波ごとの計画ファイルと mission.json へ書き出す。波の中は queue --max 3 で流す
-    supervise.py queue <plan.json>... [--max 3]   # 空いた枠へ順に流す
+    supervise.py queue <plan.json>... [--max 3]   # 空いた枠へ順に流す。作業ツリーは起動の前に 1 本ずつ作る
     supervise.py note <引き継ぎ文書.md> --report <report.md> [--next 次の欄] [--section 見出しの語]
     supervise.py sync-check [--root DIR] [--commit]   # 生成物の同期と検査 4 本
     supervise.py example            # 計画の例を出す
@@ -36,6 +36,7 @@ new / queue / note / sync-check の結果は lib/step_result.py の形の 1 行�
       "branch": "feat/issue-818-x",         # 省略可。作業場所が無ければ起動時に作業ツリーを作る
       "起点": "origin/develop",             # branch から作るときの起点（既定 origin/develop）
       "リポジトリ": "/abs/repo",             # 作業ツリーの元（省略時は作業場所の /.worktrees/ より前）
+                                            # git worktree add が .git/config の lock で落ちたら 5 回までやり直す
       "記録": "/abs/projects-sync.sh",      # 省略可。stage を記録する
       "規則": "判断の規則の抜粋（文字列）",   # judge へ毎回渡す
       "上限": 30,                           # 実行する段の数の上限（ループの歯止め）
@@ -87,7 +88,8 @@ prod は bump → changelog → 説明文 → トークン消費の記録 → sy
 run の段:
 - `"preset"`: 定型のコマンド。`sync-check`（生成物の同期と検査 4 本）・`assess`（構造改善の要否）・
   `doc-lint`（追加した行の書き方の検査）。`cmd` を書けばそちらを使う
-- `cmd` の `{pr}` は pr の段で作った Pull Request の URL に置き換わる
+- `cmd` の `{pr}` は Pull Request の番号に、`{pr_url}` は URL に置き換わる（drive の段の `args` も同じ）。
+  Pull Request は pr の段で作ったもの、または計画の `"Pull Request"`（URL なら末尾の数字を番号として読む）
 - `"rerun_failed": true`: 失敗したら落ちたテストだけ（`pytest --lf`）を走らせ直し、通れば成功として進む
 - `"skip_to": "<段の id>"`: 終了コードが `skip_code`（既定 3。`refactor.py assess` の「飛ばしてよい」）なら
   その段へ進む
@@ -104,6 +106,15 @@ run の段:
 - work: 終了後に `next`（無ければ次の段）
 - judge: 答えの `decision` が段の id ならその段へ、`next` なら次の段へ、`stop` なら止まる、
   `gate` なら関門として止まる。`choices` を渡すとその中から選ばせる
+
+途中の報告（`<state-dir>/progress.jsonl`。1 行 1 つの JSON。LLM は使わない）:
+- `"kind": "step"`: 段の切り替わりごとに 1 行（at・step・type・exit・seconds・cost・next・summary）
+- `"kind": "alive"`: 最後の行から計画の `"report_interval"`（既定 600 秒）動きが無いとき（step・elapsed・
+  worker の最後の報告）。長い段（work・run・drive）の待ちは区切って見るので、段の途中でも書く
+- `"kind": "worker"`: work の段の worker が区切りごとに追記する 1 行（プロンプトに書き方と置き場を渡す）
+- `"kind": "attention"`: conductor の判断が要る出来事（reason が 止まった・関門・同じ失敗の繰り返し・
+  判断の段で stop が出そう）。worker の行の語と繰り返し、段の結果からスクリプトで分ける。
+  `queue` はこの行を標準出力の `{"tool": "supervise-queue", "event": "attention", ...}` で知らせる
 
 最後に `## フェーズの報告` を標準出力と `<state-dir>/report.md` へ書く。conductor はこの
 スクリプトを背景の Bash で起動し、終わりの通知で報告を読む。
@@ -137,6 +148,7 @@ SERENA_MCP = {"mcpServers": {"serena": {
              "--enable-web-dashboard", "False"],
     "env": {"SERENA_HOME": ".serena"}}}}
 FULL_TOOLS = "Read,Edit,Write,Bash,Grep,Glob,Skill,Agent,Monitor,SendMessage,ToolSearch"
+PR_FOOTER = "🤖 Generated with [Claude Code](https://claude.com/claude-code)"  # PR 本文の末尾の署名（1 度だけ）
 TAIL = 6000  # LLM へ渡す出力の末尾の文字数
 SELF = Path(__file__).resolve()
 SKILLS = SELF.parent.parent / "skills"
@@ -213,6 +225,47 @@ JUDGE_SYSTEM = """あなたは NDF のフェーズの判断だけを行う。Too
 渡された結果と規則だけを根拠に、次の段を 1 つ選ぶ。
 答えは JSON 1 つだけを返す: {"decision": "<選んだ値>", "reason": "<1 行>"}"""
 
+REPORT_INTERVAL = 600  # 最後の行から動きが無いときに「まだ動いている」を足すまでの秒数。計画の "report_interval"
+TICK = 5.0             # 子プロセスの待ちを区切って見る秒数の上限
+PROGRESS_PROMPT = """## 途中の報告
+区切り（課題の本文を読み終えた・テストを足した・実装を 1 つ終えた・コミットした）ごとに、次の 1 行の JSON を
+{path} へ追記する（このファイルだけは作業場所の外でも追記してよい。書き換えず、末尾へ足す）:
+{{"kind": "worker", "at": "<ISO 8601 の時刻>", "text": "<1 行の要約>"}}
+例: printf '%s\\n' '{{"kind": "worker", "at": "'"$(date -Iseconds)"'", "text": "テストを 2 件足した"}}' >> {path}
+止まった・関門に当たった・同じ失敗を繰り返しているときは、text にそのことを書く。"""
+# worker の途中の報告を分ける語（スクリプトで見る。LLM は使わない）
+PROGRESS_STOP = re.compile(r"止まった|止まる|進めない|進められない|判断が要る|できなかった|stuck", re.I)
+PROGRESS_GATE = re.compile(r"関門|承認が要る|承認を待つ")
+PROGRESS_FAIL = re.compile(r"失敗|落ちた|落ちる|エラー|\berror\b|\bfailed\b|traceback", re.I)
+
+
+def now_iso() -> str:
+    return datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+def run_ticking(cmd, tick=None, every: float = TICK, timeout: float | None = None, input: str | None = None,
+                **kw) -> subprocess.CompletedProcess:
+    """subprocess.run と同じく待つが、every 秒ごとに tick() を呼ぶ（長い段の待ちの中で進行を書く）。
+
+    打ち切りは subprocess.TimeoutExpired を投げる。"""
+    p = subprocess.Popen(cmd, stdin=subprocess.PIPE if input is not None else subprocess.DEVNULL,
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, **kw)
+    deadline = time.time() + timeout if timeout else None
+    first = True
+    while True:
+        wait = every if deadline is None else max(0.01, min(every, deadline - time.time()))
+        try:
+            out, err = p.communicate(input if first else None, timeout=wait)
+            return subprocess.CompletedProcess(cmd, p.returncode, out, err)
+        except subprocess.TimeoutExpired:
+            first = False
+            if deadline is not None and time.time() >= deadline:
+                p.kill()
+                p.communicate()
+                raise subprocess.TimeoutExpired(cmd, timeout)
+            if tick:
+                tick()
+
 
 def claude_cmd(system: str, tools: str | None, cwd: str, full: bool = False,
                serena: bool = False, resume: str | None = None) -> list[str]:
@@ -246,16 +299,16 @@ def claude_cmd(system: str, tools: str | None, cwd: str, full: bool = False,
 
 def call_claude(system: str, prompt: str, tools: str | None, cwd: str, timeout: int,
                 full: bool = False, serena: bool = False, resume: str | None = None,
-                env: dict | None = None) -> dict:
+                env: dict | None = None, tick=None, every: float = TICK) -> dict:
     """claude -p を 1 回呼び、結果の本文と使用量を返す（既定は最小構成）。
 
     `env` は環境に足す変数（認証の切り替え）。利用上限で落ちたら `"limit": true` と、読めれば
-    解除の時刻（UNIX 時刻）を `"resets_at"` に残す。
+    解除の時刻（UNIX 時刻）を `"resets_at"` に残す。`tick` は待ちの間に every 秒ごとに呼ぶ。
     """
     started = time.time()
     try:
-        p = subprocess.run(claude_cmd(system, tools, cwd, full, serena, resume), input=prompt, capture_output=True,
-                           text=True, cwd=cwd, timeout=timeout, env={**os.environ, **env} if env else None)
+        p = run_ticking(claude_cmd(system, tools, cwd, full, serena, resume), tick, every, input=prompt,
+                        cwd=cwd, timeout=timeout, env={**os.environ, **env} if env else None)
     except subprocess.TimeoutExpired:
         return {"ok": False, "text": f"打ち切り（{timeout} 秒）", "usage": {}, "seconds": timeout}
     try:
@@ -406,6 +459,57 @@ def normalize_plan(plan: dict) -> dict:
     return plan
 
 
+def pr_number(value) -> str:
+    """計画の Pull Request（番号か URL）から番号を返す。URL なら末尾の数字を読む。読めなければ空。"""
+    m = re.search(r"(\d+)/*$", str(value or "").strip())
+    return m.group(1) if m else ""
+
+
+WORKTREE_LOCK_RETRIES = 5        # .git/config の lock で落ちたときのやり直しの回数
+WORKTREE_LOCK_WAIT = 1.0         # やり直しの間隔（秒）
+
+
+def is_config_lock(stderr: str) -> bool:
+    return "could not lock config file" in stderr or "File exists" in stderr
+
+
+def ensure_worktree(plan: dict, sleep=time.sleep) -> str | None:
+    """計画に branch があり作業場所が無ければ、作業ツリーを作る。誤りの文を返す（無ければ None）。
+
+    run と queue の両方が使う。同時に作ると .git/config の lock で落ちるので、そのときは
+    WORKTREE_LOCK_WAIT 秒おきに WORKTREE_LOCK_RETRIES 回までやり直す。
+    """
+    plan = normalize_plan(dict(plan))
+    branch = plan.get("branch")
+    wt = Path(plan["作業場所"])
+    if not branch or wt.exists():
+        return None
+    repo = plan.get("リポジトリ") or (str(wt).split("/.worktrees/")[0] if "/.worktrees/" in str(wt) else None)
+    if not repo:
+        return "作業ツリーの元のリポジトリが分からない（計画に リポジトリ を書く）"
+    base = plan.get("起点", "origin/develop")
+    if base.startswith("origin/"):
+        subprocess.run(["git", "-C", repo, "fetch", "-q", "origin"], capture_output=True, text=True)
+    p = None
+    for i in range(WORKTREE_LOCK_RETRIES + 1):
+        if i:
+            sleep(WORKTREE_LOCK_WAIT)
+        has = subprocess.run(["git", "-C", repo, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"],
+                             capture_output=True, text=True).returncode == 0
+        cmd = ["git", "-C", repo, "worktree", "add", "-q"] + ([str(wt), branch] if has
+                                                             else ["-b", branch, str(wt), base])
+        p = subprocess.run(cmd, capture_output=True, text=True)
+        if p.returncode == 0:
+            return None
+        if not is_config_lock(p.stderr):
+            break
+        # lock で途中まで作られた作業ツリーは、次のやり直しの前に片付ける
+        subprocess.run(["git", "-C", repo, "worktree", "prune"], capture_output=True, text=True)
+        if wt.exists() and not any(wt.iterdir()):
+            wt.rmdir()
+    return f"作業ツリーを作れない: {p.stderr.strip()[:300]}"
+
+
 class Supervisor:
     def __init__(self, plan: dict, state_dir: Path):
         self.plan = normalize_plan(plan)
@@ -422,6 +526,99 @@ class Supervisor:
         self.last_stage = "無し"
         self.gates: list[dict] = []      # run の段が返した関門（終了コード 10〜19）
         self.switched: list[str] = []    # 利用上限で足した認証の変数の名前
+        self.cur: dict = {}
+        self.fail_counts: dict[str, int] = {}
+        # 途中の報告（progress.jsonl）。LLM を使わずスクリプトで書き・分ける
+        self.progress = self.dir / "progress.jsonl"
+        self.interval = float(self.plan.get("report_interval", REPORT_INTERVAL))
+        self.every = max(0.05, min(TICK, self.interval / 4))
+        self.progress_seen = self.progress.stat().st_size if self.progress.is_file() else 0
+        self.last_line_at = time.time()
+        self.step_started = time.time()
+        self.worker_last = ""
+        self.worker_counts: dict[str, int] = {}
+        self.attention_keys: set[str] = set()
+        self.pcount = {"step": 0, "alive": 0, "worker": 0, "malformed": 0, "attention": 0, "llm": 0,
+                       "llm_cost": 0.0}
+
+    # --- 途中の報告 ---
+    def progress_write(self, rec: dict) -> None:
+        rec = {"kind": rec.pop("kind"), "at": now_iso(), **rec}
+        with open(self.progress, "a") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        self.progress_seen = self.progress.stat().st_size
+        self.last_line_at = time.time()
+        if rec["kind"] in self.pcount:
+            self.pcount[rec["kind"]] += 1
+
+    def attention(self, reason: str, text: str) -> None:
+        """conductor の判断が要る出来事を 1 行残す（同じ理由と文は 1 度だけ）。"""
+        key = f"{reason}\n{text}"
+        if key in self.attention_keys:
+            return
+        self.attention_keys.add(key)
+        self.progress_write({"kind": "attention", "step": self.cur.get("id"), "reason": reason, "text": text[:300]})
+
+    def classify_worker(self, text: str) -> None:
+        """worker の 1 行を語と繰り返しで分け、conductor の判断が要るものだけを attention にする。"""
+        norm = re.sub(r"\d+", "#", text.strip())
+        n = self.worker_counts[norm] = self.worker_counts.get(norm, 0) + 1
+        if PROGRESS_GATE.search(text):
+            self.attention("関門", text)
+        elif PROGRESS_STOP.search(text):
+            self.attention("止まった", text)
+        elif PROGRESS_FAIL.search(text) and n >= 2:
+            self.attention("同じ失敗の繰り返し", text)
+        elif n >= 3:
+            self.attention("止まった（同じ報告の繰り返し）", text)
+
+    def read_worker_lines(self) -> None:
+        """前に読んだ所から後の progress.jsonl を読み、worker の行を分ける。"""
+        if not self.progress.is_file() or self.progress.stat().st_size <= self.progress_seen:
+            return
+        with open(self.progress, "rb") as f:
+            f.seek(self.progress_seen)
+            data = f.read()
+        end = data.rfind(b"\n") + 1  # 書きかけの行は次に読む
+        if not end:
+            return
+        self.progress_seen += end
+        self.last_line_at = time.time()
+        for raw in data[:end].decode("utf-8", "replace").splitlines():
+            if not raw.strip():
+                continue
+            try:
+                d = json.loads(raw)
+            except json.JSONDecodeError:
+                d = None
+            if not isinstance(d, dict):
+                self.pcount["malformed"] += 1
+                continue
+            if d.get("kind") != "worker":
+                continue  # supervise.py が書いた行
+            if not isinstance(d.get("text"), str) or not d["text"].strip():
+                self.pcount["malformed"] += 1
+                continue
+            self.pcount["worker"] += 1
+            self.worker_last = d["text"].strip()[:300]
+            self.classify_worker(self.worker_last)
+
+    def tick(self) -> None:
+        """子プロセスの待ちの間に呼ぶ。worker の行を分け、動きが無ければ「まだ動いている」を足す。"""
+        self.read_worker_lines()
+        if time.time() - self.last_line_at >= self.interval:
+            self.progress_write({"kind": "alive", "step": self.cur.get("id"), "type": self.cur.get("type"),
+                                 "elapsed": round(time.time() - self.step_started, 1),
+                                 "worker": self.worker_last or "無し"})
+
+    def step_line(self, nxt: str | None) -> None:
+        """段の切り替わりの 1 行（id・type・exit・秒・費用・次・要約）。"""
+        c = self.cur
+        text = c.get("text", "") or ""
+        summary = c.get("decision") or next((l for l in reversed(text.splitlines()) if l.strip()), "")
+        self.progress_write({"kind": "step", "step": c.get("id"), "type": c.get("type"), "exit": c.get("exit"),
+                             "seconds": c.get("seconds"), "cost": (c.get("llm") or {}).get("cost", 0.0),
+                             "next": nxt or "end", "summary": summary.strip()[:160]})
 
     # --- 共通 ---
     def out_path(self, n: int, sid: str) -> Path:
@@ -477,6 +674,7 @@ class Supervisor:
         wait_max = self.plan.get("limit_wait_max", LIMIT_WAIT_MAX)
         fallback = fallback_env()
         tried_fallback, waited = False, 0.0
+        kw = {"tick": self.tick, "every": self.every, **kw}
         while True:
             res = call_claude(system, prompt, tools, cwd, timeout, **kw)
             if res.get("limit"):
@@ -497,7 +695,10 @@ class Supervisor:
                 raise UsageLimit(f"利用上限の待ちが最大 {wait_max} 秒を超える（待った {round(waited)} 秒、"
                                  f"次の待ち {round(wait)} 秒）: {(res.get('text') or '')[:200]}")
             short = os.environ.get("NDF_SUPERVISE_LIMIT_SLEEP")
-            time.sleep(min(wait, float(short)) if short else wait)
+            until = time.time() + (min(wait, float(short)) if short else wait)
+            while time.time() < until:  # 待ちの間も「まだ動いている」を書く
+                time.sleep(max(0.0, min(self.every, until - time.time())))
+                self.tick()
             waited += wait
             self.cur["limit_waited"] = round(self.cur.get("limit_waited", 0) + wait, 1)
 
@@ -529,34 +730,32 @@ class Supervisor:
 
     def ensure_worktree(self) -> str | None:
         """計画に branch があり作業場所が無ければ、作業ツリーを作る。誤りの文を返す（無ければ None）。"""
-        branch = self.plan.get("branch")
-        wt = Path(self.cwd)
-        if not branch or wt.exists():
-            return None
-        repo = self.plan.get("リポジトリ") or (str(wt).split("/.worktrees/")[0] if "/.worktrees/" in str(wt)
-                                             else None)
-        if not repo:
-            return "作業ツリーの元のリポジトリが分からない（計画に リポジトリ を書く）"
-        base = self.plan.get("起点", "origin/develop")
-        if base.startswith("origin/"):
-            subprocess.run(["git", "-C", repo, "fetch", "-q", "origin"], capture_output=True, text=True)
-        has = subprocess.run(["git", "-C", repo, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"],
-                             capture_output=True, text=True).returncode == 0
-        cmd = ["git", "-C", repo, "worktree", "add", "-q"] + ([str(wt), branch] if has
-                                                             else ["-b", branch, str(wt), base])
-        p = subprocess.run(cmd, capture_output=True, text=True)
-        if p.returncode != 0:
-            return f"作業ツリーを作れない: {p.stderr.strip()[:300]}"
-        return None
+        return ensure_worktree(self.plan)
+
+    def fill_pr(self, cmd: str) -> tuple[str, str | None]:
+        """cmd / args の {pr} を Pull Request の番号に、{pr_url} を URL に置き換える。(cmd, 誤りの文) を返す。"""
+        if "{pr}" not in cmd and "{pr_url}" not in cmd:
+            return cmd, None
+        value = str(self.plan.get("Pull Request") or "")
+        number = pr_number(value)
+        if not number:
+            return cmd, "cmd の {pr} を置き換える Pull Request がまだ無い"
+        if "{pr_url}" in cmd:
+            url = value if "/pull/" in value else subprocess.run(
+                ["gh", "pr", "view", number, "--json", "url", "--jq", ".url"], cwd=self.cwd,
+                capture_output=True, text=True).stdout.strip()
+            if not url:
+                return cmd, f"cmd の {{pr_url}} を置き換える Pull Request #{number} の URL を読めない"
+            cmd = cmd.replace("{pr_url}", url)
+        return cmd.replace("{pr}", number), None
 
     def run_cmd(self, step: dict, extra_addopts: str = "") -> tuple[int, str]:
         cmd = step.get("cmd") or PRESETS.get(step.get("preset", ""), "")
         if not cmd:
             return 2, f"段 {step['id']} に cmd も知っている preset も無い"
-        if "{pr}" in cmd:
-            if not self.plan.get("Pull Request"):
-                return 2, "cmd の {pr} を置き換える Pull Request がまだ無い"
-            cmd = cmd.replace("{pr}", self.plan["Pull Request"])
+        cmd, err = self.fill_pr(cmd)
+        if err:
+            return 2, err
         env = dict(os.environ)
         # 親の run の段から受け継いだ NO_REPORTS は、reports: true なら外す
         addopts = [env.get("PYTEST_ADDOPTS", "").replace(NO_REPORTS, "").strip()]
@@ -565,8 +764,8 @@ class Supervisor:
         addopts.append(extra_addopts)
         env["PYTEST_ADDOPTS"] = " ".join(a for a in addopts if a)
         try:
-            p = subprocess.run(cmd, shell=True, cwd=step.get("cwd", self.cwd), capture_output=True,
-                               text=True, timeout=step.get("timeout", 3600), env=env)
+            p = run_ticking(cmd, self.tick, self.every, shell=True, cwd=step.get("cwd", self.cwd),
+                            timeout=step.get("timeout", 3600), env=env)
             return p.returncode, p.stdout + p.stderr
         except subprocess.TimeoutExpired as e:
             return 124, f"打ち切り（{e.timeout} 秒）"
@@ -613,7 +812,7 @@ class Supervisor:
                "--phase", step.get("phase", "implement"), "--workdir", cwd,
                "--timeout", str(step.get("timeout", 1800))]
         try:
-            p = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd, timeout=step.get("timeout", 1800) + 120)
+            p = run_ticking(cmd, self.tick, self.every, cwd=cwd, timeout=step.get("timeout", 1800) + 120)
             out = last_json(p.stdout) or {}
         except subprocess.TimeoutExpired:
             out = {"status": "stopped", "summary": "打ち切り"}
@@ -626,7 +825,8 @@ class Supervisor:
         cwd = step.get("cwd", self.cwd)
         prompt = (f"作業: {step.get('kind', '修正')}\n作業場所: {cwd}\n\n"
                   + (f"{issues}\n\n## 指示\n" if issues else "")
-                  + f"{step['prompt']}\n\n## 入力\n{self.inputs_text(step)}")
+                  + f"{step['prompt']}\n\n## 入力\n{self.inputs_text(step)}\n\n"
+                  + PROGRESS_PROMPT.format(path=self.progress.resolve()))
         if step.get("full"):
             # Skill の本文が手順を持つ。プロンプトは Skill の呼び出しをそのまま渡す
             prompt = step["prompt"]
@@ -699,11 +899,10 @@ class Supervisor:
         if not cmd:
             self.cur.update(exit=2, text=f"段 {step['id']} に cmd も知っている drive も無い")
             return False, self.cur["text"]
-        if "{pr}" in cmd:
-            if not self.plan.get("Pull Request"):
-                self.cur.update(exit=2, text="cmd の {pr} を置き換える Pull Request がまだ無い")
-                return False, self.cur["text"]
-            cmd = cmd.replace("{pr}", self.plan["Pull Request"])
+        cmd, err = self.fill_pr(cmd)
+        if err:
+            self.cur.update(exit=2, text=err)
+            return False, err
         ok, out, text = self.drive_loop(step, cmd)
         if out:
             self.cur["counts"] = out.get("metrics") or {}
@@ -756,7 +955,7 @@ class Supervisor:
 | --- | ---: | --- |
 {chr(10).join(tests) or '| 無し | | |'}
 
-🤖 Generated with [Claude Code](https://claude.com/claude-code)
+{PR_FOOTER}
 """
         if step.get("body", "llm") == "llm":
             design = ""
@@ -769,7 +968,9 @@ class Supervisor:
                               None, self.cwd, step.get("timeout", 600))
             self.add_usage("judge", res)
             if res["ok"] and res["text"].strip():
-                body = res["text"].strip() + "\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+                body = res["text"].strip() + "\n"
+                if PR_FOOTER not in body:
+                    body = body.rstrip() + f"\n\n{PR_FOOTER}\n"
         body = with_mode_line(body, self.plan.get("モード"), self.passed_stages(step))
         found = subprocess.run(["gh", "pr", "list", "--head", branch, "--state", "open", "--json", "url",
                                 "--jq", ".[0].url"], cwd=self.cwd, capture_output=True, text=True).stdout.rstrip()
@@ -828,6 +1029,7 @@ class Supervisor:
                 break
             self.record_stage(step.get("stage"))
             self.cur = {"id": sid, "type": step["type"]}
+            self.step_started = time.time()
             try:
                 if step["type"] == "judge":
                     d = self.do_judge(step)
@@ -866,6 +1068,13 @@ class Supervisor:
                 self.cur["text"] = str(e)
                 result, reason, nxt = "止まった", "利用上限", None
             self.results[sid] = dict(self.cur)
+            self.read_worker_lines()
+            self.step_line(nxt)
+            if self.cur.get("exit") not in (0, None) and not is_gate(self.cur.get("exit")) and nxt:
+                fails = self.fail_counts[sid] = self.fail_counts.get(sid, 0) + 1
+                if fails >= 2 and (self.steps.get(nxt) or {}).get("type") == "judge":
+                    self.attention("判断の段で stop が出そう",
+                                   f"段 {sid} が {fails} 回落ちた（exit={self.cur.get('exit')}）。次は判断の段 {nxt}")
             self.out_path(n, sid).write_text(self.cur.get("text", ""))
             self.log.append({k: v for k, v in self.cur.items() if k != "text"})
             (self.dir / "state.json").write_text(json.dumps(
@@ -891,9 +1100,13 @@ class Supervisor:
         if path:
             self.cur["presentation"] = path
         self.gates.append({"id": step["id"], "exit": self.cur.get("exit"), "presentation": path})
+        self.attention("関門", f"段 {step['id']} が関門を返した（exit={self.cur.get('exit')}）"
+                       + (f"。提示物 {path}" if path else ""))
 
     def report(self, result: str, reason: str) -> str:
         l = self.llm
+        self.read_worker_lines()
+        pc = self.pcount
         steps = " → ".join(f"{e['id']}" + (f"[{e['decision']}]" if "decision" in e else
                                            f"(exit={e.get('exit')})") for e in self.log)
         rows = "\n".join(
@@ -928,7 +1141,8 @@ class Supervisor:
 - Pull Request: {self.plan.get('Pull Request', '無し')}
 - 最後に記録した工程: {self.last_stage}
 - 使った worker: 修正 {l['work']}（claude -p）/ 判断 {l['judge']}（claude -p）
-{extra}- 提示物: {presented}
+{extra}- 途中の報告: 段 {pc['step']} / まだ動いている {pc['alive']} / worker {pc['worker']}（形が違う {pc['malformed']}）/ conductor 向け {pc['attention']} / LLM へ回した {pc['llm']} 回・${pc['llm_cost']:.3f}（{self.progress}）
+- 提示物: {presented}
 - 理由: {reason}
 - 通った段: {steps}
 - 件数: {counts_line}
@@ -1307,18 +1521,54 @@ def state_dir_of(plan: str) -> Path:
     return Path(plan).parent / (Path(plan).stem + "-state")
 
 
+def notify_attention(plan: str, offset: int) -> int:
+    """計画の progress.jsonl の offset から後の attention の行を標準出力へ知らせ、読んだ所を返す。"""
+    prog = state_dir_of(plan) / "progress.jsonl"
+    if not prog.is_file() or prog.stat().st_size <= offset:
+        return offset
+    with open(prog, "rb") as f:
+        f.seek(offset)
+        data = f.read()
+    end = data.rfind(b"\n") + 1
+    for raw in data[:end].decode("utf-8", "replace").splitlines():
+        try:
+            d = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(d, dict) and d.get("kind") == "attention":
+            print(json.dumps({"tool": "supervise-queue", "event": "attention", "plan": plan,
+                              "progress": str(prog), **{k: d.get(k) for k in ("at", "step", "reason", "text")}},
+                             ensure_ascii=False), flush=True)
+    return offset + end
+
+
 def cmd_queue(plans: list[str], max_: int, poll: float = 1.0) -> dict:
-    """計画を同時に max_ 本まで走らせ、空いた枠へ順に流す。"""
+    """計画を同時に max_ 本まで走らせ、空いた枠へ順に流す。
+
+    走っている計画の progress.jsonl に conductor 向けの行（"kind": "attention"）が足されたら、
+    標準出力へ 1 行の JSON（"event": "attention"）で知らせる。最後の行は従来どおり結果の JSON。"""
     pending, running, items = list(plans), {}, []
+    seen: dict[str, int] = {}
     while pending or running:
         while pending and len(running) < max_:
             plan = pending.pop(0)
+            # 作業ツリーは queue の側で順に作る（同時の git worktree add は .git/config の lock で落ちる）。
+            # 作れなかったときの報告は run が同じ誤りで書く
+            try:
+                ensure_worktree(json.loads(Path(plan).read_text()))
+            except (OSError, ValueError, KeyError):
+                pass
+            prog = state_dir_of(plan) / "progress.jsonl"
+            seen[plan] = prog.stat().st_size if prog.is_file() else 0  # 前の実行の行は知らせない
             log = open(Path(plan).with_suffix(".log"), "w")
             running[plan] = (subprocess.Popen([sys.executable, str(SELF), "run", plan], stdout=log,
                                               stderr=subprocess.STDOUT), log, time.time())
+        for plan in list(running):
+            seen[plan] = notify_attention(plan, seen[plan])
         for plan, (proc, log, started) in list(running.items()):
             if proc.poll() is None:
                 continue
+            seen[plan] = notify_attention(plan, seen[plan])
             log.close()
             rep = state_dir_of(plan) / "report.md"
             res = report_result(rep.read_text()) if rep.is_file() else "報告なし"
