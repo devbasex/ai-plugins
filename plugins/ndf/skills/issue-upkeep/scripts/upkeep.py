@@ -11,8 +11,9 @@
 
 candidates: 段 1 の経路のうち機械で集められるものを集め、重複を除いて件数とともに返す。
   経路は diff-path（差分のパス）/ diff-identifier（削除された識別子）/ no-milestone /
-  closed-milestone（閉じた課題のマイルストーン）/ sub-issue（閉じた親の子）/ all（--all）/
-  manual（--add で担当が足したもの）。候補ごとに updated_at と本文の要約値を返す。
+  closed-milestone（閉じた課題のマイルストーン）/ sub-issue（閉じた親の子）/
+  commit-subject（<ref>..HEAD のコミットの件名が #番号で指す）/ all（--all）/
+  manual（--add で担当が足したもの）。commit-subject の候補は、上限で切るときも先に残す。候補ごとに updated_at と本文の要約値を返す。
   --limit で 1 回に扱う件数に上限を置く。超えた分は items に載せず、metrics.deferred に番号だけを返す（終了コード 20）。
 apply: plan.json の変更を反映する。反映の直前に updated_at を照合し、変わっていれば本文の
   要約値を比べ、それも変わっていれば飛ばす（skipped_changed）。済んだものは控えに記録して
@@ -64,7 +65,7 @@ NEEDS_APPROVAL = ("やらない",)
 RETURNED = ("要判断",)
 
 ROUTES = ("diff-path", "diff-identifier", "no-milestone", "closed-milestone", "sub-issue",
-          "all", "manual")
+          "commit-subject", "all", "manual")
 
 # 待ちの既定。倍々の起点は、作成の二次的な制限で実測した 60 秒の間隔に合わせる。
 DOUBLING_START = 60.0
@@ -331,6 +332,10 @@ def cmd_candidates(a):
             if int(m.group(1)) in closed_nums:
                 hit(i["number"], "sub-issue", f"#{m.group(1)}")
 
+    for line in git(root, "log", "--no-merges", "--format=%s", f"{a.since_ref}..HEAD").stdout.splitlines():
+        for m in re.finditer(r"#(\d+)\b", line):
+            hit(int(m.group(1)), "commit-subject", line)
+
     if a.all:
         for n in by_num:
             hit(n, "all")
@@ -339,7 +344,8 @@ def cmd_candidates(a):
             notes.append(f"--add の #{n} は open でないため除いた")
         hit(n, "manual")
 
-    order = sorted(routes, key=lambda n: (-len(routes[n]), n))
+    # コミットの件名が指す課題は直っている見込みが高いため、上限で切るときも先に残す
+    order = sorted(routes, key=lambda n: ("commit-subject" not in routes[n], -len(routes[n]), n))
     keep = order if a.limit is None else order[:a.limit]
     deferred = [n for n in order if n not in set(keep)]
     items = []
