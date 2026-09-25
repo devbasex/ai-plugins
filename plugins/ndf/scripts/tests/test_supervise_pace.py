@@ -72,16 +72,24 @@ def test_fast_mission_puts_check_then_dev_then_prod_after_the_implementation(tmp
     manifest = load(out / "mission.json")
     assert manifest["進め方"] == "fast" and manifest["状態"].endswith("mission-state.json")
     waves = {w["name"]: w for w in manifest["ステージ"]}
-    assert [w["name"] for w in manifest["ステージ"]] == ["設計", "関門 1", "実装", "検査", "開発版", "本番"]
+    assert [w["name"] for w in manifest["ステージ"]] == ["設計", "関門 1", "実装", "検査", "実装レビュー", "開発版", "本番"]
     cmd = waves["実装"]["command"]
     check, dev, prod = waves["検査"]["plans"][0], waves["開発版"]["plans"][0], waves["本番"]["plans"][0]
-    assert cmd.index("--then " + check) < cmd.index("--then " + dev) < cmd.index("--then " + prod)
+    review = waves["実装レビュー"]["plans"][0]
+    assert (cmd.index("--then " + check) < cmd.index("--then " + review) < cmd.index("--then " + dev)
+            < cmd.index("--then " + prod))
     assert "mission/" not in json.dumps(manifest, ensure_ascii=False)
 
     impl = load(waves["実装"]["plans"][0])
     assert impl["起点"] == "origin/develop" and next(s for s in impl["steps"] if s["type"] == "pr")["base"] == "develop"
     c = load(check)
     assert c["実行の条件"]["skip_code"] == 3 and "check-trigger.py eval --id m26-1" in c["実行の条件"]["cmd"]
+    rv = load(review)
+    assert "check-trigger.py eval --id m26-review --root" in rv["実行の条件"]["cmd"]
+    assert rv["実行の条件"]["cmd"].endswith(" --review")
+    rs = steps_of(rv)
+    assert "assess" not in rs and "refactor" not in rs and rs["pr"]["next"] == "review"
+    assert rs["prepare"]["cmd"].endswith(" --review") and rs["record"]["cmd"].endswith(" --review --pr {pr}")
     assert steps_of(load(dev))["facts"]["gate_as_ok"] is True
     first = load(prod)["steps"][0]
     assert first["id"] == "mvv" and "mvv-gate.py check" in first["cmd"] and "--gate release" in first["cmd"]
@@ -91,7 +99,7 @@ def test_fast_mission_puts_check_then_dev_then_prod_after_the_implementation(tmp
     assert "--gate design" in ds["mvv"]["cmd"] and ds["mvv"]["next"] == "approve" and ds["mvv"]["gate_next"] == "end"
     assert "design-approved" in ds["approve"]["cmd"] and ds["approve"]["next"] == "merge"
     assert ds["review"]["next"] == "glossary-check" and ds["push-glossary"]["next"] == "mvv"  # 語のチェックの後で判定する
-    for path in [*waves["設計"]["plans"], *waves["実装"]["plans"], check, dev, prod]:
+    for path in [*waves["設計"]["plans"], *waves["実装"]["plans"], check, review, dev, prod]:
         assert_transitions_exist(load(path))
 
 

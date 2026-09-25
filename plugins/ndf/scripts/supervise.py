@@ -22,6 +22,8 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
     supervise.py new check --pr N --worktree DIR [--issue N...] [--scope PATH...] [--out F]
     supervise.py new check --since-last --id <名> --worktree <リポジトリの根> [--mission <状態>] [--final] [--out F]
         # 前回の検査からの差分を範囲にする検査（pace: fast）。実行の条件 check-trigger.py eval が立ったときだけ流れる
+    supervise.py new check --since-last --review-only --id <名> --worktree <リポジトリの根> [--mission <状態>] [--out F]
+        # 実装レビューだけ（開発版ごと）。前回のレビューから PR が 1 本以上で流れ、構造改善のトリガーの起点は動かさない
         # new の共通: [--base B] [--test-cmd CMD] [--test-all PATH] [--production-branch B]（宣言より先に効く。下の「宣言」）
     supervise.py new release --version V (--prs N... | --prs-from-queue) --channel dev|prod --worktree DIR
                              [--issue N...] [--prev-tag T] [--repo DIR] [--out F]
@@ -1998,26 +2000,34 @@ def plan_check_since(a) -> dict:
     cross-review は Pull Request 1 本を入力に取るため、駆動を変えずに差分全体を見られる。検査の後に宛先を
     起点のブランチへ付け替えると、差分は検査の修正だけになる。実行の条件（check-trigger.py eval）が
     立ったときだけ流れ、作業ツリー（check/<名>）はその後に作る。落ちた run のステップは abort へ行き、
-    失敗の記録・check-base の削除・検査の Pull Request を閉じる後始末をしてから止まる。"""
+    失敗の記録・check-base の削除・検査の Pull Request を閉じる後始末をしてから止まる。
+
+    `--review-only` は実装レビューだけを通す（構造改善のステップを持たない）。実行の条件は前回のレビューから
+    PR が 1 本以上あること（`eval --review`）で、記録は構造改善のトリガーの起点にならない。"""
     repo = str(Path(a.worktree).resolve())
+    review_only = getattr(a, "review_only", False)
+    flag = " --review" if review_only else ""
     name = a.id
     tests_all = shlex.quote(with_paths(a.test_cmd, a.test_all))
     state = "{state_dir}"
     scope = f"$({CHECK_PY} scope --id {name} --state {state} --root .)"
     cond = f"git -C {shlex.quote(repo)} fetch -q origin && {CHECK_PY} eval --id {name} --root {shlex.quote(repo)}"
-    if getattr(a, "final", False):
+    if review_only:
+        cond += flag
+    elif getattr(a, "final", False):
         cond += " --final"
-    record = f"{CHECK_PY} record --id {name} --state {state} --root ."
+    record = f"{CHECK_PY} record --id {name} --state {state} --root .{flag}"
     steps = [
         {"id": "prepare", "type": "run", "stage": "構造改善", "timeout": 600,
-         "cmd": f"{CHECK_PY} prepare --id {name} --state {state} --root .", "on_fail": "abort-before-pr",
+         "cmd": f"{CHECK_PY} prepare --id {name} --state {state} --root .{flag}", "on_fail": "abort-before-pr",
          "next": "pr"},
         {"id": "pr", "type": "pr", "stage": "構造改善", "base": f"check-base/{name}", "title": f"検査: {name}",
          "body": "template", "on_fail": "abort-before-pr",
-         "summary": (f"前回の検査からの差分に構造改善と実装レビューを 1 回ずつ通す（{name}）。範囲・立ったトリガー・"
+         "summary": (f"前回の検査からの差分に{'実装レビュー' if review_only else '構造改善と実装レビュー'}を"
+                     f" 1 回ずつ通す（{name}）。範囲・立ったトリガー・"
                      f"先に見る範囲は `{CHECK_PY} scope --id {name}` と状態ディレクトリの check.json にある。"
                      "検査の後に宛先を起点のブランチへ付け替える"),
-         "changes": "無し（検査の修正だけ）", "next": "assess"},
+         "changes": "無し（検査の修正だけ）", "next": "review" if review_only else "assess"},
         {"id": "assess", "type": "run", "preset": "assess", "stage": "構造改善", "skip_to": "review",
          "on_fail": "refactor", "next": "refactor"},
         {"id": "refactor", "type": "drive", "drive": "cross-refactoring", "kind": "構造改善", "stage": "構造改善",
@@ -2044,6 +2054,8 @@ def plan_check_since(a) -> dict:
         {"id": "abort", "type": "run", "cmd": f"{record} --failed --pr {{pr}}", "next": "end"},
         {"id": "abort-before-pr", "type": "run", "cmd": f"{record} --failed", "next": "end"},
     ]
+    if review_only:
+        steps = [s for s in steps if s["id"] not in ("assess", "refactor")]
     issues = list(a.issue or [])
     if not issues and getattr(a, "mission", None):
         try:
@@ -2353,9 +2365,9 @@ def plan_fast_impl(a, n: int, repo: str) -> dict:
     return plan
 
 
-def plan_fast_check(a, repo: str, name: str, final: bool = False) -> dict:
+def plan_fast_check(a, repo: str, name: str, final: bool = False, review_only: bool = False) -> dict:
     ns = argparse.Namespace(**decl_fields(a), id=name, worktree=repo, issue=a.issue, mode=a.mode,
-                            mission=getattr(a, "state", None), final=final)
+                            mission=getattr(a, "state", None), final=final, review_only=review_only)
     return plan_check_since(ns)
 
 
@@ -2376,7 +2388,8 @@ def prod_version(version: str) -> str:
 
 def fast_mission_plans(a) -> list[dict]:
     """pace: fast のミッションのステージ。ミッションのブランチを作らず、実装は起点のブランチへ直接入れる。
-    実装の queue が --then のステージで 検査（実行の条件）→ 開発版 → 本番（先頭が MVV 判定）を順に流す。"""
+    実装の queue が --then のステージで 検査（実行の条件）→ 実装レビュー（開発版ごと）→ 開発版 → 本番（先頭が MVV 判定）を
+    順に流す。検査が立てばその中でレビューも通るため、実装レビューのステージは範囲が空になり流れない。"""
     repo = str(Path(a.worktree).resolve())
     waves = []
     if a.design:
@@ -2386,6 +2399,8 @@ def fast_mission_plans(a) -> list[dict]:
     waves += [
         {"name": "実装", "plans": {f"impl-{n}": plan_fast_impl(a, n, repo) for n in a.issue}},
         {"name": "検査", "plans": {"check": plan_fast_check(a, repo, f"{a.name}-1")}, "then_of": "実装"},
+        {"name": "実装レビュー", "plans": {"review": plan_fast_check(a, repo, f"{a.name}-review", review_only=True)},
+         "then_of": "実装"},
         {"name": "開発版", "plans": {"release": plan_fast_release(a, repo, a.version, "dev")}, "then_of": "実装"},
         {"name": "本番", "plans": {"release-prod": plan_fast_release(a, repo, prod_version(a.version), "prod")},
          "then_of": "実装"},
@@ -2991,6 +3006,8 @@ def main() -> int:
     n.add_argument("--since-last", action="store_true", help="check: 前回の検査からの差分を範囲にする（--pr と排他）")
     n.add_argument("--id", help="check --since-last: 検査の名前（ブランチ check/<名>）")
     n.add_argument("--final", action="store_true", help="check --since-last: ミッションの終わりの検査")
+    n.add_argument("--review-only", action="store_true",
+                   help="check --since-last: 実装レビューだけ（開発版ごと。構造改善はトリガーが立ったときの検査）")
     n.add_argument("--mission", help="check --since-last: ミッションの状態（課題を読む）")
     n.add_argument("--mvv", help="release: 関門 2 を MVV で判定する（ミッションの状態）")
     n.add_argument("--escape-of", type=int, help="impl: 直す不具合を持ち込んだ PR（分からなければ 0）")
@@ -3047,6 +3064,10 @@ def main() -> int:
             ap.error("new check の --since-last と --pr は同時に渡せない")
         if a.kind == "check" and a.since_last and not a.id:
             ap.error("new check --since-last には --id（検査の名前）が要る")
+        if a.kind == "check" and a.review_only and not a.since_last:
+            ap.error("new check の --review-only は --since-last と組にする")
+        if a.kind == "check" and a.review_only and a.final:
+            ap.error("new check の --review-only と --final は同時に渡せない")
         if a.kind == "check" and not (a.pr or a.since_last):
             ap.error("new check には --pr か --since-last が要る")
         if a.kind == "release" and not (a.version and (a.prs or a.prs_from_queue) and a.channel):

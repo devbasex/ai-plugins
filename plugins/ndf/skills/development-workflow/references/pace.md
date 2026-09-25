@@ -72,10 +72,11 @@ glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。どの
 | --- | --- | --- |
 | 設計 | `design-<N>`（review の後に `mvv` → `approve`（ラベル `design-approved` と判定のコメント）→ `merge`） | `queue --max 3` |
 | 関門 1 | 無し。設計の計画がすべて `完了` なら通過し、`関門` を返した計画の Pull Request だけ利用者の承認を取ってマージする | conductor |
-| 実装 | `impl-<N>`（`base` は develop） | `queue <実装>... --max 3 --then <検査> --then <開発版> --then <本番>` |
+| 実装 | `impl-<N>`（`base` は develop） | `queue <実装>... --max 3 --then <検査> --then <実装レビュー> --then <開発版> --then <本番>` |
 | 検査 | `check`（実行の条件 `check-trigger.py eval --id <ミッション>-1`） | 1 つ目の `--then` |
-| 開発版 | `release`（`facts` は `gate_as_ok`） | 2 つ目の `--then` |
-| 本番 | `release-prod`（先頭が `mvv` のステップ） | 3 つ目の `--then`。`関門` なら queue の結果が `gate` になり、承認の後に `run <計画> --from bump` で続ける |
+| 実装レビュー | `review`（`new check --since-last --review-only`。実行の条件 `eval --id <ミッション>-review --review`） | 2 つ目の `--then`。検査が立った回は範囲が空になり流れない |
+| 開発版 | `release`（`facts` は `gate_as_ok`） | 3 つ目の `--then` |
+| 本番 | `release-prod`（先頭が `mvv` のステップ） | 4 つ目の `--then`。`関門` なら queue の結果が `gate` になり、承認の後に `run <計画> --from bump` で続ける |
 
 **ミッションの終わり**は `supervise.py new close --name M --worktree <根> --issue N... --version <開発版> --prod <正式版>
 --state <状態>` が組む。最終の検査（実行の条件 `eval --final`）→ 開発版と本番（実行の条件 `changed --id <M>-final`。
@@ -97,6 +98,12 @@ glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。どの
 | `escapes` | ある領域の逃げた不具合 ≥ `triggers.escapes` | 前回の検査の後の記録を領域ごとに数える。1 件の領域は検査の範囲の 2 番目の群へ入れるだけ |
 | `hours` | 経過 ≥ `triggers.hours` かつ PR ≥ 1 | 前回の検査の時刻から今まで |
 | `final` | `--final` を渡し、PR ≥ 1 | 範囲が空なら立たない（最終の検査を飛ばす） |
+| `review` | `--review` を渡し、PR ≥ 1 | 範囲の起点は、レビューだけの回を含む前回の検査。ほかのトリガーは見ない |
+
+**実装レビューは開発版ごとに 1 回通し、構造改善はトリガーが立ったときだけ通す。** 実装の Pull Request は
+レビューを通らずに develop へ入るため、トリガーだけに頼るとレビューの無い配布が続く。レビューだけの回の記録は
+`only: review` を持ち、構造改善を含む検査の範囲の起点にならない（レビューを通すたびに構造改善のトリガーが
+数え直しにならない）。
 
 **共通層を触ったことは単独のトリガーにしない。** 2026-09-25 の範囲では 41 本のうち 31 本（76%）が共通層を触っており、
 単独で立てると PR ごとの検査と変わらない。点数の重みと、検査の中で先に見る範囲にだけ使う。
@@ -113,7 +120,7 @@ glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。どの
 | ステップ | 内容 |
 | --- | --- |
 | `prepare` | `check-trigger.py prepare`: `check-base/<名>` を `from` に作って送る（残っていれば付け直す）。範囲を状態ディレクトリの `check.json` へ |
-| `pr` → `assess` → `refactor` → `review` → `test-all` | いつもの検査と同じ。`refactor` の範囲は `check-trigger.py scope`（共通層 → 逃げた不具合の領域 → その他） |
+| `pr` → `assess` → `refactor` → `review` → `test-all` | いつもの検査と同じ。`refactor` の範囲は `check-trigger.py scope`（共通層 → 逃げた不具合の領域 → その他）。`--review-only` は `assess` と `refactor` を持たず、`pr` → `review` と進む |
 | `finish` | 宛先を起点のブランチへ付け替える。検査で変更が無ければ Pull Request を閉じて `record` へ飛ぶ |
 | `ready` → `merge` → `record` | マージして検査の記録を足し、`check-base/<名>` を消す |
 | `abort` / `abort-before-pr` | 落ちた run のステップの行き先。`result: failed` と落ちたステップを記録し、`check-base/<名>` を消し、Pull Request を閉じて止まる |
