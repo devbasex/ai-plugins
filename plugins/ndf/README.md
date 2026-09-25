@@ -138,7 +138,7 @@ agy plugin list
   `*-steps.py`（`merged-steps.py`・`pr-steps.py`・`plan-to-spec-steps.py`・`release-steps.py`・
   `release-verification-steps.py`）、`fix` は `fix-steps.py` で文脈を集める。`progress-tracking` の手順も
   スクリプトで進める。どのスクリプトも結果を同じ形の JSON（`tool` / `status` / `summary` / `items` / `next`）で返す
-- **まとまりを閉じる作業を `bundle-close.py` で行える**。CI を待ってからのマージもスクリプトで行う
+- **ミッションを閉じる作業を `mission-close.py` で行える**。CI を待ってからのマージもスクリプトで行う
 - **`supervise.py` に副命令 `new` / `queue` / `note` / `sync-check` を足した**。`new` は雛形から計画を作り、`queue` は
   計画を同時に `--max` 本まで順に流し、`note` は報告から引き継ぎ文書の表へ 1 行を足し、`sync-check` は生成物の同期と
   検査 4 本を走らせる

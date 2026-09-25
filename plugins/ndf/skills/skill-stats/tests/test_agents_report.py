@@ -2,7 +2,7 @@
 
 `skill-stats --agents` が出す 4 つの表を、`docs/specifications/ndf-context-window-metrics.md` の
 「`skill-stats --agents`」の形で固定する。記録は `scripts/tests/fixtures/transcript_agents/`
-の最小の記録で、そこには 2 つの supervisor が同じ持ち場（実装）を通した例が入っている。
+の最小の記録で、そこには 2 つの supervisor が同じフェーズ（実装）を通した例が入っている。
 """
 from __future__ import annotations
 
@@ -164,7 +164,7 @@ def test_layer_narrows_every_agents_table_to_supervisors() -> None:
     assert out["role_usage"] == []
 
 
-# ---------- AC37: 持ち場ごとの worker の使い方 ----------
+# ---------- AC37: フェーズごとの worker の使い方 ----------
 
 def test_the_role_usage_splits_by_the_supervisor_that_launched(report) -> None:
     rows = report["role_usage"]
@@ -172,7 +172,7 @@ def test_the_role_usage_splits_by_the_supervisor_that_launched(report) -> None:
         "role", "supervisor", "supervisor_work", "workers", "fixed_sum", "mark",
     }
     impl = [r for r in rows if r["role"] == "実装"]
-    assert [r["supervisor"] for r in impl] == [1, 2], "同じ持ち場は起動の早い順に連番"
+    assert [r["supervisor"] for r in impl] == [1, 2], "同じフェーズは起動の早い順に連番"
     assert [r["workers"] for r in impl] == [1, 1]
 
 
@@ -202,10 +202,10 @@ def test_the_markdown_holds_the_four_tables() -> None:
     p = run("--agents", "--session", "sess-a")
     assert p.returncode == 0, p.stderr
     for heading in (
-        "| 層 | 持ち場 | 深さ | モデル |",
-        "| 層 | 持ち場 | モデル | 件数 |",
+        "| 層 | フェーズ | 深さ | モデル |",
+        "| 層 | フェーズ | モデル | 件数 |",
         "| 層 | 件数 | 固定費の合計 | 実作業の合計 | 総消費 |",
-        "| 持ち場 | supervisor | supervisor の実作業 | worker の件数 |",
+        "| フェーズ | supervisor | supervisor の実作業 | worker の件数 |",
     ):
         assert heading in p.stdout, heading
     assert "束ねの表から外した記録: 1 件" in p.stdout
@@ -214,8 +214,8 @@ def test_the_markdown_holds_the_four_tables() -> None:
 def test_the_record_table_appears_only_with_a_session() -> None:
     p = run("--agents")
     assert p.returncode == 0, p.stderr
-    assert "| 層 | 持ち場 | 深さ | モデル |" not in p.stdout
-    assert "| 持ち場 | supervisor |" not in p.stdout
+    assert "| 層 | フェーズ | 深さ | モデル |" not in p.stdout
+    assert "| フェーズ | supervisor |" not in p.stdout
 
 
 # ---------- AC32: 既定の引数での振る舞いが変わらない ----------

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """フェーズをスクリプトで駆動する。
 
-supervisor（サブエージェント）の代わりに、このスクリプトが持ち場の手順を順に進める。
+supervisor（サブエージェント）の代わりに、このスクリプトがフェーズの手順を順に進める。
 判断の要らない段（コマンドの実行・待ち・進行の記録）はスクリプトが行い、LLM は
 次の 2 つの段でだけ、毎回新しい最小構成の `claude -p` として起動する。
 
@@ -28,7 +28,7 @@ new / queue / note / sync-check の結果は lib/step_result.py の形の 1 行�
 
 計画（JSON）:
     {
-      "持ち場": "検査", "課題": [818], "モード": "standard",
+      "フェーズ": "検査", "課題": [818], "モード": "standard",
       "作業場所": "/abs/worktree",
       "branch": "feat/issue-818-x",         # 省略可。作業場所が無ければ起動時に作業ツリーを作る
       "起点": "origin/develop",             # branch から作るときの起点（既定 origin/develop）
@@ -95,14 +95,14 @@ run の段:
   作らせるときは `"reports": true`
 
 段の遷移:
-- `next` に `end` を書くと、そこで持ち場を完了として終える
+- `next` に `end` を書くと、そこでフェーズを完了として終える
 - run: 終了コード 0 なら `next`（無ければ次の段）。10〜19 は関門として `gate_next` か `next`。
   それ以外の 0 以外なら `on_fail`（無ければ止まる）
 - work: 終了後に `next`（無ければ次の段）
 - judge: 答えの `decision` が段の id ならその段へ、`next` なら次の段へ、`stop` なら止まる、
   `gate` なら関門として止まる。`choices` を渡すとその中から選ばせる
 
-最後に `## 持ち場の報告` を標準出力と `<state-dir>/report.md` へ書く。conductor はこの
+最後に `## フェーズの報告` を標準出力と `<state-dir>/report.md` へ書く。conductor はこの
 スクリプトを背景の Bash で起動し、終わりの通知で報告を読む。
 """
 import argparse
@@ -205,7 +205,7 @@ PR_SYSTEM = """あなたは Pull Request の本文だけを書く。Tool は無�
 - 課題を閉じる語（Fix #番号・Closes・Resolves など）を書かない。課題は「#番号」とだけ書く
 - 材料に無いことを書かない。本文だけを返し、前置きや囲みを付けない"""
 
-JUDGE_SYSTEM = """あなたは NDF の持ち場の判断だけを行う。Tool は無い。
+JUDGE_SYSTEM = """あなたは NDF のフェーズの判断だけを行う。Tool は無い。
 渡された結果と規則だけを根拠に、次の段を 1 つ選ぶ。
 答えは JSON 1 つだけを返す: {"decision": "<選んだ値>", "reason": "<1 行>"}"""
 
@@ -390,9 +390,21 @@ def expand_parts(steps: list[dict]) -> list[dict]:
     return out
 
 
+# 計画の旧いキー（持ち場）を今のキー（フェーズ）へ読み替える。旧い計画の JSON も読めるようにする
+PLAN_KEY_ALIASES = {"持ち場": "フェーズ", "次の持ち場": "次のフェーズ"}
+
+
+def normalize_plan(plan: dict) -> dict:
+    for old, new in PLAN_KEY_ALIASES.items():
+        if old in plan:
+            value = plan.pop(old)
+            plan.setdefault(new, value)
+    return plan
+
+
 class Supervisor:
     def __init__(self, plan: dict, state_dir: Path):
-        self.plan = plan
+        self.plan = normalize_plan(plan)
         plan["steps"] = expand_parts(plan["steps"])
         self.steps = {s["id"]: s for s in plan["steps"]}
         self.order = [s["id"] for s in plan["steps"]]
@@ -771,7 +783,7 @@ class Supervisor:
 
     def do_judge(self, step: dict) -> dict:
         choices = step.get("choices")
-        prompt = (f"持ち場: {self.plan.get('持ち場')} / 課題: {self.plan.get('課題')}\n"
+        prompt = (f"フェーズ: {self.plan.get('フェーズ')} / 課題: {self.plan.get('課題')}\n"
                   f"問い: {step['question']}\n"
                   + (f"選べる値: {', '.join(choices)}（関門なら gate、止めるなら stop）\n" if choices else "")
                   + f"\n## 規則\n{self.plan.get('規則', '（無し）')}\n\n## 結果\n{self.inputs_text(step)}")
@@ -891,13 +903,13 @@ class Supervisor:
             extra += "- 利用上限: " + "; ".join(
                 f"{e['id']} {e.get('limit_hits', 1)} 回（待ち {e.get('limit_waited', 0)} 秒"
                 + (f"・解除 {e['limit_resets']}" if e.get("limit_resets") else "") + "）" for e in limited) + "\n"
-        text = f"""## 持ち場の報告
+        text = f"""## フェーズの報告
 
-- 持ち場: {self.plan.get('持ち場')}
+- フェーズ: {self.plan.get('フェーズ')}
 - 課題: {' '.join('#' + str(i) for i in self.plan.get('課題', []))}
 - 結果: {result}
 - 関門: {gate_line}
-- 次の持ち場: {self.plan.get('次の持ち場', '無し') if result == '完了' else '無し'}
+- 次のフェーズ: {self.plan.get('次のフェーズ', '無し') if result == '完了' else '無し'}
 - Pull Request: {self.plan.get('Pull Request', '無し')}
 - 最後に記録した工程: {self.last_stage}
 - 使った worker: 修正 {l['work']}（claude -p）/ 判断 {l['judge']}（claude -p）
@@ -917,7 +929,7 @@ class Supervisor:
 
 
 EXAMPLE = {
-    "持ち場": "検査", "課題": [0], "モード": "light", "作業場所": "/abs/worktree",
+    "フェーズ": "検査", "課題": [0], "モード": "light", "作業場所": "/abs/worktree",
     "規則": "テストが落ちたら、失敗が変更に起因するなら fix、環境や揺れなら stop。",
     "上限": 10,
     "steps": [
@@ -973,7 +985,7 @@ def plan_impl(a) -> dict:
     prompt = Path(a.prompt_file).read_text() if a.prompt_file else (a.prompt or f"課題 #{n} を実装する。")
     tests = " ".join(a.tests)
     plan = {
-        "持ち場": "実装", "課題": a.issue, "モード": a.mode, "作業場所": a.worktree,
+        "フェーズ": "実装", "課題": a.issue, "モード": a.mode, "作業場所": a.worktree,
         "規則": RULE_IMPL, "上限": 20,
         "steps": [
             {"id": "impl", "type": "work", "kind": "実装", "serena": True, "stage": "実装", "issues": True,
@@ -1020,7 +1032,7 @@ def plan_check(a) -> dict:
         refactor = {"id": "refactor", "type": "work", "full": True, "kind": "構造改善", "stage": "構造改善",
                     "timeout": 3600, "prompt": f"/ndf:cross-refactoring {pr}", "next": "review"}
     return {
-        "持ち場": "検査", "課題": a.issue or [], "モード": a.mode, "作業場所": a.worktree,
+        "フェーズ": "検査", "課題": a.issue or [], "モード": a.mode, "作業場所": a.worktree,
         "規則": RULE_CHECK, "上限": 12, "Pull Request": str(pr),
         "steps": [
             {"id": "assess", "type": "run", "preset": "assess", "stage": "構造改善", "skip_to": "review",
@@ -1121,7 +1133,7 @@ def plan_release(a) -> dict:
          "next": "sync"},
     ]
     plan = {
-        "持ち場": f"配布（{'開発版' if dev else '本番'}）", "課題": a.issue, "モード": a.mode, "作業場所": a.worktree,
+        "フェーズ": f"配布（{'開発版' if dev else '本番'}）", "課題": a.issue, "モード": a.mode, "作業場所": a.worktree,
         "branch": a.branch or f"release/v{v}", "規則": RULE_RELEASE_DEV if dev else RULE_RELEASE_PROD, "上限": 20,
         "steps": steps,
     }
@@ -1185,7 +1197,7 @@ def note_row(report: str, next_text: str) -> str:
         return m.group(1).strip() if m else ""
     cost = re.search(r"/ \$([0-9.]+)\s*$", field("LLM の使用量"))
     pr = field("Pull Request")
-    state = f"{field('持ち場')}: {field('結果')}"
+    state = f"{field('フェーズ') or field('持ち場')}: {field('結果')}"  # 旧い報告（持ち場）も読む
     extra = [x for x in ((pr if pr and pr != "無し" else ""), (f"${cost.group(1)}" if cost else "")) if x]
     if extra:
         state += "（" + "、".join(extra) + "）"

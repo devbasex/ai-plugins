@@ -220,7 +220,7 @@ python3 "$RF/refactor.py" assess --base origin/develop; rc=$?; echo "exit=$rc"
 | --- | --- |
 | 進行の記録 | 工程「構造改善」（`projects-sync.sh <課題番号> stage "構造改善"`） |
 | Pull Request の本文 | `構造改善: 飛ばした（<assess の理由の行>）` の 1 行 |
-| 持ち場の報告 | 同じ 1 行を `理由` に含める |
+| フェーズの報告 | 同じ 1 行を `理由` に含める |
 
 **`refactoring` 単独へ退避する。** `assess` が終了コード 0 で、次のいずれかに当たるとき。
 

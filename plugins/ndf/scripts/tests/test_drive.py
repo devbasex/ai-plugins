@@ -273,7 +273,7 @@ def fake_drive(tmp_path) -> str:
 
 
 def run_plan(tmp_path, steps):
-    plan = {"持ち場": "検査", "課題": [870], "作業場所": str(tmp_path), "steps": steps}
+    plan = {"フェーズ": "検査", "課題": [870], "作業場所": str(tmp_path), "steps": steps}
     s = sv.Supervisor(plan, tmp_path / "state")
     return s, s.run()
 

@@ -623,8 +623,8 @@ def test_cd_does_not_reach_past_a_pipe_or_background(command: str, expected: str
 @pytest.mark.parametrize(
     ("command", "expected"),
     [
-        # まとまりごと背景実行したときも、`cd` は親のシェルの位置を変えない。
-        # 中の `;` で `&` の復元先を引き直すと、まとまりの中の移動が外へ漏れる。
+        # グループごと背景実行したときも、`cd` は親のシェルの位置を変えない。
+        # 中の `;` で `&` の復元先を引き直すと、グループの中の移動が外へ漏れる。
         ("{ cd .worktrees/x; } & sed -i 's/a/b/' README.md", "/base/README.md"),
         ("{ cd .worktrees/x; cd y; } & sed -i 's/a/b/' README.md", "/base/README.md"),
         ("if true; then cd .worktrees/x; fi & sed -i 's/a/b/' README.md",
@@ -634,7 +634,7 @@ def test_cd_does_not_reach_past_a_pipe_or_background(command: str, expected: str
         ("for f in a b; do cd .worktrees/x; done & sed -i 's/a/b/' README.md",
          "/base/README.md"),
         ("( cd .worktrees/x; cd y ) & sed -i 's/a/b/' README.md", "/base/README.md"),
-        # 入れ子でも、外側のまとまりの入口まで戻す。
+        # 入れ子でも、外側のグループの入口まで戻す。
         ("{ if true; then cd .worktrees/x; fi; } & sed -i 's/a/b/' README.md",
          "/base/README.md"),
     ],
@@ -655,16 +655,16 @@ def test_a_backgrounded_group_does_not_move_the_parent(
 @pytest.mark.parametrize(
     ("command", "expected"),
     [
-        # まとまりの中では、`cd` の効果はそのまま後続へ及ぶ。
+        # グループの中では、`cd` の効果はそのまま後続へ及ぶ。
         ("{ cd .worktrees/x; sed -i 's/a/b/' README.md; } & echo done",
          "/base/.worktrees/x/README.md"),
-        # まとまりの中の `&` は、その中のひとまとまりの入口へ戻す。
+        # グループの中の `&` は、その中のひとつのグループの入口へ戻す。
         ("{ cd .worktrees/x; cd y & sed -i 's/a/b/' README.md; }",
          "/base/.worktrees/x/README.md"),
     ],
 )
 def test_a_group_still_carries_cd_inside_itself(command: str, expected: str) -> None:
-    """まとまりの内側の位置は変えない。外へ漏らさないことだけを直す。"""
+    """グループの内側の位置は変えない。外へ漏らさないことだけを直す。"""
     targets, rc = extract_at(command, "/base")
     assert rc == 0, (command, targets)
     assert targets == [expected], command
@@ -772,7 +772,7 @@ def test_a_stderr_pipe_stops_the_operand_scan(command: str, expected: list[str])
          "/base/.worktrees/x/README.md"),
         ("if false; then true; elif cd .worktrees/x; then sed -i 's/a/b/' README.md; fi",
          "/base/.worktrees/x/README.md"),
-        # `{` で開くまとまりは、部分シェルではなく同じシェルで動く。
+        # `{` で開くグループは、部分シェルではなく同じシェルで動く。
         ("{ cd .worktrees/x; sed -i 's/a/b/' README.md; }", "/base/.worktrees/x/README.md"),
         # `do` の後ろも命令の位置である。
         ("while read f; do cd .worktrees/x; sed -i 's/a/b/' README.md; done",
@@ -784,7 +784,7 @@ def test_a_stderr_pipe_stops_the_operand_scan(command: str, expected: list[str])
         # `!` と `time` は同じシェルで続きを走らせる。
         ("! cd .worktrees/x\nsed -i 's/a/b/' README.md", "/base/.worktrees/x/README.md"),
         ("time cd .worktrees/x\nsed -i 's/a/b/' README.md", "/base/.worktrees/x/README.md"),
-        # まとまりを閉じた後も、`{` の中の移動は残る（必ず走るため）。
+        # グループを閉じた後も、`{` の中の移動は残る（必ず走るため）。
         ("{ cd .worktrees/x; }\nsed -i 's/a/b/' README.md", "/base/.worktrees/x/README.md"),
     ],
 )
@@ -1216,13 +1216,13 @@ def test_a_case_branch_opens_a_command_position(command: str, expected: str) -> 
     ("command", "expected"),
     [
         # `&>` `&>>` は標準出力と標準エラーをまとめて 1 つのファイルへ向ける形で、
-        # `&` は背景実行の演算子ではない。演算子として読むと現在地がまとまりの
+        # `&` は背景実行の演算子ではない。演算子として読むと現在地がグループの
         # 入口へ戻り、移動前の位置を指した案内が出る。
         ("cd .worktrees/x && echo hi &> README.md",
          ["/base/.worktrees/x/README.md"]),
         ("cd .worktrees/x && echo hi &>> README.md",
          ["/base/.worktrees/x/README.md"]),
-        # まとまりが切れていないため、後続の命令にも移動が効き続ける。
+        # グループが切れていないため、後続の命令にも移動が効き続ける。
         ("cd .worktrees/x && echo hi &> log.txt && cp a.txt README.md",
          ["/base/.worktrees/x/log.txt", "/base/.worktrees/x/README.md"]),
         # `>& file` `>&file` は `&>` と同義の古い書き方で、後ろの語がファイルになる。
@@ -1362,7 +1362,7 @@ def test_a_non_continuing_right_side_does_not_decide_every_form(command: str) ->
          "/main/README.md"),
         ("cd .worktrees/x || { echo err; exit 1; }\ncp a.txt README.md",
          "/base/.worktrees/x/README.md"),
-        # まとまりの先頭が非継続命令の形。
+        # グループの先頭が非継続命令の形。
         ("cd .worktrees/x || { exit 1; }\ncp a.txt README.md",
          "/base/.worktrees/x/README.md"),
         ("cd .worktrees/x || { echo err; return 1; }\ncp a.txt README.md",
@@ -1371,7 +1371,7 @@ def test_a_non_continuing_right_side_does_not_decide_every_form(command: str) ->
          "/base/.worktrees/x/README.md"),
         ("cd .worktrees/x || { echo err; continue; }\ncp a.txt README.md",
          "/base/.worktrees/x/README.md"),
-        # 複合コマンドを挟んでも、まとまりの直下に非継続命令があれば必ず抜ける。
+        # 複合コマンドを挟んでも、グループの直下に非継続命令があれば必ず抜ける。
         ("cd .worktrees/x || { if true; then echo err; fi; exit 1; }\ncp a.txt README.md",
          "/base/.worktrees/x/README.md"),
         # 改行で区切る形も `;` と同じである。
@@ -1396,7 +1396,7 @@ def test_an_or_with_a_brace_group_that_always_exits_keeps_the_move(
 
 
 def test_a_brace_group_body_resolves_at_the_failed_position() -> None:
-    """まとまりの中は `cd` が失敗した位置で走る。抜けた後だけが移動後の位置になる。"""
+    """グループの中は `cd` が失敗した位置で走る。抜けた後だけが移動後の位置になる。"""
     targets, rc = extract_at(
         "cd .worktrees/x || { echo err > fail.log; exit 1; }\ncp a.txt README.md",
         "/base",
@@ -1415,12 +1415,12 @@ def test_a_brace_group_body_resolves_at_the_failed_position() -> None:
         "cd .worktrees/x || { echo err; }\ncp a.txt README.md",
         # 部分シェルの中の `exit` は親のシェルを終わらせない。
         "cd .worktrees/x || { echo err; ( exit 1 ); }\ncp a.txt README.md",
-        # 先行する `||` で経路が分かれていると、まとまりの `exit` では絞れない。
+        # 先行する `||` で経路が分かれていると、グループの `exit` では絞れない。
         "true || cd .worktrees/x || { echo err; exit 1; }\ncp a.txt README.md",
     ],
 )
 def test_a_brace_group_that_may_continue_does_not_decide_the_position(command: str) -> None:
-    """まとまりを抜けるかどうかが実行時に決まる形では、書き込み先を出さない。"""
+    """グループを抜けるかどうかが実行時に決まる形では、書き込み先を出さない。"""
     targets, rc = extract_at(command, "/base")
     assert rc == 1, (command, targets)
     assert targets == [], command
@@ -1878,7 +1878,7 @@ def test_calling_a_moving_function_leaves_the_position_undecidable(
 
 
 def test_a_brace_group_still_carries_cd_outside_itself() -> None:
-    """関数定義ではないまとまりは同じシェルで走り、移動は後続へ残る。"""
+    """関数定義ではないグループは同じシェルで走り、移動は後続へ残る。"""
     targets, rc = extract_at("{ cd .worktrees/x; }; cp a.txt README.md", "/base")
     assert rc == 0
     assert targets == ["/base/.worktrees/x/README.md"]

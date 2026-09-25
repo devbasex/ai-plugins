@@ -117,8 +117,8 @@ URL は最終行に生のまま置く（Markdown リンクにすると利用者�
 ## 閉じる語は本文だけに書く
 
 **閉じる語（`Closes` / `Fixes` / `Resolves`）は Pull Request の本文だけに、番号ごとに書く。** コミット
-メッセージに書くと、マージでそのコミットが指す課題だけが先に閉じ、まとまりが割れる。**本文の閉じる語は
-外さない**（`stage-completeness.md` と `progress-tracking` の「まとまりを閉じる」が本文を入力にする）。
+メッセージに書くと、マージでそのコミットが指す課題だけが先に閉じ、ミッションが割れる。**本文の閉じる語は
+外さない**（`stage-completeness.md` と `progress-tracking` の「ミッションを閉じる」が本文を入力にする）。
 
 ## 設計 Pull Request の本文
 

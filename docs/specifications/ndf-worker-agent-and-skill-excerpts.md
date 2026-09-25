@@ -11,14 +11,14 @@ supervisor は進行を記録のコマンド 1 行で残し、worker は Skill �
 | 何を読むか | 正本 |
 | --- | --- |
 | conductor → supervisor / supervisor → worker の起動指示の雛形と守る規則、委譲の線 | `plugins/ndf/skills/development-workflow/references/agent-layers.md` |
-| 器の比較表、仕事ごとの選び方、小さな作業の線引き、サブエージェントの道具を定義で絞る理由 | `plugins/ndf/skills/development-workflow/references/work-vessels.md` |
+| 器の比較表、仕事ごとの選び方、小さな作業の線引き、サブエージェントの Tool を定義で絞る理由 | `plugins/ndf/skills/development-workflow/references/work-vessels.md` |
 | 抜粋の形・置き場所・入れるもの / 入れないもの・上限を超えたときの扱い | `plugins/ndf/skills/EXCERPTS.md` |
-| 記録のコマンドのキーと打つ時点、「まとまりを閉じる」手順 | `plugins/ndf/skills/progress-tracking/SKILL.md`（抜粋は `references/excerpt.md`） |
+| 記録のコマンドのキーと打つ時点、「ミッションを閉じる」手順 | `plugins/ndf/skills/progress-tracking/SKILL.md`（抜粋は `references/excerpt.md`） |
 | worker のエージェント定義 | `plugins/ndf/agents/worker.md` |
 
 ## 概要
 
-**例（設計の持ち場の supervisor が 1 工程を記録する）。** conductor は `development-workflow` を
+**例（設計のフェーズの supervisor が 1 工程を記録する）。** conductor は `development-workflow` を
 読んでモードを判定し、`$SCRIPTS` を解いた絶対パスで起動指示の「記録のコマンド」を書く。
 
 ```text
@@ -28,7 +28,7 @@ supervisor は進行を記録のコマンド 1 行で残し、worker は Skill �
 supervisor は設計の工程に入った時点で `bash "<絶対パス>/projects-sync.sh" 828 stage "設計"` を
 1 回の Bash 実行で打つ。issue の本文の `## 進行` と盤面の両方に残り、通過工程の控えにも
 「設計」が積まれる。supervisor は `progress-tracking`（本文 約 7,600 トークン）も
-`development-workflow`（約 10,700 トークン）も起動しない。本文は起動すると持ち場が終わるまで
+`development-workflow`（約 10,700 トークン）も起動しない。本文は起動するとフェーズが終わるまで
 文脈に残り、以後の呼び出しのたびに読み直される。
 
 **背景は #827 の実測である。** 2026-09-20 以降のサブエージェント 156 件で、Skill 本文は持ち越し
@@ -38,7 +38,7 @@ supervisor は設計の工程に入った時点で `bash "<絶対パス>/project
 払っていた（#680）。
 
 **工程の Skill の起動は減らさない。** supervisor が `requirements-design` / `design` / `pr` /
-`cross-review` などを起動するのは持ち場の仕事そのものである。外すのは、工程の外から読まされる
+`cross-review` などを起動するのはフェーズの仕事そのものである。外すのは、工程の外から読まされる
 `development-workflow`（振り分けは conductor が済ませている）と `progress-tracking`（使うのは
 1 行）と、worker が読む Skill である。工程の Skill の本文を縮めるのは #845 の子が行う。
 
@@ -63,7 +63,7 @@ supervisor は設計の工程に入った時点で `bash "<絶対パス>/project
 | `plugins/ndf/agents/worker.md` | worker のエージェント定義（`ndf:worker`）。frontmatter の `disallowedTools: Skill, Agent` で 2 つのツールを外す |
 | `plugins/ndf/.claude-plugin/plugin.json` | `agents` 配列に `./agents/worker.md` を載せる。agy へは `plugins/ndf/dev.agy/agents`（`../agents` への symlink）で同じ定義が配られる |
 | `development-workflow/references/agent-layers.md` | 起動指示の雛形と守る規則。「委譲の線」から `work-vessels.md` を指す |
-| `development-workflow/references/work-vessels.md` | 器の比較表、仕事ごとの選び方、小さな作業の線引き、道具を定義で絞る理由 |
+| `development-workflow/references/work-vessels.md` | 器の比較表、仕事ごとの選び方、小さな作業の線引き、Tool を定義で絞る理由 |
 | `development-workflow/references/context-window.md` | 「委譲する対象と、しない対象」から `work-vessels.md` を指す（写さない） |
 | `development-workflow/references/stage-completeness.md` | 用語「進行の記録」に、同じ 1 回で issue の本文も更新されることを書く。控えの読み方は変えない |
 | `development-workflow/SKILL.md` | conductor が `$SCRIPTS` を解いてから supervisor を起動し、記録のコマンドを絶対パスで書くこと |
@@ -98,7 +98,7 @@ flowchart TB
 - **記録のコマンドは 1 回の Bash 実行に 1 件である。** 通過工程の控えは 1 回の実行の最初の記録しか
   読まない
 - **supervisor は `development-workflow` を起動しない。** `progress-tracking` を起動するのは、
-  終わりの工程で「まとまりを閉じる」手順を行うときだけである
+  終わりの工程で「ミッションを閉じる」手順を行うときだけである
 - **worker は Skill を起動せず、`SKILL.md` を読まない。** 起動指示が Skill の起動そのものを
   手順として渡したときだけ、その 1 つを起動してよい。起動してよいかは起動指示を書く側が決める
 - **抜粋の正本は本文である。** 抜粋に本文に無い規則を置かない
@@ -118,10 +118,10 @@ projects-sync.sh <課題番号> <キー> <値>
 | キー | 打つ時点 | issue の本文 | 盤面 | 通過工程の控え |
 | --- | --- | --- | --- | --- |
 | `stage` | 工程に入るたび（課題ごと） | `progress-record.sh <課題> "<値>"`（チェックを付ける） | 工程のフィールド | 工程を積む |
-| `mode` | 持ち場の最初の工程で 1 度 | `progress-record.sh <課題> - --mode <値>`（見出し行だけ） | モードのフィールド | モードを書く |
+| `mode` | フェーズの最初の工程で 1 度 | `progress-record.sh <課題> - --mode <値>`（見出し行だけ） | モードのフィールド | モードを書く |
 | `worktree` | 作業場所の用意の後に 1 度 | `progress-record.sh <課題> - --worktree <値>` | 作業ツリーのフィールド | 読まない |
 | `plan` | 計画の後に 1 度 | `progress-record.sh <課題> - --plan <値>` | 計画ファイルのフィールド | 読まない |
-| `status` | 「まとまりを閉じる」だけ | 書かない | Status | 読まない |
+| `status` | 「ミッションを閉じる」だけ | 書かない | Status | 読まない |
 
 見出し行だけを更新するときは、既にある見出し行のモード・作業ツリー・計画ファイルのうち
 渡さなかったものを引き継ぐ。
@@ -154,18 +154,18 @@ projects-sync.sh <課題番号> <キー> <値>
   絶対パスを渡す形はそのまま使える
 - **パスを二重引用符で囲むのは、空白を含むパスで語が割れないためである。** 通過工程の控えは
   引用符を外した語を読むため、囲んでも記録として観測される
-- **モードと通す工程は起動指示の「モード」「持ち場」が持つ。** そのため supervisor は
-  `development-workflow` を読まずに持ち場を通せる
+- **モードと通す工程は起動指示の「モード」「フェーズ」が持つ。** そのため supervisor は
+  `development-workflow` を読まずにフェーズを通せる
 
 supervisor の守る規則のうち、この仕様に関わるのは 2 つである。規則の数は 10 のまま変えない。
 conductor の起動指示と、それを写した手順が「10 個」と数で指しているためである。
 
 | # | 規則 |
 | --- | --- |
-| 3 | 工程に入った時点で起動指示の「記録のコマンド」を課題ごとに 1 回打つ。1 回の Bash 実行に 1 件。`development-workflow` を起動しない。まとまりを閉じるときだけ `progress-tracking` を起動して本文の手順に従う |
+| 3 | 工程に入った時点で起動指示の「記録のコマンド」を課題ごとに 1 回打つ。1 回の Bash 実行に 1 件。`development-workflow` を起動しない。ミッションを閉じるときだけ `progress-tracking` を起動して本文の手順に従う |
 | 7 | 委譲してよい作業は worker へ出し、委譲しない 5 つは自分で行う。小さな作業は worker へ出さずにその場で行う（`work-vessels.md` の線引き） |
 
-「まとまりを閉じる」手順は `progress-tracking` の本文に残る。#856 がこれを `bundle-close.sh` へ
+「ミッションを閉じる」手順は `progress-tracking` の本文に残る。#856 がこれを `mission-close.py` へ
 移した時点で、この例外も要らなくなる。
 
 ### worker の起動指示と定義
@@ -312,7 +312,7 @@ worker には渡さない。
   `skill-stats --agents` が測った値を使い、測っていなければ「起こす会話の最初の 1 回の読み込みの
   量」を目安にする。行数やトークン数の閾値で書くと、書いたリポジトリの値が別の環境の値として読まれる
 - **読む量が見込めないときは、その場で量だけを測ってから決める**（`wc -l` や件数の問い合わせ）
-- **この判定は起こす前の見込みである。** 起こした後の測定で、持ち場の中の小さな worker を束ねるかを
+- **この判定は起こす前の見込みである。** 起こした後の測定で、フェーズの中の小さな worker を束ねるかを
   決めるのは #773 の候補 2 である。この線引きは #773 の測定の入力になるが、#773 の判定を置き換えない
 
 ## 外部連携
@@ -367,10 +367,10 @@ CLI の worker（#760）で Skill を塞ぐ手段は次のとおりで、今の 
   既存の `test_stage_check.py` / `test_workflow_guard.py` が変更なしで通る）
 - `worker.md` の frontmatter の `disallowedTools` に `Skill` と `Agent` があり、`plugin.json` の
   `agents` に載っていること。`ndf:worker` を起動すると `ToolSearch select:Skill` が
-  `No matching deferred tools found.` を返し、道具に Skill と Agent が無いこと（#828 に記録がある）
+  `No matching deferred tools found.` を返し、Tool に Skill と Agent が無いこと（#828 に記録がある）
 - `agent-layers.md` の 2 つの起動指示の雛形の中に、`progress-tracking` / `development-workflow` を
   起動・読み込みさせる文が無いこと。残ってよいのは conductor 側の説明、「3 層の責務」の表の
-  conductor の行、supervisor の規則 3 の禁止の文と「まとまりを閉じる」の例外だけである
+  conductor の行、supervisor の規則 3 の禁止の文と「ミッションを閉じる」の例外だけである
 - `grep -rn "この工程に入ったら.*progress-tracking" plugins/ndf/skills/*/SKILL.md` が 0 件で、
   `design` の「進行を記録する」の節も記録のコマンドの形であること
 - `progress-tracking/references/excerpt.md` が 1 行目の目印と 3 つの見出しを持ち、40 行かつ
