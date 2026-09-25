@@ -1,0 +1,113 @@
+{
+ "per_pr": [
+  {
+   "version": "10.17.16",
+   "mode": "standard",
+   "model": "claude-opus-5-5",
+   "cc": "2.1.282",
+   "reviewers": "-",
+   "sessions": 1,
+   "sessions_with_pr": 1,
+   "prs": 1,
+   "conductor_cost": 975008.4000000001,
+   "supervisor_cost": 0.0,
+   "worker_cost": 0.0,
+   "context": 7004608.0,
+   "out": 32274.0,
+   "minutes": 38.7554166674614,
+   "codex_input": 0.0,
+   "codex_out": 0.0,
+   "kiro_credit": 0.0,
+   "claude_seat_cost": 0.0
+  },
+  {
+   "version": "10.17.17",
+   "mode": "light",
+   "model": "claude-opus-5-5",
+   "cc": "2.1.282",
+   "reviewers": "-",
+   "sessions": 1,
+   "sessions_with_pr": 1,
+   "prs": 2,
+   "conductor_cost": 462726.20000000007,
+   "supervisor_cost": 0.0,
+   "worker_cost": 0.0,
+   "context": 3507921.0,
+   "out": 12751.0,
+   "minutes": 24.91911666591962,
+   "codex_input": 0.0,
+   "codex_out": 0.0,
+   "kiro_credit": 0.0,
+   "claude_seat_cost": 0.0
+  }
+ ],
+ "per_role": [
+  {
+   "version": "10.17.16",
+   "mode": "standard",
+   "model": "claude-opus-5-5",
+   "cc": "2.1.282",
+   "reviewers": "-",
+   "layer": "conductor",
+   "role": "-",
+   "count": 1,
+   "cost": 975008.4000000001,
+   "context": 7004608.0,
+   "out": 32274.0,
+   "minutes": 38.7554166674614,
+   "p": 29585.0,
+   "k": 59.0,
+   "w5": 386072.0,
+   "w1h": 0.0,
+   "rewrites": 2,
+   "rewrites_after_5m": 2,
+   "rewrites_untimed": 0,
+   "rewrite_tokens": 250221,
+   "rewrite_gap_median": 9.636625001827875
+  },
+  {
+   "version": "10.17.17",
+   "mode": "light",
+   "model": "claude-opus-5-5",
+   "cc": "2.1.282",
+   "reviewers": "-",
+   "layer": "conductor",
+   "role": "-",
+   "count": 1,
+   "cost": 925452.4000000001,
+   "context": 7015842.0,
+   "out": 25502.0,
+   "minutes": 49.83823333183924,
+   "p": 29185.0,
+   "k": 66.0,
+   "w5": 372516.0,
+   "w1h": 0.0,
+   "rewrites": 2,
+   "rewrites_after_5m": 2,
+   "rewrites_untimed": 0,
+   "rewrite_tokens": 248445,
+   "rewrite_gap_median": 46.41459166606267
+  }
+ ],
+ "external": [],
+ "meta": {
+  "by": [
+   "version",
+   "mode",
+   "model",
+   "cc",
+   "reviewers"
+  ],
+  "min_version": "10.17.16",
+  "until": "2026-09-25T09:17:00Z",
+  "sessions": 2,
+  "sessions_with_pr": 2,
+  "unlinked_external": 687,
+  "skipped": {
+   "ndf の Skill が無い": 357,
+   "版を判定できない": 17
+  },
+  "released": "10.17.18",
+  "previous": "2026-09-25-7.json"
+ }
+}
