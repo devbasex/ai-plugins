@@ -4,14 +4,18 @@
     python3 plan-to-spec-steps.py spec-finalize --spec <確定仕様> --design <設計>... [--title <説明>] [--root <dir>]
 
 設計のファイルを消し、確定仕様を docs/specifications/README.md の索引へ載せてコミットする。
+用語集の宣言（.ndf/glossary.json）があれば、消した設計を確定前の出所（pending_source）に持つ語の
+正本（source）を確定仕様へ移し、文書を作り直して同じコミットに含める。
 確定仕様の本文は呼ぶ前に LLM が書いておく。結果は lib/step_result.py の形の 1 行の JSON。
 終了コードは 0 = ok / 1 = コミットする変更が無い・git が失敗 / 3 = 確定仕様か設計のファイルが無い。
 """
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -48,6 +52,31 @@ def update_index(index, text, name, link, title):
     index.write_text(body, encoding="utf-8")
 
 
+def promote_glossary(root: Path, removed: set, spec_rel: str) -> list:
+    """消した設計を pending_source に持つ語の source を確定仕様へ移し、render して git add する。"""
+    decl = root / ".ndf" / "glossary.json"
+    if not decl.is_file():
+        return []
+    rel = json.loads(decl.read_text(encoding="utf-8")).get("source")
+    path = root / rel if isinstance(rel, str) else None
+    if path is None or not path.is_file():
+        return []
+    g = json.loads(path.read_text(encoding="utf-8"))
+    moved = [t for t in g.get("terms", []) if isinstance(t, dict) and t.get("pending_source") in removed]
+    if not moved:
+        return []
+    for t in moved:
+        t["source"] = spec_rel
+        del t["pending_source"]
+    path.write_text(json.dumps(g, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    r = subprocess.run([sys.executable, str(Path(__file__).resolve().parent / "glossary.py"), "render", "--root",
+                        str(root)], capture_output=True, text=True)
+    if r.returncode != 0:
+        raise StepError(f"用語集の文書を作り直せない: {r.stdout.strip() or r.stderr.strip()}")
+    git(root, "add", "-A", "--", rel, *[i["name"] for i in json.loads(r.stdout)["items"]])
+    return [{"kind": "glossary", "name": t["term"], "result": "promoted", "source": spec_rel} for t in moved]
+
+
 def cmd_spec_finalize(a):
     root = git_root(a.root)
     spec = Path(a.spec) if Path(a.spec).is_absolute() else (root / a.spec).resolve()
@@ -63,6 +92,8 @@ def cmd_spec_finalize(a):
             raise StepError(f"設計のファイルが無い: {d}", EXIT_PRECONDITION)
         git(root, "rm", "-q", "--", rel)
         items.append({"kind": "design", "name": rel, "result": "removed"})
+
+    items += promote_glossary(root, {i["name"] for i in items}, spec_rel)
 
     index = root / "docs" / "specifications" / "README.md"
     if index.is_file():

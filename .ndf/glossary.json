@@ -11,6 +11,10 @@
     ],
     "term_sections": [
       "用語"
+    ],
+    "source_paths": [
+      "docs/specifications/*.md",
+      "plugins/ndf/skills/*.md"
     ]
   }
 }

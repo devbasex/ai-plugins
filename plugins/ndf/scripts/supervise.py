@@ -2272,7 +2272,8 @@ def plan_mission_design(a, n: int, repo: str) -> dict:
              "cmd": glossary_check, "on_fail": "fix-glossary", "next": "push-glossary"},
             {"id": "fix-glossary", "type": "work", "kind": "修正", "stage": "ドキュメントレビュー",
              "inputs": ["glossary-check"], "timeout": 1800, "next": "glossary-recheck",
-             "prompt": "語のチェックの当たりを直す。未登録の語は用語集へ足すか、用語集の語へ言い換える。廃止した語は"
+             "prompt": "語のチェックの当たりを直す。未登録の語は用語集へ足す（source は空にし、pending_source に"
+                       "設計文書のパスを書く）か、用語集の語へ言い換える。廃止した語は"
                        "用語集の語へ言い換える。用語集を変えたら `glossary.py render` で文書を作り直し、コミットする"
                        "（push しない）。利用者が採るかを決めるべき語は直さずに「判断が要る」と報告する。"},
             {"id": "glossary-recheck", "type": "run", "stage": "ドキュメントレビュー", "timeout": 120,
