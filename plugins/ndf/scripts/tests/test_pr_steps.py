@@ -326,3 +326,26 @@ def test_update_replaces_existing_mode_line(repo, env, tmp_path):
     sent = Path(edit[edit.index("--body-file") + 1]).read_text()
     assert [l for l in sent.splitlines() if l.startswith("モード: ")] == [
         "モード: standard / 通した工程: 構造改善 → 実装レビュー"]
+
+
+# --- 利用者向けの変化の節（#1054）---
+
+def test_template_has_user_changes_section(repo, env, tmp_path):
+    out_file = tmp_path / "tpl.md"
+    code, out, err = call(["template", "--out", str(out_file)], env, repo)
+    assert code == 0, err
+    check_shape(out)
+    heads = [l for l in out_file.read_text(encoding="utf-8").splitlines() if l.startswith("## ")]
+    assert heads == ["## Summary", "## 利用者向けの変化", "## Test plan"]
+    code, out, _ = call(["template", "--out", str(out_file)], env, repo)
+    assert code == 3
+
+
+def test_create_reports_missing_user_changes_section(repo, env, tmp_path):
+    code, out, err = call(["create", "--title", "題", "--body-file", str(body_file(tmp_path))], env, repo)
+    assert code == 0, err
+    assert out["metrics"]["user_changes"] is False and "利用者向けの変化" in out["next"]
+    b = body_file(tmp_path, "## Summary\n\n- 要点\n\n## 利用者向けの変化\n\n- できること\n\n## Test plan\n\n- [x] t\n")
+    code, out, err = call(["create", "--title", "題", "--body-file", str(b)], env, repo)
+    assert code == 0, err
+    assert out["metrics"]["user_changes"] is True and "next" not in out

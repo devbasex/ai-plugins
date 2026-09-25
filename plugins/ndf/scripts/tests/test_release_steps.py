@@ -227,3 +227,80 @@ def test_wait_and_merge_watches_checks_with_short_interval(monkeypatch):
     watch = next(c for c in calls if "--watch" in c)
     assert float(watch[watch.index("-i") + 1]) <= 5
     assert sleeps and max(sleeps) <= 5
+
+
+def fake_gh(tmp_path: Path, prs: dict) -> dict:
+    """gh pr view N --json title,body に prs[N] を返す偽の gh を PATH の先頭へ置いた環境を返す。"""
+    import os
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    data = tmp_path / "prs.json"
+    data.write_text(json.dumps({str(k): v for k, v in prs.items()}, ensure_ascii=False), encoding="utf-8")
+    gh = bin_dir / "gh"
+    gh.write_text(f"#!{PY}\nimport json, sys\nprint(json.dumps(json.load(open({str(data)!r}))[sys.argv[3]]))\n",
+                  encoding="utf-8")
+    gh.chmod(0o755)
+    return {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"}
+
+
+def notes_repo(repo: Path) -> Path:
+    (repo / "CHANGELOG.md").write_text("# Changelog\n\n## [ndf 1.2.3] - 2026-01-01\n\n- 題名 A（#11）\n- 題名 B（#12）\n\n"
+                                       "## [ndf 1.2.2] - 2025-12-01\n\n- 前の版\n", encoding="utf-8")
+    pdir = repo / "plugins" / "ndf"
+    (pdir / ".claude-plugin").mkdir(parents=True)
+    (pdir / ".claude-plugin" / "plugin.json").write_text("{}", encoding="utf-8")
+    (pdir / "README.md").write_text("# ndf\n\n## v1.2.3-dev.1 へ更新するとき\n\n- 題名 A（#11）\n\n## 使い方\n\n本文\n",
+                                    encoding="utf-8")
+    return pdir
+
+
+PR_BODIES = {
+    11: {"title": "題名 A", "body": "要約\n\n## 利用者向けの変化\n\n- 計画を課題番号だけで作れる\n- 段の順が変わる\n  （続き）\n\n"
+                                  "## 未検証・残る危険\n\n- 実機の CI とは未照合\n\n## テスト\n\n- ok\n"},
+    12: {"title": "題名 B", "body": "節の無い本文\n"},
+}
+
+
+def test_notes_builds_changelog_and_readme_from_user_changes(repo, tmp_path):
+    pdir = notes_repo(repo)
+    env = fake_gh(tmp_path, PR_BODIES)
+    p = subprocess.run([PY, str(SCRIPT), "notes", "--root", str(repo), "--version", "1.2.3-dev.1", "--prs", "11", "12"],
+                       capture_output=True, text=True, env=env)
+    assert p.returncode == 0, p.stdout + p.stderr
+    res = json.loads(p.stdout.strip().splitlines()[-1])
+    assert res["status"] == "ok" and res["metrics"]["fallback"] == 1
+    want = "- 計画を課題番号だけで作れる（#11）\n- 段の順が変わる （続き）（#11）\n- 題名 B（#12）\n"
+    cl = (repo / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert f"## [ndf 1.2.3] - 2026-01-01\n\n{want}\n## [ndf 1.2.2]" in cl
+    assert "題名 A（#11）" not in cl and "- 前の版" in cl
+    readme = (pdir / "README.md").read_text(encoding="utf-8")
+    assert f"## v1.2.3-dev.1 へ更新するとき\n\n{want}\n## 使い方" in readme
+
+
+def test_notes_fills_approval_cells(repo, tmp_path):
+    notes_repo(repo)
+    env = fake_gh(tmp_path, PR_BODIES)
+    approval = repo / "issues" / "approval.md"
+    approval.parent.mkdir()
+    approval.write_text("# t\n\n## 2. 承認の判断に使うもの\n\n| 項目 | 内容 |\n| --- | --- |\n| 版数 | 1.2.3 |\n"
+                        "| 配る中身 | （未記入） |\n| 検証への配布で確かめたこと | （未記入） |\n\n## 同意を求めること\n\n- [ ] x\n",
+                        encoding="utf-8")
+    before = (repo / "CHANGELOG.md").read_text(encoding="utf-8")
+    p = subprocess.run([PY, str(SCRIPT), "notes", "--root", str(repo), "--version", "1.2.3-dev.1", "--prs", "11", "12",
+                        "--approval", "issues/approval.md", "--verified", "claude,codex,kiro"],
+                       capture_output=True, text=True, env=env)
+    assert p.returncode == 0, p.stdout + p.stderr
+    text = approval.read_text(encoding="utf-8")
+    assert "| 配る中身 | - 計画を課題番号だけで作れる（#11）<br>- 段の順が変わる （続き）（#11）<br>- 題名 B（#12） |" in text
+    assert "| 検証への配布で確かめたこと | Claude Code・Codex・Kiro の 3 経路で develop から ndf 1.2.3-dev.1 を導入し" in text
+    assert "## 未検証・残る危険\n\n- 実機の CI とは未照合（#11）\n\n## 同意を求めること" in text
+    assert (repo / "CHANGELOG.md").read_text(encoding="utf-8") == before
+
+
+def test_notes_without_changelog_section_is_precondition(repo, tmp_path):
+    notes_repo(repo)
+    (repo / "CHANGELOG.md").write_text("# Changelog\n", encoding="utf-8")
+    env = fake_gh(tmp_path, PR_BODIES)
+    p = subprocess.run([PY, str(SCRIPT), "notes", "--root", str(repo), "--version", "1.2.3", "--prs", "12"],
+                       capture_output=True, text=True, env=env)
+    assert p.returncode == 3
