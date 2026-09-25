@@ -158,7 +158,9 @@ pace: fast
 | リリース後テスト | — | `release-verification`（実行した経路とは別の経路で確かめられる場合） | `release-verification` | `release-verification` | `release-verification`（提出の後に確かめる経路がある場合） |
 | 振り返り | — | `retrospective`（実行の手順そのものを変えた場合） | `retrospective` | `retrospective` | `retrospective` |
 
-表の行名は進捗記録の `stage` の値で、スクリプトが同じ字で読む。範囲外の課題の起票（`out-of-scope`）はこの表に載らない。工程ではないため、モードで要否を
+**表の行名は進捗記録の `stage` の値で、スクリプトが同じ字で読む。**
+
+範囲外の課題の起票（`out-of-scope`）はこの表に載らない。工程ではないため、モードで要否を
 決めない（「範囲外の課題を見つけたとき」を参照）。
 
 **表の工程はミッションの中で 1 回ずつ動き、中は並列にする。** 設計 Pull Request は主題ごとに同時に開いて

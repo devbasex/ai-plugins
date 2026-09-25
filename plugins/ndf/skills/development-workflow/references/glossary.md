@@ -187,7 +187,7 @@ flowchart TB
 | メインディレクトリ | リポジトリを clone したディレクトリ。`issues/` `docs/` と各ランタイムの設定は、ここで編集してよい | `git rev-parse --git-common-dir` の親 | [worktree](../../worktree/SKILL.md) の用語の表 |
 | ベースブランチ | worktree の分岐元と Pull Request の宛先 | `.ndf/worktree.json` の `base_branch` | [../SKILL.md](../SKILL.md) の「本番の系へ届く操作」 |
 | ミッションブランチ | 課題の Pull Request を集め、ベースブランチへの Pull Request をミッションで 1 本にするブランチ。`fast` では作らない | `mission/<名前>` | [parallel-work.md](parallel-work.md) の「ミッションの中の並列の 4 つの形」 |
-| 安定版と実験版 | NDF の変更の 2 つの経路。既定で働くもの（安定版）は工程どおりに、呼んだときだけ働くもの（実験版）はその場で実装して使ってから入れる | stable / experimental、置き場 `experimental/`、台帳 `docs/ndf-experiments.md` | ai-plugins の `AGENTS.md` の「安定版と実験版」 |
+| 安定版と実験版 | NDF の変更の 2 つの経路。既定で働くもの（安定版）は工程どおりに、呼んだときだけ働くもの（実験版）はその場で実装して使ってから入れる | stable / experimental、台帳 `docs/ndf-experiments.md` | ai-plugins の `AGENTS.md` の「安定版と実験版」 |
 | 即時修正 | `fast` で、200 行以内の不具合を起票せず、その場のプランで直すこと。マージ済みの変更の不具合なら流出不具合として記録する | `new impl --escape-of <PR>` | [../SKILL.md](../SKILL.md) の「進め方」、[pace.md](pace.md) の「流出不具合の記録」 |
 | 範囲外の課題 | この変更の受け入れ条件にも直す対象にも入らない課題。見つけたその場で issue にする | `/ndf:out-of-scope` | [out-of-scope](../../out-of-scope/SKILL.md) |
 | 棚卸し | 既存の課題の本文・マイルストーン・ラベルを現状に合わせること | `/ndf:issue-upkeep`、`upkeep.py` | [issue-upkeep](../../issue-upkeep/SKILL.md) の「用語」 |
@@ -202,7 +202,7 @@ flowchart TB
 - **日本のエンジニア業界でよく使う語を使う。** 想定する読み手はエンジニアである。業界に定着したカタカナ語・英語
   （リファクタリング・ベースブランチ・worktree・パイプライン・エビデンスなど）があれば、それを採り、和語へ直訳しない
 - **直訳の和語を、語にも意味の文にも使わない。** 段・鎖・束・まとまり・器・持ち場・入れ物などである
-- **複合語は「の」でつながず、業界で使う形にする。** 実行の条件ではなく実行条件、進行の記録ではなく進捗記録と書く
+- **複合語は「の」でつながず、業界で使う形にする。** 実行条件・進捗記録のように書く
 - **足す前にこの用語集と突き合わせる。** 同じ字が別の意味で載っていれば、別の語を選ぶ。業界の語が NDF の別の語と
   ぶつかるときは、複合語で分ける
 - **裸の語は 1 つの意味だけに使う。** 意味を足したくなったら複合語にする（モード判定・MVV 判定・進捗記録など）。複合語は別の語として表に載せる
