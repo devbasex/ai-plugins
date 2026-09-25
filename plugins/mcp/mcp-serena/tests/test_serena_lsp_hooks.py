@@ -192,37 +192,40 @@ def _call(ctx, tool, tool_input=None, client="claude-code", mode="default", sess
     ctx["clock"]["now"] += 1
     payload = {"session_id": session, "tool_name": tool, "tool_input": tool_input or {},
                "permission_mode": mode, "cwd": str(ctx["root"])}
-    out = hooks.pre_tool_use(payload, client)
-    return (out or {}).get("hookSpecificOutput", {}).get("permissionDecision")
+    out = (hooks.pre_tool_use(payload, client) or {}).get("hookSpecificOutput", {})
+    if "additionalContext" in out:
+        assert "permissionDecision" not in out  # 案内は実行を止めない
+        return "notice"
+    return out.get("permissionDecision")
 
 
 def _read(ctx, path, **kw):
     return _call(ctx, "Read", {"file_path": str(ctx["root"] / path)}, **kw)
 
 
-@pytest.mark.parametrize("path,denied", [("a.md", False), ("a.json", False), ("a.py", True), ("a.ts", False)])
-def test_only_adopted_language_files_count(configured, path, denied):
+@pytest.mark.parametrize("path,noticed", [("a.md", False), ("a.json", False), ("a.py", True), ("a.ts", False)])
+def test_only_adopted_language_files_count(configured, path, noticed):
     decisions = [_read(configured, path) for _ in range(3)]
-    assert decisions == [None, None, "deny" if denied else None]
+    assert decisions == [None, None, "notice" if noticed else None]
 
 
-def test_grep_three_times_denies_and_resets(configured):
-    assert [_call(configured, "Grep", {"pattern": "x"}) for _ in range(3)] == [None, None, "deny"]
+def test_grep_three_times_notices_and_resets(configured):
+    assert [_call(configured, "Grep", {"pattern": "x"}) for _ in range(3)] == [None, None, "notice"]
 
 
-def test_mixed_four_denies(configured):
+def test_mixed_four_notices(configured):
     ctx = configured
     seq = [_call(ctx, "Grep"), _read(ctx, "a.py"), _call(ctx, "Grep"), _read(ctx, "a.py")]
-    assert seq == [None, None, None, "deny"]
+    assert seq == [None, None, None, "notice"]
 
 
 def test_bash_grep_and_read_are_counted(configured):
     ctx = configured
     seq = [_call(ctx, "Bash", {"command": "sed -n 1,80p a.py"}) for _ in range(3)]
-    assert seq == [None, None, "deny"]
+    assert seq == [None, None, "notice"]
 
 
-def test_no_deny_within_120_seconds_and_counts_again_after(configured):
+def test_no_notice_within_120_seconds_and_counts_again_after(configured):
     ctx = configured
     for _ in range(3):
         _read(ctx, "a.py")
@@ -230,7 +233,7 @@ def test_no_deny_within_120_seconds_and_counts_again_after(configured):
     ctx["clock"]["now"] = base + 115
     assert [_read(ctx, "a.py") for _ in range(3)] == [None, None, None]  # 116〜118 秒: 数えない
     ctx["clock"]["now"] = base + 119
-    assert [_read(ctx, "a.py") for _ in range(3)] == [None, None, "deny"]  # 120 秒から数える
+    assert [_read(ctx, "a.py") for _ in range(3)] == [None, None, "notice"]  # 120 秒から数える
 
 
 def test_count_expires_after_1000_seconds(configured):
@@ -248,12 +251,12 @@ def test_symbolic_serena_tool_resets_but_search_and_diagnostics_do_not(configure
     assert _read(ctx, "a.py") is None
     _read(ctx, "a.py")
     _call(ctx, SERENA + "get_diagnostics_for_file")
-    assert _read(ctx, "a.py") == "deny"
+    assert _read(ctx, "a.py") == "notice"
 
 
 def test_search_for_pattern_counts_as_grep(configured):
     ctx = configured
-    assert [_call(ctx, SERENA + "search_for_pattern") for _ in range(3)] == [None, None, "deny"]
+    assert [_call(ctx, SERENA + "search_for_pattern") for _ in range(3)] == [None, None, "notice"]
 
 
 def test_parallel_calls_do_not_lose_counts(configured, monkeypatch):
@@ -274,14 +277,15 @@ def test_unmarked_repo_counts_nothing(configured):
     assert [_read(configured, "a.py") for _ in range(4)] == [None] * 4
 
 
-def test_deny_reason_names_symbol_tools_in_three_lines(configured):
+def test_notice_names_symbol_tools_without_blocking(configured):
     ctx = configured
     for _ in range(2):
         _read(ctx, "a.py")
     ctx["clock"]["now"] += 1
     out = hooks.pre_tool_use({"session_id": "s1", "tool_name": "Read", "tool_input": {"file_path": "a.py"},
                               "cwd": str(ctx["root"])}, "claude-code")
-    reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "permissionDecision" not in out["hookSpecificOutput"]
+    reason = out["hookSpecificOutput"]["additionalContext"]
     assert len(reason.splitlines()) <= 3
     for tool in ("get_symbols_overview", "find_symbol", "find_referencing_symbols", "replace_symbol_body"):
         assert tool in reason
@@ -297,13 +301,13 @@ def test_codex_never_allows_and_reads_shell_commands(configured):
     ctx = configured
     assert _call(ctx, "mcp__serena__find_symbol", client="codex", mode="acceptEdits") is None
     seq = [_call(ctx, "Bash", {"command": "sed -n 1,80p a.py"}, client="codex") for _ in range(3)]
-    assert seq == [None, None, "deny"]
+    assert seq == [None, None, "notice"]
 
 
 def test_codex_list_command_is_unwrapped(configured):
     ctx = configured
     cmd = ["bash", "-lc", "cat src/a.py"]
-    assert [_call(ctx, "shell", {"command": cmd}, client="codex") for _ in range(3)] == [None, None, "deny"]
+    assert [_call(ctx, "shell", {"command": cmd}, client="codex") for _ in range(3)] == [None, None, "notice"]
 
 
 def test_codex_hook_definition_matches_shell_tools():
