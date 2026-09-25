@@ -2,8 +2,8 @@
 
 ## 目的
 
-**利用者は所要の上限を時間（`--budget-minutes`。既定 30 分）で指定する。** 上限で止めるの
-ではなく、上限に収まる改修計画を最初に立てる。
+**利用者は所要の上限を時間（`--budget-minutes`。既定 30 分）で指定する。**
+上限に収まる改修計画を最初に立てる（上限に達して止める形はとらない）。
 
 **提案 → 改修計画 → テスト追加 → 実装 → 検証/修正の 5 つの手順を、1 回の実行で 1 回ずつ行う。**
 提案だけが参加者の全員で、改修計画以降は選ばれた 1 者（実装担当）が通す。ラウンド・群・輪番・
@@ -320,7 +320,7 @@
 
 | 項目 | 内容 |
 | --- | --- |
-| 履歴の置き場所 | `<metrics>/<owner>--<repo>/cross-refactoring-allocation.jsonl`（`allocation.history_path`）。根は実行の要約と同じ（`NDF_METRICS_DIR` → `$XDG_STATE_HOME/ndf/metrics` → `~/.local/state/ndf/metrics`）。`NDF_METRICS=0` でも書く（改修計画の材料であって計測ではない） |
+| 履歴の置き場所 | `<metrics>/<owner>--<repo>/cross-refactoring-allocation.jsonl`（`allocation.history_path`）。根は実行の要約と同じ（`NDF_METRICS_DIR` → `$XDG_STATE_HOME/ndf/metrics` → `~/.local/state/ndf/metrics`）。`NDF_METRICS=0` でも書く（改修計画の材料として扱い、計測の設定に従わない） |
 | 1 行の形 | `schema`（1）・`run`・`at`・`pr`・`implementer`・`budget_minutes`・`elapsed_seconds`・`phases`（手順ごとの秒）・`kinds`（種類ごとの `count` と `seconds`）・`verify`（`items` / `seconds`）・`fix`（`launches` / `seconds`）・`whole_test`（`init` / `danger` / `final`。走らなかった場所は `null`） |
 | 数える項目 | コミットがあり、取り消し・見送りでない項目だけ。所要は `items[].seconds`（コミットの時刻から測った値） |
 | 集計 | 種類ごとに、**その種類を含む行**の直近 10 行（`allocation.WINDOW`）の Σ秒 ÷ Σ件数。`verify` は検証した改善項目の数、`fix` は起動の数で割る |
@@ -408,7 +408,7 @@
 | 旧い形の状態ファイルで止まる・終わった旧い状態を作り直す・再開の地点を返すこと | 同 `test_init.py` |
 | 5 つの手順が 1 回ずつ走り、提案だけが全員で、履歴へ 1 行追記されること | 同 `tests/test_flow_git.py` |
 | 組の単位で 30 組・組の中の 3 件まで渡り、外れた提案が `rank` になること | 同 `tests/test_merge_proposals.py` |
-| 見積り・予備時間（#917 の例）・飛ばして詰める・締め切り・直しの終わりが `fix` を引かず `final_fix` を引くこと | 同 `tests/test_budget.py` |
+| 見積り・予備時間・飛ばして詰める・締め切り・直しの終わりが `fix` を引かず `final_fix` を引くこと | 同 `tests/test_budget.py` |
 | 改修計画の取り込みが順位・見積り・テスト・対象を持ち、改修計画を読めなくても止まらず、叩き直しで作り直さず、実行時の値をすべて書き出すこと | 同 `tests/test_merge_plan.py` |
 | Jev の等級・同じ変更か・D5 が確信度の下限で採られ、使えなければ実装担当の答えになること。非公開と鍵なしで Jev を使わないこと | 同 `test_merge_plan.py` / `test_init.py` |
 | 時間の上限がすべて予算に従い、テストの上限が w で伸び、手順の上限が残り + 余裕であること | 同 `tests/test_timeline.py` |

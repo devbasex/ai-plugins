@@ -147,7 +147,7 @@ bash scripts/build-runtime-plugins.sh --check
 
 `--check` は生成先との差分を比較し、drift がある場合に非 0 で終了する。
 
-marketplace 定義と各 plugin manifest は生成物ではなく手で更新する。build の対象外で drift チェックに
+marketplace 定義と各 plugin manifest は手で更新する（生成しない）。build の対象外で drift チェックに
 掛からないため、版数と Skill 数、`skills` 配列と manifest の一致は `validate-runtime-plugins.sh` の
 突き合わせチェックで担保する。description から Skill 数を読み取れない場合もエラーとして扱う
 （記述を消すことでチェックが素通りするのを防ぐ）。

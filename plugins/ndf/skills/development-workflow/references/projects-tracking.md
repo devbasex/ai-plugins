@@ -133,7 +133,7 @@ bash "$SCRIPTS/projects-sync.sh" 186 plan "issues/issue-186.md"
 
 ### `$SCRIPTS` を決める
 
-手順は [scripts-lookup.md](scripts-lookup.md) にある。**ボードの記録だけが使う値ではない**
+手順は [scripts-lookup.md](scripts-lookup.md) にある。**ボードの記録の外でも使う値である**
 ため、独立した参照に置く（`worktree` は 3 本のスクリプトを呼ぶ）。
 
 ## 対象のアイテムの選び方

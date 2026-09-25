@@ -273,7 +273,7 @@ cross-review の駆動は、この値を結果の `metrics.review_status` に載
 
 - 履歴の置き場所: `<metrics>/<owner>--<repo>/cross-refactoring-allocation.jsonl`。
   根は実行の要約と同じ（`NDF_METRICS_DIR` → `$XDG_STATE_HOME/ndf/metrics` →
-  `~/.local/state/ndf/metrics`）。`NDF_METRICS=0` でも書く（改修計画の材料であって計測ではない）
+  `~/.local/state/ndf/metrics`）。`NDF_METRICS=0` でも書く（改修計画の材料として扱い、計測の設定に従わない）
 - 1 実行 = 1 行。**最終ゲートが通った実行だけ**を追記する（単独起動は `cross-review` が
   `approved` のときだけ）。中断した実行と、最終ゲートが通らなかった実行は追記しない
 

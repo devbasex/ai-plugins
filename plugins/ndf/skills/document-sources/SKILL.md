@@ -25,7 +25,7 @@ allowed-tools:
 | Google Drive からの取得 | `google-drive` |
 | システムごとの取得の手順 | `document-systems` の `system-<名前>.md` |
 | SQL による集計 | 対象リポジトリの手段（`ndf:data-analyst` エージェントなど） |
-| 書かれた値と出所の突き合わせ | **`quality-gates` の事実確認の手順**（この Skill ではない） |
+| 書かれた値と出所の突き合わせ | **`quality-gates` の事実確認の手順**（この Skill の外） |
 
 **取得の手段を持つと、システムが増えるたびにこの Skill が太る。**
 

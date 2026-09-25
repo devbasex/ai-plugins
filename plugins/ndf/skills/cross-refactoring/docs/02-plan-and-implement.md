@@ -364,6 +364,6 @@ Impl-Model: gpt-5.5
 扱わない。** 読み手（単独起動なら `cross-review`、工程の 1 つなら工程表の実装レビュー）が
 確かめる。
 
-以前は一次の判定の後に AI エージェントの判定（`judge-test-changes`）を挟んでいた。改修計画の
-後の LLM の呼び出しを作業の CLI だけにするため外した（決定 25）。変えてよい範囲の定義は
+一次の判定の後に AI エージェントの判定（`judge-test-changes`）は挟まない。改修計画の
+後の LLM の呼び出しを作業の CLI だけにするためである（決定 25）。変えてよい範囲の定義は
 `refactoring` の `references/test-changes.md` が持つ。

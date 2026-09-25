@@ -58,7 +58,7 @@ supervisor は設計の工程に入った時点で `bash "<絶対パス>/project
 
 | 要素 | 責務 |
 | --- | --- |
-| `plugins/ndf/scripts/projects-sync.sh` | **記録のコマンドの入口。** 引数をチェックした後、`stage` / `mode` / `worktree` / `plan` ではボードの宣言の有無にかかわらず先に `progress-record.sh` を呼んで issue の本文を更新し、その後でボードを更新する。`status` はボードだけに書く |
+| `plugins/ndf/scripts/projects-sync.sh` | **記録のコマンドの入口。** 引数をチェックした後、`stage` / `mode` / `worktree` / `plan` ではボードの宣言があってもなくても先に `progress-record.sh` を呼んで issue の本文を更新し、その後でボードを更新する。`status` はボードだけに書く |
 | `plugins/ndf/scripts/progress-record.sh` | issue の本文の `## 進行` の更新。工程名の位置に `-` を受けると、チェックリストを変えずに見出し行（モード・作業ツリー・実装計画のファイル）だけを更新する |
 | `plugins/ndf/agents/worker.md` | worker のエージェント定義（`ndf:worker`）。frontmatter の `disallowedTools: Skill, Agent` で 2 つのツールを外す |
 | `plugins/ndf/.claude-plugin/plugin.json` | `agents` 配列に `./agents/worker.md` を載せる。agy へは `plugins/ndf/dev.agy/agents`（`../agents` への symlink）で同じ定義が配られる |
@@ -235,7 +235,7 @@ disallowedTools: Skill, Agent
 
 | 規約 | 内容 |
 | --- | --- |
-| 目印 | 1 行目の `<!-- ndf-excerpt: <Skill名> -->`。抜粋と本文の一致のチェック（#855）が抜粋を見つける起点 |
+| 目印 | 1 行目の `<!-- ndf-excerpt: <Skill名> -->`。抜粋と本文の一致のチェックが抜粋を見つける起点 |
 | 見出し | `## 呼び出し` / `## 結果の読み方` / `## 判断の基準` の 3 つだけ、この順 |
 | 分量 | 40 行以内かつ 2,000 文字以内（目印・見出し・空行を含む） |
 | 本文から指す | `SKILL.md` に「呼ぶ側へ渡す抜粋は `references/excerpt.md`」の 1 行を置く |

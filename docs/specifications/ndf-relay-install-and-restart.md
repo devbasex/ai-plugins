@@ -37,7 +37,7 @@
 | 3 | 新しい利用者 | claude の中で `/ndf:install-wrapper` を打つ。複製を `~/.claude/ndf/relay.py`、`claude` の関数を `~/.claude/ndf/shellrc` に置き、`~/.bashrc`（macOS の bash では `~/.bash_profile`）をバックアップしてから、`shellrc` を読む 1 行の囲みを足す。次に開いたシェルから効く |
 | 4 | どちらの利用者も | ラッパーの下で `/ndf:restart` を打つ。claude が再開用のコマンドを `ndf-next` のブロックで出して応答を終え、ラッパーが静止（5 秒）の後に `/exit` → 更新 → 起動を行う |
 | 5 | 外したい利用者 | `/ndf:install-wrapper uninstall`。`~/.bashrc`・`~/.bash_profile`・`~/.zshrc` の囲みを外し（バックアップの後）、`shellrc`・複製・旧い複製を消す |
-| 6 | devbase の利用者（devbasex/devbase#253 の後） | `/ndf:install-wrapper` を打つ。`DEVBASE_SHELLRC_DIR` があるので、`~/.bashrc` ではなく `$DEVBASE_SHELLRC_DIR/ndf-relay.sh` に読み込みの 1 行を置く。コンテナを作り直しても複製・`shellrc`・`ndf-relay.sh` は `/persistent/group` に残る |
+| 6 | devbase の利用者（devbasex/devbase#253 の後） | `/ndf:install-wrapper` を打つ。`DEVBASE_SHELLRC_DIR` があるので、`$DEVBASE_SHELLRC_DIR/ndf-relay.sh` に読み込みの 1 行を置き、`~/.bashrc` には置かない。コンテナを作り直しても複製・`shellrc`・`ndf-relay.sh` は `/persistent/group` に残る |
 
 ## 用語
 
@@ -67,7 +67,7 @@
 | 複製とラッパーの rc の置き場所（Claude Code の設定の親）と、devbase の読み込み先のファイル | bash / zsh 以外のシェル（fish など）への導入 |
 | `/ndf:restart` と再開用のコマンドの作り方 | 既存の `claude` の alias / 関数を上書きすること |
 | 関門を越えない守り（G1〜G3）を既存の `/exit` に入れること | 既存の定義の判定を、シェルの設定から読み込まれる別ファイルへ広げること |
-| 2 つ目以降の区間への起動の方針の引数の引継ぎ（#936） | 静止の秒数・上限・空回り・素通し・`mark` の合図の判定の変更 |
+| 2 つ目以降の区間への起動の方針の引数の引継ぎ | 静止の秒数・上限・空回り・素通し・`mark` の合図の判定の変更 |
 
 ## 決定と理由
 
@@ -96,7 +96,7 @@
 | 再起動は `ndf-next` のブロックと既存のラッパーの経路で行い、ラッパーに「今すぐ再起動」の副命令を足さない | 同じ経路なら、答え待ち・背景の処理・静止・上限・空回りと守りがそのまま効く。Skill の Bash からラッパーへ直接送ると、応答を終える前に `/exit` が入る |
 | `/ndf:restart` はモデルも起動できる | ラッパーの下で起きることは conductor がカットポイントで出すブロックと同じで、新しい権限を足さない |
 | ラッパーの下かは `relay.py notice` の 1 行目（`is-child` と同じ判定）で決める。`NDF_RELAY_DIR` の有無だけでは決めない | conductor が Bash から起こした `claude -p` も `NDF_RELAY_DIR` を継ぐ。`mark` と判定をそろえ、ブロックを出したのに切り替わらない状態を作らない |
-| ラッパーの外の `/ndf:restart` は、シェルの 1 行（`claude "..."`）ではなく貼り付ける中身を示す | 再開用のコマンドは引用符・`$(...)`・改行を含みうる。シェルへ貼ると引用が壊れて別のコマンドが動きうる |
+| ラッパーの外の `/ndf:restart` は、貼り付ける中身を示し、シェルの 1 行（`claude "..."`）は示さない | 再開用のコマンドは引用符・`$(...)`・改行を含みうる。シェルへ貼ると引用が壊れて別のコマンドが動きうる |
 | 再開用のコマンドに承認・同意・判断の結果を書かない | 次の区間の claude はそれを人の入力として読むため、関門を越える経路になる。承認は課題の本文と Pull Request から次の区間が読み直す |
 | 関門を越えない守り（G1〜G3）は、送り込みを待たずに既存の `/exit` に入れる | 質問の表示中にラッパーが書いた `\r` が選択肢 1 を決めると実測で分かった。10.17.4〜10.17.6 のカットポイントの `/exit` にも経路があり、`/ndf:restart` はそれを利用者が打てる形で増やす |
 | 質問は画面の文言で読まず、`PreToolUse` の hook の合図と会話の記録の行で見る | 文言は Claude Code の版で変わる（#895 と同じ理由）。`Notification` は表示から約 6 秒後で、2 秒で答えると来ない。`PreToolUse` は表示と同時に来る |
@@ -439,4 +439,4 @@ G1〜G3 はこの課題で既存の `/exit` に入れた。G4〜G7 は送り込�
 - [#936](https://github.com/devbasex/ai-plugins/issues/936) — 2 つ目以降の区間へ起動の方針の引数を引き継ぐ
 - [#931](https://github.com/devbasex/ai-plugins/issues/931) — 送り込みの実装（G4〜G7 を入力にする）
 - [devbasex/devbase#253](https://github.com/devbasex/devbase/issues/253) — 永続化されたシェルの設定の読み込み
-- [ndf-relay-segment-restart.md](ndf-relay-segment-restart.md) — ラッパーの本体（#895）
+- [ndf-relay-segment-restart.md](ndf-relay-segment-restart.md) — ラッパーの本体

@@ -164,7 +164,7 @@ Codex / Kiro / agy には hook を置かない。4 つのカットポイント�
   フェーズの境がカットポイントに当たるためである。ただし報告が `結果: 関門` なら、関門の承認と取り込み
   （設計 Pull Request のマージなど）が済んだ後に出す。**関門の承認より前には出さない。** 出すと、
   ラッパーが関門の前で会話を切る。カットポイント 1 はこの形で満たす
-- **ラッパーの有無によらず出す。** ラッパー（[relay.md](relay.md)）の下では、ラッパーがブロックを拾って
+- **ラッパーがあってもなくても出す。** ラッパー（[relay.md](relay.md)）の下では、ラッパーがブロックを拾って
   次の区間を自動で起動する。ラッパーが無ければ、人がブロックの中身を新しい会話へ貼り付ける
 - **Claude Code では、ブロックの直前の告知を `relay.py notice` の 2 行目で書く**（#980）。2 行目を
   言い換えずにそのまま写す。文面と秒数（静止の秒数）は `relay.py` だけが持つ。呼び方は
@@ -180,7 +180,7 @@ Codex / Kiro / agy には hook を置かない。4 つのカットポイント�
   止めて動いている作業の id とコマンドの先頭を知らせる。見張りのように止めてよい作業は `TaskStop <task id>`
   で止め、止まったかは完了通知（`failed` / `killed`）で確かめてからブロックを出し直す。supervisor や
   `supervise.py queue` は止めずに終わりを待ってから出し直す（[waiting.md](waiting.md) の「背景の作業を止める」）
-- **カットポイントの再起動は関門ではない。** 引継ぎ文書を更新したら、承認・確認（`AskUserQuestion`
+- **カットポイントの再起動は関門に数えない。** 引継ぎ文書を更新したら、承認・確認（`AskUserQuestion`
   を含む）を挟まずに告知とブロックを出して応答を終える。状態は課題の本文と Pull Request に残り、
   取り消せるためである。ラッパーの外でも挟まない（確認の答えと貼り付けで入力が 2 度になる）。
   **`/goal` の文面が「承認を求める」と書いていても、指すのは `SKILL.md` の関門 2 つだけである**
@@ -191,7 +191,7 @@ Codex / Kiro / agy には hook を置かない。4 つのカットポイント�
 | # | 読むもの | 戻すもの |
 | --- | --- | --- |
 | 1 | 課題の本文の `## 進行`（`gh issue view <番号> --json body`） | モード・作業ツリー・計画ファイル・通った工程 |
-| 2 | `bash <この Skill のディレクトリ>/scripts/stage-check.sh report <番号>`（プラグインの `scripts/` ではなく、`development-workflow` の `scripts/` にある） | 通過記録。本文と食い違えば通過記録を正とする |
+| 2 | `bash <この Skill のディレクトリ>/scripts/stage-check.sh report <番号>`（プラグインの `scripts/` に無く、`development-workflow` の `scripts/` にある） | 通過記録。本文と食い違えば通過記録を正とする |
 | 3 | 1 の作業ツリー（`.worktrees/<ブランチ名>`）のブランチ名で `gh pr list --head <ブランチ名> --state all`。実装の Pull Request は `gh issue view <番号> --json closedByPullRequestsReferences` でも引く | 設計・実装の Pull Request と状態 |
 | 4 | 1〜3 から、チェックの付いていない最初の必須の工程 | 次に起動する工程 Skill |
 
