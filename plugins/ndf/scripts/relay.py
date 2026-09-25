@@ -25,6 +25,7 @@ from __future__ import annotations
 import datetime as _dt
 import errno
 import fcntl
+import hashlib
 import json
 import os
 import random
@@ -48,6 +49,8 @@ COPY_LOCK = "copy.lock"
 QUESTION_FILE = "question"
 QUESTION_LOCK = "question.lock"
 ASKED_FILE = "asked"
+# 背景の作業が残っていて Stop を止めた印の候補（区間とハッシュ）。同じ候補では 2 度止めない
+HELD_FILE = "mark-held.json"
 
 BLOCK_OPEN = "# >>> ndf relay >>>"
 BLOCK_CLOSE = "# <<< ndf relay <<<"
@@ -283,10 +286,68 @@ def next_blocks(text: str) -> list[str]:
     return blocks
 
 
-def background_running(tasks) -> bool:
+def running_tasks(tasks) -> list[dict]:
+    """Stop hook の入力の `background_tasks` のうち動いているもの。
+
+    Claude Code（2.1.282 で実測）の要素は `id`・`type`・`status`・`description`・`command` を持つ。"""
     if not isinstance(tasks, list):
+        return []
+    return [{"id": str(t.get("id") or ""), "type": str(t.get("type") or ""),
+             "command": str(t.get("command") or t.get("description") or "")[:80]}
+            for t in tasks if isinstance(t, dict) and t.get("status") == "running"]
+
+
+def background_running(tasks) -> bool:
+    return bool(running_tasks(tasks))
+
+
+def current_section(d: str) -> int | None:
+    """中継の log.jsonl の最後の start の区間の番号。"""
+    try:
+        with open(os.path.join(d, LOG_FILE)) as f:
+            lines = f.readlines()
+    except OSError:
+        return None
+    for raw in reversed(lines):
+        try:
+            row = json.loads(raw)
+        except ValueError:
+            continue
+        if isinstance(row, dict) and row.get("event") == "start" and isinstance(row.get("section"), int):
+            return row["section"]
+    return None
+
+
+def log_mark_skipped(d: str, section: int | None, reason: str, tasks: list[dict], held: bool) -> None:
+    row = {"event": "mark_skipped", "at": now_iso(), "section": section, "reason": reason,
+           "tasks": tasks, "held": held}
+    with open(os.path.join(d, LOG_FILE), "a") as f:
+        f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def hold_reason(tasks: list[dict]) -> str:
+    """背景の作業が残っていて印を書けないときに、Stop を止めて conductor へ渡す文。"""
+    rows = [f"- {t['id'] or '(id 不明)'}: {t['command'] or '(コマンド不明)'}" for t in tasks]
+    return "\n".join([
+        f"ndf-relay: 背景の作業が {len(tasks)} 件動いているので、ndf-next の印を書かなかった（中継は切り替わらない）。",
+        *rows,
+        "背景の作業を止めるのは TaskStop <id>。pkill -f / pgrep -f で止めたり確かめたりしない"
+        "（Claude Code が包んだコマンド行に一致しない）。止まったかは完了通知（failed / killed）で確かめる。",
+        "止めてから ndf-next を出し直す。supervisor や supervise.py queue のように止めてはいけない作業なら、"
+        "止めずに終わりを待ってから ndf-next を出し直す。",
+    ])
+
+
+def hold_once(d: str, section: int | None, block: str, active: bool) -> bool:
+    """同じ区間・同じ候補で 1 度だけ真を返す（Stop を止める）。stop_hook_active が真なら止めない。"""
+    if active:
         return False
-    return any(isinstance(t, dict) and t.get("status") == "running" for t in tasks)
+    key = {"section": section, "hash": hashlib.sha256(block.encode()).hexdigest()}
+    held = os.path.join(d, HELD_FILE)
+    if read_json(held) == key:
+        return False
+    write_json_atomic(held, key)
+    return True
 
 
 def asked_after(d: str, mark_path: str) -> bool:
@@ -313,8 +374,17 @@ def cmd_mark() -> int:
     remove(os.path.join(d, QUESTION_FILE))
     path = os.path.join(d, MARK_FILE)
     blocks = next_blocks(str(data.get("last_assistant_message") or ""))
-    if background_running(data.get("background_tasks")) or len(blocks) > 1:
+    tasks = running_tasks(data.get("background_tasks"))
+    if tasks or len(blocks) > 1:
         remove(path)
+        if blocks:
+            section = current_section(d)
+            reason = "blocks" if len(blocks) > 1 else "background"
+            held = (reason == "background"
+                    and hold_once(d, section, blocks[0], bool(data.get("stop_hook_active"))))
+            log_mark_skipped(d, section, reason, tasks, held)
+            if held:
+                print(json.dumps({"decision": "block", "reason": hold_reason(tasks)}, ensure_ascii=False))
         return 0
     if not blocks:
         # 印の後に応答が続いた（目標が未達など）。質問が出ていなければ前の印を残す

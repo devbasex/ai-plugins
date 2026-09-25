@@ -1,0 +1,103 @@
+{
+ "per_pr": [
+  {
+   "version": "10.17.13",
+   "mode": "不明",
+   "model": "claude-opus-5-5",
+   "cc": "2.1.282",
+   "reviewers": "-",
+   "sessions": 1,
+   "sessions_with_pr": 1,
+   "prs": 1,
+   "conductor_cost": 1693587.1,
+   "supervisor_cost": 0.0,
+   "worker_cost": 0.0,
+   "context": 13216502.0,
+   "out": 51779.0,
+   "minutes": 57.171150000890094,
+   "codex_input": 0.0,
+   "codex_out": 0.0,
+   "kiro_credit": 0.0,
+   "claude_seat_cost": 0.0
+  },
+  {
+   "version": "10.17.14",
+   "mode": "不明",
+   "model": "claude-opus-5-5",
+   "cc": "2.1.282",
+   "reviewers": "-",
+   "sessions": 1,
+   "sessions_with_pr": 0,
+   "prs": 0
+  }
+ ],
+ "per_role": [
+  {
+   "version": "10.17.13",
+   "mode": "不明",
+   "model": "claude-opus-5-5",
+   "cc": "2.1.282",
+   "reviewers": "-",
+   "layer": "conductor",
+   "role": "-",
+   "count": 1,
+   "cost": 1693587.1,
+   "context": 13216502.0,
+   "out": 51779.0,
+   "minutes": 57.171150000890094,
+   "p": 29561.0,
+   "k": 105.0,
+   "w5": 644715.0,
+   "w1h": 0.0,
+   "rewrites": 4,
+   "rewrites_after_5m": 4,
+   "rewrites_untimed": 0,
+   "rewrite_tokens": 475480,
+   "rewrite_gap_median": 9.000533334414165
+  },
+  {
+   "version": "10.17.14",
+   "mode": "不明",
+   "model": "claude-opus-5-5",
+   "cc": "2.1.282",
+   "reviewers": "-",
+   "layer": "conductor",
+   "role": "-",
+   "count": 1,
+   "cost": 1036851.8500000001,
+   "context": 7929733.0,
+   "out": 44135.0,
+   "minutes": 27.65491666793823,
+   "p": 29359.0,
+   "k": 55.0,
+   "w5": 349650.0,
+   "w1h": 0.0,
+   "rewrites": 1,
+   "rewrites_after_5m": 1,
+   "rewrites_untimed": 0,
+   "rewrite_tokens": 162201,
+   "rewrite_gap_median": 8.524116667111715
+  }
+ ],
+ "external": [],
+ "meta": {
+  "by": [
+   "version",
+   "mode",
+   "model",
+   "cc",
+   "reviewers"
+  ],
+  "min_version": "10.17.13",
+  "until": "2026-09-25T05:51:00Z",
+  "sessions": 2,
+  "sessions_with_pr": 1,
+  "unlinked_external": 687,
+  "skipped": {
+   "ndf の Skill が無い": 357,
+   "版を判定できない": 17
+  },
+  "released": "10.17.15",
+  "previous": "2026-09-25-4.json"
+ }
+}

@@ -332,6 +332,60 @@ def test_queue_reports_stopped(tmp_path):
     assert json.loads(p.stdout)["items"][0]["result"] == "止まった"
 
 
+def queue_plan(tmp_path, name, cmd):
+    f = tmp_path / f"{name}.json"
+    f.write_text(json.dumps({"フェーズ": "試験", "課題": [], "作業場所": str(tmp_path),
+                             "steps": [{"id": "t", "type": "run", "cmd": cmd, "next": "end"}]}))
+    return str(f)
+
+
+def test_queue_then_runs_after_all_done_and_writes_done(tmp_path):
+    a = queue_plan(tmp_path, "a", f"date +%s.%N > {tmp_path}/ea")
+    b = queue_plan(tmp_path, "b", f"date +%s.%N > {tmp_path}/sb")
+    done = tmp_path / "out" / "done.json"
+    done.parent.mkdir()
+    done.write_text("古い")
+    p = cli("queue", a, "--then", b, "--done", str(done), "--poll", "0.1")
+    assert p.returncode == 0, p.stdout + p.stderr
+    res = json.loads(p.stdout.splitlines()[-1])
+    assert [(i["plan"], i["result"]) for i in res["items"]] == [(a, "完了"), (b, "完了")]
+    assert float((tmp_path / "sb").read_text()) >= float((tmp_path / "ea").read_text())
+    assert json.loads(done.read_text()) == res and res["metrics"]["done"] == str(done)
+    assert not list(done.parent.glob(".*.tmp"))
+
+
+def test_queue_then_not_run_when_one_stops(tmp_path):
+    a = queue_plan(tmp_path, "a", "true")
+    bad = queue_plan(tmp_path, "bad", "exit 1")
+    b = queue_plan(tmp_path, "b", f"touch {tmp_path}/ran")
+    p = cli("queue", a, bad, "--then", b, "--poll", "0.1")
+    assert p.returncode == 1, p.stdout + p.stderr
+    res = json.loads(p.stdout.splitlines()[-1])
+    last = res["items"][-1]
+    assert last["plan"] == b and last["result"] == "流さなかった" and bad in last["reason"]
+    assert not (tmp_path / "ran").exists() and res["metrics"]["not_run"] == 1
+    # --done を省くと最初の計画の状態ディレクトリの queue-done.json
+    assert json.loads((tmp_path / "a-state" / "queue-done.json").read_text()) == res
+
+
+def test_queue_removes_old_done_at_start(tmp_path, monkeypatch):
+    a = queue_plan(tmp_path, "a", "true")
+    done = tmp_path / "a-state" / "queue-done.json"
+    done.parent.mkdir()
+    done.write_text("古い")
+    seen = []
+    monkeypatch.setattr(sv, "run_batch", lambda plans, m, poll: seen.append(done.exists()) or [
+        {"plan": plans[0], "result": "完了"}])
+    res = sv.cmd_queue([a], 3)
+    assert seen == [False] and json.loads(done.read_text()) == res
+
+
+def test_new_release_next_says_then(tmp_path):
+    p = cli("new", "release", "--version", "10.17.11-dev.1", "--prs", "995", "--channel", "dev",
+            "--worktree", "/r/.worktrees/release/v10.17.11-dev.1", "--out", str(tmp_path / "d.json"))
+    assert "--then" in json.loads(p.stdout)["next"]
+
+
 HANDOFF = """# 引継ぎ
 
 ## 今の会話の進み（再開するときはここから読む）
@@ -770,6 +824,16 @@ def test_step_lines_and_alive_line(tmp_path):
     assert alive and alive[0]["step"] == "a" and alive[0]["worker"] == "無し"
     assert rows.index(alive[0]) < rows.index(steps[0])  # 段の途中で書く
     assert "LLM へ回した 0 回" in text
+
+
+def test_alive_line_carries_run_step_last_stderr_line(tmp_path):
+    """run の段の待ちの間、alive の行に stderr の最後の行を last_output として載せる。"""
+    cmd = "echo 'CI のランナー待ち（待ち行列 9 件、待ち 1 件）' >&2; sleep 0.6; echo 結果"
+    s, text = run_plan(tmp_path, [{"id": "merge", "type": "run", "cmd": cmd, "next": "end"}],
+                       report_interval=0.2)
+    assert "結果: 完了" in text
+    alive = [r for r in progress(s) if r["kind"] == "alive"]
+    assert alive and alive[-1]["last_output"] == "CI のランナー待ち（待ち行列 9 件、待ち 1 件）"
 
 
 def test_no_alive_line_within_interval(tmp_path):

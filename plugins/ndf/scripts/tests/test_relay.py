@@ -201,11 +201,72 @@ def test_mark_background_running_clears(relay):
     """背景の処理が動いているあいだは印を書かず、前の印を消す（AC24）。"""
     quiet_ok(mark(relay.dir, stop_input(fence("/goal x"))))
     running = [{"id": "b1", "type": "shell", "status": "running"}]
-    quiet_ok(mark(relay.dir, stop_input(fence("/goal x"), background_tasks=running)))
+    p = mark(relay.dir, stop_input(fence("/goal x"), background_tasks=running))
+    assert p.returncode == 0 and json.loads(p.stdout)["decision"] == "block"
     assert not relay.next.exists()
     done = [{"id": "b1", "type": "shell", "status": "completed"}]
     quiet_ok(mark(relay.dir, stop_input(fence("/goal x"), background_tasks=done)))
     assert relay.next.exists()
+
+
+def log_rows(relay, event):
+    path = relay.dir / "log.jsonl"
+    rows = [json.loads(x) for x in path.read_text().splitlines()] if path.exists() else []
+    return [r for r in rows if r.get("event") == event]
+
+
+WATCH = {"id": "bxl0kh7gi", "type": "shell", "status": "running", "description": "見張り",
+         "command": "until grep -q '\"event\": \"attention\"' q.log; do sleep 30; done " + "x" * 100}
+
+
+def test_mark_holds_stop_once_and_lists_tasks(relay):
+    """背景の作業が残る ndf-next の Stop は 1 度だけ止め、id とコマンドの先頭を示す（#1035）。"""
+    (relay.dir / "log.jsonl").write_text(json.dumps({"event": "start", "section": 2}) + "\n")
+    data = stop_input(fence("/goal x"), background_tasks=[WATCH, {"id": "b2", "status": "completed"}])
+    p = mark(relay.dir, data)
+    assert p.returncode == 0, p.stderr
+    out = json.loads(p.stdout)
+    assert out["decision"] == "block"
+    assert "bxl0kh7gi" in out["reason"] and WATCH["command"][:80] in out["reason"]
+    assert WATCH["command"][:81] not in out["reason"] and "b2" not in out["reason"]
+    assert "TaskStop" in out["reason"] and "pkill -f" in out["reason"] and "止めずに終わりを待って" in out["reason"]
+    # 同じ候補の 2 度目は止めない
+    quiet_ok(mark(relay.dir, data))
+    rows = log_rows(relay, "mark_skipped")
+    assert [(r["section"], r["reason"], r["held"]) for r in rows] == [(2, "background", True),
+                                                                      (2, "background", False)]
+    assert rows[0]["tasks"] == [{"id": "bxl0kh7gi", "type": "shell", "command": WATCH["command"][:80]}]
+    # TaskStop の後に出し直した ndf-next で印が書かれる
+    quiet_ok(mark(relay.dir, stop_input(fence("/goal x"))))
+    assert json.loads(relay.next.read_text())["command"] == "/goal x"
+
+
+def test_mark_does_not_hold_when_stop_hook_active(relay):
+    quiet_ok(mark(relay.dir, stop_input(fence("/goal x"), background_tasks=[WATCH], stop_hook_active=True)))
+    assert not relay.next.exists()
+    assert [r["held"] for r in log_rows(relay, "mark_skipped")] == [False]
+
+
+def test_mark_holds_again_for_another_candidate(relay):
+    for body in ("/goal x", "/goal y"):
+        p = mark(relay.dir, stop_input(fence(body), background_tasks=[WATCH]))
+        assert json.loads(p.stdout)["decision"] == "block"
+
+
+def test_mark_holds_with_count_when_tasks_lack_id(relay):
+    p = mark(relay.dir, stop_input(fence("/goal x"), background_tasks=[{"status": "running"}]))
+    assert "1 件" in json.loads(p.stdout)["reason"]
+
+
+def test_mark_skipped_logs_two_blocks_without_holding(relay):
+    quiet_ok(mark(relay.dir, stop_input(fence("a") + "\n" + fence("b"))))
+    rows = log_rows(relay, "mark_skipped")
+    assert [(r["reason"], r["held"], r["tasks"]) for r in rows] == [("blocks", False, [])]
+
+
+def test_mark_background_without_block_logs_nothing(relay):
+    quiet_ok(mark(relay.dir, stop_input("続きの応答", background_tasks=[WATCH])))
+    assert log_rows(relay, "mark_skipped") == []
 
 
 def test_mark_file_is_private(relay):

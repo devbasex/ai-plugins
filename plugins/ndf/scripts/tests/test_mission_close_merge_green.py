@@ -61,6 +61,16 @@ elif a[:2] == ["pr", "ready"]:
             s["isDraft"] = False
     else:
         sys.stderr.write("ready failed\n")
+elif a[:2] == ["run", "view"]:
+    seq = st.get("runs", {{}}).get(a[2])
+    if seq:
+        out = json.dumps(seq.pop(0) if len(seq) > 1 else seq[0])
+    else:
+        code = 1
+elif a[:2] == ["run", "rerun"]:
+    code = st.get("rerun_code", 0)
+elif a[:2] == ["run", "list"]:
+    out = json.dumps([{{"databaseId": i}} for i in range(st.get("queued_runs", 0))])
 elif a[:2] == ["issue", "view"]:
     key = f"{{opt('--repo')}}#{{a[2]}}"
     seq = st.get("issues", {{}}).get(key)
@@ -323,6 +333,72 @@ def test_merge_when_green_rewaits_on_push_and_merges(repo, gh):
     assert ("restart", "rewait") in kinds and ("pr", "merged") in kinds
     merges = [c for c in gh.get()["calls"] if c[:2] == ["pr", "merge"]]
     assert merges == [["pr", "merge", "5", "--admin", "--merge"]]
+
+
+STUCK_URL = "https://github.com/o/r/actions/runs/100/job/200"
+MERGED = {"headRefName": "feat/x", "state": "MERGED", "mergeCommit": {"oid": "c"}}
+
+
+def stuck_pr(status="IN_PROGRESS"):
+    return {"state": "OPEN", "headRefOid": "a",
+            "statusCheckRollup": [{**run_("build", None, status), "detailsUrl": STUCK_URL}]}
+
+
+def green_pr():
+    return {"state": "OPEN", "headRefOid": "a", "statusCheckRollup": [run_("build")]}
+
+
+def reruns(gh):
+    return [c for c in gh.get()["calls"] if c[:2] == ["run", "rerun"]]
+
+
+def test_merge_when_green_reruns_stuck_check_once_then_merges(repo, gh):
+    """実行が completed なのにチェックが pending なら、ジョブを 1 度だけ再実行し、通ればマージする。"""
+    gh.set(pr_seq={"5": [stuck_pr(), green_pr(), green_pr(), MERGED]},
+           runs={"100": [{"status": "completed", "jobs": [{"databaseId": 200, "status": "in_progress"}]}]})
+    git(repo, "checkout", "-q", "-b", "other")
+    code, out, err = call("merged-steps.py", ["merge-when-green", "5", "--interval", "0", "--stale-after", "0",
+                                              "--root", str(repo)], gh.env, repo)
+    assert code == 0, (out, err)
+    assert {"kind": "check", "name": "build", "result": "rerun", "run": "100", "job": "200"} in out["items"]
+    assert reruns(gh) == [["run", "rerun", "100", "--job", "200"]]
+    assert [c for c in gh.get()["calls"] if c[:2] == ["pr", "merge"]]
+
+
+def test_merge_when_green_waits_stale_after_before_rerun(repo, gh):
+    """取り残しが --stale-after に満たないうちは再実行しない。"""
+    gh.set(pr_seq={"5": [stuck_pr(), green_pr(), green_pr(), MERGED]},
+           runs={"100": [{"status": "completed", "jobs": [{"databaseId": 200, "status": "in_progress"}]}]})
+    code, out, err = call("merged-steps.py", ["merge-when-green", "5", "--interval", "0", "--no-cleanup"],
+                          gh.env, repo)
+    assert code == 0, (out, err)
+    assert reruns(gh) == []
+
+
+def test_merge_when_green_stops_when_rerun_check_stays_stuck(repo, gh):
+    """再実行した同じチェックが再び取り残されたら stopped で止まり、マージしない。"""
+    gh.set(pr_seq={"5": [stuck_pr()]},
+           runs={"100": [{"status": "completed", "jobs": [{"databaseId": 200, "status": "in_progress"}]}]})
+    code, out, err = call("merged-steps.py", ["merge-when-green", "5", "--interval", "0", "--stale-after", "0"],
+                          gh.env, repo)
+    assert code == 1 and out["status"] == "stopped"
+    assert "再実行でも動かない" in out["summary"]
+    assert [i["result"] for i in out["items"] if i["kind"] == "check"] == ["rerun", "stuck"]
+    assert len(reruns(gh)) == 1
+    assert not [c for c in gh.get()["calls"] if c[:2] == ["pr", "merge"]]
+
+
+def test_merge_when_green_reports_runner_queue(repo, gh):
+    """ジョブが queued の間は待ち行列の件数を stderr へ出し、metrics の queued_runs に残す。"""
+    gh.set(pr_seq={"5": [stuck_pr("QUEUED"), stuck_pr("QUEUED"), green_pr(), green_pr(), MERGED]},
+           runs={"100": [{"status": "queued", "jobs": [{"databaseId": 200, "status": "queued"}]}]},
+           queued_runs=9)
+    code, out, err = call("merged-steps.py", ["merge-when-green", "5", "--interval", "0", "--stale-after", "0",
+                                              "--no-cleanup"], gh.env, repo)
+    assert code == 0, (out, err)
+    assert err.count("merge-when-green: CI のランナー待ち（待ち行列 9 件、待ち 1 件）") == 2
+    assert out["metrics"]["queued_runs"] == 9
+    assert reruns(gh) == []
 
 
 def test_merge_when_green_stops_on_failure(repo, gh):

@@ -4,7 +4,8 @@
     python3 resume.py [--relay-dir DIR]
 
 出すもの: 中継の判定と理由・この区間の始まり（自動か手か）・前の区間の終わり（ended_by）・
-プラグインの版（区間の起動時・導入済み・写し）。人が読む数行の後に step_result の 1 行の JSON。
+プラグインの版（区間の起動時・導入済み・写し）・
+前の区間と今の区間で印を書かなかった Stop（mark_skipped: 背景の作業が残った・ブロックが 2 つ以上）。人が読む数行の後に step_result の 1 行の JSON。
 中継の外でも exit 0 で終わる。
 """
 from __future__ import annotations
@@ -60,6 +61,26 @@ def previous_end(d: Path | None, rows: list[dict]) -> tuple[dict | None, str | N
     return None, None
 
 
+def skipped_marks(d: Path | None, rows: list[dict], start: dict | None, end: dict | None,
+                  end_dir: str | None) -> list[dict]:
+    """前の区間（end の区間）と今の区間の mark_skipped の行。"""
+    out = []
+    if end and end_dir:
+        src = rows if d is not None and end_dir == str(d) else events(Path(end_dir))
+        out += [r for r in src if r.get("event") == "mark_skipped" and r.get("section") == end.get("section")]
+    if start:
+        out += [r for r in rows if r.get("event") == "mark_skipped" and r.get("section") == start.get("section")]
+    return out
+
+
+def skipped_line(r: dict) -> str:
+    what = {"background": "背景の作業が残った", "blocks": "ndf-next のブロックが 2 つ以上"}.get(
+        r.get("reason"), str(r.get("reason")))
+    tasks = "、".join(f"{t.get('id') or '?'}（{t.get('command') or '?'}）" for t in r.get("tasks") or [])
+    return (f"印を書かなかった Stop: 区間 {r.get('section')}・{r.get('at')}・{what}"
+            + (f": {tasks}" if tasks else "") + ("・Stop を止めて知らせた" if r.get("held") else ""))
+
+
 def installed_version() -> str | None:
     base = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
     try:
@@ -100,14 +121,17 @@ def main() -> int:
                      f"{end.get('seconds')} 秒・{end.get('at')}・{end_dir}）")
     else:
         lines.append("前の区間の終わり: 記録なし")
+    skipped = skipped_marks(d, rows, start, end, end_dir)
+    lines += [skipped_line(r) for r in skipped]
     lines.append("版: " + " / ".join(f"{k} {v or '-'}" for k, v in vers.items())
                  + ("（食い違いあり）" if len(known) > 1 else ""))
     for line in lines:
         print(line)
     item = {"position": pos, "relay_dir": a.relay_dir, "section": (start or {}).get("section"),
-            "started_by": started_by, "previous_end": end, "previous_dir": end_dir, "versions": vers}
+            "started_by": started_by, "previous_end": end, "previous_dir": end_dir, "versions": vers,
+            "mark_skipped": skipped}
     emit(result("resume", "ok", " / ".join(lines), [item],
-                {"version_mismatch": len(known) > 1, "under_relay": pos == "relay"}))
+                {"version_mismatch": len(known) > 1, "under_relay": pos == "relay", "mark_skipped": len(skipped)}))
 
 
 if __name__ == "__main__":

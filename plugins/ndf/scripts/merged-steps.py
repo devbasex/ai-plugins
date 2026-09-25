@@ -3,12 +3,15 @@
 
     python3 merged-steps.py cleanup <PR番号>... [--root <dir>]
     python3 merged-steps.py merge-when-green <PR番号> [--method merge|squash|rebase]
-                            [--interval 秒] [--timeout 秒] [--no-cleanup] [--root <dir>]
+                            [--interval 秒] [--timeout 秒] [--stale-after 秒] [--no-cleanup] [--root <dir>]
 
 cleanup: マージ済みの PR の作業ツリーとローカルブランチを外し、主ディレクトリを取り込む。
 merge-when-green: PR が draft なら `gh pr ready` で外し、CI の検査が全部通るまで待ち
 （push で先頭のコミットが変われば待ち直す）、
 失敗があれば止まり、通れば `gh pr merge --admin` でマージして cleanup まで行う。
+実行が終わったのにチェックが pending のまま --stale-after 秒続けば、そのジョブを 1 度だけ
+`gh run rerun --job` で再実行し、再実行でも取り残されれば止まる。ジョブがランナーを待つ間は、
+待ち行列の件数を待ちの 1 周ごとに stderr へ 1 行出す。
 
 結果は lib/step_result.py の形の 1 行の JSON。終了コードは 0 = ok / 10 = `git branch -D` が要る
 ブランチがある（同意が要る。提示物を書く）/ 1 = 取り込み・CI・マージが失敗 / 2 = 読めない。
@@ -19,6 +22,7 @@ import argparse
 import datetime
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -236,9 +240,98 @@ def check_states(rollup):
     return pending, failed, passed
 
 
+RUN_JOB_RE = re.compile(r"/actions/runs/(\d+)/job/(\d+)")
+
+
+def pending_check_runs(rollup):
+    """pending の CheckRun のうち、detailsUrl から実行とジョブの番号が取れるものを (名前, run, job) で返す。"""
+    out = []
+    for c in rollup or []:
+        if c.get("__typename") != "CheckRun" or (c.get("status") or "").upper() == "COMPLETED":
+            continue
+        m = RUN_JOB_RE.search(c.get("detailsUrl") or "")
+        if m:
+            out.append((c.get("name") or c.get("workflowName") or "?", m.group(1), m.group(2)))
+    return out
+
+
+def probe_checks(root, rollup):
+    """pending の CheckRun ごとに、属する実行とジョブの状態を読む。
+
+    返り値: (stale, queued)。stale は実行が completed なのにチェックが pending の (名前, run, job)、
+    queued はジョブが queued のままランナーを待つチェックの名前。読めない実行は飛ばす。
+    """
+    stale, queued, runs = [], [], {}
+    for name, run_id, job_id in pending_check_runs(rollup):
+        if run_id not in runs:
+            p = run(["gh", "run", "view", run_id, "--json", "status,jobs"], cwd=root, check=False)
+            try:
+                runs[run_id] = json.loads(p.stdout) if p.returncode == 0 else None
+            except ValueError:
+                runs[run_id] = None
+        info = runs[run_id]
+        if not info:
+            continue
+        job = next((j for j in info.get("jobs") or [] if str(j.get("databaseId")) == job_id), None)
+        if (info.get("status") or "").lower() == "completed":
+            stale.append((name, run_id, job_id))
+        elif job is not None and (job.get("status") or "").lower() == "queued":
+            queued.append(name)
+    return stale, queued
+
+
+def queued_run_count(root):
+    """リポジトリの待ち行列（queued の実行）の件数。読めなければ None。"""
+    p = run(["gh", "run", "list", "--status", "queued", "--limit", "200", "--json", "databaseId"],
+            cwd=root, check=False)
+    try:
+        return len(json.loads(p.stdout)) if p.returncode == 0 else None
+    except ValueError:
+        return None
+
+
 def pr_state(root, n):
     return gh_json(root, ["pr", "view", str(n), "--json", "state,isDraft,headRefOid,statusCheckRollup,mergeStateStatus"],
                    f"gh pr view {n}")
+
+
+def watch_stuck_checks(root, n, info, a, items, stale_since, rerun_done, waits):
+    """待ちの 1 周ぶん、pending のチェックが取り残されていないか・ランナー待ちかを見る。
+
+    実行が completed なのにチェックが pending のままの状態が a.stale_after 秒続けば、そのジョブを
+    1 度だけ `gh run rerun --job` で再実行する。再実行したチェックが再び取り残されたら止まる。
+    ジョブが queued の間は待ち行列の件数を stderr へ 1 行出し、その件数を返す（無ければ None）。
+    """
+    stale, queued = probe_checks(root, info.get("statusCheckRollup"))
+    now = time.monotonic()
+    names = {name for name, _, _ in stale}
+    for k in [k for k in stale_since if k not in names]:
+        del stale_since[k]
+    for name, run_id, job_id in stale:
+        since = stale_since.setdefault(name, now)
+        if now - since < a.stale_after:
+            continue
+        if name in rerun_done:
+            emit(result(TOOL, "stopped", f"#{n} の取り残されたチェックが再実行でも動かない: {name}",
+                        items + [{"kind": "check", "name": name, "result": "stuck", "run": run_id, "job": job_id,
+                                  "reason": "取り残されたチェックが再実行でも動かない"}],
+                        {"waits": waits},
+                        next=f"gh run view {run_id} で実行とジョブの状態を読み、手で再実行するか GitHub の障害を確かめる"))
+        p = run(["gh", "run", "rerun", run_id, "--job", job_id], cwd=root, check=False)
+        if p.returncode != 0:
+            emit(result(TOOL, "stopped", f"gh run rerun {run_id} --job {job_id} が失敗: {p.stderr.strip()[:300]}",
+                        items + [{"kind": "check", "name": name, "result": "stopped", "run": run_id, "job": job_id,
+                                  "reason": p.stderr.strip()[:300]}], {"waits": waits}))
+        items.append({"kind": "check", "name": name, "result": "rerun", "run": run_id, "job": job_id})
+        rerun_done.add(name)
+        del stale_since[name]
+    if not queued:
+        return None
+    count = queued_run_count(root)
+    shown = "?" if count is None else count
+    print(f"merge-when-green: CI のランナー待ち（待ち行列 {shown} 件、待ち {len(queued)} 件）",
+          file=sys.stderr, flush=True)
+    return count
 
 
 def cmd_merge_when_green(a):
@@ -248,6 +341,8 @@ def cmd_merge_when_green(a):
     items, waits = [], 0
     green_sha = None  # 通った状態を 1 度見た先頭のコミット。2 度続けて通れば確定とする
     last_sha = None
+    stale_since, rerun_done = {}, set()  # 取り残しを見た時刻（チェックの名前ごと）/ 再実行したチェック
+    queued_runs = 0
     while True:
         info = pr_state(root, n)
         state, sha = info.get("state"), info.get("headRefOid")
@@ -270,6 +365,7 @@ def cmd_merge_when_green(a):
             items.append({"kind": "restart", "name": sha or "?", "result": "rewait",
                           "reason": f"先頭のコミットが {str(last_sha)[:8]} から {str(sha)[:8]} へ変わった"})
             green_sha = None
+            stale_since, rerun_done = {}, set()
         last_sha = sha
         pending, failed, passed = check_states(info.get("statusCheckRollup"))
         if failed:
@@ -284,10 +380,14 @@ def cmd_merge_when_green(a):
             green_sha = sha  # 走り出す前の検査を見落とさないよう、もう 1 度確かめる
         else:
             green_sha = None
+            count = watch_stuck_checks(root, n, info, a, items, stale_since, rerun_done, waits)
+            if count is not None:
+                queued_runs = count  # 最後に見た待ち行列の件数
         if time.monotonic() >= deadline:
             emit(result(TOOL, "stopped", f"#{n} の CI が {a.timeout} 秒で終わらない（待ち: {', '.join(pending)}）",
                         items + [{"kind": "check", "name": c, "result": "pending"} for c in pending],
-                        {"failed": 0, "pending": len(pending), "passed": len(passed), "waits": waits},
+                        {"failed": 0, "pending": len(pending), "passed": len(passed), "waits": waits,
+                         "queued_runs": queued_runs},
                         next=f"打ち直す: merged-steps.py merge-when-green {n}"))
         waits += 1
         time.sleep(a.interval)
@@ -302,9 +402,10 @@ def cmd_merge_when_green(a):
         items.append({"kind": "pr", "name": f"#{n}", "result": "merged", "method": a.method})
 
     if a.no_cleanup:
-        emit(result(TOOL, "ok", f"#{n} をマージした（後片付けは行わない）", items, {"waits": waits}))
+        emit(result(TOOL, "ok", f"#{n} をマージした（後片付けは行わない）", items,
+                    {"waits": waits, "queued_runs": queued_runs}))
     status, summary, citems, metrics, path, nxt = cleanup(root, [n])
-    metrics = {**metrics, "waits": waits}
+    metrics = {**metrics, "waits": waits, "queued_runs": queued_runs}
     emit(result(TOOL, status, f"#{n} をマージした。{summary}", items + citems, metrics, path, nxt))
 
 
@@ -322,6 +423,8 @@ def build_parser():
     m.add_argument("--method", choices=("merge", "squash", "rebase"), default="merge")
     m.add_argument("--interval", type=float, default=30.0, help="CI を読み直す間隔（秒）")
     m.add_argument("--timeout", type=float, default=3600.0, help="CI を待つ上限（秒）")
+    m.add_argument("--stale-after", type=float, default=300.0,
+                   help="実行が終わったのにチェックが pending のまま続けば、ジョブを 1 度だけ再実行するまでの秒数")
     m.add_argument("--no-cleanup", action="store_true", help="マージだけ行い、後片付けをしない")
     m.set_defaults(func=cmd_merge_when_green)
     return ap
