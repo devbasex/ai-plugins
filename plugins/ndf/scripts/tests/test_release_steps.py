@@ -210,23 +210,38 @@ def test_this_repository_declares_one_production_step():
     assert "--released 10.17.9" in p.stdout
 
 
-def test_wait_and_merge_watches_checks_with_short_interval(monkeypatch):
-    """配布の PR のチェックは短い間隔で読み直し、通った後のマージまでの遅れを小さくする。"""
+def _release_steps_module(monkeypatch):
     import importlib.util
     spec = importlib.util.spec_from_file_location("release_steps_mod", SCRIPT)
     mod = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, "release_steps_mod", mod)
     spec.loader.exec_module(mod)
-    calls, sleeps = [], []
-    seq = [[], [{"name": "t", "bucket": "pending"}], [{"name": "t", "bucket": "pass"}]]
-    monkeypatch.setattr(mod, "pr_check_buckets", lambda root, n: seq.pop(0) if len(seq) > 1 else seq[0])
-    monkeypatch.setattr(mod.time, "sleep", lambda s: sleeps.append(s))
-    monkeypatch.setattr(mod, "run", lambda cmd, **kw: calls.append(cmd) or subprocess.CompletedProcess(cmd, 0, "", ""))
+    return mod
+
+
+def test_wait_and_merge_delegates_to_merge_when_green(monkeypatch):
+    """配布の PR の待ちは merge-when-green に任せる（上限と取り残されたチェックの再実行を持つ）。"""
+    mod = _release_steps_module(monkeypatch)
+    calls = []
+    out = json.dumps({"tool": "merged", "status": "ok", "summary": "#5 をマージした", "items": []})
+    monkeypatch.setattr(mod, "run", lambda cmd, **kw: calls.append(cmd) or subprocess.CompletedProcess(cmd, 0, out, ""))
     monkeypatch.setattr(mod, "merge_commit_of", lambda root, n: "c")
     assert mod.wait_and_merge(".", 5) == "c"
-    watch = next(c for c in calls if "--watch" in c)
-    assert float(watch[watch.index("-i") + 1]) <= 5
-    assert sleeps and max(sleeps) <= 5
+    assert len(calls) == 1
+    cmd = calls[0]
+    assert cmd[0] == sys.executable and cmd[1].endswith("merged-steps.py")
+    assert cmd[2:5] == ["merge-when-green", "5", "--no-cleanup"]
+    assert "--watch" not in cmd
+
+
+def test_wait_and_merge_stops_with_the_summary_of_merge_when_green(monkeypatch):
+    """merge-when-green が止まったら、その summary を持って止まる（上限なしで待ち続けない）。"""
+    mod = _release_steps_module(monkeypatch)
+    out = json.dumps({"tool": "merged", "status": "stopped",
+                      "summary": "#5 の取り残されたチェックが再実行でも動かない: build", "items": []})
+    monkeypatch.setattr(mod, "run", lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, out, ""))
+    with pytest.raises(mod.StepError, match="取り残されたチェック"):
+        mod.wait_and_merge(".", 5)
 
 
 def fake_gh(tmp_path: Path, prs: dict) -> dict:

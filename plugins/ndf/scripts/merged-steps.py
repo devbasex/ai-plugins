@@ -10,7 +10,8 @@ merge-when-green: PR が draft なら `gh pr ready` で外し、CI の検査が�
 （push で先頭のコミットが変われば待ち直す）、
 失敗があれば止まり、通れば `gh pr merge --admin` でマージして cleanup まで行う。
 実行が終わったのにチェックが pending のまま --stale-after 秒続けば、そのジョブを 1 度だけ
-`gh run rerun --job` で再実行し、再実行でも取り残されれば止まる。ジョブがランナーを待つ間は、
+`gh run rerun --job` で再実行し、再実行でも取り残されれば止まる。実行が終わりジョブに結論が
+あれば、チェックの表示が pending のままでも待たずにその結論で扱う。ジョブがランナーを待つ間は、
 待ち行列の件数を待ちの 1 周ごとに stderr へ 1 行出す。
 
 結果は lib/step_result.py の形の 1 行の JSON。終了コードは 0 = ok / 10 = `git branch -D` が要る
@@ -258,10 +259,12 @@ def pending_check_runs(rollup):
 def probe_checks(root, rollup):
     """pending の CheckRun ごとに、属する実行とジョブの状態を読む。
 
-    返り値: (stale, queued)。stale は実行が completed なのにチェックが pending の (名前, run, job)、
-    queued はジョブが queued のままランナーを待つチェックの名前。読めない実行は飛ばす。
+    返り値: (stale, queued, settled)。stale は実行が completed なのにチェックが pending で、ジョブの結論も
+    無い (名前, run, job)。settled は実行が completed でジョブに結論がある (名前, run, job, 結論) で、
+    チェックの表示が更新されていないだけなので結論で扱う。queued はジョブが queued のままランナーを
+    待つチェックの名前。読めない実行は飛ばす。
     """
-    stale, queued, runs = [], [], {}
+    stale, queued, settled, runs = [], [], [], {}
     for name, run_id, job_id in pending_check_runs(rollup):
         if run_id not in runs:
             p = run(["gh", "run", "view", run_id, "--json", "status,jobs"], cwd=root, check=False)
@@ -274,10 +277,14 @@ def probe_checks(root, rollup):
             continue
         job = next((j for j in info.get("jobs") or [] if str(j.get("databaseId")) == job_id), None)
         if (info.get("status") or "").lower() == "completed":
-            stale.append((name, run_id, job_id))
+            conclusion = (job or {}).get("conclusion") or ""
+            if conclusion:
+                settled.append((name, run_id, job_id, conclusion.lower()))
+            else:
+                stale.append((name, run_id, job_id))
         elif job is not None and (job.get("status") or "").lower() == "queued":
             queued.append(name)
-    return stale, queued
+    return stale, queued, settled
 
 
 def queued_run_count(root):
@@ -295,14 +302,14 @@ def pr_state(root, n):
                    f"gh pr view {n}")
 
 
-def watch_stuck_checks(root, n, info, a, items, stale_since, rerun_done, waits):
+def watch_stuck_checks(root, n, probed, a, items, stale_since, rerun_done, waits):
     """待ちの 1 周ぶん、pending のチェックが取り残されていないか・ランナー待ちかを見る。
 
     実行が completed なのにチェックが pending のままの状態が a.stale_after 秒続けば、そのジョブを
     1 度だけ `gh run rerun --job` で再実行する。再実行したチェックが再び取り残されたら止まる。
     ジョブが queued の間は待ち行列の件数を stderr へ 1 行出し、その件数を返す（無ければ None）。
     """
-    stale, queued = probe_checks(root, info.get("statusCheckRollup"))
+    stale, queued = probed
     now = time.monotonic()
     names = {name for name, _, _ in stale}
     for k in [k for k in stale_since if k not in names]:
@@ -370,6 +377,20 @@ def cmd_merge_when_green(a):
             stale_since, rerun_done = {}, set()
         last_sha = sha
         pending, failed, passed = check_states(info.get("statusCheckRollup"))
+        probed = None
+        if pending:
+            # 実行が終わってジョブに結論があるのに表示が pending のままのチェックは、結論で扱う（待たない）
+            stale, queued, settled = probe_checks(root, info.get("statusCheckRollup"))
+            probed = (stale, queued)
+            for name, run_id, job_id, conclusion in settled:
+                if name not in pending:
+                    continue
+                pending.remove(name)
+                (failed if conclusion.upper() in FAIL_CONCLUSIONS else passed).append(name)
+                item = {"kind": "check", "name": name, "result": "settled", "run": run_id, "job": job_id,
+                        "conclusion": conclusion}
+                if item not in items:
+                    items.append(item)
         if failed:
             emit(result(TOOL, "stopped", f"#{n} の CI が失敗: {', '.join(failed)}",
                         items + [{"kind": "check", "name": f, "result": "failed"} for f in failed],
@@ -390,7 +411,7 @@ def cmd_merge_when_green(a):
             wait = a.recheck
         else:
             green_sha, pending_sha, empty_since = None, sha, None
-            count = watch_stuck_checks(root, n, info, a, items, stale_since, rerun_done, waits)
+            count = watch_stuck_checks(root, n, probed, a, items, stale_since, rerun_done, waits)
             if count is not None:
                 queued_runs = count  # 最後に見た待ち行列の件数
         if time.monotonic() >= deadline:

@@ -247,15 +247,15 @@ def test_cli_writes_github_output(repo, tmp_path):
 
 # --- release-steps.py の待ちとマージ -------------------------------------------------
 
-def test_wait_and_merge_accepts_skipped_heavy_jobs(monkeypatch):
-    """省いたジョブ（skipping）と、ステップを省いて通ったジョブ（pass）だけならマージする。"""
-    rs = load(RELEASE_STEPS, "release_steps_for_ci_skip", monkeypatch)
-    checks = [{"name": "pytest", "bucket": "pass"}, {"name": "pytest (0/2)", "bucket": "skipping"},
-              {"name": "runtime-smoke (claude)", "bucket": "pass"}, {"name": "ci-scope", "bucket": "pass"}]
-    calls = []
-    monkeypatch.setattr(rs, "pr_check_buckets", lambda root, n: checks)
-    monkeypatch.setattr(rs.time, "sleep", lambda s: None)
-    monkeypatch.setattr(rs, "run", lambda cmd, **kw: calls.append(cmd) or subprocess.CompletedProcess(cmd, 0, "", ""))
-    monkeypatch.setattr(rs, "merge_commit_of", lambda root, n: "m")
-    assert rs.wait_and_merge(".", 7) == "m"
-    assert any(c[:3] == ["gh", "pr", "merge"] for c in calls)
+def test_merge_when_green_accepts_skipped_heavy_jobs(monkeypatch):
+    """省いたジョブ（SKIPPED）と、ステップを省いて通ったジョブ（SUCCESS）は通ったものとして数える。
+
+    配布の PR の待ち（release-steps.py の wait_and_merge）は merged-steps.py merge-when-green に任せる。
+    """
+    ms = load(RELEASE_STEPS.parent / "merged-steps.py", "merged_steps_for_ci_skip", monkeypatch)
+    rollup = [{"__typename": "CheckRun", "name": n, "status": "COMPLETED", "conclusion": c}
+              for n, c in [("pytest", "SUCCESS"), ("pytest (0/2)", "SKIPPED"),
+                           ("runtime-smoke (claude)", "SUCCESS"), ("ci-scope", "SUCCESS")]]
+    pending, failed, passed = ms.check_states(rollup)
+    assert pending == [] and failed == []
+    assert sorted(passed) == ["ci-scope", "pytest", "pytest (0/2)", "runtime-smoke (claude)"]
