@@ -152,6 +152,27 @@ python3 "$SCRIPTS/merged-steps.py" merge-when-green <PR番号> --root <主ディ
   `metrics.queued_runs` に残る。supervise.py の run の段で動かすと、この行が `progress.jsonl` の
   `alive` の行の `last_output` に載る
 
+**待ちが遅れたときの一次の調査は `probe` で行う。** supervise.py の `merge` と `release` の段が、経過が
+想定を超えたときに打つ（段の `probe`）。
+
+```bash
+python3 "$SCRIPTS/merged-steps.py" probe (--pr <PR番号> | --head <ブランチ>...) [--act] --root <主ディレクトリ>
+```
+
+| `metrics.class` | 何を見たか | `metrics.action` |
+| --- | --- | --- |
+| `failed` | 失敗の結論の検査がある | `fix` |
+| `stale` | 実行が completed なのに検査が pending でジョブの結論が無く、実行の `attempt` が 1 | `--act` なら `gh run rerun <run> --job <job>` を打って `remedied`。打てない・`--act` が無ければ `judge` |
+| `stale_again` | 同じ形で `attempt` が 2 以上（既に再実行した） | `judge` |
+| `settled` | 実行が completed でジョブに結論があり、表示だけが pending | `wait` |
+| `queued` | ジョブがランナーを待っている | `wait` |
+| `running` | 実行中のジョブがある | `wait` |
+| `passed` | すべて通っている | `judge` |
+| `none` | 開いた PR が無い・読めない | `judge` |
+
+- 分類は表の上ほど強い。複数の PR は最も上の分類で全体を表す。`metrics` に `prs`・`queued_runs` も持つ
+- 終了コードは 0 = 調べた / 2 = 引数が読めない。書き込みは `--act` の再実行だけで、マージ・push をしない
+
 ## ミッションの課題を報告する
 
 **この Skill は課題を閉じない。** ミッションの課題が閉じるのは、ミッションの終わりの工程を
