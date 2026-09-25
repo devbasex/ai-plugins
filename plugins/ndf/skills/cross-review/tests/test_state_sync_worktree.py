@@ -13,13 +13,16 @@ class _Recorder:
     """subprocess.run を差し替えて、渡されたコマンドを記録する。"""
 
     def __init__(self, fetch_rc: int = 0, reset_rc: int = 0, checkout_rc: int = 0,
-                 clean_rc: int = 0, status: str = ""):
+                 clean_rc: int = 0, status: str = "", ahead: int = 0,
+                 ancestor_rc: int = 0):
         self.calls: list[tuple[list[str], str | None]] = []
         self.fetch_rc = fetch_rc
         self.reset_rc = reset_rc
         self.checkout_rc = checkout_rc
         self.clean_rc = clean_rc
         self.status = status
+        self.ahead = ahead
+        self.ancestor_rc = ancestor_rc
 
     def __call__(self, cmd, capture_output=False, text=False, cwd=None, **kwargs):
         self.calls.append((list(cmd), cwd))
@@ -38,7 +41,9 @@ class _Recorder:
         elif cmd[:2] == ["git", "status"]:
             stdout = self.status
         elif cmd[:2] == ["git", "rev-list"]:
-            stdout = "0\n"
+            stdout = f"{self.ahead}\n"
+        elif cmd[:3] == ["git", "merge-base", "--is-ancestor"]:
+            rc = self.ancestor_rc
         elif cmd == ["git", "rev-parse", "HEAD"]:
             stdout = "b" * 40 + "\n"
         elif cmd[:2] == ["git", "rev-parse"]:
@@ -151,3 +156,28 @@ def test_dies_when_clean_fails(monkeypatch, state_mod):
     monkeypatch.setattr(state_mod.subprocess, "run", rec)
     with __import__("pytest").raises(SystemExit):
         state_mod._sync_worktree("/wt", 42, "feature/x")
+
+
+def test_keeps_unpushed_commits_ahead_of_head(monkeypatch, state_mod):
+    """PR の head より先の未 push のコミットがあるとき、`strict=False` でも巻き戻さない。
+
+    修正待ちから再開したとき、修正の工程が作ったコミットはまだ push されていない。
+    巻き戻すとそのコミットが捨てられ、`merge-fix` が止まる。
+    """
+    rec = _Recorder(ahead=2, ancestor_rc=0)
+    monkeypatch.setattr(state_mod.subprocess, "run", rec)
+    head = state_mod.HeadRef(branch="feature/x", oid="a" * 40, is_fork=False)
+    state_mod._sync_worktree("/wt", 42, head)
+
+    assert not any(c[:3] == ["git", "reset", "--hard"] for c in rec.commands())
+    assert not any(c[:2] == ["git", "clean"] for c in rec.commands())
+    assert not any(c[:2] == ["gh", "pr"] for c in rec.commands())
+
+
+def test_resets_when_head_is_not_an_ancestor(monkeypatch, state_mod):
+    """head が作業ツリーの HEAD の祖先でない（分かれた）ときは、これまでどおり巻き戻す。"""
+    rec = _Recorder(ahead=2, ancestor_rc=1)
+    monkeypatch.setattr(state_mod.subprocess, "run", rec)
+    state_mod._sync_worktree("/wt", 42, "feature/x")
+
+    assert ["git", "reset", "--hard", "origin/feature/x"] in rec.commands()
