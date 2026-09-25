@@ -36,12 +36,12 @@ AI エージェント向けの知識は以下の層で管理する。
 | 章 | 何を持つか |
 | --- | --- |
 | チャネルと ref | 正式版と開発版の対応、既定ブランチへ正式版を置く理由、clone の refspec |
-| 版の付け方と開発版の配布 | semver の区分、接尾辞の規則、版の形の表（検査 J の位置決め） |
+| 版の付け方と開発版の配布 | semver の区分、接尾辞の規則、版の形の表（チェック J の位置決め） |
 | ランタイムごとの取得と導入 | 4 ランタイムのコマンド、登録と導入が別の操作であること |
 | 開発版を試す | ref を明示した登録、Kiro と agy の clone 経由の導入 |
 | 正式版を出す | `develop` から `main` への Pull Request、タグ |
-| 版数を持つ 15 箇所 | 検査が突き合わせる箇所 |
-| 検査に載らず手で直す箇所 | 更新案内の本文、接尾辞の付け忘れ、変更履歴 |
+| 版数を持つ 15 箇所 | チェックが突き合わせる箇所 |
+| チェックに載らず手で直す箇所 | 更新案内の本文、接尾辞の付け忘れ、変更履歴 |
 | 取得元の登録を確かめる | 隔離した設定ディレクトリでの手順 |
 | 利用者が過去の版へ戻る | タグへの固定、対象だけの固定 |
 
@@ -54,11 +54,11 @@ AI エージェント向けの知識は以下の層で管理する。
 | 開発ガイドへ足さず、新しい文書にする | 開発ガイドは「プラグインを作る」手順で、版と配布は「作ったものを届ける」手順である。1 つにすると読みに来た主題と違う側を通過する |
 | 開発ガイドの「バージョン管理」「利用者が過去の版へ戻る」を正本へ集め、跡はリンクにする | どちらが正かが書かれていない状態を残さない |
 | `docs/ndf-version-decisions.md` へ足さない | あちらは出た版ごとの判断を残す履歴で、書き換えない。こちらは版を上げるたびに読み直す現行の手順である |
-| `AGENTS.md` に版数の例を置かない（囲んだ版数は「主要プラグインです（v<版>）」の 1 箇所だけ） | 検査の突き合わせから外れた例は、版を上げても落ちず古いまま残る。置かなければ古くなる記載が無い |
+| `AGENTS.md` に版数の例を置かない（囲んだ版数は「主要プラグインです（v<版>）」の 1 箇所だけ） | チェックの突き合わせから外れた例は、版を上げても落ちず古いまま残る。置かなければ古くなる記載が無い |
 | 残す節の見出しを「版と配布の方針」へ改める | 同じ見出しが 2 つの文書にあると、名前で指す参照がどちらを指すか決まらない。同じ見出しは 1 つの文書にだけ置く |
-| 節ごとの分量の割合を機械で見る仕組みは作らない | 役割から離れたことは割合では判定できない。分量の検査（501 行以上）は働いている |
+| 節ごとの分量の割合を機械で見る仕組みは作らない | 役割から離れたことは割合では判定できない。分量のチェック（501 行以上）は働いている |
 
-検査 J の読む先の移し方は [説明文書の検査](doc-consistency-checks.md) にある。
+チェック J の読む先の移し方は [説明文書のチェック](doc-consistency-checks.md) にある。
 
 ## README の役割
 
@@ -87,7 +87,7 @@ AI エージェント向けの知識は以下の層で管理する。
 | 「プラグインの削除」だけを開発ガイドへ移し、ブランチと Pull Request の手順へ書き換える | 削除の手順は他の文書に無い。作る・変える手順と同じ文書に置くとプラグインの一生が 1 か所で読める。運用の規則に反する直接 push の手順をそのまま移すと、正本が規則と食い違う |
 | 導入の最初の 1 手は根と NDF の入口の両方に置き、選択肢と後続の手順は NDF の入口へ寄せる | 規約は入口に導入と最初の 1 手を書くと定める。Kiro の選択肢や agy の hook の差し込みは NDF に固有である |
 | 更新案内（「vX へ更新するとき」）は入口に残す | 変更の一覧ではなく入れ替えに要る操作で、NDF の入口の見出しは版数を持つ 15 箇所の 1 つである |
-| 「バージョン管理ルール」の例（`1.0.0 → 1.0.1` など）を正本へ持ち込まない | 区分の定義の言い換えで、囲めば検査 J が現行版より古い版数として落とす |
+| 「バージョン管理ルール」の例（`1.0.0 → 1.0.1` など）を正本へ持ち込まない | 区分の定義の言い換えで、囲めばチェック J が現行版より古い版数として落とす |
 | 記録（`issues/`、`docs/development-history/`、`docs/presentations/`）の旧いパスと節名は書き換えない | 起きたことを残す文書で、書き換えると当時どのファイルを指していたかが読めなくなる |
 
 ## Kiro CLI 対応
@@ -98,7 +98,7 @@ Kiro CLI では `plugins/ndf/dev.kiro/install.sh` が `plugins/ndf/skills/` か�
 
 Codex 連携は MCP サーバではなく `/ndf:external-ai` skill と `corder` エージェント経由の Codex CLI 直接実行を標準とする。Kiro 用 `--with-codex` は Kiro セッションから Codex CLI を扱う場合の補助設定である。
 
-### 導入先の検査
+### 導入先のチェック
 
 `install.sh` は `--project` の値を、選択肢を解析する時点（`--scope` の解決より前）で確かめる。
 
@@ -108,7 +108,7 @@ Codex 連携は MCP サーバではなく `/ndf:external-ai` skill と `corder` 
 | ディレクトリではないパス | `ERROR: --project points at a path that is not a directory: <パス>`（`HINT:` は出さない） | 2 |
 | 存在するディレクトリ | 出さない（導入へ進む） | 変わらない |
 
-`--scope global` と併用しても検査が先に働く。存在するディレクトリとの併用だけが `WARN:` を出して
+`--scope global` と併用してもチェックが先に働く。存在するディレクトリとの併用だけが `WARN:` を出して
 `--project` を無視する。
 
 | 決定 | 理由 |
@@ -153,12 +153,12 @@ Codex 連携は MCP サーバではなく `/ndf:external-ai` skill と `corder` 
 
 ## 関連リンク
 
-- [issue #415](https://github.com/devbasex/ai-plugins/issues/415) / [PR #502](https://github.com/devbasex/ai-plugins/pull/502)（設計） / [PR #586](https://github.com/devbasex/ai-plugins/pull/586)（実装） — Kiro installer の導入先の検査
+- [issue #415](https://github.com/devbasex/ai-plugins/issues/415) / [PR #502](https://github.com/devbasex/ai-plugins/pull/502)（設計） / [PR #586](https://github.com/devbasex/ai-plugins/pull/586)（実装） — Kiro installer の導入先のチェック
 - [issue #499](https://github.com/devbasex/ai-plugins/issues/499) / [PR #505](https://github.com/devbasex/ai-plugins/pull/505)（設計） / [PR #594](https://github.com/devbasex/ai-plugins/pull/594)（実装） — `AGENTS.md` と版と配布の正本
 - [issue #500](https://github.com/devbasex/ai-plugins/issues/500) / [PR #608](https://github.com/devbasex/ai-plugins/pull/608)（設計） / [PR #612](https://github.com/devbasex/ai-plugins/pull/612)（実装） — README の役割の適用
 - [版と配布の正本](../versioning-and-distribution.md)
 - [README の役割の規約](../../plugins/ndf/skills/markdown-writing/03-readme-roles.md)
-- [説明文書の検査](doc-consistency-checks.md)
+- [説明文書のチェック](doc-consistency-checks.md)
 - [mcp-serena README](../../plugins/mcp/mcp-serena/README.md)
 - [NDF Plugin リファレンス](../ndf-plugin-reference.md)
 - [NDF README](../../plugins/ndf/README.md)

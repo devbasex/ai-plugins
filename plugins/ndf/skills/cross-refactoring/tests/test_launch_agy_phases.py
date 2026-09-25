@@ -1,11 +1,11 @@
-"""各フェーズが `agy` を起動し、作業領域と実行時間の上限を渡すこと（#214 / #933 の I2）。
+"""各手順が `agy` を起動し、作業領域と実行時間の上限を渡すこと（#214 / #933 の I2）。
 
-`agy` の実行時間の既定は 300 秒で、**どのフェーズの監視の上限よりも短い**。CLI が
+`agy` の実行時間の既定は 300 秒で、**どの手順の監視の上限よりも短い**。CLI が
 先に打ち切ると結果ファイルが残らず、監視からは「起動したのに結果が残らなかった」
-場合と区別が付かない。打ち切りの判断を監視の側へ一本化するため、フェーズごとの
+場合と区別が付かない。打ち切りの判断を監視の側へ一本化するため、手順ごとの
 上限を起動時に明示する。
 
-`start-phase` が予算から導いた上限（`phases.<フェーズ>.timeout`）があれば、CLI の上限は
+`start-phase` が予算から導いた上限（`phases.<手順>.timeout`）があれば、CLI の上限は
 その秒 + 120 になる（I2）。無ければ上限の表（`lib/limits.py`）の値 + 120 である。
 
 `agy` そのものは起動しない。PATH へ引数を書き出すだけの実行ファイルを置く。
@@ -37,8 +37,8 @@ CLI_TIMEOUT = {
     "add-tests": 3720, "implement": 3720, "fix": 3720, "final-fix": 3720,
 }
 
-# フェーズごとの作業ディレクトリ（`--add-dir` の先頭）と、生成されるプロンプトの接頭辞。
-# 提案と計画は担当ごとの読み取り用の作業ディレクトリ、書き換えるフェーズは work で行う。
+# 手順ごとの作業ディレクトリ（`--add-dir` の先頭）と、生成されるプロンプトの接頭辞。
+# 提案と改修計画は担当ごとの読み取り用の作業ディレクトリ、書き換える手順は work で行う。
 WORKDIR_AND_STEM = {
     "propose": (RUNTIME, "agy-propose-rf130"),
     "plan": (RUNTIME, "agy-plan-rf130"),
@@ -115,7 +115,7 @@ def test_the_print_timeout_is_the_monitor_timeout_plus_120(tmp_path, phase: str)
 
 @pytest.mark.parametrize("phase", sorted(CLI_TIMEOUT))
 def test_the_budget_derived_timeout_wins_over_the_table(tmp_path, phase: str) -> None:
-    """I2 I16: `start-phase` が残した `phases.<フェーズ>.cli_timeout` の秒をそのまま渡す。"""
+    """I2 I16: `start-phase` が残した `phases.<手順>.cli_timeout` の秒をそのまま渡す。"""
     args, _ = _launch(tmp_path, phase, phases={phase: {"timeout": 5000, "cli_timeout": 5090}})
     assert args[args.index("--print-timeout") + 1] == "5090s"
 
@@ -151,7 +151,7 @@ def test_start_phase_records_the_timeout_that_the_launcher_reads(
 
 
 def test_unknown_phase_stops_before_writing_a_prompt(tmp_path) -> None:
-    """ラウンド制のフェーズ（`apply` / `propose-tests`）は無くなった。起動しない。"""
+    """ラウンド制の手順（`apply` / `propose-tests`）は無くなった。起動しない。"""
     state_path = _state(tmp_path)
     for phase in ("apply", "propose-tests"):
         result, args_file = _run(state_path, tmp_path, RUNTIME, phase, "130")

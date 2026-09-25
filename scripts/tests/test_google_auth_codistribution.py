@@ -46,7 +46,7 @@ def test_the_provider_ships_wherever_the_consumer_does(manifest: Path) -> None:
 
 
 def test_the_reference_still_points_at_the_provider() -> None:
-    """参照が消えたら、この束と検査の例外はもう要らない。"""
+    """参照が消えたら、この束とチェックの例外はもう要らない。"""
     body = (
         REPO / "plugins/ndf/skills/google-drive/scripts/gdrive_fetch.py"
     ).read_text(encoding="utf-8")

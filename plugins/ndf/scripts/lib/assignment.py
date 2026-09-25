@@ -177,7 +177,7 @@ def resolve_participants(
     5. `require_all` が真で通らない者がいれば `AssignmentError`（欠けた者と理由を並べる）
     6. 通った者を `available`、通らなかった者と理由を `unavailable` として返す
 
-    名前の綴りの検査（argparse の型）はこの前段で済んでいる前提だが、ここでも
+    名前の綴りのチェック（argparse の型）はこの前段で済んでいる前提だが、ここでも
     `ALL_RUNTIMES` に無い名前は弾く。
     """
     pool = list(pool)
@@ -270,7 +270,7 @@ def seat_runtime(seat: str) -> str:
     """席の名前からランタイム名を引く。形は `SEAT_PATTERN`（`kiro` / `kiro-2`）。
 
     形に合わなければ `AssignmentError`。結果の受け口・起動スクリプト・監視が、担当の
-    引数の検査にこの関数を使う。
+    引数のチェックにこの関数を使う。
     """
     m = SEAT_PATTERN.match(seat)
     if m is None:

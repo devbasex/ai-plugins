@@ -5,11 +5,11 @@
 `docs/versioning-and-distribution.md` / `plugins/ndf/README.md`）である。
 
 配布する Skill の数はランタイムごとに違い、その数が `README.md` と `plugins/ndf/README.md`
-に書かれている。数を機械的に突き合わせる検査はプラグインの定義ファイルにしか届いていな
+に書かれている。数を機械的に突き合わせるチェックはプラグインの定義ファイルにしか届いていな
 かったため、版を上げるたびに説明文書の側へ古い数が残った。ここでは説明文書の側を突き合わせの
 対象へ入れる。
 
-版数も同じことが起きる。検査していたのは更新案内の見出し（`## v<版> へ更新するとき`）
+版数も同じことが起きる。チェックしていたのは更新案内の見出し（`## v<版> へ更新するとき`）
 だけで、概要・期待出力・キャッシュパスの例に書かれた版数は古いまま残った。周囲の固定の語で
 位置を決めた 7 種類を突き合わせの対象へ入れる。
 
@@ -18,7 +18,7 @@
 最初から走査に入らない。
 
 読み取れないこと自体も食い違いと同じく失敗として扱う。素通りさせると、記載を消すか
-書式を変えるだけでこの検査を無効化できてしまう。
+書式を変えるだけでこのチェックを無効化できてしまう。
 
 `scripts/validate-runtime-plugins.sh` から呼ばれる。単独でも実行できる。
 
@@ -82,24 +82,24 @@ TABLE_ROW = re.compile(r"^\|\s*(" + runtime_alternation(PLUGIN_README_RUNTIMES) 
 LAYOUT_SKILLS = re.compile(r"唯一の実体（\s*(\d+)\s*個\s*）")
 NAME_SEPARATOR = re.compile(r"[,、]")
 
-# 版数の書式は `scripts/lib/version_pattern.py` が唯一の定義を持つ。定義ファイルの検査
+# 版数の書式は `scripts/lib/version_pattern.py` が唯一の定義を持つ。定義ファイルのチェック
 # （`scripts/validate-runtime-plugins.sh`）も同じ場所から読む。ここへ書き写すと、書式を
-# 変えたときに片方の検査だけが新しい書式を読める状態になる。
+# 変えたときに片方のチェックだけが新しい書式を読める状態になる。
 #
 # `VERSION_VALUE` は突き合わせ先そのものの形を確かめる。`base_of` は数字 3 つに割れることを
-# 前提にしており、`1.0` のような値が来ると例外で検査全体が止まる。読み取りの時点で弾き、
+# 前提にしており、`1.0` のような値が来ると例外でチェック全体が止まる。読み取りの時点で弾き、
 # 他の記載の判定を巻き添えにせず 1 件の食い違いとして出す。
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 try:
     from version_pattern import VERSION, VERSION_VALUE
-except ImportError as exc:  # pragma: no cover - 読み込めないこと自体が検査の前提の崩れ
+except ImportError as exc:  # pragma: no cover - 読み込めないこと自体がチェックの前提の崩れ
     raise SystemExit(
         f"版数の書式を読み込めない（scripts/lib/version_pattern.py）: {exc}"
     )
 
 # F: 更新案内の見出し。版数の拾い方は `VERSION` へ揃える。数字 3 つだけで拾うと、接尾辞の
 # 付いた版（`9.7.0-dev.1`）では見出しを読み落とし、接尾辞を外して書けば今度は古いと判定
-# されるため、どちらの書き方でも検査を通せない。
+# されるため、どちらの書き方でもチェックを通せない。
 UPGRADE_HEADING = re.compile(r"^##\s+v" + VERSION + r"\s+へ更新するとき\s*$", re.MULTILINE)
 
 # --- 現行版を指す記載（G〜M）---
@@ -108,17 +108,17 @@ UPGRADE_HEADING = re.compile(r"^##\s+v" + VERSION + r"\s+へ更新するとき\s
 # 残りは変更履歴・履歴の説明であり、前の版のまま残すのが正しい。
 PLUGIN_TABLE_ROW = re.compile(r"^\|\s*\*\*(?P<name>[A-Za-z0-9_.-]+)\*\*\s*\|\s*" + VERSION + r"\s*\|")  # H
 
-# J: 区間の検査。正本のこの見出しから次の同位以上の見出しの直前までに並ぶ版数を、
+# J: 節のチェック。正本のこの見出しから次の同位以上の見出しの直前までに並ぶ版数を、
 # 現行版の基底と比べる。
 VERSION_SECTION_HEADING = "## 版の付け方と開発版の配布"
 # 終端は自身と同じか上位の見出しで取り、深さは位置決めの見出しから導く。同じ深さだけで
-# 区切ると、次が上位の見出しのときに区間が閉じず、後ろの章に並ぶ前の版の版数まで現行版と
+# 区切ると、次が上位の見出しのときに節が閉じず、後ろの章に並ぶ前の版の版数まで現行版と
 # 比べてしまう。深さを固定すると、位置決めの見出しの深さを変えたときに規則から外れる
-# （`## ` の章を固定の 3 段で閉じると、章の中の `### ` 小見出しで区間が切れる）。
+# （`## ` の章を深さを 3 に固定して閉じると、章の中の `### ` 小見出しで章が途切れる）。
 _SECTION_DEPTH = len(VERSION_SECTION_HEADING) - len(VERSION_SECTION_HEADING.lstrip("#"))
 SECTION_HEADING = re.compile(r"^#{1,%d}\s" % _SECTION_DEPTH)
 # 囲みの中の `# ` 始まりはシェルのコメントであって見出しではない。囲みを跨いで数えると、
-# 節の途中の実行例で区間が切れる。
+# 節の途中の実行例で節が切れる。
 CODE_FENCE = re.compile(r"^\s*(?:```|~~~)")
 # 囲みまで含めて位置を固定する。前後の 1 文字を塞ぐだけでは、空白で区切られた
 # `codex-cli 0.146.1` の `0.146.1` が走査へ入り、現行版より小さい基底として誤検出になる。
@@ -132,7 +132,7 @@ SECTION_VERSION = re.compile(r"`v?" + VERSION + r"`")
 #
 # 比べる相手は現行版ではなく同じ章の例である。`develop` の版は接尾辞付きになりうるため、
 # 現行版との一致を求めると開発版の配布のたびに正しい例が落ちる。正式版の行を現行版へ結び
-# 付けるのは、上の区間の規則（基底が現行版より小さければ落ちる）が持つ。
+# 付けるのは、上の節の規則（基底が現行版より小さければ落ちる）が持つ。
 VERSION_FORM_ROW = re.compile(
     r"^\|\s*(?P<label>正式版|開発版|公開前の確認版)\s*\|\s*`v?" + VERSION + r"`\s*\|"
 )
@@ -188,7 +188,7 @@ class Claim:
     lines: list[int] | None = None
     """`described` と同じ並びの行番号。渡さなければ出力へ添えない。
 
-    行番号を必須にしないのは、既存の数の検査 6 種類の出力を変えないためである。区間の検査は
+    行番号を必須にしないのは、既存の数のチェック 6 種類の出力を変えないためである。節のチェックは
     同じ節の複数の行を挙げうるため、そちらでは行番号が無いと直す場所が決まらない。
     """
 
@@ -216,7 +216,7 @@ class PointVersionSpec:
 
 @dataclass(frozen=True)
 class RepositoryMetrics:
-    """同じ検査時点にリポジトリの実体から集めた突き合わせ先の値。
+    """同じチェック時点にリポジトリの実体から集めた突き合わせ先の値。
 
     ランタイム別の配布 Skill 数・実体の Skill 数・版数と、元 Skill 数の出典の文言を
     1 つにまとめる。個別の引数として渡し回すと、同じ時点の値であるという関係が読めない。
@@ -377,7 +377,7 @@ def base_of(version: str) -> tuple[int, int, int]:
 def read_document(root: Path, relative: str, report: Report) -> str | None:
     path = root / relative
     if not path.is_file():
-        report.add_source(f"{relative} が無い（検査の対象の説明文書）")
+        report.add_source(f"{relative} が無い（チェックの対象の説明文書）")
         return None
     return path.read_text(encoding="utf-8")
 
@@ -427,7 +427,7 @@ def category_lines(body: str) -> list[re.Match[str]] | None:
     return matched
 
 
-# --- 現行版を指す記載の検査（G〜M）---
+# --- 現行版を指す記載のチェック（G〜M）---
 
 
 def check_point_version(
@@ -494,7 +494,7 @@ def check_plugin_table(root: Path, body: str, report: Report) -> None:
     """プラグイン一覧表の版数を、行ごとにその名前の `plugin.json` と突き合わせる（H）。
 
     一覧表には NDF 以外のプラグインも並ぶ。行の名前から突き合わせ先を引くことで、表へ
-    プラグインを足しても検査を書き換えずに済む。
+    プラグインを足してもチェックを書き換えずに済む。
     """
     rows = parse_plugin_table_rows(body)
     if not any(name == FAMILY for name, _, _ in rows):
@@ -510,7 +510,7 @@ def check_plugin_table(root: Path, body: str, report: Report) -> None:
 def section_lines(lines: list[str]) -> list[tuple[int, str, bool]] | None:
     """「版の付け方と開発版の配布」章の行を、行番号と囲みの中かどうかを付けて返す。
 
-    見出しを見つけ、次の同位以上の見出しの直前までを返す。区間の終わりは自身と同じか
+    見出しを見つけ、次の同位以上の見出しの直前までを返す。節の終わりは自身と同じか
     上位の見出しであり、囲みの中は見出しとして数えない。囲みの開始と終了の行そのものも
     囲みの中として扱う。見出しが無ければ `None` を返す。
     """
@@ -536,7 +536,7 @@ def section_lines(lines: list[str]) -> list[tuple[int, str, bool]] | None:
 def scan_section_versions(lines: list[str]) -> tuple[list[str], list[int]]:
     """「版の付け方と開発版の配布」章に囲みで並ぶ版数と、その行番号を拾う。
 
-    章の区間は `section_lines` が決める。拾うのは `` `9.6.0` `` のように囲まれた版数だけで、
+    章の節は `section_lines` が決める。拾うのは `` `9.6.0` `` のように囲まれた版数だけで、
     コードの囲みの中の行も拾う。見出しが無ければ空を返す。
     """
     values: list[str] = []
@@ -552,12 +552,12 @@ def check_version_section(body: str, version: str | None, report: Report) -> boo
     """正本の「版の付け方と開発版の配布」章に並ぶ版数を、現行版の基底と比べる（J）。
 
     この節の版数は 1 つの値ではなく、現行版を基にした例の集まりである。現行版そのもの・
-    接尾辞を付けたもの・次の版を指すものが混ざるため、点の照合ではなく区間の規則にする。
-    節へ例を足しても検査を書き換えずに済み、版を上げた時点で前の版の例だけが残らない。
+    接尾辞を付けたもの・次の版を指すものが混ざるため、点の照合ではなく節の規則にする。
+    節へ例を足してもチェックを書き換えずに済み、版を上げた時点で前の版の例だけが残らない。
 
     **接尾辞は基底を取り出す時点で捨てる。** semver の順序では `9.6.0-dev.1` が `9.6.0`
     より小さいため、接尾辞まで見て比べると節の内容がそのまま失敗になる。接尾辞の
-    付け忘れ・外し忘れをここでは見ない（正本の「検査に載らず手で直す箇所」に書かれているとおりである）。
+    付け忘れ・外し忘れをここでは見ない（正本の「チェックに載らず手で直す箇所」に書かれているとおりである）。
 
     節の走査（見出しの探索・囲みの追跡・囲まれた版数の収集）は `scan_section_versions` が担う。
     ここでは読み取れないことの報告と、現行版の基底との比較だけを行う。
@@ -685,7 +685,7 @@ def check_root_readme_versions(root: Path, body: str, report: Report) -> None:
     check_plugin_table(root, body, report)
 
 
-# --- 説明文書ごとの検査 ---
+# --- 説明文書ごとのチェック ---
 
 
 def check_runtime_counts(
@@ -800,7 +800,7 @@ def check_upgrade_heading(body: str, version: str | None, report: Report) -> Non
 
     本文がその版の変更内容を説明しているかは機械では決められない。ここで見るのは見出しの
     版数だけで、版を上げたときに必ずこの節へ触る状態を作ることを目的とする。本文を読み直す
-    機会は `docs/versioning-and-distribution.md` の「検査に載らず手で直す箇所」が作る。
+    機会は `docs/versioning-and-distribution.md` の「チェックに載らず手で直す箇所」が作る。
     """
     headings = UPGRADE_HEADING.findall(body)
     if not headings:
@@ -852,7 +852,7 @@ def main() -> int:
     if agents_body is not None:
         check_point_versions(AGENTS_MD, agents_body, version, report)
 
-    # 検査 I（`AGENTS.md`）と検査 J（正本）は別の文書を読む。本文を共有すると、正本の記載が
+    # チェック I（`AGENTS.md`）とチェック J（正本）は別の文書を読む。本文を共有すると、正本の記載が
     # 古いことを `AGENTS.md` の失敗として報告してしまう。
     versioning_body = read_document(root, VERSIONING_MD, report)
     if versioning_body is not None and check_version_section(versioning_body, version, report):

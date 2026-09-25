@@ -28,7 +28,7 @@ BUNDLE = "plugins/ndf/skills/development-workflow/tests"
 
 # 一覧に無い束。**シェルスクリプトを起動しない束であること**が条件である。
 # `_path_without` が組み立てる `PATH` には `dirname` すら無いため、スクリプトを
-# 起動する束をここへ置くと、前提の検査ではなくスクリプトの側で落ちる。
+# 起動する束をここへ置くと、前提のチェックではなくスクリプトの側で落ちる。
 OUTSIDE_BUNDLE = "plugins/playwright-kit/skills/playwright-kit-ops/tests"
 
 
@@ -131,9 +131,9 @@ def test_the_opt_in_skips_instead_of_failing(tmp_path: Path) -> None:
 
 
 def test_the_outside_bundle_is_really_outside_the_table() -> None:
-    """`OUTSIDE_BUNDLE` が一覧へ載ったら、次の検査は何も確かめていない。
+    """`OUTSIDE_BUNDLE` が一覧へ載ったら、次のチェックは何も確かめていない。
 
-    載せた側は検査が素通りしたことに気づけないため、ここで落とす。
+    載せた側はチェックが素通りしたことに気づけないため、ここで落とす。
     """
     body = _read_root_conftest()
     assert f'"{OUTSIDE_BUNDLE}"' not in body
@@ -172,7 +172,7 @@ def test_metrics_dir_points_to_a_temporary_directory_during_tests() -> None:
 
 
 def _root_conftest_module():
-    """根の設定を別名で読み込む。控えの辞書を汚さずに、外す側と戻す側を直接呼ぶ。"""
+    """根の設定を別名で読み込む。記録の辞書を汚さずに、外す側と戻す側を直接呼ぶ。"""
     import importlib.util
 
     spec = importlib.util.spec_from_file_location("ndf_root_conftest", ROOT_CONFTEST)
@@ -186,7 +186,7 @@ def test_no_monitor_variable_survives_into_a_test(monkeypatch: pytest.MonkeyPatc
 
     **確かめる前に自分で 1 つ差し込む。** 周りのシェルが上限を持たないと、外す仕組みを
     壊しても素通りする。差し込んでおけば、起動したシェルが何を持っていても同じことを
-    確かめられる。控えを汚さないよう、根の設定は別名で読み込む。
+    確かめられる。記録を汚さないよう、根の設定は別名で読み込む。
     """
     mod = _root_conftest_module()
     monkeypatch.setenv("MONITOR_STALL_AGY", "1800")
@@ -212,7 +212,7 @@ def test_the_child_process_does_not_inherit_a_monitor_variable(
     """外した後に起動した子プロセスは、監視の上限を指す環境変数を受け継がない。
 
     起動する側で外し直さなくてよいことを確かめる。**確かめる前に自分で 1 つ差し込む。**
-    周りのシェルが上限を持たないと、外す仕組みを壊しても素通りする。控えを汚さないよう、
+    周りのシェルが上限を持たないと、外す仕組みを壊しても素通りする。記録を汚さないよう、
     根の設定は別名で読み込む。
     """
     mod = _root_conftest_module()

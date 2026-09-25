@@ -1,6 +1,6 @@
 # 構造改善の実装（cross-refactoring / $RF_RUNTIME）
 
-あなたは **$RF_RUNTIME**（モデル: $RF_MODEL）として、計画で採った改善項目を
+あなたは **$RF_RUNTIME**（モデル: $RF_MODEL）として、改修計画で採った改善項目を
 **順位の順に 1 件ずつ**適用します。**振る舞いを変えずに構造だけを直します。**
 
 ## 必須コンテキスト
@@ -49,7 +49,7 @@ Impl-Runtime: $RF_RUNTIME
 Impl-Model: $RF_MODEL
 ```
 
-- **`Item-Id` が項目とコミットを結ぶ唯一の手がかりです。** 計画に無い `Item-Id`、
+- **`Item-Id` が項目とコミットを結ぶ唯一の手がかりです。** 改修計画に無い `Item-Id`、
   または `Item-Id` の無いコミットは取り消されます
 - **1 項目に 2 コミット以上作らない。** 刻みたいときは、着手する前の HEAD を控えて
   おき、最後に `git reset --soft <控えた HEAD>` してから 1 回だけコミットする
@@ -80,7 +80,7 @@ Impl-Model: $RF_MODEL
 ## 提出形式
 
 結果を **`$RF_STEM-result.json`** に書いてください。**進行側は git だけを見ます**
-（何と書いても検査結果は変わりません）。
+（何と書いてもチェック結果は変わりません）。
 
 ```json
 {"items": [{"item_id": "I-001", "status": "done"}, {"item_id": "I-003", "status": "skipped", "reason": "振る舞いを変えないと直せない"}]}

@@ -34,23 +34,23 @@ ISSUE_LINE = "#186 進行 = 実装レビュー\n"
 
 
 def board_stdout(stdout: str) -> str:
-    """盤面の更新の出力だけを取り出す。
+    """ボードの更新の出力だけを取り出す。
 
-    入口は先に issue の本文を更新し、その 1 行を出す（#828）。盤面の行は同じ文面のため、
-    先頭の issue の本文の行を 1 つだけ外して残りを盤面の出力として読む。
+    入口は先に issue の本文を更新し、その 1 行を出す（#828）。ボードの行は同じ文面のため、
+    先頭の issue の本文の行を 1 つだけ外して残りをボードの出力として読む。
     """
     return stdout[len(ISSUE_LINE):] if stdout.startswith(ISSUE_LINE) else stdout
 
 
 def test_no_declaration_writes_only_the_issue_body(repo, tmp_path) -> None:
-    """宣言が無いリポジトリでは盤面へ問い合わせず、issue の本文だけを更新する（#828）。"""
+    """宣言が無いリポジトリではボードへ問い合わせず、issue の本文だけを更新する（#828）。"""
     log = tmp_path / "gh.log"
     got = run_sync("186", "stage", "実装レビュー", cwd=repo, env=fake_gh(tmp_path, log))
     assert got.returncode == 0
     assert got.stdout == ISSUE_LINE and got.stderr == ""
     calls = log.read_text(encoding="utf-8")
     assert "issue edit" in calls
-    assert "project" not in calls, "宣言が無いのに盤面へ問い合わせている"
+    assert "project" not in calls, "宣言が無いのにボードへ問い合わせている"
 
 
 def without_gh(tmp_path) -> dict:
@@ -95,7 +95,7 @@ def test_unknown_key_is_an_error(repo, tmp_path) -> None:
 
 
 def test_unknown_stage_is_an_error(repo, tmp_path) -> None:
-    """工程名は工程表の行と一致する。綴りの誤りを盤面へ書き込まない。"""
+    """工程名は工程表の行と一致する。綴りの誤りをボードへ書き込まない。"""
     write_declaration(repo, VALID)
     got = run_sync("186", "stage", "レビューする", cwd=repo, env=fake_gh(tmp_path, tmp_path / "gh.log"))
     assert got.returncode == 2
@@ -115,7 +115,7 @@ def test_missing_arguments_is_an_error(repo, tmp_path) -> None:
 
 
 def test_known_stage_reaches_gh(repo, tmp_path) -> None:
-    """宣言があり `gh` があるときは、盤面の更新を試みる。"""
+    """宣言があり `gh` があるときは、ボードの更新を試みる。"""
     write_declaration(repo, VALID)
     log = tmp_path / "gh.log"
     got = run_sync("186", "stage", "実装レビュー", cwd=repo, env=fake_gh(tmp_path, log))
@@ -125,7 +125,7 @@ def test_known_stage_reaches_gh(repo, tmp_path) -> None:
 
 
 def test_text_key_reaches_gh(repo, tmp_path) -> None:
-    """文字列のフィールドは値を検査しない。任意のパスが入る。"""
+    """文字列のフィールドは値をチェックしない。任意のパスが入る。"""
     write_declaration(repo, VALID)
     log = tmp_path / "gh.log"
     got = run_sync("186", "plan", "issues/issue-186.md", cwd=repo, env=fake_gh(tmp_path, log))
@@ -137,7 +137,7 @@ def test_stage_with_a_space_reaches_gh(repo, tmp_path) -> None:
     """空白を含む工程名も 1 つの値として通る。
 
     `Pull Request` は工程表で唯一の空白を含む行名である。呼び出し側が引用を落とすと
-    4 引数になり、引数の検査で終了コード 2 になる。スクリプトは 1 つの値として渡され
+    4 引数になり、引数のチェックで終了コード 2 になる。スクリプトは 1 つの値として渡され
     さえすれば扱えることを、この経路で確かめる。
     """
     write_declaration(repo, VALID)
@@ -161,11 +161,11 @@ OTHER_REPO = "devbasex/devbase"
 
 
 def scripted_gh(tmp_path, items, repo: str = HOST_REPO, total_count: int | None = None) -> dict:
-    """盤面の応答を返す `gh` を PATH の先頭へ置く。
+    """ボードの応答を返す `gh` を PATH の先頭へ置く。
 
     `items` はアイテムの並びで、要素は issue 番号か `(リポジトリ, 番号)` である。番号だけの
     要素は `repo` に属するものとして扱う。`repo` は `gh repo view` が返す、いま開いている
-    リポジトリである。`total_count` は盤面の総数で、省略すると並びの長さになる。
+    リポジトリである。`total_count` はボードの総数で、省略すると並びの長さになる。
 
     呼ばれた引数は `tmp_path/gh.log` へ残る。どのアイテムを更新したかはここから読む。
     """
@@ -217,7 +217,7 @@ def item_id(repo: str, number: int) -> str:
 
 
 def test_item_below_the_limit_is_updated(repo, tmp_path) -> None:
-    """上限より少ない盤面では、対象が見つかって更新される。"""
+    """上限より少ないボードでは、対象が見つかって更新される。"""
     write_declaration(repo, VALID)
     env = scripted_gh(tmp_path, list(range(180, 190)))
     got = run_sync("186", "stage", "実装レビュー", cwd=repo, env=env)
@@ -227,7 +227,7 @@ def test_item_below_the_limit_is_updated(repo, tmp_path) -> None:
 
 
 def test_missing_item_below_the_limit_is_silent(repo, tmp_path) -> None:
-    """盤面へ登録していないだけなら黙って抜ける。これは正常な状態である。"""
+    """ボードへ登録していないだけなら黙って抜ける。これは正常な状態である。"""
     write_declaration(repo, VALID)
     env = scripted_gh(tmp_path, [1, 2, 3])
     got = run_sync("186", "stage", "実装レビュー", cwd=repo, env=env)
@@ -238,7 +238,7 @@ def test_missing_item_below_the_limit_is_silent(repo, tmp_path) -> None:
 def test_another_repository_with_the_same_number_is_not_updated(repo, tmp_path) -> None:
     """同じ番号のアイテムが 2 つのリポジトリ分あるとき、いま開いている側だけを選ぶ。
 
-    盤面は組織単位で、issue 番号はリポジトリごとに独立している。番号だけで選ぶと、
+    ボードは組織単位で、issue 番号はリポジトリごとに独立している。番号だけで選ぶと、
     並び順によっては別のリポジトリのアイテムを書き換える。
     """
     write_declaration(repo, VALID)
@@ -269,7 +269,7 @@ def test_missing_item_beyond_the_limit_is_reported(repo, tmp_path) -> None:
     終了コードは 0 のままにする。進行管理が理由で工程を止めない。
     """
     write_declaration(repo, VALID)
-    # 1000 件を返し、盤面の総数は 1200 件だと申告する。その中に #186 は含めない。
+    # 1000 件を返し、ボードの総数は 1200 件だと申告する。その中に #186 は含めない。
     env = scripted_gh(tmp_path, list(range(1000, 2000)), total_count=1200)
     got = run_sync("186", "stage", "実装レビュー", cwd=repo, env=env)
     assert got.returncode == 0

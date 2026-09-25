@@ -349,7 +349,7 @@ def test_an_old_review_findings_does_not_switch_to_the_classification(
 
 def test_the_marker_is_written_by_the_last_step_of_the_pipeline(
         state_mod, tmp_path, monkeypatch):
-    """印を付けるのは経路の最後（`collect-critiques`）である。
+    """目印を付けるのは経路の最後（`collect-critiques`）である。
 
     **対象ごとに有効な反証が揃ったときだけ付く**（#549 レビュー対応）。round 1 の
     担当は `agy` / `kiro` であるため、両方の結果ファイルを用意する。
@@ -412,7 +412,7 @@ def _judge_rc(state_mod, pr):
 
 
 def _single_reviewer_state(tmp_path, finding, intent="REQUEST_CHANGES"):
-    """担当 1 者（`only: "codex"`）で印の付いたラウンドが 1 つある状態ファイル。
+    """担当 1 者（`only: "codex"`）で目印の付いたラウンドが 1 つある状態ファイル。
 
     担当 1 者は `only` で表す（`_round_reviewers` が最初に読む値）。判定が読めるよう、
     状態ファイルと担当の payload を `CROSS_REVIEW_TMP_DIR` へ書く。

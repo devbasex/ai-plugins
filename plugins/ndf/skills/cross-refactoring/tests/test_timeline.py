@@ -40,13 +40,13 @@ def test_every_limit_follows_the_budget(timeline, budget_minutes):
     assert got["test_timeout"] == max(60, round(b * 60 * 0.01))  # 3 × 20 秒と 0.01·B の大きい方
     assert got["propose_end_at"] == (START + b * 0.2 * M).isoformat(timespec="seconds")
     assert got["plan_end_at"] == (START + b * 0.3 * M).isoformat(timespec="seconds")
-    # 段の終わり = 最後の項目の完了の締め切り（着手の締め切り + 見積り）
+    # 手順の終わり = 最後の項目の完了の締め切り（着手の締め切り + 見積り）
     assert got["add_tests_end_at"] == (START + (b * 0.4 + 2.7) * M).isoformat(timespec="seconds")
     assert got["implement_end_at"] == (START + (b * 0.6 + 1.3) * M).isoformat(timespec="seconds")
-    # 直しの試行の打ち切り = 開始 + B − 全体のテストの控え 2 つ − 最終ゲートの修正の控え（決定 26）
+    # 直しの試行の打ち切り = 開始 + B − 全体のテストの予備時間 2 つ − 最終ゲートの修正の予備時間（決定 26）
     assert got["fix_end_at"] == (START + (b - 2 - 5.5) * M).isoformat(timespec="seconds")
     assert got["final_end_at"] == (START + b * M).isoformat(timespec="seconds")
-    # 最終ゲートの修正の 1 回目に必ず渡す長さ（秒）= 控えの final_fix
+    # 最終ゲートの修正の 1 回目に必ず渡す長さ（秒）= 予備時間の final_fix
     assert got["final_fix_seconds"] == 330
 
 

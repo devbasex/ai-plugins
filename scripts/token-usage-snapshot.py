@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """正式版を出すときに、版ごとのトークン消費と所要時間の記録を書き出す（#893）。
 
-`.ndf/release.json` の段として `release` の手順 3 から呼ばれる。集計は `token-usage.py` の
+`.ndf/release.json` の配布のコマンドとして `release` の手順 3 から呼ばれる。集計は `token-usage.py` の
 `collect()` を読み込んで 1 回だけ行い、記録の `.md` / `.json` を `docs/metrics/ndf-token-usage/` へ書く。
 
     python3 scripts/token-usage-snapshot.py --released 10.17.9 [--until 2026-09-30T09:00:00Z]

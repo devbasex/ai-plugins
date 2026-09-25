@@ -1,6 +1,6 @@
 """supervise.py の遅れの見張り: 一次の調査・決まった手・LLM の判定・打ち切り・所要の履歴・history / expected。
 
-claude は NDF_SUPERVISE_CLAUDE の偽物で置き換える。待ちの秒は段の expected と report_interval で縮める。
+claude は NDF_SUPERVISE_CLAUDE の偽物で置き換える。待ちの秒はステップの expected と report_interval で縮める。
 """
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ if "## 経過と想定" in prompt:
     if answer == "garbage":
         text = "よく分からない"
     else:
-        text = json.dumps({"decision": answer, "reason": "理由の印 " + answer, "wait_seconds": 1})
+        text = json.dumps({"decision": answer, "reason": "理由の目印 " + answer, "wait_seconds": 1})
     print(json.dumps({"result": text, "usage": {}, "total_cost_usd": 0.002, "num_turns": 1}))
     sys.exit(0)
 counter = os.environ.get("FAKE_LIMIT_ONCE")
@@ -48,7 +48,7 @@ print(json.dumps({"result": "## 作業の報告\n- 結果: 完了", "usage": {},
 
 PROBE = r'''
 import json, sys
-print(json.dumps({"status": "ok", "summary": "調べた印 " + sys.argv[1],
+print(json.dumps({"status": "ok", "summary": "調べた目印 " + sys.argv[1],
                   "metrics": {"class": sys.argv[2], "action": sys.argv[1]}}))
 '''
 
@@ -118,7 +118,7 @@ def test_remedied_is_solved_without_llm_and_tells_conductor(env, monkeypatch):
                               "probe": probe_of(env, "remedied", "stale"), "next": "end"}])
     assert "結果: 完了" in text and not forbid.exists()
     att = [a for a in lines(env, "attention") if a["reason"] == "遅れ"]
-    assert att and "待ち直す" in att[0]["text"] and "調べた印 remedied" in att[0]["text"]
+    assert att and "待ち直す" in att[0]["text"] and "調べた目印 remedied" in att[0]["text"]
 
 
 def judge_plan(env, decision, monkeypatch, cmd="sleep 3", **step):
@@ -131,9 +131,9 @@ def test_judge_stop_stops_plan_with_reason(env, monkeypatch):
     started = time.time()
     s, text = judge_plan(env, "stop", monkeypatch)
     assert time.time() - started < 2.5
-    assert "結果: 止まった" in text and "遅れ: 理由の印 stop" in text
+    assert "結果: 止まった" in text and "遅れ: 理由の目印 stop" in text
     slow = lines(env, "slow")[-1]
-    assert (slow["by"], slow["act"], slow["llm"]["reason"]) == ("llm", "stop", "理由の印 stop")
+    assert (slow["by"], slow["act"], slow["llm"]["reason"]) == ("llm", "stop", "理由の目印 stop")
     assert s.results["slow"]["exit"] == 125
     assert any("打ち切った（stop）" in a["text"] for a in lines(env, "attention"))
 
@@ -155,7 +155,7 @@ def test_judge_fix_goes_to_on_fail(env, monkeypatch):
          "on_fail": "after", "next": "end"},
         {"id": "after", "type": "run", "cmd": f"touch {mark}", "next": "end"}])
     assert mark.exists() and "結果: 完了" in text
-    assert s.results["slow"]["exit"] == 125 and "理由の印 fix" in s.results["slow"]["text"]
+    assert s.results["slow"]["exit"] == 125 and "理由の目印 fix" in s.results["slow"]["text"]
 
 
 def test_judge_wait_extends_next_check(env, monkeypatch):

@@ -18,7 +18,7 @@ description: "Never claim something is absent without showing the search behind 
 | 期待どおり動かない理由を切り分ける | `problem-solving` |
 | 原因が分かったので修正する | `problem-solving` → `tdd-cycle`（再現テストから） |
 
-`problem-solving` で原因を特定し、その結果を文章にする段でこの Skill の裏取り規則が効く。
+`problem-solving` で原因を特定し、その結果を文章にする段階でこの Skill の裏取り規則が効く。
 両方に該当する依頼（「原因を調べてレポートにして」）では両方を使う。
 
 トリガ語は「調査」のような広い語を置かない。ほぼ全セッションに一致してしまい、他の Skill の

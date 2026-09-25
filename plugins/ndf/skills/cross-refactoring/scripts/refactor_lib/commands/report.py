@@ -31,7 +31,7 @@ def cmd_finalize(args: argparse.Namespace) -> None:
 
     | 起動のされ方 | 追記する条件 |
     | --- | --- |
-    | 単独 | 最終ゲートの検査が通り、`--review-status` が `approved` |
+    | 単独 | 最終ゲートのチェックが通り、`--review-status` が `approved` |
     | 工程の 1 つ | 最終ゲートが通った（全体のテストか継続的統合） |
 
     **単独起動で `--review-status` を渡さなければ追記しない。** その時点では
@@ -74,18 +74,18 @@ def cmd_status(args: argparse.Namespace) -> None:
     print(f"# cross-refactoring rf{state['id']}（{state['repo']} #{state['current_pr']}）")
     print(f"ホスト: {state['host']}（{state['host_detection']}）")
     print(f"参加者（提案）: {' / '.join(state['runtimes'])} / 実装担当: {state.get('implementer')}")
-    print(f"フェーズ: {state.get('phase')} / 想定最大時間: {state.get('budget_minutes')} 分")
+    print(f"手順: {state.get('phase')} / 想定最大時間: {state.get('budget_minutes')} 分")
     print()
     print(_item_table(state))
 
 
 def cmd_report(args: argparse.Namespace) -> None:
-    """完了報告（AC26）。フェーズ別の所要・想定最大時間との差・採用と見送りの件数（理由別）・
+    """完了報告（AC26）。手順別の所要・想定最大時間との差・採用と見送りの件数（理由別）・
     全体のテスト・Jev の使用を並べる。"""
     path, state = load_state(args.id)
     _print_header(state)
     print()
-    print("## フェーズ別の所要")
+    print("## 手順別の所要")
     print()
     print(_phase_table(state))
     print()
@@ -111,7 +111,7 @@ def cmd_report(args: argparse.Namespace) -> None:
 def _elapsed_seconds(state: dict[str, Any]) -> float:
     """`init` の開始から、最終ゲートの全体のテストの終わりまで（非機能の条件）。
 
-    `cross-review` の所要は含めない。終わりは最終ゲートの最後の検査、無ければ検証の
+    `cross-review` の所要は含めない。終わりは最終ゲートの最後のチェック、無ければ検証の
     終わり、それも無ければ今。
     """
     gate = state.get("final_gate") or {}
@@ -138,20 +138,20 @@ def _print_header(state: dict[str, Any]) -> None:
     print(f"- 判断に Jev を: {jev_line} / 呼び出しの失敗 {judge.get('failures', 0)} 回")
     print(f"- 着手前の全体のテスト: {baseline_line(state.get('baseline_test') or {})}")
     if whole.get("ran"):
-        print(f"- 検証の中の全体のテスト: 走らせた（印 {', '.join(whole.get('flags') or [])} / "
+        print(f"- 検証の中の全体のテスト: 走らせた（危険フラグ {', '.join(whole.get('flags') or [])} / "
               f"{whole.get('status')}{_whole_detail(whole)}）")
     else:
-        print("- 検証の中の全体のテスト: 走らせなかった（危険の印が立たなかった）")
+        print("- 検証の中の全体のテスト: 走らせなかった（危険フラグが立たなかった）")
     print(f"- 最終ゲート: {gate.get('mode') or '—'}（{gate.get('status') or '未実行'}"
           f"{' / 検証の結果を使い回した' if gate.get('whole_test_reused') else ''}"
           f" / 修正 {gate.get('fix_rounds', 0)} 回）")
-    print(f"- 監視が止めた段: {_stopped_line(state)}")
+    print(f"- 監視が止めた手順: {_stopped_line(state)}")
     print(f"- 配分テーブル: {(state.get('plan') or {}).get('table_source') or '—'}")
     print(f"- 改修計画: {plan_reference(state)}")
 
 
 def _stopped_line(state: dict[str, Any]) -> str:
-    """段の上限で監視が CLI を止めた段（決定 23）。止めていなければ「なし」。"""
+    """手順の上限で監視が CLI を止めた手順（決定 23）。止めていなければ「なし」。"""
     stopped = [f"{name}（上限 {record['stopped'].get('timeout')} 秒）"
                for name, record in (state.get("phases") or {}).items()
                if isinstance(record, dict) and record.get("stopped")]
@@ -171,8 +171,8 @@ _RESOLUTIONS = {
     "kept": "変更が原因の失敗は無く、取り消さなかった",
     "fixing": "直しの途中",
     "fixed": "直して通った",
-    "narrowed": "直らず、印の項目を新しい順に取り消した",
-    "reverted_all": "落ちたテストを取り出せず、印の項目をまとめて取り消した",
+    "narrowed": "直らず、危険フラグの項目を新しい順に取り消した",
+    "reverted_all": "落ちたテストを取り出せず、危険フラグの項目をまとめて取り消した",
 }
 
 
@@ -181,7 +181,7 @@ def _whole_detail(whole: dict[str, Any]) -> str:
     if whole.get("status") != "fail":
         return ""
     if not whole.get("resolution"):
-        return " / 印の項目を取り消した" if whole.get("reverted") else ""
+        return " / 危険フラグの項目を取り消した" if whole.get("reverted") else ""
     counts = ""
     if whole.get("failed_tests") is not None:
         counts = (f" / 揺れ {len(whole.get('flaky') or [])}・元からの失敗 "
@@ -191,7 +191,7 @@ def _whole_detail(whole: dict[str, Any]) -> str:
 
 
 def _phase_table(state: dict[str, Any]) -> str:
-    lines = ["| フェーズ | 所要（分） |", "| --- | ---: |"]
+    lines = ["| 手順 | 所要（分） |", "| --- | ---: |"]
     for name in ("propose", "plan", "add-tests", "implement", "verify", "fix"):
         record = phase_record(state, name)
         seconds = record.get("seconds")
@@ -206,7 +206,7 @@ def _item_table(state: dict[str, Any]) -> str:
     if not items:
         return "（改善項目なし）"
     lines = [
-        "| ID | 対象 | 兆候 | 手法 | 段 | 見積り（分） | 状態 | 危険の印 | 修正 |",
+        "| ID | 対象 | 兆候 | 手法 | 等級 | 見積り（分） | 状態 | 危険フラグ | 修正 |",
         "| --- | --- | --- | --- | --- | ---: | --- | --- | ---: |",
     ]
     for item in items:

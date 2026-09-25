@@ -31,7 +31,7 @@ skills/     → 実行可能なワークフロー
 
 ## NDF の Skill 構成
 
-Skill の配布は `plugins/ndf/manifests/` が唯一の基準（数と内訳は manifests の行数が持つ）。ブラウザ自動テストの 4 個は `playwright-kit` プラグインへ分離した（`plugins/playwright-kit/`）。frontmatter の書き方は `plugins/ndf/skills/AUTHORING.md` の規約に従い、`python3 scripts/check-skill-frontmatter.py` で検査する。利用実績と維持・統合・削除の判定は `docs/specifications/ndf-skill-inventory/` に記録する。
+Skill の配布は `plugins/ndf/manifests/` が唯一の基準（数と内訳は manifests の行数が持つ）。ブラウザ自動テストの 4 個は `playwright-kit` プラグインへ分離した（`plugins/playwright-kit/`）。frontmatter の書き方は `plugins/ndf/skills/AUTHORING.md` の規約に従い、`python3 scripts/check-skill-frontmatter.py` でチェックする。利用実績と維持・統合・削除の判定は `docs/specifications/ndf-skill-inventory/` に記録する。
 
 ## 版ごとの判断の記録
 
@@ -46,8 +46,8 @@ Skill の配布は `plugins/ndf/manifests/` が唯一の基準（数と内訳は
 記録になるため、退避先へ移す（手順は `release` にある）。
 
 **版が決まる前の段落は「の次の版で」で書き出す。** 版数はミッションをマージするまで決まらない
-ため、書く時点では直前の正式版しか書けない。この印を付けておくと、配布で新しい版が出た
-時点で検査が拾う（`.ndf/instructions.json` の `pending_marker`）。
+ため、書く時点では直前の正式版しか書けない。この目印を付けておくと、配布で新しい版が出た
+時点でチェックが拾う（`.ndf/instructions.json` の `pending_marker`）。
 
 ```bash
 python3 plugins/ndf/scripts/instructions-check.py --root .
@@ -59,7 +59,7 @@ python3 plugins/ndf/scripts/instructions-check.py --root .
 
 ## cross-refactoring
 
-**`/ndf:cross-refactoring` は、想定最大時間（`--budget-minutes`、既定 30 分）に収まる計画を 1 回だけ実行する（#933）。** 参加者の全員が 1 度だけ多面的に提案し、実装担当 1 者（`--implementer` → ホスト → 参加者の先頭）が計画・テスト追加・実装・検証/修正を通す。参加者の既定は **codex / kiro とホスト（ホストが codex / kiro なら 2 者）** で、`--exclude` / `--include` で名指しで変える（agy は `--include agy` で戻す）。レビューは最終ゲートの `cross-review` が担う。
+**`/ndf:cross-refactoring` は、想定最大時間（`--budget-minutes`、既定 30 分）に収まる改修計画を 1 回だけ実行する。** 参加者の全員が 1 度だけ多面的に提案し、実装担当 1 者（`--implementer` → ホスト → 参加者の先頭）が計画・テスト追加・実装・検証/修正を通す。参加者の既定は **codex / kiro とホスト（ホストが codex / kiro なら 2 者）** で、`--exclude` / `--include` で名指しで変える（agy は `--include agy` で戻す）。レビューは最終ゲートの `cross-review` が担う。
 
 ```bash
 /ndf:cross-refactoring 130 --scope src/services tests/services --round-test "pytest tests/services -q" --baseline-test "pytest -q"
@@ -68,21 +68,21 @@ python3 plugins/ndf/scripts/instructions-check.py --root .
 ```
 
 - `--scope` は必須。提案が発散して PR が肥大するのを防ぐ。**検証にも効く**ので、現状固定テストの置き場所も含める
-- 計画は配分テーブル（履歴の直近 10 回から集計。初期値は #917）で見積もり、「想定最大時間 − 経過 − 控え」に収まる件数だけを採る。見送った提案は理由（`budget` / `rank` / `duplicate` / `vocabulary` / `threshold` / `no_target` / `test_failed` / `not_done`）とともに改修計画に残る
-- 項目の検証は**限ったテスト**（`--round-test` か `--baseline-test` の対象を計画の `test_targets` へ差し替えたもの）で走らせる。全体のテストは着手前・危険の印（D1〜D5）が立ったときの 1 回・最終ゲートだけ。印の 1 回が落ちたら落ちたテストだけを走らせ直して揺れ・元からの失敗を除き、変更が原因なら締め切りまで直す。直らなければ印の項目を新しい順に絞って取り消す。`--baseline-test` が pytest / jest / vitest でなければ `--round-test` は必須
-- 時間に関わる数値（段の上限・テスト 1 回の上限・無音の打ち切り・直しの打ち切り）はすべて `--budget-minutes` から算術で出し、計画の終わりまでに状態ファイルと改修計画へ書き出す。監視はその段の終わり + 余裕で CLI を止め、修正は回数でなく締め切りまで試みる。計画の後で LLM が動くのは作業の CLI だけ
+- 改修計画は配分テーブル（履歴の直近 10 回から集計。初期値は #917）で見積もり、「想定最大時間 − 経過 − 予備時間」に収まる件数だけを採る。見送った提案は理由（`budget` / `rank` / `duplicate` / `vocabulary` / `threshold` / `no_target` / `test_failed` / `not_done`）とともに改修計画に残る
+- 項目の検証は**範囲テスト**（`--round-test` か `--baseline-test` の対象を改修計画の `test_targets` へ差し替えたもの）で走らせる。全体のテストは着手前・危険フラグ（D1〜D5）が立ったときの 1 回・最終ゲートだけ。危険フラグの 1 回が落ちたら落ちたテストだけを走らせ直して揺れ・元からの失敗を除き、変更が原因なら締め切りまで直す。直らなければ危険フラグの項目を新しい順に絞って取り消す。`--baseline-test` が pytest / jest / vitest でなければ `--round-test` は必須
+- 時間に関わる数値（手順の上限・テスト 1 回の上限・無音の打ち切り・直しの打ち切り）はすべて `--budget-minutes` から算術で出し、計画の終わりまでに状態ファイルと改修計画へ書き出す。監視はその手順の終わり + 余裕で CLI を止め、修正は回数でなく締め切りまで試みる。計画の後で LLM が動くのは作業の CLI だけ
 - 廃止: `--max-test-rounds` / `--max-outer-rounds` / `--max-items-per-round` / `--max-fix-rounds` / `--test-timeout` は知らせて無視する
 - ホストと同じランタイムが実装担当になる場合も、サブエージェントではなく **CLI プロセス**として起動する
 - 収束しない改善項目は **項目単位で取り消す**。同一ファイルの隣接行を触る項目どうしは git だけでは分離できないため、同じファイルを触った項目まで取り消しを広げる
 - 生成物・配布物の同期は **進行側の責務**。同期の手順は `--sync-command "bash scripts/build-runtime-plugins.sh"` のように渡す
 - 公開するのは **進行側だけ**。実装担当は push しない
-- 履歴に残るのは **1 改善項目 = 1 コミット**。計画がテストを足すと決めた項目だけ 2 コミット
-- Jev は `AI_GATEWAY_API_KEY` があり公開リポジトリのときだけ使う（段・同じ変更か・D5）。使えなければ実装担当が判断する（`NDF_JEV=0` で止める）
+- 履歴に残るのは **1 改善項目 = 1 コミット**。改修計画がテストを足すと決めた項目だけ 2 コミット
+- Jev は `AI_GATEWAY_API_KEY` があり公開リポジトリのときだけ使う（等級・同じ変更か・D5）。使えなければ実装担当が判断する（`NDF_JEV=0` で止める）
 - `init` が参加者の認証状態を確認し、通らない者を外して続ける。全員が揃わないなら止めたいときは `--require-all`。誤検知するときは `NDF_SKIP_AUTH_CHECK=1`
 
 ## cross-review
 
-`/ndf:cross-review` は既定の母集合（claude / codex / kiro とホスト）のうち使える者から毎ラウンド 2 席を選んで PR レビューを委譲し、新しい指摘が出なくなるまで修正ループを回す。使える者が 2 者に満たなければ同じランタイムの 2 つ目が席を埋める。ホストのランタイムも CLI プロセスとして起動する。agy は既定から外してあり、`--include agy` で戻す。外すなら `--exclude` で名指しする（既定の母集合に無い者の指定は止めずに無視する）。2 ラウンド目以降は既存コメントの控えを取り直す。agy の progress log を heartbeat に表示するため、無言に見える時間でも `scan` / `analyze` / `post` / `done` などの作業段階を確認できる。
+`/ndf:cross-review` は既定の母集合（claude / codex / kiro とホスト）のうち使える者から毎ラウンド 2 席を選んで PR レビューを委譲し、新しい指摘が出なくなるまで修正ループを回す。使える者が 2 者に満たなければ同じランタイムの 2 つ目が席を埋める。ホストのランタイムも CLI プロセスとして起動する。agy は既定から外してあり、`--include agy` で戻す。外すなら `--exclude` で名指しする（既定の母集合に無い者の指定は止めずに無視する）。2 ラウンド目以降は既存コメントのスナップショットを取り直す。agy の progress log を heartbeat に表示するため、無言に見える時間でも `scan` / `analyze` / `post` / `done` などの作業段階を確認できる。
 
 追加レビュー観点は以下のどちらかで渡す:
 

@@ -1,4 +1,4 @@
-"""通過工程の控えと報告のテスト（#221）。
+"""通過記録と報告のテスト（#221）。
 
 判定は `scripts/lib/workflow-common.sh` に集約されている。テストはこの層と入口の
 スクリプトに対して書き、GitHub への通信は行わない。
@@ -185,7 +185,7 @@ def test_a_state_file_of_another_version_is_ignored(repo: Path, state: Path) -> 
 def test_record_replaces_an_unreadable_state(
     repo: Path, state: Path, content: str
 ) -> None:
-    """現状固定: 読めない控えへの再記録は旧モードと旧工程を引き継がない。"""
+    """現状固定: 読めない通過記録への再記録は旧モードと旧工程を引き継がない。"""
     path = state_file(state, 221)
     path.parent.mkdir(parents=True)
     path.write_text(content, encoding="utf-8")
@@ -204,7 +204,7 @@ def test_record_replaces_an_unreadable_state(
 
 
 def test_a_repository_without_the_projects_declaration_still_records(repo: Path, state: Path) -> None:
-    """#221-7: 盤面に載っていない課題でも働く。宣言ファイルは読まない。"""
+    """#221-7: ボードに載っていない課題でも働く。宣言ファイルは読まない。"""
     assert not (repo / ".ndf" / "projects.json").exists()
 
     seed(repo, state, 266, "standard", ["作業場所の用意", "設計"])
@@ -214,7 +214,7 @@ def test_a_repository_without_the_projects_declaration_still_records(repo: Path,
 
 
 def test_two_records_at_once_keep_both_stages(repo: Path, state: Path) -> None:
-    """#221-8: 同じ課題へ同時に記録しても控えは壊れない。"""
+    """#221-8: 同じ課題へ同時に記録しても通過記録は壊れない。"""
     env = base_env(state, {"NDF_STAGE_LOCK_TIMEOUT": "20"})
     procs = [
         subprocess.Popen(
@@ -275,7 +275,7 @@ def test_a_record_without_jq_does_not_fail(repo: Path, state: Path, tmp_path: Pa
     result = run_stage_check("record", "221", "stage", "設計", cwd=repo, env=env)
 
     assert result.returncode == 0
-    # 通したのが jq の欠如によることを見る。jq があれば控えが書かれる。
+    # 通したのが jq の欠如によることを見る。jq があれば通過記録が書かれる。
     assert not state_file(state, 221).exists()
 
 
@@ -302,7 +302,7 @@ def test_records_at_once_never_skip_a_stage(repo: Path, state: Path) -> None:
             for stage in stages
         ]
         for proc in procs:
-            skipped += proc.communicate()[1].count("控えが使用中")
+            skipped += proc.communicate()[1].count("通過記録が使用中")
 
         path = state_file(state, issue)
         saved = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {"stages": []}
@@ -310,7 +310,7 @@ def test_records_at_once_never_skip_a_stage(repo: Path, state: Path) -> None:
             short.append(saved["stages"])
 
     assert short == [], f"工程がそろわなかった試行 {len(short)} 件: {short}"
-    assert skipped == 0, f"控えが使用中で飛ばした記録 {skipped} 件"
+    assert skipped == 0, f"通過記録が使用中で飛ばした記録 {skipped} 件"
 
 
 # --- #1078: 進め方 fast -------------------------------------------------------

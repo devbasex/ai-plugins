@@ -19,12 +19,12 @@
 | `tr <JSON>` | 会話の記録（`FAKE_DIR/transcript-<pid>.jsonl`）へ 1 行足す |
 | `q open` / `q close` | `relay.py question open` / `close` を `AskUserQuestion` の hook と同じ形で呼び、出力を `FAKE_DIR/question-<pid>.jsonl` へ書く |
 | `answer [mark <中身>]` | 質問に答えた後の Stop を模す。`relay.py mark` を呼び（中身が無ければブロック無し）、終了コード 0 で終わる |
-| `unq` | 質問の印だけを消す |
+| `unq` | 質問の合図だけを消す |
 | `stop` | ブロックの無い応答の Stop を模す。`relay.py mark` を呼ぶ |
 
 行の中の Esc（`\\x1b`）は読み捨てる（入力待ちの Esc 1 回は何もしない形を模す）。
 
-`FAKE_EXIT_QUESTION=1` なら、最初の `/exit` で終わらずに質問の印と質問の時刻 `asked` を置く（書かれた `/exit` が質問の
+`FAKE_EXIT_QUESTION=1` なら、最初の `/exit` で終わらずに質問の合図と質問の時刻 `asked` を置く（書かれた `/exit` が質問の
 答えの後に働く形を模す）。このとき SIGTERM を受けたら `FAKE_DIR/sigterm-<pid>` を書いて 143 で終わる。
 受けたバイトは読んだ単位ごとに `FAKE_DIR/chunks-<pid>.jsonl` へも書く。
 

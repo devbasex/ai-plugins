@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""upkeep.py: issue-upkeep の段 1（候補の収集）と段 3（反映）の決まった手順。
+"""upkeep.py: issue-upkeep の手順 1（候補の収集）と手順 3（反映）の決まった手順。
 
     python3 upkeep.py candidates --since-ref <ref> [--all] [--add 12,34] [--limit N]
                       [--repo owner/name] [--state-dir <dir>] [--root <dir>]
@@ -7,19 +7,19 @@
                       [--repo owner/name] [--state-dir <dir>] [--root <dir>]
     python3 upkeep.py report [--repo owner/name] [--state-dir <dir>] [--root <dir>]
 
-判定（段 2A / 2B）は持たない。LLM が candidates の結果を読んで判定し、plan.json に書く。
+区分の決定（手順 2A / 2B）は持たない。LLM が candidates の結果を読んで区分を決め、plan.json に書く。
 
-candidates: 段 1 の経路のうち機械で集められるものを集め、重複を除いて件数とともに返す。
+candidates: 手順 1 の経路のうち機械で集められるものを集め、重複を除いて件数とともに返す。
   経路は diff-path（差分のパス）/ diff-identifier（削除された識別子）/ no-milestone /
   closed-milestone（閉じた課題のマイルストーン）/ sub-issue（閉じた親の子）/
   commit-subject（<ref>..HEAD のコミットの件名が #番号で指す）/ all（--all）/
   manual（--add で担当が足したもの）。commit-subject の候補は、上限で切るときも先に残す。候補ごとに updated_at と本文の要約値を返す。
   --limit で 1 回に扱う件数に上限を置く。超えた分は items に載せず、metrics.deferred に番号だけを返す（終了コード 20）。
 apply: plan.json の変更を反映する。反映の直前に updated_at を照合し、変わっていれば本文の
-  要約値を比べ、それも変わっていれば飛ばす（skipped_changed）。済んだものは控えに記録して
+  要約値を比べ、それも変わっていれば飛ばす（skipped_changed）。済んだものは記録に記録して
   2 度書かない。上限に当たれば Retry-After / 回復時刻 / 倍々の順で待ち、--max-waits を
   超えたら部分的に終わった状態で止める。
-report: candidates と apply の控えから完了報告の値を返す。
+report: candidates と apply の記録から完了報告の値を返す。
 
 plan.json の形:
 
@@ -59,9 +59,9 @@ TOOL = "issue-upkeep"
 
 VERDICTS = ("そのまま", "追記が要る", "書き直しが要る", "閉じてよい", "やらない", "重複",
             "ルートコーズ", "要判断")
-# 承認を得てから反映する判定。承認の無いものは needs_approval へ回す。
+# 承認を得てから反映する区分。承認の無いものは needs_approval へ回す。
 NEEDS_APPROVAL = ("やらない",)
-# 反映しない判定。人へ返す。
+# 反映しない区分。人へ返す。
 RETURNED = ("要判断",)
 
 ROUTES = ("diff-path", "diff-identifier", "no-milestone", "closed-milestone", "sub-issue",
@@ -350,7 +350,7 @@ def cmd_candidates(a):
     deferred = [n for n in order if n not in set(keep)]
     items = []
     # 上限を超えた候補は items に載せない（metrics.deferred にだけ並べる）。載せると
-    # 判定の対象として求められ、上限が効かない。
+    # 区分を決める対象として求められ、上限が効かない。
     for n in keep:
         i = by_num[n]
         items.append({"kind": "issue", "name": f"#{n}", "result": "candidate",
@@ -469,7 +469,7 @@ def cmd_apply(a):
             put("returned", "要判断は反映しない")
             continue
         if key in ledger:
-            put("already", "控えにある")
+            put("already", "記録にある")
             continue
         if verdict in NEEDS_APPROVAL and not act.get("approved"):
             put("needs_approval", "やらないは承認を得てから反映する")
@@ -530,15 +530,15 @@ def cmd_apply(a):
                    for act in actions if act["number"] in buckets["needs_approval"]],
             consent=[f"#{x} を「やらない」で閉じる" for x in buckets["needs_approval"]],
             rollback="閉じた課題を reopen し、wontfix を外す（本文は GitHub の編集履歴から戻せる）")
-        nxt = "承認を得た課題に \"approved\": true を付けて同じ plan で apply を打ち直す（済んだものは控えで飛ぶ）"
+        nxt = "承認を得た課題に \"approved\": true を付けて同じ plan で apply を打ち直す（済んだものは記録で飛ぶ）"
     elif partial or buckets["skipped_changed"]:
         status, code = "gate", EXIT_PAUSE
         parts = []
         if buckets["skipped_changed"]:
             parts.append("照合で飛ばした " + " ".join(f"#{x}" for x in buckets["skipped_changed"])
-                         + " を段 2A へ戻す")
+                         + " を手順 2A へ戻す")
         if partial:
-            parts.append("時間を置いて同じ plan で apply を打ち直す（済んだものは控えで飛ぶ）")
+            parts.append("時間を置いて同じ plan で apply を打ち直す（済んだものは記録で飛ぶ）")
         nxt = "。".join(parts)
     out = result(TOOL, status, summary, items, metrics, presentation_path=pres, next=nxt)
     _write_json(sd / "apply.json", out)
@@ -553,7 +553,7 @@ def cmd_report(a):
     sd = _state_dir(a.state_dir, repo)
     cand, app = _read_json(sd / "candidates.json"), _read_json(sd / "apply.json")
     if cand is None and app is None:
-        raise StepError(f"控えが無い（candidates も apply もまだ打っていない）: {sd}", EXIT_PRECONDITION)
+        raise StepError(f"記録が無い（candidates も apply もまだ打っていない）: {sd}", EXIT_PRECONDITION)
     items, metrics = [], {"repo": repo}
     if cand:
         cm = cand["metrics"]
@@ -574,7 +574,7 @@ def cmd_report(a):
                         "wait_count": len(waits),
                         "wait_seconds": round(sum(w["seconds"] for w in waits), 1)})
         items += [
-            {"kind": "section", "name": "判定の内訳", "result": "ok",
+            {"kind": "section", "name": "区分の内訳", "result": "ok",
              "value": "・".join(f"{v} {c}" for v, c in am["verdicts"].items() if c)},
             {"kind": "section", "name": "反映", "result": "partial" if am["partial"] else "ok",
              "value": f"直した {len(am['applied']) - len(am['closed'])} 件・閉じた {len(am['closed'])} 件・"
@@ -597,7 +597,7 @@ def _numbers(s: str) -> list[int]:
 def build_parser():
     common = common_parser()
     common.add_argument("--repo", default=None, help="owner/name")
-    common.add_argument("--state-dir", default=None, help="控えの置き場所")
+    common.add_argument("--state-dir", default=None, help="記録の置き場所")
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("candidates", parents=[common])

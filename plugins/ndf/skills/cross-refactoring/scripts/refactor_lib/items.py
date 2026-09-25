@@ -1,6 +1,6 @@
 """改善項目と候補の鍵・表示・見送りの記録（#933 で `rounds.py` から移した）。
 
-ラウンドと群が無くなり、残ったのは項目そのものの扱いだけである。項目は計画が採った
+ラウンドと群が無くなり、残ったのは項目そのものの扱いだけである。項目は改修計画が採った
 改善項目（`state["items"]`）、候補は提案を統合したもの（`state["candidates"]`）で、
 どちらも `path` + `symbol` + `smell` を鍵に持つ。
 """
@@ -33,7 +33,7 @@ def item_key(item: dict[str, Any]) -> tuple[str, str, str]:
 
 
 def key_text(item: dict[str, Any]) -> str:
-    """鍵を 1 語で表す。実装担当の計画の結果が項目を指すときに使う（`path#symbol#smell`）。"""
+    """鍵を 1 語で表す。実装担当の改修計画の結果が項目を指すときに使う（`path#symbol#smell`）。"""
     return "#".join(item_key(item))
 
 
@@ -87,7 +87,7 @@ def defer(state: dict[str, Any], item: dict[str, Any], reason: str, detail: str 
 def find_item(
     state: dict[str, Any], item_id: Optional[str], required: bool = True
 ) -> Any:
-    """計画が採った項目を ID で引く。"""
+    """改修計画が採った項目を ID で引く。"""
     for item in state.get("items") or []:
         if item.get("id") == item_id:
             return item

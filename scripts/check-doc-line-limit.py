@@ -47,7 +47,7 @@ def tracked_markdown(root: Path) -> list[str]:
     **`-z` で受け取る。** 既定（`core.quotepath=true`）の `git ls-files` は非 ASCII を
     8 進エスケープした引用付きの 1 語で返すため、そのままではファイルが見つからず
     無言で走査から落ちる。このリポジトリの文書はすべて日本語であり、日本語の
-    ファイル名を付けた時点で行数の検査を素通りしていた（#417 の 1）。
+    ファイル名を付けた時点で行数のチェックを素通りしていた（#417 の 1）。
     `-c core.quotepath=false` でも同じ結果になるが、**利用者の設定を上書きする形は
     避ける**。`-z` は出力の形だけを変え、設定を読まない。
     """
@@ -105,7 +105,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     missing = sorted(rel for rel in EXEMPT if not (root / rel).is_file())
 
-    # 除外の後に 1 件も残らないなら、検査は働いていない。`git ls-files` が非空でも
+    # 除外の後に 1 件も残らないなら、チェックは働いていない。`git ls-files` が非空でも
     # 起こりうるため、走査対象の有無とは別に見る（#417 の 2）。
     if not counts:
         print(

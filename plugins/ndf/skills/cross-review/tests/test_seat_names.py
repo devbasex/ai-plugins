@@ -5,7 +5,7 @@
 ラウンドでは、同じランタイムの 2 つ目（`claude-2`）が席に入る。**受け口がこの形を
 弾くと、結果を残した担当が「結果なし」として扱われる。**
 
-見るのは結果の受け口・起動スクリプト・監視の位置引数・計測の 4 つである。綴りの検査は
+見るのは結果の受け口・起動スクリプト・監視の位置引数・計測の 4 つである。綴りのチェックは
 argparse の型が行い、通らなければ終了コード 2 になる。シェル側は席の形に合わない名前を
 終了コード 1 で弾く。
 """
@@ -44,7 +44,7 @@ def _seed_state(tmp_dir: pathlib.Path) -> None:
     (tmp_dir / f"cross-review-pr{PR}-state.json").write_text(json.dumps(state))
 
 
-# ---------------- 引数の検査 ----------------
+# ---------------- 引数のチェック ----------------
 
 def test_the_parser_accepts_a_second_seat(state_mod):
     args = state_mod.build_parser().parse_args(["read-result", "1", SEAT])
@@ -86,7 +86,7 @@ def test_the_result_of_a_second_seat_is_recorded_under_its_seat_name(tmp_dir, st
 # 起動スクリプトは席の名前を受け、CLI は `${SEAT%%-*}` で選ぶ（設計の決定 10）。
 # **渡した先を差し替えて確かめる。** 実物の共通の起動スクリプトを呼ぶと CLI を起動する。
 # 差し替えのために、起動スクリプトの隣に置いた符号のリンクから、相対で解決される
-# 共通層の位置（`../../../scripts/lib`）へ控えを置く。
+# 共通層の位置（`../../../scripts/lib`）へ記録を置く。
 
 LAUNCH_SCRIPTS = pathlib.Path(__file__).resolve().parents[1] / "scripts"
 LIB = pathlib.Path(__file__).resolve().parents[3] / "scripts" / "lib"
@@ -95,7 +95,7 @@ LIB = pathlib.Path(__file__).resolve().parents[3] / "scripts" / "lib"
 def _stub_tree(tmp_path: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
     """起動スクリプトの符号のリンクと、差し替えた共通の起動スクリプトを置く。
 
-    返すのは `(起動スクリプトのパス, 渡された引数を書き出す控えのパス)`。
+    返すのは `(起動スクリプトのパス, 渡された引数を書き出す記録のパス)`。
     """
     fake_scripts = tmp_path / "plugin" / "skills" / "cross-review" / "scripts"
     fake_scripts.mkdir(parents=True)

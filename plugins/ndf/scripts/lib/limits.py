@@ -18,7 +18,7 @@ cross-refactoring の `add-tests` / `implement` / `fix` / `final-fix` には、�
 Usage:
   limits.py cli-timeout <工程> <担当>      # 秒数を 1 行
   limits.py monitor-timeout <工程> <担当>  # 同上
-  limits.py check                          # 表の順序の検査。崩れていれば組を出して終了コード 1
+  limits.py check                          # 表の順序のチェック。崩れていれば組を出して終了コード 1
 
 表に無い工程名は終了コード 1 で拒む。別名は持たない（呼び出し側が正規化する）。
 """
@@ -124,7 +124,7 @@ def cli_timeout(phase: str, agent: str) -> int:
 
 
 def check() -> list[tuple[str, str, int, int, int]]:
-    """表の既定値の全組で順序を検査し、崩れた組を返す。環境変数は見ない。"""
+    """表の既定値の全組で順序をチェックし、崩れた組を返す。環境変数は見ない。"""
     broken = []
     for phase, monitor in PHASE_TIMEOUT.items():
         for agent, stall in AGENT_STALL.items():

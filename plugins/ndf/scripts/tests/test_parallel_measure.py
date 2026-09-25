@@ -5,7 +5,7 @@
 期待値が動く。
 
 `concurrency` の `gh` は `PATH` の先頭へ置いた偽物に差し替え、受けた引数を記録する
-（読み取りだけを行うことの検査、AC42）。
+（読み取りだけを行うことのチェック、AC42）。
 """
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ SCRIPT = Path(__file__).resolve().parents[1] / "parallel-measure.py"
 
 
 def _load_module():
-    """`--cgroup-dir` の既定の解決だけは関数を直に呼んで検査する。
+    """`--cgroup-dir` の既定の解決だけは関数を直に呼んでチェックする。
 
     ファイル名に `-` を含むため `import` できない。`__main__` の分岐は走らない。
     """
@@ -56,7 +56,7 @@ def cgroup(tmp_path: Path, *, oom_kill: int | None = None, memory_max: str | Non
     path = tmp_path / name
     path.mkdir(parents=True, exist_ok=True)
     if oom_kill is not None:
-        # 実物は `max 0` の行も持つ。`oom_kill` だけを読むことの検査でもある。
+        # 実物は `max 0` の行も持つ。`oom_kill` だけを読むことのチェックでもある。
         (path / "memory.events").write_text(
             f"low 0\nhigh 0\nmax 0\noom 0\noom_kill {oom_kill}\n", encoding="utf-8")
     if memory_max is not None:
@@ -466,7 +466,7 @@ def test_concurrency_measures_the_overlap(tmp_path: Path) -> None:
 
 
 def test_concurrency_counts_a_touching_pair_as_no_overlap(tmp_path: Path) -> None:
-    """同じ時刻に閉じる区間と開く区間は重ならない（閉じるほうを先に数える）。"""
+    """同じ時刻に閉じる期間と開く期間は重ならない（閉じるほうを先に数える）。"""
     proc = concurrency(tmp_path, data=[
         {"number": 1, "createdAt": "2026-09-01T00:00:00Z",
          "mergedAt": "2026-09-01T01:00:00Z", "closedAt": None},

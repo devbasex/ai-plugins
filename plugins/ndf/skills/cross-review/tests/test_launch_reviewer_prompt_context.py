@@ -86,7 +86,7 @@ def test_the_prompt_has_no_step_to_post(tmp_path, word) -> None:
 
 
 def test_the_prompt_asks_only_for_the_note_and_the_result(tmp_path) -> None:
-    """書かせるのは指摘の控えと結果ファイルの 2 つだけ。結果は判定と重要度別の件数（AC2）。"""
+    """書かせるのは指摘のファイルと結果ファイルの 2 つだけ。結果は判定と重要度別の件数（AC2）。"""
     prompt = _prompt(tmp_path)
     assert f"codex-review-pr{PR}-round1-payload.json" in prompt
     assert f"codex-review-pr{PR}-result.json" in prompt
@@ -94,7 +94,7 @@ def test_the_prompt_asks_only_for_the_note_and_the_result(tmp_path) -> None:
 
 
 def test_the_prompt_asks_to_rename_the_note_before_the_result(tmp_path) -> None:
-    """一時の名前で書き、控えを先・結果ファイルを後に改名させる（AC3）。"""
+    """一時の名前で書き、指摘のファイルを先・結果ファイルを後に改名させる（AC3）。"""
     prompt = _prompt(tmp_path)
     note_tmp = f"codex-review-pr{PR}-round1-payload.json.tmp"
     result_tmp = f"codex-review-pr{PR}-result.json.tmp"

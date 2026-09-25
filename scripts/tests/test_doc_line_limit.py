@@ -1,6 +1,6 @@
-"""行数の検査の振る舞いを固定する（#354 / #399）。
+"""行数のチェックの振る舞いを固定する（#354 / #399）。
 
-**基準（501 行以上）は `markdown-writing` のルール 9 が定める。** この検査はそれを機械で
+**基準（501 行以上）は `markdown-writing` のルール 9 が定める。** このチェックはそれを機械で
 見る。走査の対象は git が追跡する `.md` で、記録は外す。書式が 1 ファイルであることを
 前提にする文書は `EXEMPT` で外し、理由を値に持つ。
 """
@@ -31,7 +31,7 @@ def repo(tmp_path: Path) -> Path:
     """git が追跡する `.md` を持つ最小のリポジトリ。
 
     `EXEMPT` の指し先（`CHANGELOG.md`）を置く。**除外の指し先が無いこと自体を
-    失敗として扱う**ため、置かないと検査そのものが落ちる（#417 の 6）。
+    失敗として扱う**ため、置かないとチェックそのものが落ちる（#417 の 6）。
     """
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
     (tmp_path / "docs").mkdir()
@@ -106,7 +106,7 @@ def test_an_exempt_document_under_the_limit_fails(repo: Path) -> None:
 
 
 def test_an_empty_scan_is_a_failure(tmp_path: Path) -> None:
-    """走査対象が 0 件のまま通ると、検査が働いていないことに気づけない。"""
+    """走査対象が 0 件のまま通ると、チェックが働いていないことに気づけない。"""
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
     result = run(tmp_path)
     assert result.returncode == 2
@@ -120,7 +120,7 @@ def test_the_report_lists_the_longest_documents(repo: Path) -> None:
 
 
 def test_the_check_is_wired_into_the_validation() -> None:
-    """既存の検査から呼ばれていなければ、継続的統合では実行されない。"""
+    """既存のチェックから呼ばれていなければ、継続的統合では実行されない。"""
     body = (REPO / "scripts" / "validate-runtime-plugins.sh").read_text(encoding="utf-8")
     lines = [
         line for line in body.splitlines()
@@ -150,7 +150,7 @@ def test_a_non_ascii_filename_is_scanned(repo: Path) -> None:
     """`git ls-files` は既定で非 ASCII を 8 進エスケープして返す（#417 の 1）。
 
     このリポジトリの文書はすべて日本語であり、日本語のファイル名を付けた時点で
-    行数の検査を素通りしていた。**失敗が表に出ない形で起きる。**
+    行数のチェックを素通りしていた。**失敗が表に出ない形で起きる。**
     """
     track(repo, "docs/日本語.md", 600)
     result = run(repo)
@@ -159,7 +159,7 @@ def test_a_non_ascii_filename_is_scanned(repo: Path) -> None:
 
 
 def test_a_scan_that_is_empty_after_the_exclusions_is_a_failure(repo: Path) -> None:
-    """`git ls-files` が非空でも、除外の後に 0 件なら検査は働いていない（#417 の 2）。"""
+    """`git ls-files` が非空でも、除外の後に 0 件ならチェックは働いていない（#417 の 2）。"""
     untrack(repo, "docs/short.md")
     untrack(repo, "CHANGELOG.md")
     track(repo, "issues/plan.md", 900)

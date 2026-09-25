@@ -370,7 +370,7 @@ def test_merge_when_green_rechecks_once_with_short_interval(repo, gh):
 
 
 def test_merge_when_green_does_not_merge_while_rollup_is_empty(repo, gh):
-    """rollup が空のうちは検査が載る前かもしれないのでマージしない。"""
+    """rollup が空のうちはチェックが載る前かもしれないのでマージしない。"""
     gh.set(pr_seq={"5": [passed_pr(rollup=[])]})
     code, out, err = call("merged-steps.py", ["merge-when-green", "5", "--interval", "0", "--recheck", "0",
                                               "--timeout", "0"], gh.env, repo)
@@ -379,7 +379,7 @@ def test_merge_when_green_does_not_merge_while_rollup_is_empty(repo, gh):
 
 
 def test_merge_when_green_waits_for_checks_to_appear(repo, gh):
-    """空の rollup の後に検査が載って通れば、その通過でマージする。"""
+    """空の rollup の後にチェックが載って通れば、その通過でマージする。"""
     gh.set(pr_seq={"5": [passed_pr(rollup=[]), pending_pr(), passed_pr(), passed_pr()]})
     code, out, err = call("merged-steps.py", ["merge-when-green", "5", "--interval", "0", "--no-cleanup"],
                           gh.env, repo)

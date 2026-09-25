@@ -1,4 +1,4 @@
-"""check: 導入の検査（AC13・AC14・AC15）と、対応表だけで言語を足せること。"""
+"""check: 導入のチェック（AC13・AC14・AC15）と、対応表だけで言語を足せること。"""
 import json
 from pathlib import Path
 

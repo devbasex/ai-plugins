@@ -2,7 +2,7 @@
 
 ここが見るのは、工程名の並びの外にある 3 つである。
 
-| 見るもの | なぜ並びの検査に載らないか |
+| 見るもの | なぜ並びのチェックに載らないか |
 | --- | --- |
 | `WF_PR_EXEMPT_STAGE` が指す工程 | 値は 1 つで、並びを持たない。工程表の行名から外れても並びは一致したままになる |
 | `document-restructuring` の配布 | 配布一覧は工程表とは別のファイルが持つ |
@@ -94,7 +94,7 @@ def test_the_exempt_stage_is_a_row_of_the_workflow_table() -> None:
     ("WF_APPROVAL_LABEL", "design-approved"),
 ])
 def test_the_design_pull_request_marks_do_not_move(name: str, value: str) -> None:
-    """工程名とブランチ名は別の名前の集まりである。印は改名の巻き添えにしない。"""
+    """工程名とブランチ名は別の名前の集まりである。目印は改名の巻き添えにしない。"""
     assert scalar(name) == value
 
 

@@ -4,10 +4,10 @@
 #   progress-record.sh <issue番号> <工程名> [--mode M] [--pace normal|fast] [--worktree P] [--plan P]
 #                      [--repo <所有者>/<リポジトリ>] [--note TEXT]
 #
-# 工程名に `-` を渡すと、チェックリストを変えずに見出し行（モード・作業ツリー・計画ファイル）
+# 工程名に `-` を渡すと、チェックリストを変えずに見出し行（モード・作業ツリー・実装計画のファイル）
 # だけを更新する。`projects-sync.sh` の `mode` / `worktree` / `plan` がこの形で呼ぶ（#828）。
 #
-# **盤面の宣言が無いリポジトリでも進行が残る。** 記録先は issue の本文の `## 進行` の節で、
+# **ボードの宣言が無いリポジトリでも進行が残る。** 記録先は issue の本文の `## 進行` の節で、
 # 節の外は書き換えない（更新のたびに本文を取得し、その節だけを差し替える）。人が本文へ
 # 書いた内容を消さないためである。
 #
@@ -77,7 +77,7 @@ else
   gh issue view "$ISSUE" --json body -q .body > "$BODY_FILE" 2>/dev/null || exit 0
 fi
 
-# 節の中身を組み立てる。**印を付けるのは、この呼び出しが記録する工程までである。**
+# 節の中身を組み立てる。**目印を付けるのは、この呼び出しが記録する工程までである。**
 # 一覧の残りは空欄のまま残し、飛ばした工程がチェックの穴として見えるようにする。
 STAMP=$(date '+%Y-%m-%d %H:%M')
 export PJ_STAGES SECTION_HEADING STAGE STAMP MODE PACE WORKTREE PLAN NOTE
@@ -126,7 +126,7 @@ else:
 # 付随情報（`--note`）を新しく渡したときだけ、その分を足す。
 note = os.environ.get("NOTE", "")
 if stage == "-":
-    # 見出し行だけを更新する。チェックリストには印を足さない。
+    # 見出し行だけを更新する。チェックリストには目印を足さない。
     pass
 elif stage in done and done[stage]:
     if note and note not in done[stage]:

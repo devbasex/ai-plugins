@@ -1,7 +1,7 @@
 """SessionStart の通知と、PreToolUse の誘導・自動許可（決定 6・決定 9）。
 
 閾値・待ち・数の有効期間・数を戻さないツール名の部分文字列は Serena 1.7.0 の
-`serena-hooks remind` と同じにする。数えるのは configure の印のある project.yml の
+`serena-hooks remind` と同じにする。数えるのは configure の目印のある project.yml の
 採った言語の拡張子だけである。呼び出し側（serena-lsp.py）が例外を握りつぶす。
 """
 import contextlib
@@ -145,7 +145,7 @@ def _load_counts(path: Path) -> dict:
 
 @contextlib.contextmanager
 def _locked(path: Path):
-    """同じセッションの PreToolUse を直列にする。読み・判定・書きをこの区間で行い、並列の増分を失わない。"""
+    """同じセッションの PreToolUse を直列にする。読み・判定・書きをこのロックの中で行い、並列の増分を失わない。"""
     fd = None
     try:
         path.parent.mkdir(parents=True, exist_ok=True)

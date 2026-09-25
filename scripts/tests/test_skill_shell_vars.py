@@ -1,11 +1,11 @@
-"""手順書の bash が参照する変数の出所を検査する仕組みを確かめる（#518-1）。
+"""手順書の bash が参照する変数の出所をチェックする仕組みを確かめる（#518-1）。
 
 **繰り返しの中で使う値を、繰り返しの外の 1 回だけが返す構造は表に出ない。**
 `init` から順に実行すれば定義されるため、手元では再現しない。骨組みを抜粋して
 写した経路と、状態ファイルから再開する経路で未定義になる。
 
-検査そのものは `scripts/check-skill-shell-vars.py` にある。実物の Skill は書き換えず、
-一時ディレクトリへ最小の木を作ってそこを検査させる（実物を読むのは最後の 1 件だけ）。
+チェックそのものは `scripts/check-skill-shell-vars.py` にある。実物の Skill は書き換えず、
+一時ディレクトリへ最小の木を作ってそこをチェックさせる（実物を読むのは最後の 1 件だけ）。
 """
 from __future__ import annotations
 
@@ -88,7 +88,7 @@ def test_a_value_emitted_only_later_is_reported(tmp_path):
 
 
 def test_a_value_emitted_through_a_helper_is_a_source(tmp_path):
-    """`cmd_init` が `_emit_init` を呼ぶ形も 1 段だけたどる。"""
+    """`cmd_init` が `_emit_init` を呼ぶ形も 1 階層だけたどる。"""
     emits = (
         "def _emit_init(state):\n"
         "    statefile.emit(WORK='w')\n"

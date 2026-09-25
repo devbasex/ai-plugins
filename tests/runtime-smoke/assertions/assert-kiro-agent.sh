@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Kiro の ndf エージェントが「選択できる状態」で導入されたことを検査する。
+# Kiro の ndf エージェントが「選択できる状態」で導入されたことをチェックする。
 # 旧実装は .kiro/agents/default.json を生成していたが、Kiro の既定は組み込みの
 # kiro_default であり、生成したエージェントは選択されないままだった。
 #
@@ -41,7 +41,7 @@ hit="$(find -L "$KIRO_DIR/skills" -path '*/SKILL.md' -print -quit)"
 
 # Kiro には plugin.json を読む仕組みが無いため、版数は installer が埋める
 # エージェント description でしか確認できない。installer が読む Claude 版
-# マニフェストの版数と一致することを検査する。
+# マニフェストの版数と一致することをチェックする。
 MANIFEST_FILE="$REPO_ROOT/plugins/ndf/.claude-plugin/plugin.json"
 test -s "$MANIFEST_FILE"
 ndf_version="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$MANIFEST_FILE")"
@@ -68,7 +68,7 @@ if [ -e "$KIRO_DIR/skills/ndf-policies" ]; then
   exit 1
 fi
 
-# エージェント定義と、起動時に読み込まれる文脈量を検査する。
+# エージェント定義と、起動時に読み込まれる文脈量をチェックする。
 #
 # **文脈量に上限は置かない。計測して記録するだけにする。**
 # 以前は 200,000 文字で落としていた。根拠は 2026-08-08 / kiro-cli 2.16.1 でのこの
@@ -82,7 +82,7 @@ fi
 # 上限を外して Claude Code へ揃える。
 #
 # 数は `$LOG` へ残るため、増え方は後から追える。一覧の予算のほうは
-# `scripts/check-skill-frontmatter.py` が Claude Code と同じ 1% で検査する。
+# `scripts/check-skill-frontmatter.py` が Claude Code と同じ 1% でチェックする。
 python3 - "$AGENT_FILE" "$KIRO_DIR" "$PROJECT_DIR" "$STEERING_FILE" >> "$LOG" <<'PY'
 import json
 import sys
@@ -116,7 +116,7 @@ PY
 
 # 旧 installer が別 checkout から張った .kiro/skills/ndf-policies symlink は、現在の
 # プラグイン配下を指さないため「自分が張ったリンクだけ消す」掃除に掛からない。旧導入済み
-# プロジェクトでも steering との二重注入が解消されることを検査する。
+# プロジェクトでも steering との二重注入が解消されることをチェックする。
 STALE_ROOT="$ARTIFACT_DIR/stale-checkout-$scope/skills/ndf-policies"
 mkdir -p "$STALE_ROOT"
 echo "stale" > "$STALE_ROOT/SKILL.md"
@@ -129,10 +129,10 @@ fi
 test -f "$STALE_ROOT/SKILL.md"  # リンク先の実体まで消していないこと
 echo "installer removed a stale ndf-policies skill link" >> "$LOG"
 
-# --- workspace 限定の検査（ここから fi まで。heredoc の終端子の都合でインデントしない） ---
+# --- workspace 限定のチェック（ここから fi まで。heredoc の終端子の都合でインデントしない） ---
 if [ "$scope" = workspace ]; then
 # 利用者が $AGENT_FILE へ写した設定（MCP プラグインの mcpServers など）が、
-# installer の再実行で失われないことを検査する。kiro-cli には依存しない。
+# installer の再実行で失われないことをチェックする。kiro-cli には依存しない。
 python3 - "$AGENT_FILE" <<'PY'
 import json
 from pathlib import Path
@@ -168,7 +168,7 @@ if config.get("name") != "ndf" or not config.get("hooks", {}).get("agentSpawn"):
 if not config.get("hooks", {}).get("stop"):
     raise SystemExit(f"--with-slack did not regenerate the stop hook: {path}")
 PY
-# 検査用に注入した設定を取り除き、以降の検査へ持ち越さない
+# チェック用に注入した設定を取り除き、以降のチェックへ持ち越さない
 python3 - "$AGENT_FILE" <<'PY'
 import json
 from pathlib import Path
@@ -185,7 +185,7 @@ path.write_text(json.dumps(config, indent=2, ensure_ascii=False) + "\n", encodin
 PY
 echo "reinstall preserved user-managed agent settings" >> "$LOG"
 
-# 旧 .kiro/agents/default.json からの自動移行を検査する。kiro-cli には依存しない。
+# 旧 .kiro/agents/default.json からの自動移行をチェックする。kiro-cli には依存しない。
 MIGRATION_ROOT="$ARTIFACT_DIR/kiro-legacy-migration"
 rm -rf "$MIGRATION_ROOT"
 
@@ -193,7 +193,7 @@ rm -rf "$MIGRATION_ROOT"
 # それ以外なら NDF 生成物と判定されない fixture を書く。
 #
 # installer の判定は「旧テンプレート固有の description の完全一致」+「旧 resources
-# の skill:// 指定 または agentSpawn フックの CLAUDE.ndf.md 検査」なので、
+# の skill:// 指定 または agentSpawn フックの CLAUDE.ndf.md チェック」なので、
 # 自動移行ケースの fixture は旧 default.json.template と同じ値を持たせる。
 write_legacy_agent() {
   mkdir -p "$1/.kiro/agents"
@@ -310,7 +310,7 @@ if [ "$(dry_state)" != "$before_dry" ]; then
 fi
 echo "installer migrated a legacy default.json only when it is safe" >> "$LOG"
 fi
-# --- workspace 限定の検査ここまで ---
+# --- workspace 限定のチェックここまで ---
 
 if ! command -v kiro-cli >/dev/null 2>&1; then
   echo "kiro-cli agent checks skipped: kiro-cli is not available" >> "$LOG"
@@ -323,7 +323,7 @@ case "$scope" in
   workspace) KIRO_CWD="$PROJECT_DIR" ;;
   # global エージェントはどこからでも解決できるはずなので、.kiro を持たない中立の
   # ディレクトリを cwd にする。$HOME を使うと $HOME/.kiro が workspace 扱いにもなり、
-  # 「Global として見えている」ことの検査にならない。
+  # 「Global として見えている」ことのチェックにならない。
   global) KIRO_CWD="$ARTIFACT_DIR" ;;
 esac
 if [ "$scope" = global ] && [ -e "$KIRO_CWD/.kiro" ]; then
@@ -345,7 +345,7 @@ if ! agent_list > "$ARTIFACT_DIR/kiro-agent-list-$scope.txt"; then
   exit 0
 fi
 # global scope の $KIRO_CWD には .kiro がないため、ここに $AGENT_NAME が出ること自体が
-# 「Global: ~/.kiro/agents 経由でどこからでも解決できる」ことの検査になる。
+# 「Global: ~/.kiro/agents 経由でどこからでも解決できる」ことのチェックになる。
 # **パイプの右で判定しない。** `grep -q` は最初の一致で終わるため、`awk` がまだ書いて
 # いる間にパイプが閉じ、`set -o pipefail` のもとでは一致していても 141 になる
 # （assert-plugin-files.sh の注記を参照）。結果を変数で受けてから照合する。
@@ -360,10 +360,10 @@ before_default="$(current_default)"
 echo "default agent before: ${before_default:-unknown}" >> "$LOG"
 
 # kiro-cli の既定エージェントは ~/.local/share/kiro-cli/data.sqlite3 に保存されるマシン全体の
-# 設定であり、この検査は必ず元へ戻す必要がある。set-default は agent list と同じく workspace
+# 設定であり、このチェックは必ず元へ戻す必要がある。set-default は agent list と同じく workspace
 # エージェントを cwd 配下からしか検出せず、しかも未検出でも終了コード 0 を返すため、
 # agent_list と同じ $KIRO_CWD から実行し、戻ったことを agent list で検証する。
-# 途中の検査が落ちても復旧するよう trap で実行する。
+# 途中のチェックが落ちても復旧するよう trap で実行する。
 restore_default() {
   [ -n "$before_default" ] || return 0
   [ "$before_default" != "$AGENT_NAME" ] || return 0
@@ -378,8 +378,8 @@ restore_default() {
 trap 'rc=$?; restore_default || rc=1; exit $rc' EXIT
 
 # kiro-cli はエージェントを cwd / $HOME 配下からのみ検出する。workspace では --project で
-# 別ディレクトリへ導入したときに --set-default が効くことを検査するため、PROJECT_DIR 以外の
-# cwd から実行する。global でも同様に $HOME 以外の cwd から実行して既定切替を検査する。
+# 別ディレクトリへ導入したときに --set-default が効くことをチェックするため、PROJECT_DIR 以外の
+# cwd から実行する。global でも同様に $HOME 以外の cwd から実行して既定切替をチェックする。
 (cd "$ARTIFACT_DIR" && bash "$REPO_ROOT/plugins/ndf/dev.kiro/install.sh" "${INSTALL_ARGS[@]}" --with-slack --set-default --yes) >> "$LOG" 2>&1
 after_default="$(current_default)"
 echo "default agent after: ${after_default:-unknown}" >> "$LOG"

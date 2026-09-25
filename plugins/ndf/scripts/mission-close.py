@@ -10,12 +10,12 @@
    （`pace: fast` の実装 PR は閉じる語を持たない）
 3. 閉じる条件 1（本番への配布まで済んだ、または配布なし）と、--with-verification のときは
    条件 2（その課題の受け入れ条件がすべて合格）を課題ごとに判定する
-4. 条件を満たす課題ごとに (a) 状態を読む → (b) 記録のリポジトリの課題なら盤面を Done →
+4. 条件を満たす課題ごとに (a) 状態を読む → (b) 記録のリポジトリの課題ならボードを Done →
    (c) 読み直して OPEN なら閉じる → (d) 読み直して CLOSED を確かめる
 
 結果は lib/step_result.py の形の 1 行の JSON。items は課題ごとに
 {kind:"issue", repo, number, result, reason?, cmd?}。result は
-closed / already_closed / failed / kept_open（--dry-run では would_close）。盤面の NOTE は
+closed / already_closed / failed / kept_open（--dry-run では would_close）。ボードの NOTE は
 {kind:"board_note"} の項目に載る。
 `--record-pr 0` は「本番の記録なし」（最終の検査で変更が無く本番を飛ばした）。配布の記録を読まず、
 閉じる条件も見ずに --issues の課題を閉じる。--issues と一緒のときだけ受ける。
@@ -297,7 +297,7 @@ def build_parser():
     ap.add_argument("--repo", help="記録のリポジトリ（owner/name）。省けば gh repo view で決める")
     ap.add_argument("--with-verification", action="store_true", help="リリース後テストを通る経路（閉じる条件 2 を見る）")
     ap.add_argument("--label", help="閉じるときのコメントに入れる「<マイルストーン>の<工程名>」")
-    ap.add_argument("--dry-run", action="store_true", help="状態を読むだけで、盤面も課題も書かない")
+    ap.add_argument("--dry-run", action="store_true", help="状態を読むだけで、ボードも課題も書かない")
     ap.add_argument("--root", help="対象のリポジトリの根（既定はカレントの git の根）")
     ap.set_defaults(func=cmd_close)
     return ap

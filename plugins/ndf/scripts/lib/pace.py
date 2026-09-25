@@ -8,7 +8,7 @@ check-trigger.py・mvv-gate.py・supervise.py が同じ規則で読む。標準�
      "boundary_paths": ["<glob>", ...],
      "triggers": {"score": 15, "common_weight": 2, "lines": 5000, "escapes": 2, "hours": 24}}
 
-glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。`**/` は 0 段でもよい。
+glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。`**/` は 0 階層でもよい。
 """
 from __future__ import annotations
 

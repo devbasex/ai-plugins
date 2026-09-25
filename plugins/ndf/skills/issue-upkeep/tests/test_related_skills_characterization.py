@@ -5,7 +5,7 @@ NOTE: 現状固定。期待値の根拠は仕様ではなく、構造改善の�
 
 | Skill | 固定するもの |
 | --- | --- |
-| `retrospective` | Pull Request の番号を引く 3 段（開発の起点 → 基準ブランチ → マージ済みの Pull Request） |
+| `retrospective` | Pull Request の番号を引く 3 つの手順（開発の起点 → 基準ブランチ → マージ済みの Pull Request） |
 """
 from __future__ import annotations
 
@@ -101,7 +101,7 @@ def declare(work: pathlib.Path, branch: str) -> None:
 
 
 def run_stages(work: pathlib.Path, case: str) -> subprocess.CompletedProcess:
-    """段 1 と、場合に応じた段 2 を続けて流し、2 つの変数を出す。"""
+    """手順 1 と、場合に応じた手順 2 を続けて流し、2 つの変数を出す。"""
     blocks = pr_blocks()
     script = (f"set -uo pipefail\n{blocks['dev_base'][1]}\n{blocks[case][1]}\n"
               'printf "%s %s %s\\n" "$dev_base" "$record_base" '

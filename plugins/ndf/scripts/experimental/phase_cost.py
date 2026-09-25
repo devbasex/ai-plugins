@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""phase_cost.py: フェーズと段の粒度を測る表を出す（試行。#773）。
+"""phase_cost.py: フェーズとステップの粒度を測る表を出す（試行。#773）。
 
     python3 phase_cost.py [--state-glob GLOB] [--session ID ...] [--window-limit N]
 
 出すもの:
-- supervise.py の段（`<plan>-state/state.json` の `log`）の種類ごとの件数と、費用・所要・往復・
+- supervise.py のステップ（`<plan>-state/state.json` の `log`）の種類ごとの件数と、費用・所要・往復・
   1 往復あたりの読み込み（`(input + cache_read + cache_write) / turns`）の中央値と、`cache_write` の最大
   （新しい文脈は 1 度だけキャッシュへ書くので、最大充填の代わりに読む。`claude -p` の会話は残らない）
 - `--session` を渡したときは、Agent で起動した記録の層・フェーズごとの件数・実作業の中央値・
@@ -40,7 +40,7 @@ def median(values: list) -> int | float | str:
 
 
 def read_steps(pattern: str) -> tuple[list[dict], int]:
-    """段の記録を返す。読めた計画の数も返す。"""
+    """ステップの記録を返す。読めた計画の数も返す。"""
     steps: list[dict] = []
     plans = 0
     for d in sorted(glob.glob(pattern)):
@@ -139,9 +139,9 @@ def main() -> None:
 
     steps, plans = read_steps(args.state_glob)
     srows = step_rows(steps)
-    lines = [f"## supervise.py の段（計画 {plans} 件・段 {len(steps)} 件）", ""]
+    lines = [f"## supervise.py のステップ（計画 {plans} 件・ステップ {len(steps)} 件）", ""]
     lines += table(
-        ["種類", "段", "件数", "失敗", "費用の中央値", "費用の合計", "所要（秒）の中央値",
+        ["種類", "ステップ", "件数", "失敗", "費用の中央値", "費用の合計", "所要（秒）の中央値",
          "往復の中央値", "1 往復の読み込みの中央値", "cache_write の最大"],
         ["type", "step", "count", "failed", "cost_median", "cost_sum", "seconds_median",
          "turns_median", "read_per_turn_median", "cache_write_max"],
@@ -167,7 +167,7 @@ def main() -> None:
     print()
     emit(result(
         "phase_cost", "ok",
-        f"段 {len(steps)} 件（計画 {plans} 件）と Agent の記録 {len(args.session)} セッションを集計した",
+        f"ステップ {len(steps)} 件（計画 {plans} 件）と Agent の記録 {len(args.session)} セッションを集計した",
         items=[{"kind": "step", **r} for r in srows] + [{"kind": "agent", **r} for r in arows],
         metrics=metrics,
     ))

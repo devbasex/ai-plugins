@@ -14,7 +14,7 @@ import pytest
 from workflow_helpers import path_with
 
 pytestmark = pytest.mark.skipif(
-    os.geteuid() == 0, reason="root は権限の検査を受けないため、読めないディレクトリを作れない",
+    os.geteuid() == 0, reason="root は権限のチェックを受けないため、読めないディレクトリを作れない",
 )
 
 
@@ -80,7 +80,7 @@ def test_every_copy_of_the_command_is_hidden(
 def test_calling_again_with_the_same_directory_does_not_collide(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """同じ `bin_dir` で隠す対象を変えて呼び直しても、前の写しに引きずられない。"""
+    """同じ `bin_dir` で隠す対象を変えて呼び直しても、前の複製に引きずられない。"""
     tools = tmp_path / "tools"
     command(tools, "jq")
     command(tools, "awk")
@@ -98,7 +98,7 @@ def test_calling_again_with_the_same_directory_does_not_collide(
 def test_a_relative_path_entry_keeps_working_links(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """PATH の相対パスから写したリンクも、写しの場所から辿れる。"""
+    """PATH の相対パスから写したリンクも、複製の場所から辿れる。"""
     command(tmp_path / "tools", "jq")
     command(tmp_path / "tools", "keep")
     monkeypatch.chdir(tmp_path)

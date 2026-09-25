@@ -1,9 +1,9 @@
-"""手順書が使う変数と、`$SCRIPTS` の解決手順の対応を検査する（#193）。
+"""手順書が使う変数と、`$SCRIPTS` の解決手順の対応をチェックする（#193）。
 
 `worktree` の手順書は、プラグイン配下のスクリプトを変数経由で呼ぶ。その変数を決める
 手順は `development-workflow/references/scripts-lookup.md` の「候補の並び」
-節にしかない。**このテストは解決手順の写しを持たず、その節の bash を読み出して実行する。**
-写しを持つと、写しだけが正しくて配布された手順が外れている状態を作れてしまう。
+節にしかない。**このテストは解決手順の複製を持たず、その節の bash を読み出して実行する。**
+複製を持つと、複製だけが正しくて配布された手順が外れている状態を作れてしまう。
 
 外部への通信は行わない。配置は `tmp_path` の上に作る。
 """
@@ -22,7 +22,7 @@ SKILLS_ROOT = SKILL_DIR.parent
 LOOKUP_REFERENCE = (
     SKILLS_ROOT / "development-workflow" / "references" / "scripts-lookup.md"
 )
-LOOKUP_HEADING = "## 入口を探す 1 段"
+LOOKUP_HEADING = "## 入口を探すコマンド"
 # 解決の入口の実物。配置を作るたびに写す。
 RESOLVE_ENTRY = Path(__file__).resolve().parents[3] / "scripts" / "resolve.sh"
 # Claude Code が SKILL.md の中で置き換える語。テストでも同じ置き換えを行う。
@@ -259,5 +259,5 @@ def test_skill_stops_when_scripts_is_unresolved() -> None:
 
 
 def test_lookup_leaves_empty_value_when_nothing_is_found(elsewhere, home) -> None:
-    """盤面への記録は従来どおり飛ばす。解決手順は空の値を残し、止めない。"""
+    """ボードへの記録は従来どおり飛ばす。解決手順は空の値を残し、止めない。"""
     assert resolve(elsewhere, home) == ""

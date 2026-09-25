@@ -256,7 +256,7 @@ def test_standard_outranks_legacy_refactor(repo: Path, state: Path) -> None:
 
 
 def test_another_repository_uses_its_own_note(repo: Path, state: Path) -> None:
-    """番号だけへ潰さない。同じ番号の別リポジトリの控えに当たらない。"""
+    """番号だけへ潰さない。同じ番号の別リポジトリの通過記録に当たらない。"""
     seed(repo, state, 5, "light", ("要求と受け入れ条件", "作業場所の用意", "実装",
                                    "完了判定"))
     out = context(guard(repo, state, create("Closes other/repo#5")))

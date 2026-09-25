@@ -115,7 +115,7 @@ def resolve_cgroup_dir(given: Optional[str], *, root: Optional[Path] = None,
     `CFTYPE_NOT_ON_ROOT` で置くため、cgroup v2 の根には `memory.events` が無い。
     あるということは、その位置がすでに根ではない＝自分の cgroup である。
 
-    `root` と `proc_cgroup` は検査のための差し替え口で、既定は上の 2 つの定数である。
+    `root` と `proc_cgroup` はチェックのための差し替え口で、既定は上の 2 つの定数である。
     """
     if given is not None:
         return Path(given)
@@ -281,7 +281,7 @@ def fetch_pull_requests(numbers: list[int], repo: Optional[str]) -> list[dict]:
 
 
 def intervals(records: list[dict], now: _dt.datetime) -> list[tuple[_dt.datetime, _dt.datetime]]:
-    """区間は `createdAt` から、`mergedAt`・`closedAt`・`--now` の最初に値のあるものまで。"""
+    """期間は `createdAt` から、`mergedAt`・`closedAt`・`--now` の最初に値のあるものまで。"""
     spans = []
     for record in records:
         created = record.get("createdAt")
@@ -301,9 +301,9 @@ def intervals(records: list[dict], now: _dt.datetime) -> list[tuple[_dt.datetime
 def build_events(
         spans: list[tuple[_dt.datetime, _dt.datetime]],
 ) -> list[tuple[_dt.datetime, int]]:
-    """区間を開始と終了の事象列に変換する。
+    """期間を開始と終了の事象列に変換する。
 
-    同じ時刻に閉じる区間と開く区間は重ならない。閉じるほうを先に数えるため、
+    同じ時刻に閉じる期間と開く期間は重ならない。閉じるほうを先に数えるため、
     事象の並びで終わり（−1）を始まり（+1）より前に置く。
     """
     events: list[tuple[_dt.datetime, int]] = []
@@ -334,7 +334,7 @@ def summarize_measurement(
         max_open: int,
         overlap_seconds: float,
 ) -> dict[str, object]:
-    """区間と走査結果を表示用の集計値に整形する。"""
+    """期間と走査結果を表示用の集計値に整形する。"""
     start = min(span[0] for span in spans)
     end = max(span[1] for span in spans)
     span_seconds = (end - start).total_seconds()
@@ -354,7 +354,7 @@ def summarize_measurement(
 
 
 def measure(spans: list[tuple[_dt.datetime, _dt.datetime]]) -> dict[str, object]:
-    """区間を並行度の集計値へ変換する。"""
+    """期間を並行度の集計値へ変換する。"""
     events = build_events(spans)
     max_open, overlap_seconds = scan_events(events)
     return summarize_measurement(spans, max_open, overlap_seconds)
@@ -414,7 +414,7 @@ def build_parser() -> argparse.ArgumentParser:
     con.add_argument("--input", default=None,
                      help="gh を呼ばず、番号と時刻の JSON を読む")
     con.add_argument("--now", default=None,
-                     help="開いたままの Pull Request の区間の終わり")
+                     help="開いたままの Pull Request の期間の終わり")
     con.set_defaults(handler=run_concurrency)
     return parser
 

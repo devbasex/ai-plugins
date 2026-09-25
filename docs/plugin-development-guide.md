@@ -173,14 +173,14 @@ plugins/{plugin-name}/
 
 ## 既存プラグインへ Skill を足す
 
-NDF（`plugins/ndf/`）へ Skill を 1 個足すときに触る箇所は 15 あります。**検査は食い違いを
-指摘しますが、直す順序と、検査が見ない箇所は教えません。** 表の上から順に進めます。
+NDF（`plugins/ndf/`）へ Skill を 1 個足すときに触る箇所は 15 あります。**チェックは食い違いを
+指摘しますが、直す順序と、チェックが見ない箇所は教えません。** 表の上から順に進めます。
 frontmatter と命名の書き方は [AUTHORING.md](../plugins/ndf/skills/AUTHORING.md) にあります。
 
 **`build-runtime-plugins.sh` を先に実行します。** 生成物が無いと `validate-runtime-plugins.sh`
 は先頭の `--check` で止まり、`skills` 配列と `description` の食い違いを指摘するところまで進みません。
 
-| # | 触る箇所 | 書く値 | 取りこぼしを拾う検査 |
+| # | 触る箇所 | 書く値 | 取りこぼしを拾うチェック |
 | ---: | --- | --- | --- |
 | 1 | `plugins/ndf/skills/<名前>/SKILL.md` | 実体 | `check-skill-frontmatter.py`（形だけ） |
 | 2 | `plugins/ndf/manifests/<ランタイム>-skills.txt` | 配るランタイムの分だけ名前を 1 行 | `validate-runtime-plugins.sh`（どの manifest にも無いときだけ。配る先は判断） |
@@ -272,7 +272,7 @@ bash scripts/validate-runtime-plugins.sh
 実ランタイムのインストール経路を Docker コンテナ内で確かめる smoke test の手順は
 [tests/runtime-smoke/README.md](../tests/runtime-smoke/README.md) にあります。
 
-`scripts/` 自体を変更した場合は、その検査のテストも実行します。
+`scripts/` 自体を変更した場合は、そのチェックのテストも実行します。
 
 ```bash
 uv run --with pytest --with pytest-xdist pytest scripts/tests -q -n auto

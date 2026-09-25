@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/devbasex/ai-plugins/main/plugins/ndf/skills/release/schemas/instructions.schema.json",
   "title": "NDF 指示書の宣言",
-  "description": "リポジトリ側の .ndf/instructions.json。指示書の検査（instructions-check.py）の判定の強さを決める。無ければ既定の判定だけが動く。",
+  "description": "リポジトリ側の .ndf/instructions.json。指示書のチェック（instructions-check.py）の判定の強さを決める。無ければ既定の判定だけが動く。",
   "type": "object",
   "required": ["version"],
   "additionalProperties": false,
@@ -40,7 +40,7 @@
     "pending_marker": {
       "type": "string",
       "minLength": 1,
-      "description": "版が決まる前の段落の印（例: の次の版で）。空文字列は宣言の不正"
+      "description": "版が決まる前の段落の目印（例: の次の版で）。空文字列は宣言の不正"
     },
     "budget": {
       "type": "object",

@@ -3,7 +3,7 @@
 **純粋な処理だけを置く。** 今の時刻は内部で取らず、引数で受ける。時刻を内部で取ると、
 締め切りの計算がテストで再現できない。値の単位は、断りの無い限り分である。
 
-計画で見積りを収め、実装の中は項目ごとの締め切りで着手を止める。段の監視の上限は
+改修計画で見積りを収め、実装の中は項目ごとの締め切りで着手を止める。手順の監視の上限は
 `timeline` がこの締め切りから導く（決定 23。決定 4 の「実行中の CLI を止めない」を改めた）。
 """
 from __future__ import annotations
@@ -14,7 +14,7 @@ from typing import Any, Optional
 from .allocation import lookup
 from .vocabulary import SEVERITY_ORDER
 
-# 段の順位。Jev か実装担当が付ける（#933 決定 11）。付いていない候補は最も低い 0 とみなす。
+# 等級の順位。Jev か実装担当が付ける（#933 決定 11）。付いていない候補は最も低い 0 とみなす。
 TIER_ORDER = {"high": 3, "medium": 2, "low": 1}
 
 
@@ -33,10 +33,10 @@ def estimate_total(estimate: dict[str, Any]) -> float:
 
 
 def reserve(baseline_seconds: Optional[float], ci_check: bool, fix_minutes: float) -> dict[str, float]:
-    """控え R の内訳（分）。
+    """予備時間 R の内訳（分）。
 
     全体のテストの所要は同じ実行の着手前の全体のテスト（`init`）の秒から見積もる。
-    測れていなければ 0 にする。見積りが無いのに控えを大きく取ると、項目が 1 件も
+    測れていなければ 0 にする。見積りが無いのに予備時間を大きく取ると、項目が 1 件も
     入らなくなる。最終ゲートの全体のテストは `--ci-check` があれば継続的統合が担い、
     想定最大時間の内で走らないため 0 にする。
     """
@@ -52,14 +52,14 @@ def reserve(baseline_seconds: Optional[float], ci_check: bool, fix_minutes: floa
 
 
 def reserve_total(r: dict[str, Any]) -> float:
-    """控えの合計（分）。"""
+    """予備時間の合計（分）。"""
     return sum(float(v or 0.0) for v in r.values())
 
 
 def rank_key(candidate: dict[str, Any]) -> tuple:
     """`sorted(..., key=rank_key)` の先頭が 1 位になる鍵。
 
-    順位は（段, 賛同した者の数, 重要度）の降順で、同じなら見積りの合計の昇順である。
+    順位は（等級, 賛同した者の数, 重要度）の降順で、同じなら見積りの合計の昇順である。
     降順の 3 つは符号を反転して昇順の並べ替えに載せる。
     """
     return (
@@ -99,10 +99,10 @@ def end_time(started_at: _dt.datetime, budget_minutes: int, reserve_total_minute
 def deadlines(selected: list[dict[str, Any]], T: _dt.datetime) -> list[dict[str, Optional[_dt.datetime]]]:
     """採用の順（1..n）に、実装とテストの追加の着手の締め切りを返す。
 
-    - 実装 i: `T − Σ_{j≥i} implement_j − Σ_{全件} verify_j`。検証は実装のフェーズの
+    - 実装 i: `T − Σ_{j≥i} implement_j − Σ_{全件} verify_j`。検証は実装の手順の
       後に全件をまとめて走らせるため、i より前の項目の検証も末尾の側に残る
     - テストの追加 i: `T − Σ_{全件}(implement_j + verify_j) − Σ_{j≥i} test_j`。
-      テストの追加は実装より前のフェーズなので、実装と検証の全件を先に差し引く。
+      テストの追加は実装より前の手順なので、実装と検証の全件を先に差し引く。
       足すテストが無い項目（test が 0）は `None`
     """
     estimates = [c.get("estimate") or {} for c in selected]
@@ -128,8 +128,8 @@ def deadlines(selected: list[dict[str, Any]], T: _dt.datetime) -> list[dict[str,
 def fix_end(started_at: _dt.datetime, budget_minutes: int, reserve: dict[str, Any]) -> _dt.datetime:
     """修正に使える終わりの時刻。
 
-    **控えの `fix` は引かない。** T から測ると、控えておいた修正 1 回分が使われない。
-    全体のテストの控え 2 つと、最終ゲートの修正の控え（`final_fix`。決定 26）を差し引いた
+    **予備時間の `fix` は引かない。** T から測ると、控えておいた修正 1 回分が使われない。
+    全体のテストの予備時間 2 つと、最終ゲートの修正の予備時間（`final_fix`。決定 26）を差し引いた
     終わりである。`final_fix` を引かないと、検証の直しが最終ゲートの修正の時間まで使う。
     """
     return started_at + _dt.timedelta(
@@ -148,5 +148,5 @@ def fix_time_left(
 
 
 def available_minutes(budget_minutes: int, elapsed_minutes: float, reserve: dict[str, Any]) -> float:
-    """使える時間 A = budget − 経過 E − 控え R（分）。負にもなる（何も入らない）。"""
+    """使える時間 A = budget − 経過 E − 予備時間 R（分）。負にもなる（何も入らない）。"""
     return float(budget_minutes) - float(elapsed_minutes) - reserve_total(reserve)

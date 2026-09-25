@@ -25,7 +25,7 @@ SLUG = "devbasex/ai-plugins"
 
 
 def base_env(state_dir: Path, extra: dict | None = None) -> dict:
-    """控えの置き場所を試験用へ向けた環境を返す。"""
+    """通過記録の置き場所を試験用へ向けた環境を返す。"""
     env = os.environ.copy()
     env.setdefault("LC_ALL", "C.UTF-8")
     env["CLAUDE_PLUGIN_DATA"] = str(state_dir)
@@ -136,8 +136,8 @@ def path_with(bin_dir: Path, without: tuple[str, ...] = ()) -> str:
     `PermissionError` を上げる。返す前に対象が見つからないことも確かめる。黙って返すと、
     テストが確かめたい「コマンドが無いとき」が成立しないまま通る。
 
-    写しは呼び出しごとに別のディレクトリへ作る。同じ `bin_dir` で呼び直しても、前の
-    呼び出しの写しと衝突しない。
+    複製は呼び出しごとに別のディレクトリへ作る。同じ `bin_dir` で呼び直しても、前の
+    呼び出しの複製と衝突しない。
     """
     hidden = set(without)
     bin_dir.mkdir(parents=True, exist_ok=True)

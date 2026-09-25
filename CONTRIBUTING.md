@@ -57,7 +57,7 @@ cd .worktrees/feature/<名前>
 ## 手元での検証
 
 **Pull Request を出す前に、次の 4 つをこの順で実行します。** 継続的統合が実行するものと同じ
-検査です。リポジトリの根から実行します。
+チェックです。リポジトリの根から実行します。
 
 ```bash
 # 1. テスト（継続的統合と同じ範囲を 1 回の起動で回す。-n auto でコア数だけ並列に回す）
@@ -114,7 +114,7 @@ Fix: 作業ツリーの書き込み先の判定が case のフォールスルー
 | 文章の書き方 | `plugins/ndf/skills/markdown-writing/SKILL.md` |
 | 新しいプラグインそのものを足すとき | [docs/plugin-development-guide.md](./docs/plugin-development-guide.md) の「新しいプラグインの追加」 |
 
-frontmatter は `python3 scripts/check-skill-frontmatter.py` が検査します。`description` の
+frontmatter は `python3 scripts/check-skill-frontmatter.py` がチェックします。`description` の
 長さには上限があり、4 つのランタイムのうち最も厳しいものに合わせています。上限と根拠は
 Skill 執筆規約の「上限値」にあります。
 

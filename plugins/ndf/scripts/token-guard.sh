@@ -10,7 +10,7 @@
 # | Skill              | 寿命 5 分の supervisor が文脈を伸ばしたまま収束ループを始める |
 #
 # **拒否は `permissionDecision: deny` で返し、終了コードは常に 0 にする。** 通すときは何も
-# 出さない。判定が失敗したとき（入力が読めない・jq が無い・控えを書けない・記録を読めない・
+# 出さない。判定が失敗したとき（入力が読めない・jq が無い・記録を書けない・記録を読めない・
 # ロックを待ちの上限の内に取れない）は通す。hook の失敗でツールの実行を止めないためである。
 # 待ちの上限は `NDF_TOKEN_GUARD_LOCK_WAIT`（秒・0 以上の整数。既定 1）で変えられる。
 # 本番は既定の 1 秒のままにする。延ばすのは負荷の高い環境で並列の試験を動かすときである（#950）。
@@ -37,7 +37,7 @@ deny() {
   exit 0
 }
 
-# 控えの置き場所。順は workflow-common.sh の wf_state_dir と同じ（あちらは stages/、
+# 記録の置き場所。順は workflow-common.sh の wf_state_dir と同じ（あちらは stages/、
 # こちらは guards/ を置く）。workflow-common.sh は通信の層まで読み込むため、毎回の hook
 # では読み込まない。
 guards_dir() {
@@ -131,8 +131,8 @@ context_tokens() {
     ] | last // empty' 2>/dev/null
 }
 
-# 中継の判定と告知の文面を relay.py notice の 1 回の起動で得る（1 行目が判定、2 行目が告知。#980）。
-# 中継の下なら告知を出して 0、外なら 1 を返す
+# ラッパーの判定と告知の文面を relay.py notice の 1 回の起動で得る（1 行目が判定、2 行目が告知。#980）。
+# ラッパーの下なら告知を出して 0、外なら 1 を返す
 relay_notice() {
   local out
   out=$(python3 "$HERE/relay.py" notice 2>/dev/null) || return 1
@@ -177,7 +177,7 @@ guard_context() {
   dir=$(guards_dir) || exit 0
   take_lock "$dir" "$sid" || exit 0
   mark="$dir/context-$sid.json"
-  # 中継（relay.py）の直接の子の conductor では 1 度の通しをやめ、上限を超えている限り止め
+  # ラッパー（relay.py）の直接の子の conductor では 1 度の通しをやめ、上限を超えている限り止め
   # 続ける。人が居ない前提で LLM が「続ける」と決めて上限を超えたまま進むことを止める（#895）
   relayed=0
   notice=
@@ -193,12 +193,12 @@ guard_context() {
   issues=$(issue_refs "$words")
   local next="/ndf:development-workflow ${issues:-<課題番号>}"
   if [ "$relayed" = 1 ]; then
-    deny "会話の文脈が ${total} トークンで、上限 ${limit} を超えた。中継の下なので、上限を超えている限りこの起動を止め続ける。新しいフェーズを起動せず、動いている supervisor の報告を待ってから、引継ぎ文書（/goal の指示が名指ししたもの。無ければ書かない）を更新し、次のコマンドを情報文字列 ndf-next の囲みのコードブロック 1 つで出して応答を終える（中身: /goal ${next}、名指しの引継ぎ文書があれば「<文書> の続きから」）。<課題番号> のままなら、進めている課題の番号を補う。ブロックの直前に次の 1 文をそのまま書き、承認や確認を挟まずに出して終える: ${notice}。規約: ${CONTEXT_DOC}（止めるなら NDF_CONTEXT_GUARD=0、上限は NDF_CONTEXT_LIMIT）"
+    deny "会話の文脈が ${total} トークンで、上限 ${limit} を超えた。ラッパーの下なので、上限を超えている限りこの起動を止め続ける。新しいフェーズを起動せず、動いている supervisor の報告を待ってから、引継ぎ文書（/goal の指示が名指ししたもの。無ければ書かない）を更新し、次のコマンドを情報文字列 ndf-next の囲みのコードブロック 1 つで出して応答を終える（中身: /goal ${next}、名指しの引継ぎ文書があれば「<文書> の続きから」）。<課題番号> のままなら、進めている課題の番号を補う。ブロックの直前に次の 1 文をそのまま書き、承認や確認を挟まずに出して終える: ${notice}。規約: ${CONTEXT_DOC}（止めるなら NDF_CONTEXT_GUARD=0、上限は NDF_CONTEXT_LIMIT）"
   fi
   deny "会話の文脈が ${total} トークンで、上限 ${limit} を超えた。この工程は新しい会話で始める。次のコマンドを情報文字列 ndf-next の囲みのコードブロック 1 つで示して応答を終える。中身: ${next}（今の区間を /goal で始めていたなら /goal ${next}）。<課題番号> のままなら、進めている課題の番号を補って示す。このまま続けると利用者が決めたら、同じ起動をもう一度行うと 1 度だけ通る。規約: ${CONTEXT_DOC}（止めるなら NDF_CONTEXT_GUARD=0、上限は NDF_CONTEXT_LIMIT）"
 }
 
-# 記録の先頭から最初の assistant 行を探し、その文脈量を読む（区切りの P）。見つけた時点で読むのをやめる。
+# 記録の先頭から最初の assistant 行を探し、その文脈量を読む（スイッチポイントの判定の P）。見つけた時点で読むのをやめる。
 first_context_tokens() {
   jq -rn 'first(inputs | select(.type == "assistant" and (.message.usage | type) == "object")
       | .message.usage
@@ -221,7 +221,7 @@ guard_supervisor_cut() {
   esac
   aid=$(field '.agent_id')
   [ -n "$aid" ] || return 0
-  # 定義の名前はサブエージェントの中の入力にだけ付く。寿命 1 時間の ndf:supervisor-waits は区切らない
+  # 定義の名前はサブエージェントの中の入力にだけ付く。寿命 1 時間の ndf:supervisor-waits は替えない
   [ "$(field '.agent_type')" = "ndf:supervisor" ] || return 0
   # transcript_path はサブエージェントの中でも親の記録を指す。supervisor 自身の記録を組み立てて読む
   tp=$(field '.transcript_path')
@@ -234,8 +234,8 @@ guard_supervisor_cut() {
   case "$last" in ''|*[!0-9]*) return 0 ;; esac
   ratio=${NDF_SUPERVISOR_CUT_RATIO:-1.5}
   awk -v c="$last" -v p="$first" -v r="$ratio" 'BEGIN { exit !(r + 0 > 0 && c >= r * p) }' || return 0
-  # 1 度だけ通すことはしない。やり直すだけで越えられると、区切るかが LLM の裁量に戻る
-  deny "この supervisor の文脈が ${last} トークンで、最初の呼び出し（${first}）の ${ratio} 倍以上ある。寿命 5 分のまま収束ループ（${skill}）を始めると、待ちの後のたびに文脈の全体を書き直す。同じ起動をやり直さずに、Pull Request を出す・進行を記録するなど起動の前に済ませることを済ませてから、フェーズの報告を「結果: 区切り」「次のフェーズ: <今と同じフェーズ>」「次の工程: ${stage}」で返す（規則 12。conductor が寿命 1 時間の supervisor で続ける）。規約: ${CONTEXT_DOC}（止めるなら NDF_SUPERVISOR_CUT_GUARD=0、比は NDF_SUPERVISOR_CUT_RATIO）"
+  # 1 度だけ通すことはしない。やり直すだけで越えられると、スイッチポイントが LLM の裁量に戻る
+  deny "この supervisor の文脈が ${last} トークンで、最初の呼び出し（${first}）の ${ratio} 倍以上ある。寿命 5 分のまま収束ループ（${skill}）を始めると、待ちの後のたびに文脈の全体を書き直す。同じ起動をやり直さずに、Pull Request を出す・進行を記録するなど起動の前に済ませることを済ませてから、フェーズの報告を「結果: スイッチポイント」「次のフェーズ: <今と同じフェーズ>」「次の工程: ${stage}」で返す（規則 12。conductor が寿命 1 時間の supervisor で続ける）。規約: ${CONTEXT_DOC}（止めるなら NDF_SUPERVISOR_CUT_GUARD=0、比は NDF_SUPERVISOR_CUT_RATIO）"
 }
 
 case "$TOOL" in

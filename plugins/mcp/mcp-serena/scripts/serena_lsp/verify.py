@@ -178,7 +178,7 @@ def _prepare(result: dict, root: Path, candidates: list, not_selected: list, dry
     """検証の前の段階。(途中で終える (結果, 終了コード) か None, 元の本文, コマンド, 待ち時間) を返す。"""
     yml = root / ".serena/project.yml"
     local = root / ".serena/project.local.yml"
-    # 終了コード 3 の検査は、書き換えの try / finally に入る前に済ませる
+    # 終了コード 3 のチェックは、書き換えの try / finally に入る前に済ませる
     original, error = _precheck_yml(yml, local)
     if error:
         return ({**result, "error": error}, 3), None, None, None

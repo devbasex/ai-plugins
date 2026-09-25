@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""doc-lint.py: 追加した行だけに、文書の書き方の検査を掛ける（#870 B2）。
+"""doc-lint.py: 追加した行だけに、文書の書き方のチェックを掛ける（#870 B2）。
 
     python3 doc-lint.py [--base <ref>] [--root DIR] [--exclude PREFIX...] [--all-lines]
 
@@ -135,10 +135,10 @@ def cmd_lint(a):
     metrics = {"base": base, "files": len(files), "lines": total, "hits": len(items),
                "rules": {r: sum(1 for i in items if i["rule"] == r) for r in RULES}}
     if items:
-        summary = f"追加した {total} 行のうち {len(items)} 行に書き方の検査の語がある（{len(files)} ファイル）"
+        summary = f"追加した {total} 行のうち {len(items)} 行に書き方のチェックの語がある（{len(files)} ファイル）"
         emit(result(TOOL, "stopped", summary, items, metrics,
                     next="ヒットした行を、今の決まりだけを書く形に直す（経緯・比較・課題番号の由来を外す）"))
-    emit(result(TOOL, "ok", f"追加した {total} 行に書き方の検査の語は無い（{len(files)} ファイル）", items, metrics))
+    emit(result(TOOL, "ok", f"追加した {total} 行に書き方のチェックの語は無い（{len(files)} ファイル）", items, metrics))
 
 
 def build_parser():

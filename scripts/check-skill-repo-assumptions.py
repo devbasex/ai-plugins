@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""公開する Skill の本文に「対象リポジトリ = ai-plugins 自身」の前提が無いかを検査する。
+"""公開する Skill の本文に「対象リポジトリ = ai-plugins 自身」の前提が無いかをチェックする。
 
 NDF の Skill は任意のリポジトリに対して実行される。本文が ai-plugins にしか無い操作・
 パス・値を条件なしで実行させると、他のリポジトリでは成立せず、担当した AI が自分の判断で
@@ -7,7 +7,7 @@ NDF の Skill は任意のリポジトリに対して実行される。本文が
 
 規約の本文は plugins/ndf/skills/AUTHORING.md「対象リポジトリを仮定しない」にある。本
 スクリプトはそのうち機械的に判定できる部分、すなわち **ai-plugins に固有の語が本文へ
-現れていないか**だけを検査する。書き方が正しいか（探し方を書いているか、形で分岐して
+現れていないか**だけをチェックする。書き方が正しいか（探し方を書いているか、形で分岐して
 いるか）は判定しない。
 
 走査するのは `manifests/*-skills.txt` の和集合が指す Skill の Markdown と、family の
@@ -15,17 +15,17 @@ NDF の Skill は任意のリポジトリに対して実行される。本文が
 `tests/`・`experimental/` の下は対象にしない。スクリプトには SCRIPT_PATTERNS を掛ける。
 計画や既定値に埋め込んだ ai-plugins の形（パス・ブランチ・テストや同期のコマンド）は、
 利用者のリポジトリでは解決しない。プロジェクトごとに違うものは `.ndf/` の宣言か引数で受ける。**manifest に載っていながら走査できる本文を 1 本も
-持たない Skill があるときは、検査自体を失敗させる**。読み飛ばすと、公開する Skill の本文が
-丸ごと未走査のまま検査が成功する。
+持たない Skill があるときは、チェック自体を失敗させる**。読み飛ばすと、公開する Skill の本文が
+丸ごと未走査のままチェックが成功する。
 
 除外は EXCLUSIONS がファイルと理由の対で宣言する。**宣言した対象が走査の対象として
-実在しないときは、ヒットの有無に関わらず検査自体を失敗させる**。ファイルを消したり
+実在しないときは、ヒットの有無に関わらずチェック自体を失敗させる**。ファイルを消したり
 移したりしたときに、宣言だけが残り続けることを防ぐ。
 
 **ファイルは `--skills-dir` に渡すのと同じ書き方（Skill ディレクトリを含むパス）で書く。**
 `--skills-dir` は plugin family を 1 つだけ指定でき、その family の外にある宣言は走査の
 対象にならない。Skill ディレクトリからの相対パスで書くと、どの family の宣言かが判別
-できず、指定しなかった family の宣言まで「実在しない」と読んで検査を落とす。実在の検査は
+できず、指定しなかった family の宣言まで「実在しない」と読んでチェックを落とす。実在のチェックは
 **指定した family に属する宣言だけ**へ掛ける。`--skills-dir` を省いた走査（family を
 すべて見る）では、どの family にも属さない宣言も陳腐化として落とす。
 
@@ -39,10 +39,10 @@ NDF の Skill は任意のリポジトリに対して実行される。本文が
 
     0  除外の外にヒットが無い
     1  除外の外にヒットがある
-    2  除外の宣言・引数・走査の範囲が誤っている（検査そのものが成立しない）
+    2  除外の宣言・引数・走査の範囲が誤っている（チェックそのものが成立しない）
 
 **`--report` は出力を足すだけで、終了コードは上表のまま**である。レポートを常に 0 で
-返すと、同じ検査を一覧として実行した利用者と自動処理が違反を成功として扱う。
+返すと、同じチェックを一覧として実行した利用者と自動処理が違反を成功として扱う。
 """
 from __future__ import annotations
 
@@ -91,7 +91,7 @@ SCRIPT_SKIP_DIRS = ("tests", "experimental")
 
 # --- 除外 -------------------------------------------------------------------
 # キーは Skill ディレクトリを含むパス（`--skills-dir` に渡すのと同じ書き方）、値は除外
-# する理由である。**理由は必須**で、空にすると検査自体が失敗する。
+# する理由である。**理由は必須**で、空にするとチェック自体が失敗する。
 #
 # 除外の基準は「記述の主題が NDF 自身の配置・配布であること」と「配布物の形で分岐した
 # 先の参照であること」の 2 つに限る。対象リポジトリへの指示は除外しない。
@@ -170,8 +170,8 @@ def collect_documents(skills_dir: pathlib.Path) -> tuple[list[str], list[str]]:
 
     第 2 の戻り値は、manifest に載っていながら走査できる本文を 1 本も持たない Skill 名で
     ある。ディレクトリが無い場合と、あっても対象の Markdown が無い場合のどちらも入る。
-    **呼び出し側はこれを検査成立不可として扱う**。読み飛ばすと、公開する Skill の本文が
-    丸ごと未走査のまま検査が成功する。
+    **呼び出し側はこれをチェック成立不可として扱う**。読み飛ばすと、公開する Skill の本文が
+    丸ごと未走査のままチェックが成功する。
     """
     docs: list[str] = []
     unscanned: list[str] = []
@@ -226,9 +226,9 @@ def validate_exclusions(exclusions: dict[str, str], scanned: set[str],
                         skills_dirs: list[pathlib.Path], exhaustive: bool) -> list[str]:
     """除外の宣言が成立しているかを確かめ、成立しない理由を返す。
 
-    実在の検査は、**検査した Skill ディレクトリに属する宣言だけ**へ掛ける。`--skills-dir`
+    実在のチェックは、**チェックした Skill ディレクトリに属する宣言だけ**へ掛ける。`--skills-dir`
     は plugin family を 1 つだけ指定でき、そのとき他の family の宣言は走査の対象にならない。
-    走査していないものを「実在しない」と読むと、正しい宣言のまま検査が落ちる。
+    走査していないものを「実在しない」と読むと、正しい宣言のままチェックが落ちる。
 
     `exhaustive` は family をすべて見た走査（`--skills-dir` を省いた既定）であることを表す。
     このときはどの family にも属さない宣言も陳腐化として挙げる。指定を省いた走査で見逃すと、
@@ -253,7 +253,7 @@ def validate_exclusions(exclusions: dict[str, str], scanned: set[str],
 
 
 def resolve_skills_dirs(given: list[str] | None) -> list[pathlib.Path]:
-    """検査対象の Skill ディレクトリを決める。"""
+    """チェック対象の Skill ディレクトリを決める。"""
     if given:
         return [pathlib.Path(d) for d in given]
     found = []
@@ -267,8 +267,8 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--skills-dir", action="append", default=None,
-                    help="検査対象の Skill ディレクトリ。複数指定できる"
-                         "（既定: manifests/ を持つ plugin family の skills/ を全て検査）")
+                    help="チェック対象の Skill ディレクトリ。複数指定できる"
+                         "（既定: manifests/ を持つ plugin family の skills/ を全てチェック）")
     ap.add_argument("--exclusions", default=None,
                     help="除外の宣言を JSON（{相対パス: 理由}）で差し替える"
                          "（既定: 本スクリプトの EXCLUSIONS）")
@@ -278,7 +278,7 @@ def main() -> int:
 
     skills_dirs = resolve_skills_dirs(args.skills_dir)
     if not skills_dirs:
-        print("[check-skill-repo-assumptions] 検査対象が見つからない", file=sys.stderr)
+        print("[check-skill-repo-assumptions] チェック対象が見つからない", file=sys.stderr)
         return 2
     for d in skills_dirs:
         if not d.is_dir():
@@ -340,7 +340,7 @@ def main() -> int:
 
     # `--report` は出力を足すだけで、判定は変えない。走査の範囲と除外の宣言の誤り
     # （rc=2）はこの手前で落としており、ヒットだけを 0 で返すと同じ実行の中で終了
-    # コードの意味が 2 通りになる。README はこのコマンドを検査の一覧として載せる。
+    # コードの意味が 2 通りになる。README はこのコマンドをチェックの一覧として載せる。
     if args.report:
         for line in report_lines:
             print(line)

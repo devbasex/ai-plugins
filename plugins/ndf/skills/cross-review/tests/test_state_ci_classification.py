@@ -1,10 +1,10 @@
-"""検査ジョブの振り分けを、判定と修正の取り込みが同じ 1 つの実装で行う（#327）。
+"""チェックジョブの振り分けを、判定と修正の取り込みが同じ 1 つの実装で行う（#327）。
 
 振り分けは `cmd_merge_fix` の中にべた書きされており、収束の判定からは呼べなかった。
 `_classify_ci` へ切り出し、両方が同じ名前の一覧へ同じ判断を返すことを固定する。
 
 **分からない名前は code-related へ倒す。** 継続的統合の名前はリポジトリごとに違い、
-一覧に無い名前を無害と決めつけると、落ちた検査を通したまま収束させることになる。
+一覧に無い名前を無害と決めつけると、落ちたチェックを通したまま収束させることになる。
 """
 from __future__ import annotations
 
@@ -52,9 +52,9 @@ def _write(tmp_dir: pathlib.Path, state: dict) -> None:
 
 def test_an_unknown_name_is_treated_as_code_related(state_mod):
     """一覧に無い名前は code-related として扱う（保守的な既定）。"""
-    got = state_mod._classify_ci([_run("我々の知らない検査")])
+    got = state_mod._classify_ci([_run("我々の知らないチェック")])
 
-    assert got.code_failed == ["我々の知らない検査"]
+    assert got.code_failed == ["我々の知らないチェック"]
     assert got.meta_failed == []
 
 
@@ -68,7 +68,7 @@ def test_a_meta_name_is_separated_from_a_code_name(state_mod):
 def test_a_code_name_that_starts_with_a_meta_word_is_not_meta(state_mod):
     """`meta` を含むだけの名前を meta-only にしない。
 
-    部分一致で拾うと `metabase tests` / `metadata lint` のようなコード検査が
+    部分一致で拾うと `metabase tests` / `metadata lint` のようなコードチェックが
     meta-only になり、失敗したまま収束する。一覧に無い名前は code-related へ倒す。
     """
     got = state_mod._classify_ci([_run("metabase tests"), _run("metadata lint")])
@@ -128,7 +128,7 @@ def test_the_judge_and_the_merge_share_one_classification(tmp_dir, state_mod, mo
     with pytest.raises(SystemExit) as merge_exit:
         state_mod.cmd_merge_fix(argparse.Namespace(pr=PR, file=None))
 
-    # 判定側: GitHub から読んだ検査ジョブを見る
+    # 判定側: GitHub から読んだチェックジョブを見る
     _write(tmp_dir, _state([approved]))
     with pytest.raises(SystemExit) as judge_exit:
         state_mod.cmd_judge(argparse.Namespace(pr=PR))

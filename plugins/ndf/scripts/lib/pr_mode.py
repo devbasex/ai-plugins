@@ -1,7 +1,7 @@
 """Pull Request の宛て先の区別と、本文の末尾に書くモードの 1 行。
 
 ミッションの課題の Pull Request はミッションのブランチ（`mission/<名前>`）宛てに出して集め、
-実装レビューを通さない。develop への Pull Request はミッションで 1 本で、検査を通す。
+実装レビューを通さない。develop への Pull Request はミッションで 1 本で、チェックを通す。
 
 本文の末尾には `モード: <mode> / 通した工程: <工程> → <工程>` の 1 行を書く。配布後の
 不具合の起票数と突き合わせ、ミッション単位にした後の精度を測る材料にする。
@@ -14,7 +14,7 @@ MISSION_PREFIX = "mission/"
 MODE_LINE_PREFIX = "モード: "
 REVIEW_MARK = "<!-- I want to review in Japanese. -->"
 STAGE_SEP = " → "
-# 本文の最後に置く印。モードの 1 行はこれらより前に置く
+# 本文の最後に置く目印。モードの 1 行はこれらより前に置く
 TRAILERS = (REVIEW_MARK, "🤖 Generated with")
 
 
@@ -42,7 +42,7 @@ def mode_line(mode: str, stages: list[str]) -> str:
 def with_mode_line(body: str, mode: str | None, stages: list[str]) -> str:
     """本文の末尾にモードの 1 行を置く。既にあれば置き換える。
 
-    末尾の印（レビューの印・生成の署名）はその後ろに残す。mode が空なら本文を変えない。
+    末尾の目印（レビューの目印・生成の署名）はその後ろに残す。mode が空なら本文を変えない。
     """
     if not mode:
         return body

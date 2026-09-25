@@ -11,7 +11,7 @@ run() {
 run bash "$ROOT_DIR/scripts/build-runtime-plugins.sh" --check
 
 # Skill を配る plugin family を manifests/ の有無から検出する（plugins/mcp/* は別系統）。
-# 固定リストを置かないのは、family を足したときに検査対象から漏れる経路を作らないためである。
+# 固定リストを置かないのは、family を足したときにチェック対象から漏れる経路を作らないためである。
 # 後段の静的解析（claude plugin validate / Kiro installer の dry-run）もこの一覧で回す。
 FAMILIES=()
 for plugin_dir in "$ROOT_DIR"/plugins/*; do
@@ -56,7 +56,7 @@ from pathlib import Path
 
 root = Path(sys.argv[1])
 # 検出済みの plugin family は呼び出し側から受け取る（検出を 2 箇所に持つと、
-# 一方だけが新しい family を拾って検査範囲が食い違う）。
+# 一方だけが新しい family を拾ってチェック範囲が食い違う）。
 families = sys.argv[2:]
 
 
@@ -84,7 +84,7 @@ for plugin in claude_marketplace.get("plugins", []):
         errors.append(f"Claude plugin manifest missing under {source}")
 
 # Codex は専用のマーケットプレイス定義が無ければ .claude-plugin/marketplace.json へ
-# フォールバックする。定義は 1 つに統合したので、同じエントリを Codex 側の要件でも検査する。
+# フォールバックする。定義は 1 つに統合したので、同じエントリを Codex 側の要件でもチェックする。
 # Codex は plugin.json（Agent Plugins 形式）> .codex-plugin > .claude-plugin の順で採るため、
 # ルートマニフェストか Codex 用マニフェストのどちらかがあれば良い。
 for plugin in claude_marketplace.get("plugins", []):
@@ -110,7 +110,7 @@ for plugin in claude_marketplace.get("plugins", []):
 
 # 版数と Skill 数は plugin.json と marketplace の description に重複して書かれている。
 # `.claude-plugin/marketplace.json` と Codex 版 plugin.json は build-runtime-plugins.sh の
-# 生成対象ではなく、古い値が残っても JSON としては妥当なため他の検査に掛からない。
+# 生成対象ではなく、古い値が残っても JSON としては妥当なため他のチェックに掛からない。
 # 実際に版数と Skill 数の取り残しが繰り返し起きたので、Claude 版 plugin.json を基準に突き合わせる。
 #
 # 版数の書式は根の下の共有の定義から読む。この本体は標準入力から渡されるため自分の位置を
@@ -168,7 +168,7 @@ def check_description(label: str, description, version: str, expected, source: s
     if expected is None:
         return
     # 抽出できないこと自体をエラーにする。素通りさせると、Skill 数の記述を消すか書式を変える
-    # だけでこの検査を無効化できてしまう。
+    # だけでこのチェックを無効化できてしまう。
     described = described_skill_count(description)
     if described is None:
         errors.append(
@@ -328,7 +328,7 @@ for family in families:
 
 # マニフェストの skills は配列で明示する。配列に載っていない Skill はランタイムから
 # 読み込まれないため、manifest と一致していないと配布漏れになる。ディレクトリの中身を
-# 見る上の検査では検出できないので、ここで突き合わせる。
+# 見る上のチェックでは検出できないので、ここで突き合わせる。
 for family in families:
   for runtime, manifest_key in (("claude", ".claude-plugin"), ("codex", ".codex-plugin")):
     skills_manifest = plugin_dir_of(family) / f"manifests/{runtime}-skills.txt"
@@ -436,7 +436,7 @@ for family in "${FAMILIES[@]}"; do
 done
 
 # --with-codex を持つのは NDF の installer だけ（Codex 向け Skill も併せて配置する経路）。
-# family 共通の引数ではないため、ここだけは対象を明示して検査する。
+# family 共通の引数ではないため、ここだけは対象を明示してチェックする。
 run bash "$ROOT_DIR/plugins/ndf/dev.kiro/install.sh" --dry-run --with-codex >/dev/null
 
 while IFS= read -r installer; do

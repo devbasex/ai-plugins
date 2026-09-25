@@ -121,9 +121,9 @@ agy plugin list
 
 ## v10.17.23 へ更新するとき
 
-- `supervise.py` は、段ごとの想定時間より遅れた段を見つけます。その段を一次の調査にかけ、介入します。（#1115）
+- `supervise.py` は、ステップごとの想定時間より遅れたステップを見つけます。そのステップを一次の調査にかけ、介入します。
 - 遅れの見張りの挙動は設定で変えられます。（#1115）
-- `merged-steps.py probe` で、PR の検査が進まない理由を調べられます。理由は「取り残し」「ランナー待ち」「失敗」の 3 つに分けて示します。（#1115）
+- `merged-steps.py probe` で、PR のチェックが進まない理由を調べられます。理由は「取り残し」「ランナー待ち」「失敗」の 3 つに分けて示します。
 - 設計: #1102（#1109）
 - runtime-smoke が落ちたとき、継続的統合のログで失敗の理由を読める（成果物の `generated-tree.txt` も失敗時に残る）（#1106）
 - Python 3.14 で NDF のスクリプトを動かしても SyntaxWarning が出ない（#1106）
@@ -166,7 +166,7 @@ Kiro CLI に tool 実行前の案内が無いのは、この事象でモデル�
 `hooks.json` を読み込まないためです（「インストール / agy」を参照）。
 
 **agy は案内を作る時点と渡せる時点が離れています。** tool 実行前の hook がモデルへ文言を返す
-口は拒否のときにしか働かないため、案内はセッションの控えへ積み、次のモデル呼び出しの前に
+口は拒否のときにしか働かないため、案内はセッションの記録へ積み、次のモデル呼び出しの前に
 `injectSteps` で渡します。セッション開始時にあたる事象も持たないため、モデル呼び出しの通し番号が
 0 のときを開始時として扱います。
 
@@ -203,15 +203,15 @@ bash <プラグインのパス>/scripts/worktree-setup.sh init
 | --- | --- | --- |
 | 前景の `sleep` の待ち（`while` / `until` のループの本体、または上限を超える秒数） | `NDF_SLEEP_GUARD=0` | `NDF_SLEEP_MAX_SEC`（既定 5） |
 | 変わらないファイルの同じ範囲を続けて読む Read | `NDF_READ_REPEAT_GUARD=0` | `NDF_READ_REPEAT_LIMIT`（既定 3） |
-| 文脈が上限を超えた conductor が工程へ入る起動（1 度だけ止め、新しい会話で打つコマンドを `ndf-next` のブロックで示させる。中継の下では止め続ける） | `NDF_CONTEXT_GUARD=0` | `NDF_CONTEXT_LIMIT`（既定 200000） |
-| 寿命 5 分の supervisor（`ndf:supervisor`）が、文脈を最初の呼び出しの 1.5 倍以上に伸ばしたまま `cross-review` / `cross-refactoring` を起動する（止め続け、`結果: 区切り` で返させる） | `NDF_SUPERVISOR_CUT_GUARD=0` | `NDF_SUPERVISOR_CUT_RATIO`（既定 1.5） |
+| 文脈が上限を超えた conductor が工程へ入る起動（1 度だけ止め、新しい会話で打つコマンドを `ndf-next` のブロックで示させる。ラッパーの下では止め続ける） | `NDF_CONTEXT_GUARD=0` | `NDF_CONTEXT_LIMIT`（既定 200000） |
+| 寿命 5 分の supervisor（`ndf:supervisor`）が、文脈を最初の呼び出しの 1.5 倍以上に伸ばしたまま `cross-review` / `cross-refactoring` を起動する（止め続け、`結果: スイッチポイント` で返させる） | `NDF_SUPERVISOR_CUT_GUARD=0` | `NDF_SUPERVISOR_CUT_RATIO`（既定 1.5） |
 
 | ランタイム | 待ち方 | 会話を切る |
 | --- | --- | --- |
-| Claude Code | hook ＋ 規約 | hook ＋ 引き継ぎの 1 行 |
-| Codex | 規約だけ | 引き継ぎの 1 行だけ |
-| Kiro CLI | 規約だけ | 引き継ぎの 1 行だけ |
-| agy | 規約だけ | 引き継ぎの 1 行だけ |
+| Claude Code | hook ＋ 規約 | hook ＋ 引継ぎの 1 行 |
+| Codex | 規約だけ | 引継ぎの 1 行だけ |
+| Kiro CLI | 規約だけ | 引継ぎの 1 行だけ |
+| agy | 規約だけ | 引継ぎの 1 行だけ |
 
 規約は `skills/development-workflow/references/waiting.md`（待ち方）と
 `skills/development-workflow/references/context-window.md`（会話を切る）にあります。
@@ -222,15 +222,15 @@ Claude Code の SessionStart hook（`hooks/claude.json`）は上記に加えて�
 
 - `~/.claude/settings.json` の `cleanupPeriodDays` を 90 日以上に保つ
 - statusline 未設定時に NDF 標準 statusline を設定する
-- 区間の切れ目の中継（`scripts/relay.py`）の写しが在れば今の版で置き直す（`relay.py startup`。
+- カットポイントで claude を起動し直すラッパー（`scripts/relay.py`）の複製が在れば今の版で置き直す（`relay.py startup`。
   版は後退させない）。10.17.4〜10.17.6 が自動で足した alias の囲みが残っていれば 1 度だけ知らせる。
-  **シェルの設定は書かない。** 中継を入れる・外すのは `/ndf:install-wrapper`（Claude Code だけ）
+  **シェルの設定は書かない。** ラッパーを入れる・外すのは `/ndf:install-wrapper`（Claude Code だけ）
 
 Claude Code の Stop hook は終了時に Slack 通知スクリプトを実行します。通知に必要な環境変数が
-未設定の場合は送信せず終了します。中継の下（`NDF_RELAY_DIR` がある）では、最後の応答の
-`ndf-next` のブロックを中継の印へ写します（`relay.py mark`）。`AskUserQuestion` の PreToolUse /
-PostToolUse hook は、中継の下で質問の表示中の印を作る・消します（中継が質問の答えを代わりに
-送らないため）。好きな時点で切り替えるのは `/ndf:restart` です。中継の始め方・止め方・上限は
+未設定の場合は送信せず終了します。ラッパーの下（`NDF_RELAY_DIR` がある）では、最後の応答の
+`ndf-next` のブロックをラッパーの合図へ写します（`relay.py mark`）。`AskUserQuestion` の PreToolUse /
+PostToolUse hook は、ラッパーの下で質問の表示中の合図を作る・消します（ラッパーが質問の答えを代わりに
+送らないため）。好きな時点で切り替えるのは `/ndf:restart` です。ラッパーの始め方・止め方・上限は
 `skills/development-workflow/references/relay.md` にあります。
 
 Codex の Stop hook（`hooks/codex.json`）は `NDF_CODEX_SLACK_NOTIFY=true` が設定されている
@@ -369,4 +369,4 @@ kiro-cli の実機検証と、Skill 数が文脈量へ与える影響の実測�
 Skill の実体は `skills/` の 1 箇所だけです。ランタイムごとの複製はありません。変更したら
 [CONTRIBUTING.md の「手元での検証」](../../CONTRIBUTING.md#手元での検証)の検証を実行してください。
 frontmatter の規約は [skills/AUTHORING.md](skills/AUTHORING.md) にあり、
-`python3 scripts/check-skill-frontmatter.py` で検査します。
+`python3 scripts/check-skill-frontmatter.py` でチェックします。

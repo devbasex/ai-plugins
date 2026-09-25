@@ -1,4 +1,4 @@
-"""危険の印で走らせた全体のテストの失敗を見分ける（#933 決定 22 / 実装計画 I14）。
+"""危険フラグで走らせた全体のテストの失敗を見分ける（#933 決定 22 / 実装計画 I14）。
 
 落ちたテストの ID を出力から取り出し、**それだけを**走らせ直して 3 つに分ける。
 全体のテストは走らせ直さない（検証の中の全体のテストは 1 度だけ。決定 14）。
@@ -72,7 +72,7 @@ def failing_at(work: str, sha: str, words: list[str], nodes: list[str], timeout:
 
 
 def baseline_head(state: dict[str, Any]) -> Optional[str]:
-    """着手前の HEAD。`init` が残した SHA、無ければ（旧い状態ファイル）計画の起点。"""
+    """着手前の HEAD。`init` が残した SHA、無ければ（旧い状態ファイル）改修計画の起点。"""
     return ((state.get("baseline_test") or {}).get("head")
             or (state.get("plan") or {}).get("base_sha") or None)
 

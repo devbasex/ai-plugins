@@ -6,7 +6,7 @@
 | 確かめること | なぜ |
 | --- | --- |
 | 変更のパスを 1 文字も欠かさず拾う | `git status --porcelain` は固定幅。先頭の空白を削ると 1 行目がずれる |
-| 同期の後段で落ちても差分を残さない | 残すと次の実行が清浄性の検査で必ず止まる |
+| 同期の後段で落ちても差分を残さない | 残すと次の実行が清浄性のチェックで必ず止まる |
 | 実装担当の置き土産を捨ててから取り込む | 検証を受けていない変更なので公開しない。止まる理由にもしない |
 """
 from __future__ import annotations
@@ -34,7 +34,7 @@ def _make_work(tmp_path):
     work = tmp_path / "work"
     (work / "generated").mkdir(parents=True)
     _git("init", "-q", "-b", "main", str(work), cwd=tmp_path)
-    # 検査の対象（`refactor.py`）が自分でコミットする。**身元はテストが用意する。**
+    # チェックの対象（`refactor.py`）が自分でコミットする。**身元はテストが用意する。**
     # 実行した人の全体設定に頼ると、身元の無い実行環境で落ちる（#235）。
     _git("config", "user.email", "t@e.st", cwd=work)
     _git("config", "user.name", "test", cwd=work)
@@ -109,7 +109,7 @@ def test_sync_without_changes_makes_no_commit(gitfacts, tmp_path):
 def test_failure_after_sync_discards_produced_changes(refactor_lib, patch_lib, refactor, gitfacts, tmp_path, monkeypatch):
     """`git add` / `git commit` が落ちても、同期が作った差分を残さない。
 
-    残すと次の実行は清浄性の検査で必ず止まり、保留中の push を再試行できない。
+    残すと次の実行は清浄性のチェックで必ず止まり、保留中の push を再試行できない。
     """
     work = _make_work(tmp_path)
     state = read_state(_state_with_sync(
@@ -141,7 +141,7 @@ def test_leftover_changes_are_discarded_before_merge(gitfacts, tmp_path):
     """実装担当が残した未コミット変更は、取り込みの前に捨てる。
 
     公開は進行側が検証を通してから行うので、コミットされなかった変更は
-    **検証を受けていない**。残したまま進むと、清浄性の検査で進行が止まる。
+    **検証を受けていない**。残したまま進むと、清浄性のチェックで進行が止まる。
     """
     work = _make_work(tmp_path)
     (work / "src.py").write_text("直しかけ\n", encoding="utf-8")

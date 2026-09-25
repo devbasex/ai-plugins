@@ -1,6 +1,6 @@
-"""段の遅れの見張りの材料: 想定時間・所要の履歴・設定・組み込みの一次の調査。
+"""ステップの遅れの見張りの材料: 想定時間・所要の履歴・設定・組み込みの一次の調査。
 
-supervise.py が段を回す間に使う。想定は同じ段（フェーズ, 段の id）の直近 `window` 件の所要の中央値 ×
+supervise.py がステップを回す間に使う。想定は同じステップ（フェーズ, ステップの id）の直近 `window` 件の所要の中央値 ×
 `factor` とし、`floor` を下限にする。履歴が `min_samples` 件に満たなければ `default` を使う。
 所要の履歴は 1 行 1 つの JSON で積み、書き換えない（置き場所の既定は <git の共通ディレクトリ>/ndf/）。
 """
@@ -99,7 +99,7 @@ def resolve_config(args: dict | None = None, plan: dict | None = None, decl: dic
 
 
 def expected_for(seconds: list[float], cfg: SlowConfig, step_expected=None) -> tuple[float, dict]:
-    """同じ段の所要（古い順）から想定の秒と根拠を返す。step_expected があればそれに固定する。"""
+    """同じステップの所要（古い順）から想定の秒と根拠を返す。step_expected があればそれに固定する。"""
     if step_expected is not None:
         return float(step_expected), {"source": "step"}
     recent = [float(s) for s in seconds][-cfg.window:]
@@ -154,7 +154,7 @@ def _rows(path: Path):
 
 
 def read_history(path: Path, phase: str, step: str, window: int | None = None) -> list[float]:
-    """同じ段（フェーズ, 段の id）の所要を古い順に返す（window があれば直近の件数だけ）。読めなければ []。"""
+    """同じステップ（フェーズ, ステップの id）の所要を古い順に返す（window があれば直近の件数だけ）。読めなければ []。"""
     out = [float(d["seconds"]) for d in _rows(path) if d.get("phase") == phase and d.get("step") == step]
     return out[-window:] if window else out
 

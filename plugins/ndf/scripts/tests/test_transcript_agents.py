@@ -240,7 +240,7 @@ def test_a_step_name_maps_to_its_phase(mod, description, phase) -> None:
 
 def test_a_step_name_does_not_map_for_a_worker_or_the_old_form(mod) -> None:
     assert mod.role_of("配布: 何か", "worker") == "その他"
-    assert mod.role_of("#541 の引き継ぎ", "supervisor") == "その他"
+    assert mod.role_of("#541 の引継ぎ", "supervisor") == "その他"
     assert mod.role_of("実装 #540 実行計画", "supervisor") == "その他"
 
 

@@ -1,4 +1,4 @@
-"""`review` フェーズが受け口から消えていることを確かめる。
+"""`review` 手順が受け口から消えていることを確かめる。
 
 #436 で Step 5 の判定はテストへ置き換わり、レビューは Step 7 の `cross-review` が担う。
 受け口が残っていると `--phase review` が通り、結果ファイルを待つ側が止まる。
@@ -15,10 +15,10 @@ LAUNCH = pathlib.Path(__file__).resolve().parents[1] / "scripts" / "launch-cli.s
 
 
 def test_the_review_phase_is_rejected(tmp_path: pathlib.Path) -> None:
-    """`review` は未知のフェーズとして弾かれる。
+    """`review` は未知の手順として弾かれる。
 
-    状態ファイルの検査が先に走るため、それを用意したうえで渡す。用意しないと
-    「状態ファイルがありません」で落ち、フェーズの判定まで届かない。
+    状態ファイルのチェックが先に走るため、それを用意したうえで渡す。用意しないと
+    「状態ファイルがありません」で落ち、手順の判定まで届かない。
     """
     state_path = make_state(tmp_path)
     proc = subprocess.run(
@@ -27,7 +27,7 @@ def test_the_review_phase_is_rejected(tmp_path: pathlib.Path) -> None:
         capture_output=True, text=True,
     )
     assert proc.returncode != 0
-    assert "未知のフェーズです" in proc.stderr
+    assert "未知の手順です" in proc.stderr
 
 
 def test_the_launcher_does_not_name_the_removed_prompt() -> None:

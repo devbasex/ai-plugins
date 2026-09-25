@@ -1,11 +1,11 @@
-"""agy の定義ファイルを検査の対象へ入れる（#215 の受け入れ条件 A9）。
+"""agy の定義ファイルをチェックの対象へ入れる（#215 の受け入れ条件 A9）。
 
 版数を持つ箇所は 13 から 15 へ増える（`dev.agy/plugin.json` の `version` と `description`）。
 agy には取得元の登録が無く、`agy plugin list` も版数を出さないため、利用者が版を判断できる
 手がかりは clone した中身の版数だけである。古いまま残らないよう、Claude 版 `plugin.json` を
 基準に突き合わせる。
 
-**記載を消して検査を通せない形にする。** Skill 数を読み取れないこと自体も失敗として扱う。
+**記載を消してチェックを通せない形にする。** Skill 数を読み取れないこと自体も失敗として扱う。
 """
 from __future__ import annotations
 
@@ -76,7 +76,7 @@ def test_wrong_skill_count_fails(tmp_path: Path) -> None:
 
 
 def test_removed_skill_count_fails(tmp_path: Path) -> None:
-    """Skill 数の記載を消しても検査は通らない。"""
+    """Skill 数の記載を消してもチェックは通らない。"""
     root = build_tree(tmp_path)
     path = agy_manifest(root)
     payload = json.loads(path.read_text(encoding="utf-8"))

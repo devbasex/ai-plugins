@@ -45,7 +45,7 @@ Codex は全ブランチを取得するが、登録した ref を基準にする
 - **MINOR**: 後方互換性のある新機能
 - **PATCH**: バグフィックス
 
-**接尾辞は人が読むための印である。** Claude Code の直接インストール経路は版数を
+**接尾辞は人が読むための目印である。** Claude Code の直接インストール経路は版数を
 **キャッシュキーとしての文字列一致**でしか見ず、`-dev` や `-rc` を prerelease として
 扱わない。Codex と Kiro も同様で、Agent Plugins Specification には解釈の規定が無い。
 semver の順序で除外されるのは、プラグイン間の依存解決（`dependencies`）の経路だけである。
@@ -163,7 +163,7 @@ agy plugin uninstall ndf && agy plugin install <clone>/plugins/ndf/dev.agy
 
 **`git push origin develop:main` は使えない。** `main` / `develop` を守る ruleset の bypass は
 `pull_request` で作ってあり、**このモードは Pull Request のマージだけを通し、直接 push は
-管理者でも拒む**。必須の検査 12 個は Pull Request で走るため、`develop` の先端のコミットには
+管理者でも拒む**。必須のチェック 12 個は Pull Request で走るため、`develop` の先端のコミットには
 `push` 起動の 1 個しか結果が付いていない。
 
 ```console
@@ -174,7 +174,7 @@ remote:
  ! [remote rejected] develop -> main (push declined due to repository rule violations)
 ```
 
-この例は必須の検査が 11 個だったときの観測である。`instruction-files-check` を足して 12 個に
+この例は必須のチェックが 11 個だったときの観測である。`instruction-files-check` を足して 12 個に
 なった後は `11 of 12` になる。
 
 **この手順では `main` に `develop` へ無いマージコミットが 1 つ積まれる。** そのため `main` は
@@ -194,7 +194,7 @@ git fetch origin && git diff --stat origin/develop origin/main   # 空である�
 **Pull Request のベースは `develop` である。** 既定ブランチが `main` であるため、`gh pr create`
 は指定しないと `main` を宛先にする。**`--base develop` を必ず付ける。**
 
-**配布の Pull Request では、重い検査（`pytest` と `runtime-smoke (*)`）を省く。** 同じ中身を
+**配布の Pull Request では、重いチェック（`pytest` と `runtime-smoke (*)`）を省く。** 同じ中身を
 2 度試さないためである。判定は各 workflow の `ci-scope` のジョブが `scripts/ci-heavy-skip.py` で
 行い、次のどちらかのときだけ省く。
 
@@ -205,15 +205,15 @@ git fetch origin && git diff --stat origin/develop origin/main   # 空である�
   変えていない（`develop` → `main`）。`main` の側に `develop` へ無い変更があれば省かない
 
 コードやテストを 1 行でも変えた差分では省かない。`develop` / `main` への push では常に回す。
-省いても必須の検査の名前は変わらず、結果は成功で返る。`pytest` はまとめのジョブが、
-`runtime-smoke (*)` はステップだけを飛ばしたジョブが返す。版数の整合の検査
+省いても必須のチェックの名前は変わらず、結果は成功で返る。`pytest` はまとめのジョブが、
+`runtime-smoke (*)` はステップだけを飛ばしたジョブが返す。版数の整合のチェック
 （`runtime-plugin-validate` など）は常に回す。
 
 **`main` を進めるのが `release` の「本番への配布」である。** そちらには承認が要る。`develop`
 へのマージは「検証への配布」にあたり、承認なしで進めてよい（`/ndf:release`）。
 
 **正式版の配布の Pull Request には、版ごとのトークン消費の記録が載る。** `release` の手順 3 で
-`.ndf/release.json` の段（`scripts/token-usage-snapshot.py --released <版>`）が走り、
+`.ndf/release.json` の配布のコマンド（`scripts/token-usage-snapshot.py --released <版>`）が走り、
 `docs/metrics/ndf-token-usage/<集計日>.md` / `.json` を書く。前の行との比が ±30% を超えた版の
 読み取りだけを、[手引き](metrics/ndf-token-usage/README.md) に従って書き足す。開発版の配布では残さない。
 
@@ -225,18 +225,18 @@ claude plugin tag plugins/ndf --push      # ndf--v<版> を作って origin へ�
 ```
 
 `{プラグイン名}--v{版}` の形で作られ、打つ前に `plugin.json` の版とマーケットプレイスの項目が
-食い違っていないかを検査する。
+食い違っていないかをチェックする。
 
 ## 版数を持つ 15 箇所
 
-**版数を持つ箇所は 2 種類ある。** 検査が突き合わせる 15 箇所と、**検査に載らず手で直す箇所**である。
+**版数を持つ箇所は 2 種類ある。** チェックが突き合わせる 15 箇所と、**チェックに載らず手で直す箇所**である。
 
 揃っていないと `scripts/check-doc-staleness.py` と `scripts/validate-runtime-plugins.sh` が
-落ちる。**記載を消しても検査は通らない。** 位置を決める語が見つからなければ、読み取れない
+落ちる。**記載を消してもチェックは通らない。** 位置を決める語が見つからなければ、読み取れない
 こととして落ちる。
 
 **定義ファイルと更新案内の見出しが 8 箇所である。** 3 つの `plugin.json` はいずれも
-`version` と `description` の両方に版数を持つため、片方だけ直すと検査で止まる。
+`version` と `description` の両方に版数を持つため、片方だけ直すとチェックで止まる。
 
 | 箇所 | 何を書くか |
 | --- | --- |
@@ -266,7 +266,7 @@ claude plugin tag plugins/ndf --push      # ndf--v<版> を作って origin へ�
 付けたもの・次に出す版を指すものが混ざるため、1 つの値とは照合しない。章に並ぶ版数の
 **基底**（接尾辞を除いた数字 3 つ）が現行版の基底より小さければ落ちる。次の版を指す例は通る。
 
-**この章の版数は囲みを付けて書く。** 検査が拾うのは `` `9.6.0` `` のように囲まれた版数だけ
+**この章の版数は囲みを付けて書く。** チェックが拾うのは `` `9.6.0` `` のように囲まれた版数だけ
 である。章には配布に使う CLI の名前と版数を並べて書くことがあり、`codex-cli 0.146.1` のような
 他のソフトの版数まで現行版と比べると誤検出になる。囲まずに書いた版数は走査に入らない。
 
@@ -287,7 +287,7 @@ claude plugin tag plugins/ndf --push      # ndf--v<版> を作って origin へ�
 表を章へ足すと、同じ行が複数あるとして落ちる。コードの囲みの中の表と文は、実行例か出力例として数えない。
 
 **版を決めるのは `plugins/ndf/.claude-plugin/plugin.json` の `version` だけである。** 他の
-14 箇所は読み手向けの記載と検査のための突き合わせ先で、取得する版を変えない。
+14 箇所は読み手向けの記載とチェックのための突き合わせ先で、取得する版を変えない。
 `.claude-plugin/marketplace.json` に `version` フィールドは置かない。
 
 **版を持つのは `plugins/<名前>/.claude-plugin/plugin.json` だけである。**
@@ -298,18 +298,18 @@ claude plugin tag plugins/ndf --push      # ndf--v<版> を作って origin へ�
 `scripts/validate-runtime-plugins.sh` が突き合わせるのは、説明文書に書かれた Skill の数と、
 **版数を書いた 15 箇所**です。定義ファイルと更新案内の見出しが 8 箇所、説明文書の本文が
 7 箇所あります（`README.md` の概要とプラグイン一覧表、`AGENTS.md` と正本に 1 箇所ずつ、
-`plugins/ndf/README.md` の Kiro と Codex の確認例 3 種類）。**記載を消しても検査は通りません。**
+`plugins/ndf/README.md` の Kiro と Codex の確認例 3 種類）。**記載を消してもチェックは通りません。**
 一覧は上の 2 つの表にあります。
 
-## 検査に載らず手で直す箇所
+## チェックに載らず手で直す箇所
 
-**検査が見るのは版数そのものの一致までで、記載の中身までは見ない。** 次の 3 つは版を
+**チェックが見るのは版数そのものの一致までで、記載の中身までは見ない。** 次の 3 つは版を
 上げるたびに人が読み直す。
 
 | 箇所 | 何を確かめるか |
 | --- | --- |
-| `plugins/ndf/README.md` の更新案内の本文 | その版の変更を説明しているか。見出しの版数は検査が見るが、本文が何を説明しているかは機械では判定できない |
-| 接尾辞の付け忘れ・外し忘れ | 接尾辞の付いた版でも検査は通る（形式としては妥当な版数のため）。出す前に版数を読み直す |
+| `plugins/ndf/README.md` の更新案内の本文 | その版の変更を説明しているか。見出しの版数はチェックが見るが、本文が何を説明しているかは機械では判定できない |
+| 接尾辞の付け忘れ・外し忘れ | 接尾辞の付いた版でもチェックは通る（形式としては妥当な版数のため）。出す前に版数を読み直す |
 | `CHANGELOG.md` の版の節 | その版で何が変わったかを書く。版数と日付は機械で確かめられるが、内容は書かないと残らない |
 
 **バージョン更新時の手順**:
@@ -330,11 +330,11 @@ claude plugin tag plugins/ndf --push      # ndf--v<版> を作って origin へ�
 
 **すべての版数を機械的に置換しない。** 履歴（`docs/ndf-version-decisions.md`、`CLAUDE.md` の
 現行版の段落、`docs/development-history/`）、記録（`issues/`）、意図的に前の版を指す文（取り消しの説明）は
-そのまま残す。現行版を指しているかは文脈で決まる。**検査が突き合わせるのは、周囲の固定の語で
+そのまま残す。現行版を指しているかは文脈で決まる。**チェックが突き合わせるのは、周囲の固定の語で
 位置を決めた記載だけである。** 履歴と記録は最初から走査に入らない。
 
 **v9.5.0 の配布では、説明文書の本文に書かれた版数を取りこぼした**（#209）。上の 7 箇所を
-検査の対象へ入れたのは、この取りこぼしを次から機械が拾うためである。
+チェックの対象へ入れたのは、この取りこぼしを次から機械が拾うためである。
 
 ## 取得元の登録を確かめる
 
