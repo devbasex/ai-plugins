@@ -45,7 +45,8 @@ import gh_parts  # noqa: E402  PR の取得の部品（#849）
 # `measure.py` も同じ定義を読み、両者の一致は `test_measure.py` が固定する。
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from classifications import COUNTED_CLASSIFICATIONS  # noqa: E402
-from classifications import default_max_rounds, oversized_design_docs, review_kind  # noqa: E402
+from classifications import (  # noqa: E402
+    default_max_rounds, has_domain_model, oversized_design_docs, review_kind, review_stage)
 
 
 # ---------------- helpers ----------------
@@ -142,7 +143,20 @@ DOCS_ONLY_REVIEW_TEMPLATE = """## 自動追加レビュー観点: ドキュメ�
 DESIGN_REVIEW_TEMPLATE = """## 自動追加レビュー観点: 設計 PR
 - 要求・設計・決定の記録の 3 文書で、受け入れ条件ごとに設計の要素とテスト設計の行があるか。決定で退けた案が他の節に残っていないか。
 - 状態（ファイル・環境変数・状態ファイルの項目・引数）ごとに、書き手と読み手を並べる。同じ状態を 2 つの経路が書く・読む側が書く側より先に動く・失敗した書き手の後に読む、の矛盾が無いか。
-- 外部コマンド・外部ツールの挙動（優先順位・終了コード・一致の範囲）を断定する記述に、実測の根拠（コマンドと出力）があるか。"""
+- 外部コマンド・外部ツールの挙動（優先順位・終了コード・一致の範囲）を断定する記述に、実測の根拠（コマンドと出力）があるか。
+- 用語集どおりか。用語集に無い語・廃止した語で書いていないか。
+- 不変条件を破っていないか。構成要素・処理の流れが、ドメインモデルの節の不変条件に反する手順を含まないか。
+- コンテキストの境界を越えていないか。宣言した関係の外で、ほかのコンテキストの集約を書き換えていないか。
+- ドメインモデルの節は確定したものとして扱う。変えるべきときは、指摘にそう書く。"""
+
+# 設計 PR の 1 ラウンド目（モデルの段、#1111）で渡す観点。詳細の段は DESIGN_REVIEW_TEMPLATE を渡す
+MODEL_REVIEW_TEMPLATE = """## 自動追加レビュー観点: 設計 PR（モデルの段）
+このラウンドは、設計文書のドメインモデルの節と、用語集の差分だけを見る。**節の外への指摘はこのラウンドでは書かない。**
+- 変更が 2 つ以上のコンテキストにまたがるのに、コンテキストマップの関係の宣言が無くないか。
+- 集約ごとに、書き換えてよい持ち主が 1 つに決まっているか。
+- 不変条件どうしが矛盾しないか。1 行が 1 つの条件か。
+- ドメインイベントごとに受け手があるか。要求のドメインイベントの番号を引き継いでいるか。
+- 用語の表が用語集と一致するか（足す語・意味を変える語・廃止する語が、同じ変更の用語集に反映されているか）。"""
 
 CODE_REVIEW_TEMPLATE = """## 自動追加レビュー観点: コード変更 PR
 - 設計、正確性、可読性、保守性、単純さを確認する。不要に複雑な分岐、責務の混在、過剰な抽象化がないか。
@@ -1215,6 +1229,32 @@ def _classify_changed_files(entries: list[dict[str, Any]]) -> list[str]:
     return list(dict.fromkeys(categories))
 
 
+def _design_stage_fields(kind: str, worktree: object, changed_files: list[dict[str, Any]],
+                         review_instructions: str, manual: str) -> dict[str, Any]:
+    """設計 PR の段（モデル / 詳細）の材料を返す（#1111）。設計 PR でなければ空。
+
+    `design_has_model` は変更した設計文書のどれかに見出し `## ドメインモデル` があるか。
+    段ごとの観点は `review_instructions_by_stage` に持ち、`launch-reviewer.sh` がラウンドの段で選ぶ。
+    """
+    if kind != "design":
+        return {}
+    paths = [p for entry in changed_files or [] if isinstance(entry, dict)
+             for p in entry.get("paths", []) if isinstance(p, str)]
+    paths += [entry for entry in changed_files or [] if isinstance(entry, str)]
+    return {
+        "design_has_model": has_domain_model(str(worktree) if worktree else None, paths),
+        "review_instructions_by_stage": {
+            "model": _combined_review_instructions(MODEL_REVIEW_TEMPLATE, manual),
+            "detail": review_instructions,
+        },
+    }
+
+
+def _round_stage(st: dict[str, Any], round_no: int) -> str | None:
+    """ラウンドの段。設計 PR の 1 ラウンド目でドメインモデルの節があれば model、ほかの設計 PR は detail。"""
+    return review_stage(st.get("review_kind") or "code", round_no, bool(st.get("design_has_model")))
+
+
 def _auto_review_instructions(categories: list[str]) -> str:
     parts = (CATEGORY_TEMPLATES.get(c) for c in categories)
     return "\n\n".join(p for p in parts if p is not None)
@@ -1761,6 +1801,11 @@ def _refresh_resume_state(
     if st.get("review_instructions") != combined:
         st["review_instructions"] = combined
         state_changed = True
+    by_stage = st.get("review_instructions_by_stage")
+    if isinstance(by_stage, dict) and by_stage.get("detail") != combined:
+        by_stage["detail"] = combined
+        by_stage["model"] = _combined_review_instructions(MODEL_REVIEW_TEMPLATE, manual)
+        state_changed = True
     # 再開した時点で残っている未解決の指摘を引継ぎとして記録する。
     if _record_carried_over(st, st.get("repo") or repo, st.get("current_pr") or pr):
         state_changed = True
@@ -2062,6 +2107,9 @@ def _init_new_state(
         state = _build_initial_review_state(args, context)
         state["design_doc_oversize"] = _warn_oversized_design_docs(
             pr_ctx.worktree, review_ctx.changed_files)
+        state.update(_design_stage_fields(
+            state["review_kind"], pr_ctx.worktree, review_ctx.changed_files,
+            review_ctx.review_instructions, manual_extra_review))
         _write_state(ws_ctx.state_file, state)
         info(f"✅ state 初期化: {ws_ctx.state_file}")
         _print_init_result(
@@ -2471,6 +2519,9 @@ def cmd_start_round(args: argparse.Namespace) -> None:
     }
     if head is not None:
         entry["head_sha"] = head.oid
+    stage = _round_stage(st, round_no)
+    if stage is not None:
+        entry["stage"] = stage
     st["rounds"].append(entry)
     _save(args.pr, st)
 
@@ -2478,6 +2529,8 @@ def cmd_start_round(args: argparse.Namespace) -> None:
          f", レビュー: {' + '.join(reviewers)}) ===")
     print(f"ROUND={round_no}")
     print(f"REVIEWERS='{' '.join(reviewers)}'")
+    if stage is not None:
+        print(f"STAGE={stage}")
     print(f"REVIEWERS_CSV={','.join(reviewers)}")
     print(f"ROUND_IN_PR={round_in_pr}")
     print(f"PR={pr}")
@@ -3184,6 +3237,13 @@ def _finalize_round_if_converged(
     """
     if not converged:
         return
+    if last.get("stage") == "model" and not pending_posts:
+        # モデルの段の APPROVE では抜けない（#1111）。確定したモデルを前提に、詳細の段へ進む
+        last["verdict"] = "model_confirmed"
+        _save(pr, st)
+        info("→ モデルの段が承認された。修正を挟まずに詳細の段のラウンドへ進む。")
+        print("MODEL_CONFIRMED=1")
+        sys.exit(2)
     if pending_posts:
         # **届いていない投稿があるあいだは収束させない。** 修正するものは無いので
         # 修正の工程（2）へは回さず、流し直す先（8）へ分ける。

@@ -72,16 +72,26 @@ def test_fast_mission_puts_check_then_dev_then_prod_after_the_implementation(tmp
     manifest = load(out / "mission.json")
     assert manifest["進め方"] == "fast" and manifest["状態"].endswith("mission-state.json")
     waves = {w["name"]: w for w in manifest["ステージ"]}
-    assert [w["name"] for w in manifest["ステージ"]] == ["設計", "関門 1", "実装", "検査", "開発版", "本番"]
+    assert [w["name"] for w in manifest["ステージ"]] == ["設計", "関門 1", "実装", "検査", "実装レビュー", "開発版", "本番"]
     cmd = waves["実装"]["command"]
     check, dev, prod = waves["検査"]["plans"][0], waves["開発版"]["plans"][0], waves["本番"]["plans"][0]
-    assert cmd.index("--then " + check) < cmd.index("--then " + dev) < cmd.index("--then " + prod)
+    review = waves["実装レビュー"]["plans"][0]
+    assert (cmd.index("--then " + check) < cmd.index("--then " + review) < cmd.index("--then " + dev)
+            < cmd.index("--then " + prod))
     assert "mission/" not in json.dumps(manifest, ensure_ascii=False)
 
     impl = load(waves["実装"]["plans"][0])
     assert impl["起点"] == "origin/develop" and next(s for s in impl["steps"] if s["type"] == "pr")["base"] == "develop"
     c = load(check)
     assert c["実行の条件"]["skip_code"] == 3 and "check-trigger.py eval --id m26-1" in c["実行の条件"]["cmd"]
+    rv = load(review)
+    assert "check-trigger.py eval --id m26-review --root" in rv["実行の条件"]["cmd"]
+    assert rv["実行の条件"]["cmd"].endswith(" --review")
+    rs = steps_of(rv)
+    assert "assess" not in rs and "refactor" not in rs and rs["pr"]["next"] == "review"
+    assert rs["prepare"]["cmd"].endswith(" --review") and rs["record"]["cmd"].endswith(" --review --pr {pr}")
+    assert {rs[i]["stage"] for i in ("prepare", "pr")} == {"実装レビュー"}
+    assert {steps_of(c)[i]["stage"] for i in ("prepare", "pr")} == {"構造改善"}
     assert steps_of(load(dev))["facts"]["gate_as_ok"] is True
     first = load(prod)["steps"][0]
     assert first["id"] == "mvv" and "mvv-gate.py check" in first["cmd"] and "--gate release" in first["cmd"]
@@ -90,7 +100,11 @@ def test_fast_mission_puts_check_then_dev_then_prod_after_the_implementation(tmp
     ds = steps_of(design)
     assert "--gate design" in ds["mvv"]["cmd"] and ds["mvv"]["next"] == "approve" and ds["mvv"]["gate_next"] == "end"
     assert "design-approved" in ds["approve"]["cmd"] and ds["approve"]["next"] == "merge"
-    for path in [*waves["設計"]["plans"], *waves["実装"]["plans"], check, dev, prod]:
+    assert ds["review"]["next"] == "glossary-check" and ds["push-glossary"]["next"] == "mvv"  # 語のチェックの後で判定する
+    # 直し切れずに残った当たりは mvv を通さず、当たりを入力に持つ関門 1 の judge へ回る
+    assert ds["glossary-recheck"]["on_fail"] == "push-glossary-gate" and ds["glossary-recheck"]["next"] == "push-glossary"
+    assert ds["push-glossary-gate"]["next"] == "gate" and "glossary-recheck" in ds["gate"]["inputs"]
+    for path in [*waves["設計"]["plans"], *waves["実装"]["plans"], check, review, dev, prod]:
         assert_transitions_exist(load(path))
 
 
@@ -136,6 +150,10 @@ def test_check_since_last_has_a_condition_and_every_failure_reaches_abort(tmp_pa
     s = steps_of(plan)
     assert s["pr"]["base"] == "check-base/m-3" and s["pr"]["body"] == "template"
     assert "check-trigger.py scope --id m-3" in s["refactor"]["args"]
+    # 起点のブランチを取り込んで送ってから測る（検査の間に進んだ起点と finish の付け替えの後に衝突しない）
+    cmd = s["test-all"]["cmd"]
+    base = plan["起点"].removeprefix("origin/")
+    assert cmd.index(f"git merge -q --no-edit origin/{base}") < cmd.index("git push -q") < cmd.index("pytest")
     assert s["finish"]["skip_to"] == "record" and s["record"]["next"] == "end"
     for step in plan["steps"]:
         if step["type"] == "run" and not step["id"].startswith("abort"):
@@ -144,6 +162,18 @@ def test_check_since_last_has_a_condition_and_every_failure_reaches_abort(tmp_pa
     assert "--pr" not in s["abort-before-pr"]["cmd"]
     assert s["prepare"]["on_fail"] == "abort-before-pr" and s["ready"]["on_fail"] == "abort"
     assert_transitions_exist(plan)
+
+
+def test_since_ref_reaches_the_condition_and_prepare_but_not_record(tmp_path):
+    out = tmp_path / "review.json"
+    p = cli("new", "check", "--since-last", "--review-only", "--id", "m-r", "--since-ref", "v1.2.3",
+            "--worktree", str(tmp_path), "--out", str(out))
+    assert p.returncode == 0, p.stdout + p.stderr
+    plan = load(out)
+    s = steps_of(plan)
+    assert plan["実行の条件"]["cmd"].endswith(" --review --since v1.2.3")
+    assert s["prepare"]["cmd"].endswith(" --review --since v1.2.3")
+    assert "--since" not in s["record"]["cmd"] and s["record"]["cmd"].endswith(" --review --pr {pr}")
 
 
 def test_check_since_last_with_pr_is_a_usage_error(tmp_path):

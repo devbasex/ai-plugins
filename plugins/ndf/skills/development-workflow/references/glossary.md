@@ -135,7 +135,7 @@ flowchart TB
 
 | 語 | 意味 | 英語や識別子 | 正本 |
 | --- | --- | --- | --- |
-| 検査 | 構造改善・実装レビュー・完了判定・Pull Request を通すフェーズ。`fast` ではトリガーが立ったときだけ、前回の検査からの差分に流す | `new check`、`new check --since-last --id <名>` | [agent-layers.md](agent-layers.md) の「フェーズ」、[pace.md](pace.md) の「検査の計画」 |
+| 検査 | 構造改善・実装レビュー・完了判定・Pull Request を通すフェーズ。`fast` ではトリガーが立ったときだけ、前回の検査からの差分に流す。実装レビューだけは開発版ごとに流す（`--review-only`） | `new check`、`new check --since-last --id <名>`、`new check --since-last --review-only --id <名>` | [agent-layers.md](agent-layers.md) の「フェーズ」、[pace.md](pace.md) の「検査の計画」 |
 | チェック | 機械が合否を返すもの。CI のジョブと、`mvv-gate.py`・`doc-lint.py` などのスクリプト | CI の checks、結果 JSON の `status` | [merged](../../merged/SKILL.md) の `merge-when-green`、各スクリプトの docstring |
 | 構造改善 | 振る舞いを変えずに構造を直す工程 | `/ndf:cross-refactoring`、計画の `refactor` のステップ | [../SKILL.md](../SKILL.md) の「モードごとに起動する Skill」 |
 | 実装レビュー | 実装の差分をレビューし、新しい指摘が出なくなるまで直す工程 | `/ndf:cross-review`（`legacy-refactor` は `pr-review`）、計画の `review` のステップ | [../SKILL.md](../SKILL.md) の「モードごとに起動する Skill」 |
@@ -152,6 +152,9 @@ flowchart TB
 | コメントのスナップショット | `cross-review` が取る既存コメントの一覧。2 ラウンド目以降は取り直す | `state.py init` | [cross-review](../../cross-review/SKILL.md) |
 | 指摘のファイル | `cross-review` の担当が書く、指摘の全件と総評のファイル。レビューを回す側が読んで投稿する | `<席>-review-pr<番号>-round<R>-payload.json` | [cross-review](../../cross-review/SKILL.md) |
 | doc-lint | 追加した Markdown の行に、検討の痕跡・課題番号の由来・比較の語が無いかを見るチェック | `doc-lint.py`、計画の `doc-lint` のステップ | [doc-lint.py](../../../scripts/doc-lint.py) の docstring |
+| 語のチェック | プロジェクトの用語集の形と、文書の追加した行の廃止した語・未登録の語を見るチェック。LLM を使わない | `glossary.py check`、設計のフェーズの `glossary-check` のステップ | [glossary-format.md](../../requirements-design/references/glossary-format.md) の「語のチェックの規則」 |
+| モデルの段 | 設計 Pull Request のレビューの 1 ラウンド目。ドメインモデルの節と用語集の差分だけを見る。承認されても抜けない | 状態ファイルの `rounds[].stage: "model"` | [04-contracts.md](../../cross-review/docs/04-contracts.md) の「設計 PR の 2 段」 |
+| 詳細の段 | 設計 Pull Request のレビューの 2 ラウンド目以降。確定したモデルを前提に残りの節を見る | 状態ファイルの `rounds[].stage: "detail"` | [04-contracts.md](../../cross-review/docs/04-contracts.md) の「設計 PR の 2 段」 |
 
 ## 記録と状態
 
@@ -188,6 +191,8 @@ flowchart TB
 | 手入れ | 既存の課題の本文・マイルストーン・ラベルを現状に合わせること | `/ndf:issue-upkeep`、`upkeep.py` | [issue-upkeep](../../issue-upkeep/SKILL.md) の「用語」 |
 | 実装計画 | `implementation-plan` が `issues/` に書く、実装の前の計画 | `issues/{feature-name}.md`（タスク ID があれば `issues/TASK-1234_<説明>.md`） | [implementation-plan](../../implementation-plan/SKILL.md) |
 | 確定仕様化 | 完了した実装計画を `docs/` の確定仕様へ書き直す工程 | `/ndf:plan-to-spec` | [plan-to-spec](../../plan-to-spec/SKILL.md) |
+| 用語集の宣言 | プロジェクトの用語集の置き場・形式・検査の対象を持つファイル。設計の工程を持つモードでは、これと用語集が揃うまで設計へ入らない | `.ndf/glossary.json`、`glossary.py gate` | [glossary-format.md](../../requirements-design/references/glossary-format.md) |
+| 仕様の写し | 課題の本文（仕様の正）にある要求を、設計 Pull Request と一緒にコミットする `issues/` のファイル | `spec-copy.py write` / `check`、`issues/issue-<番号>-requirements.md` | [requirements-design](../../requirements-design/SKILL.md) の手順 7 |
 | 振り返り | 進め方で変えることを記録し、起票の取りこぼしを拾う工程 | `/ndf:retrospective` | [retrospective](../../retrospective/SKILL.md) |
 
 ## 語を足すときの規則

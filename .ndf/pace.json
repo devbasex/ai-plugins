@@ -17,5 +17,5 @@
   ],
   "boundary_paths": ["plugins/ndf/scripts/lib/auth.py", "plugins/ndf/scripts/lib/git-credential.sh",
                      "plugins/ndf/skills/google-auth/**", ".github/workflows/**", "**/.env*"],
-  "triggers": {"score": 15, "common_weight": 2, "lines": 5000, "escapes": 2, "hours": 24}
+  "triggers": {"score": 10, "common_weight": 2, "lines": 3000, "escapes": 1, "hours": 24}
 }

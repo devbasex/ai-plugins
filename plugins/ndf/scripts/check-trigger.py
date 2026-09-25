@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """check-trigger.py: 検査（構造改善と実装レビュー）のトリガーを判定し、検査の範囲の用意と後始末と記録を持つ（#1078）。
 
-    check-trigger.py eval [--final] [--id <計画名>] [--since <ref>] [--root DIR]
-    check-trigger.py prepare --id <名> --state <計画の状態ディレクトリ> [--root DIR]
+    check-trigger.py eval [--final | --review] [--id <計画名>] [--since <ref>] [--root DIR]
+    check-trigger.py prepare --id <名> --state <計画の状態ディレクトリ> [--review] [--root DIR]
     check-trigger.py scope --id <名> --state <DIR>
     check-trigger.py finish --id <名> --pr N [--root DIR]
-    check-trigger.py record --id <名> --state <DIR> (--pr N | --failed [--pr N]) [--root DIR]
+    check-trigger.py record --id <名> --state <DIR> (--pr N | --failed [--pr N]) [--review] [--root DIR]
     check-trigger.py escape --pr N [--of M] [--root DIR]
     check-trigger.py changed --id <名> [--root DIR]
     check-trigger.py stats [--root DIR]
@@ -20,6 +20,18 @@
 | escapes | 前回の検査の後に、同じ領域で逃げた不具合の記録 ≥ triggers.escapes |
 | hours | 前回の検査から triggers.hours 時間以上たち、その間に PR が 1 本以上ある |
 | final | --final を渡し、範囲に PR が 1 本以上ある（ミッションの終わり） |
+| review | --review を渡し、前回のレビューからの範囲に PR が 1 本以上ある（開発版ごとの実装レビュー。ほかのトリガーは見ない） |
+
+**範囲の起点（前回の検査）は、origin の `check-done/review`（`--review`）か `check-done/check`（それ以外）→
+手元の記録 → `--since` → 正式版のタグ → 起点のブランチとの分岐点の順に決める。** `record` が結果 merged / no_change の
+とき `to` をこのブランチへ送る（構造改善を含む検査は両方、`--review` は `check-done/review` だけ）。落ちた検査は
+送らないため、次の回は同じ起点から数え直す。ブランチは origin にあるため、手元の記録が消えても、別のマシンから
+続けても、検査を通らずに配布された変更を範囲から落とさない。初めて使うリポジトリでは、どこまで見たかを
+`--since <ref>` で渡す。
+
+**`--review` は実装レビューだけの検査である。** 範囲の起点は、レビューだけの回を含む前回の検査である。記録には
+`only: review` が付き、構造改善を含む検査（`--review` 無し）の範囲の起点にはならない。レビューを開発版ごとに
+通しても、構造改善のトリガーは前回の構造改善からの差分で数える。
 
 終了コード（eval）: 立った = 0（ok）/ 立たない = 3（stopped。正常な否定の結果）/ 宣言が読めない・git が無い・
 範囲を決められない = 2。`finish` と `changed` の 3 は「変更なし」。eval は立ったかどうかにかかわらず
@@ -51,6 +63,7 @@ TOOL = "check-trigger"
 MERGE_SUBJECT = re.compile(r"^Merge pull request #(\d+) from [^/\s]+/(\S+)")
 SKIP_BRANCHES = ("release/", "check/")
 BASE_PREFIX = "check-base/"
+DONE_PREFIX = "check-done/"  # 見終えた位置を origin に残すブランチ（review = 実装レビュー、check = 構造改善を含む検査）
 ENDED = ("merged", "no_change")  # 前回の検査になる check の終わり方
 
 
@@ -219,14 +232,29 @@ def parse_at(s: str) -> datetime:
 # ---------------------------------------------------------------- 範囲とトリガー
 
 
-def last_check(events: list[dict]) -> dict | None:
-    ended = [e for e in events if e["kind"] == "check" and e.get("result") in ENDED and e.get("to")]
+def last_check(events: list[dict], review: bool = False) -> dict | None:
+    """前回の検査。構造改善を含む検査（review=False）は、レビューだけの回（only: review）を数えない。"""
+    ended = [e for e in events if e["kind"] == "check" and e.get("result") in ENDED and e.get("to")
+             and (review or e.get("only") != "review")]
     return ended[-1] if ended else None
 
 
-def range_start(root: Path, events: list[dict], since: str | None) -> tuple[str, datetime, str]:
-    """(from のコミット, 期限の起点, 決め方)。"""
-    prev = last_check(events)
+def done_branch(review: bool) -> str:
+    return DONE_PREFIX + ("review" if review else "check")
+
+
+def range_start(root: Path, events: list[dict], since: str | None,
+                review: bool = False) -> tuple[str, datetime, str]:
+    """(from のコミット, 期限の起点, 決め方)。
+
+    **origin の `check-done/*` を手元の記録より先に見る。** 手元の記録は置き場が消えれば失われ、別のマシンからは
+    見えない。失われたまま正式版のタグへ戻ると、検査を通らずに配布された変更が範囲から外れる。"""
+    prev = last_check(events, review)
+    ref = f"refs/remotes/origin/{done_branch(review)}"
+    done = git(root, "rev-parse", "--verify", "-q", f"{ref}^{{commit}}", check=False)
+    if done:
+        at = parse_at(prev["at"]) if prev and prev["to"] == done else commit_time(root, done)
+        return done, at, f"origin/{done_branch(review)}"
     if prev:
         return prev["to"], parse_at(prev["at"]), f"前回の検査 {prev.get('id', '')}"
     if since:
@@ -272,10 +300,11 @@ def escapes_since(events: list[dict], since: datetime) -> dict[str, int]:
     return counts
 
 
-def evaluate(root: Path, final: bool, since: str | None, to_ref: str | None = None) -> dict:
+def evaluate(root: Path, final: bool, since: str | None, to_ref: str | None = None,
+             review: bool = False) -> dict:
     decl = load_decl(root)
     events = read_events(root)
-    frm, since_at, how = range_start(root, events, since)
+    frm, since_at, how = range_start(root, events, since, review)
     to = git(root, "rev-parse", to_ref or f"origin/{base_branch(root)}")
     prs = merged_prs(root, frm, to, decl)
     t = decl["triggers"]
@@ -284,6 +313,10 @@ def evaluate(root: Path, final: bool, since: str | None, to_ref: str | None = No
     metrics = {"prs": len(prs), "score": sum(p["points"] for p in prs), "lines": changed_lines(root, frm, to),
                "hours": hours, "escapes": max(esc.values(), default=0), "from": frm, "to": to}
     fired = []
+    if review:
+        if prs:
+            fired.append({"trigger": "review", "value": len(prs), "threshold": 1})
+        return {"decl": decl, "fired": fired, "metrics": metrics, "escape_areas": esc, "how": how}
     if metrics["score"] >= t["score"]:
         fired.append({"trigger": "score", "value": metrics["score"], "threshold": t["score"]})
     if metrics["lines"] > t["lines"]:
@@ -301,7 +334,7 @@ def evaluate(root: Path, final: bool, since: str | None, to_ref: str | None = No
 
 
 def cmd_eval(a, root: Path) -> tuple[dict, int]:
-    ev = evaluate(root, a.final, a.since)
+    ev = evaluate(root, a.final, a.since, review=a.review)
     m = ev["metrics"]
     names = [f["trigger"] for f in ev["fired"]]
     append_event(root, {"kind": "eval", "id": a.id or "", "from": m["from"], "to": m["to"], "fired": names,
@@ -325,7 +358,7 @@ def delete_base(root: Path, name: str) -> None:
 
 
 def cmd_prepare(a, root: Path) -> tuple[dict, int]:
-    ev = evaluate(root, False, a.since, to_ref="HEAD")
+    ev = evaluate(root, False, a.since, to_ref="HEAD", review=a.review)
     m = ev["metrics"]
     prev = [e for e in read_events(root) if e["kind"] == "eval" and e.get("id") == a.id]
     fired = prev[-1].get("fired", []) if prev else [f["trigger"] for f in ev["fired"]]
@@ -408,6 +441,8 @@ def cmd_record(a, root: Path) -> tuple[dict, int]:
     findings, failed_at = findings_of(Path(a.state))
     row = {"kind": "check", "id": a.id, "from": data.get("from", ""), "to": data.get("to", ""),
            "metrics": data.get("metrics", {}), "findings": findings}
+    if a.review:
+        row["only"] = "review"
     if a.pr:
         row["pr"] = a.pr
     if a.failed:
@@ -435,7 +470,24 @@ def cmd_record(a, root: Path) -> tuple[dict, int]:
     except OSError as e:
         raise Stop(f"検査の記録へ書けない: {e}", EXIT_VIOLATION)
     delete_base(root, a.id)
-    return result(TOOL, "ok", f"検査 {a.id} を記録した（{res}・#{a.pr}）", [row], {}), EXIT_OK
+    pushed, unpushed = push_done(root, row["to"], a.review)
+    note = f"・origin の {' / '.join(pushed)} を進めた" if pushed else ""
+    if unpushed:
+        note += f"・{' / '.join(unpushed)} を送れない（次の範囲は手元の記録から決まる）"
+    return result(TOOL, "ok", f"検査 {a.id} を記録した（{res}・#{a.pr}）{note}", [row],
+                  {"pushed": pushed, "unpushed": unpushed}), EXIT_OK
+
+
+def push_done(root: Path, to: str, review: bool) -> tuple[list[str], list[str]]:
+    """見終えた位置を origin の check-done/* へ送る。構造改善を含む検査は実装レビューも通すため両方を進める。"""
+    if not to:
+        return [], []
+    pushed, unpushed = [], []
+    for name in [done_branch(True)] + ([] if review else [done_branch(False)]):
+        ok = subprocess.run(["git", "-C", str(root), "push", "-q", "-f", "origin", f"{to}:refs/heads/{name}"],
+                            capture_output=True, text=True).returncode == 0
+        (pushed if ok else unpushed).append(name)
+    return pushed, unpushed
 
 
 def cmd_escape(a, root: Path) -> tuple[dict, int]:
@@ -480,9 +532,13 @@ def cmd_stats(a, root: Path) -> tuple[dict, int]:
     ended = [e for e in checks if e.get("result") in ENDED]
     rows = []
     for i, c in enumerate(ended):
-        until = parse_at(ended[i + 1]["at"]) if i + 1 < len(ended) else now()
+        # 実装レビューだけの回は次の記録（どちらの検査もレビューを通る）までで切り、
+        # 構造改善を含む検査は同じ種類の次の記録までで切る
+        review = c.get("only") == "review"
+        nxt = next((d for d in ended[i + 1:] if review or d.get("only") != "review"), None)
+        until = parse_at(nxt["at"]) if nxt else now()
         escaped = sum(1 for e in events if e["kind"] == "escape" and parse_at(c["at"]) < parse_at(e["at"]) <= until)
-        rows.append({"id": c.get("id"), "at": c["at"], "result": c["result"], "pr": c.get("pr"),
+        rows.append({"id": c.get("id"), "at": c["at"], "result": c["result"], "pr": c.get("pr"), "only": c.get("only"),
                      "findings": c.get("findings") or {}, "escapes_after": escaped})
     fired: dict[str, int] = {}
     for e in evals:
@@ -509,17 +565,21 @@ def build_parser() -> argparse.ArgumentParser:
         return s
 
     s = add("eval")
-    s.add_argument("--final", action="store_true")
+    g = s.add_mutually_exclusive_group()
+    g.add_argument("--final", action="store_true")
+    g.add_argument("--review", action="store_true", help="実装レビューだけの検査（前回のレビューから PR が 1 本以上で立つ）")
     s.add_argument("--id", default="")
     s.add_argument("--since")
     s = add("prepare", True, True)
     s.add_argument("--since")
+    s.add_argument("--review", action="store_true", help="範囲の起点をレビューだけの回を含む前回の検査にする")
     add("scope", True, True)
     s = add("finish", True)
     s.add_argument("--pr", type=int, required=True)
     s = add("record", True, True)
     s.add_argument("--pr", type=int)
     s.add_argument("--failed", action="store_true")
+    s.add_argument("--review", action="store_true", help="レビューだけの回として記録する（only: review）")
     s = add("escape")
     s.add_argument("--pr", type=int, required=True)
     s.add_argument("--of", type=int, default=0, help="不具合を持ち込んだ PR（分からなければ 0）")

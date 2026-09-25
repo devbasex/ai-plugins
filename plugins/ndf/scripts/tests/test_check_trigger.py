@@ -271,7 +271,7 @@ def test_since_overrides_the_tag(repo, env):
 
 def state_dir(tmp_path: Path, log: list[dict]) -> Path:
     d = tmp_path / "plan-state"
-    d.mkdir(exist_ok=True)
+    d.mkdir(parents=True, exist_ok=True)
     (d / "state.json").write_text(json.dumps({"log": log, "llm": {}}))
     return d
 
@@ -347,6 +347,104 @@ def test_record_merged_moves_the_start_of_the_next_range(repo, env, tmp_path):
     _, nxt, _ = call(repo, env, "eval")
     assert nxt["metrics"]["from"] == to and nxt["metrics"]["prs"] == 0
     assert call(repo, env, "changed", "--id", "m-1")[0] == 0
+
+
+def test_review_fires_on_one_pr_without_the_other_triggers(repo, env):
+    write_decl(repo, {**TRIGGERS, "score": 99, "lines": 10_000})
+    assert call(repo, env, "eval", "--review")[0] == 3
+    merge_pr(repo, 11, "feat/a", {"app/a.py": 1})
+    assert call(repo, env, "eval")[0] == 3
+    code, out, _ = call(repo, env, "eval", "--review")
+    assert code == 0 and out["items"] == [{"trigger": "review", "value": 1, "threshold": 1}]
+
+
+def test_review_only_record_moves_the_review_range_but_not_the_check_range(repo, env, tmp_path):
+    first = merge_pr(repo, 11, "feat/a", {"app/a.py": 1})
+    st = state_dir(tmp_path, [{"id": "review", "exit": 0, "counts": {"findings": 1, "unresolved": 0}}])
+    call(repo, env, "prepare", "--id", "m-review", "--state", str(st), "--review")
+    gh_set(env, states={"31": "MERGED"})
+    code, out, _ = call(repo, env, "record", "--id", "m-review", "--pr", "31", "--state", str(st), "--review")
+    assert code == 0, out
+    assert events(env, "check")[-1]["only"] == "review"
+    code, rv, _ = call(repo, env, "eval", "--review")
+    assert code == 3 and rv["metrics"]["from"] == first and rv["metrics"]["prs"] == 0
+    _, full, _ = call(repo, env, "eval")
+    assert full["metrics"]["from"] != first and full["metrics"]["prs"] == 1
+
+
+def test_a_full_check_also_starts_the_next_review_range(repo, env, tmp_path):
+    to = merge_pr(repo, 11, "feat/a", {"app/a.py": 1})
+    append_event(env, repo, {"kind": "check", "at": iso(0), "id": "m-1", "from": "", "to": to, "result": "merged"})
+    code, rv, _ = call(repo, env, "eval", "--review")
+    assert code == 3 and rv["metrics"]["from"] == to
+
+
+def test_stats_counts_escapes_until_the_next_record_of_the_same_kind(repo, env):
+    append_event(env, repo, {"kind": "check", "at": iso(3), "id": "m-1", "result": "merged"})
+    append_event(env, repo, {"kind": "check", "at": iso(2), "id": "m-r", "result": "merged", "only": "review"})
+    append_event(env, repo, {"kind": "escape", "at": iso(1), "pr": 21})
+    code, out, _ = call(repo, env, "stats")
+    rows = {r["id"]: r for r in out["items"]}
+    assert code == 0 and rows["m-1"]["escapes_after"] == 1 and rows["m-r"]["escapes_after"] == 1
+    assert rows["m-1"]["only"] is None and rows["m-r"]["only"] == "review"
+
+
+def test_stats_closes_a_review_only_range_at_the_next_full_check(repo, env):
+    append_event(env, repo, {"kind": "check", "at": iso(3), "id": "m-r", "result": "merged", "only": "review"})
+    append_event(env, repo, {"kind": "check", "at": iso(2), "id": "m-1", "result": "merged"})
+    append_event(env, repo, {"kind": "escape", "at": iso(1), "pr": 21})
+    code, out, _ = call(repo, env, "stats")
+    rows = {r["id"]: r for r in out["items"]}
+    assert code == 0 and rows["m-r"]["escapes_after"] == 0 and rows["m-1"]["escapes_after"] == 1
+
+
+def record_merged(repo, env, tmp_path, name, pr, *flags):
+    st = state_dir(tmp_path / name, [])
+    call(repo, env, "prepare", "--id", name, "--state", str(st), *flags)
+    gh_set(env, states={str(pr): "MERGED"})
+    code, out, _ = call(repo, env, "record", "--id", name, "--pr", str(pr), "--state", str(st), *flags)
+    assert code == 0, out
+    return json.loads((st / "check.json").read_text())["to"], out
+
+
+def forget_local_records(env):
+    for f in (Path(env["CLAUDE_PLUGIN_DATA"]) / "checks").glob("*.jsonl"):
+        f.unlink()
+
+
+def test_a_lost_local_record_still_starts_at_the_last_check_on_origin(repo, env, tmp_path):
+    merge_pr(repo, 11, "feat/a", {"app/a.py": 1})
+    to, out = record_merged(repo, env, tmp_path, "m-1", 30)
+    assert out["metrics"]["pushed"] == ["check-done/review", "check-done/check"]
+    assert git(repo, "rev-parse", "origin/check-done/check") == to
+    merge_pr(repo, 12, "feat/b", {"app/b.py": 1})
+    forget_local_records(env)
+    _, full, _ = call(repo, env, "eval")
+    _, rv, _ = call(repo, env, "eval", "--review")
+    assert full["metrics"]["from"] == rv["metrics"]["from"] == to and full["metrics"]["prs"] == 1
+
+
+def test_review_only_moves_only_the_review_branch_on_origin(repo, env, tmp_path):
+    merge_pr(repo, 11, "feat/a", {"app/a.py": 1})
+    to, out = record_merged(repo, env, tmp_path, "m-review", 31, "--review")
+    assert out["metrics"]["pushed"] == ["check-done/review"]
+    forget_local_records(env)
+    _, rv, _ = call(repo, env, "eval", "--review")
+    _, full, _ = call(repo, env, "eval")
+    assert rv["metrics"]["from"] == to and full["metrics"]["from"] != to and full["metrics"]["prs"] == 1
+
+
+def test_a_failed_check_leaves_the_branch_on_origin(repo, env, tmp_path):
+    merge_pr(repo, 11, "feat/a", {"app/a.py": 1})
+    st = state_dir(tmp_path / "f", [{"id": "review", "exit": 1}])
+    call(repo, env, "prepare", "--id", "m-2", "--state", str(st))
+    call(repo, env, "record", "--id", "m-2", "--state", str(st), "--failed")
+    assert subprocess.run(["git", "-C", str(repo), "rev-parse", "--verify", "-q", "origin/check-done/review"],
+                          capture_output=True).returncode != 0
+
+
+def test_review_and_final_are_exclusive(repo, env):
+    assert call(repo, env, "eval", "--review", "--final")[0] == 2
 
 
 def test_changed_reads_no_change_skipped_and_missing(repo, env, tmp_path):

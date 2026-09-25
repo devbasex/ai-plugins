@@ -10,8 +10,6 @@ import difflib
 import posixpath
 import re
 
-from collections import Counter
-
 from typing import Any, Iterable, Optional
 
 from .paths import git_out
@@ -233,13 +231,25 @@ _LITERAL = re.compile(
     r"""|\b\d+(?:\.\d+)?\b|\bTrue\b|\bFalse\b|\bNone\b)"""
 )
 
+# 行末までのコメントの始まり。行頭か空白の後の `#` だけを指す（`this.#x` などは含めない）。
+_COMMENT = r"(?:^|(?<=\s))#"
 
-def _values(lines: Iterable[str]) -> "Counter[str]":
-    """差分の中の値を、件数ごと数える。**`assert` の行に限らない。**"""
-    found: Counter[str] = Counter()
+# 値かコメントの始まりを、行の左から順に拾う。**文字列の中の `#` は文字列の側が先に取る。**
+_TOKEN = re.compile(rf"(?P<value>{_LITERAL.pattern})|(?P<comment>{_COMMENT})")
+
+
+def _values(lines: Iterable[str]) -> set[str]:
+    """差分の中に現れる値の集まりを返す。**`assert` の行に限らない。**
+
+    - **コメントの中は数えない**（#641）。項目 ID などを書き換えただけで値が失われたことにしない
+    - **件数は数えない**（#705）。同じ値を定数へ寄せて出現が減っても、値は失われていない
+    """
+    found: set[str] = set()
     for line in lines:
-        for literal in _LITERAL.findall(line):
-            found[literal] += 1
+        for match in _TOKEN.finditer(line):
+            if match.group("comment") is not None:
+                break
+            found.add(match.group("value"))
     return found
 
 
@@ -249,11 +259,14 @@ def assertion_change(before: Iterable[str], after: Iterable[str]) -> str:
     | 戻り値 | 意味 | 判定 |
     | --- | --- | --- |
     | `unchanged` | 変わっていない | 前後が同一 |
-    | `changed` | 期待出力が変わった | **値が失われた** |
+    | `changed` | 期待出力が変わった | **前にあった値が、後のファイルのどこにも無い**（コメントを除く） |
     | `undecidable` | **機械では決まらない** | それ以外すべて |
 
     **`unchanged` は「同じ」のときだけ返す。** 経路だけの変更も、行の並べ替えも、
     テストの追加も、機械では期待出力への影響を否定できない。最終ゲートのレビューが読む。
+
+    **値の出現が減っただけでは `changed` にしない。** 重複を定数へ寄せた変更（#705）も、
+    内部の参照を確かめる `assert` を消した変更（#641）も、値が残っていれば最終ゲートのレビューが読む。
     """
     rows_before, rows_after = list(before), list(after)
     if rows_before == rows_after:

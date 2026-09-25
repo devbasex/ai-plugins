@@ -20,8 +20,10 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
     supervise.py new impl --issue N --worktree DIR --tests PATH... --title T [--files PATH...] [--changes TEXT] [--prompt-file F] [--branch B] [--out F]
     supervise.py new impl ... --escape-of <PR番号|0>   # マージの後に逃げた不具合を記録する（check-trigger.py escape）
     supervise.py new check --pr N --worktree DIR [--issue N...] [--scope PATH...] [--out F]
-    supervise.py new check --since-last --id <名> --worktree <リポジトリの根> [--mission <状態>] [--final] [--out F]
+    supervise.py new check --since-last --id <名> --worktree <リポジトリの根> [--mission <状態>] [--final] [--since-ref R] [--out F]
         # 前回の検査からの差分を範囲にする検査（pace: fast）。実行の条件 check-trigger.py eval が立ったときだけ流れる
+    supervise.py new check --since-last --review-only --id <名> --worktree <リポジトリの根> [--mission <状態>] [--since-ref R] [--out F]
+        # 実装レビューだけ（開発版ごと）。前回のレビューから PR が 1 本以上で流れ、構造改善のトリガーの起点は動かさない
         # new の共通: [--base B] [--test-cmd CMD] [--test-all PATH] [--production-branch B]（宣言より先に効く。下の「宣言」）
     supervise.py new release --version V (--prs N... | --prs-from-queue) --channel dev|prod --worktree DIR
                              [--issue N...] [--prev-tag T] [--repo DIR] [--out F]
@@ -1998,26 +2000,36 @@ def plan_check_since(a) -> dict:
     cross-review は Pull Request 1 本を入力に取るため、駆動を変えずに差分全体を見られる。検査の後に宛先を
     起点のブランチへ付け替えると、差分は検査の修正だけになる。実行の条件（check-trigger.py eval）が
     立ったときだけ流れ、作業ツリー（check/<名>）はその後に作る。落ちた run のステップは abort へ行き、
-    失敗の記録・check-base の削除・検査の Pull Request を閉じる後始末をしてから止まる。"""
+    失敗の記録・check-base の削除・検査の Pull Request を閉じる後始末をしてから止まる。
+
+    `--review-only` は実装レビューだけを通す（構造改善のステップを持たない）。実行の条件は前回のレビューから
+    PR が 1 本以上あること（`eval --review`）で、記録は構造改善のトリガーの起点にならない。"""
     repo = str(Path(a.worktree).resolve())
+    review_only = getattr(a, "review_only", False)
+    flag = " --review" if review_only else ""
+    if getattr(a, "since_ref", None):
+        flag += f" --since {shlex.quote(a.since_ref)}"
     name = a.id
     tests_all = shlex.quote(with_paths(a.test_cmd, a.test_all))
     state = "{state_dir}"
     scope = f"$({CHECK_PY} scope --id {name} --state {state} --root .)"
     cond = f"git -C {shlex.quote(repo)} fetch -q origin && {CHECK_PY} eval --id {name} --root {shlex.quote(repo)}"
+    cond += flag
     if getattr(a, "final", False):
         cond += " --final"
-    record = f"{CHECK_PY} record --id {name} --state {state} --root ."
+    record = f"{CHECK_PY} record --id {name} --state {state} --root .{' --review' if review_only else ''}"
+    first = "実装レビュー" if review_only else "構造改善"
     steps = [
-        {"id": "prepare", "type": "run", "stage": "構造改善", "timeout": 600,
-         "cmd": f"{CHECK_PY} prepare --id {name} --state {state} --root .", "on_fail": "abort-before-pr",
+        {"id": "prepare", "type": "run", "stage": first, "timeout": 600,
+         "cmd": f"{CHECK_PY} prepare --id {name} --state {state} --root .{flag}", "on_fail": "abort-before-pr",
          "next": "pr"},
-        {"id": "pr", "type": "pr", "stage": "構造改善", "base": f"check-base/{name}", "title": f"検査: {name}",
+        {"id": "pr", "type": "pr", "stage": first, "base": f"check-base/{name}", "title": f"検査: {name}",
          "body": "template", "on_fail": "abort-before-pr",
-         "summary": (f"前回の検査からの差分に構造改善と実装レビューを 1 回ずつ通す（{name}）。範囲・立ったトリガー・"
+         "summary": (f"前回の検査からの差分に{'実装レビュー' if review_only else '構造改善と実装レビュー'}を"
+                     f" 1 回ずつ通す（{name}）。範囲・立ったトリガー・"
                      f"先に見る範囲は `{CHECK_PY} scope --id {name}` と状態ディレクトリの check.json にある。"
                      "検査の後に宛先を起点のブランチへ付け替える"),
-         "changes": "無し（検査の修正だけ）", "next": "assess"},
+         "changes": "無し（検査の修正だけ）", "next": "review" if review_only else "assess"},
         {"id": "assess", "type": "run", "preset": "assess", "stage": "構造改善", "skip_to": "review",
          "on_fail": "refactor", "next": "refactor"},
         {"id": "refactor", "type": "drive", "drive": "cross-refactoring", "kind": "構造改善", "stage": "構造改善",
@@ -2025,14 +2037,19 @@ def plan_check_since(a) -> dict:
          "next": "review"},
         {"id": "review", "type": "drive", "drive": "cross-review", "kind": "実装レビュー", "stage": "実装レビュー",
          "timeout": 3600, "args": "{pr} --max-rounds 4", "next": "test-all"},
+        # 検査の間に起点のブランチが進んでも finish の付け替えの後にマージできるよう、毎回取り込んでから測る
         {"id": "test-all", "type": "run", "stage": "完了判定", "timeout": 1800, "rerun_failed": True,
-         "cmd": "git pull -q --rebase && " + with_paths(a.test_cmd, a.test_all), "on_fail": "judge",
+         "cmd": (f"git pull -q --rebase && git fetch -q origin {shlex.quote(a.base)} && "
+                 f"git merge -q --no-edit origin/{shlex.quote(a.base)} && git push -q && "
+                 + with_paths(a.test_cmd, a.test_all)), "on_fail": "judge",
          "next": "finish"},
         {"id": "judge", "type": "judge", "inputs": ["test-all"],
-         "question": "全体テストの失敗を直す（fix）か、修正に無関係として進める（finish）か、止める（stop）か",
+         "question": "全体テストの失敗（起点のブランチの取り込みの衝突を含む）を直す（fix）か、修正に無関係として進める"
+                     "（finish）か、止める（stop）か",
          "choices": ["fix", "finish", "stop"]},
         {"id": "fix", "type": "work", "kind": "修正", "inputs": ["test-all"],
-         "prompt": "失敗したテストを直してコミットし、git push する。", "next": "test-all"},
+         "prompt": (f"失敗したテストを直してコミットし、git push する。origin/{a.base} の取り込みで衝突していれば、"
+                    "両方の変更を残して衝突を解き、マージのコミットを作って git push する。"), "next": "test-all"},
         {"id": "finish", "type": "run", "stage": "Pull Request",
          "cmd": f"{CHECK_PY} finish --id {name} --pr {{pr}} --root .", "skip_to": "record", "on_fail": "abort",
          "next": "ready"},
@@ -2044,6 +2061,8 @@ def plan_check_since(a) -> dict:
         {"id": "abort", "type": "run", "cmd": f"{record} --failed --pr {{pr}}", "next": "end"},
         {"id": "abort-before-pr", "type": "run", "cmd": f"{record} --failed", "next": "end"},
     ]
+    if review_only:
+        steps = [s for s in steps if s["id"] not in ("assess", "refactor")]
     issues = list(a.issue or [])
     if not issues and getattr(a, "mission", None):
         try:
@@ -2066,6 +2085,7 @@ RULE_RELEASE_PROD_MVV = ("関門 2 は利用者か MVV 判定が承認した（�
                          "run のステップが落ちたら、直せるもの（版数の書き漏れ・文書の形）は fix。"
                          "外部の待ち（CI・ネットワーク）の揺れなら同じステップをもう一度。タグの重複・権限の不足は stop。")
 MVV_PY = f"python3 {HERE / 'mvv-gate.py'}"
+GLOSSARY_PY = f"python3 {HERE / 'glossary.py'}"
 STEPS_PY = f"python3 {HERE / 'release-steps.py'}"
 VERIFY_PY = f"python3 {HERE / 'release-verification-steps.py'}"
 MERGED_PY = f"python3 {HERE / 'merged-steps.py'}"
@@ -2224,10 +2244,14 @@ def mission_branch(name: str) -> str:
 def plan_mission_design(a, n: int, repo: str) -> dict:
     """設計のフェーズ: 設計文書を書き、設計 PR を出し、cross-review（設計の既定 3 ラウンド）の後に関門 1 で止まる。"""
     branch = f"design/issue-{n}"
+    glossary_check = f"{GLOSSARY_PY} check --diff origin/{shlex.quote(a.base)} --root ."
     return {
         "フェーズ": "設計", "課題": [n], "モード": a.mode, "作業場所": f"{repo}/.worktrees/{branch}",
         "branch": branch, "起点": f"origin/{a.base}", "リポジトリ": repo, "規則": RULE_DESIGN, "上限": 12,
         "steps": [
+            # 設計の工程の入口の検査（#1111 の I5）。0 以外は on_fail を置かずに止まり、作る手順は結果の summary に載る
+            {"id": "glossary", "type": "run", "stage": "設計", "timeout": 120,
+             "cmd": f"{GLOSSARY_PY} gate --mode {shlex.quote(a.mode)} --root .", "next": "design"},
             {"id": "design", "type": "work", "full": True, "kind": "設計", "stage": "設計", "issues": True,
              "timeout": 3600, "next": "pr",
              "prompt": f"/ndf:design #{n}。設計文書は 1,000 行以下にする（超える主題は設計を 2 本に分けると報告する）。"
@@ -2236,9 +2260,23 @@ def plan_mission_design(a, n: int, repo: str) -> dict:
              "summary": f"#{n} の設計（ミッション {a.name}）", "next": "review"},
             # --max-rounds を渡さない。設計の分類の既定（3 ラウンド・前のラウンドからの変更だけ）で回る
             {"id": "review", "type": "drive", "drive": "cross-review", "kind": "ドキュメントレビュー",
-             "stage": "ドキュメントレビュー", "timeout": 3600, "args": "{pr}", "on_fail": "gate", "next": "gate"},
-            {"id": "gate", "type": "judge", "inputs": ["review"],
-             "question": "関門 1（設計 Pull Request のマージ）へ渡す（gate）か、止める（stop）か",
+             "stage": "ドキュメントレビュー", "timeout": 3600, "args": "{pr}", "on_fail": "gate",
+             "next": "glossary-check"},
+            # 語のチェック。当たりは 1 回だけ直し、残った当たりは関門 1 の提示へ載せる
+            {"id": "glossary-check", "type": "run", "stage": "ドキュメントレビュー", "timeout": 120,
+             "cmd": glossary_check, "on_fail": "fix-glossary", "next": "push-glossary"},
+            {"id": "fix-glossary", "type": "work", "kind": "修正", "stage": "ドキュメントレビュー",
+             "inputs": ["glossary-check"], "timeout": 1800, "next": "glossary-recheck",
+             "prompt": "語のチェックの当たりを直す。未登録の語は用語集へ足すか、用語集の語へ言い換える。廃止した語は"
+                       "用語集の語へ言い換える。用語集を変えたら `glossary.py render` で文書を作り直し、コミットする"
+                       "（push しない）。利用者が採るかを決めるべき語は直さずに「判断が要る」と報告する。"},
+            {"id": "glossary-recheck", "type": "run", "stage": "ドキュメントレビュー", "timeout": 120,
+             "cmd": glossary_check, "on_fail": "push-glossary", "next": "push-glossary"},
+            {"id": "push-glossary", "type": "run", "stage": "ドキュメントレビュー", "timeout": 300,
+             "cmd": "git push -q", "next": "gate"},
+            {"id": "gate", "type": "judge", "inputs": ["review", "glossary-recheck"],
+             "question": "関門 1（設計 Pull Request のマージ）へ渡す（gate）か、止める（stop）か。glossary-recheck に"
+                         "語のチェックの当たりが残っていれば、関門 1 の提示に載せる",
              "choices": ["gate", "stop"]},
         ],
     }
@@ -2304,10 +2342,15 @@ def plan_fast_design(a, n: int, repo: str) -> dict:
     plan = plan_mission_design(a, n, repo)
     state = shlex.quote(str(Path(a.state).resolve()))
     note = "{state_dir}/work/mvv-note.md"
+    # 語のチェックの当たりが直し切れずに残ったら、mvv の判定へ渡さず関門 1 の judge（gate）へ回す
     for s in plan["steps"]:
-        if s["id"] == "review":
+        if s["id"] == "push-glossary":
             s["next"] = "mvv"
+        elif s["id"] == "glossary-recheck":
+            s["on_fail"] = "push-glossary-gate"
     plan["steps"] += [
+        {"id": "push-glossary-gate", "type": "run", "stage": "ドキュメントレビュー", "timeout": 300,
+         "cmd": "git push -q", "next": "gate"},
         {"id": "mvv", "type": "run", "stage": "設計", "timeout": 900,
          "cmd": f"{MVV_PY} check --mission {state} --gate design --pr {{pr}} --mode {a.mode} --root . --note {note}",
          "next": "approve", "gate_next": "end"},
@@ -2334,9 +2377,9 @@ def plan_fast_impl(a, n: int, repo: str) -> dict:
     return plan
 
 
-def plan_fast_check(a, repo: str, name: str, final: bool = False) -> dict:
+def plan_fast_check(a, repo: str, name: str, final: bool = False, review_only: bool = False) -> dict:
     ns = argparse.Namespace(**decl_fields(a), id=name, worktree=repo, issue=a.issue, mode=a.mode,
-                            mission=getattr(a, "state", None), final=final)
+                            mission=getattr(a, "state", None), final=final, review_only=review_only)
     return plan_check_since(ns)
 
 
@@ -2357,7 +2400,8 @@ def prod_version(version: str) -> str:
 
 def fast_mission_plans(a) -> list[dict]:
     """pace: fast のミッションのステージ。ミッションのブランチを作らず、実装は起点のブランチへ直接入れる。
-    実装の queue が --then のステージで 検査（実行の条件）→ 開発版 → 本番（先頭が MVV 判定）を順に流す。"""
+    実装の queue が --then のステージで 検査（実行の条件）→ 実装レビュー（開発版ごと）→ 開発版 → 本番（先頭が MVV 判定）を
+    順に流す。検査が立てばその中でレビューも通るため、実装レビューのステージは範囲が空になり流れない。"""
     repo = str(Path(a.worktree).resolve())
     waves = []
     if a.design:
@@ -2367,6 +2411,8 @@ def fast_mission_plans(a) -> list[dict]:
     waves += [
         {"name": "実装", "plans": {f"impl-{n}": plan_fast_impl(a, n, repo) for n in a.issue}},
         {"name": "検査", "plans": {"check": plan_fast_check(a, repo, f"{a.name}-1")}, "then_of": "実装"},
+        {"name": "実装レビュー", "plans": {"review": plan_fast_check(a, repo, f"{a.name}-review", review_only=True)},
+         "then_of": "実装"},
         {"name": "開発版", "plans": {"release": plan_fast_release(a, repo, a.version, "dev")}, "then_of": "実装"},
         {"name": "本番", "plans": {"release-prod": plan_fast_release(a, repo, prod_version(a.version), "prod")},
          "then_of": "実装"},
@@ -2972,6 +3018,10 @@ def main() -> int:
     n.add_argument("--since-last", action="store_true", help="check: 前回の検査からの差分を範囲にする（--pr と排他）")
     n.add_argument("--id", help="check --since-last: 検査の名前（ブランチ check/<名>）")
     n.add_argument("--final", action="store_true", help="check --since-last: ミッションの終わりの検査")
+    n.add_argument("--since-ref", help="check --since-last: 前回の検査の位置が origin にも手元の記録にも無いときの"
+                                       "範囲の起点（初めて使うリポジトリで、どこまで見たか）")
+    n.add_argument("--review-only", action="store_true",
+                   help="check --since-last: 実装レビューだけ（開発版ごと。構造改善はトリガーが立ったときの検査）")
     n.add_argument("--mission", help="check --since-last: ミッションの状態（課題を読む）")
     n.add_argument("--mvv", help="release: 関門 2 を MVV で判定する（ミッションの状態）")
     n.add_argument("--escape-of", type=int, help="impl: 直す不具合を持ち込んだ PR（分からなければ 0）")
@@ -3028,6 +3078,10 @@ def main() -> int:
             ap.error("new check の --since-last と --pr は同時に渡せない")
         if a.kind == "check" and a.since_last and not a.id:
             ap.error("new check --since-last には --id（検査の名前）が要る")
+        if a.kind == "check" and a.review_only and not a.since_last:
+            ap.error("new check の --review-only は --since-last と組にする")
+        if a.kind == "check" and a.review_only and a.final:
+            ap.error("new check の --review-only と --final は同時に渡せない")
         if a.kind == "check" and not (a.pr or a.since_last):
             ap.error("new check には --pr か --since-last が要る")
         if a.kind == "release" and not (a.version and (a.prs or a.prs_from_queue) and a.channel):
