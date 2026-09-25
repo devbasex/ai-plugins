@@ -721,3 +721,106 @@ def test_pr_body_from_llm_has_one_footer(tmp_path, monkeypatch, llm_footer):
     got = body.read_text()
     assert "本文。" in got and got.count(sv.PR_FOOTER) == 1
     assert got.rstrip().endswith(sv.PR_FOOTER)
+
+
+# --- 途中の報告（progress.jsonl）---
+
+FAKE_WORKER = """#!{py}
+import json, re, sys, time
+prompt = sys.stdin.read()
+path = re.search(r"^(\\S+progress\\.jsonl) へ追記する", prompt, re.M).group(1)
+lines = {lines!r}
+for t in lines:
+    with open(path, "a") as f:
+        f.write(t + "\\n")
+    time.sleep(0.15)
+time.sleep({sleep})
+print(json.dumps({{"result": "## 作業の報告\\n- 結果: 完了", "usage": {{}}, "total_cost_usd": 0.01,
+                  "num_turns": 1}}))
+"""
+
+
+def progress(s):
+    rows = []
+    for l in (s.dir / "progress.jsonl").read_text().splitlines():
+        try:
+            rows.append(json.loads(l))
+        except json.JSONDecodeError:
+            pass  # worker が書いた形の違う行
+    return rows
+
+
+def fake_worker(tmp_path, monkeypatch, lines, sleep=0.0):
+    f = tmp_path / "fake_worker.py"
+    f.write_text(FAKE_WORKER.format(py=PY, lines=lines, sleep=sleep))
+    monkeypatch.setenv("NDF_SUPERVISE_CLAUDE", f"{PY} {f}")
+
+
+def test_step_lines_and_alive_line(tmp_path):
+    s, text = run_plan(tmp_path, [{"id": "a", "type": "run", "cmd": "sleep 0.6"},
+                                  {"id": "b", "type": "run", "cmd": "echo 最後の行", "next": "end"}],
+                       report_interval=0.2)
+    assert "結果: 完了" in text
+    rows = progress(s)
+    steps = [r for r in rows if r["kind"] == "step"]
+    assert [r["step"] for r in steps] == ["a", "b"]
+    assert steps[0]["next"] == "b" and steps[1]["next"] == "end" and steps[1]["summary"] == "最後の行"
+    assert all({"at", "type", "exit", "seconds", "cost"} <= set(r) for r in steps)
+    alive = [r for r in rows if r["kind"] == "alive"]
+    assert alive and alive[0]["step"] == "a" and alive[0]["worker"] == "無し"
+    assert rows.index(alive[0]) < rows.index(steps[0])  # 段の途中で書く
+    assert "LLM へ回した 0 回" in text
+
+
+def test_no_alive_line_within_interval(tmp_path):
+    s, _ = run_plan(tmp_path, [{"id": "a", "type": "run", "cmd": "sleep 0.3", "next": "end"}])
+    assert [r["kind"] for r in progress(s)] == ["step"]
+
+
+def test_work_prompt_has_progress_instructions(tmp_path, fakes):
+    s, _ = run_plan(tmp_path, [{"id": "impl", "type": "work", "prompt": "実装する", "next": "end"}])
+    prompt = fakes.read_text()
+    assert "## 途中の報告" in prompt and str((s.dir / "progress.jsonl").resolve()) in prompt
+
+
+def test_worker_lines_are_sorted_into_attention(tmp_path, monkeypatch):
+    w = lambda t: json.dumps({"kind": "worker", "at": "2026-01-01T00:00:00+09:00", "text": t}, ensure_ascii=False)
+    fake_worker(tmp_path, monkeypatch, [
+        w("課題の本文を読み終えた"), "形の違う行", w("テストが 3 件落ちた"), w("テストが 4 件落ちた"),
+        w("関門に当たった: 本番の配布"), w("実装を 1 つ終えた")], sleep=0.5)
+    s, text = run_plan(tmp_path, [{"id": "impl", "type": "work", "prompt": "実装する", "next": "end"}],
+                       report_interval=0.3)
+    rows = progress(s)
+    att = [r for r in rows if r["kind"] == "attention"]
+    assert [a["reason"] for a in att] == ["同じ失敗の繰り返し", "関門"]
+    assert all(a["step"] == "impl" for a in att)
+    alive = [r for r in rows if r["kind"] == "alive"]
+    assert alive and alive[-1]["worker"] == "実装を 1 つ終えた"
+    assert "worker 5（形が違う 1）" in text and "conductor 向け 2" in text
+
+
+def test_repeated_failure_before_judge_is_attention(tmp_path, seq):
+    seq[0]({"out": {"result": '{"decision": "t", "reason": "もう 1 度"}', "usage": {}, "total_cost_usd": 0.0}})
+    s, _ = run_plan(tmp_path, [
+        {"id": "t", "type": "run", "cmd": "exit 1", "on_fail": "j"},
+        {"id": "j", "type": "judge", "question": "直すか", "choices": ["t", "stop"]}], 上限=4)
+    att = [r for r in progress(s) if r["kind"] == "attention"]
+    assert [a["reason"] for a in att] == ["判断の段で stop が出そう"]
+
+
+def test_queue_notifies_attention(tmp_path):
+    f = tmp_path / "p.json"
+    prog = tmp_path / "p-state" / "progress.jsonl"
+    prog.parent.mkdir()
+    prog.write_text(json.dumps({"kind": "attention", "reason": "前の実行"}) + "\n")
+    line = json.dumps({"kind": "worker", "at": "x", "text": "進めない: 権限が無い"}, ensure_ascii=False)
+    f.write_text(json.dumps({"フェーズ": "試験", "課題": [], "作業場所": str(tmp_path), "report_interval": 0.2,
+                             "steps": [{"id": "t", "type": "run",
+                                        "cmd": f"echo '{line}' >> {prog}; sleep 0.5", "next": "end"}]}))
+    p = cli("queue", str(f), "--poll", "0.1")
+    assert p.returncode == 0, p.stdout + p.stderr
+    out = [json.loads(l) for l in p.stdout.splitlines()]
+    events = [o for o in out if o.get("event") == "attention"]
+    assert len(events) == 1 and events[0]["reason"] == "止まった" and events[0]["step"] == "t"
+    assert events[0]["tool"] == "supervise-queue" and events[0]["plan"] == str(f)
+    assert out[-1]["status"] == "ok"
