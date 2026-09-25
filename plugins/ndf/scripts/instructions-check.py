@@ -808,6 +808,7 @@ def version_findings(target: Target, text: str, latest: str,
         return findings
     latest_base = base_triple(latest)
     where = decl.decisions or "退避先の文書"
+    reported: set[int] = set()
     for number, body, _is_heading in paragraph_starts(text):
         match = VERSION_AT_START.match(body.strip())
         if not match:
@@ -827,6 +828,38 @@ def version_findings(target: Target, text: str, latest: str,
             "released-version-paragraph",
             f"{reason}。次の見出しまでを {where} へ移す",
             target.scope, display_path(target), number, target.source))
+        reported.add(number)
+    if decl.pending_marker:
+        findings.extend(_inline_pending_findings(target, text, latest, decl.pending_marker,
+                                                 reported))
+    return findings
+
+
+def _inline_pending_findings(target: Target, text: str, latest: str, marker: str,
+                             reported: set[int]) -> list[Finding]:
+    """段落の途中の「<版> の次の版で」。その版の次の版が既に出ていれば拾う（#945）。"""
+    pattern = re.compile(
+        r"(?<![0-9A-Za-z.-])v?(?P<version>\d+\.\d+\.\d+(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?)"
+        r"(?![0-9A-Za-z.-])\s*" + re.escape(marker))
+    latest_base = base_triple(latest)
+    findings: list[Finding] = []
+    in_fence = False
+    for number, line in enumerate(text.splitlines(), start=1):
+        if FENCE_RE.match(line):
+            in_fence = not in_fence
+            continue
+        if in_fence or number in reported:
+            continue
+        for match in pattern.finditer(line):
+            version = match.group("version")
+            if base_triple(version) >= latest_base:
+                continue
+            findings.append(Finding(
+                "released-version-paragraph",
+                f"段落の途中の「{version} {marker}」が指す版は既に出ている（最新は {latest}）。"
+                "変更が入った版へ書き換えるか、印を最新の版へ進める",
+                target.scope, display_path(target), number, target.source))
+            break
     return findings
 
 

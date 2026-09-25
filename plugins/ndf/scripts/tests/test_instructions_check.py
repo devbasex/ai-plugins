@@ -1180,3 +1180,24 @@ def test_non_string_files_exits_two(tmp_path, value):
     declare(root, {"version": 1, "files": value})
     proc = run(root)
     assert proc.returncode == 2, proc.stdout + proc.stderr
+
+
+def test_a_pending_marker_in_the_middle_of_a_paragraph_is_reported(tmp_path):
+    """段落の途中の「<版> の次の版で」も、その版が出た後は拾う（#945）。"""
+    body = (
+        "# c\n\n"
+        "cross-review の規約である。agy は ndf 1.0.0 の次の版で既定から外し、\n"
+        "codex で回す。\n\n"
+        "kiro は ndf 2.0.0 の次の版で外す。\n\n"
+        "```\n"
+        "例: 1.0.0 の次の版で\n"
+        "```\n"
+    )
+    root = make_repo(tmp_path, {"CLAUDE.md": body, "CHANGELOG.md": "## [ndf 2.0.0]\n"})
+    declare(root, released_decl(pending_marker="の次の版で"))
+    proc = run(root)
+    assert proc.returncode == 1
+    lines = errors(proc)
+    assert len(lines) == 1, lines
+    assert "1.0.0" in lines[0]
+    assert "CLAUDE.md:3" in lines[0]
