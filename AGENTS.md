@@ -14,28 +14,28 @@
 
 ### Git運用ルール
 - **`main` / `develop` への直接コミット・プッシュ禁止。** Pull Request の宛先は
-  **`develop`**（開発版チャネル）。`main`（正式版チャネル）へ進めるのは配布の工程だけ
+  **`develop`**（開発版チャネル）。`main`（正式版チャネル）へ進めるのはリリースの工程だけ
   （「版と配布の方針」）
-  - **起点は `.ndf/worktree.json` の `base_branch` が宣言する。** 作業ツリーの起点と、
-    宛先のチェックがこの宣言を読む（`follow_branch: true` のときは主ディレクトリの追従先にも
+  - **起点は `.ndf/worktree.json` の `base_branch` が宣言する。** worktree のベースブランチと、
+    宛先のチェックがこの宣言を読む（`follow_branch: true` のときはメインディレクトリの追従先にも
     なる）。宣言が無いリポジトリは既定ブランチのまま動く
   - **`--base develop` の付け忘れは継続的統合が塞ぐ。** `main` 宛の Pull Request は
     `develop` から出たものだけを通す（`scripts/check-pr-base.sh`）。判定は宣言に起点が
     書かれていて、そのブランチが origin にあるときだけ働く
-- **開発の変更は `.worktrees/<ブランチ名>` の作業ツリーの中で行う**（`/ndf:worktree`）。clone したディレクトリ（主ディレクトリ）は編集対象から外す
-  - `issues/` `docs/` と各ランタイムの設定は主ディレクトリで編集してよい
-  - 主ディレクトリの編集は拒否されない。案内が出ても操作は成立する
+- **開発の変更は `.worktrees/<ブランチ名>` の worktree の中で行う**（`/ndf:worktree`）。clone したディレクトリ（メインディレクトリ）は編集対象から外す
+  - `issues/` `docs/` と各ランタイムの設定はメインディレクトリで編集してよい
+  - メインディレクトリの編集は拒否されない。案内が出ても操作は成立する
 - 必ずfeatureブランチを作成して作業
 - Pull Requestを通じてレビュー・マージ
 - ユーザーの許可なくPRを承認しない
-  - `pace: fast` は MVV の承認・ハッシュの一致・判定の記録がそろった関門 1・2 だけ、MVV の承認を許可として扱う（越えない線は除く。条件は `plugins/ndf/skills/development-workflow/references/pace.md`）。approve はしない
+  - `pace: fast` は MVV の承認・ハッシュの一致・判定の記録がそろったゲート 1・2 だけ、MVV の承認を許可として扱う（レッドラインは除く。条件は `plugins/ndf/skills/development-workflow/references/pace.md`）。approve はしない
 
 ### 版と配布の方針
 
-**判断の基準だけをここに置く。** 版数と配布の手順・実測・一覧は
+**判断の基準だけをここに置く。** 版数とリリースの手順・実測・一覧は
 [docs/versioning-and-distribution.md](docs/versioning-and-distribution.md) にある（版数の扱いの正本）。
 
-**配布のチャネルは 2 つに分ける。** マージと配布を別の操作にするためである。
+**配布のチャネルは 2 つに分ける。** マージとリリースを別の操作にするためである。
 
 | チャネル | ref | 何が載るか |
 | --- | --- | --- |
@@ -59,7 +59,7 @@
 | open | `<2 桁の連番> <主題>`（例: `01 リファクタリングの方法論と構造`） | **着手の順序だけ。** 出す版は決まっていない |
 | closed | `v<版数>` | **出た版。** タグ（`ndf--v<版数>`）と `CHANGELOG.md` と一致する |
 
-**閉じるときに改名する。** 配布で版が決まった時点が、名前を版数へ変えられる最初の時点である。
+**閉じるときに改名する。** リリースで版が決まった時点が、名前を版数へ変えられる最初の時点である。
 
 **連番は再利用しない。** `01` を閉じて版数へ改名しても、次に作るのは番号の続きである。詰め直すと、
 記録に残った番号が別のミッションを指す。
@@ -77,22 +77,22 @@
 
 **正式版を出したらリリースタグを打つ。** 利用者が過去の版へ戻るときの目印になる（手順は正本の「正式版を出す」）。
 
-### 安定と試行
+### 安定版と実験版
 
-**NDF の変更は、安定と試行の 2 つの経路に分ける。** 思いつきを実践で早く試すためである。
-すべての変更に同じ工程を課すと、試す前に課題の順番待ちと配布の待ちが入る。
+**NDF の変更は、安定版と実験版（stable / experimental）の 2 つの経路に分ける。** 思いつきを実践で早く試すためである。
+すべての変更に同じ工程を課すと、試す前に課題の順番待ちとリリースの待ちが入る。
 
-| | 安定 | 試行 |
+| | 安定版 | 実験版 |
 | --- | --- | --- |
-| 何が当たるか | 既定で働くもの。hook・Skill 本文の手順・結果 JSON の契約・配布と版・関門 | 呼んだときだけ働くもの。補助のスクリプト・計画の新しい選択肢・閾値・conductor の手順の工夫 |
+| 何が当たるか | 既定で働くもの。hook・Skill 本文の手順・結果 JSON の契約・リリースと版・承認ゲート | 呼んだときだけ働くもの。補助のスクリプト・プランの新しい選択肢・閾値・conductor の手順の工夫 |
 | 置き場 | 今の場所 | `plugins/ndf/scripts/experimental/` |
 | 経路 | `development-workflow` のモードどおり | その場で実装し、手元で 1 回使ってから PR → CI → マージ。モードは `light` として扱い、課題は起票しない |
 | 記録 | 課題と Pull Request | [docs/ndf-experiments.md](docs/ndf-experiments.md) の台帳に 1 行 |
 
-- **試行は、マージの前から作業ツリーのパスで呼んでよい。** 配布を待たずに実践で使うためである
-- **既定で動くもの（コード・hook・設定と、Skill とエージェントの本文）から試行側を参照しない。** 参照すると既定の振る舞いに試行が漏れる。`plugins/ndf/scripts/tests/test_experimental.py` が落とす。README と CHANGELOG は利用者向けの説明なので、試行の置き場を紹介してよい
-- **効いた試行は安定の経路で本体へ移す。** 使われなかった試行は消す。どちらも台帳の「行き先」に書く
-- 試行を足すと決めるのは conductor でよい。既定の振る舞いを変えたくなった時点で安定の経路へ移る
+- **実験版は、マージの前から worktree のパスで呼んでよい。** リリースを待たずに実践で使うためである
+- **既定で動くもの（コード・hook・設定と、Skill とエージェントの本文）から実験版を参照しない。** 参照すると既定の振る舞いに実験版が漏れる。`plugins/ndf/scripts/tests/test_experimental.py` が落とす。README と CHANGELOG は利用者向けの説明なので、実験版の置き場を紹介してよい
+- **効いた実験版は安定版の経路で本体へ移す。** 使われなかった実験版は消す。どちらも台帳の「行き先」に書く
+- 実験版を足すと決めるのは conductor でよい。既定の振る舞いを変えたくなった時点で安定版の経路へ移る
 
 ### セキュリティ要件
 
@@ -135,7 +135,7 @@ ai-plugins/
 | [docs/plugin-development-guide.md](docs/plugin-development-guide.md) | プラグイン開発ガイド（構造、plugin.json、検証） |
 | [docs/versioning-and-distribution.md](docs/versioning-and-distribution.md) | 版と配布（チャネル、版の付け方、ランタイムごとの取得と導入、版数を持つ 15 箇所、過去の版へ戻る）。版数の扱いの正本 |
 | [docs/ndf-plugin-reference.md](docs/ndf-plugin-reference.md) | NDFプラグイン詳細リファレンス |
-| [docs/ndf-experiments.md](docs/ndf-experiments.md) | NDF の試行の台帳（試している仕組み・使った結果・行き先） |
+| [docs/ndf-experiments.md](docs/ndf-experiments.md) | NDF の実験版の台帳（試している仕組み・使った結果・行き先） |
 | [docs/specifications/](docs/specifications/) | 完了済みplan/issue由来の確定仕様 |
 | [docs/presentations/](docs/presentations/) | 勉強会などで使うスライド資料（Marp形式）とビルド手順。**発表日時点の記録で、以後の構成変更には追随しない** |
 | [docs/articles/](docs/articles/README.md) | 社外ブログへ載せる記事の正本。**書いた日時点の記録で、以後の構成変更には追随しない** |
