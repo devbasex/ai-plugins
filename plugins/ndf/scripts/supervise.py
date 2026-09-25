@@ -2336,10 +2336,15 @@ def plan_fast_design(a, n: int, repo: str) -> dict:
     plan = plan_mission_design(a, n, repo)
     state = shlex.quote(str(Path(a.state).resolve()))
     note = "{state_dir}/work/mvv-note.md"
+    # 語のチェックの当たりが直し切れずに残ったら、mvv の判定へ渡さず関門 1 の judge（gate）へ回す
     for s in plan["steps"]:
         if s["id"] == "push-glossary":
             s["next"] = "mvv"
+        elif s["id"] == "glossary-recheck":
+            s["on_fail"] = "push-glossary-gate"
     plan["steps"] += [
+        {"id": "push-glossary-gate", "type": "run", "stage": "ドキュメントレビュー", "timeout": 300,
+         "cmd": "git push -q", "next": "gate"},
         {"id": "mvv", "type": "run", "stage": "設計", "timeout": 900,
          "cmd": f"{MVV_PY} check --mission {state} --gate design --pr {{pr}} --mode {a.mode} --root . --note {note}",
          "next": "approve", "gate_next": "end"},

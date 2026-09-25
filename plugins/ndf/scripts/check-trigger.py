@@ -495,9 +495,11 @@ def cmd_stats(a, root: Path) -> tuple[dict, int]:
     ended = [e for e in checks if e.get("result") in ENDED]
     rows = []
     for i, c in enumerate(ended):
-        until = parse_at(ended[i + 1]["at"]) if i + 1 < len(ended) else now()
+        # 区間は同じ種類（構造改善を含む検査どうし・実装レビューだけの回どうし）の次の記録までで切る
+        nxt = next((d for d in ended[i + 1:] if d.get("only") == c.get("only")), None)
+        until = parse_at(nxt["at"]) if nxt else now()
         escaped = sum(1 for e in events if e["kind"] == "escape" and parse_at(c["at"]) < parse_at(e["at"]) <= until)
-        rows.append({"id": c.get("id"), "at": c["at"], "result": c["result"], "pr": c.get("pr"),
+        rows.append({"id": c.get("id"), "at": c["at"], "result": c["result"], "pr": c.get("pr"), "only": c.get("only"),
                      "findings": c.get("findings") or {}, "escapes_after": escaped})
     fired: dict[str, int] = {}
     for e in evals:

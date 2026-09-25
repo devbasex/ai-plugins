@@ -379,6 +379,16 @@ def test_a_full_check_also_starts_the_next_review_range(repo, env, tmp_path):
     assert code == 3 and rv["metrics"]["from"] == to
 
 
+def test_stats_counts_escapes_until_the_next_record_of_the_same_kind(repo, env):
+    append_event(env, repo, {"kind": "check", "at": iso(3), "id": "m-1", "result": "merged"})
+    append_event(env, repo, {"kind": "check", "at": iso(2), "id": "m-r", "result": "merged", "only": "review"})
+    append_event(env, repo, {"kind": "escape", "at": iso(1), "pr": 21})
+    code, out, _ = call(repo, env, "stats")
+    rows = {r["id"]: r for r in out["items"]}
+    assert code == 0 and rows["m-1"]["escapes_after"] == 1 and rows["m-r"]["escapes_after"] == 1
+    assert rows["m-1"]["only"] is None and rows["m-r"]["only"] == "review"
+
+
 def test_review_and_final_are_exclusive(repo, env):
     assert call(repo, env, "eval", "--review", "--final")[0] == 2
 
