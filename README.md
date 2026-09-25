@@ -20,7 +20,7 @@ Claude Code / Codex / Kiro CLI / agy 向けのスキル・MCP設定を共有す�
   - 運用 (4): skill-stats, statusline, install-wrapper, restart
 - **8つの専門エージェント**: director, data-analyst, corder, researcher, qa, debugger, devops-engineer, code-reviewer
 - **3 層の worker の定義 1 個**: worker（supervisor が 1 つの作業を渡す先。Skill と Agent のツールを外してある）
-- **自動フック**: 作業ツリー運用（Claude Code / Codex は PreToolUse + SessionStart、Kiro CLI は userPromptSubmit + agentSpawn、agy は PreToolUse + PreInvocation。リポジトリに `.ndf/worktree.json` があるときだけ動く）、SessionStart (transcript保持期間を最低90日に保つ)、Stop (AI要約生成+Slack通知)
+- **自動フック**: 作業ツリー運用（Claude Code / Codex は PreToolUse + SessionStart、Kiro CLI は userPromptSubmit + agentSpawn、agy は PreToolUse + PreInvocation。リポジトリに `.ndf/worktree.json` があるときだけ動く）、SessionStart (transcript保持期間を最低90日に保つ)、回答・承認待ちの Slack 通知（Stop・Notification・PermissionRequest ほか）
 - **外部AI委譲**: `/ndf:external-ai` skill + `corder` エージェント経由で Codex / agy をバックグラウンド実行 (v4.0.0 で Codex MCP サーバは廃止)
 - **AIクロスレビュー強化**: `/ndf:cross-review` は codex/agy 両方に PR レビューを委譲し、agy の進捗 heartbeat、`--focus` / `--extra-instructions-file`、PR 種別別の自動レビュー観点テンプレートに対応
 - **Kiro CLI対応**: `plugins/ndf/dev.kiro/install.sh` によるワンコマンドセットアップ

@@ -229,14 +229,14 @@ Claude Code の SessionStart hook（`hooks/claude.json`）は上記に加えて�
   版は後退させない）。10.17.4〜10.17.6 が自動で足した alias の囲みが残っていれば 1 度だけ知らせる。
   **シェルの設定は書かない。** ラッパーを入れる・外すのは `/ndf:install-wrapper`（Claude Code だけ）
 
-Claude Code の Stop hook は終了時に Slack 通知スクリプトを実行します。通知に必要な環境変数が
-未設定の場合は送信せず終了します。ラッパーの下（`NDF_RELAY_DIR` がある）では、最後の応答の
+Claude Code の Stop・Notification・PermissionRequest hook と `AskUserQuestion` の PreToolUse hook は、
+利用者の回答か承認を待つときだけ Slack へ知らせます（下の「Slack 通知」）。ラッパーの下（`NDF_RELAY_DIR` がある）では、最後の応答の
 `ndf-next` のブロックをラッパーの合図へ写します（`relay.py mark`）。`AskUserQuestion` の PreToolUse /
 PostToolUse hook は、ラッパーの下で質問の表示中の合図を作る・消します（ラッパーが質問の答えを代わりに
 送らないため）。好きな時点で切り替えるのは `/ndf:restart` です。ラッパーの始め方・止め方・上限は
 `skills/development-workflow/references/relay.md` にあります。
 
-Codex の Stop hook（`hooks/codex.json`）は `NDF_CODEX_SLACK_NOTIFY=true` が設定されている
+Codex の Stop・PermissionRequest hook（`hooks/codex.json`）は `NDF_CODEX_SLACK_NOTIFY=true` が設定されている
 場合だけ Slack 通知を送ります。**Codex の hook は Codex 側で明示的に有効化するまで実行され
 ません。** `~/.codex/config.toml` の `[hooks.state]` に対象 hook の `enabled = true` が要ります。
 `/hooks` で対象 hook を確認し、利用するプロジェクトで有効化してください。
@@ -245,7 +245,60 @@ Kiro CLI では installer が `.kiro/agents/ndf.json` の `hooks` を生成し�
 
 ## Slack 通知
 
-利用プロジェクト側で以下の環境変数を設定します。
+利用者の回答か承認が無いと進まない時点でだけ、Slack へ知らせます。応答が終わっても、待っていなければ
+送りません。たとえば応答が「この設計でマージしてよいですか。」で終わると、次の本文が届きます。
+
+```text
+【承認待ち】[ai-plugins] この設計でマージしてよいですか。
+セッション: https://claude.ai/code/session_01AbCdEf
+host: devbase-01 / cwd: /work/ai-plugins
+PR: https://github.com/devbasex/ai-plugins/pull/1150
+```
+
+同じ応答が「設計 PR を出しました。レビューの結果を待ちます。」で終わった場合は、何も送りません。
+
+### 送る時点
+
+| ランタイム | 時点 | 印 |
+| --- | --- | --- |
+| Claude Code | ツールの権限確認（`Notification` の `permission_prompt`） | 【承認待ち】 |
+| Claude Code | 計画の承認（`ExitPlanMode` の `PermissionRequest`） | 【承認待ち】 |
+| Claude Code | 選択式の問い（`AskUserQuestion`）・MCP の入力フォーム（`elicitation_dialog` / `elicitation_url_dialog`） | 【回答待ち】 |
+| Claude Code・Codex・Kiro | 応答が文で回答か承認を求めて終わる（`Stop` / `stop`） | 【回答待ち】か【承認待ち】 |
+| Codex | ツールの実行の承認（`PermissionRequest`） | 【承認待ち】 |
+
+Codex の選択式の問いと、Kiro の承認の画面・選択式の問いは、捉える hook が無いため送りません。
+
+- **文で求めているかは、応答の最後の 3 行の形で決めます。** 問いの形（`？` `ですか` `ますか` など）、
+  依頼の形（`ください` `お願いします` `よければ` など）、利用者の返事を待つと述べる文（`承認を待っています` など）が
+  あれば待ちです。コード・引用・表・見出しは見ません。承認の語（`承認` `マージ` `進めて` `てよいですか` など）を
+  含めば【承認待ち】、含まなければ【回答待ち】です。語の並びは `scripts/lib/wait_notice.py` にあります
+- **同じ待ちは 1 回だけ送ります。** `AskUserQuestion` や `ExitPlanMode` の後に届く `permission_prompt` は
+  同じ待ちとして送りません。放置の通知（`idle_prompt`）は捉えません
+- **非対話の `claude -p`（`CLAUDE_CODE_ENTRYPOINT` が `sdk-` で始まる）では送りません。** Codex の `codex exec` と
+  Kiro の非対話の実行は対話と見分けられないため、問いの形で終われば通知が出ることがあります
+- 本文の 1 行目は種類の印・リポジトリ名・求めている文（200 字まで）です。要約は作りません
+
+### 戻り先と関連 URL
+
+| 場合 | 載る行 |
+| --- | --- |
+| Claude Code の Remote Control 中・クラウドのセッション | `セッション: https://claude.ai/code/<ID>` |
+| Claude Code のそれ以外 | `再開: claude --resume <session_id>` |
+| Codex | `再開: codex resume <session_id>` |
+| Kiro | `再開: kiro-cli chat --resume-id <ID>`。ID が無ければ `再開: kiro-cli chat --resume`（cwd で打つ） |
+
+どの場合も `host: <ホスト名> / cwd: <cwd>` の行を足します。
+
+- 【回答待ち】には、応答に出た issue（GitHub の `/issues/<n>` と `#<n>`）と Redmine の URL を 3 件まで載せます。
+  `#<n>` は `origin` が GitHub を指すときだけ URL にします
+- 【承認待ち】には PR の URL を先頭に載せます。応答に無ければ、現在のブランチの PR を `gh pr view` で補います
+- Redmine は `REDMINE_URL` のホストの URL と `Redmine #<n>` を採ります。`REDMINE_URL` が無ければ載せません
+
+### 設定
+
+利用プロジェクト側で以下の環境変数を設定します。`.env` は cwd から git のトップまで上へ探し、無ければ
+プラグインの置き場から上へ探します。既に環境にある値は上書きしません。
 
 ```bash
 SLACK_BOT_TOKEN=xoxb-...
@@ -255,8 +308,20 @@ SLACK_USER_MENTION=<@U0123456789>
 NDF_CODEX_SLACK_NOTIFY=true
 ```
 
-`SLACK_USER_MENTION` は任意です。機密値は `.env` などで管理し、リポジトリへコミットしないで
-ください。
+| 変数 | 意味 |
+| --- | --- |
+| `SLACK_BOT_TOKEN` / `SLACK_CHANNEL_ID` | 必須。無ければ何も送りません |
+| `SLACK_USER_MENTION` | 任意。メンション付きを送って通知を鳴らし、メンション無しを送り直してから前者を消します |
+| `NDF_CODEX_SLACK_NOTIFY` | Codex だけ必須。`true` のときだけ Codex で動きます |
+| `NDF_SLACK_NOTIFY_DONE` | 任意。`true` なら待ちでない応答の終わりも【完了】として送ります（本文は最後の段落の先頭 200 字） |
+| `REDMINE_URL` | 任意。Redmine の URL を見分けるホスト（例 `https://redmine.example.com`） |
+| `DEBUG_SLACK_NOTIFY` | 任意。`true` なら `~/.claude/logs/wait-notify-<日付>.log` へ判定の理由を書きます |
+
+機密値は `.env` などで管理し、リポジトリへコミットしないでください。通知の記録（同じ待ちを 2 度送らないための
+直前の 1 件）は `${XDG_STATE_HOME:-~/.local/state}/ndf/wait-notify/` にセッションごとに置き、7 日で消します。
+
+**Kiro は `install.sh --with-slack` を打ち直してください。** 通知の入口は `scripts/wait-notify.py` の 1 本です。
+`stop` hook が配布物に無い `scripts/slack-notify.js` を指す `.kiro/agents/ndf.json` では、通知が届きません。
 
 ## 外部 AI 委譲
 
