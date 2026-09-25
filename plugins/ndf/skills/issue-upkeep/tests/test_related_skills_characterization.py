@@ -116,7 +116,7 @@ def run_stages(work: pathlib.Path, case: str) -> subprocess.CompletedProcess:
 ])
 def test_retrospective_picks_the_branch_by_case(
         clone: pathlib.Path, case: str, branch: str) -> None:
-    """起点の issue を持たない変更は開発の起点を、まとまりは配布した先（origin の HEAD）を使う。"""
+    """起点の issue を持たない変更は開発の起点を、ミッションは配布した先（origin の HEAD）を使う。"""
     done = run_stages(clone, case)
     assert done.returncode == 0, done.stderr
     dev_base, record_base, sha = done.stdout.split()
@@ -136,7 +136,7 @@ def test_retrospective_stops_when_the_declared_branch_is_missing(clone: pathlib.
 
 
 def test_retrospective_group_stops_without_the_distribution_branch(clone: pathlib.Path) -> None:
-    """まとまりで origin の HEAD が取れなければ、推測せずに止まる。起点の issue を持たない変更は止まらない。"""
+    """ミッションで origin の HEAD が取れなければ、推測せずに止まる。起点の issue を持たない変更は止まらない。"""
     git(clone, "remote", "set-head", "origin", "-d")
     group = run_stages(clone, "group")
     assert group.returncode == 1, group.stdout

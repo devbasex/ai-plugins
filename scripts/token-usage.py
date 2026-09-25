@@ -35,7 +35,7 @@ from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "plugins/ndf/scripts/lib"))
-from transcript_agents import layer_of, role_of  # 持ち場の語彙は 1 か所に置く
+from transcript_agents import layer_of, role_of  # フェーズの語彙は 1 か所に置く
 
 # 換算費用の重み（input=1）。cache read だけはモデルで倍率が違うため READ_RATES で決める
 WEIGHTS = {"inp": 1.0, "w5": 1.25, "w1h": 2.0, "out": 5.0}
@@ -279,7 +279,7 @@ class Session:
     start: float
     end: float
     active: float
-    roles: dict  # (層, 持ち場) -> Role
+    roles: dict  # (層, フェーズ) -> Role
     external: list = field(default_factory=list)
 
     @property
@@ -572,12 +572,12 @@ def render_md(result: dict, by: list[str]) -> str:
                     f"{r['kiro_credit']:.2f}", _m(r["claude_seat_cost"])])
     out += table(heads + ["会話", "PR", "conductor 換算", "supervisor 換算", "worker 換算", "入力", "出力", "所要",
                           "codex 入力", "codex 出力", "kiro credit", "claude 席 換算"], rows)
-    out += ["", "## 持ち場ごと（1 起動あたり）", ""]
-    out += table(heads + ["層", "持ち場", "起動", "換算", "入力", "出力", "所要"],
+    out += ["", "## フェーズごと（1 起動あたり）", ""]
+    out += table(heads + ["層", "フェーズ", "起動", "換算", "入力", "出力", "所要"],
                  [[r[a] for a in by] + [r["layer"], r["role"], str(r["count"]), _m(r["cost"]), _m(r["context"]),
                                         _k(r["out"]), f"{r['minutes']:.1f}"] for r in result["per_role"]])
-    out += ["", "## 持ち場ごとの呼び出しとキャッシュ", "", calls_legend, ""]
-    out += table(heads + ["層", "持ち場", "起動", "P", "k", "書き込み 5 分", "書き込み 1 時間", "書き直し", "5 分超", "間隔"],
+    out += ["", "## フェーズごとの呼び出しとキャッシュ", "", calls_legend, ""]
+    out += table(heads + ["層", "フェーズ", "起動", "P", "k", "書き込み 5 分", "書き込み 1 時間", "書き直し", "5 分超", "間隔"],
                  [[r[a] for a in by] + [r["layer"], r["role"], str(r["count"]), _k(r["p"]), f"{r['k']:.1f}",
                                         _m(r["w5"]), _m(r["w1h"]), str(r["rewrites"]), str(r["rewrites_after_5m"]),
                                         _min(r["rewrite_gap_median"])] for r in result["per_role"]])

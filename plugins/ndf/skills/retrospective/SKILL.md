@@ -97,7 +97,7 @@ issue と Pull Request の両方で検索する。**
 | 工程 | 実際に通った工程 | 飛ばした工程と、その結果 |
 | context window | `/ndf:skill-stats --agents --session <conductor のセッション>` | 層ごとの固定費と実作業、束ねる候補・割る候補・worker を使いすぎの印 |
 
-**context window の値は測って取る。** 記憶や体感で書かない。まとまりを複数のセッションで
+**context window の値は測って取る。** 記憶や体感で書かない。ミッションを複数のセッションで
 通したときは `--session` を繰り返して 1 つの表にする。**印の判定は記録ごとの比で行われる**
 ため、固定費の水準が違うセッションを束ねても判定の意味は変わらない。中央値と合計の列は
 分布の目安として読む。
@@ -132,7 +132,7 @@ python3 "$CLAUDE_PLUGIN_ROOT/skills/skill-stats/scripts/skill-stats.py" \
 | 起点 | 記録の本体を置く場所 | 辿る経路 |
 | --- | --- | --- |
 | 1 件の issue | その issue へのコメント | その issue の本文末尾へ 1 行 |
-| 複数の issue（まとまり） | そのまとまりを配布した Pull Request へのコメント | 対象のすべての issue の本文末尾へ 1 行 |
+| 複数の issue（ミッション） | そのミッションを配布した Pull Request へのコメント | 対象のすべての issue の本文末尾へ 1 行 |
 | 起点の issue を持たない変更 | その変更の Pull Request へのコメント | 追加の 1 行は要らない |
 
 **閉じた issue にもコメントは投稿できる。** GitHub が拒むのは locked のときだけである。
@@ -149,7 +149,7 @@ python3 "$CLAUDE_PLUGIN_ROOT/skills/skill-stats/scripts/skill-stats.py" \
 | 段 | 入力 | 出力 | 止まる条件 |
 | --- | --- | --- | --- |
 | 1. 開発の起点を解決する | `.ndf/worktree.json` の `base_branch`、origin | `$dev_base` | 宣言したブランチが origin にもローカルにも無い |
-| 2. 記録対象の基準ブランチを決める | 下表の場合、`$dev_base`（起点の issue を持たない変更だけが使う） | `$record_base` | まとまりを配布した先のブランチを判別できない |
+| 2. 記録対象の基準ブランチを決める | 下表の場合、`$dev_base`（起点の issue を持たない変更だけが使う） | `$record_base` | ミッションを配布した先のブランチを判別できない |
 | 3. 基準コミットから Pull Request を引く | `$record_base`、`$RECORD_REPO` | マージ済みの Pull Request 1 件の番号 | マージ済みへ絞った結果が 1 件でない |
 
 **段 1: 開発の起点を解決する**
@@ -201,9 +201,9 @@ fi
 | 場合 | 起点にするコミット |
 | --- | --- |
 | 起点の issue を持たない変更 | その変更をマージした先のブランチ（起点。`.ndf/worktree.json` の `base_branch`）の先頭 |
-| まとまり | そのまとまりを配布した先（正式版のチャネルのブランチ）の先頭 |
+| ミッション | そのミッションを配布した先（正式版のチャネルのブランチ）の先頭 |
 
-**まとまりを対象にする場合は、`$dev_base` ではなくそのまとまりを配布した先を使う。**
+**ミッションを対象にする場合は、`$dev_base` ではなくそのミッションを配布した先を使う。**
 `$dev_base` は開発の起点であり、配布した先とは限らない。開発の起点と配布の先が別の
 ブランチであるリポジトリで `$dev_base` のまま引くと、配布の Pull Request ではなく起点の
 先頭に関連付いた別の Pull Request を選び、誤った番号へ記録を投稿する。
@@ -214,13 +214,13 @@ record_base=$dev_base
 ```
 
 ```bash
-# まとまり — 配布した先を使う。**配布した先は対象リポジトリが決める。** 開発の起点を
+# ミッション — 配布した先を使う。**配布した先は対象リポジトリが決める。** 開発の起点を
 # そのまま配布に使っているリポジトリでは `$dev_base` と同じ値になり、正式版のチャネルを
 # 分けているリポジトリでは別の値になる。字面で書かず、既定ブランチ（origin の HEAD が
 # 指す先）で確かめる。取れないときは推測せず番号を利用者に聞く
 record_base=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')
 [ -n "$record_base" ] || {
-  printf 'NOTE: まとまりを配布した先のブランチを判別できません。番号を利用者に聞いてください\n' >&2
+  printf 'NOTE: ミッションを配布した先のブランチを判別できません。番号を利用者に聞いてください\n' >&2
   exit 1
 }
 ```
@@ -254,13 +254,13 @@ gh api "/repos/$RECORD_REPO/commits/$(git rev-parse "origin/$record_base")/pulls
 
 ## context window の大きさ
 
-| 層 | 持ち場 | モデル | 件数 | 固定費の中央値 | 実作業の中央値 | 実作業 < 固定費 | 最大充填の最大 | 印 |
+| 層 | フェーズ | モデル | 件数 | 固定費の中央値 | 実作業の中央値 | 実作業 < 固定費 | 最大充填の最大 | 印 |
 | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
 
 | 層 | 件数 | 固定費の合計 | 実作業の合計 | 総消費 |
 | --- | ---: | ---: | ---: | ---: |
 
-| 持ち場 | supervisor | supervisor の実作業 | worker の件数 | supervisor と worker の固定費の合計 | 印 |
+| フェーズ | supervisor | supervisor の実作業 | worker の件数 | supervisor と worker の固定費の合計 | 印 |
 | --- | ---: | ---: | ---: | ---: | --- |
 
 （`束ねる候補` / `割る候補` / `worker を使いすぎ` の印が付いた行ごとに、束ねる・割る・
@@ -279,14 +279,14 @@ worker を減らす・そのままのどれにするかと、その理由を 1 �
 | #NNN | ... | 実装中 / レビュー中 |
 ```
 
-**context window の表は貼るだけにする。** 載せてよいのは測定が出す値（数値・層・持ち場・
-作業の種類・モデル名・終わり方・持ち場の中の連番）と、そこから導いた印と判断の理由の文
+**context window の表は貼るだけにする。** 載せてよいのは測定が出す値（数値・層・フェーズ・
+作業の種類・モデル名・終わり方・フェーズの中の連番）と、そこから導いた印と判断の理由の文
 だけである。**プロンプト・応答の本文・ファイルのパス・サブエージェントの識別子は投稿しない**
 （#159）。測定の出力はこの列だけを持つため、加工せずに貼れば足りる。
 
 ```bash
 gh issue comment <issue番号> --repo "$RECORD_REPO" --body-file <記録のファイル>   # 起点が 1 件の issue
-gh pr comment <PR番号> --repo "$RECORD_REPO" --body-file <記録のファイル>         # まとまり / 起点の issue を持たない変更
+gh pr comment <PR番号> --repo "$RECORD_REPO" --body-file <記録のファイル>         # ミッション / 起点の issue を持たない変更
 ```
 
 #### 辿る経路を作る
@@ -305,7 +305,7 @@ printf '\n振り返り: %s\n' "<コメントの URL>" >> /tmp/issue-body.md
 gh issue edit <issue番号> --repo "$RECORD_REPO" --body-file /tmp/issue-body.md
 ```
 
-まとまりでは、対象のすべての issue へ同じ URL の 1 行を足す。起点の issue を持たない変更では
+ミッションでは、対象のすべての issue へ同じ URL の 1 行を足す。起点の issue を持たない変更では
 この手順が要らない。記録は Pull Request 自身に付いている。
 
 **設計判断の理由と実測の結果を残す。** Skill の挙動そのものは各 `SKILL.md` が正であり、
@@ -321,16 +321,16 @@ gh issue edit <issue番号> --repo "$RECORD_REPO" --body-file /tmp/issue-body.md
 
 この工程に入ったら記録のコマンド `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "振り返り"` を 1 行打つ（issue の本文と盤面の両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「記録のコマンド」を使う）。 **入口のこの記録では盤面の `Status` を書かない。** 先に `Done` にすると、盤面の `Auto-close issue` が課題を閉じ、reopen の手段が報告から落ちる。
 
-## まとまりを閉じる
+## ミッションを閉じる
 
 **振り返りを通る変更では、この工程がその実行の終わりの工程である。** 記録を投稿した後に、
-`progress-tracking` の「まとまりを閉じる」を行う。**手順はそこが正本で、ここには写さない。**
+`progress-tracking` の「ミッションを閉じる」を行う。**手順はそこが正本で、ここには写さない。**
 盤面の `Status` を `Done` にするのも、課題を閉じるのも、その手順の中で行う。
 
 ## 蓄積した課題を手入れする
 
-**「まとまりを閉じる」の後に `/ndf:issue-upkeep` を呼ぶ。** 順序を逆にすると、`issue-upkeep` の
-段 1 が読む「このまとまりで閉じた課題」がまだ閉じていない。振り返りが拾うのは、この変更から出た
+**「ミッションを閉じる」の後に `/ndf:issue-upkeep` を呼ぶ。** 順序を逆にすると、`issue-upkeep` の
+段 1 が読む「このミッションで閉じた課題」がまだ閉じていない。振り返りが拾うのは、この変更から出た
 取りこぼしである。**変更をまたいで溜まった課題そのもの**は対象にしていない。
 
 対象が 0 件ならその Skill 自身が飛ばす。
@@ -344,5 +344,5 @@ gh issue edit <issue番号> --repo "$RECORD_REPO" --body-file /tmp/issue-body.md
 - `/ndf:release-verification` — この工程の前に行うリリース後テスト
 - `/ndf:out-of-scope` — 取りこぼしを見つけたときの起票
 - `/ndf:plan-to-spec` — 決まった仕様の永続化（振り返りとは別の出力物）
-- `/ndf:progress-tracking` — 「まとまりを閉じる」の正本
+- `/ndf:progress-tracking` — 「ミッションを閉じる」の正本
 - `/ndf:issue-upkeep` — 蓄積した課題の手入れ（この工程の最後に呼ぶ）

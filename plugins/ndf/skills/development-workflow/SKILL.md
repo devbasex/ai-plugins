@@ -204,7 +204,7 @@ mode: standard
 
 **conductor は、`context-window.md` の 4 つの切れ目と文脈量の hook（`token-guard.sh`）に止められたときに、
 次の工程を始める引き継ぎの 1 行（`/ndf:development-workflow #<課題>`。今の区間を `/goal` で始めていたときだけ先頭に `/goal `）を、
-情報文字列 `ndf-next` の囲みのコードブロック 1 つで出す。** 3 層では conductor が `## 持ち場の報告` を
+情報文字列 `ndf-next` の囲みのコードブロック 1 つで出す。** 3 層では conductor が `## フェーズの報告` を
 受け取った時点で出し（supervisor は出さない）、`結果: 関門` なら関門の承認と取り込みの後に出す。
 出す時点・告知・新しい会話が状態を戻す手順は `context-window.md` の「新しい会話で戻す」にある。
 
@@ -351,8 +351,8 @@ Pull Request のマージ、制作物承認は本番の提出先への操作に�
   `operation` の実行も同じで、本番の系へ届く単位は承認を得るまで実行しない
 
 **工程は 3 層（conductor / supervisor / worker）へ出す。** 人間と対話しているセッション
-（conductor）が持ち場ごとに supervisor を起動し、supervisor が 1 つの作業を worker へ出す。
-**関門で止まれるのは conductor だけである。** 持ち場の表・起動の指示・報告の形・モデルの
+（conductor）がフェーズごとに supervisor を起動し、supervisor が 1 つの作業を worker へ出す。
+**関門で止まれるのは conductor だけである。** フェーズの表・起動の指示・報告の形・モデルの
 基準・他者の承認が要るときの到達点の置き直しは
 [references/agent-layers.md](references/agent-layers.md) にある。
 
@@ -370,7 +370,7 @@ PLUGIN_ROOT='${CLAUDE_PLUGIN_ROOT}'; case "$PLUGIN_ROOT" in '$'*) PLUGIN_ROOT= ;
 [ -n "$PLUGIN_ROOT" ] && python3 "$PLUGIN_ROOT/scripts/relay.py" notice || echo outside
 ```
 
-**人がその場にいて指示を変えたいときは、conductor へ伝える。** 次の持ち場から反映する。
+**人がその場にいて指示を変えたいときは、conductor へ伝える。** 次のフェーズから反映する。
 
 ## 標準フロー
 
@@ -496,4 +496,4 @@ flowchart TD
 - [references/approval-request.md](references/approval-request.md) — 承認を求めるときに提示するもの
 - [references/operation-run.md](references/operation-run.md) — `operation` の実行の範囲・記録・失敗したときの扱い
 - [references/context-window.md](references/context-window.md) — context window の切れ目、委譲する対象としない対象、残量の見方
-- [references/agent-layers.md](references/agent-layers.md) — 3 層（conductor / supervisor / worker）の責務、持ち場、報告の形
+- [references/agent-layers.md](references/agent-layers.md) — 3 層（conductor / supervisor / worker）の責務、フェーズ、報告の形

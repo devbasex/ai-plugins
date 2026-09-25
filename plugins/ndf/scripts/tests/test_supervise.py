@@ -57,7 +57,7 @@ def fakes(tmp_path, monkeypatch):
 
 
 def run_plan(tmp_path, steps, **extra):
-    plan = {"持ち場": "試験", "課題": [858], "作業場所": str(tmp_path), "steps": steps, **extra}
+    plan = {"フェーズ": "試験", "課題": [858], "作業場所": str(tmp_path), "steps": steps, **extra}
     s = sv.Supervisor(plan, tmp_path / "state")
     text = s.run()
     return s, text
@@ -143,7 +143,7 @@ def test_branch_creates_worktree(tmp_path):
     git(repo, "init", "-q", "-b", "main")
     git(repo, "-c", "user.email=a@b", "-c", "user.name=a", "commit", "-q", "--allow-empty", "-m", "init")
     wt = repo / ".worktrees" / "feat" / "x"
-    plan = {"持ち場": "試験", "課題": [], "作業場所": str(wt), "branch": "feat/x", "起点": "main",
+    plan = {"フェーズ": "試験", "課題": [], "作業場所": str(wt), "branch": "feat/x", "起点": "main",
             "steps": [{"id": "t", "type": "run", "cmd": "git rev-parse --abbrev-ref HEAD", "next": "end"}]}
     s = sv.Supervisor(plan, tmp_path / "state")
     assert "結果: 完了" in s.run()
@@ -151,7 +151,7 @@ def test_branch_creates_worktree(tmp_path):
 
 
 def test_branch_without_repo_stops(tmp_path):
-    plan = {"持ち場": "試験", "課題": [], "作業場所": str(tmp_path / "nowhere"), "branch": "feat/x",
+    plan = {"フェーズ": "試験", "課題": [], "作業場所": str(tmp_path / "nowhere"), "branch": "feat/x",
             "steps": [{"id": "t", "type": "run", "cmd": "true"}]}
     assert "リポジトリ" in sv.Supervisor(plan, tmp_path / "state").run()
 
@@ -202,7 +202,7 @@ def test_queue_limits_concurrency(tmp_path):
     plans = []
     for i in range(3):
         f = tmp_path / f"p{i}.json"
-        f.write_text(json.dumps({"持ち場": "試験", "課題": [], "作業場所": str(tmp_path), "steps": [
+        f.write_text(json.dumps({"フェーズ": "試験", "課題": [], "作業場所": str(tmp_path), "steps": [
             {"id": "t", "type": "run", "cmd": f"date +%s.%N > {tmp_path}/s{i}; sleep 0.6; "
                                              f"date +%s.%N > {tmp_path}/e{i}", "next": "end"}]}))
         plans.append(str(f))
@@ -218,7 +218,7 @@ def test_queue_limits_concurrency(tmp_path):
 
 def test_queue_reports_stopped(tmp_path):
     f = tmp_path / "bad.json"
-    f.write_text(json.dumps({"持ち場": "試験", "課題": [], "作業場所": str(tmp_path),
+    f.write_text(json.dumps({"フェーズ": "試験", "課題": [], "作業場所": str(tmp_path),
                              "steps": [{"id": "t", "type": "run", "cmd": "exit 1"}]}))
     p = cli("queue", str(f), "--poll", "0.1")
     assert p.returncode == 1
@@ -229,7 +229,7 @@ HANDOFF = """# 引継ぎ
 
 ## 今の会話の進み（再開するときはここから読む）
 
-| まとまり | 状態 | 次 |
+| ミッション | 状態 | 次 |
 | --- | --- | --- |
 | #1 | 済み | — |
 
@@ -237,7 +237,7 @@ HANDOFF = """# 引継ぎ
 
 ## 前の会話の進み
 
-| まとまり | 状態 | 次 |
+| ミッション | 状態 | 次 |
 | --- | --- | --- |
 """
 
@@ -253,6 +253,17 @@ def test_note_appends_row(tmp_path):
     i = lines.index("| #1 | 済み | — |")
     assert lines[i + 1] == "| #858 | 試験: 完了（https://example/pull/9、$0.000） | マージ |"
     assert lines[i + 2] == ""
+
+
+def test_old_plan_and_report_keys_are_read(tmp_path):
+    """旧い語（持ち場）で書いた計画と報告も読み、報告は今の語（フェーズ）で書く。"""
+    plan = {"持ち場": "試験", "次の持ち場": "検査", "課題": [1], "作業場所": str(tmp_path),
+            "steps": [{"id": "t", "type": "run", "cmd": "true", "next": "end"}]}
+    text = sv.Supervisor(plan, tmp_path / "state").run()
+    assert "## フェーズの報告" in text
+    assert "- フェーズ: 試験" in text and "- 次のフェーズ: 検査" in text
+    old = "## 持ち場の報告\n\n- 持ち場: 実装\n- 課題: #2\n- 結果: 完了\n"
+    assert sv.note_row(old, "") == "| #2 | 実装: 完了 | — |"
 
 
 def test_note_without_section_stops(tmp_path):

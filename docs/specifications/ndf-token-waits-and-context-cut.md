@@ -158,12 +158,12 @@ graph TB
 | 経路 | 見る入力 | 印の鍵 |
 | --- | --- | --- |
 | 対話 | `Skill`。名前（`ndf:` を外したもの）が `token-guard-stages.txt` にある | `skill`・`args` |
-| 3 層 | `Agent`（旧名 `Task`）。`description` の `:` の前が持ち場の語彙（`設計` / `実装` / `検査` / `取り込み` / `仕上げ`） | `description` |
+| 3 層 | `Agent`（旧名 `Task`）。`description` の `:` の前がフェーズの語彙（`設計` / `実装` / `検査` / `取り込み` / `仕上げ`） | `description` |
 
 - **サブエージェントの中の起動は見ない。** 入力に `agent_id` が付くか、`transcript_path` が
   `/subagents/` を含めば見ない。Claude Code 2.1.280 の実測では、`agent_id` はサブエージェントの
   中でだけ付き、サブエージェントの `transcript_path` は親の記録を指すため、区別は `agent_id` で
-  つく。supervisor は 1 つの持ち場の中で複数の工程を通すため、工程の起動で止めると持ち場が
+  つく。supervisor は 1 つのフェーズの中で複数の工程を通すため、工程の起動で止めるとフェーズが
   途中で途切れる
 - **工程でない Skill と、先頭語が作業の種類（`調査` など）の Agent は見ない。** 工程の途中で
   起動されるため切れ目にならない
@@ -223,7 +223,7 @@ Kiro では、それぞれの README が示す Skill の起動の書き方に読
 出す。** 出す形は情報文字列 `ndf-next` の囲みのコードブロック 1 つで、今の区間を `/goal` で始めていたときだけ中身の先頭を
 `/goal ` にする（形の定義は `context-window.md` の「新しい会話で戻す」だけに置く）。中継の下では
 中継がこのブロックを拾って次の会話を自動で起動し、中継が無ければ人が中身を貼り付ける
-（[ndf-relay-segment-restart.md](ndf-relay-segment-restart.md)）。 3 層では supervisor の持ち場の境がこの切れ目に当たるため、conductor が `## 持ち場の報告`
+（[ndf-relay-segment-restart.md](ndf-relay-segment-restart.md)）。 3 層では supervisor のフェーズの境がこの切れ目に当たるため、conductor が `## フェーズの報告`
 を受け取った時点で出し、supervisor は出さない。報告が `結果: 関門` のときは、関門の承認と
 取り込み（設計 Pull Request のマージなど）が済んだ後に出す。関門の前に会話を切らないためである。
 
@@ -242,7 +242,7 @@ Kiro では、それぞれの README が示す Skill の起動の書き方に読
 **サブエージェントは背景の処理を残したまま応答を終えない。** Claude Code 2.1.280 の実測では、
 `codex exec` を `run_in_background` で起動して応答を終えたサブエージェントは、完了通知（約 2 秒後）
 で再開して報告を出し直した。ただし親には応答を終えた時点で 1 度「終わった」と通知が届き、途中の
-文面が結果として渡った。親が 1 回目を結果と読むと、報告の無い持ち場を受け取る。
+文面が結果として渡った。親が 1 回目を結果と読むと、報告の無いフェーズを受け取る。
 
 ### 途中の通知を受けたとき
 
@@ -281,7 +281,7 @@ worker の 2 回目の通知は、写しを読んだ後に届いても読み直�
 **配布物の文書にある前景の待ちのループは、ループを書き換えずに案内の 1 行を足す。** 拒否の
 理由が「同じループを `run_in_background: true` で」と案内するため、Claude Code では 1 回の
 回り道で済む。hook と案内の行を同じ版で配布するため、拒否と文書の順序が食い違わない。ループの
-書き換え（道具の共通化）は #731 が扱う。
+書き換え（Tool の共通化）は #731 が扱う。
 
 ## データ・設定
 
@@ -388,7 +388,7 @@ agy の CLI 側の消費を測った後に、登録するかを改めて決め�
   上限以下の `sleep`・文字列やコメントやヒアドキュメントの中の `sleep` を通すこと
 - 同じ範囲の変わらない Read の 3 回目を拒否し、追記・`offset` の変更・同じ大きさの `mv` の置き換えで
   数え直すこと。同じ session の並列の hook で更新が失われないこと
-- 文脈量が上限を超えた conductor の工程 Skill と持ち場の Agent を拒否し、引き継ぎの 1 行に課題番号を
+- 文脈量が上限を超えた conductor の工程 Skill とフェーズの Agent を拒否し、引き継ぎの 1 行に課題番号を
   示すこと。番号が無ければ `<課題番号>` のまま示すこと
 - サブエージェントの中の起動・工程でない Skill・作業の種類の Agent を通すこと
 - 拒否の後の同じ起動を 1 度だけ通し（間に Bash と Read が挟まっても）、別の起動を再び拒否すること。
@@ -407,7 +407,7 @@ agy の CLI 側の消費を測った後に、登録するかを改めて決め�
   4 ランタイムの表があること
 - Codex / Kiro / agy の既存の hook の動作が変わらないこと（既存のテスト）
 - supervisor → worker の 2 段で、worker が背景の待ちを残して応答を終えても、supervisor が途中の
-  通知で止まらず、自分の写しの待ちの完了通知で再開して worker の報告を畳んだ持ち場の報告を返すこと。
+  通知で止まらず、自分の写しの待ちの完了通知で再開して worker の報告を畳んだフェーズの報告を返すこと。
   conductor が報告なしで続けさせる回数が 0 であること（`claude -p --output-format stream-json` で
   再現する。記録は [PR #910](https://github.com/devbasex/ai-plugins/pull/910) の本文。`claude -p` は
   本体が応答を終えると背景の処理を残したまま終わるため、再現では conductor 側でプロセスを保つ）
@@ -421,6 +421,6 @@ agy の CLI 側の消費を測った後に、登録するかを改めて決め�
 - [#829](https://github.com/devbasex/ai-plugins/issues/829) / [#830](https://github.com/devbasex/ai-plugins/issues/830)（親は [#827](https://github.com/devbasex/ai-plugins/issues/827)）
 - [#901](https://github.com/devbasex/ai-plugins/issues/901) — supervisor が worker の途中の通知で止まる（実装は [PR #910](https://github.com/devbasex/ai-plugins/pull/910)）
 - [#895](https://github.com/devbasex/ai-plugins/issues/895) — 引き継ぎの 1 行を `ndf-next` のブロックにし、中継の下では文脈量の拒否を止め続ける（[ndf-relay-segment-restart.md](ndf-relay-segment-restart.md)）
-- [#731](https://github.com/devbasex/ai-plugins/issues/731) — 待ちの道具（`bg-wait.sh`）を共通層へ移す
+- [#731](https://github.com/devbasex/ai-plugins/issues/731) — 待ちの Tool（`bg-wait.sh`）を共通層へ移す
 - [ndf-context-window-metrics.md](ndf-context-window-metrics.md) — 会話の記録から文脈量を測る部品
 - [ndf-agent-layers-unattended-run.md](ndf-agent-layers-unattended-run.md) — 3 層の運転

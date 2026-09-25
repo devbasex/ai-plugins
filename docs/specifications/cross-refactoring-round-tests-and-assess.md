@@ -20,7 +20,7 @@ SIGKILL が届く（#883）。
 （#723）。**リポジトリにもそのテストを置かない。** 文書が指す参照の実在は検査スクリプトが失敗
 として出す（#885）。
 
-例: PR #844 の検査の持ち場（`--scope` は 6 ファイル）をこの仕組みでやり直すと、次のようになる。
+例: PR #844 の検査のフェーズ（`--scope` は 6 ファイル）をこの仕組みでやり直すと、次のようになる。
 
 | 項目 | 変更の前（#880 の前） | 今 |
 | --- | --- | --- |
@@ -30,7 +30,7 @@ SIGKILL が届く（#883）。
 | 足したテストが `.md` を読むとき | そのまま採られ、後の文書の整理が「期待する振る舞いの変更」で取り消される | テストの追加と実装の取り込みでその項目を取り消す |
 
 文書だけを変える Pull Request では `assess` が「飛ばしてよい」（終了コード 3）を返し、検査の
-持ち場は `cross-refactoring` を起動しない。
+フェーズは `cross-refactoring` を起動しない。
 
 **手順と引数の表は
 [`cross-refactoring` の SKILL.md](../../plugins/ndf/skills/cross-refactoring/SKILL.md)・
@@ -237,7 +237,7 @@ python3 "$RF/refactor.py" assess --base origin/develop; rc=$?; echo "exit=$rc"
 | --- | --- |
 | 進行の記録 | 工程「構造改善」（`projects-sync.sh <課題番号> stage "構造改善"`。値を増やさない） |
 | Pull Request の本文 | `構造改善: 飛ばした（<assess の理由の行>）` の 1 行 |
-| 持ち場の報告 | 同じ 1 行を理由に含める |
+| フェーズの報告 | 同じ 1 行を理由に含める |
 
 ### 文言固定テストを採らない（テストの追加と実装）
 
@@ -315,7 +315,7 @@ python3 "$RF/refactor.py" assess --base origin/develop; rc=$?; echo "exit=$rc"
 全体のテストは `quality-gates` の全体のテストと重ねて回さない。
 
 **構造改善の工程を通常どおり通せることは、次の 4 つで確かめた。** #880 #883 #494 #723 を実装した
-Pull Request #917 自身の検査の持ち場で `cross-refactoring --workflow-step` を通し、その実行が 4 つとも
+Pull Request #917 自身の検査のフェーズで `cross-refactoring --workflow-step` を通し、その実行が 4 つとも
 満たした（[記録](https://github.com/devbasex/ai-plugins/pull/917#issuecomment-5797876310)。ラウンド制の
 時点の記録である）。#933 の後は、2 つ目を「全体のテストの実行が着手前・危険の印の最大 1 回・
 最終ゲートの 1 回だけ」、3 つ目と 4 つ目の「ラウンド」「群」を「テストの追加」「項目」と読み替えて

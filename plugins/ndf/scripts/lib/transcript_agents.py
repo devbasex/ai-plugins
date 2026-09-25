@@ -37,7 +37,7 @@ from datetime import datetime, timezone
 # ---------- 語彙（契約の文書の「語彙」の表） ----------
 
 LAYERS = ("conductor", "supervisor", "worker")
-POSTS = ("設計", "実装", "検査", "取り込み", "仕上げ")          # 持ち場（supervisor）
+POSTS = ("設計", "実装", "検査", "取り込み", "仕上げ")          # フェーズ（supervisor）
 TASKS = ("調査", "修正", "検証", "集計")                        # 作業の種類（worker）
 OTHER = "その他"
 NO_ROLE = "-"
@@ -129,7 +129,7 @@ def session_paths(
     return conductor, subs
 
 
-# ---------- 層と持ち場 ----------
+# ---------- 層とフェーズ ----------
 
 def head_word(description: str | None) -> str:
     """`description` の最初の `: ` より前を返す。"""
@@ -149,7 +149,7 @@ def layer_of(depth: int, description: str | None) -> str:
 
 
 def role_of(description: str | None, layer: str) -> str:
-    """持ち場（supervisor）または作業の種類（worker）を返す。"""
+    """フェーズ（supervisor）または作業の種類（worker）を返す。"""
     if layer == "conductor":
         return NO_ROLE
     vocabulary = POSTS if layer == "supervisor" else TASKS
@@ -467,7 +467,7 @@ def _cell(value) -> str:
 
 
 LIST_HEADER = (
-    "| 層 | 持ち場 | 深さ | モデル | 固定費 | 最大充填 | 実作業 | 応答数 "
+    "| 層 | フェーズ | 深さ | モデル | 固定費 | 最大充填 | 実作業 | 応答数 "
     "| 所要（分） | 終わり方 | 中断 |"
 )
 LIST_RULE = "| --- | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | --- | ---: |"
@@ -547,7 +547,7 @@ def interrupted(
 
 
 INTERRUPTED_HEADER = (
-    "| 層 | 持ち場 | 深さ | 終わり方 | 上限の種類 | 解除時刻 | 解除済み "
+    "| 層 | フェーズ | 深さ | 終わり方 | 上限の種類 | 解除時刻 | 解除済み "
     "| 起動元 | agent_id |"
 )
 INTERRUPTED_RULE = "| --- | --- | ---: | --- | --- | --- | --- | --- | --- |"

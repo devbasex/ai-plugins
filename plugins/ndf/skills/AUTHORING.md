@@ -167,7 +167,7 @@ description: "Delete merged branches and worktrees, stopping only where git refu
 
 **git が拒む操作と、事後の復元の手段がある操作は対象から外す。** 拒否そのものが止める合図であり、
 `git branch <名前> <ハッシュ>`・Restore branch・`gh issue reopen` で戻せる操作を止めても二重の確認が残るだけである。
-**課題を閉じることは問い 3 に当たらない**（判断はまとまりの工程を通った時点で済んでいる）。`issue-upkeep` の「やらない」は閉じること自体が判断であり、そこが違う。
+**課題を閉じることは問い 3 に当たらない**（判断はミッションの工程を通った時点で済んでいる）。`issue-upkeep` の「やらない」は閉じること自体が判断であり、そこが違う。
 
 | 守り方 | 選ぶ条件 | 実装 |
 | --- | --- | --- |
