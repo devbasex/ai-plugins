@@ -171,13 +171,20 @@ run_runtime() {
     docker exec -i "$cid" tar -C /workspace/ai-plugins -xf -
   docker exec "$cid" bash -lc 'chmod -R a-w /workspace/ai-plugins'
   inject_secrets "$cid"
+  local status=0
   docker exec "$cid" bash -lc 'mkdir -p "$HOME" "$PROJECT_DIR" "$ARTIFACT_DIR"; cd "$PROJECT_DIR"; "/workspace/ai-plugins/tests/runtime-smoke/adapters/${RUNTIME}.sh"' \
-    >"$runtime_artifacts/smoke.log" 2>&1
-  docker exec "$cid" bash -lc 'find /tmp/runtime-project -maxdepth 5 -print | sort > /tmp/runtime-artifacts/generated-tree.txt'
-  docker cp "$cid:/tmp/runtime-artifacts/." "$runtime_artifacts/" >/dev/null
+    >"$runtime_artifacts/smoke.log" 2>&1 || status=$?
+  # 失敗の理由を継続的統合の画面へ出す（全文は成果物の smoke.log）。成果物の書き出しは失敗しても続ける
+  if [ "$status" -ne 0 ]; then
+    echo "::error::runtime smoke: $runtime が失敗した（終了コード $status）。smoke.log の末尾:" >&2
+    tail -n 60 "$runtime_artifacts/smoke.log" >&2
+  fi
+  docker exec "$cid" bash -lc 'find /tmp/runtime-project -maxdepth 5 -print | sort > /tmp/runtime-artifacts/generated-tree.txt' || true
+  docker cp "$cid:/tmp/runtime-artifacts/." "$runtime_artifacts/" >/dev/null || true
   if [ "$KEEP_CONTAINER" = false ]; then
     docker rm -f "$cid" >/dev/null 2>&1 || true
   fi
+  return "$status"
 }
 
 # 起動したコンテナは EXIT で消す。`set -e` のもとでアダプタの `docker exec` が失敗すると
