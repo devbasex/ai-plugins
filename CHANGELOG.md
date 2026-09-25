@@ -9,6 +9,30 @@
 **開発版（接尾辞の付いた版）は載せない。** `9.8.0` は `9.8.0-dev.1` までしか出ておらず、
 その内容は `10.0.0` で届いている。
 
+## [ndf 10.17.11] - 2026-09-25
+
+### 変更
+
+- **`development-workflow` は conductor → supervisor → worker の 3 層で進める**。/goal を付けたときも、
+  作業の分け方と承認の関門は同じである
+- **中継は区間の切れ目で新しい会話へ切り替える。/goal の目標の判定は待たず、目標が未達のままでも切り替える**。
+  切り替えた後の会話は引き継ぎ文書から作業を続ける
+
+### 追加
+
+- **Skill のスクリプトの置き場所を `scripts/resolve.sh` の 1 コマンドで引ける**。`resolve.sh scripts <Skill名>` などで
+  絶対パスを出し、見つからなければ終了コード 3 で理由を出す
+- **各 Skill の手順をスクリプトで回せる**。`merged` / `pr` / `plan-to-spec` / `release` / `release-verification` は
+  `*-steps.py`（`merged-steps.py`・`pr-steps.py`・`plan-to-spec-steps.py`・`release-steps.py`・
+  `release-verification-steps.py`）、`fix` は `fix-steps.py` で文脈を集める。`progress-tracking` の手順も
+  スクリプトで進める。どのスクリプトも結果を同じ形の JSON（`tool` / `status` / `summary` / `items` / `next`）で返す
+- **まとまりを閉じる作業を `bundle-close.py` で行える**。CI を待ってからのマージもスクリプトで行う
+- **`supervise.py` に副命令 `new` / `queue` / `note` / `sync-check` を足した**。`new` は雛形から計画を作り、`queue` は
+  計画を同時に `--max` 本まで順に流し、`note` は報告から引き継ぎ文書の表へ 1 行を足し、`sync-check` は生成物の同期と
+  検査 4 本を走らせる
+- **`supervise.py` の計画に `drive` の段を書ける**。外部 CLI の起動と `cross-review` / `cross-refactoring` の収束ループを
+  スクリプトが回し、判断や修正が要るとき（`pause`）だけ worker が入る
+
 ## [ndf 10.17.10] - 2026-09-24
 
 ### 追加
