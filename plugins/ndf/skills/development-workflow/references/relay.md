@@ -143,6 +143,19 @@ conductor では、文脈量の hook が工程へ入る起動を 1 度の通し�
    - `mission-state.py render <mission.json> <引継ぎ文書> --section 今の会話の進み`（節の本文だけを置き換える。新しい区間なら `--demote 前の会話の進み --heading "今の会話の進み（<時刻>）"` で今の節を下げて新しい節を足す）
    - `mission-state.py next <mission.json> --doc <引継ぎ文書> --replace`（「次に実行するコマンド」の節を置き換え、同じ `ndf-next` の囲みを最後の応答に出す）
 
+**本番の配布の後は、切れ目の 3 つを本番の queue と同じ背景の Bash で続けて流す。** 関門 2 の承認から次の区間の起動までに、conductor が組み立てる文は無くなる。conductor は完了の通知を受けたら `relay.py notice` の告知と、出力の `ndf-next` の囲みをそのまま出す。中継がプラグインを本番の版へ更新し、次の区間を起動する。
+
+```bash
+O=/tmp/ndf-sv/r7; M=plugins/ndf/scripts/mission-state.py; DOC=issues/handoff-<名>.md
+python3 plugins/ndf/scripts/supervise.py queue $O/plan-release-prod.json --done $O/done-release-prod.json >/dev/null &&
+python3 plugins/ndf/scripts/supervise.py wait $O/done-release-prod.json --timeout 3600 >/dev/null &&
+python3 $M update $O/mission.json >/dev/null &&
+python3 $M render $O/mission.json $DOC --demote 前の会話の進み --heading "今の会話の進み（$(date -u +%Y-%m-%d\ %H:%M) UTC まで）" >/dev/null &&
+python3 $M next $O/mission.json --doc $DOC --replace >/dev/null && sed -n '/^```ndf-next/,/^```$/p' $DOC
+```
+
+**次の区間を止めずに続けるには、`/goal` の雛形を特定の課題に縛らない。** 雛形には「効果の順の残りから次のミッションを選び、同じ鎖で流し、最後に同じ雛形で `ndf-next` を出す」ことを書く。止まるのは関門 2 つだけになる。
+
 `mission-state.py status <mission.json>` は端末向けに 1 行ずつ（ミッション・状態・次）を出す。
 節が見つからないときは文書を変えずに `"status": "stopped"` と理由を返す。
 
