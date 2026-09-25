@@ -19,8 +19,10 @@
 # 背景の終了まで戻らない。ホストが codex / kiro / agy でも同じ書き方で動く（外部コマンドに
 # 依存しない）。
 #
-# 置き場所は cross-review の scripts/ にする。いま使うのは cross-review だけで、
-# cross-refactoring の待ちは #656 が扱う（設計の決定 13）。
+# 置き場所は共通層の scripts/lib/ にする（#731）。cross-review と cross-refactoring の
+# 駆動（`drive.py`）を Codex / Kiro / agy のホストで待つときと、cross-review の手順の
+# 監視（`monitor.py --phase`）を待つときに使う。待ち方の規約は
+# skills/development-workflow/references/waiting.md にある。
 
 set -uo pipefail
 
