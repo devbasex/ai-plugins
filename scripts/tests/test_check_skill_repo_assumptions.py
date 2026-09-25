@@ -99,6 +99,42 @@ def test_clean_tree_passes(tmp_path: Path) -> None:
     assert result.returncode == 0, output_of(result)
 
 
+def write_script(skills: Path, rel: str, body: str) -> Path:
+    path = skills.parent / "scripts" / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
+ASSUMING_SCRIPT = 'PYTEST = "uv run --project plugins/playwright-kit/skills/x pytest"\n'
+
+
+def test_detects_assumption_in_distributed_script(tmp_path: Path) -> None:
+    """配布するスクリプトに埋め込んだ ai-plugins の形を落とす。"""
+    skills = build_tree(tmp_path, listed=CLEAN_BODY, unlisted=CLEAN_BODY)
+    write_script(skills, "supervise.py", ASSUMING_SCRIPT + 'BASE = "origin/develop"\n')
+    result = run_check(skills, {}, tmp_path)
+    assert result.returncode == 1, output_of(result)
+    out = output_of(result)
+    assert "scripts/supervise.py:1:" in out and "scripts/supervise.py:2:" in out
+
+
+def test_script_tests_and_experimental_are_not_scanned(tmp_path: Path) -> None:
+    skills = build_tree(tmp_path, listed=CLEAN_BODY, unlisted=CLEAN_BODY)
+    write_script(skills, "tests/test_x.py", ASSUMING_SCRIPT)
+    write_script(skills, "experimental/x.py", ASSUMING_SCRIPT)
+    write_script(skills, "notes.txt", ASSUMING_SCRIPT)
+    result = run_check(skills, {}, tmp_path)
+    assert result.returncode == 0, output_of(result)
+
+
+def test_excluded_script_passes(tmp_path: Path) -> None:
+    skills = build_tree(tmp_path, listed=CLEAN_BODY, unlisted=CLEAN_BODY)
+    path = write_script(skills, "lib/release.sh", ASSUMING_SCRIPT)
+    result = run_check(skills, {path.as_posix(): "配布の形で分岐済み"}, tmp_path)
+    assert result.returncode == 0, output_of(result)
+
+
 # --- T2: 除外が効く ---
 
 
@@ -219,11 +255,12 @@ def test_report_shows_scan_size() -> None:
     assert result.returncode == 0, output_of(result)
     out = output_of(result)
     summary = re.search(
-        r"^plugins/ndf/skills: 公開する Skill (\d+) 個 / Markdown (\d+) 本 / ヒット (\d+) 行$",
+        r"^plugins/ndf/skills: 公開する Skill (\d+) 個 / Markdown (\d+) 本 / スクリプト (\d+) 本 / ヒット (\d+) 行$",
         out, re.MULTILINE)
     assert summary is not None, f"走査の要約が出ていない: {out}"
-    skills, markdown, _hits = (int(value) for value in summary.groups())
+    skills, markdown, scripts, _hits = (int(value) for value in summary.groups())
     assert skills > 0, f"公開する Skill の数が 0 になっている: {out}"
+    assert scripts > 0, f"配布するスクリプトを走査していない: {out}"
     assert markdown >= skills, f"Markdown の本数が Skill の数を下回っている: {out}"
 
 
