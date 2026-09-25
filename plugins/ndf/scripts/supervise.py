@@ -11,7 +11,7 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
 | work  | 1 つの作業（修正・調査）を worker として行わせる | Tool あり（Read/Edit/Write/Bash/Grep/Glob）。`"full": true` なら設定・プラグイン・Skill をそのまま読む claude -p で Skill を回す（cross-review など） |
 | drive | 駆動（cross-review / cross-refactoring の drive.py）を run として回し、`pause` のときだけ worker に判断・修正をさせて駆動へ返す | pause のときだけ（work と同じ最小構成） |
 | judge | 結果ファイルと規則の抜粋だけを渡し、次の段を決めさせる | Tool なし |
-| pr    | push して Draft の Pull Request を作る（スクリプト）。本文は材料（計画の値・コミット・変更の統計・run の結果・設計文書）から LLM が書く。`"body": "template"` なら材料をそのまま本文にする | 本文だけTool なし |
+| pr    | push して Draft の Pull Request を作る（スクリプト）。本文は材料（計画の値・コミット・変更の統計・run の結果・設計文書）から LLM が書く。`"body": "template"` なら材料をそのまま本文にする。末尾の署名は本文に無いときだけ足す | 本文だけTool なし |
 
 使い方:
     supervise.py run <plan.json> [--state-dir DIR] [--from <段の id>]
@@ -22,7 +22,7 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
     supervise.py new mission --name M --worktree <リポジトリの根> --issue N... [--design N...] [--tests PATH...] [--out DIR]
         # 並列の設計 → 関門 1 → ミッションのブランチ → 並列の実装（ミッションのブランチへ集める）→ 検査 1 回 → 配布
         # を波ごとの計画ファイルと mission.json へ書き出す。波の中は queue --max 3 で流す
-    supervise.py queue <plan.json>... [--max 3]   # 空いた枠へ順に流す
+    supervise.py queue <plan.json>... [--max 3]   # 空いた枠へ順に流す。作業ツリーは起動の前に 1 本ずつ作る
     supervise.py note <引き継ぎ文書.md> --report <report.md> [--next 次の欄] [--section 見出しの語]
     supervise.py sync-check [--root DIR] [--commit]   # 生成物の同期と検査 4 本
     supervise.py example            # 計画の例を出す
@@ -36,6 +36,7 @@ new / queue / note / sync-check の結果は lib/step_result.py の形の 1 行�
       "branch": "feat/issue-818-x",         # 省略可。作業場所が無ければ起動時に作業ツリーを作る
       "起点": "origin/develop",             # branch から作るときの起点（既定 origin/develop）
       "リポジトリ": "/abs/repo",             # 作業ツリーの元（省略時は作業場所の /.worktrees/ より前）
+                                            # git worktree add が .git/config の lock で落ちたら 5 回までやり直す
       "記録": "/abs/projects-sync.sh",      # 省略可。stage を記録する
       "規則": "判断の規則の抜粋（文字列）",   # judge へ毎回渡す
       "上限": 30,                           # 実行する段の数の上限（ループの歯止め）
@@ -87,7 +88,8 @@ prod は bump → changelog → 説明文 → トークン消費の記録 → sy
 run の段:
 - `"preset"`: 定型のコマンド。`sync-check`（生成物の同期と検査 4 本）・`assess`（構造改善の要否）・
   `doc-lint`（追加した行の書き方の検査）。`cmd` を書けばそちらを使う
-- `cmd` の `{pr}` は pr の段で作った Pull Request の URL に置き換わる
+- `cmd` の `{pr}` は Pull Request の番号に、`{pr_url}` は URL に置き換わる（drive の段の `args` も同じ）。
+  Pull Request は pr の段で作ったもの、または計画の `"Pull Request"`（URL なら末尾の数字を番号として読む）
 - `"rerun_failed": true`: 失敗したら落ちたテストだけ（`pytest --lf`）を走らせ直し、通れば成功として進む
 - `"skip_to": "<段の id>"`: 終了コードが `skip_code`（既定 3。`refactor.py assess` の「飛ばしてよい」）なら
   その段へ進む
@@ -137,6 +139,7 @@ SERENA_MCP = {"mcpServers": {"serena": {
              "--enable-web-dashboard", "False"],
     "env": {"SERENA_HOME": ".serena"}}}}
 FULL_TOOLS = "Read,Edit,Write,Bash,Grep,Glob,Skill,Agent,Monitor,SendMessage,ToolSearch"
+PR_FOOTER = "🤖 Generated with [Claude Code](https://claude.com/claude-code)"  # PR 本文の末尾の署名（1 度だけ）
 TAIL = 6000  # LLM へ渡す出力の末尾の文字数
 SELF = Path(__file__).resolve()
 SKILLS = SELF.parent.parent / "skills"
@@ -406,6 +409,57 @@ def normalize_plan(plan: dict) -> dict:
     return plan
 
 
+def pr_number(value) -> str:
+    """計画の Pull Request（番号か URL）から番号を返す。URL なら末尾の数字を読む。読めなければ空。"""
+    m = re.search(r"(\d+)/*$", str(value or "").strip())
+    return m.group(1) if m else ""
+
+
+WORKTREE_LOCK_RETRIES = 5        # .git/config の lock で落ちたときのやり直しの回数
+WORKTREE_LOCK_WAIT = 1.0         # やり直しの間隔（秒）
+
+
+def is_config_lock(stderr: str) -> bool:
+    return "could not lock config file" in stderr or "File exists" in stderr
+
+
+def ensure_worktree(plan: dict, sleep=time.sleep) -> str | None:
+    """計画に branch があり作業場所が無ければ、作業ツリーを作る。誤りの文を返す（無ければ None）。
+
+    run と queue の両方が使う。同時に作ると .git/config の lock で落ちるので、そのときは
+    WORKTREE_LOCK_WAIT 秒おきに WORKTREE_LOCK_RETRIES 回までやり直す。
+    """
+    plan = normalize_plan(dict(plan))
+    branch = plan.get("branch")
+    wt = Path(plan["作業場所"])
+    if not branch or wt.exists():
+        return None
+    repo = plan.get("リポジトリ") or (str(wt).split("/.worktrees/")[0] if "/.worktrees/" in str(wt) else None)
+    if not repo:
+        return "作業ツリーの元のリポジトリが分からない（計画に リポジトリ を書く）"
+    base = plan.get("起点", "origin/develop")
+    if base.startswith("origin/"):
+        subprocess.run(["git", "-C", repo, "fetch", "-q", "origin"], capture_output=True, text=True)
+    p = None
+    for i in range(WORKTREE_LOCK_RETRIES + 1):
+        if i:
+            sleep(WORKTREE_LOCK_WAIT)
+        has = subprocess.run(["git", "-C", repo, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"],
+                             capture_output=True, text=True).returncode == 0
+        cmd = ["git", "-C", repo, "worktree", "add", "-q"] + ([str(wt), branch] if has
+                                                             else ["-b", branch, str(wt), base])
+        p = subprocess.run(cmd, capture_output=True, text=True)
+        if p.returncode == 0:
+            return None
+        if not is_config_lock(p.stderr):
+            break
+        # lock で途中まで作られた作業ツリーは、次のやり直しの前に片付ける
+        subprocess.run(["git", "-C", repo, "worktree", "prune"], capture_output=True, text=True)
+        if wt.exists() and not any(wt.iterdir()):
+            wt.rmdir()
+    return f"作業ツリーを作れない: {p.stderr.strip()[:300]}"
+
+
 class Supervisor:
     def __init__(self, plan: dict, state_dir: Path):
         self.plan = normalize_plan(plan)
@@ -529,34 +583,32 @@ class Supervisor:
 
     def ensure_worktree(self) -> str | None:
         """計画に branch があり作業場所が無ければ、作業ツリーを作る。誤りの文を返す（無ければ None）。"""
-        branch = self.plan.get("branch")
-        wt = Path(self.cwd)
-        if not branch or wt.exists():
-            return None
-        repo = self.plan.get("リポジトリ") or (str(wt).split("/.worktrees/")[0] if "/.worktrees/" in str(wt)
-                                             else None)
-        if not repo:
-            return "作業ツリーの元のリポジトリが分からない（計画に リポジトリ を書く）"
-        base = self.plan.get("起点", "origin/develop")
-        if base.startswith("origin/"):
-            subprocess.run(["git", "-C", repo, "fetch", "-q", "origin"], capture_output=True, text=True)
-        has = subprocess.run(["git", "-C", repo, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"],
-                             capture_output=True, text=True).returncode == 0
-        cmd = ["git", "-C", repo, "worktree", "add", "-q"] + ([str(wt), branch] if has
-                                                             else ["-b", branch, str(wt), base])
-        p = subprocess.run(cmd, capture_output=True, text=True)
-        if p.returncode != 0:
-            return f"作業ツリーを作れない: {p.stderr.strip()[:300]}"
-        return None
+        return ensure_worktree(self.plan)
+
+    def fill_pr(self, cmd: str) -> tuple[str, str | None]:
+        """cmd / args の {pr} を Pull Request の番号に、{pr_url} を URL に置き換える。(cmd, 誤りの文) を返す。"""
+        if "{pr}" not in cmd and "{pr_url}" not in cmd:
+            return cmd, None
+        value = str(self.plan.get("Pull Request") or "")
+        number = pr_number(value)
+        if not number:
+            return cmd, "cmd の {pr} を置き換える Pull Request がまだ無い"
+        if "{pr_url}" in cmd:
+            url = value if "/pull/" in value else subprocess.run(
+                ["gh", "pr", "view", number, "--json", "url", "--jq", ".url"], cwd=self.cwd,
+                capture_output=True, text=True).stdout.strip()
+            if not url:
+                return cmd, f"cmd の {{pr_url}} を置き換える Pull Request #{number} の URL を読めない"
+            cmd = cmd.replace("{pr_url}", url)
+        return cmd.replace("{pr}", number), None
 
     def run_cmd(self, step: dict, extra_addopts: str = "") -> tuple[int, str]:
         cmd = step.get("cmd") or PRESETS.get(step.get("preset", ""), "")
         if not cmd:
             return 2, f"段 {step['id']} に cmd も知っている preset も無い"
-        if "{pr}" in cmd:
-            if not self.plan.get("Pull Request"):
-                return 2, "cmd の {pr} を置き換える Pull Request がまだ無い"
-            cmd = cmd.replace("{pr}", self.plan["Pull Request"])
+        cmd, err = self.fill_pr(cmd)
+        if err:
+            return 2, err
         env = dict(os.environ)
         # 親の run の段から受け継いだ NO_REPORTS は、reports: true なら外す
         addopts = [env.get("PYTEST_ADDOPTS", "").replace(NO_REPORTS, "").strip()]
@@ -699,11 +751,10 @@ class Supervisor:
         if not cmd:
             self.cur.update(exit=2, text=f"段 {step['id']} に cmd も知っている drive も無い")
             return False, self.cur["text"]
-        if "{pr}" in cmd:
-            if not self.plan.get("Pull Request"):
-                self.cur.update(exit=2, text="cmd の {pr} を置き換える Pull Request がまだ無い")
-                return False, self.cur["text"]
-            cmd = cmd.replace("{pr}", self.plan["Pull Request"])
+        cmd, err = self.fill_pr(cmd)
+        if err:
+            self.cur.update(exit=2, text=err)
+            return False, err
         ok, out, text = self.drive_loop(step, cmd)
         if out:
             self.cur["counts"] = out.get("metrics") or {}
@@ -756,7 +807,7 @@ class Supervisor:
 | --- | ---: | --- |
 {chr(10).join(tests) or '| 無し | | |'}
 
-🤖 Generated with [Claude Code](https://claude.com/claude-code)
+{PR_FOOTER}
 """
         if step.get("body", "llm") == "llm":
             design = ""
@@ -769,7 +820,9 @@ class Supervisor:
                               None, self.cwd, step.get("timeout", 600))
             self.add_usage("judge", res)
             if res["ok"] and res["text"].strip():
-                body = res["text"].strip() + "\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+                body = res["text"].strip() + "\n"
+                if PR_FOOTER not in body:
+                    body = body.rstrip() + f"\n\n{PR_FOOTER}\n"
         body = with_mode_line(body, self.plan.get("モード"), self.passed_stages(step))
         found = subprocess.run(["gh", "pr", "list", "--head", branch, "--state", "open", "--json", "url",
                                 "--jq", ".[0].url"], cwd=self.cwd, capture_output=True, text=True).stdout.rstrip()
@@ -1313,6 +1366,12 @@ def cmd_queue(plans: list[str], max_: int, poll: float = 1.0) -> dict:
     while pending or running:
         while pending and len(running) < max_:
             plan = pending.pop(0)
+            # 作業ツリーは queue の側で順に作る（同時の git worktree add は .git/config の lock で落ちる）。
+            # 作れなかったときの報告は run が同じ誤りで書く
+            try:
+                ensure_worktree(json.loads(Path(plan).read_text()))
+            except (OSError, ValueError, KeyError):
+                pass
             log = open(Path(plan).with_suffix(".log"), "w")
             running[plan] = (subprocess.Popen([sys.executable, str(SELF), "run", plan], stdout=log,
                                               stderr=subprocess.STDOUT), log, time.time())
