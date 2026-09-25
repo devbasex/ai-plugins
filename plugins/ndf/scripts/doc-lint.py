@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """doc-lint.py: 追加した行だけに、文書の書き方の検査を掛ける（#870 B2）。
 
-    python3 doc-lint.py [--base origin/develop] [--root DIR] [--exclude PREFIX...] [--all-lines]
+    python3 doc-lint.py [--base <ref>] [--root DIR] [--exclude PREFIX...] [--all-lines]
 
-起点（--base と HEAD の分岐点）から追加した Markdown の行に、markdown-writing のセルフチェックの
+起点（--base と HEAD の分岐点。--base が無ければ origin/<.ndf/worktree.json の base_branch>）から追加した Markdown の行に、markdown-writing のセルフチェックの
 「検討痕跡・変更履歴」の語と、課題番号の由来・以前との比較の語を掛ける。コードブロックの中は見ない。
 結果は lib/step_result.py の形の 1 行の JSON。終了コードは 0 = ヒット無し / 1 = ヒットあり / 2 = 読めない。
 `items[]` は 1 ヒット 1 件（`name` は `パス:行`、`rule` は当たった規則、`text` は行）。
@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import subprocess
 import sys
@@ -108,9 +109,21 @@ def scan(root: Path, files: dict[str, set[int]], all_lines: bool) -> tuple[list[
     return items, total
 
 
+def declared_base(root: Path) -> str | None:
+    """.ndf/worktree.json の base_branch を origin/<名前> で返す。無ければ None。"""
+    f = root / ".ndf" / "worktree.json"
+    try:
+        v = json.loads(f.read_text(encoding="utf-8")).get("base_branch") if f.is_file() else None
+    except (ValueError, AttributeError):
+        return None
+    return f"origin/{v}" if isinstance(v, str) and v else None
+
+
 def cmd_lint(a):
     root = Path(a.root).resolve() if a.root else Path(git(".", "rev-parse", "--show-toplevel").strip())
-    base = a.base
+    base = a.base or declared_base(root)
+    if not base:
+        raise StepError("起点が分からない（--base か .ndf/worktree.json の base_branch）", EXIT_UNREADABLE)
     p = subprocess.run(["git", "-C", str(root), "merge-base", base, "HEAD"], capture_output=True, text=True)
     if p.returncode != 0:
         raise StepError(f"起点 {base} を解決できない: {p.stderr.strip()[:200]}", EXIT_UNREADABLE)
@@ -132,7 +145,7 @@ def build_parser():
     ap = argparse.ArgumentParser(prog="doc-lint.py", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--root", help="対象のリポジトリの根（既定はカレントの git の根）")
-    ap.add_argument("--base", default="origin/develop", help="起点の ref（既定 origin/develop）")
+    ap.add_argument("--base", help="起点の ref（既定 origin/<.ndf/worktree.json の base_branch>）")
     ap.add_argument("--exclude", nargs="*", help=f"見ないパスの接頭辞（既定 {' '.join(DEFAULT_EXCLUDE)}）")
     ap.add_argument("--all-lines", action="store_true", help="変わったファイルの全行を見る")
     ap.set_defaults(func=cmd_lint)

@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "test": {
+    "command": "uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest --with pytest-xdist pytest {paths} -q -n 4",
+    "all": ".",
+    "no_reports": "-p no:playwright-kit"
+  },
+  "sync_checks": [
+    {"name": "build", "command": "bash scripts/build-runtime-plugins.sh"},
+    {"name": "frontmatter", "command": "python3 scripts/check-skill-frontmatter.py"},
+    {"name": "line-limit", "command": "python3 scripts/check-doc-line-limit.py"},
+    {"name": "links", "command": "python3 scripts/check-markdown-links.py"},
+    {"name": "instructions", "command": "python3 plugins/ndf/scripts/instructions-check.py --root ."}
+  ],
+  "release": {
+    "form": "package-plugin",
+    "plugin": "ndf",
+    "runtimes": ["claude", "codex", "kiro"]
+  }
+}

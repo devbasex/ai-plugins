@@ -10,8 +10,11 @@ NDF の Skill は任意のリポジトリに対して実行される。本文が
 現れていないか**だけを検査する。書き方が正しいか（探し方を書いているか、形で分岐して
 いるか）は判定しない。
 
-走査するのは `manifests/*-skills.txt` の和集合が指す Skill の Markdown である。配らない
-Skill と `tests/` の下は対象にしない。**manifest に載っていながら走査できる本文を 1 本も
+走査するのは `manifests/*-skills.txt` の和集合が指す Skill の Markdown と、family の
+`scripts/` の下の配布するスクリプト（`.py` / `.sh` / `.js`）である。配らない Skill と、
+`tests/`・`experimental/` の下は対象にしない。スクリプトには SCRIPT_PATTERNS を掛ける。
+計画や既定値に埋め込んだ ai-plugins の形（パス・ブランチ・テストや同期のコマンド）は、
+利用者のリポジトリでは解決しない。プロジェクトごとに違うものは `.ndf/` の宣言か引数で受ける。**manifest に載っていながら走査できる本文を 1 本も
 持たない Skill があるときは、検査自体を失敗させる**。読み飛ばすと、公開する Skill の本文が
 丸ごと未走査のまま検査が成功する。
 
@@ -70,6 +73,22 @@ PATTERNS: tuple[str, ...] = (
 )
 PATTERN_RE = re.compile("|".join(PATTERNS))
 
+# 配布するスクリプトに掛ける語。ai-plugins の置き場・テストや同期のコマンド・ランタイムの組・起点のブランチ。
+# スクリプトは NDF 自身の置き場（.claude-plugin/ など）を正しく読むため、Markdown の語とは分ける
+SCRIPT_PATTERNS: tuple[str, ...] = (
+    r"plugins/ndf/",
+    r"playwright-kit",
+    r"build-runtime-plugins",
+    r"check-skill-frontmatter",
+    r"check-markdown-links",
+    r"check-doc-line-limit",
+    r"claude,codex,kiro",
+    r"origin/develop",
+)
+SCRIPT_PATTERN_RE = re.compile("|".join(SCRIPT_PATTERNS))
+SCRIPT_SUFFIXES = (".py", ".sh", ".js")
+SCRIPT_SKIP_DIRS = ("tests", "experimental")
+
 # --- 除外 -------------------------------------------------------------------
 # キーは Skill ディレクトリを含むパス（`--skills-dir` に渡すのと同じ書き方）、値は除外
 # する理由である。**理由は必須**で、空にすると検査自体が失敗する。
@@ -85,6 +104,16 @@ EXCLUSIONS: dict[str, str] = {
         "NDF 自身の配布先の指定。対象リポジトリを指していない",
     "plugins/ndf/skills/out-of-scope/references/issue-target.md":
         "NDF の実体を持つ clone を見分ける手順。対象リポジトリを指していない",
+    # 配布するスクリプト。キーは family の scripts/ を含むパスで書く
+    "plugins/ndf/scripts/release-steps.py":
+        "配布の形が package-plugin のときの部品（プラグインの版・changelog・release）。"
+        "supervise.py は .ndf/supervise.json の release.form が package-plugin のときだけ呼ぶ",
+    "plugins/ndf/scripts/release-verification-steps.py":
+        "配布の形が package-plugin のときの導入の確かめ（ランタイムごとの導入の経路）。形で分岐済み",
+    "plugins/ndf/scripts/lib/step_result.py":
+        "release-steps.py が使うプラグインの置き場（plugin_dir）。package-plugin の形の中だけで使う",
+    "plugins/ndf/scripts/worktree-setup.sh":
+        "NDF 自身の宣言の形（worktree.schema.json）の URL。対象リポジトリを指していない",
 }
 
 RUNTIMES = ("claude", "codex", "kiro", "agy")
@@ -103,6 +132,7 @@ class Hit:
     """本文の 1 行に現れたヒット。"""
 
     def __init__(self, skills_dir: pathlib.Path, rel: str, lineno: int, word: str, line: str) -> None:
+        # skills_dir は走査の起点（Skill ディレクトリか、family の scripts/）
         self.skills_dir = skills_dir
         self.rel = rel
         self.lineno = lineno
@@ -160,21 +190,34 @@ def collect_documents(skills_dir: pathlib.Path) -> tuple[list[str], list[str]]:
     return docs, unscanned
 
 
-def scan(skills_dir: pathlib.Path, docs: list[str]) -> list[Hit]:
+def collect_scripts(skills_dir: pathlib.Path) -> list[str]:
+    """family の scripts/ の下の配布するスクリプトを、scripts/ からの相対パスで返す。"""
+    root = skills_dir.parent / "scripts"
+    if not root.is_dir():
+        return []
+    found = []
+    for path in sorted(root.rglob("*")):
+        rel = path.relative_to(root)
+        if path.is_file() and path.suffix in SCRIPT_SUFFIXES and not set(rel.parts) & set(SCRIPT_SKIP_DIRS):
+            found.append(rel.as_posix())
+    return found
+
+
+def scan(skills_dir: pathlib.Path, docs: list[str], pattern: re.Pattern[str] = PATTERN_RE) -> list[Hit]:
     """走査対象の本文からヒットを集める。"""
     hits: list[Hit] = []
     for rel in docs:
         text = (skills_dir / rel).read_text(encoding="utf-8")
         for lineno, line in enumerate(text.splitlines(), start=1):
-            for m in PATTERN_RE.finditer(line):
+            for m in pattern.finditer(line):
                 hits.append(Hit(skills_dir, rel, lineno, m.group(0), line))
     return hits
 
 
 def owning_skills_dir(key: str, skills_dirs: list[pathlib.Path]) -> pathlib.Path | None:
-    """除外の宣言がどの Skill ディレクトリに属するかを返す。属さなければ None。"""
+    """除外の宣言がどの Skill ディレクトリ（か、その family の scripts/）に属するかを返す。属さなければ None。"""
     for d in skills_dirs:
-        if key.startswith(canon(d) + "/"):
+        if key.startswith(canon(d) + "/") or key.startswith(canon(d.parent / "scripts") + "/"):
             return d
     return None
 
@@ -264,10 +307,14 @@ def main() -> int:
         unscanned.extend(skills_dir / name for name in missing)
         scanned.update(canon(skills_dir / rel) for rel in docs)
         hits = scan(skills_dir, docs)
+        scripts_dir = skills_dir.parent / "scripts"
+        scripts = collect_scripts(skills_dir)
+        scanned.update(canon(scripts_dir / rel) for rel in scripts)
+        hits += scan(scripts_dir, scripts, SCRIPT_PATTERN_RE)
         all_hits.extend(hits)
         report_lines.append(
             f"{skills_dir}: 公開する Skill {len(load_manifest_union(skills_dir))} 個 / "
-            f"Markdown {len(docs)} 本 / ヒット {len(hits)} 行")
+            f"Markdown {len(docs)} 本 / スクリプト {len(scripts)} 本 / ヒット {len(hits)} 行")
 
     # 走査の範囲が欠けたままの結果は、ヒットが 0 でも「無い」ことの根拠にならない。
     # 除外の宣言より先に見る。範囲が欠けていると、除外の実在の判定も当てにならない。

@@ -364,7 +364,7 @@ print(json.dumps({"tool": "external-ai", "status": "ok", "summary": "ok", "items
 def test_new_check_with_scope_uses_drive_steps(tmp_path):
     import argparse
     a = argparse.Namespace(pr=998, scope=["plugins/ndf/scripts"], issue=[870], mode="standard",
-                           worktree=str(tmp_path))
+                           worktree=str(tmp_path), base="main", test_cmd="pytest {paths}", test_all=".")
     steps = {s["id"]: s for s in sv.plan_check(a)["steps"]}
     assert steps["refactor"]["type"] == "drive" and "--workflow-step" in steps["refactor"]["args"]
     assert steps["review"]["type"] == "drive" and steps["review"]["drive"] == "cross-review"

@@ -62,8 +62,8 @@ context window を埋めるときは、**読解だけを worker へ出す**（co
 **ミッションの中の並列は、設計と実装のフェーズで開く。** 設計の supervisor は設計 Pull Request
 ごとに同時に起動し、実装の supervisor は課題ごとに同時に起動する（同時に 3 本まで）。検査・取り込み・
 仕上げはミッションで 1 つずつ起動する。ミッションのブランチ（`mission/<名前>`）は、関門 1 の承認と
-マージの後に conductor が develop から 1 度だけ切る。計画の雛形は `supervise.py new mission` が
-書き出し、`supervise.py queue --max 3` が流す。
+マージの後に conductor が起点のブランチ（`.ndf/worktree.json` の `base_branch`）から 1 度だけ切る。
+計画の雛形は `supervise.py new mission` が `.ndf/` の宣言から書き出し、`supervise.py queue --max 3` が流す。
 
 ### モードごとの組み方
 
