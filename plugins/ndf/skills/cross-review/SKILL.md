@@ -64,7 +64,7 @@ PR を**既定の母集合（claude / codex / kiro とホスト）から選ん�
 | 引数 | 意味 | 既定 |
 |---|---|---|
 | `[PR番号]` | 対象 PR（省略時は直前 PR / 現在ブランチ） | — |
-| `--max-rounds N` | 全体最大ラウンド数（PR ローテーションを含む通算） | `12` |
+| `--max-rounds N` | 全体最大ラウンド数（PR ローテーションを含む通算） | 設計 PR は `3`、それ以外は `12`（「設計 PR と実装 PR の戦略」） |
 | `--rotate-after K` | この round 数で未収束なら PR ローテーション | `8` |
 | `--rotate-mode light\|squash` | ローテーション方式。`light`: 同ブランチで旧 PR を close → 新 PR (title/body は現状の差分・実装から再生成)。`squash`: squash 統合 + 新ブランチ + `(rotated)` suffix | `light` |
 | `--host claude\|codex\|agy\|kiro` | この収束ループを起動している CLI。母集合には残る（外すなら `--exclude`） | 環境変数から推定。**推定できなければ失敗する** |
@@ -92,6 +92,21 @@ PR を**既定の母集合（claude / codex / kiro とホスト）から選ん�
 
 `init` は変更ファイルを分類して自動のレビュー観点を組み立て、`--focus` / `--extra-instructions-file` をその後ろに
 上乗せする。分類の一覧は [docs/04-contracts.md](docs/04-contracts.md) の「自動レビュー観点テンプレート」にある。
+
+### 設計 PR と実装 PR の戦略
+
+**`init` は PR を design / code に分け、分類ごとに収束の条件と差分の渡し方を変える。** head のブランチが
+`design/` で始まるか、変更が設計文書（`issues/*-design.md` など）だけなら design、それ以外は code である。
+分類は状態ファイルの `review_kind` に残る。定義は `scripts/classifications.py` の `review_kind` にある。
+
+| | design | code |
+| --- | --- | --- |
+| 収束の条件 | 上限 3 ラウンドで関門 1 へ渡す。**収束を待たない**（指摘の連鎖は文書の修正が生むため、回すほど増える） | 新しい指摘が出なくなるまで |
+| `--max-rounds` を渡さないときの上限 | `3` | `12` |
+| 担当へ渡す差分 | 2 ラウンド目以降は前のラウンドの head からの変更だけ（`git diff <前の head> <今の head>` をプロンプトに書く） | 全差分 |
+| 大きさ | 設計文書 1 本は 1,000 行以下。超えると `init` が文書と行数を標準エラーへ出し、状態ファイルの `design_doc_oversize` に残す（止めない） | 制限なし |
+
+`--max-rounds` を渡せば、どちらの分類でも渡した値が勝つ。
 
 ### `--rotate-mode` の選び方
 

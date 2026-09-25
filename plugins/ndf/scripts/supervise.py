@@ -19,6 +19,9 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
     supervise.py new check --pr N --worktree DIR [--issue N...] [--scope PATH...] [--out F]
     supervise.py new release --version V --prs N... --channel dev|prod --worktree DIR [--issue N...]
                              [--prev-tag T] [--repo DIR] [--out F]
+    supervise.py new mission --name M --worktree <リポジトリの根> --issue N... [--design N...] [--tests PATH...] [--out DIR]
+        # 並列の設計 → 関門 1 → ミッションのブランチ → 並列の実装（ミッションのブランチへ集める）→ 検査 1 回 → 配布
+        # を波ごとの計画ファイルと mission.json へ書き出す。波の中は queue --max 3 で流す
     supervise.py queue <plan.json>... [--max 3]   # 空いた枠へ順に流す
     supervise.py note <引き継ぎ文書.md> --report <report.md> [--next 次の欄] [--section 見出しの語]
     supervise.py sync-check [--root DIR] [--commit]   # 生成物の同期と検査 4 本
@@ -121,6 +124,7 @@ from zoneinfo import ZoneInfo
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 from step_result import emit, result  # noqa: E402
 from monitor import USAGE_LIMIT_FATAL  # noqa: E402  利用上限の文言の表
+from pr_mode import with_mode_line  # noqa: E402
 
 WORK_TOOLS = "Read,Edit,Write,Bash,Grep,Glob"
 # work の段に載せる MCP は Serena だけ（mcp-serena の .mcp.json と同じ起動）。シンボル単位で読み・直し、
@@ -766,6 +770,7 @@ class Supervisor:
             self.add_usage("judge", res)
             if res["ok"] and res["text"].strip():
                 body = res["text"].strip() + "\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+        body = with_mode_line(body, self.plan.get("モード"), self.passed_stages(step))
         found = subprocess.run(["gh", "pr", "list", "--head", branch, "--state", "open", "--json", "url",
                                 "--jq", ".[0].url"], cwd=self.cwd, capture_output=True, text=True).stdout.rstrip()
         if found:
@@ -780,6 +785,16 @@ class Supervisor:
             self.plan["Pull Request"] = url
         self.cur.update(exit=p.returncode, text=(url + "\n" + p.stderr).strip())
         return p.returncode == 0, url
+
+    def passed_stages(self, step: dict | None = None) -> list[str]:
+        """通した工程（段の stage）を通った順に重ねずに返す。step を渡せばその段の工程も含める。"""
+        stages: list[str] = []
+        ids = [e.get("id") for e in self.log] + ([step["id"]] if step else [])
+        for sid in ids:
+            stage = (self.steps.get(sid) or {}).get("stage")
+            if stage and stage not in stages:
+                stages.append(stage)
+        return stages
 
     def do_judge(self, step: dict) -> dict:
         choices = step.get("choices")
@@ -1154,6 +1169,135 @@ def cmd_new(a) -> dict:
                   {"steps": len(plan["steps"])})
 
 
+RULE_DESIGN = ("設計の cross-review は上限 3 ラウンドで関門 1 へ渡す（収束を待たない）。レビューが ok か、"
+               "上限・振動で打ち切られたなら gate。駆動そのものが失敗したら stop。")
+WORKTREE_SETUP = SELF.parent / "worktree-setup.sh"
+
+
+def mission_branch(name: str) -> str:
+    return f"mission/{name}"
+
+
+def plan_mission_design(a, n: int, repo: str) -> dict:
+    """設計のフェーズ: 設計文書を書き、設計 PR を出し、cross-review（設計の既定 3 ラウンド）の後に関門 1 で止まる。"""
+    branch = f"design/issue-{n}"
+    return {
+        "フェーズ": "設計", "課題": [n], "モード": a.mode, "作業場所": f"{repo}/.worktrees/{branch}",
+        "branch": branch, "起点": f"origin/{a.base}", "リポジトリ": repo, "規則": RULE_DESIGN, "上限": 12,
+        "steps": [
+            {"id": "design", "type": "work", "full": True, "kind": "設計", "stage": "設計", "issues": True,
+             "timeout": 3600, "next": "pr",
+             "prompt": f"/ndf:design #{n}。設計文書は 1,000 行以下にする（超える主題は設計を 2 本に分けると報告する）。"
+                       "コミットする（push しない）。"},
+            {"id": "pr", "type": "pr", "stage": "ドキュメントレビュー", "base": a.base, "title": f"設計: #{n}",
+             "summary": f"#{n} の設計（ミッション {a.name}）", "next": "review"},
+            # --max-rounds を渡さない。設計の分類の既定（3 ラウンド・前のラウンドからの変更だけ）で回る
+            {"id": "review", "type": "drive", "drive": "cross-review", "kind": "ドキュメントレビュー",
+             "stage": "ドキュメントレビュー", "timeout": 3600, "args": "{pr}", "on_fail": "gate", "next": "gate"},
+            {"id": "gate", "type": "judge", "inputs": ["review"],
+             "question": "関門 1（設計 Pull Request のマージ）へ渡す（gate）か、止める（stop）か",
+             "choices": ["gate", "stop"]},
+        ],
+    }
+
+
+def plan_mission_branch(a, repo: str) -> dict:
+    """ミッションのブランチを起点（develop）から切り、origin へ送る。"""
+    mb = mission_branch(a.name)
+    wt = f"{repo}/.worktrees/{mb}"
+    cmd = (f"bash {shlex.quote(str(WORKTREE_SETUP))} create {shlex.quote(mb)} && "
+           f"git -C {shlex.quote(wt)} push -q -u origin {shlex.quote(mb)}")
+    return {
+        "フェーズ": "実装", "課題": a.issue, "モード": a.mode, "作業場所": repo, "規則": "", "上限": 3,
+        "steps": [{"id": "mission-branch", "type": "run", "stage": "作業場所の用意", "timeout": 600,
+                   "cmd": cmd, "next": "end"}],
+    }
+
+
+def plan_mission_impl(a, n: int, repo: str) -> dict:
+    """実装のフェーズ: 課題の作業ツリーをミッションのブランチから切り、課題の PR をミッションのブランチへ集める。"""
+    mb = mission_branch(a.name)
+    branch = f"feat/issue-{n}-{a.name}"
+    ns = argparse.Namespace(
+        issue=[n], prompt=None, prompt_file=None, tests=a.tests or ["."], mode=a.mode,
+        worktree=f"{repo}/.worktrees/{branch}", base=mb, title=f"#{n} を実装する（ミッション {a.name}）",
+        summary=f"#{n}（ミッション {a.name} のブランチへ集める）", branch=branch)
+    plan = plan_impl(ns)
+    plan.update({"起点": f"origin/{mb}", "リポジトリ": repo})
+    return plan
+
+
+def plan_mission_check(a, repo: str) -> dict:
+    """検査のフェーズ: ミッションのブランチから develop へ PR を 1 本出し、構造改善・cross-review・完了判定を 1 回通す。"""
+    mb = mission_branch(a.name)
+    ns = argparse.Namespace(pr="{pr}", scope=a.scope, issue=a.issue, mode=a.mode, worktree=f"{repo}/.worktrees/{mb}")
+    plan = plan_check(ns)
+    plan.pop("Pull Request", None)
+    closes = "\n".join(f"Closes #{i}" for i in a.issue)
+    plan.update({"branch": mb, "起点": f"origin/{mb}", "リポジトリ": repo})
+    plan["steps"] = [
+        {"id": "collect", "type": "run", "stage": "実装", "timeout": 600,
+         "cmd": f"git pull -q --ff-only origin {shlex.quote(mb)}", "next": "pr"},
+        {"id": "pr", "type": "pr", "stage": "Pull Request", "base": a.base, "title": f"ミッション {a.name}",
+         "body": "template", "summary": f"ミッション {a.name} の課題を develop へ取り込む。\n\n{closes}",
+         "next": "assess"},
+    ] + plan["steps"]
+    return plan
+
+
+def plan_mission_release(a, repo: str) -> dict:
+    return {
+        "フェーズ": "取り込み", "課題": a.issue, "モード": a.mode, "作業場所": repo, "規則": "", "上限": 3,
+        "steps": [{"id": "release", "type": "work", "full": True, "kind": "配布", "stage": "配布",
+                   "timeout": 3600, "prompt": "/ndf:release", "next": "end"}],
+    }
+
+
+def mission_plans(a) -> list[dict]:
+    """ミッションの波を順に返す。波の中の計画は queue --max 3 で同時に流してよい。"""
+    repo = str(Path(a.worktree).resolve())
+    waves = []
+    if a.design:
+        waves.append({"name": "設計", "plans": {f"design-{n}": plan_mission_design(a, n, repo) for n in a.design}})
+        waves.append({"name": "関門 1", "gate": "設計 Pull Request をまとめて承認してマージする"})
+    waves += [
+        {"name": "ミッションのブランチ", "plans": {"mission-branch": plan_mission_branch(a, repo)}},
+        {"name": "実装", "plans": {f"impl-{n}": plan_mission_impl(a, n, repo) for n in a.issue}},
+        {"name": "検査", "plans": {"check": plan_mission_check(a, repo)}},
+        {"name": "配布", "plans": {"release": plan_mission_release(a, repo)}},
+    ]
+    return waves
+
+
+def cmd_new_mission(a) -> dict:
+    """ミッションの計画を波ごとのファイルへ書き出す。波は番号の順に queue で流す。"""
+    out = Path(a.out or f"mission-{a.name}")
+    out.mkdir(parents=True, exist_ok=True)
+    items, index = [], []
+    for i, wave in enumerate(mission_plans(a), 1):
+        entry = {"wave": i, "name": wave["name"]}
+        if "gate" in wave:
+            entry["gate"] = wave["gate"]
+        else:
+            paths = []
+            for key, plan in wave["plans"].items():
+                p = out / f"{i}-{key}.json"
+                p.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n")
+                paths.append(str(p))
+            entry["plans"] = paths
+            entry["command"] = (f"python3 {shlex.quote(str(SELF))} queue "
+                                + " ".join(map(shlex.quote, paths)) + " --max 3")
+        index.append(entry)
+        items.append(entry)
+    manifest = out / "mission.json"
+    manifest.write_text(json.dumps({"ミッション": a.name, "ブランチ": mission_branch(a.name), "波": index},
+                                   ensure_ascii=False, indent=2) + "\n")
+    plans = sum(len(e.get("plans", [])) for e in index)
+    return result("supervise-new", "ok", f"ミッション {a.name} の計画を {plans} 本・{len(index)} 波で書いた: {manifest}",
+                  items, {"waves": len(index), "plans": plans, "manifest": str(manifest)},
+                  next="波の番号の順に command を打つ。関門の波では承認を取ってから次へ進む")
+
+
 def report_result(text: str) -> str:
     m = re.search(r"^- 結果: (\S+)", text, re.M)
     return m.group(1) if m else "不明"
@@ -1238,7 +1382,7 @@ def main() -> int:
     r.add_argument("--from", dest="start", help="この段から始める（途中から再開するとき）")
     sub.add_parser("example")
     n = sub.add_parser("new", help="雛形から計画を作る")
-    n.add_argument("kind", choices=["impl", "check", "release"])
+    n.add_argument("kind", choices=["impl", "check", "release", "mission"])
     n.add_argument("--issue", type=int, nargs="+", default=[])
     n.add_argument("--pr", type=int)
     n.add_argument("--worktree", required=True)
@@ -1257,6 +1401,8 @@ def main() -> int:
     n.add_argument("--prev-tag", help="release dev: approval-facts の前のタグ（省略時は自動）")
     n.add_argument("--repo", help="release: 元のリポジトリ（省略時は作業場所の /.worktrees/ より前）")
     n.add_argument("--out")
+    n.add_argument("--name", help="mission: ミッションの名前（ブランチは mission/<名前>）")
+    n.add_argument("--design", type=int, nargs="+", default=[], help="mission: 設計 PR を出す課題")
     q = sub.add_parser("queue", help="計画を同時に --max 本まで順に流す")
     q.add_argument("plans", nargs="+")
     q.add_argument("--max", type=int, default=3)
@@ -1273,6 +1419,12 @@ def main() -> int:
     if a.cmd == "example":
         print(json.dumps(EXAMPLE, ensure_ascii=False, indent=2))
         return 0
+    if a.cmd == "new" and a.kind == "mission":
+        if not (a.name and a.issue):
+            ap.error("new mission には --name・--issue が要る")
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", a.name):
+            ap.error("--name は英数字・. _ - だけで書く（ブランチ名 mission/<名前> に使う）")
+        emit(cmd_new_mission(a))
     if a.cmd == "new":
         if a.kind == "impl" and not (a.issue and a.tests and a.title):
             ap.error("new impl には --issue・--tests・--title が要る")

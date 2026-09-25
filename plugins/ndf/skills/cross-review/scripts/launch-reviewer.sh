@@ -56,6 +56,9 @@ PR=$(jq -r '.current_pr' "$STATE")
 # 前の版の state.json から再開したときだけ、従来の `gh pr view` へ落ちる。
 SHA=$(jq -r '(.rounds[-1].head_sha // "")' "$STATE")
 [ -n "$SHA" ] || SHA=$(gh pr view "$PR" --json headRefOid -q .headRefOid)
+# 分類（design / code）と前のラウンドの head（#1005）。規則は classifications.py の diff_scope
+REVIEW_KIND=$(jq -r '.review_kind // "code"' "$STATE")
+PREV_SHA=$(jq -r '(.rounds // []) | if length >= 2 then (.[-2].head_sha // "") else "" end' "$STATE")
 }
 
 prepare_prompt_context() {
@@ -95,6 +98,23 @@ $EXTRA_REVIEW_INSTRUCTIONS
 EXTRA_EOF
 )
 fi
+# 設計 PR の 2 ラウンド目以降は、前のラウンドからの変更だけを渡す。設計の指摘の連鎖は
+# 修正で変わった行から生まれるため、変わっていない行を読み直させない。code は全差分のまま
+DIFF_SCOPE_BLOCK=
+if [ "$REVIEW_KIND" = design ] && [ "$ROUND" -ge 2 ] 2>/dev/null && [ -n "$PREV_SHA" ] && [ "$PREV_SHA" != "$SHA" ]; then
+  DIFF_SCOPE_BLOCK=$(cat <<SCOPE_EOF
+
+## このラウンドで見る差分（設計 Pull Request の round 2 以降）
+前のラウンドのレビュー対象（$PREV_SHA）からの変更だけを見る:
+
+\`\`\`bash
+git -C "$WORKTREE" diff $PREV_SHA $SHA
+\`\`\`
+
+変わっていない行へ新しい指摘を出さない。差分が取れないときだけ PR の全差分を見る。
+SCOPE_EOF
+)
+fi
 }
 
 render_review_prompt() {
@@ -117,6 +137,7 @@ workspace 外を読まなくて済むよう、以下にインライン展開す�
 $EXISTING_INLINE
 \`\`\`
 $EXTRA_REVIEW_BLOCK
+$DIFF_SCOPE_BLOCK
 
 ## 出し切り
 - **見つけた指摘はこのラウンドですべて出す。次のラウンドへ回さない。** 重要度が minor のものも書く
