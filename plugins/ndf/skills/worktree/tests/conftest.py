@@ -16,6 +16,18 @@ from worktree_helpers import git, init_repo
 
 
 
+@pytest.fixture(autouse=True)
+def _own_tmpdir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """ガードの状態ファイル（`$TMPDIR/ndf-worktree-<セッション>.json`）をテストごとに分ける。
+
+    固定のセッション ID のまま共有の /tmp に置くと、同時に走る別のテストの実行が「案内済み」を書き、
+    案内が出なくなる（全体テストを 6 本同時に走らせたときに 9 件落ちた）。
+    """
+    d = tmp_path / "tmpdir"
+    d.mkdir()
+    monkeypatch.setenv("TMPDIR", str(d))
+
+
 @pytest.fixture()
 def main_repo(tmp_path: Path) -> Path:
     """主ディレクトリにあたるリポジトリ。"""
