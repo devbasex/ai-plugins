@@ -102,6 +102,70 @@ def test_a_parametrised_value_is_changed(verify) -> None:
     assert verify.assertion_change(before, after) == "changed"
 
 
+def test_a_rewritten_comment_is_undecidable(verify) -> None:
+    """コメントの中の値は数えない（#641）。
+
+    rf34 では、内部の関数への同一性の `assert` を消した項目が、書き換えたコメントの
+    `R3-001` の `001` を失った値と数えられて取り消された。
+    """
+    before = [
+        "# --- 現状固定テスト（R3-001: build_parser のサブコマンド構成と引数パース） ---\n",
+        "def test_build_parser_subcommands_and_defaults():\n",
+        '    a = build_parser().parse_args(["ingest-cf"])\n',
+        "    assert a.func is main.cmd_ingest_cf\n",
+        '    assert a.limit == 10\n',
+    ]
+    after = [
+        "# --- build_parser のサブコマンド構成と引数パース ---\n",
+        "def test_build_parser_subcommands_and_defaults():\n",
+        '    a = build_parser().parse_args(["ingest-cf"])\n',
+        '    assert a.limit == 10\n',
+    ]
+    assert verify.assertion_change(before, after) == "undecidable"
+
+
+def test_a_hash_inside_a_string_is_still_a_value(verify) -> None:
+    """文字列の中の `#` はコメントの始まりではない。その後ろの値も数える。"""
+    before = ['    assert tag("#a") == 3  # 件数\n']
+    after = ['    assert tag("#a") == 4  # 件数\n']
+    assert verify.assertion_change(before, after) == "changed"
+
+
+def test_a_value_lost_after_a_string_hash_is_changed(verify) -> None:
+    """文字列が失われれば、`#` を含んでいても落とす。"""
+    before = ['    assert tag(x) == "#a"\n']
+    after = ['    assert tag(x) == "#b"\n']
+    assert verify.assertion_change(before, after) == "changed"
+
+
+def test_gathering_a_repeated_literal_into_a_constant_is_undecidable(verify) -> None:
+    """テストの重複を定数へ寄せただけなら、値は失われない（#705）。
+
+    同じ値の出現が 2 → 1 に減っても、値そのものは残っている。最終ゲートのレビューが読む。
+    """
+    before = [
+        "def test_a():\n",
+        "    assert parse('{\"a\":1}') == 1\n",
+        "def test_b():\n",
+        "    assert parse('{\"a\":1}') == 1\n",
+    ]
+    after = [
+        "LINE = '{\"a\":1}'\n",
+        "def test_a():\n",
+        "    assert parse(LINE) == 1\n",
+        "def test_b():\n",
+        "    assert parse(LINE) == 1\n",
+    ]
+    assert verify.assertion_change(before, after) == "undecidable"
+
+
+def test_a_value_gone_from_the_whole_file_is_changed(verify) -> None:
+    """重複があっても、ファイルから消えた値は機械で落とす。"""
+    before = ["    assert f(1) == 3\n", "    assert g(1) == 3\n"]
+    after = ["    assert f(1) == 4\n", "    assert g(1) == 4\n"]
+    assert verify.assertion_change(before, after) == "changed"
+
+
 # ---------- 検証の経路へ組み込む ----------
 
 def test_a_changed_expectation_fails_the_intake(verify) -> None:
