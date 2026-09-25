@@ -1179,10 +1179,10 @@ def mission_branch(name: str) -> str:
 
 
 def plan_mission_design(a, n: int, repo: str) -> dict:
-    """設計の持ち場: 設計文書を書き、設計 PR を出し、cross-review（設計の既定 3 ラウンド）の後に関門 1 で止まる。"""
+    """設計のフェーズ: 設計文書を書き、設計 PR を出し、cross-review（設計の既定 3 ラウンド）の後に関門 1 で止まる。"""
     branch = f"design/issue-{n}"
     return {
-        "持ち場": "設計", "課題": [n], "モード": a.mode, "作業場所": f"{repo}/.worktrees/{branch}",
+        "フェーズ": "設計", "課題": [n], "モード": a.mode, "作業場所": f"{repo}/.worktrees/{branch}",
         "branch": branch, "起点": f"origin/{a.base}", "リポジトリ": repo, "規則": RULE_DESIGN, "上限": 12,
         "steps": [
             {"id": "design", "type": "work", "full": True, "kind": "設計", "stage": "設計", "issues": True,
@@ -1208,14 +1208,14 @@ def plan_mission_branch(a, repo: str) -> dict:
     cmd = (f"bash {shlex.quote(str(WORKTREE_SETUP))} create {shlex.quote(mb)} && "
            f"git -C {shlex.quote(wt)} push -q -u origin {shlex.quote(mb)}")
     return {
-        "持ち場": "実装", "課題": a.issue, "モード": a.mode, "作業場所": repo, "規則": "", "上限": 3,
+        "フェーズ": "実装", "課題": a.issue, "モード": a.mode, "作業場所": repo, "規則": "", "上限": 3,
         "steps": [{"id": "mission-branch", "type": "run", "stage": "作業場所の用意", "timeout": 600,
                    "cmd": cmd, "next": "end"}],
     }
 
 
 def plan_mission_impl(a, n: int, repo: str) -> dict:
-    """実装の持ち場: 課題の作業ツリーをミッションのブランチから切り、課題の PR をミッションのブランチへ集める。"""
+    """実装のフェーズ: 課題の作業ツリーをミッションのブランチから切り、課題の PR をミッションのブランチへ集める。"""
     mb = mission_branch(a.name)
     branch = f"feat/issue-{n}-{a.name}"
     ns = argparse.Namespace(
@@ -1228,7 +1228,7 @@ def plan_mission_impl(a, n: int, repo: str) -> dict:
 
 
 def plan_mission_check(a, repo: str) -> dict:
-    """検査の持ち場: ミッションのブランチから develop へ PR を 1 本出し、構造改善・cross-review・完了判定を 1 回通す。"""
+    """検査のフェーズ: ミッションのブランチから develop へ PR を 1 本出し、構造改善・cross-review・完了判定を 1 回通す。"""
     mb = mission_branch(a.name)
     ns = argparse.Namespace(pr="{pr}", scope=a.scope, issue=a.issue, mode=a.mode, worktree=f"{repo}/.worktrees/{mb}")
     plan = plan_check(ns)
@@ -1247,7 +1247,7 @@ def plan_mission_check(a, repo: str) -> dict:
 
 def plan_mission_release(a, repo: str) -> dict:
     return {
-        "持ち場": "取り込み", "課題": a.issue, "モード": a.mode, "作業場所": repo, "規則": "", "上限": 3,
+        "フェーズ": "取り込み", "課題": a.issue, "モード": a.mode, "作業場所": repo, "規則": "", "上限": 3,
         "steps": [{"id": "release", "type": "work", "full": True, "kind": "配布", "stage": "配布",
                    "timeout": 3600, "prompt": "/ndf:release", "next": "end"}],
     }
