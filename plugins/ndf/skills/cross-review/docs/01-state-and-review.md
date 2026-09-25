@@ -12,7 +12,7 @@
 | `scripts/launch-reviewer.sh` | Step 2 — レビュワー起動の入口（4 ランタイム共通） |
 | `scripts/monitor.py` | Step 2 — レビュワーのプロセス多軸監視（`--agents` で担当を渡す） |
 | `scripts/wait-review.sh` | Step 2 — `monitor.py` の薄ラッパ（互換用） |
-| 共通層の `scripts/lib/bg-wait.sh` | Step 2 / 2.5 — Bash の 1 回（600 秒）に収まらない監視と反証を背景で起動し、540 秒以内の wait を 124 のあいだ**別の Bash の呼び出しで**呼び直す |
+| 共通ライブラリの `scripts/lib/bg-wait.sh` | Step 2 / 2.5 — Bash の 1 回（600 秒）に収まらない監視と反証を背景で起動し、540 秒以内の wait を 124 のあいだ**別の Bash の呼び出しで**呼び直す |
 | `scripts/state.py read-result` | Step 2.4 — result.json マージ |
 | `scripts/state.py unresolved-threads` | PR 上の未解決の指摘を数える（順序を持たない補助） |
 | `scripts/state.py judge` | Step 3 — intent + 引き継いだ指摘の判定 |
@@ -33,7 +33,7 @@ for R in '${CLAUDE_PLUGIN_ROOT}' "$(git rev-parse --show-toplevel 2>/dev/null)/p
 done
 [ -n "$R" ] || { echo "NDF の scripts/resolve.sh が見つからない" >&2; exit 3; }
 SCRIPTS=$(bash "$R/scripts/resolve.sh" scripts cross-review) || exit 3
-LIB=$(bash "$R/scripts/resolve.sh" scripts)/lib || exit 3   # 共通層（bg-wait.sh）
+LIB=$(bash "$R/scripts/resolve.sh" scripts)/lib || exit 3   # 共通ライブラリ（bg-wait.sh）
 
 # state 初期化 / 再開（プリチェック・worktree 作成・既存コメントスナップショットを内部実行）
 # ⚠ `eval "$(スクリプト)"` は、スクリプトが異常終了しても出力が空なら終了コード 0 になる。
@@ -88,7 +88,7 @@ cd "$WORKTREE"
 ROUND_VARS=$("$SCRIPTS/state.py" start-round "$STATE_PR") || {
   RC=$?
   [ "$RC" -eq 1 ] && break   # max_rounds 到達 → ループを抜けて最終スイープへ
-  exit "$RC"                 # 5=後始末が未了 / 8=作業ツリーを同期できない。その場で止める
+  exit "$RC"                 # 5=後始末が未了 / 8=worktree を同期できない。その場で止める
 }
 eval "$ROUND_VARS"
 # eval で取り込まれる変数: ROUND, ROUND_IN_PR, PR, MAX_ROUNDS, ROTATE_AFTER
@@ -103,7 +103,7 @@ round エントリを保存する前に**既存コメントのスナップショ
 
 ### ラウンドの開始時の同期
 
-**round エントリを開く前に、作業ツリーを PR の head へ揃える。** 修正を作業ツリーの外で
+**round エントリを開く前に、worktree を PR の head へ揃える。** 修正を worktree の外で
 行って push すると、次のラウンドは 1 つ前の内容をレビューする。実測（PR #212）では、
 ラウンド 4 で対応済みの指摘 2 件がラウンド 5 で再び投稿された。エントリを開く前に行うのは、
 途中で止まったときにラウンドが半端に開かれず、原因を取り除いた後に同じ番号から再開できる
@@ -116,7 +116,7 @@ round エントリを保存する前に**既存コメントのスナップショ
 | 追跡対象のファイルに変更がある | **exit 8** で止める |
 | 基準に含まれないローカルのコミットがある | **exit 8** で止める |
 | 基準を取り込めない / head を解決できない | **exit 8** で止める |
-| `worktree_path` が無い、または登録済みの作業ツリーでない | 同期せず、警告して続ける |
+| `worktree_path` が無い、または登録済みの worktree でない | 同期せず、警告して続ける |
 
 追跡対象の変更と未 push のコミットで止めるのは、それが**修正の工程が push を終えていない
 証拠**だからである。捨てると修正そのものが失われ、しかも失われたことが誰にも見えない。
@@ -133,14 +133,14 @@ round エントリを保存する前に**既存コメントのスナップショ
 
 同期先のブランチ名は毎ラウンド取り直し、`state.json` の `head_branch` へ書き戻す。
 `squash` の巻き直しは `<branch>-r<HHMMSS>` を作るため、巻き直しの側でも `set-current-pr` が
-`--head-branch` で受け取った値を書き戻す。ラウンドの開始時にも取り直すのは、作業ツリーの
+`--head-branch` で受け取った値を書き戻す。ラウンドの開始時にも取り直すのは、worktree の
 外で行われた変更に追従するためである。
 
 ## Step 2: レビュー担当 2 者の並列レビュー
 
 **要点**: メインは launcher を **並列バックグラウンド** で起動するだけ。
-各担当は **投稿しない。** 指摘のファイル（`<席>-review-pr<PR>-round<R>-payload.json`）と
-結果ファイル（`<席>-review-pr<PR>-result.json`）を一時の名前で書き、指摘のファイル → 結果の順に
+各担当は **投稿しない。** 指摘ファイル（`<席>-review-pr<PR>-round<R>-payload.json`）と
+結果ファイル（`<席>-review-pr<PR>-result.json`）を一時の名前で書き、指摘ファイル → 結果の順に
 改名する。投稿は取り込み（`read-result`）が行う（#730）。**本文はメイン context に載せない**。
 
 ### 2.1 launcher 起動 + monitor
@@ -207,7 +207,7 @@ done
 
 #### 取り込みがレビューを投稿する
 
-**書き込みと記録を 1 つの部分命令に閉じる**。`read-result` は「指摘のファイルを読む → 投稿を
+**書き込みと記録を 1 つの部分命令に閉じる**。`read-result` は「指摘ファイルを読む → 投稿を
 積む → 流す → 送信の応答を記録へ書き戻す → 指摘を取り込む」の順に進む。記録の参照は送信の
 応答から、件数（`comments`）は送れたインラインの数から取る。**担当の申告を GitHub の実数と
 突き合わせる処理は無い**（投稿する側と記録する側が同じになったため）。標準出力に足すのは
@@ -265,7 +265,7 @@ eval "$JUDGE_VARS"
 
 `NO_RESULT` は `read-result` が書き込む。理由は `no_result_reason` に、監視が残した詳細（err.log の
 抜粋、最大 200 文字）は `monitor_detail` に残る（監視の結果ファイルがあったときだけ）。理由の語彙と
-起動し直しの可否を持つのは共通層の `monitor_outcome.py` だけで、`read-result` はその値を写す（#729）。
+起動し直しの可否を持つのは共通ライブラリの `monitor_outcome.py` だけで、`read-result` はその値を写す。
 
 | 理由 | 何が起きたか | 起動し直し | `read-result` の終了コード |
 | --- | --- | --- | --- |
@@ -369,9 +369,9 @@ eval "$UNRESOLVED_VARS"
 
 GitHub の利用回数の上限に達すると投稿は失敗する。**失敗をそのまま止める側へ倒すと、
 レビューを 1 巡も進められない。** 上限のときだけ投稿する内容をローカルへ積み、回復した
-後に順に流す（#291）。仕組みは共通層の `post_queue.py` にある。
+後に順に流す。仕組みは共通ライブラリの `post_queue.py` にある。
 
-置き場所は状態ファイルと同じ `<作業ツリー>/.cross_review/pending/` で、1 項目 1 ファイルの
+置き場所は状態ファイルと同じ `<worktree>/.cross_review/pending/` で、1 項目 1 ファイルの
 JSON である。名前は `<連番 4 桁>-<種別>-<識別子>.json` で、**順序はこの連番だけが決める**。
 
 | 応答 | 扱い |
@@ -386,7 +386,7 @@ JSON である。名前は `<連番 4 桁>-<種別>-<識別子>.json` で、**�
 `gh api rate_limit` を引く（この照会そのものは上限を消費しない）。
 
 流すきっかけは 2 つある。**自動だけにも明示だけにもしない。** 自動だけだと、回復を待つ
-あいだ何もコマンドを実行していない場合に流れない。明示だけだと、進行側が忘れたときに
+あいだ何もコマンドを実行していない場合に流れない。明示だけだと、オーケストレーターが忘れたときに
 残ったまま収束の判定へ進む。
 
 | きっかけ | どこで | 流せなかったとき |
@@ -440,7 +440,7 @@ JSON である。名前は `<連番 4 桁>-<種別>-<識別子>.json` で、**�
 ### Step 1 の開始時に行う後始末のチェック
 
 `start-round` は、前のラウンドの後始末が終わっているかを次の 2 点で確かめ、
-どちらかに当たれば **exit 5** で止まる。進行側が手で修正して次のラウンドへ進めると、
+どちらかに当たれば **exit 5** で止まる。オーケストレーターが手で修正して次のラウンドへ進めると、
 Step 5 が担う返信と Resolve が飛ばされるため。
 
 | 状態 | 扱い |
