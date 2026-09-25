@@ -15,7 +15,7 @@
 
 ## 具体例: マイルストーン 26 の 2026-09-25 の区間を `pace: fast` で回すと
 
-この区間では、配布を除く Pull Request 41 本を develop へマージした（#1078 の集計の時点）。検査は Pull Request
+この区間（タグ `ndf--v10.17.10` から `ndf--v10.17.18` までのコミット時刻）では、配布を除く Pull Request 41 本を develop へマージした（#1078 の集計の時点。配布のマージを含めると 56 本）。**この文書の「2026-09-25 の区間」の本数はすべてこの数え方である。**数え方は `git log origin/develop --first-parent --merges --since=<10.17.10 の時刻> --until=<10.17.18 の時刻>` で、配布は元のブランチが `release/` のもの（2026-09-25 の再集計では 56 本・配布を除き 40 本で、1 本の差は区間の端の数え方による）。検査は Pull Request
 ごとに通していない。確定仕様化と振り返りは課題ごとに行わず、後で棚卸しを 55 件まとめて行った。
 同じ区間を `pace: fast` で回すと、次の 4 点が変わる。
 
@@ -95,8 +95,9 @@ LLM の判定は後に回す。
 | MVV の判定（`plugins/ndf/scripts/mvv-gate.py`） | 試行の置き場から本体へ移す。MVV が承認済みかを確かめ、越えない線を機械で見てから LLM に判定させる。結果をミッションの状態へ書く | 移動・変更 |
 | 計画の組み立て（`supervise.py` の `new`） | `new mission --pace fast`・`new check --since-last`・`new close`・`new release --mvv`・`new impl --escape-of` の計画を組む | 変更 |
 | 計画の実行（`supervise.py` の `run` / `queue`） | 計画の「実行の条件」を作業ツリーより先に評価して、当たらなければ飛ばす。`--then` を段として順に流す。段の `gate_as_ok` で関門を成功として扱う | 変更 |
-| ミッションの状態（`mission-state.py`） | `pace`・MVV のファイルとハッシュ・関門の記録（誰が通したか・判定・理由）を持つ | 変更 |
-| ミッションを閉じる（`mission-close.py`） | 閉じる課題を `--issues` でも受け取る（`fast` の実装 Pull Request は閉じる語を持たない） | 変更 |
+| ミッションの状態（`mission-state.py`） | `pace`・マイルストーンの説明から写した MVV のファイルとハッシュ・関門の記録（誰が通したか・判定・理由）を持つ | 変更 |
+| ミッションを閉じる（`mission-close.py`） | 閉じる課題を `--issues` でも受け取る（`fast` の実装 Pull Request は閉じる語を持たない）。本番を飛ばしたときの `--record-pr 0` を受ける | 変更 |
+| 結果の共通の契約（`lib/step_result.py`） | 終了コード 3 の文言に「各スクリプトが定めた正常な否定の結果」を足す（コードの値は変えない） | 変更 |
 | 通過工程の控え（`stage-check.sh` と `lib/workflow-common.sh`） | `pace` を記録し、報告と Pull Request の作成時の案内で「トリガー」「まとめる」の工程を記録なしに数えない | 変更 |
 | 進行の記録（`projects-sync.sh` / `progress-record.sh`） | キー `pace` を受け、課題の本文の見出し行へ `進め方: fast` を書く | 変更 |
 | 工程の規約（`development-workflow` の SKILL.md と参照） | 進め方の区分の表 1 枚と、判定の出力の `pace:` の行を持つ。`fast` に当てはまらない既存の規則を直す（下の「当てはまらない既存の規則」） | 変更 |
@@ -200,7 +201,7 @@ AGENTS.md / docs/ndf-experiments.md                 # 変更
 | SKILL.md「自走で工程を通す」と「人手の承認を求める関門」 | 2 つの関門の前で必ず止まる | `fast` では MVV の判定が「従う」なら止まらない。関門の数（2 つ）は変えない |
 | `references/parallel-work.md`「工程が動く単位」 | 構造改善・実装レビュー・完了判定はミッション単位 | `fast` の列を足す（構造改善・実装レビューはトリガーの範囲、完了判定は課題） |
 | `references/agent-layers.md` のフェーズの表 | 検査のフェーズはミッションで 1 回、関門 1 は conductor が承認を取る | `fast` の組み方の行を足す（検査はトリガーごと、関門は MVV の判定が返したときだけ） |
-| `references/relay.md` の `mission-state.py init` と `gate` | 関門の承認は利用者の承認だけを記録する | `--pace` と `--mvv` を渡す。関門の記録は `mvv-gate.py` も書く |
+| `references/relay.md` の `mission-state.py init` と `gate` | 関門の承認は利用者の承認だけを記録する | `--pace` と `--milestone`（MVV の写し元）を渡す。関門の記録は `mvv-gate.py` も書く |
 | `references/stage-completeness.md` の報告と Pull Request の作成時の案内 | 記録の無い必須の工程をすべて「記録なし」と出す | `fast` の「トリガー」「まとめる」の工程は別の行に出す |
 | `release` の SKILL.md「本番への配布は承認を得るまで進めない」 | 承認は利用者だけが与える | `fast` では MVV の判定の記録も承認として扱う（条件は `AGENTS.md`） |
 | `supervise.py` の `RULE_RELEASE_PROD` | 「利用者は関門 2 を承認した」と judge に渡す | `fast` では「関門 2 は利用者か MVV の判定が承認した」に変える |
@@ -295,6 +296,7 @@ erDiagram
 | `of` | 数 | `escape` だけ | 不具合を持ち込んだ Pull Request。**分からなければ 0（「不明」）であり、「無し」ではない** |
 | `areas` | 文字列の配列 | `escape` だけ | 直した Pull Request が触った領域 |
 | `result` | `merged` / `no_change` / `failed` | `check` だけ | 検査の終わり方 |
+| `failed_at` | 文字列 | `result` が `failed` のときだけ | 落ちた段の名前（計画の `state.json` から写す） |
 | `findings` | オブジェクト | `check` だけ | 構造改善の `applied`・`reverted`、実装レビューの `findings`・`unresolved`（計画の `state.json` の `counts` から写す） |
 
 **前回の検査は、`result` が `merged` か `no_change` の `check` の最新の行である。** その `to` が次の

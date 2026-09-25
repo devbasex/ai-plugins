@@ -12,11 +12,12 @@
 
 | 副命令 | 入力 | 成功の出力 | 失敗の形 |
 | --- | --- | --- | --- |
-| `eval [--final] [--id <計画名>] [--root DIR]` | 宣言・検査の記録・git の履歴 | 立った: `ok`・終了コード 0。`items` は立ったトリガーごとに `{trigger, value, threshold}`、`metrics` は `prs`・`score`・`lines`・`hours`・`escapes`・`from`・`to`。立たない: `stopped`・終了コード 3・`metrics.fired` が空 | 宣言が読めない・git が無い・範囲を決められない: `stopped`・終了コード 2 |
-| `prepare --id <名>` | 同上 | `check-base/<名>` を範囲の `from` に作って origin へ送る。範囲と立ったトリガーを `<計画>-state/check.json` へ書く。`ok`・0 | 送れない: `stopped`・1 |
+| `eval [--final] [--id <計画名>] [--root DIR]` | 宣言・検査の記録・git の履歴 | 立った: `ok`・終了コード 0。`items` は立ったトリガーごとに `{trigger, value, threshold}`、`metrics` は `prs`・`score`・`lines`・`hours`・`escapes`・`from`・`to`。立たない: `stopped`・終了コード 3・`items` が空。**立ったかどうかは終了コード（0 / 3）で読む**（`fired` は検査の記録の列で、`metrics` には無い） | 宣言が読めない・git が無い・範囲を決められない: `stopped`・終了コード 2 |
+| `prepare --id <名>` | 同上 | `check-base/<名>` を範囲の `from` に作って origin へ送る（前の回の残りがあれば `from` へ強制で付け直す）。範囲と立ったトリガーを `<計画>-state/check.json` へ書く。`ok`・0 | 送れない: `stopped`・1 |
 | `scope --id <名>` | `check.json` | 検査の範囲のディレクトリを空白区切りで標準出力へ（共通層 → 逃げた不具合の領域 → その他の順）。JSON を出さない唯一の副命令である | `check.json` が無い: 終了コード 2 |
-| `finish --id <名> --pr N` | 検査の Pull Request | 宛先を `develop` へ付け替える。差分があれば `ok`・0、無ければ Pull Request を閉じて `stopped`・3（「変更なし」） | 付け替えられない: `stopped`・1 |
+| `finish --id <名> --pr N` | 検査の Pull Request | 付け替えの前に `git diff origin/develop...HEAD` で差分を手元で数え、宛先を `develop` へ付け替える。差分があれば `ok`・0、無ければ Pull Request を閉じて `stopped`・3（「変更なし」） | 付け替えられない: `stopped`・1 |
 | `record --id <名> --pr N --plan <計画>` | `check.json`・計画の `state.json` | `check` の事象を追記し、`check-base/<名>` を消す。`ok`・0 | 追記できない: `stopped`・1 |
+| `record --id <名> --plan <計画> --failed [--pr N]` | 同上 | `result: failed` と `failed_at`（`state.json` で最後に落ちた段）の `check` の事象を追記し、`check-base/<名>` を消し、検査の Pull Request があれば閉じる。**記録できても `stopped`・1 を返し、計画を `止まった` で終える** | 追記できない: `stopped`・1（後始末は続ける） |
 | `escape --pr N [--of M]` | 直した Pull Request の変更したファイル | `escape` の事象を追記する。`ok`・0 | 同上 |
 | `changed --id <名>` | 検査の記録 | 最新の `<名>` の `check` が `merged` なら `ok`・0、`no_change` なら `stopped`・3 | 事象が無い: `stopped`・2 |
 
@@ -51,13 +52,14 @@ mvv-gate.py check --mission <ミッションの状態> --gate design|release [--
 
 | 呼び方 | 何が増えるか |
 | --- | --- |
-| `new mission ... --pace fast --state <ミッションの状態>` | 使ってよい条件を確かめ、外れれば `stopped`・1。当たれば下の「`fast` のミッションの計画」の波を書く。`mission.json` に `"進め方": "fast"` と `"状態": <パス>` を書く |
+| `new mission ... --pace fast --state <ミッションの状態>` | 使ってよい条件（MVV の承認の記録があり、その `sha256` が今の `mvv.md` と一致することを含む）を確かめ、外れれば `stopped`・1 で計画を書かない。当たれば下の「`fast` のミッションの計画」の波を書く。`mission.json` に `"進め方": "fast"` と `"状態": <パス>` を書く |
 | `new check --since-last --id <名> --worktree <リポジトリの根> [--mission <状態>]` | `--pr` の代わりに前回の検査からの差分を範囲にする計画を組む（`--pr` とは同時に渡せない。渡せば終了コード 2） |
 | `new release ... --channel prod --mvv <ミッションの状態>` | 先頭に MVV の判定の段を置く。`--channel dev --mvv <状態>` なら `facts` の段に `gate_as_ok` を付ける |
 | `new impl ... --escape-of <PR番号|0>` | 最後の段（マージ）の後に `check-trigger.py escape --pr {pr} --of <番号>` の段を足す |
 | `new close --name M --worktree <根> --issue N... --version <開発版> --prod <正式版> --state <状態> [--milestone M]` | ミッションの終わりの波を書く（下の「ミッションの終わりの計画」） |
 | 計画の `"実行の条件": {"cmd": "...", "skip_code": 3}` | `run` と `queue` が作業ツリーを作る前に打つ。0 なら流す。`skip_code` なら作業ツリーを作らず、報告を `結果: 完了`・`理由: 実行の条件に当たらない（<summary>）` で書いて終える。ほかは `結果: 止まった` |
 | `queue <計画>... --then <計画>... [--then <計画>...]` | `--then` を繰り返すと段になる。段は前の段がすべて `完了` のときだけ流し、段の中は今と同じく `--max` 本まで同時に流す。`{queue_prs}` は前のすべての段の Pull Request で置き換える。`--then` が 1 つなら今と同じ |
+| `{queue_pr:<計画名>}` | 前の段の、名前が `<計画名>` の計画の Pull Request **1 本**で置き換える。その計画が実行の条件で飛ばされたか Pull Request を持たなければ `0`。複数あれば段の順で最後の 1 本。`{queue_prs}`（空白区切りの全件）は単一の番号を取る引数へ渡さない |
 | 段の `"gate_as_ok": true` | run の段の 10〜19 を関門として数えず、提示物だけを写して `next` へ進む。報告の `結果` は `関門` にしない |
 
 **互換性:** どれも足すだけである。`--pace` を渡さない `new mission` と、`実行の条件` を持たない
@@ -67,14 +69,27 @@ mvv-gate.py check --mission <ミッションの状態> --gate design|release [--
 
 | 呼び方 | 何が増えるか |
 | --- | --- |
-| `mission-state.py init ... --pace fast --mvv <ファイル>` | `pace`・`mvv.path`・`mvv.sha256` を書く。`--pace fast` で `--mvv` が無ければ `stopped` |
-| `mission-state.py gate <m> MVV --what <要約>` | `sha256` に今の MVV のハッシュを入れる。conductor が利用者の承認を得た後に打つ |
+| `mission-state.py init ... --pace fast --milestone <M>` | マイルストーンの説明（`gh api .../milestones/<M>`）から `## Mission` / `## Vision` / `## Value` の節を `<状態のディレクトリ>/mvv.md` へ写し、`pace`・`mvv.path`・`mvv.sha256` を書く。見出しが 1 つでも無い・取得できないときは状態を書かずに `stopped`・3。`--mvv <ファイル>` を渡せば写さずにそれを使う。`--pace fast` でどちらも無ければ `stopped`・2 |
+| `mission-state.py gate <m> MVV --what <要約>` | `sha256` に今の MVV のハッシュを入れる。conductor が `mvv.md` を利用者へ示し、承認を得た後に打つ |
 | `mission-state.py gate ... --by mvv --verdict V --reasons JSON --log P` | 判定が通した関門の記録。`--by` を省けば今と同じ `user` |
 | `mission-close.py ... --issues 1,2` | 閉じる課題を直接受ける。`--prs` の閉じる語と両方あれば和を取る |
+| `mission-close.py --record-pr 0 --issues 1,2` | `0` は「本番の記録なし」（最終の検査で変更が無く本番を飛ばした）。配布の記録を読まずに課題を閉じる。`0` は `--issues` と一緒のときだけ受け、単独なら終了コード 2 |
 | `stage-check.sh record <課題> pace <normal\|fast>` / `projects-sync.sh <課題> pace fast` | 控えの `.pace` と本文の見出し行を書く。知らない値は終了コード 2 |
 | `stage-check.sh report <課題>` | `pace` が `fast` なら、トリガーの工程を `トリガー:`、まとめる工程を `まとめる:` の行へ出し、`記録なし:` と記録を促す行に入れない |
 
 ## 処理の流れ
+
+### ミッションの初期化（MVV の写しと承認）
+
+conductor が次の順に打つ。**承認の記録が無いうちは `new mission --pace fast` が計画を書かないため、
+設計は始まらない。**
+
+| 順 | 打つもの | 成功 | 失敗・未承認 |
+| --- | --- | --- | --- |
+| 1 | `mission-state.py init <m> --pace fast --milestone <M>` | `mvv.md` とハッシュが状態に入る | `stopped`・3（見出しが無い）: 利用者にマイルストーンの説明を直してもらい、1 を打ち直す |
+| 2 | conductor が `mvv.md` を利用者へ示す | 利用者が承認する | 承認されない: `mvv.md` の元（マイルストーンの説明）を直して 1 から。`--pace` を渡さない `normal` で進めてもよい |
+| 3 | `mission-state.py gate <m> MVV --what <要約>` | 承認の記録に `sha256` が入る | — |
+| 4 | `supervise.py new mission ... --pace fast` | 計画を書く | `stopped`・1（承認の記録が無い・ハッシュ不一致）: 2 へ戻る |
 
 ### `fast` のミッションの計画
 
@@ -153,11 +168,15 @@ sequenceDiagram
 | `finish` | run | `check-trigger.py finish --id <名> --pr {pr}` | 0 → `ready`、`skip_code` 3 → `skip_to: record` |
 | `ready` / `merge` | run | `plan_check` と同じ | → `record` |
 | `record` | run | `check-trigger.py record --id <名> --pr {pr} --plan <計画のパス>` | → `end` |
+| `abort` | run | `check-trigger.py record --id <名> --plan <計画のパス> --failed --pr {pr}`（`pr` の段より前なら `--pr` を付けない） | 常に 1 → 止まる |
 
-**落ちたとき:** 検査の計画が `止まった` で終わると、`record` の段まで進まず、検査の記録に `check` の
-事象が残らない。**次の `eval` は同じ `from` から数え直すため、範囲を取りこぼさない。** 開発版の計画は
-`--then` の「前の計画がすべて完了のときだけ」によって流れず、conductor が attention で起きる。
-`check-base/<名>` の後始末は、その後の `record` が打たれたとき（打ち直しを含む）に行う。
+**落ちたとき:** `prepare` から `record` までの run の段は、`on_fail` を持たないものすべてに
+`on_fail: abort` を付ける（`judge` / `fix` へ回す段は今の `on_fail` のまま、その先の失敗が `abort` へ来る）。
+`abort` は `result: failed` と落ちた段を記録し、`check-base/<名>` を消し、検査の Pull Request を閉じてから
+計画を `止まった` で終える。**前回の検査は `merged` か `no_change` の行だけから決まるため、`failed` の後の
+次の `eval` は同じ `from` から数え直し、範囲を取りこぼさない。** `prepare` は残った `check-base/<名>` を
+付け直すため、`abort` まで届かずに落ちた場合（端末が落ちたなど）も、同じ `from` から打ち直せる。
+開発版の計画は `--then` の「前の計画がすべて完了のときだけ」によって流れず、conductor が attention で起きる。
 
 ### ミッションの終わりの計画（`new close`）
 
@@ -185,7 +204,7 @@ graph TD
 | --- | --- | --- | --- |
 | `spec` | work（`full`） | 確定仕様化 | `/ndf:plan-to-spec`。課題の `issues/` の計画と設計を `docs/` へ移し、コミットする |
 | `pr` / `merge` | pr / run | Pull Request | develop 宛てに出してマージする。**`issues/` と `docs/` だけを触るため、配布を伴わない** |
-| `close` | run | 後片付け | `mission-close.py --record-pr <本番の記録の PR> --issues <課題> --with-verification` |
+| `close` | run | 後片付け | `mission-close.py --record-pr {queue_pr:release-prod} --issues <課題> --with-verification`。本番が飛ばされたときは `{queue_pr:release-prod}` が `0` になる |
 | `retro` | work（`full`） | 振り返り | `/ndf:retrospective`。検査の記録の集計（`check-trigger.py eval` の `metrics` と `check` の `findings`、`escape` の件数）を材料に渡す |
 
 **課題ごとの stage の記録は、計画の `課題` にミッションの課題をすべて載せて打つ。** これで
