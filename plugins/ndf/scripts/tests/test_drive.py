@@ -16,7 +16,8 @@ SCRIPTS = Path(__file__).resolve().parents[1]
 SKILLS = SCRIPTS.parent / "skills"
 PY = sys.executable
 sys.path.insert(0, str(SCRIPTS / "lib"))
-from step_result import validate_result  # noqa: E402
+from step_result import PAUSE_CODES as STEP_PAUSE_CODES, validate_result  # noqa: E402
+import drive_pause  # noqa: E402
 
 
 def load(name, path):
@@ -107,7 +108,10 @@ def test_review_drive_pauses_for_fix_then_sweep_then_finishes(tmp_path, monkeypa
     assert item["pause"] == "fix" and item["round"] == 1
     prompt = Path(item["prompt_file"]).read_text()
     assert "/ndf:fix 5 --defer-nit" in prompt and str(tmp_path / "wt") in prompt and "https://x/r1" in prompt
-    assert "pint" not in prompt
+    for tool in ("pint", "larastan", "phpstan", "ruff", "eslint", "mypy"):
+        assert tool not in prompt
+    assert "02-fix-and-rotation" not in prompt  # 修正の手順は /ndf:fix が持ち、雛形を読ませない
+    assert Path(item["result_file"]).name == "fix-pr5-result.json" and item["result_file"] in prompt
     assert ("state.py", "init", "5", "--max-rounds", "4") in fake.calls
 
     # 打ち直しても結果ファイルが無ければ同じ pause を返す
@@ -150,7 +154,24 @@ def test_review_drive_stops_when_init_fails(tmp_path, monkeypatch, capsys):
 
 
 def test_both_drives_share_the_pause_table():
-    assert cr.PAUSES == rf.PAUSES
+    assert cr.dp is rf.dp
+    assert cr.Stop is cr.dp.Stop and rf.Stop is rf.dp.Stop
+    assert not hasattr(cr, "PAUSES") and not hasattr(rf, "PAUSES")
+
+
+def test_pause_table_gives_exit_codes():
+    assert drive_pause.PAUSE_CODES == {"fix": 20, "sweep": 21, "newtext": 22, "cross-review": 23}
+    assert all(c in STEP_PAUSE_CODES for c in drive_pause.PAUSE_CODES.values())
+    for kind, code in drive_pause.PAUSE_CODES.items():
+        out = drive_pause.pause("t", kind, "/p", "/r", 2, {"rounds": 2}, command="x")
+        assert validate_result(out, code) == []
+        assert drive_pause.exit_code(out) == code
+        assert out["items"][0] == {"pause": kind, "prompt_file": "/p", "result_file": "/r", "round": 2, "command": "x"}
+    assert drive_pause.exit_code(drive_pause.done("t", "s", "/rp", {})) == 0
+    stopped = drive_pause.stopped("t", "s", {"rounds": 1}, 3)
+    assert drive_pause.exit_code(stopped) == 1 and stopped["metrics"]["exit"] == 3
+    with pytest.raises(ValueError):
+        drive_pause.pause("t", "unknown", "/p", "/r", 0, {})
 
 
 # --- cross-refactoring ----------------------------------------------------------

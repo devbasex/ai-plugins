@@ -28,13 +28,16 @@
 | [auth.py](auth.py) | 参加する CLI の認証の確認。止めずに結果だけを返す形を持つ（#727） | 同上 |
 | [run_metrics.py](run_metrics.py) | 実行の要約を作業ツリーの外へ書き、束ねて出す（`aggregate`、#662） | 同上 |
 | [assignment.py](assignment.py) | ホスト判定、母集合の確定、使える者の解決、席の埋め方と席の名前、担当の輪番（#727） | 同上 |
-| [models.py](models.py) | `--model` の解析、フラグ生成、実測値の突き合わせ | 同上 |
-| [metrics.py](metrics.py) | 担当ごとの指標算出と報告の整形 | 同上 |
-| [post_queue.py](post_queue.py) | 上限のときに投稿を積む待ち行列と、上限の見分け（#291） | 同上 |
+| [models.py](models.py) | `--model` の解析、フラグ生成、実測値の突き合わせ | `cross-refactoring` / `external-ai.py` / `metrics.py` |
+| [metrics.py](metrics.py) | 担当ごとの指標算出と報告の整形 | テストだけ（収束ループの 2 つはまだ読まない） |
+| [post_queue.py](post_queue.py) | 上限のときに投稿を積む待ち行列と、上限の見分け | `cross-review`（`state.py` / `rotate-pr.sh`） |
+| [result_posts.py](result_posts.py) | 結果ファイル（指摘の控え・修正の戻り値）を投稿へ組み立て、待ち行列から送る | `cross-review`（`state.py` / `drive.py`） / `fix-steps.py` |
+| [git-credential.sh](git-credential.sh) | credential helper が応答しない環境で git を通す退避の値 | `cross-refactoring`（`refactor_lib/gitfacts.py`） |
 | [closing-issues.sh](closing-issues.sh) | Pull Request の本文から、閉じる語が指す issue を取り出す | `progress-tracking`（ミッションを閉じる） / `merged`（OPEN の一覧） / `development-workflow` の hook |
 | [refresh.py](refresh.py) | 観点の出典の取得・指紋の比較・一覧の提示・待ちの扱い（#554）。**提示するだけで書き換えない** | `instructions-check.py` |
 | [transcript_agents.py](transcript_agents.py) | 会話の記録を conductor / supervisor / worker の層の単位で読む（#550）。上限の中断の一覧（`interrupted`）と解除の待ち（`wait-reset`）も持つ（#657）。**読むだけで送信の経路を持たない** | `skill-stats` / `development-workflow` |
-| [step_result.py](step_result.py) | 手順のスクリプトの結果 JSON の形・検証（`validate_result`）・出力と終了（`emit`）・承認の提示物（`approval_present`）と、git / gh を呼ぶ小関数 | `merged-steps.py` / `plan-to-spec-steps.py` / `release-steps.py` / `release-verification-steps.py` / `mission-close.py` |
+| [step_result.py](step_result.py) | 手順のスクリプトの結果 JSON の形・検証（`validate_result`）・出力と終了（`emit`）・承認の提示物（`approval_present`）と、git / gh を呼ぶ小関数 | `merged-steps.py` / `plan-to-spec-steps.py` / `release-steps.py` / `release-verification-steps.py` / `mission-close.py` / `drive_pause.py` |
+| [drive_pause.py](drive_pause.py) | 収束ループの駆動が止まるときの結果の形（pause の 1 行 JSON）と終了コードの表（0 完了 / 20 fix / 21 sweep / 22 newtext / 23 cross-review / 1 中断） | 収束ループの 2 つの `drive.py` |
 
 ## 手順のスクリプトの結果
 
@@ -126,9 +129,14 @@ Skill の下に共通層を置くと、その Skill を配らない配布先で�
 
 | 部品 | `cross-refactoring` | `cross-review` |
 | --- | --- | --- |
-| `monitor.py` | 共通層を直接使う | `scripts/monitor.py` がシムとして共通層を読む |
-| `_tmpdir.sh` | 共通層を直接使う | `scripts/_tmpdir.sh` が固有の名前を束ねて共通層を読む |
-| `launch-cli.sh` | 使う | `launch-agy.sh` が委譲する。`launch-codex.sh` は未移行 |
-| `assignment.py` / `models.py` / `metrics.py` | 使う | 未移行 |
-| `statefile.py` | 使う | 未移行 |
-| `post_queue.py` | 未移行 | 使う |
+| `drive_pause.py` / `step_result.py` | 使う（`drive.py`） | 使う（`drive.py`） |
+| `monitor.py` | 共通層を直接使う（`drive.py` / `refactor_lib/timeline.py`） | `scripts/monitor.py` がシムとして共通層を読む |
+| `_tmpdir.sh` | 使わない（一時ディレクトリは `refactor_lib/paths.py` が決める） | `scripts/_tmpdir.sh` が固有の名前を束ねて共通層を読む |
+| `launch-cli.sh` | `scripts/launch-cli.sh` が委譲する | `launch-reviewer.sh` / `critique.sh` が使う（`launch-codex.sh` / `launch-agy.sh` は `launch-reviewer.sh` へ委譲する） |
+| `limits.py` | 使う | `critique.sh` が使う（監視の上限は `monitor.py` が共通層の表から引く） |
+| `assignment.py` / `auth.py` / `statefile.py` / `run_metrics.py` / `monitor_outcome.py` | 使う | 使う（`state.py`） |
+| `models.py` | 使う | 未移行 |
+| `metrics.py` | 未移行 | 未移行 |
+| `post_queue.py` / `result_posts.py` | 未移行（改修計画のコメントは `refactor_lib/plan.py` が `gh` で書く） | 使う（`state.py` / `rotate-pr.sh` / `drive.py`） |
+| `git-credential.sh` | 使う（`refactor_lib/gitfacts.py`） | 使わない |
+| `bg-wait.sh` | 使わない | 未移行（`scripts/bg-wait.sh` に固有に置く。#731） |

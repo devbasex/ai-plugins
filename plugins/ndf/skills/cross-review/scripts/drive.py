@@ -4,20 +4,10 @@
     drive.py <PR> [--rotate-mode light|squash] [state.py init の引数...]
 
 init → ラウンド（起動・監視・取り込み・根拠の検証・判定）→ 振動の検知 → 修正 → 巻き直し →
-最終スイープ → 検証 → 報告を順に進める。LLM が要る地点では 1 行の JSON（`step_result` の形）を出して
-止まる。同じコマンドを打ち直すと続きから進む（進みは `$TMP_DIR/drive-pr<PR>.json`）。
+最終スイープ → 検証 → 報告を順に進める。LLM が要る地点（fix / sweep / newtext）で止まる。
+同じコマンドを打ち直すと続きから進む（進みは `$TMP_DIR/drive-pr<PR>.json`）。
 
-    {"tool": "cross-review-drive", "status": "gate", "next": "fix",
-     "items": [{"pause": "fix", "prompt_file": "...", "result_file": "...", "round": 3}], ...}
-
-| 終了コード | status | 意味 | 起こす側がすること |
-| --- | --- | --- | --- |
-| 0 | ok | 完了（報告は items[0].report） | 件数（metrics）を報告へ写す |
-| 20 | gate | fix 待ち | prompt_file の指示で直し、result_file を書かせて打ち直す |
-| 21 | gate | sweep 待ち | 同上（最終スイープ） |
-| 22 | gate | 新しい title・body 待ち | 同上（light の巻き直し） |
-| 23 | gate | 最終ゲートの cross-review 待ち | cross-refactoring だけが使う |
-| 1 | stopped | 中断（metrics.exit に元の終了コード） | 理由（summary）を報告する |
+止まるときの JSON の形と終了コードの表は共通層の `scripts/lib/drive_pause.py` にある。
 
 件数（metrics）は状態ファイルから数える: rounds / prs / findings / fixed / deferred / rejected /
 unresolved / final / review_status。
@@ -36,18 +26,11 @@ HERE = Path(__file__).resolve().parent
 SKILL = HERE.parent
 LIB = HERE.parents[2] / "scripts" / "lib"
 sys.path.insert(0, str(LIB))
-import step_result as sr  # noqa: E402
+import drive_pause as dp  # noqa: E402
+from drive_pause import Stop  # noqa: E402
 
 TOOL = "cross-review-drive"
-PAUSES = {"fix": 20, "sweep": 21, "newtext": 22, "cross-review": 23}
 DOCS02 = SKILL / "docs" / "02-fix-and-rotation.md"
-FIX_SKILL = HERE.parents[1] / "fix" / "SKILL.md"
-
-
-class Stop(Exception):
-    def __init__(self, msg: str, code: int = 1):
-        super().__init__(msg)
-        self.code = code
 
 
 def call(cmd: list[str], env: dict | None = None, cwd: str | None = None) -> tuple[int, str]:
@@ -156,10 +139,8 @@ class Drive:
             self.save_ds(ds)
         pf = self.tmp / f"drive-pr{self.pr}-{kind}-prompt.md"
         pf.write_text(prompt)
-        rnd = self.counts()["rounds"]
-        item = {"pause": kind, "prompt_file": str(pf), "result_file": str(res), "round": rnd}
-        return sr.result(TOOL, "gate", f"{kind} 待ち（round {rnd}）。prompt_file の指示で result_file を書き、"
-                         "同じコマンドを打ち直す", [item], self.counts(), next=kind)
+        c = self.counts()
+        return dp.pause(TOOL, kind, pf, res, c["rounds"], c)
 
     # --- プロンプト（手順は写さず、呼び出しと PR 固有の穴埋めだけ） ---
     def fix_prompt(self) -> str:
@@ -170,8 +151,7 @@ class Drive:
             f"  - {who}: intent={(r.get(who) or {}).get('intent')}, posted_as={(r.get(who) or {}).get('posted_as')}, "
             f"{(r.get(who) or {}).get('comments', 0)} 件, {(r.get(who) or {}).get('review_url', '')}"
             for who in r.get("reviewers") or []) or "  - 無し"
-        return f"""`/ndf:fix {pr} --defer-nit` を行う。手順は {FIX_SKILL} にある。
-方針・必須の手順・戻り値の形は {DOCS02} の「Step 5」にある。
+        return f"""`/ndf:fix {pr} --defer-nit` を行う。修正の手順・方針・戻り値ファイルの形は `/ndf:fix` が持つ。
 
 - リポジトリ: {s.get('repo')}
 - PR: #{pr}（round {r.get('round')}）
@@ -182,14 +162,14 @@ class Drive:
 - 既存コメントの控え: {self.tmp}/cross-review-pr{self.pr}-existing-comments.txt
 
 コミットまでで、送らない。GitHub へ書かない（送信・返信・決着は取り込みが行う）。
-戻り値ファイル: {self.path('fix')}
+戻り値ファイル: {self.path('fix')}（環境変数 `CROSS_REVIEW_TMP_DIR={self.tmp}` を渡すと `/ndf:fix` がここへ書く）
 """
 
     def sweep_prompt(self) -> str:
         s = self.state()
         pr = s.get("current_pr") or self.pr
         return f"""最終スイープを行う: `/ndf:fix {pr}` を再実行し、PR の open review thread を 1 件も残さない。
-手順は {FIX_SKILL}、スイープの規約と結果ファイルの形は {DOCS02} の「Step 7.5」にある。
+修正の手順は `/ndf:fix` が持つ。スイープの規約と結果ファイルの形は {DOCS02} の「Step 7.5」にある。
 
 - リポジトリ: {s.get('repo')}
 - PR: #{pr}
@@ -302,8 +282,8 @@ GitHub と git の送信をしない。結果ファイル: {self.path('sweep')}
 
     def done(self, rp: Path) -> dict:
         c = self.counts()
-        return sr.result(TOOL, "ok", f"収束ループが終わった（final={c['final']}・{c['rounds']} ラウンド・"
-                         f"指摘 {c['findings']}・未解決 {c['unresolved']}）", [{"report": str(rp)}], c)
+        return dp.done(TOOL, f"収束ループが終わった（final={c['final']}・{c['rounds']} ラウンド・"
+                       f"指摘 {c['findings']}・未解決 {c['unresolved']}）", rp, c)
 
     def run(self) -> dict:
         self.init()
@@ -344,13 +324,7 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--rotate-mode", choices=["light", "squash"], default="light")
     a, rest = ap.parse_known_args(argv)
     d = Drive(a.pr, a.rotate_mode, rest)
-    try:
-        out = d.run()
-    except Stop as e:
-        m = d.counts() if "TMP_DIR" in d.v else {}
-        sr.emit(sr.result(TOOL, "stopped", str(e), [], {**m, "exit": e.code}), 1)
-    code = PAUSES.get(out.get("next"), 0) if out["status"] == "gate" else 0
-    sr.emit(out, code)
+    dp.main(TOOL, d.run, lambda: d.counts() if "TMP_DIR" in d.v else {})
 
 
 if __name__ == "__main__":
