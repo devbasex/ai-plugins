@@ -397,3 +397,17 @@ def test_update_adds_plans_from_done_without_init_plan(r6):
     m = json.loads(Path(r6["mission"]).read_text())
     assert {p["plan"]: p["label"] for p in m["plans"]}[r6["prod"]] == "本番 10.17.17"
     assert {p["plan"]: p["kind"] for p in m["plans"]}[r6["a"]] == "実装"
+
+
+def load_mission_state():
+    spec = importlib.util.spec_from_file_location("mission_state", SCRIPT)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+@pytest.mark.parametrize("key", ["フェーズ", "持ち場"])
+def test_plan_kind_reads_the_old_key_too(tmp_path, key):
+    plan = tmp_path / "plan.json"
+    plan.write_text(json.dumps({key: "配布（開発版）"}, ensure_ascii=False))
+    assert load_mission_state().plan_kind(str(plan)) == "開発版"
