@@ -500,8 +500,12 @@ def test_kiro_session_from_env_is_the_key(world, slack):
 
 
 def test_kiro_same_text_in_one_session_is_windowed(world, slack):
-    world.run("kiro", {"hook_event_name": "stop", "assistant_response": "この方針で進めてよいですか。"},
-              env={"KIRO_SESSION_ID": "k1"})
+    for _ in range(2):
+        world.run("kiro", {"hook_event_name": "stop", "assistant_response": "この方針で進めてよいですか。"},
+                  env={"KIRO_SESSION_ID": "k1"})
+    slack.wait_for(1)
+    time.sleep(0.5)
+    assert len(slack.requests) == 1
     [f] = list(world.state.glob("*.json"))
     record = json.loads(f.read_text())
     record["sent_at"] = 0
@@ -517,6 +521,13 @@ def test_kiro_without_session_windows_only_the_same_text(world, slack):
     assert len(slack.wait_for(2)) == 2
     [record] = [json.loads(f.read_text()) for f in world.state.glob("*.json")]
     assert record["key"].endswith(":window") and record["key"] != ":window"
+
+
+def test_kiro_window_stops_only_the_consecutive_same_text(world, slack):
+    """記録は 1 セッションに最後の 1 鍵だけ。A→B→A の 2 度目の A は窓の内でも届く。"""
+    for text in ("この方針で進めてよいですか。", "次はどちらにしますか。", "この方針で進めてよいですか。"):
+        world.run("kiro", {"hook_event_name": "stop", "assistant_response": text}, env={"KIRO_SESSION_ID": "k1"})
+    assert len(slack.wait_for(3)) == 3
 
 
 def test_leftover_kiro_session_is_not_used_by_other_runtimes(world, slack):

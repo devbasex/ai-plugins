@@ -76,7 +76,7 @@ NDF の `scripts/glossary.py` はこの形でだけ読み、語はすべて用�
 | `terms[].meaning` | 文字列 | 許さない | 意味 |
 | `terms[].deprecated` | 文字列の配列 | 許す | 廃止した語（旧称）。2 文字以上 |
 | `terms[].source` | 文字列 | 許す | 正本（その語の意味を決めている確定した文書のパスか URL）。空は「用語集そのものが正本」 |
-| `terms[].pending_source` | 文字列 | 許す | 確定前の出所（語を決めた設計文書のパス）。`plan-to-spec` の `spec-finalize` がその設計を消すときに、`source` を確定仕様へ移してこの項目を消す |
+| `terms[].pending_source` | 文字列 | 許す | 確定前の出所（語を決めた設計文書のパス）。`plan-to-spec` の `spec-finalize` がその設計を消すときに、`source` を確定仕様へ移してこの項目を消す。指す文書が無ければ `check` の `schema` に当たる |
 
 **設計の工程で足す語は `source` を空にし、`pending_source` に設計文書を書く。** 設計文書は確定前の
 仕様で、承認の後も確定仕様になるまで書き換わる。正本にすると、確定仕様へ移った後も消えた文書を指す。

@@ -7,7 +7,8 @@
 用語集の宣言（.ndf/glossary.json）があれば、消した設計を確定前の出所（pending_source）に持つ語の
 正本（source）を確定仕様へ移し、文書を作り直して同じコミットに含める。
 確定仕様の本文は呼ぶ前に LLM が書いておく。結果は lib/step_result.py の形の 1 行の JSON。
-終了コードは 0 = ok / 1 = コミットする変更が無い・git が失敗 / 3 = 確定仕様か設計のファイルが無い。
+終了コードは 0 = ok / 1 = コミットする変更が無い・git が失敗 /
+3 = 確定仕様か設計のファイルが無い、または用語集の宣言か正本が読めない。
 """
 from __future__ import annotations
 
@@ -15,13 +16,15 @@ import argparse
 import json
 import os
 import re
-import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 from step_result import (EXIT_PRECONDITION, StepError, commit, common_parser, emit, git,  # noqa: E402
                          git_root, main_with, result)
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import glossary  # noqa: E402
 
 TOOL = "plan-to-spec"
 
@@ -52,29 +55,50 @@ def update_index(index, text, name, link, title):
     index.write_text(body, encoding="utf-8")
 
 
-def promote_glossary(root: Path, removed: set, spec_rel: str) -> list:
-    """消した設計を pending_source に持つ語の source を確定仕様へ移し、render して git add する。"""
-    decl = root / ".ndf" / "glossary.json"
-    if not decl.is_file():
-        return []
-    rel = json.loads(decl.read_text(encoding="utf-8")).get("source")
-    path = root / rel if isinstance(rel, str) else None
-    if path is None or not path.is_file():
-        return []
-    g = json.loads(path.read_text(encoding="utf-8"))
-    moved = [t for t in g.get("terms", []) if isinstance(t, dict) and t.get("pending_source") in removed]
+def load_glossary(root: Path):
+    """用語集の宣言と正本。宣言が無ければ None。宣言・正本が読めないか語の形が崩れていれば設計を消す前に止める。"""
+    try:
+        decl = glossary.load_declaration(root)
+        if decl is None:
+            return None
+        g = glossary.load_glossary(decl)
+    except StepError as e:
+        raise StepError(f"用語集の宣言（.ndf/glossary.json）か正本が読めない: {e}", EXIT_PRECONDITION)
+    bad = [f["detail"] for f in glossary.structure_findings(g, decl) if f["rule"] == "schema"]
+    if bad:
+        raise StepError(f"用語集の正本の形が崩れている（glossary.py check --rules structure で直す）: {bad[0]}",
+                        EXIT_PRECONDITION)
+    return decl, g
+
+
+def plan_glossary(loaded, removed: set, spec_rel: str):
+    """消す設計を pending_source に持つ語の source を確定仕様へ移し、書く正本と文書を作る。何も書かない。"""
+    if loaded is None:
+        return None
+    decl, g = loaded
+    moved = [t for t in glossary.terms_of(g) if t.get("pending_source") in removed]
     if not moved:
-        return []
+        return None
     for t in moved:
         t["source"] = spec_rel
         del t["pending_source"]
-    path.write_text(json.dumps(g, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    r = subprocess.run([sys.executable, str(Path(__file__).resolve().parent / "glossary.py"), "render", "--root",
-                        str(root)], capture_output=True, text=True)
-    if r.returncode != 0:
-        raise StepError(f"用語集の文書を作り直せない: {r.stdout.strip() or r.stderr.strip()}")
-    git(root, "add", "-A", "--", rel, *[i["name"] for i in json.loads(r.stdout)["items"]])
-    return [{"kind": "glossary", "name": t["term"], "result": "promoted", "source": spec_rel} for t in moved]
+    items = [{"kind": "glossary", "name": t["term"], "result": "promoted", "source": spec_rel} for t in moved]
+    return decl, json.dumps(g, ensure_ascii=False, indent=2) + "\n", glossary.render_text(g, decl.source), items
+
+
+def write_glossary(plan) -> list:
+    """plan_glossary の正本と文書を書いて git add する。"""
+    if plan is None:
+        return []
+    decl, source_text, document_text, items = plan
+    try:
+        decl.source_path.write_text(source_text, encoding="utf-8")
+        decl.document_path.parent.mkdir(parents=True, exist_ok=True)
+        decl.document_path.write_text(document_text, encoding="utf-8")
+    except OSError as e:
+        raise StepError(f"用語集を書けない: {e}")
+    git(decl.root, "add", "-A", "--", decl.source, decl.document)
+    return items
 
 
 def cmd_spec_finalize(a):
@@ -83,17 +107,21 @@ def cmd_spec_finalize(a):
     if not spec.is_file():
         raise StepError(f"確定仕様のファイルが無い: {a.spec}", EXIT_PRECONDITION)
     spec_rel = spec.relative_to(root).as_posix()
-    items = []
-
+    rels = []
     for d in a.design:
         dp = Path(d)
         rel = dp.resolve().relative_to(root).as_posix() if dp.is_absolute() else dp.as_posix()
         if not (root / rel).exists():
             raise StepError(f"設計のファイルが無い: {d}", EXIT_PRECONDITION)
-        git(root, "rm", "-q", "--", rel)
-        items.append({"kind": "design", "name": rel, "result": "removed"})
+        rels.append(rel)
+    plan = plan_glossary(load_glossary(root), set(rels), spec_rel)
+    # 用語集を書けなければ設計を消さずに止めるため、書き込みを git rm より前に置く
+    promoted = write_glossary(plan)
 
-    items += promote_glossary(root, {i["name"] for i in items}, spec_rel)
+    for rel in rels:
+        git(root, "rm", "-q", "--", rel)
+    items = [{"kind": "design", "name": rel, "result": "removed"} for rel in rels]
+    items += promoted
 
     index = root / "docs" / "specifications" / "README.md"
     if index.is_file():

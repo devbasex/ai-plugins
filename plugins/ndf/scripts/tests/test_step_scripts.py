@@ -175,6 +175,7 @@ def test_spec_finalize_promotes_glossary_terms_of_the_removed_design(repo, env):
         {"term": "残る語", "context": "c", "meaning": "m", "pending_source": "docs/design/y-design.md"}]}
     write(repo, ".ndf/glossary.json", json.dumps(decl, ensure_ascii=False))
     write(repo, "docs/glossary/glossary.json", json.dumps(g, ensure_ascii=False))
+    write(repo, "docs/design/y-design.md", "# 別の設計\n")
     assert subprocess.run([sys.executable, str(SCRIPTS / "glossary.py"), "render", "--root", str(repo)],
                           capture_output=True).returncode == 0
     git(repo, "add", "-A")
@@ -192,6 +193,49 @@ def test_spec_finalize_promotes_glossary_terms_of_the_removed_design(repo, env):
     check = subprocess.run([sys.executable, str(SCRIPTS / "glossary.py"), "check", "--rules", "structure",
                             "--root", str(repo)], capture_output=True, text=True)
     assert check.returncode == 0, check.stdout
+
+
+GOOD_DECL = '{"version": 1, "format": "json", "source": "g.json", "document": "g.md"}'
+TERM = '"term": "語", "context": "c", "meaning": "m"'
+PENDING = ('{{"version": 1, "contexts": [{{"id": "c", "name": "C"}}], '
+           '"terms": [{{{0}, "pending_source": "{1}/design/x-design.md"}}]}}')
+
+
+@pytest.mark.parametrize("decl,source", [('{"version": 1}', None), ('{"source": "docs/glossary/none.json"}', None),
+                                         ("not json", None), (GOOD_DECL, "not json"),
+                                         (GOOD_DECL, '{"version": 1, "terms": {}}'), (GOOD_DECL, None),
+                                         (GOOD_DECL, PENDING.format('"context": "c", "meaning": "m"', "docs")),
+                                         (GOOD_DECL, PENDING.format(TERM, "./docs"))])
+def test_spec_finalize_stops_on_a_broken_glossary_declaration(repo, env, decl, source):
+    """宣言・正本が読めないか、語の形（term・pending_source の書き方）が崩れていれば、設計を消す前に止める。"""
+    spec_repo(repo)
+    write(repo, ".ndf/glossary.json", decl)
+    if source is not None:
+        write(repo, "g.json", source)
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "decl")
+    code, _, _ = call("plan-to-spec-steps.py",
+                      ["spec-finalize", "--spec", "docs/specifications/x.md",
+                       "--design", "docs/design/x-design.md", "--root", str(repo)], env)
+    assert code == 3
+    assert (repo / "docs/design/x-design.md").is_file()
+    assert git(repo, "status", "--porcelain").strip() == ""
+
+
+def test_spec_finalize_keeps_the_design_when_the_glossary_cannot_be_written(repo, env):
+    """用語集の文書を書けなければ、設計を git rm せずに止める。"""
+    spec_repo(repo)
+    write(repo, ".ndf/glossary.json", GOOD_DECL)
+    write(repo, "g.json", PENDING.format(TERM, "docs"))
+    write(repo, "g.md/keep", "文書の場所をディレクトリで塞ぐ\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "decl")
+    code, _, _ = call("plan-to-spec-steps.py",
+                      ["spec-finalize", "--spec", "docs/specifications/x.md",
+                       "--design", "docs/design/x-design.md", "--root", str(repo)], env)
+    assert code == 1
+    assert (repo / "docs/design/x-design.md").is_file()
+    assert "x-design.md" not in git(repo, "diff", "--cached", "--name-only")
 
 
 def test_spec_finalize_missing_spec_is_precondition(repo, env):
