@@ -234,6 +234,9 @@ def classify_event(runtime: str, hook_input: dict, transcript_text: str = "", ke
             return _from_text(hook_input.get("last_assistant_message") or transcript_text, key)
         return None
     if runtime == "kiro":
+        # 入口は stop フックにだけ置く。名前の付いたほかの事象は応答の途中でありうるため待ちにしない。
+        if event and event.lower() != "stop":
+            return None
         return _from_text(hook_input.get("assistant_response") or transcript_text, key)
     return None
 
@@ -257,7 +260,7 @@ def build_locator(runtime: str, hook_input: dict, env: dict, host: str, cwd: str
     if runtime == "codex":
         return Locator(host, cwd, resume=f"codex resume {sid}" if sid else None)
     if runtime == "kiro":
-        kid = sid or str(hook_input.get("conversation_id") or "")
+        kid = sid or str(hook_input.get("conversation_id") or env.get("KIRO_SESSION_ID") or "")
         return Locator(host, cwd, resume=f"kiro-cli chat --resume-id {kid}" if kid else "kiro-cli chat --resume")
     return Locator(host, cwd)
 

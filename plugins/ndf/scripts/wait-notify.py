@@ -192,16 +192,34 @@ def claim(session: str, key: str, kind: str, window: bool, now: float | None = N
 
 def wait_key(runtime: str, hook_input: dict, transcript: tuple[str, str] | None) -> tuple[str, bool]:
     """(待ちの鍵, 60 秒の窓で扱うか)。"""
-    session = str(hook_input.get("session_id") or "")
+    session = session_of(runtime, hook_input)
     if runtime == "claude" and transcript:
         return transcript[0], False
     if runtime == "codex" and hook_input.get("turn_id"):
         tool_input = json.dumps(hook_input.get("tool_input"), sort_keys=True, ensure_ascii=False)
         digest = hashlib.sha1(tool_input.encode()).hexdigest()[:12]
         return f"{hook_input['turn_id']}:{hook_input.get('hook_event_name')}:{digest}", False
+    # Kiro は応答本文のハッシュを鍵にし、同じ文面だけを 60 秒の窓で止める。Kiro には応じると
+    # 変わる値が無く、窓なしでは同じセッションで答えた後の同じ問いまで期限なく止まる。
     if runtime == "kiro" and hook_input.get("assistant_response"):
-        return hashlib.sha1(str(hook_input["assistant_response"]).encode()).hexdigest()[:16], False
+        digest = hashlib.sha1(str(hook_input["assistant_response"]).encode()).hexdigest()[:16]
+        return (f"{session}:{digest}" if session else f"{digest}:window"), True
+    # 受け皿: 主鍵が取れないとき、同じセッションの 60 秒の内は 2 件目を止める粗い保険。
+    # 窓の内に続いた本来別の待ち（codex の turn_id が無い入力など）も止まり、通知は来ない。
+    # 「通知が来ない」を調べるときは、ログの `skip: already notified <session>:window` を見る。
     return f"{session}:window", True
+
+
+def session_of(runtime: str, hook_input: dict) -> str:
+    """セッションの識別子。無ければ空。
+
+    Kiro の stop の標準入力には識別子が無く、環境変数 `KIRO_SESSION_ID` で渡る（worktree-guard.sh と同じ）。
+    この環境変数は Kiro のときだけ読む。同じシェルに残った値を別のランタイムの鍵へ混ぜないためである。
+    """
+    session = hook_input.get("session_id") or hook_input.get("conversation_id")
+    if not session and runtime == "kiro":
+        session = os.environ.get("KIRO_SESSION_ID")
+    return str(session or "")
 
 
 # ---------------------------------------------------------------------------
@@ -255,7 +273,7 @@ def run_hook(runtime: str) -> None:
             log("skip: reply does not wait")
             return
         wait = wn.Wait(wn.DONE, wn.done_excerpt(reply), key)
-    session = str(hook_input.get("session_id") or cwd)
+    session = session_of(runtime, hook_input) or cwd
     if not claim(session, wait.key, wait.kind, window):
         log("skip: already notified", wait.key)
         return

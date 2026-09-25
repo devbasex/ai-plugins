@@ -39,10 +39,11 @@ sequenceDiagram
 `PermissionRequest` と `permission_prompt`）の両方が、書かれる前の記録を読みうる。送信に失敗すると
 その待ちは通知されないまま鍵が残るが、次の待ちは鍵が変わるため止まらない。
 
-**待ちの鍵は transcript の末尾から取る。** 末尾から読み、最後の `type: assistant` の項目の `uuid` を
-鍵にする。利用者が答えるか許可すると、ツールの結果と次の assistant の項目が足され、鍵が変わる。
-transcript が読めないときは `<セッションの ID>:<種類>` を鍵にし、記録の `sent_at` から 60 秒の内だけ
-同じ鍵を止める（決定 5）。事象の名前を鍵に入れないのは、同じ待ちに届く 2 つの事象で名前が違うためである。
+**待ちの鍵は transcript の末尾から取る。** 末尾から読み、最後の `type: user` の項目の `uuid` を
+鍵にする。利用者が答えるか許可すると、ツールの結果か指示の user の項目が足され、鍵が変わる。
+transcript が読めないときは `<セッションの ID>:window` を鍵にし、記録の `sent_at` から 60 秒の内だけ
+同じ鍵を止める（決定 5）。Claude の鍵に事象の名前を入れないのは、同じ待ちに届く 2 つの事象で名前が
+違うためである。Codex と Kiro の鍵は決定 5 の表のとおりランタイムごとに組む。
 
 ### 通知の記録の状態
 
@@ -99,13 +100,32 @@ JS のまま直す案は採らない。テストの仕組みが無く、2 本に
 応答の終わりから約 60 秒で必ず届き、回答待ちか完了かを区別できない。文での待ちは `Stop` の判定が
 先に捉えるため、`idle_prompt` を足すと同じ待ちを 2 度送る経路が増えるだけになる。
 
-### 決定 5: 待ちの鍵を transcript の最後の assistant の `uuid` にする
+### 決定 5: 待ちの鍵を transcript の最後の user の `uuid` にする
 
 同じ待ちに届く複数の事象（`ExitPlanMode` の `PermissionRequest` と `permission_prompt` など）は、
-どれも同じ assistant の項目の後で起きる。利用者が応じると次の項目が足されるため、鍵は待ちごとに
-変わる。時間の窓だけで抑える案は、窓の内に続いた別の待ち（許可した直後の次の許可）を落とすため、
+どれも同じ user の項目（指示・ツールの結果）の後で起きる。利用者が応じると次の user の項目が足される
+ため、鍵は待ちごとに変わる。当初は最後の assistant の `uuid` を鍵にする案だったが、実測（2.1.282）で
+`PreToolUse`・`PermissionRequest`・`Stop` の起動の時点ではその応答の assistant の項目がまだ書かれて
+おらず、1 つ前の応答の項目を鍵にしてしまうため退けた。時間の窓だけで抑える案は、窓の内に続いた別の待ち（許可した直後の次の許可）を落とすため、
 transcript が読めないときの受け皿に限る。`PostToolUse` と `UserPromptSubmit` で待ちを閉じる案は、
 すべてのツールの実行のたびにプロセスを起動することになるため採らない。
+
+transcript を持たない Codex と Kiro は、入力から取れるもので鍵を組む。
+
+| ランタイム | 鍵 | 窓 | 取れないとき |
+| --- | --- | --- | --- |
+| Claude Code | transcript の最後の user の `uuid` | なし | `<セッションの ID>:window`（60 秒） |
+| Codex | `<turn_id>:<事象の名前>:<tool_input のハッシュ>` | なし | `<セッションの ID>:window`（60 秒） |
+| Kiro | `<セッションの ID>:<応答本文のハッシュ>` | 60 秒 | `<応答本文のハッシュ>:window`（60 秒） |
+
+Codex の鍵に事象の名前を入れるのは、同じ turn の内で `PermissionRequest` と `Stop` が別の待ちとして
+続くためである。Codex には Claude の `permission_prompt` のように同じ待ちへ重ねて届く事象が無く、名前で
+分けても 2 度送らない。Kiro のセッションの ID は、stop の標準入力（`hook_event_name`・`cwd`・
+`assistant_response` だけ）には無く、環境変数 `KIRO_SESSION_ID` から取る（`worktree-guard.sh` と同じ）。
+Kiro の鍵はどちらも窓で扱う。Kiro には Claude の user の項目のように応じると変わる値が無く、窓なしでは
+同じセッションで答えた後に同じ文面で問われた 2 件目が期限なく止まる。取れないときの鍵に応答本文のハッシュを
+残すのは、同じ cwd で続いた別の問いを止めず、同じ文面の重複だけを 60 秒止めるためである。戻り先の
+`kiro-cli chat --resume-id` も同じ `KIRO_SESSION_ID` から組む。
 
 ### 決定 6: 非対話の実行では送らない
 
@@ -171,6 +191,10 @@ Claude Code 2.1.282 の本体では、フック入力の型（`Stop` / `Notifica
 | 二重に通知しない | 同じ transcript で `PermissionRequest`（`ExitPlanMode`）と `permission_prompt` を続けて渡し、届くのは 1 件。transcript に項目を足した後の次の待ちは届く（I1） |
 | description・引数・README を実際の発火に合わせる | `hooks/claude.json` に `session_end` と「exits」が無く、入口を指すことをテストで見る。README は `plan-to-spec` の前の文書の検査とレビューで見る（文言を照合するテストは書かない） |
 | Codex / Kiro の扱いを決め README に書く | 決定 10 の表を README へ写す。`--runtime codex` と `--runtime kiro` の `Stop` の入力で待ちが届き、戻り先が表どおり |
+| Kiro の待ちの鍵をセッションで分ける（決定 5） | 同じ文面を `KIRO_SESSION_ID` の違う 2 つのセッションで渡し、2 件とも届く。戻り先はそれぞれ `kiro-cli chat --resume-id <ID>` |
+| Kiro の同じセッションの同じ文面は 60 秒の窓で止める（決定 5） | 同じ `KIRO_SESSION_ID` と文面で、窓の内の 2 件目は届かず、記録の送信時刻を窓の外へ動かした後の 2 件目は届く |
+| Kiro でセッションの ID が無いときは同じ文面だけを止める（決定 5） | ID 無しで同じ文面を 2 回と別の文面を 1 回渡し、届くのは 2 件。記録の鍵は `<本文のハッシュ>:window` |
+| `KIRO_SESSION_ID` を Kiro 以外の鍵に混ぜない（決定 5） | 環境変数が残った状態で Codex の `Stop` を渡し、記録の名前と鍵にその値が入らない |
 | I2 待ちでないなら送らない | `NDF_SLACK_NOTIFY_DONE` なしで完了の報告を渡し、届かない |
 | I3 フラグがあれば「完了」で送る | `NDF_SLACK_NOTIFY_DONE=true` で完了の報告を渡し、「完了」で届く |
 | I4 非対話では待ちを作らない | `CLAUDE_CODE_ENTRYPOINT=sdk-cli` で、問いの応答でも届かず、記録も作らない |
@@ -186,11 +210,10 @@ Claude Code 2.1.282 の本体では、フック入力の型（`Stop` / `Notifica
 
 | 項目 | 内容 |
 | --- | --- |
-| transcript の書き込みの時点 | `PreToolUse`・`PermissionRequest`・`Notification` の起動の時点で、そのツールを呼んだ assistant の項目が transcript に書かれているか。実装の最初に実機で確かめ、書かれていなければ受け皿の鍵（60 秒の窓）を主にする |
 | `PermissionRequest` の無出力の扱い | 標準出力が空で終了コード 0 のとき、`ExitPlanMode` の許可の画面がそのまま出るか。実装の最初に実機で確かめる |
 | URL で開けるか | `cse_` を `session_` へ変えた URL が、Remote Control とクラウドの両方で当該セッションを開くか。実装 PR の検証で 1 回ずつ開く |
 | Codex の `PermissionRequest` | 発火の条件と入力の形（決定 10） |
-| Kiro の `stop` の入力 | セッションの ID が入るか。入らなければ `kiro-cli chat --resume` の行だけにする |
+| Kiro の `stop` の起動 | 標準入力にセッションの ID が無いことは決定 5 に書いた。`KIRO_SESSION_ID` が stop の起動でも入るかを実機で確かめる。入らなければ鍵は受け皿（60 秒の窓）になり、戻り先は `kiro-cli chat --resume` の行だけにする |
 | Kiro の旧いパスの失敗 | 打ち直す前の定義が消えた `slack-notify.js` を起動して失敗したとき、Kiro が操作を止めないか。実装の検証で 1 回確かめ、止めるなら同じ変更で `slack-notify.js` を入口へ渡すだけの薄い写しを残す |
 | `worker_permission_prompt` と `agent_needs_input` | 本体 2.1.282 の通知の種類にあるが、発火の場面を確かめていないため捉えない。利用者から見逃しの報告があれば足す |
 | Codex と Kiro の非対話の実行 | `codex exec` と `kiro-cli chat --no-interactive` で `Stop` が発火するか、見分ける値があるか。発火して見分けられなければ、その 2 つは README に「非対話では通知が出うる」と書く |

@@ -28,7 +28,7 @@ Remote Control 中のローカル CLI で、conductor が次の文で応答を�
 | 本文を作る | `claude --model haiku -p` を起動して 40 文字の要約を作る（最大 60 秒） | 判定に当たった文をそのまま抜く。モデルを呼ばない |
 | 戻り先 | 載らない | 環境変数 `CLAUDE_CODE_BRIDGE_SESSION_ID` から `https://claude.ai/code/session_…` を組み立てる |
 | 関連 URL | 載らない | 本文の `…/pull/1150` を採る。本文に無ければ現在のブランチの PR を `gh pr view` で補う |
-| 二重の抑止 | cwd ごとのロックと 5 秒のクールダウン | 待ちの鍵（transcript の最後の assistant の `uuid`）が前回の通知と同じなら送らない |
+| 二重の抑止 | cwd ごとのロックと 5 秒のクールダウン | 待ちの鍵（transcript の最後の user の `uuid`）が前回の通知と同じなら送らない |
 
 Slack には次の本文が届く（`SLACK_USER_MENTION` があれば、メンション付きを送って消す現行の手順を残す）。
 
@@ -109,7 +109,7 @@ URL を縛る条件（I6〜I8）は、この集約が持つ。
 | 待ちの通知 | 利用者の回答か承認が無いと進まない時点で、Slack へ送る知らせ | 追加（`ndf-notification`） |
 | 回答待ち | 利用者に問いへの答え（選択・情報・指示）を求めている待ち | 追加（`ndf-notification`） |
 | 承認待ち | 利用者に操作の許可（ツールの実行・計画・マージ・配布など）を求めている待ち | 追加（`ndf-notification`） |
-| 待ちの鍵 | 1 つの待ちを見分ける値。transcript の最後の assistant の項目の `uuid` | 追加（`ndf-notification`） |
+| 待ちの鍵 | 1 つの待ちを見分けるランタイム別の値。具体形は決定文書の決定 5 の表 | 追加（`ndf-notification`） |
 | 戻り先 | 通知から当該セッションへ戻る手段。ホスト名・cwd の行と、作れればセッションの URL か再開のコマンド | 追加（`ndf-notification`） |
 
 ## 機能一覧
@@ -329,7 +329,7 @@ classDiagram
 | Claude Code で `CLAUDE_CODE_BRIDGE_SESSION_ID` か `CLAUDE_CODE_REMOTE_SESSION_ID` がある | `セッション: https://claude.ai/code/<ID>`。ID が `cse_` で始まるなら `session_` に置き換える |
 | Claude Code で上が無い | `再開: claude --resume <session_id>` |
 | Codex | `再開: codex resume <session_id>` |
-| Kiro でフック入力にセッションの ID がある | `再開: kiro-cli chat --resume-id <ID>` |
+| Kiro でセッションの ID が取れる（フック入力の `session_id`・`conversation_id`、無ければ環境変数 `KIRO_SESSION_ID` の順。stop の標準入力には通常無く、環境変数から取る） | `再開: kiro-cli chat --resume-id <ID>` |
 | Kiro で上が無い | `再開: kiro-cli chat --resume`（cwd で打つ） |
 
 Claude Code と Codex でフック入力にセッションの ID が無いときは、再開の行を作らない（I7）。
