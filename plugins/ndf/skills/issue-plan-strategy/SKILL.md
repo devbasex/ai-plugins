@@ -38,7 +38,7 @@ allowed-tools:
 節・起動してよい本数を 1 つの表に置き、工程の終わりごとに読み直して、着手できる行を起動する。
 **課題が 1 件で Pull Request も 1 本のときは書かない。**
 
-置き場所（主ディレクトリの `issues/execution-plan-<キー>.md`、開いている間はコミットしない）・
+置き場所（メインディレクトリの `issues/execution-plan-<キー>.md`、開いている間はコミットしない）・
 行と測った値の形・見直す 5 つの契機と手順・閉じ方は
 [references/execution-plan.md](references/execution-plan.md) が持つ。
 
@@ -140,8 +140,8 @@ git checkout -b release/<PLAN-ID> origin/<default-branch>
 git push -u origin release/<PLAN-ID>
 ```
 
-release ブランチは統合先であって作業場所ではないため、主ディレクトリで作ってよい。
-**実装を載せる個別 PR ブランチは Step 5 の作業ツリーで開く** (`/ndf:worktree`)。
+release ブランチは統合先であり作業場所にならないため、メインディレクトリで作ってよい。
+**実装を載せる個別 PR ブランチは Step 5 のworktree で開く** (`/ndf:worktree`)。
 
 ### レビュアー視点の原則 (release PR body の大前提)
 
@@ -227,11 +227,11 @@ EOF
 ## Step 5: git worktree で並行開発
 
 並行可能 (依存なし or mock で先行可) な PR は **git worktree** で同時に開く。置き場所は
-`<主ディレクトリ>/.worktrees/<ブランチ名>` で、ブランチ名がそのままパスになる
+`<メインディレクトリ>/.worktrees/<ブランチ名>` で、ブランチ名がそのままパスになる
 (`/ndf:worktree`)。
 
 ```bash
-# 主ディレクトリ (default branch のまま) で
+# メインディレクトリ (default branch のまま) で
 main_dir=$(dirname "$(cd "$(git rev-parse --git-common-dir)" && pwd -P)")
 git worktree add "$main_dir/.worktrees/feature/<PLAN-ID>-schema" feature/<PLAN-ID>-schema
 git worktree add "$main_dir/.worktrees/feature/<PLAN-ID>-ui"     feature/<PLAN-ID>-ui
@@ -239,7 +239,7 @@ git worktree add "$main_dir/.worktrees/feature/<PLAN-ID>-ui"     feature/<PLAN-I
 # それぞれの worktree で別ターミナル / 別エージェントを起動
 ```
 
-`.worktrees/` が `.gitignore` に登録されていないと、作業ツリーの中身が追跡対象に入る。
+`.worktrees/` が `.gitignore` に登録されていないと、worktree の中身が追跡対象に入る。
 **作成より先に登録する** (手順は `/ndf:worktree`)。
 
 ガイドライン:

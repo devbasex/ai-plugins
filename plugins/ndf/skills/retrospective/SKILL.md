@@ -29,7 +29,7 @@ allowed-tools:
 （`standard`）と、反映の結果を実行した経路とは別の経路で確かめられない場合
 （`operation`）である。
 
-**振り返りの要否はモードで違う。** `standard` は必ず行う。実装レビューの工程を通っており、
+**振り返りの要否はモードで違う。** `standard` は必ず行う。コードレビューの工程を通っており、
 起票し損ねたものが無いかを確かめる場が要るためである。**`operation` は実行の手順そのものを
 変えたときだけ行う**（設定値を 1 つ変えただけなら通さない。進め方を見直す材料が出ない）。
 
@@ -39,7 +39,7 @@ allowed-tools:
 ## 手順
 
 **先に、記録を残すリポジトリを決める。** 記録を置くのは、その変更を行ったリポジトリである。
-起点の issue と、変更を配布した Pull Request がある場所を指す。以降の `gh` は、すべて
+起点の issue と、変更をリリースした Pull Request がある場所を指す。以降の `gh` は、すべて
 このリポジトリへ向ける。
 
 ```bash
@@ -50,8 +50,8 @@ RECORD_REPO="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
 ことがある（[out-of-scope の判断表](../out-of-scope/references/issue-target.md)）。記録の
 投稿先は性質で変わらない。範囲外の課題を配布元へ回した変更でも、記録はこちらに残る。
 
-**`--repo` を省かない。** この工程は `merged` の後に来るため、作業ツリーが消えている。
-`gh` は現在の作業ディレクトリからリポジトリを決めるので、省くと起点の issue や配布した
+**`--repo` を省かない。** この工程は `merged` の後に来るため、worktree が消えている。
+`gh` は現在の作業ディレクトリからリポジトリを決めるので、省くと起点の issue やリリースした
 Pull Request と違う場所へ記録が残り得る。`gh repo view` が別のリポジトリを返す位置に
 いるときは、推測せずに名前を利用者に確かめる。
 
@@ -137,7 +137,7 @@ python3 "$CLAUDE_PLUGIN_ROOT/skills/skill-stats/scripts/skill-stats.py" \
 | 起点 | 記録の本体を置く場所 | 辿る経路 |
 | --- | --- | --- |
 | 1 件の issue | その issue へのコメント | その issue の本文末尾へ 1 行 |
-| 複数の issue（ミッション） | そのミッションを配布した Pull Request へのコメント | 対象のすべての issue の本文末尾へ 1 行 |
+| 複数の issue（ミッション） | そのミッションをリリースした Pull Request へのコメント | 対象のすべての issue の本文末尾へ 1 行 |
 | 起点の issue を持たない変更 | その変更の Pull Request へのコメント | 追加の 1 行は要らない |
 
 **閉じた issue にもコメントは投稿できる。** GitHub が拒むのは locked のときだけである。
@@ -146,7 +146,7 @@ python3 "$CLAUDE_PLUGIN_ROOT/skills/skill-stats/scripts/skill-stats.py" \
 #### Pull Request の番号を特定する
 
 起点が 1 件の issue なら、番号はそのまま使える。**残る 2 つの場合だけ番号を引く。**
-この工程は `merged` の後に来るため、ブランチも作業ツリーも残っていない。番号はマージ先の
+この工程は `merged` の後に来るため、ブランチもworktree も残っていない。番号はマージ先の
 先頭のコミットから引く。
 
 **番号は 3 つの手順で引く。各手順は直前の手順の出力を受け取る。**
@@ -154,12 +154,12 @@ python3 "$CLAUDE_PLUGIN_ROOT/skills/skill-stats/scripts/skill-stats.py" \
 | 手順 | 入力 | 出力 | 止まる条件 |
 | --- | --- | --- | --- |
 | 1. 開発の起点を解決する | `.ndf/worktree.json` の `base_branch`、origin | `$dev_base` | 宣言したブランチが origin にもローカルにも無い |
-| 2. 記録対象の基準ブランチを決める | 下表の場合、`$dev_base`（起点の issue を持たない変更だけが使う） | `$record_base` | ミッションを配布した先のブランチを判別できない |
+| 2. 記録対象の基準ブランチを決める | 下表の場合、`$dev_base`（起点の issue を持たない変更だけが使う） | `$record_base` | ミッションをリリースした先のブランチを判別できない |
 | 3. 基準コミットから Pull Request を引く | `$record_base`、`$RECORD_REPO` | マージ済みの Pull Request 1 件の番号 | マージ済みへ絞った結果が 1 件でない |
 
 **手順 1: 開発の起点を解決する**
 
-**起点のブランチは対象リポジトリが決める。** 字面で書かず、`merged` / `deploy` /
+**ベースブランチは対象リポジトリが決める。** 字面で書かず、`merged` / `deploy` /
 `pr-review` / `cherry-pick-pr` と同じ解決を使う。
 
 ```bash
@@ -206,12 +206,12 @@ fi
 | 場合 | 起点にするコミット |
 | --- | --- |
 | 起点の issue を持たない変更 | その変更をマージした先のブランチ（起点。`.ndf/worktree.json` の `base_branch`）の先頭 |
-| ミッション | そのミッションを配布した先（正式版のチャネルのブランチ）の先頭 |
+| ミッション | そのミッションをリリースした先（正式版のチャネルのブランチ）の先頭 |
 
-**ミッションを対象にする場合は、そのミッションを配布した先を使う。**
-`$dev_base` は開発の起点であり、配布した先とは限らない。開発の起点と配布の先が別の
-ブランチであるリポジトリで `$dev_base` のまま引くと、配布の Pull Request ではなく起点の
-先頭に関連付いた別の Pull Request を選び、誤った番号へ記録を投稿する。
+**ミッションを対象にする場合は、そのミッションをリリースした先を使う。**
+`$dev_base` は開発の起点であり、リリースした先とは限らない。開発の起点とリリースの先が別の
+ブランチであるリポジトリで `$dev_base` のまま引くと、起点の先頭に
+関連付いた別の Pull Request を選び、誤った番号へ記録を投稿する。
 
 ```bash
 # 起点の issue を持たない変更 — 開発の起点をそのまま使う
@@ -219,8 +219,8 @@ record_base=$dev_base
 ```
 
 ```bash
-# ミッション — 配布した先を使う。**配布した先は対象リポジトリが決める。** 開発の起点を
-# そのまま配布に使っているリポジトリでは `$dev_base` と同じ値になり、正式版のチャネルを
+# ミッション — リリースした先を使う。**リリースした先は対象リポジトリが決める。** 開発の起点を
+# そのままリリースに使っているリポジトリでは `$dev_base` と同じ値になり、正式版のチャネルを
 # 分けているリポジトリでは別の値になる。字面で書かず、既定ブランチ（origin の HEAD が
 # 指す先）で確かめる。取れないときは推測せず番号を利用者に聞く
 record_base=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')
@@ -328,7 +328,7 @@ gh issue edit <issue番号> --repo "$RECORD_REPO" --body-file /tmp/issue-body.md
 | 書かないもの | 理由 |
 | --- | --- |
 | 個人の働き方への評価 | 対象は進め方であって人ではない（`markdown-writing` のルール 5） |
-| 成果物の良し悪し | 実装レビューの工程が扱う |
+| 成果物の良し悪し | コードレビューの工程が扱う |
 | 経緯の時系列そのもの | git の履歴と Pull Request に残っている |
 
 この工程に入ったら記録のコマンド `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "振り返り"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「記録のコマンド」を使う）。 **入口のこの記録ではボードの `Status` を書かない。** 先に `Done` にすると、ボードの `Auto-close issue` が課題を閉じ、reopen の手段が報告から落ちる。
@@ -339,7 +339,7 @@ gh issue edit <issue番号> --repo "$RECORD_REPO" --body-file /tmp/issue-body.md
 `progress-tracking` の「ミッションを閉じる」を行う。**手順はそこが正本で、ここには写さない。**
 ボードの `Status` を `Done` にするのも、課題を閉じるのも、その手順の中で行う。
 
-## 蓄積した課題を手入れする
+## 蓄積した課題を棚卸しする
 
 **「ミッションを閉じる」の後に `/ndf:issue-upkeep` を呼ぶ。** 順序を逆にすると、`issue-upkeep` の
 手順 1 が読む「このミッションで閉じた課題」がまだ閉じていない。振り返りが拾うのは、この変更から出た
@@ -357,4 +357,4 @@ gh issue edit <issue番号> --repo "$RECORD_REPO" --body-file /tmp/issue-body.md
 - `/ndf:out-of-scope` — 取りこぼしを見つけたときの起票
 - `/ndf:plan-to-spec` — 決まった仕様の永続化（振り返りとは別の出力物）
 - `/ndf:progress-tracking` — 「ミッションを閉じる」の正本
-- `/ndf:issue-upkeep` — 蓄積した課題の手入れ（この工程の最後に呼ぶ）
+- `/ndf:issue-upkeep` — 蓄積した課題の棚卸し（この工程の最後に呼ぶ）

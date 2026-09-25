@@ -70,7 +70,7 @@ flowchart LR
 段階 1 だけで完了報告をしない。**変更箇所のテストが通っても、他を壊していないことは
 示せない。**
 
-4 つの段階はいずれも**取り込み前**の検証である。配布された成果物を利用者の環境で確かめる
+4 つの段階はいずれも**取り込み前**の検証である。リリースされた成果物を利用者の環境で確かめる
 のは `release-verification`（リリース後テスト）の担当で、この Skill は扱わない。段階 4 の
 結合・端から端までも、対象は取り込み前の差分である。
 
@@ -190,7 +190,7 @@ Skill 側に既定値を持たせると、プロジェクトの方針と食い�
 
 | 項目 | 引継ぎ先 | 何をするか |
 | --- | --- | --- |
-| 未検証の項目 | `release-verification` | 配布後に実施するか、実施しない理由を残す |
+| 未検証の項目 | `release-verification` | リリース後に実施するか、実施しない理由を残す |
 | 範囲外と判断したもの | `out-of-scope` | 見つけた時点で issue にする。報告を書く時点で残っていれば、ここで起票する。**起票先のリポジトリもその Skill が決める** |
 
 範囲外と判断したものに issue の番号が付いていない項目は、まだ拾われる場所に無い。
@@ -200,7 +200,7 @@ Skill 側に既定値を持たせると、プロジェクトの方針と食い�
 ## 参照
 
 - [references/definition-of-done.md](references/definition-of-done.md) — モード別の完了の定義
-- `/ndf:release-verification` — 配布された成果物を利用者の環境で確かめる工程
+- `/ndf:release-verification` — リリースされた成果物を利用者の環境で確かめる工程
 - `/ndf:out-of-scope` — 範囲外と判断したものの起票と、起票先のリポジトリの判断
 
 この工程に入ったら記録のコマンド `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "完了判定"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「記録のコマンド」を使う）。

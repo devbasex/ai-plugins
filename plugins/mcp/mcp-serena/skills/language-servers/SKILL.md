@@ -110,8 +110,8 @@ Codex の `/hooks` で mcp-serena の hook を信頼してもらう（信頼し�
 
 | 選択 | 結果 | 打つもの |
 | --- | --- | --- |
-| 追跡する（既定） | 作業ツリー（`.worktrees/<ブランチ名>`）にも同じ設定が揃い、同じリポジトリの他の利用者は打たずに済む | 何も打たない |
-| 追跡しない | 作業ツリーでは Serena が目印の無い設定を自動で作り、通知も誘導も働かない | `configure --root . --gitignore` |
+| 追跡する（既定） | worktree（`.worktrees/<ブランチ名>`）にも同じ設定が揃い、同じリポジトリの他の利用者は打たずに済む | 何も打たない |
+| 追跡しない | worktree では Serena が目印の無い設定を自動で作り、通知も誘導も働かない | `configure --root . --gitignore` |
 
 `written.serena_gitignore_added` が空でなければ、`serena_config.yml`（認証の秘密を持ち得る）・
 `logs/`・`language_servers/`・`cache/` が追跡の候補に残っている。確認を取ってから足す。

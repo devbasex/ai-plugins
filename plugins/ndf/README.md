@@ -1,6 +1,6 @@
 # NDF Plugin
 
-PR 運用、レビュー、調査、実装計画、仕様書化、開発方法論（要求定義・テスト駆動・構造改善・
+PR 運用、レビュー、調査、実装計画、仕様書化、開発方法論（要求定義・テスト駆動・リファクタリング・
 完了判定）、Docker container access、statusline、外部 AI 委譲、Slack 通知を提供します。
 
 配布物は `plugins/ndf/` の 1 ディレクトリにまとまっています。Skill の実体は `skills/` の
@@ -103,10 +103,10 @@ agy plugin uninstall ndf && agy plugin install plugins/ndf/dev.agy   # 新しい
 ```
 
 導入すると `manifests/agy-skills.txt` に載る Skill 43 個と、エージェント 11 個（専門 8 個と、3 層の定義 3 個（supervisor 2・worker 1））、hook 1 個が
-`~/.gemini/config/plugins/ndf/` へ複製されます。symlink は実体へ解決されて複製されるため、
+`~/.gemini/config/plugins/ndf/` へコピーされます。symlink は実体へ解決されてコピーされるため、
 clone を消しても導入した内容は残ります。
 
-**hook は複製されるだけで、agy はそれを読み込みません**（agy 1.1.26 で実測）。読む先は
+**hook はコピーされるだけで、agy はそれを読み込みません**（agy 1.1.26 で実測）。読む先は
 `~/.gemini/config/hooks.json` の 1 か所だけです。次を実行して差し込みます。**冪等で、他の
 項目には触れません**（`--dry-run` で内容を確認でき、`--uninstall` で外せます）。
 
@@ -151,17 +151,17 @@ bash plugins/playwright-kit/dev.kiro/install.sh       # Kiro CLI
 
 ## Hooks
 
-### 作業ツリー運用（4 ランタイム共通）
+### worktree 運用（4 ランタイム共通）
 
-開発の変更を、リポジトリを clone したディレクトリ（主ディレクトリ）ではなく `.worktrees/` の
-作業ツリーの中で行う運用を支えます。**編集は止めません。** 案内が出ても操作は成立します。
+開発の変更を `.worktrees/` の worktree の中で行い、リポジトリを clone したディレクトリ
+（メインディレクトリ）では行わない運用を支えます。**編集は止めません。** 案内が出ても操作は成立します。
 
 | 起きること | 担う hook | Claude Code | Codex | Kiro CLI | agy |
 | --- | --- | --- | --- | --- | --- |
-| 主ディレクトリの保護対象パスを編集しようとすると案内が出る | tool 実行前 | `PreToolUse` | `PreToolUse` | — | `PreToolUse` |
-| 作業ツリーで作業する旨の案内がプロンプトごとに出る | プロンプト送信時 | — | — | `userPromptSubmit` | — |
-| 主ディレクトリに残った未コミット変更が提示される | セッション開始時 | `SessionStart` | `SessionStart` | `agentSpawn` | `PreInvocation` |
-| 主ディレクトリのブランチが稼働中の作業ツリーへ追従する（既定では動かさない。宣言の `follow_branch: true` で有効にする） | セッション開始時 | `SessionStart` | `SessionStart` | `agentSpawn` | `PreInvocation` |
+| メインディレクトリの保護対象パスを編集しようとすると案内が出る | tool 実行前 | `PreToolUse` | `PreToolUse` | — | `PreToolUse` |
+| worktree で作業する旨の案内がプロンプトごとに出る | プロンプト送信時 | — | — | `userPromptSubmit` | — |
+| メインディレクトリに残った未コミット変更が提示される | セッション開始時 | `SessionStart` | `SessionStart` | `agentSpawn` | `PreInvocation` |
+| メインディレクトリのブランチが稼働中の worktree へ追従する（既定では動かさない。宣言の `follow_branch: true` で有効にする） | セッション開始時 | `SessionStart` | `SessionStart` | `agentSpawn` | `PreInvocation` |
 
 Kiro CLI に tool 実行前の案内が無いのは、この事象でモデルへ案内を渡す手段が終了コード 2 に
 限られ、それが tool の実行を拒否するためです。拒否しない方針のもとでは置けないため、パスを
@@ -193,7 +193,7 @@ bash <プラグインのパス>/scripts/worktree-setup.sh init
 }
 ```
 
-`guard.allow_paths` は、主ディレクトリで編集しても案内を出さないパスです。省略すると
+`guard.allow_paths` は、メインディレクトリで編集しても案内を出さないパスです。省略すると
 組み込みの既定（上記と同じ一覧に `.agents/` `.serena/` を加えたもの）を使います。
 空の配列を書くと「何も許可しない」という指定になります。
 
@@ -227,14 +227,14 @@ Claude Code の SessionStart hook（`hooks/claude.json`）は上記に加えて�
 
 - `~/.claude/settings.json` の `cleanupPeriodDays` を 90 日以上に保つ
 - statusline 未設定時に NDF 標準 statusline を設定する
-- カットポイントで claude を起動し直すラッパー（`scripts/relay.py`）の複製が在れば今の版で置き直す（`relay.py startup`。
+- カットポイントで claude を起動し直すラッパー（`scripts/relay.py`）のコピーが在れば今の版で置き直す（`relay.py startup`。
   版は後退させない）。10.17.4〜10.17.6 が自動で足した alias の囲みが残っていれば 1 度だけ知らせる。
   **シェルの設定は書かない。** ラッパーを入れる・外すのは `/ndf:install-wrapper`（Claude Code だけ）
 
 Claude Code の Stop・Notification・PermissionRequest hook と `AskUserQuestion` の PreToolUse hook は、
 利用者の回答か承認を待つときだけ Slack へ知らせます（下の「Slack 通知」）。ラッパーの下（`NDF_RELAY_DIR` がある）では、最後の応答の
-`ndf-next` のブロックをラッパーの合図へ写します（`relay.py mark`）。`AskUserQuestion` の PreToolUse /
-PostToolUse hook は、ラッパーの下で質問の表示中の合図を作る・消します（ラッパーが質問の答えを代わりに
+`ndf-next` のブロックをラッパーのシグナルファイルへ写します（`relay.py mark`）。`AskUserQuestion` の PreToolUse /
+PostToolUse hook は、ラッパーの下で質問の表示中のシグナルファイルを作る・消します（ラッパーが質問の答えを代わりに
 送らないため）。好きな時点で切り替えるのは `/ndf:restart` です。ラッパーの始め方・止め方・上限は
 `skills/development-workflow/references/relay.md` にあります。
 
@@ -436,7 +436,7 @@ kiro-cli の実機検証と、Skill 数が文脈量へ与える影響の実測�
 
 ## 変更するとき
 
-Skill の実体は `skills/` の 1 箇所だけです。ランタイムごとの複製はありません。変更したら
+Skill の実体は `skills/` の 1 箇所だけです。ランタイムごとのコピーはありません。変更したら
 [CONTRIBUTING.md の「手元での検証」](../../CONTRIBUTING.md#手元での検証)の検証を実行してください。
 frontmatter の規約は [skills/AUTHORING.md](skills/AUTHORING.md) にあり、
 `python3 scripts/check-skill-frontmatter.py` でチェックします。

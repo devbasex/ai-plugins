@@ -78,7 +78,7 @@ FIX=$(bash "$R/scripts/resolve.sh" scripts fix) || exit 3
    節を設計文書に揃える（対象かどうかはスクリプトが決める。コミットが無くても行う）
 
    ```bash
-   python3 "$FIX/fix-steps.py" finalize --decisions <雛形の JSON> [--root <作業ツリー>]
+   python3 "$FIX/fix-steps.py" finalize --decisions <雛形の JSON> [--root <worktree>]
    ```
 
    `fix_commit` を省くと HEAD を採る。`items[].name` が `pr-body-decisions` の `result`

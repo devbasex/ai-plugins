@@ -143,7 +143,7 @@ fi
 ```
 
 ```bash
-# 起点はローカルに無いことがある（宣言した名前を clone していない、短命な作業ツリー
+# 起点はローカルに無いことがある（宣言した名前を clone していない、短命な worktree
 # で作業している等）。取得してからリモート追跡ブランチを比較元にする
 git fetch origin "$dev_base"
 git diff "origin/$dev_base" --name-only     # 変更ファイル一覧

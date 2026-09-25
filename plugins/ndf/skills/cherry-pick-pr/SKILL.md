@@ -1,7 +1,7 @@
 ---
 name: cherry-pick-pr
 description: "Cherry-pick a merged fix onto an environment branch (qa/staging, release) as a new PR. 明示指示のみで実行する。Use when the same fix must reach qa or staging（qaにも同じ修正を適用・stagingにも反映・cherry-pick）."
-argument-hint: "ベースブランチ名 (例: qa/staging, release/v2)"
+argument-hint: "環境ブランチ名 (例: qa/staging, release/v2)"
 disable-model-invocation: true
 allowed-tools:
   - Bash
@@ -11,7 +11,7 @@ allowed-tools:
 
 # cherry-pick PR 作成コマンド
 
-featureブランチから指定ベースブランチ（`qa/*`, `staging/*`, `release/*` 等の環境ブランチ）へ、短命ブランチ経由で cherry-pick PR を作成する。同じ修正を複数ブランチへ並行適用する場面全般で、この原則と手順に従う。
+featureブランチから指定した環境ブランチ（`qa/*`, `staging/*`, `release/*` 等）へ、短命ブランチ経由で cherry-pick PR を作成する。同じ修正を複数ブランチへ並行適用する場面全般で、この原則と手順に従う。
 
 ## 使用方法
 
@@ -22,7 +22,7 @@ featureブランチから指定ベースブランチ（`qa/*`, `staging/*`, `rel
 
 ## なぜ必要か
 
-featureブランチに環境ブランチ(`qa/staging`等)を merge して conflict を解消すると、`feature → 起点ブランチ` の PR に環境ブランチ固有のコードが混入する（起点の汚染）。短命ブランチ + cherry-pick で、必要なコミットだけを対象ブランチに届ける。
+featureブランチに環境ブランチ(`qa/staging`等)を merge して conflict を解消すると、`feature → ベースブランチ` の PR に環境ブランチ固有のコードが混入する（起点の汚染）。短命ブランチ + cherry-pick で、必要なコミットだけを対象ブランチに届ける。
 
 | 観点 | 正しい順序 | 誤った順序 |
 |------|-----------|-----------|
@@ -38,7 +38,7 @@ featureブランチに環境ブランチ(`qa/staging`等)を merge して confli
 |------|------------------|
 | feature に先に commit し cherry-pick で届ける | 3・6 |
 | 環境ブランチを feature に merge しない | 「なぜ必要か」 |
-| push 前に起点ブランチを取り込む | 5 |
+| push 前にベースブランチを取り込む | 5 |
 | マージ済みブランチには push しない | 2 |
 
 ## 処理フロー
@@ -46,7 +46,7 @@ featureブランチに環境ブランチ(`qa/staging`等)を merge して confli
 ### 1. 引数・現状確認
 - 引数から環境ブランチ名を取得（必須。未指定なら確認）
 - `git branch --show-current` で現在ブランチを取得
-- 開発の起点ブランチを決める。以降の手順はこの値を使う
+- 開発のベースブランチを決める。以降の手順はこの値を使う
 
 ```bash
 # 起点は開発の本流であって、既定ブランチとは限らない。宣言（`.ndf/worktree.json` の
@@ -89,7 +89,7 @@ fi
 
 ### 2. 既存PRのマージ済みチェック（必須）
 
-同じベースブランチ向けの短命ブランチに既存PRがないか確認する。
+同じ環境ブランチ向けの短命ブランチに既存PRがないか確認する。
 
 ```bash
 # 同名パターンのブランチでマージ済みPRがないか確認
@@ -112,7 +112,7 @@ git log --oneline "origin/$dev_base"..HEAD
 ### 4. 短命ブランチ作成
 
 **実行する場所は、cherry-pick 元のコミットを持つ作業ディレクトリである。** 開発を
-`.worktrees/<ブランチ名>` の作業ツリーで行っている場合は、その中で実行する。短命
+`.worktrees/<ブランチ名>` のworktree で行っている場合は、その中で実行する。短命
 ブランチはその作業ディレクトリで作られ、push した後に削除する。
 
 ```bash
@@ -120,10 +120,10 @@ git fetch origin <base-branch>
 git checkout -b <current-branch>-for-<base-short-name> origin/<base-branch>
 ```
 
-- `<base-short-name>`: ベースブランチのスラッシュ以降（例: `qa/staging` → `staging`）
+- `<base-short-name>`: 環境ブランチのスラッシュ以降（例: `qa/staging` → `staging`）
 - 例: `feature/add-auth-for-staging`
 
-### 5. 起点ブランチを取り込む（必須）
+### 5. ベースブランチを取り込む（必須）
 
 ```bash
 git fetch origin "$dev_base"
@@ -170,12 +170,12 @@ git checkout <original-branch>
 ## 注意事項
 
 - 短命ブランチは PR マージ後に削除してよい
-- `feature → 起点ブランチ` の PR には影響しない
+- `feature → ベースブランチ` の PR には影響しない
 - revert の扱いは `ndf-policies`「ブランチ運用の原則」5 に従う
 
 ## 関連
 
 - `ndf-policies` — 環境ブランチへの適用原則とブランチ汚染の回避（本 Skill の前提）
-- `/ndf:pr` — 通常のPR作成（宛先は起点ブランチ）。環境ブランチ宛は本 Skill に誘導される
-- `/ndf:merged` — マージ後のブランチ整理と、現ブランチへの起点ブランチの取り込み
+- `/ndf:pr` — 通常のPR作成（宛先はベースブランチ）。環境ブランチ宛は本 Skill に誘導される
+- `/ndf:merged` — マージ後のブランチ整理と、現ブランチへのベースブランチの取り込み
 - `/ndf:deploy` — ブランチ全体を環境へデプロイ（cherry-pickとは別用途）
