@@ -51,24 +51,8 @@ allowed-tools:
 
 ## 設計方針
 
-| 観点 | 方針 |
-| --- | --- |
-| 参加者 | **全員 CLI プロセス。** 提案は参加者の全員、計画以降は実装担当 1 者。ホストと同じランタイムでも別プロセスで起動する |
-| 実装担当 | **名指し（`--implementer`）→ ホスト（参加者にいれば）→ 参加者の先頭。** 輪番は持たない。再開しても変わらない |
-| 時間 | 計画の時点で「想定最大時間 − 経過 − 控え」に収まる件数だけを採る。実装の途中は**項目ごとの着手の締め切り**で止める。**段の上限・テスト 1 回の上限・直しの打ち切りは予算から算術で出し、計画の終わりまでに状態ファイルと改修計画へ書き出す。** 監視はその段の終わり + 余裕で CLI を止め、修正は回数でなく締め切りまで試みる（式は [docs/02 の「締め切り」](docs/02-plan-and-implement.md#締め切り)） |
-| 検証の単位 | **項目。** HEAD で項目ごとの限ったテストを走らせる。全体のテストは危険の印が立ったときに 1 度だけ。落ちたら落ちたテストだけを走らせ直して揺れ・元からの失敗を除き、変更が原因なら締め切りまで直し、直らなければ印の項目を新しい順に絞って取り消す |
-| 収束しない項目 | **項目の単位で取り消す。** 同じファイルの隣接行を触る項目どうしは git で分離できないため、取り消しを広げる |
-| 見積り | 配分テーブル。所要は**進行側の時計とコミットの時刻**で測り、担当の申告を使わない |
-| 判断 | Jev（公開リポジトリで鍵があるとき）に段・同じ変更か・D5 を**計画の段で**問い、確信度が足りなければ実装担当の答えを使う。**計画の後で LLM が動くのは作業の CLI（テストの追加・実装・直し）だけ**で、取り消し・見送り・絞り込み・揺れの判定・次の試行に進むかはスクリプトが決める。機械で決まらないテストの差分はレビューへ引き継ぐ |
-| 範囲の扱い | `--scope` は**検証にも効く**。範囲外を触ったコミットの項目は取り消す。**テストの置き場所を含めないと `init` が止める** |
-| 公開の責務 | **進行側だけが push する。** 生成物の同期は `--sync-command` として push の直前に進行側が行う |
-| 検証の情報源 | **git と実際のテスト実行。** 結果ファイルの申告は検証に使わない |
-| 外へ出す文章 | 項目は **`<ファイル>#<シンボル>` を併記**し、取り消しは**件数だけ**述べ、改修計画は**生の URL**で書く |
-| 最終ゲート | `--ci-check` があれば継続的統合、無ければ全体のテスト。単独起動はその後に `cross-review` |
-| 状態の永続化 | `<work>/.cross_refactoring/cross-refactoring-rf<番号>-state.json`（版 2）。中断・再開可能 |
-
-**push が credential helper の不全で落ちたときは、進行側が退避して 1 度だけやり直す**
-（#524）。退避の値は共通層（`<プラグインルート>/scripts/lib/git-credential.sh`）が持つ。
+参加者・実装担当・時間・検証の単位・取り消し・見積り・判断・範囲・公開の責務・最終ゲートの方針は
+[references/design-principles.md](references/design-principles.md) にある。
 
 ## 引数
 
@@ -123,11 +107,11 @@ allowed-tools:
   （確認コマンドは claude: `claude auth status` / codex: `codex login status` / agy: `agy models` /
   kiro: `kiro-cli whoami`。誤検知するときは `NDF_SKIP_AUTH_CHECK=1`）
 - 対象の Pull Request が Draft で開いている（未作成なら `/ndf:pr` で先に作る）
-- 本番コードの差分がある。起動の前に `assess` で飛ばしてよいかを見る。**終了コード 3 なら
+- 本番コードの差分がある。起動の前に Skill のディレクトリで `assess` を打ち、飛ばしてよいかを見る。**終了コード 3 なら
   起動しない**（2 は判定できなかったことを示し、飛ばしてよいとは読まない）
 
 ```bash
-python3 <この Skill の置き場所>/scripts/refactor.py assess --base origin/develop; echo "exit=$?"
+python3 scripts/refactor.py assess --base origin/develop; echo "exit=$?"
 ```
 
 - Jev を使うには、環境変数 `AI_GATEWAY_API_KEY` があり、対象が公開リポジトリであること。
@@ -171,26 +155,23 @@ flowchart TD
 
 ## 実行
 
-進行は `scripts/drive.py`（この SKILL.md と同じ置き場所の `scripts/`）が進める。参加者が全て CLI なので、止まるのは
-単独起動の最終ゲート（`cross-review`）だけである。メインが決めるのは `--scope` / `--baseline-test` /
-`--round-test` / `--sync-command` で、決めたらこのコマンドを打ち、最後の行の結果 JSON（`step_result` の形）の
-`status` を見る。
+メインが決めるのは `--scope` / `--baseline-test` / `--round-test` / `--sync-command` である。決めたら Skill の
+ディレクトリで次の 1 行を打ち、最後の行の結果 JSON の `status` と終了コードを見る。
 
 ```bash
-python3 <この Skill の置き場所>/scripts/drive.py <PR> --scope <範囲...> --baseline-test "<全体のテスト>" \
-  [「引数」の表のうち値のあるもの]
+python3 scripts/drive.py <PR> --scope <範囲...> --baseline-test "<全体のテスト>" [「引数」の表のうち値のあるもの]
 ```
 
-待ちはコマンドの中で行う（フェーズの上限は `start-phase` が状態ファイルの上限の表から返す）。Claude Code では
-`run_in_background` で起動し、完了通知を 1 回受ける。
+待ちはコマンドの中で行う。Claude Code では `run_in_background` で起動し、完了通知を 1 回受ける。参加者が全て
+CLI なので、止まるのは単独起動の最終ゲートだけである。JSON の形と終了コードの表は共通層の
+`scripts/lib/drive_pause.py` にあり、cross-review の駆動と同じ表を使う。
 
-| status（終了コード） | 意味 | メインがすること |
+| 終了コード（`items[0].pause`） | 止まった地点 | すること |
 | --- | --- | --- |
-| `ok`（0） | finalize まで終わった | `items[0].report`（`refactor.py report` の出力）と `metrics` を「完了報告」へ写す |
-| `gate`（23）`pause: cross-review` | 単独起動の最終ゲート | `items[0].prompt_file` の指示で `items[0].command`（cross-review の駆動）を回し、`result_file` へ最終ステータスを書いてから同じコマンドを打ち直す。続けて Draft を解除する |
-| `stopped`（1） | 中断（`metrics.exit` に元の終了コード。4 = 予算の指定の誤り・`--round-test` が要る・旧い状態ファイル・取り消しの失敗・範囲を確定できない など） | `summary` を報告して止まる。**握り潰さない**（検証を通っていない変更が残る） |
+| 0 | finalize まで終わった | `items[0].report`（`refactor.py report` の出力）と `metrics` を「完了報告」へ写す |
+| 23（`cross-review`） | 単独起動の最終ゲート | `prompt_file` を読み、`items[0].command`（cross-review の駆動）を回して `result_file` へ最終ステータスを書く。同じコマンドを打ち直し、続けて Draft を解除する |
+| 1 | 中断（`metrics.exit` に元の終了コード。4 = 予算の指定の誤り・`--round-test` が要る・旧い状態ファイル・取り消しの失敗・範囲を確定できない など） | `summary` を報告して止まる。**握り潰さない**（検証を通っていない変更が残る） |
 
-pause の番号（20 fix / 21 sweep / 22 title・body / 23 cross-review）は cross-review の駆動と同じ表である。
 再開は同じコマンドを打ち直すだけである（`init` が終わったフェーズを返し、最終ゲートの後の進みは
 `$TMP_DIR/drive-rf<ID>.json`）。`metrics` は状態ファイルから数えた件数（`items` / `adopted` / `reverted` /
 `deferred` / `fix_rounds` / `final_gate` / `review_status`）である。
