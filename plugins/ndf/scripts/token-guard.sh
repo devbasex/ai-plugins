@@ -10,7 +10,9 @@
 #
 # **拒否は `permissionDecision: deny` で返し、終了コードは常に 0 にする。** 通すときは何も
 # 出さない。判定が失敗したとき（入力が読めない・jq が無い・控えを書けない・記録を読めない・
-# ロックを 1 秒で取れない）は通す。hook の失敗でツールの実行を止めないためである。
+# ロックを待ちの上限の内に取れない）は通す。hook の失敗でツールの実行を止めないためである。
+# 待ちの上限は `NDF_TOKEN_GUARD_LOCK_WAIT`（秒・0 以上の整数。既定 1）で変えられる。
+# 本番は既定の 1 秒のままにする。延ばすのは負荷の高い環境で並列の試験を動かすときである（#950）。
 #
 # 規約は skills/development-workflow/references/waiting.md（待ち方）と
 # context-window.md（会話を切る）にある。
@@ -62,8 +64,10 @@ take_lock() {
   local dir="$1" sid="$2"
   # shellcheck source=lib/lock-common.sh
   . "$HERE/lib/lock-common.sh" 2>/dev/null || return 1
+  local wait="${NDF_TOKEN_GUARD_LOCK_WAIT:-1}"
+  case "$wait" in '' | *[!0-9]*) wait=1 ;; esac
   LOCK="$dir/$sid.lock"
-  ndf_lock_acquire "$LOCK" 1 || { LOCK=; return 1; }
+  ndf_lock_acquire "$LOCK" "$wait" || { LOCK=; return 1; }
   trap 'ndf_lock_release "$LOCK"' EXIT
 }
 
