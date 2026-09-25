@@ -319,3 +319,22 @@ def test_notes_without_changelog_section_is_precondition(repo, tmp_path):
     p = subprocess.run([PY, str(SCRIPT), "notes", "--root", str(repo), "--version", "1.2.3", "--prs", "12"],
                        capture_output=True, text=True, env=env)
     assert p.returncode == 3
+
+
+def test_notes_and_changelog_skip_unmerged_prs(repo, tmp_path):
+    pdir = notes_repo(repo)
+    env = fake_gh(tmp_path, {**PR_BODIES, 13: {"title": "未マージ", "body": "## 利用者向けの変化\n\n- 載らない\n",
+                                               "state": "OPEN"}})
+    p = subprocess.run([PY, str(SCRIPT), "notes", "--root", str(repo), "--version", "1.2.3-dev.1", "--prs", "12", "13"],
+                       capture_output=True, text=True, env=env)
+    assert p.returncode == 0, p.stdout + p.stderr
+    res = json.loads(p.stdout.strip().splitlines()[-1])
+    assert res["metrics"]["unmerged"] == [13] and res["metrics"]["prs"] == 1
+    assert {"kind": "pr", "name": "#13", "result": "skipped", "reason": "マージされていない"} in res["items"]
+    assert "#13" not in (repo / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert "#13" not in (pdir / "README.md").read_text(encoding="utf-8")
+    p = subprocess.run([PY, str(SCRIPT), "changelog", "--root", str(repo), "--version", "1.2.3-dev.1", "--prs", "12", "13"],
+                       capture_output=True, text=True, env=env)
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert json.loads(p.stdout.strip().splitlines()[-1])["metrics"]["unmerged"] == [13]
+    assert "#13" not in (repo / "CHANGELOG.md").read_text(encoding="utf-8")

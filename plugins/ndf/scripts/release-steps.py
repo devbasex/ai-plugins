@@ -446,10 +446,19 @@ def cmd_bump(a):
                 items, metrics, next="items の manual を手で直す" if ed.manual else None))
 
 
-def pr_titles(root, prs):
+def unmerged(d):
+    """gh pr view の出力がマージされていない PR を指すか。state の無い出力はマージ済みとして扱う。"""
+    return isinstance(d, dict) and d.get("state", "MERGED") != "MERGED"
+
+
+def pr_titles(root, prs, skipped=None):
+    """PR ごとに (番号, 箇条) を返す。マージされていない PR は載せず、番号を skipped へ足す。"""
     items = []
     for n in prs:
-        d = gh_json(root, ["pr", "view", str(n), "--json", "title"], f"gh pr view {n}")
+        d = gh_json(root, ["pr", "view", str(n), "--json", "title,state"], f"gh pr view {n}")
+        if unmerged(d):
+            skipped is not None and skipped.append(n)
+            continue
         try:
             title = d["title"].strip()
         except (TypeError, KeyError, AttributeError):
@@ -463,7 +472,8 @@ def cmd_changelog(a):
     cl = root / "CHANGELOG.md"
     if not cl.is_file():
         raise StepError("CHANGELOG.md が無い", EXIT_PRECONDITION)
-    items = pr_titles(root, a.prs)
+    skipped = []
+    items = pr_titles(root, a.prs, skipped)
     sections = []
 
     # CHANGELOG.md（見出しは基底の版。開発版の接尾辞は載せない）
@@ -509,8 +519,8 @@ def cmd_changelog(a):
                                  "result": "replaced", "heading": h, "added": [n for n, _ in items]})
 
     readme_done = any(s["result"] == "replaced" for s in sections)
-    emit(result(TOOL, "ok", f"{len(a.prs)} 件の PR を {len(sections)} 箇所へ並べた", sections,
-                {"version": a.version, "prs": len(a.prs)},
+    emit(result(TOOL, "ok", f"{len(items)} 件の PR を {len(sections)} 箇所へ並べた{unmerged_note(skipped)}",
+                sections + unmerged_items(skipped), {"version": a.version, "prs": len(items), "unmerged": skipped},
                 next="更新案内の本文を利用者向けの説明へ書き直す" if readme_done else None))
 
 
@@ -754,11 +764,15 @@ def change_items(lines, n):
     return [i if f"#{n}" in i else f"{i}（#{n}）" for i in items]
 
 
-def pr_notes(root, prs):
-    """PR ごとに (番号, 利用者向けの変化の箇条, 未検証・残る危険の箇条, 題名で代えたか) を返す。"""
+def pr_notes(root, prs, skipped=None):
+    """PR ごとに (番号, 利用者向けの変化の箇条, 未検証・残る危険の箇条, 題名で代えたか) を返す。
+    マージされていない PR は配る中身に入らないため載せず、番号を skipped へ足す。"""
     out = []
     for n in prs:
-        d = gh_json(root, ["pr", "view", str(n), "--json", "title,body"], f"gh pr view {n}")
+        d = gh_json(root, ["pr", "view", str(n), "--json", "title,body,state"], f"gh pr view {n}")
+        if unmerged(d):
+            skipped is not None and skipped.append(n)
+            continue
         if not isinstance(d, dict) or not isinstance(d.get("title"), str):
             raise StepError(f"gh pr view {n} の出力を読めない", 2)
         body = d.get("body") or ""
@@ -833,9 +847,18 @@ def write_approval(path, version, bullets, risks, verified, ref):
         {"kind": "section", "name": RISKS_HEADING, "result": "written", "lines": len(risks)}]
 
 
+def unmerged_items(skipped):
+    return [{"kind": "pr", "name": f"#{n}", "result": "skipped", "reason": "マージされていない"} for n in skipped]
+
+
+def unmerged_note(skipped):
+    return f"（マージされていない {' '.join(f'#{n}' for n in skipped)} は載せない）" if skipped else ""
+
+
 def cmd_notes(a):
     root = git_root(a.root)
-    notes = pr_notes(root, a.prs)
+    skipped = []
+    notes = pr_notes(root, a.prs, skipped)
     bullets = [f"- {i}" for _, items, _, _ in notes for i in items]
     risks = [f"- {i}" for _, _, rs, _ in notes for i in rs]
     fallback = sum(1 for *_, by_title in notes if by_title)
@@ -843,13 +866,15 @@ def cmd_notes(a):
         path = Path(a.approval)
         path = path if path.is_absolute() else root / path
         verified = [r for r in (a.verified or "").split(",") if r]
-        items = write_approval(path, a.version, bullets, risks, verified, a.ref)
-        emit(result(TOOL, "ok", f"提示物の欄を {len(a.prs)} 件の PR から書いた", items,
-                    {"version": a.version, "prs": len(a.prs), "lines": len(bullets), "approval": str(path)}))
+        items = write_approval(path, a.version, bullets, risks, verified, a.ref) + unmerged_items(skipped)
+        emit(result(TOOL, "ok", f"提示物の欄を {len(notes)} 件の PR から書いた{unmerged_note(skipped)}", items,
+                    {"version": a.version, "prs": len(notes), "lines": len(bullets), "approval": str(path),
+                     "unmerged": skipped}))
         return
-    items = write_notes(root, a.version, a.plugin, bullets)
-    emit(result(TOOL, "ok", f"{len(a.prs)} 件の PR の利用者向けの変化を {len(items)} 箇所へ書いた", items,
-                {"version": a.version, "prs": len(a.prs), "lines": len(bullets), "fallback": fallback}))
+    items = write_notes(root, a.version, a.plugin, bullets) + unmerged_items(skipped)
+    emit(result(TOOL, "ok", f"{len(notes)} 件の PR の利用者向けの変化を書いた{unmerged_note(skipped)}", items,
+                {"version": a.version, "prs": len(notes), "lines": len(bullets), "fallback": fallback,
+                 "unmerged": skipped}))
 
 
 def build_parser() -> argparse.ArgumentParser:
