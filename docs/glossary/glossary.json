@@ -22,43 +22,43 @@
       "term": "ユビキタス言語",
       "context": "project-glossary",
       "meaning": "プロジェクトの関係者とエージェントが、要求・設計・コードで同じ意味に使う語の集まり",
-      "pending_source": "issues/issue-1111-requirements.md"
+      "source": "docs/specifications/ndf-ubiquitous-language.md"
     },
     {
       "term": "用語集",
       "context": "project-glossary",
       "meaning": "ユビキタス言語を持つ構造化ファイル（正）と、そこから作る人が読む Markdown の文書。どちらもプロジェクトのリポジトリに置く",
-      "pending_source": "issues/issue-1111-requirements.md"
+      "source": "docs/specifications/ndf-ubiquitous-language.md"
     },
     {
       "term": "コンテキスト",
       "context": "project-glossary",
       "meaning": "語の意味が 1 つに決まる範囲（境界づけられたコンテキスト）",
-      "pending_source": "issues/issue-1111-requirements.md"
+      "source": "docs/specifications/ndf-ubiquitous-language.md"
     },
     {
       "term": "ドメインモデルの節",
       "context": "project-glossary",
       "meaning": "設計文書の先頭に置く節。変更が属するコンテキスト・変える集約とその持ち主・不変条件・ドメインイベントを書く",
-      "pending_source": "issues/issue-1111-requirements.md"
+      "source": "docs/specifications/ndf-ubiquitous-language.md"
     },
     {
       "term": "廃止した語",
       "context": "project-glossary",
       "meaning": "用語集で別の語へ置き換えた語。文書に出たら落とす",
-      "pending_source": "issues/issue-1111-requirements.md"
+      "source": "docs/specifications/ndf-ubiquitous-language.md"
     },
     {
       "term": "不変条件",
       "context": "project-glossary",
       "meaning": "集約がいつも満たす条件。設計のドメインモデルの節に書き、実装の前にテストにする",
-      "pending_source": "issues/issue-1111-requirements.md"
+      "source": "docs/specifications/ndf-ubiquitous-language.md"
     },
     {
       "term": "未登録の語",
       "context": "project-glossary",
       "meaning": "用語として書かれているのに用語集に無い語。見出しが「用語」の節の表の 1 列目に書いた語を指す",
-      "pending_source": "issues/issue-1111-requirements.md"
+      "source": "docs/specifications/ndf-ubiquitous-language.md"
     },
     {
       "term": "用語集の宣言",
