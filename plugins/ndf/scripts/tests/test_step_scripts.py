@@ -222,6 +222,22 @@ def test_spec_finalize_stops_on_a_broken_glossary_declaration(repo, env, decl, s
     assert git(repo, "status", "--porcelain").strip() == ""
 
 
+def test_spec_finalize_keeps_the_design_when_the_glossary_cannot_be_written(repo, env):
+    """用語集の文書を書けなければ、設計を git rm せずに止める。"""
+    spec_repo(repo)
+    write(repo, ".ndf/glossary.json", GOOD_DECL)
+    write(repo, "g.json", PENDING.format(TERM, "docs"))
+    write(repo, "g.md/keep", "文書の場所をディレクトリで塞ぐ\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "decl")
+    code, _, _ = call("plan-to-spec-steps.py",
+                      ["spec-finalize", "--spec", "docs/specifications/x.md",
+                       "--design", "docs/design/x-design.md", "--root", str(repo)], env)
+    assert code == 1
+    assert (repo / "docs/design/x-design.md").is_file()
+    assert "x-design.md" not in git(repo, "diff", "--cached", "--name-only")
+
+
 def test_spec_finalize_missing_spec_is_precondition(repo, env):
     code, out, _ = call("plan-to-spec-steps.py",
                         ["spec-finalize", "--spec", "nope.md", "--design", "keep.txt", "--root", str(repo)], env)

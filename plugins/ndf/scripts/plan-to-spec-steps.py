@@ -115,11 +115,13 @@ def cmd_spec_finalize(a):
             raise StepError(f"設計のファイルが無い: {d}", EXIT_PRECONDITION)
         rels.append(rel)
     plan = plan_glossary(load_glossary(root), set(rels), spec_rel)
+    # 用語集を書けなければ設計を消さずに止めるため、書き込みを git rm より前に置く
+    promoted = write_glossary(plan)
 
     for rel in rels:
         git(root, "rm", "-q", "--", rel)
     items = [{"kind": "design", "name": rel, "result": "removed"} for rel in rels]
-    items += write_glossary(plan)
+    items += promoted
 
     index = root / "docs" / "specifications" / "README.md"
     if index.is_file():
