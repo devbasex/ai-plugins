@@ -89,7 +89,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.17.11）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.17.12-dev.1）
 ```
 
 ### agy
@@ -119,42 +119,29 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.17.11 へ更新するとき
+## v10.17.12-dev.1 へ更新するとき
 
-**正式版です。** `main` に載ります。変更点の一覧は [CHANGELOG.md](../../CHANGELOG.md) にあります。
+**開発版です。** `develop` に載ります。変更点の一覧は [CHANGELOG.md](../../CHANGELOG.md) にあります。
 
 ### 変更
 
-- **`development-workflow` は conductor → supervisor → worker の 3 層で進める**。/goal を付けたときも、
-  作業の分け方と承認の関門は同じである
-- **中継は区間の切れ目で新しい会話へ切り替える。/goal の目標の判定は待たず、目標が未達のままでも切り替える**。
-  切り替えた後の会話は引き継ぎ文書から作業を続ける
+- **NDF の用語はフェーズ・Tool・ミッションである**。読む側の
+  スクリプトは旧い語も受け付ける。ミッションを閉じるスクリプトは `mission-close.py` である
+- **`development-workflow` はミッション単位で工程を 1 回ずつ通す**。設計 PR は並列に出して関門 1 で 1 回だけ承認を取り、
+  実装はミッションのブランチへ集めて `develop` への PR を 1 本にし、検査は 1 回だけ走らせる
+- **`pr` は PR の宛先を区別する**。本文にはモードと通した工程を書く
+- **`cross-review` は設計 PR を既定で 3 ラウンドまで回し、2 ラウンド目からは前のラウンドからの差分だけを見る**。
+  設計文書が 1,000 行を超えると知らせる
+- **`supervise.py` の `run` の段は worker の作業場所を cwd にして動く**
 
 ### 追加
 
-- **Skill のスクリプトの置き場所を `scripts/resolve.sh` の 1 コマンドで引ける**。`resolve.sh scripts <Skill名>` などで
-  絶対パスを出し、見つからなければ終了コード 3 で理由を出す
-- **各 Skill の手順をスクリプトで回せる**。`merged` / `pr` / `plan-to-spec` / `release` / `release-verification` は
-  `*-steps.py`（`merged-steps.py`・`pr-steps.py`・`plan-to-spec-steps.py`・`release-steps.py`・
-  `release-verification-steps.py`）、`fix` は `fix-steps.py` で文脈を集める。`progress-tracking` の手順も
-  スクリプトで進める。どのスクリプトも結果を同じ形の JSON（`tool` / `status` / `summary` / `items` / `next`）で返す
-- **ミッションを閉じる作業を `mission-close.py` で行える**。CI を待ってからのマージもスクリプトで行う
-- **`supervise.py` に副命令 `new` / `queue` / `note` / `sync-check` を足した**。`new` は雛形から計画を作り、`queue` は
-  計画を同時に `--max` 本まで順に流し、`note` は報告から引き継ぎ文書の表へ 1 行を足し、`sync-check` は生成物の同期と
-  検査 4 本を走らせる
-- **`supervise.py` の計画に `drive` の段を書ける**。外部 CLI の起動と `cross-review` / `cross-refactoring` の収束ループを
-  スクリプトが回し、判断や修正が要るとき（`pause`）だけ worker が入る
-
-正式版のチャネル（ref を指定せずに登録した取得元）なら、次で入れ替わります。**動いているセッションには
-反映されない**ため、更新したあとは起動し直してください。
-
-```bash
-claude plugin marketplace update ai-plugins
-claude plugin update ndf@ai-plugins
-
-codex plugin marketplace upgrade ai-plugins
-codex plugin add ndf@ai-plugins
-```
+- **`supervise.py` は `claude -p` の利用上限を見分け、解除まで待ってから続ける**。
+  環境変数 `NDF_SUPERVISE_CLAUDE_FALLBACK` に代替の認証を設定しておくと、そちらへ切り替えて続ける
+- **`run` の段の終了コード 10〜19 は関門として報告に写る**
+- **`supervise.py new` に計画の雛形 `release` と `mission` を足した**。`new release` はリリースの計画を、
+  `new mission` はミッションの計画を作る
+- **`worktree` はミッションのブランチから作業場所を切れる**
 
 ## Playwright テストについて
 
@@ -325,7 +312,7 @@ agy models   # 認証の確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.17.11/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.17.12-dev.1/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -347,14 +334,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.11/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.12-dev.1/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.17.11  <path>
+# => ndf@ai-plugins  installed, enabled  10.17.12-dev.1  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。
