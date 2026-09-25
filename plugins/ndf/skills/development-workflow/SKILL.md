@@ -22,7 +22,7 @@ hooks:
 
 **工程はミッション単位で 1 回ずつ通す。** ミッションは 1 つの版として出す課題の束で、複数の設計と実装を含む。
 **モードを判定する単位は、ミッションの develop 宛て Pull Request である。** モードは 1 つで、ミッションが閉じる
-課題すべての控えへ同じ値を書く。数える対象が 1 つになる。
+課題すべての通過記録へ同じ値を書く。数える対象が 1 つになる。
 
 - **ミッションのブランチ（`mission/<名前>`）を develop から切り、課題ごとの作業ツリーはそこから切る。**
   課題の Pull Request はミッションのブランチへ集め、develop への Pull Request はミッションで 1 本にする
@@ -237,7 +237,7 @@ issue にする**。呼び出し元・3 択の判断・振り返りでの拾い�
 
 この Skill の frontmatter の `hooks` が、進行の記録のコマンドを通過工程として積み（記録の無い工程は案内するだけで
 拒否しない）、承認ラベル（ラベル `design-approved`）の無い設計 Pull Request のマージだけを拒否する。判定の 2 つ・
-有効にする操作・控えの読み方・`fast` の工程の出し方は [references/stage-completeness.md](references/stage-completeness.md) にある。
+有効にする操作・通過記録の読み方・`fast` の工程の出し方は [references/stage-completeness.md](references/stage-completeness.md) にある。
 
 ## 進め方（`pace`）
 
@@ -491,7 +491,7 @@ flowchart TD
 
 - [references/workflow-modes.md](references/workflow-modes.md) — 判定の境界事例とモード別の詳細
 - [references/projects-tracking.md](references/projects-tracking.md) — 進行を GitHub Projects へ記録する設定と値の一覧
-- [references/stage-completeness.md](references/stage-completeness.md) — 通過工程の控えと報告、承認ラベルの作り方
+- [references/stage-completeness.md](references/stage-completeness.md) — 通過記録と報告、承認ラベルの作り方
 - [references/parallel-work.md](references/parallel-work.md) — 並行開発の 4 つの形、工程が動く単位、任せるうえでの下限
 - [references/pace.md](references/pace.md) — 進め方 `pace: fast` の条件・宣言・計画のステージ・検査のトリガー・MVV の判定
 - [references/approval-request.md](references/approval-request.md) — 承認を求めるときに提示するもの

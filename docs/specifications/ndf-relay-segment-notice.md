@@ -149,7 +149,7 @@ Python の `round`（最も近い整数、ちょうど半分は偶数へ。切�
 | ラッパーの外の拒否文に告知が入らないこと | `test_context_outside_relay_reason_has_no_notice` |
 | `notice` の 1 行目が `is-child` の判定と一致すること | `test_is_child_matches_notice` |
 | `is-child` と `run` の振る舞いが変わらないこと | 既存の `test_relay.py` のテスト |
-| Skill の規則（告知の写し方・承認を挟まないこと・`/goal` の文面の読み方・`/ndf:restart` の示し方） | レビューで読む |
+| Skill の規則（告知の複製方・承認を挟まないこと・`/goal` の文面の読み方・`/ndf:restart` の示し方） | レビューで読む |
 
 ## 関連リンク
 

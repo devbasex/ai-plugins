@@ -1,7 +1,7 @@
 # 抜粋の規約
 
 **サブエージェントへ Skill の本文を丸ごと読ませず、要る手順だけを抜粋で渡す**（#828）。抜粋は
-本文から、呼ぶ側が要る部分だけを取り出した写しである。**正本は本文であり、抜粋に本文に無い
+本文から、呼ぶ側が要る部分だけを取り出したものである。**正本は本文であり、抜粋に本文に無い
 規則を置かない。** 見本は [progress-tracking/references/excerpt.md](progress-tracking/references/excerpt.md) である。
 Skill 全体の執筆規約は [AUTHORING.md](AUTHORING.md) にある。
 

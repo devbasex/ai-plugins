@@ -95,7 +95,7 @@ def test_fix_time_left_does_not_subtract_fix_reserve(budget):
 
 
 def test_fix_time_left_keeps_the_final_fix_reserve_for_the_final_gate(budget):
-    """決定 26: 検証の直しは、最終ゲートの修正 1 回分の控えまで食わない。"""
+    """決定 26: 検証の直しは、最終ゲートの修正 1 回分の予備時間まで食わない。"""
     r = {"danger_whole_test": 1.0, "final_whole_test": 1.0, "fix": 5.5, "final_fix": 5.5}
     now = START + dt.timedelta(minutes=50)
     assert budget.fix_time_left(START, 60, r, now) == pytest.approx(2.5)

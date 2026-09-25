@@ -301,7 +301,7 @@ python3 "$RF/refactor.py" assess --base origin/develop; rc=$?; echo "exit=$rc"
 | 項目 | 中身 |
 | --- | --- |
 | `round_test` | `command`・`status`・`checked_at`。`--round-test` を省いたか全体のテストと同じ文字列なら `command` は空 |
-| `baseline_test.seconds` / `head` | 着手前の全体のテストの所要と HEAD。控えの見積りと、元からの失敗の見分けに使う（#933） |
+| `baseline_test.seconds` / `head` | 着手前の全体のテストの所要と HEAD。予備時間の見積りと、元からの失敗の見分けに使う（#933） |
 | `final_gate.checks[].command` / `seconds` | 最終ゲートの検査のコマンド（継続的統合なら検査の名前）と所要の秒数 |
 
 **全体のテストの実行の回数は、状態ファイルから数えられる。** `init` の 1 回は `baseline_test.status`、

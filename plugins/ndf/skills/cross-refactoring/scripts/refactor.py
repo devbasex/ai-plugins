@@ -156,7 +156,7 @@ def add_init_parser(sub: argparse._SubParsersAction) -> None:
                       help="ラウンドのテスト。項目ごとの範囲テストを組み立てる元で、"
                            "組み立てられない項目はそのまま走らせる。--baseline-test が "
                            "pytest / jest / vitest でなければ必須")
-    # **起動のされ方は引数で受け取る**（#436 決定 7）。環境変数や控えの読み取りは、
+    # **起動のされ方は引数で受け取る**（#436 決定 7）。環境変数や記録の読み取りは、
     # 起動元が違っても同じ値になりうる。呼ぶ側が明示すれば判定が 1 か所で済む。
     init.add_argument("--workflow-step", action="store_true", default=None,
                       help="`development-workflow` の 1 工程として起動したことを"

@@ -95,7 +95,7 @@ def _missing(bundles: set[str]) -> dict[str, list[str]]:
 # ここへ足し忘れる。
 MONITOR_ENV_PREFIX = "MONITOR_"
 
-# `pytest_configure` で外した値の控え。実行が終わったときに戻す。
+# `pytest_configure` で外した値の記録。実行が終わったときに戻す。
 _saved_monitor_env: dict[str, str] = {}
 
 

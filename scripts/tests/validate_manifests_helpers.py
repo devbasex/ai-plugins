@@ -68,7 +68,7 @@ def build_tree(base: Path, version: str = VERSION, described: str | None = None)
     ndf = root / f"plugins/{FAMILY}"
 
     # 検査の本体は根の下の共有の定義から版数の書式を読む。木の側にも同じファイルを置く。
-    # **写しではなく実物を複製する。** テスト用に書式を書き写すと、書式の定義が 2 つに戻る。
+    # **複製ではなく実物を複製する。** テスト用に書式を書き写すと、書式の定義が 2 つに戻る。
     (root / "scripts/lib").mkdir(parents=True)
     (root / "scripts/lib/version_pattern.py").write_text(
         VERSION_PATTERN_SOURCE.read_text(encoding="utf-8"), encoding="utf-8"

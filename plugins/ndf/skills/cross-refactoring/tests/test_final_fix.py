@@ -66,7 +66,7 @@ def test_the_gate_records_the_fix_base_before_it_asks_for_a_fix(
 def test_the_gate_emits_the_fix_impl_and_round(
     refactor, cmd_gate, tmp_path, env_tmp_dir, gate_spy, capsys
 ):
-    """呼び出し側は担当を**出力から**受け取る。控えを読み直させない。"""
+    """呼び出し側は担当を**出力から**受け取る。記録を読み直させない。"""
     state_path = _gate_state(tmp_path)
     env_tmp_dir(state_path)
     gate_spy["test_code"] = 1
@@ -99,7 +99,7 @@ def test_the_gate_does_not_reuse_the_fix_base_of_the_verify_loop(
 
     state = read_state(state_path)
     assert state["final_gate"]["fix_base_sha"] == "HEADSHA"
-    assert state["phases"]["fix"]["base_sha"] == "OLDBASE", "検証の側の控えは触らない"
+    assert state["phases"]["fix"]["base_sha"] == "OLDBASE", "検証の側の記録は触らない"
     assert state["fix"]["base_sha"] == "OLDBASE"
 
 

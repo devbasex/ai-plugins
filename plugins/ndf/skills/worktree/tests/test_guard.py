@@ -290,7 +290,7 @@ def test_declaration_created_mid_session_takes_effect(main_repo: Path, tmp_path:
     """宣言ファイルは後から作られる。作った直後のセッションで案内が出る。
 
     `/ndf:worktree` の手順 0 は、既に tool を動かしたセッションの途中で走る。
-    控えを作業ディレクトリの一致だけで再利用すると、そのセッションでは案内が
+    キャッシュを作業ディレクトリの一致だけで再利用すると、そのセッションでは案内が
     出ないままになる。
     """
     state = tmp_path / "state"

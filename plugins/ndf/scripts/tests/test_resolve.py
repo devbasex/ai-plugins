@@ -142,7 +142,7 @@ def test_development(runtime, tmp_path, home) -> None:
 
 
 def test_issue_590_old_codex_copy_is_not_taken(home, project) -> None:
-    """#590: 参照ファイルで置き換わらなくても、Claude Code では Codex の古い控えを採らない。"""
+    """#590: 参照ファイルで置き換わらなくても、Claude Code では Codex の古い複製を採らない。"""
     make_plugin(home / ".codex" / ".tmp" / "marketplaces" / "ai-plugins" / "plugins" / "ndf",
                 entry=False)
     root = install_claude(home)
@@ -150,7 +150,7 @@ def test_issue_590_old_codex_copy_is_not_taken(home, project) -> None:
 
 
 def test_issue_590_codex_entry_defers_to_claude_record(home, project) -> None:
-    """Codex の控えが入口を持っていても、Claude Code の中では導入の記録へ戻る。"""
+    """Codex の複製が入口を持っていても、Claude Code の中では導入の記録へ戻る。"""
     codex = home / ".codex" / ".tmp" / "marketplaces" / "ai-plugins" / "plugins" / "ndf"
     make_plugin(codex)
     root = install_claude(home)

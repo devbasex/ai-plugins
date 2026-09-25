@@ -9,7 +9,7 @@
 # `progress-record.sh` を呼んで issue の本文を更新し、その後でボードを更新する。`pace`（normal / fast）は
 # ボードのフィールドを持たず、本文の見出し行（`進め方: fast`）にだけ書く。
 # `status` はボードだけに書く（「ミッションを閉じる」だけが使う）。
-# 通過工程の控えはこのコマンドを観測して積むため、入口はこのスクリプトのままにする。
+# 通過記録はこのコマンドを観測して積むため、入口はこのスクリプトのままにする。
 #
 # **宣言（.ndf/projects.json）が無ければボードへは何もしない。** gh が無い場合と、
 # 記録に失敗した場合も終了コード 0 で抜ける。進行管理が理由で開発の工程が止まってはいけない。
@@ -76,12 +76,12 @@ FIELD_NAME=$(pj_field_name "$DECL" "$KEY") || exit 0
 # 想定される総数より広く取る。上限に達したときは対象が見つからなくても黙って抜けない。
 ITEM_LIMIT=1000
 
-# 解決した識別子の控え。**記録のたびにボードの全件を読まない。**
+# 解決した識別子のキャッシュ。**記録のたびにボードの全件を読まない。**
 CACHE=$(pj_cache_file "$OWNER" "$NUMBER" "$ISSUE" 2>/dev/null) || CACHE=
 CACHED_PROJECT_ID= CACHED_ITEM_ID=
 if [ -n "$CACHE" ] && [ -f "$CACHE" ]; then
-  # 控えは KEY=VALUE の 2 行だけである。**キー名を絞ってから読み込む。**
-  # 値が古くなっていた場合は、書き込みに失敗した時点で控えを捨てる（下記）。
+  # キャッシュは KEY=VALUE の 2 行だけである。**キー名を絞ってから読み込む。**
+  # 値が古くなっていた場合は、書き込みに失敗した時点でキャッシュを捨てる（下記）。
   while IFS='=' read -r k v; do
     case "$k" in
       project_id) CACHED_PROJECT_ID=$v ;;
@@ -165,21 +165,21 @@ update() {
     done
   fi
 
-  # 控えへ残す。次回からは `item-edit` だけで済む。
+  # キャッシュへ残す。次回からは `item-edit` だけで済む。
   if [ -n "$CACHE" ]; then
     printf 'project_id=%s\nitem_id=%s\n' "$project_id" "$item_id" > "$CACHE" 2>/dev/null || :
   fi
 
   fields_json=$(gh project field-list "$NUMBER" --owner "$OWNER" --format json 2>/dev/null) || return 1
 
-  # 控えの識別子が古くなることがある（ボードからアイテムを消した、ボードを作り直した）。
-  # **書き込みに失敗したら控えを捨て、1 度だけ全件の解決へ落ちる。** 捨てないと、
+  # キャッシュの識別子が古くなることがある（ボードからアイテムを消した、ボードを作り直した）。
+  # **書き込みに失敗したらキャッシュを捨て、1 度だけ全件の解決へ落ちる。** 捨てないと、
   # 以後の記録が同じ識別子を使い続けて永久に反映されない。
   if [ -n "$CACHED_ITEM_ID" ] && [ "$item_id" = "$CACHED_ITEM_ID" ]; then
     if ! write_field "$project_id" "$item_id" "$fields_json"; then
       [ -n "$CACHE" ] && rm -f "$CACHE"
       CACHED_PROJECT_ID= CACHED_ITEM_ID=
-      printf 'NOTE: 控えの識別子で書き込めませんでした。ボードを読み直します\n' >&2
+      printf 'NOTE: キャッシュの識別子で書き込めませんでした。ボードを読み直します\n' >&2
       update
       return $?
     fi

@@ -33,10 +33,10 @@ def estimate_total(estimate: dict[str, Any]) -> float:
 
 
 def reserve(baseline_seconds: Optional[float], ci_check: bool, fix_minutes: float) -> dict[str, float]:
-    """控え R の内訳（分）。
+    """予備時間 R の内訳（分）。
 
     全体のテストの所要は同じ実行の着手前の全体のテスト（`init`）の秒から見積もる。
-    測れていなければ 0 にする。見積りが無いのに控えを大きく取ると、項目が 1 件も
+    測れていなければ 0 にする。見積りが無いのに予備時間を大きく取ると、項目が 1 件も
     入らなくなる。最終ゲートの全体のテストは `--ci-check` があれば継続的統合が担い、
     想定最大時間の内で走らないため 0 にする。
     """
@@ -52,7 +52,7 @@ def reserve(baseline_seconds: Optional[float], ci_check: bool, fix_minutes: floa
 
 
 def reserve_total(r: dict[str, Any]) -> float:
-    """控えの合計（分）。"""
+    """予備時間の合計（分）。"""
     return sum(float(v or 0.0) for v in r.values())
 
 
@@ -128,8 +128,8 @@ def deadlines(selected: list[dict[str, Any]], T: _dt.datetime) -> list[dict[str,
 def fix_end(started_at: _dt.datetime, budget_minutes: int, reserve: dict[str, Any]) -> _dt.datetime:
     """修正に使える終わりの時刻。
 
-    **控えの `fix` は引かない。** T から測ると、控えておいた修正 1 回分が使われない。
-    全体のテストの控え 2 つと、最終ゲートの修正の控え（`final_fix`。決定 26）を差し引いた
+    **予備時間の `fix` は引かない。** T から測ると、控えておいた修正 1 回分が使われない。
+    全体のテストの予備時間 2 つと、最終ゲートの修正の予備時間（`final_fix`。決定 26）を差し引いた
     終わりである。`final_fix` を引かないと、検証の直しが最終ゲートの修正の時間まで使う。
     """
     return started_at + _dt.timedelta(
@@ -148,5 +148,5 @@ def fix_time_left(
 
 
 def available_minutes(budget_minutes: int, elapsed_minutes: float, reserve: dict[str, Any]) -> float:
-    """使える時間 A = budget − 経過 E − 控え R（分）。負にもなる（何も入らない）。"""
+    """使える時間 A = budget − 経過 E − 予備時間 R（分）。負にもなる（何も入らない）。"""
     return float(budget_minutes) - float(elapsed_minutes) - reserve_total(reserve)

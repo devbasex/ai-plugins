@@ -16,10 +16,10 @@ candidates: 手順 1 の経路のうち機械で集められるものを集め�
   manual（--add で担当が足したもの）。commit-subject の候補は、上限で切るときも先に残す。候補ごとに updated_at と本文の要約値を返す。
   --limit で 1 回に扱う件数に上限を置く。超えた分は items に載せず、metrics.deferred に番号だけを返す（終了コード 20）。
 apply: plan.json の変更を反映する。反映の直前に updated_at を照合し、変わっていれば本文の
-  要約値を比べ、それも変わっていれば飛ばす（skipped_changed）。済んだものは控えに記録して
+  要約値を比べ、それも変わっていれば飛ばす（skipped_changed）。済んだものは記録に記録して
   2 度書かない。上限に当たれば Retry-After / 回復時刻 / 倍々の順で待ち、--max-waits を
   超えたら部分的に終わった状態で止める。
-report: candidates と apply の控えから完了報告の値を返す。
+report: candidates と apply の記録から完了報告の値を返す。
 
 plan.json の形:
 
@@ -469,7 +469,7 @@ def cmd_apply(a):
             put("returned", "要判断は反映しない")
             continue
         if key in ledger:
-            put("already", "控えにある")
+            put("already", "記録にある")
             continue
         if verdict in NEEDS_APPROVAL and not act.get("approved"):
             put("needs_approval", "やらないは承認を得てから反映する")
@@ -530,7 +530,7 @@ def cmd_apply(a):
                    for act in actions if act["number"] in buckets["needs_approval"]],
             consent=[f"#{x} を「やらない」で閉じる" for x in buckets["needs_approval"]],
             rollback="閉じた課題を reopen し、wontfix を外す（本文は GitHub の編集履歴から戻せる）")
-        nxt = "承認を得た課題に \"approved\": true を付けて同じ plan で apply を打ち直す（済んだものは控えで飛ぶ）"
+        nxt = "承認を得た課題に \"approved\": true を付けて同じ plan で apply を打ち直す（済んだものは記録で飛ぶ）"
     elif partial or buckets["skipped_changed"]:
         status, code = "gate", EXIT_PAUSE
         parts = []
@@ -538,7 +538,7 @@ def cmd_apply(a):
             parts.append("照合で飛ばした " + " ".join(f"#{x}" for x in buckets["skipped_changed"])
                          + " を手順 2A へ戻す")
         if partial:
-            parts.append("時間を置いて同じ plan で apply を打ち直す（済んだものは控えで飛ぶ）")
+            parts.append("時間を置いて同じ plan で apply を打ち直す（済んだものは記録で飛ぶ）")
         nxt = "。".join(parts)
     out = result(TOOL, status, summary, items, metrics, presentation_path=pres, next=nxt)
     _write_json(sd / "apply.json", out)
@@ -553,7 +553,7 @@ def cmd_report(a):
     sd = _state_dir(a.state_dir, repo)
     cand, app = _read_json(sd / "candidates.json"), _read_json(sd / "apply.json")
     if cand is None and app is None:
-        raise StepError(f"控えが無い（candidates も apply もまだ打っていない）: {sd}", EXIT_PRECONDITION)
+        raise StepError(f"記録が無い（candidates も apply もまだ打っていない）: {sd}", EXIT_PRECONDITION)
     items, metrics = [], {"repo": repo}
     if cand:
         cm = cand["metrics"]
@@ -597,7 +597,7 @@ def _numbers(s: str) -> list[int]:
 def build_parser():
     common = common_parser()
     common.add_argument("--repo", default=None, help="owner/name")
-    common.add_argument("--state-dir", default=None, help="控えの置き場所")
+    common.add_argument("--state-dir", default=None, help="記録の置き場所")
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("candidates", parents=[common])

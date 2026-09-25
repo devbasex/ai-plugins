@@ -29,7 +29,7 @@ def cmd_start_phase(args: argparse.Namespace) -> None:
     if end is not None:
         margin = int(limits_table["margin_seconds"])
         if phase == "final-fix":
-            # 1 回目は控えの長さを必ず渡す（決定 26）。`final-gate` が起動の前に回数を上げる。
+            # 1 回目は予備時間の長さを必ず渡す（決定 26）。`final-gate` が起動の前に回数を上げる。
             first = int((state.get("final_gate") or {}).get("fix_rounds") or 0) <= 1
             seconds = timeline.final_fix_timeout(
                 end, clock.now(), margin, limits_table.get("final_fix_seconds"), first)

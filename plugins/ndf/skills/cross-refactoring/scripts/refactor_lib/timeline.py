@@ -105,14 +105,14 @@ def compute(
         "implement_end_at": _iso(_completion(list(items or []), "start_deadline", "implement")),
         "fix_end_at": _iso(budget.fix_end(started_at, b, reserve)) if planned else None,
         "final_end_at": _iso(started_at + _dt.timedelta(minutes=b)),
-        # 最終ゲートの修正の 1 回目に必ず渡す長さ（決定 26）。控えの `final_fix`。
+        # 最終ゲートの修正の 1 回目に必ず渡す長さ（決定 26）。予備時間の `final_fix`。
         "final_fix_seconds": (math.ceil(float(reserve.get("final_fix") or 0.0) * 60)
                               if planned else None),
     }
 
 
 def of_state(state: dict[str, Any]) -> dict[str, Any]:
-    """状態の値から表を組む。計画の後なら項目と控えも使う。"""
+    """状態の値から表を組む。計画の後なら項目と予備時間も使う。"""
     plan = state.get("plan") or None
     return compute(
         clock.parse(state["started_at"]), int(state["budget_minutes"]),
@@ -143,7 +143,7 @@ def final_fix_timeout(
 ) -> int:
     """最終ゲートの修正の監視の上限（秒）。
 
-    **1 回目は、終わりまでの残りが控え（`final_fix_seconds`）より短くても控えの長さを渡す**
+    **1 回目は、終わりまでの残りが予備時間（`final_fix_seconds`）より短くても予備時間の長さを渡す**
     （決定 26）。想定最大時間を使い切った後に落ちても、必ず 1 度は直しを試みる。
     2 回目からは他の手順と同じく残り + 余裕である。
     """

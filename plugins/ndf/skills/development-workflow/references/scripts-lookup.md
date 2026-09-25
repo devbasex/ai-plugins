@@ -23,22 +23,22 @@ SCRIPTS=$(bash "$R/scripts/resolve.sh" scripts fix)           # skills/<Skill名
 | 順 | 何を指すか | 手がかり |
 | --- | --- | --- |
 | 1 | **開発中のリポジトリ** | 現在地の git のトップの直下に `plugins/ndf/scripts/projects-sync.sh` がある |
-| 2 | Claude Code が読み込んだプラグイン | Claude Code の中（`CLAUDECODE` がある）でだけ見る。環境変数 `CLAUDE_PLUGIN_ROOT`、別ランタイムの控えを通らずに届いた入口自身、`~/.claude/plugins/installed_plugins.json` の `ndf` の `installPath` の順 |
+| 2 | Claude Code が読み込んだプラグイン | Claude Code の中（`CLAUDECODE` がある）でだけ見る。環境変数 `CLAUDE_PLUGIN_ROOT`、別ランタイムの複製を通らずに届いた入口自身、`~/.claude/plugins/installed_plugins.json` の `ndf` の `installPath` の順 |
 | 3 | Kiro CLI がインストーラで指したプラグインの `scripts` | `.kiro/skills/<Skill名>` がプラグインの `skills/<Skill名>` への symlink |
-| 4 | Codex のマーケットプレイスの控え（`~/.codex/.tmp/marketplaces/<名前>/plugins/ndf/scripts`） | マーケットプレイス名だけが導入元で変わる |
+| 4 | Codex のマーケットプレイスの複製（`~/.codex/.tmp/marketplaces/<名前>/plugins/ndf/scripts`） | マーケットプレイス名だけが導入元で変わる |
 | 5 | agy が複製した実体（`~/.gemini/config/plugins/ndf/scripts`） | 導入時にプラグインのディレクトリ全体をここへ複製する。取得元の登録が無いため位置は固定 |
 | 6 | 現在地からの相対（`plugins/ndf/scripts`） | git のトップを取れない場合の受け皿 |
 
 どれも当たらなければ、入口自身が置かれたプラグインを採る。
 
 **開発中のリポジトリを先頭に置くのは、手元で直したスクリプトが実行されない状態を無くす
-ためである。** 配布済みの控えが先に当たると、直したはずの不具合が再現し、実行しているのが
+ためである。** 配布済みの複製が先に当たると、直したはずの不具合が再現し、実行しているのが
 配布済みの版であることは出力からは分からない。判定は「現在地の git のトップが
 `plugins/ndf/scripts` を持つか」であるため、**配布物を使う利用者の側では当たらない**。
 
 **2 で入口自身の位置を条件付きで採るのは、参照ファイルの `${CLAUDE_PLUGIN_ROOT}` が
 置き換わらないためである**（#590）。Claude Code が置き換えるのは `SKILL.md` の本文だけで、
-参照ファイルを読んだ bash では下のコマンドが Codex の控えの入口を拾うことがある。入口は
+参照ファイルを読んだ bash では下のコマンドが Codex の複製の入口を拾うことがある。入口は
 自分へ届いた道が `~/.codex` / `~/.gemini` / `.kiro/skills` / `~/.claude/plugins/cache` を
 通ったかを見て、通っていれば自分を採らず Claude Code の導入の記録へ戻る。通っていなければ
 `claude --plugin-dir <パス>` で読み込んだ実体として採る。

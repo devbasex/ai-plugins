@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """結果ファイルを投稿へ変える層（#730 #583）。
 
-**GitHub と git へ書くのは、レビューを回す側だけである。** 担当は指摘の控えと結果
+**GitHub と git へ書くのは、レビューを回す側だけである。** 担当は指摘のファイルと結果
 ファイルを書いて終わり、修正の担当はコミットまでを行う。この層が、その 2 種類の
 結果ファイルを読んで投稿を組み立て、待ち行列を通して送り、送信の応答を返す。
 
@@ -152,7 +152,7 @@ def review_posts(payload_path: pathlib.Path | str, result_path: pathlib.Path | s
                  head_sha: str | None, is_own_pr: bool,
                  evacuate_all: bool = False,
                  since: str | None = None) -> list[dict[str, Any]]:
-    """指摘の控えと結果ファイルから、待ち行列へ積む項目の列を組み立てる。
+    """指摘のファイルと結果ファイルから、待ち行列へ積む項目の列を組み立てる。
 
     **判定の格下げはこの層が決める**（設計の決定 14）。自分の Pull Request へは変更を
     求めるレビューを送れないため、送る形だけを `COMMENT` へ落とす。本来の判定は
@@ -211,9 +211,9 @@ def _response_url(item: dict[str, Any] | None) -> str | None:
 
 
 def _write_destinations(payload_path: pathlib.Path | str, inline_count: int) -> str:
-    """控えへ、送れた先を書き戻す。**決めるのは投稿する側である。**
+    """指摘のファイルへ、送れた先を書き戻す。**決めるのは投稿する側である。**
 
-    **原子的に書き、失敗は呼び出し元へ返す。** 半端な控えが残ると、再実行で読めずに
+    **原子的に書き、失敗は呼び出し元へ返す。** 半端な指摘のファイルが残ると、再実行で読めずに
     空として扱われ、記録済みの指摘を 0 件で置き換える。戻り値は失敗の説明で、
     書けたときは空文字である。
     """
@@ -228,7 +228,7 @@ def _write_destinations(payload_path: pathlib.Path | str, inline_count: int) -> 
     try:
         statefile.write_json_atomic(path, payload)
     except OSError as exc:
-        return f"控えへ送れた先を書けない ({path.name}: {exc})"
+        return f"指摘のファイルへ送れた先を書けない ({path.name}: {exc})"
     return ""
 
 
@@ -245,7 +245,7 @@ def post_review(queue: post_queue.Queue, payload_path: pathlib.Path | str,
 
     **退避するのは、今回積んだ項目が拒まれたときだけである。** 先に積まれていた項目
     （先客）の拒まれ方を今回分のものと取り違えると、先客を消して今回分を二重に積む。
-    今回分が送れていない限り、控えへ送れた先を書かない。
+    今回分が送れていない限り、指摘のファイルへ送れた先を書かない。
     """
     findings = len(_findings(_read_json(payload_path)))
     item = review_posts(payload_path, result_path, repo, pr, round_no, seat,
@@ -266,7 +266,7 @@ def post_review(queue: post_queue.Queue, payload_path: pathlib.Path | str,
         flushed = queue.flush()
 
     done = _find(flushed.sent, seq) or _find(flushed.skipped, seq)
-    # 送れた後に控えを書けなければ、取り込みを止める。再実行は既投稿として照合し直す。
+    # 送れた後に指摘のファイルを書けなければ、取り込みを止める。再実行は既投稿として照合し直す。
     note_error = _write_destinations(payload_path, item["extra"]["inline"]) if done else ""
     return ReviewOutcome(
         review_url=_response_url(done),

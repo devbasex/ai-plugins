@@ -1,7 +1,7 @@
-"""ラウンドの開始（`start-round`）で既存コメントの控えを取り直す（#542 の決定 6）。
+"""ラウンドの開始（`start-round`）で既存コメントのスナップショットを取り直す（#542 の決定 6）。
 
-2 ラウンド目以降だけ取り直す / 失敗したら前の控えを残して `⚠` / 巻き直しの後は新しい PR。
-GitHub は呼ばない。控えの取得は偽の `fetch-pr-comments.sh` に差し替える。
+2 ラウンド目以降だけ取り直す / 失敗したら前のスナップショットを残して `⚠` / 巻き直しの後は新しい PR。
+GitHub は呼ばない。スナップショットの取得は偽の `fetch-pr-comments.sh` に差し替える。
 """
 from __future__ import annotations
 
@@ -88,10 +88,10 @@ def _existing(tmp_path) -> pathlib.Path:
     return tmp_path / f"cross-review-pr{PR}-existing-comments.txt"
 
 
-# ---------- 既存コメントの控えの取り直し（AC12〜AC13） ----------
+# ---------- 既存コメントのスナップショットの取り直し（AC12〜AC13） ----------
 
 def test_the_second_round_refetches_the_comments(start, repo, tmp_path, fake_fetch, monkeypatch):
-    """AC12: 2 ラウンド目で取り直し、控えが新しい中身になる。`--strict` を付ける。"""
+    """AC12: 2 ラウンド目で取り直し、スナップショットが新しい中身になる。`--strict` を付ける。"""
     head = _git(repo, "rev-parse", "HEAD")
     _existing(tmp_path).write_text("[PR-COMMENT] [bot] old\n", encoding="utf-8")
     monkeypatch.setenv("FAKE_BODY", "round1-finding")
@@ -119,14 +119,14 @@ def test_after_rotation_the_new_pr_is_fetched(start, repo, tmp_path, fake_fetch)
 
 def test_a_failed_refetch_keeps_the_previous_snapshot(
         start, repo, tmp_path, fake_fetch, monkeypatch, capsys):
-    """AC12a AC13: 取得元の 1 つでも失敗すれば（終了コード 1）前の控えを残し、`⚠` で続ける。"""
+    """AC12a AC13: 取得元の 1 つでも失敗すれば（終了コード 1）前のスナップショットを残し、`⚠` で続ける。"""
     head = _git(repo, "rev-parse", "HEAD")
     _existing(tmp_path).write_text("[PR-COMMENT] [bot] old\n", encoding="utf-8")
     monkeypatch.setenv("FAKE_RC", "1")
     start.write_state([{"round": 1, "pr": PR, "head_sha": head, "reviewers": ["codex"]}])
     start(head)
     assert _existing(tmp_path).read_text(encoding="utf-8") == "[PR-COMMENT] [bot] old\n"
-    assert "⚠ 既存コメントの控えを取り直せませんでした" in capsys.readouterr().err
+    assert "⚠ 既存コメントのスナップショットを取り直せませんでした" in capsys.readouterr().err
     st = json.loads((tmp_path / f"cross-review-pr{PR}-state.json").read_text())
     assert len(st["rounds"]) == 2
 
@@ -143,7 +143,7 @@ def test_init_fetch_is_not_strict(state_mod, tmp_path, fake_fetch, monkeypatch):
 
 def test_init_aborts_without_a_state_file_when_the_fetch_fails(
         state_mod, tmp_path, fake_fetch, monkeypatch):
-    """`init` は控えの取得に失敗すると中断し、状態ファイルを作らない（R2-005 の現状固定）。
+    """`init` はスナップショットの取得に失敗すると中断し、状態ファイルを作らない（R2-005 の現状固定）。
 
     重複検出が無効のままレビューを始めないためである。取得は `--strict` を付けない 1 回。
     """
@@ -182,7 +182,7 @@ def test_a_refetch_that_cannot_start_keeps_going(
     start.write_state([{"round": 1, "pr": PR, "head_sha": head, "reviewers": ["codex"]}])
     start(head)
     assert _existing(tmp_path).read_text(encoding="utf-8") == "[PR-COMMENT] [bot] old\n"
-    assert "⚠ 既存コメントの控えを取り直せませんでした" in capsys.readouterr().err
+    assert "⚠ 既存コメントのスナップショットを取り直せませんでした" in capsys.readouterr().err
     st = json.loads((tmp_path / f"cross-review-pr{PR}-state.json").read_text())
     assert len(st["rounds"]) == 2
 

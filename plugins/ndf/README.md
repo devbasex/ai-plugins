@@ -166,7 +166,7 @@ Kiro CLI に tool 実行前の案内が無いのは、この事象でモデル�
 `hooks.json` を読み込まないためです（「インストール / agy」を参照）。
 
 **agy は案内を作る時点と渡せる時点が離れています。** tool 実行前の hook がモデルへ文言を返す
-口は拒否のときにしか働かないため、案内はセッションの控えへ積み、次のモデル呼び出しの前に
+口は拒否のときにしか働かないため、案内はセッションの記録へ積み、次のモデル呼び出しの前に
 `injectSteps` で渡します。セッション開始時にあたる事象も持たないため、モデル呼び出しの通し番号が
 0 のときを開始時として扱います。
 
@@ -222,7 +222,7 @@ Claude Code の SessionStart hook（`hooks/claude.json`）は上記に加えて�
 
 - `~/.claude/settings.json` の `cleanupPeriodDays` を 90 日以上に保つ
 - statusline 未設定時に NDF 標準 statusline を設定する
-- カットポイントで claude を起動し直すラッパー（`scripts/relay.py`）の写しが在れば今の版で置き直す（`relay.py startup`。
+- カットポイントで claude を起動し直すラッパー（`scripts/relay.py`）の複製が在れば今の版で置き直す（`relay.py startup`。
   版は後退させない）。10.17.4〜10.17.6 が自動で足した alias の囲みが残っていれば 1 度だけ知らせる。
   **シェルの設定は書かない。** ラッパーを入れる・外すのは `/ndf:install-wrapper`（Claude Code だけ）
 

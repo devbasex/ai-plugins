@@ -216,7 +216,7 @@ oom_kill_increased = yes なら allowed = max(0, min(allowed, running − 1))
 中身が形に合わない）。**`gh` へ渡すのは `pr view <番号> --json number,createdAt,mergedAt,closedAt`
 （と `--repo`）だけである。**
 
-### 測った値の写し方
+### 測った値の複製方
 
 実行計画の「測った値」の表には `capacity` の出力のうち `mem_available_mib` / `cgroup_available_mib` /
 `swap_free_mib` / `oom_kill` / `running` / `allowed` / `limited_by` を写す。`swap_total_mib` /

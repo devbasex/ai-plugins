@@ -6,7 +6,7 @@
 - `run`: 端末の前景に常駐し、claude を擬似端末の子として起動する。要らなければ素通しする
 - `stop`: 動いているラッパーに停止の合図を置く
 - `install` / `uninstall` / `status`: `/ndf:install-wrapper` の本体（#928）
-- `startup`: SessionStart hook の本体。在る写しを置き直し、10.17.4〜10.17.6 の自動の囲みを 1 度だけ知らせる
+- `startup`: SessionStart hook の本体。在る複製を置き直し、10.17.4〜10.17.6 の自動の囲みを 1 度だけ知らせる
 - `question open` / `close`: 質問の表示中の合図（関門を越えない守り）
 
 **利用者の手元の設定は書き換えない。** 導入の副命令と `run` は、テストごとの一時の HOME と
@@ -1399,7 +1399,7 @@ def test_install_lock_busy_changes_nothing(tmp_path, home):
 
 def test_install_config_dir_oserror_changes_nothing(tmp_path, home):
     """現状固定: 設定ディレクトリを作れなければ（親が通常ファイル）、書けない旨を出して
-    終了コード 3 で終わり、シェル設定・写し・版ファイル・記録ファイルを新たに作らない
+    終了コード 3 で終わり、シェル設定・複製・版ファイル・記録ファイルを新たに作らない
     （cmd_install の os.makedirs(config_dir()) が OSError になる経路）。"""
     rc = home / ".bashrc"
     rc.write_text("a\n")
@@ -1412,7 +1412,7 @@ def test_install_config_dir_oserror_changes_nothing(tmp_path, home):
     assert "書けない（" in p.stdout
     # シェル設定は変わらない
     assert snapshot(rc) == before
-    # 設定ディレクトリ配下の成果物（写し・版ファイル・rc）は作られない
+    # 設定ディレクトリ配下の成果物（複製・版ファイル・rc）は作られない
     assert not (parent / "sub").exists()
     assert not (cfg(tmp_path) / "relay.py").exists()
     assert not (cfg(tmp_path) / "relay.version").exists()
@@ -1603,12 +1603,12 @@ def test_status_reports_and_writes_nothing(tmp_path, home):
     p = relay_cmd(tmp_path, "status")
     assert p.returncode == 0
     assert "直の alias（10.17.4〜10.17.6 の形）。10.17.4〜10.17.6 が自動で足した" in p.stdout
-    assert f"写し {cfg(tmp_path)}/relay.py: 無し" in p.stdout
+    assert f"複製 {cfg(tmp_path)}/relay.py: 無し" in p.stdout
     assert tree(home) == before
     assert relay_cmd(tmp_path, "install").returncode == 0
     p = relay_cmd(tmp_path, "status")
     assert "読み込みの行" in p.stdout and "10.17.4〜10.17.6 が自動で足した" not in p.stdout
-    assert f"写し {cfg(tmp_path)}/relay.py: 今の版と同じ" in p.stdout
+    assert f"複製 {cfg(tmp_path)}/relay.py: 今の版と同じ" in p.stdout
 
 
 # -- macOS の bash はログインシェルの設定へ足す（#966）
@@ -1778,15 +1778,15 @@ def test_startup_no_notice(tmp_path, home, case):
 def test_startup_refreshes_existing_copies_only(tmp_path, home):
     old = home / ".local" / "share" / "ndf" / "relay.py"
     old.parent.mkdir(parents=True)
-    old.write_text("# 10.17.4〜10.17.6 の写し\n")
+    old.write_text("# 10.17.4〜10.17.6 の複製\n")
     rc = home / ".bashrc"
     rc.write_text("a\n")
     before = snapshot(rc)
     assert run_hook(tmp_path, HOOK_STARTUP).returncode == 0
     assert old.read_bytes() == RELAY.read_bytes()
-    assert not (home / ".claude").exists()  # 無い写しは作らない
+    assert not (home / ".claude").exists()  # 無い複製は作らない
     cfg(tmp_path).mkdir(parents=True)
-    (cfg(tmp_path) / "relay.py").write_text("# 古い写し\n")
+    (cfg(tmp_path) / "relay.py").write_text("# 古い複製\n")
     (cfg(tmp_path) / "relay.version").write_text("10.17.4\n")
     assert run_hook(tmp_path, HOOK_STARTUP).returncode == 0
     assert (cfg(tmp_path) / "relay.py").read_bytes() == RELAY.read_bytes()
@@ -1806,7 +1806,7 @@ def test_startup_refreshes_existing_copies_only(tmp_path, home):
 def test_startup_never_downgrades(tmp_path, home, copy_ver, plugin_ver, replaced):
     relay = plugin_root(tmp_path, plugin_ver)
     cfg(tmp_path).mkdir(parents=True)
-    (cfg(tmp_path) / "relay.py").write_text("# 写し\n")
+    (cfg(tmp_path) / "relay.py").write_text("# 複製\n")
     if copy_ver is not None:
         (cfg(tmp_path) / "relay.version").write_text(copy_ver + "\n")
     assert relay_cmd(tmp_path, "startup", relay=relay).returncode == 0
@@ -1826,11 +1826,11 @@ def test_explicit_install_can_downgrade(tmp_path, home):
 
 
 def test_startup_concurrent_new_wins(tmp_path, home):
-    """状態の親を分けた（2 つのコンテナの模擬）新旧の startup が同時に走っても、写しは新しい版で終わる。"""
+    """状態の親を分けた（2 つのコンテナの模擬）新旧の startup が同時に走っても、複製は新しい版で終わる。"""
     new = plugin_root(tmp_path, "10.18.0", "new")
     old = plugin_root(tmp_path, "10.17.5", "old")
     cfg(tmp_path).mkdir(parents=True)
-    (cfg(tmp_path) / "relay.py").write_text("# 写し\n")
+    (cfg(tmp_path) / "relay.py").write_text("# 複製\n")
     (cfg(tmp_path) / "relay.version").write_text("10.17.0\n")
     procs = []
     for i, r in enumerate([old, new, old, new]):

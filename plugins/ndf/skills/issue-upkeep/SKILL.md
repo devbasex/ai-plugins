@@ -77,7 +77,7 @@ allowed-tools:
 
 **候補の収集（手順 1）・反映（手順 3）・報告の値は `upkeep.py` が持ち、判定（手順 2A / 2B）だけを
 LLM が持つ。** スクリプトの置き場所 `$R` の決め方は `development-workflow/references/scripts-lookup.md`
-にある。出力はどれも 1 行の JSON（形は `$R/scripts/lib/README.md`）で、控えは
+にある。出力はどれも 1 行の JSON（形は `$R/scripts/lib/README.md`）で、記録は
 `$NDF_UPKEEP_STATE_DIR`（既定は一時ディレクトリの `ndf/issue-upkeep/`）の下にリポジトリごとに置く。
 
 ```bash
@@ -177,7 +177,7 @@ open の全件へ広げる（`--all`）。
 | 現象レイヤー | この課題が現れている場所。ファイル・クラス・層のいずれかで書く |
 | 修正レイヤー | 直すべき場所。その責務を持つべき場所までさかのぼり、本文が書いている直し方をそのまま採らない（[references/grouping.md](references/grouping.md) の「修正レイヤーの決め方」）。手順 2B がクラスタを確定する材料 |
 
-**手順 2A ではクラスタを決めない。** 複数人で分担しており、他の課題の控えが見えないためである。
+**手順 2A ではクラスタを決めない。** 複数人で分担しており、他の課題の記録が見えないためである。
 決めるのは、この課題の修正レイヤーが現象レイヤーと違うかだけである。
 
 ### 手順 2B: 全体で突き合わせて判定を確定する
@@ -227,8 +227,8 @@ python3 "$UPKEEP/upkeep.py" apply --plan plan.json [--max-waits N]
 見る。** 要約値も変わっていればその課題だけを手順 2A へ戻し、同じならそのまま反映する。
 `apply` はこの照合を課題ごとに行い、飛ばした課題を `skipped_changed` に並べる。
 
-**反映は同じ操作を 2 度行っても結果が変わらない形にする。** 済んだ課題を控えへ記録して
-やり直しのときは飛ばし、変える内容が無いときは書き込みを行わない。`apply` は控え（`already`）と
+**反映は同じ操作を 2 度行っても結果が変わらない形にする。** 済んだ課題を記録へ記録して
+やり直しのときは飛ばし、変える内容が無いときは書き込みを行わない。`apply` は記録（`already`）と
 いまの状態との比較（`unchanged`）でこれを行う。「やらない」は `"approved": true` の無い限り
 反映せず（`needs_approval`）、「要判断」は反映せずに返す（`returned`）。
 
@@ -286,7 +286,7 @@ python3 "$UPKEEP/upkeep.py" apply --plan plan.json [--max-waits N]
 
 `apply` がこの待ち方を持つ（`metrics.waits`）。回数の上限は `--max-waits`、1 回の長さの上限は
 `--max-wait` で、超えると `partial` を立てて残りを `pending` に並べる。同じ plan で打ち直すと、
-済んだ課題は控えで飛ぶ。
+済んだ課題は記録で飛ぶ。
 
 ## 他のリポジトリで動くこと
 
@@ -333,7 +333,7 @@ python3 "$UPKEEP/upkeep.py" apply --plan plan.json [--max-waits N]
 | 未設定のまま残った課題 | 件数と理由（主題が合わず重要度も低い / 1 件しか残らない / 複数に当てはまる） |
 | 待った回数 | 外部への書き込みの制限に当たった回数と、待った長さ |
 
-対象・判定の内訳・反映・待った回数の値は `report` が控えから返す。
+対象・判定の内訳・反映・待った回数の値は `report` が記録から返す。
 
 ```bash
 python3 "$UPKEEP/upkeep.py" report

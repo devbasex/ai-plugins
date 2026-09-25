@@ -95,7 +95,7 @@ def test_a_workflow_step_run_skips_cross_review_and_runs_the_tests(
 
 
 def test_the_launch_mode_comes_from_the_argument(refactor, monkeypatch):
-    """決定 7 — 環境変数や控えの読み取りではなく、呼ぶ側が引数で伝える。"""
+    """決定 7 — 環境変数や記録の読み取りではなく、呼ぶ側が引数で伝える。"""
     captured = {}
     # **入口の名前を差し替える。** `main()` は `refactor.py` が取り込んだ `cmd_init` を呼ぶ。
     monkeypatch.setattr(refactor, "cmd_init", lambda args: captured.update(vars(args)))

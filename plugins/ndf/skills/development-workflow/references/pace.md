@@ -82,7 +82,7 @@ glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。どの
 最終の検査で変更があったときだけ）→ まとめ（`spec` 確定仕様化 → Pull Request → `close` 後片付け → `retro` 振り返り）
 を `--then` のステージで流す。`close` のステップは `mission-close.py --record-pr {queue_pr:release-prod} --issues <課題>
 --with-verification` で、本番が飛ばされたときは `--record-pr 0`（本番の記録なし）になる。まとめの計画は課題すべてへ
-工程を記録するため、控えの報告が `まとめる:` から `記録あり:` へ移る。
+工程を記録するため、通過記録の報告が `まとめる:` から `記録あり:` へ移る。
 
 ## 検査のトリガー
 
@@ -164,7 +164,7 @@ Pull Request のコメント）の 3 つがそろったときに限る。** レ�
 
 ## 記録の読み方と閾値の見直し
 
-検査の記録は通過工程の控えと同じ置き場（`${CLAUDE_PLUGIN_DATA}` → `${XDG_STATE_HOME:-~/.local/state}/ndf` →
+検査の記録は通過記録と同じ置き場（`${CLAUDE_PLUGIN_DATA}` → `${XDG_STATE_HOME:-~/.local/state}/ndf` →
 `${TMPDIR:-/tmp}/ndf-checks`）の `checks/<所有者>__<リポジトリ>.jsonl` に、事象を追記するだけで持つ。
 
 | `kind` | いつ足すか | 主な列 |

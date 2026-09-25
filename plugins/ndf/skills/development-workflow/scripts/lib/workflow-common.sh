@@ -320,7 +320,7 @@ wf_parse_sync() {
 
 # --- Pull Request の作成の観測（#424） ---------------------------------------
 
-# 閉じる語の読み取りの実体。**写しは持たない**（決定 3）。`merged` と gate の両方が
+# 閉じる語の読み取りの実体。**複製は持たない**（決定 3）。`merged` と gate の両方が
 # 同じファイルを `bash` の副プロセスとして起動する。
 #
 # **`cd` では解決しない。** Skill だけを複製する Kiro CLI の配置では symlink の手前へ
@@ -378,7 +378,7 @@ wf_parse_pr_create() {
   printf '%s\n' "$out"
 }
 
-# 控えに記録の無い、Pull Request の作成までに求める工程を 1 行 1 件返す。
+# 通過記録に記録の無い、Pull Request の作成までに求める工程を 1 行 1 件返す。
 _wf_missing_before_pr() {
   local mode="${1:-}" content="${2:-}" stage class pace
   local -a recorded=()
@@ -406,7 +406,7 @@ _wf_parse_targets() {
   done
 }
 
-# 控えが存在すれば本文とモードをタブ区切り 1 行で返す。控えが無ければ 1 を返す。
+# 通過記録が存在すれば本文とモードをタブ区切り 1 行で返す。通過記録が無ければ 1 を返す。
 _wf_load_state_mode() {
   local repo="${1:-}" issue="${2:-}" file content mode
   file=$(wf_state_file "$repo" "$issue") || return 1
@@ -532,7 +532,7 @@ _wf_compose_evidence_body() {
   done
   if [ "$conflict" -eq 1 ]; then
     body="$body"$'\n'"モードの記録が課題ごとに食い違います（$modes_str）。最も高い $effective を基準に見ています。"
-    body="$body"$'\n'"1 つの Pull Request に対しモードは 1 つです。閉じる課題すべての控えへ同じ値を書いてください。"
+    body="$body"$'\n'"1 つの Pull Request に対しモードは 1 つです。閉じる課題すべての通過記録へ同じ値を書いてください。"
   fi
   body="$body"$'\n'"記録が無いことは、その工程を通っていないことと同じではありません。記録の側が遅れているだけのこともあります。"
   body="$body"$'\n'"記録するには: bash \"\$SCRIPTS/projects-sync.sh\" <課題番号> stage \"<工程名>\""
@@ -589,7 +589,7 @@ wf_emit_context() {
   printf '"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"%s"}}\n' "$text"
 }
 
-# --- リポジトリと控えの置き場所 ---------------------------------------------
+# --- リポジトリと通過記録の置き場所 ---------------------------------------------
 
 # `<所有者>/<リポジトリ>` を返す。**通信しない。**
 # 畳む規則は projects-common.sh の pj_repo_slug の 1 箇所にある（#435）。
@@ -615,7 +615,7 @@ wf_repo_slug() {
   printf '%s/%s\n' "$owner" "$repo"
 }
 
-# 控えの置き場所。リポジトリの中には置かない（変更として Pull Request に載るため）。
+# 通過記録の置き場所。リポジトリの中には置かない（変更として Pull Request に載るため）。
 wf_state_dir() {
   local base fallback="${TMPDIR:-/tmp}/ndf-stages"
   if [ -n "${CLAUDE_PLUGIN_DATA:-}" ]; then
@@ -656,7 +656,7 @@ wf_state_file() {
 # `cd` で戻ってから `pwd` を取る形は採らない。Skill だけを複製する Kiro CLI の配置では
 # symlink の手前へ戻り、プラグインルートを外す。
 #
-# **読み込めないときは、常に取得できないものとして定義する。** 控えへ 1 件積む処理は、
+# **読み込めないときは、常に取得できないものとして定義する。** 通過記録へ 1 件積む処理は、
 # 取得できないとき書き込みそのものを行わず、終了コード 0 で工程を続ける。
 # shellcheck source=../../../../scripts/lib/lock-common.sh
 if ! . "$(dirname "${BASH_SOURCE[0]}")/../../../../scripts/lib/lock-common.sh" 2>/dev/null; then
@@ -694,9 +694,9 @@ _wf_lock_is_stale() {
   _ndf_lock_is_stale "$@"
 }
 
-# --- 通過工程の控え ---------------------------------------------------------
+# --- 通過記録 ---------------------------------------------------------
 
-# 控えを読む。`version` が 1 以外・読めない・壊れているものは記録が無いものとして扱う。
+# 通過記録を読む。`version` が 1 以外・読めない・壊れているものは記録が無いものとして扱う。
 wf_state_read() {
   local file="${1:-}" content
   if [ -n "$file" ] && [ -f "$file" ]; then
@@ -706,19 +706,19 @@ wf_state_read() {
   printf '{"version":1,"stages":[]}\n'
 }
 
-# 控えから記録されたモードを取り出す。
+# 通過記録から記録されたモードを取り出す。
 _wf_read_mode() {
   jq -r '.mode // empty' <<<"${1:-}" 2>/dev/null
 }
 
-# 控えから記録された進め方を取り出す。記録が無ければ normal と読む。
+# 通過記録から記録された進め方を取り出す。記録が無ければ normal と読む。
 _wf_read_pace() {
   local pace
   pace=$(jq -r '.pace // empty' <<<"${1:-}" 2>/dev/null)
   printf '%s\n' "${pace:-normal}"
 }
 
-# 控えへ 1 件積む。**排他を取れないときは書き込みそのものを行わない。**
+# 通過記録へ 1 件積む。**排他を取れないときは書き込みそのものを行わない。**
 # 飛ばしても終了コード 0 で返って工程は続き、飛ばした工程は報告の「記録なし」に含まれる。
 wf_record() {
   local slug="${1:-}" issue="${2:-}" key="${3:-}" value="${4:-}"
@@ -727,7 +727,7 @@ wf_record() {
   file=$(wf_state_file "$slug" "$issue") || return 0
   lock="$file.lockdir"
   if ! wf_lock_acquire "$lock" "$WF_LOCK_TIMEOUT"; then
-    printf 'NOTE: #%s の進行の控えが使用中のため、この記録は残しません\n' "$issue" >&2
+    printf 'NOTE: #%s の通過記録が使用中のため、この記録は残しません\n' "$issue" >&2
     return 0
   fi
   content=$(wf_state_read "$file")
@@ -753,7 +753,7 @@ wf_record() {
   return 0
 }
 
-# 記録された工程を、控えに書かれた順で 1 行 1 件返す。
+# 記録された工程を、通過記録に書かれた順で 1 行 1 件返す。
 _wf_recorded() {
   jq -r '(.stages // []) | .[]' <<<"$1" 2>/dev/null
 }

@@ -72,7 +72,7 @@ NEW_RUN_DEFAULTS: dict[str, Any] = {
 # どれかに必ず載る。** `replace` は状態へ書いて記録へ積み、`notify` は状態と違う
 # ときだけ「反映しない」と知らせる。
 # 予算は計画のフェーズより前だけ置き換える（設計の「再開」）。採用の件数・締め切り・
-# 控えは `merge-plan` の時点の予算で固定されるため、それ以降は知らせるだけにする。
+# 予備時間は `merge-plan` の時点の予算で固定されるため、それ以降は知らせるだけにする。
 RESUME_BUDGET_REPLACE = (statefile.ResumeField("budget_minutes", "budget_minutes", "replace"),)
 RESUME_BUDGET_NOTIFY = (statefile.ResumeField("budget_minutes", "budget_minutes", "notify"),)
 RESUME_NOTIFY_FIELDS = (
@@ -745,7 +745,7 @@ def _notify_view(
     state: dict[str, Any], args: argparse.Namespace,
     model_spec: dict[str, Optional[str]],
 ) -> tuple[dict[str, Any], argparse.Namespace]:
-    """「知らせる」の比較を、状態と引数の形を揃えて行うための写しを返す。
+    """「知らせる」の比較を、状態と引数の形を揃えて行うための複製を返す。
 
     状態は着手前のテストを `{command, status, checked_at}` で、モデルを全ランタイムの
     辞書で、作業ディレクトリ root を解決済みのパスで持つ。引数の形のまま比べると、
@@ -886,7 +886,7 @@ def _run_baseline_test(command: str, work: pathlib.Path, timeout: int) -> dict[s
             "先に直してから開始してください"
         )
     info(f"✅ 着手前のテスト成功: {command}（{seconds} 秒）")
-    # **所要を残す。** 危険フラグと最終ゲートの全体のテストの控えを、この秒から見積もる。
+    # **所要を残す。** 危険フラグと最終ゲートの全体のテストの予備時間を、この秒から見積もる。
     # **HEAD も残す。** 危険フラグの全体のテストが落ちたとき、元からの失敗かをこの SHA で
     # 見分け（決定 22）、報告と改修計画に基準として出す。
     return {"command": command, "status": status, "checked_at": statefile.now(),

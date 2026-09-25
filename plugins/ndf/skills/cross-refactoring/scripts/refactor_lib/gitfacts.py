@@ -846,7 +846,7 @@ def _sync_generated(state: dict[str, Any]) -> None:
     _commit_sync_changes(work, command, _dirty_paths(state, work), plan_rel)
 
 
-# 退避に使う値は共通層が 1 か所で持つ（#524）。**写しは持たない。** 手順書と実装が
+# 退避に使う値は共通層が 1 か所で持つ（#524）。**複製は持たない。** 手順書と実装が
 # 別々に同じ文字列を持つと、片方だけが更新される。
 _CREDENTIAL_LIB = (
     pathlib.Path(__file__).resolve().parents[4] / "scripts" / "lib" / "git-credential.sh"

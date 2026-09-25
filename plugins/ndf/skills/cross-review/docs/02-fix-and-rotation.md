@@ -29,7 +29,7 @@
 | リポジトリ・PR・ラウンド | state.json の `repo` / `current_pr` / `rounds[-1].round` |
 | 作業ディレクトリ・ブランチ・ベース | state.json の `worktree_path` / `head_branch` / `base_branch` |
 | 前ラウンドのレビュー | `rounds[-1]` の担当ごとの `intent` / `posted_as` / `comments` / `review_url`。件数はそのラウンドで投稿した数で、対応の対象は `/ndf:fix` が PR の未解決のスレッドから数え直す |
-| 既存コメントの控え | `$TMP_DIR/cross-review-pr<PR>-existing-comments.txt` |
+| 既存コメントのスナップショット | `$TMP_DIR/cross-review-pr<PR>-existing-comments.txt` |
 | 戻り値ファイル | `$TMP_DIR/fix-pr<PR>-result.json`。環境変数 `CROSS_REVIEW_TMP_DIR` を渡すと `/ndf:fix` がここへ書く |
 
 **送信・返信・決着・まとめは取り込み（`state.py merge-fix`）が行う**。worker は
@@ -201,7 +201,7 @@ stdout には両モードとも以下を KEY=VALUE で出す:
 state.json の **キーは元 PR 番号 (STATE_PR) のまま** なので、light/squash どちらでも
 後続スクリプトへの第 1 引数は `$STATE_PR` を渡し続ければよい。
 
-**巻き直しの後の最初のラウンドでは、`start-round` が新しい PR の既存コメントで控えを取り直す**
+**巻き直しの後の最初のラウンドでは、`start-round` が新しい PR の既存コメントでスナップショットを取り直す**
 （#542）。
 
 ### 後方互換: 旧 1 引数形式

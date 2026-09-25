@@ -86,7 +86,7 @@ def test_the_result_of_a_second_seat_is_recorded_under_its_seat_name(tmp_dir, st
 # 起動スクリプトは席の名前を受け、CLI は `${SEAT%%-*}` で選ぶ（設計の決定 10）。
 # **渡した先を差し替えて確かめる。** 実物の共通の起動スクリプトを呼ぶと CLI を起動する。
 # 差し替えのために、起動スクリプトの隣に置いた符号のリンクから、相対で解決される
-# 共通層の位置（`../../../scripts/lib`）へ控えを置く。
+# 共通層の位置（`../../../scripts/lib`）へ記録を置く。
 
 LAUNCH_SCRIPTS = pathlib.Path(__file__).resolve().parents[1] / "scripts"
 LIB = pathlib.Path(__file__).resolve().parents[3] / "scripts" / "lib"
@@ -95,7 +95,7 @@ LIB = pathlib.Path(__file__).resolve().parents[3] / "scripts" / "lib"
 def _stub_tree(tmp_path: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
     """起動スクリプトの符号のリンクと、差し替えた共通の起動スクリプトを置く。
 
-    返すのは `(起動スクリプトのパス, 渡された引数を書き出す控えのパス)`。
+    返すのは `(起動スクリプトのパス, 渡された引数を書き出す記録のパス)`。
     """
     fake_scripts = tmp_path / "plugin" / "skills" / "cross-review" / "scripts"
     fake_scripts.mkdir(parents=True)

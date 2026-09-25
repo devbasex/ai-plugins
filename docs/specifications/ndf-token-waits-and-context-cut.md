@@ -10,10 +10,10 @@ Claude Code の PreToolUse hook（`plugins/ndf/scripts/token-guard.sh`）が、�
 
 | 何を読むか | 正本 |
 | --- | --- |
-| 待ちの費用、許す待ち方と禁じる待ち方、待つ相手ごとの手、途中の通知を受けたときの層ごとの手と写しの待ちのコマンド、hook の止め方、4 ランタイムの扱い | `plugins/ndf/skills/development-workflow/references/waiting.md` |
+| 待ちの費用、許す待ち方と禁じる待ち方、待つ相手ごとの手、途中の通知を受けたときの層ごとの手と複製の待ちのコマンド、hook の止め方、4 ランタイムの扱い | `plugins/ndf/skills/development-workflow/references/waiting.md` |
 | 会話を切る 4 つのカットポイント、上限を超えたら hook が止めること、新しい会話で戻す手順 | `plugins/ndf/skills/development-workflow/references/context-window.md` の「context window はカットポイントで切る」「上限を超えたら hook が止める」「新しい会話で戻す」 |
 | conductor が引き継ぎの 1 行を出す時点 | `plugins/ndf/skills/development-workflow/SKILL.md`（「工程は 1 つの context window で通し切らなくてよい」の段落） |
-| supervisor と worker が待ち方に従う規則、worker の起動指示の `置き場所`（報告の写しと完了の目印） | `plugins/ndf/skills/development-workflow/references/agent-layers.md` |
+| supervisor と worker が待ち方に従う規則、worker の起動指示の `置き場所`（報告の複製と完了の目印） | `plugins/ndf/skills/development-workflow/references/agent-layers.md` |
 | `sleep` の判定の字句の規則 | `plugins/ndf/scripts/lib/token_guard_sleep.py` の docstring |
 
 ## 概要
@@ -46,8 +46,8 @@ Claude Code の PreToolUse hook（`plugins/ndf/scripts/token-guard.sh`）が、�
 | 文脈量 | 1 回の API 呼び出しで読んだトークン数。`input_tokens + cache_read_input_tokens + cache_creation_input_tokens` |
 | 工程 Skill | `context-window.md` の 4 つのカットポイントの直後に始まる工程の Skill と、入口の `development-workflow` / `issue-plan-strategy`（下の「工程 Skill の一覧」） |
 | 途中の通知 | 背景の処理を残したまま応答を終えたサブエージェントについて、親へ届く 1 回目の通知。注記に「background work of its own still running」「may be interim」と出る |
-| 報告の写し | worker が起動指示の `置き場所` のファイルの末尾へ書く `## 作業の報告` の節。最後の応答の報告と同じ中身 |
-| 完了の目印 | worker が報告の写しを書き終えた後に作る空のファイル `<置き場所>.done` |
+| 報告の複製 | worker が起動指示の `置き場所` のファイルの末尾へ書く `## 作業の報告` の節。最後の応答の報告と同じ中身 |
+| 完了の目印 | worker が報告の複製を書き終えた後に作る空のファイル `<置き場所>.done` |
 | 引き継ぎの 1 行 | 新しい会話の最初に打てば、その工程から再開できるコマンド 1 行。`/ndf:development-workflow #<課題> [#<課題> ...]`。情報文字列 `ndf-next` の囲みのコードブロック 1 つで出す |
 
 ## 構成要素
@@ -72,7 +72,7 @@ graph TB
     TG["token-guard.sh"]
   end
   subgraph ST["状態"]
-    RS["連続 Read の控えと案内の目印<br/>guards/"]
+    RS["連続 Read の記録と案内の目印<br/>guards/"]
     TR["会話の記録<br/>transcript_path"]
     SL["token-guard-stages.txt"]
   end
@@ -96,7 +96,7 @@ graph TB
 - **hook の終了コードは常に 0 である。** 拒否は `permissionDecision: deny` で返し、通すときは
   何も出さない
 - **判定が失敗したときは通す。** 入力が読めない・`jq` や `python3` が無い・`guards/` を作れない・
-  控えを書けない・記録を読めない・ロックを待ちの上限（既定 1 秒）の内に取れない、のいずれでもツールの実行を止めない。
+  記録を書けない・記録を読めない・ロックを待ちの上限（既定 1 秒）の内に取れない、のいずれでもツールの実行を止めない。
   待ちの上限は `NDF_TOKEN_GUARD_LOCK_WAIT`（秒・0 以上の整数）で変えられる。本番は既定の
   1 秒のままにし、延ばすのは負荷の高い環境で並列の試験を動かすときだけである。
   sleep の判定は状態を持たないため、`guards/` が使えなくても続ける
@@ -195,7 +195,7 @@ graph TB
 **拒否の理由の欄の `<課題>` は、Skill の `args`（Agent なら `description`）から取り出す。**
 `#<数>` と数だけの語を課題番号とし、日付・版数・小数（`2026-09-23` / `v10.16.1` / `2.0.3`）は
 番号と読まない。範囲（`#829-830`）は `#829 #830` として示す。番号が無ければ `<課題番号>` の
-文字のまま示し、通過工程の控えから推測しない。並行して別の課題を進めていると、最新の控えは
+文字のまま示し、通過記録から推測しない。並行して別の課題を進めていると、最新の記録は
 別の課題を指すためである。
 
 ### 工程 Skill の一覧
@@ -229,7 +229,7 @@ Kiro では、それぞれの README が示す Skill の起動の書き方に読
 を受け取った時点で出し、supervisor は出さない。報告が `結果: 関門` のときは、関門の承認と
 取り込み（設計 Pull Request のマージなど）が済んだ後に出す。関門の前に会話を切らないためである。
 
-**新しい会話の `development-workflow` は、課題の本文の `## 進行`・通過工程の控え・Pull Request
+**新しい会話の `development-workflow` は、課題の本文の `## 進行`・通過記録・Pull Request
 から、モード・作業ツリー・現在の工程を戻す。** Pull Request は番号の全文検索で引かず、作業
 ツリーのブランチ名と課題の `closedByPullRequestsReferences` で引く。設計の Pull Request は閉じる
 語を持たないため、ブランチ名でしか引けない。手順は `context-window.md` の「新しい会話で戻す」が
@@ -260,21 +260,21 @@ supervisor は再開しない。
 | 層 | 常に成り立つ条件 |
 | --- | --- |
 | supervisor | worker を起動する前に、`置き場所` のファイルを worker ごとに新しいパスで空に作り、完了の目印を消す。`置き場所` を「無し」にしない |
-| worker | 最後の応答の前に、長い出力の有無に依らず報告の写しを `置き場所` の末尾へ書き、その後に完了の目印を作る。`Monitor` で待つときも同じ |
-| worker | 背景の処理を残したまま応答を終えない（規則 5）。写しと目印はこの規則を緩めず、守れなかった worker を待つための備えである |
+| worker | 最後の応答の前に、長い出力の有無に依らず報告の複製を `置き場所` の末尾へ書き、その後に完了の目印を作る。`Monitor` で待つときも同じ |
+| worker | 背景の処理を残したまま応答を終えない（規則 5）。複製と目印はこの規則を緩めず、守れなかった worker を待つための備えである |
 
-写しの待ちは上限 3600 秒の until ループで、終了コード 0 なら `置き場所` の最後の
+複製の待ちは上限 3600 秒の until ループで、終了コード 0 なら `置き場所` の最後の
 `## 作業の報告` から末尾までを読んで進み、124 なら既存の「supervisor の worker の点検」と
 「報告が無いまま終わったとき」の規則へ渡す。コマンドと表の正本は `waiting.md` である。
-worker の 2 回目の通知は、写しを読んだ後に届いても読み直さない。
+worker の 2 回目の通知は、複製を読んだ後に届いても読み直さない。
 
 | 決定 | 理由 |
 | --- | --- |
-| 待つのは `置き場所` の中身ではなく、別ファイルの完了の目印の出現である | `置き場所` は長い出力と共用のため、見出しや固定の行を待つと、書きかけの写しや長い出力に同じ行が含まれたときにも反応する。別ファイルの存在は中身に左右されず、書き終えた後にだけ現れる |
-| 起動の前に `置き場所` を新しいパスで空にし、目印を消す | 前の worker の報告や目印が残ったパスを渡すと、写しの待ちが即座に終わり、今の worker の報告を待たない |
+| 待つのは `置き場所` の中身ではなく、別ファイルの完了の目印の出現である | `置き場所` は長い出力と共用のため、見出しや固定の行を待つと、書きかけの複製や長い出力に同じ行が含まれたときにも反応する。別ファイルの存在は中身に左右されず、書き終えた後にだけ現れる |
+| 起動の前に `置き場所` を新しいパスで空にし、目印を消す | 前の worker の報告や目印が残ったパスを渡すと、複製の待ちが即座に終わり、今の worker の報告を待たない |
 | 途中の通知を受けても worker へ `SendMessage` を送らない | worker は背景の待ちが終わるまで報告を出せず、送っても同じく途中の通知が返る |
 | サブエージェントの出力ファイル（`tasks/*.output`）を背景で見張らない | `waiting.md` が読むことを禁じており、パスの形も Claude Code が約束していない |
-| 写しの待ちに上限 3600 秒を置き、上限の後の扱いは既存の点検と `SendMessage` の規則を使う | worker が報告を書かずに落ちると目印は現れず、上限が無いと永久に待つ。3600 秒は初期値で、worker の所要時間の実測で見直す。上限で起きても点検が 1 回挟まるだけで作業は失われない |
+| 複製の待ちに上限 3600 秒を置き、上限の後の扱いは既存の点検と `SendMessage` の規則を使う | worker が報告を書かずに落ちると目印は現れず、上限が無いと永久に待つ。3600 秒は初期値で、worker の所要時間の実測で見直す。上限で起きても点検が 1 回挟まるだけで作業は失われない |
 | 規則の数を変えず、supervisor の規則 4 と worker の規則 5 に 1 文ずつ足す | どちらも既存の「待ちで応答を終えない」「背景の処理を残したまま応答を終えない」の中の場面である。新しい規則を立てると、起動指示へ写す規則の数が変わる |
 
 **待ち方の規約は `waiting.md` の新しいファイルに置く。** `agent-layers.md` の節にすると、
@@ -287,7 +287,7 @@ worker の 2 回目の通知は、写しを読んだ後に届いても読み直�
 
 ## データ・設定
 
-### 控えの置き場所
+### 記録の置き場所
 
 **`guards/` の場所は `token-guard.sh` が自前で解決する。** 次の順で先に使えたものの下に置く。
 順は `workflow-common.sh` の `wf_state_dir` と同じである。`workflow-common.sh` は読み込まない。
@@ -300,11 +300,11 @@ worker の 2 回目の通知は、写しを読んだ後に届いても読み直�
 
 | ファイル | 中身 |
 | --- | --- |
-| `read-<session_id>.json` | 連続 Read の控え（下の表） |
+| `read-<session_id>.json` | 連続 Read の記録（下の表） |
 | `context-<session_id>.json` | 文脈量の案内の目印。`{"key": "<鍵>"}`。鍵は Skill なら `skill\t<名前>\t<args>`、Agent なら `agent\t<description>` |
 | `<session_id>.lock` | session ごとのロック |
 
-連続 Read の控え:
+連続 Read の記録:
 
 | キー | 型 | 意味 |
 | --- | --- | --- |
@@ -315,11 +315,11 @@ worker の 2 回目の通知は、写しを読んだ後に届いても読み直�
 | `count` | 整数 | `key`・`size`・`mtime`・`inode` が変わらないまま続いた Read の回数 |
 
 - **書き込みは置き換えで行う**（一時ファイルへ書いて `mv`）。途中で落ちても壊れた JSON を残さない
-- **控えと目印の読み・判定・書き込みは session ごとのロックの中で行う。** 同じ session の hook が
+- **記録と目印の読み・判定・書き込みは session ごとのロックの中で行う。** 同じ session の hook が
   並列に走ると、置き換えだけでは `count` の更新や目印が失われる。ロックは `lock-common.sh` の
   `ndf_lock_acquire <dir> 1` / `ndf_lock_release` で取り、1 秒で取れなければ判定せず通す。
   sleep の判定はロックを取らない
-- **7 日より古い控えは、書き込みのついでに消す。** 会話が終わった合図を hook は受け取らない
+- **7 日より古い記録は、書き込みのついでに消す。** 会話が終わった合図を hook は受け取らない
 
 ### 環境変数
 
@@ -343,7 +343,7 @@ worker の 2 回目の通知は、写しを読んだ後に届いても読み直�
 | `tool_input.file_path` / `offset` / `limit` | 連続 Read | 通す |
 | `tool_input.skill` / `tool_input.args` | 文脈量（対話の経路） | 通す |
 | `tool_input.description` | 文脈量（3 層の経路） | 通す |
-| `session_id` | 連続 Read の控え・案内の目印 | 通す |
+| `session_id` | 連続 Read の記録・案内の目印 | 通す |
 | `transcript_path` | 文脈量 | 通す |
 | `agent_id` | 文脈量（付いていれば見ない） | conductor とみなす |
 
@@ -398,7 +398,7 @@ agy の CLI 側の消費を測った後に、登録するかを改めて決め�
 - ラッパーの直接の子の conductor では同じ起動が 2 回続けて止まり、理由の欄が `ndf-next` と supervisor の
   報告の待ちを含むこと。直接の子でない・ラッパーが動いていないときは 1 度だけ通ること。ラッパーの外でも理由の
   欄が `ndf-next` のブロックを求めること
-- 壊れた入力・`jq` の無い `PATH`・書けない控えの場所・取れないロック・読めない記録で、出力なし・
+- 壊れた入力・`jq` の無い `PATH`・書けない記録の場所・取れないロック・読めない記録で、出力なし・
   終了コード 0 で通すこと。`guards/` の親が `wf_state_dir` の親と一致すること
 - 環境変数で判定ごとに止まり、上限が変わること
 - `token-guard-stages.txt` の名前が上の 13 個と一致し、どれも `plugins/ndf/manifests/` の Skill 一覧に
@@ -409,7 +409,7 @@ agy の CLI 側の消費を測った後に、登録するかを改めて決め�
   4 ランタイムの表があること
 - Codex / Kiro / agy の既存の hook の動作が変わらないこと（既存のテスト）
 - supervisor → worker の 2 層で、worker が背景の待ちを残して応答を終えても、supervisor が途中の
-  通知で止まらず、自分の写しの待ちの完了通知で再開して worker の報告を畳んだフェーズの報告を返すこと。
+  通知で止まらず、自分の複製の待ちの完了通知で再開して worker の報告を畳んだフェーズの報告を返すこと。
   conductor が報告なしで続けさせる回数が 0 であること（`claude -p --output-format stream-json` で
   再現する。記録は [PR #910](https://github.com/devbasex/ai-plugins/pull/910) の本文。`claude -p` は
   本体が応答を終えると背景の処理を残したまま終わるため、再現では conductor 側でプロセスを保つ）

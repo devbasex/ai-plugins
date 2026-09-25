@@ -91,7 +91,7 @@ _pj_in_list() { grep -Fxq -- "$2" <<<"$1"; }
 pj_is_stage() { _pj_in_list "$PJ_STAGES" "${1:-}"; }
 pj_is_mode() { _pj_in_list "$PJ_MODES" "${1:-}"; }
 pj_is_status() { _pj_in_list "$PJ_STATUSES" "${1:-}"; }
-# 進め方（#1078）。ボードのフィールドは持たず、issue の本文の見出し行と控えにだけ書く。
+# 進め方（#1078）。ボードのフィールドは持たず、issue の本文の見出し行と通過記録にだけ書く。
 PJ_PACES=$'normal\nfast'
 pj_is_pace() { _pj_in_list "$PJ_PACES" "${1:-}"; }
 
@@ -117,7 +117,7 @@ pj_is_valid_value() {
   esac
 }
 
-# 解決した識別子の控え。**記録のたびにボードの全件を読まない。**
+# 解決した識別子のキャッシュ。**記録のたびにボードの全件を読まない。**
 #
 # `gh project item-list --limit 1000` は GraphQL で、取得の点数が REST とは別の上限を
 # 持つ（#271）。2026-09-04 の実測では、10 件の課題へ 2 つのキーを書こうとした時点で
@@ -125,7 +125,7 @@ pj_is_valid_value() {
 #
 # 置き場所は共通の git ディレクトリの下である。**作業ツリーでは `.git` がファイルで
 # あるため**、`.git/ndf/` を作ろうとすると失敗する。共通の git ディレクトリなら、
-# 作業ツリーを消しても控えが残り、同じリポジトリの複数の作業ツリーで共有できる。
+# 作業ツリーを消してもキャッシュが残り、同じリポジトリの複数の作業ツリーで共有できる。
 pj_cache_dir() {
   local dir git_dir
   git_dir=$(git rev-parse --git-common-dir 2>/dev/null) || return 1
@@ -137,7 +137,7 @@ pj_cache_dir() {
   printf '%s\n' "$dir"
 }
 
-# 控えのファイル。ボードと課題の組で決まる（工程が進んでも変わらない）。
+# キャッシュのファイル。ボードと課題の組で決まる（工程が進んでも変わらない）。
 pj_cache_file() {
   local dir owner="${1:-}" number="${2:-}" issue="${3:-}"
   dir=$(pj_cache_dir) || return 1

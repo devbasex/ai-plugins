@@ -88,10 +88,10 @@ _wt_abs() {
   _wt_abs_in "$PWD" "${1:-}"
 }
 
-# git への問い合わせを、同じディレクトリについて 1 回に留めるための控え。
+# git への問い合わせを、同じディレクトリについて 1 回に留めるためのキャッシュ。
 # 呼び出しは `git rev-parse --git-dir --git-common-dir` と
 # `git rev-parse --show-superproject-working-tree` の 2 回まで。
-# 引数を省くと現在地を解決する。控えは解決したディレクトリを鍵にする。
+# 引数を省くと現在地を解決する。キャッシュは解決したディレクトリを鍵にする。
 _wt_resolve() {
   local dir="${1:-$PWD}"
   [ "${_WT_RESOLVED_DIR:-}" = "$dir" ] && return "${_WT_RESOLVE_RC:-0}"
@@ -292,7 +292,7 @@ wt_declaration_local_ignored() {
 }
 
 # 宣言ファイルの状態を表す目印を返す。存在しなければ空文字。
-# 控えの作り直しが要るかを、git を呼ばずに判定するために使う。
+# キャッシュの作り直しが要るかを、git を呼ばずに判定するために使う。
 #
 # **内容から作る。** 更新時刻は秒までしか持たない実装があり、同じ秒のうちに
 # 書き換えると目印が変わらない。長さの変わらない書き換え（許可パスの入れ替えなど）は
@@ -2362,7 +2362,7 @@ fi
 WT_LOCK_STALE_MINUTES="${NDF_LOCK_STALE_MINUTES:-5}"
 
 # 待ちの上限の既定は 5 秒である。**この既定に環境変数の上書きは置かない。**
-# 上書きは工程の控えの側（`NDF_STAGE_LOCK_TIMEOUT`）だけが持つ。
+# 上書きは通過記録の側（`NDF_STAGE_LOCK_TIMEOUT`）だけが持つ。
 wt_lock_acquire() {
   local dir="${1:-}" timeout="${2:-5}"
   ndf_lock_acquire "$dir" "$timeout"

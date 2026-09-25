@@ -451,7 +451,7 @@ graph TD
 - [PR #910](https://github.com/devbasex/ai-plugins/pull/910) — 参加の母集合にホストを含める実装（#892）
 - [issue #786](https://github.com/devbasex/ai-plugins/issues/786) — 既定の母集合から agy を外し、母集合に無い者の外す指定を無視する
 - [PR #930](https://github.com/devbasex/ai-plugins/pull/930) — #786 の実装
-- [ラウンドで担当が受け取るもの](cross-review-round-inputs.md) — 出し切りの指示・控えの取り直し・設計 Pull Request の観点（#542 #786）
+- [ラウンドで担当が受け取るもの](cross-review-round-inputs.md) — 出し切りの指示・スナップショットの取り直し・設計 Pull Request の観点（#542 #786）
 - [`cross-review` のレビュワーの母集合と終了基準](../../plugins/ndf/skills/cross-review/docs/05-pool-and-convergence.md)
 - [`cross-review` の状態ファイルと入出力の契約](../../plugins/ndf/skills/cross-review/docs/04-contracts.md)
 - [`cross-review` の状態とレビューの手順](../../plugins/ndf/skills/cross-review/docs/01-state-and-review.md)

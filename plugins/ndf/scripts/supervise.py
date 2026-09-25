@@ -1072,7 +1072,7 @@ class Supervisor:
         pace_first = self.plan.get("進め方") == "fast" and not getattr(self, "pace_recorded", False)
         self.pace_recorded = True
         for issue in self.plan.get("課題", []):
-            if pace_first:  # 控えと本文の見出し行へ進め方を先に書く（まとめる工程を記録なしと数えない）
+            if pace_first:  # 通過記録と本文の見出し行へ進め方を先に書く（まとめる工程を記録なしと数えない）
                 subprocess.run(["bash", rec, str(issue), "pace", "fast"], cwd=self.cwd, capture_output=True, text=True)
             subprocess.run(["bash", rec, str(issue), "stage", stage], cwd=self.cwd,
                            capture_output=True, text=True)

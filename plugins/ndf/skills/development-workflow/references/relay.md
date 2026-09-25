@@ -25,19 +25,19 @@
 
 | 置くもの | 中身 |
 | --- | --- |
-| 写しと写しの版 | `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/relay.py` と `relay.version` |
-| ラッパーの rc | `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/shellrc`。`function claude { ... }` を定義する。関数は呼んだ時点で写しが在ればラッパーを、無ければ素の `claude` を起こす |
-| 読み込みの 1 行 | `[ -f "$HOME/.claude/ndf/shellrc" ] && . "$HOME/.claude/ndf/shellrc"`。`DEVBASE_SHELLRC_DIR` がディレクトリを指せば `$DEVBASE_SHELLRC_DIR/ndf-relay.sh` に置き、無ければ `$SHELL` の設定（bash は `~/.bashrc`（macOS では `~/.bash_profile`）、zsh は `${ZDOTDIR:-~}/.zshrc`）の末尾へ囲み（`# >>> ndf relay >>>` 〜 `# <<< ndf relay <<<`）で足す。書く前に `<設定>.ndf-bak-<UTC の時刻>` へ写しを取る |
+| 複製と複製の版 | `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/relay.py` と `relay.version` |
+| ラッパーの rc | `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/shellrc`。`function claude { ... }` を定義する。関数は呼んだ時点で複製が在ればラッパーを、無ければ素の `claude` を起こす |
+| 読み込みの 1 行 | `[ -f "$HOME/.claude/ndf/shellrc" ] && . "$HOME/.claude/ndf/shellrc"`。`DEVBASE_SHELLRC_DIR` がディレクトリを指せば `$DEVBASE_SHELLRC_DIR/ndf-relay.sh` に置き、無ければ `$SHELL` の設定（bash は `~/.bashrc`（macOS では `~/.bash_profile`）、zsh は `${ZDOTDIR:-~}/.zshrc`）の末尾へ囲み（`# >>> ndf relay >>>` 〜 `# <<< ndf relay <<<`）で足す。書く前に `<設定>.ndf-bak-<UTC の時刻>` へ複製を取る |
 
 - **次に開いたシェルから効く**
 - 既に `claude` の alias か関数がある（bash では `~/.bash_aliases` とログインシェルの設定 `~/.bash_profile`・`~/.bash_login`・`~/.profile` も見る）・bash と zsh 以外のシェルでは足さず、自分で置く 1 行を示す
 - **macOS の bash では `~/.bash_profile` へ足す。** macOS の端末は新しいウィンドウをログインシェルで開き、ログインシェルの bash は `~/.bashrc` を読まない。`~/.bash_profile` が無く `~/.bash_login` か `~/.profile` があるときは、作ると元のファイルが読まれなくなるため足さず、自分で置く 1 行を示す
-- `/ndf:install-wrapper status` で、読み込み先・囲みの形・写しの版を見られる
-- **devbase では `~/.claude` が同じアカウントグループのコンテナで共有される。** 写しとラッパーの rc はコンテナを作り直しても残り、導入・取り外しの効果は同じグループの全コンテナに及ぶ
+- `/ndf:install-wrapper status` で、読み込み先・囲みの形・複製の版を見られる
+- **devbase では `~/.claude` が同じアカウントグループのコンテナで共有される。** 複製とラッパーの rc はコンテナを作り直しても残り、導入・取り外しの効果は同じグループの全コンテナに及ぶ
 
-**写しは SessionStart hook が今の版に保つ。** 写しか 10.17.4〜10.17.6 の写し（`${XDG_DATA_HOME:-~/.local/share}/ndf/relay.py`）が
-在れば、起動ごと（新しい会話・`-c`・`--resume`）に今のプラグインの `relay.py` で置き直す。無い写しは作らない。
-写しの版が今のプラグインより新しければ置き直さない（同じ `~/.claude` を共有する古い版のコンテナが写しを
+**複製は SessionStart hook が今の版に保つ。** 複製か 10.17.4〜10.17.6 の複製（`${XDG_DATA_HOME:-~/.local/share}/ndf/relay.py`）が
+在れば、起動ごと（新しい会話・`-c`・`--resume`）に今のプラグインの `relay.py` で置き直す。無い複製は作らない。
+複製の版が今のプラグインより新しければ置き直さない（同じ `~/.claude` を共有する古い版のコンテナが複製を
 後退させないため）。
 
 ### 10.17.4〜10.17.6 から上げた利用者
@@ -45,7 +45,7 @@
 10.17.4〜10.17.6 の SessionStart hook は、`~/.bashrc` か `~/.zshrc` へ alias の囲みを自動で足していた。次の版では:
 
 - 起動したときに 1 度だけ「10.17.4〜10.17.6 が自動で足したもの。使い続けるなら何もしなくてよい。外すなら `/ndf:install-wrapper uninstall`」と知らせる
-- 何もしなければ、その囲みの alias が指す 10.17.4〜10.17.6 の写し（hook が今の版で置き直す）でラッパーが動く
+- 何もしなければ、その囲みの alias が指す 10.17.4〜10.17.6 の複製（hook が今の版で置き直す）でラッパーが動く
 - `/ndf:install-wrapper` を打つと、囲みの中だけを読み込みの 1 行へ置き換える
 - `NDF_RELAY_AUTO` は意味を失った（hook が導入しないため）。置いたままでも害は無い
 
@@ -53,7 +53,7 @@
 
 | したいこと | 手段 |
 | --- | --- |
-| 外す | `/ndf:install-wrapper uninstall`。`~/.bashrc`・`~/.bash_profile`・`~/.zshrc` の囲みを外し（バックアップの後。囲みの外は変えない）、読み込み先のファイル・ラッパーの rc・写し・10.17.4〜10.17.6 の写しを消す。開いているシェルでは `unset -f claude`（10.17.4〜10.17.6 の囲みなら `unalias claude`）で外れる |
+| 外す | `/ndf:install-wrapper uninstall`。`~/.bashrc`・`~/.bash_profile`・`~/.zshrc` の囲みを外し（バックアップの後。囲みの外は変えない）、読み込み先のファイル・ラッパーの rc・複製・10.17.4〜10.17.6 の複製を消す。開いているシェルでは `unset -f claude`（10.17.4〜10.17.6 の囲みなら `unalias claude`）で外れる |
 | 手で外す | 囲みの行を消し、`~/.claude/ndf/` の `relay.py`・`relay.version`・`shellrc` を消す |
 | 過去の版へ戻した | `/ndf:install-wrapper` を打ち直す（明示の導入は版を比べずに今の版を置く） |
 | `/ndf:install-wrapper` を持たない 10.17.6 以前へ戻す | **戻す前に** `/ndf:install-wrapper uninstall` を打つ。戻した後なら囲みと `~/.claude/ndf/` を手で消す |
@@ -138,7 +138,7 @@ conductor では、文脈量の hook が工程へ入る起動を 1 度の通し�
 
 1. 計画を作った後に 1 度: `mission-state.py init /tmp/ndf-sv/r7/mission.json --name <ミッション> --milestone 26 --plan 実装=<plan.json> ... --plan 開発版=<plan.json> --plan 本番=<plan.json> --done <queue の done> --dev <開発版> --prod <本番> --goal @<雛形>`（雛形は次の区間の `/goal` の文面。`{heading}`・`{dev}`・`{prod}`・`{milestone}`・`{name}`・`{issues}` を差し込む）
 2. 関門を承認したら: `mission-state.py gate <mission.json> "関門 2" --what "本番 <版>"`
-   - `pace: fast` のミッションは、1 に `--pace fast --milestone <M>`（MVV の写し元。`--mvv <ファイル>` でもよい）を足し、利用者が
+   - `pace: fast` のミッションは、1 に `--pace fast --milestone <M>`（MVV の複製元。`--mvv <ファイル>` でもよい）を足し、利用者が
      `mvv.md` を承認した後に `mission-state.py gate <mission.json> MVV --what <要約>` を打つ。関門 1・2 の記録は、MVV の判定が
      通したときは `mvv-gate.py` が `--by mvv --verdict --reasons --log` 付きで書く（`status` の行は「MVV の判定」）
 3. カットポイントでは次の順に呼ぶ:

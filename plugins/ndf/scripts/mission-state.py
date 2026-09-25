@@ -173,7 +173,7 @@ def init_mvv(a) -> tuple[dict | None, dict | None]:
             return None, result("stopped", f"MVV のファイルが無い: {a.mvv}", exit=EXIT_PRECONDITION)
         return {"path": str(path), "sha256": sha256_of(path)}, None
     if not a.milestone:
-        return None, result("stopped", "--pace fast には --milestone（MVV の写し元）か --mvv が要る",
+        return None, result("stopped", "--pace fast には --milestone（MVV の複製元）か --mvv が要る",
                             exit=EXIT_UNREADABLE)
     try:
         text = mvv_sections(milestone_description(a.milestone, a.repo))

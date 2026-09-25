@@ -25,7 +25,7 @@
 範囲を決められない = 2。`finish` と `changed` の 3 は「変更なし」。eval は立ったかどうかにかかわらず
 検査の記録へ 1 行を足す（閾値を見直す材料）。
 
-検査の記録は通過工程の控えと同じ置き場（`${CLAUDE_PLUGIN_DATA}` → `${XDG_STATE_HOME:-~/.local/state}/ndf`
+検査の記録は通過記録と同じ置き場（`${CLAUDE_PLUGIN_DATA}` → `${XDG_STATE_HOME:-~/.local/state}/ndf`
 → `${TMPDIR:-/tmp}/ndf-checks`）の `checks/<所有者>__<リポジトリ>.jsonl` に、事象を追記するだけで持つ。
 前回の検査は result が merged か no_change の check の最新の行で、無ければ --since、リポジトリの配布の宣言
 （`.ndf/supervise.json` の release）が決める正式版のタグの最新、起点のブランチとの分岐点の順に使う。
@@ -142,7 +142,7 @@ def slug_of(root: Path) -> str:
 
 
 def state_base() -> Path:
-    """通過工程の控えと同じ順で置き場を決める。"""
+    """通過記録と同じ順で置き場を決める。"""
     fallback = Path(os.environ.get("TMPDIR", "/tmp")) / "ndf-checks"
     if os.environ.get("CLAUDE_PLUGIN_DATA"):
         base = Path(os.environ["CLAUDE_PLUGIN_DATA"])

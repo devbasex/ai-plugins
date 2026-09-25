@@ -4,7 +4,7 @@
     python3 resume.py [--relay-dir DIR]
 
 出すもの: ラッパーの判定と理由・この区間の始まり（自動か手か）・前の区間の終わり（ended_by）・
-プラグインの版（区間の起動時・導入済み・写し）・
+プラグインの版（区間の起動時・導入済み・複製）・
 前の区間と今の区間で合図を書かなかった Stop（mark_skipped: 背景の作業が残った・ブロックが 2 つ以上）。人が読む数行の後に step_result の 1 行の JSON。
 ラッパーの外でも exit 0 で終わる。
 """
@@ -111,7 +111,7 @@ def main() -> int:
     if start:
         started_by = "自動（合図から）" if start.get("from_session") else "手（利用者の起動）"
     vers = {"区間の起動時": (start or {}).get("plugin_version"), "導入済み": installed_version(),
-            "写し": copy_version()}
+            "複製": copy_version()}
     known = {v for v in vers.values() if v}
     lines = [f"ラッパー: {pos}" + (f"（{a.relay_dir}）" if a.relay_dir else "")]
     if start:

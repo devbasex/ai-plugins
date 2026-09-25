@@ -38,7 +38,7 @@ def plan_mode(state: dict[str, Any]) -> str:
 def plan_comment_marker(state: dict[str, Any]) -> str:
     """コメントを探すための目印。**本文の先頭に置く。**
 
-    状態ファイルの控えが失われても、この目印で同じコメントを引き当てられる。
+    状態ファイルの記録が失われても、この目印で同じコメントを引き当てられる。
     引き当てられないと、ラウンドのたびに新しいコメントが積まれる。
     """
     return f"<!-- cross-refactoring plan rf{state.get('id')} -->"
@@ -200,7 +200,7 @@ _LIMIT_ROWS = (
     ("implement_end_at", "実装の終わり = 最後の項目の完了の締め切り"),
     ("fix_end_at", "直しの試行の打ち切り"),
     ("final_end_at", "最終ゲートの修正の打ち切り（想定最大時間の終わり）"),
-    ("final_fix_seconds", "最終ゲートの修正の 1 回目に必ず渡す長さ（秒。控えの final_fix）"),
+    ("final_fix_seconds", "最終ゲートの修正の 1 回目に必ず渡す長さ（秒。予備時間の final_fix）"),
     ("init_test_timeout", "着手前のテスト 1 回の上限（秒）"),
     ("test_timeout", "テスト 1 回の上限（秒）"),
     ("margin_seconds", "余裕（秒。手順の上限と CLI の上限に足す）"),

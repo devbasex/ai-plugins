@@ -184,7 +184,7 @@ python3 "$SCRIPTS/merged-steps.py" probe (--pr <PR番号> | --head <ブランチ
 ```bash
 # $SCRIPTS の決め方は development-workflow の references/scripts-lookup.md にある。
 # 閉じる語の読み取りは、どの Skill にも属さない共通層（$SCRIPTS/lib/）にある。
-# **gate も同じ実体を読む**ため、Skill の下に写しは無い。
+# **gate も同じ実体を読む**ため、Skill の下に複製は無い。
 CLOSING="$SCRIPTS/lib/closing-issues.sh"
 
 # 1. 本文から閉じる語が指す先を取り出す（<所有者>/<リポジトリ> と <番号> をタブ区切りで出す）
@@ -252,7 +252,7 @@ bash "$SCRIPTS/../skills/development-workflow/scripts/stage-check.sh" report <is
 - 記録が無ければ 1 行だけ返る。**すべての工程を欠落として並べない**
 - 記録の無い必須の工程があれば、その名前と、記録するコマンドが出力に載る
 - 実施済みであれば記録してから先へ進む。実施していなければ、その工程へ戻る
-- 控えの読み方と、記録が無いときの扱いは
+- 通過記録の読み方と、記録が無いときの扱いは
   [references/stage-completeness.md](../development-workflow/references/stage-completeness.md) にある
 
 ## 作業完了報告（必須）

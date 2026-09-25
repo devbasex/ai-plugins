@@ -159,7 +159,7 @@ class Drive:
 - ブランチ: {s.get('head_branch')} / ベース: {s.get('base_branch')}
 - 前ラウンドのレビュー（件数はそのラウンドで投稿した数。対象は reviewThreads を数え直して決める）:
 {reviews}
-- 既存コメントの控え: {self.tmp}/cross-review-pr{self.pr}-existing-comments.txt
+- 既存コメントのスナップショット: {self.tmp}/cross-review-pr{self.pr}-existing-comments.txt
 
 コミットまでで、送らない。GitHub へ書かない（送信・返信・決着は取り込みが行う）。
 戻り値ファイル: {self.path('fix')}（環境変数 `CROSS_REVIEW_TMP_DIR={self.tmp}` を渡すと `/ndf:fix` がここへ書く）

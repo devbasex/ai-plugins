@@ -1359,7 +1359,7 @@ PLANNED = {
     ("plan", False, 18 * 60 + 180),          # 計画の枠の終わり 10:18
     ("add-tests", True, 23 * 60 + 180),      # 最後の項目の完了の締め切り 10:20 + 3 分
     ("implement", True, 32 * 60 + 180),      # 10:30 + 2 分
-    ("fix", True, 58 * 60 + 180),            # 開始 + 60 − 全体のテストの控え 2 分
+    ("fix", True, 58 * 60 + 180),            # 開始 + 60 − 全体のテストの予備時間 2 分
     ("final-fix", False, 60 * 60 + 180),     # 想定最大時間の終わり 11:00
 ])
 def test_start_phase_returns_the_time_left_to_the_end_of_the_phase(
@@ -1374,14 +1374,14 @@ def test_start_phase_returns_the_time_left_to_the_end_of_the_phase(
 
 
 @pytest.mark.parametrize("minutes, rounds, expected", [
-    (70, 1, 330 + 180),        # 終わり（11:00）の後の 1 回目: 控えの final_fix（5.5 分）+ 余裕
-    (58, 1, 330 + 180),        # 残り 2 分 < 控え: 控えの長さを渡す
-    (50, 1, 600 + 180),        # 残り 10 分 > 控え: 残り + 余裕
+    (70, 1, 330 + 180),        # 終わり（11:00）の後の 1 回目: 予備時間の final_fix（5.5 分）+ 余裕
+    (58, 1, 330 + 180),        # 残り 2 分 < 予備時間: 予備時間の長さを渡す
+    (50, 1, 600 + 180),        # 残り 10 分 > 予備時間: 残り + 余裕
     (70, 2, 180),              # 2 回目からは今までどおり（過ぎていれば余裕だけ）
 ])
 def test_start_phase_gives_the_first_final_fix_at_least_its_reserve(
         phase_state, start_phase, minutes, rounds, expected):
-    """決定 26: 最終ゲートの修正の 1 回目は、想定最大時間を過ぎていても控え 1 回分を渡す。"""
+    """決定 26: 最終ゲートの修正の 1 回目は、想定最大時間を過ぎていても予備時間 1 回分を渡す。"""
     reserve = dict(PLANNED["plan"]["reserve"], final_fix=5.5)
     phase_state.edit(plan={"reserve": reserve}, items=PLANNED["items"],
                      final_gate={"fix_rounds": rounds, "checks": []})

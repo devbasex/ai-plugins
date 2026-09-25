@@ -365,10 +365,10 @@ def _git_remote_url() -> str:
 
 
 def _repo_from_resume(pr: int, worktree: str | None) -> str | None:
-    """控えの状態ファイルから `owner/repo` を読む。**GitHub へは問い合わせない。**
+    """キャッシュとしての状態ファイルから `owner/repo` を読む。**GitHub へは問い合わせない。**
 
     `origin` が無い、または URL を読めない環境では、リポジトリ名の解決が
-    `gh repo view` へ落ちる。上限に達しているとそこで止まるため、再開できる控えが
+    `gh repo view` へ落ちる。上限に達しているとそこで止まるため、再開できるキャッシュが
     残っていても再開の経路へ入れない。**#291 が塞ごうとしている状態そのものである。**
 
     読めるのは、置き場所がリポジトリ名抜きで決まるときだけである。既定の作業ツリーの
@@ -914,15 +914,15 @@ FETCH_COMMENTS_SCRIPT = (pathlib.Path(__file__).resolve().parent.parent.parent
 
 def _fetch_existing_comments(repo: str, pr: int, path: pathlib.Path, *,
                              strict: bool) -> str | None:
-    """既存コメントの控えを取り、成功なら `path` へ書いて None、失敗なら理由の文を返す。
+    """既存コメントのスナップショットを取り、成功なら `path` へ書いて None、失敗なら理由の文を返す。
 
     `strict=True` は `--strict` を付け（3 ソースのどれか 1 つの失敗でも失敗にする）、一時の
-    名前へ書いてから成功したときだけ `path` へ改名する。一部だけの控えで前の控えを上書き
+    名前へ書いてから成功したときだけ `path` へ改名する。一部だけのスナップショットで前のスナップショットを上書き
     すると、前のラウンドの指摘が重複の検出から消えるためである（#542 の決定 6）。
     """
     cmd = [str(FETCH_COMMENTS_SCRIPT), *(["--strict"] if strict else []), repo, str(pr)]
     # 起動できない（スクリプトが無い・実行権が無い）ときも失敗の理由として返す。例外で
-    # 抜けると、呼び出し側が「失敗したら前の控えのまま進める」を選べない。
+    # 抜けると、呼び出し側が「失敗したら前のスナップショットのまま進める」を選べない。
     try:
         r = subprocess.run(cmd, capture_output=True, text=True)
     except OSError as e:
@@ -1838,7 +1838,7 @@ def cmd_init(args: argparse.Namespace) -> None:
     # path には repo slug を含め、他リポジトリの同一 PR 番号と衝突しないようにする。
     # リポジトリ名は git の設定から求める。GraphQL を 1 点使わずに済み、誤りは
     # この後の REST の応答が検証する（`_fetch_pr_metadata`）。
-    # **控えを GitHub より先に読む。** git から求まらないときの落とし先が `gh` だけだと、
+    # **キャッシュを GitHub より先に読む。** git から求まらないときの落とし先が `gh` だけだと、
     # 上限に達している環境では再開の経路へ入る前に止まる（#291）。
     repo = _repo_from_git() or _repo_from_resume(pr, args.worktree) or _sh(
         ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"])
@@ -2448,15 +2448,15 @@ def cmd_start_round(args: argparse.Namespace) -> None:
     round_no = total + 1
     round_in_pr = sum(1 for r in st["rounds"] if r["pr"] == pr) + 1
 
-    # 既存コメントの控えを取り直す（#542 の決定 6）。通しの 1 ラウンド目は `init` が取った
-    # 直後のため取り直さない。失敗しても前の控えのまま進める（前の控えでも今と同じ条件で
+    # 既存コメントのスナップショットを取り直す（#542 の決定 6）。通しの 1 ラウンド目は `init` が取った
+    # 直後のため取り直さない。失敗しても前のスナップショットのまま進める（前のスナップショットでも今と同じ条件で
     # レビューできる）。**round エントリを保存する前に取る。** 保存の後で取ると、取得の
     # 途中の割り込みで結果の無い round だけが残り、再実行が前のラウンドの検査で止まる。
     if round_no >= 2:
         error = _fetch_existing_comments(
             str(st.get("repo") or ""), int(pr), _existing_comments_path(args.pr), strict=True)
         if error is not None:
-            info(f"⚠ 既存コメントの控えを取り直せませんでした（{error}）。前の控えのまま進めます")
+            info(f"⚠ 既存コメントのスナップショットを取り直せませんでした（{error}）。前のスナップショットのまま進めます")
 
     # round エントリを開く。head の commit を記録するのは、起動スクリプト 2 本と
     # 収束の判定が同じ値を読むためである。**2 本が同じ値を別々に取っていた分が 0 になる。**
@@ -2762,7 +2762,7 @@ _FINDING_DEFAULTS: dict[str, Any] = {
     "falsification": "",
     "suggested_check": "",
     # 投稿先。プロンプトが求める値は `inline` / `body` の 2 つで、持たない指摘は
-    # 従来どおり投稿したインラインの写しであるため `inline` として扱う。
+    # 従来どおり投稿したインラインの複製であるため `inline` として扱う。
     "posted_to": "inline",
 }
 
@@ -2813,7 +2813,7 @@ def _collect_review_findings(
 ) -> int:
     """その担当の `payload.json` を読み、`review_findings[]` へ積む。
 
-    **`comments[]` は投稿の写しではなく、その担当が出した指摘の全件である**（#156）。
+    **`comments[]` は投稿の複製ではなく、その担当が出した指摘の全件である**（#156）。
     総評だけへ書いた指摘も入るため、インラインの件数（`comments_count`）とは一致しない。
 
     **形の不正は黙って読み飛ばさない。** 同じファイルを判定の直前に読む
@@ -2867,7 +2867,7 @@ def cmd_read_result(args: argparse.Namespace) -> None:
     ときは 3）で、進む先を決めるのは次の判定である。
 
     **「読んで記録する」と「投稿する」を 1 つに閉じる**（#730 の決定 4）。順序は
-    「控えを読む → 投稿を積む → 流す → 送信の応答を記録へ書き戻す → 指摘を取り込む」
+    「指摘のファイルを読む → 投稿を積む → 流す → 送信の応答を記録へ書き戻す → 指摘を取り込む」
     である。分けると「投稿したが記録していない」に加えて「記録したが投稿していない」が
     もう 1 つ増える。1 つに閉じれば、途中で止まった状態は「送れていない」か
     「送れたが記録が無い」の 2 つになる。

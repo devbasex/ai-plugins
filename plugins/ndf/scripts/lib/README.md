@@ -32,7 +32,7 @@
 | [models.py](models.py) | `--model` の解析、フラグ生成、実測値の突き合わせ | `cross-refactoring` / `external-ai.py` / `metrics.py` |
 | [metrics.py](metrics.py) | 担当ごとの指標算出と報告の整形 | テストだけ（収束ループの 2 つはまだ読まない） |
 | [post_queue.py](post_queue.py) | 上限のときに投稿を積む待ち行列と、上限の見分け | `cross-review`（`state.py` / `rotate-pr.sh`） |
-| [result_posts.py](result_posts.py) | 結果ファイル（指摘の控え・修正の戻り値）を投稿へ組み立て、待ち行列から送る | `cross-review`（`state.py` / `drive.py`） / `fix-steps.py` |
+| [result_posts.py](result_posts.py) | 結果ファイル（指摘のファイル・修正の戻り値）を投稿へ組み立て、待ち行列から送る | `cross-review`（`state.py` / `drive.py`） / `fix-steps.py` |
 | [git-credential.sh](git-credential.sh) | credential helper が応答しない環境で git を通す退避の値 | `cross-refactoring`（`refactor_lib/gitfacts.py`） |
 | [closing-issues.sh](closing-issues.sh) | Pull Request の本文から、閉じる語が指す issue を取り出す | `progress-tracking`（ミッションを閉じる） / `merged`（OPEN の一覧） / `development-workflow` の hook |
 | [refresh.py](refresh.py) | 観点の出典の取得・指紋の比較・一覧の提示・待ちの扱い（#554）。**提示するだけで書き換えない** | `instructions-check.py` |

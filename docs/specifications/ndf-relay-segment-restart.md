@@ -23,7 +23,7 @@
 
 | 順 | 誰が | 何をする |
 | ---: | --- | --- |
-| 1 | 利用者 | 前もって `/ndf:install-wrapper` を 1 度打っておく。写しと `claude` の関数が `~/.claude/ndf/` に置かれ、次に開いたシェルから `claude` と打つとラッパーを挟む |
+| 1 | 利用者 | 前もって `/ndf:install-wrapper` を 1 度打っておく。複製と `claude` の関数が `~/.claude/ndf/` に置かれ、次に開いたシェルから `claude` と打つとラッパーを挟む |
 | 2 | 利用者 | `claude` と打ち、起動した claude の中で `/ndf:development-workflow #895` を入力する |
 | 3 | conductor（区間 1） | 設計の関門で `AskUserQuestion` を出す。答えを待つあいだ Stop は起きず、合図は書かれない |
 | 4 | 利用者 | 「承認」と答える（キー入力はラッパーを通ってそのまま子へ届く） |
@@ -65,7 +65,7 @@
 | --- | --- |
 | `plugins/ndf/scripts/relay.py` | ラッパーの本体。副命令 `run` / `stop` / `mark`、導入の `install` / `uninstall` / `status` / `startup`、質問の合図の `question`、ラッパーの直接の子かを返す `is-child`、文脈量の hook と `/ndf:restart` と conductor が使うカットポイントの告知 `notice`（[ndf-relay-segment-notice.md](ndf-relay-segment-notice.md)）を持つ。標準ライブラリだけで書く |
 | `plugins/ndf/hooks/claude.json` の `Stop` | `NDF_RELAY_DIR` があるときだけ `python3 <root>/scripts/relay.py mark` を呼ぶ（既存の Slack 通知の後、`timeout` 5 秒、`continueOnError: true`）。無ければ `python3` を起こさない |
-| `plugins/ndf/hooks/claude.json` の `SessionStart`（`matcher: startup\|resume`） | 写しか記録があるときだけ `relay.py startup` を呼ぶ。シェルの設定は書かない（[導入の仕様](ndf-relay-install-and-restart.md)） |
+| `plugins/ndf/hooks/claude.json` の `SessionStart`（`matcher: startup\|resume`） | 複製か記録があるときだけ `relay.py startup` を呼ぶ。シェルの設定は書かない（[導入の仕様](ndf-relay-install-and-restart.md)） |
 | `plugins/ndf/hooks/claude.json` の `PreToolUse` / `PostToolUse`（`matcher: AskUserQuestion`） | `NDF_RELAY_DIR` があるときだけ `relay.py question open` / `close` を呼ぶ（`timeout` 10 秒） |
 | `plugins/ndf/skills/install-wrapper/` / `restart/` | 明示の導入・取り外しと、好きな時点の切り替え（Claude Code だけ） |
 | `plugins/ndf/scripts/token-guard.sh` | 文脈量の判定で、ラッパーの直接の子の conductor なら 1 度の通しをせずに止め続ける（下の「文脈の上限で切る」） |
@@ -122,7 +122,7 @@ graph TB
 | `claude` の関数で常にラッパーを挟み、`run` の後ろはすべて claude の引数として受ける | ラッパーの設定を引数で受けると claude の引数と名前がぶつかる。設定は環境変数（`NDF_RELAY_*`）だけで受ける |
 | 2 つ目以降の区間へ、`run` の引数のうち起動の方針を表すものだけを引き継ぐ（#936） | 何も引き継がないと、devbase の `alias claude` が足す `--dangerously-skip-permissions` が 2 つ目の区間で落ちる。`--resume` や `-c`・最初のプロンプトを引き継ぐと捨てた会話へ戻るので、会話ごと・区間ごとのものは値ごと落とす（[導入の仕様](ndf-relay-install-and-restart.md)の「起動の方針の引数の引継ぎ」） |
 | ラッパーが要らない起動は、深さの変数だけを足して本物の claude を exec する | 擬似端末を挟むと出力の形・終了コード・シグナルの届き方が変わる。Claude Code から継いだ環境変数を外すと、直接打ったときと振る舞いが変わる |
-| `claude` の関数は版に依らない写しを指し、SessionStart hook が在る写しだけを起動ごとに置き直す（版は後退させない） | 版つきのキャッシュを指すと古い版に固定され、古い版のディレクトリが消えると壊れる。動いているラッパーは入れ替えない（子の端末を手放すことになる） |
+| `claude` の関数は版に依らない複製を指し、SessionStart hook が在る複製だけを起動ごとに置き直す（版は後退させない） | 版つきのキャッシュを指すと古い版に固定され、古い版のディレクトリが消えると壊れる。動いているラッパーは入れ替えない（子の端末を手放すことになる） |
 | 導入は利用者が明示に打つ `/ndf:install-wrapper` だけにし、SessionStart hook はシェルの設定を書かない（#928。10.17.6 までは hook が alias の囲みを自動で足した） | 利用者のシェル設定を黙って書き換えない。既存の `claude` の定義があれば足さない（選んだ起動の仕方が黙って替わる）。bash と zsh 以外は書き方が違い、読み違えると設定を壊す |
 | 文脈の上限は既存の文脈量の hook が作り、ラッパーの下では 1 度の通しをやめる | 上限の値と読み方を 1 つにし、測る側と止める側を食い違わせない。人の居ない前提で LLM が「続ける」と決めると上限を超えたまま進む。Stop hook で上限を見て応答を続けさせると、文で尋ねた関門まで承認の前に切る |
 | 背景の処理が動いている Stop では合図を書かない。判定は `background_tasks` の `status: running` だけで行う | 動いているあいだに切ると、その処理（supervisor を含む）が子の claude と一緒に終わる。背景の Bash もサブエージェントも同じ形で載る。conductor が自分で数えると数え違えて子を失う |
@@ -202,7 +202,7 @@ alias と関数は子のプロセスには効かないため、ラッパーは�
 絶対パスを使い、名前 `claude` で `PATH` を引き直さない。**
 
 1. 環境変数 `NDF_RELAY_CLAUDE` があればそれ
-2. `PATH` を前から見て、実行できる `claude` のうち、実体（`realpath`）が `relay.py` 自身と写し・旧い写しでなく、先頭 4 KB に `relay.py` を含まないもの。読めないファイルはラッパーと見なさない（飛ばし
+2. `PATH` を前から見て、実行できる `claude` のうち、実体（`realpath`）が `relay.py` 自身と複製・旧い複製でなく、先頭 4 KB に `relay.py` を含まないもの。読めないファイルはラッパーと見なさない（飛ばし
    損ねた繰り返しは `NDF_RELAY_DEPTH` が止める）
 
 ### ラッパーの流れ
@@ -295,10 +295,10 @@ hook が止めるのは工程へ入る起動だけで、フェーズの中の Ba
 
 ### 導入（`install`）
 
-**導入・取り外し・状態の表示・写しの置き直しは [ndf-relay-install-and-restart.md](ndf-relay-install-and-restart.md) が持つ。**
+**導入・取り外し・状態の表示・複製の置き直しは [ndf-relay-install-and-restart.md](ndf-relay-install-and-restart.md) が持つ。**
 10.17.6 までは SessionStart hook の `install` が `${XDG_DATA_HOME:-$HOME/.local/share}/ndf/relay.py` へ写し、
 `~/.bashrc`（zsh なら `.zshrc`）へ alias の囲みを 1 度だけ足していた。今は利用者の `/ndf:install-wrapper`
-だけが写しを `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/ndf/` に置き、シェルの設定へ読み込みの 1 行を置く。
+だけが複製を `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/ndf/` に置き、シェルの設定へ読み込みの 1 行を置く。
 
 ## データ・設定
 
@@ -404,7 +404,7 @@ hook が止めるのは工程へ入る起動だけで、フェーズの中の Ba
   設定も）だけで、別の
   ファイルから読み込む定義は見落とす。先に定義された alias は関数と組み合わさり、その引数がラッパーへ渡る
 - **費用:** ラッパーの待ちは `select` とファイルの確認で、LLM を使わない。`mark` は `NDF_RELAY_DIR` が無ければ
-  `python3` を起こさない。`startup` は写しも記録も無ければ `python3` を起こさない
+  `python3` を起こさない。`startup` は複製も記録も無ければ `python3` を起こさない
 
 ## テスト観点
 

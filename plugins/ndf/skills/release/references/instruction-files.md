@@ -163,7 +163,7 @@ home もプラグインの取得先も無い。手元で広げるときだけ `-
 "scopes": {
   "user": [
     {"path": "~/.claude/CLAUDE.md",
-     "imports": {"CLAUDE.md": {"memo.md": "利用者が毎回読ませている控え"}}}
+     "imports": {"CLAUDE.md": {"memo.md": "利用者が毎回読ませているメモ"}}}
   ],
   "plugins": [
     {"path": "~/.claude/plugins/cache/<取得元>/ndf/<版>",

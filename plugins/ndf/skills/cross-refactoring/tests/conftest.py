@@ -98,7 +98,7 @@ def refactor_lib(refactor: types.ModuleType) -> types.ModuleType:
 def patch_lib(refactor, monkeypatch):
     """`refactor_lib` の全モジュールで、その名前を持つものを差し替える。
 
-    **取り込みは値の写しである。** `from .paths import sh` と書いたモジュールは、
+    **取り込みは値の複製である。** `from .paths import sh` と書いたモジュールは、
     定義元の `paths.sh` を差し替えても元の値を呼び続ける。差し替えたい対象が
     どのモジュールで使われているかはテストからは決まらないため、その名前を
     持つモジュールすべてへ当てる。

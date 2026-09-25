@@ -1,6 +1,6 @@
 """記録のコマンド 1 行で、issue の本文とボードの両方へ残ること（#828）。
 
-`projects-sync.sh` が入口である。通過工程の控えはこのコマンドを観測して積むため、入口を
+`projects-sync.sh` が入口である。通過記録はこのコマンドを観測して積むため、入口を
 変えずに issue の本文の更新（`progress-record.sh`）を中から呼ぶ（設計の決定 1）。
 """
 from __future__ import annotations

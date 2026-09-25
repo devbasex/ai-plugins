@@ -8,8 +8,8 @@
 | `run [claude の引数 ...]` | 端末の前景に常駐し、claude を擬似端末の子として起動する。合図を受けたら子へ `/exit` を入力し、プラグインを更新して次の区間を起動する。ラッパーが要らない起動は本物の claude をそのまま exec する（素通し） |
 | `stop` | 動いているラッパーすべてに停止の合図を置く |
 | `mark` | Stop hook の本体。最後の応答の `ndf-next` のブロックを合図 `next.json` へ写す |
-| `install` / `uninstall` / `status` | `/ndf:install-wrapper` の本体。写しとラッパーの rc を `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/` に置き、シェルの設定へ読み込みの 1 行を足す・外す・状態を示す（#928） |
-| `startup` | SessionStart hook の本体。在る写しを今の版で置き直し（版は後退させない）、10.17.4〜10.17.6 が自動で足した囲みを 1 度だけ知らせる。シェルの設定は書かない |
+| `install` / `uninstall` / `status` | `/ndf:install-wrapper` の本体。複製とラッパーの rc を `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/` に置き、シェルの設定へ読み込みの 1 行を足す・外す・状態を示す（#928） |
+| `startup` | SessionStart hook の本体。在る複製を今の版で置き直し（版は後退させない）、10.17.4〜10.17.6 が自動で足した囲みを 1 度だけ知らせる。シェルの設定は書かない |
 | `question open` / `question close` | `AskUserQuestion` の `PreToolUse` / `PostToolUse` hook の本体。質問の表示中の合図を作る・消す（関門を越えない守り） |
 | `is-child` | ラッパーの直接の子の claude から呼ばれていれば 0 |
 | `notice` | カットポイントの告知。1 行目に `relay` か `outside`（`is-child` と同じ判定）、2 行目に告知の 1 文を出す（#980）。外のときの 2 行目は理由（ラッパーが無い・終わっている・直接の子でない）で変わる（#1016） |
@@ -1310,7 +1310,7 @@ VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:-(dev|rc)\.(\d+))?$")
 
 
 def config_dir() -> str:
-    """写し・写しの版・ラッパーの rc の親。devbase では永続化される `~/.claude` の下になる。"""
+    """複製・複製の版・ラッパーの rc の親。devbase では永続化される `~/.claude` の下になる。"""
     base = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
     return os.path.join(base, "ndf")
 
@@ -1328,7 +1328,7 @@ def shellrc_path() -> str:
 
 
 def old_copy_path() -> str:
-    """10.17.4〜10.17.6 が置いた写し。10.17.4〜10.17.6 の囲みの alias が指す。"""
+    """10.17.4〜10.17.6 が置いた複製。10.17.4〜10.17.6 の囲みの alias が指す。"""
     return os.path.join(data_dir(), "relay.py")
 
 
@@ -1823,8 +1823,8 @@ def cmd_status() -> int:
             out(f"{rc}: 囲みがある（{kind}{who}）")
     out(f"ラッパーの rc {shellrc_path()}: {'在る' if os.path.exists(shellrc_path()) else '無い'}")
     ver = (_read(copy_version_path()) or "").strip() or "不明"
-    out(f"写し {copy_path()}: {_same(copy_path(), body)}（写しの版 {ver}）")
-    out(f"旧い写し {old_copy_path()}: {_same(old_copy_path(), body)}")
+    out(f"複製 {copy_path()}: {_same(copy_path(), body)}（複製の版 {ver}）")
+    out(f"旧い複製 {old_copy_path()}: {_same(old_copy_path(), body)}")
     warn = None if loader else login_warning()
     if warn:
         out(warn)
@@ -1832,7 +1832,7 @@ def cmd_status() -> int:
 
 
 def _startup_copy(body: bytes) -> None:
-    """判定 0a。`copy.lock` の中で写しの有無と版を読み直し、後退させずに置き直す。"""
+    """判定 0a。`copy.lock` の中で複製の有無と版を読み直し、後退させずに置き直す。"""
     dst = copy_path()
     if not os.path.exists(dst):
         return
@@ -1856,7 +1856,7 @@ def _startup_copy(body: bytes) -> None:
 
 
 def _startup_refresh_old_copy(body: bytes) -> None:
-    """10.17.4〜10.17.6 が置いた写しが在れば今の版で置き直す。失敗は従来どおり局所的に無視する。"""
+    """10.17.4〜10.17.6 が置いた複製が在れば今の版で置き直す。失敗は従来どおり局所的に無視する。"""
     old = old_copy_path()
     try:
         if os.path.exists(old) and _read_bytes(old) != body:

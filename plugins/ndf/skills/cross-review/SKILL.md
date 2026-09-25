@@ -108,7 +108,7 @@ PR を**既定の母集合（claude / codex / kiro とホスト）から選ん�
 
 ## 事前確認
 
-自分の PR の判定・作業ツリーの分離・agy の作業領域・既存コメントの控えの 4 つは `state.py init` が行う。
+自分の PR の判定・作業ツリーの分離・agy の作業領域・既存コメントのスナップショットの 4 つは `state.py init` が行う。
 中身と `intent` / `posted_as` の両保持は [docs/04-contracts.md](docs/04-contracts.md) の「事前確認」にある。
 
 ## 全体フロー

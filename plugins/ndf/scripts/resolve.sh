@@ -13,7 +13,7 @@
 #   1. 開発中のリポジトリ（現在地の git のトップの plugins/ndf）
 #   2. Claude Code が読み込んだプラグイン
 #   3. Kiro CLI の .kiro/skills/<Skill名> の symlink が指すプラグイン
-#   4. Codex のマーケットプレイスの控え
+#   4. Codex のマーケットプレイスの複製
 #   5. agy が複製した実体
 #   6. 現在地からの相対（plugins/ndf）
 # どれも当たらなければ、この入口自身が置かれたプラグインを採る。
@@ -50,8 +50,8 @@ SELF_ROOT=$(cd -P -- "$SELF_DIR_LOGICAL" 2>/dev/null && pwd -P) || SELF_ROOT=
 #     通らずに届いたなら、SKILL.md の ${CLAUDE_PLUGIN_ROOT} の置き換えで届いた実体である
 #     （`claude --plugin-dir <パス>` で読み込んだとき）
 #   - ~/.claude/plugins/installed_plugins.json に記録された ndf の installPath
-# 参照ファイルの bash は置き換わらないため、入口が Codex の控えや cache の古い版から届く
-# ことがある（#590）。その控えを採らず、Claude Code の導入の記録へ戻る。
+# 参照ファイルの bash は置き換わらないため、入口が Codex の複製や cache の古い版から届く
+# ことがある（#590）。その複製を採らず、Claude Code の導入の記録へ戻る。
 claude_candidates() {
   [ -n "${CLAUDECODE:-}" ] || return 0
   case "${CLAUDE_PLUGIN_ROOT:-}" in /*) echo "$CLAUDE_PLUGIN_ROOT" ;; esac

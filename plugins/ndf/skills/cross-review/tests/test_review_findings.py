@@ -1,11 +1,11 @@
 """指摘を構造化して取り込む（#156 の 2 本目）。
 
-**投稿の写しでは、総評だけへ書いた指摘が進行側から見えない。** `payload.json` は
-投稿したインラインコメントの写しであるため、差分の外を指す指摘と `HTTP 422` で
+**投稿の複製では、総評だけへ書いた指摘が進行側から見えない。** `payload.json` は
+投稿したインラインコメントの複製であるため、差分の外を指す指摘と `HTTP 422` で
 総評へ移った指摘が入らない。#156 が実測した「レビュー body だけの指摘が進行側から
 見えない」（PR #157 の round 4）がこの経路である。
 
-`comments[]` が持つのは投稿の写しではなく、**その担当が出した指摘の全件**とする。
+`comments[]` が持つのは投稿の複製ではなく、**その担当が出した指摘の全件**とする。
 """
 from __future__ import annotations
 
@@ -205,7 +205,7 @@ def test_a_state_file_without_the_key_is_readable(tmp_dir, state_mod):
 def test_the_comment_count_is_the_number_of_inlines_sent(tmp_dir, state_mod):
     """件数は担当の申告ではなく、送れたインラインの数である（#730 AC15）。
 
-    送り先を決めるのは投稿する側で、控えの `posted_to` は読まない。位置を持つ指摘は
+    送り先を決めるのは投稿する側で、指摘のファイルの `posted_to` は読まない。位置を持つ指摘は
     どちらもインラインとして送る。
     """
     _write(tmp_dir, _state()); _result(tmp_dir, comments_count=3)

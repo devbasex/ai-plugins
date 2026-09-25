@@ -401,7 +401,7 @@ def test_a_conditional_stage_without_a_record_is_not_a_gap(repo: Path, state: Pa
 
 
 def test_a_repository_without_a_remote_records_nothing(tmp_path: Path, state: Path) -> None:
-    """リポジトリを特定できないときは控えを書かない。工程は止めない。"""
+    """リポジトリを特定できないときは通過記録を書かない。工程は止めない。"""
     repo = init_repo(tmp_path / "bare", remote=None)
 
     result = guard(repo, state, 'bash "$SCRIPTS/projects-sync.sh" 161 stage "配布"')
@@ -805,7 +805,7 @@ def test_is_stage_rejects_an_empty_stage() -> None:
 
 # --- R2-004: 閉じる課題でモードが食い違うときの案内（現状固定） --------------
 #
-# `wf_evidence_report` は、閉じる課題の控えのモードが食い違うと最も高いモードを選び、
+# `wf_evidence_report` は、閉じる課題の通過記録のモードが食い違うと最も高いモードを選び、
 # **全課題の不足工程をそのモードで数える**。公開の hook 入口へ `gh pr create` を渡し、
 # 復号した additionalContext の要点（食い違いの告知・選ばれたモード・課題ごとの不足
 # 工程）と、拒否を出さないことを結合の階層で固定する（対象コードは変更しない）。

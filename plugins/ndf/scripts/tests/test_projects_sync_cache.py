@@ -112,13 +112,13 @@ exit 1
 
 
 def test_the_cache_lives_outside_the_worktree(tmp_path, repo):
-    """控えは共通の git ディレクトリの下に置く。
+    """キャッシュは共通の git ディレクトリの下に置く。
 
     **作業ツリーでは `.git` がファイルである**ため、`.git/ndf/` を作ろうとすると失敗する。
     """
     run(repo)
     cache = list((repo.root / ".git" / "ndf").glob("projects-*.env"))
-    assert cache, "控えが作られていない"
+    assert cache, "キャッシュが作られていない"
     body = cache[0].read_text(encoding="utf-8")
     assert "project_id=PVT_x" in body
     assert "item_id=PVTI_x" in body
