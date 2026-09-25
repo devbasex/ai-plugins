@@ -7,6 +7,7 @@
 # | Bash               | 前景の `sleep` で待つ（ループの本体にあるか、上限を超える）  |
 # | Read               | 変わらないファイルの同じ範囲を続けて読み直す                 |
 # | Skill / Agent・Task | 文脈が上限を超えた conductor が工程へ入る                   |
+# | Skill              | 寿命 5 分の supervisor が文脈を伸ばしたまま収束ループを始める |
 #
 # **拒否は `permissionDecision: deny` で返し、終了コードは常に 0 にする。** 通すときは何も
 # 出さない。判定が失敗したとき（入力が読めない・jq が無い・控えを書けない・記録を読めない・
@@ -197,9 +198,50 @@ guard_context() {
   deny "会話の文脈が ${total} トークンで、上限 ${limit} を超えた。この工程は新しい会話で始める。次のコマンドを情報文字列 ndf-next の囲みのコードブロック 1 つで示して応答を終える。中身: ${next}（今の区間を /goal で始めていたなら /goal ${next}）。<課題番号> のままなら、進めている課題の番号を補って示す。このまま続けると利用者が決めたら、同じ起動をもう一度行うと 1 度だけ通る。規約: ${CONTEXT_DOC}（止めるなら NDF_CONTEXT_GUARD=0、上限は NDF_CONTEXT_LIMIT）"
 }
 
+# 記録の先頭から最初の assistant 行を探し、その文脈量を読む（区切りの P）。見つけた時点で読むのをやめる。
+first_context_tokens() {
+  jq -rn 'first(inputs | select(.type == "assistant" and (.message.usage | type) == "object")
+      | .message.usage
+      | (.input_tokens // 0) + (.cache_read_input_tokens // 0) + (.cache_creation_input_tokens // 0))
+    // empty' "$1" 2>/dev/null
+}
+
+# 寿命 5 分の supervisor（ndf:supervisor）が、文脈を伸ばしたまま収束ループの Skill を始めるのを止める
+# （#954）。止める条件は「今の文脈 C ≥ 比 × 最初の呼び出しの文脈 P」。止めないときは戻り、
+# 呼び出し側が次の判定へ進む。判定は安い順に行い、外れた時点で戻る。
+guard_supervisor_cut() {
+  [ "${NDF_SUPERVISOR_CUT_GUARD:-1}" = 0 ] && return 0
+  local skill aid own tp first last ratio stage
+  skill=$(field '.tool_input.skill')
+  skill=${skill#ndf:}
+  case "$skill" in
+    cross-refactoring) stage="構造改善" ;;
+    cross-review) stage="<実装レビューかドキュメントレビューのうち、始めようとした工程>" ;;
+    *) return 0 ;;
+  esac
+  aid=$(field '.agent_id')
+  [ -n "$aid" ] || return 0
+  # 定義の名前はサブエージェントの中の入力にだけ付く。寿命 1 時間の ndf:supervisor-waits は区切らない
+  [ "$(field '.agent_type')" = "ndf:supervisor" ] || return 0
+  # transcript_path はサブエージェントの中でも親の記録を指す。supervisor 自身の記録を組み立てて読む
+  tp=$(field '.transcript_path')
+  [ -n "$tp" ] || return 0
+  own="${tp%.jsonl}/subagents/agent-${aid}.jsonl"
+  [ -r "$own" ] || return 0
+  first=$(first_context_tokens "$own")
+  last=$(context_tokens "$own")
+  case "$first" in ''|*[!0-9]*|0) return 0 ;; esac
+  case "$last" in ''|*[!0-9]*) return 0 ;; esac
+  ratio=${NDF_SUPERVISOR_CUT_RATIO:-1.5}
+  awk -v c="$last" -v p="$first" -v r="$ratio" 'BEGIN { exit !(r + 0 > 0 && c >= r * p) }' || return 0
+  # 1 度だけ通すことはしない。やり直すだけで越えられると、区切るかが LLM の裁量に戻る
+  deny "この supervisor の文脈が ${last} トークンで、最初の呼び出し（${first}）の ${ratio} 倍以上ある。寿命 5 分のまま収束ループ（${skill}）を始めると、待ちの後のたびに文脈の全体を書き直す。同じ起動をやり直さずに、Pull Request を出す・進行を記録するなど起動の前に済ませることを済ませてから、持ち場の報告を「結果: 区切り」「次の持ち場: <今と同じ持ち場>」「次の工程: ${stage}」で返す（規則 11。conductor が寿命 1 時間の supervisor で続ける）。規約: ${CONTEXT_DOC}（止めるなら NDF_SUPERVISOR_CUT_GUARD=0、比は NDF_SUPERVISOR_CUT_RATIO）"
+}
+
 case "$TOOL" in
   Bash) guard_sleep ;;
   Read) guard_read ;;
-  Skill|Agent|Task) guard_context ;;
+  Skill) guard_supervisor_cut; guard_context ;;
+  Agent|Task) guard_context ;;
 esac
 exit 0
