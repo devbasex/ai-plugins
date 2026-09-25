@@ -1080,6 +1080,12 @@ class Supervisor:
     # --- 駆動 ---
     def run(self, start: str | None = None) -> str:
         sid = start or self.order[0]
+        if start and not self.plan.get("Pull Request"):
+            # 途中から再開するときは、前の実行の報告に残った Pull Request を {pr} に使う
+            prev = self.dir / "report.md"
+            m = re.search(r"^- Pull Request: (\S*/pull/\d+)", prev.read_text(), re.M) if prev.is_file() else None
+            if m:
+                self.plan["Pull Request"] = m.group(1)
         result, reason = "完了", "無し"
         limit = self.plan.get("上限", 30)
         n = 0
