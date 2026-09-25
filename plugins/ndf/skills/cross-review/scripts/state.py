@@ -756,6 +756,30 @@ def _resolve_sync_target(
     return fetch.returncode == 0, f"origin/{head}", head
 
 
+def _has_unpushed_commits(worktree: str, target: str) -> bool:
+    """作業ツリーの HEAD が基準より先へ進んでいて、基準がその祖先であるかを返す。
+
+    修正待ちから再開したとき、修正の工程が作ったコミットはまだ push されていない。
+    これを巻き戻すと修正が捨てられ、`merge-fix` が止まる。数えられないときや
+    分かれているとき（force push の後など）は False を返し、これまでどおり巻き戻す。
+    """
+    ahead = subprocess.run(
+        ["git", "rev-list", "--count", f"{target}..HEAD"],
+        capture_output=True, text=True, cwd=worktree,
+    )
+    try:
+        extra = int(ahead.stdout.strip() or "0") if ahead.returncode == 0 else 0
+    except ValueError:
+        extra = 0
+    if extra <= 0:
+        return False
+    ancestor = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", target, "HEAD"],
+        capture_output=True, text=True, cwd=worktree,
+    )
+    return ancestor.returncode == 0
+
+
 def _sync_worktree(
     worktree: str,
     pr: int,
@@ -779,7 +803,8 @@ def _sync_worktree(
     | 観点 | `strict=False`（init / 再開） | `strict=True`（ラウンドの開始） |
     | --- | --- | --- |
     | head と一致していて変更が無い | 巻き戻して掃除する | 何もしない |
-    | 追跡対象の変更 / 基準に無いコミット | 捨てる | 止める |
+    | 基準の先へ進んだ未 push のコミット | 巻き戻さずに残す | 止める |
+    | 追跡対象の変更 / 基準から分かれたコミット | 捨てる | 止める |
     | 基準を手元に持てない | `gh pr checkout --detach` へ落とす | 止める |
     | 止めるときの終了コード | 1 | 8 |
 
@@ -794,6 +819,11 @@ def _sync_worktree(
     if have_base:
         if strict and isinstance(head, HeadRef) and _is_synced(
                 worktree, pr, head, exclusions, code):
+            return
+        if not strict and _has_unpushed_commits(worktree, target):
+            info(
+                f"↷ 作業ツリーに PR #{pr} の head より先の未 push のコミットがあるため巻き戻さない"
+            )
             return
     elif strict:
         # HEAD を動かす前に、何が失われるかを数える材料が無い（基準が手元に無いのだから、

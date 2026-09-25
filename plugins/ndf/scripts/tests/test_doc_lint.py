@@ -79,6 +79,24 @@ def test_uncommitted_changes_and_excludes(repo):
     assert code == 1 and {i["name"].split(":")[0] for i in out["items"]} == {"CHANGELOG.md", "issues/h.md"}
 
 
+def test_base_from_declaration(repo):
+    # --base が無ければ .ndf/worktree.json の base_branch（origin/<名前>）を起点にする
+    git(repo, "remote", "add", "origin", str(repo))
+    git(repo, "fetch", "-q", "origin")
+    write(repo, ".ndf/worktree.json", '{"version": 1, "base_branch": "develop"}\n')
+    write(repo, "docs/c.md", "# 新規\n\n以前は別だった。\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "docs")
+    p = subprocess.run([PY, str(SCRIPTS / "doc-lint.py")], capture_output=True, text=True, cwd=repo)
+    out = json.loads(p.stdout.strip().splitlines()[-1])
+    assert p.returncode == 1 and out["metrics"]["base"] == "origin/develop", p.stderr
+
+
+def test_no_base_is_unreadable(repo):
+    p = subprocess.run([PY, str(SCRIPTS / "doc-lint.py")], capture_output=True, text=True, cwd=repo)
+    assert p.returncode == 2 and "base_branch" in json.loads(p.stdout.strip().splitlines()[-1])["summary"]
+
+
 def test_unknown_base_is_unreadable(repo):
     p = subprocess.run([PY, str(SCRIPTS / "doc-lint.py"), "--base", "nope"], capture_output=True, text=True, cwd=repo)
     assert p.returncode == 2 and json.loads(p.stdout.strip().splitlines()[-1])["status"] == "stopped"

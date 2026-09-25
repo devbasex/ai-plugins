@@ -13,7 +13,7 @@ candidates: 段 1 の経路のうち機械で集められるものを集め、�
   経路は diff-path（差分のパス）/ diff-identifier（削除された識別子）/ no-milestone /
   closed-milestone（閉じた課題のマイルストーン）/ sub-issue（閉じた親の子）/ all（--all）/
   manual（--add で担当が足したもの）。候補ごとに updated_at と本文の要約値を返す。
-  --limit で 1 回に扱う件数に上限を置く。超えた分は deferred として返す（終了コード 20）。
+  --limit で 1 回に扱う件数に上限を置く。超えた分は items に載せず、metrics.deferred に番号だけを返す（終了コード 20）。
 apply: plan.json の変更を反映する。反映の直前に updated_at を照合し、変わっていれば本文の
   要約値を比べ、それも変わっていれば飛ばす（skipped_changed）。済んだものは控えに記録して
   2 度書かない。上限に当たれば Retry-After / 回復時刻 / 倍々の順で待ち、--max-waits を
@@ -343,10 +343,11 @@ def cmd_candidates(a):
     keep = order if a.limit is None else order[:a.limit]
     deferred = [n for n in order if n not in set(keep)]
     items = []
-    for n in order:
+    # 上限を超えた候補は items に載せない（metrics.deferred にだけ並べる）。載せると
+    # 判定の対象として求められ、上限が効かない。
+    for n in keep:
         i = by_num[n]
-        items.append({"kind": "issue", "name": f"#{n}",
-                      "result": "candidate" if n in keep else "deferred",
+        items.append({"kind": "issue", "name": f"#{n}", "result": "candidate",
                       "number": n, "title": i.get("title") or "",
                       "routes": sorted(routes[n], key=ROUTES.index),
                       "terms": sorted(terms.get(n, ())),
