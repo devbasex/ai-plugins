@@ -44,7 +44,7 @@ ALLOWED_HOOK_VARIABLES = frozenset({"CLAUDE_PLUGIN_ROOT"})
 # 実行ファイルが変数を取り出す正規表現と同じもの。
 VARIABLE = re.compile(r"\$\{([a-zA-Z_][a-zA-Z0-9_.]*)\}")
 
-# 空白を含むプラグインの根。**実在させない。** 見るのは語の切れ目だけである。
+# 空白を含むプラグインの根。**実在させない。** 見るのは語の境目だけである。
 ROOT_WITH_SPACE = "/tmp/with space/ndf"
 
 
