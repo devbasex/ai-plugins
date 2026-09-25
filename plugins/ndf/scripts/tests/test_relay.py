@@ -456,10 +456,10 @@ def test_run_switches_to_next_section(term, tmp_path):
     """印を受けると /exit と \\r を入力し、更新して次の区間を起動する（AC6・AC8・AC19）。"""
     t = term("--model", "haiku", env={"FAKE_VERSION_AFTER": "2.0.0"})
     t.wait_start(1)
-    t.type("mark /goal 次の段\r")
+    t.type("mark /goal 次のステップ\r")
     t.wait_start(2)
     first, second = t.starts()[:2]
-    assert second["argv"] == ["--model", "haiku", "/goal 次の段"]
+    assert second["argv"] == ["--model", "haiku", "/goal 次のステップ"]
     assert t.child_input(0).endswith(b"/exit\r")
     assert t.calls() == [["list", "--json"], ["marketplace", "update", "mk"],
                          ["update", "ndf@mk", "-y"], ["list", "--json"]]
@@ -472,7 +472,7 @@ def test_run_switches_to_next_section(term, tmp_path):
     assert s1["command"] == "--model haiku"
     assert s1["plugin_version"] == "1.0.0"
     assert s2["plugin_version"] == "2.0.0"
-    assert s2["command"] == "/goal 次の段"
+    assert s2["command"] == "/goal 次のステップ"
     assert s2["from_session"] == f"s{first['pid']}"
     assert s2["section"] == 2 and s2["pid"] == second["pid"]
     assert e1["ended_by"] == "mark" and e1["section"] == 1
@@ -495,12 +495,12 @@ def test_run_carries_policy_args_through_shell_function(term, tmp_path):
     assert first["argv"] == ["--dangerously-skip-permissions", "--model", "x", "--add-dir", "a", "b",
                              "--resume", "id", "-c", "--session-id", "u", "-n", "nm", "最初",
                              "--", "--verbose"]
-    t.type("mark /goal 次の段\r")
+    t.type("mark /goal 次のステップ\r")
     t.wait_start(2)
     carried = ["--dangerously-skip-permissions", "--model", "x", "--add-dir", "a", "b"]
-    assert t.starts()[1]["argv"] == [*carried, "/goal 次の段"]
+    assert t.starts()[1]["argv"] == [*carried, "/goal 次のステップ"]
     s2 = events(t.rows(), "start")[1]
-    assert s2["command"] == "/goal 次の段"
+    assert s2["command"] == "/goal 次のステップ"
     assert s2["carried"] == carried
     t.type("quit 0\r")
     assert t.finish() == 0

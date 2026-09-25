@@ -125,7 +125,7 @@ def optional_decl(root: Path, name: str) -> dict:
 
 
 def area_of(path: str, decl: dict) -> tuple[str, bool]:
-    """(領域の名前, 共通層か)。どの領域にも当たらなければ、ディレクトリの先頭 3 段を名前にする。"""
+    """(領域の名前, 共通層か)。どの領域にも当たらなければ、ディレクトリの先頭 3 階層を名前にする。"""
     for a in decl["areas"]:
         if matches(path, a["paths"]):
             return a["name"], bool(a.get("common"))
@@ -388,7 +388,7 @@ def cmd_finish(a, root: Path) -> tuple[dict, int]:
 
 
 def findings_of(state: Path) -> tuple[dict, str]:
-    """計画の state.json から (件数, 最後に落ちた段) を読む。"""
+    """計画の state.json から (件数, 最後に落ちたステップ) を読む。"""
     try:
         log = json.loads((state / "state.json").read_text()).get("log") or []
     except (OSError, ValueError):

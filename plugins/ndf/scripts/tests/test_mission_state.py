@@ -30,15 +30,15 @@ def report(phase: str, issues: str, res: str, pr: str, cost: str, reason: str = 
 - Pull Request: {pr}
 - 最後に記録した工程: Pull Request
 - 使った worker: 修正 1（claude -p）/ 判断 1（claude -p）
-- 途中の報告: 段 7 / まだ動いている 0 / worker 4（形が違う 0）/ conductor 向け 0 / LLM へ回した 0 回・$0.000（x）
+- 途中の報告: ステップ 7 / まだ動いている 0 / worker 4（形が違う 0）/ conductor 向け 0 / LLM へ回した 0 回・$0.000（x）
 - 提示物: 無し
 - 理由: {reason}
-- 通った段: impl(exit=0) → pr(exit=0)
+- 通ったステップ: impl(exit=0) → pr(exit=0)
 - 件数: 無し
 - LLM の使用量: 入力 56 / cache read 1423577 / cache write 78735 / 出力 24980 / ${cost}
 - 記録: x
 
-| 段 | 往復 | 秒 | cache read | cache write | 出力 | 費用 |
+| ステップ | 往復 | 秒 | cache read | cache write | 出力 | 費用 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | impl | 41 | 296.0 | 1423577 | 75699 | 24486 | $1.153 |
 """
@@ -61,7 +61,7 @@ def r6(tmp_path):
                    report("実装", "#1053", "完了", "https://github.com/devbasex/ai-plugins/pull/1056", "1.178"))
     b = write_plan(tmp_path, "plan-1054", [1054], "実装",
                    report("実装", "#1054", "止まった", "https://github.com/devbasex/ai-plugins/pull/1058", "2.170",
-                          reason="merge の段で衝突"))
+                          reason="merge のステップで衝突"))
     prod = write_plan(tmp_path, "plan-release-prod", [1053, 1054], "配布（本番）",
                       report("配布（本番）", "#1053 #1054", "完了", "無し", "0.000"))
     dev = write_plan(tmp_path, "plan-release-dev", [1053, 1054], "配布（開発版）", None)
@@ -143,7 +143,7 @@ def test_update_fills_rows_and_render_writes_table(r6):
     rows = {i["plan"]: i for i in out["items"]}
     assert (rows[r6["a"]]["result"], rows[r6["a"]]["pr"], rows[r6["a"]]["seconds"], rows[r6["a"]]["cost"]) == \
         ("完了", "#1056", 586.4, 1.178)
-    assert (rows[r6["b"]]["result"], rows[r6["b"]]["exit"], rows[r6["b"]]["reason"]) == ("止まった", 3, "merge の段で衝突")
+    assert (rows[r6["b"]]["result"], rows[r6["b"]]["exit"], rows[r6["b"]]["reason"]) == ("止まった", 3, "merge のステップで衝突")
     assert rows[r6["dev"]]["result"] == "まだ"
     assert (rows[r6["prod"]]["result"], rows[r6["prod"]]["pr"], rows[r6["prod"]]["seconds"]) == ("完了", "", 300.3)
 
@@ -152,7 +152,7 @@ def test_update_fills_rows_and_render_writes_table(r6):
     ok("render", r6["mission"], str(doc), "--section", "今の会話の進み")
     text = doc.read_text()
     assert "| 実装 #1053 | 完了 | #1056 | 586.4 | $1.178 | 次のミッションからチェインで流す |" in text
-    assert "| 実装 #1054 | 止まった（exit=3）。理由: merge の段で衝突 | #1058 | 816 | $2.170 | — |" in text
+    assert "| 実装 #1054 | 止まった（exit=3）。理由: merge のステップで衝突 | #1058 | 816 | $2.170 | — |" in text
     assert "| 開発版 10.17.17-dev.1 | まだ | — | — | — | — |" in text
     assert "| 本番 10.17.17 | 完了 | — | 300.3 | $0.000 | — |" in text
     assert "古い行" not in text

@@ -138,7 +138,7 @@ bash ../../scripts/lib/bg-wait.sh run "$RC" -- python3 scripts/drive.py <PR> [�
 bash ../../scripts/lib/bg-wait.sh wait "$RC"   # 1 回 540 秒以内。124 = まだ終わっていない
 ```
 
-待ち方の規約は [waiting.md](../development-workflow/references/waiting.md)、待ちから戻った後に同じ応答で次の段へ
+待ち方の規約は [waiting.md](../development-workflow/references/waiting.md)、待ちから戻った後に同じ応答で次の手順へ
 進む規則は [agent-layers.md](../development-workflow/references/agent-layers.md) の supervisor の規則にある。
 JSON の形と終了コードの表は共通層の `scripts/lib/drive_pause.py` にある。
 

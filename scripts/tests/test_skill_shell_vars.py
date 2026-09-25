@@ -88,7 +88,7 @@ def test_a_value_emitted_only_later_is_reported(tmp_path):
 
 
 def test_a_value_emitted_through_a_helper_is_a_source(tmp_path):
-    """`cmd_init` が `_emit_init` を呼ぶ形も 1 段だけたどる。"""
+    """`cmd_init` が `_emit_init` を呼ぶ形も 1 階層だけたどる。"""
     emits = (
         "def _emit_init(state):\n"
         "    statefile.emit(WORK='w')\n"

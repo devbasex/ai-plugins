@@ -51,7 +51,7 @@ DEFAULT_FILES = ["AGENTS.md", "CLAUDE.md", "KIRO.md"]
 # 即時読み込みの記法を解釈する指示書。Codex / Kiro はただの文字列として扱うため、
 # 解釈しない指示書へこの判定を掛けると、書いてよい文字列で落ちる。
 DEFAULT_IMPORT_SYNTAX = ["CLAUDE.md"]
-# たどる深さの上限。根拠は Claude Code のドキュメント（memory）が最大 4 段と書いていること。
+# たどる深さの上限。根拠は Claude Code のドキュメント（memory）が最大 4 階層と書いていること。
 DEFAULT_IMPORT_DEPTH = 4
 DEFAULT_REVIEW_INTERVAL_DAYS = 90
 SUPPORTED_DECLARATION_VERSIONS = (1,)
@@ -974,7 +974,7 @@ def main(argv: list[str] | None = None) -> int:
 
 @dataclass
 class Measurements:
-    """対象ごとの計測と判定の結果。段の間で持ち回る。"""
+    """対象ごとの計測と判定の結果。手順の間で持ち回る。"""
 
     findings: list[Finding] = field(default_factory=list)
     sizes: dict[str, int] = field(default_factory=dict)

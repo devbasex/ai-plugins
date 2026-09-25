@@ -76,13 +76,13 @@ flowchart TD
 
 NDF を使う開発では、Skill の実体を持つリポジトリと、開発している側のリポジトリが別に
 なることがある。**どちらへ起票するかは課題の性質が決める。** 判断表と、リポジトリの名前を
-解決する 3 段は [references/issue-target.md](references/issue-target.md) にある。
+解決する 3 つの手順は [references/issue-target.md](references/issue-target.md) にある。
 
 決まらないときは推測で起票せず、そこで止まって利用者に聞く。以降の手順の `gh` は、
 ここで決めた起票先に対して実行する。
 
 ```bash
-ISSUE_REPO=<所有者>/<リポジトリ>          # 判断表と 3 段で決めたもの
+ISSUE_REPO=<所有者>/<リポジトリ>          # 判断表と 3 つの手順で決めたもの
 ```
 
 ### 4. 重複を確かめる

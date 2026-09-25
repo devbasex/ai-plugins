@@ -149,11 +149,11 @@ python3 "$SCRIPTS/merged-steps.py" merge-when-green <PR番号> --root <主ディ
   再実行した同じ検査が再び取り残されたら `stopped`（1）で止まる（`items` の `result` は `stuck`）
 - ジョブが `queued` のままランナーを待つ間は、待ちの 1 周ごとに stderr へ
   `merge-when-green: CI のランナー待ち（待ち行列 N 件、待ち M 件）` を出す。最後に見た待ち行列の件数は
-  `metrics.queued_runs` に残る。supervise.py の run の段で動かすと、この行が `progress.jsonl` の
+  `metrics.queued_runs` に残る。supervise.py の run のステップで動かすと、この行が `progress.jsonl` の
   `alive` の行の `last_output` に載る
 
-**待ちが遅れたときの一次の調査は `probe` で行う。** supervise.py の `merge` と `release` の段が、経過が
-想定を超えたときに打つ（段の `probe`）。
+**待ちが遅れたときの一次の調査は `probe` で行う。** supervise.py の `merge` と `release` のステップが、経過が
+想定を超えたときに打つ（ステップの `probe`）。
 
 ```bash
 python3 "$SCRIPTS/merged-steps.py" probe (--pr <PR番号> | --head <ブランチ>...) [--act] --root <主ディレクトリ>

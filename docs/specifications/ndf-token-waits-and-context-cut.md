@@ -113,7 +113,7 @@ graph TB
 | 見方 | 規則 |
 | --- | --- |
 | 見ない部分 | コメント（引用の外の `#` 以降）・引用の中・ヒアドキュメントの本文 |
-| 中身を取り出して同じ規則で見る | コマンドの位置にある `bash -c` / `sh -c` / `zsh -c` / `dash -c` / `eval` の実行される引数。入れ子も 1 段ずつ見る |
+| 中身を取り出して同じ規則で見る | コマンドの位置にある `bash -c` / `sh -c` / `zsh -c` / `dash -c` / `eval` の実行される引数。入れ子も 1 階層ずつ見る |
 | コマンドの位置 | 行頭・`;` `&&` `\|\|` `\|` `&` `(` `do` `then` `else` の直後。先頭の代入語（`X=1`）と前置き（`timeout 590` / `nohup` / `env` など）の後ろも含む |
 | 背景とみなして見ない | `run_in_background: true`、`&` で終わる `sleep`（リダイレクトを挟む形、sleep を含むリスト、`( )` / `{ }` / ループで囲んだ全体が背景になる形、外側が背景の `bash -c` / `eval` を含む）。`2>&1` / `&>` の `&` は背景と読まない |
 
@@ -408,7 +408,7 @@ agy の CLI 側の消費を測った後に、登録するかを改めて決め�
   実測値・上限の値・戻す手順があり、`SKILL.md` に引き継ぎの 1 行の規約があること。README に
   4 ランタイムの表があること
 - Codex / Kiro / agy の既存の hook の動作が変わらないこと（既存のテスト）
-- supervisor → worker の 2 段で、worker が背景の待ちを残して応答を終えても、supervisor が途中の
+- supervisor → worker の 2 層で、worker が背景の待ちを残して応答を終えても、supervisor が途中の
   通知で止まらず、自分の写しの待ちの完了通知で再開して worker の報告を畳んだフェーズの報告を返すこと。
   conductor が報告なしで続けさせる回数が 0 であること（`claude -p --output-format stream-json` で
   再現する。記録は [PR #910](https://github.com/devbasex/ai-plugins/pull/910) の本文。`claude -p` は

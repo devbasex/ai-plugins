@@ -190,7 +190,7 @@ GitHub と git の送信をしない。結果ファイル: {self.path('sweep')}
 出力ファイル（JSON: {{"title": ..., "body": ...}}）: {self.path('newtext')}
 """
 
-    # --- 段 ---
+    # --- ステップ ---
     def init(self) -> None:
         out = self.must(call([sys.executable, str(HERE / "state.py"), "init", str(self.pr), *self.init_args],
                              self.env), "state.py init")
@@ -315,7 +315,7 @@ GitHub と git の送信をしない。結果ファイル: {self.path('sweep')}
                 return self.pause(ds, "fix", self.fix_prompt())
             ds["stage"] = "sweep-start"
             self.save_ds(ds)
-        raise Stop("段の数が上限を超えた", 1)
+        raise Stop("ステップの数が上限を超えた", 1)
 
 
 def main(argv: list[str] | None = None) -> None:

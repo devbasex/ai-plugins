@@ -144,15 +144,15 @@ python3 "$CLAUDE_PLUGIN_ROOT/skills/skill-stats/scripts/skill-stats.py" \
 この工程は `merged` の後に来るため、ブランチも作業ツリーも残っていない。番号はマージ先の
 先頭のコミットから引く。
 
-**番号は 3 段で引く。各段は直前の段の出力を受け取る。**
+**番号は 3 つの手順で引く。各手順は直前の手順の出力を受け取る。**
 
-| 段 | 入力 | 出力 | 止まる条件 |
+| 手順 | 入力 | 出力 | 止まる条件 |
 | --- | --- | --- | --- |
 | 1. 開発の起点を解決する | `.ndf/worktree.json` の `base_branch`、origin | `$dev_base` | 宣言したブランチが origin にもローカルにも無い |
 | 2. 記録対象の基準ブランチを決める | 下表の場合、`$dev_base`（起点の issue を持たない変更だけが使う） | `$record_base` | ミッションを配布した先のブランチを判別できない |
 | 3. 基準コミットから Pull Request を引く | `$record_base`、`$RECORD_REPO` | マージ済みの Pull Request 1 件の番号 | マージ済みへ絞った結果が 1 件でない |
 
-**段 1: 開発の起点を解決する**
+**手順 1: 開発の起点を解決する**
 
 **起点のブランチは対象リポジトリが決める。** 字面で書かず、`merged` / `deploy` /
 `pr-review` / `cherry-pick-pr` と同じ解決を使う。
@@ -196,7 +196,7 @@ else
 fi
 ```
 
-**段 2: 記録対象の基準ブランチを決める**
+**手順 2: 記録対象の基準ブランチを決める**
 
 | 場合 | 起点にするコミット |
 | --- | --- |
@@ -225,9 +225,9 @@ record_base=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | se
 }
 ```
 
-**段 3: 基準コミットから Pull Request を引く**
+**手順 3: 基準コミットから Pull Request を引く**
 
-段 2 で決めた `$record_base` の先頭のコミットで番号を引く。
+手順 2 で決めた `$record_base` の先頭のコミットで番号を引く。
 
 ```bash
 gh api "/repos/$RECORD_REPO/commits/$(git rev-parse "origin/$record_base")/pulls" \
@@ -330,7 +330,7 @@ gh issue edit <issue番号> --repo "$RECORD_REPO" --body-file /tmp/issue-body.md
 ## 蓄積した課題を手入れする
 
 **「ミッションを閉じる」の後に `/ndf:issue-upkeep` を呼ぶ。** 順序を逆にすると、`issue-upkeep` の
-段 1 が読む「このミッションで閉じた課題」がまだ閉じていない。振り返りが拾うのは、この変更から出た
+手順 1 が読む「このミッションで閉じた課題」がまだ閉じていない。振り返りが拾うのは、この変更から出た
 取りこぼしである。**変更をまたいで溜まった課題そのもの**は対象にしていない。
 
 対象が 0 件ならその Skill 自身が飛ばす。

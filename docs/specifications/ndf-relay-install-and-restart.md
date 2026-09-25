@@ -188,7 +188,7 @@ alias claude='python3 "${XDG_DATA_HOME:-$HOME/.local/share}/ndf/relay.py" run'
 
 ### `install`
 
-| # | 段 | すること | 出す行（`ndf-relay: ` の後） |
+| # | 手順 | すること | 出す行（`ndf-relay: ` の後） |
 | ---: | --- | --- | --- |
 | E0 | パス | 写し・ラッパーの rc・読み込み先のファイルのパスに引用できない文字があれば、何も書かず 1 | `<パス> は引用できない文字を含むため置かない` |
 | E1 | 読み込み先 | `DEVBASE_SHELLRC_DIR` が在るディレクトリを指せば読み込み先のファイル。無ければ `$SHELL` の名前が `bash` なら `~/.bashrc`（macOS では `~/.bash_profile`。無ければ作る）、`zsh` なら `${ZDOTDIR:-$HOME}/.zshrc` の囲み。どちらでもなければ何も書かず 1 | `<シェル> には足さない。使うなら次の 1 行を設定へ置く: <読み込みの行>` |
@@ -205,7 +205,7 @@ alias claude='python3 "${XDG_DATA_HOME:-$HOME/.local/share}/ndf/relay.py" run'
 
 ### `uninstall`
 
-| # | 段 | すること |
+| # | 手順 | すること |
 | ---: | --- | --- |
 | U1 | 形を見る | `~/.bashrc`・`~/.bash_profile`・`${ZDOTDIR:-$HOME}/.zshrc` を調べ、閉じの無い囲みが 1 つでもあれば何も変えずに 1（`<ファイル> の囲みに閉じが無い。何も変えていない。直してから打ち直す`） |
 | U2 | ロック | `install.lock` を取る。`<親>` が在るときだけ `copy.lock` も取る（`<親>` を作らない）。取れなければ 3 |
@@ -308,7 +308,7 @@ sh -c '[ -n "${NDF_RELAY_DIR:-}" ] || exit 0; ROOT="${CLAUDE_PLUGIN_ROOT:-${PLUG
 | (4) | 作業ディレクトリに `question` が無い（G1） | 待ち続ける |
 | (5) | 印の `transcript_path` に、`timestamp` が印の `written_at` より後で `type` が `assistant` か `user` の行が無い（G2）。`attachment`（目標の判定）と `system` の行は数えない | 待ち続ける。次の Stop が印を書き直すか消す |
 
-**終わらせる段（G3）。** (1)〜(5) がそろい、停止の印・`count.lock`・1 日の上限・空回りを通った後:
+**終わらせる手順（G3）。** (1)〜(5) がそろい、停止の印・`count.lock`・1 日の上限・空回りを通った後:
 
 | 順 | ラッパーがすること |
 | ---: | --- |

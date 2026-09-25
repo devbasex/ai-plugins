@@ -154,7 +154,7 @@ Serena が使えるときは、ファイルを丸ごと読まずに `get_symbols
   - [references/lang-typescript.md](references/lang-typescript.md)
   - [references/lang-php.md](references/lang-php.md)
   - 一覧にない言語は、`data-representation.md` の判定表から自分で対応付ける
-- [references/test-changes.md](references/test-changes.md) — テストをどこまで変えてよいか。判定の 3 段と、段階の分け方
+- [references/test-changes.md](references/test-changes.md) — テストをどこまで変えてよいか。一次〜三次の判定と、段階の分け方
 - [references/vocabulary.md](references/vocabulary.md) — 兆候と手法の呼び名。**識別子を持つ唯一の場所**
 - [references/characterization-tests.md](references/characterization-tests.md) — 現状固定テストの作り方
 - `/ndf:cross-refactoring` — 発見と検証を別のランタイムへ分ける形。**この Skill は

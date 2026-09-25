@@ -555,7 +555,7 @@ def test_version_section_stops_at_a_higher_level_heading(tree: Path) -> None:
 def test_subheading_inside_the_section_does_not_close_it(tree: Path) -> None:
     """章 2 の中の `### ` 小見出しで区間を閉じない。
 
-    終端を固定の 3 段で取ると、`## ` の章の中の小見出しで区間が切れ、その後ろの古い版数を
+    終端を深さを 3 に固定して取ると、`## ` の章の中の小見出しで章が途切れ、その後ろの古い版数を
     見落とす。終端は位置決めの見出しの深さから導く。
     """
     add_to_version_section(tree, "\n### 接尾辞の規則\n\n- 前の版の例。`9.2.1` はもう使わない")

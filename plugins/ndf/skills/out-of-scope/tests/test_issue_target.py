@@ -27,7 +27,7 @@ from issue_target_helpers import (
 
 @pytest.mark.parametrize("runtime", sorted(RUNTIME_LAYOUTS))
 def test_the_second_stage_resolves_on_every_runtime(runtime: str, tmp_path: Path) -> None:
-    """段 2 は、手順書の表が挙げるどの位置でも配布元を決める（#306）。
+    """手順 2 は、手順書の表が挙げるどの位置でも配布元を決める（#306）。
 
     Kiro と agy は取得元を持たず、clone した作業ディレクトリがその位置になる。表だけを
     読む検査では、bash がその位置を見ていないことに気づけない。
@@ -64,7 +64,7 @@ def test_the_working_directory_is_dropped_when_it_does_not_carry_ndf(tmp_path: P
 
 
 def test_two_names_fall_through_to_the_third_stage(tmp_path: Path) -> None:
-    """取得元と現在地が違う配布元を指すときは、推測せず段 3 へ倒す。"""
+    """取得元と現在地が違う配布元を指すときは、推測せず手順 3 へ倒す。"""
     home, _ = runtime_layout(tmp_path, "claude")
     fork = make_clone(tmp_path / "fork", "https://github.com/example/ai-plugins.git")
 

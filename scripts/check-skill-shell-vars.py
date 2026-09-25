@@ -15,7 +15,7 @@
 
 副コマンドが返すキーは、そのスクリプトの構文木から読む。`cmd_<名前>` の関数が呼ぶ
 `emit(...)` のキーワードを集め、`_emit_init` のようなヘルパーを経由する呼び出しも
-**1 段だけ**たどる。
+**1 階層だけ**たどる。
 
 **シェルの構文解析器は使わない。** 骨組みは代入・`for`・コマンド置換に限られており、
 この範囲は後ろ向きの状態だけで読める（#201 で同じ判断をしている）。
@@ -87,7 +87,7 @@ def emitted_keys(scripts_dir: pathlib.Path) -> dict[str, set[str]]:
     """副コマンドの名前ごとに、`emit` が返すキーの集合を返す。
 
     `cmd_start_round` は副コマンド `start-round` に対応する。ヘルパーを経由する
-    呼び出しは **1 段だけ**たどる（`cmd_init` → `_emit_init`）。
+    呼び出しは **1 階層だけ**たどる（`cmd_init` → `_emit_init`）。
     """
     per_function: dict[str, set[str]] = {}
     calls: dict[str, set[str]] = {}
@@ -114,7 +114,7 @@ def emitted_keys(scripts_dir: pathlib.Path) -> dict[str, set[str]]:
         if not name.startswith("cmd_"):
             continue
         total = set(keys)
-        for callee in calls.get(name, set()):        # ヘルパーは 1 段だけ
+        for callee in calls.get(name, set()):        # ヘルパーは 1 階層だけ
             total |= per_function.get(callee, set())
         result[name[4:].replace("_", "-")] = total
     return result

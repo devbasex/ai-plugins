@@ -42,7 +42,7 @@ def fenced_blocks(body: str) -> list[str]:
 
 
 def resolution_snippet(body: str) -> str:
-    """段の解決を書いた囲みを返す。
+    """手順の解決を書いた囲みを返す。
 
     読み取れないこと自体を失敗として扱う。囲みを消すだけで、解決の形を見る検査を無効に
     できる形にしない。
@@ -52,7 +52,7 @@ def resolution_snippet(body: str) -> str:
         for block in fenced_blocks("\n".join(section(body, RESOLUTION_TABLE_HEADING)))
         if "SKILL_REPO=" in block
     ]
-    assert found, "段の解決を書いた囲みが見つからない"
+    assert found, "手順の解決を書いた囲みが見つからない"
     return found[0]
 
 
@@ -85,7 +85,7 @@ def section(body: str, heading: str) -> list[str]:
     return found
 
 
-# 段 2 が見る位置を、ランタイムごとに作る。**手順書の表が挙げる位置と同じものを作る。**
+# 手順 2 が見る位置を、ランタイムごとに作る。**手順書の表が挙げる位置と同じものを作る。**
 # 手順は「1 つに絞れたときだけ採る」ため、どのランタイムでも配置は 1 つにする。
 RUNTIME_LAYOUTS = {
     "claude": ".claude/plugins/marketplaces/ai-plugins",
@@ -129,7 +129,7 @@ def runtime_layout(root: Path, runtime: str, url: str | None = REMOTE) -> tuple[
 
 
 def run_resolution(body: str, *, home: Path, cwd: Path) -> str:
-    """段の解決の囲みをそのまま実行し、決まった名前を返す。
+    """手順の解決の囲みをそのまま実行し、決まった名前を返す。
 
     **手順書に書いてある本文を動かす。** 写し取った別の実装を試すと、手順書が誤ったまま
     でも検査は通る。

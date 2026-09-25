@@ -223,7 +223,7 @@ stateDiagram-v2
     中継する --> [*]: 子が印なしで終わった（子の終了コード）
 ```
 
-| 段 | すること |
+| 手順 | すること |
 | --- | --- |
 | 中継する | 端末の属性を保存して標準入力を raw にし、`select` で標準入力 → マスタ、マスタ → 標準出力を流す（Ctrl-C もバイトのまま子へ届く）。SIGWINCH で端末の大きさをマスタへ `TIOCSWINSZ` で写す。`NDF_RELAY_POLL` 秒（既定 2）ごとに印を見る。1 つ目の区間は今の作業ディレクトリで `<本物の claude> <run の引数>` を起動する |
 | 静止を待つ | 次がそろうまで待つ。(1) 印の `written_at`・`transcript_path` の更新時刻・利用者の最後の入力の時刻のうち最も遅いものから `NDF_RELAY_QUIET` 秒。印より後に目標が未達の判定の行（`attachment.type: "goal_status"`・`met: false`・`sentinel` 無し）があれば、`transcript_path` の更新時刻は数えない。(2) 印が消えていない。(3) 質問の印が無く、`asked` の時刻が印の `written_at` より前。(4) 会話の記録に、印より後の利用者の入力の行（`type: "user"` で `isMeta` が無く、Tool の結果でも Esc の中断の記録でもない）と、`run_in_background` が真の Tool の呼び出しを含む `assistant` の行が無い。目標が未達の判定の行が無ければ、印より後の `assistant` / `user` の行も無い |
@@ -272,7 +272,7 @@ stateDiagram-v2
 | 8 | ブロックが 0 で、7 に当たらない | 前の印を残す。印を書いた後は切り替えを確定とする |
 
 **親のたどり** は Linux では `/proc/<pid>/stat`、それ以外では `ps -o ppid=,comm=` で行う。名前が
-`claude` か、子と同じ名前か、pid が `child.pid` のプロセスに当たった時点で決める（最大 64 段、pid 1
+`claude` か、子と同じ名前か、pid が `child.pid` のプロセスに当たった時点で決める（最大 64 階層、pid 1
 で打ち切る）。conductor が Bash から起こした `claude -p` は子の claude の孫に当たり、先にそちらに当たる。
 
 **ブロックの読み取りは外側の囲みの中を除く。** 応答を行ごとに読み、囲みの開き（行頭のバッククォート
