@@ -119,6 +119,12 @@
       "context": "ndf-notification",
       "meaning": "通知から当該セッションへ戻る手段。ホスト名・cwd の行と、作れればセッションの URL か再開のコマンド",
       "pending_source": "issues/issue-821-wait-notify-design.md"
+    },
+    {
+      "term": "チェイン",
+      "context": "ndf-workflow",
+      "meaning": "queue が `--then` でつないだ計画の列（実装 → 検査 → 実装レビュー → 開発版 → 本番）。列の 1 つ分がステージ。「鎖」とは書かない（1 文字の語は照合できないため廃止の語に入れていない）",
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     }
   ]
 }
