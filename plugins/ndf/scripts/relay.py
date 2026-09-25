@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
-"""NDF の中継: 区間の切れ目で claude を起動し直す（#895）。
+"""NDF のラッパー: 区間の切れ目で claude を起動し直す（#895）。
 
 副命令:
 
 | 副命令 | 役割 |
 | --- | --- |
-| `run [claude の引数 ...]` | 端末の前景に常駐し、claude を擬似端末の子として起動する。印を受けたら子へ `/exit` を入力し、プラグインを更新して次の区間を起動する。中継が要らない起動は本物の claude をそのまま exec する（素通し） |
-| `stop` | 動いている中継すべてに停止の印を置く |
+| `run [claude の引数 ...]` | 端末の前景に常駐し、claude を擬似端末の子として起動する。印を受けたら子へ `/exit` を入力し、プラグインを更新して次の区間を起動する。ラッパーが要らない起動は本物の claude をそのまま exec する（素通し） |
+| `stop` | 動いているラッパーすべてに停止の印を置く |
 | `mark` | Stop hook の本体。最後の応答の `ndf-next` のブロックを印 `next.json` へ写す |
-| `install` / `uninstall` / `status` | `/ndf:install-wrapper` の本体。写しと中継の rc を `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/` に置き、シェルの設定へ読み込みの 1 行を足す・外す・状態を示す（#928） |
+| `install` / `uninstall` / `status` | `/ndf:install-wrapper` の本体。写しとラッパーの rc を `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/` に置き、シェルの設定へ読み込みの 1 行を足す・外す・状態を示す（#928） |
 | `startup` | SessionStart hook の本体。在る写しを今の版で置き直し（版は後退させない）、10.17.4〜10.17.6 が自動で足した囲みを 1 度だけ知らせる。シェルの設定は書かない |
 | `question open` / `question close` | `AskUserQuestion` の `PreToolUse` / `PostToolUse` hook の本体。質問の表示中の印を作る・消す（関門を越えない守り） |
-| `is-child` | 中継の直接の子の claude から呼ばれていれば 0 |
-| `notice` | 区間の切れ目の告知。1 行目に `relay` か `outside`（`is-child` と同じ判定）、2 行目に告知の 1 文を出す（#980）。外のときの 2 行目は理由（中継が無い・終わっている・直接の子でない）で変わる（#1016） |
+| `is-child` | ラッパーの直接の子の claude から呼ばれていれば 0 |
+| `notice` | 区間の切れ目の告知。1 行目に `relay` か `outside`（`is-child` と同じ判定）、2 行目に告知の 1 文を出す（#980）。外のときの 2 行目は理由（ラッパーが無い・終わっている・直接の子でない）で変わる（#1016） |
 
 **標準ライブラリだけで書く。** 印と作業ディレクトリの形（`next.json` のキーと
 `NDF_RELAY_DIR` のファイル）は版をまたいで変えない。hook は区間ごとに新しい版で動き、
-動いている中継は古い版のままでありうるためである。
+動いているラッパーは古い版のままでありうるためである。
 
 規約は skills/development-workflow/references/relay.md にある。
 """
@@ -138,7 +138,7 @@ def data_dir() -> str:
 
 
 def relay_running(d: str) -> bool:
-    """`relay.lock` の排他が取れなければ中継が動いている。pid の生死では見ない。"""
+    """`relay.lock` の排他が取れなければラッパーが動いている。pid の生死では見ない。"""
     try:
         fd = os.open(os.path.join(d, LOCK_FILE), os.O_RDWR)
     except OSError:
@@ -196,7 +196,7 @@ def proc_info(pid: int) -> tuple[int, str] | None:
 
 
 def is_direct_child(d: str, start: int | None = None) -> bool:
-    """hook の親をたどって最初に当たる claude が、中継の起動した子（`child.pid`）かを見る。
+    """hook の親をたどって最初に当たる claude が、ラッパーの起動した子（`child.pid`）かを見る。
 
     claude は名前（`claude`）か、子と同じ名前か、pid そのもので見分ける。
     conductor が Bash から起こした `claude -p` は子の claude の孫に当たり、先にそちらに当たる。
@@ -225,9 +225,9 @@ def is_direct_child(d: str, start: int | None = None) -> bool:
 
 
 def relay_position() -> str:
-    """中継との位置を返す。`relay`（直接の子）か、外である理由（`no-dir` / `not-running` / `not-child`）。
+    """ラッパーとの位置を返す。`relay`（直接の子）か、外である理由（`no-dir` / `not-running` / `not-child`）。
 
-    `not-child` は中継が動いているのに hook を呼んだ claude が `child.pid` でないとき
+    `not-child` はラッパーが動いているのに hook を呼んだ claude が `child.pid` でないとき
     （fork したセッション・bg-pty-host の下・別の入口。#1016）。
     """
     d = os.environ.get("NDF_RELAY_DIR")
@@ -241,14 +241,14 @@ def relay_position() -> str:
 
 
 def under_relay() -> str | None:
-    """`NDF_RELAY_DIR` があり、中継が動いていて、hook を呼んだ claude が中継の直接の子ならその場所を返す。"""
+    """`NDF_RELAY_DIR` があり、ラッパーが動いていて、hook を呼んだ claude がラッパーの直接の子ならその場所を返す。"""
     if relay_position() == "relay":
         return os.environ.get("NDF_RELAY_DIR")
     return None
 
 
 def relay_child_pid() -> int | None:
-    """中継が起動した子の pid（`child.pid`）。読めなければ None。"""
+    """ラッパーが起動した子の pid（`child.pid`）。読めなければ None。"""
     d = os.environ.get("NDF_RELAY_DIR")
     if not d:
         return None
@@ -302,7 +302,7 @@ def background_running(tasks) -> bool:
 
 
 def current_section(d: str) -> int | None:
-    """中継の log.jsonl の最後の start の区間の番号。"""
+    """ラッパーの log.jsonl の最後の start の区間の番号。"""
     try:
         with open(os.path.join(d, LOG_FILE)) as f:
             lines = f.readlines()
@@ -329,7 +329,7 @@ def hold_reason(tasks: list[dict]) -> str:
     """背景の作業が残っていて印を書けないときに、Stop を止めて conductor へ渡す文。"""
     rows = [f"- {t['id'] or '(id 不明)'}: {t['command'] or '(コマンド不明)'}" for t in tasks]
     return "\n".join([
-        f"ndf-relay: 背景の作業が {len(tasks)} 件動いているので、ndf-next の印を書かなかった（中継は切り替わらない）。",
+        f"ndf-relay: 背景の作業が {len(tasks)} 件動いているので、ndf-next の印を書かなかった（ラッパーは切り替わらない）。",
         *rows,
         "背景の作業を止めるのは TaskStop <id>。pkill -f / pgrep -f で止めたり確かめたりしない"
         "（Claude Code が包んだコマンド行に一致しない）。止まったかは完了通知（failed / killed）で確かめる。",
@@ -416,12 +416,12 @@ def _is_self(path: str) -> bool:
         with open(real, "rb") as f:
             return b"relay.py" in f.read(4096)
     except OSError:
-        # 読めないものは中継と見なさない。飛ばし損ねた繰り返しは NDF_RELAY_DEPTH が止める
+        # 読めないものはラッパーと見なさない。飛ばし損ねた繰り返しは NDF_RELAY_DEPTH が止める
         return False
 
 
 def resolve_claude() -> str | None:
-    """alias は子に効かないため実体を探す。`claude` という名前で中継を呼ぶラッパーを飛ばす。"""
+    """alias は子に効かないため実体を探す。`claude` という名前でラッパーを呼ぶ別のスクリプトを飛ばす。"""
     forced = os.environ.get("NDF_RELAY_CLAUDE")
     if forced:
         return forced
@@ -886,7 +886,7 @@ class Relay:
         try:
             return self._tick()
         except Exception as e:  # 本体の例外で子を巻き込まない
-            self.halt("error", f"中継の中で例外が起きた（{type(e).__name__}）")
+            self.halt("error", f"ラッパーの中で例外が起きた（{type(e).__name__}）")
             return None
 
     def _tick(self):
@@ -1180,7 +1180,7 @@ def _is_user_prompt(row: dict) -> bool:
         items = [c for c in content if isinstance(c, dict)]
         if not items or any(c.get("type") == "tool_result" for c in items):
             return False
-        # Esc で応答を止めた記録（中継が書いた Esc でも出る）は入力に数えない
+        # Esc で応答を止めた記録（ラッパーが書いた Esc でも出る）は入力に数えない
         return not all(str(c.get("text") or "").startswith("[Request interrupted by user")
                        for c in items)
     return False
@@ -1239,16 +1239,16 @@ def cmd_run(args: list[str]) -> int:
         import termios
         import tty
     except ImportError:
-        say("中継を始めない（擬似端末を作れない）。切れ目では示されたコマンドを手で入力する")
+        say("ラッパーを始めない（擬似端末を作れない）。切れ目では示されたコマンドを手で入力する")
         passthrough(claude, args)
     got = read_plugin(claude)
     if got is None:
-        say("中継を始めない（ndf のプラグインの名前と版を読めない）。切れ目では示されたコマンドを手で入力する")
+        say("ラッパーを始めない（ndf のプラグインの名前と版を読めない）。切れ目では示されたコマンドを手で入力する")
         passthrough(claude, args)
     try:
         relay_dir = make_relay_dir()
     except OSError:
-        say("中継を始めない（作業ディレクトリを作れない）。切れ目では示されたコマンドを手で入力する")
+        say("ラッパーを始めない（作業ディレクトリを作れない）。切れ目では示されたコマンドを手で入力する")
         passthrough(claude, args)
     term = Terminal()
     relay = Relay(claude, relay_dir, got[0], got[1], term,
@@ -1310,7 +1310,7 @@ VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:-(dev|rc)\.(\d+))?$")
 
 
 def config_dir() -> str:
-    """写し・写しの版・中継の rc の親。devbase では永続化される `~/.claude` の下になる。"""
+    """写し・写しの版・ラッパーの rc の親。devbase では永続化される `~/.claude` の下になる。"""
     base = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
     return os.path.join(base, "ndf")
 
@@ -1415,7 +1415,7 @@ def login_warning() -> str | None:
     if login and (rc_blocks(login)[0] or reads_bashrc(login)):
         return None
     return (f"警告: 読み込みの行は {bashrc} にしか無く、ログインシェルが読む {login or bash_profile} は "
-            f"{bashrc} を読まない。macOS の端末はログインシェルで開くため、中継が効かない。"
+            f"{bashrc} を読まない。macOS の端末はログインシェルで開くため、ラッパーが効かない。"
             f"/ndf:install-wrapper を打ち直すと {bash_profile} へ足す")
 
 
@@ -1429,7 +1429,7 @@ def sh_quote(path: str) -> str:
 
 def shellrc_body() -> str:
     c = sh_quote(copy_path())
-    return ("# ndf の中継。/ndf:install-wrapper が書き、/ndf:install-wrapper uninstall が消す\n"
+    return ("# ndf のラッパー。/ndf:install-wrapper が書き、/ndf:install-wrapper uninstall が消す\n"
             "function claude {\n"
             f"  if [ -f {c} ]; then python3 {c} run \"$@\"\n"
             "  else command claude \"$@\"; fi\n"
@@ -1442,7 +1442,7 @@ def loader_line() -> str:
 
 
 def loader_inner() -> list[str]:
-    return ["# ndf の中継（/ndf:install-wrapper uninstall で外れる）", loader_line()]
+    return ["# ndf のラッパー（/ndf:install-wrapper uninstall で外れる）", loader_line()]
 
 
 def loader_body() -> str:
@@ -1725,7 +1725,7 @@ def _install_locked(loader: str | None, sh) -> int:
         _add_record(user, rc)
     bak = f"（バックアップ {'・'.join(backups)}）" if backups else ""
     out(f"{target} から {shellrc_path()} を読むようにした{bak}。次に開くシェルから効く")
-    out(f"中継の本体 {copy_path()}（版 {ver or '不明'}）")
+    out(f"ラッパーの本体 {copy_path()}（版 {ver or '不明'}）")
     return 0
 
 
@@ -1782,7 +1782,7 @@ def _uninstall_locked() -> int:
         out(line)
     out("開いているシェルでは " + ("unalias claude" if direct_alias else "unset -f claude") + " で外れる")
     if os.path.islink(os.path.dirname(config_dir())) or loader:
-        out("同じ設定を共有する環境でも、中継を通らなくなる（開いたままのシェルは素の claude へ落ちる）")
+        out("同じ設定を共有する環境でも、ラッパーを通らなくなる（開いたままのシェルは素の claude へ落ちる）")
     return 0
 
 
@@ -1821,7 +1821,7 @@ def cmd_status() -> int:
             kind = "直の alias（10.17.4〜10.17.6 の形）" if direct else "読み込みの行"
             who = "。10.17.4〜10.17.6 が自動で足した" if rc in auto else ""
             out(f"{rc}: 囲みがある（{kind}{who}）")
-    out(f"中継の rc {shellrc_path()}: {'在る' if os.path.exists(shellrc_path()) else '無い'}")
+    out(f"ラッパーの rc {shellrc_path()}: {'在る' if os.path.exists(shellrc_path()) else '無い'}")
     ver = (_read(copy_version_path()) or "").strip() or "不明"
     out(f"写し {copy_path()}: {_same(copy_path(), body)}（写しの版 {ver}）")
     out(f"旧い写し {old_copy_path()}: {_same(old_copy_path(), body)}")
@@ -1911,7 +1911,7 @@ def startup_once() -> str | None:
 
 
 def cmd_startup() -> int:
-    """SessionStart hook の本体。シェルの設定・中継の rc・読み込み先のファイルは書かない。"""
+    """SessionStart hook の本体。シェルの設定・ラッパーの rc・読み込み先のファイルは書かない。"""
     try:
         msg = startup_once()
     except Exception:  # SessionStart を止めない
@@ -1924,7 +1924,7 @@ def cmd_startup() -> int:
 # ---------------------------------------------------------------- 質問の印（関門を越えない守り）
 
 
-DENY_REASON = ("ndf-relay: 中継が入力を書いている最中だったため、質問を出さなかった。"
+DENY_REASON = ("ndf-relay: ラッパーが入力を書いている最中だったため、質問を出さなかった。"
                "利用者へ返さずに、同じ AskUserQuestion を今すぐもう一度呼ぶ")
 
 
@@ -1974,21 +1974,21 @@ def cmd_question(action: str) -> int:
 def notice_lines() -> tuple[str, str]:
     """区間の切れ目の告知。文面と秒数の唯一の定義。
 
-    1 行目は `is-child` と同じ判定（中継の直接の子か）。自動で切り替わるかは 2 行目が表す。
+    1 行目は `is-child` と同じ判定（ラッパーの直接の子か）。自動で切り替わるかは 2 行目が表す。
     外のときは 2 行目を理由（`relay_position()`）で変え、原因と対処を書く（#1016）。
-    秒数は中継本体の静まり（`NDF_RELAY_QUIET`）そのもので、切り替えの時間は足さない。
+    秒数はラッパー本体の静まり（`NDF_RELAY_QUIET`）そのもので、切り替えの時間は足さない。
     """
     outside = ("/exit してから claude を起動し、下の中身を最初の入力として貼り付ける"
-               "（/ndf:install-wrapper で中継を入れると自動になる）")
+               "（/ndf:install-wrapper でラッパーを入れると自動になる）")
     try:
         pos = relay_position()
         if pos == "not-running":
-            return "outside", ("中継は既に終わっている。"
+            return "outside", ("ラッパーは既に終わっている。"
                                "/exit してから claude を起動し、下の中身を最初の入力として貼り付ける")
         if pos == "not-child":
             child = relay_child_pid()
             who = f"元の会話（子 pid {child}）" if child is not None else "元の会話"
-            return "outside", (f"中継は{who}しか見ていないため、この会話で出した ndf-next は自動では拾われない。"
+            return "outside", (f"ラッパーは{who}しか見ていないため、この会話で出した ndf-next は自動では拾われない。"
                                "元の会話へ戻って同じ ndf-next を出すか、元の会話を /exit してから"
                                " claude を起動し、下の中身を最初の入力として貼り付ける")
         if pos != "relay":
@@ -1997,9 +1997,9 @@ def notice_lines() -> tuple[str, str]:
     except Exception:
         return "outside", outside
     if quiet == float("inf"):
-        return "relay", ("NDF_RELAY_QUIET が有限でないため、中継は自動で切り替えない。"
+        return "relay", ("NDF_RELAY_QUIET が有限でないため、ラッパーは自動で切り替えない。"
                          "/exit してから claude を起動し、下の中身を最初の入力として貼り付ける")
-    # 中継本体は負・nan・-inf の静まりを待たずに通すので、0 として数える
+    # ラッパー本体は負・nan・-inf の静まりを待たずに通すので、0 として数える
     q = quiet if quiet == quiet and quiet > 0 else 0.0
     n = round(q)
     when = f"約 {n} 秒後に" if n > 0 else "まもなく"
@@ -2042,8 +2042,8 @@ def main(argv: list[str]) -> int:
     if sub == "question":
         return cmd_question(rest[0] if rest else "")
     if sub == "is-child":
-        # 文脈量の hook（token-guard.sh）が使う。中継が動いていて、hook を呼んだ claude が
-        # 中継の直接の子なら 0（親のたどりは mark と同じ。間の bash / sh は claude でないので飛ぶ）
+        # 文脈量の hook（token-guard.sh）が使う。ラッパーが動いていて、hook を呼んだ claude が
+        # ラッパーの直接の子なら 0（親のたどりは mark と同じ。間の bash / sh は claude でないので飛ぶ）
         return 0 if under_relay() else 1
     if sub == "notice":
         return cmd_notice()

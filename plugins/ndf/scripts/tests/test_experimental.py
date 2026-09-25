@@ -88,7 +88,7 @@ def test_resume_reports_manual_start_after_no_mark(tmp_path):
                        capture_output=True, text=True, env=env)
     assert p.returncode == 0, p.stderr
     item = json.loads(p.stdout.strip().splitlines()[-1])["items"][0]
-    assert item["position"] == "not-running"   # 中継の pid が無い
+    assert item["position"] == "not-running"   # ラッパーの pid が無い
     assert item["started_by"].startswith("手")
     assert item["previous_end"]["ended_by"] == "no-mark"
     assert item["previous_dir"] == str(prev)

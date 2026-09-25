@@ -1,31 +1,31 @@
 ---
 name: install-wrapper
-description: "Install, remove, or inspect the NDF relay for Claude Code. 明示指示のみで実行する。Use when setting up or removing the relay that restarts claude at section breaks（中継を入れる・中継を外す・中継の状態）."
+description: "Install, remove, or inspect the NDF relay for Claude Code. 明示指示のみで実行する。Use when setting up or removing the relay that restarts claude at section breaks（ラッパーを入れる・ラッパーを外す・ラッパーの状態）."
 argument-hint: "install | uninstall | status"
 disable-model-invocation: true
 allowed-tools:
   - Bash
 ---
 
-# 中継の導入・取り外し・状態
+# ラッパーの導入・取り外し・状態
 
-**中継（`relay.py`）を使うかは利用者が決める。** この Skill が、利用者のシェル設定を書き換える
-唯一の入口である。SessionStart hook はシェル設定を書かない。中継の振る舞いは
+**ラッパー（`relay.py`）を使うかは利用者が決める。** この Skill が、利用者のシェル設定を書き換える
+唯一の入口である。SessionStart hook はシェル設定を書かない。ラッパーの振る舞いは
 `development-workflow` の [references/relay.md](../development-workflow/references/relay.md) にある。
 
-例: 中継を初めて入れる。
+例: ラッパーを初めて入れる。
 
 1. claude の中で `/ndf:install-wrapper` を打つ
 2. 写しを `~/.claude/ndf/relay.py`、`claude` の関数を `~/.claude/ndf/shellrc` に置き、`~/.bashrc`（macOS の bash では
    `~/.bash_profile`）をバックアップしてから、`shellrc` を読む 1 行を囲み（`# >>> ndf relay >>>` 〜 `# <<< ndf relay <<<`）で足す
-3. 次に開いたシェルで `claude` と打つと、中継を通って起動する
+3. 次に開いたシェルで `claude` と打つと、ラッパーを通って起動する
 
 ## 引数
 
 | 引数 | 副命令 | すること |
 | --- | --- | --- |
-| 無し・`install` | `install` | 写し・写しの版・中継の rc を置き（あれば今の版で置き直す）、読み込みの 1 行を置く。10.17.4〜10.17.6 が足した囲み（alias を直に持つ）は、中だけを読み込みの行へ置き換える |
-| `uninstall` | `uninstall` | `~/.bashrc`・`~/.bash_profile`・`~/.zshrc` の囲みを外し（バックアップの後）、読み込み先のファイル・中継の rc・写し・10.17.4〜10.17.6 の写しを消す |
+| 無し・`install` | `install` | 写し・写しの版・ラッパーの rc を置き（あれば今の版で置き直す）、読み込みの 1 行を置く。10.17.4〜10.17.6 が足した囲み（alias を直に持つ）は、中だけを読み込みの行へ置き換える |
+| `uninstall` | `uninstall` | `~/.bashrc`・`~/.bash_profile`・`~/.zshrc` の囲みを外し（バックアップの後）、読み込み先のファイル・ラッパーの rc・写し・10.17.4〜10.17.6 の写しを消す |
 | `status` | `status` | 読み込み先・囲みの有無と形・写しの有無と版を示す。macOS の bash で読み込みの行が `~/.bashrc` にしか無く、ログインシェルが読むファイルが `~/.bashrc` を読まないときは警告を出す。何も書かない |
 
 それ以外の引数では、この表を示して何もしない。
@@ -56,7 +56,7 @@ python3 "$RELAY" <副命令>; echo "exit=$?"
 
 | もの | パス |
 | --- | --- |
-| 写し・写しの版・中継の rc | `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/relay.py`・`relay.version`・`shellrc` |
+| 写し・写しの版・ラッパーの rc | `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/relay.py`・`relay.version`・`shellrc` |
 | 読み込みの 1 行 | `DEVBASE_SHELLRC_DIR` がディレクトリを指せば `$DEVBASE_SHELLRC_DIR/ndf-relay.sh`、無ければ `$SHELL` の設定（bash は `~/.bashrc`（macOS では `~/.bash_profile`）、zsh は `${ZDOTDIR:-~}/.zshrc`）の囲み |
 | 記録 | `${XDG_STATE_HOME:-~/.local/state}/ndf/relay/`（`rc-added`・`rc-user` など） |
 

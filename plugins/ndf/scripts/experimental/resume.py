@@ -3,10 +3,10 @@
 
     python3 resume.py [--relay-dir DIR]
 
-出すもの: 中継の判定と理由・この区間の始まり（自動か手か）・前の区間の終わり（ended_by）・
+出すもの: ラッパーの判定と理由・この区間の始まり（自動か手か）・前の区間の終わり（ended_by）・
 プラグインの版（区間の起動時・導入済み・写し）・
 前の区間と今の区間で印を書かなかった Stop（mark_skipped: 背景の作業が残った・ブロックが 2 つ以上）。人が読む数行の後に step_result の 1 行の JSON。
-中継の外でも exit 0 で終わる。
+ラッパーの外でも exit 0 で終わる。
 """
 from __future__ import annotations
 
@@ -113,7 +113,7 @@ def main() -> int:
     vers = {"区間の起動時": (start or {}).get("plugin_version"), "導入済み": installed_version(),
             "写し": copy_version()}
     known = {v for v in vers.values() if v}
-    lines = [f"中継: {pos}" + (f"（{a.relay_dir}）" if a.relay_dir else "")]
+    lines = [f"ラッパー: {pos}" + (f"（{a.relay_dir}）" if a.relay_dir else "")]
     if start:
         lines.append(f"この区間: {start.get('section')}・{started_by}・{start.get('at')}")
     if end:

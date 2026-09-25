@@ -1,10 +1,10 @@
-"""区間の切れ目で claude を起動し直す中継（#895）。
+"""区間の切れ目で claude を起動し直すラッパー（#895）。
 
 `relay.py` の副命令:
 
 - `mark`: Stop hook の本体。最後の応答の `ndf-next` のブロックを印 `next.json` へ写す
 - `run`: 端末の前景に常駐し、claude を擬似端末の子として起動する。要らなければ素通しする
-- `stop`: 動いている中継に停止の印を置く
+- `stop`: 動いているラッパーに停止の印を置く
 - `install` / `uninstall` / `status`: `/ndf:install-wrapper` の本体（#928）
 - `startup`: SessionStart hook の本体。在る写しを置き直し、10.17.4〜10.17.6 の自動の囲みを 1 度だけ知らせる
 - `question open` / `close`: 質問の表示中の印（関門を越えない守り）
@@ -49,7 +49,7 @@ def fence(body, info="ndf-next", ticks=3):
 
 
 class Relay:
-    """動いている中継に見立てた作業ディレクトリ。`relay.lock` を持ち、`child.pid` を書く。"""
+    """動いているラッパーに見立てた作業ディレクトリ。`relay.lock` を持ち、`child.pid` を書く。"""
 
     def __init__(self, tmp_path, child_pid=None):
         self.dir = tmp_path / "relay-dir"
@@ -168,7 +168,7 @@ def test_mark_ignores_non_object_json(relay, data):
 def test_mark_not_direct_child_claude_keeps_mark(tmp_path, relay):
     """conductor が Bash から起こした `claude -p` の Stop は、前の印を消さない（AC4b）。"""
     relay.next.write_text('{"command": "keep"}')
-    # 名前が claude のラッパーを間に挟む。mark から見て最初の claude はこのラッパーになる
+    # 名前が claude の別のスクリプトを間に挟む。mark から見て最初の claude はこのスクリプトになる
     wrapper = tmp_path / "bin" / "claude"
     wrapper.parent.mkdir()
     wrapper.write_text(f"#!{sys.executable}\nimport subprocess, sys\n"
@@ -388,7 +388,7 @@ class Term:
         try:
             return self.proc.wait(timeout)
         except subprocess.TimeoutExpired:
-            raise AssertionError(f"中継が終わらない\n画面: {self.text[-2000:]}\n記録: {self.rows()}")
+            raise AssertionError(f"ラッパーが終わらない\n画面: {self.text[-2000:]}\n記録: {self.rows()}")
 
     def close(self):
         if self.proc.poll() is None:
@@ -420,7 +420,7 @@ def events(rows, kind):
 
 
 def test_run_no_mark_exits_with_child_code(term):
-    """印が無いまま claude が終わると、中継も何も出さずに同じ終了コードで終わる（AC12・AC19）。"""
+    """印が無いまま claude が終わると、ラッパーも何も出さずに同じ終了コードで終わる（AC12・AC19）。"""
     t = term()
     t.wait_start(1)
     t.type("quit 3\r")
@@ -481,7 +481,7 @@ def test_run_switches_to_next_section(term, tmp_path):
 
 
 def test_run_carries_policy_args_through_shell_function(term, tmp_path):
-    """alias の展開 → シェルの関数 → 中継と渡った引数のうち、起動の方針だけを 2 つ目の
+    """alias の展開 → シェルの関数 → ラッパーと渡った引数のうち、起動の方針だけを 2 つ目の
     区間へ引き継ぐ。区間ごとの引数（会話・名前・最初のプロンプト・`--` 以後）は落とす（#936）。"""
     assert relay_cmd(tmp_path, "install", NDF_RELAY_CLAUDE=FAKE).returncode == 0
     shellrc = cfg(tmp_path) / "shellrc"
@@ -758,12 +758,12 @@ def test_run_cannot_start_says_then_passthrough(mod, tmp_path, monkeypatch, caps
     with pytest.raises(Execd):
         mod.cmd_run([])
     err = capsys.readouterr().err
-    assert err.startswith("ndf-relay: 中継を始めない（") and err.count("\n") == 1
+    assert err.startswith("ndf-relay: ラッパーを始めない（") and err.count("\n") == 1
     assert mod.calls[0][1] == [str(claude)]
 
 
 def test_run_relay_dir_oserror_says_then_passthrough(mod, tmp_path, monkeypatch, capsys):
-    """現状固定: 一覧は読めても中継用ディレクトリを作れなければ、案内を標準エラーへ 1 回出して
+    """現状固定: 一覧は読めてもラッパー用ディレクトリを作れなければ、案内を標準エラーへ 1 回出して
     実体へ素通しする（cmd_run の make_relay_dir が OSError になる経路）。"""
     claude = tmp_path / "bin" / "claude"
     claude.parent.mkdir()
@@ -779,12 +779,12 @@ def test_run_relay_dir_oserror_says_then_passthrough(mod, tmp_path, monkeypatch,
     with pytest.raises(Execd):
         mod.cmd_run([])
     err = capsys.readouterr().err
-    assert err == "ndf-relay: 中継を始めない（作業ディレクトリを作れない）。切れ目では示されたコマンドを手で入力する\n"
+    assert err == "ndf-relay: ラッパーを始めない（作業ディレクトリを作れない）。切れ目では示されたコマンドを手で入力する\n"
     assert mod.calls[0][1] == [str(claude)]
 
 
 def test_resolve_skips_wrappers(mod, tmp_path, monkeypatch):
-    """`claude` という名前で中継を呼ぶラッパーを飛ばし、本物を選ぶ（AC20）。"""
+    """`claude` という名前でラッパーを呼ぶ別のスクリプトを飛ばし、本物を選ぶ（AC20）。"""
     wrapper = tmp_path / "wrap" / "claude"
     wrapper.parent.mkdir()
     wrapper.write_text(f'#!/bin/sh\nexec python3 "{RELAY}" run "$@"\n')
@@ -802,7 +802,7 @@ def test_resolve_skips_wrappers(mod, tmp_path, monkeypatch):
 
 
 def test_resolve_keeps_unreadable_claude(mod, tmp_path, monkeypatch):
-    """読めない（実行だけできる）claude は中継と見なさずに選ぶ。飛ばし損ねは深さの変数が止める。"""
+    """読めない（実行だけできる）claude はラッパーと見なさずに選ぶ。飛ばし損ねは深さの変数が止める。"""
     real = real_claude(tmp_path)
     real.chmod(0o111)
     if os.access(real, os.R_OK):
@@ -914,7 +914,7 @@ def test_run_max_starts_keeps_section(term):
 
 
 def test_run_max_starts_race_one_wins(tmp_path):
-    """残り 1 枠を 2 つの中継が取り合っても、起動するのは 1 つだけ（AC10）。"""
+    """残り 1 枠を 2 つのラッパーが取り合っても、起動するのは 1 つだけ（AC10）。"""
     home = tmp_path / "shared-home"
     home.mkdir()
     ts = []
@@ -927,7 +927,7 @@ def test_run_max_starts_race_one_wins(tmp_path):
             t.wait_start(1)
         for t in ts:
             t.type("mark next\r")
-        # HOME を共有するので t.rows() は両方の記録を含む。自分の中継の記録だけを見る。
+        # HOME を共有するので t.rows() は両方の記録を含む。自分のラッパーの記録だけを見る。
         # 負けた側の stop は勝った側の start の記録の後に出るが、勝った側の子が
         # starts.jsonl へ書くのはさらに後になりうる。両方が決まるまで待つ
         def own(t):
@@ -1077,7 +1077,7 @@ def test_stop_without_root_exits_1(tmp_path):
 
 
 def test_stop_prints_dir_name_when_pid_missing_or_empty(tmp_path):
-    """動いている中継の relay.pid が無い・空なら、作業ディレクトリの名前を出す。"""
+    """動いているラッパーの relay.pid が無い・空なら、作業ディレクトリの名前を出す。"""
     state = tmp_path / "state"
     env = isolated_env(tmp_path, XDG_STATE_HOME=state)
     root = state / "ndf" / "relay"
@@ -1283,7 +1283,7 @@ def test_install_bash_first_then_idempotent(tmp_path, home):
     assert '"$HOME/.claude/ndf/relay.py" run "$@"' in shellrc and 'command claude "$@"' in shellrc
     body = rc.read_text()
     assert body == ("export A=1\n\n# >>> ndf relay >>>\n"
-                    "# ndf の中継（/ndf:install-wrapper uninstall で外れる）\n"
+                    "# ndf のラッパー（/ndf:install-wrapper uninstall で外れる）\n"
                     '[ -f "$HOME/.claude/ndf/shellrc" ] && . "$HOME/.claude/ndf/shellrc"\n'
                     "# <<< ndf relay <<<\n")
     backups = list(home.glob(".bashrc.ndf-bak-*"))
@@ -1446,7 +1446,7 @@ def test_install_function_falls_back_when_copy_removed(tmp_path, home):
 
 
 def test_install_function_receives_alias_args(tmp_path, home):
-    """先に alias claude='claude --x' がある rc の後に中継の rc を読むと、--x が中継へ渡る。"""
+    """先に alias claude='claude --x' がある rc の後にラッパーの rc を読むと、--x がラッパーへ渡る。"""
     assert relay_cmd(tmp_path, "install").returncode == 0
     pre = tmp_path / "pre.sh"
     pre.write_text("alias claude='claude --x'\n")
@@ -1494,7 +1494,7 @@ def test_install_devbase_loader_with_non_bash_zsh_shell(tmp_path, home):
     # 読み込み先は loader。bash と zsh 以外でも loader があれば置く
     assert (dl / "ndf-relay.sh").read_text().endswith(
         '[ -f "$HOME/.claude/ndf/shellrc" ] && . "$HOME/.claude/ndf/shellrc"\n')
-    # 中継の本体と rc は置かれる
+    # ラッパーの本体と rc は置かれる
     assert (cfg(tmp_path) / "relay.py").read_bytes() == RELAY.read_bytes()
     assert (cfg(tmp_path) / "shellrc").exists()
     # .bashrc は囲みの対象ではないため変わらない（loader へ置くので snapshot と一致）
@@ -1974,7 +1974,7 @@ def test_guard_lock_held_then_question_appears(term):
 
 
 def test_guard_question_open_waits_for_relay_lock(tmp_path, relay):
-    """中継が question.lock を持つ間、question open は放されるまで待ち、放された後に印を作る。"""
+    """ラッパーが question.lock を持つ間、question open は放されるまで待ち、放された後に印を作る。"""
     lock = open(relay.dir / "question.lock", "a")
     fcntl.flock(lock, fcntl.LOCK_EX)
     p = subprocess.Popen([sys.executable, str(RELAY), "question", "open"], stdin=subprocess.PIPE,
@@ -2066,7 +2066,7 @@ def test_guard_exit_queued_behind_question(term):
     pid = t.starts()[0]["pid"]
     assert not (t.fake_dir / f"sigterm-{pid}").exists()
     with open(pathlib.Path(t.env["HOME"]) / ".local" / "state" / "ndf" / "relay" / "count.lock", "a") as f:
-        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)  # 別の中継が取れる
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)  # 別のラッパーが取れる
         fcntl.flock(f, fcntl.LOCK_UN)
     t.type("answer mark 答えの後\r")
     t.wait_start(2)
@@ -2123,19 +2123,19 @@ def test_relay_quiet_defaults_to_five_seconds(mod, tmp_path, monkeypatch):
 
 WAIT_TAIL = "キー入力やスクロールをせずに、そのまま待つ（切り替わらずに ndf-relay: で始まる 1 行が出たら、その案内に従う）"
 NOTICE_OUTSIDE = ("/exit してから claude を起動し、下の中身を最初の入力として貼り付ける"
-                  "（/ndf:install-wrapper で中継を入れると自動になる）")
+                  "（/ndf:install-wrapper でラッパーを入れると自動になる）")
 NOTICE_SOON = "まもなく自動で新しい会話へ切り替わる。" + WAIT_TAIL
-NOTICE_ENDED = ("中継は既に終わっている。"
+NOTICE_ENDED = ("ラッパーは既に終わっている。"
                 "/exit してから claude を起動し、下の中身を最初の入力として貼り付ける")
 
 
 def notice_not_child(pid):
-    return (f"中継は元の会話（子 pid {pid}）しか見ていないため、この会話で出した ndf-next は自動では拾われない。"
+    return (f"ラッパーは元の会話（子 pid {pid}）しか見ていないため、この会話で出した ndf-next は自動では拾われない。"
             "元の会話へ戻って同じ ndf-next を出すか、元の会話を /exit してから"
             " claude を起動し、下の中身を最初の入力として貼り付ける")
 
 
-NOTICE_INF = ("NDF_RELAY_QUIET が有限でないため、中継は自動で切り替えない。"
+NOTICE_INF = ("NDF_RELAY_QUIET が有限でないため、ラッパーは自動で切り替えない。"
               "/exit してから claude を起動し、下の中身を最初の入力として貼り付ける")
 
 
@@ -2200,7 +2200,7 @@ def test_notice_not_direct_child_without_child_pid(relay):
     # fork したセッションで child.pid が読めなくても、原因と対処を書く（#1016）
     (relay.dir / "child.pid").write_text("x")
     second = notice_lines(notice(relay.dir))[1]
-    assert second.startswith("中継は元の会話しか見ていないため")
+    assert second.startswith("ラッパーは元の会話しか見ていないため")
 
 
 @pytest.mark.parametrize("case,expected", [

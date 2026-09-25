@@ -175,10 +175,10 @@ graph TB
   利用者は同じ起動をもう一度行えば続けられる。毎回拒否すると同じ工程をやり直せず、会話ごとに
   1 度にすると以後の切れ目で止まらない。案内だけを足す形（`additionalContext`）は、規定が読み
   流された実測があるため採らない
-- **中継の直接の子の conductor では 1 度の通しをしない。** `NDF_RELAY_DIR` があり、上限を超えていて、
+- **ラッパーの直接の子の conductor では 1 度の通しをしない。** `NDF_RELAY_DIR` があり、上限を超えていて、
   `relay.py notice` の 1 行目が `relay`（`is-child` と同じ判定）なら、上限を超えている限り同じ起動も止め続け、
   拒否文に `notice` の 2 行目（告知）を埋め込む（[ndf-relay-segment-notice.md](ndf-relay-segment-notice.md)）。人の居ない
-  前提で LLM が「続ける」と決めると、上限を超えたまま進むためである。中継の外では 1 度だけ通す
+  前提で LLM が「続ける」と決めると、上限を超えたまま進むためである。ラッパーの外では 1 度だけ通す
   （[ndf-relay-segment-restart.md](ndf-relay-segment-restart.md) の「文脈の上限で切る」）
 - **文脈量を読めない（記録が無い・`usage` が無い）ときは通す**
 
@@ -223,8 +223,8 @@ Kiro では、それぞれの README が示す Skill の起動の書き方に読
 
 **conductor は `context-window.md` の 4 つの切れ目と、文脈量の hook が拒否したときにこの 1 行を
 出す。** 出す形は情報文字列 `ndf-next` の囲みのコードブロック 1 つで、今の区間を `/goal` で始めていたときだけ中身の先頭を
-`/goal ` にする（形の定義は `context-window.md` の「新しい会話で戻す」だけに置く）。中継の下では
-中継がこのブロックを拾って次の会話を自動で起動し、中継が無ければ人が中身を貼り付ける
+`/goal ` にする（形の定義は `context-window.md` の「新しい会話で戻す」だけに置く）。ラッパーの下では
+ラッパーがこのブロックを拾って次の会話を自動で起動し、ラッパーが無ければ人が中身を貼り付ける
 （[ndf-relay-segment-restart.md](ndf-relay-segment-restart.md)）。 3 層では supervisor のフェーズの境がこの切れ目に当たるため、conductor が `## フェーズの報告`
 を受け取った時点で出し、supervisor は出さない。報告が `結果: 関門` のときは、関門の承認と
 取り込み（設計 Pull Request のマージなど）が済んだ後に出す。関門の前に会話を切らないためである。
@@ -358,7 +358,7 @@ worker の 2 回目の通知は、写しを読んだ後に届いても読み直�
 | --- | --- |
 | sleep | 同じ条件の until ループを `run_in_background: true` で起動して完了通知を待つこと。出来事を 1 つずつ受けるなら `Monitor`。規約 `waiting.md`。`NDF_SLEEP_GUARD=0` |
 | 連続 Read | 書き終わりを待つなら until ループを `run_in_background: true` で起動するか、背景の処理の完了通知を待つこと。`tasks/*.output` は読まない。規約 `waiting.md`。`NDF_READ_REPEAT_GUARD=0` |
-| 文脈量 | 文脈量と上限、次のコマンドを `ndf-next` のブロック 1 つで示すこと（中身は引き継ぎの 1 行、`/goal` で始めた区間なら先頭に `/goal `）、続けるなら同じ起動をもう一度行うこと。中継の直接の子では、止め続けること・動いている supervisor の報告を待ってから引継ぎ文書を更新してブロックを出すこと。規約 `context-window.md`。`NDF_CONTEXT_GUARD=0` と `NDF_CONTEXT_LIMIT` |
+| 文脈量 | 文脈量と上限、次のコマンドを `ndf-next` のブロック 1 つで示すこと（中身は引き継ぎの 1 行、`/goal` で始めた区間なら先頭に `/goal `）、続けるなら同じ起動をもう一度行うこと。ラッパーの直接の子では、止め続けること・動いている supervisor の報告を待ってから引継ぎ文書を更新してブロックを出すこと。規約 `context-window.md`。`NDF_CONTEXT_GUARD=0` と `NDF_CONTEXT_LIMIT` |
 
 ### 4 ランタイム
 
@@ -373,7 +373,7 @@ agy の CLI 側の消費を測った後に、登録するかを改めて決め�
 - **止める:** 環境変数で判定ごとに止める。hook そのものを外すなら `hooks/claude.json` の登録を
   1 つ外す。データの移行は無い
 - **続ける:** 文脈量の拒否の後、利用者がこのまま続けると決めたら、同じ起動をもう一度行う。
-  中継の下ではこの手は無く、会話を切る
+  ラッパーの下ではこの手は無く、会話を切る
 - **性能:** 1 回の実行は、50 MB の記録でも競合しないとき 1 秒以内、ロックを待つときは 2 秒以内に
   終わる。記録は末尾 200 行だけを読み、Bash と Read の判定は記録を読まない。登録の `timeout` は
   5 秒で、`continueOnError: true` を付ける
@@ -395,8 +395,8 @@ agy の CLI 側の消費を測った後に、登録するかを改めて決め�
 - サブエージェントの中の起動・工程でない Skill・作業の種類の Agent を通すこと
 - 拒否の後の同じ起動を 1 度だけ通し（間に Bash と Read が挟まっても）、別の起動を再び拒否すること。
   同じ起動の 2 回目を並列に起動しても通るのは 1 本だけであること
-- 中継の直接の子の conductor では同じ起動が 2 回続けて止まり、理由の欄が `ndf-next` と supervisor の
-  報告の待ちを含むこと。直接の子でない・中継が動いていないときは 1 度だけ通ること。中継の外でも理由の
+- ラッパーの直接の子の conductor では同じ起動が 2 回続けて止まり、理由の欄が `ndf-next` と supervisor の
+  報告の待ちを含むこと。直接の子でない・ラッパーが動いていないときは 1 度だけ通ること。ラッパーの外でも理由の
   欄が `ndf-next` のブロックを求めること
 - 壊れた入力・`jq` の無い `PATH`・書けない控えの場所・取れないロック・読めない記録で、出力なし・
   終了コード 0 で通すこと。`guards/` の親が `wf_state_dir` の親と一致すること
@@ -422,7 +422,7 @@ agy の CLI 側の消費を測った後に、登録するかを改めて決め�
 
 - [#829](https://github.com/devbasex/ai-plugins/issues/829) / [#830](https://github.com/devbasex/ai-plugins/issues/830)（親は [#827](https://github.com/devbasex/ai-plugins/issues/827)）
 - [#901](https://github.com/devbasex/ai-plugins/issues/901) — supervisor が worker の途中の通知で止まる（実装は [PR #910](https://github.com/devbasex/ai-plugins/pull/910)）
-- [#895](https://github.com/devbasex/ai-plugins/issues/895) — 引き継ぎの 1 行を `ndf-next` のブロックにし、中継の下では文脈量の拒否を止め続ける（[ndf-relay-segment-restart.md](ndf-relay-segment-restart.md)）
+- [#895](https://github.com/devbasex/ai-plugins/issues/895) — 引き継ぎの 1 行を `ndf-next` のブロックにし、ラッパーの下では文脈量の拒否を止め続ける（[ndf-relay-segment-restart.md](ndf-relay-segment-restart.md)）
 - [#731](https://github.com/devbasex/ai-plugins/issues/731) — 待ちの Tool（`bg-wait.sh`）を共通層へ移す
 - [ndf-context-window-metrics.md](ndf-context-window-metrics.md) — 会話の記録から文脈量を測る部品
 - [ndf-agent-layers-unattended-run.md](ndf-agent-layers-unattended-run.md) — 3 層の運転

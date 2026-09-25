@@ -667,14 +667,14 @@ def test_context_limit_default_matches_doc(tmp_path, state):
     assert denied(run(skill(tp2, session="s2"), state)) is None
 
 
-# ---------------------------------------------------------------- 中継の下の conductor（#895 AC23）
+# ---------------------------------------------------------------- ラッパーの下の conductor（#895 AC23）
 
 import fcntl  # noqa: E402
 
 
 @pytest.fixture()
 def relay_dir(tmp_path):
-    """動いている中継に見立てた作業ディレクトリ。このテストのプロセスを中継の直接の子に見立てる。
+    """動いているラッパーに見立てた作業ディレクトリ。このテストのプロセスをラッパーの直接の子に見立てる。
 
     hook（bash）→ relay.py is-child と起こされるので、親をたどって最初に当たるのは
     このテストのプロセスになる。
@@ -724,7 +724,7 @@ def test_context_reason_asks_for_ndf_next_block(tmp_path, state):
     assert "ndf-next" in reason
 
 
-# ---------------------------------------------------------------- 中継の下の告知（#980 AC6）
+# ---------------------------------------------------------------- ラッパーの下の告知（#980 AC6）
 
 import sys  # noqa: E402
 
@@ -752,7 +752,7 @@ def test_context_under_relay_reason_carries_notice(tmp_path, state, relay_dir, q
     line = notice_line(env)
     assert line in first and line in second
     assert "確認を挟まずに" in second
-    assert "中継がそのブロックで次の区間を起動する" not in second
+    assert "ラッパーがそのブロックで次の区間を起動する" not in second
 
 
 def test_context_outside_relay_reason_has_no_notice(tmp_path, state):

@@ -360,10 +360,10 @@ Pull Request のマージ、制作物承認は本番の提出先への操作に�
 絶対パスで書く。** supervisor はこの 1 行で進行を記録し、この Skill も `progress-tracking` も
 起動しない（形とキーごとの打つ時点は `agent-layers.md` の「conductor → supervisor」）。
 
-**区間の切れ目の再起動は中継が自動で行う（Claude Code だけ）。** 利用者が `claude` と打つと
-alias が中継を挟み、conductor が出した `ndf-next` のブロックを拾って、`/exit`・プラグインの更新・
+**区間の切れ目の再起動はラッパーが自動で行う（Claude Code だけ）。** 利用者が `claude` と打つと
+alias がラッパーを挟み、conductor が出した `ndf-next` のブロックを拾って、`/exit`・プラグインの更新・
 次の区間の起動を行う（始め方・止め方・上限は [references/relay.md](references/relay.md)）。
-**ブロックの前に次の Bash を 1 回実行し、2 行目（告知）をブロックの直前へそのまま写す**（1 行目が `outside` か失敗なら中継の外。書き方は `context-window.md` の「新しい会話で戻す」）。
+**ブロックの前に次の Bash を 1 回実行し、2 行目（告知）をブロックの直前へそのまま写す**（1 行目が `outside` か失敗ならラッパーの外。書き方は `context-window.md` の「新しい会話で戻す」）。
 
 ```bash
 PLUGIN_ROOT='${CLAUDE_PLUGIN_ROOT}'; case "$PLUGIN_ROOT" in '$'*) PLUGIN_ROOT= ;; esac

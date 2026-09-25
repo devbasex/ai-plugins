@@ -203,7 +203,7 @@ bash <プラグインのパス>/scripts/worktree-setup.sh init
 | --- | --- | --- |
 | 前景の `sleep` の待ち（`while` / `until` のループの本体、または上限を超える秒数） | `NDF_SLEEP_GUARD=0` | `NDF_SLEEP_MAX_SEC`（既定 5） |
 | 変わらないファイルの同じ範囲を続けて読む Read | `NDF_READ_REPEAT_GUARD=0` | `NDF_READ_REPEAT_LIMIT`（既定 3） |
-| 文脈が上限を超えた conductor が工程へ入る起動（1 度だけ止め、新しい会話で打つコマンドを `ndf-next` のブロックで示させる。中継の下では止め続ける） | `NDF_CONTEXT_GUARD=0` | `NDF_CONTEXT_LIMIT`（既定 200000） |
+| 文脈が上限を超えた conductor が工程へ入る起動（1 度だけ止め、新しい会話で打つコマンドを `ndf-next` のブロックで示させる。ラッパーの下では止め続ける） | `NDF_CONTEXT_GUARD=0` | `NDF_CONTEXT_LIMIT`（既定 200000） |
 | 寿命 5 分の supervisor（`ndf:supervisor`）が、文脈を最初の呼び出しの 1.5 倍以上に伸ばしたまま `cross-review` / `cross-refactoring` を起動する（止め続け、`結果: 区切り` で返させる） | `NDF_SUPERVISOR_CUT_GUARD=0` | `NDF_SUPERVISOR_CUT_RATIO`（既定 1.5） |
 
 | ランタイム | 待ち方 | 会話を切る |
@@ -222,15 +222,15 @@ Claude Code の SessionStart hook（`hooks/claude.json`）は上記に加えて�
 
 - `~/.claude/settings.json` の `cleanupPeriodDays` を 90 日以上に保つ
 - statusline 未設定時に NDF 標準 statusline を設定する
-- 区間の切れ目の中継（`scripts/relay.py`）の写しが在れば今の版で置き直す（`relay.py startup`。
+- 区間の切れ目のラッパー（`scripts/relay.py`）の写しが在れば今の版で置き直す（`relay.py startup`。
   版は後退させない）。10.17.4〜10.17.6 が自動で足した alias の囲みが残っていれば 1 度だけ知らせる。
-  **シェルの設定は書かない。** 中継を入れる・外すのは `/ndf:install-wrapper`（Claude Code だけ）
+  **シェルの設定は書かない。** ラッパーを入れる・外すのは `/ndf:install-wrapper`（Claude Code だけ）
 
 Claude Code の Stop hook は終了時に Slack 通知スクリプトを実行します。通知に必要な環境変数が
-未設定の場合は送信せず終了します。中継の下（`NDF_RELAY_DIR` がある）では、最後の応答の
-`ndf-next` のブロックを中継の印へ写します（`relay.py mark`）。`AskUserQuestion` の PreToolUse /
-PostToolUse hook は、中継の下で質問の表示中の印を作る・消します（中継が質問の答えを代わりに
-送らないため）。好きな時点で切り替えるのは `/ndf:restart` です。中継の始め方・止め方・上限は
+未設定の場合は送信せず終了します。ラッパーの下（`NDF_RELAY_DIR` がある）では、最後の応答の
+`ndf-next` のブロックをラッパーの印へ写します（`relay.py mark`）。`AskUserQuestion` の PreToolUse /
+PostToolUse hook は、ラッパーの下で質問の表示中の印を作る・消します（ラッパーが質問の答えを代わりに
+送らないため）。好きな時点で切り替えるのは `/ndf:restart` です。ラッパーの始め方・止め方・上限は
 `skills/development-workflow/references/relay.md` にあります。
 
 Codex の Stop hook（`hooks/codex.json`）は `NDF_CODEX_SLACK_NOTIFY=true` が設定されている

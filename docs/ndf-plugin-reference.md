@@ -71,7 +71,7 @@ NDF の Skill 実装は `plugins/ndf/skills/` にあります。公開セット�
 - quality / execution: `docker-container-access`, `qa-security-scan`
   （Playwright による E2E テストは v7.0.0 で `playwright-kit` プラグインへ分離）
 - external services: `external-ai`, `official-skills-autoloader`（Claude Code のみ）
-- runtime 設定: `statusline`（Claude Code と Kiro CLI のみ）、`install-wrapper` / `restart`（区間の切れ目の中継。Claude Code のみ）
+- runtime 設定: `statusline`（Claude Code と Kiro CLI のみ）、`install-wrapper` / `restart`（区間の切れ目のラッパー。Claude Code のみ）
 - policy: `ndf-policies`, `problem-solving`, `logging-guidelines`
 
 - 外部サービスと測定: `google-auth`, `google-drive`, `skill-stats`, `ml-model-structure`,
