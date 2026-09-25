@@ -137,7 +137,7 @@ graph LR
 plugins/ndf/
 ├── scripts/
 │   ├── supervise.py                 # 変える: 見張り・判定・手の適用・雛形・history / expected
-│   ├── merged-steps.py              # 変える: probe を足す（probe_checks を使い回す）
+│   ├── merged-steps.py              # 変える: probe を足す。probe_checks が attempt も読む（下の probe の節）
 │   ├── lib/
 │   │   └── slow_step.py             # 新設: 想定・履歴・設定・組み込みの一次の調査
 │   └── tests/
@@ -166,6 +166,8 @@ plugins/ndf/
 | 利用上限の待ちの間も `tick` を呼ぶ | `Supervisor.claude` | 上限の待ちの秒が経過に入り、遅れと見なす | 上限の待ちの間は見張りを止め、待った秒を経過から引く |
 | 落ちた段の回数が 2 回になると `判断の段で stop が出そう` を出す | `Supervisor.run` | 見張りの retry で打ち切った段も落ちた回数に数える | retry で打ち切った段は `fail_counts` に数えない |
 | 段の所要は `step` の行にだけ残る | `Supervisor.step_line` | 状態ディレクトリは計画ごとに別で、次の計画から読めない | 段の終わりに所要の履歴へも 1 行積む |
+| `rerun_failed` の再実行は終了コードが 0・124・関門のどれでもないときに走る | `Supervisor.do_run` | 125 がこの条件に当たり、遅れで打ち切った段へ `pytest --lf` が走る | 除く集合に 125 を足す（`code not in (0, 124, 125)`） |
+| 実行の状態は `status` と `jobs` だけを読む | `merged-steps.py` の `probe_checks` | `stale` と `stale_again` を分ける `attempt` が無い | `--json status,attempt,jobs` で読み、`stale` の要素に `attempt` を足す（既存の呼び出し側は `attempt` を読まない） |
 
 **当てはまる規則は記録しない。** `attention_lines` と `notify_attention` は `kind` が
 `attention` の行だけを読むため、理由が増えても変えずに通る。
@@ -263,7 +265,9 @@ erDiagram
 - **並行する計画が同じファイルへ書く。** 1 行を `O_APPEND` の 1 回の `write` で足す（1 行は
   約 200 バイトで、`PIPE_BUF` の 4096 バイトに収まる）
 - **移行**: 既存の `progress.jsonl` は `supervise.py history import` で取り込む。取り込まなければ
-  履歴が 3 回たまるまで既定値で見張る。同じ（`at`, `phase`, `step`）の行は 2 度積まない
+  履歴が 3 回たまるまで既定値で見張る。同じ（`plan`, `at`, `phase`, `step`, `type`）の行は 2 度
+  積まない。`plan` を鍵に入れるのは、並行する別の計画で同じ段が同じ秒に終わった 2 件を残すため
+  である（テスト: 計画だけが違う 2 件を取り込むと 2 件とも積む）
 
 `progress.jsonl` の `slow` の行と `attention` の行は計画ごとの記録で、形は「入出力の契約」に書く。
 
@@ -309,8 +313,13 @@ erDiagram
 | --- | --- | --- |
 | `"output"` | 前の確認から stderr のファイルが伸びたか、最後の行が変わったか | run・drive |
 | `"worker"` | 前の確認から worker の行が足されたか、段の開始の後に作業場所へコミットが足されたか | work |
-| `{"cmd": "<コマンド>"}` | コマンドを段の作業場所で打ち、最後の行の JSON を読む。`{pr}` `{base}` `{branch}` `{state_dir}` を置き換える（`{branch}` は段の作業場所の今のブランチ） | — |
+| `{"cmd": "<コマンド>"}` | コマンドを段の作業場所で打ち、最後の行の JSON を読む。`{pr}` `{base}` `{branch}` `{state_dir}` を置き換える（`{branch}` は段の作業場所の今のブランチ、`{base}` は計画の `起点` から `origin/` を外した名前） | — |
 | `false` | 調べずに判定へ回す | — |
+
+**コマンドはシェルを通さない。** 先に雛形を `shlex.split` で argv に分け、各要素の中の置き換えの
+印を値で置き換えてから `shell=False` で起動する。値は 1 つの要素の中に収まり、ブランチ名や
+パスにシェルの記号があっても実行されない（テスト: `{branch}` が `a;touch x` のとき `x` が
+作られず、argv の 1 要素として渡る）。
 
 **コマンドの一次の調査が返す JSON**（`lib/step_result.py` の形）:
 
@@ -331,7 +340,9 @@ erDiagram
 python3 merged-steps.py probe (--pr N | --head <ブランチ>...) [--act] [--root DIR]
 ```
 
-開いた PR ごとに検査を読み、強い順に 1 つの分類へまとめる。
+開いた PR ごとに検査を読み、強い順に 1 つの分類へまとめる。**強い順は下の表の上から下である。**
+2 つ以上に当たる PR は上の分類を採り、複数の PR は最も上の分類で全体を表す。`attempt` は
+`probe_checks` が `gh run view <実行> --json status,attempt,jobs` で読む（置き場所の表）。
 
 | 分類 | 何を見たか | `action` |
 | --- | --- | --- |
@@ -348,12 +359,27 @@ python3 merged-steps.py probe (--pr N | --head <ブランチ>...) [--act] [--roo
 - `metrics` に `class`・`action`・`prs`（調べた PR の番号）・`queued_runs`（待ち行列の件数）を持つ
 - **書き込みは `--act` の再実行だけである。** マージ・push・PR の編集をしない
 
+**`gh` の実測（2026-09-25 22:20 JST、gh 2.101.0、devbasex/ai-plugins）:**
+
+| コマンド | 出力（抜粋） | 終了コード |
+| --- | --- | ---: |
+| `gh run view 35832480423 --json status,conclusion,attempt,jobs` | `{"attempt":1,"conclusion":"success","status":"completed","jobs":[{"databaseId":107088070035,"status":"completed","conclusion":"success"}]}` | 0 |
+| `gh run view 36131457948 --json status,conclusion,attempt,jobs`（再実行した実行） | `{"attempt":2,...,"jobs":[{"databaseId":108064877398,...}, ...]}` | 0 |
+| `gh run view 36131457948 --attempt 1 --json attempt,jobs` | `{"attempt":1,"jobs":[{"databaseId":108059436733,...}, ...]}` | 0 |
+| `gh run view 1 --json status`（無い実行） | 標準エラーに理由 | 1 |
+
+- **再実行すると実行の番号は変わらず、`attempt` が 1 増え、ジョブの番号はすべて新しくなる。**
+  このため `stale_again` は PR のチェックが指すジョブの番号ではなく、実行の `attempt` で見分ける
+- **`stale` と `settled` の形は実測できていない。** GitHub 側の表示の取り残しは狙って起こせない。
+  判定は既存の `probe_checks`（#1100 の取り残しで作った）と同じ条件を使い、テストは `gh` の出力を
+  固定した偽物で書く
+
 ### 雛形が書く `probe`
 
 | 段 | 雛形 | `probe` |
 | --- | --- | --- |
 | `merge`（`MERGE_CMD` を使う 5 箇所） | `plan_impl`・`plan_check`・`plan_check_since`・`plan_fast_design`・`close_plan` | `{"cmd": "python3 <置き場>/merged-steps.py probe --pr {pr} --act"}` |
-| `release` | `plan_release_package_plugin`（dev・prod） | `{"cmd": "python3 <置き場>/merged-steps.py probe --head {branch} --head {base} --act"}`。本番では `develop` → `main` の PR の head が起点のブランチになるため 2 つを渡す |
+| `release` | `plan_release_package_plugin`（dev・prod） | `{"cmd": "python3 <置き場>/merged-steps.py probe --head {branch} --head {base} --act"}`。段の作業場所は `release/v<版>` の作業ツリーで、`{branch}` は `release/v<版>` → `develop` の PR の head になる。本番では続けて `develop` → `main` の PR を待つ（`release-steps.py` の `cmd_release`）。その head は起点の `develop`（`{base}`）であるため 2 つを渡す |
 
 ### `progress.jsonl` の `slow` の行
 
@@ -397,7 +423,7 @@ python3 merged-steps.py probe (--pr N | --head <ブランチ>...) [--act] [--roo
 | stop | `exit` 125 | 計画を止める。`結果: 止まった`・`理由: 遅れ: <理由>` |
 
 **125 は「遅れで打ち切った」を表す。** 打ち切り（124）・関門（10〜19）と区別し、`rerun_failed`
-の再実行を通さない。
+の再実行を通さない（`do_run` の除く集合に足す。「当てはまらない既存の規則」の表）。
 
 ### 追加するコマンド
 
