@@ -39,13 +39,13 @@ Error: -p took "--dangerously-skip-permissions" as its prompt, so the intended p
 left as an argument and ignored.
 ```
 
+`external-ai.py run agy` が次の形で起動する（共通層の `launch-cli.sh`）。`--print-timeout` は
+工程の監視の上限 + 120 秒、`--add-dir` は作業ディレクトリと結果ファイルの置き場所である。
+
 ```bash
-agy --dangerously-skip-permissions --output-format text \
-  --print-timeout 900s \
-  --add-dir /path/to/worktree \
-  -p="$(cat /tmp/agy-prompt.md)" \
-  > /tmp/agy-stdout.md 2> /tmp/agy-err.log &
-PID=$!
+agy --dangerously-skip-permissions --output-format text --print-timeout <秒>s [--model M] \
+  --add-dir <workdir> --add-dir <結果ファイルの置き場所> -p="<プロンプトの本文>" \
+  < /dev/null > <stem>-stdout.log 2> <stem>-err.log
 ```
 
 | オプション | 用途 |
@@ -114,25 +114,13 @@ $ agy --output-format json -p="1+1は？数字だけ答えて"
 **実際に動いたモデル名は出力に載らない。** `--model` で指定した値だけが手がかりになる。
 モデルを比べる目的で動かすときは必ず明示する。
 
-回収は標準出力を優先し、保険として結果ファイルの書き出しをプロンプトへ加える。
+回収は結果ファイル → 標準出力 → 標準エラー出力の順で、`external-ai.py run` が行う。
 
 ## 完了検知
 
-sentinel を出さないため、**プロセスの終了**を見る。
-
-**Claude Code では、このループを Bash の `run_in_background: true` で実行して完了通知を待つ**（前景で回すと hook が止める。規約は `development-workflow/references/waiting.md`）。
-
-```bash
-until ! kill -0 $PID 2>/dev/null; do
-  sleep 30
-done
-wait $PID
-echo "exit=$?"
-```
-
-`/ndf:cross-review` の `skills/cross-review/scripts/launch-agy.sh` と共通層の
-`scripts/lib/launch-cli.sh` が同じ組み合わせで起動し、完了判定は共通層の
-`scripts/lib/monitor.py` が pidfile と結果ファイルで行う（どちらもプラグインルート直下）。
+sentinel を出さないため、**プロセスの終了**と結果ファイルを見る。共通層の `scripts/lib/monitor.py` が
+pidfile と結果ファイルで判定し、上限で必ず終わる。`external-ai.py run agy` と `/ndf:cross-review` の
+`launch-agy.sh` がこの監視を使う。
 
 ## 起動前の設定整形は要らない
 

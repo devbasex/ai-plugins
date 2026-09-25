@@ -48,16 +48,12 @@ echo 'kernel.unprivileged_userns_clone=1' | sudo tee /etc/sysctl.d/00-local-user
 
 ## 起動コマンド
 
-プロンプトは **stdin へ流す**。`-C` で作業ディレクトリを明示する。
+`external-ai.py run codex` が次の形で起動する（共通層の `launch-cli.sh`）。プロンプトは **stdin へ流し**、
+`-C` で作業ディレクトリを渡す。
 
 ```bash
-codex exec --dangerously-bypass-approvals-and-sandbox \
-  --config reasoning.effort=medium \
-  -C "$PWD" \
-  < /tmp/codex-prompt.md \
-  > /tmp/codex-stdout.md \
-  2> /tmp/codex-err.log &
-PID=$!
+codex exec --dangerously-bypass-approvals-and-sandbox --config reasoning.effort=medium \
+  -C <workdir> [--model M] < <prompt> > <stem>-stdout.log 2> <stem>-err.log
 ```
 
 | オプション | 用途 |
@@ -89,7 +85,7 @@ Codex は最終 message を返さなくても `apply_patch` でファイルを�
 
 最終的なレビュー / 調査結果を以下のファイルに **必ず書き出してください**:
 
-`/tmp/codex-output-タスク名.md`
+`--output-file` に渡したパス
 
 書き出しは `apply_patch` で新規ファイル作成してください。
 **stdout への出力だけでは不十分です**（セッション終了で失われる場合があるため）。
@@ -99,81 +95,22 @@ Codex は最終 message を返さなくても `apply_patch` でファイルを�
 補助策として `--config reasoning.effort=medium` へ下げる、`--json` でイベントを採取する、
 プロンプト末尾に「tool 呼び出しのみで終了しないこと」を明記する、の 3 つを併用する。
 
-回収は **ファイル → stdout → stderr** の順（共通手順の三段フォールバック、Codex は `OUTPUT_FILE` 優先）。
+回収は **ファイル → stdout → stderr** の順で、`external-ai.py run` が行う。
 
 ## 完了検知
 
-`ps -p $PID` は zombie (defunct) にも 0 を返すため、**PID watch は永久ループになりうる**。
-stderr 末尾の sentinel を脱出条件にする。
+`ps -p` は zombie (defunct) にも 0 を返すため、PID の存在では判定しない。監視（`monitor.py`）は
+stderr の `^tokens used$` sentinel と結果ファイルを脱出条件にし、上限（`--phase` の工程の値）で必ず終わる。
+進捗を覗くときは `tail -30 <metrics.stem>-err.log`。
 
-**Claude Code では、このループを Bash の `run_in_background: true` で実行して完了通知を待つ**（前景で回すと hook が止める。規約は `development-workflow/references/waiting.md`）。
-
-```bash
-# ❌ 永久ループ化しうる
-until ! ps -p $PID; do sleep 30; done
-
-# ✅ zombie 安全
-until grep -q '^tokens used$' /tmp/codex-err.log 2>/dev/null; do
-  sleep 30
-done
-```
-
-進捗を覗くときは `tail -30 /tmp/codex-err.log`。
-
-## 実例: レビュー依頼の完全フロー
+## 実例: レビュー依頼
 
 ```bash
-# === 1. プロンプト書き出し（最終出力先を明示し apply_patch で書かせる） ===
-FINAL=/tmp/codex-output-api-v2-review.md
-
-cat > /tmp/review-prompt.md <<EOF
-あなたはシニアバックエンドエンジニアとして、以下をレビューしてください。
-
-## 対象ファイル（必ず最初に読むこと）
-/workspace/docs/design/api-v2.md
-
-## 観点
-1. コードとの一致（行番号・件数・関数シグネチャ）
-2. API 後方互換性（v1 クライアントが壊れないか）
-
-## 調査対象コード
-- src/api/v2/**
-- src/api/v1/**（比較用）
-
-## 出力先（必須）
-最終的なレビュー結果を **必ず** \`${FINAL}\` に \`apply_patch\` で新規作成してください。
-**stdout への出力だけでは不十分です**。書き出し後、stdout にも同じ内容を出力してください。
-
-## 出力形式
-Markdown で 400〜500 行、日本語。tool 呼び出しのみで終了せず、最後に必ず assistant message として 1 回出力してください。
-EOF
-
-# === 2. バックグラウンド起動 ===
-codex exec --dangerously-bypass-approvals-and-sandbox \
-  --config reasoning.effort=medium \
-  -C /workspace \
-  < /tmp/review-prompt.md \
-  > /tmp/codex-stdout.md \
-  2> /tmp/codex-err.log &
-PID=$!
-echo "codex PID: $PID"
-
-# === 3. 完了確認（^tokens used$ sentinel を待つ） ===
-until grep -q '^tokens used$' /tmp/codex-err.log 2>/dev/null; do
-  sleep 30
-done
-
-# === 4. 成果物を回収（ファイル優先 → stdout フォールバック） ===
-if [ -s "$FINAL" ]; then
-    cp "$FINAL" ./review-result.md
-elif [ -s /tmp/codex-stdout.md ]; then
-    cp /tmp/codex-stdout.md ./review-result.md
-    echo "WARN: stdout からフォールバック回収（ファイル書き出しなし）" >&2
-else
-    echo "ERROR: Codex の最終出力を回収できませんでした。stderr 末尾を確認:" >&2
-    tail -200 /tmp/codex-err.log
-    exit 1
-fi
+FINAL=$TMP/codex-api-v2-review.md
+# プロンプト（出力先に $FINAL を書く）はファイル書き込みツールで $TMP/review-prompt.md に置く
+python3 "$SKILL_DIR/scripts/external-ai.py" run codex --phase review \
+  --prompt-file "$TMP/review-prompt.md" --output-file "$FINAL" --workdir /workspace
+# => {"status": "ok", ..., "metrics": {"outcome": "ok", "result": "$FINAL", "source": "file", ...}}
 ```
 
 ## Codex 固有のトラブルシューティング
@@ -182,9 +119,8 @@ fi
 
 **原因**: まだ最終回答を出す前に停止した、または最終 assistant message を出さずにセッションが終わった。
 
-**対処**: `grep -q '^tokens used$' /tmp/codex-err.log` で sentinel を確認する。
-未出力なら実行中なので追加待機。出ているのに stdout が空なら「最終出力をファイル経由で保証する」の
-パターンでリトライする（`apply_patch` 指示の追加 + `reasoning.effort=medium`）。
+**対処**: `metrics.outcome` が `no_result` なら「最終出力をファイル経由で保証する」の
+パターンで渡し直す（`apply_patch` 指示の追加 + `reasoning.effort=medium`）。
 
 ### Q2. `bwrap: No permissions to create a new namespace` で exec 失敗
 
@@ -198,13 +134,7 @@ fi
 
 **対処**: `--dangerously-bypass-approvals-and-sandbox` を追加し、プロンプトには絶対パス、`-C` で cwd を明示する。
 
-### Q4. タスク完了通知が来たのに出力が空 / 待機ループが抜けない
-
-**原因**: `&` で起動したラッパーシェルだけが終了した、または zombie を `ps -p` が生存と誤判定している。
-
-**対処**: 検知を PID ではなく `^tokens used$` sentinel で行う（「完了検知」節）。
-
-### Q5. 認証エラー（`Unauthorized` / `token expired`）
+### Q4. 認証エラー（`Unauthorized` / `token expired`）
 
 ```bash
 codex logout
