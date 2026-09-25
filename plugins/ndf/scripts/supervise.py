@@ -88,7 +88,8 @@ prod は bump → changelog → 説明文 → トークン消費の記録 → sy
 run の段:
 - `"preset"`: 定型のコマンド。`sync-check`（生成物の同期と検査 4 本）・`assess`（構造改善の要否）・
   `doc-lint`（追加した行の書き方の検査）。`cmd` を書けばそちらを使う
-- `cmd` の `{pr}` は pr の段で作った Pull Request の URL に置き換わる
+- `cmd` の `{pr}` は Pull Request の番号に、`{pr_url}` は URL に置き換わる（drive の段の `args` も同じ）。
+  Pull Request は pr の段で作ったもの、または計画の `"Pull Request"`（URL なら末尾の数字を番号として読む）
 - `"rerun_failed": true`: 失敗したら落ちたテストだけ（`pytest --lf`）を走らせ直し、通れば成功として進む
 - `"skip_to": "<段の id>"`: 終了コードが `skip_code`（既定 3。`refactor.py assess` の「飛ばしてよい」）なら
   その段へ進む
@@ -407,6 +408,12 @@ def normalize_plan(plan: dict) -> dict:
     return plan
 
 
+def pr_number(value) -> str:
+    """計画の Pull Request（番号か URL）から番号を返す。URL なら末尾の数字を読む。読めなければ空。"""
+    m = re.search(r"(\d+)/*$", str(value or "").strip())
+    return m.group(1) if m else ""
+
+
 WORKTREE_LOCK_RETRIES = 5        # .git/config の lock で落ちたときのやり直しの回数
 WORKTREE_LOCK_WAIT = 1.0         # やり直しの間隔（秒）
 
@@ -577,14 +584,30 @@ class Supervisor:
         """計画に branch があり作業場所が無ければ、作業ツリーを作る。誤りの文を返す（無ければ None）。"""
         return ensure_worktree(self.plan)
 
+    def fill_pr(self, cmd: str) -> tuple[str, str | None]:
+        """cmd / args の {pr} を Pull Request の番号に、{pr_url} を URL に置き換える。(cmd, 誤りの文) を返す。"""
+        if "{pr}" not in cmd and "{pr_url}" not in cmd:
+            return cmd, None
+        value = str(self.plan.get("Pull Request") or "")
+        number = pr_number(value)
+        if not number:
+            return cmd, "cmd の {pr} を置き換える Pull Request がまだ無い"
+        if "{pr_url}" in cmd:
+            url = value if "/pull/" in value else subprocess.run(
+                ["gh", "pr", "view", number, "--json", "url", "--jq", ".url"], cwd=self.cwd,
+                capture_output=True, text=True).stdout.strip()
+            if not url:
+                return cmd, f"cmd の {{pr_url}} を置き換える Pull Request #{number} の URL を読めない"
+            cmd = cmd.replace("{pr_url}", url)
+        return cmd.replace("{pr}", number), None
+
     def run_cmd(self, step: dict, extra_addopts: str = "") -> tuple[int, str]:
         cmd = step.get("cmd") or PRESETS.get(step.get("preset", ""), "")
         if not cmd:
             return 2, f"段 {step['id']} に cmd も知っている preset も無い"
-        if "{pr}" in cmd:
-            if not self.plan.get("Pull Request"):
-                return 2, "cmd の {pr} を置き換える Pull Request がまだ無い"
-            cmd = cmd.replace("{pr}", self.plan["Pull Request"])
+        cmd, err = self.fill_pr(cmd)
+        if err:
+            return 2, err
         env = dict(os.environ)
         # 親の run の段から受け継いだ NO_REPORTS は、reports: true なら外す
         addopts = [env.get("PYTEST_ADDOPTS", "").replace(NO_REPORTS, "").strip()]
@@ -727,11 +750,10 @@ class Supervisor:
         if not cmd:
             self.cur.update(exit=2, text=f"段 {step['id']} に cmd も知っている drive も無い")
             return False, self.cur["text"]
-        if "{pr}" in cmd:
-            if not self.plan.get("Pull Request"):
-                self.cur.update(exit=2, text="cmd の {pr} を置き換える Pull Request がまだ無い")
-                return False, self.cur["text"]
-            cmd = cmd.replace("{pr}", self.plan["Pull Request"])
+        cmd, err = self.fill_pr(cmd)
+        if err:
+            self.cur.update(exit=2, text=err)
+            return False, err
         ok, out, text = self.drive_loop(step, cmd)
         if out:
             self.cur["counts"] = out.get("metrics") or {}

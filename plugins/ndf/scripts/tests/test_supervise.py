@@ -131,7 +131,46 @@ def test_preset_and_pr_placeholder(tmp_path, monkeypatch):
                                {"id": "b", "type": "run", "cmd": "echo pr={pr}", "next": "end"}],
                     **{"Pull Request": "https://example/pull/9"})
     assert "preset-ran" in s.results["a"]["text"]
-    assert "pr=https://example/pull/9" in s.results["b"]["text"]
+    assert "pr=9" in s.results["b"]["text"]
+
+
+@pytest.mark.parametrize("value", ["https://github.com/o/r/pull/9", "https://github.com/o/r/pull/9/", "9", 9])
+def test_pr_placeholder_is_number_and_pr_url_is_url(tmp_path, value):
+    steps = [{"id": "b", "type": "run", "cmd": "echo n={pr} u={pr_url}", "next": "end"}]
+    if isinstance(value, str) and "/pull/" in value:
+        s, _ = run_plan(tmp_path, steps, **{"Pull Request": value})
+        assert f"n=9 u={value}" in s.results["b"]["text"]
+    else:
+        s, _ = run_plan(tmp_path, [{**steps[0], "cmd": "echo n={pr}"}], **{"Pull Request": value})
+        assert "n=9" in s.results["b"]["text"]
+
+
+def test_pr_url_from_number_asks_gh(tmp_path, monkeypatch):
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    (bindir / "gh").write_text(f"#!{PY}\nimport sys\nprint('https://github.com/o/r/pull/' + sys.argv[3])\n")
+    (bindir / "gh").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
+    s, _ = run_plan(tmp_path, [{"id": "b", "type": "run", "cmd": "echo u={pr_url}", "next": "end"}],
+                    **{"Pull Request": "12"})
+    assert "u=https://github.com/o/r/pull/12" in s.results["b"]["text"]
+
+
+def test_drive_args_get_pr_number(tmp_path, monkeypatch):
+    drive = tmp_path / "drive.py"
+    drive.write_text("import json, sys\nprint(json.dumps({'status': 'ok', 'argv': sys.argv[1:]}))\n")
+    monkeypatch.setitem(sv.DRIVES, "fake", drive)
+    s, text = run_plan(tmp_path, [{"id": "d", "type": "drive", "drive": "fake", "args": "{pr} --max-rounds 4",
+                                   "next": "end"}], **{"Pull Request": "https://github.com/o/r/pull/77"})
+    assert "結果: 完了" in text, text
+    assert '"argv": ["77", "--max-rounds", "4"]' in s.results["d"]["text"]
+
+
+@pytest.mark.parametrize("drive", ["cross-review", "cross-refactoring"])
+def test_real_drives_take_pr_number_not_url(drive):
+    # drive の args の {pr} は番号になる。2 つの駆動は URL を引数の解析で拒む
+    p = subprocess.run([PY, str(sv.DRIVES[drive]), "https://github.com/o/r/pull/77"], capture_output=True, text=True)
+    assert p.returncode == 2 and "invalid int value" in p.stderr
 
 
 def test_pr_placeholder_without_pr_fails(tmp_path):
