@@ -200,6 +200,7 @@ python3 "$SCRIPTS/plan-to-spec-steps.py" spec-finalize --spec <仕様書> --desi
 ```
 
 - 元 plan・設計のファイルを `git rm` し、`docs/specifications/README.md` があれば索引へ 1 行足し、`Docs: <名前> を確定仕様にする` でコミットする
+- 用語集の宣言があれば、消した設計を `pending_source` に持つ語の `source` を確定仕様へ移し、用語集の文書を作り直して同じコミットに入れる（`items[]` の `kind: glossary`）
 - `status` が `ok`（0）なら完了報告へ進む。`items[]` の `commit` の値を報告の検証に載せる
 - `stopped`（1 = コミットする変更が無い・git が失敗 / 3 = 仕様書か設計のファイルが無い）なら `summary` を読んで直し、もう一度打つ
 

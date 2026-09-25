@@ -91,7 +91,7 @@ guard_sleep() {
   command -v python3 >/dev/null 2>&1 || exit 0
   max=${NDF_SLEEP_MAX_SEC:-5}
   printf '%s' "$cmd" | python3 "$HERE/lib/token_guard_sleep.py" "$max" >/dev/null 2>&1 && exit 0
-  deny "前景で sleep を使って待つと、待つ呼び出しのたびに会話の文脈の全体を読み直す（ループの本体の sleep と、${max} 秒を超える sleep を止めている）。同じ条件の until ループ（例: until [ -s <ファイル> ]; do sleep 5; done）を Bash の run_in_background: true で起動し、完了通知を待つ（通知は 1 回で、待つ間は呼び出しが増えない）。出来事を 1 つずつ受けるなら Monitor を使う。規約: ${WAITING_DOC}（止めるなら NDF_SLEEP_GUARD=0）"
+  deny "前景で sleep を使って待つと、待つ呼び出しのたびに会話の文脈の全体を読み直す（ループの本体の sleep と、${max} 秒を超える sleep を止めている）。待つ相手に NDF のスクリプトがあればそれを Bash の run_in_background: true で起動し、完了通知を待つ（通知は 1 回で、待つ間は呼び出しが増えない）。queue の終わり: python3 $HERE/supervise.py wait <done のパス>（途中の知らせで終了コード 20 で返るので、中身を読んで待ち直す）。PR の CI を待ってマージ: python3 $HERE/merged-steps.py merge-when-green <PR 番号>。どちらでもなければ同じ条件の until ループ（例: until [ -s <ファイル> ]; do sleep 5; done）を同じく背景で起動する。出来事を 1 つずつ受けるなら Monitor を使う。規約: ${WAITING_DOC}（止めるなら NDF_SLEEP_GUARD=0）"
 }
 
 file_stat() {
@@ -119,7 +119,7 @@ guard_read() {
     --argjson i "$inode" --argjson c "$count" \
     '{key:$k, size:$s, mtime:$m, inode:$i, count:$c}')"
   [ "$count" -ge "$limit" ] || exit 0
-  deny "同じファイルの同じ範囲を、変わらないまま ${count} 回続けて読もうとした（${path}）。書き終わりを待つなら until [ -s <ファイル> ]; do sleep 1; done を Bash の run_in_background: true で起動して完了通知を待つか、背景の処理そのものの完了通知を待つ。サブエージェントの tasks/*.output は読まずに完了通知を待つ。規約: ${WAITING_DOC}（止めるなら NDF_READ_REPEAT_GUARD=0）"
+  deny "同じファイルの同じ範囲を、変わらないまま ${count} 回続けて読もうとした（${path}）。queue の終わりを待つなら python3 $HERE/supervise.py wait <done のパス> を、それ以外の書き終わりを待つなら until [ -s <ファイル> ]; do sleep 1; done を Bash の run_in_background: true で起動して完了通知を待つか、背景の処理そのものの完了通知を待つ。サブエージェントの tasks/*.output は読まずに完了通知を待つ。規約: ${WAITING_DOC}（止めるなら NDF_READ_REPEAT_GUARD=0）"
 }
 
 # 最後の assistant 行の usage から文脈量を読む。末尾だけを読むのは大きな記録でも速く終えるため。
