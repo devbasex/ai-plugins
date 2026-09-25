@@ -90,6 +90,8 @@ def test_fast_mission_puts_check_then_dev_then_prod_after_the_implementation(tmp
     rs = steps_of(rv)
     assert "assess" not in rs and "refactor" not in rs and rs["pr"]["next"] == "review"
     assert rs["prepare"]["cmd"].endswith(" --review") and rs["record"]["cmd"].endswith(" --review --pr {pr}")
+    assert {rs[i]["stage"] for i in ("prepare", "pr")} == {"実装レビュー"}
+    assert {steps_of(c)[i]["stage"] for i in ("prepare", "pr")} == {"構造改善"}
     assert steps_of(load(dev))["facts"]["gate_as_ok"] is True
     first = load(prod)["steps"][0]
     assert first["id"] == "mvv" and "mvv-gate.py check" in first["cmd"] and "--gate release" in first["cmd"]
