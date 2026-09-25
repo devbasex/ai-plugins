@@ -92,3 +92,28 @@ def test_resume_reports_manual_start_after_no_mark(tmp_path):
     assert item["started_by"].startswith("手")
     assert item["previous_end"]["ended_by"] == "no-mark"
     assert item["previous_dir"] == str(prev)
+
+
+def test_resume_lists_mark_skipped_of_previous_and_current_section(tmp_path):
+    """前の区間と今の区間の mark_skipped を並べ、ほかの区間の分は出さない（#1035）。"""
+    root = tmp_path / "state" / "ndf" / "relay"
+    cur = root / "20260925T041000Z-1-a"
+    cur.mkdir(parents=True)
+    task = {"id": "b5rbmp9yj", "type": "shell", "command": "until grep -q x q.log; do sleep 30; done"}
+    (cur / "log.jsonl").write_text("\n".join(json.dumps(r) for r in [
+        {"event": "start", "section": 1, "from_session": ""},
+        {"event": "mark_skipped", "section": 1, "reason": "blocks", "tasks": [], "held": False},
+        {"event": "end", "section": 1, "ended_by": "mark"},
+        {"event": "start", "section": 2, "from_session": "s1"},
+        {"event": "mark_skipped", "section": 2, "reason": "background", "tasks": [task], "held": True},
+        {"event": "end", "section": 2, "ended_by": "mark"},
+        {"event": "start", "section": 3, "from_session": "s2"},
+        {"event": "mark_skipped", "section": 3, "reason": "blocks", "tasks": [], "held": False}]) + "\n")
+    env = {**os.environ, "XDG_STATE_HOME": str(tmp_path / "state"), "CLAUDE_CONFIG_DIR": str(tmp_path / "cfg"),
+           "XDG_DATA_HOME": str(tmp_path / "data")}
+    p = subprocess.run([sys.executable, str(EXP / "resume.py"), "--relay-dir", str(cur)],
+                       capture_output=True, text=True, env=env)
+    assert p.returncode == 0, p.stderr
+    item = json.loads(p.stdout.strip().splitlines()[-1])["items"][0]
+    assert [(r["section"], r["reason"]) for r in item["mark_skipped"]] == [(2, "background"), (3, "blocks")]
+    assert "b5rbmp9yj" in p.stdout and "背景の作業が残った" in p.stdout

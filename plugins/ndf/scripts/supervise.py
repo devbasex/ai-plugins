@@ -22,7 +22,10 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
     supervise.py new mission --name M --worktree <リポジトリの根> --issue N... [--design N...] [--tests PATH...] [--out DIR]
         # 並列の設計 → 関門 1 → ミッションのブランチ → 並列の実装（ミッションのブランチへ集める）→ 検査 1 回 → 配布
         # を波ごとの計画ファイルと mission.json へ書き出す。波の中は queue --max 3 で流す
-    supervise.py queue <plan.json>... [--max 3]   # 空いた枠へ順に流す。作業ツリーは起動の前に 1 本ずつ作る
+    supervise.py queue <plan.json>... [--max 3] [--then <plan.json>...] [--done <パス>]
+        # 空いた枠へ順に流す。作業ツリーは起動の前に 1 本ずつ作る。--then の計画は前の計画がすべて完了のときだけ
+        # 続けて流す（実装の queue の後の配布など）。終わると結果の JSON を --done（省けば最初の計画の
+        # <計画>-state/queue-done.json）へ書く。待つ側は until [ -s <パス> ] で待つ
     supervise.py note <引き継ぎ文書.md> --report <report.md> [--next 次の欄] [--section 見出しの語]
     supervise.py sync-check [--root DIR] [--commit]   # 生成物の同期と検査 4 本
     supervise.py example            # 計画の例を出す
@@ -1421,7 +1424,9 @@ def cmd_new(a) -> dict:
     out.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n")
     return result("supervise-new", "ok", f"計画を書いた: {out}",
                   [{"path": str(out), "kind": a.kind, "steps": [s["id"] for s in plan["steps"]]}],
-                  {"steps": len(plan["steps"])})
+                  {"steps": len(plan["steps"])},
+                  next=(f"実装の queue へ --then {out} で渡す（実装がすべて完了した後に続けて流れる）"
+                        if a.kind == "release" else None))
 
 
 RULE_DESIGN = ("設計の cross-review は上限 3 ラウンドで関門 1 へ渡す（収束を待たない）。レビューが ok か、"
@@ -1583,11 +1588,21 @@ def notify_attention(plan: str, offset: int) -> int:
     return offset + end
 
 
-def cmd_queue(plans: list[str], max_: int, poll: float = 1.0) -> dict:
-    """計画を同時に max_ 本まで走らせ、空いた枠へ順に流す。
+def queue_done_path(plans: list[str], done: str | None) -> Path:
+    """queue の終わりに結果の JSON を書く所。省けば最初の計画の状態ディレクトリの queue-done.json。"""
+    return Path(done) if done else state_dir_of(plans[0]) / "queue-done.json"
 
-    走っている計画の progress.jsonl に conductor 向けの行（"kind": "attention"）が足されたら、
-    標準出力へ 1 行の JSON（"event": "attention"）で知らせる。最後の行は従来どおり結果の JSON。"""
+
+def write_atomic(path: Path, text: str) -> None:
+    """一時ファイルへ書いてから rename する（待つ側が書きかけを読まない）。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    tmp.write_text(text)
+    os.replace(tmp, path)
+
+
+def run_batch(plans: list[str], max_: int, poll: float) -> list[dict]:
+    """計画を同時に max_ 本まで走らせ、空いた枠へ順に流し、終わった順に結果を返す。"""
     pending, running, items = list(plans), {}, []
     seen: dict[str, int] = {}
     while pending or running:
@@ -1618,12 +1633,44 @@ def cmd_queue(plans: list[str], max_: int, poll: float = 1.0) -> dict:
             del running[plan]
         if running:
             time.sleep(poll)
-    stopped = [i for i in items if i["result"] not in ("完了", "関門")]
-    gates = [i for i in items if i["result"] == "関門"]
+    return items
+
+
+NOT_RUN = "流さなかった"
+
+
+def cmd_queue(plans: list[str], max_: int, poll: float = 1.0, then: list[str] | None = None,
+              done: str | None = None) -> dict:
+    """計画を同時に max_ 本まで走らせ、空いた枠へ順に流す。
+
+    走っている計画の progress.jsonl に conductor 向けの行（"kind": "attention"）が足されたら、
+    標準出力へ 1 行の JSON（"event": "attention"）で知らせる。最後の行は従来どおり結果の JSON。
+    then の計画は、前の計画がすべて 完了 のときだけ同じ枠（max_）で続けて流す。1 本でも 完了 でなければ
+    流さず、items に 流さなかった と理由を残す。終わったら（後続を含めて）結果の JSON を done へ書く。"""
+    done_path = queue_done_path(plans, done)
+    done_path.unlink(missing_ok=True)  # 前の queue の終わりを待つ側が読まないように、始めに消す
+    items = run_batch(plans, max_, poll)
+    if then:
+        not_done = [i for i in items if i["result"] != "完了"]
+        if not_done:
+            reason = "前の計画が完了していない: " + "、".join(f"{i['plan']}（{i['result']}）" for i in not_done)
+            items += [{"plan": p, "result": NOT_RUN, "reason": reason} for p in then]
+        else:
+            items += run_batch(then, max_, poll)
+    ran = [i for i in items if i["result"] != NOT_RUN]
+    skipped = len(items) - len(ran)
+    stopped = [i for i in ran if i["result"] not in ("完了", "関門")]
+    gates = [i for i in ran if i["result"] == "関門"]
     status = "stopped" if stopped else "gate" if gates else "ok"
-    summary = f"{len(items)} 本: 完了 {len(items) - len(stopped) - len(gates)} / 関門 {len(gates)} / 止まった {len(stopped)}"
-    return result("supervise-queue", status, summary, items,
-                  {"plans": len(items), "stopped": len(stopped), "gate": len(gates), "max": max_})
+    summary = f"{len(ran)} 本: 完了 {len(ran) - len(stopped) - len(gates)} / 関門 {len(gates)} / 止まった {len(stopped)}"
+    if skipped:
+        summary += f"。後続 {skipped} 本は流さなかった"
+    nxt = "関門の計画の report.md を読んで提示する" if status == "gate" else None
+    res = result("supervise-queue", status, summary, items,
+                 {"plans": len(ran), "stopped": len(stopped), "gate": len(gates), "not_run": skipped,
+                  "max": max_, "done": str(done_path)}, next=nxt)
+    write_atomic(done_path, json.dumps(res, ensure_ascii=False) + "\n")
+    return res
 
 
 def note_row(report: str, next_text: str) -> str:
@@ -1672,7 +1719,8 @@ def main() -> int:
     r.add_argument("--state-dir")
     r.add_argument("--from", dest="start", help="この段から始める（途中から再開するとき）")
     sub.add_parser("example")
-    n = sub.add_parser("new", help="雛形から計画を作る")
+    n = sub.add_parser("new", help="雛形から計画を作る。release の計画は、実装の queue へ --then で渡すと"
+                                   "実装がすべて完了した後に続けて流れる")
     n.add_argument("kind", choices=["impl", "check", "release", "mission"])
     n.add_argument("--issue", type=int, nargs="+", default=[])
     n.add_argument("--pr", type=int)
@@ -1698,6 +1746,10 @@ def main() -> int:
     q.add_argument("plans", nargs="+")
     q.add_argument("--max", type=int, default=3)
     q.add_argument("--poll", type=float, default=5.0)
+    q.add_argument("--then", nargs="+", default=[], metavar="PLAN",
+                   help="前の計画がすべて完了したときだけ続けて流す計画（例: 配布の計画）")
+    q.add_argument("--done", help="終わったときに結果の JSON を書く所（省けば最初の計画の状態ディレクトリの "
+                                  "queue-done.json）。待つ側は until [ -s <このパス> ] で待つ")
     t = sub.add_parser("note", help="報告から引き継ぎ文書の表へ 1 行を足す")
     t.add_argument("doc")
     t.add_argument("--report", required=True)
@@ -1727,7 +1779,7 @@ def main() -> int:
             ap.error("new release には --repo が要る（作業場所が /.worktrees/ の下に無い）")
         emit(cmd_new(a))
     if a.cmd == "queue":
-        emit(cmd_queue(a.plans, max(1, a.max), a.poll))
+        emit(cmd_queue(a.plans, max(1, a.max), a.poll, a.then, a.done))
     if a.cmd == "note":
         emit(cmd_note(a.doc, a.report, a.next, a.section))
     if a.cmd == "sync-check":
