@@ -300,8 +300,10 @@ erDiagram
 | `findings` | オブジェクト | `check` だけ | 構造改善の `applied`・`reverted`、実装レビューの `findings`・`unresolved`（計画の `state.json` の `counts` から写す） |
 
 **前回の検査は、`result` が `merged` か `no_change` の `check` の最新の行である。** その `to` が次の
-範囲の `from` になり、`at` が期限の起点になる。**行が無ければ、最新の正式版のタグ（`ndf--v*` の
-版の順で最大）のコミットと、そのタグの日時を使う。**
+範囲の `from` になり、`at` が期限の起点になる。**行が無ければ、引数 `--since <ref>` か、リポジトリの
+宣言（`.ndf/` の配布の宣言が持つ正式版のタグの形）で最新の正式版のタグを探し、そのコミットと日時を使う。**
+どちらも無ければ、起点のブランチ（`.ndf/worktree.json` の `base_branch`、無ければ既定のブランチ）と
+今の HEAD の分岐点を使う。タグの形（このリポジトリなら `ndf--v*`）をスクリプトに埋め込まない（MVV の Value 6）。
 
 ### ミッションの状態（`mission-state.py` のファイル）に足す項目
 
