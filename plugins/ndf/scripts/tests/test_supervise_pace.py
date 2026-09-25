@@ -155,6 +155,18 @@ def test_check_since_last_has_a_condition_and_every_failure_reaches_abort(tmp_pa
     assert_transitions_exist(plan)
 
 
+def test_since_ref_reaches_the_condition_and_prepare_but_not_record(tmp_path):
+    out = tmp_path / "review.json"
+    p = cli("new", "check", "--since-last", "--review-only", "--id", "m-r", "--since-ref", "v1.2.3",
+            "--worktree", str(tmp_path), "--out", str(out))
+    assert p.returncode == 0, p.stdout + p.stderr
+    plan = load(out)
+    s = steps_of(plan)
+    assert plan["実行の条件"]["cmd"].endswith(" --review --since v1.2.3")
+    assert s["prepare"]["cmd"].endswith(" --review --since v1.2.3")
+    assert "--since" not in s["record"]["cmd"] and s["record"]["cmd"].endswith(" --review --pr {pr}")
+
+
 def test_check_since_last_with_pr_is_a_usage_error(tmp_path):
     p = cli("new", "check", "--since-last", "--pr", "5", "--id", "m", "--worktree", str(tmp_path))
     assert p.returncode == 2
