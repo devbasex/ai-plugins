@@ -1133,7 +1133,7 @@ def plan_release(a) -> dict:
          "next": "sync"},
     ]
     plan = {
-        "持ち場": f"配布（{'開発版' if dev else '本番'}）", "課題": a.issue, "モード": a.mode, "作業場所": a.worktree,
+        "フェーズ": f"配布（{'開発版' if dev else '本番'}）", "課題": a.issue, "モード": a.mode, "作業場所": a.worktree,
         "branch": a.branch or f"release/v{v}", "規則": RULE_RELEASE_DEV if dev else RULE_RELEASE_PROD, "上限": 20,
         "steps": steps,
     }
