@@ -90,7 +90,7 @@ def test_resume_records_the_carried_over_threads(state_mod, unresolved):
 
 
 def test_resume_without_unresolved_threads_records_nothing(state_mod, unresolved):
-    """未解決の指摘が 0 件なら引き継ぎは無い。収束の振る舞いは現行のまま。"""
+    """未解決の指摘が 0 件なら引継ぎは無い。収束の振る舞いは現行のまま。"""
     unresolved([])
     st = _state(carried_over={"count": 3, "thread_ids": ["PRRT_x"], "fixed_in_round": None})
 

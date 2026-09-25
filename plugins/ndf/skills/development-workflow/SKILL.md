@@ -1,6 +1,6 @@
 ---
 name: development-workflow
-description: "Classify a change into 4 workflow modes and route it to the required steps. Use when deciding how much process a change needs（モード判定・工程の振り分け）."
+description: "Classify a change into 5 workflow modes and route it to the required steps. Use when deciding how much process a change needs（モード判定・工程の振り分け）."
 hooks:
   PreToolUse:
     - matcher: "Bash"
@@ -20,7 +20,7 @@ hooks:
 
 ## 判定する単位
 
-**工程はミッション単位で 1 回ずつ通す。** ミッションは 1 つの版として出す課題の束で、複数の設計と実装を含む。
+**工程はミッション単位で 1 回ずつ通す。** ミッションは 1 つの版として出す課題と Pull Request の束で、複数の設計と実装を含む。
 **モードを判定する単位は、ミッションの develop 宛て Pull Request である。** モードは 1 つで、ミッションが閉じる
 課題すべての通過記録へ同じ値を書く。数える対象が 1 つになる。
 
@@ -191,12 +191,12 @@ pace: fast
 
 **構造改善と実装レビューは、通す工程であって任意ではない。** `standard` と `legacy-refactor` の
 構造改善は `cross-refactoring` を通す。`fast` でも通し、時機だけをトリガーへ移す。
-**実装レビューは 4 モードとも通す。** Pull Request を出す以上、その差分は誰かがレビューする。
+**実装レビューは 5 つのモードとも通す。** Pull Request を出す以上、その差分は誰かがレビューする。
 `light` は「本番の振る舞いも本番コードの構造も変えない」変更だが、**変えないことの確認**が
 要る。実装レビューの工程は**明示的に呼ぶ**（自然文で「レビューして」と依頼すると、Claude Code では組み込みの
 `code-review` が起動して判定の投稿経路が変わる）。
 
-**マージは取り込みであって配布ではない。** `release` は 4 モードすべてで通す。**自動で進めて
+**マージは取り込みであって配布ではない。** `release` は 5 つのモードすべてで通す。**自動で進めて
 よいのは検証への配布までで、本番への配布は承認を得るまで進めない。**
 
 工程ごとの理由・条件・例外は
@@ -209,7 +209,7 @@ pace: fast
 [references/context-window.md](references/context-window.md) にある。
 
 **conductor は、`context-window.md` の 4 つのカットポイントと文脈量の hook（`token-guard.sh`）に止められたときに、
-次の工程を始める引き継ぎの 1 行（`/ndf:development-workflow #<課題>`。今の区間を `/goal` で始めていたときだけ先頭に `/goal `）を、
+次の工程を始める引継ぎの 1 行（`/ndf:development-workflow #<課題>`。今の区間を `/goal` で始めていたときだけ先頭に `/goal `）を、
 情報文字列 `ndf-next` の囲みのコードブロック 1 つで出す。** 3 層では conductor が `## フェーズの報告` を
 受け取った時点で出し（supervisor は出さない）、`結果: 関門` なら関門の承認と取り込みの後に出す。
 出す時点・告知・新しい会話が状態を戻す手順は `context-window.md` の「新しい会話で戻す」にある。

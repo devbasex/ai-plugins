@@ -336,7 +336,7 @@ def cell(text: str) -> str:
 
 def section_body(m: dict) -> str:
     """節の本文（見出しの次の行から）。空行で始まり、空行で終わる。"""
-    lines = ["", "| ミッション | 状態 | PR | 秒 | 費用 | 次 |", "| --- | --- | --- | ---: | ---: | --- |"]
+    lines = ["", "| 計画 | 状態 | PR | 秒 | 費用 | 次 |", "| --- | --- | --- | ---: | ---: | --- |"]
     for p in m.get("plans", []):
         r = row_of(p)
         lines.append("| " + " | ".join(cell(x) for x in (

@@ -1733,7 +1733,7 @@ def _refresh_resume_state(
 ) -> bool:
     """再開する state を最新化し、書き換えたかどうかを返す。
 
-    旧形式の補完・manual 指示の反映・`review_instructions` の再計算・引き継ぎの記録を
+    旧形式の補完・manual 指示の反映・`review_instructions` の再計算・引継ぎの記録を
     行う。**保存はしない**（呼び出し側が変更有無を見て 1 度だけ書く）。
     """
     state_changed = False
@@ -1761,7 +1761,7 @@ def _refresh_resume_state(
     if st.get("review_instructions") != combined:
         st["review_instructions"] = combined
         state_changed = True
-    # 再開した時点で残っている未解決の指摘を引き継ぎとして記録する。
+    # 再開した時点で残っている未解決の指摘を引継ぎとして記録する。
     if _record_carried_over(st, st.get("repo") or repo, st.get("current_pr") or pr):
         state_changed = True
     return state_changed
@@ -1830,7 +1830,7 @@ def _resume_from_state(
 
 
 def cmd_init(args: argparse.Namespace) -> None:
-    """Step 0 — state 初期化 or 既存 state 引き継ぎ + プリチェック。"""
+    """Step 0 — state 初期化 or 既存 state 引継ぎ + プリチェック。"""
     pr = args.pr
     manual_extra_review = _extra_review_instructions(args)
     # worktree path を先に解決してから tmp_dir を決定する。
@@ -2610,7 +2610,7 @@ def _record_carried_over(st: dict[str, Any], repo: str, pr: int) -> bool:
     通らないまま収束する経路を塞ぐ。
 
     取得できなかったときは記録を変更しない。0 件として扱うと、GitHub 側の
-    一時的な不調で引き継ぎが消える。
+    一時的な不調で引継ぎが消える。
 
     修正の工程を 1 度通した後も、deferred / rejected と最終スイープ待ちの指摘は
     Resolve されないまま残る。これを再開のたびに未処理として数え直すと、収束は
@@ -2624,7 +2624,7 @@ def _record_carried_over(st: dict[str, Any], repo: str, pr: int) -> bool:
     before = st.get("carried_over")
     threads = _fetch_unresolved_threads(str(repo or ""), int(pr))
     if threads is None:
-        info("⚠ 未解決の指摘を取得できませんでした — 引き継ぎの記録は変更しません")
+        info("⚠ 未解決の指摘を取得できませんでした — 引継ぎの記録は変更しません")
         return False
     if not threads:
         st["carried_over"] = None
@@ -4456,7 +4456,7 @@ def _build_round_fix(normalized: dict[str, Any]) -> dict[str, Any]:
 
 
 def _record_fix_history(st: dict, normalized: dict[str, Any], pr: int) -> None:
-    """引き継ぎの消化と、見送り・却下の項目別履歴を state へ積む。"""
+    """引継ぎの消化と、見送り・却下の項目別履歴を state へ積む。"""
     round_no = st["rounds"][-1]["round"]
     # 引き継いだ指摘は、修正の工程を 1 度通した時点で収束の抑止から外す。
     # 残りは最終スイープ (Step 7.5) が受け持つ。

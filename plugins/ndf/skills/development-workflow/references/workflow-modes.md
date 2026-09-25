@@ -237,7 +237,7 @@ python3 "$RF/refactor.py" assess --base origin/develop; rc=$?; echo "exit=$rc"
 
 | 状況 | 記録先 |
 | --- | --- |
-| 計画ファイルを作る変更 | `implementation-plan` の計画ファイル冒頭 |
-| 計画ファイルを作らない変更 | プルリクエスト本文（`light` は 1 行でよい） |
+| 実装計画のファイルを作る変更 | `implementation-plan` の実装計画のファイル冒頭 |
+| 実装計画のファイルを作らない変更 | プルリクエスト本文（`light` は 1 行でよい） |
 
 記録には**モードとその根拠**を書く。判定基準の表を写さない。

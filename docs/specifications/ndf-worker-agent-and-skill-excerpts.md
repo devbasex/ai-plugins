@@ -59,7 +59,7 @@ supervisor は設計の工程に入った時点で `bash "<絶対パス>/project
 | 要素 | 責務 |
 | --- | --- |
 | `plugins/ndf/scripts/projects-sync.sh` | **記録のコマンドの入口。** 引数をチェックした後、`stage` / `mode` / `worktree` / `plan` ではボードの宣言の有無にかかわらず先に `progress-record.sh` を呼んで issue の本文を更新し、その後でボードを更新する。`status` はボードだけに書く |
-| `plugins/ndf/scripts/progress-record.sh` | issue の本文の `## 進行` の更新。工程名の位置に `-` を受けると、チェックリストを変えずに見出し行（モード・作業ツリー・計画ファイル）だけを更新する |
+| `plugins/ndf/scripts/progress-record.sh` | issue の本文の `## 進行` の更新。工程名の位置に `-` を受けると、チェックリストを変えずに見出し行（モード・作業ツリー・実装計画のファイル）だけを更新する |
 | `plugins/ndf/agents/worker.md` | worker のエージェント定義（`ndf:worker`）。frontmatter の `disallowedTools: Skill, Agent` で 2 つのツールを外す |
 | `plugins/ndf/.claude-plugin/plugin.json` | `agents` 配列に `./agents/worker.md` を載せる。agy へは `plugins/ndf/dev.agy/agents`（`../agents` への symlink）で同じ定義が配られる |
 | `development-workflow/references/agent-layers.md` | 起動指示の雛形と守る規則。「委譲の線」から `work-vessels.md` を指す |
@@ -120,10 +120,10 @@ projects-sync.sh <課題番号> <キー> <値>
 | `stage` | 工程に入るたび（課題ごと） | `progress-record.sh <課題> "<値>"`（チェックを付ける） | 工程のフィールド | 工程を積む |
 | `mode` | フェーズの最初の工程で 1 度 | `progress-record.sh <課題> - --mode <値>`（見出し行だけ） | モードのフィールド | モードを書く |
 | `worktree` | 作業場所の用意の後に 1 度 | `progress-record.sh <課題> - --worktree <値>` | 作業ツリーのフィールド | 読まない |
-| `plan` | 計画の後に 1 度 | `progress-record.sh <課題> - --plan <値>` | 計画ファイルのフィールド | 読まない |
+| `plan` | 計画の後に 1 度 | `progress-record.sh <課題> - --plan <値>` | 実装計画のファイルのフィールド | 読まない |
 | `status` | 「ミッションを閉じる」だけ | 書かない | Status | 読まない |
 
-見出し行だけを更新するときは、既にある見出し行のモード・作業ツリー・計画ファイルのうち
+見出し行だけを更新するときは、既にある見出し行のモード・作業ツリー・実装計画のファイルのうち
 渡さなかったものを引き継ぐ。
 
 | 条件 | 終了コード | 出力 |

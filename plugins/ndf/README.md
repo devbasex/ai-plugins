@@ -208,10 +208,10 @@ bash <プラグインのパス>/scripts/worktree-setup.sh init
 
 | ランタイム | 待ち方 | 会話を切る |
 | --- | --- | --- |
-| Claude Code | hook ＋ 規約 | hook ＋ 引き継ぎの 1 行 |
-| Codex | 規約だけ | 引き継ぎの 1 行だけ |
-| Kiro CLI | 規約だけ | 引き継ぎの 1 行だけ |
-| agy | 規約だけ | 引き継ぎの 1 行だけ |
+| Claude Code | hook ＋ 規約 | hook ＋ 引継ぎの 1 行 |
+| Codex | 規約だけ | 引継ぎの 1 行だけ |
+| Kiro CLI | 規約だけ | 引継ぎの 1 行だけ |
+| agy | 規約だけ | 引継ぎの 1 行だけ |
 
 規約は `skills/development-workflow/references/waiting.md`（待ち方）と
 `skills/development-workflow/references/context-window.md`（会話を切る）にあります。

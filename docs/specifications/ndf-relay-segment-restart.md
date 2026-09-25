@@ -69,7 +69,7 @@
 | `plugins/ndf/hooks/claude.json` の `PreToolUse` / `PostToolUse`（`matcher: AskUserQuestion`） | `NDF_RELAY_DIR` があるときだけ `relay.py question open` / `close` を呼ぶ（`timeout` 10 秒） |
 | `plugins/ndf/skills/install-wrapper/` / `restart/` | 明示の導入・取り外しと、好きな時点の切り替え（Claude Code だけ） |
 | `plugins/ndf/scripts/token-guard.sh` | 文脈量の判定で、ラッパーの直接の子の conductor なら 1 度の通しをせずに止め続ける（下の「文脈の上限で切る」） |
-| `development-workflow/references/context-window.md` / `relay.md` / `SKILL.md` | 次のコマンドの形・ラッパーの案内・引き継ぎの規約 |
+| `development-workflow/references/context-window.md` / `relay.md` / `SKILL.md` | 次のコマンドの形・ラッパーの案内・引継ぎの規約 |
 
 ```mermaid
 graph TB
@@ -481,6 +481,6 @@ hook が止めるのは工程へ入る起動だけで、フェーズの中の Ba
 - [#895](https://github.com/devbasex/ai-plugins/issues/895)（設計は [PR #908](https://github.com/devbasex/ai-plugins/pull/908)、実装は [PR #921](https://github.com/devbasex/ai-plugins/pull/921)）
 - [#928](https://github.com/devbasex/ai-plugins/issues/928) / [#936](https://github.com/devbasex/ai-plugins/issues/936) — 明示の導入・`/ndf:restart`・関門を越えない守り・起動の方針の引数の引継ぎ（[ndf-relay-install-and-restart.md](ndf-relay-install-and-restart.md)）
 - [#827](https://github.com/devbasex/ai-plugins/issues/827) — supervisor の層のスクリプト駆動。「何が claude を起動し、状態をどこに持つか」の答え（スクリプトが起動し、正本は会話の外の記録、LLM の結果は hook がファイルへ写す）を共有する
-- [ndf-token-waits-and-context-cut.md](ndf-token-waits-and-context-cut.md) — 文脈量の hook と引き継ぎの 1 行
+- [ndf-token-waits-and-context-cut.md](ndf-token-waits-and-context-cut.md) — 文脈量の hook と引継ぎの 1 行
 - [ndf-agent-layers-unattended-run.md](ndf-agent-layers-unattended-run.md) — 3 層の運転
 - [ndf-context-window-metrics.md](ndf-context-window-metrics.md) — 会話の記録から文脈量を測る部品

@@ -105,7 +105,7 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 ### 7. 仕様として残す
 
 雛形は [references/spec-template.md](references/spec-template.md)。置き場所は `issues/` 配下とし、
-`implementation-plan` が同じ変更の計画ファイルを作る場合は**同一ファイル内の別の節**にする。
+`implementation-plan` が同じ変更の実装計画のファイルを作る場合は**同一ファイル内の別の節**にする。
 仕様と分解を別ファイルに分けると、片方だけが更新されて食い違う。
 
 ## 曖昧なまま実装しない

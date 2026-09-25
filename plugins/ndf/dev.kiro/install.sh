@@ -453,7 +453,7 @@ for key, value in existing.items():
         config[key] = value
         kept.append(key)
 # hooks / mcpServers が dict 以外（配列や文字列）だと .items() で落ちるため、
-# 壊れた JSON と同じく警告して引き継ぎ対象から外す。
+# 壊れた JSON と同じく警告して引継ぎ対象から外す。
 for section, target, managed in (
     ("hooks", hooks, managed_hooks),
     ("mcpServers", servers, managed_servers),

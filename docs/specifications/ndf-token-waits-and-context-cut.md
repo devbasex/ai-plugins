@@ -12,7 +12,7 @@ Claude Code の PreToolUse hook（`plugins/ndf/scripts/token-guard.sh`）が、�
 | --- | --- |
 | 待ちの費用、許す待ち方と禁じる待ち方、待つ相手ごとの手、途中の通知を受けたときの層ごとの手と複製の待ちのコマンド、hook の止め方、4 ランタイムの扱い | `plugins/ndf/skills/development-workflow/references/waiting.md` |
 | 会話を切る 4 つのカットポイント、上限を超えたら hook が止めること、新しい会話で戻す手順 | `plugins/ndf/skills/development-workflow/references/context-window.md` の「context window はカットポイントで切る」「上限を超えたら hook が止める」「新しい会話で戻す」 |
-| conductor が引き継ぎの 1 行を出す時点 | `plugins/ndf/skills/development-workflow/SKILL.md`（「工程は 1 つの context window で通し切らなくてよい」の段落） |
+| conductor が引継ぎの 1 行を出す時点 | `plugins/ndf/skills/development-workflow/SKILL.md`（「工程は 1 つの context window で通し切らなくてよい」の段落） |
 | supervisor と worker が待ち方に従う規則、worker の起動指示の `置き場所`（報告の複製と完了の目印） | `plugins/ndf/skills/development-workflow/references/agent-layers.md` |
 | `sleep` の判定の字句の規則 | `plugins/ndf/scripts/lib/token_guard_sleep.py` の docstring |
 
@@ -48,7 +48,7 @@ Claude Code の PreToolUse hook（`plugins/ndf/scripts/token-guard.sh`）が、�
 | 途中の通知 | 背景の処理を残したまま応答を終えたサブエージェントについて、親へ届く 1 回目の通知。注記に「background work of its own still running」「may be interim」と出る |
 | 報告の複製 | worker が起動指示の `置き場所` のファイルの末尾へ書く `## 作業の報告` の節。最後の応答の報告と同じ中身 |
 | 完了の目印 | worker が報告の複製を書き終えた後に作る空のファイル `<置き場所>.done` |
-| 引き継ぎの 1 行 | 新しい会話の最初に打てば、その工程から再開できるコマンド 1 行。`/ndf:development-workflow #<課題> [#<課題> ...]`。情報文字列 `ndf-next` の囲みのコードブロック 1 つで出す |
+| 引継ぎの 1 行 | 新しい会話の最初に打てば、その工程から再開できるコマンド 1 行。`/ndf:development-workflow #<課題> [#<課題> ...]`。情報文字列 `ndf-next` の囲みのコードブロック 1 つで出す |
 
 ## 構成要素
 
@@ -155,7 +155,7 @@ graph TB
 ### 文脈量の判定
 
 **conductor が工程へ入る起動で、会話の文脈量が上限（既定 200,000）を超えていると、1 度拒否
-して引き継ぎの 1 行を示す。** 工程へ入る起動は経路によって違うツールに現れるため、両方を見る。
+して引継ぎの 1 行を示す。** 工程へ入る起動は経路によって違うツールに現れるため、両方を見る。
 
 | 経路 | 見る入力 | 目印の鍵 |
 | --- | --- | --- |
@@ -213,7 +213,7 @@ graph TB
 `worktree` などカットポイントの内側の工程は含めない。`cross-review` はカットポイント 1 の前（ドキュメント
 レビュー）でも起動されるが、その時点で上限を超えていれば止めてよいので含める。
 
-### 引き継ぎの 1 行
+### 引継ぎの 1 行
 
 **形は `/ndf:development-workflow #<課題> [#<課題> ...]` とする。** 工程 Skill を直接起動する形
 （`/ndf:implementation-plan #829`）は採らない。工程 Skill はモード・作業ツリー・承認の状態を戻す
@@ -358,7 +358,7 @@ worker の 2 回目の通知は、複製を読んだ後に届いても読み直�
 | --- | --- |
 | sleep | 同じ条件の until ループを `run_in_background: true` で起動して完了通知を待つこと。出来事を 1 つずつ受けるなら `Monitor`。規約 `waiting.md`。`NDF_SLEEP_GUARD=0` |
 | 連続 Read | 書き終わりを待つなら until ループを `run_in_background: true` で起動するか、背景の処理の完了通知を待つこと。`tasks/*.output` は読まない。規約 `waiting.md`。`NDF_READ_REPEAT_GUARD=0` |
-| 文脈量 | 文脈量と上限、次のコマンドを `ndf-next` のブロック 1 つで示すこと（中身は引き継ぎの 1 行、`/goal` で始めた区間なら先頭に `/goal `）、続けるなら同じ起動をもう一度行うこと。ラッパーの直接の子では、止め続けること・動いている supervisor の報告を待ってから引継ぎ文書を更新してブロックを出すこと。規約 `context-window.md`。`NDF_CONTEXT_GUARD=0` と `NDF_CONTEXT_LIMIT` |
+| 文脈量 | 文脈量と上限、次のコマンドを `ndf-next` のブロック 1 つで示すこと（中身は引継ぎの 1 行、`/goal` で始めた区間なら先頭に `/goal `）、続けるなら同じ起動をもう一度行うこと。ラッパーの直接の子では、止め続けること・動いている supervisor の報告を待ってから引継ぎ文書を更新してブロックを出すこと。規約 `context-window.md`。`NDF_CONTEXT_GUARD=0` と `NDF_CONTEXT_LIMIT` |
 
 ### 4 ランタイム
 
@@ -390,7 +390,7 @@ agy の CLI 側の消費を測った後に、登録するかを改めて決め�
   上限以下の `sleep`・文字列やコメントやヒアドキュメントの中の `sleep` を通すこと
 - 同じ範囲の変わらない Read の 3 回目を拒否し、追記・`offset` の変更・同じ大きさの `mv` の置き換えで
   数え直すこと。同じ session の並列の hook で更新が失われないこと
-- 文脈量が上限を超えた conductor の工程 Skill とフェーズの Agent を拒否し、引き継ぎの 1 行に課題番号を
+- 文脈量が上限を超えた conductor の工程 Skill とフェーズの Agent を拒否し、引継ぎの 1 行に課題番号を
   示すこと。番号が無ければ `<課題番号>` のまま示すこと
 - サブエージェントの中の起動・工程でない Skill・作業の種類の Agent を通すこと
 - 拒否の後の同じ起動を 1 度だけ通し（間に Bash と Read が挟まっても）、別の起動を再び拒否すること。
@@ -405,7 +405,7 @@ agy の CLI 側の消費を測った後に、登録するかを改めて決め�
   あること
 - `waiting.md` が 1 か所にあって `agent-layers.md` の supervisor と worker の規則から参照され、
   Claude Code 向けに前景の `sleep` のループを勧める例が無いこと。`context-window.md` に #827 の
-  実測値・上限の値・戻す手順があり、`SKILL.md` に引き継ぎの 1 行の規約があること。README に
+  実測値・上限の値・戻す手順があり、`SKILL.md` に引継ぎの 1 行の規約があること。README に
   4 ランタイムの表があること
 - Codex / Kiro / agy の既存の hook の動作が変わらないこと（既存のテスト）
 - supervisor → worker の 2 層で、worker が背景の待ちを残して応答を終えても、supervisor が途中の
@@ -422,7 +422,7 @@ agy の CLI 側の消費を測った後に、登録するかを改めて決め�
 
 - [#829](https://github.com/devbasex/ai-plugins/issues/829) / [#830](https://github.com/devbasex/ai-plugins/issues/830)（親は [#827](https://github.com/devbasex/ai-plugins/issues/827)）
 - [#901](https://github.com/devbasex/ai-plugins/issues/901) — supervisor が worker の途中の通知で止まる（実装は [PR #910](https://github.com/devbasex/ai-plugins/pull/910)）
-- [#895](https://github.com/devbasex/ai-plugins/issues/895) — 引き継ぎの 1 行を `ndf-next` のブロックにし、ラッパーの下では文脈量の拒否を止め続ける（[ndf-relay-segment-restart.md](ndf-relay-segment-restart.md)）
+- [#895](https://github.com/devbasex/ai-plugins/issues/895) — 引継ぎの 1 行を `ndf-next` のブロックにし、ラッパーの下では文脈量の拒否を止め続ける（[ndf-relay-segment-restart.md](ndf-relay-segment-restart.md)）
 - [#731](https://github.com/devbasex/ai-plugins/issues/731) — 待ちの Tool（`bg-wait.sh`）を共通層へ移す
 - [ndf-context-window-metrics.md](ndf-context-window-metrics.md) — 会話の記録から文脈量を測る部品
 - [ndf-agent-layers-unattended-run.md](ndf-agent-layers-unattended-run.md) — 3 層の運転
