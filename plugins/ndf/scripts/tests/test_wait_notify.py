@@ -500,8 +500,12 @@ def test_kiro_session_from_env_is_the_key(world, slack):
 
 
 def test_kiro_same_text_in_one_session_is_windowed(world, slack):
-    world.run("kiro", {"hook_event_name": "stop", "assistant_response": "この方針で進めてよいですか。"},
-              env={"KIRO_SESSION_ID": "k1"})
+    for _ in range(2):
+        world.run("kiro", {"hook_event_name": "stop", "assistant_response": "この方針で進めてよいですか。"},
+                  env={"KIRO_SESSION_ID": "k1"})
+    slack.wait_for(1)
+    time.sleep(0.5)
+    assert len(slack.requests) == 1
     [f] = list(world.state.glob("*.json"))
     record = json.loads(f.read_text())
     record["sent_at"] = 0

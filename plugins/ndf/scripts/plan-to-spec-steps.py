@@ -7,7 +7,8 @@
 用語集の宣言（.ndf/glossary.json）があれば、消した設計を確定前の出所（pending_source）に持つ語の
 正本（source）を確定仕様へ移し、文書を作り直して同じコミットに含める。
 確定仕様の本文は呼ぶ前に LLM が書いておく。結果は lib/step_result.py の形の 1 行の JSON。
-終了コードは 0 = ok / 1 = コミットする変更が無い・git が失敗 / 3 = 確定仕様か設計のファイルが無い。
+終了コードは 0 = ok / 1 = コミットする変更が無い・git が失敗 /
+3 = 確定仕様か設計のファイルが無い、または用語集の宣言か正本が読めない。
 """
 from __future__ import annotations
 
@@ -15,13 +16,15 @@ import argparse
 import json
 import os
 import re
-import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 from step_result import (EXIT_PRECONDITION, StepError, commit, common_parser, emit, git,  # noqa: E402
                          git_root, main_with, result)
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import glossary  # noqa: E402
 
 TOOL = "plan-to-spec"
 
@@ -52,38 +55,33 @@ def update_index(index, text, name, link, title):
     index.write_text(body, encoding="utf-8")
 
 
-def glossary_source(root: Path) -> str | None:
-    """用語集の正本の相対パス。宣言が無ければ None。宣言が壊れていれば設計を消す前に止める。"""
-    decl = root / ".ndf" / "glossary.json"
-    if not decl.is_file():
-        return None
+def load_glossary(root: Path):
+    """用語集の宣言と正本。宣言が無ければ None。宣言か正本が読めなければ設計を消す前に止める。"""
     try:
-        rel = json.loads(decl.read_text(encoding="utf-8")).get("source")
-    except (ValueError, AttributeError):
-        rel = None
-    if not isinstance(rel, str) or not (root / rel).is_file():
-        raise StepError(f"用語集の宣言（.ndf/glossary.json）の source が読めない: {rel!r}", EXIT_PRECONDITION)
-    return rel
+        decl = glossary.load_declaration(root)
+        return None if decl is None else (decl, glossary.load_glossary(decl))
+    except StepError as e:
+        raise StepError(f"用語集の宣言（.ndf/glossary.json）か正本が読めない: {e}", EXIT_PRECONDITION)
 
 
-def promote_glossary(root: Path, rel: str | None, removed: set, spec_rel: str) -> list:
-    """消した設計を pending_source に持つ語の source を確定仕様へ移し、render して git add する。"""
-    if rel is None:
+def promote_glossary(loaded, removed: set, spec_rel: str) -> list:
+    """消した設計を pending_source に持つ語の source を確定仕様へ移し、文書を作り直して git add する。"""
+    if loaded is None:
         return []
-    path = root / rel
-    g = json.loads(path.read_text(encoding="utf-8"))
-    moved = [t for t in g.get("terms", []) if isinstance(t, dict) and t.get("pending_source") in removed]
+    decl, g = loaded
+    moved = [t for t in glossary.terms_of(g) if t.get("pending_source") in removed]
     if not moved:
         return []
     for t in moved:
         t["source"] = spec_rel
         del t["pending_source"]
-    path.write_text(json.dumps(g, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    r = subprocess.run([sys.executable, str(Path(__file__).resolve().parent / "glossary.py"), "render", "--root",
-                        str(root)], capture_output=True, text=True)
-    if r.returncode != 0:
-        raise StepError(f"用語集の文書を作り直せない: {r.stdout.strip() or r.stderr.strip()}")
-    git(root, "add", "-A", "--", rel, *[i["name"] for i in json.loads(r.stdout)["items"]])
+    try:
+        decl.source_path.write_text(json.dumps(g, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        decl.document_path.parent.mkdir(parents=True, exist_ok=True)
+        decl.document_path.write_text(glossary.render_text(g, decl.source), encoding="utf-8")
+    except OSError as e:
+        raise StepError(f"用語集を書けない: {e}")
+    git(decl.root, "add", "-A", "--", decl.source, decl.document)
     return [{"kind": "glossary", "name": t["term"], "result": "promoted", "source": spec_rel} for t in moved]
 
 
@@ -93,7 +91,7 @@ def cmd_spec_finalize(a):
     if not spec.is_file():
         raise StepError(f"確定仕様のファイルが無い: {a.spec}", EXIT_PRECONDITION)
     spec_rel = spec.relative_to(root).as_posix()
-    glossary = glossary_source(root)
+    loaded = load_glossary(root)
     items = []
 
     for d in a.design:
@@ -104,7 +102,7 @@ def cmd_spec_finalize(a):
         git(root, "rm", "-q", "--", rel)
         items.append({"kind": "design", "name": rel, "result": "removed"})
 
-    items += promote_glossary(root, glossary, {i["name"] for i in items}, spec_rel)
+    items += promote_glossary(loaded, {i["name"] for i in items}, spec_rel)
 
     index = root / "docs" / "specifications" / "README.md"
     if index.is_file():

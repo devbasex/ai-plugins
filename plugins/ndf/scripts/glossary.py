@@ -78,6 +78,7 @@ class Declaration:
             raise unreadable(f"{DECLARATION} の version は 1: {raw.get('version')!r}")
         if raw.get("format") not in FORMATS:
             raise unreadable(f"{DECLARATION} の format は {' / '.join(FORMATS)}: {raw.get('format')!r}")
+        self.root = root
         self.source = raw.get("source")
         self.document = raw.get("document")
         self.source_path = inside(root, self.source, "source")
@@ -210,6 +211,8 @@ def structure_findings(g: dict, decl: Declaration) -> list[dict]:
             hit("unconfirmed_source", t["term"],
                 f"terms[{i}] の source が確定仕様を指さない: {t['source']}（check.source_paths に当たるパスへ移す。"
                 "確定前は source を空にし、plan-to-spec が確定仕様を書いたときに入れる）")
+        if isinstance(t.get("pending_source"), str) and not (decl.root / t["pending_source"]).is_file():
+            hit("schema", t["term"], f"terms[{i}] の pending_source が指す設計文書が無い: {t['pending_source']}")
         if t["context"] not in ids:
             hit("schema", t["term"], f"terms[{i}] の context が宣言されていない: {t['context']}")
         for w in deprecated_of(t):

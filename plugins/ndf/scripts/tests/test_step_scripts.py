@@ -175,6 +175,7 @@ def test_spec_finalize_promotes_glossary_terms_of_the_removed_design(repo, env):
         {"term": "残る語", "context": "c", "meaning": "m", "pending_source": "docs/design/y-design.md"}]}
     write(repo, ".ndf/glossary.json", json.dumps(decl, ensure_ascii=False))
     write(repo, "docs/glossary/glossary.json", json.dumps(g, ensure_ascii=False))
+    write(repo, "docs/design/y-design.md", "# 別の設計\n")
     assert subprocess.run([sys.executable, str(SCRIPTS / "glossary.py"), "render", "--root", str(repo)],
                           capture_output=True).returncode == 0
     git(repo, "add", "-A")
@@ -194,11 +195,18 @@ def test_spec_finalize_promotes_glossary_terms_of_the_removed_design(repo, env):
     assert check.returncode == 0, check.stdout
 
 
-@pytest.mark.parametrize("decl", ['{"version": 1}', '{"source": "docs/glossary/none.json"}', "not json"])
-def test_spec_finalize_stops_on_a_broken_glossary_declaration(repo, env, decl):
-    """宣言があるのに正本が読めなければ、設計を消す前に止める。"""
+GOOD_DECL = '{"version": 1, "format": "json", "source": "g.json", "document": "g.md"}'
+
+
+@pytest.mark.parametrize("decl,source", [('{"version": 1}', None), ('{"source": "docs/glossary/none.json"}', None),
+                                         ("not json", None), (GOOD_DECL, "not json"),
+                                         (GOOD_DECL, '{"version": 1, "terms": {}}')])
+def test_spec_finalize_stops_on_a_broken_glossary_declaration(repo, env, decl, source):
+    """宣言か正本が読めなければ、設計を消す前に止める。"""
     spec_repo(repo)
     write(repo, ".ndf/glossary.json", decl)
+    if source is not None:
+        write(repo, "g.json", source)
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "decl")
     code, _, _ = call("plan-to-spec-steps.py",

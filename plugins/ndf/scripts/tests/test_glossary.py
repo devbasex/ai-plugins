@@ -441,6 +441,17 @@ def test_one_letter_deprecated_word_is_schema(repo):
     assert code == 1 and rules_of(out) == ["schema"]
 
 
+def test_pending_source_pointing_to_a_missing_design_is_schema(repo):
+    g = shop_glossary()
+    g["terms"][0]["pending_source"] = "issues/gone-design.md"
+    write_json(repo, DEFAULT_SOURCE, g)
+    run(repo, "render")
+    code, out, _ = run(repo, "check", "--rules", "structure")
+    assert code == 1 and rules_of(out) == ["schema"] and "gone-design.md" in out["items"][0]["detail"]
+    write(repo, "issues/gone-design.md", "# 設計\n")
+    assert run(repo, "check", "--rules", "structure")[0] == 0
+
+
 def test_missing_required_field_is_schema(repo):
     g = shop_glossary()
     del g["terms"][0]["meaning"]
