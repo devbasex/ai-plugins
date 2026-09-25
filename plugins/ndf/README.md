@@ -126,7 +126,7 @@ agy plugin list
 - **`supervise.py run` は進捗を状態ディレクトリの `progress.jsonl` へ 1 行ずつ書く**。段が切り替わったときと、
   計画の `report_interval`（既定 10 分）のあいだ何も書かれなかったときに書く。worker の途中の報告はスクリプトが分け、
   conductor の判断が要るものだけを `queue` が attention として知らせる
-- **呼んだときだけ働く試行のスクリプトを `scripts/experimental/` に置く**。`resume.py` は再開の調べを 1 回で出し、
+- **呼んだときだけ働く試行のスクリプトを `scripts` の下の `experimental/` に置く**。`resume.py` は再開の調べを 1 回で出し、
   `issue-body.py` は課題の本文を書き直して読み直しで確かめる
 
 ### 変更
