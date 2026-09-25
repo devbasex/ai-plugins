@@ -194,6 +194,21 @@ git fetch origin && git diff --stat origin/develop origin/main   # 空である�
 **Pull Request のベースは `develop` である。** 既定ブランチが `main` であるため、`gh pr create`
 は指定しないと `main` を宛先にする。**`--base develop` を必ず付ける。**
 
+**配布の Pull Request では、重い検査（`pytest` と `runtime-smoke (*)`）を省く。** 同じ中身を
+2 度試さないためである。判定は各 workflow の `ci-scope` のジョブが `scripts/ci-heavy-skip.py` で
+行い、次のどちらかのときだけ省く。
+
+- 差分が版数と説明だけ（版上げの `release/v<版>` → `develop`）。説明は `CHANGELOG.md`・
+  `README.md`・`AGENTS.md`・`plugins/**/README.md`・この文書・`docs/metrics/ndf-token-usage/`
+  の記録で、`plugin.json` と `marketplace.json` は `version` / `description` の行だけ
+- `develop` への push でその workflow を通ったコミットがあり、head がそこから版数と説明しか
+  変えていない（`develop` → `main`）。`main` の側に `develop` へ無い変更があれば省かない
+
+コードやテストを 1 行でも変えた差分では省かない。`develop` / `main` への push では常に回す。
+省いても必須の検査の名前は変わらず、結果は成功で返る。`pytest` はまとめのジョブが、
+`runtime-smoke (*)` はステップだけを飛ばしたジョブが返す。版数の整合の検査
+（`runtime-plugin-validate` など）は常に回す。
+
 **`main` を進めるのが `release` の「本番への配布」である。** そちらには承認が要る。`develop`
 へのマージは「検証への配布」にあたり、承認なしで進めてよい（`/ndf:release`）。
 

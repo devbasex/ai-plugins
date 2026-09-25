@@ -109,4 +109,6 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --roo
 - `changelog`: 見出しと PR のタイトルを並べるだけで、本文は書かない
 - `release`: `dev` は `release/v<版>` → `develop` の Pull Request を作り、チェックを待ってマージする。
   `prod` は続けて `develop` → `main` をマージし、タグと GitHub Release を作る。`items[]`
-  （マージした Pull Request・タグ・GitHub Release）が完了の事実の照会の結果である
+  （マージした Pull Request・タグ・GitHub Release）が完了の事実の照会の結果である。
+  どちらの Pull Request でも pytest と runtime smoke は省かれて成功（skipping / pass）を返す
+  （[版と配布](../../../../../docs/versioning-and-distribution.md#正式版を出す)）。待ちはそれを通ったものとして扱う
