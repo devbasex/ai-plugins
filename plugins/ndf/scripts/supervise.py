@@ -2037,14 +2037,19 @@ def plan_check_since(a) -> dict:
          "next": "review"},
         {"id": "review", "type": "drive", "drive": "cross-review", "kind": "実装レビュー", "stage": "実装レビュー",
          "timeout": 3600, "args": "{pr} --max-rounds 4", "next": "test-all"},
+        # 検査の間に起点のブランチが進んでも finish の付け替えの後にマージできるよう、毎回取り込んでから測る
         {"id": "test-all", "type": "run", "stage": "完了判定", "timeout": 1800, "rerun_failed": True,
-         "cmd": "git pull -q --rebase && " + with_paths(a.test_cmd, a.test_all), "on_fail": "judge",
+         "cmd": (f"git pull -q --rebase && git fetch -q origin {shlex.quote(a.base)} && "
+                 f"git merge -q --no-edit origin/{shlex.quote(a.base)} && git push -q && "
+                 + with_paths(a.test_cmd, a.test_all)), "on_fail": "judge",
          "next": "finish"},
         {"id": "judge", "type": "judge", "inputs": ["test-all"],
-         "question": "全体テストの失敗を直す（fix）か、修正に無関係として進める（finish）か、止める（stop）か",
+         "question": "全体テストの失敗（起点のブランチの取り込みの衝突を含む）を直す（fix）か、修正に無関係として進める"
+                     "（finish）か、止める（stop）か",
          "choices": ["fix", "finish", "stop"]},
         {"id": "fix", "type": "work", "kind": "修正", "inputs": ["test-all"],
-         "prompt": "失敗したテストを直してコミットし、git push する。", "next": "test-all"},
+         "prompt": (f"失敗したテストを直してコミットし、git push する。origin/{a.base} の取り込みで衝突していれば、"
+                    "両方の変更を残して衝突を解き、マージのコミットを作って git push する。"), "next": "test-all"},
         {"id": "finish", "type": "run", "stage": "Pull Request",
          "cmd": f"{CHECK_PY} finish --id {name} --pr {{pr}} --root .", "skip_to": "record", "on_fail": "abort",
          "next": "ready"},
