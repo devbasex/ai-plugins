@@ -158,6 +158,72 @@ def test_branch_without_repo_stops(tmp_path):
     assert "リポジトリ" in sv.Supervisor(plan, tmp_path / "state").run()
 
 
+def clone_repo(tmp_path):
+    """origin を持つ clone を作る。origin/main を起点にすると worktree add が upstream を .git/config へ書く。"""
+    origin = tmp_path / "origin"
+    origin.mkdir()
+    git(origin, "init", "-q", "-b", "main")
+    git(origin, "-c", "user.email=a@b", "-c", "user.name=a", "commit", "-q", "--allow-empty", "-m", "init")
+    repo = tmp_path / "repo"
+    subprocess.run(["git", "clone", "-q", str(origin), str(repo)], check=True)
+    return repo
+
+
+def wt_plan(repo, branch, **extra):
+    return {"フェーズ": "試験", "課題": [], "作業場所": str(repo / ".worktrees" / branch), "branch": branch,
+            "起点": "origin/main", "steps": [{"id": "t", "type": "run", "cmd": "true", "next": "end"}], **extra}
+
+
+def test_ensure_worktree_retries_config_lock(tmp_path):
+    # 1 回目は branch を作った後の upstream の書き込みで落ちる。やり直しは在る branch を使って作れる
+    repo = clone_repo(tmp_path)
+    (repo / ".git" / "config.lock").write_text("")
+    waits = []
+    plan = wt_plan(repo, "feat/a")
+    assert sv.ensure_worktree(plan, sleep=waits.append) is None
+    assert len(waits) == 1 and 0.5 <= waits[0] <= 2
+    assert git(Path(plan["作業場所"]), "rev-parse", "--abbrev-ref", "HEAD").strip() == "feat/a"
+
+
+def test_ensure_worktree_gives_up_after_retries(tmp_path, monkeypatch):
+    repo = clone_repo(tmp_path)
+    real = subprocess.run
+
+    def run(cmd, **kw):
+        if "worktree" in cmd and "add" in cmd:
+            return subprocess.CompletedProcess(cmd, 255, "", "error: could not lock config file .git/config: File exists")
+        return real(cmd, **kw)
+
+    monkeypatch.setattr(sv.subprocess, "run", run)
+    waits = []
+    err = sv.ensure_worktree(wt_plan(repo, "feat/a"), sleep=waits.append)
+    assert err.startswith("作業ツリーを作れない") and "could not lock config file" in err
+    assert len(waits) == sv.WORKTREE_LOCK_RETRIES
+
+
+def test_ensure_worktree_other_error_does_not_retry(tmp_path):
+    repo = clone_repo(tmp_path)
+    waits = []
+    err = sv.ensure_worktree(wt_plan(repo, "feat/a", 起点="origin/nothing"), sleep=waits.append)
+    assert err.startswith("作業ツリーを作れない") and waits == []
+
+
+def test_queue_creates_worktrees_in_order_before_run(tmp_path, monkeypatch):
+    repo = clone_repo(tmp_path)
+    plans, calls = [], []
+    for b in ("feat/a", "feat/b", "feat/c"):
+        f = tmp_path / f"{b.replace('/', '-')}.json"
+        f.write_text(json.dumps(wt_plan(repo, b)))
+        plans.append(str(f))
+    real = sv.ensure_worktree
+    monkeypatch.setattr(sv, "ensure_worktree", lambda plan, **kw: calls.append(plan["branch"]) or real(plan, **kw))
+    res = sv.cmd_queue(plans, 3, poll=0.1)
+    assert calls == ["feat/a", "feat/b", "feat/c"]
+    assert res["status"] == "ok", res
+    for b in ("feat/a", "feat/b", "feat/c"):
+        assert git(repo / ".worktrees" / b, "rev-parse", "--abbrev-ref", "HEAD").strip() == b
+
+
 def cli(*args, cwd=None):
     return subprocess.run([PY, str(SUPERVISE), *args], capture_output=True, text=True, cwd=cwd)
 

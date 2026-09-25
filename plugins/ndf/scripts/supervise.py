@@ -22,7 +22,7 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
     supervise.py new mission --name M --worktree <リポジトリの根> --issue N... [--design N...] [--tests PATH...] [--out DIR]
         # 並列の設計 → 関門 1 → ミッションのブランチ → 並列の実装（ミッションのブランチへ集める）→ 検査 1 回 → 配布
         # を波ごとの計画ファイルと mission.json へ書き出す。波の中は queue --max 3 で流す
-    supervise.py queue <plan.json>... [--max 3]   # 空いた枠へ順に流す
+    supervise.py queue <plan.json>... [--max 3]   # 空いた枠へ順に流す。作業ツリーは起動の前に 1 本ずつ作る
     supervise.py note <引き継ぎ文書.md> --report <report.md> [--next 次の欄] [--section 見出しの語]
     supervise.py sync-check [--root DIR] [--commit]   # 生成物の同期と検査 4 本
     supervise.py example            # 計画の例を出す
@@ -36,6 +36,7 @@ new / queue / note / sync-check の結果は lib/step_result.py の形の 1 行�
       "branch": "feat/issue-818-x",         # 省略可。作業場所が無ければ起動時に作業ツリーを作る
       "起点": "origin/develop",             # branch から作るときの起点（既定 origin/develop）
       "リポジトリ": "/abs/repo",             # 作業ツリーの元（省略時は作業場所の /.worktrees/ より前）
+                                            # git worktree add が .git/config の lock で落ちたら 5 回までやり直す
       "記録": "/abs/projects-sync.sh",      # 省略可。stage を記録する
       "規則": "判断の規則の抜粋（文字列）",   # judge へ毎回渡す
       "上限": 30,                           # 実行する段の数の上限（ループの歯止め）
@@ -406,6 +407,51 @@ def normalize_plan(plan: dict) -> dict:
     return plan
 
 
+WORKTREE_LOCK_RETRIES = 5        # .git/config の lock で落ちたときのやり直しの回数
+WORKTREE_LOCK_WAIT = 1.0         # やり直しの間隔（秒）
+
+
+def is_config_lock(stderr: str) -> bool:
+    return "could not lock config file" in stderr or "File exists" in stderr
+
+
+def ensure_worktree(plan: dict, sleep=time.sleep) -> str | None:
+    """計画に branch があり作業場所が無ければ、作業ツリーを作る。誤りの文を返す（無ければ None）。
+
+    run と queue の両方が使う。同時に作ると .git/config の lock で落ちるので、そのときは
+    WORKTREE_LOCK_WAIT 秒おきに WORKTREE_LOCK_RETRIES 回までやり直す。
+    """
+    plan = normalize_plan(dict(plan))
+    branch = plan.get("branch")
+    wt = Path(plan["作業場所"])
+    if not branch or wt.exists():
+        return None
+    repo = plan.get("リポジトリ") or (str(wt).split("/.worktrees/")[0] if "/.worktrees/" in str(wt) else None)
+    if not repo:
+        return "作業ツリーの元のリポジトリが分からない（計画に リポジトリ を書く）"
+    base = plan.get("起点", "origin/develop")
+    if base.startswith("origin/"):
+        subprocess.run(["git", "-C", repo, "fetch", "-q", "origin"], capture_output=True, text=True)
+    p = None
+    for i in range(WORKTREE_LOCK_RETRIES + 1):
+        if i:
+            sleep(WORKTREE_LOCK_WAIT)
+        has = subprocess.run(["git", "-C", repo, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"],
+                             capture_output=True, text=True).returncode == 0
+        cmd = ["git", "-C", repo, "worktree", "add", "-q"] + ([str(wt), branch] if has
+                                                             else ["-b", branch, str(wt), base])
+        p = subprocess.run(cmd, capture_output=True, text=True)
+        if p.returncode == 0:
+            return None
+        if not is_config_lock(p.stderr):
+            break
+        # lock で途中まで作られた作業ツリーは、次のやり直しの前に片付ける
+        subprocess.run(["git", "-C", repo, "worktree", "prune"], capture_output=True, text=True)
+        if wt.exists() and not any(wt.iterdir()):
+            wt.rmdir()
+    return f"作業ツリーを作れない: {p.stderr.strip()[:300]}"
+
+
 class Supervisor:
     def __init__(self, plan: dict, state_dir: Path):
         self.plan = normalize_plan(plan)
@@ -529,25 +575,7 @@ class Supervisor:
 
     def ensure_worktree(self) -> str | None:
         """計画に branch があり作業場所が無ければ、作業ツリーを作る。誤りの文を返す（無ければ None）。"""
-        branch = self.plan.get("branch")
-        wt = Path(self.cwd)
-        if not branch or wt.exists():
-            return None
-        repo = self.plan.get("リポジトリ") or (str(wt).split("/.worktrees/")[0] if "/.worktrees/" in str(wt)
-                                             else None)
-        if not repo:
-            return "作業ツリーの元のリポジトリが分からない（計画に リポジトリ を書く）"
-        base = self.plan.get("起点", "origin/develop")
-        if base.startswith("origin/"):
-            subprocess.run(["git", "-C", repo, "fetch", "-q", "origin"], capture_output=True, text=True)
-        has = subprocess.run(["git", "-C", repo, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"],
-                             capture_output=True, text=True).returncode == 0
-        cmd = ["git", "-C", repo, "worktree", "add", "-q"] + ([str(wt), branch] if has
-                                                             else ["-b", branch, str(wt), base])
-        p = subprocess.run(cmd, capture_output=True, text=True)
-        if p.returncode != 0:
-            return f"作業ツリーを作れない: {p.stderr.strip()[:300]}"
-        return None
+        return ensure_worktree(self.plan)
 
     def run_cmd(self, step: dict, extra_addopts: str = "") -> tuple[int, str]:
         cmd = step.get("cmd") or PRESETS.get(step.get("preset", ""), "")
@@ -1313,6 +1341,12 @@ def cmd_queue(plans: list[str], max_: int, poll: float = 1.0) -> dict:
     while pending or running:
         while pending and len(running) < max_:
             plan = pending.pop(0)
+            # 作業ツリーは queue の側で順に作る（同時の git worktree add は .git/config の lock で落ちる）。
+            # 作れなかったときの報告は run が同じ誤りで書く
+            try:
+                ensure_worktree(json.loads(Path(plan).read_text()))
+            except (OSError, ValueError, KeyError):
+                pass
             log = open(Path(plan).with_suffix(".log"), "w")
             running[plan] = (subprocess.Popen([sys.executable, str(SELF), "run", plan], stdout=log,
                                               stderr=subprocess.STDOUT), log, time.time())
