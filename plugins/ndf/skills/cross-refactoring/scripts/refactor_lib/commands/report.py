@@ -138,10 +138,10 @@ def _print_header(state: dict[str, Any]) -> None:
     print(f"- 判断に Jev を: {jev_line} / 呼び出しの失敗 {judge.get('failures', 0)} 回")
     print(f"- 着手前の全体のテスト: {baseline_line(state.get('baseline_test') or {})}")
     if whole.get("ran"):
-        print(f"- 検証の中の全体のテスト: 走らせた（印 {', '.join(whole.get('flags') or [])} / "
+        print(f"- 検証の中の全体のテスト: 走らせた（危険フラグ {', '.join(whole.get('flags') or [])} / "
               f"{whole.get('status')}{_whole_detail(whole)}）")
     else:
-        print("- 検証の中の全体のテスト: 走らせなかった（危険の印が立たなかった）")
+        print("- 検証の中の全体のテスト: 走らせなかった（危険フラグが立たなかった）")
     print(f"- 最終ゲート: {gate.get('mode') or '—'}（{gate.get('status') or '未実行'}"
           f"{' / 検証の結果を使い回した' if gate.get('whole_test_reused') else ''}"
           f" / 修正 {gate.get('fix_rounds', 0)} 回）")
@@ -171,8 +171,8 @@ _RESOLUTIONS = {
     "kept": "変更が原因の失敗は無く、取り消さなかった",
     "fixing": "直しの途中",
     "fixed": "直して通った",
-    "narrowed": "直らず、印の項目を新しい順に取り消した",
-    "reverted_all": "落ちたテストを取り出せず、印の項目をまとめて取り消した",
+    "narrowed": "直らず、危険フラグの項目を新しい順に取り消した",
+    "reverted_all": "落ちたテストを取り出せず、危険フラグの項目をまとめて取り消した",
 }
 
 
@@ -181,7 +181,7 @@ def _whole_detail(whole: dict[str, Any]) -> str:
     if whole.get("status") != "fail":
         return ""
     if not whole.get("resolution"):
-        return " / 印の項目を取り消した" if whole.get("reverted") else ""
+        return " / 危険フラグの項目を取り消した" if whole.get("reverted") else ""
     counts = ""
     if whole.get("failed_tests") is not None:
         counts = (f" / 揺れ {len(whole.get('flaky') or [])}・元からの失敗 "
@@ -206,7 +206,7 @@ def _item_table(state: dict[str, Any]) -> str:
     if not items:
         return "（改善項目なし）"
     lines = [
-        "| ID | 対象 | 兆候 | 手法 | 等級 | 見積り（分） | 状態 | 危険の印 | 修正 |",
+        "| ID | 対象 | 兆候 | 手法 | 等級 | 見積り（分） | 状態 | 危険フラグ | 修正 |",
         "| --- | --- | --- | --- | --- | ---: | --- | --- | ---: |",
     ]
     for item in items:

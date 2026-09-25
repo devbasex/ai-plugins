@@ -17,12 +17,12 @@ GROUPING = SKILL_DIR / "references" / "grouping.md"
 
 
 def plain(text: str) -> str:
-    """折り返しの改行に加えて強調の印を除く。太字の付け外しで同じ契約が落ちないようにする。"""
+    """折り返しの改行に加えて強調の目印を除く。太字の付け外しで同じ契約が落ちないようにする。"""
     return text.replace("\n", "").replace("**", "")
 
 
 def locate(text: str, fragment: str) -> int:
-    """強調の印を除いた文の、本文での位置。切り出しの起点に使う。"""
+    """強調の目印を除いた文の、本文での位置。切り出しの起点に使う。"""
     return text.index(plain(fragment))
 
 

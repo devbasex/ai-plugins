@@ -346,7 +346,7 @@ def test_a_lock_that_changed_hands_is_never_moved_out(
     # 名前の付け替えは、外へ出す側も戻す側も親のディレクトリの更新時刻を動かす。
     # ロックの中へ関門を置く手は動かさないため、外へ出したことだけを拾える。
     assert holder.stat().st_mtime_ns == parent_before, "外へ出した跡が親のディレクトリに残った"
-    assert (lock / "held").exists(), "持ち主の握りの印が失われた"
+    assert (lock / "held").exists(), "持ち主の握りの目印が失われた"
     assert (lock / "token").read_text(encoding="utf-8").strip() == "new-owner"
     assert (lock / "pid").read_text(encoding="utf-8").strip() == "999999"
 

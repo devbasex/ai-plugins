@@ -92,7 +92,7 @@ context window を埋めるときだけ、読解を worker へ出す（conductor
 conductor が判定をやり直す。
 
 **設計 Pull Request のマージは、承認を取った conductor が行う。** マージは 1 つのコマンドで済み、
-承認の印の判定（`workflow-guard.sh`）は `development-workflow` を起動した conductor のセッションで
+承認ラベルの判定（`workflow-guard.sh`）は `development-workflow` を起動した conductor のセッションで
 確実に働く。**本番の系へ届く操作は、承認を受け取った次の supervisor が行う。** 配布は `release` の
 手順そのもので 1 つのコマンドに収まらず、conductor が起動すると手順が conductor の context window
 に載る。承認は起動の指示の `承認` の項目で渡す。
@@ -285,7 +285,7 @@ supervisor と直接起動した worker を一覧し、`resets_passed` が真の
 
 ## 運用
 
-**承認の印の判定がサブエージェントの Bash に掛かるかは確かめていない。** conductor がマージする
+**承認ラベルの判定がサブエージェントの Bash に掛かるかは確かめていない。** conductor がマージする
 ため関門は保たれるが、掛からないと supervisor の進行の記録が通過工程の控えに積まれない。その場合は
 起動の指示で supervisor の最初に `development-workflow` を「判定済み」として起動させる。
 

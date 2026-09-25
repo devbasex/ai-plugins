@@ -468,8 +468,8 @@ def pr_info(pr: int, repo: str | None = None, with_parts: set[str] | None = None
 # ---------------- body-section ----------------
 #
 # 節は「見出しの行から、同じか上の段の次の見出しまで」である。**最後の節の後ろへ足した行を
-# 節に含めないため、書いた節の終わりへ印（`SECTION_END`）を置く。** 印があれば節は印で終わり、
-# 印より後ろは節の外として残す（#659: 最後の節を差し替えると、末尾へ足した 1 行が消えた）。
+# 節に含めないため、書いた節の終わりへ目印（`SECTION_END`）を置く。** 目印があれば節は目印で終わり、
+# 目印より後ろは節の外として残す（#659: 最後の節を差し替えると、末尾へ足した 1 行が消えた）。
 
 SECTION_END = "<!-- ndf:section-end -->"
 _FENCE = re.compile(r"^\s*(```|~~~)")
@@ -479,8 +479,8 @@ _HEADING = re.compile(r"^(#{1,6})[ \t]+\S")
 class _Span(NamedTuple):
     start: int      # 見出しの行
     content: int    # 見出しの次の行
-    end: int        # 節の終わり（印の行を含まない）
-    after: int      # 節の外が始まる行（印があれば印の次）
+    end: int        # 節の終わり（目印の行を含まない）
+    after: int      # 節の外が始まる行（目印があれば目印の次）
     last: bool      # 後ろに見出しが無い
 
 
@@ -521,7 +521,7 @@ def _find(lines: list[str], heading: str) -> _Span | None:
 
 
 def get_section(body: str, heading: str) -> str | None:
-    """節の中身（見出しと印を除く）。節が無ければ `None`。"""
+    """節の中身（見出しと目印を除く）。節が無ければ `None`。"""
     lines = _lines(body)
     span = _find(lines, heading)
     if span is None:
@@ -547,7 +547,7 @@ def replace_section(body: str, heading: str, content: str) -> str:
         return (head + "\n\n" if head else "") + "\n".join(block) + "\n"
     before = lines[:span.start]
     if span.after != span.end:
-        # 印の後ろは節の外である。空行も含めてそのまま残す。
+        # 目印の後ろは節の外である。空行も含めてそのまま残す。
         return "\n".join(before + block + lines[span.after:])
     after = lines[span.after:]
     while after and not after[0].strip():
@@ -560,7 +560,7 @@ def replace_section(body: str, heading: str, content: str) -> str:
 def append_line(body: str, line: str) -> str:
     """本文の末尾へ 1 行を足す。同じ行が既にあれば足さない。
 
-    **最後の節が印を持たなければ、足す前に印を置いて閉じる。** 印が無いまま足すと、足した行が
+    **最後の節が目印を持たなければ、足す前に目印を置いて閉じる。** 目印が無いまま足すと、足した行が
     最後の節の中に入り、次の節の差し替えで消える（#659）。
     """
     line = line.strip("\n")

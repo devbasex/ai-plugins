@@ -92,7 +92,7 @@ def test_a_short_record_is_excluded_from_the_summary_only(report) -> None:
     assert worker["records"] == 6, "層ごとの合計には短命な記録も含める"
 
 
-# ---------- AC29: 束ねの表と 2 つの印 ----------
+# ---------- AC29: 束ねの表と 2 つの目印 ----------
 
 def test_the_summary_holds_the_contract_columns(report) -> None:
     assert set(report["agent_summary"][0]) == {
@@ -104,7 +104,7 @@ def test_the_summary_holds_the_contract_columns(report) -> None:
 def test_the_merge_mark_is_put_only_on_supervisor_rows(report) -> None:
     # 検査の supervisor は実作業が固定費を下回る 1 件だけである
     assert group(report["agent_summary"], "supervisor", "検査")["mark"] == "束ねる候補"
-    # worker も実作業が固定費を下回るが、印は付かない（決定 16）
+    # worker も実作業が固定費を下回るが、目印は付かない（決定 16）
     fix = group(report["agent_summary"], "worker", "修正")
     assert fix["work_below_fixed"] == 1 and fix["mark"] == ""
 
@@ -181,7 +181,7 @@ def test_the_overuse_mark_compares_the_fixed_sum_with_the_work(report) -> None:
     design = rows[("設計", 1)]
     assert design["workers"] == 2 and design["fixed_sum"] == 80000
     assert design["supervisor_work"] == 30000 and design["mark"] == "worker を使いすぎ"
-    # 実作業が固定費の合計を上回る supervisor には印が付かない
+    # 実作業が固定費の合計を上回る supervisor には目印が付かない
     assert rows[("実装", 2)]["mark"] == ""
 
 

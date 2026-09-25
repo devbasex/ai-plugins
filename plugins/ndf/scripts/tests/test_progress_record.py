@@ -75,7 +75,7 @@ def test_nothing_outside_the_section_changes(fake_gh):
 
 
 def test_the_marks_already_there_are_kept(fake_gh):
-    """済んだ工程の印と記録は残る。飛ばした工程は空欄のままになる。"""
+    """済んだ工程の目印と記録は残る。飛ばした工程は空欄のままになる。"""
     fake_gh.body.write_text(
         "## 進行\n\nモード: standard / 作業ツリー: `.worktrees/x`\n\n"
         "- [x] 作業場所の用意 — 2026-09-04 06:12\n- [ ] 要求と受け入れ条件\n",

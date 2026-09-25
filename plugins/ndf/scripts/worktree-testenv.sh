@@ -467,7 +467,7 @@ do_test() {
   touch_or_warn
 
   # 実行中は reap の対象から外れるよう、ロックを握ったまま走らせる。
-  # `flock` の有無で判定が変わらないよう、印はディレクトリで持つ。
+  # `flock` の有無で判定が変わらないよう、目印はディレクトリで持つ。
   local lock rc
   lock=$(inuse_lock "$ENVIRONMENT")
   mkdir -p "$(dirname "$lock")" 2>/dev/null

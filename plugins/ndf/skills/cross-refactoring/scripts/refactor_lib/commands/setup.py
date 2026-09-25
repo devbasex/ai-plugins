@@ -352,7 +352,7 @@ def _build_initial_state(
         # `--plan-file` を明示したときだけファイルにし、空文字なら記録しない。
         "plan_mode": _plan_mode_of(args.plan_file),
         "plan_file": normalize_plan_file(args.plan_file),
-        # 編集する先のコメント。**印で引き当て直せる**ので、失っても積み増さない。
+        # 編集する先のコメント。**目印で引き当て直せる**ので、失っても積み増さない。
         "plan_comment": None,
         "phase": "propose",
         # フェーズの所要。**進行側の時計で測る**（決定 8）。
@@ -886,8 +886,8 @@ def _run_baseline_test(command: str, work: pathlib.Path, timeout: int) -> dict[s
             "先に直してから開始してください"
         )
     info(f"✅ 着手前のテスト成功: {command}（{seconds} 秒）")
-    # **所要を残す。** 危険の印と最終ゲートの全体のテストの控えを、この秒から見積もる。
-    # **HEAD も残す。** 危険の印の全体のテストが落ちたとき、元からの失敗かをこの SHA で
+    # **所要を残す。** 危険フラグと最終ゲートの全体のテストの控えを、この秒から見積もる。
+    # **HEAD も残す。** 危険フラグの全体のテストが落ちたとき、元からの失敗かをこの SHA で
     # 見分け（決定 22）、報告と改修計画に基準として出す。
     return {"command": command, "status": status, "checked_at": statefile.now(),
             "seconds": seconds, "head": git_out(str(work), ["rev-parse", "HEAD"])}

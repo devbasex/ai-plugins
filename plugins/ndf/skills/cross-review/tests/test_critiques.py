@@ -269,9 +269,9 @@ def test_the_other_agents_critique_is_kept(tmp_dir, state_mod):
     assert got == {"agy": "support", "kiro": "support"}
 
 
-# ---------- 揃ったことを確かめてから印を付ける（#549 レビュー対応） ----------
+# ---------- 揃ったことを確かめてから目印を付ける（#549 レビュー対応） ----------
 #
-# 結果ファイルが欠落・不正でも印が付くと、実行検証を持たない単独の major が
+# 結果ファイルが欠落・不正でも目印が付くと、実行検証を持たない単独の major が
 # `insufficient_evidence` へ落ち、新規 0 件のまま未検証で収束する。
 
 def _cover(tmp_dir, agents, fid="codex-r1-0"):
@@ -292,7 +292,7 @@ def test_the_marker_is_written_when_every_target_is_covered(tmp_dir, state_mod):
 @pytest.mark.parametrize("setup", ["missing", "broken", "partial"])
 def test_a_missing_or_invalid_result_leaves_the_round_unmarked(
         tmp_dir, state_mod, setup):
-    """**印を付けず、終了コード 7 で再取得へ戻す。**"""
+    """**目印を付けず、終了コード 7 で再取得へ戻す。**"""
     _write(tmp_dir, _state([_finding("codex-r1-0", "codex")]))
     if setup == "broken":
         _cover(tmp_dir, ("agy",))
@@ -310,9 +310,9 @@ def test_a_missing_or_invalid_result_leaves_the_round_unmarked(
 
 
 def test_an_unmarked_round_still_counts_every_finding(tmp_dir, state_mod):
-    """印が無いラウンドは全件を数える。**未検証のまま収束しない。**
+    """目印が無いラウンドは全件を数える。**未検証のまま収束しない。**
 
-    実行検証も支持も無い単独の `major` は `insufficient_evidence` へ落ちる。印が
+    実行検証も支持も無い単独の `major` は `insufficient_evidence` へ落ちる。目印が
     付いていれば数える 2 つから外れて新規 0 件になり、そのまま収束する。
     """
     _write(tmp_dir, _state([_finding("agy-r1-0", "agy")]))
@@ -349,14 +349,14 @@ def test_the_retry_happens_once_per_round(tmp_dir, state_mod):
 
     st = _read(tmp_dir)
     assert sorted(st["rounds"][0]["critique_relaunched"]) == ["agy", "kiro"]
-    # 揃わないまま進むが、印は付かないので全件が数えられる。
+    # 揃わないまま進むが、目印は付かないので全件が数えられる。
     assert st.get("evidence_rounds", []) == []
 
 
 def test_an_incomplete_collection_removes_an_existing_marker(tmp_dir, state_mod):
-    """**反証が揃わない取り込みは、先に付いていた印を外す**（#732 の AC13）。
+    """**反証が揃わない取り込みは、先に付いていた目印を外す**（#732 の AC13）。
 
-    印が残ると「印を付けないため、このラウンドは全件を数えます」の出力と実際の数え方が
+    目印が残ると「目印を付けないため、このラウンドは全件を数えます」の出力と実際の数え方が
     食い違い、反証が届いていない `major` が区分の絞り込みへ掛かる。
     """
     _write(tmp_dir, _state([_finding("agy-r1-0", "agy")], evidence_rounds=[1]))
@@ -374,7 +374,7 @@ def test_an_incomplete_collection_removes_an_existing_marker(tmp_dir, state_mod)
 
 
 def test_a_marker_stays_off_after_the_second_incomplete_collection(tmp_dir, state_mod):
-    """取り直した後も揃わないとき（2 度目）も印は付かない。"""
+    """取り直した後も揃わないとき（2 度目）も目印は付かない。"""
     _write(tmp_dir, _state([_finding("codex-r1-0", "codex")], evidence_rounds=[1]))
 
     collect(state_mod, expect_rc=7)
@@ -386,7 +386,7 @@ def test_a_marker_stays_off_after_the_second_incomplete_collection(tmp_dir, stat
 
 
 def test_an_incomplete_collection_keeps_other_rounds_markers(tmp_dir, state_mod):
-    """外すのはそのラウンドの番号だけである。前のラウンドの印は残る。"""
+    """外すのはそのラウンドの番号だけである。前のラウンドの目印は残る。"""
     _write(tmp_dir, _state(
         [_finding("codex-r2-0", "codex", round=2)],
         rounds=[{"round": 1, "pr": PR}, {"round": 2, "pr": PR}],
@@ -399,7 +399,7 @@ def test_an_incomplete_collection_keeps_other_rounds_markers(tmp_dir, state_mod)
 
 
 def test_a_proposer_only_round_is_marked_without_any_file(tmp_dir, state_mod):
-    """**反証の対象が無い担当は不足に数えない。** 全員が提案者なら印が付く。"""
+    """**反証の対象が無い担当は不足に数えない。** 全員が提案者なら目印が付く。"""
     _write(tmp_dir, _state([
         _finding("agy-r1-0", "agy", origin_runtimes=["agy", "kiro"])]))
 

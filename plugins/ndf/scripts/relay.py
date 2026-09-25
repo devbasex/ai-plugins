@@ -5,16 +5,16 @@
 
 | 副命令 | 役割 |
 | --- | --- |
-| `run [claude の引数 ...]` | 端末の前景に常駐し、claude を擬似端末の子として起動する。印を受けたら子へ `/exit` を入力し、プラグインを更新して次の区間を起動する。ラッパーが要らない起動は本物の claude をそのまま exec する（素通し） |
-| `stop` | 動いているラッパーすべてに停止の印を置く |
-| `mark` | Stop hook の本体。最後の応答の `ndf-next` のブロックを印 `next.json` へ写す |
+| `run [claude の引数 ...]` | 端末の前景に常駐し、claude を擬似端末の子として起動する。合図を受けたら子へ `/exit` を入力し、プラグインを更新して次の区間を起動する。ラッパーが要らない起動は本物の claude をそのまま exec する（素通し） |
+| `stop` | 動いているラッパーすべてに停止の合図を置く |
+| `mark` | Stop hook の本体。最後の応答の `ndf-next` のブロックを合図 `next.json` へ写す |
 | `install` / `uninstall` / `status` | `/ndf:install-wrapper` の本体。写しとラッパーの rc を `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/` に置き、シェルの設定へ読み込みの 1 行を足す・外す・状態を示す（#928） |
 | `startup` | SessionStart hook の本体。在る写しを今の版で置き直し（版は後退させない）、10.17.4〜10.17.6 が自動で足した囲みを 1 度だけ知らせる。シェルの設定は書かない |
-| `question open` / `question close` | `AskUserQuestion` の `PreToolUse` / `PostToolUse` hook の本体。質問の表示中の印を作る・消す（関門を越えない守り） |
+| `question open` / `question close` | `AskUserQuestion` の `PreToolUse` / `PostToolUse` hook の本体。質問の表示中の合図を作る・消す（関門を越えない守り） |
 | `is-child` | ラッパーの直接の子の claude から呼ばれていれば 0 |
 | `notice` | カットポイントの告知。1 行目に `relay` か `outside`（`is-child` と同じ判定）、2 行目に告知の 1 文を出す（#980）。外のときの 2 行目は理由（ラッパーが無い・終わっている・直接の子でない）で変わる（#1016） |
 
-**標準ライブラリだけで書く。** 印と作業ディレクトリの形（`next.json` のキーと
+**標準ライブラリだけで書く。** 合図と作業ディレクトリの形（`next.json` のキーと
 `NDF_RELAY_DIR` のファイル）は版をまたいで変えない。hook は区間ごとに新しい版で動き、
 動いているラッパーは古い版のままでありうるためである。
 
@@ -49,7 +49,7 @@ COPY_LOCK = "copy.lock"
 QUESTION_FILE = "question"
 QUESTION_LOCK = "question.lock"
 ASKED_FILE = "asked"
-# 背景の作業が残っていて Stop を止めた印の候補（区間とハッシュ）。同じ候補では 2 度止めない
+# 背景の作業が残っていて Stop を止めた合図の候補（区間とハッシュ）。同じ候補では 2 度止めない
 HELD_FILE = "mark-held.json"
 
 BLOCK_OPEN = "# >>> ndf relay >>>"
@@ -326,10 +326,10 @@ def log_mark_skipped(d: str, section: int | None, reason: str, tasks: list[dict]
 
 
 def hold_reason(tasks: list[dict]) -> str:
-    """背景の作業が残っていて印を書けないときに、Stop を止めて conductor へ渡す文。"""
+    """背景の作業が残っていて合図を書けないときに、Stop を止めて conductor へ渡す文。"""
     rows = [f"- {t['id'] or '(id 不明)'}: {t['command'] or '(コマンド不明)'}" for t in tasks]
     return "\n".join([
-        f"ndf-relay: 背景の作業が {len(tasks)} 件動いているので、ndf-next の印を書かなかった（ラッパーは切り替わらない）。",
+        f"ndf-relay: 背景の作業が {len(tasks)} 件動いているので、ndf-next の合図を書かなかった（ラッパーは切り替わらない）。",
         *rows,
         "背景の作業を止めるのは TaskStop <id>。pkill -f / pgrep -f で止めたり確かめたりしない"
         "（Claude Code が包んだコマンド行に一致しない）。止まったかは完了通知（failed / killed）で確かめる。",
@@ -351,7 +351,7 @@ def hold_once(d: str, section: int | None, block: str, active: bool) -> bool:
 
 
 def asked_after(d: str, mark_path: str) -> bool:
-    """印を書いた後に質問が出ていれば真。"""
+    """合図を書いた後に質問が出ていれば真。"""
     m = read_json(mark_path)
     asked = read_json(os.path.join(d, ASKED_FILE))
     if not isinstance(m, dict) or not isinstance(asked, dict):
@@ -370,7 +370,7 @@ def cmd_mark() -> int:
         return 0
     if not isinstance(data, dict) or not is_direct_child(d):
         return 0
-    # Stop が起きたなら質問は表示されていない（Esc で取り消した印もここで消える）
+    # Stop が起きたなら質問は表示されていない（Esc で取り消した合図もここで消える）
     remove(os.path.join(d, QUESTION_FILE))
     path = os.path.join(d, MARK_FILE)
     blocks = next_blocks(str(data.get("last_assistant_message") or ""))
@@ -387,7 +387,7 @@ def cmd_mark() -> int:
                 print(json.dumps({"decision": "block", "reason": hold_reason(tasks)}, ensure_ascii=False))
         return 0
     if not blocks:
-        # 印の後に応答が続いた（目標が未達など）。質問が出ていなければ前の印を残す
+        # 合図の後に応答が続いた（目標が未達など）。質問が出ていなければ前の合図を残す
         if asked_after(d, path):
             remove(path)
         return 0
@@ -543,7 +543,7 @@ def exit_code(status: int) -> int:
 
 
 def fallback_cwd(cwd: str) -> str:
-    """印の作業ディレクトリが消えていたら、主ディレクトリか在る最も近い親を返す。"""
+    """合図の作業ディレクトリが消えていたら、主ディレクトリか在る最も近い親を返す。"""
     if "/.worktrees/" in cwd:
         main = cwd.split("/.worktrees/", 1)[0]
         if os.path.isdir(main):
@@ -872,7 +872,7 @@ class Relay:
         self.log(**row)
         self.limit.release()
 
-    # -- 印の判定
+    # -- 合図の判定
 
     def read_mark(self):
         m = read_json(self.path(MARK_FILE))
@@ -903,15 +903,15 @@ class Relay:
             latest = max(latest, snap[1] / 1e9)
         if time.time() - latest < self.quiet:
             return None
-        # (3) 質問の表示中と、印の後に質問が出たときは書かない（G1）。(4) 印の後に利用者の入力か背景の処理の起動があれば
-        # 書かない。目標が未達の判定が無ければ、印の後の応答の再開でも書かない（G2）
+        # (3) 質問の表示中と、合図の後に質問が出たときは書かない（G1）。(4) 合図の後に利用者の入力か背景の処理の起動があれば
+        # 書かない。目標が未達の判定が無ければ、合図の後の応答の再開でも書かない（G2）
         if (os.path.exists(self.path(QUESTION_FILE)) or cancel
                 or asked_after(self.dir, self.path(MARK_FILE))):
             return None
         if not unmet and replied_after(tp, written):
             return None
         if os.path.exists(self.path(STOP_FILE)):
-            self.halt("stop-file", "停止の印がある")
+            self.halt("stop-file", "停止の合図がある")
             return None
         if not self.limit.take():
             return None
@@ -925,7 +925,7 @@ class Relay:
         return m
 
     def recheck(self, m) -> tuple[str, str] | None:
-        """質問の後に読み直した印で起動する前に、`count.lock`・上限・空回りを判定し直す。"""
+        """質問の後に読み直した合図で起動する前に、`count.lock`・上限・空回りを判定し直す。"""
         end = time.time() + 5
         while not self.limit.take():
             if time.time() >= end:
@@ -943,7 +943,7 @@ class Relay:
     # -- 切り替え
 
     def _still_due(self, m) -> bool:
-        """`/exit` を書く直前の確かめ直し。質問が無く、印が同じで、取りやめの行が無いか。"""
+        """`/exit` を書く直前の確かめ直し。質問が無く、合図が同じで、取りやめの行が無いか。"""
         now = self.read_mark()
         if (os.path.exists(self.path(QUESTION_FILE)) or now is None
                 or now.get("written_at") != m.get("written_at")
@@ -1027,7 +1027,7 @@ class Relay:
 
     def end_child(self) -> tuple[str, int, bool]:
         """`/exit` の後の待ち。(終わり方, 子の wait の状態, 待ちのあいだに質問が出たか) を返す。
-        30 秒で SIGTERM、さらに 10 秒で SIGKILL。質問の印がある間は秒を数えず、`count.lock` を放す。"""
+        30 秒で SIGTERM、さらに 10 秒で SIGKILL。質問の合図がある間は秒を数えず、`count.lock` を放す。"""
         questioned, self.saw_question = self.saw_question, False
         if self.exited:
             res, self.exited = self.exited, None
@@ -1059,13 +1059,13 @@ class Relay:
                  seconds=round(until - self.started_at, 3), ended_by=ended_by)
 
     def finalize_section(self, m, written: float) -> tuple[dict | None, int | None]:
-        """`/exit` の後の後処理。子を終わらせ、読み直した印から続ける印か終了コードを決める。
-        `event="end"` はここで 1 度だけ記録する。続けるなら (印, None)、終わるなら (None, 終了コード)。"""
+        """`/exit` の後の後処理。子を終わらせ、読み直した合図から続ける合図か終了コードを決める。
+        `event="end"` はここで 1 度だけ記録する。続けるなら (合図, None)、終わるなら (None, 終了コード)。"""
         ended_by, status, questioned = self.end_child()
         again = self.read_mark()
         requeued = questioned or again is None or again.get("written_at") != m.get("written_at")
         if requeued:
-            # 書いた /exit が質問の答えの後に働いた。答えの後の Stop が印を書き直すか消している
+            # 書いた /exit が質問の答えの後に働いた。答えの後の Stop が合図を書き直すか消している
             self.limit.release()
             if again is None:
                 self.log_end(time.time(), "no-mark")
@@ -1079,7 +1079,7 @@ class Relay:
         return m, None
 
     def prepare_next(self, m) -> tuple[str, str | None] | None:
-        """プラグインを更新し、印から次の区間の (cwd, 退避前の cwd) を決める。更新に失敗したら None。"""
+        """プラグインを更新し、合図から次の区間の (cwd, 退避前の cwd) を決める。更新に失敗したら None。"""
         version = self.update()
         if version is None:
             return None
@@ -1159,7 +1159,7 @@ def _iter_transcript_rows(transcript_path: str):
 
 
 def replied_after(transcript_path: str, written: float) -> bool:
-    """会話の記録に、印より後の `assistant` か `user` の行があれば真（G2）。"""
+    """会話の記録に、合図より後の `assistant` か `user` の行があれば真（G2）。"""
     for row in _iter_transcript_rows(transcript_path):
         if row.get("type") not in ("assistant", "user"):
             continue
@@ -1199,7 +1199,7 @@ def _starts_background(row: dict) -> bool:
 
 
 def after_mark(transcript_path: str, written: float) -> tuple[bool, bool]:
-    """印より後の会話の記録を見て (目標が未達と判定された, 切り替えを取りやめる) を返す。
+    """合図より後の会話の記録を見て (目標が未達と判定された, 切り替えを取りやめる) を返す。
     取りやめるのは、利用者の入力か背景の処理の起動の行があるとき。"""
     unmet = cancel = False
     for row in _iter_transcript_rows(transcript_path):
@@ -1921,7 +1921,7 @@ def cmd_startup() -> int:
     return 0
 
 
-# ---------------------------------------------------------------- 質問の印（関門を越えない守り）
+# ---------------------------------------------------------------- 質問の合図（関門を越えない守り）
 
 
 DENY_REASON = ("ndf-relay: ラッパーが入力を書いている最中だったため、質問を出さなかった。"
@@ -1929,7 +1929,7 @@ DENY_REASON = ("ndf-relay: ラッパーが入力を書いている最中だっ�
 
 
 def cmd_question(action: str) -> int:
-    """`open`: 質問の印を作る（ロックが取れなければ質問を拒否する）。`close`: 消す。"""
+    """`open`: 質問の合図を作る（ロックが取れなければ質問を拒否する）。`close`: 消す。"""
     started = time.time()
     try:
         if not sys.stdin.isatty():
@@ -1957,7 +1957,7 @@ def cmd_question(action: str) -> int:
             raise LockBusy()
         try:
             os.close(os.open(os.path.join(d, QUESTION_FILE), os.O_WRONLY | os.O_CREAT, 0o600))
-            # 質問が出た時刻を残す。これより前の印では切り替えない
+            # 質問が出た時刻を残す。これより前の合図では切り替えない
             write_json_atomic(os.path.join(d, ASKED_FILE), {"at": now_iso()})
         finally:
             os.close(fd)

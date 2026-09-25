@@ -95,7 +95,7 @@ def test_with_a_board_declaration_both_are_written(repo):
 
 
 def test_mode_changes_only_the_heading_line(repo):
-    """`mode` は見出し行だけを変え、チェックリストに印を足さない。"""
+    """`mode` は見出し行だけを変え、チェックリストに目印を足さない。"""
     out = run(repo, SYNC, "42", "mode", "standard")
     assert out.returncode == 0, out.stderr
     body = repo.body.read_text(encoding="utf-8")

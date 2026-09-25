@@ -5,7 +5,7 @@
 
 出すもの: ラッパーの判定と理由・この区間の始まり（自動か手か）・前の区間の終わり（ended_by）・
 プラグインの版（区間の起動時・導入済み・写し）・
-前の区間と今の区間で印を書かなかった Stop（mark_skipped: 背景の作業が残った・ブロックが 2 つ以上）。人が読む数行の後に step_result の 1 行の JSON。
+前の区間と今の区間で合図を書かなかった Stop（mark_skipped: 背景の作業が残った・ブロックが 2 つ以上）。人が読む数行の後に step_result の 1 行の JSON。
 ラッパーの外でも exit 0 で終わる。
 """
 from __future__ import annotations
@@ -77,7 +77,7 @@ def skipped_line(r: dict) -> str:
     what = {"background": "背景の作業が残った", "blocks": "ndf-next のブロックが 2 つ以上"}.get(
         r.get("reason"), str(r.get("reason")))
     tasks = "、".join(f"{t.get('id') or '?'}（{t.get('command') or '?'}）" for t in r.get("tasks") or [])
-    return (f"印を書かなかった Stop: 区間 {r.get('section')}・{r.get('at')}・{what}"
+    return (f"合図を書かなかった Stop: 区間 {r.get('section')}・{r.get('at')}・{what}"
             + (f": {tasks}" if tasks else "") + ("・Stop を止めて知らせた" if r.get("held") else ""))
 
 
@@ -109,7 +109,7 @@ def main() -> int:
     end, end_dir = previous_end(d, rows)
     started_by = None
     if start:
-        started_by = "自動（印から）" if start.get("from_session") else "手（利用者の起動）"
+        started_by = "自動（合図から）" if start.get("from_session") else "手（利用者の起動）"
     vers = {"区間の起動時": (start or {}).get("plugin_version"), "導入済み": installed_version(),
             "写し": copy_version()}
     known = {v for v in vers.values() if v}

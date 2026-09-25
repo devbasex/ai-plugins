@@ -148,7 +148,7 @@ def add_init_parser(sub: argparse._SubParsersAction) -> None:
                            "公開のたびに同じコメントを編集する。"
                            "空文字を渡すと記録しない")
     init.add_argument("--baseline-test", required=True,
-                      help="着手前・危険の印が立ったとき・最終ゲートで実行する全体のテスト。"
+                      help="着手前・危険フラグが立ったとき・最終ゲートで実行する全体のテスト。"
                            "振る舞い不変を示す手段が無い書き換えは構造改善ではないため必須")
     # **項目の検証は範囲テストで行う**（#880 / #933 の AC10b）。対象の語を計画の
     # `test_targets` に差し替えて組み立てる元になり、組み立てられない項目はそのまま使う。
@@ -175,7 +175,7 @@ def add_id_commands(sub: argparse._SubParsersAction) -> None:
          "計画の取り込み・等級と同じ変更か（Jev）・見積り・件数・締め切り"),
         ("merge-tests", cmd_merge_tests, "テストの追加の取り込み（test_failed / not_done）"),
         ("merge-implement", cmd_merge_implement, "実装の取り込み（1 項目 = 1 コミット / not_done）"),
-        ("verify", cmd_verify, "項目ごとの範囲テストと危険の印。VERIFY=done|fix"),
+        ("verify", cmd_verify, "項目ごとの範囲テストと危険フラグ。VERIFY=done|fix"),
         ("merge-fix", cmd_merge_fix, "修正の取り込み"),
         ("final-gate", cmd_final_gate,
          "最終ゲート。--ci-check があれば継続的統合、無ければ全体のテスト"),

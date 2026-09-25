@@ -94,7 +94,7 @@ def test_the_exempt_stage_is_a_row_of_the_workflow_table() -> None:
     ("WF_APPROVAL_LABEL", "design-approved"),
 ])
 def test_the_design_pull_request_marks_do_not_move(name: str, value: str) -> None:
-    """工程名とブランチ名は別の名前の集まりである。印は改名の巻き添えにしない。"""
+    """工程名とブランチ名は別の名前の集まりである。目印は改名の巻き添えにしない。"""
     assert scalar(name) == value
 
 

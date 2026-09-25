@@ -201,7 +201,7 @@ timeout 3600 bash -c 'until [ -e "$1.done" ]; do sleep 5; done' _ "<置き場所
 一致しない。確かめる側の `grep -v pgrep` は、`pgrep` を含む待ちのコマンド行ごと結果から除く）。
 止まったかは完了通知（`failed` / `killed`）で確かめる。
 
-背景の作業が残っていると、ラッパーの Stop hook（`relay.py mark`）は `ndf-next` の印を書かない。そのときは
+背景の作業が残っていると、ラッパーの Stop hook（`relay.py mark`）は `ndf-next` の合図を書かない。そのときは
 Stop を 1 度だけ止め、動いている作業を並べて知らせる。supervisor や `supervise.py queue` のように
 止めてはいけない作業なら、止めずに終わりを待ってから `ndf-next` を出し直す。
 

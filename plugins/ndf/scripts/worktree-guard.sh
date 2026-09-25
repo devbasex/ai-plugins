@@ -79,7 +79,7 @@ load_state() {
   MAIN_DIR=$(jq -r '.main_dir // empty' "$STATE_FILE" 2>/dev/null)
   [ -n "$MAIN_DIR" ] || return 1
   # 宣言ファイルは後から作られる（`worktree-setup.sh init`）。控えたままにすると、
-  # 作った直後のセッションで案内が出ない。印が変わっていたら作り直す。
+  # 作った直後のセッションで案内が出ない。目印が変わっていたら作り直す。
   cached_stamp=$(jq -r '.declaration_stamp // ""' "$STATE_FILE" 2>/dev/null)
   [ "$cached_stamp" = "$(wt_declaration_stamp "$MAIN_DIR")" ] || return 1
   IN_WORKTREE=$(jq -r 'if .in_worktree then 0 else 1 end' "$STATE_FILE" 2>/dev/null)

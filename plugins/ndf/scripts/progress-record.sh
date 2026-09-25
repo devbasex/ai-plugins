@@ -77,7 +77,7 @@ else
   gh issue view "$ISSUE" --json body -q .body > "$BODY_FILE" 2>/dev/null || exit 0
 fi
 
-# 節の中身を組み立てる。**印を付けるのは、この呼び出しが記録する工程までである。**
+# 節の中身を組み立てる。**目印を付けるのは、この呼び出しが記録する工程までである。**
 # 一覧の残りは空欄のまま残し、飛ばした工程がチェックの穴として見えるようにする。
 STAMP=$(date '+%Y-%m-%d %H:%M')
 export PJ_STAGES SECTION_HEADING STAGE STAMP MODE PACE WORKTREE PLAN NOTE
@@ -126,7 +126,7 @@ else:
 # 付随情報（`--note`）を新しく渡したときだけ、その分を足す。
 note = os.environ.get("NOTE", "")
 if stage == "-":
-    # 見出し行だけを更新する。チェックリストには印を足さない。
+    # 見出し行だけを更新する。チェックリストには目印を足さない。
     pass
 elif stage in done and done[stage]:
     if note and note not in done[stage]:

@@ -40,7 +40,7 @@
     "pending_marker": {
       "type": "string",
       "minLength": 1,
-      "description": "版が決まる前の段落の印（例: の次の版で）。空文字列は宣言の不正"
+      "description": "版が決まる前の段落の目印（例: の次の版で）。空文字列は宣言の不正"
     },
     "budget": {
       "type": "object",

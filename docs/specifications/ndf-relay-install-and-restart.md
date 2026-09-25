@@ -5,7 +5,7 @@
 `/exit` が質問（`AskUserQuestion`）の答えにならない守りを入れ、2 つ目以降の区間へ最初の区間の
 起動の方針の引数を引き継ぐ。Claude Code だけが対象である（#928・#936）。
 
-**ラッパーの本体の契約（素通し・静止・上限・空回り・印・記録）は
+**ラッパーの本体の契約（素通し・静止・上限・空回り・合図・記録）は
 [ndf-relay-segment-restart.md](ndf-relay-segment-restart.md) が持つ。** この文書は、導入・再起動・
 守り・引数の引継ぎの契約と、それぞれをそう決めた理由を残す。
 
@@ -52,11 +52,11 @@
 | 旧い写し | `${XDG_DATA_HOME:-~/.local/share}/ndf/relay.py`。10.17.4〜10.17.6 が置いた写しで、10.17.4〜10.17.6 の囲みの alias が指す |
 | 状態の親 | `${XDG_STATE_HOME:-~/.local/state}/ndf/relay/`。記録（`rc-added` など）と作業ディレクトリを持つ |
 | 再開用のコマンド | 再起動した claude へ最初の入力として渡す中身（`ndf-next` のブロックの中身と同じ扱い） |
-| 質問の印 | 作業ディレクトリの `question`。質問が表示されているあいだ在る |
+| 質問の合図 | 作業ディレクトリの `question`。質問が表示されているあいだ在る |
 | 送り込み | ラッパーが子の擬似端末へ、`/exit` 以外の入力を書くこと。実装は #931 |
 | 起動の方針の引数 | 最初の区間の `claude` の引数のうち、会話ごと・区間ごとに変わらないもの（`--dangerously-skip-permissions`・`--model` など） |
 
-区間・カットポイント・印・静止・素通し・落ちるは [ndf-relay-segment-restart.md](ndf-relay-segment-restart.md) の用語のとおり。
+区間・カットポイント・合図・静止・素通し・落ちるは [ndf-relay-segment-restart.md](ndf-relay-segment-restart.md) の用語のとおり。
 
 ## 対象範囲
 
@@ -67,7 +67,7 @@
 | 写しとラッパーの rc の置き場所（Claude Code の設定の親）と、devbase の読み込み先のファイル | bash / zsh 以外のシェル（fish など）への導入 |
 | `/ndf:restart` と再開用のコマンドの作り方 | 既存の `claude` の alias / 関数を上書きすること |
 | 関門を越えない守り（G1〜G3）を既存の `/exit` に入れること | 既存の定義の判定を、シェルの設定から読み込まれる別ファイルへ広げること |
-| 2 つ目以降の区間への起動の方針の引数の引継ぎ（#936） | 静止の秒数・上限・空回り・素通し・`mark` の印の判定の変更 |
+| 2 つ目以降の区間への起動の方針の引数の引継ぎ（#936） | 静止の秒数・上限・空回り・素通し・`mark` の合図の判定の変更 |
 
 ## 決定と理由
 
@@ -86,7 +86,7 @@
 | パスは `install` の時点で決め、`${CLAUDE_CONFIG_DIR:-...}` をファイルに残さない | 残すと、隔離した `CLAUDE_CONFIG_DIR` で `claude` を打ったときに写しを見失う |
 | 旧い写しと状態の親は動かさない | 旧い写しを動かすと 10.17.4〜10.17.6 の囲みの alias が壊れる。状態の親の記録はこのコンテナの `~/.bashrc` のパスを持つので、シェルの設定と同じく作り直しで消える場所に置けば食い違わない |
 | devbase では、devbase が読み込む汎用のディレクトリへ `ndf-relay.sh` を置く（devbasex/devbase#253 で依頼） | devbase の `~/.bashrc` はイメージの層にあり、ndf の側だけでは作り直しで消えない読み込みを置けない。devbase が ndf の内部のパスを知らずに済み、ほかのツールも同じ場所を使える。場所は環境変数 `DEVBASE_SHELLRC_DIR` で見つける（対話でないシェルからも見える） |
-| devbase 以外（変数が無い）では `install` がシェルの設定へ囲みを足す。作り直しのたびの再導入の案内は採らない | 明示の操作なので案内だけにしない。再導入の案内は作り直すたびに打ち直しを求め、`uninstall` した利用者にも「外した」印が消えて出る |
+| devbase 以外（変数が無い）では `install` がシェルの設定へ囲みを足す。作り直しのたびの再導入の案内は採らない | 明示の操作なので案内だけにしない。再導入の案内は作り直すたびに打ち直しを求め、`uninstall` した利用者にも「外した」合図が消えて出る |
 | `uninstall` は写しとラッパーの rc も消す | 関数は呼んだ時点で写しを見るので、共有する別のコンテナの `claude` を壊さない。残すと `startup` が使われない写しを置き直し続ける |
 | `uninstall` は `$SHELL` に依らず bash と zsh の両方の設定を見る | 10.17.4〜10.17.6 は起動した時点の `$SHELL` で足した。囲みの行は固有なので、両方を見ても関係の無い行を外さない |
 | 写しの横に版を書き、新しい版の写しを古い版の `startup` は置き直さない | 写しの親はコンテナの間で共有される。中身の違いだけで置き直すと、古い版のコンテナが守り（G1〜G3）の無い写しへ戻す。版は `plugin.json` が既に持つので、`relay.py` に版の定数を持たせない |
@@ -99,11 +99,11 @@
 | ラッパーの外の `/ndf:restart` は、シェルの 1 行（`claude "..."`）ではなく貼り付ける中身を示す | 再開用のコマンドは引用符・`$(...)`・改行を含みうる。シェルへ貼ると引用が壊れて別のコマンドが動きうる |
 | 再開用のコマンドに承認・同意・判断の結果を書かない | 次の区間の claude はそれを人の入力として読むため、関門を越える経路になる。承認は課題の本文と Pull Request から次の区間が読み直す |
 | 関門を越えない守り（G1〜G3）は、送り込みを待たずに既存の `/exit` に入れる | 質問の表示中にラッパーが書いた `\r` が選択肢 1 を決めると実測で分かった。10.17.4〜10.17.6 のカットポイントの `/exit` にも経路があり、`/ndf:restart` はそれを利用者が打てる形で増やす |
-| 質問は画面の文言で読まず、`PreToolUse` の hook の印と会話の記録の行で見る | 文言は Claude Code の版で変わる（#895 と同じ理由）。`Notification` は表示から約 6 秒後で、2 秒で答えると来ない。`PreToolUse` は表示と同時に来る |
+| 質問は画面の文言で読まず、`PreToolUse` の hook の合図と会話の記録の行で見る | 文言は Claude Code の版で変わる（#895 と同じ理由）。`Notification` は表示から約 6 秒後で、2 秒で答えると来ない。`PreToolUse` は表示と同時に来る |
 | `/exit` と改行を 1 回の write にする。`NDF_RELAY_EXIT_GAP` を廃止する | 1 秒あけると、あいだに出た質問で `/exit` は捨てられ `\r` が選択肢を決める。短い入力は 1 回でも間ありでも同じに働いた |
 | 確かめ直しと write を、質問の hook と同じロック（`question.lock`）で排他にする | 質問は `PreToolUse` の hook が終わるまで描かれないので、hook に同じロックを取らせれば書き終えるまで質問の始まりを止められる。書いた後に検出する形は取り消せない |
-| ロックが取れない質問の hook は、印を作らず質問を拒否する | 印を作って描かせると、ロックを持つラッパーの `/exit\r` が質問に届く。拒否ならモデルが呼び直すだけで関門を越えない |
-| 質問の印は `mark`（Stop）でも消す | `Esc` で取り消すと `PostToolUse` が来ず印が残り、切り替えが永久に止まる。Stop が起きたなら質問は表示されていない |
+| ロックが取れない質問の hook は、合図を作らず質問を拒否する | 合図を作って描かせると、ロックを持つラッパーの `/exit\r` が質問に届く。拒否ならモデルが呼び直すだけで関門を越えない |
+| 質問の合図は `mark`（Stop）でも消す | `Esc` で取り消すと `PostToolUse` が来ず合図が残り、切り替えが永久に止まる。Stop が起きたなら質問は表示されていない |
 | 2 つ目以降の区間へ、最初の区間の引数から会話ごと・区間ごとのものを除いた残りを引き継ぐ（#936） | 全部引き継ぐと `--resume` や最初のプロンプトで前の会話へ戻る。何も引き継がないと devbase の alias の `--dangerously-skip-permissions` が落ちる。対話シェルに alias を聞く案は、利用者の rc が走り手で付けた引数を拾えない |
 | 知らない選択肢も値を取る規則のまま引き継ぐ | 落とすより付けるほうが起動の方針を失わない |
 | 送り込みは実測と不変条件までをこの文書で決め、実装は #931 に分ける | 許可の一覧・判定・モデルからの要求の形を持ち、導入の配布を送り込みのレビューで待たせない |
@@ -117,8 +117,8 @@
 - **`install` / `uninstall` は囲みの外を 1 バイトも変えず、書く前に `<ファイル>.ndf-bak-<UTC の %Y%m%dT%H%M%SZ>`
   へバックアップを取る。** ロックが取れなければ何も変えない
 - **共有の写しを、古い版の `startup` が置き直さない**
-- **ラッパーは、質問の印がある間・印の後に応答の行がある間は、子の端末へ何も書かない**
-- **`question open` はラッパーの直接の子と判定した後に失敗したら、質問を拒否する**（印の無いまま質問を
+- **ラッパーは、質問の合図がある間・合図の後に応答の行がある間は、子の端末へ何も書かない**
+- **`question open` はラッパーの直接の子と判定した後に失敗したら、質問を拒否する**（合図の無いまま質問を
   描かせない）。どの場合も終了コード 0 で終わる
 - **動いているラッパーは入れ替えない。** 守りと引数の引継ぎが効くのは、ラッパーを起動し直した後（`/exit` で
   ラッパーを抜けて `claude` と打ち直した後）からである
@@ -280,14 +280,14 @@ sh -c 'R="${XDG_STATE_HOME:-$HOME/.local/state}/ndf/relay/rc-added"; C="${XDG_DA
 
 ### 関門を越えない守り
 
-**質問の印 `question`**（作業ディレクトリのファイル。`next.json` の形は変えない）:
+**質問の合図 `question`**（作業ディレクトリのファイル。`next.json` の形は変えない）:
 
 | 書く側 | 条件 | すること |
 | --- | --- | --- |
 | `question open`（`PreToolUse`・`AskUserQuestion`） | `NDF_RELAY_DIR` があり、ラッパーが動いていて、hook の親をたどって最初に当たる claude が `child.pid` と一致する | `question.lock` を起動から `NDF_RELAY_QUESTION_WAIT` 秒（既定 3）まで待って取り、`0600` の空のファイルを作ってから放す。取れない・作れない・例外なら質問を拒否する |
-| `question close`（`PostToolUse`・`AskUserQuestion`） | 同じ | 消す。失敗しても何も出さない（印が残るのは安全な側） |
-| `mark`（Stop） | 直接の子の判定を通った | 印の判定の前に消す |
-| `run` | 区間を起動する | 印（`next.json`）と一緒に消す |
+| `question close`（`PostToolUse`・`AskUserQuestion`） | 同じ | 消す。失敗しても何も出さない（合図が残るのは安全な側） |
+| `mark`（Stop） | 直接の子の判定を通った | 合図の判定の前に消す |
+| `run` | 区間を起動する | 合図（`next.json`）と一緒に消す |
 
 拒否は標準出力の `{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
 "permissionDecisionReason": "ndf-relay: ラッパーが入力を書いている最中だったため、質問を出さなかった。利用者へ返さずに、同じ AskUserQuestion を今すぐもう一度呼ぶ"}}`
@@ -298,34 +298,34 @@ sh -c 'R="${XDG_STATE_HOME:-$HOME/.local/state}/ndf/relay/rc-added"; C="${XDG_DA
 sh -c '[ -n "${NDF_RELAY_DIR:-}" ] || exit 0; ROOT="${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}"; [ -n "$ROOT" ] || exit 0; exec python3 "$ROOT/scripts/relay.py" question open'
 ```
 
-**hook の `timeout` で打ち切られると、拒否も印も残らずに質問が描かれる。** そのため `question open` は
-自分で期限を持ち（待ち 3 秒と印の作成 1 秒以内）、`timeout` 10 秒との差を 6 秒持つ。
+**hook の `timeout` で打ち切られると、拒否も合図も残らずに質問が描かれる。** そのため `question open` は
+自分で期限を持ち（待ち 3 秒と合図の作成 1 秒以内）、`timeout` 10 秒との差を 6 秒持つ。
 
 **静止を待つ条件に 2 つを足す**（本体の (1)〜(3) の後）。
 
 | # | 条件 | 外れたとき |
 | ---: | --- | --- |
 | (4) | 作業ディレクトリに `question` が無い（G1） | 待ち続ける |
-| (5) | 印の `transcript_path` に、`timestamp` が印の `written_at` より後で `type` が `assistant` か `user` の行が無い（G2）。`attachment`（目標の判定）と `system` の行は数えない | 待ち続ける。次の Stop が印を書き直すか消す |
+| (5) | 合図の `transcript_path` に、`timestamp` が合図の `written_at` より後で `type` が `assistant` か `user` の行が無い（G2）。`attachment`（目標の判定）と `system` の行は数えない | 待ち続ける。次の Stop が合図を書き直すか消す |
 
-**終わらせる手順（G3）。** (1)〜(5) がそろい、停止の印・`count.lock`・1 日の上限・空回りを通った後:
+**終わらせる手順（G3）。** (1)〜(5) がそろい、停止の合図・`count.lock`・1 日の上限・空回りを通った後:
 
 | 順 | ラッパーがすること |
 | ---: | --- |
-| 1 | そろった時点の印の `written_at` と会話の記録の大きさ・更新時刻を控える（記録を全行読むのはこの前だけ） |
+| 1 | そろった時点の合図の `written_at` と会話の記録の大きさ・更新時刻を控える（記録を全行読むのはこの前だけ） |
 | 2 | `question.lock` を待たずに試す。取れなければ `count.lock` を放して静止を待つへ戻る |
-| 3 | ロックの中で、`question` が無いこと・印の `written_at`・記録の大きさと更新時刻が 1 の控えと同じことだけを確かめる。外れたら両方のロックを放して戻る |
+| 3 | ロックの中で、`question` が無いこと・合図の `written_at`・記録の大きさと更新時刻が 1 の控えと同じことだけを確かめる。外れたら両方のロックを放して戻る |
 | 4 | `/exit\r` を **1 回の write** で書く |
 | 5 | `NDF_RELAY_EXIT_HOLD` 秒（既定 1）入出力を流してから放す |
 
 **書いた後に `question` が現れたら、`count.lock` を放し、`question` が消えるまで `NDF_RELAY_EXIT_WAIT` の
 秒を数えない。** 書いた `/exit` が応答の待ち行列に入り、質問の答えの後に働く場合に、質問を SIGTERM で
-消さない。この経路で子が終わったら印を読み直す。
+消さない。この経路で子が終わったら合図を読み直す。
 
-| 読み直した印 | すること |
+| 読み直した合図 | すること |
 | --- | --- |
 | 無い | 次の区間を起動しない。`end`（`no-mark`）を書き、子の終了コードで終わる |
-| ある | `count.lock` を 5 秒まで待って取り直し、1 日の上限と空回りを判定し直してから、読み直した印の `command` と `cwd` で起動する。取れなければ `count-lock`、上限・空回りならその理由で `stop` の行を書き、`次の区間を起動できない（<理由>）。次のコマンド:` と中身を出して終了コード 2 |
+| ある | `count.lock` を 5 秒まで待って取り直し、1 日の上限と空回りを判定し直してから、読み直した合図の `command` と `cwd` で起動する。取れなければ `count-lock`、上限・空回りならその理由で `stop` の行を書き、`次の区間を起動できない（<理由>）。次のコマンド:` と中身を出して終了コード 2 |
 
 ### 起動の方針の引数の引継ぎ（#936）
 
@@ -368,8 +368,8 @@ devbase の `alias claude='claude --dangerously-skip-permissions'` の後にラ�
 
 | # | 不変条件 | 実現 |
 | --- | --- | --- |
-| G1 | 質問の表示中は、子の端末へ何も書かない | 質問の印（上の「関門を越えない守り」） |
-| G2 | 印の後に応答が再開していたら、その印では書かない | 静止の条件 (5) |
+| G1 | 質問の表示中は、子の端末へ何も書かない | 質問の合図（上の「関門を越えない守り」） |
+| G2 | 合図の後に応答が再開していたら、その合図では書かない | 静止の条件 (5) |
 | G3 | G1・G2 の確かめ直しと write を、質問の始まりと排他にする | `question.lock`・1 回の write・1 秒の保持 |
 | G4 | 人の入力を装える自由な文を送らない（自由な文は人の入力と区別されない） | 送り込みは許可の一覧のスラッシュコマンドだけ。改行・制御文字を含む中身は捨てる（#931） |
 | G5 | 対話の UI を開くコマンドを送らない（閉じる `Esc` は質問も取り消す） | `/cost`・`/status`・`/plugin`・`/model` を許可の一覧に入れない（#931） |
@@ -425,9 +425,9 @@ G1〜G3 はこの課題で既存の `/exit` に入れた。G4〜G7 は送り込�
 | 自動の囲みの知らせが 1 度だけ、同時の 2 起動でも 1 つで、devbase の案内が付き、囲みが無い・明示に触れたパスでは出ないこと | `test_startup_notices_auto_block_once`・`test_startup_notice_*`・`test_startup_no_notice` |
 | 在る写しと旧い写しだけを置き直し、版を後退させず、新旧の同時の `startup` で新しい版が残り、明示の `install` は戻せ、`uninstall` の後は写しを作らないこと | `test_startup_refreshes_existing_copies_only`・`test_startup_never_downgrades`・`test_startup_concurrent_new_wins`・`test_explicit_install_can_downgrade`・`test_startup_after_uninstall_creates_nothing` |
 | 版の順序（`-dev.2` < `-dev.10`、`-dev` < `-rc` < 正式版） | `test_version_key` |
-| 質問の印がある間・印の後に `assistant` の行がある間は `/exit` が届かず、`attachment` の行では止まらないこと。`mark` が印を消すこと | `test_guard_question_blocks_exit`・`test_guard_reply_after_mark_blocks`・`test_guard_attachment_row_does_not_block`・`test_guard_mark_clears_question` |
-| 届いたバイトが `/exit\r` の 1 回で、ロックの保持中に `question open` が待ち、放された後に印を作ること | `test_guard_single_write`・`test_guard_lock_held_then_question_appears`・`test_guard_question_open_waits_for_relay_lock` |
-| `/exit` の後の質問のあいだ SIGTERM までの秒を数えず、印が無ければ起動せず、書き直された印なら新しい中身で起動すること | `test_guard_exit_queued_behind_question`・`test_guard_exit_queued_then_no_mark`・`test_guard_exit_wait_resumes_after_question` |
+| 質問の合図がある間・合図の後に `assistant` の行がある間は `/exit` が届かず、`attachment` の行では止まらないこと。`mark` が合図を消すこと | `test_guard_question_blocks_exit`・`test_guard_reply_after_mark_blocks`・`test_guard_attachment_row_does_not_block`・`test_guard_mark_clears_question` |
+| 届いたバイトが `/exit\r` の 1 回で、ロックの保持中に `question open` が待ち、放された後に合図を作ること | `test_guard_single_write`・`test_guard_lock_held_then_question_appears`・`test_guard_question_open_waits_for_relay_lock` |
+| `/exit` の後の質問のあいだ SIGTERM までの秒を数えず、合図が無ければ起動せず、書き直された合図なら新しい中身で起動すること | `test_guard_exit_queued_behind_question`・`test_guard_exit_queued_then_no_mark`・`test_guard_exit_wait_resumes_after_question` |
 | `question` がラッパーの外で何もせず、ロックの保持・書けないときに拒否し、`close` が消すこと | `test_question_*` |
 | 引数の選び分けと、alias → 関数 → ラッパーを通した 2 つ目の区間の引数 | `test_carried_args`・`test_run_carries_policy_args_through_shell_function` |
 | Skill の配布と frontmatter（`install-wrapper` に `disable-model-invocation: true`、`restart` に無い。`claude-skills.txt` にだけ載る） | `python3 scripts/check-skill-frontmatter.py` と manifests |

@@ -202,7 +202,7 @@ SKILL.md はそこへ渡す。本文の自由文が決定を言い換えてい�
 [stage-completeness.md](../../plugins/ndf/skills/development-workflow/references/stage-completeness.md)
 にある。**案内が出ないことは、工程を通っていることの裏付けにはならない。**
 
-**tool 実行前の判定がコマンドの本文を読む読み手は 3 つで、読み方は共通である。** 進行の記録（通過工程の控えを積む）・マージの判定（設計 Pull Request のマージを承認の印に縛る）・Pull Request の作成（この gate）である。
+**tool 実行前の判定がコマンドの本文を読む読み手は 3 つで、読み方は共通である。** 進行の記録（通過工程の控えを積む）・マージの判定（設計 Pull Request のマージを承認ラベルに縛る）・Pull Request の作成（この gate）である。
 `wf_split`（`development-workflow/scripts/lib/workflow-common.sh`）が引用符を解いて語に割り、
 引用の外の制御演算子を空の語（区切り）として出す。
 

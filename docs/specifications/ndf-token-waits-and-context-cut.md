@@ -72,7 +72,7 @@ graph TB
     TG["token-guard.sh"]
   end
   subgraph ST["状態"]
-    RS["連続 Read の控えと案内の印<br/>guards/"]
+    RS["連続 Read の控えと案内の目印<br/>guards/"]
     TR["会話の記録<br/>transcript_path"]
     SL["token-guard-stages.txt"]
   end
@@ -157,7 +157,7 @@ graph TB
 **conductor が工程へ入る起動で、会話の文脈量が上限（既定 200,000）を超えていると、1 度拒否
 して引き継ぎの 1 行を示す。** 工程へ入る起動は経路によって違うツールに現れるため、両方を見る。
 
-| 経路 | 見る入力 | 印の鍵 |
+| 経路 | 見る入力 | 目印の鍵 |
 | --- | --- | --- |
 | 対話 | `Skill`。名前（`ndf:` を外したもの）が `token-guard-stages.txt` にある | `skill`・`args` |
 | 3 層 | `Agent`（旧名 `Task`）。`description` の `:` の前がフェーズの語彙（`設計` / `実装` / `検査` / `取り込み` / `仕上げ`） | `description` |
@@ -169,8 +169,8 @@ graph TB
   途中で途切れる
 - **工程でない Skill と、先頭語が作業の種類（`調査` など）の Agent は見ない。** 工程の途中で
   起動されるためカットポイントにならない
-- **拒否の後、次に工程へ入る起動が同じ鍵なら 1 度だけ通し、印を消す。** 間に他のツールや
-  工程でない Skill・Agent が挟まっても印は残る。次の起動が別の鍵なら、上限を超えていれば印を
+- **拒否の後、次に工程へ入る起動が同じ鍵なら 1 度だけ通し、目印を消す。** 間に他のツールや
+  工程でない Skill・Agent が挟まっても目印は残る。次の起動が別の鍵なら、上限を超えていれば目印を
   置き換えて再び拒否する。これでカットポイントごとに 1 度ずつ止まり、「このまま続ける」と決めた
   利用者は同じ起動をもう一度行えば続けられる。毎回拒否すると同じ工程をやり直せず、会話ごとに
   1 度にすると以後のカットポイントで止まらない。案内だけを足す形（`additionalContext`）は、規定が読み
@@ -301,7 +301,7 @@ worker の 2 回目の通知は、写しを読んだ後に届いても読み直�
 | ファイル | 中身 |
 | --- | --- |
 | `read-<session_id>.json` | 連続 Read の控え（下の表） |
-| `context-<session_id>.json` | 文脈量の案内の印。`{"key": "<鍵>"}`。鍵は Skill なら `skill\t<名前>\t<args>`、Agent なら `agent\t<description>` |
+| `context-<session_id>.json` | 文脈量の案内の目印。`{"key": "<鍵>"}`。鍵は Skill なら `skill\t<名前>\t<args>`、Agent なら `agent\t<description>` |
 | `<session_id>.lock` | session ごとのロック |
 
 連続 Read の控え:
@@ -315,8 +315,8 @@ worker の 2 回目の通知は、写しを読んだ後に届いても読み直�
 | `count` | 整数 | `key`・`size`・`mtime`・`inode` が変わらないまま続いた Read の回数 |
 
 - **書き込みは置き換えで行う**（一時ファイルへ書いて `mv`）。途中で落ちても壊れた JSON を残さない
-- **控えと印の読み・判定・書き込みは session ごとのロックの中で行う。** 同じ session の hook が
-  並列に走ると、置き換えだけでは `count` の更新や印が失われる。ロックは `lock-common.sh` の
+- **控えと目印の読み・判定・書き込みは session ごとのロックの中で行う。** 同じ session の hook が
+  並列に走ると、置き換えだけでは `count` の更新や目印が失われる。ロックは `lock-common.sh` の
   `ndf_lock_acquire <dir> 1` / `ndf_lock_release` で取り、1 秒で取れなければ判定せず通す。
   sleep の判定はロックを取らない
 - **7 日より古い控えは、書き込みのついでに消す。** 会話が終わった合図を hook は受け取らない
@@ -343,7 +343,7 @@ worker の 2 回目の通知は、写しを読んだ後に届いても読み直�
 | `tool_input.file_path` / `offset` / `limit` | 連続 Read | 通す |
 | `tool_input.skill` / `tool_input.args` | 文脈量（対話の経路） | 通す |
 | `tool_input.description` | 文脈量（3 層の経路） | 通す |
-| `session_id` | 連続 Read の控え・案内の印 | 通す |
+| `session_id` | 連続 Read の控え・案内の目印 | 通す |
 | `transcript_path` | 文脈量 | 通す |
 | `agent_id` | 文脈量（付いていれば見ない） | conductor とみなす |
 

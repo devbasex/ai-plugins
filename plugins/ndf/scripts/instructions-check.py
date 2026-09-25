@@ -14,7 +14,7 @@
 数える「読み込みの量」「指示の数」だけである。宣言を書くまで使えない検査は、入れた利用者が
 最初に外す。
 
-**この検査はどのファイルも書き換えず、課題も立てない。** 指摘へ扱いの印（`直す` / `起票` /
+**この検査はどのファイルも書き換えず、課題も立てない。** 指摘へ扱いの目印（`直す` / `起票` /
 `報告`）を載せるまでで、書き込みと投稿は呼び出し側が行う。
 
     python3 instructions-check.py --root .
@@ -82,7 +82,7 @@ VERSION_AT_START = re.compile(
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
 FENCE_RE = re.compile(r"^\s*(```|~~~)")
 BULLET_RE = re.compile(r"^\s*(?:[-*+]\s+|\d+\.\s+)")
-# 段落の書き出しから読み飛ばす印（箇条書きの記号と強調）。
+# 段落の書き出しから読み飛ばす目印（箇条書きの記号と強調）。
 LEAD_RE = re.compile(r"^\s*(?:[-*+]\s+|\d+\.\s+)?[*_~]*")
 # 即時読み込みの参照。**`@` の直前が行頭・空白・`*`・`_`・`~` のものだけを参照とする**
 # （Claude Code 2.1.274 で 8 通りを実測した範囲）。
@@ -857,7 +857,7 @@ def _inline_pending_findings(target: Target, text: str, latest: str, marker: str
             findings.append(Finding(
                 "released-version-paragraph",
                 f"段落の途中の「{version} {marker}」が指す版は既に出ている（最新は {latest}）。"
-                "変更が入った版へ書き換えるか、印を最新の版へ進める",
+                "変更が入った版へ書き換えるか、目印を最新の版へ進める",
                 target.scope, display_path(target), number, target.source))
             break
     return findings

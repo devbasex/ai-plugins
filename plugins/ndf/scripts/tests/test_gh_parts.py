@@ -285,7 +285,7 @@ def test_appended_line_survives_replacing_the_last_section():
 
 
 def test_append_before_any_marker_closes_the_last_section_first():
-    """節を書いたことの無い本文（印が無い）へ足しても、次の差し替えで消えない。"""
+    """節を書いたことの無い本文（目印が無い）へ足しても、次の差し替えで消えない。"""
     body = "## 何をするか\n\n本文\n\n" + PROGRESS
     url = "振り返り: https://example.com/1"
 

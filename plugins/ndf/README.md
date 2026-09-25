@@ -228,8 +228,8 @@ Claude Code の SessionStart hook（`hooks/claude.json`）は上記に加えて�
 
 Claude Code の Stop hook は終了時に Slack 通知スクリプトを実行します。通知に必要な環境変数が
 未設定の場合は送信せず終了します。ラッパーの下（`NDF_RELAY_DIR` がある）では、最後の応答の
-`ndf-next` のブロックをラッパーの印へ写します（`relay.py mark`）。`AskUserQuestion` の PreToolUse /
-PostToolUse hook は、ラッパーの下で質問の表示中の印を作る・消します（ラッパーが質問の答えを代わりに
+`ndf-next` のブロックをラッパーの合図へ写します（`relay.py mark`）。`AskUserQuestion` の PreToolUse /
+PostToolUse hook は、ラッパーの下で質問の表示中の合図を作る・消します（ラッパーが質問の答えを代わりに
 送らないため）。好きな時点で切り替えるのは `/ndf:restart` です。ラッパーの始め方・止め方・上限は
 `skills/development-workflow/references/relay.md` にあります。
 

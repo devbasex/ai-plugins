@@ -152,7 +152,7 @@ def _emit_cross_review(
     path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any], message: str
 ) -> None:
     """Step 7 を `cross-review` へ委譲する結末。"""
-    # **検査が通ったことを残す。** 履歴へ追記するかは、この印と `cross-review` の
+    # **検査が通ったことを残す。** 履歴へ追記するかは、この目印と `cross-review` の
     # 最終ステータスの両方で決まる（`finalize`）。
     gate["checked_mode"] = gate.get("mode")
     gate["mode"] = "cross-review"
@@ -260,7 +260,7 @@ def _close_failed_final_fix(
     """最終ゲートの修正担当が結果を残さなかったときに、取り消して判定へ戻す。
 
     **修正ラウンドは進めない。** 進めるのは次の最終ゲートで、そこが打ち切りを見る。
-    起動し直しても解けない結末（利用上限）だけは印（`no_relaunch`）を立て、次の最終
+    起動し直しても解けない結末（利用上限）だけはフラグ（`no_relaunch`）を立て、次の最終
     ゲートを「取り消さず報告」で終わらせる（#728 の決定 11）。
     """
     closed = close_without_result(path, state, scope, outcome)

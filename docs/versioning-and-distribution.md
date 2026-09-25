@@ -45,7 +45,7 @@ Codex は全ブランチを取得するが、登録した ref を基準にする
 - **MINOR**: 後方互換性のある新機能
 - **PATCH**: バグフィックス
 
-**接尾辞は人が読むための印である。** Claude Code の直接インストール経路は版数を
+**接尾辞は人が読むための目印である。** Claude Code の直接インストール経路は版数を
 **キャッシュキーとしての文字列一致**でしか見ず、`-dev` や `-rc` を prerelease として
 扱わない。Codex と Kiro も同様で、Agent Plugins Specification には解釈の規定が無い。
 semver の順序で除外されるのは、プラグイン間の依存解決（`dependencies`）の経路だけである。

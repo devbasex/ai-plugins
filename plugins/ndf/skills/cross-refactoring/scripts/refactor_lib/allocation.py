@@ -130,7 +130,7 @@ def build_table(rows: list[dict[str, Any]], defaults: dict[str, float]) -> dict[
     """履歴の行から配分テーブル（分）を集計する。値が出ない種類は初期値で埋める。
 
     `source` は行が 1 行でもあれば `history` である。個々の種類が初期値へ落ちても
-    `history` のまま残す。**何を材料にしたか**を表す印であり、種類ごとの出所は
+    `history` のまま残す。**何を材料にしたか**を表す目印であり、種類ごとの出所は
     計画の報告が値から読めばよい。
     """
     def pick(value: Optional[float], name: str) -> float:

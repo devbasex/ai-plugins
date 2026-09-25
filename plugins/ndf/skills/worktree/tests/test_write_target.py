@@ -1657,15 +1657,15 @@ def test_a_bare_dash_still_cannot_be_followed(command: str) -> None:
 @pytest.mark.parametrize(
     ("command", "expected"),
     [
-        # 引用符の中の `>` は書き込み先の字面である。印へ置き換える前処理は
-        # 引用符を見ないため、印のまま出すと案内の文字列へ内部の印が漏れる。
+        # 引用符の中の `>` は書き込み先の字面である。目印へ置き換える前処理は
+        # 引用符を見ないため、目印のまま出すと案内の文字列へ内部の目印が漏れる。
         ('cp a "b>c"', "/base/b>c"),
         ('cp a "b>>c"', "/base/b>>c"),
         ('sed -i \'s/a/b/\' "x>y.md"', "/base/x>y.md"),
         ("cp a 'b>c'", "/base/b>c"),
         # 元からあった空白は残す。足された空白だけを消す。
         ('cp a "b > c"', "/base/b > c"),
-        # `&&` の印も同じく戻す。
+        # `&&` の目印も同じく戻す。
         ('cp a "b&&c"', "/base/b&&c"),
         # 引用符の外の `>` は従来どおり出力の付け替えである。
         ("echo hi > out.txt", "/base/out.txt"),
@@ -1679,7 +1679,7 @@ def test_markers_inside_quotes_are_restored(command: str, expected: str) -> None
 
 
 def test_markers_are_restored_without_a_base() -> None:
-    """起点を渡さない呼び方でも印を残さない。"""
+    """起点を渡さない呼び方でも目印を残さない。"""
     targets, rc = extract("cp a \"b>c\"")
     assert rc == 0
     assert targets == ["b>c"]
@@ -1990,7 +1990,7 @@ def test_a_separator_after_a_redirect_still_stops_the_scan() -> None:
 
 # --- 入力側のリダイレクト（#313） ---------------------------------------------
 #
-# 入力側の語は印へ置き換わらず、語のまま残る。被演算子として読むと、宛先の位置を奪う
+# 入力側の語は目印へ置き換わらず、語のまま残る。被演算子として読むと、宛先の位置を奪う
 # （`cp a b < in` の宛先が `in` になる）。
 
 
@@ -2051,7 +2051,7 @@ def test_consecutive_redirects_are_skipped_in_order(
 
 
 def test_a_read_write_redirect_is_skipped_and_its_file_reported() -> None:
-    """AC9: `<>` は読み書きで開く。読み飛ばしつつ、開くファイルは印の枝が出す。"""
+    """AC9: `<>` は読み書きで開く。読み飛ばしつつ、開くファイルは目印の枝が出す。"""
     targets, rc = extract("sed -i s/a/b/ x.md <>rw y.md")
     assert rc == 0
     assert set(targets) == {"x.md", "y.md", "rw"}, targets
@@ -2092,7 +2092,7 @@ def test_an_input_redirect_between_the_option_and_its_directory_is_skipped(
     """`-t` が引数を待つ途中（`take_next=1`）の入力側リダイレクトも読み飛ばす。
 
     `_wt_extract_cp_mv_target` は `take_next` を見る前にリダイレクトを飛ばす。出力側は
-    `cp -t >log dir a b` で固定済みだが、入力側は印へ置き換わらず語のまま残るため、
+    `cp -t >log dir a b` で固定済みだが、入力側は目印へ置き換わらず語のまま残るため、
     経路が別である。飛ばし損ねると `-t` が `in` を宛先として受け取り、`dir` が
     出なくなる。現状の出力（宛先 `dir` のみ）を固定する。
     """

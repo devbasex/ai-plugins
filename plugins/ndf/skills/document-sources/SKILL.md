@@ -51,7 +51,7 @@ allowed-tools:
 | 時点 | 取得した日時 |
 | 手段 | 画面 / クエリ / API のどれで取ったか |
 
-書き方と、値と出典を結ぶ印は
+書き方と、値と出典を結ぶ目印は
 [references/source-record.md](references/source-record.md) にある。
 
 ## 出所の無い値を拒否しない

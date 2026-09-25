@@ -1,7 +1,7 @@
 """SessionStart の通知と、PreToolUse の誘導・自動許可（決定 6・決定 9）。
 
 閾値・待ち・数の有効期間・数を戻さないツール名の部分文字列は Serena 1.7.0 の
-`serena-hooks remind` と同じにする。数えるのは configure の印のある project.yml の
+`serena-hooks remind` と同じにする。数えるのは configure の目印のある project.yml の
 採った言語の拡張子だけである。呼び出し側（serena-lsp.py）が例外を握りつぶす。
 """
 import contextlib

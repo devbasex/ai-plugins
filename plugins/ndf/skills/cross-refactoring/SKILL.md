@@ -28,7 +28,7 @@ allowed-tools:
 - [docs/01-state-and-propose.md](docs/01-state-and-propose.md) — 初期化・再開・提案
 - [docs/02-plan-and-implement.md](docs/02-plan-and-implement.md) — 計画・テスト追加・実装
 - [docs/03-review-viewpoints.md](docs/03-review-viewpoints.md) — 最終ゲートの `cross-review` へ渡す観点
-- [docs/04-verify-and-report.md](docs/04-verify-and-report.md) — 検証/修正・危険の印・最終ゲート・配分テーブル・報告
+- [docs/04-verify-and-report.md](docs/04-verify-and-report.md) — 検証/修正・危険フラグ・最終ゲート・配分テーブル・報告
 - [scripts/refactor.py](scripts/refactor.py) — 状態管理（uv 自己完結、標準ライブラリのみ）
 - [scripts/prepare-worktrees.sh](scripts/prepare-worktrees.sh) — 作業ディレクトリ準備と Skill 配置
 - [scripts/launch-cli.sh](scripts/launch-cli.sh) — フェーズごとのプロンプト組み立てと CLI 起動
@@ -45,7 +45,7 @@ allowed-tools:
 | 改善項目 | 計画が採った候補。`I-001` の形の ID を持ち、**1 改善項目 = 1 コミット**（テストを足す項目は 2 コミット） |
 | 配分テーブル | 種類（`test` / `structure/<手法>` / `verify` / `fix`）ごとの 1 件あたりの所要。履歴の直近 10 回から計画のたびに集計する |
 | 範囲テスト | 項目が触った箇所に限って走らせるテスト。計画の `test_targets` から進行側が組み立てる |
-| 危険の印 | 範囲テストでは覆えない変更（D1〜D5）。立ったら全体のテストを 1 度だけ走らせる |
+| 危険フラグ | 範囲テストでは覆えない変更（D1〜D5）。立ったら全体のテストを 1 度だけ走らせる |
 
 **「バッチ」「パッチ」の語は使わない。** 読み手が別の意味で知っている語である。
 
@@ -67,7 +67,7 @@ allowed-tools:
 | `--include NAMES` | 参加者に足す者（例: `--include agy`） | なし |
 | `--require-all` | 確認を通らない者が 1 者でもいれば中断する（終了コード 4） | 外して続ける |
 | `--model RT=MODEL` | ランタイムごとのモデル。繰り返し指定できる | CLI の既定 |
-| `--baseline-test CMD` | 着手前・危険の印・最終ゲートで実行する全体のテスト | 必須 |
+| `--baseline-test CMD` | 着手前・危険フラグ・最終ゲートで実行する全体のテスト | 必須 |
 | `--round-test CMD` | ラウンドのテスト。項目ごとの範囲テストを組み立てる元で、組み立てられない項目はそのまま走らせる。**`--baseline-test` の実行器が `pytest` / `python -m pytest` / `jest` / `vitest` でなければ必須** | `--baseline-test` から組み立てる |
 | `--ci-check NAME` | 最終ゲートで手元のテストの代わりに見る検査の名前（排他） | なし |
 | `--workflow-step` | `development-workflow` の 1 工程として起動したことを伝える。`cross-review` を省く | 単独起動 |
@@ -132,12 +132,12 @@ flowchart TD
     Impl --> V{"範囲テストが通る ?"}
     V -->|いいえ| Fix["修正（実装担当）"] --> Cap{"上限・残り時間 ?"}
     Cap -->|未達| V
-    Cap -->|到達| Drop["その項目だけ取り消す<br/>全体のテストなら印の項目を新しい順に絞る"]:::stop --> V
-    V -->|はい| D{"危険の印 ?"}
+    Cap -->|到達| Drop["その項目だけ取り消す<br/>全体のテストなら危険フラグの項目を新しい順に絞る"]:::stop --> V
+    V -->|はい| D{"危険フラグ ?"}
     D -->|立った| W{"全体のテストを 1 度"}
     W -->|通る・揺れ・元からの失敗| Gate
     W -->|変更が原因| Fix
-    W -->|取り出せない| DropAll["印の項目をまとめて取り消す"]:::stop --> Gate
+    W -->|取り出せない| DropAll["危険フラグの項目をまとめて取り消す"]:::stop --> Gate
     D -->|無い| Gate{"最終ゲート"}
     Gate -->|単独| CR["全体のテスト → /ndf:cross-review"]
     Gate -->|工程の 1 つ| Whole["全体のテスト（使い回しあり）<br/>--ci-check なら継続的統合"]
@@ -213,9 +213,9 @@ cross-review の最終ステータスを受けてから finalize を呼ぶ。
 `refactor.py report "$ID"` が次を出す（AC26）。
 
 - フェーズごとの所要と、想定最大時間との差（`cross-review` を除く）
-- 改善項目の表（**`<ファイル>#<シンボル>`**・兆候・手法・等級・見積り・状態・危険の印・修正の回数）
+- 改善項目の表（**`<ファイル>#<シンボル>`**・兆候・手法・等級・見積り・状態・危険フラグ・修正の回数）
 - 採用・取り消し・見送りの件数と、**見送りの理由別の件数**。内訳は**改修計画の生の URL**
-- 着手前の全体のテストの結果（通過か失敗・秒・HEAD）と、検証の中で全体のテストを走らせたか、走らせた理由（印）、落ちたときの見分け（揺れ・元からの失敗・変更が原因）と結末
+- 着手前の全体のテストの結果（通過か失敗・秒・HEAD）と、検証の中で全体のテストを走らせたか、走らせた理由（危険フラグ）、落ちたときの見分け（揺れ・元からの失敗・変更が原因）と結末
 - 判断に Jev を使ったか（使わなかった理由・呼び出しの失敗の数）
 - 最終ゲートの結果（`cross-review` の収束、または全体のテスト／継続的統合の合否）
 - 監視が手順の上限で CLI を止めた手順と、固定のまま残した値（OS の後始末と通信の待ち）

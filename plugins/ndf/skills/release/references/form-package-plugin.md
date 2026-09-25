@@ -121,7 +121,7 @@ claude plugin install <名前>@<マーケットプレイス名>   # @ の右は�
 ### チャネルは ref で分ける
 
 **開発版と正式版を分けるなら、版数の接尾辞ではなく ref を分ける。** 接尾辞は人が読むための
-印であって、取得の経路を変えない。
+目印であって、取得の経路を変えない。
 
 ```bash
 claude plugin marketplace add <owner>/<repo>@<ref>          # GitHub の短い形

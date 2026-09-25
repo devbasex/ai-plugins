@@ -127,8 +127,8 @@ def load_state(root):
     """導入先の設定を読む。project.yml が無ければ None。読めない形なら UnsupportedShape。
 
     返す辞書: languages（採った言語。project.local.yml の language_servers が上書きする）・
-    marked（configure の印 mcp_serena_excluded があるか）・excluded（外した言語の名前）。
-    印と外した言語は常に project.yml から読む。
+    marked（configure の目印 mcp_serena_excluded があるか）・excluded（外した言語の名前）。
+    目印と外した言語は常に project.yml から読む。
     """
     from pathlib import Path
     serena = Path(root) / ".serena"

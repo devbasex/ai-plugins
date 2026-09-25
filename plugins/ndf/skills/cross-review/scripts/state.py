@@ -3514,7 +3514,7 @@ def _critique_path(agent: str, pr: int, round_: int) -> pathlib.Path:
 def _mark_evidence_round(st: dict[str, Any], round_no: int) -> None:
     """そのラウンドが証拠集約を通ったことを状態ファイルへ残す（#156）。
 
-    **印を付けるのは経路の最後（`collect-critiques`）である。** 途中で付けると、
+    **目印を付けるのは経路の最後（`collect-critiques`）である。** 途中で付けると、
     反証を結ぶ前の区分（`support` も `refute` も 0 件）で数えることになり、根拠を持つ
     `major` の指摘が `insufficient_evidence` へ落ちて収束する。
     """
@@ -3530,7 +3530,7 @@ def _evidence_completed(st: dict[str, Any], round_no: int) -> bool:
     この変更より前から `review_findings[]` を積むため、旧い状態ファイルにも要素が
     ある。存在で判定すると、区分も `verification` も持たない旧いラウンドまで区分で
     絞り込むことになり、**修正必須の `major` が `insufficient_evidence` へ落ちて
-    新規 0 件（`(0, True)`）で収束する**。印を持たないラウンドは従来どおり全件を
+    新規 0 件（`(0, True)`）で収束する**。目印を持たないラウンドは従来どおり全件を
     数える。
     """
     marked = st.get("evidence_rounds") or []
@@ -3651,10 +3651,10 @@ def cmd_collect_critiques(args: argparse.Namespace) -> None:
     **結び先の無い値は捨てず `unmatched_critiques` へ残す。** 黙って捨てると、反証が
     0 件のラウンドと、結び先を誤ったラウンドが同じに見える。
 
-    **印を付けるのは、対象ごとに有効な反証が揃ったときだけである**（#549 レビュー
-    対応）。結果ファイルの欠落・不正でも印を付けると、実行検証を持たない単独の
+    **目印を付けるのは、対象ごとに有効な反証が揃ったときだけである**（#549 レビュー
+    対応）。結果ファイルの欠落・不正でも目印を付けると、実行検証を持たない単独の
     `major` が `insufficient_evidence` へ落ち、新規 0 件のまま**未検証で収束する**。
-    足りないときは印を付けず、終了コード 7 と取り直す担当を返して再取得へ戻す。
+    足りないときは目印を付けず、終了コード 7 と取り直す担当を返して再取得へ戻す。
     """
     pr = args.pr
     st = _load(pr)
@@ -3680,7 +3680,7 @@ def cmd_collect_critiques(args: argparse.Namespace) -> None:
         _handle_incomplete_critiques(pr, st, round_no, missing)
         return
 
-    # **経路を通り切ったラウンドだけへ印を付ける。** 収束の判定はこの印で母集合を
+    # **経路を通り切ったラウンドだけへ目印を付ける。** 収束の判定はこの目印で母集合を
     # 決める（`_evidence_completed`）。
     _mark_evidence_round(st, round_no)
     _save(pr, st)
@@ -3717,12 +3717,12 @@ def _handle_incomplete_critiques(
 ) -> None:
     """有効な反証が揃わなかったラウンドの扱い（#549 レビュー対応）。
 
-    **印は付けず、先に付いていた印は外す**（#732）。印の無いラウンドは従来どおり全件を
+    **目印は付けず、先に付いていた目印は外す**（#732）。目印の無いラウンドは従来どおり全件を
     数えるため、反証が届いていない `major` が区分の絞り込みで落ちて収束することがない。
-    取り直しの後もそのラウンドに印が残ると、「印を付けないため、このラウンドは全件を
+    取り直しの後もそのラウンドに目印が残ると、「目印を付けないため、このラウンドは全件を
     数えます」の出力と実際の数え方が食い違う。**取り直しは同じラウンドで 1 度だけ
     である**（`judge` の結果なしと同じ作法。2 度続けて揃わないのは対象ではなく実行
-    環境の側の事象であり、そのときも印を付けないまま工程を進める）。
+    環境の側の事象であり、そのときも目印を付けないまま工程を進める）。
     """
     st["evidence_rounds"] = [
         r for r in st.get("evidence_rounds") or []
@@ -3737,17 +3737,17 @@ def _handle_incomplete_critiques(
     detail = " / ".join(f"{a}: {len(v)} 件" for a, v in sorted(missing.items()))
     if not pending:
         info(f"⚠ 取り直した後も反証が揃いません: {detail}。"
-             "証拠集約の印を付けないため、このラウンドは全件を数えます")
+             "証拠集約の目印を付けないため、このラウンドは全件を数えます")
         return
     print(f"CRITIQUE_RETRY_AGENTS='{' '.join(pending)}'")
     print(f"CRITIQUE_RETRY_AGENTS_CSV={','.join(pending)}")
-    info(f"→ 有効な反証が揃っていない: {detail}。印を付けず、"
+    info(f"→ 有効な反証が揃っていない: {detail}。目印を付けず、"
          f"同じラウンドで 1 度だけ取り直す: {' '.join(pending)}")
     sys.exit(7)
 
 
 def _same_round_no(value: Any, round_no: int) -> bool:
-    """印の番号がそのラウンドを指すか。**番号の読み方は `_evidence_completed` と同じ**
+    """目印の番号がそのラウンドを指すか。**番号の読み方は `_evidence_completed` と同じ**
     （`int` へ換算して比べ、旧い状態ファイルの文字列の番号も同じラウンドとして読む）。"""
     try:
         return int(value) == int(round_no)

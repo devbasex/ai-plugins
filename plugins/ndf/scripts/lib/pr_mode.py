@@ -14,7 +14,7 @@ MISSION_PREFIX = "mission/"
 MODE_LINE_PREFIX = "モード: "
 REVIEW_MARK = "<!-- I want to review in Japanese. -->"
 STAGE_SEP = " → "
-# 本文の最後に置く印。モードの 1 行はこれらより前に置く
+# 本文の最後に置く目印。モードの 1 行はこれらより前に置く
 TRAILERS = (REVIEW_MARK, "🤖 Generated with")
 
 
@@ -42,7 +42,7 @@ def mode_line(mode: str, stages: list[str]) -> str:
 def with_mode_line(body: str, mode: str | None, stages: list[str]) -> str:
     """本文の末尾にモードの 1 行を置く。既にあれば置き換える。
 
-    末尾の印（レビューの印・生成の署名）はその後ろに残す。mode が空なら本文を変えない。
+    末尾の目印（レビューの目印・生成の署名）はその後ろに残す。mode が空なら本文を変えない。
     """
     if not mode:
         return body

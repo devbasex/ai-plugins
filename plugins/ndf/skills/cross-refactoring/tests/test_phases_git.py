@@ -5,7 +5,7 @@
 | AC10 | 足したテストが今のコードで落ちた項目は `test_failed`、項目に紐づかないコミットは取り消す |
 | AC11 | 1 改善項目 = 1 コミット（テストを足す項目は 2 コミット）。2 コミット以上は取り消す |
 | AC12 | コミットの無い項目・完了の締め切りを過ぎた項目は `not_done`。テストのコミットも取り消す |
-| AC13 AC14 | 検証は範囲テストだけ。全体のテストは印が立ったときに 1 度だけ（落ちたときの扱いは `test_whole_test_triage_git.py`） |
+| AC13 AC14 | 検証は範囲テストだけ。全体のテストは危険フラグが立ったときに 1 度だけ（落ちたときの扱いは `test_whole_test_triage_git.py`） |
 | AC15 AC16 | 修正の締め切りで項目だけを取り消す。共有した項目は新しい方から 1 件ずつ |
 | AC16b | 最終ゲートは、検証の中の全体のテストが通り HEAD が進んでいなければ使い回す |
 | AC17 | 単独起動は `cross-review` が `approved` のときだけ履歴へ追記する |
@@ -380,7 +380,7 @@ def test_the_whole_test_runs_once_when_a_danger_flag_is_raised_and_the_gate_reus
 
 def test_a_whole_test_failure_left_unfixed_reverts_the_flagged_item_and_the_gate_runs_again(
         flow, cmd_setup, cmd_implement, cmd_converge, cmd_gate):
-    """決定 22: 直す時間が無ければ印の項目を取り消す。全体のテストは検証の中で
+    """決定 22: 直す時間が無ければ危険フラグの項目を取り消す。全体のテストは検証の中で
     走らせ直さず、最終ゲートが走らせる。"""
     work = flow["work"]
 

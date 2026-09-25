@@ -236,7 +236,7 @@ issue にする**。呼び出し元・3 択の判断・振り返りでの拾い�
 ## 工程の飛ばしとマージを機械で見る
 
 この Skill の frontmatter の `hooks` が、進行の記録のコマンドを通過工程として積み（記録の無い工程は案内するだけで
-拒否しない）、承認の印（ラベル `design-approved`）の無い設計 Pull Request のマージだけを拒否する。判定の 2 つ・
+拒否しない）、承認ラベル（ラベル `design-approved`）の無い設計 Pull Request のマージだけを拒否する。判定の 2 つ・
 有効にする操作・控えの読み方・`fast` の工程の出し方は [references/stage-completeness.md](references/stage-completeness.md) にある。
 
 ## 進め方（`pace`）
@@ -491,7 +491,7 @@ flowchart TD
 
 - [references/workflow-modes.md](references/workflow-modes.md) — 判定の境界事例とモード別の詳細
 - [references/projects-tracking.md](references/projects-tracking.md) — 進行を GitHub Projects へ記録する設定と値の一覧
-- [references/stage-completeness.md](references/stage-completeness.md) — 通過工程の控えと報告、承認の印の作り方
+- [references/stage-completeness.md](references/stage-completeness.md) — 通過工程の控えと報告、承認ラベルの作り方
 - [references/parallel-work.md](references/parallel-work.md) — 並行開発の 4 つの形、工程が動く単位、任せるうえでの下限
 - [references/pace.md](references/pace.md) — 進め方 `pace: fast` の条件・宣言・計画のステージ・検査のトリガー・MVV の判定
 - [references/approval-request.md](references/approval-request.md) — 承認を求めるときに提示するもの

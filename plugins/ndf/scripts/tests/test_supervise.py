@@ -28,7 +28,7 @@ FAKE_GH = """#!{py}
 import json, sys
 a = sys.argv[1:]
 if a[:2] == ["issue", "view"]:
-    print(json.dumps({{"title": "題 " + a[2], "body": "本文の印 " + a[2]}}))
+    print(json.dumps({{"title": "題 " + a[2], "body": "本文の目印 " + a[2]}}))
     sys.exit(0)
 sys.exit(1)
 """
@@ -72,8 +72,8 @@ def test_work_puts_issue_body_into_prompt(tmp_path, fakes):
                                    "next": "end"}])
     assert "結果: 完了" in text
     prompt = fakes.read_text()
-    assert "## 課題 #858: 題 858" in prompt and "本文の印 858" in prompt
-    assert prompt.index("本文の印") < prompt.index("実装する")
+    assert "## 課題 #858: 題 858" in prompt and "本文の目印 858" in prompt
+    assert prompt.index("本文の目印") < prompt.index("実装する")
 
 
 def test_work_without_issues_does_not_call_gh(tmp_path, fakes):

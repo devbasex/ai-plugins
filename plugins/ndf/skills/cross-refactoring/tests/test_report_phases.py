@@ -40,7 +40,7 @@ def test_the_report_carries_phases_reasons_whole_test_and_judge(tmp_path, cmd_re
     assert "| propose | 4.5 |" in out and "| implement | 10.0 |" in out
     # 見送りは理由別の件数で出る（内訳は改修計画にある）
     assert "budget 2" in out and "no_target 1" in out and "test_failed 0" in out
-    # 全体のテストを走らせた理由（印）と Jev を使わなかった理由
+    # 全体のテストを走らせた理由（危険フラグ）と Jev を使わなかった理由
     assert "D3" in out and "private_repo" in out
     # 想定最大時間（60 分）が報告に出る
     assert "60 分" in out

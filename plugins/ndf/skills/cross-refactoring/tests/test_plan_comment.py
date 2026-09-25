@@ -108,7 +108,7 @@ def test_the_second_publish_edits_the_same_comment(plan, tmp_path, gh):
 
 
 def test_a_lost_record_is_recovered_from_the_marker(plan, tmp_path, gh):
-    """控えが失われても、印で引き当て直す。引き当てないとコメントが積まれる。"""
+    """控えが失われても、目印で引き当て直す。引き当てないとコメントが積まれる。"""
     calls, responses = gh
     _, state = _state(tmp_path)
     marker = plan.plan_comment_marker(state)

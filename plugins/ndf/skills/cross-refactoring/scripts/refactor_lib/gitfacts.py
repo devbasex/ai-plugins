@@ -200,7 +200,7 @@ def tracked_markdown(work: str) -> list[str]:
 
 
 def is_test_path(path: str) -> bool:
-    """テストの置き場所か。判定は `commit_touches_tests` と同じ印で行う。"""
+    """テストの置き場所か。判定は `commit_touches_tests` と同じ基準で行う。"""
     lowered = f"/{path.lower()}"
     name = lowered.rsplit("/", 1)[-1]
     return (any(m in lowered for m in TEST_PATH_MARKERS)
@@ -909,9 +909,9 @@ def push_head(state: dict[str, Any]) -> None:
 def push_with_retry_marker(
     path: pathlib.Path, state: dict[str, Any], entry: dict[str, Any]
 ) -> None:
-    """保留の印を立ててから push し、成功したら印を消す。
+    """保留のフラグを立ててから push し、成功したらフラグを消す。
 
-    印を残さずに push すると、失敗したときに**取り消しがローカルだけに留まる**。
+    フラグを残さずに push すると、失敗したときに**取り消しがローカルだけに留まる**。
     処理済みガードで次回は素通りするため、Pull Request へ永久に反映されない。
     """
     entry["pending_push"] = True

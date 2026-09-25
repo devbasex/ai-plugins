@@ -59,7 +59,7 @@ def test_the_two_stage_gate_lives_in_one_file() -> None:
 
 
 def test_no_other_file_holds_the_gate_of_the_second_stage() -> None:
-    """A1: 握りの印を作る関門も、共通ファイルの外に写しを持たない。"""
+    """A1: 握りの目印を作る関門も、共通ファイルの外に写しを持たない。"""
     holders = sorted(
         p.relative_to(ROOT).as_posix()
         for p in _shell_files()
@@ -194,7 +194,7 @@ def test_the_common_file_is_reached_from_every_layout(tmp_path: Path, layout) ->
 
     assert "reached=yes" in got.stdout, got
     assert "rc=0" in got.stdout, got
-    assert (lock / "held").is_file(), "握りの印が作られていない"
+    assert (lock / "held").is_file(), "握りの目印が作られていない"
 
 
 def test_the_libraries_do_not_locate_the_common_file_with_cd(tmp_path: Path) -> None:

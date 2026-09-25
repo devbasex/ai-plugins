@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # NDF plugin: tool 実行前の hook。工程の飛ばしを検知し、設計 Pull Request のマージを
-# 承認の印に縛る（#221 / #266）。
+# 承認ラベルに縛る（#221 / #266）。
 #
 # `development-workflow` の frontmatter が、この Skill を呼んだ会話の単位へ登録する。
 # 判定はすべて lib/ が持ち、この入口は入力の受け取りと出力の整形だけを行う。
@@ -27,7 +27,7 @@ PAYLOAD=$(cat 2>/dev/null || true)
 # 一度も入らない。ここで grep による粗い見分けへ倒し、fail-closed を保つ。
 if ! command -v jq >/dev/null 2>&1 || ! command -v awk >/dev/null 2>&1; then
   if wf_looks_like_merge_text "$PAYLOAD"; then
-    reason=$(wf_deny_undetermined "" '承認の印（判定に要る jq または awk が無い）')
+    reason=$(wf_deny_undetermined "" '承認ラベル（判定に要る jq または awk が無い）')
     wf_emit_deny "$reason"
   fi
   exit 0

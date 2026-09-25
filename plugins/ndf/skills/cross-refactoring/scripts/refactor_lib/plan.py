@@ -36,9 +36,9 @@ def plan_mode(state: dict[str, Any]) -> str:
 
 
 def plan_comment_marker(state: dict[str, Any]) -> str:
-    """コメントを探すための印。**本文の先頭に置く。**
+    """コメントを探すための目印。**本文の先頭に置く。**
 
-    状態ファイルの控えが失われても、この印で同じコメントを引き当てられる。
+    状態ファイルの控えが失われても、この目印で同じコメントを引き当てられる。
     引き当てられないと、ラウンドのたびに新しいコメントが積まれる。
     """
     return f"<!-- cross-refactoring plan rf{state.get('id')} -->"
@@ -58,7 +58,7 @@ def _comment_payload(out: str) -> Optional[dict[str, Any]]:
 
 
 def _find_plan_comment(state: dict[str, Any]) -> Optional[dict[str, Any]]:
-    """印を持つ既存のコメントを探す。見つからなければ `None`。"""
+    """目印を持つ既存のコメントを探す。見つからなければ `None`。"""
     repo, pr = state.get("repo"), state.get("current_pr")
     out = sh(
         ["gh", "api", f"repos/{repo}/issues/{int(pr)}/comments", "--paginate"],
@@ -149,7 +149,7 @@ def normalize_plan_file(value: Optional[str]) -> str:
 def baseline_line(baseline: dict[str, Any]) -> str:
     """着手前の全体のテストの結果（通過か失敗・秒・HEAD の短い SHA）。報告と改修計画が共有する。
 
-    危険の印の全体のテストが落ちたとき、変更が原因か元からの失敗かを読む基準になる。
+    危険フラグの全体のテストが落ちたとき、変更が原因か元からの失敗かを読む基準になる。
     """
     status = {"green": "通過", "red": "失敗"}.get(str(baseline.get("status") or ""), "—")
     seconds = baseline.get("seconds")

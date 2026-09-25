@@ -180,7 +180,7 @@ def limited_command(
 ) -> tuple[Optional[list[str]], str]:
     """項目の検証に使う語の並びと、その由来（`targets` / `round_test` / `none`）。
 
-    **`--baseline-test` をそのまま使うことはない**（全体のテストは危険の印の 1 回だけ）。
+    **`--baseline-test` をそのまま使うことはない**（全体のテストは危険フラグの 1 回だけ）。
     差し替えの元に使うだけで、組み立てられなければ `--round-test` へ、それも無ければ
     `none`（呼ぶ側が `no_target` で見送る）。
     """

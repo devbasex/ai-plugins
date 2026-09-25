@@ -401,7 +401,7 @@ def test_a_whole_test_passed_in_verify_at_the_same_head_is_reused(
 
 
 @pytest.mark.parametrize("whole_test", [
-    {**PASSED_IN_VERIFY, "reverted": True},    # 落ちて印の項目を取り消した
+    {**PASSED_IN_VERIFY, "reverted": True},    # 落ちて危険フラグの項目を取り消した
     {**PASSED_IN_VERIFY, "head": "OLDHEAD"},   # その後に HEAD が進んだ（同期のコミットなど）
     {**PASSED_IN_VERIFY, "status": "fail"},    # 落ちた
     {**PASSED_IN_VERIFY, "ran": False},        # 走らなかった

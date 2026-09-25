@@ -69,7 +69,7 @@ WF_PR_STAGE='Pull Request'
 # その検査から外す工程。**`cross-review` は Pull Request が無いと回せない**（決定 7）。
 # 求めれば毎回欠落として出て、案内が読まれなくなる。
 WF_PR_EXEMPT_STAGE='実装レビュー'
-# 承認の印。**この名前のラベルがリポジトリに定義されていること自体が有効化の宣言になる**。
+# 承認ラベル。**この名前のラベルがリポジトリに定義されていること自体が有効化の宣言になる**。
 WF_APPROVAL_LABEL='design-approved'
 # 設計 Pull Request を見分ける head のブランチ名の接頭辞。
 WF_DESIGN_PREFIX='design/'

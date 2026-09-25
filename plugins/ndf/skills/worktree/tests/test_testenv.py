@@ -641,7 +641,7 @@ def test_lock_replaces_a_plain_file(tmp_path: Path) -> None:
 
 
 def test_lock_without_a_pid_is_not_taken_immediately(tmp_path: Path) -> None:
-    """印が無いロックは、作った直後の可能性がある。すぐには奪わない。"""
+    """目印が無いロックは、作った直後の可能性がある。すぐには奪わない。"""
     from worktree_helpers import run_lib
 
     lock = tmp_path / "f.lock"
@@ -651,7 +651,7 @@ def test_lock_without_a_pid_is_not_taken_immediately(tmp_path: Path) -> None:
 
 
 def test_old_lock_without_a_pid_is_taken(tmp_path: Path) -> None:
-    """印が無いまま古くなったロックは捨ててよい。"""
+    """目印が無いまま古くなったロックは捨ててよい。"""
     import os
     import time
     from worktree_helpers import run_lib
@@ -673,7 +673,7 @@ def test_takeover_does_not_break_a_fresh_lock(tmp_path: Path) -> None:
     (lock / "pid").write_text("999999\n", encoding="utf-8")
     (lock / "token").write_text("old-token\n", encoding="utf-8")
 
-    # 判定に使う印だけを古い値にして、実体は新しいものへ差し替える。
+    # 判定に使う目印だけを古い値にして、実体は新しいものへ差し替える。
     got = run_lib(
         f'_wt_lock_discard "{lock}" "seen-but-different" "tok"; echo rc=$?'
     )

@@ -35,7 +35,7 @@ sys.path.insert(
 )
 import transcript_agents  # noqa: E402
 
-# 割る候補の印を付ける目安。`development-workflow/references/context-window.md` の
+# 割る候補の目印を付ける目安。`development-workflow/references/context-window.md` の
 # 「遅くとも切る」値と揃える。**モデルに依る値であり、あの文書が書き換わったら揃え直す。**
 DEFAULT_WINDOW_LIMIT = 200000
 
@@ -535,7 +535,7 @@ def summarize_agents(records: list, window_limit: int) -> tuple[list[dict], int]
         peak_max = max(r.peak for r in items)
         marks: list[str] = []
         # **束ねる候補は supervisor の行にだけ付く。** 設計のフェーズは、作るときはどの
-        # モードでも必ず関門を返すため対象にしない（契約の印の表）。
+        # モードでも必ず関門を返すため対象にしない（契約の目印の表）。
         if layer == "supervisor" and role != "設計" and below > len(items) / 2:
             marks.append("束ねる候補")
         if peak_max > window_limit:
@@ -614,7 +614,7 @@ def format_agent_summary_section(summary: list[dict], excluded: int) -> list[str
         "## 層・フェーズ・モデルごとの束ね",
         "",
         "| 層 | フェーズ | モデル | 件数 | 固定費の中央値 | 実作業の中央値 "
-        "| 実作業 < 固定費 | 最大充填の最大 | 印 |",
+        "| 実作業 < 固定費 | 最大充填の最大 | 目印 |",
         "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |",
     ]
     for r in summary:
@@ -652,7 +652,7 @@ def format_role_usage_section(usage: list[dict]) -> list[str]:
         "## フェーズごとの worker の使い方",
         "",
         "| フェーズ | supervisor | supervisor の実作業 | worker の件数 "
-        "| supervisor と worker の固定費の合計 | 印 |",
+        "| supervisor と worker の固定費の合計 | 目印 |",
         "| --- | ---: | ---: | ---: | ---: | --- |",
     ]
     for r in usage:
@@ -867,7 +867,7 @@ def main() -> int:
     ap.add_argument("--layer", choices=transcript_agents.LAYERS, default=None,
                     help="--agents の出力を 1 つの層に絞る")
     ap.add_argument("--window-limit", type=int, default=DEFAULT_WINDOW_LIMIT,
-                    help=f"割る候補の印を付ける最大充填の目安 (default: {DEFAULT_WINDOW_LIMIT})")
+                    help=f"割る候補の目印を付ける最大充填の目安 (default: {DEFAULT_WINDOW_LIMIT})")
     args = ap.parse_args()
 
     plugin_root = pathlib.Path(args.plugin_root) if args.plugin_root else plugin_root_default()

@@ -428,7 +428,7 @@ def test_the_next_gate_does_not_see_the_reverted_commits(
 def test_a_usage_limit_on_the_final_fix_stops_the_fix(
     cmd_gate, tmp_path, env_tmp_dir, merge_spy
 ):
-    """AC30 決定 23: 起動し直しても解けない結末では、次の最終ゲートで修正を打ち切る印を立てる。"""
+    """AC30 決定 23: 起動し直しても解けない結末では、次の最終ゲートで修正を打ち切るフラグを立てる。"""
     state_path = _failing_gate_state(tmp_path)
     env_tmp_dir(state_path)
     (state_path.parent / "codex-final-fix-monitor.json").write_text(

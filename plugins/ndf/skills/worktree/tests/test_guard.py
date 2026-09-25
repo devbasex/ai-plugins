@@ -325,7 +325,7 @@ def test_declaration_edited_mid_session_takes_effect(main_repo: Path, tmp_path: 
     """許可パスを書き換えたら、そのセッションで判定が変わる。
 
     書き換えの前後で**長さが同じ**で、**同じ秒のうち**に書き換える。更新時刻や
-    大きさで印を作ると、この形が捉えられない。
+    大きさで目印を作ると、この形が捉えられない。
     """
     state = tmp_path / "state"
     state.mkdir()
