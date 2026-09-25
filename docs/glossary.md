@@ -38,4 +38,4 @@ NDF が配る工程・関門・モード・段の語。development-workflow/refe
 | 回答待ち | 利用者に問いへの答え（選択・情報・指示）を求めている待ち | — | `issues/issue-821-wait-notify-design.md` |
 | 承認待ち | 利用者に操作の許可（ツールの実行・計画・マージ・配布など）を求めている待ち | — | `issues/issue-821-wait-notify-design.md` |
 | 待ちの鍵 | 1 つの待ちを見分ける値。transcript の最後の assistant の項目の `uuid` | — | `issues/issue-821-wait-notify-design.md` |
-| 戻り先 | 通知から当該セッションへ戻る手段。セッションの URL か、再開のコマンドとホスト名・cwd | — | `issues/issue-821-wait-notify-design.md` |
+| 戻り先 | 通知から当該セッションへ戻る手段。ホスト名・cwd の行と、作れればセッションの URL か再開のコマンド | — | `issues/issue-821-wait-notify-design.md` |

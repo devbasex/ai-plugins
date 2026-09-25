@@ -117,7 +117,7 @@
     {
       "term": "戻り先",
       "context": "ndf-notification",
-      "meaning": "通知から当該セッションへ戻る手段。セッションの URL か、再開のコマンドとホスト名・cwd",
+      "meaning": "通知から当該セッションへ戻る手段。ホスト名・cwd の行と、作れればセッションの URL か再開のコマンド",
       "source": "issues/issue-821-wait-notify-design.md"
     }
   ]

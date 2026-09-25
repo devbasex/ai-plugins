@@ -163,17 +163,20 @@ Claude Code 2.1.282 の本体では、フック入力の型（`Stop` / `Notifica
 | 作業完了の報告では通知しない | 実例の「待ちでない」の全件で `classify_text` が待ちでないを返す割合が 90% 以上。`Stop` の入口に完了の報告を渡し、偽の送信先へ 1 件も届かない |
 | 権限確認・`AskUserQuestion`・`ExitPlanMode` で通知する | 3 つの事象の入力を入口へ渡し、それぞれ 1 件届き、種類が表どおり |
 | 文での回答・承認の待ちで通知する（誤検知・見逃しを実例で） | 実例（60 件以上。回答待ち・承認待ち・待ちでないの 3 つの正解付き）で、適合率と再現率がそれぞれ 85% 以上。数えた値を実装 PR の本文に載せる |
-| 種類の印を付ける | 本文の先頭が `【回答待ち】` / `【承認待ち】` / `【完了】` のどれか（I4） |
+| 種類の印を付ける | 本文の先頭が `【回答待ち】` / `【承認待ち】` / `【完了】` のどれか（I6） |
 | Remote Control 中・クラウドで URL が載る | `CLAUDE_CODE_BRIDGE_SESSION_ID=cse_x` で `https://claude.ai/code/session_x`、`CLAUDE_CODE_REMOTE_SESSION_ID=session_y` で `…/code/session_y`。開くと当該セッションへ行くことは実機で 1 回確かめる |
 | Remote Control なしで `claude --resume` とホスト名・cwd が載る | 2 つの変数を消して起動し、`再開: claude --resume <session_id>` と `host:` `cwd:` の行 |
 | 回答待ちに issue / Redmine の URL が載る | 本文に `#821`・`https://github.com/o/r/issues/5`・`Redmine #14952`（`REDMINE_URL` あり）を置き、3 行とも載る。`REDMINE_URL` なしで Redmine の行が無い |
-| 承認待ちに PR の URL が載る（無ければ現在のブランチ） | 本文の PR を採る場合と、偽の `gh` が返す URL を採る場合と、`gh` が失敗して行を省く場合の 3 つ（I5） |
+| 承認待ちに PR の URL が載る（無ければ現在のブランチ） | 本文の PR を採る場合と、偽の `gh` が返す URL を採る場合と、`gh` が失敗して行を省く場合の 3 つ（I8） |
 | 二重に通知しない | 同じ transcript で `PermissionRequest`（`ExitPlanMode`）と `permission_prompt` を続けて渡し、届くのは 1 件。transcript に項目を足した後の次の待ちは届く（I1） |
 | description・引数・README を実際の発火に合わせる | `hooks/claude.json` に `session_end` と「exits」が無く、入口を指すことをテストで見る。README は `plan-to-spec` の前の文書の検査とレビューで見る（文言を照合するテストは書かない） |
 | Codex / Kiro の扱いを決め README に書く | 決定 10 の表を README へ写す。`--runtime codex` と `--runtime kiro` の `Stop` の入力で待ちが届き、戻り先が表どおり |
-| I2 待ちでないなら送らない | `NDF_SLACK_NOTIFY_DONE` の有無で、完了の報告が届かない / 「完了」で届く |
-| I3 非対話・再帰では待ちを作らない | `CLAUDE_CODE_ENTRYPOINT=sdk-cli` と `stop_hook_active: true` で、問いの応答でも届かず、記録も作らない |
-| I6 失敗でフックを失敗させない | 送信先が 500 を返す・`gh` が無い・transcript が壊れている・標準入力が空の 4 つで、終了コード 0 と標準出力が空 |
+| I2 待ちでないなら送らない | `NDF_SLACK_NOTIFY_DONE` なしで完了の報告を渡し、届かない |
+| I3 フラグがあれば「完了」で送る | `NDF_SLACK_NOTIFY_DONE=true` で完了の報告を渡し、「完了」で届く |
+| I4 非対話では待ちを作らない | `CLAUDE_CODE_ENTRYPOINT=sdk-cli` で、問いの応答でも届かず、記録も作らない |
+| I5 再帰では待ちを作らない | `stop_hook_active: true` で、問いの応答でも届かず、記録も作らない |
+| I7 戻り先を 1 つ持つ | セッションの ID を消したフック入力で、`host:` `cwd:` の行だけが戻り先として載る |
+| I9〜I12 外の系の失敗でフックを失敗させない | 標準入力が空（I9）・transcript が壊れている（I10）・`gh` が無い（I11）・送信先が 500 を返す（I12）の 4 つで、それぞれ終了コード 0 と標準出力が空 |
 | 入口が 1 秒以内に戻る | 送信先が 5 秒待たせる設定で `Stop` を起動し、入口のプロセスが 1 秒以内に終わる |
 
 導入の確かめ（`tests/runtime-smoke`）は、Claude Code と Codex の入口を `hook-stop.json` で起動し、終了
