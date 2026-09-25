@@ -96,9 +96,10 @@ PHASE_KINDS = {"配布（開発版）": "開発版", "配布（本番）": "本�
 
 
 def plan_kind(plan: str) -> str:
-    """計画の「フェーズ」から表の行の種類を決める（配布の 2 つは開発版・本番）。"""
+    """計画の「フェーズ」（旧キー「持ち場」も読む）から表の行の種類を決める（配布の 2 つは開発版・本番）。"""
     try:
-        phase = str(json.loads(Path(plan).read_text()).get("フェーズ") or "")
+        data = json.loads(Path(plan).read_text())
+        phase = str(data.get("フェーズ") or data.get("持ち場") or "")
     except (OSError, ValueError, AttributeError):
         phase = ""
     return PHASE_KINDS.get(phase, phase or "計画")
