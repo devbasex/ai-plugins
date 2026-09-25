@@ -120,7 +120,7 @@ flowchart TB
 
 | 語 | 意味 | 英語や識別子 | 正本 |
 | --- | --- | --- | --- |
-| リリース | 変更を利用者へ届く形で公開すること。その工程とフェーズの名前でもある | `/ndf:release`、`supervise.py new release` | [release](../../release/SKILL.md) |
+| リリース | 変更を利用者へ届く形で公開すること。その工程とフェーズの名前でもある | `/ndf:release`、`supervise.py new release`、工程表の行と進捗記録の `stage` の値は `配布` | [release](../../release/SKILL.md) |
 | リリースプラン | リリースの手順をステップの列として持つプラン | `supervise.py new release`、`--channel dev` / `prod` | [supervise.py](../../../scripts/supervise.py) の docstring |
 | 開発版 | ベースブランチ（`develop`）に載るチャネルと、そこへ出す接尾辞付きの版。マージされた変更がそのまま載る | `<版>-dev.<n>`、`new release --channel dev` | [release](../../release/SKILL.md) の「リリースの段階」 |
 | 本番 | 利用者が現に使っているチャネル・環境・外部サービス（本番の系）。プラグインのリリースでは本番のブランチ | `.ndf/worktree.json` の `production_branch`（無ければ既定ブランチ）、`--channel prod` | [../SKILL.md](../SKILL.md) の「本番の系へ届く操作」 |
@@ -139,8 +139,8 @@ flowchart TB
 | --- | --- | --- | --- |
 | 検査 | リファクタリング・コードレビュー・完了判定・Pull Request を通すフェーズ。`fast` ではトリガーが立ったときだけ、前回の検査からの差分に流す。コードレビューだけは開発版ごとに流す（`--review-only`） | `new check`、`new check --since-last --id <名>`、`new check --since-last --review-only --id <名>` | [agent-layers.md](agent-layers.md) の「フェーズ」、[pace.md](pace.md) の「検査のプラン」 |
 | チェック | 機械が合否を返すもの。CI のジョブと、`mvv-gate.py`・`doc-lint.py` などのスクリプト | CI の checks、結果 JSON の `status` | [merged](../../merged/SKILL.md) の `merge-when-green`、各スクリプトの docstring |
-| リファクタリング | 振る舞いを変えずに構造を直す工程 | `/ndf:cross-refactoring`、プランの `refactor` のステップ | [../SKILL.md](../SKILL.md) の「モードごとに起動する Skill」 |
-| コードレビュー | 実装の差分をレビューし、新しい指摘が出なくなるまで直す工程 | `/ndf:cross-review`（`legacy-refactor` は `pr-review`）、プランの `review` のステップ | [../SKILL.md](../SKILL.md) の「モードごとに起動する Skill」 |
+| リファクタリング | 振る舞いを変えずに構造を直す工程 | `/ndf:cross-refactoring`、プランの `refactor` のステップ、工程表の行と進捗記録の `stage` の値は `構造改善` | [../SKILL.md](../SKILL.md) の「モードごとに起動する Skill」 |
+| コードレビュー | 実装の差分をレビューし、新しい指摘が出なくなるまで直す工程 | `/ndf:cross-review`（`legacy-refactor` は `pr-review`）、プランの `review` のステップ、工程表の行と進捗記録の `stage` の値は `実装レビュー` | [../SKILL.md](../SKILL.md) の「モードごとに起動する Skill」 |
 | 収束ループ | 新しい指摘が出なくなるまで回すレビューと修正。リファクタリング・コードレビュー・ドキュメントレビューが持つ | drive のステップ | [context-window.md](context-window.md) の「フェーズの中のスイッチポイント」 |
 | 手順 | 1 つの Skill の中で順に通す作業の単位。`cross-refactoring` の提案・リファクタリング計画・テスト追加・実装・検証/修正の 5 つ、`document-restructuring` の測る・並べ替える・整える・測り直すの 4 つ | — | [cross-refactoring](../../cross-refactoring/SKILL.md)、[document-restructuring](../../document-restructuring/SKILL.md) |
 | リファクタリング計画 | `cross-refactoring` が採る改善項目を決め、見送った提案と理由を残す出力 | — | [cross-refactoring](../../cross-refactoring/SKILL.md) の「この Skill で使う語」 |
