@@ -214,10 +214,11 @@ def test_a_failing_later_page_gives_nothing(state_mod, real_github, monkeypatch)
 
 def test_reading_stops_at_the_page_limit(state_mod, real_github, monkeypatch):
     """上限に達しても止めず、読めた範囲で判定する。"""
-    monkeypatch.setattr(
-        state_mod, "_gh_rest",
-        lambda path: _check_runs_response(state_mod, 10_000, [f"job{i}" for i in range(100)]),
-    )
+    def _rest(path):
+        page = path.rsplit("page=", 1)[1]
+        return _check_runs_response(state_mod, 10_000, [f"p{page}-job{i}" for i in range(100)])
+
+    monkeypatch.setattr(state_mod, "_gh_rest", _rest)
 
     runs = state_mod._fetch_check_runs(REPO, "b87b3ae")
 

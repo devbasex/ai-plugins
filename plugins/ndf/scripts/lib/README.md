@@ -38,6 +38,7 @@
 | [refresh.py](refresh.py) | 観点の出典の取得・指紋の比較・一覧の提示・待ちの扱い（#554）。**提示するだけで書き換えない** | `instructions-check.py` |
 | [transcript_agents.py](transcript_agents.py) | 会話の記録を conductor / supervisor / worker の層の単位で読む（#550）。上限の中断の一覧（`interrupted`）と解除の待ち（`wait-reset`）も持つ（#657）。**読むだけで送信の経路を持たない** | `skill-stats` / `development-workflow` |
 | [step_result.py](step_result.py) | 手順のスクリプトの結果 JSON の形・検証（`validate_result`）・出力と終了（`emit`）・承認の提示物（`approval_present`）と、git / gh を呼ぶ小関数 | `merged-steps.py` / `plan-to-spec-steps.py` / `release-steps.py` / `release-verification-steps.py` / `mission-close.py` / `drive_pause.py` |
+| [gh_parts.py](gh_parts.py) | PR / issue の取得と本文の節の差し替え。`pr-info`（メタ・本文・差分の統計・checks を名前ごとの最新の実行へ畳んだもの・未解決のスレッド。GraphQL が上限なら REST へ退避。差分とログはファイルへ書く）、`unresolved-threads`、`body-section`（節の取得・置換・末尾への 1 行の追記。節の終わりに `<!-- ndf:section-end -->` を置き、後ろへ足した行を節に含めない）、`review-post`（自分の PR なら REQUEST_CHANGES を COMMENT へ下げる）。結果は `step_result` の形。GitHub を呼ぶのは `RUNNER` 1 か所 | `cross-review`（`state.py` の未解決のスレッドと checks） |
 | [drive_pause.py](drive_pause.py) | 収束ループの駆動が止まるときの結果の形（pause の 1 行 JSON）と終了コードの表（0 完了 / 20 fix / 21 sweep / 22 newtext / 23 cross-review / 1 中断） | 収束ループの 2 つの `drive.py` |
 
 ## 手順のスクリプトの結果
