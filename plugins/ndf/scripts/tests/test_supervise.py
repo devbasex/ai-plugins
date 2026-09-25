@@ -1323,3 +1323,18 @@ def test_new_impl_with_several_issues_refers_to_all_of_them(tmp_path):
     assert p.returncode == 0, p.stderr
     head = json.loads(out.read_text())["steps"][0]["prompt"].splitlines()[0]
     assert "#898・#913・#922" in head
+
+
+def test_steps_after_worktree_removal_run_in_repository(tmp_path):
+    """merge の後片付けが作業場所を消しても、次のステップは元のリポジトリで動く（検査の record）。"""
+    repo = tmp_path / "repo"
+    wt = repo / ".worktrees" / "check" / "x"
+    wt.mkdir(parents=True)
+    plan = {"フェーズ": "試験", "課題": [858], "作業場所": str(wt), "steps": [
+        {"id": "merge", "type": "run", "cmd": f"rm -rf {wt}", "next": "record"},
+        {"id": "record", "type": "run", "cmd": "pwd", "next": "end"}]}
+    s = sv.Supervisor(plan, tmp_path / "state")
+    text = s.run()
+    assert "結果: 完了" in text
+    rec = [r for r in progress(s) if r.get("kind") == "step" and r["step"] == "record"]
+    assert rec and rec[0]["exit"] == 0 and rec[0]["summary"] == str(repo)

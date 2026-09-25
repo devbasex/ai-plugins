@@ -1498,6 +1498,15 @@ class Supervisor:
         return d
 
     # --- 駆動 ---
+    def keep_cwd(self) -> None:
+        """前のステップ（merge の後片付け）が作業場所を消していたら、元のリポジトリで続ける。"""
+        if Path(self.cwd).is_dir():
+            return
+        wt = str(self.plan["作業場所"])
+        root = self.plan.get("リポジトリ") or (wt.split("/.worktrees/")[0] if "/.worktrees/" in wt else None)
+        if root and Path(root).is_dir():
+            self.cwd = root
+
     def run(self, start: str | None = None) -> str:
         sid = start or self.order[0]
         if start and not self.plan.get("Pull Request"):
@@ -1530,6 +1539,7 @@ class Supervisor:
             if step is None:
                 result, reason = "止まった", f"知らないステップ: {sid}"
                 break
+            self.keep_cwd()
             self.record_stage(step.get("stage"))
             self.cur = {"id": sid, "type": step["type"]}
             self.step_started = time.time()
