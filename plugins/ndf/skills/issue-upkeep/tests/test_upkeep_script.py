@@ -324,3 +324,16 @@ def test_candidates_do_not_match_a_path_inside_a_longer_path(env):
     env.set(lambda st: st["issues"]["7"].update(body="vendor/scripts/gone-tool.sh と x/gone-tool.sh"))
     _, out = env.run("candidates", "--since-ref", "v1")
     assert 7 not in {i.get("number") for i in out["items"]}
+
+
+def test_candidates_pick_issues_named_in_commit_subjects(env):
+    # 配布に入ったコミットの件名が番号を指す open の課題は、直っていても閉じ忘れのまま残る
+    _git(env.root, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q",
+         "--allow-empty", "-m", "Fix: 落ちる所を直す (#7 #10)")
+    code, out = env.run("candidates", "--since-ref", "v1", "--limit", "1")
+    assert code == 20
+    first = out["items"][0]
+    # 差分のパスより強い手がかりなので、上限で切るときも先に残す
+    assert first["number"] == 7 and first["routes"] == ["commit-subject"]
+    assert any(t.startswith("Fix: 落ちる所を直す") for t in first["terms"])
+    assert out["metrics"]["by_route"]["commit-subject"] == 1  # 閉じた #10 は数えない
