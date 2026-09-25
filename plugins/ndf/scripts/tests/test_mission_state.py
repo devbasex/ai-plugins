@@ -281,5 +281,108 @@ def test_next_replace_rewrites_command_section(r6):
 
 
 def test_no_llm_calls():
+    """LLM を呼ばない。外へ出るのは MVV を写すときの gh api だけである。"""
     src = SCRIPT.read_text()
-    assert "claude" not in src and "subprocess" not in src
+    assert "claude" not in src
+    assert src.count("subprocess.run(") == 1 and '["gh", "api"' in src
+
+
+# ---------- pace: fast の MVV（#1078） ----------
+
+MILESTONE = """マイルストーン 26 の説明
+
+## Mission
+
+速く届ける
+
+## Vision
+
+止まらずに回る
+
+## Value
+
+1. スクリプトで判定する
+2. 実測で決める
+
+## 備考
+
+写さない節
+"""
+
+
+def gh_env(tmp_path: Path, description: str | None) -> dict:
+    import os
+    bindir = tmp_path / "bin"
+    bindir.mkdir(exist_ok=True)
+    gh = bindir / "gh"
+    if description is None:
+        gh.write_text("#!/bin/sh\necho 'HTTP 404' >&2\nexit 1\n")
+    else:
+        (tmp_path / "desc.txt").write_text(description)
+        gh.write_text(f"#!/bin/sh\necho \"$@\" >> {tmp_path / 'gh-calls.txt'}\ncat {tmp_path / 'desc.txt'}\n")
+    gh.chmod(0o755)
+    return {**os.environ, "PATH": f"{bindir}:{os.environ['PATH']}"}
+
+
+def run_env(env: dict, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run([sys.executable, str(SCRIPT), *args], capture_output=True, text=True, timeout=30, env=env)
+
+
+def test_init_fast_copies_the_three_sections_and_hashes_them(tmp_path):
+    import hashlib
+    env = gh_env(tmp_path, MILESTONE)
+    mission = tmp_path / "state" / "mission-state.json"
+    p = run_env(env, "init", str(mission), "--name", "m", "--pace", "fast", "--milestone", "26")
+    assert p.returncode == 0, p.stdout + p.stderr
+    m = json.loads(mission.read_text())
+    mvv = Path(m["mvv"]["path"])
+    assert m["pace"] == "fast" and mvv == tmp_path / "state" / "mvv.md"
+    text = mvv.read_text()
+    assert "## Mission" in text and "## Vision" in text and "2. 実測で決める" in text
+    assert "写さない節" not in text and "マイルストーン 26 の説明" not in text
+    assert m["mvv"]["sha256"] == hashlib.sha256(mvv.read_bytes()).hexdigest()
+    assert "milestones/26" in (tmp_path / "gh-calls.txt").read_text()
+
+
+@pytest.mark.parametrize("description", [MILESTONE.replace("## Vision", "## 展望"), None])
+def test_init_fast_without_the_sections_writes_nothing_and_returns_three(tmp_path, description):
+    env = gh_env(tmp_path, description)
+    mission = tmp_path / "state" / "mission-state.json"
+    p = run_env(env, "init", str(mission), "--name", "m", "--pace", "fast", "--milestone", "26")
+    assert p.returncode == 3, p.stdout + p.stderr
+    assert not mission.exists()
+
+
+def test_init_fast_without_a_source_returns_two(tmp_path):
+    p = run("init", str(tmp_path / "m.json"), "--name", "m", "--pace", "fast")
+    assert p.returncode == 2
+    assert not (tmp_path / "m.json").exists()
+
+
+def test_init_normal_keeps_the_old_shape(r6):
+    init(r6)
+    m = json.loads(Path(r6["mission"]).read_text())
+    assert m["pace"] == "normal" and "mvv" not in m
+
+
+def test_mvv_approval_and_the_gate_by_the_judgement(tmp_path):
+    import hashlib
+    mvv = tmp_path / "given.md"
+    mvv.write_text("## Mission\nx\n## Vision\ny\n## Value\nz\n")
+    mission = tmp_path / "mission-state.json"
+    ok("init", str(mission), "--name", "m", "--pace", "fast", "--mvv", str(mvv))
+    ok("gate", str(mission), "MVV", "--what", "MVV を承認")
+    ok("gate", str(mission), "関門 2", "--what", "本番 10.17.30", "--by", "mvv", "--verdict", "follow",
+       "--reasons", '["Value 1"]', "--log", "/x/mvv-gate.jsonl")
+    g = {x["name"]: x for x in json.loads(mission.read_text())["gates"]}
+    assert g["MVV"]["sha256"] == hashlib.sha256(mvv.read_bytes()).hexdigest()
+    assert g["MVV"].get("by", "user") == "user"
+    assert (g["関門 2"]["by"], g["関門 2"]["verdict"], g["関門 2"]["reasons"], g["関門 2"]["log"]) == \
+        ("mvv", "follow", ["Value 1"], "/x/mvv-gate.jsonl")
+    p = run("status", str(mission))
+    assert "関門 2: MVV の判定 " in p.stdout
+
+
+def test_mvv_approval_without_an_mvv_stops(r6):
+    init(r6)
+    assert run("gate", r6["mission"], "MVV", "--what", "x").returncode == 1

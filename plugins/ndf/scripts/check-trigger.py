@@ -45,10 +45,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 from step_result import (EXIT_OK, EXIT_PRECONDITION, EXIT_UNREADABLE, EXIT_VIOLATION,  # noqa: E402
                          emit, result)
+from pace import PaceError, matches, read_pace  # noqa: E402
 
 TOOL = "check-trigger"
-DECL = "pace.json"
-DEFAULT_TRIGGERS = {"score": 15, "common_weight": 2, "lines": 5000, "escapes": 2, "hours": 24}
 MERGE_SUBJECT = re.compile(r"^Merge pull request #(\d+) from [^/\s]+/(\S+)")
 SKIP_BRANCHES = ("release/", "check/")
 BASE_PREFIX = "check-base/"
@@ -112,16 +111,10 @@ def read_json(path: Path, what: str) -> dict:
 
 
 def load_decl(root: Path) -> dict:
-    d = read_json(root / ".ndf" / DECL, "進め方の宣言")
-    areas = d.get("areas") or []
-    if not isinstance(areas, list) or not all(
-            isinstance(a, dict) and isinstance(a.get("name"), str) and a["name"]
-            and isinstance(a.get("paths"), list) and a["paths"] for a in areas):
-        raise Stop(f"進め方の宣言の areas は name と paths を持つ: {root / '.ndf' / DECL}")
-    triggers = {**DEFAULT_TRIGGERS, **(d.get("triggers") or {})}
-    if not all(isinstance(v, (int, float)) and v >= 0 for v in triggers.values()):
-        raise Stop("進め方の宣言の triggers は 0 以上の数で書く")
-    return {**d, "areas": areas, "triggers": triggers, "boundary_paths": list(d.get("boundary_paths") or [])}
+    try:
+        return read_pace(root)
+    except PaceError as e:
+        raise Stop(str(e))
 
 
 def optional_decl(root: Path, name: str) -> dict:
@@ -129,27 +122,6 @@ def optional_decl(root: Path, name: str) -> dict:
         return read_json(root / ".ndf" / name, name)
     except Stop:
         return {}
-
-
-def glob_re(pattern: str) -> re.Pattern:
-    """glob を正規表現にする。`**` は区切りをまたぎ、`*` と `?` はまたがない。"""
-    out, i = "", 0
-    while i < len(pattern):
-        if pattern.startswith("**/", i):
-            out, i = out + "(?:.*/)?", i + 3
-        elif pattern.startswith("**", i):
-            out, i = out + ".*", i + 2
-        elif pattern[i] == "*":
-            out, i = out + "[^/]*", i + 1
-        elif pattern[i] == "?":
-            out, i = out + "[^/]", i + 1
-        else:
-            out, i = out + re.escape(pattern[i]), i + 1
-    return re.compile(out + r"\Z")
-
-
-def matches(path: str, patterns: list[str]) -> bool:
-    return any(glob_re(p).match(path) for p in patterns)
 
 
 def area_of(path: str, decl: dict) -> tuple[str, bool]:
