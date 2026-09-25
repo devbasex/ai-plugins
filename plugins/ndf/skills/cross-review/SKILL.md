@@ -129,7 +129,18 @@ python3 scripts/drive.py <PR> [--rotate-mode light|squash] [--max-rounds N] [--r
 ```
 
 待ちはコマンドの中で行う（1 ラウンドで 20 分を超えうる）。Claude Code では `run_in_background` で起動し、
-完了通知を 1 回受ける。JSON の形と終了コードの表は共通層の `scripts/lib/drive_pause.py` にある。
+完了通知を 1 回受ける。Codex / Kiro / agy では共通層の `scripts/lib/bg-wait.sh` で背景に起動し、区切った待ちを
+124 が返るあいだ**別の呼び出しとして**打ち直す。終わると駆動の出力の全体を出し、駆動の終了コードで終わる。
+
+```bash
+RC="${TMPDIR:-/tmp}/cross-review-drive-pr<PR>.rc"
+bash ../../scripts/lib/bg-wait.sh run "$RC" -- python3 scripts/drive.py <PR> [上と同じ引数]
+bash ../../scripts/lib/bg-wait.sh wait "$RC"   # 1 回 540 秒以内。124 = まだ終わっていない
+```
+
+待ち方の規約は [waiting.md](../development-workflow/references/waiting.md)、待ちから戻った後に同じ応答で次の段へ
+進む規則は [agent-layers.md](../development-workflow/references/agent-layers.md) の supervisor の規則にある。
+JSON の形と終了コードの表は共通層の `scripts/lib/drive_pause.py` にある。
 
 | 終了コード（`items[0].pause`） | 止まった地点 | すること |
 | --- | --- | --- |
