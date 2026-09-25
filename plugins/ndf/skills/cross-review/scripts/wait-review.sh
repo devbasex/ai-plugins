@@ -12,7 +12,7 @@
 #                                              env MONITOR_STALL_<AGENT> / MONITOR_STALL で上書き
 #   poll          15s                          env MONITOR_POLL で上書き
 #
-# 1200 秒は Claude Code の Bash ツールの 1 回（600 秒）に収まらない。骨組みは `bg-wait.sh` で待つ。
+# 1200 秒は Claude Code の Bash ツールの 1 回（600 秒）に収まらない。骨組みは共通層の `scripts/lib/bg-wait.sh` で待つ。
 #
 # Exit codes は monitor.py に準拠:
 #   0  OK
