@@ -29,11 +29,14 @@ RELAY = ROOT / "scripts" / "relay.py"
 
 
 def isolated_env(tmp_path, **extra):
-    """一時の HOME と XDG_* だけを持つ環境。本物の HOME を指さないことを確かめてから返す。"""
+    """一時の HOME と XDG_* だけを持つ環境。本物の HOME を指さないことを確かめてから返す。
+
+    **`DEVBASE_SHELLRC_DIR` も落とす。** 残すと install / uninstall が本物の置き場の `ndf-relay.sh` を書き換え、消す。
+    """
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
     e = {k: v for k, v in os.environ.items()
-         if not k.startswith(("NDF_", "XDG_", "CLAUDE")) and k not in ("ZDOTDIR",)}
+         if not k.startswith(("NDF_", "XDG_", "CLAUDE", "DEVBASE_")) and k not in ("ZDOTDIR",)}
     e["HOME"] = str(home)
     e.update({k: str(v) for k, v in extra.items()})
     real_home = os.path.expanduser("~")
