@@ -46,7 +46,7 @@ NDF の開発ワークフローは、要求と設計の前に、そのプロジ�
 | コンテキスト | 何の語が 1 つの意味に決まるか |
 | --- | --- |
 | プロジェクトの用語集（`project-glossary`） | 各プロジェクトが持つユビキタス言語。語・意味・コンテキスト・廃止した語・正本 |
-| NDF の開発ワークフロー（`ndf-workflow`） | NDF がリリースする工程・承認ゲート・モード・ステップの語。`development-workflow/references/glossary.md` が持つ |
+| NDF の開発ワークフロー（`ndf-workflow`） | NDF が提供する工程・承認ゲート・モード・ステップの語。`development-workflow/references/glossary.md` が持つ |
 
 **2 つは公開された言語の関係にある。** NDF のスクリプトは、プロジェクトが書いた用語集を宣言が指す形式
 （`glossary-format.md` の JSON）でだけ読む。用語集の中身の語は NDF の語彙に入らず、NDF の語彙も

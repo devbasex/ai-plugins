@@ -9,12 +9,12 @@
     {
       "id": "ndf-workflow",
       "name": "NDF の開発ワークフロー",
-      "meaning": "NDF が配る工程・関門・モード・段の語。development-workflow/references/glossary.md が持つ"
+      "meaning": "NDF が提供する工程・承認ゲート・モード・ステップの語。development-workflow/references/glossary.md が持つ"
     },
     {
       "id": "ndf-notification",
       "name": "NDF の Slack 通知",
-      "meaning": "利用者の手を待つ時点・その種類・通知の本文と戻り先"
+      "meaning": "利用者の手を待つ時点・その種類・通知の本文と復帰先"
     }
   ],
   "terms": [
@@ -61,39 +61,57 @@
       "source": "docs/specifications/ndf-ubiquitous-language.md"
     },
     {
-      "term": "用語集の宣言",
+      "term": "用語集の設定",
       "context": "ndf-workflow",
-      "meaning": "`.ndf/glossary.json`。用語集の置き場・形式・検査の対象を持つ",
+      "meaning": "`.ndf/glossary.json`。用語集の置き場・形式・チェックの対象を持つ",
+      "deprecated": [
+        "用語集の宣言"
+      ],
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
-      "term": "語のチェック",
+      "term": "用語チェック",
       "context": "ndf-workflow",
       "meaning": "`glossary.py check`。用語集の形と、文書の追加した行の語を見る",
+      "deprecated": [
+        "語のチェック"
+      ],
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
-      "term": "モデルの段",
+      "term": "モデルレビュー",
       "context": "ndf-workflow",
       "meaning": "設計 PR のレビューの 1 ラウンド目。ドメインモデルの節だけを見る",
+      "deprecated": [
+        "モデルの段"
+      ],
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
-      "term": "詳細の段",
+      "term": "詳細レビュー",
       "context": "ndf-workflow",
       "meaning": "設計 PR のレビューの 2 ラウンド目以降。確定したモデルを前提に残りを見る",
+      "deprecated": [
+        "詳細の段"
+      ],
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
-      "term": "仕様の写し",
+      "term": "仕様のコピー",
       "context": "ndf-workflow",
       "meaning": "課題の本文にある要求を、設計 PR と一緒にコミットする `issues/` のファイル",
+      "deprecated": [
+        "仕様の写し"
+      ],
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
-      "term": "待ちの通知",
+      "term": "待ち通知",
       "context": "ndf-notification",
       "meaning": "利用者の回答か承認が無いと進まない時点で、Slack へ送る知らせ",
+      "deprecated": [
+        "待ちの通知"
+      ],
       "pending_source": "issues/issue-821-wait-notify-design.md"
     },
     {
@@ -105,25 +123,394 @@
     {
       "term": "承認待ち",
       "context": "ndf-notification",
-      "meaning": "利用者に操作の許可（ツールの実行・計画・マージ・配布など）を求めている待ち",
+      "meaning": "利用者に操作の許可（ツールの実行・プラン・マージ・リリースなど）を求めている待ち",
       "pending_source": "issues/issue-821-wait-notify-design.md"
     },
     {
-      "term": "待ちの鍵",
+      "term": "待ちのキー",
       "context": "ndf-notification",
       "meaning": "1 つの待ちを見分ける値。Claude Code では transcript の最後の user の項目の `uuid`（利用者が答える・許可すると変わる）",
+      "deprecated": [
+        "待ちの鍵"
+      ],
       "pending_source": "issues/issue-821-wait-notify-design.md"
     },
     {
-      "term": "戻り先",
+      "term": "復帰先",
       "context": "ndf-notification",
-      "meaning": "通知から当該セッションへ戻る手段。ホスト名・cwd の行と、作れればセッションの URL か再開のコマンド",
+      "meaning": "通知から当該セッションへ復帰する手段。ホスト名・cwd の行と、作れればセッションの URL か再開のコマンド",
+      "deprecated": [
+        "戻り先"
+      ],
       "pending_source": "issues/issue-821-wait-notify-design.md"
     },
     {
-      "term": "チェイン",
+      "term": "パイプライン",
       "context": "ndf-workflow",
-      "meaning": "queue が `--then` でつないだ計画の列（実装 → 検査 → 実装レビュー → 開発版 → 本番）。列の 1 つ分がステージ。「鎖」とは書かない（1 文字の語は照合できないため廃止の語に入れていない）",
+      "meaning": "キューが `--then` でつないだプランの列（実装 → 検査 → コードレビュー → 開発版 → 本番）。列の 1 つ分がステージ",
+      "deprecated": [
+        "チェイン"
+      ],
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "セッション",
+      "context": "ndf-workflow",
+      "meaning": "ラッパーが起動する claude の 1 回の起動（1 つの会話）。番号を付けて「セッション 4」と呼ぶ",
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "プラン",
+      "context": "ndf-workflow",
+      "meaning": "`supervise.py` が流す 1 本の JSON（`plan.json`）。フェーズの手順をステップの列として持つ",
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "キュー",
+      "context": "ndf-workflow",
+      "meaning": "プランを空いた枠へ順に流す `supervise.py queue`。終わると結果を done へ書く",
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "リリース差分",
+      "context": "ndf-workflow",
+      "meaning": "版と版の間（タグからタグまで）の変更",
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "インライン実行",
+      "context": "ndf-workflow",
+      "meaning": "仕事を渡す実行方式の 1 つ。いまの会話の文脈で行う",
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "オーケストレーター",
+      "context": "ndf-workflow",
+      "meaning": "`cross-refactoring` と `cross-review` で、公開・生成物の同期を持ち、担当を回す側。3 層では conductor に当たる",
+      "deprecated": [
+        "進行側"
+      ],
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "レッドライン",
+      "context": "ndf-workflow",
+      "meaning": "当たれば MVV 判定が「従う」でも利用者の承認を求める範囲",
+      "deprecated": [
+        "越えない線"
+      ],
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "実行条件",
+      "context": "ndf-workflow",
+      "meaning": "プランを流す前に打つコマンド。`skip_code` を返せば worktree を作らずに完了とする",
+      "deprecated": [
+        "実行の条件"
+      ],
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "流出不具合",
+      "context": "ndf-workflow",
+      "meaning": "マージ済みの変更に見つかった不具合。直した Pull Request が触った領域を記録し、トリガーに数える",
+      "deprecated": [
+        "逃げた不具合"
+      ],
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "重点領域",
+      "context": "ndf-workflow",
+      "meaning": "`pace: fast` の領域のうち、触った Pull Request の点数を重くするもの",
+      "deprecated": [
+        "共通層"
+      ],
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "承認ゲート",
+      "context": "ndf-workflow",
+      "meaning": "人手の承認を求める点。設計 Pull Request のマージ（ゲート 1）と本番の系へ届く操作（ゲート 2）の 2 つだけ",
+      "deprecated": [
+        "関門"
+      ],
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "承認資料",
+      "context": "ndf-workflow",
+      "meaning": "承認を求めるときに示すもの。対象を開くためのものと、承認の判断に使うものの 2 層を持つ",
+      "deprecated": [
+        "提示物"
+      ],
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "エビデンス",
+      "context": "ndf-workflow",
+      "meaning": "承認資料のうち機械で作れる部分と、conductor が確かめて足した事実。MVV 判定へ渡す",
+      "deprecated": [
+        "事実の材料"
+      ],
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "リリース",
+      "context": "ndf-workflow",
+      "meaning": "変更を利用者へ届く形で公開すること。その工程とフェーズの名前でもある",
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "リリースプラン",
+      "context": "ndf-workflow",
+      "meaning": "リリースの手順をステップの列として持つプラン",
+      "deprecated": [
+        "配布の計画"
+      ],
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "リリースコマンド",
+      "context": "ndf-workflow",
+      "meaning": "リポジトリが `.ndf/release.json` に宣言し、`release` がリリースの段階に合わせて走らせる 1 つのコマンド",
+      "deprecated": [
+        "配布のコマンド"
+      ],
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "検証リリース",
+      "context": "ndf-workflow",
+      "meaning": "開発版と分かる版数での公開か、検証環境への反映",
+      "deprecated": [
+        "検証への配布"
+      ],
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "インストール確認",
+      "context": "ndf-workflow",
+      "meaning": "隔離した HOME で ref からプラグインをインストールし、版と中身が ref と一致するかを確かめる",
+      "deprecated": [
+        "導入確認"
+      ],
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "リリース完了の確認",
+      "context": "ndf-workflow",
+      "meaning": "公開が済んだことを、リリース先の状態から読み取れる値",
+      "deprecated": [
+        "完了の事実"
+      ],
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "スタックしたチェック",
+      "context": "ndf-workflow",
+      "meaning": "実行が終わったのに pending のまま残った CI のチェック",
+      "deprecated": [
+        "取り残されたチェック"
+      ],
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "リファクタリング",
+      "context": "ndf-workflow",
+      "meaning": "振る舞いを変えずに構造を直す工程",
+      "deprecated": [
+        "構造改善"
+      ],
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "コードレビュー",
+      "context": "ndf-workflow",
+      "meaning": "実装の差分をレビューし、新しい指摘が出なくなるまで直す工程",
+      "deprecated": [
+        "実装レビュー"
+      ],
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "リファクタリング計画",
+      "context": "ndf-workflow",
+      "meaning": "`cross-refactoring` が採る改善項目を決め、見送った提案と理由を残す出力",
+      "deprecated": [
+        "改修計画"
+      ],
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "バッファ",
+      "context": "ndf-workflow",
+      "meaning": "`cross-refactoring` の見積りで、想定最大時間から経過を引いた後に残しておく時間",
+      "deprecated": [
+        "予備時間"
+      ],
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "ラウンドテスト",
+      "context": "ndf-workflow",
+      "meaning": "`cross-refactoring` で、`--scope` のテストの置き場所を走らせるコマンド",
+      "deprecated": [
+        "ラウンドのテスト"
+      ],
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "グレード",
+      "context": "ndf-workflow",
+      "meaning": "`cross-refactoring` が候補ごとに付ける適用の価値（high / medium / low）",
+      "deprecated": [
+        "等級"
+      ],
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "指摘ファイル",
+      "context": "ndf-workflow",
+      "meaning": "`cross-review` の担当が書く、指摘の全件と総評のファイル",
+      "deprecated": [
+        "指摘のファイル"
+      ],
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "進捗記録",
+      "context": "ndf-workflow",
+      "meaning": "工程に入った時点で 1 回打つ記録。課題の本文の「進行」も同じ 1 回で更新される",
+      "deprecated": [
+        "進行の記録"
+      ],
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "ミッション状態ファイル",
+      "context": "ndf-workflow",
+      "meaning": "ミッションのプラン・done・承認ゲートの記録・MVV・版を持つファイル（`mission.json`）",
+      "deprecated": [
+        "ミッションの状態"
+      ],
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "シグナルファイル",
+      "context": "ndf-workflow",
+      "meaning": "ラッパーへ知らせるファイル（`next.json` と `stop`）",
+      "deprecated": [
+        "合図"
+      ],
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "アナウンス",
+      "context": "ndf-workflow",
+      "meaning": "ndf-next のブロックの直前にそのまま置く 1 文",
+      "deprecated": [
+        "告知"
+      ],
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "アイドル",
+      "context": "ndf-workflow",
+      "meaning": "シグナルファイル・会話の記録・利用者の入力が動かない秒数。この秒数がたつまでラッパーは `/exit` を入力しない",
+      "deprecated": [
+        "静止"
+      ],
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "パススルー",
+      "context": "ndf-workflow",
+      "meaning": "ラッパーを挟まず、本物の claude をそのまま起動すること",
+      "deprecated": [
+        "素通し"
+      ],
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "進捗ログ",
+      "context": "ndf-workflow",
+      "meaning": "プランの実行中に 1 行 1 つの JSON で追記する記録（`progress.jsonl`）",
+      "deprecated": [
+        "途中の報告"
+      ],
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "フェーズレポート",
+      "context": "ndf-workflow",
+      "meaning": "supervisor（またはプラン）が最後に返す報告",
+      "deprecated": [
+        "フェーズの報告"
+      ],
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "worktree",
+      "context": "ndf-workflow",
+      "meaning": "開発の変更を行う git worktree。課題ごとに 1 つ切る",
+      "deprecated": [
+        "作業ツリー"
+      ],
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "メインディレクトリ",
+      "context": "ndf-workflow",
+      "meaning": "リポジトリを clone したディレクトリ",
+      "deprecated": [
+        "主ディレクトリ"
+      ],
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "ベースブランチ",
+      "context": "ndf-workflow",
+      "meaning": "worktree の分岐元と Pull Request の宛先",
+      "deprecated": [
+        "起点のブランチ"
+      ],
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "ミッションブランチ",
+      "context": "ndf-workflow",
+      "meaning": "課題の Pull Request を集め、ベースブランチへの Pull Request をミッションで 1 本にするブランチ",
+      "deprecated": [
+        "ミッションのブランチ"
+      ],
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "安定版と実験版",
+      "context": "ndf-workflow",
+      "meaning": "NDF の変更の 2 つの経路（stable / experimental）。実験版の置き場は `experimental/`",
+      "deprecated": [
+        "安定と試行"
+      ],
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "即時修正",
+      "context": "ndf-workflow",
+      "meaning": "`pace: fast` で、200 行以内の不具合を起票せず、その場のプランで直すこと",
+      "deprecated": [
+        "その場で直す"
+      ],
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "棚卸し",
+      "context": "ndf-workflow",
+      "meaning": "既存の課題の本文・マイルストーン・ラベルを現状に合わせること",
+      "deprecated": [
+        "手入れ"
+      ],
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     }
   ]
