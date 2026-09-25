@@ -85,7 +85,9 @@ pj_field_name() {
 }
 
 # 値がその一覧に含まれるか。含まれない値は書き込まない。
-_pj_in_list() { printf '%s\n' "$1" | grep -Fxq -- "$2"; }
+# パイプにしない。pipefail の下で grep -q が先に終わると printf が SIGPIPE を受け、
+# 一覧にある値でも 141 を返すため（#906）。
+_pj_in_list() { grep -Fxq -- "$2" <<<"$1"; }
 pj_is_stage() { _pj_in_list "$PJ_STAGES" "${1:-}"; }
 pj_is_mode() { _pj_in_list "$PJ_MODES" "${1:-}"; }
 pj_is_status() { _pj_in_list "$PJ_STATUSES" "${1:-}"; }

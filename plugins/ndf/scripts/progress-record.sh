@@ -160,7 +160,7 @@ else
   gh issue edit "$ISSUE" --body-file "$NEW_FILE" >/dev/null 2>&1 || exit 0
 fi
 if [ "$STAGE" = "-" ]; then
-  printf '#%s 進行の見出し = %s\n' "$ISSUE" "$(sed -n '/^## 進行[[:space:]]*$/,/^## /{/^モード: /p}' "$NEW_FILE" | head -1)"
+  printf '#%s 進行の見出し = %s\n' "$ISSUE" "$(sed -n '/^## 進行[[:space:]]*$/,/^## /{/^モード: /p;}' "$NEW_FILE" | head -1)"
 else
   printf '#%s 進行 = %s\n' "$ISSUE" "$STAGE"
 fi

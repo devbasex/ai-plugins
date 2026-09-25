@@ -11,10 +11,13 @@
 set -euo pipefail
 
 CMD="${1:-status}"
-SETTINGS="$HOME/.claude/settings.json"
+# settings.json は Claude Code と同じく CLAUDE_CONFIG_DIR（無ければ ~/.claude）の下を読み書きする。
+# statusline の本体は settings.json の command が ~ 起点で指すため ~/.claude に置く。
+CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+SETTINGS="$CONFIG_DIR/settings.json"
 TARGET="$HOME/.claude/ndf-statusline.sh"
-BACKUP="$HOME/.claude/.ndf-statusline-backup.json"
-LOCK="$HOME/.claude/.ndf-statusline.lock"
+BACKUP="$CONFIG_DIR/.ndf-statusline-backup.json"
+LOCK="$CONFIG_DIR/.ndf-statusline.lock"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC="$SCRIPT_DIR/statusline.sh"
 NDF_COMMAND="bash ~/.claude/ndf-statusline.sh"
@@ -27,7 +30,7 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 0
 fi
 
-mkdir -p "$HOME/.claude"
+mkdir -p "$HOME/.claude" "$CONFIG_DIR"
 if [ ! -f "$SETTINGS" ]; then
   echo "{}" > "$SETTINGS"
 fi
@@ -152,7 +155,7 @@ cmd_ensure() {
     return 0
   fi
   set_ndf_statusline
-  echo "[ndf] statusLine を NDF 標準 statusline に設定しました (~/.claude/settings.json)"
+  echo "[ndf] statusLine を NDF 標準 statusline に設定しました (${SETTINGS})"
 }
 
 cmd_set() {
