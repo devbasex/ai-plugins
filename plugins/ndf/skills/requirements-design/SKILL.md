@@ -152,14 +152,14 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 課題を読む人が GitHub の上で受け入れ条件を読めるように、要求の全文を本文へ書く
 （`gh issue edit <番号> --body-file <ファイル>`）。本文にファイルのパスだけを書かない。
 
-`standard` では、設計と要求を同じ差分でレビューするために、本文の写しを `issues/` に置く。
+`standard` では、設計と要求を同じ差分でレビューするために、本文のコピー（仕様のコピー）を `issues/` に置く。
 
-1. `python3 "$SCRIPTS/spec-copy.py" write <課題> issues/issue-<番号>-requirements.md` で写しを作る
+1. `python3 "$SCRIPTS/spec-copy.py" write <課題> issues/issue-<番号>-requirements.md` でコピーを作る
    （本文の `## 進行` より前の全文）
-2. 写しは設計 PR と一緒にコミットする。本文を直したら `write` で写しを作り直す（手で直さない）
+2. コピーは設計 PR と一緒にコミットする。本文を直したら `write` でコピーを作り直す（手で直さない）
 3. 設計 PR を出す前に `spec-copy.py check <課題> <写し>` が 0 であることを確かめる（`design` の手順 5）
 
-`implementation-plan` が同じ変更の実装計画を作る場合は、写しの**別の節**にする。写しにしか無い節は
+`implementation-plan` が同じ変更の実装計画を作る場合は、コピーの**別の節**にする。コピーにしか無い節は
 `check` が許す。仕様と分解を別ファイルに分けると、片方だけが更新されて食い違う。
 
 ## 曖昧なまま実装しない
