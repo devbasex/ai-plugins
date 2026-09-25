@@ -178,7 +178,7 @@ flowchart TB
 | 主ディレクトリ | リポジトリを clone したディレクトリ。`issues/` `docs/` と各ランタイムの設定は、ここで編集してよい | `git rev-parse --git-common-dir` の親 | — | [worktree](../../worktree/SKILL.md) の用語の表 |
 | 起点のブランチ | 作業ツリーの分岐元と Pull Request の宛先 | `.ndf/worktree.json` の `base_branch` | — | [../SKILL.md](../SKILL.md) の「本番の系へ届く操作」 |
 | ミッションのブランチ | 課題の Pull Request を集め、起点のブランチへの Pull Request をミッションで 1 本にするブランチ。`fast` では作らない | `mission/<名前>` | — | [parallel-work.md](parallel-work.md) の「ミッションの中の並列の 4 つの形」 |
-| 安定と試行 | NDF の変更の 2 つの経路。既定で働くもの（安定）は工程どおりに、呼んだときだけ働くもの（試行）はその場で実装して使ってから入れる | 試行の置き場 `plugins/ndf/scripts/experimental/`、台帳 `docs/ndf-experiments.md` | — | ai-plugins の `AGENTS.md` の「安定と試行」 |
+| 安定と試行 | NDF の変更の 2 つの経路。既定で働くもの（安定）は工程どおりに、呼んだときだけ働くもの（試行）はその場で実装して使ってから入れる | 台帳 `docs/ndf-experiments.md` | — | ai-plugins の `AGENTS.md` の「安定と試行」 |
 | その場で直す | `fast` で、200 行以内の不具合を起票せず、その場の計画で直すこと。マージ済みの変更の不具合なら逃げた不具合として記録する | `new impl --escape-of <PR>` | — | [../SKILL.md](../SKILL.md) の「進め方」、[pace.md](pace.md) の「逃げた不具合の記録」 |
 | 範囲外の課題 | この変更の受け入れ条件にも直す対象にも入らない課題。見つけたその場で issue にする | `/ndf:out-of-scope` | — | [out-of-scope](../../out-of-scope/SKILL.md) |
 | 手入れ | 既存の課題の本文・マイルストーン・ラベルを現状に合わせること | `/ndf:issue-upkeep`、`upkeep.py` | — | [issue-upkeep](../../issue-upkeep/SKILL.md) の「用語」 |
