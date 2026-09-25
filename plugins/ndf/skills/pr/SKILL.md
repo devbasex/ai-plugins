@@ -15,28 +15,14 @@ allowed-tools:
 
 **制約**: デフォルトブランチ(main, masterなど)で直接コミット禁止
 
-## 使用方法
+## 引数
 
-```
-/ndf:pr                           # main へ通常PR作成
-/ndf:pr --draft                   # main へドラフトPR作成
-/ndf:pr "新機能の追加"             # コミットメッセージ指定
-/ndf:pr --draft "wip: 作業中"      # ドラフトPR + メッセージ指定
-/ndf:pr qa/staging                # base非main → cherry-pick-prへ誘導
-```
-
-## 引数の解釈
-
-- `--draft` が含まれていればドラフトPR
-- 既知のベースブランチ名（`main`, `master`, `qa/*`, `release/*`, `staging/*` 等）が末尾にあればベース指定
-- それ以外の文字列はコミットメッセージとして扱う
-- デフォルトは `main` ベース、非ドラフト
+`/ndf:pr [--draft] [base] ["メッセージ"]`。`--draft` はドラフト PR、既知のベース名（`main` / `master` /
+`qa/*` / `release/*` / `staging/*` 等）はベース、それ以外はコミットメッセージ。既定は `main` ベース・非ドラフト。
 
 ## push / PR 作成前の同意取得（必須）
 
-push と PR 作成は外部（GitHub）への書き込みで、取り消しには追加の操作が要る。
-この Skill は自然文の依頼でも起動するため、安全性はこの手順で担保する
-（frontmatter の発動制御には依存しない）。
+push と PR 作成は取り消しに追加の操作が要る書き込みである。自然文の依頼でも起動するため、この手順で守る。
 
 **手順 3（push）と手順 4（PR 作成）の直前に、`plan` の結果から次を提示する。**
 
@@ -47,11 +33,10 @@ push と PR 作成は外部（GitHub）への書き込みで、取り消しに�
 
 同意の扱い:
 
-- 利用者の依頼が push と PR 作成まで明示的に含む場合（`/ndf:pr` の明示起動、
-  「コミットしてPRを作って」等）は、その依頼を同意とみなしてよい。提示は行い、
-  結果報告に含める
-- それ以外（作業の流れで暗黙に起動した場合）は、提示したうえで**明示的な同意を得てから
-  push する**。同意が得られなければ commit までで止め、push も PR 作成も行わない
+- 依頼が push と PR 作成まで明示的に含む（`/ndf:pr` の明示起動、「コミットしてPRを作って」等）なら、
+  依頼を同意とみなす。提示は行い、結果報告に含める
+- 作業の流れで暗黙に起動したときは、提示したうえで**明示的な同意を得てから push する**。
+  同意が無ければ commit までで止める
 - ベースブランチが `main`/`master` 以外の場合は、手順 1 の誘導を優先する
 
 ## この文書が受け取る値
@@ -131,16 +116,13 @@ URL は最終行に生のまま置く（Markdown リンクにすると利用者�
 
 ## 閉じる語は本文だけに書く
 
-**閉じる語（`Closes` / `Fixes` / `Resolves`）を書くのは Pull Request の本文だけである。** コミット
-メッセージに書くと、既定ブランチへのマージで**そのコミットが指す課題だけ**が先に閉じ、同じまとまりの
-課題が閉じたものと開いたものに割れる。**本文の閉じる語は外さない**（`development-workflow` の
-`references/stage-completeness.md` と `progress-tracking` の「まとまりを閉じる」が本文を入力にする）。
-閉じる語は番号ごとに要る。
+**閉じる語（`Closes` / `Fixes` / `Resolves`）は Pull Request の本文だけに、番号ごとに書く。** コミット
+メッセージに書くと、マージでそのコミットが指す課題だけが先に閉じ、まとまりが割れる。**本文の閉じる語は
+外さない**（`stage-completeness.md` と `progress-tracking` の「まとまりを閉じる」が本文を入力にする）。
 
 ## 設計 Pull Request の本文
 
-**head のブランチ名が `design/` で始まる Pull Request の本文は、決定の中身を持たない。** 本文と設計文書が
-同じ決定を別の文で持つと、設計を変えたときに片方だけが直る。
+**head のブランチ名が `design/` で始まる Pull Request の本文は、決定の中身を持たない**（決定は設計文書だけが持つ）。
 
 | 節 | 何を書くか |
 | --- | --- |
@@ -151,32 +133,26 @@ URL は最終行に生のまま置く（Markdown リンクにすると利用者�
 突き合わせは `bash "$SCRIPTS/pr-body-decisions.sh" check <number>`（0 一致・対象外 / 1 食い違い /
 2 読めない）。**2 を一致と読まない。**
 
-## 命名規則
+## 命名と検証ブランチ
 
-ブランチは英語（github flow）、コミット・PR は日本語。prefix 例: `feat:` / `fix:` / `refactor:` /
-`docs:` / `test:` / `chore:`。
-
-## 検証ブランチ(qa/*等)へのPR作成
-
-**featureブランチから直接検証ブランチへPRを作成してはいけません**（merge すると main が汚染される）。
-`/ndf:cherry-pick-pr <base-branch>` を使う。
+ブランチは英語（github flow）、コミット・PR は日本語（prefix 例: `feat:` / `fix:` / `docs:` / `chore:`）。
+検証ブランチ（`qa/*` 等）へは feature ブランチから直接 PR を出さず、`/ndf:cherry-pick-pr <base>` を使う
+（マージで main の変更が混ざる）。
 
 ## マージに人手の承認が要るか
 
-**Pull Request を出すこと自体は承認の関門ではない。** 要否を決めるのは**マージ先のチャネル**
-である。検証環境や開発版のチャネルへ入れるマージは取り消せるため、承認を求めない。
+要否は**マージ先のチャネル**で決まる。Pull Request を出すこと自体に承認は要らない。
 
 | マージ先 | 承認 |
 | --- | --- |
 | 開発版・検証環境のチャネル | 要らない |
 | **本番のチャネル** | **要る** |
-| head のブランチ名が `design/` で始まる Pull Request | **チャネルによらず要る**（ドキュメントレビューの関門） |
+| head のブランチ名が `design/` で始まる Pull Request | **どのチャネルでも要る**（ドキュメントレビューの関門） |
 
-**規則は `/ndf:release` が持つ。** どのブランチが本番のチャネルかはリポジトリが宣言し
-（`.ndf/worktree.json` の `production_branch`）、宣言が無ければ既定ブランチを指す。判定の
-全体像は `/ndf:development-workflow` の「人手の承認を求める関門」にある。
+**規則は `/ndf:release` が持つ。** 本番のチャネルは `.ndf/worktree.json` の `production_branch`、
+宣言が無ければ既定ブランチ。全体像は `/ndf:development-workflow` の「人手の承認を求める関門」。
 
-この工程に入ったら記録のコマンド `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "Pull Request"` を 1 行打つ（issue の本文と盤面の両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「記録のコマンド」を使う）。
+この工程に入ったら `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "Pull Request"` を 1 行打つ（3 層では起動指示の「記録のコマンド」を使う）。
 
 ## 関連
 
@@ -185,5 +161,4 @@ URL は最終行に生のまま置く（Markdown リンクにすると利用者�
 - `/ndf:pr-tests` — Test Plan 自動実行
 - `/ndf:pr-review` — PR単位レビュー
 - `/ndf:merged` — マージ後のブランチ整理 / 現ブランチに起点ブランチを取り込み
-- `/ndf:release` — 配布。**本番の系へ届く操作の承認の規則を持つ**（もう 1 つの形は
-  運用モードの実行で、そちらは `development-workflow` の `references/operation-run.md`）
+- `/ndf:release` — 配布。**本番の系へ届く操作の承認の規則を持つ**
