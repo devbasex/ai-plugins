@@ -389,6 +389,15 @@ def test_stats_counts_escapes_until_the_next_record_of_the_same_kind(repo, env):
     assert rows["m-1"]["only"] is None and rows["m-r"]["only"] == "review"
 
 
+def test_stats_closes_a_review_only_range_at_the_next_full_check(repo, env):
+    append_event(env, repo, {"kind": "check", "at": iso(3), "id": "m-r", "result": "merged", "only": "review"})
+    append_event(env, repo, {"kind": "check", "at": iso(2), "id": "m-1", "result": "merged"})
+    append_event(env, repo, {"kind": "escape", "at": iso(1), "pr": 21})
+    code, out, _ = call(repo, env, "stats")
+    rows = {r["id"]: r for r in out["items"]}
+    assert code == 0 and rows["m-r"]["escapes_after"] == 0 and rows["m-1"]["escapes_after"] == 1
+
+
 def test_review_and_final_are_exclusive(repo, env):
     assert call(repo, env, "eval", "--review", "--final")[0] == 2
 

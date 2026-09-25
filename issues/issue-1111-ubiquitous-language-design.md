@@ -383,8 +383,9 @@ erDiagram
 | `review` | drive | 今と同じ（段の分け方は cross-review の中で決まる） | `glossary-check` |
 | `glossary-check` | run | `glossary.py check --diff origin/{base}` | 0 → `push-glossary`。1 → `fix-glossary` |
 | `fix-glossary` | work | 当たった語を用語集へ足すか言い換え、`render` してコミットする（push しない）。利用者が採るかを決めるべき語は直さずに「判断が要る」と報告する | `glossary-recheck` |
-| `glossary-recheck` | run | `glossary-check` と同じ | 0 → `push-glossary`。1 → `push-glossary`（当たりは段の結果に残る） |
+| `glossary-recheck` | run | `glossary-check` と同じ | 0 → `push-glossary`。1 → `push-glossary`（当たりは段の結果に残る。fast は `push-glossary-gate`） |
 | `push-glossary` | run | `git push -q`（直しが無ければ何も送らない） | `gate`（fast は `mvv`） |
+| `push-glossary-gate` | run | `git push -q`（fast だけの段。当たりが残ったときに通る） | `gate`（fast でも `mvv` へ渡さず、関門 1 の承認を求める） |
 | `gate` | judge | 今と同じ。`glossary-recheck` の結果を `inputs` に足し、当たりが残っていれば関門 1 の提示に載せる | 今と同じ |
 
 **直しは 1 回だけ試す。** 残った当たりは、語を採るかという利用者の判断であることが多く、
