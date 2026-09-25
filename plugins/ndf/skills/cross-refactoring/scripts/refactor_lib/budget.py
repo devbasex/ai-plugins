@@ -3,7 +3,7 @@
 **純粋な処理だけを置く。** 今の時刻は内部で取らず、引数で受ける。時刻を内部で取ると、
 締め切りの計算がテストで再現できない。値の単位は、断りの無い限り分である。
 
-計画で見積りを収め、実装の中は項目ごとの締め切りで着手を止める。段の監視の上限は
+計画で見積りを収め、実装の中は項目ごとの締め切りで着手を止める。手順の監視の上限は
 `timeline` がこの締め切りから導く（決定 23。決定 4 の「実行中の CLI を止めない」を改めた）。
 """
 from __future__ import annotations
@@ -14,7 +14,7 @@ from typing import Any, Optional
 from .allocation import lookup
 from .vocabulary import SEVERITY_ORDER
 
-# 段の順位。Jev か実装担当が付ける（#933 決定 11）。付いていない候補は最も低い 0 とみなす。
+# 等級の順位。Jev か実装担当が付ける（#933 決定 11）。付いていない候補は最も低い 0 とみなす。
 TIER_ORDER = {"high": 3, "medium": 2, "low": 1}
 
 
@@ -59,7 +59,7 @@ def reserve_total(r: dict[str, Any]) -> float:
 def rank_key(candidate: dict[str, Any]) -> tuple:
     """`sorted(..., key=rank_key)` の先頭が 1 位になる鍵。
 
-    順位は（段, 賛同した者の数, 重要度）の降順で、同じなら見積りの合計の昇順である。
+    順位は（等級, 賛同した者の数, 重要度）の降順で、同じなら見積りの合計の昇順である。
     降順の 3 つは符号を反転して昇順の並べ替えに載せる。
     """
     return (

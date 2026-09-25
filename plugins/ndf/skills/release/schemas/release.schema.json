@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/devbasex/ai-plugins/main/plugins/ndf/skills/release/schemas/release.schema.json",
-  "title": "NDF 配布の段の宣言",
-  "description": "リポジトリ側の .ndf/release.json。release の手順 3 で release-steps.py が読み、配布の段階に合う段を順に実行する。無ければ何もしない。",
+  "title": "NDF 配布のコマンドの宣言",
+  "description": "リポジトリ側の .ndf/release.json。release の手順 3 で release-steps.py が読み、配布の段階に合うコマンドを順に実行する。無ければ何もしない。",
   "type": "object",
   "required": ["version", "steps"],
   "additionalProperties": false,
@@ -14,7 +14,7 @@
     "version": { "type": "integer", "enum": [1], "description": "宣言の形の版" },
     "steps": {
       "type": "array",
-      "description": "段の並び。書いた順に実行し、最初に落ちた段で止める",
+      "description": "コマンドの並び。書いた順に実行し、最初に落ちたコマンドで止める",
       "items": {
         "type": "object",
         "required": ["name", "stage", "command", "writes"],
@@ -35,14 +35,14 @@
           "writes": {
             "type": "array",
             "items": { "type": "string", "minLength": 1 },
-            "description": "書いてよいパスの前置き（根からの相対。絶対パスと .. は使えない）。外を変えたら段は失敗になる。[] は何も書かない段"
+            "description": "書いてよいパスの前置き（根からの相対。絶対パスと .. は使えない）。外を変えたらコマンドは失敗になる。[] は何も書かないコマンド"
           },
           "guide": {
             "type": "string",
             "minLength": 1,
-            "description": "エージェントが判断する部分の手引き（根からの相対パス）。段が 0 で終わったら読んで従う"
+            "description": "エージェントが判断する部分の手引き（根からの相対パス）。コマンドが 0 で終わったら読んで従う"
           },
-          "timeout_seconds": { "type": "integer", "minimum": 1, "default": 600, "description": "段 1 つの時間の上限" }
+          "timeout_seconds": { "type": "integer", "minimum": 1, "default": 600, "description": "コマンド 1 つの時間の上限" }
         }
       }
     }

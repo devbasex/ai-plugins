@@ -397,7 +397,7 @@ def cmd_init(args: argparse.Namespace) -> None:
     state = _save_initial_state(args, inputs, prep, participants, baseline, round_record,
                                 started_at)
     # **出力は入口から直接呼ぶ。** 手順書の変数の出所の検査
-    # （`scripts/check-skill-shell-vars.py`）は `cmd_*` からヘルパーを 1 段だけたどる。
+    # （`scripts/check-skill-shell-vars.py`）は `cmd_*` からヘルパーを 1 階層だけたどる。
     _emit_init(state)
 
 
@@ -593,7 +593,7 @@ def decide_judge(repo: str) -> dict[str, Any]:
     """この実行で Jev を使うかを 1 度だけ決める（決定 2・AC22 AC23）。"""
     judge = jev.decide(lambda: _repo_is_public(repo))
     if judge["kind"] == "jev":
-        info("✅ 判断の一部（段・同じ変更か・D5）を Jev に問います")
+        info("✅ 判断の一部（等級・同じ変更か・D5）を Jev に問います")
     else:
         info(f"ℹ Jev は使いません（{judge['reason']}）。判断は実装担当が行います")
     return judge

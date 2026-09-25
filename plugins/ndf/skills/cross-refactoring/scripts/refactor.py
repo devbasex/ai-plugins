@@ -172,7 +172,7 @@ def add_id_commands(sub: argparse._SubParsersAction) -> None:
         ("merge-proposals", cmd_merge_proposals,
          "提案の統合・語彙としきい値・候補の切り出し（30 組 × 組の中 3 件）"),
         ("merge-plan", cmd_merge_plan,
-         "計画の取り込み・段と同じ変更か（Jev）・見積り・件数・締め切り"),
+         "計画の取り込み・等級と同じ変更か（Jev）・見積り・件数・締め切り"),
         ("merge-tests", cmd_merge_tests, "テストの追加の取り込み（test_failed / not_done）"),
         ("merge-implement", cmd_merge_implement, "実装の取り込み（1 項目 = 1 コミット / not_done）"),
         ("verify", cmd_verify, "項目ごとの範囲テストと危険の印。VERIFY=done|fix"),

@@ -1,6 +1,6 @@
 """計画の取り込み（#933 の AC7 AC8 AC9 AC10b AC22 AC23）。
 
-段と「同じ変更か」は、Jev が使えるときは Jev の答え（確信度が下限以上）、それ以外は
+等級と「同じ変更か」は、Jev が使えるときは Jev の答え（確信度が下限以上）、それ以外は
 実装担当の答えで決まる。数え上げ・見積り・飛ばして詰める・締め切りはスクリプトが行う。
 Jev の呼び出しは偽の関数へ差し替え、実際の HTTP を呼ばない。
 """
@@ -61,7 +61,7 @@ def test_items_carry_rank_estimate_tests_and_targets(planned, cmd_plan, capsys):
     _run(cmd_plan)
     state = read_state(path)
     items = state["items"]
-    assert [i["candidate_id"] for i in items] == ["C-001", "C-002"]      # 段が先
+    assert [i["candidate_id"] for i in items] == ["C-001", "C-002"]      # 等級が先
     assert items[0]["tests"] == ["tests/test_new.py"]
     assert items[0]["command"] == ["pytest", "-q", "tests/test_new.py"]
     assert items[0]["estimate"] == {"test": 2.7, "implement": 1.3, "verify": 0.2}
@@ -159,7 +159,7 @@ def test_jev_tier_wins_when_confident(planned, cmd_plan, monkeypatch):
     _run(cmd_plan)
     items = {i["symbol"]: i for i in read_state(path)["items"]}
     assert (items["f"]["tier"], items["f"]["tier_source"]) == ("high", "jev")
-    # 確信度が下限（0.6）に満たなければ実装担当の段。
+    # 確信度が下限（0.6）に満たなければ実装担当の等級。
     assert (items["g"]["tier"], items["g"]["tier_source"]) == ("high", "runtime")
 
 
@@ -181,7 +181,7 @@ def test_jev_duplicate_needs_confidence_and_only_asks_within_a_group(planned, cm
     state = read_state(path)
     assert len(asked) == 1                         # 同じ組の中の 1 組だけ
     assert [i["candidate_id"] for i in state["items"]] == ["C-001", "C-003"]
-    # 呼び出しの失敗は数え、段は実装担当の答えで決まる。
+    # 呼び出しの失敗は数え、等級は実装担当の答えで決まる。
     assert state["judge"]["failures"] == 3
     assert state["judge"]["kind"] == "jev"
 
@@ -201,7 +201,7 @@ def test_the_plan_is_not_rebuilt_on_resume(planned, cmd_plan):
 # ---------- 実行時の値を計画の終わりまでに書き出す（決定 24・25） ----------
 
 def test_the_plan_writes_every_runtime_value_to_the_state(planned, cmd_plan):
-    """計画の後の段は、状態ファイルの値と時計の比較だけで進む。値はすべて計画で出そろう。"""
+    """計画の後の手順は、状態ファイルの値と時計の比較だけで進む。値はすべて計画で出そろう。"""
     a, b = _candidate(1, "f"), _candidate(2, "g")
     path = planned([a, b], [_answer(a, tests=["tests/test_new.py"], test_targets=["tests/test_new.py"]),
                             _answer(b)])

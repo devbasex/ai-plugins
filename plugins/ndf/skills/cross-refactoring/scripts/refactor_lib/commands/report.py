@@ -145,13 +145,13 @@ def _print_header(state: dict[str, Any]) -> None:
     print(f"- 最終ゲート: {gate.get('mode') or '—'}（{gate.get('status') or '未実行'}"
           f"{' / 検証の結果を使い回した' if gate.get('whole_test_reused') else ''}"
           f" / 修正 {gate.get('fix_rounds', 0)} 回）")
-    print(f"- 監視が止めた段: {_stopped_line(state)}")
+    print(f"- 監視が止めた手順: {_stopped_line(state)}")
     print(f"- 配分テーブル: {(state.get('plan') or {}).get('table_source') or '—'}")
     print(f"- 改修計画: {plan_reference(state)}")
 
 
 def _stopped_line(state: dict[str, Any]) -> str:
-    """段の上限で監視が CLI を止めた段（決定 23）。止めていなければ「なし」。"""
+    """手順の上限で監視が CLI を止めた手順（決定 23）。止めていなければ「なし」。"""
     stopped = [f"{name}（上限 {record['stopped'].get('timeout')} 秒）"
                for name, record in (state.get("phases") or {}).items()
                if isinstance(record, dict) and record.get("stopped")]
@@ -206,7 +206,7 @@ def _item_table(state: dict[str, Any]) -> str:
     if not items:
         return "（改善項目なし）"
     lines = [
-        "| ID | 対象 | 兆候 | 手法 | 段 | 見積り（分） | 状態 | 危険の印 | 修正 |",
+        "| ID | 対象 | 兆候 | 手法 | 等級 | 見積り（分） | 状態 | 危険の印 | 修正 |",
         "| --- | --- | --- | --- | --- | ---: | --- | --- | ---: |",
     ]
     for item in items:

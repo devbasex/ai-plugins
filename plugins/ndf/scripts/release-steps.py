@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""リポジトリが宣言した配布の段を、配布の段階に合わせて走らせる（#893）。
+"""リポジトリが宣言した配布のコマンドを、配布の段階に合わせて走らせる（#893）。
 
 宣言はリポジトリの `.ndf/release.json`。形は `skills/release/schemas/release.schema.json` が定め、
 書き方は `skills/release/references/release-steps.md` にある。
@@ -9,13 +9,13 @@
 
 終了コード:
 
-    0  宣言が無い（run は何も出力しない）、段階に合う段が無い、またはすべての段が 0 で終わり
+    0  宣言が無い（run は何も出力しない）、段階に合うコマンドが無い、またはすべてのコマンドが 0 で終わり
        書いてよい場所の中だけが変わった
-    1  段が 0 以外で終わった・時間切れ・書いてよい場所の外が変わった。最初に落ちた段で止める
+    1  コマンドが 0 以外で終わった・時間切れ・書いてよい場所の外が変わった。最初に落ちたコマンドで止める
     2  check だけが返す。宣言が無い
     3  宣言が読めない。どの項目かを標準エラーに出す
 
-段はシェルを通さずに `--root` を作業ディレクトリにして実行する。段が変えたパスは、段の前後の
+コマンドはシェルを通さずに `--root` を作業ディレクトリにして実行する。コマンドが変えたパスは、コマンドの前後の
 `git status --porcelain -uall` に出たパスの内容の要約（`git hash-object`）を比べて決める。
 
 配布の決まった手順（#862。試作は #827 の phase-steps.py）も同じスクリプトに置く。結果は
@@ -91,7 +91,7 @@ def parse(raw) -> list[Step]:
         raise DeclarationError(f"version: 無いか未対応である: {version!r}（読めるのは {SUPPORTED_VERSIONS}）")
     steps = raw.get("steps")
     if not isinstance(steps, list):
-        raise DeclarationError("steps: 段の配列で書く（必須）")
+        raise DeclarationError("steps: コマンドの配列で書く（必須）")
     out = []
     for i, s in enumerate(steps):
         where = f"steps[{i}]"
@@ -110,7 +110,7 @@ def parse(raw) -> list[Step]:
             raise DeclarationError(f"{where}.command: 空でない文字列の配列で書く（必須）")
         writes = s.get("writes")
         if not isinstance(writes, list):
-            raise DeclarationError(f"{where}.writes: パスの前置きの配列で書く（必須。何も書かない段は []）")
+            raise DeclarationError(f"{where}.writes: パスの前置きの配列で書く（必須。何も書かないコマンドは []）")
         writes = [_relative(w, f"{where}.writes[{j}]") for j, w in enumerate(writes)]
         guide = s.get("guide")
         if guide is not None:
@@ -192,7 +192,7 @@ def run_steps(root: Path, stage: str, version: str, dry_run: bool) -> int:
     for step in selected(steps, stage):
         command = expand(step, version)
         if dry_run:
-            print(f"段: {step.name}（{step.stage}）")
+            print(f"コマンド: {step.name}（{step.stage}）")
             print(f"  command: {' '.join(command)}")
             print(f"  writes: {', '.join(step.writes) or '（何も書かない）'}")
             if step.guide:
@@ -202,31 +202,31 @@ def run_steps(root: Path, stage: str, version: str, dry_run: bool) -> int:
             before_paths = status_paths(root)
             before = digests(root, before_paths)
         except (OSError, subprocess.CalledProcessError) as e:
-            print(f"段: {step.name} → 実行しない（git status を取れない: {e}）", file=sys.stderr)
+            print(f"コマンド: {step.name} → 実行しない（git status を取れない: {e}）", file=sys.stderr)
             return 1
         sys.stdout.flush()
         try:
             rc = subprocess.run(command, cwd=str(root), timeout=step.timeout).returncode
         except subprocess.TimeoutExpired:
-            print(f"段: {step.name} → 時間切れ（{step.timeout} 秒）")
+            print(f"コマンド: {step.name} → 時間切れ（{step.timeout} 秒）")
             return 1
         except OSError as e:
-            print(f"段: {step.name} → 起動できない: {e}")
+            print(f"コマンド: {step.name} → 起動できない: {e}")
             return 1
         after_paths = status_paths(root)
         union = before_paths | after_paths
         after = digests(root, union)
-        for p in after_paths - before_paths:  # 段の前は変更が無かった = HEAD の内容
+        for p in after_paths - before_paths:  # コマンドの前は変更が無かった = HEAD の内容
             before[p] = _head_digest(root, p)
         changed = sorted(p for p in union if before[p] != after[p])
         outside = [p for p in changed if not allowed(p, step.writes)]
-        print(f"段: {step.name} → {rc}")
+        print(f"コマンド: {step.name} → {rc}")
         for p in changed:
             print(f"  変えたパス: {p}{'（書いてよい場所の外）' if p in outside else ''}")
         if rc != 0:
             return 1
         if outside:
-            print(f"段: {step.name} が書いてよい場所（{', '.join(step.writes) or 'なし'}）の外を変えた", file=sys.stderr)
+            print(f"コマンド: {step.name} が書いてよい場所（{', '.join(step.writes) or 'なし'}）の外を変えた", file=sys.stderr)
             return 1
         if step.guide:
             print(f"guide: {step.guide}")
@@ -234,7 +234,7 @@ def run_steps(root: Path, stage: str, version: str, dry_run: bool) -> int:
 
 
 def _head_digest(root: Path, path: str) -> str | None:
-    """段の前に変更の無かったパスの要約（HEAD の内容。HEAD に無ければ None）。"""
+    """コマンドの前に変更の無かったパスの要約（HEAD の内容。HEAD に無ければ None）。"""
     try:
         return _git(root, "rev-parse", "--verify", "-q", f"HEAD:{path}").strip() or None
     except subprocess.CalledProcessError:
@@ -379,7 +379,7 @@ def run_staleness(root, expected=()):
     errors = [l for l in out if l.startswith("ERROR")]
     rest = [l for l in errors if not any(x in l for x in expected)]
     if errors and not rest:
-        return True, "ok（後の段で直す分だけ: " + " / ".join(errors)[:800] + "）"
+        return True, "ok（後のステップで直す分だけ: " + " / ".join(errors)[:800] + "）"
     return False, " / ".join((rest or out)[-10:])[:1000]
 
 
@@ -853,9 +853,9 @@ def cmd_notes(a):
 
 
 def build_parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(description="リポジトリが宣言した配布の段と、配布の決まった手順を走らせる")
+    ap = argparse.ArgumentParser(description="リポジトリが宣言した配布のコマンドと、配布の決まった手順を走らせる")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    r = sub.add_parser("run", help="段階に合う段を順に実行する")
+    r = sub.add_parser("run", help="段階に合うコマンドを順に実行する")
     r.add_argument("--root", type=Path, default=Path("."))
     r.add_argument("--stage", choices=("production", "verification"), required=True)
     r.add_argument("--version", required=True)

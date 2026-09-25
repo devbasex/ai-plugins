@@ -670,7 +670,7 @@ def test_init_emits_shell_assignments(run_init, tmp_path, capsys):
 
 
 def test_init_no_longer_emits_a_fixed_stall_timeout(run_init, tmp_path, capsys):
-    """決定 24: 無音の許容は段の上限と同じ値を `start-phase` が返す。`init` は出さない。"""
+    """決定 24: 無音の許容は手順の上限と同じ値を `start-phase` が返す。`init` は出さない。"""
     run_init(_args(tmp_path))
     assert "IMPL_STALL_TIMEOUT=" not in capsys.readouterr().out
 
@@ -1364,7 +1364,7 @@ PLANNED = {
 ])
 def test_start_phase_returns_the_time_left_to_the_end_of_the_phase(
         phase_state, start_phase, phase, planned, expected):
-    """決定 23・24: 監視の上限は、その段の終わりまでの残り + 余裕。CLI の上限は + 余裕。"""
+    """決定 23・24: 監視の上限は、その手順の終わりまでの残り + 余裕。CLI の上限は + 余裕。"""
     if planned:
         phase_state.edit(**PLANNED)
     state, timeout = start_phase(phase)
@@ -1391,7 +1391,7 @@ def test_start_phase_gives_the_first_final_fix_at_least_its_reserve(
 
 
 def test_start_phase_for_the_final_fix_keeps_the_phase(phase_state, start_phase):
-    """最終ゲートの修正は状態の段を変えない（再開の地点が狂う）。"""
+    """最終ゲートの修正は状態の手順を変えない（再開の地点が狂う）。"""
     phase_state.edit(phase="final")
     state, _ = start_phase("final-fix")
     assert state["phase"] == "final"

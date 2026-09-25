@@ -386,7 +386,7 @@ def cmd_merge_implement(args: argparse.Namespace) -> None:
 
     終了コード: 0 = 取り込んだ / 2 = 残る項目 0 件（最終ゲートへ）/ 4 = 範囲を確定できない。
 
-    **テストの差分のうち段 1 で決まらないものは、最終ゲートのレビューへ引き継ぐ**
+    **テストの差分のうち一次の判定で決まらないものは、最終ゲートのレビューへ引き継ぐ**
     （`review_test_judgements`。決定 25）。計画の後に判断のために LLM を起動しない。
     """
     path, state = load_state(args.id)

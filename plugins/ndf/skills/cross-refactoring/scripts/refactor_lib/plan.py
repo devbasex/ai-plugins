@@ -203,14 +203,14 @@ _LIMIT_ROWS = (
     ("final_fix_seconds", "最終ゲートの修正の 1 回目に必ず渡す長さ（秒。控えの final_fix）"),
     ("init_test_timeout", "着手前のテスト 1 回の上限（秒）"),
     ("test_timeout", "テスト 1 回の上限（秒）"),
-    ("margin_seconds", "余裕（秒。段の上限と CLI の上限に足す）"),
+    ("margin_seconds", "余裕（秒。手順の上限と CLI の上限に足す）"),
 )
 
 
 def limits_section(limits: dict[str, Any]) -> list[str]:
     """実行時の値の表。読み手が実行の前にすべての時刻を見られるようにする（決定 24）。
 
-    無音の打ち切りは段の監視の上限と同じ値のため、行を分けない。
+    無音の打ち切りは手順の監視の上限と同じ値のため、行を分けない。
     """
     if not limits:
         return []
@@ -218,7 +218,7 @@ def limits_section(limits: dict[str, Any]) -> list[str]:
     for key, label in _LIMIT_ROWS:
         value = limits.get(key)
         lines.append(f"| {label} | {'—' if value is None else value} |")
-    lines.extend(["", "無音の打ち切りは段の監視の上限と同じ値である。項目ごとの締め切りは各項目の節にある。", ""])
+    lines.extend(["", "無音の打ち切りは手順の監視の上限と同じ値である。項目ごとの締め切りは各項目の節にある。", ""])
     return lines
 
 
@@ -255,7 +255,7 @@ def _plan_item_section(item: dict[str, Any]) -> list[str]:
     lines = [
         f"### {item['id']} — `{item_label(item)}`",
         "",
-        "| 兆候 | 手法 | 重要度 | 段 | 提案元 | 状態 | コミット |",
+        "| 兆候 | 手法 | 重要度 | 等級 | 提案元 | 状態 | コミット |",
         "| --- | --- | --- | --- | --- | --- | ---: |",
         f"| {item.get('smell') or '—'} | {item.get('technique') or '—'} | "
         f"{item.get('severity') or '—'} | {item.get('tier') or '—'} | "

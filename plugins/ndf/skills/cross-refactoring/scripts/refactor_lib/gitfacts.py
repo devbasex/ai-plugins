@@ -947,16 +947,16 @@ def read_result(state: dict[str, Any], runtime: str, phase: str) -> LaunchOutcom
     return read_launch_outcome(state["tmp_dir"], stem_for(runtime, phase, state["id"]))
 
 
-# 監視が CLI を止めた結末（段の上限。無進捗の許容も同じ値を渡す）。
+# 監視が CLI を止めた結末（手順の上限。無進捗の許容も同じ値を渡す）。
 STOPPED_REASONS = frozenset({"timeout", "stalled"})
 
 
 def note_stopped(state: dict[str, Any], runtime: str, phase: str) -> None:
-    """監視が段の上限で CLI を止めていたら、フェーズの記録に残す（決定 23）。
+    """監視が手順の上限で CLI を止めていたら、フェーズの記録に残す（決定 23）。
 
     **取り込みは止めたかどうかで変えない。** 未コミットの変更は取り込みの前に捨て
     （`discard_impl_leftovers`）、コミット済みの項目は git の時刻による判定へそのまま
-    流す。止めたことは `phases.<段>.stopped` に残り、報告に 1 行出る。
+    流す。止めたことは `phases.<手順>.stopped` に残り、報告に 1 行出る。
     """
     monitor = read_result(state, runtime, phase).monitor or {}
     reason = str(monitor.get("reason") or "")

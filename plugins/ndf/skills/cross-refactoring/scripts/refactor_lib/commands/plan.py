@@ -1,7 +1,7 @@
 """計画の取り込み（`merge-plan`、#933 の F3）。
 
-実装担当の計画（段・足すテスト・範囲テストの対象・同じ変更か・公開の入出力が
-変わりうるか）を読み、Jev が使えるときは段と「同じ変更か」を Jev に問う。そのうえで
+実装担当の計画（等級・足すテスト・範囲テストの対象・同じ変更か・公開の入出力が
+変わりうるか）を読み、Jev が使えるときは等級と「同じ変更か」を Jev に問う。そのうえで
 順位を決め、配分テーブルで見積もり、想定最大時間に収まる件数を選び、項目ごとの
 締め切りを出す。**数え上げと比較はスクリプトが行う**（決定 11）。
 """
@@ -31,14 +31,14 @@ from ..vocabulary import (
 )
 
 TIERS = ["low", "medium", "high"]
-# 実装担当が段を返さなかった候補の段。**順位の上でも下でもない中ほどに置く。**
+# 実装担当が等級を返さなかった候補の等級。**順位の上でも下でもない中ほどに置く。**
 DEFAULT_TIER = "medium"
 
 
 def _read_plan_answers(state: dict[str, Any]) -> dict[str, dict[str, Any]]:
     """実装担当の計画を `鍵 → 答え` で返す。読めなければ空（全候補を既定で扱う）。
 
-    **計画が読めなくても止めない。** 段は Jev か既定の段で、テストは足さず、範囲テストは
+    **計画が読めなくても止めない。** 等級は Jev か既定の等級で、テストは足さず、範囲テストは
     `--round-test` をそのまま使う形で進める。止めると提案に使った時間が丸ごと無駄になる。
     """
     impl = str(state["implementer"])
@@ -47,7 +47,7 @@ def _read_plan_answers(state: dict[str, Any]) -> dict[str, dict[str, Any]]:
     payload = outcome.payload
     if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
         info(f"⚠ 実装担当 {impl} の計画を読めませんでした（{outcome.reason or 'missing'}）。"
-             "段は既定、足すテストは無しとして計画します")
+             "等級は既定、足すテストは無しとして計画します")
         return {}
     answers: dict[str, dict[str, Any]] = {}
     for entry in payload["items"]:
@@ -107,7 +107,7 @@ def _jev_boolean(
 
 
 def _decide_tiers(state: dict[str, Any], answers: dict[str, dict[str, Any]]) -> None:
-    """候補の全件に段を付ける。Jev の確信度が下限に満たなければ実装担当の段を使う。"""
+    """候補の全件に等級を付ける。Jev の確信度が下限に満たなければ実装担当の等級を使う。"""
     for item in state["candidates"]:
         answer = answers.get(key_text(item)) or {}
         runtime_tier = answer.get("tier") if answer.get("tier") in TIERS else DEFAULT_TIER
@@ -176,7 +176,7 @@ def _decide_public_io(state: dict[str, Any], items: list[dict[str, Any]]) -> Non
     """採った項目ごとに、公開の入出力が変わりうるか（D5）を**計画の時点で**決める（決定 25）。
 
     Jev が確信度 0.7 以上で答えればその答え、使えなければ実装担当の `risk` を使う。
-    検証の段は、ここで決めた値を読むだけで、LLM へ問わない。差分はまだ無いため、
+    検証の手順は、ここで決めた値を読むだけで、LLM へ問わない。差分はまだ無いため、
     Jev へ送るのは提案の文だけである。
     """
     for item in items:
@@ -297,7 +297,7 @@ def cmd_merge_plan(args: argparse.Namespace) -> None:
         "selected": [i["id"] for i in state["items"]],
         "end_at": clock.iso(end),
     }
-    # **実行時の値をすべて書き出す**（決定 24）。以後の段は、この表と時計の比較だけで進む。
+    # **実行時の値をすべて書き出す**（決定 24）。以後の手順は、この表と時計の比較だけで進む。
     state["limits"] = timeline.of_state(state)
     finish_phase(state, "plan")
     if not state["items"]:

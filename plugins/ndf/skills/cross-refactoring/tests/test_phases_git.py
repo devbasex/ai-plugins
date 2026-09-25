@@ -249,7 +249,7 @@ def test_a_commit_outside_the_scope_rejects_the_item(flow, cmd_setup, cmd_implem
 
 
 def test_a_changed_expectation_rejects_the_item(flow, cmd_setup, cmd_implement):
-    """期待値を変えた実装は振る舞いの変更として取り消す（#443 の段 1）。"""
+    """期待値を変えた実装は振る舞いの変更として取り消す（#443 の一次の判定）。"""
     work = flow["work"]
     _implement_phase(flow, cmd_setup, _item("I-001", 1), _item("I-002", 2, symbol="add"))
     _write(work, "src/calc.py", CALC.replace("return a + b", "return a + b + 0"))
@@ -465,7 +465,7 @@ def test_a_resumed_intake_reuses_its_conclusion_and_does_not_drop_twice(
     assert len(read_state(flow["path"])["drops"]) == 1
 
 
-# ---------- 監視が段の上限で CLI を止めたとき（決定 23 / I15） ----------
+# ---------- 監視が手順の上限で CLI を止めたとき（決定 23 / I15） ----------
 
 def test_a_phase_stopped_by_the_monitor_is_taken_in_by_the_deadline_and_reported(
         flow, cmd_setup, cmd_implement, cmd_report, capsys):

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""upkeep.py: issue-upkeep の段 1（候補の収集）と段 3（反映）の決まった手順。
+"""upkeep.py: issue-upkeep の手順 1（候補の収集）と手順 3（反映）の決まった手順。
 
     python3 upkeep.py candidates --since-ref <ref> [--all] [--add 12,34] [--limit N]
                       [--repo owner/name] [--state-dir <dir>] [--root <dir>]
@@ -7,9 +7,9 @@
                       [--repo owner/name] [--state-dir <dir>] [--root <dir>]
     python3 upkeep.py report [--repo owner/name] [--state-dir <dir>] [--root <dir>]
 
-判定（段 2A / 2B）は持たない。LLM が candidates の結果を読んで判定し、plan.json に書く。
+判定（手順 2A / 2B）は持たない。LLM が candidates の結果を読んで判定し、plan.json に書く。
 
-candidates: 段 1 の経路のうち機械で集められるものを集め、重複を除いて件数とともに返す。
+candidates: 手順 1 の経路のうち機械で集められるものを集め、重複を除いて件数とともに返す。
   経路は diff-path（差分のパス）/ diff-identifier（削除された識別子）/ no-milestone /
   closed-milestone（閉じた課題のマイルストーン）/ sub-issue（閉じた親の子）/
   commit-subject（<ref>..HEAD のコミットの件名が #番号で指す）/ all（--all）/
@@ -536,7 +536,7 @@ def cmd_apply(a):
         parts = []
         if buckets["skipped_changed"]:
             parts.append("照合で飛ばした " + " ".join(f"#{x}" for x in buckets["skipped_changed"])
-                         + " を段 2A へ戻す")
+                         + " を手順 2A へ戻す")
         if partial:
             parts.append("時間を置いて同じ plan で apply を打ち直す（済んだものは控えで飛ぶ）")
         nxt = "。".join(parts)

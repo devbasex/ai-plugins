@@ -32,7 +32,7 @@ allowed-tools:
 | ページ | 運用マニュアル / 稟議のページ | 同上 |
 
 **下の 4 つ（スライド / 文書 / 表計算 / ページ）は `documentation` モードの配布である。**
-上の 5 つと違い、**配布が生成と提出の 2 段になる**。生成は対になる下書き先へ行い、その間に
+上の 5 つと違い、**配布が生成と提出の 2 つの手順になる**。生成は対になる下書き先へ行い、その間に
 生成物の内容照合と体裁レビューと制作物承認が入る。**投稿の手順は形ではなく置き先のシステムが
 持つ**（`document-systems` の `system-<名前>.md`）。
 
@@ -221,9 +221,9 @@ Pull Request が最後かどうかを判断できない。
 潰さない 4 行・宣言の書き方・観点の調べ直しは
 [references/instruction-files.md](references/instruction-files.md) にある。
 
-**版と説明文書を上げた後、配布の Pull Request を作る前に、リポジトリが宣言した配布の段を走らせる**
+**版と説明文書を上げた後、配布の Pull Request を作る前に、リポジトリが宣言した配布のコマンドを走らせる**
 （`python3 "$SCRIPTS/release-steps.py" run --root . --stage <production|verification> --version <版>`）。
-宣言（`.ndf/release.json`）が無ければ何も出さずに 0 で終わる。段が書いたファイルは配布の
+宣言（`.ndf/release.json`）が無ければ何も出さずに 0 で終わる。コマンドが書いたファイルは配布の
 Pull Request に入れる。`guide:` の行が出たら、その手引きに従って判断の要る部分だけを書き足す。
 **0 以外を通ったとしない。** 宣言の書き方と終了コードは
 [references/release-steps.md](references/release-steps.md) にある。
@@ -276,7 +276,7 @@ Pull Request に入れる。`guide:` の行が出たら、その手引きに従�
   対象と返ってきた値を残す。上限に達して未確定で止めたなら、そのことを残す
 - 版または何が出ているかを一意に指せる値が記録されている
 - 説明文書の記載が新しい版と一致している（検査があればそれを通す）
-- **宣言された配布の段が 0 で終わり、`guide:` が指す手引きの判断を済ませている。** 宣言が
+- **宣言された配布のコマンドが 0 で終わり、`guide:` が指す手引きの判断を済ませている。** 宣言が
   無ければ当てはまらない
 - **更新案内に載せたコマンドを対象のランタイムごとに実行し、終了コードが 0 である。** 検査が
   見るのは版数だけで、コマンドが動くかは見ていない。隔離しても実行できないものは `--help` で
@@ -356,7 +356,7 @@ Pull Request へコメントで投稿する）。
   `form-spreadsheet.md` / `form-page.md`）にある
 - [references/completion-check.md](references/completion-check.md) — 公開の操作が済んだことの
   確かめ方のうち、形で変わらないもの。ログの扱い・待ちの上限・照会の間隔
-- [references/release-steps.md](references/release-steps.md) — リポジトリが宣言する配布の段の
+- [references/release-steps.md](references/release-steps.md) — リポジトリが宣言する配布のコマンドの
   書き方・段階の値・終了コード
 - `/ndf:merged` — この工程の前に行うマージ後の後片付け
 - `/ndf:release-verification` — この工程の後に行うリリース後テスト

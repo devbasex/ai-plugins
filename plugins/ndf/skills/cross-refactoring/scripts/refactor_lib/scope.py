@@ -70,7 +70,7 @@ def _matches_by_name(path: str) -> bool:
 def _child_test_location(path: str, work: str) -> Optional[str]:
     """配下に実在するテストの置き場所を 1 つ返す。無ければ `None`。
 
-    **走査は 1 段だけである。** 深く潜ると、無関係な階層のテストを根拠にして
+    **走査は 1 階層だけである。** 深く潜ると、無関係な階層のテストを根拠にして
     関門が素通りする。返すのは当たった置き場所であり、渡された親ではない。
     """
     base = pathlib.Path(work) / str(path).strip()

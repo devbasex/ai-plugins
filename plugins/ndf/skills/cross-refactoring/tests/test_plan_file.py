@@ -42,7 +42,7 @@ def _item(**over):
         "id": "I-001", "rank": 1, "path": "src/foo.py", "symbol": "Foo.handle",
         "smell": "long_method", "technique": "extract_method", "severity": "major",
         "tier": "high",
-        "rationale": "1 関数が 6 段の処理を通しで行っている",
+        "rationale": "1 関数が 6 つの処理を通しで行っている",
         "plan": "1. 範囲の確定を切り出す 2. 検証を切り出す",
         "tests": [], "estimated_diff_lines": 40,
         "proposed_by": ["codex", "agy"], "status": "verified",
@@ -72,7 +72,7 @@ def test_plan_carries_the_reason_and_the_steps(plan, tmp_path):
     """なぜ直すのか・どう直すのかは、提案の時点でしか残らない。"""
     _, state = _state(tmp_path)
     text = plan.format_plan(state)
-    assert "1 関数が 6 段の処理を通しで行っている" in text
+    assert "1 関数が 6 つの処理を通しで行っている" in text
     assert "1. 範囲の確定を切り出す" in text
 
 

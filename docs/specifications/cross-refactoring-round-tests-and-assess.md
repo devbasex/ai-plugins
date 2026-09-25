@@ -241,7 +241,7 @@ python3 "$RF/refactor.py" assess --base origin/develop; rc=$?; echo "exit=$rc"
 
 ### 文言固定テストを採らない（テストの追加と実装）
 
-| 段 | 何をするか | 理由の文面 |
+| 手順 | 何をするか | 理由の文面 |
 | --- | --- | --- |
 | 雛形（`prompts/add-tests.md`） | 文書（`.md`）の文言を固定するテストを書かないと定める | — |
 | テストの追加と実装の取り込み（`merge-tests` / `merge-implement`） | テストの期待値の変更の検査に続けて `doc_wording_tests` を呼び、当たりがあればその項目を取り消す | `文書の文言を固定するテストは足さない（<ファイル>: <文字列>）` |

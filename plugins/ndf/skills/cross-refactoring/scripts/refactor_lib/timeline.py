@@ -6,7 +6,7 @@
 決めるために LLM へ問わない。
 
 値は `init`（計画の前の値）と `merge-plan`（計画の後の値）が `state["limits"]` へ書き
-出す。以後の段は、書き出した値と時計の比較だけで進み、止まる。
+出す。以後の手順は、書き出した値と時計の比較だけで進み、止まる。
 
 **純粋な処理だけを置く。** 今の時刻は引数で受ける。
 """
@@ -22,7 +22,7 @@ from . import budget, clock
 PROPOSE_SHARE = 0.20      # 提案の枠の終わり = 開始 + 0.20·B
 PLAN_SHARE = 0.10         # 計画の枠の終わり = 提案の枠の終わり + 0.10·B
 INIT_TEST_SHARE = 0.10    # 着手前のテスト 1 回の上限 = 0.10·B（w はまだ測れていない）
-MARGIN_SHARE = 0.05       # 余裕 = 0.05·B（段の上限と CLI の上限に足す）
+MARGIN_SHARE = 0.05       # 余裕 = 0.05·B（手順の上限と CLI の上限に足す）
 TEST_FACTOR = 3.0         # テスト 1 回の上限 = max(3·w, 0.01·B)
 TEST_FLOOR_SHARE = 0.01
 
@@ -36,7 +36,7 @@ FIXED_VALUES = (
     ("auth.py の AUTH_PROBE_TIMEOUT", "120 秒", "init の参加者の認証の確認 1 回の待ち"),
 )
 
-# 段ごとの終わりの時刻のキー。`start-phase` がここから監視の上限を出す。
+# 手順ごとの終わりの時刻のキー。`start-phase` がここから監視の上限を出す。
 PHASE_END_KEYS = {
     "propose": "propose_end_at",
     "plan": "plan_end_at",
@@ -52,7 +52,7 @@ def _seconds(budget_minutes: int, share: float) -> int:
 
 
 def margin(budget_minutes: int) -> int:
-    """余裕（秒）。段の上限と CLI の上限に足す。"""
+    """余裕（秒）。手順の上限と CLI の上限に足す。"""
     return _seconds(budget_minutes, MARGIN_SHARE)
 
 
@@ -70,7 +70,7 @@ def test_timeout(budget_minutes: int, baseline_seconds: Optional[float]) -> int:
 
 
 def _completion(items: list[dict[str, Any]], start_key: str, estimate_key: str) -> Optional[_dt.datetime]:
-    """その段の最後の項目の完了の締め切り（着手の締め切り + 見積り）。項目が無ければ `None`。"""
+    """その手順の最後の項目の完了の締め切り（着手の締め切り + 見積り）。項目が無ければ `None`。"""
     ends = []
     for item in items:
         start = clock.parse(item.get(start_key))
@@ -133,7 +133,7 @@ def state_test_timeout(state: dict[str, Any]) -> int:
 
 
 def phase_timeout(end: _dt.datetime, now: _dt.datetime, margin_seconds: int) -> int:
-    """段の監視の上限（秒）= 終わりの時刻までの残り + 余裕。終わりを過ぎていれば余裕だけ。"""
+    """手順の監視の上限（秒）= 終わりの時刻までの残り + 余裕。終わりを過ぎていれば余裕だけ。"""
     return max(math.ceil((end - now).total_seconds()), 0) + int(margin_seconds)
 
 
@@ -145,7 +145,7 @@ def final_fix_timeout(
 
     **1 回目は、終わりまでの残りが控え（`final_fix_seconds`）より短くても控えの長さを渡す**
     （決定 26）。想定最大時間を使い切った後に落ちても、必ず 1 度は直しを試みる。
-    2 回目からは他の段と同じく残り + 余裕である。
+    2 回目からは他の手順と同じく残り + 余裕である。
     """
     left = max(math.ceil((end - now).total_seconds()), 0)
     if first:
