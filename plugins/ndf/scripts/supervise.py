@@ -28,12 +28,12 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
         # --prs-from-queue: queue が --then でこの計画を流す前に、先行の計画の報告の Pull Request を集めて
         # --prs に足す（--prs の固定の番号と併用できる）。prod のステップの最後は後片付け（merged-steps.py cleanup）
     supervise.py new release ... --mvv <ミッションの状態>
-        # prod: 先頭に MVV の判定（mvv-gate.py）のステップを置く。dev: approval-facts のステップを gate_as_ok にする
+        # prod: 先頭に MVV 判定（mvv-gate.py）のステップを置く。dev: approval-facts のステップを gate_as_ok にする
     supervise.py new mission --name M --worktree <リポジトリの根> --issue N... --version <開発版> [--design N...] [--tests PATH...] [--out DIR]
         # 並列の設計 → 関門 1 → ミッションのブランチ → 並列の実装（ミッションのブランチへ集める）→ 検査 1 回 → 配布
         # をステージごとの計画ファイルと mission.json へ書き出す。ステージの中は queue --max 3 で流す。配布は検査の queue が --then で流す
-        # --pace fast --state <ミッションの状態>: 使ってよい条件を確かめ、設計（関門 1 は MVV の判定）→ 実装（develop へ直接）
-        # → 検査（実行の条件）→ 開発版 → 本番（関門 2 は MVV の判定）を書く。条件に外れれば計画を書かずに止まる
+        # --pace fast --state <ミッションの状態>: 使ってよい条件を確かめ、設計（関門 1 は MVV 判定）→ 実装（develop へ直接）
+        # → 検査（実行の条件）→ 開発版 → 本番（関門 2 は MVV 判定）を書く。条件に外れれば計画を書かずに止まる
     supervise.py new close --name M --worktree <根> --issue N... --version <開発版> --prod <正式版> --state <状態> [--out DIR]
         # ミッションの終わり: 最終の検査 → 開発版 → 本番（最終の検査で変更があったときだけ）→ 確定仕様化・閉じる・振り返り
     supervise.py queue <plan.json>... [--max 3] [--then <plan.json>...]... [--done <パス>]
@@ -1558,7 +1558,7 @@ class Supervisor:
                         nxt = None if step["skip_to"] == "end" else step["skip_to"]
                         self.cur["skipped"] = True
                     elif step["type"] == "run" and is_gate(self.cur.get("exit")) and step.get("gate_as_ok"):
-                        # 関門として数えない（MVV の判定が前もって通した関門 2 の提示物など）。提示物だけを写す
+                        # 関門として数えない（MVV 判定が前もって通した関門 2 の提示物など）。提示物だけを写す
                         self.cur["presentation"] = self.copy_presentation(step)
                         self.cur["gate_as_ok"] = True
                         nxt = self.next_of(sid, step)
@@ -2052,7 +2052,7 @@ RULE_RELEASE_DEV = ("run のステップが落ちたら、出力を読んで直�
                     "の揺れなら同じステップをもう一度（retry）。認証や権限の不足・タグの重複は stop。")
 RULE_RELEASE_PROD = ("利用者は関門 2 を承認した。run のステップが落ちたら、直せるもの（版数の書き漏れ・文書の形）は fix。"
                      "外部の待ち（CI・ネットワーク）の揺れなら同じステップをもう一度。タグの重複・権限の不足は stop。")
-RULE_RELEASE_PROD_MVV = ("関門 2 は利用者か MVV の判定が承認した（先頭の mvv のステップが 0 を返したときだけ先へ進む）。"
+RULE_RELEASE_PROD_MVV = ("関門 2 は利用者か MVV 判定が承認した（先頭の mvv のステップが 0 を返したときだけ先へ進む）。"
                          "run のステップが落ちたら、直せるもの（版数の書き漏れ・文書の形）は fix。"
                          "外部の待ち（CI・ネットワーク）の揺れなら同じステップをもう一度。タグの重複・権限の不足は stop。")
 MVV_PY = f"python3 {HERE / 'mvv-gate.py'}"
@@ -2290,7 +2290,7 @@ def plan_mission_release(a, repo: str) -> dict:
 
 
 def plan_fast_design(a, n: int, repo: str) -> dict:
-    """pace: fast の設計: 関門 1 の judge を MVV の判定のステップへ替える。従えばラベルとコメントを付けてマージする。"""
+    """pace: fast の設計: 関門 1 の judge を MVV 判定のステップへ替える。従えばラベルとコメントを付けてマージする。"""
     plan = plan_mission_design(a, n, repo)
     state = shlex.quote(str(Path(a.state).resolve()))
     note = "{state_dir}/work/mvv-note.md"
@@ -2347,7 +2347,7 @@ def prod_version(version: str) -> str:
 
 def fast_mission_plans(a) -> list[dict]:
     """pace: fast のミッションのステージ。ミッションのブランチを作らず、実装は起点のブランチへ直接入れる。
-    実装の queue が --then のステージで 検査（実行の条件）→ 開発版 → 本番（先頭が MVV の判定）を順に流す。"""
+    実装の queue が --then のステージで 検査（実行の条件）→ 開発版 → 本番（先頭が MVV 判定）を順に流す。"""
     repo = str(Path(a.worktree).resolve())
     waves = []
     if a.design:

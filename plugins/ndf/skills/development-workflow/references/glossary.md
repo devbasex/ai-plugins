@@ -94,7 +94,7 @@ flowchart TB
 | モード | 変更の目的物で決める工程の振り分け。上から `operation` / `documentation` / `standard` / `legacy-refactor` / `light` | モード判定の結果の `mode:` | — | [../SKILL.md](../SKILL.md) の「判定の手順」、[workflow-modes.md](workflow-modes.md) |
 | pace | モードとは別の軸で、工程をどう通すかを決める。既定の `normal` と、関門と検査の時機を変える `fast` | `pace:`、`supervise.py new mission --pace fast`、`.ndf/pace.json` | — | [pace.md](pace.md) |
 | MVV | ミッションの Mission / Vision / Value。マイルストーンの説明から複製し、利用者が 1 回承認する。`fast` で関門 1・2 の事前の許可になる | `mvv.md`、`mvv.sha256`、関門の記録 `MVV` | — | [pace.md](pace.md) の「ミッションを始める」 |
-| MVV 判定 | 関門の材料が MVV に従うかの判定。「従う」で越えない線が無いときだけ関門を省き、記録を残す | `mvv-gate.py check`、`verdict`（follow / not_follow / unknown）、終了コード 0 / 10 | MVV の判定 | [pace.md](pace.md) の「MVV の判定」 |
+| MVV 判定 | 関門の材料が MVV に従うかの判定。「従う」で越えない線が無いときだけ関門を省き、記録を残す | `mvv-gate.py check`、`verdict`（follow / not_follow / unknown）、終了コード 0 / 10 | MVV 判定 | [pace.md](pace.md) の「MVV 判定」 |
 | 越えない線 | 当たれば MVV 判定が「従う」でも利用者の承認を求める範囲。秘密・認証認可・利用者のデータ・戻せない操作・他のリポジトリへの公開・対象外のモード・承認後に変わった MVV | `.ndf/pace.json` の `boundary_paths`、`boundary` | — | [pace.md](pace.md) の「越えない線」 |
 | トリガー | `fast` で構造改善と実装レビューを流す条件。点数・行数・逃げた不具合・経過時間・最終の 5 つ | `check-trigger.py eval`（立つ 0 / 立たない 3 / 読めない 2）、`triggers.*` | — | [pace.md](pace.md) の「検査のトリガー」 |
 | 実行の条件 | 計画を流す前に打つコマンド。`skip_code` を返せば作業ツリーを作らずに完了とする | 計画の `"実行の条件"` | — | [supervise.py](../../../scripts/supervise.py) の docstring |
@@ -114,7 +114,7 @@ flowchart TB
 | 関門 2 | 本番の系へ届く操作（本番への配布と `operation` の実行）。文書では制作物承認に当たる | `mission-state.py gate <状態> "関門 2"` | — | [../SKILL.md](../SKILL.md) の「本番の系へ届く操作」 |
 | 承認ラベル | 人間が設計を承認したことを表す Pull Request のラベル。無ければ hook が設計 Pull Request のマージを拒む | `design-approved` | 承認の印 | [stage-completeness.md](stage-completeness.md) の「用語」 |
 | 提示物 | 承認を求めるときに示すもの。対象を開くためのものと、承認の判断に使うものの 2 層を持つ | 報告の `提示物:`、結果 JSON の `presentation_path`、`issues/approval-<plugin>-v<正式版>.md`（提示物の複製） | — | [approval-request.md](approval-request.md) |
-| 事実の材料 | 提示物のうち機械で作れる部分と、conductor が確かめて足した事実。MVV 判定へ材料として渡す | `release-steps.py approval-facts`、計画の `facts` のステップ、`mvv-gate.py --material` | — | [release-steps.md](../../release/references/release-steps.md)、[pace.md](pace.md) の「MVV の判定」 |
+| 事実の材料 | 提示物のうち機械で作れる部分と、conductor が確かめて足した事実。MVV 判定へ材料として渡す | `release-steps.py approval-facts`、計画の `facts` のステップ、`mvv-gate.py --material` | — | [release-steps.md](../../release/references/release-steps.md)、[pace.md](pace.md) の「MVV 判定」 |
 
 ## 配布
 

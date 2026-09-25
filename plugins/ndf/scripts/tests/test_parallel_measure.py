@@ -466,7 +466,7 @@ def test_concurrency_measures_the_overlap(tmp_path: Path) -> None:
 
 
 def test_concurrency_counts_a_touching_pair_as_no_overlap(tmp_path: Path) -> None:
-    """同じ時刻に閉じる区間と開く区間は重ならない（閉じるほうを先に数える）。"""
+    """同じ時刻に閉じる期間と開く期間は重ならない（閉じるほうを先に数える）。"""
     proc = concurrency(tmp_path, data=[
         {"number": 1, "createdAt": "2026-09-01T00:00:00Z",
          "mergedAt": "2026-09-01T01:00:00Z", "closedAt": None},

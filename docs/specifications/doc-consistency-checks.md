@@ -130,13 +130,13 @@ graph TD
 
 ## 仕様: チェック J（版の付け方の章）
 
-### 読む先と区間
+### 読む先と節
 
 | 項目 | 内容 |
 | --- | --- |
 | 読む先・報告先 | `docs/versioning-and-distribution.md`（`VERSIONING_MD`）。`AGENTS.md` の「主要プラグインです（v<版>）」を読むチェック I とは別に読む |
 | 位置決め | `VERSION_SECTION_HEADING = "## 版の付け方と開発版の配布"` |
-| 区間の終端 | 位置決めの見出しと同じか上位の見出し。深さは位置決めの見出しから導く（`## ` なら `^#{1,2}\s`） |
+| 節の終端 | 位置決めの見出しと同じか上位の見出し。深さは位置決めの見出しから導く（`## ` なら `^#{1,2}\s`） |
 | 囲み | フェンスの中の `# ` 始まりは見出しと数えない |
 | 拾う版数 | `` `9.6.0` `` のように囲まれた版数だけ |
 
@@ -189,7 +189,7 @@ graph TD
 | 相手の文書が無いときは `missing link target` の 1 行だけが出る | 同上 |
 | `issues/` 直下と `issues/old/` の下の壊れた参照で落ち、`issues/` の無い見出しを指す参照でも落ちる | 同上 |
 | リポジトリ全体が通る | `python3 scripts/check-markdown-links.py --root .` |
-| チェック J が正本を読み、報告先が正本のパスで、章の小見出しで区間が切れない | `scripts/tests/test_doc_staleness.py` |
+| チェック J が正本を読み、報告先が正本のパスで、章の小見出しで節が途切れない | `scripts/tests/test_doc_staleness.py` |
 | 版の形の表と次の開発の例の R1〜R5、囲みの中の同じ表の行が数えられないこと | 同上 |
 | 現行版が `-dev.N` / `-rc.N` の木で、例どうしが規則を満たせば通る | 同上 |
 | リポジトリ全体が通る | `python3 scripts/check-doc-staleness.py --root .` / `bash scripts/validate-runtime-plugins.sh` |

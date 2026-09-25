@@ -343,7 +343,7 @@ Pull Request のマージ、制作物承認は本番の提出先への操作に�
 ## 自走で工程を通す
 
 **工程を続けて通す。** ただし**上の 2 つの関門の前では 1 度止まり、`AskUserQuestion` で人間の
-承認を待つ**。承認を得るまでマージせず、次の工程へも進まない。`fast` では MVV の判定が「従う」を返した関門だけ止まらない。
+承認を待つ**。承認を得るまでマージせず、次の工程へも進まない。`fast` では MVV 判定が「従う」を返した関門だけ止まらない。
 
 - 設計 Pull Request のマージ（`standard`）— 承認を得るまで実装の工程へ
   進まない
@@ -493,7 +493,7 @@ flowchart TD
 - [references/projects-tracking.md](references/projects-tracking.md) — 進行を GitHub Projects へ記録する設定と値の一覧
 - [references/stage-completeness.md](references/stage-completeness.md) — 通過記録と報告、承認ラベルの作り方
 - [references/parallel-work.md](references/parallel-work.md) — 並行開発の 4 つの形、工程が動く単位、任せるうえでの下限
-- [references/pace.md](references/pace.md) — 進め方 `pace: fast` の条件・宣言・計画のステージ・検査のトリガー・MVV の判定
+- [references/pace.md](references/pace.md) — 進め方 `pace: fast` の条件・宣言・計画のステージ・検査のトリガー・MVV 判定
 - [references/approval-request.md](references/approval-request.md) — 承認を求めるときに提示するもの
 - [references/operation-run.md](references/operation-run.md) — `operation` の実行の範囲・記録・失敗したときの扱い
 - [references/context-window.md](references/context-window.md) — context window のカットポイント、委譲する対象としない対象、残量の見方

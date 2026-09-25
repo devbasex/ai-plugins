@@ -193,7 +193,7 @@ def test_release_with_mvv(tmp_path):
         assert p.returncode == 0, p.stderr
         plan = load(out)
         if channel == "prod":
-            assert plan["steps"][0]["id"] == "mvv" and "MVV の判定" in plan["規則"]
+            assert plan["steps"][0]["id"] == "mvv" and "MVV 判定" in plan["規則"]
         else:
             assert steps_of(plan)["facts"]["gate_as_ok"] is True
 

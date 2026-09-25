@@ -163,8 +163,8 @@ def write_log(path: str, record: dict) -> None:
 
 def record_gate(a, record: dict) -> str | None:
     """関門の記録をミッションの状態へ書く。書けなければ理由を返す。"""
-    what = "MVV の判定: " + " / ".join([*(f"#{n}" for n in a.pr), *a.material]) if (a.pr or a.material) \
-        else "MVV の判定"
+    what = "MVV 判定: " + " / ".join([*(f"#{n}" for n in a.pr), *a.material]) if (a.pr or a.material) \
+        else "MVV 判定"
     cmd = [sys.executable, str(HERE / "mission-state.py"), "gate", a.mission, GATE_NAMES[a.gate], "--what", what,
            "--by", "mvv", "--verdict", record["verdict"], "--reasons", json.dumps(record["reasons"], ensure_ascii=False),
            "--log", str(Path(a.log).expanduser())]
@@ -176,7 +176,7 @@ def write_note(path: str, a, record: dict) -> None:
     reasons = "\n".join(f"- {r}" for r in record["reasons"]) or "- （無し）"
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     Path(path).write_text(
-        f"## MVV の判定（{GATES[a.gate]}）\n\n"
+        f"## MVV 判定（{GATES[a.gate]}）\n\n"
         f"- 判定: {record['verdict']}（関門を省いた。利用者が承認した MVV を事前の許可として扱う）\n"
         f"- 時刻: {record['at']}\n- ログ: `{Path(a.log).expanduser()}` の {record['at']} の行\n\n"
         f"### 理由\n\n{reasons}\n", encoding="utf-8")

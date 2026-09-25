@@ -380,7 +380,7 @@ def test_mvv_approval_and_the_gate_by_the_judgement(tmp_path):
     assert (g["関門 2"]["by"], g["関門 2"]["verdict"], g["関門 2"]["reasons"], g["関門 2"]["log"]) == \
         ("mvv", "follow", ["Value 1"], "/x/mvv-gate.jsonl")
     p = run("status", str(mission))
-    assert "関門 2: MVV の判定 " in p.stdout
+    assert "関門 2: MVV 判定 " in p.stdout
 
 
 def test_mvv_approval_without_an_mvv_stops(r6):

@@ -209,8 +209,8 @@ oom_kill_increased = yes なら allowed = max(0, min(allowed, running − 1))
 
 `<PR番号>...`（`--input PATH` のときは不要）と `--repo OWNER/REPO` / `--input PATH`（`gh` を呼ばず
 `[{"number", "createdAt", "mergedAt", "closedAt"}]` の JSON を読む）/ `--now ISO8601` を受け取る。
-区間は `createdAt` から `mergedAt`・`closedAt`・`--now` のうち最初に値のあるものまでで、同じ時刻に
-閉じる区間と開く区間は重ならない。出力は `prs` / `start` / `end` / `span_minutes` / `overlap_minutes` /
+期間は `createdAt` から `mergedAt`・`closedAt`・`--now` のうち最初に値のあるものまでで、同じ時刻に
+閉じる期間と開く期間は重ならない。出力は `prs` / `start` / `end` / `span_minutes` / `overlap_minutes` /
 `concurrency_pct`（秒どうしの比を小数 1 桁へ四捨五入、`span` が 0 秒なら `0.0`）/ `max_open` である。
 終了コードは 0 / 1（`gh pr view` が失敗、または `gh` を起動できない）/ 2（引数の誤り、`--input` の
 中身が形に合わない）。**`gh` へ渡すのは `pr view <番号> --json number,createdAt,mergedAt,closedAt`

@@ -139,8 +139,8 @@ conductor では、文脈量の hook が工程へ入る起動を 1 度の通し�
 1. 計画を作った後に 1 度: `mission-state.py init /tmp/ndf-sv/r7/mission.json --name <ミッション> --milestone 26 --plan 実装=<plan.json> ... --plan 開発版=<plan.json> --plan 本番=<plan.json> --done <queue の done> --dev <開発版> --prod <本番> --goal @<雛形>`（雛形は次の区間の `/goal` の文面。`{heading}`・`{dev}`・`{prod}`・`{milestone}`・`{name}`・`{issues}` を差し込む）
 2. 関門を承認したら: `mission-state.py gate <mission.json> "関門 2" --what "本番 <版>"`
    - `pace: fast` のミッションは、1 に `--pace fast --milestone <M>`（MVV の複製元。`--mvv <ファイル>` でもよい）を足し、利用者が
-     `mvv.md` を承認した後に `mission-state.py gate <mission.json> MVV --what <要約>` を打つ。関門 1・2 の記録は、MVV の判定が
-     通したときは `mvv-gate.py` が `--by mvv --verdict --reasons --log` 付きで書く（`status` の行は「MVV の判定」）
+     `mvv.md` を承認した後に `mission-state.py gate <mission.json> MVV --what <要約>` を打つ。関門 1・2 の記録は、MVV 判定が
+     通したときは `mvv-gate.py` が `--by mvv --verdict --reasons --log` 付きで書く（`status` の行は「MVV 判定」）
 3. カットポイントでは次の順に呼ぶ:
    - `mission-state.py update <mission.json> [--done <done>] [--next <plan.json>=<行の「次」>]`（done と報告から状態・PR・秒・費用を埋める。何度走らせても同じ）
    - `mission-state.py render <mission.json> <引継ぎ文書> --section 今の会話の進み`（節の本文だけを置き換える。新しい区間なら `--demote 前の会話の進み --heading "今の会話の進み（<時刻>）"` で今の節を下げて新しい節を足す）

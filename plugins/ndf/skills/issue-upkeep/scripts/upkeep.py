@@ -7,7 +7,7 @@
                       [--repo owner/name] [--state-dir <dir>] [--root <dir>]
     python3 upkeep.py report [--repo owner/name] [--state-dir <dir>] [--root <dir>]
 
-判定（手順 2A / 2B）は持たない。LLM が candidates の結果を読んで判定し、plan.json に書く。
+区分の決定（手順 2A / 2B）は持たない。LLM が candidates の結果を読んで区分を決め、plan.json に書く。
 
 candidates: 手順 1 の経路のうち機械で集められるものを集め、重複を除いて件数とともに返す。
   経路は diff-path（差分のパス）/ diff-identifier（削除された識別子）/ no-milestone /
@@ -59,9 +59,9 @@ TOOL = "issue-upkeep"
 
 VERDICTS = ("そのまま", "追記が要る", "書き直しが要る", "閉じてよい", "やらない", "重複",
             "ルートコーズ", "要判断")
-# 承認を得てから反映する判定。承認の無いものは needs_approval へ回す。
+# 承認を得てから反映する区分。承認の無いものは needs_approval へ回す。
 NEEDS_APPROVAL = ("やらない",)
-# 反映しない判定。人へ返す。
+# 反映しない区分。人へ返す。
 RETURNED = ("要判断",)
 
 ROUTES = ("diff-path", "diff-identifier", "no-milestone", "closed-milestone", "sub-issue",
@@ -350,7 +350,7 @@ def cmd_candidates(a):
     deferred = [n for n in order if n not in set(keep)]
     items = []
     # 上限を超えた候補は items に載せない（metrics.deferred にだけ並べる）。載せると
-    # 判定の対象として求められ、上限が効かない。
+    # 区分を決める対象として求められ、上限が効かない。
     for n in keep:
         i = by_num[n]
         items.append({"kind": "issue", "name": f"#{n}", "result": "candidate",
@@ -574,7 +574,7 @@ def cmd_report(a):
                         "wait_count": len(waits),
                         "wait_seconds": round(sum(w["seconds"] for w in waits), 1)})
         items += [
-            {"kind": "section", "name": "判定の内訳", "result": "ok",
+            {"kind": "section", "name": "区分の内訳", "result": "ok",
              "value": "・".join(f"{v} {c}" for v, c in am["verdicts"].items() if c)},
             {"kind": "section", "name": "反映", "result": "partial" if am["partial"] else "ok",
              "value": f"直した {len(am['applied']) - len(am['closed'])} 件・閉じた {len(am['closed'])} 件・"

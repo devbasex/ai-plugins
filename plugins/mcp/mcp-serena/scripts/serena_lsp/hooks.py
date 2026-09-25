@@ -145,7 +145,7 @@ def _load_counts(path: Path) -> dict:
 
 @contextlib.contextmanager
 def _locked(path: Path):
-    """同じセッションの PreToolUse を直列にする。読み・判定・書きをこの区間で行い、並列の増分を失わない。"""
+    """同じセッションの PreToolUse を直列にする。読み・判定・書きをこのロックの中で行い、並列の増分を失わない。"""
     fd = None
     try:
         path.parent.mkdir(parents=True, exist_ok=True)

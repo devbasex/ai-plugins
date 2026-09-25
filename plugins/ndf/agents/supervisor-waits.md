@@ -1,6 +1,6 @@
 ---
 name: supervisor-waits
-description: NDF の 3 層の supervisor（収束ループから始める区間。キャッシュの寿命 1 時間）。フェーズを通し、フェーズの報告で返す
+description: NDF の 3 層の supervisor（収束ループから始める起動。キャッシュの寿命 1 時間）。フェーズを通し、フェーズの報告で返す
 experimental:
   cacheTtl: 1h
 ---
@@ -17,4 +17,4 @@ NDF の 3 層（conductor → supervisor → worker）の supervisor である�
 **寿命の違う 2 つの定義があり、本文は同じである。** `supervisor` はキャッシュの寿命が 5 分で、
 収束ループの工程（構造改善・実装レビュー・ドキュメントレビュー）をフェーズの途中で始めると
 hook が止める。止められたら `結果: スイッチポイント` で返す（規則 12）。`supervisor-waits` は寿命が
-1 時間で、収束ループの工程から始める区間に使い、hook は止めない。
+1 時間で、収束ループの工程から始める起動に使い、hook は止めない。

@@ -458,7 +458,7 @@ def test_plugin_table_row_removed_fails(tree: Path) -> None:
     assert "README.md" in output_of(result)
 
 
-# --- J: 正本の「版の付け方と開発版の配布」章（区間のチェック） ---
+# --- J: 正本の「版の付け方と開発版の配布」章（節のチェック） ---
 #
 # 版数の扱いの正本は `docs/versioning-and-distribution.md` である（#499）。チェック J は
 # `AGENTS.md` ではなく正本の章 2 を読み、失敗も正本のパスで報告する。
@@ -534,7 +534,7 @@ def test_missing_versioning_document_fails(tree: Path) -> None:
 
 
 def test_versions_after_the_section_do_not_fail(tree: Path) -> None:
-    """章 2 より後ろの章に囲んだ古い版数があっても落ちない（区間は次の同位の見出しで閉じる）。"""
+    """章 2 より後ろの章に囲んだ古い版数があっても落ちない（節は次の同位の見出しで閉じる）。"""
     body = versioning_md(tree).read_text(encoding="utf-8")
     assert "`8.4.0`" in body.split("## 版数を持つ 15 箇所", 1)[1]
     result = run_check(tree)
@@ -542,9 +542,9 @@ def test_versions_after_the_section_do_not_fail(tree: Path) -> None:
 
 
 def test_version_section_stops_at_a_higher_level_heading(tree: Path) -> None:
-    """章の直後が上位の見出し（`# `）でも区間を抜ける。
+    """章の直後が上位の見出し（`# `）でも節を抜ける。
 
-    自身と同じ深さの見出しだけで区切ると、次が上位の見出しのときに区間が閉じない。閉じなければ
+    自身と同じ深さの見出しだけで区切ると、次が上位の見出しのときに節が閉じない。閉じなければ
     走査は文書の末尾まで続き、後ろの章に並ぶ前の版の版数を現行版と比べてしまう。
     """
     edit(versioning_md(tree), "## 版数を持つ 15 箇所\n", "# 版数を持つ 15 箇所\n")
@@ -553,7 +553,7 @@ def test_version_section_stops_at_a_higher_level_heading(tree: Path) -> None:
 
 
 def test_subheading_inside_the_section_does_not_close_it(tree: Path) -> None:
-    """章 2 の中の `### ` 小見出しで区間を閉じない。
+    """章 2 の中の `### ` 小見出しで節を閉じない。
 
     終端を深さを 3 に固定して取ると、`## ` の章の中の小見出しで章が途切れ、その後ろの古い版数を
     見落とす。終端は位置決めの見出しの深さから導く。
@@ -610,7 +610,7 @@ def add_code_fence_to_version_section(tree: Path) -> None:
 
 
 def test_code_fence_comment_does_not_close_the_section(tree: Path) -> None:
-    """囲みの中の `# ` 始まりで区間を閉じない（実物の章は実行例を含む）。"""
+    """囲みの中の `# ` 始まりで節を閉じない（実物の章は実行例を含む）。"""
     add_code_fence_to_version_section(tree)
     result = run_check(tree)
     assert result.returncode == 0, output_of(result)

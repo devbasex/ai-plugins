@@ -297,7 +297,7 @@ def cmd_gate(a) -> dict:
     gates.append(entry)
     m["gates"] = gates
     save(a.mission, m)
-    who = "MVV の判定" if a.by == "mvv" else "承認"
+    who = "MVV 判定" if a.by == "mvv" else "承認"
     return result("ok", f"{a.name} の{who}を書いた（{at}）", gates, {"gates": len(gates)})
 
 
@@ -306,7 +306,7 @@ def cmd_gate(a) -> dict:
 
 def gate_word(g: dict) -> str:
     """関門を誰が通したか。記録に by が無ければ利用者の承認。"""
-    return "MVV の判定" if g.get("by") == "mvv" else "承認"
+    return "MVV 判定" if g.get("by") == "mvv" else "承認"
 
 
 def row_of(p: dict) -> dict:
