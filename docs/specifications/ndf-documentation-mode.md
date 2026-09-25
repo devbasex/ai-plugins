@@ -26,7 +26,7 @@
 | 出力の形 | スライド / 文書 / 表計算 / ページ | 決めるのは `design`、生成するのは `release` |
 | ドキュメンテーションシステム | Google Drive / Notion / Confluence / SharePoint / リポジトリ自身 | `document-systems` |
 
-**承認の関門は 2 つのままである。** 新しい関門を作らない。
+**承認ゲートは 2 つのままである。** 新しい承認ゲートを作らない。
 
 ## 用語
 
@@ -53,7 +53,7 @@
 
 ### 工程表を分けない
 
-18 行 × 5 列のうち、`documentation` 列の対象外は 1 セル（構造改善）だけである。分けると
+18 行 × 5 列のうち、`documentation` 列の対象外は 1 セル（リファクタリング）だけである。分けると
 `worktree` `cross-review` `pr` `merged` と同じ規約が 2 箇所へ書かれる。
 
 ### 工程の行を 2 つ増やす
@@ -156,19 +156,19 @@ Confluence と SharePoint の実装は別のリポジトリにあり、自リポ
 **境界は「読み手に何を求めるか」で切る。** 同じ内容でも、採否を求めれば提案、承認を求めれば
 決裁である。
 
-### 承認の 2 つの関門
+### 2 つの承認ゲート
 
-| 関門 | 文書での意味 | 引き金 |
+| ゲート | 文書での意味 | 引き金 |
 | --- | --- | --- |
 | 設計 Pull Request のマージ | 企画承認 | head のブランチ名 `design/` + ラベル `design-approved` |
 | 本番の系へ届く操作 | 制作物承認 | 提出先の `production` が真 |
 
-**制作物承認の提示物には、生成物を描画した画像と、生成物と正本の内容照合の差分を含める。**
+**制作物承認の承認資料には、生成物を描画した画像と、生成物と正本の内容照合の差分を含める。**
 文字だけでは体裁を承認できない。
 
 **取り消しの手段は共有の解除と版の差し戻しで、限界は「既に見た人には効かない」ことである。**
 
-### 配布は生成と提出の 2 つの手順である
+### リリースは生成と提出の 2 つの手順である
 
 ```text
 生成（下書き先へ） → 内容照合 → 体裁レビュー → 制作物承認 → 提出（本番の提出先へ）
@@ -187,7 +187,7 @@ Confluence と SharePoint の実装は別のリポジトリにあり、自リポ
 | --- | --- |
 | `source_root` | 正本を置く根。リポジトリの根からの相対パス |
 | `destinations[].system` | `gdrive` / `notion` / `confluence` / `sharepoint` / `repo` |
-| `destinations[].production` | 真なら本番の系。届く操作が制作物承認の関門になる |
+| `destinations[].production` | 真なら本番の系。届く操作が制作物承認のゲートになる |
 | `destinations[].draft` | 本番の提出先が指す、対になる下書き先の `name` |
 | `destinations[].visibility` | 期待する公開範囲。提出の後にこの値と突き合わせる |
 | `destinations[].auth` | 認証の**出所**（環境変数の名前や秘密情報の管理系の識別子）。**値は書かない** |
@@ -215,7 +215,7 @@ Confluence と SharePoint の実装は別のリポジトリにあり、自リポ
 | 工程名の並びが 5 箇所で一致する | 文書を読んで確かめる（照合していたテストは #885 で削除） |
 | `documentation` の高さが 5 で、混在時にそちらでチェックする | `test_documentation_mode.py` |
 | 5 列目を読み、既存 4 列がずれない | 同上 |
-| 承認の関門が 2 つのままである | 文書を読んで確かめる（照合していたテストは #885 で削除） |
+| 承認ゲートが 2 つのままである | 文書を読んで確かめる（照合していたテストは #885 で削除） |
 | 形が 9 つあり、索引が実ファイルと一致する | 索引が実在する `form-*.md` をすべて指すことは `plugins/ndf/skills/release/tests/test_completion_check.py`（`test_the_form_index_links_to_every_form_file`）で見る。形の数は文書を読んで確かめる（固定の一覧と照合していたテストは #885 で削除） |
 | 新設 4 個が 4 つの manifest すべてに載る | `test_agy_distribution.py` / `validate-runtime-plugins.sh` |
 | 自リポジトリ前提を持たない | `check-skill-repo-assumptions.py` |
@@ -247,4 +247,4 @@ Confluence と SharePoint の実装は別のリポジトリにあり、自リポ
 - [`document-sources` の SKILL.md](../../plugins/ndf/skills/document-sources/SKILL.md) — 出所の残し方
 - [`document-drafting` の SKILL.md](../../plugins/ndf/skills/document-drafting/SKILL.md) — タイプ別の中身
 - [`layout-review` の SKILL.md](../../plugins/ndf/skills/layout-review/SKILL.md) — 体裁レビュー
-- [モードを判定する単位と、承認の関門](ndf-workflow-unit-and-gates.md) — 関門の一般の規則
+- [モードを判定する単位と、承認ゲート](ndf-workflow-unit-and-gates.md) — 承認ゲートの一般の規則

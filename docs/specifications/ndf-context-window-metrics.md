@@ -55,7 +55,7 @@ conductor / supervisor / worker の会話の記録を層の単位で読み、記
 
 ## 決定と理由
 
-**記録を読む部品を共通層（`plugins/ndf/scripts/lib/transcript_agents.py`）に 1 つ置く。** `skill-stats`
+**記録を読む部品をライブラリ（`plugins/ndf/scripts/lib/transcript_agents.py`）に 1 つ置く。** `skill-stats`
 が集計に使い、`development-workflow` が中断した記録の一覧と解除の待ちに使う。別の Skill の `scripts/`
 を呼ぶと、配る Skill を絞る配布先で解決できない（`scripts/check-cross-skill-refs.py`）。起動のたびに
 台帳を書く案は、記録が既に必要な値を持つため採らなかった。
@@ -173,7 +173,7 @@ worker（読解）は深さ 1 に現れるため、`description` の先頭語が
 
 | 目印 | 条件 |
 | --- | --- |
-| `束ねる候補` | 層が `supervisor` の行にだけ付く。`実作業 < 固定費` の件数 > 件数の半分。フェーズが `設計` の行には付けない（設計のフェーズはどのモードでも関門を返すため作る） |
+| `束ねる候補` | 層が `supervisor` の行にだけ付く。`実作業 < 固定費` の件数 > 件数の半分。フェーズが `設計` の行には付けない（設計のフェーズはどのモードでも承認ゲートを返すため作る） |
 | `割る候補` | 最大充填の最大 > `--window-limit`。両方付くときは `・` で連結する |
 | `worker を使いすぎ` | supervisor と配下の worker の固定費の合計 > その supervisor の実作業 |
 

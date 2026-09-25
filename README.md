@@ -20,7 +20,7 @@ Claude Code / Codex / Kiro CLI / agy 向けのスキル・MCP設定を共有す�
   - 運用 (4): skill-stats, statusline, install-wrapper, restart
 - **8つの専門エージェント**: director, data-analyst, corder, researcher, qa, debugger, devops-engineer, code-reviewer
 - **3 層の worker の定義 1 個**: worker（supervisor が 1 つの作業を渡す先。Skill と Agent のツールを外してある）
-- **自動フック**: 作業ツリー運用（Claude Code / Codex は PreToolUse + SessionStart、Kiro CLI は userPromptSubmit + agentSpawn、agy は PreToolUse + PreInvocation。リポジトリに `.ndf/worktree.json` があるときだけ動く）、SessionStart (transcript保持期間を最低90日に保つ)、回答・承認待ちの Slack 通知（Stop・Notification・PermissionRequest ほか）
+- **自動フック**: worktree 運用（Claude Code / Codex は PreToolUse + SessionStart、Kiro CLI は userPromptSubmit + agentSpawn、agy は PreToolUse + PreInvocation。リポジトリに `.ndf/worktree.json` があるときだけ動く）、SessionStart (transcript保持期間を最低90日に保つ)、回答・承認待ちの Slack 通知（Stop・Notification・PermissionRequest ほか）
 - **外部AI委譲**: `/ndf:external-ai` skill + `corder` エージェント経由で Codex / agy をバックグラウンド実行 (v4.0.0 で Codex MCP サーバは廃止)
 - **AIクロスレビュー強化**: `/ndf:cross-review` は codex/agy 両方に PR レビューを委譲し、agy の進捗 heartbeat、`--focus` / `--extra-instructions-file`、PR 種別別の自動レビュー観点テンプレートに対応
 - **Kiro CLI対応**: `plugins/ndf/dev.kiro/install.sh` によるワンコマンドセットアップ
@@ -111,14 +111,14 @@ hook を効かせる手順と、新しい版へ入れ替える手順は
 
 | プラグイン名 | バージョン | 説明 | 詳細 |
 |------------|----------|------|------|
-| **ndf** | 10.17.26 | Claude Code / Codex / Kiro CLI / agy へ 1 ディレクトリから配布する NDF プラグイン。8個の専門エージェントと 3 層の worker の定義 1 個（Claude版）、公開Skills（Claude Code向け core 47個、Kiro向け core 44個、Codex向け core 43個、agy向け core 43個）、4ランタイム共通の作業ツリー運用フック（PreToolUse / SessionStart / userPromptSubmit / agentSpawn / PreInvocation）、Claude Stopフック、Codex/Kiro向け通知・実行補助を提供。v4.0.0 で Codex MCP サーバを廃止し、`/ndf:external-ai` skill + `corder` エージェント経由の CLI 直接実行に一本化。 | [README](./plugins/ndf/README.md) |
+| **ndf** | 10.17.26 | Claude Code / Codex / Kiro CLI / agy へ 1 ディレクトリから配布する NDF プラグイン。8個の専門エージェントと 3 層の worker の定義 1 個（Claude版）、公開Skills（Claude Code向け core 47個、Kiro向け core 44個、Codex向け core 43個、agy向け core 43個）、4ランタイム共通の worktree 運用フック（PreToolUse / SessionStart / userPromptSubmit / agentSpawn / PreInvocation）、Claude Stopフック、Codex/Kiro向け通知・実行補助を提供。v4.0.0 で Codex MCP サーバを廃止し、`/ndf:external-ai` skill + `corder` エージェント経由の CLI 直接実行に一本化。 | [README](./plugins/ndf/README.md) |
 | **playwright-kit** | 2.0.3 | Playwright による E2E テストの計画・実装・証跡管理を提供するプラグイン。ページ役割からのテスト計画、動画 / trace 付きスクリプト実装、レポート生成と Drive 保管、playwright_kit ランタイム（init、a11y / CWV スキャン）の 4 Skill。NDF v7.0.0 で分離。 | [README](./plugins/playwright-kit/README.md) |
 
 ### 変更履歴
 
 版ごとの変更点は [CHANGELOG.md](./CHANGELOG.md) にある。出た版の判断の理由と、その版で決めた
 規約は [docs/ndf-version-decisions.md](./docs/ndf-version-decisions.md) にある。現行版の分だけは
-[CLAUDE.md](./CLAUDE.md) にあり、配布した時点で退避先へ移る。
+[CLAUDE.md](./CLAUDE.md) にあり、リリースした時点で退避先へ移る。
 
 ## リファレンス
 
@@ -146,7 +146,7 @@ hook を効かせる手順と、新しい版へ入れ替える手順は
 - [GOVERNANCE.md](./GOVERNANCE.md) - 役割・決め方・メンテナーになる道
 - [CONTRIBUTING.md](./CONTRIBUTING.md) - 参加の手引き（開発の進め方・手元での検証）
 - [docs/plugin-development-guide.md](./docs/plugin-development-guide.md) - プラグインの作成・更新・削除の手順
-- [docs/versioning-and-distribution.md](./docs/versioning-and-distribution.md) - 版の付け方・開発版と正式版の配布・過去の版へ戻る手順
+- [docs/versioning-and-distribution.md](./docs/versioning-and-distribution.md) - 版の付け方・開発版と正式版のリリース・過去の版へ戻る手順
 - [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) - 行動規範
 - [SECURITY.md](./SECURITY.md) - 脆弱性の報告
 - [SUPPORT.md](./SUPPORT.md) - 質問と不具合の報告
