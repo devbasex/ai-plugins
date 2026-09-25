@@ -235,7 +235,7 @@ Confluence と SharePoint の実装は別のリポジトリにあり、自リポ
 
 ### リポジトリの外に残る作業
 
-**盤面（GitHub Projects）の単一選択へ、新しい 2 工程と `documentation` の値を足す必要がある。**
+**ボード（GitHub Projects）の単一選択へ、新しい 2 工程と `documentation` の値を足す必要がある。**
 リポジトリの変更では完結せず、足りない値は書き込み時に弾かれる。
 
 ## 関連リンク

@@ -66,7 +66,7 @@ def test_the_new_stages_are_known() -> None:
 
 
 def test_the_new_stages_sit_where_the_design_says() -> None:
-    """位置を固定する。盤面の単一選択は並びが工程の順序を表す。"""
+    """位置を固定する。ボードの単一選択は並びが工程の順序を表す。"""
     result = run_lib("wf_stages")
     assert result.returncode == 0
     stages = [line for line in result.stdout.splitlines() if line]

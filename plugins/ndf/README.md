@@ -204,7 +204,7 @@ bash <プラグインのパス>/scripts/worktree-setup.sh init
 | 前景の `sleep` の待ち（`while` / `until` のループの本体、または上限を超える秒数） | `NDF_SLEEP_GUARD=0` | `NDF_SLEEP_MAX_SEC`（既定 5） |
 | 変わらないファイルの同じ範囲を続けて読む Read | `NDF_READ_REPEAT_GUARD=0` | `NDF_READ_REPEAT_LIMIT`（既定 3） |
 | 文脈が上限を超えた conductor が工程へ入る起動（1 度だけ止め、新しい会話で打つコマンドを `ndf-next` のブロックで示させる。ラッパーの下では止め続ける） | `NDF_CONTEXT_GUARD=0` | `NDF_CONTEXT_LIMIT`（既定 200000） |
-| 寿命 5 分の supervisor（`ndf:supervisor`）が、文脈を最初の呼び出しの 1.5 倍以上に伸ばしたまま `cross-review` / `cross-refactoring` を起動する（止め続け、`結果: 区切り` で返させる） | `NDF_SUPERVISOR_CUT_GUARD=0` | `NDF_SUPERVISOR_CUT_RATIO`（既定 1.5） |
+| 寿命 5 分の supervisor（`ndf:supervisor`）が、文脈を最初の呼び出しの 1.5 倍以上に伸ばしたまま `cross-review` / `cross-refactoring` を起動する（止め続け、`結果: スイッチポイント` で返させる） | `NDF_SUPERVISOR_CUT_GUARD=0` | `NDF_SUPERVISOR_CUT_RATIO`（既定 1.5） |
 
 | ランタイム | 待ち方 | 会話を切る |
 | --- | --- | --- |
@@ -222,7 +222,7 @@ Claude Code の SessionStart hook（`hooks/claude.json`）は上記に加えて�
 
 - `~/.claude/settings.json` の `cleanupPeriodDays` を 90 日以上に保つ
 - statusline 未設定時に NDF 標準 statusline を設定する
-- 区間の切れ目のラッパー（`scripts/relay.py`）の写しが在れば今の版で置き直す（`relay.py startup`。
+- カットポイントで claude を起動し直すラッパー（`scripts/relay.py`）の写しが在れば今の版で置き直す（`relay.py startup`。
   版は後退させない）。10.17.4〜10.17.6 が自動で足した alias の囲みが残っていれば 1 度だけ知らせる。
   **シェルの設定は書かない。** ラッパーを入れる・外すのは `/ndf:install-wrapper`（Claude Code だけ）
 

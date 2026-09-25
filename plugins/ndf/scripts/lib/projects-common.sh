@@ -2,7 +2,7 @@
 # NDF plugin: 工程の進行を GitHub Projects へ記録するための判定。
 #
 # **リポジトリに .ndf/projects.json があるときだけ動く。** 無ければ何もしない。
-# 進行管理は開発の前提条件ではないため、盤面が無い環境でも工程はそのまま通る。
+# 進行管理は開発の前提条件ではないため、ボードが無い環境でも工程はそのまま通る。
 #
 # 判定はすべてこのファイルが持ち、入口のスクリプトは入出力の整形だけを行う
 # （worktree の詳細設計 06 の決定 8 と同じ構造）。
@@ -31,13 +31,13 @@ pj_repo_slug() {
 }
 
 # 工程の値。**development-workflow の工程表の行名と一致させる。**
-# 綴りの違う値を書き込むと、盤面の側に工程表に無い値が増える。
+# 綴りの違う値を書き込むと、ボードの側に工程表に無い値が増える。
 PJ_STAGES=$'要求と受け入れ条件\n作業場所の用意\n設計\n素材の収集と出典の確定\nドキュメント再構成\nドキュメントレビュー\n計画\n実装\n構造改善\n実装レビュー\n完了判定\nPull Request\n確定仕様化\n後片付け\n配布\n体裁レビュー\nリリース後テスト\n振り返り'
 PJ_MODES=$'light\noperation\nlegacy-refactor\nstandard\ndocumentation'
-# 盤面の既定のフィールド。GitHub が最初から持つもので、値も既定のまま使う。
+# ボードの既定のフィールド。GitHub が最初から持つもので、値も既定のまま使う。
 PJ_STATUSES=$'Todo\nIn Progress\nDone'
 
-# キーと、盤面のフィールド名の既定。宣言の `fields` で差し替えられる。
+# キーと、ボードのフィールド名の既定。宣言の `fields` で差し替えられる。
 _pj_default_field() {
   case "$1" in
     stage) printf '進行\n' ;;
@@ -51,8 +51,8 @@ _pj_default_field() {
 
 # 宣言を 1 行の JSON で返す。読めなければ 1 を返す。
 #
-# 盤面を特定できない宣言（owner か number が欠けている）は無効として扱う。
-# 部分的に読めた値で書き込み先を推測すると、別の盤面を更新しかねない。
+# ボードを特定できない宣言（owner か number が欠けている）は無効として扱う。
+# 部分的に読めた値で書き込み先を推測すると、別のボードを更新しかねない。
 pj_declaration() {
   local dir="${1:-}" file json
   [ -n "$dir" ] || return 1
@@ -71,7 +71,7 @@ pj_declaration() {
 pj_owner() { printf '%s' "${1:-}" | jq -r '.owner' 2>/dev/null; }
 pj_number() { printf '%s' "${1:-}" | jq -r '.number' 2>/dev/null; }
 
-# キーに対応する盤面のフィールド名を返す。知らないキーは 1 を返す。
+# キーに対応するボードのフィールド名を返す。知らないキーは 1 を返す。
 pj_field_name() {
   local json="${1:-}" key="${2:-}" name
   _pj_default_field "$key" >/dev/null || return 1
@@ -91,7 +91,7 @@ _pj_in_list() { grep -Fxq -- "$2" <<<"$1"; }
 pj_is_stage() { _pj_in_list "$PJ_STAGES" "${1:-}"; }
 pj_is_mode() { _pj_in_list "$PJ_MODES" "${1:-}"; }
 pj_is_status() { _pj_in_list "$PJ_STATUSES" "${1:-}"; }
-# 進め方（#1078）。盤面のフィールドは持たず、issue の本文の見出し行と控えにだけ書く。
+# 進め方（#1078）。ボードのフィールドは持たず、issue の本文の見出し行と控えにだけ書く。
 PJ_PACES=$'normal\nfast'
 pj_is_pace() { _pj_in_list "$PJ_PACES" "${1:-}"; }
 
@@ -117,7 +117,7 @@ pj_is_valid_value() {
   esac
 }
 
-# 解決した識別子の控え。**記録のたびに盤面の全件を読まない。**
+# 解決した識別子の控え。**記録のたびにボードの全件を読まない。**
 #
 # `gh project item-list --limit 1000` は GraphQL で、取得の点数が REST とは別の上限を
 # 持つ（#271）。2026-09-04 の実測では、10 件の課題へ 2 つのキーを書こうとした時点で
@@ -137,7 +137,7 @@ pj_cache_dir() {
   printf '%s\n' "$dir"
 }
 
-# 控えのファイル。盤面と課題の組で決まる（工程が進んでも変わらない）。
+# 控えのファイル。ボードと課題の組で決まる（工程が進んでも変わらない）。
 pj_cache_file() {
   local dir owner="${1:-}" number="${2:-}" issue="${3:-}"
   dir=$(pj_cache_dir) || return 1

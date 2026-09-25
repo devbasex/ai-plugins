@@ -26,7 +26,7 @@ supervisor は進行を記録のコマンド 1 行で残し、worker は Skill �
 ```
 
 supervisor は設計の工程に入った時点で `bash "<絶対パス>/projects-sync.sh" 828 stage "設計"` を
-1 回の Bash 実行で打つ。issue の本文の `## 進行` と盤面の両方に残り、通過工程の控えにも
+1 回の Bash 実行で打つ。issue の本文の `## 進行` とボードの両方に残り、通過工程の控えにも
 「設計」が積まれる。supervisor は `progress-tracking`（本文 約 7,600 トークン）も
 `development-workflow`（約 10,700 トークン）も起動しない。本文は起動するとフェーズが終わるまで
 文脈に残り、以後の呼び出しのたびに読み直される。
@@ -49,7 +49,7 @@ supervisor は設計の工程に入った時点で `bash "<絶対パス>/project
 | Skill 本文の読み込み | Skill ツールで Skill を起動すること、または `SKILL.md` を Read すること。どちらも本文全体が文脈に載る |
 | 工程の Skill | `development-workflow` の工程表が起動する Skill |
 | 工程の外の Skill | 工程表に載らず、どの工程からも呼ばれる Skill（`progress-tracking` / `out-of-scope` など）と、工程の振り分けを持つ `development-workflow` |
-| 記録のコマンド | `projects-sync.sh <課題番号> <キー> <値>` の 1 行。issue の本文・盤面・通過工程の控えへ同時に残る |
+| 記録のコマンド | `projects-sync.sh <課題番号> <キー> <値>` の 1 行。issue の本文・ボード・通過工程の控えへ同時に残る |
 | 抜粋 | Skill の本文から、呼ぶ側が要る部分だけを取り出した写し。形は「呼び出し・結果の読み方・判断の基準」 |
 | 器 | 仕事を渡す先の実行の形。その場 / サブエージェント / CLI 実行 / 最小構成の `claude -p` / スクリプト（背景の bash を含む）の 5 つ |
 | 固定費 | 器を 1 つ起こすたびに、仕事の前に読む量（システムプロンプト・ツール定義・指示）。`context-window.md` の定義と同じ |
@@ -58,7 +58,7 @@ supervisor は設計の工程に入った時点で `bash "<絶対パス>/project
 
 | 要素 | 責務 |
 | --- | --- |
-| `plugins/ndf/scripts/projects-sync.sh` | **記録のコマンドの入口。** 引数を検査した後、`stage` / `mode` / `worktree` / `plan` では盤面の宣言の有無にかかわらず先に `progress-record.sh` を呼んで issue の本文を更新し、その後で盤面を更新する。`status` は盤面だけに書く |
+| `plugins/ndf/scripts/projects-sync.sh` | **記録のコマンドの入口。** 引数を検査した後、`stage` / `mode` / `worktree` / `plan` ではボードの宣言の有無にかかわらず先に `progress-record.sh` を呼んで issue の本文を更新し、その後でボードを更新する。`status` はボードだけに書く |
 | `plugins/ndf/scripts/progress-record.sh` | issue の本文の `## 進行` の更新。工程名の位置に `-` を受けると、チェックリストを変えずに見出し行（モード・作業ツリー・計画ファイル）だけを更新する |
 | `plugins/ndf/agents/worker.md` | worker のエージェント定義（`ndf:worker`）。frontmatter の `disallowedTools: Skill, Agent` で 2 つのツールを外す |
 | `plugins/ndf/.claude-plugin/plugin.json` | `agents` 配列に `./agents/worker.md` を載せる。agy へは `plugins/ndf/dev.agy/agents`（`../agents` への symlink）で同じ定義が配られる |
@@ -78,7 +78,7 @@ flowchart TB
   S -- 1 行 --> PS[projects-sync.sh]
   PS --> PR[progress-record.sh]
   PR --> IB[(issue の本文<br/>## 進行)]
-  PS --> BD[(盤面)]
+  PS --> BD[(ボード)]
   H[PreToolUse hook] -. コマンドを観測 .-> PS
   H --> ST[(通過工程の控え)]
   S -. 器を選ぶ .-> WV[work-vessels.md]
@@ -92,7 +92,7 @@ flowchart TB
 
 - **記録のコマンドの失敗で工程を止めない。** 呼び出し側の誤り（知らないキー・工程表に無い値・
   引数の不足）だけが終了コード 2 で、それ以外はすべて 0 で終わる。`progress-record.sh` が
-  失敗しても盤面の更新へ進む
+  失敗してもボードの更新へ進む
 - **引数の検査は何かを書く前に行う。** 値の誤りで 2 を返すときに、issue の本文だけが書かれた
   状態を作らない
 - **記録のコマンドは 1 回の Bash 実行に 1 件である。** 通過工程の控えは 1 回の実行の最初の記録しか
@@ -115,7 +115,7 @@ projects-sync.sh <課題番号> <キー> <値>
   キー: stage | mode | status | worktree | plan
 ```
 
-| キー | 打つ時点 | issue の本文 | 盤面 | 通過工程の控え |
+| キー | 打つ時点 | issue の本文 | ボード | 通過工程の控え |
 | --- | --- | --- | --- | --- |
 | `stage` | 工程に入るたび（課題ごと） | `progress-record.sh <課題> "<値>"`（チェックを付ける） | 工程のフィールド | 工程を積む |
 | `mode` | フェーズの最初の工程で 1 度 | `progress-record.sh <課題> - --mode <値>`（見出し行だけ） | モードのフィールド | モードを書く |
@@ -128,16 +128,16 @@ projects-sync.sh <課題番号> <キー> <値>
 
 | 条件 | 終了コード | 出力 |
 | --- | --- | --- |
-| issue の本文を書き換えた | 0 | `stage` は `#<課題> 進行 = <工程>`、他のキーは `#<課題> 進行の見出し = モード: …`。盤面の宣言があれば盤面の行が続く |
-| 同じ値を記録し直した（issue の本文が変わらない） | 0 | issue の本文の行は出ない。盤面の宣言があれば盤面の行だけが出る |
-| 盤面の宣言が無い | 0 | issue の本文の行だけ |
-| `gh` が無い | 0 | 出力なし。issue の本文も盤面も書かない |
-| issue を取得できない | 0 | issue の本文の行は出ない。盤面の更新は続ける |
-| 盤面が上限・盤面にアイテムを追加できない | 0 | `NOTE:` の 1 行 |
-| 知らないキー・工程表に無い値・引数の不足 | 2 | `ERROR:` の行。issue の本文も盤面も書かない |
+| issue の本文を書き換えた | 0 | `stage` は `#<課題> 進行 = <工程>`、他のキーは `#<課題> 進行の見出し = モード: …`。ボードの宣言があればボードの行が続く |
+| 同じ値を記録し直した（issue の本文が変わらない） | 0 | issue の本文の行は出ない。ボードの宣言があればボードの行だけが出る |
+| ボードの宣言が無い | 0 | issue の本文の行だけ |
+| `gh` が無い | 0 | 出力なし。issue の本文もボードも書かない |
+| issue を取得できない | 0 | issue の本文の行は出ない。ボードの更新は続ける |
+| ボードが上限・ボードにアイテムを追加できない | 0 | `NOTE:` の 1 行 |
+| 知らないキー・工程表に無い値・引数の不足 | 2 | `ERROR:` の行。issue の本文もボードも書かない |
 
 **`progress-record.sh` を直接呼ぶのは 2 つの場合だけである。** 他のリポジトリの課題へ書く
-（`--repo`。盤面へは書かない）ときと、付随情報を足す（`--note`）ときである。
+（`--repo`。ボードへは書かない）ときと、付随情報を足す（`--note`）ときである。
 
 ### supervisor の起動指示
 
@@ -294,7 +294,7 @@ worker には渡さない。
 | スクリプト | 段 1 | 決まった手順（進行の記録・集計・検査の実行・待ち）、600 秒を超える待ち（背景で起動して完了通知を待つ） |
 
 - **比較表は `agent-layers.md` とは別の文書に置く。** `agent-layers.md` に足すと分割の基準の
-  500 行を超える。`context-window.md` に足すと、切れ目と委譲の線と残量を持つ文書の責務が広がる
+  500 行を超える。`context-window.md` に足すと、カットポイントと委譲の線と残量を持つ文書の責務が広がる
 - **可搬性の列は置かない。** 4 ランタイムでの扱いは #888 が決める
 - **supervisor のスクリプト駆動（#827 の方針）は、この表の上で「工程の進行をスクリプトへ、判断を
   最小構成の `claude -p` へ」と位置づける。** 採否は #827 が決める
@@ -343,11 +343,11 @@ CLI の worker（#760）で Skill を塞ぐ手段は次のとおりで、今の 
 
 ## 運用
 
-- **性能:** 記録のコマンドは、盤面への問い合わせを分けて呼んでいたときと同じ回数に保つ。issue の
+- **性能:** 記録のコマンドは、ボードへの問い合わせを分けて呼んでいたときと同じ回数に保つ。issue の
   本文の取得と更新は `progress-record.sh` の 2 回である
 - **対話の会話:** 工程の Skill の末尾の文が 1 行になったため、対話の会話も `progress-tracking` を
   読まずに記録する。`$SCRIPTS` の決め方は `scripts-lookup.md` を読む（#847 が 1 コマンドにする）
-- **切り戻し:** Pull Request を revert すれば戻る。issue の本文と盤面に残る値の形は変わらないため、
+- **切り戻し:** Pull Request を revert すれば戻る。issue の本文とボードに残る値の形は変わらないため、
   データの移行は無い
 
 ## テスト観点
@@ -355,8 +355,8 @@ CLI の worker（#760）で Skill を塞ぐ手段は次のとおりで、今の 
 記録のコマンドのテストは `plugins/ndf/scripts/tests/test_projects_sync_record.py`、定義の検査は
 `plugins/ndf/scripts/tests/test_worker_agent.py` にある。`gh` は既存のテストと同じ偽物で置き換える。
 
-- 盤面の宣言が無いリポジトリで `stage` を打つと、issue の本文だけが更新されること
-- 宣言があるリポジトリで、issue の本文と盤面の両方が更新されること
+- ボードの宣言が無いリポジトリで `stage` を打つと、issue の本文だけが更新されること
+- 宣言があるリポジトリで、issue の本文とボードの両方が更新されること
 - `mode` でチェックリストが変わらず、見出し行だけが変わること
 - 知らないキー・工程表に無い値で 2 を返し、issue の本文を書かないこと
 - `status` が issue の本文を書かないこと
@@ -399,4 +399,4 @@ CLI の worker（#760）で Skill を塞ぐ手段は次のとおりで、今の 
 - [#855](https://github.com/devbasex/ai-plugins/issues/855) — Skill の書き方の規約と検査（抜粋と本文の一致の検査を持つ）
 - [#888](https://github.com/devbasex/ai-plugins/issues/888) / [#889](https://github.com/devbasex/ai-plugins/issues/889) — 4 ランタイムの可搬性 / 共有する外部の枠
 - [ndf-agent-layers-unattended-run.md](ndf-agent-layers-unattended-run.md) — 3 層の運転
-- [ndf-token-waits-and-context-cut.md](ndf-token-waits-and-context-cut.md) — 待つ間の問い合わせと会話の切れ目（同じ #827 の子）
+- [ndf-token-waits-and-context-cut.md](ndf-token-waits-and-context-cut.md) — 待つ間の問い合わせと会話のカットポイント（同じ #827 の子）

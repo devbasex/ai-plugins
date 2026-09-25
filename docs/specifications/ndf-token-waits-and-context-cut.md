@@ -1,4 +1,4 @@
-# 待つ間の問い合わせを止め、conductor の会話を工程の切れ目で切る
+# 待つ間の問い合わせを止め、conductor の会話をカットポイントで切る
 
 Claude Code の PreToolUse hook（`plugins/ndf/scripts/token-guard.sh`）が、待つ間に文脈を
 読み直す呼び出し（前景の `sleep` の待ちと、変わらないファイルの読み直し）と、文脈が上限を
@@ -11,7 +11,7 @@ Claude Code の PreToolUse hook（`plugins/ndf/scripts/token-guard.sh`）が、�
 | 何を読むか | 正本 |
 | --- | --- |
 | 待ちの費用、許す待ち方と禁じる待ち方、待つ相手ごとの手、途中の通知を受けたときの層ごとの手と写しの待ちのコマンド、hook の止め方、4 ランタイムの扱い | `plugins/ndf/skills/development-workflow/references/waiting.md` |
-| 会話を切る 4 つの切れ目、上限を超えたら hook が止めること、新しい会話で戻す手順 | `plugins/ndf/skills/development-workflow/references/context-window.md` の「context window は工程の切れ目で切る」「上限を超えたら hook が止める」「新しい会話で戻す」 |
+| 会話を切る 4 つのカットポイント、上限を超えたら hook が止めること、新しい会話で戻す手順 | `plugins/ndf/skills/development-workflow/references/context-window.md` の「context window はカットポイントで切る」「上限を超えたら hook が止める」「新しい会話で戻す」 |
 | conductor が引き継ぎの 1 行を出す時点 | `plugins/ndf/skills/development-workflow/SKILL.md`（「工程は 1 つの context window で通し切らなくてよい」の段落） |
 | supervisor と worker が待ち方に従う規則、worker の起動指示の `置き場所`（報告の写しと完了の目印） | `plugins/ndf/skills/development-workflow/references/agent-layers.md` |
 | `sleep` の判定の字句の規則 | `plugins/ndf/scripts/lib/token_guard_sleep.py` の docstring |
@@ -44,7 +44,7 @@ Claude Code の PreToolUse hook（`plugins/ndf/scripts/token-guard.sh`）が、�
 | ポーリング | 待つ間に、状態を確かめるための呼び出しを繰り返すこと |
 | 前景の Bash | `run_in_background` を付けずに実行する Bash。終わるまで呼び出しが返らない |
 | 文脈量 | 1 回の API 呼び出しで読んだトークン数。`input_tokens + cache_read_input_tokens + cache_creation_input_tokens` |
-| 工程 Skill | `context-window.md` の 4 つの切れ目の直後に始まる工程の Skill と、入口の `development-workflow` / `issue-plan-strategy`（下の「工程 Skill の一覧」） |
+| 工程 Skill | `context-window.md` の 4 つのカットポイントの直後に始まる工程の Skill と、入口の `development-workflow` / `issue-plan-strategy`（下の「工程 Skill の一覧」） |
 | 途中の通知 | 背景の処理を残したまま応答を終えたサブエージェントについて、親へ届く 1 回目の通知。注記に「background work of its own still running」「may be interim」と出る |
 | 報告の写し | worker が起動指示の `置き場所` のファイルの末尾へ書く `## 作業の報告` の節。最後の応答の報告と同じ中身 |
 | 完了の目印 | worker が報告の写しを書き終えた後に作る空のファイル `<置き場所>.done` |
@@ -168,12 +168,12 @@ graph TB
   つく。supervisor は 1 つのフェーズの中で複数の工程を通すため、工程の起動で止めるとフェーズが
   途中で途切れる
 - **工程でない Skill と、先頭語が作業の種類（`調査` など）の Agent は見ない。** 工程の途中で
-  起動されるため切れ目にならない
+  起動されるためカットポイントにならない
 - **拒否の後、次に工程へ入る起動が同じ鍵なら 1 度だけ通し、印を消す。** 間に他のツールや
   工程でない Skill・Agent が挟まっても印は残る。次の起動が別の鍵なら、上限を超えていれば印を
-  置き換えて再び拒否する。これで工程の切れ目ごとに 1 度ずつ止まり、「このまま続ける」と決めた
+  置き換えて再び拒否する。これでカットポイントごとに 1 度ずつ止まり、「このまま続ける」と決めた
   利用者は同じ起動をもう一度行えば続けられる。毎回拒否すると同じ工程をやり直せず、会話ごとに
-  1 度にすると以後の切れ目で止まらない。案内だけを足す形（`additionalContext`）は、規定が読み
+  1 度にすると以後のカットポイントで止まらない。案内だけを足す形（`additionalContext`）は、規定が読み
   流された実測があるため採らない
 - **ラッパーの直接の子の conductor では 1 度の通しをしない。** `NDF_RELAY_DIR` があり、上限を超えていて、
   `relay.py notice` の 1 行目が `relay`（`is-child` と同じ判定）なら、上限を超えている限り同じ起動も止め続け、
@@ -202,7 +202,7 @@ graph TB
 
 `token-guard-stages.txt` は工程表から機械的に抽出しない。次の 13 個を正とする。
 
-| 切れ目 | 直後に始まる工程の Skill |
+| カットポイント | 直後に始まる工程の Skill |
 | --- | --- |
 | 1 ドキュメントレビューのマージの後 | `implementation-plan` / `document-drafting` |
 | 2 構造改善と実装レビューの前後 | `cross-refactoring` / `cross-review` / `pr-review` / `quality-gates` |
@@ -210,7 +210,7 @@ graph TB
 | 4 配布の後 | `layout-review` / `release-verification` / `retrospective` |
 | 入口 | `development-workflow` / `issue-plan-strategy` |
 
-`worktree` など切れ目の内側の工程は含めない。`cross-review` は切れ目 1 の前（ドキュメント
+`worktree` などカットポイントの内側の工程は含めない。`cross-review` はカットポイント 1 の前（ドキュメント
 レビュー）でも起動されるが、その時点で上限を超えていれば止めてよいので含める。
 
 ### 引き継ぎの 1 行
@@ -221,11 +221,11 @@ graph TB
 約 1 万トークンが足されるが、切る前の会話の文脈（#827 で平均 41 万）に比べて小さい。Codex と
 Kiro では、それぞれの README が示す Skill の起動の書き方に読み替える。
 
-**conductor は `context-window.md` の 4 つの切れ目と、文脈量の hook が拒否したときにこの 1 行を
+**conductor は `context-window.md` の 4 つのカットポイントと、文脈量の hook が拒否したときにこの 1 行を
 出す。** 出す形は情報文字列 `ndf-next` の囲みのコードブロック 1 つで、今の区間を `/goal` で始めていたときだけ中身の先頭を
 `/goal ` にする（形の定義は `context-window.md` の「新しい会話で戻す」だけに置く）。ラッパーの下では
 ラッパーがこのブロックを拾って次の会話を自動で起動し、ラッパーが無ければ人が中身を貼り付ける
-（[ndf-relay-segment-restart.md](ndf-relay-segment-restart.md)）。 3 層では supervisor のフェーズの境がこの切れ目に当たるため、conductor が `## フェーズの報告`
+（[ndf-relay-segment-restart.md](ndf-relay-segment-restart.md)）。 3 層では supervisor のフェーズの境がこのカットポイントに当たるため、conductor が `## フェーズの報告`
 を受け取った時点で出し、supervisor は出さない。報告が `結果: 関門` のときは、関門の承認と
 取り込み（設計 Pull Request のマージなど）が済んだ後に出す。関門の前に会話を切らないためである。
 

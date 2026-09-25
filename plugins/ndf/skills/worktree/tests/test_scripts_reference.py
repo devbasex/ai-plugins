@@ -259,5 +259,5 @@ def test_skill_stops_when_scripts_is_unresolved() -> None:
 
 
 def test_lookup_leaves_empty_value_when_nothing_is_found(elsewhere, home) -> None:
-    """盤面への記録は従来どおり飛ばす。解決手順は空の値を残し、止めない。"""
+    """ボードへの記録は従来どおり飛ばす。解決手順は空の値を残し、止めない。"""
     assert resolve(elsewhere, home) == ""

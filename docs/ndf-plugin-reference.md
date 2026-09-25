@@ -71,7 +71,7 @@ NDF の Skill 実装は `plugins/ndf/skills/` にあります。公開セット�
 - quality / execution: `docker-container-access`, `qa-security-scan`
   （Playwright による E2E テストは v7.0.0 で `playwright-kit` プラグインへ分離）
 - external services: `external-ai`, `official-skills-autoloader`（Claude Code のみ）
-- runtime 設定: `statusline`（Claude Code と Kiro CLI のみ）、`install-wrapper` / `restart`（区間の切れ目のラッパー。Claude Code のみ）
+- runtime 設定: `statusline`（Claude Code と Kiro CLI のみ）、`install-wrapper` / `restart`（カットポイントで claude を起動し直すラッパー。Claude Code のみ）
 - policy: `ndf-policies`, `problem-solving`, `logging-guidelines`
 
 - 外部サービスと測定: `google-auth`, `google-drive`, `skill-stats`, `ml-model-structure`,
@@ -123,5 +123,5 @@ Codex MCP サーバは廃止済みです。外部 AI 委譲は `/ndf:external-ai
 - [Codex版 README](../plugins/ndf/README.md)
 - [Kiro CLI版 README](../plugins/ndf/README.md)
 - [NDF プラグイン README](../plugins/ndf/README.md)
-- [開発ワークフローの用語集](../plugins/ndf/skills/development-workflow/references/glossary.md) — 段・鎖・区間・関門など、`development-workflow` とその周りで使う語
+- [開発ワークフローの用語集](../plugins/ndf/skills/development-workflow/references/glossary.md) — ステップ・チェイン・区間・関門など、`development-workflow` とその周りで使う語
 - [runtime plugin container smoke 仕様](specifications/runtime-plugin-container-smoke.md)

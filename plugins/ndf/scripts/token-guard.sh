@@ -198,7 +198,7 @@ guard_context() {
   deny "会話の文脈が ${total} トークンで、上限 ${limit} を超えた。この工程は新しい会話で始める。次のコマンドを情報文字列 ndf-next の囲みのコードブロック 1 つで示して応答を終える。中身: ${next}（今の区間を /goal で始めていたなら /goal ${next}）。<課題番号> のままなら、進めている課題の番号を補って示す。このまま続けると利用者が決めたら、同じ起動をもう一度行うと 1 度だけ通る。規約: ${CONTEXT_DOC}（止めるなら NDF_CONTEXT_GUARD=0、上限は NDF_CONTEXT_LIMIT）"
 }
 
-# 記録の先頭から最初の assistant 行を探し、その文脈量を読む（区切りの P）。見つけた時点で読むのをやめる。
+# 記録の先頭から最初の assistant 行を探し、その文脈量を読む（スイッチポイントの判定の P）。見つけた時点で読むのをやめる。
 first_context_tokens() {
   jq -rn 'first(inputs | select(.type == "assistant" and (.message.usage | type) == "object")
       | .message.usage
@@ -221,7 +221,7 @@ guard_supervisor_cut() {
   esac
   aid=$(field '.agent_id')
   [ -n "$aid" ] || return 0
-  # 定義の名前はサブエージェントの中の入力にだけ付く。寿命 1 時間の ndf:supervisor-waits は区切らない
+  # 定義の名前はサブエージェントの中の入力にだけ付く。寿命 1 時間の ndf:supervisor-waits は替えない
   [ "$(field '.agent_type')" = "ndf:supervisor" ] || return 0
   # transcript_path はサブエージェントの中でも親の記録を指す。supervisor 自身の記録を組み立てて読む
   tp=$(field '.transcript_path')
@@ -234,8 +234,8 @@ guard_supervisor_cut() {
   case "$last" in ''|*[!0-9]*) return 0 ;; esac
   ratio=${NDF_SUPERVISOR_CUT_RATIO:-1.5}
   awk -v c="$last" -v p="$first" -v r="$ratio" 'BEGIN { exit !(r + 0 > 0 && c >= r * p) }' || return 0
-  # 1 度だけ通すことはしない。やり直すだけで越えられると、区切るかが LLM の裁量に戻る
-  deny "この supervisor の文脈が ${last} トークンで、最初の呼び出し（${first}）の ${ratio} 倍以上ある。寿命 5 分のまま収束ループ（${skill}）を始めると、待ちの後のたびに文脈の全体を書き直す。同じ起動をやり直さずに、Pull Request を出す・進行を記録するなど起動の前に済ませることを済ませてから、フェーズの報告を「結果: 区切り」「次のフェーズ: <今と同じフェーズ>」「次の工程: ${stage}」で返す（規則 12。conductor が寿命 1 時間の supervisor で続ける）。規約: ${CONTEXT_DOC}（止めるなら NDF_SUPERVISOR_CUT_GUARD=0、比は NDF_SUPERVISOR_CUT_RATIO）"
+  # 1 度だけ通すことはしない。やり直すだけで越えられると、スイッチポイントが LLM の裁量に戻る
+  deny "この supervisor の文脈が ${last} トークンで、最初の呼び出し（${first}）の ${ratio} 倍以上ある。寿命 5 分のまま収束ループ（${skill}）を始めると、待ちの後のたびに文脈の全体を書き直す。同じ起動をやり直さずに、Pull Request を出す・進行を記録するなど起動の前に済ませることを済ませてから、フェーズの報告を「結果: スイッチポイント」「次のフェーズ: <今と同じフェーズ>」「次の工程: ${stage}」で返す（規則 12。conductor が寿命 1 時間の supervisor で続ける）。規約: ${CONTEXT_DOC}（止めるなら NDF_SUPERVISOR_CUT_GUARD=0、比は NDF_SUPERVISOR_CUT_RATIO）"
 }
 
 case "$TOOL" in

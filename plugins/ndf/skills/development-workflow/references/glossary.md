@@ -65,12 +65,12 @@ flowchart TB
 | 計画 | `supervise.py` が流す 1 本の JSON。フェーズの手順をステップの列として持つ | `plan.json`、`supervise.py new impl` / `check` / `release` / `mission` / `close` | — | [supervise.py](../../../scripts/supervise.py) の docstring |
 | ステップ | 計画の `steps` の 1 要素。型は run / work / drive / judge / pr の 5 つ | `"id"`・`"type"`・`"next"`、`supervise.py run <計画> --from <ステップの id>` | 段 | [supervise.py](../../../scripts/supervise.py) の docstring |
 | queue | 計画を空いた枠へ順に流す副命令。同時に `--max` 本まで流し、終わると結果を done へ書く | `supervise.py queue <plan.json>... --max 3 --then <plan.json>... --done <パス>` | — | [supervise.py](../../../scripts/supervise.py) の docstring |
-| チェイン | queue が `--then` でつないだ計画の列（実装 → 開発版 → 本番） | `--then`、`new release --prs-from-queue` | 鎖 | [relay.md](relay.md) の「切れ目の引継ぎ文書と ndf-next はスクリプトで作る」 |
+| チェイン | queue が `--then` でつないだ計画の列（実装 → 開発版 → 本番） | `--then`、`new release --prs-from-queue` | 鎖 | [relay.md](relay.md) の「カットポイントの引継ぎ文書と ndf-next はスクリプトで作る」 |
 | ステージ | チェインの中の計画のまとまり 1 つ。中は queue で並列に流し、前のステージがすべて完了したときだけ次のステージが流れる。`new mission` はステージごとに計画を書き出す（設計・関門 1・実装・検査・開発版・本番） | `--then` の 1 回分、`then_of` | 波・段 | [pace.md](pace.md) の「計画の波」 |
 | 区間 | ラッパーが起動する claude の 1 回の起動（1 つの会話）。ndf-next のブロックで次の区間へ切り替わる | 区間の境の行 `── ndf-relay: 区間 2 ──`、`log.jsonl` の `section` | — | [relay.md](relay.md) |
 | context window | 1 回の会話が保持する文脈の全体と、その量 | `NDF_CONTEXT_LIMIT`（既定 200,000） | — | [context-window.md](context-window.md) の「用語」 |
 | カットポイント | context window を切ってよい 4 点。3 層ではフェーズの境になる | — | 切れ目 | [context-window.md](context-window.md) の「切ってよい点は 4 つある」 |
-| スイッチポイント | フェーズの中で supervisor を替える点。収束ループの前で hook が決める | 報告の `結果: 区切り`、`NDF_SUPERVISOR_CUT_RATIO` | 区切り | [context-window.md](context-window.md) の「フェーズの中の区切り」 |
+| スイッチポイント | フェーズの中で supervisor を替える点。収束ループの前で hook が決める | 報告の `結果: スイッチポイント`、`NDF_SUPERVISOR_CUT_RATIO` | 区切り（`結果: 区切り`） | [context-window.md](context-window.md) の「フェーズの中のスイッチポイント」 |
 | 範囲 | 版と版の間（タグからタグまで）の変更 | `ndf--v10.17.10..ndf--v10.17.18` | 区間 | [pace.md](pace.md) の「具体例」 |
 
 ## 役割
@@ -138,7 +138,7 @@ flowchart TB
 | チェック | 機械が合否を返すもの。CI のジョブと、`mvv-gate.py`・`doc-lint.py` などのスクリプト | CI の checks、結果 JSON の `status` | 検査 | [merged](../../merged/SKILL.md) の `merge-when-green`、各スクリプトの docstring |
 | 構造改善 | 振る舞いを変えずに構造を直す工程 | `/ndf:cross-refactoring`、計画の `refactor` のステップ | — | [../SKILL.md](../SKILL.md) の「モードごとに起動する Skill」 |
 | 実装レビュー | 実装の差分をレビューし、新しい指摘が出なくなるまで直す工程 | `/ndf:cross-review`（`legacy-refactor` は `pr-review`）、計画の `review` のステップ | — | [../SKILL.md](../SKILL.md) の「モードごとに起動する Skill」 |
-| 収束ループ | 新しい指摘が出なくなるまで回すレビューと修正。構造改善・実装レビュー・ドキュメントレビューが持つ | drive のステップ | — | [context-window.md](context-window.md) の「フェーズの中の区切り」 |
+| 収束ループ | 新しい指摘が出なくなるまで回すレビューと修正。構造改善・実装レビュー・ドキュメントレビューが持つ | drive のステップ | — | [context-window.md](context-window.md) の「フェーズの中のスイッチポイント」 |
 | 手順 | 1 つの Skill の中で順に通す作業のまとまり。`cross-refactoring` の提案・改修計画・テスト追加・実装・検証/修正の 5 つ、`document-restructuring` の測る・並べ替える・整える・測り直すの 4 つ | — | フェーズ・段 | [cross-refactoring](../../cross-refactoring/SKILL.md)、[document-restructuring](../../document-restructuring/SKILL.md) |
 | 改修計画 | `cross-refactoring` が採る改善項目を決め、見送った提案と理由を残す出力 | — | 計画 | [cross-refactoring](../../cross-refactoring/SKILL.md) の「この Skill で使う語」 |
 | 予備時間 | `cross-refactoring` の見積りで、想定最大時間から経過を引いた後に残しておく時間 | 「想定最大時間 − 経過 − 予備時間」 | 控え | [cross-refactoring](../../cross-refactoring/SKILL.md) の「この Skill で使う語」 |
@@ -158,7 +158,7 @@ flowchart TB
 | 通過工程 | ある課題について、進行の記録が実際に書かれた工程の集合 | — | — | [stage-completeness.md](stage-completeness.md) の「用語」 |
 | 通過記録 | 通過工程を課題ごとに残したファイル | `stage-check.sh report <番号>` | 控え | [stage-completeness.md](stage-completeness.md) の「用語」 |
 | ミッションの状態 | ミッションの計画・done・関門の記録・MVV・版を持つファイル。引継ぎ文書の表と ndf-next をここから作る | `mission.json`、`mission-state.py init` / `update` / `gate` / `render` / `next` / `status` | — | [mission-state.py](../../../scripts/mission-state.py) の docstring |
-| 引継ぎ文書 | 会話を切って再開するための文書。「今の会話の進み」（計画ごとの行の表）と「次に実行するコマンド」の節をスクリプトが書く | `issues/handoff-<名>.md`、`supervise.py note` | — | [relay.md](relay.md) の「切れ目の引継ぎ文書と ndf-next はスクリプトで作る」 |
+| 引継ぎ文書 | 会話を切って再開するための文書。「今の会話の進み」（計画ごとの行の表）と「次に実行するコマンド」の節をスクリプトが書く | `issues/handoff-<名>.md`、`supervise.py note` | — | [relay.md](relay.md) の「カットポイントの引継ぎ文書と ndf-next はスクリプトで作る」 |
 | ndf-next | 次の区間の最初の入力を入れる、情報文字列 `ndf-next` の囲みのコードブロック。最後の応答に 1 つだけ置く | 囲みの情報文字列 `ndf-next` | — | [context-window.md](context-window.md) の「新しい会話で戻す」 |
 | 合図 | ラッパーへ知らせるファイル。Stop hook が最後の応答の ndf-next を移した `next.json` と、止める `stop`。ラッパーはこれを受けて区間を切り替える | `next.json`、`stop`、`relay.py mark` | 印 | [relay.md](relay.md) の「関門を越えない守り」 |
 | 告知 | ndf-next のブロックの直前にそのまま置く 1 文。1 行目がラッパーの内か外かを示す | `relay.py notice`（1 行目 `relay` / `outside`、2 行目が告知） | — | [context-window.md](context-window.md) の「新しい会話で戻す」 |
@@ -167,7 +167,7 @@ flowchart TB
 | 途中の報告 | 計画の実行中に 1 行 1 つの JSON で追記する記録。LLM を使わない | `<state-dir>/progress.jsonl` | — | [supervise.py](../../../scripts/supervise.py) の docstring |
 | step / alive / worker / attention | 途中の報告の行の種類。ステップの切り替わり・動きの無い間の生存・worker の進み・conductor の判断が要る出来事（止まった・関門・同じ失敗の繰り返し・judge のステップで stop が出そう） | `"kind"`、`alive` の間隔は `report_interval`（既定 600 秒） | — | [supervise.py](../../../scripts/supervise.py) の docstring |
 | done | queue が終わったときに書く結果の JSON。`wait` は done か attention の行まで待つ | `queue-done.json`、`wait` の終了コード done = 0 / attention = 20 / 上限 = 3 | — | [supervise.py](../../../scripts/supervise.py) の docstring |
-| フェーズの報告 | supervisor（または計画）が最後に返す報告。conductor は見出しの有無と `結果` だけを見る | `## フェーズの報告`、`report.md`、`結果` は 完了 / 関門 / 止まった / 区切り | — | [agent-layers.md](agent-layers.md) の「フェーズの報告」 |
+| フェーズの報告 | supervisor（または計画）が最後に返す報告。conductor は見出しの有無と `結果` だけを見る | `## フェーズの報告`、`report.md`、`結果` は 完了 / 関門 / 止まった / スイッチポイント | — | [agent-layers.md](agent-layers.md) の「フェーズの報告」 |
 | 結果 JSON | 手順のスクリプトが返す 1 行の JSON。`status` で読む | `status` は ok / gate / stopped | — | [lib/README.md](../../../scripts/lib/README.md) |
 
 ## 作業場所と経路

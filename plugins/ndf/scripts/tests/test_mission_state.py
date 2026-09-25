@@ -139,7 +139,7 @@ DOC = """# 引継ぎ
 
 def test_update_fills_rows_and_render_writes_table(r6):
     init(r6)
-    out = ok("update", r6["mission"], "--done", r6["pdone"], "--next", f"{r6['a']}=次のミッションから鎖で流す")
+    out = ok("update", r6["mission"], "--done", r6["pdone"], "--next", f"{r6['a']}=次のミッションからチェインで流す")
     rows = {i["plan"]: i for i in out["items"]}
     assert (rows[r6["a"]]["result"], rows[r6["a"]]["pr"], rows[r6["a"]]["seconds"], rows[r6["a"]]["cost"]) == \
         ("完了", "#1056", 586.4, 1.178)
@@ -151,7 +151,7 @@ def test_update_fills_rows_and_render_writes_table(r6):
     doc.write_text(DOC)
     ok("render", r6["mission"], str(doc), "--section", "今の会話の進み")
     text = doc.read_text()
-    assert "| 実装 #1053 | 完了 | #1056 | 586.4 | $1.178 | 次のミッションから鎖で流す |" in text
+    assert "| 実装 #1053 | 完了 | #1056 | 586.4 | $1.178 | 次のミッションからチェインで流す |" in text
     assert "| 実装 #1054 | 止まった（exit=3）。理由: merge の段で衝突 | #1058 | 816 | $2.170 | — |" in text
     assert "| 開発版 10.17.17-dev.1 | まだ | — | — | — | — |" in text
     assert "| 本番 10.17.17 | 完了 | — | 300.3 | $0.000 | — |" in text

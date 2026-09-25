@@ -1,6 +1,6 @@
 """宣言の読み取りとフィールド名の解決を検証する（受け入れ条件 1〜3）。
 
-盤面への書き込みは行わない。宣言が無い環境で何も起きないことが、この層の主な責務である。
+ボードへの書き込みは行わない。宣言が無い環境で何も起きないことが、この層の主な責務である。
 """
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ def test_broken_json_is_rejected(repo) -> None:
 
 
 def test_owner_and_number_are_required(repo) -> None:
-    """盤面を特定できない宣言は無効として扱う。"""
+    """ボードを特定できない宣言は無効として扱う。"""
     write_declaration(repo, json.dumps({"version": 1, "owner": "devbasex"}))
     got = run_lib(f'pj_declaration "{repo}"; echo rc=$?')
     assert got.stdout.strip() == "rc=1"
@@ -55,7 +55,7 @@ def test_field_names_fall_back_to_defaults(repo) -> None:
 
 
 def test_field_names_can_be_overridden(repo) -> None:
-    """盤面のフィールド名は利用者が決める。宣言で差し替えられる。"""
+    """ボードのフィールド名は利用者が決める。宣言で差し替えられる。"""
     write_declaration(repo, json.dumps({
         "version": 1, "owner": "devbasex", "number": 1,
         "fields": {"stage": "Stage", "plan": "Plan file"},

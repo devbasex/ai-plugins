@@ -204,7 +204,7 @@ def test_record_replaces_an_unreadable_state(
 
 
 def test_a_repository_without_the_projects_declaration_still_records(repo: Path, state: Path) -> None:
-    """#221-7: 盤面に載っていない課題でも働く。宣言ファイルは読まない。"""
+    """#221-7: ボードに載っていない課題でも働く。宣言ファイルは読まない。"""
     assert not (repo / ".ndf" / "projects.json").exists()
 
     seed(repo, state, 266, "standard", ["作業場所の用意", "設計"])

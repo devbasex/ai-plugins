@@ -1,4 +1,4 @@
-"""盤面への記録が、全件の取得を繰り返さないこと（#243 / #287）。
+"""ボードへの記録が、全件の取得を繰り返さないこと（#243 / #287）。
 
 `gh project item-list --limit 1000` は GraphQL で、取得の点数が REST とは別の上限を持つ。
 2026-09-04 の実測では、10 件の課題へ 2 つのキーを書こうとした時点で上限に達し、以後の
@@ -65,7 +65,7 @@ def run(repo):
 
 
 def test_the_second_call_does_not_list_the_board(repo):
-    """2 回目の記録では盤面の全件を読まない。**上限に達する原因を断つ。**"""
+    """2 回目の記録ではボードの全件を読まない。**上限に達する原因を断つ。**"""
     assert run(repo).returncode == 0
     first = repo.calls.read_text(encoding="utf-8")
     assert "project item-list" in first
@@ -91,7 +91,7 @@ def test_a_missing_item_is_added_and_then_read_again(repo):
     out = run(repo)
     assert out.returncode == 0
     assert "project item-add" in repo.calls.read_text(encoding="utf-8")
-    assert "盤面へ追加しました" in out.stderr
+    assert "ボードへ追加しました" in out.stderr
 
 
 def test_a_rate_limited_reply_is_reported(repo):
@@ -125,7 +125,7 @@ def test_the_cache_lives_outside_the_worktree(tmp_path, repo):
 
 
 def test_the_id_from_item_add_is_used_without_listing_again(repo):
-    """追加の戻り値の識別子をそのまま使い、盤面を読み直さない。
+    """追加の戻り値の識別子をそのまま使い、ボードを読み直さない。
 
     追加した直後の読み直しは、この変更が減らそうとした問い合わせである。索引の反映が
     遅れていると、追加したばかりのアイテムが見つからずに記録が飛ぶ余地も残る。

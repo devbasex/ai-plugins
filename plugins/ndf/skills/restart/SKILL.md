@@ -10,7 +10,7 @@ allowed-tools:
 
 **ラッパー（`relay.py`）の下では、この応答の最後に出す `ndf-next` のブロック 1 つで、claude の
 終了・プラグインの更新・起動し直し・再開用のコマンドの入力までが人の入力なしで進む。** 経路は
-区間の切れ目と同じである（[relay.md](../development-workflow/references/relay.md)）。
+カットポイントと同じである（[relay.md](../development-workflow/references/relay.md)）。
 
 例: ラッパーの下で `/ndf:restart` を打つ（`/goal /ndf:development-workflow #928` の会話）。
 
@@ -22,7 +22,7 @@ allowed-tools:
    ```
    ````
 
-2. ラッパーが静まりを待ってから `/exit` を入力し、プラグインを更新して、ブロックの中身を最初の入力にした claude を起動する
+2. ラッパーが静止を待ってから `/exit` を入力し、プラグインを更新して、ブロックの中身を最初の入力にした claude を起動する
 
 ## 引数
 

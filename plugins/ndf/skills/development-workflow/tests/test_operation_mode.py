@@ -150,7 +150,7 @@ def test_stage_class_rejects_an_unknown_stage_without_output() -> None:
     assert result.stdout == ""
 
 
-# --- 盤面の値 ----------------------------------------------------------------
+# --- ボードの値 ----------------------------------------------------------------
 
 
 def test_the_board_accepts_the_new_mode() -> None:

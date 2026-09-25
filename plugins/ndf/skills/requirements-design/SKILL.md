@@ -142,5 +142,5 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 - [references/spec-template.md](references/spec-template.md) — 仕様の雛形
 - [references/document-requirements.md](references/document-requirements.md) — 読み手へ渡す文書の受け入れ条件
 
-この工程に入ったら記録のコマンド `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "要求と受け入れ条件"` を 1 行打つ（issue の本文と盤面の両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「記録のコマンド」を使う）。
+この工程に入ったら記録のコマンド `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "要求と受け入れ条件"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「記録のコマンド」を使う）。
 

@@ -167,7 +167,7 @@ API の記述を求めない。
 
 **契機は 2 つあり、別々の時点で 1 つずつ記録のコマンドを打つ。** 手順 1（触る領域を決める）に
 入るときに 1 つ目、手順 5（設計 Pull Request を出す）に入るときに 2 つ目を打つ。issue の本文の
-`## 進行` と盤面の両方に残る（`$SCRIPTS` の決め方は `development-workflow` の
+`## 進行` とボードの両方に残る（`$SCRIPTS` の決め方は `development-workflow` の
 `references/scripts-lookup.md`。3 層では起動指示の「記録のコマンド」をそのまま使う）。
 
 ```bash

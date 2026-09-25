@@ -16,7 +16,7 @@
 | ファイル | 役割 | 読む側 |
 | --- | --- | --- |
 | [worktree-common.sh](worktree-common.sh) | 作業ツリーの判定・台帳・書き込み先の推定 | `worktree` / hook |
-| [projects-common.sh](projects-common.sh) | GitHub Projects の盤面への記録 | `development-workflow` |
+| [projects-common.sh](projects-common.sh) | GitHub Projects のボードへの記録 | `development-workflow` |
 | [lock-common.sh](lock-common.sh) | 排他の取得と解放（#293） | 上の 2 つと `development-workflow` |
 | [monitor.py](monitor.py) | 別プロセスの多軸監視。対象と命名規則を引数で受ける | 収束ループの 2 つ / `external-ai.py` |
 | [limits.py](limits.py) | 監視の上限（工程ごと）・無進捗の許容（担当ごと）・CLI の上限（監視の上限 + 120 秒）の表。既定値はここだけが持つ（#598 / #537） | 同上 |

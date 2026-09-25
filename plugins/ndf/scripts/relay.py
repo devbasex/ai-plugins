@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""NDF のラッパー: 区間の切れ目で claude を起動し直す（#895）。
+"""NDF のラッパー: カットポイントで claude を起動し直す（#895）。
 
 副命令:
 
@@ -12,7 +12,7 @@
 | `startup` | SessionStart hook の本体。在る写しを今の版で置き直し（版は後退させない）、10.17.4〜10.17.6 が自動で足した囲みを 1 度だけ知らせる。シェルの設定は書かない |
 | `question open` / `question close` | `AskUserQuestion` の `PreToolUse` / `PostToolUse` hook の本体。質問の表示中の印を作る・消す（関門を越えない守り） |
 | `is-child` | ラッパーの直接の子の claude から呼ばれていれば 0 |
-| `notice` | 区間の切れ目の告知。1 行目に `relay` か `outside`（`is-child` と同じ判定）、2 行目に告知の 1 文を出す（#980）。外のときの 2 行目は理由（ラッパーが無い・終わっている・直接の子でない）で変わる（#1016） |
+| `notice` | カットポイントの告知。1 行目に `relay` か `outside`（`is-child` と同じ判定）、2 行目に告知の 1 文を出す（#980）。外のときの 2 行目は理由（ラッパーが無い・終わっている・直接の子でない）で変わる（#1016） |
 
 **標準ライブラリだけで書く。** 印と作業ディレクトリの形（`next.json` のキーと
 `NDF_RELAY_DIR` のファイル）は版をまたいで変えない。hook は区間ごとに新しい版で動き、
@@ -104,7 +104,7 @@ def _num(name: str, default: float) -> float:
 
 
 def quiet_seconds() -> float:
-    """静まりの秒数（`NDF_RELAY_QUIET`）。切り替えの実際の待ちと、区間の切れ目の告知の両方が読む。"""
+    """静止の秒数（`NDF_RELAY_QUIET`）。切り替えの実際の待ちと、カットポイントの告知の両方が読む。"""
     return _num("NDF_RELAY_QUIET", 5)
 
 
@@ -599,7 +599,7 @@ class StartLimit:
         if self.count_today() >= self.max_starts:
             return "max-starts", f"1 日の起動回数が上限 {self.max_starts} に達した"
         if self.spinning(written, started_at):
-            return "spin", f"区間が 3 つ続けて {int(self.spin)} 秒未満で切れ目に達した"
+            return "spin", f"区間が 3 つ続けて {int(self.spin)} 秒未満でカットポイントに達した"
         return None
 
     def count_today(self) -> int:
@@ -897,7 +897,7 @@ class Relay:
         latest = max(written, self.term.last_input)
         tp = m.get("transcript_path") or ""
         unmet, cancel = after_mark(tp, written)
-        # 目標が未達で応答が続くあいだは、会話の記録の更新を静まりに数えない
+        # 目標が未達で応答が続くあいだは、会話の記録の更新を静止に数えない
         snap = None if unmet else file_snap(tp)
         if snap is not None:
             latest = max(latest, snap[1] / 1e9)
@@ -1239,16 +1239,16 @@ def cmd_run(args: list[str]) -> int:
         import termios
         import tty
     except ImportError:
-        say("ラッパーを始めない（擬似端末を作れない）。切れ目では示されたコマンドを手で入力する")
+        say("ラッパーを始めない（擬似端末を作れない）。カットポイントでは示されたコマンドを手で入力する")
         passthrough(claude, args)
     got = read_plugin(claude)
     if got is None:
-        say("ラッパーを始めない（ndf のプラグインの名前と版を読めない）。切れ目では示されたコマンドを手で入力する")
+        say("ラッパーを始めない（ndf のプラグインの名前と版を読めない）。カットポイントでは示されたコマンドを手で入力する")
         passthrough(claude, args)
     try:
         relay_dir = make_relay_dir()
     except OSError:
-        say("ラッパーを始めない（作業ディレクトリを作れない）。切れ目では示されたコマンドを手で入力する")
+        say("ラッパーを始めない（作業ディレクトリを作れない）。カットポイントでは示されたコマンドを手で入力する")
         passthrough(claude, args)
     term = Terminal()
     relay = Relay(claude, relay_dir, got[0], got[1], term,
@@ -1968,15 +1968,15 @@ def cmd_question(action: str) -> int:
     return 0
 
 
-# ---------------------------------------------------------------- 区間の切れ目の告知（#980）
+# ---------------------------------------------------------------- カットポイントの告知（#980）
 
 
 def notice_lines() -> tuple[str, str]:
-    """区間の切れ目の告知。文面と秒数の唯一の定義。
+    """カットポイントの告知。文面と秒数の唯一の定義。
 
     1 行目は `is-child` と同じ判定（ラッパーの直接の子か）。自動で切り替わるかは 2 行目が表す。
     外のときは 2 行目を理由（`relay_position()`）で変え、原因と対処を書く（#1016）。
-    秒数はラッパー本体の静まり（`NDF_RELAY_QUIET`）そのもので、切り替えの時間は足さない。
+    秒数はラッパー本体の静止（`NDF_RELAY_QUIET`）そのもので、切り替えの時間は足さない。
     """
     outside = ("/exit してから claude を起動し、下の中身を最初の入力として貼り付ける"
                "（/ndf:install-wrapper でラッパーを入れると自動になる）")
@@ -1999,7 +1999,7 @@ def notice_lines() -> tuple[str, str]:
     if quiet == float("inf"):
         return "relay", ("NDF_RELAY_QUIET が有限でないため、ラッパーは自動で切り替えない。"
                          "/exit してから claude を起動し、下の中身を最初の入力として貼り付ける")
-    # ラッパー本体は負・nan・-inf の静まりを待たずに通すので、0 として数える
+    # ラッパー本体は負・nan・-inf の静止を待たずに通すので、0 として数える
     q = quiet if quiet == quiet and quiet > 0 else 0.0
     n = round(q)
     when = f"約 {n} 秒後に" if n > 0 else "まもなく"

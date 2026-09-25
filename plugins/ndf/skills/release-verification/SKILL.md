@@ -138,7 +138,7 @@ ref と一致するか、利用者の HOME の設定が変わっていないか�
 要否を決めるのは `development-workflow` である。この Skill は判定結果を受け取って実行する。
 呼ばれた時点で、この工程が要ると判定されている。
 
-この工程に入ったら記録のコマンド `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "リリース後テスト"` を 1 行打つ（issue の本文と盤面の両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「記録のコマンド」を使う）。
+この工程に入ったら記録のコマンド `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "リリース後テスト"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「記録のコマンド」を使う）。
 
 ## ミッションを閉じる
 

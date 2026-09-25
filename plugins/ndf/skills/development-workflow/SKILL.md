@@ -12,7 +12,7 @@ hooks:
 
 # 開発ワークフローの振り分け
 
-変更内容をモードへ分類し、必要な工程だけを起動する。**全変更にフル工程を課さない。** 段・鎖・区間などの語の意味は [references/glossary.md](references/glossary.md) にある。
+変更内容をモードへ分類し、必要な工程だけを起動する。**全変更にフル工程を課さない。** ステップ・チェイン・区間などの語の意味は [references/glossary.md](references/glossary.md) にある。
 
 **判定基準を持つのはこの Skill だけである。** 他の Skill とエージェント定義は判定結果を
 受け取る側に徹する。同じ基準を複数箇所へ書くと、モードを追加・変更したときに片方だけが
@@ -37,7 +37,7 @@ hooks:
 要求と受け入れ条件が掛かる。その費用は受け入れる。判定の入力が無いまま判定する状態の
 ほうが高くつく。
 
-**モード判定は工程表の行を持たない。** 盤面へ記録する工程の値を増やさないためである。
+**モード判定は工程表の行を持たない。** ボードへ記録する工程の値を増やさないためである。
 
 ## この文書が受け取る値
 
@@ -205,10 +205,10 @@ pace: fast
 
 **工程は 1 つの context window で通し切らなくてよい。** 判定したモードと通った工程は会話の
 外へ残るため、文脈を捨てても現在地から続けられる。**長い文脈のまま進めると、記録は
-残っているのに後の工程の判断だけが悪くなる。** 切れ目・委譲してよい対象・残量の見方は
+残っているのに後の工程の判断だけが悪くなる。** カットポイント・委譲してよい対象・残量の見方は
 [references/context-window.md](references/context-window.md) にある。
 
-**conductor は、`context-window.md` の 4 つの切れ目と文脈量の hook（`token-guard.sh`）に止められたときに、
+**conductor は、`context-window.md` の 4 つのカットポイントと文脈量の hook（`token-guard.sh`）に止められたときに、
 次の工程を始める引き継ぎの 1 行（`/ndf:development-workflow #<課題>`。今の区間を `/goal` で始めていたときだけ先頭に `/goal `）を、
 情報文字列 `ndf-next` の囲みのコードブロック 1 つで出す。** 3 層では conductor が `## フェーズの報告` を
 受け取った時点で出し（supervisor は出さない）、`結果: 関門` なら関門の承認と取り込みの後に出す。
@@ -219,15 +219,15 @@ pace: fast
 この変更の受け入れ条件にも、直す対象にも含まれない課題は、**見つけたその場で `out-of-scope` が
 issue にする**。呼び出し元・3 択の判断・振り返りでの拾い方は `out-of-scope` の SKILL.md にある。
 
-## 進行を盤面へ記録する
+## 進行をボードへ記録する
 
 判定したモードと、いま何番目の工程にいるかは会話の中にしか残らない。セッションが変わると
 引き継がれない。**リポジトリが `.ndf/projects.json` を持つ場合に限り**、これを GitHub Projects の
-盤面へ残す。
+ボードへ残す。
 
 - 判定の結果（モード）は、作業場所を用意した時点で記録する
-- 工程の切れ目を持つ Skill が、自分の工程に入った時点で進行を書き込む
-- 盤面の値は**この工程表の行名と一致させる**。工程を足したときは、同じ表から盤面側も更新する
+- カットポイントを持つ Skill が、自分の工程に入った時点で進行を書き込む
+- ボードの値は**この工程表の行名と一致させる**。工程を足したときは、同じ表からボード側も更新する
 
 **この仕組みは任意である。** 宣言が無ければ何も起きず、工程はそのまま通る。進行管理が
 理由で開発が止まってはいけない。設定と値の一覧は
@@ -268,7 +268,7 @@ issue にする**。呼び出し元・3 択の判断・振り返りでの拾い�
 
 **関門の外で工程の側が実行前確認を足さない。** 取り消せる操作は止めずに行い、消した対象と
 戻し方を報告する（例外の基準は `AUTHORING.md` の「実行前確認の要否を決める 3 つの問い」）。
-**区間の切れ目の再起動も関門ではなく、`ndf-next` のブロックの前に承認・確認（`AskUserQuestion` を含む）を
+**カットポイントの再起動も関門ではなく、`ndf-next` のブロックの前に承認・確認（`AskUserQuestion` を含む）を
 挟まない。`/goal` の文面が「承認を求める」と書いていても、指すのはこの 2 つの関門だけである。**
 
 | 関門 | いつ | 文書での意味 | 要否の決まり方 |
@@ -360,7 +360,7 @@ Pull Request のマージ、制作物承認は本番の提出先への操作に�
 絶対パスで書く。** supervisor はこの 1 行で進行を記録し、この Skill も `progress-tracking` も
 起動しない（形とキーごとの打つ時点は `agent-layers.md` の「conductor → supervisor」）。
 
-**区間の切れ目の再起動はラッパーが自動で行う（Claude Code だけ）。** 利用者が `claude` と打つと
+**カットポイントの再起動はラッパーが自動で行う（Claude Code だけ）。** 利用者が `claude` と打つと
 alias がラッパーを挟み、conductor が出した `ndf-next` のブロックを拾って、`/exit`・プラグインの更新・
 次の区間の起動を行う（始め方・止め方・上限は [references/relay.md](references/relay.md)）。
 **ブロックの前に次の Bash を 1 回実行し、2 行目（告知）をブロックの直前へそのまま写す**（1 行目が `outside` か失敗ならラッパーの外。書き方は `context-window.md` の「新しい会話で戻す」）。
@@ -496,5 +496,5 @@ flowchart TD
 - [references/pace.md](references/pace.md) — 進め方 `pace: fast` の条件・宣言・計画の波・検査のトリガー・MVV の判定
 - [references/approval-request.md](references/approval-request.md) — 承認を求めるときに提示するもの
 - [references/operation-run.md](references/operation-run.md) — `operation` の実行の範囲・記録・失敗したときの扱い
-- [references/context-window.md](references/context-window.md) — context window の切れ目、委譲する対象としない対象、残量の見方
+- [references/context-window.md](references/context-window.md) — context window のカットポイント、委譲する対象としない対象、残量の見方
 - [references/agent-layers.md](references/agent-layers.md) — 3 層（conductor / supervisor / worker）の責務、フェーズ、報告の形

@@ -1,4 +1,4 @@
-"""区間の切れ目で claude を起動し直すラッパー（#895）。
+"""カットポイントで claude を起動し直すラッパー（#895）。
 
 `relay.py` の副命令:
 
@@ -521,7 +521,7 @@ def test_run_chain_three_sections(term):
 
 
 def test_run_waits_for_user_input_quiet(term):
-    """利用者の入力から静まりの秒数がたつまで /exit を送らない（AC6）。"""
+    """利用者の入力から静止の秒数がたつまで /exit を送らない（AC6）。"""
     t = term(env={"NDF_RELAY_QUIET": "1.5"})
     t.wait_start(1)
     t.type("mark x\r")
@@ -779,7 +779,7 @@ def test_run_relay_dir_oserror_says_then_passthrough(mod, tmp_path, monkeypatch,
     with pytest.raises(Execd):
         mod.cmd_run([])
     err = capsys.readouterr().err
-    assert err == "ndf-relay: ラッパーを始めない（作業ディレクトリを作れない）。切れ目では示されたコマンドを手で入力する\n"
+    assert err == "ndf-relay: ラッパーを始めない（作業ディレクトリを作れない）。カットポイントでは示されたコマンドを手で入力する\n"
     assert mod.calls[0][1] == [str(claude)]
 
 
@@ -1197,7 +1197,7 @@ def test_run_goal_unmet_cancelled(term, case):
 
 
 def test_run_does_not_wait_for_goal_judgement(term):
-    """目標の判定を待たない（#994）。`/goal clear` の行（met と sentinel の両方）が残っても静まりだけで切り替える。"""
+    """目標の判定を待たない（#994）。`/goal clear` の行（met と sentinel の両方）が残っても静止だけで切り替える。"""
     t = term()
     t.wait_start(1)
     t.type(f"tr {goal_row(sentinel=True, met=True, at='2026-01-01T00:00:00.000Z')}\r")
@@ -2107,7 +2107,7 @@ def test_guard_exit_wait_resumes_after_question(term):
 
 
 def test_relay_quiet_defaults_to_five_seconds(mod, tmp_path, monkeypatch):
-    """`NDF_RELAY_QUIET` が無ければ静まりの待ちは 5 秒（#964）。有れば値に従う。"""
+    """`NDF_RELAY_QUIET` が無ければ静止の待ちは 5 秒（#964）。有れば値に従う。"""
     relay_dir = tmp_path / "relay"
     relay_dir.mkdir()
     r = mod.Relay("claude", str(relay_dir), "m", "v", None, None)

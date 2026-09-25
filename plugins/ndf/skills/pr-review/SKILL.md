@@ -421,7 +421,7 @@ PR モードではレビュー結果が **PR 上に投稿済み** であるこ�
 詳細な指摘内容は PR 上のインラインコメントに残っているため、報告では繰り返さない。
 `--branch` モードでは投稿先がないため、上記「報告」の書式でセッション上に出力する。
 
-この工程に入ったら記録のコマンド `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "実装レビュー"` を 1 行打つ（issue の本文と盤面の両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「記録のコマンド」を使う）。
+この工程に入ったら記録のコマンド `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "実装レビュー"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「記録のコマンド」を使う）。
 
 ## 関連
 

@@ -319,13 +319,13 @@ gh issue edit <issue番号> --repo "$RECORD_REPO" --body-file /tmp/issue-body.md
 | 成果物の良し悪し | 実装レビューの工程が扱う |
 | 経緯の時系列そのもの | git の履歴と Pull Request に残っている |
 
-この工程に入ったら記録のコマンド `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "振り返り"` を 1 行打つ（issue の本文と盤面の両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「記録のコマンド」を使う）。 **入口のこの記録では盤面の `Status` を書かない。** 先に `Done` にすると、盤面の `Auto-close issue` が課題を閉じ、reopen の手段が報告から落ちる。
+この工程に入ったら記録のコマンド `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "振り返り"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「記録のコマンド」を使う）。 **入口のこの記録ではボードの `Status` を書かない。** 先に `Done` にすると、ボードの `Auto-close issue` が課題を閉じ、reopen の手段が報告から落ちる。
 
 ## ミッションを閉じる
 
 **振り返りを通る変更では、この工程がその実行の終わりの工程である。** 記録を投稿した後に、
 `progress-tracking` の「ミッションを閉じる」を行う。**手順はそこが正本で、ここには写さない。**
-盤面の `Status` を `Done` にするのも、課題を閉じるのも、その手順の中で行う。
+ボードの `Status` を `Done` にするのも、課題を閉じるのも、その手順の中で行う。
 
 ## 蓄積した課題を手入れする
 

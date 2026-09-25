@@ -1,4 +1,4 @@
-"""記録のコマンド 1 行で、issue の本文と盤面の両方へ残ること（#828）。
+"""記録のコマンド 1 行で、issue の本文とボードの両方へ残ること（#828）。
 
 `projects-sync.sh` が入口である。通過工程の控えはこのコマンドを観測して積むため、入口を
 変えずに issue の本文の更新（`progress-record.sh`）を中から呼ぶ（設計の決定 1）。
@@ -30,7 +30,7 @@ BODY = "# 課題\n\n本文\n\n## 進行\n\nモード: —\n\n- [x] 作業場所�
 
 @pytest.fixture()
 def repo(tmp_path):
-    """git リポジトリと、issue の本文と盤面の呼び出しを記録する偽の `gh` を用意する。"""
+    """git リポジトリと、issue の本文とボードの呼び出しを記録する偽の `gh` を用意する。"""
     root = tmp_path / "repo"
     root.mkdir()
     subprocess.run(["git", "init", "-q"], cwd=root, check=True)
@@ -76,7 +76,7 @@ def calls(repo):
 
 
 def test_without_a_board_declaration_the_issue_body_is_still_written(repo):
-    """盤面の宣言が無くても issue の本文へ残る。今は何も出さずに抜けていた。"""
+    """ボードの宣言が無くても issue の本文へ残る。今は何も出さずに抜けていた。"""
     out = run(repo, SYNC, "42", "stage", "設計")
     assert out.returncode == 0, out.stderr
     assert "- [x] 設計 —" in repo.body.read_text(encoding="utf-8")
@@ -90,7 +90,7 @@ def test_with_a_board_declaration_both_are_written(repo):
     assert out.returncode == 0, out.stderr
     assert "- [x] 設計 —" in repo.body.read_text(encoding="utf-8")
     assert "project item-edit" in calls(repo)
-    # issue の本文の行と盤面の行の 2 つが出る
+    # issue の本文の行とボードの行の 2 つが出る
     assert out.stdout.count("#42 進行 = 設計") == 2
 
 
@@ -106,7 +106,7 @@ def test_mode_changes_only_the_heading_line(repo):
 
 @pytest.mark.parametrize("key,value", [("stage", "でたらめ"), ("mode", "でたらめ"), ("tier", "x")])
 def test_a_wrong_value_writes_nothing(repo, key, value):
-    """誤りは 2 を返し、issue の本文も盤面も書かない（宣言の有無によらない）。"""
+    """誤りは 2 を返し、issue の本文もボードも書かない（宣言の有無によらない）。"""
     out = run(repo, SYNC, "42", key, value)
     assert out.returncode == 2
     assert repo.body.read_text(encoding="utf-8") == BODY
@@ -114,7 +114,7 @@ def test_a_wrong_value_writes_nothing(repo, key, value):
 
 
 def test_status_does_not_write_the_issue_body(repo):
-    """`status` は盤面だけに書く（「ミッションを閉じる」だけが使う）。"""
+    """`status` はボードだけに書く（「ミッションを閉じる」だけが使う）。"""
     declare(repo)
     out = run(repo, SYNC, "42", "status", "Done")
     assert out.returncode == 0, out.stderr
