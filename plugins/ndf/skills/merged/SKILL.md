@@ -132,10 +132,13 @@ python3 "$SCRIPTS/merged-steps.py" cleanup <PR番号>... --root <主ディレク
 
 ```bash
 python3 "$SCRIPTS/merged-steps.py" merge-when-green <PR番号> --root <主ディレクトリ> \
-  [--method merge|squash|rebase] [--interval 30] [--timeout 3600] [--stale-after 300] [--no-cleanup]
+  [--method merge|squash|rebase] [--interval 10] [--recheck 5] [--no-checks-after 60] [--timeout 3600] [--stale-after 300] [--no-cleanup]
 ```
 
 - CI の検査が全部通るまで待つ。push で先頭のコミットが変わると待ち直す（`items` に `rewait` が載る）
+- 同じ先頭のコミットで pending を見た後に全部が通れば、その周でマージする。pending を見ずに通って
+  いたときだけ `--recheck` 秒後に 1 度確かめ直す。rollup が空のうちはマージせず、`--no-checks-after`
+  秒を過ぎても空なら CI の無いリポジトリとしてマージする（`items` に `no_checks` が載る）
 - 失敗した検査が 1 つでもあれば、マージせずに `stopped`（1）で止まる。`items[].name` が失敗した検査
 - 通れば `gh pr merge --admin` でマージし、続けて上の `cleanup` と同じ後片付けを行う。
   `status` の読み方は上の表と同じ

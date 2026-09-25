@@ -11,6 +11,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -319,20 +320,80 @@ def run_(n, conclusion="SUCCESS", status="COMPLETED"):
 def test_merge_when_green_rewaits_on_push_and_merges(repo, gh):
     seq = [
         {"state": "OPEN", "headRefOid": "aaa", "statusCheckRollup": [run_("t", None, "IN_PROGRESS")]},
-        {"state": "OPEN", "headRefOid": "aaa", "statusCheckRollup": [run_("t")]},
         {"state": "OPEN", "headRefOid": "bbb", "statusCheckRollup": [run_("t")]},
         {"state": "OPEN", "headRefOid": "bbb", "statusCheckRollup": [run_("t")]},
     ]
     merged = {"headRefName": "feat/x", "state": "MERGED", "mergeCommit": {"oid": "c"}}
     gh.set(pr_seq={"5": seq + [merged]})
     git(repo, "checkout", "-q", "-b", "other")  # 上流が無いので取り込みを行わせない
-    code, out, err = call("merged-steps.py", ["merge-when-green", "5", "--interval", "0", "--root", str(repo)],
+    code, out, err = call("merged-steps.py", ["merge-when-green", "5", "--interval", "0", "--recheck", "0", "--root", str(repo)],
                           gh.env, repo)
     assert code == 0, (out, err)
     kinds = [(i["kind"], i["result"]) for i in out["items"]]
     assert ("restart", "rewait") in kinds and ("pr", "merged") in kinds
     merges = [c for c in gh.get()["calls"] if c[:2] == ["pr", "merge"]]
     assert merges == [["pr", "merge", "5", "--admin", "--merge"]]
+
+
+def pr_views(gh):
+    return [c for c in gh.get()["calls"] if c[:2] == ["pr", "view"]]
+
+
+def pending_pr(sha="a"):
+    return {"state": "OPEN", "headRefOid": sha, "statusCheckRollup": [run_("t", None, "IN_PROGRESS")]}
+
+
+def passed_pr(sha="a", rollup=None):
+    return {"state": "OPEN", "headRefOid": sha, "statusCheckRollup": [run_("t")] if rollup is None else rollup}
+
+
+def test_merge_when_green_merges_on_first_green_after_pending(repo, gh):
+    """同じ先頭のコミットで pending を見た後に全部が通ったら、確かめ直さずにその周でマージする。"""
+    gh.set(pr_seq={"5": [pending_pr(), passed_pr(), passed_pr()]})
+    code, out, err = call("merged-steps.py", ["merge-when-green", "5", "--interval", "0", "--no-cleanup"],
+                          gh.env, repo)
+    assert code == 0, (out, err)
+    assert ("pr", "merged") in [(i["kind"], i["result"]) for i in out["items"]]
+    assert len(pr_views(gh)) == 2
+
+
+def test_merge_when_green_rechecks_once_with_short_interval(repo, gh):
+    """pending を見ずに通っていたら、--recheck の短い間隔で 1 度だけ確かめ直してマージする（--interval は待たない）。"""
+    gh.set(pr_seq={"5": [passed_pr(), passed_pr(), passed_pr()]})
+    started = time.monotonic()
+    code, out, err = call("merged-steps.py", ["merge-when-green", "5", "--interval", "60", "--recheck", "0",
+                                              "--no-cleanup"], gh.env, repo)
+    assert code == 0, (out, err)
+    assert time.monotonic() - started < 30
+    assert len(pr_views(gh)) == 2
+    assert [c for c in gh.get()["calls"] if c[:2] == ["pr", "merge"]]
+
+
+def test_merge_when_green_does_not_merge_while_rollup_is_empty(repo, gh):
+    """rollup が空のうちは検査が載る前かもしれないのでマージしない。"""
+    gh.set(pr_seq={"5": [passed_pr(rollup=[])]})
+    code, out, err = call("merged-steps.py", ["merge-when-green", "5", "--interval", "0", "--recheck", "0",
+                                              "--timeout", "0"], gh.env, repo)
+    assert code == 1 and out["status"] == "stopped"
+    assert not [c for c in gh.get()["calls"] if c[:2] == ["pr", "merge"]]
+
+
+def test_merge_when_green_waits_for_checks_to_appear(repo, gh):
+    """空の rollup の後に検査が載って通れば、その通過でマージする。"""
+    gh.set(pr_seq={"5": [passed_pr(rollup=[]), pending_pr(), passed_pr(), passed_pr()]})
+    code, out, err = call("merged-steps.py", ["merge-when-green", "5", "--interval", "0", "--no-cleanup"],
+                          gh.env, repo)
+    assert code == 0, (out, err)
+    assert len(pr_views(gh)) == 3
+
+
+def test_merge_when_green_treats_long_empty_rollup_as_no_ci(repo, gh):
+    """rollup が --no-checks-after 秒を過ぎても空なら、CI の無いリポジトリとしてマージする。"""
+    gh.set(pr_seq={"5": [passed_pr(rollup=[])]})
+    code, out, err = call("merged-steps.py", ["merge-when-green", "5", "--interval", "0", "--no-checks-after", "0",
+                                              "--no-cleanup"], gh.env, repo)
+    assert code == 0, (out, err)
+    assert [c for c in gh.get()["calls"] if c[:2] == ["pr", "merge"]]
 
 
 STUCK_URL = "https://github.com/o/r/actions/runs/100/job/200"
@@ -418,8 +479,8 @@ def test_merge_when_green_timeout_stops(repo, gh):
 
 
 def test_merge_when_green_merge_failure_stops(repo, gh):
-    gh.set(merge_code=1, pr_seq={"5": [{"state": "OPEN", "headRefOid": "a", "statusCheckRollup": []}]})
-    code, out, err = call("merged-steps.py", ["merge-when-green", "5", "--interval", "0"], gh.env, repo)
+    gh.set(merge_code=1, pr_seq={"5": [{"state": "OPEN", "headRefOid": "a", "statusCheckRollup": [run_("t")]}]})
+    code, out, err = call("merged-steps.py", ["merge-when-green", "5", "--interval", "0", "--recheck", "0"], gh.env, repo)
     assert code == 1 and "gh pr merge" in out["summary"]
 
 
@@ -428,7 +489,7 @@ def test_merge_when_green_readies_draft_before_merge(repo, gh):
     merged = {"headRefName": "feat/x", "state": "MERGED", "mergeCommit": {"oid": "c"}}
     gh.set(pr_seq={"5": [draft, dict(draft), dict(draft), merged]})
     git(repo, "checkout", "-q", "-b", "other")
-    code, out, err = call("merged-steps.py", ["merge-when-green", "5", "--interval", "0", "--root", str(repo)],
+    code, out, err = call("merged-steps.py", ["merge-when-green", "5", "--interval", "0", "--recheck", "0", "--root", str(repo)],
                           gh.env, repo)
     assert code == 0, (out, err)
     assert [i for i in out["items"] if i["kind"] == "pr"] == [
@@ -439,8 +500,8 @@ def test_merge_when_green_readies_draft_before_merge(repo, gh):
 
 
 def test_merge_when_green_not_draft_does_not_ready(repo, gh):
-    gh.set(pr_seq={"5": [{"state": "OPEN", "isDraft": False, "headRefOid": "a", "statusCheckRollup": []}]})
-    code, out, err = call("merged-steps.py", ["merge-when-green", "5", "--interval", "0", "--no-cleanup"],
+    gh.set(pr_seq={"5": [{"state": "OPEN", "isDraft": False, "headRefOid": "a", "statusCheckRollup": [run_("t")]}]})
+    code, out, err = call("merged-steps.py", ["merge-when-green", "5", "--interval", "0", "--recheck", "0", "--no-cleanup"],
                           gh.env, repo)
     assert code == 0, (out, err)
     assert not [c for c in gh.get()["calls"] if c[:2] == ["pr", "ready"]]
@@ -448,8 +509,8 @@ def test_merge_when_green_not_draft_does_not_ready(repo, gh):
 
 def test_merge_when_green_ready_failure_stops(repo, gh):
     gh.set(ready_code=1, pr_seq={"5": [{"state": "OPEN", "isDraft": True, "headRefOid": "a",
-                                        "statusCheckRollup": []}]})
-    code, out, err = call("merged-steps.py", ["merge-when-green", "5", "--interval", "0"], gh.env, repo)
+                                        "statusCheckRollup": [run_("t")]}]})
+    code, out, err = call("merged-steps.py", ["merge-when-green", "5", "--interval", "0", "--recheck", "0"], gh.env, repo)
     assert code == 1 and "gh pr ready" in out["summary"]
     assert not [c for c in gh.get()["calls"] if c[:2] == ["pr", "merge"]]
 
