@@ -116,9 +116,7 @@ context window を使ったかが読めなくなる。**語彙は次の 2 つだ
 | 作業ディレクトリ | supervisor が作業ファイルを置くディレクトリの絶対パス（例 `<scratchpad>/<フェーズ>-<課題番号>/`）。**conductor が supervisor ごとに決め、並行する supervisor どうしで重ならないようにする** |
 | 記録のコマンド | コマンドの頭 `bash "<絶対パス>/projects-sync.sh" <課題番号> <キー> "<値>"` と、キー（`stage` / `mode` / `worktree` / `plan`）ごとの打つ時点。**conductor が `$SCRIPTS` を解いた絶対パスを二重引用符で囲んで書く。** 打つ時点は `progress-tracking` の抜粋（`references/excerpt.md`）の「呼び出し」を写す |
 
-**記録のコマンドは issue の本文の `## 進行` と盤面の両方へ残り、`stage` は通過工程の控えにも
-積まれる。** そのため supervisor は `progress-tracking` も `development-workflow` も起動せずに
-フェーズを通せる。打つのはその工程を行った supervisor である。パスを二重引用符で囲むのは、空白を含むパスで語が割れないためである。
+**記録のコマンドは issue の本文の `## 進行` と盤面の両方へ残り、`stage` は通過工程の控えにも積まれる。** そのため supervisor は `progress-tracking` も `development-workflow` も起動せずにフェーズを通せる。打つのはその工程を行った supervisor である。パスを二重引用符で囲むのは、空白を含むパスで語が割れないためである。
 
 supervisor が守る規則:
 
@@ -139,11 +137,8 @@ supervisor が守る規則:
    **小さな作業は worker へ出さずにその場で行う**（[work-vessels.md](work-vessels.md) の線引き）
 8. **worker の報告をそのまま conductor へ渡さない。** フェーズの報告へ畳む
 9. 最後の応答の末尾に `## フェーズの報告` を置く
-10. モードを上げるべきだと分かったら、進めずに `結果: 止まった` で返す。`到達点` が置き直されて
-    いて、その到達点に達したときは、関門を返さずに `結果: 完了`・`次のフェーズ: 無し` で返す
-11. **作業ファイル（スクリプト・初期化の出力・プロンプト）は、起動指示の「作業ディレクトリ」の中に置く。**
-    conductor の scratchpad の直下には置かない（並行する supervisor と同じ名前で上書きし合う）。
-    worker へ渡す `置き場所` も、この作業ディレクトリの下のパスにする
+10. モードを上げるべきだと分かったら、進めずに `結果: 止まった` で返す。`到達点` が置き直されていて、その到達点に達したときは、関門を返さずに `結果: 完了`・`次のフェーズ: 無し` で返す
+11. **作業ファイル（スクリプト・初期化の出力・プロンプト）は、起動指示の「作業ディレクトリ」の中に置く。** conductor の scratchpad の直下には置かない（並行する supervisor と同じ名前で上書きし合う）。worker へ渡す `置き場所` も、この作業ディレクトリの下のパスにする
 
 **`supervise.py run` / `queue` で回すフェーズの待ち方と `progress.jsonl` の読み方は、[waiting.md](waiting.md) の「supervise.py の途中の報告」に従う。**
 
