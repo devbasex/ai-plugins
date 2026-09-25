@@ -13,8 +13,11 @@ Usage:
     # バイナリファイルをダウンロード（画像、PDF等）
     python3 gdrive_fetch.py --id FILE_ID --download --output /tmp/file.png
 
-    # ファイルをアップロード（公開共有リンク付き）
+    # ファイルをアップロード（既定は非公開）
     python3 gdrive_fetch.py --upload /path/to/file.png
+
+    # リンクを知る全員が閲覧できるようにしてアップロード
+    python3 gdrive_fetch.py --upload /path/to/file.png --public
 """
 
 import argparse
@@ -78,8 +81,8 @@ def download_file(file_id, output, port=None):
     print(f'OK: downloaded {len(fh.getvalue())} bytes to {output}')
 
 
-def upload_file(filepath, public=True, port=None):
-    """ファイルをGoogle Driveにアップロード"""
+def upload_file(filepath, public=False, port=None):
+    """ファイルをGoogle Driveにアップロードする。`public` のときだけリンクを知る全員へ閲覧を許す"""
     creds = get_credentials(SCOPES_FILE, port=port) if port else get_credentials(SCOPES_FILE)
     service = build('drive', 'v3', credentials=creds)
 
@@ -112,17 +115,18 @@ def main():
     parser.add_argument('--download', action='store_true',
                         help='バイナリダウンロードモード')
     parser.add_argument('--upload', metavar='FILE', help='アップロードするファイルパス')
+    parser.add_argument('--public', action='store_true',
+                        help='アップロードしたファイルをリンクを知る全員が閲覧できるようにする（既定は非公開）')
     parser.add_argument('--port', type=int, default=None,
                         help='OAuth認証ポート（初回認証時のローカルコールバック用）')
     args = parser.parse_args()
 
     if args.upload:
-        upload_file(args.upload, port=args.port)
+        upload_file(args.upload, public=args.public, port=args.port)
         return
 
     if not args.id:
-        parser.print_help()
-        return
+        parser.error('--id か --upload のどちらかが要る')
 
     if args.download:
         output = args.output or '/tmp/gdrive_download'
