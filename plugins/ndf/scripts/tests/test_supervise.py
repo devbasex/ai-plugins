@@ -824,3 +824,25 @@ def test_queue_notifies_attention(tmp_path):
     assert len(events) == 1 and events[0]["reason"] == "止まった" and events[0]["step"] == "t"
     assert events[0]["tool"] == "supervise-queue" and events[0]["plan"] == str(f)
     assert out[-1]["status"] == "ok"
+
+
+def test_work_and_judge_prompts_get_separate_work_dirs_per_plan(tmp_path, monkeypatch):
+    """並行する 2 つの計画の work の段は、状態ディレクトリの下の別々の作業ディレクトリを渡される。"""
+    fake = tmp_path / "fake_claude.py"
+    fake.write_text(FAKE_CLAUDE.format(py=PY))
+    log = tmp_path / "claude.log"
+    monkeypatch.setenv("NDF_SUPERVISE_CLAUDE", f"{PY} {fake}")
+    monkeypatch.setenv("FAKE_CLAUDE_LOG", str(log))
+    dirs = []
+    for name in ("plan-a", "plan-b"):
+        plan = {"フェーズ": "試験", "課題": [985], "作業場所": str(tmp_path),
+                "steps": [{"id": "w", "type": "work", "prompt": "書く", "next": "end"}]}
+        s = sv.Supervisor(plan, tmp_path / name)
+        assert "結果: 完了" in s.run()
+        work = (tmp_path / name / "work").resolve()
+        assert work.is_dir()
+        dirs.append(work)
+    prompts = log.read_text().split("\n=====\n")
+    assert f"作業ディレクトリ: {dirs[0]}" in prompts[0] and str(dirs[1]) not in prompts[0]
+    assert f"作業ディレクトリ: {dirs[1]}" in prompts[1] and str(dirs[0]) not in prompts[1]
+    assert dirs[0] != dirs[1]

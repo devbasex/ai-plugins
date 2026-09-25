@@ -209,6 +209,11 @@ def test_the_markdown_holds_the_four_tables() -> None:
     ):
         assert heading in p.stdout, heading
     assert "束ねの表から外した記録: 1 件" in p.stdout
+    assert "フェーズが読めなかった supervisor: 1 件" in p.stdout
+
+
+def test_the_json_counts_the_supervisors_without_a_phase(report) -> None:
+    assert report["unphased_supervisors"] == 1
 
 
 def test_the_record_table_appears_only_with_a_session() -> None:

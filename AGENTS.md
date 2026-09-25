@@ -89,7 +89,7 @@
 | 記録 | 課題と Pull Request | [docs/ndf-experiments.md](docs/ndf-experiments.md) の台帳に 1 行 |
 
 - **試行は、マージの前から作業ツリーのパスで呼んでよい。** 配布を待たずに実践で使うためである
-- **安定側から試行側を参照しない。** 参照すると既定の振る舞いに試行が漏れる。`plugins/ndf/scripts/tests/test_experimental.py` が落とす
+- **既定で動くもの（コード・hook・設定と、Skill とエージェントの本文）から試行側を参照しない。** 参照すると既定の振る舞いに試行が漏れる。`plugins/ndf/scripts/tests/test_experimental.py` が落とす。README と CHANGELOG は利用者向けの説明なので、試行の置き場を紹介してよい
 - **効いた試行は安定の経路で本体へ移す。** 使われなかった試行は消す。どちらも台帳の「行き先」に書く
 - 試行を足すと決めるのは conductor でよい。既定の振る舞いを変えたくなった時点で安定の経路へ移る
 
@@ -144,7 +144,7 @@ ai-plugins/
 
 ## NDFプラグインについて
 
-**NDFプラグイン**は、このマーケットプレイスの主要プラグインです（v10.17.13）。plugin 名は全ランタイムで `ndf` を維持し、配布物は `plugins/ndf/` の1ディレクトリにまとまっています。
+**NDFプラグイン**は、このマーケットプレイスの主要プラグインです（v10.17.14）。plugin 名は全ランタイムで `ndf` を維持し、配布物は `plugins/ndf/` の1ディレクトリにまとまっています。
 - Skill の実体は `plugins/ndf/skills/` の1箇所。配布先は `plugins/ndf/manifests/*-skills.txt` が決める
 - Claude Code版は 8個の専門サブエージェントと 3 層の worker の定義 1 個、公開Skills、PreToolUse/SessionStart/Stopフックを提供
 - Codex版は Codex向け公開Skillsと任意Slack通知hookを提供

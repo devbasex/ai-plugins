@@ -675,6 +675,11 @@ def format_agents_markdown(
         lines.append(transcript_agents.format_list(records, with_agent_id=False))
         lines.append("")
     lines.extend(format_agent_summary_section(summary, excluded))
+    lines.append(
+        "フェーズが読めなかった supervisor: "
+        f"{transcript_agents.unphased_supervisors(records)} 件"
+        "（`description` の先頭語がフェーズにも工程名にも当たらない）"
+    )
     lines.append("")
     lines.extend(format_layer_totals_section(totals_rows, totals))
     if with_session:
@@ -786,6 +791,7 @@ def emit_json(
             "totals": totals,
             "role_usage": usage,
             "excluded": excluded,
+            "unphased_supervisors": transcript_agents.unphased_supervisors(agents),
         })
     print(json.dumps(out, ensure_ascii=False, indent=2))
 

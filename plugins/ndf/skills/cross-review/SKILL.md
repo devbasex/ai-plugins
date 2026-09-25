@@ -42,22 +42,9 @@ PR を**既定の母集合（claude / codex / kiro とホスト）から選ん�
 
 ## 設計方針
 
-長丁場が予想されるため **メインセッションの context 消費を最小化** する:
-
-| 観点 | 方針 |
-|---|---|
-| 投稿の担い手 | **GitHub と git へ書くのはレビューを回す側だけ**（#730）。担当は指摘の控えと結果ファイルを書き、取り込み（`read-result`）が組み立てて待ち行列から送る。修正の担当はコミットまでで、送信・返信・決着・まとめは `merge-fix` が行う。書き込みと記録が同じ手順で続くため、担当が途中で止まっても投稿だけが残らない |
-| 投稿の記録 | 参照は送信の応答から、件数は送れたインラインの数から取る。本文は取り込みのプロセスの中だけを通り、メインの応答に載らない |
-| 修正 | **必ずサブエージェント (`general-purpose`) で実行**。メイン context に diff は載せない |
-| ユーザ問い合わせ | 自動判断を最大化（`critical`/`major`/`minor` は自動修正、ループ中の `nit` は deferred） |
-| 取りこぼし防止 | **ループ終了時（approved / max_rounds / oscillation / error いずれも）に最終スイープを必須実行**。`/ndf:fix` を再実行し、残った open review thread（最終 APPROVE ラウンドの minor/nit インラインコメント含む）を **全て解消**。修正可能なものは修正 + push、判断保留 nit も reply + resolveReviewThread して **open thread 0 で終了**。件数は `state.py verify-sweep` が GitHub 側の実数で確認する |
-| 再開時の引き継ぎ | 再開の時点で残っていた未解決の指摘は `carried_over` に記録し、**修正の工程を 1 度通すまで収束させない**。増えるラウンドは最大 1 回。通した後の再開では、新しい指摘が出ていなければ抑止しない |
-| 状態の永続化 | `<worktree>/.cross_review/cross-review-pr<番号>-state.json` に集約。中断・再開可能 |
-| 長尺PR対策 | **`--rotate-after` ラウンドで PR をローテーション**（default=light: 同ブランチで PR 巻き直し / squash: 新ブランチ + squash 統合） |
-| 振動検知 | 前のラウンドと**同じ箇所を指す指摘**が 50% 以上なら中断（測り方は `docs/01` の Step 4） |
-| 終了基準 | **新しい指摘が出なくなったら収束**。全員 `APPROVE` は最も止まらない参加者に律速される。3 つの層の順序は `docs/01` の「終了基準」 |
-| レビュワーの母集合 | **claude / codex / kiro とホスト**（agy は `--include agy`）から、使える者を決めて毎ラウンド 2 席。使える者の解決と席の埋め方は `docs/05` |
-| 2 ラウンド目以降 | 既存コメントの控えを取り直す（`docs/01` の Step 1） |
+長丁場のため、メインの文脈の消費を最小にする。投稿の担い手・修正の担い手・最終スイープ・再開・
+巻き直し・振動・終了基準・母集合の方針は [references/design-principles.md](references/design-principles.md)、
+「メイン」が何を指すかと、この形になっている理由は [references/context-budget.md](references/context-budget.md) にある。
 
 ## 引数
 
@@ -117,7 +104,7 @@ PR を**既定の母集合（claude / codex / kiro とホスト）から選ん�
 
 - `/ndf:fix` が **サブエージェント起動 + 重要度ベース自動修正 + Resolve Conversation** に対応
 - `gh` CLI が認証済み。担当になる CLI は `init` が起動前に確かめ、通らない者は外して続ける（誤検知するときは `NDF_SKIP_AUTH_CHECK=1`）
-- `Agent(subagent_type="general-purpose", ...)` でサブエージェントを起動可能
+- worker（`general-purpose` のサブエージェント）を起こせる
 
 ## 事前確認
 
@@ -133,41 +120,32 @@ PR を**既定の母集合（claude / codex / kiro とホスト）から選ん�
 
 ## 実行
 
-収束ループは `scripts/drive.py`（この SKILL.md と同じ置き場所の `scripts/`）が進める。メインはこのコマンドを
-打ち、最後の行の結果 JSON（`step_result` の形）の `status` を見る。**値のある引数だけを渡す**（再開で渡した
-引数の扱いは [docs/04-contracts.md](docs/04-contracts.md) の「再開で渡した引数の扱い」）。
+Skill のディレクトリで次の 1 行を打ち、最後の行の結果 JSON の `status` と終了コードを見る。**値のある引数だけを
+渡す**（再開で渡した引数の扱いは [docs/04-contracts.md](docs/04-contracts.md) の「再開で渡した引数の扱い」）。
 
 ```bash
-python3 <この Skill の置き場所>/scripts/drive.py <PR> [--rotate-mode light|squash] [--max-rounds N] [--rotate-after K] \
-  [--host H] [--only R] [--exclude N] [--include N] [--require-all] [--focus TEXT] \
-  [--verify-command CMD] [--verify-exit-code N] [--extra-instructions-file PATH]
+python3 scripts/drive.py <PR> [--rotate-mode light|squash] [--max-rounds N] [--rotate-after K] [--host H] [--only R] \
+  [--exclude N] [--include N] [--require-all] [--focus TEXT] [--extra-instructions-file PATH] [--verify-command CMD] [--verify-exit-code N]
 ```
 
-待ちはコマンドの中で行う（レビュー 1 ラウンドで 20 分を超えうる）。Claude Code では `run_in_background` で起動し、
-完了通知を 1 回受ける。
+待ちはコマンドの中で行う（1 ラウンドで 20 分を超えうる）。Claude Code では `run_in_background` で起動し、
+完了通知を 1 回受ける。JSON の形と終了コードの表は共通層の `scripts/lib/drive_pause.py` にある。
 
-| status（終了コード） | 意味 | メインがすること |
+| 終了コード（`items[0].pause`） | 止まった地点 | すること |
 | --- | --- | --- |
-| `ok`（0） | 最終スイープと検証まで終わった | `items[0].report` と `metrics` を「作業完了報告」へ写す |
-| `gate`（20）`pause: fix` | 一方でも REQUEST_CHANGES | Agent(general-purpose) に `items[0].prompt_file` を渡し、`result_file` を書かせてから同じコマンドを打ち直す |
-| `gate`（21）`pause: sweep` | ループを抜けた（どの `final` でも） | 同上（最終スイープ） |
-| `gate`（22）`pause: newtext` | light の巻き直し | 同上（新しい title / body） |
-| `stopped`（1） | 中断（`metrics.exit` に元の終了コード） | `summary` を報告して止まる |
+| 0 | 最終スイープと検証まで終わった | `items[0].report` と `metrics` を「作業完了報告」へ写す |
+| 20（`fix`） | 一方でも REQUEST_CHANGES | worker を起こし、`prompt_file` を読ませて `result_file` を書かせる。書けたら同じコマンドを打ち直す |
+| 21（`sweep`） | ループを抜けた（どの `final` でも） | 同上（最終スイープ） |
+| 22（`newtext`） | light の巻き直し | 同上（新しい title / body） |
+| 1 | 中断（`metrics.exit` に元の終了コード） | `summary` を報告して止まる |
 
-**pause の JSON はファイルのパスだけを載せる。** プロンプトは `/ndf:fix` の呼び出しと PR 固有の値
-（リポジトリ・ブランチ・前ラウンドのレビュー・戻り値ファイル）だけを持ち、方針と戻り値の形は
-[docs/02-fix-and-rotation.md](docs/02-fix-and-rotation.md) を指す。**修正はメインで書かない**（担当はコミット
-までで、送信・返信・決着は駆動の取り込みが行う）。
+**修正はメインで書かない。** `prompt_file` は `/ndf:fix` の呼び出しと PR 固有の値（ブランチ・前ラウンドの
+レビュー・戻り値ファイル）だけを持つ。担当はコミットまでで、送信・返信・決着は駆動の取り込みが行う。
+振動を検知したときは、メインが正しい状態を決めてから打ち直す。
 
 再開は同じコマンドを打ち直すだけである。進みは `$TMP_DIR/drive-pr<PR>.json` と state.json にあり、pause の
 結果ファイルがあればその続きから進む。`metrics` は state.json から数えた件数（`rounds` / `prs` / `findings` /
 `fixed` / `deferred` / `rejected` / `unresolved` / `final` / `review_status`）である。
-
-各段の中身と契約は次にある。
-
-- 初期化・ラウンド・判定・振動 — [docs/01-state-and-review.md](docs/01-state-and-review.md)
-- 修正・巻き直し・最終スイープ・終了処理 — [docs/02-fix-and-rotation.md](docs/02-fix-and-rotation.md)
-- 状態ファイルと入出力の契約 — [docs/04-contracts.md](docs/04-contracts.md)
 
 ## レビュー出力の制約と運用の切り分け
 
@@ -181,11 +159,6 @@ python3 <この Skill の置き場所>/scripts/drive.py <PR> [--rotate-mode ligh
 | アンチパターン | 手順を変えるとき、または進行が止まったとき |
 | monitor.py が誤って kill する場合の手順 | 結果ファイルが生成されないとき |
 
-## メイン context 節約の工夫
-
-**「メイン」が何を指すか**と、設計がこの形になっている理由は
-[references/context-budget.md](references/context-budget.md) にある。
-
 ## 作業完了報告（必須）
 
 駆動の結果（`status: ok`）の `items[0].report`（`state.py report` の出力）と `metrics` を材料に、次を報告する。
@@ -198,8 +171,8 @@ python3 <この Skill の置き場所>/scripts/drive.py <PR> [--rotate-mode ligh
 
 詳細は PR 上のインラインコメントと state.json に残っているため、本報告では繰り返さない。
 
-この工程に入ったら記録のコマンド `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "実装レビュー"` を 1 行打つ（issue の本文と盤面の両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「記録のコマンド」を使う）。
-設計だけを載せた Pull Request で呼ばれたときは `"ドキュメントレビュー"` を記録する。
+この工程に入ったら、起動指示の「記録のコマンド」で `実装レビュー` を 1 行記録する。設計だけを載せた
+Pull Request で呼ばれたときは `ドキュメントレビュー` を記録する。
 
 ## 関連
 
@@ -209,5 +182,5 @@ python3 <この Skill の置き場所>/scripts/drive.py <PR> [--rotate-mode ligh
 - `/ndf:issue-plan-strategy` — multi-PR ワークフローでは **個別 PR ごとに本 cross-review が原則必須**。
   `/ndf:pr-review` 単発や Claude Code の `code-reviewer` は代替にせず、release ブランチへ merge する前に
   codex + agy の APPROVE 収束を確認する (Step 6)
-- `general-purpose` エージェント — fix 実行用サブエージェント
+- `general-purpose` エージェント — fix / sweep / newtext の worker
 - `/ndf:out-of-scope` — 範囲外と判断した指摘の起票
