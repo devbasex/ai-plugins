@@ -194,3 +194,22 @@ def test_the_confirmation_line_works_with_a_strict_sed(fake_gh):
     assert out.returncode == 0, out.stderr
     assert "sed:" not in out.stderr
     assert "#123 進行の見出し = モード: standard" in out.stdout
+
+
+def test_pace_fast_is_written_after_the_mode_and_kept(fake_gh):
+    """#1078: 進め方は fast のときだけ見出し行へ書き、後の記録でも残る。"""
+    fake_gh.body.write_text("## 進行\n\nモード: standard / 作業ツリー: `.worktrees/x`\n\n- [ ] 設計\n", encoding="utf-8")
+    out = run(fake_gh, "123", "-", "--pace", "fast")
+    assert out.returncode == 0, out.stderr
+    written = fake_gh.written.read_text(encoding="utf-8")
+    assert "モード: standard / 進め方: fast / 作業ツリー: `.worktrees/x`" in written
+    fake_gh.body.write_text(written, encoding="utf-8")
+    run(fake_gh, "123", "設計")
+    assert "モード: standard / 進め方: fast / 作業ツリー: `.worktrees/x`" in fake_gh.written.read_text(encoding="utf-8")
+
+
+def test_pace_normal_is_not_written_and_an_unknown_pace_is_rejected(fake_gh):
+    fake_gh.body.write_text("## 進行\n\nモード: standard\n\n- [ ] 設計\n", encoding="utf-8")
+    run(fake_gh, "123", "設計", "--pace", "normal")
+    assert "進め方" not in fake_gh.written.read_text(encoding="utf-8")
+    assert run(fake_gh, "123", "-", "--pace", "slow").returncode == 2

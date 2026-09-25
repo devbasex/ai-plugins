@@ -311,3 +311,56 @@ def test_records_at_once_never_skip_a_stage(repo: Path, state: Path) -> None:
 
     assert short == [], f"工程がそろわなかった試行 {len(short)} 件: {short}"
     assert skipped == 0, f"控えが使用中で飛ばした記録 {skipped} 件"
+
+
+# --- #1078: 進め方 fast -------------------------------------------------------
+
+# fast で配布まで進んだ課題。構造改善・実装レビュー・確定仕様化・振り返りは記録していない。
+FAST_THROUGH_RELEASE = [
+    "要求と受け入れ条件", "作業場所の用意", "設計", "ドキュメント再構成", "ドキュメントレビュー", "計画",
+    "実装", "完了判定", "Pull Request", "後片付け", "配布",
+]
+
+
+def test_fast_lists_trigger_and_deferred_stages_apart_from_missing(repo: Path, state: Path) -> None:
+    seed(repo, state, 1078, "standard", FAST_THROUGH_RELEASE)
+    record(repo, state, 1078, "pace", "fast")
+
+    out = report(repo, state, 1078).stdout
+
+    assert out.splitlines()[0] == "#1078 の通過工程（standard・進め方 fast）"
+    assert "記録なし" not in out
+    assert "  トリガー: 構造改善 / 実装レビュー" in out
+    assert "  まとめる: 確定仕様化 / 振り返り" in out
+    assert 'stage "確定仕様化"' not in out and 'stage "構造改善"' not in out
+
+
+def test_without_a_pace_record_the_report_is_unchanged(repo: Path, state: Path) -> None:
+    seed(repo, state, 1078, "standard", FAST_THROUGH_RELEASE)
+
+    out = report(repo, state, 1078).stdout
+
+    assert "  記録なし: 構造改善 / 実装レビュー / 確定仕様化" in out
+    assert "トリガー" not in out and "まとめる" not in out
+
+
+def test_a_deferred_stage_moves_to_recorded_once_it_is_recorded(repo: Path, state: Path) -> None:
+    seed(repo, state, 1078, "standard", [*FAST_THROUGH_RELEASE, "確定仕様化", "振り返り"])
+    record(repo, state, 1078, "pace", "fast")
+
+    out = report(repo, state, 1078).stdout
+
+    assert "まとめる" not in out and "確定仕様化" in out.split("記録あり:")[1].splitlines()[0]
+
+
+def test_an_unknown_pace_returns_two(repo: Path, state: Path) -> None:
+    assert record(repo, state, 1078, "pace", "slow").returncode == 2
+
+
+def test_the_fast_stage_names_are_rows_of_the_workflow_table() -> None:
+    """SKILL.md の進め方の表に載せる工程の名前は、工程表の行名と一致する。"""
+    for stage in ("構造改善", "実装レビュー", "確定仕様化", "振り返り", "作業場所の用意", "計画", "実装",
+                  "完了判定", "Pull Request", "後片付け", "配布", "リリース後テスト", "要求と受け入れ条件", "設計",
+                  "ドキュメント再構成", "ドキュメントレビュー"):
+        result = run_lib(f'wf_is_stage "{stage}"')
+        assert result.returncode == 0, stage

@@ -426,6 +426,33 @@ def test_merge_when_green_reruns_stuck_check_once_then_merges(repo, gh):
     assert [c for c in gh.get()["calls"] if c[:2] == ["pr", "merge"]]
 
 
+def test_merge_when_green_takes_conclusion_of_stuck_check_that_finished(repo, gh):
+    """実行が completed でジョブに結論があれば、チェックの表示が pending のままでも結論で扱う（待たない・再実行しない）。"""
+    gh.set(pr_seq={"5": [stuck_pr(), stuck_pr(), stuck_pr(), MERGED]},
+           runs={"100": [{"status": "completed", "conclusion": "success",
+                          "jobs": [{"databaseId": 200, "status": "in_progress", "conclusion": "success"}]}]})
+    code, out, err = call("merged-steps.py", ["merge-when-green", "5", "--interval", "0", "--recheck", "0",
+                                              "--no-cleanup"], gh.env, repo)
+    assert code == 0, (out, err)
+    assert {"kind": "check", "name": "build", "result": "settled", "run": "100", "job": "200",
+            "conclusion": "success"} in out["items"]
+    assert reruns(gh) == []
+    assert [c for c in gh.get()["calls"] if c[:2] == ["pr", "merge"]]
+
+
+def test_merge_when_green_stops_when_stuck_check_finished_as_failure(repo, gh):
+    """取り残されたチェックのジョブの結論が failure なら、失敗として止まる。"""
+    gh.set(pr_seq={"5": [stuck_pr()]},
+           runs={"100": [{"status": "completed", "conclusion": "failure",
+                          "jobs": [{"databaseId": 200, "status": "in_progress", "conclusion": "failure"}]}]})
+    code, out, err = call("merged-steps.py", ["merge-when-green", "5", "--interval", "0", "--no-cleanup"],
+                          gh.env, repo)
+    assert code == 1 and out["status"] == "stopped"
+    assert "失敗" in out["summary"] and "build" in out["summary"]
+    assert reruns(gh) == []
+    assert not [c for c in gh.get()["calls"] if c[:2] == ["pr", "merge"]]
+
+
 def test_merge_when_green_waits_stale_after_before_rerun(repo, gh):
     """取り残しが --stale-after に満たないうちは再実行しない。"""
     gh.set(pr_seq={"5": [stuck_pr(), green_pr(), green_pr(), MERGED]},

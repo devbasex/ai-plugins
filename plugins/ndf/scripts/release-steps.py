@@ -42,7 +42,6 @@ import re
 import subprocess
 import sys
 import tempfile
-import time
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -580,22 +579,21 @@ def pr_check_buckets(root, n):
 
 
 def wait_and_merge(root, n):
-    """PR のチェックを待ち（上限あり）、全部 pass ならマージする。落ちたら失敗したチェック名で止める。"""
-    for _ in range(100):  # 作った直後はチェックがまだ現れないので、現れるまで待つ（上限 5 分）
-        if pr_check_buckets(root, n):
-            break
-        time.sleep(3)
-    else:
-        raise StepError(f"PR #{n} にチェックが現れない")
-    # 読み直しの間隔がそのまま「通ってからマージまでの遅れ」になるので短くする
-    run(["gh", "pr", "checks", str(n), "--watch", "-i", "5"], cwd=root, check=False)
-    checks = pr_check_buckets(root, n)
-    bad = [c.get("name") for c in checks if c.get("bucket") not in ("pass", "skipping")]
-    if not checks or bad:
-        raise StepError(f"PR #{n} のチェックが通らない: {', '.join(map(str, bad)) or 'チェックが無い'}")
-    p = run(["gh", "pr", "merge", str(n), "--admin", "--merge"], cwd=root, check=False)
+    """PR のチェックを merge-when-green で待ってマージする。止まったらその summary で止める。
+
+    merge-when-green は待ちの上限を持ち、実行が終わったのに pending のまま取り残されたチェックを
+    1 度だけ再実行する（`gh pr checks --watch` は上限が無く、取り残されたチェックを待ち続けた）。
+    後片付けは配布の手順が持つので行わせない。
+    """
+    script = Path(__file__).resolve().parent / "merged-steps.py"
+    p = run([sys.executable, str(script), "merge-when-green", str(n), "--no-cleanup", "--interval", "5"],
+            cwd=root, check=False)
+    try:
+        out = json.loads((p.stdout or "").strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        out = {}
     if p.returncode != 0:
-        raise StepError(f"gh pr merge {n} が失敗: {p.stderr.strip()[:300]}")
+        raise StepError(f"PR #{n} をマージできない: {out.get('summary') or p.stderr.strip()[:300]}")
     return merge_commit_of(root, n)
 
 

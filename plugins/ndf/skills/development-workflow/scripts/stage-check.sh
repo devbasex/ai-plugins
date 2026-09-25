@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # NDF plugin: 通過工程の控えを記録し、報告する（#221）。
 #
-#   stage-check.sh record <課題番号> <stage|mode> <値>
+#   stage-check.sh record <課題番号> <stage|mode|pace> <値>
 #   stage-check.sh report <課題番号>
 #
 # **終了コードで工程を止めない。** 呼び出し側の誤りだけを 2 で返す。`projects-sync.sh`
@@ -14,7 +14,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/lib/workflow-common.sh" 2>/dev/null || exit 0
 
 usage() {
-  printf 'usage: stage-check.sh record <課題番号> <キー: stage|mode> <値>\n' >&2
+  printf 'usage: stage-check.sh record <課題番号> <キー: stage|mode|pace> <値>\n' >&2
   printf '       stage-check.sh report <課題番号>\n' >&2
 }
 
@@ -56,6 +56,10 @@ case "$KEY" in
   mode)
     wf_is_mode "$VALUE" || {
       printf 'ERROR: 知らないモードです: %s\n' "$VALUE" >&2; exit 2; }
+    ;;
+  pace)
+    wf_is_pace "$VALUE" || {
+      printf 'ERROR: 知らない進め方です: %s\n' "$VALUE" >&2; exit 2; }
     ;;
   *)
     printf 'ERROR: 知らないキーです: %s\n' "$KEY" >&2

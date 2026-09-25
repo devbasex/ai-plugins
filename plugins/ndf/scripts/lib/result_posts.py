@@ -402,6 +402,8 @@ class FixOutcome(NamedTuple):
     queued: int
     failed: bool
     detail: str
+    # 恒久的な失敗で飛ばした項目の数（#962）。飛ばしても失敗にはしない。
+    dropped: int = 0
 
 
 def post_fix(queue: post_queue.Queue, result_path: pathlib.Path | str, repo: str,
@@ -426,13 +428,19 @@ def post_fix(queue: post_queue.Queue, result_path: pathlib.Path | str, repo: str
             if isinstance(response, dict):
                 summary_url = response.get("html_url") or response.get("url")
     failed = flushed.failed is not None and not flushed.rate_limited
+    ours_dropped = [i for i in flushed.dropped if i.get("seq") is not None
+                    and int(i["seq"]) in seqs]
+    detail = str((flushed.failed or {}).get("last_error") or "")
+    if not detail and ours_dropped:
+        detail = "; ".join(str(i.get("last_error") or "") for i in ours_dropped)
     return FixOutcome(
         summary_url=str(summary_url) if summary_url else None,
         replied=sum(1 for s, k in seqs.items() if k == "review-reply" and s in done),
         resolved=sum(1 for s, k in seqs.items() if k == "thread-resolve" and s in done),
         queued=flushed.remaining,
         failed=bool(failed),
-        detail=str((flushed.failed or {}).get("last_error") or ""),
+        detail=detail,
+        dropped=len(ours_dropped),
     )
 
 
@@ -567,7 +575,10 @@ def cmd_fix(args: argparse.Namespace) -> int:
     if outcome.summary_url:
         print(f"POSTED summary_url={outcome.summary_url}")
     print(f"REPLIED={outcome.replied} RESOLVED={outcome.resolved} "
-          f"QUEUED={outcome.queued}")
+          f"QUEUED={outcome.queued} DROPPED={outcome.dropped}")
+    if outcome.dropped and not outcome.failed:
+        print(f"⚠️ 送れない項目を {outcome.dropped} 件飛ばしました ({outcome.detail})",
+              file=sys.stderr)
     if outcome.failed:
         print(outcome.detail, file=sys.stderr)
         return 1

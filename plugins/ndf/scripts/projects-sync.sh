@@ -3,10 +3,11 @@
 # 1 回の呼び出しで更新する（#828）。
 #
 #   projects-sync.sh <issue番号> <キー> <値>
-#     キー: stage | mode | status | worktree | plan
+#     キー: stage | mode | pace | status | worktree | plan
 #
-# `stage` / `mode` / `worktree` / `plan` は、盤面の宣言の有無にかかわらず先に
-# `progress-record.sh` を呼んで issue の本文を更新し、その後で盤面を更新する。
+# `stage` / `mode` / `pace` / `worktree` / `plan` は、盤面の宣言の有無にかかわらず先に
+# `progress-record.sh` を呼んで issue の本文を更新し、その後で盤面を更新する。`pace`（normal / fast）は
+# 盤面のフィールドを持たず、本文の見出し行（`進め方: fast`）にだけ書く。
 # `status` は盤面だけに書く（「ミッションを閉じる」だけが使う）。
 # 通過工程の控えはこのコマンドを観測して積むため、入口はこのスクリプトのままにする。
 #
@@ -23,7 +24,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/lib/projects-common.sh" 2>/dev/null || exit 0
 
 usage() {
-  printf 'usage: projects-sync.sh <issue番号> <キー: stage|mode|status|worktree|plan> <値>\n' >&2
+  printf 'usage: projects-sync.sh <issue番号> <キー: stage|mode|pace|status|worktree|plan> <値>\n' >&2
 }
 
 ISSUE="${1:-}"
@@ -53,7 +54,7 @@ command -v gh >/dev/null 2>&1 || exit 0
 # issue の本文。失敗しても盤面の更新へ進む（終了コードの契約は誤りだけ 2）。
 case "$KEY" in
   stage) bash "$SCRIPT_DIR/progress-record.sh" "$ISSUE" "$VALUE" || : ;;
-  mode|worktree|plan) bash "$SCRIPT_DIR/progress-record.sh" "$ISSUE" - "--$KEY" "$VALUE" || : ;;
+  mode|pace|worktree|plan) bash "$SCRIPT_DIR/progress-record.sh" "$ISSUE" - "--$KEY" "$VALUE" || : ;;
 esac
 
 command -v git >/dev/null 2>&1 || exit 0

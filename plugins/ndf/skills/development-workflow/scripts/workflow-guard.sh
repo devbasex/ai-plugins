@@ -64,10 +64,11 @@ fi
 if SYNC=$(wf_parse_sync "$COMMAND"); then
   IFS=$'\t' read -r ISSUE KEY VALUE <<<"$SYNC"
   case "$ISSUE" in ''|*[!0-9]*) exit 0 ;; esac
-  case "$KEY" in stage|mode) ;; *) exit 0 ;; esac
+  case "$KEY" in stage|mode|pace) ;; *) exit 0 ;; esac
   [ -n "$VALUE" ] || exit 0
   if [ "$KEY" = "stage" ]; then wf_is_stage "$VALUE" || exit 0; fi
   if [ "$KEY" = "mode" ]; then wf_is_mode "$VALUE" || exit 0; fi
+  if [ "$KEY" = "pace" ]; then wf_is_pace "$VALUE" || exit 0; fi
 
   SLUG=$(wf_repo_slug ".") || exit 0
   wf_record "$SLUG" "$ISSUE" "$KEY" "$VALUE" 2>/dev/null

@@ -228,6 +228,25 @@ def is_position_unresolved(attempt: Attempt) -> bool:
     return _POSITION_WORD in f"{attempt.message} {attempt.stderr}".lower()
 
 
+# 項目そのものが送れないことを表す状態。送り直しても同じ応答が返る（宛先が無い・
+# 要求が受け付けられない）。401 / 403 は項目ではなく認証か上限の問題であり、後ろの
+# 項目も同じく送れないため含めない。
+PERMANENT_STATUSES = (400, 404, 410, 422)
+# 飛ばさない種別。レビューの拒否は呼び出し側が退避（`is_position_unresolved`）か
+# 失敗かを決めるため、先頭で止めて返す。
+_NOT_DROPPED_KINDS = ("review-post",)
+
+
+def is_permanent_failure(item: dict[str, Any], attempt: Attempt) -> bool:
+    """この項目の失敗が、送り直しても変わらない恒久的なものか（#962）。
+
+    例はレビューの ID を宛先にした返信で、GitHub は `Parent comment not found` を返す。
+    """
+    if attempt.ok or item.get("kind") in _NOT_DROPPED_KINDS:
+        return False
+    return attempt.http in PERMANENT_STATUSES and not is_rate_limited(attempt)
+
+
 # ---------------- 送る内容の組み立て ----------------
 
 
@@ -511,6 +530,8 @@ class FlushResult(NamedTuple):
     failed: dict[str, Any] | None
     remaining: int
     rate_limited: bool
+    # 恒久的な失敗で飛ばし、`dropped/` へ移した項目（#962）。
+    dropped: list[dict[str, Any]] = []
 
 
 class Queue:
@@ -554,6 +575,14 @@ class Queue:
                 path.unlink(missing_ok=True)
                 return True
         return False
+
+    def set_aside(self, path: pathlib.Path) -> pathlib.Path:
+        """送れない項目を待ち行列から外し、`dropped/` へ移して残す。"""
+        dest_dir = self.dir / "dropped"
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / path.name
+        path.replace(dest)
+        return dest
 
     def _next_seq(self) -> int:
         seqs = [int(m.group(1)) for m in
@@ -619,10 +648,13 @@ class Queue:
         """積んだ項目を連番の順に送る。
 
         **1 件でも送れなければそこで止める。** 先の項目を飛ばして後の項目を送ると、
-        Pull Request 上での順序が入れ替わる。
+        Pull Request 上での順序が入れ替わる。**ただし恒久的な失敗（`is_permanent_failure`）
+        の項目は飛ばし、`dropped/` へ移して後ろを送る**（#962）。送り直しても届かない
+        項目で止まると、後ろの決着とまとめが何度流しても送られない。
         """
         sent: list[dict[str, Any]] = []
         skipped: list[dict[str, Any]] = []
+        dropped: list[dict[str, Any]] = []
         failed: dict[str, Any] | None = None
         rate_limited = False
         for path in self.paths():
@@ -638,10 +670,14 @@ class Queue:
             if ok:
                 sent.append(item)
                 continue
+            if is_permanent_failure(item, attempt):
+                self.set_aside(path)
+                dropped.append(item)
+                continue
             failed = item
             rate_limited = is_rate_limited(attempt)
             break
-        return FlushResult(sent, skipped, failed, self.count(), rate_limited)
+        return FlushResult(sent, skipped, failed, self.count(), rate_limited, dropped)
 
 
 def enqueue(queue: Queue, kind: str, repo: str, pr: int, fields: dict[str, Any],
@@ -748,7 +784,11 @@ def cmd_flush(args: argparse.Namespace) -> int:
     result = q.flush()
     print(f"PENDING_SENT={len(result.sent)}")
     print(f"PENDING_SKIPPED={len(result.skipped)}")
+    print(f"PENDING_DROPPED={len(result.dropped)}")
     print(f"PENDING_REMAINING={result.remaining}")
+    for item in result.dropped:
+        print(f"⚠️ 送れない項目を飛ばしました ({item.get('kind')} #{item.get('seq')}):"
+              f" {item.get('last_error') or ''}", file=sys.stderr)
     return 0
 
 

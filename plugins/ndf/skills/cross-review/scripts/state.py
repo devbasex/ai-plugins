@@ -1546,10 +1546,11 @@ def _auto_flush(pr: int) -> None:
     result = q.flush()
     for item in result.sent + result.skipped:
         _confirm_flushed(pr, item)
-    if result.sent or result.skipped:
+    if result.sent or result.skipped or result.dropped:
         info(
             f"↻ 待ち行列を流しました: 送った {len(result.sent)} 件 /"
-            f" 既に届いていた {len(result.skipped)} 件"
+            f" 既に届いていた {len(result.skipped)} 件 /"
+            f" 送れずに飛ばした {len(result.dropped)} 件"
         )
     if result.remaining:
         reason = (result.failed or {}).get("last_error", "")
@@ -1567,7 +1568,11 @@ def cmd_flush(args: argparse.Namespace) -> None:
     print(f"PENDING_BEFORE={before}")
     print(f"PENDING_SENT={len(result.sent)}")
     print(f"PENDING_SKIPPED={len(result.skipped)}")
+    print(f"PENDING_DROPPED={len(result.dropped)}")
     print(f"PENDING_REMAINING={result.remaining}")
+    for item in result.dropped:
+        info(f"⚠️ 送れない項目を飛ばしました ({item.get('kind')} #{item.get('seq')}):"
+             f" {item.get('last_error') or ''}")
     if result.remaining:
         reason = (result.failed or {}).get("last_error", "")
         info(
@@ -4508,7 +4513,10 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     _save(pr, st)
     if posted.summary_url:
         print(f"POSTED summary_url={posted.summary_url}")
-    print(f"REPLIED={posted.replied} RESOLVED={posted.resolved} QUEUED={posted.queued}")
+    print(f"REPLIED={posted.replied} RESOLVED={posted.resolved} QUEUED={posted.queued}"
+          f" DROPPED={posted.dropped}")
+    if posted.dropped and not posted.failed:
+        info(f"⚠️ 送れない項目を {posted.dropped} 件飛ばしました ({posted.detail})")
     if posted.failed:
         die(f"返信・決着・まとめを投稿できませんでした ({posted.detail})")
 

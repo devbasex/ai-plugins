@@ -765,3 +765,23 @@ def test_the_standalone_command_stops_when_the_branch_is_not_known(
     # 返信・決着・まとめは 1 件も呼ばず、待ち行列にも積まない。
     assert [c for c in calls if c[:2] == ["gh", "api"]] == []
     assert not (work / result_posts.TMP_DIRNAME).exists()
+
+
+def test_a_reply_that_github_refuses_does_not_hold_back_the_summary(
+        tmp_path, fake_gh) -> None:
+    """送れない返信は飛ばし、決着とまとめを送る。失敗にはしない（#962）。"""
+    fake_gh.set_rules([{
+        "match": "comments/111/replies", "exit": 1,
+        "stdout": json.dumps({"message": "Parent comment not found"}),
+        "stderr": "gh: Not Found (HTTP 404)\n",
+    }])
+
+    outcome = result_posts.post_fix(_queue(tmp_path), _fix_file(tmp_path), REPO, PR,
+                                    round_no=ROUND, actor=ACTOR)
+
+    assert outcome.failed is False
+    assert outcome.dropped == 1
+    assert outcome.replied == 3
+    assert outcome.resolved == 2
+    assert outcome.queued == 0
+    assert "Parent comment not found" in outcome.detail
