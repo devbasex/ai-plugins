@@ -116,6 +116,8 @@ def cleanup(root, prs):
 
     wts = list_worktrees(root)
     main_dir = wts[0]["path"] if wts else str(root)
+    # root が消す作業ツリーのこともある（計画の merge のステップ）。以後は主ディレクトリから打つ
+    root = main_dir
     slug = repo_slug(root)
     wt_base = Path(os.environ.get("NDF_WORKTREE_BASE") or Path(tempfile.gettempdir()) / "ndf-worktrees")
 
