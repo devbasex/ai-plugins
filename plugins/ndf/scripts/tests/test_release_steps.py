@@ -338,3 +338,18 @@ def test_notes_and_changelog_skip_unmerged_prs(repo, tmp_path):
     assert p.returncode == 0, p.stdout + p.stderr
     assert json.loads(p.stdout.strip().splitlines()[-1])["metrics"]["unmerged"] == [13]
     assert "#13" not in (repo / "CHANGELOG.md").read_text(encoding="utf-8")
+
+
+def test_notes_and_changelog_stop_when_no_pr_is_merged(repo, tmp_path):
+    pdir = notes_repo(repo)
+    env = fake_gh(tmp_path, {13: {"title": "未マージ", "body": "## 利用者向けの変化\n\n- 載らない\n", "state": "OPEN"}})
+    approval = repo / "issues" / "approval.md"
+    approval.parent.mkdir()
+    approval.write_text("| 配る中身 | 前の中身 |\n| 検証への配布で確かめたこと | 前の確認 |\n", encoding="utf-8")
+    files = [repo / "CHANGELOG.md", pdir / "README.md", approval]
+    before = [f.read_bytes() for f in files]
+    base = ["--root", str(repo), "--version", "1.2.3-dev.1", "--prs", "13"]
+    for args in (["notes", *base], ["notes", *base, "--approval", "issues/approval.md"], ["changelog", *base]):
+        p = subprocess.run([PY, str(SCRIPT), *args], capture_output=True, text=True, env=env)
+        assert p.returncode == 3, args
+        assert [f.read_bytes() for f in files] == before, args

@@ -451,6 +451,13 @@ def unmerged(d):
     return isinstance(d, dict) and d.get("state", "MERGED") != "MERGED"
 
 
+def require_merged(found, prs):
+    """マージ済みが 0 件なら、書き込む前に前提エラーで止める（既存の節や欄を空で上書きしない）。"""
+    if not found:
+        raise StepError(f"渡した PR {' '.join(f'#{n}' for n in prs)} にマージ済みが無い", EXIT_PRECONDITION)
+    return found
+
+
 def pr_titles(root, prs, skipped=None):
     """PR ごとに (番号, 箇条) を返す。マージされていない PR は載せず、番号を skipped へ足す。"""
     items = []
@@ -464,7 +471,7 @@ def pr_titles(root, prs, skipped=None):
         except (TypeError, KeyError, AttributeError):
             raise StepError(f"gh pr view {n} の出力を読めない", 2)
         items.append((n, f"- {title}（#{n}）"))
-    return items
+    return require_merged(items, prs)
 
 
 def cmd_changelog(a):
@@ -779,7 +786,7 @@ def pr_notes(root, prs, skipped=None):
         items = change_items(body_section(body, CHANGES_HEADING), n)
         risks = change_items(body_section(body, RISKS_HEADING), n)
         out.append((n, items or [f"{d['title'].strip()}（#{n}）"], risks, not items))
-    return out
+    return require_merged(out, prs)
 
 
 def replace_section(lines, at, block):
