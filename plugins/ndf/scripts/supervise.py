@@ -14,7 +14,9 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
 | pr    | push して Draft の Pull Request を作る（スクリプト）。本文は材料（計画の値・コミット・変更の統計・run の結果・設計文書）から LLM が書く。`"body": "template"` なら材料をそのまま本文にする。本文には必ず「## 利用者向けの変化」の節を置く（段の `changes`、無ければ `summary`、それも無ければ題名から。配布の説明文の材料）。末尾の署名は本文に無いときだけ足す | 本文だけTool なし |
 
 使い方:
-    supervise.py run <plan.json> [--state-dir DIR] [--from <段の id>]
+    supervise.py run <plan.json> [--state-dir DIR] [--from <段の id>] [--slow K=V]...
+    supervise.py history import <progress.jsonl>... [--history F]   # 既存の段の所要を遅れの見張りの履歴へ取り込む
+    supervise.py expected <plan.json> [--history F] [--slow K=V]...  # 計画の段ごとの想定時間と根拠を出す
     supervise.py new impl --issue N --worktree DIR --tests PATH... --title T [--files PATH...] [--changes TEXT] [--prompt-file F] [--branch B] [--out F]
     supervise.py new impl ... --escape-of <PR番号|0>   # マージの後に逃げた不具合を記録する（check-trigger.py escape）
     supervise.py new check --pr N --worktree DIR [--issue N...] [--scope PATH...] [--out F]
@@ -157,13 +159,32 @@ queue の置き換え: `{queue_prs}` は前のすべての段の Pull Request（
   worker の最後の報告。run の段なら stderr の最後の行を last_output に）。長い段（work・run・drive）の
   待ちは区切って見るので、段の途中でも書く
 - `"kind": "worker"`: work の段の worker が区切りごとに追記する 1 行（プロンプトに書き方と置き場を渡す）
+- `"kind": "slow"`: 段の経過が想定を超え、一次の調査を流すたびに 1 行（下の「遅れの見張り」）
 - `"kind": "attention"`: conductor の判断が要る出来事（reason が 止まった・関門・同じ失敗の繰り返し・
-  判断の段で stop が出そう）。worker の行の語と繰り返し、段の結果からスクリプトで分ける。
+  判断の段で stop が出そう・遅れ）。worker の行の語と繰り返し、段の結果からスクリプトで分ける。
   `queue` はこの行を標準出力の `{"tool": "supervise-queue", "event": "attention", ...}` で知らせる
 
 作業ディレクトリ（`<state-dir>/work/`。起動時に作る）: work と judge の段のプロンプトに渡す。worker は
 作業ファイル（スクリプト・初期化の出力・プロンプト）をここに置く。計画ごとに別なので、並行する計画どうしで
 同じ名前のファイルを上書きし合わない
+
+遅れの見張り（run・work・drive の段。LLM は決まった手で解けないときだけ）:
+- 想定: 段の `"expected": <秒>` があればそれ。無ければ同じ段（フェーズ, 段の id）の直近 `window` 件の所要の
+  中央値 × `factor`（下限 `floor`）、履歴が `min_samples` 件に満たなければ `default`。所要の履歴は成功と関門の
+  段だけを `<git の共通ディレクトリ>/ndf/step-history.jsonl`（git でなければ `<state-dir>/`）へ積む
+- 経過（利用上限の待ちを除く）が想定を超えると、段の `"probe"` で一次の調査を流す。`"output"`（run・drive の
+  既定。stderr が伸びたか）/ `"worker"`（work の既定。worker の行かコミットが足されたか）/
+  `{"cmd": "<コマンド>"}`（シェルを通さずに打ち、最後の行の JSON の `metrics.action` を読む。`{pr}` `{base}`
+  `{branch}` `{state_dir}` を置き換える）/ `false`（調べずに判定へ）
+- `action` が `wait` か `remedied` なら、`max_waits` 回まで想定の秒だけ待ち直す。`retry` / `fix` / `stop` はそのまま
+  打つ。`judge`（読めない調査も）と待ち直しの上限では、Tool なしの claude -p が retry / fix / stop / wait を選ぶ
+  （段ごとに `max_llm` 回まで。超えたら見張りを止めて段の timeout まで待つ。答えが読めなければ wait）
+- retry は同じ段を打ち直す（`max_retry` を超えると stop）。fix は `on_fail` へ、stop は `結果: 止まった`・
+  `理由: 遅れ: <理由>`。打ち切った段は子のプロセスグループごと止め、終了コードは 125
+- 設定は `--slow K=V` → 計画の `"slow"` → `.ndf/supervise.json` の `"slow"` → 既定の順に先に効く。鍵は
+  `enabled`（true）・`window`（10）・`min_samples`（3）・`factor`（3.0）・`floor`（300）・`default`（900）・
+  `max_waits`（3）・`max_llm`（2）・`max_retry`（1）・`probe_timeout`（120）・`judge_timeout`（300）・`history`。
+  知らない鍵・形の違う値は段を始める前に `結果: 止まった`・`理由: slow の設定が読めない（<鍵>）`
 
 最後に `## フェーズの報告` を標準出力と `<state-dir>/report.md` へ書く。conductor はこの
 スクリプトを背景の Bash で起動し、終わりの通知で報告を読む。
