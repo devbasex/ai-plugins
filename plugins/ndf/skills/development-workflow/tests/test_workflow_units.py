@@ -116,7 +116,7 @@ def test_the_report_requires_a_review_for_light(repo, tmp_path) -> None:
     assert state_file(state_dir, 31).is_file()
 
 
-# --- R2-001: 証跡の検査が見る工程の並び（現状固定） -------------------------
+# --- R2-001: 証跡のチェックが見る工程の並び（現状固定） -------------------------
 
 # `wf_stages_before_pr` が返す工程の並びを、そのまま正解として記録する。
 # 証跡の報告（`_wf_missing_before_pr`）はこの並びを終点に使う。`WF_PR_EXEMPT_STAGE`

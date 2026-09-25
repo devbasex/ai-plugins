@@ -1,10 +1,10 @@
-"""リンク検査の見出しへの参照の照合を固定する（#445）。
+"""リンクチェックの見出しへの参照の照合を固定する（#445）。
 
 **名前の規則は GitHub の生成規則に合わせる。** 小文字にし、文字・数字・結合文字・空白・
 `-`・`_` 以外を落とし、空白を `-` にし、重複へ `-1` から連番を付ける。規則と決定の理由は
 `docs/specifications/doc-consistency-checks.md` にある。
 
-検査は一時ディレクトリへ作った木に対して別プロセスで実行する。スクリプト名が `-` を含み、
+チェックは一時ディレクトリへ作った木に対して別プロセスで実行する。スクリプト名が `-` を含み、
 そのままでは import できないためである。
 """
 from __future__ import annotations
@@ -212,7 +212,7 @@ def test_heading_inside_quote_or_fence_is_not_heading(tmp_path: Path) -> None:
 
 
 def test_document_outside_scan_scope_is_not_checked_for_headings(tmp_path: Path) -> None:
-    """決定 2: 検査の対象外の文書（`notes/`）は、見出しを読みに行かない。"""
+    """決定 2: チェックの対象外の文書（`notes/`）は、見出しを読みに行かない。"""
     write(tmp_path, "notes/plan.md", "# 在る見出し\n")
     write(tmp_path, "docs/a.md", "[飛ぶ](../notes/plan.md#無い見出し)\n")
     result = run(tmp_path)

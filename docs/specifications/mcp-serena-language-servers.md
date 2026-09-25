@@ -11,13 +11,13 @@
 | Codex | Serena（`get_diagnostics_for_file`） | Serena |
 
 **言語は導入先のリポジトリごとに検出して設定する。** このリポジトリ専用の設定にしない。
-**動いていないことを検査で見えるようにする。** 言語サーバが無くても何も表示されない状態を
+**動いていないことをチェックで見えるようにする。** 言語サーバが無くても何も表示されない状態を
 残さない。
 
 例: このリポジトリで `/mcp-serena:language-servers` を実行すると、スクリプトが追跡対象の
 拡張子を数えて `python`（321 ファイル・81%）と `bash`（71・18%）を採り、`.js` の 4 ファイル
 （1%）はしきい値に届かないので外す。`.serena/project.yml` を書き、1 言語ずつ起動を検証し、
-Claude Code 向けには `pyright-lsp` の導入と `pyright-langserver` の有無を検査して足りないものを
+Claude Code 向けには `pyright-lsp` の導入と `pyright-langserver` の有無をチェックして足りないものを
 知らせる。以後のセッションで、モデルが採った言語のファイルを `Read` で 3 回続けて開こうと
 すると hook が 1 度だけ拒み、シンボル単位の手順を示す。
 
@@ -42,14 +42,14 @@ Claude Code 向けには `pyright-lsp` の導入と `pyright-langserver` の有�
 
 | 業務用語 | 識別子 | 何を指すか |
 | --- | --- | --- |
-| 対応表 | `scripts/languages.json` | 言語ごとに拡張子・Serena の言語識別子・公式 LSP プラグイン・本体のコマンド・追加の検査を持つ。唯一の正本 |
+| 対応表 | `scripts/languages.json` | 言語ごとに拡張子・Serena の言語識別子・公式 LSP プラグイン・本体のコマンド・追加のチェックを持つ。唯一の正本 |
 | 検出 | `detect` | `git ls-files` の拡張子を数え、しきい値を超えた言語を選ぶこと |
 | 採った言語 | `language_servers` | 検出で選ばれ、起動の検証を通った言語。`project.local.yml` にこのキーがあればそちらが上書きする |
 | 起動の検証 | `serena project health-check` | 1 言語だけを設定した状態で走らせ、終了コード 0 を見ること |
 | 外した言語 | `mcp_serena_excluded` | 検証に失敗した言語と、`--only` で名指しされなかった言語。`<言語> <理由>` の要素 |
 | 設定済みの目印 | `mcp_serena_excluded` のキーの有無 | このキーがあることが「`configure` で設定した」目印。空の配列でも目印になる |
-| 導入の検査 | `check` | 公式 LSP プラグイン・本体・追加の検査（TypeScript の版・shellcheck）が揃っているかを見ること |
-| 追加の検査 | `extra_checks` | 対応表が名前で指し、`check.py` の `EXTRA_CHECKS` が関数を持つ検査 |
+| 導入のチェック | `check` | 公式 LSP プラグイン・本体・追加のチェック（TypeScript の版・shellcheck）が揃っているかを見ること |
+| 追加のチェック | `extra_checks` | 対応表が名前で指し、`check.py` の `EXTRA_CHECKS` が関数を持つチェック |
 | 誘導 | PreToolUse の `deny` | grep やコードファイルの読み込みが続いたとき 1 度だけ拒み、シンボル単位の手順を示すこと |
 | 数の記録 | `<session_id>.json` | 誘導のためにセッションごとに数える grep・読み込み・混在の回数と時刻 |
 
@@ -77,7 +77,7 @@ Claude Code 向けには `pyright-lsp` の導入と `pyright-langserver` の有�
 | 5 | プラグイン名とサーバ名は変えない | 遅延読み込みで一覧に載るのは名前だけで、数百文字しか変わらない。変えると利用者の許可の設定と定義中のツール名がすべて変わり、`serena` は公式と衝突する |
 | 6 | 誘導は公式の `serena-hooks` を使わず標準ライブラリで持つ。閾値・待ち・有効期間・数を戻さない部分文字列は公式と同じにする | 公式は固定の 60 拡張子（`.json` などを含む）で判定し、設定していないリポジトリでも拒む |
 | 7 | 起動の検証は `project.yml` を 1 言語ずつ書き換えて `serena project health-check` を走らせる | Serena は 1 言語の失敗で全体の初期化を止める。内部の API は版で壊れやすく、一時ディレクトリではファイルの根が変わる |
-| 8 | `project.yml` は行単位で書き換え、YAML のライブラリを使わない。知らない形では書かずに止める | hook と検査を標準ライブラリだけで動かし、SessionStart を 1 秒に収める。注釈と他のキーを 1 バイトも変えない |
+| 8 | `project.yml` は行単位で書き換え、YAML のライブラリを使わない。知らない形では書かずに止める | hook とチェックを標準ライブラリだけで動かし、SessionStart を 1 秒に収める。注釈と他のキーを 1 バイトも変えない |
 | 9 | SessionStart は、設定済みでは食い違いと欠けがあるときだけ、未設定では未設定だけを知らせ、何も導入しない。外した言語は `project.yml` の `mcp_serena_excluded` に残す | 揃っているときの通知は読み飛ばされる。導入はネットワークへ出て手元に書き込む。外した言語を残さないと毎回食い違いとして出る。注釈に置くと Serena の書き直しで消える（知らないキーは残る） |
 | 10 | エージェント定義は Serena の行だけを直す | 構成の整理は #877 #869 が同じファイルを変える。古いツール名（`mcp__plugin_ndf_serena__*` など）は待つ間もモデルを誤らせる |
 | 11 | `initial_instructions`・Claude Code の `LSP` ツール・`get_diagnostics_for_file` は一覧に残す | サーバの説明が `initial_instructions` を指す。どれも遅延読み込みで文脈はほとんど増えない。`excluded_tools` はランタイムで共有され Codex からも消える |
@@ -95,7 +95,7 @@ Claude Code 向けには `pyright-lsp` の導入と `pyright-langserver` の有�
 | 手順 | 担うもの |
 | --- | --- |
 | 拡張子を数える・しきい値で選ぶ・`project.yml` を書く・1 言語ずつ検証する・失敗を外す | スクリプト（`configure`） |
-| 導入の検査（プラグイン・本体・TypeScript の版・shellcheck） | スクリプト（`check`） |
+| 導入のチェック（プラグイン・本体・TypeScript の版・shellcheck） | スクリプト（`check`） |
 | 食い違いの通知・誘導・自動許可 | スクリプト（hook） |
 | 導入のコマンドを打つか | モデル（利用者に確認。ネットワークへ出て手元に書き込む） |
 | `.serena/project.yml` を追跡するか | モデル（利用者に確認） |
@@ -114,8 +114,8 @@ Claude Code 向けには `pyright-lsp` の導入と `pyright-langserver` の有�
 | セッションの開始でネットワークへ出る導入を走らせない。スクリプトは導入のコマンドを出力に載せるだけで打たない | — |
 | hook はツールの呼び出しを止めない（誘導の `deny` を除く） | 例外・読めない入力・`project.yml` の読めない形では何も出さずに終了コード 0 |
 | 設定済みの目印の無いリポジトリでは PreToolUse は数えない | Serena が `--project-from-cwd` で自動で作った `project.yml` も目印が無いので数えない |
-| 言語を足すときに変えるのは対応表だけで、hook とスクリプトは言語の名前で分岐しない | 既にある種類で足りない追加の検査だけは `check.py` の `EXTRA_CHECKS` に関数を 1 つ足す。知らない名前は対応表の破損として `check` が終了コード 2 |
-| hook と検査は Python 3 の標準ライブラリだけで動き、`uvx` を呼ばない | `uvx` を要するのは Serena の起動と `configure` の検証だけ |
+| 言語を足すときに変えるのは対応表だけで、hook とスクリプトは言語の名前で分岐しない | 既にある種類で足りない追加のチェックだけは `check.py` の `EXTRA_CHECKS` に関数を 1 つ足す。知らない名前は対応表の破損として `check` が終了コード 2 |
+| hook とチェックは Python 3 の標準ライブラリだけで動き、`uvx` を呼ばない | `uvx` を要するのは Serena の起動と `configure` の検証だけ |
 
 ## 構成要素
 
@@ -130,10 +130,10 @@ Claude Code 向けには `pyright-lsp` の導入と `pyright-langserver` の有�
 | `scripts/serena_lsp/detect.py` | `git ls-files -z` を数え（`count`）、しきい値で選ぶ（`choose`）。`git` が使えなければ `GitUnavailable` |
 | `scripts/serena_lsp/project_yml.py` | 3 キーを行単位で読み書きする（`read_list` / `write_list`）。導入先の状態を読む（`load_state`） |
 | `scripts/serena_lsp/verify.py` | `configure`。検出・作成・1 言語ずつの検証・確定の値の書き込み・`.gitignore` |
-| `scripts/serena_lsp/check.py` | 導入の検査（`run` / `missing_items`）と追加の検査の関数（`EXTRA_CHECKS`） |
+| `scripts/serena_lsp/check.py` | 導入のチェック（`run` / `missing_items`）と追加のチェックの関数（`EXTRA_CHECKS`） |
 | `scripts/serena_lsp/hooks.py` | SessionStart の通知（`session_start`）と PreToolUse の誘導・自動許可（`pre_tool_use`） |
 | `hooks/hooks.json` / `hooks/codex.json` | Claude Code（と Kiro の installer）/ Codex の hook 定義 |
-| `skills/language-servers/SKILL.md` | 導入と検査の Skill。呼び出しと 4 つの判断だけを持つ |
+| `skills/language-servers/SKILL.md` | 導入とチェックの Skill。呼び出しと 4 つの判断だけを持つ |
 | `dev.kiro/install.sh` | 生成物（`scripts/build-runtime-plugins.sh` が作る） |
 | `scripts/validate-runtime-plugins.sh`（リポジトリの根） | Codex の `mcpServers` が実在する `./.mcp.json` か `./.codex.mcp.json` を指すことを見る |
 
@@ -248,7 +248,7 @@ sequenceDiagram
   C->>G: ls-files -z
   G-->>C: パスの一覧
   C->>C: 対応表で数える・しきい値で選ぶ・--only で置き換える
-  C->>C: 終了コード 3 の検査（書き換えの前）
+  C->>C: 終了コード 3 のチェック（書き換えの前）
   alt project.yml が無い
     C->>S: project create --ls L1 --ls L2 --name <ディレクトリ名> ROOT
   end
@@ -263,7 +263,7 @@ sequenceDiagram
   C-->>M: JSON（missing）・終了コード
 ```
 
-- 終了コード 3 の検査は書き換えの `try` / `finally` に入る前に済ませ、何も書かずに返す
+- 終了コード 3 のチェックは書き換えの `try` / `finally` に入る前に済ませ、何も書かずに返す
 - `ignored_paths` には `.serena/**` を常に、`.worktrees/**` は `.worktrees/` があるときだけ、無ければ
   足す。既存の要素は消さない。**`.serena/**` は検証の前に足す**（`.serena/.gitignore` の無い
   リポジトリで、Serena が `.serena/language_servers/` の `.d.ts` を解析対象に選び TypeScript の
@@ -385,9 +385,9 @@ SKILL.md が正である。`configure` は言語の数 × 120 秒かかり得る
 | `threshold` | `min_files`（数）と `min_share`（数） | 必須 |
 | `serena` | 文字列。Serena の `Language` の値 | 必須 |
 | `extensions` | 小文字の拡張子の配列。言語をまたいで重ならない | 必須 |
-| `claude_plugin` | 公式 LSP プラグインの ID | `null` なら Claude Code の LSP を検査しない（Bash は公式が無い） |
-| `binaries` | `command` と `install` の組の配列 | 空なら本体を検査しない |
-| `extra_checks` | 追加の検査の名前の配列 | 空でよい。知らない名前は `check` が終了コード 2 |
+| `claude_plugin` | 公式 LSP プラグインの ID | `null` なら Claude Code の LSP をチェックしない（Bash は公式が無い） |
+| `binaries` | `command` と `install` の組の配列 | 空なら本体をチェックしない |
+| `extra_checks` | 追加のチェックの名前の配列 | 空でよい。知らない名前は `check` が終了コード 2 |
 
 載せている言語は 13 である: `python`（`pyright-lsp`）・`typescript`（`typescript-lsp`）・`php`
 （`php-lsp`）・`bash`・`go`・`ruby`・`rust`・`java`・`kotlin`・`csharp`・`swift`・`lua`・`cpp`
@@ -436,7 +436,7 @@ uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest 
 | --- | --- |
 | 2 つの起動定義が版を固定し、文脈だけが違い、`git+` を含まないこと。Codex の定義を指すこと。どの `plugin.json` と `marketplace.json` も `lspServers` を持たないこと | `plugins/mcp/mcp-serena/tests/test_serena_lsp_launch.py` / `scripts/tests/test_validate_mcp_codex_servers.py` |
 | しきい値の境界（9/10 ファイル・4.9%/5.0%）と、分母に対応表の外の拡張子を数えないこと・`skipped.reason` | 同 `tests/test_serena_lsp_detect.py` |
-| 対応表の形の検証と、既にある種類の検査を持つ架空の言語がコードを変えずに `detect` と `check` に載ること | 同 `tests/test_serena_lsp_table.py` / `test_serena_lsp_detect.py` / `test_serena_lsp_check.py` |
+| 対応表の形の検証と、既にある種類のチェックを持つ架空の言語がコードを変えずに `detect` と `check` に載ること | 同 `tests/test_serena_lsp_table.py` / `test_serena_lsp_detect.py` / `test_serena_lsp_check.py` |
 | 3 キー以外が 1 バイトも変わらないこと、読めない形で止まること | 同 `tests/test_serena_lsp_project_yml.py` |
 | `configure` が無いときに作り、1 言語ずつ検証し、失敗と `not_selected` を外した言語に書き、例外・SIGTERM・全失敗でも最後の値を書くこと。`project create` と `health-check` が `SERENA_HOME=.serena`・cwd が根で動くこと | 同 `tests/test_serena_lsp_configure.py` |
 | `--dry-run` が何も書かないこと、`--gitignore` / `--serena-gitignore` を渡したときだけ書くこと、終了コード 2・3 | 同 `test_serena_lsp_configure.py` |
@@ -446,7 +446,7 @@ uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest 
 | 1 万ファイルのリポジトリで SessionStart 1 秒以内・PreToolUse 0.2 秒以内 | 同 `tests/test_serena_lsp_hook_speed.py` |
 | Kiro の installer が生成した `agentSpawn` のコマンドが `CLAUDE_PLUGIN_ROOT` の無い環境で何も出さないこと | 同 `tests/test_serena_lsp_kiro.py` |
 | このリポジトリの `project.yml` が検出と食い違わないこと | 同 `tests/test_serena_lsp_this_repo.py` |
-| 配布物の検査 | `claude plugin validate .`（終了コード 0）/ `bash scripts/build-runtime-plugins.sh --check` / `bash plugins/mcp/mcp-serena/dev.kiro/install.sh --dry-run` |
+| 配布物のチェック | `claude plugin validate .`（終了コード 0）/ `bash scripts/build-runtime-plugins.sh --check` / `bash plugins/mcp/mcp-serena/dev.kiro/install.sh --dry-run` |
 
 実機でだけ確かめられる観点（2026-09-24 に `env -i` と一時の HOME で隔離した claude / codex で確認済み）:
 

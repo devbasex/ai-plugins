@@ -172,7 +172,7 @@ def test_without_carried_over_threads_the_verdict_is_unchanged(tmp_dir, state_mo
 
 
 def test_judge_records_the_verdict_on_the_round(tmp_dir, state_mod):
-    """次のラウンドの検査が読めるよう、判定の結果をラウンドへ残す。"""
+    """次のラウンドのチェックが読めるよう、判定の結果をラウンドへ残す。"""
     _write(tmp_dir, _state(carried_over={
         "count": 1, "thread_ids": ["PRRT_a"], "fixed_in_round": None,
     }))

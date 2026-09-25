@@ -68,7 +68,7 @@ def assert_no_bare_cd_error(proc: subprocess.CompletedProcess) -> None:
 def test_missing_prerequisite_stops_with_path_error(
     tmp_path: Path, missing_path: Path, extra_args: tuple[str, ...]
 ) -> None:
-    # 現状固定: 必須パスの種類や検査位置によらず、同じ形式のエラー 1 行と
+    # 現状固定: 必須パスの種類やチェック位置によらず、同じ形式のエラー 1 行と
     # 終了コード 1 で停止する。
     plugin_dir = tmp_path / "ndf"
     shutil.copytree(INSTALLER.parents[1], plugin_dir)

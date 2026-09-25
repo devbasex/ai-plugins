@@ -105,7 +105,7 @@ def test_a_parametrised_value_is_changed(verify) -> None:
 # ---------- 検証の経路へ組み込む ----------
 
 def test_a_changed_expectation_fails_the_intake(verify) -> None:
-    """期待値が変わった差分は、取り込みの検査で落ちること。"""
+    """期待値が変わった差分は、取り込みのチェックで落ちること。"""
     problem = verify.verify_test_changes(
         {"tests/test_a.py": (["    assert f(1) == 3\n"], ["    assert f(1) == 4\n"])}
     )
@@ -145,7 +145,7 @@ def test_the_facts_carry_the_test_diff(gitfacts) -> None:
 
 
 def test_the_implement_intake_rejects_a_changed_expectation(cmd_implement, tmp_path) -> None:
-    """実装の取り込みの検査が、期待値の変更を落とすこと。
+    """実装の取り込みのチェックが、期待値の変更を落とすこと。
 
     **新設した関数を呼ばなければ、手順書だけが「機械が見る」と書いた状態になる。**
     """
@@ -165,7 +165,7 @@ def test_the_implement_intake_rejects_a_changed_expectation(cmd_implement, tmp_p
 
 
 def test_the_fix_intake_rejects_a_changed_expectation(cmd_converge) -> None:
-    """修正の取り込みの検査も、同じ基準で期待値の変更を落とすこと。"""
+    """修正の取り込みのチェックも、同じ基準で期待値の変更を落とすこと。"""
     facts = [{
         "sha": "b" * 40, "exists": True, "diff_lines": 4, "files": ["tests/test_a.py"],
         "trailers": {"Item-Id": "I-001", "Impl-Runtime": "codex", "Impl-Model": "gpt-5.5"},

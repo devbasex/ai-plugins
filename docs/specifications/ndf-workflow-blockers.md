@@ -12,7 +12,7 @@
 （`RUNTIMES` / `RUNTIMES_CSV`）は `refactor.py init` と `start-round` の両方が返す。
 
 **骨組みが参照する変数の出所は機械で見る。** `scripts/check-skill-shell-vars.py` が、
-手順書の bash が参照する変数を、その行より前のコマンドが返しているかで検査する。
+手順書の bash が参照する変数を、その行より前のコマンドが返しているかでチェックする。
 
 **`--scope` の関門は、名前で当たらないときだけ実体を見る。** 走査は配下 1 階層に限り、
 返すのは**当たった置き場所そのもの**である。
@@ -47,7 +47,7 @@
 **常に成り立つ条件**: 骨組みが繰り返しの中で参照する変数は、その繰り返しの中で実行する
 コマンドが返す。繰り返しの外の 1 回だけが返す形にしない。
 
-### 骨組みの変数の検査
+### 骨組みの変数のチェック
 
 `scripts/check-skill-shell-vars.py` は、`SKILL.md` の bash のコードブロックから参照する
 変数を集め、次の 3 つを出所として突き合わせる。
@@ -152,7 +152,7 @@ username=FIRST          # 後から足した側は呼ばれない
 | --- | --- |
 | `start-round` が母集合を返し、既存の値を変えないこと | `<crf>/tests/test_start_round_emits_runtimes.py` |
 | 骨組みの変数の出所が突き合わせられること | `scripts/tests/test_skill_shell_vars.py` |
-| 現行の骨組みが検査を通ること | 同上（実物を読む 2 件） |
+| 現行の骨組みがチェックを通ること | 同上（実物を読む 2 件） |
 | 実体を持つ親が関門を通り、返す値が配下の側になること | `<crf>/tests/test_scope_gate.py` |
 | 名前で渡す経路とみなさない経路が変わらないこと | 同上 |
 | push が退避して 1 度だけ再試行すること | `<crf>/tests/test_push_credential_fallback.py` |

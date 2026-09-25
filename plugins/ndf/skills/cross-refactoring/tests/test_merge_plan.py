@@ -1,4 +1,4 @@
-"""計画の取り込み（#933 の AC7 AC8 AC9 AC10b AC22 AC23）。
+"""改修計画の取り込み（#933 の AC7 AC8 AC9 AC10b AC22 AC23）。
 
 等級と「同じ変更か」は、Jev が使えるときは Jev の答え（確信度が下限以上）、それ以外は
 実装担当の答えで決まる。数え上げ・見積り・飛ばして詰める・締め切りはスクリプトが行う。
@@ -198,10 +198,10 @@ def test_the_plan_is_not_rebuilt_on_resume(planned, cmd_plan):
     assert read_state(path)["plan"] == first
 
 
-# ---------- 実行時の値を計画の終わりまでに書き出す（決定 24・25） ----------
+# ---------- 実行時の値を改修計画の終わりまでに書き出す（決定 24・25） ----------
 
 def test_the_plan_writes_every_runtime_value_to_the_state(planned, cmd_plan):
-    """計画の後の手順は、状態ファイルの値と時計の比較だけで進む。値はすべて計画で出そろう。"""
+    """改修計画の後の手順は、状態ファイルの値と時計の比較だけで進む。値はすべて改修計画で出そろう。"""
     a, b = _candidate(1, "f"), _candidate(2, "g")
     path = planned([a, b], [_answer(a, tests=["tests/test_new.py"], test_targets=["tests/test_new.py"]),
                             _answer(b)])
@@ -216,7 +216,7 @@ def test_the_plan_writes_every_runtime_value_to_the_state(planned, cmd_plan):
 
 
 def test_d5_is_decided_by_jev_at_the_plan(planned, cmd_plan, monkeypatch):
-    """決定 25: 公開の入出力が変わりうるか（D5）は計画の時点で Jev に問い、答えを項目に残す。"""
+    """決定 25: 公開の入出力が変わりうるか（D5）は改修計画の時点で Jev に問い、答えを項目に残す。"""
     a, b = _candidate(1, "f"), _candidate(2, "g")
     path = _jev_state(planned, [a, b], [_answer(a, risk=True), _answer(b)])
     monkeypatch.setattr(cmd_plan.jev, "ask_score", lambda *a, **k: None)

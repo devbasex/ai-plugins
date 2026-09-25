@@ -1,6 +1,6 @@
 """cross-refactoring の状態の保存と実行の要約（#662 の AC9 / AC14 / AC16 / AC23、#933）。
 
-フェーズの所要は状態の `phases`（進行側の時計）から、CLI の起動回数と合計秒は監視の
+手順の所要は状態の `phases`（進行側の時計）から、CLI の起動回数と合計秒は監視の
 記録から組み立てる（#933 の決定 8）。記録は手で書き、`refactor_lib.measure` と、状態の
 保存の差し込み口を通した要約を読む。
 """
@@ -84,12 +84,12 @@ def test_start_phase_writes_the_summary(refactor, tmp_path, env_tmp_dir, metrics
 # ---------- AC14 ----------
 
 def test_phases_counts_launches_and_seconds_per_phase(rf_measure):
-    """フェーズの所要は状態から、起動回数と CLI の秒は監視の記録から足す。"""
+    """手順の所要は状態から、起動回数と CLI の秒は監視の記録から足す。"""
     state = {"phases": {
         "propose": {"started_at": _t(0), "ended_at": _t(6), "seconds": 360.0},
         "implement": {"started_at": _t(10), "ended_at": _t(25), "seconds": 900.0},
         "verify": {"started_at": _t(25), "ended_at": _t(26), "seconds": 60.0},
-        "plan": {"started_at": _t(6)},            # 終わっていないフェーズは所要を置かない
+        "plan": {"started_at": _t(6)},            # 終わっていない手順は所要を置かない
     }}
     launches = [
         _launch("codex-propose-rf130", _t(1), _t(3), 120.0),
@@ -119,7 +119,7 @@ def test_phases_counts_launches_and_seconds_per_phase(rf_measure):
 
 
 def test_phases_without_records_or_launches_are_absent(rf_measure):
-    """測っていないフェーズを 0 で置かない。"""
+    """測っていない手順を 0 で置かない。"""
     assert rf_measure.phases({"phases": {}}, []) == {}
     assert rf_measure.phases({}, [_launch("codex-propose-rf130", _t(1), _t(3), 120.0)]) == {
         "propose": {"launches": 1, "cli_seconds": 120.0}}

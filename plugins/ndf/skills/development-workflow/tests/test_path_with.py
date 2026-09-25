@@ -14,7 +14,7 @@ import pytest
 from workflow_helpers import path_with
 
 pytestmark = pytest.mark.skipif(
-    os.geteuid() == 0, reason="root は権限の検査を受けないため、読めないディレクトリを作れない",
+    os.geteuid() == 0, reason="root は権限のチェックを受けないため、読めないディレクトリを作れない",
 )
 
 

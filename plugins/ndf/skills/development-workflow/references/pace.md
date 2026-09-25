@@ -43,7 +43,7 @@ SKILL.md の「進め方（`pace`）」の続きである。区分の表と関�
 | `fast.modes` | 文字列の配列 | 既定の 3 つ | `fast` を使ってよいモード |
 | `fast.verify` | 文字列 | `fast` を断る | 導入の確認のコマンド |
 | `areas[].name` / `common` / `paths` | 文字列 / bool / glob の配列 | name と paths は許さない | 領域。`common` が真なら共通層で、触った Pull Request は `common_weight` 点。逃げた不具合の重なりはこの単位で数える |
-| `boundary_paths` | glob の配列 | 機械の検査は無し | 越えない線に当たるファイル |
+| `boundary_paths` | glob の配列 | 機械のチェックは無し | 越えない線に当たるファイル |
 | `triggers.score` / `common_weight` / `lines` / `escapes` / `hours` | 数 | 15 / 2 / 5000 / 2 / 24 | トリガーの閾値 |
 
 glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。どの領域にも当たらないファイルは、ディレクトリの
@@ -133,7 +133,7 @@ Pull Request が分からなければ `0`（不明）を渡す。`fix/` のブ�
 mvv-gate.py check --mission <状態> --gate design|release [--material F...] [--pr N...] [--mode M] [--root DIR] [--note F]
 ```
 
-**機械の検査を LLM の判定より先に通し、1 つでも外れれば LLM を呼ばずに関門（終了コード 10）へ戻す。**
+**機械のチェックを LLM の判定より先に通し、1 つでも外れれば LLM を呼ばずに関門（終了コード 10）へ戻す。**
 
 1. MVV の承認の記録がある
 2. 今の `mvv.md` のハッシュ・状態の `mvv.sha256`・承認の記録の `sha256` が一致する

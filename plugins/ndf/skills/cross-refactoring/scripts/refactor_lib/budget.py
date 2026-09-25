@@ -3,7 +3,7 @@
 **純粋な処理だけを置く。** 今の時刻は内部で取らず、引数で受ける。時刻を内部で取ると、
 締め切りの計算がテストで再現できない。値の単位は、断りの無い限り分である。
 
-計画で見積りを収め、実装の中は項目ごとの締め切りで着手を止める。手順の監視の上限は
+改修計画で見積りを収め、実装の中は項目ごとの締め切りで着手を止める。手順の監視の上限は
 `timeline` がこの締め切りから導く（決定 23。決定 4 の「実行中の CLI を止めない」を改めた）。
 """
 from __future__ import annotations
@@ -99,10 +99,10 @@ def end_time(started_at: _dt.datetime, budget_minutes: int, reserve_total_minute
 def deadlines(selected: list[dict[str, Any]], T: _dt.datetime) -> list[dict[str, Optional[_dt.datetime]]]:
     """採用の順（1..n）に、実装とテストの追加の着手の締め切りを返す。
 
-    - 実装 i: `T − Σ_{j≥i} implement_j − Σ_{全件} verify_j`。検証は実装のフェーズの
+    - 実装 i: `T − Σ_{j≥i} implement_j − Σ_{全件} verify_j`。検証は実装の手順の
       後に全件をまとめて走らせるため、i より前の項目の検証も末尾の側に残る
     - テストの追加 i: `T − Σ_{全件}(implement_j + verify_j) − Σ_{j≥i} test_j`。
-      テストの追加は実装より前のフェーズなので、実装と検証の全件を先に差し引く。
+      テストの追加は実装より前の手順なので、実装と検証の全件を先に差し引く。
       足すテストが無い項目（test が 0）は `None`
     """
     estimates = [c.get("estimate") or {} for c in selected]

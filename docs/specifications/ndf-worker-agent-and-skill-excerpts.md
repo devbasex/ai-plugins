@@ -58,7 +58,7 @@ supervisor は設計の工程に入った時点で `bash "<絶対パス>/project
 
 | 要素 | 責務 |
 | --- | --- |
-| `plugins/ndf/scripts/projects-sync.sh` | **記録のコマンドの入口。** 引数を検査した後、`stage` / `mode` / `worktree` / `plan` ではボードの宣言の有無にかかわらず先に `progress-record.sh` を呼んで issue の本文を更新し、その後でボードを更新する。`status` はボードだけに書く |
+| `plugins/ndf/scripts/projects-sync.sh` | **記録のコマンドの入口。** 引数をチェックした後、`stage` / `mode` / `worktree` / `plan` ではボードの宣言の有無にかかわらず先に `progress-record.sh` を呼んで issue の本文を更新し、その後でボードを更新する。`status` はボードだけに書く |
 | `plugins/ndf/scripts/progress-record.sh` | issue の本文の `## 進行` の更新。工程名の位置に `-` を受けると、チェックリストを変えずに見出し行（モード・作業ツリー・計画ファイル）だけを更新する |
 | `plugins/ndf/agents/worker.md` | worker のエージェント定義（`ndf:worker`）。frontmatter の `disallowedTools: Skill, Agent` で 2 つのツールを外す |
 | `plugins/ndf/.claude-plugin/plugin.json` | `agents` 配列に `./agents/worker.md` を載せる。agy へは `plugins/ndf/dev.agy/agents`（`../agents` への symlink）で同じ定義が配られる |
@@ -93,7 +93,7 @@ flowchart TB
 - **記録のコマンドの失敗で工程を止めない。** 呼び出し側の誤り（知らないキー・工程表に無い値・
   引数の不足）だけが終了コード 2 で、それ以外はすべて 0 で終わる。`progress-record.sh` が
   失敗してもボードの更新へ進む
-- **引数の検査は何かを書く前に行う。** 値の誤りで 2 を返すときに、issue の本文だけが書かれた
+- **引数のチェックは何かを書く前に行う。** 値の誤りで 2 を返すときに、issue の本文だけが書かれた
   状態を作らない
 - **記録のコマンドは 1 回の Bash 実行に 1 件である。** 通過記録は 1 回の実行の最初の記録しか
   読まない
@@ -235,7 +235,7 @@ disallowedTools: Skill, Agent
 
 | 規約 | 内容 |
 | --- | --- |
-| 目印 | 1 行目の `<!-- ndf-excerpt: <Skill名> -->`。抜粋と本文の一致の検査（#855）が抜粋を見つける起点 |
+| 目印 | 1 行目の `<!-- ndf-excerpt: <Skill名> -->`。抜粋と本文の一致のチェック（#855）が抜粋を見つける起点 |
 | 見出し | `## 呼び出し` / `## 結果の読み方` / `## 判断の基準` の 3 つだけ、この順 |
 | 分量 | 40 行以内かつ 2,000 文字以内（目印・見出し・空行を含む） |
 | 本文から指す | `SKILL.md` に「呼ぶ側へ渡す抜粋は `references/excerpt.md`」の 1 行を置く |
@@ -255,7 +255,7 @@ disallowedTools: Skill, Agent
 1 行を長くして収められるため、文字数も縛る。種類による差は上限を分けるほど開かなかったため、
 上限は 1 つにした。
 
-**上限を超えたときは抜粋を割らない。** 割ると #855 の検査が本文と抜粋を 1 対 1 で対応づけられない。
+**上限を超えたときは抜粋を割らない。** 割ると #855 のチェックが本文と抜粋を 1 対 1 で対応づけられない。
 次の順で扱う。
 
 1. 「入れない」に当たるものを外す
@@ -291,7 +291,7 @@ worker には渡さない。
 | サブエージェント | レベル 3 | 読む量が大きく返す量が小さい読解（worker の `調査` / `集計`）、作業ツリーを書き換える修正（worker の `修正`） |
 | CLI 実行 | レベル 3（別の LLM） | 別の視点のレビュー・提案 |
 | 最小構成の `claude -p` | レベル 2（分類の判断） | 分類の判断 1 つ。#841 が入るまでは選ばず、会話の中で行う |
-| スクリプト | レベル 1 | 決まった手順（進行の記録・集計・検査の実行・待ち）、600 秒を超える待ち（背景で起動して完了通知を待つ） |
+| スクリプト | レベル 1 | 決まった手順（進行の記録・集計・チェックの実行・待ち）、600 秒を超える待ち（背景で起動して完了通知を待つ） |
 
 - **比較表は `agent-layers.md` とは別の文書に置く。** `agent-layers.md` に足すと分割の基準の
   500 行を超える。`context-window.md` に足すと、カットポイントと委譲の線と残量を持つ文書の責務が広がる
@@ -352,7 +352,7 @@ CLI の worker（#760）で Skill を塞ぐ手段は次のとおりで、今の 
 
 ## テスト観点
 
-記録のコマンドのテストは `plugins/ndf/scripts/tests/test_projects_sync_record.py`、定義の検査は
+記録のコマンドのテストは `plugins/ndf/scripts/tests/test_projects_sync_record.py`、定義のチェックは
 `plugins/ndf/scripts/tests/test_worker_agent.py` にある。`gh` は既存のテストと同じ偽物で置き換える。
 
 - ボードの宣言が無いリポジトリで `stage` を打つと、issue の本文だけが更新されること
@@ -396,7 +396,7 @@ CLI の worker（#760）で Skill を塞ぐ手段は次のとおりで、今の 
 
 - [#828](https://github.com/devbasex/ai-plugins/issues/828) / [#680](https://github.com/devbasex/ai-plugins/issues/680)（親は [#827](https://github.com/devbasex/ai-plugins/issues/827)）
 - [#845](https://github.com/devbasex/ai-plugins/issues/845) — 工程の Skill を呼び出しと判断に縮める（抜粋の中身を作る）
-- [#855](https://github.com/devbasex/ai-plugins/issues/855) — Skill の書き方の規約と検査（抜粋と本文の一致の検査を持つ）
+- [#855](https://github.com/devbasex/ai-plugins/issues/855) — Skill の書き方の規約とチェック（抜粋と本文の一致のチェックを持つ）
 - [#888](https://github.com/devbasex/ai-plugins/issues/888) / [#889](https://github.com/devbasex/ai-plugins/issues/889) — 4 ランタイムの可搬性 / 共有する外部の枠
 - [ndf-agent-layers-unattended-run.md](ndf-agent-layers-unattended-run.md) — 3 層の運転
 - [ndf-token-waits-and-context-cut.md](ndf-token-waits-and-context-cut.md) — 待つ間の問い合わせと会話のカットポイント（同じ #827 の子）

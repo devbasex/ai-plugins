@@ -72,7 +72,7 @@ def failing_at(work: str, sha: str, words: list[str], nodes: list[str], timeout:
 
 
 def baseline_head(state: dict[str, Any]) -> Optional[str]:
-    """着手前の HEAD。`init` が残した SHA、無ければ（旧い状態ファイル）計画の起点。"""
+    """着手前の HEAD。`init` が残した SHA、無ければ（旧い状態ファイル）改修計画の起点。"""
     return ((state.get("baseline_test") or {}).get("head")
             or (state.get("plan") or {}).get("base_sha") or None)
 

@@ -115,7 +115,7 @@ def resolve_cgroup_dir(given: Optional[str], *, root: Optional[Path] = None,
     `CFTYPE_NOT_ON_ROOT` で置くため、cgroup v2 の根には `memory.events` が無い。
     あるということは、その位置がすでに根ではない＝自分の cgroup である。
 
-    `root` と `proc_cgroup` は検査のための差し替え口で、既定は上の 2 つの定数である。
+    `root` と `proc_cgroup` はチェックのための差し替え口で、既定は上の 2 つの定数である。
     """
     if given is not None:
         return Path(given)

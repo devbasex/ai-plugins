@@ -152,7 +152,7 @@ def test_a_failed_ci_check_does_not_pass(cmd_gate, tmp_path, env_tmp_dir, spy):
 
 @pytest.mark.parametrize("payload", [
     "",                                        # 照会そのものができない
-    '{"total_count": 0, "check_runs": []}',    # 検査が 1 件も無い
+    '{"total_count": 0, "check_runs": []}',    # チェックが 1 件も無い
     "not json",                                # 応答を解釈できない
 ])
 def test_no_result_does_not_pass(cmd_gate, tmp_path, env_tmp_dir, spy, payload):
@@ -179,7 +179,7 @@ def test_an_unfinished_ci_check_does_not_pass(cmd_gate, tmp_path, env_tmp_dir, s
 def test_a_named_check_that_is_missing_does_not_pass(
     refactor, cmd_gate, tmp_path, env_tmp_dir, spy
 ):
-    """名前が一致しない検査の成功で通さない。"""
+    """名前が一致しないチェックの成功で通さない。"""
     state_path = _state(tmp_path, workflow_step=True, ci_check="tests")
     env_tmp_dir(state_path)
     spy["gh_out"] = _check_runs(_run("lint"))

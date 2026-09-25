@@ -462,26 +462,26 @@ def _fetch_pr_metadata(pr: int, repo: str | None = None) -> PrMetadata | None:
 
 
 # 継続的統合の照会は `commits/{sha}/check-runs` の 1 回だけにする。
-# **併記された状態（`commits/{sha}/status`）は使わない。** GitHub Actions は検査ジョブを
+# **併記された状態（`commits/{sha}/status`）は使わない。** GitHub Actions はチェックジョブを
 # 記録し commit の状態を記録しないため、9 件すべてが成功した commit でも
 # `state: "pending"` / `total_count: 0` を返す（実測）。保留として読むと、承認された
 # ラウンドが収束しなくなる。
 
-# 失敗した検査ジョブの名前の振り分け。**一覧に無い名前は code-related へ倒す。**
+# 失敗したチェックジョブの名前の振り分け。**一覧に無い名前は code-related へ倒す。**
 CI_CODE_PATTERNS = ("pint", "larastan", "phpstan", "test", "lint", "type",
                     "build", "ruff", "eslint", "tsc", "mypy")
 CI_META_PATTERNS = ("check_pr_requirements", "assignees", "reviewers", "labels", "meta")
-# メタ検査の名前は**語として**一致したときだけ meta-only にする。部分一致で拾うと
-# `metabase tests` や `metadata lint` のようなコード検査まで meta-only になり、失敗した
+# メタチェックの名前は**語として**一致したときだけ meta-only にする。部分一致で拾うと
+# `metabase tests` や `metadata lint` のようなコードチェックまで meta-only になり、失敗した
 # まま収束する。前後が英数字でないことを求めるため、区切り（空白・`_`・`-`・`/`）で
 # 挟まれた語だけが一致する。**一覧に無い名前を code-related へ倒す既定は変わらない。**
 _CI_META_RE = re.compile(
     "(?<![0-9a-z])(?:" + "|".join(re.escape(p) for p in CI_META_PATTERNS) + ")(?![0-9a-z])")
-# 完了した検査ジョブのうち、失敗として数える結論。`cancelled` / `skipped` / `neutral`
+# 完了したチェックジョブのうち、失敗として数える結論。`cancelled` / `skipped` / `neutral`
 # は失敗にしない。
 CI_FAILED_CONCLUSIONS = ("failure", "timed_out", "action_required", "startup_failure")
 
-# 検査ジョブの一覧は 1 ページ 100 件（REST の上限）で読む。**既定の 30 件のままにしない。**
+# チェックジョブの一覧は 1 ページ 100 件（REST の上限）で読む。**既定の 30 件のままにしない。**
 # 31 件目以降に code-related の失敗があるリポジトリでは、失敗を見ないまま収束する。
 CHECK_RUNS_PER_PAGE = 100
 # 読むページ数の上限。100 件で収まるリポジトリは 1 回のままである（このリポジトリは 9 件）。
@@ -490,7 +490,7 @@ CHECK_RUNS_MAX_PAGES = 10
 
 
 class CiClassification(NamedTuple):
-    """検査ジョブを、修正の要る失敗・コードと無関係な失敗・未完了へ分けた結果。"""
+    """チェックジョブを、修正の要る失敗・コードと無関係な失敗・未完了へ分けた結果。"""
 
     code_failed: list[str]
     meta_failed: list[str]
@@ -498,9 +498,9 @@ class CiClassification(NamedTuple):
 
 
 def _classify_ci(runs: list[dict[str, Any]]) -> CiClassification:
-    """検査ジョブを振り分ける。`cmd_judge` と `cmd_merge_fix` が同じ実装を呼ぶ。
+    """チェックジョブを振り分ける。`cmd_judge` と `cmd_merge_fix` が同じ実装を呼ぶ。
 
-    **`status` が `completed` 以外の検査ジョブは失敗にしない。** 完了を待たずに
+    **`status` が `completed` 以外のチェックジョブは失敗にしない。** 完了を待たずに
     未完了として別に返し、呼び出し側が「未完了のまま収束した」ことを残す。
     """
     code_failed: list[str] = []
@@ -534,7 +534,7 @@ def _classify_failed_names(names: list[str]) -> CiClassification:
 
 
 def _fetch_check_runs(repo: str, sha: str) -> list[dict[str, Any]] | None:
-    """head の commit に対する検査ジョブの一覧を返す。照会できなければ `None`。
+    """head の commit に対するチェックジョブの一覧を返す。照会できなければ `None`。
 
     **「照会できなかった」と「すべて成功」を区別する。** `HTTP 422`（GitHub 側に
     無い commit）も `total_count` が 0 のリポジトリも、失敗が無いことの根拠に
@@ -545,8 +545,8 @@ def _fetch_check_runs(repo: str, sha: str) -> list[dict[str, Any]] | None:
     `_classify_ci` へ渡すと、後ろのページにある失敗が無いものとして扱われる。
     100 件で収まるリポジトリは 1 回で終わり、呼び出し回数は変わらない。
 
-    **同名の検査ジョブは名前ごとの最新の実行へ畳む**（#632）。再実行で `failure` →
-    `success` になった検査を失敗として数えない。読み方と畳み方は共通層の `gh_parts`
+    **同名のチェックジョブは名前ごとの最新の実行へ畳む**（#632）。再実行で `failure` →
+    `success` になったチェックを失敗として数えない。読み方と畳み方は共通層の `gh_parts`
     （`pr-info --with checks` と同じ実装）が持ち、ここは REST の呼び出しだけを渡す。
     """
     runs = gh_parts.fetch_check_runs(
@@ -1984,7 +1984,7 @@ def _init_new_state(
         )
 
     def _prepare_initial_assignment(args: argparse.Namespace) -> _InitialAssignment:
-        """担当ホストを確定し、起動対象の認証を検査する。"""
+        """担当ホストを確定し、起動対象の認証をチェックする。"""
         # **ホストを先に確定する。** 状態ファイルの `host` として残り、出力にも出る。
         # 推定できないときに既定を置かない（間違ったまま一周してしまう）。
         try:
@@ -2145,7 +2145,7 @@ def _round_reviewers(st: dict[str, Any], round_no: int) -> list[str]:
 
 # ---------- 参加者の引数と使える者の解決（#727） ----------
 #
-# 名前の検査は 2 段に分かれる。綴り（4 つの名前か `none`）は argparse の型が弾き
+# 名前のチェックは 2 段に分かれる。綴り（4 つの名前か `none`）は argparse の型が弾き
 # （終了コード 2）、母集合との関係は共通層の `resolve_participants` が弾く（終了コード 1）。
 
 NONE_WORD = "none"
@@ -2360,7 +2360,7 @@ def _verify_resolved_threads(st: dict[str, Any], prev: dict[str, Any],
     if threads is None:
         info(
             f"⚠ round {round_no} で Resolve したと申告されたスレッドの状態を確認できません"
-            " — 検査を飛ばして続行します"
+            " — チェックを飛ばして続行します"
         )
         return
     open_ids = {t["id"] for t in threads}
@@ -2384,13 +2384,13 @@ def _guard_previous_round(st: dict[str, Any], prev: dict[str, Any]) -> None:
     1. 前のラウンドが修正必須の判定なのに、修正の記録が無い
     2. 前のラウンドで Resolve したと申告されたスレッドが、GitHub 側で未解決のまま
 
-    未解決の指摘を取得できないときは検査を行わず、確認できなかったことを残して進む。
+    未解決の指摘を取得できないときはチェックを行わず、確認できなかったことを残して進む。
     取得の失敗で止めると、GitHub 側の一時的な不調でループが進まなくなる。
 
     スレッドの状態は、申告が行われた Pull Request（`prev["pr"]`）へ問い合わせる。
     ローテーションを挟んだラウンドでは Step 6 の `set-current-pr` が先に走るため、
     `current_pr` は既に新しい Pull Request を指している。そちらへ問い合わせると、
-    旧 Pull Request のスレッドが未解決のままでも一覧に現れず検査が素通りする。
+    旧 Pull Request のスレッドが未解決のままでも一覧に現れずチェックが素通りする。
     """
     fix = prev.get("fix")
     verdict = _resolve_previous_verdict(st, prev)
@@ -2438,7 +2438,7 @@ def cmd_start_round(args: argparse.Namespace) -> None:
         st["ended_at"] = _now()
         _save(args.pr, st)
         die(f"max_rounds={max_r} 到達。中断。", code=1)
-    # 上限に達していれば、そこでループが終わる。後始末の検査はその後で意味を持たない。
+    # 上限に達していれば、そこでループが終わる。後始末のチェックはその後で意味を持たない。
     if total > 0:
         _guard_previous_round(st, st["rounds"][-1])
 
@@ -2451,7 +2451,7 @@ def cmd_start_round(args: argparse.Namespace) -> None:
     # 既存コメントのスナップショットを取り直す（#542 の決定 6）。通しの 1 ラウンド目は `init` が取った
     # 直後のため取り直さない。失敗しても前のスナップショットのまま進める（前のスナップショットでも今と同じ条件で
     # レビューできる）。**round エントリを保存する前に取る。** 保存の後で取ると、取得の
-    # 途中の割り込みで結果の無い round だけが残り、再実行が前のラウンドの検査で止まる。
+    # 途中の割り込みで結果の無い round だけが残り、再実行が前のラウンドのチェックで止まる。
     if round_no >= 2:
         error = _fetch_existing_comments(
             str(st.get("repo") or ""), int(pr), _existing_comments_path(args.pr), strict=True)
@@ -2564,7 +2564,7 @@ def _thread_ids(value: Any) -> list[str]:
     """fix の戻り値から、Resolve したと申告されたスレッドの識別子を取り出す。
 
     正は dict の list だが、件数(int) や単一 dict で返ることがある。識別子を
-    取り出せない形は空の一覧として扱い、後段の検査を行わない。
+    取り出せない形は空の一覧として扱い、後段のチェックを行わない。
     """
     items = value if isinstance(value, list) else [value] if isinstance(value, dict) else []
     return [
@@ -2973,13 +2973,13 @@ def _record_review_post(
 
 
 def _round_ci(st: dict[str, Any], last: dict[str, Any], pr: int) -> dict[str, Any]:
-    """収束の直前に検査ジョブを 1 度だけ照会し、判定に使う記録を返す。
+    """収束の直前にチェックジョブを 1 度だけ照会し、判定に使う記録を返す。
 
     head の commit は `rounds[-1].head_sha` から読む。承認したレビューが読んだ commit と
     同じ値であり、追加の呼び出しが要らない。値が無いときだけ REST を 1 回投げる。
 
     **照会できないことは、承認されたラウンドを差し戻す理由にならない。** `gh` の失敗・
-    `HTTP 422`・検査ジョブ 0 件はいずれも `unverified` として収束させ、確かめられ
+    `HTTP 422`・チェックジョブ 0 件はいずれも `unverified` として収束させ、確かめられ
     なかったことを記録に残す。
     """
     repo = str(st.get("repo") or "")
@@ -2995,7 +2995,7 @@ def _round_ci(st: dict[str, Any], last: dict[str, Any], pr: int) -> dict[str, An
     if runs is None:
         return {
             "verdict": "unverified",
-            "reason": "検査ジョブを照会できない（未 push・権限・検査ジョブ 0 件のいずれか）",
+            "reason": "チェックジョブを照会できない（未 push・権限・チェックジョブ 0 件のいずれか）",
             "sha": sha,
         }
     c = _classify_ci(runs)
@@ -3116,7 +3116,7 @@ def _finalize_converged_round(
         info(f"⚠ {ci['note']}")
     elif ci["verdict"] == "pending":
         info(
-            f"⚠ 未完了の検査ジョブが残ったまま収束する: {' '.join(ci['pending'])}。"
+            f"⚠ 未完了のチェックジョブが残ったまま収束する: {' '.join(ci['pending'])}。"
             "完了は待たない"
         )
     elif ci["verdict"] == "unverified":
@@ -3201,9 +3201,9 @@ def cmd_judge(args: argparse.Namespace) -> None:
     """Step 3 — intent ベース pass 判定。
 
     出口は 5 つある。**結果を取り込めていないラウンドは、収束も修正も決められない。**
-    そのため結果なしの検査を、通ったかどうかの判定より先に置く。
+    そのため結果なしのチェックを、通ったかどうかの判定より先に置く。
 
-    収束の枝に入る直前で、継続的統合の検査ジョブを 1 度だけ照会する（#327）。
+    収束の枝に入る直前で、継続的統合のチェックジョブを 1 度だけ照会する（#327）。
     code-related の失敗があれば**中断せず**終了コード 2 で修正のラウンドへ回す。
     収束の直前は修正の機会が残っている段であり、そこで中断すると直せる失敗まで
     人手へ戻すことになる。中断は上限のラウンド数・振動の検知・`merge-fix` が受け持つ。
@@ -5036,7 +5036,7 @@ _SUBCOMMAND_REGISTRARS = (
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """副コマンドの引数を組み立てる。**テストが選択肢を検査できるように分ける。**
+    """副コマンドの引数を組み立てる。**テストが選択肢をチェックできるように分ける。**
 
     実機で `kiro` の結果が `invalid choice` で弾かれた。担当が 4 つの名前を取りうる
     以上、副コマンドの引数も同じ母集合を持たなければ、結果を残した担当が「結果なし」

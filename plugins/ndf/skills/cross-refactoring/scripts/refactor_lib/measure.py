@@ -1,8 +1,8 @@
-"""cross-refactoring の実行の要約が持つフェーズの所要（#662 / #933）。
+"""cross-refactoring の実行の要約が持つ手順の所要（#662 / #933）。
 
-**フェーズの所要は状態ファイルの `phases` から読む**（#933 の決定 8。進行側の時計）。
-あわせて監視の記録から、フェーズごとの CLI の起動回数と合計秒を足す。CLI の時間と
-フェーズの所要の差が、進行側が回したテストと取り込みの時間である。
+**手順の所要は状態ファイルの `phases` から読む**（#933 の決定 8。進行側の時計）。
+あわせて監視の記録から、手順ごとの CLI の起動回数と合計秒を足す。CLI の時間と
+手順の所要の差が、進行側が回したテストと取り込みの時間である。
 """
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import pathlib
 import re
 from typing import Any, Optional
 
-# stem からフェーズを読む規則（`paths.stem_for` と揃える）。
+# stem から手順を読む規則（`paths.stem_for` と揃える）。
 _STEM = re.compile(
     r"^(?:codex|agy|claude|kiro)-(?:"
     r"(?P<phase>propose|plan|add-tests|implement|fix|judge-test-changes)-rf\d+"
@@ -27,10 +27,10 @@ def _phase_of(launch: dict[str, Any]) -> Optional[str]:
 
 
 def phases(state: dict[str, Any], launches: list[dict[str, Any]]) -> dict[str, Any]:
-    """フェーズごとの所要（進行側の時計）と、CLI の起動回数・合計秒（監視の記録）。
+    """手順ごとの所要（進行側の時計）と、CLI の起動回数・合計秒（監視の記録）。
 
-    **起動や記録のあったフェーズだけを置く。** 無いフェーズを 0 で置くと、測っていない
-    フェーズと 0 秒のフェーズを区別できない。
+    **起動や記録のあった手順だけを置く。** 無い手順を 0 で置くと、測っていない
+    手順と 0 秒の手順を区別できない。
     """
     out: dict[str, Any] = {}
     for name, record in (state.get("phases") or {}).items():

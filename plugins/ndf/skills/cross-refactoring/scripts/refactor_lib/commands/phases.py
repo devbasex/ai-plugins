@@ -1,4 +1,4 @@
-"""フェーズの開始時刻と監視期限を記録する。"""
+"""手順の開始時刻と監視期限を記録する。"""
 from __future__ import annotations
 
 import argparse
@@ -12,11 +12,11 @@ PHASE_NAMES = ("propose", "plan", "add-tests", "implement", "fix", "final-fix")
 
 
 def cmd_start_phase(args: argparse.Namespace) -> None:
-    """フェーズの開始を進行側の時計で記録し、監視の上限を返す。"""
+    """手順の開始を進行側の時計で記録し、監視の上限を返す。"""
     path, state = load_state(args.id)
     phase = args.phase
     if phase not in PHASE_NAMES:
-        die(f"未知のフェーズです: {phase}（{' / '.join(PHASE_NAMES)}）")
+        die(f"未知の手順です: {phase}（{' / '.join(PHASE_NAMES)}）")
     record = state.setdefault("phases", {}).setdefault(phase, {})
     now = statefile.now()
     if phase in ("fix", "final-fix") or not record.get("started_at"):

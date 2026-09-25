@@ -244,7 +244,7 @@ def _find_best_match(
         return None, True
     finding_id = newest_candidates[0].get("finding_id")
     if finding_id is None:
-        # **`str(None)` を返さない。** 呼び出し側の `finding_id is None` の検査を
+        # **`str(None)` を返さない。** 呼び出し側の `finding_id is None` のチェックを
         # すり抜け、上限の方式の集合へ文字列 `"None"` が入る。上限が 1 件多く
         # 見え、他の方式の再現率がその分だけ低く出る。
         return None, False

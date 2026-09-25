@@ -3,7 +3,7 @@
 誘導の対象になる tool 名は共通ライブラリが 1 箇所で持つ。hook の matcher が
 その一覧とずれると、判定を足しても hook が起動しない。実際に起きた不具合
 （Codex CLI の `apply_patch` が matcher に無く、パッチ本文の解析が使われなかった）
-を繰り返さないため、両者の一致を検査する。
+を繰り返さないため、両者の一致をチェックする。
 """
 from __future__ import annotations
 

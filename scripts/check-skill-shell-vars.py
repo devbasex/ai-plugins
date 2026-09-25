@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""手順書の bash が参照する変数の出所を検査する（#518-1）。
+"""手順書の bash が参照する変数の出所をチェックする（#518-1）。
 
 **繰り返しの中で使う値を、繰り返しの外の 1 回だけが返す構造は表に出ない。** `init` から
 順に実行すれば定義されるため、手元では再現しない。骨組みを抜粋して写した経路と、状態
 ファイルから再開する経路で未定義になり、`unbound variable` で止まる。
 
-検査は 1 つで、**参照する変数がその行より前のコマンドで得られるか**を見る。出所は 3 つある。
+チェックは 1 つで、**参照する変数がその行より前のコマンドで得られるか**を見る。出所は 3 つある。
 
 | 出所 | 例 |
 | --- | --- |
@@ -37,7 +37,7 @@ from typing import Iterable, Optional
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
-# 既定で検査する Skill。**骨組みを `eval` で受け取る手順書だけを対象にする。**
+# 既定でチェックする Skill。**骨組みを `eval` で受け取る手順書だけを対象にする。**
 # 変数を渡さない手順書へ広げると、外から渡る値の宣言だけが増える。
 DEFAULT_SKILLS = ("plugins/ndf/skills/cross-refactoring",)
 
@@ -187,7 +187,7 @@ def sources_of(skill_dir: pathlib.Path, name: str) -> list[str]:
 def main(argv: Optional[Iterable[str]] = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--skill-dir", action="append", default=None,
-                    help="検査する Skill のディレクトリ（複数可）")
+                    help="チェックする Skill のディレクトリ（複数可）")
     ap.add_argument("--external", default=None,
                     help="骨組みの外から渡る値。コンマ区切り")
     ap.add_argument("--show-sources", default=None,

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""drive.py: cross-refactoring の 1 回の計画実行を、LLM の判断が要る地点まで進めて止まる。
+"""drive.py: cross-refactoring の 1 回の改修計画実行を、LLM の判断が要る地点まで進めて止まる。
 
     drive.py <PR> --scope ... --baseline-test CMD [refactor.py init の引数...]
 
-init → 提案 → 計画 → テスト追加 → 実装 → 検証と修正 → 最終ゲート → finalize を順に進める。
+init → 提案 → 改修計画 → テスト追加 → 実装 → 検証と修正 → 最終ゲート → finalize を順に進める。
 参加者は全て CLI なので、止まるのは単独起動の最終ゲート（cross-review）だけである。
-同じコマンドを打ち直すと続きから進む（init が終わったフェーズを返し、最終ゲートの後の進みは
+同じコマンドを打ち直すと続きから進む（init が終わった手順を返し、最終ゲートの後の進みは
 `$TMP_DIR/drive-rf<ID>.json`）。
 
 止まるときの JSON の形と終了コードの表は共通層の `scripts/lib/drive_pause.py` にある（使うのは 23 だけ。中断の `metrics.exit` が 4 なら refactor.py の中断）。
@@ -171,7 +171,7 @@ class Drive:
 
     def done(self, extra: dict | None = None) -> dict:
         c = {**self.counts(), **(extra or {})}
-        return dp.done(TOOL, f"計画の実行が終わった（項目 {c['items']}・採用 {c['adopted']}・"
+        return dp.done(TOOL, f"改修計画の実行が終わった（項目 {c['items']}・採用 {c['adopted']}・"
                        f"取り消し {c['reverted']}・見送り {c['deferred']}）", self.report(), c)
 
     def run(self) -> dict:

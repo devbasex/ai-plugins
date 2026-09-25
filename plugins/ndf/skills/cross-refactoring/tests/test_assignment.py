@@ -1,6 +1,6 @@
 """担当の決定（ホスト判定 / 母集合の既定 / 実装担当 / 席）のテスト。
 
-cross-refactoring は提案を参加者の全員が、計画以降を実装担当 1 者が通し（#933 の決定 1）、
+cross-refactoring は提案を参加者の全員が、改修計画以降を実装担当 1 者が通し（#933 の決定 1）、
 cross-review は claude / codex / kiro とホストの母集合（ホストが agy なら 4 者）から 2 席を決める。母集合の既定は Skill ごとに違う。
 """
 from __future__ import annotations

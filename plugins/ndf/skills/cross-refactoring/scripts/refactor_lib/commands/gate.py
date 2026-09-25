@@ -77,7 +77,7 @@ def cmd_final_gate(args: argparse.Namespace) -> None:
     if passed and standalone:
         _emit_cross_review(
             path, state, gate,
-            f"✅ 最終ゲートの検査が通りました（{detail}）。続けて /ndf:cross-review を実行します",
+            f"✅ 最終ゲートのチェックが通りました（{detail}）。続けて /ndf:cross-review を実行します",
         )
         return
     if passed:
@@ -98,7 +98,7 @@ def _final_fix_stop(state: dict[str, Any], gate: dict[str, Any]) -> Optional[str
     過ぎていれば打ち切る。起動し直しても解けない結末（利用上限）も打ち切る。
 
     **ただし 1 度も試みていなければ時計で打ち切らない**（決定 26）。修正 1 回分の予備時間
-    （`plan.reserve.final_fix`）を計画の時点で予算から差し引いてあり、予算を使い切った後に
+    （`plan.reserve.final_fix`）を改修計画の時点で予算から差し引いてあり、予算を使い切った後に
     落ちても必ず 1 度は直しを試みる。
     """
     if gate.get("no_relaunch"):
@@ -130,7 +130,7 @@ def _reusable_whole_test(state: dict[str, Any]) -> bool:
 def _run_and_record_gate_check(
     state: dict[str, Any], gate: dict[str, Any]
 ) -> tuple[bool, str]:
-    """最終ゲートの検査を 1 回走らせ、`checks` へ記録して結果を返す。"""
+    """最終ゲートのチェックを 1 回走らせ、`checks` へ記録して結果を返す。"""
     # **排他である。** `--ci-check` があれば手元のテストを実行せず継続的統合の成功
     # だけで判定し、無ければ手元のテストだけで判定する。「どちらか一方が通れば通過」
     # とはしない（OR で採ると、手元のテストの失敗を継続的統合の成功が覆す）。
@@ -152,7 +152,7 @@ def _emit_cross_review(
     path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any], message: str
 ) -> None:
     """Step 7 を `cross-review` へ委譲する結末。"""
-    # **検査が通ったことを残す。** 履歴へ追記するかは、この目印と `cross-review` の
+    # **チェックが通ったことを残す。** 履歴へ追記するかは、この目印と `cross-review` の
     # 最終ステータスの両方で決まる（`finalize`）。
     gate["checked_mode"] = gate.get("mode")
     gate["mode"] = "cross-review"
@@ -165,7 +165,7 @@ def _emit_cross_review(
 def _record_gate_check(
     gate: dict[str, Any], command: str, passed: bool, detail: str, seconds: float
 ) -> None:
-    """最終ゲートの検査 1 件を `checks` へ追記する。"""
+    """最終ゲートのチェック 1 件を `checks` へ追記する。"""
     gate.setdefault("checks", []).append({
         "at": statefile.now(),
         "mode": gate["mode"],
@@ -416,7 +416,7 @@ def cmd_merge_final_fix(args: argparse.Namespace) -> None:
     statefile.save(path, state)
     # **取り消したかどうかに関わらず公開する。** 最終ゲートは push 済みの地点なので、
     # 公開しないと Pull Request の内容と手元の HEAD が食い違ったまま次の判定へ入る。
-    # `--ci-check` の実行では、push しないと読む対象の検査そのものが動かない。
+    # `--ci-check` の実行では、push しないと読む対象のチェックそのものが動かない。
     push_with_retry_marker(path, state, gate)
 
 
@@ -435,10 +435,10 @@ def _ci_gate(state: dict[str, Any], name: str) -> tuple[bool, str]:
     """継続的統合の結果で判定する。**読むのは `check-runs` の 1 回だけ。**
 
     **結果を得られないときは通過させない**（fail-closed）。照会できなかったことと、
-    検査が成功したことは別である。
+    チェックが成功したことは別である。
     """
     sha = git_out(work_dir(state), ["rev-parse", "HEAD"]) or ""
     result: Optional[str] = check_run_result(str(state.get("repo") or ""), sha, name)
     if result is None:
-        return False, f"検査 {name} の結果を得られませんでした（{sha[:7]}）"
-    return result == "success", f"検査 {name} の結論は {result} でした（{sha[:7]}）"
+        return False, f"チェック {name} の結果を得られませんでした（{sha[:7]}）"
+    return result == "success", f"チェック {name} の結論は {result} でした（{sha[:7]}）"

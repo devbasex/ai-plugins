@@ -25,7 +25,7 @@ dev_base=$(jq -r 'select(.version == 1) | .base_branch | select(type == "string"
 #
 # 照合先は `refs/heads/<名前>` と完全な参照名で渡す。`git ls-remote` のパターンは参照名の
 # 末尾に一致するため、`develop` とだけ渡すと `refs/heads/feature/develop` にも一致し、
-# 起点が未作成なのに検査が有効になる（git 2.53.0 で実測）。返った行の参照名とも突き合わせ、
+# 起点が未作成なのにチェックが有効になる（git 2.53.0 で実測）。返った行の参照名とも突き合わせ、
 # 末尾一致で別のブランチを拾わないようにする（`wt_branch_exists` と同じ形）。
 listing=$(GIT_TERMINAL_PROMPT=0 git ls-remote --heads origin "refs/heads/$dev_base" 2>/dev/null) ||
   exit 0

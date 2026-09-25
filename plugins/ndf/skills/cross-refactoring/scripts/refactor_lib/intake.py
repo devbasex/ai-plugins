@@ -65,7 +65,7 @@ def confirm_range(state: dict[str, Any], scope: IntakeScope) -> Optional[list[st
     """起点から HEAD までのコミットを新しい順で返す。確定できなければ `None`。
 
     **空の配列と `None` を区別する。** 空は「1 件もコミットされていない」、`None` は
-    「範囲を確定できなかった」である。混同すると、確定できないときに検査が素通りする。
+    「範囲を確定できなかった」である。混同すると、確定できないときにチェックが素通りする。
     """
     work = state["worktrees"]["work"]
     head = git_out(work, ["rev-parse", "HEAD"]) or ""

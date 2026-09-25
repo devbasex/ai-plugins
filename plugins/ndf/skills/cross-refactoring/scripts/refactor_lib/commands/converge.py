@@ -166,9 +166,9 @@ def _test_files(state: dict[str, Any], item: dict[str, Any]) -> Optional[list[st
 
 
 def _d5(item: dict[str, Any]) -> bool:
-    """公開の入出力が変わりうるか。**計画の時点で決めた値を読むだけで、LLM へ問わない**（決定 25）。
+    """公開の入出力が変わりうるか。**改修計画の時点で決めた値を読むだけで、LLM へ問わない**（決定 25）。
 
-    計画の前に作った状態ファイル（`public_io` を持たない）は実装担当の `risk` を使う。
+    改修計画の前に作った状態ファイル（`public_io` を持たない）は実装担当の `risk` を使う。
     `risk` は危険フラグを立てる側にだけ使う（決定 14）。
     """
     return bool(item.get("public_io", item.get("risk")))
@@ -437,7 +437,7 @@ def _apply_fix_result(
 
 
 def _account_fix(state: dict[str, Any], targets: list[dict[str, Any]]) -> None:
-    """修正回数、項目状態、修正フェーズの所要時間を更新する。"""
+    """修正回数、項目状態、修正手順の所要時間を更新する。"""
     for item in targets:
         item["fix_count"] = int(item.get("fix_count") or 0) + 1
         if item.get("status") == FAILING:

@@ -1,4 +1,4 @@
-# 改修の計画（cross-refactoring / $RF_RUNTIME）
+# 改修の改修計画（cross-refactoring / $RF_RUNTIME）
 
 あなたは **$RF_RUNTIME**（モデル: $RF_MODEL）として、参加者の全員が出した
 構造改善の候補を**判断**します。この後のテストの追加・実装・修正もあなたが担います。

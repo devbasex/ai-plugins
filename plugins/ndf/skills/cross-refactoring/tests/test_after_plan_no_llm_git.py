@@ -1,6 +1,6 @@
-"""計画の後の手順で、判断のために LLM を呼ばない（#933 決定 25 / 実装計画 I17）。
+"""改修計画の後の手順で、判断のために LLM を呼ばない（#933 決定 25 / 実装計画 I17）。
 
-計画の後で LLM が動くのは、作業の CLI（テストの追加・実装・直し）だけである。
+改修計画の後で LLM が動くのは、作業の CLI（テストの追加・実装・直し）だけである。
 取り込み・検証・取り消し・絞り込み・揺れの判定・最終ゲートは、状態ファイルの値・git・
 テストの終了コードだけで進む。ここでは Jev と CLI の呼び出し口を差し替え、呼ばれたら
 落とす形で、実装の取り込みから最終ゲートまでを通す。
@@ -39,7 +39,7 @@ def forbid_llm(monkeypatch):
     import jev
 
     def refuse(*args, **kwargs):
-        raise AssertionError(f"計画の後に Jev が呼ばれた: {args[:1]}")
+        raise AssertionError(f"改修計画の後に Jev が呼ばれた: {args[:1]}")
 
     for name in ("ask_boolean", "ask_score", "decide"):
         monkeypatch.setattr(jev, name, refuse)
@@ -54,7 +54,7 @@ def forbid_llm(monkeypatch):
         words = cmd if isinstance(cmd, (list, tuple)) else str(cmd).split()
         head = str(words[0]).rsplit("/", 1)[-1] if words else ""
         if head in LLM_CLIS:
-            raise AssertionError(f"計画の後に LLM の CLI が起動された: {cmd}")
+            raise AssertionError(f"改修計画の後に LLM の CLI が起動された: {cmd}")
 
     def popen(cmd, *args, **kwargs):
         _check(cmd)
@@ -90,7 +90,7 @@ def test_the_stages_after_the_plan_ask_no_llm(flow, cmd_setup, cmd_implement, cm
                                               cmd_gate, forbid_llm):
     work = flow["work"]
     state = read_state(flow["path"])
-    state["items"] = [_item("I-001", 1, public_io=True)]      # D5 は計画で決めてある
+    state["items"] = [_item("I-001", 1, public_io=True)]      # D5 は改修計画で決めてある
     state["plan"] = {"base_sha": git("rev-parse", "HEAD", cwd=work).stdout.strip(),
                      "reserve": {"danger_whole_test": 0.1, "final_whole_test": 0.1, "fix": 5.5},
                      "end_at": FAR, "table_source": "defaults"}

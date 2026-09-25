@@ -203,8 +203,8 @@ cleanup_managed_prompts() {
   done
 }
 
-# 配布元の prompt を .kiro/prompts/ へコピーする。codex.md の有無の検査はコピーと
-# 案内の出力を終えた後に行う（検査より前の標準出力と配置を変えないため）。
+# 配布元の prompt を .kiro/prompts/ へコピーする。codex.md の有無のチェックはコピーと
+# 案内の出力を終えた後に行う（チェックより前の標準出力と配置を変えないため）。
 install_prompts() {
   local prompt_file prompt_name
   while IFS= read -r prompt_file; do

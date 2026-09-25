@@ -125,7 +125,7 @@ def test_known_stage_reaches_gh(repo, tmp_path) -> None:
 
 
 def test_text_key_reaches_gh(repo, tmp_path) -> None:
-    """文字列のフィールドは値を検査しない。任意のパスが入る。"""
+    """文字列のフィールドは値をチェックしない。任意のパスが入る。"""
     write_declaration(repo, VALID)
     log = tmp_path / "gh.log"
     got = run_sync("186", "plan", "issues/issue-186.md", cwd=repo, env=fake_gh(tmp_path, log))
@@ -137,7 +137,7 @@ def test_stage_with_a_space_reaches_gh(repo, tmp_path) -> None:
     """空白を含む工程名も 1 つの値として通る。
 
     `Pull Request` は工程表で唯一の空白を含む行名である。呼び出し側が引用を落とすと
-    4 引数になり、引数の検査で終了コード 2 になる。スクリプトは 1 つの値として渡され
+    4 引数になり、引数のチェックで終了コード 2 になる。スクリプトは 1 つの値として渡され
     さえすれば扱えることを、この経路で確かめる。
     """
     write_declaration(repo, VALID)

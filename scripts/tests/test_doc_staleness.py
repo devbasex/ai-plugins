@@ -1,7 +1,7 @@
-"""説明文書の記載を崩すと検査が失敗することを確かめる。
+"""説明文書の記載を崩すとチェックが失敗することを確かめる。
 
 記号（A〜F）は `issues/old/issue-178-doc-staleness-checks.md` の受け入れ条件に、
-記号（G〜M）は `issues/parallel-batch-03/04-issue-209.md` の「検査する記載」に対応する。
+記号（G〜M）は `issues/parallel-batch-03/04-issue-209.md` の「チェックする記載」に対応する。
 """
 from __future__ import annotations
 
@@ -48,13 +48,13 @@ def test_manifest_skill_with_inline_comment_counts_as_one(tree: Path) -> None:
 
 
 def test_real_repository_passes() -> None:
-    """実物のリポジトリでも通る。検査を入れた時点で落ちる状態を作らない。"""
+    """実物のリポジトリでも通る。チェックを入れた時点で落ちる状態を作らない。"""
     result = run_check(REPO_ROOT)
     assert result.returncode == 0, output_of(result)
 
 
 def test_root_defaults_to_current_directory() -> None:
-    """現状固定: `--root` を省くとカレントディレクトリをリポジトリの根として検査する。"""
+    """現状固定: `--root` を省くとカレントディレクトリをリポジトリの根としてチェックする。"""
     result = subprocess.run(
         [sys.executable, str(CHECKER)],
         cwd=REPO_ROOT,
@@ -97,7 +97,7 @@ def test_runtime_skill_count_mismatch_fails(tree: Path, before: str, after: str,
     ],
 )
 def test_runtime_skill_count_removed_fails(tree: Path, fragment: str) -> None:
-    """記載を消して検査を通せる状態を作らない。"""
+    """記載を消してチェックを通せる状態を作らない。"""
     edit(root_readme(tree), fragment, "")
     result = run_check(tree)
     assert result.returncode != 0
@@ -341,7 +341,7 @@ def test_missing_skills_dir_fails(tree: Path) -> None:
 
 # --- G〜M: 説明文書の本文に書かれた版数 ---
 #
-# 記号は `issues/parallel-batch-03/04-issue-209.md` の「検査する記載」に対応する。
+# 記号は `issues/parallel-batch-03/04-issue-209.md` の「チェックする記載」に対応する。
 
 
 def agents_md(tree: Path) -> Path:
@@ -363,7 +363,7 @@ def agents_md(tree: Path) -> Path:
     ],
 )
 def test_body_version_stale_fails(tree: Path, mark: str, document: str, before: str, after: str) -> None:
-    """本文の版数を前の版へ書き換えると失敗する（点の検査が 1 箇所ずつ働く）。"""
+    """本文の版数を前の版へ書き換えると失敗する（点のチェックが 1 箇所ずつ働く）。"""
     edit(tree / document, before, after)
     result = run_check(tree)
     assert result.returncode != 0, mark
@@ -389,7 +389,7 @@ def test_codex_cache_path_partial_stale_fails(tree: Path) -> None:
 @pytest.mark.parametrize(
     ("mark", "document", "fragment", "occurrences"),
     [
-        ("G", "README.md", "**NDFプラグイン v9.3.0** の検査用の最小構成です。\n", 1),
+        ("G", "README.md", "**NDFプラグイン v9.3.0** のチェック用の最小構成です。\n", 1),
         ("I", "AGENTS.md", "主要プラグインです（v9.3.0）", 1),
         ("K", "plugins/ndf/README.md", "# => NDF統合開発エージェント（Kiro CLI用 / v9.3.0）\n", 1),
         ("L", "plugins/ndf/README.md", "~/.codex/plugins/cache/ai-plugins/ndf/9.3.0/skills/deploy/SKILL.md", 2),
@@ -399,7 +399,7 @@ def test_codex_cache_path_partial_stale_fails(tree: Path) -> None:
 def test_body_version_removed_fails(
     tree: Path, mark: str, document: str, fragment: str, occurrences: int
 ) -> None:
-    """記載を消して検査を通せる状態にしない。"""
+    """記載を消してチェックを通せる状態にしない。"""
     edit_all(tree / document, fragment, "", occurrences)
     result = run_check(tree)
     assert result.returncode != 0, mark
@@ -438,7 +438,7 @@ def test_plugin_table_unknown_plugin_fails(tree: Path) -> None:
 
 
 def test_plugin_table_malformed_plugin_json_fails(tree: Path) -> None:
-    """`plugin.json` が構文不正な場合、例外ではなく検査の失敗として出す。"""
+    """`plugin.json` が構文不正な場合、例外ではなくチェックの失敗として出す。"""
     (tree / "plugins/fixture-kit/.claude-plugin/plugin.json").write_text(
         "{\n  not json\n", encoding="utf-8"
     )
@@ -451,16 +451,16 @@ def test_plugin_table_malformed_plugin_json_fails(tree: Path) -> None:
 
 
 def test_plugin_table_row_removed_fails(tree: Path) -> None:
-    """一覧表から NDF の行を消して検査を通せる状態にしない。"""
-    edit(root_readme(tree), "| **ndf** | 9.3.0 | 検査用の最小構成 |\n", "")
+    """一覧表から NDF の行を消してチェックを通せる状態にしない。"""
+    edit(root_readme(tree), "| **ndf** | 9.3.0 | チェック用の最小構成 |\n", "")
     result = run_check(tree)
     assert result.returncode != 0
     assert "README.md" in output_of(result)
 
 
-# --- J: 正本の「版の付け方と開発版の配布」章（区間の検査） ---
+# --- J: 正本の「版の付け方と開発版の配布」章（区間のチェック） ---
 #
-# 版数の扱いの正本は `docs/versioning-and-distribution.md` である（#499）。検査 J は
+# 版数の扱いの正本は `docs/versioning-and-distribution.md` である（#499）。チェック J は
 # `AGENTS.md` ではなく正本の章 2 を読み、失敗も正本のパスで報告する。
 
 
@@ -518,7 +518,7 @@ def test_version_section_two_digit_minor_passes(tree: Path) -> None:
 
 
 def test_version_section_heading_removed_fails(tree: Path) -> None:
-    """章を消して検査を通せる状態にしない。"""
+    """章を消してチェックを通せる状態にしない。"""
     edit(versioning_md(tree), "## 版の付け方と開発版の配布\n", "")
     result = run_check(tree)
     assert result.returncode != 0
@@ -658,7 +658,7 @@ NEXT_EXAMPLE = "`9.3.0` の次を開発するなら `9.4.0-dev.1`"
 
 
 def j_errors(result) -> list[str]:
-    """検査 J の失敗の行だけを取り出す。"""
+    """チェック J の失敗の行だけを取り出す。"""
     return [line for line in output_of(result).splitlines() if line.startswith(J_ERROR)]
 
 
@@ -811,10 +811,10 @@ def test_version_section_heading_removed_reports_only_the_existing_failure(tree:
 
 @pytest.mark.parametrize("version", ["1.0", "9.3", "v9.3.0", "９.３.０", ""])
 def test_malformed_plugin_version_is_reported_as_a_failure(tree: Path, version: str) -> None:
-    """`plugin.json` の版数が semver の形でなければ、例外ではなく検査の失敗として出す。
+    """`plugin.json` の版数が semver の形でなければ、例外ではなくチェックの失敗として出す。
 
     途中で例外を投げると他の記載の判定まで巻き添えで消える。読めないこと自体を 1 件の
-    食い違いとして数え、他の検査と同じ出力の形で返す。
+    食い違いとして数え、他のチェックと同じ出力の形で返す。
     """
     bump_plugin_version(tree, version)
     result = run_check(tree)
@@ -825,7 +825,7 @@ def test_malformed_plugin_version_is_reported_as_a_failure(tree: Path, version: 
 
 
 def test_missing_plugin_version_is_reported_as_a_failure(tree: Path) -> None:
-    """`version` キーが無ければ、例外ではなく検査の失敗として出す。"""
+    """`version` キーが無ければ、例外ではなくチェックの失敗として出す。"""
     (tree / "plugins/ndf/.claude-plugin/plugin.json").write_text(
         '{\n  "name": "ndf"\n}\n', encoding="utf-8"
     )
@@ -882,7 +882,7 @@ def test_version_failure_output_names_path_subject_line_and_both_values(tree: Pa
 
 
 def test_count_failure_output_is_unchanged(tree: Path) -> None:
-    """`Claim` を広げても、行番号を持たない数の検査の出力は変わらない。"""
+    """`Claim` を広げても、行番号を持たない数のチェックの出力は変わらない。"""
     edit(root_readme(tree), "Claude Code向け core 5個", "Claude Code向け core 9個")
     result = run_check(tree)
     out = output_of(result)
@@ -893,7 +893,7 @@ def test_count_failure_output_is_unchanged(tree: Path) -> None:
 
 
 def test_missing_agents_md_fails(tree: Path) -> None:
-    """検査の対象の説明文書が無いこと自体を失敗として扱う。"""
+    """チェックの対象の説明文書が無いこと自体を失敗として扱う。"""
     agents_md(tree).unlink()
     result = run_check(tree)
     assert result.returncode != 0

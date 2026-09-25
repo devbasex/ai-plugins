@@ -60,12 +60,12 @@ fi
 1. `$TMP_DIR/fix-pr<PR>-result.json` を読んで `state.rounds[-1].fix` にマージ
 2. `deferred` を `state.deferred_nits` に追記
 3. **CI 失敗の分類**:
-   - code-fail（検査ジョブの名前がテスト・lint・型検査・ビルドを指す。語の一覧は `state.py` の `CI_CODE_PATTERNS`）: `final=error` で中断 (exit 3)
+   - code-fail（チェックジョブの名前がテスト・lint・型検査・ビルドを指す。語の一覧は `state.py` の `CI_CODE_PATTERNS`）: `final=error` で中断 (exit 3)
    - meta-only (`check_pr_requirements` / `assignees` / `reviewers` / `labels` / `meta`): `ci_note` に記録して継続
    - 不明: 保守的に code-fail 扱い
 
 meta-only の語は**区切りで挟まれた語として**一致したときだけ拾う。部分一致にすると
-`metabase tests` や `metadata lint` のようなコード検査まで meta-only になり、失敗した
+`metabase tests` や `metadata lint` のようなコードチェックまで meta-only になり、失敗した
 まま収束する。
 
 **例**: `check_pr_requirements`（Assignees 未設定）はループ継続、
@@ -75,10 +75,10 @@ lint や型検査の失敗は即中断してユーザ判断。
 収束を返す前に `commits/{HEAD_OID}/check-runs` を **1 度だけ** 照会する。code-related の
 失敗があれば**中断せず**終了コード 2 で修正のラウンドへ回す。収束の直前は修正の機会が
 残っている段であり、そこで中断すると直せる失敗まで人手へ戻すことになる。照会できない
-とき（`gh` の失敗 / `HTTP 422` / 検査ジョブ 0 件）は収束させ、`rounds[-1].ci.verdict` へ
-`unverified` と理由を残す。**進行を止めない側へ倒す。** 同名の検査ジョブは名前ごとの
+とき（`gh` の失敗 / `HTTP 422` / チェックジョブ 0 件）は収束させ、`rounds[-1].ci.verdict` へ
+`unverified` と理由を残す。**進行を止めない側へ倒す。** 同名のチェックジョブは名前ごとの
 最新の実行（`completed_at` と `started_at` の新しい方）へ畳んでから振り分ける。本文の編集や
-再実行で別の実行が成功した検査の、前の実行の失敗は数えない。
+再実行で別の実行が成功したチェックの、前の実行の失敗は数えない。
 
 ## Step 6: PR ローテーション (prepare → Agent → execute の 3 段)
 

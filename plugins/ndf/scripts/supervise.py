@@ -45,7 +45,7 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
         # queue の終わり（done）か、queue が流す計画の attention の行まで待つ。出力は要約の 1 行と結果の JSON。
         # 終了コード: done = 0 / attention = 20 / 上限 = 3。attention の後にもう一度打つと、その続きから待つ
     supervise.py note <引き継ぎ文書.md> --report <report.md> [--next 次の欄] [--section 見出しの語]
-    supervise.py sync-check [--root DIR] [--commit]   # 宣言した同期と検査（.ndf/supervise.json の sync_checks）
+    supervise.py sync-check [--root DIR] [--commit]   # 宣言した同期とチェック（.ndf/supervise.json の sync_checks）
     supervise.py example            # 計画の例を出す
 
 new / queue / wait / note / sync-check の結果は lib/step_result.py の形の 1 行の JSON（status を見る）。
@@ -100,7 +100,7 @@ drive のステップ: `cmd`（または `"drive": "cross-review" | "cross-refac
       {"version": 1,
        "test": {"command": "<テストのコマンド。{paths} を範囲に置き換える>", "all": "<全体の範囲（既定 .）>",
                 "no_reports": "<run のステップの PYTEST_ADDOPTS に足す。省略可>"},
-       "sync_checks": [{"name": "<名前>", "command": "<同期か検査のコマンド>"}, ...],   # 省略可。無ければ sync のステップを置かない
+       "sync_checks": [{"name": "<名前>", "command": "<同期かチェックのコマンド>"}, ...],   # 省略可。無ければ sync のステップを置かない
        "release": {"form": "package-plugin", "plugin": "<名前>", "runtimes": ["claude", ...]}}
   テストの範囲の選び方（--tests）と配布してよいかの判断は、宣言にせず conductor と judge のステップに残す
 
@@ -108,7 +108,7 @@ drive のステップ: `cmd`（または `"drive": "cross-review" | "cross-refac
 - `package-plugin`（Claude Code のプラグイン）: dev は bump → changelog → 説明文 → sync-check → release →
   verify-install（起点のブランチ）→ approval-facts → 提示物の説明文。approval-facts の提示物は
   `issues/approval-<plugin>-v<正式版>.md` へ写す。prod は bump → changelog → 説明文 → トークン消費の記録 →
-  sync-check → release → verify-install（本番のブランチ）→ 後片付け。sync-check は同期と検査の宣言があるときだけ
+  sync-check → release → verify-install（本番のブランチ）→ 後片付け。sync-check は同期とチェックの宣言があるときだけ
 落ちた run のステップは judge が fix・同じステップのやり直し・stop を選ぶ。計画のスクリプトは、このスクリプトの置き場からの
 絶対パスで呼ぶ（利用者のリポジトリにプラグインの中身が無くても動く）。
 
@@ -122,8 +122,8 @@ drive のステップ: `cmd`（または `"drive": "cross-review" | "cross-refac
 - 待ちの合計が計画の `"limit_wait_max"`（既定 10800 秒）を超えるなら `結果: 止まった`・`理由: 利用上限`
 
 run のステップ:
-- `"preset"`: 定型のコマンド。`sync-check`（宣言した同期と検査）・`assess`（構造改善の要否）・
-  `doc-lint`（追加した行の書き方の検査）。`cmd` を書けばそちらを使う
+- `"preset"`: 定型のコマンド。`sync-check`（宣言した同期とチェック）・`assess`（構造改善の要否）・
+  `doc-lint`（追加した行の書き方のチェック）。`cmd` を書けばそちらを使う
 - `cmd` の `{pr}` は Pull Request の番号に、`{pr_url}` は URL に置き換わる（drive のステップの `args` も同じ）。
   Pull Request は pr のステップで作ったもの、または計画の `"Pull Request"`（URL なら末尾の数字を番号として読む）
 - `"rerun_failed": true`: 失敗したら落ちたテストだけ（`pytest --lf`）を走らせ直し、通れば成功として進む
@@ -311,7 +311,7 @@ WORK_SYSTEM = """あなたは NDF の worker である。1 つの作業だけを
   replace_symbol_body など）で読み・直す。Serena の memory と onboarding は使わない
 - それ以外のファイルは全文を読まない。grep -n で位置を探し、Read の offset / limit で要る範囲だけを読む
   （200 行未満のファイルと、これから書き換える関数の周りは除く）。同じ範囲を読み直さない
-- テストや検査の出力は、失敗した箇所と要約だけを読む（`| tail`・`-q`・`--tb=short`）
+- テストやチェックの出力は、失敗した箇所と要約だけを読む（`| tail`・`-q`・`--tb=short`）
 - 判断が要るときは、作業をせずに「結果: 判断が要る」と理由を書いて終える
 - 最後に次の形で終える:
 ## 作業の報告
@@ -1739,7 +1739,7 @@ EXAMPLE = {
 
 
 def sync_check(root: str, commit: bool, checks: list[tuple[str, str]] | None = None) -> dict:
-    """宣言（.ndf/supervise.json の sync_checks）の同期と検査を順に回す。同期で変わったファイルは commit なら
+    """宣言（.ndf/supervise.json の sync_checks）の同期とチェックを順に回す。同期で変わったファイルは commit なら
     1 つのコミットにする。宣言が無ければ回さずに止まる。"""
     if checks is None:
         try:
@@ -1748,7 +1748,7 @@ def sync_check(root: str, commit: bool, checks: list[tuple[str, str]] | None = N
             return result("supervise-sync-check", "stopped", str(e), [], {"failed": 0, "changed": 0})
     if not checks:
         return result("supervise-sync-check", "stopped",
-                      f"同期と検査の宣言が無い（{root}/.ndf/{SUPERVISE_DECL} の sync_checks）", [],
+                      f"同期とチェックの宣言が無い（{root}/.ndf/{SUPERVISE_DECL} の sync_checks）", [],
                       {"failed": 0, "changed": 0})
     items, failed = [], []
     for name, cmd in checks:
@@ -1768,7 +1768,7 @@ def sync_check(root: str, commit: bool, checks: list[tuple[str, str]] | None = N
                       "exit": c.returncode, "files": len(changed)})
         if c.returncode:
             failed.append("commit")
-    summary = f"失敗: {', '.join(failed)}" if failed else f"同期と検査 {len(checks)} 本が通った"
+    summary = f"失敗: {', '.join(failed)}" if failed else f"同期とチェック {len(checks)} 本が通った"
     return result("supervise-sync-check", "stopped" if failed else "ok", summary, items,
                   {"failed": len(failed), "changed": len(changed)})
 
@@ -1780,7 +1780,7 @@ RULE_CHECK = ("全体テストが落ちたら（落ちたテストだけの再�
               "変更に無関係なら ready。2 回直しても同じなら stop。")
 FIX_PROMPT = "失敗した箇所を直してコミットする（push しない）。変更に起因しない失敗は直さない。"
 MERGE_CMD = f"python3 {HERE / 'merged-steps.py'} merge-when-green {{pr}}"
-# マージの待ちのステップの一次の調査（遅れたとき PR の検査を分け、取り残しを再実行する）
+# マージの待ちのステップの一次の調査（遅れたとき PR のチェックを分け、取り残しを再実行する）
 MERGE_PROBE = {"cmd": f"python3 {HERE / 'merged-steps.py'} probe --pr {{pr}} --act"}
 
 # 雛形が宣言から受けるもの。引数が宣言より先に効く
@@ -1794,7 +1794,7 @@ def apply_decls(a) -> None:
     - 起点のブランチ（a.base）: --base → worktree.json の base_branch
     - 本番のブランチ（a.production_branch）: --production-branch → worktree.json の production_branch
     - テスト（a.test_cmd・a.test_all・a.no_reports）: --test-cmd・--test-all → supervise.json の test
-    - 同期と検査（a.sync_checks）: supervise.json の sync_checks（無ければ計画に sync のステップを置かない）
+    - 同期とチェック（a.sync_checks）: supervise.json の sync_checks（無ければ計画に sync のステップを置かない）
     - 配布（a.release）: supervise.json の release
     """
     roots = decl_roots(a.worktree, getattr(a, "repo", None))
@@ -1896,7 +1896,7 @@ def plan_impl(a, out: Path | None = None) -> dict:
         {"id": "impl", "type": "work", "kind": "実装", "serena": True, "stage": "実装", "issues": True,
          "timeout": 3600, "prompt": prompt, "next": "sync" if sync else "test-limited"},
     ]
-    if sync:  # 同期と検査の宣言が無いプロジェクトではステップを置かない
+    if sync:  # 同期とチェックの宣言が無いプロジェクトではステップを置かない
         steps += [
             {"id": "sync", "type": "run", "preset": "sync-check", "stage": "実装", "on_fail": "fix-sync",
              "next": "test-limited"},
@@ -1908,7 +1908,7 @@ def plan_impl(a, out: Path | None = None) -> dict:
          "cmd": with_paths(a.test_cmd, tests), "on_fail": "judge", "next": "pr"},
         {"id": "judge", "type": "judge", "inputs": ["test-limited", "test-all"],
          "question": "テストの失敗を直すか（fix）、範囲テストの失敗が変更に無関係なら PR へ（pr）、"
-                     "全体テストの失敗が変更に無関係なら文書の検査へ（doc-lint）、止めるか（stop）",
+                     "全体テストの失敗が変更に無関係なら文書のチェックへ（doc-lint）、止めるか（stop）",
          "choices": ["fix", "pr", "doc-lint", "stop"]},
         {"id": "fix", "type": "work", "kind": "修正", "inputs": ["test-limited", "test-all"],
          "prompt": FIX_PROMPT, "next": "test-limited"},
@@ -2077,7 +2077,7 @@ def plan_release_package_plugin(a) -> dict:
     {"form": "package-plugin", "plugin": <名前>, "runtimes": [<導入を確かめるランタイム>...]}。
     dev: bump → changelog → 説明文 → sync-check → release → verify-install（起点のブランチ）→ approval-facts
     → 提示物の欄。prod: bump → changelog → 説明文 → 消費の記録 → sync-check → release → verify-install
-    （本番のブランチ）→ 後片付け。sync-check は同期と検査の宣言があるときだけ置く。
+    （本番のブランチ）→ 後片付け。sync-check は同期とチェックの宣言があるときだけ置く。
     説明文と提示物の欄は release-steps.py notes が PR 本文の「利用者向けの変化」から組む（LLM を使わない）。"""
     rel = a.release
     plugin, runtimes = rel.get("plugin"), rel.get("runtimes")
@@ -2120,7 +2120,7 @@ def plan_release_package_plugin(a) -> dict:
     steps += [
         {"id": "release", "type": "run", "stage": "配布", "timeout": 2400 if dev else 3000,
          "cmd": f"{STEPS_PY} release --version {v} --channel {a.channel}", "on_fail": "judge", "next": "verify",
-         # 配布の PR（release/v<版> → 起点）と、本番では続く 起点 → 本番 の PR の検査を調べる
+         # 配布の PR（release/v<版> → 起点）と、本番では続く 起点 → 本番 の PR のチェックを調べる
          "probe": {"cmd": f"{MERGED_PY} probe --head {{branch}} --head {{base}} --act"}},
         {"id": "verify", "type": "run", "stage": "配布" if dev else "リリース後テスト", "timeout": 1500, "cwd": repo,
          "cmd": f"sh -c 'git pull -q --ff-only origin {a.base} && {VERIFY_PY} verify-install --ref {ref} "
@@ -2985,7 +2985,7 @@ def main() -> int:
     t.add_argument("--report", required=True)
     t.add_argument("--next", default="")
     t.add_argument("--section", default="今の会話の進み")
-    c = sub.add_parser("sync-check", help="宣言した同期と検査（.ndf/supervise.json の sync_checks）")
+    c = sub.add_parser("sync-check", help="宣言した同期とチェック（.ndf/supervise.json の sync_checks）")
     c.add_argument("--root", default=".")
     c.add_argument("--commit", action="store_true", help="同期で変わったファイルをコミットする")
     a = ap.parse_args()

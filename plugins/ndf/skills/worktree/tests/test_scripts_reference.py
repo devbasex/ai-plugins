@@ -1,4 +1,4 @@
-"""手順書が使う変数と、`$SCRIPTS` の解決手順の対応を検査する（#193）。
+"""手順書が使う変数と、`$SCRIPTS` の解決手順の対応をチェックする（#193）。
 
 `worktree` の手順書は、プラグイン配下のスクリプトを変数経由で呼ぶ。その変数を決める
 手順は `development-workflow/references/scripts-lookup.md` の「候補の並び」

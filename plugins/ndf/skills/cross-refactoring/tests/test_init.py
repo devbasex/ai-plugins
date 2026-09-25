@@ -504,7 +504,7 @@ def test_an_invalid_budget_stops_before_anything_runs(run_init, tmp_path, test_c
 
 
 def test_an_invalid_budget_is_not_an_argparse_error(patch_lib, refactor, monkeypatch):
-    """AC1 — 型の検査は `init` が行う。argparse の終了コード 2 にしない。"""
+    """AC1 — 型のチェックは `init` が行う。argparse の終了コード 2 にしない。"""
     captured = _parsed_init_args(patch_lib, refactor, monkeypatch, "--budget-minutes", "abc")
     assert captured["budget_minutes"] == "abc"
 
@@ -615,7 +615,7 @@ def test_the_ci_check_is_not_set_by_default(patch_lib, refactor, monkeypatch):
 
 
 def test_init_starts_at_the_propose_phase(run_init, tmp_path):
-    """版 2 の状態は提案のフェーズから始まり、計画はまだ無い（#933）。"""
+    """版 2 の状態は提案の手順から始まり、改修計画はまだ無い（#933）。"""
     run_init(_args(tmp_path))
     _, state = _state_of(tmp_path)
     assert state["schema"] == 2
@@ -750,7 +750,7 @@ def test_init_records_the_vocabulary_for_the_prompt(run_init, tmp_path, vocabula
 # ---------- 再開（#727 / #648 の決定 13〜16） ----------
 
 def test_resume_before_the_plan_rebuilds_the_limits_from_the_new_budget(run_init, tmp_path):
-    """決定 24 — 計画の前に予算を置き換えた再開は、上限の表を新しい予算で組み直す。"""
+    """決定 24 — 改修計画の前に予算を置き換えた再開は、上限の表を新しい予算で組み直す。"""
     run_init(_args(tmp_path, budget_minutes="30"))
     run_init(_args(tmp_path, budget_minutes="10"))
     _, after = _state_of(tmp_path)
@@ -1120,7 +1120,7 @@ def test_resume_emits_the_phase_to_resume_from(run_init, tmp_path, capsys):
 # ---------- 予算の再開での扱い（設計の「再開」） ----------
 
 def test_resume_before_the_plan_replaces_the_budget(run_init, tmp_path, capsys):
-    """計画の前（phase が propose / plan で plan が無い）なら置き換えて記録に積む。"""
+    """改修計画の前（phase が propose / plan で plan が無い）なら置き換えて記録に積む。"""
     run_init(_args(tmp_path))
     capsys.readouterr()
 
@@ -1138,7 +1138,7 @@ def test_resume_before_the_plan_replaces_the_budget(run_init, tmp_path, capsys):
 ])
 def test_resume_after_the_plan_only_notifies_the_budget(
         run_init, tmp_path, capsys, phase, plan):
-    """計画の後は置き換えず、「反映しない」の 1 行だけを出す。"""
+    """改修計画の後は置き換えず、「反映しない」の 1 行だけを出す。"""
     run_init(_args(tmp_path))
     _, state = _state_of(tmp_path)
     state["phase"], state["plan"] = phase, plan
@@ -1186,7 +1186,7 @@ def test_a_named_implementer_outside_the_participants_stops(run_init, tmp_path):
 
 
 def test_resume_before_the_plan_reassigns_a_dropped_implementer(run_init, tmp_path, capsys):
-    """計画の前に実装担当が参加者から外れたら、決め方を当て直して記録に積む。"""
+    """改修計画の前に実装担当が参加者から外れたら、決め方を当て直して記録に積む。"""
     run_init(_args(tmp_path), probe={})
     capsys.readouterr()
 
@@ -1200,7 +1200,7 @@ def test_resume_before_the_plan_reassigns_a_dropped_implementer(run_init, tmp_pa
 
 
 def test_resume_after_the_plan_stops_when_the_implementer_is_dropped(run_init, tmp_path):
-    """計画の後に実装担当が外れたら終了コード 4 で止め、状態を書き換えない。"""
+    """改修計画の後に実装担当が外れたら終了コード 4 で止め、状態を書き換えない。"""
     run_init(_args(tmp_path), probe={})
     _, state = _state_of(tmp_path)
     state["phase"], state["plan"] = "add-tests", {"end_at": "2026-09-24T11:00:00"}
@@ -1264,7 +1264,7 @@ def test_the_judge_decision_is_recorded_once(run_init, tmp_path, monkeypatch, cm
     assert calls == [1]
 
 
-# ---------- フェーズの開始（`start-phase`。#933 の決定 8・実装計画 I1） ----------
+# ---------- 手順の開始（`start-phase`。#933 の決定 8・実装計画 I1） ----------
 
 @pytest.fixture
 def phase_state(tmp_path, env_tmp_dir, monkeypatch, cmd_phases):
@@ -1356,7 +1356,7 @@ PLANNED = {
 
 @pytest.mark.parametrize("phase, planned, expected", [
     ("propose", False, 12 * 60 + 180),       # 提案の枠の終わり 10:12
-    ("plan", False, 18 * 60 + 180),          # 計画の枠の終わり 10:18
+    ("plan", False, 18 * 60 + 180),          # 改修計画の枠の終わり 10:18
     ("add-tests", True, 23 * 60 + 180),      # 最後の項目の完了の締め切り 10:20 + 3 分
     ("implement", True, 32 * 60 + 180),      # 10:30 + 2 分
     ("fix", True, 58 * 60 + 180),            # 開始 + 60 − 全体のテストの予備時間 2 分

@@ -1,7 +1,7 @@
 """mvv-gate.py: 関門 1・2 の材料が MVV に従うかの判定と、関門を省く条件（#1078）。
 
 claude は NDF_MVV_CLAUDE で、gh は PATH の先頭の偽物で差し替える。差し替えた claude は呼ばれるたびに
-calls.txt へ 1 行を足す（機械の検査で止めるときに LLM を呼ばないことを数で見る）。
+calls.txt へ 1 行を足す（機械のチェックで止めるときに LLM を呼ばないことを数で見る）。
 """
 from __future__ import annotations
 

@@ -1,9 +1,9 @@
-"""公開する Skill の本文に自リポジトリ前提が混入していないかの検査を確かめる。
+"""公開する Skill の本文に自リポジトリ前提が混入していないかのチェックを確かめる。
 
 記号（T1〜T6）は `issues/parallel-batch-07/06-issue-292.md` の「テスト設計」に対応する。
 
-検査そのものは `scripts/check-skill-repo-assumptions.py` にある。実物の Skill は
-書き換えず、一時ディレクトリへ最小の木を作ってそこを検査させる（T6 だけが実物を読む）。
+チェックそのものは `scripts/check-skill-repo-assumptions.py` にある。実物の Skill は
+書き換えず、一時ディレクトリへ最小の木を作ってそこをチェックさせる（T6 だけが実物を読む）。
 """
 from __future__ import annotations
 
@@ -54,7 +54,7 @@ def build_tree(tmp_path: Path, *, listed: str, unlisted: str) -> Path:
 
 def run_check(skills_dir: Path | None, exclusions: dict[str, str] | None = None,
               tmp_path: Path | None = None) -> subprocess.CompletedProcess[str]:
-    """検査を起動する。`exclusions` を省くと、検査が持つ既定の宣言を使う。
+    """チェックを起動する。`exclusions` を省くと、チェックが持つ既定の宣言を使う。
 
     `skills_dir` を None にすると `--skills-dir` を渡さず、family をすべて見る走査になる。
     """
@@ -152,7 +152,7 @@ def test_excluded_file_passes(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("reason", ["", "   "])
 def test_exclusion_without_reason_fails_the_check(tmp_path: Path, reason: str) -> None:
-    """理由の無い除外は、ヒットの有無に関わらず検査自体を失敗させる。"""
+    """理由の無い除外は、ヒットの有無に関わらずチェック自体を失敗させる。"""
     skills = build_tree(tmp_path, listed=CLEAN_BODY, unlisted=CLEAN_BODY)
     result = run_check(skills, {key_for(skills, f"{LISTED_SKILL}/SKILL.md"): reason}, tmp_path)
     assert result.returncode == 2, output_of(result)
@@ -163,7 +163,7 @@ def test_exclusion_without_reason_fails_the_check(tmp_path: Path, reason: str) -
 
 
 def test_exclusion_pointing_at_missing_file_fails_the_check(tmp_path: Path) -> None:
-    """実在しないファイルを除外に載せると、検査自体が失敗する。"""
+    """実在しないファイルを除外に載せると、チェック自体が失敗する。"""
     skills = build_tree(tmp_path, listed=CLEAN_BODY, unlisted=CLEAN_BODY)
     result = run_check(skills, {key_for(skills, "charlie/SKILL.md"): "消えた文書"}, tmp_path)
     assert result.returncode == 2, output_of(result)
@@ -181,10 +181,10 @@ def test_exclusion_outside_scan_scope_fails_the_check(tmp_path: Path) -> None:
 
 
 def test_exclusion_of_another_family_is_not_validated(tmp_path: Path) -> None:
-    """検査していない plugin family の除外は、実在の検査に掛けない。
+    """チェックしていない plugin family の除外は、実在のチェックに掛けない。
 
     `--skills-dir` は family を 1 つだけ指定できる。走査していないものを「実在しない」と
-    読むと、正しい宣言のまま検査が落ちる。
+    読むと、正しい宣言のままチェックが落ちる。
     """
     skills = build_tree(tmp_path, listed=CLEAN_BODY, unlisted=CLEAN_BODY)
     other = tmp_path / "plugins" / "other" / "skills"
@@ -193,7 +193,7 @@ def test_exclusion_of_another_family_is_not_validated(tmp_path: Path) -> None:
 
 
 def test_real_exclusions_do_not_break_a_single_family_scan() -> None:
-    """検査が持つ既定の宣言のまま、NDF 以外の family だけを検査しても通る。"""
+    """チェックが持つ既定の宣言のまま、NDF 以外の family だけをチェックしても通る。"""
     result = run_check(REPO_ROOT / "plugins/playwright-kit/skills")
     assert result.returncode == 0, output_of(result)
 
@@ -227,7 +227,7 @@ def test_tests_directory_is_not_scanned(tmp_path: Path) -> None:
 
 
 def test_real_repository_passes() -> None:
-    """実物の Skill でも通る。検査を入れた時点で落ちる状態を作らない。"""
+    """実物の Skill でも通る。チェックを入れた時点で落ちる状態を作らない。"""
     result = run_check(REPO_ROOT / "plugins/ndf/skills")
     assert result.returncode == 0, output_of(result)
 
@@ -267,7 +267,7 @@ def test_report_shows_scan_size() -> None:
 def test_report_still_fails_on_a_hit(tmp_path: Path) -> None:
     """`--report` は出力を足すだけで、除外の外にヒットがあれば 1 を返す。
 
-    レポートを常に 0 で返すと、README がこのコマンドを検査の一覧として載せている以上、
+    レポートを常に 0 で返すと、README がこのコマンドをチェックの一覧として載せている以上、
     利用者と自動処理が違反を成功として扱う。
     """
     skills = build_tree(tmp_path, listed=ASSUMING_BODY, unlisted=CLEAN_BODY)
@@ -279,7 +279,7 @@ def test_report_still_fails_on_a_hit(tmp_path: Path) -> None:
     assert "[検知]" in result.stdout, output_of(result)
 
 
-# --- T7: manifest に載る Skill を走査できないと検査が成立しない ---
+# --- T7: manifest に載る Skill を走査できないとチェックが成立しない ---
 
 
 def rewrite_manifest(skills_dir: Path, names: list[str]) -> None:
@@ -289,7 +289,7 @@ def rewrite_manifest(skills_dir: Path, names: list[str]) -> None:
 
 
 def test_missing_skill_directory_fails_the_check(tmp_path: Path) -> None:
-    """manifest に載る Skill のディレクトリが無いと、検査自体が失敗する。"""
+    """manifest に載る Skill のディレクトリが無いと、チェック自体が失敗する。"""
     skills = build_tree(tmp_path, listed=CLEAN_BODY, unlisted=CLEAN_BODY)
     rewrite_manifest(skills, [LISTED_SKILL, "delta"])
     result = run_check(skills, {}, tmp_path)
@@ -298,7 +298,7 @@ def test_missing_skill_directory_fails_the_check(tmp_path: Path) -> None:
 
 
 def test_skill_directory_without_scannable_markdown_fails_the_check(tmp_path: Path) -> None:
-    """ディレクトリがあっても走査できる本文が無ければ、同じく検査自体が失敗する。"""
+    """ディレクトリがあっても走査できる本文が無ければ、同じくチェック自体が失敗する。"""
     skills = build_tree(tmp_path, listed=CLEAN_BODY, unlisted=CLEAN_BODY)
     rewrite_manifest(skills, [LISTED_SKILL, "echo"])
     (skills / "echo" / "tests").mkdir(parents=True)

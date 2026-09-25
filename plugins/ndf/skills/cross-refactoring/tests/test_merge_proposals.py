@@ -2,7 +2,7 @@
 
 鍵（`path` + `symbol` + `smell`）が同じ提案を機械的にまとめ、語彙外は `vocabulary`、
 しきい値未満は `threshold` で見送る。残りを `path` + `symbol` の組の単位で上位 30 組、
-組の中は上位 3 件まで計画へ渡し、外れたものは `rank` で見送る。
+組の中は上位 3 件まで改修計画へ渡し、外れたものは `rank` で見送る。
 """
 from __future__ import annotations
 

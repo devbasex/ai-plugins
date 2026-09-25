@@ -122,7 +122,7 @@ def _replay_without_dropped(
             mode = "widened"
             mapping = _attempt(work, ordered, owner, live - dropped, head)
     if mapping is None:
-        info("⚠ 積み直しが競合したため、計画の項目をすべて取り消します")
+        info("⚠ 積み直しが競合したため、改修計画の項目をすべて取り消します")
         dropped = set(live)
         mode = "all"
         revert_range(work, ordered, head)
@@ -165,7 +165,7 @@ def drop(
 ) -> dict[str, Any]:
     """項目（と、どの項目にも属さないコミット）を取り消す。取り消した項目 ID を返す。
 
-    `extra_shas` は項目に属さない取り消し対象（計画に無い `Item-Id` のコミットなど）。
+    `extra_shas` は項目に属さない取り消し対象（改修計画に無い `Item-Id` のコミットなど）。
     戻り値は `{"mode", "dropped", "reverted_commits", "replayed"}`。取り消した項目は
     `status: reverted`、`failure_reason` に理由を持つ。**見送り（`deferred_items`）へ
     入れるかは呼び出し側が決める**（`test_failed` / `not_done` は見送り、検証の失敗は

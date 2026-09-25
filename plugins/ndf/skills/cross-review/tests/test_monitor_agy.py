@@ -30,7 +30,7 @@ def test_the_monitor_accepts_the_new_name(tmp_path) -> None:
 
 
 def test_the_monitor_rejects_the_old_name() -> None:
-    """綴りの検査は席の名前の形が行う（#727）。通らなければ終了コード 2。"""
+    """綴りのチェックは席の名前の形が行う（#727）。通らなければ終了コード 2。"""
     r = _run("1", "gemini")
     assert r.returncode == 2
     assert "席の名前の形が違います" in r.stderr

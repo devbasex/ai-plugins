@@ -4,7 +4,7 @@
 参照は 2 件で、どちらも共通層ではなく Skill の本体どうしの参照である（#344）。
 一覧へ書いた 2 件と、新しく増えた参照を分けられることを確かめる。
 
-数え方そのものも検査する。**文書のリンクは対象にしない**（読み手への案内であり、
+数え方そのものもチェックする。**文書のリンクは対象にしない**（読み手への案内であり、
 配布した先で解決できなくても手順は動く）。**Skill 名だけを手がかりにすると
 `gh pr view` のような別の用途が入る**ため、直後に `scripts` が続く形へ絞る。
 """
@@ -35,7 +35,7 @@ def checker():
 
 
 def _tree(base: pathlib.Path) -> pathlib.Path:
-    """検査が読む最小の木。`plugins/ndf/skills/<名前>/` の下だけを見る。"""
+    """チェックが読む最小の木。`plugins/ndf/skills/<名前>/` の下だけを見る。"""
     skills = base / "plugins" / "ndf" / "skills"
     for name in ("cross-review", "cross-refactoring", "fix", "pr"):
         (skills / name / "scripts").mkdir(parents=True)
@@ -63,7 +63,7 @@ def test_every_exception_carries_an_issue_number(checker) -> None:
 
 
 def test_the_check_is_wired_into_the_validation(checker) -> None:
-    """既存の検査から呼ばれていなければ、継続的統合では実行されない。"""
+    """既存のチェックから呼ばれていなければ、継続的統合では実行されない。"""
     body = (ROOT / "scripts" / "validate-runtime-plugins.sh").read_text(encoding="utf-8")
     lines = [
         line for line in body.splitlines()

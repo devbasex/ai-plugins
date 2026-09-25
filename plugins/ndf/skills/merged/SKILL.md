@@ -135,18 +135,18 @@ python3 "$SCRIPTS/merged-steps.py" merge-when-green <PR番号> --root <主ディ
   [--method merge|squash|rebase] [--interval 10] [--recheck 5] [--no-checks-after 60] [--timeout 3600] [--stale-after 300] [--no-cleanup]
 ```
 
-- CI の検査が全部通るまで待つ。push で先頭のコミットが変わると待ち直す（`items` に `rewait` が載る）
+- CI のチェックが全部通るまで待つ。push で先頭のコミットが変わると待ち直す（`items` に `rewait` が載る）
 - 同じ先頭のコミットで pending を見た後に全部が通れば、その周でマージする。pending を見ずに通って
   いたときだけ `--recheck` 秒後に 1 度確かめ直す。rollup が空のうちはマージせず、`--no-checks-after`
   秒を過ぎても空なら CI の無いリポジトリとしてマージする（`items` に `no_checks` が載る）
-- 失敗した検査が 1 つでもあれば、マージせずに `stopped`（1）で止まる。`items[].name` が失敗した検査
+- 失敗したチェックが 1 つでもあれば、マージせずに `stopped`（1）で止まる。`items[].name` が失敗したチェック
 - 通れば `gh pr merge --admin` でマージし、続けて上の `cleanup` と同じ後片付けを行う。
   `status` の読み方は上の表と同じ
-- 上限の時間を過ぎても検査が終わらなければ `stopped`（1）で止まる。`next` のコマンドで打ち直す
-- 実行が終わった（`completed`）のに検査が pending のまま `--stale-after` 秒続けば、GitHub 側で
-  取り残された検査とみなし、そのジョブを `gh run rerun <run> --job <job>` で **1 度だけ**再実行する
+- 上限の時間を過ぎてもチェックが終わらなければ `stopped`（1）で止まる。`next` のコマンドで打ち直す
+- 実行が終わった（`completed`）のにチェックが pending のまま `--stale-after` 秒続けば、GitHub 側で
+  取り残されたチェックとみなし、そのジョブを `gh run rerun <run> --job <job>` で **1 度だけ**再実行する
   （`items` に `{"kind": "check", "result": "rerun", "run": ..., "job": ...}` が載る）。
-  再実行した同じ検査が再び取り残されたら `stopped`（1）で止まる（`items` の `result` は `stuck`）
+  再実行した同じチェックが再び取り残されたら `stopped`（1）で止まる（`items` の `result` は `stuck`）
 - ジョブが `queued` のままランナーを待つ間は、待ちの 1 周ごとに stderr へ
   `merge-when-green: CI のランナー待ち（待ち行列 N 件、待ち M 件）` を出す。最後に見た待ち行列の件数は
   `metrics.queued_runs` に残る。supervise.py の run のステップで動かすと、この行が `progress.jsonl` の
@@ -161,8 +161,8 @@ python3 "$SCRIPTS/merged-steps.py" probe (--pr <PR番号> | --head <ブランチ
 
 | `metrics.class` | 何を見たか | `metrics.action` |
 | --- | --- | --- |
-| `failed` | 失敗の結論の検査がある | `fix` |
-| `stale` | 実行が completed なのに検査が pending でジョブの結論が無く、実行の `attempt` が 1 | `--act` なら `gh run rerun <run> --job <job>` を打って `remedied`。打てない・`--act` が無ければ `judge` |
+| `failed` | 失敗の結論のチェックがある | `fix` |
+| `stale` | 実行が completed なのにチェックが pending でジョブの結論が無く、実行の `attempt` が 1 | `--act` なら `gh run rerun <run> --job <job>` を打って `remedied`。打てない・`--act` が無ければ `judge` |
 | `stale_again` | 同じ形で `attempt` が 2 以上（既に再実行した） | `judge` |
 | `settled` | 実行が completed でジョブに結論があり、表示だけが pending | `wait` |
 | `queued` | ジョブがランナーを待っている | `wait` |

@@ -87,7 +87,7 @@ def test_non_dict_comment_entry_dies(patched_tmp_dir, state_mod, capsys):
 
 
 def test_valid_dict_payloads_dont_die(patched_tmp_dir, state_mod):
-    """正常な dict payload (regression guard): non-dict 検査が誤検知しないこと。"""
+    """正常な dict payload (regression guard): non-dict チェックが誤検知しないこと。"""
     tmp_dir = patched_tmp_dir
     _seed_state_two_rounds(tmp_dir)
 

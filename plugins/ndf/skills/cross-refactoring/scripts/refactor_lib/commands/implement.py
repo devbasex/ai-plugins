@@ -6,7 +6,7 @@
 
 | 見つけたもの | 扱い |
 | --- | --- |
-| どの項目にも属さないコミット（`Item-Id` が無い・計画に無い） | そのコミットだけを取り消す |
+| どの項目にも属さないコミット（`Item-Id` が無い・改修計画に無い） | そのコミットだけを取り消す |
 | 手順を外れたコミット（範囲の外・トレーラー欠け・2 コミット以上・差分予算・文言固定テスト・期待値の変更） | 項目を取り消す（`status: reverted`。見送りには入れない。I5） |
 | コミットの無い項目・完了の締め切りを過ぎてコミットした項目 | `not_done` で見送り、項目のコミットを取り消す（AC12） |
 | 足したテストが今のコードで落ちた項目 | `test_failed` で見送り、テストのコミットを取り消す（決定 13） |
@@ -64,7 +64,7 @@ from ..vocabulary import DEFER_NOT_DONE, DEFER_TEST_FAILED
 
 @dataclass
 class Intake:
-    """1 フェーズ分の取り込みの結論。取り消しは最後に 1 度だけまとめて行う。"""
+    """1 つの手順分の取り込みの結論。取り消しは最後に 1 度だけまとめて行う。"""
 
     extra: list[str] = field(default_factory=list)            # どの項目にも属さないコミット
     rejected: dict[str, str] = field(default_factory=dict)     # 項目 → 手順を外れた理由
@@ -74,7 +74,7 @@ class Intake:
 
 
 def _phase_commits(state: dict[str, Any], phase: str) -> list[str]:
-    """フェーズの起点から HEAD までのコミットを**古い順**で返す。確定できなければ中断。"""
+    """手順の起点から HEAD までのコミットを**古い順**で返す。確定できなければ中断。"""
     work = work_dir(state)
     base = phase_record(state, phase).get("base_sha")
     head = git_out(work, ["rev-parse", "HEAD"]) or ""
@@ -124,7 +124,7 @@ def _deadline_passed(item: dict[str, Any], key: str, estimate_key: str, when: Op
 def _record_seconds(
     state: dict[str, Any], phase: str, key: str, accepted: dict[str, dict[str, Any]],
 ) -> None:
-    """項目の所要。起点は最初の項目ならフェーズの開始、2 件目からは直前の項目のコミット（設計）。"""
+    """項目の所要。起点は最初の項目なら手順の開始、2 件目からは直前の項目のコミット（設計）。"""
     previous = phase_record(state, phase).get("started_at")
     ordered = sorted(accepted.items(), key=lambda kv: clock.parse(kv[1]["time"]) or clock.now())
     for item_id, fact in ordered:
@@ -354,7 +354,7 @@ def _implement_problem(
     item: dict[str, Any], commits: list[dict[str, Any]], scope: list[str],
     tracked: list[str], state: dict[str, Any],
 ) -> Optional[str]:
-    """実装のコミットが手順を満たすか。適用の検査（v10.17.x）を項目の単位で掛ける。"""
+    """実装のコミットが手順を満たすか。適用のチェック（v10.17.x）を項目の単位で掛ける。"""
     if len(commits) > 1:
         return f"実装が {len(commits)} コミットあります（1 改善項目 = 1 コミット）"
     problem = verify_commit_basics(commits[0], scope, "コミットが範囲にありません", check_test=False)
@@ -387,7 +387,7 @@ def cmd_merge_implement(args: argparse.Namespace) -> None:
     終了コード: 0 = 取り込んだ / 2 = 残る項目 0 件（最終ゲートへ）/ 4 = 範囲を確定できない。
 
     **テストの差分のうち一次の判定で決まらないものは、最終ゲートのレビューへ引き継ぐ**
-    （`review_test_judgements`。決定 25）。計画の後に判断のために LLM を起動しない。
+    （`review_test_judgements`。決定 25）。改修計画の後に判断のために LLM を起動しない。
     """
     path, state = load_state(args.id)
     _prepare(path, state)

@@ -34,7 +34,7 @@ def test_item_estimate_uses_technique_and_falls_back(budget):
 
 def test_reserve_matches_the_917_example(budget):
     r = budget.reserve(60, False, 5.5)
-    # 最終ゲートの修正 1 回分（final_fix）も計画の時点で差し引く（決定 26）
+    # 最終ゲートの修正 1 回分（final_fix）も改修計画の時点で差し引く（決定 26）
     assert r == {"danger_whole_test": 1.0, "final_whole_test": 1.0, "fix": 5.5, "final_fix": 5.5}
     assert budget.reserve_total(r) == pytest.approx(13.0)
     # 経過 9 分で使える時間は 60 − 9 − 13 = 38 分

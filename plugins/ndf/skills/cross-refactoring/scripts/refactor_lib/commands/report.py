@@ -31,7 +31,7 @@ def cmd_finalize(args: argparse.Namespace) -> None:
 
     | 起動のされ方 | 追記する条件 |
     | --- | --- |
-    | 単独 | 最終ゲートの検査が通り、`--review-status` が `approved` |
+    | 単独 | 最終ゲートのチェックが通り、`--review-status` が `approved` |
     | 工程の 1 つ | 最終ゲートが通った（全体のテストか継続的統合） |
 
     **単独起動で `--review-status` を渡さなければ追記しない。** その時点では
@@ -74,18 +74,18 @@ def cmd_status(args: argparse.Namespace) -> None:
     print(f"# cross-refactoring rf{state['id']}（{state['repo']} #{state['current_pr']}）")
     print(f"ホスト: {state['host']}（{state['host_detection']}）")
     print(f"参加者（提案）: {' / '.join(state['runtimes'])} / 実装担当: {state.get('implementer')}")
-    print(f"フェーズ: {state.get('phase')} / 想定最大時間: {state.get('budget_minutes')} 分")
+    print(f"手順: {state.get('phase')} / 想定最大時間: {state.get('budget_minutes')} 分")
     print()
     print(_item_table(state))
 
 
 def cmd_report(args: argparse.Namespace) -> None:
-    """完了報告（AC26）。フェーズ別の所要・想定最大時間との差・採用と見送りの件数（理由別）・
+    """完了報告（AC26）。手順別の所要・想定最大時間との差・採用と見送りの件数（理由別）・
     全体のテスト・Jev の使用を並べる。"""
     path, state = load_state(args.id)
     _print_header(state)
     print()
-    print("## フェーズ別の所要")
+    print("## 手順別の所要")
     print()
     print(_phase_table(state))
     print()
@@ -111,7 +111,7 @@ def cmd_report(args: argparse.Namespace) -> None:
 def _elapsed_seconds(state: dict[str, Any]) -> float:
     """`init` の開始から、最終ゲートの全体のテストの終わりまで（非機能の条件）。
 
-    `cross-review` の所要は含めない。終わりは最終ゲートの最後の検査、無ければ検証の
+    `cross-review` の所要は含めない。終わりは最終ゲートの最後のチェック、無ければ検証の
     終わり、それも無ければ今。
     """
     gate = state.get("final_gate") or {}
@@ -191,7 +191,7 @@ def _whole_detail(whole: dict[str, Any]) -> str:
 
 
 def _phase_table(state: dict[str, Any]) -> str:
-    lines = ["| フェーズ | 所要（分） |", "| --- | ---: |"]
+    lines = ["| 手順 | 所要（分） |", "| --- | ---: |"]
     for name in ("propose", "plan", "add-tests", "implement", "verify", "fix"):
         record = phase_record(state, name)
         seconds = record.get("seconds")

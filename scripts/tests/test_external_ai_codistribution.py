@@ -49,7 +49,7 @@ def _distributed(manifest: Path) -> set[str]:
 
 
 def test_some_skill_points_at_external_ai() -> None:
-    """走査が 0 件になると、以下の検査が何も見ないまま通る。"""
+    """走査が 0 件になると、以下のチェックが何も見ないまま通る。"""
     assert _skills_pointing_at_external_ai()
 
 

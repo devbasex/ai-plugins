@@ -18,7 +18,7 @@ NDF 30 Skill = 6,582 文字 = 14,485 文字がすべて一覧に載っており�
 
 | 施策 | 内容 |
 | --- | --- |
-| トリガ書式の変更 | `Triggers: 'a', 'b'` を廃止し `Use when …（a・b）` へ。旧書式は検査で失敗させる |
+| トリガ書式の変更 | `Triggers: 'a', 'b'` を廃止し `Use when …（a・b）` へ。旧書式はチェックで失敗させる |
 | `description` の圧縮 | 全 Skill を新書式へ。用途文も冗長な言い換えを削る |
 | playwright 系の分離 | 4 Skill を `playwright-kit` プラグインへ。Skill 名は変えない |
 | `allowed-tools` | **削らない**。利用制限ではなく事前承認で、外すと手順のたびに承認を求められる |
@@ -182,7 +182,7 @@ Skill を 35 個から **36 個**へ増やした。ミッションの Pull Reque
 行い、配布された成果物を確かめるのは利用者の環境を持つ側が行う。
 
 版を上げる基準そのものは `docs/versioning-and-distribution.md`（「版の付け方と開発版の配布」と
-「検査に載らず手で直す箇所」）にあり、`release` はそれを指す。
+「チェックに載らず手で直す箇所」）にあり、`release` はそれを指す。
 Skill 側に新しい基準は置かない。
 
 予算への影響（`python3 scripts/check-skill-frontmatter.py --report`）:

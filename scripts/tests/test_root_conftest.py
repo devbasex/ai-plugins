@@ -28,7 +28,7 @@ BUNDLE = "plugins/ndf/skills/development-workflow/tests"
 
 # 一覧に無い束。**シェルスクリプトを起動しない束であること**が条件である。
 # `_path_without` が組み立てる `PATH` には `dirname` すら無いため、スクリプトを
-# 起動する束をここへ置くと、前提の検査ではなくスクリプトの側で落ちる。
+# 起動する束をここへ置くと、前提のチェックではなくスクリプトの側で落ちる。
 OUTSIDE_BUNDLE = "plugins/playwright-kit/skills/playwright-kit-ops/tests"
 
 
@@ -131,9 +131,9 @@ def test_the_opt_in_skips_instead_of_failing(tmp_path: Path) -> None:
 
 
 def test_the_outside_bundle_is_really_outside_the_table() -> None:
-    """`OUTSIDE_BUNDLE` が一覧へ載ったら、次の検査は何も確かめていない。
+    """`OUTSIDE_BUNDLE` が一覧へ載ったら、次のチェックは何も確かめていない。
 
-    載せた側は検査が素通りしたことに気づけないため、ここで落とす。
+    載せた側はチェックが素通りしたことに気づけないため、ここで落とす。
     """
     body = _read_root_conftest()
     assert f'"{OUTSIDE_BUNDLE}"' not in body

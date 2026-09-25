@@ -543,7 +543,7 @@ def test_evidence_directory_is_excluded_from_tracking(main_repo: Path, worktree:
     assert result["rc"] == 0, result
 
     written = list((worktree / ".ndf-evidence").rglob("evidence.txt"))
-    assert written, "証跡が書かれていること（書かれないと除外の検査にならない）"
+    assert written, "証跡が書かれていること（書かれないと除外のチェックにならない）"
 
     status = subprocess.run(
         ["git", "status", "--porcelain"], cwd=str(worktree), capture_output=True, text=True,

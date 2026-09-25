@@ -298,7 +298,7 @@ class Editor:
 
 
 def bump_update_heading(ed, readme):
-    """README の更新案内の見出しを新しい版へ書き換える（検査は見出しを現行の版の 1 つだけに求める）。"""
+    """README の更新案内の見出しを新しい版へ書き換える（チェックは見出しを現行の版の 1 つだけに求める）。"""
     rel = readme.relative_to(ed.root).as_posix()
     if not readme.is_file():
         ed.manual.append(f"{rel} が無い（更新案内の見出し）")
@@ -536,7 +536,7 @@ def changelog_section(root, version, plugin="ndf"):
 
 
 def run_checks(root):
-    """リリース前の検査を回し、[(名前, 通ったか, 末尾の出力)] を返す。"""
+    """リリース前のチェックを回し、[(名前, 通ったか, 末尾の出力)] を返す。"""
     res = []
     for name, cmd in (("check-doc-staleness", ["python3", "scripts/check-doc-staleness.py", "--root", str(root)]),
                       ("validate-runtime-plugins", ["bash", "scripts/validate-runtime-plugins.sh"])):
@@ -622,7 +622,7 @@ def cmd_release(a):
         mark = {True: "pass", False: "fail", None: "skip"}
         body = "\n".join([
             f"ndf v{ver} のリリース（{a.channel}）。対象の plugin: {', '.join(plugins)}",
-            "", "## 含む PR", "", section or "（CHANGELOG.md に該当の節が無い）", "", "## 検査の結果", "",
+            "", "## 含む PR", "", section or "（CHANGELOG.md に該当の節が無い）", "", "## チェックの結果", "",
             *[f"- {name}: {mark[ok]}" + (f"（{tail.splitlines()[-1]}）" if tail else "")
               for name, ok, tail in run_checks(root)],
             "", "🤖 Generated with [Claude Code](https://claude.com/claude-code)",

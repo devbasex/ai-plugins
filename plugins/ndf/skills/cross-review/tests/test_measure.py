@@ -371,7 +371,7 @@ def test_oracle_counts_a_null_position_as_unmatched(measure_mod):
 def test_oracle_does_not_count_a_finding_without_an_id(measure_mod):
     """`finding_id` を持たない指摘は結ばない（#558 レビュー）。
 
-    `str(None)` を返すと、呼び出し側の `finding_id is None` の検査をすり抜け、
+    `str(None)` を返すと、呼び出し側の `finding_id is None` のチェックをすり抜け、
     上限の方式の集合へ文字列 `"None"` が入る。**上限が 1 件多く見え、他の方式の
     再現率がその分だけ低く出る。** 結べなかったものとして `unmatched` へ数える。
     """

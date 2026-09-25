@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""エージェント向け指示書を適切に保つ検査（#554）。
+"""エージェント向け指示書を適切に保つチェック（#554）。
 
 指示書（既定では `AGENTS.md` / `CLAUDE.md` / `KIRO.md`）は、**根に置いたものをそのランタイムの
 全セッションと全サブエージェントが毎回読む**。何を書いてもよい場所ではなく、毎回の読み込みの量を
@@ -11,10 +11,10 @@
 
 **判定の強さはリポジトリ側の宣言（`.ndf/instructions.json`）が決める。** 宣言が無くても
 動くのは、リポジトリの性質によらず誤りである「参照先の無い即時読み込み」と、落とさずに
-数える「読み込みの量」「指示の数」だけである。宣言を書くまで使えない検査は、入れた利用者が
+数える「読み込みの量」「指示の数」だけである。宣言を書くまで使えないチェックは、入れた利用者が
 最初に外す。
 
-**この検査はどのファイルも書き換えず、課題も立てない。** 指摘へ扱いの目印（`直す` / `起票` /
+**このチェックはどのファイルも書き換えず、課題も立てない。** 指摘へ扱いの目印（`直す` / `起票` /
 `報告`）を載せるまでで、書き込みと投稿は呼び出し側が行う。
 
     python3 instructions-check.py --root .
@@ -940,7 +940,7 @@ class _Parser(argparse.ArgumentParser):
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = _Parser(description="エージェント向け指示書を適切に保つ検査")
+    parser = _Parser(description="エージェント向け指示書を適切に保つチェック")
     parser.add_argument("--root", default=".", help="リポジトリの根（既定は現在地）")
     parser.add_argument("--scope", action="append", choices=SCOPES,
                         help="走査するスコープ（重ねて指定できる。既定は project）")

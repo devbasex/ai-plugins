@@ -33,7 +33,7 @@ def offending_lines() -> list[tuple[str, int, str]]:
 
 
 def test_the_assertions_exist() -> None:
-    """走査対象が 0 件のまま通ると、検査が働いていないことに気づけない。"""
+    """走査対象が 0 件のまま通ると、チェックが働いていないことに気づけない。"""
     assert sorted(ASSERTIONS.glob("*.sh"))
 
 

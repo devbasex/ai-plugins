@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# cross-refactoring: フェーズごとのプロンプトを組み立てて CLI を起動する（#933）。
+# cross-refactoring: 手順ごとのプロンプトを組み立てて CLI を起動する（#933）。
 #
 # Usage: launch-cli.sh <runtime> <phase> <ID>
 #
@@ -7,7 +7,7 @@
 #   phase    propose | plan | add-tests | implement | fix | final-fix
 #   ID       状態ファイルの鍵（最初に初期化した Pull Request 番号）
 #
-# **フェーズの名前は状態・履歴・`limits.py`・雛形で同じ語を使う。** 提案だけが参加者の
+# **手順の名前は状態・履歴・`limits.py`・雛形で同じ語を使う。** 提案だけが参加者の
 # 全員、残りは実装担当 1 者が担う（決定 1）。
 #
 # **ホストか否かで分岐しない。** ランタイム名だけで分岐する。ホストと同じランタイムが
@@ -64,13 +64,13 @@ resolve_print_timeout() {
 configure_phase() {
 case "$PHASE" in
   propose|plan)
-    # 提案と計画は読むだけ。**読み取り用の作業ディレクトリ**（`prepare-worktrees.sh` が
+    # 提案と改修計画は読むだけ。**読み取り用の作業ディレクトリ**（`prepare-worktrees.sh` が
     # 担当ごとに detach で用意し、HEAD へ同期する）で行う。
     STEM=$TMP_DIR/$RUNTIME-$PHASE-rf$ID
     WORKDIR=$ROOT/$RUNTIME
     ;;
   add-tests|implement|fix)
-    # 書き換えるフェーズは常に work/ の中だけで行う。並列には起動しない。
+    # 書き換える手順は常に work/ の中だけで行う。並列には起動しない。
     STEM=$TMP_DIR/$RUNTIME-$PHASE-rf$ID
     WORKDIR=$WORK
     ;;
@@ -81,7 +81,7 @@ case "$PHASE" in
     WORKDIR=$WORK
     ;;
   *)
-    echo "未知のフェーズです: $PHASE" >&2
+    echo "未知の手順です: $PHASE" >&2
     exit 1
     ;;
 esac
@@ -110,11 +110,11 @@ PROMPT=$STEM-prompt.md
 TEMPLATE=$PROMPTS/$PHASE.md
 [ -f "$TEMPLATE" ] || { echo "プロンプト雛形がありません: $TEMPLATE" >&2; exit 1; }
 
-# フェーズごとに渡す項目。**締め切りは項目ごとの時刻で渡す**（AC12）。
+# 手順ごとに渡す項目。**締め切りは項目ごとの時刻で渡す**（AC12）。
 collect_items() {
 case "$PHASE" in
   plan)
-    # 候補の全件。`key` は計画の結果が候補を指す鍵（`path#symbol#smell`）。
+    # 候補の全件。`key` は改修計画の結果が候補を指す鍵（`path#symbol#smell`）。
     ITEMS_JSON=$(jq '[.candidates[] | {key: "\(.path)#\(.symbol)#\(.smell)", path, symbol,
       smell, technique, severity, rationale, plan, test_gap, agreed_by: (.proposed_by | length)}]' "$STATE")
     ;;

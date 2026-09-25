@@ -1,6 +1,6 @@
 """配分テーブル（項目 1 件あたりの所要の見積り）と、その材料の履歴（#933）。
 
-**配分テーブルは保存しない**（#933 決定 7）。計画のたびに履歴から集計する。集計した
+**配分テーブルは保存しない**（#933 決定 7）。改修計画のたびに履歴から集計する。集計した
 値を別に持つと、履歴と表が食い違う。履歴は実行ごとに 1 行の JSONL で、リポジトリ
 ごとに 1 ファイルに分ける。テストの所要はリポジトリで大きく違い、混ぜると見積りが
 外れる。
@@ -131,7 +131,7 @@ def build_table(rows: list[dict[str, Any]], defaults: dict[str, float]) -> dict[
 
     `source` は行が 1 行でもあれば `history` である。個々の種類が初期値へ落ちても
     `history` のまま残す。**何を材料にしたか**を表す目印であり、種類ごとの出所は
-    計画の報告が値から読めばよい。
+    改修計画の報告が値から読めばよい。
     """
     def pick(value: Optional[float], name: str) -> float:
         return float(defaults[name]) if value is None else value
@@ -174,7 +174,7 @@ def _parse_time(value: Any) -> Optional[_dt.datetime]:
 
 
 def _ended_at(state: dict[str, Any]) -> Optional[str]:
-    """実行の終わりの時刻。無ければフェーズの終わりの最も遅いもので代える。"""
+    """実行の終わりの時刻。無ければ手順の終わりの最も遅いもので代える。"""
     if state.get("ended_at"):
         return str(state["ended_at"])
     ends = [

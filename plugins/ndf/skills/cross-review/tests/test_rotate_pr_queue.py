@@ -120,7 +120,7 @@ def test_a_comment_is_queued_instead_of_waiting(fake_gh, tmp_path) -> None:
 
 # ---- execute --mode light の失敗時の旧 PR 復旧（R2-001, 現状固定） ----
 #
-# 既存の検査は投稿コマンドの静的検査と retry の単独実行にとどまり、`execute` における
+# 既存のチェックは投稿コマンドの静的検査と retry の単独実行にとどまり、`execute` における
 # 旧 PR の close → 新 PR 作成失敗 → ERR trap による旧 PR 復旧のつながりを実行していない。
 # 公開入口から通し、git は成功する代替・gh は PR の開閉状態を記録する代替に差し替える
 # （外部サービスへは接続しない）。正しさを主張しない現状固定テスト。

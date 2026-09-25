@@ -30,8 +30,8 @@ from .vocabulary import (
 )
 
 
-# 実装担当は自分の成果を報告する側なので、結果ファイルの値をそのまま検査に使うと
-# 「JSON を書き換えるだけで通る」検査になる。ここは git だけを情報源にする。
+# 実装担当は自分の成果を報告する側なので、結果ファイルの値をそのままチェックに使うと
+# 「JSON を書き換えるだけで通る」チェックになる。ここは git だけを情報源にする。
 
 # テストの置き場所。現状固定テストが先行しているかの判定に使う。
 TEST_PATH_MARKERS = ("/test/", "/tests/", "/spec/", "/specs/", "__tests__/")
@@ -93,7 +93,7 @@ def commits_in_range(work: str, base: Optional[str], head: str) -> Optional[list
 
     **空リストと `None` を区別する。** 空リストは「1 件もコミットされていない」、
     `None` は「範囲を確定できなかった」である。混同すると、範囲を確定できないときに
-    検査が素通りしてしまう（過去の任意のコミットが実在扱いになる）。
+    チェックが素通りしてしまう（過去の任意のコミットが実在扱いになる）。
     """
     if not base:
         return None
@@ -166,7 +166,7 @@ def commit_diff_lines(work: str, sha: str) -> int:
 
 
 def commit_files(work: str, sha: str) -> list[str]:
-    """コミットが触ったファイルのリポジトリ相対パス。範囲の検査に使う。"""
+    """コミットが触ったファイルのリポジトリ相対パス。範囲のチェックに使う。"""
     out = git_out(work, ["show", "--name-only", "--format=", sha])
     return [p.strip() for p in (out or "").splitlines() if p.strip()]
 
@@ -353,7 +353,7 @@ def run_test_at(
     """指定コミットを取り出してテストを実行し `pass` / `fail` を返す。
 
     **各コミットでテストが通ったかは、実際に走らせないと分からない。**
-    結果ファイルの `test_status` は実装担当の申告にすぎず、検査の根拠にできない。
+    結果ファイルの `test_status` は実装担当の申告にすぎず、チェックの根拠にできない。
     実行後は必ず元のブランチへ戻す。
 
     上限時間を超えたら `fail` とする。生成されたコードやテストが無限ループに入ると、
@@ -479,11 +479,11 @@ def resolved_threads_on_github(repo: str, pr: int) -> Optional[set[str]]:
 
 
 # 継続的統合の照会は `commits/{sha}/check-runs` だけにする。**併記された状態
-# （`commits/{sha}/status`）は使わない。** GitHub Actions は検査ジョブを記録し commit の
+# （`commits/{sha}/status`）は使わない。** GitHub Actions はチェックジョブを記録し commit の
 # 状態を記録しないため、すべて成功した commit でも `pending` を返す。保留として読むと、
-# 通っている検査で通過できなくなる。
+# 通っているチェックで通過できなくなる。
 #
-# ページの読み方と、同名の検査ジョブを名前ごとの最新の実行へ畳む処理は共通層の
+# ページの読み方と、同名のチェックジョブを名前ごとの最新の実行へ畳む処理は共通層の
 # `gh_parts`（`pr-info --with checks` と cross-review の判定が使う実装）が持つ（#632）。
 
 
@@ -499,16 +499,16 @@ def _gh_api_get(path: str) -> Optional[SimpleNamespace]:
 
 
 def check_run_result(repo: str, sha: str, name: str) -> Optional[str]:
-    """名前が一致した検査ジョブの、最新の実行の結果を 1 つの語で返す。
+    """名前が一致したチェックジョブの、最新の実行の結果を 1 つの語で返す。
 
     - 完了して結論が `success` なら `"success"`
     - 未完了なら `"pending"`
     - それ以外はその結論（`"failure"` など。空なら `"unknown"`）
-    - **照会できない・名前が一致する検査が 1 件も無いときは `None`**
+    - **照会できない・名前が一致するチェックが 1 件も無いときは `None`**
 
     **「照会できなかった」と「成功した」を区別する。** 呼び出し側は `None` を
-    通過させない（fail-closed）。名前で絞るのは、別の検査の成功で通さないためである。
-    別の実行で成功した同名の検査の、前の実行の失敗は数えない。
+    通過させない（fail-closed）。名前で絞るのは、別のチェックの成功で通さないためである。
+    別の実行で成功した同名のチェックの、前の実行の失敗は数えない。
     """
     if not repo or not sha or not name:
         return None
@@ -677,7 +677,7 @@ def _discard_worktree_changes(work: str) -> None:
     """作業ツリーと index の未コミット変更を捨てる。**着手前が綺麗なときだけ呼ぶ。**
 
     **index も戻す。** `git checkout -- .` は staged された差分を戻さないため、
-    同期コマンドが `git add` してから失敗すると清浄性の検査が通らないままになり、
+    同期コマンドが `git add` してから失敗すると清浄性のチェックが通らないままになり、
     `pending_push` の再試行が永久に進まない。
 
     無視されたファイル（制御用ディレクトリを含む）は消さない（`git clean` に
@@ -693,8 +693,8 @@ def discard_impl_leftovers(state: dict[str, Any], work: str) -> None:
     **公開は進行側が検証を通してから行う**ので、コミットされなかった変更は
     どの検証も受けていない。Pull Request へ出す道が無い以上、残す意味がない。
 
-    残したまま進むと、push の直前の清浄性の検査で中断する。実測では、修正
-    フェーズでコミットを作れなかった実装担当が直しかけの差分を置いたまま終え、
+    残したまま進むと、push の直前の清浄性のチェックで中断する。実測では、修正
+    手順でコミットを作れなかった実装担当が直しかけの差分を置いたまま終え、
     続く `merge-fix` が「修正 0 件」として先へ進むこともできなくなった。
 
     制御用ディレクトリ（状態・結果・ログ）は無視の設定で守られており、
@@ -744,7 +744,7 @@ def _run_sync_command(state: dict[str, Any], work: str, command: str) -> None:
     """同期コマンドを実行する。失敗したら差分を捨てて中断する。
 
     **黙って push しない。** 同期できない状態を公開すると、利用者のリポジトリの
-    検査を壊したまま進むことになる。
+    チェックを壊したまま進むことになる。
     """
     code, timed_out = run_with_timeout(
         command, work, timeline.state_test_timeout(state)
@@ -816,16 +816,16 @@ def _commit_sync_changes(
 def _sync_generated(state: dict[str, Any]) -> None:
     """push の直前に生成物を同期し、差分があれば進行側のコミットとして積む。
 
-    同期を**実装担当の責務にすると範囲外の変更が生まれ**、範囲の検査で全件失敗する
+    同期を**実装担当の責務にすると範囲外の変更が生まれ**、範囲のチェックで全件失敗する
     （実測ではラウンドの採用 5 件が全て範囲外で落ちた）。かといって同期しないと、
-    生成物の同期を検査する pre-push を持つリポジトリでは push そのものが通らず、
+    生成物の同期をチェックする pre-push を持つリポジトリでは push そのものが通らず、
     取り消しを Pull Request へ反映できない。そこで**進行側が push の直前に同期する**。
 
     このコミットはどの改善項目にも属さない。取り消しでは積み直されないが、
     次の push で作り直されるので失われても問題にならない。
 
     同期に失敗したら中断する。**黙って push しない。** 同期できない状態を公開すると、
-    利用者のリポジトリの検査を壊したまま進むことになる。
+    利用者のリポジトリのチェックを壊したまま進むことになる。
     """
     command = str(state.get("sync_command") or "").strip()
     # 状態ファイルの値も受け取った時点と同じ基準で通す。旧い状態ファイルや
@@ -952,7 +952,7 @@ STOPPED_REASONS = frozenset({"timeout", "stalled"})
 
 
 def note_stopped(state: dict[str, Any], runtime: str, phase: str) -> None:
-    """監視が手順の上限で CLI を止めていたら、フェーズの記録に残す（決定 23）。
+    """監視が手順の上限で CLI を止めていたら、手順の記録に残す（決定 23）。
 
     **取り込みは止めたかどうかで変えない。** 未コミットの変更は取り込みの前に捨て
     （`discard_impl_leftovers`）、コミット済みの項目は git の時刻による判定へそのまま

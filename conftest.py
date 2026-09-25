@@ -55,7 +55,7 @@ REQUIRED_COMMANDS: dict[str, tuple[str, ...]] = {
     # `launch-reviewer.sh` と `rotate-pr.sh` を bash で起動する束がある。
     # どちらも内部で `jq` を呼ぶ。
     "plugins/ndf/skills/cross-review/tests": ("bash", "jq", "git"),
-    # `assert-characterization.sh` を bash で起動し、検査の本体が `jq` と `python3` を呼ぶ。
+    # `assert-characterization.sh` を bash で起動し、チェックの本体が `jq` と `python3` を呼ぶ。
     "tests/runtime-smoke": ("bash", "jq", "python3"),
 }
 

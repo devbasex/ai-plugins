@@ -42,7 +42,7 @@ Kiro CLI は installer が `kiro-skills.txt` を読んで symlink を張る。ag
 
 **この文書は配布 Skill の数を書かない（#288）。** 数はランタイムごとに違い、版を上げる
 たびに動く。基準を持つのは `plugins/ndf/manifests/*-skills.txt` の行数だけである。確定仕様の
-側に数を写すと、`docs/specifications/` を検査の対象へ広げない限り古いまま残る。
+側に数を写すと、`docs/specifications/` をチェックの対象へ広げない限り古いまま残る。
 
 **`skills/` に置く Skill は、少なくとも 1 つの manifest へ載せる。** 配らない Skill の置き場所
 （`optional-skills/`）は v10.5.0 で無くした（#116）。どこからも起動できない Skill を置き続ける
@@ -147,10 +147,10 @@ bash scripts/build-runtime-plugins.sh --check
 
 `--check` は生成先との差分を比較し、drift がある場合に非 0 で終了する。
 
-marketplace 定義と各 plugin manifest は生成物ではなく手で更新する。build の対象外で drift 検査に
+marketplace 定義と各 plugin manifest は生成物ではなく手で更新する。build の対象外で drift チェックに
 掛からないため、版数と Skill 数、`skills` 配列と manifest の一致は `validate-runtime-plugins.sh` の
-突き合わせ検査で担保する。description から Skill 数を読み取れない場合もエラーとして扱う
-（記述を消すことで検査が素通りするのを防ぐ）。
+突き合わせチェックで担保する。description から Skill 数を読み取れない場合もエラーとして扱う
+（記述を消すことでチェックが素通りするのを防ぐ）。
 
 総合検証は `scripts/validate-runtime-plugins.sh` で行う。
 

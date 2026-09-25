@@ -54,7 +54,7 @@
 | サブエージェント | 完了通知を待つ。途中の出力を読まない |
 | 背景で動かす CLI（`codex exec` など） | CLI そのものを `run_in_background: true` で起動し、完了通知を待つ |
 | 既に起動したプロセス・書き終わりを待つファイル | 終わりを待つ until ループ（例: `until [ -s out.md ]; do sleep 5; done`）を `run_in_background: true` で起動する |
-| Pull Request の検査 | `gh pr checks <番号> --watch` を `run_in_background: true` で起動する |
+| Pull Request のチェック | `gh pr checks <番号> --watch` を `run_in_background: true` で起動する |
 | 新しいコメントを 1 件ずつ | `Monitor` |
 | `supervise.py run` | `report.md` が揃うか、`progress.jsonl` に `attention` の行が足されるまでの until ループを `run_in_background: true` で起動する（下の節） |
 | `supervise.py queue` | `supervise.py wait <done のパス>` を `run_in_background: true` で 1 回起動する。queue の終わり（done）か、queue が流す計画の `attention` の行で終わる（下の節）。done のパスは `queue --done` で渡した所（省けば最初の計画の `<計画>-state/queue-done.json`） |

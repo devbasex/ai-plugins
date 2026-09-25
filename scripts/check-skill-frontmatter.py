@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
-"""Skill の frontmatter が執筆規約に適合しているかを検査する。
+"""Skill の frontmatter が執筆規約に適合しているかをチェックする。
 
 規約の本文は plugins/ndf/skills/AUTHORING.md にある。本スクリプトはそのうち
-機械的に判定できる項目だけを検査し、継続的インテグレーションで実行する。
+機械的に判定できる項目だけをチェックし、継続的インテグレーションで実行する。
 
-検査は 3 種類に分かれる。
+チェックは 3 種類に分かれる。
 
 - **individual** — Skill 単位。仕様準拠・安全性・可搬性・運用
 - **aggregate**  — 配布先ごとの初期一覧予算（Claude Code / Codex / Kiro CLI / agy）と
   frontmatter 総量。
-  予算は検査対象の plugin family すべての合計に対して判定する
+  予算はチェック対象の plugin family すべての合計に対して判定する
 - **cross**      — Skill 間。トリガ語の重複と、既知の外部 Skill 名との衝突
 
 判定が本質的に近似になる項目（description 先頭のトリガ語、when_to_use の追加トリガ、
 既知の外部 Skill 名との衝突）は警告にとどめ、`--strict` を付けたときだけ失敗させる。
 外部 Skill 名の一覧は網羅できないため（KNOWN_EXTERNAL_SKILL_NAMES の注記を参照）、
-この検査は見逃しを前提にした補助である。
+このチェックは見逃しを前提にした補助である。
 
 使い方:
 
@@ -70,7 +70,7 @@ SKILL_MD_MAX_LINES = 500      # 仕様の推奨 / コンパクション対策
 #   $ python3 scripts/check-skill-frontmatter.py --calibrate
 #
 # で `claude -p "/context"` を実行し、Skill ごとの実測トークンと本スクリプトの文字数計測を
-# 突き合わせて比を求め、CALIBRATION_FILE へ保存する。以後の検査はその値を使う。
+# 突き合わせて比を求め、CALIBRATION_FILE へ保存する。以後のチェックはその値を使う。
 # 較正していない環境では安全側の既定を使う（日本語が増えるほど比は下がり、日本語だけなら
 # ほぼ 1 文字 = 1 トークンになるため、小さめに倒しておく）。
 DEFAULT_CHARS_PER_TOKEN = 2.5
@@ -104,7 +104,7 @@ CODEX_LISTING_LEVEL = "error"
 #   その時点で一覧を取れる手段を確かめ、この行の出典も書き直すこと。Claude Code の
 #   Opus 5 と同じである。**NDF は Kiro でも 1M コンテキストのモデルだけを対象とする**
 #   （`plugins/ndf/dev.kiro/install.sh` が導入時にこの前提を出力する。モデルの一覧を
-#   取る手段が kiro-cli の版によって変わるため、機械での検査は置いていない）。
+#   取る手段が kiro-cli の版によって変わるため、機械でのチェックは置いていない）。
 #   規定が無い以上どこかから基準を借りるほかなく、コンテキスト長が同じ Claude Code の
 #   1% を当てる。憶測で独自の値を置くより、同じ土俵の実在する規定へ揃えるほうが根拠が残る。
 KIRO_CONTEXT_TOKENS = 1_000_000
@@ -169,9 +169,9 @@ FRONTMATTER_TOTAL_MAX = 20_000
 # したがって一覧の単位は「名前空間を除いた Skill 名」が正しい。行末に、`/` メニューで
 # どう表示されていたか（名前空間付きの表示名）を観測元として残す。
 #
-# この一覧は網羅ではない。配布先の環境に何が入っているかは検査時点では分からず、
+# この一覧は網羅ではない。配布先の環境に何が入っているかはチェック時点では分からず、
 # 利用者が入れる他プラグインまでは列挙できない。観測できたものを手で足していく
-# best-effort の検査であり、ここに無い競合を見逃すことを前提にする。
+# best-effort のチェックであり、ここに無い競合を見逃すことを前提にする。
 #
 # 出典: 2026-08-12 に Claude Code の `/` メニューで観測（issue #83）。
 KNOWN_EXTERNAL_SKILL_NAMES = (
@@ -211,7 +211,7 @@ LEGACY_TRIGGER_RE = re.compile(
 # 誤検出を避けるため 2 つの条件を課す。
 #   1. description の**末尾**にあること（本文中の `(Codex/Gemini)` のような補足を拾わない）
 #   2. 日本語を 1 文字以上含むこと（英語の補足を拾わない）
-# 条件を外すと、トリガ宣言でない括弧が重複検査へ流れ込み、偽の衝突が出る。
+# 条件を外すと、トリガ宣言でない括弧が重複チェックへ流れ込み、偽の衝突が出る。
 TRIGGER_PAREN_RE = re.compile(r"（([^（）]{2,160})）\s*[.。]?\s*$")
 HAS_JA_RE = re.compile(r"[ぁ-んァ-ヶ一-龠ー]")
 # 「いつ使うか」を示す語。description にこれが無いと Codex / Kiro で発動判定できない。
@@ -270,7 +270,7 @@ class Finding:
 def parse_front_matter(text: str) -> tuple[dict[str, str], str] | tuple[None, str]:
     """frontmatter を {key: 生の値} と生ブロックの組で返す。
 
-    値は引用符を外さずそのまま保持する。二重引用符の有無を検査するため。
+    値は引用符を外さずそのまま保持する。二重引用符の有無をチェックするため。
     リスト値（allowed-tools 等）は改行区切りの文字列にまとめる。
     """
     m = FRONT_MATTER_RE.match(text)
@@ -565,7 +565,7 @@ def measure_aggregate(skills: list[dict], skills_dir: pathlib.Path) -> dict:
 
 
 def check_budget(metrics: dict) -> list[Finding]:
-    """検査対象すべての合計値を予算と突き合わせる。
+    """チェック対象すべての合計値を予算と突き合わせる。
 
     引数は measure_aggregate の計測値を plugin family 横断で合計したもの。
     """
@@ -589,7 +589,7 @@ def check_budget(metrics: dict) -> list[Finding]:
 
 
 def check_trigger_collisions(skills: list[dict]) -> list[Finding]:
-    """同じトリガ語を複数の Skill が宣言していないかを検査する。
+    """同じトリガ語を複数の Skill が宣言していないかをチェックする。
 
     重複すると同じ依頼で複数の Skill が起動を競い、どちらが選ばれるかが
     依頼文の細部に左右される。
@@ -611,14 +611,14 @@ def check_trigger_collisions(skills: list[dict]) -> list[Finding]:
 
 
 def check_external_name_collisions(skills: list[dict]) -> list[Finding]:
-    """Skill 名が既知の外部 Skill 名の末尾要素になっていないかを検査する。
+    """Skill 名が既知の外部 Skill 名の末尾要素になっていないかをチェックする。
 
     利用者が `/` メニューで名前の一部を打つと、その語を末尾に含む候補がすべて並ぶ。
     NDF の Skill 名が外部 Skill 名の末尾要素だと、外部側に埋もれて選びにくくなる。
     実例は `review`（`code-review` / `security-review` の末尾）で、issue #83 で
     `pr-review` へ改名した。
 
-    逆向き（外部名が NDF 名の末尾要素）は検査しない。`pr-review` のように接頭辞で
+    逆向き（外部名が NDF 名の末尾要素）はチェックしない。`pr-review` のように接頭辞で
     区別できていれば、利用者は `/pr-rev` まで打った時点で一意に決められる。
 
     突き合わせる相手は KNOWN_EXTERNAL_SKILL_NAMES で、そのエントリは名前空間を除いた
@@ -631,7 +631,7 @@ def check_external_name_collisions(skills: list[dict]) -> list[Finding]:
         # 区切りは `-`（`code-review` の `review`）と `:`（`plugin:review` の `review`）の両方を見る。
         # KNOWN_EXTERNAL_SKILL_NAMES の規約は「名前空間を除いた Skill 名」で確定していて、これを
         # 変える予定はない。`:` を見るのは規約を変える想定だからではなく、規約に反して
-        # `coderabbit:code-review` のような表示名がそのまま貼られた場合に、検査が黙って
+        # `coderabbit:code-review` のような表示名がそのまま貼られた場合に、チェックが黙って
         # すり抜けるのを防ぐためである。`/` メニューの表示名をコピーしてしまう誤りは起きやすく、
         # `-` だけの判定だと衝突があっても警告が出ず、見逃したことにも気づけない。
         # 規約どおりのエントリしかない現状では、この分岐があっても挙動は変わらない。
@@ -735,8 +735,8 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--skills-dir", action="append", default=None,
-                    help="検査対象の Skill ディレクトリ。複数指定できる"
-                         "（既定: manifests/ を持つ plugin family の skills/ を全て検査）")
+                    help="チェック対象の Skill ディレクトリ。複数指定できる"
+                         "（既定: manifests/ を持つ plugin family の skills/ を全てチェック）")
     ap.add_argument("--strict", action="store_true",
                     help="警告も失敗として扱う")
     ap.add_argument("--report", action="store_true",
@@ -750,7 +750,7 @@ def main() -> int:
     else:
         # plugin family を manifests/ の有無から検出する。移行の途中は 2 つの構成が
         # 混ざるため、どちらも拾う。
-        #   split  … plugins/<family>-shared（編集元。生成物は検査しない）
+        #   split  … plugins/<family>-shared（編集元。生成物はチェックしない）
         #   single … plugins/<family>（配布ディレクトリが 1 つだけ）
         # 初期一覧の予算はプラグイン横断で共有されるため、既定では全 family を対象に
         # して合計も出す。
@@ -761,7 +761,7 @@ def main() -> int:
             if d.name.endswith(("-claude", "-codex", "-kiro")):
                 continue
             found.append(d / "skills")
-            # どの manifest にも載せない Skill も規約の検査は受ける。配らないだけで、
+            # どの manifest にも載せない Skill も規約のチェックは受ける。配らないだけで、
             # 中身は同じ規約で書く（後で配布へ回すときに書き直しが要らないように）。
             if (d / "optional-skills").is_dir():
                 found.append(d / "optional-skills")
@@ -771,7 +771,7 @@ def main() -> int:
             print(f"[check-skill-frontmatter] ディレクトリがない: {d}", file=sys.stderr)
             return 2
     if not skills_dirs:
-        print("[check-skill-frontmatter] 検査対象が見つからない", file=sys.stderr)
+        print("[check-skill-frontmatter] チェック対象が見つからない", file=sys.stderr)
         return 2
 
     if args.calibrate:
@@ -838,7 +838,7 @@ def main() -> int:
     for f in sorted(findings, key=lambda x: (x.level != "error", x.skill, x.code)):
         print(str(f), file=sys.stderr if f.level == "error" else sys.stdout)
 
-    print(f"\nSkill {len(skills)} 個を検査 — エラー {len(errors)} 件 / 警告 {len(warns)} 件")
+    print(f"\nSkill {len(skills)} 個をチェック — エラー {len(errors)} 件 / 警告 {len(warns)} 件")
     for runtime, total in sorted(metrics["listings"].items()):
         limit = listing_limits().get(runtime)
         print(f"{runtime} の初期一覧の合計: {total}" + (f" / {limit} 文字" if limit else " 文字"))

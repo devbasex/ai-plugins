@@ -355,7 +355,7 @@ def test_the_final_fix_prompt_does_not_ask_for_an_item_id(tmp_path):
     assert "Item-Id:" not in text
 
 
-# ---------- R2-002: 提案フェーズの命名 ----------
+# ---------- R2-002: 提案手順の命名 ----------
 
 def test_the_propose_result_file_carries_the_run_number(paths):
     """**提案の名前は実行の番号を持つ**（I3）。監視の `--stem-template` と揃える。

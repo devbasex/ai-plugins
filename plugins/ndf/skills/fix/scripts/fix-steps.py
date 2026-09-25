@@ -105,7 +105,7 @@ def fetch_comments(repo: str, pr: int) -> tuple[str, int]:
 
 
 def ci_snapshot(pr: int) -> tuple[str, list[dict]]:
-    """現時点の検査の状態。待たない。"""
+    """現時点のチェックの状態。待たない。"""
     p = run(["gh", "pr", "checks", str(pr), "--json", "name,state,link"], check=False)
     try:
         checks = json.loads(p.stdout or "[]")

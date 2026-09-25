@@ -5,7 +5,7 @@
 ラウンドでは、同じランタイムの 2 つ目（`claude-2`）が席に入る。**受け口がこの形を
 弾くと、結果を残した担当が「結果なし」として扱われる。**
 
-見るのは結果の受け口・起動スクリプト・監視の位置引数・計測の 4 つである。綴りの検査は
+見るのは結果の受け口・起動スクリプト・監視の位置引数・計測の 4 つである。綴りのチェックは
 argparse の型が行い、通らなければ終了コード 2 になる。シェル側は席の形に合わない名前を
 終了コード 1 で弾く。
 """
@@ -44,7 +44,7 @@ def _seed_state(tmp_dir: pathlib.Path) -> None:
     (tmp_dir / f"cross-review-pr{PR}-state.json").write_text(json.dumps(state))
 
 
-# ---------------- 引数の検査 ----------------
+# ---------------- 引数のチェック ----------------
 
 def test_the_parser_accepts_a_second_seat(state_mod):
     args = state_mod.build_parser().parse_args(["read-result", "1", SEAT])

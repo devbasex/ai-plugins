@@ -149,7 +149,7 @@ def test_a_failed_call_returns_nothing(state_mod, monkeypatch):
     assert state_mod._gh_rest("repos/o/r/commits/x/check-runs") is None
 
 
-# ---------------- 検査ジョブの一覧はページを読み切る ----------------
+# ---------------- チェックジョブの一覧はページを読み切る ----------------
 
 def _check_run(name: str) -> dict:
     return {"name": name, "status": "completed", "conclusion": "success"}

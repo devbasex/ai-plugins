@@ -1,4 +1,4 @@
-"""既定ブランチ宛の Pull Request の分岐元を検査する（issue #202）。
+"""既定ブランチ宛の Pull Request の分岐元をチェックする（issue #202）。
 
 配布のチャネルを分けるリポジトリでは、正式版のブランチへ直に Pull Request を出さない。
 判定は宣言に起点が書かれていて、そのブランチが origin にあるときだけ働く。書く前・作る前は
@@ -32,12 +32,12 @@ def guard(repo: Path, head_ref: str) -> subprocess.CompletedProcess:
 
 
 def test_without_declaration_passes(origin_repo: Path) -> None:
-    """宣言が無いリポジトリでは検査しない。"""
+    """宣言が無いリポジトリではチェックしない。"""
     assert guard(origin_repo, "feature/x").returncode == 0
 
 
 def test_without_base_branch_passes(origin_repo: Path) -> None:
-    """チャネルを分けていないリポジトリでは検査しない。"""
+    """チャネルを分けていないリポジトリではチェックしない。"""
     declare(origin_repo, {"version": 1})
     assert guard(origin_repo, "feature/x").returncode == 0
 
@@ -59,7 +59,7 @@ def test_branch_with_matching_tail_does_not_enable_the_guard(origin_repo: Path) 
 
     `git ls-remote` のパターンは参照名の末尾に一致するため、`develop` とだけ渡すと
     `refs/heads/feature/develop` にも一致する（実測）。起点ブランチが未作成のまま
-    検査が有効にならないことを見る。
+    チェックが有効にならないことを見る。
     """
     declare(origin_repo, {"version": 1, "base_branch": "develop"})
     push_branch(origin_repo, "feature/develop")
@@ -105,7 +105,7 @@ LOCAL_BASE_BRANCH = {"version": 1, "base_branch": "main"}
 
 
 def test_local_declaration_does_not_change_the_verdict(origin_repo: Path) -> None:
-    """起点は共有の宣言だけが決める。個人の宣言で検査の宛先は動かない。"""
+    """起点は共有の宣言だけが決める。個人の宣言でチェックの宛先は動かない。"""
     declare(origin_repo, {"version": 1, "base_branch": "develop"})
     push_branch(origin_repo, "develop")
     declare_local(origin_repo, LOCAL_BASE_BRANCH)
@@ -117,7 +117,7 @@ def test_local_declaration_does_not_change_the_verdict(origin_repo: Path) -> Non
 
 
 def test_local_declaration_alone_does_not_enable_the_guard(origin_repo: Path) -> None:
-    """共有の宣言が無ければ検査しない。個人の宣言だけでは有効にならない。"""
+    """共有の宣言が無ければチェックしない。個人の宣言だけでは有効にならない。"""
     declare_local(origin_repo, LOCAL_BASE_BRANCH)
     push_branch(origin_repo, "main2")
 

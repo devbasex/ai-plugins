@@ -1,7 +1,7 @@
 """`documentation` モードの値と工程を固定する（#507）。
 
 **足すのは 5 番目のモードと 2 つの工程である。** 既存の 4 モードの判定と、16 個の工程の
-並びは変わらない。この検査は新しい値だけを見て、既存の値が動いていないことも同時に見る。
+並びは変わらない。このチェックは新しい値だけを見て、既存の値が動いていないことも同時に見る。
 
 """
 from __future__ import annotations
@@ -46,7 +46,7 @@ def test_an_unknown_or_empty_mode_has_zero_height_and_fails(mode: str) -> None:
 
 
 def test_the_height_is_higher_than_standard() -> None:
-    """モードが混ざったときに `documentation` の側で検査する。"""
+    """モードが混ざったときに `documentation` の側でチェックする。"""
     result = run_lib(f"wf_higher_mode standard {MODE}")
     assert result.stdout.strip() == MODE
 

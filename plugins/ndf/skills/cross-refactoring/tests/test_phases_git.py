@@ -149,14 +149,14 @@ def test_a_test_commit_after_its_completion_deadline_is_not_done(flow, cmd_setup
 
 
 def test_a_commit_without_a_planned_item_is_reverted_alone(flow, cmd_setup, cmd_implement):
-    """AC10: 計画に無いテストのコミットだけを取り消し、項目のテストは残す。"""
+    """AC10: 改修計画に無いテストのコミットだけを取り消し、項目のテストは残す。"""
     work = flow["work"]
     _plan(flow, _item("I-001", 1, tests=["tests/test_total.py"], targets=["tests/test_total.py"]))
     _call(cmd_setup, "cmd_start_phase", phase="add-tests")
     _write(work, "tests/test_total.py", TEST_TOTAL)
     kept = commit_with_trailers(work, "Test", item_trailers("I-001"))
     _write(work, "tests/test_extra.py", "def test_x():\n    assert True\n")
-    commit_with_trailers(work, "Test: 計画に無い", {"Impl-Runtime": "claude", "Impl-Model": "m"})
+    commit_with_trailers(work, "Test: 改修計画に無い", {"Impl-Runtime": "claude", "Impl-Model": "m"})
 
     _call(cmd_implement, "cmd_merge_tests")
 
@@ -451,7 +451,7 @@ def test_a_resumed_intake_reuses_its_conclusion_and_does_not_drop_twice(
     _refactor_total(work)
     commit_with_trailers(work, "Refactor", item_trailers("I-001"))
     _write(work, "src/other.py", "X = 1\n")
-    commit_with_trailers(work, "計画に無い", {"Impl-Runtime": "claude", "Impl-Model": "m"})
+    commit_with_trailers(work, "改修計画に無い", {"Impl-Runtime": "claude", "Impl-Model": "m"})
     _call(cmd_implement, "cmd_merge_implement")
     head = git("rev-parse", "HEAD", cwd=work).stdout.strip()
     state = read_state(flow["path"])

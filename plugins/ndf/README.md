@@ -123,7 +123,7 @@ agy plugin list
 
 - `supervise.py` は、ステップごとの想定時間より遅れたステップを見つけます。そのステップを一次の調査にかけ、介入します。（#1115）
 - 遅れの見張りの挙動は設定で変えられます。（#1115）
-- `merged-steps.py probe` で、PR の検査が進まない理由を調べられます。理由は「取り残し」「ランナー待ち」「失敗」の 3 つに分けて示します。（#1115）
+- `merged-steps.py probe` で、PR のチェックが進まない理由を調べられます。理由は「取り残し」「ランナー待ち」「失敗」の 3 つに分けて示します。（#1115）
 - 設計: #1102（#1109）
 - runtime-smoke が落ちたとき、継続的統合のログで失敗の理由を読める（成果物の `generated-tree.txt` も失敗時に残る）（#1106）
 - Python 3.14 で NDF のスクリプトを動かしても SyntaxWarning が出ない（#1106）
@@ -369,4 +369,4 @@ kiro-cli の実機検証と、Skill 数が文脈量へ与える影響の実測�
 Skill の実体は `skills/` の 1 箇所だけです。ランタイムごとの複製はありません。変更したら
 [CONTRIBUTING.md の「手元での検証」](../../CONTRIBUTING.md#手元での検証)の検証を実行してください。
 frontmatter の規約は [skills/AUTHORING.md](skills/AUTHORING.md) にあり、
-`python3 scripts/check-skill-frontmatter.py` で検査します。
+`python3 scripts/check-skill-frontmatter.py` でチェックします。

@@ -161,7 +161,7 @@ def format_plan(state: dict[str, Any]) -> str:
     """改修計画の本文を組み立てる。**同じ状態からは同じ本文が出る。**
 
     提案の理由と手順は状態ファイルにしか残らず、そのディレクトリは差分から
-    除外される。Pull Request を読む側からは、なぜ直したのかも、どう直す計画
+    除外される。Pull Request を読む側からは、なぜ直したのかも、どう直す改修計画
     だったのかも見えない。ここで差分の中へ置く。
     """
     baseline = state.get("baseline_test") or {}
@@ -169,14 +169,14 @@ def format_plan(state: dict[str, Any]) -> str:
     lines = [
         f"# 改修計画 — {state['repo']} #{state['current_pr']}",
         "",
-        "`/ndf:cross-refactoring` が提案し、計画し、適用した改善項目の記録である。",
+        "`/ndf:cross-refactoring` が提案し、改修計画し、適用した改善項目の記録である。",
         "理由と手順は提案の時点でしか残らないため、公開の直前に書き出している。",
         "",
         f"- 対象範囲: {', '.join(state.get('target_scope') or []) or '（未指定）'}",
         f"- 着手前のテスト: {baseline.get('command') or '（未指定）'}",
         f"- 着手前の全体のテストの結果: {baseline_line(baseline)}",
         f"- 想定最大時間: {state.get('budget_minutes')} 分"
-        f" / 計画の時点で使えた時間: {plan.get('available_minutes', '—')} 分",
+        f" / 改修計画の時点で使えた時間: {plan.get('available_minutes', '—')} 分",
         f"- 実装担当: {state.get('implementer') or '—'}",
         "",
         "## 改善項目",
@@ -195,7 +195,7 @@ def format_plan(state: dict[str, Any]) -> str:
 # 上限の表の行（決定 24）。式は `docs/02-plan-and-implement.md` の「締め切り」の節にある。
 _LIMIT_ROWS = (
     ("propose_end_at", "提案の枠の終わり（監視の上限 = 残り + 余裕）"),
-    ("plan_end_at", "計画の枠の終わり（同上）"),
+    ("plan_end_at", "改修計画の枠の終わり（同上）"),
     ("add_tests_end_at", "テストの追加の終わり = 最後の項目の完了の締め切り"),
     ("implement_end_at", "実装の終わり = 最後の項目の完了の締め切り"),
     ("fix_end_at", "直しの試行の打ち切り"),

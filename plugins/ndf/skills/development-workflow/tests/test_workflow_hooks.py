@@ -29,7 +29,7 @@ PLUGIN_ROOT = SKILL_DIR.parents[1]
 #     Hook command references ${CLAUDE_PLUGIN_DATA} but only ${CLAUDE_PLUGIN_ROOT} is
 #     available for skill hooks (${CLAUDE_PLUGIN_DATA} is plugin-only).
 #
-# **拒否の検査が見るのはこの 2 つだけである。** `${CLAUDE_PROJECT_DIR}` はブレースを
+# **拒否のチェックが見るのはこの 2 つだけである。** `${CLAUDE_PROJECT_DIR}` はブレースを
 # 付けても捕捉されず、値にもなる（シェル形式では hook の環境変数として、`args` を持つ
 # 形では実行ファイルの置き換えとして届く）。**それでも一覧へは入れない。** この hook が
 # 起動する判定のスクリプトはプラグインの下にあり、主ディレクトリの位置に依存させない。
@@ -68,7 +68,7 @@ def test_frontmatter_rejects_body_without_delimiters(tmp_path, monkeypatch) -> N
 def hook_command() -> str:
     """frontmatter が登録する hook のコマンドを、YAML の引用を解いて返す。
 
-    読み取れないこと自体を失敗として扱う。行が消えるだけで、コマンドを見る検査が
+    読み取れないこと自体を失敗として扱う。行が消えるだけで、コマンドを見るチェックが
     素通りになる形にしない。
 
     **引用を解いてから返す。** この行は YAML の二重引用の並びで、経路を囲む引用符は
@@ -104,7 +104,7 @@ def test_the_hook_command_only_uses_the_plugin_root_variable() -> None:
 
     `${CLAUDE_PROJECT_DIR}` も落とす。**値にはなるが、この hook を主ディレクトリの位置へ
     依存させない。** シェルの展開を意図して書くなら、ブレースを付けずに
-    `$CLAUDE_PROJECT_DIR` と書く。この検査はブレース付きだけを拾う。
+    `$CLAUDE_PROJECT_DIR` と書く。このチェックはブレース付きだけを拾う。
     """
     used = set(VARIABLE.findall(hook_command()))
 
@@ -142,7 +142,7 @@ def test_the_hook_command_keeps_a_plugin_root_with_a_space_in_one_word() -> None
     確かめたときは hook が拒否も案内も出さないまま素通りした。** 止めるはずの操作が
     通るため、気づく手がかりが無い。
 
-    上の検査は実体の位置を使うため、空白を含まない環境では引用を外しても通る。ここは
+    上のチェックは実体の位置を使うため、空白を含まない環境では引用を外しても通る。ここは
     空白を含む位置を作って、引用そのものを見る。
     """
     resolved = hook_command().replace("${CLAUDE_PLUGIN_ROOT}", ROOT_WITH_SPACE)
@@ -163,7 +163,7 @@ def test_the_hook_block_is_nested_in_the_documented_order() -> None:
     """公式ドキュメントが示す入れ子（hooks → PreToolUse → matcher → hooks → command）。
 
     書式が崩れると Skill の読み込みそのものが失敗し、モード判定を失う。**外部の
-    ライブラリに頼らず確かめる。** 読み飛ばされる検査は、崩れても気づけない。
+    ライブラリに頼らず確かめる。** 読み飛ばされるチェックは、崩れても気づけない。
     """
     lines = [line for line in frontmatter().splitlines() if line.strip()]
     start = lines.index("hooks:")

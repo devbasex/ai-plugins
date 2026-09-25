@@ -89,7 +89,7 @@ python3 "$ROOT/scripts/serena-lsp.py" configure --root . --json --only python,ty
 | 言語サーバの取得・展開の失敗 | 利用者の確認を取ってから `.serena/language_servers/` の該当の言語を退避し、打ち直す |
 | 依存の不足（`node` / `npm` / `java` など） | 利用者に導入を示す。スクリプトは入れない |
 
-## 3. Claude Code の LSP の導入を検査する
+## 3. Claude Code の LSP の導入をチェックする
 
 ```bash
 python3 "$ROOT/scripts/serena-lsp.py" check --root . --json

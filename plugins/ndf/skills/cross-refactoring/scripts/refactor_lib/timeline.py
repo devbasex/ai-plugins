@@ -5,7 +5,7 @@
 `docs/02-plan-and-implement.md` の「締め切り」の節にまとめてある。実行の途中で数値を
 決めるために LLM へ問わない。
 
-値は `init`（計画の前の値）と `merge-plan`（計画の後の値）が `state["limits"]` へ書き
+値は `init`（改修計画の前の値）と `merge-plan`（改修計画の後の値）が `state["limits"]` へ書き
 出す。以後の手順は、書き出した値と時計の比較だけで進み、止まる。
 
 **純粋な処理だけを置く。** 今の時刻は引数で受ける。
@@ -20,7 +20,7 @@ from . import budget, clock
 
 # 係数（決定 24）。B と w に掛ける比率で、秒や分の固定値は持たない。
 PROPOSE_SHARE = 0.20      # 提案の枠の終わり = 開始 + 0.20·B
-PLAN_SHARE = 0.10         # 計画の枠の終わり = 提案の枠の終わり + 0.10·B
+PLAN_SHARE = 0.10         # 改修計画の枠の終わり = 提案の枠の終わり + 0.10·B
 INIT_TEST_SHARE = 0.10    # 着手前のテスト 1 回の上限 = 0.10·B（w はまだ測れていない）
 MARGIN_SHARE = 0.05       # 余裕 = 0.05·B（手順の上限と CLI の上限に足す）
 TEST_FACTOR = 3.0         # テスト 1 回の上限 = max(3·w, 0.01·B)
@@ -32,7 +32,7 @@ FIXED_VALUES = (
     ("monitor.py の SIGTERM の猶予", "3 秒", "監視が止めた CLI へ SIGKILL を送るまでの待ち"),
     ("monitor.py の RESULT_AGE_GRACE", "30 秒", "結果ファイルを書き終えたとみなす経過"),
     ("monitor.py の見回りの間隔", "15 秒", "監視の 1 周期"),
-    ("jev.py の PROBE_TIMEOUT / ASK_TIMEOUT", "10 秒 / 20 秒", "計画までの Jev の通信 1 回の待ち"),
+    ("jev.py の PROBE_TIMEOUT / ASK_TIMEOUT", "10 秒 / 20 秒", "改修計画までの Jev の通信 1 回の待ち"),
     ("auth.py の AUTH_PROBE_TIMEOUT", "120 秒", "init の参加者の認証の確認 1 回の待ち"),
 )
 
@@ -89,7 +89,7 @@ def compute(
     started_at: _dt.datetime, budget_minutes: int, baseline_seconds: Optional[float],
     items: Optional[list[dict[str, Any]]] = None, reserve: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
-    """実行時の値の表。`items` と `reserve`（計画の後）が無ければ、その行は `None`。"""
+    """実行時の値の表。`items` と `reserve`（改修計画の後）が無ければ、その行は `None`。"""
     b = int(budget_minutes)
     propose_end = started_at + _dt.timedelta(minutes=b * PROPOSE_SHARE)
     plan_end = propose_end + _dt.timedelta(minutes=b * PLAN_SHARE)
@@ -112,7 +112,7 @@ def compute(
 
 
 def of_state(state: dict[str, Any]) -> dict[str, Any]:
-    """状態の値から表を組む。計画の後なら項目と予備時間も使う。"""
+    """状態の値から表を組む。改修計画の後なら項目と予備時間も使う。"""
     plan = state.get("plan") or None
     return compute(
         clock.parse(state["started_at"]), int(state["budget_minutes"]),

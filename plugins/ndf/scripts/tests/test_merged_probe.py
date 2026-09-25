@@ -1,4 +1,4 @@
-"""merged-steps.py probe: 開いた PR の検査の分類と、取り残しの再実行。
+"""merged-steps.py probe: 開いた PR のチェックの分類と、取り残しの再実行。
 
 gh は PATH の先頭に置いた偽物で置き換える。偽物は FAKE_GH_STATE の JSON を読み、呼ばれた引数を calls に積む。
 """
