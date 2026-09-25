@@ -35,6 +35,9 @@ def make_repo(tmp_path: Path, files: dict[str, str], *, track: bool = True) -> P
         git(root, "init", "-q")
         git(root, "config", "user.email", "t@example.com")
         git(root, "config", "user.name", "t")
+        # コミットの後に git が裏で保守を走らせ、`.git` に一時ファイルを作って消すのを止める
+        git(root, "config", "gc.auto", "0")
+        git(root, "config", "maintenance.auto", "false")
     for name, body in files.items():
         target = root / name
         target.parent.mkdir(parents=True, exist_ok=True)
