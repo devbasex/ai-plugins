@@ -483,7 +483,8 @@ def _fix_file(tmp_path, **over) -> pathlib.Path:
              "summary": "末尾の書き方", "reason_for_deferral": "好みの範囲"},
         ],
         "rejected": [
-            {"comment_id": 444, "path": "c.py", "line": 7, "severity": "minor",
+            {"comment_id": 444, "thread_id": "PRRT_d", "path": "c.py", "line": 7,
+             "severity": "minor",
              "summary": "引用の形", "reason_for_rejection": "意図して展開している"},
         ],
     }
@@ -550,6 +551,23 @@ def test_fix_posts_skips_replies_with_non_numeric_comment_ids(tmp_path) -> None:
     assert items[0]["extra"] == {"ident": "resolve-PRRT_a"}
     assert items[1]["extra"] == {"ident": f"fix-summary-{ROUND}"}
     assert "決着: 1 件 / 見送り: 1 件 / 却下: 1 件" in items[1]["fields"]["body"]
+
+
+def test_a_finding_in_a_review_body_gets_no_reply_and_goes_to_the_summary(tmp_path) -> None:
+    """本文の指摘はスレッドを持たない。GitHub はレビューへの返信を受け付けず、
+    待ち行列の先頭で止まって後ろの決着とまとめを止めるため、返信を積まない（#962）。"""
+    body_finding = {"thread_id": None, "comment_id": 5300229994, "severity": "minor",
+                    "summary": "本文の指摘", "reason_for_deferral": "別の課題で扱う"}
+    items = result_posts.fix_posts(
+        _fix_file(tmp_path, deferred=[body_finding],
+                  rejected=[{**body_finding, "reason_for_rejection": "採らない理由"}]),
+        repo=REPO, pr=PR, round_no=ROUND)
+
+    targets = [i["fields"]["in_reply_to"] for i in items if i["kind"] == "review-reply"]
+    assert targets == [111, 222]
+    body = items[-1]["fields"]["body"]
+    assert "見送り: 1 件 / 却下: 1 件" in body
+    assert "本文の指摘" in body and "別の課題で扱う" in body and "採らない理由" in body
 
 
 # ---------------- 送信 ----------------

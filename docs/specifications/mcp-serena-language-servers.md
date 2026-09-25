@@ -400,10 +400,10 @@ SKILL.md が正である。`configure` は言語の数 × 120 秒かかり得る
 | キー | 書き方 |
 | --- | --- |
 | `language_servers` | 採った言語のブロックの配列で置き換える。空なら `language_servers: []` |
-| `ignored_paths` | `.serena/**` と（`.worktrees/` があれば）`.worktrees/**` を無ければ足す。既存の要素は消さない |
+| `ignored_paths` | `.serena/**` と（`.worktrees/` があれば）`.worktrees/**` を無ければブロックの末尾へ足す。既存の要素の行は注釈と引用符ごと変えない |
 | `mcp_serena_excluded` | 外した言語を `<言語> <理由>` の要素で書く（無ければ `[]`）。理由は `failed.reason` の値か `not_selected`。`configure` が毎回書く |
 
-- 書き換えは、対象のキーの行からインデントの無い次のキーまでを 1 ブロックとして置き換える。
+- `language_servers` と `mcp_serena_excluded` の書き換えは、対象のキーの行からインデントの無い次のキーまでを 1 ブロックとして置き換える。
   キーが無ければ末尾に足す。読めるのはブロックの形（`key:` の後に `- 値` の行）と空の流れの形
   （`key: []`）だけである
 - **`project.local.yml` の `language_servers` は `project.yml` を上書きする**（Serena 1.7.0 の

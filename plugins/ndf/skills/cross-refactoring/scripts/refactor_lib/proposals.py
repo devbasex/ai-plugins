@@ -6,7 +6,7 @@
 """
 from __future__ import annotations
 
-from typing import Any, Callable, Iterable, Optional
+from typing import Any, Iterable, Optional
 
 from . import info
 from .gitfacts import safe_int

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-import pathlib
 from collections import Counter
 from typing import Any
 

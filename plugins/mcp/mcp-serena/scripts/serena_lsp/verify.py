@@ -85,10 +85,8 @@ def _with_ignores(text: str, root: Path) -> str:
     `.serena/` を外さないと、Serena が言語サーバのキャッシュ（`.serena/language_servers/` の
     `.d.ts` など）を解析対象に選び、検証が失敗する（`.serena/.gitignore` の無い新しいリポジトリ）。
     """
-    ignored = py.read_list(text, "ignored_paths") or []
     wanted = [".serena/**"] + ([".worktrees/**"] if (root / ".worktrees").is_dir() else [])
-    added = [p for p in wanted if p not in ignored]
-    return py.write_list(text, "ignored_paths", ignored + added) if added else text
+    return py.append_list(text, "ignored_paths", wanted)
 
 
 def _final_text(text: str, root: Path, verified: list, excluded: list) -> str:

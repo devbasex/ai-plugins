@@ -27,7 +27,6 @@ from .. import timeline
 from ..paths import (
     git_out,
     default_worktree_base,
-    load_state,
     repo_slug,
     sh,
     state_path,
@@ -289,6 +288,7 @@ class InitialContext:
     implementer: str
     implementer_reason: str
     judge: dict[str, Any]
+    started_at: str
 
 
 def _build_initial_state(
@@ -305,7 +305,7 @@ def _build_initial_state(
     return {
         "schema": SCHEMA,
         "id": args.pr,
-        "started_at": statefile.now(),
+        "started_at": ctx.started_at,
         "budget_minutes": args.budget_minutes,
         "repo": ctx.repo,
         "current_pr": args.pr,
@@ -379,6 +379,8 @@ def cmd_init(args: argparse.Namespace) -> None:
     残っていれば再開し、渡した引数を反映の表に従って扱う。旧い形（ラウンド制）で
     終わっていない状態ファイルは読み替えずに止める（決定 18）。
     """
+    # **開始は着手前のテストより前に取る。** テストの所要も想定最大時間に入れる（#968）。
+    started_at = statefile.now()
     _normalize_args(args)
     inputs = _resolve_init_inputs(args)
     if inputs is None:
@@ -392,7 +394,8 @@ def cmd_init(args: argparse.Namespace) -> None:
             setattr(args, key, value)
 
     participants, baseline, round_record = _verify_init(args, inputs, prep)
-    state = _save_initial_state(args, inputs, prep, participants, baseline, round_record)
+    state = _save_initial_state(args, inputs, prep, participants, baseline, round_record,
+                                started_at)
     # **出力は入口から直接呼ぶ。** 手順書の変数の出所の検査
     # （`scripts/check-skill-shell-vars.py`）は `cmd_*` からヘルパーを 1 段だけたどる。
     _emit_init(state)
@@ -603,6 +606,7 @@ def _save_initial_state(
     participants: dict[str, Any],
     baseline: dict[str, Any],
     round_record: dict[str, Any],
+    started_at: str,
 ) -> dict[str, Any]:
     """初期の状態を組み立てて保存し、保存した状態を返す。"""
     implementer, reason = _choose_implementer(
@@ -623,6 +627,7 @@ def _save_initial_state(
         model_spec=inputs.model_spec,
         baseline=baseline,
         round_test=round_record,
+        started_at=started_at,
     )
     state = _build_initial_state(args, context)
     # **実行時の値を書き出す**（決定 24）。計画の後の値は `merge-plan` が足す。

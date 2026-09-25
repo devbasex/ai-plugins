@@ -136,6 +136,20 @@ def test_plan_names_the_budget_and_the_implementer(plan, tmp_path):
     assert "45" in text and "43.5" in text and "kiro" in text
 
 
+def test_plan_shows_every_limit_and_marks_a_missing_one(plan, tmp_path):
+    """上限の表は値を 1 行ずつ出し、決まっていない値は — にする。"""
+    _, state = _state(tmp_path, limits={"fix_end_at": "2026-09-24T10:40:00",
+                                        "final_fix_seconds": None, "test_timeout": 300})
+    rows = [line for line in plan.format_plan(state).splitlines()
+            if line.startswith("| ") and not line.startswith("| 値")]
+    values = [row.rsplit("|", 2)[1].strip() for row in rows[-len(plan._LIMIT_ROWS):]]
+    assert len(values) == len(plan._LIMIT_ROWS)
+    keys = [key for key, _ in plan._LIMIT_ROWS]
+    assert values[keys.index("fix_end_at")] == "2026-09-24T10:40:00"
+    assert values[keys.index("test_timeout")] == "300"
+    assert values[keys.index("final_fix_seconds")] == "—"
+
+
 def test_plan_is_stable_for_the_same_state(plan, tmp_path):
     """同じ状態からは同じ本文が出る。差分が出続けると毎回コミットが積まれる。"""
     _, state = _state(tmp_path)
