@@ -235,7 +235,7 @@ guard_supervisor_cut() {
   ratio=${NDF_SUPERVISOR_CUT_RATIO:-1.5}
   awk -v c="$last" -v p="$first" -v r="$ratio" 'BEGIN { exit !(r + 0 > 0 && c >= r * p) }' || return 0
   # 1 度だけ通すことはしない。やり直すだけで越えられると、区切るかが LLM の裁量に戻る
-  deny "この supervisor の文脈が ${last} トークンで、最初の呼び出し（${first}）の ${ratio} 倍以上ある。寿命 5 分のまま収束ループ（${skill}）を始めると、待ちの後のたびに文脈の全体を書き直す。同じ起動をやり直さずに、Pull Request を出す・進行を記録するなど起動の前に済ませることを済ませてから、持ち場の報告を「結果: 区切り」「次の持ち場: <今と同じ持ち場>」「次の工程: ${stage}」で返す（規則 11。conductor が寿命 1 時間の supervisor で続ける）。規約: ${CONTEXT_DOC}（止めるなら NDF_SUPERVISOR_CUT_GUARD=0、比は NDF_SUPERVISOR_CUT_RATIO）"
+  deny "この supervisor の文脈が ${last} トークンで、最初の呼び出し（${first}）の ${ratio} 倍以上ある。寿命 5 分のまま収束ループ（${skill}）を始めると、待ちの後のたびに文脈の全体を書き直す。同じ起動をやり直さずに、Pull Request を出す・進行を記録するなど起動の前に済ませることを済ませてから、フェーズの報告を「結果: 区切り」「次のフェーズ: <今と同じフェーズ>」「次の工程: ${stage}」で返す（規則 12。conductor が寿命 1 時間の supervisor で続ける）。規約: ${CONTEXT_DOC}（止めるなら NDF_SUPERVISOR_CUT_GUARD=0、比は NDF_SUPERVISOR_CUT_RATIO）"
 }
 
 case "$TOOL" in
