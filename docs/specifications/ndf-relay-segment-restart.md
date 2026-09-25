@@ -126,6 +126,7 @@ graph TB
 | 導入は利用者が明示に打つ `/ndf:install-wrapper` だけにし、SessionStart hook はシェルの設定を書かない（#928。10.17.6 までは hook が alias の囲みを自動で足した） | 利用者のシェル設定を黙って書き換えない。既存の `claude` の定義があれば足さない（選んだ起動の仕方が黙って替わる）。bash と zsh 以外は書き方が違い、読み違えると設定を壊す |
 | 文脈の上限は既存の文脈量の hook が作り、中継の下では 1 度の通しをやめる | 上限の値と読み方を 1 つにし、測る側と止める側を食い違わせない。人の居ない前提で LLM が「続ける」と決めると上限を超えたまま進む。Stop hook で上限を見て応答を続けさせると、文で尋ねた関門まで承認の前に切る |
 | 背景の処理が動いている Stop では印を書かない。判定は `background_tasks` の `status: running` だけで行う | 動いているあいだに切ると、その処理（supervisor を含む）が子の claude と一緒に終わる。背景の Bash もサブエージェントも同じ形で載る。conductor が自分で数えると数え違えて子を失う |
+| 背景の処理のために印を書けない Stop は、同じ区間の同じ候補で 1 度だけ止め（`decision: block`）、動いている作業の id とコマンドの先頭を conductor へ渡す。止め方は `TaskStop <id>` と書き、止めてはいけない作業（supervisor・`supervise.py queue`）なら終わりを待たせる。印を書かなかった Stop は `log.jsonl` に `mark_skipped` で残す | 黙って抜けると conductor も利用者も切り替わらない理由に気づかない（#1035 では 1 回目の `ndf-next` から切り替わりまで約 7 分、利用者の手が 2 回入った）。conductor はプロセス名で探すしかなく、Claude Code が包んだコマンド行に `pkill -f` / `pgrep -f` が一致しないので止め損ねる。2 度目も止めると、待つと決めた conductor の応答を繰り返し起こす |
 | 次の区間の中身は位置引数 1 つで渡す | 複数行の中身でも、改行ごと 1 つの入力として届く |
 | 文脈量の hook は `relay.py notice` の 1 行目（`is-child` と同じ判定）で中継の直接の子かを見る | bash の hook に親のたどりを写すと、2 つの実装が食い違う |
 | 質問が表示されているあいだと、印の後に質問・利用者の入力・背景の処理の起動・応答の再開があったあいだは子の端末へ書かない。`/exit` と改行は質問の hook と同じロックの中で 1 回の write で書く（#928） | 質問の表示中に書いた `\r` は選択肢 1 を決める（実測）。10.17.6 までの 1 秒あけた `/exit` と `\r` のあいだに質問が出ると、`\r` が答えになる（[導入の仕様](ndf-relay-install-and-restart.md)の「関門を越えない守り」） |
@@ -264,7 +265,8 @@ stateDiagram-v2
 | 2 | `relay.lock` の排他が取れる（中継が動いていない） | 何もしない |
 | 3 | 標準入力を JSON として読めない | 何もしない |
 | 4 | hook の親をたどって最初に当たる claude が `child.pid` と違う | 何もしない（印を消さない） |
-| 5 | `background_tasks` に `status: running` がある、またはブロックが 2 つ以上 | 印があれば消す。処理が終わって応答し直した Stop で改めて書かれる |
+| 5 | `background_tasks` に `status: running` がある、またはブロックが 2 つ以上 | 印があれば消す。ブロックが 1 つ以上あれば `log.jsonl` に `{"event": "mark_skipped", "at", "section", "reason": "background" \| "blocks", "tasks": [{"id", "type", "command"}], "held"}` を 1 行足す（`section` は最後の `start` の区間）。処理が終わって応答し直した Stop で改めて書かれる |
+| 5a | 5 のうちブロックがちょうど 1 つで背景の処理が動いていて、`stop_hook_active` が偽で、同じ区間の同じ候補（ブロックの中身のハッシュ）でまだ止めていない | 標準出力へ `{"decision": "block", "reason": …}` を出して Stop を止める。`reason` は動いている作業の id とコマンドの先頭 80 字（取れなければ件数）、`TaskStop <id>` で止めること、`pkill -f` / `pgrep -f` を使わないこと、止めてはいけない作業なら終わりを待ってから出し直すこと。止めた候補は `mark-held.json` に残す |
 | 6 | ブロックがちょうど 1 つ | 印を書く（前の印は置き換わる） |
 | 7 | ブロックが 0 で、`asked` の時刻が印の `written_at` 以後 | 印を消す（印の後に質問が出た） |
 | 8 | ブロックが 0 で、7 に当たらない | 前の印を残す。印を書いた後は切り替えを確定とする |
@@ -287,7 +289,7 @@ stateDiagram-v2
 | 文脈量の hook | conductor が工程へ入る起動（工程 Skill・フェーズの Agent）で上限を超えていれば止める。これが「前のフェーズの報告を受け取った後で、次のフェーズを起動する前」の切りの良いところに当たる |
 | 文脈量の hook（中継の下） | `NDF_RELAY_DIR` があり、上限を超えていて、`relay.py notice` の 1 行目が `relay` なら、同じ起動の 1 度の通しをしない。理由の欄は「新しいフェーズを起動せず、動いている supervisor の報告を待ち、引継ぎ文書を更新し、`ndf-next` のブロックを出して終える」と、ブロックの直前に書く `notice` の 2 行目、承認や確認を挟まないことを示す。中継の外では今までどおり 1 度だけ通す |
 | conductor | 背景の supervisor の報告をすべて受け取ってから、引継ぎ文書（起動の指示が名指ししたもの。無ければ書かない）を更新し、ブロックを出して終える。中身は `/ndf:development-workflow #<課題>`、名指しの引継ぎ文書があれば「<文書> の続きから」 |
-| Stop hook と中継 | 背景の処理が残っていれば印を書かない。すべて終わった後の Stop で印が書かれ、中継がほかの切れ目と同じく次の区間を起動する |
+| Stop hook と中継 | 背景の処理が残っていれば印を書かず、Stop を 1 度止めて残っている作業を知らせる。すべて終わった後の Stop で印が書かれ、中継がほかの切れ目と同じく次の区間を起動する |
 
 hook が止めるのは工程へ入る起動だけで、フェーズの中の Bash や Read は止めない。
 
@@ -371,14 +373,15 @@ hook が止めるのは工程へ入る起動だけで、フェーズの中の Ba
 
 | 相手 | 使うもの |
 | --- | --- |
-| Claude Code の Stop hook の入力 | `last_assistant_message`・`background_tasks`（`status`）・`cwd`・`session_id`・`transcript_path`。`stop_hook_active` は見ない |
+| Claude Code の Stop hook の入力 | `last_assistant_message`・`background_tasks`（`status`・`id`・`type`・`command`）・`cwd`・`session_id`・`transcript_path`・`stop_hook_active`（Stop を止めるかにだけ使い、印を書くかには使わない）。止めるときは標準出力の `{"decision": "block", "reason"}` |
 | Claude Code の CLI | `claude plugin list --json`（`id` が `<プラグイン>@<マーケットプレイス>`、`version`）・`claude plugin marketplace update <名前>`・`claude plugin update ndf@<名前> -y`（端末でなければ `-y` が要る）。区間の起動は位置引数の最初の入力（スラッシュコマンドも入力として働く） |
 | 会話の記録 | `transcript_path` の更新時刻と、印より後の `assistant` / `user` の行 |
 
 **前提にしている Claude Code の振る舞い**（2.1.280・Linux で実測）: Stop hook は応答が終わるたびに
 発火し、`AskUserQuestion` の答えを待つあいだと claude の終了では発火しない。擬似端末のマスタへ書いた `/exit` と `\r` で約 1.6 秒で終わり、記録は
 壊れない。入力待ちの子の端末は raw で、`\x03` はバイトのまま Ctrl-C として届く。背景の Bash と
-サブエージェントは `background_tasks` に `running` で載り、終わると空の配列に戻る。
+サブエージェントは `background_tasks` に `running` で載り、終わると空の配列に戻る。要素は `id`・`type`
+（`shell` など）・`status`・`description`・`command` を持つ（2.1.282 で実測）。
 
 ## セキュリティ
 
@@ -412,7 +415,10 @@ hook が止めるのは工程へ入る起動だけで、フェーズの中の Ba
   が真でも書くこと。`NDF_RELAY_DIR` 無し・中継が動いていない・ブロック 0・2 つ・4 つのバッククォートの囲みの
   中だけ・壊れた JSON・直接の子でない・情報文字列 `text` で、印が無く出力が空で終了コード 0 であること。
   ブロック無しの Stop で前の印が残り、直接の子でない claude の Stop でも消えないこと。`background_tasks` に
-  `running` があるときとブロック 2 つのときは書かずに前の印を消すこと
+  `running` があるときとブロック 2 つのときは書かずに前の印を消すこと。`running` があるブロック 1 つの Stop は
+  1 度だけ `decision: block` を出して id とコマンドの先頭 80 字（id が無ければ件数）を示し、同じ候補の 2 度目・
+  `stop_hook_active` が真のときは出さず、別の候補では改めて出すこと。印を書かなかった Stop が `log.jsonl` に
+  `mark_skipped` を残し、ブロックの無い Stop では残さないこと
 - 素通し: `NDF_RELAY=0`・中継の下・`-p`・`--help`・副命令・標準入力がパイプで、本物の claude のパスと元の
   引数が渡り、環境の差が `NDF_RELAY_DEPTH` だけで、何も出力しないこと。`pty` が読めない・`plugin list` の
   失敗・`ndf@` が無い・`plugin list` の打ち切りで、1 行を出してから素通しすること。`claude` という名前の
