@@ -10,10 +10,10 @@ Claude Code の PreToolUse hook（`plugins/ndf/scripts/token-guard.sh`）が、�
 
 | 何を読むか | 正本 |
 | --- | --- |
-| 待ちの費用、許す待ち方と禁じる待ち方、待つ相手ごとの手、途中の通知を受けたときの層ごとの手と複製の待ちのコマンド、hook の止め方、4 ランタイムの扱い | `plugins/ndf/skills/development-workflow/references/waiting.md` |
+| 待ちの費用、許す待ち方と禁じる待ち方、待つ相手ごとの手、途中の通知を受けたときの層ごとの手とコピーの待ちのコマンド、hook の止め方、4 ランタイムの扱い | `plugins/ndf/skills/development-workflow/references/waiting.md` |
 | 会話を切る 4 つのカットポイント、上限を超えたら hook が止めること、新しい会話で戻す手順 | `plugins/ndf/skills/development-workflow/references/context-window.md` の「context window はカットポイントで切る」「上限を超えたら hook が止める」「新しい会話で戻す」 |
 | conductor が引継ぎの 1 行を出す時点 | `plugins/ndf/skills/development-workflow/SKILL.md`（「工程は 1 つの context window で通し切らなくてよい」の段落） |
-| supervisor と worker が待ち方に従う規則、worker の起動指示の `置き場所`（報告の複製と完了の目印） | `plugins/ndf/skills/development-workflow/references/agent-layers.md` |
+| supervisor と worker が待ち方に従う規則、worker の起動指示の `置き場所`（報告のコピーと完了の目印） | `plugins/ndf/skills/development-workflow/references/agent-layers.md` |
 | `sleep` の判定の字句の規則 | `plugins/ndf/scripts/lib/token_guard_sleep.py` の docstring |
 
 ## 概要
@@ -46,8 +46,8 @@ Claude Code の PreToolUse hook（`plugins/ndf/scripts/token-guard.sh`）が、�
 | 文脈量 | 1 回の API 呼び出しで読んだトークン数。`input_tokens + cache_read_input_tokens + cache_creation_input_tokens` |
 | 工程 Skill | `context-window.md` の 4 つのカットポイントの直後に始まる工程の Skill と、入口の `development-workflow` / `issue-plan-strategy`（下の「工程 Skill の一覧」） |
 | 途中の通知 | 背景の処理を残したまま応答を終えたサブエージェントについて、親へ届く 1 回目の通知。注記に「background work of its own still running」「may be interim」と出る |
-| 報告の複製 | worker が起動指示の `置き場所` のファイルの末尾へ書く `## 作業の報告` の節。最後の応答の報告と同じ中身 |
-| 完了の目印 | worker が報告の複製を書き終えた後に作る空のファイル `<置き場所>.done` |
+| 報告のコピー | worker が起動指示の `置き場所` のファイルの末尾へ書く `## 作業の報告` の節。最後の応答の報告と同じ中身 |
+| 完了の目印 | worker が報告のコピーを書き終えた後に作る空のファイル `<置き場所>.done` |
 | 引継ぎの 1 行 | 新しい会話の最初に打てば、その工程から再開できるコマンド 1 行。`/ndf:development-workflow #<課題> [#<課題> ...]`。情報文字列 `ndf-next` の囲みのコードブロック 1 つで出す |
 
 ## 構成要素
@@ -177,7 +177,7 @@ graph TB
   流された実測があるため採らない
 - **ラッパーの直接の子の conductor では 1 度の通しをしない。** `NDF_RELAY_DIR` があり、上限を超えていて、
   `relay.py notice` の 1 行目が `relay`（`is-child` と同じ判定）なら、上限を超えている限り同じ起動も止め続け、
-  拒否文に `notice` の 2 行目（告知）を埋め込む（[ndf-relay-segment-notice.md](ndf-relay-segment-notice.md)）。人の居ない
+  拒否文に `notice` の 2 行目（アナウンス）を埋め込む（[ndf-relay-segment-notice.md](ndf-relay-segment-notice.md)）。人の居ない
   前提で LLM が「続ける」と決めると、上限を超えたまま進むためである。ラッパーの外では 1 度だけ通す
   （[ndf-relay-segment-restart.md](ndf-relay-segment-restart.md) の「文脈の上限で切る」）
 - **文脈量を読めない（記録が無い・`usage` が無い）ときは通す**
@@ -205,9 +205,9 @@ graph TB
 | カットポイント | 直後に始まる工程の Skill |
 | --- | --- |
 | 1 ドキュメントレビューのマージの後 | `implementation-plan` / `document-drafting` |
-| 2 構造改善と実装レビューの前後 | `cross-refactoring` / `cross-review` / `pr-review` / `quality-gates` |
+| 2 リファクタリングとコードレビューの前後 | `cross-refactoring` / `cross-review` / `pr-review` / `quality-gates` |
 | 3 Pull Request を出した後 | `plan-to-spec` / `merged` |
-| 4 配布の後 | `layout-review` / `release-verification` / `retrospective` |
+| 4 リリースの後 | `layout-review` / `release-verification` / `retrospective` |
 | 入口 | `development-workflow` / `issue-plan-strategy` |
 
 `worktree` などカットポイントの内側の工程は含めない。`cross-review` はカットポイント 1 の前（ドキュメント
@@ -216,21 +216,21 @@ graph TB
 ### 引継ぎの 1 行
 
 **形は `/ndf:development-workflow #<課題> [#<課題> ...]` とする。** 工程 Skill を直接起動する形
-（`/ndf:implementation-plan #829`）は採らない。工程 Skill はモード・作業ツリー・承認の状態を戻す
+（`/ndf:implementation-plan #829`）は採らない。工程 Skill はモード・ worktree ・承認の状態を戻す
 手順を持たず、戻す手順を持つのは `development-workflow` の側だからである。経由すると固定費に
 約 1 万トークンが足されるが、切る前の会話の文脈（#827 で平均 41 万）に比べて小さい。Codex と
 Kiro では、それぞれの README が示す Skill の起動の書き方に読み替える。
 
 **conductor は `context-window.md` の 4 つのカットポイントと、文脈量の hook が拒否したときにこの 1 行を
-出す。** 出す形は情報文字列 `ndf-next` の囲みのコードブロック 1 つで、今の区間を `/goal` で始めていたときだけ中身の先頭を
+出す。** 出す形は情報文字列 `ndf-next` の囲みのコードブロック 1 つで、今のセッションを `/goal` で始めていたときだけ中身の先頭を
 `/goal ` にする（形の定義は `context-window.md` の「新しい会話で戻す」だけに置く）。ラッパーの下では
 ラッパーがこのブロックを拾って次の会話を自動で起動し、ラッパーが無ければ人が中身を貼り付ける
 （[ndf-relay-segment-restart.md](ndf-relay-segment-restart.md)）。 3 層では supervisor のフェーズの境がこのカットポイントに当たるため、conductor が `## フェーズの報告`
-を受け取った時点で出し、supervisor は出さない。報告が `結果: 関門` のときは、関門の承認と
-取り込み（設計 Pull Request のマージなど）が済んだ後に出す。関門の前に会話を切らないためである。
+を受け取った時点で出し、supervisor は出さない。報告が `結果: 関門` のときは、ゲートの承認と
+取り込み（設計 Pull Request のマージなど）が済んだ後に出す。承認ゲートの前に会話を切らないためである。
 
 **新しい会話の `development-workflow` は、課題の本文の `## 進行`・通過記録・Pull Request
-から、モード・作業ツリー・現在の工程を戻す。** Pull Request は番号の全文検索で引かず、作業
+から、モード・ worktree ・現在の工程を戻す。** Pull Request は番号の全文検索で引かず、作業
 ツリーのブランチ名と課題の `closedByPullRequestsReferences` で引く。設計の Pull Request は閉じる
 語を持たないため、ブランチ名でしか引けない。手順は `context-window.md` の「新しい会話で戻す」が
 持つ。
@@ -260,21 +260,21 @@ supervisor は再開しない。
 | 層 | 常に成り立つ条件 |
 | --- | --- |
 | supervisor | worker を起動する前に、`置き場所` のファイルを worker ごとに新しいパスで空に作り、完了の目印を消す。`置き場所` を「無し」にしない |
-| worker | 最後の応答の前に、長い出力の有無に依らず報告の複製を `置き場所` の末尾へ書き、その後に完了の目印を作る。`Monitor` で待つときも同じ |
-| worker | 背景の処理を残したまま応答を終えない（規則 5）。複製と目印はこの規則を緩めず、守れなかった worker を待つための備えである |
+| worker | 最後の応答の前に、長い出力の有無に依らず報告のコピーを `置き場所` の末尾へ書き、その後に完了の目印を作る。`Monitor` で待つときも同じ |
+| worker | 背景の処理を残したまま応答を終えない（規則 5）。コピーと目印はこの規則を緩めず、守れなかった worker を待つための備えである |
 
-複製の待ちは上限 3600 秒の until ループで、終了コード 0 なら `置き場所` の最後の
+コピーの待ちは上限 3600 秒の until ループで、終了コード 0 なら `置き場所` の最後の
 `## 作業の報告` から末尾までを読んで進み、124 なら既存の「supervisor の worker の点検」と
 「報告が無いまま終わったとき」の規則へ渡す。コマンドと表の正本は `waiting.md` である。
-worker の 2 回目の通知は、複製を読んだ後に届いても読み直さない。
+worker の 2 回目の通知は、コピーを読んだ後に届いても読み直さない。
 
 | 決定 | 理由 |
 | --- | --- |
-| 待つのは別ファイルの完了の目印の出現で、`置き場所` の中身は待たない | `置き場所` は長い出力と共用のため、見出しや固定の行を待つと、書きかけの複製や長い出力に同じ行が含まれたときにも反応する。別ファイルの存在は中身に左右されず、書き終えた後にだけ現れる |
-| 起動の前に `置き場所` を新しいパスで空にし、目印を消す | 前の worker の報告や目印が残ったパスを渡すと、複製の待ちが即座に終わり、今の worker の報告を待たない |
+| 待つのは別ファイルの完了の目印の出現で、`置き場所` の中身は待たない | `置き場所` は長い出力と共用のため、見出しや固定の行を待つと、書きかけのコピーや長い出力に同じ行が含まれたときにも反応する。別ファイルの存在は中身に左右されず、書き終えた後にだけ現れる |
+| 起動の前に `置き場所` を新しいパスで空にし、目印を消す | 前の worker の報告や目印が残ったパスを渡すと、コピーの待ちが即座に終わり、今の worker の報告を待たない |
 | 途中の通知を受けても worker へ `SendMessage` を送らない | worker は背景の待ちが終わるまで報告を出せず、送っても同じく途中の通知が返る |
 | サブエージェントの出力ファイル（`tasks/*.output`）を背景で見張らない | `waiting.md` が読むことを禁じており、パスの形も Claude Code が約束していない |
-| 複製の待ちに上限 3600 秒を置き、上限の後の扱いは既存の点検と `SendMessage` の規則を使う | worker が報告を書かずに落ちると目印は現れず、上限が無いと永久に待つ。3600 秒は初期値で、worker の所要時間の実測で見直す。上限で起きても点検が 1 回挟まるだけで作業は失われない |
+| コピーの待ちに上限 3600 秒を置き、上限の後の扱いは既存の点検と `SendMessage` の規則を使う | worker が報告を書かずに落ちると目印は現れず、上限が無いと永久に待つ。3600 秒は初期値で、worker の所要時間の実測で見直す。上限で起きても点検が 1 回挟まるだけで作業は失われない |
 | 規則の数を変えず、supervisor の規則 4 と worker の規則 5 に 1 文ずつ足す | どちらも既存の「待ちで応答を終えない」「背景の処理を残したまま応答を終えない」の中の場面である。新しい規則を立てると、起動指示へ写す規則の数が変わる |
 
 **待ち方の規約は `waiting.md` の新しいファイルに置く。** `agent-layers.md` の節にすると、
@@ -282,7 +282,7 @@ worker の 2 回目の通知は、複製を読んだ後に届いても読み直�
 
 **配布物の文書にある前景の待ちのループは、ループを書き換えずに案内の 1 行を足す。** 拒否の
 理由が「同じループを `run_in_background: true` で」と案内するため、Claude Code では 1 回の
-回り道で済む。hook と案内の行を同じ版で配布するため、拒否と文書の順序が食い違わない。ループの
+回り道で済む。hook と案内の行を同じ版でリリースするため、拒否と文書の順序が食い違わない。ループの
 書き換え（Tool の共通化）は #731 が扱う。
 
 ## データ・設定
@@ -319,7 +319,7 @@ worker の 2 回目の通知は、複製を読んだ後に届いても読み直�
   並列に走ると、置き換えだけでは `count` の更新や目印が失われる。ロックは `lock-common.sh` の
   `ndf_lock_acquire <dir> 1` / `ndf_lock_release` で取り、1 秒で取れなければ判定せず通す。
   sleep の判定はロックを取らない
-- **7 日より古い記録は、書き込みのついでに消す。** 会話が終わった合図を hook は受け取らない
+- **7 日より古い記録は、書き込みのついでに消す。** 会話が終わったことを hook は知らされない
 
 ### 環境変数
 
@@ -358,7 +358,7 @@ worker の 2 回目の通知は、複製を読んだ後に届いても読み直�
 | --- | --- |
 | sleep | 同じ条件の until ループを `run_in_background: true` で起動して完了通知を待つこと。出来事を 1 つずつ受けるなら `Monitor`。規約 `waiting.md`。`NDF_SLEEP_GUARD=0` |
 | 連続 Read | 書き終わりを待つなら until ループを `run_in_background: true` で起動するか、背景の処理の完了通知を待つこと。`tasks/*.output` は読まない。規約 `waiting.md`。`NDF_READ_REPEAT_GUARD=0` |
-| 文脈量 | 文脈量と上限、次のコマンドを `ndf-next` のブロック 1 つで示すこと（中身は引継ぎの 1 行、`/goal` で始めた区間なら先頭に `/goal `）、続けるなら同じ起動をもう一度行うこと。ラッパーの直接の子では、止め続けること・動いている supervisor の報告を待ってから引継ぎ文書を更新してブロックを出すこと。規約 `context-window.md`。`NDF_CONTEXT_GUARD=0` と `NDF_CONTEXT_LIMIT` |
+| 文脈量 | 文脈量と上限、次のコマンドを `ndf-next` のブロック 1 つで示すこと（中身は引継ぎの 1 行、`/goal` で始めたセッションなら先頭に `/goal `）、続けるなら同じ起動をもう一度行うこと。ラッパーの直接の子では、止め続けること・動いている supervisor の報告を待ってから引継ぎ文書を更新してブロックを出すこと。規約 `context-window.md`。`NDF_CONTEXT_GUARD=0` と `NDF_CONTEXT_LIMIT` |
 
 ### 4 ランタイム
 
@@ -409,12 +409,12 @@ agy の CLI 側の消費を測った後に、登録するかを改めて決め�
   4 ランタイムの表があること
 - Codex / Kiro / agy の既存の hook の動作が変わらないこと（既存のテスト）
 - supervisor → worker の 2 層で、worker が背景の待ちを残して応答を終えても、supervisor が途中の
-  通知で止まらず、自分の複製の待ちの完了通知で再開して worker の報告を畳んだフェーズの報告を返すこと。
+  通知で止まらず、自分のコピーの待ちの完了通知で再開して worker の報告を畳んだフェーズレポートを返すこと。
   conductor が報告なしで続けさせる回数が 0 であること（`claude -p --output-format stream-json` で
   再現する。記録は [PR #910](https://github.com/devbasex/ai-plugins/pull/910) の本文。`claude -p` は
   本体が応答を終えると背景の処理を残したまま終わるため、再現では conductor 側でプロセスを保つ）
 
-効果の数値（ポーリングの費用の割合、conductor の最大文脈と再読込量）は、配布後に #827 の
+効果の数値（ポーリングの費用の割合、conductor の最大文脈と再読込量）は、リリース後に #827 の
 `measure.py` / `poll.py` / `extra.py` を変更前と同じ条件で回して比べる。変更前の値は、ポーリング
 が全体の 16%、conductor の最大文脈 683k、再読込の削減見込み 58% である。
 
@@ -423,6 +423,6 @@ agy の CLI 側の消費を測った後に、登録するかを改めて決め�
 - [#829](https://github.com/devbasex/ai-plugins/issues/829) / [#830](https://github.com/devbasex/ai-plugins/issues/830)（親は [#827](https://github.com/devbasex/ai-plugins/issues/827)）
 - [#901](https://github.com/devbasex/ai-plugins/issues/901) — supervisor が worker の途中の通知で止まる（実装は [PR #910](https://github.com/devbasex/ai-plugins/pull/910)）
 - [#895](https://github.com/devbasex/ai-plugins/issues/895) — 引継ぎの 1 行を `ndf-next` のブロックにし、ラッパーの下では文脈量の拒否を止め続ける（[ndf-relay-segment-restart.md](ndf-relay-segment-restart.md)）
-- [#731](https://github.com/devbasex/ai-plugins/issues/731) — 待ちの Tool（`bg-wait.sh`）を共通層へ移す
+- [#731](https://github.com/devbasex/ai-plugins/issues/731) — 待ちの Tool（`bg-wait.sh`）をライブラリへ移す
 - [ndf-context-window-metrics.md](ndf-context-window-metrics.md) — 会話の記録から文脈量を測る部品
 - [ndf-agent-layers-unattended-run.md](ndf-agent-layers-unattended-run.md) — 3 層の運転
