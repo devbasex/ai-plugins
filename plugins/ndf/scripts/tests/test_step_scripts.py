@@ -196,13 +196,18 @@ def test_spec_finalize_promotes_glossary_terms_of_the_removed_design(repo, env):
 
 
 GOOD_DECL = '{"version": 1, "format": "json", "source": "g.json", "document": "g.md"}'
+TERM = '"term": "語", "context": "c", "meaning": "m"'
+PENDING = ('{{"version": 1, "contexts": [{{"id": "c", "name": "C"}}], '
+           '"terms": [{{{0}, "pending_source": "{1}/design/x-design.md"}}]}}')
 
 
 @pytest.mark.parametrize("decl,source", [('{"version": 1}', None), ('{"source": "docs/glossary/none.json"}', None),
                                          ("not json", None), (GOOD_DECL, "not json"),
-                                         (GOOD_DECL, '{"version": 1, "terms": {}}')])
+                                         (GOOD_DECL, '{"version": 1, "terms": {}}'), (GOOD_DECL, None),
+                                         (GOOD_DECL, PENDING.format('"context": "c", "meaning": "m"', "docs")),
+                                         (GOOD_DECL, PENDING.format(TERM, "./docs"))])
 def test_spec_finalize_stops_on_a_broken_glossary_declaration(repo, env, decl, source):
-    """宣言か正本が読めなければ、設計を消す前に止める。"""
+    """宣言・正本が読めないか、語の形（term・pending_source の書き方）が崩れていれば、設計を消す前に止める。"""
     spec_repo(repo)
     write(repo, ".ndf/glossary.json", decl)
     if source is not None:

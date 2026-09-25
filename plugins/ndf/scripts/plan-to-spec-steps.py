@@ -56,33 +56,49 @@ def update_index(index, text, name, link, title):
 
 
 def load_glossary(root: Path):
-    """用語集の宣言と正本。宣言が無ければ None。宣言か正本が読めなければ設計を消す前に止める。"""
+    """用語集の宣言と正本。宣言が無ければ None。宣言・正本が読めないか語の形が崩れていれば設計を消す前に止める。"""
     try:
         decl = glossary.load_declaration(root)
-        return None if decl is None else (decl, glossary.load_glossary(decl))
+        if decl is None:
+            return None
+        g = glossary.load_glossary(decl)
     except StepError as e:
         raise StepError(f"用語集の宣言（.ndf/glossary.json）か正本が読めない: {e}", EXIT_PRECONDITION)
+    bad = [f["detail"] for f in glossary.structure_findings(g, decl) if f["rule"] == "schema"]
+    if bad:
+        raise StepError(f"用語集の正本の形が崩れている（glossary.py check --rules structure で直す）: {bad[0]}",
+                        EXIT_PRECONDITION)
+    return decl, g
 
 
-def promote_glossary(loaded, removed: set, spec_rel: str) -> list:
-    """消した設計を pending_source に持つ語の source を確定仕様へ移し、文書を作り直して git add する。"""
+def plan_glossary(loaded, removed: set, spec_rel: str):
+    """消す設計を pending_source に持つ語の source を確定仕様へ移し、書く正本と文書を作る。何も書かない。"""
     if loaded is None:
-        return []
+        return None
     decl, g = loaded
     moved = [t for t in glossary.terms_of(g) if t.get("pending_source") in removed]
     if not moved:
-        return []
+        return None
     for t in moved:
         t["source"] = spec_rel
         del t["pending_source"]
+    items = [{"kind": "glossary", "name": t["term"], "result": "promoted", "source": spec_rel} for t in moved]
+    return decl, json.dumps(g, ensure_ascii=False, indent=2) + "\n", glossary.render_text(g, decl.source), items
+
+
+def write_glossary(plan) -> list:
+    """plan_glossary の正本と文書を書いて git add する。"""
+    if plan is None:
+        return []
+    decl, source_text, document_text, items = plan
     try:
-        decl.source_path.write_text(json.dumps(g, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        decl.source_path.write_text(source_text, encoding="utf-8")
         decl.document_path.parent.mkdir(parents=True, exist_ok=True)
-        decl.document_path.write_text(glossary.render_text(g, decl.source), encoding="utf-8")
+        decl.document_path.write_text(document_text, encoding="utf-8")
     except OSError as e:
         raise StepError(f"用語集を書けない: {e}")
     git(decl.root, "add", "-A", "--", decl.source, decl.document)
-    return [{"kind": "glossary", "name": t["term"], "result": "promoted", "source": spec_rel} for t in moved]
+    return items
 
 
 def cmd_spec_finalize(a):
@@ -91,18 +107,19 @@ def cmd_spec_finalize(a):
     if not spec.is_file():
         raise StepError(f"確定仕様のファイルが無い: {a.spec}", EXIT_PRECONDITION)
     spec_rel = spec.relative_to(root).as_posix()
-    loaded = load_glossary(root)
-    items = []
-
+    rels = []
     for d in a.design:
         dp = Path(d)
         rel = dp.resolve().relative_to(root).as_posix() if dp.is_absolute() else dp.as_posix()
         if not (root / rel).exists():
             raise StepError(f"設計のファイルが無い: {d}", EXIT_PRECONDITION)
-        git(root, "rm", "-q", "--", rel)
-        items.append({"kind": "design", "name": rel, "result": "removed"})
+        rels.append(rel)
+    plan = plan_glossary(load_glossary(root), set(rels), spec_rel)
 
-    items += promote_glossary(loaded, {i["name"] for i in items}, spec_rel)
+    for rel in rels:
+        git(root, "rm", "-q", "--", rel)
+    items = [{"kind": "design", "name": rel, "result": "removed"} for rel in rels]
+    items += write_glossary(plan)
 
     index = root / "docs" / "specifications" / "README.md"
     if index.is_file():

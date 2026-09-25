@@ -172,6 +172,17 @@ def render_text(g: dict, source: str) -> str:
 
 # --- 用語集の形 --------------------------------------------------------------------
 
+def pending_problem(root: Path, rel: str) -> str | None:
+    """pending_source は根の内側の正規の相対パスで設計文書を指す。spec-finalize はこの形でだけ照合する。"""
+    try:
+        inside(root, rel, "pending_source")
+    except StepError:
+        return "は根の内側の相対パスで書く（絶対パス・.. は受けない）"
+    if Path(rel).as_posix() != rel:
+        return f"は正規の形で書く（{Path(rel).as_posix()}）"
+    return None if (root / rel).is_file() else "が指す設計文書が無い"
+
+
 def structure_findings(g: dict, decl: Declaration) -> list[dict]:
     items = []
 
@@ -211,8 +222,8 @@ def structure_findings(g: dict, decl: Declaration) -> list[dict]:
             hit("unconfirmed_source", t["term"],
                 f"terms[{i}] の source が確定仕様を指さない: {t['source']}（check.source_paths に当たるパスへ移す。"
                 "確定前は source を空にし、plan-to-spec が確定仕様を書いたときに入れる）")
-        if isinstance(t.get("pending_source"), str) and not (decl.root / t["pending_source"]).is_file():
-            hit("schema", t["term"], f"terms[{i}] の pending_source が指す設計文書が無い: {t['pending_source']}")
+        if isinstance(t.get("pending_source"), str) and (problem := pending_problem(decl.root, t["pending_source"])):
+            hit("schema", t["term"], f"terms[{i}] の pending_source {problem}: {t['pending_source']}")
         if t["context"] not in ids:
             hit("schema", t["term"], f"terms[{i}] の context が宣言されていない: {t['context']}")
         for w in deprecated_of(t):
