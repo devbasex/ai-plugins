@@ -1,0 +1,63 @@
+{
+ "per_pr": [
+  {
+   "version": "10.17.18",
+   "mode": "不明",
+   "model": "claude-opus-5-5",
+   "cc": "2.1.282",
+   "reviewers": "-",
+   "sessions": 4,
+   "sessions_with_pr": 0,
+   "prs": 0
+  }
+ ],
+ "per_role": [
+  {
+   "version": "10.17.18",
+   "mode": "不明",
+   "model": "claude-opus-5-5",
+   "cc": "2.1.282",
+   "reviewers": "-",
+   "layer": "conductor",
+   "role": "-",
+   "agent_type": "-",
+   "count": 4,
+   "cost": 516125.30000000005,
+   "context": 3374633.0,
+   "out": 32226.0,
+   "minutes": 7.192512501279513,
+   "p": 45251.75,
+   "k": 29.5,
+   "w5": 155173.0,
+   "w1h": 0.0,
+   "rewrites": 0,
+   "rewrites_after_5m": 0,
+   "rewrites_untimed": 0,
+   "rewrite_tokens": 0,
+   "rewrite_tokens_after_5m": 0,
+   "read_tokens_after_5m": 0,
+   "rewrite_gap_median": null
+  }
+ ],
+ "external": [],
+ "meta": {
+  "by": [
+   "version",
+   "mode",
+   "model",
+   "cc",
+   "reviewers"
+  ],
+  "min_version": "10.17.18",
+  "until": "2026-09-25T10:25:00Z",
+  "sessions": 4,
+  "sessions_with_pr": 0,
+  "unlinked_external": 691,
+  "skipped": {
+   "ndf の Skill が無い": 358,
+   "版を判定できない": 17
+  },
+  "released": "10.17.20",
+  "previous": "2026-09-25-9.json"
+ }
+}
