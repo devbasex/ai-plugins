@@ -89,7 +89,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.17.21）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.17.22-dev.1）
 ```
 
 ### agy
@@ -119,13 +119,11 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.17.21 へ更新するとき
+## v10.17.22-dev.1 へ更新するとき
 
-- cross-review を修正待ちから再開しても、PR の head より先にある未 push のコミットは残る（#1093）
-- issue-upkeep の `candidates --limit` は、指定した件数を超える候補を items に載せない（#1093）
-- `mission-state.py init` は、既存の `mission.json` が別の形のときは上書きせずに止まる（#1093）
-- supervise.py の計画は、テスト・同期・起点・配布を .ndf/ の宣言か引数から読むため、他のプロジェクトでもそのまま使える（#1094）
-- doc-lint.py の起点の既定は .ndf/worktree.json の base_branch から読む（#1094）
+- cross-review と cross-refactoring の判定は、同じ名前の検査ジョブを最新の実行の結論で見る。後で成功した検査より前の失敗では、修正のラウンドを回さない（#1098）
+- レビュー本文の指摘を見送った場合も、スレッドの決着と修正のまとめが投稿される（#1098）
+- `pace: fast` を選ぶと、MVV の判定が従うときに関門 1・2 を止まらずに通り、構造改善と実装レビューは `check-trigger.py` のトリガーが立ったときだけ次の開発版の前に 1 回通る。確定仕様化・受け入れ条件の確認・振り返りはミッションの終わりに new close の計画で流れる（#1099）
 
 ## Playwright テストについて
 
@@ -297,7 +295,7 @@ agy models   # 認証の確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.17.21/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.17.22-dev.1/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -319,14 +317,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.21/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.22-dev.1/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.17.21  <path>
+# => ndf@ai-plugins  installed, enabled  10.17.22-dev.1  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。
