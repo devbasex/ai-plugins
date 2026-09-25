@@ -26,7 +26,7 @@ push と PR 作成は取り消しに追加の操作が要る書き込みであ�
 
 **手順 3（push）と手順 4（PR 作成）の直前に、`plan` の結果から次を提示する。**
 
-- push 先のブランチ名と、PR のベースブランチ（`metrics.branch` / `metrics.base`）
+- push 先のブランチ名と、PR の宛て先ブランチ（`metrics.branch` / `metrics.base`）
 - コミット対象のファイル一覧と変更量（`items` の `changes`、`metrics.commits` / `metrics.files`）
 - 使用するコミットメッセージ
 - 既存 PR の有無（`metrics.existing_pr`。新規作成なのか、既存 PR の更新なのか）
@@ -37,7 +37,7 @@ push と PR 作成は取り消しに追加の操作が要る書き込みであ�
   依頼を同意とみなす。提示は行い、結果報告に含める
 - 作業の流れで暗黙に起動したときは、提示したうえで**明示的な同意を得てから push する**。
   同意が無ければ commit までで止める
-- ベースブランチが `main`/`master` 以外の場合は、手順 1 の誘導を優先する
+- 宛て先ブランチが `main`/`master` 以外の場合は、手順 1 の誘導を優先する
 
 ## この文書が受け取る値
 
@@ -56,8 +56,8 @@ push と PR 作成は取り消しに追加の操作が要る書き込みであ�
 python3 "$SCRIPTS/pr-steps.py" plan [--draft] [--base <base>] [--message "<コミットメッセージ>"]
 ```
 
-- `metrics.redirect` が `worktree`: 起点のブランチにいる。`/ndf:worktree` で作業ツリーを用意し、
-  そこへ移ってから打ち直す（入れ子の作業ツリーは作らない）
+- `metrics.redirect` が `worktree`: ベースブランチにいる。`/ndf:worktree` で worktree を用意し、
+  そこへ移ってから打ち直す（入れ子の worktreeは作らない）
 - `metrics.redirect` が `cherry-pick-pr`: 起点が `main`/`master` でも宣言のブランチでもない。警告を出して
   `/ndf:cherry-pick-pr <base>` へ誘導し、利用者が明示的に継続を指示したときだけ `--force` で進める
 - `metrics.closing_words_in_message` に語がある: メッセージから外す（「閉じる語は本文だけに書く」）
@@ -90,9 +90,9 @@ credential helper が応答しない環境の退避（`gh auth git-credential` �
 （`git log origin/<base>..HEAD`）を反映し、既存の関連リンクを保つ。雛形は
 `python3 "$SCRIPTS/pr-steps.py" template --out /tmp/pr-body.md` が書く。
 
-**`## 利用者向けの変化` は配布の CHANGELOG と更新案内へそのまま載る**（`release-steps.py notes` が組む）。
+**`## 利用者向けの変化` はリリースの CHANGELOG と更新案内へそのまま載る**（`release-steps.py notes` が組む）。
 利用者に何ができるようになるか・使い方が変わる点を箇条書きにし、今の決まりだけを書く。見える変化が無ければ
-「- 無し」と書く（配布の説明文は題名で代わる）。節の無い本文では、`create` / `update` の `next` が節を足すよう求める。
+「- 無し」と書く（リリースの説明文は題名で代わる）。節の無い本文では、`create` / `update` の `next` が節を足すよう求める。
 
 ```bash
 python3 "$SCRIPTS/pr-steps.py" create --title "<タイトル>" --body-file /tmp/pr-body.md [--draft] [--base <base>] \
@@ -103,7 +103,7 @@ python3 "$SCRIPTS/pr-steps.py" update --body-file /tmp/pr-body.md [--title "<タ
 
 - `--mode` と `--stages` を渡すと、本文の末尾に `モード: <mode> / 通した工程: <工程> → <工程>` の
   1 行を書く（既にあれば置き換える）。モードは `development-workflow` が判定した値、工程は工程表の
-  行の名前である。**この 1 行は省かない。** 配布後の不具合の起票数と突き合わせる材料になる
+  行の名前である。**この 1 行は省かない。** リリース後の不具合の起票数と突き合わせる材料になる
 
 - `create` は OPEN の PR があれば更新として振る舞う（`metrics.action`）
 - 本文末尾の `<!-- I want to review in Japanese. -->`、GraphQL の上限での REST への退避、
@@ -125,17 +125,17 @@ python3 "$SCRIPTS/pr-steps.py" report <番号>
 URL は最終行に生のまま置く（Markdown リンクにすると利用者の画面では番号しか表示されない）。
 コミット履歴は報告に含めない。
 
-## ミッションのブランチ宛てと develop 宛て
+## ミッションブランチ宛てと develop 宛て
 
 **宛て先で、Pull Request の役割が変わる。** `plan` の `metrics.target` と `metrics.review` が区分を返す。
 
-| 宛て先 | 何の Pull Request か | 実装レビュー | `metrics` |
+| 宛て先 | 何の Pull Request か | コードレビュー | `metrics` |
 | --- | --- | --- | --- |
-| `mission/<名前>` | 課題の Pull Request。課題の作業ツリーからミッションのブランチへ集める | 通さない。緑になったらミッションのブランチへ取り込む | `target: mission` / `review: false` |
-| develop（宣言の `base_branch`） | ミッションの Pull Request（ミッションで 1 本）か、ミッションのブランチを経ない単独の Pull Request | 通す（構造改善・`cross-review`・完了判定を 1 回） | `target: develop` / `review: true` |
+| `mission/<名前>` | 課題の Pull Request。課題の worktree からミッションブランチへ集める | 通さない。緑になったらミッションブランチへ取り込む | `target: mission` / `review: false` |
+| develop（宣言の `base_branch`） | ミッションの Pull Request（ミッションで 1 本）か、ミッションブランチを経ない単独の Pull Request | 通す（リファクタリング・`cross-review`・完了判定を 1 回） | `target: develop` / `review: true` |
 
-課題の Pull Request は `--base mission/<名前>` で出す。ミッションの Pull Request は、ミッションの
-ブランチの作業ツリーから `--base` を省いて出し、本文にミッションが閉じる課題を番号ごとに書く。
+課題の Pull Request は `--base mission/<名前>` で出す。ミッションの Pull Request は、
+ミッションブランチの worktree から `--base` を省いて出し、本文にミッションが閉じる課題を番号ごとに書く。
 
 ## 閉じる語は本文だけに書く
 
@@ -170,7 +170,7 @@ URL は最終行に生のまま置く（Markdown リンクにすると利用者�
 | --- | --- |
 | 開発版・検証環境のチャネル | 要らない |
 | **本番のチャネル** | **要る** |
-| head のブランチ名が `design/` で始まる Pull Request | **どのチャネルでも要る**（ドキュメントレビューの関門） |
+| head のブランチ名が `design/` で始まる Pull Request | **どのチャネルでも要る**（ドキュメントレビューの承認ゲート） |
 
 **規則は `/ndf:release` が持つ。** 本番のチャネルは `.ndf/worktree.json` の `production_branch`、
 宣言が無ければ既定ブランチ。全体像は `/ndf:development-workflow` の「人手の承認を求める関門」。
@@ -183,5 +183,5 @@ URL は最終行に生のまま置く（Markdown リンクにすると利用者�
 - `/ndf:deploy` — 環境ブランチへのデプロイPR（ブランチ全体）
 - `/ndf:pr-tests` — Test Plan 自動実行
 - `/ndf:pr-review` — PR単位レビュー
-- `/ndf:merged` — マージ後のブランチ整理 / 現ブランチに起点ブランチを取り込み
-- `/ndf:release` — 配布。**本番の系へ届く操作の承認の規則を持つ**
+- `/ndf:merged` — マージ後のブランチ整理 / 現ブランチにベースブランチを取り込み
+- `/ndf:release` — リリース。**本番の系へ届く操作の承認の規則を持つ**

@@ -1,4 +1,4 @@
-# プラグイン共通層
+# プラグインのライブラリ
 
 `plugins/ndf/scripts/lib/` は、**どの Skill にも属さない部品**を置く。プラグイン
 ルート直下にあるため、配る Skill を絞る配布先でも残る。
@@ -15,7 +15,7 @@
 
 | ファイル | 役割 | 読む側 |
 | --- | --- | --- |
-| [worktree-common.sh](worktree-common.sh) | 作業ツリーの判定・台帳・書き込み先の推定 | `worktree` / hook |
+| [worktree-common.sh](worktree-common.sh) | worktree の判定・台帳・書き込み先の推定 | `worktree` / hook |
 | [projects-common.sh](projects-common.sh) | GitHub Projects のボードへの記録 | `development-workflow` |
 | [lock-common.sh](lock-common.sh) | 排他の取得と解放（#293） | 上の 2 つと `development-workflow` |
 | [monitor.py](monitor.py) | 別プロセスの多軸監視。対象と命名規則を引数で受ける | 収束ループの 2 つ / `external-ai.py` |
@@ -27,17 +27,17 @@
 | [_tmpdir.sh](_tmpdir.sh) | 一時ディレクトリの解決。環境変数名とディレクトリ名を引数で受ける | 同上 |
 | [statefile.py](statefile.py) | 状態ファイルの読み書きと KEY=VALUE 出力、保存の後の差し込み口、再開で渡した引数の反映（#727） | 同上 |
 | [auth.py](auth.py) | 参加する CLI の認証の確認。止めずに結果だけを返す形を持つ（#727） | 同上 |
-| [run_metrics.py](run_metrics.py) | 実行の要約を作業ツリーの外へ書き、束ねて出す（`aggregate`、#662） | 同上 |
+| [run_metrics.py](run_metrics.py) | 実行の要約をworktree の外へ書き、集計して出す（`aggregate`、#662） | 同上 |
 | [assignment.py](assignment.py) | ホスト判定、母集合の確定、使える者の解決、席の埋め方と席の名前、担当の輪番（#727） | 同上 |
 | [models.py](models.py) | `--model` の解析、フラグ生成、実測値の突き合わせ | `cross-refactoring` / `external-ai.py` / `metrics.py` |
 | [metrics.py](metrics.py) | 担当ごとの指標算出と報告の整形 | テストだけ（収束ループの 2 つはまだ読まない） |
 | [post_queue.py](post_queue.py) | 上限のときに投稿を積む待ち行列と、上限の見分け | `cross-review`（`state.py` / `rotate-pr.sh`） |
-| [result_posts.py](result_posts.py) | 結果ファイル（指摘のファイル・修正の戻り値）を投稿へ組み立て、待ち行列から送る | `cross-review`（`state.py` / `drive.py`） / `fix-steps.py` |
+| [result_posts.py](result_posts.py) | 結果ファイル（指摘ファイル・修正の戻り値）を投稿へ組み立て、待ち行列から送る | `cross-review`（`state.py` / `drive.py`） / `fix-steps.py` |
 | [git-credential.sh](git-credential.sh) | credential helper が応答しない環境で git を通す退避の値 | `cross-refactoring`（`refactor_lib/gitfacts.py`） |
 | [closing-issues.sh](closing-issues.sh) | Pull Request の本文から、閉じる語が指す issue を取り出す | `progress-tracking`（ミッションを閉じる） / `merged`（OPEN の一覧） / `development-workflow` の hook |
 | [refresh.py](refresh.py) | 観点の出典の取得・指紋の比較・一覧の提示・待ちの扱い（#554）。**提示するだけで書き換えない** | `instructions-check.py` |
 | [transcript_agents.py](transcript_agents.py) | 会話の記録を conductor / supervisor / worker の層の単位で読む（#550）。上限の中断の一覧（`interrupted`）と解除の待ち（`wait-reset`）も持つ（#657）。**読むだけで送信の経路を持たない** | `skill-stats` / `development-workflow` |
-| [step_result.py](step_result.py) | 手順のスクリプトの結果 JSON の形・検証（`validate_result`）・出力と終了（`emit`）・承認の提示物（`approval_present`）と、git / gh を呼ぶ小関数 | `merged-steps.py` / `plan-to-spec-steps.py` / `release-steps.py` / `release-verification-steps.py` / `mission-close.py` / `drive_pause.py` |
+| [step_result.py](step_result.py) | 手順のスクリプトの結果 JSON の形・検証（`validate_result`）・出力と終了（`emit`）・承認資料（`approval_present`）と、git / gh を呼ぶ小関数 | `merged-steps.py` / `plan-to-spec-steps.py` / `release-steps.py` / `release-verification-steps.py` / `mission-close.py` / `drive_pause.py` |
 | [gh_parts.py](gh_parts.py) | PR / issue の取得と本文の節の差し替え。`pr-info`（メタ・本文・差分の統計・checks を名前ごとの最新の実行へ畳んだもの・未解決のスレッド。GraphQL が上限なら REST へ退避。差分とログはファイルへ書く）、`unresolved-threads`、`body-section`（節の取得・置換・末尾への 1 行の追記。節の終わりに `<!-- ndf:section-end -->` を置き、後ろへ足した行を節に含めない）、`review-post`（自分の PR なら REQUEST_CHANGES を COMMENT へ下げる）。結果は `step_result` の形。GitHub を呼ぶのは `RUNNER` 1 か所 | `cross-review`（`state.py` の未解決のスレッドと checks） |
 | [wait_notice.py](wait_notice.py) | Slack の待ちの通知の判定（応答の本文から回答待ち・承認待ち・待ちでない）・フックの事象の訳し・戻り先・関連 URL・本文の組み立て。入出力を持たない | `scripts/wait-notify.py` |
 | [drive_pause.py](drive_pause.py) | 収束ループの駆動が止まるときの結果の形（pause の 1 行 JSON）と終了コードの表（0 完了 / 20 fix / 21 sweep / 22 newtext / 23 cross-review / 1 中断） | 収束ループの 2 つの `drive.py` |
@@ -64,7 +64,7 @@ Skill から呼ぶ手順のスクリプト（`scripts/*-steps.py`）は、最後
 | `summary` | はい | 文字列 | 1 行の要約。報告へそのまま写せる |
 | `items` | はい | オブジェクトの配列 | 対象ごとの結果。`kind` / `name` / `result` を持つ。`result` の語彙はスクリプトごとに決めてよい |
 | `metrics` | はい | オブジェクト | 件数・版数・コミットなどの値 |
-| `presentation_path` | いいえ | 文字列 | 承認の関門で利用者へ示す提示物（`approval_present` が書く） |
+| `presentation_path` | いいえ | 文字列 | 承認ゲートで利用者へ示す承認資料（`approval_present` が書く） |
 | `next` | いいえ | 文字列 | 次に打つコマンドか、LLM が書く説明文 |
 
 `gate` のときは `presentation_path` か `next` を必ず添える。表に無い項目は置かない。
@@ -75,12 +75,12 @@ Skill から呼ぶ手順のスクリプト（`scripts/*-steps.py`）は、最後
 | 1 | `stopped` | チェックで違反があった・手順が失敗した |
 | 2 | `stopped` | 読めない・呼び出しの誤り。「一致」「0 件」と読まない |
 | 3 | `stopped` | 前提が無い（宣言・認証・対象のファイル）、または各スクリプトが定めた正常な否定の結果（立たない・変更なし・飛ばしてよい。例 `check-trigger.py eval`・`refactor.py assess`）。読めないときは 2 で返し、3 と混ぜない |
-| 10〜19 | `gate` | 関門。人の同意が要る |
+| 10〜19 | `gate` | 承認ゲート。人の同意が要る |
 | 20〜29 | `gate` | LLM の判断待ち |
 
-提示物は `development-workflow/references/approval-request.md` の 2 層（対象を開くもの・判断に
+承認資料は `development-workflow/references/approval-request.md` の 2 層（対象を開くもの・判断に
 使うもの）に、同意を求めること・戻し方を足した形で書く。置き場所は `NDF_PRESENTATION_DIR`
-（既定は一時ディレクトリの `ndf/`）。戻し方の無い提示物は書かない。
+（既定は一時ディレクトリの `ndf/`）。戻し方の無い承認資料は書かない。
 
 ## 置いてよいもの・いけないもの
 
@@ -100,14 +100,14 @@ Skill から呼ぶ手順のスクリプト（`scripts/*-steps.py`）は、最後
 | --- | --- | --- |
 | Claude Code | 残る | 届く |
 | Codex | 残る | 届く |
-| Kiro CLI | `.kiro/skills/` からは消える | 届く（`..` が主ディレクトリの実体へ抜ける） |
+| Kiro CLI | `.kiro/skills/` からは消える | 届く（`..` がメインディレクトリの実体へ抜ける） |
 | agy | 消える | **届かない** |
 
-Skill の下に共通層を置くと、その Skill を配らない配布先で読み込みが失敗する。
+Skill の下にライブラリを置くと、その Skill を配らない配布先で読み込みが失敗する。
 プラグインルートの `scripts/` は配布の基準の対象ではないため、4 ランタイムすべてへ
 届く（基準は Skill の名前だけを持ち、`scripts` という語を含まない）。
 
-共通層のための Skill を新設する形は採らない。利用者が呼ぶものではないのに初期一覧へ
+ライブラリのための Skill を新設する形は採らない。利用者が呼ぶものではないのに初期一覧へ
 載り、発動の候補に混ざる（`disable-model-invocation` を付けても名前は残る）。
 
 ## ここを指す書き方
@@ -133,13 +133,13 @@ Skill の下に共通層を置くと、その Skill を配らない配布先で�
 | 部品 | `cross-refactoring` | `cross-review` |
 | --- | --- | --- |
 | `drive_pause.py` / `step_result.py` | 使う（`drive.py`） | 使う（`drive.py`） |
-| `monitor.py` | 共通層を直接使う（`drive.py` / `refactor_lib/timeline.py`） | `scripts/monitor.py` がシムとして共通層を読む |
-| `_tmpdir.sh` | 使わない（一時ディレクトリは `refactor_lib/paths.py` が決める） | `scripts/_tmpdir.sh` が固有の名前を束ねて共通層を読む |
+| `monitor.py` | ライブラリを直接使う（`drive.py` / `refactor_lib/timeline.py`） | `scripts/monitor.py` がシムとしてライブラリを読む |
+| `_tmpdir.sh` | 使わない（一時ディレクトリは `refactor_lib/paths.py` が決める） | `scripts/_tmpdir.sh` が固有の名前をまとめてライブラリを読む |
 | `launch-cli.sh` | `scripts/launch-cli.sh` が委譲する | `launch-reviewer.sh` / `critique.sh` が使う（`launch-codex.sh` / `launch-agy.sh` は `launch-reviewer.sh` へ委譲する） |
-| `limits.py` | 使う | `critique.sh` が使う（監視の上限は `monitor.py` が共通層の表から引く） |
+| `limits.py` | 使う | `critique.sh` が使う（監視の上限は `monitor.py` がライブラリの表から引く） |
 | `assignment.py` / `auth.py` / `statefile.py` / `run_metrics.py` / `monitor_outcome.py` | 使う | 使う（`state.py`） |
 | `models.py` | 使う | 未移行 |
 | `metrics.py` | 未移行 | 未移行 |
-| `post_queue.py` / `result_posts.py` | 未移行（改修計画のコメントは `refactor_lib/plan.py` が `gh` で書く） | 使う（`state.py` / `rotate-pr.sh` / `drive.py`） |
+| `post_queue.py` / `result_posts.py` | 未移行（リファクタリング計画のコメントは `refactor_lib/plan.py` が `gh` で書く） | 使う（`state.py` / `rotate-pr.sh` / `drive.py`） |
 | `git-credential.sh` | 使う（`refactor_lib/gitfacts.py`） | 使わない |
 | `bg-wait.sh` | Codex / Kiro / agy で `drive.py` を待つ（SKILL.md の「実行」） | Codex / Kiro / agy で `drive.py` を待つ（SKILL.md の「実行」）。手順の監視の待ち（`docs/01-state-and-review.md`） |

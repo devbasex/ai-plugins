@@ -86,8 +86,8 @@ bash plugins/mcp/mcp-serena/dev.kiro/install.sh
 | Claude Code / Kiro CLI | `.mcp.json` | `claude-code` |
 | Codex | `.codex.mcp.json` | `codex` |
 
-どちらも `SERENA_HOME=.serena`（起動したディレクトリからの相対）で動きます。作業ツリーごとに
-`.serena/language_servers/` を持つため、作業ツリーでの初回は言語サーバの取得が走ります。
+どちらも `SERENA_HOME=.serena`（起動したディレクトリからの相対）で動きます。worktree ごとに
+`.serena/language_servers/` を持つため、worktree での初回は言語サーバの取得が走ります。
 
 ## hook
 
@@ -103,7 +103,7 @@ bash plugins/mcp/mcp-serena/dev.kiro/install.sh
 
 ## v2.1.2 へ更新するとき
 
-**正式版です。** `main` に載ります（ndf 10.17.9 と同じ配布。#818）。中身は開発版 `2.1.0-dev.1` と同じで、版数の接尾辞だけを外しました。
+**正式版です。** `main` に載ります（ndf 10.17.9 と同じリリース。#818）。中身は開発版 `2.1.0-dev.1` と同じで、版数の接尾辞だけを外しました。
 
 | 変わったこと | 中身 |
 | --- | --- |

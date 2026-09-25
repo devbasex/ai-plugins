@@ -14,13 +14,13 @@ user-invocable: false
 
 1. **修正は feature ブランチに先に commit し、cherry-pick で環境ブランチへ届ける。** 短命ブランチに先に commit して feature へ再実装すると、二重作業と不整合の原因になる
 2. **環境ブランチを feature ブランチに merge しない。** conflict 解消目的でも禁止。`feature → main` の PR へ環境固有コードが混入する（ブランチ汚染）
-3. **短命ブランチを push する前に開発の起点ブランチを取り込む。** 起点は既定ブランチとは限らない（`.ndf/worktree.json` の `base_branch`）。CI に最新の起点必須の Workflow があるため
+3. **短命ブランチを push する前に開発のベースブランチを取り込む。** 起点は既定ブランチとは限らない（`.ndf/worktree.json` の `base_branch`）。CI に最新の起点必須の Workflow があるため
 4. **マージ済みブランチには push しない。** 既存 PR の状態を確認し、マージ済みなら新ブランチ + 新 PR を作る（サフィックス `-v2`, `-v3`）
 5. **revert を連鎖させない。** 最終的なあるべき状態を直接コミットする方が履歴上の意図が明確になり、後の cherry-pick も簡単になる
 
 ## v8.0.0 で改名した Skill（v9.0.0 で削除）
 
-構造改善の Skill を **`/ndf:refactoring`** へ改名し、分岐・反復・定数の表現を決める観点を
+リファクタリングの Skill を **`/ndf:refactoring`** へ改名し、分岐・反復・定数の表現を決める観点を
 統合した。引数と手順は変わらない。
 
 | 旧コマンド | 移行先 |
@@ -31,5 +31,5 @@ user-invocable: false
 `references/data-representation.md` にあり、兆候の一覧からも参照される。
 
 v7.0.0 の対応表（playwright 系 4 Skill の `playwright-kit` プラグインへの分離）は、予告どおり
-本バージョンで削除した。v7.0.0 より前から移行する場合は、この対応表を持つ最後の配布版である
+本バージョンで削除した。v7.0.0 より前から移行する場合は、この対応表を持つ最後のリリースである
 v7.0.0 の `ndf-policies` を参照する。
