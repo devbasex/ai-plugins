@@ -27,10 +27,11 @@
 | --- | --- |
 | 写しと写しの版 | `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/relay.py` と `relay.version` |
 | 中継の rc | `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/shellrc`。`function claude { ... }` を定義する。関数は呼んだ時点で写しが在れば中継を、無ければ素の `claude` を起こす |
-| 読み込みの 1 行 | `[ -f "$HOME/.claude/ndf/shellrc" ] && . "$HOME/.claude/ndf/shellrc"`。`DEVBASE_SHELLRC_DIR` がディレクトリを指せば `$DEVBASE_SHELLRC_DIR/ndf-relay.sh` に置き、無ければ `$SHELL` の設定（bash は `~/.bashrc`、zsh は `${ZDOTDIR:-~}/.zshrc`）の末尾へ囲み（`# >>> ndf relay >>>` 〜 `# <<< ndf relay <<<`）で足す。書く前に `<設定>.ndf-bak-<UTC の時刻>` へ写しを取る |
+| 読み込みの 1 行 | `[ -f "$HOME/.claude/ndf/shellrc" ] && . "$HOME/.claude/ndf/shellrc"`。`DEVBASE_SHELLRC_DIR` がディレクトリを指せば `$DEVBASE_SHELLRC_DIR/ndf-relay.sh` に置き、無ければ `$SHELL` の設定（bash は `~/.bashrc`（macOS では `~/.bash_profile`）、zsh は `${ZDOTDIR:-~}/.zshrc`）の末尾へ囲み（`# >>> ndf relay >>>` 〜 `# <<< ndf relay <<<`）で足す。書く前に `<設定>.ndf-bak-<UTC の時刻>` へ写しを取る |
 
 - **次に開いたシェルから効く**
-- 既に `claude` の alias か関数がある（bash では `~/.bash_aliases` も見る）・bash と zsh 以外のシェルでは足さず、自分で置く 1 行を示す
+- 既に `claude` の alias か関数がある（bash では `~/.bash_aliases` とログインシェルの設定 `~/.bash_profile`・`~/.bash_login`・`~/.profile` も見る）・bash と zsh 以外のシェルでは足さず、自分で置く 1 行を示す
+- **macOS の bash では `~/.bash_profile` へ足す。** macOS の端末は新しいウィンドウをログインシェルで開き、ログインシェルの bash は `~/.bashrc` を読まない。`~/.bash_profile` が無く `~/.bash_login` か `~/.profile` があるときは、作ると元のファイルが読まれなくなるため足さず、自分で置く 1 行を示す
 - `/ndf:install-wrapper status` で、読み込み先・囲みの形・写しの版を見られる
 - **devbase では `~/.claude` が同じアカウントグループのコンテナで共有される。** 写しと中継の rc はコンテナを作り直しても残り、導入・取り外しの効果は同じグループの全コンテナに及ぶ
 
@@ -52,7 +53,7 @@
 
 | したいこと | 手段 |
 | --- | --- |
-| 外す | `/ndf:install-wrapper uninstall`。`~/.bashrc` と `~/.zshrc` の囲みを外し（バックアップの後。囲みの外は変えない）、読み込み先のファイル・中継の rc・写し・10.17.4〜10.17.6 の写しを消す。開いているシェルでは `unset -f claude`（10.17.4〜10.17.6 の囲みなら `unalias claude`）で外れる |
+| 外す | `/ndf:install-wrapper uninstall`。`~/.bashrc`・`~/.bash_profile`・`~/.zshrc` の囲みを外し（バックアップの後。囲みの外は変えない）、読み込み先のファイル・中継の rc・写し・10.17.4〜10.17.6 の写しを消す。開いているシェルでは `unset -f claude`（10.17.4〜10.17.6 の囲みなら `unalias claude`）で外れる |
 | 手で外す | 囲みの行を消し、`~/.claude/ndf/` の `relay.py`・`relay.version`・`shellrc` を消す |
 | 過去の版へ戻した | `/ndf:install-wrapper` を打ち直す（明示の導入は版を比べずに今の版を置く） |
 | `/ndf:install-wrapper` を持たない 10.17.6 以前へ戻す | **戻す前に** `/ndf:install-wrapper uninstall` を打つ。戻した後なら囲みと `~/.claude/ndf/` を手で消す |

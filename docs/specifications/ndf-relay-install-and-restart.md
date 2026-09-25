@@ -34,9 +34,9 @@
 | ---: | --- | --- |
 | 1 | 10.17.4〜10.17.6 の利用者 | 次の版へ上げて claude を起動する。SessionStart hook の `relay.py startup` が、10.17.4〜10.17.6 が置いた旧い写し（`~/.local/share/ndf/relay.py`）を今の版で置き直し、`rc-added` に載った `~/.bashrc` に囲みが残っているのを読んで、「10.17.4〜10.17.6 が自動で足したもの…」の 1 行を 1 度だけ出す。シェルの設定は書かない |
 | 2 | 同じ利用者 | そのまま `claude` と打つ。囲みの alias が、置き直された旧い写しの中継を起こす |
-| 3 | 新しい利用者 | claude の中で `/ndf:install-wrapper` を打つ。写しを `~/.claude/ndf/relay.py`、`claude` の関数を `~/.claude/ndf/shellrc` に置き、`~/.bashrc` をバックアップしてから、`shellrc` を読む 1 行の囲みを足す。次に開いたシェルから効く |
+| 3 | 新しい利用者 | claude の中で `/ndf:install-wrapper` を打つ。写しを `~/.claude/ndf/relay.py`、`claude` の関数を `~/.claude/ndf/shellrc` に置き、`~/.bashrc`（macOS の bash では `~/.bash_profile`）をバックアップしてから、`shellrc` を読む 1 行の囲みを足す。次に開いたシェルから効く |
 | 4 | どちらの利用者も | 中継の下で `/ndf:restart` を打つ。claude が再開用のコマンドを `ndf-next` のブロックで出して応答を終え、中継が静まり（5 秒）の後に `/exit` → 更新 → 起動を行う |
-| 5 | 外したい利用者 | `/ndf:install-wrapper uninstall`。`~/.bashrc` と `~/.zshrc` の囲みを外し（バックアップの後）、`shellrc`・写し・旧い写しを消す |
+| 5 | 外したい利用者 | `/ndf:install-wrapper uninstall`。`~/.bashrc`・`~/.bash_profile`・`~/.zshrc` の囲みを外し（バックアップの後）、`shellrc`・写し・旧い写しを消す |
 | 6 | devbase の利用者（devbasex/devbase#253 の後） | `/ndf:install-wrapper` を打つ。`DEVBASE_SHELLRC_DIR` があるので、`~/.bashrc` ではなく `$DEVBASE_SHELLRC_DIR/ndf-relay.sh` に読み込みの 1 行を置く。コンテナを作り直しても写し・`shellrc`・`ndf-relay.sh` は `/persistent/group` に残る |
 
 ## 用語
@@ -133,7 +133,7 @@
 | 写しの版 | `<親>/relay.version` | `install`・`startup` | 残る |
 | 中継の rc | `<親>/shellrc`（`0644`） | `install` | 残る |
 | 読み込み先のファイル | `$DEVBASE_SHELLRC_DIR/ndf-relay.sh`（`0644`） | `install`（変数が在るディレクトリを指すとき） | 残る（devbasex/devbase#253 の後） |
-| 読み込みの囲み | `~/.bashrc`・`${ZDOTDIR:-$HOME}/.zshrc` | `install`（変数が無いとき） | 消える |
+| 読み込みの囲み | `~/.bashrc`・`~/.bash_profile`（macOS の bash）・`${ZDOTDIR:-$HOME}/.zshrc` | `install`（変数が無いとき） | 消える |
 | 旧い写し | `${XDG_DATA_HOME:-$HOME/.local/share}/ndf/relay.py` | 10.17.4〜10.17.6 の hook（新しい版は置かない） | 消える |
 | 状態の親 | `${XDG_STATE_HOME:-$HOME/.local/state}/ndf/relay/` | 変えない | 消える |
 | `copy.lock` | `<親>/` | `install`・`uninstall`・`startup` | 残る（共有） |
@@ -191,9 +191,10 @@ alias claude='python3 "${XDG_DATA_HOME:-$HOME/.local/share}/ndf/relay.py" run'
 | # | 段 | すること | 出す行（`ndf-relay: ` の後） |
 | ---: | --- | --- | --- |
 | E0 | パス | 写し・中継の rc・読み込み先のファイルのパスに引用できない文字があれば、何も書かず 1 | `<パス> は引用できない文字を含むため置かない` |
-| E1 | 読み込み先 | `DEVBASE_SHELLRC_DIR` が在るディレクトリを指せば読み込み先のファイル。無ければ `$SHELL` の名前が `bash` なら `~/.bashrc`、`zsh` なら `${ZDOTDIR:-$HOME}/.zshrc` の囲み。どちらでもなければ何も書かず 1 | `<シェル> には足さない。使うなら次の 1 行を設定へ置く: <読み込みの行>` |
-| E2 | 既存の定義 | 囲みの外に行頭の `alias claude=` / `function claude` / `claude()` があれば何も書かず 1。見るのは `$SHELL` が bash なら `~/.bashrc` と `~/.bash_aliases`、zsh なら `.zshrc`、どちらでもない（読み込み先のファイルを使う）ときは 3 つとも | `<ファイル> に claude の定義があるため足さない。使うなら次の 1 行を自分で置く: <読み込みの行>` |
-| E2b | 囲みの形 | `~/.bashrc` と `.zshrc` のどちらかに閉じの無い囲みがあれば、何も書かず 1 | `<ファイル> の囲みに閉じが無い。直してから打ち直す` |
+| E1 | 読み込み先 | `DEVBASE_SHELLRC_DIR` が在るディレクトリを指せば読み込み先のファイル。無ければ `$SHELL` の名前が `bash` なら `~/.bashrc`（macOS では `~/.bash_profile`。無ければ作る）、`zsh` なら `${ZDOTDIR:-$HOME}/.zshrc` の囲み。どちらでもなければ何も書かず 1 | `<シェル> には足さない。使うなら次の 1 行を設定へ置く: <読み込みの行>` |
+| E2 | 既存の定義 | 囲みの外に行頭の `alias claude=` / `function claude` / `claude()` があれば何も書かず 1。見るのは `$SHELL` が bash なら `~/.bashrc`・`~/.bash_aliases` とログインシェルの設定（`~/.bash_profile`・`~/.bash_login`・`~/.profile`）、zsh なら `.zshrc`、どちらでもない（読み込み先のファイルを使う）ときは全部 | `<ファイル> に claude の定義があるため足さない。使うなら次の 1 行を自分で置く: <読み込みの行>` |
+| E2b | 囲みの形 | `~/.bashrc`・`~/.bash_profile`・`.zshrc` のどれかに閉じの無い囲みがあれば、何も書かず 1 | `<ファイル> の囲みに閉じが無い。直してから打ち直す` |
+| E2c | ログインシェル | macOS の bash で読み込み先のファイルを使わず、`~/.bash_profile` が無く `~/.bash_login` か `~/.profile` があれば、何も書かず 1。`~/.bash_profile` を作るとログインシェルが元のファイルを読まなくなるため（#966） | `<~/.bash_profile> が無く、ログインシェルは <読まれている先> を読んでいる。…使うなら <~/.bash_profile> を作り、<読まれている先> を読む行と次の 1 行を置く: <読み込みの行>` |
 | — | ロック | `<親>` を `0700` で作り、`install.lock` → `copy.lock` を 2 秒ずつ待つ。取れなければ何も変えず 3 | `ほかの導入が動いている。少し待ってから打ち直す`（書けなければ `書けない（<理由>）`） |
 | E3 | 写し | 中身が違うか無ければ一時ファイルに書いて置き換える。写しの版に自分の版を書く。**版は比べない** | — |
 | E4 | 中継の rc | 中身が違うか無ければ置き換える | — |
@@ -206,7 +207,7 @@ alias claude='python3 "${XDG_DATA_HOME:-$HOME/.local/share}/ndf/relay.py" run'
 
 | # | 段 | すること |
 | ---: | --- | --- |
-| U1 | 形を見る | `~/.bashrc` と `${ZDOTDIR:-$HOME}/.zshrc` の両方を調べ、閉じの無い囲みが 1 つでもあれば何も変えずに 1（`<ファイル> の囲みに閉じが無い。何も変えていない。直してから打ち直す`） |
+| U1 | 形を見る | `~/.bashrc`・`~/.bash_profile`・`${ZDOTDIR:-$HOME}/.zshrc` を調べ、閉じの無い囲みが 1 つでもあれば何も変えずに 1（`<ファイル> の囲みに閉じが無い。何も変えていない。直してから打ち直す`） |
 | U2 | ロック | `install.lock` を取る。`<親>` が在るときだけ `copy.lock` も取る（`<親>` を作らない）。取れなければ 3 |
 | U3 | 外す | 囲み（いくつあってもすべて）があるファイルは、バックアップの後に囲みの行だけを除き、元の権限で置き換える |
 | U4 | 消す | 読み込み先のファイル・中継の rc・写しの版・写し・旧い写しを消す（無いものは飛ばす） |
@@ -217,7 +218,12 @@ alias claude='python3 "${XDG_DATA_HOME:-$HOME/.local/share}/ndf/relay.py" run'
 
 読み込み先（読み込み先のファイルとその有無か、どのシェルの設定の囲みか）、各シェルの設定の囲みの有無と
 形（読み込みの行か直の alias か、自動の囲みか、閉じが無いか）、中継の rc の有無、写しと旧い写しそれぞれが
-今のプラグインの `relay.py` と同じか違うか無いか、写しの版を 1 行ずつ示す。何も書かない。
+今のプラグインの `relay.py` と同じか違うか無いか、写しの版を 1 行ずつ示す。`~/.bash_profile` の囲みが無い行は
+macOS でだけ示す。何も書かない。
+
+macOS の bash で読み込み先のファイルを使わず、囲みが `~/.bashrc` にしか無く、ログインシェルが読むファイル
+（`~/.bash_profile`・`~/.bash_login`・`~/.profile` のうち在る最初の 1 つ）が囲みを持たず `~/.bashrc` も読まない
+ときは、`警告:` で始まる行を最後に足す。終了コードは 0 のまま（#966）。
 
 ### `startup`（SessionStart）
 
@@ -410,11 +416,12 @@ G1〜G3 はこの課題で既存の `/exit` に入れた。G4〜G7 は送り込�
 | 空の HOME で `startup` の hook が何も書かず何も出さないこと | `test_startup_hook_writes_nothing_on_clean_home` |
 | `install` が bash / zsh（`ZDOTDIR`）で写し・写しの版・中継の rc・囲み・バックアップを作り、2 回目は足さず、空の HOME・末尾の改行が無い設定・`rc-added` の記録がある状態からも足すこと | `test_install_bash_first_then_idempotent` ほか `test_install_*` |
 | 10.17.4〜10.17.6 の囲みの中だけが置き換わり、囲みの外がバイトで同じこと | `test_install_rewrites_old_block_inner_only`・`test_install_devbase_rewrites_old_block` |
-| 既存の定義（`~/.bash_aliases` を含む）・fish・閉じの無い囲み・引用できないパスで何も書かず 1、ロックの保持・書けない親で何も変えず 3 | `test_install_existing_definition_skips` ほか |
+| 既存の定義（`~/.bash_aliases` とログインシェルの設定を含む）・fish・閉じの無い囲み・引用できないパスで何も書かず 1、ロックの保持・書けない親で何も変えず 3 | `test_install_existing_definition_skips` ほか |
 | 写しを消すと関数が素の `claude` を起こし、先の alias の引数が中継へ渡ること | `test_install_function_falls_back_when_copy_removed`・`test_install_function_receives_alias_args` |
 | `DEVBASE_SHELLRC_DIR` で `ndf-relay.sh` ができ、シェルの設定が変わらないこと | `test_install_devbase_loader`・`test_install_devbase_loader_with_non_bash_zsh_shell` |
 | `uninstall` が両方の囲みを外して囲みの外を変えず、ファイルと記録を表のとおりにし、閉じの無い囲みで何も変えず、10.17.4〜10.17.6 の状態（`<親>` が無い）から `<親>` を作らずに外すこと | `test_uninstall_*` |
 | `status` が各状態を示し何も書かないこと | `test_status_reports_and_writes_nothing` |
+| macOS の bash（`sys.platform` を `darwin` に差し替え）で `~/.bash_profile` へ足して `uninstall` で両方の囲みを外し、`~/.profile` を隠す `~/.bash_profile` を作らず、`~/.bashrc` にしか無い囲みを `status` が警告し、Linux の bash は `~/.bashrc` のままであること | `test_mac_*`・`test_bash_definition_in_login_file_is_not_overridden`・`test_linux_bash_still_adds_to_bashrc` |
 | 自動の囲みの知らせが 1 度だけ、同時の 2 起動でも 1 つで、devbase の案内が付き、囲みが無い・明示に触れたパスでは出ないこと | `test_startup_notices_auto_block_once`・`test_startup_notice_*`・`test_startup_no_notice` |
 | 在る写しと旧い写しだけを置き直し、版を後退させず、新旧の同時の `startup` で新しい版が残り、明示の `install` は戻せ、`uninstall` の後は写しを作らないこと | `test_startup_refreshes_existing_copies_only`・`test_startup_never_downgrades`・`test_startup_concurrent_new_wins`・`test_explicit_install_can_downgrade`・`test_startup_after_uninstall_creates_nothing` |
 | 版の順序（`-dev.2` < `-dev.10`、`-dev` < `-rc` < 正式版） | `test_version_key` |

@@ -1611,6 +1611,86 @@ def test_status_reports_and_writes_nothing(tmp_path, home):
     assert f"写し {cfg(tmp_path)}/relay.py: 今の版と同じ" in p.stdout
 
 
+# -- macOS の bash はログインシェルの設定へ足す（#966）
+
+
+@pytest.fixture()
+def mac(mod, tmp_path, monkeypatch):
+    """relay.py を macOS の bash として動かす。HOME は一時ディレクトリ（mod が用意する）。"""
+    for k in ("DEVBASE_SHELLRC_DIR", "ZDOTDIR"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("SHELL", "/bin/bash")
+    monkeypatch.setattr(sys, "platform", "darwin")
+    assert mod.os.path.expanduser("~") == str(home_of(tmp_path))
+    return mod
+
+
+def test_mac_install_adds_to_bash_profile_and_uninstall_removes(mac, tmp_path, capsys):
+    home = home_of(tmp_path)
+    assert mac.cmd_install() == 0
+    profile = home / ".bash_profile"
+    assert "# >>> ndf relay >>>" in profile.read_text()
+    assert not (home / ".bashrc").exists()
+    assert f"{profile} から" in capsys.readouterr().out
+    assert mac.cmd_status() == 0
+    assert "警告" not in capsys.readouterr().out
+    assert mac.cmd_uninstall() == 0
+    assert "# >>> ndf relay >>>" not in profile.read_text()
+
+
+def test_mac_status_warns_when_only_bashrc_has_loader(mac, tmp_path, capsys):
+    home = home_of(tmp_path)
+    (home / ".bashrc").write_text("# >>> ndf relay >>>\n" + mac.loader_body() + "# <<< ndf relay <<<\n")
+    (home / ".bash_profile").write_text("export A=1\n# . ~/.bashrc\n")
+    assert mac.cmd_status() == 0
+    assert "警告" in capsys.readouterr().out
+    (home / ".bash_profile").write_text('[ -f "$HOME/.bashrc" ] && . "$HOME/.bashrc"\n')
+    assert mac.cmd_status() == 0
+    assert "警告" not in capsys.readouterr().out
+
+
+def test_mac_uninstall_removes_blocks_in_both_files(mac, tmp_path):
+    home = home_of(tmp_path)
+    block = "# >>> ndf relay >>>\n" + mac.loader_body() + "# <<< ndf relay <<<\n"
+    (home / ".bashrc").write_text("a=1\n" + block)
+    (home / ".bash_profile").write_text("b=1\n" + block)
+    assert mac.cmd_uninstall() == 0
+    assert (home / ".bashrc").read_text() == "a=1\n"
+    assert (home / ".bash_profile").read_text() == "b=1\n"
+
+
+@pytest.mark.parametrize("name", [".bash_profile", ".bash_login", ".profile"])
+def test_bash_definition_in_login_file_is_not_overridden(mod, tmp_path, monkeypatch, capsys, name):
+    monkeypatch.delenv("DEVBASE_SHELLRC_DIR", raising=False)
+    monkeypatch.setenv("SHELL", "/bin/bash")
+    home = home_of(tmp_path)
+    (home / name).write_text("alias claude='claude --dangerously-skip-permissions'\n")
+    assert mod.cmd_install() == 1
+    assert f"{home / name} に claude の定義がある" in capsys.readouterr().out
+    assert not (home / ".bashrc").exists()
+
+
+def test_mac_does_not_create_bash_profile_that_shadows_profile(mac, tmp_path, capsys):
+    home = home_of(tmp_path)
+    (home / ".profile").write_text("export A=1\n")
+    assert mac.cmd_install() == 1
+    assert not (home / ".bash_profile").exists()
+    assert f"{home / '.profile'} を読んでいる" in capsys.readouterr().out
+
+
+def test_linux_bash_still_adds_to_bashrc(mod, tmp_path, monkeypatch, capsys):
+    monkeypatch.delenv("DEVBASE_SHELLRC_DIR", raising=False)
+    monkeypatch.setenv("SHELL", "/bin/bash")
+    monkeypatch.setattr(sys, "platform", "linux")
+    home = home_of(tmp_path)
+    assert mod.cmd_install() == 0
+    assert "# >>> ndf relay >>>" in (home / ".bashrc").read_text()
+    assert not (home / ".bash_profile").exists()
+    assert mod.cmd_status() == 0
+    out = capsys.readouterr().out
+    assert ".bash_profile" not in out and "警告" not in out
+
+
 # -- startup（AC1・AC9〜AC11・AC29）
 
 

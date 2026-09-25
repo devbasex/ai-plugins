@@ -1339,19 +1339,84 @@ def loader_file() -> str | None:
 
 
 def rc_files() -> list[str]:
+    """囲みを足しうるファイル（`~/.bashrc`・`~/.bash_profile`・`~/.zshrc`）。uninstall はこの全部から外す。"""
     home = os.path.expanduser("~")
-    return [os.path.join(home, ".bashrc"), os.path.join(os.environ.get("ZDOTDIR") or home, ".zshrc")]
+    return [os.path.join(home, ".bashrc"), os.path.join(home, ".bash_profile"),
+            os.path.join(os.environ.get("ZDOTDIR") or home, ".zshrc")]
+
+
+def login_files() -> list[str]:
+    """ログインシェルの bash が読む候補。在る最初の 1 つだけを読む（#966）。"""
+    home = os.path.expanduser("~")
+    return [os.path.join(home, n) for n in (".bash_profile", ".bash_login", ".profile")]
+
+
+def login_file() -> str | None:
+    """ログインシェルの bash が実際に読むファイル。どれも無ければ None。"""
+    return next((p for p in login_files() if os.path.exists(p)), None)
+
+
+def bash_look() -> list[str]:
+    """bash で既存の `claude` の定義を探すファイル。ログインシェルの設定も含める（#936・#966）。"""
+    home = os.path.expanduser("~")
+    return [os.path.join(home, ".bashrc"), os.path.join(home, ".bash_aliases")] + login_files()
 
 
 def shell_rc() -> tuple[str, str, list[str]] | None:
-    """(シェルの名前, 足す先, 既存の定義を探すファイル)。bash と zsh 以外は None。"""
+    """(シェルの名前, 足す先, 既存の定義を探すファイル)。bash と zsh 以外は None。
+
+    macOS の bash は `~/.bash_profile` へ足す。macOS の端末は新しいウィンドウをログインシェルで
+    開き、ログインシェルの bash は `~/.bashrc` を読まないためである（#966）。"""
     shell = os.path.basename(os.environ.get("SHELL", ""))
-    bashrc, zshrc = rc_files()
+    bashrc, bash_profile, zshrc = rc_files()
     if shell == "bash":
-        return shell, bashrc, [bashrc, os.path.join(os.path.expanduser("~"), ".bash_aliases")]
+        return shell, (bash_profile if sys.platform == "darwin" else bashrc), bash_look()
     if shell == "zsh":
         return shell, zshrc, [zshrc]
     return None
+
+
+READS_BASHRC_RE = re.compile(r"(?:^|[\s;&|])(?:\.|source)\s+\S*\.bashrc\b")
+
+
+def reads_bashrc(path: str) -> bool:
+    """囲みの外に `~/.bashrc` を読む行（`. ~/.bashrc`・`source ~/.bashrc` など）があるか。"""
+    body = _read(path)
+    if body is None:
+        return False
+    lines = body.split("\n")
+    inside = set()
+    for a, b in blocks_of(lines)[0]:
+        inside.update(range(a, b + 1))
+    return any(READS_BASHRC_RE.search(line) for i, line in enumerate(lines)
+               if i not in inside and not line.lstrip().startswith("#"))
+
+
+def login_shadow() -> tuple[str, str] | None:
+    """macOS の bash で `~/.bash_profile` が無く、`~/.bash_login` か `~/.profile` をログインシェルが
+    読んでいるとき (作る先, 読まれている先)。作ると読まれている先が読まれなくなる。"""
+    bash_profile = login_files()[0]
+    login = login_file()
+    if login is None or login == bash_profile:
+        return None
+    return bash_profile, login
+
+
+def login_warning() -> str | None:
+    """macOS の bash で、読み込みの行が `~/.bashrc` にしか無く、ログインシェルが読むファイルが
+    `~/.bashrc` を読まないときの警告。"""
+    sh = shell_rc()
+    if sys.platform != "darwin" or not sh or sh[0] != "bash":
+        return None
+    bashrc, bash_profile = rc_files()[:2]
+    if not rc_blocks(bashrc)[0]:
+        return None
+    login = login_file()
+    if login and (rc_blocks(login)[0] or reads_bashrc(login)):
+        return None
+    return (f"警告: 読み込みの行は {bashrc} にしか無く、ログインシェルが読む {login or bash_profile} は "
+            f"{bashrc} を読まない。macOS の端末はログインシェルで開くため、中継が効かない。"
+            f"/ndf:install-wrapper を打ち直すと {bash_profile} へ足す")
 
 
 def sh_quote(path: str) -> str:
@@ -1589,7 +1654,7 @@ def cmd_install() -> int:
         shell = os.path.basename(os.environ.get("SHELL", "")) or "このシェル"
         out(f"{shell} には足さない。使うなら次の 1 行を設定へ置く: {loader_line()}")
         return 1
-    look = sh[2] if sh else rc_files() + [os.path.join(os.path.expanduser("~"), ".bash_aliases")]
+    look = sh[2] if sh else list(dict.fromkeys(rc_files() + bash_look()))
     found = has_definition(look)
     if found:
         out(f"{found} に claude の定義があるため足さない。使うなら次の 1 行を自分で置く: {loader_line()}")
@@ -1598,6 +1663,13 @@ def cmd_install() -> int:
         if rc_blocks(rc)[1]:
             out(f"{rc} の囲みに閉じが無い。直してから打ち直す")
             return 1
+    shadow = login_shadow() if loader is None and sh and sh[0] == "bash" and sys.platform == "darwin" \
+        else None
+    if shadow:
+        out(f"{shadow[0]} が無く、ログインシェルは {shadow[1]} を読んでいる。{shadow[0]} を作ると "
+            f"{shadow[1]} が読まれなくなるため足さない。使うなら {shadow[0]} を作り、{shadow[1]} を読む行と"
+            f"次の 1 行を置く: {loader_line()}")
+        return 1
     try:
         os.makedirs(config_dir(), mode=0o700, exist_ok=True)
         fd, cfd = _take_both(True)
@@ -1741,7 +1813,9 @@ def cmd_status() -> int:
         if unclosed:
             out(f"{rc}: 閉じの無い囲みがある")
         elif not found:
-            out(f"{rc}: 囲みは無い")
+            # `~/.bash_profile` へ足すのは macOS だけ。ほかでは無いときに行を出さない
+            if rc != rc_files()[1] or sys.platform == "darwin":
+                out(f"{rc}: 囲みは無い")
         else:
             direct = has_direct_alias(text, found)
             kind = "直の alias（10.17.4〜10.17.6 の形）" if direct else "読み込みの行"
@@ -1751,6 +1825,9 @@ def cmd_status() -> int:
     ver = (_read(copy_version_path()) or "").strip() or "不明"
     out(f"写し {copy_path()}: {_same(copy_path(), body)}（写しの版 {ver}）")
     out(f"旧い写し {old_copy_path()}: {_same(old_copy_path(), body)}")
+    warn = None if loader else login_warning()
+    if warn:
+        out(warn)
     return 0
 
 
