@@ -977,7 +977,7 @@ def test_prod_release_ends_with_cleanup(tmp_path):
         sid = steps[sid]["next"]
     assert order[-2:] == ["verify", "cleanup"]
     cmd = steps["cleanup"]["cmd"]
-    assert "merged-steps.py cleanup" in cmd and "--head release/v10.17.99" in cmd and "1060" in cmd
+    assert "merged-steps.py cleanup" in cmd and "release/v10.17.99" in cmd and "--base main" not in cmd and "1060" in cmd
     assert steps["cleanup"]["cwd"] == "/r" and "cleanup" in steps["judge"]["choices"]
     dev = {s["id"] for s in json.loads(release_plan(tmp_path, "dev", "10.17.99-dev.1", "--prs", "1").read_text())[
         "steps"]}

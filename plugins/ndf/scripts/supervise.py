@@ -1450,12 +1450,13 @@ def plan_release(a) -> dict:
          "on_fail": "judge", "next": "facts" if dev else "cleanup"},
     ]
     if not dev:
-        # 後片付け: 配布の PR（release/v{v} → main）とミッションの PR（--prs）のブランチと作業ツリー
+        # 後片付け: 配布の PR（head が release/v{v} で始まる。開発版の release/v{v}-dev.N も含む。宛先は develop）と
+        # ミッションの PR（--prs）のブランチと作業ツリー
         run_ids.append("cleanup")
         steps.append(
             {"id": "cleanup", "type": "run", "stage": "後片付け", "cwd": repo,
-             "cmd": f"sh -c '{MERGED_PY} cleanup $(gh pr list --head release/v{v} --base main --state merged "
-                    f"--json number --jq \".[].number\") {prs}'",
+             "cmd": f"sh -c '{MERGED_PY} cleanup $(gh pr list --state merged --limit 30 --json number,headRefName "
+                    f"--jq \".[] | select(.headRefName | startswith(\\\"release/v{v}\\\")) | .number\") {prs}'",
              "on_fail": "judge", "next": "end"})
     if dev:
         approval = f"issues/approval-ndf-v{base}.md"
