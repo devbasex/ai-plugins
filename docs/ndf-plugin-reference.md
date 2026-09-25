@@ -109,11 +109,14 @@ Codex MCP サーバは廃止済みです。外部 AI 委譲は `/ndf:external-ai
 
 ## Slack 通知
 
+利用者の回答か承認を待つときだけ、`plugins/ndf/scripts/wait-notify.py` が Slack へ知らせます。送る時点・本文・
+環境変数は [plugins/ndf/README.md の「Slack 通知」](../plugins/ndf/README.md#slack-通知) にあります。
+
 | Runtime | 通知方法 |
 |---|---|
-| Claude Code | Stop hook で `plugins/ndf/scripts/slack-notify.js` を実行 |
-| Codex | `NDF_CODEX_SLACK_NOTIFY=true` の場合のみ Stop hook で通知 |
-| Kiro CLI | `plugins/ndf/dev.kiro/install.sh --with-slack` で通知 hook を生成 |
+| Claude Code | Stop・Notification（`permission_prompt` ほか）・PermissionRequest（`ExitPlanMode`）・PreToolUse（`AskUserQuestion`）hook で `wait-notify.py --runtime claude` を実行 |
+| Codex | `NDF_CODEX_SLACK_NOTIFY=true` の場合のみ Stop・PermissionRequest hook で `wait-notify.py --runtime codex` を実行 |
+| Kiro CLI | `plugins/ndf/dev.kiro/install.sh --with-slack` で `stop` hook に `wait-notify.py --runtime kiro` を生成 |
 
 機密情報は環境変数で管理し、リポジトリにはコミットしません。
 

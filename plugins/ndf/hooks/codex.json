@@ -30,9 +30,21 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh -c 'if [ -n \"$PLUGIN_ROOT\" ]; then node \"$PLUGIN_ROOT/scripts/codex-slack-notify.js\"; fi; exit 0'",
+            "command": "sh -c 'if [ -n \"$PLUGIN_ROOT\" ]; then python3 \"$PLUGIN_ROOT/scripts/wait-notify.py\" --runtime codex; fi; exit 0'",
             "timeout": 15,
-            "statusMessage": "Sending Codex completion notification"
+            "statusMessage": "Checking whether the reply waits for an answer or approval"
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'if [ -n \"$PLUGIN_ROOT\" ]; then python3 \"$PLUGIN_ROOT/scripts/wait-notify.py\" --runtime codex; fi; exit 0'",
+            "timeout": 15,
+            "statusMessage": "Notifying that an approval waits"
           }
         ]
       }

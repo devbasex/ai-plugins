@@ -11,11 +11,11 @@ case "$runtime" in
     PLUGIN_ROOT="$REPO_ROOT/plugins/ndf" CLAUDE_PLUGIN_ROOT="$REPO_ROOT/plugins/ndf" \
       bash "$REPO_ROOT/plugins/ndf/scripts/ensure-retention.sh" < "$REPO_ROOT/tests/runtime-smoke/fixtures/hook-session-start.json"
     PLUGIN_ROOT="$REPO_ROOT/plugins/ndf" CLAUDE_PLUGIN_ROOT="$REPO_ROOT/plugins/ndf" \
-      node "$REPO_ROOT/plugins/ndf/scripts/slack-notify.js" session_end < "$REPO_ROOT/tests/runtime-smoke/fixtures/hook-stop.json" >/dev/null
+      python3 "$REPO_ROOT/plugins/ndf/scripts/wait-notify.py" --runtime claude < "$REPO_ROOT/tests/runtime-smoke/fixtures/hook-stop.json" >/dev/null
     ;;
   codex)
     PLUGIN_ROOT="$REPO_ROOT/plugins/ndf" \
-      node "$REPO_ROOT/plugins/ndf/scripts/codex-slack-notify.js" < "$REPO_ROOT/tests/runtime-smoke/fixtures/hook-stop.json" >/dev/null
+      python3 "$REPO_ROOT/plugins/ndf/scripts/wait-notify.py" --runtime codex < "$REPO_ROOT/tests/runtime-smoke/fixtures/hook-stop.json" >/dev/null
     ;;
   kiro)
     test -f "$PROJECT_DIR/.kiro/agents/ndf.json"
@@ -27,14 +27,14 @@ import shlex
 import sys
 
 parts = shlex.split(sys.argv[1])
-if len(parts) < 2 or parts[0] != "node":
+if len(parts) < 4 or parts[0] != "python3" or parts[2:4] != ["--runtime", "kiro"]:
     raise SystemExit(1)
 print(parts[1])
 PY
 )"
     test -f "$stop_script"
     PLUGIN_ROOT="$REPO_ROOT/plugins/ndf" \
-      node "$stop_script" session_end < "$REPO_ROOT/tests/runtime-smoke/fixtures/hook-stop.json" >/dev/null
+      python3 "$stop_script" --runtime kiro < "$REPO_ROOT/tests/runtime-smoke/fixtures/hook-stop.json" >/dev/null
     ;;
   *) echo "unknown runtime: $runtime" >&2; exit 2 ;;
 esac
