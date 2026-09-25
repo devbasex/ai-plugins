@@ -155,6 +155,20 @@ cd "$main_dir/.worktrees/$branch"
 
 既存のブランチで作業を続けるなら `-b` を外す。
 
+**ミッションの中では、課題の作業ツリーをミッションのブランチから切る。** ミッションの
+ブランチ（`mission/<名前>`）そのものは起点（`base_branch`）から切り、課題の作業ツリーは
+`--from` にミッションのブランチを渡す。宣言の `base_branch` は develop のまま変えない。
+
+```bash
+# ミッションのブランチ。起点は宣言の base_branch
+bash "$SCRIPTS/worktree-setup.sh" create mission/<名前>
+# 課題の作業ツリー。起点はミッションのブランチ
+bash "$SCRIPTS/worktree-setup.sh" create feat/issue-<番号>-<名前> --from mission/<名前>
+```
+
+`create` は `.worktrees/` の登録を確かめ、`origin` を取得してから作り、作業ツリーのパスと
+起点を出力する。起点のブランチが origin にもローカルにも無いときは作らずに 1 で終わる。
+
 **既定ブランチと開発の起点は別物である。** 既定ブランチに正式版を置き、開発の本流を
 `develop` などの別のブランチに置くリポジトリでは、既定ブランチから分岐すると開発中の
 変更が正式版から枝分かれする。起点は宣言（[references/declaration.md](references/declaration.md)

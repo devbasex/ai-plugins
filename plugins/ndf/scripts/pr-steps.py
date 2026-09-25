@@ -25,6 +25,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 from step_result import (EXIT_PRECONDITION, EXIT_UNREADABLE, StepError, common_parser, emit,  # noqa: E402
                          git, git_root, main_with, result, run)
+from pr_mode import needs_review, pr_target, split_stages, with_mode_line  # noqa: E402
 
 TOOL = "pr"
 SCRIPTS = Path(__file__).resolve().parent
@@ -152,7 +153,8 @@ def cmd_plan(a):
         emit(result(TOOL, "stopped", f"起点のブランチ {branch} にいる。作業ツリーを用意してから進める", items,
                     {"branch": branch, "base": base, "redirect": "worktree"},
                     next="/ndf:worktree の手順で作業ツリーを用意し、そこへ移る"), EXIT_PRECONDITION)
-    if base not in allowed and not a.force:
+    # ミッションのブランチ宛て（課題の PR）は宣言の外でも起点として受ける
+    if base not in allowed and pr_target(base) != "mission" and not a.force:
         items[1]["result"] = "redirect"
         emit(result(TOOL, "stopped", f"起点 {base} は既定・宣言のブランチと違う。cherry-pick-pr へ回す", items,
                     {"branch": branch, "base": base, "redirect": "cherry-pick-pr"},
@@ -174,12 +176,15 @@ def cmd_plan(a):
     for sha in in_commits:
         items.append({"kind": "commit", "name": sha, "result": "closing_word"})
     metrics = {"branch": branch, "base": base, "base_ref": ref, "default_branch": default, "draft": bool(a.draft),
+               "target": pr_target(base), "review": needs_review(base),
                "existing_pr": pr, "uncommitted": len(status), "closing_words_in_message": in_msg,
                "commits_with_closing_words": in_commits, **nums}
     if in_msg:
         emit(result(TOOL, "stopped", f"コミットメッセージに閉じる語がある: {', '.join(in_msg)}（本文だけに書く）",
                     items, metrics, next="閉じる語を外したメッセージで plan をやり直す"))
     action = "既存の PR を更新する" if pr else "新しい PR を作る"
+    if not needs_review(base):
+        action += "（ミッションのブランチ宛て。実装レビューはミッションの PR で通す）"
     emit(result(TOOL, "ok", f"{branch} → {base}: 未コミット {len(status)} 件・{nums['commits']} コミット・"
                 f"{nums['files']} ファイル。{action}", items, metrics))
 
@@ -261,7 +266,7 @@ def rest_create(root, branch, base, title, body, draft):
 def upsert(a, must_exist):
     root = git_root(a.root)
     branch = current_branch(root)
-    body = body_with_mark(a.body_file)
+    body = with_mode_line(body_with_mark(a.body_file), getattr(a, "mode", None), split_stages(getattr(a, "stages", None)))
     with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8") as f:
         f.write(body)
         body_path = f.name
@@ -385,6 +390,11 @@ def cmd_report(a):
 
 # --- 入口 --------------------------------------------------------------------------
 
+def add_mode_args(p):
+    p.add_argument("--mode", help="本文の末尾に書くモード（light / standard など）")
+    p.add_argument("--stages", help="通した工程をカンマ区切りで（例: 設計,実装,構造改善,実装レビュー,完了判定）")
+
+
 def build_parser():
     ap = argparse.ArgumentParser(prog="pr-steps.py", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -407,11 +417,13 @@ def build_parser():
     p.add_argument("--body-file", required=True)
     p.add_argument("--draft", action="store_true")
     p.add_argument("--base")
+    add_mode_args(p)
     p.set_defaults(func=cmd_create)
     p = sub.add_parser("update", parents=[common_parser()], help="既存の PR の本文を書き直す")
     p.add_argument("--title")
     p.add_argument("--body-file", required=True)
     p.add_argument("--pr", type=int)
+    add_mode_args(p)
     p.set_defaults(func=cmd_update)
     p = sub.add_parser("report", parents=[common_parser()], help="完了報告の材料を集める")
     p.add_argument("pr", nargs="?", type=int)

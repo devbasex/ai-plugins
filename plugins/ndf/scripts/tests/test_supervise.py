@@ -487,3 +487,106 @@ def test_new_release_dev_and_prod(tmp_path):
 def test_new_release_requires_version():
     p = cli("new", "release", "--worktree", "/r/.worktrees/x", "--channel", "dev")
     assert p.returncode != 0 and "--version" in p.stderr
+
+# --- ミッション（#1005） ------------------------------------------------------------
+
+def test_new_mission_writes_waves_in_order(tmp_path):
+    out = tmp_path / "m"
+    p = cli("new", "mission", "--name", "v10-18", "--worktree", str(tmp_path), "--issue", "11", "12",
+            "--design", "11", "--out", str(out))
+    assert p.returncode == 0, p.stderr
+    res = json.loads(p.stdout)
+    assert res["status"] == "ok"
+    manifest = json.loads((out / "mission.json").read_text())
+    assert manifest["ブランチ"] == "mission/v10-18"
+    assert [w["name"] for w in manifest["波"]] == ["設計", "関門 1", "ミッションのブランチ", "実装", "検査", "配布"]
+    waves = {w["name"]: w for w in manifest["波"]}
+    assert "plans" not in waves["関門 1"] and waves["関門 1"]["gate"]
+    assert len(waves["実装"]["plans"]) == 2 and waves["実装"]["command"].endswith("--max 3")
+    for w in manifest["波"]:
+        for path in w.get("plans", []):
+            plan = json.loads(Path(path).read_text())
+            steps = {s["id"]: s for s in plan["steps"]}
+            for s in plan["steps"]:
+                for k in ("next", "on_fail", "skip_to"):
+                    if k in s:
+                        assert s[k] in steps or s[k] == "end", (path, s)
+                for c in s.get("choices", []):
+                    assert c in steps or c in ("stop", "gate"), (path, c)
+
+    design = json.loads(Path(waves["設計"]["plans"][0]).read_text())
+    review = next(s for s in design["steps"] if s["id"] == "review")
+    assert "--max-rounds" not in review["args"]  # 設計の既定（3 ラウンド）に任せる
+    assert design["branch"].startswith("design/")
+
+    impl = json.loads(Path(waves["実装"]["plans"][0]).read_text())
+    assert impl["起点"] == "origin/mission/v10-18"
+    assert next(s for s in impl["steps"] if s["type"] == "pr")["base"] == "mission/v10-18"
+
+    check = json.loads(Path(waves["検査"]["plans"][0]).read_text())
+    assert check["branch"] == "mission/v10-18" and "Pull Request" not in check
+    pr = next(s for s in check["steps"] if s["type"] == "pr")
+    assert pr["base"] == "develop" and "Closes #11" in pr["summary"] and "Closes #12" in pr["summary"]
+    assert [s["id"] for s in check["steps"]][:3] == ["collect", "pr", "assess"]
+
+
+def test_new_mission_without_design_skips_gate(tmp_path):
+    out = tmp_path / "m"
+    p = cli("new", "mission", "--name", "m", "--worktree", str(tmp_path), "--issue", "1", "--out", str(out))
+    assert p.returncode == 0, p.stderr
+    names = [w["name"] for w in json.loads((out / "mission.json").read_text())["波"]]
+    assert names == ["ミッションのブランチ", "実装", "検査", "配布"]
+
+
+@pytest.mark.parametrize("args", [["--issue", "1"], ["--name", "a b", "--issue", "1"], ["--name", "m"]])
+def test_new_mission_rejects_bad_args(tmp_path, args):
+    assert cli("new", "mission", "--worktree", str(tmp_path), *args).returncode == 2
+
+
+FAKE_GH_PR = """#!{py}
+import json, os, sys
+a = sys.argv[1:]
+if a[:2] == ["pr", "list"]:
+    sys.exit(0)
+if a[:2] == ["pr", "create"]:
+    open(os.environ["FAKE_GH_BODY"], "w").write(a[a.index("--body") + 1])
+    print("https://github.com/o/r/pull/5"); sys.exit(0)
+sys.exit(1)
+"""
+
+
+def test_pr_body_ends_with_mode_and_passed_stages(tmp_path, monkeypatch):
+    origin = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "-q", "--bare", "-b", "develop", str(origin)], check=True)
+    root = tmp_path / "repo"
+    root.mkdir()
+    git(root, "init", "-q", "-b", "develop")
+    git(root, "config", "user.email", "t@example.com")
+    git(root, "config", "user.name", "t")
+    git(root, "config", "commit.gpgsign", "false")
+    (root / "a.txt").write_text("a\n")
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", "init")
+    git(root, "remote", "add", "origin", str(origin))
+    git(root, "push", "-q", "-u", "origin", "develop")
+    git(root, "checkout", "-q", "-b", "feat/x")
+    (root / "b.txt").write_text("b\n")
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", "Add: b")
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    (bindir / "gh").write_text(FAKE_GH_PR.format(py=PY))
+    (bindir / "gh").chmod(0o755)
+    body = tmp_path / "body.txt"
+    monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("FAKE_GH_BODY", str(body))
+    plan = {"フェーズ": "実装", "課題": [1], "モード": "standard", "作業場所": str(root), "steps": [
+        {"id": "impl", "type": "run", "cmd": "true", "stage": "実装", "next": "test"},
+        {"id": "test", "type": "run", "cmd": "true", "stage": "完了判定", "next": "pr"},
+        {"id": "pr", "type": "pr", "stage": "Pull Request", "base": "develop", "body": "template", "next": "end"}]}
+    s = sv.Supervisor(plan, tmp_path / "state")
+    text = s.run()
+    assert "結果: 完了" in text, text
+    lines = [l for l in body.read_text().splitlines() if l.strip()]
+    assert lines[-2] == "モード: standard / 通した工程: 実装 → 完了判定 → Pull Request"
+    assert lines[-1].startswith("🤖 Generated with")

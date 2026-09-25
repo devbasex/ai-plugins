@@ -33,4 +33,7 @@
 <!-- 「要る」「要らない」のどちらかと、その理由を 1 行。版はまとまり単位でマージが終わった後に
 上げる（Pull Request ごとには上げない）。手順は /ndf:release にある -->
 
+<!-- 次の 1 行は残す。モードは development-workflow の判定、工程は工程表の行の名前（pr-steps.py の --mode / --stages が書く） -->
+モード: <mode> / 通した工程: <工程> → <工程>
+
 <!-- I want to review in Japanese. -->
