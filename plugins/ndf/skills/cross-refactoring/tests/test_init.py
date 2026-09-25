@@ -473,6 +473,18 @@ def test_a_new_run_fills_the_caps_with_their_defaults(run_init, tmp_path):
 
 # ---------- 想定最大時間 `--budget-minutes`（#933 の AC1） ----------
 
+def test_the_start_is_taken_before_the_baseline_test(run_init, tmp_path, monkeypatch):
+    """着手前のテストの所要も想定最大時間に入る。開始はテストより前に取る（#968）。"""
+    marker = tmp_path / "baseline-ran"
+    statefile = sys.modules["statefile"]
+    monkeypatch.setattr(statefile, "now",
+                        lambda: "2026-09-24T11:00:00" if marker.exists() else "2026-09-24T10:00:00")
+    run_init(_args(tmp_path, baseline_test=f"touch {shlex.quote(str(marker))}"))
+    _, state = _state_of(tmp_path)
+    assert marker.exists()
+    assert state["started_at"] == "2026-09-24T10:00:00"
+
+
 def test_the_budget_is_recorded(run_init, tmp_path, capsys):
     """整数の文字列を受け取り、整数として状態へ残す（引数は argparse で型を付けない）。"""
     run_init(_args(tmp_path, budget_minutes="90"))
