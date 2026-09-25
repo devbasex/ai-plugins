@@ -16,6 +16,7 @@
 - bg-wait.sh が plugins/ndf/scripts/lib/ に置かれ、cross-review 以外の Skill からも使える（#1066）
 - cross-review と cross-refactoring の収束ループの待ちは、共通層の bg-wait.sh を使う（#1066）
 - 配布の計画の CHANGELOG と説明で、PR が番号の順に並ぶ。（#1067）
+- 止まった計画を `--from` で途中の段から再開できるようになる。（#1069）
 
 ## [ndf 10.17.17] - 2026-09-25
 
