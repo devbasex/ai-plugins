@@ -519,6 +519,14 @@ def test_kiro_without_session_windows_only_the_same_text(world, slack):
     assert record["key"].endswith(":window") and record["key"] != ":window"
 
 
+def test_leftover_kiro_session_is_not_used_by_other_runtimes(world, slack):
+    world.run("codex", {"hook_event_name": "Stop", "last_assistant_message": "どちらにしますか。"},
+              env={"NDF_CODEX_SLACK_NOTIFY": "true", "KIRO_SESSION_ID": "k9"})
+    slack.wait_for(1)
+    [f] = list(world.state.glob("*.json"))
+    assert "k9" not in f.name and "k9" not in json.loads(f.read_text())["key"]
+
+
 def test_kiro_non_stop_event_is_not_a_wait():
     hook_input = {"hook_event_name": "preToolUse", "assistant_response": "この方針で進めてよいですか。"}
     assert wn.classify_event("kiro", hook_input) is None

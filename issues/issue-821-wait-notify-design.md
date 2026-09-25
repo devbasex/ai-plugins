@@ -329,7 +329,7 @@ classDiagram
 | Claude Code で `CLAUDE_CODE_BRIDGE_SESSION_ID` か `CLAUDE_CODE_REMOTE_SESSION_ID` がある | `セッション: https://claude.ai/code/<ID>`。ID が `cse_` で始まるなら `session_` に置き換える |
 | Claude Code で上が無い | `再開: claude --resume <session_id>` |
 | Codex | `再開: codex resume <session_id>` |
-| Kiro でフック入力にセッションの ID がある | `再開: kiro-cli chat --resume-id <ID>` |
+| Kiro でセッションの ID が取れる（フック入力の `session_id`・`conversation_id`、無ければ環境変数 `KIRO_SESSION_ID` の順。stop の標準入力には通常無く、環境変数から取る） | `再開: kiro-cli chat --resume-id <ID>` |
 | Kiro で上が無い | `再開: kiro-cli chat --resume`（cwd で打つ） |
 
 Claude Code と Codex でフック入力にセッションの ID が無いときは、再開の行を作らない（I7）。

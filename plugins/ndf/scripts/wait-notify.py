@@ -192,7 +192,7 @@ def claim(session: str, key: str, kind: str, window: bool, now: float | None = N
 
 def wait_key(runtime: str, hook_input: dict, transcript: tuple[str, str] | None) -> tuple[str, bool]:
     """(待ちの鍵, 60 秒の窓で扱うか)。"""
-    session = session_of(hook_input)
+    session = session_of(runtime, hook_input)
     if runtime == "claude" and transcript:
         return transcript[0], False
     if runtime == "codex" and hook_input.get("turn_id"):
@@ -210,13 +210,16 @@ def wait_key(runtime: str, hook_input: dict, transcript: tuple[str, str] | None)
     return f"{session}:window", True
 
 
-def session_of(hook_input: dict) -> str:
+def session_of(runtime: str, hook_input: dict) -> str:
     """セッションの識別子。無ければ空。
 
     Kiro の stop の標準入力には識別子が無く、環境変数 `KIRO_SESSION_ID` で渡る（worktree-guard.sh と同じ）。
+    この環境変数は Kiro のときだけ読む。同じシェルに残った値を別のランタイムの鍵へ混ぜないためである。
     """
-    return str(hook_input.get("session_id") or hook_input.get("conversation_id")
-               or os.environ.get("KIRO_SESSION_ID") or "")
+    session = hook_input.get("session_id") or hook_input.get("conversation_id")
+    if not session and runtime == "kiro":
+        session = os.environ.get("KIRO_SESSION_ID")
+    return str(session or "")
 
 
 # ---------------------------------------------------------------------------
@@ -270,7 +273,7 @@ def run_hook(runtime: str) -> None:
             log("skip: reply does not wait")
             return
         wait = wn.Wait(wn.DONE, wn.done_excerpt(reply), key)
-    session = session_of(hook_input) or cwd
+    session = session_of(runtime, hook_input) or cwd
     if not claim(session, wait.key, wait.kind, window):
         log("skip: already notified", wait.key)
         return

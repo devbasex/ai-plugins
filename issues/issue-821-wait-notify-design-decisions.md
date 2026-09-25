@@ -191,6 +191,10 @@ Claude Code 2.1.282 の本体では、フック入力の型（`Stop` / `Notifica
 | 二重に通知しない | 同じ transcript で `PermissionRequest`（`ExitPlanMode`）と `permission_prompt` を続けて渡し、届くのは 1 件。transcript に項目を足した後の次の待ちは届く（I1） |
 | description・引数・README を実際の発火に合わせる | `hooks/claude.json` に `session_end` と「exits」が無く、入口を指すことをテストで見る。README は `plan-to-spec` の前の文書の検査とレビューで見る（文言を照合するテストは書かない） |
 | Codex / Kiro の扱いを決め README に書く | 決定 10 の表を README へ写す。`--runtime codex` と `--runtime kiro` の `Stop` の入力で待ちが届き、戻り先が表どおり |
+| Kiro の待ちの鍵をセッションで分ける（決定 5） | 同じ文面を `KIRO_SESSION_ID` の違う 2 つのセッションで渡し、2 件とも届く。戻り先はそれぞれ `kiro-cli chat --resume-id <ID>` |
+| Kiro の同じセッションの同じ文面は 60 秒の窓で止める（決定 5） | 同じ `KIRO_SESSION_ID` と文面で、窓の内の 2 件目は届かず、記録の送信時刻を窓の外へ動かした後の 2 件目は届く |
+| Kiro でセッションの ID が無いときは同じ文面だけを止める（決定 5） | ID 無しで同じ文面を 2 回と別の文面を 1 回渡し、届くのは 2 件。記録の鍵は `<本文のハッシュ>:window` |
+| `KIRO_SESSION_ID` を Kiro 以外の鍵に混ぜない（決定 5） | 環境変数が残った状態で Codex の `Stop` を渡し、記録の名前と鍵にその値が入らない |
 | I2 待ちでないなら送らない | `NDF_SLACK_NOTIFY_DONE` なしで完了の報告を渡し、届かない |
 | I3 フラグがあれば「完了」で送る | `NDF_SLACK_NOTIFY_DONE=true` で完了の報告を渡し、「完了」で届く |
 | I4 非対話では待ちを作らない | `CLAUDE_CODE_ENTRYPOINT=sdk-cli` で、問いの応答でも届かず、記録も作らない |
