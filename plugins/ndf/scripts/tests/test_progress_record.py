@@ -66,7 +66,8 @@ def test_nothing_outside_the_section_changes(fake_gh):
         "## 受け入れ条件\n\n- [ ] 何か\n",
         encoding="utf-8",
     )
-    run(fake_gh, "123", "設計")
+    out = run(fake_gh, "123", "設計")
+    assert out.returncode == 0, out.stderr
     written = fake_gh.written.read_text(encoding="utf-8")
     assert "## 概要\n\nこれは残る" in written
     assert "## 受け入れ条件\n\n- [ ] 何か" in written
