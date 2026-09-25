@@ -2018,11 +2018,12 @@ def plan_check_since(a) -> dict:
     if getattr(a, "final", False):
         cond += " --final"
     record = f"{CHECK_PY} record --id {name} --state {state} --root .{' --review' if review_only else ''}"
+    first = "実装レビュー" if review_only else "構造改善"
     steps = [
-        {"id": "prepare", "type": "run", "stage": "構造改善", "timeout": 600,
+        {"id": "prepare", "type": "run", "stage": first, "timeout": 600,
          "cmd": f"{CHECK_PY} prepare --id {name} --state {state} --root .{flag}", "on_fail": "abort-before-pr",
          "next": "pr"},
-        {"id": "pr", "type": "pr", "stage": "構造改善", "base": f"check-base/{name}", "title": f"検査: {name}",
+        {"id": "pr", "type": "pr", "stage": first, "base": f"check-base/{name}", "title": f"検査: {name}",
          "body": "template", "on_fail": "abort-before-pr",
          "summary": (f"前回の検査からの差分に{'実装レビュー' if review_only else '構造改善と実装レビュー'}を"
                      f" 1 回ずつ通す（{name}）。範囲・立ったトリガー・"
@@ -2336,10 +2337,15 @@ def plan_fast_design(a, n: int, repo: str) -> dict:
     plan = plan_mission_design(a, n, repo)
     state = shlex.quote(str(Path(a.state).resolve()))
     note = "{state_dir}/work/mvv-note.md"
+    # 語のチェックの当たりが直し切れずに残ったら、mvv の判定へ渡さず関門 1 の judge（gate）へ回す
     for s in plan["steps"]:
         if s["id"] == "push-glossary":
             s["next"] = "mvv"
+        elif s["id"] == "glossary-recheck":
+            s["on_fail"] = "push-glossary-gate"
     plan["steps"] += [
+        {"id": "push-glossary-gate", "type": "run", "stage": "ドキュメントレビュー", "timeout": 300,
+         "cmd": "git push -q", "next": "gate"},
         {"id": "mvv", "type": "run", "stage": "設計", "timeout": 900,
          "cmd": f"{MVV_PY} check --mission {state} --gate design --pr {{pr}} --mode {a.mode} --root . --note {note}",
          "next": "approve", "gate_next": "end"},
