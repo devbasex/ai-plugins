@@ -192,6 +192,58 @@ def test_role_of_reads_only_the_head_word(mod) -> None:
     assert mod.role_of("G2 設計 #540", "supervisor") == "その他"
 
 
+# ---------- #768: 工程名で書かれた description をフェーズへ写す ----------
+
+AGENT_LAYERS = (
+    pathlib.Path(__file__).resolve().parents[2]
+    / "skills" / "development-workflow" / "references" / "agent-layers.md"
+)
+
+
+def phase_steps_from_table() -> dict[str, str]:
+    """agent-layers.md のフェーズの表の「通す工程」の列から、工程名 → フェーズを作る。"""
+    text = AGENT_LAYERS.read_text(encoding="utf-8")
+    section = text.split("## フェーズ\n", 1)[1]
+    steps: dict[str, str] = {}
+    for line in section.splitlines():
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if len(cells) < 2 or cells[0] in ("フェーズ", "---"):
+            if steps:
+                break  # 表の終わり
+            continue
+        phase, column = cells[0], cells[1]
+        column = re.sub(r"（[^）]*）", "", column).split("。", 1)[0]
+        for step in (s.strip() for s in column.split("/")):
+            if step and step != phase:
+                steps.setdefault(step, phase)
+    return steps
+
+
+def test_the_step_names_match_the_phase_table(mod) -> None:
+    assert mod.STEP_PHASES == phase_steps_from_table()
+
+
+@pytest.mark.parametrize(
+    "description,phase",
+    [
+        ("確定仕様化: #540", "取り込み"),
+        ("配布: #540", "取り込み"),
+        ("リリース後テスト: #766", "仕上げ"),
+        ("振り返り: #550", "仕上げ"),
+        ("実装レビュー: #540", "検査"),
+        ("作業場所の用意: #540", "設計"),
+    ],
+)
+def test_a_step_name_maps_to_its_phase(mod, description, phase) -> None:
+    assert mod.role_of(description, "supervisor") == phase
+
+
+def test_a_step_name_does_not_map_for_a_worker_or_the_old_form(mod) -> None:
+    assert mod.role_of("配布: 何か", "worker") == "その他"
+    assert mod.role_of("#541 の引き継ぎ", "supervisor") == "その他"
+    assert mod.role_of("実装 #540 実行計画", "supervisor") == "その他"
+
+
 def test_the_parent_is_resolved_through_the_tool_use_id(records) -> None:
     # 深さ 2 の記録は起動元の supervisor を指し、conductor が起動したものは null になる
     assert records["w1"].parent_agent_id == "s1"
