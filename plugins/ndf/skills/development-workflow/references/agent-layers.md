@@ -76,7 +76,7 @@ context window を埋めるときは、**読解だけを worker へ出す**（co
 
 | フェーズ | プラン（`supervise.py new` の種別） | ステージ（ミッション状態ファイル `mission.json`） | supervisor で回すとき |
 | --- | --- | --- | --- |
-| 設計 | `new mission --design <課題>...` の設計のプラン（設計 Pull Request ごと）。終わりの judge が承認ゲート 1 を返す | 設計 → 関門 1 | 要求と受け入れ条件（`requirements-design`）の工程。設計のプランはこの工程を持たない |
+| 設計 | `new mission --design <課題>...` の設計のプラン（設計 Pull Request ごと）。終わりの judge が承認ゲート 1 を返す | 設計 → 関門 1 | `--design` を渡さないときの要求と受け入れ条件（`requirements-design`）の工程。設計のプランはこの工程を持つ（課題の本文の写しが一致すれば飛ばす） |
 | 実装 | `new mission` の実装のプラン（課題ごと。ミッションブランチ宛て）。ミッションブランチはその前のステージのプランが切る。単発は `new impl` | ミッションのブランチ → 実装 | — |
 | 検査 | `new mission` の検査のプラン（ミッションの Pull Request を出し、構造改善・コードレビュー・完了判定を通してマージする）。単発は `new check`、`pace: fast` は `new check --since-last` | 検査 | — |
 | 取り込み | ミッションの Pull Request のマージは検査のプランが、検証リリースは開発版のリリースプランが持つ（後片付けは本番のリリースプランの最後のステップ） | 配布（検査のキューが `--then` で流す） | 確定仕様化（`plan-to-spec`）。`normal` のプランはこの工程を持たない（`pace: fast` は `new close` が持つ） |
@@ -88,7 +88,7 @@ context window を埋めるときは、**読解だけを worker へ出す**（co
 | 条件 | 見分け方 | conductor の動き |
 | --- | --- | --- |
 | プランの雛形が無い | 表の「supervisor で回すとき」の列の工程、表に無いモードの組み方（`operation` の実行、`documentation` の素材の収集など）、リリースの形（`.ndf/supervise.json` の `release.form`）の雛形が無い | その工程だけを supervisor で回し、残りはプランで流す |
-| 雛形に要る設定が無い | `supervise.py new` が設定の不足（`.ndf/worktree.json` の `base_branch`、`.ndf/supervise.json` の `test` / `release`）で止まる | 設定を足せるなら足して打ち直す。足せなければそのフェーズを supervisor で回す |
+| 雛形に要る設定が無い | `supervise.py new` が設定の不足（`.ndf/worktree.json` の `base_branch`、`.ndf/supervise.json` の `test`。`new release` では `release` も）で止まる。`new mission` は `release` が無くても止まらず、手で行うリリースのステージを最後に置く | 設定を足せるなら足して打ち直す。足せなければそのフェーズを supervisor で回す |
 
 **`supervise.py --help` の説明を読んでプランを外さない。** `new mission` は承認ゲート 1 の前の設計から
 書き出す（`--design` を渡したとき）。
