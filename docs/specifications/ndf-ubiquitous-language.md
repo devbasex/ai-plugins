@@ -302,7 +302,8 @@ stateDiagram-v2
 
 ai-plugins の宣言は `source` に `docs/glossary/glossary.json`、`document` に `docs/glossary.md`、
 `check.paths` に `init` の既定の 3 つ、`check.term_sections` に `["用語"]`、`check.source_paths` に
-`docs/specifications/*.md`・`plugins/ndf/skills/*.md` を持つ。
+`docs/specifications/*.md`・`plugins/*/skills/*.md`・`plugins/ndf/scripts/lib/README.md` を持つ。glob の `*` は
+`/` にも当たるため、`plugins/*/skills/*.md` はプラグインの Skill の下のすべての `.md` に当たる。
 
 CI（`.github/workflows/glossary.yml`）は Pull Request ごとに `glossary.py check --diff origin/<base>` を打つ。
 head のブランチが `design/` で始まるときは `--rules all`、ほかは `--rules structure` である。ブランチ名は
