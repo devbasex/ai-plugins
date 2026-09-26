@@ -457,4 +457,4 @@ graph TD
 - [`cross-review` の状態とレビューの手順](../../plugins/ndf/skills/cross-review/docs/01-state-and-review.md)
 - [`cross-review` の手順](../../plugins/ndf/skills/cross-review/SKILL.md)
 - [証拠ベースのレビューと効果の測定](cross-review-evidence-based.md) — 指摘の構造化・実行検証・反証と、状態ファイルのそれ以外の鍵
-- [起動 1 回の起動結果と上限の検知](cross-review-launch-outcome.md) — 結果なしの理由の語彙と起動し直しの可否
+- [起動結果と上限の検知](cross-review-launch-outcome.md) — 結果なしの理由の語彙とリトライ可否
