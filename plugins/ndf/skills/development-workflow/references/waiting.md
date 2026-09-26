@@ -232,7 +232,7 @@ Stop を 1 度だけ止め、動いている作業を並べて知らせる。sup
 
 ## hook
 
-**Claude Code では、禁じる待ち方を hook が止める**（`scripts/token-guard.sh`。PreToolUse の
+**Claude Code では、禁じる待ち方を hook が止める**（`scripts/hook.py` の token の guard。PreToolUse の
 `Bash` と `Read` で動く）。止めたときは理由の欄に代わりの待ち方が出る。
 
 | 判定 | 止める条件 | 止め方 | 上限を変える |
