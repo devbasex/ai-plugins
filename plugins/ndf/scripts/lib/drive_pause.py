@@ -29,7 +29,6 @@
 """
 from __future__ import annotations
 
-import json
 import shlex
 from pathlib import Path
 from typing import Callable
@@ -55,19 +54,6 @@ def parse_vars(text: str) -> dict:
             if sep and k.isidentifier():
                 out[k] = v
     return out
-
-
-def resumed_init_vars(state_file: Path, stages: tuple[str, ...], tmp: Path) -> dict | None:
-    """駆動の状態ファイルの段階が stages のどれかで、init_vars.TMP_DIR を解決した値が tmp と一致するときだけ
-    init_vars を返す（再開の規則 I7）。tmp は呼ぶ側が比べたい形（解決の要否）で渡す。"""
-    try:
-        ds = json.loads(state_file.read_text())
-    except (OSError, json.JSONDecodeError):
-        return None
-    iv = ds.get("init_vars") if isinstance(ds, dict) else None
-    if ds.get("stage") not in stages or not isinstance(iv, dict) or not iv.get("TMP_DIR"):
-        return None
-    return iv if Path(iv["TMP_DIR"]).resolve() == tmp else None
 
 
 class Stop(Exception):
