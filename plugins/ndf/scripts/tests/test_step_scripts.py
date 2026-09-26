@@ -383,6 +383,22 @@ def test_compare_files_follows_a_symlink_to_a_directory(tmp_path, installed):
     assert out == ([] if installed in ("symlink", "copy") else ["claude: p/agy/a"])
 
 
+def test_compare_files_skips_symlinks_for_a_runtime_that_drops_them(tmp_path):
+    """codex は symlink を導入先へ入れないので、symlink が無くても不一致にしない。"""
+    mod = load_verification()
+    src = tmp_path / "src" / "p"
+    (src / "skills" / "a").mkdir(parents=True)
+    (src / "skills" / "a" / "SKILL.md").write_text("x\n")
+    (src / "agy").mkdir()
+    (src / "agy" / "a").symlink_to("../skills/a")
+    dst = tmp_path / "dst"
+    (dst / "skills" / "a").mkdir(parents=True)
+    (dst / "skills" / "a" / "SKILL.md").write_text("y\n")
+    files = ["p/agy/a", "p/skills/a/SKILL.md"]
+    out = mod.compare_files(tmp_path / "src", dst, "p", files, "codex", keeps_symlinks=False)
+    assert out == ["codex: p/skills/a/SKILL.md"]
+
+
 # --- phase-steps.py（互換の入口） --------------------------------------------
 
 @pytest.mark.parametrize("root_first", [True, False])
