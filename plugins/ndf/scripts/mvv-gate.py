@@ -13,7 +13,8 @@
 3. `--mode` が `operation` でも `documentation` でもない
 4. `--pr` の変更したファイルが、進め方の宣言（`.ndf/pace.json`）の `boundary_paths` に当たらない
 
-通れば、材料（提示物のファイル・PR の題名と本文と変更したファイル）と MVV を最小構成の claude -p に渡し、
+通れば、材料（提示物のファイル・PR の題名と本文と変更したファイル。`--gate design` では PR が変更した `issues/` の設計文書の
+PR の先頭のコミットの中身も足す）と MVV を最小構成の claude -p に渡し、
 「従う / 従わない / 判定できない」と理由と越えない線を JSON で返させる。
 
 - 従う（越えない線なし）: `mission-state.py gate` で関門の記録（`by: mvv`・判定・理由・ログ）を書き、
@@ -34,6 +35,7 @@ import os
 import shlex
 import subprocess
 import sys
+import urllib.parse
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -87,7 +89,7 @@ def gh(args: list[str], repo: str | None, cwd: Path) -> str:
 
 def pr_info(n: int, repo: str | None, cwd: Path) -> dict:
     try:
-        return json.loads(gh(["pr", "view", str(n), "--json", "title,body,files"], repo, cwd))
+        return json.loads(gh(["pr", "view", str(n), "--json", "title,body,files,headRefOid"], repo, cwd))
     except ValueError:
         raise Back(f"PR #{n} の出力を読めない")
 
@@ -96,6 +98,26 @@ def pr_material(n: int, info: dict) -> str:
     files = "\n".join(f"- {f['path']} (+{f.get('additions', 0)} -{f.get('deletions', 0)})"
                       for f in info.get("files", []))
     return f"## Pull Request #{n}: {info.get('title', '')}\n\n{info.get('body') or ''}\n\n### 変更したファイル\n{files}"
+
+
+def design_docs(info: dict) -> list[str]:
+    """PR が足したか直した `issues/` の設計文書のパス（消しただけのものは読めないので除く）。"""
+    return [f["path"] for f in info.get("files", [])
+            if f.get("path", "").startswith("issues/") and f["path"].endswith(".md") and "design" in Path(f["path"]).name
+            and not (f.get("additions", 0) == 0 and f.get("deletions", 0) > 0)]
+
+
+def design_material(n: int, path: str, info: dict, repo: str | None, cwd: Path) -> str:
+    """PR の先頭のコミットの設計文書の中身を材料の 1 件にする。取れなければ Back。"""
+    ref = info.get("headRefOid") or ""
+    if not ref:
+        raise Back(f"PR #{n} の先頭のコミットが分からず、設計文書 {path} を読めない")
+    endpoint = f"repos/{repo or '{owner}/{repo}'}/contents/{urllib.parse.quote(path)}?ref={ref}"
+    try:
+        text = gh(["api", "-H", "Accept: application/vnd.github.raw", endpoint], None, cwd)
+    except Back as e:
+        raise Back(f"PR #{n} の設計文書 {path} を読めない: {e}")
+    return f"## 設計文書 {path}（PR #{n}）\n\n{text}"
 
 
 def build_prompt(mvv: str, gate: str, materials: list[str]) -> str:
@@ -194,7 +216,7 @@ def write_note(path: str, a, record: dict) -> None:
 
 def cmd_check(a) -> tuple[dict, int | None]:
     root = Path(a.root or ".").resolve()
-    record = {"at": now_iso(), "gate": a.gate, "mission": a.mission, "material": a.material, "pr": a.pr,
+    record = {"at": now_iso(), "gate": a.gate, "mission": a.mission, "material": list(a.material), "pr": a.pr,
               "mode": a.mode or ""}
 
     def back(why: str, verdict: str, extra: dict | None = None, usage: dict | None = None):
@@ -219,6 +241,11 @@ def cmd_check(a) -> tuple[dict, int | None]:
                 raise Back(f"材料のファイルが無い: {m}")
             materials.append(f"## {m}\n\n{Path(m).read_text(encoding='utf-8')}")
         materials += [pr_material(n, info) for n, info in infos.items()]
+        if a.gate == "design":
+            for n, info in infos.items():
+                for path in design_docs(info):
+                    materials.append(design_material(n, path, info, a.repo, root))
+                    record["material"].append(f"#{n} {path}")
         if not materials:
             raise Back("材料が無い（--material か --pr を渡す）")
     except (OSError, ValueError) as e:
