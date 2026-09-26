@@ -389,13 +389,14 @@ def mask_comments(lines: list[str], suffix: str) -> list[str]:
     """コードの行のコメントを空白に置き換える。`#` は .py / .sh（.sh は語の頭だけ）、`//` と `/* */` は .js / .ts。
     文字列の内側の記号はコメントとみなさない（`"--cart"` の識別子は残す）。行をまたぐ文字列（.py の三連引用符、
     .js / .ts のバッククォート、.sh の引用）は次の行へ持ち越す。.sh は引用の外の `\\` で次の 1 文字を飛ばし、
-    `'` の内側の `\\` はエスケープとみなさない。"""
+    `'` の内側の `\\` はエスケープとみなさない。.py / .js / .ts の通常の引用も、行末の `\\` で改行を
+    エスケープしたときは次の行へ持ち越す。"""
     hash_style, sh = suffix in (".py", ".sh"), suffix == ".sh"
     opens = {".py": ('"""', "'''", '"', "'"), ".sh": ('"', "'")}.get(suffix, ("`", '"', "'"))
     multiline = {'"', "'"} if sh else {'"""', "'''", "`"}
     out, block, quote = [], False, None
     for line in lines:
-        chars, i = list(line), 0
+        chars, i, escaped_eol = list(line), 0, False
         while i < len(line):
             if block:
                 end = line.find("*/", i)
@@ -406,7 +407,7 @@ def mask_comments(lines: list[str], suffix: str) -> list[str]:
             c = line[i]
             if quote:
                 if c == "\\" and not (sh and quote == "'"):
-                    i += 2
+                    escaped_eol, i = i + 1 == len(line), i + 2
                 elif line.startswith(quote, i):
                     i, quote = i + len(quote), None
                 else:
@@ -427,7 +428,7 @@ def mask_comments(lines: list[str], suffix: str) -> list[str]:
                 chars[i:i + 2], block, i = "  ", True, i + 2
                 continue
             i += 1
-        if quote not in multiline:
+        if quote not in multiline and not escaped_eol:
             quote = None
         out.append("".join(chars))
     return out

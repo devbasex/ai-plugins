@@ -602,6 +602,17 @@ def test_comment_marks_inside_multiline_strings_are_not_comments(repo):
     ]
 
 
+def test_escaped_newline_inside_plain_strings_carries_the_quote(repo):
+    coded_repo(repo)
+    write(repo, "src/a.py", "s = 'a\\\n# cart' # cart\nt = '\\\\' # cart\n")
+    write(repo, "src/c.js", "const u = \"a\\\n// Cart\"; // cart\n")
+    code, out, err = run(repo, "check", "--diff", "develop")
+    assert code == 1, (out, err)
+    assert sorted((it["path"], it["line"], it["term"]) for it in out["items"]) == [
+        ("src/a.py", 2, "cart"), ("src/c.js", 2, "Cart"),
+    ]
+
+
 def test_shell_backslash_outside_quotes_and_inside_single_quotes(repo):
     coded_repo(repo)
     write(repo, "src/b.sh", "echo 'it'\\''s' # cart\necho \\' # cart\ntr -d '\\' # cart\n"
