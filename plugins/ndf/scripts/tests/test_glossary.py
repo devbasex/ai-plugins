@@ -591,6 +591,26 @@ def test_deprecated_code_in_comments_is_not_matched_but_in_strings_is(repo):
     ]
 
 
+def test_comment_marks_inside_multiline_strings_are_not_comments(repo):
+    coded_repo(repo)
+    write(repo, "src/a.py", 's = """\n# cart\n"""  # cart\n')
+    write(repo, "src/c.js", "const t = `\n// Cart ${x} src/*\n`; cart; // cart\n")
+    code, out, err = run(repo, "check", "--diff", "develop")
+    assert code == 1, (out, err)
+    assert sorted((it["path"], it["line"], it["term"]) for it in out["items"]) == [
+        ("src/a.py", 2, "cart"), ("src/c.js", 2, "Cart"), ("src/c.js", 3, "cart"),
+    ]
+
+
+def test_shell_backslash_outside_quotes_and_inside_single_quotes(repo):
+    coded_repo(repo)
+    write(repo, "src/b.sh", "echo 'it'\\''s' # cart\necho \\' # cart\ntr -d '\\' # cart\n"
+                            "echo \"a\n# cart\" # cart\n")
+    code, out, err = run(repo, "check", "--diff", "develop")
+    assert code == 1, (out, err)
+    assert [(it["path"], it["line"], it["term"]) for it in out["items"]] == [("src/b.sh", 5, "cart")]
+
+
 def test_check_file_finds_deprecated_code_in_a_code_file(repo):
     coded_repo(repo)
     p = write(repo, "tool.py", "Cart()\n")
