@@ -13,7 +13,7 @@
 **MCP は認証で失敗しやすい。** `Authentication credentials are missing` を返す事象が
 報告されている。**REST を直接呼ぶ経路を既定にする。**
 
-**サイトの URL はリポジトリごとに違う。** 宣言の `location` が持つ。この Skill には書かない。
+**サイトの URL はリポジトリごとに違う。** 設定の `location` が持つ。この Skill には書かない。
 
 ## 取り込みの手段と取れないもの
 
@@ -43,7 +43,7 @@ storage をそのまま控えておき、次に取得した storage と比べる
 | 添付 | 添付の API（v1） |
 
 **マクロとコードブロックは、変換の前に差し替える。** そのまま変換すると
-`UnknownMacroMigrationException` で失敗する。置き換え用の目印を入れてから変換し、変換後に
+`UnknownMacroMigrationException` で失敗する。置き換え用のマーカーを入れてから変換し、変換後に
 戻す。
 
 ## 本文の表現
@@ -79,5 +79,5 @@ storage をそのまま控えておき、次に取得した storage と比べる
 | --- | --- |
 | MCP が認証で失敗する | REST を直接呼ぶ |
 | `DRAFT pages do not support multiple versions` | 下書きと公開中で版の扱いを分ける |
-| `UnknownMacroMigrationException` | マクロを目印へ差し替えてから変換する |
+| `UnknownMacroMigrationException` | マクロをマーカーへ差し替えてから変換する |
 | PlantUML が `Migration Required` になる | 画像へ変換して添付する |

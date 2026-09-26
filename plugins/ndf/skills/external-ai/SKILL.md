@@ -114,7 +114,7 @@ LLM が決めるのは **どの CLI に渡すか**（上の表）と **プロン
   上限を超えると CLI を止めて必ず終わる
 - 回収は結果ファイル → stdout（claude は JSON の `result`、kiro は ANSI を除く） → stderr の末尾の順で、
   回収した本文は `--output-file` に置く。プロンプトに出力先の指示が無ければ末尾へ足す
-- 監視の記録は `metrics.stem` の `-monitor.json` にあり、`metrics.monitor_status` / `metrics.reason` と一致する
+- 監視ログは `metrics.stem` の `-monitor.json` にあり、`metrics.monitor_status` / `metrics.reason` と一致する
 - 一時ファイルは `NDF_EXTERNAL_AI_TMP_DIR`（既定は一時ディレクトリの `ndf/external-ai/`）に、
   起動ごとに固有の名前で置く
 
