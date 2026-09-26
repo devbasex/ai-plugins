@@ -19,14 +19,16 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE.parent / "lib"))
-import relay  # noqa: E402
+from relay_lib import common as relay_common  # noqa: E402
+from relay_lib import proc as relay_proc  # noqa: E402
+from relay_lib import version_dir as relay_version_dir  # noqa: E402
 from step_result import emit, result  # noqa: E402
 
 
 def events(d: Path) -> list[dict]:
     rows = []
     try:
-        for line in (d / relay.LOG_FILE).read_text().splitlines():
+        for line in (d / relay_common.LOG_FILE).read_text().splitlines():
             try:
                 rows.append(json.loads(line))
             except json.JSONDecodeError:
@@ -40,9 +42,9 @@ def position(d: str | None) -> str:
     """relay / no-dir / not-running / not-child"""
     if not d:
         return "no-dir"
-    if not relay.relay_running(d):
+    if not relay_common.relay_running(d):
         return "not-running"
-    return "relay" if relay.is_direct_child(d) else "not-child"
+    return "relay" if relay_proc.is_direct_child(d) else "not-child"
 
 
 def previous_end(d: Path | None, rows: list[dict]) -> tuple[dict | None, str | None]:
@@ -52,7 +54,7 @@ def previous_end(d: Path | None, rows: list[dict]) -> tuple[dict | None, str | N
         before = [r for r in rows[:starts[-1]] if r.get("event") == "end"]
         if before:
             return before[-1], str(d)
-    root = Path(relay.state_root())
+    root = Path(relay_common.state_root())
     dirs = sorted(p for p in root.glob("*") if p.is_dir() and (d is None or p.name < d.name))
     for p in reversed(dirs):
         ends = [r for r in events(p) if r.get("event") == "end"]
@@ -93,7 +95,7 @@ def installed_version() -> str | None:
 
 def copy_version() -> str | None:
     try:
-        return Path(relay.copy_version_path()).read_text().strip() or None
+        return Path(relay_version_dir.copy_version_path()).read_text().strip() or None
     except OSError:
         return None
 
