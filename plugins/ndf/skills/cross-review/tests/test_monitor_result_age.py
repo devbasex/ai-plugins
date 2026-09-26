@@ -62,10 +62,10 @@ def test_agy_result_age_fallback_triggers_ok(monitor_mod, tmp_path):
             raise RuntimeError("too many polls — fallback should have triggered")
 
     with (
-        mock.patch.object(monitor_mod, "_tmp_dir", return_value=tmp_path),
-        mock.patch.object(monitor_mod, "_pid_alive", side_effect=fake_pid_alive),
-        mock.patch.object(monitor_mod, "_kill_pid", side_effect=fake_kill_pid),
-        mock.patch.object(monitor_mod, "_pid_cmdline_matches", return_value=True),
+        mock.patch.object(monitor_mod.monitor_types, "_tmp_dir", return_value=tmp_path),
+        mock.patch.object(monitor_mod.monitor_proc, "_pid_alive", side_effect=fake_pid_alive),
+        mock.patch.object(monitor_mod.monitor_proc, "_kill_pid", side_effect=fake_kill_pid),
+        mock.patch.object(monitor_mod.monitor_proc, "_pid_cmdline_matches", return_value=True),
         mock.patch("time.sleep", side_effect=fake_sleep),
         mock.patch("time.time", side_effect=fake_time),
     ):
@@ -114,10 +114,10 @@ def test_agy_result_age_too_young_continues(monitor_mod, tmp_path):
         poll_count[0] += 1
 
     with (
-        mock.patch.object(monitor_mod, "_tmp_dir", return_value=tmp_path),
-        mock.patch.object(monitor_mod, "_pid_alive", side_effect=fake_pid_alive),
-        mock.patch.object(monitor_mod, "_kill_pid"),
-        mock.patch.object(monitor_mod, "_pid_cmdline_matches", return_value=None),
+        mock.patch.object(monitor_mod.monitor_types, "_tmp_dir", return_value=tmp_path),
+        mock.patch.object(monitor_mod.monitor_proc, "_pid_alive", side_effect=fake_pid_alive),
+        mock.patch.object(monitor_mod.monitor_proc, "_kill_pid"),
+        mock.patch.object(monitor_mod.monitor_proc, "_pid_cmdline_matches", return_value=None),
         mock.patch("time.sleep", side_effect=fake_sleep),
     ):
         config = monitor_mod.MonitorConfig(
@@ -175,10 +175,10 @@ def test_fresh_but_young_result_continues_monitoring(monitor_mod, tmp_path):
         poll_count[0] += 1
 
     with (
-        mock.patch.object(monitor_mod, "_tmp_dir", return_value=tmp_path),
-        mock.patch.object(monitor_mod, "_pid_alive", side_effect=fake_pid_alive),
-        mock.patch.object(monitor_mod, "_kill_pid"),
-        mock.patch.object(monitor_mod, "_pid_cmdline_matches", return_value=True),
+        mock.patch.object(monitor_mod.monitor_types, "_tmp_dir", return_value=tmp_path),
+        mock.patch.object(monitor_mod.monitor_proc, "_pid_alive", side_effect=fake_pid_alive),
+        mock.patch.object(monitor_mod.monitor_proc, "_kill_pid"),
+        mock.patch.object(monitor_mod.monitor_proc, "_pid_cmdline_matches", return_value=True),
         mock.patch("time.sleep", side_effect=fake_sleep),
         mock.patch("time.time", side_effect=fake_time),
     ):
@@ -222,10 +222,10 @@ def test_codex_sentinel_takes_priority(monitor_mod, tmp_path):
         kill_called.append(pid)
 
     with (
-        mock.patch.object(monitor_mod, "_tmp_dir", return_value=tmp_path),
-        mock.patch.object(monitor_mod, "_pid_alive", side_effect=fake_pid_alive),
-        mock.patch.object(monitor_mod, "_kill_pid", side_effect=fake_kill_pid),
-        mock.patch.object(monitor_mod, "_pid_cmdline_matches", return_value=None),
+        mock.patch.object(monitor_mod.monitor_types, "_tmp_dir", return_value=tmp_path),
+        mock.patch.object(monitor_mod.monitor_proc, "_pid_alive", side_effect=fake_pid_alive),
+        mock.patch.object(monitor_mod.monitor_proc, "_kill_pid", side_effect=fake_kill_pid),
+        mock.patch.object(monitor_mod.monitor_proc, "_pid_cmdline_matches", return_value=None),
         mock.patch("time.sleep"),
     ):
         config = monitor_mod.MonitorConfig(
@@ -273,10 +273,10 @@ def test_stale_result_json_from_previous_round_ignored(monitor_mod, tmp_path):
         poll_count[0] += 1
 
     with (
-        mock.patch.object(monitor_mod, "_tmp_dir", return_value=tmp_path),
-        mock.patch.object(monitor_mod, "_pid_alive", side_effect=fake_pid_alive),
-        mock.patch.object(monitor_mod, "_kill_pid"),
-        mock.patch.object(monitor_mod, "_pid_cmdline_matches", return_value=True),
+        mock.patch.object(monitor_mod.monitor_types, "_tmp_dir", return_value=tmp_path),
+        mock.patch.object(monitor_mod.monitor_proc, "_pid_alive", side_effect=fake_pid_alive),
+        mock.patch.object(monitor_mod.monitor_proc, "_kill_pid"),
+        mock.patch.object(monitor_mod.monitor_proc, "_pid_cmdline_matches", return_value=True),
         mock.patch("time.sleep", side_effect=fake_sleep),
     ):
         config = monitor_mod.MonitorConfig(
@@ -322,11 +322,11 @@ def test_cmdline_not_validated_skips_fallback(monitor_mod, tmp_path):
         poll_count[0] += 1
 
     with (
-        mock.patch.object(monitor_mod, "_tmp_dir", return_value=tmp_path),
-        mock.patch.object(monitor_mod, "_pid_alive", side_effect=fake_pid_alive),
-        mock.patch.object(monitor_mod, "_kill_pid"),
+        mock.patch.object(monitor_mod.monitor_types, "_tmp_dir", return_value=tmp_path),
+        mock.patch.object(monitor_mod.monitor_proc, "_pid_alive", side_effect=fake_pid_alive),
+        mock.patch.object(monitor_mod.monitor_proc, "_kill_pid"),
         # cmdline_matches が None → cmdline_validated は False のまま
-        mock.patch.object(monitor_mod, "_pid_cmdline_matches", return_value=None),
+        mock.patch.object(monitor_mod.monitor_proc, "_pid_cmdline_matches", return_value=None),
         mock.patch("time.sleep", side_effect=fake_sleep),
     ):
         config = monitor_mod.MonitorConfig(

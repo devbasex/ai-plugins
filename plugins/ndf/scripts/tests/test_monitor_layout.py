@@ -48,7 +48,7 @@ HOLDS = {
 }
 # 各モジュールが読んでよいライブラリのモジュール（標準ライブラリは数えない）
 MAY_IMPORT = {
-    "monitor": {"assignment", "limits", "monitor_outcome", "monitor_patterns", "monitor_scan", "monitor_proc",
+    "monitor": {"assignment", "clock", "limits", "monitor_outcome", "monitor_patterns", "monitor_scan", "monitor_proc",
                 "monitor_types", "monitor_loop"},
     "monitor_loop": {"limits", "monitor_outcome", "monitor_patterns", "monitor_scan", "monitor_proc",
                      "monitor_types"},
