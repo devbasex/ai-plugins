@@ -151,7 +151,7 @@ ai-plugins/
 - Codex版は Codex向け公開Skillsと任意Slack通知hookを提供
 - Kiro版は `plugins/ndf/dev.kiro/install.sh` で `.kiro/skills/`、`.kiro/steering/ndf-policies.md`、`.kiro/agents/ndf.json` を生成
 - agy版は `plugins/ndf/dev.agy/` を `agy plugin install` で導入し、公開Skills・エージェント定義・PreToolUse/PreInvocationフックを提供
-- 外部AI委譲は `/ndf:external-ai` skill と `corder` エージェント経由で Codex / agy を呼び出し（v4.0.0 で Codex MCP サーバは廃止）
+- 外部AI委譲は `/ndf:external-ai` skill と `corder` エージェント経由で Codex / agy を呼び出す
 
 詳細は各 runtime README と `docs/ndf-plugin-reference.md` を参照。
 
