@@ -27,6 +27,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "lib"))
 import transcript_agents  # noqa: E402
+from statefile import sv_state_home  # noqa: E402
 from step_result import emit, result  # noqa: E402
 
 
@@ -34,8 +35,7 @@ def default_globs() -> list[str]:
     """既定で読む状態ディレクトリ。状態の置き場所（`NDF_SV_STATE_DIR` → `${XDG_STATE_HOME:-~/.local/state}/ndf/sv`）の下の
     `<置き場所>/*/plan-*-state` と、一時ディレクトリの下のプランの実体 `<置き場所>/plan-*`（#1142）、
     古い置き場所の `/tmp/ndf-sv/*/plan-*-state`。同じ実体は 1 度だけ読む。"""
-    base = (Path(os.environ["NDF_SV_STATE_DIR"]) if os.environ.get("NDF_SV_STATE_DIR") else
-            Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local" / "state") / "ndf" / "sv")
+    base = sv_state_home()
     return [str(base / "*" / "plan-*-state"), str(base / "plan-*"), "/tmp/ndf-sv/*/plan-*-state"]
 
 
