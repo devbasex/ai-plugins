@@ -65,6 +65,11 @@
       "id": "playwright-kit",
       "name": "playwright-kit のテスト計画",
       "meaning": "探索的テストとテスト設計技法の語。page role・oracle・HTSM など業界の定訳をそのまま使う"
+    },
+    {
+      "id": "repo-dev-checks",
+      "name": "このリポジトリの開発の検査",
+      "meaning": "ai-plugins の開発で formatter と静的解析を手元と CI で走らせるときの語。NDF が利用者へ配る振る舞いではない"
     }
   ],
   "terms": [
@@ -2036,6 +2041,34 @@
       "meaning": "対象範囲の中で、同じコードが最小の行数（8 行）以上続く 2 か所以上の組。Python は symilar、ほかの言語は jscpd が見つける",
       "source": "",
       "pending_source": "issues/issue-1319-design.md"
+    },
+    {
+      "term": "一括の整形",
+      "context": "repo-dev-checks",
+      "meaning": "リポジトリの全対象へ formatter を掛け、結果を 1 つのコミットにしたもの。.git-blame-ignore-revs に載せる単位",
+      "source": "",
+      "pending_source": "issues/issue-1323-requirements.md"
+    },
+    {
+      "term": "検査のコマンド",
+      "context": "repo-dev-checks",
+      "meaning": "手元で formatter の確認と静的解析を、CI と同じ版・同じ設定で走らせる 1 つのコマンド",
+      "source": "",
+      "pending_source": "issues/issue-1323-requirements.md"
+    },
+    {
+      "term": "一括の自動修正",
+      "context": "repo-dev-checks",
+      "meaning": "リポジトリの全対象へ ruff check --fix を掛け、結果を 1 つのコミットにしたもの。一括の整形と同じく .git-blame-ignore-revs に載せる",
+      "source": "",
+      "pending_source": "issues/issue-1323-design.md"
+    },
+    {
+      "term": "抑止",
+      "context": "repo-dev-checks",
+      "meaning": "静的解析の指摘を、行のコメント（# noqa・# shellcheck disable=）か設定の除外で出さなくすること。理由を添える",
+      "source": "",
+      "pending_source": "issues/issue-1323-design.md"
     }
   ]
 }
