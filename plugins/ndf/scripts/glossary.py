@@ -385,10 +385,45 @@ def text_findings(rel: str, text: str, wanted: set[int] | None, g: dict, decl: D
     return items
 
 
+def mask_comments(lines: list[str], suffix: str) -> list[str]:
+    """コードの行のコメントを空白に置き換える。`#` は .py / .sh（.sh は語の頭だけ）、`//` と `/* */` は .js / .ts。
+    文字列の内側の記号はコメントとみなさない（`"--cart"` の識別子は残す）。"""
+    hash_style = suffix in (".py", ".sh")
+    quotes = "'\"" if hash_style else "'\"`"
+    out, block = [], False
+    for line in lines:
+        chars, i, quote = list(line), 0, None
+        while i < len(line):
+            if block:
+                end = line.find("*/", i)
+                stop = len(line) if end < 0 else end + 2
+                chars[i:stop] = " " * (stop - i)
+                block, i = end < 0, stop
+                continue
+            c = line[i]
+            if quote:
+                if c == "\\":
+                    i += 1
+                elif c == quote:
+                    quote = None
+            elif c in quotes:
+                quote = c
+            elif (c == "#" and hash_style and (suffix == ".py" or i == 0 or line[i - 1] in " \t;|&(")) \
+                    or (not hash_style and line.startswith("//", i)):
+                chars[i:] = " " * (len(line) - i)
+                break
+            elif not hash_style and line.startswith("/*", i):
+                chars[i:i + 2], block, i = "  ", True, i + 2
+                continue
+            i += 1
+        out.append("".join(chars))
+    return out
+
+
 def code_findings(rel: str, text: str, wanted: set[int] | None, g: dict, dep_re, live_re) -> list[dict]:
-    """コードの行から、廃止した識別子とその書き方を変えた形を拾う。生きた識別子の内側の出現は当てない。"""
+    """コードの行から、廃止した識別子とその書き方を変えた形を拾う。生きた識別子の内側とコメントの中の出現は当てない。"""
     items = []
-    for n, line in enumerate(text.splitlines(), 1):
+    for n, line in enumerate(mask_comments(text.splitlines(), Path(rel).suffix), 1):
         if wanted is not None and n not in wanted:
             continue
         spans = [m.span() for m in live_re.finditer(line)] if live_re else []

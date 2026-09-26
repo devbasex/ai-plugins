@@ -578,6 +578,19 @@ def test_deprecated_code_inside_live_code_or_other_files_is_not_matched(repo):
     assert code == 0, (out, err)
 
 
+def test_deprecated_code_in_comments_is_not_matched_but_in_strings_is(repo):
+    coded_repo(repo)
+    write(repo, "src/a.py", "# cart is the old name\nx = 1  # Cart\ny = '#' + cart\n")
+    write(repo, "src/b.sh", "#!/bin/sh\n# CART\necho ${#cart} # cart\n")
+    write(repo, "src/c.js", "// cart\nconst u = 'http://x'; /* Cart\n cart */ cart;\n")
+    write(repo, "src/d.ts", "let s = \"// \\\" \" + Cart; // cart\n")
+    code, out, err = run(repo, "check", "--diff", "develop")
+    assert code == 1, (out, err)
+    assert sorted((it["path"], it["line"], it["term"]) for it in out["items"]) == [
+        ("src/a.py", 3, "cart"), ("src/b.sh", 3, "cart"), ("src/c.js", 3, "cart"), ("src/d.ts", 1, "Cart"),
+    ]
+
+
 def test_check_file_finds_deprecated_code_in_a_code_file(repo):
     coded_repo(repo)
     p = write(repo, "tool.py", "Cart()\n")
