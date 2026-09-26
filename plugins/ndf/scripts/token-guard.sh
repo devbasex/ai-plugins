@@ -151,14 +151,77 @@ issue_refs() {
   printf '%s' "${refs% }"
 }
 
+# コマンドの文字列を、引用の外の区切り（; & | 括弧 改行）で 1 行ずつに分けて出す。引用の内側の区切りと
+# 改行は分けず（改行は空白にする）、ヒアドキュメントの本文は捨てる。commit のメッセージや PR 本文の中の
+# 文字列を、コマンドの先頭として拾わないため
+split_commands() {
+  local s=$1 out= q= c hd= dash= i n rest first line skip
+  n=${#s}
+  for ((i = 0; i < n; i++)); do
+    c=${s:i:1}
+    if [ -n "$q" ]; then
+      if [ "$c" = '\' ] && [ "$q" = '"' ]; then out+=${s:i:2}; i=$((i + 1)); continue; fi
+      [ "$c" = "$q" ] && q=
+      [ "$c" = $'\n' ] && c=' '
+      out+=$c
+      continue
+    fi
+    case "$c" in
+      "'" | '"') q=$c ;;
+      '\') out+=${s:i:2}; i=$((i + 1)); continue ;;
+      ';' | '&' | '|' | '(' | ')') c=$'\n' ;;
+      '<')
+        if [ "${s:i:2}" = '<<' ] && [ "${s:i+2:1}" != '<' ]; then
+          # ヒアドキュメントの終わりの語を読む（<<- と引用した語も扱う）
+          i=$((i + 2)); dash=
+          [ "${s:i:1}" = - ] && { dash=1; i=$((i + 1)); }
+          while [ "${s:i:1}" = ' ' ] || [ "${s:i:1}" = $'\t' ]; do i=$((i + 1)); done
+          hd=
+          while ((i < n)); do
+            c=${s:i:1}
+            case "$c" in
+              ' ' | $'\t' | $'\n' | ';' | '&' | '|' | '(' | ')' | '<' | '>') break ;;
+              "'" | '"' | '\') ;;
+              *) hd+=$c ;;
+            esac
+            i=$((i + 1))
+          done
+          out+=' '
+          i=$((i - 1))
+          continue
+        fi ;;
+      $'\n')
+        if [ -n "$hd" ]; then
+          # 本文を終わりの語の行まで飛ばす
+          rest=${s:i+1}; skip=0
+          while :; do
+            first=${rest%%$'\n'*}
+            line=$first
+            if [ -n "$dash" ]; then line=${line#"${line%%[!$'\t']*}"}; fi
+            if [ "$line" = "$hd" ] || [ "$first" = "$rest" ]; then
+              skip=$((skip + ${#first})); break
+            fi
+            skip=$((skip + ${#first} + 1))
+            rest=${rest#*$'\n'}
+          done
+          i=$((i + skip)); hd=
+        fi ;;
+    esac
+    out+=$c
+  done
+  printf '%s\n' "$out"
+}
+
 # Bash のコマンドが supervise.py の queue か run（プランを起こす副命令）を起動するなら 0。
-# 区切り（; & | 括弧 改行）で分けた各コマンドの先頭で起動しているものだけを見る。
-# echo の引数やコメントの中の文字列はコマンドの先頭に来ないので拾わない
+# 引用の外の区切りで分けた各コマンドの先頭で起動しているものだけを見る。
+# echo の引数・コメント・引用やヒアドキュメントの中の文字列はコマンドの先頭に来ないので拾わない。
+# インタプリタのフラグ（python3 -u）は挟んでよい
 plan_command() {
-  local line re='^[[:space:]]*(env[[:space:]]+|nohup[[:space:]]+|[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*([^[:space:]]*python3?[[:space:]]+)?[^[:space:]]*supervise\.py['"'"'"]?[[:space:]]+(queue|run)([[:space:]]|$)'
+  case "$1" in *supervise.py*) ;; *) return 1 ;; esac
+  local line re='^[[:space:]]*(env[[:space:]]+|nohup[[:space:]]+|[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*([^[:space:]]*python3?[[:space:]]+(-[^[:space:]]+[[:space:]]+)*)?[^[:space:]]*supervise\.py['"'"'"]?[[:space:]]+(queue|run)([[:space:]]|$)'
   while IFS= read -r line; do
     [[ "$line" =~ $re ]] && return 0
-  done <<< "${1//[;&|()]/$'\n'}"
+  done < <(split_commands "$1")
   return 1
 }
 

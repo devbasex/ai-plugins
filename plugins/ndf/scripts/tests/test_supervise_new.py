@@ -146,8 +146,11 @@ def test_design_glossary_stops_when_candidates_fails(tmp_path, monkeypatch):
     replies = {"gate": (1, {"summary": "無い"}), "init": (0, {"items": [{"name": ".ndf/glossary.json"}]}),
                "candidates": (2, {"summary": "壊れた"})}
 
+    calls = []
+
     def fake(cmd, **kw):
         if len(cmd) > 2 and cmd[1].endswith("glossary.py"):
+            calls.append(cmd[2])
             code, res = replies[cmd[2]]
             return subprocess.CompletedProcess(cmd, code, json.dumps(res) + "\n", "")
         return real(cmd, **kw)
@@ -156,6 +159,26 @@ def test_design_glossary_stops_when_candidates_fails(tmp_path, monkeypatch):
     res, code = sv.cmd_design_glossary(str(root), "standard", str(out))
     assert code == 2 and res["status"] == "stopped" and "candidates" in res["summary"]
     assert not out.exists()
+    # init より前に止まるので、打ち直しも gate の停止から同じ経路を通る
+    assert "init" not in calls
+
+
+def test_design_glossary_removes_created_files_when_commit_fails(tmp_path, monkeypatch):
+    """コミットできずに止まったら起こしたファイルを消し、打ち直しの gate が素通りしないようにする。"""
+    root = glossary_repo(tmp_path)
+    out = tmp_path / "glossary-candidates.md"
+    real = subprocess.run
+
+    def fake(cmd, **kw):
+        if cmd[:2] == ["git", "commit"]:
+            return subprocess.CompletedProcess(cmd, 1, "", "拒否")
+        return real(cmd, **kw)
+
+    monkeypatch.setattr(sv.subprocess, "run", fake)
+    res, code = sv.cmd_design_glossary(str(root), "standard", str(out))
+    assert code == 1 and res["status"] == "stopped"
+    assert not (root / ".ndf" / "glossary.json").exists()
+    assert git(root, "status", "--porcelain") == ""
 
 
 def test_pr_step_appends_existing_files(tmp_path, monkeypatch):

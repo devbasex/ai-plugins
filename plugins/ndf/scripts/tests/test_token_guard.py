@@ -780,6 +780,8 @@ QUEUE_CMD = "python3 /x/scripts/supervise.py queue --max 3 a.json b.json"
     "python3 /x/scripts/supervise.py run plan.json --from 3",
     "cd /w && python3 '/x/scripts/supervise.py' queue --max 2 a.json",
     "X=1 nohup python3 \"/x/scripts/supervise.py\" run plan.json",
+    "python3 -u /x/scripts/supervise.py run plan.json",
+    "cat <<EOF > f\ndon't\nEOF\npython3 /x/scripts/supervise.py run plan.json",
 ])
 def test_context_over_limit_denies_plan_bash(tmp_path, state, cmd):
     tp = transcript(tmp_path, 250_000)
@@ -797,6 +799,10 @@ def test_context_over_limit_denies_plan_bash(tmp_path, state, cmd):
     "echo 'python3 /x/scripts/supervise.py queue a.json'",
     "# python3 /x/scripts/supervise.py run plan.json",
     "printf '%s\\n' 'supervise.py run を打つ'",
+    'git commit -m "docs: 中断の手順（supervise.py run --from）"',
+    'git commit -m "docs: (supervise.py run --from)"',
+    "gh pr create --body \"$(cat <<'EOF'\npython3 /x/scripts/supervise.py queue a.json\nEOF\n)\"",
+    "cat <<-EOF > f\n\tpython3 /x/scripts/supervise.py queue a.json\n\tEOF\necho ok",
 ])
 def test_context_over_limit_passes_other_bash(tmp_path, state, cmd):
     tp = transcript(tmp_path, 250_000)

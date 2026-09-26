@@ -2672,25 +2672,32 @@ def cmd_design_glossary(root: str, mode: str, out: str) -> tuple[dict, int | Non
     if code != 1:
         return result("supervise-design-glossary", "stopped", f"glossary.py gate が失敗した: {res.get('summary')}",
                       [], {"initialized": 0}), code
-    code, init = call("init")
-    if code != 0:
-        return result("supervise-design-glossary", "stopped", f"glossary.py init が失敗した: {init.get('summary')}",
-                      [], {"initialized": 0}), code
-    created = [it["name"] for it in init.get("items") or []]
+    # candidates は init より前に打つ（宣言が無くても既定の節で動く）。init の後で止まると起こしたファイルが
+    # 未コミットで残り、打ち直しの gate が通って用語集のコミットも候補の語も書かれずに進むため
     code, cand = call("candidates")
     if code != 0:
         # 候補の欠落を「0 件」と区別できなくなるので、承認ゲート 1 の材料が揃わないまま進めない
         return result("supervise-design-glossary", "stopped", f"glossary.py candidates が失敗した: {cand.get('summary')}",
                       [], {"initialized": 0}), code
     words = cand.get("items") or []
+    code, init = call("init")
+    if code != 0:
+        return result("supervise-design-glossary", "stopped", f"glossary.py init が失敗した: {init.get('summary')}",
+                      [], {"initialized": 0}), code
+    created = [it["name"] for it in init.get("items") or []]
     if created:
         for args in (["add", "--", *created],
                      ["commit", "-q", "-m", "docs(glossary): 設計の入口で用語集を起こす", "--", *created]):
             p = subprocess.run(["git", *args], cwd=root, capture_output=True, text=True)
             if p.returncode != 0:
+                # 起こしたファイルを消して、打ち直しが同じ経路（gate の停止 → init → コミット）を通るようにする
+                subprocess.run(["git", "rm", "-q", "--cached", "--ignore-unmatch", "--", *created],
+                               cwd=root, capture_output=True, text=True)
+                for c in created:
+                    Path(root, c).unlink(missing_ok=True)
                 return result("supervise-design-glossary", "stopped",
                               f"起こした用語集をコミットできない: {p.stderr.strip()[-300:]}", [],
-                              {"initialized": 1}), 1
+                              {"initialized": 0}), 1
     rows = "\n".join(f"| {w.get('term')} | {w.get('count')} | {w.get('kind')} | `{w.get('first')}` |" for w in words)
     note = ("## 用語集の候補\n\nこの Pull Request で用語集を起こした（`glossary.py init`）: "
             + "、".join(f"`{c}`" for c in created) + "。\n語の採否は承認ゲート 1 で見る。候補の語（`glossary.py candidates`）:\n\n"
