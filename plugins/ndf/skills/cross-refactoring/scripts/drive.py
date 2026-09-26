@@ -6,7 +6,8 @@
 init → 提案 → 改修計画 → テスト追加 → 実装 → 検証と修正 → 最終ゲート → finalize を順に進める。
 参加者は全て CLI なので、止まるのは単独起動の最終ゲート（cross-review）だけである。
 同じコマンドを打ち直すと続きから進む（init が終わった手順を返し、最終ゲートの後の進みは
-`$TMP_DIR/drive-rf<ID>.json`）。
+`$TMP_DIR/drive-rf<ID>.json`）。進みは `refactor.py init` の出力を `init_vars` に持ち、段階が done の
+ときは init を打たずにこれを使う（init が done の状態を作り直し、件数が 0 になるのを防ぐ。#1142 の I7）。
 
 止まるときの JSON の形と終了コードの表は共通層の `scripts/lib/drive_pause.py` にある（使うのは 23 だけ。中断の `metrics.exit` が 4 なら refactor.py の中断）。
 件数（metrics）は状態ファイルから数える: items / adopted / reverted / deferred / fix_rounds（項目の修正の回数の和）/ final_gate。
@@ -87,6 +88,40 @@ class Drive:
 
     def ds_path(self) -> Path:
         return self.tmp / f"drive-rf{self.v['ID']}.json"
+
+    def save_ds(self, ds: dict) -> None:
+        self.ds_path().write_text(json.dumps({**ds, "init_vars": dict(self.v)}, ensure_ascii=False))
+
+    def known_tmp(self) -> Path | None:
+        """init を打たずに、`refactor.py init` と同じ規則で状態の置き場を求める。求まらなければ None。"""
+        if str(HERE) not in sys.path:
+            sys.path.append(str(HERE))
+        from refactor_lib import paths
+        ap = argparse.ArgumentParser(add_help=False)
+        ap.add_argument("--worktree-root")
+        root = ap.parse_known_args(self.init_args)[0].worktree_root
+        if root:
+            return paths.tmp_dir_for(Path(root).resolve() / "work")
+        if os.environ.get("CROSS_REFACTORING_TMP_DIR"):
+            return paths.tmp_dir_for(Path())  # 環境変数が作業ディレクトリより先に効く
+        from refactor_lib.commands.setup import _repo_from_git
+        repo = _repo_from_git()
+        return paths.tmp_dir_for(paths.default_worktree_base() / paths.repo_slug(repo) / f"rf{self.pr}" / "work") \
+            if repo else None
+
+    def finished_vars(self) -> dict | None:
+        """段階が done の駆動の状態があれば、その init_vars を返す（I7）。"""
+        tmp = self.known_tmp()
+        if tmp is None:
+            return None
+        try:
+            ds = json.loads((tmp / f"drive-rf{self.pr}.json").read_text())
+        except (OSError, json.JSONDecodeError):
+            return None
+        iv = ds.get("init_vars") if isinstance(ds, dict) else None
+        if ds.get("stage") != "done" or not isinstance(iv, dict) or not iv.get("TMP_DIR"):
+            return None
+        return iv if Path(iv["TMP_DIR"]).resolve() == tmp.resolve() else None
 
     def state(self) -> dict:
         try:
@@ -175,7 +210,11 @@ class Drive:
                        f"取り消し {c['reverted']}・見送り {c['deferred']}）", self.report(), c)
 
     def run(self) -> dict:
-        self.rf("init", str(self.pr), *self.init_args)
+        iv = self.finished_vars()
+        if iv is None:
+            self.rf("init", str(self.pr), *self.init_args)
+        else:
+            self.v.update(iv)
         if "TMP_DIR" not in self.v or "ID" not in self.v:
             raise Stop("refactor.py init が TMP_DIR / ID を返さない", 2)
         self.env["CROSS_REFACTORING_TMP_DIR"] = self.v["TMP_DIR"]
@@ -192,7 +231,7 @@ class Drive:
             except json.JSONDecodeError:
                 raise Stop(f"{res} を読めない", 2)
             self.rf("finalize", self.v["ID"], "--review-status", status)
-            self.ds_path().write_text(json.dumps({"stage": "done", "review_status": status}))
+            self.save_ds({"stage": "done", "review_status": status})
             return self.done({"review_status": status})
         if ds.get("stage") == "done":
             return self.done({"review_status": ds.get("review_status")})
@@ -201,10 +240,10 @@ class Drive:
         self.final_gate()
         if self.v.get("FINAL_GATE") == "cross-review":
             res.unlink(missing_ok=True)
-            self.ds_path().write_text(json.dumps({"stage": "cross-review"}))
+            self.save_ds({"stage": "cross-review"})
             return self.pause_review(res)
         self.rf("finalize", self.v["ID"])
-        self.ds_path().write_text(json.dumps({"stage": "done"}))
+        self.save_ds({"stage": "done"})
         return self.done()
 
     def pause_review(self, res: Path) -> dict:
