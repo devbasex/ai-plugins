@@ -56,7 +56,7 @@ $ ls -d ~/.claude/plugins/marketplaces/*/
 /home/ubuntu/.claude/plugins/marketplaces/claude-plugins-official/
 ```
 
-**先頭から見て最初の GitHub の取得元を採ると、上流リポジトリではないリポジトリが決まる。** 上の例で
+**先頭から見て最初の GitHub の取得元を採ると、上流リポジトリと別のリポジトリが決まることがある。** 上の例で
 `anthropic-agent-skills` は `https://github.com/anthropics/skills.git` を指しており、条件を
 GitHub の取得元であることだけに置くと候補になる。並びは名前順であって、上流リポジトリが先に来る
 保証は無い。
