@@ -15,19 +15,36 @@ NDF のスクリプト（`plugins/ndf/scripts/` と各 Skill の `scripts/`。�
 | 測るもの | 値 |
 | --- | ---: |
 | ファイル | 128 本（Python 37,575 行・シェル 10,288 行・計 47,863 行） |
-| 1000 行を超えるファイル | 6 本 |
+| 500 行を超えるファイル | 23 本（うち 1000 行を超えるもの 7 本。2026-09-26 に測った値） |
 | 2 つ以上のファイルで同じ名前を持つ最上位の関数 | 86 個（うち本体まで同じものがある 5 個） |
 
-**1000 行を超えるファイル**
+**500 行を超えるファイル**（2026-09-26 に develop で測った値。区分は `markdown-writing` のルール 9 と同じで、501 行以上は分ける）
 
 | スクリプト | 行数 | 中身 |
 | --- | ---: | --- |
 | `skills/cross-review/scripts/state.py` | 5121 | 関数 227 個・副命令 14 個。キュー・参加者の解決・GitHub の呼び出しを同じファイルに持つ |
-| `scripts/supervise.py` | 3126 | `Supervisor` クラス 1 つがステップの 5 種類を持つ。計画のテンプレート・queue・wait も同じファイル。直近 1 週間で 48 回変更 |
-| `scripts/lib/worktree-common.sh` | 2492 | hook とworktreeの共通の関数 |
-| `scripts/relay.py` | 2057 | `~/.claude/ndf/relay.py` へファイル 1 本で複製して動かす |
-| `scripts/lib/monitor.py` | 1256 | |
-| `scripts/instructions-check.py` | 1128 | |
+| `scripts/supervise.py` | 3401 | `Supervisor` クラス 1 つがステップの 5 種類を持つ。計画のテンプレート・queue・wait も同じファイル。直近 1 週間で 48 回変更 |
+| `scripts/lib/worktree-common.sh` | 2515 | hook と worktree の共通の関数 |
+| `scripts/relay.py` | 2092 | `~/.claude/ndf/relay.py` へファイル 1 本で複製して動かす |
+| `scripts/lib/monitor.py` | 1256 |  |
+| `scripts/instructions-check.py` | 1128 |  |
+| `skills/cross-refactoring/scripts/refactor_lib/gitfacts.py` | 1011 |  |
+| `scripts/release-steps.py` | 988 |  |
+| `skills/skill-stats/scripts/skill-stats.py` | 942 |  |
+| `skills/cross-refactoring/scripts/refactor_lib/commands/setup.py` | 923 |  |
+| `skills/development-workflow/scripts/lib/workflow-common.sh` | 900 |  |
+| `scripts/lib/post_queue.py` | 843 |  |
+| `scripts/lib/gh_parts.py` | 822 |  |
+| `scripts/lib/transcript_agents.py` | 795 |  |
+| `scripts/glossary.py` | 781 |  |
+| `scripts/worktree-testenv.sh` | 716 |  |
+| `skills/issue-upkeep/scripts/upkeep.py` | 624 |  |
+| `scripts/merged-steps.py` | 615 |  |
+| `scripts/check-trigger.py` | 607 |  |
+| `scripts/lib/result_posts.py` | 605 |  |
+| `scripts/mission-state.py` | 586 |  |
+| `skills/cross-review/scripts/measure.py` | 582 |  |
+| `dev.kiro/install.sh` | 561 |  |
 
 **同じ概念が別々に実装されている**（構文木で拾った数。`main` と `build_parser` を除く）
 
