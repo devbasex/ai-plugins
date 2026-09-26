@@ -1846,7 +1846,9 @@ def session_line() -> str:
         return f"{head}ラッパー経由（relay PID {pid}、claude PID {child}）"
     if pos == "no-dir":
         line = f"{head}ラッパーを通らずに起動（NDF_RELAY_DIR が無い）"
-        loaded = [rc for rc in rc_files()[:2] if _has_loader(rc)]
+        loader = loader_file()
+        loaded = ([loader] if loader and os.path.exists(loader) else []) + \
+            [rc for rc in rc_files() if _has_loader(rc)]
         if loaded:
             line += (f"。{'・'.join(loaded)} に読み込みの行はあるので、"
                      "このセッションは読み込みの前に開いたシェル、または IDE から起動した")

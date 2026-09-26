@@ -636,7 +636,8 @@ def mod(tmp_path, monkeypatch):
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)
     for k in list(os.environ):
-        if k.startswith(("NDF_", "XDG_", "CLAUDE")):
+        # DEVBASE_SHELLRC_DIR と ZDOTDIR も落とす（isolated_env と同じ。本物の読み込み先を見ない）
+        if k.startswith(("NDF_", "XDG_", "CLAUDE", "DEVBASE_")) or k == "ZDOTDIR":
             monkeypatch.delenv(k, raising=False)
     home = tmp_path / "home"
     home.mkdir()
@@ -1690,6 +1691,20 @@ def test_status_session_no_dir_hints_when_loader_is_in_rc(mod, tmp_path, capsys)
         "ndf-relay: このセッション: ラッパーを通らずに起動（NDF_RELAY_DIR が無い）。"
         f"{home / '.bashrc'} に読み込みの行はあるので、このセッションは読み込みの前に開いたシェル、"
         "または IDE から起動した"]
+
+
+def test_status_session_no_dir_hints_when_loader_is_in_zshrc(mod, tmp_path, capsys):
+    home = home_of(tmp_path)
+    (home / ".zshrc").write_text("# >>> ndf relay >>>\n" + mod.loader_body() + "# <<< ndf relay <<<\n")
+    assert f"{home / '.zshrc'} に読み込みの行はある" in session_lines(mod, capsys)[0]
+
+
+def test_status_session_no_dir_hints_when_devbase_loader_exists(mod, tmp_path, monkeypatch, capsys):
+    dl = tmp_path / "shellrc.d"
+    dl.mkdir()
+    (dl / "ndf-relay.sh").write_text(mod.loader_body())
+    monkeypatch.setenv("DEVBASE_SHELLRC_DIR", str(dl))
+    assert f"{dl / 'ndf-relay.sh'} に読み込みの行はある" in session_lines(mod, capsys)[0]
 
 
 def test_status_session_not_running(mod, tmp_path, monkeypatch, capsys):
