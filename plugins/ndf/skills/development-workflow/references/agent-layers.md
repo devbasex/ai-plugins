@@ -1,8 +1,10 @@
 # 3 層で工程を通す（conductor / supervisor / worker）
 
 **工程を 3 層へ出し、2 つの承認ゲート以外を人間の入力なしで通す。** 人間と対話しているセッション
-（conductor）がフェーズごとにサブエージェント（supervisor）を起動し、supervisor が 1 つの作業を
-サブエージェント（worker）へ出す。
+（conductor）がフェーズごとにプラン（`supervise.py`）をキューで流し、プランが 1 つの作業を worker
+（毎回新しい `claude -p`）へ出す。**既定はプランである。** プランの雛形が無いフェーズと、雛形に要る
+設定が無いときだけ、conductor はサブエージェント（supervisor）を起動し、supervisor が 1 つの作業を
+サブエージェント（worker）へ出す（下の「プランで流すか supervisor で回すか」）。
 
 **`/ndf:development-workflow` を呼べば 3 層へ出す。** 人がその場にいて指示を変えたいときは、
 conductor へ伝えれば次のフェーズから反映する。
@@ -14,8 +16,8 @@ conductor へ伝えれば次のフェーズから反映する。
 
 | 層 | 何者か | 人間へ問えるか | 起動する相手 | 持たないもの |
 | --- | --- | --- | --- | --- |
-| conductor | 人間と対話しているセッション。`/ndf:development-workflow` を受ける | **問える**（`AskUserQuestion`） | supervisor | 工程 Skill の実行。**`development-workflow` と `issue-plan-strategy` 以外を起動しない** |
-| supervisor | 1 つのフェーズ（連続する工程のグループ）を通すサブエージェント | 問えない | worker | 人間への問い、設計 Pull Request のマージ、承認のない本番の操作 |
+| conductor | 人間と対話しているセッション。`/ndf:development-workflow` を受ける | **問える**（`AskUserQuestion`） | プラン（キュー）。雛形の無いフェーズだけ supervisor | 工程 Skill の実行。**`development-workflow` と `issue-plan-strategy` 以外を起動しない** |
+| supervisor | 1 つのフェーズ（連続する工程のグループ）を通す。プランで流すときは `supervise.py` が代わりを務め、雛形の無いフェーズだけサブエージェントが務める | 問えない | worker | 人間への問い、設計 Pull Request のマージ、承認のない本番の操作 |
 | worker | 1 つの作業（調査・修正・検証・集計）を行うサブエージェント | 問えない | 起動しない。**別のサブエージェントを起動しない** | 人間への問い、進捗記録、収束の判定、設計の決定 |
 
 **worker は葉である。** 深さ 3（worker がさらに起動する形）は実測していない。
@@ -23,11 +25,11 @@ conductor へ伝えれば次のフェーズから反映する。
 | 層 | 持つ単位 | 何を持って帰るか |
 | --- | --- | --- |
 | conductor | ミッション | 着手の判定（課題の組み方・モード・到達点）、承認ゲートでの問い、承認の受け渡し、最後の報告 |
-| supervisor | フェーズ | 工程 Skill の起動、進捗記録、収束の判定、フェーズレポート |
+| supervisor（またはプラン） | フェーズ | 工程 Skill の起動、進捗記録、収束の判定、フェーズレポート |
 | worker | 1 つの作業 | その作業の報告だけ |
 
 **着手の判定は conductor が行う。** 課題の組み方・ミッションのモード・到達点の
-置き直しは、最初の supervisor を起動する前に決める。課題が多く本文の読解が conductor の
+置き直しは、最初のプランを流す（または最初の supervisor を起動する）前に決める。課題が多く本文の読解が conductor の
 context window を埋めるときは、**読解だけを worker へ出す**（conductor が直接 worker を
 起動する唯一の場面である）。判定そのものは conductor が行う。
 
@@ -58,11 +60,38 @@ context window を埋めるときは、**読解だけを worker へ出す**（co
 **Draft を開く位置は既存の規約のとおりである**（[stage-notes.md](stage-notes.md) のリファクタリングの節）。
 フェーズの表は、その 1 度の呼び出しを実装のフェーズの終わりに置いただけで、工程表の順序を変えない。
 
-**ミッションの中の並列は、設計と実装のフェーズで開く。** 設計の supervisor は設計 Pull Request
-ごとに同時に起動し、実装の supervisor は課題ごとに同時に起動する（同時に 3 本まで）。検査・取り込み・
-仕上げはミッションで 1 つずつ起動する。ミッションブランチ（`mission/<名前>`）は、ゲート 1 の承認と
-マージの後に conductor がベースブランチ（`.ndf/worktree.json` の `base_branch`）から 1 度だけ切る。
-プランの雛形は `supervise.py new mission` が `.ndf/` の設定から書き出し、`supervise.py queue --max 3` が流す。
+**ミッションの中の並列は、設計と実装のフェーズで開く。** `supervise.py new mission` が `.ndf/` の設定から
+設計のプランを設計 Pull Request ごとに、実装のプランを課題ごとに書き出し、`supervise.py queue --max 3` が
+同時に 3 本まで流す。検査・取り込み・仕上げはミッションで 1 つずつ流す。ミッションブランチ（`mission/<名前>`）は、
+ゲート 1 の承認とマージの後に、ミッションブランチのステージのプランがベースブランチ（`.ndf/worktree.json` の
+`base_branch`）から 1 度だけ切る。supervisor で回すフェーズも同じ単位と本数で起動する。
+
+### プランで流すか supervisor で回すか
+
+**フェーズは、下の表のプランで流すのが既定である。** conductor が `Agent` で supervisor を起動するのは、
+「supervisor で回すとき」の列に当たるときだけである。プランは、supervisor が持つと抜けやすいステップ
+（用語集のエントリポイントの検査、設計 Pull Request の「決めたこと」の同期、上限 3 ラウンドの judge、
+進捗ログの `attention`）を雛形として持つ。打つコマンドの並びは [SKILL.md](../SKILL.md) の
+「ミッションを流すコマンド」にある。
+
+| フェーズ | プラン（`supervise.py new` の種別） | ステージ（ミッション状態ファイル `mission.json`） | supervisor で回すとき |
+| --- | --- | --- | --- |
+| 設計 | `new mission --design <課題>...` の設計のプラン（設計 Pull Request ごと）。終わりの judge が承認ゲート 1 を返す | 設計 → 関門 1 | 要求と受け入れ条件（`requirements-design`）の工程。設計のプランはこの工程を持たない |
+| 実装 | `new mission` の実装のプラン（課題ごと。ミッションブランチ宛て）。ミッションブランチはその前のステージのプランが切る。単発は `new impl` | ミッションのブランチ → 実装 | — |
+| 検査 | `new mission` の検査のプラン（ミッションの Pull Request を出し、構造改善・コードレビュー・完了判定を通してマージする）。単発は `new check`、`pace: fast` は `new check --since-last` | 検査 | — |
+| 取り込み | ミッションの Pull Request のマージは検査のプランが、検証リリースは開発版のリリースプランが持つ（後片付けは本番のリリースプランの最後のステップ） | 配布（検査のキューが `--then` で流す） | 確定仕様化（`plan-to-spec`）。`normal` のプランはこの工程を持たない（`pace: fast` は `new close` が持つ） |
+| 仕上げ | 本番のリリースプラン `new release --channel prod`（本番へのリリース・リリース後テスト・後片付け） | ミッション状態ファイルの外。ゲート 2 の承認の後に流す | 振り返り（`retrospective`）。`normal` のプランはこの工程を持たない（`pace: fast` は `new close` が持つ） |
+| リリース | `new release --channel dev` / `--channel prod` | 配布 | —（プランだけが通す） |
+
+**supervisor へ落とすのは、次の 2 つのときだけである。**
+
+| 条件 | 見分け方 | conductor の動き |
+| --- | --- | --- |
+| プランの雛形が無い | 表の「supervisor で回すとき」の列の工程、表に無いモードの組み方（`operation` の実行、`documentation` の素材の収集など）、リリースの形（`.ndf/supervise.json` の `release.form`）の雛形が無い | その工程だけを supervisor で回し、残りはプランで流す |
+| 雛形に要る設定が無い | `supervise.py new` が設定の不足（`.ndf/worktree.json` の `base_branch`、`.ndf/supervise.json` の `test` / `release`）で止まる | 設定を足せるなら足して打ち直す。足せなければそのフェーズを supervisor で回す |
+
+**`supervise.py --help` の説明を読んでプランを外さない。** `new mission` は承認ゲート 1 の前の設計から
+書き出す（`--design` を渡したとき）。
 
 ### モードごとの組み方
 
@@ -82,6 +111,10 @@ context window を埋めるときは、**読解だけを worker へ出す**（co
 フェーズは、中身が少なくても作る。
 
 ## 起動の指示
+
+**この節は supervisor で回すフェーズ（「プランで流すか supervisor で回すか」）にだけ当たる。** プランで流す
+フェーズは、[SKILL.md](../SKILL.md) の「ミッションを流すコマンド」のキューと `wait` で起動し、待ち方は
+[waiting.md](waiting.md) に従う。
 
 ### conductor → supervisor
 
@@ -235,6 +268,10 @@ supervisor を起動できる。
 **worker の報告は conductor へ転送されない。** supervisor が畳むため、
 **conductor が 1 つのフェーズについて読む報告は 1 件である**。worker を 5 つ使っても、
 conductor が読む量は変わらない。
+
+**プランで流したフェーズの結果は、キューの done の `status` で読む**（[waiting.md](waiting.md) の
+「supervise.py の進捗ログ」）。`gate` なら承認資料を添えて承認を取り、承認の後にミッション状態ファイルの
+次のステージの `command` を打つ。下の表は supervisor のフェーズレポートにだけ当たる。
 
 **conductor が見るのは、見出しの有無と `結果` の 2 つである。**
 
@@ -423,6 +460,7 @@ python3 "$SCRIPTS/lib/transcript_agents.py" interrupted \
 | --- | --- | --- | --- |
 | worker | supervisor（失敗の通知）。supervisor も落ちていれば、起こされた supervisor が見る | supervisor（conductor が直接起動した worker なら conductor） | supervisor が動いていれば `SendMessage`。動いていなければ conductor → supervisor → worker の順 |
 | supervisor | conductor（失敗の通知） | conductor | `SendMessage`。続けられなければ `最後に記録した工程` の頭から新しい supervisor（`subagent_type` は起動の指示の `subagent_type` の欄で選ぶ） |
+| プラン | conductor（`wait` の終わり・キューの done・進捗ログ） | conductor | 進捗ログ（`<プラン>-state/progress.jsonl`）の最後のステップの id から `supervise.py run <プラン> --from <ステップの id>`。落ちたプランごとに打ち、終わったプランは流し直さない |
 | conductor | 人か Claude Code（自動継続） | conductor 自身 | 自動継続・人の 1 通・背景の待ちの終わり（「解除を待つ手段」） |
 
 **3 層は同じ割り当てを共有するため、同時に落ちるのが普通である。** そのときは conductor が
@@ -459,6 +497,9 @@ python3 "$SCRIPTS/lib/transcript_agents.py" interrupted \
 **手順 4 は `--max-sleep` を付けない。** 背景の待ちを数時間続けられないと分かったときだけ
 `--max-sleep 540` を付け、終了コード 3 で起きるたびに手順 1 と手順 4 だけを行う。
 **解除の前に `SendMessage` を送らない。**
+
+**プランは `interrupted` の一覧に出ない。** 流していたプランは、ミッション状態ファイルのステージと
+キューの done で点検し、終わっていないプランを「落ちた層ごとの割り当て」のプランの行で再開する。
 
 **応答を終える前に「フェーズの一覧」を 1 回出す**（「conductor の報告」の 3 つ目の時点）。
 
