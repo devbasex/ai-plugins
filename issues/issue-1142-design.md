@@ -2,7 +2,7 @@
 
 要求と受け入れ条件は #1142 の本文にある（コピーは [issue-1142-requirements.md](issue-1142-requirements.md) ）。
 この文書は「どう作るか」だけを扱う。エントリポイントの一覧と移行の順序（移行ステップごとに触るファイル）は
-[issue-1142-design-migration.md](issue-1142-design-migration.md) 、決定の記録は [issue-1142-design-decisions.md](issue-1142-design-decisions.md) にある。
+[issue-1142-design-migration.md](issue-1142-design-migration.md) 、モジュールの分け方は [issue-1142-design-modules.md](issue-1142-design-modules.md) 、決定の記録は [issue-1142-design-decisions.md](issue-1142-design-decisions.md) にある。
 
 数は 2026-09-26 03:30 UTC に測った値である（`python3 /tmp/ndf-measure-1142/structure.py plugins/ndf`）。
 ファイル 128 本・48,394 行（本文の表から 531 行増えた）、1000 行を超えるファイル 6 本、2 つ以上のファイルで
@@ -51,7 +51,7 @@
 | 集約 | 持ち主（書き換えてよいもの） | 根 | エンティティ | 値オブジェクト |
 | --- | --- | --- | --- | --- |
 | プラン | `supervise_lib.templates`（`new` が書く） | `plan.json` | ステップ | ステップの型・条件 |
-| 実行の状態 | `supervise_lib.engine.RunState` | `<プラン>-state/` | ステップの記録 | `ClaudeCall`・件数 |
+| 実行の状態 | `supervise_lib.state.RunState` | `<プラン>-state/` | ステップの記録 | `ClaudeCall`・件数 |
 | ミッション状態ファイル | `mission-state.py` | `mission.json` | プラン・承認ゲートの記録 | 版 |
 | レビューの状態 | `review_lib.store.ReviewStore` | `cross-review-pr<N>-state.json` | ラウンド・指摘 | `final`・`sweep` |
 | drive の状態 | 各 Skill の `drive.py` の `Drive` | `drive-pr<N>.json` / `drive-rf<ID>.json` | — | `stage`・`init_vars` |
@@ -137,13 +137,14 @@
 | `lib/usage_ledger.py`（新設） | 使用量の帳簿の追記と読み取り |
 | `lib/limits.py`（変更） | 外部 CLI の起動の上限時間を 1 つの関数で決める（`resolve_cli_timeout`） |
 | `lib/step_result.py`・`lib/gh_parts.py`・`lib/statefile.py`（変更） | 結果 JSON・GitHub の部品・KEY=VALUE の出力に絞る。git と時刻は新設の 3 本へ移す。GitHub の読み書きは `gh_parts` だけが `gh` を呼ぶ。読み直しは REST の ETag 付きの要求、単発の読み書きは REST、入れ子の読み取りと REST に無い操作は GraphQL で行い、片方の枠が上限なら代われる操作をもう片方で行う（不足 g） |
-| `scripts/supervise.py` と `scripts/supervise_lib/`（分割） | エントリポイントは引数の解析だけ。実行・テンプレート・queue は下のパッケージ |
-| `skills/cross-review/scripts/state.py` と `review_lib/`（分割） | エントリポイントは副命令の解析だけ。状態・GitHub・指摘・副命令の本体は下のパッケージ |
+| `scripts/supervise.py` と `scripts/supervise_lib/`（分割） | エントリポイントは使い方と main だけ。実行・テンプレート・queue は下のパッケージの 19 本（分け方は [issue-1142-design-modules.md](issue-1142-design-modules.md) ） |
+| `skills/cross-review/scripts/state.py` と `review_lib/`（分割） | エントリポイントは副命令の解析だけ。状態・GitHub・指摘・副命令の本体は下のパッケージの 21 本 |
 | 2 つの `drive.py`（変更） | `final` の後に `init` を打たない（I7）。共通の部品は `lib/loop_drive.py` |
-| `scripts/relay.py` と `relay_lib/`（分割） | エントリポイントだけを持つランチャーと、バージョンディレクトリに入るパッケージ。`log.jsonl`・`next.json` を書くのは `relay_lib.record` だけ（I12） |
-| `lib/worktree-common.sh`（分割） | ほかのスクリプトが source するファイルとして残し、字句解析・書き込み先・ブランチ・レジストリの 4 本を読み込む |
-| `lib/monitor.py`（分割） | 照合の表を `lib/monitor_patterns.py` へ出す（`supervise.py` も読む） |
-| `instructions-check.py`（分割） | 型と宣言と観点を隣の `instructions_lib/model.py` へ出す（読み手が 1 つのためライブラリに置かない） |
+| `scripts/relay.py` と `relay_lib/`（分割） | エントリポイントだけを持つランチャーと、バージョンディレクトリに入るパッケージの 11 本。`log.jsonl`・`next.json` を書くのは `relay_lib.record` だけ（I12） |
+| `lib/worktree-common.sh`（分割） | ほかのスクリプトが source するファイルとして残し、宣言・ブランチ・字句解析・書き込み先（3 本）・レジストリの 7 本を source する |
+| `lib/monitor.py`（分割） | 照合の表・ログの読み取り・PID・型・監視ループの 5 本へ分ける（`supervise.py` は照合の表を `monitor_patterns` から読む） |
+| `instructions-check.py`（分割） | 型・宣言・集める処理・判定・出力を隣の `instructions_lib/` の 7 本へ出す（読み手が 1 つのためライブラリに置かない） |
+| `refactor_lib/gitfacts.py`（分割） | コミットの事実だけを残し、パスの判定・プロセス・GitHub・作業ツリー・公開・結果の 6 本へ分ける |
 | `release-steps.py`（変更） | 差分のあるプラグインを列挙する副命令 `changed-plugins` |
 | `mvv-gate.py`（変更） | 設計の判定で PR の `issues/` の設計文書を材料に足す |
 | `scripts/check-script-structure.py`（新設、リポジトリ根） | 構造チェック。例外リストは `scripts/script-structure-allow.json` |
@@ -231,34 +232,9 @@ graph TD
 
 ### パッケージ・モジュール構成
 
-新設は `+`、分割して中身を移すものは `>`、中身を薄くするエントリポイントは `=` で示す。
-
-```text
-plugins/ndf/scripts/
-├── = supervise.py                # 引数の解析と main（約 450 行。説明文を短くする）
-├── + supervise_lib/              # __init__・paths・decl・prompts・claude・plan・slow・steps・engine・templates・mission・queue・commands
-├── = relay.py                    # ランチャー（約 80 行）。プラグインでも複製でも同じバイト列
-├── + relay_lib/                  # __init__・common・proc・record・mark・claude・terminal・run・version_dir・install
-├── > instructions-check.py       # 約 870 行
-├── + instructions_lib/           # __init__・model
-└── lib/
-    ├── + clock.py  + jsonio.py  + proc.py  + repo.py  + loop_drive.py  + usage_ledger.py
-    ├── + monitor_patterns.py      # monitor.py は約 860 行
-    ├── = worktree-common.sh      # 約 465 行。下の 4 本を読み込む
-    └── + worktree-branch.sh  + worktree-shell-lex.sh  + worktree-write-target.sh  + worktree-registry.sh
-plugins/ndf/skills/cross-review/scripts/
-├── = state.py                    # 副命令の解析と main（約 220 行）
-└── + review_lib/                 # __init__・store・workspace・github・categories・participants・findings・commands/（9 本）
-scripts/                          # リポジトリの根（開発用）
-├── + check-script-structure.py  + script-structure-allow.json
-└── + measure/structure-baseline.py  + measure/claude-p-usage.py
-```
-
-見積りの行数は移行の文書の各移行ステップにある。**分けて新しく作るファイルは、どれも 500 行以下にする。**
-見積りで 500 行を超える 7 本（`engine.py` 約 550・`commands/init.py` 約 520・`relay_lib/run.py` 約 780・`monitor.py` 約 860・
-`instructions-check.py` 約 870・`worktree-write-target.sh` 約 950・`gitfacts.py` 1011）は、同じ移行ステップの中で責務ごとにさらに
-分ける。分け方は移行ステップの PR が示し、コードレビューで見る。移行の範囲の外で 500 行を超えるファイルは例外リストに残り、
-触ったときに分ける（決定 18）。
+移行の後のディレクトリの構成と、関数とクラスをどのモジュールへ置くかは [issue-1142-design-modules.md](issue-1142-design-modules.md) にある。
+501 行以上のファイルは移行の後に 0 本になり（移行の範囲の外のものは例外リストに残る。決定 18）、見積りの最大は
+`worktree-write-target-scan.sh` の約 475 行である。
 
 ### クラス図: プランの実行
 
@@ -375,11 +351,12 @@ classDiagram
 └── relay-<版>-<digest 8 字>/
     ├── relay_lib/                # バージョンディレクトリの中身
     ├── lib/clock.py  lib/jsonio.py
+    ├── inuse-<pid>               # このバージョンディレクトリを使っている run ごとに 1 つ。run が終わるときに消す
     └── MANIFEST                  # バージョンディレクトリのファイルと sha256。digest はこの内容の sha256
 ```
 
 時系列の扱い: 帳簿と `log.jsonl` は追記だけのイベントログ。バージョンディレクトリは版ごとに新しく作り、古い
-バージョンディレクトリは `startup` が「`relay.current` が指さず、動いている `run` の pid ファイルも指さない」ものを 2 つを残して消す。
+バージョンディレクトリは `startup` が「`relay.current` が指さず、生きている pid の `inuse-<pid>` も無い」ものを 2 つを残して消す。
 
 ### CRUD 図
 
@@ -498,7 +475,7 @@ graph LR
 | 既存のテストが置き換え先の変更だけで通る | 各移行ステップの差分のうち `tests/` の変更が import と差し替え先だけかを、レビューの観点に入れる |
 | エントリポイントの形が変わらない（I3） | `scripts/tests/test_entrypoints.py`（新設）が一覧の各エントリポイントの `--help` の副命令と、代表の出力の形を固定する |
 | `build-runtime-plugins.sh --check` が通り、配布物に新しいモジュールが入る | `--check` と、開発版の `verify-install` の後に 3 ランタイムの導入先で `supervise_lib` などの有無を見る |
-| 複製が 1 回の導入で動く（F10・I2・I9） | `test_relay.py` にバージョンディレクトリの作成・切り替え・古いバージョンディレクトリの削除・書きかけのバージョンディレクトリが指されないテスト。手動確認はラッパーの下でセッションを 1 回切り替える |
+| 複製が 1 回の導入で動く（F10・I2・I9） | `test_relay.py` にバージョンディレクトリの作成・切り替え・古いバージョンディレクトリの削除（生きている pid の `inuse-<pid>` があるものは残す）・書きかけのバージョンディレクトリが指されないテスト。手動確認はラッパーの下でセッションを 1 回切り替える |
 | I1・I2・I13 | 構造チェックの import の検査（ライブラリとバージョンディレクトリの中身の import 先を構文木で見る。hook からたどれるモジュールに外部パッケージが無いこと、外部パッケージを使うエントリポイントが先に `deps.require()` を呼ぶこと） |
 | 外部パッケージを固定して使え、uv が無ければ入れる（h・F13） | `test_deps.py`（uv を置いた・置かない一時の `PATH`、`NDF_DEPS_REEXEC` での打ち切り、入れられないときの終了コード 3）。試行で 4 ランタイムからの起動し直しと 304 が上限に数えられないことを確かめ、結果を課題のコメントに残す |
 | I6 | 既存の `test_experimental.py` |

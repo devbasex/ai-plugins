@@ -164,21 +164,23 @@ S1 の例外リストは、その時点の違反をすべて載せて始める�
 
 | ステージ | 移行ステップ | 触るファイル | 見積りの行数（移行後の最大） |
 | --- | --- | --- | --- |
-| 1 | L0 ライブラリ | `lib/` に `clock.py`・`jsonio.py`・`proc.py`・`repo.py`・`loop_drive.py` を新設。`lib/limits.py`（`resolve_cli_timeout`・V3）・`lib/launch-cli.sh`（`resolve_print_timeout` を `limits.py` の 1 回へ）・`lib/step_result.py`（`git`・`gh_json` を `proc` の上へ）・`lib/statefile.py`（`now`・`die`・`info` を再エクスポート）・`lib/deps.py`（新設。`require()`・h）・`plugins/ndf/pyproject.toml` と `plugins/ndf/uv.lock`（新設。h）・`lib/gh_parts.py`（ETag 付きの読み直し・PR と課題の単発の読み書きの REST の関数・枠の使い分けと上限の代替・待ちの間隔の伸長・g。試行が成り立てば githubkit の上に置く。決定 17）・根の `scripts/check-script-structure.py` と `scripts/script-structure-allow.json`（行数の上限を 500 へ下げ、500 行を超えるファイルを行数付きで例外リストへ載せ、載せた行数を超えたら落とす。決定 18）・`lib/README.md`・テスト。**呼び出し側はまだ変えない**。C1〜C7 は、移すファイルの `gh pr` / `gh issue` の呼び出しを `gh_parts` の関数へ置き換える | 各 150 以下 |
-| 2 | C1 プランの実行 | `scripts/supervise.py`・`scripts/supervise_lib/`（新設 13 本。`__init__` を含む）・`mission-state.py`・`mvv-gate.py`・`check-trigger.py`・`mission-close.py`・`scripts/tests/test_supervise*.py` ほか差し替え先 | `supervise.py` 約 450・`engine.py` 約 550 |
-| 2 | C2 cross-review | `skills/cross-review/scripts/state.py`・`review_lib/`（新設 16 本。`__init__` を含む）・`drive.py`・`measure.py`・`critique.sh`・`launch-reviewer.sh`・`skills/cross-review/tests/`・`skills/fix/tests/test_fix_steps.py`（差し替え先だけ） | `commands/init.py` 約 520 |
-| 2 | C3 外部 CLI と記録 | `lib/monitor.py`・`lib/monitor_patterns.py`（新設）・`lib/monitor_outcome.py`・`lib/run_metrics.py`・`lib/post_queue.py`・`lib/transcript_agents.py`・`skills/external-ai/scripts/external-ai.py`・`scripts/wait-notify.py`・`skills/skill-stats/scripts/skill-stats.py`・`scripts/parallel-measure.py`・テスト | `monitor.py` 約 860 |
-| 2 | C5 worktree | `lib/worktree-common.sh`・`lib/worktree-branch.sh`・`worktree-shell-lex.sh`・`worktree-write-target.sh`・`worktree-registry.sh`（新設）・`scripts/worktree-*.sh` 5 本・`lib/README.md` の worktree の行 | `worktree-write-target.sh` 約 950 |
-| 2 | C6 ラッパー | `scripts/relay.py`・`scripts/relay_lib/`（新設 10 本。`__init__` を含む）・`scripts/experimental/resume.py`・`scripts/tests/test_relay.py`・`skills/install-wrapper/SKILL.md`（バージョンディレクトリの説明だけ） | `relay_lib/run.py` 約 780 |
-| 2 | C7 リリースと文書 | 「重複だけを置き換えるもの」のリリースと文書の検査の 11 本・`scripts/instructions-check.py`・`scripts/instructions_lib/`（新設 2 本）・`scripts/tests/test_instructions_check.py`（複製の対象に新設の 1 本を足す） | `instructions-check.py` 約 870 |
-| 3 | C4 cross-refactoring | `skills/cross-refactoring/scripts/drive.py`・`launch-cli.sh`・`refactor_lib/clock.py`・`paths.py`・`commands/converge.py`・`commands/implement.py`・`commands/setup.py`・テスト | 変わらず（最大 `gitfacts.py` 991） |
+| 1 | L0 ライブラリ | `lib/` に `clock.py`・`jsonio.py`・`proc.py`・`repo.py`・`loop_drive.py` を新設。`lib/limits.py`（`resolve_cli_timeout`・V3）・`lib/launch-cli.sh`（`resolve_print_timeout` を `limits.py` の 1 回へ）・`lib/step_result.py`（`git`・`gh_json` を `proc` の上へ）・`lib/statefile.py`（`now`・`die`・`info` を再エクスポート）・`lib/deps.py`（新設。`require()`・h）・`plugins/ndf/pyproject.toml` と `plugins/ndf/uv.lock`（新設。h）・`lib/gh_parts.py`（ETag 付きの読み直し・PR と課題の単発の読み書きの REST の関数・枠の使い分けと上限の代替・待ちの間隔の伸長・g。試行が成り立てば githubkit の上に置く。決定 17。`gh_call`・`gh_quota`・`gh_fields`・`gh_rest`・`gh_graphql`・`gh_checks`・`gh_pr_info`・`gh_sections` の 8 本を新設して分け、`gh_parts.py` はエントリポイントと再エクスポートにする。分け方は [issue-1142-design-modules.md](issue-1142-design-modules.md) ）・根の `scripts/check-script-structure.py` と `scripts/script-structure-allow.json`（行数の上限を 500 へ下げ、500 行を超えるファイルを行数付きで例外リストへ載せ、載せた行数を超えたら落とす。決定 18）・`lib/README.md`・テスト。**呼び出し側はまだ変えない**。C1〜C7 は、移すファイルの `gh pr` / `gh issue` の呼び出しを `gh_parts` の関数へ置き換える | 各 150 以下 |
+| 2 | C1 プランの実行 | `scripts/supervise.py`・`scripts/supervise_lib/`（新設 19 本。`__init__` を含む）・`mission-state.py`・`mvv-gate.py`・`check-trigger.py`・`mission-close.py`・`scripts/tests/test_supervise*.py` ほか差し替え先 | 最大 `queue.py` 約 295 |
+| 2 | C2 cross-review | `skills/cross-review/scripts/state.py`・`review_lib/`（新設 21 本。`__init__` を含む）・`drive.py`・`measure.py`・`critique.sh`・`launch-reviewer.sh`・`skills/cross-review/tests/`・`skills/fix/tests/test_fix_steps.py`（差し替え先だけ） | 最大 `commands/init.py` 約 435 |
+| 2 | C3 外部 CLI と記録 | `lib/monitor.py`・`lib/monitor_patterns.py`・`monitor_scan.py`・`monitor_proc.py`・`monitor_types.py`・`monitor_loop.py`（新設 5 本）・`lib/monitor_outcome.py`・`lib/run_metrics.py`・`lib/post_queue.py`・`lib/transcript_agents.py`・`skills/external-ai/scripts/external-ai.py`・`scripts/wait-notify.py`・`skills/skill-stats/scripts/skill-stats.py`・`scripts/parallel-measure.py`・テスト | 最大 `monitor_loop.py` 約 300 |
+| 2 | C5 worktree | `lib/worktree-common.sh`・`lib/worktree-declaration.sh`・`worktree-branch.sh`・`worktree-shell-lex.sh`・`worktree-write-target.sh`・`worktree-write-target-scan.sh`・`worktree-write-target-track.sh`・`worktree-registry.sh`（新設 7 本）・`scripts/worktree-*.sh` 5 本・`lib/README.md` の worktree の行 | 最大 `worktree-write-target-scan.sh` 約 475 |
+| 2 | C6 ラッパー | `scripts/relay.py`・`scripts/relay_lib/`（新設 11 本。`__init__` を含む）・`scripts/experimental/resume.py`・`scripts/tests/test_relay.py`・`skills/install-wrapper/SKILL.md`（バージョンディレクトリの説明だけ） | 最大 `relay_lib/run.py` 約 350 |
+| 2 | C7 リリースと文書 | 「重複だけを置き換えるもの」のリリースと文書の検査の 11 本・`scripts/instructions-check.py`・`scripts/instructions_lib/`（新設 7 本）・`scripts/tests/test_instructions_check.py`（複製の対象に `instructions_lib/` のディレクトリを足す） | 最大 `instructions-check.py` 約 245 |
+| 3 | C4 cross-refactoring | `skills/cross-refactoring/scripts/drive.py`・`launch-cli.sh`・`refactor_lib/clock.py`・`paths.py`・`commands/converge.py`・`commands/implement.py`・`commands/setup.py`・`refactor_lib/gitfacts.py` と新設 6 本（`pathkinds`・`process`・`github`・`worktree`・`publish`・`results`）・`tests/conftest.py` の `_MODULES`・テスト | 最大 `gitfacts.py` 約 255 |
 
 **ステージ 2 は 6 本で、並列の上限に収まる。** C4 は C2 と同じ `lib/loop_drive.py` の呼び出しを揃えるため、
 C2 の後に置く。`lib/README.md` の索引は、各移行ステップが自分の行だけを直す。
 
 **テストは差し替え先と import だけを変える**（受け入れ条件「置き換え先の変更だけで通る」）。`state.py` の
-`monkeypatch.setattr(state_mod, ...)` 146 か所と `supervise.py` の 8 か所を、定義元のモジュールへ向け直す
-（決定 3）。`lib/monitor.py` は差し替えられる関数を動かさないため、シム越しの約 43 か所はそのまま通る。
+`monkeypatch.setattr(state_mod, ...)` のうち名前で渡す 131 か所と `supervise.py` の 8 か所を、定義元のモジュールへ向け直す
+（決定 3）。差し替え先の件数の内訳は [issue-1142-design-modules.md](issue-1142-design-modules.md) の各節にある。`lib/monitor.py` は
+シム越しの 43 か所のうち 41 か所が `monitor_types`・`monitor_proc` へ向き直り、シムの名前空間を確かめる
+`test_monitor_generic_stem.py` の assert は `_run_all.__globals__` を見る形に変わる。
 
 ### ミッション 3: 語・撤去・測り直し
 
