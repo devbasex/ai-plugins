@@ -18,6 +18,8 @@ dependencies = [
     # accessibility autouse は scenario.config.yaml で default 有効。
     # runtime テンプレート (templates/pyproject.toml.runtime) と揃えて main dep に含める。
     "axe-playwright-python>=0.1.4",
+    # config.yaml の各節の形と型の変換 (playwright_kit/config.py)
+    "pydantic>=2.7,<3",
 ]
 
 [project.optional-dependencies]
