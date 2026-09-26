@@ -293,3 +293,19 @@ githubkit の ETag 付きの読み直しが上限に数えられないこと、4
 
 試行（PR #1258）で 3 候補とも成り立ち、キューと資源のタグごとの枠を持ち自作が残らない DBOS を選んだ。比べた表と
 置き換える範囲は [issue-1142-design-libraries.md](issue-1142-design-libraries.md) の「決定 21」にある。移行はミッション 2c。
+
+### 決定 22: 全体テストは、根の 1 つの環境で本番と同じパッケージを入れて流す
+
+包みを呼ぶ側のテストが、全体テストの環境（playwright-kit の venv）に無いパッケージを import して落ちる（2026-09-26 の
+ステージ 2 で D1〜D4 が止まった）。根の `pyproject.toml` に playwright_kit と ndf の全 extra と pytest を 1 つの lock で
+固定し、CI と手元はその環境で流す。比べた案と移行は [issue-1142-design-libraries.md](issue-1142-design-libraries.md) の「決定 22」にある。
+
+### 決定 23: `deps.require()` は複数のグループを 1 回で入れる
+
+1 回の起動し直しで 1 つのグループしか入らず、2 つ要るエントリポイントが止まるため（[issue-1142-design-libraries.md](issue-1142-design-libraries.md) の「決定 23」）。
+
+### 決定 24: `claude -p` の包みは CLI の直の起動のまま残す
+
+claude-agent-sdk は成り立つが、費用を保つ手段が文書に無い環境変数だけで、消える自作は約 130 行にとどまる
+（試行 T2・T2b。[issue-1142-design-libraries.md](issue-1142-design-libraries.md) の「決定 24」）。
+
