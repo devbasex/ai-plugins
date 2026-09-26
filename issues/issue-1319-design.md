@@ -76,9 +76,9 @@ uvx も radon も無い環境では、4 のファイルに `python | tool_missin
 
 | 用語 | 意味 | 用語集への反映 |
 | --- | --- | --- |
-| 指標 | `cross-refactoring` が提案の前に対象範囲のコードを測定ツールで測った値。関数ごとの循環的複雑度、ファイルごとの保守性か大きさ、行数 | 既にある（出所を設計へ移す） |
-| 指標のファイル | 提案の前に 1 回だけ作り、参加者の全員が読む指標の測定の結果 | 既にある（出所を設計へ移す） |
-| 測定ツール | 言語ごとに指標を測る外部のコマンド（radon・lizard など） | 既にある（出所を設計へ移す） |
+| 指標 | `cross-refactoring` が提案の前に対象範囲のコードを測定ツールで測った値。関数ごとの循環的複雑度、ファイルごとの保守性か大きさ、行数 | 追加（`ndf-cross-refactoring`） |
+| 指標のファイル | 提案の前に 1 回だけ作り、参加者の全員が読む指標の測定の結果 | 追加（`ndf-cross-refactoring`） |
+| 測定ツール | 言語ごとに指標を測る外部のコマンド（radon・lizard など） | 追加（`ndf-cross-refactoring`） |
 | 測定の宣言 | 言語ごとの測定ツールをプロジェクトが置き換える `.ndf/code-metrics.json` | 追加（`ndf-cross-refactoring`） |
 | 根拠の値 | 提案が根拠にした指標の値。提案の JSON の `evidence` に書き、採否には使わない | 追加（`ndf-cross-refactoring`） |
 
@@ -113,7 +113,7 @@ uvx も radon も無い環境では、4 のファイルに `python | tool_missin
 | `refactor_lib/commands/report.py` | 完了報告に「指標の測定」の節を足す（計画と同じ表を `codemetrics_view` から受ける） | 変更 |
 | `SKILL.md` ・ `docs/01` ・ `docs/02` ・ `docs/04` | 引数の表・全体フロー・測定の節・締め切りの表・完了報告の列挙 | 変更 |
 | `refactoring/references/lang-{python,javascript,typescript,php}.md` | 「指標の測定」の節（既定のツール・読む指標・手で測るコマンド） | 変更 |
-| `docs/glossary/glossary.json` | 測定の宣言・根拠の値を足し、既存 3 語の出所を設計へ移す | 変更 |
+| `docs/glossary/glossary.json` | 指標・指標のファイル・測定ツール・測定の宣言・根拠の値の 5 語を足す | 変更 |
 
 ### 構成要素図
 
