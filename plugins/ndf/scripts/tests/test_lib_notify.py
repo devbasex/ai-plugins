@@ -1,4 +1,4 @@
-"""HTTP と Slack の呼び出し・`.env` の読み取りの包み（lib/notify.py・#1142 の決定 19）。uv の環境の外では test_wrappers_uv_env.py が流し直す。
+"""HTTP と Slack の呼び出し・`.env` の読み取りの包み（lib/notify.py・#1142 の決定 19）。外部パッケージは全体テストの環境（根の pyproject.toml）が入れる。
 
 今の `wait-notify.py:_parse_env` から変わる入力を固定する: `export KEY=v` は `KEY` として読む（今は `export KEY`）、
 引用しない値の後ろの ` # 注記` は値に含めない（今は含める）。すでにある環境変数を上書きしないのは今と同じ。
@@ -15,9 +15,9 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
-pytest.importorskip("slack_sdk")
-pytest.importorskip("dotenv")
-pytest.importorskip("httpx")
+import slack_sdk  # noqa: E402,F401  包みの外部パッケージ。無ければ集めるところで落とす
+import dotenv  # noqa: E402,F401  包みの外部パッケージ。無ければ集めるところで落とす
+import httpx  # noqa: E402,F401  包みの外部パッケージ。無ければ集めるところで落とす
 import notify  # noqa: E402
 
 

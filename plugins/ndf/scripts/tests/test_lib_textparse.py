@@ -1,4 +1,4 @@
-"""unified diff の解釈とコメントの除去の包み（lib/textparse.py・#1142 の決定 19）。uv の環境の外では test_wrappers_uv_env.py が流し直す。"""
+"""unified diff の解釈とコメントの除去の包み（lib/textparse.py・#1142 の決定 19）。外部パッケージは全体テストの環境（根の pyproject.toml）が入れる。"""
 from __future__ import annotations
 
 import sys
@@ -7,8 +7,8 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
-pytest.importorskip("unidiff")
-pytest.importorskip("pygments")
+import unidiff  # noqa: E402,F401  包みの外部パッケージ。無ければ集めるところで落とす
+import pygments  # noqa: E402,F401  包みの外部パッケージ。無ければ集めるところで落とす
 import textparse  # noqa: E402
 
 DIFF = """diff --git a/a.md b/a.md

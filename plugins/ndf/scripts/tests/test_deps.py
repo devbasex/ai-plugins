@@ -24,15 +24,17 @@ exit 7
 """
 
 
-def entry(tmp_path: Path, modules: list[str]) -> Path:
+def entry(tmp_path: Path, modules: list[str], more: dict[str, list[str]] | None = None) -> Path:
+    groups = {"t": modules, **(more or {})}
     script = tmp_path / "entry.py"
     script.write_text(
         f"import sys\nsys.path.insert(0, {str(LIB)!r})\nimport deps\n"
-        f"deps.GROUPS['t'] = {modules!r}\ndeps.require('t')\nprint('after', sys.argv[1:])\n")
+        f"deps.GROUPS.update({groups!r})\ndeps.require(*{list(groups)!r})\nprint('after', sys.argv[1:])\n")
     return script
 
 
-def run_entry(tmp_path: Path, modules: list[str], *, uv: bool, **env: str) -> subprocess.CompletedProcess:
+def run_entry(tmp_path: Path, modules: list[str], *, uv: bool, more: dict[str, list[str]] | None = None,
+              **env: str) -> subprocess.CompletedProcess:
     bindir = tmp_path / "bin"
     bindir.mkdir(exist_ok=True)
     if uv:
@@ -41,7 +43,7 @@ def run_entry(tmp_path: Path, modules: list[str], *, uv: bool, **env: str) -> su
     base = {k: v for k, v in os.environ.items() if k not in ("NDF_DEPS_REEXEC", "UV_PROJECT_ENVIRONMENT")}
     base.update(PATH=str(bindir), HOME=str(tmp_path / "home"), FAKE_UV_LOG=str(tmp_path / "uv.log"),
                 NDF_DEPS_VENV=str(tmp_path / "venv"), **env)
-    return subprocess.run([sys.executable, str(entry(tmp_path, modules)), "a1", "--x"],
+    return subprocess.run([sys.executable, str(entry(tmp_path, modules, more)), "a1", "--x"],
                           capture_output=True, text=True, env=base)
 
 
@@ -59,6 +61,33 @@ def test_reexec_through_uv_with_the_lock_and_the_venv_outside_the_plugin(tmp_pat
                        str((tmp_path / "entry.py").resolve())]
     assert log[9:11] == ["a1", "--x"]
     assert "REEXEC=1" in log and f"VENV={tmp_path / 'venv'}" in log
+
+
+def test_several_groups_reexec_once_with_every_extra(tmp_path):
+    """決定 23: 2 つ以上のグループは 1 回の起動し直しで入る。import できるグループも並べる。"""
+    p = run_entry(tmp_path, ["json"], uv=True, more={"u": ["ndf_no_such_module"], "w": ["ndf_no_such_module_2"]})
+    assert p.returncode == 7, p.stderr
+    log = (tmp_path / "uv.log").read_text().splitlines()
+    assert log[:11] == ["run", "--quiet", "--frozen", "--project", str(PLUGIN), "--extra", "t", "--extra", "u",
+                        "--extra", "w"]
+    assert log[11:15] == ["python", str((tmp_path / "entry.py").resolve()), "a1", "--x"]
+
+
+def test_several_importable_groups_return_without_reexec(tmp_path):
+    p = run_entry(tmp_path, ["json"], uv=True, more={"u": ["os"]})
+    assert p.returncode == 0 and "after ['a1', '--x']" in p.stdout
+    assert not (tmp_path / "uv.log").exists()
+
+
+def test_after_reexec_a_missing_group_among_several_stops_with_code_3(tmp_path):
+    p = run_entry(tmp_path, ["json"], uv=True, more={"u": ["ndf_no_such_module"]}, NDF_DEPS_REEXEC="1")
+    assert p.returncode == 3 and "after" not in p.stdout
+    assert "u のパッケージ（ndf_no_such_module）" in p.stderr
+
+
+def test_reexec_argv_keeps_the_single_group_form():
+    assert deps.reexec_argv("uv", "md", "s.py", ["a"], Path("/p")) == deps.reexec_argv("uv", ["md"], "s.py", ["a"],
+                                                                                       Path("/p"))
 
 
 def test_after_reexec_a_missing_package_stops_with_code_3(tmp_path):
@@ -130,6 +159,8 @@ def test_find_uv_looks_in_local_bin(monkeypatch, tmp_path):
 def test_an_unknown_group_is_a_programming_error():
     with pytest.raises(ValueError):
         deps.require("aws-not-declared")
+    with pytest.raises(ValueError):
+        deps.require("md", "aws-not-declared")
 
 
 def test_the_venv_is_named_by_the_plugin_version(monkeypatch, tmp_path):
@@ -149,4 +180,19 @@ def test_groups_match_the_declaration_and_the_lock():
     lock = (PLUGIN / "uv.lock").read_text()
     for pkgs in declared.values():
         for name, ver in re.findall(r'"([\w-]+)==([\w.]+)"', pkgs):
+            assert f'name = "{name}"\nversion = "{ver}"' in lock
+
+
+def test_root_declaration_pins_the_same_versions_as_the_plugin():
+    """根の pyproject.toml（全体テストの環境・決定 22）は plugins/ndf の全グループを同じ版で持ち、根の uv.lock が固定する。"""
+    def groups(path: Path) -> dict[str, str]:
+        section = path.read_text().split("[project.optional-dependencies]", 1)[1].split("\n[", 1)[0]
+        return dict(re.findall(r'^(\w[\w-]*)\s*=\s*\[(.*?)\]', section, re.M))
+
+    repo = PLUGIN.parents[1]
+    plugin, root = groups(PLUGIN / "pyproject.toml"), groups(repo / "pyproject.toml")
+    assert root == plugin
+    lock = (repo / "uv.lock").read_text()
+    for pins in root.values():
+        for name, ver in re.findall(r'"([\w-]+)==([\w.]+)"', pins):
             assert f'name = "{name}"\nversion = "{ver}"' in lock

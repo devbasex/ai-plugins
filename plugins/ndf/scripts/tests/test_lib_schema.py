@@ -1,4 +1,4 @@
-"""JSON と設定の形の検証の包み（lib/schema.py・#1142 の決定 19）。uv の環境の外では test_wrappers_uv_env.py が流し直す。"""
+"""JSON と設定の形の検証の包み（lib/schema.py・#1142 の決定 19）。外部パッケージは全体テストの環境（根の pyproject.toml）が入れる。"""
 from __future__ import annotations
 
 import sys
@@ -8,7 +8,7 @@ from typing import Literal
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
-pytest.importorskip("pydantic")
+import pydantic  # noqa: E402,F401  包みの外部パッケージ。無ければ集めるところで落とす
 import schema  # noqa: E402
 
 

@@ -1,4 +1,4 @@
-"""シェルの字句・構文の解析の包み（lib/shparse.py・#1142 の決定 19・20）。uv の環境の外では test_wrappers_uv_env.py が流し直す。
+"""シェルの字句・構文の解析の包み（lib/shparse.py・#1142 の決定 19・20）。外部パッケージは全体テストの環境（根の pyproject.toml）が入れる。
 
 試行 T2（docs/ndf-experiments.md の hook-trial の行）で見つけた構文木の癖 5 つを包みが直すことと、
 読めない 2 つの形の扱いを固定する。
@@ -8,10 +8,9 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
-pytest.importorskip("tree_sitter_bash")
+import tree_sitter_bash  # noqa: E402,F401  包みの外部パッケージ。無ければ集めるところで落とす
 import shparse  # noqa: E402
 
 

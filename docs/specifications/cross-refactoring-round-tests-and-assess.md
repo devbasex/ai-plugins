@@ -350,7 +350,7 @@ Pull Request #917 自身の検査のフェーズで `cross-refactoring --workflo
 | 追跡している `.md` のリテラル・末尾が一致するリテラル・既存の定数・補助モジュールから import した定数が当たり、追跡していない名前と変更していない行は当たらないこと。テストの追加と実装のマージ処理がその理由で項目を取り消すこと | `cross-refactoring/tests/test_doc_wording_tests.py` |
 | 手順書・規約の該当の節（`SKILL.md` の引数の表、`workflow-modes.md`「リファクタリングの退避先」、`stage-notes.md` のリファクタリング、`prompts/add-tests.md`、テストを書く規約の 3 か所）が上の契約を書くこと | 文書を読んで確かめる（文言を固定するテストは書かない） |
 | 文書が指す参照を 1 つ消すとチェックスクリプトが失敗を返すこと | `python3 scripts/check-markdown-links.py --root .`（`scripts/tests/test_check_markdown_links.py`） |
-| 全体テストが通ること | `uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest pytest . -q -n 4` |
+| 全体テストが通ること | `uv run --frozen --project . --all-extras pytest . -q -n 4` |
 
 ## 関連リンク
 

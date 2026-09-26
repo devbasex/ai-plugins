@@ -1,4 +1,4 @@
-"""frontmatter と YAML の読み書きの包み（lib/yamlio.py・#1142 の決定 19）。uv の環境の外では test_wrappers_uv_env.py が流し直す。
+"""frontmatter と YAML の読み書きの包み（lib/yamlio.py・#1142 の決定 19）。外部パッケージは全体テストの環境（根の pyproject.toml）が入れる。
 
 今の `skill-stats.py:parse_front_matter` から変わる入力を固定する: 値は YAML の型で返る
 （`true` は真偽値、`[a, b]` は配列、複数行の `>` は畳んだ文字列）。
@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
-pytest.importorskip("ruamel.yaml")
+import ruamel.yaml  # noqa: E402,F401  包みの外部パッケージ。無ければ集めるところで落とす
 import yamlio  # noqa: E402
 
 DOC = """---
