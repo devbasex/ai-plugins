@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/lib/proc.py", "name": "git", "kind": "same-name", "reason": "L0 でライブラリに置いた定義と、まだ置き換えていない呼び出し側の同じ名前で本体の違う関数。C1・C7 で呼び出し側を置き換えて消す"}

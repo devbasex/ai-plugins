@@ -41,7 +41,7 @@ plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/
 ├── = gitfacts.py                 # コミットの事実（約 255 行）。移した名前を再エクスポートする
 └── + pathkinds.py  + process.py  + github.py  + worktree.py  + publish.py  + results.py
 scripts/                          # リポジトリの根（開発用）
-├── + check-script-structure.py  + script-structure-allow.json
+├── + check-script-structure.py  + script-structure-allow/
 └── + measure/structure-baseline.py  + measure/claude-p-usage.py
 ```
 

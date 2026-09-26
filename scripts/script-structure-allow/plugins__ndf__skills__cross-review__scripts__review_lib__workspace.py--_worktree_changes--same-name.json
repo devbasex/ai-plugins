@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/skills/cross-review/scripts/review_lib/workspace.py", "name": "_worktree_changes", "kind": "same-name", "reason": "C2 で state.py から移した。cross-refactoring（C4）の同じ名前の関数とは別の実装。C4 で寄せるか名前を分ける"}

@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/lib/monitor_types.py", "name": "_tmp_dir", "kind": "same-name", "reason": "C3 で monitor.py から移した。review_lib/store.py の同じ名前の関数とは別の実装（--tmp-dir の明示を先に見る）。テストが名前で差し替えるため C3 では名前を変えない"}

@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/skills/cross-review/scripts/measure.py", "name": "", "kind": "lines", "reason": "L0 の時点で 582 行。C2 は重複だけをライブラリへ置き換える。触って 500 行以下にしたら消す", "lines": 582}

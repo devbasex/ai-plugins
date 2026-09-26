@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/commands/gate.py", "name": "_gate_passed", "kind": "same-name", "reason": "S1 の時点の同じ名前で本体の違う関数。C4 でライブラリへ寄せるか、別の概念なら名前を分ける"}
