@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/wait-notify.py", "name": "urllib.request", "kind": "wrapped", "reason": "L1 の時点の使用。D5 が lib/notify.py（httpx・slack_sdk） の上へ置き換えたら消す"}

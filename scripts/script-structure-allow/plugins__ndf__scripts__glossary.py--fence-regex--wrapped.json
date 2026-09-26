@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/glossary.py", "name": "fence-regex", "kind": "wrapped", "reason": "L1 の時点の使用。D7 が lib/md.py（markdown-it-py） の上へ置き換えたら消す"}

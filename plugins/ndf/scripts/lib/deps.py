@@ -34,7 +34,22 @@ from typing import NoReturn
 
 UV_VERSION = "0.12.19"
 # pyproject.toml の [project.optional-dependencies] と同じグループ。値はグループが入ったかを見る import の名前
-GROUPS = {"github": ["githubkit"]}
+GROUPS = {
+    "github": ["githubkit"],
+    "md": ["markdown_it", "mdit_py_plugins"],
+    "mdtable": ["tabulate"],
+    "schema": ["pydantic"],
+    "procs": ["psutil"],
+    "locks": ["filelock"],
+    "shparse": ["tree_sitter", "tree_sitter_bash"],
+    "versions": ["semver"],
+    "bump": ["bumpversion"],
+    "pathmatch": ["pathspec"],
+    "textparse": ["unidiff", "pygments"],
+    "yamlio": ["ruamel.yaml"],
+    "waits": ["tenacity"],
+    "notify": ["slack_sdk", "dotenv", "httpx"],
+}
 EXIT_PRECONDITION = 3
 REEXEC_ENV = "NDF_DEPS_REEXEC"
 PLUGIN_ROOT = Path(__file__).resolve().parents[2]
@@ -47,8 +62,11 @@ def _stop(msg: str) -> NoReturn:
 
 
 def importable(group: str) -> bool:
-    """グループのパッケージがすべて import できるか。"""
-    return all(importlib.util.find_spec(m) is not None for m in GROUPS[group])
+    """グループのパッケージがすべて import できるか（`ruamel.yaml` のような点の入った名前は親が無ければ偽）。"""
+    try:
+        return all(importlib.util.find_spec(m) is not None for m in GROUPS[group])
+    except ModuleNotFoundError:
+        return False
 
 
 def find_uv() -> str | None:

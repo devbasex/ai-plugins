@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""NDF のスクリプトの構造チェック（#1142 の不変条件 I4・I5）。
+"""NDF のスクリプトの構造チェック（#1142 の不変条件 I4・I5・I14）。
 
 見るのは `plugins/ndf/` の下の `.py` と `.sh` のうち、テストを除くもの（`tests/`・`test/` の下と
 `test_` で始まるファイル）。git の作業ツリーでは git が追跡するファイルだけを見る。
@@ -9,6 +9,11 @@
   関数名を除いた構文木で、シェルは空行とコメントの行を除き前後の空白を落とした行で比べる
 - `same-name`: 同じ名前で本体の違う最上位の関数が 2 つ以上のファイルにある（I4）。Python とシェルは
   別々に数える
+
+- `wrapped`: 汎用の処理の包み（`lib/` の包み。決定 19）が受け持つ標準ライブラリの部品を、包みの外の Python の
+  モジュールが使う（I14）。部品と持ち主は `WRAPPED` の表で、`fcntl`・`pty`・`termios`・`urllib.request` の import、
+  `/proc/` の読み取り（docstring を除く文字列）、囲み（```` ``` ```` / `~~~`）を追う正規表現と `startswith` を見る。
+  例外リストの `name` は部品の名前（`fcntl` など）
 
 副命令のハンドラー（`cmd_*`）・`main`・`build_parser`・`_build_parser`・シェルの `usage` は規則で外す。
 
@@ -40,7 +45,19 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 SCAN = "plugins/ndf"
 MAX_LINES = 500
-KINDS = ("lines", "same-body", "same-name")
+KINDS = ("lines", "same-body", "same-name", "wrapped")
+LIB = "plugins/ndf/scripts/"
+# I14: 部品 → 使ってよい包み（決定 19。擬似端末は relay_lib/terminal.py が包みを兼ねる）
+WRAPPED = {
+    "fcntl": (LIB + "lib/locks.py",),
+    "pty": (LIB + "relay_lib/terminal.py",),
+    "termios": (LIB + "relay_lib/terminal.py",),
+    "urllib.request": (LIB + "lib/notify.py",),
+    "proc-fs": (LIB + "lib/procs.py",),
+    "fence-regex": (LIB + "lib/md.py",),
+}
+RE_FUNCS = {"compile", "match", "search", "fullmatch", "finditer", "findall", "sub", "subn", "split"}
+FENCE_HINT = re.compile(r"```|~~~|`\{3|~\{3|\[`~\]|\[~`\]")
 RULE_NAMES = {"main", "build_parser", "_build_parser"}
 SHELL_RULE_NAMES = {"usage"}
 SH_FUNC_RE = re.compile(r"^(\s*)(?:function\s+([A-Za-z_][\w:.-]*)\s*(?:\(\))?|([A-Za-z_][\w:.-]*)\s*\(\))\s*(\{.*)?$")
@@ -107,6 +124,57 @@ def py_functions(text: str) -> list[tuple[str, str]] | None:
     except SyntaxError:
         return None
     return [(n.name, py_body_key(n)) for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+
+
+def _docstring_ids(tree: ast.AST) -> set[int]:
+    ids = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and node.body:
+            first = node.body[0]
+            if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant) \
+                    and isinstance(first.value.value, str):
+                ids.add(id(first.value))
+    return ids
+
+
+def _strings(node: ast.AST) -> list[str]:
+    return [n.value for n in ast.walk(node) if isinstance(n, ast.Constant) and isinstance(n.value, str)]
+
+
+def wrapped_parts(text: str) -> dict[str, str]:
+    """I14: 包みが受け持つ部品の使用を `{部品: 最初の行と形}` で返す（読めない Python は空）。"""
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return {}
+    found: dict[str, str] = {}
+
+    def hit(part: str, node: ast.AST, how: str) -> None:
+        found.setdefault(part, f"{node.lineno} 行: {how}")
+
+    docs = _docstring_ids(tree)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for a in node.names:
+                for part in ("fcntl", "pty", "termios", "urllib.request"):
+                    if a.name == part or a.name.startswith(part + "."):
+                        hit(part, node, f"import {a.name}")
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            names = {a.name for a in node.names}
+            for part in ("fcntl", "pty", "termios", "urllib.request"):
+                if node.module == part or node.module.startswith(part + ".") \
+                        or (part == "urllib.request" and node.module == "urllib" and "request" in names):
+                    hit(part, node, f"from {node.module} import")
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in docs \
+                and "/proc/" in node.value:
+            hit("proc-fs", node, repr(node.value[:40]))
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            f = node.func
+            regex = f.attr in RE_FUNCS and isinstance(f.value, ast.Name) and f.value.id == "re"
+            if (regex or f.attr in ("startswith", "endswith")) \
+                    and any(FENCE_HINT.search(s) for a in node.args for s in _strings(a)):
+                hit("fence-regex", node, f"{'re.' if regex else '.'}{f.attr}")
+    return found
 
 
 def _norm_sh(lines: list[str]) -> str:
@@ -190,6 +258,11 @@ def scan(root: Path) -> tuple[list[dict], dict]:
         if n > MAX_LINES:
             violations.append({"kind": "lines", "path": rel, "function": "", "detail": f"{n} 行", "lines": n})
         lang = "py" if rel.endswith(".py") else "sh"
+        if lang == "py":
+            for part, where in sorted(wrapped_parts(text).items()):
+                if rel not in WRAPPED[part]:
+                    violations.append({"kind": "wrapped", "path": rel, "function": part,
+                                       "detail": f"包み {' / '.join(WRAPPED[part])} が受け持つ部品を使う（{where}）"})
         found = py_functions(text) if lang == "py" else sh_functions(text)
         if found is None:
             unparsed += 1
