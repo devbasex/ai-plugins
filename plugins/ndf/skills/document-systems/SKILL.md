@@ -49,7 +49,7 @@ allowed-tools:
 
 **取得で提出先の設定を要求しない。** 素材が Google Drive にあり、提出先が Notion である構成が
 ある。提出先だけを見ると、取得の参照を取り違える。**提出先がまだ決まっていない既存文書の
-取り込み（[references/import.md](references/import.md) の用途 2）も、設定の有無によらず行う。**
+取り込み（[references/import.md](references/import.md) の用途 2）も、提出先の設定なしで行う。**
 
 取得元の URL から見分けるときの手掛かりは次のとおり。
 
