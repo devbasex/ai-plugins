@@ -39,6 +39,11 @@ _PREFIXES: tuple[tuple[str, ...], ...] = (
     ("npx",),
 )
 
+# `env` の前置きで値を取るオプション（#1312）。`-S` は後ろの 1 語をコマンドとして割るため、
+# 語の並びから実行器を読めない。ここに入れず、既知でないとして扱う。
+_ENV_VALUE_OPTIONS = frozenset({"-u", "--unset", "-C", "--chdir"})
+_ENV_FLAGS = frozenset({"-i", "--ignore-environment", "-", "-0", "--null", "-v", "--debug"})
+
 # 対象の語に含まれてはならない文字。組み立てた語の並びは `shell=False` で走らせるが、
 # 担当が書いた値を語として通す以上、シェルの構文に読める値は最初から受け取らない。
 _SHELL_CHARS = frozenset(";&|$`<>()\n")
@@ -56,12 +61,35 @@ def _skip_options(words: list[str], i: int) -> int:
     return i
 
 
+def _skip_env(words: list[str], i: int) -> Optional[int]:
+    """`env` の前置き（オプションと `NAME=VAL`）を読み飛ばした位置。読めないオプションなら `None`。"""
+    i += 1
+    while i < len(words):
+        word = words[i]
+        if word in _ENV_VALUE_OPTIONS:
+            i += 2
+        elif word in _ENV_FLAGS or word.startswith(("--unset=", "--chdir=")):
+            i += 1
+        elif word.startswith("-"):
+            return None
+        elif "=" in word:
+            i += 1
+        else:
+            break
+    return i
+
+
 def runner_index(words: list[str]) -> Optional[int]:
     """既知の実行器の**最後の語**の位置。既知でなければ `None`。
 
     `python -m pytest` なら `pytest` の位置を返す。対象の語はこの位置より後ろにある。
     """
     i = 0
+    if words[:1] == ["env"]:
+        skipped = _skip_env(words, 0)
+        if skipped is None:
+            return None
+        i = skipped
     progressed = True
     while progressed:
         progressed = False
