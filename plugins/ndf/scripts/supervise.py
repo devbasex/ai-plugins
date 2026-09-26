@@ -226,7 +226,6 @@ from monitor import USAGE_LIMIT_FATAL  # noqa: E402  利用上限の文言の表
 from pr_mode import with_mode_line  # noqa: E402
 from pace import PaceError, read_pace  # noqa: E402
 import slow_step as ss  # noqa: E402  遅れの見張りの材料
-from statefile import sv_state_home  # noqa: E402  プランの状態の実体の置き場所（phase_cost も読む）
 import gh_parts  # noqa: E402  GitHub の上限の見分けと rate_limit の読み取り
 
 WORK_TOOLS = "Read,Edit,Write,Bash,Grep,Glob"
@@ -2891,6 +2890,14 @@ def under_temp(path: Path) -> bool:
     except OSError:
         return False
     return any(p == r or r in p.parents for r in temp_roots())
+
+
+def sv_state_home() -> Path:
+    """プランの状態の実体の置き場所。`NDF_SV_STATE_DIR` → `${XDG_STATE_HOME}/ndf/sv` → `~/.local/state/ndf/sv`。"""
+    if os.environ.get("NDF_SV_STATE_DIR"):
+        return Path(os.environ["NDF_SV_STATE_DIR"])
+    base = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
+    return Path(base) / "ndf" / "sv"
 
 
 def attention_lines(prog: Path, offset: int) -> tuple[list[dict], int]:
