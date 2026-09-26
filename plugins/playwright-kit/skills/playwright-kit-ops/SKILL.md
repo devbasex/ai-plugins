@@ -31,6 +31,29 @@ playwright_kit のスクリプト群を実行してテスト環境のセット�
 | `scripts/upload_md_as_gdoc.py` | Markdown を Google Doc に変換・アップロード | レポート |
 | `scripts/build_gdoc_with_drive_links.py` | Google Doc にエビデンスの Drive リンクを埋め込み | レポート |
 
+## 出力と終了コード
+
+`scripts/*.py` の標準出力は 1 つの JSON である。経過や注意は標準エラーへ書く。
+`--output` を取るスクリプトは、結果の本体をそのファイルへ書き、標準出力には書き出し先と件数の要約を返す。
+`record_scenario.py` は `--output` を付けないとき codegen が出すコードを標準出力へ流す。
+`init_project.sh` / `init_project.bat` は人が読む経過を出す。
+
+| スクリプト | 0 | 1 | 2 |
+|---|---|---|---|
+| `init_project.sh` / `.bat` | 初期化した (dry-run を含む) | 引数の誤り・必要なコマンドが無い | — |
+| `classify_page_role.py` | 分類した (開けなかった URL は要素の `error` に入る) | — | 引数の誤り |
+| `record_scenario.py` | codegen の終了コードをそのまま返す | 同左 | playwright CLI が無い・起動できない |
+| `run_a11y_scan.py` | 走査した | `--fail-on-violations` で違反が 1 件以上 | 引数の誤り |
+| `check_cwv.py` | 計測した | `--fail-on-poor` で poor が 1 件以上 | 引数の誤り |
+| `upload_evidence.py` | 上げた | 認証・Drive API の失敗 | 引数の誤り・ファイルが無い |
+| `gdrive_upload_dir.py` / `upload_md_as_gdoc.py` | 上げた | 認証・Drive API の失敗 | 引数の誤り |
+| `build_gdoc_with_drive_links.py` | Doc を作った | run-id のフォルダが無い・認証・Drive API の失敗 | 引数の誤り |
+
+1 の「認証・Drive API の失敗」は例外で止まり、標準エラーに理由が出る (標準出力の JSON は出ない)。
+計画と作成の工程のスクリプトは各 Skill に置く: `playwright-planning/scripts/plan_skeleton.py` (計画書の雛形)、
+`playwright-authoring/scripts/lint_scenario.py` (構文木での検査) と `app_ready.sh` (起動の確認)。
+終了コードは各 Skill の SKILL.md に書く。
+
 ## セットアップ
 
 ### プロジェクト初期化
@@ -58,13 +81,15 @@ cd /path/to/your-app
 ./scenario-test/run.sh --pwk-drive-folder=<ID>    # Drive 自動アップロード
 ```
 
-Drive 連携は optional dependency として扱う。`google-auth` skill はどのランタイムの
-配布物にも同梱していないため、Drive 系コマンドや `--pwk-drive-folder` を使う場合は
-リポジトリ [devbasex/ai-plugins](https://github.com/devbasex/ai-plugins) を clone し、
-`GOOGLE_AUTH_SCRIPTS` をその clone 先の `google-auth/scripts` へ設定する。
+Drive 連携は optional dependency として扱う。`google-auth` / `google-drive` skill は
+NDF の 4 つの manifest (`plugins/ndf/manifests/*-skills.txt`) すべてに載っているが、
+playwright-kit とは別のプラグインであるため、置かれる場所は導入したランタイムで変わる。
+スクリプトは各ランタイムの標準の導入先と、この Skill と並ぶ `google-auth/scripts` を探す
+(`scripts/_drive_auth.py`)。候補で見つからないときは `GOOGLE_AUTH_SCRIPTS` を
+`google-auth/scripts` へ設定する。
 
 ```bash
-# <ai-plugins を clone した先> を実パスに置き換える
+# 例: ai-plugins を clone した先の google-auth を使う
 export GOOGLE_AUTH_SCRIPTS=<ai-plugins のパス>/plugins/ndf/skills/google-auth/scripts
 cd scenario-test
 uv sync --extra drive
