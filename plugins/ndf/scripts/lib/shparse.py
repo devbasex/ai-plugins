@@ -70,6 +70,41 @@ def has_parse_error(cmd: str) -> bool:
     return parse_bash(cmd).has_error
 
 
+def _read_write_quirk(n: Node) -> bool:
+    """`<>` が割れた ERROR（`redirect_operator()` と、後ろの `>` のリダイレクトで読み直せる）。
+
+    被演算子が空白の後にあれば `<` の後ろの `>` だけが ERROR になり、密着していれば `<` だけが ERROR になって
+    すぐ後ろに `>` のリダイレクトが続く。"""
+    text, prev, nxt = node_text(n), n.prev_sibling, n.next_sibling
+    if text == ">" and prev is not None and prev.type == "<":
+        return n.parent is not None and n.parent.type == "file_redirect"
+    return (text == "<" and nxt is not None and nxt.type == "file_redirect" and nxt.start_byte == n.end_byte
+            and node_text(nxt).startswith(">"))
+
+
+def _heredoc_arithmetic(n: Node) -> bool:
+    """ヒアドキュメントの本文の `$((…))`（構文木はコマンド置換と読むが算術展開で、中の ERROR は読み違いである）。"""
+    return (n.type == "command_substitution" and n.parent is not None and n.parent.type == "heredoc_body"
+            and node_text(n).startswith("$(("))
+
+
+def unreadable(root: Node) -> bool:
+    """構文木に、包みが読み直せない ERROR・欠けた字句があるか（`! case … esac`・`echo hi >` など）。
+
+    真のとき、呼び出し側は判定をせずに通す。`<>` の割れとヒアドキュメントの本文の `$((…))` は読み直せるので数えない。"""
+    if not root.has_error:
+        return False
+    stack = [root]
+    while stack:
+        n = stack.pop()
+        if _heredoc_arithmetic(n):
+            continue
+        if n.is_missing or (n.is_error and not _read_write_quirk(n)):
+            return True
+        stack.extend(c for c in n.children if c.has_error or c.is_missing)
+    return False
+
+
 def node_text(n: Node) -> str:
     return n.text.decode("utf-8", errors="replace") if n.text is not None else ""
 
@@ -202,3 +237,19 @@ def substitutions(n: Node) -> Iterator[Node]:
                 yield parse_bash(m.group(1))
         elif c.child_count:
             yield from substitutions(c)
+
+
+def heredoc_substitutions(r: Node) -> Iterator[Node]:
+    """ヒアドキュメント（`heredoc_redirect`）の本文の置換だけを返す。後ろに並ぶリダイレクトの中は含めない。
+
+    区切りを引用したヒアドキュメントは本文を展開しないので、何も返さない。"""
+    if heredoc_quoted(r):
+        return
+    for c in r.children:
+        if c.type != "heredoc_body":
+            continue
+        if c.child_count:
+            yield from substitutions(c)
+        else:
+            for m in _BACKTICK.finditer(node_text(c)):
+                yield parse_bash(m.group(1))
