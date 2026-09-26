@@ -37,15 +37,9 @@ TARGET=$(wt_normalize_path "$TARGET" "$(pwd -P)")
 MAIN_DIR=$(wt_main_dir "$TARGET") || MAIN_DIR=$(wt_main_dir) || exit 0
 DECLARATION=$(wt_declaration "$MAIN_DIR") || exit 0
 
-decl_get() { printf '%s' "$DECLARATION" | jq -r "$1" 2>/dev/null; }
-
 # compose 以外の実行系は未対応として扱う。
-KIND=$(decl_get '.localenv.kind // empty')
+KIND=$(wt_declaration_get "$DECLARATION" '.localenv.kind // empty')
 [ "$KIND" = "compose" ] || exit 0
-
-target_branch() {
-  git -C "$TARGET" symbolic-ref --short -q HEAD 2>/dev/null
-}
 
 # --- setup ------------------------------------------------------------------
 
@@ -140,7 +134,7 @@ replace_with_real_copy() {
 do_setup() {
   [ -d "$TARGET" ] || { printf '作業ツリーがありません: %s\n' "$TARGET" >&2; return 1; }
   local rel rc=0
-  _wt_read_lines < <(decl_get '.localenv.copy_from_main // [] | .[]')
+  _wt_read_lines < <(wt_declaration_get "$DECLARATION" '.localenv.copy_from_main // [] | .[]')
   for rel in "${WT_LINES[@]+"${WT_LINES[@]}"}"; do
     [ -n "$rel" ] || continue
     if ! wt_is_safe_relative "$rel"; then
@@ -151,7 +145,7 @@ do_setup() {
   done
   [ "$rc" = 0 ] || return 1
 
-  _wt_read_lines < <(decl_get '.localenv.copy_as_real // [] | .[]')
+  _wt_read_lines < <(wt_declaration_get "$DECLARATION" '.localenv.copy_as_real // [] | .[]')
   for rel in "${WT_LINES[@]+"${WT_LINES[@]}"}"; do
     [ -n "$rel" ] || continue
     if ! wt_is_safe_relative "$rel"; then
@@ -168,10 +162,10 @@ do_setup() {
 # 0 一致 / 1 不一致 / 2 未起動または適用外
 do_verify() {
   local probe loaded branch
-  probe=$(decl_get '.localenv.branch_probe // empty')
+  probe=$(wt_declaration_get "$DECLARATION" '.localenv.branch_probe // empty')
   [ -n "$probe" ] || return 2
 
-  branch=$(target_branch)
+  branch=$(wt_current_branch "$TARGET")
   [ -n "$branch" ] || return 2
 
   loaded=$(cd "$MAIN_DIR" && sh -c "$probe" 2>/dev/null) || return 2
@@ -195,7 +189,7 @@ do_healthcheck() {
   rc=$?
   [ "$rc" = 0 ] || return "$rc"
 
-  command=$(decl_get '.localenv.healthcheck // empty')
+  command=$(wt_declaration_get "$DECLARATION" '.localenv.healthcheck // empty')
   [ -n "$command" ] || return 2
   (cd "$MAIN_DIR" && sh -c "$command")
 }
@@ -214,9 +208,9 @@ do_aim() {
     printf '作業ツリーではありません: %s\n' "$TARGET" >&2
     return 1
   }
-  layout=$(decl_get '.localenv.layout // empty')
-  service=$(decl_get '.localenv.app_service // empty')
-  src_target=$(decl_get '.localenv.src_target // empty')
+  layout=$(wt_declaration_get "$DECLARATION" '.localenv.layout // empty')
+  service=$(wt_declaration_get "$DECLARATION" '.localenv.app_service // empty')
+  src_target=$(wt_declaration_get "$DECLARATION" '.localenv.src_target // empty')
   project=$(wt_compose_project "$(basename "$MAIN_DIR")") || {
     printf '%s\n' "コンテナのプロジェクト名を決められません" >&2
     return 1
@@ -228,7 +222,7 @@ do_aim() {
   }
 
   # 切り替える前に、追跡されない生成物を作る。
-  _wt_read_lines < <(decl_get '.localenv.build_before_aim // [] | .[]')
+  _wt_read_lines < <(wt_declaration_get "$DECLARATION" '.localenv.build_before_aim // [] | .[]')
   for build in "${WT_LINES[@]+"${WT_LINES[@]}"}"; do
     [ -n "$build" ] || continue
     (cd "$TARGET" && sh -c "$build") || {
@@ -264,8 +258,8 @@ do_aim() {
   esac
 
   # 実行中のプロセスがコードの位置を保持している場合は、再読み込みを促す。
-  reload_process=$(decl_get '.localenv.reload_signal.process // empty')
-  reload_signal=$(decl_get '.localenv.reload_signal.signal // empty')
+  reload_process=$(wt_declaration_get "$DECLARATION" '.localenv.reload_signal.process // empty')
+  reload_signal=$(wt_declaration_get "$DECLARATION" '.localenv.reload_signal.signal // empty')
   if [ -n "$reload_process" ] && [ -n "$reload_signal" ] && [ -n "$service" ]; then
     for container in $(docker ps --filter "label=com.docker.compose.project=$project" --filter "label=com.docker.compose.service=$service" --format '{{.Names}}' 2>/dev/null); do
       docker exec -u root "$container" pkill "-${reload_signal}" -x -- "$reload_process" 2>/dev/null || true
@@ -280,7 +274,7 @@ do_aim() {
 # 0 相乗り / 1 分離
 do_mode() {
   local pattern path matched=""
-  _wt_read_lines < <(decl_get '.localenv.isolate_when // [] | .[]')
+  _wt_read_lines < <(wt_declaration_get "$DECLARATION" '.localenv.isolate_when // [] | .[]')
   local patterns=("${WT_LINES[@]+"${WT_LINES[@]}"}")
 
   if [ "${#patterns[@]}" -eq 0 ]; then

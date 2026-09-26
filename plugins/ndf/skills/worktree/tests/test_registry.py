@@ -485,4 +485,4 @@ def test_the_two_lock_implementations_share_one_procedure(name: str) -> None:
     """
     wt = "wt_" + name if name == "lock_acquire" else "_wt_" + name
     wf = "wf_" + name if name == "lock_acquire" else "_wf_" + name
-    assert _lock_body(LIB, wt) == _lock_body(WF_LIB, wf)
+    assert _lock_body(LIB.with_name("worktree-registry.sh"), wt) == _lock_body(WF_LIB, wf)
