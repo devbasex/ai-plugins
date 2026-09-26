@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 
@@ -37,9 +38,10 @@ def main() -> int:
         fields="id,name,webViewLink,mimeType",
         supportsAllDrives=True,
     ).execute()
-    print(f"OK: created {file['name']} ({file['mimeType']})")
-    print(f"     id: {file['id']}")
-    print(f"     url: {file['webViewLink']}")
+    print(json.dumps({
+        "id": file["id"], "name": file["name"],
+        "mime_type": file["mimeType"], "url": file["webViewLink"],
+    }, ensure_ascii=False, indent=2))
     return 0
 
 

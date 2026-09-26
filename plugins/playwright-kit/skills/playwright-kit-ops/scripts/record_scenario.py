@@ -20,6 +20,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import shutil
 import subprocess
 import sys
@@ -50,8 +51,10 @@ def main() -> int:
     # PATH 再検索による不一致や PATH 改竄リスクを避ける)
     pw = shutil.which("playwright")
     if not pw:
-        print("ERROR: playwright CLI が見つかりません。", file=sys.stderr)
-        print("  uv sync && uv run playwright install chromium", file=sys.stderr)
+        print(json.dumps({
+            "status": "error",
+            "message": "playwright CLI が見つからない (uv sync && uv run playwright install chromium)",
+        }, ensure_ascii=False))
         return 2
 
     cmd = [pw, "codegen", "--target", args.target]
@@ -76,7 +79,8 @@ def main() -> int:
     try:
         result = subprocess.run(cmd, check=False)
     except FileNotFoundError:
-        print("ERROR: playwright CLI 実行に失敗", file=sys.stderr)
+        print(json.dumps({"status": "error", "message": "playwright CLI の実行に失敗"},
+                         ensure_ascii=False))
         return 2
 
     if args.output and args.output.exists():
@@ -97,6 +101,12 @@ def main() -> int:
         print("  3. templates/test_<role>.py.template に貼り付け、page_role / role marker を",
               file=sys.stderr)
         print("     付与して `uv run pytest --pwk-config=...` で実行する", file=sys.stderr)
+    if args.output:
+        # --output を付けないときの stdout は codegen が出すコードそのもの
+        print(json.dumps({
+            "output": str(args.output), "target": args.target,
+            "written": args.output.exists(), "returncode": result.returncode,
+        }, ensure_ascii=False))
     return result.returncode
 
 

@@ -228,7 +228,11 @@ def main() -> int:
     output_text = json.dumps(results, indent=2, ensure_ascii=False)
     if args.output:
         args.output.write_text(output_text, encoding="utf-8")
-        print(f"OK: {len(results)} URL を分類 → {args.output}")
+        print(json.dumps({
+            "output": str(args.output),
+            "count": len(results),
+            "errors": sum(1 for r in results if "error" in r),
+        }, ensure_ascii=False))
     else:
         print(output_text)
     return 0

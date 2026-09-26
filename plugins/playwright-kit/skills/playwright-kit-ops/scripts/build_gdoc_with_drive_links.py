@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import sys
@@ -148,13 +149,13 @@ def main() -> int:
 
     service = drive_service(SCOPES)
     run_folder_id = find_run_folder_id(service, args.folder, args.run_id)
-    print(f"run folder: {run_folder_id}")
+    print(f"run folder: {run_folder_id}", file=sys.stderr)
 
     mapping = list_folder_files(service, run_folder_id)
-    print(f"Indexed {len(mapping)} files")
+    print(f"Indexed {len(mapping)} files", file=sys.stderr)
 
     md_new, replaced = rewrite_links(args.md.read_text(encoding="utf-8"), mapping)
-    print(f"Replaced links: {replaced} matches")
+    print(f"Replaced links: {replaced} matches", file=sys.stderr)
 
     tmp_md = Path("/tmp/report_with_drive_links.md")
     tmp_md.write_text(md_new, encoding="utf-8")
@@ -166,9 +167,12 @@ def main() -> int:
         fields="id,name,webViewLink,mimeType",
         supportsAllDrives=True,
     ).execute()
-    print(f"OK: created {file['name']} ({file['mimeType']})")
-    print(f"     id: {file['id']}")
-    print(f"     url: {file['webViewLink']}")
+    print(json.dumps({
+        "id": file["id"], "name": file["name"],
+        "mime_type": file["mimeType"], "url": file["webViewLink"],
+        "run_folder_id": run_folder_id, "indexed": len(mapping),
+        "replaced_links": replaced,
+    }, ensure_ascii=False, indent=2))
     return 0
 
 
