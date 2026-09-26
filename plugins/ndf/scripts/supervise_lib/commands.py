@@ -10,6 +10,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import mdtable
 import slow_step as ss
 from step_result import result
 from supervise_lib.decl import SUPERVISE_DECL, DeclError, decl_roots, read_decl, sync_checks_of
@@ -100,10 +101,11 @@ def cmd_design_glossary(root: str, mode: str, out: str) -> tuple[dict, int | Non
                 return result("supervise-design-glossary", "stopped",
                               f"起こした用語集をコミットできない: {p.stderr.strip()[-300:]}", [],
                               {"initialized": 0}), 1
-    rows = "\n".join(f"| {w.get('term')} | {w.get('count')} | {w.get('kind')} | `{w.get('first')}` |" for w in words)
+    rows = [[w.get("term"), w.get("count"), w.get("kind"), f"`{w.get('first')}`"] for w in words]
     note = ("## 用語集の候補\n\nこの Pull Request で用語集を起こした（`glossary.py init`）: "
             + "、".join(f"`{c}`" for c in created) + "。\n語の採否は承認ゲート 1 で見る。候補の語（`glossary.py candidates`）:\n\n"
-            + ("| 語 | 回数 | 種類 | 最初の場所 |\n| --- | ---: | --- | --- |\n" + rows if rows
+            + (mdtable.table_markdown(("語", "回数", "種類", "最初の場所"), rows, align=(None, "right", None, None))
+               if rows
                else "候補は 0 件（要求から語を起こす）") + "\n")
     Path(out).parent.mkdir(parents=True, exist_ok=True)
     Path(out).write_text(note)
