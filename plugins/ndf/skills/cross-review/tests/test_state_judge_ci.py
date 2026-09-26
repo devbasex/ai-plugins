@@ -20,6 +20,9 @@ import json
 import pathlib
 
 import pytest
+import review_lib.ci
+import review_lib.commands.judge
+import review_lib.github
 
 PR = 7731
 REPO = "o/r"
@@ -45,7 +48,7 @@ def check_runs(monkeypatch, state_mod):
         def _fetch(repo, sha):
             calls.append((repo, sha))
             return runs
-        monkeypatch.setattr(state_mod, "_fetch_check_runs", _fetch)
+        monkeypatch.setattr(review_lib.ci, "_fetch_check_runs", _fetch)
         return calls
 
     _set.calls = calls  # type: ignore[attr-defined]
@@ -96,7 +99,7 @@ def test_a_code_related_failure_sends_the_round_to_the_fix_step(tmp_dir, state_m
     _write(tmp_dir, _state([_approved_round()]))
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_judge(argparse.Namespace(pr=PR))
+        review_lib.commands.judge.cmd_judge(argparse.Namespace(pr=PR))
 
     assert e.value.code == 2
     st = _read(tmp_dir)
@@ -111,7 +114,7 @@ def test_a_meta_only_failure_still_converges(tmp_dir, state_mod, check_runs):
     _write(tmp_dir, _state([_approved_round()]))
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_judge(argparse.Namespace(pr=PR))
+        review_lib.commands.judge.cmd_judge(argparse.Namespace(pr=PR))
 
     assert e.value.code == 0
     st = _read(tmp_dir)
@@ -125,7 +128,7 @@ def test_all_green_converges(tmp_dir, state_mod, check_runs):
     _write(tmp_dir, _state([_approved_round()]))
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_judge(argparse.Namespace(pr=PR))
+        review_lib.commands.judge.cmd_judge(argparse.Namespace(pr=PR))
 
     assert e.value.code == 0
     assert _read(tmp_dir)["rounds"][-1]["ci"]["verdict"] == "success"
@@ -138,7 +141,7 @@ def test_a_running_check_is_not_a_failure(tmp_dir, state_mod, check_runs, capsys
     _write(tmp_dir, _state([_approved_round()]))
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_judge(argparse.Namespace(pr=PR))
+        review_lib.commands.judge.cmd_judge(argparse.Namespace(pr=PR))
 
     assert e.value.code == 0
     ci = _read(tmp_dir)["rounds"][-1]["ci"]
@@ -155,7 +158,7 @@ def test_an_unavailable_query_still_converges(tmp_dir, state_mod, check_runs):
     _write(tmp_dir, _state([_approved_round()]))
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_judge(argparse.Namespace(pr=PR))
+        review_lib.commands.judge.cmd_judge(argparse.Namespace(pr=PR))
 
     assert e.value.code == 0
     st = _read(tmp_dir)
@@ -171,8 +174,8 @@ def test_no_check_run_is_treated_as_unavailable(tmp_dir, state_mod, real_github,
     REST の応答そのものから、その扱いになることを見る。
     """
     monkeypatch.setattr(
-        state_mod, "_gh_rest",
-        lambda path: state_mod.RestResponse(
+        review_lib.github, "_gh_rest",
+        lambda path: review_lib.github.RestResponse(
             headers={}, body={"total_count": 0, "check_runs": []},
             rate_remaining=None, rate_reset=None,
         ),
@@ -180,7 +183,7 @@ def test_no_check_run_is_treated_as_unavailable(tmp_dir, state_mod, real_github,
     _write(tmp_dir, _state([_approved_round()]))
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_judge(argparse.Namespace(pr=PR))
+        review_lib.commands.judge.cmd_judge(argparse.Namespace(pr=PR))
 
     assert e.value.code == 0
     assert _read(tmp_dir)["rounds"][-1]["ci"]["verdict"] == "unverified"
@@ -195,13 +198,13 @@ def test_the_query_runs_only_on_the_converging_branch(tmp_dir, state_mod, check_
     requested = _approved_round(agy={"intent": "REQUEST_CHANGES", "by_severity": {"major": 1}})
     _write(tmp_dir, _state([requested]))
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_judge(argparse.Namespace(pr=PR))
+        review_lib.commands.judge.cmd_judge(argparse.Namespace(pr=PR))
     assert e.value.code == 2
     assert calls == []
 
     _write(tmp_dir, _state([_approved_round()]))
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_judge(argparse.Namespace(pr=PR))
+        review_lib.commands.judge.cmd_judge(argparse.Namespace(pr=PR))
     assert e.value.code == 0
     assert calls == [(REPO, HEAD_SHA)]
 
@@ -212,7 +215,7 @@ def test_the_query_is_skipped_when_no_result_relaunches(tmp_dir, state_mod, chec
     _write(tmp_dir, _state([_approved_round(codex={})]))
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_judge(argparse.Namespace(pr=PR))
+        review_lib.commands.judge.cmd_judge(argparse.Namespace(pr=PR))
 
     assert e.value.code == 7
     assert calls == []
@@ -224,7 +227,7 @@ def test_the_round_records_what_was_checked(tmp_dir, state_mod, check_runs, caps
     _write(tmp_dir, _state([_approved_round()]))
 
     with pytest.raises(SystemExit):
-        state_mod.cmd_judge(argparse.Namespace(pr=PR))
+        review_lib.commands.judge.cmd_judge(argparse.Namespace(pr=PR))
 
     assert _read(tmp_dir)["rounds"][-1]["ci"]["sha"] == HEAD_SHA
     assert "CI_VERDICT=success" in capsys.readouterr().out
@@ -237,18 +240,18 @@ def test_the_head_commit_is_fetched_when_the_state_has_none(tmp_dir, state_mod, 
 
     def _meta(pr, repo=None):
         asked.append(pr)
-        return state_mod.PrMetadata(
+        return review_lib.github.PrMetadata(
             repo=REPO, author="someone", head_branch="feat/x", head_sha="deadbee",
             base_branch="develop", is_fork=False, rate_remaining=None, rate_reset=None,
         )
 
-    monkeypatch.setattr(state_mod, "_fetch_pr_metadata", _meta)
+    monkeypatch.setattr(review_lib.github, "_fetch_pr_metadata", _meta)
     round_ = _approved_round()
     del round_["head_sha"]
     _write(tmp_dir, _state([round_]))
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_judge(argparse.Namespace(pr=PR))
+        review_lib.commands.judge.cmd_judge(argparse.Namespace(pr=PR))
 
     assert e.value.code == 0
     assert asked == [PR]

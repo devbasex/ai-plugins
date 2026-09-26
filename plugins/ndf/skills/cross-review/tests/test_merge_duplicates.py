@@ -8,6 +8,8 @@
 from __future__ import annotations
 
 import pytest
+import review_lib.commands.collect_critiques
+import review_lib.commands.verify_findings
 
 
 def _finding(fid, agent, path, line, body, **over):
@@ -23,7 +25,7 @@ def _finding(fid, agent, path, line, body, **over):
 
 def merge(state_mod, findings):
     st = {"review_findings": list(findings)}
-    state_mod._merge_duplicates(st, round_no=1)
+    review_lib.commands.verify_findings._merge_duplicates(st, round_no=1)
     return st["review_findings"]
 
 
@@ -146,7 +148,7 @@ def test_no_evidence_leaves_the_flag_false(state_mod):
 
 def test_nothing_happens_without_findings(state_mod):
     st = {}
-    state_mod._merge_duplicates(st, round_no=1)
+    review_lib.commands.verify_findings._merge_duplicates(st, round_no=1)
     assert st.get("review_findings", []) == []
 
 
@@ -154,7 +156,7 @@ def test_nothing_happens_without_findings(state_mod):
 
 def merge_declared(state_mod, findings):
     st = {"review_findings": list(findings)}
-    state_mod._merge_declared_duplicates(st, round_no=1)
+    review_lib.commands.collect_critiques._merge_declared_duplicates(st, round_no=1)
     return st["review_findings"]
 
 

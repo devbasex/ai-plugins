@@ -22,6 +22,8 @@ import json
 import pathlib
 
 import pytest
+import review_lib.commands.report
+import review_lib.github
 
 PR = 4242
 REPO = "o/r"
@@ -52,7 +54,7 @@ def gh_output(monkeypatch, state_mod):
         def _fake(cmd):
             calls.append(list(cmd))
             return output
-        monkeypatch.setattr(state_mod, "_gh_output", _fake)
+        monkeypatch.setattr(review_lib.github, "_gh_output", _fake)
         return calls
 
     return _set
@@ -64,7 +66,7 @@ def test_unresolved_threads_are_listed_with_their_identifiers(state_mod, gh_outp
     """未解決の指摘だけが、Resolve に使える識別子つきで返る。"""
     calls = gh_output("PRRT_a\tsrc/foo.py\t42\nPRRT_b\tdocs/bar.md\t7\n")
 
-    threads = state_mod._fetch_unresolved_threads(REPO, PR)
+    threads = review_lib.github._fetch_unresolved_threads(REPO, PR)
 
     assert [t["id"] for t in threads] == ["PRRT_a", "PRRT_b"]
     assert threads[0]["path"] == "src/foo.py"
@@ -78,25 +80,25 @@ def test_no_unresolved_thread_returns_an_empty_list(state_mod, gh_output):
     """0 件は空の一覧で返る。取得できなかったこととは区別する。"""
     gh_output("")
 
-    assert state_mod._fetch_unresolved_threads(REPO, PR) == []
+    assert review_lib.github._fetch_unresolved_threads(REPO, PR) == []
 
 
 def test_failure_to_fetch_returns_none(state_mod, gh_output):
     """取得できないときは `None` を返し、0 件と区別する。"""
     gh_output(None)
 
-    assert state_mod._fetch_unresolved_threads(REPO, PR) is None
+    assert review_lib.github._fetch_unresolved_threads(REPO, PR) is None
 
 
 def test_missing_repository_is_treated_as_unavailable(state_mod, monkeypatch):
     """リポジトリを決められないときは GitHub を呼ばずに `None` を返す。"""
     monkeypatch.setattr(
-        state_mod, "_gh_output",
+        review_lib.github, "_gh_output",
         lambda cmd: pytest.fail("リポジトリが無いのに GitHub を呼んでいる"),
     )
 
-    assert state_mod._fetch_unresolved_threads("", PR) is None
-    assert state_mod._fetch_unresolved_threads("no-slash", PR) is None
+    assert review_lib.github._fetch_unresolved_threads("", PR) is None
+    assert review_lib.github._fetch_unresolved_threads("no-slash", PR) is None
 
 
 # ---------------- サブコマンド ----------------
@@ -105,7 +107,7 @@ def test_subcommand_prints_the_count_and_the_identifiers(tmp_dir, state_mod, gh_
     _seed_state(tmp_dir)
     gh_output("PRRT_a\tsrc/foo.py\t42\nPRRT_b\tdocs/bar.md\t7\n")
 
-    state_mod.cmd_unresolved_threads(argparse.Namespace(pr=PR))
+    review_lib.commands.report.cmd_unresolved_threads(argparse.Namespace(pr=PR))
 
     out = capsys.readouterr().out
     assert "UNRESOLVED_COUNT=2" in out
@@ -116,7 +118,7 @@ def test_subcommand_reports_zero_without_failing(tmp_dir, state_mod, gh_output, 
     _seed_state(tmp_dir)
     gh_output("")
 
-    state_mod.cmd_unresolved_threads(argparse.Namespace(pr=PR))
+    review_lib.commands.report.cmd_unresolved_threads(argparse.Namespace(pr=PR))
 
     assert "UNRESOLVED_COUNT=0" in capsys.readouterr().out
 
@@ -127,5 +129,5 @@ def test_subcommand_fails_when_the_count_cannot_be_fetched(tmp_dir, state_mod, g
     gh_output(None)
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_unresolved_threads(argparse.Namespace(pr=PR))
+        review_lib.commands.report.cmd_unresolved_threads(argparse.Namespace(pr=PR))
     assert e.value.code == 1

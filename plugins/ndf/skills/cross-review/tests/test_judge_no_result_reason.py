@@ -18,6 +18,8 @@ import json
 import pathlib
 
 import pytest
+import review_lib.commands.judge
+import review_lib.commands.report
 
 PR = 8729
 REPO = "o/r"
@@ -90,7 +92,7 @@ def _read(tmp_dir: pathlib.Path) -> dict:
 
 def _judge(state_mod) -> int:
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_judge(argparse.Namespace(pr=PR))
+        review_lib.commands.judge.cmd_judge(argparse.Namespace(pr=PR))
     return int(e.value.code or 0)
 
 
@@ -188,14 +190,14 @@ def test_the_verdict_reads_relaunchability_from_the_common_layer(
     判定が `usage_limit` を直に比べていれば、この変更は届かず 7 になる。
     """
     monkeypatch.setattr(
-        state_mod.monitor_outcome, "NO_RELAUNCH_REASONS", frozenset({"timeout"}))
+        review_lib.commands.judge.monitor_outcome, "NO_RELAUNCH_REASONS", frozenset({"timeout"}))
     _write(tmp_dir, _state([_round(codex=_approve(), agy=_no_result("timeout"))]))
 
     assert _judge(state_mod) == 1
     assert _read(tmp_dir)["final"] == "error"
 
     # 逆に `usage_limit` を外せば、判定は起動し直す
-    monkeypatch.setattr(state_mod.monitor_outcome, "NO_RELAUNCH_REASONS", frozenset())
+    monkeypatch.setattr(review_lib.commands.judge.monitor_outcome, "NO_RELAUNCH_REASONS", frozenset())
     _write(tmp_dir, _state([_round(codex=_approve(), agy=_no_result("usage_limit"))]))
 
     assert _judge(state_mod) == 7
@@ -256,7 +258,7 @@ def test_the_round_summary_shows_the_reason_of_a_no_result(tmp_dir, state_mod, c
                verdict="no_result"),
     ], final="error"))
 
-    state_mod.cmd_report(argparse.Namespace(pr=PR))
+    review_lib.commands.report.cmd_report(argparse.Namespace(pr=PR))
 
     out = capsys.readouterr().out
     assert "agy=NO_RESULT(usage_limit)" in out
@@ -273,6 +275,6 @@ def test_the_round_summary_shows_a_dash_when_the_reason_is_unknown(
         _round(codex=_approve(), agy={"intent": "NO_RESULT"}, verdict="no_result"),
     ]))
 
-    state_mod.cmd_report(argparse.Namespace(pr=PR))
+    review_lib.commands.report.cmd_report(argparse.Namespace(pr=PR))
 
     assert "agy=NO_RESULT(-)" in capsys.readouterr().out

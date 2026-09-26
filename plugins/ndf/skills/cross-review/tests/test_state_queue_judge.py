@@ -17,6 +17,11 @@ import json
 import pathlib
 
 import pytest
+import review_lib.ci
+import review_lib.commands.init
+import review_lib.commands.judge
+import review_lib.commands.read_result
+import review_lib.github
 
 REPO = "o/r"
 PR = 2911
@@ -63,7 +68,7 @@ def test_a_pending_queue_blocks_convergence(state_mod, queue_mod, fake_gh,
     fake_gh.set_mode("rate_limit")   # 流そうとしても、まだ上限のまま
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_judge(argparse.Namespace(pr=PR))
+        review_lib.commands.judge.cmd_judge(argparse.Namespace(pr=PR))
 
     assert e.value.code == 8
     assert _state(tmp_dir)["final"] is None
@@ -72,11 +77,11 @@ def test_a_pending_queue_blocks_convergence(state_mod, queue_mod, fake_gh,
 def test_an_empty_queue_still_converges(state_mod, tmp_dir, monkeypatch) -> None:
     """待ち行列が空なら、これまでどおり収束する。"""
     _seed(tmp_dir)
-    monkeypatch.setattr(state_mod, "_round_ci", lambda st, last, pr: {
+    monkeypatch.setattr(review_lib.ci, "_round_ci", lambda st, last, pr: {
         "verdict": "unverified", "failed": [], "pending": [], "reason": "テスト"})
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_judge(argparse.Namespace(pr=PR))
+        review_lib.commands.judge.cmd_judge(argparse.Namespace(pr=PR))
 
     assert e.value.code == 0
     assert _state(tmp_dir)["final"] == "approved"
@@ -90,7 +95,7 @@ def test_the_judge_reports_the_pending_count(state_mod, queue_mod, fake_gh,
     fake_gh.set_mode("rate_limit")
 
     with pytest.raises(SystemExit):
-        state_mod.cmd_judge(argparse.Namespace(pr=PR))
+        review_lib.commands.judge.cmd_judge(argparse.Namespace(pr=PR))
 
     assert "PENDING_POSTS=1" in capsys.readouterr().out
 
@@ -116,9 +121,9 @@ def test_the_review_is_confirmed_once_right_after_it_is_flushed(
         calls.append(url)
         return True
 
-    monkeypatch.setattr(state_mod, "_review_exists", _exists)
+    monkeypatch.setattr(review_lib.github, "_review_exists", _exists)
 
-    state_mod.cmd_flush(argparse.Namespace(pr=PR))
+    review_lib.commands.judge.cmd_flush(argparse.Namespace(pr=PR))
 
     assert calls == [REVIEW_URL]
     assert _state(tmp_dir)["rounds"][0]["codex"]["review_url"] == REVIEW_URL
@@ -151,9 +156,9 @@ def test_a_review_that_was_already_there_is_confirmed_too(
         calls.append(url)
         return True
 
-    monkeypatch.setattr(state_mod, "_review_exists", _exists)
+    monkeypatch.setattr(review_lib.github, "_review_exists", _exists)
 
-    state_mod.cmd_flush(argparse.Namespace(pr=PR))
+    review_lib.commands.judge.cmd_flush(argparse.Namespace(pr=PR))
 
     assert calls == [REVIEW_URL]
     assert _state(tmp_dir)["rounds"][0]["codex"]["review_url"] == REVIEW_URL
@@ -176,9 +181,9 @@ def test_a_review_that_did_not_arrive_is_recorded_as_no_result(
         {"match": "", "stdout": json.dumps(
             {"id": 4961230016, "html_url": REVIEW_URL})},
     ])
-    monkeypatch.setattr(state_mod, "_review_exists", lambda repo, pr, url: False)
+    monkeypatch.setattr(review_lib.github, "_review_exists", lambda repo, pr, url: False)
 
-    state_mod.cmd_flush(argparse.Namespace(pr=PR))
+    review_lib.commands.judge.cmd_flush(argparse.Namespace(pr=PR))
 
     assert _state(tmp_dir)["rounds"][0]["codex"]["intent"] == "NO_RESULT"
 
@@ -201,7 +206,7 @@ def test_a_post_refused_by_the_limit_is_queued_and_recorded(
          "stderr": "gh: API rate limit exceeded for user ID 1. (HTTP 403)\n"},
     ])
 
-    state_mod.cmd_read_result(argparse.Namespace(pr=PR, agent="codex",
+    review_lib.commands.read_result.cmd_read_result(argparse.Namespace(pr=PR, agent="codex",
                                                  file=str(rfile)))
 
     entry = _state(tmp_dir)["rounds"][0]["codex"]
@@ -239,10 +244,10 @@ def test_the_resume_keeps_what_the_flush_wrote_to_the_state(
         {"match": "", "stdout": json.dumps(
             {"id": 4961230016, "html_url": REVIEW_URL})},
     ])
-    monkeypatch.setattr(state_mod, "_review_exists", lambda repo, pr, url: True)
+    monkeypatch.setattr(review_lib.github, "_review_exists", lambda repo, pr, url: True)
 
     # `--focus` を渡し、手元の `st` を書き戻す経路（`state_changed`）を通す。
-    state_mod.cmd_init(argparse.Namespace(
+    review_lib.commands.init.cmd_init(argparse.Namespace(
         pr=PR, max_rounds=12, rotate_after=8, only=None, worktree=None,
         focus="重点観点", extra_instructions_file=None))
 
@@ -277,9 +282,9 @@ def test_the_take_in_flushes_what_was_left_before_posting(
         {"match": "", "stdout": json.dumps(
             {"id": 4961230016, "html_url": REVIEW_URL})},
     ])
-    monkeypatch.setattr(state_mod, "_review_exists", lambda repo, pr, url: True)
+    monkeypatch.setattr(review_lib.github, "_review_exists", lambda repo, pr, url: True)
 
-    state_mod.cmd_read_result(argparse.Namespace(pr=PR, agent="codex",
+    review_lib.commands.read_result.cmd_read_result(argparse.Namespace(pr=PR, agent="codex",
                                                  file=str(rfile)))
 
     rnd = _state(tmp_dir)["rounds"][0]
@@ -303,8 +308,8 @@ def test_the_queued_reviews_are_confirmed_once_both_results_are_taken_in(
         {"match": "", "stdout": json.dumps(
             {"id": 4961230016, "html_url": REVIEW_URL})},
     ])
-    monkeypatch.setattr(state_mod, "_review_exists", lambda repo, pr, url: True)
-    monkeypatch.setattr(state_mod, "_round_ci", lambda st, last, pr: {
+    monkeypatch.setattr(review_lib.github, "_review_exists", lambda repo, pr, url: True)
+    monkeypatch.setattr(review_lib.ci, "_round_ci", lambda st, last, pr: {
         "verdict": "unverified", "failed": [], "pending": [], "reason": "テスト"})
 
     for agent in ("codex", "agy"):
@@ -313,11 +318,11 @@ def test_the_queued_reviews_are_confirmed_once_both_results_are_taken_in(
             "event": "APPROVE", "comments_count": 0, "review_url": "",
             "queued": True, "by_severity": {},
         }), encoding="utf-8")
-        state_mod.cmd_read_result(argparse.Namespace(pr=PR, agent=agent,
+        review_lib.commands.read_result.cmd_read_result(argparse.Namespace(pr=PR, agent=agent,
                                                      file=str(rfile)))
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_judge(argparse.Namespace(pr=PR))
+        review_lib.commands.judge.cmd_judge(argparse.Namespace(pr=PR))
 
     assert e.value.code == 0
     round1 = _state(tmp_dir)["rounds"][0]
@@ -343,7 +348,7 @@ def test_a_broken_item_is_reported_instead_of_being_skipped(
         '{"kind": "review-post"', encoding="utf-8")
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_judge(argparse.Namespace(pr=PR))
+        review_lib.commands.judge.cmd_judge(argparse.Namespace(pr=PR))
 
     assert e.value.code == 8
     assert "待ち行列の項目を読めない" in capsys.readouterr().err

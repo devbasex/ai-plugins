@@ -21,6 +21,8 @@ import json
 import pathlib
 
 import pytest
+import review_lib.ci
+import review_lib.commands.judge
 
 REPO = "o/r"
 PR = 291
@@ -181,7 +183,7 @@ def test_the_flush_subcommand_drains_the_queue(state_mod, queue_mod, fake_gh,
     _post(queue_mod, tmp_path / "pending")
 
     fake_gh.set_mode("ok")
-    state_mod.cmd_flush(argparse.Namespace(pr=PR))
+    review_lib.commands.judge.cmd_flush(argparse.Namespace(pr=PR))
 
     assert queue_mod.Queue(tmp_path / "pending").count() == 0
 
@@ -201,10 +203,10 @@ def test_the_judge_drains_the_queue_at_its_entry(state_mod, queue_mod, fake_gh,
     _post(queue_mod, tmp_path / "pending")
 
     fake_gh.set_mode("ok")
-    monkeypatch.setattr(state_mod, "_round_ci", lambda st, last, pr: {
+    monkeypatch.setattr(review_lib.ci, "_round_ci", lambda st, last, pr: {
         "verdict": "unverified", "failed": [], "pending": [], "reason": "テスト"})
     with pytest.raises(SystemExit):
-        state_mod.cmd_judge(argparse.Namespace(pr=PR))
+        review_lib.commands.judge.cmd_judge(argparse.Namespace(pr=PR))
 
     assert queue_mod.Queue(tmp_path / "pending").count() == 0
 

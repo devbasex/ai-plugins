@@ -24,6 +24,9 @@ SCRIPTS = HERE.parent / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
 from classifications import has_domain_model, review_stage  # noqa: E402
+import review_lib.ci
+import review_lib.commands.judge
+import review_lib.review_focus
 
 PR = 1111
 
@@ -54,19 +57,19 @@ def test_design_stage_fields_hold_instructions_per_stage(state_mod, tmp_path):
     (tmp_path / "issues").mkdir()
     (tmp_path / "issues/issue-1-design.md").write_text("## ドメインモデル\n")
     changed = [{"status": "A", "paths": ["issues/issue-1-design.md"]}]
-    fields = state_mod._design_stage_fields("design", tmp_path, changed, "詳細の観点", "手で足した観点")
+    fields = review_lib.review_focus._design_stage_fields("design", tmp_path, changed, "詳細の観点", "手で足した観点")
     assert fields["design_has_model"] is True
     by = fields["review_instructions_by_stage"]
     assert by["detail"] == "詳細の観点"
-    assert by["model"].startswith(state_mod.MODEL_REVIEW_TEMPLATE) and by["model"].endswith("手で足した観点")
-    assert state_mod._design_stage_fields("code", tmp_path, changed, "x", "") == {}
+    assert by["model"].startswith(review_lib.review_focus.MODEL_REVIEW_TEMPLATE) and by["model"].endswith("手で足した観点")
+    assert review_lib.review_focus._design_stage_fields("code", tmp_path, changed, "x", "") == {}
 
 
 def test_round_stage_follows_state(state_mod):
     st = {"review_kind": "design", "design_has_model": True}
-    assert [state_mod._round_stage(st, n) for n in (1, 2, 3)] == ["model", "detail", "detail"]
-    assert state_mod._round_stage({"review_kind": "code"}, 1) is None
-    assert state_mod._round_stage({}, 1) is None  # 分類を持たない状態ファイル（再開）
+    assert [review_lib.review_focus._round_stage(st, n) for n in (1, 2, 3)] == ["model", "detail", "detail"]
+    assert review_lib.review_focus._round_stage({"review_kind": "code"}, 1) is None
+    assert review_lib.review_focus._round_stage({}, 1) is None  # 分類を持たない状態ファイル（再開）
 
 
 def _approved(no, **over):
@@ -86,7 +89,7 @@ def _state(rounds):
 @pytest.fixture()
 def tmp_dir(monkeypatch, tmp_path, state_mod):
     monkeypatch.setenv("CROSS_REVIEW_TMP_DIR", str(tmp_path))
-    monkeypatch.setattr(state_mod, "_fetch_check_runs", lambda repo, sha: [])
+    monkeypatch.setattr(review_lib.ci, "_fetch_check_runs", lambda repo, sha: [])
     return tmp_path
 
 
@@ -94,7 +97,7 @@ def _judge(state_mod, tmp_dir, state):
     path = tmp_dir / f"cross-review-pr{PR}-state.json"
     path.write_text(json.dumps(state))
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_judge(argparse.Namespace(pr=PR))
+        review_lib.commands.judge.cmd_judge(argparse.Namespace(pr=PR))
     return e.value.code, json.loads(path.read_text())
 
 

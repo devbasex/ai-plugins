@@ -10,23 +10,27 @@ worktree path は `<base>/<owner>--<name>/pr<N>` 形式で、他リポジトリ�
 from __future__ import annotations
 
 import pathlib
+import review_lib
+import review_lib.github
+import review_lib.workspace
+import tempfile
 
 
 def test_env_override_takes_precedence(monkeypatch, tmp_path, state_mod):
     explicit = tmp_path / "custom-base"
     monkeypatch.setenv("NDF_WORKTREE_BASE", str(explicit))
-    assert state_mod._default_worktree_base() == explicit
+    assert review_lib.workspace._default_worktree_base() == explicit
 
 
 def test_default_is_tmpdir_ndf_worktrees(monkeypatch, tmp_path, state_mod):
     """既定では永続 volume ではなくシステム tmpdir 配下を使う。"""
     monkeypatch.delenv("NDF_WORKTREE_BASE", raising=False)
-    monkeypatch.setattr(state_mod.tempfile, "gettempdir", lambda: str(tmp_path))
-    assert state_mod._default_worktree_base() == tmp_path / "ndf-worktrees"
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+    assert review_lib.workspace._default_worktree_base() == tmp_path / "ndf-worktrees"
 
 
 def test_repo_slug_is_path_safe(state_mod):
-    assert state_mod._repo_slug("devbasex/ai-plugins") == "devbasex--ai-plugins"
+    assert review_lib.github._repo_slug("devbasex/ai-plugins") == "devbasex--ai-plugins"
 
 
 def test_is_registered_worktree_rejects_foreign_dir(monkeypatch, tmp_path, state_mod):
@@ -34,8 +38,8 @@ def test_is_registered_worktree_rejects_foreign_dir(monkeypatch, tmp_path, state
     registered = tmp_path / "registered"
     foreign = tmp_path / "foreign"
     monkeypatch.setattr(
-        state_mod, "_sh",
+        review_lib, "_sh",
         lambda cmd, check=True: f"worktree {registered}\nHEAD abc\n",
     )
-    assert state_mod._is_registered_worktree(str(registered)) is True
-    assert state_mod._is_registered_worktree(str(foreign)) is False
+    assert review_lib.workspace._is_registered_worktree(str(registered)) is True
+    assert review_lib.workspace._is_registered_worktree(str(foreign)) is False

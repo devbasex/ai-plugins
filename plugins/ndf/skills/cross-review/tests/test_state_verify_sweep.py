@@ -18,6 +18,8 @@ import json
 import pathlib
 
 import pytest
+import review_lib.commands.report
+import review_lib.github
 
 PR = 3131
 REPO = "o/r"
@@ -66,7 +68,7 @@ def tmp_dir(monkeypatch, tmp_path, state_mod):
 def unresolved(monkeypatch, state_mod):
     def _set(threads):
         monkeypatch.setattr(
-            state_mod, "_fetch_unresolved_threads",
+            review_lib.github, "_fetch_unresolved_threads",
             lambda repo, pr: threads,
         )
     return _set
@@ -84,7 +86,7 @@ def test_zero_remaining_is_confirmed_against_github(tmp_dir, state_mod, unresolv
     unresolved([])
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_verify_sweep(_args())
+        review_lib.commands.report.cmd_verify_sweep(_args())
 
     assert e.value.code == 0
     assert "REMAINING_OPEN=0" in capsys.readouterr().out
@@ -101,7 +103,7 @@ def test_a_declaration_of_zero_does_not_override_the_actual_count(tmp_dir, state
                 {"id": "PRRT_b", "path": "docs/bar.md", "line": "7"}])
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_verify_sweep(_args())
+        review_lib.commands.report.cmd_verify_sweep(_args())
 
     assert e.value.code == 6
     assert "REMAINING_OPEN=2" in capsys.readouterr().out
@@ -116,7 +118,7 @@ def test_the_reason_is_kept_when_threads_remain(tmp_dir, state_mod, unresolved):
     unresolved([{"id": "PRRT_a", "path": "src/foo.py", "line": "42"}])
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_verify_sweep(_args())
+        review_lib.commands.report.cmd_verify_sweep(_args())
 
     assert e.value.code == 6
     assert _read(tmp_dir)["sweep"]["remaining_reason"] == "外部の担当者による指摘のため保留"
@@ -128,7 +130,7 @@ def test_a_missing_reason_is_recorded_as_absent(tmp_dir, state_mod, unresolved):
     unresolved([{"id": "PRRT_a", "path": "src/foo.py", "line": "42"}])
 
     with pytest.raises(SystemExit):
-        state_mod.cmd_verify_sweep(_args())
+        review_lib.commands.report.cmd_verify_sweep(_args())
 
     assert _read(tmp_dir)["sweep"]["remaining_reason"] == "理由の記載なし"
 
@@ -140,7 +142,7 @@ def test_unavailable_count_falls_back_to_the_declaration(tmp_dir, state_mod, unr
     unresolved(None)
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_verify_sweep(_args())
+        review_lib.commands.report.cmd_verify_sweep(_args())
 
     assert e.value.code == 0
     assert _read(tmp_dir)["sweep"]["verified"] is False
@@ -152,7 +154,7 @@ def test_a_missing_sweep_result_fails(tmp_dir, state_mod, unresolved):
     unresolved([])
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_verify_sweep(_args())
+        review_lib.commands.report.cmd_verify_sweep(_args())
 
     assert e.value.code == 1
 
@@ -165,7 +167,7 @@ def test_report_includes_the_remaining_count_and_the_reason(tmp_dir, state_mod, 
         "remaining_reason": "外部の担当者による指摘のため保留", "verified": True,
     }))
 
-    state_mod.cmd_report(argparse.Namespace(pr=PR))
+    review_lib.commands.report.cmd_report(argparse.Namespace(pr=PR))
 
     out = capsys.readouterr().out
     assert "最終スイープ" in out
@@ -179,7 +181,7 @@ def test_report_states_zero_when_nothing_remains(tmp_dir, state_mod, capsys):
         "remaining_reason": None, "verified": True,
     }))
 
-    state_mod.cmd_report(argparse.Namespace(pr=PR))
+    review_lib.commands.report.cmd_report(argparse.Namespace(pr=PR))
 
     assert "未解決の指摘: 0 件" in capsys.readouterr().out
 
@@ -188,6 +190,6 @@ def test_report_marks_an_unverified_sweep(tmp_dir, state_mod, capsys):
     """検証を通っていない状態ファイルでも報告が出る。"""
     _write(tmp_dir, _state())
 
-    state_mod.cmd_report(argparse.Namespace(pr=PR))
+    review_lib.commands.report.cmd_report(argparse.Namespace(pr=PR))
 
     assert "最終スイープ: 未検証" in capsys.readouterr().out

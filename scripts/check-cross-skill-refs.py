@@ -45,7 +45,7 @@ IGNORED_DIRS = {"__pycache__", ".pytest_cache", "tests"}
 # 既に知っている参照。**共通層ではなく Skill の本体どうしの参照**であるため、置き場所を
 # 移すだけでは解けない。解くには双方の Skill の設計が要る（#344）。
 EXCEPTIONS: dict[tuple[str, str], str] = {
-    ("plugins/ndf/skills/cross-review/scripts/state.py", "fix"): "#344",
+    ("plugins/ndf/skills/cross-review/scripts/review_lib/github.py", "fix"): "#344",
     # `google-drive` は `google-auth` の資格情報を使う。**4 つの manifest すべてが
     # 両方を載せている**ため、配る先で相手が欠けることが起きない。その条件は
     # `scripts/tests/test_google_auth_codistribution.py` が固定する。参照は候補の

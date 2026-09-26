@@ -21,6 +21,12 @@ import json
 import pathlib
 
 import pytest
+import review_lib
+import review_lib.commands.init
+import review_lib.commands.judge
+import review_lib.commands.merge_fix
+import review_lib.findings
+import review_lib.github
 
 PR = 7788
 REPO = "o/r"
@@ -70,7 +76,7 @@ def unresolved(monkeypatch, state_mod):
     """GitHub 側の未解決の指摘を差し替える。`None` は取得できなかったことを表す。"""
     def _set(threads):
         monkeypatch.setattr(
-            state_mod, "_fetch_unresolved_threads",
+            review_lib.github, "_fetch_unresolved_threads",
             lambda repo, pr: threads,
         )
     return _set
@@ -82,7 +88,7 @@ def test_resume_records_the_carried_over_threads(state_mod, unresolved):
     unresolved(_threads("PRRT_a", "PRRT_b"))
     st = _state()
 
-    state_mod._record_carried_over(st, REPO, PR)
+    review_lib.findings._record_carried_over(st, REPO, PR)
 
     assert st["carried_over"]["count"] == 2
     assert st["carried_over"]["thread_ids"] == ["PRRT_a", "PRRT_b"]
@@ -94,7 +100,7 @@ def test_resume_without_unresolved_threads_records_nothing(state_mod, unresolved
     unresolved([])
     st = _state(carried_over={"count": 3, "thread_ids": ["PRRT_x"], "fixed_in_round": None})
 
-    state_mod._record_carried_over(st, REPO, PR)
+    review_lib.findings._record_carried_over(st, REPO, PR)
 
     assert st.get("carried_over") is None
 
@@ -105,7 +111,7 @@ def test_unavailable_count_keeps_the_previous_record(state_mod, unresolved):
     kept = {"count": 3, "thread_ids": ["PRRT_x"], "fixed_in_round": None}
     st = _state(carried_over=dict(kept))
 
-    state_mod._record_carried_over(st, REPO, PR)
+    review_lib.findings._record_carried_over(st, REPO, PR)
 
     assert st["carried_over"]["count"] == 3
     assert st["carried_over"]["thread_ids"] == ["PRRT_x"]
@@ -114,7 +120,7 @@ def test_unavailable_count_keeps_the_previous_record(state_mod, unresolved):
 def test_init_resume_reports_the_carried_over_count(tmp_dir, state_mod, unresolved, monkeypatch, capsys):
     """再開の出力に引き継いだ指摘の件数が出て、状態ファイルへ残る。"""
     unresolved(_threads("PRRT_a", "PRRT_b"))
-    monkeypatch.setattr(state_mod, "_sh", lambda cmd, check=True: REPO)
+    monkeypatch.setattr(review_lib, "_sh", lambda cmd, check=True: REPO)
     _write(tmp_dir, _state(
         auto_review_instructions="",
         review_instructions="",
@@ -125,7 +131,7 @@ def test_init_resume_reports_the_carried_over_count(tmp_dir, state_mod, unresolv
         worktree=str(tmp_dir), focus=None, extra_instructions_file=None,
     )
 
-    state_mod.cmd_init(args)
+    review_lib.commands.init.cmd_init(args)
 
     assert "CARRIED_OVER_THREADS=2" in capsys.readouterr().out
     assert _read(tmp_dir)["carried_over"]["count"] == 2
@@ -140,7 +146,7 @@ def test_approval_does_not_converge_while_carried_over_threads_wait(tmp_dir, sta
     }))
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_judge(argparse.Namespace(pr=PR))
+        review_lib.commands.judge.cmd_judge(argparse.Namespace(pr=PR))
 
     assert e.value.code == 2
     assert "CARRIED_OVER_THREADS=2" in capsys.readouterr().out
@@ -154,7 +160,7 @@ def test_approval_converges_after_the_fix_step_ran_once(tmp_dir, state_mod):
     }))
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_judge(argparse.Namespace(pr=PR))
+        review_lib.commands.judge.cmd_judge(argparse.Namespace(pr=PR))
 
     assert e.value.code == 0
     assert _read(tmp_dir)["final"] == "approved"
@@ -165,7 +171,7 @@ def test_without_carried_over_threads_the_verdict_is_unchanged(tmp_dir, state_mo
     _write(tmp_dir, _state())
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_judge(argparse.Namespace(pr=PR))
+        review_lib.commands.judge.cmd_judge(argparse.Namespace(pr=PR))
 
     assert e.value.code == 0
     assert _read(tmp_dir)["final"] == "approved"
@@ -178,7 +184,7 @@ def test_judge_records_the_verdict_on_the_round(tmp_dir, state_mod):
     }))
 
     with pytest.raises(SystemExit):
-        state_mod.cmd_judge(argparse.Namespace(pr=PR))
+        review_lib.commands.judge.cmd_judge(argparse.Namespace(pr=PR))
 
     assert _read(tmp_dir)["rounds"][-1]["verdict"] == "changes_requested"
 
@@ -195,7 +201,7 @@ def test_merge_fix_marks_the_round_that_handled_the_carried_over(tmp_dir, state_
         "deferred": [], "rejected": [],
     }))
 
-    state_mod.cmd_merge_fix(argparse.Namespace(pr=PR, file=None))
+    review_lib.commands.merge_fix.cmd_merge_fix(argparse.Namespace(pr=PR, file=None))
 
     st = _read(tmp_dir)
     assert st["carried_over"]["fixed_in_round"] == 1
@@ -212,7 +218,7 @@ def test_merge_fix_keeps_the_first_round_that_handled_it(tmp_dir, state_mod):
         "fixed_count": 1, "resolved_threads": [], "deferred": [], "rejected": [],
     }))
 
-    state_mod.cmd_merge_fix(argparse.Namespace(pr=PR, file=None))
+    review_lib.commands.merge_fix.cmd_merge_fix(argparse.Namespace(pr=PR, file=None))
 
     assert _read(tmp_dir)["carried_over"]["fixed_in_round"] == 1
 
@@ -230,11 +236,11 @@ def test_resume_after_the_fix_step_keeps_the_record(state_mod, unresolved):
         "count": 2, "thread_ids": ["PRRT_a", "PRRT_b"], "fixed_in_round": 1,
     })
 
-    changed = state_mod._record_carried_over(st, REPO, PR)
+    changed = review_lib.findings._record_carried_over(st, REPO, PR)
 
     assert changed is False
     assert st["carried_over"]["fixed_in_round"] == 1
-    assert state_mod._carried_over_pending(st) is None
+    assert review_lib.findings._carried_over_pending(st) is None
 
 
 def test_resume_after_the_fix_step_with_a_new_thread_forces_one_more_round(state_mod, unresolved):
@@ -244,12 +250,12 @@ def test_resume_after_the_fix_step_with_a_new_thread_forces_one_more_round(state
         "count": 1, "thread_ids": ["PRRT_a"], "fixed_in_round": 1,
     })
 
-    changed = state_mod._record_carried_over(st, REPO, PR)
+    changed = review_lib.findings._record_carried_over(st, REPO, PR)
 
     assert changed is True
     assert st["carried_over"]["thread_ids"] == ["PRRT_a", "PRRT_new"]
     assert st["carried_over"]["fixed_in_round"] is None
-    assert state_mod._carried_over_pending(st) is not None
+    assert review_lib.findings._carried_over_pending(st) is not None
 
 
 def test_resume_before_the_fix_step_still_counts_again(state_mod, unresolved):
@@ -259,7 +265,7 @@ def test_resume_before_the_fix_step_still_counts_again(state_mod, unresolved):
         "count": 1, "thread_ids": ["PRRT_a"], "fixed_in_round": None,
     })
 
-    changed = state_mod._record_carried_over(st, REPO, PR)
+    changed = review_lib.findings._record_carried_over(st, REPO, PR)
 
     assert changed is True
     assert st["carried_over"]["fixed_in_round"] is None
