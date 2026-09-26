@@ -12,7 +12,7 @@ context   未解決のスレッド・3 種のコメント・CI の状態（失�
           （既定はカレントの作業ツリーの根）の `.ndf/review.json` を読む
 finalize  振り分けの JSON から件数と by_severity を数え、`cross-review` の `state.py merge-fix`
           が読む戻り値ファイル `$TMP_DIR/fix-pr<PR>-result.json` を組む。`waived` は見送りの返信を
-          組んで `deferred` へ `resolve: true` で載せ、`fixed` が無ければ `fix_commit` を捨てる。設計 PR の本文の
+          組んで `deferred` へ `resolve: true` で載せ、`fixed` も CI の修正（`ci_fixed`）も無ければ `fix_commit` を捨てる。設計 PR の本文の
           「決めたこと」の節も揃える（`pr-body-decisions.sh sync`）
 remaining 返信と決着の後に未解決のスレッドを数え直し、見送り・却下で残したもの以外が
           残っていれば止まる
@@ -22,7 +22,7 @@ remaining 返信と決着の後に未解決のスレッドを数え直し、見�
 
 振り分けの JSON（`context` が雛形を書き、LLM が `decision` と理由を埋める）:
 
-    {"pr": 812, "fix_commit": "abc1234"（省くと HEAD）, "ci_note": null,
+    {"pr": 812, "fix_commit": "abc1234"（省くと HEAD）, "ci_fixed": false（CI の失敗を直したら true）, "ci_note": null,
      "review_focus": ["<重点の名前>"], "review_focus_status": "declared|none|unreadable",
      "decisions": [{"thread_id": "PRRT_...", "comment_id": 1, "path": "a.py", "line": 3,
                     "severity": "major", "category": "style", "summary": "...",
@@ -222,7 +222,7 @@ def cmd_context(a):
 
     dec = d / f"fix-pr{pr}-decisions.json"
     dec.write_text(json.dumps({
-        "pr": pr, "fix_commit": None, "ci_note": None,
+        "pr": pr, "fix_commit": None, "ci_fixed": False, "ci_note": None,
         "review_focus": list(focus.names), "review_focus_status": focus.status,
         "decisions": [{"thread_id": t["thread_id"], "comment_id": t["comment_id"], "path": t["path"],
                        "line": t["line"], "severity": "", "category": "", "summary": head_line(t["body"]),
@@ -360,12 +360,15 @@ def cmd_finalize(a):
                     next=f"{a.decisions} の decision / reason / severity / criterion / waive_kind を直して打ち直す"))
     commit = d.get("fix_commit")
     has_fixed = any(e["decision"] == "fixed" for e in d["decisions"])
+    # CI の失敗を直したコミットは、指摘の fixed が 0 件でも送る
+    keep = has_fixed or d.get("ci_fixed") is True
     dropped = None
-    if not has_fixed and commit:
+    if not keep and commit:
         # 直したものが無ければ送るコミットも無い（I4）。push と CI を起こさない
-        dropped = {"name": "fix-commit", "result": "dropped", "reason": f"fixed が 0 件のため {commit} を捨てた"}
+        dropped = {"name": "fix-commit", "result": "dropped",
+                   "reason": f"fixed が 0 件で CI の修正も無いため {commit} を捨てた"}
         commit = None
-    if not commit and has_fixed:
+    if not commit and keep:
         root = git_root(a.root)
         commit = git(root, "rev-parse", "--short", "HEAD").stdout.strip()
     ci_status, failed = ci_snapshot(pr)

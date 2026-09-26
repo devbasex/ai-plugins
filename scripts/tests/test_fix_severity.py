@@ -53,7 +53,13 @@ def test_collect_cuts_summaries_by_period():
     since = datetime(2026, 10, 1, tzinfo=timezone.utc)
     nodes = [{"number": 5, "comments": {"nodes": [{"body": OLD, "createdAt": "2026-09-30T23:59:59Z"},
                                                     {"body": MIXED, "createdAt": "2026-10-01T00:00:00Z"}]},
-              "reviewThreads": {"nodes": [{"comments": {"nodes": [{"body": "[minor / x] y"}]}}]}}, {}]
+              "reviewThreads": {"nodes": [
+                  {"comments": {"nodes": [{"body": "[minor / x] y", "createdAt": "2026-10-01T00:00:00Z"}]}},
+                  {"comments": {"nodes": [{"body": "[major / x] old", "createdAt": "2026-09-30T23:59:59Z"}]}},
+                  {"comments": {"nodes": [{"body": "[major / x] late", "createdAt": "2026-10-02T00:00:00Z"}]}},
+              ]}}, {}]
     summaries, threads = fs.collect(nodes, since, None)
-    assert summaries == [(5, MIXED)] and threads == [["[minor / x] y"]]
-    assert fs.collect(nodes, since, datetime(2026, 10, 1, tzinfo=timezone.utc))[0] == []
+    assert summaries == [(5, MIXED)] and threads == [["[minor / x] y"], ["[major / x] late"]]
+    until = datetime(2026, 10, 2, tzinfo=timezone.utc)
+    assert fs.collect(nodes, since, until)[1] == [["[minor / x] y"]]
+    assert fs.collect(nodes, since, datetime(2026, 10, 1, tzinfo=timezone.utc)) == ([], [])

@@ -75,7 +75,7 @@ FIX=$(bash "$R/scripts/resolve.sh" scripts fix) || exit 3
    「`--classify-only` の出力」を報告して終える
 3. **修正する。** `fixed` の指摘と CI の失敗を直す（「CI の失敗の切り分け」）。`waived` の指摘の
    ためにコードを変えない。コミット前に手順 1 を打ち直し、新しい指摘・失敗があれば手順 2 へ戻る
-4. 直したものがあればコミットする。**送らない**。`fixed` が無ければコミットしない
+4. 直したものがあればコミットする。**送らない**。`fixed` も CI の修正も無ければコミットしない
 5. **戻り値ファイルを組む。** 件数と `by_severity` を数え、設計 PR なら本文の「決めたこと」の
    節を設計文書に揃える（対象かどうかはスクリプトが決める。コミットが無くても行う）
 
@@ -83,7 +83,8 @@ FIX=$(bash "$R/scripts/resolve.sh" scripts fix) || exit 3
    python3 "$FIX/fix-steps.py" finalize --decisions <雛形の JSON> [--root <worktree>]
    ```
 
-   `fix_commit` を省くと HEAD を採る。`fixed` が 0 件なら `fix_commit` を捨てて `null` にし（`items`
+   `fix_commit` を省くと HEAD を採る。CI の失敗を直したコミットがあれば雛形の `ci_fixed` を `true` に
+   する。`fixed` が 0 件で `ci_fixed` も `true` でなければ `fix_commit` を捨てて `null` にし（`items`
    の `fix-commit` が `dropped`）、送信も CI も起きない。振り分けが「重要度の判定」の規則を破れば
    `stopped` で止まり、戻り値ファイルを書かない。`items[].name` が `pr-body-decisions` の `result`
    （`synced` / `mismatch` / `unreadable` / `invalid_call`）と `code` を作業完了報告へ写す。

@@ -325,6 +325,21 @@ def test_waived_minor_and_nit_close_without_commit_or_push(env):
     assert result_posts.push_fix(env["root"], "feat/x", res["fix_commit"]).pushed is False
 
 
+def test_ci_only_fix_keeps_the_commit(env):
+    code, out, err = _finalize(env, _waived_only(ci_fixed=True))
+    assert code == 0 and out["status"] == "ok", err
+    res = json.loads((env["tmp"] / f"fix-pr{PR}-result.json").read_text())
+    assert res["fix_commit"] == "abc1234" and res["fixed_count"] == 0
+    assert not any(i["name"] == "fix-commit" for i in out["items"])
+
+
+def test_ci_only_fix_takes_commit_from_head_when_omitted(env):
+    sha = _git_repo(env["root"] / "wt")
+    code, out, err = _finalize(env, _waived_only(fix_commit=None, ci_fixed=True), "--root", env["root"] / "wt")
+    assert code == 0, err
+    assert json.loads((env["tmp"] / f"fix-pr{PR}-result.json").read_text())["fix_commit"] == sha
+
+
 def test_waived_reply_names_the_declared_focus(env):
     code, out, _ = _finalize(env, _waived_only(review_focus=["外部 API の費用"], review_focus_status="declared"))
     assert code == 0

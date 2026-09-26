@@ -7,7 +7,7 @@
         [--max-minor-ratio 0.10] [--max-minor-only-per-pr 0.05] [--out <JSON>]
 
 期間は PR のまとめのコメントの作成日時で切る（`--since` を含み `--until` を含まない。日付だけなら UTC の 0 時）。
-スレッドは、期間内に更新された PR のものをすべて数える。
+スレッドも、最初のコメントの作成日時が同じ期間に入るものだけを数える。
 
 出力の鍵:
   summaries / prs          まとめのコメントの件数と、それを持つ PR の本数
@@ -40,7 +40,7 @@ LEVELS = ("critical", "major", "minor", "nit")
 QUERY = """query($q:String!,$after:String){search(query:$q,type:ISSUE,first:30,after:$after){
 pageInfo{hasNextPage endCursor}
 nodes{... on PullRequest{number comments(first:100){nodes{body createdAt}}
-reviewThreads(first:100){nodes{comments(first:30){nodes{body}}}}}}}}"""
+reviewThreads(first:100){nodes{comments(first:30){nodes{body createdAt}}}}}}}}"""
 
 
 # --- 解析（純粋な関数。単体テストはここだけを縛る） ------------------------------
@@ -103,7 +103,7 @@ def in_range(created: str, since: datetime, until: datetime | None) -> bool:
 
 
 def collect(nodes: list[dict], since: datetime, until: datetime | None) -> tuple[list, list]:
-    """GraphQL の PR の列から、期間内のまとめと、スレッドの本文の列を取り出す。"""
+    """GraphQL の PR の列から、期間内のまとめと、期間内に始まったスレッドの本文の列を取り出す。"""
     summaries, threads = [], []
     for n in nodes:
         if not isinstance(n, dict) or "number" not in n:
@@ -112,7 +112,9 @@ def collect(nodes: list[dict], since: datetime, until: datetime | None) -> tuple
             if c.get("createdAt") and in_range(c["createdAt"], since, until):
                 summaries.append((n["number"], c.get("body") or ""))
         for t in (n.get("reviewThreads") or {}).get("nodes") or []:
-            threads.append([c.get("body") or "" for c in (t.get("comments") or {}).get("nodes") or []])
+            cs = (t.get("comments") or {}).get("nodes") or []
+            if cs and cs[0].get("createdAt") and in_range(cs[0]["createdAt"], since, until):
+                threads.append([c.get("body") or "" for c in cs])
     return summaries, threads
 
 
