@@ -353,3 +353,66 @@ def test_notes_and_changelog_stop_when_no_pr_is_merged(repo, tmp_path):
         p = subprocess.run([PY, str(SCRIPT), *args], capture_output=True, text=True, env=env)
         assert p.returncode == 3, args
         assert [f.read_bytes() for f in files] == before, args
+
+
+# --- GraphQL の上限で REST へ退避する・bump の打ち直し ------------------------------
+
+RATE = "GraphQL: API rate limit already exceeded for user ID 1."
+
+
+def test_pr_reads_fall_back_to_rest_when_graphql_is_rate_limited(monkeypatch, tmp_path):
+    mod = _release_steps_module(monkeypatch)
+    calls = []
+
+    def runner(args, stdin=None, cwd=None):
+        calls.append((args, cwd))
+        if args[:2] == ["pr", "view"]:
+            return mod.gh_parts.GhResult(1, "", RATE)
+        n = int(args[1].rsplit("/", 1)[1])
+        return mod.gh_parts.GhResult(0, json.dumps({
+            "number": n, "title": f"題 {n}", "body": "## 利用者向けの変化\n\n- 変わる\n", "state": "closed",
+            "merged_at": "2026-09-26T00:00:00Z" if n == 5 else None, "merge_commit_sha": "abc",
+            "html_url": f"https://github.com/o/r/pull/{n}"}), "")
+    monkeypatch.setattr(mod.gh_parts, "RUNNER", runner)
+    skipped = []
+    assert mod.pr_titles(tmp_path, [5, 6], skipped) == [(5, "- 題 5（#5）")]
+    assert skipped == [6]
+    assert mod.merge_commit_of(tmp_path, 5) == "abc"
+    assert mod.merge_commit_of(tmp_path, 6) is None
+    assert mod.pr_notes(tmp_path, [5])[0][1] == ["変わる（#5）"]
+    assert calls[1] == (["api", "repos/{owner}/{repo}/pulls/5"], str(tmp_path))
+
+
+def test_pr_read_failure_other_than_rate_limit_stops(monkeypatch, tmp_path):
+    mod = _release_steps_module(monkeypatch)
+    monkeypatch.setattr(mod.gh_parts, "RUNNER",
+                        lambda args, stdin=None, cwd=None: mod.gh_parts.GhResult(1, "", "not found"))
+    with pytest.raises(mod.StepError, match="gh pr view 5 が失敗: not found"):
+        mod.pr_titles(tmp_path, [5])
+
+
+def bump_repo(root: Path, base_version: str, work_version: str) -> None:
+    f = root / "plugins" / "ndf" / ".claude-plugin" / "plugin.json"
+    f.parent.mkdir(parents=True)
+    f.write_text(json.dumps({"version": base_version}), encoding="utf-8")
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", "base")
+    git(root, "update-ref", "refs/remotes/origin/develop", "HEAD")
+    if work_version != base_version:
+        f.write_text(json.dumps({"version": work_version}), encoding="utf-8")
+        git(root, "commit", "-q", "-am", "bump")
+
+
+def test_bump_rerun_after_the_version_was_raised_is_ok(repo):
+    bump_repo(repo, "1.2.3", "1.2.4")
+    p = run(repo, "bump", "--plugin", "ndf", "--to", "1.2.4")
+    assert p.returncode == 0, p.stdout + p.stderr
+    res = json.loads(p.stdout.strip().splitlines()[-1])
+    assert res["status"] == "ok" and res["metrics"]["from"] == "1.2.3" and res["items"] == []
+
+
+def test_bump_to_the_version_of_the_base_still_stops(repo):
+    bump_repo(repo, "1.2.4", "1.2.4")
+    p = run(repo, "bump", "--plugin", "ndf", "--to", "1.2.4")
+    assert p.returncode != 0
+    assert "旧版と新版が同じ" in p.stdout + p.stderr

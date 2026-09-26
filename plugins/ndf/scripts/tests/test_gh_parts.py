@@ -390,3 +390,70 @@ def test_fold_takes_the_newer_of_completed_and_started_times():
                      "started_at": "2026-09-25T02:00:00Z", "completed_at": "2026-09-25T02:10:00Z"}
     assert gp.check_result([long_failure, short_success], "t") == "failure"
     assert gp.check_result([short_success, long_failure], "t") == "failure"
+
+
+# ---------------- view-json（gh pr view / gh issue view の --json） ----------------
+
+REST_MERGED = {"number": 1210, "title": "Release", "body": "本文", "state": "closed",
+               "merged_at": "2026-09-26T03:52:01Z", "merged": True,
+               "merge_commit_sha": "8a0cdaa7", "html_url": "https://github.com/o/r/pull/1210"}
+
+
+def test_view_json_returns_graphql_output_as_is(fake):
+    fake.on("pr", "view", out=json.dumps({"title": "t", "state": "MERGED"}))
+    r = gp.view_json("pr", 5, "title,state")
+    assert r.returncode == 0 and json.loads(r.stdout) == {"title": "t", "state": "MERGED"}
+    assert fake.argvs() == ["pr view 5 --json title,state"]
+
+
+def test_view_json_reads_rest_in_graphql_shape_when_rate_limited(fake):
+    fake.on("pr", "view", rc=1, err=RATE)
+    fake.on("api", out=json.dumps(REST_MERGED))
+    r = gp.view_json("pr", 1210, "number,title,state,mergeCommit,url,body")
+    assert r.returncode == 0
+    assert json.loads(r.stdout) == {"number": 1210, "title": "Release", "state": "MERGED",
+                                    "mergeCommit": {"oid": "8a0cdaa7"},
+                                    "url": "https://github.com/o/r/pull/1210", "body": "本文"}
+    assert fake.argvs()[-1] == "api repos/{owner}/{repo}/pulls/1210"
+
+
+@pytest.mark.parametrize("rest, state, merge", [
+    ({"state": "open", "merged_at": None, "merge_commit_sha": "x"}, "OPEN", None),
+    ({"state": "closed", "merged_at": None, "merge_commit_sha": "x"}, "CLOSED", None),
+])
+def test_view_json_rest_state_of_unmerged_pr(fake, rest, state, merge):
+    fake.on("pr", "view", rc=1, err=RATE)
+    fake.on("api", out=json.dumps({"number": 5, **rest}))
+    d = json.loads(gp.view_json("pr", 5, "state,mergeCommit", repo=REPO).stdout)
+    assert d == {"state": state, "mergeCommit": merge}
+    assert fake.argvs() == [f"pr view 5 --repo {REPO} --json state,mergeCommit", f"api repos/{REPO}/pulls/5"]
+
+
+def test_view_json_issue_reads_issues_endpoint(fake):
+    fake.on("issue", "view", rc=1, err=RATE)
+    fake.on("api", out=json.dumps({"number": 7, "title": "課題", "state": "closed", "body": None,
+                                   "html_url": "https://github.com/o/r/issues/7"}))
+    d = json.loads(gp.view_json("issue", 7, "title,state,body,url").stdout)
+    assert d == {"title": "課題", "state": "CLOSED", "body": "", "url": "https://github.com/o/r/issues/7"}
+    assert fake.argvs()[-1] == "api repos/{owner}/{repo}/issues/7"
+
+
+def test_view_json_unknown_field_returns_the_original_error(fake):
+    fake.on("pr", "view", rc=1, err=RATE)
+    r = gp.view_json("pr", 5, "title,headRefName")
+    assert (r.returncode, r.stderr) == (1, RATE)
+    assert not any(a.startswith("api") for a in fake.argvs())
+
+
+def test_view_json_other_failure_is_not_retried_on_rest(fake):
+    fake.on("pr", "view", rc=1, err="GraphQL: Could not resolve to a PullRequest")
+    r = gp.view_json("pr", 5, "title")
+    assert r.returncode == 1 and "Could not resolve" in r.stderr
+    assert len(fake.calls) == 1
+
+
+def test_view_json_rest_failure_keeps_both_errors(fake):
+    fake.on("pr", "view", rc=1, err=RATE)
+    fake.on("api", rc=1, err="HTTP 403: API rate limit exceeded")
+    r = gp.view_json("pr", 5, "title")
+    assert r.returncode == 1 and RATE in r.stderr and "HTTP 403" in r.stderr
