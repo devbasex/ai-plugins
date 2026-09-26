@@ -36,7 +36,7 @@ def test_wrapper_tests_pass_in_the_locked_environment(wrapper: str):
         pytest.skip("この環境で import できるので、test_lib_%s.py がその場で流れる" % wrapper)
     uv = deps.find_uv()
     assert uv, "uv が無い。包みのテストは uv の環境で流す（https://docs.astral.sh/uv/）"
-    env = {k: v for k, v in os.environ.items() if not k.startswith(("PYTEST_", "VIRTUAL_ENV"))}
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("PYTEST_", "VIRTUAL_ENV", "SHARD_"))}
     env["UV_PROJECT_ENVIRONMENT"] = deps.venv_dir()
     cmd = [uv, "run", "--quiet", "--frozen", "--project", str(PLUGIN)]
     for g in groups:
