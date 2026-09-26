@@ -423,7 +423,7 @@ def test_bump_to_the_version_of_the_base_still_stops(repo):
 def plugin_json(root: Path, rel: str, version: str) -> None:
     f = root / rel / ".claude-plugin" / "plugin.json"
     f.parent.mkdir(parents=True, exist_ok=True)
-    f.write_text(json.dumps({"version": version}), encoding="utf-8")
+    f.write_text(json.dumps({"version": version}, indent=2), encoding="utf-8")
 
 
 def changed_repo(root: Path) -> Path:
@@ -467,8 +467,9 @@ def test_changed_plugins_skips_a_plugin_already_bumped_in_the_diff(repo):
 def test_changed_plugins_without_the_tag_is_two(repo):
     code, res = changed(changed_repo(repo), "--since", "ndf--v9.9.9")
     assert code == 2 and res["status"] == "stopped"
-    code, res = changed(repo)  # タグが 1 つも無い
-    assert code == 2
+    git(repo, "tag", "-d", "ndf--v1.0.0", "ndf--v1.0.1-dev.1")
+    code, res = changed(repo)  # 本番のタグが 1 つも無い
+    assert code == 2 and "ndf--v" in res["summary"]
 
 
 def test_bump_raises_the_other_plugin_from_changed_plugins(repo):

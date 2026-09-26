@@ -329,7 +329,7 @@ def plugin_repo(tmp_path):
          "release": {"form": "package-plugin", "plugin": "ndf", "runtimes": ["claude"]}}))
     for rel, v in (("plugins/ndf", "1.0.0"), ("plugins/mcp/mcp-serena", "2.3.4")):
         (root / rel / ".claude-plugin").mkdir(parents=True)
-        (root / rel / ".claude-plugin" / "plugin.json").write_text(json.dumps({"version": v}))
+        (root / rel / ".claude-plugin" / "plugin.json").write_text(json.dumps({"version": v}, indent=2))
     git(root, "init", "-q", "-b", "develop")
     for k, v in (("user.email", "t@example.com"), ("user.name", "t"), ("commit.gpgsign", "false")):
         git(root, "config", k, v)
