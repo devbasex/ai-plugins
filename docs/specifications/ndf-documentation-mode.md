@@ -161,7 +161,7 @@ Confluence と SharePoint の実装は別のリポジトリにあり、自リポ
 | ゲート | 文書での意味 | 引き金 |
 | --- | --- | --- |
 | 設計 Pull Request のマージ | 企画承認 | head のブランチ名 `design/` + ラベル `design-approved` |
-| 本番の系へ届く操作 | 制作物承認 | 提出先の `production` が真 |
+| 本番系へ届く操作 | 制作物承認 | 提出先の `production` が真 |
 
 **制作物承認の承認資料には、生成物を描画した画像と、生成物と正本の内容照合の差分を含める。**
 文字だけでは体裁を承認できない。
@@ -187,7 +187,7 @@ Confluence と SharePoint の実装は別のリポジトリにあり、自リポ
 | --- | --- |
 | `source_root` | 正本を置く根。リポジトリの根からの相対パス |
 | `destinations[].system` | `gdrive` / `notion` / `confluence` / `sharepoint` / `repo` |
-| `destinations[].production` | 真なら本番の系。届く操作が制作物承認のゲートになる |
+| `destinations[].production` | 真なら本番系。届く操作が制作物承認のゲートになる |
 | `destinations[].draft` | 本番の提出先が指す、対になる下書き先の `name` |
 | `destinations[].visibility` | 期待する公開範囲。提出の後にこの値と突き合わせる |
 | `destinations[].auth` | 認証の**出所**（環境変数の名前や秘密情報の管理系の識別子）。**値は書かない** |
@@ -242,7 +242,7 @@ Confluence と SharePoint の実装は別のリポジトリにあり、自リポ
 
 - [`development-workflow` の SKILL.md](../../plugins/ndf/skills/development-workflow/SKILL.md) — 工程表とモードの判定
 - [`document-types.md`](../../plugins/ndf/skills/development-workflow/references/document-types.md) — 6 タイプの判定
-- [`document-destinations.md`](../../plugins/ndf/skills/development-workflow/references/document-destinations.md) — 提出先の宣言
+- [`document-destinations.md`](../../plugins/ndf/skills/development-workflow/references/document-destinations.md) — 提出先の設定
 - [`document-systems` の SKILL.md](../../plugins/ndf/skills/document-systems/SKILL.md) — システムごとの手順
 - [`document-sources` の SKILL.md](../../plugins/ndf/skills/document-sources/SKILL.md) — 出所の残し方
 - [`document-drafting` の SKILL.md](../../plugins/ndf/skills/document-drafting/SKILL.md) — タイプ別の中身

@@ -37,7 +37,7 @@ Kiro CLI は installer が `kiro-skills.txt` を読んで symlink を張る。ag
 
 **ルート直下の `plugin.json` は置かない。** 置くと Codex が `.codex-plugin/plugin.json` より
 優先して読み、`skills` 配列ではなく `skills/` の実体を全件配る（`plugins/ndf` で実測）。agy の
-プラグインの目印はディレクトリ直下の `plugin.json` であるため、agy 向けの定義は
+プラグインのマーカーはディレクトリ直下の `plugin.json` であるため、agy 向けの定義は
 `dev.agy/plugin.json` へ置く。
 
 **この文書は配布 Skill の数を書かない（#288）。** 数はランタイムごとに違い、版を上げる
