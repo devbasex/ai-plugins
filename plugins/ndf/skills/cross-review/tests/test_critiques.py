@@ -64,7 +64,7 @@ def collect(state_mod, expect_rc: int | None = None) -> int:
     """
     rc = 0
     try:
-        state_mod.cmd_collect_critiques(argparse.Namespace(pr=PR))
+        review_lib.commands.collect_critiques.cmd_collect_critiques(argparse.Namespace(pr=PR))
     except SystemExit as exc:
         rc = int(exc.code or 0)
     if expect_rc is not None:
@@ -228,14 +228,14 @@ def test_a_corrected_verdict_stops_the_finding_from_staying_rejected(
     _critique_file(tmp_dir, "kiro", [
         {"finding_id": "codex-r1-0", "verdict": "refute", "reason": "誤りだと思う"}])
     collect(state_mod)
-    assert state_mod._classify_finding(
+    assert review_lib.findings._classify_finding(
         _read(tmp_dir)["review_findings"][0]) == "rejected"
 
     _critique_file(tmp_dir, "kiro", [
         {"finding_id": "codex-r1-0", "verdict": "support", "reason": "読み直した"}])
     collect(state_mod)
 
-    assert state_mod._classify_finding(
+    assert review_lib.findings._classify_finding(
         _read(tmp_dir)["review_findings"][0]) == "needs_human_judgment"
 
 
@@ -306,7 +306,7 @@ def test_a_missing_or_invalid_result_leaves_the_round_unmarked(
 
     st = _read(tmp_dir)
     assert st.get("evidence_rounds", []) == []
-    assert state_mod._evidence_completed(st, 1) is False
+    assert review_lib.matching._evidence_completed(st, 1) is False
 
 
 def test_an_unmarked_round_still_counts_every_finding(tmp_dir, state_mod):
@@ -324,7 +324,7 @@ def test_an_unmarked_round_still_counts_every_finding(tmp_dir, state_mod):
     collect(state_mod, expect_rc=7)
 
     st = _read(tmp_dir)
-    count, measurable = state_mod._new_finding_count(st, PR)
+    count, measurable = review_lib.matching._new_finding_count(st, PR)
     assert measurable is True
     assert count == 1
 
@@ -368,8 +368,8 @@ def test_an_incomplete_collection_removes_an_existing_marker(tmp_dir, state_mod)
 
     st = _read(tmp_dir)
     assert st["evidence_rounds"] == []
-    assert state_mod._evidence_completed(st, 1) is False
-    count, measurable = state_mod._new_finding_count(st, PR)
+    assert review_lib.matching._evidence_completed(st, 1) is False
+    count, measurable = review_lib.matching._new_finding_count(st, PR)
     assert (count, measurable) == (1, True)   # payload の全件を数える
 
 
@@ -783,6 +783,9 @@ def test_missing_or_empty_state_file_exits_with_error(tmp_dir, tmp_path, state_s
 
 import subprocess  # noqa: E402  (通し経路のテストが使う)
 import time  # noqa: E402
+import review_lib.commands.collect_critiques
+import review_lib.findings
+import review_lib.matching
 
 
 @pytest.fixture()

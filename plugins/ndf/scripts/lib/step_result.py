@@ -19,10 +19,19 @@ import datetime
 import json
 import os
 import re
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
+
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+import proc  # noqa: E402
+
+# 子プロセスと git の起動は `proc` が持つ（#1142 の L0）。ここの名前は同じものを指す
+StepError = proc.StepError
+run = proc.run
+git = proc.git
+git_root = proc.git_root
 
 STATUSES = ("ok", "gate", "stopped")
 REQUIRED = ("tool", "status", "summary", "items", "metrics")
@@ -170,34 +179,6 @@ CO_AUTHOR = "Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com
 VERSION_RE = re.compile(r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?$")
 
 
-class StepError(Exception):
-    """手順の失敗。status=stopped と code（既定 1）で終える。"""
-
-    def __init__(self, msg, code=EXIT_VIOLATION):
-        super().__init__(msg)
-        self.code = code
-
-
-def run(cmd, cwd=None, check=True, env=None):
-    p = subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True)
-    if check and p.returncode != 0:
-        raise StepError(f"{' '.join(map(str, cmd))} が終了コード {p.returncode}: {p.stderr.strip()[:500]}")
-    return p
-
-
-def git(root, *args, check=True):
-    return run(["git", "-C", str(root), *args], check=check)
-
-
-def git_root(arg):
-    if arg:
-        return Path(arg).resolve()
-    p = run(["git", "rev-parse", "--show-toplevel"], check=False)
-    if p.returncode != 0:
-        raise StepError("カレントが git の作業ツリーではない（--root を渡す）", EXIT_UNREADABLE)
-    return Path(p.stdout.strip())
-
-
 def commit(root, subject):
     git(root, "commit", "-q", "-m", f"{subject}\n\n{CO_AUTHOR}\n")
     return git(root, "rev-parse", "HEAD").stdout.strip()
@@ -224,7 +205,7 @@ def _has_gh():
 
 def gh_json(root, args, what):
     try:
-        p = run(["gh", *args], cwd=root, check=False)
+        p = proc.run(["gh", *args], cwd=root, check=False)
     except FileNotFoundError:
         raise StepError("gh が無い", EXIT_PRECONDITION)
     if p.returncode != 0:

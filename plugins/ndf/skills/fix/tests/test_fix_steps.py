@@ -200,8 +200,8 @@ def test_finalize_output_passes_cross_review_normalizer(env):
     code, out, _ = run("finalize", "--decisions", dec, "--no-sync")
     assert code == 0
     spec = importlib.util.spec_from_file_location("cr_state", PLUGIN_ROOT / "skills" / "cross-review" / "scripts" / "state.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    spec.loader.exec_module(importlib.util.module_from_spec(spec))
+    mod = sys.modules["review_lib.commands.merge_fix"]
     res = json.loads((env["tmp"] / f"fix-pr{PR}-result.json").read_text())
     norm = mod._normalize_fix_result(res)
     assert norm["commit"] == "abc1234" and norm["fixed"] == 1 and norm["deferred"] == 2 and norm["rejected"] == 1

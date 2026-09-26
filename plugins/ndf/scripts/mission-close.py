@@ -35,6 +35,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE / "lib"))
 from step_result import (EXIT_PRECONDITION, EXIT_UNREADABLE, StepError, emit, git_root,  # noqa: E402
                          main_with, result, run)
+import gh_call  # noqa: E402
 
 TOOL = "mission-close"
 DIST = "## 配布の記録"
@@ -45,7 +46,7 @@ VERIFY = "## リリース後テスト"
 
 def read_record(root, repo, n):
     """記録の PR の本文とコメントを投稿の順に 1 つの文字列にする。"""
-    p = run(["gh", "pr", "view", str(n), "--repo", repo, "--json", "body,comments"], cwd=root, check=False)
+    p = gh_call.gh(["pr", "view", str(n), "--repo", repo, "--json", "body,comments"], cwd=root)
     if p.returncode != 0:
         raise StepError(f"記録の PR #{n} を読めない: {p.stderr.strip()[:300]}", EXIT_UNREADABLE)
     try:
@@ -145,7 +146,7 @@ def verification_verdicts(block, record_repo):
 def mission_issues(root, repo, prs):
     seen, out = set(), []
     for n in prs:
-        p = run(["gh", "pr", "view", str(n), "--repo", repo, "--json", "body", "-q", ".body"], cwd=root, check=False)
+        p = gh_call.gh(["pr", "view", str(n), "--repo", repo, "--json", "body", "-q", ".body"], cwd=root)
         if p.returncode != 0:
             raise StepError(f"ミッションの PR #{n} を読めない: {p.stderr.strip()[:300]}", EXIT_UNREADABLE)
         c = subprocess.run(["bash", str(HERE / "lib" / "closing-issues.sh"), "--repo", repo],
@@ -164,7 +165,7 @@ def mission_issues(root, repo, prs):
 # --- 閉じる ---------------------------------------------------------------------
 
 def issue_state(root, repo, n):
-    p = run(["gh", "issue", "view", str(n), "--repo", repo, "--json", "state", "-q", ".state"], cwd=root, check=False)
+    p = gh_call.gh(["issue", "view", str(n), "--repo", repo, "--json", "state", "-q", ".state"], cwd=root)
     return p.stdout.strip() if p.returncode == 0 and p.stdout.strip() else None
 
 
@@ -183,7 +184,7 @@ def close_one(root, repo, n, record_repo, comment, notes):
     if before == "OPEN":
         now = issue_state(root, repo, n)
         if now == "OPEN":
-            c = run(["gh", "issue", "close", str(n), "--repo", repo, "--comment", comment], cwd=root, check=False)
+            c = gh_call.gh(["issue", "close", str(n), "--repo", repo, "--comment", comment], cwd=root)
             close_out = (c.stdout + c.stderr).strip()[:300] or None
     after = issue_state(root, repo, n)
     if before == "CLOSED":
@@ -206,7 +207,7 @@ def cmd_close(a):
     root = git_root(a.root)
     record_repo = a.repo
     if not record_repo:
-        p = run(["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"], cwd=root, check=False)
+        p = gh_call.gh(["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"], cwd=root)
         record_repo = p.stdout.strip()
         if p.returncode != 0 or not record_repo:
             raise StepError("記録のリポジトリを決められない（--repo を渡す）", EXIT_PRECONDITION)
@@ -281,7 +282,7 @@ class Parser(argparse.ArgumentParser):
         raise SystemExit(EXIT_PRECONDITION)
 
 
-def pr_list(s):
+def number_list(s):
     try:
         return [int(x.strip().lstrip("#")) for x in s.replace(" ", ",").split(",") if x.strip()]
     except ValueError:
@@ -292,8 +293,8 @@ def build_parser():
     ap = Parser(prog="mission-close.py", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--record-pr", type=int, required=True,
                     help="配布の記録を置いた PR の番号。0 は本番の記録なし（--issues と一緒に渡す）")
-    ap.add_argument("--prs", type=pr_list, help="ミッションの PR の番号（カンマ区切り）。省けば配布の記録から読む")
-    ap.add_argument("--issues", type=pr_list, help="閉じる課題の番号（カンマ区切り）。PR の閉じる語と和を取る")
+    ap.add_argument("--prs", type=number_list, help="ミッションの PR の番号（カンマ区切り）。省けば配布の記録から読む")
+    ap.add_argument("--issues", type=number_list, help="閉じる課題の番号（カンマ区切り）。PR の閉じる語と和を取る")
     ap.add_argument("--repo", help="記録のリポジトリ（owner/name）。省けば gh repo view で決める")
     ap.add_argument("--with-verification", action="store_true", help="リリース後テストを通る経路（閉じる条件 2 を見る）")
     ap.add_argument("--label", help="閉じるときのコメントに入れる「<マイルストーン>の<工程名>」")

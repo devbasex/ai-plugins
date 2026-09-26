@@ -22,6 +22,8 @@ import os
 import pathlib
 
 import pytest
+import review_lib.commands.merge_fix
+import review_lib.fix_result
 
 
 PR = 9919
@@ -75,7 +77,7 @@ def test_canonical_path_and_key(patched_tmp_dir, state_mod):
     fix = _canonical_fix()
     (tmp_dir / f"fix-pr{PR}-result.json").write_text(json.dumps(fix))
 
-    state_mod.cmd_merge_fix(_make_args())
+    review_lib.commands.merge_fix.cmd_merge_fix(_make_args())
 
     st = _read_state(tmp_dir)
     merged = st["rounds"][-1]["fix"]
@@ -98,7 +100,7 @@ def test_tmp_fallback_path(patched_tmp_dir, state_mod, tmp_path):
     legacy = pathlib.Path(f"/tmp/fix-pr{PR}-result.json")
     legacy.write_text(json.dumps(fix))
     try:
-        state_mod.cmd_merge_fix(_make_args())
+        review_lib.commands.merge_fix.cmd_merge_fix(_make_args())
         st = _read_state(tmp_dir)
         assert st["rounds"][-1]["fix"]["commit"] == "tmp_path_commit"
     finally:
@@ -120,7 +122,7 @@ def test_key_alias_commit_sha_and_fixed(patched_tmp_dir, state_mod):
     }
     (tmp_dir / f"fix-pr{PR}-result.json").write_text(json.dumps(fix))
 
-    state_mod.cmd_merge_fix(_make_args())
+    review_lib.commands.merge_fix.cmd_merge_fix(_make_args())
 
     st = _read_state(tmp_dir)
     merged = st["rounds"][-1]["fix"]
@@ -137,7 +139,7 @@ def test_missing_all_candidates_dies_with_paths(patched_tmp_dir, state_mod, caps
     legacy.unlink(missing_ok=True)
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_merge_fix(_make_args())
+        review_lib.commands.merge_fix.cmd_merge_fix(_make_args())
     assert e.value.code == 3
 
     captured = capsys.readouterr()
@@ -160,7 +162,7 @@ def test_explicit_file_arg_wins(patched_tmp_dir, state_mod, tmp_path):
     explicit_path = tmp_path / "custom-fix.json"
     explicit_path.write_text(json.dumps(explicit_fix))
 
-    state_mod.cmd_merge_fix(_make_args(explicit_path))
+    review_lib.commands.merge_fix.cmd_merge_fix(_make_args(explicit_path))
 
     st = _read_state(tmp_dir)
     assert st["rounds"][-1]["fix"]["commit"] == "explicit_wins"
@@ -197,7 +199,7 @@ def test_fallback_stale_mtime_is_ignored(patched_tmp_dir, state_mod, capsys):
     os.utime(stale, (stale_ts, stale_ts))
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_merge_fix(_make_args())
+        review_lib.commands.merge_fix.cmd_merge_fix(_make_args())
     assert e.value.code == 3
 
     captured = capsys.readouterr()
@@ -222,7 +224,7 @@ def test_fallback_tmp_stale_is_ignored(patched_tmp_dir, state_mod, capsys):
     os.utime(legacy, (stale_ts, stale_ts))
     try:
         with pytest.raises(SystemExit) as e:
-            state_mod.cmd_merge_fix(_make_args())
+            review_lib.commands.merge_fix.cmd_merge_fix(_make_args())
         assert e.value.code == 3
         captured = capsys.readouterr()
         assert "round 開始前" in captured.err or "古いファイル" in captured.err
@@ -246,7 +248,7 @@ def test_fallback_pr_mismatch_is_ignored(patched_tmp_dir, state_mod, capsys):
     (tmp_dir / f"fix-pr{PR}-result.json").write_text(json.dumps(fix))
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_merge_fix(_make_args())
+        review_lib.commands.merge_fix.cmd_merge_fix(_make_args())
     assert e.value.code == 3
     captured = capsys.readouterr()
     assert "pr 不一致" in captured.err or "別 PR" in captured.err
@@ -263,7 +265,7 @@ def test_fallback_fresh_mtime_and_matching_pr_is_accepted(patched_tmp_dir, state
     fix["fix_commit"] = "fresh_ok"
     (tmp_dir / f"fix-pr{PR}-result.json").write_text(json.dumps(fix))
 
-    state_mod.cmd_merge_fix(_make_args())
+    review_lib.commands.merge_fix.cmd_merge_fix(_make_args())
 
     st = _read_state(tmp_dir)
     assert st["rounds"][-1]["fix"]["commit"] == "fresh_ok"
@@ -283,7 +285,7 @@ def test_explicit_file_bypasses_stale_check(patched_tmp_dir, state_mod, tmp_path
     stale_ts = now_dt.timestamp() - 3600
     os.utime(explicit_path, (stale_ts, stale_ts))
 
-    state_mod.cmd_merge_fix(_make_args(explicit_path))
+    review_lib.commands.merge_fix.cmd_merge_fix(_make_args(explicit_path))
 
     st = _read_state(tmp_dir)
     assert st["rounds"][-1]["fix"]["commit"] == "explicit_stale_ok"
@@ -314,7 +316,7 @@ def test_canonical_path_json_parse_failure_dies_immediately(
     legacy.write_text(json.dumps(_canonical_fix()))
     try:
         with pytest.raises(SystemExit) as e:
-            state_mod.cmd_merge_fix(_make_args())
+            review_lib.commands.merge_fix.cmd_merge_fix(_make_args())
         assert e.value.code == 3
         captured = capsys.readouterr()
         # 正規パスの読み取り失敗である旨が stderr に出る
@@ -342,7 +344,7 @@ def test_fallback_pr_field_non_numeric_is_skipped(patched_tmp_dir, state_mod, ca
     canonical.write_text(json.dumps(bad))
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_merge_fix(_make_args())
+        review_lib.commands.merge_fix.cmd_merge_fix(_make_args())
     # /tmp/ 側にも候補が無いので最終的には "戻り値ファイル無し" で die(3)
     assert e.value.code == 3
     captured = capsys.readouterr()
@@ -370,7 +372,7 @@ def test_is_fresh_fix_result_returns_tuple_with_parsed_payload(
     p = tmp_dir / f"fix-pr{PR}-result.json"
     p.write_text(json.dumps(fix))
 
-    is_fresh, parsed = state_mod._is_fresh_fix_result(p, PR, past_ts, is_canonical=True)
+    is_fresh, parsed = review_lib.fix_result._is_fresh_fix_result(p, PR, past_ts, is_canonical=True)
     assert is_fresh is True
     assert isinstance(parsed, dict)
     assert parsed["fix_commit"] == "tuple_return_ok"
@@ -386,7 +388,7 @@ def test_is_fresh_fix_result_returns_none_when_stale(patched_tmp_dir, state_mod)
     stale_ts = now_dt.timestamp() - 3600
     os.utime(p, (stale_ts, stale_ts))
 
-    is_fresh, parsed = state_mod._is_fresh_fix_result(
+    is_fresh, parsed = review_lib.fix_result._is_fresh_fix_result(
         p, PR, now_dt.timestamp(), is_canonical=False
     )
     assert is_fresh is False
@@ -411,7 +413,7 @@ def test_is_fresh_fix_result_non_dict_json_is_skipped(patched_tmp_dir, state_mod
     # JSON として valid だが dict ではない (list)
     p.write_text(json.dumps([{"fix_commit": "should_be_ignored"}]))
 
-    is_fresh, parsed = state_mod._is_fresh_fix_result(
+    is_fresh, parsed = review_lib.fix_result._is_fresh_fix_result(
         p, PR, past_ts, is_canonical=False
     )
     assert is_fresh is False
@@ -437,7 +439,7 @@ def test_is_fresh_fix_result_non_dict_json_canonical_dies_round5(
     p.write_text(json.dumps(["not", "a", "dict"]))
 
     with pytest.raises(SystemExit) as e:
-        state_mod._is_fresh_fix_result(p, PR, past_ts, is_canonical=True)
+        review_lib.fix_result._is_fresh_fix_result(p, PR, past_ts, is_canonical=True)
     assert e.value.code == 3
     captured = capsys.readouterr()
     assert "dict ではない" in captured.err
@@ -458,7 +460,7 @@ def test_explicit_file_non_dict_json_dies(patched_tmp_dir, state_mod, capsys, tm
     explicit_path.write_text(json.dumps([_canonical_fix()]))
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_merge_fix(_make_args(explicit_path))
+        review_lib.commands.merge_fix.cmd_merge_fix(_make_args(explicit_path))
     assert e.value.code == 3
     captured = capsys.readouterr()
     assert "dict ではない" in captured.err
@@ -492,7 +494,7 @@ def test_canonical_path_non_dict_json_dies_immediately(
     legacy.write_text(json.dumps(_canonical_fix()))
     try:
         with pytest.raises(SystemExit) as e:
-            state_mod.cmd_merge_fix(_make_args())
+            review_lib.commands.merge_fix.cmd_merge_fix(_make_args())
         assert e.value.code == 3
         captured = capsys.readouterr()
         # 正規パスで非 dict であった旨が stderr に出る
@@ -520,7 +522,7 @@ def test_explicit_file_nonexistent_dies(patched_tmp_dir, state_mod, capsys, tmp_
     assert not nonexistent.exists()
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_merge_fix(_make_args(nonexistent))
+        review_lib.commands.merge_fix.cmd_merge_fix(_make_args(nonexistent))
     assert e.value.code == 3
     captured = capsys.readouterr()
     assert "存在しません" in captured.err
@@ -539,7 +541,7 @@ def test_explicit_file_empty_dies(patched_tmp_dir, state_mod, capsys, tmp_path):
     empty.write_text("")
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_merge_fix(_make_args(empty))
+        review_lib.commands.merge_fix.cmd_merge_fix(_make_args(empty))
     assert e.value.code == 3
     captured = capsys.readouterr()
     assert "空です" in captured.err
@@ -557,7 +559,7 @@ def test_explicit_file_invalid_json_dies(patched_tmp_dir, state_mod, capsys, tmp
     bad.write_text("{ this is not valid json")
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_merge_fix(_make_args(bad))
+        review_lib.commands.merge_fix.cmd_merge_fix(_make_args(bad))
     assert e.value.code == 3
     captured = capsys.readouterr()
     assert "parse に失敗" in captured.err or "読み取り" in captured.err
@@ -606,7 +608,7 @@ def test_count_normalizes_int_list_tuple_none_bool(state_mod, value, expected):
     PLAN25 round2 (gemini 指摘): 数値文字列 ("3" 等) も件数として許容する。
     PLAN25 round4 (gemini 指摘): 単一 dict は 1 件、数値文字列は前後空白を strip して許容。
     """
-    assert state_mod._count(value) == expected
+    assert review_lib.commands.merge_fix._count(value) == expected
 
 
 def test_merge_fix_int_counts_do_not_crash_and_persist(patched_tmp_dir, state_mod):
@@ -628,7 +630,7 @@ def test_merge_fix_int_counts_do_not_crash_and_persist(patched_tmp_dir, state_mo
     (tmp_dir / f"fix-pr{PR}-result.json").write_text(json.dumps(fix))
 
     # TypeError を出さずに完走すること
-    state_mod.cmd_merge_fix(_make_args())
+    review_lib.commands.merge_fix.cmd_merge_fix(_make_args())
 
     st = _read_state(tmp_dir)
     merged = st["rounds"][-1]["fix"]
@@ -653,7 +655,7 @@ def test_merge_fix_deferred_single_dict_is_wrapped(patched_tmp_dir, state_mod):
     fix["deferred"] = {"comment_id": 7, "summary": "single-nit"}
     (tmp_dir / f"fix-pr{PR}-result.json").write_text(json.dumps(fix))
 
-    state_mod.cmd_merge_fix(_make_args())
+    review_lib.commands.merge_fix.cmd_merge_fix(_make_args())
 
     st = _read_state(tmp_dir)
     merged = st["rounds"][-1]["fix"]
@@ -681,7 +683,7 @@ def test_merge_fix_list_deferred_expands_nits(patched_tmp_dir, state_mod):
     fix["rejected"] = [{"comment_id": 3, "summary": "rej-1"}]
     (tmp_dir / f"fix-pr{PR}-result.json").write_text(json.dumps(fix))
 
-    state_mod.cmd_merge_fix(_make_args())
+    review_lib.commands.merge_fix.cmd_merge_fix(_make_args())
 
     st = _read_state(tmp_dir)
     merged = st["rounds"][-1]["fix"]
@@ -723,7 +725,7 @@ def test_merge_fix_deferred_non_dict_elements_are_skipped(patched_tmp_dir, state
     (tmp_dir / f"fix-pr{PR}-result.json").write_text(json.dumps(fix))
 
     # TypeError を出さずに完走すること
-    state_mod.cmd_merge_fix(_make_args())
+    review_lib.commands.merge_fix.cmd_merge_fix(_make_args())
 
     st = _read_state(tmp_dir)
     merged = st["rounds"][-1]["fix"]
@@ -765,7 +767,7 @@ def test_merge_fix_deferred_count_matches_expanded_nits(patched_tmp_dir, state_m
     ]
     (tmp_dir / f"fix-pr{PR}-result.json").write_text(json.dumps(fix))
 
-    state_mod.cmd_merge_fix(_make_args())
+    review_lib.commands.merge_fix.cmd_merge_fix(_make_args())
 
     st = _read_state(tmp_dir)
     merged = st["rounds"][-1]["fix"]
@@ -795,7 +797,7 @@ def test_merge_fix_records_resolved_thread_positions(patched_tmp_dir, state_mod)
     ]
     (tmp_dir / f"fix-pr{PR}-result.json").write_text(json.dumps(fix))
 
-    state_mod.cmd_merge_fix(_make_args())
+    review_lib.commands.merge_fix.cmd_merge_fix(_make_args())
 
     merged = _read_state(tmp_dir)["rounds"][-1]["fix"]
     assert merged["resolved_thread_positions"] == [
@@ -817,7 +819,7 @@ def test_merge_fix_resolved_thread_positions_int_form_does_not_crash(
     fix["resolved_threads"] = 3
     (tmp_dir / f"fix-pr{PR}-result.json").write_text(json.dumps(fix))
 
-    state_mod.cmd_merge_fix(_make_args())
+    review_lib.commands.merge_fix.cmd_merge_fix(_make_args())
 
     merged = _read_state(tmp_dir)["rounds"][-1]["fix"]
     assert merged["resolved_thread_positions"] == []
@@ -843,7 +845,7 @@ def test_merge_fix_resolved_thread_positions_keeps_incomplete_items(
     ]
     (tmp_dir / f"fix-pr{PR}-result.json").write_text(json.dumps(fix))
 
-    state_mod.cmd_merge_fix(_make_args())
+    review_lib.commands.merge_fix.cmd_merge_fix(_make_args())
 
     merged = _read_state(tmp_dir)["rounds"][-1]["fix"]
     assert merged["resolved_thread_positions"] == [

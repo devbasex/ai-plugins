@@ -92,11 +92,11 @@ def _prs(st: dict[str, Any]) -> list[int]:
     return [current] if current is not None else []
 
 
-def _parse_time(value: Any) -> _dt.datetime | None:
-    if not isinstance(value, str) or not value.strip():
-        return None
+def _recorded_time(value: Any) -> _dt.datetime | None:
+    """記録の時刻を、タイムゾーンの有無を変えずに読む（ライブラリの `clock.parse` は無いものに付ける）。"""
+    text = value.strip() if isinstance(value, str) else ""
     try:
-        return _dt.datetime.fromisoformat(value.strip())
+        return _dt.datetime.fromisoformat(text) if text else None
     except ValueError:
         return None
 
@@ -111,8 +111,8 @@ def _wall_clock_seconds(st: dict[str, Any]) -> int | None:
     offset-naive の引き算は `TypeError` を投げる。受け取らないと、費用の 1 項目の
     ために測定そのものが落ちる。
     """
-    started = _parse_time(st.get("started_at"))
-    ended = _parse_time(st.get("ended_at"))
+    started = _recorded_time(st.get("started_at"))
+    ended = _recorded_time(st.get("ended_at"))
     if started is None or ended is None:
         return None
     try:
@@ -546,7 +546,7 @@ def measure(st: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _load(path: pathlib.Path) -> dict[str, Any]:
+def _read_state_file(path: pathlib.Path) -> dict[str, Any]:
     try:
         raw = path.read_text(encoding="utf-8")
     except OSError as exc:
@@ -570,7 +570,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
-    result = measure(_load(pathlib.Path(args.state_file)))
+    result = measure(_read_state_file(pathlib.Path(args.state_file)))
     text = json.dumps(result, indent=2, ensure_ascii=False) + "\n"
     if args.output:
         pathlib.Path(args.output).write_text(text, encoding="utf-8")

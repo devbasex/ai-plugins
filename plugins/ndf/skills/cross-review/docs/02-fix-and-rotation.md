@@ -60,7 +60,7 @@ fi
 1. `$TMP_DIR/fix-pr<PR>-result.json` を読んで `state.rounds[-1].fix` にマージ
 2. `deferred` を `state.deferred_nits` に追記
 3. **CI 失敗の分類**:
-   - code-fail（チェックジョブの名前がテスト・lint・型検査・ビルドを指す。語の一覧は `state.py` の `CI_CODE_PATTERNS`）: `final=error` で中断 (exit 3)
+   - code-fail（チェックジョブの名前がメタのチェック（`review_lib/ci.py` の `CI_META_PATTERNS`）に当たらない。テスト・lint・型検査・ビルドはここに入る）: `final=error` で中断 (exit 3)
    - meta-only (`check_pr_requirements` / `assignees` / `reviewers` / `labels` / `meta`): `ci_note` に記録して継続
    - 不明: 保守的に code-fail 扱い
 

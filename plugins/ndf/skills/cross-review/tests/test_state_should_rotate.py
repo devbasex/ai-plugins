@@ -16,6 +16,7 @@ import json
 import pathlib
 
 import pytest
+import review_lib.commands.loop
 
 PR = 6100
 REPO = "o/r"
@@ -52,7 +53,7 @@ def test_reaching_rotate_after_under_the_round_cap_signals_rotate(
     _write(tmp_dir, _state(_rounds(PR, 8), rotate_after=8, max_rounds=12))
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_should_rotate(argparse.Namespace(pr=PR))
+        review_lib.commands.loop.cmd_should_rotate(argparse.Namespace(pr=PR))
 
     assert e.value.code == 0
     out = capsys.readouterr().out
@@ -65,7 +66,7 @@ def test_fewer_rounds_than_rotate_after_keeps(tmp_dir, state_mod) -> None:
     _write(tmp_dir, _state(_rounds(PR, 7), rotate_after=8, max_rounds=12))
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_should_rotate(argparse.Namespace(pr=PR))
+        review_lib.commands.loop.cmd_should_rotate(argparse.Namespace(pr=PR))
 
     assert e.value.code == 2
 
@@ -75,7 +76,7 @@ def test_reaching_the_round_cap_keeps_even_past_rotate_after(tmp_dir, state_mod)
     _write(tmp_dir, _state(_rounds(PR, 12), rotate_after=8, max_rounds=12))
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_should_rotate(argparse.Namespace(pr=PR))
+        review_lib.commands.loop.cmd_should_rotate(argparse.Namespace(pr=PR))
 
     assert e.value.code == 2
 
@@ -88,7 +89,7 @@ def test_round_in_pr_counts_only_the_current_pr_after_a_rotation(
     _write(tmp_dir, _state(rounds, rotate_after=8, max_rounds=20, current_pr=new_pr))
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_should_rotate(argparse.Namespace(pr=PR))
+        review_lib.commands.loop.cmd_should_rotate(argparse.Namespace(pr=PR))
 
     assert e.value.code == 0
     out = capsys.readouterr().out
@@ -111,7 +112,7 @@ def test_the_round_cap_counts_rounds_of_earlier_prs_too(tmp_dir, state_mod) -> N
     _write(tmp_dir, _state(rounds, rotate_after=8, max_rounds=12, current_pr=new_pr))
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_should_rotate(argparse.Namespace(pr=PR))
+        review_lib.commands.loop.cmd_should_rotate(argparse.Namespace(pr=PR))
 
     assert e.value.code == 2
 
@@ -123,7 +124,7 @@ def test_one_round_below_the_cap_still_rotates(tmp_dir, state_mod, capsys) -> No
     _write(tmp_dir, _state(rounds, rotate_after=8, max_rounds=12, current_pr=new_pr))
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_should_rotate(argparse.Namespace(pr=PR))
+        review_lib.commands.loop.cmd_should_rotate(argparse.Namespace(pr=PR))
 
     assert e.value.code == 0
     out = capsys.readouterr().out

@@ -17,11 +17,8 @@ unresolved / final / review_status。
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import json
 import os
-import shlex
-import subprocess
 import sys
 from pathlib import Path
 
@@ -31,6 +28,7 @@ LIB = HERE.parents[2] / "scripts" / "lib"
 sys.path.insert(0, str(LIB))
 import drive_pause as dp  # noqa: E402
 from drive_pause import Stop  # noqa: E402
+from loop_drive import call, parse_vars, review_status  # noqa: E402,F401  テストは `call` をこのモジュールの上で差し替える
 
 TOOL = "cross-review-drive"
 DOCS02 = SKILL / "docs" / "02-fix-and-rotation.md"
@@ -38,48 +36,12 @@ DOCS02 = SKILL / "docs" / "02-fix-and-rotation.md"
 FINAL_STAGES = ("sweep-start", "sweep", "done")
 
 
-def review_state_module():
-    """置き場の規則を init と揃えるため、`state.py` を読み込む（打ち直しのときだけ呼ぶ）。"""
-    name = "cross_review_state_for_drive"
-    if name not in sys.modules:
-        spec = importlib.util.spec_from_file_location(name, HERE / "state.py")
-        mod = importlib.util.module_from_spec(spec)
-        sys.modules[name] = mod
-        spec.loader.exec_module(mod)
-    return sys.modules[name]
-
-
-def call(cmd: list[str], env: dict | None = None, cwd: str | None = None) -> tuple[int, str]:
-    """スクリプトを 1 本実行し、終了コードと標準出力を返す。標準エラーはそのまま流す。"""
-    p = subprocess.run(cmd, capture_output=True, text=True, errors="replace", env=env, cwd=cwd)
-    if p.stderr:
-        sys.stderr.write(p.stderr)
-    return p.returncode, p.stdout
-
-
-def parse_vars(text: str) -> dict:
-    out = {}
-    for line in text.splitlines():
-        try:
-            words = shlex.split(line)
-        except ValueError:
-            continue
-        for w in words:
-            k, sep, v = w.partition("=")
-            if sep and k.isidentifier():
-                out[k] = v
-    return out
-
-
-def review_status(state: dict) -> str:
-    """最後の HEAD が承認されたなら approved、それ以外は final の値（cross-refactoring の finalize が読む）。"""
-    sw = state.get("sweep") or {}
-    if (state.get("final") == "approved" and sw.get("verified") is True
-            and (sw.get("remaining_open") or 0) == 0 and sw.get("commit") is None):
-        return "approved"
-    if state.get("final") == "approved":
-        return "unverified"  # 最後の HEAD（スイープの修正・残り・未検証）は承認されていない
-    return state.get("final") or "unknown"
+def review_paths():
+    """置き場の規則を init と揃えるため、`review_lib` の `github` と `workspace` を読み込む（打ち直しのときだけ呼ぶ）。"""
+    if str(HERE) not in sys.path:
+        sys.path.insert(0, str(HERE))
+    from review_lib import github, workspace
+    return github, workspace
 
 
 class Drive:
@@ -221,9 +183,9 @@ GitHub と git の送信をしない。結果ファイル: {self.path('sweep')}
         wt = ap.parse_known_args(self.init_args)[0].worktree
         if wt:
             return Path(wt).resolve() / ".cross_review"
-        st = review_state_module()
-        repo = st._repo_from_git()
-        return st._default_worktree_base() / st._repo_slug(repo) / f"pr{self.pr}" / ".cross_review" \
+        github, workspace = review_paths()
+        repo = github._repo_from_git()
+        return workspace._default_worktree_base() / github._repo_slug(repo) / f"pr{self.pr}" / ".cross_review" \
             if repo else None
 
     def finished_vars(self) -> dict | None:

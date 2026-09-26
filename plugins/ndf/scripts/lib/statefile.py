@@ -7,12 +7,25 @@
 """
 from __future__ import annotations
 
-import datetime as _dt
+import functools
 import json
 import pathlib
 import shlex
 import sys
 from typing import Any, Callable, Iterable, NamedTuple
+
+if str(pathlib.Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import clock  # noqa: E402
+import jsonio  # noqa: E402
+import proc  # noqa: E402
+
+# 時刻・JSON の書き込み・終わり方は `clock`・`jsonio`・`proc` が持つ（#1142 の L0）。ここの名前は再エクスポート。
+# `now` は状態ファイルに書く時刻で、ローカル時刻のタイムゾーンを持たない ISO 8601（秒まで）。
+now = functools.partial(clock.now_iso, "naive")
+write_json_atomic = jsonio.write_atomic
+die = proc.die
+info = proc.info
 
 # 保存の後に呼ぶ関数（#662）。**共通層は呼ぶだけで、何をするかは知らない。**
 # cross-refactoring の `refactor.py` が実行の要約の書き出しを登録する。
@@ -31,9 +44,6 @@ def unregister_after_save(hook: AfterSave) -> None:
         _AFTER_SAVE.remove(hook)
 
 
-def now() -> str:
-    """状態ファイルに書く時刻。ローカル時刻の ISO 8601 形式（秒まで）。"""
-    return _dt.datetime.now().isoformat(timespec="seconds")
 
 
 def load(path: pathlib.Path) -> dict[str, Any]:
@@ -41,21 +51,6 @@ def load(path: pathlib.Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def write_json_atomic(path: pathlib.Path, data: Any) -> None:
-    """JSON を原子的に書く。
-
-    同じディレクトリへ一時ファイルを書いてから `replace` する。途中で落ちても
-    半端な JSON が残らないため、再開時に必ず読める。失敗は例外で返し、一時
-    ファイルは残さない。
-    """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".json.tmp")
-    try:
-        tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-        tmp.replace(path)
-    except BaseException:
-        tmp.unlink(missing_ok=True)
-        raise
 
 
 def save(path: pathlib.Path, state: dict[str, Any]) -> None:
@@ -85,13 +80,8 @@ def emit(**values: Any) -> None:
         print(f"{key}={shlex.quote(str(value))}")
 
 
-def die(msg: str, code: int = 1) -> None:
-    print(f"❌ {msg}", file=sys.stderr)
-    sys.exit(code)
 
 
-def info(msg: str) -> None:
-    print(msg, file=sys.stderr)
 
 
 # ---------- 再開の反映（#727 / #648） ----------

@@ -20,6 +20,11 @@ import json
 import pathlib
 
 import pytest
+import review_lib
+import review_lib.commands.init
+import review_lib.github
+import review_lib.workspace
+import subprocess
 
 PR = 2912
 REPO = "devbasex/ai-plugins"
@@ -66,13 +71,13 @@ def _init_args() -> argparse.Namespace:
 
 
 def test_the_repository_is_resolved_from_git(state_mod) -> None:
-    assert state_mod._repo_from_git() == REPO
+    assert review_lib.github._repo_from_git() == REPO
 
 
 def test_the_repository_falls_back_to_gh_only_when_git_cannot_answer(
         state_mod, monkeypatch) -> None:
-    monkeypatch.setattr(state_mod, "_git_remote_url", lambda: "")
-    assert state_mod._repo_from_git() is None
+    monkeypatch.setattr(review_lib.github, "_git_remote_url", lambda: "")
+    assert review_lib.github._repo_from_git() is None
 
 
 # ---- 受け入れ条件 1 / 3: 再開の入口はキャッシュを読み直さない ----
@@ -84,7 +89,7 @@ def test_the_resume_path_does_not_look_up_the_cached_values(
     # 未解決スレッドの照会だけが残る。0 件の応答（空の出力）を返す。
     fake_gh.set_rules([{"match": "graphql", "stdout": ""}])
 
-    state_mod.cmd_init(_init_args())
+    review_lib.commands.init.cmd_init(_init_args())
 
     calls = fake_gh.joined()
     assert [c for c in calls if any(k in c for k in CACHED_LOOKUPS)] == []
@@ -97,7 +102,7 @@ def test_the_only_remaining_lookup_is_the_round_varying_one(
     _seed_resumable(tmp_dir)
     fake_gh.set_rules([{"match": "graphql", "stdout": ""}])
 
-    state_mod.cmd_init(_init_args())
+    review_lib.commands.init.cmd_init(_init_args())
 
     calls = fake_gh.joined()
     assert len(calls) == 1
@@ -110,7 +115,7 @@ def test_the_resume_survives_the_rate_limit(state_mod, fake_gh, tmp_dir,
     _seed_resumable(tmp_dir)
     fake_gh.set_mode("rate_limit")
 
-    state_mod.cmd_init(_init_args())
+    review_lib.commands.init.cmd_init(_init_args())
 
     out = capsys.readouterr().out
     assert "RESUMED=1" in out
@@ -125,21 +130,21 @@ def test_the_viewer_login_is_kept_in_the_state(state_mod, tmp_dir, monkeypatch,
     """一度取ったログイン名を状態ファイルへ持つ。待ち行列の冪等の照合が使う。"""
     worktree = tmp_path / "wt"
     worktree.mkdir()
-    monkeypatch.setattr(state_mod, "_fetch_pr_metadata", lambda pr, repo=None:
-                        state_mod.PrMetadata(REPO, "takemi", "feat/x", "abc",
+    monkeypatch.setattr(review_lib.github, "_fetch_pr_metadata", lambda pr, repo=None:
+                        review_lib.github.PrMetadata(REPO, "takemi", "feat/x", "abc",
                                              "develop", False, 4000, None))
-    monkeypatch.setattr(state_mod, "_fetch_changed_files", lambda pr, repo: [])
-    monkeypatch.setattr(state_mod, "_sh", lambda cmd, check=True: "takemi")
-    monkeypatch.setattr(state_mod, "_create_worktree", lambda *a: None)
-    monkeypatch.setattr(state_mod, "_is_registered_worktree", lambda p: True)
-    monkeypatch.setattr(state_mod, "_sync_worktree", lambda *a, **k: None)
-    monkeypatch.setattr(state_mod.subprocess, "run", lambda *a, **k:
+    monkeypatch.setattr(review_lib.github, "_fetch_changed_files", lambda pr, repo: [])
+    monkeypatch.setattr(review_lib, "_sh", lambda cmd, check=True: "takemi")
+    monkeypatch.setattr(review_lib.workspace, "_create_worktree", lambda *a: None)
+    monkeypatch.setattr(review_lib.workspace, "_is_registered_worktree", lambda p: True)
+    monkeypatch.setattr(review_lib.workspace, "_sync_worktree", lambda *a, **k: None)
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k:
                         __import__("types").SimpleNamespace(
                             returncode=0, stdout="", stderr=""))
     args = _init_args()
     args.worktree = str(worktree)
 
-    state_mod.cmd_init(args)
+    review_lib.commands.init.cmd_init(args)
 
     saved = json.loads(
         (tmp_dir / f"cross-review-pr{PR}-state.json").read_text(encoding="utf-8"))
@@ -155,10 +160,10 @@ def test_the_repository_comes_from_the_resume_state_before_github(
     止まる。**#291 が塞ごうとしている状態そのものである。**
     """
     _seed_resumable(tmp_dir)
-    monkeypatch.setattr(state_mod, "_git_remote_url", lambda: "")
+    monkeypatch.setattr(review_lib.github, "_git_remote_url", lambda: "")
     fake_gh.set_mode("rate_limit")
 
-    state_mod.cmd_init(_init_args())
+    review_lib.commands.init.cmd_init(_init_args())
 
     out = capsys.readouterr().out
     assert "RESUMED=1" in out
@@ -169,4 +174,4 @@ def test_the_resume_state_is_not_read_without_a_place_to_look(
         state_mod, monkeypatch) -> None:
     """既定の作業ツリーの位置はリポジトリ名を含むため、名前抜きでは探せない。"""
     monkeypatch.delenv("CROSS_REVIEW_TMP_DIR", raising=False)
-    assert state_mod._repo_from_resume(PR, None) is None
+    assert review_lib.github._repo_from_resume(PR, None) is None

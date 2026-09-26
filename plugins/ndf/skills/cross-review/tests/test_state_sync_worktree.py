@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import subprocess
+import review_lib.workspace
 
 
 class _Recorder:
@@ -57,8 +58,8 @@ class _Recorder:
 def test_resets_worktree_to_pr_head(monkeypatch, state_mod):
     """fetch が通れば origin/<head> へ hard reset する。"""
     rec = _Recorder()
-    monkeypatch.setattr(state_mod.subprocess, "run", rec)
-    state_mod._sync_worktree("/wt", 42, "feature/x")
+    monkeypatch.setattr(subprocess, "run", rec)
+    review_lib.workspace._sync_worktree("/wt", 42, "feature/x")
 
     assert ["git", "fetch", "origin", "feature/x"] in rec.commands()
     assert ["git", "reset", "--hard", "origin/feature/x"] in rec.commands()
@@ -75,8 +76,8 @@ def test_removes_untracked_leftovers(monkeypatch, state_mod):
     tmp ディレクトリを消さないためで、除外は `-e` でも重ねて指定する。
     """
     rec = _Recorder()
-    monkeypatch.setattr(state_mod.subprocess, "run", rec)
-    state_mod._sync_worktree("/wt", 42, "feature/x")
+    monkeypatch.setattr(subprocess, "run", rec)
+    review_lib.workspace._sync_worktree("/wt", 42, "feature/x")
 
     clean = [c for c in rec.commands() if c[:2] == ["git", "clean"]]
     assert clean and clean[0][:3] == ["git", "clean", "-fd"]
@@ -93,8 +94,8 @@ def test_excludes_the_tmp_dir_from_clean(monkeypatch, state_mod):
     """
     monkeypatch.setenv("CROSS_REVIEW_TMP_DIR", "/wt/.review-tmp")
     rec = _Recorder()
-    monkeypatch.setattr(state_mod.subprocess, "run", rec)
-    state_mod._sync_worktree("/wt", 42, "feature/x")
+    monkeypatch.setattr(subprocess, "run", rec)
+    review_lib.workspace._sync_worktree("/wt", 42, "feature/x")
 
     clean = [c for c in rec.commands() if c[:2] == ["git", "clean"]][0]
     assert "-e" in clean
@@ -108,11 +109,11 @@ def test_strict_mode_keeps_tracked_changes(monkeypatch, state_mod):
     ラウンドの開始時に見つかる変更は、同じループの修正の工程が今まさに残したものである。
     """
     rec = _Recorder(status=" M src/foo.py\n")
-    monkeypatch.setattr(state_mod.subprocess, "run", rec)
-    head = state_mod.HeadRef(branch="feature/x", oid="a" * 40, is_fork=False)
+    monkeypatch.setattr(subprocess, "run", rec)
+    head = review_lib.workspace.HeadRef(branch="feature/x", oid="a" * 40, is_fork=False)
 
     with __import__("pytest").raises(SystemExit) as e:
-        state_mod._sync_worktree("/wt", 42, head, strict=True)
+        review_lib.workspace._sync_worktree("/wt", 42, head, strict=True)
 
     assert e.value.code == 8
     assert not any(c[:3] == ["git", "reset", "--hard"] for c in rec.commands())
@@ -121,8 +122,8 @@ def test_strict_mode_keeps_tracked_changes(monkeypatch, state_mod):
 def test_falls_back_to_gh_pr_checkout(monkeypatch, state_mod):
     """`strict=False` で基準を手元に持てないときは、フォールバックの後に掃除まで進む。"""
     rec = _Recorder(fetch_rc=1)
-    monkeypatch.setattr(state_mod.subprocess, "run", rec)
-    state_mod._sync_worktree("/wt", 42, "feature/x")
+    monkeypatch.setattr(subprocess, "run", rec)
+    review_lib.workspace._sync_worktree("/wt", 42, "feature/x")
 
     assert ["gh", "pr", "checkout", "42", "--detach"] in rec.commands()
     assert any(c[:2] == ["git", "clean"] for c in rec.commands())
@@ -131,8 +132,8 @@ def test_falls_back_to_gh_pr_checkout(monkeypatch, state_mod):
 def test_falls_back_to_gh_pr_checkout_for_fork(monkeypatch, state_mod):
     """origin に head branch が無いフォーク PR は gh pr checkout で合わせる。"""
     rec = _Recorder(fetch_rc=1)
-    monkeypatch.setattr(state_mod.subprocess, "run", rec)
-    state_mod._sync_worktree("/wt", 42, "feature/x")
+    monkeypatch.setattr(subprocess, "run", rec)
+    review_lib.workspace._sync_worktree("/wt", 42, "feature/x")
 
     assert ["gh", "pr", "checkout", "42", "--detach"] in rec.commands()
     assert not any(c[:3] == ["git", "reset", "--hard"] for c in rec.commands())
@@ -141,9 +142,9 @@ def test_falls_back_to_gh_pr_checkout_for_fork(monkeypatch, state_mod):
 def test_dies_when_reset_fails(monkeypatch, state_mod):
     """同期できないまま進めない。古い差分を読ませるより止める。"""
     rec = _Recorder(reset_rc=1)
-    monkeypatch.setattr(state_mod.subprocess, "run", rec)
+    monkeypatch.setattr(subprocess, "run", rec)
     with __import__("pytest").raises(SystemExit):
-        state_mod._sync_worktree("/wt", 42, "feature/x")
+        review_lib.workspace._sync_worktree("/wt", 42, "feature/x")
 
 
 def test_dies_when_clean_fails(monkeypatch, state_mod):
@@ -153,9 +154,9 @@ def test_dies_when_clean_fails(monkeypatch, state_mod):
     `git add -A` で Pull Request へ混ざる。
     """
     rec = _Recorder(clean_rc=1)
-    monkeypatch.setattr(state_mod.subprocess, "run", rec)
+    monkeypatch.setattr(subprocess, "run", rec)
     with __import__("pytest").raises(SystemExit):
-        state_mod._sync_worktree("/wt", 42, "feature/x")
+        review_lib.workspace._sync_worktree("/wt", 42, "feature/x")
 
 
 def test_keeps_unpushed_commits_ahead_of_head(monkeypatch, state_mod):
@@ -165,9 +166,9 @@ def test_keeps_unpushed_commits_ahead_of_head(monkeypatch, state_mod):
     巻き戻すとそのコミットが捨てられ、`merge-fix` が止まる。
     """
     rec = _Recorder(ahead=2, ancestor_rc=0)
-    monkeypatch.setattr(state_mod.subprocess, "run", rec)
-    head = state_mod.HeadRef(branch="feature/x", oid="a" * 40, is_fork=False)
-    state_mod._sync_worktree("/wt", 42, head)
+    monkeypatch.setattr(subprocess, "run", rec)
+    head = review_lib.workspace.HeadRef(branch="feature/x", oid="a" * 40, is_fork=False)
+    review_lib.workspace._sync_worktree("/wt", 42, head)
 
     assert not any(c[:3] == ["git", "reset", "--hard"] for c in rec.commands())
     assert not any(c[:2] == ["git", "clean"] for c in rec.commands())
@@ -177,7 +178,7 @@ def test_keeps_unpushed_commits_ahead_of_head(monkeypatch, state_mod):
 def test_resets_when_head_is_not_an_ancestor(monkeypatch, state_mod):
     """head が作業ツリーの HEAD の祖先でない（分かれた）ときは、これまでどおり巻き戻す。"""
     rec = _Recorder(ahead=2, ancestor_rc=1)
-    monkeypatch.setattr(state_mod.subprocess, "run", rec)
-    state_mod._sync_worktree("/wt", 42, "feature/x")
+    monkeypatch.setattr(subprocess, "run", rec)
+    review_lib.workspace._sync_worktree("/wt", 42, "feature/x")
 
     assert ["git", "reset", "--hard", "origin/feature/x"] in rec.commands()

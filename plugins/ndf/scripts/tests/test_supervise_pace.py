@@ -5,7 +5,6 @@ new close・new release --mvv・new impl --escape-of）と実行（実行の条�
 """
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
 import subprocess
@@ -20,9 +19,8 @@ MISSION_STATE = SCRIPTS / "mission-state.py"
 REPO = SCRIPTS.parents[2]
 PY = sys.executable
 
-spec = importlib.util.spec_from_file_location("supervise_pace", SUPERVISE)
-sv = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(sv)
+sys.path.insert(0, str(SCRIPTS))
+from supervise_lib import engine, paths, queue  # noqa: E402
 
 
 def cli(*args, cwd=None):
@@ -279,10 +277,10 @@ def test_condition_skip_finishes_without_a_worktree_and_the_next_stage_runs(tmp_
                      **{"作業場所": str(wt), "branch": "check/x", "起点": "HEAD", "リポジトリ": str(repo),
                         "実行の条件": {"cmd": "echo '{\"summary\": \"立たない\"}'; exit 3", "skip_code": 3}})
     after = plan_file(tmp_path, "after", [{"id": "t", "type": "run", "cmd": f"touch {tmp_path}/after", "next": "end"}])
-    res = sv.cmd_queue([cond], 3, poll=0.05, then=[[after]])
+    res = queue.cmd_queue([cond], 3, poll=0.05, then=[[after]])
     assert [i["result"] for i in res["items"]] == ["完了", "完了"], res
     assert not wt.exists() and not (tmp_path / "ran").exists() and (tmp_path / "after").exists()
-    report = (sv.state_dir_of(cond) / "report.md").read_text()
+    report = (paths.state_dir_of(cond) / "report.md").read_text()
     assert "- 結果: 完了" in report and "実行の条件に当たらない（立たない）" in report
 
 
@@ -291,7 +289,7 @@ def test_condition_zero_runs_and_other_codes_stop(tmp_path):
                    **{"実行の条件": {"cmd": "true", "skip_code": 3}})
     bad = plan_file(tmp_path, "bad", [{"id": "t", "type": "run", "cmd": "true", "next": "end"}],
                     **{"実行の条件": {"cmd": "exit 2", "skip_code": 3}})
-    res = sv.cmd_queue([ok, bad], 3, poll=0.05)
+    res = queue.cmd_queue([ok, bad], 3, poll=0.05)
     got = {Path(i["plan"]).stem: i["result"] for i in res["items"]}
     assert got == {"ok": "完了", "bad": "止まった"} and (tmp_path / "ran").exists()
 
@@ -301,17 +299,17 @@ def test_then_stages_run_in_order_and_stop_after_a_failed_stage(tmp_path):
     b = plan_file(tmp_path, "b", [{"id": "t", "type": "run", "cmd": f"sleep 0.2; date +%s.%N > {tmp_path}/b",
                                    "next": "end"}])
     c = plan_file(tmp_path, "c", [{"id": "t", "type": "run", "cmd": f"date +%s.%N > {tmp_path}/c", "next": "end"}])
-    res = sv.cmd_queue([a], 3, poll=0.05, then=[[b], [c]])
+    res = queue.cmd_queue([a], 3, poll=0.05, then=[[b], [c]])
     assert [i["result"] for i in res["items"]] == ["完了"] * 3
     t = {k: float((tmp_path / k).read_text()) for k in "abc"}
     assert t["a"] <= t["b"] <= t["c"]
     fail = plan_file(tmp_path, "fail", [{"id": "t", "type": "run", "cmd": "exit 1"}])
-    res = sv.cmd_queue([a], 3, poll=0.05, then=[[fail], [c]])
-    assert [i["result"] for i in res["items"]] == ["完了", "止まった", sv.NOT_RUN]
+    res = queue.cmd_queue([a], 3, poll=0.05, then=[[fail], [c]])
+    assert [i["result"] for i in res["items"]] == ["完了", "止まった", queue.NOT_RUN]
 
 
 def report_with_pr(plan: str, pr: str) -> None:
-    d = sv.state_dir_of(plan)
+    d = paths.state_dir_of(plan)
     d.mkdir(parents=True, exist_ok=True)
     (d / "report.md").write_text(f"## フェーズの報告\n\n- 結果: 完了\n- Pull Request: {pr}\n")
 
@@ -331,16 +329,16 @@ def test_queue_pr_placeholder_takes_the_named_plan_or_zero(tmp_path, monkeypatch
                 items.append({"plan": p, "result": "完了", "report": ""})
             else:
                 report_with_pr(p, "https://github.com/o/r/pull/77" if p == prod else "78")
-                items.append({"plan": p, "result": "完了", "report": str(sv.state_dir_of(p) / "report.md")})
+                items.append({"plan": p, "result": "完了", "report": str(paths.state_dir_of(p) / "report.md")})
         return items
-    monkeypatch.setattr(sv, "run_batch", batch)
-    sv.cmd_queue([impl], 3, poll=0.05, then=[[prod], [close]])
+    monkeypatch.setattr(queue, "run_batch", batch)
+    queue.cmd_queue([impl], 3, poll=0.05, then=[[prod], [close]])
     assert seen["cmd"] == "echo 77"
     close2 = plan_file(tmp_path, "4-close-b", [{"id": "t", "type": "run", "cmd": "echo {queue_pr:release-prod}",
                                                 "next": "end"}])
-    (sv.state_dir_of(prod) / "report.md").write_text("## フェーズの報告\n\n- 結果: 完了\n- Pull Request: 無し\n")
-    assert sv.fill_queue_pr(close2, [{"plan": prod, "result": "完了",
-                                      "report": str(sv.state_dir_of(prod) / "report.md")}]) is None
+    (paths.state_dir_of(prod) / "report.md").write_text("## フェーズの報告\n\n- 結果: 完了\n- Pull Request: 無し\n")
+    assert queue.fill_queue_pr(close2, [{"plan": prod, "result": "完了",
+                                      "report": str(paths.state_dir_of(prod) / "report.md")}]) is None
     assert load(close2)["steps"][0]["cmd"] == "echo 0"
 
 
@@ -348,7 +346,7 @@ def test_queue_pr_placeholder_reads_a_sibling_plan_when_queued_alone(tmp_path):
     prod = plan_file(tmp_path, "3-release-prod", [])
     report_with_pr(prod, "91")
     close = plan_file(tmp_path, "4-close", [{"id": "t", "type": "run", "cmd": "echo {queue_pr:release-prod}"}])
-    assert sv.fill_queue_pr(close, []) is None
+    assert queue.fill_queue_pr(close, []) is None
     assert load(close)["steps"][0]["cmd"] == "echo 91"
 
 
@@ -357,12 +355,12 @@ def test_gate_as_ok_copies_the_presentation_and_goes_on(tmp_path):
     pres.write_text("# 提示物\n")
     out = json.dumps({"tool": "t", "status": "gate", "summary": "s", "items": [], "metrics": {},
                       "presentation_path": str(pres)})
-    s = sv.Supervisor({"フェーズ": "試験", "課題": [], "作業場所": str(tmp_path), "steps": [
+    s = engine.Engine({"フェーズ": "試験", "課題": [], "作業場所": str(tmp_path), "steps": [
         {"id": "facts", "type": "run", "cmd": f"echo '{out}'; exit 10", "gate_as_ok": True,
          "presentation_to": "issues/a.md", "next": "after"},
         {"id": "after", "type": "run", "cmd": "true", "next": "end"}]}, tmp_path / "state")
     text = s.run()
-    assert "- 結果: 完了" in text and "after" in s.results
+    assert "- 結果: 完了" in text and "after" in s.state.results
     assert (tmp_path / "issues" / "a.md").read_text() == "# 提示物\n"
     assert f"提示物: {tmp_path / 'issues' / 'a.md'}" in text
 
@@ -371,7 +369,7 @@ def test_mvv_step_returning_ten_makes_the_queue_a_gate(tmp_path):
     prod = plan_file(tmp_path, "prod", [
         {"id": "mvv", "type": "run", "cmd": "exit 10", "next": "bump", "gate_next": "end"},
         {"id": "bump", "type": "run", "cmd": f"touch {tmp_path}/bumped", "next": "end"}])
-    res = sv.cmd_queue([prod], 3, poll=0.05)
+    res = queue.cmd_queue([prod], 3, poll=0.05)
     assert res["status"] == "gate" and res["items"][0]["result"] == "関門"
     assert not (tmp_path / "bumped").exists()
 
@@ -380,7 +378,7 @@ def test_a_fast_plan_records_the_pace_before_the_first_stage(tmp_path):
     log = tmp_path / "rec.log"
     rec = tmp_path / "rec.sh"
     rec.write_text(f'echo "$@" >> {log}\n')
-    s = sv.Supervisor({"フェーズ": "試験", "課題": [5, 6], "作業場所": str(tmp_path), "記録": str(rec), "進め方": "fast",
+    s = engine.Engine({"フェーズ": "試験", "課題": [5, 6], "作業場所": str(tmp_path), "記録": str(rec), "進め方": "fast",
                        "steps": [{"id": "a", "type": "run", "cmd": "true", "stage": "確定仕様化", "next": "b"},
                                  {"id": "b", "type": "run", "cmd": "true", "stage": "振り返り", "next": "end"}]},
                       tmp_path / "state")

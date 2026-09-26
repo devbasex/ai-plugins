@@ -8,7 +8,6 @@ from __future__ import annotations
 import argparse
 import json
 import pathlib
-import re
 import subprocess
 import sys
 import time
@@ -19,6 +18,8 @@ import assignment
 import auth
 import jev
 import models as models_lib
+import proc
+import repo as repo_lib
 import statefile
 
 from .. import ABORT, die, info
@@ -27,7 +28,6 @@ from .. import timeline
 from ..paths import (
     git_out,
     default_worktree_base,
-    repo_slug,
     sh,
     state_path,
     tmp_dir_for,
@@ -189,19 +189,15 @@ def _warn_unmeasurable_models(
         )
 
 
-_REPO_URL = re.compile(
-    r"(?:github\.com[:/])(?P<owner>[^/]+)/(?P<name>[^/]+?)(?:\.git)?/?$"
-)
-
-
-def _repo_from_git() -> Optional[str]:
-    """git の設定から `owner/repo` を求める。求まらなければ `None`。
+def github_repo_from_origin() -> Optional[str]:
+    """カレントの origin の URL から `owner/repo` を求める（GitHub の URL だけ）。求まらなければ `None`。
 
     **求めた名前はそのまま使わない。** `repos/{owner}/{repo}/pulls/{PR}` の応答が
     そのまま検証になるため、誤った名前は失敗として現れる（`_fetch_pr_context`）。
+    URL の読み方はライブラリの `repo.owner_repo_from_url` が持つ。
     """
-    m = _REPO_URL.search(sh(["git", "remote", "get-url", "origin"], check=False))
-    return f"{m.group('owner')}/{m.group('name')}" if m else None
+    url = proc.git_out(pathlib.Path.cwd(), "remote", "get-url", "origin") or ""
+    return repo_lib.owner_repo_from_url(url) if "github.com" in url else None
 
 
 def _pr_payload(repo: str, pr: int) -> Optional[dict[str, Any]]:
@@ -228,7 +224,7 @@ def _fetch_pr_context(pr: int, repo: Optional[str] = None) -> tuple[str, str, st
     tried: list[str] = []
     body: Optional[dict[str, Any]] = None
     resolved = ""
-    for candidate in (repo, _repo_from_git()):
+    for candidate in (repo, github_repo_from_origin()):
         if not candidate or candidate in tried:
             continue
         tried.append(candidate)
@@ -483,7 +479,7 @@ def _prepare_init(args: argparse.Namespace) -> _InitPreparation:
 
     root = (
         pathlib.Path(args.worktree_root).resolve() if args.worktree_root
-        else default_worktree_base() / repo_slug(repo) / f"rf{args.pr}"
+        else default_worktree_base() / repo_lib.slug(repo) / f"rf{args.pr}"
     )
     work = root / "work"
     _ensure_work_worktree(work, head_branch)

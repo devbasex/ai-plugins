@@ -16,6 +16,17 @@ import subprocess
 import types
 
 import pytest
+import review_lib
+import review_lib.ci
+import review_lib.commands.init
+import review_lib.commands.judge
+import review_lib.commands.report
+import review_lib.commands.start_round
+import review_lib.findings
+import review_lib.github
+import review_lib.participants
+import review_lib.posts
+import review_lib.workspace
 
 # 子プロセスの起動の本物。テストのフィクスチャが差し替える前に控える（#813 の AC10 で
 # 認証の確認だけを本物のまま走らせるため）。
@@ -66,10 +77,10 @@ def _round(round_no, reviewers, verdicts, pr=500):
 def _no_external(state_mod, monkeypatch, tmp_path):
     """外部への問い合わせを止める。"""
     monkeypatch.setenv("CROSS_REVIEW_TMP_DIR", str(tmp_path))
-    monkeypatch.setattr(state_mod, "_auto_flush", lambda pr: None)
-    monkeypatch.setattr(state_mod, "_pending_posts", lambda pr: 0)
-    monkeypatch.setattr(state_mod, "_record_carried_over", lambda *a, **k: False)
-    monkeypatch.setattr(state_mod, "_round_ci", lambda *a, **k: {"verdict": "success",
+    monkeypatch.setattr(review_lib.posts, "_auto_flush", lambda pr: None)
+    monkeypatch.setattr(review_lib.posts, "_pending_posts", lambda pr: 0)
+    monkeypatch.setattr(review_lib.findings, "_record_carried_over", lambda *a, **k: False)
+    monkeypatch.setattr(review_lib.ci, "_round_ci", lambda *a, **k: {"verdict": "success",
                                                              "failed": [], "pending": [],
                                                              "note": "", "reason": ""})
 
@@ -92,7 +103,7 @@ def test_a_host_only_state_keeps_reviewers_other_than_the_host(state_mod, tmp_pa
     for host in ("claude", "codex", "agy", "kiro"):
         path = _state(tmp_path, host=host)
         st = json.loads(path.read_text(encoding="utf-8"))
-        picked = state_mod._round_reviewers(st, 1)
+        picked = review_lib.participants._round_reviewers(st, 1)
         assert len(picked) == 2
         assert host not in picked
 
@@ -106,14 +117,14 @@ def test_state_without_a_host_keeps_the_two_named_reviewers(state_mod, tmp_path)
     path = _state(tmp_path)
     st = json.loads(path.read_text(encoding="utf-8"))
     del st["host"]
-    assert state_mod._round_reviewers(st, 1) == ["codex", "agy"]
+    assert review_lib.participants._round_reviewers(st, 1) == ["codex", "agy"]
 
 
 def test_recorded_reviewers_win_over_the_rotation(state_mod, tmp_path):
     """ラウンドに記録された担当があれば、それを使う。"""
     path = _state(tmp_path, rounds=[_round(1, ["kiro", "codex"], {})])
     st = json.loads(path.read_text(encoding="utf-8"))
-    assert state_mod._round_reviewers(st, 1) == ["kiro", "codex"]
+    assert review_lib.participants._round_reviewers(st, 1) == ["kiro", "codex"]
 
 
 # ---------- 終了基準: 新規の指摘 ----------
@@ -128,7 +139,7 @@ def test_no_findings_converges_on_the_first_round(state_mod, tmp_path, capsys):
     _state(tmp_path, rounds=[_round(1, ["codex", "agy"],
                                     {"codex": "APPROVE", "agy": "APPROVE"})])
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_judge(type("A", (), {"pr": 500})())
+        review_lib.commands.judge.cmd_judge(type("A", (), {"pr": 500})())
     assert e.value.code == 0
     assert "NEW_FINDINGS=-" in capsys.readouterr().out
 
@@ -146,7 +157,7 @@ def test_only_repeated_findings_converge(state_mod, tmp_path, capsys):
     _payload(tmp_path, "agy", 500, 2, [_comment()])
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_judge(type("A", (), {"pr": 500})())
+        review_lib.commands.judge.cmd_judge(type("A", (), {"pr": 500})())
     assert e.value.code == 0
     assert "NEW_FINDINGS=0" in capsys.readouterr().out
 
@@ -161,7 +172,7 @@ def test_a_new_finding_keeps_the_loop_running(state_mod, tmp_path, capsys):
     _payload(tmp_path, "agy", 500, 2, [_comment(), _comment("src/b.py", 99, "別の指摘")])
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_judge(type("A", (), {"pr": 500})())
+        review_lib.commands.judge.cmd_judge(type("A", (), {"pr": 500})())
     assert e.value.code == 2
     assert "NEW_FINDINGS=1" in capsys.readouterr().out
 
@@ -173,7 +184,7 @@ def test_carried_over_findings_win_over_the_new_finding_count(state_mod, tmp_pat
            rounds=[_round(1, ["codex", "agy"],
                           {"codex": "APPROVE", "agy": "APPROVE"})])
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_judge(type("A", (), {"pr": 500})())
+        review_lib.commands.judge.cmd_judge(type("A", (), {"pr": 500})())
     assert e.value.code == 2
 
 
@@ -183,7 +194,7 @@ def test_judge_prints_intents_by_reviewer_name(state_mod, tmp_path, capsys):
            rounds=[_round(1, ["claude", "kiro"],
                           {"claude": "APPROVE", "kiro": "APPROVE"})])
     with pytest.raises(SystemExit):
-        state_mod.cmd_judge(type("A", (), {"pr": 500})())
+        review_lib.commands.judge.cmd_judge(type("A", (), {"pr": 500})())
     out = capsys.readouterr().out
     assert "REVIEWER_INTENTS='claude=APPROVE kiro=APPROVE'" in out
 
@@ -203,7 +214,7 @@ def test_a_fully_repeated_round_converges_instead_of_oscillating(state_mod, tmp_
     _payload(tmp_path, "agy", 500, 2, [_comment()])
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_judge(type("A", (), {"pr": 500})())
+        review_lib.commands.judge.cmd_judge(type("A", (), {"pr": 500})())
     assert e.value.code == 0
 
 
@@ -212,8 +223,8 @@ def test_a_fully_repeated_round_converges_instead_of_oscillating(state_mod, tmp_
 def test_start_round_records_the_reviewers(state_mod, tmp_path, capsys, monkeypatch):
     """ラウンドを開くときに担当を決めて残す。後から引き直すと記録とずれる。"""
     path = _state(tmp_path, host="codex")
-    monkeypatch.setattr(state_mod, "_sync_before_round", lambda st, pr: None)
-    state_mod.cmd_start_round(type("A", (), {"pr": 500})())
+    monkeypatch.setattr(review_lib.commands.start_round, "_sync_before_round", lambda st, pr: None)
+    review_lib.commands.start_round.cmd_start_round(type("A", (), {"pr": 500})())
     st = json.loads(path.read_text(encoding="utf-8"))
     # ホスト codex の母集合は claude / agy / kiro。ラウンド 1 は先頭の claude を外す
     assert st["rounds"][-1]["reviewers"] == ["agy", "kiro"]
@@ -247,7 +258,7 @@ def test_only_narrows_the_round_reviewers(state_mod, tmp_path):
     """
     path = _state(tmp_path, only="kiro")
     st = json.loads(path.read_text(encoding="utf-8"))
-    assert state_mod._round_reviewers(st, 1) == ["kiro"]
+    assert review_lib.participants._round_reviewers(st, 1) == ["kiro"]
 
 
 def test_init_accepts_the_host_as_only(state_mod, tmp_path, monkeypatch):
@@ -257,12 +268,12 @@ def test_init_accepts_the_host_as_only(state_mod, tmp_path, monkeypatch):
     `test_contradicting_names_fail_before_the_state_is_written` が確かめる。
     """
     calls: list[list[str]] = []
-    monkeypatch.setattr(state_mod.auth, "probe_auth", _fake_probe({}, calls))
-    p = state_mod._resolve_reviewers("claude", _init_args(tmp_path, only="claude"))
+    monkeypatch.setattr(review_lib.participants.auth, "probe_auth", _fake_probe({}, calls))
+    p = review_lib.participants._resolve_reviewers("claude", _init_args(tmp_path, only="claude"))
     assert p["available"] == ["claude"]
-    p = state_mod._resolve_reviewers("claude", _init_args(tmp_path, only="codex"))
+    p = review_lib.participants._resolve_reviewers("claude", _init_args(tmp_path, only="codex"))
     assert p["available"] == ["codex"]
-    p = state_mod._resolve_reviewers("claude", _init_args(tmp_path))
+    p = review_lib.participants._resolve_reviewers("claude", _init_args(tmp_path))
     assert p["available"] == ["claude", "codex", "kiro"]
 
 
@@ -271,7 +282,7 @@ def test_judge_returns_the_relaunch_targets_as_a_list(state_mod, tmp_path, capsy
     _state(tmp_path, host="codex",
            rounds=[_round(1, ["claude", "kiro"], {"claude": "APPROVE"})])
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_judge(type("A", (), {"pr": 500})())
+        review_lib.commands.judge.cmd_judge(type("A", (), {"pr": 500})())
     assert e.value.code == 7
     out = capsys.readouterr().out
     assert "RELAUNCH_AGENTS='kiro'" in out
@@ -286,11 +297,11 @@ def test_auth_check_covers_only_the_reviewers_that_run(state_mod, tmp_path, monk
     しないため、ホストも確かめない（AC18 後半）。
     """
     calls: list[list[str]] = []
-    monkeypatch.setattr(state_mod.auth, "probe_auth", _fake_probe({}, calls))
-    state_mod._resolve_reviewers("claude", _init_args(tmp_path, only="kiro"))
+    monkeypatch.setattr(review_lib.participants.auth, "probe_auth", _fake_probe({}, calls))
+    review_lib.participants._resolve_reviewers("claude", _init_args(tmp_path, only="kiro"))
     assert calls == [["kiro"]]
     calls.clear()
-    state_mod._resolve_reviewers("claude", _init_args(tmp_path))
+    review_lib.participants._resolve_reviewers("claude", _init_args(tmp_path))
     assert calls == [["claude", "codex", "kiro"]]
 
 
@@ -316,7 +327,7 @@ def test_report_shows_every_reviewer_that_took_part(state_mod, tmp_path, capsys)
         _round(1, ["claude", "kiro"], {"claude": "APPROVE", "kiro": "REQUEST_CHANGES"}),
         _round(2, ["agy", "claude"], {"agy": "APPROVE", "claude": "APPROVE"}),
     ])
-    state_mod.cmd_report(type("A", (), {"pr": 500})())
+    review_lib.commands.report.cmd_report(type("A", (), {"pr": 500})())
     out = capsys.readouterr().out
     assert "claude=APPROVE" in out
     assert "kiro=REQUEST_CHANGES" in out
@@ -365,23 +376,23 @@ def _parser(state_mod):
 def new_init(state_mod, monkeypatch, tmp_path):
     """新規の初期化を GitHub と git に触れずに通す。"""
     (tmp_path / "wt").mkdir(exist_ok=True)
-    monkeypatch.setattr(state_mod, "_repo_from_git", lambda: REPO_INIT)
-    monkeypatch.setattr(state_mod, "_fetch_pr_metadata", lambda pr, repo=None:
-                        state_mod.PrMetadata(REPO_INIT, "author", "feat/x", "abc",
+    monkeypatch.setattr(review_lib.github, "_repo_from_git", lambda: REPO_INIT)
+    monkeypatch.setattr(review_lib.github, "_fetch_pr_metadata", lambda pr, repo=None:
+                        review_lib.github.PrMetadata(REPO_INIT, "author", "feat/x", "abc",
                                              "develop", False, 4000, None))
-    monkeypatch.setattr(state_mod, "_sh", lambda cmd, check=True: "viewer")
-    monkeypatch.setattr(state_mod, "_fetch_changed_files", lambda pr, repo: [])
-    monkeypatch.setattr(state_mod, "_is_registered_worktree", lambda path: True)
-    monkeypatch.setattr(state_mod, "_sync_worktree", lambda *a, **k: None)
-    monkeypatch.setattr(state_mod.subprocess, "run", lambda *a, **k:
+    monkeypatch.setattr(review_lib, "_sh", lambda cmd, check=True: "viewer")
+    monkeypatch.setattr(review_lib.github, "_fetch_changed_files", lambda pr, repo: [])
+    monkeypatch.setattr(review_lib.workspace, "_is_registered_worktree", lambda path: True)
+    monkeypatch.setattr(review_lib.workspace, "_sync_worktree", lambda *a, **k: None)
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k:
                         __import__("subprocess").CompletedProcess(a[0], 0, stdout="", stderr=""))
-    monkeypatch.setattr(state_mod, "_sync_before_round", lambda st, pr: None)
+    monkeypatch.setattr(review_lib.commands.start_round, "_sync_before_round", lambda st, pr: None)
     calls: list[list[str]] = []
 
     def run(*argv: str, failing=None, only=None, real_probe=False):
         if not real_probe:
-            monkeypatch.setattr(state_mod.auth, "probe_auth", _fake_probe(failing or {}, calls))
-        state_mod.cmd_init(_init_args(tmp_path, *argv, only=only))
+            monkeypatch.setattr(review_lib.participants.auth, "probe_auth", _fake_probe(failing or {}, calls))
+        review_lib.commands.init.cmd_init(_init_args(tmp_path, *argv, only=only))
         return json.loads((tmp_path / f"cross-review-pr{PR_INIT}-state.json").read_text())
 
     run.calls = calls
@@ -390,7 +401,7 @@ def new_init(state_mod, monkeypatch, tmp_path):
 
 
 def _start_round(state_mod, tmp_path):
-    state_mod.cmd_start_round(type("A", (), {"pr": PR_INIT})())
+    review_lib.commands.start_round.cmd_start_round(type("A", (), {"pr": PR_INIT})())
     st = json.loads((tmp_path / f"cross-review-pr{PR_INIT}-state.json").read_text())
     return st["rounds"][-1]["reviewers"]
 
@@ -444,7 +455,7 @@ def test_include_agy_puts_it_back_in_the_rotation(new_init, state_mod):
     """#786 の AC4: `--include agy` で agy が戻り、座席は 4 者の輪番になる。"""
     st = new_init("--include", "agy")
     assert st["participants"]["available"] == ["claude", "codex", "agy", "kiro"]
-    seats = [state_mod._round_reviewers(st, r) for r in (1, 2, 3, 4)]
+    seats = [review_lib.participants._round_reviewers(st, r) for r in (1, 2, 3, 4)]
     assert seats == [["codex", "agy"], ["agy", "kiro"], ["claude", "kiro"], ["claude", "codex"]]
 
 
@@ -515,8 +526,8 @@ def test_only_fails_when_the_named_reviewer_does_not_pass_the_probe(new_init, ca
 def test_only_still_starts_when_the_probe_is_skipped(new_init, state_mod, tmp_path, monkeypatch):
     """確認を飛ばした実行では、1 者指定はそのまま通る（通らなかった者がいない）。"""
     calls: list[list[str]] = []
-    monkeypatch.setattr(state_mod.auth, "probe_auth", _fake_probe({}, calls, skipped=True))
-    p = state_mod._resolve_reviewers("claude", _init_args(tmp_path, only="codex"))
+    monkeypatch.setattr(review_lib.participants.auth, "probe_auth", _fake_probe({}, calls, skipped=True))
+    p = review_lib.participants._resolve_reviewers("claude", _init_args(tmp_path, only="codex"))
     assert p["available"] == ["codex"]
     assert p["probe_skipped"] is True
 
@@ -559,7 +570,7 @@ def _real_subprocess(state_mod, monkeypatch):
     モジュールのため、属性を戻すと開始の手順の側まで本物になる。認証の確認が見る
     名前だけを別の入れ物へ向けて、2 つを分ける。
     """
-    monkeypatch.setattr(state_mod.auth, "subprocess", types.SimpleNamespace(
+    monkeypatch.setattr(review_lib.participants.auth, "subprocess", types.SimpleNamespace(
         run=_REAL_RUN, TimeoutExpired=subprocess.TimeoutExpired))
 
 
@@ -593,7 +604,7 @@ def test_init_starts_when_a_probe_cannot_be_launched(new_init, state_mod, monkey
             raise PermissionError(13, "Permission denied")
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
-    monkeypatch.setattr(state_mod.auth, "subprocess", types.SimpleNamespace(
+    monkeypatch.setattr(review_lib.participants.auth, "subprocess", types.SimpleNamespace(
         run=run, TimeoutExpired=subprocess.TimeoutExpired))
 
     st = new_init(real_probe=True)
@@ -648,17 +659,17 @@ def test_a_state_without_participants_keeps_the_old_rotation(state_mod, tmp_path
     # 変更前の輪番: 母集合 claude / agy / kiro から `(round_no - 1) % 3` の者を外した 2 者
     previous = [["agy", "kiro"], ["claude", "kiro"], ["claude", "agy"]]
     for round_no in range(1, 7):
-        assert state_mod._round_reviewers(st, round_no) == previous[(round_no - 1) % 3]
+        assert review_lib.participants._round_reviewers(st, round_no) == previous[(round_no - 1) % 3]
     del st["host"]
-    assert state_mod._round_reviewers(st, 1) == ["codex", "agy"]
+    assert review_lib.participants._round_reviewers(st, 1) == ["codex", "agy"]
 
 
 def test_recorded_reviewers_win_over_only(state_mod, tmp_path):
     """決定 11: 再開で 1 者指定を変えても、記録のあるラウンドの担当は変わらない。"""
     path = _state(tmp_path, only="codex", rounds=[_round(1, ["agy", "kiro"], {})])
     st = json.loads(path.read_text(encoding="utf-8"))
-    assert state_mod._round_reviewers(st, 1) == ["agy", "kiro"]
-    assert state_mod._round_reviewers(st, 2) == ["codex"]
+    assert review_lib.participants._round_reviewers(st, 1) == ["agy", "kiro"]
+    assert review_lib.participants._round_reviewers(st, 2) == ["codex"]
 
 
 def test_participants_win_over_the_host_rotation(state_mod, tmp_path):
@@ -669,7 +680,7 @@ def test_participants_win_over_the_host_rotation(state_mod, tmp_path):
         "require_all": False, "fallback": [],
     })
     st = json.loads(path.read_text(encoding="utf-8"))
-    assert state_mod._round_reviewers(st, 1) == ["codex", "kiro"]
+    assert review_lib.participants._round_reviewers(st, 1) == ["codex", "kiro"]
 
 
 # ---------- 母集合にホストを入れる（#892） ----------
@@ -679,7 +690,7 @@ def test_exclude_agy_on_claude_rotates_three_pairs(new_init, state_mod, tmp_path
     st = new_init("--exclude", "agy")
     available = st["participants"]["available"]
     assert available == ["claude", "codex", "kiro"]
-    seats = [state_mod._round_reviewers(st, r) for r in (1, 2, 3)]
+    seats = [review_lib.participants._round_reviewers(st, r) for r in (1, 2, 3)]
     assert seats == [["codex", "kiro"], ["claude", "kiro"], ["claude", "codex"]]
     assert {frozenset(s) for s in seats} == {
         frozenset(p) for p in (("claude", "codex"), ("claude", "kiro"), ("codex", "kiro"))}
@@ -688,10 +699,10 @@ def test_exclude_agy_on_claude_rotates_three_pairs(new_init, state_mod, tmp_path
 @pytest.mark.parametrize("host", ["claude", "codex", "agy", "kiro"])
 def test_init_reports_the_host_in_the_pool(state_mod, tmp_path, monkeypatch, capsys, host):
     """#892 の AC3: どのホストでも、`init` の出力の「母集合」にホストが入る。"""
-    monkeypatch.setattr(state_mod.auth, "probe_auth", _fake_probe({}, []))
+    monkeypatch.setattr(review_lib.participants.auth, "probe_auth", _fake_probe({}, []))
     args = _init_args(tmp_path)
     args.host = host
-    p = state_mod._resolve_reviewers(host, args)
+    p = review_lib.participants._resolve_reviewers(host, args)
     assert host in p["pool"]
     expected = [r for r in state_mod.assignment.ALL_RUNTIMES if r in {"claude", "codex", "kiro", host}]
     assert f"母集合: {' / '.join(expected)} " in capsys.readouterr().err
@@ -716,12 +727,12 @@ def test_a_state_with_the_old_participants_keeps_its_seats(state_mod, tmp_path):
     path = _state(tmp_path, participants=old)
     st = json.loads(path.read_text(encoding="utf-8"))
     for round_no in range(1, 13):
-        assert state_mod._round_reviewers(st, round_no) == ["codex", "kiro"]
+        assert review_lib.participants._round_reviewers(st, round_no) == ["codex", "kiro"]
     one = dict(old, available=["codex"], unavailable={"kiro": "x"})
     path = _state(tmp_path, participants=one)
     st = json.loads(path.read_text(encoding="utf-8"))
     for round_no in range(1, 13):
-        assert state_mod._round_reviewers(st, round_no) == ["codex", "claude"]
+        assert review_lib.participants._round_reviewers(st, round_no) == ["codex", "claude"]
 
 
 @pytest.mark.parametrize("host", ["claude", "codex", "agy", "kiro"])
@@ -733,14 +744,14 @@ def test_a_host_only_state_keeps_the_previous_rotation(state_mod, tmp_path, host
     for round_no in range(1, 13):
         dropped = (round_no - 1) % 3
         expected = [r for i, r in enumerate(previous_pool) if i != dropped]
-        assert state_mod._round_reviewers(st, round_no) == expected, f"round={round_no}"
+        assert review_lib.participants._round_reviewers(st, round_no) == expected, f"round={round_no}"
 
 
 # ---------- 完了報告の「参加した者」（#727: AC24） ----------
 
 def _report(state_mod, tmp_path, capsys, **over) -> list[str]:
     _state(tmp_path, final="approved", **over)
-    state_mod.cmd_report(type("A", (), {"pr": 500})())
+    review_lib.commands.report.cmd_report(type("A", (), {"pr": 500})())
     out = capsys.readouterr().out
     body = out.split("## 参加した者\n", 1)
     assert len(body) == 2, out

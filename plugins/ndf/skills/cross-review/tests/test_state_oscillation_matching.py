@@ -20,6 +20,9 @@ import json
 import pathlib
 
 import pytest
+import review_lib.commands.loop
+import review_lib.matching
+import review_lib.store
 
 PR = 7246
 
@@ -53,7 +56,7 @@ def _run(tmp_dir: pathlib.Path, state_mod, prev: list[dict], curr: list[dict]):
     _payload(tmp_dir, 1, prev)
     _payload(tmp_dir, 2, curr)
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_check_oscillation(argparse.Namespace(pr=PR))
+        review_lib.commands.loop.cmd_check_oscillation(argparse.Namespace(pr=PR))
     return e.value.code
 
 
@@ -155,9 +158,9 @@ def test_the_threshold_stays_at_half(tmp_dir, state_mod):
 
 
 def test_the_body_normalization_keeps_letters_of_any_language(state_mod):
-    assert state_mod._normalized_body("引数のチェックが抜けている（`a.py:10`）") == "引数のチェックが抜けているapy10"
-    assert state_mod._normalized_body(None) == ""
-    assert state_mod._normalized_body("!!!") == ""
+    assert review_lib.matching._normalized_body("引数のチェックが抜けている（`a.py:10`）") == "引数のチェックが抜けているapy10"
+    assert review_lib.matching._normalized_body(None) == ""
+    assert review_lib.matching._normalized_body("!!!") == ""
 
 
 def test_a_comment_with_an_unreadable_line_is_skipped(tmp_dir, state_mod):
@@ -189,8 +192,8 @@ def test_new_finding_count_characterization_conditions(tmp_dir, state_mod):
     ]
     _payload(tmp_dir, 1, prev)
     _payload(tmp_dir, 2, curr)
-    st = state_mod._load(PR)
-    count, measurable = state_mod._new_finding_count(st, PR)
+    st = review_lib.store._load(PR)
+    count, measurable = review_lib.matching._new_finding_count(st, PR)
     assert measurable is True
     assert count == 4
 

@@ -202,7 +202,7 @@ case "$DECISION" in
     # 作業ツリーの手順の側で出す。
     base_branch=$(wt_base_branch "$MAIN_DIR" 2>/dev/null) || base_branch=""
     if [ -n "$base_branch" ]; then
-      current_branch=$(git -C "$MAIN_DIR" symbolic-ref --short -q HEAD 2>/dev/null)
+      current_branch=$(wt_current_branch "$MAIN_DIR")
       if [ "$current_branch" != "$base_branch" ]; then
         current=$(git -C "$MAIN_DIR" rev-parse HEAD 2>/dev/null)
         wanted=$(resolve_base_commit "$base_branch") || wanted=""

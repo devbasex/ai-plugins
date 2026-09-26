@@ -55,7 +55,7 @@ def update_index(index, text, name, link, title):
     index.write_text(body, encoding="utf-8")
 
 
-def load_glossary(root: Path):
+def load_checked_glossary(root: Path):
     """用語集の設定と正本。宣言が無ければ None。宣言・正本が読めないか語の形が崩れていれば設計を消す前に止める。"""
     try:
         decl = glossary.load_declaration(root)
@@ -114,7 +114,7 @@ def cmd_spec_finalize(a):
         if not (root / rel).exists():
             raise StepError(f"設計のファイルが無い: {d}", EXIT_PRECONDITION)
         rels.append(rel)
-    plan = plan_glossary(load_glossary(root), set(rels), spec_rel)
+    plan = plan_glossary(load_checked_glossary(root), set(rels), spec_rel)
     # 用語集を書けなければ設計を消さずに止めるため、書き込みを git rm より前に置く
     promoted = write_glossary(plan)
 

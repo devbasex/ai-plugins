@@ -50,10 +50,16 @@ import json
 import os
 import pathlib
 import re
-import subprocess
 import sys
 import time
 from typing import Any, NamedTuple
+
+_LIB = pathlib.Path(__file__).resolve().parent
+if str(_LIB) not in sys.path:
+    sys.path.insert(0, str(_LIB))
+import clock  # noqa: E402  時刻の読み取り（#1142 の L0）
+import gh_quota  # noqa: E402  上限の語（#1142 の L0）
+import proc  # noqa: E402  子プロセスの起動（#1142 の L0）
 
 # 積める種別。**この版で積む側があるのは `pr-comment` だけである。** ほかの 3 つは
 # 受け皿として持つ（投稿の責務を進行側へ移すのは次の変更、#350）。
@@ -160,15 +166,16 @@ class Attempt(NamedTuple):
 def run(cmd: list[str], stdin: str | None = None) -> Attempt:
     """`gh` を 1 回実行する。**例外を投げない。**"""
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, input=stdin)
+        r = proc.run(cmd, check=False, input=stdin)
     except OSError as exc:
         return Attempt(127, "", f"gh の実行に失敗: {exc}")
     return Attempt(r.returncode, r.stdout or "", r.stderr or "")
 
 
 def _has_rate_words(text: str) -> bool:
+    """上限の語があるか。ライブラリの語（`gh_quota.is_rate_limited`）に、二次の上限の言い回しを足して見る。"""
     low = (text or "").lower()
-    return any(w in low for w in _RATE_WORDS)
+    return gh_quota.is_rate_limited(text or "") or any(w in low for w in _RATE_WORDS)
 
 
 def quota_remaining() -> int | None:
@@ -401,14 +408,6 @@ def _comment_match(match: dict[str, Any], actor: str | None):
     return lambda row: _by_actor(row, actor) and _head(row.get("body")) == head
 
 
-def _parse_time(value: Any) -> _dt.datetime | None:
-    try:
-        parsed = _dt.datetime.fromisoformat(str(value or "").replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    return parsed if parsed.tzinfo is not None else None
-
-
 def _review_match(match: dict[str, Any], actor: str | None):
     """同じラウンド・同じ席のレビューか。
 
@@ -418,10 +417,10 @@ def _review_match(match: dict[str, Any], actor: str | None):
     倒さない）。
     """
     key = review_match_key(match.get("body"))
-    since = _parse_time(match.get("since"))
+    since = clock.parse(match.get("since"), naive="reject")
 
     def _in_this_run(row: dict[str, Any]) -> bool:
-        submitted = _parse_time(row.get("submitted_at"))
+        submitted = clock.parse(row.get("submitted_at"), naive="reject")
         return since is None or submitted is None or submitted >= since
 
     return lambda row: (

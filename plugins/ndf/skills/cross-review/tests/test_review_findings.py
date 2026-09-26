@@ -14,6 +14,8 @@ import json
 import pathlib
 
 import pytest
+import review_lib.commands.read_result
+import review_lib.github
 
 PR = 6002
 REPO = "o/r"
@@ -75,7 +77,7 @@ def tmp_dir(monkeypatch, tmp_path, state_mod):
 @pytest.fixture(autouse=True)
 def _no_github_checks(monkeypatch, state_mod):
     """流した後の実在確認を通す。取り込みの形だけを見る。"""
-    monkeypatch.setattr(state_mod, "_review_exists", lambda *a, **k: True)
+    monkeypatch.setattr(review_lib.github, "_review_exists", lambda *a, **k: True)
 
 
 FULL = {
@@ -89,7 +91,7 @@ FULL = {
 
 
 def _read_result(state_mod) -> None:
-    state_mod.cmd_read_result(argparse.Namespace(pr=PR, agent=AGENT, file=None))
+    review_lib.commands.read_result.cmd_read_result(argparse.Namespace(pr=PR, agent=AGENT, file=None))
 
 
 # ---------- 取り込み ----------
@@ -140,7 +142,7 @@ def test_records_accumulate_across_agents(tmp_dir, state_mod):
     }))
     (tmp_dir / f"kiro-review-pr{PR}-round1-payload.json").write_text(json.dumps({
         "comments": [{**FULL, "line": 99}]}))
-    state_mod.cmd_read_result(argparse.Namespace(pr=PR, agent="kiro", file=None))
+    review_lib.commands.read_result.cmd_read_result(argparse.Namespace(pr=PR, agent="kiro", file=None))
 
     found = _read(tmp_dir)["review_findings"]
     assert [f["agent"] for f in found] == [AGENT, "kiro"]
@@ -313,7 +315,7 @@ def test_reimporting_keeps_other_agents(tmp_dir, state_mod):
         "review_url": "https://example.invalid/r/2", "by_severity": {}}))
     (tmp_dir / f"kiro-review-pr{PR}-round1-payload.json").write_text(json.dumps({
         "comments": [{**FULL, "line": 99}]}))
-    state_mod.cmd_read_result(argparse.Namespace(pr=PR, agent="kiro", file=None))
+    review_lib.commands.read_result.cmd_read_result(argparse.Namespace(pr=PR, agent="kiro", file=None))
 
     _read_result(state_mod)      # agy をもう一度
 
@@ -394,7 +396,7 @@ def test_the_identifier_separates_agents_and_rounds(tmp_dir, state_mod):
     }))
     (tmp_dir / f"kiro-review-pr{PR}-round1-payload.json").write_text(
         json.dumps({"comments": [FULL]}))
-    state_mod.cmd_read_result(argparse.Namespace(pr=PR, agent="kiro", file=None))
+    review_lib.commands.read_result.cmd_read_result(argparse.Namespace(pr=PR, agent="kiro", file=None))
 
     ids = [f["finding_id"] for f in _read(tmp_dir)["review_findings"]]
     assert ids == [f"{AGENT}-r1-0", "kiro-r1-0"]

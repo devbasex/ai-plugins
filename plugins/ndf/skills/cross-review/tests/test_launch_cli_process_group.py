@@ -110,8 +110,8 @@ def test_killing_the_group_prevents_the_child_from_writing_the_result(launched, 
 def test_non_leader_pid_is_signalled_alone(monitor_mod):
     """先頭でない pid（pgid ≠ pid）は pid だけへ送り、`os.killpg` を呼ばない（AC21）。"""
     with (
-        mock.patch.object(monitor_mod, "_is_zombie", return_value=False),
-        mock.patch.object(monitor_mod, "_pid_alive", return_value=False),
+        mock.patch.object(monitor_mod.monitor_proc, "_is_zombie", return_value=False),
+        mock.patch.object(monitor_mod.monitor_proc, "_pid_alive", return_value=False),
         mock.patch("os.getpgid", return_value=4242),
         mock.patch("os.killpg") as killpg,
         mock.patch("os.kill") as kill,
@@ -124,8 +124,8 @@ def test_non_leader_pid_is_signalled_alone(monitor_mod):
 def test_pid_in_the_monitors_own_group_is_signalled_alone(monitor_mod):
     """pgid = pid でも監視自身のグループなら `os.killpg` を呼ばない（監視まで止まる）。"""
     with (
-        mock.patch.object(monitor_mod, "_is_zombie", return_value=False),
-        mock.patch.object(monitor_mod, "_pid_alive", return_value=False),
+        mock.patch.object(monitor_mod.monitor_proc, "_is_zombie", return_value=False),
+        mock.patch.object(monitor_mod.monitor_proc, "_pid_alive", return_value=False),
         mock.patch("os.getpgid", return_value=4242),
         mock.patch("os.getpgrp", return_value=4242),
         mock.patch("os.killpg") as killpg,
@@ -138,8 +138,8 @@ def test_pid_in_the_monitors_own_group_is_signalled_alone(monitor_mod):
 
 def test_group_leader_gets_sigterm_then_sigkill_via_killpg(monitor_mod):
     with (
-        mock.patch.object(monitor_mod, "_is_zombie", return_value=False),
-        mock.patch.object(monitor_mod, "_pid_alive", return_value=True),
+        mock.patch.object(monitor_mod.monitor_proc, "_is_zombie", return_value=False),
+        mock.patch.object(monitor_mod.monitor_proc, "_pid_alive", return_value=True),
         mock.patch("os.getpgid", return_value=4242),
         mock.patch("os.getpgrp", return_value=1),
         mock.patch("os.killpg") as killpg,
@@ -153,8 +153,8 @@ def test_group_leader_gets_sigterm_then_sigkill_via_killpg(monitor_mod):
 def test_getpgid_failure_falls_back_to_the_pid(monitor_mod):
     """`os.getpgid` が失敗する（もう居ない・権限が無い）ときは従来どおり pid だけへ送る。"""
     with (
-        mock.patch.object(monitor_mod, "_is_zombie", return_value=False),
-        mock.patch.object(monitor_mod, "_pid_alive", return_value=False),
+        mock.patch.object(monitor_mod.monitor_proc, "_is_zombie", return_value=False),
+        mock.patch.object(monitor_mod.monitor_proc, "_pid_alive", return_value=False),
         mock.patch("os.getpgid", side_effect=ProcessLookupError),
         mock.patch("os.killpg") as killpg,
         mock.patch("os.kill") as kill,

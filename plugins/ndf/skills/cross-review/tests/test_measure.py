@@ -11,6 +11,8 @@ import subprocess
 import sys
 
 import pytest
+import review_lib.commands.merge_fix
+import review_lib.findings
 
 
 _MEASURE = pathlib.Path(__file__).resolve().parents[1] / "scripts" / "measure.py"
@@ -678,7 +680,7 @@ def test_the_counted_classifications_match_the_state_script(measure_mod, state_m
     片方だけに `unrefuted` を足すと、判定が数えた指摘を測定が採らず、この方式の再現率が
     実際より低く出る。
     """
-    assert measure_mod.COUNTED_CLASSIFICATIONS == state_mod.COUNTED_CLASSIFICATIONS
+    assert measure_mod.COUNTED_CLASSIFICATIONS == review_lib.findings.COUNTED_CLASSIFICATIONS
     assert set(measure_mod.COUNTED_CLASSIFICATIONS) == {
         "verified_blocking", "needs_human_judgment", "unrefuted"}
 
@@ -875,7 +877,7 @@ def test_state_writes_positions_that_measure_reads(monkeypatch, tmp_path, state_
         "deferred": [], "rejected": [],
     }), encoding="utf-8")
 
-    state_mod.cmd_merge_fix(argparse.Namespace(pr=pr, file=None))
+    review_lib.commands.merge_fix.cmd_merge_fix(argparse.Namespace(pr=pr, file=None))
     proc = _run([str(state_file)])
 
     assert proc.returncode == 0, proc.stderr

@@ -26,14 +26,17 @@ LLM を呼ばない。入力は supervise.py queue の done の JSON と各計�
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
-import os
 import re
 import subprocess
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from supervise_lib.paths import sha256_of, state_dir_of  # noqa: E402  supervise_lib が lib/ を sys.path へ足す
+import clock  # noqa: E402
+import jsonio  # noqa: E402
+import step_result  # noqa: E402
 
 TOOL = "mission-state"
 SECTION_DEFAULT = "今の会話の進み"
@@ -45,26 +48,9 @@ MVV_SECTIONS = ("Mission", "Vision", "Value")
 EXIT_UNREADABLE, EXIT_PRECONDITION = 2, 3
 
 
-def result(status: str, summary: str, items=None, metrics=None, **extra) -> dict:
-    out = {"tool": TOOL, "status": status, "summary": summary, "items": items or [], "metrics": metrics or {}}
-    out.update(extra)
-    return out
-
-
-def load(path: str) -> dict:
-    return json.loads(Path(path).read_text())
-
-
-def save(path: str, data: dict) -> None:
-    p = Path(path)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_name(f".{p.name}.{os.getpid()}.tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1) + "\n")
-    os.replace(tmp, p)
-
-
-def state_dir_of(plan: str) -> Path:
-    return Path(plan).parent / (Path(plan).stem + "-state")
+def outcome(status: str, summary: str, items=None, metrics=None, **extra) -> dict:
+    """結果 JSON（`step_result.result` の形）。`exit` などの鍵を足せる（`main` が終了コードに読む）。"""
+    return {**step_result.result(TOOL, status, summary, items, metrics), **extra}
 
 
 def field(report: str, name: str) -> str:
@@ -151,10 +137,6 @@ def other_shape(path: str) -> str:
     return ""
 
 
-def sha256_of(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
 def mvv_sections(text: str) -> str | None:
     """説明から Mission / Vision / Value の節を順に取り出す。1 つでも無ければ None。"""
     found = {}
@@ -183,17 +165,17 @@ def init_mvv(a) -> tuple[dict | None, dict | None]:
     if a.mvv:
         path = Path(a.mvv).resolve()
         if not path.is_file():
-            return None, result("stopped", f"MVV のファイルが無い: {a.mvv}", exit=EXIT_PRECONDITION)
+            return None, outcome("stopped", f"MVV のファイルが無い: {a.mvv}", exit=EXIT_PRECONDITION)
         return {"path": str(path), "sha256": sha256_of(path)}, None
     if not a.milestone:
-        return None, result("stopped", "--pace fast には --milestone（MVV の複製元）か --mvv が要る",
+        return None, outcome("stopped", "--pace fast には --milestone（MVV の複製元）か --mvv が要る",
                             exit=EXIT_UNREADABLE)
     try:
         text = mvv_sections(milestone_description(a.milestone, a.repo))
     except (OSError, FileNotFoundError) as e:
-        return None, result("stopped", f"マイルストーン {a.milestone} の説明を読めない: {e}", exit=EXIT_PRECONDITION)
+        return None, outcome("stopped", f"マイルストーン {a.milestone} の説明を読めない: {e}", exit=EXIT_PRECONDITION)
     if text is None:
-        return None, result("stopped", f"マイルストーン {a.milestone} の説明に ## Mission / ## Vision / ## Value の"
+        return None, outcome("stopped", f"マイルストーン {a.milestone} の説明に ## Mission / ## Vision / ## Value の"
                             "見出しがそろっていない。説明を直してから打ち直す", exit=EXIT_PRECONDITION)
     path = Path(a.mission).resolve().parent / "mvv.md"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -204,7 +186,7 @@ def init_mvv(a) -> tuple[dict | None, dict | None]:
 def cmd_init(a) -> dict:
     why = other_shape(a.mission)
     if why:
-        return result("stopped", f"別の形の JSON があるため上書きしない（{why}）: {a.mission}。"
+        return outcome("stopped", f"別の形の JSON があるため上書きしない（{why}）: {a.mission}。"
                       " 状態のファイルは別の名前か別の場所に置く",
                       metrics={"path": a.mission, "reason": why})
     mvv, stop = init_mvv(a)
@@ -225,8 +207,8 @@ def cmd_init(a) -> dict:
         issues = plan_issues(plan)
         m["plans"].append({"kind": kind, "plan": plan, "issues": issues,
                            "label": default_label(kind, issues, m), "next": ""})
-    save(a.mission, m)
-    return result("ok", f"ミッション {a.name} を書いた（計画 {len(m['plans'])} 本）: {a.mission}",
+    jsonio.write_atomic(a.mission, m, indent=1)
+    return outcome("ok", f"ミッション {a.name} を書いた（計画 {len(m['plans'])} 本）: {a.mission}",
                   [{"plan": p["plan"], "kind": p["kind"]} for p in m["plans"]],
                   {"plans": len(m["plans"]), "done": len(m["done"])})
 
@@ -268,7 +250,7 @@ def fill_row(p: dict, item: dict | None) -> dict:
 
 
 def cmd_update(a) -> dict:
-    m = load(a.mission)
+    m = jsonio.read(a.mission)
     for d in a.done or []:
         if d not in m["done"]:
             m["done"].append(d)
@@ -288,38 +270,38 @@ def cmd_update(a) -> dict:
         if not p.get("issues"):
             p["issues"] = plan_issues(p["plan"])
         p["row"] = fill_row(p, items.get(p["plan"]))
-    save(a.mission, m)
+    jsonio.write_atomic(a.mission, m, indent=1)
     rows = [{"plan": p["plan"], **p["row"]} for p in m["plans"]]
     finished = sum(1 for r in rows if r["result"] != NOT_DONE)
     stopped = sum(1 for r in rows if r["result"] not in (NOT_DONE, "完了"))
-    return result("ok", f"計画 {len(rows)} 本: 終わった {finished} / 完了でない {stopped}", rows,
+    return outcome("ok", f"計画 {len(rows)} 本: 終わった {finished} / 完了でない {stopped}", rows,
                   {"plans": len(rows), "finished": finished, "stopped": stopped})
 
 
 def cmd_gate(a) -> dict:
-    m = load(a.mission)
-    at = a.at or datetime.now(timezone.utc).isoformat(timespec="seconds")
+    m = jsonio.read(a.mission)
+    at = a.at or clock.now_iso("utc")
     entry = {"name": a.name, "what": a.what, "at": at}
     if a.name == MVV_GATE:
         mvv = m.get("mvv") or {}
         if not mvv.get("path") or not Path(mvv["path"]).is_file():
-            return result("stopped", "MVV が無い（init --pace fast で写す）。MVV の承認を書かない")
+            return outcome("stopped", "MVV が無い（init --pace fast で写す）。MVV の承認を書かない")
         entry["sha256"] = sha256_of(Path(mvv["path"]))
     if a.by == "mvv":
         if not a.verdict:
-            return result("stopped", "--by mvv には --verdict が要る", exit=EXIT_UNREADABLE)
+            return outcome("stopped", "--by mvv には --verdict が要る", exit=EXIT_UNREADABLE)
         try:
             reasons = json.loads(a.reasons or "[]")
         except ValueError:
-            return result("stopped", f"--reasons は JSON の配列で渡す: {a.reasons}", exit=EXIT_UNREADABLE)
+            return outcome("stopped", f"--reasons は JSON の配列で渡す: {a.reasons}", exit=EXIT_UNREADABLE)
         entry.update(by="mvv", verdict=a.verdict, reasons=reasons if isinstance(reasons, list) else [reasons],
                      log=a.log or "")
     gates = [g for g in m.get("gates", []) if g.get("name") != a.name]
     gates.append(entry)
     m["gates"] = gates
-    save(a.mission, m)
+    jsonio.write_atomic(a.mission, m, indent=1)
     who = "MVV 判定" if a.by == "mvv" else "承認"
-    return result("ok", f"{a.name} の{who}を書いた（{at}）", gates, {"gates": len(gates)})
+    return outcome("ok", f"{a.name} の{who}を書いた（{at}）", gates, {"gates": len(gates)})
 
 
 # ---------------------------------------------------------------- 生成
@@ -351,7 +333,7 @@ def state_text(r: dict) -> str:
     return s
 
 
-def cell(text: str) -> str:
+def md_cell(text: str) -> str:
     return (text or "—").replace("|", "\\|").replace("\n", " ")
 
 
@@ -360,7 +342,7 @@ def section_body(m: dict) -> str:
     lines = ["", "| 計画 | 状態 | PR | 秒 | 費用 | 次 |", "| --- | --- | --- | ---: | ---: | --- |"]
     for p in m.get("plans", []):
         r = row_of(p)
-        lines.append("| " + " | ".join(cell(x) for x in (
+        lines.append("| " + " | ".join(md_cell(x) for x in (
             p.get("label") or p["plan"], state_text(r), r.get("pr"), fmt_seconds(r.get("seconds")),
             fmt_cost(r.get("cost")), p.get("next"))) + " |")
     lines.append("")
@@ -417,16 +399,16 @@ def heading_text(line: str) -> str:
 
 
 def cmd_render(a) -> dict:
-    m = load(a.mission)
+    m = jsonio.read(a.mission)
     text = Path(a.doc).read_text()
     found = find_section(text, a.section)
     if found is None:
-        return result("stopped", f"見出しに「{a.section}」を含む節が無い: {a.doc}")
+        return outcome("stopped", f"見出しに「{a.section}」を含む節が無い: {a.doc}")
     head_start, body_start, body_end, head_line = found
     body = section_body(m)
     if a.demote:
         if not a.heading:
-            return result("stopped", "--demote には新しい見出し（--heading）が要る")
+            return outcome("stopped", "--demote には新しい見出し（--heading）が要る")
         hashes = re.match(r"^#+", head_line).group(0)
         eol = head_line[len(head_line.rstrip("\r\n")):] or "\n"
         old_head = head_line.replace(a.section, a.demote, 1)
@@ -438,7 +420,7 @@ def cmd_render(a) -> dict:
         summary = f"節「{heading_text(head_line)}」の本文を置き換えた"
     if out != text:
         Path(a.doc).write_text(out)
-    return result("ok", summary, [{"doc": a.doc, "changed": out != text}],
+    return outcome("ok", summary, [{"doc": a.doc, "changed": out != text}],
                   {"plans": len(m.get("plans", [])), "bytes": len(body.encode())})
 
 
@@ -459,10 +441,10 @@ def status_lines(m: dict) -> list[str]:
 
 
 def cmd_status(a) -> dict | None:
-    m = load(a.mission)
+    m = jsonio.read(a.mission)
     lines = status_lines(m)
     if a.json:
-        return result("ok", lines[0], lines[1:], {"plans": len(m.get("plans", []))})
+        return outcome("ok", lines[0], lines[1:], {"plans": len(m.get("plans", []))})
     print("\n".join(lines))
     return None
 
@@ -482,34 +464,34 @@ def next_block(m: dict, heading: str) -> str:
 
 
 def cmd_next(a) -> dict | None:
-    m = load(a.mission)
+    m = jsonio.read(a.mission)
     heading = m.get("heading", "")
     text = None
     if a.doc:
         text = Path(a.doc).read_text()
         found = find_section(text, a.section)
         if found is None:
-            return result("stopped", f"見出しに「{a.section}」を含む節が無い: {a.doc}")
+            return outcome("stopped", f"見出しに「{a.section}」を含む節が無い: {a.doc}")
         heading = heading_text(found[3])
     if not (m.get("goal_template") or "").strip():
-        return result("stopped", "mission.json に /goal の雛形（goal_template）が無い")
+        return outcome("stopped", "mission.json に /goal の雛形（goal_template）が無い")
     block = next_block(m, heading)
     if not a.replace:
         if a.json:
-            return result("ok", "ndf-next の囲みを作った", [block], {"heading": heading})
+            return outcome("ok", "ndf-next の囲みを作った", [block], {"heading": heading})
         print(block, end="")
         return None
     if text is None:
-        return result("stopped", "--replace には引継ぎ文書（--doc）が要る")
+        return outcome("stopped", "--replace には引継ぎ文書（--doc）が要る")
     found = find_section(text, a.replace)
     if found is None:
-        return result("stopped", f"見出しに「{a.replace}」を含む節が無い: {a.doc}")
+        return outcome("stopped", f"見出しに「{a.replace}」を含む節が無い: {a.doc}")
     _, body_start, body_end, head_line = found
     tail = "\n" if body_end < len(text) else ""
     out = text[:body_start] + "\n" + block + tail + text[body_end:]
     if out != text:
         Path(a.doc).write_text(out)
-    return result("ok", f"節「{heading_text(head_line)}」を ndf-next の囲みで置き換えた", [block],
+    return outcome("ok", f"節「{heading_text(head_line)}」を ndf-next の囲みで置き換えた", [block],
                   {"heading": heading, "changed": out != text})
 
 
@@ -574,7 +556,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         out = fn(a)
     except (OSError, ValueError) as e:
-        out = result("stopped", f"読めない・書けない: {e}")
+        out = outcome("stopped", f"読めない・書けない: {e}")
     if out is None:
         return 0
     code = out.pop("exit", None)

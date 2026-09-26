@@ -32,7 +32,8 @@ REPO_SLUG = "devbasex/ai-plugins"
 MARKET = "ai-plugins"
 
 
-def sha256_of(path):
+def rc_digest(path):
+    """rc ファイルの sha256。無ければ None（導入の前後で利用者の rc が変わらないことを比べる）。"""
     p = Path(path)
     return hashlib.sha256(p.read_bytes()).hexdigest() if p.is_file() else None
 
@@ -41,8 +42,8 @@ def user_env_snapshot():
     home = Path(os.path.expanduser("~"))
     link = home / ".local" / "bin" / "claude"
     return {
-        ".bashrc": sha256_of(home / ".bashrc"),
-        ".zshrc": sha256_of(home / ".zshrc"),
+        ".bashrc": rc_digest(home / ".bashrc"),
+        ".zshrc": rc_digest(home / ".zshrc"),
         ".local/bin/claude": os.readlink(link) if link.is_symlink() else ("file" if link.exists() else None),
     }
 

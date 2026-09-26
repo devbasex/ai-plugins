@@ -26,9 +26,15 @@ import datetime as _dt
 import json
 import os
 import pathlib
+import sys
 import threading
 from dataclasses import dataclass
 from typing import Any, Optional
+
+_HERE = pathlib.Path(__file__).resolve().parent
+if str(_HERE) not in sys.path:
+    sys.path.insert(0, str(_HERE))
+import clock  # noqa: E402  時刻の書き出し（#1142 の L0）
 
 try:  # Windows には無い。無ければスレッドの排他だけで書く。
     import fcntl
@@ -77,17 +83,9 @@ JOURNAL_NAME = "monitor-outcomes.jsonl"
 _JOURNAL_LOCK = threading.Lock()
 
 
-def now_iso() -> str:
-    """タイムゾーン付きの現在時刻。`state.py` の `_now` と同じ形。"""
-    return _dt.datetime.now(_dt.timezone.utc).astimezone().isoformat(timespec="seconds")
-
-
 def iso_from_timestamp(ts: float) -> str:
-    """UNIX 時刻（ファイルの更新時刻など）を、`now_iso` と同じ形へ変える。"""
-    return (
-        _dt.datetime.fromtimestamp(ts, _dt.timezone.utc)
-        .astimezone().isoformat(timespec="seconds")
-    )
+    """UNIX 時刻（ファイルの更新時刻など）を、`clock.now_iso()` と同じ形へ変える。"""
+    return clock.iso(_dt.datetime.fromtimestamp(ts, _dt.timezone.utc))
 
 
 def reason_for(status: str) -> str:
@@ -234,3 +232,56 @@ def read_journal(tmp_dir: os.PathLike[str] | str) -> list[dict[str, Any]]:
         if isinstance(row, dict):
             rows.append(row)
     return rows
+
+
+def _record_outcome(
+    agent: str, pr: int, stem_template: str, st: Any, started_at: str,  # st は monitor_types.AgentStatus
+    phase: Optional[str] = None,
+) -> None:
+    """担当 1 者の監視の結果を、結果ファイルと記録へ書く（#662）。
+
+    **書けなくても監視の結果は変えない。** 終了コードと標準出力は呼び出し側の分岐が
+    読むため、書き出しの失敗は標準エラーへ 1 行出すだけにする。
+    """
+    import monitor_types  # 読む側（state.py ほか）が監視の型を読まずに済むよう、書くときだけ読む
+    stem = stem_template.format(agent=agent, id=pr)
+    try:
+        paths = monitor_types.AgentPaths.for_(agent, pr, stem_template)
+        # 結末が理由を持てばそれを、無ければ状態からの既定を書く（#729 の決定 8）
+        st.reason = (st.outcome.reason if st.outcome and st.outcome.reason
+                     else reason_for(st.status))
+        st.started_at = started_at
+        st.ended_at = clock.now_iso()
+        try:
+            st.launched_at = iso_from_timestamp(
+                paths.pidfile.stat().st_mtime)
+        except OSError:
+            st.launched_at = None
+        outcome = {
+            "agent": agent,
+            "stem": stem,
+            "status": st.status,
+            "exit_code": st.exit_code,
+            "reason": st.reason,
+            "detail": st.detail,
+            "launched_at": st.launched_at,
+            "started_at": st.started_at,
+            "ended_at": st.ended_at,
+            "elapsed": round(st.elapsed, 1),
+            "idle_seconds": round(st.idle_seconds, 1),
+            "progress_tail": st.progress_tail,
+            "result_exists": st.result_exists,
+            "pid": st.pid,
+            # `--phase` の値。省いたときは null（#598 / #537）
+            "phase": phase,
+        }
+        # 組み立てたキー集合を正本（`OUTCOME_KEYS`）と突き合わせる。
+        # キーを片方だけへ足すと、ここで食い違いがその場で落ちる（#662）。
+        assert set(outcome) == set(OUTCOME_KEYS), (
+            set(outcome).symmetric_difference(OUTCOME_KEYS))
+        tmp_dir = paths.pidfile.parent
+        write_outcome(tmp_dir, stem, outcome)
+        append_journal(tmp_dir, outcome)
+    except Exception as exc:  # noqa: BLE001  書き出しの失敗で監視を落とさない
+        print(f"[{agent}] ⚠ 監視の結果を書けません（{stem}）: {exc}",
+              file=sys.stderr, flush=True)

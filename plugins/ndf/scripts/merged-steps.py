@@ -39,6 +39,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 from step_result import (StepError, approval_present, common_parser, emit, gh_json, git,  # noqa: E402
                          git_root, main_with, repo_slug, result, run)
+import gh_parts  # noqa: E402
+import repo  # noqa: E402
 
 TOOL = "merged"
 
@@ -115,14 +117,6 @@ def same_untracked(main_dir, pull):
     return rels
 
 
-def base_branch(main_dir):
-    try:
-        f = Path(main_dir) / ".ndf" / "worktree.json"
-        return json.loads(f.read_text(encoding="utf-8")).get("base_branch") or "develop"
-    except (OSError, ValueError, AttributeError):
-        return "develop"
-
-
 def cleanup(root, prs):
     """後片付けを行い、(status, summary, items, metrics, presentation_path, next) を返す。"""
     items = []
@@ -141,7 +135,7 @@ def cleanup(root, prs):
     wt_base = Path(os.environ.get("NDF_WORKTREE_BASE") or Path(tempfile.gettempdir()) / "ndf-worktrees")
 
     for n in prs:
-        p = run(["gh", "pr", "view", str(n), "--json", "headRefName,state,mergeCommit"], cwd=root, check=False)
+        p = gh_parts.gh(["pr", "view", str(n), "--json", "headRefName,state,mergeCommit"], cwd=root)
         if p.returncode != 0:
             add("pr", f"#{n}", "kept", f"gh pr view が失敗: {p.stderr.strip()[:200]}")
             continue
@@ -193,7 +187,7 @@ def cleanup(root, prs):
                     add("worktree", w["path"], "removed" if ok else "kept", why)
 
     git(root, "worktree", "prune", check=False)
-    base = base_branch(main_dir)
+    base = repo.declared_base(main_dir) or "develop"
     cur = git(main_dir, "branch", "--show-current", check=False).stdout.strip()
     pull_err = None
     if cur != base:
@@ -296,7 +290,7 @@ def probe_checks(root, rollup):
     stale, queued, settled, runs = [], [], [], {}
     for name, run_id, job_id in pending_check_runs(rollup):
         if run_id not in runs:
-            p = run(["gh", "run", "view", run_id, "--json", "status,attempt,jobs"], cwd=root, check=False)
+            p = gh_parts.gh(["run", "view", run_id, "--json", "status,attempt,jobs"], cwd=root)
             try:
                 runs[run_id] = json.loads(p.stdout) if p.returncode == 0 else None
             except ValueError:
@@ -318,8 +312,7 @@ def probe_checks(root, rollup):
 
 def queued_run_count(root):
     """リポジトリの待ち行列（queued の実行）の件数。読めなければ None。"""
-    p = run(["gh", "run", "list", "--status", "queued", "--limit", "200", "--json", "databaseId"],
-            cwd=root, check=False)
+    p = gh_parts.gh(["run", "list", "--status", "queued", "--limit", "200", "--json", "databaseId"], cwd=root)
     try:
         return len(json.loads(p.stdout)) if p.returncode == 0 else None
     except ValueError:
@@ -353,7 +346,7 @@ def watch_stuck_checks(root, n, probed, a, items, stale_since, rerun_done, waits
                                   "reason": "取り残されたチェックが再実行でも動かない"}],
                         {"waits": waits},
                         next=f"gh run view {run_id} で実行とジョブの状態を読み、手で再実行するか GitHub の障害を確かめる"))
-        p = run(["gh", "run", "rerun", run_id, "--job", job_id], cwd=root, check=False)
+        p = gh_parts.gh(["run", "rerun", run_id, "--job", job_id], cwd=root)
         if p.returncode != 0:
             emit(result(TOOL, "stopped", f"gh run rerun {run_id} --job {job_id} が失敗: {p.stderr.strip()[:300]}",
                         items + [{"kind": "check", "name": name, "result": "stopped", "run": run_id, "job": job_id,
@@ -392,7 +385,7 @@ def cmd_merge_when_green(a):
                         [{"kind": "pr", "name": f"#{n}", "result": "stopped", "reason": f"state={state}"}]))
         if info.get("isDraft"):
             # draft のままではマージできない。ready で走り出すチェックも待つよう、待ちの前に外す
-            p = run(["gh", "pr", "ready", str(n)], cwd=root, check=False)
+            p = gh_parts.gh(["pr", "ready", str(n)], cwd=root)
             if p.returncode != 0:
                 emit(result(TOOL, "stopped", f"gh pr ready が失敗: {p.stderr.strip()[:300]}",
                             items + [{"kind": "pr", "name": f"#{n}", "result": "stopped",
@@ -453,8 +446,7 @@ def cmd_merge_when_green(a):
         time.sleep(wait)
 
     if not any(i["kind"] == "pr" and i["result"] == "already_merged" for i in items):
-        cmd = ["gh", "pr", "merge", str(n), "--admin", f"--{a.method}"]
-        p = run(cmd, cwd=root, check=False)
+        p = gh_parts.gh(["pr", "merge", str(n), "--admin", f"--{a.method}"], cwd=root)
         if p.returncode != 0:
             emit(result(TOOL, "stopped", f"gh pr merge --admin が失敗: {p.stderr.strip()[:300]}",
                         items + [{"kind": "pr", "name": f"#{n}", "result": "stopped", "reason": p.stderr.strip()[:300]}],
@@ -483,7 +475,7 @@ def probe_prs(root, a):
         return [str(n) for n in a.pr]
     out = []
     for head in a.head or []:
-        p = run(["gh", "pr", "list", "--head", head, "--state", "open", "--json", "number"], cwd=root, check=False)
+        p = gh_parts.gh(["pr", "list", "--head", head, "--state", "open", "--json", "number"], cwd=root)
         try:
             out += [str(d["number"]) for d in json.loads(p.stdout)] if p.returncode == 0 else []
         except (ValueError, KeyError, TypeError):
@@ -493,7 +485,7 @@ def probe_prs(root, a):
 
 def probe_one(root, n, act, items):
     """1 本の PR のチェックを分類する。(分類, 手) を返し、根拠を items に足す。読めなければ None。"""
-    p = run(["gh", "pr", "view", n, "--json", "number,state,statusCheckRollup"], cwd=root, check=False)
+    p = gh_parts.gh(["pr", "view", n, "--json", "number,state,statusCheckRollup"], cwd=root)
     try:
         info = json.loads(p.stdout) if p.returncode == 0 else None
     except ValueError:
@@ -534,7 +526,7 @@ def probe_one(root, n, act, items):
             item = {"kind": "check", "pr": int(n), "name": name, "result": "stale", "run": run_id, "job": job_id,
                     "attempt": attempt}
             if act:
-                r = run(["gh", "run", "rerun", run_id, "--job", job_id], cwd=root, check=False)
+                r = gh_parts.gh(["run", "rerun", run_id, "--job", job_id], cwd=root)
                 item["result"] = "rerun" if r.returncode == 0 else "rerun_failed"
                 if r.returncode != 0:
                     done = False

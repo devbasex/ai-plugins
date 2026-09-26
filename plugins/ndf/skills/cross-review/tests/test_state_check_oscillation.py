@@ -10,6 +10,7 @@ import json
 import pathlib
 
 import pytest
+import review_lib.commands.loop
 
 
 PR = 7777
@@ -63,7 +64,7 @@ def test_non_dict_payload_dies(patched_tmp_dir, state_mod, capsys):
     _write_payload(tmp_dir, "agy", 2, [{"comments": "should_be_ignored"}])
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_check_oscillation(_make_args())
+        review_lib.commands.loop.cmd_check_oscillation(_make_args())
     assert e.value.code == 3
     captured = capsys.readouterr()
     assert "dict ではない" in captured.err
@@ -80,7 +81,7 @@ def test_non_dict_comment_entry_dies(patched_tmp_dir, state_mod, capsys):
     _write_payload(tmp_dir, "codex", 2, {"comments": ["not-a-dict-entry"]})
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_check_oscillation(_make_args())
+        review_lib.commands.loop.cmd_check_oscillation(_make_args())
     assert e.value.code == 3
     captured = capsys.readouterr()
     assert "dict ではない" in captured.err
@@ -97,5 +98,5 @@ def test_valid_dict_payloads_dont_die(patched_tmp_dir, state_mod):
 
     # exit code 2 (continue) で正常終了
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_check_oscillation(_make_args())
+        review_lib.commands.loop.cmd_check_oscillation(_make_args())
     assert e.value.code == 2

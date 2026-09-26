@@ -16,6 +16,9 @@ import pathlib
 import subprocess
 
 import pytest
+import review_lib
+import review_lib.commands.init
+import review_lib.github
 
 PR = 7300
 REPO = "o/r"
@@ -77,17 +80,17 @@ def stub_init_scaffolding(monkeypatch, state_mod, tmp_path):
     worktree = tmp_path / "wt-not-created-yet"  # 存在しないパス（新規作成扱い）
 
     monkeypatch.setattr(
-        state_mod, "_fetch_pr_metadata",
-        lambda pr, repo=None: state_mod.PrMetadata(
+        review_lib.github, "_fetch_pr_metadata",
+        lambda pr, repo=None: review_lib.github.PrMetadata(
             REPO, "takemi", HEAD_BRANCH, "abc123", "develop", True, 4000, None),
     )
-    monkeypatch.setattr(state_mod, "_fetch_changed_files", lambda pr, repo: [])
-    monkeypatch.setattr(state_mod, "_repo_from_git", lambda: REPO)
+    monkeypatch.setattr(review_lib.github, "_fetch_changed_files", lambda pr, repo: [])
+    monkeypatch.setattr(review_lib.github, "_repo_from_git", lambda: REPO)
     monkeypatch.setenv("NDF_SKIP_AUTH_CHECK", "1")
 
     recorder = _RecordingRun()
-    monkeypatch.setattr(state_mod.subprocess, "run", recorder)
-    monkeypatch.setattr(state_mod, "_sh", _sh_via_recorder(recorder))
+    monkeypatch.setattr(subprocess, "run", recorder)
+    monkeypatch.setattr(review_lib, "_sh", _sh_via_recorder(recorder))
     return worktree, recorder
 
 
@@ -102,7 +105,7 @@ def test_a_failed_fallback_checkout_removes_the_worktree_and_aborts(
     worktree, recorder = stub_init_scaffolding
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_init(_init_args(worktree))
+        review_lib.commands.init.cmd_init(_init_args(worktree))
 
     assert e.value.code == 1
     remove_calls = [c for c in recorder.calls if c[:3] == ["git", "worktree", "remove"]]
@@ -121,7 +124,7 @@ def test_the_checkout_is_attempted_inside_the_worktree(
     worktree, recorder = stub_init_scaffolding
 
     with pytest.raises(SystemExit):
-        state_mod.cmd_init(_init_args(worktree))
+        review_lib.commands.init.cmd_init(_init_args(worktree))
 
     checkout_idx = [
         i for i, c in enumerate(recorder.calls)

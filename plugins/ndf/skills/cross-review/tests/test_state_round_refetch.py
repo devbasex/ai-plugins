@@ -10,6 +10,12 @@ import pathlib
 import subprocess
 
 import pytest
+import review_lib
+import review_lib.commands.init
+import review_lib.commands.start_round
+import review_lib.github
+import review_lib.posts
+import review_lib.workspace
 
 PR = 7100
 REPO = "acme/demo"
@@ -47,8 +53,8 @@ def fake_fetch(tmp_path, state_mod, monkeypatch):
         'echo "[PR-COMMENT] [bot] ${FAKE_BODY:-new}"\n'
         'exit "${FAKE_RC:-0}"\n', encoding="utf-8")
     script.chmod(0o755)
-    monkeypatch.setattr(state_mod, "FETCH_COMMENTS_SCRIPT", script)
-    monkeypatch.setattr(state_mod.subprocess, "run", _RUN)
+    monkeypatch.setattr(review_lib.github, "FETCH_COMMENTS_SCRIPT", script)
+    monkeypatch.setattr(subprocess, "run", _RUN)
 
     def calls() -> list[str]:
         return log.read_text(encoding="utf-8").splitlines() if log.exists() else []
@@ -59,12 +65,12 @@ def fake_fetch(tmp_path, state_mod, monkeypatch):
 def start(state_mod, monkeypatch, tmp_path, repo):
     """状態ファイルを置き、`start-round` を呼ぶ。同期は head を返すだけにする。"""
     monkeypatch.setenv("CROSS_REVIEW_TMP_DIR", str(tmp_path))
-    monkeypatch.setattr(state_mod, "_auto_flush", lambda pr: None)
-    monkeypatch.setattr(state_mod, "_guard_previous_round", lambda st, prev: None)
+    monkeypatch.setattr(review_lib.posts, "_auto_flush", lambda pr: None)
+    monkeypatch.setattr(review_lib.commands.start_round, "_guard_previous_round", lambda st, prev: None)
     heads: dict[str, str] = {}
     monkeypatch.setattr(
-        state_mod, "_sync_before_round",
-        lambda st, pr: state_mod.HeadRef("feat/x", heads["oid"], False) if heads.get("oid") else None)
+        review_lib.commands.start_round, "_sync_before_round",
+        lambda st, pr: review_lib.workspace.HeadRef("feat/x", heads["oid"], False) if heads.get("oid") else None)
 
     def write_state(rounds: list[dict], current_pr: int = PR) -> None:
         st = {
@@ -78,7 +84,7 @@ def start(state_mod, monkeypatch, tmp_path, repo):
 
     def run(head: str | None) -> None:
         heads["oid"] = head
-        state_mod.cmd_start_round(type("A", (), {"pr": PR})())
+        review_lib.commands.start_round.cmd_start_round(type("A", (), {"pr": PR})())
 
     run.write_state = write_state
     return run
@@ -134,11 +140,11 @@ def test_a_failed_refetch_keeps_the_previous_snapshot(
 def test_init_fetch_is_not_strict(state_mod, tmp_path, fake_fetch, monkeypatch):
     """AC12a: `init` の取得は `--strict` を付けず、失敗したら理由を返す。"""
     path = tmp_path / "existing.txt"
-    assert state_mod._fetch_existing_comments(REPO, PR, path, strict=False) is None
+    assert review_lib.github._fetch_existing_comments(REPO, PR, path, strict=False) is None
     assert fake_fetch() == [f"{REPO} {PR}"]
     assert path.read_text(encoding="utf-8").startswith("[PR-COMMENT]")
     monkeypatch.setenv("FAKE_RC", "1")
-    assert state_mod._fetch_existing_comments(REPO, PR, path, strict=False)
+    assert review_lib.github._fetch_existing_comments(REPO, PR, path, strict=False)
 
 
 def test_init_aborts_without_a_state_file_when_the_fetch_fails(
@@ -152,21 +158,21 @@ def test_init_aborts_without_a_state_file_when_the_fetch_fails(
     monkeypatch.setenv("FAKE_RC", "1")
     worktree = tmp_path / "wt-new"
     monkeypatch.setattr(
-        state_mod, "_fetch_pr_metadata",
-        lambda pr, repo=None: state_mod.PrMetadata(
+        review_lib.github, "_fetch_pr_metadata",
+        lambda pr, repo=None: review_lib.github.PrMetadata(
             REPO, "someone", "feat/x", "abc123", "develop", True, 4000, None))
-    monkeypatch.setattr(state_mod, "_fetch_changed_files", lambda pr, repo: [])
-    monkeypatch.setattr(state_mod, "_repo_from_git", lambda: REPO)
-    monkeypatch.setattr(state_mod, "_create_worktree",
+    monkeypatch.setattr(review_lib.github, "_fetch_changed_files", lambda pr, repo: [])
+    monkeypatch.setattr(review_lib.github, "_repo_from_git", lambda: REPO)
+    monkeypatch.setattr(review_lib.workspace, "_create_worktree",
                         lambda wt, pr, head: pathlib.Path(wt).mkdir())
-    monkeypatch.setattr(state_mod, "_sh", lambda cmd, check=True: "me")
+    monkeypatch.setattr(review_lib, "_sh", lambda cmd, check=True: "me")
     args = type("A", (), {
         "pr": PR, "max_rounds": 12, "rotate_after": 8, "only": None,
         "worktree": str(worktree), "focus": None, "extra_instructions_file": None,
         "host": "claude"})()
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_init(args)
+        review_lib.commands.init.cmd_init(args)
 
     assert e.value.code != 0
     assert not (tmp_path / f"cross-review-pr{PR}-state.json").exists()
@@ -178,7 +184,7 @@ def test_a_refetch_that_cannot_start_keeps_going(
     """取得の起動が OSError を送出しても `⚠` で続け、round を 1 つだけ開く（PR #930 の指摘）。"""
     head = _git(repo, "rev-parse", "HEAD")
     _existing(tmp_path).write_text("[PR-COMMENT] [bot] old\n", encoding="utf-8")
-    monkeypatch.setattr(state_mod, "FETCH_COMMENTS_SCRIPT", tmp_path / "missing.sh")
+    monkeypatch.setattr(review_lib.github, "FETCH_COMMENTS_SCRIPT", tmp_path / "missing.sh")
     start.write_state([{"round": 1, "pr": PR, "head_sha": head, "reviewers": ["codex"]}])
     start(head)
     assert _existing(tmp_path).read_text(encoding="utf-8") == "[PR-COMMENT] [bot] old\n"
@@ -194,7 +200,7 @@ def test_an_interrupted_refetch_does_not_open_a_round(
 
     def interrupted(*a, **k):
         raise KeyboardInterrupt
-    monkeypatch.setattr(state_mod, "_fetch_existing_comments", interrupted)
+    monkeypatch.setattr(review_lib.github, "_fetch_existing_comments", interrupted)
     start.write_state([{"round": 1, "pr": PR, "head_sha": head, "reviewers": ["codex"]}])
     with pytest.raises(KeyboardInterrupt):
         start(head)

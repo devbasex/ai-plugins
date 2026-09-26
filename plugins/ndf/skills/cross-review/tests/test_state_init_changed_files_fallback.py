@@ -19,6 +19,10 @@ import pathlib
 import subprocess
 
 import pytest
+import review_lib
+import review_lib.commands.init
+import review_lib.github
+import review_lib.workspace
 
 PR = 7200
 REPO = "o/r"
@@ -45,14 +49,14 @@ def stub_init_scaffolding(monkeypatch, state_mod, tmp_path):
     worktree.mkdir()
 
     monkeypatch.setattr(
-        state_mod, "_fetch_pr_metadata",
-        lambda pr, repo=None: state_mod.PrMetadata(
+        review_lib.github, "_fetch_pr_metadata",
+        lambda pr, repo=None: review_lib.github.PrMetadata(
             REPO, "takemi", "feat/x", "abc123", "develop", False, 4000, None),
     )
-    monkeypatch.setattr(state_mod, "_sh", lambda cmd, check=True: "takemi")
-    monkeypatch.setattr(state_mod, "_create_worktree", lambda *a: None)
-    monkeypatch.setattr(state_mod, "_is_registered_worktree", lambda p: True)
-    monkeypatch.setattr(state_mod, "_sync_worktree", lambda *a, **k: None)
+    monkeypatch.setattr(review_lib, "_sh", lambda cmd, check=True: "takemi")
+    monkeypatch.setattr(review_lib.workspace, "_create_worktree", lambda *a: None)
+    monkeypatch.setattr(review_lib.workspace, "_is_registered_worktree", lambda p: True)
+    monkeypatch.setattr(review_lib.workspace, "_sync_worktree", lambda *a, **k: None)
     monkeypatch.setenv("NDF_SKIP_AUTH_CHECK", "1")
 
     # `fetch-pr-comments.sh` の呼び出しだけを差し替える。他（`_fetch_changed_files` が
@@ -65,7 +69,7 @@ def stub_init_scaffolding(monkeypatch, state_mod, tmp_path):
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
         return real_run(cmd, *args, **kwargs)
 
-    monkeypatch.setattr(state_mod.subprocess, "run", _run)
+    monkeypatch.setattr(subprocess, "run", _run)
     return worktree
 
 
@@ -83,7 +87,7 @@ def test_the_rest_files_api_failure_falls_back_to_gh_pr_view(
         {"match": f"pr view {PR} --json files", "stdout": _FALLBACK_FILES},
     ])
 
-    state_mod.cmd_init(_init_args(stub_init_scaffolding))
+    review_lib.commands.init.cmd_init(_init_args(stub_init_scaffolding))
 
     calls = fake_gh.joined()
     assert any(f"repos/{REPO}/pulls/{PR}/files" in c for c in calls)
@@ -112,7 +116,7 @@ def test_the_empty_rest_response_also_falls_back(
         {"match": f"pr view {PR} --json files", "stdout": _FALLBACK_FILES},
     ])
 
-    state_mod.cmd_init(_init_args(stub_init_scaffolding))
+    review_lib.commands.init.cmd_init(_init_args(stub_init_scaffolding))
 
     saved = json.loads(
         (tmp_dir / f"cross-review-pr{PR}-state.json").read_text(encoding="utf-8"))
