@@ -4,11 +4,11 @@ gh と claude は PATH の先頭に置いた偽物で置き換える。実機の
 """
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -20,9 +20,9 @@ PY = sys.executable
 sys.path.insert(0, str(SCRIPTS / "lib"))
 from step_result import validate_result  # noqa: E402
 
-spec = importlib.util.spec_from_file_location("supervise", SUPERVISE)
-sv = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(sv)
+sys.path.insert(0, str(SCRIPTS))
+from supervise_lib import claude, commands, engine, paths, plan, pr as pr_step, queue  # noqa: E402
+import gh_call  # noqa: E402
 
 FAKE_GH = """#!{py}
 import json, sys
@@ -58,7 +58,7 @@ def fakes(tmp_path, monkeypatch):
 
 def run_plan(tmp_path, steps, **extra):
     plan = {"フェーズ": "試験", "課題": [858], "作業場所": str(tmp_path), "steps": steps, **extra}
-    s = sv.Supervisor(plan, tmp_path / "state")
+    s = engine.Engine(plan, tmp_path / "state")
     text = s.run()
     return s, text
 
@@ -86,16 +86,16 @@ def test_rerun_failed_passes_when_last_failed_run_passes(tmp_path):
     cmd = 'case "$PYTEST_ADDOPTS" in *--lf*) exit 0;; *) echo boom; exit 1;; esac'
     s, text = run_plan(tmp_path, [{"id": "t", "type": "run", "cmd": cmd, "rerun_failed": True, "next": "end"}])
     assert "結果: 完了" in text
-    assert s.results["t"]["rerun"] == {"exit": 0}
-    assert "揺れとして進む" in s.results["t"]["text"]
+    assert s.state.results["t"]["rerun"] == {"exit": 0}
+    assert "揺れとして進む" in s.state.results["t"]["text"]
 
 
 def test_rerun_failed_still_failing_goes_to_on_fail(tmp_path):
     steps = [{"id": "t", "type": "run", "cmd": "exit 1", "rerun_failed": True, "on_fail": "after"},
              {"id": "after", "type": "run", "cmd": "true", "next": "end"}]
     s, text = run_plan(tmp_path, steps)
-    assert s.results["t"]["rerun"] == {"exit": 1}
-    assert [e["id"] for e in s.log] == ["t", "after"]
+    assert s.state.results["t"]["rerun"] == {"exit": 1}
+    assert [e["id"] for e in s.state.log] == ["t", "after"]
 
 
 @pytest.mark.parametrize("where", ["plan", "declaration"])
@@ -109,24 +109,24 @@ def test_run_step_disables_pytest_reports(tmp_path, monkeypatch, where):
         (tmp_path / ".ndf" / "supervise.json").write_text('{"version": 1, "test": {"no_reports": "-p no:x"}}')
     s, _ = run_plan(tmp_path, [{"id": "t", "type": "run", "cmd": 'echo "[$PYTEST_ADDOPTS]"', "next": "end"}],
                     **extra)
-    assert "[-p no:x]" in s.results["t"]["text"]
+    assert "[-p no:x]" in s.state.results["t"]["text"]
     s, _ = run_plan(tmp_path, [{"id": "t", "type": "run", "cmd": 'echo "[$PYTEST_ADDOPTS]"', "reports": True,
                                 "next": "end"}], **extra)
-    assert "no:x" not in s.results["t"]["text"]
+    assert "no:x" not in s.state.results["t"]["text"]
 
 
 def test_run_step_without_no_reports_adds_nothing(tmp_path, monkeypatch):
     monkeypatch.delenv("PYTEST_ADDOPTS", raising=False)
     s, _ = run_plan(tmp_path, [{"id": "t", "type": "run", "cmd": 'echo "[$PYTEST_ADDOPTS]"', "next": "end"}])
-    assert "[]" in s.results["t"]["text"]
+    assert "[]" in s.state.results["t"]["text"]
 
 
 def test_preset_fills_base_branch(tmp_path, monkeypatch):
-    monkeypatch.setitem(sv.PRESETS, "echo-base", "echo base={base}")
+    monkeypatch.setitem(paths.PRESETS, "echo-base", "echo base={base}")
     s, _ = run_plan(tmp_path, [{"id": "t", "type": "run", "preset": "echo-base", "next": "end"}], base_branch="trunk")
-    assert "base=trunk" in s.results["t"]["text"]
+    assert "base=trunk" in s.state.results["t"]["text"]
     s, _ = run_plan(tmp_path, [{"id": "t", "type": "run", "preset": "echo-base", "next": "end"}])
-    assert s.results["t"]["exit"] == 2 and "base_branch" in s.results["t"]["text"]
+    assert s.state.results["t"]["exit"] == 2 and "base_branch" in s.state.results["t"]["text"]
 
 
 def test_skip_to_jumps_over_steps(tmp_path):
@@ -135,7 +135,7 @@ def test_skip_to_jumps_over_steps(tmp_path):
              {"id": "review", "type": "run", "cmd": "true", "next": "end"}]
     s, text = run_plan(tmp_path, steps)
     assert "結果: 完了" in text
-    assert [e["id"] for e in s.log] == ["assess", "review"]
+    assert [e["id"] for e in s.state.log] == ["assess", "review"]
 
 
 def test_skip_to_passes_through_on_zero(tmp_path):
@@ -143,16 +143,16 @@ def test_skip_to_passes_through_on_zero(tmp_path):
              {"id": "refactor", "type": "run", "cmd": "true"},
              {"id": "review", "type": "run", "cmd": "true", "next": "end"}]
     s, _ = run_plan(tmp_path, steps)
-    assert [e["id"] for e in s.log] == ["assess", "refactor", "review"]
+    assert [e["id"] for e in s.state.log] == ["assess", "refactor", "review"]
 
 
 def test_preset_and_pr_placeholder(tmp_path, monkeypatch):
-    monkeypatch.setitem(sv.PRESETS, "echo", "echo preset-ran")
+    monkeypatch.setitem(paths.PRESETS, "echo", "echo preset-ran")
     s, _ = run_plan(tmp_path, [{"id": "a", "type": "run", "preset": "echo"},
                                {"id": "b", "type": "run", "cmd": "echo pr={pr}", "next": "end"}],
                     **{"Pull Request": "https://example/pull/9"})
-    assert "preset-ran" in s.results["a"]["text"]
-    assert "pr=9" in s.results["b"]["text"]
+    assert "preset-ran" in s.state.results["a"]["text"]
+    assert "pr=9" in s.state.results["b"]["text"]
 
 
 @pytest.mark.parametrize("value", ["https://github.com/o/r/pull/9", "https://github.com/o/r/pull/9/", "9", 9])
@@ -160,10 +160,10 @@ def test_pr_placeholder_is_number_and_pr_url_is_url(tmp_path, value):
     steps = [{"id": "b", "type": "run", "cmd": "echo n={pr} u={pr_url}", "next": "end"}]
     if isinstance(value, str) and "/pull/" in value:
         s, _ = run_plan(tmp_path, steps, **{"Pull Request": value})
-        assert f"n=9 u={value}" in s.results["b"]["text"]
+        assert f"n=9 u={value}" in s.state.results["b"]["text"]
     else:
         s, _ = run_plan(tmp_path, [{**steps[0], "cmd": "echo n={pr}"}], **{"Pull Request": value})
-        assert "n=9" in s.results["b"]["text"]
+        assert "n=9" in s.state.results["b"]["text"]
 
 
 def test_pr_url_from_number_asks_gh(tmp_path, monkeypatch):
@@ -174,23 +174,23 @@ def test_pr_url_from_number_asks_gh(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
     s, _ = run_plan(tmp_path, [{"id": "b", "type": "run", "cmd": "echo u={pr_url}", "next": "end"}],
                     **{"Pull Request": "12"})
-    assert "u=https://github.com/o/r/pull/12" in s.results["b"]["text"]
+    assert "u=https://github.com/o/r/pull/12" in s.state.results["b"]["text"]
 
 
 def test_drive_args_get_pr_number(tmp_path, monkeypatch):
     drive = tmp_path / "drive.py"
     drive.write_text("import json, sys\nprint(json.dumps({'status': 'ok', 'argv': sys.argv[1:]}))\n")
-    monkeypatch.setitem(sv.DRIVES, "fake", drive)
+    monkeypatch.setitem(paths.DRIVES, "fake", drive)
     s, text = run_plan(tmp_path, [{"id": "d", "type": "drive", "drive": "fake", "args": "{pr} --max-rounds 4",
                                    "next": "end"}], **{"Pull Request": "https://github.com/o/r/pull/77"})
     assert "結果: 完了" in text, text
-    assert '"argv": ["77", "--max-rounds", "4"]' in s.results["d"]["text"]
+    assert '"argv": ["77", "--max-rounds", "4"]' in s.state.results["d"]["text"]
 
 
 @pytest.mark.parametrize("drive", ["cross-review", "cross-refactoring"])
 def test_real_drives_take_pr_number_not_url(drive):
     # drive の args の {pr} は番号になる。2 つの駆動は URL を引数の解析で拒む
-    p = subprocess.run([PY, str(sv.DRIVES[drive]), "https://github.com/o/r/pull/77"], capture_output=True, text=True)
+    p = subprocess.run([PY, str(paths.DRIVES[drive]), "https://github.com/o/r/pull/77"], capture_output=True, text=True)
     assert p.returncode == 2 and "invalid int value" in p.stderr
 
 
@@ -207,15 +207,15 @@ def test_branch_creates_worktree(tmp_path):
     wt = repo / ".worktrees" / "feat" / "x"
     plan = {"フェーズ": "試験", "課題": [], "作業場所": str(wt), "branch": "feat/x", "起点": "main",
             "steps": [{"id": "t", "type": "run", "cmd": "git rev-parse --abbrev-ref HEAD", "next": "end"}]}
-    s = sv.Supervisor(plan, tmp_path / "state")
+    s = engine.Engine(plan, tmp_path / "state")
     assert "結果: 完了" in s.run()
-    assert s.results["t"]["text"].strip() == "feat/x"
+    assert s.state.results["t"]["text"].strip() == "feat/x"
 
 
 def test_branch_without_repo_stops(tmp_path):
     plan = {"フェーズ": "試験", "課題": [], "作業場所": str(tmp_path / "nowhere"), "branch": "feat/x",
             "steps": [{"id": "t", "type": "run", "cmd": "true"}]}
-    assert "リポジトリ" in sv.Supervisor(plan, tmp_path / "state").run()
+    assert "リポジトリ" in engine.Engine(plan, tmp_path / "state").run()
 
 
 def clone_repo(tmp_path):
@@ -240,7 +240,7 @@ def test_ensure_worktree_retries_config_lock(tmp_path):
     (repo / ".git" / "config.lock").write_text("")
     waits = []
     plan = wt_plan(repo, "feat/a")
-    assert sv.ensure_worktree(plan, sleep=waits.append) is None
+    assert paths.ensure_worktree(plan, sleep=waits.append) is None
     assert len(waits) == 1 and 0.5 <= waits[0] <= 2
     assert git(Path(plan["作業場所"]), "rev-parse", "--abbrev-ref", "HEAD").strip() == "feat/a"
 
@@ -254,17 +254,17 @@ def test_ensure_worktree_gives_up_after_retries(tmp_path, monkeypatch):
             return subprocess.CompletedProcess(cmd, 255, "", "error: could not lock config file .git/config: File exists")
         return real(cmd, **kw)
 
-    monkeypatch.setattr(sv.subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "run", run)
     waits = []
-    err = sv.ensure_worktree(wt_plan(repo, "feat/a"), sleep=waits.append)
+    err = paths.ensure_worktree(wt_plan(repo, "feat/a"), sleep=waits.append)
     assert err.startswith("作業ツリーを作れない") and "could not lock config file" in err
-    assert len(waits) == sv.WORKTREE_LOCK_RETRIES
+    assert len(waits) == paths.WORKTREE_LOCK_RETRIES
 
 
 def test_ensure_worktree_other_error_does_not_retry(tmp_path):
     repo = clone_repo(tmp_path)
     waits = []
-    err = sv.ensure_worktree(wt_plan(repo, "feat/a", 起点="origin/nothing"), sleep=waits.append)
+    err = paths.ensure_worktree(wt_plan(repo, "feat/a", 起点="origin/nothing"), sleep=waits.append)
     assert err.startswith("作業ツリーを作れない") and waits == []
 
 
@@ -275,9 +275,9 @@ def test_queue_creates_worktrees_in_order_before_run(tmp_path, monkeypatch):
         f = tmp_path / f"{b.replace('/', '-')}.json"
         f.write_text(json.dumps(wt_plan(repo, b)))
         plans.append(str(f))
-    real = sv.ensure_worktree
-    monkeypatch.setattr(sv, "ensure_worktree", lambda plan, **kw: calls.append(plan["branch"]) or real(plan, **kw))
-    res = sv.cmd_queue(plans, 3, poll=0.1)
+    real = paths.ensure_worktree
+    monkeypatch.setattr(paths, "ensure_worktree", lambda plan, **kw: calls.append(plan["branch"]) or real(plan, **kw))
+    res = queue.cmd_queue(plans, 3, poll=0.1)
     assert calls == ["feat/a", "feat/b", "feat/c"]
     assert res["status"] == "ok", res
     for b in ("feat/a", "feat/b", "feat/c"):
@@ -328,7 +328,7 @@ def test_new_impl_in_other_repo_uses_declarations_only(tmp_path):
         assert not any(w in cmd for w in AI_PLUGINS_WORDS), cmd
     # 配布したスクリプトは置き場からの絶対パスで呼ぶ
     assert steps["merge"]["cmd"].startswith(f"python3 {SCRIPTS / 'merged-steps.py'} ")
-    assert sv.PRESETS["doc-lint"].startswith(f"python3 {SCRIPTS / 'doc-lint.py'} ")
+    assert paths.PRESETS["doc-lint"].startswith(f"python3 {SCRIPTS / 'doc-lint.py'} ")
 
 
 def test_new_impl_without_declaration_stops(tmp_path):
@@ -488,9 +488,9 @@ def test_queue_removes_old_done_at_start(tmp_path, monkeypatch):
     done.parent.mkdir()
     done.write_text("古い")
     seen = []
-    monkeypatch.setattr(sv, "run_batch", lambda plans, m, poll: seen.append(done.exists()) or [
+    monkeypatch.setattr(queue, "run_batch", lambda plans, m, poll: seen.append(done.exists()) or [
         {"plan": plans[0], "result": "完了"}])
-    res = sv.cmd_queue([a], 3)
+    res = queue.cmd_queue([a], 3)
     assert seen == [False] and json.loads(done.read_text()) == res
 
 
@@ -534,11 +534,11 @@ def test_old_plan_and_report_keys_are_read(tmp_path):
     """旧い語（持ち場）で書いた計画と報告も読み、報告は今の語（フェーズ）で書く。"""
     plan = {"持ち場": "試験", "次の持ち場": "検査", "課題": [1], "作業場所": str(tmp_path),
             "steps": [{"id": "t", "type": "run", "cmd": "true", "next": "end"}]}
-    text = sv.Supervisor(plan, tmp_path / "state").run()
+    text = engine.Engine(plan, tmp_path / "state").run()
     assert "## フェーズの報告" in text
     assert "- フェーズ: 試験" in text and "- 次のフェーズ: 検査" in text
     old = "## 持ち場の報告\n\n- 持ち場: 実装\n- 課題: #2\n- 結果: 完了\n"
-    assert sv.note_row(old, "") == "| #2 | 実装: 完了 | — |"
+    assert commands.note_row(old, "") == "| #2 | 実装: 完了 | — |"
 
 
 def test_note_without_section_stops(tmp_path):
@@ -555,7 +555,7 @@ def test_sync_check_reports_each_check(tmp_path, monkeypatch):
     (tmp_path / ".ndf").mkdir()
     (tmp_path / ".ndf" / "supervise.json").write_text(json.dumps({"version": 1, "sync_checks": [
         {"name": "build", "command": "echo gen > gen.txt"}, {"name": "links", "command": "exit 1"}]}))
-    res = sv.sync_check(str(tmp_path), commit=False)
+    res = commands.sync_check(str(tmp_path), commit=False)
     assert res["status"] == "stopped" and res["summary"] == "失敗: links"
     assert [i["result"] for i in res["items"]] == ["ok", "failed"]
     assert validate_result(res, 1) == []
@@ -565,13 +565,13 @@ def test_sync_check_commits_generated(tmp_path, monkeypatch):
     git(tmp_path, "init", "-q")
     git(tmp_path, "config", "user.email", "a@b")
     git(tmp_path, "config", "user.name", "a")
-    res = sv.sync_check(str(tmp_path), commit=True, checks=[("build", "echo gen > gen.txt")])
+    res = commands.sync_check(str(tmp_path), commit=True, checks=[("build", "echo gen > gen.txt")])
     assert res["status"] == "ok"
     assert git(tmp_path, "log", "--format=%s").strip() == "Update: 生成物を同期する"
 
 
 def test_sync_check_without_declaration_stops(tmp_path):
-    res = sv.sync_check(str(tmp_path), commit=False)
+    res = commands.sync_check(str(tmp_path), commit=False)
     assert res["status"] == "stopped" and "sync_checks" in res["summary"] and res["items"] == []
 
 
@@ -631,9 +631,9 @@ def test_limit_switches_auth_then_waits_then_recovers(tmp_path, seq, monkeypatch
     assert [c["bedrock"] for c in calls()] == [None, "1", None]
     assert "結果: 完了" in text
     assert "- 認証: 切り替え（CLAUDE_CODE_USE_BEDROCK）" in text
-    w = s.results["w"]
+    w = s.state.results["w"]
     assert w["limit"] is True and w["limit_hits"] == 2 and w["limit_resets"]
-    assert "j" not in s.results  # judge を起こさない
+    assert "j" not in s.state.results  # judge を起こさない
 
 
 def test_limit_fallback_recovers_without_wait(tmp_path, seq, monkeypatch):
@@ -643,7 +643,7 @@ def test_limit_fallback_recovers_without_wait(tmp_path, seq, monkeypatch):
     s, text = run_plan(tmp_path, WORK_THEN_FAIL)
     assert [c["bedrock"] for c in calls()] == [None, "1"]
     assert "結果: 完了" in text and "認証: 切り替え（CLAUDE_CODE_USE_BEDROCK, AWS_REGION）" in text
-    assert "limit_waited" not in s.results["w"]
+    assert "limit_waited" not in s.state.results["w"]
 
 
 def test_limit_without_reset_uses_retry_interval(tmp_path, seq):
@@ -651,7 +651,7 @@ def test_limit_without_reset_uses_retry_interval(tmp_path, seq):
     set_responses(LIMIT_NO_TIME, LIMIT_NO_TIME, OK)
     s, text = run_plan(tmp_path, WORK_THEN_FAIL, limit_retry_seconds=7)
     assert len(calls()) == 3 and "結果: 完了" in text
-    assert s.results["w"]["limit_waited"] == 14
+    assert s.state.results["w"]["limit_waited"] == 14
     assert "認証" not in text
 
 
@@ -661,7 +661,7 @@ def test_limit_wait_over_max_stops_without_judge(tmp_path, seq):
     s, text = run_plan(tmp_path, WORK_THEN_FAIL, limit_retry_seconds=10, limit_wait_max=25)
     assert len(calls()) == 3  # 0 秒・10 秒・20 秒の後。次の待ちで 30 秒になり最大を超える
     assert "結果: 止まった" in text and "理由: 利用上限" in text
-    assert "j" not in s.results
+    assert "j" not in s.state.results
 
 
 def test_limit_applies_to_judge(tmp_path, seq):
@@ -670,7 +670,7 @@ def test_limit_applies_to_judge(tmp_path, seq):
     s, text = run_plan(tmp_path, [{"id": "j", "type": "judge", "question": "?"},
                                   {"id": "r", "type": "run", "cmd": "true", "next": "end"}],
                        limit_retry_seconds=1)
-    assert len(calls()) == 2 and s.results["j"]["decision"] == "next" and "結果: 完了" in text
+    assert len(calls()) == 2 and s.state.results["j"]["decision"] == "next" and "結果: 完了" in text
 
 
 def test_error_that_is_not_limit_is_plain_failure(tmp_path, seq):
@@ -678,8 +678,8 @@ def test_error_that_is_not_limit_is_plain_failure(tmp_path, seq):
     set_responses({"out": {"result": "boom", "is_error": True}, "code": 1},
                   {"out": {"result": '{"decision": "stop", "reason": "直せない"}'}})
     s, text = run_plan(tmp_path, WORK_THEN_FAIL)
-    assert "limit" not in s.results["w"] or s.results["w"]["limit"] is False
-    assert s.results["j"]["decision"] == "stop" and "理由: 直せない" in text
+    assert "limit" not in s.state.results["w"] or s.state.results["w"]["limit"] is False
+    assert s.state.results["j"]["decision"] == "stop" and "理由: 直せない" in text
 
 
 @pytest.mark.parametrize("text,expect", [
@@ -691,7 +691,7 @@ def test_error_that_is_not_limit_is_plain_failure(tmp_path, seq):
 ])
 def test_limit_reset_at(text, expect):
     now = 1758790800.0  # 2025-09-25 09:00 UTC
-    got = sv.limit_reset_at(text, now)
+    got = claude.limit_reset_at(text, now)
     if expect == "none":
         assert got is None
     elif isinstance(expect, float):
@@ -704,9 +704,9 @@ def test_limit_reset_at(text, expect):
 
 
 def test_is_usage_limit_matches_monitor_table():
-    assert sv.is_usage_limit('{"api_error_status": 429}')
-    assert sv.is_usage_limit("You've hit your weekly limit")
-    assert not sv.is_usage_limit("ordinary failure")
+    assert claude.is_usage_limit('{"api_error_status": 429}')
+    assert claude.is_usage_limit("You've hit your weekly limit")
+    assert not claude.is_usage_limit("ordinary failure")
 
 
 def test_run_gate_exit_goes_next_and_copies_presentation(tmp_path):
@@ -722,15 +722,15 @@ def test_run_gate_exit_goes_next_and_copies_presentation(tmp_path):
     ])
     copied = tmp_path / "issues" / "a.md"
     assert copied.read_text() == "# 提示物\n"
-    assert s.results["facts"]["gate"] is True and "rerun" not in s.results["facts"]
-    assert "after" in s.results and "bad" not in s.results
+    assert s.state.results["facts"]["gate"] is True and "rerun" not in s.state.results["facts"]
+    assert "after" in s.state.results and "bad" not in s.state.results
     assert "結果: 関門" in text and f"提示物: {copied}" in text and "関門: ステップ facts（exit=10）" in text
 
 
 def test_run_gate_without_gate_next_uses_next(tmp_path):
     s, text = run_plan(tmp_path, [{"id": "g", "type": "run", "cmd": "exit 12", "on_fail": "bad", "next": "end"},
                                   {"id": "bad", "type": "run", "cmd": "false"}])
-    assert list(s.results) == ["g"] and "結果: 関門" in text and "提示物: 無し" in text
+    assert list(s.state.results) == ["g"] and "結果: 関門" in text and "提示物: 無し" in text
 
 
 def test_work_prompt_uses_step_cwd(tmp_path, fakes):
@@ -888,13 +888,13 @@ def test_pr_body_ends_with_mode_and_passed_stages(tmp_path, monkeypatch):
         {"id": "impl", "type": "run", "cmd": "true", "stage": "実装", "next": "test"},
         {"id": "test", "type": "run", "cmd": "true", "stage": "完了判定", "next": "pr"},
         {"id": "pr", "type": "pr", "stage": "Pull Request", "base": "develop", "body": "template", "next": "end"}]}
-    s = sv.Supervisor(plan, tmp_path / "state")
+    s = engine.Engine(plan, tmp_path / "state")
     text = s.run()
     assert "結果: 完了" in text, text
     lines = [l for l in body.read_text().splitlines() if l.strip()]
     assert lines[-2] == "モード: standard / 通した工程: 実装 → 完了判定 → Pull Request"
     assert lines[-1].startswith("🤖 Generated with")
-    assert sum(sv.PR_FOOTER in l for l in lines) == 1
+    assert sum(pr_step.PR_FOOTER in l for l in lines) == 1
 
 
 def advance_develop(root):
@@ -913,7 +913,7 @@ def test_pr_body_stat_is_from_merge_base(tmp_path, monkeypatch):
     advance_develop(root)
     plan = {"フェーズ": "実装", "課題": [1], "作業場所": str(root), "steps": [
         {"id": "pr", "type": "pr", "stage": "Pull Request", "base": "develop", "body": "template", "next": "end"}]}
-    assert "結果: 完了" in sv.Supervisor(plan, tmp_path / "state").run()
+    assert "結果: 完了" in engine.Engine(plan, tmp_path / "state").run()
     got = body.read_text()
     assert "b.txt" in got and "other.txt" not in got, got
 
@@ -930,7 +930,7 @@ def test_pr_base_from_declaration(tmp_path, monkeypatch):
     (root / ".ndf" / "worktree.json").write_text('{"version": 1, "base_branch": "trunk"}\n')
     plan = {"フェーズ": "実装", "課題": [1], "作業場所": str(root), "steps": [
         {"id": "pr", "type": "pr", "stage": "Pull Request", "body": "template", "next": "end"}]}
-    assert "結果: 完了" in sv.Supervisor(plan, tmp_path / "state").run()
+    assert "結果: 完了" in engine.Engine(plan, tmp_path / "state").run()
     assert "other.txt" not in body.read_text()
 
 
@@ -938,26 +938,26 @@ def test_pr_without_base_stops(tmp_path, monkeypatch):
     root, body = pr_repo(tmp_path, monkeypatch)
     plan = {"フェーズ": "実装", "課題": [1], "作業場所": str(root), "steps": [
         {"id": "pr", "type": "pr", "stage": "Pull Request", "body": "template", "next": "end"}]}
-    s = sv.Supervisor(plan, tmp_path / "state")
+    s = engine.Engine(plan, tmp_path / "state")
     assert "結果: 完了" not in s.run()
-    assert "base_branch" in s.results["pr"]["text"]
+    assert "base_branch" in s.state.results["pr"]["text"]
 
 
 @pytest.mark.parametrize("llm_footer", [True, False])
 def test_pr_body_from_llm_has_one_footer(tmp_path, monkeypatch, llm_footer):
     root, body = pr_repo(tmp_path, monkeypatch)
-    text = "## 概要\n\n本文。" + (f"\n\n{sv.PR_FOOTER}" if llm_footer else "")
+    text = "## 概要\n\n本文。" + (f"\n\n{pr_step.PR_FOOTER}" if llm_footer else "")
     fake = tmp_path / "claude.py"
     fake.write_text("import json, sys\nsys.stdin.read()\n"
                     f"print(json.dumps({{'result': {text!r}, 'usage': {{}}, 'total_cost_usd': 0}}))\n")
     monkeypatch.setenv("NDF_SUPERVISE_CLAUDE", f"{PY} {fake}")
     plan = {"フェーズ": "実装", "課題": [1], "作業場所": str(root), "steps": [
         {"id": "pr", "type": "pr", "stage": "Pull Request", "base": "develop", "next": "end"}]}
-    s = sv.Supervisor(plan, tmp_path / "state")
+    s = engine.Engine(plan, tmp_path / "state")
     assert "結果: 完了" in s.run()
     got = body.read_text()
-    assert "本文。" in got and got.count(sv.PR_FOOTER) == 1
-    assert got.rstrip().endswith(sv.PR_FOOTER)
+    assert "本文。" in got and got.count(pr_step.PR_FOOTER) == 1
+    assert got.rstrip().endswith(pr_step.PR_FOOTER)
 
 
 # --- 途中の報告（progress.jsonl）---
@@ -982,7 +982,7 @@ print(json.dumps({{"result": "## 作業の報告\\n- 結果: 完了", "usage": {
 
 def progress(s):
     rows = []
-    for l in (s.dir / "progress.jsonl").read_text().splitlines():
+    for l in (s.state.dir / "progress.jsonl").read_text().splitlines():
         try:
             rows.append(json.loads(l))
         except json.JSONDecodeError:
@@ -1031,7 +1031,7 @@ def test_no_alive_line_within_interval(tmp_path):
 def test_work_prompt_has_progress_instructions(tmp_path, fakes):
     s, _ = run_plan(tmp_path, [{"id": "impl", "type": "work", "prompt": "実装する", "next": "end"}])
     prompt = fakes.read_text()
-    assert "## 途中の報告" in prompt and str((s.dir / "progress.jsonl").resolve()) in prompt
+    assert "## 途中の報告" in prompt and str((s.state.dir / "progress.jsonl").resolve()) in prompt
 
 
 def test_worker_lines_are_sorted_into_attention(tmp_path, monkeypatch):
@@ -1100,7 +1100,7 @@ def test_work_and_judge_prompts_get_separate_work_dirs_per_plan(tmp_path, monkey
     for name in ("plan-a", "plan-b"):
         plan = {"フェーズ": "試験", "課題": [985], "作業場所": str(tmp_path),
                 "steps": [{"id": "w", "type": "work", "prompt": "書く", "next": "end"}]}
-        s = sv.Supervisor(plan, tmp_path / name)
+        s = engine.Engine(plan, tmp_path / name)
         assert "結果: 完了" in s.run()
         work = (tmp_path / name / "work").resolve()
         assert work.is_dir()
@@ -1127,28 +1127,28 @@ def test_queue_then_fills_prs_from_reports(tmp_path, fakes, monkeypatch):
                                  "steps": [{"id": "w", "type": "work", "prompt": "作る", "next": "end"}]}))
         impl.append(str(f))
     rel = release_plan(tmp_path, "dev", "10.17.99-dev.1", "--prs", "1052", "--prs-from-queue")
-    assert sv.QUEUE_PRS in rel.read_text()
-    real, seen = sv.run_batch, {}
+    assert plan.QUEUE_PRS in rel.read_text()
+    real, seen = queue.run_batch, {}
 
     def batch(plans, m, poll):
         if str(rel) in plans:  # 後続の配布は流さず、流す時の計画を読む
             seen.update({s["id"]: s for s in json.loads(rel.read_text())["steps"]})
             return [{"plan": p, "result": "完了"} for p in plans]
         return real(plans, m, poll)
-    monkeypatch.setattr(sv, "run_batch", batch)
+    monkeypatch.setattr(queue, "run_batch", batch)
     done = tmp_path / "done.json"
-    res = sv.cmd_queue(impl, 3, poll=0.1, then=[str(rel)], done=str(done))
+    res = queue.cmd_queue(impl, 3, poll=0.1, then=[str(rel)], done=str(done))
     assert res["status"] == "ok", res
     assert "--prs 1052 1101 1102" in seen["changelog"]["cmd"] and "--prs 1052 1101 1102" in seen["facts"]["cmd"]
-    assert json.loads(sv.queue_plans_path(done).read_text())["plans"] == [*impl, str(rel)]
+    assert json.loads(paths.queue_plans_path(done).read_text())["plans"] == [*impl, str(rel)]
 
 
 def test_queue_then_prs_from_queue_without_pr_is_not_run(tmp_path, monkeypatch):
     a = queue_plan(tmp_path, "a", "true")
     rel = release_plan(tmp_path, "dev", "10.17.99-dev.1", "--prs-from-queue")
-    res = sv.cmd_queue([a], 3, poll=0.1, then=[str(rel)])
+    res = queue.cmd_queue([a], 3, poll=0.1, then=[str(rel)])
     last = res["items"][-1]
-    assert last["result"] == sv.NOT_RUN and "Pull Request" in last["reason"]
+    assert last["result"] == queue.NOT_RUN and "Pull Request" in last["reason"]
 
 
 def test_new_release_requires_prs_or_from_queue(tmp_path):
@@ -1174,8 +1174,8 @@ def test_prod_release_ends_with_cleanup(tmp_path):
 
 def wait_setup(tmp_path, plans):
     done = tmp_path / "q" / "done.json"
-    sv.write_atomic(sv.queue_plans_path(done), json.dumps(
-        {"started": "t0", "plans": plans, "offsets": {p: sv.progress_size(p) for p in plans}}))
+    queue.write_text_atomic(paths.queue_plans_path(done), json.dumps(
+        {"started": "t0", "plans": plans, "offsets": {p: queue.progress_size(p) for p in plans}}))
     return done
 
 
@@ -1188,15 +1188,15 @@ def wait_cli(done, *args):
 
 def test_wait_returns_0_on_done(tmp_path):
     done = wait_setup(tmp_path, [])
-    sv.write_atomic(done, json.dumps({"tool": "supervise-queue", "status": "gate", "summary": "1 本: 関門 1"}))
+    queue.write_text_atomic(done, json.dumps({"tool": "supervise-queue", "status": "gate", "summary": "1 本: 関門 1"}))
     code, summary, res = wait_cli(done)
-    assert code == sv.WAIT_DONE == 0 and "関門 1" in summary
+    assert code == queue.WAIT_DONE == 0 and "関門 1" in summary
     assert res["metrics"]["event"] == "done" and res["metrics"]["queue_status"] == "gate"
 
 
 def test_wait_returns_20_on_attention_then_continues(tmp_path):
     plan = queue_plan(tmp_path, "a", "true")
-    prog = sv.state_dir_of(plan) / "progress.jsonl"
+    prog = paths.state_dir_of(plan) / "progress.jsonl"
     prog.parent.mkdir()
     prog.write_text(json.dumps({"kind": "attention", "step": "old", "text": "前の queue"}) + "\n")
     done = wait_setup(tmp_path, [plan])
@@ -1204,11 +1204,11 @@ def test_wait_returns_20_on_attention_then_continues(tmp_path):
         f.write(json.dumps({"kind": "step", "step": "t"}) + "\n")
         f.write(json.dumps({"kind": "attention", "step": "facts", "reason": "関門", "text": "提示物"}) + "\n")
     code, summary, res = wait_cli(done, "--timeout", "5")
-    assert code == sv.WAIT_ATTENTION == 20 and "facts" in summary
+    assert code == queue.WAIT_ATTENTION == 20 and "facts" in summary
     assert [i["step"] for i in res["items"]] == ["facts"]
     # 同じ行は 2 度知らせず、続きから待つ（ここでは上限まで）
     code, _, res = wait_cli(done, "--timeout", "0.2")
-    assert code == sv.WAIT_TIMEOUT == 3 and res["metrics"]["event"] == "timeout"
+    assert code == queue.WAIT_TIMEOUT == 3 and res["metrics"]["event"] == "timeout"
 
 
 def test_wait_returns_3_on_timeout_before_queue_starts(tmp_path):
@@ -1276,7 +1276,7 @@ def test_pr_body_has_user_changes_section(tmp_path, monkeypatch):
     plan = {"フェーズ": "実装", "課題": [1], "作業場所": str(root), "steps": [
         {"id": "pr", "type": "pr", "base": "develop", "body": "template", "title": "T",
          "changes": "計画を課題番号だけで作れる", "next": "end"}]}
-    assert "結果: 完了" in sv.Supervisor(plan, tmp_path / "state").run()
+    assert "結果: 完了" in engine.Engine(plan, tmp_path / "state").run()
     assert "## 利用者向けの変化\n\n- 計画を課題番号だけで作れる\n" in body.read_text()
 
 
@@ -1288,7 +1288,7 @@ def test_pr_body_from_llm_keeps_user_changes_section(tmp_path, monkeypatch):
     monkeypatch.setenv("NDF_SUPERVISE_CLAUDE", f"{PY} {fake}")
     plan = {"フェーズ": "実装", "課題": [1], "作業場所": str(root), "steps": [
         {"id": "pr", "type": "pr", "base": "develop", "title": "題名だけ", "next": "end"}]}
-    assert "結果: 完了" in sv.Supervisor(plan, tmp_path / "state").run()
+    assert "結果: 完了" in engine.Engine(plan, tmp_path / "state").run()
     got = body.read_text()
     assert "## 利用者向けの変化\n\n- 題名だけ" in got and "本文。" in got
 
@@ -1301,9 +1301,9 @@ def test_run_from_restores_pr_from_previous_report(tmp_path):
     plan = {"フェーズ": "試験", "課題": [731], "作業場所": str(tmp_path),
             "steps": [{"id": "a", "type": "run", "cmd": "false", "next": "b"},
                       {"id": "b", "type": "run", "cmd": "echo n={pr}", "next": "end"}]}
-    s = sv.Supervisor(plan, state)
+    s = engine.Engine(plan, state)
     assert "結果: 完了" in s.run(start="b")
-    assert "n=1066" in s.results["b"]["text"]
+    assert "n=1066" in s.state.results["b"]["text"]
 
 
 def test_new_check_without_scope_drives_over_the_pr_directories(tmp_path):
@@ -1348,7 +1348,7 @@ def test_steps_after_worktree_removal_run_in_repository(tmp_path):
     plan = {"フェーズ": "試験", "課題": [858], "作業場所": str(wt), "steps": [
         {"id": "merge", "type": "run", "cmd": f"rm -rf {wt}", "next": "record"},
         {"id": "record", "type": "run", "cmd": "pwd", "next": "end"}]}
-    s = sv.Supervisor(plan, tmp_path / "state")
+    s = engine.Engine(plan, tmp_path / "state")
     text = s.run()
     assert "結果: 完了" in text
     rec = [r for r in progress(s) if r.get("kind") == "step" and r["step"] == "record"]
@@ -1371,13 +1371,13 @@ def _gh_limit_rows(s):
 
 def test_judge_retry_waits_until_graphql_reset(tmp_path, seq, monkeypatch):
     seq[0](JUDGE_RETRY_T)
-    reset = int(sv.time.time()) + 300
+    reset = int(time.time()) + 300
     asked = []
 
     def runner(args, stdin=None, cwd=None):
         asked.append(args)
-        return sv.gh_parts.GhResult(0, str(reset), "")
-    monkeypatch.setattr(sv.gh_parts.gh_call, "RUNNER", runner)
+        return gh_call.GhResult(0, str(reset), "")
+    monkeypatch.setattr(gh_call, "RUNNER", runner)
     monkeypatch.chdir(tmp_path)
     s, text = run_plan(tmp_path, GH_RATE_STEP)
     assert "結果: 完了" in text, text
@@ -1388,7 +1388,7 @@ def test_judge_retry_waits_until_graphql_reset(tmp_path, seq, monkeypatch):
 
 def test_judge_retry_waits_doubling_from_60_when_reset_is_unknown(tmp_path, seq, monkeypatch):
     seq[0](JUDGE_RETRY_T, JUDGE_RETRY_T)
-    monkeypatch.setattr(sv.gh_parts.gh_call, "RUNNER", lambda args, stdin=None, cwd=None: sv.gh_parts.GhResult(1, "", "x"))
+    monkeypatch.setattr(gh_call, "RUNNER", lambda args, stdin=None, cwd=None: gh_call.GhResult(1, "", "x"))
     steps = [{**GH_RATE_STEP[0], "cmd": "echo 'GraphQL: API rate limit already exceeded' >&2; exit 1"},
              GH_RATE_STEP[1]]
     s, _ = run_plan(tmp_path, steps, 上限=5)
@@ -1397,7 +1397,7 @@ def test_judge_retry_waits_doubling_from_60_when_reset_is_unknown(tmp_path, seq,
 
 def test_judge_retry_without_rate_limit_does_not_wait(tmp_path, seq, monkeypatch):
     seq[0](JUDGE_RETRY_T)
-    monkeypatch.setattr(sv.gh_parts.gh_call, "RUNNER", lambda *a, **k: pytest.fail("上限でないのに rate_limit を読んだ"))
+    monkeypatch.setattr(gh_call, "RUNNER", lambda *a, **k: pytest.fail("上限でないのに rate_limit を読んだ"))
     steps = [{**GH_RATE_STEP[0], "cmd": "if [ -f done ]; then exit 0; fi; touch done; exit 1"}, GH_RATE_STEP[1]]
     monkeypatch.chdir(tmp_path)
     s, text = run_plan(tmp_path, steps)

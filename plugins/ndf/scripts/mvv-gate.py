@@ -28,8 +28,6 @@ PR の先頭のコミットの中身も足す）と MVV を最小構成の claud
 from __future__ import annotations
 
 import argparse
-import datetime
-import hashlib
 import json
 import os
 import shlex
@@ -39,8 +37,12 @@ import urllib.parse
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE / "lib"))
+sys.path.insert(0, str(HERE))
+from supervise_lib.paths import sha256_of  # noqa: E402  supervise_lib が lib/ を sys.path へ足す
 from step_result import EXIT_GATE, emit, result  # noqa: E402
+import clock  # noqa: E402
+import gh_call  # noqa: E402
+import gh_rest  # noqa: E402
 from pace import EXCLUDED_MODES, PaceError, matches, read_pace  # noqa: E402
 
 TOOL = "mvv-gate"
@@ -68,28 +70,23 @@ class Back(Exception):
     """関門へ戻す（利用者の承認を求める）理由。"""
 
 
-def now_iso() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
-
-
-def sha256_of(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
-def gh(args: list[str], repo: str | None, cwd: Path) -> str:
-    cmd = ["gh", *args] + (["--repo", repo] if repo else [])
-    try:
-        p = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd)
-    except FileNotFoundError:
+def gh_or_back(args: list[str], repo: str | None, cwd: Path) -> str:
+    """`gh` を 1 回呼び（`lib/gh_call.py`）、標準出力を返す。失敗は Back。"""
+    r = gh_call.gh([*args] + (["--repo", repo] if repo else []), cwd=str(cwd))
+    if r.returncode == 127:
         raise Back("gh が無い")
-    if p.returncode != 0:
-        raise Back(f"{' '.join(cmd)}: {p.stderr.strip()[:300]}")
-    return p.stdout
+    if r.returncode != 0:
+        raise Back(f"gh {' '.join(args)}: {r.stderr.strip()[:300]}")
+    return r.stdout
 
 
-def pr_info(n: int, repo: str | None, cwd: Path) -> dict:
+def pr_facts(n: int, repo: str | None, cwd: Path) -> dict:
+    """PR の題名・本文・変更したファイル・先頭のコミット（GraphQL が上限なら REST で読む）。取れなければ Back。"""
+    r = gh_rest.view_json("pr", n, "title,body,files,headRefOid", repo, cwd=str(cwd))
+    if r.returncode != 0:
+        raise Back("gh が無い" if r.returncode == 127 else f"gh pr view {n}: {r.stderr.strip()[:300]}")
     try:
-        return json.loads(gh(["pr", "view", str(n), "--json", "title,body,files,headRefOid"], repo, cwd))
+        return json.loads(r.stdout)
     except ValueError:
         raise Back(f"PR #{n} の出力を読めない")
 
@@ -114,7 +111,7 @@ def design_material(n: int, path: str, info: dict, repo: str | None, cwd: Path) 
         raise Back(f"PR #{n} の先頭のコミットが分からず、設計文書 {path} を読めない")
     endpoint = f"repos/{repo or '{owner}/{repo}'}/contents/{urllib.parse.quote(path)}?ref={ref}"
     try:
-        text = gh(["api", "-H", "Accept: application/vnd.github.raw", endpoint], None, cwd)
+        text = gh_or_back(["api", "-H", "Accept: application/vnd.github.raw", endpoint], None, cwd)
     except Back as e:
         raise Back(f"PR #{n} の設計文書 {path} を読めない: {e}")
     return f"## 設計文書 {path}（PR #{n}）\n\n{text}"
@@ -216,7 +213,7 @@ def write_note(path: str, a, record: dict) -> None:
 
 def cmd_check(a) -> tuple[dict, int | None]:
     root = Path(a.root or ".").resolve()
-    record = {"at": now_iso(), "gate": a.gate, "mission": a.mission, "material": list(a.material), "pr": a.pr,
+    record = {"at": clock.now_iso("utc"), "gate": a.gate, "mission": a.mission, "material": list(a.material), "pr": a.pr,
               "mode": a.mode or ""}
 
     def back(why: str, verdict: str, extra: dict | None = None, usage: dict | None = None):
@@ -231,7 +228,7 @@ def cmd_check(a) -> tuple[dict, int | None]:
         mvv_path = approved_mvv(state)
         if a.mode in EXCLUDED_MODES:
             raise Back(f"モード {a.mode} は関門を省かない")
-        infos = {n: pr_info(n, a.repo, root) for n in a.pr}
+        infos = {n: pr_facts(n, a.repo, root) for n in a.pr}
         hits = boundary_hits(root, infos)
         if hits:
             raise Back("越えない線のパスに当たる: " + " / ".join(hits))
