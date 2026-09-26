@@ -196,7 +196,7 @@ cross-review / cross-refactoring が参加者の CLI を選び、起動し、監
 | 参加者 | 参加者プールに --include の者を加え、--exclude の者を除いた一覧。認証確認の対象 | — | `docs/specifications/cross-review-participants-and-seats.md` |
 | 利用可能な参加者 | 参加者のうち認証確認を通った者（participants.available） | 使える者 | `docs/specifications/cross-review-participants-and-seats.md` |
 | 認証確認 | 確認コマンドを走らせ、止めずに結果だけを返す参加者ごとの確認（probe_auth） | 認証の確認 | `docs/specifications/cross-review-participants-and-seats.md` |
-| スロット | 1 ラウンドで 1 つの CLI プロセスが占める枠。1 ラウンドは 2 スロット | — | `docs/specifications/cross-review-participants-and-seats.md` |
+| スロット | 1 ラウンドで 1 つの CLI プロセスが占める枠 | — | `docs/specifications/cross-review-participants-and-seats.md` |
 | フォールバック | 利用可能な参加者が 2 者に満たないとき、足りない分を埋める参加者（participants.fallback） | 埋め合わせ | `docs/specifications/cross-review-participants-and-seats.md` |
 
 ## NDF の cross-review（`ndf-cross-review`）

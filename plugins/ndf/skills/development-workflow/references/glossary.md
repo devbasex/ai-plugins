@@ -100,7 +100,7 @@ flowchart TB
 | トリガー | `fast` でリファクタリングとコードレビューを流す条件。点数・行数・流出不具合・経過時間・最終の 5 つ | `check-trigger.py eval`（立つ 0 / 立たない 3 / 読めない 2）、`triggers.*` | [pace.md](pace.md) の「検査のトリガー」 |
 | 実行条件 | プランを流す前に打つコマンド。`skip_code` を返せば worktree を作らずに完了とする | プランの `"実行の条件"` | [supervise.py](../../../scripts/supervise.py) の docstring |
 | 流出不具合 | マージ済みの変更に見つかった不具合。直した Pull Request が触った領域を記録し、トリガーに数える | `new impl --escape-of <PR>`、記録の `kind: escape` | [pace.md](pace.md) の「流出不具合の記録」 |
-| 重点領域 | 領域のうち、触った Pull Request の点数を重くするもの | `areas[].common`、`common_weight` | [pace.md](pace.md) の「宣言」 |
+| 重点領域 | 領域のうち、触った Pull Request の点数を重くするもの | `areas[].common`、`common_weight` | [pace.md](pace.md) の「設定」 |
 | judge のステップ | 結果ファイルと規則の抜粋だけを渡し、次のステップを LLM に決めさせるステップ。Tool を持たない | `"type": "judge"` | [supervise.py](../../../scripts/supervise.py) の docstring |
 | 決定 | judge のステップが返す、次に取る手 | `decision`（`choices` のどれか） | [supervise.py](../../../scripts/supervise.py) の docstring |
 | 区分 | `issue-upkeep` が課題ごとに決める 8 つ（そのまま・追記が要る・書き直しが要る・閉じてよい・やらない・重複・ルートコーズ・要判断） | `plan.json` の `verdict` | [issue-upkeep](../../issue-upkeep/SKILL.md) の「用語」 |
