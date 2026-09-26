@@ -78,12 +78,14 @@
       "term": "用語集",
       "context": "project-glossary",
       "meaning": "ユビキタス言語を持つ構造化ファイル（正）と、そこから作る人が読む Markdown の文書。どちらもプロジェクトのリポジトリに置く",
+      "code": "glossary",
       "source": "docs/specifications/ndf-ubiquitous-language.md"
     },
     {
       "term": "コンテキスト",
       "context": "project-glossary",
       "meaning": "語の意味が 1 つに決まる範囲（境界づけられたコンテキスト）",
+      "code": "context",
       "source": "docs/specifications/ndf-ubiquitous-language.md"
     },
     {
@@ -96,6 +98,7 @@
       "term": "廃止した語",
       "context": "project-glossary",
       "meaning": "用語集で別の語へ置き換えた語。文書に出たら落とす",
+      "code": "deprecated",
       "source": "docs/specifications/ndf-ubiquitous-language.md"
     },
     {
@@ -108,6 +111,7 @@
       "term": "未登録の語",
       "context": "project-glossary",
       "meaning": "用語として書かれているのに用語集に無い語。見出しが「用語」の節の表の 1 列目に書いた語を指す",
+      "code": "unregistered",
       "source": "docs/specifications/ndf-ubiquitous-language.md"
     },
     {
@@ -116,6 +120,10 @@
       "meaning": "`.ndf/glossary.json`。用語集の置き場・形式・チェックの対象を持つ",
       "deprecated": [
         "用語集の宣言"
+      ],
+      "code": "glossary_config",
+      "deprecated_code": [
+        "declaration"
       ],
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
@@ -201,24 +209,28 @@
       "deprecated": [
         "チェイン"
       ],
+      "code": "pipeline",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
       "term": "セッション",
       "context": "ndf-workflow",
       "meaning": "ラッパーが起動する claude の 1 回の起動（1 つの会話）。番号を付けて「セッション 4」と呼ぶ",
+      "code": "session",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
       "term": "プラン",
       "context": "ndf-workflow",
       "meaning": "`supervise.py` が流す 1 本の JSON（`plan.json`）。フェーズの手順をステップの列として持つ",
+      "code": "plan",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
       "term": "キュー",
       "context": "ndf-workflow",
       "meaning": "プランを空いた枠へ順に流す `supervise.py queue`。終わると結果を done へ書く",
+      "code": "queue",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
@@ -286,6 +298,10 @@
       "deprecated": [
         "関門"
       ],
+      "code": "approval_gate",
+      "deprecated_code": [
+        "gate"
+      ],
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
@@ -310,6 +326,7 @@
       "term": "リリース",
       "context": "ndf-workflow",
       "meaning": "変更を利用者へ届く形で公開すること。その工程とフェーズの名前でもある",
+      "code": "release",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
@@ -409,6 +426,7 @@
       "deprecated": [
         "ラウンドのテスト"
       ],
+      "code": "round_test",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
@@ -446,6 +464,7 @@
       "deprecated": [
         "ミッションの状態"
       ],
+      "code": "mission_state",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
@@ -491,6 +510,7 @@
       "deprecated": [
         "途中の報告"
       ],
+      "code": "progress",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
@@ -509,6 +529,7 @@
       "deprecated": [
         "作業ツリー"
       ],
+      "code": "worktree",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
@@ -575,6 +596,7 @@
       "term": "最終ゲート",
       "context": "ndf-cross-refactoring",
       "meaning": "全体テストか CI で合否を判定する、cross-refactoring の最後の手順（final-gate）。承認ゲートとは別",
+      "code": "final_gate",
       "source": "docs/specifications/cross-refactoring-verify-and-final-gate.md"
     },
     {
@@ -590,6 +612,7 @@
       "term": "起動結果",
       "context": "ndf-agent-cli",
       "meaning": "担当 CLI の起動 1 回の終わり方。監視の状態と理由、結果ファイルの有無と読めるかを合わせて持つ（LaunchOutcome）",
+      "code": "launch_outcome",
       "source": "docs/specifications/cross-review-launch-outcome.md",
       "deprecated": [
         "結末"
@@ -701,6 +724,7 @@
       "term": "危険フラグ",
       "context": "ndf-workflow",
       "meaning": "cross-refactoring で、範囲テストでは覆えない変更（D1〜D5）。立てば全体テストを 1 度走らせる",
+      "code": "danger",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
@@ -716,6 +740,7 @@
       "term": "指摘",
       "context": "ndf-cross-review",
       "meaning": "担当が出した 1 件の主張（review_findings[] の 1 要素）",
+      "code": "finding",
       "source": "docs/specifications/cross-review-evidence-based.md"
     },
     {
@@ -764,12 +789,14 @@
       "term": "結果ファイル",
       "context": "ndf-agent-cli",
       "meaning": "担当 CLI が書く判定の要約の JSON（<stem>-result.json）",
+      "code": "result_file",
       "source": "docs/specifications/cross-review-launch-outcome.md"
     },
     {
       "term": "監視結果ファイル",
       "context": "ndf-agent-cli",
       "meaning": "監視が起動 1 回ごとに状態と理由を書く JSON（<stem>-monitor.json）",
+      "code": "monitor_outcome",
       "source": "docs/specifications/cross-review-launch-outcome.md",
       "deprecated": [
         "監視の結果ファイル"
@@ -788,12 +815,14 @@
       "term": "ランタイム",
       "context": "ndf-agent-cli",
       "meaning": "エージェントの CLI の種類。claude / codex / agy / kiro の 4 つで、並びは固定（ALL_RUNTIMES）",
+      "code": "runtime",
       "source": "docs/specifications/cross-review-participants-and-seats.md"
     },
     {
       "term": "ホスト",
       "context": "ndf-agent-cli",
       "meaning": "収束ループを起動している CLI のランタイム（host）",
+      "code": "host",
       "source": "docs/specifications/cross-review-participants-and-seats.md"
     },
     {
@@ -809,6 +838,7 @@
       "term": "参加者",
       "context": "ndf-agent-cli",
       "meaning": "参加者プールに --include の者を加え、--exclude の者を除いた一覧。認証確認の対象",
+      "code": "participant",
       "source": "docs/specifications/cross-review-participants-and-seats.md"
     },
     {
@@ -833,12 +863,14 @@
       "term": "スロット",
       "context": "ndf-agent-cli",
       "meaning": "1 ラウンドで 1 つの CLI プロセスが占める枠",
+      "code": "slot",
       "source": "docs/specifications/cross-review-participants-and-seats.md"
     },
     {
       "term": "フォールバック",
       "context": "ndf-agent-cli",
       "meaning": "利用可能な参加者が 2 者に満たないとき、足りない分を埋める参加者（participants.fallback）",
+      "code": "fallback",
       "source": "docs/specifications/cross-review-participants-and-seats.md",
       "deprecated": [
         "埋め合わせ"
@@ -869,6 +901,7 @@
       "term": "投稿キュー",
       "context": "ndf-cross-review",
       "meaning": "送る前に投稿を積み、上限で送れなければ残す仕組み（lib/post_queue.py）",
+      "code": "post_queue",
       "source": "docs/specifications/cross-review-writes-to-conductor.md",
       "deprecated": [
         "投稿の待ち行列"
@@ -893,6 +926,7 @@
       "term": "正本",
       "context": "ndf-workflow",
       "meaning": "その事柄の定義を持つ唯一の文書。食い違ったときはこれを正とする",
+      "code": "source",
       "source": "docs/specifications/doc-consistency-checks.md"
     },
     {
@@ -908,24 +942,28 @@
       "term": "conductor",
       "context": "ndf-workflow",
       "meaning": "人間と対話しているセッション。ミッションを持ち、承認ゲートで人間へ問えるのはこの層だけ",
+      "code": "conductor",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
       "term": "supervisor",
       "context": "ndf-workflow",
       "meaning": "1 つのフェーズを通すサブエージェント。人間へ問わない",
+      "code": "supervisor",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
       "term": "worker",
       "context": "ndf-workflow",
       "meaning": "1 つの作業（調査・修正・検証・集計）を行うサブエージェント。別のサブエージェントを起動しない",
+      "code": "worker",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
       "term": "フェーズ",
       "context": "ndf-workflow",
       "meaning": "supervisor 1 つ（またはプラン 1 本）が通す、連続する工程のグループ。設計・実装・検査・取り込み・仕上げ・リリースの 6 つ",
+      "code": "phase",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
@@ -995,6 +1033,7 @@
       "term": "ミッション",
       "context": "ndf-workflow",
       "meaning": "1 つの版として出す課題と Pull Request のセット。工程はミッション単位で 1 回ずつ通し、モードもミッションで 1 つにする",
+      "code": "mission",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
@@ -1076,6 +1115,7 @@
       "term": "バンドル",
       "context": "ndf-workflow",
       "meaning": "1 本の設計 Pull Request で決める課題の集合",
+      "code": "bundle",
       "source": "docs/specifications/ndf-execution-plan-and-parallel-capacity.md"
     },
     {
@@ -1236,6 +1276,7 @@
       "term": "状態ディレクトリ",
       "context": "ndf-relay",
       "meaning": "${XDG_STATE_HOME:-~/.local/state}/ndf/relay/。記録（rc-added など）と作業ディレクトリを持つ",
+      "code": "state_dir",
       "source": "docs/specifications/ndf-relay-install-and-restart.md",
       "deprecated": [
         "状態の親"
@@ -1278,6 +1319,7 @@
       "term": "ラッパー",
       "context": "ndf-workflow",
       "meaning": "利用者の claude を包んで常駐し、ndf-next のブロックを拾って /exit・プラグインの更新・次のセッションの起動を行う（Claude Code だけ）",
+      "code": "relay",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
@@ -1299,12 +1341,14 @@
       "term": "リリース種別",
       "context": "ndf-release",
       "meaning": "リリースの種類。production（本番リリース）/ verification（検証リリース）",
+      "code": "release_type",
       "source": "docs/specifications/ndf-release-steps-and-token-usage-snapshot.md"
     },
     {
       "term": "worktree レジストリ",
       "context": "ndf-worktree",
       "meaning": "割り当て・ポート・基準のタグ・公開の記録を持つ JSON（.git/ndf/worktree-registry.json）",
+      "code": "registry",
       "source": "docs/specifications/ndf-testenv-lock-and-registry.md"
     },
     {
@@ -1521,6 +1565,7 @@
       "term": "マイルストーン",
       "context": "ndf-workflow",
       "meaning": "着手の順序を表す単位。ミッションはこの中から切り出す",
+      "code": "milestone",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
@@ -1645,18 +1690,21 @@
       "term": "工程",
       "context": "ndf-workflow",
       "meaning": "工程表（モードごとに起動する Skill の表）の 1 行。要求と受け入れ条件・設計・実装・リリースなど",
+      "code": "stage",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
       "term": "ステップ",
       "context": "ndf-workflow",
       "meaning": "プランの steps の 1 要素。型は run / work / drive / judge / pr の 5 つ",
+      "code": "step",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
       "term": "ステージ",
       "context": "ndf-workflow",
       "meaning": "パイプラインの中のプランのグループ 1 つ。中はキューで並列に流し、前のステージがすべて完了したときだけ次のステージが流れる。new mission はステージごとにプランを書き出す（設計・ゲート 1・実装・検査・開発版・本番）",
+      "code": "pipeline_stage",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
@@ -1687,12 +1735,14 @@
       "term": "モード",
       "context": "ndf-workflow",
       "meaning": "変更の目的物で決める工程の振り分け。上から operation / documentation / standard / legacy-refactor / light",
+      "code": "mode",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
       "term": "pace",
       "context": "ndf-workflow",
       "meaning": "モードとは別の軸で、工程をどう通すかを決める。既定の normal と、承認ゲートと検査の時機を変える fast",
+      "code": "pace",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
@@ -1711,6 +1761,7 @@
       "term": "トリガー",
       "context": "ndf-workflow",
       "meaning": "fast でリファクタリングとコードレビューを流す条件。点数・行数・流出不具合・経過時間・最終の 5 つ",
+      "code": "trigger",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
@@ -1801,6 +1852,7 @@
       "term": "引継ぎ文書",
       "context": "ndf-workflow",
       "meaning": "会話を切って再開するための文書。「今の会話の進み」（プランごとの行の表）と「次に実行するコマンド」の節をスクリプトが書く",
+      "code": "handoff",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
@@ -1825,6 +1877,7 @@
       "term": "結果 JSON",
       "context": "ndf-workflow",
       "meaning": "手順のスクリプトが返す 1 行の JSON。status で読む",
+      "code": "step_result",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
