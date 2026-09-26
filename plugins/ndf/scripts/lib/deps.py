@@ -15,7 +15,8 @@
 
 1. 渡したグループのパッケージがすべて import できる → `NDF_DEPS_REEXEC` を環境から外して戻る（uv の環境の中で
    起動されたとき）。外すのは、子のプロセスが別のグループを要るときに起動し直せるようにするため
-2. 環境変数 `NDF_DEPS_REEXEC` がある → 起動し直したのに import できない。理由を出して終了コード 3
+2. 環境変数 `NDF_DEPS_REEXEC` が自分のスクリプトのパス → 起動し直したのに import できない。理由を出して終了コード 3。
+   印の値は起動し直したスクリプトのパスで、別のパス（印を外す前の版の親から継いだ `1` など）なら 3 へ進む
 3. uv が見つかる（`PATH`・`~/.local/bin`・`~/.cargo/bin`）→ `uv run --frozen --project <プラグインの根> --extra <グループ> ...
    python <パス> <引数>` で自分を起動し直す（`os.execve`）。環境は `UV_PROJECT_ENVIRONMENT` で
    `~/.cache/ndf/venv/<版>` に置く（`NDF_DEPS_VENV` で変えられる）。プラグインのキャッシュの中には作らない
@@ -133,7 +134,8 @@ def require(group: str, *more: str, project: Path | None = None) -> None:
         # 起動し直した印は子のプロセス（別のグループを要るエントリポイント）へ継がせない。継ぐと子は起動し直さずに止まる
         os.environ.pop(REEXEC_ENV, None)
         return
-    if os.environ.get(REEXEC_ENV):
+    script = str(Path(sys.argv[0]).resolve())
+    if os.environ.get(REEXEC_ENV) == script:
         mods = ", ".join(m for g in missing for m in GROUPS[g])
         _stop(f"uv の環境へ起動し直したが {' / '.join(missing)} のパッケージ（{mods}）を import できない。"
               f"{root / 'uv.lock'} に載っているかを見る")
@@ -146,6 +148,5 @@ def require(group: str, *more: str, project: Path | None = None) -> None:
     if not uv:
         _stop(f"uv を入れられない（ネットワークか権限が無い）。手で入れてから打ち直す: {INSTALL_HINT}")
     venv = venv_dir() if root == PLUGIN_ROOT else str(root / ".venv")
-    env = dict(os.environ, **{REEXEC_ENV: "1", "UV_PROJECT_ENVIRONMENT": venv})
-    script = str(Path(sys.argv[0]).resolve())
+    env = dict(os.environ, **{REEXEC_ENV: script, "UV_PROJECT_ENVIRONMENT": venv})
     os.execve(uv, reexec_argv(uv, groups, script, sys.argv[1:], root), env)
