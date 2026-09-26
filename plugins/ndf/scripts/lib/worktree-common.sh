@@ -556,13 +556,21 @@ _wt_tokenize() {
     # 見なければ `"` の中の `\"` を閉じ引用符と読み、残りをまるごと 1 語へ吸い
     # 込む（検知漏れ）。引用符の外では `\ ` を区切り、`\)` を部分シェルの終わり
     # と読む（語の取り違えと誤検知）。
+    # 語の頭の `~` は引用符かエスケープの中にあると展開されず、字面の名前になる
+    # （`"~/x"` は現在地の `~/x`）。語を出すと引用の有無が消えるため、`./` を
+    # 前へ足して現在地からの相対パスとして残す。
     if _wt_tok_consume_escape "$s" "$i" "$quote"; then
+      [ -z "$cur" ] && [ "${_WT_TOK_TEXT:0:1}" = "~" ] && cur="./"
       cur+="$_WT_TOK_TEXT"
       i=$((i + _WT_TOK_ADVANCE))
       continue
     fi
     if [ -n "$quote" ]; then
-      if [ "$c" = "$quote" ]; then quote=""; else cur+="$c"; fi
+      if [ "$c" = "$quote" ]; then quote=""
+      else
+        [ -z "$cur" ] && [ "$c" = "~" ] && cur="./"
+        cur+="$c"
+      fi
       continue
     fi
     case "$c" in

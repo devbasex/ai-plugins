@@ -111,6 +111,11 @@ def test_the_public_entry_point_keeps_its_output(
         pytest.param("cp a ~/.local/state/x.md", ["/home/u/.local/state/x.md"], 0, id="tilde_slash"),
         pytest.param("echo hi > ~", ["/home/u"], 0, id="tilde_alone"),
         pytest.param("echo hi > ~other/x.md", [], 1, id="tilde_user"),
+        # 引用符・エスケープの中の `~` は展開されず、現在地の下の名前になる。
+        pytest.param('cp a "~/.local/x"', ["/base/~/.local/x"], 0, id="tilde_double_quoted"),
+        pytest.param("cp a '~/.local/x'", ["/base/~/.local/x"], 0, id="tilde_single_quoted"),
+        pytest.param("cp a \\~/.local/x", ["/base/~/.local/x"], 0, id="tilde_escaped"),
+        pytest.param('echo hi > "~"', ["/base/~"], 0, id="tilde_alone_quoted"),
     ],
 )
 def test_a_leading_tilde_is_the_home_directory(
