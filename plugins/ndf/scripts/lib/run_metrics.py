@@ -42,6 +42,7 @@ from typing import Any, Callable, Mapping, Optional
 _LIB = pathlib.Path(__file__).resolve().parent
 if str(_LIB) not in sys.path:
     sys.path.insert(0, str(_LIB))
+import clock  # noqa: E402
 import monitor_outcome  # noqa: E402
 
 SCHEMA = 1
@@ -75,31 +76,16 @@ def _disabled(env: Mapping[str, str]) -> bool:
 
 # ---------------- 時刻 ----------------
 
-def _parse_time(value: Any) -> Optional[_dt.datetime]:
-    """ISO 8601 を読む。**タイムゾーンの無い時刻は書き出す機械の地方時として付ける。**
-
-    cross-refactoring の `statefile.now` はタイムゾーンを持たない。付けないまま比べると
-    タイムゾーン付きの監視の記録との引き算が `TypeError` になる。
-    """
-    if not isinstance(value, str) or not value.strip():
-        return None
-    try:
-        parsed = _dt.datetime.fromisoformat(value.strip())
-    except ValueError:
-        return None
-    return parsed.astimezone() if parsed.tzinfo is None else parsed
-
-
-def _iso(value: Any) -> Optional[str]:
-    parsed = _parse_time(value)
+def _iso_seconds(value: Any) -> Optional[str]:
+    """読めた時刻を、元のタイムゾーンのまま秒までで書き直す。読めなければ `None`。"""
+    parsed = clock.parse(value)
     return None if parsed is None else parsed.isoformat(timespec="seconds")
 
 
-def _seconds(start: Any, end: Any) -> Optional[int]:
-    s, e = _parse_time(start), _parse_time(end)
-    if s is None or e is None:
-        return None
-    return int(round((e - s).total_seconds()))
+def _whole_seconds(start: Any, end: Any) -> Optional[int]:
+    """2 つの時刻の差を整数の秒で。どちらかが読めなければ `None`。"""
+    seconds = clock.seconds_between(start, end)
+    return None if seconds is None else int(round(seconds))
 
 
 # ---------------- 要約の組み立て ----------------
@@ -134,7 +120,7 @@ def summary_path(state: dict, kind: str, base: Optional[pathlib.Path] = None) ->
     **開始時刻を名前に入れる。** 同じ番号で回し直した実行を別のファイルにし、同じ実行の
     保存では同じファイルを上書きする。
     """
-    started = _parse_time(state.get("started_at"))
+    started = clock.parse(state.get("started_at"))
     if started is None:
         raise ValueError("状態ファイルに started_at がありません")
     ident = run_id(state, kind)
@@ -151,32 +137,27 @@ def ended_at(state: dict) -> Optional[str]:
 
     途中の値を置くと、止まった実行が所要の分布へ混ざる。
     """
-    return _iso(state.get("ended_at")) if state.get("final") is not None else None
-
-
-def seconds_between(start: Any, end: Any) -> Optional[int]:
-    """2 つの時刻の差（秒）。どちらかが読めなければ `None`。"""
-    return _seconds(start, end)
+    return _iso_seconds(state.get("ended_at")) if state.get("final") is not None else None
 
 
 def round_spans(state: dict) -> list[dict]:
     """ラウンドの開始と終了。終了はそのラウンドの値、次のラウンドの開始、全体の終了の順。"""
-    return _rounds(state, ended_at(state))
+    return _round_rows(state, ended_at(state))
 
 
-def _rounds(state: dict, run_end: Optional[str]) -> list[dict]:
+def _round_rows(state: dict, run_end: Optional[str]) -> list[dict]:
     rounds = [r for r in state.get("rounds") or [] if isinstance(r, dict)]
     out: list[dict] = []
     for index, entry in enumerate(rounds):
-        end = _iso(entry.get("ended_at"))
+        end = _iso_seconds(entry.get("ended_at"))
         if end is None and index + 1 < len(rounds):
-            end = _iso(rounds[index + 1].get("started_at"))
+            end = _iso_seconds(rounds[index + 1].get("started_at"))
         if end is None and index + 1 == len(rounds):
             end = run_end
         row: dict[str, Any] = {"round": entry.get("round", index + 1)}
         if "kind" in entry:
             row["kind"] = entry.get("kind")
-        row["started_at"] = _iso(entry.get("started_at"))
+        row["started_at"] = _iso_seconds(entry.get("started_at"))
         row["ended_at"] = end
         out.append(row)
     return out
@@ -193,11 +174,11 @@ def _launches(state_path: pathlib.Path, state: dict, kind: str,
     （終わった実行は終了より後も）の行を数えると、前の実行の起動が混ざる。cross-review は
     stem が状態ファイルの番号で決まるため、番号の違う行も外す。
     """
-    start, end = _parse_time(started_at), _parse_time(run_end)
+    start, end = clock.parse(started_at), clock.parse(run_end)
     ident = run_id(state, kind)
     rows: list[dict] = []
     for row in monitor_outcome.read_journal(state_path.parent):
-        began = _parse_time(row.get("started_at"))
+        began = clock.parse(row.get("started_at"))
         if start is not None and (began is None or began < start):
             continue
         if end is not None and began is not None and began > end:
@@ -215,7 +196,7 @@ def build_summary(state_path: pathlib.Path, state: dict, kind: str,
     if kind not in KINDS:
         raise ValueError(f"要約の種類として知らない値です: {kind!r}")
     final = state.get("final")
-    started_at = _iso(state.get("started_at"))
+    started_at = _iso_seconds(state.get("started_at"))
     end = ended_at(state)
     launches = _launches(pathlib.Path(state_path), state, kind, started_at, end)
     summary: dict[str, Any] = {
@@ -227,10 +208,10 @@ def build_summary(state_path: pathlib.Path, state: dict, kind: str,
         "host": state.get("host"),
         "started_at": started_at,
         "ended_at": end,
-        "last_saved_at": monitor_outcome.now_iso(),
+        "last_saved_at": clock.now_iso(),
         "final": final,
-        "wall_clock_seconds": _seconds(started_at, end),
-        "rounds": _rounds(state, end),
+        "wall_clock_seconds": _whole_seconds(started_at, end),
+        "rounds": _round_rows(state, end),
         "launches": launches,
     }
     if extra is not None:
@@ -308,7 +289,7 @@ def _bound(value: Optional[str], *, upper: bool) -> Optional[_dt.datetime]:
     if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
         day = _dt.datetime.fromisoformat(value).astimezone()
         return day + _dt.timedelta(days=1) if upper else day
-    parsed = _parse_time(value)
+    parsed = clock.parse(value)
     if parsed is None:
         raise SystemExit(f"日付として読めません: {value}")
     return parsed
@@ -332,7 +313,7 @@ def _select(rows: list[dict], args: argparse.Namespace) -> list[dict]:
     equality_filters = (("repo", "repo"), ("kind", "kind"), ("version", "ndf_version"))
     out = []
     for row in rows:
-        started = _parse_time(row.get("started_at"))
+        started = clock.parse(row.get("started_at"))
         if not _within_time_bound(started, since, until, until_exclusive):
             continue
         if any(getattr(args, attr) and row.get(key) != getattr(args, attr)
@@ -352,14 +333,14 @@ def _quantile(sorted_values: list[float], q: float) -> float:
     return sorted_values[low] + (sorted_values[high] - sorted_values[low]) * (pos - low)
 
 
-def _minutes(row: dict) -> Optional[float]:
+def _wall_minutes(row: dict) -> Optional[float]:
     seconds = row.get("wall_clock_seconds")
     if row.get("final") is None or not isinstance(seconds, (int, float)):
         return None
     return seconds / 60
 
 
-def _fmt(value: float) -> str:
+def _one_decimal(value: float) -> str:
     return f"{value:.1f}"
 
 
@@ -373,11 +354,11 @@ def _table(header: list[str], rows: list[list[str]]) -> str:
 def _finished_rows(rows: list[dict]) -> list[list[str]]:
     out: list[list[str]] = []
     for kind in KINDS:
-        minutes = sorted(m for r in rows if r.get("kind") == kind and (m := _minutes(r)) is not None)
+        minutes = sorted(m for r in rows if r.get("kind") == kind and (m := _wall_minutes(r)) is not None)
         if minutes:
-            out.append([kind, str(len(minutes)), _fmt(_quantile(minutes, 0.5)),
-                        _fmt(_quantile(minutes, 0.75)), _fmt(_quantile(minutes, 0.9)),
-                        _fmt(minutes[-1]), _fmt(sum(minutes))])
+            out.append([kind, str(len(minutes)), _one_decimal(_quantile(minutes, 0.5)),
+                        _one_decimal(_quantile(minutes, 0.75)), _one_decimal(_quantile(minutes, 0.9)),
+                        _one_decimal(minutes[-1]), _one_decimal(sum(minutes))])
     return out
 
 
@@ -408,13 +389,13 @@ def _round_count_bucket(count: int) -> Optional[str]:
 def _by_round_count(rows: list[dict]) -> str:
     buckets: dict[str, list[float]] = {"1": [], "2": [], "3 以上": []}
     for row in rows:
-        minutes = _minutes(row)
+        minutes = _wall_minutes(row)
         if row.get("kind") != "cross-review" or minutes is None:
             continue
         key = _round_count_bucket(len(row.get("rounds") or []))
         if key is not None:
             buckets[key].append(minutes)
-    table = [[k, str(len(v)), _fmt(_quantile(sorted(v), 0.5))] for k, v in buckets.items() if v]
+    table = [[k, str(len(v)), _one_decimal(_quantile(sorted(v), 0.5))] for k, v in buckets.items() if v]
     return _table(["ラウンド数", "件数", "中央値（分）"], table)
 
 
@@ -433,7 +414,7 @@ def _by_reason(rows: list[dict]) -> str:
 _BY = {"total": _by_total, "round-count": _by_round_count, "reason": _by_reason}
 
 
-def aggregate(base: pathlib.Path, args: argparse.Namespace) -> str:
+def aggregate_table(base: pathlib.Path, args: argparse.Namespace) -> str:
     rows, broken = _load_summaries(base)
     text = _BY[args.by](_select(rows, args))
     if broken:
@@ -458,7 +439,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Optional[list[str]] = None) -> None:
     args = build_parser().parse_args(argv)
     base = pathlib.Path(args.dir) if args.dir else metrics_dir()
-    print(aggregate(base, args))
+    print(aggregate_table(base, args))
 
 
 if __name__ == "__main__":

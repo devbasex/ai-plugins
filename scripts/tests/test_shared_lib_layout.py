@@ -215,8 +215,8 @@ def test_the_monitor_shim_exposes_the_implementation_namespace() -> None:
         spec.loader.exec_module(mod)
         assert mod._IMPL == LIB / "monitor.py"
         assert callable(mod.monitor_agent)
-        assert mod.monitor_agent.__globals__ is mod.__dict__
-        assert mod.monitor_agent.__globals__["_pid_alive"] is mod._pid_alive
+        assert mod._run_all.__globals__ is mod.__dict__
+        assert mod._run_all.__globals__["_pid_alive"] is mod._pid_alive
     finally:
         sys.modules.pop(name, None)
 

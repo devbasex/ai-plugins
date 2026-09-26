@@ -23,7 +23,7 @@ from unittest import mock
 
 def test_default_stem_keeps_cross_review_naming(monitor_mod, tmp_path):
     """既定の骨格は現行の `<agent>-review-pr<PR>` のままであること。"""
-    with mock.patch.object(monitor_mod, "_tmp_dir", return_value=tmp_path):
+    with mock.patch.object(monitor_mod.monitor_types, "_tmp_dir", return_value=tmp_path):
         paths = monitor_mod.AgentPaths.for_("codex", 42)
     assert paths.pidfile == tmp_path / "codex-review-pr42.pid"
     assert paths.result == tmp_path / "codex-review-pr42-result.json"
@@ -31,7 +31,7 @@ def test_default_stem_keeps_cross_review_naming(monitor_mod, tmp_path):
 
 def test_stem_template_overrides_naming(monitor_mod, tmp_path):
     """`{agent}` と `{id}` を埋めた任意の骨格を使えること。"""
-    with mock.patch.object(monitor_mod, "_tmp_dir", return_value=tmp_path):
+    with mock.patch.object(monitor_mod.monitor_types, "_tmp_dir", return_value=tmp_path):
         paths = monitor_mod.AgentPaths.for_(
             "kiro", 130, "{agent}-propose-rf{id}"
         )
@@ -52,8 +52,8 @@ def test_monitor_agent_uses_stem_template(monitor_mod, tmp_path):
         json.dumps({"items": []}), encoding="utf-8"
     )
     with (
-        mock.patch.object(monitor_mod, "_tmp_dir", return_value=tmp_path),
-        mock.patch.object(monitor_mod, "_pid_alive", return_value=False),
+        mock.patch.object(monitor_mod.monitor_types, "_tmp_dir", return_value=tmp_path),
+        mock.patch.object(monitor_mod.monitor_proc, "_pid_alive", return_value=False),
     ):
         config = monitor_mod.MonitorConfig(
             timeout=420, stall_timeout=900, poll=1,
@@ -73,7 +73,7 @@ def test_tmp_dir_honors_cross_refactoring_env(monitor_mod, tmp_path, monkeypatch
     """`CROSS_REFACTORING_TMP_DIR` も一時ディレクトリとして受け付けること。"""
     monkeypatch.delenv("CROSS_REVIEW_TMP_DIR", raising=False)
     monkeypatch.setenv("CROSS_REFACTORING_TMP_DIR", str(tmp_path / "rf"))
-    monkeypatch.setattr(monitor_mod, "_TMP_DIR_OVERRIDE", None, raising=False)
+    monkeypatch.setattr(monitor_mod.monitor_types, "_TMP_DIR_OVERRIDE", None, raising=False)
     assert monitor_mod._tmp_dir() == (tmp_path / "rf").resolve()
 
 
@@ -83,7 +83,7 @@ def test_cross_review_env_wins_over_cross_refactoring(
     """両方あるときは cross-review 側を優先し、既存挙動を変えないこと。"""
     monkeypatch.setenv("CROSS_REVIEW_TMP_DIR", str(tmp_path / "cr"))
     monkeypatch.setenv("CROSS_REFACTORING_TMP_DIR", str(tmp_path / "rf"))
-    monkeypatch.setattr(monitor_mod, "_TMP_DIR_OVERRIDE", None, raising=False)
+    monkeypatch.setattr(monitor_mod.monitor_types, "_TMP_DIR_OVERRIDE", None, raising=False)
     assert monitor_mod._tmp_dir() == (tmp_path / "cr").resolve()
 
 
@@ -91,13 +91,13 @@ def test_tmp_dir_override_wins_over_env(monitor_mod, tmp_path, monkeypatch):
     """`--tmp-dir` 相当の明示指定が env より優先されること。"""
     monkeypatch.setenv("CROSS_REVIEW_TMP_DIR", str(tmp_path / "cr"))
     monkeypatch.setattr(
-        monitor_mod, "_TMP_DIR_OVERRIDE", (tmp_path / "explicit").resolve(),
+        monitor_mod.monitor_types, "_TMP_DIR_OVERRIDE", (tmp_path / "explicit").resolve(),
         raising=False,
     )
     try:
         assert monitor_mod._tmp_dir() == (tmp_path / "explicit").resolve()
     finally:
-        monkeypatch.setattr(monitor_mod, "_TMP_DIR_OVERRIDE", None, raising=False)
+        monkeypatch.setattr(monitor_mod.monitor_types, "_TMP_DIR_OVERRIDE", None, raising=False)
 
 
 # ---------- 3. ANSI エスケープの除去 ----------
@@ -210,7 +210,7 @@ def test_shim_exposes_implementation_namespace():
         assert callable(mod.monitor_agent)
         # 実体側で定義された関数の名前解決先がシムの名前空間であること。
         # そうでないと既存テストの `mock.patch.object(monitor_mod, ...)` が届かない。
-        assert mod.monitor_agent.__globals__ is mod.__dict__
-        assert mod.monitor_agent.__globals__["_pid_alive"] is mod._pid_alive
+        assert mod._run_all.__globals__ is mod.__dict__
+        assert mod._run_all.__globals__["_pid_alive"] is mod._pid_alive
     finally:
         sys.modules.pop(name, None)

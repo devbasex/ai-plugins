@@ -23,6 +23,7 @@ import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import proc  # noqa: E402  子プロセスの起動（#1142 の L0）
 import wait_notice as wn  # noqa: E402
 
 RUNTIMES = ("claude", "codex", "kiro")
@@ -301,21 +302,22 @@ def run_hook(runtime: str) -> None:
 # 子: 本文の組み立てと送信
 # ---------------------------------------------------------------------------
 
-def _run(cmd: list[str], cwd: str, timeout: float) -> str | None:
+def _stdout_of(cmd: list[str], cwd: str, timeout: float) -> str | None:
+    """`cmd` の標準出力（前後の空白を落とす）。失敗・起動できない・時間切れは `None`。"""
     try:
-        r = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout)
+        r = proc.run(cmd, cwd=cwd, check=False, timeout=timeout)
     except (OSError, subprocess.SubprocessError):
         return None
     return r.stdout.strip() if r.returncode == 0 else None
 
 
 def repo_name(cwd: str) -> str:
-    top = _run(["git", "rev-parse", "--show-toplevel"], cwd, GH_TIMEOUT)
+    top = _stdout_of(["git", "rev-parse", "--show-toplevel"], cwd, GH_TIMEOUT)
     return os.path.basename(top) if top else (os.environ.get("GIT_REPO") or "unknown")
 
 
 def current_pr(cwd: str) -> str | None:
-    out = _run(["gh", "pr", "view", "--json", "url", "--jq", ".url"], cwd, GH_TIMEOUT)
+    out = _stdout_of(["gh", "pr", "view", "--json", "url", "--jq", ".url"], cwd, GH_TIMEOUT)
     return out if out and out.startswith("http") else None
 
 
@@ -341,7 +343,7 @@ def build_notice(payload: dict) -> wn.Notice:
     runtime, kind, cwd = payload["runtime"], payload["kind"], payload["cwd"]
     wait = wn.Wait(kind, payload.get("excerpt", ""), payload.get("key", ""))
     locator = wn.build_locator(runtime, payload.get("hook_input") or {}, dict(os.environ), socket.gethostname(), cwd)
-    slug = wn.github_slug(_run(["git", "remote", "get-url", "origin"], cwd, GH_TIMEOUT) or "")
+    slug = wn.github_slug(_stdout_of(["git", "remote", "get-url", "origin"], cwd, GH_TIMEOUT) or "")
     redmine = os.environ.get("REDMINE_URL") or None
     text = payload.get("search", "")
     urls = wn.extract_urls(kind, text, slug, redmine)
@@ -352,7 +354,7 @@ def build_notice(payload: dict) -> wn.Notice:
     return wn.Notice(wait, locator, repo_name(cwd), tuple(urls))
 
 
-def send(payload: dict) -> None:
+def send_notice(payload: dict) -> None:
     notice = build_notice(payload)
     clean = notice.text()
     if clean is None:
@@ -375,7 +377,7 @@ def send(payload: dict) -> None:
 def main(argv: list[str]) -> int:
     try:
         if len(argv) >= 2 and argv[0] == "--send":
-            send(json.loads(argv[1]))
+            send_notice(json.loads(argv[1]))
         elif len(argv) >= 2 and argv[0] == "--runtime" and argv[1] in RUNTIMES:
             run_hook(argv[1])
         else:

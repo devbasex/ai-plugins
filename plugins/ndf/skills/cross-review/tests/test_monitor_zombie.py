@@ -84,7 +84,7 @@ def test_is_zombie_helper(monitor_mod):
 def test_kill_pid_skips_zombie(monitor_mod):
     """ゾンビプロセスに対して _kill_pid() はシグナルを送らない。"""
     with (
-        mock.patch.object(monitor_mod, "_is_zombie", return_value=True),
+        mock.patch.object(monitor_mod.monitor_proc, "_is_zombie", return_value=True),
         mock.patch("os.kill") as mock_kill,
     ):
         monitor_mod._kill_pid(12345)

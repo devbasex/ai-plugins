@@ -34,6 +34,16 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
+_LIB = pathlib.Path(__file__).resolve().parent
+if str(_LIB) not in sys.path:
+    sys.path.insert(0, str(_LIB))
+import clock  # noqa: E402  時刻の読み取り（#1142 の L0）
+
+
+def _parse_utc(value) -> datetime | None:
+    """ISO 8601 を読む。タイムゾーンの無い時刻は UTC として付ける（記録の `timestamp` は UTC で書かれる）。"""
+    return clock.parse(value, naive="utc")
+
 # ---------- 語彙（契約の文書の「語彙」の表） ----------
 
 LAYERS = ("conductor", "supervisor", "worker")
@@ -241,19 +251,6 @@ def _input_total(row: dict) -> int | None:
     return total
 
 
-def _parse_time(value) -> datetime | None:
-    if not isinstance(value, str) or not value:
-        return None
-    text = value.replace("Z", "+00:00")
-    try:
-        parsed = datetime.fromisoformat(text)
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed
-
-
 def _error_status(row: dict) -> str | None:
     """API の失敗を表す合成の応答の種別（`429` など）を返す。"""
     status = row.get("apiErrorStatus")
@@ -358,7 +355,7 @@ def _count_interruptions(rows: list[dict]) -> int:
 
 def _calculate_duration(rows: list[dict]) -> tuple[str | None, str | None, int]:
     """タイムスタンプ走査で開始/終了時刻と所要時間（秒）を返す。"""
-    times = [t for t in (_parse_time(row.get("timestamp")) for row in rows) if t]
+    times = [t for t in (_parse_utc(row.get("timestamp")) for row in rows) if t]
     if not times:
         return None, None, 0
     return times[0].isoformat(), times[-1].isoformat(), int(
@@ -390,7 +387,7 @@ def _fill_rate_limit(rows: list[dict], record: AgentRecord) -> None:
         break
 
 
-def read_file(path: pathlib.Path, meta: dict | None = None) -> tuple[AgentRecord, int]:
+def read_agent_record(path: pathlib.Path, meta: dict | None = None) -> tuple[AgentRecord, int]:
     """記録 1 件を読む。返すのは `AgentRecord` と飛ばした行の数である。"""
     meta = meta or {}
     rows, skipped = _iter_lines(path)
@@ -448,13 +445,13 @@ def read_session(
     skipped = no_meta = 0
 
     if conductor_path is not None:
-        record, n = read_file(conductor_path, {"spawnDepth": 0})
+        record, n = read_agent_record(conductor_path, {"spawnDepth": 0})
         record.session = session
         skipped += n
         records.append(record)
     for path in sub_paths:
         meta = read_meta(path)
-        record, n = read_file(path, meta)
+        record, n = read_agent_record(path, meta)
         record.session = session
         skipped += n
         no_meta += record.layer == OTHER
@@ -537,7 +534,7 @@ def parse_now(value: str | None = None) -> datetime:
     """`--now` の値を読む。省いたときは現在時刻（UTC）を返す。"""
     if not value:
         return datetime.now(timezone.utc)
-    parsed = _parse_time(value)
+    parsed = _parse_utc(value)
     if parsed is None:
         raise ValueError(f"時刻として読めない: {value}")
     return parsed
@@ -549,7 +546,7 @@ def resets_passed(record: AgentRecord, now: datetime | None = None) -> bool:
     **解除時刻を持たない上限の中断は真にする。** 待つ先が無いまま止まるのを避けるため
     である。記録から取れないだけで、上限そのものは解けているかもしれない。
     """
-    reset = _parse_time(record.resets_at)
+    reset = _parse_utc(record.resets_at)
     if reset is None:
         return True
     return reset <= (now or datetime.now(timezone.utc))
@@ -637,7 +634,7 @@ def wait_reset(
         )
 
     futures = [
-        t for t in (_parse_time(r.resets_at) for r in pick()) if t and t > now
+        t for t in (_parse_utc(r.resets_at) for r in pick()) if t and t > now
     ]
     slept = 0
     cut = False
