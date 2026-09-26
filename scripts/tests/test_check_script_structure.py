@@ -1,4 +1,4 @@
-"""構造チェック（`scripts/check-script-structure.py`）の振る舞いを固定する（#1142 の I4・I5）。
+"""構造チェック（`scripts/check-script-structure.py`）の振る舞いを固定する（#1142 の I4・I5・I14）。
 
 一時ディレクトリへ作った `plugins/ndf/` の木に対して打つ。実物の木は、例外リストと合っているかだけを見る。
 """
@@ -243,3 +243,45 @@ def test_claude_p_usage_takes_paths_as_arguments():
     assert p.returncode == 0, p.stderr
     for opt in ("--repo", "--sv-root", "--projects", "--out"):
         assert opt in p.stdout
+
+
+# --- I14: 包みが受け持つ部品を、包みの外で使わない（決定 19） ---------------------------------
+
+def test_wrapped_parts_outside_their_wrapper_fail(tmp_path: Path):
+    put(tmp_path, "scripts/a.py", "import fcntl\nfrom urllib import request\n")
+    put(tmp_path, "scripts/b.py", "import os\nP = f'/proc/{os.getpid()}/stat'\n")
+    put(tmp_path, "scripts/c.py", "import re\nF = re.compile(r'^\\s*(```|~~~)')\n")
+    put(tmp_path, "scripts/d.py", "def f(s):\n    return s.startswith(('```', '~~~'))\n")
+    put(tmp_path, "scripts/e.py", "import termios\nimport pty\nfrom urllib.request import urlopen\n")
+    code, r = run(tmp_path, [])
+    assert code == 1
+    assert kinds(r) == {
+        ("wrapped", "plugins/ndf/scripts/a.py:fcntl"), ("wrapped", "plugins/ndf/scripts/a.py:urllib.request"),
+        ("wrapped", "plugins/ndf/scripts/b.py:proc-fs"), ("wrapped", "plugins/ndf/scripts/c.py:fence-regex"),
+        ("wrapped", "plugins/ndf/scripts/d.py:fence-regex"), ("wrapped", "plugins/ndf/scripts/e.py:termios"),
+        ("wrapped", "plugins/ndf/scripts/e.py:pty"), ("wrapped", "plugins/ndf/scripts/e.py:urllib.request"),
+    }
+
+
+def test_wrappers_may_use_their_parts_and_mentions_do_not_count(tmp_path: Path):
+    put(tmp_path, "scripts/lib/locks.py", "import fcntl\n")
+    put(tmp_path, "scripts/lib/procs.py", "P = '/proc/self/cgroup'\n")
+    put(tmp_path, "scripts/lib/md.py", "import re\nF = re.compile('```')\n")
+    put(tmp_path, "scripts/lib/notify.py", "import urllib.request\n")
+    put(tmp_path, "scripts/relay_lib/terminal.py", "import pty\nimport termios\n")
+    # docstring の言及・囲みを書く側の文字列・urllib.parse は数えない
+    put(tmp_path, "scripts/a.py", '"""/proc/ は procs が読む。"""\nimport urllib.parse\n'
+                                  'def f(b):\n    """```text の囲みを書く。"""\n    return f"```text\\n{b}\\n```"\n')
+    code, r = run(tmp_path, [])
+    assert code == 0, r["items"]
+
+
+def test_wrapped_part_can_be_allowed_per_file_and_part(tmp_path: Path):
+    put(tmp_path, "scripts/a.py", "import fcntl\n")
+    row = {"path": "plugins/ndf/scripts/a.py", "name": "fcntl", "kind": "wrapped", "reason": "D3 が置き換えたら消す"}
+    assert structure.allow_file_name(row) == "plugins__ndf__scripts__a.py--fcntl--wrapped.json"
+    code, r = run(tmp_path, [row])
+    assert code == 0 and r["metrics"]["allowed"] == 1
+    put(tmp_path, "scripts/a.py", "import os\n")
+    code, r = run(tmp_path, [row])
+    assert code == 1 and kinds(r) == {("unused-allow", "plugins/ndf/scripts/a.py:fcntl")}

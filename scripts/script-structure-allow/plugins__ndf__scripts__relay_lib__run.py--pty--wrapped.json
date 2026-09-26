@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/relay_lib/run.py", "name": "pty", "kind": "wrapped", "reason": "L1 の時点の使用。D6 が relay_lib/terminal.py（ptyprocess） の上へ置き換えたら消す"}

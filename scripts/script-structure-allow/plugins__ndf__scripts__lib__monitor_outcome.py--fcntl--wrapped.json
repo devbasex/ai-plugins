@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/lib/monitor_outcome.py", "name": "fcntl", "kind": "wrapped", "reason": "L1 の時点の使用。D3 が lib/locks.py（filelock） の上へ置き換えたら消す"}
