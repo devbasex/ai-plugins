@@ -31,7 +31,7 @@ cross-refactoring の実装担当は、ライブラリの `choose_implementer` �
 | --- | --- | --- |
 | ランタイム | `ALL_RUNTIMES` | `claude` / `codex` / `agy` / `kiro` の 4 つ。並びは固定 |
 | ホスト | `host` | 収束ループを起動している CLI |
-| 参加者プール | `review_pool(host)` / `refactor_pool(host)` | Skill ごとに決まる参加者の出発点。cross-review は claude / codex / kiro とホスト（#786。agy は `--include agy` で戻す。ホストが agy なら 4 者） |
+| 参加者プール | `default_pool(host)` | 参加者の出発点。cross-review と cross-refactoring で共通の claude / codex / kiro とホスト（agy は `--include agy` で戻す。ホストが agy なら 4 者） |
 | 参加者 | — | 参加者プールに足す者を加え、外す者を除いた一覧。認証確認の対象 |
 | 利用可能な参加者 | `participants.available` | 参加者のうち認証確認を通った者 |
 | 認証確認 | `probe_auth` | 確認コマンドを走らせ、止めずに結果だけを返すライブラリの関数 |
@@ -132,7 +132,7 @@ cross-refactoring の実装担当は、ライブラリの `choose_implementer` �
 
 | 要素 | 責務 | 置き場所 |
 | --- | --- | --- |
-| 参加者プールの既定 | Skill ごとの出発点を返す | `lib/assignment.py` の `review_pool` / `refactor_pool` |
+| 参加者プールの既定 | 2 つの Skill で共通の出発点を返す | `lib/assignment.py` の `default_pool` |
 | 利用可能な参加者の解決 | 参加者プール・ホスト・足す者・外す者・1 者指定・確認・全員を要するかから、参加者の記録を返す。名前の矛盾と欠けを例外で返す | 同 `resolve_participants` |
 | 認証確認 | 確認コマンドを走らせ、止めずに担当ごとの結果を返す | `lib/auth.py` の `probe_auth` |
 | スロットの埋め方 | 利用可能な参加者とフォールバックから 2 スロットを返す。規則の表はこの関数の docstring が正 | `lib/assignment.py` の `review_seats` |
@@ -419,7 +419,7 @@ graph TD
 | 利用可能な参加者の解決が、通らない者を外して続け、外した者へ確認を呼ばず、名前の矛盾と欠けを例外にすること | `plugins/ndf/scripts/tests/test_lib_participants.py` |
 | 認証確認が失敗で例外を上げず、理由を返すこと。起動できない 2 形（読めないディレクトリを含む検索のパス・実行形式でないファイル）でも理由を返すこと | 同 `test_auth_probe.py` |
 | 2 つの開始の手順が、読めないディレクトリを含む検索のパスで、欠けた者を外して始まること | `plugins/ndf/skills/cross-review/tests/test_state_review_pool.py` / `plugins/ndf/skills/cross-refactoring/tests/test_init.py` |
-| スロットの埋め方が 3 者で輪番の値と一致し、2 / 1 / 0 者で規則どおりに埋めること。スロット名の形。cross-review の参加者プールの既定が、4 つのホストのどれでも claude / codex / kiro とホストであること（ホストが agy なら 4 者。`test_review_pool_is_the_default_three_and_the_host`） | `plugins/ndf/skills/cross-refactoring/tests/test_assignment.py` |
+| スロットの埋め方が 3 者で輪番の値と一致し、2 / 1 / 0 者で規則どおりに埋めること。スロット名の形。cross-review の参加者プールの既定が、4 つのホストのどれでも claude / codex / kiro とホストであること（ホストが agy なら 4 者。`test_default_pool_is_the_default_three_and_the_host`） | `plugins/ndf/skills/cross-refactoring/tests/test_assignment.py` |
 | ホストが claude で agy を外すと利用可能な参加者が 3 者になり、ラウンド 1〜3 で 3 通りの組を 1 度ずつ取ること。4 つのホストのどれでも初期化の出力の参加者プールにホストが入ること。ホストを外す指定が通ること | `plugins/ndf/skills/cross-review/tests/test_state_review_pool.py` |
 | 利用可能な参加者が 1 者ならフォールバックが空で同じランタイムの 2 つ目がスロットを埋め、0 者なら終了コード 1 で終わり、どちらでもホストを別に確かめないこと | 同 |
 | #892 の前に作った状態ファイル（参加者の記録を持つもの、ホストだけを持つもの）の再開で、スロットが変更の前と同じであること。後者は 4 つのホスト × ラウンド 1〜12 で固定する | 同 |

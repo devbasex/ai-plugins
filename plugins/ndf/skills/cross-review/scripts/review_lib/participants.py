@@ -123,8 +123,8 @@ def _round_reviewers(st: dict[str, Any], round_no: int) -> list[str]:
         )
     host = st.get("host")
     if host:
-        # **`review_pool(host)` を呼ばない。** #892 で母集合がホストを含む形へ変わったため、
-        # 変更の前に始めた実行の担当を保つには、変更の前の母集合を式で持つほかにない。
+        # **`default_pool(host)` を呼ばない。** `host` だけを持つ状態ファイルの担当は、
+        # ホストを除く全ランタイムから選んでいた。その担当を保つため、この母集合を式で持つ。
         return assignment.review_seats(
             max(round_no, 1), [r for r in assignment.ALL_RUNTIMES if r != host], [])
     return list(LEGACY_AGENTS)
@@ -171,7 +171,7 @@ def _normalize_participant_args(
 def _resolve_reviewers(host: str, args: argparse.Namespace) -> dict[str, Any]:
     """使える者を決め、状態ファイルの `participants`（`fallback` を含む 9 項目）を返す。
 
-    母集合は `review_pool(host)`（claude / codex / kiro とホスト、#786）。母集合に無い者の
+    母集合は `default_pool(host)`（claude / codex / kiro とホスト）。母集合に無い者の
     除外は止めずに無視し、`ℹ` の 1 行を出す（決定 2）。確認は止めない確認
     （`auth.probe_auth`）で、通らない者は外して続ける。**ホストを別に確かめて埋め合わせに
     使うことはしない**（ホストは既に母集合で確かめている）。`fallback` は常に空で、使える者が
@@ -182,7 +182,7 @@ def _resolve_reviewers(host: str, args: argparse.Namespace) -> dict[str, Any]:
     only, include, exclude = _normalize_participant_args(args)
     probe = functools.partial(auth.probe_auth, info=review_lib.info)
     try:
-        pool = assignment.review_pool(host)
+        pool = assignment.default_pool(host)
         resolved = assignment.resolve_participants(
             pool, host=host, include=include or [], exclude=exclude or [], only=only,
             probe=probe, require_all=bool(getattr(args, "require_all", None)),
