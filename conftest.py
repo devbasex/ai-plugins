@@ -9,7 +9,9 @@
 3. テストの実行中だけ git の全体設定と system の設定を空へ向ける。身元を用意していない
    テストは、実行した人の設定に関わらずその場で落ちる
 4. テストの実行中だけ実行の要約の置き場所（`NDF_METRICS_DIR`）を一時ディレクトリへ向ける。
-   状態を保存するテストが、実行した人の状態ディレクトリへ要約を書かない（#662 の AC72）
+   状態を保存するテストが、実行した人の状態ディレクトリへ要約を書かない（#662 の AC72）。
+   使用量の帳簿（`NDF_USAGE_DIR`）とプランの状態の実体（`NDF_SV_STATE_DIR`）は、テストごとに
+   別の一時ディレクトリへ向ける。帳簿を読むテストが、ほかのテストの書いた行を読まない（#1142）
 5. テストの実行中だけ監視の上限を指す環境変数（接頭辞 `MONITOR_`）を外す。上限を延ばした
    シェルから起動しても、既定値を前提にするテストが同じ結果になる（#678）
 6. `SHARD_TOTAL` と `SHARD_INDEX` が与えられたら、収集した項目をファイル単位で分け、
@@ -226,3 +228,15 @@ def _isolated_metrics_dir() -> object:
                     os.environ.pop(key, None)
                 else:
                     os.environ[key] = value
+
+
+@pytest.fixture(autouse=True)
+def _isolated_usage_dirs(_isolated_metrics_dir: Path, request: pytest.FixtureRequest,
+                         monkeypatch: pytest.MonkeyPatch) -> None:
+    """テストごとに、使用量の帳簿とプランの状態の実体の置き場所を別の一時ディレクトリへ向ける（#1142）。
+
+    どちらも書く時に作るため、ここではパスを決めるだけでディレクトリを作らない。
+    """
+    base = Path(_isolated_metrics_dir) / f"t{zlib.crc32(request.node.nodeid.encode()):08x}-{id(request):x}"
+    monkeypatch.setenv("NDF_USAGE_DIR", str(base / "usage"))
+    monkeypatch.setenv("NDF_SV_STATE_DIR", str(base / "sv"))
