@@ -1,4 +1,4 @@
-"""パスのパターン照合の包み（lib/pathmatch.py・#1142 の決定 19）。uv の環境の外では test_wrappers_uv_env.py が流し直す。
+"""パスのパターン照合の包み（lib/pathmatch.py・#1142 の決定 19）。外部パッケージは全体テストの環境（根の pyproject.toml）が入れる。
 
 今の `glossary.declared_path_matches` と `collect._matches_file_pattern`（fnmatch）から変わる入力を固定する:
 `*` は `/` をまたがない（`*.md` は `docs/a.md` に当たらない）。
@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
-pytest.importorskip("pathspec")
+import pathspec  # noqa: E402,F401  包みの外部パッケージ。無ければ集めるところで落とす
 import pathmatch  # noqa: E402
 
 

@@ -1,19 +1,36 @@
-# リポジトリの根の scripts/（開発と CI の検査）が使う外部パッケージの宣言（#1142 の決定 19）。版は隣の uv.lock が固定する。
-# グループ（extra）と版は plugins/ndf/pyproject.toml の同じ名前のグループと揃える（根の検査も plugins/ndf/scripts/lib/ の包みを使う）。
+# リポジトリの根の環境の宣言。全体テスト（#1142 の決定 22）と根の scripts/（開発と CI の検査。決定 19）が使う。
+# 版は隣の uv.lock が固定する。全体テストは `uv run --frozen --project . --all-extras pytest . -q -n auto` で流す。
+# グループ（extra）は plugins/ndf/pyproject.toml の全グループを同じ版で持つ（包みを呼ぶ側のテストが同じプロセスで import する）。
+# playwright_kit はパスで指定し、requires-python はそれに合わせて 3.11 以上にする。
 # 足す・版を上げるのは、この 2 つを変える PR だけで行う（理由を PR に書く）。
 [project]
 name = "ai-plugins-dev-scripts"
 version = "0.0.0"
-requires-python = ">=3.10"
-dependencies = []
+requires-python = ">=3.11"
+dependencies = [
+    "playwright_kit",
+    "pytest==9.0.3",
+    "pytest-xdist==3.8.0",
+]
 
 [project.optional-dependencies]
+github = ["githubkit==0.16.1"]
 md = ["markdown-it-py==4.2.0", "mdit-py-plugins==0.6.1"]
 mdtable = ["tabulate==0.10.0"]
 schema = ["pydantic==2.13.5"]
+procs = ["psutil==7.2.2"]
+locks = ["filelock==4.0.3"]
 shparse = ["tree-sitter==0.26.0", "tree-sitter-bash==0.25.1"]
 versions = ["semver==3.1.0"]
+bump = ["bump-my-version==1.5.1"]
+pathmatch = ["pathspec==1.1.1"]
+textparse = ["unidiff==1.0.1", "pygments==2.21.0"]
 yamlio = ["ruamel-yaml==0.19.1"]
+waits = ["tenacity==9.1.4"]
+notify = ["slack-sdk==3.44.1", "python-dotenv==1.2.3", "httpx==0.28.1"]
 
 [tool.uv]
 package = false
+
+[tool.uv.sources]
+playwright_kit = { path = "plugins/playwright-kit/skills/playwright-kit-ops", editable = true }

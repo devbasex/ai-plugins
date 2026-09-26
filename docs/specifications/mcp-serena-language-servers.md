@@ -426,7 +426,7 @@ SKILL.md が正である。`configure` は言語の数 × 120 秒かかり得る
 走らせるコマンド:
 
 ```bash
-uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest pytest plugins/mcp/mcp-serena -q -n 4
+uv run --frozen --project . --all-extras pytest plugins/mcp/mcp-serena -q -n 4
 ```
 
 `serena` と `git` の結合は、一時ディレクトリの git リポジトリと偽の `serena`

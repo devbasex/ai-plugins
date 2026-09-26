@@ -1,4 +1,4 @@
-"""版数の比較と一括の書き換えの包み（lib/versions.py・#1142 の決定 19）。uv の環境の外では test_wrappers_uv_env.py が流し直す。"""
+"""版数の比較と一括の書き換えの包み（lib/versions.py・#1142 の決定 19）。外部パッケージは全体テストの環境（根の pyproject.toml）が入れる。"""
 from __future__ import annotations
 
 import sys
@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
-pytest.importorskip("semver")
+import semver  # noqa: E402,F401  包みの外部パッケージ。無ければ集めるところで落とす
 import versions  # noqa: E402
 
 
@@ -49,7 +49,7 @@ replace = '"version": "{new_version}"'
 
 
 def test_bump_replace_rewrites_the_configured_places(tmp_path: Path):
-    pytest.importorskip("bumpversion")
+    import bumpversion  # noqa: F401  包みの外部パッケージ。無ければ落とす
     (tmp_path / "plugin.json").write_text('{"version": "1.2.3-dev.1", "other": "1.2.3-dev.1"}\n')
     (tmp_path / "bump.toml").write_text(CONFIG)
     r = versions.bump_replace(tmp_path / "bump.toml", "1.2.3-dev.1", "1.2.3-dev.2", tmp_path)

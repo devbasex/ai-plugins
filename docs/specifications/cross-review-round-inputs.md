@@ -200,7 +200,7 @@ cross-refactoring の適用のプロンプト（`prompts/apply.md`）の禁止�
 | プロンプトの組み立てが通ること（出し切り・起動しない処理・観点の文言は読んで確かめる） | 同 `test_launch_reviewer_prompt_context.py` |
 | 新しい指摘が minor だけのラウンドが収束すること（判定を変えていないこと） | 同 `test_classify_findings.py` と judge のテストが変更なしで通る |
 | 振動の検知と結果が無い担当の起動し直しが変わらないこと | 同 `test_state_check_oscillation.py` / `test_judge_no_result_reason.py` が変更なしで通る |
-| 全体テストが通ること | `uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest pytest . -q -n 4` |
+| 全体テストが通ること | `uv run --frozen --project . --all-extras pytest . -q -n 4` |
 
 ## 関連リンク
 

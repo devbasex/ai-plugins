@@ -1,4 +1,4 @@
-"""待ちとやり直しの包み（lib/waits.py・#1142 の決定 19）。uv の環境の外では test_wrappers_uv_env.py が流し直す。
+"""待ちとやり直しの包み（lib/waits.py・#1142 の決定 19）。外部パッケージは全体テストの環境（根の pyproject.toml）が入れる。
 
 眠りは差し替え、実時間を使わない。回数と待ちの合計は `post_queue.retry`（待ちの合計 + 間隔が上限を超えたら打ち切る）と同じ。
 """
@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
-pytest.importorskip("tenacity")
+import tenacity  # noqa: E402,F401  包みの外部パッケージ。無ければ集めるところで落とす
 import waits  # noqa: E402
 
 

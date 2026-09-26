@@ -1,4 +1,4 @@
-"""ファイルロックの包み（lib/locks.py・#1142 の決定 19）。uv の環境の外では test_wrappers_uv_env.py が流し直す。"""
+"""ファイルロックの包み（lib/locks.py・#1142 の決定 19）。外部パッケージは全体テストの環境（根の pyproject.toml）が入れる。"""
 from __future__ import annotations
 
 import subprocess
@@ -10,7 +10,7 @@ import pytest
 
 LIB = Path(__file__).resolve().parents[1] / "lib"
 sys.path.insert(0, str(LIB))
-pytest.importorskip("filelock")
+import filelock  # noqa: E402,F401  包みの外部パッケージ。無ければ集めるところで落とす
 import locks  # noqa: E402
 
 

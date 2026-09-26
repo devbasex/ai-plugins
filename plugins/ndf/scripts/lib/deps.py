@@ -8,11 +8,14 @@
     deps.require("github")      # 外部パッケージの import より前に呼ぶ
     import githubkit
 
+2 つ以上のグループが要るエントリポイントは 1 回の呼び出しで並べる（`deps.require("notify", "locks")`。決定 23）。
+起動し直すのは 1 回で、`uv run` へ `--extra` を並べる。分けて呼ぶと、2 つ目は起動し直した後なので止まる。
+
 `require()` は次の順に動く（決定 17 の表）。
 
-1. グループのパッケージが import できる → そのまま戻る（uv の環境の中で起動されたとき）
+1. 渡したグループのパッケージがすべて import できる → そのまま戻る（uv の環境の中で起動されたとき）
 2. 環境変数 `NDF_DEPS_REEXEC` がある → 起動し直したのに import できない。理由を出して終了コード 3
-3. uv が見つかる（`PATH`・`~/.local/bin`・`~/.cargo/bin`）→ `uv run --frozen --project <プラグインの根> --extra <グループ>
+3. uv が見つかる（`PATH`・`~/.local/bin`・`~/.cargo/bin`）→ `uv run --frozen --project <プラグインの根> --extra <グループ> ...
    python <パス> <引数>` で自分を起動し直す（`os.execve`）。環境は `UV_PROJECT_ENVIRONMENT` で
    `~/.cache/ndf/venv/<版>` に置く（`NDF_DEPS_VENV` で変えられる）。プラグインのキャッシュの中には作らない
 4. uv が無い → 版を固定した公式のインストーラで `~/.local/bin` へ入れ（`UV_NO_MODIFY_PATH=1`）、標準エラーに 1 行を
@@ -30,7 +33,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import NoReturn
+from typing import NoReturn, Sequence
 
 UV_VERSION = "0.12.19"
 # pyproject.toml の [project.optional-dependencies] と同じグループ。値はグループが入ったかを見る import の名前
@@ -106,19 +109,25 @@ def venv_dir(root: Path = PLUGIN_ROOT) -> str:
     return os.environ.get("NDF_DEPS_VENV") or str(Path.home() / ".cache" / "ndf" / "venv" / venv_version(root))
 
 
-def reexec_argv(uv: str, group: str, script: str, args: list[str], root: Path = PLUGIN_ROOT) -> list[str]:
-    return [uv, "run", "--quiet", "--frozen", "--project", str(root), "--extra", group,
-            "python", script, *args]
+def reexec_argv(uv: str, groups: str | Sequence[str], script: str, args: list[str],
+                root: Path = PLUGIN_ROOT) -> list[str]:
+    extras = [x for g in ([groups] if isinstance(groups, str) else groups) for x in ("--extra", g)]
+    return [uv, "run", "--quiet", "--frozen", "--project", str(root), *extras, "python", script, *args]
 
 
-def require(group: str) -> None:
-    """`group` のパッケージが import できる環境で動いていることを保証する。できなければ uv の環境で起動し直す。"""
-    if group not in GROUPS:
-        raise ValueError(f"外部パッケージのグループに無い: {group}（{' / '.join(GROUPS)}）")
-    if importable(group):
+def require(group: str, *more: str) -> None:
+    """渡したグループのパッケージが import できる環境で動いていることを保証する。できなければ、足りないグループを
+    すべて `--extra` に並べた uv の環境で 1 回だけ起動し直す。"""
+    groups = list(dict.fromkeys((group, *more)))
+    unknown = [g for g in groups if g not in GROUPS]
+    if unknown:
+        raise ValueError(f"外部パッケージのグループに無い: {', '.join(unknown)}（{' / '.join(GROUPS)}）")
+    missing = [g for g in groups if not importable(g)]
+    if not missing:
         return
     if os.environ.get(REEXEC_ENV):
-        _stop(f"uv の環境へ起動し直したが {group} のパッケージ（{', '.join(GROUPS[group])}）を import できない。"
+        mods = ", ".join(m for g in missing for m in GROUPS[g])
+        _stop(f"uv の環境へ起動し直したが {' / '.join(missing)} のパッケージ（{mods}）を import できない。"
               f"{PLUGIN_ROOT / 'uv.lock'} に載っているかを見る")
     if not (PLUGIN_ROOT / "pyproject.toml").is_file() or not (PLUGIN_ROOT / "uv.lock").is_file():
         _stop(f"外部パッケージの宣言が無い: {PLUGIN_ROOT}/pyproject.toml と uv.lock")
@@ -130,4 +139,4 @@ def require(group: str) -> None:
         _stop(f"uv を入れられない（ネットワークか権限が無い）。手で入れてから打ち直す: {INSTALL_HINT}")
     env = dict(os.environ, **{REEXEC_ENV: "1", "UV_PROJECT_ENVIRONMENT": venv_dir()})
     script = str(Path(sys.argv[0]).resolve())
-    os.execve(uv, reexec_argv(uv, group, script, sys.argv[1:]), env)
+    os.execve(uv, reexec_argv(uv, groups, script, sys.argv[1:]), env)
