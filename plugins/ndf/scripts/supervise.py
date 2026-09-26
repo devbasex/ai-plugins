@@ -1362,9 +1362,10 @@ class Supervisor:
             pf = item.get("prompt_file")
             if not pf or not Path(pf).is_file():
                 return False, out, "\n".join(texts) + f"\n{kind} の prompt_file が無い"
-            prompt = (f"作業: {kind}\n作業場所: {cwd}\n\n{Path(pf).read_text()}\n\n"
+            wd = str(item.get("cwd") or cwd)  # 駆動が作業ディレクトリを示せば、それが worker の作業場所
+            prompt = (f"作業: {kind}\n作業場所: {wd}\n\n{Path(pf).read_text()}\n\n"
                       f"終えたら結果ファイル {res_file} を書く。")
-            res = self.call_worker(step, prompt, cwd, f"{step['id']}-{kind}-{len(self.cur['pauses'])}")
+            res = self.call_worker(step, prompt, wd, f"{step['id']}-{kind}-{len(self.cur['pauses'])}")
             self.add_usage("work", res)
             texts.append(f"## {kind} の worker\n{res['text'][-TAIL:]}")
             if not res_file.is_file():
