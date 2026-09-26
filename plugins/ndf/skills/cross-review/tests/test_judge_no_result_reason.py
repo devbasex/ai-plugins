@@ -278,3 +278,17 @@ def test_the_round_summary_shows_a_dash_when_the_reason_is_unknown(
     review_lib.commands.report.cmd_report(argparse.Namespace(pr=PR))
 
     assert "agy=NO_RESULT(-)" in capsys.readouterr().out
+
+
+def test_the_round_summary_is_built_by_the_table_library(tmp_dir, state_mod, capsys):
+    """表はライブラリの `mdtable` が組む（#1142 の D2）。区切りの行は `| --- |` の形で、数の列（round）は右寄せになる。"""
+    _write(tmp_dir, _state([
+        _round(codex=_approve(), agy=_no_result("usage_limit", DETAIL), verdict="no_result"),
+    ], final="error"))
+
+    review_lib.commands.report.cmd_report(argparse.Namespace(pr=PR))
+
+    lines = capsys.readouterr().out.splitlines()
+    head = lines.index("| round | PR | レビュー | fix | CI |")
+    assert lines[head + 1] == "| ---: | --- | --- | --- | --- |"
+    assert lines[head + 2].startswith("| 1 | #")

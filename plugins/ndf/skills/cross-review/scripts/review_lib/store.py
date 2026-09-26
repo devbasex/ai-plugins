@@ -13,6 +13,7 @@ import sys
 from typing import Any
 
 import review_lib  # noqa: E402
+import jsonio  # noqa: E402
 import run_metrics  # noqa: E402
 
 
@@ -104,9 +105,7 @@ def _save(pr: int, state: dict[str, Any]) -> None:
 
 def _write_state(p: pathlib.Path, state: dict[str, Any]) -> None:
     """状態ファイルを書く唯一の経路。`init` と再開の入口もここを通す（AC8）。"""
-    tmp = p.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
-    tmp.replace(p)
+    jsonio.write_atomic(p, state)
     # **保存のたびに実行の要約を書き直す**（#662 の決定 5）。失敗しても進行は止めない。
     run_metrics.after_save(p, state, "cross-review", _summary_extra)
 

@@ -380,7 +380,7 @@ def new_init(state_mod, monkeypatch, tmp_path):
     monkeypatch.setattr(review_lib.github, "_fetch_pr_metadata", lambda pr, repo=None:
                         review_lib.github.PrMetadata(REPO_INIT, "author", "feat/x", "abc",
                                              "develop", False, 4000, None))
-    monkeypatch.setattr(review_lib, "_sh", lambda cmd, check=True: "viewer")
+    monkeypatch.setattr(review_lib.github, "_viewer_login", lambda: "viewer")
     monkeypatch.setattr(review_lib.github, "_fetch_changed_files", lambda pr, repo: [])
     monkeypatch.setattr(review_lib.workspace, "_is_registered_worktree", lambda path: True)
     monkeypatch.setattr(review_lib.workspace, "_sync_worktree", lambda *a, **k: None)
