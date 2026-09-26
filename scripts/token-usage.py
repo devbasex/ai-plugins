@@ -66,8 +66,9 @@ AXIS_LABEL = {"version": "ndf の版", "mode": "モード", "model": "モデル"
 def version_key(v: str) -> tuple:
     head, _, suffix = v.partition("-")
     nums = tuple(int(x) for x in head.split("."))
-    # 開発版（接尾辞つき）は同じ番号の正式版より前に並べる
-    return nums + ((0, suffix) if suffix else (1, ""))
+    # 開発版（接尾辞つき）は同じ番号の正式版より前に並べる。接尾辞の数字の部分は数で比べる（dev.9 < dev.10）
+    parts = tuple((0, int(p), "") if p.isdigit() else (1, 0, p) for p in suffix.split(".")) if suffix else ()
+    return nums + ((0, parts) if suffix else (1, ()))
 
 
 def parse_ts(value) -> float | None:
