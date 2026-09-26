@@ -398,4 +398,4 @@ def test_new_check_with_scope_uses_drive_steps(tmp_path):
     assert steps["review"]["type"] == "drive" and steps["review"]["drive"] == "cross-review"
     a.scope = []
     refactor = templates.plan_check(a)["steps"][1]
-    assert refactor["type"] == "drive" and "gh pr diff 998 --name-only" in refactor["args"]
+    assert refactor["type"] == "drive" and "pulls/998/files" in refactor["args"]

@@ -149,9 +149,11 @@ def plan_to_merge(a, head: list[dict]) -> dict:
 
 def plan_check(a) -> dict:
     pr = a.pr
-    # 範囲の指定が無ければ、PR が変えたファイルのディレクトリ（根を除く）を範囲にする。ステップはシェルで動く
+    # 範囲の指定が無ければ、PR が変えたファイルのディレクトリ（根を除く）を範囲にする。ステップはシェルで動く。
+    # 一覧は REST から取る（gh pr diff は差分が 20000 行を超えると 406 で拒み、範囲が空になる）
     scope = (" ".join(map(shlex.quote, a.scope)) if a.scope else
-             f"$(gh pr diff {pr} --name-only | xargs -n1 dirname | sort -u | grep -vx '\\.')")
+             f"$(gh api 'repos/{{owner}}/{{repo}}/pulls/{pr}/files' --paginate --jq '.[].filename'"
+             f" | xargs -n1 dirname | sort -u | grep -vx '\\.')")
     # 駆動で回す（最終ゲートは全体のテスト）
     refactor = {"id": "refactor", "type": "drive", "drive": "cross-refactoring", "kind": "構造改善",
                 "stage": "構造改善", "timeout": 3600,
