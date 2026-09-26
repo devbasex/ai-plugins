@@ -18,6 +18,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 from urllib.parse import quote
@@ -149,7 +150,8 @@ def main() -> int:
     args = parser.parse_args()
 
     if not args.file.exists():
-        print(f"ERROR: file not found: {args.file}", file=sys.stderr)
+        print(json.dumps({"status": "error", "message": f"file not found: {args.file}"},
+                         ensure_ascii=False))
         return 2
 
     kind = args.kind or detect_kind(args.file)
@@ -174,15 +176,8 @@ def main() -> int:
                 file=sys.stderr,
             )
 
-    print(f"kind: {result['kind']}")
-    print(f"file_id: {result['file_id']}")
-    print(f"Drive: {result['drive_view']}")
-    if result["direct_download"]:
-        print(f"Direct: {result['direct_download']}")
-    if result["playwright_trace_viewer"]:
-        print()
-        print("Playwright Trace Viewer URL (bug report に記載):")
-        print(f"  {result['playwright_trace_viewer']}")
+    # playwright_trace_viewer は bug report に記載する URL (--public の trace のときだけ入る)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
 
 

@@ -95,17 +95,19 @@ def main() -> int:
         for u in urls
     ]
 
+    has_poor = any(
+        any(v == "poor" for v in r.get("judgement", {}).values()) for r in results
+    )
+
     text = json.dumps(results, indent=2, ensure_ascii=False)
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(text, encoding="utf-8")
-        print(f"OK: web_vitals → {args.output}", file=sys.stderr)
+        print(json.dumps({
+            "output": str(args.output), "count": len(results), "has_poor": has_poor,
+        }, ensure_ascii=False))
     else:
         sys.stdout.write(text + "\n")
-
-    has_poor = any(
-        any(v == "poor" for v in r.get("judgement", {}).values()) for r in results
-    )
     return 1 if args.fail_on_poor and has_poor else 0
 
 

@@ -82,9 +82,9 @@ allowed-tools:
       ▼
 [C] テストコード実装      codegen で記録 → expect() ベースの assertion を追加
       ▼
-[D] 再現可能性レビュー    下記チェックリストを全項目確認
+[D] 再現可能性レビュー    scripts/lint_scenario.py で 4 項目を検査 → 残りの 4 項目を確認
       ▼
-[E] テスト実行 + エビデンス収集   ./scenario-test/run.sh
+[E] テスト実行 + エビデンス収集   scripts/app_ready.sh <URL> で起動を確かめ → ./scenario-test/run.sh
       ▼
 [F] レポートと証跡へ → /playwright-kit:playwright-evidence
 ```
@@ -121,6 +121,8 @@ overlay API (`set_caption`, `flash_click`, `hide_cursor`) の使用例は `playw
 ### 再現可能性レビューチェックリスト
 
 スクリプト完成後、以下を全項目確認してからテスト実行に進む。
+「marker 付与」「role marker」「URL 構築」「wait 戦略」の 4 項目は `scripts/lint_scenario.py` が構文木で判定する。
+残りの 4 項目 (再現可能性・テストデータ独立性・assertion 網羅性・ndf plugin 非依存) はレビューする者が判断する。
 
 - [ ] **再現可能性**: 同じ環境で同じ結果が得られるか (ランダム値・タイムスタンプに依存していないか)
 - [ ] **テストデータ独立性**: 外部の状態に依存せず、テスト単体で成立するか
@@ -131,7 +133,34 @@ overlay API (`set_caption`, `flash_click`, `hide_cursor`) の使用例は `playw
 - [ ] **wait 戦略**: `wait_until="domcontentloaded"` 等の明示的な待機指定があるか
 - [ ] **ndf plugin 非依存**: `scenario-test/` ディレクトリ単体で実行可能か
 
+### 構文木での検査
+
+```bash
+# この Skill のディレクトリで実行する
+python scripts/lint_scenario.py /path/to/your-app/scenario-test/tests/
+```
+
+| rule | 違反とみなすもの |
+|---|---|
+| `page_role` | テスト関数に `@pytest.mark.page_role()` が無い (関数・クラスの decorator、モジュールの `pytestmark` のどれにも無い) |
+| `role_pair` | `@pytest.mark.role("<id>")` があるのに `pwk_role_<id>` fixture を受け取らない、または受け取る `pwk_role_<id>` が role の目印と食い違う。目印の無い `pwk_role_<id>` だけのテストは通す |
+| `hardcoded_url` | `http://` / `https://` で始まる文字列の直書き (docstring は除く) |
+| `wait_until` | `goto` / `reload` / `go_back` / `go_forward` に `wait_until=` が無い |
+
+標準出力は 1 つの JSON (`violations` に file / line / test / rule / message)。
+終了コードは 0 = 違反なし、1 = 違反あり、2 = 引数の誤り・構文エラーのファイルがある。
+
 ## テスト実行
+
+実行の前に、対象のアプリケーションが応答するかを確かめる。
+
+```bash
+# 2xx / 3xx / 4xx が返れば起動済み。5xx と接続できない状態は --timeout 秒まで繰り返す
+scripts/app_ready.sh http://localhost:8080/ --timeout 60
+```
+
+標準出力は 1 行の JSON (`ready` / `status` / `attempts` / `elapsed_s`)。
+終了コードは 0 = 起動している、1 = 時間切れ、2 = 引数の誤り・curl が無い。
 
 ```bash
 ./scenario-test/run.sh                            # 全テスト (動画 ON)
@@ -222,7 +251,7 @@ Chrome DevTools MCP の利用可能な方を自動選択する。どちらも使
 
 ### 手順
 
-1. **アプリケーション起動確認**: `docker compose ps` や `curl -fsS http://localhost:<port>/health` で確認する。起動していなければ起動手順を案内する
+1. **アプリケーション起動確認**: `scripts/app_ready.sh http://localhost:<port>/` や `docker compose ps` で確認する。起動していなければ起動手順を案内する
 2. **アクセスと認証**: 指定 URL (または `/`) にアクセスし、必要ならログインする。資格情報はプロジェクト固有で、`.env.example` / README から確認し機密情報として扱う
 3. **機能画面への遷移**: 実装された機能に応じた画面へ遷移する
 4. **動作確認**: フォーム入力・ボタンクリック・データ表示・コンソールエラー・ネットワークリクエストを確認する。スクリーンショットは明示的に指示されたときのみ取得する

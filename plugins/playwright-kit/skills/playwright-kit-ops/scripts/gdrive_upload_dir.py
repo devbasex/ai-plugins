@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import mimetypes
 import os
 import sys
@@ -33,7 +34,7 @@ def get_or_create_folder(service, name: str, parent_id: str) -> str:
         body={"name": name, "mimeType": FOLDER_MIME, "parents": [parent_id]},
         fields="id", supportsAllDrives=True,
     ).execute()
-    print(f"  [folder] created: {name} -> {folder['id']}")
+    print(f"  [folder] created: {name} -> {folder['id']}", file=sys.stderr)
     return folder["id"]
 
 
@@ -45,17 +46,23 @@ def upload_file(service, path: Path, parent_id: str) -> str:
         media_body=media, fields="id,name,size",
         supportsAllDrives=True,
     ).execute()
-    print(f"  [file]   {path.name} ({path.stat().st_size:,} bytes) -> {file['id']}")
+    print(f"  [file]   {path.name} ({path.stat().st_size:,} bytes) -> {file['id']}",
+          file=sys.stderr)
     return file["id"]
 
 
-def upload_dir(service, local_dir: Path, drive_parent_id: str) -> None:
+def upload_dir(service, local_dir: Path, drive_parent_id: str,
+               uploaded: list[dict] | None = None) -> list[dict]:
+    """local_dir を再帰的に上げ、上げたファイルの {path, id} を uploaded に足して返す。"""
+    if uploaded is None:
+        uploaded = []
     for entry in sorted(local_dir.iterdir()):
         if entry.is_dir():
             sub_id = get_or_create_folder(service, entry.name, drive_parent_id)
-            upload_dir(service, entry, sub_id)
+            upload_dir(service, entry, sub_id, uploaded)
         elif entry.is_file():
-            upload_file(service, entry, drive_parent_id)
+            uploaded.append({"path": str(entry), "id": upload_file(service, entry, drive_parent_id)})
+    return uploaded
 
 
 def main() -> int:
@@ -65,9 +72,12 @@ def main() -> int:
     args = p.parse_args()
 
     service = drive_service(SCOPES)
-    print(f"Upload {args.local} -> drive folder {args.parent}")
-    upload_dir(service, args.local, args.parent)
-    print("Done.")
+    print(f"Upload {args.local} -> drive folder {args.parent}", file=sys.stderr)
+    uploaded = upload_dir(service, args.local, args.parent)
+    print(json.dumps({
+        "local": str(args.local), "parent": args.parent,
+        "count": len(uploaded), "files": uploaded,
+    }, ensure_ascii=False, indent=2))
     return 0
 
 

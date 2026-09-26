@@ -96,14 +96,14 @@ web vitals (LCP/CLS/TTFB) が **autouse で自動実行** されます。
 - `--pwk-overlay`: 動画に赤丸カーソル + 字幕を焼き込む
 - `--pwk-drive-folder <id>`: 終了後に成果物を Google Drive にアップロード
 
-Drive 連携は optional dependency です。`google-auth` skill はどのランタイムの配布物にも
-同梱していないため、`--pwk-drive-folder` や Drive 系スクリプトを使う場合はリポジトリ
-[devbasex/ai-plugins](https://github.com/devbasex/ai-plugins) を clone し、事前に
-`GOOGLE_AUTH_SCRIPTS` をその clone 先の `google-auth/scripts` へ設定してから
+Drive 連携は optional dependency です。`google-auth` skill は NDF の 4 つの manifest すべてに
+載っていますが、playwright-kit とは別のプラグインです。`--pwk-drive-folder` や Drive 系スクリプトは
+各ランタイムの標準の導入先 (`~/.claude/skills/google-auth/scripts` など) を探します。
+見つからないときは `GOOGLE_AUTH_SCRIPTS` を `google-auth/scripts` へ設定してから
 Drive extra を同期してください。
 
 ```bash
-# <ai-plugins のパス> を clone 先の実パスに置き換える
+# 例: ai-plugins を clone した先の google-auth を使う
 export GOOGLE_AUTH_SCRIPTS=<ai-plugins のパス>/plugins/ndf/skills/google-auth/scripts
 uv sync --extra drive
 ```
