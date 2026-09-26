@@ -148,7 +148,7 @@ _wf_verify_approval_label() {
   if [ "$rc" -ne 0 ]; then
     case "$out" in
       *404*) return 0 ;;
-      *) wf_deny_undetermined "$num" "承認ラベル（ラベル $WF_APPROVAL_LABEL）の定義の有無"; return 1 ;;
+      *) wf_deny_undetermined "$num" "承認ラベル（ラベル ${WF_APPROVAL_LABEL}）の定義の有無"; return 1 ;;
     esac
   fi
 

@@ -531,7 +531,7 @@ _wf_compose_evidence_body() {
     body="$body"$'\n'"$line"
   done
   if [ "$conflict" -eq 1 ]; then
-    body="$body"$'\n'"モードの記録が課題ごとに食い違います（$modes_str）。最も高い $effective を基準に見ています。"
+    body="$body"$'\n'"モードの記録が課題ごとに食い違います（${modes_str}）。最も高い $effective を基準に見ています。"
     body="$body"$'\n'"1 つの Pull Request に対しモードは 1 つです。閉じる課題すべての通過記録へ同じ値を書いてください。"
   fi
   body="$body"$'\n'"記録が無いことは、その工程を通っていないことと同じではありません。記録の側が遅れているだけのこともあります。"
