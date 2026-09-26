@@ -11,6 +11,7 @@ import tempfile
 from typing import NamedTuple
 
 import review_lib  # noqa: E402
+import gh_call  # noqa: E402
 from review_lib import github  # noqa: E402
 
 
@@ -69,11 +70,7 @@ def _create_worktree(worktree: str, pr: int, head_branch: str) -> None:
         review_lib.info(f"⚠ git fetch origin {head_branch} 失敗 (フォーク PR の可能性) — gh pr checkout でフォールバック")
         review_lib._sh(["git", "worktree", "add", "--detach", worktree, "HEAD"])
         # worktree 内で gh pr checkout を実行して正しいコミットに切り替え
-        checkout_result = subprocess.run(
-            ["gh", "pr", "checkout", str(pr), "--detach"],
-            capture_output=True, text=True,
-            cwd=worktree,
-        )
+        checkout_result = gh_call.gh(["pr", "checkout", str(pr), "--detach"], cwd=worktree)
         if checkout_result.returncode != 0:
             # HEAD (親コミット) 指向のまま残すと、次回実行時に
             # _is_registered_worktree() を通過して不正流用されるため、
@@ -252,10 +249,7 @@ def _reset_worktree_head(
         if reset.returncode != 0:
             review_lib.die(f"worktree を {target} へ同期できない: {reset.stderr.strip()}", code=code)
     else:
-        checkout = subprocess.run(
-            ["gh", "pr", "checkout", str(pr), "--detach"],
-            capture_output=True, text=True, cwd=worktree,
-        )
+        checkout = gh_call.gh(["pr", "checkout", str(pr), "--detach"], cwd=worktree)
         if checkout.returncode != 0:
             review_lib.die(f"gh pr checkout --detach #{pr} 失敗: {checkout.stderr.strip()}", code=code)
 

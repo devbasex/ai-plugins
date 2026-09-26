@@ -53,7 +53,7 @@ def stub_init_scaffolding(monkeypatch, state_mod, tmp_path):
         lambda pr, repo=None: review_lib.github.PrMetadata(
             REPO, "takemi", "feat/x", "abc123", "develop", False, 4000, None),
     )
-    monkeypatch.setattr(review_lib, "_sh", lambda cmd, check=True: "takemi")
+    monkeypatch.setattr(review_lib.github, "_viewer_login", lambda: "takemi")
     monkeypatch.setattr(review_lib.workspace, "_create_worktree", lambda *a: None)
     monkeypatch.setattr(review_lib.workspace, "_is_registered_worktree", lambda p: True)
     monkeypatch.setattr(review_lib.workspace, "_sync_worktree", lambda *a, **k: None)

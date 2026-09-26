@@ -1,6 +1,7 @@
-"""gh と REST の呼び出し・リポジトリの特定・PR とコメントとスレッドの取得（#1142 の C2）。
+"""gh と REST の呼び出し・リポジトリの特定・PR とコメントとスレッドの取得（#1142 の C2・D2）。
 
-gh と REST の失敗の扱いを 1 か所に集める。テストは関数をこのモジュールの上で差し替えるため、ほかの
+GitHub へはライブラリの `gh_call`（`gh` の CLI と REST の 1 回の要求）を通して届き、ここは応答の読み方と
+失敗の扱いを持つ。テストは関数をこのモジュールの上で差し替えるため、ほかの
 モジュールは `github._gh_rest(...)` のようにモジュールの属性として呼ぶ。
 
 **尽きるのは GraphQL 側である**（#271）。`gh pr view` は項目を増やしても
@@ -17,7 +18,9 @@ import subprocess
 from typing import Any, NamedTuple
 
 import review_lib  # noqa: E402
+import gh_call  # noqa: E402
 import gh_parts  # noqa: E402
+import gh_rest  # noqa: E402
 import repo as repo_ids  # noqa: E402  `repo` は引数の名前と紛れる
 
 
@@ -36,38 +39,13 @@ def _gh_rest(path: str) -> RestResponse | None:
 
     **例外を投げず、進行を止めない側へ倒す**（#291 の待ち行列を挟む位置）。
     呼び出し側は `None` を「確かめられなかった」として扱う。積む・待つ・流すは
-    ここではなく呼び出し側が持つ。
+    ここではなく呼び出し側が持つ。要求はライブラリの `gh_call.request` が送る。
     """
-    try:
-        r = subprocess.run(["gh", "api", "-i", path], capture_output=True, text=True)
-    except OSError as exc:
-        review_lib.info(f"⚠ gh の実行に失敗 ({path}): {exc}")
+    resp = gh_call.request(path)
+    if not resp.ok or resp.error:
+        review_lib.info(f"⚠ REST が失敗 ({path}, status={resp.status}): {resp.error.strip()[:200]}")
         return None
-    if r.returncode != 0:
-        review_lib.info(f"⚠ REST が失敗 ({path}, exit={r.returncode}): {r.stderr.strip()[:200]}")
-        return None
-    headers, raw = _parse_rest_headers(r.stdout)
-    try:
-        body = json.loads(raw) if raw.strip() else None
-    except json.JSONDecodeError as exc:
-        review_lib.info(f"⚠ REST の応答を読み取れない ({path}): {exc}")
-        return None
-    remaining = headers.get("x-ratelimit-remaining")
-    try:
-        rate_remaining = int(remaining) if remaining is not None else None
-    except ValueError:
-        rate_remaining = None
-    return RestResponse(
-        headers=headers,
-        body=body,
-        rate_remaining=rate_remaining,
-        rate_reset=headers.get("x-ratelimit-reset"),
-    )
-
-
-_REPO_URL = re.compile(
-    r"(?:github\.com[:/])(?P<owner>[^/]+)/(?P<name>[^/]+?)(?:\.git)?/?$"
-)
+    return resp
 
 
 def _git_remote_url() -> str:
@@ -114,8 +92,18 @@ def _repo_from_git() -> str | None:
     **求めた名前はそのまま使わない。** `repos/{owner}/{repo}/pulls/{PR}` の応答が
     そのまま検証になるため、誤った名前は失敗として現れる（`_fetch_pr_metadata`）。
     """
-    m = _REPO_URL.search(_git_remote_url())
-    return f"{m.group('owner')}/{m.group('name')}" if m else None
+    return repo_ids.owner_repo_from_url(_git_remote_url())
+
+
+def _repo_from_gh() -> str:
+    """`gh repo view` が返す `owner/repo`。求まらなければ空文字（GitHub へ問い合わせる最後の落とし先）。"""
+    r = gh_call.gh(["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"])
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+
+def _viewer_login() -> str | None:
+    """認証している利用者の login。求まらなければ `None`。"""
+    return gh_rest.viewer_login()
 
 
 class PrMetadata(NamedTuple):
@@ -168,10 +156,7 @@ def _fetch_pr_metadata(pr: int, repo: str | None = None) -> PrMetadata | None:
         meta = _pr_metadata_of(candidate, resp)
         if meta is not None:
             return meta
-    resolved = review_lib._sh(
-        ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
-        check=False,
-    )
+    resolved = _repo_from_gh()
     if not resolved or resolved in tried:
         return None
     resp = _gh_rest(f"repos/{resolved}/pulls/{int(pr)}")
@@ -269,14 +254,11 @@ def _parse_pr_files_api_lines(output: str) -> list[dict[str, Any]]:
 
 
 def _fetch_changed_files(pr: int, repo: str) -> list[dict[str, Any]]:
-    r = subprocess.run(
-        [
-            "gh", "api", f"repos/{repo}/pulls/{pr}/files",
-            "--paginate",
-            "--jq", '.[] | [.status, .filename, (.previous_filename // "")] | @tsv',
-        ],
-        capture_output=True, text=True,
-    )
+    r = gh_call.gh([
+        "api", f"repos/{repo}/pulls/{pr}/files",
+        "--paginate",
+        "--jq", '.[] | [.status, .filename, (.previous_filename // "")] | @tsv',
+    ])
     if r.returncode == 0:
         entries = _parse_pr_files_api_lines(r.stdout)
         if entries:
@@ -286,10 +268,7 @@ def _fetch_changed_files(pr: int, repo: str) -> list[dict[str, Any]]:
     else:
         review_lib.info(f"⚠ PR files API 取得に失敗。gh pr view fallback を試行: {r.stderr.strip()[:200]}")
 
-    fallback = subprocess.run(
-        ["gh", "pr", "view", str(pr), "--json", "files"],
-        capture_output=True, text=True,
-    )
+    fallback = gh_call.gh(["pr", "view", str(pr), "--json", "files"])
     if fallback.returncode != 0:
         review_lib.info(f"⚠ PR 変更ファイル一覧の取得に失敗。自動レビュー観点は共通のみ: {fallback.stderr.strip()[:200]}")
         return []
@@ -313,14 +292,7 @@ def _review_exists(repo: str, pr: int, review_url: str | None) -> bool | None:
     m = re.search(r"pullrequestreview-(\d+)", str(review_url))
     if not m:
         return False
-    try:
-        out = review_lib._sh(
-            ["gh", "api", f"repos/{repo}/pulls/{pr}/reviews/{m.group(1)}", "--jq", ".id"],
-            check=False,
-        )
-    except Exception:
-        return None
-    text = str(out).strip()
+    text = gh_call.gh(["api", f"repos/{repo}/pulls/{pr}/reviews/{m.group(1)}", "--jq", ".id"]).stdout.strip()
     if not text:
         return None
     return text.split()[0] == m.group(1)
@@ -332,11 +304,7 @@ def _gh_output(cmd: list[str]) -> str | None:
     **「取得できなかった」と「0 件」を区別する。** 失敗を空の出力として返すと、
     GitHub 側の一時的な不調が「未解決の指摘は無い」と読まれてしまう。
     """
-    try:
-        r = subprocess.run(cmd, capture_output=True, text=True)
-    except OSError as exc:
-        review_lib.info(f"⚠ gh の実行に失敗: {exc}")
-        return None
+    r = gh_call.gh(cmd[1:] if cmd[:1] == ["gh"] else cmd)
     if r.returncode != 0:
         review_lib.info(f"⚠ gh が失敗 (exit={r.returncode}): {r.stderr.strip()[:200]}")
         return None

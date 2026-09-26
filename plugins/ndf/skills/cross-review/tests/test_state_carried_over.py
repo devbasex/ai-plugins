@@ -120,7 +120,7 @@ def test_unavailable_count_keeps_the_previous_record(state_mod, unresolved):
 def test_init_resume_reports_the_carried_over_count(tmp_dir, state_mod, unresolved, monkeypatch, capsys):
     """再開の出力に引き継いだ指摘の件数が出て、状態ファイルへ残る。"""
     unresolved(_threads("PRRT_a", "PRRT_b"))
-    monkeypatch.setattr(review_lib, "_sh", lambda cmd, check=True: REPO)
+    monkeypatch.setattr(review_lib.github, "_repo_from_gh", lambda: REPO)
     _write(tmp_dir, _state(
         auto_review_instructions="",
         review_instructions="",

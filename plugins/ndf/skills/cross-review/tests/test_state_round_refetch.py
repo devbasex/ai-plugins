@@ -165,7 +165,7 @@ def test_init_aborts_without_a_state_file_when_the_fetch_fails(
     monkeypatch.setattr(review_lib.github, "_repo_from_git", lambda: REPO)
     monkeypatch.setattr(review_lib.workspace, "_create_worktree",
                         lambda wt, pr, head: pathlib.Path(wt).mkdir())
-    monkeypatch.setattr(review_lib, "_sh", lambda cmd, check=True: "me")
+    monkeypatch.setattr(review_lib.github, "_viewer_login", lambda: "me")
     args = type("A", (), {
         "pr": PR, "max_rounds": 12, "rotate_after": 8, "only": None,
         "worktree": str(worktree), "focus": None, "extra_instructions_file": None,

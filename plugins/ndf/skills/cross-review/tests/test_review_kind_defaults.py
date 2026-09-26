@@ -66,7 +66,7 @@ def init_env(monkeypatch, state_mod, tmp_path, fake_gh):
     worktree = tmp_path / "wt"
     (worktree / "issues").mkdir(parents=True)
     (worktree / "issues" / "1-design.md").write_text("x\n" * 1200)
-    monkeypatch.setattr(review_lib, "_sh", lambda cmd, check=True: "takemi")
+    monkeypatch.setattr(review_lib.github, "_viewer_login", lambda: "takemi")
     monkeypatch.setattr(review_lib.workspace, "_create_worktree", lambda *a: None)
     monkeypatch.setattr(review_lib.workspace, "_is_registered_worktree", lambda p: True)
     monkeypatch.setattr(review_lib.workspace, "_sync_worktree", lambda *a, **k: None)
