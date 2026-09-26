@@ -26,7 +26,8 @@ def load(name: str, path: Path):
     return mod
 
 
-sv = load("supervise_for_ledger", SCRIPTS / "supervise.py")
+sys.path.insert(0, str(SCRIPTS))
+from supervise_lib import claude, engine, paths, prompts  # noqa: E402
 mvv = load("mvv_gate_for_ledger", SCRIPTS / "mvv-gate.py")
 
 USAGE = {"input_tokens": 3, "output_tokens": 40, "cache_read_input_tokens": 500,
@@ -119,7 +120,7 @@ def test_append_safely_reports_failure(tmp_path, capsys):
 
 def run_plan(tmp_path, steps, plan_path=None):
     plan = {"フェーズ": "試験", "課題": [1142], "作業場所": str(tmp_path), "steps": steps}
-    s = sv.Supervisor(plan, tmp_path / "state", plan_path=plan_path)
+    s = engine.Engine(plan, tmp_path / "state", plan_path=plan_path)
     return s, s.run()
 
 
@@ -134,10 +135,10 @@ def test_each_call_appends_one_row_with_5m_and_1h(tmp_path, ledger):
     assert all(r["source"] == "supervise" and r["plan"] == str(plan_file.resolve()) for r in got)
     assert got[0]["usage"]["cache_creation"]["ephemeral_1h_input_tokens"] == 200
     assert got[0]["model"] == "claude-opus-5-5" and got[0]["session_id"] == "sess-1"
-    llm = s.log[0]["llm"]
+    llm = s.state.log[0]["llm"]
     assert (llm["cache_write"], llm["cache_write_5m"], llm["cache_write_1h"]) == (300, 100, 200)
     assert llm["models"]["claude-opus-5-5"]["calls"] == 1 and llm["models"]["claude-haiku-4-5"]["output"] == 10
-    assert (s.dir / "state.json").is_file()
+    assert (s.state.dir / "state.json").is_file()
 
 
 def test_ledger_failure_keeps_the_call_result(tmp_path, ledger, monkeypatch, capsys):
@@ -146,16 +147,16 @@ def test_ledger_failure_keeps_the_call_result(tmp_path, ledger, monkeypatch, cap
     monkeypatch.setenv("NDF_USAGE_DIR", str(blocker / "usage"))
     s, text = run_plan(tmp_path, [{"id": "impl", "type": "work", "prompt": "直す", "next": "end"}])
     assert "結果: 完了" in text
-    assert s.log[0]["llm"]["cost"] == 0.06
+    assert s.state.log[0]["llm"]["cost"] == 0.06
     assert "使用量の帳簿" in capsys.readouterr().err
 
 
 def test_call_kinds_follow_the_system_prompt():
-    assert sv.claude_kind(sv.JUDGE_SYSTEM, False) == "judge"
-    assert sv.claude_kind(sv.SLOW_SYSTEM, False) == "slow"
-    assert sv.claude_kind(sv.PR_SYSTEM, False) == "pr"
-    assert sv.claude_kind(sv.WORK_SYSTEM, False) == "work"
-    assert sv.claude_kind(sv.FULL_SYSTEM, True) == "full"
+    assert claude.claude_kind(prompts.JUDGE_SYSTEM, False) == "judge"
+    assert claude.claude_kind(prompts.SLOW_SYSTEM, False) == "slow"
+    assert claude.claude_kind(prompts.PR_SYSTEM, False) == "pr"
+    assert claude.claude_kind(prompts.WORK_SYSTEM, False) == "work"
+    assert claude.claude_kind(prompts.FULL_SYSTEM, True) == "full"
 
 
 def test_nested_drive_keeps_inner_metrics(tmp_path, monkeypatch):
@@ -172,10 +173,10 @@ def test_nested_drive_keeps_inner_metrics(tmp_path, monkeypatch):
         "else:\n"
         "    print(json.dumps({'status': 'gate', 'items': [{'pause': 'final', 'result_file': str(res),"
         f" 'command': {f'{PY} {inner}'!r}}}]}}))\n")
-    monkeypatch.setitem(sv.DRIVES, "fake", outer)
+    monkeypatch.setitem(paths.DRIVES, "fake", outer)
     s, text = run_plan(tmp_path, [{"id": "refactor", "type": "drive", "drive": "fake", "next": "end"}])
     assert "結果: 完了" in text, text
-    counts = s.log[0]["counts"]
+    counts = s.state.log[0]["counts"]
     assert counts["adopted"] == 2
     assert counts["inner"] == {"rounds": 3, "findings": 5, "review_status": "approved"}
     assert json.loads(res.read_text()) == {"review_status": "approved"}
@@ -203,7 +204,7 @@ def temp_root(tmp_path, monkeypatch):
     """tmp_path/tmp を一時ディレクトリとみなし、状態の実体の置き場所を tmp_path/state にする。"""
     t = tmp_path / "tmp"
     t.mkdir()
-    monkeypatch.setattr(sv, "temp_roots", lambda: (t.resolve(),))
+    monkeypatch.setattr(paths, "temp_roots", lambda: (t.resolve(),))
     monkeypatch.setenv("NDF_SV_STATE_DIR", str(tmp_path / "state" / "sv"))
     return t
 
@@ -212,20 +213,20 @@ def test_state_under_temp_is_symlink_to_state_home(tmp_path, temp_root):
     plan = temp_root / "r1" / "plan-impl.json"
     plan.parent.mkdir()
     plan.write_text('{"steps": []}')
-    d = sv.state_dir_of(str(plan))
+    d = paths.state_dir_of(str(plan))
     assert d == plan.parent / "plan-impl-state" and d.is_symlink()
     real = d.resolve()
     assert real.parent == (tmp_path / "state" / "sv").resolve()
     assert real.name.startswith("plan-impl-") and len(real.name) == len("plan-impl-") + 8
     assert (real / "plan.json").read_text() == '{"steps": []}'
-    assert sv.state_dir_of(str(plan)).resolve() == real  # 2 度目も同じ実体
+    assert paths.state_dir_of(str(plan)).resolve() == real  # 2 度目も同じ実体
 
 
 def test_state_outside_temp_stays_a_directory_path(tmp_path, temp_root):
     plan = tmp_path / "keep" / "plan-impl.json"
     plan.parent.mkdir()
     plan.write_text("{}")
-    d = sv.state_dir_of(str(plan))
+    d = paths.state_dir_of(str(plan))
     assert d == plan.parent / "plan-impl-state" and not d.exists()
 
 
@@ -233,7 +234,7 @@ def test_existing_state_directory_is_kept(tmp_path, temp_root):
     plan = temp_root / "plan-impl.json"
     plan.write_text("{}")
     (temp_root / "plan-impl-state").mkdir()
-    d = sv.state_dir_of(str(plan))
+    d = paths.state_dir_of(str(plan))
     assert d.is_dir() and not d.is_symlink()
 
 
@@ -241,7 +242,7 @@ def test_state_home_under_temp_makes_no_symlink(tmp_path, temp_root, monkeypatch
     monkeypatch.setenv("NDF_SV_STATE_DIR", str(temp_root / "sv"))
     plan = temp_root / "plan-impl.json"
     plan.write_text("{}")
-    assert not sv.state_dir_of(str(plan)).is_symlink()
+    assert not paths.state_dir_of(str(plan)).is_symlink()
 
 
 # --- phase_cost.py の既定の置き場所 ---

@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/lib/worktree-registry.sh", "name": "wt_lock_release", "kind": "same-body", "reason": "lock-common.sh への委譲。workflow-common.sh の委譲と同じ形であることを test_registry.py が求める（#297）"}

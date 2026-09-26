@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/mission-state.py", "name": "", "kind": "lines", "reason": "C1 で重複をライブラリへ置き換えた時点で 568 行。500 行以下にしたら消す", "lines": 568}

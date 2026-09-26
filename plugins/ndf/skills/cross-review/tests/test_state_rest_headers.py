@@ -5,6 +5,7 @@
 現状の振る舞いを記録する（現状固定テスト。正しさを主張しない）。
 """
 from __future__ import annotations
+import review_lib.github
 
 
 def test_headers_are_lowercased_and_body_is_split_at_the_blank_line(state_mod):
@@ -16,7 +17,7 @@ def test_headers_are_lowercased_and_body_is_split_at_the_blank_line(state_mod):
         "\r\n"
         '{"number": 1}'
     )
-    headers, body = state_mod._parse_rest_headers(text)
+    headers, body = review_lib.github._parse_rest_headers(text)
 
     assert headers == {
         "content-type": "application/json",
@@ -34,7 +35,7 @@ def test_the_status_line_without_a_colon_is_not_a_header(state_mod):
         "\r\n"
         "body"
     )
-    headers, body = state_mod._parse_rest_headers(text)
+    headers, body = review_lib.github._parse_rest_headers(text)
 
     assert headers == {"accept": "application/json"}
     assert body == "body"
@@ -47,7 +48,7 @@ def test_an_input_without_a_blank_line_yields_an_empty_body(state_mod):
         "Content-Type: application/json\r\n"
         "X-Ratelimit-Remaining: 10\r\n"
     )
-    headers, body = state_mod._parse_rest_headers(text)
+    headers, body = review_lib.github._parse_rest_headers(text)
 
     assert headers == {
         "content-type": "application/json",

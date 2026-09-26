@@ -13,6 +13,9 @@ import json
 import subprocess
 
 import pytest
+import review_lib
+import review_lib.ci
+import review_lib.github
 
 PR = 320
 REPO = "devbasex/ai-plugins"
@@ -40,7 +43,7 @@ RAW = (
 
 
 def _response(state_mod, body=None, remaining=None):
-    return state_mod.RestResponse(
+    return review_lib.github.RestResponse(
         headers={}, body=PULL_BODY if body is None else body,
         rate_remaining=remaining, rate_reset=None,
     )
@@ -55,26 +58,26 @@ def _response(state_mod, body=None, remaining=None):
     "ssh://git@github.com/devbasex/ai-plugins.git",
 ])
 def test_the_repository_name_comes_from_the_git_remote(state_mod, monkeypatch, url):
-    monkeypatch.setattr(state_mod, "_git_remote_url", lambda: url)
+    monkeypatch.setattr(review_lib.github, "_git_remote_url", lambda: url)
 
-    assert state_mod._repo_from_git() == REPO
+    assert review_lib.github._repo_from_git() == REPO
 
 
 def test_an_unreadable_remote_gives_no_name(state_mod, monkeypatch):
-    monkeypatch.setattr(state_mod, "_git_remote_url", lambda: "")
+    monkeypatch.setattr(review_lib.github, "_git_remote_url", lambda: "")
 
-    assert state_mod._repo_from_git() is None
+    assert review_lib.github._repo_from_git() is None
 
 
 # ---------------- 1 回の応答から全部を埋める ----------------
 
 def test_one_rest_response_fills_author_head_and_base(state_mod, real_github, monkeypatch):
     paths: list[str] = []
-    monkeypatch.setattr(state_mod, "_repo_from_git", lambda: REPO)
-    monkeypatch.setattr(state_mod, "_gh_rest", lambda p: (paths.append(p), _response(state_mod))[1])
-    monkeypatch.setattr(state_mod, "_sh", lambda *a, **k: pytest.fail("GraphQL へ落ちてはならない"))
+    monkeypatch.setattr(review_lib.github, "_repo_from_git", lambda: REPO)
+    monkeypatch.setattr(review_lib.github, "_gh_rest", lambda p: (paths.append(p), _response(state_mod))[1])
+    monkeypatch.setattr(review_lib, "_sh", lambda *a, **k: pytest.fail("GraphQL へ落ちてはならない"))
 
-    meta = state_mod._fetch_pr_metadata(PR)
+    meta = review_lib.github._fetch_pr_metadata(PR)
 
     assert paths == [f"repos/{REPO}/pulls/{PR}"]
     assert meta.repo == REPO
@@ -88,10 +91,10 @@ def test_one_rest_response_fills_author_head_and_base(state_mod, real_github, mo
 def test_a_fork_pull_request_is_detected_from_the_same_response(state_mod, real_github, monkeypatch):
     body = json.loads(json.dumps(PULL_BODY))
     body["head"]["repo"]["full_name"] = "someone/ai-plugins"
-    monkeypatch.setattr(state_mod, "_repo_from_git", lambda: REPO)
-    monkeypatch.setattr(state_mod, "_gh_rest", lambda p: _response(state_mod, body))
+    monkeypatch.setattr(review_lib.github, "_repo_from_git", lambda: REPO)
+    monkeypatch.setattr(review_lib.github, "_gh_rest", lambda p: _response(state_mod, body))
 
-    assert state_mod._fetch_pr_metadata(PR).is_fork is True
+    assert review_lib.github._fetch_pr_metadata(PR).is_fork is True
 
 
 def test_a_wrong_repository_name_falls_back_to_gh_repo_view(state_mod, real_github, monkeypatch):
@@ -102,22 +105,22 @@ def test_a_wrong_repository_name_falls_back_to_gh_repo_view(state_mod, real_gith
         paths.append(path)
         return _response(state_mod) if path == f"repos/{REPO}/pulls/{PR}" else None
 
-    monkeypatch.setattr(state_mod, "_repo_from_git", lambda: "wrong/name")
-    monkeypatch.setattr(state_mod, "_gh_rest", _rest)
-    monkeypatch.setattr(state_mod, "_sh", lambda cmd, check=True: REPO)
+    monkeypatch.setattr(review_lib.github, "_repo_from_git", lambda: "wrong/name")
+    monkeypatch.setattr(review_lib.github, "_gh_rest", _rest)
+    monkeypatch.setattr(review_lib, "_sh", lambda cmd, check=True: REPO)
 
-    meta = state_mod._fetch_pr_metadata(PR)
+    meta = review_lib.github._fetch_pr_metadata(PR)
 
     assert paths == [f"repos/wrong/name/pulls/{PR}", f"repos/{REPO}/pulls/{PR}"]
     assert meta.repo == REPO
 
 
 def test_an_unreachable_pull_request_gives_nothing(state_mod, real_github, monkeypatch):
-    monkeypatch.setattr(state_mod, "_repo_from_git", lambda: REPO)
-    monkeypatch.setattr(state_mod, "_gh_rest", lambda p: None)
-    monkeypatch.setattr(state_mod, "_sh", lambda cmd, check=True: REPO)
+    monkeypatch.setattr(review_lib.github, "_repo_from_git", lambda: REPO)
+    monkeypatch.setattr(review_lib.github, "_gh_rest", lambda p: None)
+    monkeypatch.setattr(review_lib, "_sh", lambda cmd, check=True: REPO)
 
-    assert state_mod._fetch_pr_metadata(PR) is None
+    assert review_lib.github._fetch_pr_metadata(PR) is None
 
 
 # ---------------- 残量は通常の要求の応答ヘッダから読む ----------------
@@ -128,9 +131,9 @@ def test_the_rate_limit_is_read_from_the_response_header(state_mod, monkeypatch)
         assert cmd[:3] == ["gh", "api", "-i"]
         return subprocess.CompletedProcess(cmd, 0, stdout=RAW, stderr="")
 
-    monkeypatch.setattr(state_mod.subprocess, "run", _run)
+    monkeypatch.setattr(subprocess, "run", _run)
 
-    resp = state_mod._gh_rest(f"repos/{REPO}/pulls/{PR}")
+    resp = review_lib.github._gh_rest(f"repos/{REPO}/pulls/{PR}")
 
     assert resp.rate_remaining == 4972
     assert resp.rate_reset == "1788519069"
@@ -141,12 +144,12 @@ def test_the_rate_limit_is_read_from_the_response_header(state_mod, monkeypatch)
 def test_a_failed_call_returns_nothing(state_mod, monkeypatch):
     """失敗は例外にせず `None` で返す。待ち行列を挟む位置になる（#291）。"""
     monkeypatch.setattr(
-        state_mod.subprocess, "run",
+        subprocess, "run",
         lambda cmd, capture_output=True, text=True:
             subprocess.CompletedProcess(cmd, 1, stdout="", stderr="HTTP 422"),
     )
 
-    assert state_mod._gh_rest("repos/o/r/commits/x/check-runs") is None
+    assert review_lib.github._gh_rest("repos/o/r/commits/x/check-runs") is None
 
 
 # ---------------- チェックジョブの一覧はページを読み切る ----------------
@@ -156,7 +159,7 @@ def _check_run(name: str) -> dict:
 
 
 def _check_runs_response(state_mod, total: int, names: list[str]):
-    return state_mod.RestResponse(
+    return review_lib.github.RestResponse(
         headers={}, body={"total_count": total, "check_runs": [_check_run(n) for n in names]},
         rate_remaining=None, rate_reset=None,
     )
@@ -170,9 +173,9 @@ def test_check_runs_are_read_one_hundred_at_a_time(state_mod, real_github, monke
         paths.append(path)
         return _check_runs_response(state_mod, 9, [f"job{i}" for i in range(9)])
 
-    monkeypatch.setattr(state_mod, "_gh_rest", _rest)
+    monkeypatch.setattr(review_lib.github, "_gh_rest", _rest)
 
-    runs = state_mod._fetch_check_runs(REPO, "b87b3ae")
+    runs = review_lib.ci._fetch_check_runs(REPO, "b87b3ae")
 
     assert len(runs) == 9
     assert paths == [f"repos/{REPO}/commits/b87b3ae/check-runs?per_page=100&page=1"]
@@ -191,9 +194,9 @@ def test_check_runs_beyond_one_page_are_followed(state_mod, real_github, monkeyp
         seen.append(page)
         return _check_runs_response(state_mod, 120, pages[page])
 
-    monkeypatch.setattr(state_mod, "_gh_rest", _rest)
+    monkeypatch.setattr(review_lib.github, "_gh_rest", _rest)
 
-    runs = state_mod._fetch_check_runs(REPO, "b87b3ae")
+    runs = review_lib.ci._fetch_check_runs(REPO, "b87b3ae")
 
     assert seen == [1, 2]
     assert len(runs) == 120
@@ -207,9 +210,9 @@ def test_a_failing_later_page_gives_nothing(state_mod, real_github, monkeypatch)
             return _check_runs_response(state_mod, 120, [f"job{i}" for i in range(100)])
         return None
 
-    monkeypatch.setattr(state_mod, "_gh_rest", _rest)
+    monkeypatch.setattr(review_lib.github, "_gh_rest", _rest)
 
-    assert state_mod._fetch_check_runs(REPO, "b87b3ae") is None
+    assert review_lib.ci._fetch_check_runs(REPO, "b87b3ae") is None
 
 
 def test_reading_stops_at_the_page_limit(state_mod, real_github, monkeypatch):
@@ -218,8 +221,8 @@ def test_reading_stops_at_the_page_limit(state_mod, real_github, monkeypatch):
         page = path.rsplit("page=", 1)[1]
         return _check_runs_response(state_mod, 10_000, [f"p{page}-job{i}" for i in range(100)])
 
-    monkeypatch.setattr(state_mod, "_gh_rest", _rest)
+    monkeypatch.setattr(review_lib.github, "_gh_rest", _rest)
 
-    runs = state_mod._fetch_check_runs(REPO, "b87b3ae")
+    runs = review_lib.ci._fetch_check_runs(REPO, "b87b3ae")
 
-    assert len(runs) == 100 * state_mod.CHECK_RUNS_MAX_PAGES
+    assert len(runs) == 100 * review_lib.ci.CHECK_RUNS_MAX_PAGES

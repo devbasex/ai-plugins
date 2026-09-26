@@ -19,6 +19,10 @@ SCRIPTS = pathlib.Path(__file__).resolve().parent.parent / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 from classifications import (default_max_rounds, diff_scope, oversized_design_docs,  # noqa: E402
                              review_kind)
+import review_lib
+import review_lib.commands.init
+import review_lib.github
+import review_lib.workspace
 
 PR = 7300
 REPO = "o/r"
@@ -62,10 +66,10 @@ def init_env(monkeypatch, state_mod, tmp_path, fake_gh):
     worktree = tmp_path / "wt"
     (worktree / "issues").mkdir(parents=True)
     (worktree / "issues" / "1-design.md").write_text("x\n" * 1200)
-    monkeypatch.setattr(state_mod, "_sh", lambda cmd, check=True: "takemi")
-    monkeypatch.setattr(state_mod, "_create_worktree", lambda *a: None)
-    monkeypatch.setattr(state_mod, "_is_registered_worktree", lambda p: True)
-    monkeypatch.setattr(state_mod, "_sync_worktree", lambda *a, **k: None)
+    monkeypatch.setattr(review_lib, "_sh", lambda cmd, check=True: "takemi")
+    monkeypatch.setattr(review_lib.workspace, "_create_worktree", lambda *a: None)
+    monkeypatch.setattr(review_lib.workspace, "_is_registered_worktree", lambda p: True)
+    monkeypatch.setattr(review_lib.workspace, "_sync_worktree", lambda *a, **k: None)
     monkeypatch.setenv("NDF_SKIP_AUTH_CHECK", "1")
     real_run = subprocess.run
 
@@ -74,7 +78,7 @@ def init_env(monkeypatch, state_mod, tmp_path, fake_gh):
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
         return real_run(cmd, *args, **kwargs)
 
-    monkeypatch.setattr(state_mod.subprocess, "run", _run)
+    monkeypatch.setattr(subprocess, "run", _run)
     fake_gh.set_rules([
         {"match": f"repos/{REPO}/pulls/{PR}/files", "stdout": "", "exit": 1},
         {"match": f"pr view {PR} --json files",
@@ -83,10 +87,10 @@ def init_env(monkeypatch, state_mod, tmp_path, fake_gh):
 
     def run(branch, max_rounds=None):
         monkeypatch.setattr(
-            state_mod, "_fetch_pr_metadata",
-            lambda pr, repo=None: state_mod.PrMetadata(
+            review_lib.github, "_fetch_pr_metadata",
+            lambda pr, repo=None: review_lib.github.PrMetadata(
                 REPO, "takemi", branch, "abc123", "develop", False, 4000, None))
-        state_mod.cmd_init(argparse.Namespace(
+        review_lib.commands.init.cmd_init(argparse.Namespace(
             pr=PR, max_rounds=max_rounds, rotate_after=None, only=None, worktree=str(worktree),
             focus=None, extra_instructions_file=None, host="claude"))
         return json.loads((tmp_path / f"cross-review-pr{PR}-state.json").read_text(encoding="utf-8"))

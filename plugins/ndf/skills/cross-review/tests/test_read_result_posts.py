@@ -20,6 +20,7 @@ import json
 import pathlib
 
 import pytest
+import review_lib.commands.read_result
 
 PR = 730
 AGENT = "codex"
@@ -97,7 +98,7 @@ def test_the_take_in_posts_the_review_and_records_the_response(
     _result(tmp_dir)
     fake_gh.set_rules([_NO_PRIOR, _ACCEPT])
 
-    state_mod.cmd_read_result(_args())
+    review_lib.commands.read_result.cmd_read_result(_args())
 
     entry = _entry(tmp_dir)
     assert entry["review_url"] == _URL         # 送信の応答から取る（AC15）
@@ -117,7 +118,7 @@ def test_no_body_reaches_the_answer(tmp_dir, state_mod, fake_gh, capsys) -> None
     _result(tmp_dir)
     fake_gh.set_rules([_NO_PRIOR, _ACCEPT])
 
-    state_mod.cmd_read_result(_args())
+    review_lib.commands.read_result.cmd_read_result(_args())
 
     captured = capsys.readouterr()
     assert INLINE_TEXT not in captured.out and INLINE_TEXT not in captured.err
@@ -132,7 +133,7 @@ def test_the_body_is_sent_from_the_note(tmp_dir, state_mod, fake_gh) -> None:
     _result(tmp_dir)
     fake_gh.set_rules([_NO_PRIOR, _ACCEPT])
 
-    state_mod.cmd_read_result(_args())
+    review_lib.commands.read_result.cmd_read_result(_args())
 
     sent = [c for c in fake_gh.calls() if "--method POST" in " ".join(c["argv"])]
     body = json.loads(sent[-1]["stdin"])
@@ -149,7 +150,7 @@ def test_a_second_take_in_does_not_add_a_second_review(
     _note(tmp_dir)
     _result(tmp_dir)
     fake_gh.set_rules([_NO_PRIOR, _ACCEPT])
-    state_mod.cmd_read_result(_args())
+    review_lib.commands.read_result.cmd_read_result(_args())
     posted_once = len([c for c in fake_gh.joined() if "--method POST" in c])
 
     # 記録を消して、投稿だけが残った状態を作る。
@@ -164,7 +165,7 @@ def test_a_second_take_in_does_not_add_a_second_review(
             "html_url": _URL}])},
     ])
 
-    state_mod.cmd_read_result(_args())
+    review_lib.commands.read_result.cmd_read_result(_args())
 
     assert len([c for c in fake_gh.joined() if "--method POST" in c]) == posted_once
     assert _entry(tmp_dir)["review_url"] == _URL
@@ -178,7 +179,7 @@ def test_findings_without_an_inline_are_still_a_result(
     _result(tmp_dir)
     fake_gh.set_rules([_NO_PRIOR, _ACCEPT])
 
-    state_mod.cmd_read_result(_args())
+    review_lib.commands.read_result.cmd_read_result(_args())
 
     entry = _entry(tmp_dir)
     assert entry["intent"] == "REQUEST_CHANGES"
@@ -194,7 +195,7 @@ def test_a_note_alone_is_treated_as_no_result(tmp_dir, state_mod, fake_gh) -> No
     fake_gh.set_rules([_NO_PRIOR, _ACCEPT])
 
     with pytest.raises(SystemExit):
-        state_mod.cmd_read_result(_args())
+        review_lib.commands.read_result.cmd_read_result(_args())
 
     assert [c for c in fake_gh.joined() if "--method POST" in c] == []
 
@@ -207,7 +208,7 @@ def test_only_what_is_sent_is_downgraded_on_ones_own_pull_request(
     _result(tmp_dir)
     fake_gh.set_rules([_NO_PRIOR, _ACCEPT])
 
-    state_mod.cmd_read_result(_args())
+    review_lib.commands.read_result.cmd_read_result(_args())
 
     sent = [c for c in fake_gh.calls() if "--method POST" in " ".join(c["argv"])]
     assert json.loads(sent[-1]["stdin"])["event"] == "COMMENT"
@@ -224,7 +225,7 @@ def test_a_reviewer_that_wrote_nothing_adds_no_review(
     fake_gh.set_rules([_NO_PRIOR, _ACCEPT])
 
     with pytest.raises(SystemExit):
-        state_mod.cmd_read_result(_args())
+        review_lib.commands.read_result.cmd_read_result(_args())
 
     assert [c for c in fake_gh.joined() if "--method POST" in c] == []
     assert _entry(tmp_dir)["intent"] == "NO_RESULT"

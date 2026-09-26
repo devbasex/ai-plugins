@@ -12,6 +12,8 @@ import json
 import pathlib
 
 import pytest
+import review_lib.commands.read_result
+import review_lib.github
 
 
 PR = 4242
@@ -48,7 +50,7 @@ def patched_tmp_dir(monkeypatch, tmp_path, state_mod):
 @pytest.fixture(autouse=True)
 def review_posted(monkeypatch, state_mod):
     """投稿の実在確認は届いた前提にする。ここで見るのはスキーマの揺れである。"""
-    monkeypatch.setattr(state_mod, "_review_exists", lambda repo, pr, url: True)
+    monkeypatch.setattr(review_lib.github, "_review_exists", lambda repo, pr, url: True)
 
 
 def test_canonical_schema(patched_tmp_dir, state_mod):
@@ -64,7 +66,7 @@ def test_canonical_schema(patched_tmp_dir, state_mod):
     rfile = tmp_dir / "result.json"
     rfile.write_text(json.dumps(result))
 
-    state_mod.cmd_read_result(_make_args(rfile))
+    review_lib.commands.read_result.cmd_read_result(_make_args(rfile))
 
     st = _read_state(tmp_dir)
     merged = st["rounds"][-1][AGENT]
@@ -89,7 +91,7 @@ def test_alias_schema_intent_and_comment_count(patched_tmp_dir, state_mod):
     rfile = tmp_dir / "result.json"
     rfile.write_text(json.dumps(result))
 
-    state_mod.cmd_read_result(_make_args(rfile))
+    review_lib.commands.read_result.cmd_read_result(_make_args(rfile))
 
     st = _read_state(tmp_dir)
     merged = st["rounds"][-1][AGENT]
@@ -113,7 +115,7 @@ def test_missing_event_and_intent_dies(patched_tmp_dir, state_mod):
     rfile.write_text(json.dumps(result))
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_read_result(_make_args(rfile))
+        review_lib.commands.read_result.cmd_read_result(_make_args(rfile))
     assert e.value.code == 1
 
     st = _read_state(tmp_dir)
@@ -130,7 +132,7 @@ def test_empty_result_file_dies(patched_tmp_dir, state_mod):
     rfile.write_text("")
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_read_result(_make_args(rfile))
+        review_lib.commands.read_result.cmd_read_result(_make_args(rfile))
     assert e.value.code == 1
 
 
@@ -149,7 +151,7 @@ def test_non_dict_result_json_dies(patched_tmp_dir, state_mod, capsys):
     rfile.write_text(json.dumps([{"event": "APPROVE"}]))
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_read_result(_make_args(rfile))
+        review_lib.commands.read_result.cmd_read_result(_make_args(rfile))
     assert e.value.code == 3
     captured = capsys.readouterr()
     assert "dict ではない" in captured.err
@@ -167,7 +169,7 @@ def test_invalid_json_result_file_dies(patched_tmp_dir, state_mod, capsys):
     rfile.write_text("{ this is not valid json")
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_read_result(_make_args(rfile))
+        review_lib.commands.read_result.cmd_read_result(_make_args(rfile))
     assert e.value.code == 3
     captured = capsys.readouterr()
     assert "parse" in captured.err.lower() or "parse" in captured.err
@@ -184,14 +186,14 @@ def test_the_take_in_passes_the_start_of_the_round(
     rfile = tmp_dir / "result.json"
     rfile.write_text(json.dumps({"event": "APPROVE", "comments_count": 0}))
     seen = {}
-    offline = state_mod.result_posts.post_review
+    offline = review_lib.commands.read_result.result_posts.post_review
 
     def _spy(*a, **kw):
         seen["since"] = kw.get("since")
         return offline(*a, **kw)
 
-    monkeypatch.setattr(state_mod.result_posts, "post_review", _spy)
+    monkeypatch.setattr(review_lib.commands.read_result.result_posts, "post_review", _spy)
 
-    state_mod.cmd_read_result(_make_args(rfile))
+    review_lib.commands.read_result.cmd_read_result(_make_args(rfile))
 
     assert seen["since"] == "2026-05-21T00:00:00+00:00"

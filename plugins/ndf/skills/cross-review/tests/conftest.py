@@ -16,6 +16,9 @@ import types
 
 _HERE = pathlib.Path(__file__).resolve().parent
 _SCRIPT = _HERE.parent / "scripts" / "state.py"
+# `state.py` の中身は隣の `review_lib/` にある（#1142 の C2）。テストはそのモジュールを直接 import し、
+# 関数を定義したモジュールの上で差し替える。
+sys.path.insert(0, str(_SCRIPT.parent))
 _MONITOR = _HERE.parent / "scripts" / "monitor.py"
 _MEASURE = _HERE.parent / "scripts" / "measure.py"
 
@@ -47,16 +50,16 @@ _ASSIGNMENT = _HERE.parents[2] / "scripts" / "lib" / "assignment.py"
 import pytest
 
 
-# 既定で差し替える、GitHub を読みに行く関数。実物は `_REAL` へ退避する。
-_GITHUB_LOOKUPS = ("_fetch_check_runs", "_fetch_pr_metadata")
-_REAL: dict[str, object] = {}
+# 既定で差し替える、GitHub を読みに行く関数（定義を置いたモジュールと名前）。実物は `_REAL` へ退避する。
+_GITHUB_LOOKUPS = (("review_lib.ci", "_fetch_check_runs"), ("review_lib.github", "_fetch_pr_metadata"))
+_REAL: dict[tuple[str, str], object] = {}
 
 
 @pytest.fixture(scope="session")
 def state_mod() -> types.ModuleType:
     mod = _load_state_module()
-    for name in _GITHUB_LOOKUPS:
-        _REAL[name] = getattr(mod, name)
+    for key in _GITHUB_LOOKUPS:
+        _REAL[key] = getattr(sys.modules[key[0]], key[1])
     return mod
 
 
@@ -128,14 +131,14 @@ def _no_github_state(request, monkeypatch) -> None:
     """
     if "state_mod" not in request.fixturenames:
         return
-    state_mod = request.getfixturevalue("state_mod")
-    monkeypatch.setattr(state_mod, "_fetch_check_runs", lambda repo, sha: None)
-    monkeypatch.setattr(state_mod, "_fetch_pr_metadata", lambda pr, repo=None: None)
+    request.getfixturevalue("state_mod")
+    monkeypatch.setattr(sys.modules["review_lib.ci"], "_fetch_check_runs", lambda repo, sha: None)
+    monkeypatch.setattr(sys.modules["review_lib.github"], "_fetch_pr_metadata", lambda pr, repo=None: None)
     # **取り込みはレビューを投稿する**（#730）。投稿を見ないテストでは、組み立てまでを
     # 本物で通し、送信だけを「届いた」に置き換える。偽の `gh` を要求するテストは
     # 送信も含めてチェックするため置き換えない。
     if "fake_gh" not in request.fixturenames:
-        rp = state_mod.result_posts
+        rp = sys.modules["review_lib.commands.read_result"].result_posts
         monkeypatch.setattr(rp, "post_review", _post_review_offline(rp))
         monkeypatch.setattr(rp, "push_fix",
                             lambda worktree, head, commit: rp.PushResult(
@@ -166,8 +169,8 @@ def real_github(monkeypatch, state_mod):
     取得そのものの組み立てを見るテストが使う。GitHub へは `_gh_rest` か
     `subprocess.run` の差し替えで届かないようにする。
     """
-    for name in _GITHUB_LOOKUPS:
-        monkeypatch.setattr(state_mod, name, _REAL[name])
+    for key in _GITHUB_LOOKUPS:
+        monkeypatch.setattr(sys.modules[key[0]], key[1], _REAL[key])
 
 
 # ---- 模した `gh` を PATH の先頭へ置く（#291） ----

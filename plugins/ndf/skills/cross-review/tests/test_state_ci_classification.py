@@ -13,6 +13,9 @@ import json
 import pathlib
 
 import pytest
+import review_lib.ci
+import review_lib.commands.judge
+import review_lib.commands.merge_fix
 
 PR = 7712
 REPO = "o/r"
@@ -52,14 +55,14 @@ def _write(tmp_dir: pathlib.Path, state: dict) -> None:
 
 def test_an_unknown_name_is_treated_as_code_related(state_mod):
     """一覧に無い名前は code-related として扱う（保守的な既定）。"""
-    got = state_mod._classify_ci([_run("我々の知らないチェック")])
+    got = review_lib.ci._classify_ci([_run("我々の知らないチェック")])
 
     assert got.code_failed == ["我々の知らないチェック"]
     assert got.meta_failed == []
 
 
 def test_a_meta_name_is_separated_from_a_code_name(state_mod):
-    got = state_mod._classify_ci([_run("check_pr_requirements"), _run("pytest")])
+    got = review_lib.ci._classify_ci([_run("check_pr_requirements"), _run("pytest")])
 
     assert got.code_failed == ["pytest"]
     assert got.meta_failed == ["check_pr_requirements"]
@@ -71,7 +74,7 @@ def test_a_code_name_that_starts_with_a_meta_word_is_not_meta(state_mod):
     部分一致で拾うと `metabase tests` / `metadata lint` のようなコードチェックが
     meta-only になり、失敗したまま収束する。一覧に無い名前は code-related へ倒す。
     """
-    got = state_mod._classify_ci([_run("metabase tests"), _run("metadata lint")])
+    got = review_lib.ci._classify_ci([_run("metabase tests"), _run("metadata lint")])
 
     assert got.code_failed == ["metabase tests", "metadata lint"]
     assert got.meta_failed == []
@@ -79,7 +82,7 @@ def test_a_code_name_that_starts_with_a_meta_word_is_not_meta(state_mod):
 
 def test_a_meta_word_between_separators_is_still_meta(state_mod):
     """区切りで挟まれた語は meta-only のままにする。"""
-    got = state_mod._classify_ci([
+    got = review_lib.ci._classify_ci([
         _run("meta"), _run("meta / labels"), _run("pr-meta"), _run("check_pr_requirements"),
     ])
 
@@ -88,7 +91,7 @@ def test_a_meta_word_between_separators_is_still_meta(state_mod):
 
 
 def test_a_run_that_has_not_completed_is_neither(state_mod):
-    got = state_mod._classify_ci([
+    got = review_lib.ci._classify_ci([
         _run("pytest", status="in_progress", conclusion=""),
         _run("lint", status="queued", conclusion=""),
         _run("build", conclusion="success"),
@@ -104,14 +107,14 @@ def test_a_run_that_has_not_completed_is_neither(state_mod):
 def test_the_judge_and_the_merge_share_one_classification(tmp_dir, state_mod, monkeypatch):
     """同じ名前の一覧に対して、判定と修正の取り込みが同じ判断へ至る。"""
     seen: list[list[str]] = []
-    real = state_mod._classify_ci
+    real = review_lib.ci._classify_ci
 
     def _spy(runs):
         seen.append([str(r.get("name")) for r in runs])
         return real(runs)
 
-    monkeypatch.setattr(state_mod, "_classify_ci", _spy)
-    monkeypatch.setattr(state_mod, "_fetch_check_runs", lambda repo, sha: [_run("pytest")])
+    monkeypatch.setattr(review_lib.ci, "_classify_ci", _spy)
+    monkeypatch.setattr(review_lib.ci, "_fetch_check_runs", lambda repo, sha: [_run("pytest")])
 
     # 修正の取り込み側: 申告された失敗の名前を読む
     approved = {
@@ -126,12 +129,12 @@ def test_the_judge_and_the_merge_share_one_classification(tmp_dir, state_mod, mo
         "ci_failed_checks": ["pytest"], "fixed_count": 1,
     }))
     with pytest.raises(SystemExit) as merge_exit:
-        state_mod.cmd_merge_fix(argparse.Namespace(pr=PR, file=None))
+        review_lib.commands.merge_fix.cmd_merge_fix(argparse.Namespace(pr=PR, file=None))
 
     # 判定側: GitHub から読んだチェックジョブを見る
     _write(tmp_dir, _state([approved]))
     with pytest.raises(SystemExit) as judge_exit:
-        state_mod.cmd_judge(argparse.Namespace(pr=PR))
+        review_lib.commands.judge.cmd_judge(argparse.Namespace(pr=PR))
 
     assert merge_exit.value.code == 3   # 修正の取り込みは中断する
     assert judge_exit.value.code == 2   # 判定は中断せず修正へ回す
@@ -151,7 +154,7 @@ def test_merge_fix_continues_when_only_meta_checks_failed(tmp_dir, state_mod):
         "ci_failed_checks": ["labels"], "fixed_count": 1,
     }))
 
-    state_mod.cmd_merge_fix(argparse.Namespace(pr=PR, file=None))
+    review_lib.commands.merge_fix.cmd_merge_fix(argparse.Namespace(pr=PR, file=None))
 
     saved = json.loads((tmp_dir / f"cross-review-pr{PR}-state.json").read_text())
     assert saved["rounds"][-1]["fix"]["ci_note"] == (

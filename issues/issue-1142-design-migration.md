@@ -149,7 +149,7 @@ graph LR
 
 | ステージ | 移行ステップ | 触るファイル |
 | --- | --- | --- |
-| 1 | S1 構造チェック | 根の `scripts/check-script-structure.py`・`scripts/script-structure-allow.json`・`scripts/measure/structure-baseline.py`・`scripts/measure/claude-p-usage.py`（パスを引数へ）・`scripts/tests/test_check_script_structure.py`・`.github/workflows/script-structure.yml` |
+| 1 | S1 構造チェック | 根の `scripts/check-script-structure.py`・`scripts/script-structure-allow/`・`scripts/measure/structure-baseline.py`・`scripts/measure/claude-p-usage.py`（パスを引数へ）・`scripts/tests/test_check_script_structure.py`・`.github/workflows/script-structure.yml` |
 | 1 | S2 検査の件数（d） | `skills/cross-review/scripts/drive.py`・`skills/cross-refactoring/scripts/drive.py`・両方の `tests/test_drive.py` |
 | 1 | S3 消費の記録（f と d の入れ子） | `scripts/lib/usage_ledger.py`（新設）・`scripts/supervise.py`（`claude_cmd`・`call_claude`・`add_usage`・`do_drive`・`state_dir_of` だけ）・`scripts/mvv-gate.py`（`ask` だけ）・根の `scripts/token-usage.py`・`scripts/experimental/phase_cost.py`（既定の glob）・`skills/development-workflow/references/relay.md`（例のパス）・テスト |
 | 2 | S4 設計文書の材料（e） | `scripts/mvv-gate.py`（`cmd_check`・`record`）・`scripts/tests/test_mvv_gate.py` |
@@ -164,7 +164,7 @@ S1 の例外リストは、その時点の違反をすべて載せて始める�
 
 | ステージ | 移行ステップ | 触るファイル | 見積りの行数（移行後の最大） |
 | --- | --- | --- | --- |
-| 1 | L0 ライブラリ | `lib/` に `clock.py`・`jsonio.py`・`proc.py`・`repo.py`・`loop_drive.py` を新設。`lib/limits.py`（`resolve_cli_timeout`・V3）・`lib/launch-cli.sh`（`resolve_print_timeout` を `limits.py` の 1 回へ）・`lib/step_result.py`（`git`・`gh_json` を `proc` の上へ）・`lib/statefile.py`（`now`・`die`・`info` を再エクスポート）・`lib/deps.py`（新設。`require()`・h）・`plugins/ndf/pyproject.toml` と `plugins/ndf/uv.lock`（新設。h）・`lib/gh_parts.py`（ETag 付きの読み直し・PR と課題の単発の読み書きの REST の関数・枠の使い分けと上限の代替・待ちの間隔の伸長・g。試行が成り立てば githubkit の上に置く。決定 17。`gh_call`・`gh_quota`・`gh_fields`・`gh_rest`・`gh_graphql`・`gh_checks`・`gh_pr_info`・`gh_sections` の 8 本を新設して分け、`gh_parts.py` はエントリポイントと再エクスポートにする。分け方は [issue-1142-design-modules.md](issue-1142-design-modules.md) ）・根の `scripts/check-script-structure.py` と `scripts/script-structure-allow.json`（行数の上限を 500 へ下げ、500 行を超えるファイルを行数付きで例外リストへ載せ、載せた行数を超えたら落とす。決定 18）・`lib/README.md`・テスト。**呼び出し側はまだ変えない**。C1〜C7 は、移すファイルの `gh pr` / `gh issue` の呼び出しを `gh_parts` の関数へ置き換える | 各 150 以下 |
+| 1 | L0 ライブラリ | `lib/` に `clock.py`・`jsonio.py`・`proc.py`・`repo.py`・`loop_drive.py` を新設。`lib/limits.py`（`resolve_cli_timeout`・V3）・`lib/launch-cli.sh`（`resolve_print_timeout` を `limits.py` の 1 回へ）・`lib/step_result.py`（`git`・`gh_json` を `proc` の上へ）・`lib/statefile.py`（`now`・`die`・`info` を再エクスポート）・`lib/deps.py`（新設。`require()`・h）・`plugins/ndf/pyproject.toml` と `plugins/ndf/uv.lock`（新設。h）・`lib/gh_parts.py`（ETag 付きの読み直し・PR と課題の単発の読み書きの REST の関数・枠の使い分けと上限の代替・待ちの間隔の伸長・g。試行が成り立てば githubkit の上に置く。決定 17。`gh_call`・`gh_quota`・`gh_fields`・`gh_rest`・`gh_graphql`・`gh_checks`・`gh_pr_info`・`gh_sections` の 8 本を新設して分け、`gh_parts.py` はエントリポイントと再エクスポートにする。分け方は [issue-1142-design-modules.md](issue-1142-design-modules.md) ）・根の `scripts/check-script-structure.py` と `scripts/script-structure-allow/`（行数の上限を 500 へ下げ、500 行を超えるファイルを行数付きで例外リストへ載せ、載せた行数を超えたら落とす。決定 18）・`lib/README.md`・テスト。**呼び出し側はまだ変えない**。C1〜C7 は、移すファイルの `gh pr` / `gh issue` の呼び出しを `gh_parts` の関数へ置き換える | 各 150 以下 |
 | 2 | C1 プランの実行 | `scripts/supervise.py`・`scripts/supervise_lib/`（新設 19 本。`__init__` を含む）・`mission-state.py`・`mvv-gate.py`・`check-trigger.py`・`mission-close.py`・`scripts/tests/test_supervise*.py` ほか差し替え先 | 最大 `queue.py` 約 295 |
 | 2 | C2 cross-review | `skills/cross-review/scripts/state.py`・`review_lib/`（新設 21 本。`__init__` を含む）・`drive.py`・`measure.py`・`critique.sh`・`launch-reviewer.sh`・`skills/cross-review/tests/`・`skills/fix/tests/test_fix_steps.py`（差し替え先だけ） | 最大 `commands/init.py` 約 435 |
 | 2 | C3 外部 CLI と記録 | `lib/monitor.py`・`lib/monitor_patterns.py`・`monitor_scan.py`・`monitor_proc.py`・`monitor_types.py`・`monitor_loop.py`（新設 5 本）・`lib/monitor_outcome.py`・`lib/run_metrics.py`・`lib/post_queue.py`・`lib/transcript_agents.py`・`skills/external-ai/scripts/external-ai.py`・`scripts/wait-notify.py`・`skills/skill-stats/scripts/skill-stats.py`・`scripts/parallel-measure.py`・テスト | 最大 `monitor_loop.py` 約 300 |
@@ -182,6 +182,12 @@ C2 の後に置く。`lib/README.md` の索引は、各移行ステップが自�
 シム越しの 43 か所のうち 41 か所が `monitor_types`・`monitor_proc` へ向き直り、シムの名前空間を確かめる
 `test_monitor_generic_stem.py` の assert は `_run_all.__globals__` を見る形に変わる。
 
+### ミッション 2b: 汎用の処理をライブラリへ（決定 19・20）
+
+ミッション 2 の開発版の後、ミッション 3 の前に置く。ステージと触るファイルは
+[issue-1142-design-libraries.md](issue-1142-design-libraries.md) の「移行の順序」にある。計画の実行とキュー
+（不足 i）は決定 21（DBOS）で、ミッション 2b の後のミッション 2c にする。
+
 ### ミッション 3: 語・撤去・測り直し
 
 | ステージ | 移行ステップ | 触るファイル |
@@ -193,7 +199,7 @@ C2 の後に置く。`lib/README.md` の索引は、各移行ステップが自�
 | 1 | W5 worktree の語（`主ディレクトリ` → メインディレクトリほか） | C5 と同じファイル |
 | 1 | W6 ラッパーの語（R4・`区間` → セッション・`合図` → シグナルファイル） | C6 と同じファイル |
 | 2 | W7 リリースと文書の語（`配布` → リリースほか） | C7 と同じファイル。W1 と同じステージに置くと並列の上限を超えるためステージ 2 |
-| 3 | X1 撤去と後片付け | `scripts/phase-steps.py`・`scripts/bundle-close.py`（削除）・`.ndf/pace.json`・根の `scripts/script-structure-allow.json`。読み替えを外す課題を起票する |
+| 3 | X1 撤去と後片付け | `scripts/phase-steps.py`・`scripts/bundle-close.py`（削除）・`.ndf/pace.json`・根の `scripts/script-structure-allow/`。読み替えを外す課題を起票する |
 | 4 | X2 測り直し（E9） | ファイルは変えない。`scripts/measure/` の 2 本を E1 と同じ引数で打ち、課題のコメントへ比べた表を残す |
 
 語の移行ステップは、`glossary.py check` を対象のファイルに掛け、旧い語の行が 0 になることを確かめる。

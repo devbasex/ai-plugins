@@ -49,7 +49,6 @@ import argparse
 import json
 import os
 import re
-import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -58,6 +57,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 from step_result import (EXIT_OK, EXIT_PRECONDITION, EXIT_UNREADABLE, EXIT_VIOLATION,  # noqa: E402
                          emit, result)
 from pace import PaceError, matches, read_pace  # noqa: E402
+import clock  # noqa: E402
+import gh_call  # noqa: E402
+import jsonio  # noqa: E402
+import proc  # noqa: E402
+import repo  # noqa: E402
 
 TOOL = "check-trigger"
 MERGE_SUBJECT = re.compile(r"^Merge pull request #(\d+) from [^/\s]+/(\S+)")
@@ -76,51 +80,41 @@ class Stop(Exception):
 # ---------------------------------------------------------------- 宣言・git・置き場
 
 
-def now() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-def now_iso() -> str:
-    return now().isoformat(timespec="seconds")
-
-
-def git(root: Path, *args: str, check: bool = True) -> str:
+def git_or_stop(root: Path, *args: str, check: bool = True) -> str:
+    """`git -C <root>` の標準出力（`lib/proc.py`）。`check` なら失敗は Stop、そうでなければ空。"""
     try:
-        p = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True)
-    except FileNotFoundError:
+        p = proc.git(root, *args, check=False)
+    except OSError:
         raise Stop("git が無い")
     if check and p.returncode != 0:
         raise Stop(f"git {' '.join(args)}: {p.stderr.strip()[:300]}")
     return p.stdout.strip() if p.returncode == 0 else ""
 
 
-def gh(root: Path, *args: str) -> str:
-    try:
-        p = subprocess.run(["gh", *args], capture_output=True, text=True, cwd=root)
-    except FileNotFoundError:
+def gh_or_stop(root: Path, *args: str) -> str:
+    """`gh` を 1 回呼ぶ（`lib/gh_call.py`）。失敗は Stop（終了コード 1）。"""
+    r = gh_call.gh(list(args), cwd=str(root))
+    if r.returncode == 127:
         raise Stop("gh が無い", EXIT_VIOLATION)
-    if p.returncode != 0:
-        raise Stop(f"gh {' '.join(args)}: {p.stderr.strip()[:300]}", EXIT_VIOLATION)
-    return p.stdout
+    if r.returncode != 0:
+        raise Stop(f"gh {' '.join(args)}: {r.stderr.strip()[:300]}", EXIT_VIOLATION)
+    return r.stdout
 
 
 def repo_root(arg: str | None) -> Path:
-    root = git(Path(arg or "."), "rev-parse", "--show-toplevel")
+    root = git_or_stop(Path(arg or "."), "rev-parse", "--show-toplevel")
     if not root:
         raise Stop("git の作業ツリーではない（--root を渡す）")
     return Path(root)
 
 
-def read_json(path: Path, what: str) -> dict:
+def json_or_stop(path: Path, what: str) -> dict:
+    """JSON のオブジェクトを読む（`lib/jsonio.py`）。無い・読めない・形が違うときは Stop。"""
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        raise Stop(f"{what} が無い: {path}")
-    except (OSError, ValueError) as e:
-        raise Stop(f"{what} を読めない: {path}: {e}")
-    if not isinstance(data, dict):
-        raise Stop(f"{what} はオブジェクトで書く: {path}")
-    return data
+        return jsonio.read(path, want=dict)
+    except jsonio.JsonReadError as e:
+        raise Stop({"missing": f"{what} が無い: {path}", "broken": f"{what} を読めない: {path}: {e.detail}",
+                    "type": f"{what} はオブジェクトで書く: {path}"}[e.kind])
 
 
 def load_decl(root: Path) -> dict:
@@ -132,7 +126,7 @@ def load_decl(root: Path) -> dict:
 
 def optional_decl(root: Path, name: str) -> dict:
     try:
-        return read_json(root / ".ndf" / name, name)
+        return json_or_stop(root / ".ndf" / name, name)
     except Stop:
         return {}
 
@@ -147,7 +141,7 @@ def area_of(path: str, decl: dict) -> tuple[str, bool]:
 
 
 def slug_of(root: Path) -> str:
-    url = git(root, "config", "--get", "remote.origin.url", check=False)
+    url = git_or_stop(root, "config", "--get", "remote.origin.url", check=False)
     m = re.search(r"([^/:]+)/([^/]+?)(?:\.git)?/?$", url)
     if not m:
         raise Stop("origin の URL から所有者とリポジトリを決められない")
@@ -199,14 +193,15 @@ def append_event(root: Path, row: dict) -> None:
     p = log_path(root)
     p.parent.mkdir(parents=True, exist_ok=True)
     with p.open("a", encoding="utf-8") as f:
-        f.write(json.dumps({"kind": row.pop("kind"), "at": now_iso(), **row}, ensure_ascii=False) + "\n")
+        f.write(json.dumps({"kind": row.pop("kind"), "at": clock.now_iso("utc"), **row}, ensure_ascii=False) + "\n")
 
 
-def base_branch(root: Path) -> str:
-    wt = optional_decl(root, "worktree.json")
-    if wt.get("base_branch"):
-        return wt["base_branch"]
-    head = git(root, "symbolic-ref", "--short", "refs/remotes/origin/HEAD", check=False)
+def range_base(root: Path) -> str:
+    """起点のブランチ: `.ndf/worktree.json` の base_branch、無ければ origin の HEAD。"""
+    base = repo.declared_base(root)
+    if base:
+        return base
+    head = git_or_stop(root, "symbolic-ref", "--short", "refs/remotes/origin/HEAD", check=False)
     if head.startswith("origin/"):
         return head[len("origin/"):]
     raise Stop("起点のブランチが分からない（.ndf/worktree.json の base_branch）")
@@ -220,9 +215,9 @@ def release_tag_glob(root: Path) -> str | None:
     return None
 
 
-def commit_time(root: Path, ref: str) -> datetime:
-    ts = git(root, "log", "-1", "--format=%cI", ref)
-    return datetime.fromisoformat(ts).astimezone(timezone.utc)
+def commit_at(root: Path, ref: str) -> datetime:
+    """コミットの時刻（UTC）。"""
+    return datetime.fromisoformat(git_or_stop(root, "log", "-1", "--format=%cI", ref)).astimezone(timezone.utc)
 
 
 def parse_at(s: str) -> datetime:
@@ -251,35 +246,35 @@ def range_start(root: Path, events: list[dict], since: str | None,
     見えない。失われたまま正式版のタグへ戻ると、検査を通らずに配布された変更が範囲から外れる。"""
     prev = last_check(events, review)
     ref = f"refs/remotes/origin/{done_branch(review)}"
-    done = git(root, "rev-parse", "--verify", "-q", f"{ref}^{{commit}}", check=False)
+    done = git_or_stop(root, "rev-parse", "--verify", "-q", f"{ref}^{{commit}}", check=False)
     if done:
-        at = parse_at(prev["at"]) if prev and prev["to"] == done else commit_time(root, done)
+        at = parse_at(prev["at"]) if prev and prev["to"] == done else commit_at(root, done)
         return done, at, f"origin/{done_branch(review)}"
     if prev:
         return prev["to"], parse_at(prev["at"]), f"前回の検査 {prev.get('id', '')}"
     if since:
-        sha = git(root, "rev-parse", f"{since}^{{commit}}")
-        return sha, commit_time(root, sha), f"--since {since}"
+        sha = git_or_stop(root, "rev-parse", f"{since}^{{commit}}")
+        return sha, commit_at(root, sha), f"--since {since}"
     prefix = release_tag_glob(root)
     if prefix:
-        for tag in git(root, "tag", "--list", f"{prefix}*", "--sort=-v:refname").split():
+        for tag in git_or_stop(root, "tag", "--list", f"{prefix}*", "--sort=-v:refname").split():
             if "-" not in tag[len(prefix):]:
-                sha = git(root, "rev-parse", f"{tag}^{{commit}}")
-                return sha, commit_time(root, sha), f"正式版のタグ {tag}"
-    base = base_branch(root)
-    sha = git(root, "merge-base", f"origin/{base}", "HEAD")
-    return sha, commit_time(root, sha), f"origin/{base} との分岐点"
+                sha = git_or_stop(root, "rev-parse", f"{tag}^{{commit}}")
+                return sha, commit_at(root, sha), f"正式版のタグ {tag}"
+    base = range_base(root)
+    sha = git_or_stop(root, "merge-base", f"origin/{base}", "HEAD")
+    return sha, commit_at(root, sha), f"origin/{base} との分岐点"
 
 
 def merged_prs(root: Path, frm: str, to: str, decl: dict) -> list[dict]:
     out = []
-    log = git(root, "log", "--first-parent", "--merges", "--format=%H%x09%s", f"{frm}..{to}")
+    log = git_or_stop(root, "log", "--first-parent", "--merges", "--format=%H%x09%s", f"{frm}..{to}")
     for line in log.splitlines():
         sha, _, subject = line.partition("\t")
         m = MERGE_SUBJECT.match(subject)
         if not m or m.group(2).startswith(SKIP_BRANCHES):
             continue
-        files = git(root, "diff", "--name-only", f"{sha}^1", sha).splitlines()
+        files = git_or_stop(root, "diff", "--name-only", f"{sha}^1", sha).splitlines()
         common = any(area_of(f, decl)[1] for f in files)
         out.append({"pr": int(m.group(1)), "branch": m.group(2), "common": common,
                     "points": decl["triggers"]["common_weight"] if common else 1})
@@ -287,7 +282,7 @@ def merged_prs(root: Path, frm: str, to: str, decl: dict) -> list[dict]:
 
 
 def changed_lines(root: Path, frm: str, to: str) -> int:
-    stat = git(root, "diff", "--shortstat", frm, to)
+    stat = git_or_stop(root, "diff", "--shortstat", frm, to)
     return sum(int(n) for n in re.findall(r"(\d+) (?:insertion|deletion)", stat))
 
 
@@ -305,11 +300,11 @@ def evaluate(root: Path, final: bool, since: str | None, to_ref: str | None = No
     decl = load_decl(root)
     events = read_events(root)
     frm, since_at, how = range_start(root, events, since, review)
-    to = git(root, "rev-parse", to_ref or f"origin/{base_branch(root)}")
+    to = git_or_stop(root, "rev-parse", to_ref or f"origin/{range_base(root)}")
     prs = merged_prs(root, frm, to, decl)
     t = decl["triggers"]
     esc = escapes_since(events, since_at)
-    hours = round((now() - since_at).total_seconds() / 3600, 2)
+    hours = round((clock.now(utc=True) - since_at).total_seconds() / 3600, 2)
     metrics = {"prs": len(prs), "score": sum(p["points"] for p in prs), "lines": changed_lines(root, frm, to),
                "hours": hours, "escapes": max(esc.values(), default=0), "from": frm, "to": to}
     fired = []
@@ -353,8 +348,8 @@ def check_json(state: str) -> Path:
 
 def delete_base(root: Path, name: str) -> None:
     branch = BASE_PREFIX + name
-    git(root, "push", "-q", "origin", "--delete", branch, check=False)
-    git(root, "branch", "-D", branch, check=False)
+    git_or_stop(root, "push", "-q", "origin", "--delete", branch, check=False)
+    git_or_stop(root, "branch", "-D", branch, check=False)
 
 
 def cmd_prepare(a, root: Path) -> tuple[dict, int]:
@@ -363,13 +358,13 @@ def cmd_prepare(a, root: Path) -> tuple[dict, int]:
     prev = [e for e in read_events(root) if e["kind"] == "eval" and e.get("id") == a.id]
     fired = prev[-1].get("fired", []) if prev else [f["trigger"] for f in ev["fired"]]
     branch = BASE_PREFIX + a.id
-    git(root, "branch", "-f", branch, m["from"])
+    git_or_stop(root, "branch", "-f", branch, m["from"])
     try:
-        git(root, "push", "-q", "-f", "origin", f"{branch}:refs/heads/{branch}")
+        git_or_stop(root, "push", "-q", "-f", "origin", f"{branch}:refs/heads/{branch}")
     except Stop as e:
         raise Stop(f"{branch} を送れない: {e}", EXIT_VIOLATION)
-    git(root, "fetch", "-q", "origin", f"+refs/heads/{branch}:refs/remotes/origin/{branch}", check=False)
-    files = git(root, "diff", "--name-only", m["from"], m["to"]).splitlines()
+    git_or_stop(root, "fetch", "-q", "origin", f"+refs/heads/{branch}:refs/remotes/origin/{branch}", check=False)
+    files = git_or_stop(root, "diff", "--name-only", m["from"], m["to"]).splitlines()
     data = {"id": a.id, "from": m["from"], "to": m["to"], "fired": fired, "metrics": m, "files": files,
             "escape_areas": ev["escape_areas"], "base": branch}
     check_json(a.state).parent.mkdir(parents=True, exist_ok=True)
@@ -404,16 +399,16 @@ def cmd_scope(a, root: Path) -> int:
 
 
 def cmd_finish(a, root: Path) -> tuple[dict, int]:
-    base = base_branch(root)
-    stat = git(root, "diff", "--numstat", f"origin/{base}...HEAD")
+    base = range_base(root)
+    stat = git_or_stop(root, "diff", "--numstat", f"origin/{base}...HEAD")
     lines = sum(int(x) for ln in stat.splitlines() for x in ln.split("\t")[:2] if x.isdigit())
     files = len(stat.splitlines())
     if not files:
-        gh(root, "pr", "close", str(a.pr), "--comment", "検査で変更が無かったため閉じる（check-trigger.py finish）")
+        gh_or_stop(root, "pr", "close", str(a.pr), "--comment", "検査で変更が無かったため閉じる（check-trigger.py finish）")
         return result(TOOL, "stopped", f"検査で変更が無い。#{a.pr} を閉じた（変更なし）", [],
                       {"files": 0, "lines": 0}), EXIT_PRECONDITION
     try:
-        gh(root, "pr", "edit", str(a.pr), "--base", base)
+        gh_or_stop(root, "pr", "edit", str(a.pr), "--base", base)
     except Stop as e:
         raise Stop(f"#{a.pr} の宛先を {base} へ付け替えられない: {e}", EXIT_VIOLATION)
     return result(TOOL, "ok", f"#{a.pr} の宛先を {base} へ付け替えた（検査の修正 {files} ファイル・{lines} 行）", [],
@@ -454,13 +449,12 @@ def cmd_record(a, root: Path) -> tuple[dict, int]:
             written = f"記録できない（{e}）"
         delete_base(root, a.id)
         if a.pr:
-            subprocess.run(["gh", "pr", "close", str(a.pr), "--comment", "検査が途中で落ちたため閉じる"],
-                           cwd=root, capture_output=True, text=True)
+            gh_call.gh(["pr", "close", str(a.pr), "--comment", "検査が途中で落ちたため閉じる"], cwd=str(root))
         return result(TOOL, "stopped", f"検査 {a.id} が {row['failed_at']} で落ちた。{written}・"
                       f"{BASE_PREFIX}{a.id} を消した", [row], {}), EXIT_VIOLATION
     if not a.pr:
         raise Stop("record には --pr か --failed が要る")
-    state = json.loads(gh(root, "pr", "view", str(a.pr), "--json", "state")).get("state")
+    state = json.loads(gh_or_stop(root, "pr", "view", str(a.pr), "--json", "state")).get("state")
     res = {"MERGED": "merged", "CLOSED": "no_change"}.get(state)
     if not res:
         raise Stop(f"#{a.pr} がマージも閉じられもしていない（{state}）", EXIT_VIOLATION)
@@ -484,15 +478,14 @@ def push_done(root: Path, to: str, review: bool) -> tuple[list[str], list[str]]:
         return [], []
     pushed, unpushed = [], []
     for name in [done_branch(True)] + ([] if review else [done_branch(False)]):
-        ok = subprocess.run(["git", "-C", str(root), "push", "-q", "-f", "origin", f"{to}:refs/heads/{name}"],
-                            capture_output=True, text=True).returncode == 0
+        ok = proc.git(root, "push", "-q", "-f", "origin", f"{to}:refs/heads/{name}", check=False).returncode == 0
         (pushed if ok else unpushed).append(name)
     return pushed, unpushed
 
 
 def cmd_escape(a, root: Path) -> tuple[dict, int]:
     decl = load_decl(root)
-    info = json.loads(gh(root, "pr", "view", str(a.pr), "--json", "files"))
+    info = json.loads(gh_or_stop(root, "pr", "view", str(a.pr), "--json", "files"))
     areas: list[str] = []
     for f in info.get("files") or []:
         name = area_of(f.get("path", ""), decl)[0]
@@ -536,7 +529,7 @@ def cmd_stats(a, root: Path) -> tuple[dict, int]:
         # 構造改善を含む検査は同じ種類の次の記録までで切る
         review = c.get("only") == "review"
         nxt = next((d for d in ended[i + 1:] if review or d.get("only") != "review"), None)
-        until = parse_at(nxt["at"]) if nxt else now()
+        until = parse_at(nxt["at"]) if nxt else clock.now(utc=True)
         escaped = sum(1 for e in events if e["kind"] == "escape" and parse_at(c["at"]) < parse_at(e["at"]) <= until)
         rows.append({"id": c.get("id"), "at": c["at"], "result": c["result"], "pr": c.get("pr"), "only": c.get("only"),
                      "findings": c.get("findings") or {}, "escapes_after": escaped})

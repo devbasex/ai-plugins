@@ -18,7 +18,6 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -26,6 +25,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 from step_result import (EXIT_PRECONDITION, EXIT_UNREADABLE, StepError, common_parser, emit,  # noqa: E402
                          git, git_root, main_with, result, run)
+import gh_parts  # noqa: E402
+import repo  # noqa: E402
 from pr_mode import needs_review, pr_target, split_stages, with_mode_line  # noqa: E402
 
 TOOL = "pr"
@@ -72,18 +73,7 @@ def default_branch(root):
     return "main"
 
 
-def declared_base(root):
-    f = Path(root) / ".ndf" / "worktree.json"
-    if f.is_file():
-        try:
-            v = json.loads(f.read_text(encoding="utf-8")).get("base_branch")
-            return v if isinstance(v, str) and v else None
-        except ValueError:
-            return None
-    return None
-
-
-def base_ref(root, base):
+def compare_ref(root, base):
     """比較に使う ref。origin/<base> があればそれ、無ければローカルの <base>。"""
     for ref in (f"origin/{base}", base):
         if git(root, "rev-parse", "--verify", "--quiet", ref, check=False).returncode == 0:
@@ -99,40 +89,35 @@ def closing_issues(text):
     return [m.group(2) for m in CLOSING.finditer(text or "")]
 
 
-def is_graphql_limit(stderr):
-    s = (stderr or "").lower()
-    return "graphql" in s and "rate limit" in s
-
-
 def repo_owner_name(root):
-    p = run(["gh", "repo", "view", "--json", "owner,name"], cwd=root, check=False)
+    p = gh_parts.gh(["repo", "view", "--json", "owner,name"], cwd=root)
     if p.returncode == 0:
         try:
             d = json.loads(p.stdout)
             return d["owner"]["login"], d["name"]
         except (ValueError, KeyError, TypeError):
             pass
-    url = git(root, "remote", "get-url", "origin", check=False).stdout.strip()
-    m = re.search(r"[:/]([^/:]+)/([^/]+?)(?:\.git)?$", url)
-    if not m:
+    slug = repo.owner_repo(root)
+    if not slug:
         raise StepError("リポジトリの所有者と名前を決められない", EXIT_UNREADABLE)
-    return m.group(1), m.group(2)
+    owner, _, name = slug.partition("/")
+    return owner, name
 
 
 def existing_pr(root, branch):
     """head が branch の OPEN の PR（{number, url, isDraft, baseRefName}）。無ければ None。上限なら REST。"""
-    p = run(["gh", "pr", "list", "--head", branch, "--state", "open", "--json", "number,url,isDraft,baseRefName"],
-            cwd=root, check=False)
+    p = gh_parts.gh(["pr", "list", "--head", branch, "--state", "open", "--json", "number,url,isDraft,baseRefName"],
+                    cwd=root)
     if p.returncode == 0:
         try:
             prs = json.loads(p.stdout or "[]")
         except ValueError:
             raise StepError("gh pr list の出力を読めない", EXIT_UNREADABLE)
         return prs[0] if prs else None
-    if not is_graphql_limit(p.stderr):
+    if not gh_parts.is_rate_limited(p.stderr):
         raise StepError(f"gh pr list が失敗: {p.stderr.strip()[:300]}", EXIT_PRECONDITION)
     owner, name = repo_owner_name(root)
-    q = run(["gh", "api", f"repos/{owner}/{name}/pulls?head={owner}:{branch}&state=open"], cwd=root, check=False)
+    q = gh_parts.gh(["api", f"repos/{owner}/{name}/pulls?head={owner}:{branch}&state=open"], cwd=root)
     if q.returncode != 0:
         raise StepError(f"REST でも既存の PR を引けない: {q.stderr.strip()[:300]}")
     try:
@@ -160,7 +145,7 @@ def cmd_plan(a):
     root = git_root(a.root)
     branch = current_branch(root)
     default = default_branch(root)
-    declared = declared_base(root)
+    declared = repo.declared_base(root)
     base = a.base or declared or default
     allowed = {default} | ({declared} if declared else set())
     items = [{"kind": "branch", "name": branch, "result": "ok"}, {"kind": "base", "name": base, "result": "ok"}]
@@ -176,7 +161,7 @@ def cmd_plan(a):
                     {"branch": branch, "base": base, "redirect": "cherry-pick-pr"},
                     next=f"/ndf:cherry-pick-pr {base}（続けるなら --force）"), EXIT_PRECONDITION)
     status = [l for l in git(root, "status", "--short").stdout.splitlines() if l.strip()]
-    ref = base_ref(root, base)
+    ref = compare_ref(root, base)
     nums = diff_numbers(root, ref)
     in_commits = []
     for line in git(root, "log", "--format=%H %B%x00", f"{ref}..HEAD").stdout.split("\x00"):
@@ -272,7 +257,7 @@ def rest_create(root, branch, base, title, body, draft):
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False)
         tmp = f.name
-    p = run(["gh", "api", f"repos/{owner}/{name}/pulls", "--input", tmp], cwd=root, check=False)
+    p = gh_parts.gh(["api", f"repos/{owner}/{name}/pulls", "--input", tmp], cwd=root)
     if p.returncode != 0:
         raise StepError(f"REST でも作成が失敗: {p.stderr.strip()[:300]}")
     d = json.loads(p.stdout)
@@ -292,10 +277,10 @@ def upsert(a, must_exist):
     else:
         pr = existing_pr(root, branch)
     if pr:
-        args = ["gh", "pr", "edit", str(pr["number"]), "--body-file", body_path]
+        args = ["pr", "edit", str(pr["number"]), "--body-file", body_path]
         if a.title:
             args += ["--title", a.title]
-        p = run(args, cwd=root, check=False)
+        p = gh_parts.gh(args, cwd=root)
         if p.returncode != 0:
             raise StepError(f"gh pr edit {pr['number']} が失敗: {p.stderr.strip()[:300]}")
         number, url, action = pr["number"], pr["url"], "updated"
@@ -304,17 +289,17 @@ def upsert(a, must_exist):
             raise StepError(f"{branch} の OPEN の PR が無い（create を使う）", EXIT_PRECONDITION)
         if not a.title:
             raise StepError("--title が要る", EXIT_UNREADABLE)
-        base = a.base or declared_base(root) or default_branch(root)
-        args = ["gh", "pr", "create", "--base", base, "--title", a.title, "--body-file", body_path]
+        base = a.base or repo.declared_base(root) or default_branch(root)
+        args = ["pr", "create", "--base", base, "--title", a.title, "--body-file", body_path]
         if a.draft:
             args.append("--draft")
-        p = run(args, cwd=root, check=False)
+        p = gh_parts.gh(args, cwd=root)
         rest = False
         if p.returncode == 0:
             url = (p.stdout.strip().splitlines() or [""])[-1]
             m = re.search(r"/pull/(\d+)", url)
             number = int(m.group(1)) if m else None
-        elif is_graphql_limit(p.stderr):
+        elif gh_parts.is_rate_limited(p.stderr):
             rest = True
             number, url = rest_create(root, branch, base, a.title, body, a.draft)
         else:
@@ -360,18 +345,18 @@ def cmd_update(a):
 
 # --- report -----------------------------------------------------------------------
 
-def pr_view(root, number):
+def pr_for_report(root, number):
     fields = "number,title,url,isDraft,baseRefName,headRefName,body"
-    p = run(["gh", "pr", "view", str(number), "--json", fields], cwd=root, check=False)
+    p = gh_parts.gh(["pr", "view", str(number), "--json", fields], cwd=root)
     if p.returncode == 0:
         try:
             return json.loads(p.stdout)
         except ValueError:
             raise StepError("gh pr view の出力を読めない", EXIT_UNREADABLE)
-    if not is_graphql_limit(p.stderr):
+    if not gh_parts.is_rate_limited(p.stderr):
         raise StepError(f"gh pr view {number} が失敗: {p.stderr.strip()[:300]}")
     owner, name = repo_owner_name(root)
-    q = run(["gh", "api", f"repos/{owner}/{name}/pulls/{number}"], cwd=root, check=False)
+    q = gh_parts.gh(["api", f"repos/{owner}/{name}/pulls/{number}"], cwd=root)
     if q.returncode != 0:
         raise StepError(f"REST でも PR を引けない: {q.stderr.strip()[:300]}")
     d = json.loads(q.stdout)
@@ -398,8 +383,8 @@ def cmd_report(a):
         if not pr:
             raise StepError("報告する PR が無い（番号を渡す）", EXIT_PRECONDITION)
         number = pr["number"]
-    v = pr_view(root, number)
-    ref = base_ref(root, v["baseRefName"])
+    v = pr_for_report(root, number)
+    ref = compare_ref(root, v["baseRefName"])
     nums = diff_numbers(root, ref)
     summary = next((l.strip().lstrip("- ").strip() for l in section(v["body"], "Summary")
                     if l.strip() and not l.strip().startswith("<!--")), "（Summary が無い）")

@@ -13,6 +13,13 @@ import subprocess
 import sys
 
 import pytest
+import review_lib
+import review_lib.commands.init
+import review_lib.commands.judge
+import review_lib.commands.report
+import review_lib.github
+import review_lib.store
+import review_lib.workspace
 
 _HERE = pathlib.Path(__file__).resolve().parent
 _MEASURE = _HERE.parent / "scripts" / "measure.py"
@@ -59,14 +66,14 @@ def _summaries(metrics: pathlib.Path) -> list[pathlib.Path]:
 def test_every_save_rewrites_one_summary_outside_the_worktree(state_mod, review_dirs):
     worktree, tmp_dir, metrics = review_dirs
     state = _state(tmp_dir)
-    state_mod._save(PR, state)
+    review_lib.store._save(PR, state)
     [first] = _summaries(metrics)
     assert first == metrics / "devbasex--ai-plugins" / f"cross-review-pr{PR}-20260915T010000Z.json"
     assert json.loads(first.read_text())["final"] is None
 
     state["final"] = "approved"
     state["ended_at"] = "2026-09-15T10:40:00+09:00"
-    state_mod._save(PR, state)
+    review_lib.store._save(PR, state)
     assert _summaries(metrics) == [first]
 
     # AC11: 作業ツリーを消しても要約は残り、読める
@@ -79,7 +86,7 @@ def test_every_save_rewrites_one_summary_outside_the_worktree(state_mod, review_
 
 def test_summary_measure_equals_measure_py_output(state_mod, review_dirs):
     _, tmp_dir, metrics = review_dirs
-    state_mod._save(PR, _state(tmp_dir))
+    review_lib.store._save(PR, _state(tmp_dir))
     [path] = _summaries(metrics)
 
     proc = subprocess.run(
@@ -91,7 +98,7 @@ def test_summary_measure_equals_measure_py_output(state_mod, review_dirs):
 
 def test_summary_does_not_carry_review_instructions(state_mod, review_dirs):
     _, tmp_dir, metrics = review_dirs
-    state_mod._save(PR, _state(tmp_dir))
+    review_lib.store._save(PR, _state(tmp_dir))
     [path] = _summaries(metrics)
     assert "レビュー観点の本文" not in path.read_text()
 
@@ -115,16 +122,16 @@ def test_summary_failure_keeps_exit_code_and_stdout(state_mod, review_dirs, monk
 
     monkeypatch.setenv("NDF_METRICS", "0")
     state_path.write_text(original, encoding="utf-8")
-    expected = _run(state_mod, state_mod.cmd_judge, capsys)
+    expected = _run(state_mod, review_lib.commands.judge.cmd_judge, capsys)
 
     monkeypatch.delenv("NDF_METRICS")
 
     def boom(*args, **kwargs):
         raise RuntimeError("要約が壊れた")
 
-    monkeypatch.setattr(state_mod.run_metrics, "build_summary", boom)
+    monkeypatch.setattr(review_lib.store.run_metrics, "build_summary", boom)
     state_path.write_text(original, encoding="utf-8")
-    actual = _run(state_mod, state_mod.cmd_judge, capsys)
+    actual = _run(state_mod, review_lib.commands.judge.cmd_judge, capsys)
 
     assert actual[:2] == expected[:2]
     # 保存を通ったこと（要約の書き出しで例外が起きたこと）を確かめる
@@ -138,7 +145,7 @@ def test_report_ends_with_the_summary_path(state_mod, review_dirs, capsys):
     (tmp_dir / f"cross-review-pr{PR}-state.json").write_text(
         json.dumps(_state(tmp_dir), ensure_ascii=False), encoding="utf-8")
 
-    state_mod.cmd_report(argparse.Namespace(pr=PR))
+    review_lib.commands.report.cmd_report(argparse.Namespace(pr=PR))
 
     last = capsys.readouterr().out.rstrip("\n").splitlines()[-1]
     [path] = _summaries(metrics)
@@ -151,7 +158,7 @@ def test_report_says_why_it_did_not_write(state_mod, review_dirs, monkeypatch, c
     (tmp_dir / f"cross-review-pr{PR}-state.json").write_text(
         json.dumps(_state(tmp_dir), ensure_ascii=False), encoding="utf-8")
 
-    state_mod.cmd_report(argparse.Namespace(pr=PR))
+    review_lib.commands.report.cmd_report(argparse.Namespace(pr=PR))
 
     last = capsys.readouterr().out.rstrip("\n").splitlines()[-1]
     assert last == "計測の要約: 書いていません（NDF_METRICS=0）"
@@ -170,21 +177,21 @@ def _init_args(worktree: pathlib.Path, **over) -> argparse.Namespace:
 def test_new_init_writes_the_summary(state_mod, review_dirs, monkeypatch):
     """`init` が初期状態を保存した直後に要約がある。start-round を待たない。"""
     worktree, tmp_dir, metrics = review_dirs
-    monkeypatch.setattr(state_mod, "_repo_from_git", lambda: "devbasex/ai-plugins")
+    monkeypatch.setattr(review_lib.github, "_repo_from_git", lambda: "devbasex/ai-plugins")
     monkeypatch.setattr(
-        state_mod, "_fetch_pr_metadata",
-        lambda pr, repo=None: state_mod.PrMetadata(
+        review_lib.github, "_fetch_pr_metadata",
+        lambda pr, repo=None: review_lib.github.PrMetadata(
             "devbasex/ai-plugins", "takemi", "feat/x", "abc123", "develop", True, 4000, None))
-    monkeypatch.setattr(state_mod, "_fetch_changed_files", lambda pr, repo: [])
-    monkeypatch.setattr(state_mod, "_is_registered_worktree", lambda wt: True)
-    monkeypatch.setattr(state_mod, "_sync_worktree", lambda *a, **k: None)
-    monkeypatch.setattr(state_mod, "_sh", lambda cmd, check=True: "takemi")
+    monkeypatch.setattr(review_lib.github, "_fetch_changed_files", lambda pr, repo: [])
+    monkeypatch.setattr(review_lib.workspace, "_is_registered_worktree", lambda wt: True)
+    monkeypatch.setattr(review_lib.workspace, "_sync_worktree", lambda *a, **k: None)
+    monkeypatch.setattr(review_lib, "_sh", lambda cmd, check=True: "takemi")
     monkeypatch.setattr(
-        state_mod.subprocess, "run",
+        subprocess, "run",
         lambda cmd, *a, **k: subprocess.CompletedProcess(cmd, 0, stdout="", stderr=""))
     monkeypatch.setenv("NDF_SKIP_AUTH_CHECK", "1")
 
-    state_mod.cmd_init(_init_args(worktree))
+    review_lib.commands.init.cmd_init(_init_args(worktree))
 
     assert (tmp_dir / f"cross-review-pr{PR}-state.json").exists()
     [path] = _summaries(metrics)
@@ -198,11 +205,11 @@ def test_resume_that_updates_the_state_rewrites_the_summary(state_mod, review_di
     state.update(auto_review_instructions="", worktree_path=str(worktree))
     (tmp_dir / f"cross-review-pr{PR}-state.json").write_text(
         json.dumps(state, ensure_ascii=False), encoding="utf-8")
-    monkeypatch.setattr(state_mod, "_repo_from_git", lambda: "devbasex/ai-plugins")
-    monkeypatch.setattr(state_mod, "_fetch_unresolved_threads", lambda repo, pr: [])
-    monkeypatch.setattr(state_mod, "_sync_worktree", lambda *a, **k: None)
+    monkeypatch.setattr(review_lib.github, "_repo_from_git", lambda: "devbasex/ai-plugins")
+    monkeypatch.setattr(review_lib.github, "_fetch_unresolved_threads", lambda repo, pr: [])
+    monkeypatch.setattr(review_lib.workspace, "_sync_worktree", lambda *a, **k: None)
 
-    state_mod.cmd_init(_init_args(worktree, focus="追加の観点"))
+    review_lib.commands.init.cmd_init(_init_args(worktree, focus="追加の観点"))
 
     [path] = _summaries(metrics)
     assert json.loads(path.read_text())["kind"] == "cross-review"

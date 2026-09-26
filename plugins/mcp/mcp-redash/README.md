@@ -15,13 +15,14 @@ Redash MCP サーバーをマルチ環境対応で利用するための Claude C
 - Claude Code
 - Node.js（npx が使える環境）
 
-## v2.0.0 へ更新するとき
+## v3.0.0 へ更新するとき
 
-配布ディレクトリが `plugins/mcp/{shared,claude,codex,kiro}/mcp-redash/` から
-`plugins/mcp/mcp-redash/` へ変わりました。マーケットプレイスの参照先が変わるため、**導入済みの
-環境では再インストールが要ります**。Kiro CLI の installer は `dev.kiro/install.sh` へ移りました。
+**互換を壊す変更です。** `/redash-add` / `/redash-remove` / `/redash-list` / `/redash-status` の
+4 つの Skill を `/redash` の 1 本にまとめ、操作は最初の引数（`add` / `remove` / `list` / `status`）で
+選ぶようにしました。旧名の Skill は無くなります。呼び方の対応と、Kiro CLI に残る symlink の片付けは
+下の「[`/redash-add` などの名前で呼んでいた場合](#redash-add-などの名前で呼んでいた場合)」にあります。
 
-MCP サーバの定義（`.mcp.json`）の内容は変えていません。
+追加済みの `redash-*` MCP と MCP サーバの定義（`.mcp.json`）の内容は変えていません。
 
 ## インストール
 
@@ -69,31 +70,48 @@ REDASH_API_KEY=your-api-key
 
 ```bash
 # dev 環境を追加
-/redash-add dev
+/redash add dev
 
 # .env に環境変数を設定
 # REDASH_DEV_URL=https://redash-dev.example.com
 # REDASH_DEV_API_KEY=your-dev-api-key
 
 # 一覧確認
-/redash-list
+/redash list
 
 # 状態確認（環境変数の設定漏れチェック）
-/redash-status
+/redash status
 
 # 不要になったら削除
-/redash-remove dev
+/redash remove dev
 ```
 
 ## スラッシュコマンド
 
 | コマンド | 説明 |
 |---------|------|
-| `/redash-add <suffix>` | 任意 suffix の Redash MCP を project `.mcp.json` に追加 |
-| `/redash-remove <suffix>` | 指定 suffix の Redash MCP を project `.mcp.json` から削除 |
-| `/redash-list` | 有効な Redash MCP を一覧表示 |
-| `/redash-status` | 設定状況の詳細確認（環境変数の未設定警告付き） |
+| `/redash add <suffix>` | 任意 suffix の Redash MCP を project `.mcp.json` に追加 |
+| `/redash remove <suffix>` | 指定 suffix の Redash MCP を project `.mcp.json` から削除 |
+| `/redash list` | 有効な Redash MCP を一覧表示 |
+| `/redash status` | 設定状況の詳細確認（環境変数の未設定警告付き） |
 | `/redash-guide` | 使い方ガイドを表示 |
+
+### `/redash-add` などの名前で呼んでいた場合
+
+操作は `/redash` の最初の引数で選ぶ。`/redash-add` / `/redash-remove` / `/redash-list` / `/redash-status` という名前の Skill は無い。
+
+| 呼んでいた名前 | 呼び方 |
+|-------------|-----------|
+| `/redash-add <suffix>` | `/redash add <suffix>` |
+| `/redash-remove <suffix>` | `/redash remove <suffix>` |
+| `/redash-list` | `/redash list` |
+| `/redash-status` | `/redash status` |
+
+追加済みの `redash-*` MCP と `.mcp.json` はそのまま使える。Kiro CLI で `dev.kiro/install.sh` を実行していた場合は、更新後に `.kiro/skills/` に残る `redash-add` / `redash-remove` / `redash-list` / `redash-status` の 4 つの symlink を消す（installer は今ある Skill の symlink を張るだけで、Skill の無い symlink は消さない）。
+
+```bash
+rm -f .kiro/skills/redash-add .kiro/skills/redash-remove .kiro/skills/redash-list .kiro/skills/redash-status
+```
 
 ## suffix と環境変数の対応
 
@@ -120,10 +138,7 @@ plugins/mcp/mcp-redash/
 ├── scripts/
 │   └── redash-mcp-config.js     # JSON 編集スクリプト（Node.js）
 ├── skills/
-│   ├── redash-add/SKILL.md      # /redash-add コマンド
-│   ├── redash-remove/SKILL.md   # /redash-remove コマンド
-│   ├── redash-list/SKILL.md     # /redash-list コマンド
-│   ├── redash-status/SKILL.md   # /redash-status コマンド
+│   ├── redash/SKILL.md          # /redash <add|list|remove|status> [suffix]
 │   └── redash-guide/SKILL.md    # 使い方ガイド
 └── README.md
 ```
@@ -138,7 +153,7 @@ plugins/mcp/mcp-redash/
 > そのため MCP 定義は **必要になるまで作られない**。
 
 - plugin 同梱: `redash`（常に `/mcp` に表示）
-- project `.mcp.json`: `/redash-add` で追加したもののみ表示
+- project `.mcp.json`: `/redash add` で追加したもののみ表示
 
 ## トラブルシューティング
 
@@ -151,16 +166,16 @@ plugins/mcp/mcp-redash/
 
 - `.env` ファイルがプロジェクトルートにあるか確認
 - 変数名が正しい形式か確認（`REDASH_{SUFFIX}_URL`）
-- `/redash-status` で設定状況を確認
+- `/redash status` で設定状況を確認
 
-### `/redash-add` でエラーが出る
+### `/redash add` でエラーが出る
 
 - `.mcp.json` の JSON が壊れていないか確認（手動編集した場合）
 - `default` は予約語のため suffix に使用不可
 
 ### suffix 付き MCP が動かない
 
-- 対応する環境変数が `.env` に設定されているか `/redash-status` で確認
+- 対応する環境変数が `.env` に設定されているか `/redash status` で確認
 - Redash の URL と API Key が正しいか確認
 
 ## 参考リンク

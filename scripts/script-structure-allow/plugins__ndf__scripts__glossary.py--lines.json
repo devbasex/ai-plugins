@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/glossary.py", "name": "", "kind": "lines", "reason": "L0 の時点で 781 行。C7 は重複だけをライブラリへ置き換える。触って 500 行以下にしたら消す", "lines": 781}

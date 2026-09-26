@@ -29,7 +29,8 @@ def load(name, path):
 
 cr = load("cr_drive", SKILLS / "cross-review" / "scripts" / "drive.py")
 rf = load("rf_drive", SKILLS / "cross-refactoring" / "scripts" / "drive.py")
-sv = load("supervise_drive", SCRIPTS / "supervise.py")
+sys.path.insert(0, str(SCRIPTS))
+from supervise_lib import engine, paths, templates, worker_steps  # noqa: E402
 
 
 def run_main(mod, argv, capsys):
@@ -309,18 +310,18 @@ def fake_drive(tmp_path) -> str:
 
 def run_plan(tmp_path, steps):
     plan = {"フェーズ": "検査", "課題": [870], "作業場所": str(tmp_path), "steps": steps}
-    s = sv.Supervisor(plan, tmp_path / "state")
+    s = engine.Engine(plan, tmp_path / "state")
     return s, s.run()
 
 
 def test_drive_step_hands_pause_to_worker_and_reports_counts(tmp_path, fake_claude):
     s, text = run_plan(tmp_path, [{"id": "review", "type": "drive", "cmd": fake_drive(tmp_path), "next": "end"}])
     assert "結果: 完了" in text
-    assert s.results["review"]["pauses"] == ["fix"]
+    assert s.state.results["review"]["pauses"] == ["fix"]
     assert "- 件数: review: rounds 2 / findings 3 / unresolved 0" in text
     prompt = fake_claude.read_text()
     assert "作業: fix" in prompt and "PR を直す指示" in prompt
-    assert s.llm["work"] == 1
+    assert s.state.llm["work"] == 1
 
 
 def test_drive_step_uses_pause_cwd_as_worker_workdir(tmp_path, fake_claude):
@@ -340,7 +341,7 @@ def test_drive_step_fails_when_worker_writes_no_result(tmp_path, fake_claude, mo
     monkeypatch.setenv("FAKE_CLAUDE_WRITE", "0")
     s, text = run_plan(tmp_path, [{"id": "review", "type": "drive", "cmd": fake_drive(tmp_path), "next": "end"}])
     assert "結果: 止まった" in text
-    assert "結果ファイルを書かなかった" in s.results["review"]["text"]
+    assert "結果ファイルを書かなかった" in s.state.results["review"]["text"]
 
 
 def test_drive_step_runs_nested_command_pause(tmp_path, fake_claude):
@@ -362,14 +363,12 @@ sys.exit(23)
     s, text = run_plan(tmp_path, [{"id": "refactor", "type": "drive", "cmd": f"{PY} {outer}", "next": "end"}])
     assert "結果: 完了" in text
     # 外側の metrics に、入れ子の駆動の metrics を inner として足す（#1142 の不足 d の入れ子）
-    assert s.results["refactor"]["counts"] == {"review_status": "approved", "inner": {
+    assert s.state.results["refactor"]["counts"] == {"review_status": "approved", "inner": {
         "findings": 3, "review_status": "approved", "rounds": 2, "unresolved": 0}}
 
 
 def test_drive_step_resolves_known_drive(tmp_path):
-    s = sv.Supervisor({"作業場所": str(tmp_path), "steps": [{"id": "x", "type": "run", "cmd": "true"}]},
-                      tmp_path / "st")
-    cmd = s.drive_cmd({"drive": "cross-review", "args": "5 --max-rounds 4"})
+    cmd = worker_steps.DriveStep().drive_cmd({"drive": "cross-review", "args": "5 --max-rounds 4"})
     assert cmd.endswith("cross-review/scripts/drive.py 5 --max-rounds 4")
 
 
@@ -382,11 +381,11 @@ prompt = open(a[a.index("--prompt-file") + 1]).read()
 open(out, "w").write("## 作業の報告\\n- 結果: 完了\\n" + a[1] + "\\n" + prompt[-20:])
 print(json.dumps({"tool": "external-ai", "status": "ok", "summary": "ok", "items": [], "metrics": {}}))
 """)
-    monkeypatch.setattr(sv, "EXTERNAL_AI", fake)
+    monkeypatch.setattr(paths, "EXTERNAL_AI", fake)
     s, text = run_plan(tmp_path, [{"id": "impl", "type": "work", "runtime": "codex", "prompt": "実装する",
                                    "next": "end"}])
     assert "結果: 完了" in text
-    assert "codex" in s.results["impl"]["text"]
+    assert "codex" in s.state.results["impl"]["text"]
     assert "作業の報告" in (tmp_path / "state" / "impl-prompt.md").read_text()
 
 
@@ -394,9 +393,9 @@ def test_new_check_with_scope_uses_drive_steps(tmp_path):
     import argparse
     a = argparse.Namespace(pr=998, scope=["plugins/ndf/scripts"], issue=[870], mode="standard",
                            worktree=str(tmp_path), base="main", test_cmd="pytest {paths}", test_all=".")
-    steps = {s["id"]: s for s in sv.plan_check(a)["steps"]}
+    steps = {s["id"]: s for s in templates.plan_check(a)["steps"]}
     assert steps["refactor"]["type"] == "drive" and "--workflow-step" in steps["refactor"]["args"]
     assert steps["review"]["type"] == "drive" and steps["review"]["drive"] == "cross-review"
     a.scope = []
-    refactor = sv.plan_check(a)["steps"][1]
-    assert refactor["type"] == "drive" and "gh pr diff 998 --name-only" in refactor["args"]
+    refactor = templates.plan_check(a)["steps"][1]
+    assert refactor["type"] == "drive" and "pulls/998/files" in refactor["args"]

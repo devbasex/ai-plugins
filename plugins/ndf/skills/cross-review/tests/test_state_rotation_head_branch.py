@@ -18,6 +18,8 @@ import json
 import pathlib
 
 import pytest
+import review_lib
+import review_lib.commands.loop
 
 PR = 4244
 NEW_PR = 4299
@@ -56,10 +58,10 @@ def _args(**over) -> argparse.Namespace:
 def test_the_given_branch_is_written_back(tmp_dir, state_mod, monkeypatch):
     _seed(tmp_dir)
     monkeypatch.setattr(
-        state_mod, "_sh", lambda cmd, check=True: pytest.fail("引数があるのに GitHub を呼んでいる")
+        review_lib, "_sh", lambda cmd, check=True: pytest.fail("引数があるのに GitHub を呼んでいる")
     )
 
-    state_mod.cmd_set_current_pr(_args(head_branch=NEW_BRANCH))
+    review_lib.commands.loop.cmd_set_current_pr(_args(head_branch=NEW_BRANCH))
 
     st = _state(tmp_dir)
     assert st["head_branch"] == NEW_BRANCH
@@ -70,10 +72,10 @@ def test_the_branch_is_read_back_from_the_pull_request(tmp_dir, state_mod, monke
     _seed(tmp_dir)
     calls: list[list[str]] = []
     monkeypatch.setattr(
-        state_mod, "_sh", lambda cmd, check=True: calls.append(list(cmd)) or NEW_BRANCH
+        review_lib, "_sh", lambda cmd, check=True: calls.append(list(cmd)) or NEW_BRANCH
     )
 
-    state_mod.cmd_set_current_pr(_args())
+    review_lib.commands.loop.cmd_set_current_pr(_args())
 
     assert _state(tmp_dir)["head_branch"] == NEW_BRANCH
     assert calls and str(NEW_PR) in calls[0]
@@ -86,9 +88,9 @@ def test_the_previous_branch_is_kept_when_the_lookup_fails(tmp_dir, state_mod, m
     def boom(cmd, check=True):
         raise RuntimeError("network")
 
-    monkeypatch.setattr(state_mod, "_sh", boom)
+    monkeypatch.setattr(review_lib, "_sh", boom)
 
-    state_mod.cmd_set_current_pr(_args())
+    review_lib.commands.loop.cmd_set_current_pr(_args())
 
     st = _state(tmp_dir)
     assert st["head_branch"] == OLD_BRANCH
@@ -98,9 +100,9 @@ def test_the_previous_branch_is_kept_when_the_lookup_fails(tmp_dir, state_mod, m
 
 def test_an_empty_lookup_keeps_the_previous_branch(tmp_dir, state_mod, monkeypatch):
     _seed(tmp_dir)
-    monkeypatch.setattr(state_mod, "_sh", lambda cmd, check=True: "  \n")
+    monkeypatch.setattr(review_lib, "_sh", lambda cmd, check=True: "  \n")
 
-    state_mod.cmd_set_current_pr(_args())
+    review_lib.commands.loop.cmd_set_current_pr(_args())
 
     assert _state(tmp_dir)["head_branch"] == OLD_BRANCH
 
@@ -134,10 +136,10 @@ def test_only_the_current_pr_entry_is_closed_when_history_has_past_prs(
     (tmp_dir / f"cross-review-pr{PR}-state.json").write_text(json.dumps(state))
     # 引数で枝名を渡し、GitHub を呼ばない経路で確かめる。
     monkeypatch.setattr(
-        state_mod, "_sh", lambda cmd, check=True: pytest.fail("GitHub を呼んでいる")
+        review_lib, "_sh", lambda cmd, check=True: pytest.fail("GitHub を呼んでいる")
     )
 
-    state_mod.cmd_set_current_pr(_args(head_branch=NEW_BRANCH))
+    review_lib.commands.loop.cmd_set_current_pr(_args(head_branch=NEW_BRANCH))
 
     history = _state(tmp_dir)["pr_history"]
     # 過去 PR は変わらない。

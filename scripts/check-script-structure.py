@@ -4,7 +4,7 @@
 見るのは `plugins/ndf/` の下の `.py` と `.sh` のうち、テストを除くもの（`tests/`・`test/` の下と
 `test_` で始まるファイル）。git の作業ツリーでは git が追跡するファイルだけを見る。
 
-- `lines`: 1000 行を超えるファイル（I5）
+- `lines`: 500 行を超えるファイル（I5・決定 18）。例外リストに載るファイルは、載せた行数を超えたら落ちる
 - `same-body`: 本体の同じ最上位の関数が 2 つ以上のファイルにある（I4）。Python は docstring・型注釈・
   関数名を除いた構文木で、シェルは空行とコメントの行を除き前後の空白を落とした行で比べる
 - `same-name`: 同じ名前で本体の違う最上位の関数が 2 つ以上のファイルにある（I4）。Python とシェルは
@@ -12,11 +12,14 @@
 
 副命令のハンドラー（`cmd_*`）・`main`・`build_parser`・`_build_parser`・シェルの `usage` は規則で外す。
 
-例外リスト（既定は `scripts/script-structure-allow.json`）は `{"path", "name", "kind", "reason"}` の
-配列である。`lines` の行は `name` を空にする。違反に当たらない行は `unused-allow` として落とす。
-直した移行ステップは、同じ PR で例外リストの行を消す。
+例外リストの置き場（既定は `scripts/script-structure-allow/`）は 1 項目 1 ファイルで、各ファイルは
+`{"path", "name", "kind", "reason"}` を持つ。ファイル名は `allow_file_name()` が path・name・kind から
+決める（例 `plugins__ndf__scripts__lib__deps.py--find_uv--same-body.json`）。並列の計画が別の項目を
+消す・足しても同じファイルを触らないため、マージで衝突しない。`lines` の項目は `name` を空にし、
+載せた時点の行数を `lines` に持つ（ラチェット）。違反に当たらない項目は `unused-allow` として落とす。
+直した移行ステップは、同じ PR でその項目のファイルを消す。
 
-    python3 scripts/check-script-structure.py [--root <リポジトリ>] [--allow <json>]
+    python3 scripts/check-script-structure.py [--root <リポジトリ>] [--allow <ディレクトリ>]
 
 最後に結果 JSON を 1 行出す（`plugins/ndf/scripts/lib/README.md` の形）。終了コードは 0 が違反なし、
 1 が違反あり、2 が例外リストの読めない・形の誤り。
@@ -36,7 +39,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 SCAN = "plugins/ndf"
-MAX_LINES = 1000
+MAX_LINES = 500
 KINDS = ("lines", "same-body", "same-name")
 RULE_NAMES = {"main", "build_parser", "_build_parser"}
 SHELL_RULE_NAMES = {"usage"}
@@ -143,22 +146,36 @@ def sh_functions(text: str) -> list[tuple[str, str]]:
     return out
 
 
+def allow_file_name(row: dict) -> str:
+    """例外リストの 1 項目のファイル名。path の `/` を `__` に、各部を `--` でつなぐ（lines は name を省く）。"""
+    parts = [row["path"].replace("/", "__"), row["name"], row["kind"]]
+    return "--".join(p for p in parts if p) + ".json"
+
+
 def load_allow(path: Path) -> list[dict]:
+    """置き場（ディレクトリ）の `*.json` を 1 ファイル 1 項目として読む。"""
     if not path.exists():
         return []
-    try:
-        rows = json.loads(path.read_text())
-    except ValueError as e:
-        raise UsageError(f"例外リストを読めない: {path}: {e}")
-    if not isinstance(rows, list):
-        raise UsageError(f"例外リストは配列にする: {path}")
-    for i, r in enumerate(rows):
-        if not isinstance(r, dict) or set(r) != {"path", "name", "kind", "reason"}:
-            raise UsageError(f"例外リストの {i + 1} 行目は path・name・kind・reason の 4 つを持つ: {r}")
+    if not path.is_dir():
+        raise UsageError(f"例外リストの置き場はディレクトリにする: {path}")
+    rows = []
+    for f in sorted(path.glob("*.json")):
+        try:
+            r = json.loads(f.read_text())
+        except ValueError as e:
+            raise UsageError(f"例外リストを読めない: {f}: {e}")
+        keys = {"path", "name", "kind", "reason"} | ({"lines"} if isinstance(r, dict) and r.get("kind") == "lines" else set())
+        if not isinstance(r, dict) or set(r) != keys:
+            raise UsageError(f"例外リストの {f.name} は {'・'.join(sorted(keys))} を持つ: {r}")
+        if "lines" in r and (isinstance(r["lines"], bool) or not isinstance(r["lines"], int) or r["lines"] <= MAX_LINES):
+            raise UsageError(f"例外リストの {f.name} の lines は {MAX_LINES} を超える整数: {r['lines']}")
         if r["kind"] not in KINDS:
-            raise UsageError(f"例外リストの {i + 1} 行目の kind は {'/'.join(KINDS)} のどれか: {r['kind']}")
+            raise UsageError(f"例外リストの {f.name} の kind は {'/'.join(KINDS)} のどれか: {r['kind']}")
         if not isinstance(r["reason"], str) or not r["reason"].strip():
-            raise UsageError(f"例外リストの {i + 1} 行目に理由が無い: {r['path']}:{r['name']}")
+            raise UsageError(f"例外リストの {f.name} に理由が無い: {r['path']}:{r['name']}")
+        if not all(isinstance(r[k], str) for k in ("path", "name")) or f.name != allow_file_name(r):
+            raise UsageError(f"例外リストの {f.name} は {allow_file_name(r)} という名前にする")
+        rows.append(r)
     return rows
 
 
@@ -171,7 +188,7 @@ def scan(root: Path) -> tuple[list[dict], dict]:
         text = (root / rel).read_text(errors="ignore")
         n = text.count("\n") + (0 if text.endswith("\n") or not text else 1)
         if n > MAX_LINES:
-            violations.append({"kind": "lines", "path": rel, "function": "", "detail": f"{n} 行"})
+            violations.append({"kind": "lines", "path": rel, "function": "", "detail": f"{n} 行", "lines": n})
         lang = "py" if rel.endswith(".py") else "sh"
         found = py_functions(text) if lang == "py" else sh_functions(text)
         if found is None:
@@ -211,20 +228,24 @@ def item(kind: str, path: str, function: str, result: str, detail: str) -> dict:
 
 def check(root: Path, allow: list[dict]) -> tuple[list[dict], dict]:
     violations, metrics = scan(root)
-    allowed = {(r["path"], r["name"], r["kind"]) for r in allow}
+    allowed = {(r["path"], r["name"], r["kind"]): r for r in allow}
     hit = set()
     items = []
     for v in violations:
         k = (v["path"], v["function"], v["kind"])
-        if k in allowed:
+        row = allowed.get(k)
+        if row is not None:
             hit.add(k)
+            if v["kind"] == "lines" and v["lines"] > row["lines"]:
+                items.append(item("lines", v["path"], "", "violation",
+                                  f"{v['lines']} 行。例外リストの {row['lines']} 行を超えた"))
             continue
         items.append(item(v["kind"], v["path"], v["function"], "violation", v["detail"]))
     for r in allow:
         k = (r["path"], r["name"], r["kind"])
         if k not in hit:
             items.append(item("unused-allow", r["path"], r["name"], "violation",
-                              f"{r['kind']} の例外に当たる違反が無い。例外リストから消す"))
+                              f"{r['kind']} の例外に当たる違反が無い。例外リストの {allow_file_name(r)} を消す"))
     items.sort(key=lambda i: (i["path"], i["function"], i["kind"]))
     metrics.update(allowed=len(hit), violations=len(items))
     return items, metrics
@@ -238,11 +259,11 @@ def emit(status: str, summary: str, items: list[dict], metrics: dict) -> None:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--root", type=Path, default=REPO, help="リポジトリの根（既定はこのスクリプトのリポジトリ）")
-    ap.add_argument("--allow", type=Path, help="例外リスト（既定は <root>/scripts/script-structure-allow.json）")
+    ap.add_argument("--allow", type=Path, help="例外リストの置き場（既定は <root>/scripts/script-structure-allow/）")
     a = ap.parse_args(argv)
     root = a.root.resolve()
     try:
-        allow = load_allow(a.allow or root / "scripts" / "script-structure-allow.json")
+        allow = load_allow(a.allow or root / "scripts" / "script-structure-allow")
     except UsageError as e:
         emit("stopped", str(e), [], {})
         return 2

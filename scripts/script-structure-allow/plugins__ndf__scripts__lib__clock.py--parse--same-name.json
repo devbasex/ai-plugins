@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/lib/clock.py", "name": "parse", "kind": "same-name", "reason": "試行 T2 の hook-trial に同じ名前の関数がある既存側の定義。試行が消えるまで残る"}

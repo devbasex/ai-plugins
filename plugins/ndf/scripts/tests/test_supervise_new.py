@@ -1,7 +1,6 @@
 """supervise.py new の宣言の扱い（#1192）・設計のプランの入口（#1193）・種別ごとの help（#1194）。"""
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
 import subprocess
@@ -14,9 +13,8 @@ SCRIPTS = Path(__file__).resolve().parents[1]
 SUPERVISE = SCRIPTS / "supervise.py"
 PY = sys.executable
 
-spec = importlib.util.spec_from_file_location("supervise_new", SUPERVISE)
-sv = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(sv)
+sys.path.insert(0, str(SCRIPTS))
+from supervise_lib import commands, engine, pr as pr_step  # noqa: E402
 
 
 def cli(*args, cwd):
@@ -155,8 +153,8 @@ def test_design_glossary_stops_when_candidates_fails(tmp_path, monkeypatch):
             return subprocess.CompletedProcess(cmd, code, json.dumps(res) + "\n", "")
         return real(cmd, **kw)
 
-    monkeypatch.setattr(sv.subprocess, "run", fake)
-    res, code = sv.cmd_design_glossary(str(root), "standard", str(out))
+    monkeypatch.setattr(subprocess, "run", fake)
+    res, code = commands.cmd_design_glossary(str(root), "standard", str(out))
     assert code == 2 and res["status"] == "stopped" and "candidates" in res["summary"]
     assert not out.exists()
     # init より前に止まるので、打ち直しも gate の停止から同じ経路を通る
@@ -174,8 +172,8 @@ def test_design_glossary_removes_created_files_when_commit_fails(tmp_path, monke
             return subprocess.CompletedProcess(cmd, 1, "", "拒否")
         return real(cmd, **kw)
 
-    monkeypatch.setattr(sv.subprocess, "run", fake)
-    res, code = sv.cmd_design_glossary(str(root), "standard", str(out))
+    monkeypatch.setattr(subprocess, "run", fake)
+    res, code = commands.cmd_design_glossary(str(root), "standard", str(out))
     assert code == 1 and res["status"] == "stopped"
     assert not (root / ".ndf" / "glossary.json").exists()
     assert git(root, "status", "--porcelain") == ""
@@ -208,9 +206,9 @@ def test_pr_step_appends_existing_files(tmp_path, monkeypatch):
     plan = {"フェーズ": "設計", "課題": [1], "作業場所": str(root), "steps": [
         {"id": "pr", "type": "pr", "base": "main", "body": "template", "next": "end",
          "append": ["{state_dir}/work/cand.md", "{state_dir}/work/none.md"]}]}
-    assert "結果: 完了" in sv.Supervisor(plan, state).run()
+    assert "結果: 完了" in engine.Engine(plan, state).run()
     got = body.read_text()
-    assert "目印の語" in got and got.index("目印の語") < got.index(sv.PR_FOOTER)
+    assert "目印の語" in got and got.index("目印の語") < got.index(pr_step.PR_FOOTER)
 
 
 # --- #1194: 種別ごとの help ------------------------------------------------------------

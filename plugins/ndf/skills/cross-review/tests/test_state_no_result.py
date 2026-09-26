@@ -21,6 +21,10 @@ import json
 import pathlib
 
 import pytest
+import review_lib.commands.judge
+import review_lib.commands.read_result
+import review_lib.commands.report
+import review_lib.commands.start_round
 
 PR = 6196
 REPO = "o/r"
@@ -83,7 +87,7 @@ def test_a_round_with_a_missing_result_does_not_converge(tmp_dir, state_mod, cap
     _write(tmp_dir, _state([_round(codex=_approve())]))
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_judge(argparse.Namespace(pr=PR))
+        review_lib.commands.judge.cmd_judge(argparse.Namespace(pr=PR))
 
     assert e.value.code != 0
     assert _read(tmp_dir)["final"] != "approved"
@@ -94,7 +98,7 @@ def test_only_codex_converges_on_a_codex_approval(tmp_dir, state_mod):
     _write(tmp_dir, _state([_round(codex=_approve())], only="codex"))
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_judge(argparse.Namespace(pr=PR))
+        review_lib.commands.judge.cmd_judge(argparse.Namespace(pr=PR))
 
     assert e.value.code == 0
     assert _read(tmp_dir)["final"] == "approved"
@@ -110,14 +114,14 @@ def test_only_narrows_the_round_and_a_missing_result_stays_visible(
     """
     _write(tmp_dir, _state([_round(codex=_approve())], only="codex"))
     with pytest.raises(SystemExit):
-        state_mod.cmd_judge(argparse.Namespace(pr=PR))
+        review_lib.commands.judge.cmd_judge(argparse.Namespace(pr=PR))
     out = capsys.readouterr().out
     assert "REVIEWER_INTENTS='codex=APPROVE'" in out
     assert "agy" not in out
 
     _write(tmp_dir, _state([_round(codex=_approve())]))
     with pytest.raises(SystemExit):
-        state_mod.cmd_judge(argparse.Namespace(pr=PR))
+        review_lib.commands.judge.cmd_judge(argparse.Namespace(pr=PR))
     assert "agy=NO_RESULT" in capsys.readouterr().out
 
 
@@ -126,7 +130,7 @@ def test_only_narrows_the_round_and_a_missing_result_stays_visible(
 
 def _read_result(state_mod, rfile: pathlib.Path, agent: str = "agy") -> int:
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_read_result(
+        review_lib.commands.read_result.cmd_read_result(
             argparse.Namespace(pr=PR, agent=agent, file=str(rfile))
         )
     return int(e.value.code or 0)
@@ -180,7 +184,7 @@ def test_the_first_missing_result_asks_for_one_relaunch(tmp_dir, state_mod, caps
     _write(tmp_dir, _state([_round(codex=_approve())]))
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_judge(argparse.Namespace(pr=PR))
+        review_lib.commands.judge.cmd_judge(argparse.Namespace(pr=PR))
 
     assert e.value.code == 7
     out = capsys.readouterr().out
@@ -194,7 +198,7 @@ def test_both_missing_results_ask_for_both(tmp_dir, state_mod, capsys):
     _write(tmp_dir, _state([_round()]))
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_judge(argparse.Namespace(pr=PR))
+        review_lib.commands.judge.cmd_judge(argparse.Namespace(pr=PR))
 
     assert e.value.code == 7
     out = capsys.readouterr().out
@@ -211,7 +215,7 @@ def test_a_missing_result_after_the_relaunch_stops_the_review(tmp_dir, state_mod
     )
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_judge(argparse.Namespace(pr=PR))
+        review_lib.commands.judge.cmd_judge(argparse.Namespace(pr=PR))
 
     assert e.value.code == 1
     st = _read(tmp_dir)
@@ -224,7 +228,7 @@ def test_the_round_stays_unconverged_when_the_relaunch_is_ignored(tmp_dir, state
     _write(tmp_dir, _state([_round(codex=_approve())]))
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_judge(argparse.Namespace(pr=PR))
+        review_lib.commands.judge.cmd_judge(argparse.Namespace(pr=PR))
 
     assert e.value.code == 7
     st = _read(tmp_dir)
@@ -242,7 +246,7 @@ def test_a_no_result_round_needs_no_fix_record(tmp_dir, state_mod):
         _state([_round(codex=_approve(), relaunched=["agy"], verdict="no_result")]),
     )
 
-    state_mod.cmd_start_round(argparse.Namespace(pr=PR))
+    review_lib.commands.start_round.cmd_start_round(argparse.Namespace(pr=PR))
 
     assert len(_read(tmp_dir)["rounds"]) == 2
 
@@ -253,7 +257,7 @@ def test_a_round_without_a_verdict_and_a_missing_agent_can_be_followed(
     """判定の結果を持たない古い状態ファイルでも、項目が欠けたラウンドの次を開始できる。"""
     _write(tmp_dir, _state([_round(codex=_approve())]))
 
-    state_mod.cmd_start_round(argparse.Namespace(pr=PR))
+    review_lib.commands.start_round.cmd_start_round(argparse.Namespace(pr=PR))
 
     assert len(_read(tmp_dir)["rounds"]) == 2
 
@@ -276,6 +280,6 @@ def test_the_round_summary_shows_the_missing_result(tmp_dir, state_mod, capsys):
         ),
     )
 
-    state_mod.cmd_report(argparse.Namespace(pr=PR))
+    review_lib.commands.report.cmd_report(argparse.Namespace(pr=PR))
 
     assert "NO_RESULT" in capsys.readouterr().out

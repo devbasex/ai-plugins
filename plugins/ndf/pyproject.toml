@@ -1,0 +1,15 @@
+# NDF のスクリプトが使う外部パッケージの宣言（#1142 の決定 17）。版は隣の uv.lock が固定する。
+# パッケージは用途ごとのグループ（extra）に分け、エントリポイントは lib/deps.py の require("<グループ>") で使う。
+# 足す・版を上げるのは、この 2 つを変える PR だけで行う（理由を PR に書く）。
+# hook とラッパーのバージョンディレクトリは外部パッケージを使わない（I13）。
+[project]
+name = "ndf-scripts"
+version = "0.0.0"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+github = ["githubkit==0.16.1"]
+
+[tool.uv]
+package = false

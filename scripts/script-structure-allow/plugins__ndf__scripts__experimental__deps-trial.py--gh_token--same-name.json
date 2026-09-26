@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/experimental/deps-trial.py", "name": "gh_token", "kind": "same-name", "reason": "L0 で試行の require をライブラリの deps.py に置いた。試行は既定で動くものから参照しないため複製のまま残し、X1 で試行ごと消す"}

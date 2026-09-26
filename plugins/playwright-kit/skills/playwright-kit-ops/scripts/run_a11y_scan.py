@@ -87,15 +87,18 @@ def main() -> int:
         for u in urls
     ]
 
+    total_violations = sum(r.get("violations_count", 0) for r in results)
+
     text = json.dumps(results, indent=2, ensure_ascii=False)
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(text, encoding="utf-8")
-        print(f"OK: a11y scan → {args.output}", file=sys.stderr)
+        print(json.dumps({
+            "output": str(args.output), "count": len(results),
+            "violations": total_violations,
+        }, ensure_ascii=False))
     else:
         sys.stdout.write(text + "\n")
-
-    total_violations = sum(r.get("violations_count", 0) for r in results)
     print(f"violations: {total_violations}", file=sys.stderr)
     return 1 if args.fail_on_violations and total_violations > 0 else 0
 

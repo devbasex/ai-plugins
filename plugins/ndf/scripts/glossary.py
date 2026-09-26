@@ -27,6 +27,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 from step_result import EXIT_UNREADABLE, EXIT_VIOLATION, StepError, emit, main_with, result  # noqa: E402
+import jsonio  # noqa: E402
+import proc  # noqa: E402
 
 TOOL = "glossary"
 DECLARATION = ".ndf/glossary.json"
@@ -102,18 +104,18 @@ class Declaration:
         self.source_paths = source_paths  # 語の正本（terms[].source）に認めるパス。空なら見ない
 
 
-def read_json(path: Path, label: str):
+def _read_declared(path: Path, label: str):
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as e:
-        raise unreadable(f"{label} を読めない: {path}: {e}")
+        return jsonio.read(path)
+    except jsonio.JsonReadError as e:
+        raise unreadable(f"{label} を読めない: {e}")
 
 
 def load_declaration(root: Path) -> Declaration | None:
     p = root / DECLARATION
     if not p.exists():
         return None
-    return Declaration(root, read_json(p, DECLARATION))
+    return Declaration(root, _read_declared(p, DECLARATION))
 
 
 def parse_glossary(raw, label: str) -> dict:
@@ -125,7 +127,7 @@ def parse_glossary(raw, label: str) -> dict:
 
 
 def load_glossary(decl: Declaration) -> dict:
-    return parse_glossary(read_json(decl.source_path, "用語集"), "用語集")
+    return parse_glossary(_read_declared(decl.source_path, "用語集"), "用語集")
 
 
 def contexts_of(g: dict) -> list[dict]:
@@ -250,7 +252,7 @@ def structure_findings(g: dict, decl: Declaration) -> list[dict]:
         elif "pending_source" in t and not isinstance(t["pending_source"], str):
             hit("schema", t["term"], f"terms[{i}] の pending_source は文字列で書く")
         elif decl.source_paths and t.get("source") and "://" not in t["source"] and \
-                not matches(t["source"], decl.source_paths):
+                not declared_path_matches(t["source"], decl.source_paths):
             hit("unconfirmed_source", t["term"],
                 f"terms[{i}] の source が確定仕様を指さない: {t['source']}（check.source_paths に当たるパスへ移す。"
                 "確定前は source を空にし、plan-to-spec が確定仕様を書いたときに入れる）")
@@ -471,21 +473,18 @@ def replacement(g: dict, word: str) -> str:
 
 # --- git ------------------------------------------------------------------------------
 
-def git(root: Path, *args, check=True) -> subprocess.CompletedProcess:
-    p = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True)
+def git_checked(root: Path, *args, check=True) -> subprocess.CompletedProcess:
+    p = proc.git(root, *args, check=False)
     if check and p.returncode != 0:
         raise unreadable(f"git {' '.join(args)} が失敗: {p.stderr.strip()[:300]}")
     return p
 
 
-def added_lines(root: Path, base: str) -> dict[str, set[int]]:
-    """base と HEAD の分岐点から追加した行の番号を、ファイルごとに返す（作業ツリーの未コミット分も含む）。
-
-    差分の取り方は doc-lint.py の added_lines と同じ `git diff --unified=0` で、起点だけを
-    merge-base で解く。追跡していないファイルは全行とする。
-    """
-    mb = git(root, "merge-base", base, "HEAD").stdout.strip()
-    diff = git(root, "diff", "--unified=0", "--no-color", "--diff-filter=AM", mb, "--").stdout
+def added_lines(root: Path, base: str, pathspecs: tuple[str, ...] = ()) -> dict[str, set[int]]:
+    """base と HEAD の分岐点（merge-base）から追加した行の番号を、ファイルごとに返す（未コミット分も含む）。
+    追跡していないファイルは全行とする。`pathspecs` を渡すとそのパスに絞る（doc-lint.py は `*.md`）。"""
+    mb = git_checked(root, "merge-base", base, "HEAD").stdout.strip()
+    diff = git_checked(root, "diff", "--unified=0", "--no-color", "--diff-filter=AM", mb, "--", *pathspecs).stdout
     out: dict[str, set[int]] = {}
     cur, ln = None, 0
     for line in diff.splitlines():
@@ -504,7 +503,7 @@ def added_lines(root: Path, base: str) -> dict[str, set[int]]:
             ln += 1
         elif not line.startswith("-") and not line.startswith("\\"):
             ln += 1
-    for rel in git(root, "ls-files", "--others", "--exclude-standard").stdout.splitlines():
+    for rel in git_checked(root, "ls-files", "--others", "--exclude-standard", "--", *pathspecs).stdout.splitlines():
         rel = rel.strip()
         p = root / rel
         if rel and p.is_file():
@@ -513,7 +512,7 @@ def added_lines(root: Path, base: str) -> dict[str, set[int]]:
     return out
 
 
-def matches(rel: str, patterns: list[str]) -> bool:
+def declared_path_matches(rel: str, patterns: list[str]) -> bool:  # fnmatch（`*` は `/` をまたぐ）
     return any(fnmatch.fnmatchcase(rel, p) or fnmatch.fnmatchcase(rel, p.replace("**/", "")) for p in patterns)
 
 
@@ -595,7 +594,7 @@ def cmd_candidates(a):
         it = found.setdefault((term, kind), {"term": term, "count": 0, "kind": kind, "first": where})
         it["count"] += 1
 
-    files = git(root, "ls-files").stdout.splitlines()
+    files = git_checked(root, "ls-files").stdout.splitlines()
     for rel in files:
         p = root / rel
         if rel in skip or not p.is_file() or p.is_symlink():
@@ -674,7 +673,7 @@ def cmd_check(a):
                 targets.append((f, text, None))
         else:
             for rel, lines in sorted(added_lines(root, a.diff).items()):
-                if rel == decl.document or not (rel.endswith(CODE_SUFFIXES) or matches(rel, decl.paths)):
+                if rel == decl.document or not (rel.endswith(CODE_SUFFIXES) or declared_path_matches(rel, decl.paths)):
                     continue
                 p = root / rel
                 if p.is_file():
@@ -701,9 +700,9 @@ def glossary_at(root: Path, decl: Declaration, ref: str | None) -> dict:
     empty = {"version": 1, "contexts": [], "terms": []}
     if ref is None:
         return load_glossary(decl) if decl.source_path.exists() else empty
-    p = git(root, "show", f"{ref}:{decl.source}", check=False)
+    p = git_checked(root, "show", f"{ref}:{decl.source}", check=False)
     if p.returncode != 0:
-        git(root, "rev-parse", "--verify", f"{ref}^{{commit}}")  # ref そのものが無ければ 2
+        git_checked(root, "rev-parse", "--verify", f"{ref}^{{commit}}")  # ref そのものが無ければ 2
         return empty
     try:
         return parse_glossary(json.loads(p.stdout), f"{ref} の用語集")
