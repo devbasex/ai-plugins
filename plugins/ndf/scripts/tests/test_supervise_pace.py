@@ -79,7 +79,8 @@ def test_fast_mission_puts_check_then_dev_then_prod_after_the_implementation(tmp
     review = waves["実装レビュー"]["plans"][0]
     assert (cmd.index("--then " + check) < cmd.index("--then " + review) < cmd.index("--then " + dev)
             < cmd.index("--then " + prod))
-    assert "mission/" not in json.dumps(manifest, ensure_ascii=False)
+    # ミッションのブランチを作らない。スクリプトの絶対パスは .worktrees/mission/... を含みうるので、ブランチ名で見る。
+    assert "mission/m26" not in json.dumps(manifest, ensure_ascii=False)
 
     impl = load(waves["実装"]["plans"][0])
     assert impl["起点"] == "origin/develop" and next(s for s in impl["steps"] if s["type"] == "pr")["base"] == "develop"

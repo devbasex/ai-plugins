@@ -5,7 +5,9 @@
 
 init → ラウンド（起動・監視・取り込み・根拠の検証・判定）→ 振動の検知 → 修正 → 巻き直し →
 最終スイープ → 検証 → 報告を順に進める。LLM が要る地点（fix / sweep / newtext）で止まる。
-同じコマンドを打ち直すと続きから進む（進みは `$TMP_DIR/drive-pr<PR>.json`）。
+同じコマンドを打ち直すと続きから進む（進みは `$TMP_DIR/drive-pr<PR>.json`）。進みは `state.py init` の
+出力を `init_vars` に持つ。段階が sweep か done のときは init を打たずにこれを使う（`final` が決まった
+状態を init が空の状態で上書きし、件数が 0 になるのを防ぐ。#1142 の I7）。
 
 止まるときの JSON の形と終了コードの表は共通層の `scripts/lib/drive_pause.py` にある。
 
@@ -15,6 +17,7 @@ unresolved / final / review_status。
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import shlex
@@ -31,6 +34,19 @@ from drive_pause import Stop  # noqa: E402
 
 TOOL = "cross-review-drive"
 DOCS02 = SKILL / "docs" / "02-fix-and-rotation.md"
+# `final` が決まった後の段階。ここからの打ち直しは init を打たずに init_vars を使う（I7）
+FINAL_STAGES = ("sweep-start", "sweep", "done")
+
+
+def review_state_module():
+    """置き場の規則を init と揃えるため、`state.py` を読み込む（打ち直しのときだけ呼ぶ）。"""
+    name = "cross_review_state_for_drive"
+    if name not in sys.modules:
+        spec = importlib.util.spec_from_file_location(name, HERE / "state.py")
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[name] = mod
+        spec.loader.exec_module(mod)
+    return sys.modules[name]
 
 
 def call(cmd: list[str], env: dict | None = None, cwd: str | None = None) -> tuple[int, str]:
@@ -106,6 +122,7 @@ class Drive:
             return {"stage": "round", "rotate_mode": self.rotate_mode}
 
     def save_ds(self, ds: dict) -> None:
+        ds["init_vars"] = dict(self.v)
         self.ds_path().write_text(json.dumps(ds, ensure_ascii=False))
 
     def state(self) -> dict:
@@ -194,10 +211,42 @@ GitHub と git の送信をしない。結果ファイル: {self.path('sweep')}
 """
 
     # --- ステップ ---
+    def known_tmp(self) -> Path | None:
+        """init を打たずに、`state.py init` と同じ規則で状態の置き場を求める。求まらなければ None。"""
+        env = os.environ.get("CROSS_REVIEW_TMP_DIR")
+        if env:
+            return Path(env).resolve()
+        ap = argparse.ArgumentParser(add_help=False)
+        ap.add_argument("--worktree")
+        wt = ap.parse_known_args(self.init_args)[0].worktree
+        if wt:
+            return Path(wt).resolve() / ".cross_review"
+        st = review_state_module()
+        repo = st._repo_from_git()
+        return st._default_worktree_base() / st._repo_slug(repo) / f"pr{self.pr}" / ".cross_review" \
+            if repo else None
+
+    def finished_vars(self) -> dict | None:
+        """段階が sweep か done の駆動の状態があれば、その init_vars を返す（I7）。"""
+        tmp = self.known_tmp()
+        if tmp is None:
+            return None
+        try:
+            ds = json.loads((tmp / f"drive-pr{self.pr}.json").read_text())
+        except (OSError, json.JSONDecodeError):
+            return None
+        iv = ds.get("init_vars") if isinstance(ds, dict) else None
+        if ds.get("stage") not in FINAL_STAGES or not isinstance(iv, dict) or not iv.get("TMP_DIR"):
+            return None
+        return iv if Path(iv["TMP_DIR"]).resolve() == tmp.resolve() else None
+
     def init(self) -> None:
-        out = self.must(call([sys.executable, str(HERE / "state.py"), "init", str(self.pr), *self.init_args],
-                             self.env), "state.py init")
-        self.v.update(parse_vars(out))
+        iv = self.finished_vars()
+        if iv is None:
+            out = self.must(call([sys.executable, str(HERE / "state.py"), "init", str(self.pr), *self.init_args],
+                                 self.env), "state.py init")
+            iv = parse_vars(out)
+        self.v.update(iv)
         if "TMP_DIR" not in self.v:
             raise Stop("state.py init が TMP_DIR を返さない", 2)
         self.env["CROSS_REVIEW_TMP_DIR"] = self.v["TMP_DIR"]
@@ -293,6 +342,7 @@ GitHub と git の送信をしない。結果ファイル: {self.path('sweep')}
     def run(self) -> dict:
         self.init()
         ds = self.load_ds()
+        self.save_ds(ds)
         for _ in range(1000):
             stage = ds.get("stage", "round")
             if stage == "done":

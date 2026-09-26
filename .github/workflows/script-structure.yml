@@ -1,0 +1,32 @@
+name: Script structure
+
+# NDF のスクリプトの構造チェック（#1142 の I4・I5）。テストを除くスクリプトの 1000 行を超えるファイルと、
+# 本体の同じ関数・同じ名前で本体の違う関数を数え、scripts/script-structure-allow.json の例外のほかに
+# 当たれば落とす。例外リストの使われない行も落とす（直した Pull Request が同じ差分で行を消す）。
+#
+# Pull Request では絞り込まずに常に起動する（pytest.yml と同じ理由）。数秒で終わる
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - ".github/workflows/script-structure.yml"
+      - "plugins/ndf/**"
+      - "scripts/check-script-structure.py"
+      - "scripts/script-structure-allow.json"
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Check the script structure
+        run: python3 scripts/check-script-structure.py

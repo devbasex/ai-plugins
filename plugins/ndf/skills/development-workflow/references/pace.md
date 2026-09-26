@@ -136,7 +136,8 @@ Pull Request が範囲から外れる。ブランチはリポジトリにある�
 
 ## 流出不具合の記録
 
-**マージ済みの変更の不具合を即時修正すると決めたら、`new impl --escape-of <持ち込んだ PR>` でプランを組む。**
+**マージ済みの変更の不具合を即時修正すると決めたら、`new fix --escape-of <持ち込んだ PR>` でプランを組む**
+（直した作業場所を テスト → Pull Request → `merge-when-green` で流す。worker に直させるなら `new impl --escape-of`）。
 即時修正にする条件はどの `pace` でも同じで、[../SKILL.md](../SKILL.md) の「即時修正」にある。
 マージの後に `check-trigger.py escape` のステップが入り、直した Pull Request が触った領域を記録する。持ち込んだ
 Pull Request が分からなければ `0`（不明）を渡す。`fix/` のブランチの本数では数えない。

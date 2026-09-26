@@ -230,7 +230,7 @@ def test_new_impl_help_differs_from_mission(tmp_path):
 
 
 def test_every_new_argument_has_help(tmp_path):
-    for kind in ("impl", "check", "release", "mission", "close"):
+    for kind in ("impl", "fix", "check", "release", "mission", "close"):
         p = cli("new", kind, "--help", cwd=tmp_path)
         assert p.returncode == 0, kind
         opts = p.stdout.split("options:\n", 1)[1].split("\n\n", 1)[0].splitlines()
@@ -244,7 +244,135 @@ def test_every_new_argument_has_help(tmp_path):
 
 def test_top_help_has_phase_table(tmp_path):
     out = cli("--help", cwd=tmp_path).stdout
-    for kind in ("new mission", "new impl", "new check", "new release", "new close"):
+    for kind in ("new mission", "new impl", "new fix", "new check", "new release", "new close"):
         assert kind in out, kind
     for sub in ("run", "queue", "wait"):
         assert cli(sub, "--help", cwd=tmp_path).stdout.count("\n") > 5, sub
+
+
+# --- #1142: 即時修正のプラン（不足 a） --------------------------------------------------
+
+def new_fix(root, out, *extra):
+    return cli("new", "fix", "--tests", "tests/test_x.py", "--title", "Fix: x", "--out", str(out), *extra, cwd=root)
+
+
+def fix_order(plan):
+    steps = {s["id"]: s for s in plan["steps"]}
+    order, sid = [], plan["steps"][0]["id"]
+    while sid != "end":
+        order.append(sid)
+        sid = steps[sid]["next"]
+    return order, steps
+
+
+def test_new_fix_runs_tests_pr_and_merge_without_the_worker_step(tmp_path):
+    root = plain_repo(tmp_path)
+    out = tmp_path / "fix.json"
+    p = new_fix(root, out, "--worktree", str(root))
+    assert p.returncode == 0, p.stderr
+    res = json.loads(p.stdout)
+    assert res["tool"] == "supervise-new" and res["status"] == "ok" and res["items"][0]["kind"] == "fix"
+    plan = json.loads(out.read_text())
+    order, steps = fix_order(plan)
+    assert order == ["test-limited", "pr", "test-all", "doc-lint", "ready", "merge"]
+    assert not any(s["type"] == "work" and s.get("kind") == "実装" for s in plan["steps"])
+    assert "merge-when-green" in steps["merge"]["cmd"] and steps["pr"]["title"] == "Fix: x"
+    assert "tests/test_x.py" in steps["test-limited"]["cmd"] and plan["作業場所"] == str(root)
+    assert plan["課題"] == [] and plan["base_branch"] == "main"
+
+
+def test_new_fix_records_the_escape_and_takes_the_issue(tmp_path):
+    root = plain_repo(tmp_path)
+    out = tmp_path / "fix.json"
+    assert new_fix(root, out, "--worktree", str(root), "--issue", "7", "--escape-of", "0").returncode == 0
+    plan = json.loads(out.read_text())
+    order, steps = fix_order(plan)
+    assert order[-1] == "escape" and "escape --pr {pr} --of 0" in steps["escape"]["cmd"]
+    assert plan["課題"] == [7]
+
+
+def test_new_fix_with_branch_only_places_the_worktree_under_the_repository(tmp_path):
+    root = plain_repo(tmp_path)
+    git(root, "init", "-q")
+    out = tmp_path / "fix.json"
+    p = new_fix(root, out, "--branch", "fix/x")
+    assert p.returncode == 0, p.stderr
+    plan = json.loads(out.read_text())
+    assert plan["作業場所"] == str(root.resolve() / ".worktrees" / "fix" / "x")
+    assert plan["branch"] == "fix/x" and plan["起点"] == "origin/main"
+
+
+@pytest.mark.parametrize("drop", ["--tests", "--title", "place"])
+def test_new_fix_without_a_required_argument_is_two(tmp_path, drop):
+    root = plain_repo(tmp_path)
+    args = {"--tests": ["tests/test_x.py"], "--title": ["Fix: x"], "place": ["--worktree", str(root)]}
+    argv = [x for k, v in args.items() if k != drop for x in ([k, *v] if k != "place" else v)]
+    p = cli("new", "fix", *argv, "--out", str(tmp_path / "f.json"), cwd=root)
+    assert p.returncode == 2
+
+
+def test_new_fix_help_shows_only_its_arguments(tmp_path):
+    out = cli("new", "fix", "--help", cwd=tmp_path).stdout
+    assert "--escape-of" in out and "--branch" in out and "--prompt" not in out and "--design" not in out
+
+
+# --- #1142: 本番のリリースプランが他のプラグインの版を上げる（不足 c） ----------------------
+
+def plugin_repo(tmp_path):
+    """ndf と mcp-serena を持ち、ndf--v1.0.0 の後に mcp-serena だけを変えたリポジトリ。"""
+    root = tmp_path / "repo"
+    (root / ".ndf").mkdir(parents=True)
+    (root / ".ndf" / "worktree.json").write_text(
+        '{"version": 1, "base_branch": "develop", "production_branch": "main"}\n')
+    (root / ".ndf" / "supervise.json").write_text(json.dumps(
+        {"version": 1, "test": {"command": "true {paths}"},
+         "release": {"form": "package-plugin", "plugin": "ndf", "runtimes": ["claude"]}}))
+    for rel, v in (("plugins/ndf", "1.0.0"), ("plugins/mcp/mcp-serena", "2.3.4")):
+        (root / rel / ".claude-plugin").mkdir(parents=True)
+        (root / rel / ".claude-plugin" / "plugin.json").write_text(json.dumps({"version": v}, indent=2))
+    git(root, "init", "-q", "-b", "develop")
+    for k, v in (("user.email", "t@example.com"), ("user.name", "t"), ("commit.gpgsign", "false")):
+        git(root, "config", k, v)
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", "base")
+    git(root, "tag", "ndf--v1.0.0")
+    (root / "plugins" / "mcp" / "mcp-serena" / "README.md").write_text("changed\n")
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", "serena")
+    git(root, "update-ref", "refs/remotes/origin/develop", "HEAD")
+    return root
+
+
+def release_steps_of(root, tmp_path, channel, version):
+    out = tmp_path / f"rel-{channel}.json"
+    p = cli("new", "release", "--version", version, "--channel", channel, "--prs", "1", "--worktree", str(root),
+            "--repo", str(root), "--out", str(out), cwd=root)
+    assert p.returncode == 0, p.stderr
+    return {s["id"]: s for s in json.loads(out.read_text())["steps"]}
+
+
+def test_prod_release_bumps_other_changed_plugins_after_ndf(tmp_path):
+    root = plugin_repo(tmp_path)
+    steps = release_steps_of(root, tmp_path, "prod", "1.0.1")
+    assert steps["bump"]["next"] == "bump-others" and steps["bump-others"]["next"] == "changelog"
+    assert "bump-others" in steps["judge"]["choices"]
+    p = subprocess.run(steps["bump-others"]["cmd"], shell=True, cwd=root, capture_output=True, text=True)
+    assert p.returncode == 0, p.stdout + p.stderr
+    got = json.loads((root / "plugins/mcp/mcp-serena/.claude-plugin/plugin.json").read_text())["version"]
+    assert got == "2.3.5"
+    ndf = json.loads((root / "plugins/ndf/.claude-plugin/plugin.json").read_text())["version"]
+    assert ndf == "1.0.0"  # ndf は bump のステップが上げる
+
+
+def test_bump_others_stops_when_changed_plugins_fails(tmp_path):
+    root = plugin_repo(tmp_path)
+    git(root, "tag", "-d", "ndf--v1.0.0")
+    steps = release_steps_of(root, tmp_path, "prod", "1.0.1")
+    p = subprocess.run(steps["bump-others"]["cmd"], shell=True, cwd=root, capture_output=True, text=True)
+    assert p.returncode != 0
+
+
+def test_dev_release_does_not_bump_other_plugins(tmp_path):
+    root = plugin_repo(tmp_path)
+    steps = release_steps_of(root, tmp_path, "dev", "1.0.1-dev.1")
+    assert "bump-others" not in steps and steps["bump"]["next"] == "changelog"

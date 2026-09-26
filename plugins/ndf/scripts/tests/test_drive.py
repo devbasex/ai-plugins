@@ -361,7 +361,9 @@ sys.exit(23)
 """)
     s, text = run_plan(tmp_path, [{"id": "refactor", "type": "drive", "cmd": f"{PY} {outer}", "next": "end"}])
     assert "結果: 完了" in text
-    assert s.results["refactor"]["counts"] == {"review_status": "approved"}
+    # 外側の metrics に、入れ子の駆動の metrics を inner として足す（#1142 の不足 d の入れ子）
+    assert s.results["refactor"]["counts"] == {"review_status": "approved", "inner": {
+        "findings": 3, "review_status": "approved", "rounds": 2, "unresolved": 0}}
 
 
 def test_drive_step_resolves_known_drive(tmp_path):

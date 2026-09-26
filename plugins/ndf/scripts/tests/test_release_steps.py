@@ -416,3 +416,68 @@ def test_bump_to_the_version_of_the_base_still_stops(repo):
     p = run(repo, "bump", "--plugin", "ndf", "--to", "1.2.4")
     assert p.returncode != 0
     assert "旧版と新版が同じ" in p.stdout + p.stderr
+
+
+# --- changed-plugins（#1142 の不足 c） ---------------------------------------------------
+
+def plugin_json(root: Path, rel: str, version: str) -> None:
+    f = root / rel / ".claude-plugin" / "plugin.json"
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(json.dumps({"version": version}, indent=2), encoding="utf-8")
+
+
+def changed_repo(root: Path) -> Path:
+    """ndf・mcp-serena・mcp-codex を持ち、ndf--v1.0.0 のタグの後に mcp-serena だけを変えたリポジトリ。"""
+    plugin_json(root, "plugins/ndf", "1.0.0")
+    plugin_json(root, "plugins/mcp/mcp-serena", "2.3.4")
+    plugin_json(root, "plugins/mcp/mcp-codex", "0.1.0")
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", "base")
+    git(root, "tag", "ndf--v1.0.0")
+    git(root, "tag", "ndf--v1.0.1-dev.1")  # 接尾辞のあるタグは前の本番に数えない
+    (root / "plugins" / "mcp" / "mcp-serena" / "README.md").write_text("changed\n", encoding="utf-8")
+    (root / "plugins" / "mcp" / "README.md").write_text("index\n", encoding="utf-8")  # プラグインでない
+    (root / "plugins" / "ndf" / "x.py").write_text("x\n", encoding="utf-8")  # ndf は items に入れない
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", "change serena")
+    return root
+
+
+def changed(root: Path, *extra: str) -> tuple[int, dict]:
+    p = run(root, "changed-plugins", *extra)
+    return p.returncode, json.loads(p.stdout.strip().splitlines()[-1])
+
+
+@pytest.mark.parametrize("extra", [("--since", "ndf--v1.0.0"), ()])
+def test_changed_plugins_lists_only_other_plugins_changed_since_the_tag(repo, extra):
+    code, res = changed(changed_repo(repo), *extra)
+    assert code == 0 and res["status"] == "ok", res
+    assert [(i["name"], i["from"], i["to"]) for i in res["items"]] == [("mcp-serena", "2.3.4", "2.3.5")]
+    assert res["metrics"]["since"] == "ndf--v1.0.0"
+
+
+def test_changed_plugins_skips_a_plugin_already_bumped_in_the_diff(repo):
+    root = changed_repo(repo)
+    plugin_json(root, "plugins/mcp/mcp-serena", "2.3.5")
+    git(root, "commit", "-q", "-am", "bump serena")
+    code, res = changed(root, "--since", "ndf--v1.0.0")
+    assert code == 0 and res["items"] == [] and res["metrics"]["already"] == ["mcp-serena"]
+
+
+def test_changed_plugins_without_the_tag_is_two(repo):
+    code, res = changed(changed_repo(repo), "--since", "ndf--v9.9.9")
+    assert code == 2 and res["status"] == "stopped"
+    git(repo, "tag", "-d", "ndf--v1.0.0", "ndf--v1.0.1-dev.1")
+    code, res = changed(repo)  # 本番のタグが 1 つも無い
+    assert code == 2 and "ndf--v" in res["summary"]
+
+
+def test_bump_raises_the_other_plugin_from_changed_plugins(repo):
+    root = changed_repo(repo)
+    git(root, "update-ref", "refs/remotes/origin/develop", "HEAD")
+    _, res = changed(root, "--since", "ndf--v1.0.0")
+    it = res["items"][0]
+    p = run(root, "bump", "--plugin", it["name"], "--to", it["to"])
+    assert p.returncode == 0, p.stdout + p.stderr
+    got = json.loads((root / "plugins/mcp/mcp-serena/.claude-plugin/plugin.json").read_text())
+    assert got["version"] == "2.3.5"

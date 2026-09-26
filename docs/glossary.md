@@ -166,6 +166,11 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 実装計画 | — | implementation-plan が issues/ に書く、実装の前の計画 | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 確定仕様化 | — | 完了した実装計画を docs/ の確定仕様へ書き直す工程 | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 振り返り | — | 進め方で変えることを記録し、起票の取りこぼしを拾う工程 | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| ライブラリ | `library` | 2 つ以上のスクリプトが使う関数とクラスの置き場。今の plugins/ndf/scripts/lib/ に当たる。pace.json の「共通層」（点数を重くする領域）とは別 | — | — | — |
+| エントリポイント | `entry_point` | Skill・プラン・hook・宣言・利用者が呼ぶスクリプトのパスと副命令と引数と出力の形 | — | — | — |
+| 移行ステップ | `migration_step` | 設計の決める移行の順序の 1 つ分。1 本の PR で閉じる。プランの「ステップ」とは別 | — | — | — |
+| 使用量の帳簿 | `usage_ledger` | claude -p の 1 回の呼び出しごとに、版・プラン・ステップ・usage を 1 行で追記する jsonl（usage/<owner>__<repo>.jsonl） | — | — | — |
+| 構造チェック | `structure_check` | テストを除くスクリプトの行数と、本体の同じ関数・同じ名前で本体の違う関数を構文木で数える継続的統合のチェック | — | — | — |
 
 ## NDF の Slack 通知（`ndf-notification`）
 
@@ -217,6 +222,7 @@ Pull Request のレビューを CLI へ委譲し、新しい指摘が出なく�
 | 投稿キュー | `post_queue` | 送る前に投稿を積み、上限で送れなければ残す仕組み（lib/post_queue.py） | 投稿の待ち行列 | — | `docs/specifications/cross-review-writes-to-conductor.md` |
 | 重複投稿 | — | 送ろうとした投稿と同じものとして、すでに Pull Request にある投稿 | 先客 | — | `docs/specifications/cross-review-writes-to-conductor.md` |
 | 総評 | — | レビュー本体に書く文章（body）。インラインのコメントとは別に置く | — | — | `docs/specifications/cross-review-writes-to-conductor.md` |
+| drive の状態 | `drive_state` | 収束ループの drive.py が Pull Request ごとに持つ状態ファイル（drive-pr<N>.json / drive-rf<ID>.json）。stage と init_vars を持つ | — | — | — |
 
 ## NDF の cross-refactoring（`ndf-cross-refactoring`）
 
@@ -253,6 +259,8 @@ Pull Request のレビューを CLI へ委譲し、新しい指摘が出なく�
 | 起動オプション | — | 最初のセッションの claude の引数のうち、セッションごとに変わらないもの（--dangerously-skip-permissions など） | 起動の方針の引数 | — | `docs/specifications/ndf-relay-install-and-restart.md` |
 | 停止シグナルファイル | — | ラッパーに次のセッションを起動させないために置く空のファイル（stop） | 停止のシグナルファイル | — | `docs/specifications/ndf-relay-segment-restart.md` |
 | 再起動ループ | — | シグナルファイルを書いて終わったセッションが短い時間で続き、進まずに起動だけが重なる状態。ラッパーは次のセッションを起動しない | — | — | `docs/specifications/ndf-relay-segment-restart.md` |
+| ラッパーのバージョンディレクトリ | `relay_version_dir` | ~/.claude/ndf/ に版ごとに置く、ラッパーの relay_lib/ と使うライブラリのコピー。relay.current が使うバージョンディレクトリを指す | ラッパーの束 | `relay_bundle` | — |
+| ランチャー | `relay_launcher` | ~/.claude/ndf/relay.py（プラグインの scripts/relay.py と同じバイト列）。使うバージョンディレクトリを選び、relay_lib を読み込んで起動するだけのエントリポイント | — | — | — |
 
 ## NDF のリリース（`ndf-release`）
 

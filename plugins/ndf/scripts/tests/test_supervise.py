@@ -759,8 +759,8 @@ def test_new_release_dev_and_prod(tmp_path):
             "--worktree", "/r/.worktrees/release/v10.17.11", "--out", str(tmp_path / "p.json"))
     plan = json.loads((tmp_path / "p.json").read_text())
     st = {s["id"]: s for s in plan["steps"]}
-    assert [s["id"] for s in plan["steps"]] == ["bump", "changelog", "notes", "snapshot", "sync", "release",
-                                                "verify", "cleanup", "judge", "fix"]
+    assert [s["id"] for s in plan["steps"]] == ["bump", "bump-others", "changelog", "notes", "snapshot", "sync",
+                                                "release", "verify", "cleanup", "judge", "fix"]
     assert "--ref main" in st["verify"]["cmd"] and st["verify"]["stage"] == "リリース後テスト"
     assert st["verify"]["next"] == "cleanup" and "facts" not in st
 

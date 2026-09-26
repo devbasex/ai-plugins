@@ -23,6 +23,7 @@
 2 = 読めない / 3 = 前提が無い / 10 = 本番への配布の承認が要る（approval-facts）。
 
     python3 release-steps.py bump           --plugin <名前> --to <版> [--base develop] [--root <dir>]
+    python3 release-steps.py changed-plugins [--since <タグ>] [--plugin ndf] [--root <dir>]  # 差分のある他のプラグイン
     python3 release-steps.py changelog      --version <版> --prs <PR番号>... [--plugin ndf] [--root <dir>]
     python3 release-steps.py release        --version <版> --channel dev|prod [--plugins ndf,...] [--root <dir>]
     python3 release-steps.py approval-facts --version <版> --prs <PR番号>... [--prev-tag <タグ>] [--root <dir>]
@@ -390,10 +391,10 @@ def run_staleness(root, expected=()):
     return False, " / ".join((rest or out)[-10:])[:1000]
 
 
-def base_version(root, pdir, base):
-    """起点のブランチ（origin/<base>）の plugin.json の版。読めなければ None。"""
+def base_version(root, pdir, ref):
+    """ref（起点のブランチなら origin/<base>・タグ・HEAD）の plugin.json の版。読めなければ None。"""
     rel = (pdir / ".claude-plugin" / "plugin.json").relative_to(root).as_posix()
-    p = git(root, "show", f"origin/{base}:{rel}", check=False)
+    p = git(root, "show", f"{ref}:{rel}", check=False)
     try:
         return json.loads(p.stdout)["version"] if p.returncode == 0 else None
     except (ValueError, KeyError, TypeError):
@@ -409,7 +410,7 @@ def cmd_bump(a):
         raise StepError(f"旧版を plugin.json から読めない: {e}", 2)
     new = a.to
     if old == new:
-        base_ver = base_version(root, pdir, a.base)
+        base_ver = base_version(root, pdir, f"origin/{a.base}")
         if base_ver is None or base_ver == new:
             raise StepError(f"旧版と新版が同じ: {old}"
                             + ("" if base_ver else f"（origin/{a.base} の版を読めない）"))
@@ -469,6 +470,33 @@ def cmd_bump(a):
                 items, metrics, next="items の manual を手で直す" if ed.manual else None))
 
 
+def release_tag_before(root, plugin, current=None):
+    """<plugin>--v で始まり接尾辞の無いタグのうち、current を除いて最も新しいもの。無ければ None。"""
+    head = f"{plugin}--v"
+    tags = git(root, "tag", "--list", f"{head}*", "--sort=-v:refname").stdout.split()
+    return next((t for t in tags if t != current and "-" not in t[len(head):]), None)
+
+
+def cmd_changed_plugins(a):
+    """前のタグからの差分にある --plugin 以外のプラグインと、PATCH を 1 つ上げた版を items に返す。"""
+    root = git_root(a.root)
+    since = a.since or release_tag_before(root, a.plugin) or f"{a.plugin}--v*"
+    p = git(root, "diff", "--name-only", f"refs/tags/{since}", "HEAD", check=False)
+    if p.returncode:
+        raise StepError(f"前のタグが無い: {since}", 2)
+    items, already = [], []
+    for name in sorted({m[1] for f in p.stdout.split() if (m := re.match(r"plugins/(?:mcp/)?([^/]+)/", f))} - {a.plugin}):
+        pdir = root / "plugins" / (name if name in ("ndf", "playwright-kit") else f"mcp/{name}")
+        old, head = base_version(root, pdir, since), base_version(root, pdir, "HEAD")
+        if old and head == old:  # 差分の中でまだ上げていない
+            items.append({"kind": "plugin", "name": name, "result": "bump", "from": old,
+                          "to": re.sub(r"\d+$", lambda m: str(int(m[0]) + 1), base_of(old))})
+        elif head:
+            already.append(name)
+    emit(result(TOOL, "ok", f"{since} からの差分で版を上げるプラグイン {len(items)} 件（{a.plugin} を除く）", items,
+                {"since": since, "plugins": len(items), "already": already}))
+
+
 def pr_view(root, n, fields):
     """gh pr view <n> --json <fields> を読む。GraphQL が上限なら gh_parts が REST で読み直す。"""
     what = f"gh pr view {n}"
@@ -522,8 +550,7 @@ def cmd_changelog(a):
 
     # CHANGELOG.md（見出しは基底の版。開発版の接尾辞は載せない）
     lines = cl.read_text(encoding="utf-8").split("\n")
-    head = f"## [{a.plugin} {base_of(a.version)}]"
-    at = next((i for i, l in enumerate(lines) if l == head or l.startswith(head + " ")), None)
+    head, (at, end) = f"## [{a.plugin} {base_of(a.version)}]", changelog_span(lines, a.plugin, a.version)
     if at is None:
         first = next((i for i, l in enumerate(lines) if l.startswith("## [")), len(lines))
         block = [f"{head} - {today()}", ""] + [b for _, b in items] + [""]
@@ -533,7 +560,6 @@ def cmd_changelog(a):
         sections.append({"kind": "section", "name": "CHANGELOG.md", "result": "added",
                          "heading": block[0] or block[1], "added": [n for n, _ in items]})
     else:
-        end = next((i for i in range(at + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
         body = "\n".join(lines[at:end])
         add = [(n, b) for n, b in items if f"#{n}）" not in body and f"#{n})" not in body]
         ins = end
@@ -575,18 +601,20 @@ def owner_repo(root):
     return slug.replace("--", "/", 1)
 
 
+def changelog_span(lines, plugin, version):
+    """CHANGELOG.md の `## [<plugin> <基底の版>]` の節の (見出しの行, 次の節の行)。無ければ (None, None)。"""
+    head = f"## [{plugin} {base_of(version)}]"
+    at = next((i for i, l in enumerate(lines) if l == head or l.startswith(head + " ")), None)
+    return (None, None) if at is None else (
+        at, next((i for i in range(at + 1, len(lines)) if lines[i].startswith("## ")), len(lines)))
+
+
 def changelog_section(root, version, plugin="ndf"):
     """CHANGELOG.md の `## [<plugin> <基底の版>]` の節の本文（見出しを除く）を返す。"""
     cl = root / "CHANGELOG.md"
-    if not cl.is_file():
-        return ""
-    lines = cl.read_text(encoding="utf-8").split("\n")
-    head = f"## [{plugin} {base_of(version)}]"
-    at = next((i for i, l in enumerate(lines) if l == head or l.startswith(head + " ")), None)
-    if at is None:
-        return ""
-    end = next((i for i in range(at + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
-    return "\n".join(lines[at + 1:end]).strip()
+    lines = cl.read_text(encoding="utf-8").split("\n") if cl.is_file() else []
+    at, end = changelog_span(lines, plugin, version)
+    return "" if at is None else "\n".join(lines[at + 1:end]).strip()
 
 
 def run_checks(root):
@@ -732,12 +760,9 @@ def cmd_approval_facts(a):
     repo = owner_repo(root)
     git(root, "fetch", "-q", "origin", "--tags")
     cur_tag = f"ndf--v{a.version}"
-    prev = a.prev_tag
+    prev = a.prev_tag or release_tag_before(root, "ndf", cur_tag)
     if not prev:
-        tags = git(root, "tag", "--list", "ndf--v*", "--sort=-v:refname").stdout.split()
-        prev = next((t for t in tags if t != cur_tag and "-" not in t[len("ndf--v"):]), None)
-        if not prev:
-            raise StepError("前のタグを決められない（--prev-tag を渡す）", EXIT_PRECONDITION)
+        raise StepError("前のタグを決められない（--prev-tag を渡す）", EXIT_PRECONDITION)
     dev = git(root, "rev-parse", "origin/develop").stdout.strip()
 
     stat = git(root, "diff", "--shortstat", "origin/main...origin/develop").stdout.strip()
@@ -938,6 +963,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--base", default="develop",
                    help="起点のブランチ。作業場所の版がすでに --to で、origin/<base> の版と違うなら打ち直しとして ok を返す")
     p.set_defaults(func=cmd_bump)
+    p = sub.add_parser("changed-plugins", parents=[common], help="前のタグからの差分にある他のプラグインと上げる版")
+    p.add_argument("--since", help="前のタグ（省略時は <--plugin>--v の接尾辞の無い最も新しいタグ）")
+    p.add_argument("--plugin", default="ndf", help="除くプラグイン（宣言の release.plugin）")
+    p.set_defaults(func=cmd_changed_plugins)
 
     p = sub.add_parser("changelog", parents=[common], help="CHANGELOG.md と plugin の README の更新案内へ PR のタイトルを並べる")
     p.add_argument("--version", required=True, type=version_arg)
