@@ -50,6 +50,7 @@ from pathlib import Path
 
 _LIB = Path(__file__).resolve().parents[3] / "scripts" / "lib"
 sys.path.insert(0, str(_LIB))
+import jsonio  # noqa: E402
 import post_queue  # noqa: E402
 from step_result import (EXIT_PAUSE, EXIT_PRECONDITION, EXIT_UNREADABLE, StepError,  # noqa: E402
                          approval_present, common_parser, emit, git, git_root, main_with,
@@ -131,13 +132,12 @@ def _write_json(path: Path, obj) -> None:
     tmp.replace(path)
 
 
-def _read_json(path: Path):
+def _read_state(path: Path):
+    """状態の JSON。無ければ None、読めなければ終了コード 2（読みは `jsonio`）。"""
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        return None
-    except ValueError as e:
-        raise StepError(f"{path} を読めない: {e}", EXIT_UNREADABLE)
+        return jsonio.read(path, missing=None)
+    except jsonio.JsonReadError as e:
+        raise StepError(f"{path} を読めない: {e.detail or e}", EXIT_UNREADABLE)
 
 
 # ---------------- gh の呼び出しと待ち ----------------
@@ -378,7 +378,7 @@ def cmd_candidates(a):
 # ---------------- apply ----------------
 
 def _load_plan(path: str) -> dict:
-    plan = _read_json(Path(path))
+    plan = _read_state(Path(path))
     if plan is None:
         raise StepError(f"plan が無い: {path}", EXIT_PRECONDITION)
     if not isinstance(plan, dict) or not isinstance(plan.get("actions"), list):
@@ -447,7 +447,7 @@ def cmd_apply(a):
     repo = a.repo or plan.get("repo") or _repo(root, None)
     sd = _state_dir(a.state_dir, repo)
     ledger_path = sd / "ledger.json"
-    ledger = _read_json(ledger_path) or {}
+    ledger = _read_state(ledger_path) or {}
     gh = Gh(repo, max_waits=a.max_waits, max_wait=a.max_wait)
     ms = Milestones(gh)
     buckets = {k: [] for k in ("applied", "skipped_changed", "unchanged", "already", "needs_approval",
@@ -551,7 +551,7 @@ def cmd_report(a):
     root = git_root(a.root)
     repo = _repo(root, a.repo)
     sd = _state_dir(a.state_dir, repo)
-    cand, app = _read_json(sd / "candidates.json"), _read_json(sd / "apply.json")
+    cand, app = _read_state(sd / "candidates.json"), _read_state(sd / "apply.json")
     if cand is None and app is None:
         raise StepError(f"記録が無い（candidates も apply もまだ打っていない）: {sd}", EXIT_PRECONDITION)
     items, metrics = [], {"repo": repo}

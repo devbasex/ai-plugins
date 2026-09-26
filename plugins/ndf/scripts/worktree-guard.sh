@@ -71,7 +71,7 @@ IN_WORKTREE=1
 HAS_DECLARATION=0
 ALLOW_PATHS=()
 
-load_state() {
+load_cached_state() {
   [ -n "$STATE_FILE" ] && [ -f "$STATE_FILE" ] || return 1
   local cached_cwd cached_stamp
   cached_cwd=$(jq -r '.resolved_from // empty' "$STATE_FILE" 2>/dev/null) || return 1
@@ -121,7 +121,7 @@ save_state() {
   mv "$tmp" "$STATE_FILE" 2>/dev/null || rm -f "$tmp"
 }
 
-if ! load_state; then
+if ! load_cached_state; then
   compute_state || exit 0
   save_state
 fi

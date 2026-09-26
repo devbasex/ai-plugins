@@ -14,7 +14,10 @@
 """
 from __future__ import annotations
 
+import ast
+import errno
 import fcntl
+import hashlib
 import json
 import os
 import pathlib
@@ -26,6 +29,16 @@ import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 RELAY = ROOT / "scripts" / "relay.py"
+sys.path.insert(0, str(ROOT / "scripts"))
+from relay_lib import claude as relay_claude  # noqa: E402
+from relay_lib import common as relay_common  # noqa: E402
+from relay_lib import install as relay_install  # noqa: E402
+from relay_lib import mark as relay_mark  # noqa: E402
+from relay_lib import proc as relay_proc  # noqa: E402
+from relay_lib import record as relay_record  # noqa: E402
+from relay_lib import run as relay_run  # noqa: E402
+from relay_lib import shellrc as relay_shellrc  # noqa: E402
+from relay_lib import version_dir as relay_version_dir  # noqa: E402
 
 
 def isolated_env(tmp_path, **extra):
@@ -606,7 +619,8 @@ def test_run_exception_keeps_child_and_restores(term, tmp_path):
         f"spec = importlib.util.spec_from_file_location('relay', {str(RELAY)!r})\n"
         "m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)\n"
         "def boom(*a, **k): raise RuntimeError('boom')\n"
-        "m.Relay._tick = boom\n"
+        "import relay_lib.run\n"
+        "relay_lib.run.Relay._tick = boom\n"
         "sys.exit(m.main(sys.argv[1:]))\n")
     t = term(cmd=[sys.executable, str(wrapper), "run"])
     t.wait_start(1)
@@ -676,40 +690,40 @@ def mod(tmp_path, monkeypatch):
 ])
 def test_carried_args(mod, args, expected):
     """最初の区間の引数から、2 つ目以降の区間へ引き継ぐものを選ぶ（#936）。"""
-    assert mod.carried_args(args) == expected
+    assert relay_claude.carried_args(args) == expected
 
 
 @pytest.mark.parametrize("tasks", [None, {"status": "running"}, "running"])
 def test_background_running_ignores_non_list_inputs(mod, tasks):
-    assert mod.background_running(tasks) is False
+    assert relay_mark.background_running(tasks) is False
 
 
 def test_background_running_ignores_non_dict_items(mod):
-    assert mod.background_running(["running", 1, None]) is False
+    assert relay_mark.background_running(["running", 1, None]) is False
 
 
 def test_background_running_detects_running_dict(mod):
     tasks = [{"status": "queued"}, {"status": "running"}]
 
-    assert mod.background_running(tasks) is True
+    assert relay_mark.background_running(tasks) is True
 
 
 def test_fallback_cwd_uses_nearest_existing_parent(mod, tmp_path):
     parent = tmp_path / "a"
     parent.mkdir()
 
-    assert mod.fallback_cwd(str(parent / "b" / "c")) == str(parent)
+    assert relay_common.fallback_cwd(str(parent / "b" / "c")) == str(parent)
 
 
 def test_fallback_cwd_uses_existing_parent_when_worktree_main_is_gone(mod, tmp_path):
     cwd = tmp_path / "gone" / ".worktrees" / "x" / "y"
 
-    assert mod.fallback_cwd(str(cwd)) == str(tmp_path)
+    assert relay_common.fallback_cwd(str(cwd)) == str(tmp_path)
 
 
 @pytest.mark.parametrize("cwd", ["nope/deeper", ""])
 def test_fallback_cwd_uses_home_when_relative_path_has_no_existing_parent(mod, tmp_path, cwd):
-    assert mod.fallback_cwd(cwd) == str(tmp_path / "home")
+    assert relay_common.fallback_cwd(cwd) == str(tmp_path / "home")
 
 
 def real_claude(tmp_path, name="real"):
@@ -734,7 +748,7 @@ def test_run_passthrough(mod, tmp_path, monkeypatch, capsys, case):
         monkeypatch.setenv("NDF_RELAY_DIR", str(tmp_path))
     before = dict(os.environ)
     with pytest.raises(Execd):
-        mod.cmd_run(args)
+        relay_run.cmd_run(args)
     path, argv, env = mod.calls[0]
     assert path == str(claude)
     assert argv == [str(claude)] + args
@@ -760,7 +774,7 @@ def test_run_cannot_start_says_then_passthrough(mod, tmp_path, monkeypatch, caps
     if case == "no-pty":
         monkeypatch.setitem(sys.modules, "pty", None)
     with pytest.raises(Execd):
-        mod.cmd_run([])
+        relay_run.cmd_run([])
     err = capsys.readouterr().err
     assert err.startswith("ndf-relay: ラッパーを始めない（") and err.count("\n") == 1
     assert mod.calls[0][1] == [str(claude)]
@@ -778,10 +792,10 @@ def test_run_relay_dir_oserror_says_then_passthrough(mod, tmp_path, monkeypatch,
     monkeypatch.setattr(mod.os, "isatty", lambda fd: True)
 
     def boom():
-        raise OSError(mod.errno.EACCES, "no dir")
-    monkeypatch.setattr(mod, "make_relay_dir", boom)
+        raise OSError(errno.EACCES, "no dir")
+    monkeypatch.setattr(relay_record, "make_relay_dir", boom)
     with pytest.raises(Execd):
-        mod.cmd_run([])
+        relay_run.cmd_run([])
     err = capsys.readouterr().err
     assert err == "ndf-relay: ラッパーを始めない（作業ディレクトリを作れない）。カットポイントでは示されたコマンドを手で入力する\n"
     assert mod.calls[0][1] == [str(claude)]
@@ -799,10 +813,10 @@ def test_resolve_skips_wrappers(mod, tmp_path, monkeypatch):
     real = real_claude(tmp_path)
     monkeypatch.setenv("PATH", os.pathsep.join([str(wrapper.parent), str(link.parent),
                                                 str(real.parent), "/usr/bin"]))
-    assert mod.resolve_claude() == str(real)
+    assert relay_claude.resolve_claude() == str(real)
     forced = real_claude(tmp_path, "forced")
     monkeypatch.setenv("NDF_RELAY_CLAUDE", str(forced))
-    assert mod.resolve_claude() == str(forced)
+    assert relay_claude.resolve_claude() == str(forced)
 
 
 def test_resolve_keeps_unreadable_claude(mod, tmp_path, monkeypatch):
@@ -813,7 +827,7 @@ def test_resolve_keeps_unreadable_claude(mod, tmp_path, monkeypatch):
         pytest.skip("読み取り権限を外せない（root で実行している）")
     monkeypatch.setenv("PATH", os.pathsep.join([str(real.parent), "/usr/bin"]))
     monkeypatch.delenv("NDF_RELAY_CLAUDE", raising=False)
-    assert mod.resolve_claude() == str(real)
+    assert relay_claude.resolve_claude() == str(real)
 
 
 def test_run_nested_stops_127(tmp_path):
@@ -1109,11 +1123,11 @@ def test_stop_prints_dir_name_when_pid_missing_or_empty(tmp_path):
 def test_make_relay_dir_is_new_each_time(mod, tmp_path, monkeypatch):
     """pid が同じでも作業ディレクトリは起動ごとに新しい。親が無くても作る（AC26）。"""
     monkeypatch.setattr(mod.os, "getpid", lambda: 4242)
-    monkeypatch.setattr(mod.time, "gmtime", lambda *a: time.struct_time((2026, 9, 23, 0, 0, 0, 2, 266, 0)))
-    a = mod.make_relay_dir()
+    monkeypatch.setattr(relay_record.time, "gmtime", lambda *a: time.struct_time((2026, 9, 23, 0, 0, 0, 2, 266, 0)))
+    a = relay_record.make_relay_dir()
     (pathlib.Path(a) / "stop").touch()
     (pathlib.Path(a) / "next.json").write_text("{}")
-    b = mod.make_relay_dir()
+    b = relay_record.make_relay_dir()
     assert a != b
     assert os.listdir(b) == []
     assert pathlib.Path(b).stat().st_mode & 0o777 == 0o700
@@ -1229,6 +1243,11 @@ def plugin_root(tmp_path, version, name="plugin"):
     (root / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "ndf", "version": version}))
     body = RELAY.read_bytes() + f"\n# 版 {version}\n".encode()
     (root / "scripts" / "relay.py").write_bytes(body)
+    shutil.copytree(ROOT / "scripts" / "relay_lib", root / "scripts" / "relay_lib", dirs_exist_ok=True,
+                    ignore=shutil.ignore_patterns("__pycache__"))
+    (root / "scripts" / "lib").mkdir(exist_ok=True)
+    for name in ("clock.py", "jsonio.py"):
+        shutil.copyfile(ROOT / "scripts" / "lib" / name, root / "scripts" / "lib" / name)
     return root / "scripts" / "relay.py"
 
 
@@ -1631,25 +1650,25 @@ def mac(mod, tmp_path, monkeypatch):
 
 def test_mac_install_adds_to_bash_profile_and_uninstall_removes(mac, tmp_path, capsys):
     home = home_of(tmp_path)
-    assert mac.cmd_install() == 0
+    assert relay_install.cmd_install() == 0
     profile = home / ".bash_profile"
     assert "# >>> ndf relay >>>" in profile.read_text()
     assert not (home / ".bashrc").exists()
     assert f"{profile} から" in capsys.readouterr().out
-    assert mac.cmd_status() == 0
+    assert relay_install.cmd_status() == 0
     assert "警告" not in capsys.readouterr().out
-    assert mac.cmd_uninstall() == 0
+    assert relay_install.cmd_uninstall() == 0
     assert "# >>> ndf relay >>>" not in profile.read_text()
 
 
 def test_mac_status_warns_when_only_bashrc_has_loader(mac, tmp_path, capsys):
     home = home_of(tmp_path)
-    (home / ".bashrc").write_text("# >>> ndf relay >>>\n" + mac.loader_body() + "# <<< ndf relay <<<\n")
+    (home / ".bashrc").write_text("# >>> ndf relay >>>\n" + relay_shellrc.loader_body() + "# <<< ndf relay <<<\n")
     (home / ".bash_profile").write_text("export A=1\n# . ~/.bashrc\n")
-    assert mac.cmd_status() == 0
+    assert relay_install.cmd_status() == 0
     assert "警告" in capsys.readouterr().out
     (home / ".bash_profile").write_text('[ -f "$HOME/.bashrc" ] && . "$HOME/.bashrc"\n')
-    assert mac.cmd_status() == 0
+    assert relay_install.cmd_status() == 0
     assert "警告" not in capsys.readouterr().out
 
 
@@ -1658,7 +1677,7 @@ def test_mac_status_warns_when_only_bashrc_has_loader(mac, tmp_path, capsys):
 
 def session_lines(m, capsys):
     before = {p for p in home_of_now().rglob("*")}
-    assert m.cmd_status() == 0
+    assert relay_install.cmd_status() == 0
     assert {p for p in home_of_now().rglob("*")} == before
     return [x for x in capsys.readouterr().out.splitlines() if x.startswith("ndf-relay: このセッション:")]
 
@@ -1686,7 +1705,7 @@ def test_status_session_no_dir(mod, capsys):
 
 def test_status_session_no_dir_hints_when_loader_is_in_rc(mod, tmp_path, capsys):
     home = home_of(tmp_path)
-    (home / ".bashrc").write_text("# >>> ndf relay >>>\n" + mod.loader_body() + "# <<< ndf relay <<<\n")
+    (home / ".bashrc").write_text("# >>> ndf relay >>>\n" + relay_shellrc.loader_body() + "# <<< ndf relay <<<\n")
     assert session_lines(mod, capsys) == [
         "ndf-relay: このセッション: ラッパーを通らずに起動（NDF_RELAY_DIR が無い）。"
         f"{home / '.bashrc'} に読み込みの行はあるので、このセッションは読み込みの前に開いたシェル、"
@@ -1695,14 +1714,14 @@ def test_status_session_no_dir_hints_when_loader_is_in_rc(mod, tmp_path, capsys)
 
 def test_status_session_no_dir_hints_when_loader_is_in_zshrc(mod, tmp_path, capsys):
     home = home_of(tmp_path)
-    (home / ".zshrc").write_text("# >>> ndf relay >>>\n" + mod.loader_body() + "# <<< ndf relay <<<\n")
+    (home / ".zshrc").write_text("# >>> ndf relay >>>\n" + relay_shellrc.loader_body() + "# <<< ndf relay <<<\n")
     assert f"{home / '.zshrc'} に読み込みの行はある" in session_lines(mod, capsys)[0]
 
 
 def test_status_session_no_dir_hints_when_devbase_loader_exists(mod, tmp_path, monkeypatch, capsys):
     dl = tmp_path / "shellrc.d"
     dl.mkdir()
-    (dl / "ndf-relay.sh").write_text(mod.loader_body())
+    (dl / "ndf-relay.sh").write_text(relay_shellrc.loader_body())
     monkeypatch.setenv("DEVBASE_SHELLRC_DIR", str(dl))
     assert f"{dl / 'ndf-relay.sh'} に読み込みの行はある" in session_lines(mod, capsys)[0]
 
@@ -1729,9 +1748,9 @@ def test_status_session_cannot_trace_parents(mod, tmp_path, monkeypatch, capsys)
     # /proc も ps も使えない環境。ほかの行はそのまま出す
     r = Relay(tmp_path, child_pid=999999)
     monkeypatch.setenv("NDF_RELAY_DIR", str(r.dir))
-    monkeypatch.setattr(mod, "proc_info", lambda pid: None)
+    monkeypatch.setattr(relay_proc, "proc_info", lambda pid: None)
     try:
-        assert mod.cmd_status() == 0
+        assert relay_install.cmd_status() == 0
         out = capsys.readouterr().out
         assert "ndf-relay: このセッション: 判定できない（親のプロセスをたどれない）" in out.splitlines()
         assert "ndf-relay: 読み込み先:" in out and "ndf-relay: 複製 " in out
@@ -1741,10 +1760,10 @@ def test_status_session_cannot_trace_parents(mod, tmp_path, monkeypatch, capsys)
 
 def test_mac_uninstall_removes_blocks_in_both_files(mac, tmp_path):
     home = home_of(tmp_path)
-    block = "# >>> ndf relay >>>\n" + mac.loader_body() + "# <<< ndf relay <<<\n"
+    block = "# >>> ndf relay >>>\n" + relay_shellrc.loader_body() + "# <<< ndf relay <<<\n"
     (home / ".bashrc").write_text("a=1\n" + block)
     (home / ".bash_profile").write_text("b=1\n" + block)
-    assert mac.cmd_uninstall() == 0
+    assert relay_install.cmd_uninstall() == 0
     assert (home / ".bashrc").read_text() == "a=1\n"
     assert (home / ".bash_profile").read_text() == "b=1\n"
 
@@ -1755,7 +1774,7 @@ def test_bash_definition_in_login_file_is_not_overridden(mod, tmp_path, monkeypa
     monkeypatch.setenv("SHELL", "/bin/bash")
     home = home_of(tmp_path)
     (home / name).write_text("alias claude='claude --dangerously-skip-permissions'\n")
-    assert mod.cmd_install() == 1
+    assert relay_install.cmd_install() == 1
     assert f"{home / name} に claude の定義がある" in capsys.readouterr().out
     assert not (home / ".bashrc").exists()
 
@@ -1763,7 +1782,7 @@ def test_bash_definition_in_login_file_is_not_overridden(mod, tmp_path, monkeypa
 def test_mac_does_not_create_bash_profile_that_shadows_profile(mac, tmp_path, capsys):
     home = home_of(tmp_path)
     (home / ".profile").write_text("export A=1\n")
-    assert mac.cmd_install() == 1
+    assert relay_install.cmd_install() == 1
     assert not (home / ".bash_profile").exists()
     assert f"{home / '.profile'} を読んでいる" in capsys.readouterr().out
 
@@ -1773,10 +1792,10 @@ def test_linux_bash_still_adds_to_bashrc(mod, tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("SHELL", "/bin/bash")
     monkeypatch.setattr(sys, "platform", "linux")
     home = home_of(tmp_path)
-    assert mod.cmd_install() == 0
+    assert relay_install.cmd_install() == 0
     assert "# >>> ndf relay >>>" in (home / ".bashrc").read_text()
     assert not (home / ".bash_profile").exists()
-    assert mod.cmd_status() == 0
+    assert relay_install.cmd_status() == 0
     out = capsys.readouterr().out
     assert ".bash_profile" not in out and "警告" not in out
 
@@ -1958,7 +1977,7 @@ def test_startup_unwritable_exits_zero(tmp_path, home):
 
 
 def test_version_key(mod):
-    k = mod.version_key
+    k = relay_version_dir.version_key
     assert k("10.17.5-dev.2") < k("10.17.5-dev.10") < k("10.17.5-rc.1") < k("10.17.5") < k("10.17.6-dev.1")
     assert k("x") is None and k(None) is None
 
@@ -2210,11 +2229,11 @@ def test_relay_quiet_defaults_to_five_seconds(mod, tmp_path, monkeypatch):
     """`NDF_RELAY_QUIET` が無ければ静止の待ちは 5 秒（#964）。有れば値に従う。"""
     relay_dir = tmp_path / "relay"
     relay_dir.mkdir()
-    r = mod.Relay("claude", str(relay_dir), "m", "v", None, None)
+    r = relay_run.Relay("claude", str(relay_dir), "m", "v", None, None)
     os.close(r.lock_fd)
     assert r.quiet == 5
     monkeypatch.setenv("NDF_RELAY_QUIET", "0.3")
-    r = mod.Relay("claude", str(relay_dir), "m", "v", None, None)
+    r = relay_run.Relay("claude", str(relay_dir), "m", "v", None, None)
     os.close(r.lock_fd)
     assert r.quiet == 0.3
 
@@ -2352,3 +2371,155 @@ def test_is_child_matches_notice(tmp_path, relay, case, expected):
     first, _ = notice_lines(notice(env_dir))
     assert first == expected
     assert (is_child(env_dir).returncode == 0) == (first == "relay")
+
+
+# ---------------------------------------------------------------- バージョンディレクトリ（#1142 の C6。F10・I2・I9）
+
+
+def version_dirs(base):
+    base = pathlib.Path(base)
+    return sorted(p.name for p in base.iterdir() if p.name.startswith("relay-")) if base.exists() else []
+
+
+def current_of(base):
+    return (pathlib.Path(base) / "relay.current").read_text().strip()
+
+
+def dead_pid():
+    p = subprocess.Popen([sys.executable, "-c", "pass"])
+    p.wait()
+    return p.pid
+
+
+def test_install_places_version_dir_and_copy_runs_from_it(tmp_path, home):
+    (home / ".bashrc").write_text("")
+    assert relay_cmd(tmp_path, "install").returncode == 0
+    ver = json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text())["version"]
+    name = current_of(cfg(tmp_path))
+    assert name.startswith(f"relay-{ver}-") and version_dirs(cfg(tmp_path)) == [name]
+    vd = cfg(tmp_path) / name
+    for rel in ("relay_lib/__init__.py", "relay_lib/run.py", "lib/clock.py", "lib/jsonio.py"):
+        assert (vd / rel).is_file(), rel
+    manifest = (vd / "MANIFEST").read_text()
+    assert hashlib.sha256(manifest.encode()).hexdigest()[:8] == name.rsplit("-", 1)[1]
+    rels = []
+    for line in manifest.splitlines():
+        digest, rel = line.split("  ", 1)
+        rels.append(rel)
+        assert hashlib.sha256((vd / rel).read_bytes()).hexdigest() == digest, rel
+    assert "relay_lib/common.py" in rels and not any("__pycache__" in r for r in rels)
+    # 複製のランチャーは隣に relay_lib が無くても、relay.current のバージョンディレクトリで動く
+    p = relay_cmd(tmp_path, "notice", relay=cfg(tmp_path) / "relay.py")
+    assert p.returncode == 0 and p.stdout.splitlines()[0] == "outside", p.stderr
+    before = [x for x in tree(cfg(tmp_path)) if "__pycache__" not in x]
+    assert relay_cmd(tmp_path, "install").returncode == 0
+    assert [x for x in tree(cfg(tmp_path)) if "__pycache__" not in x] == before  # 同じ中身なら作り直さない
+
+
+def test_startup_switches_version_dir(tmp_path, home):
+    old = plugin_root(tmp_path, "10.17.5", "old")
+    new = plugin_root(tmp_path, "10.18.0", "new")
+    assert relay_cmd(tmp_path, "install", relay=old).returncode == 0
+    first = current_of(cfg(tmp_path))
+    assert first.startswith("relay-10.17.5-")
+    assert relay_cmd(tmp_path, "startup", relay=new).returncode == 0
+    second = current_of(cfg(tmp_path))
+    assert second.startswith("relay-10.18.0-")
+    assert version_dirs(cfg(tmp_path)) == sorted([first, second])  # 指されない古いものも 2 つまでは残す
+    p = relay_cmd(tmp_path, "notice", relay=cfg(tmp_path) / "relay.py")
+    assert p.returncode == 0 and p.stdout.splitlines()[0] == "outside", p.stderr
+
+
+def test_version_dir_prune_keeps_two_and_in_use(tmp_path):
+    base = tmp_path / "ndf"
+    base.mkdir()
+    names = [f"relay-10.17.{i}-0000000{i}" for i in range(5)]
+    for n in names:
+        (base / n).mkdir()
+    (base / names[0] / f"inuse-{os.getpid()}").touch()  # 動いている run が使う
+    dead = dead_pid()
+    (base / names[1] / f"inuse-{dead}").touch()  # 終わった run の残り
+    for i, n in enumerate(names):
+        os.utime(base / n, (1000 + i, 1000 + i))
+    (base / f"relay-10.17.9-deadbeef.tmp-{dead}").mkdir()  # 落ちた書きかけ
+    name = relay_version_dir.VersionDir(str(base)).ensure("10.18.0")
+    assert current_of(base) == name
+    assert version_dirs(base) == sorted([names[0], names[3], names[4], name])
+    assert (base / names[0] / f"inuse-{os.getpid()}").exists()
+
+
+def test_version_dir_half_written_is_not_pointed(tmp_path, monkeypatch):
+    base = tmp_path / "ndf"
+    base.mkdir()
+    first = relay_version_dir.VersionDir(str(base)).ensure("10.17.5")
+    real = shutil.copyfile
+    n = []
+
+    def boom(src, dst, *a, **k):
+        n.append(src)
+        if len(n) > 2:
+            raise OSError("disk full")
+        return real(src, dst, *a, **k)
+    monkeypatch.setattr(relay_version_dir.shutil, "copyfile", boom)
+    with pytest.raises(OSError):
+        relay_version_dir.VersionDir(str(base)).ensure("10.18.0")
+    monkeypatch.undo()
+    assert current_of(base) == first
+    assert version_dirs(base) == [first]  # 書きかけは残らず、指されもしない
+    second = relay_version_dir.VersionDir(str(base)).ensure("10.18.0")
+    assert current_of(base) == second and version_dirs(base) == sorted([first, second])
+
+
+def test_version_dir_claim_marks_only_version_dirs(tmp_path):
+    base = tmp_path / "ndf"
+    base.mkdir()
+    name = relay_version_dir.VersionDir(str(base)).ensure("10.18.0")
+    got = relay_version_dir.claim_inuse(str(base / name))
+    assert got == str(base / name / f"inuse-{os.getpid()}") and os.path.exists(got)
+    relay_version_dir.release_inuse(got)
+    assert not os.path.exists(got)
+    assert relay_version_dir.claim_inuse(str(ROOT / "scripts")) is None  # プラグインのキャッシュには置かない
+
+
+def test_uninstall_removes_version_dirs(tmp_path, home):
+    (home / ".bashrc").write_text("")
+    assert relay_cmd(tmp_path, "install").returncode == 0
+    assert version_dirs(cfg(tmp_path))
+    p = relay_cmd(tmp_path, "uninstall")
+    assert p.returncode == 0, p.stdout
+    assert version_dirs(cfg(tmp_path)) == [] and not (cfg(tmp_path) / "relay.current").exists()
+
+
+def test_startup_old_copy_runs_from_its_version_dir(tmp_path, home):
+    old = home / ".local" / "share" / "ndf" / "relay.py"
+    old.parent.mkdir(parents=True)
+    old.write_text("# 10.17.4〜10.17.6 の複製\n")
+    assert run_hook(tmp_path, HOOK_STARTUP).returncode == 0
+    assert old.read_bytes() == RELAY.read_bytes()
+    p = relay_cmd(tmp_path, "notice", relay=old)
+    assert p.returncode == 0 and p.stdout.splitlines()[0] == "outside", p.stderr
+
+
+def test_launcher_without_relay_lib_says_so(tmp_path, home):
+    lone = tmp_path / "lone" / "relay.py"
+    lone.parent.mkdir()
+    lone.write_bytes(RELAY.read_bytes())
+    p = relay_cmd(tmp_path, "notice", relay=lone)
+    assert p.returncode == 1 and p.stderr.startswith("ndf-relay:"), p.stderr
+
+
+def test_version_dir_imports_only_stdlib_and_itself():
+    """バージョンディレクトリの中身とランチャーは、標準ライブラリとバージョンディレクトリの中だけを import する（I2）。"""
+    allowed = set(sys.stdlib_module_names) | {"clock", "jsonio", "relay_lib", "__future__"}
+    files = [RELAY, ROOT / "scripts" / "lib" / "clock.py", ROOT / "scripts" / "lib" / "jsonio.py",
+             *sorted((ROOT / "scripts" / "relay_lib").glob("*.py"))]
+    for f in files:
+        for node in ast.walk(ast.parse(f.read_text())):
+            if isinstance(node, ast.Import):
+                names = [a.name for a in node.names]
+            elif isinstance(node, ast.ImportFrom) and not node.level:
+                names = [node.module or ""]
+            else:
+                continue
+            for n in names:
+                assert n.split(".")[0] in allowed, (f.name, n)

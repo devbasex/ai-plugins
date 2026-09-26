@@ -55,8 +55,11 @@ from pathlib import Path, PurePosixPath
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 from step_result import (EXIT_GATE, EXIT_PRECONDITION, StepError, approval_present, base_of,  # noqa: E402
                          common_parser, emit, gh_json, git, git_root, main_with, plugin_dir,
-                         repo_slug, result, run, today, version_arg)
+                         result, run, today, version_arg)
 import gh_parts  # noqa: E402
+import jsonio  # noqa: E402
+import proc  # noqa: E402
+import repo as repo_lib  # noqa: E402
 
 DECLARATION = ".ndf/release.json"
 SUPPORTED_VERSIONS = (1,)
@@ -88,7 +91,7 @@ def _relative(value, where: str) -> str:
     return value
 
 
-def parse(raw) -> list[Step]:
+def parse_steps(raw) -> list[Step]:
     if not isinstance(raw, dict):
         raise DeclarationError("release.json: 最上位はオブジェクトで書く")
     unknown = set(raw) - {"$schema", "version", "steps"}
@@ -130,27 +133,22 @@ def parse(raw) -> list[Step]:
     return out
 
 
-def load(root: Path) -> list[Step] | None:
+def load_steps(root: Path) -> list[Step] | None:
     path = root / DECLARATION
     if not path.is_file():
         return None
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, ValueError) as e:
-        raise DeclarationError(f"release.json: JSON として読めない: {e}") from e
-    return parse(raw)
+        raw = jsonio.read(path)
+    except jsonio.JsonReadError as e:
+        raise DeclarationError(f"release.json: JSON として読めない: {e.detail or e}") from e
+    return parse_steps(raw)
 
 
 # ---------- 変更の判定 ----------
 
-def _git(root: Path, *args: str, stdin: str | None = None) -> str:
-    return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, check=True,
-                          input=stdin).stdout
-
-
 def status_paths(root: Path) -> set[str]:
     """`git status` が挙げたパス。名前の変更は元と先の両方を返す。"""
-    tokens = _git(root, "status", "--porcelain=v1", "-z", "-uall").split("\0")
+    tokens = proc.git(root, "status", "--porcelain=v1", "-z", "-uall").stdout.split("\0")
     paths: set[str] = set()
     i = 0
     while i < len(tokens):
@@ -170,7 +168,8 @@ def digests(root: Path, paths: set[str]) -> dict[str, str | None]:
     present = sorted(p for p in paths if (root / p).is_file() or (root / p).is_symlink())
     out: dict[str, str | None] = {p: None for p in paths}
     if present:
-        hashes = _git(root, "hash-object", "--stdin-paths", stdin="\n".join(present) + "\n").split()
+        hashes = proc.run(["git", "-C", str(root), "hash-object", "--stdin-paths"],
+                          input="\n".join(present) + "\n").stdout.split()
         out.update(zip(present, hashes))
     return out
 
@@ -194,7 +193,7 @@ def expand(step: Step, version: str) -> list[str]:
 
 
 def run_steps(root: Path, stage: str, version: str, dry_run: bool) -> int:
-    steps = load(root)
+    steps = load_steps(root)
     if steps is None:
         return 0
     for step in selected(steps, stage):
@@ -209,7 +208,7 @@ def run_steps(root: Path, stage: str, version: str, dry_run: bool) -> int:
         try:
             before_paths = status_paths(root)
             before = digests(root, before_paths)
-        except (OSError, subprocess.CalledProcessError) as e:
+        except (OSError, StepError) as e:
             print(f"コマンド: {step.name} → 実行しない（git status を取れない: {e}）", file=sys.stderr)
             return 1
         sys.stdout.flush()
@@ -244,8 +243,8 @@ def run_steps(root: Path, stage: str, version: str, dry_run: bool) -> int:
 def _head_digest(root: Path, path: str) -> str | None:
     """コマンドの前に変更の無かったパスの要約（HEAD の内容。HEAD に無ければ None）。"""
     try:
-        return _git(root, "rev-parse", "--verify", "-q", f"HEAD:{path}").strip() or None
-    except subprocess.CalledProcessError:
+        return proc.git(root, "rev-parse", "--verify", "-q", f"HEAD:{path}").stdout.strip() or None
+    except StepError:
         return None
 
 
@@ -594,13 +593,6 @@ def cmd_changelog(a):
                 next="更新案内の本文を利用者向けの説明へ書き直す" if readme_done else None))
 
 
-def owner_repo(root):
-    slug = repo_slug(root)
-    if not slug or "--" not in slug:
-        raise StepError("リポジトリの owner/name を決められない", EXIT_PRECONDITION)
-    return slug.replace("--", "/", 1)
-
-
 def changelog_span(lines, plugin, version):
     """CHANGELOG.md の `## [<plugin> <基底の版>]` の節の (見出しの行, 次の節の行)。無ければ (None, None)。"""
     head = f"## [{plugin} {base_of(version)}]"
@@ -642,8 +634,7 @@ def find_pr(root, head, base, states=("OPEN",)):
 
 
 def create_pr(root, base, head, title, body):
-    p = run(["gh", "pr", "create", "--base", base, "--head", head, "--title", title, "--body", body],
-            cwd=root, check=False)
+    p = gh_parts.gh(["pr", "create", "--base", base, "--head", head, "--title", title, "--body", body], cwd=root)
     if p.returncode != 0:
         raise StepError(f"gh pr create（{head} → {base}）が失敗: {p.stderr.strip()[:300]}")
     m = re.search(r"/pull/(\d+)", p.stdout)
@@ -653,7 +644,7 @@ def create_pr(root, base, head, title, body):
 
 
 def pr_check_buckets(root, n):
-    p = run(["gh", "pr", "checks", str(n), "--json", "name,bucket"], cwd=root, check=False)
+    p = gh_parts.gh(["pr", "checks", str(n), "--json", "name,bucket"], cwd=root)
     try:
         return json.loads(p.stdout or "[]") or []
     except ValueError:
@@ -741,8 +732,8 @@ def cmd_release(a):
         f.write(notes + "\n")
         notes_file = f.name
     try:
-        p = run(["gh", "release", "create", tag, "--title", f"ndf v{ver}", "--notes-file", notes_file,
-                 "--latest"], cwd=root, check=False)
+        p = gh_parts.gh(["release", "create", tag, "--title", f"ndf v{ver}", "--notes-file", notes_file,
+                         "--latest"], cwd=root)
     finally:
         os.unlink(notes_file)
     if p.returncode != 0:
@@ -757,7 +748,9 @@ def cmd_release(a):
 
 def cmd_approval_facts(a):
     root = git_root(a.root)
-    repo = owner_repo(root)
+    repo = repo_lib.owner_repo(root)
+    if not repo:
+        raise StepError("リポジトリの owner/name を決められない", EXIT_PRECONDITION)
     git(root, "fetch", "-q", "origin", "--tags")
     cur_tag = f"ndf--v{a.version}"
     prev = a.prev_tag or release_tag_before(root, "ndf", cur_tag)
@@ -806,16 +799,10 @@ NOTES_PENDING = "（release-steps.py notes --approval が PR 本文の「利用�
 RUNTIME_NAMES = {"claude": "Claude Code", "codex": "Codex", "kiro": "Kiro", "agy": "Antigravity"}
 
 
-def body_section(body, heading):
-    """Markdown の本文から heading の節の中身の行（空行を除く）を返す。"""
-    out, inside = [], False
-    for line in (body or "").splitlines():
-        if line.startswith("## "):
-            inside = line.strip() == heading
-            continue
-        if inside and line.strip():
-            out.append(line.rstrip())
-    return out
+def section_lines(body, heading):
+    """Markdown の本文から heading の節の中身の行（空行を除く）を返す（節の読み取りは `gh_sections`）。"""
+    text = gh_parts.get_section(body or "", heading) or ""
+    return [line.rstrip() for line in text.splitlines() if line.strip()]
 
 
 def change_items(lines, n):
@@ -844,13 +831,13 @@ def pr_notes(root, prs, skipped=None):
         if not isinstance(d, dict) or not isinstance(d.get("title"), str):
             raise StepError(f"gh pr view {n} の出力を読めない", 2)
         body = d.get("body") or ""
-        items = change_items(body_section(body, CHANGES_HEADING), n)
-        risks = change_items(body_section(body, RISKS_HEADING), n)
+        items = change_items(section_lines(body, CHANGES_HEADING), n)
+        risks = change_items(section_lines(body, RISKS_HEADING), n)
         out.append((n, items or [f"{d['title'].strip()}（#{n}）"], risks, not items))
     return require_merged(out, prs)
 
 
-def replace_section(lines, at, block):
+def replace_lines_under(lines, at, block):
     """lines[at] の見出しから次の `## ` までの中身を block に差し替える。"""
     end = next((j for j in range(at + 1, len(lines)) if lines[j].startswith("## ")), len(lines))
     lines[at + 1:end] = [""] + block + [""]
@@ -866,7 +853,7 @@ def write_notes(root, version, plugin, bullets):
     at = next((i for i, l in enumerate(lines) if l == head or l.startswith(head + " ")), None)
     if at is None:
         raise StepError(f"CHANGELOG.md に {head} の節が無い（先に changelog を走らせる）", EXIT_PRECONDITION)
-    replace_section(lines, at, bullets)
+    replace_lines_under(lines, at, bullets)
     cl.write_text("\n".join(lines), encoding="utf-8")
     items.append({"kind": "section", "name": "CHANGELOG.md", "result": "replaced", "heading": lines[at],
                   "lines": len(bullets)})
@@ -879,14 +866,15 @@ def write_notes(root, version, plugin, bullets):
     if readme and readme.is_file():
         rl = readme.read_text(encoding="utf-8").split("\n")
         if h in rl:
-            replace_section(rl, rl.index(h), bullets)
+            replace_lines_under(rl, rl.index(h), bullets)
             readme.write_text("\n".join(rl), encoding="utf-8")
             items.append({"kind": "section", "name": readme.relative_to(root).as_posix(), "result": "replaced",
                           "heading": h, "lines": len(bullets)})
     return items
 
 
-def cell(text):
+def approval_cell(text):
+    """提示物の表の 1 セル（改行は <br>）。"""
     return text.replace("|", "\\|").replace("\n", "<br>")
 
 
@@ -902,7 +890,7 @@ def write_approval(path, version, bullets, risks, verified, ref):
     for i, line in enumerate(lines):
         for key, value in rows.items():
             if line.startswith(f"| {key} |"):
-                lines[i] = f"| {key} | {cell(value)} |"
+                lines[i] = f"| {key} | {approval_cell(value)} |"
                 done.append(key)
     missing = [k for k in rows if k not in done]
     if missing:
@@ -1006,7 +994,7 @@ def main(argv: list[str] | None = None) -> int:
     root = args.root.resolve()
     try:
         if args.cmd == "check":
-            return 0 if load(root) is not None else 2
+            return 0 if load_steps(root) is not None else 2
         return run_steps(root, args.stage, args.version, args.dry_run)
     except DeclarationError as e:
         print(f"宣言を読めない（{DECLARATION}）: {e}", file=sys.stderr)

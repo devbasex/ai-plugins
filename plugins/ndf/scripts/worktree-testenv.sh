@@ -72,14 +72,12 @@ TARGET=$(wt_normalize_path "$TARGET" "$(pwd -P)")
 MAIN_DIR=$(wt_main_dir "$TARGET") || MAIN_DIR=$(wt_main_dir) || exit 0
 DECLARATION=$(wt_declaration "$MAIN_DIR") || exit 0
 
-decl_get() { printf '%s' "$DECLARATION" | jq -r "$1" 2>/dev/null; }
 test_kind_get() { printf '%s' "$DECLARATION" | jq -r --arg k "$KIND" "$1" 2>/dev/null; }
 decl_raw() { printf '%s' "$DECLARATION" | jq -c "$1" 2>/dev/null; }
 
 # testenv の宣言が無いリポジトリでは何もしない。
 printf '%s' "$DECLARATION" | jq -e '(.testenv | type) == "object"' >/dev/null 2>&1 || exit 0
 
-target_branch() { git -C "$TARGET" symbolic-ref --short -q HEAD 2>/dev/null; }
 registry() { wt_registry_path "$MAIN_DIR"; }
 
 # 実行中の作業ツリーが握るロックの位置。
@@ -91,7 +89,7 @@ inuse_lock() { printf '%s/%s.inuse.d\n' "$(dirname "$(registry)")" "$1"; }
 # 同じ内容なら同じ値になるため、焼き直しが要るかを内容で判定できる。
 do_tag() {
   local -a paths=()
-  _wt_read_lines < <(decl_get '.testenv.golden_tag_paths // [] | .[]')
+  _wt_read_lines < <(wt_declaration_get "$DECLARATION" '.testenv.golden_tag_paths // [] | .[]')
   paths=("${WT_LINES[@]+"${WT_LINES[@]}"}")
   [ "${#paths[@]}" -gt 0 ] || return 2
 
@@ -134,15 +132,15 @@ build_assigned_ports() {
       return 1
     fi
     ports=$(printf '%s' "$ports" | jq --arg r "$role" --argjson p "$port" '. + {($r): $p}')
-  done < <(decl_get '.testenv.port_roles // {} | to_entries[] | "\(.key)\t\(.value)"')
+  done < <(wt_declaration_get "$DECLARATION" '.testenv.port_roles // {} | to_entries[] | "\(.key)\t\(.value)"')
   printf '%s\n' "$ports"
 }
 
 env_assign_ports() {
   local slot=$1 had_slot=$2 environment=$3
   local band_low band_high ports
-  band_low=$(decl_get '.testenv.port_band[0] // empty')
-  band_high=$(decl_get '.testenv.port_band[1] // empty')
+  band_low=$(wt_declaration_get "$DECLARATION" '.testenv.port_band[0] // empty')
+  band_high=$(wt_declaration_get "$DECLARATION" '.testenv.port_band[1] // empty')
   ports="{}"
   if [ -n "$band_low" ]; then
     ports=$(build_assigned_ports "$slot" "$band_low" "$band_high") || {
@@ -165,7 +163,7 @@ env_assign_ports() {
 
 do_env() {
   local branch environment slot ports
-  branch=$(target_branch) || true
+  branch=$(wt_current_branch "$TARGET") || true
   [ -n "$branch" ] || { printf '作業ツリーのブランチを取れません: %s\n' "$TARGET" >&2; return 1; }
 
   environment=$(wt_env_name "$MAIN_DIR" "$branch") || return 1
@@ -242,7 +240,7 @@ compose_env() {
     "NDF_SLOT=$SLOT"
     "NDF_WORKTREE=$TARGET"
   )
-  network=$(decl_get '.testenv.shared_network // empty')
+  network=$(wt_declaration_get "$DECLARATION" '.testenv.shared_network // empty')
   COMPOSE_ENV+=("NDF_SHARED_NETWORK=$network")
 
   while IFS=$'\t' read -r role port; do
@@ -285,7 +283,7 @@ validate_compose_file() {
 # 対象が 1 件も無ければ 2 を返し、実行系を呼ばずに終わらせる。
 compose_file_args() {
   COMPOSE_FILE_ARGS=()
-  _wt_read_lines < <(decl_get '.localenv.compose_files // [] | .[]')
+  _wt_read_lines < <(wt_declaration_get "$DECLARATION" '.localenv.compose_files // [] | .[]')
   local f path
   for f in "${WT_LINES[@]+"${WT_LINES[@]}"}"; do
     [ -n "$f" ] || continue
@@ -327,7 +325,7 @@ do_bake() {
     fi
     printf '基準を作りました: %s\n' "${golden}-${TAG}"
     created=$((created + 1))
-  done < <(decl_get '.testenv.golden_volumes // {} | to_entries[] | "\(.key)\t\(.value)"')
+  done < <(wt_declaration_get "$DECLARATION" '.testenv.golden_volumes // {} | to_entries[] | "\(.key)\t\(.value)"')
 
   if [ "$created" = 0 ] && [ "$existing" -gt 0 ]; then
     printf '同じタグの基準が既にあります（%s 件）\n' "$existing"
@@ -498,7 +496,7 @@ do_unexpose() {
     slot=$(printf '%s' "$row" | jq -r '.slot // empty')
   fi
 
-  close_command=$(decl_get '.testenv.expose.close_command // empty')
+  close_command=$(wt_declaration_get "$DECLARATION" '.testenv.expose.close_command // empty')
   if [ -n "$close_command" ] && [ -n "$url" ]; then
     # 開けるときと同じ値を渡す。URL だけでは、環境名やスロットを資源の名前に
     # 使っている構成で後片付けの対象を特定できない。
@@ -540,14 +538,14 @@ _close_record() {
 # 公開設定（有効化フラグ、公開基準タグ、ドメイン）を検証する。
 expose_validate_config() {
   local enabled public_tag base_domain
-  enabled=$(decl_get '.testenv.expose.enabled // false')
+  enabled=$(wt_declaration_get "$DECLARATION" '.testenv.expose.enabled // false')
   if [ "$enabled" != "true" ]; then
     printf '拒否: testenv.expose.enabled が有効ではありません\n' >&2
     return 1
   fi
 
-  public_tag=$(decl_get '.testenv.expose.public_tag // empty')
-  base_domain=$(decl_get '.testenv.expose.base_domain // empty')
+  public_tag=$(wt_declaration_get "$DECLARATION" '.testenv.expose.public_tag // empty')
+  base_domain=$(wt_declaration_get "$DECLARATION" '.testenv.expose.base_domain // empty')
   if [ -z "$public_tag" ] || [ -z "$base_domain" ]; then
     printf '拒否: testenv.expose.public_tag と base_domain が要ります\n' >&2
     return 1
@@ -603,7 +601,7 @@ do_expose() {
   fi
 
   local public_tag loaded_tag
-  public_tag=$(decl_get '.testenv.expose.public_tag // empty')
+  public_tag=$(wt_declaration_get "$DECLARATION" '.testenv.expose.public_tag // empty')
   loaded_tag=$(current_assignment | jq -r '.golden_tag // empty')
   if [ "$loaded_tag" != "$public_tag" ]; then
     printf '拒否: 載っている基準（%s）が公開を許す基準（%s）と一致しません\n' \
@@ -612,13 +610,13 @@ do_expose() {
   fi
 
   local base_domain ttl host open_command
-  base_domain=$(decl_get '.testenv.expose.base_domain // empty')
-  ttl=$(decl_get '.testenv.expose.ttl // "8h"')
+  base_domain=$(wt_declaration_get "$DECLARATION" '.testenv.expose.base_domain // empty')
+  ttl=$(wt_declaration_get "$DECLARATION" '.testenv.expose.ttl // "8h"')
   host="wt${SLOT}.${base_domain}"
 
   # 実際に口を開ける手段はリポジトリごとに違う（共有の入口の設定、折り返しの
   # 中継など）。宣言が無ければ、記録だけ残して公開したことにはしない。
-  open_command=$(decl_get '.testenv.expose.open_command // empty')
+  open_command=$(wt_declaration_get "$DECLARATION" '.testenv.expose.open_command // empty')
   if [ -z "$open_command" ]; then
     printf '%s\n' "公開の手段が宣言されていません（testenv.expose.open_command）" >&2
     return 2

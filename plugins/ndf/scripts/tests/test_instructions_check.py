@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import urllib.error
@@ -378,6 +379,8 @@ def install_script(root: Path) -> Path:
     (dest / "data").mkdir(parents=True, exist_ok=True)
     (dest / "instructions-check.py").write_bytes(SCRIPT.read_bytes())
     (dest / "lib" / "refresh.py").write_bytes((SCRIPT.parent / "lib" / "refresh.py").read_bytes())
+    shutil.copytree(SCRIPT.parent / "instructions_lib", dest / "instructions_lib", dirs_exist_ok=True,
+                    ignore=shutil.ignore_patterns("__pycache__"))
     src = SCRIPT.parent / "data" / "instruction-criteria.json"
     (dest / "data" / "instruction-criteria.json").write_bytes(src.read_bytes())
     return dest / "instructions-check.py"
@@ -1204,3 +1207,43 @@ def test_a_pending_marker_in_the_middle_of_a_paragraph_is_reported(tmp_path):
     assert len(lines) == 1, lines
     assert "1.0.0" in lines[0]
     assert "CLAUDE.md:3" in lines[0]
+
+
+# --- モジュールの分け方（#1142 の C7） ---------------------------------------
+
+LIB_ORDER = ["model", "declaration", "collect", "findings", "versions", "report"]
+
+
+def test_moved_names_are_reexported_from_the_entry_point(module):
+    """分けた先の名前（先頭が _ のものを含む）を、エントリポイントの名前空間から同じオブジェクトで引ける。"""
+    import ast
+    for name in LIB_ORDER:
+        path = SCRIPT.parent / "instructions_lib" / f"{name}.py"
+        lib = sys.modules[f"instructions_lib.{name}"]
+        for node in ast.parse(path.read_text(encoding="utf-8")).body:
+            defined = getattr(node, "name", None)
+            if isinstance(node, ast.Assign):
+                defined = node.targets[0].id
+            if defined:
+                assert getattr(module, defined) is getattr(lib, defined), f"{name}.{defined}"
+
+
+def test_instructions_lib_imports_point_one_way():
+    """import の向きは model ← declaration ← collect ← findings・versions ← report ← 本体の一方向。"""
+    import ast
+    for i, name in enumerate(LIB_ORDER):
+        path = SCRIPT.parent / "instructions_lib" / f"{name}.py"
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("instructions_lib."):
+                dep = node.module.split(".", 1)[1]
+                assert LIB_ORDER.index(dep) < i, f"{name} → {dep}"
+
+
+def test_entry_point_runs_from_a_copy_without_lib_on_sys_path(tmp_path):
+    """複製した先（instructions_lib/ を隣に置いた形）からも、カレントに依らず動く。"""
+    root = make_repo(tmp_path, {"AGENTS.md": "# 指示\n\n- 1 つ\n"})
+    script = install_script(root)
+    p = subprocess.run([sys.executable, str(script), "--root", str(root)], capture_output=True, text=True,
+                       cwd=str(tmp_path))
+    assert p.returncode == 0, p.stderr
+    assert "AGENTS.md" in p.stdout
