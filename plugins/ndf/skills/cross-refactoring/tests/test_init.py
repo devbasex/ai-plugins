@@ -156,13 +156,14 @@ def _state_of(tmp_path):
 
 
 def test_init_creates_the_writable_worktree_from_origin(run_init, tmp_path):
-    """ローカルに head ブランチが無くても作業ディレクトリを作れること。"""
+    """ローカルに head ブランチが無くても、origin の head で detach した作業ディレクトリを作れること（#638）。"""
     run_init(_args(tmp_path))
     work = tmp_path / "rf130" / "work"
     assert (work / "src" / "bar.py").is_file()
-    head = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"],
-                          cwd=work, capture_output=True, text=True)
-    assert head.stdout.strip() == HEAD_BRANCH
+    def rev(*args):
+        return subprocess.run(["git", "rev-parse", *args], cwd=work, capture_output=True, text=True).stdout.strip()
+    assert rev("--abbrev-ref", "HEAD") == "HEAD"
+    assert rev("HEAD") == rev(f"origin/{HEAD_BRANCH}")
 
 
 def test_init_uses_codex_kiro_and_the_host_as_the_participants(run_init, tmp_path, capsys):
