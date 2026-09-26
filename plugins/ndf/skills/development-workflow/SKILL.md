@@ -34,6 +34,7 @@ hooks:
 **代わりに工程の順序が変わる。** ミッションに何が入るかが決まらないと判定できないため、
 **要求と受け入れ条件 → モード判定 → 作業場所の用意**の順になる。`light` にも要求と受け入れ条件が掛かる。
 その費用は受け入れる。判定の入力が無いまま判定する状態のほうが高くつく。
+要求と受け入れ条件はプランの雛形が無いため supervisor で回し、判定の後のフェーズはプランで流す（`agent-layers.md` の表）。
 
 **モード判定は工程表の行を持たない。** ボードへ記録する工程の値を増やさないためである。
 
@@ -124,10 +125,15 @@ pace: fast
   → plan-to-spec（仕様が変わった場合） → merged → release
   → release-verification（マージ前に実施できなかった受け入れ条件がある場合）
   → retrospective
+次のコマンド: python3 "$SCRIPTS/supervise.py" new mission --name m6 --worktree <リポジトリの根>
+  --issue 1052 1053 --design 1052 --version 10.18.0-dev.1 --out <作業ディレクトリ>/mission-m6
 ```
 
 工程の並びは「モードごとに起動する Skill」の表から読む。この例は出力の形を示すもので、
 基準ではない。
+**`次のコマンド:` の行は、判定の後に conductor が最初に打つコマンドである。** `normal` は [references/waiting.md](references/waiting.md) の
+「ミッションを流すコマンド」の 1 つ目（設計 Pull Request を出さないモードは `--design` を省く）、`pace: fast` は
+[references/pace.md](references/pace.md) の「ミッションを始める」の 1 つ目を写す。雛形が無ければ `無し（supervisor で回す: <フェーズ>）`。
 `pace:` の行は `fast` を指定したときだけ出す（既定の `normal` では出さない）。
 
 判定基準の本文を出力へ貼らない。呼び出し側が基準を写し取ると、この Skill が唯一の
@@ -210,8 +216,8 @@ pace: fast
 
 **conductor は、`context-window.md` の 4 つのカットポイントとコンテキスト量の hook（`token-guard.sh`）に止められたときに、
 次の工程を始める再開コマンド（`/ndf:development-workflow #<課題>`。今のセッションを `/goal` で始めていたときだけ先頭に `/goal `）を、
-情報文字列 `ndf-next` の囲みのコードブロック 1 つで出す。** 3 層では conductor がフェーズレポート（`## フェーズの報告`）を
-受け取った時点で出し（supervisor は出さない）、`結果: 関門` なら承認ゲートの承認と取り込みの後に出す。
+情報文字列 `ndf-next` の囲みのコードブロック 1 つで出す。** 3 層では conductor がフェーズレポート（`## フェーズの報告`）かキューの done を
+受け取った時点で出し（supervisor とプランは出さない）、`結果: 関門` なら承認ゲートの承認と取り込みの後に出す。
 出す時点・アナウンス・新しい会話が状態を戻す手順は `context-window.md` の「新しい会話で戻す」にある。
 
 ## 即時修正
@@ -363,15 +369,12 @@ Pull Request のマージ、制作物承認は本番の提出先への操作に�
 - 本番系へ届く操作 — 承認を得るまで進めない。**検証リリースまでは自動で進めてよい**。
   `operation` の実行も同じで、本番系へ届く単位は承認を得るまで実行しない
 
-**工程は 3 層（conductor / supervisor / worker）へ出す。** 人間と対話しているセッション
-（conductor）がフェーズごとに supervisor を起動し、supervisor が 1 つの作業を worker へ出す。
-**承認ゲートで止まれるのは conductor だけである。** フェーズの表・起動の指示・報告の形・モデルの
-基準・他者の承認が要るときの到達点の置き直しは
-[references/agent-layers.md](references/agent-layers.md) にある。
+**工程は 3 層（conductor / supervisor / worker）へ出し、既定はプラン（`supervise.py`）である。** conductor がフェーズごとにプランをキューで流し（[references/waiting.md](references/waiting.md) の「ミッションを流すコマンド」）、
+雛形か要る設定が無いときだけ `Agent` で supervisor を起動する（[references/agent-layers.md](references/agent-layers.md) の「プランで流すか supervisor で回すか」）。
+**承認ゲートで止まれるのは conductor だけである。** 起動の指示・報告の形・モデルの基準・到達点の置き直しも `agent-layers.md` にある。
 
-**conductor は `$SCRIPTS` を解いてから supervisor を起動し、起動指示の「進捗記録」へ
-絶対パスで書く。** supervisor はこの 1 行で進行を記録し、この Skill も `progress-tracking` も
-起動しない（形とキーごとの打つ時点は `agent-layers.md` の「conductor → supervisor」）。
+**supervisor を起動するときは `$SCRIPTS` を解き、起動指示の「進捗記録」へ絶対パスで書く。** supervisor はこの 1 行で
+進行を記録し、この Skill も `progress-tracking` も起動しない（`agent-layers.md` の「conductor → supervisor」）。
 
 **カットポイントの再起動はラッパーが自動で行う（Claude Code だけ）。** 利用者が `claude` と打つと
 alias がラッパーを挟み、conductor が出した `ndf-next` のブロックを拾って、`/exit`・プラグインの更新・

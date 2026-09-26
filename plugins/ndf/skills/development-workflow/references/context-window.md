@@ -93,13 +93,16 @@ hook の無いランタイムにスイッチポイントは無い。Codex / Kiro
 
 ### supervisor の定義を選ぶ
 
+**この節は supervisor で回すフェーズにだけ当たる。** 設計・実装・検査・リリースはプランで流すのが既定で、
+`subagent_type` を選ばない（[agent-layers.md](agent-layers.md) の「プランで流すか supervisor で回すか」）。
+
 **`subagent_type` は、その supervisor が最初に通す工程で決める。** 2 つの定義は本文が同じで、
 キャッシュの寿命だけが違う（`plugins/ndf/agents/supervisor.md` と `supervisor-waits.md`）。
 
 | 最初に通す工程 | `subagent_type` | 当たる起動 |
 | --- | --- | --- |
 | リファクタリング・コードレビュー・ドキュメントレビュー（収束ループ） | `ndf:supervisor-waits`（寿命 1 時間） | 検査の起動、`結果: スイッチポイント` の後の設計・検査の起動 |
-| それ以外 | `ndf:supervisor`（寿命 5 分） | 設計・実装・取り込み・仕上げの起動 |
+| それ以外 | `ndf:supervisor`（寿命 5 分） | プランの雛形が無い工程（要求と受け入れ条件・確定仕様化・振り返りなど）の起動 |
 
 - モードで検査がリファクタリングを含まない（`documentation` / `light`）ときも、検査の最初の工程はコードレビューなので `ndf:supervisor-waits` にする
 - 1 時間の寿命は、待ちの後の書き直しを読み込みに変えるぶんが、書き込みの割増し（5 分の 1.25 倍に対して 2 倍）を上回る supervisor にだけ使う。収束ループは待ちを必ず含むので上回る。待たない supervisor に使うと損になる
@@ -193,7 +196,8 @@ Codex / Kiro / agy には hook を置かない。4 つのカットポイント�
 | 1 | 課題の本文の `## 進行`（`gh issue view <番号> --json body`） | モード・worktree・計画ファイル・通った工程 |
 | 2 | `bash <この Skill のディレクトリ>/scripts/stage-check.sh report <番号>`（プラグインの `scripts/` に無く、`development-workflow` の `scripts/` にある） | 通過記録。本文と食い違えば通過記録を正とする |
 | 3 | 1 の worktree（`.worktrees/<ブランチ名>`）のブランチ名で `gh pr list --head <ブランチ名> --state all`。実装の Pull Request は `gh issue view <番号> --json closedByPullRequestsReferences` でも引く | 設計・実装の Pull Request と状態 |
-| 4 | 1〜3 から、チェックの付いていない最初の必須の工程 | 次に起動する工程 Skill |
+| 4 | 引継ぎ文書の「今の会話の進み」が指すミッション状態ファイル（`mission.json`）の `ステージ` と、ステージごとのキューの done（`wait <done>` の結果）。プランの途中で止まっていれば、その `<プラン>-state/progress.jsonl` の最後のステップ | 終わったステージ・`gate` で止まったステージ・途中のプランとステップ |
+| 5 | 1〜4 から、チェックの付いていない最初の必須の工程 | 次に打つコマンド。プランのあるフェーズは次のステージの `command`（途中のプランは `supervise.py run <プラン> --from <ステップの id>`）、雛形の無い工程は起動する supervisor |
 
 **Pull Request は番号の全文検索で引かない。** 同じ番号に触れただけの別の Pull Request も返す
 ためである。設計の Pull Request は閉じる語を持たないため、課題との結び付きでは引けず、
