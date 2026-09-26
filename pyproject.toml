@@ -1,0 +1,19 @@
+# リポジトリの根の scripts/（開発と CI の検査）が使う外部パッケージの宣言（#1142 の決定 19）。版は隣の uv.lock が固定する。
+# グループ（extra）と版は plugins/ndf/pyproject.toml の同じ名前のグループと揃える（根の検査も plugins/ndf/scripts/lib/ の包みを使う）。
+# 足す・版を上げるのは、この 2 つを変える PR だけで行う（理由を PR に書く）。
+[project]
+name = "ai-plugins-dev-scripts"
+version = "0.0.0"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+md = ["markdown-it-py==4.2.0", "mdit-py-plugins==0.6.1"]
+mdtable = ["tabulate==0.10.0"]
+schema = ["pydantic==2.13.5"]
+shparse = ["tree-sitter==0.26.0", "tree-sitter-bash==0.25.1"]
+versions = ["semver==3.1.0"]
+yamlio = ["ruamel-yaml==0.19.1"]
+
+[tool.uv]
+package = false

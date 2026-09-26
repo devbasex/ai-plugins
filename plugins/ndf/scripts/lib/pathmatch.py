@@ -30,6 +30,8 @@ def _anchored(pattern: str) -> str:
     """根に錨を下ろしたパターンにする（`!` は保つ。`**/` で始まるものは錨が無くても同じ）。"""
     neg = pattern.startswith("!")
     body = pattern[1:] if neg else pattern
+    if body.startswith("./"):
+        body = body[2:]
     if not body.startswith("/"):
         body = "/" + body
     return ("!" if neg else "") + body
@@ -38,7 +40,7 @@ def _anchored(pattern: str) -> str:
 @lru_cache(maxsize=256)
 def _spec(patterns: tuple[str, ...]) -> pathspec.PathSpec:
     lines = [_anchored(p.strip()) for p in patterns if p.strip() and not p.strip().startswith("#")]
-    return pathspec.PathSpec.from_lines("gitwildmatch", lines)
+    return pathspec.PathSpec.from_lines("gitignore", lines)
 
 
 def path_matches(path: str, patterns: Iterable[str]) -> bool:
