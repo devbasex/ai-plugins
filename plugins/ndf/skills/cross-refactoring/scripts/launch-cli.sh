@@ -110,7 +110,8 @@ case "$PHASE" in
   plan)
     # 候補の全件。`key` は改修計画の結果が候補を指す鍵（`path#symbol#smell`）。
     ITEMS_JSON=$(jq '[.candidates[] | {key: "\(.path)#\(.symbol)#\(.smell)", path, symbol,
-      smell, technique, severity, rationale, plan, test_gap, agreed_by: (.proposed_by | length)}]' "$STATE")
+      smell, technique, severity, rationale, plan, test_gap, agreed_by: (.proposed_by | length)}
+      + (if .evidence then {evidence} else {} end)]' "$STATE")
     ;;
   add-tests)
     ITEMS_JSON=$(jq '[.items[] | select(.status == "planned" and ((.tests // []) | length) > 0)
@@ -166,6 +167,26 @@ VOCAB_VIEWPOINTS=$(jq -r '(.vocabulary.viewpoints // {}) | to_entries[] | "- `\(
 [ -n "$VOCAB_VIEWPOINTS" ] || VOCAB_VIEWPOINTS="（同上）"
 }
 
+# 指標の節（#1319）。**提案の手順だけ、指標のファイルが実在するときだけ組む**（AC18）。
+# 無いときは空にし、無いファイルのパスを示さない。
+build_metrics_block() {
+METRICS_BLOCK=
+[ "$PHASE" = "propose" ] || return 0
+local file
+file=$(jq -r '.code_metrics.file // ""' "$STATE")
+[ -n "$file" ] && [ -f "$file" ] || return 0
+METRICS_BLOCK=$(cat <<METRICS_EOF
+## 指標（測定の結果・読むだけ）
+
+提案の前に \`$file\` を読んでください。対象範囲のコードを測定ツールで測った値です。
+作業ディレクトリの外にありますが、このファイルは読んでかまいません。値を根拠にした提案は、
+\`evidence\` に使った値を書けます（例: \`"evidence": {"cognitive": 74, "cc": 26, "lines": 101}\`）。
+書ける鍵は \`cc\` / \`cognitive\` / \`lines\` / \`functions\` / \`max_function_lines\` / \`duplicate_lines\` で、値は数です。
+書かなくても見送られません。
+METRICS_EOF
+)
+}
+
 export_prompt_env() {
 BUDGET_MINUTES=$(jq -r '.budget_minutes' "$STATE")
 END_AT=$(jq -r '.plan.end_at // ""' "$STATE")
@@ -178,11 +199,13 @@ export RF_ITEMS=$ITEMS_JSON RF_TMP_DIR=$TMP_DIR
 export RF_BUDGET_MINUTES=$BUDGET_MINUTES RF_END_AT=$END_AT
 export RF_VOCAB_SMELLS=$VOCAB_SMELLS RF_VOCAB_TECHNIQUES=$VOCAB_TECHNIQUES
 export RF_VOCAB_SEVERITIES=$VOCAB_SEVERITIES RF_VOCAB_VIEWPOINTS=$VOCAB_VIEWPOINTS
+export RF_METRICS_BLOCK=$METRICS_BLOCK
 }
 
 collect_items
 build_skill_block
 collect_refactoring_vocabulary
+build_metrics_block
 export_prompt_env
 
 # 雛形は `${RF_*}` を展開するだけの素の Markdown。コマンド置換は展開しない

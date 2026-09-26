@@ -140,6 +140,18 @@ backed enum・`readonly`・first-class callable 構文がいずれも使えな�
 閉じた状態集合は 8.1 以降と同じくコード側に置く。変わるのは**外部化した業務ルールの守り方**で、
 生成した定数クラスに対する網羅性検査が効かないぶん、実行時のスキーマ検証への依存が高くなる。
 
+## 指標の測定
+
+`/ndf:cross-refactoring` は提案の前に、既定で lizard 1.24.0 を版を固定して測る（`.ndf/code-metrics.json` で
+置き換えられる）。PHP の実行環境は要らない。読む指標は関数・メソッドごとの循環的複雑度（`CCN`。11 以上から
+分岐の多さを疑う）と関数の行数（`length`）、ファイルの行数（空行を除く）である。
+重複は jscpd（`jscpd@4.3.0`・最小 8 行）で探す。
+
+```bash
+uvx --from lizard==1.24.0 lizard --csv src/*.php
+npx -y jscpd@4.3.0 src/*.php --no-gitignore --min-lines 8 --reporters json --output /tmp/jscpd
+```
+
 ## 出典
 
 - [PHP 8.1 リリースアナウンス](https://www.php.net/releases/8.1/en.php)

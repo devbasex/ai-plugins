@@ -12,6 +12,8 @@
 - 対象範囲: `$RF_SCOPE`（**この範囲の外は提案しない**）
 - 着手前のテスト: `$RF_BASELINE_TEST`
 
+$RF_METRICS_BLOCK
+
 ## 手順書
 
 $RF_SKILL_BLOCK

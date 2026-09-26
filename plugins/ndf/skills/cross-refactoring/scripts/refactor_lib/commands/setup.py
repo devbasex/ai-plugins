@@ -32,6 +32,7 @@ from ..paths import (
     state_path,
     tmp_dir_for,
 )
+from ..codemetrics_record import code_metrics_record, ensure_record, recorded_enabled
 from ..plan import PLAN_COMMENT, PLAN_FILE, PLAN_NONE, normalize_plan_file
 from ..scope import require_scope_covers_tests, round_test_hint
 from ..testcmd import is_known
@@ -88,6 +89,7 @@ RESUME_NOTIFY_FIELDS = (
     statefile.ResumeField("plan_file", "plan_file", "notify"),
     statefile.ResumeField("workflow_step", "workflow_step", "notify"),
     statefile.ResumeField("worktree_root", "worktree_root", "notify"),
+    statefile.ResumeField("code_metrics", "code_metrics", "notify"),
 )
 
 
@@ -365,6 +367,7 @@ def _build_initial_state(
         "pending_push": False,
         "pending_drop": None,
         "history_written": False,
+        "code_metrics": code_metrics_record(ctx.work, getattr(args, "code_metrics", None) is not False),
     }
 
 
@@ -688,6 +691,7 @@ def _resume(
     書き込みの前に中断するため、状態ファイルは変わらない。
     """
     info(f"↻ 前回中断した状態から再開します（手順 {state.get('phase')}）")
+    ensure_record(state, getattr(args, "code_metrics", None))
     budget_spec = RESUME_BUDGET_REPLACE if _before_plan(state) else RESUME_BUDGET_NOTIFY
     for line in statefile.apply_resume_args(state, args, budget_spec):
         info(line)
@@ -747,7 +751,7 @@ def _notify_view(
     辞書で、作業ディレクトリ root を解決済みのパスで持つ。引数の形のまま比べると、
     同じ値でも「違う」と知らせてしまう。
     """
-    view = dict(state)
+    view = {**state, "code_metrics": recorded_enabled(state)}
     view["baseline_test"] = (state.get("baseline_test") or {}).get("command")
     # ラウンドのテストを省いた（または全体のテストと同じ文字列だった）実行は `None` を持つ。
     # 同じ文字列を渡し直した再開を「違う」と知らせないため、全体のテストと同じなら同じと読む。

@@ -59,6 +59,9 @@
 12. **着手前のテスト** — `--baseline-test` を実行し、`--round-test` を渡したときはそれも
     1 回実行する。**どちらかが失敗していたら開始しない**。全体テストの秒は
     `baseline_test.seconds` に残し、危険フラグと最終ゲートの全体テストのバッファに使う
+13. **測定の設定の読み込み** — 書き込み用の作業ディレクトリの `.ndf/code-metrics.json` を読み、
+    既定の対応と重ねて状態の `code_metrics.config` に書く。`status` は `pending` から始まる。
+    `limits.measure_timeout` もここで書く（下の「指標の測定」）
 
 ### 再開
 
@@ -210,6 +213,7 @@ claude 17 本 / codex 1 メソッド / kiro 0 本と揃わなかった。最後�
 
 ```bash
 "$SCRIPTS/prepare-worktrees.sh" "$ID" sync "$(git -C "$WORK" rev-parse HEAD)"
+rf measure "$ID"                  # 指標を 1 回だけ測る。測れなくても 0（4 だけが中断）
 rf_eval start-phase "$ID" propose            # PHASE_TIMEOUT = 提案の枠の終わりまでの残り + 余裕
 for a in $RUNTIMES; do "$SCRIPTS/launch-cli.sh" "$a" propose "$ID"; done
 "$LIB/monitor.py" "$ID" --agents "$RUNTIMES_CSV" --tmp-dir "$TMP_DIR" \
@@ -221,6 +225,62 @@ rf merge-proposals "$ID"          # 2 = 改善候補 0 件（最終ゲートへ�
 **提案は参加者の全員が 1 度だけ、並行して行う。** 提案とリファクタリング計画は想定最大時間の中の枠で
 行い、枠の終わり（提案 `開始 + 0.20·B`、リファクタリング計画 `開始 + 0.30·B`）を監視の上限にする
 （決定 24。式は [02 の「締め切り」](02-plan-and-implement.md#締め切り)）。
+
+### 指標の測定（`measure`）
+
+**提案の前に 1 回だけ、対象範囲のコードの指標を測り、参加者の全員が同じファイルを読む。**
+測るのはオーケストレーターで、参加者の CLI には測らせない（値の出所に LLM の申告を使わない）。
+
+1. `git ls-files -- <--scope>` で追跡されたファイルを集め、拡張子で言語に分ける。表に無い拡張子は
+   「言語を判定しなかったファイル」に数えるだけにする
+2. 言語ごとにツールを起動する（言語の名前の順・1 回に 500 本まで）。Python は Ruff（循環的複雑度・
+   分岐・文・引数・return の数）と complexipy（認知的複雑度）の 2 つを 1 つの測定ツール
+   `ruff-complexipy` として測り、関数の範囲は `ast` で数える。JavaScript・TypeScript・PHP・Go ほかは
+   lizard（循環的複雑度と関数の行数）で測る。shell は測らない（`unsupported_language`）
+3. 言語ごとの測定の後に、重複を 1 回ずつ探す。Python は pylint 同梱の `symilar`、ほかの言語
+   （shell を含む）は jscpd で、最小 8 行である
+4. 指標のファイル `$TMP_DIR/code-metrics-rf<ID>.md` を書く。言語ごとの節（見出しにツールの名前と版）に、
+   本体とテストを分けて、複雑な関数・ファイルの行数・重複の箇所の上位を載せる。要約の件数は全件から数える
+5. 提案のプロンプトに「指標」の節が入り、このファイルの絶対パスが載る。ファイルが無ければ節ごと入らない
+
+**起動は `uvx --from <パッケージ>==<版>`（jscpd は `npx -y jscpd@<版>`）で版を固定する。** ランナーが
+無いときだけ PATH のコマンドを使い、その版（`--version`）とランナー `path` を記録する。対象リポジトリの
+依存へは何も足さず、作業ディレクトリへも書かない（Ruff は `--no-cache`、complexipy と jscpd の出力は
+一時ディレクトリ）。
+
+**測れなくても止めない。** 理由は識別子で残し、指標のファイル・リファクタリング計画・完了報告で同じ値を使う。
+
+| 識別子 | いつ |
+| --- | --- |
+| `tool_missing` | ランナーもツールのコマンドも無い |
+| `unsupported_language` | 言語の表にあるが既定のツールが無い（shell） |
+| `disabled` | 宣言がその言語を `null` にした |
+| `tool_failed` | 起動できない・正常でない終了コード（uvx / npx の取得の失敗を含む） |
+| `unreadable_output` | 正常に終わったが出力を読めない |
+| `timeout` | 測定に使える時間を過ぎた・残りが無かった |
+| `too_many_files` | 重複検出に渡すパスの合計が 256 KiB を超えた |
+
+実行の単位の `code_metrics.status` は `written`（ファイルを書いた。測れた言語が 0 でも）・`disabled`
+（`--no-code-metrics`）・`no_language`（判定できた言語が無い）・`write_failed`（書けない）のどれかになる。
+`pending` 以外なら 2 回目の `measure` は測らない。提案を始めた後（`phases.propose.started_at` がある）も測らない。
+旧い状態ファイル（`code_metrics` が無い）の再開は、提案を始める前なら `init` が記録を作って測る。
+
+**時間は提案の枠から割く。** 使える時間は `min(0.05·B, 0.5·max(0, 提案の枠の終わり − 今))` で、言語ごとの
+測定と重複検出が分け合う。提案の枠の終わりは動かない（[02 の「締め切り」](02-plan-and-implement.md#締め切り)）。
+
+**言語ごとのツールは `.ndf/code-metrics.json` で置き換える。** 書いた言語だけが置き換わり、ほかは既定のまま測る。
+
+```json
+{"version": 1, "tools": {"python": "lizard", "shell": null}}
+```
+
+値は `"ruff-complexipy"`（`python` だけ）・`"lizard"`・`null`（その言語を測らず、重複も探さない）。形が違えば
+（JSON でない・知らない鍵・知らない言語かツール）宣言の全体を使わずに既定で測り、`declaration_invalid` と
+理由を指標のファイルと計画に残す。重複の最小の行数と版は宣言で変えない。
+
+**参加者は `evidence` に根拠の値を書ける。** 鍵は `cc` / `cognitive` / `lines` / `functions` /
+`max_function_lines` / `duplicate_lines`、値は数である。書かなくても、形が悪くても見送られない（採否と
+順位に使わない）。
 
 ### 観点を並べて観点ごとに探させる
 
@@ -246,7 +306,8 @@ rf merge-proposals "$ID"          # 2 = 改善候補 0 件（最終ゲートへ�
 1. 各参加者の `<ランタイム>-propose-rf<ID>-result.json` を読む。1 者が欠けた・壊れた JSON を
    返したときは、その者の提案を無かったものとして続ける（`proposed` に `null` / 件数が残る）
 2. 鍵（`path` + `symbol` + `smell`）が同じ提案を 1 件へまとめる。賛同した者を足し、
-   `rationale` / `plan` は長い方、重要度は高い方、見積りの行数は大きい方を採る
+   `rationale` / `plan` は長い方、重要度は高い方、見積りの行数は大きい方を採る。`evidence` は
+   知らない鍵と数でない値を落とし、既にある鍵を残して無い鍵だけ足す
 3. 語彙外を含む提案は `vocabulary`、しきい値未満は `threshold` で見送る
 4. 残りを（賛同した者の数、重要度）の降順に並べ、`path` + `symbol` の組の単位で
    **上位 30 組**を取る。取った組の中は**上位 3 件まで**リファクタリング計画へ渡す（最大 90 件）。
