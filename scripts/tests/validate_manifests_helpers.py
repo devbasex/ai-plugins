@@ -1,9 +1,8 @@
-"""定義ファイルのチェック（`scripts/validate-runtime-plugins.sh` の Python ブロック）のテスト補助。
+"""定義ファイルのチェック（`scripts/validate-runtime-plugins.sh` が呼ぶ `scripts/lib/validate_manifests.py`）のテスト補助。
 
-チェックの本体はシェルスクリプトの中のヒアドキュメントに埋まっている。シェルスクリプト全体を
-動かすと `claude plugin validate` や Kiro の installer まで走り、確かめたい突き合わせと
-関係の無い理由で結果が変わる。そこでヒアドキュメントの本文だけを取り出し、一時ディレクトリへ
-作った木に対して実行する。実物の定義ファイルは読むだけで、書き換えない。
+シェルスクリプト全体を動かすと `claude plugin validate` や Kiro の installer まで走り、確かめたい
+突き合わせと関係の無い理由で結果が変わる。そこでチェックの本体だけを、一時ディレクトリへ作った木に
+対して実行する。実物の定義ファイルは読むだけで、書き換えない。
 
 版数（9.3.0）と Skill 数（5 / 3 / 2）は実物（9.8.0-dev.1 / 33 / 31 / 31）と重ならない値に
 してある。
@@ -20,10 +19,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 VALIDATE = REPO_ROOT / "scripts/validate-runtime-plugins.sh"
 VERSION_PATTERN_SOURCE = REPO_ROOT / "scripts/lib/version_pattern.py"
 
-# ヒアドキュメントの開始行と終端。チェックの本体はこの 2 行に挟まれている。
-HEREDOC_START = 'run python3 - "$ROOT_DIR" "${FAMILIES[@]}" <<\'PY\''
-HEREDOC_END = "PY"
-
+# チェックの本体（validate-runtime-plugins.sh が呼ぶ）
+MANIFEST_CHECKER = REPO_ROOT / "scripts/lib/validate_manifests.py"
 FAMILY = "ndf"
 VERSION = "9.3.0"
 
@@ -33,23 +30,6 @@ MANIFESTS = {
     "codex": ["alpha", "bravo", "charlie"],
     "agy": ["alpha", "bravo"],
 }
-
-
-def extract_checker() -> str:
-    """シェルスクリプトからチェックの本体（Python）を取り出す。
-
-    取り出せないときは落とす。素通りさせると、ヒアドキュメントの書き方が変わったときに
-    テストが空の本文を実行して「通った」と報告する。
-    """
-    lines = VALIDATE.read_text(encoding="utf-8").splitlines()
-    try:
-        start = lines.index(HEREDOC_START)
-    except ValueError:  # pragma: no cover - 取り出せないこと自体がチェック対象
-        raise AssertionError(
-            f"{VALIDATE} にチェックの本体のヒアドキュメント（{HEREDOC_START}）が無い"
-        )
-    end = lines.index(HEREDOC_END, start + 1)
-    return "\n".join(lines[start + 1 : end]) + "\n"
 
 
 def description(version: str, skill_count: int) -> str:
@@ -147,10 +127,8 @@ def build_tree(base: Path, version: str = VERSION, described: str | None = None)
 
 def run_check(root: Path, tmp_path: Path) -> subprocess.CompletedProcess[str]:
     """取り出したチェックを子プロセスとして実行し、終了コードと出力を観測する。"""
-    checker = tmp_path / "validate_manifests.py"
-    checker.write_text(extract_checker(), encoding="utf-8")
     return subprocess.run(
-        [sys.executable, str(checker), str(root), FAMILY],
+        [sys.executable, str(MANIFEST_CHECKER), str(root), FAMILY],
         capture_output=True,
         text=True,
         check=False,
