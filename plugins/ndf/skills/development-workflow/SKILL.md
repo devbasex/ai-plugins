@@ -34,8 +34,7 @@ hooks:
 **代わりに工程の順序が変わる。** ミッションに何が入るかが決まらないと判定できないため、
 **要求と受け入れ条件 → モード判定 → 作業場所の用意**の順になる。`light` にも要求と受け入れ条件が掛かる。
 その費用は受け入れる。判定の入力が無いまま判定する状態のほうが高くつく。
-要求と受け入れ条件はプランの雛形を持たないため supervisor で回し、判定の後のフェーズはプランで流す
-（[references/agent-layers.md](references/agent-layers.md) の「プランで流すか supervisor で回すか」）。
+要求と受け入れ条件はプランの雛形が無いため supervisor で回し、判定の後のフェーズはプランで流す（`agent-layers.md` の表）。
 
 **モード判定は工程表の行を持たない。** ボードへ記録する工程の値を増やさないためである。
 
@@ -132,10 +131,9 @@ pace: fast
 
 工程の並びは「モードごとに起動する Skill」の表から読む。この例は出力の形を示すもので、
 基準ではない。
-**`次のコマンド:` の行には、判定の後に conductor が最初に打つコマンドを書く。** `normal` は「ミッションを流すコマンド」の
-1 つ目（`new mission`。設計 Pull Request を出さないモードでは `--design` を省く）、`pace: fast` は
-[references/pace.md](references/pace.md) の「ミッションを始める」の 1 つ目（`mission-state.py init`）を写す。
-最初のフェーズにプランの雛形が無いときだけ、`次のコマンド: 無し（supervisor で回す: <フェーズ>）` と書く。
+**`次のコマンド:` の行は、判定の後に conductor が最初に打つコマンドである。** `normal` は [references/waiting.md](references/waiting.md) の
+「ミッションを流すコマンド」の 1 つ目（設計 Pull Request を出さないモードは `--design` を省く）、`pace: fast` は
+[references/pace.md](references/pace.md) の「ミッションを始める」の 1 つ目を写す。雛形が無ければ `無し（supervisor で回す: <フェーズ>）`。
 `pace:` の行は `fast` を指定したときだけ出す（既定の `normal` では出さない）。
 
 判定基準の本文を出力へ貼らない。呼び出し側が基準を写し取ると、この Skill が唯一の
@@ -371,17 +369,12 @@ Pull Request のマージ、制作物承認は本番の提出先への操作に�
 - 本番系へ届く操作 — 承認を得るまで進めない。**検証リリースまでは自動で進めてよい**。
   `operation` の実行も同じで、本番系へ届く単位は承認を得るまで実行しない
 
-**工程は 3 層（conductor / supervisor / worker）へ出す。** 人間と対話しているセッション
-（conductor）がフェーズごとにプラン（`supervise.py`）をキューで流し、プランが 1 つの作業を worker へ出す。
-**既定はプランである。** conductor が `Agent` で supervisor を起動するのは、プランの雛形が無いときと、
-雛形に要る設定が無いときだけである。フェーズごとにどちらで回すかは
-[references/agent-layers.md](references/agent-layers.md) の「プランで流すか supervisor で回すか」の表が決める。
-**承認ゲートで止まれるのは conductor だけである。** フェーズの表・起動の指示・報告の形・モデルの
-基準・他者の承認が要るときの到達点の置き直しも同じ文書にある。
+**工程は 3 層（conductor / supervisor / worker）へ出し、既定はプラン（`supervise.py`）である。** conductor がフェーズごとにプランをキューで流し（[references/waiting.md](references/waiting.md) の「ミッションを流すコマンド」）、
+雛形か要る設定が無いときだけ `Agent` で supervisor を起動する（[references/agent-layers.md](references/agent-layers.md) の「プランで流すか supervisor で回すか」）。
+**承認ゲートで止まれるのは conductor だけである。** 起動の指示・報告の形・モデルの基準・到達点の置き直しも `agent-layers.md` にある。
 
-**supervisor で回すフェーズでは、conductor は `$SCRIPTS` を解いてから supervisor を起動し、起動指示の「進捗記録」へ
-絶対パスで書く。** supervisor はこの 1 行で進行を記録し、この Skill も `progress-tracking` も
-起動しない（形とキーごとの打つ時点は `agent-layers.md` の「conductor → supervisor」）。
+**supervisor を起動するときは `$SCRIPTS` を解き、起動指示の「進捗記録」へ絶対パスで書く。** supervisor はこの 1 行で
+進行を記録し、この Skill も `progress-tracking` も起動しない（`agent-layers.md` の「conductor → supervisor」）。
 
 **カットポイントの再起動はラッパーが自動で行う（Claude Code だけ）。** 利用者が `claude` と打つと
 alias がラッパーを挟み、conductor が出した `ndf-next` のブロックを拾って、`/exit`・プラグインの更新・
@@ -394,30 +387,6 @@ PLUGIN_ROOT='${CLAUDE_PLUGIN_ROOT}'; case "$PLUGIN_ROOT" in '$'*) PLUGIN_ROOT= ;
 ```
 
 **人がその場にいて指示を変えたいときは、conductor へ伝える。** 次のフェーズから反映する。
-
-### ミッションを流すコマンド
-
-**`normal` の 1 ミッション（設計 → 承認ゲート 1 → ミッションブランチ → 実装 → 検査 → 開発版 → 承認ゲート 2 → 本番）で
-conductor が起きるのは、承認ゲート・`attention`・キューの終わりだけである。** 例はミッション `m6`（課題 1052・1053、
-設計 Pull Request は 1052）で、`sv() { python3 "$SCRIPTS/supervise.py" "$@"; }`、`O=<作業ディレクトリ>/mission-m6` とする。
-キューと `wait` は背景で起動し、待ち方と done の読み方は [references/waiting.md](references/waiting.md) に従う。
-
-1. プランを書き出す。ステージごとのプランとミッション状態ファイル（`$O/mission.json`）ができる:
-   `sv new mission --name m6 --worktree <リポジトリの根> --issue 1052 1053 --design 1052 --version 10.18.0-dev.1 --out $O`
-2. 設計: `sv queue $O/1-design-1052.json --max 3 --done $O/done-1.json` と `sv wait $O/done-1.json`
-3. 承認ゲート 1: キューの結果が `gate` なら、設計 Pull Request をまとめて 1 回の承認に載せる。承認の後、
-   conductor が `python3 "$SCRIPTS/merged-steps.py" merge-when-green <設計 PR 番号>` でマージする
-4. ミッションブランチ: `sv queue $O/3-mission-branch.json --done $O/done-3.json` と `sv wait $O/done-3.json`
-5. 実装: `sv queue $O/4-impl-1052.json $O/4-impl-1053.json --max 3 --done $O/done-4.json` と `sv wait $O/done-4.json`
-6. 検査 → 開発版: `sv queue $O/5-check.json --max 3 --then $O/6-release.json --done $O/done-5.json` と
-   `sv wait $O/done-5.json`。検査のプランがミッションの Pull Request をベースブランチへマージし、開発版のリリースプランが続けて流れる
-7. 承認ゲート 2: キューの結果が `gate`（開発版の facts のステップ）なら、承認資料を添えて本番の承認を取る
-8. 本番: `sv new release --version 10.18.0 --prs <ミッションの PR 番号> --channel prod --worktree <リポジトリの根>/.worktrees/release/v10.18.0 --out $O/7-release-prod.json`、
-   続けて `sv queue $O/7-release-prod.json --done $O/done-7.json` と `sv wait $O/done-7.json`。最後のステップが後片付けを行う
-
-- ステージの番号とプランのファイル名は `new mission` の出力（`mission.json` の `ステージ`）が正である。書き出した `command` に `--done` を足して打つ
-- 確定仕様化と振り返りは `normal` のプランが持たないため、supervisor で回す（[references/agent-layers.md](references/agent-layers.md) の表の取り込み・仕上げの行）
-- 本番の後に続けるコマンドは [references/relay.md](references/relay.md)、`pace: fast` の並びは [references/pace.md](references/pace.md) にある
 
 ## 標準フロー
 

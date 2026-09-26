@@ -144,6 +144,30 @@ python3 plugins/ndf/scripts/supervise.py wait q/done.json
    ブランチ・worktree を片付ける。`git branch -D` が要るブランチがあれば承認ゲートで止まる
 5. `wait` が 0 で終わったら、引継ぎ文書を `supervise.py note` で更新し、`ndf-next` を出す
 
+### ミッションを流すコマンド
+
+**`normal` の 1 ミッション（設計 → 承認ゲート 1 → ミッションブランチ → 実装 → 検査 → 開発版 → 承認ゲート 2 → 本番）で
+conductor が起きるのは、承認ゲート・`attention`・キューの終わりだけである。** 例はミッション `m6`（課題 1052・1053、
+設計 Pull Request は 1052）で、`sv() { python3 "$SCRIPTS/supervise.py" "$@"; }`、`O=<作業ディレクトリ>/mission-m6` とする。
+キューと `wait` は背景で起動し、done は上の「supervise.py の進捗ログ」で読む。
+
+1. プランを書き出す。ステージごとのプランとミッション状態ファイル（`$O/mission.json`）ができる:
+   `sv new mission --name m6 --worktree <リポジトリの根> --issue 1052 1053 --design 1052 --version 10.18.0-dev.1 --out $O`
+2. 設計: `sv queue $O/1-design-1052.json --max 3 --done $O/done-1.json` と `sv wait $O/done-1.json`
+3. 承認ゲート 1: キューの結果が `gate` なら、設計 Pull Request をまとめて 1 回の承認に載せる。承認の後、
+   conductor が `python3 "$SCRIPTS/merged-steps.py" merge-when-green <設計 PR 番号>` でマージする
+4. ミッションブランチ: `sv queue $O/3-mission-branch.json --done $O/done-3.json` と `sv wait $O/done-3.json`
+5. 実装: `sv queue $O/4-impl-1052.json $O/4-impl-1053.json --max 3 --done $O/done-4.json` と `sv wait $O/done-4.json`
+6. 検査 → 開発版: `sv queue $O/5-check.json --max 3 --then $O/6-release.json --done $O/done-5.json` と
+   `sv wait $O/done-5.json`。検査のプランがミッションの Pull Request をベースブランチへマージし、開発版のリリースプランが続けて流れる
+7. 承認ゲート 2: キューの結果が `gate`（開発版の facts のステップ）なら、承認資料を添えて本番の承認を取る
+8. 本番: `sv new release --version 10.18.0 --prs <ミッションの PR 番号> --channel prod --worktree <リポジトリの根>/.worktrees/release/v10.18.0 --out $O/7-release-prod.json`、
+   続けて `sv queue $O/7-release-prod.json --done $O/done-7.json` と `sv wait $O/done-7.json`。最後のステップが後片付けを行う
+
+- ステージの番号とプランのファイル名は `new mission` の出力（`mission.json` の `ステージ`）が正である。書き出した `command` に `--done` を足して打つ
+- 確定仕様化と振り返りは `normal` のプランが持たないため、supervisor で回す（[agent-layers.md](agent-layers.md) の表の取り込み・仕上げの行）
+- 本番の後に続けるコマンドは [relay.md](relay.md)、`pace: fast` の並びは [pace.md](pace.md) にある
+
 **サブエージェントは、背景の処理を残したまま応答を終えない。** 完了通知で再開はされるが、
 **親には応答を終えた時点で 1 度「終わった」と通知が届き、途中の文面が結果として渡る**
 （Claude Code 2.1.280 で実測。`codex exec` を背景で起動して応答を終えたサブエージェントは、
@@ -188,7 +212,7 @@ timeout 3600 bash -c 'until [ -e "$1.done" ]; do sleep 5; done' _ "<置き場所
 | 終了コード | supervisor の動き |
 | --- | --- |
 | 0（`<置き場所>.done` が現れた） | `置き場所` の最後の `## 作業の報告` から末尾までを読み、フェーズを進める |
-| 124（上限の 3600 秒に達した） | [agent-layers.md](agent-layers.md) の「supervisor の worker の点検」を 1 回行う。レートリミット中断でなければ「報告が無いまま終わったとき」の規則で `SendMessage` を送る |
+| 124（上限の 3600 秒に達した） | [interrupt-resume.md](interrupt-resume.md) の「supervisor の worker の点検」を 1 回行う。レートリミット中断でなければ「報告が無いまま終わったとき」の規則で `SendMessage` を送る |
 
 - **worker の 2 回目の通知は、コピーを読んだ後に届いても読み直さない。** 同じ報告である
 - 中間通知でない通知（報告の見出しが無く、背景の処理も残っていない）は、今のまま
