@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 
 from .common import config_dir, data_dir, env_num, launcher_path, parse_iso
 
@@ -210,6 +211,30 @@ def _iter_transcript_rows(transcript_path: str):
                     yield row
     except OSError:
         return
+
+
+def pending_wakeups(transcript_path: str, now: float) -> list[dict]:
+    """会話の記録から、発火の前の `ScheduleWakeup` の予約を `running_tasks` と同じ形で返す。
+
+    予約は Stop hook の `background_tasks` に入らないが、残っていると `/exit` で Claude Code が選択肢を出して
+    止まる（区間 7・16）。`stop: true` の呼び出しより前の予約は取り消されたものとして数えない。"""
+    fires: list[float] = []
+    for row in _iter_transcript_rows(transcript_path):
+        content = (row.get("message") or {}).get("content") if isinstance(row.get("message"), dict) else None
+        at = parse_iso(row.get("timestamp"))
+        if row.get("type") != "assistant" or not isinstance(content, list) or at is None:
+            continue
+        for c in content:
+            inp = c.get("input") if isinstance(c, dict) and c.get("name") == "ScheduleWakeup" else None
+            if not isinstance(inp, dict):
+                continue
+            if inp.get("stop"):
+                fires = []
+            elif isinstance(inp.get("delaySeconds"), (int, float)):
+                fires.append(at + min(max(inp["delaySeconds"], 60), 3600))
+    return [{"id": "ScheduleWakeup", "type": "wakeup",
+             "command": "発火の予定 " + time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(f))}
+            for f in fires if f > now]
 
 
 def replied_after(transcript_path: str, written: float) -> bool:
