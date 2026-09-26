@@ -1,17 +1,19 @@
 """ラッパーのファイル名の定数と、どのモジュールも使う小さな関数（#895・#1142 の C6）。
 
-標準ライブラリと、バージョンディレクトリにも入る `lib/clock.py`・`lib/jsonio.py` だけを import する（I2）。
+読み込みのときは標準ライブラリと、バージョンディレクトリにも入る `lib/clock.py`・`lib/jsonio.py` だけを import する
+（I2。ラッパーを動かす python を選ぶ `venv` と、素通しの `claude` より前に読まれるため）。排他はファイルロックの包み
+`lib/locks.py`（filelock）を、使う関数の中で import する（決定 20）。
 時刻と JSON の読みはライブラリの 1 つの実装を使う（決定 6）。JSON の書き込みだけは、権限 0600 と
 symlink の指す先の置き換えを保つため `_write_file` の上に置く。
 """
 from __future__ import annotations
 
 import datetime as _dt
-import fcntl
 import json
 import os
 import sys
 import time
+from contextlib import ExitStack
 
 # relay_lib の親。プラグインでは `scripts/`、複製ではバージョンディレクトリ（`relay-<版>-<digest>/`）
 PKG_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -102,19 +104,15 @@ def launcher_path() -> str:
 
 def relay_running(d: str) -> bool:
     """`relay.lock` の排他が取れなければラッパーが動いている。pid の生死では見ない。"""
-    try:
-        fd = os.open(os.path.join(d, LOCK_FILE), os.O_RDWR)
-    except OSError:
+    path = os.path.join(d, LOCK_FILE)
+    if not os.path.exists(path):
         return False
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        held = _lock(path, 0)
     except OSError:
-        return True
-    else:
-        fcntl.flock(fd, fcntl.LOCK_UN)
         return False
-    finally:
-        os.close(fd)
+    _unlock(held)
+    return held is None
 
 
 def remove(path: str) -> None:
@@ -143,32 +141,22 @@ class LockBusy(Exception):
     pass
 
 
-def _flock_wait(fd: int, seconds: float) -> bool:
-    end = time.time() + seconds
-    while True:
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            return True
-        except OSError:
-            if time.time() >= end:
-                return False
-            time.sleep(0.05)
+def _lock(path: str, seconds: float | None) -> ExitStack | None:
+    """`path`（`<名前>.lock`）の排他を `seconds` 秒まで待って取る（None は取れるまで待つ）。取れなければ None。
+    取った排他は `_unlock` で放す。"""
+    import locks  # 外部パッケージ（filelock）を使う。読み込みのときには import しない
+    target = path[:-len(".lock")] if path.endswith(".lock") else path
+    held = ExitStack()
+    try:
+        held.enter_context(locks.exclusive(target, timeout=seconds))
+    except locks.LockTimeout:
+        return None
+    return held
 
 
-def _lock(path: str, seconds: float) -> int | None:
-    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
-    if _flock_wait(fd, seconds):
-        return fd
-    os.close(fd)
-    return None
-
-
-def _unlock(fd: int | None) -> None:
-    if fd is not None:
-        try:
-            os.close(fd)
-        except OSError:
-            pass
+def _unlock(held: ExitStack | None) -> None:
+    if held is not None:
+        held.close()
 
 
 def read_text(path: str) -> str | None:

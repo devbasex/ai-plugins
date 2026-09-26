@@ -22,7 +22,7 @@
    出してから 3 へ進む。curl が無ければ `python3 -m pip install --user uv==<版>` を使う
 5. 入れられない（ネットワークが無い・権限が無い）→ 何が無いかと、手で入れるコマンドを出して終了コード 3
 
-hook とラッパーのバージョンディレクトリはこのモジュールを使わない（I13）。
+hook とラッパーは `require()` を呼ばない（I13・決定 20）。ラッパー（`relay_lib/runtime.py`）は `find_uv`・`install_uv`・`venv_dir` だけを使う。
 """
 from __future__ import annotations
 
@@ -52,6 +52,7 @@ GROUPS = {
     "yamlio": ["ruamel.yaml"],
     "waits": ["tenacity"],
     "notify": ["slack_sdk", "dotenv", "httpx"],
+    "terminal": ["ptyprocess"],
 }
 EXIT_PRECONDITION = 3
 REEXEC_ENV = "NDF_DEPS_REEXEC"
