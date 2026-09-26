@@ -70,7 +70,7 @@
 | `lib/procs.py` | psutil | 6（cgroup の読み取りは psutil に無いので残す） |
 | `lib/locks.py` | filelock | 7（シェルの `lock-common.sh` は、呼ぶ側が決定 20 で Python になるため消える） |
 | `lib/shparse.py` | tree-sitter-bash | 8（hook の 1 本のエントリポイントが呼ぶ。決定 20） |
-| `lib/versions.py` | semver（・bump-my-version） | 9（packaging は `-dev.1` を `.dev1` へ変えるため使わない。2026-09-26 に実測） |
+| `lib/versions.py` | semver（・bump-my-version） | 9（版を付ける対象はプラグインのマニフェストで、規則は SemVer 2.0 である。packaging は Python のパッケージの PEP 440 の比較で、規則が合わない） |
 | `lib/pathmatch.py` | pathspec | 10（今の `*` は `/` をまたぐ。またがない側へ揃え、`.ndf/pace.json` の宣言を読み替える） |
 | `lib/textparse.py` | unidiff・pygments | 11・12 |
 | `lib/yamlio.py` | ruamel.yaml | 13 |
