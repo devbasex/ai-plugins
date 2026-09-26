@@ -44,6 +44,7 @@ from ..intake import (
 from ..paths import git_out, load_state, work_dir
 from ..verify import verify_final_fix_commit
 from ..verify import unassigned_fix_commits
+from ..vocabulary import initial_final_gate
 
 
 def cmd_final_gate(args: argparse.Namespace) -> None:
@@ -63,7 +64,7 @@ def cmd_final_gate(args: argparse.Namespace) -> None:
     単独起動は、通れば `cross-review` へ渡す（`FINAL_GATE=cross-review`）。
     """
     path, state = load_state(args.id)
-    gate = state.setdefault("final_gate", {"fix_rounds": 0, "checks": []})
+    gate = state.setdefault("final_gate", initial_final_gate())
     standalone = not state.get("workflow_step")
     state["phase"] = "final"
 
@@ -381,7 +382,7 @@ def cmd_merge_final_fix(args: argparse.Namespace) -> None:
     未検証の差分が Pull Request に残る（#674）。
     """
     path, state = load_state(args.id)
-    gate = state.setdefault("final_gate", {"fix_rounds": 0, "checks": []})
+    gate = state.setdefault("final_gate", initial_final_gate())
     impl = str(gate.get("impl") or "")
     if not impl:
         die(
