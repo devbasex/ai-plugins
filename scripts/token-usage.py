@@ -29,13 +29,19 @@ import argparse
 import json
 import os
 import re
+import statistics
 import sys
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "plugins/ndf/scripts/lib"))
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+from ndf_wrappers import require  # noqa: E402  根の lock で包みの依存を解決する（#1142 の決定 19）
+
+require("versions", "mdtable")
+import mdtable  # noqa: E402
+import versions  # noqa: E402
 from transcript_agents import layer_of, role_of  # フェーズの語彙は 1 か所に置く
 import usage_ledger  # 計画が起動した claude -p の使用量の帳簿（#1142）
 
@@ -63,12 +69,12 @@ AXES = ("version", "mode", "model", "cc", "reviewers")
 AXIS_LABEL = {"version": "ndf の版", "mode": "モード", "model": "モデル", "cc": "Claude Code", "reviewers": "cross-review の担当"}
 
 
-def version_key(v: str) -> tuple:
-    head, _, suffix = v.partition("-")
-    nums = tuple(int(x) for x in head.split("."))
-    # 開発版（接尾辞つき）は同じ番号の正式版より前に並べる。接尾辞の数字の部分は数で比べる（dev.9 < dev.10）
-    parts = tuple((0, int(p), "") if p.isdigit() else (1, 0, p) for p in suffix.split(".")) if suffix else ()
-    return nums + ((0, parts) if suffix else (1, ()))
+def version_key(v: str):
+    """版の並べ替えの鍵（`lib/versions.py`。`-dev.N` < `-rc.N` < 正式版、`dev.9` < `dev.10`）。読めない版は ValueError。"""
+    key = versions.version_order(v)
+    if key is None:
+        raise ValueError(f"版の形が違う: {v}（X.Y.Z / X.Y.Z-dev.N / X.Y.Z-rc.N）")
+    return key
 
 
 def parse_ts(value) -> float | None:
@@ -97,11 +103,7 @@ def is_rewrite(write: int, context: int) -> bool:
 
 
 def median(xs: list[float]) -> float | None:
-    xs = sorted(xs)
-    if not xs:
-        return None
-    mid = len(xs) // 2
-    return xs[mid] if len(xs) % 2 else (xs[mid - 1] + xs[mid]) / 2
+    return statistics.median(xs) if xs else None
 
 
 def most_common(counter: Counter, empty: str = "不明") -> str:
@@ -357,8 +359,9 @@ def read_claude(root: Path, idle_cap: int, until: float | None = None) -> tuple[
                                       usage=s.usage))
             continue
         subs = [(p, scan_file(p, until=until), read_meta(p)) for p in sorted((main.parent / main.stem / "subagents").glob("*.jsonl"))]
-        versions = s.versions or [v for _, sub, _ in subs for v in sub.versions]
-        if not versions or not s.times:
+        found = [v for v in (s.versions or [v for _, sub, _ in subs for v in sub.versions])
+                 if versions.version_order(v) is not None]
+        if not found or not s.times:
             skipped["版を判定できない"] += 1
             continue
         launched = dict(s.agent_types)
@@ -380,7 +383,7 @@ def read_claude(root: Path, idle_cap: int, until: float | None = None) -> tuple[
             modes.update(sub.modes)
             prs |= sub.prs
             keys |= sub.keys
-        sessions.append(Session(versions[0], mode_of(modes), most_common(s.models), most_common(s.cc), prs, keys,
+        sessions.append(Session(found[0], mode_of(modes), most_common(s.models), most_common(s.cc), prs, keys,
                                 min(s.times), max(s.times), c.sec, dict(roles)))
     return sessions, seats, dict(skipped)
 
@@ -630,8 +633,7 @@ def render_md(result: dict, by: list[str]) -> str:
     heads = [AXIS_LABEL[a] for a in by]
 
     def table(cols: list[str], rows: list[list[str]]) -> list[str]:
-        lines = ["| " + " | ".join(cols) + " |", "| " + " | ".join("---" for _ in cols) + " |"]
-        return lines + ["| " + " | ".join(r) + " |" for r in rows]
+        return mdtable.table_markdown(cols, rows).split("\n")
 
     meta = result["meta"]
     summary = (f"対象の会話: {meta['sessions']} 件 / PR を作った会話: {meta['sessions_with_pr']} 件 / "
