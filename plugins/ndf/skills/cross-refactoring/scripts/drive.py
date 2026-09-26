@@ -89,14 +89,7 @@ class Drive:
         tmp = self.known_tmp()
         if tmp is None:
             return None
-        try:
-            ds = json.loads((tmp / f"drive-rf{self.pr}.json").read_text())
-        except (OSError, json.JSONDecodeError):
-            return None
-        iv = ds.get("init_vars") if isinstance(ds, dict) else None
-        if ds.get("stage") != "done" or not isinstance(iv, dict) or not iv.get("TMP_DIR"):
-            return None
-        return iv if Path(iv["TMP_DIR"]).resolve() == tmp.resolve() else None
+        return dp.resumed_init_vars(tmp / f"drive-rf{self.pr}.json", ("done",), tmp.resolve())
 
     def state(self) -> dict:
         try:
