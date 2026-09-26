@@ -155,3 +155,31 @@ def test_needs_pr_or_head(tmp_path, gh):
     gh()
     code, _ = probe(tmp_path)
     assert code == 2
+
+
+# --- merge-when-green の待ちの間隔（lib/waits.py） ----------------------------------------
+
+def test_green_watch_stretches_the_interval_while_nothing_changes(monkeypatch):
+    """読んだ中身が変わらない間は間隔を 1.5 倍ずつ --interval の 6 倍まで伸ばし、変われば戻す。pending を見ずに
+    通ったときの確かめ直しは --recheck で眠る（前は --interval のまま伸ばさなかった）。"""
+    import argparse
+    monkeypatch.syspath_prepend(str(SCRIPTS / "lib"))
+    monkeypatch.syspath_prepend(str(SCRIPTS))
+    from merged_lib import checks
+    pending = {"__typename": "CheckRun", "name": "t", "status": "IN_PROGRESS", "conclusion": None}
+    done = {"__typename": "CheckRun", "name": "t", "status": "COMPLETED", "conclusion": "SUCCESS"}
+    views = [("a", pending)] * 6 + [("b", pending)] * 2 + [("c", done)] * 2
+    calls = iter(views)
+
+    def view(_root, _n):
+        sha, check = next(calls)
+        return {"state": "OPEN", "headRefOid": sha, "statusCheckRollup": [check]}
+    slept = []
+    monkeypatch.setattr(checks, "pr_state", view)
+    monkeypatch.setattr(checks, "probe_checks", lambda _root, _rollup: ([], [], []))
+    monkeypatch.setattr(checks.time, "sleep", slept.append)
+    a = argparse.Namespace(pr=5, timeout=3600.0, interval=10.0, recheck=1.0, no_checks_after=60.0, stale_after=300.0)
+    watch = checks.GreenWatch(".", a)
+    watch.wait()
+    assert slept == [10.0, 15.0, 22.5, 33.75, 50.625, 60.0, 10.0, 15.0, 1.0]
+    assert watch.waits == 9 and watch.items[-1] == {"kind": "check", "name": "t", "result": "passed"}

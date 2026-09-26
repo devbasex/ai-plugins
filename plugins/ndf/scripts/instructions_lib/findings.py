@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import re
 
-from instructions_lib.model import BULLET_RE, Criteria, FENCE_RE, Finding, HEADING_RE, ScopeRoot, Target
+from instructions_lib.model import BULLET_RE, Criteria, Finding, ScopeRoot, Target, atx_headings, code_lines
 from instructions_lib.declaration import Declaration
 from instructions_lib.collect import _matches_file_pattern, display_path, interprets_imports, references, resolve
 
@@ -139,19 +139,16 @@ def count_instructions(text: str) -> int:
         paragraph.clear()
         return len(parts)
 
-    in_fence = False
-    for line in text.splitlines():
-        if FENCE_RE.match(line):
+    headings = atx_headings(text)
+    for number, (line, fenced) in enumerate(zip(text.splitlines(), code_lines(text)), start=1):
+        if fenced:
             count += flush()
-            in_fence = not in_fence
-            continue
-        if in_fence:
             continue
         stripped = line.strip()
         if not stripped:
             count += flush()
             continue
-        if HEADING_RE.match(line):
+        if number in headings:
             count += flush()
             count += 1
             continue
