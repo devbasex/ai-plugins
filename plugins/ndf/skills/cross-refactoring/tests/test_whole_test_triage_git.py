@@ -236,7 +236,7 @@ def test_without_failed_test_ids_the_flagged_items_are_reverted_together(
         flow, cmd_setup, cmd_implement, cmd_converge, capsys):
     _existing_tests(flow, {"tests/test_total.py": TEST_TOTAL})
     state = read_state(flow["path"])
-    state["baseline_test"]["command"] = "env pytest -q tests"  # 実行器が pytest と読めない
+    state["baseline_test"]["command"] = "sh -c 'pytest -q tests'"  # 実行器が pytest と読めない
     write_state(flow["path"], state)
     _implement(flow, cmd_setup, cmd_implement,
                {"I-001": _touch_other("other"), "I-002": _break_total})

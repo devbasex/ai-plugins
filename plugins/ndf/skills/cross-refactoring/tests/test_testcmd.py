@@ -35,6 +35,10 @@ def work(tmp_path):
     ("poetry run pytest", 2),
     ("uv run --with=pytest pytest", 3),
     (REPO_COMMAND, 6),
+    # #1312: env の前置き（変数を外す・足す）の後ろの実行器も読む
+    ("env -u DEVBASE_ROOT uv run --locked pytest tests/ -q", 6),
+    ("env A=1 B=2 pytest -q", 3),
+    ("env -i --unset=X PATH=/bin python3 -m pytest", 6),
 ])
 def test_runner_index_known(testcmd, command, expected):
     assert testcmd.runner_index(shlex.split(command)) == expected
@@ -43,7 +47,7 @@ def test_runner_index_known(testcmd, command, expected):
 @pytest.mark.parametrize("command", [
     "make -C backend test", "cargo test", "bash scripts/run-scope-tests.sh",
     "npm --prefix backend test", "go test ./...", "uv run --project pytest", "",
-    "pytest 'unclosed",
+    "pytest 'unclosed", "env", "env A=1", "env -S 'pytest -q'",
 ])
 def test_unknown_runners(testcmd, command):
     assert not testcmd.is_known(command)
@@ -173,12 +177,13 @@ def test_failed_nodes_ignores_other_error_lines(testcmd):
     ("pytest . -q -n 4", ["pytest", "-q", "-n", "4", "tests/unit/test_a.py::test_x"]),
     ("uv run --with pytest pytest -q", ["uv", "run", "--with", "pytest", "pytest", "-q",
                                         "tests/unit/test_a.py::test_x"]),
+    ("env -u X pytest -q", ["env", "-u", "X", "pytest", "-q", "tests/unit/test_a.py::test_x"]),
 ])
 def test_rerun_command_runs_only_the_failed_tests(testcmd, work, command, expected):
     (work / "tests").mkdir(exist_ok=True)
     assert testcmd.rerun_command(command, ["tests/unit/test_a.py::test_x"], str(work)) == expected
 
 
-@pytest.mark.parametrize("command", ["npx jest", "vitest run", "make test", "env pytest -q"])
+@pytest.mark.parametrize("command", ["npx jest", "vitest run", "make test", "env A=1 make test"])
 def test_rerun_command_is_none_outside_pytest(testcmd, work, command):
     assert testcmd.rerun_command(command, ["tests/unit/test_a.py"], str(work)) is None
