@@ -40,7 +40,7 @@ from ..vocabulary import (
     DEFAULT_BUDGET_MINUTES,
     DEFAULT_SEVERITY_THRESHOLD,
     REQUIRED_SKILLS,
-    initial_final_gate, vocabulary,
+    vocabulary,
 )
 
 # 状態ファイルの版（#933）。無い状態ファイルは v10.17.x までのラウンド制の形である。
@@ -363,7 +363,7 @@ def _build_initial_state(
                        "head": None, "reverted": False},
         "verify_stats": {"items": 0, "seconds": 0.0},
         "fix_stats": {"launches": 0, "seconds": 0.0},
-        "final_gate": initial_final_gate(),
+        "final_gate": {"fix_rounds": 0, "checks": []},
         "pending_push": False,
         "pending_drop": None,
         "history_written": False,

@@ -197,8 +197,3 @@ EXTRACTION_TECHNIQUES: frozenset[str] = frozenset(
     if factor == str(EXTRACTION_DIFF_BUDGET_FACTOR)
 )
 
-
-
-def initial_final_gate() -> dict:
-    """最終ゲートの記録の初期形。可変の辞書を共有しないよう呼ぶたびに作る。"""
-    return {"fix_rounds": 0, "checks": []}

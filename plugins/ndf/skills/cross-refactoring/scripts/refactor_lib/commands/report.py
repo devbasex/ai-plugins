@@ -18,7 +18,7 @@ from ..outbound import plan_reference
 from ..plan import baseline_line
 from ..paths import load_state
 from ..phases import phase_record
-from ..vocabulary import DEFER_REASONS, initial_final_gate
+from ..vocabulary import DEFER_REASONS
 
 # `cross-review` の最終ステータスのうち、追記してよいもの。
 APPROVED = "approved"
@@ -40,7 +40,7 @@ def cmd_finalize(args: argparse.Namespace) -> None:
     `cross-review` の合否が決まっておらず、収束しなかった実行が履歴に混ざる。
     """
     path, state = load_state(args.id)
-    gate = state.setdefault("final_gate", initial_final_gate())
+    gate = state.setdefault("final_gate", {"fix_rounds": 0, "checks": []})
     standalone = not state.get("workflow_step")
     status = getattr(args, "review_status", None)
     if status is not None:
