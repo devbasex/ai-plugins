@@ -216,14 +216,7 @@ GitHub と git の送信をしない。結果ファイル: {self.path('sweep')}
         tmp = self.known_tmp()
         if tmp is None:
             return None
-        try:
-            ds = json.loads((tmp / f"drive-pr{self.pr}.json").read_text())
-        except (OSError, json.JSONDecodeError):
-            return None
-        iv = ds.get("init_vars") if isinstance(ds, dict) else None
-        if ds.get("stage") not in FINAL_STAGES or not isinstance(iv, dict) or not iv.get("TMP_DIR"):
-            return None
-        return iv if Path(iv["TMP_DIR"]).resolve() == tmp else None
+        return dp.resumed_init_vars(tmp / f"drive-pr{self.pr}.json", FINAL_STAGES, tmp)
 
     def init(self) -> None:
         iv = self.finished_vars()
