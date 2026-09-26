@@ -481,14 +481,14 @@ def import_glossary():
 
 
 def test_code_forms_derive_every_spelling_from_snake_case():
-    assert import_glossary().code_forms("approval_gate") == \
-        ["approval_gate", "ApprovalGate", "APPROVAL_GATE", "approval-gate"]
+    assert import_glossary().code_forms("shopping_cart") == \
+        ["shopping_cart", "ShoppingCart", "SHOPPING_CART", "shopping-cart"]
     assert import_glossary().code_forms("plan") == ["plan", "Plan", "PLAN"]
 
 
 @pytest.mark.parametrize("field,value", [
-    ("code", "ApprovalGate"), ("code", "approval-gate"), ("code", "approval__gate"), ("code", "_gate"),
-    ("code", "2gate"), ("code", ""), ("code", 1), ("deprecated_code", "gate"), ("deprecated_code", ["Gate"]),
+    ("code", "ShoppingCart"), ("code", "shopping-cart"), ("code", "shopping__cart"), ("code", "_cart"),
+    ("code", "2cart"), ("code", ""), ("code", 1), ("deprecated_code", "cart"), ("deprecated_code", ["Cart"]),
     ("deprecated_code", [1]),
 ])
 def test_malformed_code_is_schema(repo, field, value):
@@ -539,8 +539,8 @@ def test_render_has_code_columns(repo):
 
 def coded_repo(repo):
     g = shop_glossary()
-    g["terms"][0].update({"code": "order", "deprecated_code": ["purchase_order", "gate"]})
-    g["terms"][1]["code"] = "approval_gate"
+    g["terms"][0].update({"code": "order", "deprecated_code": ["purchase_order", "cart"]})
+    g["terms"][1]["code"] = "shopping_cart"
     write_json(repo, DEFAULT_SOURCE, g)
     run(repo, "render")
     commit(repo, "code")
@@ -554,16 +554,16 @@ def test_diff_finds_deprecated_code_in_every_spelling_on_added_code_lines(repo):
     git(repo, "branch", "-f", "develop")
     write(repo, "src/a.py", "purchase_order = 1\nclass PurchaseOrder: pass\n")
     write(repo, "src/b.sh", "PURCHASE_ORDER=1\ncmd --purchase-order\n")
-    write(repo, "src/c.js", "const x = gate;\n")
-    write(repo, "src/d.ts", "let y: Gate;\n")
+    write(repo, "src/c.js", "const x = cart;\n")
+    write(repo, "src/d.ts", "let y: Cart;\n")
     code, out, err = run(repo, "check", "--diff", "develop")
     assert code == 1
     assert sorted((it["rule"], it["path"], it["line"], it["term"]) for it in out["items"]) == [
         ("deprecated_code", "src/a.py", 2, "PurchaseOrder"),
         ("deprecated_code", "src/b.sh", 1, "PURCHASE_ORDER"),
         ("deprecated_code", "src/b.sh", 2, "purchase-order"),
-        ("deprecated_code", "src/c.js", 1, "gate"),
-        ("deprecated_code", "src/d.ts", 1, "Gate"),
+        ("deprecated_code", "src/c.js", 1, "cart"),
+        ("deprecated_code", "src/d.ts", 1, "Cart"),
     ]
     assert "order" in out["items"][0]["detail"]
     assert "ERROR: src/a.py:2: deprecated_code: PurchaseOrder" in err
@@ -571,23 +571,23 @@ def test_diff_finds_deprecated_code_in_every_spelling_on_added_code_lines(repo):
 
 def test_deprecated_code_inside_live_code_or_other_files_is_not_matched(repo):
     coded_repo(repo)
-    write(repo, "src/a.py", "approval_gate = ApprovalGate(APPROVAL_GATE)\nrun('--approval-gate')\nsub_gate = 1\n")
-    write(repo, "src/notes.txt", "gate\n")
-    write(repo, "issues/a.md", "`gate` と書く。\n")
+    write(repo, "src/a.py", "shopping_cart = ShoppingCart(SHOPPING_CART)\nrun('--shopping-cart')\nsub_cart = 1\n")
+    write(repo, "src/notes.txt", "cart\n")
+    write(repo, "issues/a.md", "`cart` と書く。\n")
     code, out, err = run(repo, "check", "--diff", "develop")
     assert code == 0, (out, err)
 
 
 def test_check_file_finds_deprecated_code_in_a_code_file(repo):
     coded_repo(repo)
-    p = write(repo, "tool.py", "Gate()\n")
+    p = write(repo, "tool.py", "Cart()\n")
     code, out, _ = run(repo, "check", "--file", str(p))
-    assert code == 1 and [(it["rule"], it["term"]) for it in out["items"]] == [("deprecated_code", "Gate")]
+    assert code == 1 and [(it["rule"], it["term"]) for it in out["items"]] == [("deprecated_code", "Cart")]
 
 
 def test_structure_rules_skip_deprecated_code(repo):
     coded_repo(repo)
-    write(repo, "src/a.py", "gate = 1\n")
+    write(repo, "src/a.py", "cart = 1\n")
     assert run(repo, "check", "--diff", "develop", "--rules", "structure")[0] == 0
 
 
