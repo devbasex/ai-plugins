@@ -61,7 +61,7 @@ def test_without_ledger_values_stay_as_before(tmp_path):
 def test_until_drops_later_ledger_rows(tmp_path):
     roots = build(tmp_path)
     usage = tmp_path / "usage"
-    _jsonl(usage / "x.jsonl", [row(20, "work"), row(25, "judge")])
-    r = run_json(roots, usage, "--until", _ts(22))
+    _jsonl(usage / "x.jsonl", [row(10, "work"), row(12, "judge")])
+    r = run_json(roots, usage, "--until", _ts(11))
     roles = {x["role"] for x in r["per_role"] if x["agent_type"] == "claude -p"}
     assert roles == {"work"}

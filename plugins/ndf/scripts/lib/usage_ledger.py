@@ -48,7 +48,7 @@ def ledger_dir(env: Optional[dict] = None) -> Path:
 
 
 @functools.lru_cache(maxsize=32)
-def slug_of(root: str) -> str:
+def repo_key(root: str) -> str:
     """origin の URL から `<owner>__<repo>`。決められなければ `unknown`。"""
     try:
         url = subprocess.run(["git", "config", "--get", "remote.origin.url"], cwd=root,
@@ -140,7 +140,7 @@ class UsageLedger:
 
     def __init__(self, root: str | os.PathLike, directory: Optional[Path] = None):
         self.dir = Path(directory) if directory is not None else ledger_dir()
-        self.path = self.dir / f"{slug_of(str(root))}.jsonl"
+        self.path = self.dir / f"{repo_key(str(root))}.jsonl"
 
     def append(self, record: UsageRecord) -> Path:
         """1 行を追記する。失敗は OSError のまま投げる。"""
@@ -150,7 +150,7 @@ class UsageLedger:
         return self.path
 
     def records(self) -> Iterator[dict]:
-        return read_file(self.path)
+        return read_rows(self.path)
 
 
 def append_safely(root: str | os.PathLike, record: UsageRecord, directory: Optional[Path] = None) -> bool:
@@ -163,7 +163,7 @@ def append_safely(root: str | os.PathLike, record: UsageRecord, directory: Optio
         return False
 
 
-def read_file(path: Path) -> Iterator[dict]:
+def read_rows(path: Path) -> Iterator[dict]:
     """帳簿の 1 ファイルを読む。壊れた行と dict でない行は飛ばす。"""
     try:
         text = Path(path).read_text(encoding="utf-8", errors="replace")
@@ -183,4 +183,4 @@ def read_all(directory: Optional[Path] = None) -> list[dict]:
     d = Path(directory) if directory is not None else ledger_dir()
     if not d.is_dir():
         return []
-    return [r for p in sorted(d.glob("*.jsonl")) for r in read_file(p)]
+    return [r for p in sorted(d.glob("*.jsonl")) for r in read_rows(p)]
