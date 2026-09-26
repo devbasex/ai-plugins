@@ -1,7 +1,11 @@
 """監視する CLI の PID とプロセスグループ（#1142 の C3 で `monitor.py` から分けた）。
 
-pid ファイルの読み取り・生死とゾンビの判定・`/proc/<pid>/cmdline` の照合・停止（SIGTERM の後に SIGKILL）を持つ。
-標準ライブラリだけを import する。
+pid ファイルの読み取りと停止（SIGTERM の後に SIGKILL）を持つ。生死・ゾンビ・起動の引数・グループの先頭の
+判定は `lib/procs.py`（psutil の包み）へ渡す（#1142 の D3）。
+
+**`procs` は使う関数の中で import する。** `monitor.py` は `supervise_lib/claude.py` が利用上限の文言の表を読むためにも
+import し、そこでは `deps.require("procs")` が呼ばれていない。監視を流すのは `monitor.py` の `main()` で、そこで
+`deps.require("procs", "locks")` を呼ぶ。
 """
 from __future__ import annotations
 
@@ -12,6 +16,11 @@ import time
 from typing import Optional
 
 
+def _procs():
+    import procs  # deps.require("procs") の後でだけ import できる
+    return procs
+
+
 def _read_pidfile(p: pathlib.Path) -> Optional[int]:
     try:
         s = p.read_text().strip()
@@ -20,39 +29,17 @@ def _read_pidfile(p: pathlib.Path) -> Optional[int]:
         return None
 
 
-def _proc_state(pid: int) -> Optional[str]:
-    """`/proc/<pid>/status` の State 行の値。読めない・State 行が無いときは None。"""
-    try:
-        status_text = pathlib.Path(f"/proc/{pid}/status").read_text()
-    except (FileNotFoundError, PermissionError, OSError):
-        return None
-    for line in status_text.splitlines():
-        if line.startswith("State:"):
-            return line[len("State:"):]
-    return None
-
-
 def _pid_alive(pid: int) -> bool:
-    """`kill -0` + ゾンビ検出。
+    """pid が生きているか。ゾンビは死んだとみなす（`os.kill(pid, 0)` はゾンビにも成功するため）。
 
-    `os.kill(pid, 0)` はゾンビプロセスに対しても成功する (PID エントリが
-    残っているため)。Docker without `--init` 環境では orphan プロセスが
-    ゾンビ化して永久に残るため、`/proc/<pid>/status` で State: Z を検出する。
+    Docker を `--init` なしで動かすと、親を失ったプロセスはゾンビのまま残る。
     """
-    try:
-        os.kill(pid, 0)
-    except (ProcessLookupError, PermissionError):
-        return False
-    except OSError:
-        return False
-    state = _proc_state(pid)
-    return state is None or "Z" not in state
+    return _procs().pid_alive(pid)
 
 
 def _is_zombie(pid: int) -> bool:
     """PID がゾンビかどうか。_pid_alive() とは独立に呼べるユーティリティ。"""
-    state = _proc_state(pid)
-    return state is not None and "Z" in state
+    return _procs().pid_is_zombie(pid)
 
 
 def _leads_own_group(pid: int) -> bool:
@@ -62,11 +49,7 @@ def _leads_own_group(pid: int) -> bool:
     （古い起動の手順・別の経路）は先頭でないか、監視と同じグループに居る。**監視自身の
     グループへ送ると、進行側のシェルまで止まる**（#584 の候補で退けた形）。
     """
-    try:
-        pgid = os.getpgid(pid)
-    except OSError:
-        return False
-    return pgid == pid and pgid != os.getpgrp()
+    return _procs().leads_own_group(pid)
 
 
 def _kill_pid(pid: int, sigterm_grace: float = 3.0) -> None:
@@ -102,12 +85,8 @@ def _kill_pid(pid: int, sigterm_grace: float = 3.0) -> None:
 
 
 def _pid_cmdline_matches(pid: int, expected: str) -> Optional[bool]:
-    """`/proc/<pid>/cmdline` を読んで `expected` を含むか。
+    """pid の起動の引数が `expected` を含むか（大文字と小文字を区別しない）。
 
-    /proc が読めない環境では None を返す（PID 再利用チェック非対応）。
+    読めない（pid が無い・権限が無い）ときは None を返す（PID 再利用チェック非対応）。
     """
-    try:
-        cmdline = pathlib.Path(f"/proc/{pid}/cmdline").read_text()
-        return expected.lower() in cmdline.lower()
-    except (FileNotFoundError, PermissionError, OSError):
-        return None
+    return _procs().cmdline_contains(pid, expected)

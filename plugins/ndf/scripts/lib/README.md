@@ -25,10 +25,10 @@
 | [worktree-registry.sh](worktree-registry.sh) | テスト環境の採番と台帳・排他・スロット | 同上 |
 | [projects-common.sh](projects-common.sh) | GitHub Projects のボードへの記録 | `development-workflow` |
 | [lock-common.sh](lock-common.sh) | 排他の取得と解放（#293） | 上の 2 つと `development-workflow` |
-| [monitor.py](monitor.py) | 別プロセスの多軸監視。対象と命名規則を引数で受ける | 収束ループの 2 つ / `external-ai.py` |
+| [monitor.py](monitor.py) | 別プロセスの多軸監視。対象と命名規則を引数で受ける。`main()` が `deps.require("procs", "locks")` を呼ぶ | 収束ループの 2 つ / `external-ai.py` |
 | [monitor_patterns.py](monitor_patterns.py) | 監視の照合の表（利用上限・致命・警告・無害・CLI の上限・codex の終わりの印）。標準ライブラリだけを読む | `monitor.py` / `supervise_lib/claude.py`（`USAGE_LIMIT_FATAL`） |
 | [monitor_scan.py](monitor_scan.py) | 監視のログの末尾の読み取りと、照合の表による致命・警告・利用上限の判定 | `monitor.py` |
-| [monitor_proc.py](monitor_proc.py) | 監視する CLI の pid ファイル・生死とゾンビの判定・cmdline の照合・停止（プロセスグループごと）。標準ライブラリだけを読む | `monitor.py` |
+| [monitor_proc.py](monitor_proc.py) | 監視する CLI の pid ファイル・停止（プロセスグループごと）。生死とゾンビの判定・cmdline の照合は `procs.py` へ渡す（使う関数の中で import する） | `monitor.py` |
 | [monitor_types.py](monitor_types.py) | 監視の既定値（上限の表の別名）・一時ディレクトリ・設定と状態の型 | `monitor.py` / `monitor_outcome.py` |
 | [monitor_loop.py](monitor_loop.py) | 担当 1 者の監視ループ（上限・無進捗・早期のエラー・プロセスの終了から結末を決める） | `monitor.py` |
 | [limits.py](limits.py) | 監視の上限（工程ごと）・無進捗の許容（担当ごと）・CLI の上限（監視の上限 + 120 秒）の表。既定値はここだけが持つ（#598 / #537）。CLI の上限の上書きは `resolve_cli_timeout` と `cli-timeout --override N [--no-floor]` の 1 つで決める（既定では導いた値より短くできない） | 同上 |
