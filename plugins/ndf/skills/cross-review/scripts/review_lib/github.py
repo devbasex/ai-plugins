@@ -21,6 +21,7 @@ import review_lib  # noqa: E402
 import gh_call  # noqa: E402
 import gh_parts  # noqa: E402
 import gh_rest  # noqa: E402
+import jsonio  # noqa: E402
 import repo as repo_ids  # noqa: E402  `repo` は引数の名前と紛れる
 
 
@@ -76,14 +77,8 @@ def _repo_from_resume(pr: int, worktree: str | None) -> str | None:
         base = pathlib.Path(worktree).resolve() / ".cross_review"
     else:
         return None
-    try:
-        st = json.loads(
-            (base / f"cross-review-pr{pr}-state.json").read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    if not isinstance(st, dict):
-        return None
-    return str(st.get("repo") or "") or None
+    st = jsonio.read(base / f"cross-review-pr{pr}-state.json", missing=None, broken=None, want=dict)
+    return str(st.get("repo") or "") or None if st else None
 
 
 def _repo_from_git() -> str | None:
