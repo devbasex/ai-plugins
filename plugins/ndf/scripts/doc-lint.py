@@ -13,12 +13,16 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 from step_result import EXIT_UNREADABLE, StepError, emit, main_with, result  # noqa: E402
+import proc  # noqa: E402
+import repo  # noqa: E402
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import glossary  # noqa: E402  追加した行の取り方を共有する
 
 TOOL = "doc-lint"
 
@@ -32,44 +36,6 @@ RULES = {
     "comparison": re.compile(r"従来|以前|かつて|もともと|元々|旧来|過去に|によらず|ではな[いく]|に関わらず|にかかわらず"),
 }
 DEFAULT_EXCLUDE = ("CHANGELOG.md", "issues/", ".worktrees/", "docs/presentations/")
-HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
-
-
-def git(root, *args):
-    p = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True)
-    if p.returncode != 0:
-        raise StepError(f"git {' '.join(args)} が失敗: {p.stderr.strip()[:300]}", EXIT_UNREADABLE)
-    return p.stdout
-
-
-def added_lines(root, base) -> dict[str, set[int]]:
-    """起点から追加した行の番号を、ファイルごとに返す（作業ツリーの未コミット分も含む）。"""
-    diff = git(root, "diff", "--unified=0", "--no-color", "--diff-filter=AM", base, "--", "*.md", "**/*.md")
-    out: dict[str, set[int]] = {}
-    cur, ln = None, 0
-    for line in diff.splitlines():
-        if line.startswith("+++ "):
-            path = line[4:]
-            cur = None if path == "/dev/null" else path[2:] if path.startswith("b/") else path
-            continue
-        m = HUNK.match(line)
-        if m:
-            ln = int(m.group(1))
-            continue
-        if cur is None or line.startswith("---") or line.startswith("diff "):
-            continue
-        if line.startswith("+"):
-            out.setdefault(cur, set()).add(ln)
-            ln += 1
-        elif not line.startswith("-") and not line.startswith("\\"):
-            ln += 1
-    # まだ追跡していない .md は全行が追加した行
-    for rel in git(root, "ls-files", "--others", "--exclude-standard", "--", "*.md", "**/*.md").splitlines():
-        rel = rel.strip()
-        if rel and (Path(root) / rel).is_file():
-            n = len((Path(root) / rel).read_text(encoding="utf-8", errors="replace").splitlines())
-            out[rel] = set(range(1, n + 1))
-    return out
 
 
 def fenced(lines: list[str]) -> set[int]:
@@ -87,7 +53,7 @@ def fenced(lines: list[str]) -> set[int]:
     return out
 
 
-def scan(root: Path, files: dict[str, set[int]], all_lines: bool) -> tuple[list[dict], int]:
+def lint_files(root: Path, files: dict[str, set[int]], all_lines: bool) -> tuple[list[dict], int]:
     items, total = [], 0
     for rel, nums in sorted(files.items()):
         path = root / rel
@@ -109,16 +75,6 @@ def scan(root: Path, files: dict[str, set[int]], all_lines: bool) -> tuple[list[
     return items, total
 
 
-def declared_base(root: Path) -> str | None:
-    """.ndf/worktree.json の base_branch を origin/<名前> で返す。無ければ None。"""
-    f = root / ".ndf" / "worktree.json"
-    try:
-        v = json.loads(f.read_text(encoding="utf-8")).get("base_branch") if f.is_file() else None
-    except (ValueError, AttributeError):
-        return None
-    return f"origin/{v}" if isinstance(v, str) and v else None
-
-
 def generated_documents(root: Path) -> tuple[str, ...]:
     """.ndf/glossary.json の document（render の生成物）。直すなら正本を直すため、--exclude によらず見ない。
 
@@ -136,20 +92,20 @@ def generated_documents(root: Path) -> tuple[str, ...]:
 
 
 def cmd_lint(a):
-    root = Path(a.root).resolve() if a.root else Path(git(".", "rev-parse", "--show-toplevel").strip())
-    base = a.base or declared_base(root)
+    root = proc.git_root(a.root)
+    base = a.base or repo.declared_base(root, remote=True)
     if not base:
         raise StepError("起点が分からない（--base か .ndf/worktree.json の base_branch）", EXIT_UNREADABLE)
-    p = subprocess.run(["git", "-C", str(root), "merge-base", base, "HEAD"], capture_output=True, text=True)
+    p = proc.git(root, "merge-base", base, "HEAD", check=False)
     if p.returncode != 0:
         raise StepError(f"起点 {base} を解決できない: {p.stderr.strip()[:200]}", EXIT_UNREADABLE)
     start = p.stdout.strip()
-    files = added_lines(root, start)
+    files = glossary.added_lines(root, start, ("*.md", "**/*.md"))
     excl = tuple(a.exclude) if a.exclude is not None else DEFAULT_EXCLUDE
     generated = set(generated_documents(root))
     files = {k: v for k, v in files.items()
              if k not in generated and not any(k.startswith(e) or k == e.rstrip("/") for e in excl)}
-    items, total = scan(root, files, a.all_lines)
+    items, total = lint_files(root, files, a.all_lines)
     metrics = {"base": base, "files": len(files), "lines": total, "hits": len(items),
                "rules": {r: sum(1 for i in items if i["rule"] == r) for r in RULES}}
     if items:

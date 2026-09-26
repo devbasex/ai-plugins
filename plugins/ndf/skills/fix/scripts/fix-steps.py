@@ -30,7 +30,6 @@ import argparse
 import json
 import os
 import re
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -41,6 +40,7 @@ sys.path.insert(0, str(PLUGIN_ROOT / "scripts" / "lib"))
 from step_result import (  # noqa: E402
     EXIT_PRECONDITION, EXIT_UNREADABLE, StepError, emit, gh_json, git, git_root, main_with, result, run,
 )
+import gh_parts  # noqa: E402
 
 TOOL = "fix"
 SEVERITIES = ("critical", "major", "minor", "nit")
@@ -51,16 +51,18 @@ CI_FAILED = ("FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "S
 CI_PENDING = ("PENDING", "IN_PROGRESS", "QUEUED", "WAITING", "REQUESTED", "EXPECTED")
 
 
-def tmp_dir() -> Path:
+def result_dir() -> Path:
+    """結果とログの置き場（cross-review と同じ `CROSS_REVIEW_TMP_DIR`）。"""
     d = Path(os.environ.get("CROSS_REVIEW_TMP_DIR") or tempfile.gettempdir())
     d.mkdir(parents=True, exist_ok=True)
     return d
 
 
-def repo_slug(a) -> str:
+def repo_of(a) -> str:
+    """`--repo` か、`gh repo view` の `owner/repo`（origin の URL より gh の既定のリポジトリを先に見る）。"""
     if getattr(a, "repo", None):
         return a.repo
-    p = run(["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"], check=False)
+    p = gh_parts.gh(["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"])
     slug = p.stdout.strip()
     if p.returncode != 0 or "/" not in slug:
         raise StepError("リポジトリを決められない（--repo <所有者>/<リポジトリ> を渡す）", EXIT_PRECONDITION)
@@ -69,12 +71,13 @@ def repo_slug(a) -> str:
 
 # --- 取得 -----------------------------------------------------------------------
 
-def pr_view(pr: int) -> dict:
+def pr_for_fix(pr: int) -> dict:
     return gh_json(None, ["pr", "view", str(pr), "--json", "number,url,body,headRefName,reviewDecision,state"],
                    f"PR #{pr} の取得")
 
 
-def unresolved_threads(repo: str, pr: int) -> list[dict]:
+def threads_with_first_comment(repo: str, pr: int) -> list[dict]:
+    """未解決のスレッドを、最初のコメント（id・書き手・本文）つきで返す（`gh_parts.unresolved_threads` は id と位置だけ）。"""
     owner, name = repo.split("/", 1)
     query = ("query($owner:String!,$name:String!,$pr:Int!){repository(owner:$owner,name:$name){"
              "pullRequest(number:$pr){reviewThreads(first:100){nodes{id isResolved path line "
@@ -106,7 +109,7 @@ def fetch_comments(repo: str, pr: int) -> tuple[str, int]:
 
 def ci_snapshot(pr: int) -> tuple[str, list[dict]]:
     """現時点のチェックの状態。待たない。"""
-    p = run(["gh", "pr", "checks", str(pr), "--json", "name,state,link"], check=False)
+    p = gh_parts.gh(["pr", "checks", str(pr), "--json", "name,state,link"])
     try:
         checks = json.loads(p.stdout or "[]")
     except ValueError:
@@ -122,15 +125,15 @@ def ci_snapshot(pr: int) -> tuple[str, list[dict]]:
 
 
 def failed_log(branch: str, pr: int) -> str | None:
-    p = run(["gh", "run", "list", "--branch", branch, "--limit", "1", "--json", "databaseId",
-             "--jq", ".[0].databaseId // empty"], check=False)
+    p = gh_parts.gh(["run", "list", "--branch", branch, "--limit", "1", "--json", "databaseId",
+                     "--jq", ".[0].databaseId // empty"])
     run_id = p.stdout.strip()
     if p.returncode != 0 or not run_id:
         return None
-    p = run(["gh", "run", "view", run_id, "--log-failed"], check=False)
+    p = gh_parts.gh(["run", "view", run_id, "--log-failed"])
     if p.returncode != 0 and not p.stdout.strip():
         return None
-    path = tmp_dir() / f"fix-pr{pr}-ci-failed.log"
+    path = result_dir() / f"fix-pr{pr}-ci-failed.log"
     path.write_text(p.stdout, encoding="utf-8")
     return str(path)
 
@@ -159,15 +162,15 @@ def head_line(s: str, n: int = 100) -> str:
 
 def cmd_context(a):
     pr = a.pr
-    repo = repo_slug(a)
-    view = pr_view(pr)
-    threads = unresolved_threads(repo, pr)
+    repo = repo_of(a)
+    view = pr_for_fix(pr)
+    threads = threads_with_first_comment(repo, pr)
     comments_text, comments_n = fetch_comments(repo, pr)
     ci_status, failed = ci_snapshot(pr)
     log_path = failed_log(view.get("headRefName") or "", pr) if failed else None
     excluded = exclusion_sections(view.get("body") or "")
 
-    d = tmp_dir()
+    d = result_dir()
     ctx = d / f"fix-pr{pr}-context.md"
     lines = [f"# PR #{pr} の文脈", "", f"- URL: {view.get('url')}", f"- head: {view.get('headRefName')}",
              f"- reviewDecision: {view.get('reviewDecision')}", f"- CI: {ci_status}", ""]
@@ -301,7 +304,7 @@ def cmd_finalize(a):
         commit = git(root, "rev-parse", "--short", "HEAD").stdout.strip()
     ci_status, failed = ci_snapshot(pr)
     res = build_result(pr, d, commit, ci_status, [str(c.get("name")) for c in failed])
-    out = Path(a.out) if a.out else tmp_dir() / f"fix-pr{pr}-result.json"
+    out = Path(a.out) if a.out else result_dir() / f"fix-pr{pr}-result.json"
     out.write_text(json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
 
     sync = {"name": "pr-body-decisions", "result": "skipped", "code": None} if a.no_sync else \
@@ -322,10 +325,10 @@ def cmd_finalize(a):
 
 def cmd_remaining(a):
     pr = a.pr
-    repo = repo_slug(a)
-    threads = unresolved_threads(repo, pr)
+    repo = repo_of(a)
+    threads = threads_with_first_comment(repo, pr)
     kept = set()
-    res_path = Path(a.result) if a.result else tmp_dir() / f"fix-pr{pr}-result.json"
+    res_path = Path(a.result) if a.result else result_dir() / f"fix-pr{pr}-result.json"
     if res_path.is_file():
         try:
             res = json.loads(res_path.read_text(encoding="utf-8"))
