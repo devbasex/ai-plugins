@@ -41,8 +41,9 @@
    名指しが参加者に無ければ止める。状態の `implementer` と `implementer_reason`
    （`named` / `host` / `first`）に残し、**再開しても変えない**
 5. **モデルの確定** — `--model <ランタイム>=<モデル>` を受け取り、実行の間は固定する
-6. **書き込み用の作業ディレクトリ作成** — `<root>/work/` に head ブランチを checkout する。
-   ここが**唯一の非 detach** である。既にある場合は `origin/<head>` へ**早送りで同期**
+6. **書き込み用の作業ディレクトリ作成** — `<root>/work/` に `origin/<head>` を detach で展開する。
+   head ブランチは開発用の worktree で checkout 済みのことが多く、git は同じブランチを 2 つの
+   作業ツリーへ checkout できないためである。push は `HEAD:<head>` で行う。既にある場合は `origin/<head>` へ**早送りで同期**
    してから使い、早送りできない・取得に失敗したときは中断する
 7. **認証状態の確認** — 参加者の CLI を 1 つずつ確認し、通らない者を**外して続ける**。
    `--require-all` なら 1 者でも通らなければ中断する。着手前のテストより先に確認する
@@ -101,7 +102,7 @@
 
 ```text
 <worktree-base>/<owner>--<repo>/rf<PR>/
-├── work/              # 書き込み用。head ブランチ（唯一の非 detach）
+├── work/              # 書き込み用。origin/<head> を detach で展開する
 ├── <参加1>/           # 読み取り用。--detach
 ├── <参加2>/           # 読み取り用。--detach
 ├── <参加3>/           # 読み取り用。--detach

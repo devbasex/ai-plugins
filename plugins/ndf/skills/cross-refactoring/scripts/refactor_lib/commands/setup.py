@@ -797,9 +797,9 @@ def _emit_init(state: dict[str, Any]) -> None:
 def _ensure_work_worktree(work: pathlib.Path, head_branch: str) -> None:
     """書き込み用の作業ディレクトリを冪等に用意する。
 
-    ここだけが**唯一の非 detach**（Pull Request の head ブランチを checkout する）。
-    読み取り用は `prepare-worktrees.sh` が `--detach` で作る。同一ブランチを
-    2 つの作業ディレクトリへ checkout できないという git の制約があるためである。
+    **detach で作る。** Pull Request の head ブランチは、worktree の運用で開発用の作業ツリーに
+    checkout 済みのことが多く、git は同じブランチを 2 つの作業ツリーへ checkout できない（#638）。
+    push は `HEAD:<head>` の refspec で行うため、ブランチを checkout しなくてよい。
     """
     if work.exists():
         if _is_registered_worktree(work):
@@ -811,17 +811,7 @@ def _ensure_work_worktree(work: pathlib.Path, head_branch: str) -> None:
     work.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(["git", "worktree", "prune"], capture_output=True, text=True)
     sh(["git", "fetch", "origin", head_branch])
-    # ローカルに head ブランチがあるかどうかで作り方が変わる。無い状態で
-    # `worktree add <path> <branch>` を叩くと「そんなブランチは無い」で失敗する。
-    exists = subprocess.run(
-        ["git", "show-ref", "--verify", "--quiet", f"refs/heads/{head_branch}"],
-        capture_output=True, text=True,
-    ).returncode == 0
-    if exists:
-        sh(["git", "worktree", "add", str(work), head_branch])
-    else:
-        sh(["git", "worktree", "add", "-b", head_branch, str(work),
-             f"origin/{head_branch}"])
+    sh(["git", "worktree", "add", "--detach", str(work), f"origin/{head_branch}"])
     info(f"✅ 書き込み用の作業ディレクトリを作成しました: {work}")
 
 

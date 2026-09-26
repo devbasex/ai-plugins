@@ -374,11 +374,14 @@ def run_test_at(
 
     **各コミットでテストが通ったかは、実際に走らせないと分からない。**
     結果ファイルの `test_status` は実装担当の申告にすぎず、チェックの根拠にできない。
-    実行後は必ず元のブランチへ戻す。
+    実行後は必ず元の位置へ戻す。ブランチの上にいたらそのブランチへ、detach していたら
+    元のコミットへ戻る（書き込み用の作業ディレクトリは detach で作る。#638）。
 
     上限時間を超えたら `fail` とする。生成されたコードやテストが無限ループに入ると、
     待ち続けて進行全体が止まるためで、通す側には倒さない。
     """
+    branch = git_out(work, ["symbolic-ref", "-q", "--short", "HEAD"])
+    back = [branch] if branch else ["--detach", git_out(work, ["rev-parse", "HEAD"]) or "HEAD"]
     if git_out(work, ["checkout", "--detach", sha]) is None:
         return "missing"
     try:
@@ -389,7 +392,7 @@ def run_test_at(
         return "pass" if code == 0 else "fail"
     finally:
         subprocess.run(
-            ["git", "checkout", head_branch], cwd=work, capture_output=True, text=True
+            ["git", "checkout", *back], cwd=work, capture_output=True, text=True
         )
 
 
