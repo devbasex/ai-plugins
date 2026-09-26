@@ -216,7 +216,12 @@ def main(argv: list[str] | None = None) -> int:
         errors = [{"file": m, "message": "見つからない"} for m in missing]
     for f in files:
         try:
-            tree = ast.parse(f.read_text(encoding="utf-8"), filename=str(f))
+            source = f.read_text(encoding="utf-8")
+        except OSError as exc:
+            errors.append({"file": str(f), "message": f"読めない: {exc}"})
+            continue
+        try:
+            tree = ast.parse(source, filename=str(f))
         except (SyntaxError, UnicodeDecodeError) as exc:
             errors.append({"file": str(f), "message": f"構文木を作れない: {exc}"})
             continue

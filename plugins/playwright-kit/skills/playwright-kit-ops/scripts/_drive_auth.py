@@ -26,8 +26,12 @@ def _claude_plugin_cache() -> str | None:
     """Claude Code がプラグインを置くキャッシュ（`<取得元>/ndf/<版>/`）のうち、最新の版の google-auth。"""
     found = Path("~/.claude/plugins/cache").expanduser().glob("*/ndf/*/skills/google-auth/scripts")
 
-    def version(p: Path) -> tuple[int, ...]:
-        return tuple(int(n) for n in re.findall(r"\d+", p.parents[2].name))
+    def version(p: Path) -> tuple:
+        """SemVer の順。同じ基底なら正式版が prerelease（`-dev.1` / `-rc.1`）より新しい。"""
+        core, _, pre = p.parents[2].name.partition("-")
+        nums = tuple(int(n) for n in re.findall(r"\d+", core))
+        ids = tuple((0, int(i), "") if i.isdigit() else (1, 0, i) for i in pre.split(".")) if pre else ()
+        return (nums, not pre, ids)
     latest = max(found, key=version, default=None)
     return str(latest) if latest else None
 

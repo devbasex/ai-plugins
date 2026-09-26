@@ -73,6 +73,27 @@ def test_claude_code_plugin_cache_is_searched_at_the_latest_version(
     assert found is not None and Path(found).parents[2].name == "10.17.8"
 
 
+@pytest.mark.parametrize(
+    ("versions", "latest"),
+    [
+        (("10.17.30-dev.1", "10.17.30", "10.17.29"), "10.17.30"),
+        (("10.17.30-rc.1", "10.17.30-dev.2", "10.17.29"), "10.17.30-rc.1"),
+        (("10.17.30-dev.10", "10.17.30-dev.9"), "10.17.30-dev.10"),
+        (("10.17.31-dev.1", "10.17.30"), "10.17.31-dev.1"),
+    ],
+)
+def test_claude_code_plugin_cache_orders_prereleases_by_semver(
+    drive_auth, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, versions, latest
+) -> None:
+    """同じ基底では正式版が prerelease より新しい。prerelease 同士は識別子ごとに比べる。"""
+    for ver in versions:
+        d = tmp_path / ".claude/plugins/cache/ai-plugins/ndf" / ver / "skills/google-auth/scripts"
+        d.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    found = drive_auth._claude_plugin_cache()
+    assert found is not None and Path(found).parents[2].name == latest
+
+
 def test_claude_code_plugin_cache_absent(
     drive_auth, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

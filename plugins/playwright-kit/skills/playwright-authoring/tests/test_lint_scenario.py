@@ -195,3 +195,14 @@ def test_argument_error_is_json_and_exit_2(args: tuple[str, ...]):
     assert proc.returncode == 2
     out = json.loads(proc.stdout)
     assert out["errors"] and out["errors"][0]["message"].startswith("引数の誤り")
+
+
+def test_unreadable_file_is_json_and_exit_2(tmp_path: Path):
+    """走査の後に消えた・読めない test_*.py も traceback にせず、ファイル単位の errors にする。"""
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "test_gone.py").symlink_to(tmp_path / "deleted.py")
+    proc = run(str(tests))
+    assert proc.returncode == 2
+    err = json.loads(proc.stdout)["errors"][0]
+    assert err["file"].endswith("test_gone.py") and err["message"].startswith("読めない")
