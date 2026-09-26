@@ -70,15 +70,15 @@ def test_credential_fallback_args_returns_helper_reset_arguments(gitfacts):
     ]
 
 
-def test_missing_shared_library_returns_no_fallback_args(gitfacts, monkeypatch, tmp_path):
+def test_missing_shared_library_returns_no_fallback_args(gitfacts, publish, monkeypatch, tmp_path):
     """現状固定: 共通層が無い環境では例外を出さず退避を省く。"""
-    monkeypatch.setattr(gitfacts, "_CREDENTIAL_LIB", tmp_path / "missing.sh")
+    monkeypatch.setattr(publish, "_CREDENTIAL_LIB", tmp_path / "missing.sh")
 
     assert gitfacts.credential_fallback_args() == []
 
 
 @pytest.fixture
-def failing_first_push(patch_lib, monkeypatch, gitfacts):
+def failing_first_push(patch_lib, monkeypatch, gitfacts, publish):
     """1 度目の `git push` だけを失敗させ、呼ばれた引数を記録する。"""
     calls: list[list[str]] = []
     attempts = {"push": 0}
@@ -94,7 +94,7 @@ def failing_first_push(patch_lib, monkeypatch, gitfacts):
     patch_lib("sh", fake_sh)
     patch_lib("_sync_generated", lambda state: None)
     patch_lib("publish_plan_comment", lambda state: None)
-    monkeypatch.setattr(gitfacts, "gh_available", lambda: True, raising=False)
+    monkeypatch.setattr(publish, "gh_available", lambda: True, raising=False)
     return calls
 
 
@@ -139,7 +139,7 @@ def test_a_working_helper_is_not_retried(gitfacts, patch_lib, tmp_path):
     assert len([c for c in calls if "push" in c]) == 1
 
 
-def test_the_retry_happens_only_once(gitfacts, patch_lib, monkeypatch, tmp_path):
+def test_the_retry_happens_only_once(gitfacts, publish, patch_lib, monkeypatch, tmp_path):
     """認証以外の理由で失敗したとき、同じ失敗を繰り返さない。"""
     calls: list[list[str]] = []
 
@@ -152,7 +152,7 @@ def test_the_retry_happens_only_once(gitfacts, patch_lib, monkeypatch, tmp_path)
     patch_lib("sh", always_fails)
     patch_lib("_sync_generated", lambda state: None)
     patch_lib("publish_plan_comment", lambda state: None)
-    monkeypatch.setattr(gitfacts, "gh_available", lambda: True, raising=False)
+    monkeypatch.setattr(publish, "gh_available", lambda: True, raising=False)
 
     with pytest.raises(RuntimeError):
         gitfacts.push_head(_state(tmp_path))
@@ -161,7 +161,7 @@ def test_the_retry_happens_only_once(gitfacts, patch_lib, monkeypatch, tmp_path)
 
 
 def test_without_gh_the_failure_is_returned_as_is(
-    gitfacts, patch_lib, monkeypatch, tmp_path
+    gitfacts, publish, patch_lib, monkeypatch, tmp_path
 ):
     """`gh` が無ければ退避しても通らない。失敗として扱う。"""
     calls: list[list[str]] = []
@@ -175,7 +175,7 @@ def test_without_gh_the_failure_is_returned_as_is(
     patch_lib("sh", fails)
     patch_lib("_sync_generated", lambda state: None)
     patch_lib("publish_plan_comment", lambda state: None)
-    monkeypatch.setattr(gitfacts, "gh_available", lambda: False, raising=False)
+    monkeypatch.setattr(publish, "gh_available", lambda: False, raising=False)
 
     with pytest.raises(RuntimeError):
         gitfacts.push_head(_state(tmp_path))

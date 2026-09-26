@@ -9,7 +9,8 @@ init → 提案 → 改修計画 → テスト追加 → 実装 → 検証と修
 `$TMP_DIR/drive-rf<ID>.json`）。進みは `refactor.py init` の出力を `init_vars` に持ち、段階が done の
 ときは init を打たずにこれを使う（init が done の状態を作り直し、件数が 0 になるのを防ぐ。#1142 の I7）。
 
-止まるときの JSON の形と終了コードの表は共通層の `scripts/lib/drive_pause.py` にある（使うのは 23 だけ。中断の `metrics.exit` が 4 なら refactor.py の中断）。
+止まるときの JSON の形と終了コードの表はライブラリの `scripts/lib/drive_pause.py` にある（使うのは 23 だけ。中断の `metrics.exit` が 4 なら refactor.py の中断）。
+子の起動・KEY=VALUE の読み取り・最終ステータスの決定は `scripts/lib/loop_drive.py` にある。
 件数（metrics）は状態ファイルから数える: items / adopted / reverted / deferred / fix_rounds（項目の修正の回数の和）/ final_gate。
 """
 from __future__ import annotations
@@ -18,7 +19,6 @@ import argparse
 import json
 import os
 import shlex
-import subprocess
 import sys
 from pathlib import Path
 
@@ -27,44 +27,14 @@ LIB = HERE.parents[2] / "scripts" / "lib"
 sys.path.insert(0, str(LIB))
 import drive_pause as dp  # noqa: E402
 from drive_pause import Stop  # noqa: E402
+from loop_drive import call, parse_vars, review_status  # noqa: E402,F401  テストは `call` をこのモジュールの上で差し替える
+import repo as repo_lib  # noqa: E402
 
 TOOL = "cross-refactoring-drive"
 ORDER = ("propose", "plan", "add-tests", "implement", "verify", "final", "done")
 CR_DRIVE = HERE.parents[1] / "cross-review" / "scripts" / "drive.py"
 FOCUS = ("項目をまたいだ整合を見る。個々の改善項目の妥当性は範囲テストで判定済みのため対象外とする。"
          "複数の項目で触った箇所の重複・打ち消し・命名の揺れ、取り消した項目の残骸、生成物と配布物の同期を確かめる")
-
-
-def call(cmd: list[str], env: dict | None = None, cwd: str | None = None) -> tuple[int, str]:
-    p = subprocess.run(cmd, capture_output=True, text=True, env=env, cwd=cwd)
-    if p.stderr:
-        sys.stderr.write(p.stderr)
-    return p.returncode, p.stdout
-
-
-def parse_vars(text: str) -> dict:
-    out = {}
-    for line in text.splitlines():
-        try:
-            words = shlex.split(line)
-        except ValueError:
-            continue
-        for w in words:
-            k, sep, v = w.partition("=")
-            if sep and k.isidentifier():
-                out[k] = v
-    return out
-
-
-def review_status(state: dict) -> str:
-    """cross-review の状態ファイルから finalize へ渡す最終ステータスを決める。"""
-    sw = state.get("sweep") or {}
-    if (state.get("final") == "approved" and sw.get("verified") is True
-            and (sw.get("remaining_open") or 0) == 0 and sw.get("commit") is None):
-        return "approved"
-    if state.get("final") == "approved":
-        return "unverified"  # 最後の HEAD（スイープの修正・残り・未検証）は承認されていない
-    return state.get("final") or "unknown"
 
 
 class Drive:
@@ -104,9 +74,9 @@ class Drive:
             return paths.tmp_dir_for(Path(root).resolve() / "work")
         if os.environ.get("CROSS_REFACTORING_TMP_DIR"):
             return paths.tmp_dir_for(Path())  # 環境変数が作業ディレクトリより先に効く
-        from refactor_lib.commands.setup import _repo_from_git
-        repo = _repo_from_git()
-        return paths.tmp_dir_for(paths.default_worktree_base() / paths.repo_slug(repo) / f"rf{self.pr}" / "work") \
+        from refactor_lib.commands.setup import github_repo_from_origin
+        repo = github_repo_from_origin()
+        return paths.tmp_dir_for(paths.default_worktree_base() / repo_lib.slug(repo) / f"rf{self.pr}" / "work") \
             if repo else None
 
     def finished_vars(self) -> dict | None:

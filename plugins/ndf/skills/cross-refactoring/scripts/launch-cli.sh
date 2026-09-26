@@ -48,19 +48,6 @@ load_common_state() {
 
 load_common_state
 
-# CLI 側の実行時間の上限。**`start-phase` が予算から導いた上限（監視の上限 + 余裕）を
-# そのまま渡す**（決定 24）。記録が無ければ（`start-phase` を通らない起動）工程名を渡し、
-# 共通層が上限の表（`lib/limits.py`）から導く（#598 / #537）。
-resolve_print_timeout() {
-  local override
-  override=$(jq -r --arg p "$PHASE" '.phases[$p].cli_timeout // empty' "$STATE")
-  if [ -n "$override" ]; then
-    PRINT_TIMEOUT=$override
-  else
-    PRINT_TIMEOUT=$PHASE
-  fi
-}
-
 configure_phase() {
 case "$PHASE" in
   propose|plan)
@@ -88,7 +75,14 @@ esac
 }
 
 configure_phase
-resolve_print_timeout
+
+# CLI 側の実行時間の上限。**`start-phase` が予算から導いた上限（監視の上限 + 余裕）を
+# そのまま渡す**（決定 24。`--no-floor`）。記録が無ければ（`start-phase` を通らない起動）
+# 上限の表から導く（#598 / #537）。決め方はライブラリの `limits.py cli-timeout` の 1 か所にある。
+CLI_TIMEOUT_OVERRIDE=$(jq -r --arg p "$PHASE" '.phases[$p].cli_timeout // empty' "$STATE")
+PRINT_TIMEOUT=$(python3 "$LIB/limits.py" cli-timeout "$PHASE" "$RUNTIME" \
+  ${CLI_TIMEOUT_OVERRIDE:+--override "$CLI_TIMEOUT_OVERRIDE" --no-floor}) || {
+  echo "CLI の上限を決められません（手順: ${PHASE}）" >&2; exit 1; }
 
 # Skill の配置先はランタイムで違う。**プロンプトに明示パスを必ず書く**ため、
 # ここで解決して雛形へ渡す。kiro は配置しただけでは SKILL.md 本文を読まない。
