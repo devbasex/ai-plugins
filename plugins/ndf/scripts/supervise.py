@@ -2488,13 +2488,13 @@ def plan_mission_check(a, repo: str) -> dict:
                             worktree=f"{repo}/.worktrees/{mb}")
     plan = plan_check(ns)
     plan.pop("Pull Request", None)
-    closes = "\n".join(f"Closes #{i}" for i in a.issue)
+    related = "関連: " + " ".join(f"#{i}" for i in a.issue)
     plan.update({"branch": mb, "起点": f"origin/{mb}", "リポジトリ": repo})
     plan["steps"] = [
         {"id": "collect", "type": "run", "stage": "実装", "timeout": 600,
          "cmd": f"git pull -q --ff-only origin {shlex.quote(mb)}", "next": "pr"},
         {"id": "pr", "type": "pr", "stage": "Pull Request", "base": a.base, "title": f"ミッション {a.name}",
-         "body": "template", "summary": f"ミッション {a.name} の課題を {a.base} へ取り込む。\n\n{closes}",
+         "body": "template", "summary": f"ミッション {a.name} の課題を {a.base} へ取り込む。\n\n{related}",
          "next": "assess"},
     ] + plan["steps"]
     return plan
