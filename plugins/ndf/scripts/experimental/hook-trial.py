@@ -4,7 +4,7 @@
     python3 hook-trial.py collect [--work DIR]    # hook のテストを流し、hook へ渡るシェルの入力を集める
     python3 hook-trial.py parity [--work DIR]     # 1: 集めた入力のすべてを tree-sitter-bash で判定し、今の判定と比べる
     python3 hook-trial.py timing [--work DIR] [--runs N]  # 2: 今の worktree-guard.sh と 1 本のエントリポイントの所要の中央値
-    python3 hook-trial.py passthrough [--work DIR]  # 3: 環境が無いとき・壊れているときにパススルー（終了コード 0・出力なし）で終わるか
+    python3 hook-trial.py passthrough [--work DIR]  # 3: 環境が無いとき・壊れているときに判定をせずに通す（終了コード 0・出力なし）か
     python3 hook-trial.py sdk [--work DIR] [--live]  # 4a: claude-agent-sdk が supervise_lib/claude.py の契約を満たすか
     python3 hook-trial.py bump [--work DIR]       # 4b: bump-my-version が release-steps.py の cmd_bump の書き換えを満たすか
 

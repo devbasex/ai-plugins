@@ -17,7 +17,7 @@ REPO = HERE.parents[4]
 GUARD = SCRIPTS / "worktree-guard.sh"
 HOOK = HERE / "ht_hook.py"
 TOOL = "hook-trial"
-# hooks/*.json の command の形の案: 環境の python が無ければ sh が 0 で抜ける（決定 20 のパススルー）
+# hooks/*.json の command の形の案: 環境の python が無ければ sh が 0 で抜ける（決定 20 の、判定をせずに通す形）
 LAUNCH = '[ -x "$0" ] || exit 0; exec "$0" "$1"'
 
 
@@ -152,6 +152,6 @@ def cmd_passthrough(a) -> None:
             bad.append(name + "（案内が出ない）")
     direct = next(i for i in items if "python 直" in i["name"])
     status = "stopped" if bad else "ok"
-    summary = ("環境が無いときも壊れているときもパススルーで終わる（hook の command は sh で環境の有無を見る形にする。"
-               f"python を直に指す形は終了コード {direct['exit']} で終わる）") if not bad else "パススルーにならない: " + " / ".join(bad)
+    summary = ("環境が無いときも壊れているときも判定をせずに通す（hook の command は sh で環境の有無を見る形にする。"
+               f"python を直に指す形は終了コード {direct['exit']} で終わる）") if not bad else "判定をせずに通す形にならない: " + " / ".join(bad)
     emit(result(TOOL, status, summary, items), 0 if status == "ok" else 1)

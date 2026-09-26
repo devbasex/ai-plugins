@@ -4,7 +4,7 @@
 additionalContext で案内する）と、token-guard.sh の 2 つの判定（前景の sleep・プランを起こす副命令）を 1 回で行う。
 判定の本体は ht_shparse.py（tree-sitter-bash）。
 
-**環境が無い・壊れているときは判定をせずにパススルー（出力なし・終了コード 0）で終わる。** hook が止まると Tool の
+**環境が無い・壊れているときは判定をせずに通す（出力なし・終了コード 0）。** hook が止まると Tool の
 呼び出しが全部止まるためである。宣言（.ndf/）の許可パスと agy・Kiro の入力の形は試作に含めない（所要を測るため）。
 """
 from __future__ import annotations
@@ -83,7 +83,7 @@ def main() -> int:
         if not isinstance(payload, dict):
             return 0
         res = run(payload)
-    except Exception:  # 環境が壊れている（import できない）・入力が読めない: パススルー
+    except Exception:  # 環境が壊れている（import できない）・入力が読めない: 判定をせずに通す
         return 0
     if res:
         sys.stdout.write(json.dumps(res, ensure_ascii=False))
