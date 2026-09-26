@@ -154,15 +154,27 @@ conductor として、その時に入っていた版で数える。状態の既�
 コンテキストの移行ステップの中で語も替える形は採らない。ミッション 2 の PR が大きくなり、C1〜C7 の
 差分が読めなくなる。
 
-### 決定 16: 不足 g は GitHub の呼び出しを `gh_parts` へ集め、上限のときは REST で読む
+### 決定 16: 不足 g は GitHub の呼び出しを `gh_parts` へ集め、REST を常に使う
 
-GraphQL を使う `gh pr` / `gh issue` の呼び出しは 23 ファイル・115 か所にあり、上限の見分けを持つのは
-`gh_parts` を使う 5 ファイルだけである。呼び出しごとに上限の扱いを足すと、同じ判定が 115 か所に散る。
-読み取りは REST（`repos/{owner}/{repo}/pulls|issues/<n>`）で同じ値が取れるため、`gh_parts.view_json` が
-GraphQL の `--json` と同じ形へ写して返す。対応表に無いフィールドは REST へ回さず元の誤りを返す（形の違う
-値を黙って返さない）。PR の作成・ready・マージのように REST で同じ振る舞いを保証できない操作は、REST へ
-写さず回復の時刻まで待つ。
+GraphQL を使う `gh pr` / `gh issue` の呼び出しは 23 ファイル・115 か所にある。GraphQL の上限（1 時間 5000 点）は
+cross-review の 1 回で使い切ることがあり（2026-09-26 の設計 PR #1209 のレビュー中に本番の配布が止まった）、
+REST の枠（1 時間 5000 回）は同じ時刻に 1 回も使われていなかった。上限のときだけ REST へ切り替える形は、
+上限に当たるまで GraphQL を使い続けるため、上限に当たった後の待ちとやり直しが毎回起きる。
 
-配布の経路（`release-steps.py` の読み取り・bump の打ち直し・judge の待ち）は即時修正 #1211 で先に直した。
-残りの呼び出し側は、ファイルを移す移行ステップ（C1〜C7）の中で置き換える。別の移行ステップにすると、
-同じファイルを 2 度触り、移行ステップどうしが同じ行で衝突する。
+そこで、REST にある操作は常に REST で行う。PR と課題の読み取り・一覧・作成・編集・コメント・マージ・CI の結果
+（check-runs）は `gh api repos/{owner}/{repo}/...` で行い、`gh_parts` の関数は今の `gh pr view --json` と同じ形
+（フィールド名と値の形。state は OPEN / CLOSED / MERGED）で返す。GraphQL を使うのは REST に無い 3 つの操作だけ
+である。
+
+| GraphQL だけの操作 | 今の置き場 |
+| --- | --- |
+| レビューのスレッドの解決状態の読み取りと resolve（`reviewThreads`・`resolveReviewThread`） | `gh_parts`・`post_queue`・`refactor_lib/gitfacts`・`fix-steps` |
+| Projects のボード（ProjectV2） | `projects-common.sh` |
+| draft を ready にする（`gh pr ready`） | `pr-steps`・`supervise` の ready のステップ |
+
+この 3 つが GraphQL の上限に当たったときは、回復の時刻（`gh api rate_limit` の graphql の reset）まで待って
+からやり直す。ほかの操作は GraphQL を使わないので止まらない。
+
+即時修正 #1211 の `view_json`（上限のときだけ REST で読む）は、REST を先に使う形へ置き換える。残りの呼び出し
+側は、ファイルを移す移行ステップ（C1〜C7）の中で置き換える。別の移行ステップにすると、同じファイルを 2 度
+触り、移行ステップどうしが同じ行で衝突する。
