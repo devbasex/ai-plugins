@@ -32,7 +32,7 @@
 - **次に開いたシェルから効く**
 - 既に `claude` の alias か関数がある（bash では `~/.bash_aliases` とログインシェルの設定 `~/.bash_profile`・`~/.bash_login`・`~/.profile` も見る）・bash と zsh 以外のシェルでは足さず、自分で置く 1 行を示す
 - **macOS の bash では `~/.bash_profile` へ足す。** macOS の端末は新しいウィンドウをログインシェルで開き、ログインシェルの bash は `~/.bashrc` を読まない。`~/.bash_profile` が無く `~/.bash_login` か `~/.profile` があるときは、作ると元のファイルが読まれなくなるため足さず、自分で置く 1 行を示す
-- `/ndf:install-wrapper status` で、読み込み先・管理ブロックの形・コピーの版を見られる
+- `/ndf:install-wrapper status` で、読み込み先・管理ブロックの形・コピーの版と、今のセッションがラッパー経由かを見られる
 - **devbase では `~/.claude` が同じアカウントグループのコンテナで共有される。** コピーとラッパーの rc はコンテナを作り直しても残り、導入・取り外しの効果は同じグループの全コンテナに及ぶ
 
 **コピーは SessionStart hook が今の版に保つ。** コピーか 10.17.4〜10.17.6 のコピー（`${XDG_DATA_HOME:-~/.local/share}/ndf/relay.py`）が
