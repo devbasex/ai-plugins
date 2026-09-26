@@ -27,7 +27,7 @@ def _redirect_words(r: sp.Node) -> list[str]:
     return [fd + sp.redirect_operator(r) + (sp.unquote(dest) if dest is not None else "")]
 
 
-def _tokens(n: sp.Node, extra: list[sp.Node]) -> list[str]:
+def _command_words(n: sp.Node, extra: list[sp.Node]) -> list[str]:
     nodes, rs, _ = sp.command_parts(n, extra)
     shown = [(c.start_byte, [sp.unquote(c)]) for c in nodes]
     shown += [(r.start_byte, _redirect_words(r)) for r in rs if r.type in REDIRECTS]
@@ -49,7 +49,7 @@ def command_stream(cmd: str) -> list[str]:
         if n.type == "command":
             if out:
                 out.append("")
-            out.extend(_tokens(n, extra))
+            out.extend(_command_words(n, extra))
             for s in sp.substitutions(n):
                 visit(s, [])
             return
