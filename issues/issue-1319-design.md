@@ -10,20 +10,21 @@ python3 scripts/drive.py 1320 --scope plugins/ndf/scripts/supervise_lib plugins/
     --baseline-test "uv run --frozen --project . --all-extras pytest plugins/ndf/scripts/tests -q -n 4"
 ```
 
-1. `init` が `.ndf/code-metrics.json` を探す。無いので既定の対応（Python → radon、ほかの言語 → lizard）を
+1. `init` が `.ndf/code-metrics.json` を探す。無いので既定の対応（Python → Ruff と complexipy、ほかの言語 → lizard）を
    状態ファイルの `code_metrics.config` に書く。`limits.measure_timeout` は `0.05·30 分 = 90 秒` になる
 2. 駆動が読み取り用の作業ディレクトリを HEAD へ同期した後、提案を起動する前に `refactor.py measure 1320` を打つ
 3. `measure` が `git ls-files -- <対象範囲>` で追跡されたファイルを集め、拡張子で言語に分ける。Python の
-   ファイルを `uvx --from radon==6.0.1 radon cc -j` と `radon mi -j` で測る
+   ファイルを `uvx --from ruff==0.16.9 ruff check`（循環的複雑度・分岐・文・引数・return の数）と
+   `uvx --from complexipy==8.0.1 complexipy`（認知的複雑度）で測り、関数の範囲を NDF が `ast` で数える
 4. 指標のファイル `<作業ディレクトリ>/work/.cross_refactoring/code-metrics-rf1320.md` ができる。
-   本体の最初の行は `Engine.run`（`supervise_lib/engine.py` ・CC 45・101 行）で、ファイルの表の MI が
-   最も低いのは `slow.py`（24.4）である
+   本体の最初の行は `Engine.run`（`supervise_lib/engine.py` ・認知的複雑度 74・CC 26・101 行）で、
+   ファイルの表で最も長いのは `claude.py`（282 行）である
 5. 提案のプロンプトに「指標」の節が入り、このファイルのパスが載る。参加者は、提案の `evidence` に
-   `{"cc": 45, "lines": 101}` と根拠にした値を書ける。書かなくても見送られない
+   `{"cognitive": 74, "cc": 26, "lines": 101}` と根拠にした値を書ける。書かなくても見送られない
 6. リファクタリング計画のコメントと `refactor.py report` に「指標の測定」の節ができる
-   （`python ・ radon 6.0.1 ・ uvx ・ 103 ファイル ・ 0.7 秒 ・ 測った`）
+   （`python ・ ruff-complexipy ・ ruff 0.16.9 / complexipy 8.0.1 ・ uvx ・ 103 ファイル ・ 0.1 秒 ・ 測った`）
 
-uvx も radon も無い環境では、4 のファイルに `python | tool_missing` の行だけが載り、5 以降は同じように進む。
+uvx も `ruff` も `complexipy` も無い環境では、4 のファイルに `python | tool_missing` の行だけが載り、5 以降は同じように進む。
 
 ## ドメインモデル
 
@@ -33,7 +34,7 @@ uvx も radon も無い環境では、4 のファイルに `python | tool_missin
 | --- | --- |
 | `ndf-cross-refactoring` | 指標・指標のファイル・測定ツール・測定の宣言・根拠の値。提案・改善候補・リファクタリング計画は今の意味のまま |
 
-1 つのコンテキストに収まる。測定ツール（radon・lizard）は外部のコマンドで、その出力を指標の形へ
+1 つのコンテキストに収まる。測定ツール（Ruff・complexipy・lizard）は外部のコマンドで、その出力を指標の形へ
 直すのは `ndf-cross-refactoring` の側の腐敗防止層（`codemetrics` の読み取り）である。
 
 ### 集約
@@ -76,9 +77,9 @@ uvx も radon も無い環境では、4 のファイルに `python | tool_missin
 
 | 用語 | 意味 | 用語集への反映 |
 | --- | --- | --- |
-| 指標 | `cross-refactoring` が提案の前に対象範囲のコードを測定ツールで測った値。関数ごとの循環的複雑度、ファイルごとの保守性か大きさ、行数 | 追加（`ndf-cross-refactoring`） |
+| 指標 | `cross-refactoring` が提案の前に対象範囲のコードを測定ツールで測った値。関数ごとの循環的複雑度（Python では認知的複雑度も）、ファイルごとの大きさ、行数 | 追加（`ndf-cross-refactoring`） |
 | 指標のファイル | 提案の前に 1 回だけ作り、参加者の全員が読む指標の測定の結果 | 追加（`ndf-cross-refactoring`） |
-| 測定ツール | 言語ごとに指標を測る外部のコマンド（radon・lizard など） | 追加（`ndf-cross-refactoring`） |
+| 測定ツール | 言語ごとに指標を測る外部のコマンド（Ruff・complexipy・lizard など） | 追加（`ndf-cross-refactoring`） |
 | 測定の宣言 | 言語ごとの測定ツールをプロジェクトが置き換える `.ndf/code-metrics.json` | 追加（`ndf-cross-refactoring`） |
 | 根拠の値 | 提案が根拠にした指標の値。提案の JSON の `evidence` に書き、採否には使わない | 追加（`ndf-cross-refactoring`） |
 
@@ -98,9 +99,9 @@ uvx も radon も無い環境では、4 のファイルに `python | tool_missin
 
 | 要素 | 責務 | 新設 / 変更 |
 | --- | --- | --- |
-| `refactor_lib/codemetrics.py` | 言語の表・ツールの表（版の固定）・宣言の読み取りと重ね合わせ・ファイルの言語分け・ツールのコマンドの組み立て・出力の読み取り・識別子の集合（`REASONS`）。**純粋な処理だけを置く**（起動も書き出しもしない） | 新設 |
+| `refactor_lib/codemetrics.py` | 言語の表・ツールの表（版の固定）・宣言の読み取りと重ね合わせ・ファイルの言語分け・ツールのコマンドの組み立て・出力の読み取り・Python の関数の列挙（ソースの文字列を `ast` で読む）と Ruff・complexipy の値の突き合わせ・識別子の集合（`REASONS`）。**純粋な処理だけを置く**（起動も書き出しもしない） | 新設 |
 | `refactor_lib/codemetrics_view.py` | 読み取った指標から、指標のファイル（Markdown）と、計画・報告の「指標の測定」の表を組む。純粋な処理 | 新設 |
-| `refactor_lib/commands/measure.py` | `cmd_measure`。ファイルの収集（git）・ランナーの解決・締め切りつきの起動・行数の数え上げ・指標のファイルの書き出し・状態の保存・KEY=VALUE の出力 | 新設 |
+| `refactor_lib/commands/measure.py` | `cmd_measure`。ファイルの収集（git）・ランナーの解決・締め切りつきの起動・ファイルの読み込みと行数の数え上げ・指標のファイルの書き出し・状態の保存・KEY=VALUE の出力 | 新設 |
 | `refactor_lib/process.py` | 標準出力と標準エラーを分けて受け取り、締め切りでプロセスグループごと止める `run_capture` を足す（`_kill_process_group` を使い回す） | 変更 |
 | `refactor_lib/timeline.py` | 係数 `MEASURE_SHARE`（0.05）と `MEASURE_PROPOSE_CAP`（0.5）、表の `measure_timeout`、純粋な `measure_deadline(now, limits)` | 変更 |
 | `refactor_lib/commands/setup.py` | `init` が測定の設定を読み、`code_metrics = {config, status: pending}` を書く。再開では提案の前で記録が無いときだけ同じことをする。`--code-metrics` を「知らせる」の表へ載せる | 変更 |
@@ -158,7 +159,7 @@ graph LR
     起動者[cross-refactoring を起動する者] --> 本体[cross-refactoring]
     本体 --> 対象[対象リポジトリの作業ディレクトリ: 読むだけ]
     本体 --> uv[uvx と PyPI: 測定ツールの取得]
-    本体 --> ツール[radon / lizard]
+    本体 --> ツール[Ruff ・ complexipy / lizard]
     本体 --> 参加者[参加者の CLI]
     本体 --> GH[GitHub: 計画のコメント]
 ```
@@ -173,7 +174,7 @@ graph TD
         M[refactor.py measure]
     end
     subgraph 子のプロセスグループ
-        U[uvx --from radon==6.0.1 radon ...]
+        U[uvx --from ruff==0.16.9 ruff ... と uvx --from complexipy==8.0.1 complexipy ...]
     end
     subgraph 書き込み用の作業ディレクトリ work/
         S[追跡されたファイル]
@@ -185,6 +186,7 @@ graph TD
     M -- ファイルの一覧を引数で渡す --> U
     U -- 読むだけ --> S
     U -- 標準出力の JSON / CSV --> M
+    U -- complexipy の JSON とキャッシュ --> TMP
     M -- 指標のファイルと状態を書く --> TMP
     R -- 絶対パスで読む --> TMP
 ```
@@ -260,14 +262,18 @@ classDiagram
     class FunctionMetric {
         +path: str
         +symbol: str
-        +cc: int
+        +cc: int|None
+        +cognitive: int|None
+        +branches: int|None
+        +statements: int|None
+        +args: int|None
+        +returns: int|None
         +lines: int
         +role: main|test
     }
     class FileMetric {
         +path: str
         +lines: int
-        +mi: float|None
         +functions: int
         +max_function_lines: int
         +role: main|test
@@ -286,7 +292,7 @@ classDiagram
 
 | 言語 | 拡張子 | 既定のツール |
 | --- | --- | --- |
-| `python` | `.py` | `radon` |
+| `python` | `.py` | `ruff-complexipy` |
 | `javascript` | `.js` `.mjs` `.cjs` `.jsx` | `lizard` |
 | `typescript` | `.ts` `.tsx` `.mts` | `lizard` |
 | `php` | `.php` | `lizard` |
@@ -308,11 +314,65 @@ classDiagram
 
 | ツール | パッケージと版 | 起動（uvx があるとき） | 使う出力 |
 | --- | --- | --- | --- |
-| `radon` | `radon==6.0.1` | `uvx --from radon==6.0.1 radon cc -j <files>` と `... radon mi -j <files>` | cc: 関数とメソッドの `complexity` ・ `lineno` ・ `endline` ・ `classname`（`type` が `class` の行は除く）。mi: ファイルの `mi` と `rank` |
+| `ruff-complexipy` | `ruff==0.16.9` と `complexipy==8.0.1` の 2 つのコマンド | 下の 2 行を順に起動する | 下の 2 行 |
+| （Ruff） | `ruff==0.16.9` | `uvx --from ruff==0.16.9 ruff check --isolated --no-cache --exit-zero --select C901,PLR0911,PLR0912,PLR0913,PLR0915 --config lint.mccabe.max-complexity=0 --config lint.pylint.max-branches=0 --config lint.pylint.max-returns=0 --config lint.pylint.max-args=0 --config lint.pylint.max-statements=0 --output-format json <files>` | 標準出力の JSON の配列。要素の `code` ・ `filename`（絶対パス）・ `location.row`（`def` の行。デコレータの行ではない）・ `message`。構文を読めないファイルは `code` が `invalid-syntax` で出る |
+| （complexipy） | `complexipy==8.0.1` | `uvx --from complexipy==8.0.1 complexipy <files> --output-format json --output <TMP_DIR>/complexipy-rf<ID>.json -q --max-complexity-allowed 1000000 --no-ignore --cache-dir <TMP_DIR>/complexipy-cache` | `--output` のファイルの JSON の配列。要素の `complexity` ・ `path`（渡したとおりの相対パス）・ `function_name`（`関数` か `クラス::メソッド`）。`file_name` と `refactor_plans` は使わない |
 | `lizard` | `lizard==1.24.0` | `uvx --from lizard==1.24.0 lizard --csv <files>` | 1 行 11 列の CSV（NLOC・CCN・token・PARAM・length・location・file・function・long_name・start・end）。使うのは CCN・length・file・function |
 
+`ruff-complexipy` は 1 つの測定ツールとして扱う。2 つのコマンドのどちらかが無い・落ちる・読めないときは、
+その言語を失敗にする（片方の値だけを載せない）。版（`version`）は `ruff 0.16.9 / complexipy 8.0.1` のように
+コマンドごとの版を並べた文字列にする。
+
+**Ruff の引数の意味。** `--isolated` で対象プロジェクトの設定（`pyproject.toml` ・ `ruff.toml`）を読まず、閾値を
+NDF が決める。5 つの閾値を 0 にすると、値が 1 以上の関数がすべて出る（2026-09-27、`supervise_lib` で C901 が
+162 件＝全関数）。閾値の既定のままだと上限を超えた関数しか出ない（同じ範囲で 15 件）。`--exit-zero` で、出た
+診断の有無を終了コードから外す（外さないと診断が 1 件でもあれば 1 になる）。`--no-cache` で作業ディレクトリへ
+`.ruff_cache` を書かない（I8）。
+
+**Ruff の値の読み方。** 値は構造化された欄に無く、`message` の文字列の末尾にだけある（例:
+`` `check_new` is too complex (11 > 0) `` ・ `Too many branches (29 > 0)`）。末尾の `(<N> > 0)` を
+`\((\d+) > 0\)$` で読み、`code` ごとに次の欄へ入れる。
+
+| `code` | 欄 | 意味 |
+| --- | --- | --- |
+| `C901` | `cc` | 循環的複雑度（mccabe。ブール演算子を数えない） |
+| `PLR0912` | `branches` | 分岐の数 |
+| `PLR0915` | `statements` | 文の数 |
+| `PLR0913` | `args` | 引数の数 |
+| `PLR0911` | `returns` | return の数 |
+
+診断は（`filename` をリポジトリ相対へ直したパス、`location.row`）で関数へ結び付ける。`PLR` の `message` には
+関数の名前が無いため、名前では結び付けない。閾値が 0 なので、出ない `PLR` の欄は 0 と読む（例: return の無い
+関数には `PLR0911` が出ない）。`C901` は全関数に出る（最小が 1）。`invalid-syntax` の診断は値として読まず、
+そのファイルを「読めなかったファイル」に数える。末尾の形が合わない `message` が 1 件でもあれば、その言語を
+`unreadable_output` にする。
+
+**complexipy の終了コードの扱い。** complexipy 8.0.1 は、上限（既定 15。`pyproject.toml` の
+`[tool.complexipy]` でも変わる）を超える関数があると 1 で終わる。`-i` / `--ignore-complexity` を付けても
+1 のままだった（2026-09-27、`supervise_lib` で実測）。そこで `--max-complexity-allowed 1000000` を渡し、上限を
+超える関数が出ない形にする（引数は設定より優先され、この値で 0 になった）。上限を外しても、構文を読めない
+ファイルがあると 1 で終わり、`--output` にはほかのファイルの結果が書かれる（`Failed to process <file>` は
+標準出力に出る）。**0 と、1 で `--output` のファイルが JSON の配列として読めるときを正常とし、それ以外
+（2 = 引数の誤り、1 で出力のファイルが無い・読めない）を `tool_failed` にする。** 読めなかったファイルの数は
+Ruff の `invalid-syntax` から数える（complexipy の標準出力の文は読まない）。`--no-ignore` は
+`# noqa: complexipy` を付けた関数も出すため（付けないと出力から消える）、`--cache-dir` は既定の
+`.complexipy_cache` を作業ディレクトリへ作らないため（I8）に渡す。起動の前に `--output` のファイルを消し、
+前の実行の出力を読まない。
+
+**Python の関数は NDF が列挙する。** Ruff も complexipy も関数の終わりの行を出さないため、標準ライブラリの
+`ast` でファイルを読み、`FunctionDef` と `AsyncFunctionDef` ごとに名前（`クラス.メソッド`・入れ子は
+`外側.内側`）・`lineno`（`def` の行）・`end_lineno` を取る。関数の行数は `end_lineno − lineno + 1` である。
+Ruff の値は（パス・`lineno`）で、complexipy の値は（パス・`function_name` の `::` を `.` にした名前）で結び付ける。
+complexipy は入れ子の関数を外側の関数に含めて数え、入れ子のクラスのメソッドを出さない（2026-09-27 実測）ため、
+それらの関数の `cognitive` は空になる。`ast` が読めないファイル（オーケストレーターの Python より新しい構文を
+含むなど）は「読めなかったファイル」に数え、その関数を載せない。
+
 **行数（`lines`）は NDF が数える。** 空白だけの行を除いた行の数で、全言語で同じ数え方にする（決定 11）。
-関数の行数は radon なら `endline − lineno + 1`、lizard なら `length` である。
+関数の行数は Python なら上の `ast` の範囲、lizard なら `length` である。
+
+**同じ名前の指標でも、ツールが違えば値の意味が違う。** `check_new`（`supervise_lib/new_args.py`）の循環的複雑度は
+lizard で 35、Ruff の C901 で 11 だった（mccabe はブール演算子を数えない）。指標のファイルの各節の見出しに
+ツールの名前と版を載せ、言語の節ごとに列を分ける。言語をまたいで同じ列で並べ替え・比較をしない。
 
 ### 測定の宣言 `.ndf/code-metrics.json`
 
@@ -323,10 +383,10 @@ classDiagram
 | 鍵 | 型 | 空を許すか | 意味 |
 | --- | --- | --- | --- |
 | `version` | 整数 | 許さない | `1` だけ |
-| `tools` | オブジェクト | 許さない（空のオブジェクトは可） | 鍵は上の表の言語名。値は `"radon"`（`python` だけ）・`"lizard"`・`null`（その言語を測らない） |
+| `tools` | オブジェクト | 許さない（空のオブジェクトは可） | 鍵は上の表の言語名。値は `"ruff-complexipy"`（`python` だけ）・`"lizard"`・`null`（その言語を測らない） |
 
 読むのは書き込み用の作業ディレクトリ（Pull Request の head）の `.ndf/code-metrics.json` である。形が違えば
-（JSON でない・`version` が違う・知らない鍵・知らない言語・知らないツール・`radon` を `python` 以外へ当てる）
+（JSON でない・`version` が違う・知らない鍵・知らない言語・知らないツール・`ruff-complexipy` を `python` 以外へ当てる）
 **宣言の全体を使わず既定で測り**、`config.source = "invalid"` と理由を残す（前提 8）。一部の鍵だけを
 生かさない。宣言した言語だけを置き換え、ほかの言語は既定のまま測る（AC6）。
 
@@ -373,34 +433,39 @@ classDiagram
 
 （なし）
 
-## python（radon 6.0.1 ・ uvx）
+## python（ruff-complexipy ・ ruff 0.16.9 / complexipy 8.0.1 ・ uvx）
 
-本体: 19 ファイル・関数 160 個・CC 11 以上 36 個・最大 CC 45 / テスト: 84 ファイル・関数 1,910 個・CC 11 以上 32 個・最大 CC 41
+本体: 19 ファイル・関数 162 個・認知的複雑度 16 以上 20 個・最大 74・CC 11 以上 8 個・最大 26 / テスト: 84 ファイル・関数 1,983 個・認知的複雑度 16 以上 7 個・最大 41・CC 11 以上 2 個・最大 13
 
-### 複雑な関数（本体・CC の降順・上位 30）
+### 複雑な関数（本体・認知的複雑度の降順・上位 30）
 
-| ファイル | 関数 | CC | 行 |
-| --- | --- | --- | --- |
-| plugins/ndf/scripts/supervise_lib/engine.py | Engine.run | 45 | 101 |
+| ファイル | 関数 | 認知 | CC | 分岐 | 文 | 引数 | return | 行 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| plugins/ndf/scripts/supervise_lib/engine.py | Engine.run | 74 | 26 | 29 | 91 | 1 | 4 | 101 |
 
 ### ファイル（本体・行数の降順・上位 20）
 
-| ファイル | 行 | MI | 関数 | 最長の関数の行 |
-| --- | --- | --- | --- | --- |
+| ファイル | 行 | 関数 | 最長の関数の行 |
+| --- | --- | --- | --- |
+| plugins/ndf/scripts/supervise_lib/claude.py | 282 | … | … |
 ```
 
 | 表 | 並び | 上限 |
 | --- | --- | --- |
-| 複雑な関数（本体） | CC の降順、同じなら行数の降順・パス | 30 行 |
+| 複雑な関数（本体） | Python は認知的複雑度の降順、lizard の言語は CC の降順。同じなら行数の降順・パス | 30 行 |
 | 複雑な関数（テスト） | 同上 | 10 行 |
 | ファイル（本体） | 行数の降順 | 20 行 |
 | ファイル（テスト） | 同上 | 10 行 |
 
 上限は `codemetrics_view` の定数に置く。要約の行の件数（CC 11 以上の数など）は全件から数える。
-本体かテストかは `pathkinds.is_test_path` で分ける（決定 1）。lizard の言語では MI の列が `—` になる。
-radon が構文を読めなかったファイルは「読めなかったファイル N 本」を要約の行に足し、表には載せない。
-**ファイルの集合は集めた一覧が正である。** `radon cc` は関数の無いファイル（`__init__.py` など）を出力に
-含めないため、ツールの出力からファイルを数えない（2026-09-26 の実測で 103 本中 2 本が出なかった）。
+要約の行の閾値は、Python の認知的複雑度が 16 以上（complexipy の既定の上限 15 を超える）、CC が 11 以上
+（Ruff の mccabe の既定の上限 10 を超える。lizard の言語も同じ）で、`codemetrics_view` の定数に置く。
+本体かテストかは `pathkinds.is_test_path` で分ける（決定 1）。関数の表の列は言語の節ごとに決まる。Python は
+認知・CC・分岐・文・引数・return・行、lizard の言語は CC・行である。値の無い欄（complexipy が出さない入れ子の
+関数の認知など）は `—` にする。
+構文を読めなかったファイルは「読めなかったファイル N 本」を要約の行に足し、表には載せない。
+**ファイルの集合は集めた一覧が正である。** 関数の無いファイル（`__init__.py` など）はツールの出力に
+現れないため、ツールの出力からファイルを数えない（2026-09-27 の実測で `supervise_lib` の 19 本中 2 本が関数を持たなかった）。
 
 ### CRUD
 
@@ -428,7 +493,7 @@ radon が構文を読めなかったファイルは「読めなかったファ�
 | --- | --- |
 | 入力 | 実行の番号。環境変数 `CROSS_REFACTORING_TMP_DIR`（今の副コマンドと同じ） |
 | 出力（標準出力） | `CODE_METRICS=<status>`（記録が無ければ空）と `CODE_METRICS_FILE=<絶対パス>`（作らなければ空） |
-| 出力（標準エラー） | 言語ごとに `✅ python: radon 6.0.1（uvx）103 ファイル 0.7 秒` か `⚠ go: tool_missing（…）` の 1 行 |
+| 出力（標準エラー） | 言語ごとに `✅ python: ruff-complexipy（ruff 0.16.9 / complexipy 8.0.1 ・ uvx）103 ファイル 0.1 秒` か `⚠ go: tool_missing（…）` の 1 行 |
 | 終了コード | 0（測った・測れなかった・止めた・測らずに返した、のいずれも）。4 は状態ファイルを読めないときだけ |
 | 冪等 | `status` が `pending` 以外、または提案を始めた後は、測らずに記録を出す（I1 I2） |
 
@@ -436,11 +501,11 @@ radon が構文を読めなかったファイルは「読めなかったファ�
 
 | 識別子 | いつ | 詳細に書くもの |
 | --- | --- | --- |
-| `tool_missing` | uvx も、そのツールのコマンドも PATH に無い | 探したコマンドの名前 |
+| `tool_missing` | uvx も、そのツールのコマンドも PATH に無い（`ruff-complexipy` は `ruff` と `complexipy` のどちらか 1 つでも無い） | 探したコマンドの名前 |
 | `unsupported_language` | 言語の表にあるが、既定の対応にツールが無い（`shell`） | — |
 | `disabled` | 宣言がその言語を `null` にした。実行の全体を止めたときは `status = disabled` | — |
-| `tool_failed` | 起動できない、または 0 以外で終わった（uvx の取得の失敗を含む） | 終了コードと標準エラーの末尾 5 行 |
-| `unreadable_output` | 0 で終わったが、出力を読めない（JSON でない・CSV の列が 11 でない） | 読めなかった箇所 |
+| `tool_failed` | 起動できない、または正常でない終了コードで終わった（uvx の取得の失敗を含む）。正常は Ruff と lizard が 0、complexipy が 0 か「1 で `--output` が読める」 | 終了コードと標準エラーの末尾 5 行 |
+| `unreadable_output` | 正常に終わったが、出力を読めない（JSON でない・CSV の列が 11 でない・Ruff の `message` の末尾が `(<N> > 0)` でない） | 読めなかった箇所 |
 | `timeout` | 締め切りを過ぎた、または起動の前に残りが無かった | 使えた秒 |
 
 実行の単位の値（`status`）と宣言の理由（`declaration_invalid`）も同じモジュールに置く。指標のファイル・
@@ -452,12 +517,12 @@ radon が構文を読めなかったファイルは「読めなかったファ�
 {"path": "plugins/ndf/scripts/supervise_lib/engine.py", "symbol": "Engine.run",
  "smell": "long_method", "technique": "extract_method", "severity": "major",
  "rationale": "...", "plan": "...", "test_gap": false, "estimated_diff_lines": 80,
- "evidence": {"cc": 45, "lines": 101}}
+ "evidence": {"cognitive": 74, "cc": 26, "lines": 101}}
 ```
 
 | 鍵 | 型 | 必須か | 意味 |
 | --- | --- | --- | --- |
-| `evidence` | オブジェクト | 任意 | 鍵は `cc` / `mi` / `lines` / `functions` / `max_function_lines`、値は数 |
+| `evidence` | オブジェクト | 任意 | 鍵は `cc` / `cognitive` / `lines` / `functions` / `max_function_lines`、値は数 |
 
 `merge-proposals` の正規化: オブジェクトでなければ落とす。知らない鍵と数でない値は、その鍵だけ落とす。
 **どの場合も提案は残り、見送りの理由を作らない**（I7・AC17）。同じ鍵の提案を統合するときは、既にある鍵を
@@ -473,7 +538,7 @@ radon が構文を読めなかったファイルは「読めなかったファ�
 
 提案の前に `<code_metrics.file>` を読んでください。対象範囲のコードを測定ツールで測った値です。
 作業ディレクトリの外にありますが、このファイルは読んでかまいません。値を根拠にした提案は、
-`evidence` に使った値を書けます（例: `"evidence": {"cc": 45, "lines": 101}`）。書かなくても見送られません。
+`evidence` に使った値を書けます（例: `"evidence": {"cognitive": 74, "cc": 26, "lines": 101}`）。書かなくても見送られません。
 ```
 
 雛形 `propose.md` は「必須コンテキスト」の直後に `$RF_METRICS_BLOCK` を置く。提出形式の例と「守ること」は
@@ -486,12 +551,12 @@ radon が構文を読めなかったファイルは「読めなかったファ�
 ```markdown
 ## 指標の測定
 
-- 状態: written / 言語とツールの対応: 既定 / 所要: 0.8 秒（上限 90 秒）
+- 状態: written / 言語とツールの対応: 既定 / 所要: 0.2 秒（上限 90 秒）
 - 指標のファイル: /tmp/ndf-worktrees/devbasex--ai-plugins/rf1320/work/.cross_refactoring/code-metrics-rf1320.md
 
 | 言語 | ツール | 版 | ランナー | ファイル | 秒 | 結果 |
 | --- | --- | --- | --- | --- | --- | --- |
-| python | radon | 6.0.1 | uvx | 103 | 0.7 | 測った |
+| python | ruff-complexipy | ruff 0.16.9 / complexipy 8.0.1 | uvx | 103 | 0.1 | 測った |
 | shell（別の実行の例） | — | — | — | 2 | — | unsupported_language |
 ```
 
@@ -534,7 +599,7 @@ graph TD
     A[言語の群] --> B{設定のツール}
     B -->|null・宣言| X1[disabled]
     B -->|無い・既定| X2[unsupported_language]
-    B -->|radon / lizard| C{ランナー}
+    B -->|ruff-complexipy / lizard| C{ランナー}
     C -->|uvx がある| E[uvx --from 固定の版]
     C -->|uvx が無く PATH にある| F[PATH のコマンド・--version で版]
     C -->|どちらも無い| X3[tool_missing]
@@ -543,14 +608,15 @@ graph TD
     G -->|いいえ| X4[timeout]
     G -->|はい| H{終わり方}
     H -->|締め切り| X4
-    H -->|0 以外・起動できない| X5[tool_failed]
-    H -->|0| I{読めるか}
+    H -->|正常でない・起動できない| X5[tool_failed]
+    H -->|正常| I{読めるか}
     I -->|いいえ| X6[unreadable_output]
     I -->|はい| OK[measured]
 ```
 
 言語の順は名前の辞書順にする（結果が起動のたびに変わらない）。ファイルは 1 回の起動に 500 本までに分け、
-結果を合わせる（引数の長さの上限を超えないため）。分けた起動の 1 つが失敗すれば、その言語を失敗にする。
+結果を合わせる（引数の長さの上限を超えないため）。complexipy の `--output` は起動ごとに別のファイルにする。
+分けた起動の 1 つが失敗すれば、その言語を失敗にする。
 
 ### `code_metrics.status` の遷移
 
@@ -583,9 +649,9 @@ stateDiagram-v2
 
 | 大項目 | 要求の条件 | 実現方式 | 確かめ方 |
 | --- | --- | --- | --- |
-| 性能・拡張性 | 測定の所要は AC13 の上限に収まる。上限は想定最大時間から出る | 言語ごとに順に起動し、各起動に締め切りまでの残りを渡す。残りが尽きた言語は起動しない。B = 30 分で上限 90 秒。実測はこのリポジトリの `plugins/` の Python 549 本で `radon cc` 0.8 秒・`radon mi` 1.9 秒、lizard（`.py` `.js` `.ts`）1.0 秒（2026-09-26、キャッシュ済み） | 遅い偽のツールで締め切りを超えさせ、所要が `deadline_seconds + kill_grace` を超えないこと |
+| 性能・拡張性 | 測定の所要は AC13 の上限に収まる。上限は想定最大時間から出る | 言語ごとに順に起動し、各起動に締め切りまでの残りを渡す。残りが尽きた言語は起動しない。B = 30 分で上限 90 秒。実測はこのリポジトリの `plugins/` の Python 549 本で complexipy 0.13 秒・Ruff 0.10 秒（2026-09-27）、lizard（`.py` `.js` `.ts`）1.0 秒（2026-09-26）。どれも uvx のキャッシュ済み | 遅い偽のツールで締め切りを超えさせ、所要が `deadline_seconds + kill_grace` を超えないこと |
 | 運用・保守性 | 測れなかった理由は識別子で残し、指標のファイル・計画・完了報告で同じ識別子を使う | 識別子は `codemetrics.REASONS` の 1 か所に置き、3 つの出力はどれも `codemetrics_view` を通す | 3 つの出力に同じ識別子が出ることを、失敗させた実行で確かめる |
-| システム環境 | 利用者の環境へ常駐のインストールを増やさない。一時実行のキャッシュへの書き込みは許す | `uvx` の一時実行だけを使い、`uv tool install` も `npx` も使わない。uv のキャッシュ（`~/.cache/uv`）への書き込みは許す。対象リポジトリへは書かない | 測定の前後で `git status --porcelain` が同じこと。起動したコマンドに `install` が無いこと |
+| システム環境 | 利用者の環境へ常駐のインストールを増やさない。一時実行のキャッシュへの書き込みは許す | `uvx` の一時実行だけを使い、`uv tool install` も `npx` も使わない。uv のキャッシュ（`~/.cache/uv`）への書き込みは許す。対象リポジトリへは書かない（Ruff は `--no-cache`、complexipy は `--cache-dir` を一時ディレクトリへ向ける。どちらも外すと作業ディレクトリの直下にキャッシュのディレクトリができた。2026-09-27） | 測定の前後で `git status --porcelain` が同じこと。起動したコマンドに `install` が無いこと |
 
 ## 決定の記録
 
@@ -595,10 +661,21 @@ stateDiagram-v2
 重複や長いテストも提案の対象になる。本体の表を先に置いて件数を多く取り、テストの表は短くする。
 本体だけを測る案は、テストへの提案の根拠を失うため採らない。
 
-### 決定 2: Python は radon、ほかの言語は lizard 1 つで受ける
+### 決定 2: Python は Ruff と complexipy、ほかの言語は lizard 1 つで受ける
 
-radon は Python の CC と MI を 1 つのパッケージで出す。lizard は JavaScript・TypeScript・PHP・Go を含む 13 言語の
-CC と関数の長さを、設定なしで同じ CSV の形で出す。どちらも PyPI にあり、ランナーが `uvx` 1 つで足りる。
+利用者が 2026-09-27 の承認ゲート 1 で決めた。Python は Ruff（循環的複雑度・分岐・文・引数・return の数）と
+complexipy（認知的複雑度）の 2 つのコマンドを 1 つの測定ツール `ruff-complexipy` として測る。どちらも
+Rust で書かれて速く（`plugins/` の Python 549 本で 0.1 秒台）、保守が続いている。認知的複雑度は入れ子の深さに
+重みを付けるため、循環的複雑度だけより読みにくさの順位に近い。lizard は JavaScript・TypeScript・PHP・Go を含む
+13 言語の CC と関数の長さを、設定なしで同じ CSV の形で出す。3 つとも PyPI にあり、ランナーが `uvx` 1 つで足りる。
+
+radon は採らない。radon だけが出す保守性の指数（MI）は失い、ファイル単位の値は決定 11 の NDF が数える行数と
+関数の数で代える。Ruff の値は `message` の文字列にしか無く、関数の終わりの行も出ないため、値を文字列から
+読み（「データ構造」の Ruff の値の読み方）、関数の範囲は NDF が `ast` で数える。循環的複雑度はツールで数え方が
+違う（`check_new` は lizard で 35、Ruff で 11）ため、言語の節ごとにツールの名前と版を載せ、言語をまたいで
+同じ列で比べない。complexipy の上限を超えたときの終了コード 1 は、上限を 1000000 にして出さない（`-i` では
+0 にならなかった）。
+
 ESLint の `complexity` は TypeScript にパーサーのプラグインと設定が要り、phpmetrics は PHP の実行環境が要るため
 採らない。
 
@@ -655,8 +732,8 @@ bash の流れにも 1 行で書ける。
 
 ### 決定 11: 行数は NDF が空行を除いて数える
 
-radon の `sloc` はコメントとドキュメント文字列を除き、lizard はファイルの行数を CSV に出さない。ツールの
-値を使うと言語で意味が変わる。空行を除いた行なら全言語で同じ意味になり、標準ライブラリで数えられる。
+Ruff と complexipy はファイルの行数を出さず、lizard はファイルの行数を CSV に出さない。ツールごとの
+行数を使うと言語で意味が変わる。空行を除いた行なら全言語で同じ意味になり、標準ライブラリで数えられる。
 
 ### 決定 12: 関数とファイルの指標は状態ファイルに載せない
 
@@ -667,7 +744,7 @@ radon の `sloc` はコメントとドキュメント文字列を除き、lizard
 
 | 受け入れ条件・不変条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
 | --- | --- | --- |
-| AC1 | Python のファイルを含む範囲で `measure` を打つと、`start-phase propose` より前に指標のファイルができ、関数の CC・ファイルの MI・行数が載る | 駆動で `measure` を `start-phase propose` の後へ動かす。MI の読み取りを外す |
+| AC1 | Python のファイルを含む範囲で `measure` を打つと、`start-phase propose` より前に指標のファイルができ、関数の CC と認知的複雑度・ファイルの大きさ（関数の数・最長の関数の行数）・行数が載る | 駆動で `measure` を `start-phase propose` の後へ動かす。complexipy の値の突き合わせを外す |
 | AC2 | `.py` と `.ts` を含む範囲で、言語ごとの節と、節の見出しにツールの名前と版が出る | 言語の群を 1 つにまとめる。版を見出しから落とす |
 | AC3 | 範囲外の追跡ファイルと、範囲内の追跡していないファイルが載らない | `git ls-files` を `find` に替える。パス指定の `--` を外す |
 | AC4 | テストのパスの関数が「テスト」の表に、本体の関数が「本体」の表に出る | `is_test_path` の判定を外す |
@@ -677,8 +754,8 @@ radon の `sloc` はコメントとドキュメント文字列を除き、lizard
 | AC8 | 既定の表と既定の値に `plugins/` などのパスと、このリポジトリ固有の設定が無い | 既定の表にこのリポジトリのパスを足す |
 | AC9 | uvx もツールも PATH に無いとき、`measure` が 0 で終わり、ファイルと計画に `tool_missing` が出て、提案が起動される | ツールが無いときに 4 で止める |
 | AC10 | `.go` だけの範囲は lizard で測られる。`.sh` だけの範囲は `unsupported_language` と記録して提案へ進む | `go` を表から消す。`unsupported_language` で止める |
-| AC11 | 0 以外で終わるツール・壊れた出力を返すツールで、その言語が `tool_failed` / `unreadable_output` になり、ほかの言語は測られる | 1 言語の失敗で残りの言語を飛ばす |
-| AC12 | 壊れた宣言（JSON でない・知らない鍵・`radon` を `typescript` へ）で既定で測り、ファイルと計画に `declaration_invalid` と理由が出る | 壊れた宣言で例外を上げる。一部の鍵だけ生かす |
+| AC11 | 正常でない終了コードで終わるツール・壊れた出力を返すツールで、その言語が `tool_failed` / `unreadable_output` になり、ほかの言語は測られる。complexipy が 1 で `--output` を書いたとき（構文を読めないファイルがある）は測った扱いで、読めなかったファイルが数えられる。`ruff` か `complexipy` の片方だけが落ちても `python` は失敗になる | 1 言語の失敗で残りの言語を飛ばす。complexipy の 1 を一律に失敗にする。片方の値だけで載せる |
+| AC12 | 壊れた宣言（JSON でない・知らない鍵・`ruff-complexipy` を `typescript` へ）で既定で測り、ファイルと計画に `declaration_invalid` と理由が出る | 壊れた宣言で例外を上げる。一部の鍵だけ生かす |
 | AC13 | `init` の後の `limits.measure_timeout` が `ceil(0.05·B·60)` で、B を変えると比例して変わる | 秒の固定値を入れる |
 | AC14 | 締め切りを超える偽のツールで、子プロセスまで止まり、その言語が `timeout` になり、提案が起動される | プロセスグループではなく子だけを止める。打ち切りを外す |
 | AC15 | 測定を足しても、`limits` の手順の終わりの時刻が足す前と同じである | 提案の枠の終わりに測定の上限を足す |
@@ -688,7 +765,7 @@ radon の `sloc` はコメントとドキュメント文字列を除き、lizard
 | AC19 | 計画に「指標の測定」の節があり、言語・ツール・版・秒と、測れなかった言語・理由が出る | 計画の書き出しから節を外す |
 | AC20 | `report` に計画と同じ行が出る | 報告だけ別の組み立てにする |
 | AC21 | 測定の前後で `git status --porcelain` が同じ | 指標のファイルを作業ディレクトリの直下へ書く |
-| AC22 | uvx があるとき、起動の引数が `--from radon==6.0.1` と `--from lizard==1.24.0` を含む。uvx が無く PATH にあるとき、PATH のコマンドで起動し `runner` が `path` になる | 版の固定を外す。uvx があっても PATH を先に使う |
+| AC22 | uvx があるとき、起動の引数が `--from ruff==0.16.9` ・ `--from complexipy==8.0.1` ・ `--from lizard==1.24.0` を含む。uvx が無く PATH にあるとき、PATH のコマンドで起動し `runner` が `path` になる | 版の固定を外す。uvx があっても PATH を先に使う |
 | AC23 | 既存の `tests/` がすべて通る | — |
 | AC24 | 4 本の `lang-*.md` に既定のツールと読む指標がある | 目で確かめる（`.md` の文言を照合するテストは書かない） |
 | I1 | 2 回目の `measure` がツールを起動せず、同じ記録を返す | 冪等の判定を外す |
@@ -700,10 +777,11 @@ radon の `sloc` はコメントとドキュメント文字列を除き、lizard
 | I7 | AC17 と同じ | — |
 | I8 | AC21 と同じ | — |
 | I9 | AC14 と同じ。あわせて残りが 0 の言語はツールを起動しない | 残りが尽きた後も起動する |
+| Ruff の値の読み方 | 2026-09-27 に保存した Ruff の出力（`C901` と `PLR` の 5 つ・`invalid-syntax`）から、（パス・`def` の行）で関数へ結び付き、出ない `PLR` が 0 になる | 名前で結び付ける。出ない `PLR` を空にする。`message` の末尾以外の数を読む |
 
-**外部の取得には頼らない。** 偽の `uvx` ・ `radon` ・ `lizard` を置いた環境で、無い・落ちる・読めない・遅い
-経路を確かめる（要求の「検証手段」）。実物のツールの出力の読み取りは、2026-09-26 に測った出力の形
-（「データ構造」のツールの表）をもとにする。
+**外部の取得には頼らない。** 偽の `uvx` ・ `ruff` ・ `complexipy` ・ `lizard` を置いた環境で、無い・落ちる・読めない・遅い
+経路を確かめる（要求の「検証手段」）。実物のツールの出力の読み取りは、2026-09-26（lizard）と 2026-09-27（Ruff と
+complexipy）に測った出力の形（「データ構造」のツールの表）をもとにする。
 
 ## 未確認のまま残ること
 
@@ -712,5 +790,6 @@ radon の `sloc` はコメントとドキュメント文字列を除き、lizard
 | claude・kiro が作業ディレクトリの外のファイルを読めるか | 結果ファイルを一時ディレクトリへ書けているため読めると見込む。agy は一時ディレクトリを `--add-dir` で既に足している | 手動確認（このリポジトリの PR で `drive.py` を 1 回動かす） |
 | キャッシュの無い環境での初回の所要 | uvx の取得は通信に依存する。キャッシュ済みなら 0.1〜0.2 秒で起動した。キャッシュ済みの固定の版は `UV_OFFLINE=1` でも起動した | 実装で 1 度、キャッシュを空にして測る |
 | 1 回の起動に渡すファイルの数（500 本） | 引数の長さの上限（macOS は 1 MB）に対する余裕として置いた値 | 実装で大きい範囲を渡して確かめる |
-| radon のクロージャとネストした関数の載せ方 | cc の出力の `closures` を関数として載せるか | 実装（`tdd-cycle`）で出力を見て決める |
+| Ruff と complexipy の構文の読み取りの差 | 片方だけが読めないファイルがあるか。読めなかったファイルは Ruff の `invalid-syntax` だけで数える | 実装で、新しい構文と壊れた構文のファイルを両方へ渡して確かめる |
+| `ast` がオーケストレーターの Python の版で読めないファイル | 対象が新しい構文を使うと、Ruff と complexipy が読めても NDF が関数を列挙できない | 実装で、読めなかったファイルの数が要約に出ることを確かめる |
 | lizard の関数名の形（`Class::method` など）と提案の `symbol` の書き方の差 | 参加者が読み替えられるかは使って分かる | 手動確認 |

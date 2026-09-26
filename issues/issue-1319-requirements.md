@@ -76,7 +76,7 @@
 | --- | --- |
 | 指標 | 対象範囲のコードをツールで測った値。関数ごとの循環的複雑度、ファイルごとの保守性か大きさ、行数 |
 | 指標のファイル | 提案の前に 1 回だけ作り、参加者の全員が読む測定の結果 |
-| 測定ツール | 言語ごとに指標を測る外部のコマンド（radon・lizard など） |
+| 測定ツール | 言語ごとに指標を測る外部のコマンド（Ruff・complexipy・lizard など） |
 
 ## 受け入れ条件
 
@@ -169,7 +169,7 @@ AC9〜AC12・AC14 はツールを差し替えた（無い・失敗する・遅�
 | # | 項目 | 誰が決めるか | 期限 |
 | --- | --- | --- | --- |
 | 1 | 測る範囲（`--scope` の本体だけか、テストも含むか。含めるなら本体と分けて載せるか） | `design` | 設計 PR |
-| 2 | 言語ごとのツールの既定。候補は Python が radon（cc / mi / raw）、JavaScript / TypeScript が ESLint の `complexity` か lizard、PHP が phpmetrics か lizard。lizard を専用ツールの無い言語の受け皿にするか | `design` | 設計 PR |
+| 2 | 言語ごとのツールの既定。候補は Python が radon（cc / mi / raw）、JavaScript / TypeScript が ESLint の `complexity` か lizard、PHP が phpmetrics か lizard。lizard を専用ツールの無い言語の受け皿にするか。**2026-09-27 の承認ゲート 1 で、Python は Ruff と complexipy、ほかの言語は lizard と決まった（設計の決定 2）** | `design` | 設計 PR |
 | 3 | ツールの起動の仕方（`uvx` / `npx` などの一時実行か、プロジェクトに入っているものを優先するか）と、版の固定の仕方 | `design` | 設計 PR |
 | 4 | 指標のファイルの形（Markdown の表か JSON か、上位と要約に絞るか）と置き場（参加者の作業ディレクトリから読める所） | `design` | 設計 PR |
 | 5 | 提案の JSON の根拠の欄の名前と形 | `design` | 設計 PR |

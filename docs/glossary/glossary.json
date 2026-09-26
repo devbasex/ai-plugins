@@ -1998,7 +1998,7 @@
     {
       "term": "指標",
       "context": "ndf-cross-refactoring",
-      "meaning": "`cross-refactoring` が提案の前に対象範囲のコードを測定ツールで測った値。関数ごとの循環的複雑度、ファイルごとの保守性か大きさ、行数",
+      "meaning": "`cross-refactoring` が提案の前に対象範囲のコードを測定ツールで測った値。関数ごとの循環的複雑度（Python では認知的複雑度も）、ファイルごとの大きさ、行数",
       "source": "",
       "pending_source": "issues/issue-1319-design.md"
     },
@@ -2012,7 +2012,7 @@
     {
       "term": "測定ツール",
       "context": "ndf-cross-refactoring",
-      "meaning": "言語ごとに指標を測る外部のコマンド（radon・lizard など）",
+      "meaning": "言語ごとに指標を測る外部のコマンド（Ruff・complexipy・lizard など）",
       "source": "",
       "pending_source": "issues/issue-1319-design.md"
     },
