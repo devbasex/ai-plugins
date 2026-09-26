@@ -239,4 +239,7 @@ def main(argv: list[str] | None = None) -> None:
 
 
 if __name__ == "__main__":
+    import deps  # noqa: E402
+    # `refactor_lib` を同じプロセスで読む（状態の置き場・origin の owner/repo）。呼び名の表は md で読む
+    deps.require("md", "mdtable")
     main()

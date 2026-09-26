@@ -65,9 +65,9 @@
 | [repo.py](repo.py) | メインディレクトリ・`owner/repo`・slug・宣言のベースブランチ（git だけで決める） | `cross-review`（`review_lib/`） / `cross-refactoring`（`drive.py`・`commands/setup.py`）（C1〜C7 で各スクリプト） |
 | [loop_drive.py](loop_drive.py) | 収束ループの drive の部品（`call`・`parse_vars`・`review_status`） | 収束ループの 2 つの `drive.py` |
 | [deps.py](deps.py) | 外部パッケージを使うエントリポイントが最初に呼ぶ `require("<グループ>")`。import できなければ uv の環境（宣言と版の固定はプラグインルートの `pyproject.toml` と `uv.lock`）で起動し直し、uv が無ければ版を固定して入れる。入れられなければ終了コード 3。hook とラッパーのバージョンディレクトリは使わない | 外部パッケージを使うエントリポイント |
-| [md.py](md.py) | Markdown の構造の読み取り（囲み・見出し・節・表・地の文・リンクとアンカー）。markdown-it-py を呼ぶのはここだけ。書き込みは読み取った行の区間で呼び出し側が行う | L1 の時点では無し（D1〜D8 が呼び出し側を置き換える） |
-| [mdtable.py](mdtable.py) | Markdown の表の組み立て（列の幅を揃えない行・セルの縦棒のエスケープ・数の列の右寄せ）。tabulate を呼ぶのはここだけ | 同上 |
-| [schema.py](schema.py) | JSON と設定の形の検証（`Shape` と `load_shape`）。pydantic の誤りを日本語の 1 行（`ShapeError`）へ直し、語彙に無い値を下げる読みは `lenient_choice` | 同上 |
+| [md.py](md.py) | Markdown の構造の読み取り（囲み・見出し・節・表・地の文・リンクとアンカー）。markdown-it-py を呼ぶのはここだけ。書き込みは読み取った行の区間で呼び出し側が行う | `cross-refactoring`（`refactor_lib/vocabulary.py`）。ほかは D1〜D8 が呼び出し側を置き換える |
+| [mdtable.py](mdtable.py) | Markdown の表の組み立て（列の幅を揃えない行・セルの縦棒のエスケープ・数の列の右寄せ）。tabulate を呼ぶのはここだけ | `cross-refactoring`（`refactor_lib/plan.py`・`commands/report.py`）。ほかは D1〜D8 が呼び出し側を置き換える |
+| [schema.py](schema.py) | JSON と設定の形の検証（`Shape` と `load_shape`）。pydantic の誤りを日本語の 1 行（`ShapeError`）へ直し、語彙に無い値を下げる読みは `lenient_choice` | L1 の時点では無し（D1〜D8 が呼び出し側を置き換える） |
 | [procs.py](procs.py) | プロセスの生死（ゾンビは死）・親子・木の停止（グループの先頭ならグループへ）・メモリと cgroup。psutil を呼び、`/proc/` を読むのはここだけ | 同上 |
 | [locks.py](locks.py) | ファイルロック（`<対象>.lock` で取る排他・待たない取得・排他つきの 1 行の追記）。filelock を呼び、`fcntl` を使うのはここだけ | 同上 |
 | [shparse.py](shparse.py) | シェルの構文木（tree-sitter-bash）。試行 T2 で見つけた構文木の癖 5 つを直して渡す。hook の経路で使うため `deps.require()` を呼ばない | 同上 |

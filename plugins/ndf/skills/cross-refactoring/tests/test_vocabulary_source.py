@@ -53,3 +53,19 @@ def test_it_stops_when_the_table_is_missing(tmp_path: pathlib.Path) -> None:
     with pytest.raises(Exception) as caught:
         _load(copy, "vocabulary_without_table")
     assert "呼び名の表を読めません" in str(caught.value)
+
+
+def test_a_table_inside_a_code_fence_is_not_read(vocabulary, tmp_path, monkeypatch) -> None:
+    """#1142 の D4 で節と表を `md` で読むようにして変わった入力。コードの囲みの中の `## ` や `|` の行は、
+    節にも表にもならない（前は正規表現で行を拾い、囲みの中の例を表として読んでいた）。"""
+    table = tmp_path / "vocabulary.md"
+    table.write_text(
+        "## 兆候\n\n```text\n| 識別子 | 日本語の名前 |\n| --- | --- |\n| `fake` | 例 |\n```\n\n"
+        "| 識別子 | 日本語の名前 |\n| --- | --- |\n| `real` | 本物 |\n\n"
+        "```md\n## 手法\n```\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(vocabulary, "VOCABULARY_TABLE", table)
+    assert vocabulary._read_table("兆候", "日本語の名前") == {"real": "本物"}
+    with pytest.raises(vocabulary.VocabularyUnavailable, match="「手法」の節がありません"):
+        vocabulary._read_table("手法", "日本語の名前")
