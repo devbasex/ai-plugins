@@ -1998,7 +1998,7 @@
     {
       "term": "指標",
       "context": "ndf-cross-refactoring",
-      "meaning": "`cross-refactoring` が提案の前に対象範囲のコードを測定ツールで測った値。関数ごとの循環的複雑度（Python では認知的複雑度も）、ファイルごとの大きさ、行数",
+      "meaning": "`cross-refactoring` が提案の前に対象範囲のコードを測定ツールで測った値。関数ごとの循環的複雑度（Python では認知的複雑度も）、ファイルごとの大きさ、行数、重複の箇所",
       "source": "",
       "pending_source": "issues/issue-1319-design.md"
     },
@@ -2012,7 +2012,7 @@
     {
       "term": "測定ツール",
       "context": "ndf-cross-refactoring",
-      "meaning": "言語ごとに指標を測る外部のコマンド（Ruff・complexipy・lizard など）",
+      "meaning": "言語ごとに指標を測る外部のコマンド（Ruff・complexipy・lizard・symilar・jscpd など）",
       "source": "",
       "pending_source": "issues/issue-1319-design.md"
     },
@@ -2027,6 +2027,13 @@
       "term": "根拠の値",
       "context": "ndf-cross-refactoring",
       "meaning": "提案が根拠にした指標の値。提案の JSON の `evidence` に書き、採否には使わない",
+      "source": "",
+      "pending_source": "issues/issue-1319-design.md"
+    },
+    {
+      "term": "重複の箇所",
+      "context": "ndf-cross-refactoring",
+      "meaning": "対象範囲の中で、同じコードが最小の行数（8 行）以上続く 2 か所以上の組。Python は symilar、ほかの言語は jscpd が見つける",
       "source": "",
       "pending_source": "issues/issue-1319-design.md"
     }
