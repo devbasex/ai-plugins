@@ -33,9 +33,13 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE / "lib"))
+import deps  # noqa: E402
+
+deps.require("md")
 from step_result import (EXIT_PRECONDITION, EXIT_UNREADABLE, StepError, emit, git_root,  # noqa: E402
                          main_with, result, run)
 import gh_call  # noqa: E402
+import md  # noqa: E402
 
 TOOL = "mission-close"
 DIST = "## 配布の記録"
@@ -65,19 +69,14 @@ def parse_record(text):
     後の最後のブロック。無ければ None。
     """
     lines = text.splitlines()
-    dist_start = None
-    for i, ln in enumerate(lines):
-        if ln.startswith(DIST):
-            dist_start = i
+    sections = [s for s in md.md_sections(text) if lines[s.heading.line].startswith("#")]
+    dists = [s for s in sections if lines[s.heading.line].startswith(DIST)]
+    dist_start = dists[-1].heading.line if dists else None
     out = {"found": dist_start is not None, "stage": None, "version": None, "mission_prs": [],
            "verify_block": None}
     if dist_start is None:
         return out
-    block = []
-    for ln in lines[dist_start + 1:]:
-        if ln.startswith("## "):
-            break
-        block.append(ln)
+    block = lines[dists[-1].start:dists[-1].end]
     for ln in block:
         if ln.startswith("段階: ") and out["stage"] is None:
             out["stage"] = ln[len("段階: "):].strip()
@@ -90,9 +89,10 @@ def parse_record(text):
                 break
 
     blocks = []  # (開始行, 対象の版, 行の並び)
+    verify_heads = {s.heading.line for s in sections if lines[s.heading.line].startswith(VERIFY)}
     cur = None
     for i, ln in enumerate(lines):
-        if ln.startswith(VERIFY):
+        if i in verify_heads:
             cur = {"start": i, "ver": None, "lines": [ln]}
             continue
         if cur is None:
@@ -113,26 +113,20 @@ def parse_record(text):
     return out
 
 
-def cells(row):
-    return [c.strip() for c in row.strip().strip("|").split("|")]
-
-
 def verification_verdicts(block, record_repo):
-    """表を課題でまとめ、{(repo, number): 全部合格か} を返す。表が読めなければ None。"""
-    rows = [ln for ln in block.splitlines() if ln.strip().startswith("|")]
-    if len(rows) < 2:
+    """表を課題でまとめ、{(repo, number): 全部合格か} を返す。表が読めなければ None。
+
+    表は lib/md.py（GFM）で読む。欠けたセルは空として読むため、`結果` の欠けた行は合格でない。"""
+    found = md.tables(block)
+    if not found:
         return None
-    head = cells(rows[0])
+    head = [c.strip() for c in found[0].header]
     if "課題" not in head or "結果" not in head:
         return None
     ci, ri = head.index("課題"), head.index("結果")
     verdicts = {}
-    for row in rows[1:]:
-        cs = cells(row)
-        if all(re.fullmatch(r":?-+:?", c) for c in cs if c):
-            continue
-        if len(cs) <= max(ci, ri):
-            return None
+    for row in found[0].rows:
+        cs = [c.strip() for c in row]  # md は行のセルを見出しの数へ揃える
         m = re.search(r"(?:([A-Za-z0-9._-]+/[A-Za-z0-9._-]+))?#(\d+)", cs[ci])
         if not m:
             return None
