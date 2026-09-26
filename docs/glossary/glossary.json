@@ -832,7 +832,7 @@
     {
       "term": "スロット",
       "context": "ndf-agent-cli",
-      "meaning": "1 ラウンドで 1 つの CLI プロセスが占める枠。1 ラウンドは 2 スロット",
+      "meaning": "1 ラウンドで 1 つの CLI プロセスが占める枠",
       "source": "docs/specifications/cross-review-participants-and-seats.md"
     },
     {

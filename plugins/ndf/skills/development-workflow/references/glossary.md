@@ -83,9 +83,10 @@ flowchart TB
 | worker | 1 つの作業（調査・修正・検証・集計）を行うサブエージェント。別のサブエージェントを起動しない | `ndf:worker`、プランの work のステップ | [agent-layers.md](agent-layers.md) の「3 層の責務」 |
 | ラッパー | 利用者の `claude` を包んで常駐し、ndf-next のブロックを拾って `/exit`・プラグインの更新・次のセッションの起動を行う（Claude Code だけ） | `relay.py run`、`/ndf:install-wrapper`、`NDF_RELAY_DIR` | [relay.md](relay.md) |
 | 最小構成の `claude -p` | Tool と指示を絞った 1 回の判断。judge のステップと MVV 判定が使う | — | [work-vessels.md](work-vessels.md) の「比べる実行方式」 |
-| レベル | 仕事を渡す実行方式の LLM の使い方の水準。レベル 1 = スクリプト、レベル 2 = 分類の判断、レベル 3 = インライン実行の LLM | — | [work-vessels.md](work-vessels.md) の「比べる実行方式」 |
+| 実行レベル | 仕事を渡す実行方式の LLM の使い方の水準。実行レベル 1 = スクリプト、実行レベル 2 = 分類の判断、実行レベル 3 = インライン実行の LLM | — | [work-vessels.md](work-vessels.md) の「比べる実行方式」 |
 | インライン実行 | 仕事を渡す実行方式の 1 つ。いまの会話の文脈で行う | — | [work-vessels.md](work-vessels.md) |
-| 実装担当 / オーケストレーター | `cross-refactoring` で、リファクタリング計画以降を通す 1 ランタイムと、公開・生成物の同期を持つ側 | `--implementer` | [cross-refactoring](../../cross-refactoring/SKILL.md) の「この Skill で使う語」 |
+| 実装担当 | `cross-refactoring` で、リファクタリング計画・テスト追加・実装・修正・最終ゲート修正を通して担う 1 ランタイム | `--implementer` | [cross-refactoring](../../cross-refactoring/SKILL.md) の「この Skill で使う語」 |
+| オーケストレーター | `cross-refactoring` と `cross-review` で、公開・生成物の同期を持ち、担当を回す側。3 層では conductor に当たる | — | [cross-refactoring](../../cross-refactoring/SKILL.md) の「この Skill で使う語」 |
 
 ## 進め方と判定
 
@@ -100,7 +101,6 @@ flowchart TB
 | 実行条件 | プランを流す前に打つコマンド。`skip_code` を返せば worktree を作らずに完了とする | プランの `"実行の条件"` | [supervise.py](../../../scripts/supervise.py) の docstring |
 | 流出不具合 | マージ済みの変更に見つかった不具合。直した Pull Request が触った領域を記録し、トリガーに数える | `new impl --escape-of <PR>`、記録の `kind: escape` | [pace.md](pace.md) の「流出不具合の記録」 |
 | 重点領域 | 領域のうち、触った Pull Request の点数を重くするもの | `areas[].common`、`common_weight` | [pace.md](pace.md) の「宣言」 |
-| 階層 | パスの区切り 1 つ分の深さ。どの領域にも当たらないファイルは、ディレクトリの先頭 3 階層を領域の名前にする | — | [pace.md](pace.md) の「宣言」 |
 | judge のステップ | 結果ファイルと規則の抜粋だけを渡し、次のステップを LLM に決めさせるステップ。Tool を持たない | `"type": "judge"` | [supervise.py](../../../scripts/supervise.py) の docstring |
 | 決定 | judge のステップが返す、次に取る手 | `decision`（`choices` のどれか） | [supervise.py](../../../scripts/supervise.py) の docstring |
 | 区分 | `issue-upkeep` が課題ごとに決める 8 つ（そのまま・追記が要る・書き直しが要る・閉じてよい・やらない・重複・ルートコーズ・要判断） | `plan.json` の `verdict` | [issue-upkeep](../../issue-upkeep/SKILL.md) の「用語」 |
@@ -111,7 +111,7 @@ flowchart TB
 | --- | --- | --- | --- |
 | 承認ゲート | 人手の承認を求める点。取り消せない操作の前の 2 つだけで、増やさない | 報告の `結果: 関門`、結果 JSON の `status: gate`、終了コード 10〜19 | [../SKILL.md](../SKILL.md) の「人手の承認を求める承認ゲート」 |
 | ゲート 1 | 設計 Pull Request のマージ。文書では企画承認に当たる | 承認ラベル `design-approved` | [../SKILL.md](../SKILL.md) の「設計 Pull Request のマージ」 |
-| ゲート 2 | 本番の系へ届く操作（本番へのリリースと `operation` の実行）。文書では制作物承認に当たる | `mission-state.py gate <状態> "関門 2"` | [../SKILL.md](../SKILL.md) の「本番の系へ届く操作」 |
+| ゲート 2 | 本番系へ届く操作（本番へのリリースと `operation` の実行）。文書では制作物承認に当たる | `mission-state.py gate <状態> "関門 2"` | [../SKILL.md](../SKILL.md) の「本番系へ届く操作」 |
 | 承認ラベル | 人間が設計を承認したことを表す Pull Request のラベル。無ければ hook が設計 Pull Request のマージを拒む | `design-approved` | [stage-completeness.md](stage-completeness.md) の「用語」 |
 | 承認資料 | 承認を求めるときに示すもの。対象を開くためのものと、承認の判断に使うものの 2 層を持つ | 報告の `提示物:`、結果 JSON の `presentation_path`、`issues/approval-<plugin>-v<正式版>.md`（承認資料のコピー） | [approval-request.md](approval-request.md) |
 | エビデンス | 承認資料のうち機械で作れる部分と、conductor が確かめて足した事実。MVV 判定へ渡す | `release-steps.py approval-facts`、プランの `facts` のステップ、`mvv-gate.py --material` | [release-steps.md](../../release/references/release-steps.md)、[pace.md](pace.md) の「MVV 判定」 |
@@ -122,16 +122,16 @@ flowchart TB
 | --- | --- | --- | --- |
 | リリース | 変更を利用者へ届く形で公開すること。その工程とフェーズの名前でもある | `/ndf:release`、`supervise.py new release`、工程表の行と進捗記録の `stage` の値は `配布` | [release](../../release/SKILL.md) |
 | リリースプラン | リリースの手順をステップの列として持つプラン | `supervise.py new release`、`--channel dev` / `prod` | [supervise.py](../../../scripts/supervise.py) の docstring |
-| 開発版 | ベースブランチ（`develop`）に載るチャネルと、そこへ出す接尾辞付きの版。マージされた変更がそのまま載る | `<版>-dev.<n>`、`new release --channel dev` | [release](../../release/SKILL.md) の「リリースの段階」 |
-| 本番 | 利用者が現に使っているチャネル・環境・外部サービス（本番の系）。プラグインのリリースでは本番のブランチ | `.ndf/worktree.json` の `production_branch`（無ければ既定ブランチ）、`--channel prod` | [../SKILL.md](../SKILL.md) の「本番の系へ届く操作」 |
-| 正式版 | 本番のチャネルへ出す、接尾辞の無い版。出したらリリースタグを打つ | タグ `<plugin>--v<版>` | [release](../../release/SKILL.md) の「リリースの段階」 |
-| 検証リリース | 開発版と分かる版数での公開か、検証環境への反映。提示して進めてよい | — | [release](../../release/SKILL.md) の「リリースの段階」 |
+| 開発版 | ベースブランチ（`develop`）に載るチャネルと、そこへ出す接尾辞付きの版。マージされた変更がそのまま載る | `<版>-dev.<n>`、`new release --channel dev` | [release](../../release/SKILL.md) の「リリース種別」 |
+| 本番 | 利用者が現に使っているチャネル・環境・外部サービス（本番系）。プラグインのリリースでは本番のブランチ | `.ndf/worktree.json` の `production_branch`（無ければ既定ブランチ）、`--channel prod` | [../SKILL.md](../SKILL.md) の「本番系へ届く操作」 |
+| 正式版 | 本番チャネルへ出す、接尾辞の無い版。出したらリリースタグを打つ | タグ `<plugin>--v<版>` | [release](../../release/SKILL.md) の「リリース種別」 |
+| 検証リリース | 開発版と分かる版数での公開か、検証環境への反映。提示して進めてよい | — | [release](../../release/SKILL.md) の「リリース種別」 |
 | インストール確認 | 隔離した HOME で ref からプラグインをインストールし、版と中身が ref と一致するかを確かめる | `release-verification-steps.py verify-install --ref <ブランチ> --expect <版>`、プランの `verify` のステップ、`fast.verify` | [release-verification-steps.py](../../../scripts/release-verification-steps.py) の docstring |
 | リリース完了の確認 | 公開が済んだことを、リリース先の状態から読み取れる値 | `release` の結果 JSON の `items[]` | [completion-check.md](../../release/references/completion-check.md) の「用語」 |
 | スタックしたチェック | 実行が終わったのに pending のまま残った CI のチェック。1 度だけ再実行し、再び残れば止まる | `merged-steps.py merge-when-green --stale-after <秒>`、`items` の `rerun` / `stuck` | [merged](../../merged/SKILL.md) の `merge-when-green` |
 | コピー | 元のファイルをそのまま別の場所へ置いたもの。ラッパーの `relay.py`（版は横の `relay.version`。新しい版を古い版で置き直さない）・マイルストーンの説明から作る `mvv.md`・承認資料の `issues/approval-*.md` | `~/.claude/ndf/relay.py`、`relay.version` | [relay.md](relay.md) の「始め方」 |
 | 抜粋 | 呼ぶ側が要る部分だけを Skill の本文から取り出したもの | `EXCERPTS.md` | [EXCERPTS.md](../../EXCERPTS.md) |
-| リリースコマンド | リポジトリが `.ndf/release.json` に宣言し、`release` がリリースの段階に合わせて走らせる 1 つのコマンド | `steps[]`、`release-steps.py run`、出力の `コマンド: <name> → <終了コード>` | [release-steps.md](../../release/references/release-steps.md) |
+| リリースコマンド | リポジトリが `.ndf/release.json`（リリースの設定）に書き、`release` がリリース種別に合わせて走らせる 1 つのコマンド | `steps[]`、`release-steps.py run`、出力の `コマンド: <name> → <終了コード>` | [release-steps.md](../../release/references/release-steps.md) |
 
 ## 検査とテスト
 
@@ -152,7 +152,7 @@ flowchart TB
 | 危険フラグ | `cross-refactoring` で、範囲テストでは覆えない変更（D1〜D5）。立てば全体テストを 1 度走らせる | D1〜D5 | [cross-refactoring](../../cross-refactoring/SKILL.md) の「この Skill で使う語」 |
 | グレード | `cross-refactoring` が候補ごとに付ける適用の価値（high / medium / low）。改善項目の順位の最初のキー | `tier` | [cross-refactoring](../../cross-refactoring/SKILL.md) の「この Skill で使う語」 |
 | コメントのスナップショット | `cross-review` が取る既存コメントの一覧。2 ラウンド目以降は取り直す | `state.py init` | [cross-review](../../cross-review/SKILL.md) |
-| 指摘ファイル | `cross-review` の担当が書く、指摘の全件と総評のファイル。レビューを回す側が読んで投稿する | `<席>-review-pr<番号>-round<R>-payload.json` | [cross-review](../../cross-review/SKILL.md) |
+| 指摘ファイル | `cross-review` の担当が書く、指摘の全件と総評のファイル。オーケストレーターが読んで投稿する | `<席>-review-pr<番号>-round<R>-payload.json` | [cross-review](../../cross-review/SKILL.md) |
 | doc-lint | 追加した Markdown の行に、検討の痕跡・課題番号の由来・比較の語が無いかを見るチェック | `doc-lint.py`、プランの `doc-lint` のステップ | [doc-lint.py](../../../scripts/doc-lint.py) の docstring |
 | 用語チェック | プロジェクトの用語集の形と、文書の追加した行の廃止した語・未登録の語を見るチェック。LLM を使わない | `glossary.py check`、設計のフェーズの `glossary-check` のステップ | [glossary-format.md](../../requirements-design/references/glossary-format.md) |
 | モデルレビュー | 設計 Pull Request のレビューの 1 ラウンド目。ドメインモデルの節と用語集の差分だけを見る。承認されても抜けない | 状態ファイルの `rounds[].stage: "model"` | [04-contracts.md](../../cross-review/docs/04-contracts.md) |
@@ -163,7 +163,7 @@ flowchart TB
 | 語 | 意味 | 英語や識別子 | 正本 |
 | --- | --- | --- | --- |
 | 進捗記録 | 工程に入った時点で 1 回打つ記録。課題の本文の `## 進行` も同じ 1 回で更新される | `projects-sync.sh` | [stage-completeness.md](stage-completeness.md) の「用語」 |
-| ボード | 進行を記録する GitHub Projects のプロジェクト 1 つ。宣言が無ければ何も動かない | `.ndf/projects.json` | [projects-tracking.md](projects-tracking.md) の「用語」 |
+| ボード | 進行を記録する GitHub Projects のプロジェクト 1 つ。設定が無ければ何も動かない | `.ndf/projects.json` | [projects-tracking.md](projects-tracking.md) の「用語」 |
 | 通過工程 | ある課題について、進捗記録が実際に書かれた工程の集合 | — | [stage-completeness.md](stage-completeness.md) の「用語」 |
 | 通過記録 | 通過工程を課題ごとに残したファイル | `stage-check.sh report <番号>` | [stage-completeness.md](stage-completeness.md) の「用語」 |
 | ミッション状態ファイル | ミッションのプラン・done・承認ゲートの記録・MVV・版を持つファイル。引継ぎ文書の表と ndf-next をここから作る | `mission.json`、`mission-state.py init` / `update` / `gate` / `render` / `next` / `status` | [mission-state.py](../../../scripts/mission-state.py) の docstring |
@@ -176,7 +176,7 @@ flowchart TB
 | 進捗ログ | プランの実行中に 1 行 1 つの JSON で追記する記録。LLM を使わない | `<state-dir>/progress.jsonl` | [supervise.py](../../../scripts/supervise.py) の docstring |
 | step / alive / worker / attention | 進捗ログの行の種類。ステップの切り替わり・動きの無い間の生存・worker の進み・conductor の判断が要る出来事（止まった・承認ゲート・同じ失敗の繰り返し・judge のステップで stop が出そう） | `"kind"`、`alive` の間隔は `report_interval`（既定 600 秒） | [supervise.py](../../../scripts/supervise.py) の docstring |
 | done | キューが終わったときに書く結果の JSON。`wait` は done か attention の行まで待つ | `queue-done.json`、`wait` の終了コード done = 0 / attention = 20 / 上限 = 3 | [supervise.py](../../../scripts/supervise.py) の docstring |
-| フェーズレポート | supervisor（またはプラン）が最後に返す報告。conductor は見出しの有無と `結果` だけを見る | `## フェーズの報告`、`report.md`、`結果` は 完了 / 関門 / 止まった / スイッチポイント | [agent-layers.md](agent-layers.md) の「フェーズレポート」 |
+| フェーズレポート | supervisor（またはプラン）が最後に返す報告。conductor は見出しの有無と `結果` だけを見る | `## フェーズの報告`、`report.md`、`結果` は `完了` / `関門` / `止まった` / `スイッチポイント` | [agent-layers.md](agent-layers.md) の「フェーズレポート」 |
 | 結果 JSON | 手順のスクリプトが返す 1 行の JSON。`status` で読む | `status` は ok / gate / stopped | [lib/README.md](../../../scripts/lib/README.md) |
 
 ## 作業場所と経路
@@ -185,7 +185,7 @@ flowchart TB
 | --- | --- | --- | --- |
 | worktree | 開発の変更を行う git worktree。課題ごとに 1 つ切る | `.worktrees/<ブランチ名>`、`/ndf:worktree` | [worktree](../../worktree/SKILL.md) |
 | メインディレクトリ | リポジトリを clone したディレクトリ。`issues/` `docs/` と各ランタイムの設定は、ここで編集してよい | `git rev-parse --git-common-dir` の親 | [worktree](../../worktree/SKILL.md) の用語の表 |
-| ベースブランチ | worktree の分岐元と Pull Request の宛先 | `.ndf/worktree.json` の `base_branch` | [../SKILL.md](../SKILL.md) の「本番の系へ届く操作」 |
+| ベースブランチ | worktree の分岐元と Pull Request の宛先 | `.ndf/worktree.json` の `base_branch` | [../SKILL.md](../SKILL.md) の「本番系へ届く操作」 |
 | ミッションブランチ | 課題の Pull Request を集め、ベースブランチへの Pull Request をミッションで 1 本にするブランチ。`fast` では作らない | `mission/<名前>` | [parallel-work.md](parallel-work.md) の「ミッションの中の並列の 4 つの形」 |
 | 安定版と実験版 | NDF の変更の 2 つの経路。既定で働くもの（安定版）は工程どおりに、呼んだときだけ働くもの（実験版）はその場で実装して使ってから入れる | stable / experimental、台帳 `docs/ndf-experiments.md` | ai-plugins の `AGENTS.md` の「安定版と実験版」 |
 | 即時修正 | `fast` で、200 行以内の不具合を起票せず、その場のプランで直すこと。マージ済みの変更の不具合なら流出不具合として記録する | `new impl --escape-of <PR>` | [../SKILL.md](../SKILL.md) の「進め方」、[pace.md](pace.md) の「流出不具合の記録」 |
