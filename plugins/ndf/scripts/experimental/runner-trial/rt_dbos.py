@@ -1,6 +1,6 @@
-"""DBOS Transact（SQLite のシステムデータベース）で計画とキューを流す。
+"""DBOS Transact（SQLite のシステムデータベース）でプランとキューを流す。
 
-計画 1 本をワークフロー 1 つにし、ステップの遷移は Python の while と rt_common.route で書く。
+プラン 1 本をワークフロー 1 つにし、ステップの遷移は Python の while と rt_common.route で書く。
 ステップの結果は @DBOS.step が SQLite へ記録し、落ちた後の DBOS.launch() が記録を読み直して
 （記録のあるステップは流し直さずに）続ける。承認ゲートは DBOS.recv で待ち、DBOS.send で続ける。
 キューは DBOS の Queue（同時の本数は worker_concurrency、資源のタグは別のキューの concurrency）。
@@ -96,7 +96,7 @@ def wait_handle(wid: str, handle, gate_seq: int) -> tuple[dict, bool]:
         time.sleep(0.05)
 
 
-def run_plan(ctx: Ctx, approve: bool) -> dict:
+def run_dbos(ctx: Ctx, approve: bool) -> dict:
     """同じ入口で打ち直すと、DBOS.launch() が落ちたワークフローを記録から続ける。承認ゲートでは
     ワークフローを recv の待ちのまま残してプロセスを抜ける（os._exit。呼ぶ側が出力を済ませてから）。"""
     launch(ctx.state / "dbos.sqlite")
@@ -121,7 +121,7 @@ def run_plan(ctx: Ctx, approve: bool) -> dict:
 
 @DBOS.workflow()
 def queue_wf(stages: list, root: str) -> list:
-    """ステージの順に計画を Q["plans"] へ入れる。前のステージがすべて done のときだけ次を入れる。"""
+    """ステージの順にプランを Q["plans"] へ入れる。前のステージがすべて done のときだけ次を入れる。"""
     results = []
     for i, stage in enumerate(stages):
         handles = [Q["plans"].enqueue(plan_wf, p["plan"], str(Path(root) / f"{p['plan']}-state"), p["scenario"])

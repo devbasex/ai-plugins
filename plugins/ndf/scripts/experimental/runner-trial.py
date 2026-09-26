@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""runner-trial.py: #1142 の不足 i の設計の前に、計画の実行とキューを置き換えるライブラリを試す（実験版）。
+"""runner-trial.py: #1142 の不足 i の設計の前に、プランの実行とキューを置き換えるライブラリを試す（実験版）。
 
-    python3 runner-trial.py check <候補> [--root DIR]   # 表せるか・キュー・再開・進行の記録と wait を確かめる
+    python3 runner-trial.py check <候補> [--root DIR]   # 表せるか・キュー・再開・進捗ログと wait を確かめる
     python3 runner-trial.py cost [<候補>...] [--work DIR]  # uv での解決と導入・大きさ・import の秒数・依存の数
 
-候補は langgraph（SqliteSaver）・burr（SQLitePersister）・dbos（DBOS Transact の SQLite）。計画は
+候補は langgraph（SqliteSaver）・burr（SQLitePersister）・dbos（DBOS Transact の SQLite）。プランは
 supervise.py new impl の雛形（rt_common.PLAN_STEPS）を、ステップを偽物（sleep と決めた終了コード）にして流す。
 依存は deps-trial.py と同じ形（uv の環境へ起動し直す）で解決し、宣言と lock は隣の runner-trial/ にある。
 環境は ~/.cache/ndf/venv/runner-trial-<候補> に置く（NDF_DEPS_VENV を接頭辞に変えられる）。
@@ -85,7 +85,7 @@ def cmd_run(a) -> None:
     mod = adapter(a.cand)
     slots = rc.Slots(Path(a.slots), {"graphql": 1}) if a.slots else None
     ctx = rc.Ctx(Path(a.state), a.plan, a.scenario, slots)
-    out = mod.run_plan(ctx, a.approve)
+    out = getattr(mod, f"run_{a.cand}")(ctx, a.approve)  # 候補ごとの run_<候補>
     out["listen_ports"] = rc.own_listen_ports()
     exit_now = out.pop("exit_now", False)
     print(json.dumps(out, ensure_ascii=False), flush=True)
@@ -175,7 +175,7 @@ def queue_stats(root: Path) -> dict:
         if r["what"] == "end":
             last_end[r["plan"]] = r["t"]
         elif "graphql" in r.get("resources", []) and r["t"] - last_end.get(r["plan"], r["t"]) > 0.1:
-            waited += 1  # 同じ計画の前のステップの終わりから、枠が空くのを待った
+            waited += 1  # 同じプランの前のステップの終わりから、枠が空くのを待った
         s, e = plans.get(r["plan"], (r["t"], r["t"]))
         plans[r["plan"]] = (min(s, r["t"]), max(e, r["t"]))
         if "graphql" in r.get("resources", []):
@@ -189,7 +189,7 @@ def queue_stats(root: Path) -> dict:
 
 
 def self_built_queue(cand: str, root: Path, stages: list[list[dict]], width: int = 2) -> list:
-    """LangGraph と Burr はキューを持たないため、supervise.py queue と同じく計画ごとに子プロセスを起こす。"""
+    """LangGraph と Burr はキューを持たないため、supervise.py queue と同じくプランごとに子プロセスを起こす。"""
     results = []
     for i, stage in enumerate(stages):
         pending, running, outs = list(stage), {}, []
@@ -213,7 +213,7 @@ def self_built_queue(cand: str, root: Path, stages: list[list[dict]], width: int
 
 
 def write_listing(root: Path, stages: list[list[dict]]) -> Path:
-    """supervise.py queue と同じ置き場: 計画 <root>/<名>.json・<名>-state/・done の隣の <done>.plans.json。"""
+    """supervise.py queue と同じ置き場: プラン <root>/<名>.json・<名>-state/・done の隣の <done>.plans.json。"""
     names = [p["plan"] for s in stages for p in s]
     for n in names:
         (root / f"{n}.json").write_text(json.dumps({"steps": rc.PLAN_STEPS}, ensure_ascii=False))
@@ -258,7 +258,7 @@ def check_queue(cand: str, root: Path) -> dict:
         order_ok = not s2 or min(s for s, _ in s2) >= max(e for _, e in s1)
         ran = sorted(st["plans"])
         want = [f"q{i}" for i in range(1, 7)] if stop_plan is None else ["q1", "q2", "q3", "q4"]
-        w1 = sv_wait(done)  # done を書く前: queue の流す計画の attention で返る（stage1-stops のとき）
+        w1 = sv_wait(done)  # done を書く前: queue の流すプランの attention で返る（stage1-stops のとき）
         (done).write_text(json.dumps({"status": "ok" if stop_plan is None else "stopped",
                                       "summary": f"{len(ran)} 本を流した"}, ensure_ascii=False))
         w2 = sv_wait(done)
@@ -283,7 +283,7 @@ def check_resume(cand: str, root: Path) -> dict:
     while time.time() < deadline and not any(r["step"] == "test-limited" for r in steps_started(d)):
         time.sleep(0.05)
     time.sleep(0.5)
-    os.killpg(proc.pid, signal.SIGKILL)  # 計画のプロセスと、流れているステップの子プロセスをまとめて落とす
+    os.killpg(proc.pid, signal.SIGKILL)  # プランのプロセスと、流れているステップの子プロセスをまとめて落とす
     proc.wait()
     first = [r["step"] for r in steps_started(d)]
     code, out = run_sub(cand, d, "k", "slow")

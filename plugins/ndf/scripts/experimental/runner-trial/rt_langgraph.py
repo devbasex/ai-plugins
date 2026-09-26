@@ -1,4 +1,4 @@
-"""LangGraph（SqliteSaver のチェックポイント）で計画を流す。
+"""LangGraph（SqliteSaver のチェックポイント）でプランを流す。
 
 ステップ 1 つをノード 1 つにし、行き先は rt_common.route を条件付きの辺にする。承認ゲートは
 interrupt() で止め、Command(resume=...) で続ける。チェックポイントはノードの終わりごとに SQLite へ書く。
@@ -62,7 +62,7 @@ def graph_for(ctx: Ctx):
     return g.compile(checkpointer=SqliteSaver(conn))
 
 
-def run_plan(ctx: Ctx, approve: bool) -> dict:
+def run_langgraph(ctx: Ctx, approve: bool) -> dict:
     app = graph_for(ctx)
     cfg = {"configurable": {"thread_id": ctx.plan}, "recursion_limit": 200}
     snap = app.get_state(cfg)

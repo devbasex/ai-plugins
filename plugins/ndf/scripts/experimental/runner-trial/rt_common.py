@@ -1,4 +1,4 @@
-"""runner-trial の候補に共通の部品: 計画の雛形・偽物のステップ・遷移・進行の記録・資源の枠。
+"""runner-trial の候補に共通の部品: プランの雛形・偽物のステップ・遷移・進捗ログ・資源の枠。
 
 候補（LangGraph・Burr・DBOS）は、ここの `route` を遷移の規則として使い、ステップの実行を
 `exec_fake` に任せる。候補ごとに違うのは、状態の持ち方・再開・承認ゲートの止め方・キューである。
@@ -114,13 +114,13 @@ class Slots:
 
 
 class Ctx:
-    """1 本の計画の実行の文脈: 状態ディレクトリ・シナリオ・進行の記録。"""
+    """1 本のプランの実行の文脈: 状態ディレクトリ・シナリオ・進捗ログ。"""
 
     def __init__(self, state: Path, plan: str, scenario: str, slots: Slots | None = None):
         self.state, self.plan, self.scenario, self.slots = state, plan, scenario, slots
         state.mkdir(parents=True, exist_ok=True)
         self.progress = state / "progress.jsonl"
-        self.events = state.parent / "events.jsonl"  # 計画をまたいだ開始と終わり（同時の本数を数える）
+        self.events = state.parent / "events.jsonl"  # プランをまたいだ開始と終わり（同時の本数を数える）
 
     def write(self, path: Path, rec: dict) -> None:
         with open(path, "a") as f:
@@ -156,8 +156,9 @@ class Ctx:
         self.progress_line("attention", step=step, reason=reason, text=text)
 
     def finish(self, status: str, step: str, count: int, path: list[str]) -> dict:
-        """計画の終わり。status は done / stopped / gate / limit。結果を <state>/outcome.json へ書く。"""
+        """プランの終わり。status は done / stopped / gate / limit。結果を <state>/outcome.json へ書く。"""
         if status == "gate":
+            # reason の値は supervise.py の attention の今の契約（#1166 の旧い語のまま読まれる）
             self.attention(step, "関門", f"ステップ {step} が承認を待つ")
         elif status in ("stopped", "limit"):
             self.attention(step, "止まった", f"ステップ {step} で止まった（{status}・{count} ステップ）")

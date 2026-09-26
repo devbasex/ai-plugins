@@ -1,4 +1,4 @@
-"""Burr（SQLitePersister の永続化）で計画を流す。
+"""Burr（SQLitePersister の永続化）でプランを流す。
 
 ステップ 1 つをアクション 1 つにし、行き先は state の cur を条件（when）にした遷移で表す。
 承認ゲートは gate のアクションの前で halt_before で止め、承認で halt_before を外して続ける。
@@ -61,7 +61,7 @@ def build_app(ctx: Ctx):
             .with_state_persister(persister).with_identifiers(app_id=ctx.plan).build())
 
 
-def run_plan(ctx: Ctx, approve: bool) -> dict:
+def run_burr(ctx: Ctx, approve: bool) -> dict:
     app = build_app(ctx)
     st = app.state
     if st["cur"] == FINISH and st["status"] in ("done", "stopped", "limit"):
