@@ -42,17 +42,6 @@ def call(cmd: list[str], env: dict | None = None, cwd: str | None = None) -> tup
     return p.returncode, p.stdout
 
 
-def review_status(state: dict) -> str:
-    """cross-review の状態ファイルから finalize へ渡す最終ステータスを決める。"""
-    sw = state.get("sweep") or {}
-    if (state.get("final") == "approved" and sw.get("verified") is True
-            and (sw.get("remaining_open") or 0) == 0 and sw.get("commit") is None):
-        return "approved"
-    if state.get("final") == "approved":
-        return "unverified"  # 最後の HEAD（スイープの修正・残り・未検証）は承認されていない
-    return state.get("final") or "unknown"
-
-
 class Drive:
     def __init__(self, pr: int, init_args: list[str]):
         self.pr = pr
