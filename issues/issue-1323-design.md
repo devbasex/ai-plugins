@@ -28,15 +28,17 @@ Ruff を起動するが、`--isolated` でこの設定を読まず、版も自�
 
 ### 集約
 
-| 集約 | 持ち主（書き換えてよいもの） | 根 | エンティティ | 値オブジェクト |
-| --- | --- | --- | --- | --- |
-| Ruff の設定 | 根の `pyproject.toml` の `[tool.ruff]` | Ruff の設定 | — | 規則の選択・除外と理由・行幅・対象の Python の版 |
-| ツールの版 | 根の `pyproject.toml` の `[dependency-groups] lint`（`uv lock` が `uv.lock` へ解決する） | lint のグループ | — | ruff の版・shellcheck-py の版 |
-| 検査の手順 | `scripts/check-lint.sh` | 検査のコマンド | — | 対象の一覧・shellcheck の重さ・終了コード |
-| 一括の変更 | 実装の Pull Request（1 回だけ） | 実装の Pull Request | 一括の自動修正・一括の整形・手の修正の各コミット | コミットのハッシュ |
-| 整形の履歴 | `.git-blame-ignore-revs` | ファイル | 載せたコミット（ハッシュで参照） | 注記の 1 行 |
+| 集約 | 持ち主（書き換えてよいもの） | 保存先 | 根 | エンティティ | 値オブジェクト |
+| --- | --- | --- | --- | --- | --- |
+| Ruff の設定 | 書き手（Pull Request で手で変える） | 根の `pyproject.toml` の `[tool.ruff]` | Ruff の設定 | — | 規則の選択・除外と理由・行幅・対象の Python の版 |
+| ツールの版 | `uv`（`uv add --group lint` と `uv lock`） | 根の `pyproject.toml` の `[dependency-groups] lint` と `uv.lock` | lint のグループ | — | ruff の版・shellcheck-py の版 |
+| 検査の手順 | 書き手（Pull Request で手で変える） | `scripts/check-lint.sh` | 検査のコマンド | — | 対象の一覧・shellcheck の重さ・終了コード |
+| 一括の変更 | 実装の担当（コミット 3〜5、1 回だけ） | 実装の Pull Request | 実装の Pull Request | 一括の自動修正・一括の整形・手の修正の各コミット | コミットのハッシュ |
+| 整形の履歴 | 実装の担当（コミット 6 と、`develop` を取り込んだ後に足す行） | `.git-blame-ignore-revs` | ファイル | 載せたコミット（ハッシュで参照） | 注記の 1 行 |
 
-整形の履歴は、一括の変更のコミットを**ハッシュで参照する**。コミットそのものを持たない。
+持ち主のほかは、集約を読むだけである。検査のコマンド・CI・`.githooks/pre-push` は Ruff の設定とツールの版を
+読み、書き換えない。`uv.lock` は手で書かない。整形の履歴は、一括の変更のコミットを**ハッシュで参照する**。
+コミットそのものを持たない。
 
 ### 不変条件
 
