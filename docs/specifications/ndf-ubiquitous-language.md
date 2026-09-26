@@ -197,7 +197,7 @@ stateDiagram-v2
 - `--diff BASE` は `git merge-base BASE HEAD` で起点を解き、その起点へ `git diff --unified=0
   --diff-filter=AM` を 1 回打つ（worktree の未コミット分を含む）。`BASE` が先へ進んでも、ほかの変更が
   足した行は当たらない。追跡していないファイルは全行を見る。見るのは `check.paths` に当たるファイルだけで、
-  用語集の設定の `document` は見ない。コード（`.py` / `.sh` / `.js` / `.ts`）は `check.paths` に関わらず見て、
+  用語集の設定の `document` は見ない。コード（`.py` / `.sh` / `.js` / `.ts`）は `check.paths` の外でも見て、
   `deprecated_code` だけを当てる
 - 識別子は `spellings` が導く書き方（基本形・PascalCase・大文字・kebab-case）で、英数字と `_` の境界で照合する。
   廃止した `gate` は `approval_gate` にも `ApprovalGate` にも当たらない。生きた識別子の書き方の出現の内側

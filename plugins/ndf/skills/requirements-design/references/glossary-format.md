@@ -131,7 +131,7 @@ NDF の `scripts/glossary.py` はこの形でだけ読み、語はすべて用�
 - 廃止した語の出現が生きた語の出現の内側にあるとき（廃止した `カート` と生きた `カートン`）は当てない
 - 英数字だけの語は単語の境界で照合する（`cart` は `cartridge` に当たらない）
 - 識別子は英数字と `_` の境界で照合する。廃止した `gate` は `approval_gate` にも `ApprovalGate` にも当たらない。
-  生きた識別子の出現の内側（`approval-gate` の `gate`）も当てない。コードは `check.paths` に関わらず見る。
+  生きた識別子の出現の内側（`approval-gate` の `gate`）も当てない。コードは `check.paths` の外でも見る。
   コードに `deprecated` と `unregistered` は当てない
 - `--diff BASE` は `BASE` と `HEAD` の分岐点からの追加した行を見る。`BASE` が先へ進んでも、ほかの変更が
   足した行は当たらない。追跡していないファイルは全行を見る。見るのは `check.paths` に当たるファイルだけである
