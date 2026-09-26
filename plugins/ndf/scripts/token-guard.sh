@@ -151,9 +151,15 @@ issue_refs() {
   printf '%s' "${refs% }"
 }
 
-# Bash のコマンドが supervise.py の queue か run（プランを起こす副命令）を起動するなら 0
+# Bash のコマンドが supervise.py の queue か run（プランを起こす副命令）を起動するなら 0。
+# 区切り（; & | 括弧 改行）で分けた各コマンドの先頭で起動しているものだけを見る。
+# echo の引数やコメントの中の文字列はコマンドの先頭に来ないので拾わない
 plan_command() {
-  [[ "$1" =~ supervise\.py[\'\"]?[[:space:]]+(queue|run)([[:space:]]|$|[\;\&\|\)]) ]]
+  local line re='^[[:space:]]*(env[[:space:]]+|nohup[[:space:]]+|[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*([^[:space:]]*python3?[[:space:]]+)?[^[:space:]]*supervise\.py['"'"'"]?[[:space:]]+(queue|run)([[:space:]]|$)'
+  while IFS= read -r line; do
+    [[ "$line" =~ $re ]] && return 0
+  done <<< "${1//[;&|()]/$'\n'}"
+  return 1
 }
 
 guard_context() {

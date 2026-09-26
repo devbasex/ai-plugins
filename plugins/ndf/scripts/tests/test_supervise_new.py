@@ -138,6 +138,26 @@ def test_design_glossary_initializes_and_commits_when_missing(tmp_path):
     assert git(root, "rev-parse", "HEAD") == head and not out.exists()
 
 
+def test_design_glossary_stops_when_candidates_fails(tmp_path, monkeypatch):
+    """候補の取得の失敗を「候補 0 件」として進めない。"""
+    root = glossary_repo(tmp_path)
+    out = tmp_path / "glossary-candidates.md"
+    real = subprocess.run
+    replies = {"gate": (1, {"summary": "無い"}), "init": (0, {"items": [{"name": ".ndf/glossary.json"}]}),
+               "candidates": (2, {"summary": "壊れた"})}
+
+    def fake(cmd, **kw):
+        if len(cmd) > 2 and cmd[1].endswith("glossary.py"):
+            code, res = replies[cmd[2]]
+            return subprocess.CompletedProcess(cmd, code, json.dumps(res) + "\n", "")
+        return real(cmd, **kw)
+
+    monkeypatch.setattr(sv.subprocess, "run", fake)
+    res, code = sv.cmd_design_glossary(str(root), "standard", str(out))
+    assert code == 2 and res["status"] == "stopped" and "candidates" in res["summary"]
+    assert not out.exists()
+
+
 def test_pr_step_appends_existing_files(tmp_path, monkeypatch):
     root = glossary_repo(tmp_path)
     origin = tmp_path / "origin.git"

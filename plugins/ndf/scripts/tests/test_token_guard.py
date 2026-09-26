@@ -779,6 +779,7 @@ QUEUE_CMD = "python3 /x/scripts/supervise.py queue --max 3 a.json b.json"
     QUEUE_CMD,
     "python3 /x/scripts/supervise.py run plan.json --from 3",
     "cd /w && python3 '/x/scripts/supervise.py' queue --max 2 a.json",
+    "X=1 nohup python3 \"/x/scripts/supervise.py\" run plan.json",
 ])
 def test_context_over_limit_denies_plan_bash(tmp_path, state, cmd):
     tp = transcript(tmp_path, 250_000)
@@ -793,6 +794,9 @@ def test_context_over_limit_denies_plan_bash(tmp_path, state, cmd):
     "python3 /x/scripts/supervise.py note r.md",
     "python3 /x/scripts/supervise.py history import",
     "echo queue",
+    "echo 'python3 /x/scripts/supervise.py queue a.json'",
+    "# python3 /x/scripts/supervise.py run plan.json",
+    "printf '%s\\n' 'supervise.py run を打つ'",
 ])
 def test_context_over_limit_passes_other_bash(tmp_path, state, cmd):
     tp = transcript(tmp_path, 250_000)

@@ -2678,7 +2678,11 @@ def cmd_design_glossary(root: str, mode: str, out: str) -> tuple[dict, int | Non
                       [], {"initialized": 0}), code
     created = [it["name"] for it in init.get("items") or []]
     code, cand = call("candidates")
-    words = (cand.get("items") or []) if code == 0 else []
+    if code != 0:
+        # 候補の欠落を「0 件」と区別できなくなるので、承認ゲート 1 の材料が揃わないまま進めない
+        return result("supervise-design-glossary", "stopped", f"glossary.py candidates が失敗した: {cand.get('summary')}",
+                      [], {"initialized": 0}), code
+    words = cand.get("items") or []
     if created:
         for args in (["add", "--", *created],
                      ["commit", "-q", "-m", "docs(glossary): 設計の入口で用語集を起こす", "--", *created]):
