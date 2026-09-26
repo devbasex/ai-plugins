@@ -15,6 +15,8 @@ import json
 import os
 from typing import Any, Optional
 
+import mdtable
+
 from . import die, info
 from .paths import sh
 from .items import item_label
@@ -214,10 +216,8 @@ def limits_section(limits: dict[str, Any]) -> list[str]:
     """
     if not limits:
         return []
-    lines = ["## 時間の上限", "", "| 値 | 中身 |", "| --- | --- |"]
-    for key, label in _LIMIT_ROWS:
-        value = limits.get(key)
-        lines.append(f"| {label} | {'—' if value is None else value} |")
+    rows = [(label, "—" if limits.get(key) is None else str(limits[key])) for key, label in _LIMIT_ROWS]
+    lines = ["## 時間の上限", "", mdtable.table_markdown(["値", "中身"], rows)]
     lines.extend(["", "無音の打ち切りは手順の監視の上限と同じ値である。項目ごとの締め切りは各項目の節にある。", ""])
     return lines
 
@@ -233,16 +233,9 @@ def _plan_deferred_section(state: dict[str, Any]) -> list[str]:
     if not deferred:
         lines.extend(["（なし）", ""])
         return lines
-    lines.extend([
-        "| 対象 | 兆候 | 理由 | 補足 |",
-        "| --- | --- | --- | --- |",
-    ])
-    for item in deferred:
-        lines.append(
-            f"| `{item_label(item)}` | {item.get('smell') or '—'} | "
-            f"{item.get('defer_reason', '—')} | {item.get('detail') or '—'} |"
-        )
-    lines.append("")
+    rows = [(f"`{item_label(item)}`", item.get("smell") or "—", str(item.get("defer_reason", "—")),
+             item.get("detail") or "—") for item in deferred]
+    lines.extend([mdtable.table_markdown(["対象", "兆候", "理由", "補足"], rows), ""])
     return lines
 
 
@@ -255,11 +248,10 @@ def _plan_item_section(item: dict[str, Any]) -> list[str]:
     lines = [
         f"### {item['id']} — `{item_label(item)}`",
         "",
-        "| 兆候 | 手法 | 重要度 | 等級 | 提案元 | 状態 | コミット |",
-        "| --- | --- | --- | --- | --- | --- | ---: |",
-        f"| {item.get('smell') or '—'} | {item.get('technique') or '—'} | "
-        f"{item.get('severity') or '—'} | {item.get('tier') or '—'} | "
-        f"{' / '.join(item.get('proposed_by') or []) or '—'} | {status} | {count} |",
+        mdtable.table_markdown(
+            ["兆候", "手法", "重要度", "等級", "提案元", "状態", "コミット"],
+            [(item.get("smell") or "—", item.get("technique") or "—", item.get("severity") or "—",
+              item.get("tier") or "—", " / ".join(item.get("proposed_by") or []) or "—", status, count)]),
         "",
         f"**なぜ**: {item.get('rationale') or '（記録なし）'}",
         "",
