@@ -51,10 +51,12 @@ HTSM / ISTQB / FEW HICCUPPS に基づいて E2E テストシナリオを計画�
       │
 [B] page role を判定           → scripts/classify_page_role.py --url <URL>
       ▼
-[C] 該当チェックリストを開く   → docs/checklists/checklist-{role}.md
-      │  全項目を「適用」or「不適用 (理由付き)」で判定
+[C] 計画書の雛形を作る         → scripts/plan_skeleton.py --role <role> --data-types <型…> --output plan.md
+      │  チェックリストの観点 ID と §11 の必須技法が並ぶ。判定の欄は空
+      │  (分類の上位 2 件の差が小さいと exit 1。role は人が決めて --role で渡す)
       ▼
-[D] 必須テスト技法を確定       → docs/03-test-techniques.md § 11
+[D] 雛形の判定の欄を埋める     全観点を「適用」or「不適用 (理由付き)」で判定し、
+      │                        必須技法を当てる観点 ID を書く
       ▼
 [E] pytest テストを書く        → templates/test_<role>.py.template を起点に
       ▼
@@ -103,13 +105,27 @@ HTSM / ISTQB / FEW HICCUPPS に基づいて E2E テストシナリオを計画�
 
 ```bash
 # page role を自動推定
-python scripts/classify_page_role.py --url <URL>
+python scripts/classify_page_role.py --url <URL> --output classifications.json
 
 # Playwright codegen で操作を記録 → テストコードに変換
 python scripts/record_scenario.py <URL>
 ```
 
 > 上記は `playwright-kit-ops/` ディレクトリ内での実行を想定。
+
+計画書の雛形はこの Skill の `scripts/plan_skeleton.py` で作る (この Skill のディレクトリ内で実行する)。
+
+```bash
+# role を決めて渡す
+python scripts/plan_skeleton.py --role form --data-types 数値 ファイル --output plan.md
+
+# 分類の結果から role を決める。上位 2 件の差が --margin (既定 0.5) 未満なら exit 1
+python scripts/plan_skeleton.py --classification classifications.json --url <URL> --output plan.md
+```
+
+- `--data-types` に渡せる値は `docs/03-test-techniques.md` §11 の表のデータ型 (数値 / 文字列 / 日付 / URL/path / ファイル / 金額 / クエリ / 認証情報 / 状態を持つ操作 / 多次元組合せ / 仕様で主張あり / IDOR/CSRF/XSS リスク)
+- 標準出力は 1 つの JSON。終了コードは 0 = 雛形を作った、1 = 分類が決め切れない (候補を `candidates` に返す)、2 = 引数・入力の誤り
+- 観点を適用するか・データ型の認定・技法を当てる観点は雛形に書かない。計画する者が判断して埋める
 
 ## 用語集
 
