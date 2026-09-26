@@ -144,7 +144,7 @@
 | `lib/worktree-common.sh`（分割） | ほかのスクリプトが source するファイルとして残し、宣言・ブランチ・字句解析・書き込み先（3 本）・レジストリの 7 本を source する |
 | `lib/monitor.py`（分割） | 照合の表・ログの読み取り・PID・型・監視ループの 5 本へ分ける（`supervise.py` は照合の表を `monitor_patterns` から読む） |
 | `instructions-check.py`（分割） | 型・宣言・集める処理・判定・出力を隣の `instructions_lib/` の 7 本へ出す（読み手が 1 つのためライブラリに置かない） |
-| `refactor_lib/gitfacts.py`（分割） | コミットの事実だけを残し、パスの判定・プロセス・GitHub・作業ツリー・公開・結果の 6 本へ分ける |
+| `refactor_lib/gitfacts.py`（分割） | コミットの事実だけを残し、パスの判定・プロセス・GitHub・worktree・公開・結果の 6 本へ分ける |
 | `release-steps.py`（変更） | 差分のあるプラグインを列挙する副命令 `changed-plugins` |
 | `mvv-gate.py`（変更） | 設計の判定で PR の `issues/` の設計文書を材料に足す |
 | `scripts/check-script-structure.py`（新設、リポジトリ根） | 構造チェック。例外リストは `scripts/script-structure-allow.json` |
