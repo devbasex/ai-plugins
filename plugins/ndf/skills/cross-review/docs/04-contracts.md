@@ -117,7 +117,7 @@
 
 ### 重要なフィールド
 
-- `host` — 確定したホスト名（`claude` / `codex` / `agy` / `kiro`）。#892 から参加者プールに残る
+- `host` — 確定したホスト名（`claude` / `codex` / `agy` / `kiro`）。参加者プールに残る
   （`participants` を持たない古い状態の再開では、変更の前と同じく参加者プールから外して輪番を回す）
 - `review_findings` — 取り込んだ指摘を **per-item** で蓄積する（#156）。各要素は
   `finding_id`（`<担当>-r<ラウンド>-<索引>`）を持つ。**取り込みの時点で採番し、統合・
@@ -165,7 +165,7 @@
   （`fix` が int を返す経路）があるためである。** そのときは記録が空になり、件数だけが残る。
   **項目が欠けた要素も落とさない**（落とすと却下そのものが記録から消える）
 - `host_source` — `explicit`（`--host`）または `env`（環境変数からの推定）
-- `participants` — 利用可能な参加者の解決の結果（#727）。`pool`（参加者プールの既定）/ `included` /
+- `participants` — 利用可能な参加者の解決の結果。`pool`（参加者プールの既定）/ `included` /
   `excluded` / `ignored_exclude`（`--exclude` で指定したが参加者プールに無かったため無視した者。#786。
   この項目を持たない状態ファイルは空として読む）/ `available`（利用可能な参加者）/ `unavailable`（名前 → 確認が通らなかった理由）/
   `probe_skipped`（確認を飛ばしたか）/ `require_all` / `fallback`（スロットのフォールバックに使える
