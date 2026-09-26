@@ -30,18 +30,18 @@ PR マージ後の後始末をまとめて実行する。対象 PR のブラン�
 報告へ載せる**（要否の基準は
 [AUTHORING.md](../AUTHORING.md) の「実行前確認の要否を決める 3 つの問い」）。
 
-**止める合図は git の拒否だけである。** `-D` の代わりになる判定をこの Skill の側に作らない。
+**止まる理由は git の拒否だけである。** `-D` の代わりになる判定をこの Skill の側に作らない。
 
 | 対象 | 止めずに行う | 止まる（一覧で示し、同意の無い対象を消さない） | 触らない（報告に「対象外」） |
 | --- | --- | --- | --- |
 | worktree | `git worktree remove <path>` が 0 で終わる。拒まれたら未追跡・無視されたファイルを退避して外す（スクリプトが行う） | 退避か削除が 0 以外で終わる（未完了。同意の対象にしない） | メインディレクトリ |
-| ローカルブランチ | `git branch -d <name>` が 0 で終わる | 同じコマンドが 0 以外で終わる | 起点・本番のチャネル・現在のブランチ |
-| リモートブランチ | マージ済み Pull Request の head で、同じリポジトリにあり、先端が `headRefOid` と一致する | — | 起点・本番のチャネル・fork の head、先端が `headRefOid` と違う、対応する Pull Request が見つからない |
-| 課題 | **閉じない**（ミッションの課題の OPEN の一覧を報告に載せるだけ） | — | — |
+| ローカルブランチ | `git branch -d <name>` が 0 で終わる | 同じコマンドが 0 以外で終わる | 起点・本番チャネル・現在のブランチ |
+| リモートブランチ | マージ済み Pull Request の head で、同じリポジトリにあり、先端が `headRefOid` と一致する | — | 起点・本番チャネル・fork の head、先端が `headRefOid` と違う、対応する Pull Request が見つからない |
+| 課題 | **閉じない**（ミッション課題の OPEN の一覧を報告に載せるだけ） | — | — |
 
-- **起点・本番のチャネル・現在のブランチは、同意を求めずに対象から外す。** 尋ねる場面を
+- **起点・本番チャネル・現在のブランチは、同意を求めずに対象から外す。** 尋ねる場面を
   作ること自体が誤りで、1 回の誤答で開発の本流が消える。起点は「ベースブランチを決める」の
-  `$dev_base`、本番のチャネルは `.ndf/worktree.json` の `production_branch`（宣言が無ければ
+  `$dev_base`、本番チャネルは `.ndf/worktree.json` の `production_branch`（設定が無ければ
   既定ブランチ）である
 - **リモートブランチを消すのは、先端が Pull Request の `headRefOid` と一致するときだけ。**
   マージの後に積まれたコミットは Restore branch で戻らず、消した後に戻す手段が無い。
@@ -116,13 +116,13 @@ python3 "$SCRIPTS/merged-steps.py" cleanup <PR番号>... --root <メインディ
 
 | `status`（終了コード） | 次にすること |
 | --- | --- |
-| `ok`（0） | 「ミッションの課題を報告する」→ 必要なら「マージ済みブランチの整理」→ 作業完了報告 |
+| `ok`（0） | 「ミッション課題を報告する」→ 必要なら「マージ済みブランチの整理」→ 作業完了報告 |
 | `gate`（10） | `git branch -d` が拒んだブランチがある。`presentation_path` の承認資料を示して同意を取り、同意を得た対象にだけ `next` のコマンド（`git branch -D`）を打つ |
 | `stopped`（1 / 2 / 3） | `summary` と `items[].reason` を報告して止まる |
 
 - `items[]` の `result` は `removed`（worktree を外した）/ `deleted`（ブランチを消した。`restore` が戻し方）/ `absent`（ローカルに無い。削除済みとして扱う）/ `kept`（MERGED でない・メインディレクトリが checkout している など。`reason` を報告へ載せる）/ `stopped` / `pulled` を取る
 - worktree の未追跡・無視されたファイルは `<共通の git ディレクトリ>/ndf/worktree-trash/` へ退避してから外す。退避先は `reason` に載る。**退避先は自動では消さない**（容量 `du -sh <退避先>` を報告に載せ、消すのは利用者）
-- レビュー用の worktree（システムの一時ディレクトリ配下の `pr<PR番号>`）もスクリプトが外す。cross-review / cross-refactoring の実行の要約は worktree の外にあり、消えない
+- レビュー worktree（システムの一時ディレクトリ配下の `pr<PR番号>`）もスクリプトが外す。cross-review / cross-refactoring の実行の要約は worktree の外にあり、消えない
 
 ### マージから行うとき
 
@@ -173,13 +173,13 @@ python3 "$SCRIPTS/merged-steps.py" probe (--pr <PR番号> | --head <ブランチ
 - 分類は表の上ほど強い。複数の PR は最も上の分類で全体を表す。`metrics` に `prs`・`queued_runs` も持つ
 - 終了コードは 0 = 調べた / 2 = 引数が読めない。書き込みは `--act` の再実行だけで、マージ・push をしない
 
-## ミッションの課題を報告する
+## ミッション課題を報告する
 
-**この Skill は課題を閉じない。** ミッションの課題が閉じるのは、ミッションの終わりの工程を
+**この Skill は課題を閉じない。** ミッション課題が閉じるのは、ミッションの最終工程を
 通った時点である（手順は `progress-tracking` の「ミッションを閉じる」が持つ）。**マージした
 時点で閉じると、リリースで問題が出ても課題の一覧に出ない。**
 
-後片付けで行うのは、**ミッションの課題のうち OPEN のものを控えて報告へ載せること**だけである。
+後片付けで行うのは、**ミッション課題のうち OPEN のものを控えて報告へ載せること**だけである。
 
 ```bash
 # $SCRIPTS の決め方は development-workflow の references/scripts-lookup.md にある。
@@ -219,7 +219,7 @@ git ls-remote origin "refs/heads/<branch>"
 git push origin --delete <branch>        # 先端が headRefOid と一致したときだけ
 ```
 
-- **ベースブランチ・本番のチャネル・現在のブランチは必ず除外する**（同意を求めずに外す）
+- **ベースブランチ・本番チャネル・現在のブランチは必ず除外する**（同意を求めずに外す）
 - 手順 3 は「止まる条件」の表のとおり、0 で終われば消し、拒まれたら止まる対象へ積む
 - **手順 4 で消すのは、同じリポジトリにあるマージ済み Pull Request の head で、先端が
   `headRefOid` と一致するものだけである。** Pull Request を引けないブランチと、先端が違う
@@ -264,10 +264,10 @@ bash "$SCRIPTS/../skills/development-workflow/scripts/stage-check.sh" report <is
 | 消したローカルブランチ | `<名前>`（`<削除時のハッシュ>`）— 戻すなら `git branch <名前> <ハッシュ>` |
 | 消したリモートブランチ | `origin/<名前>` — 戻すなら `<Pull Request の URL>` の Restore branch |
 | 消した worktree | `<パス>`。無視されたファイルを退避したなら、退避先のパスと容量（`du -sh <退避先>`）— 戻すなら `mv <退避先>/<退避した相対パス> <worktree を作り直した先>/<退避した相対パス>`、まとめて戻すなら `cp -a <退避先>/. <worktree を作り直した先>/` |
-| 対象外 | 名前と理由（起点 / 本番のチャネル / 現在のブランチ / fork / 先端が `headRefOid` と違う / 対応する Pull Request が無い）。先端が違う・Pull Request が無いリモートブランチには、先端のハッシュと `headRefOid`、マージ後に積まれたコミット（`git log --oneline <headRefOid>..origin/<名前>`）を添える |
+| 対象外 | 名前と理由（起点 / 本番チャネル / 現在のブランチ / fork / 先端が `headRefOid` と違う / 対応する Pull Request が無い）。先端が違う・Pull Request が無いリモートブランチには、先端のハッシュと `headRefOid`、マージ後に積まれたコミット（`git log --oneline <headRefOid>..origin/<名前>`）を添える |
 | 止まった対象 | 「止まる条件」の「止まったときの一覧」と、同意の結果 |
 | 未完了 | 退避が失敗した worktreeのパス、退避先・退避済みのパス・失敗したパスと `mv` の出力（退避済みのものは退避先に残す。戻すなら同じ `mv` の逆）、「原因を取り除いた後に `/ndf:merged <PR番号>` をもう一度実行する」 |
-| ミッションの課題 | このマージの閉じる語が指す課題のうち OPEN のもの。「閉じるのはミッションの終わりの工程（`progress-tracking` の「ミッションを閉じる」）」と添える |
+| ミッション課題 | このマージの閉じる語が指す課題のうち OPEN のもの。「閉じるのはミッションの最終工程（`progress-tracking` の「ミッションを閉じる」）」と添える |
 | ミッションの最後か | 最後 / 残りあり / **判断できない** |
 
 あわせて次も載せる。
@@ -296,16 +296,16 @@ bash "$SCRIPTS/../skills/development-workflow/scripts/stage-check.sh" report <is
 
 この Skill は版を上げない。担い手と時期は `release` が持つ。
 
-**このマージに人手の承認が要ったかどうかは、届く先が本番の系かどうかで決まる。** 開発版や
-検証環境のチャネルへ入れるマージは取り消せるため、承認を求めない。**本番の系へ届く操作
+**このマージに人手の承認が要ったかどうかは、届く先が本番系かどうかで決まる。** 開発版や
+検証環境のチャネルへ入れるマージは取り消せるため、承認を求めない。**本番系へ届く操作
 だけが承認ゲートである**（設計 Pull Request のマージは、どのチャネルでも承認が要る別の承認ゲートである）。
 
-**本番の系へ届く操作は 2 つの形を取る。** リリース（`release`）と、運用モードの実行
+**本番系へ届く操作は 2 つの形を取る。** リリース（`release`）と、運用モードの実行
 （`operation` の実装）である。マージが関わるのは前者で、規則は `/ndf:release` が持つ。
-どのブランチが本番のチャネルかはリポジトリが宣言する（`.ndf/worktree.json` の
-`production_branch`。宣言が無ければ既定ブランチ）。
+どのブランチが本番チャネルかはリポジトリが設定する（`.ndf/worktree.json` の
+`production_branch`。設定が無ければ既定ブランチ）。
 
-この工程に入ったら記録のコマンド `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "後片付け"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「記録のコマンド」を使う）。
+この工程に入ったら進捗記録 `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "後片付け"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「進捗記録」を使う）。
 
 ## 関連
 
