@@ -1,4 +1,4 @@
-"""使える者の解決（`assignment.resolve_participants` / `refactor_pool`）のテスト（#727）。
+"""使える者の解決（`assignment.resolve_participants`）のテスト（#727）。
 
 確認（`probe`）はスタブで、呼び出しの引数を記録する。環境変数の読み取りは
 `auth.probe_auth` の責務なので、飛ばしは `probe` が `(…, True)` を返す形で確かめる。
@@ -41,27 +41,6 @@ def _probe(failing: dict[str, str] | None = None, *, skipped: bool = False):
 
     probe.calls = calls
     return probe
-
-
-# ---------- 母集合の既定 ----------
-
-@pytest.mark.parametrize("host,expected", [
-    ("claude", ["claude", "codex", "kiro"]),
-    ("codex", ["codex", "kiro"]),
-    ("agy", ["codex", "agy", "kiro"]),
-    ("kiro", ["codex", "kiro"]),
-])
-def test_refactor_pool_is_defaults_plus_host_in_fixed_order(assignment, host, expected):
-    assert assignment.refactor_pool(host) == expected
-
-
-def test_refactor_pool_rejects_a_non_host(assignment):
-    with pytest.raises(assignment.AssignmentError):
-        assignment.refactor_pool("gemini")
-
-
-def test_default_refactor_runtimes(assignment):
-    assert assignment.DEFAULT_REFACTOR_RUNTIMES == ("codex", "kiro")
 
 
 # ---------- AC1 / AC2: 通らない者を外す・全員を要する ----------

@@ -17,7 +17,7 @@
 | 変数 | 内容 |
 | --- | --- |
 | `ID` | 状態ファイルの鍵（最初に初期化した Pull Request 番号） |
-| `RUNTIMES` / `RUNTIMES_CSV` | 提案の参加者（既定は codex / kiro とホスト） |
+| `RUNTIMES` / `RUNTIMES_CSV` | 提案の参加者（既定は cross-review と同じ claude / codex / kiro とホスト） |
 | `IMPL` / `IMPL_MODEL` | 実装担当（リファクタリング計画・テスト追加・実装・修正・最終ゲート修正）とそのモデル |
 | `PHASE` | 再開の地点。駆動は終わった手順を飛ばす |
 | `BUDGET_MINUTES` | 想定最大時間 |
@@ -35,7 +35,7 @@
    使った後で、全項目が「範囲テストを組み立てられない」（`no_target`）になるためである
 2. **ホストの確定** — `--host` の明示指定を第一とし、未指定時のみ環境変数から推定する。
    推定できなければ**既定値を置かずに失敗する**
-3. **参加者の確定** — 既定（codex / kiro とホスト）に `--include` を足し、`--exclude` を
+3. **参加者の確定** — 既定（claude / codex / kiro とホスト）に `--include` を足し、`--exclude` を
    除く。参加者プールに無い者を外す指定は中断せず、`ℹ` の 1 行を出して無視する
 4. **実装担当の確定** — `--implementer` → ホスト（参加者にいれば）→ 参加者の先頭。
    名指しが参加者に無ければ止める。状態の `implementer` と `implementer_reason`

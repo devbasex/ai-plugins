@@ -127,14 +127,14 @@ def resolve_participants(
 ) -> dict[str, Any]:
     """参加者を決め、状態ファイルの `participants` を返す（#727 の決定 2〜5）。
 
-    母集合の既定は `refactor_pool(host)`（codex / kiro とホスト）。確認は止めない確認
+    母集合の既定は `default_pool(host)`（claude / codex / kiro とホスト。cross-review と共通）。確認は止めない確認
     （`auth.probe_auth`）で、通らない者は外して続ける。名前の矛盾・全員を要する指定で
     欠け・使える者が 0 者は、この工程の中断（終了コード 4）へ写す。母集合に無い者の
     除外は中断せず、`ℹ` の 1 行を出して続ける（#786 の決定 2）。状態ファイルは
     この関数の後に書かれるため、失敗したときは作られも書き換えられもしない。
     """
     try:
-        pool = assignment.refactor_pool(host)
+        pool = assignment.default_pool(host)
         resolved = assignment.resolve_participants(
             pool, host=host, include=include, exclude=exclude,
             probe=lambda names: auth.probe_auth(names, info=info),
