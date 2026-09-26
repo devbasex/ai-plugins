@@ -310,6 +310,11 @@ def _fix_summary_body(fix: dict[str, Any], round_no: int | None,
         f"決着: {resolved} 件 / 見送り: {deferred} 件 / 却下: {rejected} 件",
         f"CI: {fix.get('ci_status') or 'NONE'}",
     ]
+    # 基準外の見送り（`fix-steps.py` の waived）があるときだけ、決着の行の直後に足す。
+    # 既存の 4 行の形は変えない（効果の集計が読む）
+    waived = sum(1 for e in _dict_items(fix.get("deferred")) if e.get("waived"))
+    if waived:
+        lines.insert(4, f"基準外の見送り: {waived} 件")
     if body_notes:
         lines += ["", "レビュー本文の指摘への返事:", *body_notes]
     note = str(fix.get("ci_note") or "").strip()
@@ -342,7 +347,8 @@ def _reply_items(resolved: list[dict[str, Any]], deferred: list[dict[str, Any]],
                 note = f"（{commit}）" if commit else ""
             else:
                 note = str(entry.get(reason_key) or entry.get("reason") or "")
-            text = f"{lead}{note}".strip()
+            # 本文を持つ要素（見送りの返信）は、その本文だけを送る。定型句を重ねない
+            text = str(entry.get("reply") or "").strip() or f"{lead}{note}".strip()
             if not entry.get("thread_id"):
                 summary = str(entry.get("summary") or "").strip()
                 body_notes.append(f"- {summary}: {text}" if summary else f"- {text}")
