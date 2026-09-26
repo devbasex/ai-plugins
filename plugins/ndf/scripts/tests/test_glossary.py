@@ -182,8 +182,9 @@ def test_declared_paths_star_does_not_cross_slash(repo):
     write(repo, "issues/old/a.md", "オーダーを受ける。\n")
     code, out, err = run(repo, "check", "--diff", "develop")
     assert code == 0, (out, err)
-    d = declaration(paths=["issues/**/*.md"])
-    write_json(repo, ".ndf/glossary.json", d)
+    config = json.loads((repo / ".ndf/glossary.json").read_text(encoding="utf-8"))
+    config["check"]["paths"] = ["issues/**/*.md"]
+    write_json(repo, ".ndf/glossary.json", config)
     code, out, _ = run(repo, "check", "--diff", "develop")
     assert code == 1 and [(it["path"], it["term"]) for it in out["items"]] == [("issues/old/a.md", "オーダー")]
 
