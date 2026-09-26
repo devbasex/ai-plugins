@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import pathlib
 import shlex
 import time
@@ -9,6 +10,7 @@ from typing import Any, NamedTuple
 
 import review_lib  # noqa: E402
 import assignment  # noqa: E402
+import review_criteria  # noqa: E402
 from classifications import default_max_rounds, review_kind  # noqa: E402
 from review_lib import (  # noqa: E402
     categories as categories_mod, findings as findings_mod, github, participants as participants_mod, posts,
@@ -33,6 +35,7 @@ class _InitResult(NamedTuple):
     has_extra: bool
     carried_count: int
     resumed: bool
+    review_focus: str = "none"
 
 
 def _print_init_result(result: _InitResult) -> None:
@@ -52,6 +55,35 @@ def _print_init_result(result: _InitResult) -> None:
     print(f"HAS_EXTRA_REVIEW_INSTRUCTIONS={'1' if result.has_extra else '0'}")
     print(f"CARRIED_OVER_THREADS={result.carried_count}")
     print(f"RESUMED={'1' if result.resumed else '0'}")
+    print(f"REVIEW_FOCUS={result.review_focus}")
+
+
+def _review_criteria(worktree: object) -> dict[str, Any]:
+    """PR の head の作業ツリーから重点の宣言を読み、状態ファイルの `review_criteria` を組む（#1287）。
+
+    読めなくても止めない。基準 1・2・4 の節で続け、読めなかったことを標準エラーへ出す。
+    """
+    focus = review_criteria.load_focus(worktree) if worktree else review_criteria.NO_FOCUS
+    if focus.status == "unreadable":
+        review_lib.info(f"⚠️ レビューの重点の宣言を読めないため、基準 1・2・4 だけで続ける: {focus.error}")
+    return review_criteria.as_state(focus)
+
+
+def _rewrite_review_criteria(state_file: pathlib.Path, worktree: object) -> str:
+    """再開で、同期した後の作業ツリーから読み直して状態ファイルへ書く。
+
+    待ち行列を流した結果は状態ファイルへ直接書かれているため、手元の `st` ではなく
+    ファイルを読み直してから書く。
+    """
+    crit = _review_criteria(worktree)
+    try:
+        st = json.loads(state_file.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return crit["status"]
+    if isinstance(st, dict) and st.get("review_criteria") != crit:
+        st["review_criteria"] = crit
+        store._write_state(state_file, st)
+    return crit["status"]
 
 
 def _refresh_resume_state(
@@ -142,6 +174,7 @@ def _resume_from_state(
         review_lib.info("↻ 追加レビュー観点を state に反映して再開")
 
     tmp_dir = _sync_resume_worktree(st, pr, worktree)
+    focus_status = _rewrite_review_criteria(resume_state_file, st.get("worktree_path") or "")
     review_lib.info(f"↻ 前回中断 state から再開（round={len(st.get('rounds', []))}）")
     _print_init_result(
         _InitResult(
@@ -156,6 +189,7 @@ def _resume_from_state(
             has_extra=bool(st.get("review_instructions")),
             carried_count=(st.get("carried_over") or {}).get("count", 0),
             resumed=True,
+            review_focus=focus_status,
         )
     )
     return True
@@ -397,6 +431,7 @@ def _init_new_state(
         state.update(review_focus._design_stage_fields(
             state["review_kind"], pr_ctx.worktree, review_ctx.changed_files,
             review_ctx.review_instructions, manual_extra_review))
+        state["review_criteria"] = _review_criteria(pr_ctx.worktree)
         store._write_state(ws_ctx.state_file, state)
         review_lib.info(f"✅ state 初期化: {ws_ctx.state_file}")
         _print_init_result(
@@ -412,6 +447,7 @@ def _init_new_state(
                 has_extra=bool(review_ctx.review_instructions),
                 carried_count=0,
                 resumed=False,
+                review_focus=state["review_criteria"]["status"],
             )
         )
 
