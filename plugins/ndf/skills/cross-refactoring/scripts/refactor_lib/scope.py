@@ -120,14 +120,18 @@ def baseline_search_roots(command: str, work: str) -> list[str]:
     **限定とみなすのはディレクトリだけである。** ファイルを指す語は実行する
     スクリプトそのもの（`bash scripts/run-tests.sh`）であることが多く、探索範囲の
     宣言とは限らない。**先頭の語**（プログラム名）と `-` で始まる語も見ない。
+    値を取ると分かっているオプションの直後の語（`--project <dir>`）と作業ディレクトリの
+    根（`.`）も数えない。`round_test_roots` と同じで、どちらも範囲を限定しない。
 
     語として読めないコマンド（引用符が閉じていないなど）は限定なしとして扱う。
     ここは範囲の宣言を読むための補助であり、コマンドの妥当性を判定する場所ではない。
     """
-    return _scope_roots(
-        command, work,
-        lambda word, previous, normalized: (pathlib.Path(work) / word).is_dir(),
-    )
+    def accept(word: str, previous: str, normalized: str) -> bool:
+        if previous in VALUE_OPTIONS or normalized == ".":
+            return False
+        return (pathlib.Path(work) / word).is_dir()
+
+    return _scope_roots(command, work, accept)
 
 
 def covered_by_roots(location: str, roots: list[str]) -> bool:

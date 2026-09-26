@@ -63,6 +63,20 @@ def test_directories_named_on_the_command_line_are_search_roots(scope, tmp_path)
     assert roots == ["scripts/tests", "plugins"]
 
 
+def test_an_option_value_and_the_work_root_are_not_search_roots(scope, tmp_path):
+    """`--project <ディレクトリ>` はオプションの値で、`.` は作業ディレクトリの根である。
+
+    検査のプランが渡す形（`uv run --project <dir> ... pytest . -q -n 4`）で、全体を
+    走らせるコマンドを範囲の限定と読むと、関門がすべての置き場所を範囲の外として止める。
+    """
+    (tmp_path / "tools" / "kit").mkdir(parents=True)
+    command = ("uv run --project tools/kit --with pytest --with pytest-xdist"
+               " pytest . -q -n 4")
+    assert scope.baseline_search_roots(command, str(tmp_path)) == []
+    _services(tmp_path)
+    assert scope.scope_problem(["tests/services"], command, str(tmp_path)) is None
+
+
 def test_an_unparsable_command_limits_nothing(scope, tmp_path):
     """語として読めないコマンドは、範囲の宣言として読まない。"""
     assert scope.baseline_search_roots('pytest "unclosed', str(tmp_path)) == []
