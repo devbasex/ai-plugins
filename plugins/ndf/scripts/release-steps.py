@@ -288,6 +288,79 @@ def base_version(root, pdir, ref):
         return None
 
 
+def bump_versioning_doc(ed):
+    """docs/versioning-and-distribution.md の「版の付け方と開発版の配布」章の正式版の版数。"""
+    doc = ed.root / "docs" / "versioning-and-distribution.md"
+    rel = "docs/versioning-and-distribution.md"
+    ob, nb = base_of(ed.old), base_of(ed.new)
+    if ob == nb:
+        return
+    if not doc.is_file():
+        ed.manual.append(f"{rel} が無い（この章は手で直す）")
+        return
+    lines = ed.lines(doc)
+    targets = [
+        (re.compile(r"^\| 正式版 \| `([^`]+)` \|"), "正式版の表の行"),
+        (re.compile(r"`([^`]+)` の次を開発するなら"), "接尾辞の例"),
+    ]
+    for rx, what in targets:
+        hits = [i for i, l in enumerate(lines) if rx.search(l)]
+        if len(hits) != 1:
+            ed.manual.append(f"{rel}: 「版の付け方と開発版の配布」章の{what}が特定できない（この章は手で直す）")
+            continue
+        i = hits[0]
+        cur = rx.search(lines[i]).group(1)
+        if cur == nb:
+            continue
+        if cur != ob:
+            ed.manual.append(f"{rel}: {what}の版が {cur} で旧版 {ob} と違う（この章は手で直す）")
+            continue
+        esc = bump.braces(lines[i])
+        ed.place(doc, [i], esc.replace(f"`{ob}`", f"`{bump.CUR_BASE}`", 1),
+                 esc.replace(f"`{ob}`", f"`{bump.NEW_BASE}`", 1), what)
+
+
+def plan_bump(root, pdir, plugin, old, new):
+    """`plugin` の版を `old` から `new` へ上げる箇所を集めた `BumpPlan` を返す（まだ書き換えない）。"""
+    ed = bump.BumpPlan(root, old, new)
+    desc_re = r'^\s*"description"\s*:.*\(v' + re.escape(old) + r"\)"
+
+    for rel, _ in ((".claude-plugin/plugin.json", True), (".codex-plugin/plugin.json", False),
+                   ("dev.agy/plugin.json", False), ("plugin.json", False)):
+        f = pdir / rel
+        if not f.is_file():
+            continue
+        ed.sub(f, r'^\s*"version"\s*:', f"{rel} の version")
+        if f"(v{old})" in f.read_text(encoding="utf-8"):
+            ed.sub(f, desc_re, f"{rel} の description")
+
+    mp = root / ".claude-plugin" / "marketplace.json"
+    if mp.is_file():
+        s, e = bump.marketplace_range(ed.lines(mp), plugin)
+        if s is None:
+            ed.manual.append(f".claude-plugin/marketplace.json に {plugin} の項目が無い")
+        elif any(f"(v{old})" in l for l in ed.lines(mp)[s:e]):
+            ed.sub(mp, desc_re, "marketplace.json の description", start=s, stop=e)
+
+    readme = root / "README.md"
+    rows = [l for l in (ed.lines(readme) if readme.is_file() else []) if l.startswith(f"| **{plugin}** |")]
+    if rows:
+        ed.sub(readme, r"^\| \*\*" + re.escape(plugin) + r"\*\* \|", "README.md のプラグイン一覧表")
+    elif plugin in ("ndf", "playwright-kit"):
+        ed.manual.append(f"README.md のプラグイン一覧表に {plugin} の行が無い")
+    if plugin == "ndf":
+        ed.sub(readme, r"\*\*NDFプラグイン v", "README.md の概要の版")
+        ed.sub(root / "AGENTS.md", r"主要プラグインです（v", "AGENTS.md の版")
+        nr = pdir / "README.md"
+        ed.sub(nr, r"（Kiro CLI用 / v", "plugins/ndf/README.md の Kiro の確認例")
+        ed.sub(nr, r"/plugins/cache/ai-plugins/ndf/", "plugins/ndf/README.md の Codex のパス例", count=2)
+        ed.sub(nr, r"ndf@ai-plugins\s+installed", "plugins/ndf/README.md の codex plugin list の出力例")
+        bump_versioning_doc(ed)
+
+    bump.bump_update_heading(ed, pdir / "README.md")
+    return ed
+
+
 def cmd_bump(a):
     root = git_root(a.root)
     pdir = plugin_dir(root, a.plugin)
@@ -304,7 +377,7 @@ def cmd_bump(a):
         # 同じステップの打ち直し（作業場所の版はすでに上げてある）
         emit(result(TOOL, "ok", f"{a.plugin} はすでに {new}（origin/{a.base} は {base_ver}）。上げ直さない",
                     [], {"plugin": a.plugin, "from": base_ver, "to": new, "already": True}))
-    ed = bump.plan_bump(root, pdir, a.plugin, old, new)
+    ed = plan_bump(root, pdir, a.plugin, old, new)
     ed.apply()
 
     expected = []
