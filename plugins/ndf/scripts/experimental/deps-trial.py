@@ -20,17 +20,18 @@ import sys
 import time
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
+from step_result import emit, result  # noqa: E402
+
 TOOL = "deps-trial"
 PROJECT = Path(__file__).resolve().parent / "deps-trial"
 UV_VERSION = "0.12.19"
 GROUPS = {"github": ["githubkit"]}
 
 
-def emit(status: str, summary: str, items: list | None = None, metrics: dict | None = None,
-         code: int = 0) -> None:
-    print(json.dumps({"tool": TOOL, "status": status, "summary": summary, "items": items or [],
-                      "metrics": metrics or {}}, ensure_ascii=False))
-    sys.exit(code)
+def finish(status: str, summary: str, items: list | None = None, metrics: dict | None = None,
+           code: int | None = None) -> None:
+    emit(result(TOOL, status, summary, items, metrics), code)
 
 
 def find_uv() -> str | None:
@@ -62,13 +63,13 @@ def require(group: str) -> None:
     if all(importlib.util.find_spec(m) for m in GROUPS[group]):
         return
     if os.environ.get("NDF_DEPS_REEXEC"):
-        emit("stopped", f"uv の環境へ起動し直したが {group} を import できない", code=3)
+        finish("stopped", f"uv の環境へ起動し直したが {group} を import できない", code=3)
     uv = find_uv()
     if not uv:
         print(f"[{TOOL}] uv が無いため {UV_VERSION} を ~/.local/bin へ入れる", file=sys.stderr)
         uv = install_uv()
     if not uv:
-        emit("stopped", "uv を入れられない。手で入れる: "
+        finish("stopped", "uv を入れられない。手で入れる: "
              f"curl -LsSf https://astral.sh/uv/{UV_VERSION}/install.sh | sh", code=3)
     venv = os.environ.get("NDF_DEPS_VENV") or str(Path.home() / ".cache/ndf/venv/trial")
     env = dict(os.environ, NDF_DEPS_REEXEC="1", UV_PROJECT_ENVIRONMENT=venv)
@@ -89,7 +90,7 @@ def cmd_where() -> None:
     require("github")
     from importlib.metadata import version
     ver = version("githubkit")
-    emit("ok", f"githubkit {ver} を {sys.executable} で import した",
+    finish("ok", f"githubkit {ver} を {sys.executable} で import した",
          metrics={"executable": sys.executable, "reexec": bool(os.environ.get("NDF_DEPS_REEXEC")),
                   "python": sys.version.split()[0], "githubkit": ver})
 
@@ -122,7 +123,7 @@ def cmd_etag(repo: str, pr: int, wait: float) -> None:
                       "cache_control": resp.headers.get("cache-control"),
                       "updated_at": str(resp.parsed_data.updated_at)})
     total = sum(r["counted"] for r in reads)
-    emit("ok", f"読み 3 回で上限に数えられたのは {total} 回（別の利用者の呼び出しが混ざると増える）",
+    finish("ok", f"読み 3 回で上限に数えられたのは {total} 回（別の利用者の呼び出しが混ざると増える）",
          items=reads, metrics={"counted_total": total, "wait": wait})
 
 
