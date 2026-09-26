@@ -395,7 +395,6 @@ def test_the_whole_test_runs_once_when_a_danger_flag_is_raised_and_the_gate_reus
     flow, cmd_setup, cmd_implement, cmd_converge, cmd_gate, capsys
 ):
     """AC13 AC14 AC16b: ファイルを消した項目（D2）で全体のテストを 1 度。最終ゲートは使い回す。"""
-    work = flow["work"]
 
     def delete(w):
         git("rm", "-q", "src/__init__.py", cwd=w)

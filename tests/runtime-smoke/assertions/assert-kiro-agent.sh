@@ -375,6 +375,7 @@ restore_default() {
     return 1
   fi
 }
+# shellcheck disable=SC2154  # rc は trap の文字列の中で代入する（#1323）
 trap 'rc=$?; restore_default || rc=1; exit $rc' EXIT
 
 # kiro-cli はエージェントを cwd / $HOME 配下からのみ検出する。workspace では --project で

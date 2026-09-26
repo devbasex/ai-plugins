@@ -90,7 +90,8 @@ ensure_readonly_worktree() {
              git -C "$dir" checkout --detach "$sha" >/dev/null; }
       return
     fi
-    local stale="$dir.stale-$(date +%Y%m%d%H%M%S)"
+    local stale
+    stale="$dir.stale-$(date +%Y%m%d%H%M%S)"
     mv "$dir" "$stale"
     echo "⚠ 現リポジトリの作業ディレクトリでないため退避しました: $stale" >&2
   fi

@@ -58,7 +58,7 @@ if [ -n "$total_input" ]; then
           | @tsv end' 2>/dev/null)
       [ -n "$st" ] || continue
       IFS=$'\t' read -r model tokens state <<<"$st"
-      [ "$state" = done ] && continue
+      [ "$state" = "done" ] && continue
       if [ "$state" = idle ]; then
         # 30 秒以上書き足されていなければ終わったとみなす (GNU / BSD の stat の両方に対応)
         mtime=$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null)

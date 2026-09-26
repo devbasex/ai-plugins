@@ -1262,7 +1262,9 @@ def test_work_prompt_has_progress_instructions(tmp_path, fakes):
 
 
 def test_worker_lines_are_sorted_into_attention(tmp_path, monkeypatch):
-    w = lambda t: json.dumps({"kind": "worker", "at": "2026-01-01T00:00:00+09:00", "text": t}, ensure_ascii=False)
+    def w(t):
+        return json.dumps({"kind": "worker", "at": "2026-01-01T00:00:00+09:00", "text": t}, ensure_ascii=False)
+
     fake_worker(
         tmp_path,
         monkeypatch,
@@ -1289,7 +1291,10 @@ def test_worker_lines_are_sorted_into_attention(tmp_path, monkeypatch):
 
 def test_worker_lines_with_different_issue_numbers_are_not_repeats(tmp_path, monkeypatch):
     """課題番号だけが違う報告（#943 → #946 → #906 をコミットした）は繰り返しに数えない。同じ番号の 3 度目は数える。"""
-    w = lambda t: json.dumps({"kind": "worker", "at": "2026-01-01T00:00:00+09:00", "text": t}, ensure_ascii=False)
+
+    def w(t):
+        return json.dumps({"kind": "worker", "at": "2026-01-01T00:00:00+09:00", "text": t}, ensure_ascii=False)
+
     fake_worker(
         tmp_path,
         monkeypatch,

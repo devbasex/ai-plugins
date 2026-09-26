@@ -363,7 +363,9 @@ def check_skill(s: dict) -> list[Finding]:
         return [Finding(name_hint, "error", "spec/frontmatter", "frontmatter がない")]
 
     out: list[Finding] = []
-    add = lambda level, code, msg: out.append(Finding(name_hint, level, code, msg))
+
+    def add(level, code, msg):
+        out.append(Finding(name_hint, level, code, msg))
 
     desc = fm.get("description", "")
     wtu = fm.get("when_to_use", "")

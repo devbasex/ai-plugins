@@ -147,7 +147,10 @@ def test_resume_lists_mark_skipped_of_previous_and_current_section(tmp_path):
 
 def _body_repo(tmp_path):
     """origin（bare）と clone を作り、clone に origin/develop へ載っていないファイルを 1 つ置く。"""
-    run = lambda *a, cwd=None: subprocess.run(a, cwd=cwd, check=True, capture_output=True, text=True)
+
+    def run(*a, cwd=None):
+        return subprocess.run(a, cwd=cwd, check=True, capture_output=True, text=True)
+
     bare, clone = tmp_path / "origin.git", tmp_path / "clone"
     run("git", "init", "-q", "--bare", "-b", "develop", str(bare))
     run("git", "clone", "-q", str(bare), str(clone))

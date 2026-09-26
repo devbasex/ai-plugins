@@ -10,6 +10,7 @@ from __future__ import annotations
 import datetime as _dt
 import json
 import pathlib
+import subprocess
 from typing import Any
 
 
@@ -167,8 +168,6 @@ def test_total():
 
 
 def git(*args: str, cwd: Any) -> "subprocess.CompletedProcess[str]":
-    import subprocess
-
     return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True)
 
 
