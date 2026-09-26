@@ -72,7 +72,7 @@ class Measurement:
     """1 回の測定。締め切り（`measure_deadline`）を言語ごとの測定と重複検出で分け合う。"""
 
     def __init__(self, state: dict[str, Any], record: dict[str, Any],
-                 which: Callable[[str], Optional[str]] = shutil.which,
+                 which: Optional[Callable[[str], Optional[str]]] = None,
                  kill_grace: float = KILL_GRACE) -> None:
         self.state = state
         self.record = record
@@ -81,7 +81,7 @@ class Measurement:
         self.roots = list(dict.fromkeys([str(self.work), os.path.realpath(self.work)]))
         self.tmp = pathlib.Path(state["tmp_dir"])
         self.run_id = state["id"]
-        self.which = which
+        self.which = which or shutil.which
         self.kill_grace = kill_grace
         self.budget = 0
         self.end = 0.0
