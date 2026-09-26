@@ -5,6 +5,7 @@
 採った言語の拡張子だけである。呼び出し側（serena-lsp.py）が例外を握りつぶす。
 """
 import contextlib
+import hashlib
 import json
 import os
 import shlex
@@ -128,6 +129,47 @@ def _state_path(session_id: str) -> Path:
     return Path(base) / "mcp-serena/hooks" / f"{safe}.json"
 
 
+def _project_key(root: Path) -> list | None:
+    """project.yml と project.local.yml の (更新時刻, 大きさ)。project.yml が無ければ None。"""
+    key = []
+    for name in ("project.yml", "project.local.yml"):
+        try:
+            st = (root / ".serena" / name).stat()
+            key.append([st.st_mtime_ns, st.st_size])
+        except OSError:
+            key.append(None)
+    return key if key[0] is not None else None
+
+
+def cached_state(root: Path):
+    """`project_yml.load_state` の控え。2 つのファイルが変わらない間は YAML を読まない（PreToolUse の所要を増やさない）。"""
+    key = _project_key(root)
+    if key is None:
+        return None
+    base = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local/state")
+    path = Path(base) / "mcp-serena/hooks" / f"project-{hashlib.sha1(str(root).encode()).hexdigest()[:16]}.json"
+    try:
+        data = json.loads(path.read_text())
+        if data.get("root") == str(root) and data.get("key") == key:
+            if data.get("unsupported"):
+                raise py.UnsupportedShape("控えの形")
+            return data["state"]
+    except (OSError, ValueError, KeyError, AttributeError):
+        pass
+    try:
+        state, unsupported = py.load_state(root), False
+    except py.UnsupportedShape:
+        state, unsupported = None, True
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"root": str(root), "key": key, "state": state, "unsupported": unsupported}))
+    except OSError:
+        pass
+    if unsupported:
+        raise py.UnsupportedShape("読めない形")
+    return state
+
+
 EMPTY = {"grep": 0, "read": 0, "mixed": 0, "last_grep": None, "last_read": None, "last_mixed": None,
          "last_notice": None}
 
@@ -241,7 +283,7 @@ def pre_tool_use(payload: dict, client: str):
         return None
     tool_input = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
     try:
-        state = py.load_state(find_root(payload["cwd"]))
+        state = cached_state(find_root(payload["cwd"]))
     except py.UnsupportedShape:
         state = None
     if state is None or not state["marked"]:
