@@ -18,10 +18,10 @@ allowed-tools:
 | --- | --- |
 | メインディレクトリ | リポジトリを clone したディレクトリ。`git rev-parse --git-common-dir` の親にあたる |
 | worktree | `git worktree add` で作った作業用ディレクトリ。ここでは `.worktrees/` 配下に置くものを指す |
-| 開発用の worktree | 人が変更を加えて Pull Request にするもの。ブランチを持つ |
-| レビュー用の worktree | `cross-review` と `cross-refactoring` が一時的に使うもの。システムの一時ディレクトリに置く |
+| 開発 worktree | 人が変更を加えて Pull Request にするもの。ブランチを持つ |
+| レビュー worktree | `cross-review` と `cross-refactoring` が一時的に使うもの。システムの一時ディレクトリに置く |
 
-この Skill が扱うのは開発用の worktree だけである。レビュー用の worktree は
+この Skill が扱うのは開発 worktree だけである。レビュー worktree は
 それぞれの Skill が作って捨てるため、置き場所も後片付けの主体も異なる。
 
 ## メインディレクトリを編集してよい場合
@@ -34,7 +34,7 @@ allowed-tools:
 | `docs/` | リポジトリ知識 |
 | `.claude/` `.codex/` `.kiro/` `.agents/` | 各ランタイムの設定 |
 | `.serena/` | コードインテリジェンスの設定と索引 |
-| `.ndf/` | この仕組みの宣言ファイル |
+| `.ndf/` | この仕組みの設定ファイル |
 | `.gitignore` | worktree の登録そのものに必要 |
 
 リポジトリ側で `.ndf/worktree.json` の `guard.allow_paths` を書けば、この一覧を差し替えられる。
@@ -50,7 +50,7 @@ allowed-tools:
 
 **続けて実行するときは 1 つの bash ブロックへまとめる。** 先頭で 1 度決めれば、後続のコマンドは決め直さずに済む（推奨であり、1 コマンドずつ実行してもよい）。
 
-## 0. 宣言ファイルを用意する
+## 0. 設定ファイルを用意する
 
 **この Skill を起動したら、まずこれを実行する。**
 
@@ -65,29 +65,29 @@ worktree 運用の仕組みは、リポジトリ側に `.ndf/worktree.json` が�
 入口を作る。**
 
 **終了コードが 0 でなければ先へ進まない。** `init` の出力をそのまま利用者に示し、手順 1 へ
-進まずに止まる。宣言が読めない（JSON として壊れている・`version` が未対応）ときは、宣言の
-状態を示す行と案内が標準エラーに出て 1 で終わる。**宣言を直す・消す・`init --force` で作り直す
-のは利用者が決める。** エージェントは宣言を書き換えない。
+進まずに止まる。設定が読めない（JSON として壊れている・`version` が未対応）ときは、設定の
+状態を示す行と案内が標準エラーに出て 1 で終わる。**設定を直す・消す・`init --force` で作り直す
+のは利用者が決める。** エージェントは設定を書き換えない。
 
-- 読める宣言が既にあれば**上書きしない**。書き加えた内容は消えない。読めない宣言では
+- 読める設定が既にあれば**上書きしない**。書き加えた内容は消えない。読めない設定では
   1 で終わる（「既にあります」とは報告しない）
 - 作った直後から、メインディレクトリの編集時の案内と逸脱検知が動く。メインディレクトリの
   ブランチは既定では動かさない（追従させるなら `follow_branch: true` を足す。「メイン
   ディレクトリのブランチ」）
-- **作った宣言ファイルはコミットする。** リポジトリの設定であり、他の開発者にも同じ
+- **作った設定ファイルはコミットする。** リポジトリの設定であり、他の開発者にも同じ
   運用が要る
 
-導入の状態は `worktree-setup.sh status` で見られる（宣言ファイルの有無、`.worktrees/`
+導入の状態は `worktree-setup.sh status` で見られる（設定ファイルの有無、`.worktrees/`
 の登録、稼働中の worktree 数）。**手順が分岐に使うなら `worktree-setup.sh check` を使う。**
-宣言の状態を終了コードで返し（0 あり / 2 なし / 3 読めない / 1 判定できない）、ファイルを作らない。
+設定の状態を終了コードで返し（0 あり / 2 なし / 3 読めない / 1 判定できない）、ファイルを作らない。
 
 ローカル環境での動作検証やテスト実行の分離を使うときは `localenv` / `testenv` を足す。
 書き方は [references/declaration.md](references/declaration.md) にある。
 
-**機械ごとに違う値は共有の宣言へ書かない。** ポートの帯・持ち込み物・追従の有無は、
+**機械ごとに違う値は共有設定へ書かない。** ポートの帯・持ち込み物・追従の有無は、
 コミットしない `.ndf/worktree.local.json` へ書く（`init` が `.ndf/.gitignore` で追跡から
 外す）。上書きできる項目と重ね合わせの規則は
-[references/declaration.md](references/declaration.md) の「機械ごとに違う値は個人の宣言へ
+[references/declaration.md](references/declaration.md) の「機械ごとに違う値は個人設定へ
 書く」にある。
 
 ## 1. 現在地を確かめる
@@ -144,7 +144,7 @@ fi
 ```bash
 branch="feature/<name>"
 git -C "$main_dir" fetch origin
-# 起点は開発の本流であって、既定ブランチとは限らない。宣言の base_branch を
+# 起点は開発の本流であって、既定ブランチとは限らない。設定の base_branch を
 # 優先し、無ければ origin の HEAD が指す先へ落ちる
 base=$(wt_base_branch "$main_dir") || exit 1
 start="origin/$base"
@@ -157,10 +157,10 @@ cd "$main_dir/.worktrees/$branch"
 
 **ミッションの中では、課題の worktree をミッションブランチから切る。** ミッション
 ブランチ（`mission/<名前>`）そのものは起点（`base_branch`）から切り、課題の worktree は
-`--from` にミッションブランチを渡す。宣言の `base_branch` は develop のまま変えない。
+`--from` にミッションブランチを渡す。設定の `base_branch` は develop のまま変えない。
 
 ```bash
-# ミッションブランチ。起点は宣言の base_branch
+# ミッションブランチ。起点は設定の base_branch
 bash "$SCRIPTS/worktree-setup.sh" create mission/<名前>
 # 課題の worktree。起点はミッションブランチ
 bash "$SCRIPTS/worktree-setup.sh" create feat/issue-<番号>-<名前> --from mission/<名前>
@@ -171,10 +171,10 @@ bash "$SCRIPTS/worktree-setup.sh" create feat/issue-<番号>-<名前> --from mis
 
 **既定ブランチと開発の起点は別物である。** 既定ブランチに正式版を置き、開発の本流を
 `develop` などの別のブランチに置くリポジトリでは、既定ブランチから分岐すると開発中の
-変更が正式版から枝分かれする。起点は宣言（[references/declaration.md](references/declaration.md)
-の `base_branch`）から取り、宣言が無ければ `origin` の HEAD が指すブランチへ落ちる。
+変更が正式版から枝分かれする。起点は設定（[references/declaration.md](references/declaration.md)
+の `base_branch`）から取り、設定が無ければ `origin` の HEAD が指すブランチへ落ちる。
 
-宣言した名前が origin にもローカルにも無いときは、`wt_base_branch` が名前を挙げて失敗する。
+設定した名前が origin にもローカルにも無いときは、`wt_base_branch` が名前を挙げて失敗する。
 既定ブランチへは落ちない。**まだ取得していないだけのブランチは「無い」とは読まない。**
 取得済みの参照に見つからないときは origin へ問い合わせるため、起点を移した直後の作業
 ディレクトリでも、`git fetch` を挟まずに解決できる。`origin/HEAD` が設定されていない場合は
@@ -244,11 +244,11 @@ Pull Request がマージされた後の削除は `/ndf:merged` が行う。
 
 ## メインディレクトリのブランチ
 
-**セッション開始時の hook は、既定ではメインディレクトリの HEAD を動かさない。** 並列に動く
+**セッション開始 hook は、既定ではメインディレクトリの HEAD を動かさない。** 並列に動く
 エージェントのどれが開始・再開しても、他の担当が読んでいるメインディレクトリの内容が
 入れ替わらないためである。
 
-稼働中の worktree の内容をメインディレクトリでも見たいときは、宣言に `follow_branch: true` を
+稼働中の worktree の内容をメインディレクトリでも見たいときは、設定に `follow_branch: true` を
 書く（[references/declaration.md](references/declaration.md)）。このときメインディレクトリの
 ブランチは、稼働中の開発用 worktree へセッション開始時に追従する。同じブランチを 2 つの
 作業ディレクトリへ checkout できないため、追従は detached HEAD で行う。detached HEAD では
@@ -258,7 +258,7 @@ Pull Request がマージされた後の削除は `/ndf:merged` が行う。
 | 稼働中の開発用 worktree | メインディレクトリ（`follow_branch: true` のとき） |
 | --- | --- |
 | 1 つ | そのブランチが指すコミットを detached HEAD で開く |
-| 0 個または複数 | 起点ブランチに合わせる（宣言が無ければ既定ブランチ） |
+| 0 個または複数 | ベースブランチに合わせる（設定が無ければ既定ブランチ） |
 
 メインディレクトリに未コミットの変更があるときは追従せず、変更がある事実だけを伝える。
 
@@ -284,7 +284,7 @@ bash "$NDF" verify "$WT"; echo $?  # 0 一致 / 1 不一致 / 2 未起動
 しては現れない。別のコードを検証したことに気づけないまま進む。
 
 リポジトリごとの差は `.ndf/worktree.json` が持つ。書き方は
-[references/declaration.md](references/declaration.md) にある。**この宣言が無い
+[references/declaration.md](references/declaration.md) にある。**この設定が無い
 リポジトリでは、これらのコマンドは何も出力せず終了コード 0 で終わる。**
 
 ## テスト実行の分離
@@ -294,21 +294,21 @@ bash "$NDF" verify "$WT"; echo $?  # 0 一致 / 1 不一致 / 2 未起動
 
 ```bash
 TE="$SCRIPTS/worktree-testenv.sh"
-bash "$TE" env "$WT"                        # 環境名・スロット・ポートを採番し台帳へ記録
+bash "$TE" env "$WT"                        # 環境名・スロット・ポートを採番し worktree レジストリへ記録
 bash "$TE" bake --tag "$(bash "$TE" tag "$WT")"  # 基準を作る（内容が同じなら焼き直さない）
 bash "$TE" up "$WT" --profile core          # 起動する
 bash "$TE" test "$WT" --kind stateful       # 実行したコマンドの終了コードがそのまま返る
 bash "$TE" down "$WT" --volumes             # 破棄し、割り当てを解放する
 ```
 
-**worktree を消す前に `down --volumes` を実行する。** 順序を逆にすると台帳から実体を
+**worktree を消す前に `down --volumes` を実行する。** 順序を逆にすると worktree レジストリから実体を
 引けなくなる。
 
-台帳は共通の git ディレクトリ配下（`.git/ndf/worktree-registry.json`）に置く。worktree の
+worktree レジストリは共通の git ディレクトリ配下（`.git/ndf/worktree-registry.json`）に置く。worktree の
 中に置くと、削除した時点で割り当ての記録が消える。**解放しても行は消さず、解放の時刻を
 書き込む。**
 
-この工程に入ったら記録のコマンド `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "作業場所の用意"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「記録のコマンド」を使う）。
+この工程に入ったら進捗記録のコマンド `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "作業場所の用意"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の進捗記録のコマンドを使う）。
 
 
 ## 関連

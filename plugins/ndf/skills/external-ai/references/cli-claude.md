@@ -45,7 +45,7 @@ $ claude -p --permission-mode bypassPermissions < prompt.md
 
 ## 完了検知は JSON で確定する
 
-`--output-format json` を使えば**完了目印のファイルは要らない**。
+`--output-format json` を使えば**完了マーカーのファイルは要らない**。
 
 ```bash
 jq -r '.is_error, (.permission_denials | length), .subtype' /tmp/claude-stdout.json

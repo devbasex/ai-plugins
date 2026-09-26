@@ -9,15 +9,15 @@ worktree は**追跡されているファイルしか持たない**。依存物�
 
 この文書が前提にするのは git・コンテナ実行系と Compose 相当の定義・POSIX シェルまでで、
 ホストの種類・言語・フレームワークには依存しない。リポジトリごとの差は
-[`declaration.md`](declaration.md) の宣言ファイルが持つ。
+[`declaration.md`](declaration.md) の設定ファイルが持つ。
 
 ## この文書が受け取る値
 
 | 変数 | 値 | 決め方 |
 | --- | --- | --- |
 | `$SCRIPTS` | プラグインの `scripts/` の絶対パス | [SKILL.md](../SKILL.md) の手順 0。シェルが変わったら決め直す |
-| `$APP_SERVICE` | アプリのサービス名 | 宣言の `localenv.app_service` |
-| `$SRC_TARGET` | コンテナ内のコードの位置 | 宣言の `localenv.src_target` |
+| `$APP_SERVICE` | アプリのサービス名 | 設定の `localenv.app_service` |
+| `$SRC_TARGET` | コンテナ内のコードの位置 | 設定の `localenv.src_target` |
 
 **続けて実行するときは 1 つの bash ブロックへまとめる。** 先頭で 1 度決めれば、後続のコマンドは決め直さずに済む（推奨であり、1 コマンドずつ実行してもよい）。
 
@@ -39,7 +39,7 @@ flowchart TD
 | 相乗り | 既定。コマンドで完結する検証、1 本だけの画面確認 | メインディレクトリの 1 セットを共有 | 不要 |
 | 分離 | データの構造を壊す変更、2 本の同時比較、コンテナ定義そのものの変更 | worktree ごとに 1 セット | 並行起動用の定義の追加 |
 
-判定は変更ファイルの一覧を宣言の条件へ当てて提示する。対象の worktree は引数で渡す
+判定は変更ファイルの一覧を設定の条件へ当てて提示する。対象の worktree は引数で渡す
 （省略すると現在地が対象になる）。
 
 ```bash
@@ -52,7 +52,7 @@ bash "$SCRIPTS/worktree-localenv.sh" mode "$WT"   # 0 相乗り / 1 分離
 ## 型を見分ける
 
 ローカル環境の作り方によって切り替えの手順が変わる。運用を始める前に 1 度だけ判定し、結果を
-宣言の `localenv.layout` へ書く。
+設定の `localenv.layout` へ書く。
 
 ```bash
 MAIN=$(dirname "$(cd "$(git rev-parse --git-common-dir)" && pwd -P)")
@@ -82,7 +82,7 @@ docker exec "$APP" sh -lc "readlink '$SRC_TARGET' || echo 'symlink ではない'
 bash "$SCRIPTS/worktree-localenv.sh" setup "$MAIN/.worktrees/feature/x"
 ```
 
-複製対象は宣言の `copy_from_main` と `copy_as_real` が持つ。
+複製対象は設定の `copy_from_main` と `copy_as_real` が持つ。
 
 - **依存物は複製する。メインディレクトリへの symlink は使わない。** 読み込み定義が親
   ディレクトリを実体解決する構成があり、リンクにすると worktree で起動した処理が
@@ -115,7 +115,7 @@ docker exec -w "$WT" "$APP" <検証コマンド>
 bash "$SCRIPTS/worktree-localenv.sh" aim "$WT"
 ```
 
-このコマンドは宣言に従って、資産のビルド → コードの位置の切り替え → 再読み込みの
+このコマンドは設定に従って、資産のビルド → コードの位置の切り替え → 再読み込みの
 シグナルを順に行う。`indirect` 型では、コードの位置を指しているコンテナだけを対象に
 リンクを張り替える。
 
@@ -136,12 +136,12 @@ bash "$SCRIPTS/worktree-localenv.sh" verify "$WT"; echo $?
 | --- | --- | --- |
 | 0 | 一致。ローカル環境に対象のコードが載っている | 検証へ進む |
 | 1 | 不一致。別のコードが載っている | `aim` で切り替える |
-| 2 | 未起動、または適用外 | ローカル環境を起動する。宣言に `branch_probe` があるかを見る |
+| 2 | 未起動、または適用外 | ローカル環境を起動する。設定に `branch_probe` があるかを見る |
 
 **「未起動」と「不一致」を同じ値にしない。** ローカル環境が動いていないことと、別のコードが
 載っていることは、次の手が違う。
 
-宣言した動作確認コマンドまで通すなら `healthcheck` を使う。照合を先に行い、一致した
+設定した動作確認コマンドまで通すなら `healthcheck` を使う。照合を先に行い、一致した
 ときだけコマンドを実行して、その終了コードをそのまま返す。
 
 ### 戻す
