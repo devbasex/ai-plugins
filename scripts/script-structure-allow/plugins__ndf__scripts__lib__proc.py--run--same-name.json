@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/lib/proc.py", "name": "run", "kind": "same-name", "reason": "子プロセスの起動の定義。post_queue.py の同じ名前の関数は C3 でこの関数の上に置いた Attempt を返す包み（upkeep.py とテストが名前で読む）"}

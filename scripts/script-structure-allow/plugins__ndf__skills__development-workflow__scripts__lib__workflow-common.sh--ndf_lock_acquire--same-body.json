@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/skills/development-workflow/scripts/lib/workflow-common.sh", "name": "ndf_lock_acquire", "kind": "same-body", "reason": "S1 の時点の本体の同じ関数。C7 でライブラリへ寄せるか、別の概念なら名前を分ける"}

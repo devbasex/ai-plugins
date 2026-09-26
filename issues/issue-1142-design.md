@@ -147,7 +147,7 @@
 | `refactor_lib/gitfacts.py`（分割） | コミットの事実だけを残し、パスの判定・プロセス・GitHub・worktree・公開・結果の 6 本へ分ける |
 | `release-steps.py`（変更） | 差分のあるプラグインを列挙する副命令 `changed-plugins` |
 | `mvv-gate.py`（変更） | 設計の判定で PR の `issues/` の設計文書を材料に足す |
-| `scripts/check-script-structure.py`（新設、リポジトリ根） | 構造チェック。例外リストは `scripts/script-structure-allow.json` |
+| `scripts/check-script-structure.py`（新設、リポジトリ根） | 構造チェック。例外リストは `scripts/script-structure-allow/` |
 | `scripts/measure/`（新設、リポジトリ根） | E1 と E9 の計測の 2 本（`structure-baseline.py`・`claude-p-usage.py`） |
 | `development-workflow/references/conductor-entrypoints.md`（新設） | conductor が直に使うエントリポイントの一覧 |
 

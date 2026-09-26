@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/skills/cross-review/scripts/review_lib/__init__.py", "name": "_sh", "kind": "same-name", "reason": "C2 で state.py から移した。lib/result_posts.py の同じ名前の関数とは別の実装（こちらは失敗で止まる）。テストが名前で差し替えるため C2 では名前を変えない"}
