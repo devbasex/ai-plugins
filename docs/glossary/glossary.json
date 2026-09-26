@@ -1977,7 +1977,7 @@
     {
       "term": "見送りの返信",
       "context": "ndf-cross-review",
-      "meaning": "修正担当が minor / nit の指摘を直さずに閉じるときに書く返信。理由の種類と、直す条件を書く",
+      "meaning": "修正担当が minor / nit の指摘を直さずに閉じるときに書く返信。雛形から組み、理由の種類（見送りの種類の名前）と直す条件（使って困る場面が出たら直す）を定型文で書く",
       "source": "",
       "pending_source": "issues/issue-1287-design.md"
     },

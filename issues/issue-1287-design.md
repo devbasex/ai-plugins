@@ -39,19 +39,26 @@ PR の上に、担当が `[minor / 整合性] 2 つの文書で受け入れ条�
 | # | 集約 | 条件 | 破れたときの扱い |
 | --- | --- | --- | --- |
 | I1 | 振り分け | `decision` が `fixed` の要素は、重要度が `critical` か `major` である | `finalize` が `stopped`（終了コード 1）で止まり、戻り値ファイルを書かない |
-| I2 | 振り分け | `decision` が `waived` の要素は、重要度が `minor` か `nit` で、`criterion` を持たず、`waive_kind` が見送りの種類の 5 つのどれかである | 同上 |
+| I2a | 振り分け | `decision` が `waived` の要素は、重要度が `minor` か `nit` である | 同上 |
+| I2b | 振り分け | `decision` が `waived` の要素は、`criterion` を持たない | 同上 |
+| I2c | 振り分け | `decision` が `waived` の要素は、`waive_kind` が見送りの種類の 5 つのどれかである | 同上 |
 | I3 | 振り分け | `criterion` が 3 の要素は、振り分けの JSON の `review_focus` が空でない | 同上 |
-| I4 | 振り分け | `fixed` の要素が 1 つも無いとき、戻り値の `fix_commit` は `null` である（振り分けの JSON に値があっても捨てる） | 捨てたことを `finalize` の `items` に出す。止めない |
-| I5 | 振り分け | `waived` の要素は、戻り値の `deferred` に `resolve: true` と、雛形から組んだ `reply` を持って載る | 組めない（種類が不明）ときは I2 で止まる |
-| I6 | 指摘の基準 | 重点の宣言が無いとき、レビュー担当への節に基準 3 が現れず、見送りの返信は雛形の定型文と種類の名前だけでできている | テストで落とす |
-| I7 | 指摘の基準 | 重点の宣言が読めないとき、基準 1・2・4 だけの節を返し、読み取り結果を `unreadable` と理由にする。例外を上げない | テストで落とす |
-| I8 | 収束ループの状態 | 1 回の実行の中で、どのラウンドの担当も init が写した同じ基準の節を受け取る | 状態ファイルに節が無いときは、宣言を読まない既定の節を使う |
+| I4 | 振り分け | `fixed` の要素が 1 つも無いとき、戻り値の `fix_commit` は `null` である（振り分けの JSON に値があっても捨てる） | 捨てたことを `finalize` の `items` に `fix-commit` の項目（形は「戻り値ファイル」の節）で出す。止めない |
+| I5 | 振り分け | `waived` の要素は、戻り値の `deferred` に `resolve: true` と、雛形から組んだ `reply` を持って載る | 組めない（種類が不明）ときは I2c で止まる |
+| I6a | 指摘の基準 | 重点の宣言が無いとき、レビュー担当への節に基準 3 が現れない | テストで落とす |
+| I6b | 指摘の基準 | 重点の宣言が無いとき、見送りの返信は雛形の定型文と種類の名前だけでできている（重点の句を持たない） | テストで落とす |
+| I7a | 指摘の基準 | 重点の宣言が読めないとき、基準 1・2・4 だけの節を返す | テストで落とす |
+| I7b | 指摘の基準 | 重点の宣言が読めないとき、読み取り結果の `status` を `unreadable`、`error` を理由にする | テストで落とす |
+| I7c | 指摘の基準 | 重点の宣言が読めないとき、例外を上げない | テストで落とす |
+| I8 | 収束ループの状態 | 1 回の実行の中で、どのラウンドのレビュー担当と修正担当も init が写した同じ基準（節と重点の名前）を受け取る | 状態ファイルに節が無いときは、宣言を読まない既定の節を使う |
+
+I2・I6・I7 と書くときは、枝番の付いた行のすべてを指す。
 
 ### ドメインイベント
 
 | # | イベント | 発生元 | 受け手 |
 | --- | --- | --- | --- |
-| E1 | プロジェクトの重点の宣言を読んだ | `state.py init`（cross-review）/ `fix-steps.py context`（`/ndf:fix`） | 状態ファイルの `review_criteria` / 振り分けの JSON の `review_focus` と文脈のファイル |
+| E1 | プロジェクトの重点の宣言を読んだ | `state.py init`（cross-review）/ `fix-steps.py context`（`/ndf:fix` を単独で呼んだときだけ） | 状態ファイルの `review_criteria` / 振り分けの JSON の `review_focus` と文脈のファイル。cross-review の中の `context` は宣言を読まず、`drive.py` が環境変数 `CROSS_REVIEW_STATE` で渡す状態ファイルの `review_criteria` を写す（I8） |
 | E2 | レビュー担当が基準に当たる指摘だけを書いた | レビュー担当（`launch-reviewer.sh` の指示） | 取り込み（`read-result`） |
 | E3 | 取り込みが指摘を PR へ投稿した | 取り込み（既存） | 修正担当（PR の未解決のスレッド） |
 | E4 | 修正担当が指摘ごとに重要度を判定し直した | 修正担当 | `fix-steps.py finalize` |
@@ -66,7 +73,7 @@ PR の上に、担当が `[minor / 整合性] 2 つの文書で受け入れ条�
 | --- | --- | --- |
 | 指摘の基準 | 指摘として出してよいものを決める 4 つの条件。当たるものが `major` 以上になる | 追加（要求の段で反映済み。出所をこの設計へ移す） |
 | レビューの重点 | プロジェクトが `.ndf/review.json` で宣言した、指摘の基準 3 に使う観点 | 意味の変更（置き場所を `.ndf/review.json` に決めた） |
-| 見送りの返信 | 修正担当が `minor` / `nit` の指摘を直さずに閉じるときに送る返信。雛形から組む | 追加（要求の段で反映済み） |
+| 見送りの返信 | 修正担当が `minor` / `nit` の指摘を直さずに閉じるときに送る返信。雛形から組み、理由の種類（見送りの種類の名前）と直す条件（使って困る場面が出たら直す）を定型文で書く。重点の宣言があるときだけ重点の句が入る | 意味の変更（「雛形から組む」ことと中身を用語集にも書く） |
 | 見送りの種類 | 見送りの返信の括弧に書く、基準に当たらない理由の 5 分類（`waive_kind`） | 追加 |
 | 最終スイープ | 収束ループを抜けた後に `/ndf:fix` を通し、open thread を 0 にする工程 | 追加（要求の段で反映済み） |
 
@@ -90,14 +97,14 @@ PR の上に、担当が `[minor / 整合性] 2 つの文書で受け入れ条�
 | 初期化 | `skills/cross-review/scripts/review_lib/commands/init.py` | 変更 | 新規・再開のどちらでも基準の正本を呼び、状態ファイルの `review_criteria` を書き直す。読めなければ標準エラーと出力の `REVIEW_FOCUS=unreadable` に出す |
 | レビュー担当の起動 | `skills/cross-review/scripts/launch-reviewer.sh` | 変更 | 「出し切り」の節を状態ファイルの基準の節に差し替える。重要度の書式を `critical` / `major` だけにする |
 | 完了報告 | `skills/cross-review/scripts/review_lib/commands/report.py` | 変更 | 基準外の見送りを件数で別の節に出し、残 deferred の一覧から外す。宣言が読めなかったことを出す |
-| 修正の駆動 | `skills/cross-review/scripts/drive.py` | 変更 | 修正の指示から `--defer-nit` を外す |
-| 修正の手順の集計 | `skills/fix/scripts/fix-steps.py` | 変更 | `context` が文脈のファイルへ修正担当への節を書き、振り分けの雛形へ `review_focus` を写す。`finalize` が I1〜I5 を守り、`waived` を `deferred` へ変える |
+| 修正の駆動 | `skills/cross-review/scripts/drive.py` | 変更 | 修正の指示から `--defer-nit` を外し、環境変数 `CROSS_REVIEW_STATE=<状態ファイル>` を渡す指示を足す |
+| 修正の手順の集計 | `skills/fix/scripts/fix-steps.py` | 変更 | `context` が文脈のファイルへ修正担当への節を書き、振り分けの雛形へ `review_focus` を写す（`CROSS_REVIEW_STATE` があれば状態ファイルの `review_criteria` を優先し、宣言を読まない）。`finalize` が I1〜I5 を守り、`waived` を `deferred` へ変える |
 | 修正の投稿 | `plugins/ndf/scripts/lib/result_posts.py` | 変更 | 要素が `reply` を持てば定型句を付けずにそのまま返信する。まとめに「基準外の見送り: N 件」の行を足す |
 | 修正の手順 | `skills/fix/SKILL.md` | 変更 | 引数・振り分けの値・「重要度の判定」の表・`--classify-only` の表を基準に揃える |
 | cross-review の定め | `skills/cross-review/references/design-principles.md`・`docs/02-fix-and-rotation.md`・`docs/03-review-output.md`・`docs/04-contracts.md`・`SKILL.md` | 変更 | 自動で直すのは `critical` / `major` だけ・最終スイープは閉じるだけ・戻り値の新しい項目を書く |
 | PR レビューの表 | `skills/pr-review/SKILL.md` | 変更 | 「重要度の運用ガイド」の「後段（`/ndf:fix`）の扱い」の列を新しい判断表に揃える |
 | ライブラリの一覧 | `plugins/ndf/scripts/lib/README.md` | 変更 | `review_criteria.py` の行を足す |
-| 効果の集計 | `scripts/measure/fix-severity.py` | 新設 | `/tmp/fixsum.py` と `/tmp/threads.py` を 1 本にまとめ、期間を引数で受け、前提 9 の判定を出す |
+| 効果の集計 | `scripts/measure/fix-severity.py` | 新設 | `/tmp/fixsum.py` と `/tmp/threads.py` を 1 本にまとめ、期間を引数で受け、前提 9 の判定と、振る舞いの変化を測る値を出す |
 
 ```mermaid
 graph TD
@@ -128,6 +135,7 @@ graph TD
     CTX --> CRIT
     FIN --> CRIT
     DRIVE --> CTX
+    DRIVE -. 状態ファイルの review_criteria .-> CTX
     FIN -. 戻り値ファイル .-> MERGE
     MERGE --> POSTS
     MERGE -. 状態ファイルの deferred_nits .-> REPORT
@@ -252,14 +260,14 @@ classDiagram
 {"status": "declared", "focus": ["…"], "error": null, "reviewer_block": "## 指摘の基準\n…"}
 ```
 
-`init` が新規・再開のどちらでも書き直す。`launch-reviewer.sh` は `reviewer_block` だけを読み、空なら `review_criteria.py reviewer`（`--root` なし。宣言を読まない既定の節）を差し込む。`init` の出力に `REVIEW_FOCUS=<status>` の 1 行を足す。
+`init` が新規・再開のどちらでも書き直す。修正担当の側は `drive.py` が渡す `CROSS_REVIEW_STATE` から `context` が `status` と `focus` を読む（I8）。`launch-reviewer.sh` は `reviewer_block` だけを読み、空なら `review_criteria.py reviewer`（`--root` なし。宣言を読まない既定の節）を差し込む。`init` の出力に `REVIEW_FOCUS=<status>` の 1 行を足す。
 
 ### `/ndf:fix` の引数
 
 | 引数 | 変更 |
 | --- | --- |
 | `--defer-nit` | 廃止。受け取ったら「nit は常に見送るため無視する」と知らせて続ける |
-| `--severity-min LEVEL` | 値は `critical` / `major`、既定 `major`。`minor` を受け取ったら `major` として扱うと知らせる |
+| `--severity-min LEVEL` | 値は `critical` / `major`、既定 `major`。`minor` を受け取ったら `major` として扱うと知らせる。閾値は修正担当が判定し直した後の重要度に効き、閾値未満の指摘も無視しない（「指定重要度未満は無視」の定めを消す）。閾値未満の `minor` / `nit` は `waived`、`critical` を指定したときの `major` は `deferred`（理由に `--severity-min critical` を書く）にし、どちらも返信を受ける |
 
 ### 振り分けの JSON（`fix-steps.py` の `context` が雛形を書き、修正担当が埋める）
 
@@ -273,7 +281,7 @@ classDiagram
 | `criterion` | 要素 | 当たった基準の番号（1〜4）。任意。`waived` では持たない |
 | `waive_kind` | 要素 | `waived` のとき必須。見送りの種類の値 |
 
-`context` の出力は、文脈のファイルに「## 指摘の基準」の節（`fixer_block`）を足し、`items` に `{"name": "review-focus", "result": "<status>", "reason": "<error>"}`、`metrics` に `review_focus` を足す。
+`context` は、環境変数 `CROSS_REVIEW_STATE` が状態ファイルを指し、その `review_criteria` があればそれを写し、`--root` の宣言を読まない。無ければ `--root` の宣言を読む。出力は、文脈のファイルに「## 指摘の基準」の節（`fixer_block`）を足し、`items` に `{"name": "review-focus", "result": "<status>", "reason": "<error>"}`、`metrics` に `review_focus` を足す。
 
 ### 戻り値ファイル `fix-pr<PR>-result.json`
 
@@ -285,7 +293,7 @@ classDiagram
  "reply": "<見送りの返信>", "resolve": true, "waived": "doc_mismatch"}
 ```
 
-`finalize` の `metrics` に `waived`（件数）を足し、要約を `修正 N 件 / 見送り N 件（うち基準外 M 件）/ 却下 N 件 / …` にする。
+`fixed` が 0 件で振り分けの JSON の `fix_commit` に値があったときは、`finalize` の `items` に `{"name": "fix-commit", "result": "dropped", "reason": "fixed が 0 件のため <値> を捨てた"}` を足す（I4）。`finalize` の `metrics` に `waived`（件数）を足し、要約を `修正 N 件 / 見送り N 件（うち基準外 M 件）/ 却下 N 件 / …` にする。
 
 ### 修正のまとめのコメント（`result_posts.py`）
 
@@ -305,7 +313,11 @@ python3 scripts/measure/fix-severity.py --repo devbasex/ai-plugins --since 2026-
 | `minor_only_rounds` | `minor` が 1 以上で、`critical` と `major` が 0 のまとめの件数 |
 | `waived` | 「基準外の見送り」の行の和 |
 | `posted_by_severity` | 期間内の PR の、スレッドの最初のコメントの `[重要度 / …]` の件数 |
+| `posted_minor_ratio` | `posted_by_severity` の `minor` と `nit` の和 ÷ 全件。レビュー担当が基準外を書かなくなったかを測る |
+| `raised_from_minor` | スレッドの最初のコメントのラベルが `minor` / `nit` で、修正担当の「対応しました」の返信を持つスレッドの数（判定し直しで上げて直した件数） |
 | `verdict` | 前提 9 の判定（`minor_ratio ≤ 0.10` かつ `minor_only_rounds ≤ 0.05 × prs`）。閾値は引数で変えられる |
+
+`minor_ratio` と `minor_only_rounds` は `fixed` の要素だけを数えるため、I1 の後は構造上 0 になり、`verdict` は振る舞いによらず通る。振る舞いの変化は `posted_minor_ratio` と `raised_from_minor` で測り、受け入れ条件 8 のコメントに `verdict` と並べて載せる（前提 9 は判定し直して上げたものを minor に数えないため、`verdict` の式には入れない）。
 
 GitHub の読み取りは `gh api graphql` を使う。形の解析は純粋な関数に分け、単体テストはそこだけを縛る。
 
@@ -382,7 +394,7 @@ stateDiagram-v2
 | 性能・拡張性 | minor・nit だけの修正の回が起きない分、修正・push・CI の回数が減る | `fixed` を `major` 以上に限り（I1）、`fixed` が無ければ送らない（I4） | 受け入れ条件 8 の集計 |
 | 性能・拡張性 | ラウンドあたりのトークンを増やさない（指示に足す基準の文は、消す「出し切り」の文と同じ程度の長さに収める） | 基準の節で「出し切り」の節・「nit / スタイル指摘」の行・重要度の行の 3 つを置き換える。宣言が無い形の指示の増分を 400 バイト以下にする | 変更の前後で同じ状態ファイルから指示を組み、`wc -c` の差を PR に書く |
 | 運用・保守性 | 指摘の基準の正本は 1 か所で、ほかの定めはそこを参照するか同じ扱いを導く | 基準の文は `review_criteria.py` だけが持ち、指示・文脈のファイル・返信はそこから組む。文書は番号と節の名前で参照する | レビュー（文言の照合テストは書かない） |
-| セキュリティ | 基準 2 は確率によらず出す。見送りの対象にレッドラインの指摘が入らない | 基準の節に「確率によらず」を書き、`waived` は `criterion` を持てない（I2） | テスト設計の受け入れ条件 5 の行 |
+| セキュリティ | 基準 2 は確率によらず出す。見送りの対象にレッドラインの指摘が入らない | 基準の節に「確率によらず」を書き、`waived` は `criterion` を持てない（I2b） | テスト設計の受け入れ条件 5 の行 |
 | システム環境 | このリポジトリの目的を既定に埋め込まない | 重点は宣言だけから入る。雛形と基準の定数にプロジェクト固有の語を置かない | テスト設計の受け入れ条件 2 の行 |
 
 ## 決定の記録
@@ -405,7 +417,7 @@ stateDiagram-v2
 
 ### 決定 5: `fixed` を `critical` / `major` に限り、`finalize` が止める
 
-受け入れ条件 4・5 を LLM の判断ではなくスクリプトの検査で縛れる。修正担当が `minor` を直したいときは、重要度を判定し直して基準の番号を書くしかなくなる。判断表に書くだけでは、テストで固定できない。
+受け入れ条件 4・5 のうち、重要度と `decision` と `criterion` の整合を LLM の判断ではなくスクリプトの検査で縛れる。基準 2 に当たる指摘を基準 2 に当てたかどうか（`criterion` を書かずに `waived` にしていないか）は検査で縛れず、修正担当の判断に残る（「未確認のまま残ること」）。修正担当が `minor` を直したいときは、重要度を判定し直して基準の番号を書くしかなくなる。判断表に書くだけでは、テストで固定できない。
 
 ### 決定 6: 見送りの種類を「出さないもの」の 5 つにする
 
@@ -413,7 +425,7 @@ stateDiagram-v2
 
 ### 決定 7: `--defer-nit` は知らせて無視し、`--severity-min` の `minor` は `major` として扱う
 
-`nit` は常に見送るため、`--defer-nit` の意味が既定と同じになる。引数を消すと、古い呼び出し（手で打つ人・古い版の駆動）が引数の誤りで止まる。`drive.py` は渡さないように直す。
+`nit` は常に見送るため、`--defer-nit` の意味が既定と同じになる。引数を消すと、古い呼び出し（手で打つ人・古い版の駆動）が引数の誤りで止まる。`drive.py` は渡さないように直す。`--severity-min` を判定し直しの前に効かせて閾値未満を無視すると、`minor` ラベルの指摘が返信も決着も受けずに残り、最終スイープの open thread 0 と食い違う。閾値は判定し直しの後に効かせ、閾値未満も見送りの返信で閉じる。
 
 ### 決定 8: cross-review は重点の宣言を `init` で 1 回読み、状態ファイルに写す
 
@@ -440,16 +452,18 @@ cross-review の `init` が既に `worktree_path` を持ち、`/ndf:fix` もwork
 | 受け入れ条件・不変条件 | どの振る舞いで縛るか | どう壊したら落ちるべきか |
 | --- | --- | --- |
 | 受け入れ条件 1 | レビュー担当への指示を組んだ結果に、基準の節があり、「重要度が minor のものも書く」の節が無い（`launch-reviewer.sh` を状態ファイルから組む） | 「出し切り」の節を戻す / 基準の節を差し込まない。文書どうしの食い違いはレビューで見る |
-| 受け入れ条件 2・I6 | 宣言が無いworktreeで、`reviewer_block` に基準 3 の行が無く、`waiver_reply` の本文が 5 つの種類のどれでもトークン・所要時間・処理の回数の語を含まない | 雛形か定数へ固有の語を入れる / 宣言が無いのに 3 の行を出す |
+| 受け入れ条件 2・I6a・I6b | 宣言が無いworktreeで、`reviewer_block` に基準 3 の行が無く、`waiver_reply` の本文が 5 つの種類のどれでもトークン・所要時間・処理の回数の語を含まない | 雛形か定数へ固有の語を入れる / 宣言が無いのに 3 の行を出す |
 | 受け入れ条件 3 | 宣言があるworktreeで、`reviewer_block` の基準 3 の行に宣言した名前がそのまま現れ、`init` が状態ファイルへ同じ節を写す | 名前を落とす / `init` が再開で書き直さない |
-| 受け入れ条件 4・I2・I4・I5 | `minor` と `nit` の `waived` だけの振り分けで `finalize` が通り、戻り値の `fix_commit` が `null`、`deferred` の要素が `resolve: true` と `reply` を持ち、`result_posts.py` の項目が返信と決着とまとめだけで、送信（`push_fix`）が送らない | `fix_commit` を振り分けの値のまま残す / `resolve` を付けない / 定型句を前に付ける |
-| 受け入れ条件 5・I1・I2 | `minor` で `fixed` の要素、`criterion: 2` で `waived` の要素は `finalize` が止め、`major` で `criterion: 2` の `fixed` は通る | 検査を外す / `waived` に `criterion` を許す |
+| 受け入れ条件 4・I2a・I2c・I4・I5 | `minor` と `nit` の `waived` だけの振り分けで `finalize` が通り、戻り値の `fix_commit` が `null`、`deferred` の要素が `resolve: true` と `reply` を持ち、`result_posts.py` の項目が返信と決着とまとめだけで、送信（`push_fix`）が送らない | `fix_commit` を振り分けの値のまま残す / `resolve` を付けない / 定型句を前に付ける |
+| I4 | `fix_commit` に値を持ち `fixed` が 0 件の振り分けで、戻り値の `fix_commit` が `null` になり、`finalize` の `items` に `fix-commit` の `dropped` が出て `status` は `ok` | 値を残す / 捨てたことを出さない / 止める |
+| 受け入れ条件 5・I1・I2b | `minor` で `fixed` の要素、`criterion: 2` で `waived` の要素は `finalize` が止め、`major` で `criterion: 2` の `fixed` は通る | 検査を外す / `waived` に `criterion` を許す |
 | 受け入れ条件 6 | `waived` だけのスイープの結果ファイルで、`result_posts.py` がすべてのスレッドを決着させ、`verify-sweep` が残り 0 で終了コード 0 を返す（既存の検証の偽の GitHub を使う） | `waived` の決着を積まない |
-| 受け入れ条件 7・I7 | 壊れた宣言（JSON でない・`focus` が文字列）で、`load_focus` が `unreadable` と理由を返し、`reviewer_block` が基準 1・2・4 を出し、`init` の出力が `REVIEW_FOCUS=unreadable`、`context` の `items` に `review-focus` の `unreadable` が出て `status` は `ok` | 例外を上げる / 止まる / 読めなかったことを出さない |
-| 受け入れ条件 8 | `fix-severity.py` の解析の関数が、まとめのコメントの本文の列から `minor_ratio`・`minor_only_rounds`・`waived`・`verdict` を出す（起票時の形と、基準外の見送りの行を足した形の両方） | 旧形のまとめを読めない / 判定の閾値を逆にする |
+| 受け入れ条件 7・I7a・I7b・I7c | 壊れた宣言（JSON でない・`focus` が文字列）で、`load_focus` が `unreadable` と理由を返し、`reviewer_block` が基準 1・2・4 を出し、`init` の出力が `REVIEW_FOCUS=unreadable`、`context` の `items` に `review-focus` の `unreadable` が出て `status` は `ok` | 例外を上げる / 止まる / 読めなかったことを出さない |
+| 受け入れ条件 8 | `fix-severity.py` の解析の関数が、まとめのコメントの本文の列から `minor_ratio`・`minor_only_rounds`・`waived`・`verdict` を出し（起票時の形と、基準外の見送りの行を足した形の両方）、スレッドの列から `posted_minor_ratio`・`raised_from_minor` を出す | 旧形のまとめを読めない / 判定の閾値を逆にする / 「対応しました」の返信を持つ minor のスレッドを数えない |
 | 受け入れ条件 9 | 既存のテスト（`_classify_finding`・`verify-sweep`・`merge-fix`・`finalize` の契約）がそのまま通る | — |
 | I3 | `review_focus` が空の振り分けで `criterion: 3` を持つ要素を `finalize` が止める | 検査を外す |
-| I8 | 状態ファイルの `reviewer_block` が空のとき、起動の指示に既定の節（基準 3 の無い形）が入る | 空の節のまま起動する |
+| I8 | 状態ファイルの `reviewer_block` が空のとき、起動の指示に既定の節（基準 3 の無い形）が入る。`CROSS_REVIEW_STATE` の状態ファイルと異なる宣言を `--root` に置いても、`context` の `review_focus` は状態ファイルの値になる | 空の節のまま起動する / `context` が `--root` の宣言を読む |
+| `--severity-min` | `critical` を指定し、`major` と `minor` の要素を持つ振り分けで、どちらも返信の項目を持ち（`major` は `deferred`、`minor` は `waived`）、無視される要素が無い | 閾値未満を振り分けから落とす |
 
 受け入れ条件 8 の集計そのもの（前提 8 の時点で打ち、課題にコメントする）はテストでなく、リリースの後の作業として実装計画へ載せる。
 
@@ -460,4 +474,6 @@ cross-review の `init` が既に `worktree_path` を持ち、`/ndf:fix` もwork
 | 既存のテストの 1 行 | `plugins/ndf/scripts/tests/test_drive.py` の 113 行目は、修正の指示の文字列に `--defer-nit` があることを固定している。決定 7 で `drive.py` が渡さなくなるため、この 1 行の期待値だけを変える（振る舞いの退行ではない）。受け入れ条件 9 の「そのまま通る」から外れる唯一の行で、承認ゲート 1 で確かめる |
 | 集計の時点と閾値 | 前提 8・9（14 日か 30 件の早い方、10% と 5%）は承認ゲート 1 で利用者が確かめる |
 | 指示の増分 | 400 バイトの上限は、基準の節の文を実装で組んで測るまで確かでない。超えたら文を削る（条件は下げない） |
+| 基準 2 の当てはめ | `finalize` が縛るのは重要度・`decision`・`criterion` の整合だけで、基準 2 に当たる指摘を修正担当が `criterion` なしの `waived` にしても通る。当てはめは修正担当の判断に残る。変更の後の最初の cross-review で、`waived` の返信を受けた指摘に秘密・認証認可・利用者のデータ・戻せない操作に触れるものが無いかを PR の上で見る（要求の「手動確認」に含める） |
+| 前提 9 の判定が構造上通ること | I1 の後は `verdict` が必ず通る。`posted_minor_ratio` と `raised_from_minor` に閾値を置いて前提 9 へ足すかは、承認ゲート 1 で利用者が決める（足すなら要求の前提を書き換える） |
 | 担当が基準を守るか | 担当が `minor` を書かなくなるかは LLM の振る舞いで、テストで縛れない。変更の後の最初の cross-review で、投稿された指摘に基準外のものが無いかを PR の上で見る（要求の「手動確認」） |
