@@ -2000,21 +2000,35 @@
       "context": "ndf-cross-refactoring",
       "meaning": "`cross-refactoring` が提案の前に対象範囲のコードを測定ツールで測った値。関数ごとの循環的複雑度、ファイルごとの保守性か大きさ、行数",
       "source": "",
-      "pending_source": "issues/issue-1319-requirements.md"
+      "pending_source": "issues/issue-1319-design.md"
     },
     {
       "term": "指標のファイル",
       "context": "ndf-cross-refactoring",
       "meaning": "提案の前に 1 回だけ作り、参加者の全員が読む指標の測定の結果",
       "source": "",
-      "pending_source": "issues/issue-1319-requirements.md"
+      "pending_source": "issues/issue-1319-design.md"
     },
     {
       "term": "測定ツール",
       "context": "ndf-cross-refactoring",
       "meaning": "言語ごとに指標を測る外部のコマンド（radon・lizard など）",
       "source": "",
-      "pending_source": "issues/issue-1319-requirements.md"
+      "pending_source": "issues/issue-1319-design.md"
+    },
+    {
+      "term": "測定の宣言",
+      "context": "ndf-cross-refactoring",
+      "meaning": "言語ごとの測定ツールをプロジェクトが置き換える `.ndf/code-metrics.json`",
+      "source": "",
+      "pending_source": "issues/issue-1319-design.md"
+    },
+    {
+      "term": "根拠の値",
+      "context": "ndf-cross-refactoring",
+      "meaning": "提案が根拠にした指標の値。提案の JSON の `evidence` に書き、採否には使わない",
+      "source": "",
+      "pending_source": "issues/issue-1319-design.md"
     }
   ]
 }
