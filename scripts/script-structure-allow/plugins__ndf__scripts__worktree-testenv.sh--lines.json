@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/worktree-testenv.sh", "name": "", "kind": "lines", "reason": "C5 の後で 714 行。C5 は重複だけをライブラリへ置き換えた。触って 500 行以下にしたら消す", "lines": 714}

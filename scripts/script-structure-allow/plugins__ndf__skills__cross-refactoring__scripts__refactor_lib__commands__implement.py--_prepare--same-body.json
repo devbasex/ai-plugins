@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/commands/implement.py", "name": "_prepare", "kind": "same-body", "reason": "S1 の時点の本体の同じ関数。C4 でライブラリへ寄せるか、別の概念なら名前を分ける"}

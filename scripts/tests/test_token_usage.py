@@ -369,3 +369,13 @@ def test_external_has_after_5m_columns(tmp_path):
     out = run(roots, "--by", "version").stdout
     assert "5 分超の書き直し | 5 分超の読み込み" in out
     assert "| 10.16.0 | supervisor | 設計 | ndf:supervisor | 1 |" in out
+
+
+def test_version_key_orders_dev_numbers_numerically():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("token_usage", Path(__file__).parents[1] / "token-usage.py")
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["token_usage"] = mod  # dataclass が自分のモジュールを sys.modules から引くため
+    spec.loader.exec_module(mod)
+    got = sorted(["10.17.30", "10.17.30-dev.10", "10.17.29", "10.17.30-dev.9", "10.17.30-dev.2"], key=mod.version_key)
+    assert got == ["10.17.29", "10.17.30-dev.2", "10.17.30-dev.9", "10.17.30-dev.10", "10.17.30"]

@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/experimental/hook-trial/ht_hook.py", "name": "run", "kind": "same-name", "reason": "試行 T2 の hook-trial は既定で動くものから参照しない実験版。試行の間は複製と同名のまま残し、試行を畳むときに試行ごと消す"}

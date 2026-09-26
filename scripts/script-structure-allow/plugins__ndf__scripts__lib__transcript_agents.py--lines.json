@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/lib/transcript_agents.py", "name": "", "kind": "lines", "reason": "L0 の時点で 795 行。C3 は重複だけをライブラリへ置き換える。触って 500 行以下にしたら消す", "lines": 795}
