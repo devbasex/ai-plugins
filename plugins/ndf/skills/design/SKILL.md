@@ -47,7 +47,7 @@ issue のことではない。
 
 `python3 "$SCRIPTS/glossary.py" gate --mode <モード>` を打つ（`$SCRIPTS` の決め方は `development-workflow` の
 `references/scripts-lookup.md`）。**0 以外なら設計へ進まない。** 出力の `items` の 3 行（`init` のコマンド・候補の
-集め方・`requirements-design` の手順 0）を示して止まる。1 は宣言か用語集が無い、2 は壊れている。
+集め方・`requirements-design` の手順 0）を示して止まる。1 は用語集の設定か用語集が無い、2 は壊れている。
 ほかのモードは 0 を返し、この手順で止まらない。
 
 ### 1. 触る領域を決める
@@ -189,10 +189,10 @@ API の記述を求めない。
 
 ## 進行を記録する
 
-**契機は 2 つあり、別々の時点で 1 つずつ記録のコマンドを打つ。** 手順 1（触る領域を決める）に
+**契機は 2 つあり、別々の時点で 1 つずつ進捗記録を打つ。** 手順 1（触る領域を決める）に
 入るときに 1 つ目、手順 5（設計 Pull Request を出す）に入るときに 2 つ目を打つ。issue の本文の
 `## 進行` とボードの両方に残る（`$SCRIPTS` の決め方は `development-workflow` の
-`references/scripts-lookup.md`。3 層では起動指示の「記録のコマンド」をそのまま使う）。
+`references/scripts-lookup.md`。3 層では起動指示にある進捗記録のコマンドをそのまま使う）。
 
 ```bash
 bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "設計"
