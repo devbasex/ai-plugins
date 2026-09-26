@@ -11,18 +11,10 @@
 
 ## [ndf 10.17.27] - 2026-09-26
 
-- release・refactoring・design の Skill の説明と参照文書は、ユビキタス言語の用語で書かれている（#1175）
-- worktree の Skill の文書では、「設定」「worktree レジストリ」「開発 worktree」など用語集の語を使う（#1176）
-- issue-upkeep の Skill の文書では、「再検討条件」「修正方針」「課題グループ」など用語集の語を使う（#1176）
-- external-ai・document-systems・document-drafting・requirements-design の Skill の文書では、用語集の語を使う（#1176）
-- cross-review と cross-refactoring の文書・プロンプトの語が、用語集のユビキタス言語に揃っている（#1177）
-- Skill と README の文書は用語集の語で書かれている。（#1178）
-- 用語集には、Skill と README で使う語が載っている。（#1178）
-- development-workflow の SKILL と references は、用語集に載った語で書かれている（#1179）
-- 用語集に判断表の語とコンテキストが載っている（#1179）
-- 仕様の文書・CLAUDE.md・AGENTS.md・README で、同じものを同じ語で呼ぶ（例: リリース済み版・@インポート・worktree レジストリ・進捗記録・ミッション課題）（#1180）
-- 仕様に出てくる語は用語集で意味を引ける（#1180）
-- Fix: doc-lint が用語集の生成物を調べ、直しのステップが生成物を手で直す（#1181）
+- 用語集の語ごとに、コードで使う識別子を `code` で持たせられる（#1185）
+- 廃止した識別子は `deprecated_code` に書き、言い換え先の識別子と並べて示せる（#1185）
+- NDF の用語集の語に識別子が入り、語からコード上の名前を引ける（#1185）
+- 無し（検査の修正だけ）（#1186）
 
 ## [ndf 10.17.26] - 2026-09-25
 
