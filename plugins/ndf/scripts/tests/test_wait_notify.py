@@ -610,7 +610,10 @@ def _commands(hooks: dict, event: str) -> list[dict]:
 
 
 def _runs_entry(command: str, runtime: str) -> bool:
-    return "scripts/wait-notify.py" in command and f"--runtime {runtime}" in command
+    """hook の 1 本のエントリポイント（hook.py。#1142 の決定 20）を起動する。runtime の既定は claude。"""
+    if "scripts/hook.py" not in command:
+        return False
+    return f"--runtime {runtime}" in command or (runtime == "claude" and "--runtime" not in command)
 
 
 def test_claude_hooks_point_to_entry():

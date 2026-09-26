@@ -1,4 +1,7 @@
-"""`wt_extract_write_target` の公開入出力を段の分割の前に固定する（現状固定テスト）。
+"""書き込み先の推定の公開入出力を固定する（現状固定テスト）。
+
+固定した入出力は、シェルの `wt_extract_write_target` を段へ分ける前に採った値で、#1142 の決定 20 で
+tree-sitter-bash の上へ移した `hook_lib/write_target.py:shell_targets` が同じ値を返す。
 
 **正しさを主張しない。** 走査を段（前処理・字句化・追跡・抽出）へ分けるとき、公開
 入口の振る舞いが変わっていないことだけを検出するために置く。期待値は分割の前の
@@ -19,13 +22,16 @@
 """
 from __future__ import annotations
 
-import os
 import pathlib
-import subprocess
+import sys
 
 import pytest
 
-LIB = pathlib.Path(__file__).resolve().parents[1] / "lib" / "worktree-common.sh"
+SCRIPTS = pathlib.Path(__file__).resolve().parents[1]
+for _p in (SCRIPTS / "lib", SCRIPTS):
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
+from hook_lib import write_target  # noqa: E402
 
 # (名前, コマンド, 起点, 期待する書き込み先, 期待する終了コード)
 # 起点が空文字のときは第 2 引数を渡さない呼び方（出力は字面のまま）。
@@ -79,20 +85,9 @@ CASES = [
 
 
 def _extract(command: str, base: str) -> tuple[list[str], int]:
-    """公開入口だけを通す。改行を含むコマンドはヒアドキュメントで渡す。"""
-    call = 'wt_extract_write_target "$cmd"' if not base \
-        else f'wt_extract_write_target "$cmd" "{base}"'
-    script = (
-        f'set -uo pipefail\n. "{LIB}"\n'
-        "cmd=$(cat <<'WT_EOF'\n" + command + "\nWT_EOF\n)\n"
-        f"{call}; echo rc=$?\n"
-    )
-    env = {**os.environ, "LC_ALL": "C"}
-    done = subprocess.run(["bash", "-c", script], capture_output=True, text=True,
-                          env=env, timeout=120)
-    lines = [line for line in done.stdout.splitlines() if line]
-    rc = int(lines.pop().removeprefix("rc="))
-    return lines, rc
+    """公開入口だけを通す。"""
+    lines = write_target.shell_targets(command, base)
+    return lines, 0 if lines else 1
 
 
 @pytest.mark.parametrize(

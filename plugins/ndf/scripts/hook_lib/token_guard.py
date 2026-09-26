@@ -19,7 +19,6 @@ import json
 import os
 import re
 import subprocess
-import sys
 import tempfile
 import time
 from collections import deque
@@ -232,16 +231,13 @@ def first_context_tokens(path: str) -> int | None:
 
 
 def relay_notice() -> str | None:
-    """ラッパー（relay.py）の直接の子なら告知の文面、外なら None（relay.py notice の 1 回の起動で得る。#980）。"""
+    """ラッパー（relay.py）の直接の子なら告知の文面、外なら None（`relay_lib.mark.notice_lines` の 1 回の呼び出し。#980）。"""
     try:
-        p = subprocess.run([sys.executable, str(SCRIPTS / "relay.py"), "notice"], capture_output=True, text=True,
-                           timeout=4)
-    except (OSError, subprocess.SubprocessError):
+        from relay_lib import mark
+        kind, text = mark.notice_lines()
+    except Exception:  # noqa: BLE001 — ラッパーの判定が失敗したら、外として扱う
         return None
-    lines = p.stdout.split("\n")
-    if p.returncode != 0 or lines[0] != "relay":
-        return None
-    return lines[1] if len(lines) > 1 else ""
+    return text if kind == "relay" else None
 
 
 ISSUE = re.compile(r"(?:^|[^0-9A-Za-z_/])#?([0-9]+)\b")

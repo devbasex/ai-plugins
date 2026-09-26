@@ -1,6 +1,6 @@
 """待ちの hook と文脈量の hook（#829 / #830）。
 
-`token-guard.sh` は Claude Code の PreToolUse で動き、3 つを判定する。
+hook の 1 本のエントリポイント（`hook.py` の token-guard。#1142 の決定 20）は Claude Code の PreToolUse で動き、3 つを判定する。
 
 - 前景の `sleep` で待つ Bash（ループの本体にあるか、秒数が上限を超える）
 - 変わらないファイルの同じ範囲を続けて読み直す Read
@@ -16,12 +16,13 @@ import os
 import pathlib
 import shutil
 import subprocess
+import sys
 import threading
 
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-SCRIPT = ROOT / "scripts" / "token-guard.sh"
+SCRIPT = ROOT / "scripts" / "hook.py"
 STAGES = ROOT / "scripts" / "lib" / "token-guard-stages.txt"
 WF_DOCS = ROOT / "skills" / "development-workflow"
 HOOKS = ROOT / "hooks" / "claude.json"
@@ -55,7 +56,7 @@ def run(payload, state_dir, env=None, raw=None):
     if env:
         e.update(env)
     data = raw if raw is not None else json.dumps(payload)
-    return subprocess.run(["bash", str(SCRIPT)], input=data, capture_output=True,
+    return subprocess.run([sys.executable, str(SCRIPT), "token-guard"], input=data, capture_output=True,
                           text=True, env=e, timeout=20)
 
 
@@ -325,14 +326,12 @@ def test_broken_json_passes(state):
     assert p.returncode == 0 and p.stdout == ""
 
 
-def test_without_jq_passes(tmp_path, state):
-    bindir = tmp_path / "bin"
-    bindir.mkdir()
-    for tool in ("bash", "cat", "tail", "stat", "mkdir", "date", "mv", "rm", "find", "python3"):
-        src = shutil.which(tool)
-        if src:
-            (bindir / tool).symlink_to(src)
-    p = run(bash("sleep 30"), state, {"PATH": str(bindir)})
+def test_without_hook_packages_passes(tmp_path, state):
+    """hook の環境の外部パッケージ（tree-sitter-bash ほか）を import できない python では、判定をせずに通す。"""
+    e = {k: v for k, v in os.environ.items() if not k.startswith("NDF_")}
+    e["CLAUDE_PLUGIN_DATA"] = str(state)
+    p = subprocess.run([sys.executable, "-S", str(SCRIPT), "token-guard"], input=json.dumps(bash("sleep 30")),
+                       capture_output=True, text=True, env=e, timeout=20)
     assert p.returncode == 0 and p.stdout == ""
 
 
@@ -357,15 +356,16 @@ def test_lock_held_passes(tmp_path, state):
     f.write_text("")
     guards = state / "guards"
     guards.mkdir(parents=True)
-    lock = guards / "s1.lock"
-    lock.mkdir()
-    (lock / "held").write_text("")
-    (lock / "pid").write_text(str(os.getpid()))
-    (lock / "token").write_text("t")
-    # 3 回目は排他を取れれば拒否される回数である（test_repeat_read_denied_on_third）。
-    # 1 回ごとに排他の上限（1 秒）を待つため、それを越えて回さない（#884）
-    for _ in range(3):
-        assert denied(run(read(f), state)) is None
+    import filelock
+    held = filelock.FileLock(str(guards / "s1.lock"))
+    held.acquire()
+    try:
+        # 3 回目は排他を取れれば拒否される回数である（test_repeat_read_denied_on_third）。
+        # 1 回ごとに排他の上限（1 秒）を待つため、それを越えて回さない（#884）
+        for _ in range(3):
+            assert denied(run(read(f), state)) is None
+    finally:
+        held.release()
 
 
 @pytest.mark.parametrize("env,expect", [
@@ -383,7 +383,7 @@ def test_guards_dir_follows_wf_state_dir(tmp_path, env, expect):
     f.write_text("")
     e = {k: v for k, v in os.environ.items() if not k.startswith("NDF_")}
     e.update(env)
-    subprocess.run(["bash", str(SCRIPT)], input=json.dumps(read(f)), text=True,
+    subprocess.run([sys.executable, str(SCRIPT), "token-guard"], input=json.dumps(read(f)), text=True,
                    capture_output=True, env=e, check=True)
     assert (pathlib.Path(expect.format(d=tmp_path)) / "read-s1.json").is_file()
     wf = subprocess.run(
@@ -643,12 +643,12 @@ def test_stage_list_matches_design():
 
 def test_hook_registered_for_claude():
     hooks = json.loads(HOOKS.read_text())["hooks"]["PreToolUse"]
-    ours = [h for h in hooks if any("token-guard.sh" in x["command"] for x in h["hooks"])]
+    ours = [h for h in hooks if any("scripts/hook.py" in x["command"] for x in h["hooks"])]
     assert len(ours) == 1
-    assert set(ours[0]["matcher"].split("|")) == {"Bash", "Read", "Skill", "Agent", "Task"}
+    assert {"Bash", "Read", "Skill", "Agent", "Task"} <= set(ours[0]["matcher"].split("|"))
     entry = ours[0]["hooks"][0]
-    assert entry["continueOnError"] is True and entry["timeout"] == 5
-    assert "worktree-guard.sh" in hooks[0]["hooks"][0]["command"]
+    assert entry["continueOnError"] is True and entry["timeout"] == 10
+    assert "scripts/hook.py" in hooks[0]["hooks"][0]["command"]
 
 
 def test_hook_not_registered_for_other_runtimes():
