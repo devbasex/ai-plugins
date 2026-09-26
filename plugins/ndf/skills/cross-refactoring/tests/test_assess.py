@@ -134,3 +134,37 @@ def test_binary_production_file_counts_as_zero_lines(repo):
         "理由: 本番コードの変更が 0 行で、上限 10 行以下です",
         "本番コード: 1 ファイル・0 行（src/binary.py）",
     ]
+
+
+def _script(n: int) -> str:
+    return "#!/bin/sh\n" + "".join(f"echo {i}\n" for i in range(n - 1))
+
+
+def test_extensionless_shebang_script_counts_as_production_code(repo):
+    """拡張子の無いスクリプトは shebang で本番コードと判定する（#1134）。"""
+    _commit(repo, {"containers/base/tmux-session": _script(40)})
+    rc, out = _assess(repo, "--base", "base")
+    assert rc == 0
+    assert out == [
+        "判定: 通す",
+        "理由: 本番コードの変更が 40 行です",
+        "本番コード: 1 ファイル・40 行（containers/base/tmux-session）",
+    ]
+
+
+def test_deleted_extensionless_shebang_script_counts_as_production_code(repo):
+    """削除したスクリプトは起点の版の shebang で判定する。"""
+    _commit(repo, {"bin/run": _script(15)})
+    _git("branch", "-f", "base", cwd=repo)
+    _git("rm", "-q", "bin/run", cwd=repo)
+    _git("commit", "-qm", "delete", cwd=repo)
+    rc, out = _assess(repo, "--base", "base")
+    assert rc == 0
+    assert out[2] == "本番コード: 1 ファイル・15 行（bin/run）"
+
+
+def test_extensionless_file_without_shebang_is_not_production_code(repo):
+    _commit(repo, {"LICENSE": _lines(30), "tests/run": _script(30)})
+    rc, out = _assess(repo, "--base", "base")
+    assert rc == 3
+    assert out[2] == "本番コード: 0 ファイル・0 行"
