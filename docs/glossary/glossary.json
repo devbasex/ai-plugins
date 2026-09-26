@@ -886,7 +886,7 @@
     {
       "term": "総評",
       "context": "ndf-cross-review",
-      "meaning": "インラインではなく、レビュー本体に書く文章（body）",
+      "meaning": "レビュー本体に書く文章（body）。インラインのコメントとは別に置く",
       "source": "docs/specifications/cross-review-writes-to-conductor.md"
     },
     {
