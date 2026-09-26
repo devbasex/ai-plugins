@@ -1,1 +1,1 @@
-{"path": "plugins/ndf/scripts/parallel-measure.py", "name": "proc-fs", "kind": "wrapped", "reason": "L1 の時点の使用。D3 が lib/procs.py（psutil） の上へ置き換えたら消す"}
+{"path": "plugins/ndf/scripts/parallel-measure.py", "name": "proc-fs", "kind": "wrapped", "reason": "D3 で cgroup の読み取りは lib/procs.py へ移した。`--meminfo`（既定 /proc/meminfo）はスワップの空きも読み、procs にスワップの読み取りが無いため残す。procs が swap を持ったら消す"}

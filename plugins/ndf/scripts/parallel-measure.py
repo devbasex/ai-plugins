@@ -37,6 +37,10 @@ from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import clock  # noqa: E402  時刻の読み取り（#1142 の L0）
+import deps  # noqa: E402  外部パッケージの環境（#1142 の決定 17）
+
+deps.require("procs")  # cgroup の位置と使用量は procs（psutil の包み）が読む
+import procs  # noqa: E402
 import gh_parts  # noqa: E402  GitHub の読み取り（#1142 の L0）
 
 # --- 既定値（ここだけが持つ） -----------------------------------------------
@@ -52,8 +56,6 @@ DEFAULT_MAX_LANES = 3
 DEFAULT_SWAP_FREE_MIN_PCT = 25
 
 DEFAULT_MEMINFO = "/proc/meminfo"
-DEFAULT_CGROUP_DIR = "/sys/fs/cgroup"
-DEFAULT_PROC_CGROUP = "/proc/self/cgroup"
 GH_JSON_FIELDS = "number,createdAt,mergedAt,closedAt"
 
 UNKNOWN = "unknown"
@@ -109,7 +111,7 @@ def read_meminfo(path: Path) -> dict[str, int]:
 
 def resolve_cgroup_dir(given: Optional[str], *, root: Optional[Path] = None,
                        proc_cgroup: Optional[Path] = None) -> Path:
-    """`--cgroup-dir` が無いときだけ、自分の cgroup の位置を導く。
+    """`--cgroup-dir` が無いときだけ、自分の cgroup の位置を導く（`procs.cgroup_dir`）。
 
     コンテナの中では `/sys/fs/cgroup` がそのまま自分の cgroup だが、ホストでは
     `/proc/self/cgroup` の `0::<path>` が指す下にある。
@@ -118,56 +120,28 @@ def resolve_cgroup_dir(given: Optional[str], *, root: Optional[Path] = None,
     `CFTYPE_NOT_ON_ROOT` で置くため、cgroup v2 の根には `memory.events` が無い。
     あるということは、その位置がすでに根ではない＝自分の cgroup である。
 
-    `root` と `proc_cgroup` はチェックのための差し替え口で、既定は上の 2 つの定数である。
+    `root` と `proc_cgroup` はチェックのための差し替え口で、既定は `procs` の 2 つの定数である。
     """
     if given is not None:
         return Path(given)
-    root = Path(DEFAULT_CGROUP_DIR) if root is None else Path(root)
-    proc_cgroup = Path(DEFAULT_PROC_CGROUP) if proc_cgroup is None else Path(proc_cgroup)
-    if (root / "memory.events").exists():
-        return root
-    try:
-        for line in proc_cgroup.read_text(encoding="utf-8").splitlines():
-            if line.startswith("0::"):
-                relative = line[3:].strip().lstrip("/")
-                if relative:
-                    return root / relative
-    except OSError:
-        pass
-    return root
+    return procs.cgroup_dir(procs.CGROUP_ROOT if root is None else Path(root),
+                            procs.PROC_SELF_CGROUP if proc_cgroup is None else Path(proc_cgroup))
 
 
 def read_oom_kill(cgroup_dir: Path) -> object:
     """`memory.events` の `oom_kill`。読めなければ `unknown` で続ける。"""
-    try:
-        text = (cgroup_dir / "memory.events").read_text(encoding="utf-8")
-    except OSError:
-        return UNKNOWN
-    for line in text.splitlines():
-        fields = line.split()
-        # `max 0` の行もあるため、キーの一致で選ぶ。
-        if len(fields) == 2 and fields[0] == "oom_kill":
-            try:
-                return int(fields[1])
-            except ValueError:
-                return UNKNOWN
-    return UNKNOWN
+    oom = procs.cgroup_memory(cgroup_dir).oom_kill
+    return UNKNOWN if oom is None else oom
 
 
 def read_cgroup_available_mib(cgroup_dir: Path) -> object:
     """cgroup の残り。上限が無ければ `max`、読めなければ `unknown`。"""
-    try:
-        limit = (cgroup_dir / "memory.max").read_text(encoding="utf-8").strip()
-    except OSError:
-        return UNKNOWN
-    if limit == NO_LIMIT:
+    mem = procs.cgroup_memory(cgroup_dir)
+    if mem.unlimited:
         return NO_LIMIT
-    try:
-        limit_bytes = int(limit)
-        current = int((cgroup_dir / "memory.current").read_text(encoding="utf-8").strip())
-    except (OSError, ValueError):
+    if mem.limit is None or mem.current is None:
         return UNKNOWN
-    return max(0, (limit_bytes - current) // (1024 * 1024))
+    return max(0, (mem.limit - mem.current) // (1024 * 1024))
 
 
 def lanes_by_memory(available_mib: int, running: int, reserve_mib: int,
