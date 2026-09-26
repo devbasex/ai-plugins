@@ -149,3 +149,39 @@ def test_unknown_data_type_is_usage_error():
 def test_role_without_checklist_is_usage_error():
     proc = run("--role", "settings")
     assert proc.returncode == 2
+
+
+def test_argument_errors_are_json_and_exit_2(tmp_path: Path):
+    """role の指定が無い・両方ある・--margin が数でないときも、標準出力は 1 つの JSON で終了コード 2。"""
+    cls = write_classification(tmp_path, [])
+    for args in ((), ("--role", "form", "--classification", str(cls)), ("--role", "form", "--margin", "abc")):
+        proc = run(*args)
+        assert proc.returncode == 2, args
+        assert json.loads(proc.stdout)["status"] == "error", args
+
+
+def test_margin_must_be_finite_and_non_negative(tmp_path: Path):
+    """nan や負の margin は `gap < margin` を常に偽にし、僅差を人へ渡さずに通してしまう。"""
+    cls = write_classification(tmp_path, [{
+        "url": "https://example.com/signup", "primary_role": "form",
+        "primary_score": 1.5, "alternates": [{"role": "auth", "score": 1.5}],
+    }])
+    for margin in ("nan", "inf", "-0.1"):
+        proc = run("--classification", str(cls), "--margin", margin)
+        assert proc.returncode == 2, margin
+        assert json.loads(proc.stdout)["status"] == "error", margin
+
+
+def test_malformed_classification_is_json_and_exit_2(tmp_path: Path):
+    """分類の JSON の形が崩れていても traceback にせず、標準出力の JSON と終了コード 2 で返す。"""
+    base = {"url": "https://example.com/a", "primary_role": "form", "primary_score": 2.0}
+    for entries in (
+        ["not-an-object"],
+        [{**base, "alternates": "auth"}],
+        [{**base, "alternates": ["auth"]}],
+        [{**base, "alternates": [{"role": "auth", "score": "high"}]}],
+        [{**base, "primary_score": "NaN", "alternates": []}],
+    ):
+        proc = run("--classification", str(write_classification(tmp_path, entries)))
+        assert proc.returncode == 2, entries
+        assert json.loads(proc.stdout)["status"] == "error", entries

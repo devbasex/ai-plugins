@@ -118,6 +118,7 @@ def plan_mission_check(a, repo: str) -> dict:
          "cmd": f"git pull -q --ff-only origin {shlex.quote(mb)}", "next": "pr"},
         {"id": "pr", "type": "pr", "stage": "Pull Request", "base": a.base, "title": f"ミッション {a.name}",
          "body": "template", "summary": f"ミッション {a.name} の課題を {a.base} へ取り込む。\n\n{related}",
+         "changes": f"ミッション {a.name} の課題を {a.base} へ取り込む。",
          "next": "assess"},
     ] + plan["steps"]
     return plan

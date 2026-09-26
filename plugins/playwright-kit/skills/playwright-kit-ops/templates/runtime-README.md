@@ -98,7 +98,8 @@ web vitals (LCP/CLS/TTFB) が **autouse で自動実行** されます。
 
 Drive 連携は optional dependency です。`google-auth` skill は NDF の 4 つの manifest すべてに
 載っていますが、playwright-kit とは別のプラグインです。`--pwk-drive-folder` や Drive 系スクリプトは
-各ランタイムの標準の導入先 (`~/.claude/skills/google-auth/scripts` など) を探します。
+各ランタイムの標準の導入先 (`~/.claude/skills/google-auth/scripts` など) と、Claude Code の
+プラグインのキャッシュ (`~/.claude/plugins/cache/<取得元>/ndf/<版>/skills/google-auth/scripts` の最新の版) を探します。
 見つからないときは `GOOGLE_AUTH_SCRIPTS` を `google-auth/scripts` へ設定してから
 Drive extra を同期してください。
 

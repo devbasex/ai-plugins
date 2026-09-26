@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 import sys
 from pathlib import Path
@@ -145,6 +146,8 @@ def load_classification(path: Path, url: str | None) -> dict[str, Any]:
     except (OSError, json.JSONDecodeError) as exc:
         raise UsageError(f"分類の結果を読めない: {path} ({exc})") from exc
     entries = data if isinstance(data, list) else [data]
+    for e in entries:
+        _check_entry(e)
     if url:
         entries = [e for e in entries if e.get("url") == url]
         if not entries:
@@ -155,6 +158,40 @@ def load_classification(path: Path, url: str | None) -> dict[str, Any]:
     if "error" in entry:
         raise UsageError(f"分類に失敗した URL である: {entry['error']}")
     return entry
+
+
+def _finite(value: Any, what: str) -> float:
+    """分類のスコアと margin は有限の数に限る（nan は比較が常に偽になり、判定をすり抜ける）。"""
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        raise UsageError(f"{what} が数でない: {value!r}") from None
+    if not math.isfinite(f):
+        raise UsageError(f"{what} が有限の数でない: {value!r}")
+    return f
+
+
+def _check_entry(entry: Any) -> None:
+    """分類の 1 件の形（オブジェクト・alternates の配列・有限の score）を確かめる。"""
+    if not isinstance(entry, dict):
+        raise UsageError(f"分類の結果の要素がオブジェクトでない: {entry!r}")
+    if "error" in entry:
+        return
+    _finite(entry.get("primary_score") or 0.0, "primary_score")
+    alternates = entry.get("alternates", [])
+    if not isinstance(alternates, list):
+        raise UsageError(f"alternates が配列でない: {alternates!r}")
+    for a in alternates:
+        if not isinstance(a, dict):
+            raise UsageError(f"alternates の要素がオブジェクトでない: {a!r}")
+        _finite(a.get("score") or 0.0, "alternates の score")
+
+
+def _margin(text: str) -> float:
+    m = _finite(text, "--margin")
+    if m < 0:
+        raise UsageError(f"--margin は 0 以上: {text}")
+    return m
 
 
 def judge_classification(entry: dict[str, Any], margin: float) -> dict[str, Any]:
@@ -263,8 +300,15 @@ def build(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
     return 0, result
 
 
+class _Parser(argparse.ArgumentParser):
+    """引数の誤りも標準出力の 1 つの JSON で返す（argparse は既定で標準エラーへ出して終える）。"""
+
+    def error(self, message: str):  # type: ignore[override]
+        raise UsageError(message)
+
+
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="テスト計画書の雛形を作る")
+    parser = _Parser(description="テスト計画書の雛形を作る")
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--role", help="page role（form / list / checkout など）")
     source.add_argument("--classification",
@@ -273,14 +317,12 @@ def main(argv: list[str] | None = None) -> int:
                         help="--classification が複数 URL を含むときに選ぶ URL")
     parser.add_argument("--data-types", nargs="*", default=[],
                         help="§11 のデータ型（数値 / 文字列 / 日付 / ファイル / 金額 など）")
-    parser.add_argument("--margin", type=float, default=DEFAULT_MARGIN,
+    parser.add_argument("--margin", type=_margin, default=DEFAULT_MARGIN,
                         help=f"上位 2 件のスコアの差がこれ未満なら人へ渡す（既定 {DEFAULT_MARGIN}）")
     parser.add_argument("--output", default=None, help="Markdown の雛形の書き出し先")
     parser.add_argument("--docs-dir", default=str(DOCS_DIR), help=argparse.SUPPRESS)
-    args = parser.parse_args(argv)
-
     try:
-        code, result = build(args)
+        code, result = build(parser.parse_args(argv))
     except UsageError as exc:
         code, result = 2, {"status": "error", "message": str(exc)}
     print(json.dumps(result, ensure_ascii=False, indent=2))

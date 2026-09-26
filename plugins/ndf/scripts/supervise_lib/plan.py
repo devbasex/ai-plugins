@@ -112,8 +112,8 @@ queue の置き換え: `{queue_prs}` は前のすべてのステージの Pull R
 - `"kind": "worker"`: work のステップの worker が区切りごとに追記する 1 行（プロンプトに書き方と置き場を渡す）
 - `"kind": "slow"`: ステップの経過が想定を超え、一次の調査を流すたびに 1 行（下の「遅れの見張り」）
 - `"kind": "gh-limit"`: judge が打ち直すステップの前の出力が GitHub の上限（`gh_parts.is_rate_limited`）のとき、
-  打ち直す前に待った 1 回ごとに 1 行（step・waited・reset）。待つのは `gh api rate_limit` の graphql の reset まで。
-  読めなければ同じステップの待ちごとに 60 秒から倍々
+  打ち直す前に待った 1 回ごとに 1 行（step・waited・reset）。待つのは `gh api rate_limit` の graphql の残りが 0 のときの reset まで。
+  読めなければ（残りがあるときも）同じステップの待ちごとに 60 秒から倍々で、1 時間で頭打ち
 - `"kind": "attention"`: conductor の判断が要る出来事（reason が 止まった・関門・同じ失敗の繰り返し・
   judge のステップで stop が出そう・遅れ）。worker の行の語と繰り返し、ステップの結果からスクリプトで分ける。
   `queue` はこの行を標準出力の `{"tool": "supervise-queue", "event": "attention", ...}` で知らせる

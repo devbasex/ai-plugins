@@ -88,3 +88,13 @@ def test_missing_url_is_usage_error():
     proc = run()
     assert proc.returncode == 2
     assert json.loads(proc.stdout)["ready"] is False
+
+
+@pytest.mark.parametrize("args", [("--bad\n\x01\"\\",), ("http://a\tb/", "--timeout", "x")])
+def test_usage_error_is_one_json_line(args: tuple[str, ...]):
+    proc = run(*args)
+    assert proc.returncode == 2
+    assert proc.stdout.count("\n") == 1
+    out = json.loads(proc.stdout)
+    assert out["ready"] is False
+    assert args[0] in (out["url"] or "") + out["error"]

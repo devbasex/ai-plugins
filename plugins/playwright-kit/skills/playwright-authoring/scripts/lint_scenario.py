@@ -19,7 +19,7 @@
 終了コード:
     0  違反なし
     1  違反あり
-    2  引数の誤り・構文エラーのファイルがある
+    2  引数の誤り・構文エラーのファイルがある・検査したテストが 0 件
 
 Usage:
     python scripts/lint_scenario.py scenario-test/tests/
@@ -190,24 +190,47 @@ def collect(paths: list[str]) -> tuple[list[Path], list[str]]:
     return files, missing
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="テストスクリプトを構文木で検査する")
-    parser.add_argument("paths", nargs="+", help="テストのディレクトリかファイル")
-    args = parser.parse_args(argv)
+class _UsageError(Exception):
+    pass
 
-    files, missing = collect(args.paths)
-    errors: list[dict[str, Any]] = [{"file": m, "message": "見つからない"} for m in missing]
+
+class _Parser(argparse.ArgumentParser):
+    """引数の誤りも標準出力の 1 つの JSON で返す（argparse は既定で標準エラーへ出して終える）。"""
+
+    def error(self, message: str):  # type: ignore[override]
+        raise _UsageError(message)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = _Parser(description="テストスクリプトを構文木で検査する")
+    parser.add_argument("paths", nargs="+", help="テストのディレクトリかファイル")
+    files: list[Path] = []
     violations: list[dict[str, Any]] = []
     tests = 0
+    try:
+        args = parser.parse_args(argv)
+    except _UsageError as exc:
+        errors: list[dict[str, Any]] = [{"file": "", "message": f"引数の誤り: {exc}"}]
+    else:
+        files, missing = collect(args.paths)
+        errors = [{"file": m, "message": "見つからない"} for m in missing]
     for f in files:
         try:
-            tree = ast.parse(f.read_text(encoding="utf-8"), filename=str(f))
+            source = f.read_text(encoding="utf-8")
+        except OSError as exc:
+            errors.append({"file": str(f), "message": f"読めない: {exc}"})
+            continue
+        try:
+            tree = ast.parse(source, filename=str(f))
         except (SyntaxError, UnicodeDecodeError) as exc:
             errors.append({"file": str(f), "message": f"構文木を作れない: {exc}"})
             continue
         n, v = lint_tree(tree, str(f))
         tests += n
         violations.extend(v)
+    if not errors and tests == 0:
+        # 何も検査していない実行を合格にしない（空のディレクトリ・test_*.py が無い・test 関数が無い）
+        errors.append({"file": " ".join(args.paths), "message": "検査したテストが 0 件"})
 
     violations.sort(key=lambda v: (v["file"], v["line"], v["rule"]))
     result = {

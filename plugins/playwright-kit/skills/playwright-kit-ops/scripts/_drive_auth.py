@@ -5,8 +5,8 @@ upload_md_as_gdoc) はいずれも同じ手順で `google_auth.get_credentials()
 sys.path から発見する。本モジュールにロジックを集約する。
 
 Drive 連携は optional dependency。`GOOGLE_AUTH_SCRIPTS` 環境変数が設定されて
-いればそれを使い、それ以外は 4 ランタイムの標準インストール先と sibling の
-google-auth スキルを探す。google-auth は NDF の 4 つの manifest すべてに載って
+いればそれを使い、それ以外は 4 ランタイムの標準インストール先・Claude Code の
+プラグインのキャッシュ（最新の版）と sibling の google-auth スキルを探す。google-auth は NDF の 4 つの manifest すべてに載って
 いるが、**playwright-kit とは別のプラグインである**ため、置かれる場所は導入した
 ランタイムで変わる。候補で見つからないときは `GOOGLE_AUTH_SCRIPTS` を明示する。
 """
@@ -14,16 +14,34 @@ google-auth スキルを探す。google-auth は NDF の 4 つの manifest す�
 from __future__ import annotations
 
 import os
+import re
 import sys
 from pathlib import Path
 
 
 _HERE = Path(__file__).resolve()
+
+
+def _claude_plugin_cache() -> str | None:
+    """Claude Code がプラグインを置くキャッシュ（`<取得元>/ndf/<版>/`）のうち、最新の版の google-auth。"""
+    found = Path("~/.claude/plugins/cache").expanduser().glob("*/ndf/*/skills/google-auth/scripts")
+
+    def version(p: Path) -> tuple:
+        """SemVer の順。同じ基底なら正式版が prerelease（`-dev.1` / `-rc.1`）より新しい。"""
+        core, _, pre = p.parents[2].name.partition("-")
+        nums = tuple(int(n) for n in re.findall(r"\d+", core))
+        ids = tuple((0, int(i), "") if i.isdigit() else (1, 0, i) for i in pre.split(".")) if pre else ()
+        return (nums, not pre, ids)
+    latest = max(found, key=version, default=None)
+    return str(latest) if latest else None
+
+
 _CANDIDATES: tuple[Path, ...] = tuple(
     Path(p).expanduser()
     for p in (
         os.environ.get("GOOGLE_AUTH_SCRIPTS"),
         "~/.claude/skills/google-auth/scripts",
+        _claude_plugin_cache(),
         "~/.codex/skills/google-auth/scripts",
         "~/.kiro/skills/google-auth/scripts",
         "~/.gemini/config/plugins/ndf/skills/google-auth/scripts",
