@@ -15,19 +15,36 @@ NDF のスクリプト（`plugins/ndf/scripts/` と各 Skill の `scripts/`。�
 | 測るもの | 値 |
 | --- | ---: |
 | ファイル | 128 本（Python 37,575 行・シェル 10,288 行・計 47,863 行） |
-| 1000 行を超えるファイル | 6 本 |
+| 500 行を超えるファイル | 23 本（うち 1000 行を超えるもの 7 本。2026-09-26 に測った値） |
 | 2 つ以上のファイルで同じ名前を持つ最上位の関数 | 86 個（うち本体まで同じものがある 5 個） |
 
-**1000 行を超えるファイル**
+**500 行を超えるファイル**（2026-09-26 に develop で測った値。区分は `markdown-writing` のルール 9 と同じで、501 行以上は分ける）
 
 | スクリプト | 行数 | 中身 |
 | --- | ---: | --- |
-| `skills/cross-review/scripts/state.py` | 5121 | 関数 227 個・副命令 14 個。待ち行列・参加者の解決・GitHub の呼び出しを同じファイルに持つ |
-| `scripts/supervise.py` | 3126 | `Supervisor` クラス 1 つがステップの 5 種類を持つ。計画の雛形・queue・wait も同じファイル。直近 1 週間で 48 回変更 |
-| `scripts/lib/worktree-common.sh` | 2492 | hook とworktreeの共通の関数 |
-| `scripts/relay.py` | 2057 | `~/.claude/ndf/relay.py` へファイル 1 本で複製して動かす |
-| `scripts/lib/monitor.py` | 1256 | |
-| `scripts/instructions-check.py` | 1128 | |
+| `skills/cross-review/scripts/state.py` | 5121 | 関数 227 個・副命令 14 個。キュー・参加者の解決・GitHub の呼び出しを同じファイルに持つ |
+| `scripts/supervise.py` | 3401 | `Supervisor` クラス 1 つがステップの 5 種類を持つ。計画のテンプレート・queue・wait も同じファイル。直近 1 週間で 48 回変更 |
+| `scripts/lib/worktree-common.sh` | 2515 | hook と worktree の共通の関数 |
+| `scripts/relay.py` | 2092 | `~/.claude/ndf/relay.py` へファイル 1 本で複製して動かす |
+| `scripts/lib/monitor.py` | 1256 |  |
+| `scripts/instructions-check.py` | 1128 |  |
+| `skills/cross-refactoring/scripts/refactor_lib/gitfacts.py` | 1011 |  |
+| `scripts/release-steps.py` | 988 |  |
+| `skills/skill-stats/scripts/skill-stats.py` | 942 |  |
+| `skills/cross-refactoring/scripts/refactor_lib/commands/setup.py` | 923 |  |
+| `skills/development-workflow/scripts/lib/workflow-common.sh` | 900 |  |
+| `scripts/lib/post_queue.py` | 843 |  |
+| `scripts/lib/gh_parts.py` | 822 |  |
+| `scripts/lib/transcript_agents.py` | 795 |  |
+| `scripts/glossary.py` | 781 |  |
+| `scripts/worktree-testenv.sh` | 716 |  |
+| `skills/issue-upkeep/scripts/upkeep.py` | 624 |  |
+| `scripts/merged-steps.py` | 615 |  |
+| `scripts/check-trigger.py` | 607 |  |
+| `scripts/lib/result_posts.py` | 605 |  |
+| `scripts/mission-state.py` | 586 |  |
+| `skills/cross-review/scripts/measure.py` | 582 |  |
+| `dev.kiro/install.sh` | 561 |  |
 
 **同じ概念が別々に実装されている**（構文木で拾った数。`main` と `build_parser` を除く）
 
@@ -38,7 +55,7 @@ NDF のスクリプト（`plugins/ndf/scripts/` と各 Skill の `scripts/`。�
 | 時刻の読み取り（`_parse_time`） | 5 | `lib/post_queue.py`・`lib/run_metrics.py`・`lib/transcript_agents.py`・cross-refactoring `allocation.py`・cross-review `measure.py` |
 | JSON の読み書き・結果の出力（`read_json` / `load` / `emit` / `die` / `info`） | 12 | `check-trigger.py`・`glossary.py`・`relay.py`・`lib/statefile.py`・`lib/step_result.py`・`mission-state.py`・`release-steps.py` ほか |
 | リポジトリの識別（`repo_slug`・`declared_base`） | 6 | `lib/step_result.py`・cross-refactoring `paths.py`・`fix-steps.py`・`doc-lint.py`・`pr-steps.py`・`supervise.py` |
-| 収束ループの駆動（`parse_vars` / `review_status` / `call`） | 2 | cross-review と cross-refactoring の `drive.py`（本体が同じ） |
+| 収束ループの drive（`parse_vars` / `review_status` / `call`） | 2 | cross-review と cross-refactoring の `drive.py`（本体が同じ） |
 | 外部 CLI の起動（`launch-cli.sh`・`resolve_print_timeout`） | 3 | `lib/launch-cli.sh`・cross-refactoring の `launch-cli.sh`（差 365 行）・cross-review `critique.sh` |
 
 **使う側から見えている不足**（2026-09-25 区間 12 と、この課題の計測で観測）
@@ -52,6 +69,7 @@ NDF のスクリプト（`plugins/ndf/scripts/` と各 Skill の `scripts/`。�
 | e | `mvv-gate` の設計の判定に設計文書が材料として渡らない | 承認ゲート 1 の判定で `material: []` になった |
 | f | 計画が起動した `claude -p` の消費が版ごとの集計に入らない | `scripts/token-usage.py --by version` は 10.17.10 以降で supervisor と worker の値が 0 になる。原因は 3 つ: worker と判断の `claude -p` は `--no-session-persistence` で起動するため会話の記録が残らない / 計画の状態を `/tmp/ndf-sv/` に置き、消えた（72 本のうち使用量が残ったのは 14 本）/ usage を合計でしか残さず、モデル・呼び出し回数・書き込みの 5 分と 1 時間の区別が無い。Skill を回すステップの会話は、別の conductor としてその時に入っていた版で数えられる（計測の詳細は課題のコメント） |
 | g | GitHub の GraphQL が上限のとき、REST の枠が空いていても配布が止まる | 2026-09-26 の本番 10.17.28 で、`release-steps.py changelog` の `gh pr view` が `GraphQL: API rate limit already exceeded` で落ち、judge が待たずに 10 回やり直して止まった（REST の残りは 5000）。GraphQL を使う `gh pr` / `gh issue` の呼び出しは 23 ファイル・115 か所にあり、上限の見分けと REST の読み取りを持つ `lib/gh_parts.py` を使うのは 5 ファイルだけ。配布の経路（`release-steps.py` の読み取り・bump の打ち直し・judge の待ち）は即時修正 #1211 で直した |
+| h | 標準ライブラリだけで書く前提のため、GitHub の呼び出しと上限の扱いを自前で持っている | `gh pr` / `gh issue`（GraphQL）の呼び出しが 241 か所、`gh api`（REST）が 72 か所、`gh` を呼ぶ配布スクリプトが 35 本ある（2026-09-26）。上限の見分け・待ち直し・ETag の条件付きの要求・同時数の制限は、githubkit 0.16.1 のような外部パッケージがすでに持つ（同日に実物で確認）。外部パッケージを使うには依存を解決する仕組みが要る。githubkit は pydantic-core のようなバイナリを引き込むため、ファイルを同梱する形は取れない（アーキテクチャごとに要る） |
 
 ## 直さないと何が起きるか
 
@@ -67,6 +85,7 @@ NDF のスクリプト（`plugins/ndf/scripts/` と各 Skill の `scripts/`。�
 - 不足 a〜f はこの課題の受け入れ条件に含め、設計の移行の順序で最初の移行ステップに置く（d・f を先に直さないと、移行の前後を同じ物差しで比べられない）
 - `/ndf:development-workflow` の `standard` モードで進める。`pace: fast` は使わない（承認ゲート 1・2 は利用者の承認）
 - 語: 「段」は使わない。「入口」ではなく「エントリポイント」と書く
+- 外部パッケージを使ってよい。依存は uv で解決し、uv が無い環境では入れる（2026-09-26 利用者。不足 h）
 
 ## 目的
 
@@ -90,6 +109,7 @@ NDF のスクリプト（`plugins/ndf/scripts/` と各 Skill の `scripts/`。�
 - `plugins/ndf/scripts/`（`lib/`・`experimental/` を含む）と各 Skill の `scripts/` の、テストを除くすべて
 - `relay.py` と、それを `~/.claude/ndf/` へ複製する仕組み
 - 不足 a〜f のうち、スクリプトの構造で直すもの（エントリポイントの追加・記録の欠け）
+- 外部パッケージの宣言と、uv による依存の解決（不足 h）
 - 移行の前後の計測と振り返り
 
 含まない:
@@ -143,7 +163,7 @@ NDF のスクリプト（`plugins/ndf/scripts/` と各 Skill の `scripts/`。�
 - [ ] 設計文書が、エントリポイントの一覧（今のエントリポイントと移行後の置き場）を持ち、変えるエントリポイントを 1 つずつ理由付きで挙げる
 
 構造:
-- [ ] 移行の後、テストを除くスクリプトに 1000 行を超えるファイルが無い（設計が例外を理由付きで挙げたものを除く）
+- [ ] 移行の後、テストを除くスクリプトに 500 行を超えるファイルが無い（例外リストに理由と行数付きで載るものを除く）。例外リストのファイルは載せた行数を超えず、新しく作るファイルは例外リストに載らない
 - [ ] 「同じ概念が別々に実装されている」の表の概念ごとに実装が 1 つになる。構文木で「本体の同じ関数」と「同じ名前で本体の違う関数」を数えるチェックが継続的統合で走り、設計の決めた例外のほかに当たらない
 
 エントリポイントと不足:
@@ -154,6 +174,7 @@ NDF のスクリプト（`plugins/ndf/scripts/` と各 Skill の `scripts/`。�
 - [ ] `mvv-gate.py` の設計の判定に、設計 PR の設計文書が材料として渡る（e）
 - [ ] 計画が起動した `claude -p` の消費が、版ごとの集計に入る。計画の状態は OS の再起動と `/tmp` の掃除で消えない場所に残り、usage はステップごとにモデル・呼び出し回数・書き込みの 5 分と 1 時間を分けて持つ（f）
 - [ ] GitHub の読み書きが 1 つのライブラリを通る。読み直し（CI と PR の状態の待ち）は REST の ETag 付きの要求で行い、変わっていない間は上限に数えられない。片方の枠が上限のときは、代われる操作をもう片方の枠で行い、代われない操作は回復の時刻まで待ってからやり直す。待ちの問い合わせの間隔は、変化が無い間は伸ばす（g）
+- [ ] 外部パッケージを、1 つの宣言と lock で版を固定して使える。エントリポイントを起動する形（`python3 <パス>`）は変わらず、依存の解決は uv が行う。uv が無い環境では版を固定して入れてから続け、入れられないとき（ネットワークが無いなど）は理由を出して止まる。hook とラッパーのバージョンディレクトリは標準ライブラリだけで動く（h）
 
 退行しないこと:
 - [ ] 既存のテストが、置き換え先の変更だけで通る
@@ -168,7 +189,7 @@ NDF のスクリプト（`plugins/ndf/scripts/` と各 Skill の `scripts/`。�
 | 性能・拡張性 | worker がスクリプトを 1 つ直すときに読むファイルの大きさの中央値が、移行の前より小さい（計測は E1 と E9 で同じスクリプト） |
 | 運用・保守性 | 並列のミッションが同じファイルを触った件数が、移行の後の 10 本の PR で移行の前より少ない |
 | 移行性 | 途中の版を導入した利用者の手順が変わらない。どの移行ステップでも 1 つ前へ戻せる |
-| システム環境 | Python 3.10 以上・bash 3.2（macOS 既定）で動く。依存パッケージを足さない |
+| システム環境 | Python 3.10 以上・bash 3.2（macOS 既定）で動く。外部パッケージは宣言と lock に載るものだけを使い、uv で解決する。hook とラッパーのバージョンディレクトリは外部パッケージを使わない |
 
 ## 影響
 
@@ -200,8 +221,8 @@ NDF のスクリプト（`plugins/ndf/scripts/` と各 Skill の `scripts/`。�
 | 区分 | 内容 |
 | --- | --- |
 | 常に行う | 既存のテストの実行、配布物の同期、移行ステップごとの PR |
-| 確認してから行う | エントリポイントの変更、状態ファイルの形の変更、シェルから Python への書き換え |
-| 行わない | Skill の本文の書き直し（エントリポイントの追随を除く）、依存パッケージの追加 |
+| 確認してから行う | エントリポイントの変更、状態ファイルの形の変更、シェルから Python への書き換え、外部パッケージの追加（宣言へ足す PR に理由を書く） |
+| 行わない | Skill の本文の書き直し（エントリポイントの追随を除く） |
 
 
 ## コードに残る旧い語（#1166）

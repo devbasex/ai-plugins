@@ -1927,10 +1927,30 @@
       "pending_source": "issues/issue-1142-design.md"
     },
     {
-      "term": "ラッパーの束",
-      "code": "relay_bundle",
+      "term": "ラッパーのバージョンディレクトリ",
+      "code": "relay_version_dir",
       "context": "ndf-relay",
-      "meaning": "~/.claude/ndf/ に版ごとに置く、ラッパーの relay_lib/ と使うライブラリの写し。relay.current が使う束を指す",
+      "meaning": "~/.claude/ndf/ に版ごとに置く、ラッパーの relay_lib/ と使うライブラリのコピー。relay.current が使うバージョンディレクトリを指す",
+      "pending_source": "issues/issue-1142-design.md",
+      "deprecated": [
+        "ラッパーの束"
+      ],
+      "deprecated_code": [
+        "relay_bundle"
+      ]
+    },
+    {
+      "term": "ランチャー",
+      "code": "relay_launcher",
+      "context": "ndf-relay",
+      "meaning": "~/.claude/ndf/relay.py（プラグインの scripts/relay.py と同じバイト列）。使うバージョンディレクトリを選び、relay_lib を読み込んで起動するだけのエントリポイント",
+      "pending_source": "issues/issue-1142-design.md"
+    },
+    {
+      "term": "drive の状態",
+      "code": "drive_state",
+      "context": "ndf-cross-review",
+      "meaning": "収束ループの drive.py が Pull Request ごとに持つ状態ファイル（drive-pr<N>.json / drive-rf<ID>.json）。stage と init_vars を持つ",
       "pending_source": "issues/issue-1142-design.md"
     },
     {

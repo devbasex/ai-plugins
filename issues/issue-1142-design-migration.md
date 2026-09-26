@@ -6,11 +6,11 @@
 
 ## エントリポイントの一覧
 
-外から呼ばれるスクリプトは 45 本である（2026-09-26 の調査。手順書・hook・宣言・プランの雛形・継続的統合・
+外から呼ばれるスクリプトは 45 本である（2026-09-26 の調査。手順書・hook・宣言・プランのテンプレート・継続的統合・
 ほかのスクリプトから、パスと副命令の形で呼ばれるもの）。**45 本すべてについて、パスと副命令と引数と出力の
 形を移行の後も変えない**（I3）。変わるのは中身の置き場所だけである。追加と読み替えと撤去は次の節にある。
 
-呼び出し元の略号: S = Skill の手順、A = エージェント、H = hook、N = `.ndf/`、P = プランの雛形、
+呼び出し元の略号: S = Skill の手順、A = エージェント、H = hook、N = `.ndf/`、P = プランのテンプレート、
 X = ほかのスクリプト、CI = 継続的統合。
 
 ### 中身を移すもの（11 本）
@@ -25,7 +25,7 @@ X = ほかのスクリプト、CI = 継続的統合。
 | `skills/cross-review/scripts/drive.py` | 収束ループ | S・P | `lib/loop_drive.py`。drive.py が起動する内部の `state.py`（副命令 14 個）の中身は `review_lib/` | C2 |
 | `skills/cross-refactoring/scripts/drive.py` | 収束ループ | S・P | `lib/loop_drive.py` | C4 |
 | `skills/cross-refactoring/scripts/refactor.py` | 収束ループ | S・P・X | `refactor_lib/`（時刻と slug をライブラリへ） | C4 |
-| `scripts/relay.py`（run / stop / install / uninstall / status / startup / question / is-child / notice / mark） | ラッパー | H・S・X | `scripts/relay_lib/` とラッパーの束 | C6 |
+| `scripts/relay.py`（run / stop / install / uninstall / status / startup / question / is-child / notice / mark） | ラッパー | H・S・X | `scripts/relay_lib/` とラッパーのバージョンディレクトリ | C6 |
 | `lib/worktree-common.sh`（source） | worktree | S・X | 同じディレクトリの 4 本 | C5 |
 | `scripts/instructions-check.py` | 文書の検査 | S・N・CI | `scripts/instructions_lib/` | C7 |
 
@@ -42,7 +42,7 @@ X = ほかのスクリプト、CI = 継続的統合。
 
 ### 変えないもの（12 本）
 
-重複を持たず、1000 行以下のもの: `scripts/projects-sync.sh`・`progress-record.sh`・`resolve.sh`・
+重複を持たず、500 行以下のもの（500 行を超えるものは例外リストに行数付きで残す）: `scripts/projects-sync.sh`・`progress-record.sh`・`resolve.sh`・
 `token-guard.sh`・`ensure-retention.sh`・`statusline-switch.sh`・`statusline.sh`・`install-official-skills.sh`・
 `skills/development-workflow/scripts/workflow-guard.sh`・`stage-check.sh`・`skills/google-auth` と `google-drive` の
 2 本（`google_auth.py`・`gdrive_fetch.py`）。語の移行（W1〜W7）で文面だけ触るものがある。
@@ -66,7 +66,7 @@ X = ほかのスクリプト、CI = 継続的統合。
 | V4 | 根の `scripts/check-script-structure.py` | 構造チェック（I4・I5） | S1 |
 | V5 | 根の `scripts/measure/structure-baseline.py`・`claude-p-usage.py` | E1 と E9 を同じコマンドで打つ | S1 |
 
-### 足す約束の形
+### 足すインタフェースの形
 
 | 名前 | 入力 | 出力（成功） | 失敗の形 | 互換性 |
 | --- | --- | --- | --- | --- |
@@ -100,18 +100,18 @@ X1 で起票する）。
 | # | エントリポイント | 理由 | 移行ステップ |
 | --- | --- | --- | --- |
 | X-a | `scripts/phase-steps.py` | 呼び出し元が 0 件の試作 | X1 |
-| X-b | `scripts/bundle-close.py` | `mission-close.py` の旧名の中継。手順書・プランの雛形からの呼び出しが 0 件 | X1 |
+| X-b | `scripts/bundle-close.py` | `mission-close.py` の旧名の中継。手順書・プランのテンプレートからの呼び出しが 0 件 | X1 |
 
 ### 中身が変わるが形は変わらないもの
 
-- `~/.claude/ndf/relay.py` は、ラッパーの束を読むランチャーになる。rc の関数が呼ぶパスと引数は変わらない
+- `~/.claude/ndf/relay.py` は、ラッパーのバージョンディレクトリを読むランチャーになる。rc の関数が呼ぶパスと引数は変わらない
 - `<プラン>-state/` は、プランが一時ディレクトリの下にあるとき状態の置き場への シンボリックリンクになる
 
 ## 移行の順序
 
 **3 つのミッションに分け、各ミッションが版を 1 つ出す**（前提 2）。1 移行ステップは 1 本の PR で閉じる
-（I10）。同じ段の移行ステップは触るファイルが重ならず、並列に流せる（6 本まで）。**着手の前に、開いている
-PR の変更ファイルと突き合わせ、重なれば同じ段の中で順序を入れ替える**（前提 3）。
+（I10）。同じステージの移行ステップは触るファイルが重ならず、並列に流せる（6 本まで）。**着手の前に、開いている
+PR の変更ファイルと突き合わせ、重なれば同じステージの中で順序を入れ替える**（前提 3）。
 
 ```mermaid
 graph LR
@@ -147,7 +147,7 @@ graph LR
 
 ### ミッション 1: 記録と不足 a〜f
 
-| 段 | 移行ステップ | 触るファイル |
+| ステージ | 移行ステップ | 触るファイル |
 | --- | --- | --- |
 | 1 | S1 構造チェック | 根の `scripts/check-script-structure.py`・`scripts/script-structure-allow.json`・`scripts/measure/structure-baseline.py`・`scripts/measure/claude-p-usage.py`（パスを引数へ）・`scripts/tests/test_check_script_structure.py`・`.github/workflows/script-structure.yml` |
 | 1 | S2 検査の件数（d） | `skills/cross-review/scripts/drive.py`・`skills/cross-refactoring/scripts/drive.py`・両方の `tests/test_drive.py` |
@@ -162,27 +162,29 @@ S1 の例外リストは、その時点の違反をすべて載せて始める�
 
 ### ミッション 2: ライブラリとコンテキスト
 
-| 段 | 移行ステップ | 触るファイル | 見積りの行数（移行後の最大） |
+| ステージ | 移行ステップ | 触るファイル | 見積りの行数（移行後の最大） |
 | --- | --- | --- | --- |
-| 1 | L0 ライブラリ | `lib/` に `clock.py`・`jsonio.py`・`proc.py`・`repo.py`・`loop_drive.py` を新設。`lib/limits.py`（`resolve_cli_timeout`・V3）・`lib/launch-cli.sh`（`resolve_print_timeout` を `limits.py` の 1 回へ）・`lib/step_result.py`（`git`・`gh_json` を `proc` の上へ）・`lib/statefile.py`（`now`・`die`・`info` を再エクスポート）・`lib/gh_parts.py`（ETag 付きの読み直し・PR と課題の単発の読み書きの REST の関数・枠の使い分けと上限の代替・待ちの間隔の伸長・g）・`lib/README.md`・テスト。**呼び出し側はまだ変えない**。C1〜C7 は、移すファイルの `gh pr` / `gh issue` の呼び出しを `gh_parts` の関数へ置き換える | 各 150 以下 |
-| 2 | C1 プランの実行 | `scripts/supervise.py`・`scripts/supervise_lib/`（新設 13 本。`__init__` を含む）・`mission-state.py`・`mvv-gate.py`・`check-trigger.py`・`mission-close.py`・`scripts/tests/test_supervise*.py` ほか差し替え先 | `supervise.py` 約 450・`engine.py` 約 550 |
-| 2 | C2 cross-review | `skills/cross-review/scripts/state.py`・`review_lib/`（新設 16 本。`__init__` を含む）・`drive.py`・`measure.py`・`critique.sh`・`launch-reviewer.sh`・`skills/cross-review/tests/`・`skills/fix/tests/test_fix_steps.py`（差し替え先だけ） | `commands/init.py` 約 520 |
-| 2 | C3 外部 CLI と記録 | `lib/monitor.py`・`lib/monitor_patterns.py`（新設）・`lib/monitor_outcome.py`・`lib/run_metrics.py`・`lib/post_queue.py`・`lib/transcript_agents.py`・`skills/external-ai/scripts/external-ai.py`・`scripts/wait-notify.py`・`skills/skill-stats/scripts/skill-stats.py`・`scripts/parallel-measure.py`・テスト | `monitor.py` 約 860 |
-| 2 | C5 worktree | `lib/worktree-common.sh`・`lib/worktree-branch.sh`・`worktree-shell-lex.sh`・`worktree-write-target.sh`・`worktree-registry.sh`（新設）・`scripts/worktree-*.sh` 5 本・`lib/README.md` の worktree の行 | `worktree-write-target.sh` 約 950 |
-| 2 | C6 ラッパー | `scripts/relay.py`・`scripts/relay_lib/`（新設 10 本。`__init__` を含む）・`scripts/experimental/resume.py`・`scripts/tests/test_relay.py`・`skills/install-wrapper/SKILL.md`（束の説明だけ） | `relay_lib/run.py` 約 780 |
-| 2 | C7 リリースと文書 | 「重複だけを置き換えるもの」のリリースと文書の検査の 11 本・`scripts/instructions-check.py`・`scripts/instructions_lib/`（新設 2 本）・`scripts/tests/test_instructions_check.py`（複製の対象に新設の 1 本を足す） | `instructions-check.py` 約 870 |
-| 3 | C4 cross-refactoring | `skills/cross-refactoring/scripts/drive.py`・`launch-cli.sh`・`refactor_lib/clock.py`・`paths.py`・`commands/converge.py`・`commands/implement.py`・`commands/setup.py`・テスト | 変わらず（最大 `gitfacts.py` 991） |
+| 1 | L0 ライブラリ | `lib/` に `clock.py`・`jsonio.py`・`proc.py`・`repo.py`・`loop_drive.py` を新設。`lib/limits.py`（`resolve_cli_timeout`・V3）・`lib/launch-cli.sh`（`resolve_print_timeout` を `limits.py` の 1 回へ）・`lib/step_result.py`（`git`・`gh_json` を `proc` の上へ）・`lib/statefile.py`（`now`・`die`・`info` を再エクスポート）・`lib/deps.py`（新設。`require()`・h）・`plugins/ndf/pyproject.toml` と `plugins/ndf/uv.lock`（新設。h）・`lib/gh_parts.py`（ETag 付きの読み直し・PR と課題の単発の読み書きの REST の関数・枠の使い分けと上限の代替・待ちの間隔の伸長・g。試行が成り立てば githubkit の上に置く。決定 17。`gh_call`・`gh_quota`・`gh_fields`・`gh_rest`・`gh_graphql`・`gh_checks`・`gh_pr_info`・`gh_sections` の 8 本を新設して分け、`gh_parts.py` はエントリポイントと再エクスポートにする。分け方は [issue-1142-design-modules.md](issue-1142-design-modules.md) ）・根の `scripts/check-script-structure.py` と `scripts/script-structure-allow.json`（行数の上限を 500 へ下げ、500 行を超えるファイルを行数付きで例外リストへ載せ、載せた行数を超えたら落とす。決定 18）・`lib/README.md`・テスト。**呼び出し側はまだ変えない**。C1〜C7 は、移すファイルの `gh pr` / `gh issue` の呼び出しを `gh_parts` の関数へ置き換える | 各 150 以下 |
+| 2 | C1 プランの実行 | `scripts/supervise.py`・`scripts/supervise_lib/`（新設 19 本。`__init__` を含む）・`mission-state.py`・`mvv-gate.py`・`check-trigger.py`・`mission-close.py`・`scripts/tests/test_supervise*.py` ほか差し替え先 | 最大 `queue.py` 約 295 |
+| 2 | C2 cross-review | `skills/cross-review/scripts/state.py`・`review_lib/`（新設 21 本。`__init__` を含む）・`drive.py`・`measure.py`・`critique.sh`・`launch-reviewer.sh`・`skills/cross-review/tests/`・`skills/fix/tests/test_fix_steps.py`（差し替え先だけ） | 最大 `commands/init.py` 約 435 |
+| 2 | C3 外部 CLI と記録 | `lib/monitor.py`・`lib/monitor_patterns.py`・`monitor_scan.py`・`monitor_proc.py`・`monitor_types.py`・`monitor_loop.py`（新設 5 本）・`lib/monitor_outcome.py`・`lib/run_metrics.py`・`lib/post_queue.py`・`lib/transcript_agents.py`・`skills/external-ai/scripts/external-ai.py`・`scripts/wait-notify.py`・`skills/skill-stats/scripts/skill-stats.py`・`scripts/parallel-measure.py`・テスト | 最大 `monitor_loop.py` 約 300 |
+| 2 | C5 worktree | `lib/worktree-common.sh`・`lib/worktree-declaration.sh`・`worktree-branch.sh`・`worktree-shell-lex.sh`・`worktree-write-target.sh`・`worktree-write-target-scan.sh`・`worktree-write-target-track.sh`・`worktree-registry.sh`（新設 7 本）・`scripts/worktree-*.sh` 5 本・`lib/README.md` の worktree の行 | 最大 `worktree-write-target-scan.sh` 約 475 |
+| 2 | C6 ラッパー | `scripts/relay.py`・`scripts/relay_lib/`（新設 11 本。`__init__` を含む）・`scripts/experimental/resume.py`・`scripts/tests/test_relay.py`・`skills/install-wrapper/SKILL.md`（バージョンディレクトリの説明だけ） | 最大 `relay_lib/run.py` 約 350 |
+| 2 | C7 リリースと文書 | 「重複だけを置き換えるもの」のリリースと文書の検査の 11 本・`scripts/instructions-check.py`・`scripts/instructions_lib/`（新設 7 本）・`scripts/tests/test_instructions_check.py`（複製の対象に `instructions_lib/` のディレクトリを足す） | 最大 `instructions-check.py` 約 245 |
+| 3 | C4 cross-refactoring | `skills/cross-refactoring/scripts/drive.py`・`launch-cli.sh`・`refactor_lib/clock.py`・`paths.py`・`commands/converge.py`・`commands/implement.py`・`commands/setup.py`・`refactor_lib/gitfacts.py` と新設 6 本（`pathkinds`・`process`・`github`・`worktree`・`publish`・`results`）・`tests/conftest.py` の `_MODULES`・テスト | 最大 `gitfacts.py` 約 255 |
 
-**段 2 は 6 本で、並列の上限に収まる。** C4 は C2 と同じ `lib/loop_drive.py` の呼び出しを揃えるため、
+**ステージ 2 は 6 本で、並列の上限に収まる。** C4 は C2 と同じ `lib/loop_drive.py` の呼び出しを揃えるため、
 C2 の後に置く。`lib/README.md` の索引は、各移行ステップが自分の行だけを直す。
 
 **テストは差し替え先と import だけを変える**（受け入れ条件「置き換え先の変更だけで通る」）。`state.py` の
-`monkeypatch.setattr(state_mod, ...)` 146 か所と `supervise.py` の 8 か所を、定義元のモジュールへ向け直す
-（決定 3）。`lib/monitor.py` は差し替えられる関数を動かさないため、シム越しの約 43 か所はそのまま通る。
+`monkeypatch.setattr(state_mod, ...)` のうち名前で渡す 131 か所と `supervise.py` の 8 か所を、定義元のモジュールへ向け直す
+（決定 3）。差し替え先の件数の内訳は [issue-1142-design-modules.md](issue-1142-design-modules.md) の各節にある。`lib/monitor.py` は
+シム越しの 43 か所のうち 41 か所が `monitor_types`・`monitor_proc` へ向き直り、シムの名前空間を確かめる
+`test_monitor_generic_stem.py` の assert は `_run_all.__globals__` を見る形に変わる。
 
 ### ミッション 3: 語・撤去・測り直し
 
-| 段 | 移行ステップ | 触るファイル |
+| ステージ | 移行ステップ | 触るファイル |
 | --- | --- | --- |
 | 1 | W1 プランの実行の語（R1〜R3・R5） | C1 と同じファイル |
 | 1 | W2 cross-review の語 | C2 と同じファイル |
@@ -190,7 +192,7 @@ C2 の後に置く。`lib/README.md` の索引は、各移行ステップが自�
 | 1 | W4 cross-refactoring の語（`改修計画` → リファクタリング計画ほか） | C4 と同じファイル |
 | 1 | W5 worktree の語（`主ディレクトリ` → メインディレクトリほか） | C5 と同じファイル |
 | 1 | W6 ラッパーの語（R4・`区間` → セッション・`合図` → シグナルファイル） | C6 と同じファイル |
-| 2 | W7 リリースと文書の語（`配布` → リリースほか） | C7 と同じファイル。W1 と同じ段に置くと並列の上限を超えるため段 2 |
+| 2 | W7 リリースと文書の語（`配布` → リリースほか） | C7 と同じファイル。W1 と同じステージに置くと並列の上限を超えるためステージ 2 |
 | 3 | X1 撤去と後片付け | `scripts/phase-steps.py`・`scripts/bundle-close.py`（削除）・`.ndf/pace.json`・根の `scripts/script-structure-allow.json`。読み替えを外す課題を起票する |
 | 4 | X2 測り直し（E9） | ファイルは変えない。`scripts/measure/` の 2 本を E1 と同じ引数で打ち、課題のコメントへ比べた表を残す |
 
@@ -200,6 +202,6 @@ C2 の後に置く。`lib/README.md` の索引は、各移行ステップが自�
 
 | 何が落ちたか | 扱い |
 | --- | --- |
-| 移行ステップの PR の全体テスト | その PR をマージしない。直せなければ閉じ、同じ段の残りを先に流す |
+| 移行ステップの PR の全体テスト | その PR をマージしない。直せなければ閉じ、同じステージの残りを先に流す |
 | マージ後に開発版の `verify-install` | 落ちた移行ステップの PR を revert する（I10）。ほかの移行ステップは revert しない |
-| ほかのミッションとの衝突 | 同じ段の中で入れ替える。段をまたぐ入れ替えはしない（L0 の前にコンテキストの移行ステップを置かない） |
+| ほかのミッションとの衝突 | 同じステージの中で入れ替える。ステージをまたぐ入れ替えはしない（L0 の前にコンテキストの移行ステップを置かない） |
