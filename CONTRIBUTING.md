@@ -105,7 +105,7 @@ bash scripts/validate-runtime-plugins.sh
 
 ## 一括の整形と git blame
 
-**Python の全体を一度だけ整形し直しました（#1323）。** 一括の自動修正（`ruff check --fix`）と
+**Python の全体は一度だけ一括で整形してある。** 一括の自動修正（`ruff check --fix`）と
 一括の整形（`ruff format`）の 2 つのコミットは、根の `.git-blame-ignore-revs` に載っています。
 GitHub の blame の画面はこのファイルを自動で読みます。手元の `git blame` に読ませるには、clone ごとに
 1 回設定します。
