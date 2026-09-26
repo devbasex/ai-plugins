@@ -15,10 +15,7 @@
     "multi-environment"
   ],
   "skills": [
-    "./skills/redash-add",
-    "./skills/redash-remove",
-    "./skills/redash-list",
-    "./skills/redash-status",
+    "./skills/redash",
     "./skills/redash-guide"
   ]
 }
