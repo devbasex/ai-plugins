@@ -29,7 +29,7 @@ UV_VERSION = "0.12.19"
 GROUPS = {"github": ["githubkit"]}
 
 
-def finish(status: str, summary: str, items: list | None = None, metrics: dict | None = None,
+def trial_result(status: str, summary: str, items: list | None = None, metrics: dict | None = None,
            code: int | None = None) -> None:
     emit(result(TOOL, status, summary, items, metrics), code)
 
@@ -63,13 +63,13 @@ def require(group: str) -> None:
     if all(importlib.util.find_spec(m) for m in GROUPS[group]):
         return
     if os.environ.get("NDF_DEPS_REEXEC"):
-        finish("stopped", f"uv の環境へ起動し直したが {group} を import できない", code=3)
+        trial_result("stopped", f"uv の環境へ起動し直したが {group} を import できない", code=3)
     uv = find_uv()
     if not uv:
         print(f"[{TOOL}] uv が無いため {UV_VERSION} を ~/.local/bin へ入れる", file=sys.stderr)
         uv = install_uv()
     if not uv:
-        finish("stopped", "uv を入れられない。手で入れる: "
+        trial_result("stopped", "uv を入れられない。手で入れる: "
              f"curl -LsSf https://astral.sh/uv/{UV_VERSION}/install.sh | sh", code=3)
     venv = os.environ.get("NDF_DEPS_VENV") or str(Path.home() / ".cache/ndf/venv/trial")
     env = dict(os.environ, NDF_DEPS_REEXEC="1", UV_PROJECT_ENVIRONMENT=venv)
@@ -90,7 +90,7 @@ def cmd_where() -> None:
     require("github")
     from importlib.metadata import version
     ver = version("githubkit")
-    finish("ok", f"githubkit {ver} を {sys.executable} で import した",
+    trial_result("ok", f"githubkit {ver} を {sys.executable} で import した",
          metrics={"executable": sys.executable, "reexec": bool(os.environ.get("NDF_DEPS_REEXEC")),
                   "python": sys.version.split()[0], "githubkit": ver})
 
@@ -123,7 +123,7 @@ def cmd_etag(repo: str, pr: int, wait: float) -> None:
                       "cache_control": resp.headers.get("cache-control"),
                       "updated_at": str(resp.parsed_data.updated_at)})
     total = sum(r["counted"] for r in reads)
-    finish("ok", f"読み 3 回で上限に数えられたのは {total} 回（別の利用者の呼び出しが混ざると増える）",
+    trial_result("ok", f"読み 3 回で上限に数えられたのは {total} 回（別の利用者の呼び出しが混ざると増える）",
          items=reads, metrics={"counted_total": total, "wait": wait})
 
 
