@@ -30,11 +30,14 @@ from __future__ import annotations
 import argparse
 import datetime as _dt
 import json
-import subprocess
 import sys
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 from typing import Optional
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import clock  # noqa: E402  時刻の読み取り（#1142 の L0）
+import gh_parts  # noqa: E402  GitHub の読み取り（#1142 の L0）
 
 # --- 既定値（ここだけが持つ） -----------------------------------------------
 # 予備: 進行側の claude 本体（約 470MiB）と、同じ VM に常駐する他のプロセスの揺れ。
@@ -75,7 +78,7 @@ def non_negative_int(value: str) -> int:
     return parsed
 
 
-def emit(pairs: list[tuple[str, object]]) -> None:
+def emit_pairs(pairs: list[tuple[str, object]]) -> None:
     """`キー=値` を 1 行ずつ、渡された順に出す。"""
     for key, value in pairs:
         print(f"{key}={value}")
@@ -224,7 +227,7 @@ def run_capacity(args: argparse.Namespace) -> int:
             allowed = 1
             limited_by.append("floor")
 
-    emit([
+    emit_pairs([
         ("mem_available_mib", mem_available_mib),
         ("swap_total_mib", swap_total_mib),
         ("swap_free_mib", swap_free_mib),
@@ -246,12 +249,9 @@ def parse_time(value: object, *, what: str) -> _dt.datetime:
         # `--input` の JSON は数値も真偽も配列も持てる。素通しすると `value.strip()`
         # が `AttributeError` を出し、`gh pr view` の失敗と同じ終了コード 1 で落ちる。
         raise Usage(f"{what} が文字列ではない: {value!r}")
-    try:
-        parsed = _dt.datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
-    except ValueError:
+    parsed = clock.parse(value, naive="utc")
+    if parsed is None:
         raise Usage(f"{what} が ISO8601 ではない: {value}")
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=_dt.timezone.utc)
     return parsed.astimezone(_dt.timezone.utc)
 
 
@@ -263,20 +263,13 @@ def fetch_pull_requests(numbers: list[int], repo: Optional[str]) -> list[dict]:
     """`gh pr view` で読むだけ。書き込む副コマンドは呼ばない。"""
     records = []
     for number in numbers:
-        command = ["gh", "pr", "view", str(number), "--json", GH_JSON_FIELDS]
-        if repo:
-            command += ["--repo", repo]
-        try:
-            proc = subprocess.run(command, capture_output=True, text=True)
-        except OSError as exc:
-            # 起動できないのも `gh pr view` の失敗である。空の配列を返すと
-            # `measure` の `min()` が空列で落ちるため、ここで終了コード 1 にする。
-            print(f"gh を実行できない: {exc}", file=sys.stderr)
+        # 起動できない（`gh` が無い）のも `gh pr view` の失敗である。空の配列を返すと
+        # `measure_spans` の `min()` が空列で落ちるため、ここで終了コード 1 にする。
+        r = gh_parts.view_json("pr", number, GH_JSON_FIELDS, repo)
+        if r.returncode != 0:
+            print(f"gh pr view {number} が失敗した: {r.stderr.strip()}", file=sys.stderr)
             raise SystemExit(1)
-        if proc.returncode != 0:
-            print(f"gh pr view {number} が失敗した: {proc.stderr.strip()}", file=sys.stderr)
-            raise SystemExit(1)
-        records.append(json.loads(proc.stdout))
+        records.append(json.loads(r.stdout))
     return records
 
 
@@ -353,7 +346,7 @@ def summarize_measurement(
     }
 
 
-def measure(spans: list[tuple[_dt.datetime, _dt.datetime]]) -> dict[str, object]:
+def measure_spans(spans: list[tuple[_dt.datetime, _dt.datetime]]) -> dict[str, object]:
     """期間を並行度の集計値へ変換する。"""
     events = build_events(spans)
     max_open, overlap_seconds = scan_events(events)
@@ -361,7 +354,7 @@ def measure(spans: list[tuple[_dt.datetime, _dt.datetime]]) -> dict[str, object]
 
 
 def run_concurrency(args: argparse.Namespace) -> int:
-    now = parse_time(args.now, what="--now") if args.now else _dt.datetime.now(_dt.timezone.utc)
+    now = parse_time(args.now, what="--now") if args.now else clock.now(utc=True)
     if args.input:
         try:
             records = json.loads(Path(args.input).read_text(encoding="utf-8"))
@@ -380,8 +373,8 @@ def run_concurrency(args: argparse.Namespace) -> int:
             raise Usage("Pull Request の番号を 1 つ以上渡す")
         records = fetch_pull_requests(args.numbers, args.repo)
 
-    measured = measure(intervals(records, now))
-    emit([("prs", len(records))] + list(measured.items()))
+    measured = measure_spans(intervals(records, now))
+    emit_pairs([("prs", len(records))] + list(measured.items()))
     return 0
 
 

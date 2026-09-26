@@ -37,6 +37,7 @@ if str(LIB) not in sys.path:
 import auth  # noqa: E402
 import limits  # noqa: E402
 import models  # noqa: E402
+import proc  # noqa: E402
 import monitor_outcome  # noqa: E402
 import step_result as sr  # noqa: E402
 
@@ -180,7 +181,7 @@ def cmd_run(a) -> None:
     cli_limit = (str(a.timeout + limits.CLI_MARGIN) if a.timeout else a.phase)
     launch = [str(LIB / "launch-cli.sh"), runtime, str(workdir), str(prompt_copy), str(stem),
               a.model or "", str(output.parent), cli_limit]
-    p = subprocess.run(launch, capture_output=True, text=True)
+    p = proc.run(launch, check=False)
     if p.returncode != 0:
         finish(runtime, "launch_failed", f"起動できない: {p.stderr.strip()[:300]}",
                {"stem": str(stem)})
