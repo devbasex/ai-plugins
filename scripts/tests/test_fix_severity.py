@@ -64,3 +64,30 @@ def test_collect_cuts_summaries_by_period():
     until = datetime(2026, 10, 2, tzinfo=timezone.utc)
     assert fs.collect(nodes, since, until)[1] == [["[minor / x] y"]]
     assert fs.collect(nodes, since, datetime(2026, 10, 1, tzinfo=timezone.utc)) == ([], [])
+
+
+def test_fetch_reads_every_page_of_comments_and_threads():
+    more = {"hasNextPage": True, "endCursor": "c1"}
+    done = {"hasNextPage": False, "endCursor": None}
+    calls = []
+
+    def run(query, **v):
+        calls.append(v)
+        if "q" in v:
+            return {"search": {"pageInfo": done, "nodes": [{
+                "id": "PR1", "number": 7,
+                "comments": {"nodes": [{"body": "a"}], "pageInfo": more},
+                "reviewThreads": {"nodes": [{"id": "T1", "comments": {"nodes": [{"body": "t1"}], "pageInfo": more}}],
+                                  "pageInfo": more}}, {}]}}
+        if v["id"] == "PR1" and "reviewThreads" in query:
+            return {"node": {"reviewThreads": {"nodes": [{"id": "T2", "comments": {"nodes": [{"body": "t2"}],
+                                                                                   "pageInfo": done}}],
+                                               "pageInfo": done}}}
+        return {"node": {"comments": {"nodes": [{"body": v["id"] + "-2"}], "pageInfo": done}}}
+
+    nodes = fs.fetch("o/r", datetime(2026, 10, 1, tzinfo=timezone.utc), run=run)
+    pr = nodes[0]
+    assert [c["body"] for c in pr["comments"]["nodes"]] == ["a", "PR1-2"]
+    assert [[c["body"] for c in t["comments"]["nodes"]] for t in pr["reviewThreads"]["nodes"]] == [["t1", "T1-2"], ["t2"]]
+    # 続きが無い connection は照会しない（検索 1 回 + 続き 3 回）
+    assert len(calls) == 4

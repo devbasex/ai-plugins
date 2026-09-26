@@ -8,6 +8,7 @@
 
 期間は PR のまとめのコメントの作成日時で切る（`--since` を含み `--until` を含まない。日付だけなら UTC の 0 時）。
 スレッドも、最初のコメントの作成日時が同じ期間に入るものだけを数える。
+PR のコメント・スレッド・スレッドのコメントは、1 ページに収まらなければ続きのページも読む。
 
 出力の鍵:
   summaries / prs          まとめのコメントの件数と、それを持つ PR の本数
@@ -37,10 +38,18 @@ LABEL = re.compile(r"^\s*\[(critical|major|minor|nit)\s*/", re.I)
 FIXED_REPLY = "対応しました"
 LEVELS = ("critical", "major", "minor", "nit")
 
-QUERY = """query($q:String!,$after:String){search(query:$q,type:ISSUE,first:30,after:$after){
-pageInfo{hasNextPage endCursor}
-nodes{... on PullRequest{number comments(first:100){nodes{body createdAt}}
-reviewThreads(first:100){nodes{comments(first:30){nodes{body createdAt}}}}}}}}"""
+PAGE = "pageInfo{hasNextPage endCursor}"
+COMMENTS = "nodes{body createdAt} " + PAGE
+THREADS = "nodes{id comments(first:30){" + COMMENTS + "}} " + PAGE
+QUERY = ("query($q:String!,$after:String){search(query:$q,type:ISSUE,first:30,after:$after){" + PAGE
+         + " nodes{... on PullRequest{id number comments(first:100){" + COMMENTS + "}"
+         + " reviewThreads(first:100){" + THREADS + "}}}}}")
+# 1 ページに収まらなかった connection の続き（ノードの id から読む）。(型, connection, 選ぶ鍵)
+MORE = {
+    "comments": ("PullRequest", "comments", COMMENTS),
+    "reviewThreads": ("PullRequest", "reviewThreads", THREADS),
+    "threadComments": ("PullRequestReviewThread", "comments", COMMENTS),
+}
 
 
 # --- 解析（純粋な関数。単体テストはここだけを縛る） ------------------------------
@@ -121,17 +130,40 @@ def collect(nodes: list[dict], since: datetime, until: datetime | None) -> tuple
 
 # --- 取得 -----------------------------------------------------------------------
 
-def fetch(repo: str, since: datetime) -> list[dict]:
+def gh_graphql(query: str, **variables) -> dict:
+    args = ["gh", "api", "graphql", "-f", f"query={query}"]
+    for k, v in variables.items():
+        if v is not None:
+            args += ["-F", f"{k}={v}"]
+    p = subprocess.run(args, capture_output=True, text=True)
+    if p.returncode != 0:
+        raise SystemExit(f"gh api graphql が失敗した: {p.stderr.strip()[:300]}")
+    return json.loads(p.stdout)["data"]
+
+
+def complete(conn: dict, node_id: str, kind: str, run=gh_graphql) -> None:
+    """connection の残りのページを足す。1 ページに収まっていれば照会しない。"""
+    typename, field, select = MORE[kind]
+    query = ("query($id:ID!,$after:String){node(id:$id){... on " + typename
+             + "{" + field + "(first:100,after:$after){" + select + "}}}}")
+    while (conn.get("pageInfo") or {}).get("hasNextPage"):
+        more = run(query, id=node_id, after=conn["pageInfo"]["endCursor"])["node"][field]
+        conn["nodes"] = (conn.get("nodes") or []) + (more.get("nodes") or [])
+        conn["pageInfo"] = more.get("pageInfo") or {}
+
+
+def fetch(repo: str, since: datetime, run=gh_graphql) -> list[dict]:
     q = f"repo:{repo} is:pr updated:>={since.date().isoformat()}"
     nodes, after = [], None
     while True:
-        args = ["gh", "api", "graphql", "-f", f"query={QUERY}", "-F", f"q={q}"]
-        if after:
-            args += ["-F", f"after={after}"]
-        p = subprocess.run(args, capture_output=True, text=True)
-        if p.returncode != 0:
-            raise SystemExit(f"gh api graphql が失敗した: {p.stderr.strip()[:300]}")
-        s = json.loads(p.stdout)["data"]["search"]
+        s = run(QUERY, q=q, after=after)["search"]
+        for n in s["nodes"]:
+            if not isinstance(n, dict) or "id" not in n:
+                continue
+            complete(n.setdefault("comments", {}), n["id"], "comments", run)
+            complete(n.setdefault("reviewThreads", {}), n["id"], "reviewThreads", run)
+            for t in n["reviewThreads"].get("nodes") or []:
+                complete(t.setdefault("comments", {}), t["id"], "threadComments", run)
         nodes += s["nodes"]
         if not s["pageInfo"]["hasNextPage"]:
             return nodes
