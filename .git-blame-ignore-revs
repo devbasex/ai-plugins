@@ -1,0 +1,8 @@
+# git blame が飛ばす一括の変更（#1323）。ツールの出力だけを持つコミットを、注記の 1 行とともに載せる。
+# 手元では `git config blame.ignoreRevsFile .git-blame-ignore-revs` で読ませる（CONTRIBUTING.md）。
+# GitHub の blame の画面は、根にあるこのファイルを自動で読む。
+
+# 一括の自動修正（ruff check --fix。ruff 0.16.9）
+8b77010034e2e669d2d69f2831e7efc78bec74eb
+# 一括の整形（ruff format。ruff 0.16.9）
+e6b04b4908d3e0a138369d9c362791eb9c797880

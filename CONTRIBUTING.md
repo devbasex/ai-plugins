@@ -86,8 +86,11 @@ bash scripts/check-lint.sh
 抑止には理由を添えます。行の抑止は同じ行か直前の行に、設定の除外は `pyproject.toml` のコメントに書きます。
 
 ```python
-from lib.foo import bar  # noqa: F401 -- 他のモジュールが lib.monitor.bar として使う再公開
+# 次の 5 つは、他のモジュールが monitor.monitor_proc のように使う再公開の import である（F401 の抑止の理由。#1323）
+import monitor_proc  # noqa: E402,F401
 ```
+
+（`plugins/ndf/scripts/lib/monitor.py` から）
 
 プラグイン定義そのものを変えたときは、あわせて次を実行します。**引数にプラグインのパスが
 要ります。**
@@ -99,6 +102,55 @@ bash scripts/validate-runtime-plugins.sh
 ```
 
 `plugins/ndf/skills/` だけを触った場合は 1〜5 で足ります。
+
+## 一括の整形と git blame
+
+**Python の全体を一度だけ整形し直しました（#1323）。** 一括の自動修正（`ruff check --fix`）と
+一括の整形（`ruff format`）の 2 つのコミットは、根の `.git-blame-ignore-revs` に載っています。
+GitHub の blame の画面はこのファイルを自動で読みます。手元の `git blame` に読ませるには、clone ごとに
+1 回設定します。
+
+```bash
+git config blame.ignoreRevsFile .git-blame-ignore-revs
+```
+
+この設定のまま、`.git-blame-ignore-revs` の無い版（一括の整形より前のタグやブランチ）を checkout した
+作業ツリーで `git blame` を打つと、`fatal: could not open object name list` で落ちます。そのときは
+1 回だけ設定を外して打ちます。
+
+```bash
+git -c blame.ignoreRevsFile= blame <ファイル>
+```
+
+### 一括の整形の前から続くブランチを取り込む
+
+そのまま `develop` を取り込むと、触ったファイルが整形の差で衝突します。次の順で取り込むと、衝突は
+自分の変更だけに残ります。
+
+```bash
+git fetch origin
+AUTOFIX=$(git show origin/develop:.git-blame-ignore-revs | grep -E '^[0-9a-f]{40}$' | sed -n 1p)
+FORMAT=$(git show origin/develop:.git-blame-ignore-revs | grep -E '^[0-9a-f]{40}$' | sed -n 2p)
+
+# 1. 一括の自動修正の直前まで取り込む（検査の設定と scripts/check-lint.sh が入る）
+git merge "$AUTOFIX^"
+
+# 2. 自分のブランチへ同じツールを掛けてコミットする。直せない違反が残ると 1 で終わるが、ここでは続ける
+bash scripts/check-lint.sh --fix
+git commit -am "Refactor: 一括の整形（#1323）に合わせて整形する"
+
+# 3. 一括の整形を取り込む。両側とも同じツールの出力なので、衝突は自分の側を採る
+git merge -X ours "$FORMAT"
+
+# 4. 残りの develop をふつうに取り込む（ここで出る衝突は、ふつうの衝突として解く）
+git merge origin/develop
+
+# 5. 自分の変更に残る違反を直して、0 で終わるまで繰り返す
+bash scripts/check-lint.sh
+```
+
+**`-X ours` は 3 の 1 回だけに使います。** 4 で使うと、一括の整形の後に `develop` へ入った手の修正を、
+衝突した箇所で捨てます。
 
 ## コミットメッセージ
 
