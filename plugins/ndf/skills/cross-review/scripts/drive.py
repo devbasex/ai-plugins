@@ -158,6 +158,7 @@ class Drive:
 - 作業ディレクトリ: {s.get('worktree_path')}（外を触らない）
 - 作業ディレクトリは detached HEAD（PR の head）のままでよい。ブランチへ切り替えず、そこでコミットする。送る（push）のは取り込み
 - ループの終わり: {s.get('final')}
+- `fix-steps.py context` には環境変数 `CROSS_REVIEW_STATE={self.tmp}/cross-review-pr{self.pr}-state.json` を渡す（ループと同じ指摘の基準を使う）
 
 GitHub と git の送信をしない。結果ファイル: {self.path('sweep')}
 """
