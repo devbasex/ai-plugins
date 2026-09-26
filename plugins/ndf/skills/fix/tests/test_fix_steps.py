@@ -99,6 +99,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setenv("FAKE_GH_STATE", str(state))
     monkeypatch.setenv("FAKE_SYNC_LOG", str(tmp_path / "sync.log"))
     monkeypatch.setenv("CROSS_REVIEW_TMP_DIR", str(tmp))
+    monkeypatch.delenv("CROSS_REVIEW_STATE", raising=False)
     return {"tmp": tmp, "state": state, "sync": sync, "root": tmp_path}
 
 
@@ -121,10 +122,10 @@ def _git_repo(path: Path) -> str:
 # --- context --------------------------------------------------------------------
 
 def test_context_collects_threads_comments_ci_and_exclusions(env):
-    code, out, err = run("context", PR)
+    code, out, err = run("context", PR, "--root", env["root"])
     assert code == 0 and out["status"] == "ok", err
     assert out["metrics"] == {"pr": PR, "repo": "o/r", "unresolved": 2, "comments": 3, "ci_status": "FAILURE",
-                              "ci_failed": 1, "excluded_sections": 1}
+                              "ci_failed": 1, "excluded_sections": 1, "review_focus": "none"}
     ctx = Path(next(i["path"] for i in out["items"] if i["name"] == "context"))
     text = ctx.read_text(encoding="utf-8")
     assert "### やらないこと" in text and "型の付け直し" in text and "## 手順" not in text
@@ -272,3 +273,161 @@ def test_remaining_treats_resolved_separate_pr_as_leftover(env):
                                "rejected": []}))
     code, out, _ = run("remaining", PR)
     assert code == 1 and out["metrics"]["leftover"] == 1 and out["items"][1]["result"] == "unresolved"
+
+
+# --- 指摘の基準（#1287） --------------------------------------------------------
+
+import importlib  # noqa: E402
+
+result_posts = importlib.import_module("result_posts")
+review_criteria = importlib.import_module("review_criteria")
+
+
+def _waived_only(**over):
+    d = {"pr": PR, "fix_commit": "abc1234", "ci_note": None, "review_focus": [], "review_focus_status": "none",
+         "decisions": [
+             {"thread_id": "PRRT_4", "comment_id": 14, "path": "c.py", "line": 5, "severity": "minor",
+              "category": "整合性", "summary": "番号のずれ", "decision": "waived", "reason": "",
+              "waive_kind": "doc_mismatch"},
+             {"thread_id": "PRRT_3", "comment_id": 13, "path": "b.py", "line": 1, "severity": "nit",
+              "category": "style", "summary": "末尾", "decision": "waived", "reason": "", "waive_kind": "wording"},
+         ]}
+    d.update(over)
+    return d
+
+
+def _finalize(env, d, *extra):
+    dec = env["tmp"] / "d.json"
+    dec.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    return run("finalize", "--decisions", dec, "--no-sync", *extra)
+
+
+def test_waived_minor_and_nit_close_without_commit_or_push(env):
+    code, out, err = _finalize(env, _waived_only())
+    assert code == 0 and out["status"] == "ok", err
+    res = json.loads((env["tmp"] / f"fix-pr{PR}-result.json").read_text())
+    assert res["fix_commit"] is None and res["fixed_count"] == 0 and res["resolved_threads"] == []
+    assert [e["thread_id"] for e in res["deferred"]] == ["PRRT_4", "PRRT_3"]
+    for e, kind in zip(res["deferred"], ("doc_mismatch", "wording")):
+        assert e["resolve"] is True and e["waived"] == kind
+        assert e["reply"] == review_criteria.waiver_reply(kind) == e["reason_for_deferral"]
+    assert out["metrics"]["waived"] == 2
+    dropped = next(i for i in out["items"] if i["name"] == "fix-commit")
+    assert dropped["result"] == "dropped" and "abc1234" in dropped["reason"]
+
+    posts = result_posts.fix_posts(env["tmp"] / f"fix-pr{PR}-result.json", "o/r", PR)
+    assert [p["kind"] for p in posts] == ["review-reply", "review-reply", "thread-resolve", "thread-resolve",
+                                          "pr-comment"]
+    assert [p["fields"]["body"] for p in posts[:2]] == [e["reply"] for e in res["deferred"]]
+    assert "見送ります。" not in posts[0]["fields"]["body"]
+    summary = posts[-1]["fields"]["body"].splitlines()
+    assert summary[3].startswith("決着: ") and summary[4] == "基準外の見送り: 2 件"
+    assert result_posts.push_fix(env["root"], "feat/x", res["fix_commit"]).pushed is False
+
+
+def test_waived_reply_names_the_declared_focus(env):
+    code, out, _ = _finalize(env, _waived_only(review_focus=["外部 API の費用"], review_focus_status="declared"))
+    assert code == 0
+    res = json.loads((env["tmp"] / f"fix-pr{PR}-result.json").read_text())
+    assert "外部 API の費用" in res["deferred"][0]["reply"]
+
+
+def test_a_fix_without_waived_keeps_the_summary_lines(env):
+    code, _, _ = _finalize(env, _decisions())
+    assert code == 0
+    posts = result_posts.fix_posts(env["tmp"] / f"fix-pr{PR}-result.json", "o/r", PR)
+    assert "基準外の見送り" not in posts[-1]["fields"]["body"]
+
+
+def test_a_redline_finding_labelled_minor_is_fixed_only_as_major(env):
+    d = _waived_only(decisions=[
+        {"thread_id": "PRRT_1", "comment_id": 11, "path": "a.py", "line": 3, "severity": "minor",
+         "category": "security", "summary": "秘密をログへ書く", "decision": "fixed", "reason": ""},
+        {"thread_id": "PRRT_3", "comment_id": 13, "path": "b.py", "line": 1, "severity": "minor",
+         "category": "security", "summary": "秘密", "decision": "waived", "reason": "", "criterion": 2,
+         "waive_kind": "unlikely"},
+    ])
+    code, out, _ = _finalize(env, d)
+    assert code == 1 and out["status"] == "stopped" and [i["index"] for i in out["items"]] == [0, 1]
+    assert not (env["tmp"] / f"fix-pr{PR}-result.json").exists()
+    d["decisions"] = [{**d["decisions"][0], "severity": "major", "criterion": 2}]
+    code, out, _ = _finalize(env, d)
+    assert code == 0 and out["status"] == "ok"
+    res = json.loads((env["tmp"] / f"fix-pr{PR}-result.json").read_text())
+    assert res["fix_commit"] == "abc1234" and res["by_severity"]["major"] == 1
+
+
+@pytest.mark.parametrize("entry,why", [
+    ({"severity": "major", "waive_kind": "wording"}, "waived は severity"),
+    ({"severity": "minor", "waive_kind": "style"}, "waive_kind"),
+    ({"severity": "minor", "waive_kind": None}, "waive_kind"),
+])
+def test_invalid_waived_entries_stop(env, entry, why):
+    d = _waived_only()
+    d["decisions"] = [{**d["decisions"][0], **entry}]
+    code, out, _ = _finalize(env, d)
+    assert code == 1 and why in out["items"][0]["reason"]
+
+
+def test_criterion_3_needs_a_declared_focus(env):
+    fixed = {"thread_id": "PRRT_1", "comment_id": 11, "path": "a.py", "line": 3, "severity": "major",
+             "category": "perf", "summary": "起動が増える", "decision": "fixed", "reason": "", "criterion": 3}
+    code, out, _ = _finalize(env, _waived_only(decisions=[fixed]))
+    assert code == 1 and "criterion 3" in out["items"][0]["reason"]
+    code, _, _ = _finalize(env, _waived_only(decisions=[fixed], review_focus=["起動"], review_focus_status="declared"))
+    assert code == 0
+
+
+def test_severity_min_critical_replies_to_major_and_minor(env):
+    # --severity-min critical: major は deferred（理由に閾値）、minor は waived。どちらも返信を受ける
+    d = _waived_only(fix_commit=None, decisions=[
+        {"thread_id": "PRRT_1", "comment_id": 11, "path": "a.py", "line": 3, "severity": "major",
+         "category": "logic", "summary": "空", "decision": "deferred", "reason": "--severity-min critical のため"},
+        {"thread_id": "PRRT_3", "comment_id": 13, "path": "b.py", "line": 1, "severity": "minor",
+         "category": "style", "summary": "末尾", "decision": "waived", "reason": "", "waive_kind": "wording"},
+    ])
+    code, _, _ = _finalize(env, d)
+    assert code == 0
+    posts = result_posts.fix_posts(env["tmp"] / f"fix-pr{PR}-result.json", "o/r", PR)
+    replies = {p["fields"]["in_reply_to"] for p in posts if p["kind"] == "review-reply"}
+    assert replies == {11, 13}
+
+
+def _context_decisions(out) -> dict:
+    return json.loads(Path(next(i["path"] for i in out["items"] if i["name"] == "decisions")).read_text())
+
+
+def test_context_reads_the_declaration_of_the_root(env):
+    root = env["root"] / "wt"
+    (root / ".ndf").mkdir(parents=True)
+    (root / ".ndf" / "review.json").write_text(json.dumps({"version": 1, "focus": ["重点 A"]}), encoding="utf-8")
+    code, out, _ = run("context", PR, "--repo", "o/r", "--root", root)
+    assert code == 0 and out["metrics"]["review_focus"] == "declared"
+    dec = _context_decisions(out)
+    assert dec["review_focus"] == ["重点 A"] and dec["review_focus_status"] == "declared"
+    ctx = Path(next(i["path"] for i in out["items"] if i["name"] == "context")).read_text(encoding="utf-8")
+    assert "## 指摘の基準" in ctx and "3. " in ctx and "重点 A" in ctx
+
+
+def test_context_with_a_broken_declaration_continues(env):
+    root = env["root"] / "wt"
+    (root / ".ndf").mkdir(parents=True)
+    (root / ".ndf" / "review.json").write_text('{"version": 1, "focus": "x"}', encoding="utf-8")
+    code, out, _ = run("context", PR, "--repo", "o/r", "--root", root)
+    assert code == 0 and out["status"] == "ok"
+    item = next(i for i in out["items"] if i["name"] == "review-focus")
+    assert item["result"] == "unreadable" and item["reason"]
+    assert _context_decisions(out)["review_focus"] == []
+
+
+def test_context_in_cross_review_uses_the_state_file(env, monkeypatch):
+    root = env["root"] / "wt"
+    (root / ".ndf").mkdir(parents=True)
+    (root / ".ndf" / "review.json").write_text(json.dumps({"version": 1, "focus": ["作業ツリーの重点"]}),
+                                               encoding="utf-8")
+    state = env["root"] / "cr-state.json"
+    state.write_text(json.dumps({"review_criteria": {"status": "declared", "focus": ["状態ファイルの重点"],
+                                                     "error": None, "reviewer_block": "x"}}), encoding="utf-8")
+    monkeypatch.setenv("CROSS_REVIEW_STATE", str(state))
+    code, out, _ = run("context", PR, "--repo", "o/r", "--root", root)
+    assert code == 0 and _context_decisions(out)["review_focus"] == ["状態ファイルの重点"]

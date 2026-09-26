@@ -22,7 +22,9 @@
 
 **修正の手順・方針・戻り値ファイルの形は `/ndf:fix` が持つ**（`skills/fix/SKILL.md`）。駆動
 （`scripts/drive.py`）は fix で止まるとき、worker へ渡す指示を `prompt_file` に書く。指示が持つのは
-`/ndf:fix <PR> --defer-nit` の呼び出しと PR 固有の値だけである。
+`/ndf:fix <PR>` の呼び出しと PR 固有の値だけである。**自動で直すのは `critical` / `major` だけで、
+`minor` / `nit` は直さず見送りの返信を付けて閉じる**（振り分けの規則は `/ndf:fix` の「重要度の判定」、
+基準の正本は `scripts/lib/review_criteria.py`）。
 
 | 値 | 出どころ |
 | --- | --- |
@@ -31,6 +33,7 @@
 | 前ラウンドのレビュー | `rounds[-1]` の担当ごとの `intent` / `posted_as` / `comments` / `review_url`。件数はそのラウンドで投稿した数で、対応の対象は `/ndf:fix` が PR の未解決のスレッドから数え直す |
 | コメントのスナップショット | `$TMP_DIR/cross-review-pr<PR>-existing-comments.txt` |
 | 戻り値ファイル | `$TMP_DIR/fix-pr<PR>-result.json`。環境変数 `CROSS_REVIEW_TMP_DIR` を渡すと `/ndf:fix` がここへ書く |
+| 指摘の基準 | 環境変数 `CROSS_REVIEW_STATE=$TMP_DIR/cross-review-pr<STATE_PR>-state.json`。`fix-steps.py context` が状態ファイルの `review_criteria`（`init` が写した重点）を読み、担当と同じ基準で振り分ける |
 
 **送信・返信・決着・まとめは取り込み（`state.py merge-fix`）が行う**。worker は
 GitHub と git へ書かない。取り込みは現在の頭を指定して送り（`git push origin HEAD:<ブランチ名>`）、
@@ -229,9 +232,9 @@ Step 1 に戻る。
 ループ内の修正フェーズ (Step 5) は「一方でも REQUEST_CHANGES」のラウンドでしか走らない。
 そのため以下が取りこぼされる:
 
-- **最終 APPROVE ラウンドのインラインコメント**: skill のレビュー方針上、`minor` 以下しか
-  無ければ `APPROVE` で良い。つまり **APPROVE でも minor/nit のインラインコメントが
-  投稿されている**ことがあり、両者 APPROVE でループを抜けるとこれらが未対応のまま残る。
+- **最終 APPROVE ラウンドのインラインコメント**: 担当は指摘の基準に当たるものしか書かないが、
+  bot や人のレビューが `minor` / `nit` のインラインコメントを残していることがあり、両者
+  APPROVE でループを抜けるとこれらが未対応のまま残る。
 - **ループ中に deferred 記録した nit**: `state.deferred_nits` に積まれたまま reply のみで
   Resolve されていないスレッド。
 
@@ -256,10 +259,13 @@ while ループ脱出後にメインが以下のプロンプトでサブエー�
 >
 > PR の **全 open review thread**（インライン / レビュー body / PR レベルコメント）を
 > `gh api` で洗い出し、cross-review の codex/agy が残したものを中心に **すべて解消**せよ:
-> 1. 修正可能な `minor`/`nit` → コード修正 + コミット（**送らない**）し、`resolved_threads` へ入れる。
-> 2. 修正しない（好み・判断保留）`nit` → 見送りの理由を添えて `deferred` へ入れ、
->    **`"resolve": true`** を付ける（スレッドを open のまま残さない）。
-> 3. bot 誤指摘 → 却下理由を添えて `rejected` へ入れ、`"resolve": true` を付ける。
+> 振り分けは `/ndf:fix` の「重要度の判定」をそのまま使う（スイープ独自の重要度の規則を持たない）:
+> 1. `major` 以上（指摘の基準に当たる）→ コード修正 + コミット（**送らない**）し、`resolved_threads` へ入れる。
+>    **コードを直すのは `major` 以上が残っていたときだけである**
+> 2. `minor` / `nit`（基準に当たらない）→ コードを変えず `waived` にする。`finalize` が見送りの返信と
+>    `"resolve": true` を付けて `deferred` へ入れるので、そのまま結果ファイルへ写す
+> 3. 判断保留（`deferred`）と bot 誤指摘（`rejected`）→ 理由を添えて入れ、**`"resolve": true`** を付ける
+>    （スレッドを open のまま残さない）
 >
 > **GitHub と git へ書かない。** 返信・決着・送信は、メインがこの結果ファイルを読んで
 > 共通ライブラリの 1 行（`result_posts.py fix`）で行う。
@@ -356,7 +362,9 @@ sweep 中にメインが落ちても、`sweep-pr<STATE_PR>-result.json` が無�
 - 最終ステータス（`approved` / `max_rounds` / `oscillation` / `error`）
 - PR 履歴
 - ラウンドサマリ表
+- 基準外の見送りの件数（`waived`。返信を付けて閉じたもので、残 deferred の一覧には入れない）
 - 残 deferred nit 一覧
+- レビューの重点の宣言が読めなかったときは、その理由（基準 1・2・4 だけで続けた）
 
 `verify-sweep` を通していれば、`report` の出力に「## 最終スイープ」の節が入り、
 GitHub 側で数え直した残件数と、0 件にできなかった場合の理由が含まれる。
@@ -364,8 +372,6 @@ GitHub 側で数え直した残件数と、0 件にできなかった場合の�
 `verification`（実行した検証コマンドと終了コード、実行しなかった場合はその理由）を
 添えて最終報告する。
 
-> **方針変更（v4.11.0）**: 従来は deferred nit を「AskUserQuestion で 1 回問い合わせ」て
-> いたが、未解決スレッドを残さない方針に変更。**Step 7.5 で nit も含め全 open thread を
-> Resolve する**ため、Step 8 のユーザ問い合わせは原則不要。deferred nit は「対応見送りの
-> 記録」として report に **参考列挙**するに留める（再対応が要るものがあればユーザが
-> その場で指示できる）。`remaining_open > 0` の場合のみ、残った理由を添えて報告する。
+> **Step 7.5 で全 open thread を Resolve する**ため、Step 8 のユーザ問い合わせは原則不要。
+> deferred は「対応見送りの記録」として report に **参考列挙**するに留める（再対応が要るものが
+> あればユーザがその場で指示できる）。`remaining_open > 0` の場合のみ、残った理由を添えて報告する。
