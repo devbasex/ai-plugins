@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/paths.py", "name": "git_out", "kind": "same-name", "reason": "C4 で起動を lib/proc.py の run へ委ねた。名前と引数の形（語の並びと strip）は、C4 の範囲の外のモジュール（gate・phases・plan・danger・intake・triage・undo・verify）が使うため残す"}

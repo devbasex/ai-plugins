@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/lib/deps.py", "name": "install_uv", "kind": "same-name", "reason": "L0 で試行の require を置いた deps.py の定義。試行の複製が X1 で消えるまで残る"}

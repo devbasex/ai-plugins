@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/skills/cross-review/scripts/review_lib/store.py", "name": "_tmp_dir", "kind": "same-name", "reason": "C2 で state.py から移した。lib/monitor.py の同じ名前の関数とは別の実装。テストと呼び出し側が名前で読むため C2 では名前を変えない。C3 で寄せるか名前を分ける"}

@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/worktree.py", "name": "_worktree_changes", "kind": "same-name", "reason": "C4 で gitfacts.py から worktree.py へ移した。cross-review の review_lib/workspace.py の同じ名前の関数は追跡対象と追跡対象外の 2 つに分けて返し、こちらはパス → 状態の表を返す（戻り値の形が違う）"}

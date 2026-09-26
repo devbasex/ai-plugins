@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/lib/slow_step.py", "name": "_git", "kind": "same-name", "reason": "S1 の時点の同じ名前で本体の違う関数。L0 でライブラリへ寄せるか、別の概念なら名前を分ける"}

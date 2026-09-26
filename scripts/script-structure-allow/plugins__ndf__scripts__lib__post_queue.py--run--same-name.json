@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/lib/post_queue.py", "name": "run", "kind": "same-name", "reason": "gh を 1 回打って Attempt を返す（例外を投げない）。起動は C3 で proc.run へ寄せた。upkeep.py とテストが名前で読み・差し替えるため名前を残す"}

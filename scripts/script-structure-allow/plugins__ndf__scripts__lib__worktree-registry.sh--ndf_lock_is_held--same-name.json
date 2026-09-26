@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/lib/worktree-registry.sh", "name": "ndf_lock_is_held", "kind": "same-name", "reason": "lock-common.sh を読めないときの代わりの定義。読み込む側ごとに置く（#293）"}

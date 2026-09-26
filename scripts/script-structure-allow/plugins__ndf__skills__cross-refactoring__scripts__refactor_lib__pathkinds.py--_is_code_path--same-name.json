@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/pathkinds.py", "name": "_is_code_path", "kind": "same-name", "reason": "C4 で gitfacts.py から pathkinds.py へ移した。cross-review の review_lib/categories.py の同じ名前の関数は拡張子だけで決め、こちらは拡張子の無いファイルを起点の版と HEAD の shebang で決める（引数が違う）"}

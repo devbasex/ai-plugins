@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/lib/gh_quota.py", "name": "is_rate_limited", "kind": "same-name", "reason": "上限の語を見る関数。post_queue.py の同じ名前の関数は gh の 1 回の結果（Attempt）を HTTP の状態・語・残り回数で見分ける別の関数で、C3 で語の判定をこの関数へ寄せた。upkeep.py とテストが post_queue の名前で読むため名前を残す"}

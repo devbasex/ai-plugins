@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/lib/lock-common.sh", "name": "ndf_lock_acquire", "kind": "same-body", "reason": "S1 の時点の本体の同じ関数。L0 でライブラリへ寄せるか、別の概念なら名前を分ける"}

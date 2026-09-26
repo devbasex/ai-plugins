@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/worktree-guard.sh", "name": "jq_get", "kind": "same-name", "reason": "hook の入力を読む同じ概念が workflow-guard.sh にある。相手は C5 の外のため、寄せるのは別の移行ステップ"}
