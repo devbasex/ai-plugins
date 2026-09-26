@@ -62,6 +62,38 @@ def run_with_timeout(
             sink.close()
 
 
+def run_capture(
+    argv: list[str], cwd: str, timeout: float, kill_grace: float = 5.0,
+) -> tuple[Optional[int], str, str, bool]:
+    """語の並びを締め切りつきで走らせ `(終了コード, 標準出力, 標準エラー, 打ち切ったか)` を返す。
+
+    指標の測定（#1319）で使う。標準出力と標準エラーを分けて受け取る（ツールの出力は標準出力、
+    失敗の理由は標準エラー）。**打ち切るときはプロセスグループごと止める**（`run_with_timeout`
+    と同じ理由。uvx / npx の子が残る）。起動できなければ終了コード 127 と理由を返す。
+    """
+    try:
+        proc = subprocess.Popen(
+            argv, cwd=cwd, start_new_session=True, stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+    except OSError as exc:
+        return 127, "", f"起動できませんでした: {exc}", False
+    try:
+        out, err = proc.communicate(timeout=max(float(timeout), 0.0))
+    except subprocess.TimeoutExpired:
+        _kill_process_group(proc, kill_grace)
+        for pipe in (proc.stdout, proc.stderr):
+            if pipe is not None:
+                pipe.close()
+        try:
+            proc.wait(timeout=kill_grace)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        return None, "", "", True
+    return (proc.returncode, out.decode("utf-8", errors="replace"),
+            err.decode("utf-8", errors="replace"), False)
+
+
 def _process_group_alive(pgid: int) -> bool:
     """プロセスグループに生きたプロセスが残っているか。"""
     try:

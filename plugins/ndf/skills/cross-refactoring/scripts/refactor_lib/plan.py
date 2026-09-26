@@ -18,6 +18,7 @@ from typing import Any, Optional
 import mdtable
 
 from . import die, info
+from .codemetrics_view import record_lines
 from .paths import sh
 from .items import item_label
 from .vocabulary import ITEM_STATUS_LABELS
@@ -189,6 +190,7 @@ def format_plan(state: dict[str, Any]) -> str:
         lines.extend(["（採用した改善項目なし）", ""])
     for item in items:
         lines.extend(_plan_item_section(item))
+    lines.extend(record_lines(state))
     lines.extend(limits_section(state.get("limits") or {}))
     lines.extend(_plan_deferred_section(state))
     return "\n".join(lines).rstrip() + "\n"
@@ -203,6 +205,7 @@ _LIMIT_ROWS = (
     ("fix_end_at", "直しの試行の打ち切り"),
     ("final_end_at", "最終ゲートの修正の打ち切り（想定最大時間の終わり）"),
     ("final_fix_seconds", "最終ゲートの修正の 1 回目に必ず渡す長さ（秒。予備時間の final_fix）"),
+    ("measure_timeout", "指標の測定の上限（秒。提案の枠の中から割く）"),
     ("init_test_timeout", "着手前のテスト 1 回の上限（秒）"),
     ("test_timeout", "テスト 1 回の上限（秒）"),
     ("margin_seconds", "余裕（秒。手順の上限と CLI の上限に足す）"),
