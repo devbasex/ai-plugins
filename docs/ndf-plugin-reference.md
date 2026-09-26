@@ -6,10 +6,10 @@ NDF は Claude Code / Codex / Kiro CLI 向けの開発支援プラグイン群�
 
 | ランタイム | 導入方法 | 公開 Skill |
 |---|---|---|
-| Claude Code | `.claude-plugin/marketplace.json` の `ndf` | 47 個 |
-| Codex | `.claude-plugin/marketplace.json` の `ndf` | 43 個 |
-| Kiro CLI | `plugins/ndf/dev.kiro/install.sh` | 44 個 |
-| agy | `plugins/ndf/dev.agy/` を `agy plugin install` | 43 個 |
+| Claude Code | `.claude-plugin/marketplace.json` の `ndf` | 48 個 |
+| Codex | `.claude-plugin/marketplace.json` の `ndf` | 44 個 |
+| Kiro CLI | `plugins/ndf/dev.kiro/install.sh` | 45 個 |
+| agy | `plugins/ndf/dev.agy/` を `agy plugin install` | 44 個 |
 
 Skill の実体は `plugins/ndf/skills/` の 1 箇所だけです。ランタイム別の複製はありません。Skill や
 共通スクリプトを変更する場合は `plugins/ndf/` を直接編集します。
@@ -20,7 +20,7 @@ Skill の実体は `plugins/ndf/skills/` の 1 箇所だけです。ランタイ
 plugins/ndf/
 ├── .claude-plugin/plugin.json   # Claude Code（agents / hooks / skills 配列）
 ├── .codex-plugin/plugin.json    # Codex（hooks / skills 配列）
-├── skills/                      # 配布 Skill の唯一の実体（47 個）
+├── skills/                      # 配布 Skill の唯一の実体（48 個）
 ├── manifests/                   # ランタイム別の配布 Skill 一覧
 ├── agents/                      # Claude Code のサブエージェント（専門 8 個と、3 層の定義 3 個（supervisor 2・worker 1））
 ├── hooks/claude.json            # Claude Code の SessionStart / Stop hook
@@ -37,8 +37,8 @@ plugin install 時に build を実行する必要はありません。
 
 | Runtime | 読むもの |
 |---|---|
-| Claude Code | `.claude-plugin/plugin.json`（`agents/` 11 個（専門 8 個と、3 層の定義 3 個（supervisor 2・worker 1））、`hooks/claude.json`、`skills` 配列 47 個）、`scripts/` |
-| Codex | `.codex-plugin/plugin.json`（`hooks/codex.json`、`skills` 配列 43 個）、`scripts/` |
+| Claude Code | `.claude-plugin/plugin.json`（`agents/` 11 個（専門 8 個と、3 層の定義 3 個（supervisor 2・worker 1））、`hooks/claude.json`、`skills` 配列 48 個）、`scripts/` |
+| Codex | `.codex-plugin/plugin.json`（`hooks/codex.json`、`skills` 配列 44 個）、`scripts/` |
 | Kiro CLI | `dev.kiro/`（installer・agent config template・workflow prompts）、`manifests/kiro-skills.txt`、`skills/`、`scripts/` |
 | agy | `dev.agy/`（マニフェスト・`hooks.json`・`skills/` の symlink・`agents` と `scripts` への symlink） |
 

@@ -9,6 +9,7 @@ fix
 implementation-plan
 layout-review
 investigation-rules
+decision-request
 issue-plan-strategy
 logging-guidelines
 markdown-writing
