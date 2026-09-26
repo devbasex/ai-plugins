@@ -47,8 +47,8 @@ Claude Code 向けには `pyright-lsp` の導入と `pyright-langserver` の有�
 | 採った言語 | `language_servers` | 検出で選ばれ、起動の検証を通った言語。`project.local.yml` にこのキーがあればそちらが上書きする |
 | 起動の検証 | `serena project health-check` | 1 言語だけを設定した状態で走らせ、終了コード 0 を見ること |
 | 外した言語 | `mcp_serena_excluded` | 検証に失敗した言語と、`--only` で名指しされなかった言語。`<言語> <理由>` の要素 |
-| 設定済みの目印 | `mcp_serena_excluded` のキーの有無 | このキーがあることが「`configure` で設定した」目印。空の配列でも目印になる |
-| 導入のチェック | `check` | 公式 LSP プラグイン・本体・追加のチェック（TypeScript の版・shellcheck）が揃っているかを見ること |
+| 設定済みのマーカー | `mcp_serena_excluded` のキーの有無 | このキーがあることが「`configure` で設定した」マーカー。空の配列でもマーカーになる |
+| インストールチェック | `check` | 公式 LSP プラグイン・本体・追加のチェック（TypeScript の版・shellcheck）が揃っているかを見ること |
 | 追加のチェック | `extra_checks` | 対応表が名前で指し、`check.py` の `EXTRA_CHECKS` が関数を持つチェック |
 | 誘導 | PreToolUse の `additionalContext` | grep やコードファイルの読み込みが続いたとき、ツールの実行を止めずにシンボル単位の手順を 1 度だけ添えること |
 | 数の記録 | `<session_id>.json` | 誘導のためにセッションごとに数える grep・読み込み・混在の回数と時刻 |
@@ -95,7 +95,7 @@ Claude Code 向けには `pyright-lsp` の導入と `pyright-langserver` の有�
 | 手順 | 担うもの |
 | --- | --- |
 | 拡張子を数える・しきい値で選ぶ・`project.yml` を書く・1 言語ずつ検証する・失敗を外す | スクリプト（`configure`） |
-| 導入のチェック（プラグイン・本体・TypeScript の版・shellcheck） | スクリプト（`check`） |
+| インストールチェック（プラグイン・本体・TypeScript の版・shellcheck） | スクリプト（`check`） |
 | 食い違いの通知・誘導・自動許可 | スクリプト（hook） |
 | 導入のコマンドを打つか | モデル（利用者に確認。ネットワークへ出て手元に書き込む） |
 | `.serena/project.yml` を追跡するか | モデル（利用者に確認） |
@@ -113,7 +113,7 @@ Claude Code 向けには `pyright-lsp` の導入と `pyright-langserver` の有�
 | `.gitignore` は `--gitignore`、`.serena/.gitignore` は `--serena-gitignore` のときだけ書く | 渡さないときは足すべき行を `serena_gitignore_added` に載せるだけ。`project create` が作る Serena の既定の `.serena/.gitignore` は許す |
 | セッションの開始でネットワークへ出る導入を走らせない。スクリプトは導入のコマンドを出力に載せるだけで打たない | — |
 | hook はツールの呼び出しを止めない（誘導も `permissionDecision` を付けない） | 例外・読めない入力・`project.yml` の読めない形では何も出さずに終了コード 0 |
-| 設定済みの目印の無いリポジトリでは PreToolUse は数えない | Serena が `--project-from-cwd` で自動で作った `project.yml` も目印が無いので数えない |
+| 設定済みのマーカーの無いリポジトリでは PreToolUse は数えない | Serena が `--project-from-cwd` で自動で作った `project.yml` もマーカーが無いので数えない |
 | 言語を足すときに変えるのは対応表だけで、hook とスクリプトは言語の名前で分岐しない | 既にある種類で足りない追加のチェックだけは `check.py` の `EXTRA_CHECKS` に関数を 1 つ足す。知らない名前は対応表の破損として `check` が終了コード 2 |
 | hook とチェックは Python 3 の標準ライブラリだけで動き、`uvx` を呼ばない | `uvx` を要するのは Serena の起動と `configure` の検証だけ |
 
@@ -130,7 +130,7 @@ Claude Code 向けには `pyright-lsp` の導入と `pyright-langserver` の有�
 | `scripts/serena_lsp/detect.py` | `git ls-files -z` を数え（`count`）、しきい値で選ぶ（`choose`）。`git` が使えなければ `GitUnavailable` |
 | `scripts/serena_lsp/project_yml.py` | 3 キーを行単位で読み書きする（`read_list` / `write_list`）。導入先の状態を読む（`load_state`） |
 | `scripts/serena_lsp/verify.py` | `configure`。検出・作成・1 言語ずつの検証・確定の値の書き込み・`.gitignore` |
-| `scripts/serena_lsp/check.py` | 導入のチェック（`run` / `missing_items`）と追加のチェックの関数（`EXTRA_CHECKS`） |
+| `scripts/serena_lsp/check.py` | インストールチェック（`run` / `missing_items`）と追加のチェックの関数（`EXTRA_CHECKS`） |
 | `scripts/serena_lsp/hooks.py` | SessionStart の通知（`session_start`）と PreToolUse の誘導・自動許可（`pre_tool_use`） |
 | `hooks/hooks.json` / `hooks/codex.json` | Claude Code（と Kiro の installer）/ Codex の hook 定義 |
 | `skills/language-servers/SKILL.md` | 導入とチェックの Skill。呼び出しと 4 つの判断だけを持つ |
@@ -181,7 +181,7 @@ graph TB
 
 worktree（`.worktrees/<ブランチ名>`）で起動した Serena は worktree を根にし、worktree ごとに
 `.serena/language_servers/` を持つ（決定 16。実測で初回の `find_symbol` 3.8 秒・48M）。
-`project.yml` を追跡しない worktree では Serena が目印の無い設定を自動で作るため、hook は
+`project.yml` を追跡しない worktree では Serena がマーカーの無い設定を自動で作るため、hook は
 未設定を知らせる。
 
 ### `serena-lsp.py` のサブコマンド
@@ -306,8 +306,8 @@ hook は、環境に `CLAUDE_PLUGIN_ROOT` が無ければ何も出さずに 0 �
 | リポジトリの状態 | 出すもの |
 | --- | --- |
 | git のリポジトリでない・採る言語が 0・`project.yml` が読めない形 | 何も出さない |
-| 設定済みの目印が無い（`project.yml` が無い・Serena が自動で作った）で、採る言語が 1 つ以上 | 未設定の 1 行と、Skill の名前と「プロジェクトごとに実行する」の 1 行の 2 行だけ。食い違いと欠けの行は出さない |
-| 目印がある | 食い違いと欠けがあるときだけ、1 項目 1 行と、最後に Skill の名前の 1 行 |
+| 設定済みのマーカーが無い（`project.yml` が無い・Serena が自動で作った）で、採る言語が 1 つ以上 | 未設定の 1 行と、Skill の名前と「プロジェクトごとに実行する」の 1 行の 2 行だけ。食い違いと欠けの行は出さない |
+| マーカーがある | 食い違いと欠けがあるときだけ、1 項目 1 行と、最後に Skill の名前の 1 行 |
 
 ```text
 [mcp-serena] 設定に無い言語があります: typescript（97 ファイル）
@@ -344,7 +344,7 @@ hook は、環境に `CLAUDE_PLUGIN_ROOT` が無ければ何も出さずに 0 �
   `find_referencing_symbols`）と編集（`replace_symbol_body`）をツール名で示し、数を戻したので
   続けてよいことを書く
 - **自動許可:** Claude Code で `permission_mode` が `acceptEdits` か `auto` のとき、名前に `serena`
-  を含むツールに `allow` を返す。目印の無いリポジトリでも同じ。他のモードと Codex では返さない
+  を含むツールに `allow` を返す。マーカーの無いリポジトリでも同じ。他のモードと Codex では返さない
 
 ### Skill の契約
 
@@ -407,7 +407,7 @@ SKILL.md が正である。`configure` は言語の数 × 120 秒かかり得る
   キーが無ければ末尾に足す。読めるのはブロックの形（`key:` の後に `- 値` の行）と空の流れの形
   （`key: []`）だけである
 - **`project.local.yml` の `language_servers` は `project.yml` を上書きする**（Serena 1.7.0 の
-  `ProjectConfig.load`）。`check` と hook はその値を採った言語として読む。目印と外した言語は常に
+  `ProjectConfig.load`）。`check` と hook はその値を採った言語として読む。マーカーと外した言語は常に
   `project.yml` から読む
 - Serena 1.7.0 は項目の欠けた `project.yml` を書き直すとき、知らないキー（`mcp_serena_excluded`）
   を残す。切り戻しで mcp-serena を戻しても、残ったキーは Serena が無視する
