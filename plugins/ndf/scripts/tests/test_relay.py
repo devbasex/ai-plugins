@@ -43,7 +43,8 @@ from relay_lib import version_dir as relay_version_dir  # noqa: E402
 
 def fake_uv(tmp_path):
     """ラッパーの環境を作る uv の代わり（`NDF_RELAY_UV`）。`UV_PROJECT_ENVIRONMENT` に、テストの python を
-    起動する `bin/python` を置く。`FAKE_UV_LOG` があれば引数を 1 行ずつ残し、`FAKE_UV_EXIT` が 0 でなければ失敗する。"""
+    起動する `bin/python` を置く。`FAKE_UV_LOG` があれば引数を 1 行ずつ残し、`FAKE_UV_EXIT` が 0 でなければ失敗する。
+    置いた `bin/python` は、`FAKE_PY_LOG` があれば自分のパスを 1 行残す。"""
     uv = tmp_path / "fake-uv" / "uv"
     if not uv.exists():
         uv.parent.mkdir(parents=True, exist_ok=True)
@@ -52,7 +53,8 @@ def fake_uv(tmp_path):
             '[ -z "$FAKE_UV_LOG" ] || echo "$*" >> "$FAKE_UV_LOG"\n'
             '[ "${FAKE_UV_EXIT:-0}" = 0 ] || { echo "fake uv: no network" >&2; exit "$FAKE_UV_EXIT"; }\n'
             'mkdir -p "$UV_PROJECT_ENVIRONMENT/bin"\n'
-            f"printf '#!/bin/sh\\nexec %s \"$@\"\\n' '{sys.executable}' > \"$UV_PROJECT_ENVIRONMENT/bin/python\"\n"
+            "printf '#!/bin/sh\\n[ -z \"$FAKE_PY_LOG\" ] || echo \"$0\" >> \"$FAKE_PY_LOG\"\\nexec %s \"$@\"\\n' "
+            f"'{sys.executable}' > \"$UV_PROJECT_ENVIRONMENT/bin/python\"\n"
             'chmod 755 "$UV_PROJECT_ENVIRONMENT/bin/python"\n')
         uv.chmod(0o755)
     return uv
@@ -2554,3 +2556,122 @@ def test_version_dir_imports_only_stdlib_and_itself():
                 continue
             for n in names:
                 assert n.split(".")[0] in allowed, (f.name, n)
+
+
+# ---------------------------------------------------------------- 囲みの読み取り（lib/md.py。#1142 の D6）
+
+
+@pytest.mark.parametrize("text, expected", [
+    # 変わった入力: CommonMark の囲みとして読む（前は行頭の ``` だけを追い、~~~ を囲みと見なさなかった）
+    ("~~~\n" + fence("x") + "\n~~~", []),                                   # ~~~ の囲みの中は中身の文字列
+    ("```ndf-next\n/goal 続き", ["/goal 続き"]),                              # 閉じの無い囲みは文書の終わりまで
+    ("- " + fence("li").replace("\n", "\n  "), ["li"]),                       # 箇条書きの中の囲み
+    ("> " + fence("q").replace("\n", "\n> "), ["q"]),                         # 引用の中の囲み
+    ("  " + fence("ind"), ["ind"]),                                           # 3 つまでの空白で字下げした囲み
+    # 変わらない入力
+    (fence("a") + "\n\n" + fence("b"), ["a", "b"]),
+    ("````\n" + fence("x") + "\n````", []),
+    (fence("x", ticks=4), []),
+    (fence("x", info="ndf-next extra"), []),
+])
+def test_next_blocks_reads_commonmark_fences(text, expected):
+    assert relay_mark.next_blocks(text) == expected
+
+
+# ---------------------------------------------------------------- ラッパーの環境（relay_lib/runtime.py。決定 20）
+
+
+def bare(tmp_path, sub, relay=RELAY, **env):
+    """外部パッケージを import できない python（-S でサイトのパッケージを読まない）でランチャーを起動する。"""
+    e = isolated_env(tmp_path, SHELL="/bin/bash", **env)
+    return subprocess.run([sys.executable, "-S", str(relay), *sub.split()], capture_output=True, text=True,
+                          env=e, timeout=30)
+
+
+@pytest.mark.parametrize("sub, code", [("mark", 0), ("question open", 0), ("question close", 0),
+                                       ("is-child", 1), ("notice", 0)])
+def test_hook_without_env_passes_through(tmp_path, home, sub, code):
+    """環境がまだ無いとき、hook の副命令は判定をせずに決まった終了コードで終わる（環境も作らない）。"""
+    log = tmp_path / "uv.log"
+    p = bare(tmp_path, sub, FAKE_UV_LOG=log, NDF_RELAY_DIR=tmp_path)
+    assert (p.returncode, p.stdout) == (code, ""), p.stderr
+    assert not log.exists()
+
+
+def test_run_without_env_says_then_passthrough(tmp_path, home):
+    claude = tmp_path / "bin" / "claude"
+    claude.parent.mkdir()
+    claude.write_text('#!/bin/sh\necho "args:$*"\nexit 7\n')
+    claude.chmod(0o755)
+    p = bare(tmp_path, "run -c", NDF_RELAY_CLAUDE=claude)
+    assert (p.returncode, p.stdout) == (7, "args:-c\n")
+    assert p.stderr.startswith("ndf-relay: ラッパーを始めない（ラッパーの環境（"), p.stderr
+
+
+def test_install_prepares_env_then_copy_runs_in_it(tmp_path, home):
+    """導入は、プラグインの環境を同じ lock から用意して起動し直し、複製のバージョンディレクトリにも環境を作る。
+    複製のランチャーは、素の python から起動されてもバージョンディレクトリの環境の python で動く。"""
+    (home / ".bashrc").write_text("")
+    log, pylog = tmp_path / "uv.log", tmp_path / "py.log"
+    p = bare(tmp_path, "install", FAKE_UV_LOG=log, FAKE_PY_LOG=pylog)
+    assert p.returncode == 0, p.stdout + p.stderr
+    syncs = log.read_text().splitlines()
+    assert len(syncs) == 2 and all(s.startswith("sync --frozen") for s in syncs)
+    groups = " ".join(f"--extra {g}" for g in ("procs", "locks", "md", "versions", "terminal"))
+    assert groups in syncs[0] and syncs[0].endswith("--inexact")      # 共有のプラグインの環境は消さずに足す
+    assert f"--project {ROOT}" in syncs[0]
+    assert groups in syncs[1] and "--inexact" not in syncs[1]
+    name = current_of(cfg(tmp_path))
+    vdir = cfg(tmp_path) / name
+    assert (vdir / ".venv" / "bin" / "python").is_file()
+    assert (vdir / "uv.lock").read_bytes() == (ROOT / "uv.lock").read_bytes()
+    assert (vdir / "pyproject.toml").read_bytes() == (ROOT / "pyproject.toml").read_bytes()
+    assert "uv.lock" in (vdir / "MANIFEST").read_text()
+    pylog.unlink()
+    p = bare(tmp_path, "is-child", relay=cfg(tmp_path) / "relay.py", FAKE_PY_LOG=pylog)
+    assert p.returncode == 1, p.stderr
+    assert pylog.read_text().splitlines() == [str(vdir / ".venv" / "bin" / "python")]
+
+
+def test_install_stops_when_env_cannot_be_made(tmp_path, home):
+    """環境を作れない（ネットワークが無いなど）ときは、理由を出して終了コード 3 で止まり、複製を置かない。"""
+    (home / ".bashrc").write_text("")
+    p = bare(tmp_path, "install", FAKE_UV_EXIT=2)
+    assert p.returncode == 3
+    assert "ラッパーの環境を" in p.stderr and "fake uv: no network" in p.stderr, p.stderr
+    assert not (cfg(tmp_path) / "relay.py").exists()
+
+
+def test_version_dir_not_placed_when_sync_fails(tmp_path, monkeypatch):
+    """バージョンディレクトリは環境を作れたときだけ置く（書きかけも残さない）。"""
+    base = tmp_path / "cfg"
+    monkeypatch.setenv("FAKE_UV_EXIT", "1")
+    with pytest.raises(OSError):
+        relay_version_dir.VersionDir(str(base)).ensure("10.18.0")
+    assert list(base.iterdir()) == []
+
+
+def test_version_dir_without_env_is_rewritten(tmp_path):
+    """中身が同じでも環境の無いバージョンディレクトリ（途中で消えたなど）は、置き直して環境を作る。"""
+    base = tmp_path / "cfg"
+    vd = relay_version_dir.VersionDir(str(base))
+    name = vd.ensure("10.18.0")
+    shutil.rmtree(base / name / ".venv")
+    assert vd.ensure("10.18.0") == name
+    assert (base / name / ".venv" / "bin" / "python").is_file()
+
+
+def test_prune_treats_zombie_as_dead(tmp_path):
+    """`inuse-<pid>` の pid がゾンビなら、使っていないものとして片づける（lib/procs.py の生死）。"""
+    base = tmp_path / "cfg"
+    old = base / "relay-10.17.1-00000001"
+    old.mkdir(parents=True)
+    child = subprocess.Popen([sys.executable, "-c", "pass"])
+    try:
+        deadline = time.time() + 10
+        while relay_version_dir._alive(child.pid) and time.time() < deadline:
+            time.sleep(0.05)
+        (old / f"inuse-{child.pid}").touch()
+        assert not relay_version_dir.VersionDir._in_use(str(old))
+    finally:
+        child.wait()

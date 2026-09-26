@@ -71,7 +71,7 @@ def env_dir(root: str = PKG_ROOT) -> str:
     return version_env(root) if is_version_dir(root) else deps.venv_dir(deps.PLUGIN_ROOT)
 
 
-def find_uv() -> str:
+def uv_path() -> str:
     """`NDF_RELAY_UV`・PATH と既定の置き場の uv。無ければ版を固定して入れる。入れられなければ EnvUnavailable。"""
     forced = os.environ.get(UV_ENV)
     if forced:
@@ -90,7 +90,7 @@ def sync(project: str, venv: str, inexact: bool = False) -> str:
 
     `inexact` は、ほかのグループも入る共有の環境（プラグインのキャッシュの環境）で、入っているものを消さない。"""
     extras = [x for g in GROUPS for x in ("--extra", g)]
-    cmd = [find_uv(), "sync", "--frozen", "--quiet", "--project", project, *extras, *(["--inexact"] if inexact else [])]
+    cmd = [uv_path(), "sync", "--frozen", "--quiet", "--project", project, *extras, *(["--inexact"] if inexact else [])]
     env = dict(os.environ, UV_PROJECT_ENVIRONMENT=venv)
     env.pop("VIRTUAL_ENV", None)
     try:
