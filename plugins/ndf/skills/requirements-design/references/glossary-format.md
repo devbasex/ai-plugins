@@ -91,7 +91,7 @@ NDF の `scripts/glossary.py` はこの形でだけ読み、語はすべて用�
 
 ### 識別子の書き方
 
-**識別子は基本形（snake_case）を 1 つだけ持ち、ほかの書き方は `glossary.py` の `code_forms` が導く。**
+**識別子は基本形（snake_case）を 1 つだけ持ち、ほかの書き方は `glossary.py` の `spellings` が導く。**
 
 | 使う場所 | 書き方 | `approval_gate` の例 |
 | --- | --- | --- |

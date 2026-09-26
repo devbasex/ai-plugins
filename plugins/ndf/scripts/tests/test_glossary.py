@@ -565,7 +565,7 @@ def test_diff_finds_deprecated_code_in_every_spelling_on_added_code_lines(repo):
         ("deprecated_code", "src/c.js", 1, "cart"),
         ("deprecated_code", "src/d.ts", 1, "Cart"),
     ]
-    assert "order" in out["items"][0]["detail"]
+    assert "PurchaseOrder" not in out["items"][0]["detail"] and "Order（注文）" in out["items"][0]["detail"]
     assert "ERROR: src/a.py:2: deprecated_code: PurchaseOrder" in err
 
 

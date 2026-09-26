@@ -199,9 +199,10 @@ stateDiagram-v2
   足した行は当たらない。追跡していないファイルは全行を見る。見るのは `check.paths` に当たるファイルだけで、
   用語集の設定の `document` は見ない。コード（`.py` / `.sh` / `.js` / `.ts`）は `check.paths` に関わらず見て、
   `deprecated_code` だけを当てる
-- 識別子は `code_forms` が導く書き方（基本形・PascalCase・大文字・kebab-case）で、英数字と `_` の境界で照合する。
+- 識別子は `spellings` が導く書き方（基本形・PascalCase・大文字・kebab-case）で、英数字と `_` の境界で照合する。
   廃止した `gate` は `approval_gate` にも `ApprovalGate` にも当たらない。生きた識別子の書き方の出現の内側
-  （`approval-gate` の `gate`）は当てない
+  （`approval-gate` の `gate`）は当てない。`deprecated_code` の `detail` は、出た書き方と同じ書き方の生きた識別子を
+  示す（`Gate` なら `ApprovalGate`）
 - 当たりは標準エラーへも `ERROR: <path>:<line>: <rule>: <term>` の 1 行ずつで出す。用語集の規則の `line` は 0
 
 ### 人が読む文書
@@ -306,7 +307,7 @@ stateDiagram-v2
 | `terms[].code` | 文字列 | 許す | コードで使う識別子の基本形。英小文字の snake_case（例: `approval_gate`）。コードに現れない語は項目を書かない |
 | `terms[].deprecated_code` | 文字列の配列 | 許す | 廃止した識別子の基本形（例: `gate`）。形は `code` と同じ |
 
-**識別子の書き方は基本形から導く。** 導くのは `glossary.py` の `code_forms` だけで、ほかの場所で同じ変換を書かない。
+**識別子の書き方は基本形から導く。** 導くのは `glossary.py` の `spellings` だけで、ほかの場所で同じ変換を書かない。
 
 | 使う場所 | 書き方 | `approval_gate` の例 |
 | --- | --- | --- |

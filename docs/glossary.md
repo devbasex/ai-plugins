@@ -9,12 +9,12 @@
 | 語 | 識別子 | 意味 | 廃止した語 | 廃止した識別子 | 正本 |
 | --- | --- | --- | --- | --- | --- |
 | ユビキタス言語 | — | プロジェクトの関係者とエージェントが、要求・設計・コードで同じ意味に使う語の集まり | — | — | `docs/specifications/ndf-ubiquitous-language.md` |
-| 用語集 | — | ユビキタス言語を持つ構造化ファイル（正）と、そこから作る人が読む Markdown の文書。どちらもプロジェクトのリポジトリに置く | — | — | `docs/specifications/ndf-ubiquitous-language.md` |
-| コンテキスト | — | 語の意味が 1 つに決まる範囲（境界づけられたコンテキスト） | — | — | `docs/specifications/ndf-ubiquitous-language.md` |
+| 用語集 | `glossary` | ユビキタス言語を持つ構造化ファイル（正）と、そこから作る人が読む Markdown の文書。どちらもプロジェクトのリポジトリに置く | — | — | `docs/specifications/ndf-ubiquitous-language.md` |
+| コンテキスト | `context` | 語の意味が 1 つに決まる範囲（境界づけられたコンテキスト） | — | — | `docs/specifications/ndf-ubiquitous-language.md` |
 | ドメインモデルの節 | — | 設計文書の先頭に置く節。変更が属するコンテキスト・変える集約とその持ち主・不変条件・ドメインイベントを書く | — | — | `docs/specifications/ndf-ubiquitous-language.md` |
-| 廃止した語 | — | 用語集で別の語へ置き換えた語。文書に出たら落とす | — | — | `docs/specifications/ndf-ubiquitous-language.md` |
+| 廃止した語 | `deprecated` | 用語集で別の語へ置き換えた語。文書に出たら落とす | — | — | `docs/specifications/ndf-ubiquitous-language.md` |
 | 不変条件 | — | 集約がいつも満たす条件。設計のドメインモデルの節に書き、実装の前にテストにする | — | — | `docs/specifications/ndf-ubiquitous-language.md` |
-| 未登録の語 | — | 用語として書かれているのに用語集に無い語。見出しが「用語」の節の表の 1 列目に書いた語を指す | — | — | `docs/specifications/ndf-ubiquitous-language.md` |
+| 未登録の語 | `unregistered` | 用語として書かれているのに用語集に無い語。見出しが「用語」の節の表の 1 列目に書いた語を指す | — | — | `docs/specifications/ndf-ubiquitous-language.md` |
 
 ## NDF の開発ワークフロー（`ndf-workflow`）
 
@@ -22,15 +22,15 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 
 | 語 | 識別子 | 意味 | 廃止した語 | 廃止した識別子 | 正本 |
 | --- | --- | --- | --- | --- | --- |
-| 用語集の設定 | — | `.ndf/glossary.json`。用語集の置き場・形式・チェックの対象を持つ | 用語集の宣言 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| 用語集の設定 | `glossary_config` | `.ndf/glossary.json`。用語集の置き場・形式・チェックの対象を持つ | 用語集の宣言 | `declaration` | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 用語チェック | — | `glossary.py check`。用語集の形と、文書の追加した行の語を見る | 語のチェック | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | モデルレビュー | — | 設計 PR のレビューの 1 ラウンド目。ドメインモデルの節だけを見る | モデルの段 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 詳細レビュー | — | 設計 PR のレビューの 2 ラウンド目以降。確定したモデルを前提に残りを見る | 詳細の段 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 仕様のコピー | — | 課題の本文にある要求を、設計 PR と一緒にコミットする `issues/` のファイル | 仕様の写し | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| パイプライン | — | キューが `--then` でつないだプランの列（実装 → 検査 → コードレビュー → 開発版 → 本番）。列の 1 つ分がステージ | チェイン | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| セッション | — | ラッパーが起動する claude の 1 回の起動（1 つの会話）。番号を付けて「セッション 4」と呼ぶ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| プラン | — | `supervise.py` が流す 1 本の JSON（`plan.json`）。フェーズの手順をステップの列として持つ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| キュー | — | プランを空いた枠へ順に流す `supervise.py queue`。終わると結果を done へ書く | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| パイプライン | `pipeline` | キューが `--then` でつないだプランの列（実装 → 検査 → コードレビュー → 開発版 → 本番）。列の 1 つ分がステージ | チェイン | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| セッション | `session` | ラッパーが起動する claude の 1 回の起動（1 つの会話）。番号を付けて「セッション 4」と呼ぶ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| プラン | `plan` | `supervise.py` が流す 1 本の JSON（`plan.json`）。フェーズの手順をステップの列として持つ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| キュー | `queue` | プランを空いた枠へ順に流す `supervise.py queue`。終わると結果を done へ書く | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | リリース差分 | — | 版と版の間（タグからタグまで）の変更 | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | インライン実行 | — | 仕事を渡す実行方式の 1 つ。いまの会話の文脈で行う | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | オーケストレーター | — | `cross-refactoring` と `cross-review` で、公開・生成物の同期を持ち、担当を回す側。3 層では conductor に当たる | 進行側、レビューを回す側 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
@@ -38,10 +38,10 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 実行条件 | — | プランを流す前に打つコマンド。`skip_code` を返せば worktree を作らずに完了とする | 実行の条件 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 流出不具合 | — | マージ済みの変更に見つかった不具合。直した Pull Request が触った領域を記録し、トリガーに数える | 逃げた不具合 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 重点領域 | — | `pace: fast` の領域のうち、触った Pull Request の点数を重くするもの | 共通層 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| 承認ゲート | — | 人手の承認を求める点。設計 Pull Request のマージ（ゲート 1）と本番の系へ届く操作（ゲート 2）の 2 つだけ | 関門 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| 承認ゲート | `approval_gate` | 人手の承認を求める点。設計 Pull Request のマージ（ゲート 1）と本番の系へ届く操作（ゲート 2）の 2 つだけ | 関門 | `gate` | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 承認資料 | — | 承認を求めるときに示すもの。対象を開くためのものと、承認の判断に使うものの 2 層を持つ | 提示物 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | エビデンス | — | 承認資料のうち機械で作れる部分と、conductor が確かめて足した事実。MVV 判定へ渡す | 事実の材料 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| リリース | — | 変更を利用者へ届く形で公開すること。その工程とフェーズの名前でもある | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| リリース | `release` | 変更を利用者へ届く形で公開すること。その工程とフェーズの名前でもある | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | リリースプラン | — | リリースの手順をステップの列として持つプラン | 配布の計画 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | リリースコマンド | — | リポジトリが `.ndf/release.json` に宣言し、`release` がリリースの段階に合わせて走らせる 1 つのコマンド | 配布のコマンド | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 検証リリース | — | 開発版と分かる版数での公開か、検証環境への反映 | 検証への配布 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
@@ -52,18 +52,18 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | コードレビュー | — | 実装の差分をレビューし、新しい指摘が出なくなるまで直す工程 | 実装レビュー | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | リファクタリング計画 | — | `cross-refactoring` が採る改善項目を決め、見送った提案と理由を残す出力 | 改修計画 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | バッファ | — | `cross-refactoring` の見積りで、想定最大時間から経過を引いた後に残しておく時間 | 予備時間 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| ラウンドテスト | — | `cross-refactoring` で、`--scope` のテストの置き場所を走らせるコマンド | ラウンドのテスト | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| ラウンドテスト | `round_test` | `cross-refactoring` で、`--scope` のテストの置き場所を走らせるコマンド | ラウンドのテスト | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | グレード | — | `cross-refactoring` が候補ごとに付ける適用の価値（high / medium / low） | 等級 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 指摘ファイル | — | `cross-review` の担当が書く、指摘の全件と総評のファイル | 指摘のファイル | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 進捗記録 | — | 工程に入った時点で 1 回打つ記録。課題の本文の「進行」も同じ 1 回で更新される | 進行の記録、記録のコマンド | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| ミッション状態ファイル | — | ミッションのプラン・done・承認ゲートの記録・MVV・版を持つファイル（`mission.json`） | ミッションの状態 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| ミッション状態ファイル | `mission_state` | ミッションのプラン・done・承認ゲートの記録・MVV・版を持つファイル（`mission.json`） | ミッションの状態 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | シグナルファイル | — | ラッパーへ知らせるファイル（`next.json` と `stop`） | 合図 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | アナウンス | — | ndf-next のブロックの直前にそのまま置く 1 文 | 告知 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | アイドル | — | シグナルファイル・会話の記録・利用者の入力が動かない秒数。この秒数がたつまでラッパーは `/exit` を入力しない | 静止 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | パススルー | — | ラッパーを挟まず、本物の claude をそのまま起動すること | 素通し | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| 進捗ログ | — | プランの実行中に 1 行 1 つの JSON で追記する記録（`progress.jsonl`） | 途中の報告 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| 進捗ログ | `progress` | プランの実行中に 1 行 1 つの JSON で追記する記録（`progress.jsonl`） | 途中の報告 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | フェーズレポート | — | supervisor（またはプラン）が最後に返す報告 | フェーズの報告 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| worktree | — | 開発の変更を行う git worktree。課題ごとに 1 つ切る | 作業ツリー | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| worktree | `worktree` | 開発の変更を行う git worktree。課題ごとに 1 つ切る | 作業ツリー | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | メインディレクトリ | — | リポジトリを clone したディレクトリ | 主ディレクトリ | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | ベースブランチ | — | worktree の分岐元と Pull Request の宛先 | 起点のブランチ | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | ミッションブランチ | — | 課題の Pull Request を集め、ベースブランチへの Pull Request をミッションで 1 本にするブランチ | ミッションのブランチ | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
@@ -73,13 +73,13 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 文言固定テスト | — | リポジトリで追跡している .md を読み、その文字列・見出し・表の並びを照合するテスト。書かない | — | — | `docs/specifications/cross-refactoring-round-tests-and-assess.md` |
 | 手順 | — | 1 つの Skill の中で順に通す作業の単位。cross-refactoring の提案・リファクタリング計画・テスト追加・実装・検証/修正の 5 つ、document-restructuring の測る・並べ替える・整える・測り直すの 4 つ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 範囲テスト | — | 変更が触った範囲に限って走らせるテスト | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| 危険フラグ | — | cross-refactoring で、範囲テストでは覆えない変更（D1〜D5）。立てば全体テストを 1 度走らせる | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| 危険フラグ | `danger` | cross-refactoring で、範囲テストでは覆えない変更（D1〜D5）。立てば全体テストを 1 度走らせる | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 設計 Pull Request | — | 要求仕様と設計文書だけを載せ、実装を含まない Pull Request。変更ファイルに issues/ の要求・設計・決定の記録を含む | — | — | `docs/specifications/ndf-design-phase.md` |
-| 正本 | — | その事柄の定義を持つ唯一の文書。食い違ったときはこれを正とする | — | — | `docs/specifications/doc-consistency-checks.md` |
-| conductor | — | 人間と対話しているセッション。ミッションを持ち、承認ゲートで人間へ問えるのはこの層だけ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| supervisor | — | 1 つのフェーズを通すサブエージェント。人間へ問わない | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| worker | — | 1 つの作業（調査・修正・検証・集計）を行うサブエージェント。別のサブエージェントを起動しない | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| フェーズ | — | supervisor 1 つ（またはプラン 1 本）が通す、連続する工程のグループ。設計・実装・検査・取り込み・仕上げ・リリースの 6 つ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| 正本 | `source` | その事柄の定義を持つ唯一の文書。食い違ったときはこれを正とする | — | — | `docs/specifications/doc-consistency-checks.md` |
+| conductor | `conductor` | 人間と対話しているセッション。ミッションを持ち、承認ゲートで人間へ問えるのはこの層だけ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| supervisor | `supervisor` | 1 つのフェーズを通すサブエージェント。人間へ問わない | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| worker | `worker` | 1 つの作業（調査・修正・検証・集計）を行うサブエージェント。別のサブエージェントを起動しない | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| フェーズ | `phase` | supervisor 1 つ（またはプラン 1 本）が通す、連続する工程のグループ。設計・実装・検査・取り込み・仕上げ・リリースの 6 つ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 作業種別 | — | worker 1 つが行う作業の分類。調査 / 修正 / 検証 / 集計、どれにも当たらなければその他 | 作業の種類 | — | `docs/specifications/ndf-agent-layers-unattended-run.md` |
 | context window | — | 1 回の会話が保持する文脈の全体と、その量 | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | レートリミット中断 | — | 利用上限（429）で層が途中で終わること。記録の ending が rate_limit | 上限の中断 | — | `docs/specifications/ndf-context-window-metrics.md` |
@@ -88,7 +88,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 親エージェント | — | その記録を起動したエージェント。.meta.json の toolUseId でたどる（parent_agent_id） | 起動元 | — | `docs/specifications/ndf-context-window-metrics.md` |
 | 実行前確認 | — | Skill の手順の途中で、操作の対象を示して利用者の同意を得ること。承認ゲートとは別 | — | — | `docs/specifications/ndf-cleanup-and-bundle-closing.md` |
 | 取り消せる操作 | — | 失う状態を git 自身が拒むか、事後の手段（ハッシュからの復元・Restore branch・reopen）で元へ戻せる操作。実行前確認なしで進める | — | — | `docs/specifications/ndf-cleanup-and-bundle-closing.md` |
-| ミッション | — | 1 つの版として出す課題と Pull Request のセット。工程はミッション単位で 1 回ずつ通し、モードもミッションで 1 つにする | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| ミッション | `mission` | 1 つの版として出す課題と Pull Request のセット。工程はミッション単位で 1 回ずつ通し、モードもミッションで 1 つにする | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | ミッション課題 | — | ミッションに含まれる Pull Request の本文が、閉じる語で指す課題 | ミッションの課題 | — | `docs/specifications/ndf-cleanup-and-bundle-closing.md` |
 | 最終工程 | — | その実行で最後に通る工程。振り返りを通るなら retrospective、通らずリリース後テストを通るなら release-verification | 終わりの工程 | — | `docs/specifications/ndf-cleanup-and-bundle-closing.md` |
 | ピーク使用量 | — | 応答ごとの入力トークンの合計の最大 | 最大充填 | — | `docs/specifications/ndf-context-window-metrics.md` |
@@ -98,7 +98,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 制作物承認 | — | documentation モードのゲート 2。production が真の提出先への操作 | — | — | `docs/specifications/ndf-documentation-mode.md` |
 | 下書き先 | — | production が偽の提出先。承認の前に書き込んでよい唯一の場所 | — | — | `docs/specifications/ndf-documentation-mode.md` |
 | 実行計画 | — | ミッションの課題を、バンドル・工程ごとの依存・触る箇所・着手できる時点で並べた表。オーケストレーターが持つ | — | — | `docs/specifications/ndf-execution-plan-and-parallel-capacity.md` |
-| バンドル | — | 1 本の設計 Pull Request で決める課題の集合 | — | — | `docs/specifications/ndf-execution-plan-and-parallel-capacity.md` |
+| バンドル | `bundle` | 1 本の設計 Pull Request で決める課題の集合 | — | — | `docs/specifications/ndf-execution-plan-and-parallel-capacity.md` |
 | 課題グループ | — | マイルストーンの説明に書く、触る場所の見込みと依存で分けた課題の集合。実行計画のバンドルの初期値 | — | — | `docs/specifications/ndf-execution-plan-and-parallel-capacity.md` |
 | 変更重複 | — | 2 つの Pull Request が同じファイルを触ること。節（見出し）・関数の単位で程度を分ける | — | — | `docs/specifications/ndf-execution-plan-and-parallel-capacity.md` |
 | 並行度 | — | 対象の Pull Request のうち、2 本以上が同時に開いていた時間の割合 | — | — | `docs/specifications/ndf-execution-plan-and-parallel-capacity.md` |
@@ -106,7 +106,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 設定 | — | リポジトリ側に置く .ndf/<名前>.json。無ければその機能は既定の動きだけになるか、何も動かない。「<対象>の設定」の形で呼ぶ（指示書チェックの設定・リリースの設定・ボードの設定・worktree の設定・用語集の設定）。git で追跡するものを共有設定、追跡しないものを個人設定と呼ぶ | — | — | `docs/specifications/ndf-instruction-files-check.md` |
 | コピー | — | 元のファイルをそのまま別の場所へ置いたもの。ラッパーの relay.py（版は横の relay.version。新しい版を古い版で置き直さない）・マイルストーンの説明から作る mvv.md・承認資料の issues/approval-*.md | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | カットポイント | — | context window を切ってよい 4 点。3 層ではフェーズの境になる | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| ラッパー | — | 利用者の claude を包んで常駐し、ndf-next のブロックを拾って /exit・プラグインの更新・次のセッションの起動を行う（Claude Code だけ） | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| ラッパー | `relay` | 利用者の claude を包んで常駐し、ndf-next のブロックを拾って /exit・プラグインの更新・次のセッションの起動を行う（Claude Code だけ） | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | ポーリング | — | 待つ間に、状態を確かめる呼び出しを繰り返すこと | — | — | `docs/specifications/ndf-token-waits-and-context-cut.md` |
 | フォアグラウンド Bash | — | run_in_background を付けずに実行する Bash。終わるまで呼び出しが返らない | 前景の Bash | — | `docs/specifications/ndf-token-waits-and-context-cut.md` |
 | コンテキスト量 | — | 1 回の API 呼び出しで読んだトークン数（input_tokens + cache_read_input_tokens + cache_creation_input_tokens） | 文脈量 | — | `docs/specifications/ndf-token-waits-and-context-cut.md` |
@@ -130,21 +130,21 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | ボード | — | 進行を記録する GitHub Projects のプロジェクト 1 つ。設定が無ければ何も動かない | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 通過工程 | — | ある課題について、進捗記録が実際に書かれた工程の集合 | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 承認ラベル | — | 人間が設計を承認したことを表す Pull Request のラベル。無ければ hook が設計 Pull Request のマージを拒む | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| マイルストーン | — | 着手の順序を表す単位。ミッションはこの中から切り出す | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| マイルストーン | `milestone` | 着手の順序を表す単位。ミッションはこの中から切り出す | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 範囲外の課題 | — | この変更の受け入れ条件にも直す対象にも入らない課題。見つけたその場で issue にする | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 再開コマンド | — | 新しい会話の最初に入力すれば、その工程から再開できるコマンド。ndf-next のブロックの中身 | 再開用のコマンド、引継ぎの 1 行 | — | `docs/specifications/ndf-token-waits-and-context-cut.md` |
-| 工程 | — | 工程表（モードごとに起動する Skill の表）の 1 行。要求と受け入れ条件・設計・実装・リリースなど | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| ステップ | — | プランの steps の 1 要素。型は run / work / drive / judge / pr の 5 つ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| ステージ | — | パイプラインの中のプランのグループ 1 つ。中はキューで並列に流し、前のステージがすべて完了したときだけ次のステージが流れる。new mission はステージごとにプランを書き出す（設計・ゲート 1・実装・検査・開発版・本番） | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| 工程 | `stage` | 工程表（モードごとに起動する Skill の表）の 1 行。要求と受け入れ条件・設計・実装・リリースなど | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| ステップ | `step` | プランの steps の 1 要素。型は run / work / drive / judge / pr の 5 つ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| ステージ | `pipeline_stage` | パイプラインの中のプランのグループ 1 つ。中はキューで並列に流し、前のステージがすべて完了したときだけ次のステージが流れる。new mission はステージごとにプランを書き出す（設計・ゲート 1・実装・検査・開発版・本番） | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | スイッチポイント | — | フェーズの中で supervisor を替える点。収束ループの前で hook が決める | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 3 層 | — | 工程を conductor → supervisor → worker の順に起動して通す形 | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 最小構成の `claude -p` | — | Tool と指示を絞った 1 回の判断。judge のステップと MVV 判定が使う | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 実行レベル | — | 仕事を渡す実行方式の LLM の使い方の水準。レベル 1 = スクリプト、レベル 2 = 分類の判断、レベル 3 = インライン実行の LLM | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| モード | — | 変更の目的物で決める工程の振り分け。上から operation / documentation / standard / legacy-refactor / light | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| pace | — | モードとは別の軸で、工程をどう通すかを決める。既定の normal と、承認ゲートと検査の時機を変える fast | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| モード | `mode` | 変更の目的物で決める工程の振り分け。上から operation / documentation / standard / legacy-refactor / light | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| pace | `pace` | モードとは別の軸で、工程をどう通すかを決める。既定の normal と、承認ゲートと検査の時機を変える fast | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | MVV | — | ミッションの Mission / Vision / Value。マイルストーンの説明からコピーし、利用者が 1 回承認する。fast でゲート 1・2 の事前の許可になる | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | MVV 判定 | — | 承認ゲートのエビデンスが MVV に従うかの判定。「従う」でレッドラインが無いときだけ承認ゲートを省き、記録を残す | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| トリガー | — | fast でリファクタリングとコードレビューを流す条件。点数・行数・流出不具合・経過時間・最終の 5 つ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| トリガー | `trigger` | fast でリファクタリングとコードレビューを流す条件。点数・行数・流出不具合・経過時間・最終の 5 つ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | judge のステップ | — | 結果ファイルと規則の抜粋だけを渡し、次のステップを LLM に決めさせるステップ。Tool を持たない | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 決定 | — | judge のステップが返す、次に取る手 | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | ゲート 1 | — | 設計 Pull Request のマージ。文書では企画承認に当たる | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
@@ -158,11 +158,11 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 全体テスト | — | リポジトリ全体を範囲にするテスト | 全体のテスト | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | コメントのスナップショット | — | cross-review が取る既存コメントの一覧。2 ラウンド目以降は取り直す | 既存コメントのスナップショット | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | doc-lint | — | 追加した Markdown の行に、検討の痕跡・課題番号の由来・比較の語が無いかを見るチェック | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| 引継ぎ文書 | — | 会話を切って再開するための文書。「今の会話の進み」（プランごとの行の表）と「次に実行するコマンド」の節をスクリプトが書く | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| 引継ぎ文書 | `handoff` | 会話を切って再開するための文書。「今の会話の進み」（プランごとの行の表）と「次に実行するコマンド」の節をスクリプトが書く | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | ndf-next | — | 次のセッションの最初の入力を置く、情報文字列 ndf-next の囲みのコードブロック。最後の応答に 1 つだけ置く | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | step / alive / worker / attention | — | 進捗ログの行の種類。ステップの切り替わり・動きの無い間の生存・worker の進み・conductor の判断が要る出来事（止まった・承認ゲート・同じ失敗の繰り返し・judge のステップで stop が出そう） | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | done | — | キューが終わったときに書く結果の JSON。wait は done か attention の行まで待つ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| 結果 JSON | — | 手順のスクリプトが返す 1 行の JSON。status で読む | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| 結果 JSON | `step_result` | 手順のスクリプトが返す 1 行の JSON。status で読む | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 実装計画 | — | implementation-plan が issues/ に書く、実装の前の計画 | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 確定仕様化 | — | 完了した実装計画を docs/ の確定仕様へ書き直す工程 | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 振り返り | — | 進め方で変えることを記録し、起票の取りこぼしを拾う工程 | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
@@ -185,19 +185,19 @@ cross-review / cross-refactoring が参加者の CLI を選び、起動し、監
 
 | 語 | 識別子 | 意味 | 廃止した語 | 廃止した識別子 | 正本 |
 | --- | --- | --- | --- | --- | --- |
-| 起動結果 | — | 担当 CLI の起動 1 回の終わり方。監視の状態と理由、結果ファイルの有無と読めるかを合わせて持つ（LaunchOutcome） | 結末 | — | `docs/specifications/cross-review-launch-outcome.md` |
+| 起動結果 | `launch_outcome` | 担当 CLI の起動 1 回の終わり方。監視の状態と理由、結果ファイルの有無と読めるかを合わせて持つ（LaunchOutcome） | 結末 | — | `docs/specifications/cross-review-launch-outcome.md` |
 | リトライ可否 | — | 同じ担当を同じ条件で起動し直せば解ける起動結果か（relaunch_same_agent） | 起動し直しの可否 | — | `docs/specifications/cross-review-launch-outcome.md` |
-| 結果ファイル | — | 担当 CLI が書く判定の要約の JSON（<stem>-result.json） | — | — | `docs/specifications/cross-review-launch-outcome.md` |
-| 監視結果ファイル | — | 監視が起動 1 回ごとに状態と理由を書く JSON（<stem>-monitor.json） | 監視の結果ファイル | — | `docs/specifications/cross-review-launch-outcome.md` |
+| 結果ファイル | `result_file` | 担当 CLI が書く判定の要約の JSON（<stem>-result.json） | — | — | `docs/specifications/cross-review-launch-outcome.md` |
+| 監視結果ファイル | `monitor_outcome` | 監視が起動 1 回ごとに状態と理由を書く JSON（<stem>-monitor.json） | 監視の結果ファイル | — | `docs/specifications/cross-review-launch-outcome.md` |
 | 監視ログ | — | 起動結果を追記だけで積む記録（monitor-outcomes.jsonl） | 監視の記録 | — | `docs/specifications/cross-review-launch-outcome.md` |
-| ランタイム | — | エージェントの CLI の種類。claude / codex / agy / kiro の 4 つで、並びは固定（ALL_RUNTIMES） | — | — | `docs/specifications/cross-review-participants-and-seats.md` |
-| ホスト | — | 収束ループを起動している CLI のランタイム（host） | — | — | `docs/specifications/cross-review-participants-and-seats.md` |
+| ランタイム | `runtime` | エージェントの CLI の種類。claude / codex / agy / kiro の 4 つで、並びは固定（ALL_RUNTIMES） | — | — | `docs/specifications/cross-review-participants-and-seats.md` |
+| ホスト | `host` | 収束ループを起動している CLI のランタイム（host） | — | — | `docs/specifications/cross-review-participants-and-seats.md` |
 | 参加者プール | — | Skill ごとに決まる参加者の出発点。cross-review は claude / codex / kiro とホスト、cross-refactoring は codex / kiro とホスト（review_pool / refactor_pool） | 参加の母集合 | — | `docs/specifications/cross-review-participants-and-seats.md` |
-| 参加者 | — | 参加者プールに --include の者を加え、--exclude の者を除いた一覧。認証確認の対象 | — | — | `docs/specifications/cross-review-participants-and-seats.md` |
+| 参加者 | `participant` | 参加者プールに --include の者を加え、--exclude の者を除いた一覧。認証確認の対象 | — | — | `docs/specifications/cross-review-participants-and-seats.md` |
 | 利用可能な参加者 | — | 参加者のうち認証確認を通った者（participants.available） | 使える者 | — | `docs/specifications/cross-review-participants-and-seats.md` |
 | 認証確認 | — | 確認コマンドを走らせ、止めずに結果だけを返す参加者ごとの確認（probe_auth） | 認証の確認 | — | `docs/specifications/cross-review-participants-and-seats.md` |
-| スロット | — | 1 ラウンドで 1 つの CLI プロセスが占める枠 | — | — | `docs/specifications/cross-review-participants-and-seats.md` |
-| フォールバック | — | 利用可能な参加者が 2 者に満たないとき、足りない分を埋める参加者（participants.fallback） | 埋め合わせ | — | `docs/specifications/cross-review-participants-and-seats.md` |
+| スロット | `slot` | 1 ラウンドで 1 つの CLI プロセスが占める枠 | — | — | `docs/specifications/cross-review-participants-and-seats.md` |
+| フォールバック | `fallback` | 利用可能な参加者が 2 者に満たないとき、足りない分を埋める参加者（participants.fallback） | 埋め合わせ | — | `docs/specifications/cross-review-participants-and-seats.md` |
 
 ## NDF の cross-review（`ndf-cross-review`）
 
@@ -205,7 +205,7 @@ Pull Request のレビューを CLI へ委譲し、新しい指摘が出なく�
 
 | 語 | 識別子 | 意味 | 廃止した語 | 廃止した識別子 | 正本 |
 | --- | --- | --- | --- | --- | --- |
-| 指摘 | — | 担当が出した 1 件の主張（review_findings[] の 1 要素） | — | — | `docs/specifications/cross-review-evidence-based.md` |
+| 指摘 | `finding` | 担当が出した 1 件の主張（review_findings[] の 1 要素） | — | — | `docs/specifications/cross-review-evidence-based.md` |
 | 反証条件 | — | 何が成り立てばその指摘を棄却できるか（falsification） | — | — | `docs/specifications/cross-review-evidence-based.md` |
 | 検証手順 | — | 指摘を実行できる形で確かめる手順（suggested_check） | — | — | `docs/specifications/cross-review-evidence-based.md` |
 | 反証 | — | 提案者以外の担当が、各指摘へ返す 1 つの値 | — | — | `docs/specifications/cross-review-evidence-based.md` |
@@ -214,7 +214,7 @@ Pull Request のレビューを CLI へ委譲し、新しい指摘が出なく�
 | 代表指摘 | — | 統合した組で判定が読む 1 件。統合された側は merged_into を持つ | — | — | `docs/specifications/cross-review-evidence-based.md` |
 | 新しい指摘 | — | 直前のラウンドの指摘と一致しない、そのラウンドの指摘。収束ループはこれが 0 件になるまで回す | — | — | `docs/specifications/cross-review-round-inputs.md` |
 | 修正担当 | — | 指摘を直してコミットするサブエージェント（/ndf:fix を実行する） | 修正の担当 | — | `docs/specifications/cross-review-writes-to-conductor.md` |
-| 投稿キュー | — | 送る前に投稿を積み、上限で送れなければ残す仕組み（lib/post_queue.py） | 投稿の待ち行列 | — | `docs/specifications/cross-review-writes-to-conductor.md` |
+| 投稿キュー | `post_queue` | 送る前に投稿を積み、上限で送れなければ残す仕組み（lib/post_queue.py） | 投稿の待ち行列 | — | `docs/specifications/cross-review-writes-to-conductor.md` |
 | 重複投稿 | — | 送ろうとした投稿と同じものとして、すでに Pull Request にある投稿 | 先客 | — | `docs/specifications/cross-review-writes-to-conductor.md` |
 | 総評 | — | レビュー本体に書く文章（body）。インラインのコメントとは別に置く | — | — | `docs/specifications/cross-review-writes-to-conductor.md` |
 
@@ -225,7 +225,7 @@ Pull Request のレビューを CLI へ委譲し、新しい指摘が出なく�
 | 語 | 識別子 | 意味 | 廃止した語 | 廃止した識別子 | 正本 |
 | --- | --- | --- | --- | --- | --- |
 | マージ処理 | — | 担当の結果やコミットをオーケストレーターが受け入れるコマンド（merge-proposals / merge-plan / merge-tests / merge-implement / merge-fix / merge-final-fix）。フェーズの「取り込み」とは別 | — | — | `docs/specifications/cross-refactoring-apply-intake.md` |
-| 最終ゲート | — | 全体テストか CI で合否を判定する、cross-refactoring の最後の手順（final-gate）。承認ゲートとは別 | — | — | `docs/specifications/cross-refactoring-verify-and-final-gate.md` |
+| 最終ゲート | `final_gate` | 全体テストか CI で合否を判定する、cross-refactoring の最後の手順（final-gate）。承認ゲートとは別 | — | — | `docs/specifications/cross-refactoring-verify-and-final-gate.md` |
 | 最終ゲート修正 | — | 最終ゲートの失敗を直す起動と、そのマージ処理（final-fix / merge-final-fix）。改善項目に属さない | 最終ゲートの修正 | — | `docs/specifications/cross-refactoring-verify-and-final-gate.md` |
 | 必須トレーラー | — | 担当がコミットメッセージのトレーラーとして書く Item-Id / Impl-Runtime / Impl-Model。最終ゲート修正は Item-Id を除く 2 つ | 必須の記名 | — | `docs/specifications/cross-refactoring-apply-intake.md` |
 | 帰属トレーラー | — | 実行環境がコミットメッセージの末尾へ足すトレーラー（Co-Authored-By: / Claude-Session:） | 帰属の段落 | — | `docs/specifications/cross-refactoring-apply-intake.md` |
@@ -247,7 +247,7 @@ Pull Request のレビューを CLI へ委譲し、新しい指摘が出なく�
 | --- | --- | --- | --- | --- | --- |
 | 管理ブロック | — | シェルの設定の # >>> ndf relay >>> から # <<< ndf relay <<< までの行 | — | — | `docs/specifications/ndf-relay-install-and-restart.md` |
 | 自動追加ブロック | — | 10.17.4〜10.17.6 の SessionStart hook が足した管理ブロック。状態ディレクトリの rc-added に載り、rc-user に載らない | 自動の囲み | — | `docs/specifications/ndf-relay-install-and-restart.md` |
-| 状態ディレクトリ | — | ${XDG_STATE_HOME:-~/.local/state}/ndf/relay/。記録（rc-added など）と作業ディレクトリを持つ | 状態の親 | — | `docs/specifications/ndf-relay-install-and-restart.md` |
+| 状態ディレクトリ | `state_dir` | ${XDG_STATE_HOME:-~/.local/state}/ndf/relay/。記録（rc-added など）と作業ディレクトリを持つ | 状態の親 | — | `docs/specifications/ndf-relay-install-and-restart.md` |
 | 質問シグナルファイル | — | 作業ディレクトリの question。質問が表示されているあいだ在る | 質問のシグナルファイル | — | `docs/specifications/ndf-relay-install-and-restart.md` |
 | 入力注入 | — | ラッパーが子の擬似端末へ /exit 以外の入力を書くこと | 送り込み | — | `docs/specifications/ndf-relay-install-and-restart.md` |
 | 起動オプション | — | 最初のセッションの claude の引数のうち、セッションごとに変わらないもの（--dangerously-skip-permissions など） | 起動の方針の引数 | — | `docs/specifications/ndf-relay-install-and-restart.md` |
@@ -261,7 +261,7 @@ release が走らせるリリースの種別・リリースコマンド・公開
 | 語 | 識別子 | 意味 | 廃止した語 | 廃止した識別子 | 正本 |
 | --- | --- | --- | --- | --- | --- |
 | リリース記録 | — | release が Pull Request へ残す記録のブロック。段階・版・ミッションの Pull Request を持つ | リリースの記録 | — | `docs/specifications/ndf-cleanup-and-bundle-closing.md` |
-| リリース種別 | — | リリースの種類。production（本番リリース）/ verification（検証リリース） | — | — | `docs/specifications/ndf-release-steps-and-token-usage-snapshot.md` |
+| リリース種別 | `release_type` | リリースの種類。production（本番リリース）/ verification（検証リリース） | — | — | `docs/specifications/ndf-release-steps-and-token-usage-snapshot.md` |
 | 公開操作 | — | release の手順 4 で行う操作。レジストリへの公開・配備先への反映・署名した配布物の設置・ストアへの提出 | 公開の操作 | — | `plugins/ndf/skills/release/references/completion-check.md` |
 
 ## NDF の指示書チェック（`ndf-instructions`）
@@ -304,7 +304,7 @@ worktree の設定・セッション開始 hook・テスト環境の割り当て
 
 | 語 | 識別子 | 意味 | 廃止した語 | 廃止した識別子 | 正本 |
 | --- | --- | --- | --- | --- | --- |
-| worktree レジストリ | — | 割り当て・ポート・基準のタグ・公開の記録を持つ JSON（.git/ndf/worktree-registry.json） | — | — | `docs/specifications/ndf-testenv-lock-and-registry.md` |
+| worktree レジストリ | `registry` | 割り当て・ポート・基準のタグ・公開の記録を持つ JSON（.git/ndf/worktree-registry.json） | — | — | `docs/specifications/ndf-testenv-lock-and-registry.md` |
 | 共有設定 | — | .ndf/worktree.json。git で追跡する | 共有の宣言 | — | `docs/specifications/ndf-worktree-declaration-and-entry-points.md` |
 | 個人設定 | — | .ndf/worktree.local.json。git で追跡しない | 個人の宣言 | — | `docs/specifications/ndf-worktree-declaration-and-entry-points.md` |
 | 実効設定 | — | wt_declaration が返す、共有設定に個人設定を反映した JSON | 重ね合わせた宣言 | — | `docs/specifications/ndf-worktree-declaration-and-entry-points.md` |

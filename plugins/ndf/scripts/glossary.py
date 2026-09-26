@@ -151,11 +151,16 @@ def deprecated_code_of(t: dict) -> list[str]:
     return [w for w in d if isinstance(w, str) and CODE_SHAPE.fullmatch(w)] if isinstance(d, list) else []
 
 
-def code_forms(code: str) -> list[str]:
-    """識別子の基本形（snake_case）から書き方を導く。基本形（JSON のキー・変数・関数）・PascalCase（クラス）・
-    大文字（定数）・kebab-case（CLI の引数・ファイル名）の順で、重なる形は 1 つにする。書き方の変換はここだけで行う。"""
+def spellings(code: str) -> tuple[str, str, str, str]:
+    """識別子の基本形（snake_case）から 4 つの書き方を導く。基本形（JSON のキー・変数・関数）・PascalCase（クラス）・
+    大文字（定数）・kebab-case（CLI の引数・ファイル名）の順。書き方の変換はここだけで行う。"""
     parts = code.split("_")
-    return list(dict.fromkeys([code, "".join(w.capitalize() for w in parts), code.upper(), "-".join(parts)]))
+    return code, "".join(w.capitalize() for w in parts), code.upper(), "-".join(parts)
+
+
+def code_forms(code: str) -> list[str]:
+    """spellings の重なる形を 1 つにした一覧（`plan` なら plan / Plan / PLAN）。"""
+    return list(dict.fromkeys(spellings(code)))
 
 
 def live_words(g: dict) -> set[str]:
@@ -397,9 +402,17 @@ def code_findings(rel: str, text: str, wanted: set[int] | None, g: dict, dep_re,
 
 
 def code_replacement(g: dict, form: str) -> str:
-    names = [f"{code_of(t)}（{t['term']}）" for t in terms_of(g) if code_of(t) and isinstance(t.get("term"), str)
-             and any(form in code_forms(w) for w in deprecated_code_of(t))]
-    return " / ".join(names) or "用語集の識別子"
+    """廃止した識別子の出た書き方に合わせて、生きた識別子を同じ書き方で返す（PascalCase で出たら PascalCase）。"""
+    names = []
+    for t in terms_of(g):
+        if not code_of(t) or not isinstance(t.get("term"), str):
+            continue
+        for w in deprecated_code_of(t):
+            hits = [live for dep, live in zip(spellings(w), spellings(code_of(t))) if dep == form]
+            if hits:
+                names.append(f"{hits[0]}（{t['term']}）")
+                break
+    return " / ".join(dict.fromkeys(names)) or "用語集の識別子"
 
 
 def replacement(g: dict, word: str) -> str:
