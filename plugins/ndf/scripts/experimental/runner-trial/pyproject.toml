@@ -1,0 +1,13 @@
+[project]
+name = "ndf-runner-trial"
+version = "0.0.0"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+langgraph = ["langgraph==1.2.12", "langgraph-checkpoint-sqlite==3.1.1"]
+burr = ["burr==0.42.0"]
+dbos = ["dbos==3.1.0"]
+
+[tool.uv]
+package = false
