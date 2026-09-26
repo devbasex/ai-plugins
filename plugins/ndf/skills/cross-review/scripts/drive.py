@@ -238,7 +238,7 @@ GitHub と git の送信をしない。結果ファイル: {self.path('sweep')}
         iv = ds.get("init_vars") if isinstance(ds, dict) else None
         if ds.get("stage") not in FINAL_STAGES or not isinstance(iv, dict) or not iv.get("TMP_DIR"):
             return None
-        return iv if Path(iv["TMP_DIR"]).resolve() == tmp else None
+        return iv if Path(iv["TMP_DIR"]).resolve() == tmp.resolve() else None
 
     def init(self) -> None:
         iv = self.finished_vars()

@@ -9,6 +9,7 @@ import importlib.util
 import json
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -141,16 +142,26 @@ def test_rerun_finds_drive_state_under_given_worktree(tmp_path, monkeypatch, cap
     assert code == 0 and out["metrics"]["rounds"] == 2 and fake.inits() == inits
 
 
-def test_rerun_finds_drive_state_under_default_worktree(tmp_path, monkeypatch, capsys):
-    """引数も環境変数も無ければ、`init` と同じ既定の worktree の下を見る。"""
+@pytest.mark.parametrize("linked", [False, True])
+def test_rerun_finds_drive_state_under_default_worktree(tmp_path, monkeypatch, capsys, linked):
+    """引数も環境変数も無ければ、`init` と同じ既定の worktree の下を見る。
+
+    システムの一時ディレクトリがシンボリックリンク（macOS の /tmp など）でも同じ置き場と判定する。
+    """
     monkeypatch.delenv("CROSS_REVIEW_TMP_DIR", raising=False)
-    monkeypatch.setenv("NDF_WORKTREE_BASE", str(tmp_path / "base"))
+    monkeypatch.delenv("NDF_WORKTREE_BASE", raising=False)
+    sys_tmp = tmp_path / "sys"
+    sys_tmp.mkdir()
+    if linked:
+        (tmp_path / "link").symlink_to(sys_tmp)
+        sys_tmp = tmp_path / "link"
+    monkeypatch.setattr(tempfile, "tempdir", str(sys_tmp))
     repo = tmp_path / "repo"
     repo.mkdir()
     subprocess.run(["git", "init", "-q", str(repo)], check=True)
     subprocess.run(["git", "-C", str(repo), "remote", "add", "origin", "https://github.com/o/r.git"], check=True)
     monkeypatch.chdir(repo)
-    tmp = tmp_path / "base" / "o--r" / "pr5" / ".cross_review"
+    tmp = sys_tmp / "ndf-worktrees" / "o--r" / "pr5" / ".cross_review"
     tmp.mkdir(parents=True)
     fake = FakeReview(tmp)
     monkeypatch.setattr(cr, "call", fake)
