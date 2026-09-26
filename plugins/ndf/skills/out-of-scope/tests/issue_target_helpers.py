@@ -4,6 +4,7 @@
 `sys.path` の先頭へ足すため、束を同時に実行すると同名のファイルが互いを覆う。**束ごとに
 違う名前を付ければ、どの束から実行しても同じものが読まれる。**
 """
+
 from __future__ import annotations
 
 import os
@@ -47,11 +48,7 @@ def resolution_snippet(body: str) -> str:
     読み取れないこと自体を失敗として扱う。囲みを消すだけで、解決の形を見るチェックを無効に
     できる形にしない。
     """
-    found = [
-        block
-        for block in fenced_blocks("\n".join(section(body, RESOLUTION_TABLE_HEADING)))
-        if "SKILL_REPO=" in block
-    ]
+    found = [block for block in fenced_blocks("\n".join(section(body, RESOLUTION_TABLE_HEADING))) if "SKILL_REPO=" in block]
     assert found, "手順の解決を書いた囲みが見つからない"
     return found[0]
 
@@ -142,7 +139,11 @@ def run_resolution(body: str, *, home: Path, cwd: Path) -> str:
     env.pop("NDF_SKILL_REPO", None)
     env.update({"HOME": str(home), "LC_ALL": "C.UTF-8"})
     done = subprocess.run(
-        ["bash", "-c", script], cwd=str(cwd), env=env, capture_output=True, text=True,
+        ["bash", "-c", script],
+        cwd=str(cwd),
+        env=env,
+        capture_output=True,
+        text=True,
     )
     assert done.returncode == 0, f"解決が落ちた: {done.stderr}"
     return done.stdout.strip()

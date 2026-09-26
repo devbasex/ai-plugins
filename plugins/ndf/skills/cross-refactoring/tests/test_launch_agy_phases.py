@@ -10,6 +10,7 @@
 
 `agy` そのものは起動しない。PATH へ引数を書き出すだけの実行ファイルを置く。
 """
+
 from __future__ import annotations
 
 import os
@@ -33,8 +34,12 @@ mv "$NDF_TEST_ARGS_FILE.tmp" "$NDF_TEST_ARGS_FILE"
 
 # `start-phase` を通らない起動の CLI の上限（#598 / #537 の AC36）。監視の上限（`lib/limits.py`）+ 120 秒。
 CLI_TIMEOUT = {
-    "propose": 1320, "plan": 1320,
-    "add-tests": 3720, "implement": 3720, "fix": 3720, "final-fix": 3720,
+    "propose": 1320,
+    "plan": 1320,
+    "add-tests": 3720,
+    "implement": 3720,
+    "fix": 3720,
+    "final-fix": 3720,
 }
 
 # 手順ごとの作業ディレクトリ（`--add-dir` の先頭）と、生成されるプロンプトの接頭辞。
@@ -56,8 +61,7 @@ def _state(tmp_path: pathlib.Path, **overrides) -> pathlib.Path:
     return make_state_v2(tmp_path, work, runtimes=["codex", RUNTIME, "kiro"], **overrides)
 
 
-def _run(state_path: pathlib.Path, tmp_path: pathlib.Path, *args: str) -> tuple[
-        subprocess.CompletedProcess[str], pathlib.Path]:
+def _run(state_path: pathlib.Path, tmp_path: pathlib.Path, *args: str) -> tuple[subprocess.CompletedProcess[str], pathlib.Path]:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
     for name in (RUNTIME, "codex"):
@@ -73,7 +77,8 @@ def _run(state_path: pathlib.Path, tmp_path: pathlib.Path, *args: str) -> tuple[
             "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
             "NDF_TEST_ARGS_FILE": str(args_file),
         },
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     return result, args_file
 
@@ -125,17 +130,14 @@ def test_a_timeout_of_another_phase_is_not_used(tmp_path) -> None:
     assert args[args.index("--print-timeout") + 1] == f"{CLI_TIMEOUT['fix']}s"
 
 
-def test_start_phase_records_the_timeout_that_the_launcher_reads(
-        tmp_path, cmd_setup, env_tmp_dir) -> None:
+def test_start_phase_records_the_timeout_that_the_launcher_reads(tmp_path, cmd_setup, env_tmp_dir) -> None:
     """I1 と I2 の受け渡し: `start-phase` が書いた上限を起動側がそのまま使う。"""
     import argparse
 
-    state_path = _state(tmp_path, implementer=RUNTIME,
-                        limits={"margin_seconds": 90, "implement_end_at": "2099-01-01T00:00:00+00:00"})
+    state_path = _state(tmp_path, implementer=RUNTIME, limits={"margin_seconds": 90, "implement_end_at": "2099-01-01T00:00:00+00:00"})
     env_tmp_dir(state_path)
     git("init", "-q", cwd=tmp_path / "work")
-    git("-c", "user.email=t@e.st", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init",
-        cwd=tmp_path / "work")
+    git("-c", "user.email=t@e.st", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init", cwd=tmp_path / "work")
     cmd_setup.cmd_start_phase(argparse.Namespace(id=130, phase="implement"))
     record = read_state(state_path)["phases"]["implement"]
     assert record["cli_timeout"] == record["timeout"] + 90

@@ -199,7 +199,7 @@ print_declaration_line() {
 # 個人の宣言を使わない利用者の出力を変えないためで、既存の出力に依存する手順と
 # テストがこの変更で壊れない。**status と check は同じ行を出す。**
 print_local_declaration_lines() {
-  local state list= name
+  local state list='' name
   state=$(wt_declaration_local_state "$MAIN_DIR") || return 0
   case "$state" in
     absent) return 0 ;;
@@ -263,7 +263,7 @@ do_status() {
 # origin へ問い合わせることがあり、起動のたびに通信が走る。実在の確認は、その名前を
 # 使う時点の wt_base_branch / wt_production_branch が持つ。
 print_branch_line() {
-  local label="$1" key="$2" decl="$3" name= fallback
+  local label="$1" key="$2" decl="$3" name='' fallback
   if [ -n "$decl" ]; then
     name=$(_wt_declaration_string "$decl" "$key")
   fi

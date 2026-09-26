@@ -1,4 +1,5 @@
 """GitHub の照会（レビュースレッドの解決と継続的統合のチェックジョブ）を、cross-refactoring が読む形へ変える。"""
+
 from __future__ import annotations
 
 import json
@@ -26,18 +27,24 @@ query($owner: String!, $repo: String!, $pr: Int!, $cursor: String) {
 """
 
 
-def _fetch_review_threads_page(
-    owner: str, name: str, pr: int, cursor: Optional[str]
-) -> Optional[dict[str, Any]]:
+def _fetch_review_threads_page(owner: str, name: str, pr: int, cursor: Optional[str]) -> Optional[dict[str, Any]]:
     """レビュースレッドを 1 ページ分だけ取得する。取れなければ `None` を返す。
 
     呼び出しの失敗と応答の解釈の失敗を、どちらも `None` へ畳む。ページ送りの側は
     「取れたか」だけを見ればよく、GraphQL の呼び方を知らずに済む。
     """
     cmd = [
-        "gh", "api", "graphql",
-        "-f", f"query={_REVIEW_THREADS_QUERY}",
-        "-F", f"owner={owner}", "-F", f"repo={name}", "-F", f"pr={pr}",
+        "gh",
+        "api",
+        "graphql",
+        "-f",
+        f"query={_REVIEW_THREADS_QUERY}",
+        "-F",
+        f"owner={owner}",
+        "-F",
+        f"repo={name}",
+        "-F",
+        f"pr={pr}",
     ]
     if cursor:
         cmd += ["-F", f"cursor={cursor}"]
@@ -46,9 +53,7 @@ def _fetch_review_threads_page(
         info(f"⚠ レビュースレッドの取得に失敗しました: {r.stderr.strip()[:200]}")
         return None
     try:
-        return (
-            json.loads(r.stdout)["data"]["repository"]["pullRequest"]["reviewThreads"]
-        )
+        return json.loads(r.stdout)["data"]["repository"]["pullRequest"]["reviewThreads"]
     except (json.JSONDecodeError, KeyError, TypeError) as e:
         info(f"⚠ レビュースレッドの応答を解釈できませんでした: {e}")
         return None
@@ -70,9 +75,7 @@ def resolved_threads_on_github(repo: str, pr: int) -> Optional[set[str]]:
         threads = _fetch_review_threads_page(owner, name, pr, cursor)
         if threads is None:
             return None
-        resolved.update(
-            n["id"] for n in threads.get("nodes", []) if n.get("isResolved")
-        )
+        resolved.update(n["id"] for n in threads.get("nodes", []) if n.get("isResolved"))
         page = threads.get("pageInfo") or {}
         if not page.get("hasNextPage"):
             return resolved

@@ -3,6 +3,7 @@
 各モジュールが持つ名前・行数・import の向き（設計の「lib/monitor.py」の節）と、
 エントリポイント（`monitor.py` の引数と再エクスポート）が分けた後も変わらないことを固定する。
 """
+
 from __future__ import annotations
 
 import ast
@@ -19,39 +20,95 @@ SHIM = LIB.parents[1] / "skills" / "cross-review" / "scripts" / "monitor.py"
 HOLDS = {
     "monitor": ["_lib_dir", "_seat_or_both", "main", "_resolve_agents", "_run_all", "_emit_results"],
     "monitor_patterns": [
-        "USAGE_LIMIT_FATAL", "EARLY_ERROR_FATAL", "EARLY_ERROR_FATAL_WARNING_SHAPED", "EARLY_ERROR_WARN",
-        "EARLY_ERROR_BENIGN", "EARLY_ERROR_BENIGN_KEEP_WARNINGS", "CLI_TIMEOUT_AFTER_EXIT", "CODEX_SENTINEL",
-        "ANSI_ESCAPE", "CLAUDE_STDOUT_FATAL", "CLAUDE_STDOUT_USAGE_LIMIT", "_match_is_quoted", "_unescaped_count",
+        "USAGE_LIMIT_FATAL",
+        "EARLY_ERROR_FATAL",
+        "EARLY_ERROR_FATAL_WARNING_SHAPED",
+        "EARLY_ERROR_WARN",
+        "EARLY_ERROR_BENIGN",
+        "EARLY_ERROR_BENIGN_KEEP_WARNINGS",
+        "CLI_TIMEOUT_AFTER_EXIT",
+        "CODEX_SENTINEL",
+        "ANSI_ESCAPE",
+        "CLAUDE_STDOUT_FATAL",
+        "CLAUDE_STDOUT_USAGE_LIMIT",
+        "_match_is_quoted",
+        "_unescaped_count",
         "_strip_ansi",
     ],
     "monitor_scan": [
-        "_read_tail", "_safe_size", "_tail_last_nonempty_line", "_scan_patterns", "_scan_early_fatal",
-        "_scan_early_warn", "_scan_claude_stdout", "_scan_claude_stdout_fatal", "_scan_claude_stdout_usage_limit",
-        "_scan_codex_sentinel", "EarlyFatal", "_scan_usage_limit", "_scan_fatal", "_early_error",
+        "_read_tail",
+        "_safe_size",
+        "_tail_last_nonempty_line",
+        "_scan_patterns",
+        "_scan_early_fatal",
+        "_scan_early_warn",
+        "_scan_claude_stdout",
+        "_scan_claude_stdout_fatal",
+        "_scan_claude_stdout_usage_limit",
+        "_scan_codex_sentinel",
+        "EarlyFatal",
+        "_scan_usage_limit",
+        "_scan_fatal",
+        "_early_error",
     ],
     "monitor_proc": [
-        "_read_pidfile", "_pid_alive", "_is_zombie", "_leads_own_group", "_kill_pid",
+        "_read_pidfile",
+        "_pid_alive",
+        "_is_zombie",
+        "_leads_own_group",
+        "_kill_pid",
         "_pid_cmdline_matches",
     ],
     "monitor_types": [
-        "DEFAULT_TIMEOUT", "DEFAULT_STALL", "DEFAULT_STALL_AGENT_BUILTIN", "DEFAULT_POLL", "RESULT_AGE_GRACE",
-        "DEFAULT_NO_EARLY_ERROR", "_safe_int_env", "_agent_runtime", "_agent_stall_default", "_TMP_DIR_OVERRIDE",
-        "TMP_DIR_ENV_VARS", "_tmp_dir", "DEFAULT_STEM_TEMPLATE", "MonitorConfig", "AgentPaths", "MonitorOutcome",
+        "DEFAULT_TIMEOUT",
+        "DEFAULT_STALL",
+        "DEFAULT_STALL_AGENT_BUILTIN",
+        "DEFAULT_POLL",
+        "RESULT_AGE_GRACE",
+        "DEFAULT_NO_EARLY_ERROR",
+        "_safe_int_env",
+        "_agent_runtime",
+        "_agent_stall_default",
+        "_TMP_DIR_OVERRIDE",
+        "TMP_DIR_ENV_VARS",
+        "_tmp_dir",
+        "DEFAULT_STEM_TEMPLATE",
+        "MonitorConfig",
+        "AgentPaths",
+        "MonitorOutcome",
         "AgentStatus",
     ],
     "monitor_loop": [
-        "monitor_agent", "_initialize_monitor", "_validate_pid_cmdline", "_update_progress",
-        "_lingering_completion", "_timeout_outcome", "_early_error_outcome", "_process_exit_outcome",
-        "_stall_outcome", "_finish_monitor", "_emit_progress", "_emit_log",
+        "monitor_agent",
+        "_initialize_monitor",
+        "_validate_pid_cmdline",
+        "_update_progress",
+        "_lingering_completion",
+        "_timeout_outcome",
+        "_early_error_outcome",
+        "_process_exit_outcome",
+        "_stall_outcome",
+        "_finish_monitor",
+        "_emit_progress",
+        "_emit_log",
     ],
     "monitor_outcome": ["_record_outcome"],
 }
 # 各モジュールが読んでよいライブラリのモジュール（標準ライブラリは数えない）
 MAY_IMPORT = {
-    "monitor": {"assignment", "clock", "deps", "limits", "monitor_outcome", "monitor_patterns", "monitor_scan", "monitor_proc",
-                "monitor_types", "monitor_loop"},
-    "monitor_loop": {"limits", "monitor_outcome", "monitor_patterns", "monitor_scan", "monitor_proc",
-                     "monitor_types"},
+    "monitor": {
+        "assignment",
+        "clock",
+        "deps",
+        "limits",
+        "monitor_outcome",
+        "monitor_patterns",
+        "monitor_scan",
+        "monitor_proc",
+        "monitor_types",
+        "monitor_loop",
+    },
+    "monitor_loop": {"limits", "monitor_outcome", "monitor_patterns", "monitor_scan", "monitor_proc", "monitor_types"},
     "monitor_scan": {"monitor_patterns", "monitor_types"},
     "monitor_proc": {"procs"},
     "monitor_patterns": set(),
@@ -135,9 +192,7 @@ def test_shim_sees_the_same_submodules():
 
 
 def test_entrypoint_help_is_unchanged():
-    p = subprocess.run([sys.executable, str(LIB / "monitor.py"), "--help"], capture_output=True, text=True,
-                       timeout=60)
+    p = subprocess.run([sys.executable, str(LIB / "monitor.py"), "--help"], capture_output=True, text=True, timeout=60)
     assert p.returncode == 0
-    for flag in ["--agents", "--phase", "--timeout", "--stall-timeout", "--no-early-error", "--stem-template",
-                 "--tmp-dir"]:
+    for flag in ["--agents", "--phase", "--timeout", "--stall-timeout", "--no-early-error", "--stem-template", "--tmp-dir"]:
         assert flag in p.stdout

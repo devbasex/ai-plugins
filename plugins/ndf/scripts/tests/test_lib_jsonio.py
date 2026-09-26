@@ -1,4 +1,5 @@
 """JSON の読みと原子的な書き込み（lib/jsonio.py・#1142 の L0）。無い・壊れた・形が違うときの扱いを引数で選ぶ。"""
+
 from __future__ import annotations
 
 import sys

@@ -1,4 +1,5 @@
 """cross-refactoring の drive.py が共通層の pause の表（`scripts/lib/drive_pause.py`）で止まること。"""
+
 from __future__ import annotations
 
 import importlib.util

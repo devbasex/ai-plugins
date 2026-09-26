@@ -43,6 +43,7 @@
 （`.ndf/supervise.json` の release）が決める正式版のタグの最新、起点のブランチとの分岐点の順に使う。
 トリガーの評価は通信しない（git の履歴だけを読む）。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -54,8 +55,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
-from step_result import (EXIT_OK, EXIT_PRECONDITION, EXIT_UNREADABLE, EXIT_VIOLATION,  # noqa: E402
-                         emit, result)
+from step_result import (
+    EXIT_OK,
+    EXIT_PRECONDITION,
+    EXIT_UNREADABLE,
+    EXIT_VIOLATION,  # noqa: E402
+    emit,
+    result,
+)
 from pace import PaceError, matches, read_pace  # noqa: E402
 import clock  # noqa: E402
 import gh_call  # noqa: E402
@@ -113,8 +120,13 @@ def json_or_stop(path: Path, what: str) -> dict:
     try:
         return jsonio.read(path, want=dict)
     except jsonio.JsonReadError as e:
-        raise Stop({"missing": f"{what} が無い: {path}", "broken": f"{what} を読めない: {path}: {e.detail}",
-                    "type": f"{what} はオブジェクトで書く: {path}"}[e.kind])
+        raise Stop(
+            {
+                "missing": f"{what} が無い: {path}",
+                "broken": f"{what} を読めない: {path}: {e.detail}",
+                "type": f"{what} はオブジェクトで書く: {path}",
+            }[e.kind]
+        )
 
 
 def load_decl(root: Path) -> dict:
@@ -203,7 +215,7 @@ def range_base(root: Path) -> str:
         return base
     head = git_or_stop(root, "symbolic-ref", "--short", "refs/remotes/origin/HEAD", check=False)
     if head.startswith("origin/"):
-        return head[len("origin/"):]
+        return head[len("origin/") :]
     raise Stop("起点のブランチが分からない（.ndf/worktree.json の base_branch）")
 
 
@@ -229,8 +241,9 @@ def parse_at(s: str) -> datetime:
 
 def last_check(events: list[dict], review: bool = False) -> dict | None:
     """前回の検査。構造改善を含む検査（review=False）は、レビューだけの回（only: review）を数えない。"""
-    ended = [e for e in events if e["kind"] == "check" and e.get("result") in ENDED and e.get("to")
-             and (review or e.get("only") != "review")]
+    ended = [
+        e for e in events if e["kind"] == "check" and e.get("result") in ENDED and e.get("to") and (review or e.get("only") != "review")
+    ]
     return ended[-1] if ended else None
 
 
@@ -238,8 +251,7 @@ def done_branch(review: bool) -> str:
     return DONE_PREFIX + ("review" if review else "check")
 
 
-def range_start(root: Path, events: list[dict], since: str | None,
-                review: bool = False) -> tuple[str, datetime, str]:
+def range_start(root: Path, events: list[dict], since: str | None, review: bool = False) -> tuple[str, datetime, str]:
     """(from のコミット, 期限の起点, 決め方)。
 
     **origin の `check-done/*` を手元の記録より先に見る。** 手元の記録は置き場が消えれば失われ、別のマシンからは
@@ -258,7 +270,7 @@ def range_start(root: Path, events: list[dict], since: str | None,
     prefix = release_tag_glob(root)
     if prefix:
         for tag in git_or_stop(root, "tag", "--list", f"{prefix}*", "--sort=-v:refname").split():
-            if "-" not in tag[len(prefix):]:
+            if "-" not in tag[len(prefix) :]:
                 sha = git_or_stop(root, "rev-parse", f"{tag}^{{commit}}")
                 return sha, commit_at(root, sha), f"正式版のタグ {tag}"
     base = range_base(root)
@@ -276,8 +288,9 @@ def merged_prs(root: Path, frm: str, to: str, decl: dict) -> list[dict]:
             continue
         files = git_or_stop(root, "diff", "--name-only", f"{sha}^1", sha).splitlines()
         common = any(area_of(f, decl)[1] for f in files)
-        out.append({"pr": int(m.group(1)), "branch": m.group(2), "common": common,
-                    "points": decl["triggers"]["common_weight"] if common else 1})
+        out.append(
+            {"pr": int(m.group(1)), "branch": m.group(2), "common": common, "points": decl["triggers"]["common_weight"] if common else 1}
+        )
     return out
 
 
@@ -295,8 +308,7 @@ def escapes_since(events: list[dict], since: datetime) -> dict[str, int]:
     return counts
 
 
-def evaluate(root: Path, final: bool, since: str | None, to_ref: str | None = None,
-             review: bool = False) -> dict:
+def evaluate(root: Path, final: bool, since: str | None, to_ref: str | None = None, review: bool = False) -> dict:
     decl = load_decl(root)
     events = read_events(root)
     frm, since_at, how = range_start(root, events, since, review)
@@ -305,8 +317,15 @@ def evaluate(root: Path, final: bool, since: str | None, to_ref: str | None = No
     t = decl["triggers"]
     esc = escapes_since(events, since_at)
     hours = round((clock.now(utc=True) - since_at).total_seconds() / 3600, 2)
-    metrics = {"prs": len(prs), "score": sum(p["points"] for p in prs), "lines": changed_lines(root, frm, to),
-               "hours": hours, "escapes": max(esc.values(), default=0), "from": frm, "to": to}
+    metrics = {
+        "prs": len(prs),
+        "score": sum(p["points"] for p in prs),
+        "lines": changed_lines(root, frm, to),
+        "hours": hours,
+        "escapes": max(esc.values(), default=0),
+        "from": frm,
+        "to": to,
+    }
     fired = []
     if review:
         if prs:
@@ -332,14 +351,27 @@ def cmd_eval(a, root: Path) -> tuple[dict, int]:
     ev = evaluate(root, a.final, a.since, review=a.review)
     m = ev["metrics"]
     names = [f["trigger"] for f in ev["fired"]]
-    append_event(root, {"kind": "eval", "id": a.id or "", "from": m["from"], "to": m["to"], "fired": names,
-                        "metrics": {k: m[k] for k in ("prs", "score", "lines", "hours", "escapes")}})
+    append_event(
+        root,
+        {
+            "kind": "eval",
+            "id": a.id or "",
+            "from": m["from"],
+            "to": m["to"],
+            "fired": names,
+            "metrics": {k: m[k] for k in ("prs", "score", "lines", "hours", "escapes")},
+        },
+    )
     rng = f"{m['from'][:10]}..{m['to'][:10]}（{ev['how']}から）"
     if names:
-        return result(TOOL, "ok", f"検査のトリガーが立った（{' / '.join(names)}）: 範囲 {rng}・PR {m['prs']} 本",
-                      ev["fired"], m), EXIT_OK
-    return result(TOOL, "stopped", f"検査のトリガーは立たない: 範囲 {rng}・PR {m['prs']} 本・点数 {m['score']}・"
-                  f"{m['lines']} 行・{m['hours']} 時間", [], m), EXIT_PRECONDITION
+        return result(TOOL, "ok", f"検査のトリガーが立った（{' / '.join(names)}）: 範囲 {rng}・PR {m['prs']} 本", ev["fired"], m), EXIT_OK
+    return result(
+        TOOL,
+        "stopped",
+        f"検査のトリガーは立たない: 範囲 {rng}・PR {m['prs']} 本・点数 {m['score']}・{m['lines']} 行・{m['hours']} 時間",
+        [],
+        m,
+    ), EXIT_PRECONDITION
 
 
 def check_json(state: str) -> Path:
@@ -365,13 +397,25 @@ def cmd_prepare(a, root: Path) -> tuple[dict, int]:
         raise Stop(f"{branch} を送れない: {e}", EXIT_VIOLATION)
     git_or_stop(root, "fetch", "-q", "origin", f"+refs/heads/{branch}:refs/remotes/origin/{branch}", check=False)
     files = git_or_stop(root, "diff", "--name-only", m["from"], m["to"]).splitlines()
-    data = {"id": a.id, "from": m["from"], "to": m["to"], "fired": fired, "metrics": m, "files": files,
-            "escape_areas": ev["escape_areas"], "base": branch}
+    data = {
+        "id": a.id,
+        "from": m["from"],
+        "to": m["to"],
+        "fired": fired,
+        "metrics": m,
+        "files": files,
+        "escape_areas": ev["escape_areas"],
+        "base": branch,
+    }
     check_json(a.state).parent.mkdir(parents=True, exist_ok=True)
     check_json(a.state).write_text(json.dumps(data, ensure_ascii=False, indent=1) + "\n")
-    return result(TOOL, "ok", f"{branch} を {m['from'][:10]} に作って送った（範囲の PR {m['prs']} 本・"
-                  f"ファイル {len(files)} 件）", [{"branch": branch, "from": m["from"], "to": m["to"]}],
-                  {k: m[k] for k in ("prs", "score", "lines")}), EXIT_OK
+    return result(
+        TOOL,
+        "ok",
+        f"{branch} を {m['from'][:10]} に作って送った（範囲の PR {m['prs']} 本・ファイル {len(files)} 件）",
+        [{"branch": branch, "from": m["from"], "to": m["to"]}],
+        {k: m[k] for k in ("prs", "score", "lines")},
+    ), EXIT_OK
 
 
 def scope_dirs(root: Path, data: dict) -> list[str]:
@@ -405,14 +449,14 @@ def cmd_finish(a, root: Path) -> tuple[dict, int]:
     files = len(stat.splitlines())
     if not files:
         gh_or_stop(root, "pr", "close", str(a.pr), "--comment", "検査で変更が無かったため閉じる（check-trigger.py finish）")
-        return result(TOOL, "stopped", f"検査で変更が無い。#{a.pr} を閉じた（変更なし）", [],
-                      {"files": 0, "lines": 0}), EXIT_PRECONDITION
+        return result(TOOL, "stopped", f"検査で変更が無い。#{a.pr} を閉じた（変更なし）", [], {"files": 0, "lines": 0}), EXIT_PRECONDITION
     try:
         gh_or_stop(root, "pr", "edit", str(a.pr), "--base", base)
     except Stop as e:
         raise Stop(f"#{a.pr} の宛先を {base} へ付け替えられない: {e}", EXIT_VIOLATION)
-    return result(TOOL, "ok", f"#{a.pr} の宛先を {base} へ付け替えた（検査の修正 {files} ファイル・{lines} 行）", [],
-                  {"files": files, "lines": lines}), EXIT_OK
+    return result(
+        TOOL, "ok", f"#{a.pr} の宛先を {base} へ付け替えた（検査の修正 {files} ファイル・{lines} 行）", [], {"files": files, "lines": lines}
+    ), EXIT_OK
 
 
 def findings_of(state: Path) -> tuple[dict, str]:
@@ -423,10 +467,15 @@ def findings_of(state: Path) -> tuple[dict, str]:
         log = []
     counts = {e.get("id"): e.get("counts") or {} for e in log if e.get("counts")}
     ref, rev = counts.get("refactor", {}), counts.get("review", {})
-    findings = {"applied": ref.get("adopted", ref.get("applied")), "reverted": ref.get("reverted"),
-                "findings": rev.get("findings"), "unresolved": rev.get("unresolved")}
-    failed = [e.get("id") for e in log if e.get("exit") not in (0, None) and not e.get("gate")
-              and not str(e.get("id", "")).startswith("abort")]
+    findings = {
+        "applied": ref.get("adopted", ref.get("applied")),
+        "reverted": ref.get("reverted"),
+        "findings": rev.get("findings"),
+        "unresolved": rev.get("unresolved"),
+    }
+    failed = [
+        e.get("id") for e in log if e.get("exit") not in (0, None) and not e.get("gate") and not str(e.get("id", "")).startswith("abort")
+    ]
     return findings, (failed[-1] if failed else "")
 
 
@@ -434,8 +483,14 @@ def cmd_record(a, root: Path) -> tuple[dict, int]:
     p = check_json(a.state)
     data = json.loads(p.read_text()) if p.is_file() else {}
     findings, failed_at = findings_of(Path(a.state))
-    row = {"kind": "check", "id": a.id, "from": data.get("from", ""), "to": data.get("to", ""),
-           "metrics": data.get("metrics", {}), "findings": findings}
+    row = {
+        "kind": "check",
+        "id": a.id,
+        "from": data.get("from", ""),
+        "to": data.get("to", ""),
+        "metrics": data.get("metrics", {}),
+        "findings": findings,
+    }
     if a.review:
         row["only"] = "review"
     if a.pr:
@@ -450,8 +505,9 @@ def cmd_record(a, root: Path) -> tuple[dict, int]:
         delete_base(root, a.id)
         if a.pr:
             gh_call.gh(["pr", "close", str(a.pr), "--comment", "検査が途中で落ちたため閉じる"], cwd=str(root))
-        return result(TOOL, "stopped", f"検査 {a.id} が {row['failed_at']} で落ちた。{written}・"
-                      f"{BASE_PREFIX}{a.id} を消した", [row], {}), EXIT_VIOLATION
+        return result(
+            TOOL, "stopped", f"検査 {a.id} が {row['failed_at']} で落ちた。{written}・{BASE_PREFIX}{a.id} を消した", [row], {}
+        ), EXIT_VIOLATION
     if not a.pr:
         raise Stop("record には --pr か --failed が要る")
     state = json.loads(gh_or_stop(root, "pr", "view", str(a.pr), "--json", "state")).get("state")
@@ -468,8 +524,7 @@ def cmd_record(a, root: Path) -> tuple[dict, int]:
     note = f"・origin の {' / '.join(pushed)} を進めた" if pushed else ""
     if unpushed:
         note += f"・{' / '.join(unpushed)} を送れない（次の範囲は手元の記録から決まる）"
-    return result(TOOL, "ok", f"検査 {a.id} を記録した（{res}・#{a.pr}）{note}", [row],
-                  {"pushed": pushed, "unpushed": unpushed}), EXIT_OK
+    return result(TOOL, "ok", f"検査 {a.id} を記録した（{res}・#{a.pr}）{note}", [row], {"pushed": pushed, "unpushed": unpushed}), EXIT_OK
 
 
 def push_done(root: Path, to: str, review: bool) -> tuple[list[str], list[str]]:
@@ -497,8 +552,9 @@ def cmd_escape(a, root: Path) -> tuple[dict, int]:
     except OSError as e:
         raise Stop(f"検査の記録へ書けない: {e}", EXIT_VIOLATION)
     of = f"#{a.of}" if a.of else "不明"
-    return result(TOOL, "ok", f"逃げた不具合を記録した（直した #{a.pr}・持ち込んだ {of}・領域 {' / '.join(areas)}）",
-                  [row], {"areas": len(areas)}), EXIT_OK
+    return result(
+        TOOL, "ok", f"逃げた不具合を記録した（直した #{a.pr}・持ち込んだ {of}・領域 {' / '.join(areas)}）", [row], {"areas": len(areas)}
+    ), EXIT_OK
 
 
 def cmd_changed(a, root: Path) -> tuple[dict, int]:
@@ -510,11 +566,9 @@ def cmd_changed(a, root: Path) -> tuple[dict, int]:
             return result(TOOL, "ok", f"検査 {a.id} は変更をマージした", [checks[-1]], {}), EXIT_OK
         if res == "no_change":
             return result(TOOL, "stopped", f"検査 {a.id} は変更なし", [checks[-1]], {}), EXIT_PRECONDITION
-        return result(TOOL, "stopped", f"検査 {a.id} は落ちた（{checks[-1].get('failed_at', '')}）",
-                      [checks[-1]], {}), EXIT_VIOLATION
+        return result(TOOL, "stopped", f"検査 {a.id} は落ちた（{checks[-1].get('failed_at', '')}）", [checks[-1]], {}), EXIT_VIOLATION
     if rows and not rows[-1].get("fired"):
-        return result(TOOL, "stopped", f"検査 {a.id} はトリガーが立たず流れていない（変更なし）", [rows[-1]], {}), \
-            EXIT_PRECONDITION
+        return result(TOOL, "stopped", f"検査 {a.id} はトリガーが立たず流れていない（変更なし）", [rows[-1]], {}), EXIT_PRECONDITION
     raise Stop(f"検査 {a.id} の記録が無い")
 
 
@@ -528,20 +582,40 @@ def cmd_stats(a, root: Path) -> tuple[dict, int]:
         # 実装レビューだけの回は次の記録（どちらの検査もレビューを通る）までで切り、
         # 構造改善を含む検査は同じ種類の次の記録までで切る
         review = c.get("only") == "review"
-        nxt = next((d for d in ended[i + 1:] if review or d.get("only") != "review"), None)
+        nxt = next((d for d in ended[i + 1 :] if review or d.get("only") != "review"), None)
         until = parse_at(nxt["at"]) if nxt else clock.now(utc=True)
         escaped = sum(1 for e in events if e["kind"] == "escape" and parse_at(c["at"]) < parse_at(e["at"]) <= until)
-        rows.append({"id": c.get("id"), "at": c["at"], "result": c["result"], "pr": c.get("pr"), "only": c.get("only"),
-                     "findings": c.get("findings") or {}, "escapes_after": escaped})
+        rows.append(
+            {
+                "id": c.get("id"),
+                "at": c["at"],
+                "result": c["result"],
+                "pr": c.get("pr"),
+                "only": c.get("only"),
+                "findings": c.get("findings") or {},
+                "escapes_after": escaped,
+            }
+        )
     fired: dict[str, int] = {}
     for e in evals:
         for t in e.get("fired") or []:
             fired[t] = fired.get(t, 0) + 1
-    metrics = {"evals": len(evals), "fired": sum(1 for e in evals if e.get("fired")), "by_trigger": fired,
-               "checks": len(checks), "failed": sum(1 for c in checks if c.get("result") == "failed"),
-               "escapes": sum(1 for e in events if e["kind"] == "escape"), "log": str(log_path(root))}
-    return result(TOOL, "ok", f"評価 {metrics['evals']} 回（立った {metrics['fired']}）・検査 {len(checks)} 回・"
-                  f"逃げた不具合 {metrics['escapes']} 件", rows, metrics), EXIT_OK
+    metrics = {
+        "evals": len(evals),
+        "fired": sum(1 for e in evals if e.get("fired")),
+        "by_trigger": fired,
+        "checks": len(checks),
+        "failed": sum(1 for c in checks if c.get("result") == "failed"),
+        "escapes": sum(1 for e in events if e["kind"] == "escape"),
+        "log": str(log_path(root)),
+    }
+    return result(
+        TOOL,
+        "ok",
+        f"評価 {metrics['evals']} 回（立った {metrics['fired']}）・検査 {len(checks)} 回・逃げた不具合 {metrics['escapes']} 件",
+        rows,
+        metrics,
+    ), EXIT_OK
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -588,8 +662,15 @@ def main(argv: list[str] | None = None) -> int:
         root = repo_root(a.root)
         if a.cmd == "scope":
             return cmd_scope(a, root)
-        fn = {"eval": cmd_eval, "prepare": cmd_prepare, "finish": cmd_finish, "record": cmd_record,
-              "escape": cmd_escape, "changed": cmd_changed, "stats": cmd_stats}[a.cmd]
+        fn = {
+            "eval": cmd_eval,
+            "prepare": cmd_prepare,
+            "finish": cmd_finish,
+            "record": cmd_record,
+            "escape": cmd_escape,
+            "changed": cmd_changed,
+            "stats": cmd_stats,
+        }[a.cmd]
         out, code = fn(a, root)
     except Stop as e:
         out, code = result(TOOL, "stopped", str(e), [], {}), e.code

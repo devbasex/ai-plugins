@@ -3,6 +3,7 @@
 `Relay` はセッションを切り替える状態機械である。合図の判定の材料（会話の記録）は `claude`、
 入出力と子の起動は `terminal`、記録は `record` が持つ。
 """
+
 from __future__ import annotations
 
 import os
@@ -12,8 +13,24 @@ import time
 
 from . import claude as cl
 from . import record, version_dir
-from .common import (CHILD_FILE, LOCK_FILE, LOG_FILE, MARK_FILE, PID_FILE, QUESTION_FILE, QUESTION_LOCK,
-                     STOP_FILE, _lock, _unlock, env_num, fallback_cwd, parse_iso, quiet_seconds, remove, stamp)
+from .common import (
+    CHILD_FILE,
+    LOCK_FILE,
+    LOG_FILE,
+    MARK_FILE,
+    PID_FILE,
+    QUESTION_FILE,
+    QUESTION_LOCK,
+    STOP_FILE,
+    _lock,
+    _unlock,
+    env_num,
+    fallback_cwd,
+    parse_iso,
+    quiet_seconds,
+    remove,
+    stamp,
+)
 from .mark import asked_after
 from .record import RelayRecord, StartLimit
 from .terminal import StartFailed, Terminal, pty_available, wait_exit_code
@@ -22,8 +39,7 @@ from .terminal import StartFailed, Terminal, pty_available, wait_exit_code
 class Relay:
     """前景に常駐し、区間ごとの claude を擬似端末の子として起動する。"""
 
-    def __init__(self, claude: str, relay_dir: str, marketplace: str, version: str,
-                 term: Terminal, limit: StartLimit):
+    def __init__(self, claude: str, relay_dir: str, marketplace: str, version: str, term: Terminal, limit: StartLimit):
         self.claude = claude
         self.dir = relay_dir
         self.record = RelayRecord(relay_dir)
@@ -51,16 +67,24 @@ class Relay:
 
     # -- 子の起動
 
-    def start_section(self, args: list[str], cwd: str, command: str, from_session: str,
-                      cwd_fallback: str | None = None, carried: list[str] | None = None) -> None:
+    def start_section(
+        self, args: list[str], cwd: str, command: str, from_session: str, cwd_fallback: str | None = None, carried: list[str] | None = None
+    ) -> None:
         self.record.drop_mark()
         remove(self.path(QUESTION_FILE))
         at = self.term.spawn(self.claude, [*(carried or []), *args], cwd, self.env, self.path(CHILD_FILE))
         self.section += 1
         self.started_at = at
-        row = dict(event="start", at=stamp(at), section=self.section, pid=self.term.pid,
-                   command=command, from_session=from_session,
-                   plugin_version=self.version, cwd=cwd)
+        row = dict(
+            event="start",
+            at=stamp(at),
+            section=self.section,
+            pid=self.term.pid,
+            command=command,
+            from_session=from_session,
+            plugin_version=self.version,
+            cwd=cwd,
+        )
         if cwd_fallback is not None:
             row["cwd_fallback"] = cwd_fallback
         if carried is not None:
@@ -98,8 +122,7 @@ class Relay:
             return None
         # (3) 質問の表示中と、合図の後に質問が出たときは書かない（G1）。(4) 合図の後に利用者の入力か背景の処理の起動があれば
         # 書かない。目標が未達の判定が無ければ、合図の後の応答の再開でも書かない（G2）
-        if (os.path.exists(self.path(QUESTION_FILE)) or cancel
-                or asked_after(self.dir, self.path(MARK_FILE))):
+        if os.path.exists(self.path(QUESTION_FILE)) or cancel or asked_after(self.dir, self.path(MARK_FILE)):
             return None
         if not unmet and cl.replied_after(tp, written):
             return None
@@ -130,17 +153,19 @@ class Relay:
         self.halted = True
         self.log(event="stop", section=self.section, reason=reason)
         self.record.drop_mark()
-        self.term.screen(f"ndf-relay: 次の区間を起動しない（{why}）。このまま続けるか、"
-                         "/exit して示されたコマンドを手で入力する")
+        self.term.screen(f"ndf-relay: 次の区間を起動しない（{why}）。このまま続けるか、/exit して示されたコマンドを手で入力する")
 
     # -- 切り替え
 
     def _still_due(self, m) -> bool:
         """`/exit` を書く直前の確かめ直し。質問が無く、合図が同じで、取りやめの行が無いか。"""
         now = self.read_mark()
-        if (os.path.exists(self.path(QUESTION_FILE)) or now is None
-                or now.get("written_at") != m.get("written_at")
-                or asked_after(self.dir, self.path(MARK_FILE))):
+        if (
+            os.path.exists(self.path(QUESTION_FILE))
+            or now is None
+            or now.get("written_at") != m.get("written_at")
+            or asked_after(self.dir, self.path(MARK_FILE))
+        ):
             return False
         tp = m.get("transcript_path") or ""
         if m.get("_unmet"):
@@ -227,8 +252,7 @@ class Relay:
         return 2
 
     def log_end(self, until: float, ended_by: str) -> None:
-        self.log(event="end", section=self.section, pid=self.term.pid,
-                 seconds=round(until - self.started_at, 3), ended_by=ended_by)
+        self.log(event="end", section=self.section, pid=self.term.pid, seconds=round(until - self.started_at, 3), ended_by=ended_by)
 
     def finalize_section(self, m, written: float) -> tuple[dict | None, int | None]:
         """`/exit` の後の後処理。子を終わらせ、読み直した合図から続ける合図か終了コードを決める。
@@ -291,8 +315,7 @@ class Relay:
             try:
                 self.start_section([command], cwd, command, m.get("session_id") or "", fb, carried)
             except StartFailed as e:
-                return self.give_up("start-failed", f"claude を起動できない（{os.strerror(e.err)}）",
-                                    command, errno=e.err)
+                return self.give_up("start-failed", f"claude を起動できない（{os.strerror(e.err)}）", command, errno=e.err)
 
     def close(self) -> None:
         self.limit.release()
@@ -332,8 +355,7 @@ def cmd_run(args: list[str]) -> int:
         cl.say("ラッパーを始めない（作業ディレクトリを作れない）。カットポイントでは示されたコマンドを手で入力する")
         cl.passthrough(claude, args)
     term = Terminal()
-    relay = Relay(claude, relay_dir, got[0], got[1], term,
-                  StartLimit(os.path.join(relay_dir, LOG_FILE)))
+    relay = Relay(claude, relay_dir, got[0], got[1], term, StartLimit(os.path.join(relay_dir, LOG_FILE)))
     # 使うバージョンディレクトリに印を置く。startup はこの印のあるディレクトリを消さない
     inuse = version_dir.claim_inuse()
 

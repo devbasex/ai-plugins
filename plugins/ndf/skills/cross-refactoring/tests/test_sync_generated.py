@@ -9,6 +9,7 @@
 | 同期の後段で落ちても差分を残さない | 残すと次の実行が清浄性のチェックで必ず止まる |
 | 実装担当の置き土産を捨ててから取り込む | 検証を受けていない変更なので公開しない。止まる理由にもしない |
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -19,8 +20,7 @@ from crossref_helpers import make_state_v2, read_state
 
 
 def _git(*args, cwd):
-    return subprocess.run(["git", *args], cwd=cwd, capture_output=True,
-                          text=True, check=True)
+    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True)
 
 
 def _commit(repo, message):
@@ -49,6 +49,7 @@ def _state_with_sync(tmp_path, work, command="true", **over):
 
 
 # ---------- 変更のパスを 1 文字も欠かさず拾う ----------
+
 
 def test_unstaged_change_on_first_line_keeps_full_path(gitfacts, tmp_path):
     """先頭が空白の状態コード（` M`）でも、パスの先頭文字が消えない。
@@ -80,11 +81,11 @@ def test_every_changed_path_is_addable(paths, gitfacts, tmp_path):
 
 # ---------- 同期コミット ----------
 
+
 def test_sync_commits_generated_changes(vocabulary, gitfacts, tmp_path):
     """同期コマンドが作った差分は、進行側のコミットとして積まれる。"""
     work = _make_work(tmp_path)
-    state = read_state(_state_with_sync(
-        tmp_path, work, command="printf 'x = 2\\n' > generated/out.py"))
+    state = read_state(_state_with_sync(tmp_path, work, command="printf 'x = 2\\n' > generated/out.py"))
 
     gitfacts._sync_generated(state)
 
@@ -106,16 +107,15 @@ def test_sync_without_changes_makes_no_commit(gitfacts, tmp_path):
 
 # ---------- 同期の後段で落ちたとき ----------
 
+
 def test_failure_after_sync_discards_produced_changes(refactor_lib, patch_lib, refactor, gitfacts, tmp_path, monkeypatch):
     """`git add` / `git commit` が落ちても、同期が作った差分を残さない。
 
     残すと次の実行は清浄性のチェックで必ず止まり、保留中の push を再試行できない。
     """
     work = _make_work(tmp_path)
-    state = read_state(_state_with_sync(
-        tmp_path, work, command="printf 'x = 2\\n' > generated/out.py"))
-    patch_lib("sh",
-                        lambda *a, **k: refactor_lib.die("commit に失敗しました"))
+    state = read_state(_state_with_sync(tmp_path, work, command="printf 'x = 2\\n' > generated/out.py"))
+    patch_lib("sh", lambda *a, **k: refactor_lib.die("commit に失敗しました"))
 
     with pytest.raises(SystemExit):
         gitfacts._sync_generated(state)
@@ -126,8 +126,7 @@ def test_failure_after_sync_discards_produced_changes(refactor_lib, patch_lib, r
 def test_failed_sync_command_discards_partial_changes(gitfacts, tmp_path):
     """同期コマンド自身が落ちたときも、途中まで書き換えた差分を残さない。"""
     work = _make_work(tmp_path)
-    state = read_state(_state_with_sync(
-        tmp_path, work, command="printf 'x = 2\\n' > generated/out.py; exit 1"))
+    state = read_state(_state_with_sync(tmp_path, work, command="printf 'x = 2\\n' > generated/out.py; exit 1"))
 
     with pytest.raises(SystemExit):
         gitfacts._sync_generated(state)
@@ -136,6 +135,7 @@ def test_failed_sync_command_discards_partial_changes(gitfacts, tmp_path):
 
 
 # ---------- 実装担当が残した未コミット変更 ----------
+
 
 def test_leftover_changes_are_discarded_before_merge(gitfacts, tmp_path):
     """実装担当が残した未コミット変更は、取り込みの前に捨てる。
@@ -172,16 +172,32 @@ def test_discard_keeps_control_directory(gitfacts, tmp_path):
 
 def _fix_state(tmp_path, work, base):
     """修正を 1 回起動した直後の版 2 の状態（`verify` が `fix` を書いた後）。"""
-    item = {"id": "I-001", "rank": 1, "path": "src.py", "symbol": "f", "smell": "long_method",
-            "technique": "extract_method", "severity": "major", "proposed_by": ["codex"],
-            "tests": [], "command": ["pytest", "-q"], "status": "failing",
-            "commits": {"test": None, "implement": "x" * 40, "fix": []},
-            "seconds": {}, "fix_count": 0, "danger": [], "estimated_diff_lines": 10}
+    item = {
+        "id": "I-001",
+        "rank": 1,
+        "path": "src.py",
+        "symbol": "f",
+        "smell": "long_method",
+        "technique": "extract_method",
+        "severity": "major",
+        "proposed_by": ["codex"],
+        "tests": [],
+        "command": ["pytest", "-q"],
+        "status": "failing",
+        "commits": {"test": None, "implement": "x" * 40, "fix": []},
+        "seconds": {},
+        "fix_count": 0,
+        "danger": [],
+        "estimated_diff_lines": 10,
+    }
     return _state_with_sync(
-        tmp_path, work, phase="fix", items=[item], target_scope=["."],
+        tmp_path,
+        work,
+        phase="fix",
+        items=[item],
+        target_scope=["."],
         fix={"items": ["I-001"], "base_sha": base},
-        phases={"fix": {"started_at": "2026-09-24T10:00:00+00:00",
-                        "launch_started_at": "2026-09-24T10:00:00+00:00"}},
+        phases={"fix": {"started_at": "2026-09-24T10:00:00+00:00", "launch_started_at": "2026-09-24T10:00:00+00:00"}},
     )
 
 
@@ -203,7 +219,7 @@ def test_merge_fix_continues_when_impl_left_changes(patch_lib, refactor, tmp_pat
     assert _git("status", "--porcelain", cwd=work).stdout == ""
     state = read_state(state_path)
     assert state["items"][0]["fix_count"] == 1
-    assert state["items"][0]["status"] == "implemented"   # 次の verify が見直す
+    assert state["items"][0]["status"] == "implemented"  # 次の verify が見直す
     assert state["fix"] is None
 
 
@@ -218,9 +234,7 @@ def test_merge_fix_advances_when_the_range_is_undeterminable(patch_lib, refactor
     refactor.cmd_merge_fix(type("A", (), {"id": 130})())
 
     state = read_state(state_path)
-    assert state["items"][0]["fix_count"] == 1, (
-        "範囲を確定できなかったのに修正の回数が進んでいない（無限ループになる）"
-    )
+    assert state["items"][0]["fix_count"] == 1, "範囲を確定できなかったのに修正の回数が進んでいない（無限ループになる）"
     assert state["fix_stats"]["launches"] == 1
 
 

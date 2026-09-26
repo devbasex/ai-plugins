@@ -4,6 +4,7 @@
 しきい値未満は `threshold` で見送る。残りを `path` + `symbol` の組の単位で上位 30 組、
 組の中は上位 3 件まで改修計画へ渡し、外れたものは `rank` で見送る。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -35,12 +36,15 @@ def _reasons(deferred):
 
 # ---------- 鍵が同じ提案の統合 ----------
 
+
 def test_same_target_and_smell_is_merged(proposals):
-    candidates, _ = proposals.build_candidates({
-        "codex": [proposal()],
-        "agy": [proposal(rationale="短い")],
-        "kiro": [proposal(path="src/bar.py")],
-    })
+    candidates, _ = proposals.build_candidates(
+        {
+            "codex": [proposal()],
+            "agy": [proposal(rationale="短い")],
+            "kiro": [proposal(path="src/bar.py")],
+        }
+    )
     assert len(candidates) == 2
     merged = next(i for i in candidates if i["path"] == "src/foo.py")
     assert sorted(merged["proposed_by"]) == ["agy", "codex"]
@@ -48,20 +52,24 @@ def test_same_target_and_smell_is_merged(proposals):
 
 def test_merged_item_keeps_the_most_specific_text(proposals):
     """`rationale` と `plan` は最も具体的なもの（長い方）を採る。"""
-    candidates, _ = proposals.build_candidates({
-        "codex": [proposal(rationale="長い", plan="短")],
-        "agy": [proposal(rationale="短", plan="とても長い手順の説明")],
-    })
+    candidates, _ = proposals.build_candidates(
+        {
+            "codex": [proposal(rationale="長い", plan="短")],
+            "agy": [proposal(rationale="短", plan="とても長い手順の説明")],
+        }
+    )
     assert candidates[0]["rationale"] == "長い"
     assert candidates[0]["plan"] == "とても長い手順の説明"
 
 
 def test_merged_item_takes_the_higher_severity_and_larger_estimate(proposals):
     """見積りを楽観側へ倒さない。差分予算の検証が甘くなるため。"""
-    candidates, _ = proposals.build_candidates({
-        "codex": [proposal(severity="minor", estimated_diff_lines=10)],
-        "agy": [proposal(severity="critical", estimated_diff_lines=90)],
-    })
+    candidates, _ = proposals.build_candidates(
+        {
+            "codex": [proposal(severity="minor", estimated_diff_lines=10)],
+            "agy": [proposal(severity="critical", estimated_diff_lines=90)],
+        }
+    )
     assert candidates[0]["severity"] == "critical"
     assert candidates[0]["estimated_diff_lines"] == 90
 
@@ -73,6 +81,7 @@ def test_a_proposal_without_path_or_symbol_is_ignored(proposals):
 
 # ---------- 語彙としきい値（AC9） ----------
 
+
 @pytest.mark.parametrize("field", ["smell", "technique", "severity"])
 def test_an_out_of_vocabulary_proposal_is_deferred_as_vocabulary(proposals, field):
     candidates, deferred = proposals.build_candidates({"codex": [proposal(**{field: "日本語"})]})
@@ -81,19 +90,21 @@ def test_an_out_of_vocabulary_proposal_is_deferred_as_vocabulary(proposals, fiel
 
 
 def test_a_proposal_below_the_threshold_is_deferred_as_threshold(proposals):
-    candidates, deferred = proposals.build_candidates(
-        {"codex": [proposal(severity="minor")]}, threshold="major")
+    candidates, deferred = proposals.build_candidates({"codex": [proposal(severity="minor")]}, threshold="major")
     assert candidates == []
     assert _reasons(deferred) == ["threshold"]
 
 
 # ---------- 候補の切り出し（決定 17） ----------
 
+
 def test_candidates_are_ordered_by_agreement_then_severity(proposals):
-    candidates, _ = proposals.build_candidates({
-        "codex": [proposal(symbol="a", severity="critical"), proposal(symbol="b")],
-        "kiro": [proposal(symbol="b")],
-    })
+    candidates, _ = proposals.build_candidates(
+        {
+            "codex": [proposal(symbol="a", severity="critical"), proposal(symbol="b")],
+            "kiro": [proposal(symbol="b")],
+        }
+    )
     assert [c["symbol"] for c in candidates] == ["b", "a"]
     assert [c["id"] for c in candidates] == ["C-001", "C-002"]
 
@@ -107,8 +118,7 @@ def test_only_the_top_30_groups_are_passed_to_the_plan(proposals):
 
 def test_a_group_passes_at_most_three_proposals_and_does_not_use_a_group_slot(proposals):
     """組の中は 3 件まで。4 件目は `rank`。組の数は件数で減らない。"""
-    same = [proposal(smell=s) for s in ("long_method", "deep_nesting", "magic_value",
-                                         "dead_code")]
+    same = [proposal(smell=s) for s in ("long_method", "deep_nesting", "magic_value", "dead_code")]
     others = [proposal(symbol=f"g{n:02d}") for n in range(29)]
     candidates, deferred = proposals.build_candidates({"codex": same + others})
     assert len([c for c in candidates if c["symbol"] == "Foo.handle"]) == 3
@@ -118,12 +128,12 @@ def test_a_group_passes_at_most_three_proposals_and_does_not_use_a_group_slot(pr
 
 # ---------- 取り込み（merge-proposals） ----------
 
+
 def _run(cmd_propose, path):
     cmd_propose.cmd_merge_proposals(argparse.Namespace(id=130))
 
 
-def test_merge_proposals_records_candidates_and_the_propose_phase(
-        tmp_path, cmd_propose, env_tmp_dir):
+def test_merge_proposals_records_candidates_and_the_propose_phase(tmp_path, cmd_propose, env_tmp_dir):
     path = make_state_v2(tmp_path, tmp_path / "work")
     env_tmp_dir(path)
     write_result(path, "codex-propose-rf130", {"items": [proposal()]})
@@ -138,8 +148,7 @@ def test_merge_proposals_records_candidates_and_the_propose_phase(
     assert state["phases"]["propose"]["ended_at"]
 
 
-def test_merge_proposals_with_no_candidates_exits_2_and_is_idempotent(
-        tmp_path, cmd_propose, env_tmp_dir):
+def test_merge_proposals_with_no_candidates_exits_2_and_is_idempotent(tmp_path, cmd_propose, env_tmp_dir):
     path = make_state_v2(tmp_path, tmp_path / "work")
     env_tmp_dir(path)
     write_result(path, "codex-propose-rf130", {"items": []})

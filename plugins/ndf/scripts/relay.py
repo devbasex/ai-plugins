@@ -12,6 +12,7 @@
 どちらも無ければ理由を 1 行出し、`run` なら本物の claude をそのまま起動する。標準ライブラリだけを使う。
 規約は skills/development-workflow/references/relay.md にある。
 """
+
 from __future__ import annotations
 
 import os
@@ -53,8 +54,7 @@ def real_claude() -> str | None:
 
 
 def missing(argv: list[str]) -> int:
-    sys.stderr.write(f"ndf-relay: ラッパーの中身（relay_lib）が {HERE} に見つからない。"
-                     "/ndf:install-wrapper を打ち直す\n")
+    sys.stderr.write(f"ndf-relay: ラッパーの中身（relay_lib）が {HERE} に見つからない。/ndf:install-wrapper を打ち直す\n")
     if argv[:1] == ["run"] and os.environ.get("NDF_RELAY_DEPTH", "0") in ("", "0"):
         claude = real_claude()
         if claude:

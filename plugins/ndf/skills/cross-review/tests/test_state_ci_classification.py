@@ -6,6 +6,7 @@
 **分からない名前は code-related へ倒す。** 継続的統合の名前はリポジトリごとに違い、
 一覧に無い名前を無害と決めつけると、落ちたチェックを通したまま収束させることになる。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -53,6 +54,7 @@ def _write(tmp_dir: pathlib.Path, state: dict) -> None:
 
 # ---------------- 振り分けそのもの ----------------
 
+
 def test_an_unknown_name_is_treated_as_code_related(state_mod):
     """一覧に無い名前は code-related として扱う（保守的な既定）。"""
     got = review_lib.ci._classify_ci([_run("我々の知らないチェック")])
@@ -82,20 +84,27 @@ def test_a_code_name_that_starts_with_a_meta_word_is_not_meta(state_mod):
 
 def test_a_meta_word_between_separators_is_still_meta(state_mod):
     """区切りで挟まれた語は meta-only のままにする。"""
-    got = review_lib.ci._classify_ci([
-        _run("meta"), _run("meta / labels"), _run("pr-meta"), _run("check_pr_requirements"),
-    ])
+    got = review_lib.ci._classify_ci(
+        [
+            _run("meta"),
+            _run("meta / labels"),
+            _run("pr-meta"),
+            _run("check_pr_requirements"),
+        ]
+    )
 
     assert got.meta_failed == ["meta", "meta / labels", "pr-meta", "check_pr_requirements"]
     assert got.code_failed == []
 
 
 def test_a_run_that_has_not_completed_is_neither(state_mod):
-    got = review_lib.ci._classify_ci([
-        _run("pytest", status="in_progress", conclusion=""),
-        _run("lint", status="queued", conclusion=""),
-        _run("build", conclusion="success"),
-    ])
+    got = review_lib.ci._classify_ci(
+        [
+            _run("pytest", status="in_progress", conclusion=""),
+            _run("lint", status="queued", conclusion=""),
+            _run("build", conclusion="success"),
+        ]
+    )
 
     assert got.code_failed == []
     assert got.meta_failed == []
@@ -103,6 +112,7 @@ def test_a_run_that_has_not_completed_is_neither(state_mod):
 
 
 # ---------------- 判定と修正の取り込みが同じ実装を呼ぶ ----------------
+
 
 def test_the_judge_and_the_merge_share_one_classification(tmp_dir, state_mod, monkeypatch):
     """同じ名前の一覧に対して、判定と修正の取り込みが同じ判断へ至る。"""
@@ -118,16 +128,25 @@ def test_the_judge_and_the_merge_share_one_classification(tmp_dir, state_mod, mo
 
     # 修正の取り込み側: 申告された失敗の名前を読む
     approved = {
-        "round": 1, "pr": PR, "started_at": "2026-09-04T00:00:00+00:00",
+        "round": 1,
+        "pr": PR,
+        "started_at": "2026-09-04T00:00:00+00:00",
         "codex": {"intent": "APPROVE", "by_severity": {}},
         "agy": {"intent": "APPROVE", "by_severity": {}},
         "head_sha": "b87b3ae",
     }
     _write(tmp_dir, _state([approved]))
-    (tmp_dir / f"fix-pr{PR}-result.json").write_text(json.dumps({
-        "pr": PR, "fix_commit": "abc1234", "ci_status": "FAILURE",
-        "ci_failed_checks": ["pytest"], "fixed_count": 1,
-    }))
+    (tmp_dir / f"fix-pr{PR}-result.json").write_text(
+        json.dumps(
+            {
+                "pr": PR,
+                "fix_commit": "abc1234",
+                "ci_status": "FAILURE",
+                "ci_failed_checks": ["pytest"],
+                "fixed_count": 1,
+            }
+        )
+    )
     with pytest.raises(SystemExit) as merge_exit:
         review_lib.commands.merge_fix.cmd_merge_fix(argparse.Namespace(pr=PR, file=None))
 
@@ -136,28 +155,35 @@ def test_the_judge_and_the_merge_share_one_classification(tmp_dir, state_mod, mo
     with pytest.raises(SystemExit) as judge_exit:
         review_lib.commands.judge.cmd_judge(argparse.Namespace(pr=PR))
 
-    assert merge_exit.value.code == 3   # 修正の取り込みは中断する
-    assert judge_exit.value.code == 2   # 判定は中断せず修正へ回す
+    assert merge_exit.value.code == 3  # 修正の取り込みは中断する
+    assert judge_exit.value.code == 2  # 判定は中断せず修正へ回す
     assert seen == [["pytest"], ["pytest"]]
 
 
 def test_merge_fix_continues_when_only_meta_checks_failed(tmp_dir, state_mod):
     approved = {
-        "round": 1, "pr": PR, "started_at": "2026-09-04T00:00:00+00:00",
+        "round": 1,
+        "pr": PR,
+        "started_at": "2026-09-04T00:00:00+00:00",
         "codex": {"intent": "APPROVE", "by_severity": {}},
         "agy": {"intent": "APPROVE", "by_severity": {}},
         "head_sha": "b87b3ae",
     }
     _write(tmp_dir, _state([approved]))
-    (tmp_dir / f"fix-pr{PR}-result.json").write_text(json.dumps({
-        "pr": PR, "fix_commit": "abc1234", "ci_status": "FAILURE",
-        "ci_failed_checks": ["labels"], "fixed_count": 1,
-    }))
+    (tmp_dir / f"fix-pr{PR}-result.json").write_text(
+        json.dumps(
+            {
+                "pr": PR,
+                "fix_commit": "abc1234",
+                "ci_status": "FAILURE",
+                "ci_failed_checks": ["labels"],
+                "fixed_count": 1,
+            }
+        )
+    )
 
     review_lib.commands.merge_fix.cmd_merge_fix(argparse.Namespace(pr=PR, file=None))
 
     saved = json.loads((tmp_dir / f"cross-review-pr{PR}-state.json").read_text())
-    assert saved["rounds"][-1]["fix"]["ci_note"] == (
-        "メタチェックのみ失敗: ['labels'] — コードと無関係のため継続"
-    )
+    assert saved["rounds"][-1]["fix"]["ci_note"] == ("メタチェックのみ失敗: ['labels'] — コードと無関係のため継続")
     assert saved["final"] is None

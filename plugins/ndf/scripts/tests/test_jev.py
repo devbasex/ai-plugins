@@ -3,6 +3,7 @@
 HTTP は偽の応答へ差し替える。鍵の値はどこにも書かない（`AI_GATEWAY_API_KEY` は
 テストの中だけで偽の値を置く）。
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -46,16 +47,14 @@ def test_boolean_false_reports_the_confidence_of_the_false_side(jev):
 
 
 def test_score_picks_the_most_probable_criterion_and_the_reported_confidence(jev):
-    post = _replying({"q": {"type": "score", "probabilities": {"0": 0.1, "1": 0.2, "2": 0.7},
-                            "confidence": 0.55}})
+    post = _replying({"q": {"type": "score", "probabilities": {"0": 0.1, "1": 0.2, "2": 0.7}, "confidence": 0.55}})
     assert jev.ask_score("s", "i", ["low", "medium", "high"], post=post) == ("high", 0.55)
     body, _ = post.sent[0]
     assert body["questions"]["q"]["criteria"] == ["low", "medium", "high"]
     assert body["model"] == "typesafe-ai/jev"
 
 
-@pytest.mark.parametrize("answers", [None, {}, {"q": {"type": "score"}},
-                                     {"q": {"type": "score", "probabilities": {"9": 1.0}}}])
+@pytest.mark.parametrize("answers", [None, {}, {"q": {"type": "score"}}, {"q": {"type": "score", "probabilities": {"9": 1.0}}}])
 def test_a_failed_or_malformed_answer_is_none(jev, answers):
     assert jev.ask_score("s", "i", ["low", "high"], post=_replying(answers)) is None
     assert jev.ask_boolean("s", "i", post=_replying(answers)) is None

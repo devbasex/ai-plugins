@@ -12,6 +12,7 @@
 後半は、手順のスクリプトが共通に使う小さな関数（git / gh の呼び出し、版の形、plugin の置き場所）。
 標準ライブラリだけで書く。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -38,12 +39,12 @@ REQUIRED = ("tool", "status", "summary", "items", "metrics")
 OPTIONAL = ("presentation_path", "next")
 
 EXIT_OK = 0
-EXIT_VIOLATION = 1      # チェックで違反あり・手順が失敗した
-EXIT_UNREADABLE = 2     # 読めない・呼び出しの誤り（「一致」「0 件」と読ませない）
-EXIT_PRECONDITION = 3   # 前提が無い（宣言・認証・対象のファイル）、または各スクリプトが定めた正常な否定の結果
-                        # （立たない・変更なし・飛ばしてよい）。読めないときは 2 で返し、3 と混ぜない
-EXIT_GATE = 10          # 10〜19: 関門（人の同意が要る）
-EXIT_PAUSE = 20         # 20〜29: LLM の判断待ち
+EXIT_VIOLATION = 1  # チェックで違反あり・手順が失敗した
+EXIT_UNREADABLE = 2  # 読めない・呼び出しの誤り（「一致」「0 件」と読ませない）
+EXIT_PRECONDITION = 3  # 前提が無い（宣言・認証・対象のファイル）、または各スクリプトが定めた正常な否定の結果
+# （立たない・変更なし・飛ばしてよい）。読めないときは 2 で返し、3 と混ぜない
+EXIT_GATE = 10  # 10〜19: 関門（人の同意が要る）
+EXIT_PAUSE = 20  # 20〜29: LLM の判断待ち
 
 GATE_CODES = range(10, 20)
 PAUSE_CODES = range(20, 30)
@@ -98,10 +99,10 @@ def validate_result(obj, code: int | None = None) -> list[str]:
     return errs
 
 
-def result(tool: str, status: str, summary: str, items=None, metrics=None,
-           presentation_path: str | None = None, next: str | None = None) -> dict:
-    out = {"tool": tool, "status": status, "summary": summary,
-           "items": list(items or []), "metrics": dict(metrics or {})}
+def result(
+    tool: str, status: str, summary: str, items=None, metrics=None, presentation_path: str | None = None, next: str | None = None
+) -> dict:
+    out = {"tool": tool, "status": status, "summary": summary, "items": list(items or []), "metrics": dict(metrics or {})}
     if presentation_path:
         out["presentation_path"] = str(presentation_path)
     if next:
@@ -128,6 +129,7 @@ def emit(obj: dict, code: int | None = None, stream=None) -> "NoReturn":  # noqa
 
 # --- 承認の関門の提示物 --------------------------------------------------------
 
+
 def presentation_dir() -> Path:
     base = os.environ.get("NDF_PRESENTATION_DIR") or str(Path(tempfile.gettempdir()) / "ndf")
     d = Path(base)
@@ -135,8 +137,7 @@ def presentation_dir() -> Path:
     return d
 
 
-def approval_present(tool: str, name: str, *, title: str, targets, change: str,
-                     judge, consent, rollback: str, path=None) -> str:
+def approval_present(tool: str, name: str, *, title: str, targets, change: str, judge, consent, rollback: str, path=None) -> str:
     """approval-request.md の 2 層の形で提示物の Markdown を書き出し、パスを返す。
 
     targets: [{"url", "title"?, "base_head"?}]（URL は生のまま書く）
@@ -157,8 +158,7 @@ def approval_present(tool: str, name: str, *, title: str, targets, change: str,
         lines.append(f"- {url}" + (f"  {t['title']}" if t.get("title") else ""))
         if t.get("base_head"):
             lines.append(f"  - ベースと head: {t['base_head']}")
-    lines += [f"- 変更量: {change}", "", "## 2. 承認の判断に使うもの", "",
-              "| 項目 | 内容 |", "| --- | --- |"]
+    lines += [f"- 変更量: {change}", "", "## 2. 承認の判断に使うもの", "", "| 項目 | 内容 |", "| --- | --- |"]
     for k, v in judge:
         lines.append(f"| {k} | {str(v).replace('|', chr(92) + '|').replace(chr(10), '<br>')} |")
     lines += ["", "## 同意を求めること", ""]
@@ -200,6 +200,7 @@ def repo_slug(root):
 
 def _has_gh():
     from shutil import which
+
     return which("gh") is not None
 
 
@@ -229,8 +230,7 @@ def base_of(v):
 def plugin_dir(root, name):
     d = root / "plugins" / name if name in ("ndf", "playwright-kit") else root / "plugins" / "mcp" / name
     if not (d / ".claude-plugin" / "plugin.json").is_file():
-        raise StepError(f"プラグインが無い: {name}（{d.relative_to(root)}/.claude-plugin/plugin.json）",
-                        EXIT_PRECONDITION)
+        raise StepError(f"プラグインが無い: {name}（{d.relative_to(root)}/.claude-plugin/plugin.json）", EXIT_PRECONDITION)
     return d
 
 

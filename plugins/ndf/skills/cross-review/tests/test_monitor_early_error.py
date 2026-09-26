@@ -9,6 +9,7 @@
 codex がレビュー対象の doc / テストコードを echo した際に上記が err.log に書かれることで、
 従来の monitor.py は無関係なドキュメント・コード記述を fatal とみなしてプロセスを kill していた。
 """
+
 from __future__ import annotations
 
 import pathlib
@@ -77,7 +78,7 @@ def test_grep_style_source_citation_is_benign(tmp_path, monitor_mod):
     """
     log = _write(
         tmp_path / "err.log",
-        '/work/worktrees/pr23/plugins/ndf/skills/cross-review/tests/'
+        "/work/worktrees/pr23/plugins/ndf/skills/cross-review/tests/"
         'test_monitor_early_error.py:22:    log = _write(tmp_path / "err.log", '
         '"quota exceeded: please upgrade\\n")\n',
     )
@@ -128,7 +129,7 @@ def test_match_is_quoted_helper(monitor_mod):
 
 def test_escaped_double_quotes_do_not_quote_a_fatal_match(tmp_path, monitor_mod):
     """現状固定: `\\"` は引用符を開かず、後続の fatal を隠さない。"""
-    line = r'x = \"a\"; quota exceeded: upgrade'
+    line = r"x = \"a\"; quota exceeded: upgrade"
     start = line.index("quota exceeded")
     end = start + len("quota exceeded")
 
@@ -140,10 +141,6 @@ def test_escaped_double_quotes_do_not_quote_a_fatal_match(tmp_path, monitor_mod)
 
 def test_fatal_detected_after_preceding_benign_hit(tmp_path, monitor_mod):
     """先行する benign 引用行があっても走査を継続し、後続の本物 fatal 行を検出する。"""
-    content = (
-        "| doc | explanation of `quota exceeded` pattern |\n"
-        "quota exceeded: please upgrade\n"
-    )
+    content = "| doc | explanation of `quota exceeded` pattern |\nquota exceeded: please upgrade\n"
     log = _write(tmp_path / "err.log", content)
     assert monitor_mod._scan_early_fatal(log) == "quota exceeded: please upgrade"
-

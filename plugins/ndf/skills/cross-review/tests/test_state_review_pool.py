@@ -9,6 +9,7 @@
 **終了基準は「新しい指摘が出ない」である。** 全員 `APPROVE` は、最も止まらない参加者に
 律速される。同じ論点の再提出では止まる。
 """
+
 from __future__ import annotations
 
 import json
@@ -63,13 +64,19 @@ def _state(tmp_path, **over):
 def _round(round_no, reviewers, verdicts, pr=500):
     """1 ラウンド分の記録。`verdicts` は `{担当: intent}`。"""
     entry = {
-        "round": round_no, "pr": pr, "reviewers": list(reviewers),
+        "round": round_no,
+        "pr": pr,
+        "reviewers": list(reviewers),
         "started_at": "2026-09-04T00:00:00",
     }
     for name, intent in verdicts.items():
-        entry[name] = {"intent": intent, "posted_as": "COMMENT", "comments": 0,
-                       "review_url": "https://x/pull/500#pullrequestreview-1",
-                       "by_severity": {"critical": 0, "major": 0, "minor": 0, "nit": 0}}
+        entry[name] = {
+            "intent": intent,
+            "posted_as": "COMMENT",
+            "comments": 0,
+            "review_url": "https://x/pull/500#pullrequestreview-1",
+            "by_severity": {"critical": 0, "major": 0, "minor": 0, "nit": 0},
+        }
     return entry
 
 
@@ -80,9 +87,9 @@ def _no_external(state_mod, monkeypatch, tmp_path):
     monkeypatch.setattr(review_lib.posts, "_auto_flush", lambda pr: None)
     monkeypatch.setattr(review_lib.posts, "_pending_posts", lambda pr: 0)
     monkeypatch.setattr(review_lib.findings, "_record_carried_over", lambda *a, **k: False)
-    monkeypatch.setattr(review_lib.ci, "_round_ci", lambda *a, **k: {"verdict": "success",
-                                                             "failed": [], "pending": [],
-                                                             "note": "", "reason": ""})
+    monkeypatch.setattr(
+        review_lib.ci, "_round_ci", lambda *a, **k: {"verdict": "success", "failed": [], "pending": [], "note": "", "reason": ""}
+    )
 
 
 def _payload(tmp_path, agent, pr, round_no, comments):
@@ -97,6 +104,7 @@ def _comment(path="src/a.py", line=10, body="ここを直す"):
 
 
 # ---------- 母集合 ----------
+
 
 def test_a_host_only_state_keeps_reviewers_other_than_the_host(state_mod, tmp_path):
     """`host` だけを持つ古い状態ファイルでは、担当はホストを含まない 2 者のままである。"""
@@ -129,6 +137,7 @@ def test_recorded_reviewers_win_over_the_rotation(state_mod, tmp_path):
 
 # ---------- 終了基準: 新規の指摘 ----------
 
+
 def test_no_findings_converges_on_the_first_round(state_mod, tmp_path, capsys):
     """指摘が 0 件のラウンドは、初回でも収束する。
 
@@ -136,8 +145,7 @@ def test_no_findings_converges_on_the_first_round(state_mod, tmp_path, capsys):
     指摘が 0 件になるため、新規性は測れないものとして扱い（出力は `-`）、従来どおり
     全員が pass かどうかで収束を決める。
     """
-    _state(tmp_path, rounds=[_round(1, ["codex", "agy"],
-                                    {"codex": "APPROVE", "agy": "APPROVE"})])
+    _state(tmp_path, rounds=[_round(1, ["codex", "agy"], {"codex": "APPROVE", "agy": "APPROVE"})])
     with pytest.raises(SystemExit) as e:
         review_lib.commands.judge.cmd_judge(type("A", (), {"pr": 500})())
     assert e.value.code == 0
@@ -149,10 +157,13 @@ def test_only_repeated_findings_converge(state_mod, tmp_path, capsys):
 
     全員 `APPROVE` は最も止まらない参加者に律速される。同じ論点の再提出では止まる。
     """
-    _state(tmp_path, rounds=[
-        _round(1, ["codex", "agy"], {"codex": "APPROVE", "agy": "REQUEST_CHANGES"}),
-        _round(2, ["codex", "agy"], {"codex": "APPROVE", "agy": "REQUEST_CHANGES"}),
-    ])
+    _state(
+        tmp_path,
+        rounds=[
+            _round(1, ["codex", "agy"], {"codex": "APPROVE", "agy": "REQUEST_CHANGES"}),
+            _round(2, ["codex", "agy"], {"codex": "APPROVE", "agy": "REQUEST_CHANGES"}),
+        ],
+    )
     _payload(tmp_path, "agy", 500, 1, [_comment()])
     _payload(tmp_path, "agy", 500, 2, [_comment()])
 
@@ -164,10 +175,13 @@ def test_only_repeated_findings_converge(state_mod, tmp_path, capsys):
 
 def test_a_new_finding_keeps_the_loop_running(state_mod, tmp_path, capsys):
     """新しい観点が出ているあいだは回る。"""
-    _state(tmp_path, rounds=[
-        _round(1, ["codex", "agy"], {"codex": "APPROVE", "agy": "REQUEST_CHANGES"}),
-        _round(2, ["codex", "agy"], {"codex": "APPROVE", "agy": "REQUEST_CHANGES"}),
-    ])
+    _state(
+        tmp_path,
+        rounds=[
+            _round(1, ["codex", "agy"], {"codex": "APPROVE", "agy": "REQUEST_CHANGES"}),
+            _round(2, ["codex", "agy"], {"codex": "APPROVE", "agy": "REQUEST_CHANGES"}),
+        ],
+    )
     _payload(tmp_path, "agy", 500, 1, [_comment()])
     _payload(tmp_path, "agy", 500, 2, [_comment(), _comment("src/b.py", 99, "別の指摘")])
 
@@ -179,10 +193,11 @@ def test_a_new_finding_keeps_the_loop_running(state_mod, tmp_path, capsys):
 
 def test_carried_over_findings_win_over_the_new_finding_count(state_mod, tmp_path, monkeypatch):
     """引き継いだ指摘があるラウンドは、新規 0 件でも修正へ回る。"""
-    _state(tmp_path,
-           carried_over={"count": 2, "thread_ids": ["a", "b"], "fixed_in_round": None},
-           rounds=[_round(1, ["codex", "agy"],
-                          {"codex": "APPROVE", "agy": "APPROVE"})])
+    _state(
+        tmp_path,
+        carried_over={"count": 2, "thread_ids": ["a", "b"], "fixed_in_round": None},
+        rounds=[_round(1, ["codex", "agy"], {"codex": "APPROVE", "agy": "APPROVE"})],
+    )
     with pytest.raises(SystemExit) as e:
         review_lib.commands.judge.cmd_judge(type("A", (), {"pr": 500})())
     assert e.value.code == 2
@@ -190,9 +205,7 @@ def test_carried_over_findings_win_over_the_new_finding_count(state_mod, tmp_pat
 
 def test_judge_prints_intents_by_reviewer_name(state_mod, tmp_path, capsys):
     """判定の出力は担当名を含む 1 変数で返す。担当は 4 つの名前を取りうる。"""
-    _state(tmp_path, host="codex",
-           rounds=[_round(1, ["claude", "kiro"],
-                          {"claude": "APPROVE", "kiro": "APPROVE"})])
+    _state(tmp_path, host="codex", rounds=[_round(1, ["claude", "kiro"], {"claude": "APPROVE", "kiro": "APPROVE"})])
     with pytest.raises(SystemExit):
         review_lib.commands.judge.cmd_judge(type("A", (), {"pr": 500})())
     out = capsys.readouterr().out
@@ -201,15 +214,19 @@ def test_judge_prints_intents_by_reviewer_name(state_mod, tmp_path, capsys):
 
 # ---------- 振動検知との順序 ----------
 
+
 def test_a_fully_repeated_round_converges_instead_of_oscillating(state_mod, tmp_path):
     """新規 0 件のラウンドは重複率 1.0 になる。**収束を先に見る。**
 
     順序を逆にすると、収束すべきラウンドが中断として落ちる。
     """
-    _state(tmp_path, rounds=[
-        _round(1, ["codex", "agy"], {"codex": "APPROVE", "agy": "REQUEST_CHANGES"}),
-        _round(2, ["codex", "agy"], {"codex": "APPROVE", "agy": "REQUEST_CHANGES"}),
-    ])
+    _state(
+        tmp_path,
+        rounds=[
+            _round(1, ["codex", "agy"], {"codex": "APPROVE", "agy": "REQUEST_CHANGES"}),
+            _round(2, ["codex", "agy"], {"codex": "APPROVE", "agy": "REQUEST_CHANGES"}),
+        ],
+    )
     _payload(tmp_path, "agy", 500, 1, [_comment()])
     _payload(tmp_path, "agy", 500, 2, [_comment()])
 
@@ -219,6 +236,7 @@ def test_a_fully_repeated_round_converges_instead_of_oscillating(state_mod, tmp_
 
 
 # ---------- init / start-round ----------
+
 
 def test_start_round_records_the_reviewers(state_mod, tmp_path, capsys, monkeypatch):
     """ラウンドを開くときに担当を決めて残す。後から引き直すと記録とずれる。"""
@@ -248,6 +266,7 @@ def test_read_result_accepts_every_runtime(state_mod):
 
 
 # ---------- --only と母集合の相互作用 ----------
+
 
 def test_only_narrows_the_round_reviewers(state_mod, tmp_path):
     """`--only` を指定したラウンドの担当は、その 1 者だけになる。
@@ -279,8 +298,7 @@ def test_init_accepts_the_host_as_only(state_mod, tmp_path, monkeypatch):
 
 def test_judge_returns_the_relaunch_targets_as_a_list(state_mod, tmp_path, capsys):
     """起動し直す担当は名前の一覧で返す。`both` は 2 者だけを指す語である。"""
-    _state(tmp_path, host="codex",
-           rounds=[_round(1, ["claude", "kiro"], {"claude": "APPROVE"})])
+    _state(tmp_path, host="codex", rounds=[_round(1, ["claude", "kiro"], {"claude": "APPROVE"})])
     with pytest.raises(SystemExit) as e:
         review_lib.commands.judge.cmd_judge(type("A", (), {"pr": 500})())
     assert e.value.code == 7
@@ -323,10 +341,15 @@ def test_report_shows_every_reviewer_that_took_part(state_mod, tmp_path, capsys)
     2 者を固定した表のままだと、`claude` / `kiro` が担当したラウンドの結果が読めない。
     **利用者が結果を確認できないまま収束する。**
     """
-    _state(tmp_path, host="codex", final="approved", rounds=[
-        _round(1, ["claude", "kiro"], {"claude": "APPROVE", "kiro": "REQUEST_CHANGES"}),
-        _round(2, ["agy", "claude"], {"agy": "APPROVE", "claude": "APPROVE"}),
-    ])
+    _state(
+        tmp_path,
+        host="codex",
+        final="approved",
+        rounds=[
+            _round(1, ["claude", "kiro"], {"claude": "APPROVE", "kiro": "REQUEST_CHANGES"}),
+            _round(2, ["agy", "claude"], {"agy": "APPROVE", "claude": "APPROVE"}),
+        ],
+    )
     review_lib.commands.report.cmd_report(type("A", (), {"pr": 500})())
     out = capsys.readouterr().out
     assert "claude=APPROVE" in out
@@ -342,12 +365,13 @@ REPO_INIT = "acme/demo"
 
 def _fake_probe(failing: dict[str, str], calls: list[list[str]], skipped: bool = False):
     """止めない確認の差し替え。`failing` の名前だけ通らず、理由を `detail` に入れる。"""
+
     def probe(runtimes, *, info, env=None):
         calls.append(list(runtimes))
         if skipped:
             return {}, True
-        return ({r: {"command": r, "ok": r not in failing, "detail": failing.get(r, "")}
-                 for r in runtimes}, False)
+        return ({r: {"command": r, "ok": r not in failing, "detail": failing.get(r, "")} for r in runtimes}, False)
+
     return probe
 
 
@@ -377,15 +401,16 @@ def new_init(state_mod, monkeypatch, tmp_path):
     """新規の初期化を GitHub と git に触れずに通す。"""
     (tmp_path / "wt").mkdir(exist_ok=True)
     monkeypatch.setattr(review_lib.github, "_repo_from_git", lambda: REPO_INIT)
-    monkeypatch.setattr(review_lib.github, "_fetch_pr_metadata", lambda pr, repo=None:
-                        review_lib.github.PrMetadata(REPO_INIT, "author", "feat/x", "abc",
-                                             "develop", False, 4000, None))
+    monkeypatch.setattr(
+        review_lib.github,
+        "_fetch_pr_metadata",
+        lambda pr, repo=None: review_lib.github.PrMetadata(REPO_INIT, "author", "feat/x", "abc", "develop", False, 4000, None),
+    )
     monkeypatch.setattr(review_lib.github, "_viewer_login", lambda: "viewer")
     monkeypatch.setattr(review_lib.github, "_fetch_changed_files", lambda pr, repo: [])
     monkeypatch.setattr(review_lib.workspace, "_is_registered_worktree", lambda path: True)
     monkeypatch.setattr(review_lib.workspace, "_sync_worktree", lambda *a, **k: None)
-    monkeypatch.setattr(subprocess, "run", lambda *a, **k:
-                        __import__("subprocess").CompletedProcess(a[0], 0, stdout="", stderr=""))
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: __import__("subprocess").CompletedProcess(a[0], 0, stdout="", stderr=""))
     monkeypatch.setattr(review_lib.commands.start_round, "_sync_before_round", lambda st, pr: None)
     calls: list[list[str]] = []
 
@@ -493,8 +518,7 @@ def test_one_available_reviewer_is_backed_by_a_second_copy(new_init, state_mod, 
     assert st["participants"]["available"] == ["codex"]
     assert st["participants"]["fallback"] == []
     assert new_init.calls == [["claude", "codex", "kiro"]]
-    assert "⚠ 使える者が 1 者のため、席を同じランタイムの 2 つ目で埋めます（観点が減ります）" \
-        in capsys.readouterr().err
+    assert "⚠ 使える者が 1 者のため、席を同じランタイムの 2 つ目で埋めます（観点が減ります）" in capsys.readouterr().err
     assert _start_round(state_mod, tmp_path) == ["codex", "codex-2"]
 
 
@@ -554,6 +578,7 @@ def test_the_host_is_not_probed_separately_when_it_was_excluded(new_init, capsys
 
 # ---------- 読めないディレクトリを含む PATH（#813: AC10） ----------
 
+
 def _stub_cli(bin_dir, *names: str) -> None:
     """確認コマンドが終了コード 0 で終わる短い実行ファイルを置く。"""
     bin_dir.mkdir(exist_ok=True)
@@ -570,12 +595,12 @@ def _real_subprocess(state_mod, monkeypatch):
     モジュールのため、属性を戻すと開始の手順の側まで本物になる。認証の確認が見る
     名前だけを別の入れ物へ向けて、2 つを分ける。
     """
-    monkeypatch.setattr(review_lib.participants.auth, "subprocess", types.SimpleNamespace(
-        run=_REAL_RUN, TimeoutExpired=subprocess.TimeoutExpired))
+    monkeypatch.setattr(
+        review_lib.participants.auth, "subprocess", types.SimpleNamespace(run=_REAL_RUN, TimeoutExpired=subprocess.TimeoutExpired)
+    )
 
 
-def test_init_starts_when_an_unreadable_path_hides_a_missing_cli(
-        new_init, state_mod, monkeypatch, tmp_path, capsys):
+def test_init_starts_when_an_unreadable_path_hides_a_missing_cli(new_init, state_mod, monkeypatch, tmp_path, capsys):
     """AC10: 読めないディレクトリを含む PATH で CLI が 1 つ欠けても、開始の手順は終わる。
 
     権限が効かない実行者（root）では、欠けた CLI の理由が「コマンドが見つかりません」に
@@ -599,25 +624,29 @@ def test_init_starts_when_an_unreadable_path_hides_a_missing_cli(
 
 def test_init_starts_when_a_probe_cannot_be_launched(new_init, state_mod, monkeypatch, tmp_path):
     """AC10: 起動できない例外がどの実行者でも「外して続ける」になることを確かめる。"""
+
     def run(cmd, **kwargs):
         if cmd[0] == "kiro-cli":
             raise PermissionError(13, "Permission denied")
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
-    monkeypatch.setattr(review_lib.participants.auth, "subprocess", types.SimpleNamespace(
-        run=run, TimeoutExpired=subprocess.TimeoutExpired))
+    monkeypatch.setattr(
+        review_lib.participants.auth, "subprocess", types.SimpleNamespace(run=run, TimeoutExpired=subprocess.TimeoutExpired)
+    )
 
     st = new_init(real_probe=True)
 
     assert st["participants"]["available"] == ["claude", "codex"]
-    assert st["participants"]["unavailable"] == {
-        "kiro": "コマンドを実行できません（Permission denied）"}
+    assert st["participants"]["unavailable"] == {"kiro": "コマンドを実行できません（Permission denied）"}
 
 
-@pytest.mark.parametrize("argv", [
-    ("--only", "codex", "--exclude", "codex"),
-    ("--include", "agy", "--exclude", "agy"),
-])
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ("--only", "codex", "--exclude", "codex"),
+        ("--include", "agy", "--exclude", "agy"),
+    ],
+)
 def test_contradicting_names_fail_before_the_state_is_written(new_init, argv):
     """AC20: 名前の矛盾は終了コード 1 で、状態ファイルを作らない。"""
     with pytest.raises(SystemExit) as e:
@@ -652,6 +681,7 @@ def test_a_misspelt_runtime_is_rejected_by_argparse(state_mod):
 
 # ---------- 担当の読み出し（#727: AC22） ----------
 
+
 def test_a_state_without_participants_keeps_the_old_rotation(state_mod, tmp_path):
     """AC22: `participants` が無くても、`host` があれば変更前の輪番と同じ値を返す。"""
     path = _state(tmp_path, host="codex")
@@ -674,16 +704,25 @@ def test_recorded_reviewers_win_over_only(state_mod, tmp_path):
 
 def test_participants_win_over_the_host_rotation(state_mod, tmp_path):
     """記録された参加者があれば、席の埋め方はその一覧から決める。"""
-    path = _state(tmp_path, participants={
-        "pool": ["codex", "agy", "kiro"], "included": [], "excluded": ["agy"],
-        "available": ["codex", "kiro"], "unavailable": {}, "probe_skipped": False,
-        "require_all": False, "fallback": [],
-    })
+    path = _state(
+        tmp_path,
+        participants={
+            "pool": ["codex", "agy", "kiro"],
+            "included": [],
+            "excluded": ["agy"],
+            "available": ["codex", "kiro"],
+            "unavailable": {},
+            "probe_skipped": False,
+            "require_all": False,
+            "fallback": [],
+        },
+    )
     st = json.loads(path.read_text(encoding="utf-8"))
     assert review_lib.participants._round_reviewers(st, 1) == ["codex", "kiro"]
 
 
 # ---------- 母集合にホストを入れる（#892） ----------
+
 
 def test_exclude_agy_on_claude_rotates_three_pairs(new_init, state_mod, tmp_path):
     """#892 の AC2: ホスト claude・`--exclude agy` で使える者は 3 者、ラウンド 1〜3 は 3 通りの組を 1 度ずつ。"""
@@ -692,8 +731,7 @@ def test_exclude_agy_on_claude_rotates_three_pairs(new_init, state_mod, tmp_path
     assert available == ["claude", "codex", "kiro"]
     seats = [review_lib.participants._round_reviewers(st, r) for r in (1, 2, 3)]
     assert seats == [["codex", "kiro"], ["claude", "kiro"], ["claude", "codex"]]
-    assert {frozenset(s) for s in seats} == {
-        frozenset(p) for p in (("claude", "codex"), ("claude", "kiro"), ("codex", "kiro"))}
+    assert {frozenset(s) for s in seats} == {frozenset(p) for p in (("claude", "codex"), ("claude", "kiro"), ("codex", "kiro"))}
 
 
 @pytest.mark.parametrize("host", ["claude", "codex", "agy", "kiro"])
@@ -720,9 +758,14 @@ def test_exclude_the_host_is_accepted(new_init):
 def test_a_state_with_the_old_participants_keeps_its_seats(state_mod, tmp_path):
     """#892 の AC6: 変更の前に作った `participants`（使える者 2 者・`fallback: [host]`）は同じ席を返す。"""
     old = {
-        "pool": ["codex", "agy", "kiro"], "included": [], "excluded": ["agy"],
-        "available": ["codex", "kiro"], "unavailable": {}, "probe_skipped": False,
-        "require_all": False, "fallback": ["claude"],
+        "pool": ["codex", "agy", "kiro"],
+        "included": [],
+        "excluded": ["agy"],
+        "available": ["codex", "kiro"],
+        "unavailable": {},
+        "probe_skipped": False,
+        "require_all": False,
+        "fallback": ["claude"],
     }
     path = _state(tmp_path, participants=old)
     st = json.loads(path.read_text(encoding="utf-8"))
@@ -748,6 +791,7 @@ def test_a_host_only_state_keeps_the_previous_rotation(state_mod, tmp_path, host
 
 
 # ---------- 完了報告の「参加した者」（#727: AC24） ----------
+
 
 def _report(state_mod, tmp_path, capsys, **over) -> list[str]:
     _state(tmp_path, final="approved", **over)
@@ -782,11 +826,21 @@ def test_the_report_lists_who_took_part(new_init, state_mod, tmp_path, capsys):
 
 
 def test_the_report_shows_the_reason_a_reviewer_was_dropped(state_mod, tmp_path, capsys):
-    lines = _report(state_mod, tmp_path, capsys, participants={
-        "pool": ["codex", "agy", "kiro"], "included": ["claude"], "excluded": [],
-        "available": ["claude", "codex"], "unavailable": {"kiro": "コマンドが見つかりません"},
-        "probe_skipped": False, "require_all": False, "fallback": ["claude"],
-    })
+    lines = _report(
+        state_mod,
+        tmp_path,
+        capsys,
+        participants={
+            "pool": ["codex", "agy", "kiro"],
+            "included": ["claude"],
+            "excluded": [],
+            "available": ["claude", "codex"],
+            "unavailable": {"kiro": "コマンドが見つかりません"},
+            "probe_skipped": False,
+            "require_all": False,
+            "fallback": ["claude"],
+        },
+    )
     assert "- --include で足した者: claude" in lines
     assert "- 確認を通らなかった者: kiro（コマンドが見つかりません）" in lines
     assert "- 席の埋め合わせ: claude" in lines
@@ -794,24 +848,45 @@ def test_the_report_shows_the_reason_a_reviewer_was_dropped(state_mod, tmp_path,
 
 def test_the_report_says_the_probe_was_skipped(state_mod, tmp_path, capsys):
     """確認を飛ばしたときは、通らなかった者が「なし」である理由を書き分ける。"""
-    lines = _report(state_mod, tmp_path, capsys, participants={
-        "pool": ["codex", "agy", "kiro"], "included": [], "excluded": [],
-        "available": ["codex", "agy", "kiro"], "unavailable": {},
-        "probe_skipped": True, "require_all": False, "fallback": [],
-    })
+    lines = _report(
+        state_mod,
+        tmp_path,
+        capsys,
+        participants={
+            "pool": ["codex", "agy", "kiro"],
+            "included": [],
+            "excluded": [],
+            "available": ["codex", "agy", "kiro"],
+            "unavailable": {},
+            "probe_skipped": True,
+            "require_all": False,
+            "fallback": [],
+        },
+    )
     assert "- 確認を通らなかった者: 確認を飛ばした（NDF_SKIP_AUTH_CHECK）" in lines
 
 
 def test_the_report_lists_the_resume_changes(state_mod, tmp_path, capsys):
     """再開で変えた値は 1 件 1 行で出す。"""
-    lines = _report(state_mod, tmp_path, capsys, participants={
-        "pool": ["codex", "agy", "kiro"], "included": [], "excluded": [],
-        "available": ["codex", "agy", "kiro"], "unavailable": {},
-        "probe_skipped": False, "require_all": False, "fallback": [],
-    }, resume_changes=[
-        {"at": "2026-09-19T12:00:00", "field": "max_rounds", "from": 12, "to": 20},
-        {"at": "2026-09-19T12:00:00", "field": "only", "from": None, "to": "codex"},
-    ])
+    lines = _report(
+        state_mod,
+        tmp_path,
+        capsys,
+        participants={
+            "pool": ["codex", "agy", "kiro"],
+            "included": [],
+            "excluded": [],
+            "available": ["codex", "agy", "kiro"],
+            "unavailable": {},
+            "probe_skipped": False,
+            "require_all": False,
+            "fallback": [],
+        },
+        resume_changes=[
+            {"at": "2026-09-19T12:00:00", "field": "max_rounds", "from": 12, "to": 20},
+            {"at": "2026-09-19T12:00:00", "field": "only", "from": None, "to": "codex"},
+        ],
+    )
     assert "- 再開で変えた値:" in lines
     assert "  - 2026-09-19T12:00:00 max_rounds: 12 → 20" in lines
     assert "  - 2026-09-19T12:00:00 only: None → codex" in lines

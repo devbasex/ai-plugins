@@ -5,6 +5,7 @@
 
 `subprocess.run` はモジュールの属性として呼ぶ。テストが `subprocess.run` を差し替えると、ここにも効く。
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -21,8 +22,9 @@ class StepError(Exception):
         self.code = code
 
 
-def run(cmd: Sequence, cwd=None, check: bool = True, env=None, timeout: float | None = None,
-        input: str | None = None) -> subprocess.CompletedProcess:
+def run(
+    cmd: Sequence, cwd=None, check: bool = True, env=None, timeout: float | None = None, input: str | None = None
+) -> subprocess.CompletedProcess:
     """`cmd` を起動し、標準出力と標準エラーを文字列で受ける。`check` なら 0 以外を `StepError` にする。"""
     p = subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True, timeout=timeout, input=input)
     if check and p.returncode != 0:

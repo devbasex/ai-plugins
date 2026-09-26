@@ -10,6 +10,7 @@ import の向きは設計（`issues/issue-1142-design-modules.md` の review_lib
 | 名前でなくモジュールを取り込むこと | テストは定義したモジュールの上で差し替える。名前を取り込むと差し替えが効かない |
 | `state.py` が副命令の本体を持たないこと | エントリポイントに本体が戻ると、分けた意味が無くなる |
 """
+
 from __future__ import annotations
 
 import ast
@@ -23,8 +24,14 @@ LIB = SCRIPTS / "review_lib"
 # 層。import は自分より小さい層へだけ向く
 LAYERS = {
     "review_lib": 0,
-    "review_lib.store": 1, "review_lib.github": 1, "review_lib.categories": 1, "review_lib.review_focus": 1,
-    "review_lib.workspace": 2, "review_lib.ci": 2, "review_lib.findings": 2, "review_lib.posts": 2,
+    "review_lib.store": 1,
+    "review_lib.github": 1,
+    "review_lib.categories": 1,
+    "review_lib.review_focus": 1,
+    "review_lib.workspace": 2,
+    "review_lib.ci": 2,
+    "review_lib.findings": 2,
+    "review_lib.posts": 2,
     "review_lib.fix_result": 2,
     "review_lib.participants": 3,
     "review_lib.matching": 4,
@@ -72,8 +79,7 @@ def _target(module: str, name: str) -> str:
 
 
 def test_the_package_has_the_designed_modules() -> None:
-    commands = {"init", "start_round", "read_result", "verify_findings", "collect_critiques", "judge", "loop",
-                "merge_fix", "report"}
+    commands = {"init", "start_round", "read_result", "verify_findings", "collect_critiques", "judge", "loop", "merge_fix", "report"}
     expected = set(LAYERS) | {"review_lib.commands"} | {f"review_lib.commands.{c}" for c in commands}
     assert {_module_name(p) for p in _modules()} == expected
 

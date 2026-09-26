@@ -12,6 +12,7 @@ GitHub の上限の待ち（回復の時刻まで）は `gh_quota` が持つ。�
 
 使う側は `deps.require("waits")` を先に呼ぶ。
 """
+
 from __future__ import annotations
 
 import time
@@ -25,21 +26,28 @@ T = TypeVar("T")
 class Waited(NamedTuple):
     value: Any
     attempts: int
-    waited: float     # 眠った秒の合計
-    done: bool        # 条件が揃った（retry_call ではやり直しが要らなくなった）
+    waited: float  # 眠った秒の合計
+    done: bool  # 条件が揃った（retry_call ではやり直しが要らなくなった）
     error: BaseException | None = None
 
 
 def _stop_by_idle(max_wait: float) -> Callable[[RetryCallState], bool]:
     def stop(rs: RetryCallState) -> bool:
         return rs.idle_for + (rs.upcoming_sleep or 0.0) > max_wait
+
     return stop
 
 
-def retry_call(fn: Callable[[], T], should_retry: Callable[[T], bool] = lambda _v: False, *,
-               retry_on: tuple[type[BaseException], ...] = (), max_wait: float = 900.0, interval: float = 30.0,
-               sleep: Callable[[float], None] = time.sleep,
-               on_wait: Callable[[float, int], None] | None = None) -> Waited:
+def retry_call(
+    fn: Callable[[], T],
+    should_retry: Callable[[T], bool] = lambda _v: False,
+    *,
+    retry_on: tuple[type[BaseException], ...] = (),
+    max_wait: float = 900.0,
+    interval: float = 30.0,
+    sleep: Callable[[float], None] = time.sleep,
+    on_wait: Callable[[float, int], None] | None = None,
+) -> Waited:
     """`fn()` を、結果が `should_retry` に当たるか `retry_on` の例外の間、`interval` 秒ごとにやり直す。
 
     `interval <= 0` はやり直さない。打ち切ったときは最後の結果（例外なら `error`）を返し、`done` は偽。
@@ -58,8 +66,13 @@ def retry_call(fn: Callable[[], T], should_retry: Callable[[T], bool] = lambda _
 
     retrying = Retrying(
         retry=retry_if_result(should_retry) | retry_if_exception(lambda e: isinstance(e, retry_on)),
-        wait=lambda _rs: interval, stop=_stop_by_idle(max_wait), sleep=sleep,
-        before_sleep=before_sleep, retry_error_callback=lambda rs: rs, reraise=False)
+        wait=lambda _rs: interval,
+        stop=_stop_by_idle(max_wait),
+        sleep=sleep,
+        before_sleep=before_sleep,
+        retry_error_callback=lambda rs: rs,
+        reraise=False,
+    )
     out = retrying(fn)
     stats = retrying.statistics
     attempts, waited = int(stats.get("attempt_number", 1)), float(stats.get("idle_for", 0.0))
@@ -71,10 +84,18 @@ def retry_call(fn: Callable[[], T], should_retry: Callable[[T], bool] = lambda _
     return Waited(out, attempts, waited, True)
 
 
-def wait_until(fn: Callable[[], T], done: Callable[[T], bool], *, max_wait: float, interval: float = 10.0,
-               factor: float = 1.5, max_interval: float = 120.0, sleep: Callable[[float], None] = time.sleep,
-               same: Callable[[Any, Any], bool] = lambda a, b: a == b,
-               on_wait: Callable[[float, int], None] | None = None) -> Waited:
+def wait_until(
+    fn: Callable[[], T],
+    done: Callable[[T], bool],
+    *,
+    max_wait: float,
+    interval: float = 10.0,
+    factor: float = 1.5,
+    max_interval: float = 120.0,
+    sleep: Callable[[float], None] = time.sleep,
+    same: Callable[[Any, Any], bool] = lambda a, b: a == b,
+    on_wait: Callable[[float, int], None] | None = None,
+) -> Waited:
     """`done(fn())` が真になるまで問い合わせる。前の値と `same` なら間隔を `factor` 倍に伸ばす。"""
     state = {"prev": object(), "gap": float(interval)}
 
@@ -91,9 +112,15 @@ def wait_until(fn: Callable[[], T], done: Callable[[T], bool], *, max_wait: floa
         if on_wait is not None:
             on_wait(rs.upcoming_sleep, rs.attempt_number + 1)
 
-    retrying = Retrying(retry=retry_if_result(lambda v: not done(v)), wait=next_gap,
-                        stop=_stop_by_idle(max_wait), sleep=sleep, before_sleep=before_sleep,
-                        retry_error_callback=lambda rs: rs, reraise=True)
+    retrying = Retrying(
+        retry=retry_if_result(lambda v: not done(v)),
+        wait=next_gap,
+        stop=_stop_by_idle(max_wait),
+        sleep=sleep,
+        before_sleep=before_sleep,
+        retry_error_callback=lambda rs: rs,
+        reraise=True,
+    )
     out = retrying(fn)
     stats = retrying.statistics
     attempts, waited = int(stats.get("attempt_number", 1)), float(stats.get("idle_for", 0.0))

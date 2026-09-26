@@ -9,6 +9,7 @@
 
 使う側は `deps.require("procs")` を先に呼ぶ。
 """
+
 from __future__ import annotations
 
 import os
@@ -24,10 +25,10 @@ PROC_SELF_CGROUP = Path("/proc/self/cgroup")
 
 
 class CgroupMemory(NamedTuple):
-    limit: int | None     # バイト。上限が無い（`max`）・読めないときは None
-    current: int | None   # バイト。読めなければ None
+    limit: int | None  # バイト。上限が無い（`max`）・読めないときは None
+    current: int | None  # バイト。読めなければ None
     oom_kill: int | None  # `memory.events` の oom_kill。読めなければ None
-    unlimited: bool       # `memory.max` が `max`
+    unlimited: bool  # `memory.max` が `max`
 
 
 def _process(pid: int) -> psutil.Process | None:

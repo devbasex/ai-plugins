@@ -3,6 +3,7 @@
 起点のコミットに対して差分を 1 つ積み、終了コード（0 = 通す / 3 = 飛ばしてよい /
 2 = 判定できない）と、出力の 3 行（`判定:` / `理由:` / `本番コード:`）を見る。
 """
+
 from __future__ import annotations
 
 import pathlib
@@ -15,8 +16,7 @@ _SCRIPT = pathlib.Path(__file__).resolve().parents[1] / "scripts" / "refactor.py
 
 
 def _git(*args, cwd):
-    return subprocess.run(["git", *args], cwd=cwd, capture_output=True,
-                          text=True, check=True)
+    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True)
 
 
 def _lines(n: int, prefix: str = "x") -> str:
@@ -50,16 +50,19 @@ def _commit(work: pathlib.Path, files: dict[str, str]) -> None:
 
 
 def _assess(work: pathlib.Path, *extra: str) -> tuple[int, list[str]]:
-    r = subprocess.run([sys.executable, str(_SCRIPT), "assess", *extra],
-                       cwd=work, capture_output=True, text=True)
+    r = subprocess.run([sys.executable, str(_SCRIPT), "assess", *extra], cwd=work, capture_output=True, text=True)
     return r.returncode, r.stdout.splitlines()
 
 
-@pytest.mark.parametrize("files", [
-    {"docs/guide.md": "# guide\n" + _lines(30)},
-    {"tests/test_a.py": _lines(30, "t")},
-    {"config/settings.json": "{\n" + "".join(f'"k{i}": {i},\n' for i in range(30)) + "}\n"},
-], ids=["md-only", "tests-only", "json-only"])
+@pytest.mark.parametrize(
+    "files",
+    [
+        {"docs/guide.md": "# guide\n" + _lines(30)},
+        {"tests/test_a.py": _lines(30, "t")},
+        {"config/settings.json": "{\n" + "".join(f'"k{i}": {i},\n' for i in range(30)) + "}\n"},
+    ],
+    ids=["md-only", "tests-only", "json-only"],
+)
 def test_no_production_code_may_be_skipped(repo, files):
     _commit(repo, files)
     rc, out = _assess(repo, "--base", "base")

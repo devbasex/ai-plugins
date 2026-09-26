@@ -2,6 +2,7 @@
 
 一時ディレクトリへ作った `plugins/ndf/` の木に対して打つ。実物の木は、例外リストと合っているかだけを見る。
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -93,8 +94,7 @@ def test_same_body_ignores_docstring_annotations_and_name(tmp_path: Path):
     put(tmp_path, "skills/x/scripts/b.py", "def _repo_slug(p):\n    return p.strip('/')\n")
     code, r = run(tmp_path, [])
     assert code == 1
-    assert kinds(r) == {("same-body", "plugins/ndf/scripts/a.py:repo_slug"),
-                        ("same-body", "plugins/ndf/skills/x/scripts/b.py:_repo_slug")}
+    assert kinds(r) == {("same-body", "plugins/ndf/scripts/a.py:repo_slug"), ("same-body", "plugins/ndf/skills/x/scripts/b.py:_repo_slug")}
 
 
 def test_same_name_with_different_bodies(tmp_path: Path):
@@ -102,16 +102,16 @@ def test_same_name_with_different_bodies(tmp_path: Path):
     put(tmp_path, "scripts/b.py", "def now():\n    return 2\n")
     code, r = run(tmp_path, [])
     assert code == 1
-    assert kinds(r) == {("same-name", "plugins/ndf/scripts/a.py:now"),
-                        ("same-name", "plugins/ndf/scripts/b.py:now")}
-    allow = [{"path": f"plugins/ndf/scripts/{n}.py", "name": "now", "kind": "same-name", "reason": "L0 で統合"}
-             for n in ("a", "b")]
+    assert kinds(r) == {("same-name", "plugins/ndf/scripts/a.py:now"), ("same-name", "plugins/ndf/scripts/b.py:now")}
+    allow = [{"path": f"plugins/ndf/scripts/{n}.py", "name": "now", "kind": "same-name", "reason": "L0 で統合"} for n in ("a", "b")]
     assert run(tmp_path, allow)[0] == 0
 
 
 def test_rule_excluded_names_and_tests_are_not_counted(tmp_path: Path):
-    body = "def main():\n    return 0\n\ndef build_parser():\n    return 0\n\ndef _build_parser():\n    return 0\n\n" \
-           "def cmd_run(a):\n    return 0\n"
+    body = (
+        "def main():\n    return 0\n\ndef build_parser():\n    return 0\n\ndef _build_parser():\n    return 0\n\n"
+        "def cmd_run(a):\n    return 0\n"
+    )
     put(tmp_path, "scripts/a.py", body)
     put(tmp_path, "scripts/b.py", body)
     put(tmp_path, "scripts/a.sh", "usage() {\n  echo a\n}\n")
@@ -123,8 +123,8 @@ def test_rule_excluded_names_and_tests_are_not_counted(tmp_path: Path):
 
 
 def test_shell_functions_are_compared_by_normalized_lines(tmp_path: Path):
-    put(tmp_path, "scripts/lib/a.sh", "resolve_print_timeout() {\n  local t=1\n\n  # 注\n  echo \"$t\"\n}\n")
-    put(tmp_path, "skills/x/scripts/b.sh", "function resolve_print_timeout {\n    local t=1\n    echo \"$t\"\n}\n")
+    put(tmp_path, "scripts/lib/a.sh", 'resolve_print_timeout() {\n  local t=1\n\n  # 注\n  echo "$t"\n}\n')
+    put(tmp_path, "skills/x/scripts/b.sh", 'function resolve_print_timeout {\n    local t=1\n    echo "$t"\n}\n')
     put(tmp_path, "skills/y/scripts/c.sh", "resolve_print_timeout() { echo 2; }\n")
     code, r = run(tmp_path, [])
     assert code == 1
@@ -151,14 +151,17 @@ def test_unused_allow_row_fails(tmp_path: Path):
     assert kinds(r) == {("unused-allow", "plugins/ndf/scripts/a.py:f")}
 
 
-@pytest.mark.parametrize("row", [
-    {"path": "plugins/ndf/scripts/a.py", "name": "f", "kind": "same-name"},
-    {"path": "plugins/ndf/scripts/a.py", "name": "f", "kind": "same-name", "reason": ""},
-    {"path": "plugins/ndf/scripts/a.py", "name": "f", "kind": "other", "reason": "x"},
-    {"path": "plugins/ndf/scripts/a.py", "name": "", "kind": "lines", "reason": "x"},
-    {"path": "plugins/ndf/scripts/a.py", "name": "", "kind": "lines", "reason": "x", "lines": "600"},
-    {"path": "plugins/ndf/scripts/a.py", "name": "f", "kind": "same-name", "reason": "x", "lines": 600},
-])
+@pytest.mark.parametrize(
+    "row",
+    [
+        {"path": "plugins/ndf/scripts/a.py", "name": "f", "kind": "same-name"},
+        {"path": "plugins/ndf/scripts/a.py", "name": "f", "kind": "same-name", "reason": ""},
+        {"path": "plugins/ndf/scripts/a.py", "name": "f", "kind": "other", "reason": "x"},
+        {"path": "plugins/ndf/scripts/a.py", "name": "", "kind": "lines", "reason": "x"},
+        {"path": "plugins/ndf/scripts/a.py", "name": "", "kind": "lines", "reason": "x", "lines": "600"},
+        {"path": "plugins/ndf/scripts/a.py", "name": "f", "kind": "same-name", "reason": "x", "lines": 600},
+    ],
+)
 def test_broken_allow_row_is_a_usage_error(tmp_path: Path, row: dict):
     put(tmp_path, "scripts/a.py", "def f():\n    return 1\n")
     code, r = run(tmp_path, [row])
@@ -171,26 +174,27 @@ def test_allow_file_name_must_match_the_row(tmp_path: Path):
     put(tmp_path, "scripts/b.py", "def f():\n    return 2\n")
     row = {"path": "plugins/ndf/scripts/a.py", "name": "f", "kind": "same-name", "reason": "x"}
     assert structure.allow_file_name(row) == "plugins__ndf__scripts__a.py--f--same-name.json"
-    assert structure.allow_file_name({"path": "plugins/ndf/x.sh", "name": "", "kind": "lines"}) \
-        == "plugins__ndf__x.sh--lines.json"
+    assert structure.allow_file_name({"path": "plugins/ndf/x.sh", "name": "", "kind": "lines"}) == "plugins__ndf__x.sh--lines.json"
     d = tmp_path / "allow"
     d.mkdir()
     (d / "other.json").write_text(json.dumps(row))
-    p = subprocess.run([sys.executable, str(CHECK), "--root", str(tmp_path), "--allow", str(d)],
-                       capture_output=True, text=True)
+    p = subprocess.run([sys.executable, str(CHECK), "--root", str(tmp_path), "--allow", str(d)], capture_output=True, text=True)
     assert p.returncode == 2
 
 
 def git(repo: Path, *args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@example.com", *args],
-                          capture_output=True, text=True)
+    return subprocess.run(
+        ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@example.com", *args], capture_output=True, text=True
+    )
 
 
 def test_parallel_branches_removing_different_rows_merge_without_conflict(tmp_path: Path):
     """並列の 2 つの枝が別の項目を消しても git merge は衝突しない。消し忘れは unused-allow で落ちる。"""
     repo = tmp_path / "repo"
-    rows = [{"path": f"plugins/ndf/scripts/{n}.py", "name": "", "kind": "lines", "reason": "分ける前", "lines": 501}
-            for n in ("big1", "big2", "big3")]
+    rows = [
+        {"path": f"plugins/ndf/scripts/{n}.py", "name": "", "kind": "lines", "reason": "分ける前", "lines": 501}
+        for n in ("big1", "big2", "big3")
+    ]
     for n in ("big1", "big2", "big3"):
         put(repo, f"scripts/{n}.py", "x = 1\n" * 501)
     allow = write_allow(repo / "scripts" / "script-structure-allow", rows)
@@ -231,8 +235,7 @@ def test_repository_matches_its_allow_list():
 def test_structure_baseline_runs_on_a_given_root(tmp_path: Path):
     put(tmp_path, "scripts/a.py", "def f():\n    return 1\n")
     put(tmp_path, "scripts/b.py", "def f():\n    return 1\n")
-    p = subprocess.run([sys.executable, str(BASELINE), str(tmp_path / "plugins" / "ndf")],
-                       capture_output=True, text=True)
+    p = subprocess.run([sys.executable, str(BASELINE), str(tmp_path / "plugins" / "ndf")], capture_output=True, text=True)
     assert p.returncode == 0, p.stderr
     assert "files 2 / lines 4" in p.stdout
     assert "defined in 2+ files: 1 (with identical bodies somewhere: 1)" in p.stdout
@@ -247,6 +250,7 @@ def test_claude_p_usage_takes_paths_as_arguments():
 
 # --- I14: 包みが受け持つ部品を、包みの外で使わない（決定 19） ---------------------------------
 
+
 def test_wrapped_parts_outside_their_wrapper_fail(tmp_path: Path):
     put(tmp_path, "scripts/a.py", "import fcntl\nfrom urllib import request\n")
     put(tmp_path, "scripts/b.py", "import os\nP = f'/proc/{os.getpid()}/stat'\n")
@@ -256,10 +260,14 @@ def test_wrapped_parts_outside_their_wrapper_fail(tmp_path: Path):
     code, r = run(tmp_path, [])
     assert code == 1
     assert kinds(r) == {
-        ("wrapped", "plugins/ndf/scripts/a.py:fcntl"), ("wrapped", "plugins/ndf/scripts/a.py:urllib.request"),
-        ("wrapped", "plugins/ndf/scripts/b.py:proc-fs"), ("wrapped", "plugins/ndf/scripts/c.py:fence-regex"),
-        ("wrapped", "plugins/ndf/scripts/d.py:fence-regex"), ("wrapped", "plugins/ndf/scripts/e.py:termios"),
-        ("wrapped", "plugins/ndf/scripts/e.py:pty"), ("wrapped", "plugins/ndf/scripts/e.py:urllib.request"),
+        ("wrapped", "plugins/ndf/scripts/a.py:fcntl"),
+        ("wrapped", "plugins/ndf/scripts/a.py:urllib.request"),
+        ("wrapped", "plugins/ndf/scripts/b.py:proc-fs"),
+        ("wrapped", "plugins/ndf/scripts/c.py:fence-regex"),
+        ("wrapped", "plugins/ndf/scripts/d.py:fence-regex"),
+        ("wrapped", "plugins/ndf/scripts/e.py:termios"),
+        ("wrapped", "plugins/ndf/scripts/e.py:pty"),
+        ("wrapped", "plugins/ndf/scripts/e.py:urllib.request"),
     }
 
 
@@ -270,8 +278,12 @@ def test_wrappers_may_use_their_parts_and_mentions_do_not_count(tmp_path: Path):
     put(tmp_path, "scripts/lib/notify.py", "import urllib.request\n")
     put(tmp_path, "scripts/relay_lib/terminal.py", "import pty\nimport termios\n")
     # docstring の言及・囲みを書く側の文字列・urllib.parse は数えない
-    put(tmp_path, "scripts/a.py", '"""/proc/ は procs が読む。"""\nimport urllib.parse\n'
-                                  'def f(b):\n    """```text の囲みを書く。"""\n    return f"```text\\n{b}\\n```"\n')
+    put(
+        tmp_path,
+        "scripts/a.py",
+        '"""/proc/ は procs が読む。"""\nimport urllib.parse\n'
+        'def f(b):\n    """```text の囲みを書く。"""\n    return f"```text\\n{b}\\n```"\n',
+    )
     code, r = run(tmp_path, [])
     assert code == 0, r["items"]
 

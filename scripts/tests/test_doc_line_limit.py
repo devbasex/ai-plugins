@@ -4,6 +4,7 @@
 見る。走査の対象は git が追跡する `.md` で、記録は外す。書式が 1 ファイルであることを
 前提にする文書は `EXEMPT` で外し、理由を値に持つ。
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -18,7 +19,8 @@ CHECK = REPO / "scripts" / "check-doc-line-limit.py"
 def run(root: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["python3", str(CHECK), "--root", str(root), *args],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
 
 
@@ -38,16 +40,15 @@ def repo(tmp_path: Path) -> Path:
     (tmp_path / "issues").mkdir()
     (tmp_path / "docs" / "short.md").write_text("x\n" * 10, encoding="utf-8")
     (tmp_path / "CHANGELOG.md").write_text("x\n" * 900, encoding="utf-8")
-    subprocess.run(
-        ["git", "-C", str(tmp_path), "add", "-A"], check=True, capture_output=True
-    )
+    subprocess.run(["git", "-C", str(tmp_path), "add", "-A"], check=True, capture_output=True)
     return tmp_path
 
 
 def untrack(root: Path, rel: str) -> None:
     subprocess.run(
         ["git", "-C", str(root), "rm", "-q", "--cached", rel],
-        check=True, capture_output=True,
+        check=True,
+        capture_output=True,
     )
     (root / rel).unlink()
 
@@ -56,9 +57,7 @@ def track(root: Path, rel: str, lines: int) -> Path:
     path = root / rel
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("x\n" * lines, encoding="utf-8")
-    subprocess.run(
-        ["git", "-C", str(root), "add", rel], check=True, capture_output=True
-    )
+    subprocess.run(["git", "-C", str(root), "add", rel], check=True, capture_output=True)
     return path
 
 
@@ -122,11 +121,7 @@ def test_the_report_lists_the_longest_documents(repo: Path) -> None:
 def test_the_check_is_wired_into_the_validation() -> None:
     """既存のチェックから呼ばれていなければ、継続的統合では実行されない。"""
     body = (REPO / "scripts" / "validate-runtime-plugins.sh").read_text(encoding="utf-8")
-    lines = [
-        line for line in body.splitlines()
-        if "scripts/check-doc-line-limit.py" in line
-        and not line.lstrip().startswith("#")
-    ]
+    lines = [line for line in body.splitlines() if "scripts/check-doc-line-limit.py" in line and not line.lstrip().startswith("#")]
     assert lines, "validate-runtime-plugins.sh から呼ばれていない"
 
 

@@ -1,4 +1,5 @@
 """configure: 設定の生成と 1 言語ずつの起動の検証（AC6・AC7・AC9・AC10）。"""
+
 import hashlib
 import json
 import os
@@ -31,8 +32,7 @@ def fake(tmp_path, monkeypatch):
 
 
 def _configure(repo, fake, *extra, result=""):
-    return run_json("configure", "--root", str(repo), "--json", "--serena", fake["cmd"], *extra,
-                    env={"FAKE_SERENA_RESULT": result})
+    return run_json("configure", "--root", str(repo), "--json", "--serena", fake["cmd"], *extra, env={"FAKE_SERENA_RESULT": result})
 
 
 def _yml(repo):
@@ -106,13 +106,19 @@ def test_all_failed_writes_empty_and_exits_1(repo, fake):
     assert code == 1
     text = _yml(repo)
     assert py.read_list(text, "language_servers") == []
-    assert py.read_list(text, "mcp_serena_excluded") == ["python health_check_exit_1",
-                                                         "bash health_check_exit_2"]
+    assert py.read_list(text, "mcp_serena_excluded") == ["python health_check_exit_1", "bash health_check_exit_2"]
 
 
 def test_timeout_is_a_failure(repo, fake, monkeypatch):
-    code, out, _ = run_json("configure", "--root", str(repo), "--json", "--serena", fake["cmd"],
-                            env={"FAKE_SERENA_RESULT": "bash=hang", "SERENA_LSP_VERIFY_TIMEOUT": "1"})
+    code, out, _ = run_json(
+        "configure",
+        "--root",
+        str(repo),
+        "--json",
+        "--serena",
+        fake["cmd"],
+        env={"FAKE_SERENA_RESULT": "bash=hang", "SERENA_LSP_VERIFY_TIMEOUT": "1"},
+    )
     assert code == 0
     assert [(f["language"], f["reason"]) for f in out["failed"]] == [("bash", "timeout")]
 
@@ -136,8 +142,12 @@ def test_exception_midway_still_writes_verified_only(repo, fake, monkeypatch):
 
 def test_sigterm_midway_still_writes_verified_only(repo, fake):
     env = dict(os.environ, FAKE_SERENA_RESULT="bash=hang")
-    proc = subprocess.Popen([sys.executable, str(CLI), "configure", "--root", str(repo), "--json",
-                             "--serena", fake["cmd"]], env=env, stdout=subprocess.PIPE, text=True)
+    proc = subprocess.Popen(
+        [sys.executable, str(CLI), "configure", "--root", str(repo), "--json", "--serena", fake["cmd"]],
+        env=env,
+        stdout=subprocess.PIPE,
+        text=True,
+    )
     deadline = time.time() + 20
     while time.time() < deadline:
         if fake["log"].exists() and '["bash"]' in fake["log"].read_text():
@@ -197,8 +207,9 @@ def test_serena_gitignore_only_with_flag(repo, fake):
     code, out, _ = _configure(repo, fake, "--serena-gitignore")
     assert out["written"]["serena_gitignore_added"] == []
     assert (repo / ".serena/.gitignore").read_text().count("/logs") == 1
-    status = subprocess.run(["git", "-C", str(repo), "status", "--porcelain", "--untracked-files=all", ".serena"],
-                            capture_output=True, text=True).stdout
+    status = subprocess.run(
+        ["git", "-C", str(repo), "status", "--porcelain", "--untracked-files=all", ".serena"], capture_output=True, text=True
+    ).stdout
     for name in ("serena_config.yml", "logs/", "language_servers/", "cache/"):
         assert name not in status
 

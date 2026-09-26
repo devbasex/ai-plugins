@@ -230,9 +230,7 @@ def test_page_role_marker_collector_returns_empty_when_no_marker():
 
 def _make_pytestconfig(pwk_har_mode: str | None = None) -> SimpleNamespace:
     """``pytestconfig.getoption("pwk_har_mode", default=None)`` を模す軽量 stub。"""
-    return SimpleNamespace(
-        getoption=lambda name, default=None: pwk_har_mode if name == "pwk_har_mode" else default
-    )
+    return SimpleNamespace(getoption=lambda name, default=None: pwk_har_mode if name == "pwk_har_mode" else default)
 
 
 def _make_config_with_har_mode(har_mode: str) -> Config:

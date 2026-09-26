@@ -2,6 +2,7 @@
 
 install・uninstall・status・startup のどの副命令も、ここの同じ関数でシェルの設定を読み書きする。
 """
+
 from __future__ import annotations
 
 import os
@@ -29,8 +30,7 @@ def loader_file() -> str | None:
 def rc_files() -> list[str]:
     """囲みを足しうるファイル（`~/.bashrc`・`~/.bash_profile`・`~/.zshrc`）。uninstall はこの全部から外す。"""
     home = os.path.expanduser("~")
-    return [os.path.join(home, ".bashrc"), os.path.join(home, ".bash_profile"),
-            os.path.join(os.environ.get("ZDOTDIR") or home, ".zshrc")]
+    return [os.path.join(home, ".bashrc"), os.path.join(home, ".bash_profile"), os.path.join(os.environ.get("ZDOTDIR") or home, ".zshrc")]
 
 
 def login_files() -> list[str]:
@@ -73,8 +73,7 @@ def reads_bashrc(path: str) -> bool:
     inside = set()
     for a, b in blocks_of(lines)[0]:
         inside.update(range(a, b + 1))
-    return any(READS_BASHRC_RE.search(line) for i, line in enumerate(lines)
-               if i not in inside and not line.lstrip().startswith("#"))
+    return any(READS_BASHRC_RE.search(line) for i, line in enumerate(lines) if i not in inside and not line.lstrip().startswith("#"))
 
 
 def login_shadow() -> tuple[str, str] | None:
@@ -99,26 +98,30 @@ def login_warning() -> str | None:
     login = login_file()
     if login and (rc_blocks(login)[0] or reads_bashrc(login)):
         return None
-    return (f"警告: 読み込みの行は {bashrc} にしか無く、ログインシェルが読む {login or bash_profile} は "
-            f"{bashrc} を読まない。macOS の端末はログインシェルで開くため、ラッパーが効かない。"
-            f"/ndf:install-wrapper を打ち直すと {bash_profile} へ足す")
+    return (
+        f"警告: 読み込みの行は {bashrc} にしか無く、ログインシェルが読む {login or bash_profile} は "
+        f"{bashrc} を読まない。macOS の端末はログインシェルで開くため、ラッパーが効かない。"
+        f"/ndf:install-wrapper を打ち直すと {bash_profile} へ足す"
+    )
 
 
 def sh_quote(path: str) -> str:
     """`$HOME` の下なら `"$HOME/..."`、それ以外は `"<絶対パス>"`。"""
     home = os.path.expanduser("~").rstrip("/")
     if home and path.startswith(home + "/"):
-        return f'"$HOME{path[len(home):]}"'
+        return f'"$HOME{path[len(home) :]}"'
     return f'"{path}"'
 
 
 def shellrc_body() -> str:
     c = sh_quote(copy_path())
-    return ("# ndf のラッパー。/ndf:install-wrapper が書き、/ndf:install-wrapper uninstall が消す\n"
-            "function claude {\n"
-            f"  if [ -f {c} ]; then python3 {c} run \"$@\"\n"
-            "  else command claude \"$@\"; fi\n"
-            "}\n")
+    return (
+        "# ndf のラッパー。/ndf:install-wrapper が書き、/ndf:install-wrapper uninstall が消す\n"
+        "function claude {\n"
+        f'  if [ -f {c} ]; then python3 {c} run "$@"\n'
+        '  else command claude "$@"; fi\n'
+        "}\n"
+    )
 
 
 def loader_line() -> str:
@@ -218,12 +221,11 @@ def rewrite_blocks(path: str, body: str, inner: list[str] | None) -> str:
 
 
 def block_inner(body: str, a: int, b: int) -> list[str]:
-    return [x.rstrip("\r") for x in body.split("\n")[a + 1:b]]
+    return [x.rstrip("\r") for x in body.split("\n")[a + 1 : b]]
 
 
 def has_direct_alias(text: str, found: list[tuple[int, int]]) -> bool:
-    return any(any(x.startswith("alias claude=") for x in block_inner(text, a, b))
-               for a, b in found)
+    return any(any(x.startswith("alias claude=") for x in block_inner(text, a, b)) for a, b in found)
 
 
 def _has_loader(rc: str) -> bool:
@@ -238,8 +240,7 @@ def _has_loader(rc: str) -> bool:
 def _auto_blocks(root: str) -> list[str]:
     """`rc-added` に載り `rc-user` に載らず、今も囲みがあるパス（10.17.4〜10.17.6 の自動の囲み）。"""
     user = _records(os.path.join(root, "rc-user"))
-    return [p for p in dict.fromkeys(_records(os.path.join(root, "rc-added")))
-            if p not in user and rc_blocks(p)[0]]
+    return [p for p in dict.fromkeys(_records(os.path.join(root, "rc-added"))) if p not in user and rc_blocks(p)[0]]
 
 
 def _startup_record_noticed(root: str) -> list[str]:
@@ -253,11 +254,13 @@ def _startup_record_noticed(root: str) -> list[str]:
 
 def _startup_notice_message(paths: list[str]) -> str:
     """自動で足した alias を知らせる通知文を、パスの列から組み立てる。"""
-    msg = (f"ndf-relay: {'・'.join(paths)} の alias claude は 10.17.4〜10.17.6 が自動で足したもの。"
-           "使い続けるなら何もしなくてよい。外すなら /ndf:install-wrapper uninstall。"
-           "この alias は別のファイルが定義した alias claude（devbase の "
-           "--dangerously-skip-permissions など）を上書きしている。/ndf:install-wrapper で"
-           "入れ直せば囲みの中が読み込みの 1 行に替わり、その alias が戻る")
+    msg = (
+        f"ndf-relay: {'・'.join(paths)} の alias claude は 10.17.4〜10.17.6 が自動で足したもの。"
+        "使い続けるなら何もしなくてよい。外すなら /ndf:install-wrapper uninstall。"
+        "この alias は別のファイルが定義した alias claude（devbase の "
+        "--dangerously-skip-permissions など）を上書きしている。/ndf:install-wrapper で"
+        "入れ直せば囲みの中が読み込みの 1 行に替わり、その alias が戻る"
+    )
     if os.environ.get("DEVBASE_SHELLRC_DIR"):
         msg += "。コンテナを作り直した後も使うなら /ndf:install-wrapper"
     return msg

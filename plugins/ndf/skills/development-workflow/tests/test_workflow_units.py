@@ -7,6 +7,7 @@
 単位を Pull Request にすると生じない。代わりに、Pull Request に何が入るかが決まらないと
 判定できないため、**要求と受け入れ条件が判定より前に来る**。
 """
+
 from __future__ import annotations
 
 import shlex
@@ -55,9 +56,7 @@ def test_mode_height_for_unknown_mode() -> None:
         ("unknown-first", "unknown-second", "unknown-first"),
     ],
 )
-def test_higher_mode_at_empty_and_equal_height_boundaries(
-    first: str, second: str, expected: str
-) -> None:
+def test_higher_mode_at_empty_and_equal_height_boundaries(first: str, second: str, expected: str) -> None:
     """現状固定: 空なら非空側、同じ高さなら先に渡した側を返す。"""
     result = run_lib(f"wf_higher_mode {shlex.quote(first)} {shlex.quote(second)}")
     assert result.returncode == 0, result.stderr
@@ -68,7 +67,7 @@ def test_higher_mode_at_empty_and_equal_height_boundaries(
     ("value", "expected"),
     [
         ("a\\b", r"a\\b"),
-        ('a"b', r'a\"b'),
+        ('a"b', r"a\"b"),
         ("a\nb", r"a\nb"),
         ("a\tb", r"a\tb"),
         ("a\rb", r"a\rb"),
@@ -85,7 +84,7 @@ def test_json_escape_replaces_each_special_character(value: str, expected: str) 
 def test_json_escape_replaces_all_five_special_characters_together() -> None:
     """現状固定: 5 種のエスケープ対象文字（\\, ", \\n, \\t, \\r）をすべて含む入力の実測出力を固定する。"""
     value = 'back=\\ quote=" nl=\n tab=\t cr=\r'
-    expected = r'back=\\ quote=\" nl=\n tab=\t cr=\r'
+    expected = r"back=\\ quote=\" nl=\n tab=\t cr=\r"
     result = run_lib(f"wf_json_escape {shlex.quote(value)}")
     assert result.returncode == 0, result.stderr
     assert result.stdout == expected
@@ -108,9 +107,7 @@ def test_the_report_requires_a_review_for_light(repo, tmp_path) -> None:
     result = run_stage_check("report", "31", cwd=repo, env=env)
 
     assert result.returncode == 0, result.stderr
-    missing = next(
-        (line for line in result.stdout.splitlines() if "記録なし:" in line), ""
-    )
+    missing = next((line for line in result.stdout.splitlines() if "記録なし:" in line), "")
     assert "実装レビュー" in missing, result.stdout
     assert "要求と受け入れ条件" in missing, result.stdout
     assert state_file(state_dir, 31).is_file()

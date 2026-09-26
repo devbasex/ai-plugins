@@ -9,6 +9,7 @@
 2 席は `review_seats` が、cross-refactoring の実装担当は `choose_implementer` が決める（#933）。
 cross-refactoring は提案と適用を同じ参加者で回し、レビュー担当を持たない。
 """
+
 from __future__ import annotations
 
 import os
@@ -66,19 +67,14 @@ def detect_host(
     """
     if explicit:
         if explicit not in HOST_RUNTIMES:
-            raise AssignmentError(
-                f"--host には {'/'.join(HOST_RUNTIMES)} のいずれかを指定してください: {explicit}"
-            )
+            raise AssignmentError(f"--host には {'/'.join(HOST_RUNTIMES)} のいずれかを指定してください: {explicit}")
         return explicit, "explicit"
 
     environ = os.environ if env is None else env
     for key, runtime in HOST_ENV_HINTS:
         if environ.get(key):
             return runtime, "env"
-    raise AssignmentError(
-        "ホストを推定できませんでした。"
-        f"`--host {'|'.join(HOST_RUNTIMES)}` で明示してください"
-    )
+    raise AssignmentError(f"ホストを推定できませんでした。`--host {'|'.join(HOST_RUNTIMES)}` で明示してください")
 
 
 def _in_fixed_order(names: Iterable[str]) -> list[str]:
@@ -106,6 +102,7 @@ class Participants:
     `to_state()` の辞書へ足す。`ignored_exclude` は「外す指定をしたが母集合に無かったため
     無視した者」で、外した者（`excluded`）とは別に持つ（#786 の決定 2）。
     """
+
     pool: list[str]
     included: list[str] = field(default_factory=list)
     excluded: list[str] = field(default_factory=list)
@@ -167,14 +164,10 @@ def resolve_participants(
 
     for name in (*include, *exclude, *([only] if only is not None else [])):
         if name not in ALL_RUNTIMES:
-            raise AssignmentError(
-                f"参加できないランタイムです: {name}（{'/'.join(ALL_RUNTIMES)} のいずれか）"
-            )
+            raise AssignmentError(f"参加できないランタイムです: {name}（{'/'.join(ALL_RUNTIMES)} のいずれか）")
     overlap = set(include) & set(exclude)
     if overlap:
-        raise AssignmentError(
-            f"足す者と外す者に同じ名前があります: {', '.join(_in_fixed_order(overlap))}"
-        )
+        raise AssignmentError(f"足す者と外す者に同じ名前があります: {', '.join(_in_fixed_order(overlap))}")
     # 矛盾は無視より先に見る。母集合に無い名前の除外を先に捨てると、`--only agy
     # --exclude agy` が矛盾ではなく「参加者に無い」で止まり、理由を読み違える。
     if only is not None and only in exclude:
@@ -189,21 +182,14 @@ def resolve_participants(
 
     if only is not None:
         if only not in participants:
-            raise AssignmentError(
-                f"--only は参加者のいずれかを指定してください: {only}"
-                f"（参加者: {', '.join(participants)}）"
-            )
+            raise AssignmentError(f"--only は参加者のいずれかを指定してください: {only}（参加者: {', '.join(participants)}）")
         participants = [only]
 
     results, skipped = probe(list(participants))
     if skipped:
         available, unavailable = list(participants), {}
     else:
-        unavailable = {
-            n: str(results.get(n, {}).get("detail", ""))
-            for n in participants
-            if not results.get(n, {}).get("ok", False)
-        }
+        unavailable = {n: str(results.get(n, {}).get("detail", "")) for n in participants if not results.get(n, {}).get("ok", False)}
         available = [n for n in participants if n not in unavailable]
 
     if require_all and unavailable:
@@ -255,10 +241,7 @@ def seat_runtime(seat: str) -> str:
     """
     m = SEAT_PATTERN.match(seat)
     if m is None:
-        raise AssignmentError(
-            f"席の名前の形が違います: {seat}"
-            f"（{'/'.join(ALL_RUNTIMES)} か、その名前に -2〜-9 を付けた形）"
-        )
+        raise AssignmentError(f"席の名前の形が違います: {seat}（{'/'.join(ALL_RUNTIMES)} か、その名前に -2〜-9 を付けた形）")
     return m.group(1)
 
 
@@ -295,7 +278,9 @@ def review_seats(round_no: int, available: list[str], fallback: list[str]) -> li
 
 
 def choose_implementer(
-    participants: list[str], host: str, named: Optional[str] = None,
+    participants: list[str],
+    host: str,
+    named: Optional[str] = None,
 ) -> tuple[str, str]:
     """cross-refactoring の実装担当 1 者と、その決め方を返す（#933 の決定 1）。
 
@@ -310,8 +295,7 @@ def choose_implementer(
         raise AssignmentError("実装担当を選べる参加者がいません")
     if named:
         if named not in participants:
-            raise AssignmentError(
-                f"--implementer {named} は参加者にいません（参加者: {', '.join(participants)}）")
+            raise AssignmentError(f"--implementer {named} は参加者にいません（参加者: {', '.join(participants)}）")
         return named, "named"
     if host in participants:
         return host, "host"

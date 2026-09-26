@@ -4,6 +4,7 @@
 全体のテストを走らせたかとその理由・判断に Jev を使ったかを持つ。文言ではなく、
 状態の値が報告へ渡ることを見る。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -11,26 +12,41 @@ import argparse
 from crossref_helpers import make_state_v2
 
 
-def test_the_report_carries_phases_reasons_whole_test_and_judge(tmp_path, cmd_report,
-                                                                env_tmp_dir, capsys):
+def test_the_report_carries_phases_reasons_whole_test_and_judge(tmp_path, cmd_report, env_tmp_dir, capsys):
     path = make_state_v2(
-        tmp_path, tmp_path / "work",
-        phases={"propose": {"seconds": 270.0}, "plan": {"seconds": 180.0},
-                "implement": {"seconds": 600.0}, "verify": {"seconds": 30.0,
-                                                             "ended_at": "2026-09-24T10:30:00"}},
-        items=[{"id": "I-001", "path": "src/a.py", "symbol": "f", "smell": "long_method",
-                "technique": "extract_method", "tier": "high", "status": "verified",
-                "estimate": {"test": 0, "implement": 1.3, "verify": 0.2}, "danger": ["D3"],
-                "fix_count": 1, "commits": {"test": None, "implement": "abc", "fix": []},
-                "seconds": {"implement": 600.0}, "kind": "structure/extract_method"}],
-        deferred_items=[{"path": "src/b.py", "symbol": "g", "defer_reason": "budget"},
-                        {"path": "src/c.py", "symbol": "h", "defer_reason": "budget"},
-                        {"path": "src/d.py", "symbol": "i", "defer_reason": "no_target"}],
-        whole_test={"ran": True, "flags": ["D3"], "status": "pass", "seconds": 60.0,
-                    "head": "abc", "reverted": False},
+        tmp_path,
+        tmp_path / "work",
+        phases={
+            "propose": {"seconds": 270.0},
+            "plan": {"seconds": 180.0},
+            "implement": {"seconds": 600.0},
+            "verify": {"seconds": 30.0, "ended_at": "2026-09-24T10:30:00"},
+        },
+        items=[
+            {
+                "id": "I-001",
+                "path": "src/a.py",
+                "symbol": "f",
+                "smell": "long_method",
+                "technique": "extract_method",
+                "tier": "high",
+                "status": "verified",
+                "estimate": {"test": 0, "implement": 1.3, "verify": 0.2},
+                "danger": ["D3"],
+                "fix_count": 1,
+                "commits": {"test": None, "implement": "abc", "fix": []},
+                "seconds": {"implement": 600.0},
+                "kind": "structure/extract_method",
+            }
+        ],
+        deferred_items=[
+            {"path": "src/b.py", "symbol": "g", "defer_reason": "budget"},
+            {"path": "src/c.py", "symbol": "h", "defer_reason": "budget"},
+            {"path": "src/d.py", "symbol": "i", "defer_reason": "no_target"},
+        ],
+        whole_test={"ran": True, "flags": ["D3"], "status": "pass", "seconds": 60.0, "head": "abc", "reverted": False},
         judge={"kind": "runtime", "reason": "private_repo", "failures": 0},
-        final_gate={"mode": "test", "status": "passed", "fix_rounds": 0, "checks": [],
-                    "whole_test_reused": True},
+        final_gate={"mode": "test", "status": "passed", "fix_rounds": 0, "checks": [], "whole_test_reused": True},
         plan={"table_source": "history"},
     )
     env_tmp_dir(path)
@@ -48,14 +64,14 @@ def test_the_report_carries_phases_reasons_whole_test_and_judge(tmp_path, cmd_re
     assert "structure/extract_method" in out
 
 
-def test_the_report_gives_the_gap_between_the_budget_and_the_elapsed_time(tmp_path, cmd_report,
-                                                                          env_tmp_dir, capsys):
+def test_the_report_gives_the_gap_between_the_budget_and_the_elapsed_time(tmp_path, cmd_report, env_tmp_dir, capsys):
     """所要は `init` の開始から最終ゲートの最後のチェックまで。差は想定最大時間からの残り。"""
     path = make_state_v2(
-        tmp_path, tmp_path / "work",
-        started_at="2026-09-24T10:00:00", budget_minutes=60,
-        final_gate={"mode": "test", "status": "passed", "fix_rounds": 0,
-                    "checks": [{"at": "2026-09-24T10:45:00"}]},
+        tmp_path,
+        tmp_path / "work",
+        started_at="2026-09-24T10:00:00",
+        budget_minutes=60,
+        final_gate={"mode": "test", "status": "passed", "fix_rounds": 0, "checks": [{"at": "2026-09-24T10:45:00"}]},
     )
     env_tmp_dir(path)
     cmd_report.cmd_report(argparse.Namespace(id=130, metrics=False))

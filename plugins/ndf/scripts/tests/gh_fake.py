@@ -1,4 +1,5 @@
 """gh_* のテストが使う `gh` の偽物（`gh_call.RUNNER` の差し替え先）。argv の先頭一致で応答を返す。"""
+
 from __future__ import annotations
 
 import json
@@ -37,7 +38,7 @@ class FakeGh:
     def __call__(self, args, stdin=None, cwd=None):
         self.calls.append((list(args), stdin))
         for prefix, res in self.routes:
-            if tuple(args[:len(prefix)]) == prefix:
+            if tuple(args[: len(prefix)]) == prefix:
                 return res(args, stdin) if callable(res) else res
         pytest.fail(f"想定外の gh の呼び出し: {args}")
 

@@ -34,6 +34,7 @@
 最後に結果 JSON を 1 行出す（`plugins/ndf/scripts/lib/README.md` の形）。終了コードは 0 が違反なし、
 1 が違反あり、2 が例外リストの読めない・形の誤り。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -118,8 +119,7 @@ def py_body_key(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
     fn = copy.deepcopy(fn)
     fn.name = ""
     body = fn.body
-    if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant) \
-            and isinstance(body[0].value.value, str):
+    if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant) and isinstance(body[0].value.value, str):
         body = body[1:] or [ast.Pass()]
     fn.body = body
     _strip_annotations(fn)
@@ -139,8 +139,7 @@ def _docstring_ids(tree: ast.AST) -> set[int]:
     for node in ast.walk(tree):
         if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and node.body:
             first = node.body[0]
-            if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant) \
-                    and isinstance(first.value.value, str):
+            if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant) and isinstance(first.value.value, str):
                 ids.add(id(first.value))
     return ids
 
@@ -170,17 +169,18 @@ def wrapped_parts(text: str) -> dict[str, str]:
         elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
             names = {a.name for a in node.names}
             for part in ("fcntl", "pty", "termios", "urllib.request"):
-                if node.module == part or node.module.startswith(part + ".") \
-                        or (part == "urllib.request" and node.module == "urllib" and "request" in names):
+                if (
+                    node.module == part
+                    or node.module.startswith(part + ".")
+                    or (part == "urllib.request" and node.module == "urllib" and "request" in names)
+                ):
                     hit(part, node, f"from {node.module} import")
-        elif isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in docs \
-                and "/proc/" in node.value:
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in docs and "/proc/" in node.value:
             hit("proc-fs", node, repr(node.value[:40]))
         elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
             f = node.func
             regex = f.attr in RE_FUNCS and isinstance(f.value, ast.Name) and f.value.id == "re"
-            if (regex or f.attr in ("startswith", "endswith")) \
-                    and any(FENCE_HINT.search(s) for a in node.args for s in _strings(a)):
+            if (regex or f.attr in ("startswith", "endswith")) and any(FENCE_HINT.search(s) for a in node.args for s in _strings(a)):
                 hit("fence-regex", node, f"{'re.' if regex else '.'}{f.attr}")
     return found
 
@@ -212,8 +212,7 @@ def sh_functions(text: str) -> list[tuple[str, str]]:
             else:
                 i += 1
                 continue
-        end = next((j for j in range(start, len(lines))
-                    if lines[j].rstrip() in (indent + "}", indent + "};")), None)
+        end = next((j for j in range(start, len(lines)) if lines[j].rstrip() in (indent + "}", indent + "};")), None)
         if end is None:
             i += 1
             continue
@@ -269,8 +268,14 @@ def scan(root: Path) -> tuple[list[dict], dict]:
         if lang == "py":
             for part, where in sorted(wrapped_parts(text).items()):
                 if rel not in WRAPPED[part]:
-                    violations.append({"kind": "wrapped", "path": rel, "function": part,
-                                       "detail": f"包み {' / '.join(WRAPPED[part])} が受け持つ部品を使う（{where}）"})
+                    violations.append(
+                        {
+                            "kind": "wrapped",
+                            "path": rel,
+                            "function": part,
+                            "detail": f"包み {' / '.join(WRAPPED[part])} が受け持つ部品を使う（{where}）",
+                        }
+                    )
         found = py_functions(text) if lang == "py" else sh_functions(text)
         if found is None:
             unparsed += 1
@@ -288,16 +293,18 @@ def scan(root: Path) -> tuple[list[dict], dict]:
             others = by_key[(lang, key)] - {path}
             if others and (path, name, "same-body") not in seen:
                 seen.add((path, name, "same-body"))
-                violations.append({"kind": "same-body", "path": path, "function": name,
-                                   "detail": "本体が同じ: " + ", ".join(sorted(others))})
+                violations.append(
+                    {"kind": "same-body", "path": path, "function": name, "detail": "本体が同じ: " + ", ".join(sorted(others))}
+                )
         for name, per_path in by_name.items():
             if len(per_path) < 2:
                 continue
             for path, keys in per_path.items():
                 diff = sorted(p for p, ks in per_path.items() if p != path and ks != keys)
                 if diff:
-                    violations.append({"kind": "same-name", "path": path, "function": name,
-                                       "detail": "同じ名前で本体が違う: " + ", ".join(diff)})
+                    violations.append(
+                        {"kind": "same-name", "path": path, "function": name, "detail": "同じ名前で本体が違う: " + ", ".join(diff)}
+                    )
     violations += hook_deps(root)
     metrics = {"files": len(files), "functions": sum(len(v) for v in defs.values()), "unparsed": unparsed}
     return violations, metrics
@@ -308,8 +315,13 @@ def _calls_require(tree: ast.AST) -> bool:
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and node.module == "deps" and any(a.name == "require" for a in node.names):
             return True
-        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "require"
-                and isinstance(node.func.value, ast.Name) and node.func.value.id == "deps"):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "require"
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "deps"
+        ):
             return True
     return False
 
@@ -359,20 +371,38 @@ def hook_deps(root: Path) -> list[dict]:
         except SyntaxError:
             calls = False
         if calls:
-            out.append({"kind": "hook-deps", "path": rel, "function": "deps.require",
-                        "detail": "hook の経路のモジュールが deps.require() を呼ぶ（hook は用意済みの環境の python で動く）"})
+            out.append(
+                {
+                    "kind": "hook-deps",
+                    "path": rel,
+                    "function": "deps.require",
+                    "detail": "hook の経路のモジュールが deps.require() を呼ぶ（hook は用意済みの環境の python で動く）",
+                }
+            )
         todo += [f for f in (_module_file(root, n) for n in names) if f and f not in seen]
     for f in sorted(root.glob("plugins/*/hooks/*.json")):
         rel = f.relative_to(root).as_posix()
         if "uv run" in f.read_text(errors="ignore"):
-            out.append({"kind": "hook-deps", "path": rel, "function": "uv run",
-                        "detail": "hook の command が uv run を挟む（用意済みの環境の python を直に起動する）"})
+            out.append(
+                {
+                    "kind": "hook-deps",
+                    "path": rel,
+                    "function": "uv run",
+                    "detail": "hook の command が uv run を挟む（用意済みの環境の python を直に起動する）",
+                }
+            )
     return out
 
 
 def item(kind: str, path: str, function: str, result: str, detail: str) -> dict:
-    return {"kind": kind, "name": f"{path}:{function}" if function else path, "path": path,
-            "function": function, "result": result, "detail": detail}
+    return {
+        "kind": kind,
+        "name": f"{path}:{function}" if function else path,
+        "path": path,
+        "function": function,
+        "result": result,
+        "detail": detail,
+    }
 
 
 def check(root: Path, allow: list[dict]) -> tuple[list[dict], dict]:
@@ -386,23 +416,32 @@ def check(root: Path, allow: list[dict]) -> tuple[list[dict], dict]:
         if row is not None:
             hit.add(k)
             if v["kind"] == "lines" and v["lines"] > row["lines"]:
-                items.append(item("lines", v["path"], "", "violation",
-                                  f"{v['lines']} 行。例外リストの {row['lines']} 行を超えた"))
+                items.append(item("lines", v["path"], "", "violation", f"{v['lines']} 行。例外リストの {row['lines']} 行を超えた"))
             continue
         items.append(item(v["kind"], v["path"], v["function"], "violation", v["detail"]))
     for r in allow:
         k = (r["path"], r["name"], r["kind"])
         if k not in hit:
-            items.append(item("unused-allow", r["path"], r["name"], "violation",
-                              f"{r['kind']} の例外に当たる違反が無い。例外リストの {allow_file_name(r)} を消す"))
+            items.append(
+                item(
+                    "unused-allow",
+                    r["path"],
+                    r["name"],
+                    "violation",
+                    f"{r['kind']} の例外に当たる違反が無い。例外リストの {allow_file_name(r)} を消す",
+                )
+            )
     items.sort(key=lambda i: (i["path"], i["function"], i["kind"]))
     metrics.update(allowed=len(hit), violations=len(items))
     return items, metrics
 
 
 def emit(status: str, summary: str, items: list[dict], metrics: dict) -> None:
-    print(json.dumps({"tool": "check-script-structure", "status": status, "summary": summary,
-                      "items": items, "metrics": metrics}, ensure_ascii=False))
+    print(
+        json.dumps(
+            {"tool": "check-script-structure", "status": status, "summary": summary, "items": items, "metrics": metrics}, ensure_ascii=False
+        )
+    )
 
 
 def main(argv: list[str] | None = None) -> int:

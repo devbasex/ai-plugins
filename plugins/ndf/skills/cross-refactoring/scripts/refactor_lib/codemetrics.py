@@ -8,6 +8,7 @@
 **表にパスもリポジトリ固有の設定も入れない**（AC8）。ほかのリポジトリでも同じ既定で測る。
 同じ名前の指標（循環的複雑度）でも、ツールが違えば値の意味が違う。言語をまたいで比べない。
 """
+
 from __future__ import annotations
 
 import json
@@ -28,8 +29,7 @@ TOOL_FAILED = "tool_failed"
 UNREADABLE_OUTPUT = "unreadable_output"
 TIMEOUT = "timeout"
 TOO_MANY_FILES = "too_many_files"
-REASONS = (TOOL_MISSING, UNSUPPORTED_LANGUAGE, DISABLED, TOOL_FAILED, UNREADABLE_OUTPUT,
-           TIMEOUT, TOO_MANY_FILES)
+REASONS = (TOOL_MISSING, UNSUPPORTED_LANGUAGE, DISABLED, TOOL_FAILED, UNREADABLE_OUTPUT, TIMEOUT, TOO_MANY_FILES)
 
 # 言語ごと・重複検出のツールごとの結果。
 MEASURED = "measured"
@@ -41,8 +41,7 @@ STATUS_WRITTEN = "written"
 STATUS_DISABLED = "disabled"
 STATUS_NO_LANGUAGE = "no_language"
 STATUS_WRITE_FAILED = "write_failed"
-STATUSES = (STATUS_PENDING, STATUS_WRITTEN, STATUS_DISABLED, STATUS_NO_LANGUAGE,
-            STATUS_WRITE_FAILED)
+STATUSES = (STATUS_PENDING, STATUS_WRITTEN, STATUS_DISABLED, STATUS_NO_LANGUAGE, STATUS_WRITE_FAILED)
 
 # 宣言を使わなかった理由（前提 8）。
 DECLARATION_INVALID = "declaration_invalid"
@@ -85,8 +84,7 @@ EXTENSION_LANGUAGE = {ext: lang for lang, exts in LANGUAGE_EXTENSIONS.items() fo
 
 # 言語 → 既定のツール。`None` はツールが無い（`unsupported_language`）。
 DEFAULT_TOOLS: dict[str, Optional[str]] = {
-    lang: (TOOL_RUFF_COMPLEXIPY if lang == "python" else None if lang == "shell" else TOOL_LIZARD)
-    for lang in LANGUAGE_EXTENSIONS
+    lang: (TOOL_RUFF_COMPLEXIPY if lang == "python" else None if lang == "shell" else TOOL_LIZARD) for lang in LANGUAGE_EXTENSIONS
 }
 
 # 測定ツール → 起動するコマンド。`ruff-complexipy` は 2 つを 1 つの測定ツールとして扱う。
@@ -122,8 +120,8 @@ RUFF_FIELDS = {
 _VERSION = re.compile(r"(\d+\.\d+(?:\.\d+)*)")
 
 
-
 # ---------------- 宣言 ----------------
+
 
 def _declaration_error(data: Any) -> Optional[str]:
     """宣言の形の誤り。正しければ `None`。"""
@@ -156,16 +154,22 @@ def load_config(text: Optional[str], enabled: bool = True) -> dict[str, Any]:
     """
     tools = dict(DEFAULT_TOOLS)
     config: dict[str, Any] = {
-        "enabled": bool(enabled), "source": SOURCE_DEFAULT, "declaration": DECLARATION_FILE,
-        "error": None, "tools": tools, "disabled": [],
+        "enabled": bool(enabled),
+        "source": SOURCE_DEFAULT,
+        "declaration": DECLARATION_FILE,
+        "error": None,
+        "tools": tools,
+        "disabled": [],
     }
     if text is None:
         return config
     try:
         data = json.loads(text)
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-        config.update(source=SOURCE_INVALID, error=f"JSON として読めない（{exc.msg}）"
-                      if isinstance(exc, json.JSONDecodeError) else "UTF-8 として読めない")
+        config.update(
+            source=SOURCE_INVALID,
+            error=f"JSON として読めない（{exc.msg}）" if isinstance(exc, json.JSONDecodeError) else "UTF-8 として読めない",
+        )
         return config
     error = _declaration_error(data)
     if error is not None:
@@ -190,6 +194,7 @@ def language_tool(config: dict[str, Any], lang: str) -> tuple[Optional[str], Opt
 
 # ---------------- ファイル ----------------
 
+
 def language_of(path: str) -> Optional[str]:
     """拡張子から言語を判定する。表に無い拡張子と拡張子の無いファイルは `None`。"""
     return EXTENSION_LANGUAGE.get(posixpath.splitext(path)[1].lower())
@@ -209,7 +214,8 @@ def split_by_language(paths: Iterable[str]) -> tuple[dict[str, list[str]], int]:
 
 
 def duplication_targets(
-    config: dict[str, Any], by_lang: dict[str, list[str]],
+    config: dict[str, Any],
+    by_lang: dict[str, list[str]],
 ) -> list[tuple[str, list[str], list[str]]]:
     """重複検出の `(ツール, 言語, ファイル)` の並び（決定 13）。
 
@@ -232,7 +238,7 @@ def arg_bytes(paths: Iterable[str]) -> int:
 
 
 def chunks(items: list[str], size: int = BATCH_FILES) -> list[list[str]]:
-    return [items[i:i + size] for i in range(0, len(items), size)] or [[]]
+    return [items[i : i + size] for i in range(0, len(items), size)] or [[]]
 
 
 def to_relative(name: str, roots: Iterable[str]) -> Optional[str]:
@@ -244,7 +250,7 @@ def to_relative(name: str, roots: Iterable[str]) -> Optional[str]:
     for root in roots:
         root = str(root).rstrip("/")
         if name.startswith(root + "/"):
-            return posixpath.normpath(name[len(root) + 1:])
+            return posixpath.normpath(name[len(root) + 1 :])
     return None
 
 
@@ -265,6 +271,7 @@ def path_role(path: str) -> str:
 
 
 # ---------------- ランナーとコマンド ----------------
+
 
 def resolve_runner(command: str, which: Callable[[str], Optional[str]]) -> Optional[tuple[str, list[str]]]:
     """コマンドの `(ランナー, 起動の頭の語の並び)`。見つからなければ `None`（決定 3）。
@@ -288,20 +295,46 @@ def pinned_version(command: str) -> str:
 
 def ruff_argv(prefix: list[str], files: list[str]) -> list[str]:
     """Ruff の起動。`--isolated` で対象の設定を読まず、閾値を 0 にして全関数の値を出させる。"""
-    return [*prefix, "check", "--isolated", "--no-cache", "--exit-zero",
-            "--select", ",".join(RUFF_FIELDS),
-            "--config", "lint.mccabe.max-complexity=0",
-            "--config", "lint.pylint.max-branches=0",
-            "--config", "lint.pylint.max-returns=0",
-            "--config", "lint.pylint.max-args=0",
-            "--config", "lint.pylint.max-statements=0",
-            "--output-format", "json", *files]
+    return [
+        *prefix,
+        "check",
+        "--isolated",
+        "--no-cache",
+        "--exit-zero",
+        "--select",
+        ",".join(RUFF_FIELDS),
+        "--config",
+        "lint.mccabe.max-complexity=0",
+        "--config",
+        "lint.pylint.max-branches=0",
+        "--config",
+        "lint.pylint.max-returns=0",
+        "--config",
+        "lint.pylint.max-args=0",
+        "--config",
+        "lint.pylint.max-statements=0",
+        "--output-format",
+        "json",
+        *files,
+    ]
 
 
 def complexipy_argv(prefix: list[str], files: list[str], output: str, cache_dir: str) -> list[str]:
     """complexipy の起動。上限を外して終了コード 1 を出させず、キャッシュを一時ディレクトリへ向ける。"""
-    return [*prefix, *files, "--output-format", "json", "--output", output, "-q",
-            "--max-complexity-allowed", "1000000", "--no-ignore", "--cache-dir", cache_dir]
+    return [
+        *prefix,
+        *files,
+        "--output-format",
+        "json",
+        "--output",
+        output,
+        "-q",
+        "--max-complexity-allowed",
+        "1000000",
+        "--no-ignore",
+        "--cache-dir",
+        cache_dir,
+    ]
 
 
 def lizard_argv(prefix: list[str], files: list[str]) -> list[str]:
@@ -310,12 +343,21 @@ def lizard_argv(prefix: list[str], files: list[str]) -> list[str]:
 
 def symilar_argv(prefix: list[str], files: list[str]) -> list[str]:
     """symilar の起動。引数は pylint の duplicate-code（R0801）の既定と同じ扱いにする。"""
-    return [*prefix, "-d", str(DUPLICATE_MIN_LINES), "-i", "--ignore-docstrings",
-            "--ignore-imports", "--ignore-signatures", *files]
+    return [*prefix, "-d", str(DUPLICATE_MIN_LINES), "-i", "--ignore-docstrings", "--ignore-imports", "--ignore-signatures", *files]
 
 
 def jscpd_argv(prefix: list[str], abs_files: list[str], output_dir: str) -> list[str]:
     """jscpd の起動。ファイルを明示して渡し、`.gitignore` を二重に当てない。"""
-    return [*prefix, *abs_files, "--absolute", "--no-gitignore",
-            "--min-lines", str(DUPLICATE_MIN_LINES), "--reporters", "json",
-            "--output", output_dir, "--silent"]
+    return [
+        *prefix,
+        *abs_files,
+        "--absolute",
+        "--no-gitignore",
+        "--min-lines",
+        str(DUPLICATE_MIN_LINES),
+        "--reporters",
+        "json",
+        "--output",
+        output_dir,
+        "--silent",
+    ]

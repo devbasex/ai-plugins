@@ -3,6 +3,7 @@
 指摘・対象・スコープの型、観点のデータ（`data/instruction-criteria.json`）の読み込み、複数のモジュールが使う
 本文の読み方（見出しと囲みは lib/md.py）を持つ。ほかの `instructions_lib` のモジュールを import しない。
 """
+
 from __future__ import annotations
 
 import json
@@ -48,6 +49,7 @@ class CheckError(Exception):
 
 
 # --- 型 ----------------------------------------------------------------------
+
 
 @dataclass
 class Source:
@@ -98,6 +100,7 @@ class ScopeRoot:
 
 # --- 観点のデータ ------------------------------------------------------------
 
+
 @dataclass
 class Criteria:
     """観点と出典。**読めなければ止まる**（何を見るかが決まらないまま走らせない）。"""
@@ -120,8 +123,7 @@ class Criteria:
         for source_id in self.sources_of.get(criterion_id, []):
             source = by_id.get(source_id)
             if source:
-                names.append(f"{source.get('name', source_id)}"
-                             f"（{source.get('checked_at', '-')}）")
+                names.append(f"{source.get('name', source_id)}（{source.get('checked_at', '-')}）")
         return names
 
 

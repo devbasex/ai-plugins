@@ -3,6 +3,7 @@
 Codex だけ別の起動定義を読ませるプラグインがある（mcp-serena の `.codex.mcp.json`。#818）。
 指す先が実在すれば通し、無い・形が違えば落とす。
 """
+
 from __future__ import annotations
 
 import json
@@ -20,15 +21,17 @@ def _mcp_plugin(root: Path, declared, files=(".mcp.json",)) -> None:
     for name in files:
         (plugin / name).write_text('{"mcpServers": {}}\n', encoding="utf-8")
     (plugin / ".claude-plugin/plugin.json").write_text('{"name": "mcp-x"}\n', encoding="utf-8")
-    (plugin / ".codex-plugin/plugin.json").write_text(
-        json.dumps({"name": "mcp-x", "mcpServers": declared}), encoding="utf-8")
+    (plugin / ".codex-plugin/plugin.json").write_text(json.dumps({"name": "mcp-x", "mcpServers": declared}), encoding="utf-8")
     (plugin / "dev.kiro/install.sh").write_text("#!/bin/sh\n", encoding="utf-8")
 
 
-@pytest.mark.parametrize("declared,files", [
-    ("./.mcp.json", (".mcp.json",)),
-    ("./.codex.mcp.json", (".mcp.json", ".codex.mcp.json")),
-])
+@pytest.mark.parametrize(
+    "declared,files",
+    [
+        ("./.mcp.json", (".mcp.json",)),
+        ("./.codex.mcp.json", (".mcp.json", ".codex.mcp.json")),
+    ],
+)
 def test_existing_mcp_definition_passes(tmp_path, declared, files):
     root = build_tree(tmp_path / "tree")
     _mcp_plugin(root, declared, files)
@@ -36,12 +39,15 @@ def test_existing_mcp_definition_passes(tmp_path, declared, files):
     assert result.returncode == 0, output_of(result)
 
 
-@pytest.mark.parametrize("declared,files", [
-    (None, (".mcp.json",)),
-    ("./.codex.mcp.json", (".mcp.json",)),
-    ("./other.json", (".mcp.json", "other.json")),
-    ("../.mcp.json", (".mcp.json",)),
-])
+@pytest.mark.parametrize(
+    "declared,files",
+    [
+        (None, (".mcp.json",)),
+        ("./.codex.mcp.json", (".mcp.json",)),
+        ("./other.json", (".mcp.json", "other.json")),
+        ("../.mcp.json", (".mcp.json",)),
+    ],
+)
 def test_missing_or_misnamed_definition_fails(tmp_path, declared, files):
     root = build_tree(tmp_path / "tree")
     _mcp_plugin(root, declared, files)

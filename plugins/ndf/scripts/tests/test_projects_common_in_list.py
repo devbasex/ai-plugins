@@ -4,6 +4,7 @@
 パイプ全体が 141 になる。一覧をパイプの緩衝（64 KiB）より大きくし、先頭で一致させると
 この競合を毎回起こせる。
 """
+
 from __future__ import annotations
 
 import pathlib

@@ -4,6 +4,7 @@
 `serena-hooks remind` と同じにする。数えるのは configure の目印のある project.yml の
 採った言語の拡張子だけである。呼び出し側（serena-lsp.py）が例外を握りつぶす。
 """
+
 import contextlib
 import hashlib
 import json
@@ -27,8 +28,19 @@ PREFIX = "[mcp-serena]"
 THRESHOLDS = {"grep": 3, "read": 3, "mixed": 4}
 PERIODS = {"grep": 1000, "read": 1000, "mixed": 2000}
 NOTICE_INTERVAL = 120
-NON_SYMBOLIC = ("pattern", "read", "diagnostics", "memory", "onboarding", "config", "list_file",
-                "find_file", "shell", "dashboard", "restart_language_server")
+NON_SYMBOLIC = (
+    "pattern",
+    "read",
+    "diagnostics",
+    "memory",
+    "onboarding",
+    "config",
+    "list_file",
+    "find_file",
+    "shell",
+    "dashboard",
+    "restart_language_server",
+)
 GREP_COMMANDS = {"grep", "rg", "ag", "ack", "fgrep", "egrep"}
 READ_COMMANDS = {"cat", "head", "tail", "sed", "less", "nl"}
 SHELL_TOOLS = {"bash", "shell", "exec_command", "local_shell"}
@@ -61,13 +73,13 @@ def find_root(cwd) -> Path:
 
 # ---- SessionStart ------------------------------------------------------------
 
+
 def _context(event: str, lines: list) -> dict:
     return {"hookSpecificOutput": {"hookEventName": event, "additionalContext": "\n".join(lines)}}
 
 
 def _decision(decision: str, reason: str) -> dict:
-    return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": decision,
-                                   "permissionDecisionReason": reason}}
+    return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": decision, "permissionDecisionReason": reason}}
 
 
 def _unconfigured_lines(detected: list) -> list:
@@ -123,6 +135,7 @@ def session_start(payload: dict, client: str):
 
 # ---- PreToolUse -------------------------------------------------------------
 
+
 def _state_path(session_id: str) -> Path:
     base = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local/state")
     safe = "".join(c for c in session_id if c.isalnum() or c in "-_") or "unknown"
@@ -170,8 +183,7 @@ def cached_state(root: Path):
     return state
 
 
-EMPTY = {"grep": 0, "read": 0, "mixed": 0, "last_grep": None, "last_read": None, "last_mixed": None,
-         "last_notice": None}
+EMPTY = {"grep": 0, "read": 0, "mixed": 0, "last_grep": None, "last_read": None, "last_mixed": None, "last_notice": None}
 
 
 def _load_counts(path: Path) -> dict:

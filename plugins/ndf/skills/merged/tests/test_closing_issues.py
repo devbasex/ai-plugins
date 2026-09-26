@@ -7,6 +7,7 @@
 issue you reference" と定めており、`Fixes #12, #13` は 12 だけを閉じる。既定ブランチへ
 マージしたときの GitHub の振る舞いと同じ結果になるようにする。
 """
+
 from __future__ import annotations
 
 import shutil
@@ -38,9 +39,7 @@ def test_the_case_of_the_keyword_does_not_matter(body: str) -> None:
     assert numbers(body) == ["12", "13"]
 
 
-@pytest.mark.parametrize(
-    "keyword", ["close", "closes", "closed", "fix", "fixes", "fixed", "resolve", "resolves", "resolved"]
-)
+@pytest.mark.parametrize("keyword", ["close", "closes", "closed", "fix", "fixes", "fixed", "resolve", "resolves", "resolved"])
 def test_every_keyword_github_accepts_is_read(keyword: str) -> None:
     assert numbers(f"{keyword} #42\n") == ["42"]
 
@@ -90,11 +89,7 @@ def test_an_issue_url_is_read() -> None:
 
 def test_the_three_forms_are_read_from_one_body() -> None:
     """#229-1: 3 つの形が、いずれも所有者とリポジトリと番号に分かれて出る。"""
-    body = (
-        "Fixes #12\n"
-        "Closes devbasex/other#283\n"
-        "Resolves https://github.com/devbasex/third/issues/7\n"
-    )
+    body = "Fixes #12\nCloses devbasex/other#283\nResolves https://github.com/devbasex/third/issues/7\n"
 
     assert entries(body) == [
         (DEFAULT_REPO, "12"),

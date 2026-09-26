@@ -1,5 +1,5 @@
-"""リポジトリ側の宣言（`.ndf/instructions.json`）の読み込みと検査（`instructions-check.py` から分けた。#1142 の C7）。
-"""
+"""リポジトリ側の宣言（`.ndf/instructions.json`）の読み込みと検査（`instructions-check.py` から分けた。#1142 の C7）。"""
+
 from __future__ import annotations
 
 import datetime
@@ -99,10 +99,8 @@ def _apply_field_constraints(raw: dict, decl: Declaration) -> None:
         decl.pending_marker = marker
 
     decl.import_depth = _positive(raw, "import_depth", decl.import_depth)
-    decl.refresh_timeout_seconds = _positive(
-        raw, "refresh_timeout_seconds", decl.refresh_timeout_seconds)
-    decl.review_interval_days = _positive(
-        raw, "review_interval_days", decl.review_interval_days)
+    decl.refresh_timeout_seconds = _positive(raw, "refresh_timeout_seconds", decl.refresh_timeout_seconds)
+    decl.review_interval_days = _positive(raw, "review_interval_days", decl.review_interval_days)
 
     if decl.budget is not None and "bytes" in decl.budget:
         decl.budget["bytes"] = _positive(decl.budget, "bytes", 0)
@@ -133,8 +131,7 @@ def _validate_imports(allow, label: str) -> None:
         raise CheckError(f"宣言の {label} はオブジェクトである")
     for key, entries in allow.items():
         if not isinstance(entries, dict):
-            raise CheckError(f"宣言の {label}.{key} は "
-                             "{参照先: 理由} のオブジェクトである")
+            raise CheckError(f"宣言の {label}.{key} は {{参照先: 理由}} のオブジェクトである")
         for name, reason in entries.items():
             if not isinstance(reason, str):
                 raise CheckError(f"宣言の {label}.{key}.{name} の理由は文字列である")

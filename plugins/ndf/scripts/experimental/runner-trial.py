@@ -15,6 +15,7 @@ supervise.py new impl の雛形（rt_common.PLAN_STEPS）を、ステップを�
     python3 runner-trial.py dbos-queue --root DIR --stages JSON
     python3 runner-trial.py noop <候補>                 # 起動し直しと import だけ（cost が秒数を測る）
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -39,9 +40,11 @@ import rt_common as rc  # noqa: E402
 
 TOOL = "runner-trial"
 CANDS = {"langgraph": "rt_langgraph", "burr": "rt_burr", "dbos": "rt_dbos"}
-IMPORTS = {"langgraph": "from langgraph.graph import StateGraph; from langgraph.checkpoint.sqlite import SqliteSaver",
-           "burr": "from burr.core import ApplicationBuilder; from burr.core.persistence import SQLitePersister",
-           "dbos": "from dbos import DBOS, Queue"}
+IMPORTS = {
+    "langgraph": "from langgraph.graph import StateGraph; from langgraph.checkpoint.sqlite import SqliteSaver",
+    "burr": "from burr.core import ApplicationBuilder; from burr.core.persistence import SQLitePersister",
+    "dbos": "from dbos import DBOS, Queue",
+}
 TOP = {"langgraph": "langgraph", "burr": "burr", "dbos": "dbos"}
 SUPERVISE = HERE.parents[1] / "supervise.py"
 EXIT = {"done": 0, "gate": 10, "stopped": 1, "limit": 1}
@@ -61,8 +64,7 @@ def reexec_into(cand: str) -> None:
     if not uv:
         emit(result(TOOL, "stopped", f"uv を入れられない（{dt.UV_VERSION}）"), 3)
     env = dict(os.environ, NDF_DEPS_REEXEC="1", UV_PROJECT_ENVIRONMENT=venv_of(cand))
-    argv = [uv, "run", "--quiet", "--frozen", "--project", str(PROJECT), "--extra", cand,
-            "python", str(HERE), *sys.argv[1:]]
+    argv = [uv, "run", "--quiet", "--frozen", "--project", str(PROJECT), "--extra", cand, "python", str(HERE), *sys.argv[1:]]
     os.execve(uv, argv, env)
 
 
@@ -72,6 +74,7 @@ def adapter(cand: str):
 
 
 # --- 内部の副命令 ---
+
 
 def cmd_run(a) -> None:
     mod = adapter(a.cand)
@@ -101,10 +104,23 @@ def cmd_noop(a) -> None:
 
 # --- check: 表せるか ---
 
-def run_sub(cand: str, root: Path, plan: str, scenario: str, *extra: str, slots: Path | None = None,
-            timeout: float = 120) -> tuple[int, dict]:
-    argv = [sys.executable, str(HERE), "run", cand, "--state", str(root / f"{plan}-state"), "--plan", plan,
-            "--scenario", scenario, *extra] + (["--slots", str(slots)] if slots else [])
+
+def run_sub(
+    cand: str, root: Path, plan: str, scenario: str, *extra: str, slots: Path | None = None, timeout: float = 120
+) -> tuple[int, dict]:
+    argv = [
+        sys.executable,
+        str(HERE),
+        "run",
+        cand,
+        "--state",
+        str(root / f"{plan}-state"),
+        "--plan",
+        plan,
+        "--scenario",
+        scenario,
+        *extra,
+    ] + (["--slots", str(slots)] if slots else [])
     p = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
     last = (p.stdout.strip().splitlines() or ["{}"])[-1]
     try:
@@ -128,10 +144,18 @@ def check_express(cand: str, root: Path) -> dict:
         t0 = time.time()
         code, out = run_sub(cand, d, sc, sc)
         want_status, want_path = rc.reference_path(sc)
-        items.append({"scenario": sc, "ok": out.get("status") == want_status and out.get("path") == want_path,
-                      "status": out.get("status"), "steps": len(out.get("path") or []), "exit": code,
-                      "seconds": round(time.time() - t0, 2), "error": out.get("error"),
-                      "listen_ports": out.get("listen_ports")})
+        items.append(
+            {
+                "scenario": sc,
+                "ok": out.get("status") == want_status and out.get("path") == want_path,
+                "status": out.get("status"),
+                "steps": len(out.get("path") or []),
+                "exit": code,
+                "seconds": round(time.time() - t0, 2),
+                "error": out.get("error"),
+                "listen_ports": out.get("listen_ports"),
+            }
+        )
     d = root / "express-gate"
     c1, o1 = run_sub(cand, d, "gate", "gate")
     n1 = len(steps_started(d))
@@ -140,14 +164,21 @@ def check_express(cand: str, root: Path) -> dict:
     c3, o3 = run_sub(cand, d, "gate", "gate", "--approve")
     started = [r["step"] for r in steps_started(d)]
     want_status, want_path = rc.reference_path("gate")
-    items.append({"scenario": "gate", "ok": (o1.get("status"), o2.get("status"), o3.get("status")) == (
-        "gate", "gate", "done") and n1 == n2 and started == want_path, "exits": [c1, c2, c3],
-        "rerun_without_approve_ran_steps": n2 - n1, "after_approve": started[n1:],
-        "error": o1.get("error") or o2.get("error") or o3.get("error")})
+    items.append(
+        {
+            "scenario": "gate",
+            "ok": (o1.get("status"), o2.get("status"), o3.get("status")) == ("gate", "gate", "done") and n1 == n2 and started == want_path,
+            "exits": [c1, c2, c3],
+            "rerun_without_approve_ran_steps": n2 - n1,
+            "after_approve": started[n1:],
+            "error": o1.get("error") or o2.get("error") or o3.get("error"),
+        }
+    )
     return {"check": "express", "ok": all(i["ok"] for i in items), "items": items}
 
 
 # --- check: キュー ---
+
 
 def overlap(intervals: list[tuple[float, float]]) -> int:
     pts = sorted([(s, 1) for s, _ in intervals] + [(e, -1) for _, e in intervals], key=lambda x: (x[0], x[1]))
@@ -176,8 +207,7 @@ def queue_stats(root: Path) -> dict:
                 opened[key] = r["t"]
             elif key in opened:
                 gql.append((opened.pop(key), r["t"]))
-    return {"plans": plans, "max_plans": overlap(list(plans.values())), "max_graphql": overlap(gql),
-            "graphql_waited": waited}
+    return {"plans": plans, "max_plans": overlap(list(plans.values())), "max_graphql": overlap(gql), "graphql_waited": waited}
 
 
 def self_built_queue(cand: str, root: Path, stages: list[list[dict]], width: int = 2) -> list:
@@ -188,10 +218,21 @@ def self_built_queue(cand: str, root: Path, stages: list[list[dict]], width: int
         while pending or running:
             while pending and len(running) < width:
                 p = pending.pop(0)
-                argv = [sys.executable, str(HERE), "run", cand, "--state", str(root / f"{p['plan']}-state"),
-                        "--plan", p["plan"], "--scenario", p["scenario"], "--slots", str(root / "slots")]
-                running[p["plan"]] = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                                                      text=True)
+                argv = [
+                    sys.executable,
+                    str(HERE),
+                    "run",
+                    cand,
+                    "--state",
+                    str(root / f"{p['plan']}-state"),
+                    "--plan",
+                    p["plan"],
+                    "--scenario",
+                    p["scenario"],
+                    "--slots",
+                    str(root / "slots"),
+                ]
+                running[p["plan"]] = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
             for name, proc in list(running.items()):
                 if proc.poll() is not None:
                     outs.append(json.loads(proc.stdout.read().strip().splitlines()[-1]))
@@ -199,7 +240,7 @@ def self_built_queue(cand: str, root: Path, stages: list[list[dict]], width: int
             time.sleep(0.05)
         results.append({"stage": i, "outcomes": outs})
         if any(o.get("status") != "done" for o in outs):
-            results.append({"stage": i + 1, "skipped": [p["plan"] for s in stages[i + 1:] for p in s]})
+            results.append({"stage": i + 1, "skipped": [p["plan"] for s in stages[i + 1 :] for p in s]})
             break
     return results
 
@@ -211,14 +252,16 @@ def write_listing(root: Path, stages: list[list[dict]]) -> Path:
         (root / f"{n}.json").write_text(json.dumps({"steps": rc.PLAN_STEPS}, ensure_ascii=False))
         (root / f"{n}-state").mkdir(parents=True, exist_ok=True)
     done = root / "queue-done.json"
-    done.with_suffix(".plans.json").write_text(json.dumps(
-        {"started": rc.iso_now(), "plans": [str(root / f"{n}.json") for n in names], "offsets": {}}))
+    done.with_suffix(".plans.json").write_text(
+        json.dumps({"started": rc.iso_now(), "plans": [str(root / f"{n}.json") for n in names], "offsets": {}})
+    )
     return done
 
 
 def sv_wait(done: Path) -> tuple[int, dict]:
-    p = subprocess.run([sys.executable, str(SUPERVISE), "wait", str(done), "--timeout", "3", "--poll", "0.2"],
-                       capture_output=True, text=True, timeout=60)
+    p = subprocess.run(
+        [sys.executable, str(SUPERVISE), "wait", str(done), "--timeout", "3", "--poll", "0.2"], capture_output=True, text=True, timeout=60
+    )
     try:
         return p.returncode, json.loads(p.stdout.strip().splitlines()[-1])
     except (json.JSONDecodeError, IndexError):
@@ -230,13 +273,19 @@ def check_queue(cand: str, root: Path) -> dict:
     for label, stop_plan in (("all-done", None), ("stage1-stops", "q2")):
         d = root / f"queue-{label}"
         d.mkdir(parents=True, exist_ok=True)
-        stages = [[{"plan": f"q{i}", "scenario": "stop" if f"q{i}" == stop_plan else "pass"} for i in (1, 2, 3, 4)],
-                  [{"plan": f"q{i}", "scenario": "pass"} for i in (5, 6)]]
+        stages = [
+            [{"plan": f"q{i}", "scenario": "stop" if f"q{i}" == stop_plan else "pass"} for i in (1, 2, 3, 4)],
+            [{"plan": f"q{i}", "scenario": "pass"} for i in (5, 6)],
+        ]
         done = write_listing(d, stages)
         t0 = time.time()
         if cand == "dbos":
-            p = subprocess.run([sys.executable, str(HERE), "dbos-queue", "--root", str(d), "--stages",
-                                json.dumps(stages)], capture_output=True, text=True, timeout=300)
+            p = subprocess.run(
+                [sys.executable, str(HERE), "dbos-queue", "--root", str(d), "--stages", json.dumps(stages)],
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
             try:
                 res = json.loads(p.stdout.strip().splitlines()[-1])
             except (json.JSONDecodeError, IndexError):
@@ -251,20 +300,35 @@ def check_queue(cand: str, root: Path) -> dict:
         ran = sorted(st["plans"])
         want = [f"q{i}" for i in range(1, 7)] if stop_plan is None else ["q1", "q2", "q3", "q4"]
         w1 = sv_wait(done)  # done を書く前: queue の流すプランの attention で返る（stage1-stops のとき）
-        (done).write_text(json.dumps({"status": "ok" if stop_plan is None else "stopped",
-                                      "summary": f"{len(ran)} 本を流した"}, ensure_ascii=False))
+        (done).write_text(
+            json.dumps({"status": "ok" if stop_plan is None else "stopped", "summary": f"{len(ran)} 本を流した"}, ensure_ascii=False)
+        )
         w2 = sv_wait(done)
-        items.append({"case": label, "seconds": secs, "ran": ran, "max_plans": st["max_plans"],
-                      "max_graphql": st["max_graphql"], "graphql_waited": st["graphql_waited"], "stage_order_ok": order_ok,
-                      "wait_before_done": [w1[0], w1[1].get("status"), w1[1].get("metrics", {}).get("attention")],
-                      "wait_after_done": [w2[0], w2[1].get("status")],
-                      "ok": ran == want and st["max_plans"] <= 2 and st["max_graphql"] <= 1 and order_ok
-                      and w1[0] == (20 if stop_plan else 3) and w2[0] == 0,
-                      "raw": res if not isinstance(res, list) or any("error" in r for r in res) else None})
+        items.append(
+            {
+                "case": label,
+                "seconds": secs,
+                "ran": ran,
+                "max_plans": st["max_plans"],
+                "max_graphql": st["max_graphql"],
+                "graphql_waited": st["graphql_waited"],
+                "stage_order_ok": order_ok,
+                "wait_before_done": [w1[0], w1[1].get("status"), w1[1].get("metrics", {}).get("attention")],
+                "wait_after_done": [w2[0], w2[1].get("status")],
+                "ok": ran == want
+                and st["max_plans"] <= 2
+                and st["max_graphql"] <= 1
+                and order_ok
+                and w1[0] == (20 if stop_plan else 3)
+                and w2[0] == 0,
+                "raw": res if not isinstance(res, list) or any("error" in r for r in res) else None,
+            }
+        )
     return {"check": "queue", "ok": all(i["ok"] for i in items), "items": items}
 
 
 # --- check: 再開 ---
+
 
 def check_resume(cand: str, root: Path) -> dict:
     d = root / "resume"
@@ -275,34 +339,47 @@ def check_resume(cand: str, root: Path) -> dict:
 
     def reached() -> bool:
         return any(r["step"] == "test-limited" for r in steps_started(d))
+
     while time.time() < deadline and proc.poll() is None and not reached():
         time.sleep(0.05)
+
     def kill_group() -> None:
         try:
             os.killpg(proc.pid, signal.SIGKILL)
         except ProcessLookupError:  # 子のグループが既に終わっていれば落とすものは無い
             pass
         proc.wait()
+
     if not reached():  # 落とす前に子が終わった、または時間切れ。再開を確かめる前提が成り立たない
         exited = proc.poll()
         if exited is None:
             kill_group()
         reason = "120 秒で test-limited に届かない" if exited is None else f"test-limited の前に終了した（{exited}）"
-        return {"check": "resume", "items": [{"before_kill": [r["step"] for r in steps_started(d)],
-                                              "error": reason}], "ok": False}
+        return {"check": "resume", "items": [{"before_kill": [r["step"] for r in steps_started(d)], "error": reason}], "ok": False}
     time.sleep(0.5)
     kill_group()  # プランのプロセスと、流れているステップの子プロセスをまとめて落とす
     first = [r["step"] for r in steps_started(d)]
     code, out = run_sub(cand, d, "k", "slow")
     rows = steps_started(d)
-    second = [r["step"] for r in rows[len(first):]]
+    second = [r["step"] for r in rows[len(first) :]]
     completed_before = first[:-1]  # 最後の 1 つは落ちたときに流れていた
-    return {"check": "resume", "items": [{"before_kill": first, "after_restart": second,
-                                          "restarted_at": second[0] if second else None,
-                                          "rerun_completed_steps": [s for s in second if s in completed_before],
-                                          "status": out.get("status"), "error": out.get("error")}],
-            "ok": out.get("status") == "done" and bool(second) and second[0] == first[-1]
-            and first + second[1:] == rc.reference_path("slow")[1]}
+    return {
+        "check": "resume",
+        "items": [
+            {
+                "before_kill": first,
+                "after_restart": second,
+                "restarted_at": second[0] if second else None,
+                "rerun_completed_steps": [s for s in second if s in completed_before],
+                "status": out.get("status"),
+                "error": out.get("error"),
+            }
+        ],
+        "ok": out.get("status") == "done"
+        and bool(second)
+        and second[0] == first[-1]
+        and first + second[1:] == rc.reference_path("slow")[1],
+    }
 
 
 def cmd_check(a) -> None:
@@ -317,6 +394,7 @@ def cmd_check(a) -> None:
 
 
 # --- cost ---
+
 
 def timed(argv: list[str], env: dict | None = None) -> float:
     t0 = time.time()
@@ -336,8 +414,8 @@ def cost_of(cand: str, uv: str, work: Path) -> dict:
     text = (PROJECT / "pyproject.toml").read_text()
     pins = [ln.split("=", 1)[1].strip() for ln in text.splitlines() if ln.startswith(f"{cand} = ")][0]
     (lockdir / "pyproject.toml").write_text(
-        f'[project]\nname = "rt-{cand}"\nversion = "0"\nrequires-python = ">=3.10"\ndependencies = {pins}\n'
-        "[tool.uv]\npackage = false\n")
+        f'[project]\nname = "rt-{cand}"\nversion = "0"\nrequires-python = ">=3.10"\ndependencies = {pins}\n[tool.uv]\npackage = false\n'
+    )
     env = dict(os.environ, UV_CACHE_DIR=str(cache), UV_PROJECT_ENVIRONMENT=str(venv))
     resolve = timed([uv, "lock", "--project", str(lockdir)], env)
     shutil.rmtree(cache)
@@ -355,11 +433,21 @@ def cost_of(cand: str, uv: str, work: Path) -> dict:
     renv = dict(os.environ, NDF_DEPS_VENV=str(work / "reexec"))
     reexec_cold = timed([sys.executable, str(HERE), "noop", cand], renv)
     reexec_warm = statistics.median(timed([sys.executable, str(HERE), "noop", cand], renv) for _ in range(3))
-    return {"candidate": cand, "resolve_s": resolve, "install_cold_s": install_cold, "install_warm_s": install_warm,
-            "venv_mb": dir_mb(venv), "site_packages_mb": dir_mb(site),
-            "packages": sum(1 for _ in site.glob("*.dist-info")), "locked_packages": lock.count("[[package]]") - 1,
-            "import_cold_s": import_cold, "import_warm_s": import_warm, "python_bare_s": bare,
-            "entry_with_reexec_cold_s": reexec_cold, "entry_with_reexec_warm_s": reexec_warm}
+    return {
+        "candidate": cand,
+        "resolve_s": resolve,
+        "install_cold_s": install_cold,
+        "install_warm_s": install_warm,
+        "venv_mb": dir_mb(venv),
+        "site_packages_mb": dir_mb(site),
+        "packages": sum(1 for _ in site.glob("*.dist-info")),
+        "locked_packages": lock.count("[[package]]") - 1,
+        "import_cold_s": import_cold,
+        "import_warm_s": import_warm,
+        "python_bare_s": bare,
+        "entry_with_reexec_cold_s": reexec_cold,
+        "entry_with_reexec_warm_s": reexec_warm,
+    }
 
 
 def cmd_cost(a) -> None:
@@ -369,14 +457,13 @@ def cmd_cost(a) -> None:
     work = Path(a.work or Path.home() / ".cache/ndf/runner-trial/cost")
     work.mkdir(parents=True, exist_ok=True)
     items = [cost_of(c, uv, work) for c in (a.cands or list(CANDS))]
-    summary = "・".join(f"{i['candidate']} {i['site_packages_mb']}MB/{i['packages']}件/import {i['import_warm_s']}s"
-                       for i in items)
-    emit(result(TOOL, "ok", summary, items, {"uv": subprocess.run([uv, "--version"], capture_output=True,
-                                                                  text=True).stdout.strip()}))
+    summary = "・".join(f"{i['candidate']} {i['site_packages_mb']}MB/{i['packages']}件/import {i['import_warm_s']}s" for i in items)
+    emit(result(TOOL, "ok", summary, items, {"uv": subprocess.run([uv, "--version"], capture_output=True, text=True).stdout.strip()}))
 
 
 def main() -> None:
     import argparse
+
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = p.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("check")

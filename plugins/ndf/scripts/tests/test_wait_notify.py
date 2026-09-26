@@ -3,6 +3,7 @@
 入口（`wait-notify.py`）は本物の Slack の代わりに記録用の偽の送信先（`NDF_SLACK_API_BASE`）へ送り、
 `git`・`gh` は `PATH` の先頭に置いた偽物を使う。HOME と状態の置き場はテストごとの一時ディレクトリにする。
 """
+
 from __future__ import annotations
 
 import json
@@ -26,6 +27,7 @@ import wait_notice as wn  # noqa: E402
 # ---------------------------------------------------------------------------
 # 偽の送信先・偽の git / gh・起動
 # ---------------------------------------------------------------------------
+
 
 class FakeSlack:
     def __init__(self, status: int = 200, delay: float = 0.0):
@@ -92,33 +94,44 @@ def world(tmp_path, slack):
     (proj / ".git").mkdir(parents=True)
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    _write_exe(bin_dir / "git", f"""#!/bin/sh
+    _write_exe(
+        bin_dir / "git",
+        f"""#!/bin/sh
 case "$*" in
   "rev-parse --show-toplevel") echo "{proj}";;
   "remote get-url origin") echo "https://github.com/o/r.git";;
   *) exit 1;;
 esac
-""")
-    _write_exe(bin_dir / "gh", """#!/bin/sh
+""",
+    )
+    _write_exe(
+        bin_dir / "gh",
+        """#!/bin/sh
 [ -n "$FAKE_GH_URL" ] || exit 1
 echo "$FAKE_GH_URL"
-""")
-    base_env = {k: v for k, v in os.environ.items()
-                if not k.startswith(("CLAUDE", "SLACK_", "NDF_", "XDG_", "REDMINE", "DEBUG_SLACK", "FAKE_GH", "KIRO_"))}
-    base_env.update({
-        "HOME": str(home),
-        "XDG_STATE_HOME": str(tmp_path / "state"),
-        "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
-        "SLACK_BOT_TOKEN": "xoxb-test",
-        "SLACK_CHANNEL_ID": "C1",
-        "SLACK_USER_MENTION": "",
-        "NDF_SLACK_API_BASE": slack.base,
-        "CLAUDE_CODE_ENTRYPOINT": "cli",
-        "CLAUDE_CODE_BRIDGE_SESSION_ID": "",
-        "CLAUDE_CODE_REMOTE_SESSION_ID": "",
-        "REDMINE_URL": "",
-        "NDF_SLACK_NOTIFY_DONE": "",
-    })
+""",
+    )
+    base_env = {
+        k: v
+        for k, v in os.environ.items()
+        if not k.startswith(("CLAUDE", "SLACK_", "NDF_", "XDG_", "REDMINE", "DEBUG_SLACK", "FAKE_GH", "KIRO_"))
+    }
+    base_env.update(
+        {
+            "HOME": str(home),
+            "XDG_STATE_HOME": str(tmp_path / "state"),
+            "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
+            "SLACK_BOT_TOKEN": "xoxb-test",
+            "SLACK_CHANNEL_ID": "C1",
+            "SLACK_USER_MENTION": "",
+            "NDF_SLACK_API_BASE": slack.base,
+            "CLAUDE_CODE_ENTRYPOINT": "cli",
+            "CLAUDE_CODE_BRIDGE_SESSION_ID": "",
+            "CLAUDE_CODE_REMOTE_SESSION_ID": "",
+            "REDMINE_URL": "",
+            "NDF_SLACK_NOTIFY_DONE": "",
+        }
+    )
 
     class World:
         root = tmp_path
@@ -137,8 +150,15 @@ echo "$FAKE_GH_URL"
             e.update(env or {})
             data = raw if raw is not None else json.dumps({"cwd": str(proj), **hook_input}, ensure_ascii=False)
             start = time.time()
-            r = subprocess.run([sys.executable, str(ENTRY), "--runtime", runtime], input=data,
-                               capture_output=True, text=True, env=e, cwd=str(proj), timeout=30)
+            r = subprocess.run(
+                [sys.executable, str(ENTRY), "--runtime", runtime],
+                input=data,
+                capture_output=True,
+                text=True,
+                env=e,
+                cwd=str(proj),
+                timeout=30,
+            )
             r.elapsed = time.time() - start
             return r
 
@@ -154,8 +174,13 @@ def assistant(uuid: str, text: str) -> dict:
 
 
 def stop(text: str, transcript: str, session: str = "s1") -> dict:
-    return {"hook_event_name": "Stop", "session_id": session, "transcript_path": transcript,
-            "last_assistant_message": text, "stop_hook_active": False}
+    return {
+        "hook_event_name": "Stop",
+        "session_id": session,
+        "transcript_path": transcript,
+        "last_assistant_message": text,
+        "stop_hook_active": False,
+    }
 
 
 def no_send(world, slack, result) -> None:
@@ -168,6 +193,7 @@ def no_send(world, slack, result) -> None:
 # ---------------------------------------------------------------------------
 # 本文の判定（実例）
 # ---------------------------------------------------------------------------
+
 
 def _corpus():
     return json.loads(CORPUS.read_text(encoding="utf-8"))["examples"]
@@ -195,21 +221,27 @@ def test_corpus_has_three_labels():
     assert labels == {wn.ANSWER, wn.APPROVAL, wn.NONE}
 
 
-@pytest.mark.parametrize("text,kind", [
-    ("設計 PR を出しました。https://github.com/devbasex/ai-plugins/pull/1150\n"
-     "モデルの段と詳細の段のレビューが通りました。この設計でマージしてよいですか。", wn.APPROVAL),
-    ("設計 PR を出しました。レビューの結果を待ちます。", wn.NONE),
-    ("A と B のどちらにしますか。", wn.ANSWER),
-    ("どうしますか。\n- 残す\n- 閉じる\n- 両方閉じる", wn.ANSWER),
-    ("```\nどうしますか？\n```\n実装を終えました。", wn.NONE),
-    ("## 次にやることは？\n実装を終えました。", wn.NONE),
-    ("> 進めてよいですか\n実装を終えました。", wn.NONE),
-    ("起票してよいか決めてください。#539 の巻き直しを待っています。", wn.APPROVAL),
-    ("本番への配布は、関門 2 のあなたの承認を待っています。", wn.APPROVAL),
-    ("変えたい箇所があれば言ってください。", wn.NONE),
-    ("#205 の cross-review を回しますか。", wn.ANSWER),
-    ("進めてよろしければ `/ndf:pr` で作成します。", wn.APPROVAL),
-])
+@pytest.mark.parametrize(
+    "text,kind",
+    [
+        (
+            "設計 PR を出しました。https://github.com/devbasex/ai-plugins/pull/1150\n"
+            "モデルの段と詳細の段のレビューが通りました。この設計でマージしてよいですか。",
+            wn.APPROVAL,
+        ),
+        ("設計 PR を出しました。レビューの結果を待ちます。", wn.NONE),
+        ("A と B のどちらにしますか。", wn.ANSWER),
+        ("どうしますか。\n- 残す\n- 閉じる\n- 両方閉じる", wn.ANSWER),
+        ("```\nどうしますか？\n```\n実装を終えました。", wn.NONE),
+        ("## 次にやることは？\n実装を終えました。", wn.NONE),
+        ("> 進めてよいですか\n実装を終えました。", wn.NONE),
+        ("起票してよいか決めてください。#539 の巻き直しを待っています。", wn.APPROVAL),
+        ("本番への配布は、関門 2 のあなたの承認を待っています。", wn.APPROVAL),
+        ("変えたい箇所があれば言ってください。", wn.NONE),
+        ("#205 の cross-review を回しますか。", wn.ANSWER),
+        ("進めてよろしければ `/ndf:pr` で作成します。", wn.APPROVAL),
+    ],
+)
 def test_classify_text(text, kind):
     assert wn.classify_text(text)[0] == kind
 
@@ -224,11 +256,19 @@ def test_excerpt_is_the_wait_sentence_up_to_200_chars():
 # 事象ごとに通知する（受け入れ条件: 権限確認・AskUserQuestion・ExitPlanMode）
 # ---------------------------------------------------------------------------
 
+
 def test_permission_prompt_notifies_approval(world, slack):
     t = world.transcript(user("u1"), assistant("a1", "実行します。"))
-    r = world.run("claude", {"hook_event_name": "Notification", "notification_type": "permission_prompt",
-                             "message": "Claude needs your permission to use Bash", "session_id": "s1",
-                             "transcript_path": t})
+    r = world.run(
+        "claude",
+        {
+            "hook_event_name": "Notification",
+            "notification_type": "permission_prompt",
+            "message": "Claude needs your permission to use Bash",
+            "session_id": "s1",
+            "transcript_path": t,
+        },
+    )
     assert r.returncode == 0 and r.stdout == ""
     texts = slack.wait_for(1)
     assert len(texts) == 1
@@ -237,39 +277,64 @@ def test_permission_prompt_notifies_approval(world, slack):
 
 def test_ask_user_question_notifies_answer(world, slack):
     t = world.transcript(user("u1"))
-    world.run("claude", {"hook_event_name": "PreToolUse", "tool_name": "AskUserQuestion", "session_id": "s1",
-                         "transcript_path": t,
-                         "tool_input": {"questions": [{"question": "どの色にしますか"}, {"question": "大きさは"}]}})
+    world.run(
+        "claude",
+        {
+            "hook_event_name": "PreToolUse",
+            "tool_name": "AskUserQuestion",
+            "session_id": "s1",
+            "transcript_path": t,
+            "tool_input": {"questions": [{"question": "どの色にしますか"}, {"question": "大きさは"}]},
+        },
+    )
     texts = slack.wait_for(1)
     assert texts[0].startswith("【回答待ち】[proj] どの色にしますか（ほか 1 問）")
 
 
 def test_exit_plan_mode_notifies_approval(world, slack):
     t = world.transcript(user("u1"))
-    world.run("claude", {"hook_event_name": "PermissionRequest", "tool_name": "ExitPlanMode", "session_id": "s1",
-                         "transcript_path": t, "tool_input": {"plan": "# hello.txt を作る\n\n手順"}})
+    world.run(
+        "claude",
+        {
+            "hook_event_name": "PermissionRequest",
+            "tool_name": "ExitPlanMode",
+            "session_id": "s1",
+            "transcript_path": t,
+            "tool_input": {"plan": "# hello.txt を作る\n\n手順"},
+        },
+    )
     texts = slack.wait_for(1)
     assert texts[0].startswith("【承認待ち】[proj] 計画の承認: hello.txt を作る")
 
 
 def test_elicitation_notifies_answer(world, slack):
     t = world.transcript(user("u1"))
-    world.run("claude", {"hook_event_name": "Notification", "notification_type": "elicitation_dialog",
-                         "message": "入力してください", "session_id": "s1", "transcript_path": t})
+    world.run(
+        "claude",
+        {
+            "hook_event_name": "Notification",
+            "notification_type": "elicitation_dialog",
+            "message": "入力してください",
+            "session_id": "s1",
+            "transcript_path": t,
+        },
+    )
     assert slack.wait_for(1)[0].startswith("【回答待ち】")
 
 
 @pytest.mark.parametrize("ntype", ["idle_prompt", "auth_success"])
 def test_other_notifications_do_not_notify(world, slack, ntype):
     t = world.transcript(user("u1"))
-    r = world.run("claude", {"hook_event_name": "Notification", "notification_type": ntype,
-                             "message": "x", "session_id": "s1", "transcript_path": t})
+    r = world.run(
+        "claude", {"hook_event_name": "Notification", "notification_type": ntype, "message": "x", "session_id": "s1", "transcript_path": t}
+    )
     no_send(world, slack, r)
 
 
 # ---------------------------------------------------------------------------
 # 文での待ち・完了（I2・I3）
 # ---------------------------------------------------------------------------
+
 
 def test_stop_with_question_notifies(world, slack):
     text = "設計 PR を出しました。https://github.com/devbasex/ai-plugins/pull/1150\nこの設計でマージしてよいですか。"
@@ -288,8 +353,7 @@ def test_stop_with_done_report_does_not_notify(world, slack):
 
 def test_done_flag_sends_done(world, slack):
     t = world.transcript(user("u1"))
-    world.run("claude", stop("前置き。\n\n実装を終え、テストは 12 件とも通りました。", t),
-              env={"NDF_SLACK_NOTIFY_DONE": "true"})
+    world.run("claude", stop("前置き。\n\n実装を終え、テストは 12 件とも通りました。", t), env={"NDF_SLACK_NOTIFY_DONE": "true"})
     texts = slack.wait_for(1)
     assert texts[0].startswith("【完了】[proj] 実装を終え、テストは 12 件とも通りました。")
 
@@ -305,6 +369,7 @@ def test_stop_without_message_reads_transcript(world, slack):
 # ---------------------------------------------------------------------------
 # 非対話・再帰（I4・I5）
 # ---------------------------------------------------------------------------
+
 
 def test_non_interactive_does_not_notify(world, slack):
     t = world.transcript(user("u1"))
@@ -329,6 +394,7 @@ def test_missing_slack_vars_do_nothing(world, slack):
 # ---------------------------------------------------------------------------
 # 復帰先（I7）
 # ---------------------------------------------------------------------------
+
 
 def test_bridge_session_url_converts_cse(world, slack):
     t = world.transcript(user("u1"))
@@ -363,16 +429,15 @@ def test_without_session_id_only_host_and_cwd(world, slack):
 
 def test_locator_for_codex_and_kiro():
     assert wn.build_locator("codex", {"session_id": "c1"}, {}, "h", "/w").lines()[0] == "再開: codex resume c1"
-    assert wn.build_locator("kiro", {"session_id": "k1"}, {}, "h", "/w").lines()[0] == \
-        "再開: kiro-cli chat --resume-id k1"
+    assert wn.build_locator("kiro", {"session_id": "k1"}, {}, "h", "/w").lines()[0] == "再開: kiro-cli chat --resume-id k1"
     assert wn.build_locator("kiro", {}, {}, "h", "/w").lines() == ["再開: kiro-cli chat --resume", "host: h / cwd: /w"]
-    assert wn.build_locator("kiro", {}, {"KIRO_SESSION_ID": "k2"}, "h", "/w").lines()[0] == \
-        "再開: kiro-cli chat --resume-id k2"
+    assert wn.build_locator("kiro", {}, {"KIRO_SESSION_ID": "k2"}, "h", "/w").lines()[0] == "再開: kiro-cli chat --resume-id k2"
 
 
 # ---------------------------------------------------------------------------
 # 関連 URL（I8）
 # ---------------------------------------------------------------------------
+
 
 def test_answer_lists_issue_and_redmine(world, slack):
     text = "#821 と https://github.com/o/r/issues/5 と Redmine #14952 のどれから直しますか。"
@@ -413,14 +478,31 @@ def test_extract_urls_puts_pr_first_and_limits_to_three():
 # 二重に通知しない（I1）
 # ---------------------------------------------------------------------------
 
+
 def test_same_wait_is_notified_once(world, slack):
     """ExitPlanMode の PermissionRequest と、約 6 秒後の permission_prompt は同じ待ち。"""
     t = world.transcript(user("u1"), assistant("a0", "計画を書きました。"))
-    world.run("claude", {"hook_event_name": "PermissionRequest", "tool_name": "ExitPlanMode", "session_id": "s1",
-                         "transcript_path": t, "tool_input": {"plan": "計画"}})
+    world.run(
+        "claude",
+        {
+            "hook_event_name": "PermissionRequest",
+            "tool_name": "ExitPlanMode",
+            "session_id": "s1",
+            "transcript_path": t,
+            "tool_input": {"plan": "計画"},
+        },
+    )
     world.transcript({"type": "assistant", "uuid": "a1", "message": {"content": [{"type": "tool_use"}]}})
-    r = world.run("claude", {"hook_event_name": "Notification", "notification_type": "permission_prompt",
-                             "message": "approve the plan", "session_id": "s1", "transcript_path": t})
+    r = world.run(
+        "claude",
+        {
+            "hook_event_name": "Notification",
+            "notification_type": "permission_prompt",
+            "message": "approve the plan",
+            "session_id": "s1",
+            "transcript_path": t,
+        },
+    )
     assert r.returncode == 0
     time.sleep(1.0)
     assert len(slack.texts()) == 1
@@ -428,10 +510,26 @@ def test_same_wait_is_notified_once(world, slack):
 
 def test_ask_user_question_and_its_permission_prompt_are_one_wait(world, slack):
     t = world.transcript(user("u1"))
-    world.run("claude", {"hook_event_name": "PreToolUse", "tool_name": "AskUserQuestion", "session_id": "s1",
-                         "transcript_path": t, "tool_input": {"questions": [{"question": "色は"}]}})
-    world.run("claude", {"hook_event_name": "Notification", "notification_type": "permission_prompt",
-                         "message": "x", "session_id": "s1", "transcript_path": t})
+    world.run(
+        "claude",
+        {
+            "hook_event_name": "PreToolUse",
+            "tool_name": "AskUserQuestion",
+            "session_id": "s1",
+            "transcript_path": t,
+            "tool_input": {"questions": [{"question": "色は"}]},
+        },
+    )
+    world.run(
+        "claude",
+        {
+            "hook_event_name": "Notification",
+            "notification_type": "permission_prompt",
+            "message": "x",
+            "session_id": "s1",
+            "transcript_path": t,
+        },
+    )
     time.sleep(1.0)
     texts = slack.texts()
     assert len(texts) == 1 and texts[0].startswith("【回答待ち】")
@@ -439,8 +537,13 @@ def test_ask_user_question_and_its_permission_prompt_are_one_wait(world, slack):
 
 def test_next_wait_after_user_reply_is_notified(world, slack):
     t = world.transcript(user("u1"))
-    notice = {"hook_event_name": "Notification", "notification_type": "permission_prompt",
-              "message": "x", "session_id": "s1", "transcript_path": t}
+    notice = {
+        "hook_event_name": "Notification",
+        "notification_type": "permission_prompt",
+        "message": "x",
+        "session_id": "s1",
+        "transcript_path": t,
+    }
     world.run("claude", notice)
     slack.wait_for(1)
     world.transcript({"type": "user", "uuid": "u2", "message": {"content": [{"type": "tool_result"}]}})
@@ -460,18 +563,28 @@ def test_record_is_per_session_file(world, slack):
 # Codex・Kiro
 # ---------------------------------------------------------------------------
 
+
 def test_codex_needs_opt_in(world, slack):
-    r = world.run("codex", {"hook_event_name": "Stop", "session_id": "c1", "turn_id": "t1",
-                            "last_assistant_message": "どちらにしますか。"})
+    r = world.run("codex", {"hook_event_name": "Stop", "session_id": "c1", "turn_id": "t1", "last_assistant_message": "どちらにしますか。"})
     no_send(world, slack, r)
 
 
 def test_codex_stop_and_permission_request(world, slack):
     env = {"NDF_CODEX_SLACK_NOTIFY": "true"}
-    world.run("codex", {"hook_event_name": "Stop", "session_id": "c1", "turn_id": "t1",
-                        "last_assistant_message": "どちらにしますか。"}, env=env)
-    world.run("codex", {"hook_event_name": "PermissionRequest", "session_id": "c1", "turn_id": "t2",
-                        "tool_name": "Bash", "tool_input": {"command": "touch x"}}, env=env)
+    world.run(
+        "codex", {"hook_event_name": "Stop", "session_id": "c1", "turn_id": "t1", "last_assistant_message": "どちらにしますか。"}, env=env
+    )
+    world.run(
+        "codex",
+        {
+            "hook_event_name": "PermissionRequest",
+            "session_id": "c1",
+            "turn_id": "t2",
+            "tool_name": "Bash",
+            "tool_input": {"command": "touch x"},
+        },
+        env=env,
+    )
     texts = slack.wait_for(2)
     assert any(x.startswith("【回答待ち】") and "再開: codex resume c1" in x for x in texts)
     assert any(x.startswith("【承認待ち】[proj] Bash の実行の承認") for x in texts)
@@ -485,24 +598,23 @@ def test_kiro_stop(world, slack):
 
 def test_kiro_same_text_in_other_conversations_is_notified(world, slack):
     for conv in ("k1", "k2"):
-        world.run("kiro", {"hook_event_name": "stop", "conversation_id": conv,
-                           "assistant_response": "この方針で進めてよいですか。"})
+        world.run("kiro", {"hook_event_name": "stop", "conversation_id": conv, "assistant_response": "この方針で進めてよいですか。"})
     assert len(slack.wait_for(2)) == 2
 
 
 def test_kiro_session_from_env_is_the_key(world, slack):
     for sid in ("k1", "k2"):
-        world.run("kiro", {"hook_event_name": "stop", "assistant_response": "この方針で進めてよいですか。"},
-                  env={"KIRO_SESSION_ID": sid})
+        world.run("kiro", {"hook_event_name": "stop", "assistant_response": "この方針で進めてよいですか。"}, env={"KIRO_SESSION_ID": sid})
     texts = slack.wait_for(2)
-    assert sorted(x for t in texts for x in t.splitlines() if x.startswith("再開:")) == \
-        ["再開: kiro-cli chat --resume-id k1", "再開: kiro-cli chat --resume-id k2"]
+    assert sorted(x for t in texts for x in t.splitlines() if x.startswith("再開:")) == [
+        "再開: kiro-cli chat --resume-id k1",
+        "再開: kiro-cli chat --resume-id k2",
+    ]
 
 
 def test_kiro_same_text_in_one_session_is_windowed(world, slack):
     for _ in range(2):
-        world.run("kiro", {"hook_event_name": "stop", "assistant_response": "この方針で進めてよいですか。"},
-                  env={"KIRO_SESSION_ID": "k1"})
+        world.run("kiro", {"hook_event_name": "stop", "assistant_response": "この方針で進めてよいですか。"}, env={"KIRO_SESSION_ID": "k1"})
     slack.wait_for(1)
     time.sleep(0.5)
     assert len(slack.requests) == 1
@@ -510,8 +622,7 @@ def test_kiro_same_text_in_one_session_is_windowed(world, slack):
     record = json.loads(f.read_text())
     record["sent_at"] = 0
     f.write_text(json.dumps(record))
-    world.run("kiro", {"hook_event_name": "stop", "assistant_response": "この方針で進めてよいですか。"},
-              env={"KIRO_SESSION_ID": "k1"})
+    world.run("kiro", {"hook_event_name": "stop", "assistant_response": "この方針で進めてよいですか。"}, env={"KIRO_SESSION_ID": "k1"})
     assert len(slack.wait_for(2)) == 2
 
 
@@ -531,8 +642,11 @@ def test_kiro_window_stops_only_the_consecutive_same_text(world, slack):
 
 
 def test_leftover_kiro_session_is_not_used_by_other_runtimes(world, slack):
-    world.run("codex", {"hook_event_name": "Stop", "last_assistant_message": "どちらにしますか。"},
-              env={"NDF_CODEX_SLACK_NOTIFY": "true", "KIRO_SESSION_ID": "k9"})
+    world.run(
+        "codex",
+        {"hook_event_name": "Stop", "last_assistant_message": "どちらにしますか。"},
+        env={"NDF_CODEX_SLACK_NOTIFY": "true", "KIRO_SESSION_ID": "k9"},
+    )
     slack.wait_for(1)
     [f] = list(world.state.glob("*.json"))
     assert "k9" not in f.name and "k9" not in json.loads(f.read_text())["key"]
@@ -546,6 +660,7 @@ def test_kiro_non_stop_event_is_not_a_wait():
 # ---------------------------------------------------------------------------
 # 外の系の失敗（I9〜I12）と速さ
 # ---------------------------------------------------------------------------
+
 
 def test_empty_stdin(world, slack):
     no_send(world, slack, world.run("claude", {}, raw=""))
@@ -604,6 +719,7 @@ def test_mention_is_sent_then_deleted(world, slack):
 # ---------------------------------------------------------------------------
 # フックの定義
 # ---------------------------------------------------------------------------
+
 
 def _commands(hooks: dict, event: str) -> list[dict]:
     return [h for group in hooks["hooks"].get(event, []) for h in group["hooks"]]

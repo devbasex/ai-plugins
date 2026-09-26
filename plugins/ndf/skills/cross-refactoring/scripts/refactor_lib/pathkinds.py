@@ -1,4 +1,5 @@
 """テストとプロダクションコードのパスの判定。git の出力だけで決める。"""
+
 from __future__ import annotations
 
 import pathlib
@@ -13,24 +14,43 @@ TEST_PATH_MARKERS = ("/test/", "/tests/", "/spec/", "/specs/", "__tests__/")
 TEST_NAME_MARKERS = (".test.", ".spec.", "_test.", "_spec.", "test_", "spec_")
 
 # 本番コードの拡張子。構造改善を飛ばしてよいかの判定（`assess`）に使う（#494）。
-CODE_EXTENSIONS = frozenset({
-    ".py", ".sh", ".bash", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".php",
-    ".rb", ".go", ".rs", ".java", ".kt", ".swift", ".c", ".h", ".cc", ".cpp", ".cs",
-})
+CODE_EXTENSIONS = frozenset(
+    {
+        ".py",
+        ".sh",
+        ".bash",
+        ".js",
+        ".mjs",
+        ".cjs",
+        ".ts",
+        ".tsx",
+        ".jsx",
+        ".php",
+        ".rb",
+        ".go",
+        ".rs",
+        ".java",
+        ".kt",
+        ".swift",
+        ".c",
+        ".h",
+        ".cc",
+        ".cpp",
+        ".cs",
+    }
+)
 
 
 def is_test_path(path: str) -> bool:
     """テストの置き場所か。判定は `commit_touches_tests` と同じ基準で行う。"""
     lowered = f"/{path.lower()}"
     name = lowered.rsplit("/", 1)[-1]
-    return (any(m in lowered for m in TEST_PATH_MARKERS)
-            or any(m in name for m in TEST_NAME_MARKERS))
+    return any(m in lowered for m in TEST_PATH_MARKERS) or any(m in name for m in TEST_NAME_MARKERS)
 
 
 def _has_shebang(work: str, rev: str, path: str) -> bool:
     """`<rev>:<path>` の 1 行目が `#!` で始まるか。その版に無ければ False。"""
-    r = subprocess.run(["git", "cat-file", "blob", f"{rev}:{path}"], cwd=work,
-                       capture_output=True)
+    r = subprocess.run(["git", "cat-file", "blob", f"{rev}:{path}"], cwd=work, capture_output=True)
     return r.returncode == 0 and r.stdout.startswith(b"#!")
 
 

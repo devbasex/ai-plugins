@@ -13,6 +13,7 @@ digest は MANIFEST（ファイルごとの sha256 と相対パス）の sha256 
 `.venv/` はラッパーを動かす環境で、書きかけのディレクトリの中でプラグインと同じ `pyproject.toml` と `uv.lock` から
 `uv sync --frozen` で作る（決定 20。`runtime.sync`）。作れなければバージョンディレクトリを置かない。
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -21,8 +22,20 @@ import re
 import shutil
 
 from . import runtime
-from .common import (COPY_LOCK, PKG_ROOT, _lock, _read_bytes, _unlock, _write_file, config_dir, copy_path, data_dir,
-                     launcher_path, load_json, read_text)
+from .common import (
+    COPY_LOCK,
+    PKG_ROOT,
+    _lock,
+    _read_bytes,
+    _unlock,
+    _write_file,
+    config_dir,
+    copy_path,
+    data_dir,
+    launcher_path,
+    load_json,
+    read_text,
+)
 
 import procs  # noqa: E402,I001  common が lib/ を sys.path に置く
 import versions  # noqa: E402
@@ -30,8 +43,7 @@ import versions  # noqa: E402
 CURRENT_FILE = "relay.current"
 MANIFEST = runtime.MANIFEST
 # ラッパーが import するライブラリ（包みと、venv が使う deps）
-LIB_FILES = ("lib/clock.py", "lib/deps.py", "lib/jsonio.py", "lib/locks.py", "lib/md.py", "lib/procs.py",
-             "lib/versions.py")
+LIB_FILES = ("lib/clock.py", "lib/deps.py", "lib/jsonio.py", "lib/locks.py", "lib/md.py", "lib/procs.py", "lib/versions.py")
 # 環境の宣言と lock。プラグインではプラグインの根（scripts/ の 1 つ上）、バージョンディレクトリでは中にある
 PROJECT_FILES = ("pyproject.toml", "uv.lock")
 DIR_RE = re.compile(r"^relay-.+-[0-9a-f]{8}$")
@@ -144,8 +156,7 @@ class VersionDir:
         manifest = self.manifest()
         name = self.name_for(version, manifest)
         target = os.path.join(self.base, name)
-        if (read_text(os.path.join(target, MANIFEST)) != manifest
-                or not os.path.isfile(runtime.python_of(runtime.version_env(target)))):
+        if read_text(os.path.join(target, MANIFEST)) != manifest or not os.path.isfile(runtime.python_of(runtime.version_env(target))):
             self._write(target, manifest)
         if self.current() != name:
             _write_file(os.path.join(self.base, CURRENT_FILE), (name + "\n").encode(), 0o644)
@@ -201,7 +212,7 @@ class VersionDir:
             if not n.startswith("inuse-"):
                 continue
             try:
-                pid = int(n[len("inuse-"):])
+                pid = int(n[len("inuse-") :])
             except ValueError:
                 continue
             if _alive(pid):

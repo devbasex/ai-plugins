@@ -3,6 +3,7 @@ new close・new release --mvv・new impl --escape-of）と実行（実行の条�
 
 実機の claude と gh は呼ばない（計画の形と、run のステップだけの計画を流して見る）。
 """
+
 from __future__ import annotations
 
 import json
@@ -31,11 +32,11 @@ def mission_state(tmp_path: Path, approve: bool = True) -> Path:
     mvv = tmp_path / "mvv-src.md"
     mvv.write_text("## Mission\n速く\n## Vision\n回る\n## Value\n実測\n")
     state = tmp_path / "state" / "mission-state.json"
-    subprocess.run([PY, str(MISSION_STATE), "init", str(state), "--name", "m", "--pace", "fast", "--mvv", str(mvv)],
-                   check=True, capture_output=True)
+    subprocess.run(
+        [PY, str(MISSION_STATE), "init", str(state), "--name", "m", "--pace", "fast", "--mvv", str(mvv)], check=True, capture_output=True
+    )
     if approve:
-        subprocess.run([PY, str(MISSION_STATE), "gate", str(state), "MVV", "--what", "MVV を承認"], check=True,
-                       capture_output=True)
+        subprocess.run([PY, str(MISSION_STATE), "gate", str(state), "MVV", "--what", "MVV を承認"], check=True, capture_output=True)
     return state
 
 
@@ -60,8 +61,28 @@ def assert_transitions_exist(plan: dict) -> None:
 
 def new_fast_mission(tmp_path, state, *extra):
     out = tmp_path / "m"
-    p = cli("new", "mission", "--name", "m26", "--worktree", str(tmp_path), "--issue", "11", "12", "--design", "11",
-            "--version", "10.18.0-dev.1", "--pace", "fast", "--state", str(state), "--out", str(out), *extra)
+    p = cli(
+        "new",
+        "mission",
+        "--name",
+        "m26",
+        "--worktree",
+        str(tmp_path),
+        "--issue",
+        "11",
+        "12",
+        "--design",
+        "11",
+        "--version",
+        "10.18.0-dev.1",
+        "--pace",
+        "fast",
+        "--state",
+        str(state),
+        "--out",
+        str(out),
+        *extra,
+    )
     return p, out
 
 
@@ -75,8 +96,7 @@ def test_fast_mission_puts_check_then_dev_then_prod_after_the_implementation(tmp
     cmd = waves["実装"]["command"]
     check, dev, prod = waves["検査"]["plans"][0], waves["開発版"]["plans"][0], waves["本番"]["plans"][0]
     review = waves["実装レビュー"]["plans"][0]
-    assert (cmd.index("--then " + check) < cmd.index("--then " + review) < cmd.index("--then " + dev)
-            < cmd.index("--then " + prod))
+    assert cmd.index("--then " + check) < cmd.index("--then " + review) < cmd.index("--then " + dev) < cmd.index("--then " + prod)
     # ミッションのブランチを作らない。スクリプトの絶対パスは .worktrees/mission/... を含みうるので、ブランチ名で見る。
     assert "mission/m26" not in json.dumps(manifest, ensure_ascii=False)
 
@@ -152,8 +172,25 @@ def test_fast_mission_is_refused_without_the_declaration(tmp_path):
     (repo / ".ndf" / "worktree.json").write_text('{"version": 1, "base_branch": "develop", "production_branch": "main"}')
     (repo / ".ndf" / "supervise.json").write_text((REPO / ".ndf" / "supervise.json").read_text())
     out = tmp_path / "m"
-    p = cli("new", "mission", "--name", "m", "--worktree", str(repo), "--issue", "1", "--version", "1.0.0-dev.1",
-            "--pace", "fast", "--state", str(mission_state(tmp_path)), "--out", str(out), cwd=repo)
+    p = cli(
+        "new",
+        "mission",
+        "--name",
+        "m",
+        "--worktree",
+        str(repo),
+        "--issue",
+        "1",
+        "--version",
+        "1.0.0-dev.1",
+        "--pace",
+        "fast",
+        "--state",
+        str(mission_state(tmp_path)),
+        "--out",
+        str(out),
+        cwd=repo,
+    )
     assert p.returncode == 1 and "pace.json" in json.loads(p.stdout)["summary"]
 
 
@@ -187,8 +224,20 @@ def test_check_since_last_has_a_condition_and_every_failure_reaches_abort(tmp_pa
 
 def test_since_ref_reaches_the_condition_and_prepare_but_not_record(tmp_path):
     out = tmp_path / "review.json"
-    p = cli("new", "check", "--since-last", "--review-only", "--id", "m-r", "--since-ref", "v1.2.3",
-            "--worktree", str(tmp_path), "--out", str(out))
+    p = cli(
+        "new",
+        "check",
+        "--since-last",
+        "--review-only",
+        "--id",
+        "m-r",
+        "--since-ref",
+        "v1.2.3",
+        "--worktree",
+        str(tmp_path),
+        "--out",
+        str(out),
+    )
     assert p.returncode == 0, p.stdout + p.stderr
     plan = load(out)
     s = steps_of(plan)
@@ -207,9 +256,25 @@ def test_check_since_last_with_pr_is_a_usage_error(tmp_path):
 
 def test_close_runs_spec_close_and_retro_once_each_in_order(tmp_path):
     out = tmp_path / "close"
-    p = cli("new", "close", "--name", "m26", "--worktree", str(tmp_path), "--issue", "11", "12",
-            "--version", "10.18.0-dev.2", "--prod", "10.18.0", "--state", str(mission_state(tmp_path)),
-            "--out", str(out))
+    p = cli(
+        "new",
+        "close",
+        "--name",
+        "m26",
+        "--worktree",
+        str(tmp_path),
+        "--issue",
+        "11",
+        "12",
+        "--version",
+        "10.18.0-dev.2",
+        "--prod",
+        "10.18.0",
+        "--state",
+        str(mission_state(tmp_path)),
+        "--out",
+        str(out),
+    )
     assert p.returncode == 0, p.stdout + p.stderr
     manifest = load(out / "mission.json")
     waves = {w["name"]: w for w in manifest["ステージ"]}
@@ -239,8 +304,22 @@ def test_release_with_mvv(tmp_path):
     state = mission_state(tmp_path)
     for channel, version in (("prod", "10.18.0"), ("dev", "10.18.0-dev.1")):
         out = tmp_path / f"{channel}.json"
-        p = cli("new", "release", "--version", version, "--channel", channel, "--prs", "5", "--mvv", str(state),
-                "--worktree", f"/r/.worktrees/release/v{version}", "--out", str(out))
+        p = cli(
+            "new",
+            "release",
+            "--version",
+            version,
+            "--channel",
+            channel,
+            "--prs",
+            "5",
+            "--mvv",
+            str(state),
+            "--worktree",
+            f"/r/.worktrees/release/v{version}",
+            "--out",
+            str(out),
+        )
         assert p.returncode == 0, p.stderr
         plan = load(out)
         if channel == "prod":
@@ -251,8 +330,9 @@ def test_release_with_mvv(tmp_path):
 
 def test_impl_escape_of_records_after_the_merge(tmp_path):
     out = tmp_path / "impl.json"
-    p = cli("new", "impl", "--issue", "7", "--worktree", str(tmp_path), "--tests", "x", "--title", "t",
-            "--escape-of", "12", "--out", str(out))
+    p = cli(
+        "new", "impl", "--issue", "7", "--worktree", str(tmp_path), "--tests", "x", "--title", "t", "--escape-of", "12", "--out", str(out)
+    )
     assert p.returncode == 0, p.stderr
     s = steps_of(load(out))
     assert s["merge"]["next"] == "escape" and "escape --pr {pr} --of 12" in s["escape"]["cmd"]
@@ -264,8 +344,7 @@ def test_impl_escape_of_records_after_the_merge(tmp_path):
 
 def plan_file(tmp_path, name, steps, **extra) -> str:
     f = tmp_path / f"{name}.json"
-    f.write_text(json.dumps({"フェーズ": "試験", "課題": [], "作業場所": str(tmp_path), "steps": steps, **extra},
-                            ensure_ascii=False))
+    f.write_text(json.dumps({"フェーズ": "試験", "課題": [], "作業場所": str(tmp_path), "steps": steps, **extra}, ensure_ascii=False))
     return str(f)
 
 
@@ -273,9 +352,18 @@ def test_condition_skip_finishes_without_a_worktree_and_the_next_stage_runs(tmp_
     repo = tmp_path / "repo"
     subprocess.run(["git", "init", "-q", str(repo)], check=True)
     wt = repo / ".worktrees" / "check" / "x"
-    cond = plan_file(tmp_path, "cond", [{"id": "t", "type": "run", "cmd": f"touch {tmp_path}/ran", "next": "end"}],
-                     **{"作業場所": str(wt), "branch": "check/x", "起点": "HEAD", "リポジトリ": str(repo),
-                        "実行の条件": {"cmd": "echo '{\"summary\": \"立たない\"}'; exit 3", "skip_code": 3}})
+    cond = plan_file(
+        tmp_path,
+        "cond",
+        [{"id": "t", "type": "run", "cmd": f"touch {tmp_path}/ran", "next": "end"}],
+        **{
+            "作業場所": str(wt),
+            "branch": "check/x",
+            "起点": "HEAD",
+            "リポジトリ": str(repo),
+            "実行の条件": {"cmd": 'echo \'{"summary": "立たない"}\'; exit 3', "skip_code": 3},
+        },
+    )
     after = plan_file(tmp_path, "after", [{"id": "t", "type": "run", "cmd": f"touch {tmp_path}/after", "next": "end"}])
     res = queue.cmd_queue([cond], 3, poll=0.05, then=[[after]])
     assert [i["result"] for i in res["items"]] == ["完了", "完了"], res
@@ -285,10 +373,15 @@ def test_condition_skip_finishes_without_a_worktree_and_the_next_stage_runs(tmp_
 
 
 def test_condition_zero_runs_and_other_codes_stop(tmp_path):
-    ok = plan_file(tmp_path, "ok", [{"id": "t", "type": "run", "cmd": f"touch {tmp_path}/ran", "next": "end"}],
-                   **{"実行の条件": {"cmd": "true", "skip_code": 3}})
-    bad = plan_file(tmp_path, "bad", [{"id": "t", "type": "run", "cmd": "true", "next": "end"}],
-                    **{"実行の条件": {"cmd": "exit 2", "skip_code": 3}})
+    ok = plan_file(
+        tmp_path,
+        "ok",
+        [{"id": "t", "type": "run", "cmd": f"touch {tmp_path}/ran", "next": "end"}],
+        **{"実行の条件": {"cmd": "true", "skip_code": 3}},
+    )
+    bad = plan_file(
+        tmp_path, "bad", [{"id": "t", "type": "run", "cmd": "true", "next": "end"}], **{"実行の条件": {"cmd": "exit 2", "skip_code": 3}}
+    )
     res = queue.cmd_queue([ok, bad], 3, poll=0.05)
     got = {Path(i["plan"]).stem: i["result"] for i in res["items"]}
     assert got == {"ok": "完了", "bad": "止まった"} and (tmp_path / "ran").exists()
@@ -296,8 +389,7 @@ def test_condition_zero_runs_and_other_codes_stop(tmp_path):
 
 def test_then_stages_run_in_order_and_stop_after_a_failed_stage(tmp_path):
     a = plan_file(tmp_path, "a", [{"id": "t", "type": "run", "cmd": f"date +%s.%N > {tmp_path}/a", "next": "end"}])
-    b = plan_file(tmp_path, "b", [{"id": "t", "type": "run", "cmd": f"sleep 0.2; date +%s.%N > {tmp_path}/b",
-                                   "next": "end"}])
+    b = plan_file(tmp_path, "b", [{"id": "t", "type": "run", "cmd": f"sleep 0.2; date +%s.%N > {tmp_path}/b", "next": "end"}])
     c = plan_file(tmp_path, "c", [{"id": "t", "type": "run", "cmd": f"date +%s.%N > {tmp_path}/c", "next": "end"}])
     res = queue.cmd_queue([a], 3, poll=0.05, then=[[b], [c]])
     assert [i["result"] for i in res["items"]] == ["完了"] * 3
@@ -317,8 +409,7 @@ def report_with_pr(plan: str, pr: str) -> None:
 def test_queue_pr_placeholder_takes_the_named_plan_or_zero(tmp_path, monkeypatch):
     prod = plan_file(tmp_path, "3-release-prod", [{"id": "t", "type": "run", "cmd": "true", "next": "end"}])
     impl = plan_file(tmp_path, "1-impl-5", [{"id": "t", "type": "run", "cmd": "true", "next": "end"}])
-    close = plan_file(tmp_path, "4-close", [{"id": "t", "type": "run", "cmd": "echo {queue_pr:release-prod}",
-                                             "next": "end"}])
+    close = plan_file(tmp_path, "4-close", [{"id": "t", "type": "run", "cmd": "echo {queue_pr:release-prod}", "next": "end"}])
     seen = {}
 
     def batch(plans, m, poll):
@@ -331,14 +422,13 @@ def test_queue_pr_placeholder_takes_the_named_plan_or_zero(tmp_path, monkeypatch
                 report_with_pr(p, "https://github.com/o/r/pull/77" if p == prod else "78")
                 items.append({"plan": p, "result": "完了", "report": str(paths.state_dir_of(p) / "report.md")})
         return items
+
     monkeypatch.setattr(queue, "run_batch", batch)
     queue.cmd_queue([impl], 3, poll=0.05, then=[[prod], [close]])
     assert seen["cmd"] == "echo 77"
-    close2 = plan_file(tmp_path, "4-close-b", [{"id": "t", "type": "run", "cmd": "echo {queue_pr:release-prod}",
-                                                "next": "end"}])
+    close2 = plan_file(tmp_path, "4-close-b", [{"id": "t", "type": "run", "cmd": "echo {queue_pr:release-prod}", "next": "end"}])
     (paths.state_dir_of(prod) / "report.md").write_text("## フェーズの報告\n\n- 結果: 完了\n- Pull Request: 無し\n")
-    assert queue.fill_queue_pr(close2, [{"plan": prod, "result": "完了",
-                                      "report": str(paths.state_dir_of(prod) / "report.md")}]) is None
+    assert queue.fill_queue_pr(close2, [{"plan": prod, "result": "完了", "report": str(paths.state_dir_of(prod) / "report.md")}]) is None
     assert load(close2)["steps"][0]["cmd"] == "echo 0"
 
 
@@ -353,12 +443,26 @@ def test_queue_pr_placeholder_reads_a_sibling_plan_when_queued_alone(tmp_path):
 def test_gate_as_ok_copies_the_presentation_and_goes_on(tmp_path):
     pres = tmp_path / "facts.md"
     pres.write_text("# 提示物\n")
-    out = json.dumps({"tool": "t", "status": "gate", "summary": "s", "items": [], "metrics": {},
-                      "presentation_path": str(pres)})
-    s = engine.Engine({"フェーズ": "試験", "課題": [], "作業場所": str(tmp_path), "steps": [
-        {"id": "facts", "type": "run", "cmd": f"echo '{out}'; exit 10", "gate_as_ok": True,
-         "presentation_to": "issues/a.md", "next": "after"},
-        {"id": "after", "type": "run", "cmd": "true", "next": "end"}]}, tmp_path / "state")
+    out = json.dumps({"tool": "t", "status": "gate", "summary": "s", "items": [], "metrics": {}, "presentation_path": str(pres)})
+    s = engine.Engine(
+        {
+            "フェーズ": "試験",
+            "課題": [],
+            "作業場所": str(tmp_path),
+            "steps": [
+                {
+                    "id": "facts",
+                    "type": "run",
+                    "cmd": f"echo '{out}'; exit 10",
+                    "gate_as_ok": True,
+                    "presentation_to": "issues/a.md",
+                    "next": "after",
+                },
+                {"id": "after", "type": "run", "cmd": "true", "next": "end"},
+            ],
+        },
+        tmp_path / "state",
+    )
     text = s.run()
     assert "- 結果: 完了" in text and "after" in s.state.results
     assert (tmp_path / "issues" / "a.md").read_text() == "# 提示物\n"
@@ -366,9 +470,14 @@ def test_gate_as_ok_copies_the_presentation_and_goes_on(tmp_path):
 
 
 def test_mvv_step_returning_ten_makes_the_queue_a_gate(tmp_path):
-    prod = plan_file(tmp_path, "prod", [
-        {"id": "mvv", "type": "run", "cmd": "exit 10", "next": "bump", "gate_next": "end"},
-        {"id": "bump", "type": "run", "cmd": f"touch {tmp_path}/bumped", "next": "end"}])
+    prod = plan_file(
+        tmp_path,
+        "prod",
+        [
+            {"id": "mvv", "type": "run", "cmd": "exit 10", "next": "bump", "gate_next": "end"},
+            {"id": "bump", "type": "run", "cmd": f"touch {tmp_path}/bumped", "next": "end"},
+        ],
+    )
     res = queue.cmd_queue([prod], 3, poll=0.05)
     assert res["status"] == "gate" and res["items"][0]["result"] == "関門"
     assert not (tmp_path / "bumped").exists()
@@ -378,10 +487,26 @@ def test_a_fast_plan_records_the_pace_before_the_first_stage(tmp_path):
     log = tmp_path / "rec.log"
     rec = tmp_path / "rec.sh"
     rec.write_text(f'echo "$@" >> {log}\n')
-    s = engine.Engine({"フェーズ": "試験", "課題": [5, 6], "作業場所": str(tmp_path), "記録": str(rec), "進め方": "fast",
-                       "steps": [{"id": "a", "type": "run", "cmd": "true", "stage": "確定仕様化", "next": "b"},
-                                 {"id": "b", "type": "run", "cmd": "true", "stage": "振り返り", "next": "end"}]},
-                      tmp_path / "state")
+    s = engine.Engine(
+        {
+            "フェーズ": "試験",
+            "課題": [5, 6],
+            "作業場所": str(tmp_path),
+            "記録": str(rec),
+            "進め方": "fast",
+            "steps": [
+                {"id": "a", "type": "run", "cmd": "true", "stage": "確定仕様化", "next": "b"},
+                {"id": "b", "type": "run", "cmd": "true", "stage": "振り返り", "next": "end"},
+            ],
+        },
+        tmp_path / "state",
+    )
     s.run()
-    assert log.read_text().splitlines() == ["5 pace fast", "5 stage 確定仕様化", "6 pace fast", "6 stage 確定仕様化",
-                                            "5 stage 振り返り", "6 stage 振り返り"]
+    assert log.read_text().splitlines() == [
+        "5 pace fast",
+        "5 stage 確定仕様化",
+        "6 pace fast",
+        "6 stage 確定仕様化",
+        "5 stage 振り返り",
+        "6 stage 振り返り",
+    ]

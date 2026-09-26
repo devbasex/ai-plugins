@@ -1,4 +1,5 @@
 """mcp-serena のテストが共有する道具。スクリプトの置き場所を import の経路へ足す。"""
+
 import json
 import os
 import subprocess
@@ -38,8 +39,7 @@ def files_of(**counts) -> dict:
 def run_cli(*args, env=None, cwd=None, stdin=None):
     full_env = dict(os.environ)
     full_env.update(env or {})
-    return subprocess.run([sys.executable, str(CLI), *args], capture_output=True, text=True,
-                          env=full_env, cwd=cwd, input=stdin)
+    return subprocess.run([sys.executable, str(CLI), *args], capture_output=True, text=True, env=full_env, cwd=cwd, input=stdin)
 
 
 def run_json(*args, **kw):

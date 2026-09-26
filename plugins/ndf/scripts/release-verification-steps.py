@@ -9,6 +9,7 @@ ref と一致するかを確かめる。利用者の HOME の設定が変わっ�
 結果は lib/step_result.py の形の 1 行の JSON。終了コードは 0 = ok / 1 = 不一致か導入の失敗 /
 2 = 呼び出しの誤り（未知の runtime）/ 3 = plugin が無い。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -24,8 +25,18 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
-from step_result import (EXIT_UNREADABLE, StepError, common_parser, emit, git, git_root,  # noqa: E402
-                         main_with, plugin_dir, result, version_arg)
+from step_result import (
+    EXIT_UNREADABLE,
+    StepError,
+    common_parser,
+    emit,
+    git,
+    git_root,  # noqa: E402
+    main_with,
+    plugin_dir,
+    result,
+    version_arg,
+)
 
 TOOL = "release-verification"
 REPO_SLUG = "devbasex/ai-plugins"
@@ -63,8 +74,16 @@ def isolated_env(tmp):
         "NPM_CONFIG_PREFIX": str(h / ".npm-global"),
         "LANG": os.environ.get("LANG", "C.UTF-8"),
     }
-    for k in ("HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME",
-              "CLAUDE_CONFIG_DIR", "CODEX_HOME", "NPM_CONFIG_PREFIX"):
+    for k in (
+        "HOME",
+        "XDG_CONFIG_HOME",
+        "XDG_DATA_HOME",
+        "XDG_CACHE_HOME",
+        "XDG_STATE_HOME",
+        "CLAUDE_CONFIG_DIR",
+        "CODEX_HOME",
+        "NPM_CONFIG_PREFIX",
+    ):
         Path(env[k]).mkdir(parents=True, exist_ok=True)
     return env
 
@@ -191,8 +210,7 @@ def verify_kiro(env, src, tmp, expect):
     proj = Path(tmp) / "kiro-project"
     proj.mkdir()
     res = {"exit": 0, "version": None}
-    code, out = run_env_i(["bash", str(src / "plugins/ndf/dev.kiro/install.sh"),
-                           "--project", str(proj), "--yes"], env, cwd=str(src))
+    code, out = run_env_i(["bash", str(src / "plugins/ndf/dev.kiro/install.sh"), "--project", str(proj), "--yes"], env, cwd=str(src))
     res["exit"] = code
     if code != 0:
         res["error"] = out.strip()[-500:]
@@ -221,7 +239,7 @@ def cmd_verify_install(a):
     ref_rev = git(root, "rev-parse", f"origin/{a.ref}").stdout.strip()
     tags = git(root, "tag", "--list", "ndf--v*", "--sort=-v:refname").stdout.split()
     cur = f"ndf--v{a.expect}"
-    prev = next((t for t in tags if t != cur and "-" not in t[len("ndf--v"):]), None)
+    prev = next((t for t in tags if t != cur and "-" not in t[len("ndf--v") :]), None)
 
     before = user_env_snapshot()
     tmp = tempfile.mkdtemp(prefix="ndf-verify-install-")
@@ -236,8 +254,10 @@ def cmd_verify_install(a):
         if tar.returncode != 0:
             raise StepError(f"展開が失敗: {tar.stderr.decode(errors='replace')[:300]}")
 
-        changed = {p: ([f for f in git(root, "diff", "--name-only", prev, ref_rev, "--", r).stdout.split() if f]
-                       if prev else []) for p, r in rel.items()}
+        changed = {
+            p: ([f for f in git(root, "diff", "--name-only", prev, ref_rev, "--", r).stdout.split() if f] if prev else [])
+            for p, r in rel.items()
+        }
         env = isolated_env(tmp)
         for name, fn in (("claude", verify_claude), ("codex", verify_codex)):
             if name not in runtimes:
@@ -248,8 +268,7 @@ def cmd_verify_install(a):
                 if d is None:
                     mismatch.append(f"{name}: {p} の導入先が無い")
                 else:
-                    mismatch += compare_files(src, d, rel[p], changed[p], name,
-                                              keeps_symlinks=(name != "codex"))
+                    mismatch += compare_files(src, d, rel[p], changed[p], name, keeps_symlinks=(name != "codex"))
         if "kiro" in runtimes:
             runtimes_res["kiro"], _ = verify_kiro(env, src, tmp, a.expect)
     finally:
@@ -261,8 +280,7 @@ def cmd_verify_install(a):
     if not env_same:
         for k in before:
             if before[k] != after[k]:
-                items.append({"kind": "user_env", "name": k, "result": "changed", "before": before[k],
-                              "after": after[k]})
+                items.append({"kind": "user_env", "name": k, "result": "changed", "before": before[k], "after": after[k]})
     ok = env_same and not mismatch
     for name, r in runtimes_res.items():
         v = r.get("version")
@@ -277,19 +295,28 @@ def cmd_verify_install(a):
             ok = False
         items.append({"kind": "runtime", "name": name, "result": res, **r})
     items += [{"kind": "file", "name": m, "result": "mismatch"} for m in mismatch]
-    metrics = {"ref": a.ref, "rev": ref_rev[:8], "prev_tag": prev, "expect": a.expect,
-               "user_env_unchanged": env_same, "mismatch": len(mismatch)}
+    metrics = {
+        "ref": a.ref,
+        "rev": ref_rev[:8],
+        "prev_tag": prev,
+        "expect": a.expect,
+        "user_env_unchanged": env_same,
+        "mismatch": len(mismatch),
+    }
     bad_rt = [i["name"] for i in items if i["kind"] == "runtime" and i["result"] != "ok"]
-    summary = (f"{a.ref}（{ref_rev[:8]}）から {', '.join(runtimes_res)} へ導入し v{a.expect} を確かめた"
-               if ok else
-               f"導入の確認が通らない（runtime: {', '.join(bad_rt) or 'なし'} / 中身の不一致 {len(mismatch)} 件"
-               f" / 利用者の環境が{'変わらない' if env_same else '変わった'}）")
+    summary = (
+        f"{a.ref}（{ref_rev[:8]}）から {', '.join(runtimes_res)} へ導入し v{a.expect} を確かめた"
+        if ok
+        else f"導入の確認が通らない（runtime: {', '.join(bad_rt) or 'なし'} / 中身の不一致 {len(mismatch)} 件"
+        f" / 利用者の環境が{'変わらない' if env_same else '変わった'}）"
+    )
     emit(result(TOOL, "ok" if ok else "stopped", summary, items, metrics))
 
 
 def build_parser():
-    ap = argparse.ArgumentParser(prog="release-verification-steps.py", description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        prog="release-verification-steps.py", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("--root", help="対象のリポジトリの根（既定はカレントの git の根）")
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("verify-install", parents=[common_parser()], help="隔離した HOME で ref から導入し、版と中身を確かめる")

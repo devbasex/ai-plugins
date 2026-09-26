@@ -1,4 +1,5 @@
 """起動定義（AC1・AC2）と lspServers を宣言しないこと（AC16）。"""
+
 import json
 from pathlib import Path
 
@@ -7,9 +8,12 @@ REPO = PLUGIN.parents[2]
 
 COMMON_TAIL = [
     "--project-from-cwd",
-    "--add-mode", "no-memories",
-    "--add-mode", "no-onboarding",
-    "--enable-web-dashboard", "False",
+    "--add-mode",
+    "no-memories",
+    "--add-mode",
+    "no-onboarding",
+    "--enable-web-dashboard",
+    "False",
 ]
 
 
@@ -18,8 +22,7 @@ def _server(name):
 
 
 def _expected(context):
-    return ["--from", "serena-agent==1.7.0", "serena", "start-mcp-server",
-            "--context", context, *COMMON_TAIL]
+    return ["--from", "serena-agent==1.7.0", "serena", "start-mcp-server", "--context", context, *COMMON_TAIL]
 
 
 def test_claude_code_launch_is_pinned_with_claude_code_context():

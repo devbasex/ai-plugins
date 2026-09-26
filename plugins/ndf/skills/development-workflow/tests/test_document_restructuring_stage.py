@@ -11,6 +11,7 @@
 **旧い名前を新しい名前として読む表は持たない**（設計の決定 3）。移行で 1 度だけ書き換える
 方針であるため、読み替えの仕組みが実装へ入っていないことも併せて見る。
 """
+
 from __future__ import annotations
 
 import re
@@ -89,10 +90,13 @@ def test_the_exempt_stage_is_a_row_of_the_workflow_table() -> None:
     assert scalar("WF_PR_EXEMPT_STAGE") in stage_names()
 
 
-@pytest.mark.parametrize("name, value", [
-    ("WF_DESIGN_PREFIX", "design/"),
-    ("WF_APPROVAL_LABEL", "design-approved"),
-])
+@pytest.mark.parametrize(
+    "name, value",
+    [
+        ("WF_DESIGN_PREFIX", "design/"),
+        ("WF_APPROVAL_LABEL", "design-approved"),
+    ],
+)
 def test_the_design_pull_request_marks_do_not_move(name: str, value: str) -> None:
     """工程名とブランチ名は別の名前の集まりである。目印は改名の巻き添えにしない。"""
     assert scalar(name) == value

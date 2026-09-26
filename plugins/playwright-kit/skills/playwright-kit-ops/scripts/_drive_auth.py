@@ -32,6 +32,7 @@ def _claude_plugin_cache() -> str | None:
         nums = tuple(int(n) for n in re.findall(r"\d+", core))
         ids = tuple((0, int(i), "") if i.isdigit() else (1, 0, i) for i in pre.split(".")) if pre else ()
         return (nums, not pre, ids)
+
     latest = max(found, key=version, default=None)
     return str(latest) if latest else None
 
@@ -81,4 +82,5 @@ def drive_service(scopes: list[str]):
     _ensure_google_auth_on_path()
     from google_auth import get_credentials  # type: ignore
     from googleapiclient.discovery import build
+
     return build("drive", "v3", credentials=get_credentials(scopes))

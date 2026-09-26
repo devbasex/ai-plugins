@@ -5,6 +5,7 @@
 テストの終了コードだけで進む。ここでは Jev と CLI の呼び出し口を差し替え、呼ばれたら
 落とす形で、実装の取り込みから最終ゲートまでを通す。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -29,8 +30,7 @@ LLM_CLIS = {"claude", "codex", "kiro", "kiro-cli", "agy"}
 
 @pytest.fixture
 def flow(tmp_path, monkeypatch, refactor, patch_lib, env_tmp_dir):
-    return build_git_flow(tmp_path, monkeypatch, patch_lib, env_tmp_dir,
-                          judge={"kind": "jev", "reason": None, "failures": 0})
+    return build_git_flow(tmp_path, monkeypatch, patch_lib, env_tmp_dir, judge={"kind": "jev", "reason": None, "failures": 0})
 
 
 @pytest.fixture
@@ -74,35 +74,53 @@ def _call(module, name, **kwargs):
 
 def _item(item_id, rank, public_io):
     return {
-        "id": item_id, "rank": rank, "path": "src/calc.py", "symbol": "add",
-        "smell": "long_method", "technique": "extract_method", "severity": "major",
-        "proposed_by": ["codex"], "tier": "high", "risk": False, "public_io": public_io,
-        "tests": [], "test_targets": ["tests/test_calc.py"],
-        "command": ["pytest", "-q", "tests/test_calc.py"], "command_source": "targets",
+        "id": item_id,
+        "rank": rank,
+        "path": "src/calc.py",
+        "symbol": "add",
+        "smell": "long_method",
+        "technique": "extract_method",
+        "severity": "major",
+        "proposed_by": ["codex"],
+        "tier": "high",
+        "risk": False,
+        "public_io": public_io,
+        "tests": [],
+        "test_targets": ["tests/test_calc.py"],
+        "command": ["pytest", "-q", "tests/test_calc.py"],
+        "command_source": "targets",
         "estimate": {"test": 0.0, "implement": 1.3, "verify": 0.2},
-        "start_deadline": FAR, "test_start_deadline": None,
-        "status": "planned", "commits": {"test": None, "implement": None, "fix": []},
-        "seconds": {}, "fix_count": 0, "danger": [], "estimated_diff_lines": 20,
+        "start_deadline": FAR,
+        "test_start_deadline": None,
+        "status": "planned",
+        "commits": {"test": None, "implement": None, "fix": []},
+        "seconds": {},
+        "fix_count": 0,
+        "danger": [],
+        "estimated_diff_lines": 20,
     }
 
 
-def test_the_stages_after_the_plan_ask_no_llm(flow, cmd_setup, cmd_implement, cmd_converge,
-                                              cmd_gate, forbid_llm):
+def test_the_stages_after_the_plan_ask_no_llm(flow, cmd_setup, cmd_implement, cmd_converge, cmd_gate, forbid_llm):
     work = flow["work"]
     state = read_state(flow["path"])
-    state["items"] = [_item("I-001", 1, public_io=True)]      # D5 は改修計画で決めてある
-    state["plan"] = {"base_sha": git("rev-parse", "HEAD", cwd=work).stdout.strip(),
-                     "reserve": {"danger_whole_test": 0.1, "final_whole_test": 0.1, "fix": 5.5},
-                     "end_at": FAR, "table_source": "defaults"}
+    state["items"] = [_item("I-001", 1, public_io=True)]  # D5 は改修計画で決めてある
+    state["plan"] = {
+        "base_sha": git("rev-parse", "HEAD", cwd=work).stdout.strip(),
+        "reserve": {"danger_whole_test": 0.1, "final_whole_test": 0.1, "fix": 5.5},
+        "end_at": FAR,
+        "table_source": "defaults",
+    }
     state["phase"] = "implement"
     write_state(flow["path"], state)
 
     _call(cmd_setup, "cmd_start_phase", phase="implement")
     # 期待値の外の差分（経路だけの変更）は機械で決まらない。LLM へ問わずにレビューへ引き継ぐ。
     test_file = work / "tests" / "test_calc.py"
-    test_file.write_text(test_file.read_text().replace(
-        "from src.calc import add", "from src import calc").replace("add(1, 2)", "calc.add(1, 2)"),
-        encoding="utf-8")
+    test_file.write_text(
+        test_file.read_text().replace("from src.calc import add", "from src import calc").replace("add(1, 2)", "calc.add(1, 2)"),
+        encoding="utf-8",
+    )
     (work / "src" / "calc.py").write_text(CALC + "\n", encoding="utf-8")
     commit_with_trailers(work, "Refactor add", item_trailers("I-001"))
     _call(cmd_implement, "cmd_merge_implement")

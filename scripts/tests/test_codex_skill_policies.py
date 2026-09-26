@@ -2,6 +2,7 @@
 
 frontmatter を YAML として読む。移す前は `キー: 値` の字面で読み、引用符を外した文字列 `true` を真として扱った。
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -22,18 +23,26 @@ def _tree(tmp_path: Path, skills: dict[str, str]) -> tuple[Path, Path]:
 
 
 def _run(skills_dir: Path, manifest: Path, check: bool = False) -> subprocess.CompletedProcess[str]:
-    return subprocess.run([sys.executable, str(GENERATOR), str(skills_dir), str(manifest), "true" if check else "false"],
-                          capture_output=True, text=True, check=False)
+    return subprocess.run(
+        [sys.executable, str(GENERATOR), str(skills_dir), str(manifest), "true" if check else "false"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
 
 
 def test_explicit_only_skills_get_a_policy_and_the_hint(tmp_path):
-    skills_dir, manifest = _tree(tmp_path, {
-        "a": 'disable-model-invocation: true\nargument-hint: "<PR 番号> [\\"x\\"]"\n',
-        "b": "description: plain\n",
-    })
+    skills_dir, manifest = _tree(
+        tmp_path,
+        {
+            "a": 'disable-model-invocation: true\nargument-hint: "<PR 番号> [\\"x\\"]"\n',
+            "b": "description: plain\n",
+        },
+    )
     assert _run(skills_dir, manifest).returncode == 0
     assert (skills_dir / "a/agents/openai.yaml").read_text(encoding="utf-8") == (
-        'policy:\n  allow_implicit_invocation: false\ninterface:\n  default_prompt: "<PR 番号> [\\"x\\"]"\n')
+        'policy:\n  allow_implicit_invocation: false\ninterface:\n  default_prompt: "<PR 番号> [\\"x\\"]"\n'
+    )
     assert not (skills_dir / "b/agents").exists()
     assert _run(skills_dir, manifest, check=True).returncode == 0
 

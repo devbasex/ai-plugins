@@ -2,6 +2,7 @@
 
 `SELF` は分けた後も `supervise.py` を指す（プランのコマンドは `SELF` の副命令として書く）。
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -20,8 +21,10 @@ SELF = Path(__file__).resolve().parent.parent / "supervise.py"
 
 
 SKILLS = SELF.parent.parent / "skills"
-DRIVES = {"cross-review": SKILLS / "cross-review" / "scripts" / "drive.py",
-          "cross-refactoring": SKILLS / "cross-refactoring" / "scripts" / "drive.py"}
+DRIVES = {
+    "cross-review": SKILLS / "cross-review" / "scripts" / "drive.py",
+    "cross-refactoring": SKILLS / "cross-refactoring" / "scripts" / "drive.py",
+}
 EXTERNAL_AI = SKILLS / "external-ai" / "scripts" / "external-ai.py"
 HERE = SELF.parent  # 配布したスクリプトの置き場。計画のコマンドはここからの絶対パスで書く
 # run のステップの定型（"preset"）。作業場所（リポジトリの根）で動く。{base} は起点のブランチ
@@ -37,8 +40,8 @@ def with_paths(cmd: str, paths: str) -> str:
     return cmd.replace("{paths}", paths) if "{paths}" in cmd else f"{cmd} {paths}"
 
 
-WORKTREE_LOCK_RETRIES = 5        # .git/config の lock で落ちたときのやり直しの回数
-WORKTREE_LOCK_WAIT = 1.0         # やり直しの間隔（秒）
+WORKTREE_LOCK_RETRIES = 5  # .git/config の lock で落ちたときのやり直しの回数
+WORKTREE_LOCK_WAIT = 1.0  # やり直しの間隔（秒）
 
 
 def is_config_lock(stderr: str) -> bool:
@@ -71,10 +74,13 @@ def ensure_worktree(plan: dict, sleep=time.sleep) -> str | None:
     for i in range(WORKTREE_LOCK_RETRIES + 1):
         if i:
             sleep(WORKTREE_LOCK_WAIT)
-        has = subprocess.run(["git", "-C", repo, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"],
-                             capture_output=True, text=True).returncode == 0
-        cmd = ["git", "-C", repo, "worktree", "add", "-q"] + ([str(wt), branch] if has
-                                                             else ["-b", branch, str(wt), base])
+        has = (
+            subprocess.run(
+                ["git", "-C", repo, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"], capture_output=True, text=True
+            ).returncode
+            == 0
+        )
+        cmd = ["git", "-C", repo, "worktree", "add", "-q"] + ([str(wt), branch] if has else ["-b", branch, str(wt), base])
         p = subprocess.run(cmd, capture_output=True, text=True)
         if p.returncode == 0:
             return None

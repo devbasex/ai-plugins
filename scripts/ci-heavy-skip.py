@@ -17,6 +17,7 @@
 
 出力: `skip=true|false` と `reason=...` を標準出力へ書き、GITHUB_OUTPUT があればそこへも足す。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -92,22 +93,22 @@ def gh_api(path: str) -> dict:
     return json.loads(p.stdout or "{}")
 
 
-def passed_on_branch(repo: str, workflow: str, sha: str, branch: str,
-                     api: Callable[[str], dict] = gh_api) -> bool:
+def passed_on_branch(repo: str, workflow: str, sha: str, branch: str, api: Callable[[str], dict] = gh_api) -> bool:
     """sha が branch への push でこの workflow を成功で通ったか。"""
-    path = (f"repos/{repo}/actions/workflows/{workflow}/runs"
-            f"?head_sha={sha}&event=push&branch={branch}&status=success&per_page=5")
+    path = f"repos/{repo}/actions/workflows/{workflow}/runs?head_sha={sha}&event=push&branch={branch}&status=success&per_page=5"
     try:
         data = api(path)
     except (RuntimeError, ValueError):
         return False
-    return any(r.get("head_sha") == sha and r.get("event") == "push"
-               and r.get("head_branch") == branch and r.get("conclusion") == "success"
-               for r in data.get("workflow_runs") or [])
+    return any(
+        r.get("head_sha") == sha and r.get("event") == "push" and r.get("head_branch") == branch and r.get("conclusion") == "success"
+        for r in data.get("workflow_runs") or []
+    )
 
 
-def decide(root: str, event: str, base: str, head: str, repo: str, workflow: str,
-           branch: str = "develop", api: Callable[[str], dict] = gh_api) -> tuple[bool, str]:
+def decide(
+    root: str, event: str, base: str, head: str, repo: str, workflow: str, branch: str = "develop", api: Callable[[str], dict] = gh_api
+) -> tuple[bool, str]:
     if event != "pull_request":
         return False, f"{event or '不明'} のイベントでは省かない"
     mb = git(root, "merge-base", base, head)

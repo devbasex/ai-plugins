@@ -1,4 +1,5 @@
 """supervise.py new の宣言の扱い（#1192）・設計のプランの入口（#1193）・種別ごとの help（#1194）。"""
+
 from __future__ import annotations
 
 import json
@@ -38,11 +39,29 @@ def plain_repo(tmp_path, release=None):
 
 
 def new_mission(root, out, *extra):
-    return cli("new", "mission", "--name", "m6", "--worktree", str(root), "--issue", "216", "247",
-               "--design", "216", "--version", "3.8.0-dev.1", "--out", str(out), *extra, cwd=root)
+    return cli(
+        "new",
+        "mission",
+        "--name",
+        "m6",
+        "--worktree",
+        str(root),
+        "--issue",
+        "216",
+        "247",
+        "--design",
+        "216",
+        "--version",
+        "3.8.0-dev.1",
+        "--out",
+        str(out),
+        *extra,
+        cwd=root,
+    )
 
 
 # --- #1192: リリースの雛形の無い形 -------------------------------------------------
+
 
 @pytest.mark.parametrize("release", [None, {"form": "merge"}])
 def test_new_mission_without_release_template_writes_until_check(tmp_path, release):
@@ -73,12 +92,30 @@ def test_new_mission_with_package_plugin_keeps_release_stage(tmp_path):
 
 def test_new_close_still_needs_release_form(tmp_path):
     root = plain_repo(tmp_path)
-    p = cli("new", "close", "--name", "m6", "--worktree", str(root), "--issue", "216", "--version", "3.8.0-dev.1",
-            "--prod", "3.8.0", "--state", str(tmp_path / "s.json"), "--out", str(tmp_path / "c"), cwd=root)
+    p = cli(
+        "new",
+        "close",
+        "--name",
+        "m6",
+        "--worktree",
+        str(root),
+        "--issue",
+        "216",
+        "--version",
+        "3.8.0-dev.1",
+        "--prod",
+        "3.8.0",
+        "--state",
+        str(tmp_path / "s.json"),
+        "--out",
+        str(tmp_path / "c"),
+        cwd=root,
+    )
     assert p.returncode == 2 and "release.form" in p.stderr
 
 
 # --- #1193: 設計のプランの入口 --------------------------------------------------------
+
 
 def design_plan(tmp_path):
     root = plain_repo(tmp_path)
@@ -141,8 +178,11 @@ def test_design_glossary_stops_when_candidates_fails(tmp_path, monkeypatch):
     root = glossary_repo(tmp_path)
     out = tmp_path / "glossary-candidates.md"
     real = subprocess.run
-    replies = {"gate": (1, {"summary": "無い"}), "init": (0, {"items": [{"name": ".ndf/glossary.json"}]}),
-               "candidates": (2, {"summary": "壊れた"})}
+    replies = {
+        "gate": (1, {"summary": "無い"}),
+        "init": (0, {"items": [{"name": ".ndf/glossary.json"}]}),
+        "candidates": (2, {"summary": "壊れた"}),
+    }
 
     calls = []
 
@@ -191,11 +231,13 @@ def test_pr_step_appends_existing_files(tmp_path, monkeypatch):
     git(root, "commit", "-q", "-m", "Add: d")
     bindir = tmp_path / "bin"
     bindir.mkdir()
-    (bindir / "gh").write_text(f"#!{PY}\nimport os, sys\na = sys.argv[1:]\n"
-                               "if a[:2] == ['pr', 'create']:\n"
-                               "    open(os.environ['FAKE_GH_BODY'], 'w').write(a[a.index('--body') + 1])\n"
-                               "    print('https://github.com/o/r/pull/5')\n"
-                               "sys.exit(0)\n")
+    (bindir / "gh").write_text(
+        f"#!{PY}\nimport os, sys\na = sys.argv[1:]\n"
+        "if a[:2] == ['pr', 'create']:\n"
+        "    open(os.environ['FAKE_GH_BODY'], 'w').write(a[a.index('--body') + 1])\n"
+        "    print('https://github.com/o/r/pull/5')\n"
+        "sys.exit(0)\n"
+    )
     (bindir / "gh").chmod(0o755)
     body = tmp_path / "body.txt"
     monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
@@ -203,15 +245,28 @@ def test_pr_step_appends_existing_files(tmp_path, monkeypatch):
     state = tmp_path / "state"
     (state / "work").mkdir(parents=True)
     (state / "work" / "cand.md").write_text("## 用語集の候補\n\n- 目印の語\n")
-    plan = {"フェーズ": "設計", "課題": [1], "作業場所": str(root), "steps": [
-        {"id": "pr", "type": "pr", "base": "main", "body": "template", "next": "end",
-         "append": ["{state_dir}/work/cand.md", "{state_dir}/work/none.md"]}]}
+    plan = {
+        "フェーズ": "設計",
+        "課題": [1],
+        "作業場所": str(root),
+        "steps": [
+            {
+                "id": "pr",
+                "type": "pr",
+                "base": "main",
+                "body": "template",
+                "next": "end",
+                "append": ["{state_dir}/work/cand.md", "{state_dir}/work/none.md"],
+            }
+        ],
+    }
     assert "結果: 完了" in engine.Engine(plan, state).run()
     got = body.read_text()
     assert "目印の語" in got and got.index("目印の語") < got.index(pr_step.PR_FOOTER)
 
 
 # --- #1194: 種別ごとの help ------------------------------------------------------------
+
 
 def test_new_mission_help_shows_only_its_arguments_and_declarations(tmp_path):
     p = cli("new", "mission", "--help", cwd=tmp_path)
@@ -249,6 +304,7 @@ def test_top_help_has_phase_table(tmp_path):
 
 
 # --- #1142: 即時修正のプラン（不足 a） --------------------------------------------------
+
 
 def new_fix(root, out, *extra):
     return cli("new", "fix", "--tests", "tests/test_x.py", "--title", "Fix: x", "--out", str(out), *extra, cwd=root)
@@ -316,15 +372,21 @@ def test_new_fix_help_shows_only_its_arguments(tmp_path):
 
 # --- #1142: 本番のリリースプランが他のプラグインの版を上げる（不足 c） ----------------------
 
+
 def plugin_repo(tmp_path):
     """ndf と mcp-serena を持ち、ndf--v1.0.0 の後に mcp-serena だけを変えたリポジトリ。"""
     root = tmp_path / "repo"
     (root / ".ndf").mkdir(parents=True)
-    (root / ".ndf" / "worktree.json").write_text(
-        '{"version": 1, "base_branch": "develop", "production_branch": "main"}\n')
-    (root / ".ndf" / "supervise.json").write_text(json.dumps(
-        {"version": 1, "test": {"command": "true {paths}"},
-         "release": {"form": "package-plugin", "plugin": "ndf", "runtimes": ["claude"]}}))
+    (root / ".ndf" / "worktree.json").write_text('{"version": 1, "base_branch": "develop", "production_branch": "main"}\n')
+    (root / ".ndf" / "supervise.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "test": {"command": "true {paths}"},
+                "release": {"form": "package-plugin", "plugin": "ndf", "runtimes": ["claude"]},
+            }
+        )
+    )
     for rel, v in (("plugins/ndf", "1.0.0"), ("plugins/mcp/mcp-serena", "2.3.4")):
         (root / rel / ".claude-plugin").mkdir(parents=True)
         (root / rel / ".claude-plugin" / "plugin.json").write_text(json.dumps({"version": v}, indent=2))
@@ -343,8 +405,23 @@ def plugin_repo(tmp_path):
 
 def release_steps_of(root, tmp_path, channel, version):
     out = tmp_path / f"rel-{channel}.json"
-    p = cli("new", "release", "--version", version, "--channel", channel, "--prs", "1", "--worktree", str(root),
-            "--repo", str(root), "--out", str(out), cwd=root)
+    p = cli(
+        "new",
+        "release",
+        "--version",
+        version,
+        "--channel",
+        channel,
+        "--prs",
+        "1",
+        "--worktree",
+        str(root),
+        "--repo",
+        str(root),
+        "--out",
+        str(out),
+        cwd=root,
+    )
     assert p.returncode == 0, p.stderr
     return {s["id"]: s for s in json.loads(out.read_text())["steps"]}
 

@@ -23,9 +23,7 @@ def test_extra_review_instructions_combines_focus_and_file(tmp_path, state_mod):
         extra_instructions_file=str(extra),
     )
 
-    assert review_lib.review_focus._extra_review_instructions(args) == (
-        "ドキュメント整合性\n\n公開 API の説明と実装差分も確認"
-    )
+    assert review_lib.review_focus._extra_review_instructions(args) == ("ドキュメント整合性\n\n公開 API の説明と実装差分も確認")
 
 
 def test_extra_review_instructions_ignores_empty_values(tmp_path, state_mod):

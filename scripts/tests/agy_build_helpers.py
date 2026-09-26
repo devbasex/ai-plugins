@@ -8,6 +8,7 @@
 Skill 名は実物（`cherry-pick-pr` など）と重ならない値にしてある。テストが実物の manifest へ
 依存していないことを、値そのもので示すためである。
 """
+
 from __future__ import annotations
 
 import json
@@ -29,9 +30,7 @@ def build_tree(base: Path, skills: list[str] | None = None) -> Path:
     plugin = root / f"plugins/{FAMILY}"
 
     (root / "scripts").mkdir(parents=True)
-    (root / "scripts/build-runtime-plugins.sh").write_text(
-        BUILD.read_text(encoding="utf-8"), encoding="utf-8"
-    )
+    (root / "scripts/build-runtime-plugins.sh").write_text(BUILD.read_text(encoding="utf-8"), encoding="utf-8")
     # MCP プラグインの同期はディレクトリを走査する。空でも存在していないと読めない。
     (root / "plugins/mcp").mkdir(parents=True)
 

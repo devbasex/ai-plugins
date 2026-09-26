@@ -15,11 +15,12 @@ tabulate が値の文字列化と欠けた値を持ち、この包みがリポ�
 
 使う側は `deps.require("mdtable")` を先に呼ぶ。
 """
+
 from __future__ import annotations
 
 from typing import Any, Iterable, Sequence
 
-from tabulate import DataRow, Line, TableFormat, tabulate
+from tabulate import TableFormat, tabulate
 
 _ALIGNS = {"left", "right", "center"}
 
@@ -33,8 +34,16 @@ def _rule(_widths: list[int], aligns: list[str]) -> str:
     return "| " + " | ".join(marks.get(a, "---") for a in aligns) + " |"
 
 
-_FORMAT = TableFormat(lineabove=None, linebelowheader=_rule, linebetweenrows=None, linebelow=None,
-                      headerrow=_row, datarow=_row, padding=0, with_header_hide=None)
+_FORMAT = TableFormat(
+    lineabove=None,
+    linebelowheader=_rule,
+    linebetweenrows=None,
+    linebelow=None,
+    headerrow=_row,
+    datarow=_row,
+    padding=0,
+    with_header_hide=None,
+)
 
 
 def cell_text(value: Any) -> str:
@@ -44,27 +53,24 @@ def cell_text(value: Any) -> str:
     return str(value).replace("\r\n", "\n").replace("\n", " ").replace("|", "\\|")
 
 
-def table_markdown(headers: Sequence[Any], rows: Iterable[Sequence[Any]],
-                   align: Sequence[str | None] | None = None) -> str:
+def table_markdown(headers: Sequence[Any], rows: Iterable[Sequence[Any]], align: Sequence[str | None] | None = None) -> str:
     """Markdown の表を返す（末尾の改行なし）。`align` は列ごとに `left` / `right` / `center` / None（自動）。"""
     headers = [cell_text(h) for h in headers]
     body = []
     for r in rows:
         cells = list(r) + [None] * (len(headers) - len(r))
-        body.append([c if isinstance(c, (int, float)) and not isinstance(c, bool) else cell_text(c)
-                     for c in cells[:len(headers)]])
+        body.append([c if isinstance(c, (int, float)) and not isinstance(c, bool) else cell_text(c) for c in cells[: len(headers)]])
     colalign = None
     if align is not None:
         bad = [a for a in align if a is not None and a not in _ALIGNS]
         if bad:
             raise ValueError(f"表の寄せ方は left / right / center のどれか: {bad}")
-        colalign = [a or _auto_align(body, k) for k, a in enumerate(list(align) + [None] * len(headers))][:len(headers)]
+        colalign = [a or _auto_align(body, k) for k, a in enumerate(list(align) + [None] * len(headers))][: len(headers)]
     else:
         colalign = [_auto_align(body, k) for k in range(len(headers))]
     if not body:  # 行が無いと tabulate は寄せ方を捨てる
         return _row(headers, [], []) + "\n" + _rule([], colalign)
-    return tabulate(body, headers=headers, tablefmt=_FORMAT, colalign=colalign,
-                    disable_numparse=True, missingval="")
+    return tabulate(body, headers=headers, tablefmt=_FORMAT, colalign=colalign, disable_numparse=True, missingval="")
 
 
 def _auto_align(body: list[list[Any]], k: int) -> str:

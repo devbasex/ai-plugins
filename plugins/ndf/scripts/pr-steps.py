@@ -13,6 +13,7 @@
 メッセージにある・push や作成が失敗）/ 2 = 読めない / 3 = 前提が無い（既定ブランチにいる・起点が
 main 以外で別 Skill へ回す・PR が無い）。`plan` の `metrics` が同意の提示物の材料になる。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -27,8 +28,18 @@ import deps  # noqa: E402
 
 deps.require("md")
 import md  # noqa: E402
-from step_result import (EXIT_PRECONDITION, EXIT_UNREADABLE, StepError, common_parser, emit,  # noqa: E402
-                         git, git_root, main_with, result, run)
+from step_result import (
+    EXIT_PRECONDITION,
+    EXIT_UNREADABLE,
+    StepError,
+    common_parser,
+    emit,  # noqa: E402
+    git,
+    git_root,
+    main_with,
+    result,
+    run,
+)
 import gh_parts  # noqa: E402
 import repo  # noqa: E402
 from pr_mode import needs_review, pr_target, split_stages, with_mode_line  # noqa: E402
@@ -36,8 +47,11 @@ from pr_mode import needs_review, pr_target, split_stages, with_mode_line  # noq
 TOOL = "pr"
 SCRIPTS = Path(__file__).resolve().parent
 REVIEW_MARK = "<!-- I want to review in Japanese. -->"
-CLOSING = re.compile(r"\b(close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s*"
-                     r"(https?://github\.com/[\w.-]+/[\w.-]+/issues/\d+|[\w.-]+/[\w.-]+#\d+|#\d+)", re.I)
+CLOSING = re.compile(
+    r"\b(close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s*"
+    r"(https?://github\.com/[\w.-]+/[\w.-]+/issues/\d+|[\w.-]+/[\w.-]+#\d+|#\d+)",
+    re.I,
+)
 # credential helper が応答しない環境の退避（lib/git-credential.sh と同じ値）
 CREDENTIAL_FALLBACK = ["-c", "credential.helper=", "-c", "credential.helper=!gh auth git-credential"]
 CHANGES_HEADING = "## 利用者向けの変化"  # 配布の CHANGELOG と更新案内の材料（release-steps.py notes が読む）
@@ -59,6 +73,7 @@ STAT_RE = re.compile(r"(\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:, (\
 
 
 # --- 値を読む -------------------------------------------------------------------
+
 
 def current_branch(root):
     b = git(root, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
@@ -110,8 +125,7 @@ def repo_owner_name(root):
 
 def existing_pr(root, branch):
     """head が branch の OPEN の PR（{number, url, isDraft, baseRefName}）。無ければ None。上限なら REST。"""
-    p = gh_parts.gh(["pr", "list", "--head", branch, "--state", "open", "--json", "number,url,isDraft,baseRefName"],
-                    cwd=root)
+    p = gh_parts.gh(["pr", "list", "--head", branch, "--state", "open", "--json", "number,url,isDraft,baseRefName"], cwd=root)
     if p.returncode == 0:
         try:
             prs = json.loads(p.stdout or "[]")
@@ -131,8 +145,12 @@ def existing_pr(root, branch):
     if not prs:
         return None
     pr = prs[0]
-    return {"number": pr["number"], "url": pr["html_url"], "isDraft": pr.get("draft", False),
-            "baseRefName": pr.get("base", {}).get("ref", "")}
+    return {
+        "number": pr["number"],
+        "url": pr["html_url"],
+        "isDraft": pr.get("draft", False),
+        "baseRefName": pr.get("base", {}).get("ref", ""),
+    }
 
 
 def diff_numbers(root, ref):
@@ -145,6 +163,7 @@ def diff_numbers(root, ref):
 
 # --- plan -------------------------------------------------------------------------
 
+
 def cmd_plan(a):
     root = git_root(a.root)
     branch = current_branch(root)
@@ -155,15 +174,31 @@ def cmd_plan(a):
     items = [{"kind": "branch", "name": branch, "result": "ok"}, {"kind": "base", "name": base, "result": "ok"}]
     if branch in allowed:
         items[0]["result"] = "redirect"
-        emit(result(TOOL, "stopped", f"起点のブランチ {branch} にいる。作業ツリーを用意してから進める", items,
-                    {"branch": branch, "base": base, "redirect": "worktree"},
-                    next="/ndf:worktree の手順で作業ツリーを用意し、そこへ移る"), EXIT_PRECONDITION)
+        emit(
+            result(
+                TOOL,
+                "stopped",
+                f"起点のブランチ {branch} にいる。作業ツリーを用意してから進める",
+                items,
+                {"branch": branch, "base": base, "redirect": "worktree"},
+                next="/ndf:worktree の手順で作業ツリーを用意し、そこへ移る",
+            ),
+            EXIT_PRECONDITION,
+        )
     # ミッションのブランチ宛て（課題の PR）は宣言の外でも起点として受ける
     if base not in allowed and pr_target(base) != "mission" and not a.force:
         items[1]["result"] = "redirect"
-        emit(result(TOOL, "stopped", f"起点 {base} は既定・宣言のブランチと違う。cherry-pick-pr へ回す", items,
-                    {"branch": branch, "base": base, "redirect": "cherry-pick-pr"},
-                    next=f"/ndf:cherry-pick-pr {base}（続けるなら --force）"), EXIT_PRECONDITION)
+        emit(
+            result(
+                TOOL,
+                "stopped",
+                f"起点 {base} は既定・宣言のブランチと違う。cherry-pick-pr へ回す",
+                items,
+                {"branch": branch, "base": base, "redirect": "cherry-pick-pr"},
+                next=f"/ndf:cherry-pick-pr {base}（続けるなら --force）",
+            ),
+            EXIT_PRECONDITION,
+        )
     status = [l for l in git(root, "status", "--short").stdout.splitlines() if l.strip()]
     ref = compare_ref(root, base)
     nums = diff_numbers(root, ref)
@@ -174,27 +209,53 @@ def cmd_plan(a):
             in_commits.append(line.split()[0][:12])
     pr = existing_pr(root, branch)
     in_msg = closing_words(a.message or "")
-    items.append({"kind": "existing_pr", "name": pr["url"] if pr else "無し",
-                  "result": "update" if pr else "create"})
-    items.append({"kind": "changes", "name": f"{len(status)} 件の未コミット", "result": "uncommitted" if status else "clean",
-                  "files": status[:50]})
+    items.append({"kind": "existing_pr", "name": pr["url"] if pr else "無し", "result": "update" if pr else "create"})
+    items.append(
+        {"kind": "changes", "name": f"{len(status)} 件の未コミット", "result": "uncommitted" if status else "clean", "files": status[:50]}
+    )
     for sha in in_commits:
         items.append({"kind": "commit", "name": sha, "result": "closing_word"})
-    metrics = {"branch": branch, "base": base, "base_ref": ref, "default_branch": default, "draft": bool(a.draft),
-               "target": pr_target(base), "review": needs_review(base),
-               "existing_pr": pr, "uncommitted": len(status), "closing_words_in_message": in_msg,
-               "commits_with_closing_words": in_commits, **nums}
+    metrics = {
+        "branch": branch,
+        "base": base,
+        "base_ref": ref,
+        "default_branch": default,
+        "draft": bool(a.draft),
+        "target": pr_target(base),
+        "review": needs_review(base),
+        "existing_pr": pr,
+        "uncommitted": len(status),
+        "closing_words_in_message": in_msg,
+        "commits_with_closing_words": in_commits,
+        **nums,
+    }
     if in_msg:
-        emit(result(TOOL, "stopped", f"コミットメッセージに閉じる語がある: {', '.join(in_msg)}（本文だけに書く）",
-                    items, metrics, next="閉じる語を外したメッセージで plan をやり直す"))
+        emit(
+            result(
+                TOOL,
+                "stopped",
+                f"コミットメッセージに閉じる語がある: {', '.join(in_msg)}（本文だけに書く）",
+                items,
+                metrics,
+                next="閉じる語を外したメッセージで plan をやり直す",
+            )
+        )
     action = "既存の PR を更新する" if pr else "新しい PR を作る"
     if not needs_review(base):
         action += "（ミッションのブランチ宛て。実装レビューはミッションの PR で通す）"
-    emit(result(TOOL, "ok", f"{branch} → {base}: 未コミット {len(status)} 件・{nums['commits']} コミット・"
-                f"{nums['files']} ファイル。{action}", items, metrics))
+    emit(
+        result(
+            TOOL,
+            "ok",
+            f"{branch} → {base}: 未コミット {len(status)} 件・{nums['commits']} コミット・{nums['files']} ファイル。{action}",
+            items,
+            metrics,
+        )
+    )
 
 
 # --- commit / push ------------------------------------------------------------------
+
 
 def read_message(a):
     if getattr(a, "message_file", None):
@@ -210,17 +271,29 @@ def cmd_commit(a):
     msg = read_message(a)
     words = closing_words(msg)
     if words:
-        emit(result(TOOL, "stopped", f"コミットメッセージに閉じる語がある: {', '.join(words)}（本文だけに書く）",
-                    [{"kind": "message", "name": msg.splitlines()[0][:80], "result": "closing_word"}],
-                    {"branch": branch, "closing_words": words}))
+        emit(
+            result(
+                TOOL,
+                "stopped",
+                f"コミットメッセージに閉じる語がある: {', '.join(words)}（本文だけに書く）",
+                [{"kind": "message", "name": msg.splitlines()[0][:80], "result": "closing_word"}],
+                {"branch": branch, "closing_words": words},
+            )
+        )
     git(root, "add", "-A")
     if not git(root, "status", "--porcelain").stdout.strip():
         emit(result(TOOL, "ok", "コミットする変更が無い", [], {"branch": branch, "committed": False}))
     run(["git", "-C", str(root), "commit", "-q", "-m", msg])
     sha = git(root, "rev-parse", "HEAD").stdout.strip()
-    emit(result(TOOL, "ok", f"コミットした: {sha[:12]} {msg.splitlines()[0][:80]}",
-                [{"kind": "commit", "name": sha[:12], "result": "committed"}],
-                {"branch": branch, "committed": True, "sha": sha}))
+    emit(
+        result(
+            TOOL,
+            "ok",
+            f"コミットした: {sha[:12]} {msg.splitlines()[0][:80]}",
+            [{"kind": "commit", "name": sha[:12], "result": "committed"}],
+            {"branch": branch, "committed": True, "sha": sha},
+        )
+    )
 
 
 def cmd_push(a):
@@ -233,13 +306,24 @@ def cmd_push(a):
         p = run(["git", "-C", str(root), *CREDENTIAL_FALLBACK, "push", "-q", "-u", "origin", "HEAD"], check=False)
     metrics = {"branch": branch, "retried_with_credential_fallback": retried}
     if p.returncode != 0:
-        emit(result(TOOL, "stopped", f"push が失敗: {p.stderr.strip()[:300]}",
-                    [{"kind": "push", "name": branch, "result": "failed"}], metrics))
-    emit(result(TOOL, "ok", f"origin/{branch} へ push した" + ("（credential の退避で再試行）" if retried else ""),
-                [{"kind": "push", "name": branch, "result": "pushed"}], metrics))
+        emit(
+            result(
+                TOOL, "stopped", f"push が失敗: {p.stderr.strip()[:300]}", [{"kind": "push", "name": branch, "result": "failed"}], metrics
+            )
+        )
+    emit(
+        result(
+            TOOL,
+            "ok",
+            f"origin/{branch} へ push した" + ("（credential の退避で再試行）" if retried else ""),
+            [{"kind": "push", "name": branch, "result": "pushed"}],
+            metrics,
+        )
+    )
 
 
 # --- create / update ----------------------------------------------------------------
+
 
 def body_with_mark(path):
     body = Path(path).read_text(encoding="utf-8")
@@ -310,8 +394,15 @@ def upsert(a, must_exist):
             raise StepError(f"gh pr create が失敗: {p.stderr.strip()[:300]}")
         action = "created_rest" if rest else "created"
     sync_exit = decisions_sync(root, number) if number else None
-    metrics = {"number": number, "url": url, "action": action, "branch": branch, "draft": bool(getattr(a, "draft", False)),
-               "closing_issues_in_body": closing_issues(body), "decisions_sync_exit": sync_exit}
+    metrics = {
+        "number": number,
+        "url": url,
+        "action": action,
+        "branch": branch,
+        "draft": bool(getattr(a, "draft", False)),
+        "closing_issues_in_body": closing_issues(body),
+        "decisions_sync_exit": sync_exit,
+    }
     items = [{"kind": "pr", "name": url, "result": action}]
     if sync_exit is not None:
         items.append({"kind": "decisions", "name": "pr-body-decisions.sh sync", "result": f"exit={sync_exit}"})
@@ -322,15 +413,14 @@ def upsert(a, must_exist):
         items.append({"kind": "section", "name": CHANGES_HEADING, "result": "ok" if has else "missing"})
         if not has:
             nxt = f"本文に {CHANGES_HEADING} の節を足して update する（無いと配布の説明文が題名になる）"
-    emit(result(TOOL, "ok", f"PR #{number} を{'更新した' if action == 'updated' else '作った'}: {url}", items, metrics,
-                next=nxt))
+    emit(result(TOOL, "ok", f"PR #{number} を{'更新した' if action == 'updated' else '作った'}: {url}", items, metrics, next=nxt))
 
 
 def h2_sections(body):
     """本文の深さ 2 の節ごとに（見出しの字面, 節の行）。囲みの中の `##` は見出しにしない（lib/md.py）。"""
     text = body or ""
     lines = text.splitlines()
-    return [(s.heading.title, lines[s.start:s.end]) for s in md.md_sections(text) if s.heading.level == 2]
+    return [(s.heading.title, lines[s.start : s.end]) for s in md.md_sections(text) if s.heading.level == 2]
 
 
 def has_user_changes(body):
@@ -342,8 +432,15 @@ def cmd_template(a):
     if out.exists() and not a.force:
         raise StepError(f"{out} が既にある（書き直すなら --force）", EXIT_PRECONDITION)
     out.write_text(BODY_TEMPLATE, encoding="utf-8")
-    emit(result(TOOL, "ok", f"PR 本文の雛形を書いた: {out}", [{"kind": "file", "name": str(out), "result": "written"}],
-                {"sections": [l for l in BODY_TEMPLATE.splitlines() if l.startswith("## ")]}))
+    emit(
+        result(
+            TOOL,
+            "ok",
+            f"PR 本文の雛形を書いた: {out}",
+            [{"kind": "file", "name": str(out), "result": "written"}],
+            {"sections": [l for l in BODY_TEMPLATE.splitlines() if l.startswith("## ")]},
+        )
+    )
 
 
 def cmd_create(a):
@@ -355,6 +452,7 @@ def cmd_update(a):
 
 
 # --- report -----------------------------------------------------------------------
+
 
 def pr_for_report(root, number):
     fields = "number,title,url,isDraft,baseRefName,headRefName,body"
@@ -371,8 +469,15 @@ def pr_for_report(root, number):
     if q.returncode != 0:
         raise StepError(f"REST でも PR を引けない: {q.stderr.strip()[:300]}")
     d = json.loads(q.stdout)
-    return {"number": d["number"], "title": d["title"], "url": d["html_url"], "isDraft": d.get("draft", False),
-            "baseRefName": d["base"]["ref"], "headRefName": d["head"]["ref"], "body": d.get("body") or ""}
+    return {
+        "number": d["number"],
+        "title": d["title"],
+        "url": d["html_url"],
+        "isDraft": d.get("draft", False),
+        "baseRefName": d["base"]["ref"],
+        "headRefName": d["head"]["ref"],
+        "body": d.get("body") or "",
+    }
 
 
 def section(body, heading):
@@ -391,31 +496,50 @@ def cmd_report(a):
     v = pr_for_report(root, number)
     ref = compare_ref(root, v["baseRefName"])
     nums = diff_numbers(root, ref)
-    summary = next((l.strip().lstrip("- ").strip() for l in section(v["body"], "Summary")
-                    if l.strip() and not l.strip().startswith("<!--")), "（Summary が無い）")
+    summary = next(
+        (l.strip().lstrip("- ").strip() for l in section(v["body"], "Summary") if l.strip() and not l.strip().startswith("<!--")),
+        "（Summary が無い）",
+    )
     plan_lines = section(v["body"], "Test plan")
     total = sum(1 for l in plan_lines if re.match(r"\s*- \[[ xX]\]", l))
     done = sum(1 for l in plan_lines if re.match(r"\s*- \[[xX]\]", l))
     script = SCRIPTS / "pr-body-decisions.sh"
     dec = run(["bash", str(script), "check", str(number)], cwd=root, check=False).returncode if script.is_file() else None
     dec_text = f"exit={dec}" + ("（本文の決めたことを確かめられていない）" if dec == 2 else "") if dec is not None else "チェックなし"
-    text = "\n".join([
-        f"PR #{v['number']} {v['title']}", "",
-        f"- ベース / ソース: {v['baseRefName']} ← {v['headRefName']}（ドラフト: {'あり' if v.get('isDraft') else 'なし'}）",
-        f"- 変更量: {nums['commits']} コミット / {nums['files']} ファイル / +{nums['insertions']} -{nums['deletions']}",
-        "- 主な変更: <1〜3 行を書く>",
-        f"- PR 本文: {summary} / Test plan {total} 件（実行済み {done} 件）",
-        f"- 決めたことの節: `pr-body-decisions.sh check` の {dec_text}", "",
-        f"URL: {v['url']}",
-    ])
-    metrics = {"number": v["number"], "url": v["url"], "title": v["title"], "draft": bool(v.get("isDraft")),
-               "base": v["baseRefName"], "head": v["headRefName"], "test_plan_total": total, "test_plan_done": done,
-               "decisions_check_exit": dec, **nums}
-    emit(result(TOOL, "ok", f"PR #{v['number']} の完了報告の材料", [{"kind": "pr", "name": v["url"], "result": "reported"}],
-                metrics, next=text))
+    text = "\n".join(
+        [
+            f"PR #{v['number']} {v['title']}",
+            "",
+            f"- ベース / ソース: {v['baseRefName']} ← {v['headRefName']}（ドラフト: {'あり' if v.get('isDraft') else 'なし'}）",
+            f"- 変更量: {nums['commits']} コミット / {nums['files']} ファイル / +{nums['insertions']} -{nums['deletions']}",
+            "- 主な変更: <1〜3 行を書く>",
+            f"- PR 本文: {summary} / Test plan {total} 件（実行済み {done} 件）",
+            f"- 決めたことの節: `pr-body-decisions.sh check` の {dec_text}",
+            "",
+            f"URL: {v['url']}",
+        ]
+    )
+    metrics = {
+        "number": v["number"],
+        "url": v["url"],
+        "title": v["title"],
+        "draft": bool(v.get("isDraft")),
+        "base": v["baseRefName"],
+        "head": v["headRefName"],
+        "test_plan_total": total,
+        "test_plan_done": done,
+        "decisions_check_exit": dec,
+        **nums,
+    }
+    emit(
+        result(
+            TOOL, "ok", f"PR #{v['number']} の完了報告の材料", [{"kind": "pr", "name": v["url"], "result": "reported"}], metrics, next=text
+        )
+    )
 
 
 # --- 入口 --------------------------------------------------------------------------
+
 
 def add_mode_args(p):
     p.add_argument("--mode", help="本文の末尾に書くモード（light / standard など）")
@@ -423,8 +547,7 @@ def add_mode_args(p):
 
 
 def build_parser():
-    ap = argparse.ArgumentParser(prog="pr-steps.py", description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(prog="pr-steps.py", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--root", help="対象のリポジトリの根（既定はカレントの git の根）")
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("plan", parents=[common_parser()], help="ブランチ・起点・既存 PR・変更量を集める")

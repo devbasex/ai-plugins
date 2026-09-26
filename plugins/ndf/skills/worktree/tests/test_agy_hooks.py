@@ -12,6 +12,7 @@ agy は案内を作る時点と渡せる時点が離れている。**tool 実行
 `toolCall.args.TargetFile`、作業ディレクトリは `workspacePaths[0]`、セッションの識別子は
 `conversationId` にある。**`write_file` は権限の名前であって tool の名前ではない。**
 """
+
 from __future__ import annotations
 
 import json
@@ -204,9 +205,7 @@ def test_later_invocation_does_not_repeat_the_report(main_repo: Path, tmp_path: 
 # --- A5: 作業ツリーの中では出さない -----------------------------------------
 
 
-def test_edit_inside_the_worktree_queues_nothing(
-    main_repo: Path, worktree: Path, tmp_path: Path
-) -> None:
+def test_edit_inside_the_worktree_queues_nothing(main_repo: Path, worktree: Path, tmp_path: Path) -> None:
     """作業ツリーの中の編集は記録へ積まれない。"""
     declared(main_repo)
     tmpdir = tmp_path / "state"
@@ -255,11 +254,7 @@ def test_hooks_json_matcher_matches_the_library() -> None:
     tool 名の一覧を 2 箇所に持つと、判定を足しても hook が起動しない状態になる。
     """
     config = json.loads(HOOKS_JSON.read_text(encoding="utf-8"))
-    matchers = {
-        entry.get("matcher")
-        for hook in config.values()
-        for entry in hook.get("PreToolUse", [])
-    }
+    matchers = {entry.get("matcher") for hook in config.values() for entry in hook.get("PreToolUse", [])}
     assert payload.tool_matcher() in matchers, matchers
 
 
@@ -269,17 +264,8 @@ def test_hooks_json_wires_both_scripts() -> None:
     `PreInvocation` は matcher を取らず、handler の配列を直に持つ（agy の書式）。
     """
     config = json.loads(HOOKS_JSON.read_text(encoding="utf-8"))
-    pre_tool = [
-        hook["command"]
-        for definition in config.values()
-        for entry in definition.get("PreToolUse", [])
-        for hook in entry["hooks"]
-    ]
-    pre_invocation = [
-        handler["command"]
-        for definition in config.values()
-        for handler in definition.get("PreInvocation", [])
-    ]
+    pre_tool = [hook["command"] for definition in config.values() for entry in definition.get("PreToolUse", []) for hook in entry["hooks"]]
+    pre_invocation = [handler["command"] for definition in config.values() for handler in definition.get("PreInvocation", [])]
     assert any("worktree-guard.sh" in c for c in pre_tool), pre_tool
     assert any("worktree-session.sh" in c for c in pre_invocation), pre_invocation
 

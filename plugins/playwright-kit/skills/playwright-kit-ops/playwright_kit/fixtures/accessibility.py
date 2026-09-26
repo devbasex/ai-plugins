@@ -43,19 +43,12 @@ def pwk_accessibility_scan(page, pwk_evidence: PwkEvidence, _pwk_config_optional
 
     def _scan(*, tags: tuple[str, ...] | None = None) -> list[dict]:
         if not accessibility_mod.is_available():
-            pwk_evidence.log_lines.append(
-                "[accessibility] axe-playwright-python 未インストール — SKIP "
-                "(`uv sync --extra a11y` で有効化)"
-            )
+            pwk_evidence.log_lines.append("[accessibility] axe-playwright-python 未インストール — SKIP (`uv sync --extra a11y` で有効化)")
             return []
         actual_tags = (
             tuple(tags)
             if tags is not None
-            else (
-                tuple(config.accessibility.tags)
-                if config is not None
-                else accessibility_mod.DEFAULT_TAGS
-            )
+            else (tuple(config.accessibility.tags) if config is not None else accessibility_mod.DEFAULT_TAGS)
         )
         violations = accessibility_mod.scan_page(page, tags=actual_tags)
         pwk_evidence.axe_violations.extend(violations)
@@ -97,9 +90,7 @@ def _pwk_accessibility_autouse(request) -> Iterator[None]:
     if not page_roles:
         yield
         return
-    if not accessibility_mod.should_auto_scan(
-        page_roles, auto_roles=frozenset(config.accessibility.auto_roles)
-    ):
+    if not accessibility_mod.should_auto_scan(page_roles, auto_roles=frozenset(config.accessibility.auto_roles)):
         yield
         return
 
@@ -111,9 +102,7 @@ def _pwk_accessibility_autouse(request) -> Iterator[None]:
 
     # teardown phase: closure に保持した ev / page のみを参照する。
     if not accessibility_mod.is_available():
-        pwk_evidence.log_lines.append(
-            "[accessibility autouse] axe-playwright-python 未インストール — SKIP"
-        )
+        pwk_evidence.log_lines.append("[accessibility autouse] axe-playwright-python 未インストール — SKIP")
         return
 
     try:
@@ -129,15 +118,10 @@ def _pwk_accessibility_autouse(request) -> Iterator[None]:
 
     impacts = Counter(v.get("impact") or "unknown" for v in violations)
     impact_summary = ", ".join(f"{k}={n}" for k, n in impacts.most_common())
-    pwk_evidence.log_lines.append(
-        f"[accessibility autouse] {len(violations)} violations: {impact_summary}"
-    )
+    pwk_evidence.log_lines.append(f"[accessibility autouse] {len(violations)} violations: {impact_summary}")
 
     if config.accessibility.fail_on_violations:
         pytest.fail(
             f"[accessibility] {len(violations)} 件の axe-core 違反 "
-            f"[{impact_summary}]: "
-            + ", ".join(
-                f"{v.get('id')}({v.get('impact', '?')})" for v in violations[:5]
-            )
+            f"[{impact_summary}]: " + ", ".join(f"{v.get('id')}({v.get('impact', '?')})" for v in violations[:5])
         )

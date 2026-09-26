@@ -1,4 +1,5 @@
 """JSON と設定の形の検証の包み（lib/schema.py・#1142 の決定 19）。外部パッケージは全体テストの環境（根の pyproject.toml）が入れる。"""
+
 from __future__ import annotations
 
 import sys
@@ -23,9 +24,11 @@ class Step(schema.Shape):
 def test_errors_become_one_japanese_line_with_the_place():
     with pytest.raises(schema.ShapeError) as e:
         schema.load_shape(Step, {"retries": "x", "kind": "other", "extra": 1, "next": ["a", 2]}, where="steps[0]")
-    assert str(e.value) == ("steps[0].id: 必須の項目が無い／steps[0].retries: 整数にする（値: 'x'）／"
-                            "steps[0].kind: 次のどれかにする: 'work' / 'judge'（値: 'other'）／"
-                            "steps[0].next[1]: 文字列にする（値: 2）／steps[0].extra: 知らない項目")
+    assert str(e.value) == (
+        "steps[0].id: 必須の項目が無い／steps[0].retries: 整数にする（値: 'x'）／"
+        "steps[0].kind: 次のどれかにする: 'work' / 'judge'（値: 'other'）／"
+        "steps[0].next[1]: 文字列にする（値: 2）／steps[0].extra: 知らない項目"
+    )
     assert e.value.problems[0] == ("steps[0].id", "必須の項目が無い")
 
 

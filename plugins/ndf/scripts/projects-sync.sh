@@ -78,7 +78,7 @@ ITEM_LIMIT=1000
 
 # 解決した識別子のキャッシュ。**記録のたびにボードの全件を読まない。**
 CACHE=$(pj_cache_file "$OWNER" "$NUMBER" "$ISSUE" 2>/dev/null) || CACHE=
-CACHED_PROJECT_ID= CACHED_ITEM_ID=
+CACHED_PROJECT_ID='' CACHED_ITEM_ID=''
 if [ -n "$CACHE" ] && [ -f "$CACHE" ]; then
   # キャッシュは KEY=VALUE の 2 行だけである。**キー名を絞ってから読み込む。**
   # 値が古くなっていた場合は、書き込みに失敗した時点でキャッシュを捨てる（下記）。
@@ -178,7 +178,7 @@ update() {
   if [ -n "$CACHED_ITEM_ID" ] && [ "$item_id" = "$CACHED_ITEM_ID" ]; then
     if ! write_field "$project_id" "$item_id" "$fields_json"; then
       [ -n "$CACHE" ] && rm -f "$CACHE"
-      CACHED_PROJECT_ID= CACHED_ITEM_ID=
+      CACHED_PROJECT_ID='' CACHED_ITEM_ID=''
       printf 'NOTE: キャッシュの識別子で書き込めませんでした。ボードを読み直します\n' >&2
       update
       return $?

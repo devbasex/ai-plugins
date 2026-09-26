@@ -10,14 +10,12 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from playwright_kit.pytest_plugin import (
     _collect_entries,
     pytest_sessionfinish,
     pytest_terminal_summary,
 )
-from playwright_kit.pytest_report import PwkTestEntry
 
 
 def _make_rep(
@@ -52,9 +50,11 @@ def _make_terminalreporter(stats: dict, out_dir: Path | None = None) -> Any:
 
 
 def test_collect_entries_passed():
-    tr = _make_terminalreporter({
-        "passed": [_make_rep(nodeid="t::ok", outcome="passed")],
-    })
+    tr = _make_terminalreporter(
+        {
+            "passed": [_make_rep(nodeid="t::ok", outcome="passed")],
+        }
+    )
     entries = _collect_entries(tr)
     assert len(entries) == 1
     assert entries[0].outcome == "passed"
@@ -63,12 +63,14 @@ def test_collect_entries_passed():
 
 def test_collect_entries_skips_teardown():
     """teardown phase の rep は集約しない。"""
-    tr = _make_terminalreporter({
-        "failed": [
-            _make_rep(nodeid="t::fail", outcome="failed", when="call"),
-            _make_rep(nodeid="t::teardown", outcome="failed", when="teardown"),
-        ],
-    })
+    tr = _make_terminalreporter(
+        {
+            "failed": [
+                _make_rep(nodeid="t::fail", outcome="failed", when="call"),
+                _make_rep(nodeid="t::teardown", outcome="failed", when="teardown"),
+            ],
+        }
+    )
     entries = _collect_entries(tr)
     assert len(entries) == 1
     assert entries[0].nodeid == "t::fail"
@@ -76,11 +78,13 @@ def test_collect_entries_skips_teardown():
 
 def test_collect_entries_includes_xfailed_xpassed():
     """xfailed / xpassed も集約されること (Codex Major 3)。"""
-    tr = _make_terminalreporter({
-        "passed": [_make_rep(nodeid="t::ok")],
-        "xfailed": [_make_rep(nodeid="t::xf", outcome="xfailed")],
-        "xpassed": [_make_rep(nodeid="t::xp", outcome="xpassed")],
-    })
+    tr = _make_terminalreporter(
+        {
+            "passed": [_make_rep(nodeid="t::ok")],
+            "xfailed": [_make_rep(nodeid="t::xf", outcome="xfailed")],
+            "xpassed": [_make_rep(nodeid="t::xp", outcome="xpassed")],
+        }
+    )
     entries = _collect_entries(tr)
     outcomes = {e.outcome for e in entries}
     assert "xfailed" in outcomes
@@ -89,18 +93,20 @@ def test_collect_entries_includes_xfailed_xpassed():
 
 def test_collect_entries_promotes_teardown_failure_on_passed_call():
     """call=passed + teardown=failed (body_check fail) → outcome=failed に昇格。"""
-    tr = _make_terminalreporter({
-        "passed": [_make_rep(nodeid="t::bc", outcome="passed", when="call")],
-        "": [
-            _make_rep(
-                nodeid="t::bc",
-                outcome="failed",
-                when="teardown",
-                user_properties=[("pwk_body_check_violations", 2)],
-                longrepr="body_check teardown failure",
-            )
-        ],
-    })
+    tr = _make_terminalreporter(
+        {
+            "passed": [_make_rep(nodeid="t::bc", outcome="passed", when="call")],
+            "": [
+                _make_rep(
+                    nodeid="t::bc",
+                    outcome="failed",
+                    when="teardown",
+                    user_properties=[("pwk_body_check_violations", 2)],
+                    longrepr="body_check teardown failure",
+                )
+            ],
+        }
+    )
     entries = _collect_entries(tr)
     assert len(entries) == 1
     assert entries[0].outcome == "failed"
@@ -114,18 +120,20 @@ def test_collect_entries_promotes_teardown_failure_on_xfailed_call():
     旧実装では ``entry.outcome == 'passed'`` 限定のため xfail テストの
     teardown failure を拾い損ねていた (codex review Major #2)。
     """
-    tr = _make_terminalreporter({
-        "xfailed": [_make_rep(nodeid="t::xf", outcome="xfailed", when="call")],
-        "": [
-            _make_rep(
-                nodeid="t::xf",
-                outcome="failed",
-                when="teardown",
-                user_properties=[("pwk_body_check_violations", 1)],
-                longrepr="body_check teardown failure on xfail",
-            )
-        ],
-    })
+    tr = _make_terminalreporter(
+        {
+            "xfailed": [_make_rep(nodeid="t::xf", outcome="xfailed", when="call")],
+            "": [
+                _make_rep(
+                    nodeid="t::xf",
+                    outcome="failed",
+                    when="teardown",
+                    user_properties=[("pwk_body_check_violations", 1)],
+                    longrepr="body_check teardown failure on xfail",
+                )
+            ],
+        }
+    )
     entries = _collect_entries(tr)
     assert entries[0].outcome == "failed"
     assert entries[0].body_check_violations == 1
@@ -133,36 +141,40 @@ def test_collect_entries_promotes_teardown_failure_on_xfailed_call():
 
 def test_collect_entries_promotes_teardown_error_with_error_outcome():
     """teardown=error は outcome=error に昇格 (failed と区別する)。"""
-    tr = _make_terminalreporter({
-        "passed": [_make_rep(nodeid="t::e", outcome="passed", when="call")],
-        "": [
-            _make_rep(
-                nodeid="t::e",
-                outcome="error",
-                when="teardown",
-                user_properties=[("pwk_body_check_violations", 0)],
-                longrepr="teardown error",
-            )
-        ],
-    })
+    tr = _make_terminalreporter(
+        {
+            "passed": [_make_rep(nodeid="t::e", outcome="passed", when="call")],
+            "": [
+                _make_rep(
+                    nodeid="t::e",
+                    outcome="error",
+                    when="teardown",
+                    user_properties=[("pwk_body_check_violations", 0)],
+                    longrepr="teardown error",
+                )
+            ],
+        }
+    )
     entries = _collect_entries(tr)
     assert entries[0].outcome == "error"
 
 
 def test_collect_entries_promotes_teardown_failure_on_xpassed_call():
     """call=xpassed + teardown=failed → outcome=failed に昇格。"""
-    tr = _make_terminalreporter({
-        "xpassed": [_make_rep(nodeid="t::xp", outcome="xpassed", when="call")],
-        "": [
-            _make_rep(
-                nodeid="t::xp",
-                outcome="failed",
-                when="teardown",
-                user_properties=[("pwk_body_check_violations", 1)],
-                longrepr="body_check teardown failure on xpass",
-            )
-        ],
-    })
+    tr = _make_terminalreporter(
+        {
+            "xpassed": [_make_rep(nodeid="t::xp", outcome="xpassed", when="call")],
+            "": [
+                _make_rep(
+                    nodeid="t::xp",
+                    outcome="failed",
+                    when="teardown",
+                    user_properties=[("pwk_body_check_violations", 1)],
+                    longrepr="body_check teardown failure on xpass",
+                )
+            ],
+        }
+    )
     entries = _collect_entries(tr)
     assert entries[0].outcome == "failed"
     assert entries[0].body_check_violations == 1
@@ -170,18 +182,20 @@ def test_collect_entries_promotes_teardown_failure_on_xpassed_call():
 
 def test_collect_entries_promotes_teardown_failure_on_skipped_call():
     """call=skipped + teardown=failed → outcome=failed に昇格。"""
-    tr = _make_terminalreporter({
-        "skipped": [_make_rep(nodeid="t::sk", outcome="skipped", when="call")],
-        "": [
-            _make_rep(
-                nodeid="t::sk",
-                outcome="failed",
-                when="teardown",
-                user_properties=[("pwk_body_check_violations", 3)],
-                longrepr="body_check teardown failure on skip",
-            )
-        ],
-    })
+    tr = _make_terminalreporter(
+        {
+            "skipped": [_make_rep(nodeid="t::sk", outcome="skipped", when="call")],
+            "": [
+                _make_rep(
+                    nodeid="t::sk",
+                    outcome="failed",
+                    when="teardown",
+                    user_properties=[("pwk_body_check_violations", 3)],
+                    longrepr="body_check teardown failure on skip",
+                )
+            ],
+        }
+    )
     entries = _collect_entries(tr)
     assert entries[0].outcome == "failed"
     assert entries[0].body_check_violations == 3
@@ -189,24 +203,26 @@ def test_collect_entries_promotes_teardown_failure_on_skipped_call():
 
 def test_collect_entries_does_not_overwrite_genuine_call_failure():
     """call phase の本物の failure は teardown failure で上書きしない。"""
-    tr = _make_terminalreporter({
-        "failed": [
-            _make_rep(
-                nodeid="t::f",
-                outcome="failed",
-                when="call",
-                longrepr="real call failure",
-            )
-        ],
-        "": [
-            _make_rep(
-                nodeid="t::f",
-                outcome="failed",
-                when="teardown",
-                longrepr="teardown also failed",
-            )
-        ],
-    })
+    tr = _make_terminalreporter(
+        {
+            "failed": [
+                _make_rep(
+                    nodeid="t::f",
+                    outcome="failed",
+                    when="call",
+                    longrepr="real call failure",
+                )
+            ],
+            "": [
+                _make_rep(
+                    nodeid="t::f",
+                    outcome="failed",
+                    when="teardown",
+                    longrepr="teardown also failed",
+                )
+            ],
+        }
+    )
     entries = _collect_entries(tr)
     assert entries[0].outcome == "failed"
     # error_message は call phase のものが残る
@@ -215,10 +231,12 @@ def test_collect_entries_does_not_overwrite_genuine_call_failure():
 
 def test_collect_entries_error_message_only_for_failed(tmp_path: Path):
     """failed のみ error_message が設定され、skipped は None になること (Amazon Q Critical-3)。"""
-    tr = _make_terminalreporter({
-        "failed": [_make_rep(nodeid="t::fail", outcome="failed", longrepr="AssertionError: x")],
-        "skipped": [_make_rep(nodeid="t::skip", outcome="skipped", longrepr=("file", 1, "skipped"))],
-    })
+    tr = _make_terminalreporter(
+        {
+            "failed": [_make_rep(nodeid="t::fail", outcome="failed", longrepr="AssertionError: x")],
+            "skipped": [_make_rep(nodeid="t::skip", outcome="skipped", longrepr=("file", 1, "skipped"))],
+        }
+    )
     entries = _collect_entries(tr)
     failed_entry = next(e for e in entries if e.outcome == "failed")
     skipped_entry = next(e for e in entries if e.outcome == "skipped")
@@ -233,15 +251,19 @@ def test_collect_entries_error_message_only_for_failed(tmp_path: Path):
 
 def test_terminal_summary_generates_report_md(tmp_path: Path):
     """pytest_terminal_summary が report.md を out_dir に生成すること。"""
-    tr = _make_terminalreporter({
-        "passed": [_make_rep(nodeid="t::ok", outcome="passed", duration=1.0)],
-        "failed": [_make_rep(
-            nodeid="t::fail",
-            outcome="failed",
-            duration=0.5,
-            longrepr="AssertionError: expected True got False",
-        )],
-    })
+    tr = _make_terminalreporter(
+        {
+            "passed": [_make_rep(nodeid="t::ok", outcome="passed", duration=1.0)],
+            "failed": [
+                _make_rep(
+                    nodeid="t::fail",
+                    outcome="failed",
+                    duration=0.5,
+                    longrepr="AssertionError: expected True got False",
+                )
+            ],
+        }
+    )
 
     config = MagicMock()
     config.getoption.return_value = str(tmp_path)
@@ -278,9 +300,7 @@ def test_terminal_summary_skips_when_no_tests(tmp_path: Path):
 def _make_session(*, drive_folder: str | None, report_path: Path, out_dir: Path):
     """``pytest_sessionfinish`` 用の薄い session mock を作る。"""
     config = MagicMock()
-    config.getoption = lambda name, default=None: (
-        drive_folder if name == "pwk_drive_folder" else default
-    )
+    config.getoption = lambda name, default=None: drive_folder if name == "pwk_drive_folder" else default
     config._pwk_report_path = report_path
     config._pwk_out_dir = out_dir
     session = MagicMock()
@@ -314,21 +334,13 @@ def test_sessionfinish_uploads_body_check_jsonl_with_any_kind(tmp_path: Path):
 
     def fake_detect_kind(f):
         suffix = Path(f).suffix
-        return {".zip": "trace", ".har": "har", ".mp4": "video", ".webm": "video"}.get(
-            suffix, "any"
-        )
+        return {".zip": "trace", ".har": "har", ".mp4": "video", ".webm": "video"}.get(suffix, "any")
 
     with patch.dict(
         "sys.modules",
-        {
-            "playwright_kit.uploaders": SimpleNamespace(
-                upload=fake_upload, detect_kind=fake_detect_kind
-            )
-        },
+        {"playwright_kit.uploaders": SimpleNamespace(upload=fake_upload, detect_kind=fake_detect_kind)},
     ):
-        session = _make_session(
-            drive_folder="DRIVE_FOLDER", report_path=report, out_dir=out_dir
-        )
+        session = _make_session(drive_folder="DRIVE_FOLDER", report_path=report, out_dir=out_dir)
         pytest_sessionfinish(session, exitstatus=0)
 
     by_name = dict(uploads)
@@ -358,15 +370,9 @@ def test_sessionfinish_skips_when_no_drive_folder(tmp_path: Path):
 
     with patch.dict(
         "sys.modules",
-        {
-            "playwright_kit.uploaders": SimpleNamespace(
-                upload=fake_upload, detect_kind=lambda f: "any"
-            )
-        },
+        {"playwright_kit.uploaders": SimpleNamespace(upload=fake_upload, detect_kind=lambda f: "any")},
     ):
-        session = _make_session(
-            drive_folder=None, report_path=report, out_dir=out_dir
-        )
+        session = _make_session(drive_folder=None, report_path=report, out_dir=out_dir)
         pytest_sessionfinish(session, exitstatus=0)
 
     assert uploads == []

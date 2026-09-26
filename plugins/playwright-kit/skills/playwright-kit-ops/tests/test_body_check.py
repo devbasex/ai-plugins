@@ -6,7 +6,6 @@ Playwright を起動しない部分のみ。E2E は Phase 3 以降の smoke で�
 from __future__ import annotations
 
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -150,9 +149,7 @@ def test_scan_body_handles_multiple_categories():
 
 
 def test_body_violation_to_dict_round_trip():
-    v = BodyViolation(
-        url="https://e/x", category="fatal", pattern="Fatal error", snippet="snip"
-    )
+    v = BodyViolation(url="https://e/x", category="fatal", pattern="Fatal error", snippet="snip")
     d = v.to_dict()
     assert d == {
         "url": "https://e/x",
@@ -220,9 +217,7 @@ def test_body_check_from_raw_accepts_legacy_warning_head_bytes_alias():
 
 def test_body_check_from_raw_new_name_takes_priority_over_alias():
     """新旧両方が指定されたら新名 ``warning_head_chars`` を優先する。"""
-    cfg = _body_check_from_raw(
-        {"warning_head_chars": 400, "warning_head_bytes": 100}
-    )
+    cfg = _body_check_from_raw({"warning_head_chars": 400, "warning_head_bytes": 100})
     assert cfg.warning_head_chars == 400
 
 
@@ -376,10 +371,7 @@ def test_write_jsonl_noop_when_no_violations(tmp_path: Path):
 
 
 def test_format_violation_summary_truncates_long_lists():
-    vs = [
-        {"url": f"u{i}", "category": "fatal", "pattern": "Fatal error", "snippet": "x"}
-        for i in range(10)
-    ]
+    vs = [{"url": f"u{i}", "category": "fatal", "pattern": "Fatal error", "snippet": "x"} for i in range(10)]
     s = _format_violation_summary(vs, limit=3)
     assert "+7 more" in s
     # head 3 件は含まれる

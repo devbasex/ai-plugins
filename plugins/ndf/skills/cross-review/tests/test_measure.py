@@ -3,6 +3,7 @@
 確定仕様は `docs/specifications/cross-review-evidence-based.md` にある。
 **測定は状態ファイルを読むだけで、GitHub へ問い合わせない。**
 """
+
 from __future__ import annotations
 
 import json
@@ -40,11 +41,16 @@ def _round(round_no: int, pr: int = 123, **overrides) -> dict:
     return rec
 
 
-def _finding(finding_id: str, round_no: int, path: str, line: int,
-             pr: int = 123, **overrides) -> dict:
+def _finding(finding_id: str, round_no: int, path: str, line: int, pr: int = 123, **overrides) -> dict:
     rec = {
-        "finding_id": finding_id, "pr": pr, "round": round_no, "agent": "codex",
-        "path": path, "line": line, "severity": "major", "body": finding_id,
+        "finding_id": finding_id,
+        "pr": pr,
+        "round": round_no,
+        "agent": "codex",
+        "path": path,
+        "line": line,
+        "severity": "major",
+        "body": finding_id,
     }
     rec.update(overrides)
     return rec
@@ -53,7 +59,8 @@ def _finding(finding_id: str, round_no: int, path: str, line: int,
 def _fix(*positions: dict) -> dict:
     """修正の記録。位置は `resolved_thread_positions` が持つ（#156 の Task 1）。"""
     return {
-        "commit": "abc1234", "fixed": len(positions),
+        "commit": "abc1234",
+        "fixed": len(positions),
         "resolved_threads": len(positions),
         "resolved_thread_ids": [p["thread_id"] for p in positions if p.get("thread_id")],
         "resolved_thread_positions": list(positions),
@@ -81,11 +88,12 @@ def test_cost_counts_rounds_launches_and_wall_clock(measure_mod):
 
 def test_reviewer_launches_falls_back_to_recorded_agents(measure_mod):
     """`reviewers` を持たない古い記録では、結果を残した担当の数を数える。"""
-    st = _state(rounds=[
-        {"round": 1, "pr": 123,
-         "codex": {"intent": "REQUEST_CHANGES"}, "agy": {"intent": "APPROVE"}},
-        {"round": 2, "pr": 123, "codex": {"intent": "APPROVE"}},
-    ])
+    st = _state(
+        rounds=[
+            {"round": 1, "pr": 123, "codex": {"intent": "REQUEST_CHANGES"}, "agy": {"intent": "APPROVE"}},
+            {"round": 2, "pr": 123, "codex": {"intent": "APPROVE"}},
+        ]
+    )
 
     assert measure_mod.measure(st)["cost"]["reviewer_launches"] == 3
 
@@ -138,8 +146,7 @@ def test_empty_state_does_not_crash(measure_mod):
     assert result["pr"] is None
     assert result["prs"] == []
     assert result["rounds"] == 0
-    assert result["cost"] == {
-        "rounds": 0, "reviewer_launches": 0, "wall_clock_seconds": None}
+    assert result["cost"] == {"rounds": 0, "reviewer_launches": 0, "wall_clock_seconds": None}
     assert result["convergence"] == {"final": None, "oscillation": 0, "max_rounds": 0}
     assert "methods" in result
 
@@ -163,12 +170,14 @@ def test_wall_clock_is_null_while_the_run_has_not_ended(measure_mod):
     assert measure_mod.measure(st)["cost"]["wall_clock_seconds"] is None
 
 
-@pytest.mark.parametrize("started_at,ended_at", [
-    ("2026-05-23T00:00:00+00:00", "2026-05-23T01:10:00"),
-    ("2026-05-23T00:00:00", "2026-05-23T01:10:00+00:00"),
-])
-def test_wall_clock_is_null_when_the_offsets_do_not_match(
-        measure_mod, started_at, ended_at):
+@pytest.mark.parametrize(
+    "started_at,ended_at",
+    [
+        ("2026-05-23T00:00:00+00:00", "2026-05-23T01:10:00"),
+        ("2026-05-23T00:00:00", "2026-05-23T01:10:00+00:00"),
+    ],
+)
+def test_wall_clock_is_null_when_the_offsets_do_not_match(measure_mod, started_at, ended_at):
     """タイムゾーンの有無が混ざった記録でも測定を止めない（#558 レビュー）。
 
     offset-aware と offset-naive の引き算は `TypeError` を投げる。受け取って
@@ -186,7 +195,9 @@ def test_wall_clock_is_null_when_the_offsets_do_not_match(
 def _run(args: list[str]) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, str(_MEASURE), *args],
-        capture_output=True, text=True, check=False,
+        capture_output=True,
+        text=True,
+        check=False,
     )
 
 
@@ -311,8 +322,7 @@ def test_oracle_reports_unmatched_threads(measure_mod):
         review_findings=[_finding("codex-r1-0", 1, "a.py", 10)],
     )
 
-    assert measure_mod.measure(st)["methods"]["oracle"] == {
-        "found": 0, "unmatched": 1, "ambiguous": 0}
+    assert measure_mod.measure(st)["methods"]["oracle"] == {"found": 0, "unmatched": 1, "ambiguous": 0}
 
 
 def test_oracle_counts_a_thread_without_a_position_as_unmatched(measure_mod):
@@ -322,8 +332,7 @@ def test_oracle_counts_a_thread_without_a_position_as_unmatched(measure_mod):
         review_findings=[_finding("codex-r1-0", 1, "a.py", 10)],
     )
 
-    assert measure_mod.measure(st)["methods"]["oracle"] == {
-        "found": 0, "unmatched": 1, "ambiguous": 0}
+    assert measure_mod.measure(st)["methods"]["oracle"] == {"found": 0, "unmatched": 1, "ambiguous": 0}
 
 
 def test_oracle_counts_a_non_dict_position_as_unmatched(measure_mod):
@@ -334,7 +343,9 @@ def test_oracle_counts_a_non_dict_position_as_unmatched(measure_mod):
     `_add_oracle_match` がそれを `unmatched + 1` として扱う経路を固定する。
     """
     fix = {
-        "commit": "abc1234", "fixed": 1, "resolved_threads": 1,
+        "commit": "abc1234",
+        "fixed": 1,
+        "resolved_threads": 1,
         "resolved_thread_ids": ["T1"],
         "resolved_thread_positions": ["not-a-dict"],
     }
@@ -345,8 +356,7 @@ def test_oracle_counts_a_non_dict_position_as_unmatched(measure_mod):
 
     result = measure_mod.measure(st)
 
-    assert result["methods"]["oracle"] == {
-        "found": 0, "unmatched": 1, "ambiguous": 0}
+    assert result["methods"]["oracle"] == {"found": 0, "unmatched": 1, "ambiguous": 0}
 
 
 def test_oracle_counts_a_null_position_as_unmatched(measure_mod):
@@ -355,7 +365,9 @@ def test_oracle_counts_a_null_position_as_unmatched(measure_mod):
     非辞書要素の代表として `None`（JSON の null）でも同じ経路を通ることを固定する。
     """
     fix = {
-        "commit": "abc1234", "fixed": 1, "resolved_threads": 1,
+        "commit": "abc1234",
+        "fixed": 1,
+        "resolved_threads": 1,
         "resolved_thread_ids": ["T1"],
         "resolved_thread_positions": [None],
     }
@@ -366,8 +378,7 @@ def test_oracle_counts_a_null_position_as_unmatched(measure_mod):
 
     result = measure_mod.measure(st)
 
-    assert result["methods"]["oracle"] == {
-        "found": 0, "unmatched": 1, "ambiguous": 0}
+    assert result["methods"]["oracle"] == {"found": 0, "unmatched": 1, "ambiguous": 0}
 
 
 def test_oracle_does_not_count_a_finding_without_an_id(measure_mod):
@@ -385,8 +396,7 @@ def test_oracle_does_not_count_a_finding_without_an_id(measure_mod):
     )
 
     assert measure_mod._oracle(st).finding_ids == set()
-    assert measure_mod.measure(st)["methods"]["oracle"] == {
-        "found": 0, "unmatched": 1, "ambiguous": 0}
+    assert measure_mod.measure(st)["methods"]["oracle"] == {"found": 0, "unmatched": 1, "ambiguous": 0}
 
 
 def test_oracle_reports_two_findings_at_one_position_as_ambiguous(measure_mod):
@@ -403,8 +413,7 @@ def test_oracle_reports_two_findings_at_one_position_as_ambiguous(measure_mod):
         ],
     )
 
-    assert measure_mod.measure(st)["methods"]["oracle"] == {
-        "found": 0, "unmatched": 0, "ambiguous": 1}
+    assert measure_mod.measure(st)["methods"]["oracle"] == {"found": 0, "unmatched": 0, "ambiguous": 1}
 
 
 def test_oracle_ignores_merged_elements(measure_mod):
@@ -412,15 +421,12 @@ def test_oracle_ignores_merged_elements(measure_mod):
     st = _state(
         rounds=[_round(1, fix=_fix(_position("T1", "a.py", 10)))],
         review_findings=[
-            _finding("codex-r1-0", 1, "a.py", 10, origin_runtimes=["codex", "agy"],
-                     merged_from=["agy-r1-0"]),
-            _finding("agy-r1-0", 1, "a.py", 10, agent="agy",
-                     merged_into="codex-r1-0"),
+            _finding("codex-r1-0", 1, "a.py", 10, origin_runtimes=["codex", "agy"], merged_from=["agy-r1-0"]),
+            _finding("agy-r1-0", 1, "a.py", 10, agent="agy", merged_into="codex-r1-0"),
         ],
     )
 
-    assert measure_mod.measure(st)["methods"]["oracle"] == {
-        "found": 1, "unmatched": 0, "ambiguous": 0}
+    assert measure_mod.measure(st)["methods"]["oracle"] == {"found": 1, "unmatched": 0, "ambiguous": 0}
     assert measure_mod._oracle(st).finding_ids == {"codex-r1-0"}
 
 
@@ -514,8 +520,7 @@ def test_methods_do_not_count_a_merged_finding_twice(measure_mod):
     st = _state(
         rounds=[_round(1, fix=_fix(_position("T1", "a.py", 10)))],
         review_findings=[
-            _finding("codex-r1-0", 1, "a.py", 10, origin_runtimes=["codex", "agy"],
-                     merged_from=["agy-r1-0"]),
+            _finding("codex-r1-0", 1, "a.py", 10, origin_runtimes=["codex", "agy"], merged_from=["agy-r1-0"]),
             _finding("agy-r1-0", 1, "a.py", 10, agent="agy", merged_into="codex-r1-0"),
         ],
     )
@@ -537,8 +542,7 @@ def test_majority_takes_findings_with_two_or_more_origins(measure_mod):
         ],
     )
 
-    assert measure_mod.measure(st)["methods"]["majority"] == {
-        "found": 1, "matched": 1, "of_oracle": 1.0}
+    assert measure_mod.measure(st)["methods"]["majority"] == {"found": 1, "matched": 1, "of_oracle": 1.0}
 
 
 def test_of_oracle_does_not_exceed_one_when_a_finding_was_not_fixed(measure_mod):
@@ -555,8 +559,7 @@ def test_of_oracle_does_not_exceed_one_when_a_finding_was_not_fixed(measure_mod)
         ],
     )
 
-    assert measure_mod.measure(st)["methods"]["single"]["codex"] == {
-        "found": 2, "matched": 1, "of_oracle": 1.0}
+    assert measure_mod.measure(st)["methods"]["single"]["codex"] == {"found": 2, "matched": 1, "of_oracle": 1.0}
 
 
 # ---------- 受け入れ条件 1 / 7: この変更の方式（`proposed`） ----------
@@ -568,8 +571,7 @@ def test_four_methods_come_from_one_record(measure_mod):
         evidence_rounds=[1],
         rounds=[_round(1, fix=_fix(_position("T1", "a.py", 10)))],
         review_findings=[
-            _finding("codex-r1-0", 1, "a.py", 10, origin_runtimes=["codex", "agy"],
-                     classification="verified_blocking"),
+            _finding("codex-r1-0", 1, "a.py", 10, origin_runtimes=["codex", "agy"], classification="verified_blocking"),
         ],
     )
 
@@ -603,9 +605,7 @@ def test_proposed_limits_the_denominator_to_marked_rounds(measure_mod):
     methods = measure_mod.measure(st)["methods"]
 
     assert methods["oracle"]["found"] == 2
-    assert methods["proposed"] == {
-        "found": 1, "matched": 1, "of_oracle": 1.0,
-        "oracle_scope": "evidence_rounds", "oracle_base": 1}
+    assert methods["proposed"] == {"found": 1, "matched": 1, "of_oracle": 1.0, "oracle_scope": "evidence_rounds", "oracle_base": 1}
 
 
 def test_proposed_reports_all_rounds_when_every_round_is_marked(measure_mod):
@@ -626,8 +626,12 @@ def test_proposed_reports_all_rounds_when_every_round_is_marked(measure_mod):
     )
 
     assert measure_mod.measure(st)["methods"]["proposed"] == {
-        "found": 2, "matched": 2, "of_oracle": 1.0,
-        "oracle_scope": "all_rounds", "oracle_base": 2}
+        "found": 2,
+        "matched": 2,
+        "of_oracle": 1.0,
+        "oracle_scope": "all_rounds",
+        "oracle_base": 2,
+    }
 
 
 def test_proposed_normalizes_duplicate_and_invalid_evidence_rounds(measure_mod):
@@ -639,16 +643,18 @@ def test_proposed_normalizes_duplicate_and_invalid_evidence_rounds(measure_mod):
             _round(2, fix=_fix(_position("T2", "b.py", 20))),
         ],
         review_findings=[
-            _finding("codex-r1-0", 1, "a.py", 10,
-                     classification="verified_blocking"),
-            _finding("codex-r2-0", 2, "b.py", 20,
-                     classification="verified_blocking"),
+            _finding("codex-r1-0", 1, "a.py", 10, classification="verified_blocking"),
+            _finding("codex-r2-0", 2, "b.py", 20, classification="verified_blocking"),
         ],
     )
 
     assert measure_mod.measure(st)["methods"]["proposed"] == {
-        "found": 1, "matched": 1, "of_oracle": 1.0,
-        "oracle_scope": "evidence_rounds", "oracle_base": 1}
+        "found": 1,
+        "matched": 1,
+        "of_oracle": 1.0,
+        "oracle_scope": "evidence_rounds",
+        "oracle_base": 1,
+    }
 
 
 def test_proposed_takes_only_the_three_counted_classifications(measure_mod):
@@ -662,12 +668,9 @@ def test_proposed_takes_only_the_three_counted_classifications(measure_mod):
         review_findings=[
             _finding("codex-r1-0", 1, "a.py", 10, classification="verified_blocking"),
             _finding("codex-r1-1", 1, "b.py", 20, classification="rejected"),
-            _finding("codex-r1-2", 1, "c.py", 30,
-                     classification="insufficient_evidence"),
-            _finding("agy-r1-0", 1, "d.py", 40, agent="agy",
-                     classification="needs_human_judgment"),
-            _finding("agy-r1-1", 1, "e.py", 50, agent="agy",
-                     classification="unrefuted", unrefuted_reason="no_critique"),
+            _finding("codex-r1-2", 1, "c.py", 30, classification="insufficient_evidence"),
+            _finding("agy-r1-0", 1, "d.py", 40, agent="agy", classification="needs_human_judgment"),
+            _finding("agy-r1-1", 1, "e.py", 50, agent="agy", classification="unrefuted", unrefuted_reason="no_critique"),
         ],
     )
 
@@ -681,8 +684,7 @@ def test_the_counted_classifications_match_the_state_script(measure_mod, state_m
     実際より低く出る。
     """
     assert measure_mod.COUNTED_CLASSIFICATIONS == review_lib.findings.COUNTED_CLASSIFICATIONS
-    assert set(measure_mod.COUNTED_CLASSIFICATIONS) == {
-        "verified_blocking", "needs_human_judgment", "unrefuted"}
+    assert set(measure_mod.COUNTED_CLASSIFICATIONS) == {"verified_blocking", "needs_human_judgment", "unrefuted"}
 
 
 def test_proposed_ignores_findings_from_unmarked_rounds(measure_mod):
@@ -724,9 +726,13 @@ def test_proposed_is_null_when_no_round_carries_the_evidence_mark(measure_mod):
     )
 
     assert measure_mod.measure(st)["methods"]["proposed"] == {
-        "found": None, "matched": None, "of_oracle": None,
-        "oracle_scope": None, "oracle_base": None,
-        "reason": "no_evidence_rounds"}
+        "found": None,
+        "matched": None,
+        "of_oracle": None,
+        "oracle_scope": None,
+        "oracle_base": None,
+        "reason": "no_evidence_rounds",
+    }
 
 
 def test_oracle_is_null_without_any_recorded_position(measure_mod):
@@ -737,8 +743,7 @@ def test_oracle_is_null_without_any_recorded_position(measure_mod):
     """
     st = _state(
         evidence_rounds=[1],
-        rounds=[_round(1, fix={"commit": "abc1234", "fixed": 1,
-                               "resolved_threads": 1, "resolved_thread_ids": ["T1"]})],
+        rounds=[_round(1, fix={"commit": "abc1234", "fixed": 1, "resolved_threads": 1, "resolved_thread_ids": ["T1"]})],
         review_findings=[
             _finding("codex-r1-0", 1, "a.py", 10, classification="verified_blocking"),
         ],
@@ -746,16 +751,11 @@ def test_oracle_is_null_without_any_recorded_position(measure_mod):
 
     methods = measure_mod.measure(st)["methods"]
 
-    assert methods["oracle"] == {
-        "found": None, "unmatched": None, "ambiguous": None,
-        "reason": "no_resolved_thread_positions"}
+    assert methods["oracle"] == {"found": None, "unmatched": None, "ambiguous": None, "reason": "no_resolved_thread_positions"}
     # 拾えた件数と再現率は全方式で決まらない。**件数はそのまま出す。**
-    assert methods["single"]["codex"] == {
-        "found": 1, "matched": None, "of_oracle": None}
+    assert methods["single"]["codex"] == {"found": 1, "matched": None, "of_oracle": None}
     assert methods["majority"] == {"found": 0, "matched": None, "of_oracle": None}
-    assert methods["proposed"] == {
-        "found": 1, "matched": None, "of_oracle": None,
-        "oracle_scope": "all_rounds", "oracle_base": None}
+    assert methods["proposed"] == {"found": 1, "matched": None, "of_oracle": None, "oracle_scope": "all_rounds", "oracle_base": None}
 
 
 def test_of_oracle_is_null_when_the_oracle_is_empty(measure_mod):
@@ -775,9 +775,7 @@ def test_of_oracle_is_null_when_the_oracle_is_empty(measure_mod):
 
     assert methods["oracle"] == {"found": 0, "unmatched": 0, "ambiguous": 0}
     assert methods["single"]["codex"] == {"found": 1, "matched": 0, "of_oracle": None}
-    assert methods["proposed"] == {
-        "found": 1, "matched": 0, "of_oracle": None,
-        "oracle_scope": "all_rounds", "oracle_base": 0}
+    assert methods["proposed"] == {"found": 1, "matched": 0, "of_oracle": None, "oracle_scope": "all_rounds", "oracle_base": 0}
 
 
 def test_proposed_base_is_zero_when_marked_rounds_fixed_nothing(measure_mod):
@@ -801,9 +799,7 @@ def test_proposed_base_is_zero_when_marked_rounds_fixed_nothing(measure_mod):
     methods = measure_mod.measure(st)["methods"]
 
     assert methods["oracle"]["found"] == 1
-    assert methods["proposed"] == {
-        "found": 1, "matched": 0, "of_oracle": None,
-        "oracle_scope": "evidence_rounds", "oracle_base": 0}
+    assert methods["proposed"] == {"found": 1, "matched": 0, "of_oracle": None, "oracle_scope": "evidence_rounds", "oracle_base": 0}
 
 
 def test_reason_is_absent_while_the_value_is_decided(measure_mod):
@@ -851,31 +847,43 @@ def test_state_writes_positions_that_measure_reads(monkeypatch, tmp_path, state_
     pr = 9919
     monkeypatch.setenv("CROSS_REVIEW_TMP_DIR", str(tmp_path))
     state_file = tmp_path / f"cross-review-pr{pr}-state.json"
-    state_file.write_text(json.dumps(_state(
-        current_pr=pr,
-        pr_history=[{"pr": pr, "rounds": 1}],
-        rounds=[{"round": 1, "pr": pr, "reviewers": ["codex", "agy"],
-                 "started_at": "2026-05-23T00:00:00+00:00"}],
-        review_findings=[
-            _finding("codex-r1-0", 1, "src/foo.py", 42, pr=pr,
-                     origin_runtimes=["codex", "agy"],
-                     classification="verified_blocking"),
-            _finding("agy-r1-0", 1, "src/foo.py", 42, pr=pr, agent="agy",
-                     merged_into="codex-r1-0"),
-        ],
-        evidence_rounds=[1],
-        deferred_nits=[],
-    )), encoding="utf-8")
-    (tmp_path / f"fix-pr{pr}-result.json").write_text(json.dumps({
-        "pr": pr, "fix_commit": "abc1234", "fixed_count": 1,
-        "ci_status": "SUCCESS", "ci_failed_checks": [],
-        "by_severity": {"critical": 0, "major": 1, "minor": 0, "nit": 0},
-        "resolved_threads": [
-            {"thread_id": "T1", "comment_id": 111, "path": "src/foo.py", "line": 42},
-            {"thread_id": "T2", "comment_id": 222, "path": "src/gone.py", "line": 99},
-        ],
-        "deferred": [], "rejected": [],
-    }), encoding="utf-8")
+    state_file.write_text(
+        json.dumps(
+            _state(
+                current_pr=pr,
+                pr_history=[{"pr": pr, "rounds": 1}],
+                rounds=[{"round": 1, "pr": pr, "reviewers": ["codex", "agy"], "started_at": "2026-05-23T00:00:00+00:00"}],
+                review_findings=[
+                    _finding(
+                        "codex-r1-0", 1, "src/foo.py", 42, pr=pr, origin_runtimes=["codex", "agy"], classification="verified_blocking"
+                    ),
+                    _finding("agy-r1-0", 1, "src/foo.py", 42, pr=pr, agent="agy", merged_into="codex-r1-0"),
+                ],
+                evidence_rounds=[1],
+                deferred_nits=[],
+            )
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / f"fix-pr{pr}-result.json").write_text(
+        json.dumps(
+            {
+                "pr": pr,
+                "fix_commit": "abc1234",
+                "fixed_count": 1,
+                "ci_status": "SUCCESS",
+                "ci_failed_checks": [],
+                "by_severity": {"critical": 0, "major": 1, "minor": 0, "nit": 0},
+                "resolved_threads": [
+                    {"thread_id": "T1", "comment_id": 111, "path": "src/foo.py", "line": 42},
+                    {"thread_id": "T2", "comment_id": 222, "path": "src/gone.py", "line": 99},
+                ],
+                "deferred": [],
+                "rejected": [],
+            }
+        ),
+        encoding="utf-8",
+    )
 
     review_lib.commands.merge_fix.cmd_merge_fix(argparse.Namespace(pr=pr, file=None))
     proc = _run([str(state_file)])

@@ -2,6 +2,7 @@
 
 一時の git リポジトリを作り、gh は PATH の先頭に置いた偽物（FAKE_GH_PRS の JSON を返す）で置き換える。
 """
+
 from __future__ import annotations
 
 import json
@@ -83,6 +84,7 @@ def check_shape(out):
 
 # --- cleanup（merged-steps.py） ---------------------------------------------
 
+
 def test_cleanup_removes_merged_and_stops_on_unmerged(repo, env, tmp_path):
     # 取り込み先を main と宣言し、主ディレクトリ（develop）では pull させない
     write(repo, ".ndf/worktree.json", json.dumps({"base_branch": "main"}))
@@ -93,12 +95,14 @@ def test_cleanup_removes_merged_and_stops_on_unmerged(repo, env, tmp_path):
     git(wy, "add", "-A")
     git(wy, "commit", "-q", "-m", "y")
     write(tmp_path / "feature-x", "ignored.log", "junk\n")  # 未追跡のファイルは退避して外す
-    env["FAKE_GH_PRS"] = json.dumps({
-        "1": {"headRefName": "feature/x", "state": "MERGED"},
-        "2": {"headRefName": "feature/y", "state": "MERGED"},
-        "3": {"headRefName": "feature/gone", "state": "MERGED"},
-        "4": {"headRefName": "feature/open", "state": "OPEN"},
-    })
+    env["FAKE_GH_PRS"] = json.dumps(
+        {
+            "1": {"headRefName": "feature/x", "state": "MERGED"},
+            "2": {"headRefName": "feature/y", "state": "MERGED"},
+            "3": {"headRefName": "feature/gone", "state": "MERGED"},
+            "4": {"headRefName": "feature/open", "state": "OPEN"},
+        }
+    )
     code, out, err = call("merged-steps.py", ["cleanup", "1", "2", "3", "4", "--root", str(repo)], env)
     assert code == 10, err
     check_shape(out)
@@ -128,7 +132,6 @@ def test_cleanup_all_merged_is_ok(repo, env, tmp_path):
     assert out["metrics"]["removed_worktrees"] == 1 and out["metrics"]["deleted_branches"] == 1
 
 
-
 def test_cleanup_from_inside_the_worktree_it_removes(repo, env, tmp_path):
     # 計画の merge のステップは作業場所（消す作業ツリー）で打つ。消した後も主ディレクトリから続ける
     write(repo, ".ndf/worktree.json", json.dumps({"base_branch": "main"}))
@@ -139,7 +142,9 @@ def test_cleanup_from_inside_the_worktree_it_removes(repo, env, tmp_path):
     assert code == 0, (out, err)
     assert not wx.exists() and "feature/x" not in git(repo, "branch", "--list")
 
+
 # --- spec-finalize（plan-to-spec-steps.py） ---------------------------------
+
 
 def spec_repo(repo):
     write(repo, "docs/design/x-design.md", "# 設計\n")
@@ -151,9 +156,11 @@ def spec_repo(repo):
 
 def test_spec_finalize_removes_design_and_indexes_spec(repo, env):
     spec_repo(repo)
-    code, out, err = call("plan-to-spec-steps.py",
-                          ["spec-finalize", "--spec", "docs/specifications/x.md",
-                           "--design", "docs/design/x-design.md", "--title", "X", "--root", str(repo)], env)
+    code, out, err = call(
+        "plan-to-spec-steps.py",
+        ["spec-finalize", "--spec", "docs/specifications/x.md", "--design", "docs/design/x-design.md", "--title", "X", "--root", str(repo)],
+        env,
+    )
     assert code == 0, err
     check_shape(out)
     assert out["tool"] == "plan-to-spec" and out["status"] == "ok"
@@ -170,9 +177,11 @@ def test_spec_finalize_skips_index_lines_inside_a_fence(repo, env):
     spec_repo(repo)
     write(repo, "docs/specifications/README.md", "# 索引\n\n- [a.md](a.md) — A\n\n```md\n- [z.md](z.md) — Z\n```\n")
     git(repo, "commit", "-q", "-am", "index")
-    code, _, err = call("plan-to-spec-steps.py",
-                        ["spec-finalize", "--spec", "docs/specifications/x.md",
-                         "--design", "docs/design/x-design.md", "--title", "X", "--root", str(repo)], env)
+    code, _, err = call(
+        "plan-to-spec-steps.py",
+        ["spec-finalize", "--spec", "docs/specifications/x.md", "--design", "docs/design/x-design.md", "--title", "X", "--root", str(repo)],
+        env,
+    )
     assert code == 0, err
     idx = (repo / "docs/specifications/README.md").read_text(encoding="utf-8")
     assert idx.startswith("# 索引\n\n- [a.md](a.md) — A\n- [x.md](x.md) — X\n\n```md\n")
@@ -184,10 +193,10 @@ def test_spec_finalize_removes_every_design_given_by_repeated_or_listed_flags(re
     for rel in designs[1:]:
         write(repo, rel, "x\n")
     spec_repo(repo)
-    flags = ([f for d in designs for f in ("--design", d)] if repeat else ["--design", *designs])
-    code, out, err = call("plan-to-spec-steps.py",
-                          ["spec-finalize", "--spec", "docs/specifications/x.md", *flags,
-                           "--title", "X", "--root", str(repo)], env)
+    flags = [f for d in designs for f in ("--design", d)] if repeat else ["--design", *designs]
+    code, out, err = call(
+        "plan-to-spec-steps.py", ["spec-finalize", "--spec", "docs/specifications/x.md", *flags, "--title", "X", "--root", str(repo)], env
+    )
     assert code == 0, err
     assert out["metrics"]["removed_designs"] == 3
     for rel in designs:
@@ -198,21 +207,34 @@ def test_spec_finalize_removes_every_design_given_by_repeated_or_listed_flags(re
 def test_spec_finalize_promotes_glossary_terms_of_the_removed_design(repo, env):
     """消した設計を pending_source に持つ語だけ、source を確定仕様へ移して文書ごと同じコミットに入れる。"""
     spec_repo(repo)
-    decl = {"version": 1, "format": "json", "source": "docs/glossary/glossary.json", "document": "docs/glossary.md",
-            "check": {"source_paths": ["docs/specifications/*.md"]}}
-    g = {"version": 1, "contexts": [{"id": "c", "name": "C"}], "terms": [
-        {"term": "移る語", "context": "c", "meaning": "m", "pending_source": "docs/design/x-design.md"},
-        {"term": "残る語", "context": "c", "meaning": "m", "pending_source": "docs/design/y-design.md"}]}
+    decl = {
+        "version": 1,
+        "format": "json",
+        "source": "docs/glossary/glossary.json",
+        "document": "docs/glossary.md",
+        "check": {"source_paths": ["docs/specifications/*.md"]},
+    }
+    g = {
+        "version": 1,
+        "contexts": [{"id": "c", "name": "C"}],
+        "terms": [
+            {"term": "移る語", "context": "c", "meaning": "m", "pending_source": "docs/design/x-design.md"},
+            {"term": "残る語", "context": "c", "meaning": "m", "pending_source": "docs/design/y-design.md"},
+        ],
+    }
     write(repo, ".ndf/glossary.json", json.dumps(decl, ensure_ascii=False))
     write(repo, "docs/glossary/glossary.json", json.dumps(g, ensure_ascii=False))
     write(repo, "docs/design/y-design.md", "# 別の設計\n")
-    assert subprocess.run([sys.executable, str(SCRIPTS / "glossary.py"), "render", "--root", str(repo)],
-                          capture_output=True).returncode == 0
+    assert (
+        subprocess.run([sys.executable, str(SCRIPTS / "glossary.py"), "render", "--root", str(repo)], capture_output=True).returncode == 0
+    )
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "glossary")
-    code, out, err = call("plan-to-spec-steps.py",
-                          ["spec-finalize", "--spec", "docs/specifications/x.md",
-                           "--design", "docs/design/x-design.md", "--root", str(repo)], env)
+    code, out, err = call(
+        "plan-to-spec-steps.py",
+        ["spec-finalize", "--spec", "docs/specifications/x.md", "--design", "docs/design/x-design.md", "--root", str(repo)],
+        env,
+    )
     assert code == 0, err
     terms = {t["term"]: t for t in json.loads((repo / "docs/glossary/glossary.json").read_text())["terms"]}
     assert terms["移る語"] == {"term": "移る語", "context": "c", "meaning": "m", "source": "docs/specifications/x.md"}
@@ -220,22 +242,30 @@ def test_spec_finalize_promotes_glossary_terms_of_the_removed_design(repo, env):
     assert "docs/specifications/x.md" in (repo / "docs/glossary.md").read_text(encoding="utf-8")
     assert git(repo, "status", "--porcelain").strip() == ""
     assert [i["name"] for i in out["items"] if i["kind"] == "glossary"] == ["移る語"]
-    check = subprocess.run([sys.executable, str(SCRIPTS / "glossary.py"), "check", "--rules", "structure",
-                            "--root", str(repo)], capture_output=True, text=True)
+    check = subprocess.run(
+        [sys.executable, str(SCRIPTS / "glossary.py"), "check", "--rules", "structure", "--root", str(repo)], capture_output=True, text=True
+    )
     assert check.returncode == 0, check.stdout
 
 
 GOOD_DECL = '{"version": 1, "format": "json", "source": "g.json", "document": "g.md"}'
 TERM = '"term": "語", "context": "c", "meaning": "m"'
-PENDING = ('{{"version": 1, "contexts": [{{"id": "c", "name": "C"}}], '
-           '"terms": [{{{0}, "pending_source": "{1}/design/x-design.md"}}]}}')
+PENDING = '{{"version": 1, "contexts": [{{"id": "c", "name": "C"}}], "terms": [{{{0}, "pending_source": "{1}/design/x-design.md"}}]}}'
 
 
-@pytest.mark.parametrize("decl,source", [('{"version": 1}', None), ('{"source": "docs/glossary/none.json"}', None),
-                                         ("not json", None), (GOOD_DECL, "not json"),
-                                         (GOOD_DECL, '{"version": 1, "terms": {}}'), (GOOD_DECL, None),
-                                         (GOOD_DECL, PENDING.format('"context": "c", "meaning": "m"', "docs")),
-                                         (GOOD_DECL, PENDING.format(TERM, "./docs"))])
+@pytest.mark.parametrize(
+    "decl,source",
+    [
+        ('{"version": 1}', None),
+        ('{"source": "docs/glossary/none.json"}', None),
+        ("not json", None),
+        (GOOD_DECL, "not json"),
+        (GOOD_DECL, '{"version": 1, "terms": {}}'),
+        (GOOD_DECL, None),
+        (GOOD_DECL, PENDING.format('"context": "c", "meaning": "m"', "docs")),
+        (GOOD_DECL, PENDING.format(TERM, "./docs")),
+    ],
+)
 def test_spec_finalize_stops_on_a_broken_glossary_declaration(repo, env, decl, source):
     """宣言・正本が読めないか、語の形（term・pending_source の書き方）が崩れていれば、設計を消す前に止める。"""
     spec_repo(repo)
@@ -244,9 +274,11 @@ def test_spec_finalize_stops_on_a_broken_glossary_declaration(repo, env, decl, s
         write(repo, "g.json", source)
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "decl")
-    code, _, _ = call("plan-to-spec-steps.py",
-                      ["spec-finalize", "--spec", "docs/specifications/x.md",
-                       "--design", "docs/design/x-design.md", "--root", str(repo)], env)
+    code, _, _ = call(
+        "plan-to-spec-steps.py",
+        ["spec-finalize", "--spec", "docs/specifications/x.md", "--design", "docs/design/x-design.md", "--root", str(repo)],
+        env,
+    )
     assert code == 3
     assert (repo / "docs/design/x-design.md").is_file()
     assert git(repo, "status", "--porcelain").strip() == ""
@@ -260,27 +292,32 @@ def test_spec_finalize_keeps_the_design_when_the_glossary_cannot_be_written(repo
     write(repo, "g.md/keep", "文書の場所をディレクトリで塞ぐ\n")
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "decl")
-    code, _, _ = call("plan-to-spec-steps.py",
-                      ["spec-finalize", "--spec", "docs/specifications/x.md",
-                       "--design", "docs/design/x-design.md", "--root", str(repo)], env)
+    code, _, _ = call(
+        "plan-to-spec-steps.py",
+        ["spec-finalize", "--spec", "docs/specifications/x.md", "--design", "docs/design/x-design.md", "--root", str(repo)],
+        env,
+    )
     assert code == 1
     assert (repo / "docs/design/x-design.md").is_file()
     assert "x-design.md" not in git(repo, "diff", "--cached", "--name-only")
 
 
 def test_spec_finalize_missing_spec_is_precondition(repo, env):
-    code, out, _ = call("plan-to-spec-steps.py",
-                        ["spec-finalize", "--spec", "nope.md", "--design", "keep.txt", "--root", str(repo)], env)
+    code, out, _ = call("plan-to-spec-steps.py", ["spec-finalize", "--spec", "nope.md", "--design", "keep.txt", "--root", str(repo)], env)
     assert code == 3
     assert out["status"] == "stopped" and "nope.md" in out["summary"]
 
 
 # --- bump / changelog（release-steps.py） ------------------------------------
 
+
 def plugin_repo(repo, name="mcp-x", version="1.0.0", heading="1.0.0"):
     d = f"plugins/mcp/{name}"
-    write(repo, f"{d}/.claude-plugin/plugin.json",
-          json.dumps({"name": name, "version": version, "description": f"X (v{version})"}, indent=2) + "\n")
+    write(
+        repo,
+        f"{d}/.claude-plugin/plugin.json",
+        json.dumps({"name": name, "version": version, "description": f"X (v{version})"}, indent=2) + "\n",
+    )
     write(repo, f"{d}/README.md", f"# {name}\n\n## v{heading} へ更新するとき\n\n前の版の説明\n\n## 使い方\n\nx\n")
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "plugin")
@@ -311,8 +348,9 @@ def test_changelog_adds_section_and_replaces_update_guide(repo, env):
     pdir = plugin_repo(repo, heading="1.1.0")
     write(repo, "CHANGELOG.md", "# Changelog\n\n## [mcp-x 1.0.0] - 2026-01-01\n\n- old（#1）\n")
     env["FAKE_GH_PRS"] = json.dumps({"5": {"title": "Add: x"}, "6": {"title": "Fix: y"}})
-    code, out, err = call("release-steps.py", ["changelog", "--version", "1.1.0", "--prs", "5", "6",
-                                                "--plugin", "mcp-x", "--root", str(repo)], env)
+    code, out, err = call(
+        "release-steps.py", ["changelog", "--version", "1.1.0", "--prs", "5", "6", "--plugin", "mcp-x", "--root", str(repo)], env
+    )
     assert code == 0, err
     check_shape(out)
     cl = (repo / "CHANGELOG.md").read_text(encoding="utf-8")
@@ -324,38 +362,43 @@ def test_changelog_adds_section_and_replaces_update_guide(repo, env):
     assert out["next"]
 
     # もう一度呼んでも同じ PR を重ねない
-    code, out, _ = call("release-steps.py", ["changelog", "--version", "1.1.0", "--prs", "5",
-                                              "--plugin", "mcp-x", "--root", str(repo)], env)
+    code, out, _ = call(
+        "release-steps.py", ["changelog", "--version", "1.1.0", "--prs", "5", "--plugin", "mcp-x", "--root", str(repo)], env
+    )
     assert code == 0
     assert (repo / "CHANGELOG.md").read_text(encoding="utf-8").count("（#5）") == 1
 
 
 def test_changelog_gh_failure_stops(repo, env):
     write(repo, "CHANGELOG.md", "# Changelog\n")
-    code, out, _ = call("release-steps.py", ["changelog", "--version", "1.1.0", "--prs", "99",
-                                              "--root", str(repo)], env)
+    code, out, _ = call("release-steps.py", ["changelog", "--version", "1.1.0", "--prs", "99", "--root", str(repo)], env)
     assert code == 1 and out["status"] == "stopped" and "gh pr view 99" in out["summary"]
 
 
 def test_release_steps_run_and_check_are_unchanged(repo, env):
-    assert subprocess.run([PY, str(SCRIPTS / "release-steps.py"), "check", "--root", str(repo)],
-                          env=env).returncode == 2
-    p = subprocess.run([PY, str(SCRIPTS / "release-steps.py"), "run", "--root", str(repo),
-                        "--stage", "production", "--version", "1.0.0"], env=env, capture_output=True, text=True)
+    assert subprocess.run([PY, str(SCRIPTS / "release-steps.py"), "check", "--root", str(repo)], env=env).returncode == 2
+    p = subprocess.run(
+        [PY, str(SCRIPTS / "release-steps.py"), "run", "--root", str(repo), "--stage", "production", "--version", "1.0.0"],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
     assert p.returncode == 0 and p.stdout == ""
 
 
 def test_verify_install_unknown_runtime_is_2(repo, env):
-    code, out, _ = call("release-verification-steps.py",
-                        ["verify-install", "--ref", "develop", "--expect", "1.0.0", "--runtimes", "nope",
-                         "--root", str(repo)], env)
+    code, out, _ = call(
+        "release-verification-steps.py",
+        ["verify-install", "--ref", "develop", "--expect", "1.0.0", "--runtimes", "nope", "--root", str(repo)],
+        env,
+    )
     assert code == 2 and out["tool"] == "release-verification" and out["status"] == "stopped"
 
 
 def load_verification():
     import importlib.util
-    spec = importlib.util.spec_from_file_location("release_verification_steps",
-                                                  SCRIPTS / "release-verification-steps.py")
+
+    spec = importlib.util.spec_from_file_location("release_verification_steps", SCRIPTS / "release-verification-steps.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
@@ -401,11 +444,12 @@ def test_compare_files_skips_symlinks_for_a_runtime_that_drops_them(tmp_path):
 
 # --- phase-steps.py（互換の入口） --------------------------------------------
 
+
 @pytest.mark.parametrize("root_first", [True, False])
 def test_phase_steps_forwards_with_root_before_or_after(repo, env, root_first):
     spec_repo(repo)
     sub = ["spec-finalize", "--spec", "docs/specifications/x.md", "--design", "docs/design/x-design.md"]
-    args = (["--root", str(repo), *sub] if root_first else [*sub, "--root", str(repo)])
+    args = ["--root", str(repo), *sub] if root_first else [*sub, "--root", str(repo)]
     code, out, err = call("phase-steps.py", args, env, cwd=str(repo.parent))
     assert code == 0, err
     assert out["tool"] == "plan-to-spec" and out["status"] == "ok"

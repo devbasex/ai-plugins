@@ -4,6 +4,7 @@
 引数で受け取り、判定だけを行う（詳細設計 05）。そのため、作業ツリーが
 0 個 / 1 個 / 複数個 × 変更あり / なしの 6 通りを網羅できる。
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -56,7 +57,7 @@ def test_detached_worktree_is_excluded_from_branch_count() -> None:
 
 def test_dev_worktrees_rejects_empty_main_dir() -> None:
     """主ディレクトリが空なら、何も出力せず終了コード 1 を返す。"""
-    got = run_lib("wt_dev_worktrees \"\"")
+    got = run_lib('wt_dev_worktrees ""')
 
     assert got.returncode == 1
     assert got.stdout == ""

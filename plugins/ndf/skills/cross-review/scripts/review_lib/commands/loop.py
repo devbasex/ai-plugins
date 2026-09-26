@@ -2,6 +2,7 @@
 
 ループを止めるか・PR を巻き直すか・巻き直した PR へ移るかを決める。
 """
+
 from __future__ import annotations
 
 import argparse

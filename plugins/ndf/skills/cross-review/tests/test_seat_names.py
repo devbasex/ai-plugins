@@ -9,6 +9,7 @@
 argparse の型が行い、通らなければ終了コード 2 になる。シェル側は席の形に合わない名前を
 終了コード 1 で弾く。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -39,14 +40,14 @@ def review_posted(monkeypatch, state_mod):
 def _seed_state(tmp_dir: pathlib.Path) -> None:
     state = {
         "current_pr": PR,
-        "rounds": [{"round": 1, "pr": PR, "started_at": "2026-09-19T00:00:00+00:00",
-                    "reviewers": ["codex", SEAT]}],
+        "rounds": [{"round": 1, "pr": PR, "started_at": "2026-09-19T00:00:00+00:00", "reviewers": ["codex", SEAT]}],
         "final": None,
     }
     (tmp_dir / f"cross-review-pr{PR}-state.json").write_text(json.dumps(state))
 
 
 # ---------------- 引数のチェック ----------------
+
 
 def test_the_parser_accepts_a_second_seat(state_mod):
     args = state_mod.build_parser().parse_args(["read-result", "1", SEAT])
@@ -68,14 +69,22 @@ def test_a_name_outside_the_seat_pattern_exits_with_two(state_mod, seat):
 
 # ---------------- 記録の鍵 ----------------
 
+
 def test_the_result_of_a_second_seat_is_recorded_under_its_seat_name(tmp_dir, state_mod):
     """AC21: `read-result <pr> claude-2` の結果は `rounds[-1]["claude-2"]` に入る。"""
     _seed_state(tmp_dir)
     rfile = tmp_dir / "result.json"
-    rfile.write_text(json.dumps({
-        "event": "APPROVE", "posted_as": "APPROVE", "comments_count": 0,
-        "review_url": "https://example/pr/1#1", "by_severity": {},
-    }))
+    rfile.write_text(
+        json.dumps(
+            {
+                "event": "APPROVE",
+                "posted_as": "APPROVE",
+                "comments_count": 0,
+                "review_url": "https://example/pr/1#1",
+                "by_severity": {},
+            }
+        )
+    )
 
     review_lib.commands.read_result.cmd_read_result(argparse.Namespace(pr=PR, agent=SEAT, file=str(rfile)))
 
@@ -118,14 +127,18 @@ def _run_launch(script: pathlib.Path, seat: str, tmp_dir: pathlib.Path):
     import subprocess
 
     state = {
-        "current_pr": PR, "repo": "o/r", "worktree_path": str(tmp_dir),
+        "current_pr": PR,
+        "repo": "o/r",
+        "worktree_path": str(tmp_dir),
         "rounds": [{"round": 1, "head_sha": "a" * 40}],
     }
     (tmp_dir / f"cross-review-pr{PR}-state.json").write_text(json.dumps(state))
     return subprocess.run(
         ["bash", str(script), seat, str(PR), "1"],
         env={**os.environ, "CROSS_REVIEW_TMP_DIR": str(tmp_dir)},
-        capture_output=True, text=True, timeout=30,
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
 
 
@@ -162,7 +175,9 @@ def test_the_launch_scripts_reject_a_name_outside_the_seat_pattern(tmp_path, scr
     result = subprocess.run(
         ["bash", str(LAUNCH_SCRIPTS / script_name), "bogus", "1", "1"],
         env={**os.environ, "CROSS_REVIEW_TMP_DIR": str(tmp_path)},
-        capture_output=True, text=True, timeout=30,
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
 
     assert result.returncode == 1
@@ -171,6 +186,7 @@ def test_the_launch_scripts_reject_a_name_outside_the_seat_pattern(tmp_path, scr
 
 
 # ---------------- 監視の位置引数 ----------------
+
 
 def test_the_monitor_accepts_a_second_seat_as_its_target(monitor_mod):
     """AC21: 監視の位置引数は席の名前を受ける。"""
@@ -188,7 +204,9 @@ def _run_monitor(tmp_path: pathlib.Path, *argv: str):
     return subprocess.run(
         [sys.executable, str(monitor), *argv],
         env={**os.environ, "CROSS_REVIEW_TMP_DIR": str(tmp_path)},
-        capture_output=True, text=True, timeout=120,
+        capture_output=True,
+        text=True,
+        timeout=120,
     )
 
 
@@ -197,8 +215,7 @@ def test_the_monitor_takes_a_second_seat_as_its_positional_argument(tmp_path):
     # 起動待ちを使い切らないよう、終了済みの pid を先に置く。
     (tmp_path / "kiro-2-review-pr1.pid").write_text("2147483646\n", encoding="utf-8")
 
-    result = _run_monitor(tmp_path, "1", "kiro-2", "--tmp-dir", str(tmp_path),
-                          "--timeout", "1", "--poll", "1")
+    result = _run_monitor(tmp_path, "1", "kiro-2", "--tmp-dir", str(tmp_path), "--timeout", "1", "--poll", "1")
 
     assert result.returncode != 2, result.stderr
     assert "席の名前の形が違います" not in result.stderr
@@ -219,6 +236,7 @@ def test_the_runtime_of_a_seat_is_used_for_the_cli_specific_checks(monitor_mod):
 
 # ---------------- 監視の上限と無進捗の許容 ----------------
 
+
 @pytest.fixture()
 def no_limit_env(monkeypatch):
     """上限の表を上書きする環境変数を外す。手元の設定でこの節が揺れないようにする。"""
@@ -228,12 +246,16 @@ def no_limit_env(monkeypatch):
             monkeypatch.delenv(f"{name}_{runtime}", raising=False)
 
 
-@pytest.mark.parametrize("seat,expected", [
-    ("claude-2", 900), ("agy-2", 480), ("kiro-2", 480), ("codex-2", 180),
-])
-def test_a_second_seat_gets_the_allowance_of_its_runtime(
-    monitor_mod, no_limit_env, seat, expected
-):
+@pytest.mark.parametrize(
+    "seat,expected",
+    [
+        ("claude-2", 900),
+        ("agy-2", 480),
+        ("kiro-2", 480),
+        ("codex-2", 180),
+    ],
+)
+def test_a_second_seat_gets_the_allowance_of_its_runtime(monitor_mod, no_limit_env, seat, expected):
     """2 席目の無進捗の許容は、そのランタイムの値になる。
 
     席の名前のまま上限の表を引くと表に無い担当として既定（180 秒）へ落ち、1 席目より
@@ -242,17 +264,13 @@ def test_a_second_seat_gets_the_allowance_of_its_runtime(
     assert monitor_mod._agent_stall_default(seat) == expected
 
 
-def test_a_second_seat_reads_the_environment_variable_of_its_runtime(
-    monkeypatch, monitor_mod, no_limit_env
-):
+def test_a_second_seat_reads_the_environment_variable_of_its_runtime(monkeypatch, monitor_mod, no_limit_env):
     """担当別の環境変数もランタイム名で引く（`MONITOR_STALL_CLAUDE-2` は書けない）。"""
     monkeypatch.setenv("MONITOR_STALL_CLAUDE", "777")
     assert monitor_mod._agent_stall_default("claude-2") == 777
 
 
-def test_both_seats_of_a_runtime_are_monitored_with_the_same_limits(
-    monkeypatch, monitor_mod, no_limit_env
-):
+def test_both_seats_of_a_runtime_are_monitored_with_the_same_limits(monkeypatch, monitor_mod, no_limit_env):
     """並列監視の入口（`_run_all`）でも、2 席目が 1 席目と同じ上限で監視される。"""
     seen: dict[str, object] = {}
 
@@ -264,9 +282,14 @@ def test_both_seats_of_a_runtime_are_monitored_with_the_same_limits(
     monkeypatch.setattr(monitor_mod, "_record_outcome", lambda *a, **k: None)
 
     args = argparse.Namespace(
-        timeout=None, stall_timeout=None, poll=1, no_require_result=False,
-        no_early_error=False, stem_template=monitor_mod.DEFAULT_STEM_TEMPLATE,
-        pr=1, phase="review",
+        timeout=None,
+        stall_timeout=None,
+        poll=1,
+        no_require_result=False,
+        no_early_error=False,
+        stem_template=monitor_mod.DEFAULT_STEM_TEMPLATE,
+        pr=1,
+        phase="review",
     )
     monitor_mod._run_all(["claude", "claude-2"], args, "review")
 
@@ -276,14 +299,11 @@ def test_both_seats_of_a_runtime_are_monitored_with_the_same_limits(
 
 # ---------------- 計測 ----------------
 
+
 def test_the_measure_counts_a_second_seat(measure_mod):
     """AC21: 席の名前で残った結果も、そのラウンドの担当の数に入る。"""
-    assert measure_mod._reviewer_count(
-        {"round": 1, "pr": 1, "codex": {"intent": "APPROVE"}, SEAT: {"intent": "APPROVE"}}
-    ) == 2
+    assert measure_mod._reviewer_count({"round": 1, "pr": 1, "codex": {"intent": "APPROVE"}, SEAT: {"intent": "APPROVE"}}) == 2
 
 
 def test_the_measure_ignores_keys_outside_the_seat_pattern(measure_mod):
-    assert measure_mod._reviewer_count(
-        {"round": 1, "pr": 1, "ci": {"state": "SUCCESS"}, "claude-1": {"intent": "APPROVE"}}
-    ) == 0
+    assert measure_mod._reviewer_count({"round": 1, "pr": 1, "ci": {"state": "SUCCESS"}, "claude-1": {"intent": "APPROVE"}}) == 0

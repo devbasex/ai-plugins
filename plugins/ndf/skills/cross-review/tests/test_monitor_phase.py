@@ -6,6 +6,7 @@
 
 pid ファイルには終わったプロセスの pid を書き、監視を直ちに終わらせる（上限まで待たない）。
 """
+
 from __future__ import annotations
 
 import json
@@ -27,15 +28,16 @@ def _dead_pid() -> int:
     return proc.pid
 
 
-def _run(tmp_dir: pathlib.Path, *extra: str, agents: str = "agy",
-         env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
+def _run(tmp_dir: pathlib.Path, *extra: str, agents: str = "agy", env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
     for agent in agents.split(","):
         (tmp_dir / f"{agent}-review-pr7.pid").write_text(str(_dead_pid()))
         (tmp_dir / f"{agent}-review-pr7-result.json").write_text('{"event": "APPROVE"}')
     return subprocess.run(
-        [sys.executable, str(_MONITOR_LIB), "7", "--agents", agents,
-         "--tmp-dir", str(tmp_dir), "--poll", "1", *extra],
-        capture_output=True, text=True, env={**os.environ, **(env or {})}, timeout=60,
+        [sys.executable, str(_MONITOR_LIB), "7", "--agents", agents, "--tmp-dir", str(tmp_dir), "--poll", "1", *extra],
+        capture_output=True,
+        text=True,
+        env={**os.environ, **(env or {})},
+        timeout=60,
     )
 
 
@@ -51,10 +53,19 @@ def _warnings(proc: subprocess.CompletedProcess) -> list[str]:
 
 # ---------- AC32 ----------
 
-@pytest.mark.parametrize(("phase", "expected"), [
-    ("review", 1200), ("critique", 1200), ("propose", 1200),
-    ("judge-test-changes", 1200), ("implement", 3600), ("fix", 3600), ("final-fix", 3600),
-])
+
+@pytest.mark.parametrize(
+    ("phase", "expected"),
+    [
+        ("review", 1200),
+        ("critique", 1200),
+        ("propose", 1200),
+        ("judge-test-changes", 1200),
+        ("implement", 3600),
+        ("fix", 3600),
+        ("final-fix", 3600),
+    ],
+)
 def test_the_phase_default_is_the_table_value(tmp_path, phase: str, expected: int) -> None:
     proc = _run(tmp_path, "--phase", phase)
     assert proc.returncode == 0, proc.stderr
@@ -72,15 +83,13 @@ def test_the_shared_environment_overrides_the_phase(tmp_path) -> None:
 
 
 def test_the_per_agent_environment_overrides_the_shared_one(tmp_path) -> None:
-    proc = _run(tmp_path, "--phase", "review", agents="agy,codex",
-                env={"MONITOR_TIMEOUT": "1500", "MONITOR_TIMEOUT_AGY": "1700"})
+    proc = _run(tmp_path, "--phase", "review", agents="agy,codex", env={"MONITOR_TIMEOUT": "1500", "MONITOR_TIMEOUT_AGY": "1700"})
     assert _hard_timeout(proc, "agy") == 1700
     assert _hard_timeout(proc, "codex") == 1500
 
 
 def test_the_argument_overrides_the_environment(tmp_path) -> None:
-    proc = _run(tmp_path, "--phase", "review", "--timeout", "999",
-                env={"MONITOR_TIMEOUT": "1500", "MONITOR_TIMEOUT_AGY": "1700"})
+    proc = _run(tmp_path, "--phase", "review", "--timeout", "999", env={"MONITOR_TIMEOUT": "1500", "MONITOR_TIMEOUT_AGY": "1700"})
     assert _hard_timeout(proc, "agy") == 999
 
 
@@ -92,6 +101,7 @@ def test_an_unknown_phase_is_a_usage_error(tmp_path) -> None:
 
 
 # ---------- AC33 ----------
+
 
 def test_the_table_defaults_do_not_warn(tmp_path) -> None:
     proc = _run(tmp_path, "--phase", "review", agents="codex,agy,kiro,claude")
@@ -112,8 +122,7 @@ def test_a_stall_equal_to_the_monitor_timeout_warns(tmp_path) -> None:
 
 
 def test_an_environment_override_that_breaks_the_order_warns_per_agent(tmp_path) -> None:
-    proc = _run(tmp_path, "--phase", "review", agents="codex,claude",
-                env={"MONITOR_TIMEOUT": "600"})
+    proc = _run(tmp_path, "--phase", "review", agents="codex,claude", env={"MONITOR_TIMEOUT": "600"})
     lines = _warnings(proc)
     assert len(lines) == 1, proc.stderr
     assert "claude" in lines[0] and "900" in lines[0] and "600" in lines[0]
@@ -129,13 +138,13 @@ def test_the_warning_does_not_change_the_exit_code_or_stdout(tmp_path) -> None:
 
     def rows(proc: subprocess.CompletedProcess) -> list[dict]:
         drop = ("elapsed", "idle_seconds", "pid", "detail")
-        return [{k: v for k, v in json.loads(line).items() if k not in drop}
-                for line in proc.stdout.splitlines()]
+        return [{k: v for k, v in json.loads(line).items() if k not in drop} for line in proc.stdout.splitlines()]
 
     assert rows(quiet) == rows(loud)
 
 
 # ---------- 記録の工程 ----------
+
 
 def test_the_journal_records_the_phase(tmp_path) -> None:
     _run(tmp_path, "--phase", "critique")
@@ -153,8 +162,10 @@ def test_the_journal_phase_is_null_without_the_argument(tmp_path) -> None:
 
 # ---------- AC30: 既定値を持つのは表だけ ----------
 
+
 def test_the_monitor_defaults_point_at_the_table(monitor_mod) -> None:
     import importlib.util
+
     spec = importlib.util.spec_from_file_location("ndf_lib_limits_t", _LIB / "limits.py")
     limits = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(limits)

@@ -7,6 +7,7 @@
 `cross-refactoring` と `cross-review` の両方が同じ確認を行う。片方だけに置くと、母集合を
 広げたときにもう片方が未認証の CLI を担当へ入れる。
 """
+
 from __future__ import annotations
 
 import os
@@ -28,8 +29,12 @@ AUTH_PROBE_TIMEOUT = 120
 
 # **終了コード 0 でも未認証を示すことがある。** kiro は成否を終了コードで表さない。
 UNAUTHENTICATED_MARKERS = (
-    "not logged in", "not authenticated", "authentication failed",
-    "login required", "unauthorized", "please log in",
+    "not logged in",
+    "not authenticated",
+    "authentication failed",
+    "login required",
+    "unauthorized",
+    "please log in",
 )
 
 SKIP_ENV = "NDF_SKIP_AUTH_CHECK"
@@ -55,8 +60,7 @@ def _run_probe(probe: tuple[str, ...]) -> tuple[bool, str]:
     ないファイルも同じ形で落ちる。見つからない例外は下位にあるため先に捕まえる。
     """
     try:
-        r = subprocess.run(list(probe), capture_output=True, text=True,
-                           timeout=AUTH_PROBE_TIMEOUT)
+        r = subprocess.run(list(probe), capture_output=True, text=True, timeout=AUTH_PROBE_TIMEOUT)
     except FileNotFoundError:
         return False, "コマンドが見つかりません"
     except subprocess.TimeoutExpired:

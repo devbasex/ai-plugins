@@ -1,4 +1,5 @@
 """副命令 `start-round`（#1142 の C2）。"""
+
 from __future__ import annotations
 
 import argparse
@@ -6,7 +7,13 @@ from typing import Any
 
 import review_lib  # noqa: E402
 from review_lib import (  # noqa: E402
-    github, participants as participants_mod, posts, review_focus, store, workspace as workspace_mod)
+    github,
+    participants as participants_mod,
+    posts,
+    review_focus,
+    store,
+    workspace as workspace_mod,
+)
 
 
 def _resolve_previous_verdict(st: dict[str, Any], prev: dict[str, Any]) -> str | None:
@@ -17,12 +24,10 @@ def _resolve_previous_verdict(st: dict[str, Any], prev: dict[str, Any]) -> str |
     reviewers = prev.get("reviewers") or participants_mod._round_reviewers(st, prev.get("round") or 1)
     if participants_mod._no_result_agents(prev, st.get("only"), reviewers):
         return "no_result"
-    return ("approved" if participants_mod._round_passes(prev, st.get("only"), reviewers)
-            else "changes_requested")
+    return "approved" if participants_mod._round_passes(prev, st.get("only"), reviewers) else "changes_requested"
 
 
-def _require_fix_for_changes(round_no: Any, verdict: str | None,
-                             fix: dict[str, Any] | None) -> None:
+def _require_fix_for_changes(round_no: Any, verdict: str | None, fix: dict[str, Any] | None) -> None:
     """修正必須の判定に修正記録が伴うことを確かめる。"""
     if verdict != "changes_requested" or fix:
         return
@@ -35,8 +40,7 @@ def _require_fix_for_changes(round_no: Any, verdict: str | None,
     )
 
 
-def _verify_resolved_threads(st: dict[str, Any], prev: dict[str, Any],
-                             fix: dict[str, Any] | None) -> None:
+def _verify_resolved_threads(st: dict[str, Any], prev: dict[str, Any], fix: dict[str, Any] | None) -> None:
     """Resolve 済みとの申告を GitHub の未解決スレッドと突き合わせる。"""
     round_no = prev.get("round")
     claimed = (fix or {}).get("resolved_thread_ids") or []
@@ -45,10 +49,7 @@ def _verify_resolved_threads(st: dict[str, Any], prev: dict[str, Any],
     claimed_pr = int(prev.get("pr") or st.get("current_pr") or 0)
     threads = github._fetch_unresolved_threads(str(st.get("repo") or ""), claimed_pr)
     if threads is None:
-        review_lib.info(
-            f"⚠ round {round_no} で Resolve したと申告されたスレッドの状態を確認できません"
-            " — チェックを飛ばして続行します"
-        )
+        review_lib.info(f"⚠ round {round_no} で Resolve したと申告されたスレッドの状態を確認できません — チェックを飛ばして続行します")
         return
     open_ids = {t["id"] for t in threads}
     still_open = [i for i in claimed if i in open_ids]
@@ -140,8 +141,7 @@ def cmd_start_round(args: argparse.Namespace) -> None:
     # レビューできる）。**round エントリを保存する前に取る。** 保存の後で取ると、取得の
     # 途中の割り込みで結果の無い round だけが残り、再実行が前のラウンドのチェックで止まる。
     if round_no >= 2:
-        error = github._fetch_existing_comments(
-            str(st.get("repo") or ""), int(pr), store._existing_comments_path(args.pr), strict=True)
+        error = github._fetch_existing_comments(str(st.get("repo") or ""), int(pr), store._existing_comments_path(args.pr), strict=True)
         if error is not None:
             review_lib.info(f"⚠ 既存コメントのスナップショットを取り直せませんでした（{error}）。前のスナップショットのまま進めます")
 
@@ -164,8 +164,7 @@ def cmd_start_round(args: argparse.Namespace) -> None:
     st["rounds"].append(entry)
     store._save(args.pr, st)
 
-    review_lib.info(f"=== Round {round_no} / {max_r} (PR #{pr}, round_in_pr={round_in_pr}"
-         f", レビュー: {' + '.join(reviewers)}) ===")
+    review_lib.info(f"=== Round {round_no} / {max_r} (PR #{pr}, round_in_pr={round_in_pr}, レビュー: {' + '.join(reviewers)}) ===")
     print(f"ROUND={round_no}")
     print(f"REVIEWERS='{' '.join(reviewers)}'")
     if stage is not None:

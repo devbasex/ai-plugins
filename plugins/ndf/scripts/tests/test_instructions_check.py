@@ -4,6 +4,7 @@
 継続的統合は浅い clone で過去のコミットを持たないため、このリポジトリの過去の状態は
 テストから読まない（実例の再現は Pull Request の本文に残す）。
 """
+
 from __future__ import annotations
 
 import json
@@ -21,10 +22,13 @@ SCRIPT = Path(__file__).resolve().parents[1] / "instructions-check.py"
 
 # --- 一時リポジトリの組み立て ------------------------------------------------
 
+
 def git(root: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["git", "-C", str(root), *args],
-        capture_output=True, text=True, check=True,
+        capture_output=True,
+        text=True,
+        check=True,
     )
 
 
@@ -58,7 +62,9 @@ def declare(root: Path, decl: dict) -> None:
 def run(root: Path, *args: str, cwd: Path | None = None) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, str(SCRIPT), "--root", str(root), *args],
-        capture_output=True, text=True, cwd=str(cwd) if cwd else None,
+        capture_output=True,
+        text=True,
+        cwd=str(cwd) if cwd else None,
     )
 
 
@@ -68,11 +74,18 @@ def errors(proc: subprocess.CompletedProcess) -> list[str]:
 
 # --- 走査の対象（AC1〜AC5） --------------------------------------------------
 
+
 def test_ac1_scans_root_and_nested_defaults(tmp_path):
-    root = make_repo(tmp_path, {
-        "AGENTS.md": "# a\n", "CLAUDE.md": "# c\n", "KIRO.md": "# k\n",
-        "docs/AGENTS.md": "# d\n", "docs/other.md": "# o\n",
-    })
+    root = make_repo(
+        tmp_path,
+        {
+            "AGENTS.md": "# a\n",
+            "CLAUDE.md": "# c\n",
+            "KIRO.md": "# k\n",
+            "docs/AGENTS.md": "# d\n",
+            "docs/other.md": "# o\n",
+        },
+    )
     proc = run(root)
     assert proc.returncode == 0, proc.stderr
     assert "4 本" in proc.stdout
@@ -97,18 +110,23 @@ def test_ac3_no_instruction_file_exits_zero(tmp_path):
 
 def test_ac3_unreadable_release_wins_over_no_target(tmp_path):
     root = make_repo(tmp_path, {"README.md": "# r\n"})
-    declare(root, {"version": 1, "released": {
-        "source": "changelog", "path": "CHANGELOG.md",
-        "pattern": r"^## \[(?P<version>\d+\.\d+\.\d+)\]"}})
+    declare(
+        root, {"version": 1, "released": {"source": "changelog", "path": "CHANGELOG.md", "pattern": r"^## \[(?P<version>\d+\.\d+\.\d+)\]"}}
+    )
     proc = run(root)
     assert proc.returncode == 2, proc.stdout + proc.stderr
 
 
 def test_ac4_files_matches_name_or_relative_path(tmp_path):
-    root = make_repo(tmp_path, {
-        "AGENTS.md": "# a\n", "docs/AGENTS.md": "# d\n",
-        "notes/POLICY.md": "# p\n", "POLICY.md": "# root p\n",
-    })
+    root = make_repo(
+        tmp_path,
+        {
+            "AGENTS.md": "# a\n",
+            "docs/AGENTS.md": "# d\n",
+            "notes/POLICY.md": "# p\n",
+            "POLICY.md": "# root p\n",
+        },
+    )
     declare(root, {"version": 1, "files": ["AGENTS.md", "notes/POLICY.md"]})
     proc = run(root)
     assert proc.returncode == 0, proc.stderr
@@ -136,12 +154,12 @@ def test_ac5_files_replaces_the_defaults(tmp_path):
 
 # --- 宣言が無くても動く判定（AC19〜AC31） ------------------------------------
 
+
 def test_ac19_broken_import_is_reported(tmp_path):
     root = make_repo(tmp_path, {"CLAUDE.md": "# c\n\n@docs/none.md を読む\n"})
     proc = run(root)
     assert proc.returncode == 1
-    assert errors(proc) == ["ERROR: [直す] CLAUDE.md:3: "
-                            "@docs/none.md の参照先が無い。参照を消すか実在するパスへ直す"]
+    assert errors(proc) == ["ERROR: [直す] CLAUDE.md:3: @docs/none.md の参照先が無い。参照を消すか実在するパスへ直す"]
 
 
 def test_ac20_non_import_syntax_file_is_not_checked(tmp_path):
@@ -167,9 +185,13 @@ def test_ac22_allowance_on_non_import_syntax_file_is_reported(tmp_path):
 
 
 def test_ac23_reference_resolves_from_the_writing_file(tmp_path):
-    root = make_repo(tmp_path, {
-        "docs/CLAUDE.md": "# d\n\n@x.md\n", "docs/x.md": "x\n",
-    })
+    root = make_repo(
+        tmp_path,
+        {
+            "docs/CLAUDE.md": "# d\n\n@x.md\n",
+            "docs/x.md": "x\n",
+        },
+    )
     proc = run(root)
     assert proc.returncode == 0, proc.stderr + proc.stdout
 
@@ -218,11 +240,14 @@ def test_ac28_emphasis_and_space_are_references(tmp_path):
 
 
 def test_ac29_size_follows_imports_once_and_stops_on_cycle(tmp_path):
-    root = make_repo(tmp_path, {
-        "CLAUDE.md": "@a.md\n@b.md\n",
-        "a.md": "@b.md\n@CLAUDE.md\n",
-        "b.md": "bbbb\n",
-    })
+    root = make_repo(
+        tmp_path,
+        {
+            "CLAUDE.md": "@a.md\n@b.md\n",
+            "a.md": "@b.md\n@CLAUDE.md\n",
+            "b.md": "bbbb\n",
+        },
+    )
     expect = sum((root / n).stat().st_size for n in ("CLAUDE.md", "a.md", "b.md"))
     proc = run(root)
     assert proc.returncode == 0, proc.stderr + proc.stdout
@@ -249,11 +274,11 @@ def test_ac31_note_when_no_declaration(tmp_path):
     root = make_repo(tmp_path, {"CLAUDE.md": "# c\n"})
     proc = run(root)
     assert proc.returncode == 0, proc.stderr
-    assert any(line.startswith("NOTE:") and "宣言" in line
-               for line in proc.stdout.splitlines())
+    assert any(line.startswith("NOTE:") and "宣言" in line for line in proc.stdout.splitlines())
 
 
 # --- 指示の数と観点のデータ（AC32〜AC38） ------------------------------------
+
 
 def test_ac32_instruction_count_is_reported(tmp_path):
     body = (
@@ -276,9 +301,9 @@ def test_ac32_instruction_count_is_reported(tmp_path):
 def test_ac33_missing_criteria_data_exits_two(tmp_path):
     root = make_repo(tmp_path, {"CLAUDE.md": "# c\n"})
     proc = subprocess.run(
-        [sys.executable, str(SCRIPT), "--root", str(root),
-         "--criteria", str(tmp_path / "none.json")],
-        capture_output=True, text=True,
+        [sys.executable, str(SCRIPT), "--root", str(root), "--criteria", str(tmp_path / "none.json")],
+        capture_output=True,
+        text=True,
     )
     assert proc.returncode == 2
 
@@ -291,7 +316,8 @@ def test_ac34_removing_a_criterion_disables_it(tmp_path):
     path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
     proc = subprocess.run(
         [sys.executable, str(SCRIPT), "--root", str(root), "--criteria", str(path)],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     assert proc.returncode == 0, proc.stderr + proc.stdout
 
@@ -299,13 +325,13 @@ def test_ac34_removing_a_criterion_disables_it(tmp_path):
 def test_ac35_unknown_criterion_id_exits_two(tmp_path):
     root = make_repo(tmp_path, {"CLAUDE.md": "# c\n"})
     data = json.loads((SCRIPT.parent / "data" / "instruction-criteria.json").read_text())
-    data["criteria"].append({"id": "unknown-thing", "aspect": 1, "enforce": "error",
-                             "needs": [], "sources": []})
+    data["criteria"].append({"id": "unknown-thing", "aspect": 1, "enforce": "error", "needs": [], "sources": []})
     path = tmp_path / "criteria.json"
     path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
     proc = subprocess.run(
         [sys.executable, str(SCRIPT), "--root", str(root), "--criteria", str(path)],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     assert proc.returncode == 2
 
@@ -321,7 +347,8 @@ def test_ac36_report_criterion_never_fails(tmp_path):
     path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
     proc = subprocess.run(
         [sys.executable, str(SCRIPT), "--root", str(root), "--criteria", str(path)],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     assert proc.returncode == 0, proc.stderr + proc.stdout
 
@@ -334,11 +361,11 @@ def test_ac37_old_criteria_data_emits_note(tmp_path):
     path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
     proc = subprocess.run(
         [sys.executable, str(SCRIPT), "--root", str(root), "--criteria", str(path)],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     assert proc.returncode == 0, proc.stderr + proc.stdout
-    assert any(line.startswith("NOTE:") and "2000-01-01" in line
-               for line in proc.stdout.splitlines())
+    assert any(line.startswith("NOTE:") and "2000-01-01" in line for line in proc.stdout.splitlines())
 
 
 def test_ac38_review_interval_and_reviewed_at(tmp_path):
@@ -351,19 +378,22 @@ def test_ac38_review_interval_and_reviewed_at(tmp_path):
     declare(root, {"version": 1, "review_interval_days": 99999})
     loose = subprocess.run(
         [sys.executable, str(SCRIPT), "--root", str(root), "--criteria", str(path)],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     assert not any("2000-01-01" in line for line in loose.stdout.splitlines())
 
     declare(root, {"version": 1, "reviewed_at": "2000-01-02"})
     dated = subprocess.run(
         [sys.executable, str(SCRIPT), "--root", str(root), "--criteria", str(path)],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     assert any("2000-01-02" in line for line in dated.stdout.splitlines())
 
 
 # --- 出力と終了コード（AC69〜AC71） ------------------------------------------
+
 
 def test_ac70_clean_run_prints_counts_and_sizes(tmp_path):
     root = make_repo(tmp_path, {"CLAUDE.md": "# c\n"})
@@ -382,6 +412,7 @@ def test_ac71_unknown_argument_exits_three(tmp_path):
 
 # --- 走査の範囲と扱い（AC6〜AC18） -------------------------------------------
 
+
 def install_script(root: Path) -> Path:
     """スクリプトの実体を一時リポジトリの中へ置く（NDF の開発リポジトリの判定）。"""
     dest = root / "plugins" / "ndf" / "scripts"
@@ -390,8 +421,9 @@ def install_script(root: Path) -> Path:
     (dest / "instructions-check.py").write_bytes(SCRIPT.read_bytes())
     for name in ("refresh.py", "deps.py", "md.py", "pathmatch.py"):
         (dest / "lib" / name).write_bytes((SCRIPT.parent / "lib" / name).read_bytes())
-    shutil.copytree(SCRIPT.parent / "instructions_lib", dest / "instructions_lib", dirs_exist_ok=True,
-                    ignore=shutil.ignore_patterns("__pycache__"))
+    shutil.copytree(
+        SCRIPT.parent / "instructions_lib", dest / "instructions_lib", dirs_exist_ok=True, ignore=shutil.ignore_patterns("__pycache__")
+    )
     src = SCRIPT.parent / "data" / "instruction-criteria.json"
     (dest / "data" / "instruction-criteria.json").write_bytes(src.read_bytes())
     return dest / "instructions-check.py"
@@ -443,9 +475,24 @@ def test_ac9_ac10_plugin_findings_carry_the_distributor(tmp_path):
     plug.mkdir()
     (plug / "CLAUDE.md").write_text("# p\n\n@none.md\n", encoding="utf-8")
     root = make_repo(tmp_path, {"CLAUDE.md": "# c\n"})
-    declare(root, {"version": 1, "scopes": {"plugins": [
-        {"path": str(plug), "name": "other", "version": "1.0.0",
-         "origin": "acme/other", "update": "claude plugin update other", "ndf": False}]}})
+    declare(
+        root,
+        {
+            "version": 1,
+            "scopes": {
+                "plugins": [
+                    {
+                        "path": str(plug),
+                        "name": "other",
+                        "version": "1.0.0",
+                        "origin": "acme/other",
+                        "update": "claude plugin update other",
+                        "ndf": False,
+                    }
+                ]
+            },
+        },
+    )
     proc = run(root, "--scope", "plugins")
     assert proc.returncode == 1
     line = errors(proc)[0]
@@ -458,9 +505,17 @@ def test_ac10_ndf_true_becomes_file(tmp_path):
     plug.mkdir()
     (plug / "CLAUDE.md").write_text("# p\n\n@none.md\n", encoding="utf-8")
     root = make_repo(tmp_path, {"CLAUDE.md": "# c\n"})
-    declare(root, {"version": 1, "scopes": {"plugins": [
-        {"path": str(plug), "name": "ndf", "version": "1.0.0",
-         "origin": "devbasex/ai-plugins", "update": "u", "ndf": True}]}})
+    declare(
+        root,
+        {
+            "version": 1,
+            "scopes": {
+                "plugins": [
+                    {"path": str(plug), "name": "ndf", "version": "1.0.0", "origin": "devbasex/ai-plugins", "update": "u", "ndf": True}
+                ]
+            },
+        },
+    )
     proc = run(root, "--scope", "plugins")
     assert proc.returncode == 1
     assert "[起票]" in errors(proc)[0]
@@ -472,10 +527,14 @@ def test_ac11_allowances_are_per_scope_root(tmp_path):
     (plug / "CLAUDE.md").write_text("# p\n\n@x.md\n", encoding="utf-8")
     (plug / "x.md").write_text("x\n", encoding="utf-8")
     root = make_repo(tmp_path, {"CLAUDE.md": "# c\n\n@x.md\n", "x.md": "x\n"})
-    declare(root, {"version": 1,
-                   "imports": {"CLAUDE.md": {"x.md": "根の理由"}},
-                   "scopes": {"plugins": [{"path": str(plug), "name": "o", "ndf": False,
-                                           "imports": {}}]}})
+    declare(
+        root,
+        {
+            "version": 1,
+            "imports": {"CLAUDE.md": {"x.md": "根の理由"}},
+            "scopes": {"plugins": [{"path": str(plug), "name": "o", "ndf": False, "imports": {}}]},
+        },
+    )
     proc = run(root, "--scope", "project", "--scope", "plugins")
     assert proc.returncode == 1
     lines = errors(proc)
@@ -502,9 +561,13 @@ def test_ac13_report_line_carries_criterion_and_sources(tmp_path):
     plug.mkdir()
     (plug / "CLAUDE.md").write_text("# p\n\n@none.md\n", encoding="utf-8")
     root = make_repo(tmp_path, {"CLAUDE.md": "# c\n"})
-    declare(root, {"version": 1, "scopes": {"plugins": [
-        {"path": str(plug), "name": "o", "version": "1", "origin": "a/o",
-         "update": "u", "ndf": False}]}})
+    declare(
+        root,
+        {
+            "version": 1,
+            "scopes": {"plugins": [{"path": str(plug), "name": "o", "version": "1", "origin": "a/o", "update": "u", "ndf": False}]},
+        },
+    )
     proc = run(root, "--scope", "plugins")
     line = errors(proc)[0]
     assert "broken-import" in line
@@ -516,8 +579,7 @@ def test_ac13_issue_title_marker(tmp_path):
     plug.mkdir()
     (plug / "CLAUDE.md").write_text("# p\n\n@none.md\n", encoding="utf-8")
     root = make_repo(tmp_path, {"CLAUDE.md": "# c\n"})
-    declare(root, {"version": 1, "scopes": {"plugins": [
-        {"path": str(plug), "name": "ndf", "origin": "devbasex/ai-plugins", "ndf": True}]}})
+    declare(root, {"version": 1, "scopes": {"plugins": [{"path": str(plug), "name": "ndf", "origin": "devbasex/ai-plugins", "ndf": True}]}})
     proc = run(root, "--scope", "plugins")
     assert "[instructions] broken-import" in errors(proc)[0]
 
@@ -534,13 +596,13 @@ def test_ac15_development_repo_makes_everything_fix(tmp_path):
     (plug / "CLAUDE.md").write_text("# p\n\n@none.md\n", encoding="utf-8")
     root = make_repo(tmp_path, {"CLAUDE.md": "# c\n"}, track=False)
     script = install_script(root)
-    declare(root, {"version": 1, "scopes": {"plugins": [
-        {"path": str(plug), "name": "o", "ndf": False}]}})
+    declare(root, {"version": 1, "scopes": {"plugins": [{"path": str(plug), "name": "o", "ndf": False}]}})
     git(root, "add", "-A")
     git(root, "commit", "-q", "-m", "t")
     proc = subprocess.run(
         [sys.executable, str(script), "--root", str(root), "--scope", "plugins"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     assert proc.returncode == 1
     assert "[直す]" in proc.stderr
@@ -548,16 +610,18 @@ def test_ac15_development_repo_makes_everything_fix(tmp_path):
 
 def test_ac18_check_writes_nothing(tmp_path):
     root = make_repo(tmp_path, {"CLAUDE.md": "@none.md\n", "AGENTS.md": "# a\n"})
+
     # `.git` は外す。コミット直後の git の自動保守が `maintenance.lock` を後から作り、揺れる
     def snapshot():
-        return {p: p.stat().st_mtime_ns for p in root.rglob("*")
-                if p.is_file() and ".git" not in p.relative_to(root).parts}
+        return {p: p.stat().st_mtime_ns for p in root.rglob("*") if p.is_file() and ".git" not in p.relative_to(root).parts}
+
     before = snapshot()
     run(root)
     assert snapshot() == before
 
 
 # --- 宣言があるときの判定（AC48〜AC68） --------------------------------------
+
 
 def test_ac48_schema_is_ignored(tmp_path):
     root = make_repo(tmp_path, {"CLAUDE.md": "# c\n"})
@@ -567,8 +631,7 @@ def test_ac48_schema_is_ignored(tmp_path):
 
 
 def test_ac50_unlisted_import_fails_even_when_target_exists(tmp_path):
-    root = make_repo(tmp_path, {"CLAUDE.md": "@x.md\n", "x.md": "x\n",
-                                "docs/CLAUDE.md": "@x.md\n", "docs/x.md": "x\n"})
+    root = make_repo(tmp_path, {"CLAUDE.md": "@x.md\n", "x.md": "x\n", "docs/CLAUDE.md": "@x.md\n", "docs/x.md": "x\n"})
     declare(root, {"version": 1, "imports": {"CLAUDE.md": {"x.md": "理由"}}})
     proc = run(root)
     assert proc.returncode == 1
@@ -604,25 +667,24 @@ CHANGELOG_PATTERN = r"^## \[ndf (?P<version>\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\]
 
 
 def released_decl(**over) -> dict:
-    decl = {"version": 1,
-            "released": {"source": "changelog", "path": "CHANGELOG.md",
-                         "pattern": CHANGELOG_PATTERN},
-            "decisions": "docs/decisions.md"}
+    decl = {
+        "version": 1,
+        "released": {"source": "changelog", "path": "CHANGELOG.md", "pattern": CHANGELOG_PATTERN},
+        "decisions": "docs/decisions.md",
+    }
     decl.update(over)
     return decl
 
 
 def test_ac53_released_paragraphs_and_headings(tmp_path):
-    body = (
-        "# c\n\n"
-        "## v1.0.0 で決めたこと\n\n"
-        "2.0.0 で足した規約である。\n\n"
-        "現行の規約である。\n"
+    body = "# c\n\n## v1.0.0 で決めたこと\n\n2.0.0 で足した規約である。\n\n現行の規約である。\n"
+    root = make_repo(
+        tmp_path,
+        {
+            "CLAUDE.md": body,
+            "CHANGELOG.md": "## [ndf 2.0.0] - 2026-01-01\n## [ndf 1.0.0] - 2025-01-01\n",
+        },
     )
-    root = make_repo(tmp_path, {
-        "CLAUDE.md": body,
-        "CHANGELOG.md": "## [ndf 2.0.0] - 2026-01-01\n## [ndf 1.0.0] - 2025-01-01\n",
-    })
     declare(root, released_decl())
     proc = run(root)
     assert proc.returncode == 1
@@ -635,27 +697,27 @@ def test_ac54_version_check_is_project_only(tmp_path):
     home = tmp_path / "home"
     home.mkdir()
     (home / "CLAUDE.md").write_text("1.0.0 の段落である。\n", encoding="utf-8")
-    root = make_repo(tmp_path, {
-        "CLAUDE.md": "# c\n",
-        "CHANGELOG.md": "## [ndf 2.0.0] - 2026-01-01\n",
-    })
+    root = make_repo(
+        tmp_path,
+        {
+            "CLAUDE.md": "# c\n",
+            "CHANGELOG.md": "## [ndf 2.0.0] - 2026-01-01\n",
+        },
+    )
     declare(root, released_decl(scopes={"user": [{"path": str(home)}]}))
     proc = run(root, "--scope", "project", "--scope", "user")
     assert proc.returncode == 0, proc.stderr + proc.stdout
 
 
 def test_ac55_wrapped_lines_and_list_items(tmp_path):
-    body = (
-        "# c\n\n"
-        "先頭の文である。\n"
-        "1.0.0 までを対象とした。\n\n"
-        "- 1.0.0 の項目\n"
-        "- 1.0.0 の 2 件目\n"
+    body = "# c\n\n先頭の文である。\n1.0.0 までを対象とした。\n\n- 1.0.0 の項目\n- 1.0.0 の 2 件目\n"
+    root = make_repo(
+        tmp_path,
+        {
+            "CLAUDE.md": body,
+            "CHANGELOG.md": "## [ndf 2.0.0] - 2026-01-01\n",
+        },
     )
-    root = make_repo(tmp_path, {
-        "CLAUDE.md": body,
-        "CHANGELOG.md": "## [ndf 2.0.0] - 2026-01-01\n",
-    })
     declare(root, released_decl())
     proc = run(root)
     assert proc.returncode == 1
@@ -663,10 +725,13 @@ def test_ac55_wrapped_lines_and_list_items(tmp_path):
 
 
 def test_ac56_newer_paragraph_is_not_reported(tmp_path):
-    root = make_repo(tmp_path, {
-        "CLAUDE.md": "# c\n\n3.0.0 で決めたことである。\n",
-        "CHANGELOG.md": "## [ndf 2.0.0] - 2026-01-01\n",
-    })
+    root = make_repo(
+        tmp_path,
+        {
+            "CLAUDE.md": "# c\n\n3.0.0 で決めたことである。\n",
+            "CHANGELOG.md": "## [ndf 2.0.0] - 2026-01-01\n",
+        },
+    )
     declare(root, released_decl())
     assert run(root).returncode == 0
 
@@ -675,34 +740,42 @@ def test_ac57_ac58_tags_source_and_maximum(tmp_path):
     root = make_repo(tmp_path, {"CLAUDE.md": "# c\n\n10.9.0 の段落である。\n"})
     for tag in ("ndf--v10.9.0", "ndf--v10.10.0"):
         git(root, "tag", tag)
-    declare(root, {"version": 1, "released": {
-        "source": "tags",
-        "pattern": r"^ndf--v(?P<version>\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$"}})
+    declare(root, {"version": 1, "released": {"source": "tags", "pattern": r"^ndf--v(?P<version>\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$"}})
     proc = run(root)
     assert proc.returncode == 1
     assert "最新は 10.10.0" in errors(proc)[0]
 
 
 def test_ac58_suffix_is_older_than_release(tmp_path):
-    root = make_repo(tmp_path, {
-        "CLAUDE.md": "# c\n",
-        "CHANGELOG.md": "## [ndf 10.15.0-dev.1]\n## [ndf 10.15.0]\n",
-    })
+    root = make_repo(
+        tmp_path,
+        {
+            "CLAUDE.md": "# c\n",
+            "CHANGELOG.md": "## [ndf 10.15.0-dev.1]\n## [ndf 10.15.0]\n",
+        },
+    )
     declare(root, released_decl())
     proc = run(root, "--report")
     assert proc.returncode == 0, proc.stderr + proc.stdout
 
 
-@pytest.mark.parametrize("versions,newest", [
-    (["10.15.0-dev", "10.15.0-dev.1"], "10.15.0-dev.1"),
-    (["10.15.0-dev.2", "10.15.0-dev.10"], "10.15.0-dev.10"),
-    (["10.15.0-dev.10", "10.15.0-rc"], "10.15.0-rc"),
-])
+@pytest.mark.parametrize(
+    "versions,newest",
+    [
+        (["10.15.0-dev", "10.15.0-dev.1"], "10.15.0-dev.1"),
+        (["10.15.0-dev.2", "10.15.0-dev.10"], "10.15.0-dev.10"),
+        (["10.15.0-dev.10", "10.15.0-rc"], "10.15.0-rc"),
+    ],
+)
 def test_ac59_prerelease_order(tmp_path, versions, newest):
     log = "".join(f"## [ndf {v}]\n" for v in versions)
-    root = make_repo(tmp_path, {
-        "CLAUDE.md": "# c\n\n0.1.0 の段落である。\n", "CHANGELOG.md": log,
-    })
+    root = make_repo(
+        tmp_path,
+        {
+            "CLAUDE.md": "# c\n\n0.1.0 の段落である。\n",
+            "CHANGELOG.md": log,
+        },
+    )
     declare(root, released_decl())
     proc = run(root)
     assert proc.returncode == 1
@@ -711,24 +784,22 @@ def test_ac59_prerelease_order(tmp_path, versions, newest):
 
 def test_ac60_pattern_without_named_group(tmp_path):
     root = make_repo(tmp_path, {"CLAUDE.md": "# c\n", "CHANGELOG.md": "## [ndf 1.0.0]\n"})
-    declare(root, released_decl(released={
-        "source": "changelog", "path": "CHANGELOG.md", "pattern": r"^## \[ndf (.+)\]"}))
+    declare(root, released_decl(released={"source": "changelog", "path": "CHANGELOG.md", "pattern": r"^## \[ndf (.+)\]"}))
     assert run(root).returncode == 2
 
 
 @pytest.mark.parametrize("bad", ["10.15.0-dev..1", "10.15.0-dev.01", "10.15"])
 def test_ac61_bad_version_form(tmp_path, bad):
     root = make_repo(tmp_path, {"CLAUDE.md": "# c\n", "CHANGELOG.md": f"## [ndf {bad}]\n"})
-    declare(root, released_decl(released={
-        "source": "changelog", "path": "CHANGELOG.md",
-        "pattern": r"^## \[ndf (?P<version>[0-9A-Za-z.-]+)\]"}))
+    declare(
+        root, released_decl(released={"source": "changelog", "path": "CHANGELOG.md", "pattern": r"^## \[ndf (?P<version>[0-9A-Za-z.-]+)\]"})
+    )
     assert run(root).returncode == 2
 
 
 def test_ac62_released_path_outside_root(tmp_path):
     root = make_repo(tmp_path, {"CLAUDE.md": "# c\n"})
-    declare(root, released_decl(released={
-        "source": "changelog", "path": "../outside.md", "pattern": CHANGELOG_PATTERN}))
+    declare(root, released_decl(released={"source": "changelog", "path": "../outside.md", "pattern": CHANGELOG_PATTERN}))
     assert run(root).returncode == 2
 
 
@@ -742,8 +813,7 @@ def test_ac63_no_version_stops_before_scanning(tmp_path):
 
 def test_ac64_pending_marker(tmp_path):
     body = "# c\n\n2.0.0 の次の版で決めたことである。\n\n1.0.0 の次の版で決めたことである。\n"
-    root = make_repo(tmp_path, {
-        "CLAUDE.md": body, "CHANGELOG.md": "## [ndf 2.0.0]\n"})
+    root = make_repo(tmp_path, {"CLAUDE.md": body, "CHANGELOG.md": "## [ndf 2.0.0]\n"})
     declare(root, released_decl(pending_marker="の次の版で"))
     proc = run(root)
     assert proc.returncode == 1
@@ -753,8 +823,7 @@ def test_ac64_pending_marker(tmp_path):
 
 
 def test_ac65_finding_names_the_decisions_target(tmp_path):
-    root = make_repo(tmp_path, {
-        "CLAUDE.md": "# c\n\n1.0.0 の段落である。\n", "CHANGELOG.md": "## [ndf 2.0.0]\n"})
+    root = make_repo(tmp_path, {"CLAUDE.md": "# c\n\n1.0.0 の段落である。\n", "CHANGELOG.md": "## [ndf 2.0.0]\n"})
     declare(root, released_decl())
     assert "docs/decisions.md" in errors(run(root))[0]
 
@@ -769,15 +838,17 @@ def test_ac66_budget_is_per_root_file(tmp_path):
     assert "CLAUDE.md" in lines[0]
 
 
-@pytest.mark.parametrize("decl", [
-    "not json",
-    json.dumps({"files": ["AGENTS.md"]}),
-    json.dumps({"version": 99}),
-    json.dumps({"version": 1, "files": "AGENTS.md"}),
-    json.dumps({"version": 1, "released": {"source": "changelog", "path": "c.md",
-                                           "pattern": "(?P<version>["}}),
-    json.dumps({"version": 1, "pending_marker": ""}),
-])
+@pytest.mark.parametrize(
+    "decl",
+    [
+        "not json",
+        json.dumps({"files": ["AGENTS.md"]}),
+        json.dumps({"version": 99}),
+        json.dumps({"version": 1, "files": "AGENTS.md"}),
+        json.dumps({"version": 1, "released": {"source": "changelog", "path": "c.md", "pattern": "(?P<version>["}}),
+        json.dumps({"version": 1, "pending_marker": ""}),
+    ],
+)
 def test_ac67_broken_declaration(tmp_path, decl):
     root = make_repo(tmp_path, {"CLAUDE.md": "# c\n"})
     path = root / ".ndf" / "instructions.json"
@@ -786,13 +857,16 @@ def test_ac67_broken_declaration(tmp_path, decl):
     assert run(root).returncode == 2
 
 
-@pytest.mark.parametrize("over", [
-    {"import_depth": 0},
-    {"refresh_timeout_seconds": -1},
-    {"review_interval_days": 0},
-    {"budget": {"bytes": 0}},
-    {"reviewed_at": "きのう"},
-])
+@pytest.mark.parametrize(
+    "over",
+    [
+        {"import_depth": 0},
+        {"refresh_timeout_seconds": -1},
+        {"review_interval_days": 0},
+        {"budget": {"bytes": 0}},
+        {"reviewed_at": "きのう"},
+    ],
+)
 def test_ac68_out_of_range_values(tmp_path, over):
     root = make_repo(tmp_path, {"CLAUDE.md": "# c\n"})
     declare(root, {"version": 1, **over})
@@ -861,14 +935,14 @@ def criteria_file(tmp_path: Path, **over) -> Path:
 
 
 def test_ac39_ac43_refresh_lists_one_row_per_source(module, tmp_path, capsys):
-    path = criteria_file(tmp_path, sources=[
-        {"id": "a", "name": "出典 A", "url": "https://example.invalid/a",
-         "checked_at": "2026-09-17", "claim": "主張 A"},
-        {"id": "b", "name": "出典 B", "url": "https://example.invalid/b",
-         "checked_at": "2026-09-01", "claim": "主張 B"},
-    ])
-    module.refresh_lib.fetch = lambda url, timeout, opener=None: module.refresh_lib.FetchResult(
-        url=url, ok=True, fingerprint="sha256:x")
+    path = criteria_file(
+        tmp_path,
+        sources=[
+            {"id": "a", "name": "出典 A", "url": "https://example.invalid/a", "checked_at": "2026-09-17", "claim": "主張 A"},
+            {"id": "b", "name": "出典 B", "url": "https://example.invalid/b", "checked_at": "2026-09-01", "claim": "主張 B"},
+        ],
+    )
+    module.refresh_lib.fetch = lambda url, timeout, opener=None: module.refresh_lib.FetchResult(url=url, ok=True, fingerprint="sha256:x")
     root = make_repo(tmp_path, {"CLAUDE.md": "# c\n"})
     code = module.main(["--root", str(root), "--refresh", "--criteria", str(path)])
     out = capsys.readouterr().out.splitlines()
@@ -879,15 +953,17 @@ def test_ac39_ac43_refresh_lists_one_row_per_source(module, tmp_path, capsys):
 
 
 def test_ac42_fingerprint_comparison(module, tmp_path, capsys):
-    path = criteria_file(tmp_path, sources=[
-        {"id": "same", "name": "同じ", "url": "u1", "claim": "c",
-         "fingerprint": "sha256:known"},
-        {"id": "diff", "name": "違う", "url": "u2", "claim": "c",
-         "fingerprint": "sha256:other"},
-        {"id": "none", "name": "記録なし", "url": "u3", "claim": "c"},
-    ])
+    path = criteria_file(
+        tmp_path,
+        sources=[
+            {"id": "same", "name": "同じ", "url": "u1", "claim": "c", "fingerprint": "sha256:known"},
+            {"id": "diff", "name": "違う", "url": "u2", "claim": "c", "fingerprint": "sha256:other"},
+            {"id": "none", "name": "記録なし", "url": "u3", "claim": "c"},
+        ],
+    )
     module.refresh_lib.fetch = lambda url, timeout, opener=None: module.refresh_lib.FetchResult(
-        url=url, ok=True, fingerprint="sha256:known")
+        url=url, ok=True, fingerprint="sha256:known"
+    )
     root = make_repo(tmp_path, {"CLAUDE.md": "# c\n"})
     module.main(["--root", str(root), "--refresh", "--criteria", str(path)])
     out = capsys.readouterr().out.splitlines()
@@ -898,8 +974,7 @@ def test_ac42_fingerprint_comparison(module, tmp_path, capsys):
 
 def test_ac40_timeout_priority(module, tmp_path, capsys):
     seen: list[float] = []
-    path = criteria_file(tmp_path, sources=[
-        {"id": "a", "name": "A", "url": "u", "claim": "c"}])
+    path = criteria_file(tmp_path, sources=[{"id": "a", "name": "A", "url": "u", "claim": "c"}])
 
     def spy(url, timeout, opener=None):
         seen.append(timeout)
@@ -914,8 +989,7 @@ def test_ac40_timeout_priority(module, tmp_path, capsys):
     module.main(["--root", str(root), "--refresh", "--criteria", str(path)])
     assert seen[-1] == 3
 
-    module.main(["--root", str(root), "--refresh", "--criteria", str(path),
-                 "--refresh-timeout", "1"])
+    module.main(["--root", str(root), "--refresh", "--criteria", str(path), "--refresh-timeout", "1"])
     assert seen[-1] == 1
     capsys.readouterr()
 
@@ -925,21 +999,20 @@ def test_ac41_timeout_is_total_elapsed():
     import refresh as refresh_lib
 
     started = time.monotonic()
-    result = refresh_lib.fetch(
-        "https://example.invalid/slow", 0.3,
-        opener=lambda url, timeout: FakeResponse(b"", delay=0.02, forever=True))
+    result = refresh_lib.fetch("https://example.invalid/slow", 0.3, opener=lambda url, timeout: FakeResponse(b"", delay=0.02, forever=True))
     elapsed = time.monotonic() - started
     assert not result.ok
     assert "待ち" in (result.error or "")
     assert elapsed < 2.0
 
 
-@pytest.mark.parametrize(("failure", "expected_error"), [
-    (urllib.error.HTTPError("https://example.invalid", 503, "unavailable", {}, None),
-     "HTTP 503"),
-    (urllib.error.URLError("name resolution failed"),
-     "接続できない（name resolution failed）"),
-])
+@pytest.mark.parametrize(
+    ("failure", "expected_error"),
+    [
+        (urllib.error.HTTPError("https://example.invalid", 503, "unavailable", {}, None), "HTTP 503"),
+        (urllib.error.URLError("name resolution failed"), "接続できない（name resolution failed）"),
+    ],
+)
 def test_fetch_returns_the_opener_error(failure, expected_error):
     sys.path.insert(0, str(SCRIPT.parent / "lib"))
     import refresh as refresh_lib
@@ -947,8 +1020,7 @@ def test_fetch_returns_the_opener_error(failure, expected_error):
     def failing_opener(url, timeout):
         raise failure
 
-    result = refresh_lib.fetch(
-        "https://example.invalid/source", 1, opener=failing_opener)
+    result = refresh_lib.fetch("https://example.invalid/source", 1, opener=failing_opener)
 
     assert result.ok is False
     assert result.error == expected_error
@@ -956,20 +1028,18 @@ def test_fetch_returns_the_opener_error(failure, expected_error):
 
 def test_ac44_refresh_writes_nothing(tmp_path):
     root = make_repo(tmp_path, {"CLAUDE.md": "# c\n"})
-    path = criteria_file(tmp_path, sources=[
-        {"id": "a", "name": "A", "url": "http://127.0.0.1:1/a", "claim": "c"}])
+    path = criteria_file(tmp_path, sources=[{"id": "a", "name": "A", "url": "http://127.0.0.1:1/a", "claim": "c"}])
 
     # .git 配下は git の背景の保守が一時ファイルを作って消すため、比べる対象から外す
     def snapshot():
-        return {p: p.stat().st_mtime_ns for p in root.rglob("*")
-                if ".git" not in p.relative_to(root).parts and p.is_file()}
+        return {p: p.stat().st_mtime_ns for p in root.rglob("*") if ".git" not in p.relative_to(root).parts and p.is_file()}
 
     before = snapshot()
     before[path] = path.stat().st_mtime_ns
     subprocess.run(
-        [sys.executable, str(SCRIPT), "--root", str(root), "--refresh",
-         "--criteria", str(path), "--refresh-timeout", "1"],
-        capture_output=True, text=True,
+        [sys.executable, str(SCRIPT), "--root", str(root), "--refresh", "--criteria", str(path), "--refresh-timeout", "1"],
+        capture_output=True,
+        text=True,
     )
     after = snapshot()
     after[path] = path.stat().st_mtime_ns
@@ -978,12 +1048,11 @@ def test_ac44_refresh_writes_nothing(tmp_path):
 
 def test_ac45_ac46_unreachable_refresh_exits_two_but_check_is_zero(tmp_path):
     root = make_repo(tmp_path, {"CLAUDE.md": "# c\n"})
-    path = criteria_file(tmp_path, sources=[
-        {"id": "a", "name": "届かない", "url": "http://127.0.0.1:1/a", "claim": "c"}])
+    path = criteria_file(tmp_path, sources=[{"id": "a", "name": "届かない", "url": "http://127.0.0.1:1/a", "claim": "c"}])
     refreshed = subprocess.run(
-        [sys.executable, str(SCRIPT), "--root", str(root), "--refresh",
-         "--criteria", str(path), "--refresh-timeout", "2"],
-        capture_output=True, text=True,
+        [sys.executable, str(SCRIPT), "--root", str(root), "--refresh", "--criteria", str(path), "--refresh-timeout", "2"],
+        capture_output=True,
+        text=True,
     )
     assert refreshed.returncode == 2
     assert "取得できなかった" in refreshed.stdout
@@ -991,16 +1060,20 @@ def test_ac45_ac46_unreachable_refresh_exits_two_but_check_is_zero(tmp_path):
 
     checked = subprocess.run(
         [sys.executable, str(SCRIPT), "--root", str(root), "--criteria", str(path)],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     assert checked.returncode == 0, checked.stderr
 
 
 def test_ac47_partial_failure_lists_all_and_exits_two(module, tmp_path, capsys):
-    path = criteria_file(tmp_path, sources=[
-        {"id": "ok", "name": "取れる", "url": "u1", "claim": "c"},
-        {"id": "ng", "name": "取れない", "url": "u2", "claim": "c"},
-    ])
+    path = criteria_file(
+        tmp_path,
+        sources=[
+            {"id": "ok", "name": "取れる", "url": "u1", "claim": "c"},
+            {"id": "ng", "name": "取れない", "url": "u2", "claim": "c"},
+        ],
+    )
 
     def half(url, timeout, opener=None):
         if url == "u1":
@@ -1036,12 +1109,15 @@ echo "exit=$rc"
 """
 
 
-@pytest.mark.parametrize("files,decl,extra,expected", [
-    ({"CLAUDE.md": "# c\n"}, None, "", 0),
-    ({"CLAUDE.md": "@none.md\n"}, None, "", 1),
-    ({"CLAUDE.md": "# c\n"}, {"version": 99}, "", 2),
-    ({"CLAUDE.md": "# c\n"}, None, "--nope", 3),
-])
+@pytest.mark.parametrize(
+    "files,decl,extra,expected",
+    [
+        ({"CLAUDE.md": "# c\n"}, None, "", 0),
+        ({"CLAUDE.md": "@none.md\n"}, None, "", 1),
+        ({"CLAUDE.md": "# c\n"}, {"version": 99}, "", 2),
+        ({"CLAUDE.md": "# c\n"}, None, "--nope", 3),
+    ],
+)
 def test_ac74_block_keeps_the_exit_code(tmp_path, files, decl, extra, expected):
     root = make_repo(tmp_path, files)
     if decl is not None:
@@ -1050,15 +1126,16 @@ def test_ac74_block_keeps_the_exit_code(tmp_path, files, decl, extra, expected):
         path.write_text(json.dumps(decl), encoding="utf-8")
     proc = subprocess.run(
         ["bash", "-c", BLOCK],
-        capture_output=True, text=True,
-        env={**os.environ, "SCRIPTS": str(SCRIPT.parent), "ROOT": str(root),
-             "EXTRA": extra},
+        capture_output=True,
+        text=True,
+        env={**os.environ, "SCRIPTS": str(SCRIPT.parent), "ROOT": str(root), "EXTRA": extra},
     )
     assert proc.returncode == expected, proc.stdout + proc.stderr
     assert f"exit={expected}" in proc.stdout
 
 
 # --- 待ちの見張りと、走査の実体のパス（レビューの指摘） ----------------------
+
 
 class SlowOnceResponse:
     """1 回の読み取りが待ちを越える相手。socket を持たない。"""
@@ -1111,14 +1188,14 @@ class SocketResponse:
 def _refresh_lib():
     sys.path.insert(0, str(SCRIPT.parent / "lib"))
     import refresh as module
+
     return module
 
 
 def test_single_read_over_the_deadline_is_a_failure():
     """1 回の読み取りが待ちを越えても、取得の失敗として返る。"""
     lib = _refresh_lib()
-    result = lib.fetch("https://example.invalid/slow", 0.2,
-                       opener=lambda url, timeout: SlowOnceResponse(0.5))
+    result = lib.fetch("https://example.invalid/slow", 0.2, opener=lambda url, timeout: SlowOnceResponse(0.5))
     assert not result.ok
     assert "待ち" in (result.error or "")
 
@@ -1126,8 +1203,7 @@ def test_single_read_over_the_deadline_is_a_failure():
 def test_unbounded_read_is_named_in_the_reason():
     """socket へ届かなかったことを、越えたときの理由に残す。"""
     lib = _refresh_lib()
-    result = lib.fetch("https://example.invalid/slow", 0.2,
-                       opener=lambda url, timeout: SlowOnceResponse(0.5))
+    result = lib.fetch("https://example.invalid/slow", 0.2, opener=lambda url, timeout: SlowOnceResponse(0.5))
     assert "socket" in (result.error or "")
 
 
@@ -1135,8 +1211,7 @@ def test_socket_timeout_is_delivered_when_available():
     """socket を持つ相手では `settimeout` が呼ばれ、理由に但し書きが付かない。"""
     lib = _refresh_lib()
     response = SocketResponse()
-    result = lib.fetch("https://example.invalid/ok", 5,
-                       opener=lambda url, timeout: response)
+    result = lib.fetch("https://example.invalid/ok", 5, opener=lambda url, timeout: response)
     assert result.ok
     assert response.sock.values, "settimeout が呼ばれていない"
     assert all(0 < value <= 5 for value in response.sock.values)
@@ -1163,11 +1238,14 @@ def test_tracked_instruction_file_outside_root_is_skipped(tmp_path):
     assert "CLAUDE.md" not in proc.stdout
 
 
-@pytest.mark.parametrize("imports", [
-    {"CLAUDE.md": 1},
-    {"CLAUDE.md": {"x.md": 1}},
-    {"CLAUDE.md": ["x.md"]},
-])
+@pytest.mark.parametrize(
+    "imports",
+    [
+        {"CLAUDE.md": 1},
+        {"CLAUDE.md": {"x.md": 1}},
+        {"CLAUDE.md": ["x.md"]},
+    ],
+)
 def test_broken_imports_shape_exits_two(tmp_path, imports):
     root = make_repo(tmp_path, {"CLAUDE.md": "# c\n"})
     declare(root, {"version": 1, "imports": imports})
@@ -1177,8 +1255,7 @@ def test_broken_imports_shape_exits_two(tmp_path, imports):
 
 def test_broken_scope_imports_shape_exits_two(tmp_path):
     root = make_repo(tmp_path, {"CLAUDE.md": "# c\n"})
-    declare(root, {"version": 1, "scopes": {
-        "user": [{"path": str(tmp_path / "home"), "imports": {"CLAUDE.md": 1}}]}})
+    declare(root, {"version": 1, "scopes": {"user": [{"path": str(tmp_path / "home"), "imports": {"CLAUDE.md": 1}}]}})
     proc = run(root)
     assert proc.returncode == 2, proc.stdout + proc.stderr
 
@@ -1228,6 +1305,7 @@ LIB_ORDER = ["model", "declaration", "collect", "findings", "versions", "report"
 def test_moved_names_are_reexported_from_the_entry_point(module):
     """分けた先の名前（先頭が _ のものを含む）を、エントリポイントの名前空間から同じオブジェクトで引ける。"""
     import ast
+
     for name in LIB_ORDER:
         path = SCRIPT.parent / "instructions_lib" / f"{name}.py"
         lib = sys.modules[f"instructions_lib.{name}"]
@@ -1242,6 +1320,7 @@ def test_moved_names_are_reexported_from_the_entry_point(module):
 def test_instructions_lib_imports_point_one_way():
     """import の向きは model ← declaration ← collect ← findings・versions ← report ← 本体の一方向。"""
     import ast
+
     for i, name in enumerate(LIB_ORDER):
         path = SCRIPT.parent / "instructions_lib" / f"{name}.py"
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
@@ -1254,7 +1333,6 @@ def test_entry_point_runs_from_a_copy_without_lib_on_sys_path(tmp_path):
     """複製した先（instructions_lib/ を隣に置いた形）からも、カレントに依らず動く。"""
     root = make_repo(tmp_path, {"AGENTS.md": "# 指示\n\n- 1 つ\n"})
     script = install_script(root)
-    p = subprocess.run([sys.executable, str(script), "--root", str(root)], capture_output=True, text=True,
-                       cwd=str(tmp_path))
+    p = subprocess.run([sys.executable, str(script), "--root", str(root)], capture_output=True, text=True, cwd=str(tmp_path))
     assert p.returncode == 0, p.stderr
     assert "AGENTS.md" in p.stdout

@@ -1,4 +1,5 @@
 """テストのプロセスの実行と打ち切り。プロセスグループごと止める。"""
+
 from __future__ import annotations
 
 import os
@@ -13,7 +14,10 @@ from .paths import git_out
 
 
 def run_with_timeout(
-    command: "str | list[str]", cwd: str, timeout: int, kill_grace: float = 5.0,
+    command: "str | list[str]",
+    cwd: str,
+    timeout: int,
+    kill_grace: float = 5.0,
     output: Optional[pathlib.Path] = None,
 ) -> tuple[Optional[int], bool]:
     """テストコマンドを実行し `(終了コード, 打ち切ったか)` を返す。
@@ -33,7 +37,10 @@ def run_with_timeout(
     sink = open(output, "wb") if output is not None else None
     try:
         proc = subprocess.Popen(
-            command, shell=isinstance(command, str), cwd=cwd, start_new_session=True,
+            command,
+            shell=isinstance(command, str),
+            cwd=cwd,
+            start_new_session=True,
             stdout=sink if sink is not None else subprocess.PIPE,
             stderr=subprocess.STDOUT if sink is not None else subprocess.PIPE,
         )
@@ -63,7 +70,10 @@ def run_with_timeout(
 
 
 def run_capture(
-    argv: list[str], cwd: str, timeout: float, kill_grace: float = 5.0,
+    argv: list[str],
+    cwd: str,
+    timeout: float,
+    kill_grace: float = 5.0,
 ) -> tuple[Optional[int], str, str, bool]:
     """語の並びを締め切りつきで走らせ `(終了コード, 標準出力, 標準エラー, 打ち切ったか)` を返す。
 
@@ -73,8 +83,12 @@ def run_capture(
     """
     try:
         proc = subprocess.Popen(
-            argv, cwd=cwd, start_new_session=True, stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            argv,
+            cwd=cwd,
+            start_new_session=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
         )
     except OSError as exc:
         return 127, "", f"起動できませんでした: {exc}", False
@@ -90,8 +104,7 @@ def run_capture(
         except subprocess.TimeoutExpired:
             proc.kill()
         return None, "", "", True
-    return (proc.returncode, out.decode("utf-8", errors="replace"),
-            err.decode("utf-8", errors="replace"), False)
+    return (proc.returncode, out.decode("utf-8", errors="replace"), err.decode("utf-8", errors="replace"), False)
 
 
 def _process_group_alive(pgid: int) -> bool:
@@ -106,9 +119,7 @@ def _process_group_alive(pgid: int) -> bool:
         return True
 
 
-def _kill_process_group(
-    proc: "subprocess.Popen[bytes]", grace: float = 5.0
-) -> None:
+def _kill_process_group(proc: "subprocess.Popen[bytes]", grace: float = 5.0) -> None:
     """プロセスグループごと止める。SIGTERM のあと、残っていれば SIGKILL。
 
     **親シェルの終了で打ち切らない。** 親が終わっても、SIGTERM を無視する子は
@@ -144,8 +155,12 @@ def _kill_process_group(
 
 
 def run_test_at(
-    work: str, sha: str, command: str, head_branch: str,
-    timeout: int, kill_grace: float = 5.0,
+    work: str,
+    sha: str,
+    command: str,
+    head_branch: str,
+    timeout: int,
+    kill_grace: float = 5.0,
 ) -> str:
     """指定コミットを取り出してテストを実行し `pass` / `fail` を返す。
 
@@ -168,6 +183,4 @@ def run_test_at(
             return "fail"
         return "pass" if code == 0 else "fail"
     finally:
-        subprocess.run(
-            ["git", "checkout", *back], cwd=work, capture_output=True, text=True
-        )
+        subprocess.run(["git", "checkout", *back], cwd=work, capture_output=True, text=True)

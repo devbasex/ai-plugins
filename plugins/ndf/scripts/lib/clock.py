@@ -11,6 +11,7 @@
 
 読み取り（`parse`）はどの形も受ける。Python 3.10 の `fromisoformat` は `Z` を読めないため、先に `+00:00` へ置き換える。
 """
+
 from __future__ import annotations
 
 import datetime as _dt

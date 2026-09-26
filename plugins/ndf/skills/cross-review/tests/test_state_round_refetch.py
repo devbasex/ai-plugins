@@ -3,6 +3,7 @@
 2 ラウンド目以降だけ取り直す / 失敗したら前のスナップショットを残して `⚠` / 巻き直しの後は新しい PR。
 GitHub は呼ばない。スナップショットの取得は偽の `fetch-pr-comments.sh` に差し替える。
 """
+
 from __future__ import annotations
 
 import json
@@ -25,8 +26,7 @@ _RUN = subprocess.run
 
 
 def _git(repo: pathlib.Path, *argv: str) -> str:
-    return _RUN(["git", "-C", str(repo), *argv], check=True,
-                capture_output=True, text=True).stdout.strip()
+    return _RUN(["git", "-C", str(repo), *argv], check=True, capture_output=True, text=True).stdout.strip()
 
 
 @pytest.fixture()
@@ -48,16 +48,16 @@ def fake_fetch(tmp_path, state_mod, monkeypatch):
     log = tmp_path / "fetch.log"
     script = tmp_path / "fetch-pr-comments.sh"
     script.write_text(
-        "#!/usr/bin/env bash\n"
-        f'echo "$*" >> "{log}"\n'
-        'echo "[PR-COMMENT] [bot] ${FAKE_BODY:-new}"\n'
-        'exit "${FAKE_RC:-0}"\n', encoding="utf-8")
+        f'#!/usr/bin/env bash\necho "$*" >> "{log}"\necho "[PR-COMMENT] [bot] ${{FAKE_BODY:-new}}"\nexit "${{FAKE_RC:-0}}"\n',
+        encoding="utf-8",
+    )
     script.chmod(0o755)
     monkeypatch.setattr(review_lib.github, "FETCH_COMMENTS_SCRIPT", script)
     monkeypatch.setattr(subprocess, "run", _RUN)
 
     def calls() -> list[str]:
         return log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+
     return calls
 
 
@@ -69,18 +69,28 @@ def start(state_mod, monkeypatch, tmp_path, repo):
     monkeypatch.setattr(review_lib.commands.start_round, "_guard_previous_round", lambda st, prev: None)
     heads: dict[str, str] = {}
     monkeypatch.setattr(
-        review_lib.commands.start_round, "_sync_before_round",
-        lambda st, pr: review_lib.workspace.HeadRef("feat/x", heads["oid"], False) if heads.get("oid") else None)
+        review_lib.commands.start_round,
+        "_sync_before_round",
+        lambda st, pr: review_lib.workspace.HeadRef("feat/x", heads["oid"], False) if heads.get("oid") else None,
+    )
 
     def write_state(rounds: list[dict], current_pr: int = PR) -> None:
         st = {
-            "started_at": "x", "max_rounds": 12, "rotate_after": 8, "only": "codex",
-            "current_pr": current_pr, "worktree_path": str(repo), "tmp_dir": str(tmp_path),
-            "repo": REPO, "head_branch": "feat/x", "host": "claude",
-            "pr_history": [], "rounds": rounds, "final": None,
+            "started_at": "x",
+            "max_rounds": 12,
+            "rotate_after": 8,
+            "only": "codex",
+            "current_pr": current_pr,
+            "worktree_path": str(repo),
+            "tmp_dir": str(tmp_path),
+            "repo": REPO,
+            "head_branch": "feat/x",
+            "host": "claude",
+            "pr_history": [],
+            "rounds": rounds,
+            "final": None,
         }
-        (tmp_path / f"cross-review-pr{PR}-state.json").write_text(
-            json.dumps(st), encoding="utf-8")
+        (tmp_path / f"cross-review-pr{PR}-state.json").write_text(json.dumps(st), encoding="utf-8")
 
     def run(head: str | None) -> None:
         heads["oid"] = head
@@ -95,6 +105,7 @@ def _existing(tmp_path) -> pathlib.Path:
 
 
 # ---------- 既存コメントのスナップショットの取り直し（AC12〜AC13） ----------
+
 
 def test_the_second_round_refetches_the_comments(start, repo, tmp_path, fake_fetch, monkeypatch):
     """AC12: 2 ラウンド目で取り直し、スナップショットが新しい中身になる。`--strict` を付ける。"""
@@ -117,14 +128,12 @@ def test_the_first_round_does_not_refetch(start, repo, tmp_path, fake_fetch):
 def test_after_rotation_the_new_pr_is_fetched(start, repo, tmp_path, fake_fetch):
     """AC12b: 巻き直しの後の最初のラウンドは新しい PR の番号で取り直す。"""
     head = _git(repo, "rev-parse", "HEAD")
-    start.write_state([{"round": 1, "pr": PR, "head_sha": head, "reviewers": ["codex"]}],
-                      current_pr=PR + 1)
+    start.write_state([{"round": 1, "pr": PR, "head_sha": head, "reviewers": ["codex"]}], current_pr=PR + 1)
     start(head)
     assert fake_fetch() == [f"--strict {REPO} {PR + 1}"]
 
 
-def test_a_failed_refetch_keeps_the_previous_snapshot(
-        start, repo, tmp_path, fake_fetch, monkeypatch, capsys):
+def test_a_failed_refetch_keeps_the_previous_snapshot(start, repo, tmp_path, fake_fetch, monkeypatch, capsys):
     """AC12a AC13: 取得元の 1 つでも失敗すれば（終了コード 1）前のスナップショットを残し、`⚠` で続ける。"""
     head = _git(repo, "rev-parse", "HEAD")
     _existing(tmp_path).write_text("[PR-COMMENT] [bot] old\n", encoding="utf-8")
@@ -147,8 +156,7 @@ def test_init_fetch_is_not_strict(state_mod, tmp_path, fake_fetch, monkeypatch):
     assert review_lib.github._fetch_existing_comments(REPO, PR, path, strict=False)
 
 
-def test_init_aborts_without_a_state_file_when_the_fetch_fails(
-        state_mod, tmp_path, fake_fetch, monkeypatch):
+def test_init_aborts_without_a_state_file_when_the_fetch_fails(state_mod, tmp_path, fake_fetch, monkeypatch):
     """`init` はスナップショットの取得に失敗すると中断し、状態ファイルを作らない（R2-005 の現状固定）。
 
     重複検出が無効のままレビューを始めないためである。取得は `--strict` を付けない 1 回。
@@ -158,18 +166,28 @@ def test_init_aborts_without_a_state_file_when_the_fetch_fails(
     monkeypatch.setenv("FAKE_RC", "1")
     worktree = tmp_path / "wt-new"
     monkeypatch.setattr(
-        review_lib.github, "_fetch_pr_metadata",
-        lambda pr, repo=None: review_lib.github.PrMetadata(
-            REPO, "someone", "feat/x", "abc123", "develop", True, 4000, None))
+        review_lib.github,
+        "_fetch_pr_metadata",
+        lambda pr, repo=None: review_lib.github.PrMetadata(REPO, "someone", "feat/x", "abc123", "develop", True, 4000, None),
+    )
     monkeypatch.setattr(review_lib.github, "_fetch_changed_files", lambda pr, repo: [])
     monkeypatch.setattr(review_lib.github, "_repo_from_git", lambda: REPO)
-    monkeypatch.setattr(review_lib.workspace, "_create_worktree",
-                        lambda wt, pr, head: pathlib.Path(wt).mkdir())
+    monkeypatch.setattr(review_lib.workspace, "_create_worktree", lambda wt, pr, head: pathlib.Path(wt).mkdir())
     monkeypatch.setattr(review_lib.github, "_viewer_login", lambda: "me")
-    args = type("A", (), {
-        "pr": PR, "max_rounds": 12, "rotate_after": 8, "only": None,
-        "worktree": str(worktree), "focus": None, "extra_instructions_file": None,
-        "host": "claude"})()
+    args = type(
+        "A",
+        (),
+        {
+            "pr": PR,
+            "max_rounds": 12,
+            "rotate_after": 8,
+            "only": None,
+            "worktree": str(worktree),
+            "focus": None,
+            "extra_instructions_file": None,
+            "host": "claude",
+        },
+    )()
 
     with pytest.raises(SystemExit) as e:
         review_lib.commands.init.cmd_init(args)
@@ -179,8 +197,7 @@ def test_init_aborts_without_a_state_file_when_the_fetch_fails(
     assert fake_fetch() == [f"{REPO} {PR}"]
 
 
-def test_a_refetch_that_cannot_start_keeps_going(
-        start, repo, tmp_path, fake_fetch, state_mod, monkeypatch, capsys):
+def test_a_refetch_that_cannot_start_keeps_going(start, repo, tmp_path, fake_fetch, state_mod, monkeypatch, capsys):
     """取得の起動が OSError を送出しても `⚠` で続け、round を 1 つだけ開く（PR #930 の指摘）。"""
     head = _git(repo, "rev-parse", "HEAD")
     _existing(tmp_path).write_text("[PR-COMMENT] [bot] old\n", encoding="utf-8")
@@ -193,13 +210,13 @@ def test_a_refetch_that_cannot_start_keeps_going(
     assert len(st["rounds"]) == 2
 
 
-def test_an_interrupted_refetch_does_not_open_a_round(
-        start, repo, tmp_path, state_mod, monkeypatch):
+def test_an_interrupted_refetch_does_not_open_a_round(start, repo, tmp_path, state_mod, monkeypatch):
     """取得の途中で割り込まれても、結果の無い round を状態ファイルへ残さない。"""
     head = _git(repo, "rev-parse", "HEAD")
 
     def interrupted(*a, **k):
         raise KeyboardInterrupt
+
     monkeypatch.setattr(review_lib.github, "_fetch_existing_comments", interrupted)
     start.write_state([{"round": 1, "pr": PR, "head_sha": head, "reviewers": ["codex"]}])
     with pytest.raises(KeyboardInterrupt):

@@ -3,6 +3,7 @@
 pid ファイル・ログ・結果ファイルを周期ごとに見て、上限・無進捗・早期のエラー・プロセスの終了から結末を決める。
 PID の判定は `monitor_proc`、ログの判定は `monitor_scan` の属性として呼ぶ（テストの差し替えを効かせるため）。
 """
+
 from __future__ import annotations
 
 import sys
@@ -48,10 +49,7 @@ def _lingering_completion(
         return None
     monitor_proc._kill_pid(pid)
     status.result_exists = True
-    return (
-        f"result.json exists for {result_age:.0f}s without process exit; "
-        f"killed lingering pid {pid}"
-    )
+    return f"result.json exists for {result_age:.0f}s without process exit; killed lingering pid {pid}"
 
 
 def _update_progress(
@@ -64,9 +62,7 @@ def _update_progress(
     status.stdout_log_size = monitor_scan._safe_size(paths.stdout_log)
     status.progress_log_size = monitor_scan._safe_size(paths.progress_log)
     status.progress_tail = monitor_scan._tail_last_nonempty_line(paths.progress_log)
-    progress_size = (
-        status.err_log_size + status.stdout_log_size + status.progress_log_size
-    )
+    progress_size = status.err_log_size + status.stdout_log_size + status.progress_log_size
     if progress_size != last_progress_size:
         last_progress_size = progress_size
         last_progress = time.monotonic()
@@ -88,9 +84,7 @@ def _initialize_monitor(
     return paths, status, started, monitor_proc._read_pidfile(paths.pidfile)
 
 
-def _validate_pid_cmdline(
-    pid: int, agent: str, alive: bool, validated: bool
-) -> tuple[bool, monitor_types.MonitorOutcome | None]:
+def _validate_pid_cmdline(pid: int, agent: str, alive: bool, validated: bool) -> tuple[bool, monitor_types.MonitorOutcome | None]:
     if not alive or validated:
         return validated, None
     cmdline_ok = monitor_proc._pid_cmdline_matches(pid, agent)
@@ -103,9 +97,7 @@ def _validate_pid_cmdline(
     return cmdline_ok is True, None
 
 
-def _timeout_outcome(
-    elapsed: float, timeout: int, alive: bool, pid: int
-) -> monitor_types.MonitorOutcome | None:
+def _timeout_outcome(elapsed: float, timeout: int, alive: bool, pid: int) -> monitor_types.MonitorOutcome | None:
     if elapsed < timeout:
         return None
     if alive:
@@ -122,7 +114,8 @@ def _early_error_outcome(
     if alive:
         monitor_proc._kill_pid(status.pid)
     return monitor_types.MonitorOutcome.create(
-        "EARLY_ERROR", f"early error (fatal) in {fatal.source}: {fatal.message[:200]}",
+        "EARLY_ERROR",
+        f"early error (fatal) in {fatal.source}: {fatal.message[:200]}",
         reason=fatal.reason,
     ), warning
 
@@ -136,8 +129,7 @@ def _process_exit_outcome(
     if status.result_exists or not require_result:
         return monitor_types.MonitorOutcome.create(
             "OK",
-            f"process exited; sentinel={status.sentinel_seen}; "
-            f"result_exists={status.result_exists}",
+            f"process exited; sentinel={status.sentinel_seen}; result_exists={status.result_exists}",
         )
     # 結果なしの理由を err.log から引く。CLI の上限の文言があれば `cli_timeout`、無ければ
     # 状態からの既定（`missing`）に落ちる。
@@ -148,9 +140,7 @@ def _process_exit_outcome(
             f"process exited but result.json missing (CLI timeout): {cli_timeout[:200]}",
             reason="cli_timeout",
         )
-    return monitor_types.MonitorOutcome.create(
-        "NO_RESULT", f"process exited but result.json missing: {paths.result}"
-    )
+    return monitor_types.MonitorOutcome.create("NO_RESULT", f"process exited but result.json missing: {paths.result}")
 
 
 def _stall_outcome(
@@ -161,8 +151,7 @@ def _stall_outcome(
     monitor_proc._kill_pid(pid)
     return monitor_types.MonitorOutcome.create(
         "STALLED",
-        f"no log progress for {stall_timeout}s "
-        f"(pid {pid}, last size {last_progress_size}B)",
+        f"no log progress for {stall_timeout}s (pid {pid}, last size {last_progress_size}B)",
     )
 
 
@@ -196,9 +185,7 @@ def monitor_agent(
 
     started_wall = time.time()
     last_progress_size = (
-        monitor_scan._safe_size(paths.err_log)
-        + monitor_scan._safe_size(paths.stdout_log)
-        + monitor_scan._safe_size(paths.progress_log)
+        monitor_scan._safe_size(paths.err_log) + monitor_scan._safe_size(paths.stdout_log) + monitor_scan._safe_size(paths.progress_log)
     )
     last_progress = time.monotonic()
     cmdline_validated = False
@@ -230,9 +217,7 @@ def monitor_agent(
         # 安全条件:
         #   - cmdline_validated: PID 再利用でない (または検証不能環境) ことを確認済み
         #   - mtime >= started_wall: 前 round の stale result.json を拾わない
-        cmdline_validated, outcome = _validate_pid_cmdline(
-            pid, agent, alive, cmdline_validated
-        )
+        cmdline_validated, outcome = _validate_pid_cmdline(pid, agent, alive, cmdline_validated)
         if outcome:
             return finish(outcome)
 
@@ -250,9 +235,9 @@ def monitor_agent(
             return finish(outcome)
         if not warned_early_error and warn_err:
             print(
-                f"{config.log_prefix}⚠️  {agent} early-error WARN "
-                f"(non-fatal, not killing): {warn_err[:200]}",
-                file=sys.stderr, flush=True,
+                f"{config.log_prefix}⚠️  {agent} early-error WARN (non-fatal, not killing): {warn_err[:200]}",
+                file=sys.stderr,
+                flush=True,
             )
             warned_early_error = True
 
@@ -264,9 +249,7 @@ def monitor_agent(
         # agy は stdout 側だけ進捗が出るケースがあり、progress.log には
         # launcher が要求した短いフェーズマーカーが出るため、いずれかが
         # 更新されれば progress として扱う)
-        last_progress_size, last_progress = _update_progress(
-            paths, status, last_progress_size, last_progress
-        )
+        last_progress_size, last_progress = _update_progress(paths, status, last_progress_size, last_progress)
         outcome = _stall_outcome(status, config.stall_timeout, pid, last_progress_size)
         if outcome:
             return finish(outcome)
@@ -284,7 +267,8 @@ def _emit_progress(prefix: str, agent: str, st: monitor_types.AgentStatus) -> No
         f"err={st.err_log_size}B stdout={st.stdout_log_size}B "
         f"progress_log={st.progress_log_size}B "
         f"sentinel={'Y' if st.sentinel_seen else '-'}{progress}",
-        file=sys.stderr, flush=True,
+        file=sys.stderr,
+        flush=True,
     )
 
 
@@ -292,5 +276,6 @@ def _emit_log(prefix: str, agent: str, st: monitor_types.AgentStatus) -> None:
     icon = st.outcome.icon if st.outcome else "?"
     print(
         f"{prefix}{icon} {agent} {st.status} ({st.elapsed:.0f}s) — {st.detail}",
-        file=sys.stderr, flush=True,
+        file=sys.stderr,
+        flush=True,
     )

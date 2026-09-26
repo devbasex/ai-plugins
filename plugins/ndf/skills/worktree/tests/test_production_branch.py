@@ -7,6 +7,7 @@
 
 宣言が無いリポジトリでは既定ブランチを本番のチャネルとして扱う。
 """
+
 from __future__ import annotations
 
 import json
@@ -40,9 +41,7 @@ def test_without_the_key_uses_the_default_branch(main_repo: Path) -> None:
 def test_the_declared_branch_is_used(main_repo: Path) -> None:
     add_origin(main_repo)
     push_branch(main_repo, "release")
-    write_declaration(
-        main_repo, json.dumps({"version": 1, "production_branch": "release"})
-    )
+    write_declaration(main_repo, json.dumps({"version": 1, "production_branch": "release"}))
     out, _, rc = resolve(main_repo)
     assert rc == 0
     assert out == "release"
@@ -61,9 +60,7 @@ def test_the_base_branch_is_not_borrowed(main_repo: Path) -> None:
 def test_a_branch_that_does_not_exist_is_refused(main_repo: Path) -> None:
     """本番のチャネルを取り違えると、配布の承認の対象が変わる。既定へ落とさない。"""
     add_origin(main_repo)
-    write_declaration(
-        main_repo, json.dumps({"version": 1, "production_branch": "nowhere"})
-    )
+    write_declaration(main_repo, json.dumps({"version": 1, "production_branch": "nowhere"}))
     _out, err, rc = resolve(main_repo)
     assert rc == 1
     assert "production_branch" in err
@@ -79,8 +76,6 @@ def test_this_repository_declares_the_production_branch() -> None:
 
 def test_the_schema_documents_the_key() -> None:
     root = Path(__file__).resolve().parents[1]
-    schema = json.loads(
-        (root / "schemas" / "worktree.schema.json").read_text(encoding="utf-8")
-    )
+    schema = json.loads((root / "schemas" / "worktree.schema.json").read_text(encoding="utf-8"))
     described = schema["properties"]["production_branch"]["description"]
     assert "base_branch" in described

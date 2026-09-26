@@ -4,6 +4,7 @@ supervise.py がステップを回す間に使う。想定は同じステップ�
 `factor` とし、`floor` を下限にする。履歴が `min_samples` 件に満たなければ `default` を使う。
 所要の履歴は 1 行 1 つの JSON で積み、書き換えない（置き場所の既定は <git の共通ディレクトリ>/ndf/）。
 """
+
 from __future__ import annotations
 
 import json
@@ -102,7 +103,7 @@ def expected_for(seconds: list[float], cfg: SlowConfig, step_expected=None) -> t
     """同じステップの所要（古い順）から想定の秒と根拠を返す。step_expected があればそれに固定する。"""
     if step_expected is not None:
         return float(step_expected), {"source": "step"}
-    recent = [float(s) for s in seconds][-cfg.window:]
+    recent = [float(s) for s in seconds][-cfg.window :]
     basis = {"samples": len(recent), "factor": cfg.factor, "floor": cfg.floor}
     if len(recent) < cfg.min_samples:
         return float(cfg.default), {"source": "default", **basis, "default": cfg.default}
@@ -114,6 +115,7 @@ def expected_for(seconds: list[float], cfg: SlowConfig, step_expected=None) -> t
 
 
 # --- 所要の履歴 ---
+
 
 def _git(cwd, *args) -> str | None:
     try:
@@ -159,10 +161,16 @@ def read_history(path: Path, phase: str, step: str, window: int | None = None) -
     return out[-window:] if window else out
 
 
-def history_record(phase, step: str, type_: str, seconds: float, exit_code: int, plan: str | None,
-                   at: str) -> dict:
-    return {"at": at, "phase": phase or "?", "step": step, "type": type_, "seconds": round(float(seconds), 1),
-            "exit": exit_code, "plan": plan or ""}
+def history_record(phase, step: str, type_: str, seconds: float, exit_code: int, plan: str | None, at: str) -> dict:
+    return {
+        "at": at,
+        "phase": phase or "?",
+        "step": step,
+        "type": type_,
+        "seconds": round(float(seconds), 1),
+        "exit": exit_code,
+        "plan": plan or "",
+    }
 
 
 def append_history(path: Path, rec: dict) -> str | None:
@@ -221,9 +229,15 @@ def import_progress(paths, history: Path) -> dict:
                 d = json.loads(raw)
             except ValueError:
                 continue
-            if (not isinstance(d, dict) or d.get("kind") != "step" or d.get("type") not in WATCHED_TYPES
-                    or not keeps(d.get("exit")) or not isinstance(d.get("seconds"), (int, float))
-                    or not d.get("at") or not d.get("step")):
+            if (
+                not isinstance(d, dict)
+                or d.get("kind") != "step"
+                or d.get("type") not in WATCHED_TYPES
+                or not keeps(d.get("exit"))
+                or not isinstance(d.get("seconds"), (int, float))
+                or not d.get("at")
+                or not d.get("step")
+            ):
                 continue
             rec = history_record(phase, d["step"], d["type"], d["seconds"], d["exit"], plan, d["at"])
             key = _history_key(rec)
@@ -240,6 +254,7 @@ def import_progress(paths, history: Path) -> dict:
 
 # --- 組み込みの一次の調査 ---
 
+
 def probe_output(err_path, prev_size: int) -> tuple[dict, int]:
     """stderr のファイルが前の確認から伸びたか。(調査の結果, 今の大きさ) を返す。"""
     try:
@@ -249,10 +264,18 @@ def probe_output(err_path, prev_size: int) -> tuple[dict, int]:
         size, text = 0, ""
     last = next((l.strip()[:300] for l in reversed(text.splitlines()) if l.strip()), "")
     if size > prev_size:
-        return {"name": "output", "class": "progress", "action": "wait",
-                "summary": f"出力が伸びている（{size - prev_size} バイト）: {last}".rstrip(": ")}, size
-    return {"name": "output", "class": "silent", "action": "judge",
-            "summary": f"前の確認から出力が伸びていない: {last or '（出力なし）'}"}, size
+        return {
+            "name": "output",
+            "class": "progress",
+            "action": "wait",
+            "summary": f"出力が伸びている（{size - prev_size} バイト）: {last}".rstrip(": "),
+        }, size
+    return {
+        "name": "output",
+        "class": "silent",
+        "action": "judge",
+        "summary": f"前の確認から出力が伸びていない: {last or '（出力なし）'}",
+    }, size
 
 
 def commit_count(cwd) -> int | None:
@@ -266,11 +289,19 @@ def commit_count(cwd) -> int | None:
 def probe_worker(new_lines: int, new_commits: int, last_text: str, since_last: float | None) -> dict:
     """前の確認から worker の行かコミットが足されたか。"""
     if new_lines > 0 or new_commits > 0:
-        return {"name": "worker", "class": "progress", "action": "wait",
-                "summary": f"worker の行 {new_lines} 件・コミット {new_commits} 件が足された"}
+        return {
+            "name": "worker",
+            "class": "progress",
+            "action": "wait",
+            "summary": f"worker の行 {new_lines} 件・コミット {new_commits} 件が足された",
+        }
     ago = f"（最後の行から {round(since_last)} 秒）" if since_last is not None else ""
-    return {"name": "worker", "class": "silent", "action": "judge",
-            "summary": f"worker の行もコミットも足されていない。最後の行: {last_text or '無し'}{ago}"}
+    return {
+        "name": "worker",
+        "class": "silent",
+        "action": "judge",
+        "summary": f"worker の行もコミットも足されていない。最後の行: {last_text or '無し'}{ago}",
+    }
 
 
 def fill_argv(template: str, values: dict) -> list[str]:
@@ -308,7 +339,11 @@ def probe_cmd(template: str, values: dict, cwd, timeout: float) -> dict:
     metrics = (out or {}).get("metrics") if isinstance(out, dict) else None
     if p.returncode != 0 or not isinstance(metrics, dict) or metrics.get("action") not in ACTIONS:
         tail = (p.stderr or p.stdout).strip()[-200:]
-        return {"name": "cmd", "class": "unknown", "action": "judge",
-                "summary": f"probe が読めない（exit={p.returncode}）: {tail}"}
-    return {"name": "cmd", "class": str(metrics.get("class") or "unknown"), "action": metrics["action"],
-            "summary": str(out.get("summary") or "")[:300], "items": (out.get("items") or [])[:10]}
+        return {"name": "cmd", "class": "unknown", "action": "judge", "summary": f"probe が読めない（exit={p.returncode}）: {tail}"}
+    return {
+        "name": "cmd",
+        "class": str(metrics.get("class") or "unknown"),
+        "action": metrics["action"],
+        "summary": str(out.get("summary") or "")[:300],
+        "items": (out.get("items") or [])[:10],
+    }

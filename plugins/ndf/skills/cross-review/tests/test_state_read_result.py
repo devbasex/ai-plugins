@@ -5,6 +5,7 @@
   2. 変則スキーマ (`intent` / `comment_count`) → 同等にマージされる (フォールバック)
   3. event / intent いずれも欠落 → die(exit 1) で fail + 結果なしがラウンドへ残る
 """
+
 from __future__ import annotations
 
 import argparse
@@ -23,9 +24,7 @@ AGENT = "agy"
 def _seed_state(tmp_dir: pathlib.Path) -> dict:
     state = {
         "current_pr": PR,
-        "rounds": [
-            {"round": 1, "pr": PR, "started_at": "2026-05-21T00:00:00+00:00"}
-        ],
+        "rounds": [{"round": 1, "pr": PR, "started_at": "2026-05-21T00:00:00+00:00"}],
         "final": None,
     }
     (tmp_dir / f"cross-review-pr{PR}-state.json").write_text(json.dumps(state))
@@ -175,8 +174,7 @@ def test_invalid_json_result_file_dies(patched_tmp_dir, state_mod, capsys):
     assert "parse" in captured.err.lower() or "parse" in captured.err
 
 
-def test_the_take_in_passes_the_start_of_the_round(
-        patched_tmp_dir, state_mod, monkeypatch):
+def test_the_take_in_passes_the_start_of_the_round(patched_tmp_dir, state_mod, monkeypatch):
     """取り込みは、二度書かない照合を絞るためにラウンドの開始時刻を渡す。
 
     ラウンドの番号は回し直すと 1 から数え直すため、前の実行のレビューと取り違えない。

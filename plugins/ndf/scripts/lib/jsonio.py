@@ -7,6 +7,7 @@
     jsonio.read(path, missing=None)                # 無ければ None。壊れていれば JsonReadError
     jsonio.read(path, missing={}, broken={}, want=dict)  # どれでも {}
 """
+
 from __future__ import annotations
 
 import json
@@ -25,8 +26,7 @@ class JsonReadError(ValueError):
         super().__init__(f"{path} が{what}" + (f": {detail}" if detail else ""))
 
 
-def read(path: pathlib.Path | str, *, missing: Any = RAISE, broken: Any = RAISE,
-         want: type | None = None) -> Any:
+def read(path: pathlib.Path | str, *, missing: Any = RAISE, broken: Any = RAISE, want: type | None = None) -> Any:
     """`path` の JSON を読む。`want` を渡すと、その型でない値を `type` の失敗にする（`broken` の値を返す）。"""
     path = pathlib.Path(path)
     try:

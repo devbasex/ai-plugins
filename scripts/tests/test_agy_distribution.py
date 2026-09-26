@@ -9,6 +9,7 @@ Codex の配布 Skill が `.codex-plugin/plugin.json` の `skills` 配列では�
 `scripts/build-runtime-plugins.sh` が生成する。基準と生成物が食い違ったまま配られないよう、
 `--check` が不足・余分・向き先の違いを検出することを確かめる。
 """
+
 from __future__ import annotations
 
 import os
@@ -41,11 +42,7 @@ EXPECTED_COUNTS = {"claude": 48, "codex": 44, "kiro": 45, "agy": 44}
 def manifest_names(runtime: str) -> list[str]:
     path = MANIFEST_DIR / f"{runtime}-skills.txt"
     assert path.is_file(), f"{path} が無い"
-    return [
-        line.split("#", 1)[0].strip()
-        for line in path.read_text(encoding="utf-8").splitlines()
-        if line.split("#", 1)[0].strip()
-    ]
+    return [line.split("#", 1)[0].strip() for line in path.read_text(encoding="utf-8").splitlines() if line.split("#", 1)[0].strip()]
 
 
 def test_root_plugin_json_is_absent() -> None:
@@ -184,6 +181,4 @@ def test_generated_links_are_not_collected_twice() -> None:
         check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "dev.agy" not in result.stdout, [
-        line for line in result.stdout.splitlines() if "dev.agy" in line
-    ]
+    assert "dev.agy" not in result.stdout, [line for line in result.stdout.splitlines() if "dev.agy" in line]

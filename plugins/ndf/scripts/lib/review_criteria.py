@@ -14,6 +14,7 @@
 
     {"version": 1, "focus": ["<重点の名前>", ...]}
 """
+
 from __future__ import annotations
 
 import argparse
@@ -42,14 +43,16 @@ WAIVE_KINDS = {
     "alignment": "番号や表記の揃え",
     "preference": "好みの設計",
 }
-NOT_WRITTEN = "・".join(("字句や言い回し", "まず起きない条件での異常処理", "実装に影響しない文書どうしの食い違い",
-                         "番号や表記の揃え", "好みの設計"))
+NOT_WRITTEN = "・".join(
+    ("字句や言い回し", "まず起きない条件での異常処理", "実装に影響しない文書どうしの食い違い", "番号や表記の揃え", "好みの設計")
+)
 REPLY = "直しません。この指摘は、利用者が実際に使って困る不具合ではないためです（{inner}）。使って困る場面が出たら、そのときに直します。"
 REPLY_FOCUS = "。レビューの重点（{names}）にも当たりません"
 
 
 class Focus(NamedTuple):
     """重点の宣言の読み取り結果。`none` と `unreadable` では `names` が空。"""
+
     status: str  # declared | none | unreadable
     names: tuple[str, ...] = ()
     error: str | None = None
@@ -68,9 +71,13 @@ def load_focus(root) -> Focus:
     except (OSError, ValueError) as e:
         return Focus("unreadable", (), f"{path} を読めない: {e}")
     focus = data.get("focus") if isinstance(data, dict) else None
-    if not isinstance(data, dict) or data.get("version") != 1 or not isinstance(focus, list) \
-            or not all(isinstance(x, str) and x.strip() for x in focus):
-        return Focus("unreadable", (), f"{path} の形が違う（{{\"version\": 1, \"focus\": [\"...\"]}} を書く）")
+    if (
+        not isinstance(data, dict)
+        or data.get("version") != 1
+        or not isinstance(focus, list)
+        or not all(isinstance(x, str) and x.strip() for x in focus)
+    ):
+        return Focus("unreadable", (), f'{path} の形が違う（{{"version": 1, "focus": ["..."]}} を書く）')
     if not focus:
         return NO_FOCUS
     return Focus("declared", tuple(x.strip() for x in focus))
@@ -96,38 +103,42 @@ def _criteria_lines(focus: Focus) -> list[str]:
 
 def reviewer_block(focus: Focus = NO_FOCUS) -> str:
     """レビュー担当への「指摘の基準」の節。宣言があるときだけ基準 3 の行を持つ。"""
-    return "\n".join([
-        "## 指摘の基準",
-        "次のどれかに当たるものだけを、重要度 `critical` か `major` で書く（`minor` / `nit` は使わない）。"
-        "上のレビュー観点は探す場所で、書く基準はここである。"
-        "見つけたものはこのラウンドですべて書く。",
-        *_criteria_lines(focus),
-        f"書かないもの: {NOT_WRITTEN}",
-    ])
+    return "\n".join(
+        [
+            "## 指摘の基準",
+            "次のどれかに当たるものだけを、重要度 `critical` か `major` で書く（`minor` / `nit` は使わない）。"
+            "上のレビュー観点は探す場所で、書く基準はここである。"
+            "見つけたものはこのラウンドですべて書く。",
+            *_criteria_lines(focus),
+            f"書かないもの: {NOT_WRITTEN}",
+        ]
+    )
 
 
 def fixer_block(focus: Focus = NO_FOCUS) -> str:
     """修正担当への「指摘の基準」の節。基準・書かないもの・見送りの種類・返信の雛形。"""
     kinds = [f"- `{k}`: {v}" for k, v in WAIVE_KINDS.items()]
-    return "\n".join([
-        "## 指摘の基準",
-        "",
-        "届いた重要度のラベルによらず、指摘ごとに次のどれかに当たるかを判定し直す。",
-        "当たるものは `critical` / `major` とし、`criterion` に番号を書いて直す（`fixed`）。",
-        "当たらないものは `minor` / `nit` とし、コードを変えずに `decision: \"waived\"` と `waive_kind` を書く"
-        "（`criterion` は書かない）。",
-        "",
-        *_criteria_lines(focus),
-        "",
-        f"書かないもの（見送る）: {NOT_WRITTEN}",
-        "",
-        "見送りの種類（`waive_kind`）:",
-        *kinds,
-        "",
-        "見送りの返信は `finalize` が雛形から組む:",
-        "",
-        "> " + waiver_reply("doc_mismatch", focus.names if focus.status == "declared" else ()),
-    ])
+    return "\n".join(
+        [
+            "## 指摘の基準",
+            "",
+            "届いた重要度のラベルによらず、指摘ごとに次のどれかに当たるかを判定し直す。",
+            "当たるものは `critical` / `major` とし、`criterion` に番号を書いて直す（`fixed`）。",
+            '当たらないものは `minor` / `nit` とし、コードを変えずに `decision: "waived"` と `waive_kind` を書く'
+            "（`criterion` は書かない）。",
+            "",
+            *_criteria_lines(focus),
+            "",
+            f"書かないもの（見送る）: {NOT_WRITTEN}",
+            "",
+            "見送りの種類（`waive_kind`）:",
+            *kinds,
+            "",
+            "見送りの返信は `finalize` が雛形から組む:",
+            "",
+            "> " + waiver_reply("doc_mismatch", focus.names if focus.status == "declared" else ()),
+        ]
+    )
 
 
 def waiver_reply(kind: str, names=()) -> str:
@@ -143,8 +154,7 @@ def waiver_reply(kind: str, names=()) -> str:
 
 def as_state(focus: Focus) -> dict:
     """状態ファイルの `review_criteria` の形。"""
-    return {"status": focus.status, "focus": list(focus.names), "error": focus.error,
-            "reviewer_block": reviewer_block(focus)}
+    return {"status": focus.status, "focus": list(focus.names), "error": focus.error, "reviewer_block": reviewer_block(focus)}
 
 
 def main(argv=None) -> int:

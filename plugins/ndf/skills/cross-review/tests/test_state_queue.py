@@ -15,6 +15,7 @@ GitHub の利用回数の上限に達すると、投稿は失敗する。**失�
 判別は標準エラーの `(HTTP <番号>)` と標準出力の `message` の**両方**を読む。片方だけで
 決めると、権限の誤り（403）と上限（403）を分けられない。
 """
+
 from __future__ import annotations
 
 import json
@@ -79,12 +80,18 @@ def test_other_failures_are_not_queued(queue_mod, fake_gh, qdir, mode) -> None:
 
 def test_the_http_status_alone_does_not_decide(queue_mod, fake_gh, qdir) -> None:
     """403 でも `message` が上限を指さず、残量も 0 でなければ積まない（条件 6）。"""
-    fake_gh.set_rules([
-        # `--jq` は実物の gh が適用する。模した gh は結果だけを返す。
-        {"match": "api rate_limit", "stdout": "4321\n"},
-        {"match": "", "stdout": '{"message":"Must have admin rights","status":"403"}',
-         "stderr": "gh: Must have admin rights (HTTP 403)\n", "exit": 1},
-    ])
+    fake_gh.set_rules(
+        [
+            # `--jq` は実物の gh が適用する。模した gh は結果だけを返す。
+            {"match": "api rate_limit", "stdout": "4321\n"},
+            {
+                "match": "",
+                "stdout": '{"message":"Must have admin rights","status":"403"}',
+                "stderr": "gh: Must have admin rights (HTTP 403)\n",
+                "exit": 1,
+            },
+        ]
+    )
     outcome, _ = _post(queue_mod, qdir)
 
     assert outcome == queue_mod.FAILED
@@ -93,31 +100,35 @@ def test_the_http_status_alone_does_not_decide(queue_mod, fake_gh, qdir) -> None
 
 def test_a_403_with_no_quota_left_is_queued(queue_mod, fake_gh, qdir) -> None:
     """`message` で決まらないときだけ残量を引く。0 なら上限として積む。"""
-    fake_gh.set_rules([
-        {"match": "api rate_limit", "stdout": "0\n"},
-        {"match": "", "stdout": '{"message":"Must have admin rights","status":"403"}',
-         "stderr": "gh: Must have admin rights (HTTP 403)\n", "exit": 1},
-    ])
+    fake_gh.set_rules(
+        [
+            {"match": "api rate_limit", "stdout": "0\n"},
+            {
+                "match": "",
+                "stdout": '{"message":"Must have admin rights","status":"403"}',
+                "stderr": "gh: Must have admin rights (HTTP 403)\n",
+                "exit": 1,
+            },
+        ]
+    )
     outcome, _ = _post(queue_mod, qdir)
 
     assert outcome == queue_mod.QUEUED
 
 
-def test_the_message_alone_decides_when_no_http_status_is_printed(
-        queue_mod, fake_gh, qdir) -> None:
+def test_the_message_alone_decides_when_no_http_status_is_printed(queue_mod, fake_gh, qdir) -> None:
     """GraphQL の失敗は `(HTTP <番号>)` を伴わない（#291 の実例）。"""
-    fake_gh.set_rules([
-        {"match": "", "stdout": "",
-         "stderr": "gh: GraphQL: API rate limit already exceeded for user ID 10234200.\n",
-         "exit": 1},
-    ])
+    fake_gh.set_rules(
+        [
+            {"match": "", "stdout": "", "stderr": "gh: GraphQL: API rate limit already exceeded for user ID 10234200.\n", "exit": 1},
+        ]
+    )
     outcome, _ = _post(queue_mod, qdir)
 
     assert outcome == queue_mod.QUEUED
 
 
-def test_the_quota_lookup_is_skipped_when_the_message_decides(
-        queue_mod, fake_gh, qdir) -> None:
+def test_the_quota_lookup_is_skipped_when_the_message_decides(queue_mod, fake_gh, qdir) -> None:
     """上限だと `message` で分かるときは、残量を引かない（余分な照会を足さない）。"""
     fake_gh.set_mode("rate_limit")
     _post(queue_mod, qdir)
@@ -132,9 +143,7 @@ def test_the_items_flush_in_sequence_order(queue_mod, fake_gh, qdir) -> None:
     fake_gh.set_mode("rate_limit")
     for i in range(3):
         _post(queue_mod, qdir, body=f"本文 {i}")
-    assert [p.name for p in queue_mod.Queue(qdir).paths()] == [
-        f"{n:04d}-pr-comment-{PR}.json" for n in (1, 2, 3)
-    ]
+    assert [p.name for p in queue_mod.Queue(qdir).paths()] == [f"{n:04d}-pr-comment-{PR}.json" for n in (1, 2, 3)]
 
     fake_gh.set_mode("ok")
     result = queue_mod.Queue(qdir).flush()
@@ -153,7 +162,7 @@ def test_a_failed_flush_records_the_attempt(queue_mod, fake_gh, qdir) -> None:
 
     assert result.remaining == 1
     item = json.loads(queue_mod.Queue(qdir).paths()[0].read_text(encoding="utf-8"))
-    assert item["attempts"] == 2          # 積んだときの 1 回 + 流そうとした 1 回
+    assert item["attempts"] == 2  # 積んだときの 1 回 + 流そうとした 1 回
     assert "rate limit" in item["last_error"].lower()
 
 
@@ -171,14 +180,13 @@ def test_the_flush_stops_at_the_first_failure(queue_mod, fake_gh, qdir) -> None:
 # ---- 受け入れ条件 10: 明示と自動の両方で流れる ----
 
 
-def test_the_flush_subcommand_drains_the_queue(state_mod, queue_mod, fake_gh,
-                                               monkeypatch, tmp_path) -> None:
+def test_the_flush_subcommand_drains_the_queue(state_mod, queue_mod, fake_gh, monkeypatch, tmp_path) -> None:
     import argparse
 
     monkeypatch.setenv("CROSS_REVIEW_TMP_DIR", str(tmp_path))
     (tmp_path / f"cross-review-pr{PR}-state.json").write_text(
-        json.dumps({"current_pr": PR, "repo": REPO, "tmp_dir": str(tmp_path),
-                    "rounds": [], "final": None}), encoding="utf-8")
+        json.dumps({"current_pr": PR, "repo": REPO, "tmp_dir": str(tmp_path), "rounds": [], "final": None}), encoding="utf-8"
+    )
     fake_gh.set_mode("rate_limit")
     _post(queue_mod, tmp_path / "pending")
 
@@ -188,23 +196,29 @@ def test_the_flush_subcommand_drains_the_queue(state_mod, queue_mod, fake_gh,
     assert queue_mod.Queue(tmp_path / "pending").count() == 0
 
 
-def test_the_judge_drains_the_queue_at_its_entry(state_mod, queue_mod, fake_gh,
-                                                 monkeypatch, tmp_path) -> None:
+def test_the_judge_drains_the_queue_at_its_entry(state_mod, queue_mod, fake_gh, monkeypatch, tmp_path) -> None:
     import argparse
 
     monkeypatch.setenv("CROSS_REVIEW_TMP_DIR", str(tmp_path))
     (tmp_path / f"cross-review-pr{PR}-state.json").write_text(
-        json.dumps({
-            "current_pr": PR, "repo": REPO, "tmp_dir": str(tmp_path), "final": None,
-            "rounds": [{"round": 1, "pr": PR,
-                        "codex": {"intent": "APPROVE"}, "agy": {"intent": "APPROVE"}}],
-        }), encoding="utf-8")
+        json.dumps(
+            {
+                "current_pr": PR,
+                "repo": REPO,
+                "tmp_dir": str(tmp_path),
+                "final": None,
+                "rounds": [{"round": 1, "pr": PR, "codex": {"intent": "APPROVE"}, "agy": {"intent": "APPROVE"}}],
+            }
+        ),
+        encoding="utf-8",
+    )
     fake_gh.set_mode("rate_limit")
     _post(queue_mod, tmp_path / "pending")
 
     fake_gh.set_mode("ok")
-    monkeypatch.setattr(review_lib.ci, "_round_ci", lambda st, last, pr: {
-        "verdict": "unverified", "failed": [], "pending": [], "reason": "テスト"})
+    monkeypatch.setattr(
+        review_lib.ci, "_round_ci", lambda st, last, pr: {"verdict": "unverified", "failed": [], "pending": [], "reason": "テスト"}
+    )
     with pytest.raises(SystemExit):
         review_lib.commands.judge.cmd_judge(argparse.Namespace(pr=PR))
 
@@ -221,16 +235,14 @@ def test_a_queued_review_pins_the_commit_it_read(queue_mod) -> None:
     流すまでに head が進むと、レビューが読んでいない commit に付き、行を指す
     `comments` はその差分で解決されるためずれる。
     """
-    built = queue_mod.request_for("review-post", REPO, PR, {
-        "body": "本文", "event": "APPROVE", "commit_id": "abc1234"})
+    built = queue_mod.request_for("review-post", REPO, PR, {"body": "本文", "event": "APPROVE", "commit_id": "abc1234"})
 
     assert built["request"]["fields"]["commit_id"] == "abc1234"
 
 
 def test_a_review_without_a_commit_leaves_the_field_out(queue_mod) -> None:
     """渡されなければ付けない。GitHub の既定（流した時点の head）へ戻る。"""
-    built = queue_mod.request_for("review-post", REPO, PR,
-                                  {"body": "本文", "event": "APPROVE"})
+    built = queue_mod.request_for("review-post", REPO, PR, {"body": "本文", "event": "APPROVE"})
 
     assert "commit_id" not in built["request"]["fields"]
 
@@ -238,7 +250,6 @@ def test_a_review_without_a_commit_leaves_the_field_out(queue_mod) -> None:
 def test_the_commit_is_not_part_of_the_idempotency_match(queue_mod) -> None:
     """冪等の照合は投稿者・判定・本文で行う。commit を条件へ入れると、head が
     進んだ後の照会で同じレビューを別物と読み、二重に投稿する。"""
-    built = queue_mod.request_for("review-post", REPO, PR, {
-        "body": "本文", "event": "APPROVE", "commit_id": "abc1234"})
+    built = queue_mod.request_for("review-post", REPO, PR, {"body": "本文", "event": "APPROVE", "commit_id": "abc1234"})
 
     assert "commit_id" not in built["match"]

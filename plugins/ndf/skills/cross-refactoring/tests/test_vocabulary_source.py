@@ -2,6 +2,7 @@
 
 **枠組みは呼び名を自分では持たない。** 表を読み、読めなければ止める。
 """
+
 from __future__ import annotations
 
 import importlib.util

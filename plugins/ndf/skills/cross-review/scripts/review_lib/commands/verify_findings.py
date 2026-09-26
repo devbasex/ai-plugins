@@ -1,4 +1,5 @@
 """副命令 `verify-findings`（#1142 の C2）。"""
+
 from __future__ import annotations
 
 import argparse
@@ -51,9 +52,9 @@ def _verify_argv(check: str, allowed: list[str], work: str) -> Optional[list[str
             prefix = shlex.split(str(candidate or ""))
         except ValueError:
             continue
-        if not prefix or argv[:len(prefix)] != prefix:
+        if not prefix or argv[: len(prefix)] != prefix:
             continue
-        rest = argv[len(prefix):]
+        rest = argv[len(prefix) :]
         # 実行してよいのは対象を絞る引数までである。`-c` や `-p` は任意の設定と
         # プラグインを読み込ませる。
         if any(token.startswith("-") for token in rest):
@@ -71,7 +72,10 @@ def _run_verify(argv: list[str], work: str) -> Optional[int]:
     """`shell=False` で実行し、終了コードを返す。起動できなければ `None`。"""
     try:
         proc = subprocess.run(
-            argv, cwd=work, capture_output=True, text=True,
+            argv,
+            cwd=work,
+            capture_output=True,
+            text=True,
             timeout=VERIFY_TIMEOUT_SECONDS,
         )
     except (OSError, subprocess.SubprocessError):
@@ -79,9 +83,7 @@ def _run_verify(argv: list[str], work: str) -> Optional[int]:
     return proc.returncode
 
 
-def _merged_root(
-    finding: dict[str, Any], by_id: dict[Any, dict[str, Any]]
-) -> dict[str, Any]:
+def _merged_root(finding: dict[str, Any], by_id: dict[Any, dict[str, Any]]) -> dict[str, Any]:
     """束ねられた側から代表をたどる。**環になっていたらその場で止める。**"""
     seen = {finding.get("finding_id")}
     current = finding
@@ -107,8 +109,11 @@ def _run_finding_checks(
     for finding in targets:
         check = str(finding.get("suggested_check") or "")
         record: dict[str, Any] = {
-            "command": check, "finding_id": finding.get("finding_id"),
-            "exit_code": None, "result": "not_run", "ran_at": None,
+            "command": check,
+            "finding_id": finding.get("finding_id"),
+            "exit_code": None,
+            "result": "not_run",
+            "ran_at": None,
         }
         argv = _verify_argv(check, allowed, work) if allowed else None
         if argv is not None:
@@ -127,9 +132,7 @@ def _run_finding_checks(
         finding["verification"] = record
 
 
-def _propagate_best_verification(
-    targets: list[dict[str, Any]], by_id: dict[Any, dict[str, Any]]
-) -> None:
+def _propagate_best_verification(targets: list[dict[str, Any]], by_id: dict[Any, dict[str, Any]]) -> None:
     """束ねた組から最良の検証結果を代表へ反映する。"""
     for rep in targets:
         if rep.get("merged_into"):
@@ -140,8 +143,9 @@ def _propagate_best_verification(
                 continue
             if _merged_root(member, by_id) is not rep:
                 continue
-            if findings_mod._VERIFY_RANK.get(findings_mod._verify_result(member), -1) > \
-               findings_mod._VERIFY_RANK.get(str(best.get("result") or "not_run"), -1):
+            if findings_mod._VERIFY_RANK.get(findings_mod._verify_result(member), -1) > findings_mod._VERIFY_RANK.get(
+                str(best.get("result") or "not_run"), -1
+            ):
                 best = member["verification"]
         if best is not rep["verification"]:
             rep["verification"] = dict(best)
@@ -178,9 +182,7 @@ def _verify_findings(
     """
     codes = set(reproduced_codes or VERIFY_REPRODUCED_CODES)
     run = runner or _run_verify
-    targets = [
-        f for f in st.get("review_findings") or [] if f.get("round") == round_no
-    ]
+    targets = [f for f in st.get("review_findings") or [] if f.get("round") == round_no]
     by_id = {f.get("finding_id"): f for f in targets}
     _run_finding_checks(targets, allowed, work, codes, run)
     _propagate_best_verification(targets, by_id)
@@ -225,10 +227,7 @@ def cmd_verify_findings(args: argparse.Namespace) -> None:
         result = findings_mod._verify_result(finding)
         results[result] = results.get(result, 0) + 1
     store._save(pr, st)
-    review_lib.info(
-        f"✅ 統合: {merged} 件を束ねた / 実行検証: "
-        + (" ".join(f"{k}={v}" for k, v in sorted(results.items())) or "対象なし")
-    )
+    review_lib.info(f"✅ 統合: {merged} 件を束ねた / 実行検証: " + (" ".join(f"{k}={v}" for k, v in sorted(results.items())) or "対象なし"))
 
 
 def _merge_duplicates(st: dict[str, Any], round_no: int) -> None:
@@ -250,7 +249,7 @@ def _merge_duplicates(st: dict[str, Any], round_no: int) -> None:
     for i, rep in enumerate(targets):
         if rep.get("merged_into"):
             continue
-        for other in targets[i + 1:]:
+        for other in targets[i + 1 :]:
             if other.get("merged_into") or other.get("agent") == rep.get("agent"):
                 continue
             if not _is_near(rep, other):

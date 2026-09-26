@@ -1,4 +1,5 @@
 """project.yml の行単位の読み書き（AC6）。3 つのキー以外は 1 バイトも変えない。"""
+
 import difflib
 from pathlib import Path
 
@@ -12,8 +13,11 @@ KEYS = ("language_servers", "ignored_paths", "mcp_serena_excluded")
 
 
 def _changed_lines(before: str, after: str) -> list:
-    return [line for line in difflib.unified_diff(before.splitlines(), after.splitlines(), lineterm="", n=0)
-            if line[:1] in "+-" and not line.startswith(("+++", "---"))]
+    return [
+        line
+        for line in difflib.unified_diff(before.splitlines(), after.splitlines(), lineterm="", n=0)
+        if line[:1] in "+-" and not line.startswith(("+++", "---"))
+    ]
 
 
 def _only_keys_changed(before, after):
@@ -38,8 +42,7 @@ def test_write_template_changes_only_three_keys():
     assert py.read_list(out, "mcp_serena_excluded") == ["typescript health_check_exit_1"]
     _only_keys_changed(TEMPLATE, out)
     # 注釈はすべて残る
-    assert [l for l in TEMPLATE.splitlines() if l.startswith("#")] == \
-        [l for l in out.splitlines() if l.startswith("#")]
+    assert [l for l in TEMPLATE.splitlines() if l.startswith("#")] == [l for l in out.splitlines() if l.startswith("#")]
 
 
 def test_write_is_idempotent_and_empty_list_is_flow():
@@ -63,13 +66,16 @@ def test_indented_block_items_are_read():
     assert py.read_list(text, "ignored_paths") == ["a/**", "b"]
 
 
-@pytest.mark.parametrize("text", [
-    "language_servers: [python, bash]\n",
-    "language_servers: &ls\n- python\n",
-    "language_servers:\n- *ls\n",
-    "language_servers: python\n",
-    "language_servers:\n- python\n- {a: 1}\n",
-])
+@pytest.mark.parametrize(
+    "text",
+    [
+        "language_servers: [python, bash]\n",
+        "language_servers: &ls\n- python\n",
+        "language_servers:\n- *ls\n",
+        "language_servers: python\n",
+        "language_servers:\n- python\n- {a: 1}\n",
+    ],
+)
 def test_unknown_shapes_are_refused(text):
     with pytest.raises(py.UnsupportedShape):
         py.read_list(text, "language_servers")
@@ -87,11 +93,9 @@ def test_missing_key_is_appended():
 
 def test_appending_keeps_the_comments_and_quotes_of_the_existing_items():
     """既存の要素の行は 1 バイトも変えず、足す要素だけをブロックの末尾へ置く（#984）。"""
-    text = ("ignored_paths: # 注釈\n- data/**\n- \"build/**\"   # 生成物\n"
-            "# 次のキーの注釈\nencoding: utf-8\n")
+    text = 'ignored_paths: # 注釈\n- data/**\n- "build/**"   # 生成物\n# 次のキーの注釈\nencoding: utf-8\n'
     out = py.append_list(text, "ignored_paths", [".serena/**"])
-    assert out == ("ignored_paths: # 注釈\n- data/**\n- \"build/**\"   # 生成物\n- .serena/**\n"
-                   "# 次のキーの注釈\nencoding: utf-8\n")
+    assert out == ('ignored_paths: # 注釈\n- data/**\n- "build/**"   # 生成物\n- .serena/**\n# 次のキーの注釈\nencoding: utf-8\n')
     assert py.read_list(out, "ignored_paths") == ["data/**", "build/**", ".serena/**"]
 
 
@@ -100,10 +104,13 @@ def test_appending_follows_the_indent_of_the_existing_items():
     assert out == "ignored_paths:\n  - a/**\n  - b\nread_only: false\n"
 
 
-@pytest.mark.parametrize(("text", "expected"), [
-    ("ignored_paths: []\nencoding: utf-8\n", "ignored_paths:\n- b\nencoding: utf-8\n"),
-    ("encoding: utf-8\n", "encoding: utf-8\nignored_paths:\n- b\n"),
-    ("ignored_paths:\n- b\n", "ignored_paths:\n- b\n"),
-])
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("ignored_paths: []\nencoding: utf-8\n", "ignored_paths:\n- b\nencoding: utf-8\n"),
+        ("encoding: utf-8\n", "encoding: utf-8\nignored_paths:\n- b\n"),
+        ("ignored_paths:\n- b\n", "ignored_paths:\n- b\n"),
+    ],
+)
 def test_appending_to_an_empty_or_missing_key(text, expected):
     assert py.append_list(text, "ignored_paths", ["b"]) == expected

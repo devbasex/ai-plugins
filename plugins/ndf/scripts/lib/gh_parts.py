@@ -37,6 +37,7 @@ LLM が `gh` / `gh api` を手順の文どおりに組み立てていた取得�
 **GraphQL が上限のときは REST へ退避する**（#271。尽きるのは GraphQL 側である）。
 本文の取得と更新は初めから REST で行い、GraphQL を消費しない。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -120,8 +121,9 @@ append_line = gh_sections.append_line
 # ---------------- body-section ----------------
 
 
-def body_section(op: str, number: int, repo: str | None, heading: str = "",
-                 content: str = "", line: str = "") -> tuple[dict[str, Any], int]:
+def body_section(
+    op: str, number: int, repo: str | None, heading: str = "", content: str = "", line: str = ""
+) -> tuple[dict[str, Any], int]:
     """本文を取り、節を取得・置換・追記する。変わらないときは書き込まない。"""
     tool = "body-section"
     slug = gh_call.resolve_repo(repo)
@@ -129,8 +131,7 @@ def body_section(op: str, number: int, repo: str | None, heading: str = "",
         return step_result.result(tool, "stopped", "リポジトリを決められない"), step_result.EXIT_PRECONDITION
     body = gh_rest.fetch_body(slug, number)
     if body is None:
-        return step_result.result(tool, "stopped", f"#{number} の本文を取得できない"), \
-            step_result.EXIT_UNREADABLE
+        return step_result.result(tool, "stopped", f"#{number} の本文を取得できない"), step_result.EXIT_UNREADABLE
     if op == "get":
         text = gh_sections.get_section(body, heading)
         item = {"kind": "section", "name": heading, "result": "absent" if text is None else "found"}
@@ -140,25 +141,25 @@ def body_section(op: str, number: int, repo: str | None, heading: str = "",
     new = gh_sections.replace_section(body, heading, content) if op == "replace" else gh_sections.append_line(body, line)
     name = heading if op == "replace" else "append"
     if new == body:
-        return step_result.result(tool, "ok", f"#{number} {name}: 変更なし",
-                                  [{"kind": "section", "name": name, "result": "unchanged"}]), 0
+        return step_result.result(tool, "ok", f"#{number} {name}: 変更なし", [{"kind": "section", "name": name, "result": "unchanged"}]), 0
     if not gh_rest.update_body(slug, number, new):
-        return step_result.result(tool, "stopped", f"#{number} の本文を更新できない"), \
-            step_result.EXIT_VIOLATION
-    return step_result.result(tool, "ok", f"#{number} {name}: 更新した",
-                              [{"kind": "section", "name": name, "result": "updated"}]), 0
-
-
-
-
+        return step_result.result(tool, "stopped", f"#{number} の本文を更新できない"), step_result.EXIT_VIOLATION
+    return step_result.result(tool, "ok", f"#{number} {name}: 更新した", [{"kind": "section", "name": name, "result": "updated"}]), 0
 
 
 # ---------------- review-post ----------------
 
 
-def review_post(payload: str, result: str, pr: int, round_no: int, seat: str,
-                repo: str | None = None, head_sha: str | None = None,
-                queue_dir: str | None = None) -> tuple[dict[str, Any], int]:
+def review_post(
+    payload: str,
+    result: str,
+    pr: int,
+    round_no: int,
+    seat: str,
+    repo: str | None = None,
+    head_sha: str | None = None,
+    queue_dir: str | None = None,
+) -> tuple[dict[str, Any], int]:
     """レビューを 1 回で投稿する。PR の作成者が自分なら REQUEST_CHANGES を COMMENT へ下げる。
 
     投稿そのものは `result_posts.post_review`（待ち行列・位置の拒否の退避）に任せる。
@@ -176,22 +177,29 @@ def review_post(payload: str, result: str, pr: int, round_no: int, seat: str,
     meta = gh_pr_info._meta_from_rest(slug, resp.body)
     me = gh_rest.viewer_login()
     if me is None:
-        return step_result.result(tool, "stopped", "自分のアカウントを確かめられない"), \
-            step_result.EXIT_PRECONDITION
+        return step_result.result(tool, "stopped", "自分のアカウントを確かめられない"), step_result.EXIT_PRECONDITION
     is_own = meta["author"] == me
     qdir = pathlib.Path(queue_dir) if queue_dir else gh_pr_info.default_out_dir(slug, pr) / post_queue.QUEUE_DIRNAME
-    posted = result_posts.post_review(post_queue.Queue(qdir), payload, result, slug, int(pr),
-                                      int(round_no), seat, head_sha or meta["head_sha"], is_own,
-                                      actor=me)
-    item = {"kind": "review", "name": seat, "result": "posted" if posted.review_url else
-            ("queued" if posted.queued else "failed"),
-            "intent": posted.intent, "posted_as": posted.posted_as,
-            "review_url": posted.review_url or ""}
-    metrics = {"posted_inline": posted.posted_inline, "posted_body": posted.posted_body,
-               "queued": posted.queued, "findings": posted.findings, "is_own_pr": is_own}
+    posted = result_posts.post_review(
+        post_queue.Queue(qdir), payload, result, slug, int(pr), int(round_no), seat, head_sha or meta["head_sha"], is_own, actor=me
+    )
+    item = {
+        "kind": "review",
+        "name": seat,
+        "result": "posted" if posted.review_url else ("queued" if posted.queued else "failed"),
+        "intent": posted.intent,
+        "posted_as": posted.posted_as,
+        "review_url": posted.review_url or "",
+    }
+    metrics = {
+        "posted_inline": posted.posted_inline,
+        "posted_body": posted.posted_body,
+        "queued": posted.queued,
+        "findings": posted.findings,
+        "is_own_pr": is_own,
+    }
     if posted.failed:
-        return step_result.result(tool, "stopped", f"投稿できない: {posted.detail}", [item], metrics), \
-            step_result.EXIT_VIOLATION
+        return step_result.result(tool, "stopped", f"投稿できない: {posted.detail}", [item], metrics), step_result.EXIT_VIOLATION
     summary = f"PR #{pr} へ {posted.posted_as} で" + ("投稿した" if posted.review_url else "積んだ（上限）")
     return step_result.result(tool, "ok", summary, [item], metrics), 0
 
@@ -206,8 +214,7 @@ def _parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("pr-info", help="PR のメタ・本文・差分の統計・checks・未解決のスレッド")
     sp.add_argument("pr", type=int)
     sp.add_argument("--repo")
-    sp.add_argument("--with", dest="with_parts", default="",
-                    help=f"カンマ区切り: {', '.join(gh_pr_info.WITH_PARTS)}")
+    sp.add_argument("--with", dest="with_parts", default="", help=f"カンマ区切り: {', '.join(gh_pr_info.WITH_PARTS)}")
     sp.add_argument("--out-dir", help="差分とログを書く場所")
 
     sp = sub.add_parser("unresolved-threads", help="未解決のレビュースレッド")
@@ -242,39 +249,33 @@ def main(argv: list[str] | None = None) -> None:
         parts = {x.strip() for x in args.with_parts.split(",") if x.strip()}
         unknown = parts - set(gh_pr_info.WITH_PARTS)
         if unknown:
-            step_result.emit(step_result.result("pr-info", "stopped",
-                                                f"知らない --with: {', '.join(sorted(unknown))}"), 2)
-        obj, code = gh_pr_info.pr_info(args.pr, args.repo, parts,
-                            pathlib.Path(args.out_dir) if args.out_dir else None)
+            step_result.emit(step_result.result("pr-info", "stopped", f"知らない --with: {', '.join(sorted(unknown))}"), 2)
+        obj, code = gh_pr_info.pr_info(args.pr, args.repo, parts, pathlib.Path(args.out_dir) if args.out_dir else None)
     elif args.cmd == "unresolved-threads":
         slug = gh_call.resolve_repo(args.repo)
         threads = gh_graphql.unresolved_threads(slug or "", args.pr)
         if threads is None:
-            obj, code = step_result.result("unresolved-threads", "stopped",
-                                           f"PR #{args.pr} の未解決のスレッドを取得できない"), 2
+            obj, code = step_result.result("unresolved-threads", "stopped", f"PR #{args.pr} の未解決のスレッドを取得できない"), 2
         else:
-            items = [{"kind": "thread", "name": t["thread_id"], "result": "unresolved", **t}
-                     for t in threads]
-            obj, code = step_result.result("unresolved-threads", "ok", f"未解決 {len(threads)}",
-                                           items, {"unresolved_threads": len(threads)}), 0
+            items = [{"kind": "thread", "name": t["thread_id"], "result": "unresolved", **t} for t in threads]
+            obj, code = (
+                step_result.result("unresolved-threads", "ok", f"未解決 {len(threads)}", items, {"unresolved_threads": len(threads)}),
+                0,
+            )
     elif args.cmd == "body-section":
         number = args.issue if args.issue is not None else args.pr
         if args.op in ("get", "replace") and not args.heading.strip().startswith("#"):
-            step_result.emit(step_result.result("body-section", "stopped",
-                                                "--heading に見出しの行（`## 進行` など）を渡す"), 2)
+            step_result.emit(step_result.result("body-section", "stopped", "--heading に見出しの行（`## 進行` など）を渡す"), 2)
         if args.op == "append" and not args.line.strip():
             step_result.emit(step_result.result("body-section", "stopped", "--line が空"), 2)
         content = ""
         if args.op == "replace":
             if not args.content_file:
-                step_result.emit(step_result.result("body-section", "stopped",
-                                                    "--content-file が要る"), 2)
-            content = (sys.stdin.read() if args.content_file == "-"
-                       else pathlib.Path(args.content_file).read_text(encoding="utf-8"))
+                step_result.emit(step_result.result("body-section", "stopped", "--content-file が要る"), 2)
+            content = sys.stdin.read() if args.content_file == "-" else pathlib.Path(args.content_file).read_text(encoding="utf-8")
         obj, code = body_section(args.op, number, args.repo, args.heading, content, args.line)
     else:
-        obj, code = review_post(args.payload, args.result, args.pr, args.round_no, args.seat,
-                                args.repo, args.head_sha, args.queue_dir)
+        obj, code = review_post(args.payload, args.result, args.pr, args.round_no, args.seat, args.repo, args.head_sha, args.queue_dir)
     step_result.emit(obj, code)
 
 

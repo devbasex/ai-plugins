@@ -4,6 +4,7 @@
 承認ゲートは gate のアクションの前で halt_before で止め、承認で halt_before を外して続ける。
 状態はアクションの終わりごとに SQLite へ書く（persister）。
 """
+
 from __future__ import annotations
 
 from burr.core import ApplicationBuilder, State, default, when
@@ -35,6 +36,7 @@ def build_app(ctx: Ctx):
             else:
                 upd.update(cur=target, status="running")
             return state.update(**upd)
+
         return step_action
 
     @action(reads=["gate_to"], writes=["cur", "status"])
@@ -51,14 +53,20 @@ def build_app(ctx: Ctx):
         for dst in [st["id"] for st in PLAN_STEPS] + [GATE, FINISH]:
             transitions.append((src, dst, when(cur=dst)))
     transitions.append((FINISH, FINISH, default))
-    persister = SQLitePersister(db_path=str(ctx.state / "burr.sqlite"), table_name="burr_state",
-                                connect_kwargs={"check_same_thread": False})
+    persister = SQLitePersister(
+        db_path=str(ctx.state / "burr.sqlite"), table_name="burr_state", connect_kwargs={"check_same_thread": False}
+    )
     persister.initialize()
     default_state = {"cur": FIRST, "visits": {}, "count": 0, "path": [], "status": "running", "gate_to": ""}
-    return (ApplicationBuilder().with_actions(**actions).with_transitions(*transitions)
-            .initialize_from(persister, resume_at_next_action=True, default_state=default_state,
-                             default_entrypoint=FIRST)
-            .with_state_persister(persister).with_identifiers(app_id=ctx.plan).build())
+    return (
+        ApplicationBuilder()
+        .with_actions(**actions)
+        .with_transitions(*transitions)
+        .initialize_from(persister, resume_at_next_action=True, default_state=default_state, default_entrypoint=FIRST)
+        .with_state_persister(persister)
+        .with_identifiers(app_id=ctx.plan)
+        .build()
+    )
 
 
 def run_burr(ctx: Ctx, approve: bool) -> dict:

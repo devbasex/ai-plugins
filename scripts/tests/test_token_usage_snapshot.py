@@ -2,6 +2,7 @@
 
 会話は conductor だけの最小の形にし、呼び出しの回数で換算の値を決める（1 回 = U_COST）。
 """
+
 from __future__ import annotations
 
 import json
@@ -12,8 +13,13 @@ from pathlib import Path
 SCRIPT = Path(__file__).resolve().parents[1] / "token-usage-snapshot.py"
 WT = "/tmp/ndf-worktrees/acme--secret-repo/pr7"
 UNTIL = "2026-09-10T12:00:00Z"
-U = {"input_tokens": 10, "cache_read_input_tokens": 1000, "output_tokens": 100,
-     "cache_creation_input_tokens": 200, "cache_creation": {"ephemeral_1h_input_tokens": 200, "ephemeral_5m_input_tokens": 0}}
+U = {
+    "input_tokens": 10,
+    "cache_read_input_tokens": 1000,
+    "output_tokens": 100,
+    "cache_creation_input_tokens": 200,
+    "cache_creation": {"ephemeral_1h_input_tokens": 200, "ephemeral_5m_input_tokens": 0},
+}
 
 
 def _jsonl(path: Path, rows: list[dict]) -> None:
@@ -27,17 +33,44 @@ def _ts(minute: int) -> str:
 
 def session(claude: Path, sid: str, version: str, start: int, calls: int, pr: int) -> None:
     """版 `version` の会話を 1 件作る。`start` 分から 1 分おきに `calls` 回の応答を置き、PR を 1 本作る。"""
-    rows = [{"type": "user", "isMeta": True, "timestamp": _ts(start), "cwd": "/work/secret-repo",
-             "message": {"content": [{"type": "text", "text":
-                                      f"Base directory for this skill: /h/.claude/plugins/cache/ai-plugins/ndf/{version}/skills/x"}]}}]
+    rows = [
+        {
+            "type": "user",
+            "isMeta": True,
+            "timestamp": _ts(start),
+            "cwd": "/work/secret-repo",
+            "message": {
+                "content": [
+                    {"type": "text", "text": f"Base directory for this skill: /h/.claude/plugins/cache/ai-plugins/ndf/{version}/skills/x"}
+                ]
+            },
+        }
+    ]
     for i in range(calls):
-        content = [{"type": "tool_use", "id": f"t{sid}", "name": "Bash", "input": {"command": f"cd {WT} && gh pr create"}}] if i == 0 else []
-        rows.append({"type": "assistant", "timestamp": _ts(start + 1 + i), "version": "2.1.200", "cwd": "/work/secret-repo",
-                     "message": {"id": f"{sid}-m{i}", "model": "claude-opus-5", "usage": U, "content": content}})
+        content = (
+            [{"type": "tool_use", "id": f"t{sid}", "name": "Bash", "input": {"command": f"cd {WT} && gh pr create"}}] if i == 0 else []
+        )
+        rows.append(
+            {
+                "type": "assistant",
+                "timestamp": _ts(start + 1 + i),
+                "version": "2.1.200",
+                "cwd": "/work/secret-repo",
+                "message": {"id": f"{sid}-m{i}", "model": "claude-opus-5", "usage": U, "content": content},
+            }
+        )
         if i == 0:
-            rows.append({"type": "user", "timestamp": _ts(start + 1), "message": {"content": [
-                {"type": "tool_result", "tool_use_id": f"t{sid}",
-                 "content": f"https://github.com/acme/secret-repo/pull/{pr}"}]}})
+            rows.append(
+                {
+                    "type": "user",
+                    "timestamp": _ts(start + 1),
+                    "message": {
+                        "content": [
+                            {"type": "tool_result", "tool_use_id": f"t{sid}", "content": f"https://github.com/acme/secret-repo/pull/{pr}"}
+                        ]
+                    },
+                }
+            )
     _jsonl(claude / "-work-secret-repo" / f"{sid}.jsonl", rows)
 
 
@@ -46,8 +79,9 @@ def record(out: Path, name: str, released: str, until: str | None, versions: lis
     if until is not None:
         meta["until"] = until
     out.mkdir(parents=True, exist_ok=True)
-    (out / f"{name}.json").write_text(json.dumps({"per_pr": [{"version": v} for v in versions], "per_role": [],
-                                                   "external": [], "meta": meta}), encoding="utf-8")
+    (out / f"{name}.json").write_text(
+        json.dumps({"per_pr": [{"version": v} for v in versions], "per_role": [], "external": [], "meta": meta}), encoding="utf-8"
+    )
     (out / f"{name}.md").write_text("# 前の記録\n", encoding="utf-8")
 
 
@@ -57,25 +91,50 @@ def build(tmp: Path) -> dict:
     session(claude, "aaaaaaaa-0000-0000-0000-000000000002", "10.1.0", 10, 2, 2)
     session(claude, "aaaaaaaa-0000-0000-0000-000000000003", "10.2.0", 20, 4, 3)  # 前の行の 2 倍
     session(claude, "aaaaaaaa-0000-0000-0000-000000000004", "10.3.0", 690, 5, 4)  # 1.25 倍・打ち切りの 30 分以内
-    _jsonl(tmp / "codex" / "2026/09/10/rollout-a.jsonl", [
-        {"timestamp": _ts(12), "type": "session_meta", "payload": {"cwd": WT}},
-        {"timestamp": _ts(13), "type": "event_msg", "payload": {"type": "token_count", "info": {"total_token_usage": {
-            "input_tokens": 5000, "cached_input_tokens": 4000, "output_tokens": 50}}}},
-    ])
+    _jsonl(
+        tmp / "codex" / "2026/09/10/rollout-a.jsonl",
+        [
+            {"timestamp": _ts(12), "type": "session_meta", "payload": {"cwd": WT}},
+            {
+                "timestamp": _ts(13),
+                "type": "event_msg",
+                "payload": {
+                    "type": "token_count",
+                    "info": {"total_token_usage": {"input_tokens": 5000, "cached_input_tokens": 4000, "output_tokens": 50}},
+                },
+            },
+        ],
+    )
     (tmp / "kiro").mkdir()
     out = tmp / "out"
     record(out, "2026-08-01", "9.0.0", None, ["9.0.0", "10.0.0"])  # 打ち切りの時刻を持たない記録は最も古い
     record(out, "2026-09-05", "10.1.0", "2026-09-05T00:00:00Z", ["10.0.0", "10.1.0-dev.1", "10.1.0"])
     record(out, "2026-09-20", "10.9.0", "2026-09-20T00:00:00Z", ["10.9.0"])  # 打ち切りより後の記録は取らない
     changelog = tmp / "CHANGELOG.md"
-    changelog.write_text("# Changelog\n\n## [ndf 10.3.0] - x\n\n## [mcp-x 1.0.0] - x\n\n## [ndf 10.2.0] - x\n\n"
-                         "## [ndf 10.1.5] - x\n\n## [ndf 10.1.0] - x\n\n## [ndf 10.0.0] - x\n", encoding="utf-8")
+    changelog.write_text(
+        "# Changelog\n\n## [ndf 10.3.0] - x\n\n## [mcp-x 1.0.0] - x\n\n## [ndf 10.2.0] - x\n\n"
+        "## [ndf 10.1.5] - x\n\n## [ndf 10.1.0] - x\n\n## [ndf 10.0.0] - x\n",
+        encoding="utf-8",
+    )
     return {"claude": tmp / "claude", "codex": tmp / "codex", "kiro": tmp / "kiro", "out": out, "changelog": changelog}
 
 
 def run(env: dict, *args: str, until: str | None = UNTIL) -> subprocess.CompletedProcess:
-    cmd = [sys.executable, str(SCRIPT), "--claude-root", str(env["claude"]), "--codex-root", str(env["codex"]),
-           "--kiro-root", str(env["kiro"]), "--out", str(env["out"]), "--changelog", str(env["changelog"]), *args]
+    cmd = [
+        sys.executable,
+        str(SCRIPT),
+        "--claude-root",
+        str(env["claude"]),
+        "--codex-root",
+        str(env["codex"]),
+        "--kiro-root",
+        str(env["kiro"]),
+        "--out",
+        str(env["out"]),
+        "--changelog",
+        str(env["changelog"]),
+        *args,
+    ]
     if until:
         cmd += ["--until", until]
     return subprocess.run(cmd, capture_output=True, text=True)
@@ -93,6 +152,7 @@ def section(md: str, head: str) -> str:
 
 
 # --- AC6: 2 つのファイルと名前 ---------------------------------------------------
+
 
 def test_writes_md_and_json_named_by_until_date(tmp_path):
     env = build(tmp_path)
@@ -126,6 +186,7 @@ def test_without_previous_and_min_version_is_two(tmp_path):
 
 
 # --- AC7: 表と注意 ---------------------------------------------------------------
+
 
 def test_table_starts_at_last_version_of_previous_record(tmp_path):
     env = build(tmp_path)
@@ -163,6 +224,7 @@ def test_notes_list_each_mechanical_case(tmp_path):
 
 # --- AC8: 差の大きい版 -----------------------------------------------------------
 
+
 def test_only_versions_beyond_30_percent_are_listed(tmp_path):
     env = build(tmp_path)
     p = ok(env, "--released", "10.3.0")
@@ -177,6 +239,7 @@ def test_no_large_difference_prints_none(tmp_path):
 
 
 # --- AC9: 走らせ直し -------------------------------------------------------------
+
 
 def test_rerun_with_same_until_rewrites_same_name_identically(tmp_path):
     env = build(tmp_path)
@@ -200,6 +263,7 @@ def test_rerun_with_other_until_same_version_uses_same_name(tmp_path):
 
 
 # --- AC10: 秘匿 ------------------------------------------------------------------
+
 
 def test_outputs_carry_no_body_path_repository_or_session_id(tmp_path):
     env = build(tmp_path)

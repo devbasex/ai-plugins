@@ -1,4 +1,5 @@
 """修正の結果ファイルを見つけ、今のラウンドのものかを確かめる（#1142 の C2）。"""
+
 from __future__ import annotations
 
 import datetime as _dt
@@ -93,8 +94,7 @@ def _read_and_parse_fix_payload(
     except (OSError, json.JSONDecodeError) as exc:
         if is_canonical:
             review_lib.die(
-                f"正規パスの fix 戻り値ファイルの読み取りに失敗 ({path}): {exc}。"
-                " 後続 fallback への流れ込みを防ぐため即時中断。",
+                f"正規パスの fix 戻り値ファイルの読み取りに失敗 ({path}): {exc}。 後続 fallback への流れ込みを防ぐため即時中断。",
                 code=3,
             )
         review_lib.info(f"⚠ fallback 候補 JSON 解析失敗 ({path}): {exc} — skip")
@@ -114,10 +114,7 @@ def _read_and_parse_fix_payload(
                 " 後続 fallback への流れ込みを防ぐため即時中断。",
                 code=3,
             )
-        review_lib.info(
-            f"⚠ fallback 候補 JSON が dict ではない ({path}, type={type(payload).__name__}) "
-            "— skip"
-        )
+        review_lib.info(f"⚠ fallback 候補 JSON が dict ではない ({path}, type={type(payload).__name__}) — skip")
         return None
     return payload
 
@@ -129,16 +126,10 @@ def _matches_pr(path: pathlib.Path, payload: dict[str, Any], pr: int) -> bool:
         try:
             file_pr_int = int(file_pr)
         except (TypeError, ValueError):
-            review_lib.info(
-                f"⚠ fallback 候補の pr フィールドが数値として解釈できない "
-                f"({path}, file_pr={file_pr!r}) — skip"
-            )
+            review_lib.info(f"⚠ fallback 候補の pr フィールドが数値として解釈できない ({path}, file_pr={file_pr!r}) — skip")
             return False
         if file_pr_int != int(pr):
-            review_lib.info(
-                f"⚠ fallback 候補の pr 不一致 ({path}, file_pr={file_pr} != pr={pr}) "
-                "— 別 PR の戻り値の可能性。skip"
-            )
+            review_lib.info(f"⚠ fallback 候補の pr 不一致 ({path}, file_pr={file_pr} != pr={pr}) — 別 PR の戻り値の可能性。skip")
             return False
     return True
 
@@ -182,8 +173,7 @@ def _read_fix_result(
     if fix is None:
         checked = ([str(explicit)] if explicit else []) + [str(c) for c, _ in fallback_candidates]
         review_lib.die(
-            "fix サブエージェントが戻り値ファイルを生成しなかった "
-            f"(checked: {checked})",
+            f"fix サブエージェントが戻り値ファイルを生成しなかった (checked: {checked})",
             code=3,
         )
 
@@ -200,8 +190,7 @@ def _read_explicit_fix_result(explicit: pathlib.Path) -> dict[str, Any]:
         fix = json.loads(explicit.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         review_lib.die(
-            f"--file 指定の fix 戻り値ファイルの読み取り / parse に失敗 "
-            f"({explicit}): {exc}",
+            f"--file 指定の fix 戻り値ファイルの読み取り / parse に失敗 ({explicit}): {exc}",
             code=3,
         )
     if not isinstance(fix, dict):
@@ -223,9 +212,7 @@ def _find_fallback_fix_result(
     for candidate, is_canonical in candidates:
         if not (candidate.exists() and candidate.stat().st_size > 0):
             continue
-        is_fresh, parsed = _is_fresh_fix_result(
-            candidate, pr, round_started_ts, is_canonical=is_canonical
-        )
+        is_fresh, parsed = _is_fresh_fix_result(candidate, pr, round_started_ts, is_canonical=is_canonical)
         if is_fresh:
             parsed.setdefault(FIX_SOURCE_KEY, str(candidate))
             return parsed

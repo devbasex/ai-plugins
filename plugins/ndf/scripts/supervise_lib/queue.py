@@ -3,6 +3,7 @@
 `engine` を import しない。プランは `SELF` の `run` として流す。worktree は `paths.ensure_worktree` で作る
 （テストがモジュールの属性を差し替える）。
 """
+
 from __future__ import annotations
 
 import json
@@ -44,9 +45,19 @@ def notify_attention(plan: str, offset: int) -> int:
     prog = state_dir_of(plan) / "progress.jsonl"
     found, offset = attention_lines(prog, offset)
     for d in found:
-        print(json.dumps({"tool": "supervise-queue", "event": "attention", "plan": plan,
-                          "progress": str(prog), **{k: d.get(k) for k in ("at", "step", "reason", "text")}},
-                         ensure_ascii=False), flush=True)
+        print(
+            json.dumps(
+                {
+                    "tool": "supervise-queue",
+                    "event": "attention",
+                    "plan": plan,
+                    "progress": str(prog),
+                    **{k: d.get(k) for k in ("at", "step", "reason", "text")},
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
     return offset
 
 
@@ -122,10 +133,15 @@ def fill_queue_pr(plan: str, items: list[dict]) -> str | None:
     for name in names:
         hits = [i for i in items if named(i.get("plan", ""), name)]
         if not hits:
-            hits = [{"plan": str(f), "result": report_result((state_dir_of(str(f)) / "report.md").read_text()),
-                     "report": str(state_dir_of(str(f)) / "report.md")}
-                    for f in sorted(Path(plan).parent.glob("*.json"))
-                    if str(f) != plan and named(str(f), name) and (state_dir_of(str(f)) / "report.md").is_file()]
+            hits = [
+                {
+                    "plan": str(f),
+                    "result": report_result((state_dir_of(str(f)) / "report.md").read_text()),
+                    "report": str(state_dir_of(str(f)) / "report.md"),
+                }
+                for f in sorted(Path(plan).parent.glob("*.json"))
+                if str(f) != plan and named(str(f), name) and (state_dir_of(str(f)) / "report.md").is_file()
+            ]
         prs = [n for n in (plan_pr(i) for i in hits) if n]
         text = text.replace(f"{{queue_pr:{name}}}", prs[-1] if prs else "0")
     write_text_atomic(Path(plan), text)
@@ -158,8 +174,11 @@ def run_batch(plans: list[str], max_: int, poll: float) -> list[dict]:
             prog = state_dir_of(plan) / "progress.jsonl"
             seen[plan] = prog.stat().st_size if prog.is_file() else 0  # 前の実行の行は知らせない
             log = open(Path(plan).with_suffix(".log"), "w")
-            running[plan] = (subprocess.Popen([sys.executable, str(SELF), "run", plan], stdout=log,
-                                              stderr=subprocess.STDOUT), log, time.time())
+            running[plan] = (
+                subprocess.Popen([sys.executable, str(SELF), "run", plan], stdout=log, stderr=subprocess.STDOUT),
+                log,
+                time.time(),
+            )
         for plan in list(running):
             seen[plan] = notify_attention(plan, seen[plan])
         for plan, (proc, log, started) in list(running.items()):
@@ -169,8 +188,9 @@ def run_batch(plans: list[str], max_: int, poll: float) -> list[dict]:
             log.close()
             rep = state_dir_of(plan) / "report.md"
             res = report_result(rep.read_text()) if rep.is_file() else "報告なし"
-            items.append({"plan": plan, "result": res, "exit": proc.returncode, "report": str(rep),
-                          "seconds": round(time.time() - started, 1)})
+            items.append(
+                {"plan": plan, "result": res, "exit": proc.returncode, "report": str(rep), "seconds": round(time.time() - started, 1)}
+            )
             del running[plan]
         if running:
             time.sleep(poll)
@@ -180,8 +200,7 @@ def run_batch(plans: list[str], max_: int, poll: float) -> list[dict]:
 NOT_RUN = "流さなかった"
 
 
-def cmd_queue(plans: list[str], max_: int, poll: float = 1.0, then: list | None = None,
-              done: str | None = None) -> dict:
+def cmd_queue(plans: list[str], max_: int, poll: float = 1.0, then: list | None = None, done: str | None = None) -> dict:
     """計画を同時に max_ 本まで走らせ、空いた枠へ順に流す。
 
     走っている計画の progress.jsonl に conductor 向けの行（"kind": "attention"）が足されたら、
@@ -197,9 +216,11 @@ def cmd_queue(plans: list[str], max_: int, poll: float = 1.0, then: list | None 
     done_path.unlink(missing_ok=True)  # 前の queue の終わりを待つ側が読まないように、始めに消す
     wait_cursor_path(done_path).unlink(missing_ok=True)
     all_plans = [*plans, *(p for st in stages for p in st)]
-    write_text_atomic(queue_plans_path(done_path), json.dumps(
-        {"started": now_iso(), "plans": all_plans, "offsets": {p: progress_size(p) for p in all_plans}},
-        ensure_ascii=False) + "\n")
+    write_text_atomic(
+        queue_plans_path(done_path),
+        json.dumps({"started": now_iso(), "plans": all_plans, "offsets": {p: progress_size(p) for p in all_plans}}, ensure_ascii=False)
+        + "\n",
+    )
     first, early = [], []
     for p in plans:
         err = fill_queue_pr(p, [])
@@ -209,8 +230,11 @@ def cmd_queue(plans: list[str], max_: int, poll: float = 1.0, then: list | None 
         not_done = [i for i in items if i["result"] != "完了"]
         if not_done:
             ran_bad = [i for i in not_done if i["result"] != NOT_RUN]
-            reason = ("前の計画が完了していない: " + "、".join(f"{i['plan']}（{i['result']}）" for i in ran_bad)
-                      if ran_bad else "前のステージを流さなかった")
+            reason = (
+                "前の計画が完了していない: " + "、".join(f"{i['plan']}（{i['result']}）" for i in ran_bad)
+                if ran_bad
+                else "前のステージを流さなかった"
+            )
             items += [{"plan": p, "result": NOT_RUN, "reason": reason} for p in stage]
             continue
         prs, runnable, skipped_then = queue_prs(items), [], []
@@ -230,9 +254,14 @@ def cmd_queue(plans: list[str], max_: int, poll: float = 1.0, then: list | None 
     if skipped:
         summary += f"。後続 {skipped} 本は流さなかった"
     nxt = "関門の計画の report.md を読んで提示する" if status == "gate" else None
-    res = result("supervise-queue", status, summary, items,
-                 {"plans": len(ran), "stopped": len(stopped), "gate": len(gates), "not_run": skipped,
-                  "max": max_, "done": str(done_path)}, next=nxt)
+    res = result(
+        "supervise-queue",
+        status,
+        summary,
+        items,
+        {"plans": len(ran), "stopped": len(stopped), "gate": len(gates), "not_run": skipped, "max": max_, "done": str(done_path)},
+        next=nxt,
+    )
     write_text_atomic(done_path, json.dumps(res, ensure_ascii=False) + "\n")
     return res
 
@@ -249,17 +278,29 @@ def cmd_wait(done: str, timeout: float, poll: float = 5.0, clock=time.time, slee
     plans_path, cursor_path = queue_plans_path(done_path), wait_cursor_path(done_path)
     start = clock()
     while True:
-        if done_path.is_file() and done_path.stat().st_size > 0 and not (
-                plans_path.is_file() and plans_path.stat().st_mtime > done_path.stat().st_mtime):
+        if (
+            done_path.is_file()
+            and done_path.stat().st_size > 0
+            and not (plans_path.is_file() and plans_path.stat().st_mtime > done_path.stat().st_mtime)
+        ):
             try:
                 res = json.loads(done_path.read_text())
             except (OSError, json.JSONDecodeError):
                 res = None
             if isinstance(res, dict):
                 summary = f"queue が終わった（{res.get('status')}）: {res.get('summary')}"
-                return summary, result("supervise-wait", "ok", summary, [res],
-                                       {"event": "done", "queue_status": res.get("status"), "done": str(done_path)},
-                                       next=res.get("next")), WAIT_DONE
+                return (
+                    summary,
+                    result(
+                        "supervise-wait",
+                        "ok",
+                        summary,
+                        [res],
+                        {"event": "done", "queue_status": res.get("status"), "done": str(done_path)},
+                        next=res.get("next"),
+                    ),
+                    WAIT_DONE,
+                )
         try:
             listing = json.loads(plans_path.read_text())
         except (OSError, json.JSONDecodeError):
@@ -276,20 +317,40 @@ def cmd_wait(done: str, timeout: float, poll: float = 5.0, clock=time.time, slee
             for plan in listing.get("plans") or []:
                 prog = state_dir_of(plan) / "progress.jsonl"
                 lines, offsets[plan] = attention_lines(prog, int(offsets.get(plan, 0)))
-                found += [{"plan": plan, "progress": str(prog),
-                           **{k: d.get(k) for k in ("at", "step", "reason", "text")}} for d in lines]
+                found += [{"plan": plan, "progress": str(prog), **{k: d.get(k) for k in ("at", "step", "reason", "text")}} for d in lines]
             if found:
-                write_text_atomic(cursor_path, json.dumps({"started": listing.get("started"), "offsets": offsets},
-                                                     ensure_ascii=False) + "\n")
+                write_text_atomic(
+                    cursor_path, json.dumps({"started": listing.get("started"), "offsets": offsets}, ensure_ascii=False) + "\n"
+                )
                 first = found[0]
-                summary = (f"attention {len(found)} 件: {first['plan']} のステップ {first.get('step')}"
-                           f"（{first.get('reason')}）: {first.get('text')}")
-                return summary, result("supervise-wait", "gate", summary, found,
-                                       {"event": "attention", "attention": len(found), "done": str(done_path)},
-                                       next="attention を読んで対処し、もう一度 wait を打つ（続きから待つ）"), WAIT_ATTENTION
+                summary = (
+                    f"attention {len(found)} 件: {first['plan']} のステップ {first.get('step')}"
+                    f"（{first.get('reason')}）: {first.get('text')}"
+                )
+                return (
+                    summary,
+                    result(
+                        "supervise-wait",
+                        "gate",
+                        summary,
+                        found,
+                        {"event": "attention", "attention": len(found), "done": str(done_path)},
+                        next="attention を読んで対処し、もう一度 wait を打つ（続きから待つ）",
+                    ),
+                    WAIT_ATTENTION,
+                )
         if clock() - start >= timeout:
             summary = f"{timeout:g} 秒待ったが queue が終わらず attention も無い"
-            return summary, result("supervise-wait", "stopped", summary, [],
-                                   {"event": "timeout", "timeout": timeout, "done": str(done_path)},
-                                   next="queue の <計画>.log と progress.jsonl を見て、続けるならもう一度 wait を打つ"), WAIT_TIMEOUT
+            return (
+                summary,
+                result(
+                    "supervise-wait",
+                    "stopped",
+                    summary,
+                    [],
+                    {"event": "timeout", "timeout": timeout, "done": str(done_path)},
+                    next="queue の <計画>.log と progress.jsonl を見て、続けるならもう一度 wait を打つ",
+                ),
+                WAIT_TIMEOUT,
+            )
         sleep(poll)

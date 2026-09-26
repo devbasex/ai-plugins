@@ -4,6 +4,7 @@
 ここでは表の値と、全工程 × 全担当の組の順序、環境変数と引数の解決順、コマンドの
 終了コードを確かめる。監視と起動からの呼び出しは各 Skill のテストが確かめる。
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -19,8 +20,15 @@ LIB = pathlib.Path(__file__).resolve().parents[1] / "lib"
 LIMITS = LIB / "limits.py"
 
 PHASES = {
-    "review": 1200, "critique": 1200, "propose": 1200, "judge-test-changes": 1200,
-    "plan": 1200, "add-tests": 3600, "implement": 3600, "fix": 3600, "final-fix": 3600,
+    "review": 1200,
+    "critique": 1200,
+    "propose": 1200,
+    "judge-test-changes": 1200,
+    "plan": 1200,
+    "add-tests": 3600,
+    "implement": 3600,
+    "fix": 3600,
+    "final-fix": 3600,
 }
 STALLS = {"codex": 180, "agy": 480, "kiro": 480, "claude": 900}
 
@@ -38,11 +46,14 @@ def limits():
 def _run(*args: str, **env: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, str(LIMITS), *args],
-        env={**os.environ, **env}, capture_output=True, text=True,
+        env={**os.environ, **env},
+        capture_output=True,
+        text=True,
     )
 
 
 # ---------- AC30: 表の値 ----------
+
 
 def test_the_phase_table_holds_the_contract_values(limits) -> None:
     assert limits.PHASE_TIMEOUT == PHASES
@@ -63,6 +74,7 @@ def test_the_cli_timeout_is_the_monitor_timeout_plus_120(limits, phase: str) -> 
 
 
 # ---------- AC31: 全 28 組の順序 ----------
+
 
 @pytest.mark.parametrize(("phase", "agent"), sorted(itertools.product(PHASES, STALLS)))
 def test_stall_is_below_monitor_is_below_cli(limits, phase: str, agent: str) -> None:
@@ -99,6 +111,7 @@ def test_the_check_command_exits_0() -> None:
 
 
 # ---------- AC32: 監視の上限の解決順 ----------
+
 
 def test_explicit_wins_over_everything(limits, monkeypatch) -> None:
     monkeypatch.setenv("MONITOR_TIMEOUT_AGY", "700")
@@ -162,6 +175,7 @@ def test_an_unknown_agent_takes_the_fallback_stall(limits) -> None:
 
 # ---------- コマンド ----------
 
+
 def test_the_cli_timeout_command_prints_seconds() -> None:
     r = _run("cli-timeout", "critique", "agy")
     assert (r.returncode, r.stdout) == (0, "1320\n")
@@ -196,6 +210,7 @@ def test_an_argv_matching_no_form_prints_usage_to_stderr(args: tuple[str, ...]) 
 
 
 # ---------- CLI の上限の上書き（#1142 の V3。3 つの resolve_print_timeout を 1 つにする） ----------
+
 
 def test_resolve_cli_timeout_without_override_is_the_derived_value(limits) -> None:
     assert limits.resolve_cli_timeout("critique", "agy") == (1320, None)
@@ -240,11 +255,14 @@ def test_the_cli_timeout_command_takes_override_and_no_floor() -> None:
     assert (r.returncode, r.stdout) == (0, "4000\n")
 
 
-@pytest.mark.parametrize("args", [
-    ("cli-timeout", "critique", "agy", "--override"),
-    ("cli-timeout", "critique", "agy", "--bogus"),
-    ("monitor-timeout", "critique", "agy", "--no-floor"),
-])
+@pytest.mark.parametrize(
+    "args",
+    [
+        ("cli-timeout", "critique", "agy", "--override"),
+        ("cli-timeout", "critique", "agy", "--bogus"),
+        ("monitor-timeout", "critique", "agy", "--no-floor"),
+    ],
+)
 def test_broken_cli_timeout_options_print_usage(args: tuple[str, ...]) -> None:
     r = _run(*args)
     assert r.returncode == 1 and r.stdout == ""

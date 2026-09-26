@@ -31,7 +31,7 @@ ISSUE="${1:-}"
 STAGE="${2:-}"
 shift 2 2>/dev/null || true
 
-MODE= PACE= WORKTREE= PLAN= REPO= NOTE=
+MODE='' PACE='' WORKTREE='' PLAN='' REPO='' NOTE=''
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --mode) MODE="${2:-}"; shift 2 ;;

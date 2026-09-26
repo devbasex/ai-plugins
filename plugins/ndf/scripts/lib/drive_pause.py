@@ -27,6 +27,7 @@
 再開は同じコマンドを打ち直すだけである。進みは各 drive が一時ディレクトリの状態ファイルに持つ。
 件数（metrics）の中身は drive ごとに決め、各 drive の docstring が並べる。
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -35,8 +36,12 @@ from typing import Callable
 import step_result as sr
 
 PAUSE_CODES = {"fix": 20, "sweep": 21, "newtext": 22, "cross-review": 23}
-MEANINGS = {"fix": "修正待ち", "sweep": "最終スイープ待ち", "newtext": "巻き直しの新しい title・body 待ち",
-            "cross-review": "最終ゲートの cross-review 待ち"}
+MEANINGS = {
+    "fix": "修正待ち",
+    "sweep": "最終スイープ待ち",
+    "newtext": "巻き直しの新しい title・body 待ち",
+    "cross-review": "最終ゲートの cross-review 待ち",
+}
 EXIT_DONE = 0
 EXIT_STOPPED = 1
 
@@ -49,15 +54,19 @@ class Stop(Exception):
         self.code = code
 
 
-def pause(tool: str, kind: str, prompt_file: Path | str, result_file: Path | str, round_: int,
-          metrics: dict, **extra) -> dict:
+def pause(tool: str, kind: str, prompt_file: Path | str, result_file: Path | str, round_: int, metrics: dict, **extra) -> dict:
     """止まる地点の結果を組む。extra は items[0] へ足す（例 `cwd`・`command`）。"""
     if kind not in PAUSE_CODES:
         raise ValueError(f"知らない pause: {kind}")
-    item = {"pause": kind, "prompt_file": str(prompt_file), "result_file": str(result_file),
-            "round": round_, **extra}
-    return sr.result(tool, "gate", f"{MEANINGS[kind]}（round {round_}）。prompt_file の指示で result_file を書き、"
-                     "同じコマンドを打ち直す", [item], metrics, next=kind)
+    item = {"pause": kind, "prompt_file": str(prompt_file), "result_file": str(result_file), "round": round_, **extra}
+    return sr.result(
+        tool,
+        "gate",
+        f"{MEANINGS[kind]}（round {round_}）。prompt_file の指示で result_file を書き、同じコマンドを打ち直す",
+        [item],
+        metrics,
+        next=kind,
+    )
 
 
 def done(tool: str, summary: str, report: Path | str, metrics: dict) -> dict:

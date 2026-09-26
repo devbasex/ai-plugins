@@ -3,6 +3,7 @@
 `init` の新規の実行と再開がここを呼ぶ。測るのは `commands/measure.py` で、ここは測定の設定を
 読んで `pending` の記録を作るだけである。
 """
+
 from __future__ import annotations
 
 import pathlib
@@ -44,12 +45,10 @@ def ensure_record(state: dict[str, Any], enabled: Optional[bool]) -> None:
     """
     if isinstance(state.get("code_metrics"), dict) or propose_started(state):
         return
-    state["code_metrics"] = code_metrics_record(
-        pathlib.Path(state["worktrees"]["work"]), enabled is not False)
+    state["code_metrics"] = code_metrics_record(pathlib.Path(state["worktrees"]["work"]), enabled is not False)
 
 
 def recorded_enabled(state: dict[str, Any]) -> Optional[bool]:
     """再開で `--code-metrics` と比べる値（`init` の「知らせる」の表）。記録が無ければ `None`。"""
     record = state.get("code_metrics")
     return (record.get("config") or {}).get("enabled") if isinstance(record, dict) else None
-

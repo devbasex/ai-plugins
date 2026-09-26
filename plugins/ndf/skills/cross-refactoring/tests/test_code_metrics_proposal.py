@@ -5,6 +5,7 @@
 - AC17: `evidence` の有無と形は、候補の採否と並びを変えない
 - 駆動は提案の同期の後、`start-phase propose` の前に `measure` を 1 回打ち、失敗でも止まらない
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -34,12 +35,14 @@ def render(refactor, tmp_path):
     (stub_dir / RUNTIME).chmod(0o755)
 
     def _render(phase: str, record: dict, **overrides) -> str:
-        path = make_state_v2(tmp_path, work, runtimes=[RUNTIME], vocabulary=vocabulary,
-                             code_metrics=record, **overrides)
-        subprocess.run([str(LAUNCH), RUNTIME, phase, "130"],
-                       env={**os.environ, "CROSS_REFACTORING_TMP_DIR": str(path.parent),
-                            "PATH": f"{stub_dir}{os.pathsep}{os.environ['PATH']}"},
-                       check=True, capture_output=True, text=True)
+        path = make_state_v2(tmp_path, work, runtimes=[RUNTIME], vocabulary=vocabulary, code_metrics=record, **overrides)
+        subprocess.run(
+            [str(LAUNCH), RUNTIME, phase, "130"],
+            env={**os.environ, "CROSS_REFACTORING_TMP_DIR": str(path.parent), "PATH": f"{stub_dir}{os.pathsep}{os.environ['PATH']}"},
+            check=True,
+            capture_output=True,
+            text=True,
+        )
         return (path.parent / f"{RUNTIME}-{phase}-rf130-prompt.md").read_text(encoding="utf-8")
 
     return _render, tmp_path
@@ -58,12 +61,15 @@ def test_propose_prompt_shows_the_metrics_file(render):
     assert str(target) not in _render("plan", {"status": "written", "file": str(target)})
 
 
-@pytest.mark.parametrize("record", [
-    {"status": "disabled"},
-    {"status": "write_failed", "file": None},
-    {"status": "written", "file": "/nonexistent/code-metrics-rf130.md"},
-    None,
-])
+@pytest.mark.parametrize(
+    "record",
+    [
+        {"status": "disabled"},
+        {"status": "write_failed", "file": None},
+        {"status": "written", "file": "/nonexistent/code-metrics-rf130.md"},
+        None,
+    ],
+)
 def test_propose_prompt_without_a_file_does_not_mention_it(render, record):
     """AC18: ファイルが無ければ、指標の節もパスも無い。"""
     _render, _ = render
@@ -75,25 +81,55 @@ def test_propose_prompt_without_a_file_does_not_mention_it(render, record):
 def test_plan_prompt_carries_evidence_of_candidates(render):
     _render, _ = render
     candidates = [
-        {"path": "src/a.py", "symbol": "Foo", "smell": "long_method", "technique": "extract_method",
-         "severity": "major", "rationale": "r", "plan": "p", "proposed_by": ["codex"],
-         "evidence": {"cc": 26, "lines": 101}},
-        {"path": "src/b.py", "symbol": "Bar", "smell": "long_method", "technique": "extract_method",
-         "severity": "major", "rationale": "r", "plan": "p", "proposed_by": ["codex"]},
+        {
+            "path": "src/a.py",
+            "symbol": "Foo",
+            "smell": "long_method",
+            "technique": "extract_method",
+            "severity": "major",
+            "rationale": "r",
+            "plan": "p",
+            "proposed_by": ["codex"],
+            "evidence": {"cc": 26, "lines": 101},
+        },
+        {
+            "path": "src/b.py",
+            "symbol": "Bar",
+            "smell": "long_method",
+            "technique": "extract_method",
+            "severity": "major",
+            "rationale": "r",
+            "plan": "p",
+            "proposed_by": ["codex"],
+        },
     ]
     prompt = _render("plan", None, candidates=candidates)
     assert '"cc": 26' in prompt and prompt.count('"evidence"') == 1
 
 
 def _proposal(**extra):
-    return {"path": "src/a.py", "symbol": "Foo", "smell": "long_method",
-            "technique": "extract_method", "severity": "major", "rationale": "r", "plan": "p",
-            **extra}
+    return {
+        "path": "src/a.py",
+        "symbol": "Foo",
+        "smell": "long_method",
+        "technique": "extract_method",
+        "severity": "major",
+        "rationale": "r",
+        "plan": "p",
+        **extra,
+    }
 
 
-@pytest.mark.parametrize("evidence", [
-    None, {"cognitive": 74, "cc": 26, "lines": 101}, "74", [1], {"cc": "big", "who": 3, "lines": True},
-])
+@pytest.mark.parametrize(
+    "evidence",
+    [
+        None,
+        {"cognitive": 74, "cc": 26, "lines": 101},
+        "74",
+        [1],
+        {"cc": "big", "who": 3, "lines": True},
+    ],
+)
 def test_evidence_never_changes_what_is_adopted(proposals, evidence):
     """AC17 I7: 書いた提案も書かない提案も形の悪い提案も、同じ規則で候補になる。"""
     extra = {} if evidence is None else {"evidence": evidence}
@@ -112,10 +148,12 @@ def test_evidence_never_changes_what_is_adopted(proposals, evidence):
 
 def test_merged_evidence_keeps_existing_keys(proposals):
     """統合では既にある鍵を残し、無い鍵だけ足す。"""
-    got, _ = proposals.build_candidates({
-        "codex": [_proposal(evidence={"cc": 26})],
-        "kiro": [_proposal(evidence={"cc": 99, "lines": 101})],
-    })
+    got, _ = proposals.build_candidates(
+        {
+            "codex": [_proposal(evidence={"cc": 26})],
+            "kiro": [_proposal(evidence={"cc": 99, "lines": 101})],
+        }
+    )
     assert got[0]["evidence"] == {"cc": 26, "lines": 101}
     assert got[0]["proposed_by"] == ["codex", "kiro"]
 
@@ -140,8 +178,7 @@ def test_drive_measures_once_before_the_proposal(tmp_path, monkeypatch, capsys, 
             return 0, "abc\n"
         sub = cmd[2]
         if sub == "init":
-            return 0, (f"ID=7\nTMP_DIR={tmp_path}\nPHASE=propose\nIMPL=codex\n"
-                       f"RUNTIMES=codex\nRUNTIMES_CSV=codex\nWORK={tmp_path}\n")
+            return 0, (f"ID=7\nTMP_DIR={tmp_path}\nPHASE=propose\nIMPL=codex\nRUNTIMES=codex\nRUNTIMES_CSV=codex\nWORK={tmp_path}\n")
         if sub == "measure":
             return measure_rc, "CODE_METRICS=written\n"
         if sub == "merge-proposals":

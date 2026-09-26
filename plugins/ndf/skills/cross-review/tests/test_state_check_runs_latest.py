@@ -3,6 +3,7 @@
 再実行で `failure` → `success` になったチェックを失敗として数えると、承認されたラウンドが
 code_failure へ差し戻される。畳み方は共通層の `gh_parts.fold_check_runs` が持つ。
 """
+
 from __future__ import annotations
 import review_lib.ci
 import review_lib.github
@@ -13,14 +14,15 @@ SHA = "b87b3ae"
 
 def _run(state_mod, runs):
     return lambda path: review_lib.github.RestResponse(
-        headers={}, body={"total_count": len(runs), "check_runs": runs},
-        rate_remaining=None, rate_reset=None,
+        headers={},
+        body={"total_count": len(runs), "check_runs": runs},
+        rate_remaining=None,
+        rate_reset=None,
     )
 
 
 def _check(name, conclusion, started, run_id):
-    return {"id": run_id, "name": name, "status": "completed", "conclusion": conclusion,
-            "started_at": started}
+    return {"id": run_id, "name": name, "status": "completed", "conclusion": conclusion, "started_at": started}
 
 
 RERUN = [
@@ -35,8 +37,7 @@ def test_rerun_success_supersedes_the_earlier_failure(state_mod, real_github, mo
 
     runs = review_lib.ci._fetch_check_runs(REPO, SHA)
 
-    assert [(r["name"], r["conclusion"]) for r in runs] == [("pytest", "success"),
-                                                            ("lint", "success")]
+    assert [(r["name"], r["conclusion"]) for r in runs] == [("pytest", "success"), ("lint", "success")]
 
 
 def test_round_ci_converges_after_a_rerun(state_mod, real_github, monkeypatch):
@@ -48,10 +49,17 @@ def test_round_ci_converges_after_a_rerun(state_mod, real_github, monkeypatch):
 
 
 def test_rerun_failure_after_success_still_fails(state_mod, real_github, monkeypatch):
-    monkeypatch.setattr(review_lib.github, "_gh_rest", _run(state_mod, [
-        _check("pytest", "success", "2026-09-25T01:00:00Z", 101),
-        _check("pytest", "failure", "2026-09-25T02:00:00Z", 102),
-    ]))
+    monkeypatch.setattr(
+        review_lib.github,
+        "_gh_rest",
+        _run(
+            state_mod,
+            [
+                _check("pytest", "success", "2026-09-25T01:00:00Z", 101),
+                _check("pytest", "failure", "2026-09-25T02:00:00Z", 102),
+            ],
+        ),
+    )
 
     ci = review_lib.ci._round_ci({"repo": REPO}, {"head_sha": SHA}, 1)
 

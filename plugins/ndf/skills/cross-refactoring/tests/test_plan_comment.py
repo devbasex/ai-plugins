@@ -5,9 +5,9 @@
 
 `gh` は呼ばない。`sh` を差し替え、渡した引数と返した JSON だけを見る。
 """
+
 from __future__ import annotations
 
-import sys
 import json
 
 import pytest
@@ -20,13 +20,21 @@ COMMENT_URL = "https://github.com/devbasex/ai-plugins/pull/130#issuecomment-999"
 
 def _item(**over):
     base = {
-        "id": "I-001", "rank": 1, "path": "src/foo.py",
-        "symbol": "Foo.handle", "smell": "long_method",
-        "technique": "extract_method", "severity": "major", "tier": "high",
+        "id": "I-001",
+        "rank": 1,
+        "path": "src/foo.py",
+        "symbol": "Foo.handle",
+        "smell": "long_method",
+        "technique": "extract_method",
+        "severity": "major",
+        "tier": "high",
         "rationale": "1 関数が 6 つの処理を通しで行っている",
-        "plan": "1. 範囲の確定を切り出す", "tests": [],
-        "estimated_diff_lines": 40, "proposed_by": ["codex", "agy"],
-        "status": "verified", "commits": {"test": None, "implement": "abc1234", "fix": []},
+        "plan": "1. 範囲の確定を切り出す",
+        "tests": [],
+        "estimated_diff_lines": 40,
+        "proposed_by": ["codex", "agy"],
+        "status": "verified",
+        "commits": {"test": None, "implement": "abc1234", "fix": []},
     }
     base.update(over)
     return base
@@ -60,6 +68,7 @@ def gh(patch_lib, refactor, monkeypatch):
 
 # ---------- 置き場所の決まり方 ----------
 
+
 def test_the_default_mode_is_a_comment(plan, tmp_path):
     _, state = _state(tmp_path)
     assert plan.plan_mode(state) == plan.PLAN_COMMENT
@@ -78,10 +87,10 @@ def test_a_state_file_without_any_plan_records_nothing(plan, tmp_path):
 
 # ---------- 投稿と編集 ----------
 
+
 def test_the_first_publish_creates_a_comment(plan, tmp_path, gh):
     calls, responses = gh
-    responses["issues/130/comments"] = json.dumps(
-        {"id": 999, "html_url": COMMENT_URL})
+    responses["issues/130/comments"] = json.dumps({"id": 999, "html_url": COMMENT_URL})
     _, state = _state(tmp_path)
 
     url = plan.publish_plan_comment(state)
@@ -95,8 +104,7 @@ def test_the_first_publish_creates_a_comment(plan, tmp_path, gh):
 def test_the_second_publish_edits_the_same_comment(plan, tmp_path, gh):
     """**同じコメントを編集する。** 公開のたびに積み増さない。"""
     calls, responses = gh
-    responses["issues/comments/999"] = json.dumps(
-        {"id": 999, "html_url": COMMENT_URL})
+    responses["issues/comments/999"] = json.dumps({"id": 999, "html_url": COMMENT_URL})
     _, state = _state(tmp_path, plan_comment={"id": 999, "url": COMMENT_URL})
 
     plan.publish_plan_comment(state)
@@ -112,11 +120,8 @@ def test_a_lost_record_is_recovered_from_the_marker(plan, tmp_path, gh):
     calls, responses = gh
     _, state = _state(tmp_path)
     marker = plan.plan_comment_marker(state)
-    responses["--paginate"] = json.dumps(
-        [{"id": 12, "body": "別のコメント"},
-         {"id": 999, "body": f"{marker}\n\n# 改修計画"}])
-    responses["issues/comments/999"] = json.dumps(
-        {"id": 999, "html_url": COMMENT_URL})
+    responses["--paginate"] = json.dumps([{"id": 12, "body": "別のコメント"}, {"id": 999, "body": f"{marker}\n\n# 改修計画"}])
+    responses["issues/comments/999"] = json.dumps({"id": 999, "html_url": COMMENT_URL})
 
     plan.publish_plan_comment(state)
 
@@ -147,13 +152,22 @@ def test_the_file_mode_does_not_post_a_comment(plan, tmp_path, gh):
 
 # ---------- 見送りの内訳は改修計画が持つ ----------
 
+
 def test_the_plan_lists_the_deferred_items(plan, tmp_path):
     """**内訳を持つのは改修計画だけである**（決定 6-b）。"""
-    _, state = _state(tmp_path, deferred_items=[{
-        "item_id": "I-002", "path": "src/bar.py",
-        "symbol": "Bar.run", "smell": "duplication",
-        "defer_reason": "not_done", "detail": "実装の締め切りまでにコミットが無い",
-    }])
+    _, state = _state(
+        tmp_path,
+        deferred_items=[
+            {
+                "item_id": "I-002",
+                "path": "src/bar.py",
+                "symbol": "Bar.run",
+                "smell": "duplication",
+                "defer_reason": "not_done",
+                "detail": "実装の締め切りまでにコミットが無い",
+            }
+        ],
+    )
     text = plan.format_plan(state)
     section = text.split("## 見送った提案", 1)[1]
     assert "src/bar.py#Bar.run" in section and "not_done" in section
@@ -169,10 +183,19 @@ def test_the_plan_says_none_when_nothing_was_deferred(plan, tmp_path):
 def test_a_pipe_or_newline_in_a_cell_does_not_break_the_table(plan, tmp_path):
     """#1142 の D4 で表を `mdtable` で組むようにして変わった入力。セルの `|` は `\\|` に、改行は空白になる
     （前は `|` がそのまま列を増やし、改行が表を途中で切っていた）。"""
-    _, state = _state(tmp_path, deferred_items=[{
-        "item_id": "I-002", "path": "src/bar.py", "symbol": "Bar.run", "smell": "duplication",
-        "defer_reason": "not_done", "detail": "a | b\nc",
-    }])
+    _, state = _state(
+        tmp_path,
+        deferred_items=[
+            {
+                "item_id": "I-002",
+                "path": "src/bar.py",
+                "symbol": "Bar.run",
+                "smell": "duplication",
+                "defer_reason": "not_done",
+                "detail": "a | b\nc",
+            }
+        ],
+    )
     section = plan.format_plan(state).split("## 見送った提案", 1)[1]
     row = next(ln for ln in section.splitlines() if "src/bar.py#Bar.run" in ln)
     assert row == "| `src/bar.py#Bar.run` | duplication | not_done | a \\| b c |"

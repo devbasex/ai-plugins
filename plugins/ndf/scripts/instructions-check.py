@@ -30,6 +30,7 @@
 
 **2 を 0 へ畳まない。** 確かめられなかったことを、通ったと報告しない。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -49,31 +50,86 @@ import refresh as refresh_lib  # noqa: E402
 
 # 分けた名前をここから引けるように再エクスポートする（先頭が _ のものを含む）
 from instructions_lib.model import (  # noqa: E402,F401
-    SUPPORTED_CRITERIA_VERSIONS, KNOWN_CRITERIA, BULLET_RE, CheckError, Source,
-    Finding, Target, ScopeRoot, Criteria, load_criteria, code_lines, atx_headings,
+    SUPPORTED_CRITERIA_VERSIONS,
+    KNOWN_CRITERIA,
+    BULLET_RE,
+    CheckError,
+    Source,
+    Finding,
+    Target,
+    ScopeRoot,
+    Criteria,
+    load_criteria,
+    code_lines,
+    atx_headings,
 )
 from instructions_lib.declaration import (  # noqa: E402,F401
-    DEFAULT_FILES, DEFAULT_IMPORT_SYNTAX, DEFAULT_IMPORT_DEPTH, DEFAULT_REVIEW_INTERVAL_DAYS,
-    SUPPORTED_DECLARATION_VERSIONS, DECLARATION_RELATIVE_PATH, Declaration, _declaration_from,
-    _populate_declaration, _apply_field_constraints, _validate_scopes, _validate_imports, _typed, _positive,
-    _parse_declared_date, _validate_released,
+    DEFAULT_FILES,
+    DEFAULT_IMPORT_SYNTAX,
+    DEFAULT_IMPORT_DEPTH,
+    DEFAULT_REVIEW_INTERVAL_DAYS,
+    SUPPORTED_DECLARATION_VERSIONS,
+    DECLARATION_RELATIVE_PATH,
+    Declaration,
+    _declaration_from,
+    _populate_declaration,
+    _apply_field_constraints,
+    _validate_scopes,
+    _validate_imports,
+    _typed,
+    _positive,
+    _parse_declared_date,
+    _validate_released,
 )
 from instructions_lib.collect import (  # noqa: E402,F401
-    IMPORT_RE, _matches_file_pattern, _expand, collect_project, _build_scope_metadata, _enumerate_scope_files,
-    _collect_scope_entry, collect_declared, display_path, mask_code, interprets_imports, references,
-    _inside_root, resolve,
+    IMPORT_RE,
+    _matches_file_pattern,
+    _expand,
+    collect_project,
+    _build_scope_metadata,
+    _enumerate_scope_files,
+    _collect_scope_entry,
+    collect_declared,
+    display_path,
+    mask_code,
+    interprets_imports,
+    references,
+    _inside_root,
+    resolve,
 )
 from instructions_lib.findings import (  # noqa: E402,F401
-    import_findings, stale_allowance_findings, read_size, budget_findings, SENTENCE_END, count_instructions,
+    import_findings,
+    stale_allowance_findings,
+    read_size,
+    budget_findings,
+    SENTENCE_END,
+    count_instructions,
     count_findings,
 )
 from instructions_lib.versions import (  # noqa: E402,F401
-    VERSION_RE, VERSION_AT_START, LEAD_RE, semver_key, base_triple, _read_changelog_lines, _read_tag_lines,
-    released_versions, _valid_suffix, paragraph_starts, version_findings, _inline_pending_findings,
+    VERSION_RE,
+    VERSION_AT_START,
+    LEAD_RE,
+    semver_key,
+    base_triple,
+    _read_changelog_lines,
+    _read_tag_lines,
+    released_versions,
+    _valid_suffix,
+    paragraph_starts,
+    version_findings,
+    _inline_pending_findings,
 )
 from instructions_lib.report import (  # noqa: E402,F401
-    ACTION_FIX, ACTION_FILE, ACTION_REPORT, action_of, format_finding, issue_title, Measurements,
-    ReportInput, report,
+    ACTION_FIX,
+    ACTION_FILE,
+    ACTION_REPORT,
+    action_of,
+    format_finding,
+    issue_title,
+    Measurements,
+    ReportInput,
+    report,
 )
 
 SCOPES = ("project", "user", "plugins")
@@ -94,6 +150,7 @@ def in_development_repo(root: Path) -> bool:
 
 # --- 調べ直し ----------------------------------------------------------------
 
+
 def run_refresh(criteria: Criteria, timeout: float, out) -> int:
     lines, failed = refresh_lib.refresh(criteria.sources, timeout)
     for line in lines:
@@ -103,6 +160,7 @@ def run_refresh(criteria: Criteria, timeout: float, out) -> int:
 
 
 # --- 実行 --------------------------------------------------------------------
+
 
 class _Parser(argparse.ArgumentParser):
     def error(self, message: str):  # noqa: D102
@@ -114,23 +172,18 @@ class _Parser(argparse.ArgumentParser):
 def build_parser() -> argparse.ArgumentParser:
     parser = _Parser(description="エージェント向け指示書を適切に保つチェック")
     parser.add_argument("--root", default=".", help="リポジトリの根（既定は現在地）")
-    parser.add_argument("--scope", action="append", choices=SCOPES,
-                        help="走査するスコープ（重ねて指定できる。既定は project）")
+    parser.add_argument("--scope", action="append", choices=SCOPES, help="走査するスコープ（重ねて指定できる。既定は project）")
     parser.add_argument("--report", action="store_true", help="たどった先の内訳を足す")
-    parser.add_argument("--refresh", action="store_true",
-                        help="観点の出典を取得して提示する（通信する唯一の経路）")
-    parser.add_argument("--refresh-timeout", type=float, default=None,
-                        help="出典 1 件あたりの待ち（秒）")
-    parser.add_argument("--criteria", default=None,
-                        help="観点のデータの位置（既定は配布物の data/ の下）")
+    parser.add_argument("--refresh", action="store_true", help="観点の出典を取得して提示する（通信する唯一の経路）")
+    parser.add_argument("--refresh-timeout", type=float, default=None, help="出典 1 件あたりの待ち（秒）")
+    parser.add_argument("--criteria", default=None, help="観点のデータの位置（既定は配布物の data/ の下）")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     root = Path(args.root).resolve()
-    criteria_path = Path(args.criteria) if args.criteria else (
-        Path(__file__).resolve().parent / "data" / "instruction-criteria.json")
+    criteria_path = Path(args.criteria) if args.criteria else (Path(__file__).resolve().parent / "data" / "instruction-criteria.json")
 
     try:
         criteria = load_criteria(criteria_path)
@@ -155,8 +208,7 @@ def resolve_latest(root: Path, decl: Declaration, criteria: Criteria) -> str | N
     return max(versions, key=semver_key)
 
 
-def collect_scope_roots(root: Path, decl: Declaration,
-                        scopes: list[str]) -> list[ScopeRoot]:
+def collect_scope_roots(root: Path, decl: Declaration, scopes: list[str]) -> list[ScopeRoot]:
     """走査するスコープの根と、その配下の対象を集める。"""
     scope_roots: list[ScopeRoot] = []
     if "project" in scopes:
@@ -167,8 +219,7 @@ def collect_scope_roots(root: Path, decl: Declaration,
     return scope_roots
 
 
-def measure_targets(targets: list[Target], latest: str | None,
-                    decl: Declaration, criteria: Criteria) -> Measurements:
+def measure_targets(targets: list[Target], latest: str | None, decl: Declaration, criteria: Criteria) -> Measurements:
     """対象ごとの findings・sizes・counts・breakdowns を作る。"""
     result = Measurements()
     for target in targets:
@@ -177,8 +228,7 @@ def measure_targets(targets: list[Target], latest: str | None,
         if latest is not None and target.scope == "project":
             # 版の段落の判定はプロジェクトのスコープだけに掛ける。`released` は
             # そのリポジトリの版を指すため、他の製品の版数を古いとは言わない。
-            result.findings.extend(
-                version_findings(target, text, latest, decl, criteria))
+            result.findings.extend(version_findings(target, text, latest, decl, criteria))
         total, breakdown = read_size(target, decl)
         result.sizes[display_path(target)] = total
         result.breakdowns[display_path(target)] = breakdown
@@ -186,9 +236,7 @@ def measure_targets(targets: list[Target], latest: str | None,
     return result
 
 
-def finalize(scope_roots: list[ScopeRoot], targets: list[Target],
-             result: Measurements, decl: Declaration,
-             criteria: Criteria) -> list[str]:
+def finalize(scope_roots: list[ScopeRoot], targets: list[Target], result: Measurements, decl: Declaration, criteria: Criteria) -> list[str]:
     """スコープ横断の findings を足し、注記を作る。注記を返す。"""
     for scope_root in scope_roots:
         result.findings.extend(stale_allowance_findings(scope_root, decl, criteria))
@@ -196,12 +244,10 @@ def finalize(scope_roots: list[ScopeRoot], targets: list[Target],
 
     notes: list[str] = []
     if not decl.present:
-        notes.append(f"NOTE: 宣言（{DECLARATION_RELATIVE_PATH}）が無いため、"
-                     "出た版と許可の判定は動かない")
+        notes.append(f"NOTE: 宣言（{DECLARATION_RELATIVE_PATH}）が無いため、出た版と許可の判定は動かない")
     stale = criteria_is_stale(criteria, decl)
     if stale:
-        notes.append(f"NOTE: 観点の一覧を最後に調べ直したのは {stale} である"
-                     "（--refresh で出典を読み直す）")
+        notes.append(f"NOTE: 観点の一覧を最後に調べ直したのは {stale} である（--refresh で出典を読み直す）")
     return notes
 
 
@@ -218,14 +264,16 @@ def check(root: Path, decl: Declaration, criteria: Criteria, args) -> int:
     result = measure_targets(targets, latest, decl, criteria)
     notes = finalize(scope_roots, targets, result, decl, criteria)
 
-    return report(ReportInput(
-        targets=targets,
-        measurements=result,
-        notes=notes,
-        criteria=criteria,
-        in_ndf_repo=in_development_repo(root),
-        with_report=args.report,
-    ))
+    return report(
+        ReportInput(
+            targets=targets,
+            measurements=result,
+            notes=notes,
+            criteria=criteria,
+            in_ndf_repo=in_development_repo(root),
+            with_report=args.report,
+        )
+    )
 
 
 def criteria_is_stale(criteria: Criteria, decl: Declaration) -> str | None:

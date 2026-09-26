@@ -33,15 +33,7 @@ def pwk_web_vitals_measure(page, pwk_evidence: PwkEvidence, _pwk_config_optional
     config: Config | None = _pwk_config_optional
 
     def _measure(*, observe_ms: int | None = None) -> dict[str, float]:
-        ms = (
-            int(observe_ms)
-            if observe_ms is not None
-            else (
-                int(config.web_vitals.observe_ms)
-                if config is not None
-                else 5000
-            )
-        )
+        ms = int(observe_ms) if observe_ms is not None else (int(config.web_vitals.observe_ms) if config is not None else 5000)
         metrics = web_vitals_mod.measure_page(page, observe_ms=ms)
         pwk_evidence.web_vitals_metrics.update(metrics)
         pwk_evidence.web_vitals_passed = web_vitals_mod.passed(pwk_evidence.web_vitals_metrics)
@@ -77,9 +69,7 @@ def _pwk_web_vitals_autouse(request) -> Iterator[None]:
     if not page_roles:
         yield
         return
-    if not web_vitals_mod.should_auto_measure(
-        page_roles, auto_roles=frozenset(config.web_vitals.auto_roles)
-    ):
+    if not web_vitals_mod.should_auto_measure(page_roles, auto_roles=frozenset(config.web_vitals.auto_roles)):
         yield
         return
 
@@ -100,9 +90,7 @@ def _pwk_web_vitals_autouse(request) -> Iterator[None]:
     pwk_evidence.web_vitals_metrics.update(metrics)
     pwk_evidence.web_vitals_passed = web_vitals_mod.passed(pwk_evidence.web_vitals_metrics)
 
-    detail = ", ".join(
-        f"{k}={v:.1f}({web_vitals_mod.judge(k, v)})" for k, v in metrics.items()
-    ) or "no metrics collected"
+    detail = ", ".join(f"{k}={v:.1f}({web_vitals_mod.judge(k, v)})" for k, v in metrics.items()) or "no metrics collected"
     pwk_evidence.log_lines.append(f"[web_vitals autouse] {detail}")
 
     if not pwk_evidence.web_vitals_passed and config.web_vitals.fail_on_poor:

@@ -1,4 +1,5 @@
 """`launch-cli.sh` が不正な入力では CLI を起動しないことを固定する。"""
+
 from __future__ import annotations
 
 import os

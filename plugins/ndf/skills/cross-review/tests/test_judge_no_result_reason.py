@@ -11,6 +11,7 @@
 判定は `usage_limit` という値を知らない（AC12）。報告の表は結果なしの担当を
 `<担当>=NO_RESULT(<理由>)` の形で出す（AC17）。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -133,9 +134,14 @@ def test_the_reason_line_comes_before_the_relaunch_line(tmp_dir, state_mod, caps
 
 def test_a_usage_limit_stops_the_review_without_a_relaunch(tmp_dir, state_mod, capsys):
     """利用上限の担当があれば、起動し直さず `final = error` で 1 で止まる。"""
-    _write(tmp_dir, _state([
-        _round(codex=_approve(), agy=_no_result("usage_limit", DETAIL)),
-    ]))
+    _write(
+        tmp_dir,
+        _state(
+            [
+                _round(codex=_approve(), agy=_no_result("usage_limit", DETAIL)),
+            ]
+        ),
+    )
 
     assert _judge(state_mod) == 1
 
@@ -152,13 +158,16 @@ def test_a_usage_limit_stops_the_review_without_a_relaunch(tmp_dir, state_mod, c
     assert DETAIL in captured.err
 
 
-def test_a_usage_limit_stops_even_when_another_agent_could_be_relaunched(
-    tmp_dir, state_mod, capsys
-):
+def test_a_usage_limit_stops_even_when_another_agent_could_be_relaunched(tmp_dir, state_mod, capsys):
     """起動し直してよい担当が混ざっていても、利用上限が 1 つあれば誰も起動し直さない。"""
-    _write(tmp_dir, _state([
-        _round(codex=_no_result("timeout"), agy=_no_result("usage_limit")),
-    ]))
+    _write(
+        tmp_dir,
+        _state(
+            [
+                _round(codex=_no_result("timeout"), agy=_no_result("usage_limit")),
+            ]
+        ),
+    )
 
     assert _judge(state_mod) == 1
 
@@ -181,16 +190,13 @@ def test_a_usage_limit_without_monitor_detail_still_stops(tmp_dir, state_mod, ca
     assert "usage_limit" in err
 
 
-def test_the_verdict_reads_relaunchability_from_the_common_layer(
-    tmp_dir, state_mod, monkeypatch, capsys
-):
+def test_the_verdict_reads_relaunchability_from_the_common_layer(tmp_dir, state_mod, monkeypatch, capsys):
     """可否を決めるのは共通層の集合であり、判定は理由の値を見ない（AC12）。
 
     共通層の「起動し直せない理由」に `timeout` を足すと、判定は `timeout` でも止まる。
     判定が `usage_limit` を直に比べていれば、この変更は届かず 7 になる。
     """
-    monkeypatch.setattr(
-        review_lib.commands.judge.monitor_outcome, "NO_RELAUNCH_REASONS", frozenset({"timeout"}))
+    monkeypatch.setattr(review_lib.commands.judge.monitor_outcome, "NO_RELAUNCH_REASONS", frozenset({"timeout"}))
     _write(tmp_dir, _state([_round(codex=_approve(), agy=_no_result("timeout"))]))
 
     assert _judge(state_mod) == 1
@@ -209,10 +215,14 @@ def test_the_verdict_reads_relaunchability_from_the_common_layer(
 
 def test_relaunchable_reasons_ask_for_one_relaunch(tmp_dir, state_mod, capsys):
     """理由がすべて起動し直してよいものなら、1 度目は 7 で `RELAUNCH_AGENTS` を返す。"""
-    _write(tmp_dir, _state([
-        _round(codex=_no_result("cli_timeout", "print timeout after 60m"),
-               agy=_no_result("early_error", "fatal: something")),
-    ]))
+    _write(
+        tmp_dir,
+        _state(
+            [
+                _round(codex=_no_result("cli_timeout", "print timeout after 60m"), agy=_no_result("early_error", "fatal: something")),
+            ]
+        ),
+    )
 
     assert _judge(state_mod) == 7
 
@@ -226,9 +236,14 @@ def test_relaunchable_reasons_ask_for_one_relaunch(tmp_dir, state_mod, capsys):
 
 def test_a_second_no_result_with_relaunchable_reasons_stops(tmp_dir, state_mod, capsys):
     """起動し直した後も結果が残らなければ、従来どおり `final = error` で 1 で止まる。"""
-    _write(tmp_dir, _state([
-        _round(codex=_approve(), agy=_no_result("timeout"), relaunched=["agy"]),
-    ]))
+    _write(
+        tmp_dir,
+        _state(
+            [
+                _round(codex=_approve(), agy=_no_result("timeout"), relaunched=["agy"]),
+            ]
+        ),
+    )
 
     assert _judge(state_mod) == 1
 
@@ -253,10 +268,15 @@ def test_rounds_without_a_no_result_do_not_print_the_reason_line(tmp_dir, state_
 
 def test_the_round_summary_shows_the_reason_of_a_no_result(tmp_dir, state_mod, capsys):
     """報告の表で、結果なしの担当は `<担当>=NO_RESULT(<理由>)` の形で出る。"""
-    _write(tmp_dir, _state([
-        _round(codex=_approve(), agy=_no_result("usage_limit", DETAIL),
-               verdict="no_result"),
-    ], final="error"))
+    _write(
+        tmp_dir,
+        _state(
+            [
+                _round(codex=_approve(), agy=_no_result("usage_limit", DETAIL), verdict="no_result"),
+            ],
+            final="error",
+        ),
+    )
 
     review_lib.commands.report.cmd_report(argparse.Namespace(pr=PR))
 
@@ -267,13 +287,16 @@ def test_the_round_summary_shows_the_reason_of_a_no_result(tmp_dir, state_mod, c
     assert "codex=APPROVE (0)" in out
 
 
-def test_the_round_summary_shows_a_dash_when_the_reason_is_unknown(
-    tmp_dir, state_mod, capsys
-):
+def test_the_round_summary_shows_a_dash_when_the_reason_is_unknown(tmp_dir, state_mod, capsys):
     """理由の鍵を持たない古い記録は `NO_RESULT(-)` として出る。"""
-    _write(tmp_dir, _state([
-        _round(codex=_approve(), agy={"intent": "NO_RESULT"}, verdict="no_result"),
-    ]))
+    _write(
+        tmp_dir,
+        _state(
+            [
+                _round(codex=_approve(), agy={"intent": "NO_RESULT"}, verdict="no_result"),
+            ]
+        ),
+    )
 
     review_lib.commands.report.cmd_report(argparse.Namespace(pr=PR))
 
@@ -282,9 +305,15 @@ def test_the_round_summary_shows_a_dash_when_the_reason_is_unknown(
 
 def test_the_round_summary_is_built_by_the_table_library(tmp_dir, state_mod, capsys):
     """表はライブラリの `mdtable` が組む（#1142 の D2）。区切りの行は `| --- |` の形で、数の列（round）は右寄せになる。"""
-    _write(tmp_dir, _state([
-        _round(codex=_approve(), agy=_no_result("usage_limit", DETAIL), verdict="no_result"),
-    ], final="error"))
+    _write(
+        tmp_dir,
+        _state(
+            [
+                _round(codex=_approve(), agy=_no_result("usage_limit", DETAIL), verdict="no_result"),
+            ],
+            final="error",
+        ),
+    )
 
     review_lib.commands.report.cmd_report(argparse.Namespace(pr=PR))
 

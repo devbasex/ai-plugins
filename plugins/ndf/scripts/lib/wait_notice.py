@@ -3,6 +3,7 @@
 入出力を持たない純粋な処理だけを置く。フック入力・環境変数・ホスト名・transcript の中身は、
 入口（`scripts/wait-notify.py`）が読んで引数で渡す。
 """
+
 from __future__ import annotations
 
 import re
@@ -21,18 +22,40 @@ URL_LIMIT = 3
 
 # 本文の判定の語。プロジェクトごとに変える宣言は持たない（決定 1）
 WAIT_ENDINGS = ("?", "？", "ですか", "ますか", "でしょうか", "ませんか", "ましょうか")
-WAIT_CONTAINS = ("ください", "お願いします", "いただければ", "もらえれば", "よろしければ", "てよければ",
-                 "でよければ", "問題なければ")
+WAIT_CONTAINS = ("ください", "お願いします", "いただければ", "もらえれば", "よろしければ", "てよければ", "でよければ", "問題なければ")
 # 利用者の返事を待つと述べる文。末尾が「待っています」でも待ちの文にする
-USER_WAIT_CONTAINS = ("承認を待", "返事を待", "答えを待", "判断を待", "指示を待", "ご指示をお待ち",
-                      "承認の指示", "ご意向を伺", "ご判断をお待ち", "入力を待")
+USER_WAIT_CONTAINS = (
+    "承認を待",
+    "返事を待",
+    "答えを待",
+    "判断を待",
+    "指示を待",
+    "ご指示をお待ち",
+    "承認の指示",
+    "ご意向を伺",
+    "ご判断をお待ち",
+    "入力を待",
+)
 # 条件付きの依頼（「…がある場合は…ください」）は、待たずに進む応答の添え書きとして待ちの文から外す
 CONDITIONAL_MARKERS = ("場合は", "あれば", "場合には", "際は")
 BACKGROUND_WAIT_ENDINGS = ("待ちます", "待っています")
-APPROVAL_WORDS = ("承認", "許可", "マージ", "てよいですか", "てよければ", "てよろしいですか",
-                  "でよいですか", "でよろしいですか", "でよろしいでしょうか", "てよいか", "よろしければ",
-                  "でよければ", "問題なければ",
-                  "進めて", "approve")
+APPROVAL_WORDS = (
+    "承認",
+    "許可",
+    "マージ",
+    "てよいですか",
+    "てよければ",
+    "てよろしいですか",
+    "でよいですか",
+    "でよろしいですか",
+    "でよろしいでしょうか",
+    "てよいか",
+    "よろしければ",
+    "でよければ",
+    "問題なければ",
+    "進めて",
+    "approve",
+)
 
 _SENTENCE_END = re.compile(r"(?<=[。？?！])")
 _TRAILING_PAREN = re.compile(r"\s*(?:（[^（）]*）|\([^()]*\))\s*$")
@@ -86,6 +109,7 @@ class Notice:
 # ---------------------------------------------------------------------------
 # 本文の判定
 # ---------------------------------------------------------------------------
+
 
 def _prose_lines(text: str) -> list[tuple[str, bool]]:
     """コードのブロック・引用・表・見出しを除いた、空でない行と、箇条書きの項目かどうか。"""
@@ -177,6 +201,7 @@ def done_excerpt(text: str) -> str:
 # フックの事象から待ちへの訳し
 # ---------------------------------------------------------------------------
 
+
 def _plan_excerpt(plan: str) -> str:
     for line in (plan or "").splitlines():
         s = line.strip().lstrip("#").strip()
@@ -245,8 +270,9 @@ def classify_event(runtime: str, hook_input: dict, transcript_text: str = "", ke
 # 復帰先の組み立て
 # ---------------------------------------------------------------------------
 
+
 def session_url(session_id: str) -> str:
-    sid = "session_" + session_id[len("cse_"):] if session_id.startswith("cse_") else session_id
+    sid = "session_" + session_id[len("cse_") :] if session_id.startswith("cse_") else session_id
     return f"https://claude.ai/code/{sid}"
 
 
@@ -282,8 +308,9 @@ def github_slug(remote_url: str) -> str | None:
     return f"{m.group(1)}/{m.group(2)}" if m else None
 
 
-def extract_urls(kind: str, text: str, slug: str | None = None, redmine_url: str | None = None,
-                 pr_fallback: str | None = None) -> list[tuple[str, str]]:
+def extract_urls(
+    kind: str, text: str, slug: str | None = None, redmine_url: str | None = None, pr_fallback: str | None = None
+) -> list[tuple[str, str]]:
     """本文から関連 URL を抜く。承認待ちは PR を先頭に置き、本文に無ければ `pr_fallback` を使う。"""
     text = text or ""
     redmine_base = (redmine_url or "").rstrip("/")

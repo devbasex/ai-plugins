@@ -5,6 +5,7 @@
 
 `cross-review` の `state.py` と `cross-refactoring` の `refactor.py` が共有する。
 """
+
 from __future__ import annotations
 
 import functools
@@ -44,13 +45,9 @@ def unregister_after_save(hook: AfterSave) -> None:
         _AFTER_SAVE.remove(hook)
 
 
-
-
 def load(path: pathlib.Path) -> dict[str, Any]:
     """状態ファイルを読む。存在しなければ FileNotFoundError を上げる。"""
     return json.loads(path.read_text(encoding="utf-8"))
-
-
 
 
 def save(path: pathlib.Path, state: dict[str, Any]) -> None:
@@ -80,10 +77,6 @@ def emit(**values: Any) -> None:
         print(f"{key}={shlex.quote(str(value))}")
 
 
-
-
-
-
 # ---------- 再開の反映（#727 / #648） ----------
 
 
@@ -93,6 +86,7 @@ class ResumeField(NamedTuple):
     `mode` は `"replace"`（値のある引数を状態へ書き、`resume_changes` に積む）か
     `"notify"`（状態と違うときだけ「反映しない」と知らせる。状態は変えない）。
     """
+
     arg: str
     key: str
     mode: str
@@ -122,9 +116,7 @@ def apply_resume_args(
             continue
         if field.mode == "replace":
             state[field.key] = new
-            state.setdefault("resume_changes", []).append(
-                {"at": now(), "field": field.key, "from": old, "to": new}
-            )
+            state.setdefault("resume_changes", []).append({"at": now(), "field": field.key, "from": old, "to": new})
             lines.append(f"↻ {field.key}: {old} → {new}")
         else:
             option = "--" + field.arg.replace("_", "-")

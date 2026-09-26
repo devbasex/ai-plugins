@@ -4,6 +4,7 @@
 merge-when-green の 1 回の読み直し（`GreenWatch.poll`）を持つ。待ちの間隔は
 lib/waits.py の `wait_until` で回す（`GreenWatch.wait`）。
 """
+
 from __future__ import annotations
 
 import json
@@ -102,8 +103,7 @@ def queued_run_count(root):
 
 
 def pr_state(root, n):
-    return gh_json(root, ["pr", "view", str(n), "--json", "state,isDraft,headRefOid,statusCheckRollup,mergeStateStatus"],
-                   f"gh pr view {n}")
+    return gh_json(root, ["pr", "view", str(n), "--json", "state,isDraft,headRefOid,statusCheckRollup,mergeStateStatus"], f"gh pr view {n}")
 
 
 def watch_stuck_checks(root, n, probed, a, items, stale_since, rerun_done, waits):
@@ -123,16 +123,40 @@ def watch_stuck_checks(root, n, probed, a, items, stale_since, rerun_done, waits
         if now - since < a.stale_after:
             continue
         if name in rerun_done:
-            emit(result(TOOL, "stopped", f"#{n} の取り残されたチェックが再実行でも動かない: {name}",
-                        items + [{"kind": "check", "name": name, "result": "stuck", "run": run_id, "job": job_id,
-                                  "reason": "取り残されたチェックが再実行でも動かない"}],
-                        {"waits": waits},
-                        next=f"gh run view {run_id} で実行とジョブの状態を読み、手で再実行するか GitHub の障害を確かめる"))
+            emit(
+                result(
+                    TOOL,
+                    "stopped",
+                    f"#{n} の取り残されたチェックが再実行でも動かない: {name}",
+                    items
+                    + [
+                        {
+                            "kind": "check",
+                            "name": name,
+                            "result": "stuck",
+                            "run": run_id,
+                            "job": job_id,
+                            "reason": "取り残されたチェックが再実行でも動かない",
+                        }
+                    ],
+                    {"waits": waits},
+                    next=f"gh run view {run_id} で実行とジョブの状態を読み、手で再実行するか GitHub の障害を確かめる",
+                )
+            )
         p = gh_parts.gh(["run", "rerun", run_id, "--job", job_id], cwd=root)
         if p.returncode != 0:
-            emit(result(TOOL, "stopped", f"gh run rerun {run_id} --job {job_id} が失敗: {p.stderr.strip()[:300]}",
-                        items + [{"kind": "check", "name": name, "result": "stopped", "run": run_id, "job": job_id,
-                                  "reason": p.stderr.strip()[:300]}], {"waits": waits}))
+            emit(
+                result(
+                    TOOL,
+                    "stopped",
+                    f"gh run rerun {run_id} --job {job_id} が失敗: {p.stderr.strip()[:300]}",
+                    items
+                    + [
+                        {"kind": "check", "name": name, "result": "stopped", "run": run_id, "job": job_id, "reason": p.stderr.strip()[:300]}
+                    ],
+                    {"waits": waits},
+                )
+            )
         items.append({"kind": "check", "name": name, "result": "rerun", "run": run_id, "job": job_id})
         rerun_done.add(name)
         del stale_since[name]
@@ -140,8 +164,7 @@ def watch_stuck_checks(root, n, probed, a, items, stale_since, rerun_done, waits
         return None
     count = queued_run_count(root)
     shown = "?" if count is None else count
-    print(f"merge-when-green: CI のランナー待ち（待ち行列 {shown} 件、待ち {len(queued)} 件）",
-          file=sys.stderr, flush=True)
+    print(f"merge-when-green: CI のランナー待ち（待ち行列 {shown} 件、待ち {len(queued)} 件）", file=sys.stderr, flush=True)
     return count
 
 
@@ -162,8 +185,14 @@ class GreenWatch:
     def wait(self):
         """終わるまで読み直す。読んだ中身（先頭のコミットとチェックの状態）が変わらない間は、間隔を 1.5 倍ずつ
         --interval の 6 倍まで伸ばす。"""
-        waits.wait_until(self.poll, lambda v: v[0] == "done", max_wait=float("inf"), interval=self.a.interval,
-                         max_interval=self.a.interval * 6, sleep=self.sleep)
+        waits.wait_until(
+            self.poll,
+            lambda v: v[0] == "done",
+            max_wait=float("inf"),
+            interval=self.a.interval,
+            max_interval=self.a.interval * 6,
+            sleep=self.sleep,
+        )
 
     def sleep(self, gap):
         self.waits += 1
@@ -179,20 +208,38 @@ class GreenWatch:
             items.append({"kind": "pr", "name": f"#{n}", "result": "already_merged"})
             return ("done", "merged")
         if state != "OPEN":
-            emit(result(TOOL, "stopped", f"#{n} が OPEN でない（{state}）",
-                        [{"kind": "pr", "name": f"#{n}", "result": "stopped", "reason": f"state={state}"}]))
+            emit(
+                result(
+                    TOOL,
+                    "stopped",
+                    f"#{n} が OPEN でない（{state}）",
+                    [{"kind": "pr", "name": f"#{n}", "result": "stopped", "reason": f"state={state}"}],
+                )
+            )
         if info.get("isDraft"):
             # draft のままではマージできない。ready で走り出すチェックも待つよう、待ちの前に外す
             p = gh_parts.gh(["pr", "ready", str(n)], cwd=root)
             if p.returncode != 0:
-                emit(result(TOOL, "stopped", f"gh pr ready が失敗: {p.stderr.strip()[:300]}",
-                            items + [{"kind": "pr", "name": f"#{n}", "result": "stopped",
-                                      "reason": p.stderr.strip()[:300]}], {"waits": waits}))
+                emit(
+                    result(
+                        TOOL,
+                        "stopped",
+                        f"gh pr ready が失敗: {p.stderr.strip()[:300]}",
+                        items + [{"kind": "pr", "name": f"#{n}", "result": "stopped", "reason": p.stderr.strip()[:300]}],
+                        {"waits": waits},
+                    )
+                )
             items.append({"kind": "pr", "name": f"#{n}", "result": "ready"})
         if self.last_sha is not None and sha != self.last_sha:
             # push で CI が走り直した。前のコミットで見た結果は使わない
-            items.append({"kind": "restart", "name": sha or "?", "result": "rewait",
-                          "reason": f"先頭のコミットが {str(self.last_sha)[:8]} から {str(sha)[:8]} へ変わった"})
+            items.append(
+                {
+                    "kind": "restart",
+                    "name": sha or "?",
+                    "result": "rewait",
+                    "reason": f"先頭のコミットが {str(self.last_sha)[:8]} から {str(sha)[:8]} へ変わった",
+                }
+            )
             self.green_sha = self.pending_sha = self.empty_since = None
             self.stale_since, self.rerun_done = {}, set()
         self.last_sha = sha
@@ -207,15 +254,20 @@ class GreenWatch:
                     continue
                 pending.remove(name)
                 (failed if conclusion.upper() in FAIL_CONCLUSIONS else passed).append(name)
-                item = {"kind": "check", "name": name, "result": "settled", "run": run_id, "job": job_id,
-                        "conclusion": conclusion}
+                item = {"kind": "check", "name": name, "result": "settled", "run": run_id, "job": job_id, "conclusion": conclusion}
                 if item not in items:
                     items.append(item)
         if failed:
-            emit(result(TOOL, "stopped", f"#{n} の CI が失敗: {', '.join(failed)}",
-                        items + [{"kind": "check", "name": f, "result": "failed"} for f in failed],
-                        {"failed": len(failed), "pending": len(pending), "passed": len(passed), "waits": waits},
-                        next=f"gh pr checks {n} で失敗を読み、直して push してから打ち直す"))
+            emit(
+                result(
+                    TOOL,
+                    "stopped",
+                    f"#{n} の CI が失敗: {', '.join(failed)}",
+                    items + [{"kind": "check", "name": f, "result": "failed"} for f in failed],
+                    {"failed": len(failed), "pending": len(pending), "passed": len(passed), "waits": waits},
+                    next=f"gh pr checks {n} で失敗を読み、直して push してから打ち直す",
+                )
+            )
         if not pending and not passed:
             # チェックがまだ載っていない。--no-checks-after 秒を過ぎても空なら CI の無いリポジトリとみなす
             self.empty_since = self.empty_since if self.empty_since is not None else time.monotonic()
@@ -234,9 +286,14 @@ class GreenWatch:
             if count is not None:
                 self.queued_runs = count  # 最後に見た待ち行列の件数
         if time.monotonic() >= self.deadline:
-            emit(result(TOOL, "stopped", f"#{n} の CI が {a.timeout} 秒で終わらない（待ち: {', '.join(pending)}）",
-                        items + [{"kind": "check", "name": c, "result": "pending"} for c in pending],
-                        {"failed": 0, "pending": len(pending), "passed": len(passed), "waits": waits,
-                         "queued_runs": self.queued_runs},
-                        next=f"打ち直す: merged-steps.py merge-when-green {n}"))
+            emit(
+                result(
+                    TOOL,
+                    "stopped",
+                    f"#{n} の CI が {a.timeout} 秒で終わらない（待ち: {', '.join(pending)}）",
+                    items + [{"kind": "check", "name": c, "result": "pending"} for c in pending],
+                    {"failed": 0, "pending": len(pending), "passed": len(passed), "waits": waits, "queued_runs": self.queued_runs},
+                    next=f"打ち直す: merged-steps.py merge-when-green {n}",
+                )
+            )
         return ("wait", (sha, tuple(sorted(pending)), tuple(sorted(passed)), self.recheck))

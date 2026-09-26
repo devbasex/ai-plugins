@@ -3,6 +3,7 @@
 一時ディレクトリに最小のリポジトリ（`git init` と `.ndf/release.json`）を作り、`--root` で渡す。
 配布のコマンドは `sys.executable -c ...` で書き、シェルを通さない。
 """
+
 from __future__ import annotations
 
 import json
@@ -48,8 +49,9 @@ def step(code: str, *, stage: str = "production", writes=("out/",), **extra) -> 
 
 
 def run(root: Path, *args: str, cwd: Path | None = None) -> subprocess.CompletedProcess:
-    return subprocess.run([PY, str(SCRIPT), *args[:1], "--root", str(root), *args[1:]],
-                          capture_output=True, text=True, cwd=str(cwd) if cwd else None)
+    return subprocess.run(
+        [PY, str(SCRIPT), *args[:1], "--root", str(root), *args[1:]], capture_output=True, text=True, cwd=str(cwd) if cwd else None
+    )
 
 
 def run_prod(root: Path, *extra: str, cwd: Path | None = None) -> subprocess.CompletedProcess:
@@ -60,6 +62,7 @@ WRITE_OUT = "import sys, pathlib; pathlib.Path('out/new.md').write_text(sys.argv
 
 
 # --- AC2: 宣言が無い・段階・置き換え・作業ディレクトリ ---------------------------
+
 
 def test_run_without_declaration_is_silent_and_zero(repo):
     p = run_prod(repo)
@@ -76,10 +79,16 @@ def test_check_with_valid_declaration_returns_zero(repo):
 
 
 def test_only_matching_stage_runs_and_version_is_substituted(repo, tmp_path):
-    declare(repo, {"version": 1, "steps": [
-        {**step(WRITE_OUT), "command": [PY, "-c", WRITE_OUT, "{version}"]},
-        step("import pathlib; pathlib.Path('out/verify.md').write_text('v')", stage="verification"),
-    ]})
+    declare(
+        repo,
+        {
+            "version": 1,
+            "steps": [
+                {**step(WRITE_OUT), "command": [PY, "-c", WRITE_OUT, "{version}"]},
+                step("import pathlib; pathlib.Path('out/verify.md').write_text('v')", stage="verification"),
+            ],
+        },
+    )
     p = run_prod(repo, cwd=tmp_path)  # --root と別のディレクトリから呼ぶ
     assert p.returncode == 0, p.stdout + p.stderr
     assert (repo / "out" / "new.md").read_text() == "1.2.3"
@@ -121,9 +130,9 @@ def test_dry_run_lists_steps_without_running(repo):
 
 # --- AC3: 書いてよい場所 --------------------------------------------------------
 
+
 def test_step_failure_stops_with_one(repo):
-    declare(repo, {"version": 1, "steps": [step("raise SystemExit(4)"),
-                                           step("import pathlib; pathlib.Path('out/b.md').write_text('b')")]})
+    declare(repo, {"version": 1, "steps": [step("raise SystemExit(4)"), step("import pathlib; pathlib.Path('out/b.md').write_text('b')")]})
     p = run_prod(repo)
     assert p.returncode == 1
     assert not (repo / "out" / "b.md").exists()
@@ -179,16 +188,22 @@ def test_deleting_outside_is_one(repo):
 
 # --- AC4: 宣言が読めない --------------------------------------------------------
 
-@pytest.mark.parametrize(("decl", "item"), [
-    ("{not json", "release.json"),
-    ({"version": 2, "steps": []}, "version"),
-    ({"version": 1}, "steps"),
-    ({"version": 1, "steps": [{"name": "a", "stage": "production", "writes": []}]}, "command"),
-    ({"version": 1, "steps": [{"name": "a", "stage": "production", "command": ["x"], "writes": [],
-                               "timeout_seconds": 0}]}, "timeout_seconds"),
-    ({"version": 1, "steps": [{"name": "a", "stage": "prod", "command": ["x"], "writes": []}]}, "stage"),
-    ({"version": 1, "steps": [{"name": "a", "stage": "production", "command": ["x"], "writes": ["../up"]}]}, "writes"),
-])
+
+@pytest.mark.parametrize(
+    ("decl", "item"),
+    [
+        ("{not json", "release.json"),
+        ({"version": 2, "steps": []}, "version"),
+        ({"version": 1}, "steps"),
+        ({"version": 1, "steps": [{"name": "a", "stage": "production", "writes": []}]}, "command"),
+        (
+            {"version": 1, "steps": [{"name": "a", "stage": "production", "command": ["x"], "writes": [], "timeout_seconds": 0}]},
+            "timeout_seconds",
+        ),
+        ({"version": 1, "steps": [{"name": "a", "stage": "prod", "command": ["x"], "writes": []}]}, "stage"),
+        ({"version": 1, "steps": [{"name": "a", "stage": "production", "command": ["x"], "writes": ["../up"]}]}, "writes"),
+    ],
+)
 def test_unreadable_declaration_is_three_with_item(repo, decl, item):
     declare(repo, decl)
     for args in (("run", "--stage", "production", "--version", "1.2.3"), ("check",)):
@@ -212,6 +227,7 @@ def test_this_repository_declares_one_production_step():
 
 def _release_steps_module(monkeypatch):
     import importlib.util
+
     spec = importlib.util.spec_from_file_location("release_steps_mod", SCRIPT)
     mod = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, "release_steps_mod", mod)
@@ -237,8 +253,9 @@ def test_wait_and_merge_delegates_to_merge_when_green(monkeypatch):
 def test_wait_and_merge_stops_with_the_summary_of_merge_when_green(monkeypatch):
     """merge-when-green が止まったら、その summary を持って止まる（上限なしで待ち続けない）。"""
     mod = _release_steps_module(monkeypatch)
-    out = json.dumps({"tool": "merged", "status": "stopped",
-                      "summary": "#5 の取り残されたチェックが再実行でも動かない: build", "items": []})
+    out = json.dumps(
+        {"tool": "merged", "status": "stopped", "summary": "#5 の取り残されたチェックが再実行でも動かない: build", "items": []}
+    )
     monkeypatch.setattr(mod, "run", lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, out, ""))
     with pytest.raises(mod.StepError, match="取り残されたチェック"):
         mod.wait_and_merge(".", 5)
@@ -247,31 +264,35 @@ def test_wait_and_merge_stops_with_the_summary_of_merge_when_green(monkeypatch):
 def fake_gh(tmp_path: Path, prs: dict) -> dict:
     """gh pr view N --json title,body に prs[N] を返す偽の gh を PATH の先頭へ置いた環境を返す。"""
     import os
+
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     data = tmp_path / "prs.json"
     data.write_text(json.dumps({str(k): v for k, v in prs.items()}, ensure_ascii=False), encoding="utf-8")
     gh = bin_dir / "gh"
-    gh.write_text(f"#!{PY}\nimport json, sys\nprint(json.dumps(json.load(open({str(data)!r}))[sys.argv[3]]))\n",
-                  encoding="utf-8")
+    gh.write_text(f"#!{PY}\nimport json, sys\nprint(json.dumps(json.load(open({str(data)!r}))[sys.argv[3]]))\n", encoding="utf-8")
     gh.chmod(0o755)
     return {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"}
 
 
 def notes_repo(repo: Path) -> Path:
-    (repo / "CHANGELOG.md").write_text("# Changelog\n\n## [ndf 1.2.3] - 2026-01-01\n\n- 題名 A（#11）\n- 題名 B（#12）\n\n"
-                                       "## [ndf 1.2.2] - 2025-12-01\n\n- 前の版\n", encoding="utf-8")
+    (repo / "CHANGELOG.md").write_text(
+        "# Changelog\n\n## [ndf 1.2.3] - 2026-01-01\n\n- 題名 A（#11）\n- 題名 B（#12）\n\n## [ndf 1.2.2] - 2025-12-01\n\n- 前の版\n",
+        encoding="utf-8",
+    )
     pdir = repo / "plugins" / "ndf"
     (pdir / ".claude-plugin").mkdir(parents=True)
     (pdir / ".claude-plugin" / "plugin.json").write_text("{}", encoding="utf-8")
-    (pdir / "README.md").write_text("# ndf\n\n## v1.2.3-dev.1 へ更新するとき\n\n- 題名 A（#11）\n\n## 使い方\n\n本文\n",
-                                    encoding="utf-8")
+    (pdir / "README.md").write_text("# ndf\n\n## v1.2.3-dev.1 へ更新するとき\n\n- 題名 A（#11）\n\n## 使い方\n\n本文\n", encoding="utf-8")
     return pdir
 
 
 PR_BODIES = {
-    11: {"title": "題名 A", "body": "要約\n\n## 利用者向けの変化\n\n- 計画を課題番号だけで作れる\n- ステップの順が変わる\n  （続き）\n\n"
-                                  "## 未検証・残る危険\n\n- 実機の CI とは未照合\n\n## テスト\n\n- ok\n"},
+    11: {
+        "title": "題名 A",
+        "body": "要約\n\n## 利用者向けの変化\n\n- 計画を課題番号だけで作れる\n- ステップの順が変わる\n  （続き）\n\n"
+        "## 未検証・残る危険\n\n- 実機の CI とは未照合\n\n## テスト\n\n- ok\n",
+    },
     12: {"title": "題名 B", "body": "節の無い本文\n"},
 }
 
@@ -279,8 +300,12 @@ PR_BODIES = {
 def test_notes_builds_changelog_and_readme_from_user_changes(repo, tmp_path):
     pdir = notes_repo(repo)
     env = fake_gh(tmp_path, PR_BODIES)
-    p = subprocess.run([PY, str(SCRIPT), "notes", "--root", str(repo), "--version", "1.2.3-dev.1", "--prs", "11", "12"],
-                       capture_output=True, text=True, env=env)
+    p = subprocess.run(
+        [PY, str(SCRIPT), "notes", "--root", str(repo), "--version", "1.2.3-dev.1", "--prs", "11", "12"],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
     assert p.returncode == 0, p.stdout + p.stderr
     res = json.loads(p.stdout.strip().splitlines()[-1])
     assert res["status"] == "ok" and res["metrics"]["fallback"] == 1
@@ -297,13 +322,33 @@ def test_notes_fills_approval_cells(repo, tmp_path):
     env = fake_gh(tmp_path, PR_BODIES)
     approval = repo / "issues" / "approval.md"
     approval.parent.mkdir()
-    approval.write_text("# t\n\n## 2. 承認の判断に使うもの\n\n| 項目 | 内容 |\n| --- | --- |\n| 版数 | 1.2.3 |\n"
-                        "| 配る中身 | （未記入） |\n| 検証への配布で確かめたこと | （未記入） |\n\n## 同意を求めること\n\n- [ ] x\n",
-                        encoding="utf-8")
+    approval.write_text(
+        "# t\n\n## 2. 承認の判断に使うもの\n\n| 項目 | 内容 |\n| --- | --- |\n| 版数 | 1.2.3 |\n"
+        "| 配る中身 | （未記入） |\n| 検証への配布で確かめたこと | （未記入） |\n\n## 同意を求めること\n\n- [ ] x\n",
+        encoding="utf-8",
+    )
     before = (repo / "CHANGELOG.md").read_text(encoding="utf-8")
-    p = subprocess.run([PY, str(SCRIPT), "notes", "--root", str(repo), "--version", "1.2.3-dev.1", "--prs", "11", "12",
-                        "--approval", "issues/approval.md", "--verified", "claude,codex,kiro"],
-                       capture_output=True, text=True, env=env)
+    p = subprocess.run(
+        [
+            PY,
+            str(SCRIPT),
+            "notes",
+            "--root",
+            str(repo),
+            "--version",
+            "1.2.3-dev.1",
+            "--prs",
+            "11",
+            "12",
+            "--approval",
+            "issues/approval.md",
+            "--verified",
+            "claude,codex,kiro",
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
     assert p.returncode == 0, p.stdout + p.stderr
     text = approval.read_text(encoding="utf-8")
     assert "| 配る中身 | - 計画を課題番号だけで作れる（#11）<br>- ステップの順が変わる （続き）（#11）<br>- 題名 B（#12） |" in text
@@ -316,25 +361,33 @@ def test_notes_without_changelog_section_is_precondition(repo, tmp_path):
     notes_repo(repo)
     (repo / "CHANGELOG.md").write_text("# Changelog\n", encoding="utf-8")
     env = fake_gh(tmp_path, PR_BODIES)
-    p = subprocess.run([PY, str(SCRIPT), "notes", "--root", str(repo), "--version", "1.2.3", "--prs", "12"],
-                       capture_output=True, text=True, env=env)
+    p = subprocess.run(
+        [PY, str(SCRIPT), "notes", "--root", str(repo), "--version", "1.2.3", "--prs", "12"], capture_output=True, text=True, env=env
+    )
     assert p.returncode == 3
 
 
 def test_notes_and_changelog_skip_unmerged_prs(repo, tmp_path):
     pdir = notes_repo(repo)
-    env = fake_gh(tmp_path, {**PR_BODIES, 13: {"title": "未マージ", "body": "## 利用者向けの変化\n\n- 載らない\n",
-                                               "state": "OPEN"}})
-    p = subprocess.run([PY, str(SCRIPT), "notes", "--root", str(repo), "--version", "1.2.3-dev.1", "--prs", "12", "13"],
-                       capture_output=True, text=True, env=env)
+    env = fake_gh(tmp_path, {**PR_BODIES, 13: {"title": "未マージ", "body": "## 利用者向けの変化\n\n- 載らない\n", "state": "OPEN"}})
+    p = subprocess.run(
+        [PY, str(SCRIPT), "notes", "--root", str(repo), "--version", "1.2.3-dev.1", "--prs", "12", "13"],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
     assert p.returncode == 0, p.stdout + p.stderr
     res = json.loads(p.stdout.strip().splitlines()[-1])
     assert res["metrics"]["unmerged"] == [13] and res["metrics"]["prs"] == 1
     assert {"kind": "pr", "name": "#13", "result": "skipped", "reason": "マージされていない"} in res["items"]
     assert "#13" not in (repo / "CHANGELOG.md").read_text(encoding="utf-8")
     assert "#13" not in (pdir / "README.md").read_text(encoding="utf-8")
-    p = subprocess.run([PY, str(SCRIPT), "changelog", "--root", str(repo), "--version", "1.2.3-dev.1", "--prs", "12", "13"],
-                       capture_output=True, text=True, env=env)
+    p = subprocess.run(
+        [PY, str(SCRIPT), "changelog", "--root", str(repo), "--version", "1.2.3-dev.1", "--prs", "12", "13"],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
     assert p.returncode == 0, p.stdout + p.stderr
     assert json.loads(p.stdout.strip().splitlines()[-1])["metrics"]["unmerged"] == [13]
     assert "#13" not in (repo / "CHANGELOG.md").read_text(encoding="utf-8")
@@ -369,10 +422,22 @@ def test_pr_reads_fall_back_to_rest_when_graphql_is_rate_limited(monkeypatch, tm
         if args[:2] == ["pr", "view"]:
             return mod.gh_parts.GhResult(1, "", RATE)
         n = int(args[1].rsplit("/", 1)[1])
-        return mod.gh_parts.GhResult(0, json.dumps({
-            "number": n, "title": f"題 {n}", "body": "## 利用者向けの変化\n\n- 変わる\n", "state": "closed",
-            "merged_at": "2026-09-26T00:00:00Z" if n == 5 else None, "merge_commit_sha": "abc",
-            "html_url": f"https://github.com/o/r/pull/{n}"}), "")
+        return mod.gh_parts.GhResult(
+            0,
+            json.dumps(
+                {
+                    "number": n,
+                    "title": f"題 {n}",
+                    "body": "## 利用者向けの変化\n\n- 変わる\n",
+                    "state": "closed",
+                    "merged_at": "2026-09-26T00:00:00Z" if n == 5 else None,
+                    "merge_commit_sha": "abc",
+                    "html_url": f"https://github.com/o/r/pull/{n}",
+                }
+            ),
+            "",
+        )
+
     monkeypatch.setattr(mod.gh_parts.gh_call, "RUNNER", runner)
     skipped = []
     assert mod.pr_titles(tmp_path, [5, 6], skipped) == [(5, "- 題 5（#5）")]
@@ -385,8 +450,7 @@ def test_pr_reads_fall_back_to_rest_when_graphql_is_rate_limited(monkeypatch, tm
 
 def test_pr_read_failure_other_than_rate_limit_stops(monkeypatch, tmp_path):
     mod = _release_steps_module(monkeypatch)
-    monkeypatch.setattr(mod.gh_parts.gh_call, "RUNNER",
-                        lambda args, stdin=None, cwd=None: mod.gh_parts.GhResult(1, "", "not found"))
+    monkeypatch.setattr(mod.gh_parts.gh_call, "RUNNER", lambda args, stdin=None, cwd=None: mod.gh_parts.GhResult(1, "", "not found"))
     with pytest.raises(mod.StepError, match="gh pr view 5 が失敗: not found"):
         mod.pr_titles(tmp_path, [5])
 
@@ -433,6 +497,7 @@ def test_bump_leaves_a_line_repeated_elsewhere_to_the_hand(repo):
 
 
 # --- changed-plugins（#1142 の不足 c） ---------------------------------------------------
+
 
 def plugin_json(root: Path, rel: str, version: str) -> None:
     f = root / rel / ".claude-plugin" / "plugin.json"

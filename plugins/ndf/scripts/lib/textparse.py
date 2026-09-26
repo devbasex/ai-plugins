@@ -10,6 +10,7 @@ unidiff と pygments を呼ぶのはこのモジュールだけである。
 
 使う側は `deps.require("textparse")` を先に呼ぶ。
 """
+
 from __future__ import annotations
 
 from typing import Iterable
@@ -22,8 +23,7 @@ from unidiff import PatchSet
 from unidiff.errors import UnidiffParseError
 
 # 拡張子 → pygments の字句解析器の名前（ほかの拡張子は pygments のファイル名の判定に任せる）
-_LEXERS = {".py": "python", ".sh": "bash", ".bash": "bash", ".js": "javascript", ".mjs": "javascript",
-           ".ts": "typescript", ".tsx": "tsx"}
+_LEXERS = {".py": "python", ".sh": "bash", ".bash": "bash", ".js": "javascript", ".mjs": "javascript", ".ts": "typescript", ".tsx": "tsx"}
 
 
 class DiffParseError(ValueError):

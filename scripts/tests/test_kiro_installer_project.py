@@ -8,6 +8,7 @@
 終了コードはどちらの誤りも 2 であるため、文言まで見ないと 2 つの誤りを区別できない。
 正しい値の確認は `--dry-run` で行い、利用者の環境へ書き込まない。
 """
+
 from __future__ import annotations
 
 import json
@@ -43,7 +44,7 @@ def hint_words(stderr: str) -> list[str]:
     prefix = "HINT: mkdir -p "
     lines = [line for line in stderr.splitlines() if line.startswith(prefix)]
     assert len(lines) == 1, stderr
-    quoted = lines[0][len(prefix):]
+    quoted = lines[0][len(prefix) :]
     out = subprocess.run(
         ["bash", "-c", 'eval "set -- $1"; printf "%s\\0" "$@"', "_", quoted],
         capture_output=True,
@@ -65,9 +66,7 @@ def assert_no_bare_cd_error(proc: subprocess.CompletedProcess) -> None:
         (Path("dev.kiro/prompts/codex.md"), ("--with-codex",)),
     ],
 )
-def test_missing_prerequisite_stops_with_path_error(
-    tmp_path: Path, missing_path: Path, extra_args: tuple[str, ...]
-) -> None:
+def test_missing_prerequisite_stops_with_path_error(tmp_path: Path, missing_path: Path, extra_args: tuple[str, ...]) -> None:
     # 現状固定: 必須パスの種類やチェック位置によらず、同じ形式のエラー 1 行と
     # 終了コード 1 で停止する。
     plugin_dir = tmp_path / "ndf"
@@ -143,9 +142,7 @@ def test_file_path_stops_without_hint(tmp_path: Path) -> None:
     proc = run("--project", str(target), "--yes", home=tmp_path)
 
     assert proc.returncode == 2
-    assert proc.stderr.splitlines() == [
-        f"ERROR: --project points at a path that is not a directory: {target}"
-    ]
+    assert proc.stderr.splitlines() == [f"ERROR: --project points at a path that is not a directory: {target}"]
     assert "HINT:" not in proc.stderr
     assert_no_bare_cd_error(proc)
 
@@ -170,7 +167,12 @@ def test_global_scope_with_existing_path_warns_and_succeeds(tmp_path: Path) -> N
     project = tmp_path / "project"
     project.mkdir()
     proc = run(
-        "--scope", "global", "--project", str(project), "--dry-run", "--yes",
+        "--scope",
+        "global",
+        "--project",
+        str(project),
+        "--dry-run",
+        "--yes",
         home=tmp_path,
     )
 
@@ -206,12 +208,8 @@ def test_reinstall_preserves_user_managed_agent_config(tmp_path: Path) -> None:
         "command": "myserver",
         "args": ["serve"],
     }
-    config.setdefault("hooks", {})["myhook"] = [
-        {"command": "echo custom", "timeout_ms": 1000}
-    ]
-    agent_file.write_text(
-        json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-    )
+    config.setdefault("hooks", {})["myhook"] = [{"command": "echo custom", "timeout_ms": 1000}]
+    agent_file.write_text(json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
     second = run("--project", str(project), "--yes", home=tmp_path)
     assert second.returncode == 0, second.stderr
@@ -222,9 +220,7 @@ def test_reinstall_preserves_user_managed_agent_config(tmp_path: Path) -> None:
         "command": "myserver",
         "args": ["serve"],
     }
-    assert reinstalled["hooks"]["myhook"] == [
-        {"command": "echo custom", "timeout_ms": 1000}
-    ]
+    assert reinstalled["hooks"]["myhook"] == [{"command": "echo custom", "timeout_ms": 1000}]
     assert reinstalled["hooks"]["agentSpawn"]
     assert reinstalled["hooks"]["userPromptSubmit"]
 
@@ -252,12 +248,8 @@ def test_reinstall_removes_optional_features_when_flags_omitted(tmp_path: Path) 
         "command": "myserver",
         "args": ["serve"],
     }
-    config["hooks"]["myhook"] = [
-        {"command": "echo custom", "timeout_ms": 1000}
-    ]
-    agent_file.write_text(
-        json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-    )
+    config["hooks"]["myhook"] = [{"command": "echo custom", "timeout_ms": 1000}]
+    agent_file.write_text(json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
     second = run("--project", str(project), "--yes", home=tmp_path)
     assert second.returncode == 0, second.stderr
@@ -269,9 +261,7 @@ def test_reinstall_removes_optional_features_when_flags_omitted(tmp_path: Path) 
         "command": "myserver",
         "args": ["serve"],
     }
-    assert reinstalled["hooks"]["myhook"] == [
-        {"command": "echo custom", "timeout_ms": 1000}
-    ]
+    assert reinstalled["hooks"]["myhook"] == [{"command": "echo custom", "timeout_ms": 1000}]
     assert reinstalled["customKey"] == {"enabled": True}
     assert reinstalled["hooks"]["agentSpawn"]
     assert reinstalled["hooks"]["userPromptSubmit"]
@@ -299,11 +289,7 @@ def test_reinstall_removes_deprecated_prompts_and_keeps_user_prompt(tmp_path: Pa
     assert (prompts_dir / "custom.md").read_text(encoding="utf-8") == custom_text
 
     # --with-codex を付けないため codex.md は配布されない
-    distributed = {
-        p.name
-        for p in (INSTALLER.parent / "prompts").glob("*.md")
-        if p.name != "codex.md"
-    }
+    distributed = {p.name for p in (INSTALLER.parent / "prompts").glob("*.md") if p.name != "codex.md"}
     assert distributed
     assert {p.name for p in prompts_dir.iterdir()} == distributed | {"custom.md"}
 
@@ -321,9 +307,7 @@ def test_reinstall_removes_deprecated_prompts_and_keeps_user_prompt(tmp_path: Pa
         ('{"mcpServers": "x"}', "の mcpServers が JSON オブジェクトではないため引き継ぎません"),
     ],
 )
-def test_reinstall_with_malformed_agent_config_warns_and_continues(
-    tmp_path: Path, existing: str, warn_marker: str
-) -> None:
+def test_reinstall_with_malformed_agent_config_warns_and_continues(tmp_path: Path, existing: str, warn_marker: str) -> None:
     # 既存 ndf.json が不正 JSON・JSON オブジェクト以外・hooks / mcpServers が
     # オブジェクト以外のとき、引継ぎを断念して警告を出しつつ導入を続ける経路を固定する。
     # 終了コードは 0 で、出力された ndf.json は JSON オブジェクトとして読め、
@@ -350,9 +334,7 @@ def test_reinstall_with_malformed_agent_config_warns_and_continues(
     ("cwd_part", "arg", "resolved_part"),
     [(".", "project/sub", "project/sub"), ("project", ".", "project")],
 )
-def test_relative_path_is_resolved_against_cwd(
-    tmp_path: Path, cwd_part: str, arg: str, resolved_part: str
-) -> None:
+def test_relative_path_is_resolved_against_cwd(tmp_path: Path, cwd_part: str, arg: str, resolved_part: str) -> None:
     # 相対パスは実行時のカレントディレクトリを起点に `cd` と `pwd` で絶対パスへ解決され、
     # スコープの表示にはその絶対パスが出る。
     base = tmp_path.resolve()
@@ -392,10 +374,7 @@ def test_ndf_policies_skill_migration(tmp_path: Path, case: str) -> None:
     if case == "symlink":
         assert not target.exists()
         assert not target.is_symlink()
-        assert (
-            "  REMOVED: ndf-policies (steering へ移行済みのため .kiro/skills のリンクを削除)"
-            in proc.stdout
-        )
+        assert "  REMOVED: ndf-policies (steering へ移行済みのため .kiro/skills のリンクを削除)" in proc.stdout
         assert f"WARN: {target} はシンボリックリンクではありません。" not in proc.stderr
     elif case == "file":
         assert target.is_file()
@@ -413,10 +392,7 @@ def test_ndf_policies_skill_migration(tmp_path: Path, case: str) -> None:
     steering_file = project / ".kiro" / "steering" / "ndf-policies.md"
     assert steering_file.is_file()
     steering_content = steering_file.read_text(encoding="utf-8")
-    assert (
-        "<!-- plugins/ndf/dev.kiro/install.sh が生成します。直接編集しないでください。 -->"
-        in steering_content
-    )
+    assert "<!-- plugins/ndf/dev.kiro/install.sh が生成します。直接編集しないでください。 -->" in steering_content
     assert "<!-- 編集元: plugins/ndf/skills/ndf-policies/SKILL.md -->" in steering_content
     assert "# NDFポリシー" in steering_content
     assert "## ブランチ運用の原則" in steering_content
@@ -465,11 +441,7 @@ def test_manifest_skills_are_linked_with_count_and_output(tmp_path: Path) -> Non
     assert not (skills_dir / "ndf-policies").is_symlink()
 
     # 出力の「linked」行と「Skills数」が本数と一致する。
-    linked_lines = {
-        line[len("  linked: "):]
-        for line in proc.stdout.splitlines()
-        if line.startswith("  linked: ")
-    }
+    linked_lines = {line[len("  linked: ") :] for line in proc.stdout.splitlines() if line.startswith("  linked: ")}
     assert linked_lines == expected_linked
     assert f"  Skills数: {len(expected_linked)} (シンボリックリンク: {skills_dir})" in proc.stdout
 
@@ -508,9 +480,6 @@ def test_reinstall_removes_only_managed_skill_links(tmp_path: Path) -> None:
     assert (skills_dir / "user-external").resolve() == foreign_target.resolve()
 
     managed_now = {
-        p.name
-        for p in skills_dir.iterdir()
-        if p.is_symlink()
-        and str(p.resolve()).startswith(str(plugin_skills.resolve()) + os.sep)
+        p.name for p in skills_dir.iterdir() if p.is_symlink() and str(p.resolve()).startswith(str(plugin_skills.resolve()) + os.sep)
     }
     assert managed_now == expected_managed

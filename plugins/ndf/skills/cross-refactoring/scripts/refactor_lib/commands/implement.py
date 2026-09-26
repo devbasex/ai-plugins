@@ -11,6 +11,7 @@
 | コミットの無い項目・完了の締め切りを過ぎてコミットした項目 | `not_done` で見送り、項目のコミットを取り消す（AC12） |
 | 足したテストが今のコードで落ちた項目 | `test_failed` で見送り、テストのコミットを取り消す（決定 13） |
 """
+
 from __future__ import annotations
 
 import argparse
@@ -66,9 +67,9 @@ from ..vocabulary import DEFER_NOT_DONE, DEFER_TEST_FAILED
 class Intake:
     """1 つの手順分の取り込みの結論。取り消しは最後に 1 度だけまとめて行う。"""
 
-    extra: list[str] = field(default_factory=list)            # どの項目にも属さないコミット
-    rejected: dict[str, str] = field(default_factory=dict)     # 項目 → 手順を外れた理由
-    not_done: dict[str, str] = field(default_factory=dict)     # 項目 → 締め切りの理由
+    extra: list[str] = field(default_factory=list)  # どの項目にも属さないコミット
+    rejected: dict[str, str] = field(default_factory=dict)  # 項目 → 手順を外れた理由
+    not_done: dict[str, str] = field(default_factory=dict)  # 項目 → 締め切りの理由
     test_failed: dict[str, str] = field(default_factory=dict)  # 項目 → テストの結果
     accepted: dict[str, dict[str, Any]] = field(default_factory=dict)  # 項目 → コミットの事実
 
@@ -80,8 +81,7 @@ def _phase_commits(state: dict[str, Any], phase: str) -> list[str]:
     head = git_out(work, ["rev-parse", "HEAD"]) or ""
     ordered = commits_in_range(work, base, head)
     if ordered is None:
-        die(f"{phase} の範囲を確定できません（起点 {base} / HEAD {head}）。"
-            "検証できない変更は採りません")
+        die(f"{phase} の範囲を確定できません（起点 {base} / HEAD {head}）。検証できない変更は採りません")
         raise SystemExit(4)
     return list(reversed(ordered))
 
@@ -89,12 +89,19 @@ def _phase_commits(state: dict[str, Any], phase: str) -> list[str]:
 def _facts(state: dict[str, Any], shas: list[str]) -> list[dict[str, Any]]:
     """コミットの事実（トレーラー・ファイル・差分行数・テストの差分）。テストは走らせない。"""
     return collect_commit_facts(
-        work_dir(state), shas, set(shas), "", state["head_branch"],
+        work_dir(state),
+        shas,
+        set(shas),
+        "",
+        state["head_branch"],
     )
 
 
 def _group_by_item(
-    state: dict[str, Any], facts: list[dict[str, Any]], allowed: Any, intake: Intake,
+    state: dict[str, Any],
+    facts: list[dict[str, Any]],
+    allowed: Any,
+    intake: Intake,
 ) -> dict[str, list[dict[str, Any]]]:
     """コミットを `Item-Id` で項目へ振り分ける。属さないものは `intake.extra` へ。"""
     by_item: dict[str, list[dict[str, Any]]] = {}
@@ -122,7 +129,10 @@ def _deadline_passed(item: dict[str, Any], key: str, estimate_key: str, when: Op
 
 
 def _record_seconds(
-    state: dict[str, Any], phase: str, key: str, accepted: dict[str, dict[str, Any]],
+    state: dict[str, Any],
+    phase: str,
+    key: str,
+    accepted: dict[str, dict[str, Any]],
 ) -> None:
     """項目の所要。起点は最初の項目なら手順の開始、2 件目からは直前の項目のコミット（設計）。"""
     previous = phase_record(state, phase).get("started_at")
@@ -134,7 +144,10 @@ def _record_seconds(
 
 
 def _settle(
-    path: pathlib.Path, state: dict[str, Any], intake: Intake, label: str,
+    path: pathlib.Path,
+    state: dict[str, Any],
+    intake: Intake,
+    label: str,
 ) -> None:
     """取り消しと見送りを 1 度にまとめて行う。"""
     for item_id, reason in intake.rejected.items():
@@ -150,8 +163,7 @@ def _settle(
         drop(path, state, targets, label, intake.extra)
     # 見送った項目は `drop` が付けた `reverted` を `deferred` へ改める。取り消しと見送りの
     # 両方に数えると、報告の件数の和が項目の数を超える（設計の状態遷移）。
-    for reason_code, found in ((DEFER_NOT_DONE, intake.not_done),
-                               (DEFER_TEST_FAILED, intake.test_failed)):
+    for reason_code, found in ((DEFER_NOT_DONE, intake.not_done), (DEFER_TEST_FAILED, intake.test_failed)):
         for item_id, reason in found.items():
             item = find_item(state, item_id)
             defer(state, item, reason_code, reason)
@@ -171,8 +183,10 @@ def _remember(path: pathlib.Path, state: dict[str, Any], phase: str, intake: Int
     """
     record = state.setdefault("phases", {}).setdefault(phase, {})
     record["intake"] = {
-        "extra": list(intake.extra), "rejected": dict(intake.rejected),
-        "not_done": dict(intake.not_done), "test_failed": dict(intake.test_failed),
+        "extra": list(intake.extra),
+        "rejected": dict(intake.rejected),
+        "not_done": dict(intake.not_done),
+        "test_failed": dict(intake.test_failed),
     }
     statefile.save(path, state)
 
@@ -181,9 +195,12 @@ def _recalled(state: dict[str, Any], phase: str) -> Optional[Intake]:
     saved = phase_record(state, phase).get("intake")
     if not isinstance(saved, dict):
         return None
-    return Intake(extra=list(saved.get("extra") or []), rejected=dict(saved.get("rejected") or {}),
-                  not_done=dict(saved.get("not_done") or {}),
-                  test_failed=dict(saved.get("test_failed") or {}))
+    return Intake(
+        extra=list(saved.get("extra") or []),
+        rejected=dict(saved.get("rejected") or {}),
+        not_done=dict(saved.get("not_done") or {}),
+        test_failed=dict(saved.get("test_failed") or {}),
+    )
 
 
 def _prepare(path: pathlib.Path, state: dict[str, Any]) -> None:
@@ -207,6 +224,7 @@ def _finish(path: pathlib.Path, state: dict[str, Any], phase: str) -> None:
 
 # ---------- テストの追加 ----------
 
+
 def _test_words(state: dict[str, Any], item: dict[str, Any], files: list[str]) -> Optional[list[str]]:
     """足したテストを今のコードで走らせる語の並び。
 
@@ -217,8 +235,7 @@ def _test_words(state: dict[str, Any], item: dict[str, Any], files: list[str]) -
     if item.get("command_source") == "targets":
         return list(item["command"])
     work = work_dir(state)
-    source = (state.get("round_test") or {}).get("command") or \
-        (state.get("baseline_test") or {}).get("command")
+    source = (state.get("round_test") or {}).get("command") or (state.get("baseline_test") or {}).get("command")
     tests = [f for f in files if testcmd.valid_targets([f], work, list(state.get("target_scope") or []))]
     if source and tests:
         built = testcmd.build(source, tests, work)
@@ -247,8 +264,12 @@ def _run_added_tests(state: dict[str, Any], intake: Intake) -> None:
 
 
 def _intake_phase(
-    state: dict[str, Any], live_predicate: Any, problem_fn: Any,
-    start_key: str, estimate_key: str, intake: Intake,
+    state: dict[str, Any],
+    live_predicate: Any,
+    problem_fn: Any,
+    start_key: str,
+    estimate_key: str,
+    intake: Intake,
 ) -> Intake:
     phase = "add-tests" if estimate_key == "test" else "implement"
     label = "テストの追加" if estimate_key == "test" else "実装"
@@ -281,14 +302,20 @@ def _intake_tests(state: dict[str, Any]) -> Intake:
     scope = list(state.get("target_scope") or [])
     tracked = tracked_markdown(work_dir(state))
     return _intake_phase(
-        state, lambda item: bool(item.get("tests")),
+        state,
+        lambda item: bool(item.get("tests")),
         lambda _item, commits: _test_commit_problem(commits, scope, tracked, state),
-        "test_start_deadline", "test", intake,
+        "test_start_deadline",
+        "test",
+        intake,
     )
 
 
 def _test_commit_problem(
-    commits: list[dict[str, Any]], scope: list[str], tracked: list[str], state: dict[str, Any],
+    commits: list[dict[str, Any]],
+    scope: list[str],
+    tracked: list[str],
+    state: dict[str, Any],
 ) -> Optional[str]:
     """テストの追加のコミットが手順を満たすか。**テスト以外のファイルを触らない。**"""
     from ..gitfacts import is_test_path
@@ -332,27 +359,32 @@ def cmd_merge_tests(args: argparse.Namespace) -> None:
             item = find_item(state, item_id)
             item["commits"]["test"] = fact["sha"]
             item["status"] = TESTED
-        _record_seconds(state, "add-tests", "test",
-                        {k: v for k, v in intake.accepted.items() if k not in intake.test_failed})
+        _record_seconds(state, "add-tests", "test", {k: v for k, v in intake.accepted.items() if k not in intake.test_failed})
         _remember(path, state, "add-tests", intake)
     else:
         info("↻ テストの追加の結論は記録済みです。取り消しと見送りだけをやり直します")
     _settle(path, state, intake, "テストの追加の取り込み")
     kept = [i for i in live_items(state) if i.get("status") == TESTED]
-    info(f"テストの追加: 採用 {len(kept)} 件 / test_failed {len(intake.test_failed)} 件 / "
-         f"not_done {len(intake.not_done)} 件 / 手順違反 {len(intake.rejected)} 件")
+    info(
+        f"テストの追加: 採用 {len(kept)} 件 / test_failed {len(intake.test_failed)} 件 / "
+        f"not_done {len(intake.not_done)} 件 / 手順違反 {len(intake.rejected)} 件"
+    )
     _finish(path, state, "add-tests")
 
 
 # ---------- 実装 ----------
+
 
 def _doc_wording_reason(hits: list[tuple[str, int]]) -> str:
     return "文書の文言を固定するテストは足さない（" + "、".join(f"{p}: {l}" for p, l in hits) + "）"
 
 
 def _implement_problem(
-    item: dict[str, Any], commits: list[dict[str, Any]], scope: list[str],
-    tracked: list[str], state: dict[str, Any],
+    item: dict[str, Any],
+    commits: list[dict[str, Any]],
+    scope: list[str],
+    tracked: list[str],
+    state: dict[str, Any],
 ) -> Optional[str]:
     """実装のコミットが手順を満たすか。適用のチェック（v10.17.x）を項目の単位で掛ける。"""
     if len(commits) > 1:
@@ -375,9 +407,12 @@ def _intake_implement(state: dict[str, Any]) -> Intake:
     scope = list(state.get("target_scope") or [])
     tracked = tracked_markdown(work)
     return _intake_phase(
-        state, lambda item: item.get("status") in (PLANNED, TESTED),
+        state,
+        lambda item: item.get("status") in (PLANNED, TESTED),
         lambda item, commits: _implement_problem(item, commits, scope, tracked, state),
-        "start_deadline", "implement", intake,
+        "start_deadline",
+        "implement",
+        intake,
     )
 
 
@@ -415,9 +450,10 @@ def cmd_merge_implement(args: argparse.Namespace) -> None:
         info("↻ 実装の結論は記録済みです。取り消しと見送りだけをやり直します")
     _settle(path, state, intake, "実装の取り込み")
     carried = [i["id"] for i in live_items(state) if i.get("review_test_judgements")]
-    info(f"実装: 採用 {len(intake.accepted)} 件 / not_done {len(intake.not_done)} 件 / "
-         f"手順違反 {len(intake.rejected)} 件")
+    info(f"実装: 採用 {len(intake.accepted)} 件 / not_done {len(intake.not_done)} 件 / 手順違反 {len(intake.rejected)} 件")
     if carried:
-        info(f"{len(carried)} 件のテストの差分は機械で決まらないため、最終ゲートのレビューへ"
-             f"引き継ぎます（改修計画に載ります）: {', '.join(carried)}")
+        info(
+            f"{len(carried)} 件のテストの差分は機械で決まらないため、最終ゲートのレビューへ"
+            f"引き継ぎます（改修計画に載ります）: {', '.join(carried)}"
+        )
     _finish(path, state, "implement")

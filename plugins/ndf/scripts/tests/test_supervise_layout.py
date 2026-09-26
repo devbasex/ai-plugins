@@ -3,6 +3,7 @@
 エントリポイント（副命令・`new` の種別・`example` の形）が分けた後も変わらないことと、
 supervise_lib のモジュールの行数と import の向き（設計の「import の向き」）を固定する。
 """
+
 from __future__ import annotations
 
 import ast
@@ -17,14 +18,48 @@ SCRIPTS = Path(__file__).resolve().parents[1]
 SUPERVISE = SCRIPTS / "supervise.py"
 PKG = SCRIPTS / "supervise_lib"
 
-SUBCOMMANDS = ["run", "history", "expected", "example", "new", "queue", "wait", "design-glossary", "note",
-               "sync-check"]
+SUBCOMMANDS = ["run", "history", "expected", "example", "new", "queue", "wait", "design-glossary", "note", "sync-check"]
 NEW_KINDS = ["impl", "fix", "check", "release", "mission", "close"]
-MODULES = ["__init__", "paths", "decl", "plan", "prompts", "claude", "state", "slow", "steps", "worker_steps", "pr",
-           "engine", "templates", "release_templates", "mission_waves", "mission", "queue", "commands", "new_args"]
+MODULES = [
+    "__init__",
+    "paths",
+    "decl",
+    "plan",
+    "prompts",
+    "claude",
+    "state",
+    "slow",
+    "steps",
+    "worker_steps",
+    "pr",
+    "engine",
+    "templates",
+    "release_templates",
+    "mission_waves",
+    "mission",
+    "queue",
+    "commands",
+    "new_args",
+]
 # プランの実行の部品（ハンドラー・状態・監視・claude）とプランを作る側は Engine を import しない
-NO_ENGINE = ["decl", "plan", "prompts", "claude", "state", "slow", "steps", "worker_steps", "pr", "templates",
-             "release_templates", "mission_waves", "mission", "queue", "new_args", "paths"]
+NO_ENGINE = [
+    "decl",
+    "plan",
+    "prompts",
+    "claude",
+    "state",
+    "slow",
+    "steps",
+    "worker_steps",
+    "pr",
+    "templates",
+    "release_templates",
+    "mission_waves",
+    "mission",
+    "queue",
+    "new_args",
+    "paths",
+]
 
 
 def run(*args: str) -> subprocess.CompletedProcess:

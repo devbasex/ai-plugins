@@ -10,6 +10,7 @@
 | 依存に循環が無いこと | 循環があると、どちらが土台なのかが決まらない |
 | モジュールをまたいで非公開名を渡していないこと | 渡していると、外から見た公開 API が確定しない |
 """
+
 from __future__ import annotations
 
 import ast
@@ -91,16 +92,13 @@ def test_every_import_comes_from_the_module_that_defines_it() -> None:
 
 def test_the_dependency_graph_has_no_cycle() -> None:
     """依存に循環が無いこと。"""
-    graph = {
-        _module_name(p): {t for t, _ in _imports(p) if t}
-        for p in _modules()
-    }
+    graph = {_module_name(p): {t for t, _ in _imports(p) if t} for p in _modules()}
     seen: set[str] = set()
     stack: list[str] = []
 
     def walk(node: str) -> list[str]:
         if node in stack:
-            return stack[stack.index(node):] + [node]
+            return stack[stack.index(node) :] + [node]
         if node in seen:
             return []
         seen.add(node)

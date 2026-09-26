@@ -5,6 +5,7 @@
 ない dict のどれで来ても識別子の一覧を返す現状の振る舞いを記録する（現状固定テスト。
 正しさを主張しない）。
 """
+
 from __future__ import annotations
 import review_lib.commands.merge_fix
 

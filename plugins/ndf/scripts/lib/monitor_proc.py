@@ -7,6 +7,7 @@ pid ファイルの読み取りと停止（SIGTERM の後に SIGKILL）を持つ
 import し、そこでは `deps.require("procs")` が呼ばれていない。監視を流すのは `monitor.py` の `main()` で、そこで
 `deps.require("procs", "locks")` を呼ぶ。
 """
+
 from __future__ import annotations
 
 import os
@@ -18,6 +19,7 @@ from typing import Optional
 
 def _procs():
     import procs  # deps.require("procs") の後でだけ import できる
+
     return procs
 
 
@@ -67,8 +69,7 @@ def _kill_pid(pid: int, sigterm_grace: float = 3.0) -> None:
         return
     if _is_zombie(pid):
         return
-    send = (lambda sig: os.killpg(pid, sig)) if _leads_own_group(pid) else (
-        lambda sig: os.kill(pid, sig))
+    send = (lambda sig: os.killpg(pid, sig)) if _leads_own_group(pid) else (lambda sig: os.kill(pid, sig))
     try:
         send(signal.SIGTERM)
     except OSError:

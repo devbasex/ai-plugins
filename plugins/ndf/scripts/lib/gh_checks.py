@@ -1,4 +1,5 @@
 """チェックジョブの読み取りと畳み方（#1142 の L0 で gh_parts から分けた。#632）。"""
+
 from __future__ import annotations
 
 import pathlib
@@ -12,10 +13,13 @@ CHECK_RUNS_MAX_PAGES = 10
 FAILED_CONCLUSIONS = ("failure", "timed_out", "action_required", "startup_failure")
 
 
-def fetch_check_runs(repo: str, sha: str,
-                     rest_get: Callable[[str], Any] | None = None,
-                     per_page: int = CHECK_RUNS_PER_PAGE,
-                     max_pages: int = CHECK_RUNS_MAX_PAGES) -> list[dict[str, Any]] | None:
+def fetch_check_runs(
+    repo: str,
+    sha: str,
+    rest_get: Callable[[str], Any] | None = None,
+    per_page: int = CHECK_RUNS_PER_PAGE,
+    max_pages: int = CHECK_RUNS_MAX_PAGES,
+) -> list[dict[str, Any]] | None:
     """head の commit のチェックジョブを `total_count` に届くまで読む（畳む前の生の一覧）。
 
     **「照会できなかった」と「すべて成功」を区別する。** 失敗・`total_count` 0 はどちらも `None`。

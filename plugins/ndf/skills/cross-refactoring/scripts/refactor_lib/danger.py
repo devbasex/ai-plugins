@@ -11,6 +11,7 @@
 示せないときに立て、D3 の見落とし（動的な読み込み・文字列で組み立てた import）は
 残る危険として受け入れる。見落としは最終ゲートが拾う。
 """
+
 from __future__ import annotations
 
 import os
@@ -26,18 +27,29 @@ from .scope import round_test_roots
 # 再 export を持ちうるパッケージの入口。中身を探さずに D3 を立てる。入口の名前で
 # 参照する側は、入口のパス（`pkg/__init__`）ではなくパッケージの名前で読むため、
 # 名前の一致では当たらない。
-ENTRY_NAMES: frozenset[str] = frozenset({
-    "__init__.py",
-    "index.js", "index.ts", "index.jsx", "index.tsx", "index.mjs", "index.cjs",
-    "index.d.ts",
-    "mod.rs", "lib.rs",
-})
+ENTRY_NAMES: frozenset[str] = frozenset(
+    {
+        "__init__.py",
+        "index.js",
+        "index.ts",
+        "index.jsx",
+        "index.tsx",
+        "index.mjs",
+        "index.cjs",
+        "index.d.ts",
+        "mod.rs",
+        "lib.rs",
+    }
+)
 
 # D3 で探さない文書のファイル。一般的な語幹は文書に必ず当たり、ほぼすべての項目で
 # D3 が立つ。`CODE_EXTENSIONS` で数える前に git の側でも除いて、読む量を減らす。
 _DOC_EXCLUDES = (
-    ":(exclude)*.md", ":(exclude)*.rst", ":(exclude)*.txt",
-    ":(exclude)docs/**", ":(exclude)docs",
+    ":(exclude)*.md",
+    ":(exclude)*.rst",
+    ":(exclude)*.txt",
+    ":(exclude)docs/**",
+    ":(exclude)docs",
 )
 
 # POSIX 拡張正規表現で特別な意味を持つ文字。`re.escape` は `-` や `#` も `\` 付きに
@@ -98,7 +110,9 @@ def _grep(work: str, pattern: str, excludes: list[str]) -> Optional[list[str]]:
     """
     r = subprocess.run(
         ["git", "grep", "-lE", "-e", pattern, "--", ".", *_DOC_EXCLUDES, *excludes],
-        cwd=work, capture_output=True, text=True,
+        cwd=work,
+        capture_output=True,
+        text=True,
     )
     if r.returncode == 1:
         return []

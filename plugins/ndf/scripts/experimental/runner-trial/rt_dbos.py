@@ -5,6 +5,7 @@
 （記録のあるステップは流し直さずに）続ける。承認ゲートは DBOS.recv で待ち、DBOS.send で続ける。
 キューは DBOS の Queue（同時の本数は worker_concurrency、資源のタグは別のキューの concurrency）。
 """
+
 from __future__ import annotations
 
 import os
@@ -124,12 +125,11 @@ def queue_wf(stages: list, root: str) -> list:
     """ステージの順にプランを Q["plans"] へ入れる。前のステージがすべて done のときだけ次を入れる。"""
     results = []
     for i, stage in enumerate(stages):
-        handles = [Q["plans"].enqueue(plan_wf, p["plan"], str(Path(root) / f"{p['plan']}-state"), p["scenario"])
-                   for p in stage]
+        handles = [Q["plans"].enqueue(plan_wf, p["plan"], str(Path(root) / f"{p['plan']}-state"), p["scenario"]) for p in stage]
         outs = [h.get_result() for h in handles]
         results.append({"stage": i, "outcomes": outs})
         if any(o.get("status") != "done" for o in outs):
-            results.append({"stage": i + 1, "skipped": [p["plan"] for s in stages[i + 1:] for p in s]})
+            results.append({"stage": i + 1, "skipped": [p["plan"] for s in stages[i + 1 :] for p in s]})
             break
     return results
 

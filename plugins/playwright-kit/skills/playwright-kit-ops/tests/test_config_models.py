@@ -2,6 +2,7 @@
 
 移す前は ``bool(x)`` / ``int(x)`` / ``str(x)`` と ``raw["key"]`` で手で変換していた。次の入力で結果が変わる。
 """
+
 from __future__ import annotations
 
 import pytest

@@ -3,6 +3,7 @@
 寿命 1 時間（`experimental.cacheTtl: 1h`）は収束ループから始める区間の定義だけが持つ。
 本文は手で 2 つ書き、ここで一致を確かめる（設計の決定 12）。
 """
+
 from __future__ import annotations
 
 import json
@@ -19,13 +20,12 @@ def split(path: pathlib.Path) -> tuple[str, str]:
     text = path.read_text(encoding="utf-8")
     m = FRONTMATTER.match(text)
     assert m, f"{path.name} に frontmatter が無い"
-    return m.group(1), text[m.end():]
+    return m.group(1), text[m.end() :]
 
 
 def top_level(fm: str) -> dict[str, str]:
     return dict(
-        (k.strip(), v.strip())
-        for k, v in (line.split(":", 1) for line in fm.splitlines() if ":" in line and not line.startswith(" "))
+        (k.strip(), v.strip()) for k, v in (line.split(":", 1) for line in fm.splitlines() if ":" in line and not line.startswith(" "))
     )
 
 

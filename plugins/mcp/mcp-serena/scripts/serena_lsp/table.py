@@ -1,4 +1,5 @@
 """対応表（languages.json）を読む。言語を足すときに変えるのはこのファイルの読む先だけである。"""
+
 import json
 import os
 from pathlib import Path
@@ -31,18 +32,23 @@ def validate(data) -> dict:
     _require(isinstance(data, dict), "最上位が object ではありません")
     _require(data.get("version") == SUPPORTED_VERSION, f"対応していない version です: {data.get('version')!r}")
     threshold = data.get("threshold")
-    _require(isinstance(threshold, dict) and _is_number(threshold.get("min_files"))
-             and _is_number(threshold.get("min_share")), "threshold の形が違います")
+    _require(
+        isinstance(threshold, dict) and _is_number(threshold.get("min_files")) and _is_number(threshold.get("min_share")),
+        "threshold の形が違います",
+    )
     _require(isinstance(data.get("languages"), list), "languages が配列ではありません")
     for lang in data["languages"]:
         _require(isinstance(lang, dict) and isinstance(lang.get("serena"), str), "言語の serena がありません")
         name = lang["serena"]
         _require(_is_str_list(lang.get("extensions")), f"{name} の extensions の形が違います")
-        _require(lang.get("claude_plugin") is None or isinstance(lang["claude_plugin"], str),
-                 f"{name} の claude_plugin の形が違います")
-        _require(isinstance(lang.get("binaries"), list) and all(
-            isinstance(b, dict) and isinstance(b.get("command"), str) and isinstance(b.get("install"), str)
-            for b in lang["binaries"]), f"{name} の binaries の形が違います")
+        _require(lang.get("claude_plugin") is None or isinstance(lang["claude_plugin"], str), f"{name} の claude_plugin の形が違います")
+        _require(
+            isinstance(lang.get("binaries"), list)
+            and all(
+                isinstance(b, dict) and isinstance(b.get("command"), str) and isinstance(b.get("install"), str) for b in lang["binaries"]
+            ),
+            f"{name} の binaries の形が違います",
+        )
         _require(_is_str_list(lang.get("extra_checks")), f"{name} の extra_checks の形が違います")
     return data
 

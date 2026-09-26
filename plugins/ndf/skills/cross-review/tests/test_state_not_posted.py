@@ -14,6 +14,7 @@
 | 識別子を取り出せない | 届いていない |
 | 照会できない・何も返らない | 分からない（届いていないとは読まない） |
 """
+
 from __future__ import annotations
 
 import argparse
@@ -84,8 +85,7 @@ def test_a_posted_review_is_merged(tmp_dir, state_mod, monkeypatch):
 def test_the_lookup_reads_the_review_id_from_the_url(state_mod, monkeypatch):
     calls: list[list[str]] = []
     monkeypatch.setattr(
-        gh_call, "RUNNER",
-        lambda args, stdin=None, cwd=None: calls.append(list(args)) or gh_call.GhResult(0, "4961230016\n", "")
+        gh_call, "RUNNER", lambda args, stdin=None, cwd=None: calls.append(list(args)) or gh_call.GhResult(0, "4961230016\n", "")
     )
 
     assert review_lib.github._review_exists("o/r", PR, REVIEW_URL) is True
@@ -93,9 +93,7 @@ def test_the_lookup_reads_the_review_id_from_the_url(state_mod, monkeypatch):
 
 
 def test_the_lookup_is_false_without_a_review_id(state_mod, monkeypatch):
-    monkeypatch.setattr(
-        gh_call, "RUNNER", lambda *a, **k: pytest.fail("識別子が無いのに GitHub を呼んでいる")
-    )
+    monkeypatch.setattr(gh_call, "RUNNER", lambda *a, **k: pytest.fail("識別子が無いのに GitHub を呼んでいる"))
 
     assert review_lib.github._review_exists("o/r", PR, "https://example.test/") is False
     assert review_lib.github._review_exists("o/r", PR, None) is False
