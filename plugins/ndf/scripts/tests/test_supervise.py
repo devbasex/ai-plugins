@@ -1446,3 +1446,13 @@ def test_supervise_decl_keeps_unknown_keys_and_empty_values():
     sv = {"test": None, "sync_checks": [{"name": "a", "command": "b", "note": "x"}], "release": {"form": "f"}}
     assert decl.sync_checks_of(sv) == [("a", "b")]
     assert decl.supervise_shape(sv).test == {}
+
+
+def test_pr_body_tests_table_escapes_a_pipe_in_the_last_line(tmp_path, monkeypatch):
+    """テストの表は lib/mdtable.py で組む（#1142 の D1）。最後の行の `|` は表を壊さず `\\|` になる。"""
+    root, body = pr_repo(tmp_path, monkeypatch)
+    plan = {"フェーズ": "実装", "課題": [1], "作業場所": str(root), "steps": [
+        {"id": "test", "type": "run", "cmd": "echo 'a | b'", "next": "pr"},
+        {"id": "pr", "type": "pr", "base": "develop", "body": "template", "next": "end"}]}
+    assert "結果: 完了" in engine.Engine(plan, tmp_path / "state").run()
+    assert "| test | 0 | a \\| b |" in body.read_text().splitlines()
