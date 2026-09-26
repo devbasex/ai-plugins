@@ -41,16 +41,41 @@ from relay_lib import shellrc as relay_shellrc  # noqa: E402
 from relay_lib import version_dir as relay_version_dir  # noqa: E402
 
 
+def fake_uv(tmp_path):
+    """ラッパーの環境を作る uv の代わり（`NDF_RELAY_UV`）。`UV_PROJECT_ENVIRONMENT` に、テストの python を
+    起動する `bin/python` を置く。`FAKE_UV_LOG` があれば引数を 1 行ずつ残し、`FAKE_UV_EXIT` が 0 でなければ失敗する。"""
+    uv = tmp_path / "fake-uv" / "uv"
+    if not uv.exists():
+        uv.parent.mkdir(parents=True, exist_ok=True)
+        uv.write_text(
+            "#!/bin/sh\n"
+            '[ -z "$FAKE_UV_LOG" ] || echo "$*" >> "$FAKE_UV_LOG"\n'
+            '[ "${FAKE_UV_EXIT:-0}" = 0 ] || { echo "fake uv: no network" >&2; exit "$FAKE_UV_EXIT"; }\n'
+            'mkdir -p "$UV_PROJECT_ENVIRONMENT/bin"\n'
+            f"printf '#!/bin/sh\\nexec %s \"$@\"\\n' '{sys.executable}' > \"$UV_PROJECT_ENVIRONMENT/bin/python\"\n"
+            'chmod 755 "$UV_PROJECT_ENVIRONMENT/bin/python"\n')
+        uv.chmod(0o755)
+    return uv
+
+
+@pytest.fixture(autouse=True)
+def relay_uv(tmp_path, monkeypatch):
+    """バージョンディレクトリの環境は、本物の uv ではなく fake_uv で作る（ネットワークと本物のキャッシュを使わない）。"""
+    monkeypatch.setenv("NDF_RELAY_UV", str(fake_uv(tmp_path)))
+
+
 def isolated_env(tmp_path, **extra):
     """一時の HOME と XDG_* だけを持つ環境。本物の HOME を指さないことを確かめてから返す。
 
     **`DEVBASE_SHELLRC_DIR` も落とす。** 残すと install / uninstall が本物の置き場の `ndf-relay.sh` を書き換え、消す。
+    ラッパーの環境は fake_uv で作る（`NDF_RELAY_UV`）。
     """
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
     e = {k: v for k, v in os.environ.items()
          if not k.startswith(("NDF_", "XDG_", "CLAUDE", "DEVBASE_")) and k not in ("ZDOTDIR",)}
     e["HOME"] = str(home)
+    e["NDF_RELAY_UV"] = str(fake_uv(tmp_path))
     e.update({k: str(v) for k, v in extra.items()})
     real_home = os.path.expanduser("~")
     assert e["HOME"] != real_home
@@ -651,7 +676,7 @@ def mod(tmp_path, monkeypatch):
     spec.loader.exec_module(m)
     for k in list(os.environ):
         # DEVBASE_SHELLRC_DIR と ZDOTDIR も落とす（isolated_env と同じ。本物の読み込み先を見ない）
-        if k.startswith(("NDF_", "XDG_", "CLAUDE", "DEVBASE_")) or k == "ZDOTDIR":
+        if (k.startswith(("NDF_", "XDG_", "CLAUDE", "DEVBASE_")) or k == "ZDOTDIR") and k != "NDF_RELAY_UV":
             monkeypatch.delenv(k, raising=False)
     home = tmp_path / "home"
     home.mkdir()
@@ -1246,8 +1271,10 @@ def plugin_root(tmp_path, version, name="plugin"):
     shutil.copytree(ROOT / "scripts" / "relay_lib", root / "scripts" / "relay_lib", dirs_exist_ok=True,
                     ignore=shutil.ignore_patterns("__pycache__"))
     (root / "scripts" / "lib").mkdir(exist_ok=True)
-    for name in ("clock.py", "jsonio.py"):
-        shutil.copyfile(ROOT / "scripts" / "lib" / name, root / "scripts" / "lib" / name)
+    for rel in relay_version_dir.LIB_FILES:
+        shutil.copyfile(ROOT / "scripts" / rel, root / "scripts" / rel)
+    for rel in relay_version_dir.PROJECT_FILES:
+        shutil.copyfile(ROOT / rel, root / rel)
     return root / "scripts" / "relay.py"
 
 
@@ -2230,11 +2257,11 @@ def test_relay_quiet_defaults_to_five_seconds(mod, tmp_path, monkeypatch):
     relay_dir = tmp_path / "relay"
     relay_dir.mkdir()
     r = relay_run.Relay("claude", str(relay_dir), "m", "v", None, None)
-    os.close(r.lock_fd)
+    relay_common._unlock(r.lock)
     assert r.quiet == 5
     monkeypatch.setenv("NDF_RELAY_QUIET", "0.3")
     r = relay_run.Relay("claude", str(relay_dir), "m", "v", None, None)
-    os.close(r.lock_fd)
+    relay_common._unlock(r.lock)
     assert r.quiet == 0.3
 
 
@@ -2509,9 +2536,13 @@ def test_launcher_without_relay_lib_says_so(tmp_path, home):
 
 
 def test_version_dir_imports_only_stdlib_and_itself():
-    """バージョンディレクトリの中身とランチャーは、標準ライブラリとバージョンディレクトリの中だけを import する（I2）。"""
-    allowed = set(sys.stdlib_module_names) | {"clock", "jsonio", "relay_lib", "__future__"}
-    files = [RELAY, ROOT / "scripts" / "lib" / "clock.py", ROOT / "scripts" / "lib" / "jsonio.py",
+    """バージョンディレクトリの中身とランチャーは、標準ライブラリ・バージョンディレクトリの中・ラッパーの環境に
+    入るパッケージ（relay_lib/runtime.py の GROUPS）だけを import する（I2・決定 20）。"""
+    from relay_lib import runtime
+    libs = {pathlib.Path(rel).stem for rel in relay_version_dir.LIB_FILES}
+    packages = {m.split(".")[0] for g in runtime.GROUPS for m in runtime.deps.GROUPS[g]}
+    allowed = set(sys.stdlib_module_names) | libs | packages | {"relay_lib", "__future__"}
+    files = [RELAY, *(ROOT / "scripts" / rel for rel in relay_version_dir.LIB_FILES),
              *sorted((ROOT / "scripts" / "relay_lib").glob("*.py"))]
     for f in files:
         for node in ast.walk(ast.parse(f.read_text())):

@@ -7,38 +7,24 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import re
 import sys
 import time
 
 from . import proc
 from .common import (ASKED_FILE, HELD_FILE, MARK_FILE, PID_FILE, QUESTION_FILE, QUESTION_LOCK, STOP_FILE, LockBusy,
-                     _lock, env_num, load_json, parse_iso, quiet_seconds, relay_running, remove, stamp,
+                     _lock, _unlock, env_num, load_json, parse_iso, quiet_seconds, relay_running, remove, stamp,
                      state_root, write_json_atomic)
 from .record import RelayRecord, current_section
 
-FENCE_RE = re.compile(r"^(`{3,})(.*)$")
+import md  # noqa: E402,I001  common が lib/ を sys.path に置く
 
 
 def next_blocks(text: str) -> list[str]:
-    """外側の囲みの中を除き、情報文字列が `ndf-next` の 3 つのバッククォートの囲みの中身を返す。"""
-    blocks: list[str] = []
-    open_len = 0
-    cur: list[str] | None = None
-    for line in text.split("\n"):
-        m = FENCE_RE.match(line.rstrip("\r"))
-        if not open_len:
-            if m and "`" not in m.group(2):
-                open_len = len(m.group(1))
-                cur = [] if open_len == 3 and m.group(2).strip() == "ndf-next" else None
-            continue
-        if m and len(m.group(1)) >= open_len and not m.group(2).strip():
-            if cur is not None:
-                blocks.append("\n".join(cur).strip("\n"))
-            open_len, cur = 0, None
-        elif cur is not None:
-            cur.append(line)
-    return blocks
+    """情報文字列が `ndf-next` の、3 つのバッククォートの囲みの中身を返す。
+
+    囲みは Markdown の包み `lib/md.py`（CommonMark）で読む。ほかの囲みの中の囲みは中身の文字列なので拾わない。"""
+    return [t.content.strip("\n") for t in md.md_tokens(text)
+            if t.type == "fence" and t.markup == "```" and t.info.strip() == "ndf-next"]
 
 
 def running_tasks(tasks) -> list[dict]:
@@ -187,7 +173,7 @@ def cmd_question(action: str) -> int:
             # 質問が出た時刻を残す。これより前の合図では切り替えない
             write_json_atomic(os.path.join(d, ASKED_FILE), {"at": stamp()})
         finally:
-            os.close(fd)
+            _unlock(fd)
     except Exception:
         print(json.dumps({"hookSpecificOutput": {
             "hookEventName": "PreToolUse", "permissionDecision": "deny",
