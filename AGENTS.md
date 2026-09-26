@@ -16,11 +16,11 @@
 - **`main` / `develop` への直接コミット・プッシュ禁止。** Pull Request の宛先は
   **`develop`**（開発版チャネル）。`main`（正式版チャネル）へ進めるのはリリースの工程だけ
   （「版と配布の方針」）
-  - **起点は `.ndf/worktree.json` の `base_branch` が宣言する。** worktree のベースブランチと、
-    宛先のチェックがこの宣言を読む（`follow_branch: true` のときはメインディレクトリの追従先にも
-    なる）。宣言が無いリポジトリは既定ブランチのまま動く
+  - **起点は `.ndf/worktree.json` の `base_branch` に書く。** worktree のベースブランチと、
+    宛先のチェックがこの設定を読む（`follow_branch: true` のときはメインディレクトリの追従先にも
+    なる）。設定が無いリポジトリは既定ブランチのまま動く
   - **`--base develop` の付け忘れは継続的統合が塞ぐ。** `main` 宛の Pull Request は
-    `develop` から出たものだけを通す（`scripts/check-pr-base.sh`）。判定は宣言に起点が
+    `develop` から出たものだけを通す（`scripts/check-pr-base.sh`）。判定は設定に起点が
     書かれていて、そのブランチが origin にあるときだけ働く
 - **開発の変更は `.worktrees/<ブランチ名>` の worktree の中で行う**（`/ndf:worktree`）。clone したディレクトリ（メインディレクトリ）は編集対象から外す
   - `issues/` `docs/` と各ランタイムの設定はメインディレクトリで編集してよい
