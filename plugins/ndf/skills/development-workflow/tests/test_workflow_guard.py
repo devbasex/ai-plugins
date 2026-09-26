@@ -530,15 +530,20 @@ def test_split_does_not_mark_the_last_newline() -> None:
 def test_split_finishes_quickly_on_a_long_body() -> None:
     """非機能: 36KB の本文で 0.1 秒以内。演算子を引用の外に置き、区切りの判定を通す。
 
-    測るのは子の bash が使った CPU 時間。壁時計は並列の実行で CPU の順番待ちを含み、揺れる。
+    測るのは子のプロセスが使った CPU 時間。壁時計は並列の実行で CPU の順番待ちを含み、揺れる。
+    短い本文の CPU 時間を差し引き、分割そのものの費用だけを見る。Python の起動と tree-sitter の
+    読み込みは本文の長さによらない固定の費用で、hook 1 回の所要として別に測る。
     """
     body = "| 表 | x; y && z 2>&1 |\n" * 1500
     assert len(body.encode("utf-8")) >= 36000
-    before = resource.getrusage(resource.RUSAGE_CHILDREN)
-    split(body)
-    after = resource.getrusage(resource.RUSAGE_CHILDREN)
-    used = (after.ru_utime - before.ru_utime) + (after.ru_stime - before.ru_stime)
-    assert used < 0.1
+
+    def cpu(text: str) -> float:
+        before = resource.getrusage(resource.RUSAGE_CHILDREN)
+        split(text)
+        after = resource.getrusage(resource.RUSAGE_CHILDREN)
+        return (after.ru_utime - before.ru_utime) + (after.ru_stime - before.ru_stime)
+
+    assert cpu(body) - cpu("a b") < 0.1
 
 
 def test_a_stage_glued_to_a_semicolon_is_recorded(repo: Path, state: Path) -> None:
