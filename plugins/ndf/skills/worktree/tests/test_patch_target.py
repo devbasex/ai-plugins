@@ -5,7 +5,7 @@ Codex CLI はファイルの編集を `apply_patch` で渡し、パスは `tool_
 """
 from __future__ import annotations
 
-from worktree_helpers import run_lib
+from hook_lib import write_target
 
 CODEX_PATCH = """*** Begin Patch
 *** Update File: plugins/ndf/README.md
@@ -17,15 +17,8 @@ CODEX_PATCH = """*** Begin Patch
 
 
 def extract(patch: str) -> tuple[list[str], int]:
-    # 改行を含むためヒアドキュメントで渡す。引数へ埋めると 1 行に潰れる。
-    snippet = (
-        "patch=$(cat <<'WT_EOF'\n" + patch.rstrip("\n") + "\nWT_EOF\n)\n"
-        "wt_extract_patch_target \"$patch\"; echo rc=$?"
-    )
-    got = run_lib(snippet)
-    lines = [ln for ln in got.stdout.splitlines() if ln]
-    rc = int(lines.pop().removeprefix("rc="))
-    return lines, rc
+    lines = write_target.patch_targets(patch)
+    return lines, 0 if lines else 1
 
 
 def test_update_file() -> None:

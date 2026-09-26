@@ -12,23 +12,23 @@ from pathlib import Path
 
 import pytest
 
-from worktree_helpers import SCRIPTS_DIR, run_lib
+from hook_lib import payload
+from worktree_helpers import SCRIPTS_DIR
 
 HOOKS_DIR = SCRIPTS_DIR.parent / "hooks"
 INSTALL_SH = SCRIPTS_DIR.parent / "dev.kiro" / "install.sh"
 
 
-def matcher_from_lib() -> str:
-    got = run_lib("wt_tool_matcher")
-    return got.stdout.strip()
+def guard_entries(runtime: str) -> list[dict]:
+    config = json.loads((HOOKS_DIR / f"{runtime}.json").read_text(encoding="utf-8"))
+    return [e for e in config["hooks"]["PreToolUse"] if any("hook.py" in h["command"] for h in e["hooks"])]
 
 
 @pytest.mark.parametrize("runtime", ["claude", "codex"])
 def test_pretooluse_matcher_matches_the_library(runtime: str) -> None:
-    config = json.loads((HOOKS_DIR / f"{runtime}.json").read_text(encoding="utf-8"))
-    entries = config["hooks"]["PreToolUse"]
-    matchers = {entry.get("matcher") for entry in entries}
-    assert matcher_from_lib() in matchers, matchers
+    """hook.py を起動する PreToolUse の matcher が、guard の Tool の名前の一覧をすべて含む。"""
+    matchers = [set(e.get("matcher", "").split("|")) for e in guard_entries(runtime)]
+    assert any(set(payload.tool_matcher().split("|")) <= m for m in matchers), matchers
 
 
 @pytest.mark.parametrize("runtime", ["claude", "codex"])
@@ -39,7 +39,7 @@ def test_pretooluse_runs_the_guard(runtime: str) -> None:
         for entry in config["hooks"]["PreToolUse"]
         for hook in entry["hooks"]
     ]
-    assert any("worktree-guard.sh" in c for c in commands), commands
+    assert any("scripts/hook.py" in c for c in commands), commands
 
 
 @pytest.mark.parametrize("runtime", ["claude", "codex"])

@@ -10,11 +10,12 @@ import json
 import os
 import pathlib
 import subprocess
+import sys
 
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-SCRIPT = ROOT / "scripts" / "token-guard.sh"
+SCRIPT = ROOT / "scripts" / "hook.py"
 P = 10_000
 AGENT_ID = "a1b2c3"
 
@@ -55,7 +56,7 @@ def run(data, tmp_path, env=None):
     e = {k: v for k, v in os.environ.items() if not k.startswith("NDF_")}
     e["CLAUDE_PLUGIN_DATA"] = str(tmp_path / "plugin-data")
     e.update(env or {})
-    proc = subprocess.run(["bash", str(SCRIPT)], input=json.dumps(data), capture_output=True,
+    proc = subprocess.run([sys.executable, str(SCRIPT), "token-guard"], input=json.dumps(data), capture_output=True,
                           text=True, env=e, timeout=20)
     assert proc.returncode == 0, proc.stderr
     if not proc.stdout.strip():

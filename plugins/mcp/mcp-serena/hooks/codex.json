@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh -c 'if [ -n \"$PLUGIN_ROOT\" ]; then python3 \"$PLUGIN_ROOT/scripts/serena-lsp.py\" hook pre-tool-use --client codex; fi; exit 0'",
+            "command": "sh -c '[ -x \"$0\" ] || exit 0; exec \"$0\" \"$@\"' \"$HOME/.cache/mcp-serena/roots$PLUGIN_ROOT/bin/python\" \"$PLUGIN_ROOT/scripts/serena-lsp.py\" hook pre-tool-use --client codex",
             "timeout": 5,
             "statusMessage": "Counting non-symbolic code reads"
           }

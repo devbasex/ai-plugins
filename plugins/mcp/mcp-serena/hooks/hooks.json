@@ -19,7 +19,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}}/scripts/serena-lsp.py\" hook pre-tool-use --client claude-code",
+            "command": "sh -c '[ -x \"$0\" ] || exit 0; exec \"$0\" \"$@\"' \"$HOME/.cache/mcp-serena/roots${PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}}/bin/python\" \"${PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}}/scripts/serena-lsp.py\" hook pre-tool-use --client claude-code",
             "timeout": 5
           }
         ]

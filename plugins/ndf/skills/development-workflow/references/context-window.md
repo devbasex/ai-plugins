@@ -81,7 +81,7 @@ Pull Request の差分）、**捨てても復元できる**。新しい会話で
 | --- | --- |
 | 替える相手 | 寿命 5 分の supervisor（`ndf:supervisor`）だけ。寿命 1 時間の supervisor は替えない（待ちの後が読み込みで済み、前提を書き直す分を取り返せない） |
 | 替える条件 | 今の文脈 C が、その supervisor の最初の呼び出しの文脈 P の 1.5 倍以上 |
-| 決める側 | hook（`token-guard.sh`）。supervisor は自分から替えない（[agent-layers.md](agent-layers.md) の規則 12） |
+| 決める側 | hook（`scripts/hook.py` の token の guard）。supervisor は自分から替えない（[agent-layers.md](agent-layers.md) の規則 12） |
 | 比を変える | `NDF_SUPERVISOR_CUT_RATIO`（既定 1.5）。`NDF_SUPERVISOR_CUT_GUARD=0` で止めない |
 
 **比は、続けた費用と替えた費用の損得から出す。** 待ち 1 回と後の k 回の呼び出しで比べると、
@@ -123,7 +123,7 @@ hook の無いランタイムにスイッチポイントは無い。Codex / Kiro
 ## 上限を超えたら hook が止める
 
 **Claude Code では、文脈が上限を超えた conductor が工程へ入る起動を hook が 1 度止める**
-（`scripts/token-guard.sh`）。上限の既定は **200,000** トークンで、上の「遅くとも 20 万」と
+（`scripts/hook.py` の token の guard）。上限の既定は **200,000** トークンで、上の「遅くとも 20 万」と
 同じ値である。環境変数 `NDF_CONTEXT_LIMIT` で変えられ、`NDF_CONTEXT_GUARD=0` で止められる。
 
 | 経路 | 止める起動 |
