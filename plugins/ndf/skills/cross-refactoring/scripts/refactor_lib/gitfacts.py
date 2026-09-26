@@ -1,47 +1,71 @@
 """git の出力だけを情報源にして、コミットとテストの事実を取る。
 
-取り消し・作業ツリーの掃除・生成物の同期・公開も、git を触る操作として同居する。
+パスの判定・プロセス・GitHub・worktree・公開・結果ファイルは同じディレクトリの 6 本
+（`pathkinds`・`process`・`github`・`worktree`・`publish`・`results`）が持つ。ここはそれらの名前を
+再エクスポートし、`from .gitfacts import ...` で使う側の import を変えずに済ませる（#1142 の C4）。
 """
 from __future__ import annotations
 
-import json
-import os
-import pathlib
 import re
-import shutil
-import signal
 import subprocess
-import time
-from types import SimpleNamespace
 from typing import Any, Optional
 
-import gh_parts
-import models as models_lib
-import statefile
-from monitor_outcome import LaunchOutcome, read_launch_outcome
+from . import github, pathkinds, process, publish, results, worktree
+from .paths import git_out
 
-from . import die, info, timeline
-from .paths import git_out, sh, stem_for
-from .plan import format_plan, normalize_plan_file, publish_plan_comment
-from .vocabulary import (
-    PLAN_COMMIT_MESSAGE,
-    SYNC_AND_PLAN_COMMIT_MESSAGE,
-    SYNC_COMMIT_MESSAGE,
-)
+# 分けた先の名前を再エクスポートする。`from .gitfacts import ...` で使う側の import を変えない。
 
+_REVIEW_THREADS_QUERY = github._REVIEW_THREADS_QUERY
+_fetch_review_threads_page = github._fetch_review_threads_page
+_gh_api_get = github._gh_api_get
+check_run_result = github.check_run_result
+resolved_threads_on_github = github.resolved_threads_on_github
+
+CODE_EXTENSIONS = pathkinds.CODE_EXTENSIONS
+TEST_NAME_MARKERS = pathkinds.TEST_NAME_MARKERS
+TEST_PATH_MARKERS = pathkinds.TEST_PATH_MARKERS
+_has_shebang = pathkinds._has_shebang
+_is_code_path = pathkinds._is_code_path
+is_test_path = pathkinds.is_test_path
+production_code_changes = pathkinds.production_code_changes
+
+_kill_process_group = process._kill_process_group
+_process_group_alive = process._process_group_alive
+run_test_at = process.run_test_at
+run_with_timeout = process.run_with_timeout
+
+_CREDENTIAL_LIB = publish._CREDENTIAL_LIB
+_commit_sync_changes = publish._commit_sync_changes
+_publish_commit_message = publish._publish_commit_message
+_push_with_credential_fallback = publish._push_with_credential_fallback
+_run_sync_command = publish._run_sync_command
+_sync_generated = publish._sync_generated
+_write_plan_file = publish._write_plan_file
+credential_fallback_args = publish.credential_fallback_args
+flush_pending_push = publish.flush_pending_push
+gh_available = publish.gh_available
+push_head = publish.push_head
+push_with_retry_marker = publish.push_with_retry_marker
+
+STOPPED_REASONS = results.STOPPED_REASONS
+note_stopped = results.note_stopped
+read_result = results.read_result
+record_observed_model = results.record_observed_model
+
+_control_prefix = worktree._control_prefix
+_dirty_paths = worktree._dirty_paths
+_discard_worktree_changes = worktree._discard_worktree_changes
+_order_newest_first = worktree._order_newest_first
+_require_clean_worktree = worktree._require_clean_worktree
+_worktree_changes = worktree._worktree_changes
+discard_impl_leftovers = worktree.discard_impl_leftovers
+replay_commits = worktree.replay_commits
+reset_hard = worktree.reset_hard
+revert_item_commits = worktree.revert_item_commits
+revert_range = worktree.revert_range
 
 # 実装担当は自分の成果を報告する側なので、結果ファイルの値をそのままチェックに使うと
 # 「JSON を書き換えるだけで通る」チェックになる。ここは git だけを情報源にする。
-
-# テストの置き場所。現状固定テストが先行しているかの判定に使う。
-TEST_PATH_MARKERS = ("/test/", "/tests/", "/spec/", "/specs/", "__tests__/")
-TEST_NAME_MARKERS = (".test.", ".spec.", "_test.", "_spec.", "test_", "spec_")
-
-# 本番コードの拡張子。構造改善を飛ばしてよいかの判定（`assess`）に使う（#494）。
-CODE_EXTENSIONS = frozenset({
-    ".py", ".sh", ".bash", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".php",
-    ".rb", ".go", ".rs", ".java", ".kt", ".swift", ".c", ".h", ".cc", ".cpp", ".cs",
-})
 
 
 def safe_int(value: Any, fallback: int = 0) -> int:
@@ -81,8 +105,6 @@ def reported_shas(reported: Any) -> list[str]:
         if isinstance(sha, str) and sha.strip():
             shas.append(sha.strip())
     return shas
-
-
 
 
 def commits_in_range(work: str, base: Optional[str], head: str) -> Optional[list[str]]:
@@ -199,112 +221,9 @@ def tracked_markdown(work: str) -> list[str]:
     return [p for p in (out or "").split("\0") if p]
 
 
-def is_test_path(path: str) -> bool:
-    """テストの置き場所か。判定は `commit_touches_tests` と同じ基準で行う。"""
-    lowered = f"/{path.lower()}"
-    name = lowered.rsplit("/", 1)[-1]
-    return (any(m in lowered for m in TEST_PATH_MARKERS)
-            or any(m in name for m in TEST_NAME_MARKERS))
-
-
-def _has_shebang(work: str, rev: str, path: str) -> bool:
-    """`<rev>:<path>` の 1 行目が `#!` で始まるか。その版に無ければ False。"""
-    r = subprocess.run(["git", "cat-file", "blob", f"{rev}:{path}"], cwd=work,
-                       capture_output=True)
-    return r.returncode == 0 and r.stdout.startswith(b"#!")
-
-
-def _is_code_path(work: str, base: str, path: str) -> bool:
-    """本番コードのファイルか。拡張子で判定し、拡張子の無いファイルは shebang で判定する。
-
-    拡張子の無いスクリプト（`containers/base/tmux-session` の `#!/bin/sh` など）を
-    数えないと、シェルスクリプトを主に持つリポジトリで構造改善が常に飛ばされる（#1134）。
-    削除したファイルは HEAD に無いので、起点の版で判定する。
-    """
-    suffix = pathlib.PurePosixPath(path).suffix.lower()
-    if suffix:
-        return suffix in CODE_EXTENSIONS
-    return _has_shebang(work, "HEAD", path) or _has_shebang(work, base, path)
-
-
-def production_code_changes(work: str, base: str) -> Optional[list[tuple[str, int]]]:
-    """`<base>...HEAD` の差分のうち、本番コードのファイルと変更行（追加 + 削除）を返す。
-
-    `<base>` を解けないときは `None`。**`--no-renames` を付ける。** 付けないと rename が
-    `dir/{old.py => new.py}` の形になり、拡張子で判定できない。付ければ旧パスの削除と
-    新パスの追加に分かれ、両方のパスで判定できる。拡張子の無いファイルは shebang で
-    判定する（`_is_code_path`）。`-z` は、ASCII 以外を含むパスが
-    引用符付きで出て拡張子が読めなくなるのを防ぐ。
-    """
-    out = git_out(work, ["diff", "--numstat", "-z", "--no-renames", f"{base}...HEAD"])
-    if out is None:
-        return None
-    changes: list[tuple[str, int]] = []
-    for line in out.split("\0"):
-        parts = line.split("\t")
-        if len(parts) < 3:
-            continue
-        path = parts[2]
-        if is_test_path(path) or not _is_code_path(work, base, path):
-            continue
-        # バイナリは `-` になるので数えない
-        changes.append((path, sum(int(n) for n in parts[:2] if n.isdigit())))
-    return changes
-
-
 def commit_touches_tests(work: str, sha: str) -> bool:
     """コミットがテストの置き場所を触っているか。"""
     return any(is_test_path(p) for p in commit_files(work, sha))
-
-
-def run_with_timeout(
-    command: "str | list[str]", cwd: str, timeout: int, kill_grace: float = 5.0,
-    output: Optional[pathlib.Path] = None,
-) -> tuple[Optional[int], bool]:
-    """テストコマンドを実行し `(終了コード, 打ち切ったか)` を返す。
-
-    **新しいプロセスグループで起動し、打ち切るときはグループごと止める。**
-    `shell=True` のまま `subprocess.run(timeout=...)` を使うと、終了するのは
-    シェルだけで、pytest などの子プロセスは走り続ける。残ったプロセスは同じ
-    作業ディレクトリを書き換え続けるため、直後の `git checkout` と競合する。
-
-    **語の並び（`list`）はシェルを通さずに走らせる**（#933 の AC10b）。範囲テストは
-    進行側が `test_targets` から組み立てた語の並びで、シェルの構文を解釈させない。
-    文字列は利用者が渡したコマンド（`--baseline-test` / `--round-test`）で、今と同じく
-    シェルで走らせる。
-
-    `output` を渡すと標準出力と標準エラーをそのファイルへ書く（修正担当へ渡す材料）。
-    """
-    sink = open(output, "wb") if output is not None else None
-    try:
-        proc = subprocess.Popen(
-            command, shell=isinstance(command, str), cwd=cwd, start_new_session=True,
-            stdout=sink if sink is not None else subprocess.PIPE,
-            stderr=subprocess.STDOUT if sink is not None else subprocess.PIPE,
-        )
-    except OSError as exc:
-        if sink is not None:
-            sink.write(f"起動できませんでした: {exc}\n".encode("utf-8"))
-            sink.close()
-        return 127, False
-    try:
-        proc.communicate(timeout=timeout)
-        return proc.returncode, False
-    except subprocess.TimeoutExpired:
-        _kill_process_group(proc, kill_grace)
-        # 出力はもう使わない。**パイプを閉じてから**待つ。開いたままだと、
-        # パイプを継承した子が残っている限り EOF が来ず、ここで止まる。
-        for pipe in (proc.stdout, proc.stderr):
-            if pipe is not None:
-                pipe.close()
-        try:
-            proc.wait(timeout=kill_grace)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-        return None, True
-    finally:
-        if sink is not None:
-            sink.close()
 
 
 def commit_time(work: str, sha: str) -> Optional[str]:
@@ -315,85 +234,6 @@ def commit_time(work: str, sha: str) -> Optional[str]:
     時点を表すコミッターの時刻を採る。
     """
     return git_out(work, ["log", "-1", "--format=%cI", sha])
-
-
-def _process_group_alive(pgid: int) -> bool:
-    """プロセスグループに生きたプロセスが残っているか。"""
-    try:
-        os.killpg(pgid, 0)
-        return True
-    except ProcessLookupError:
-        return False
-    except (PermissionError, OSError):
-        # 判断できないときは「残っている」側に倒す（SIGKILL まで進める）。
-        return True
-
-
-def _kill_process_group(
-    proc: "subprocess.Popen[bytes]", grace: float = 5.0
-) -> None:
-    """プロセスグループごと止める。SIGTERM のあと、残っていれば SIGKILL。
-
-    **親シェルの終了で打ち切らない。** 親が終わっても、SIGTERM を無視する子は
-    グループに残って作業ディレクトリを書き換え続ける。判定は必ず
-    **グループの存否**で行う。
-    """
-    try:
-        pgid = os.getpgid(proc.pid)
-    except (ProcessLookupError, PermissionError, OSError):
-        proc.kill()
-        return
-    try:
-        os.killpg(pgid, signal.SIGTERM)
-    except ProcessLookupError:
-        return
-    except (PermissionError, OSError):
-        proc.kill()
-        return
-
-    deadline = time.monotonic() + grace
-    while time.monotonic() < deadline:
-        # 親シェルを先に回収する。回収しないとゾンビがグループに残り、
-        # 子がすべて終わっていても猶予を最後まで待つ（#883）
-        proc.poll()
-        if not _process_group_alive(pgid):
-            return
-        time.sleep(0.2)
-
-    try:
-        os.killpg(pgid, signal.SIGKILL)
-    except (ProcessLookupError, PermissionError, OSError):
-        pass
-
-
-def run_test_at(
-    work: str, sha: str, command: str, head_branch: str,
-    timeout: int, kill_grace: float = 5.0,
-) -> str:
-    """指定コミットを取り出してテストを実行し `pass` / `fail` を返す。
-
-    **各コミットでテストが通ったかは、実際に走らせないと分からない。**
-    結果ファイルの `test_status` は実装担当の申告にすぎず、チェックの根拠にできない。
-    実行後は必ず元の位置へ戻す。ブランチの上にいたらそのブランチへ、detach していたら
-    元のコミットへ戻る（書き込み用の作業ディレクトリは detach で作る。#638）。
-
-    上限時間を超えたら `fail` とする。生成されたコードやテストが無限ループに入ると、
-    待ち続けて進行全体が止まるためで、通す側には倒さない。
-    """
-    branch = git_out(work, ["symbolic-ref", "-q", "--short", "HEAD"])
-    back = [branch] if branch else ["--detach", git_out(work, ["rev-parse", "HEAD"]) or "HEAD"]
-    if git_out(work, ["checkout", "--detach", sha]) is None:
-        return "missing"
-    try:
-        code, timed_out = run_with_timeout(command, work, timeout, kill_grace)
-        if timed_out:
-            info(f"⚠ コミット {sha[:7]} のテストが {timeout} 秒で終わりませんでした")
-            return "fail"
-        return "pass" if code == 0 else "fail"
-    finally:
-        subprocess.run(
-            ["git", "checkout", *back], cwd=work, capture_output=True, text=True
-        )
 
 
 def collect_commit_facts(
@@ -430,585 +270,3 @@ def collect_commit_facts(
             ) if test_command else "skipped",
         })
     return facts
-
-
-_REVIEW_THREADS_QUERY = """
-query($owner: String!, $repo: String!, $pr: Int!, $cursor: String) {
-  repository(owner: $owner, name: $repo) {
-    pullRequest(number: $pr) {
-      reviewThreads(first: 100, after: $cursor) {
-        pageInfo { hasNextPage endCursor }
-        nodes { id isResolved }
-      }
-    }
-  }
-}
-"""
-
-
-def _fetch_review_threads_page(
-    owner: str, name: str, pr: int, cursor: Optional[str]
-) -> Optional[dict[str, Any]]:
-    """レビュースレッドを 1 ページ分だけ取得する。取れなければ `None` を返す。
-
-    呼び出しの失敗と応答の解釈の失敗を、どちらも `None` へ畳む。ページ送りの側は
-    「取れたか」だけを見ればよく、GraphQL の呼び方を知らずに済む。
-    """
-    cmd = [
-        "gh", "api", "graphql",
-        "-f", f"query={_REVIEW_THREADS_QUERY}",
-        "-F", f"owner={owner}", "-F", f"repo={name}", "-F", f"pr={pr}",
-    ]
-    if cursor:
-        cmd += ["-F", f"cursor={cursor}"]
-    r = subprocess.run(cmd, capture_output=True, text=True)
-    if r.returncode != 0:
-        info(f"⚠ レビュースレッドの取得に失敗しました: {r.stderr.strip()[:200]}")
-        return None
-    try:
-        return (
-            json.loads(r.stdout)["data"]["repository"]["pullRequest"]["reviewThreads"]
-        )
-    except (json.JSONDecodeError, KeyError, TypeError) as e:
-        info(f"⚠ レビュースレッドの応答を解釈できませんでした: {e}")
-        return None
-
-
-def resolved_threads_on_github(repo: str, pr: int) -> Optional[set[str]]:
-    """GitHub 上で実際に解決済みのレビュースレッド ID を返す。
-
-    取得できなければ `None` を返す。呼び出し側は**空集合と区別する**こと。
-    「取得できなかった」を「解決済みが 0 件」と混同すると、通信が失敗しただけで
-    全ての指摘を未解決扱いにするか、逆に自己申告を素通しすることになる。
-    """
-    owner, _, name = repo.partition("/")
-    if not owner or not name:
-        return None
-    resolved: set[str] = set()
-    cursor: Optional[str] = None
-    while True:
-        threads = _fetch_review_threads_page(owner, name, pr, cursor)
-        if threads is None:
-            return None
-        resolved.update(
-            n["id"] for n in threads.get("nodes", []) if n.get("isResolved")
-        )
-        page = threads.get("pageInfo") or {}
-        if not page.get("hasNextPage"):
-            return resolved
-        cursor = page.get("endCursor")
-        if not cursor:
-            return resolved
-
-
-# 継続的統合の照会は `commits/{sha}/check-runs` だけにする。**併記された状態
-# （`commits/{sha}/status`）は使わない。** GitHub Actions はチェックジョブを記録し commit の
-# 状態を記録しないため、すべて成功した commit でも `pending` を返す。保留として読むと、
-# 通っているチェックで通過できなくなる。
-#
-# ページの読み方と、同名のチェックジョブを名前ごとの最新の実行へ畳む処理は共通層の
-# `gh_parts`（`pr-info --with checks` と cross-review の判定が使う実装）が持つ（#632）。
-
-
-def _gh_api_get(path: str) -> Optional[SimpleNamespace]:
-    """`gh api <path>` の JSON を `.body` に持つ応答。照会できなければ `None`。"""
-    out = sh(["gh", "api", path], check=False)
-    if not out:
-        return None
-    try:
-        return SimpleNamespace(body=json.loads(out))
-    except json.JSONDecodeError:
-        return None
-
-
-def check_run_result(repo: str, sha: str, name: str) -> Optional[str]:
-    """名前が一致したチェックジョブの、最新の実行の結果を 1 つの語で返す。
-
-    - 完了して結論が `success` なら `"success"`
-    - 未完了なら `"pending"`
-    - それ以外はその結論（`"failure"` など。空なら `"unknown"`）
-    - **照会できない・名前が一致するチェックが 1 件も無いときは `None`**
-
-    **「照会できなかった」と「成功した」を区別する。** 呼び出し側は `None` を
-    通過させない（fail-closed）。名前で絞るのは、別のチェックの成功で通さないためである。
-    別の実行で成功した同名のチェックの、前の実行の失敗は数えない。
-    """
-    if not repo or not sha or not name:
-        return None
-    runs = gh_parts.fetch_check_runs(repo, sha, rest_get=_gh_api_get)
-    return gh_parts.check_result(runs, name)
-
-
-def revert_item_commits(
-    state: dict[str, Any], item: dict[str, Any], dry_run: bool = False
-) -> int:
-    """改善項目のコミットを取り消し、取り消した件数を返す。
-
-    **新しいコミットから順に戻す。** 逆順にすると後続の取り消しが競合する。
-    取り消しに失敗したら中断する。半端な状態を Pull Request に残さない。
-
-    適用の検証に失敗したときと、レビューが収束しなかったときの両方から呼ぶ。
-    前者で呼ばないと、実装担当が既に push した差分が Pull Request に残り、
-    以後のレビュー対象にも混入する。
-    """
-    # **取り消し済みなら何もしない。** push の失敗などで叩き直したときに、
-    # 既に戻したコミットへもう一度 `git revert` を掛けると必ず失敗し、
-    # そこから先へ進めなくなる。
-    if item.get("reverted"):
-        info(f"↩ {item['item_id']} は取り消し済みです")
-        return 0
-
-    work = state["worktrees"]["work"]
-    shas = _order_newest_first(
-        work, [s for s in (item.get("commits") or []) if isinstance(s, str) and s]
-    )
-    if dry_run:
-        for sha in shas:
-            info(f"（dry-run）git revert --no-edit {sha}")
-        return len(shas)
-
-    # 途中で失敗したら**着手前の HEAD まで戻す**。1 項目が複数のコミットを持つとき、
-    # 先行して成功した取り消しだけが履歴に残ると、再実行で不整合になって進めなくなる。
-    before = git_out(work, ["rev-parse", "HEAD"])
-    revert_range(work, shas, before, prefix=f"{item['item_id']} の")
-    item["reverted"] = True
-    return len(shas)
-
-
-def reset_hard(work: str, sha: Optional[str]) -> None:
-    """着手前の HEAD へ戻す。半端な履歴を Pull Request に残さないための後始末。"""
-    if sha:
-        subprocess.run(["git", "reset", "--hard", sha], cwd=work,
-                       capture_output=True, text=True)
-
-
-def revert_range(
-    work: str, ordered: list[str], before: Optional[str], prefix: str = ""
-) -> None:
-    """範囲を**新しい順に**全て取り消す。失敗したら着手前へ戻して中断する。
-
-    範囲全体を新しい順にたどる取り消しは、履歴をそのまま逆再生するだけなので
-    **競合しない**。競合するのは「一部のコミットだけを飛ばして戻す」ときである。
-    """
-    for sha in ordered:
-        r = subprocess.run(
-            ["git", "revert", "--no-edit", sha],
-            cwd=work, capture_output=True, text=True,
-        )
-        if r.returncode != 0:
-            subprocess.run(["git", "revert", "--abort"], cwd=work,
-                           capture_output=True, text=True)
-            reset_hard(work, before)
-            die(
-                f"{prefix}コミット {sha} を取り消せませんでした: {r.stderr.strip()[:400]}"
-                f"（HEAD を {before} へ戻しました）"
-            )
-
-
-def replay_commits(work: str, shas: list[str]) -> Optional[dict[str, str]]:
-    """残す項目のコミットを**古い順に**積み直し、`{元の SHA: 新しい SHA}` を返す。
-
-    競合したら `None` を返す。**ここで中断しない。** どの項目を残せるか決められない
-    だけなので、呼び出し側がラウンド全件の取り消しへ退避できる。
-    """
-    mapping: dict[str, str] = {}
-    for sha in shas:
-        r = subprocess.run(
-            ["git", "cherry-pick", "--allow-empty", sha],
-            cwd=work, capture_output=True, text=True,
-        )
-        if r.returncode != 0:
-            subprocess.run(["git", "cherry-pick", "--abort"], cwd=work,
-                           capture_output=True, text=True)
-            info(f"⚠ {sha[:7]} を積み直せませんでした: {r.stderr.strip()[:200]}")
-            return None
-        mapping[sha] = git_out(work, ["rev-parse", "HEAD"]) or sha
-    return mapping
-
-
-def _order_newest_first(work: str, shas: list[str]) -> list[str]:
-    """コミットを **git の履歴順（新しい順）** に並べ替える。
-
-    申告された順序を信じない。古いコミットから取り消すと、後続の取り消しが
-    競合して進めなくなる。履歴に無いものは順序を決められないので末尾へ置く。
-    """
-    if len(shas) < 2:
-        return list(shas)
-    history = git_out(work, ["rev-list", "HEAD"])
-    if history is None:
-        return list(shas)
-    rank = {sha: i for i, sha in enumerate(history.split())}   # 0 が最も新しい
-    resolved = {
-        s: (git_out(work, ["rev-parse", "--verify", f"{s}^{{commit}}"]) or s)
-        for s in shas
-    }
-    return sorted(shas, key=lambda s: rank.get(resolved[s], len(rank)))
-
-
-def _worktree_changes(work: str) -> dict[str, str]:
-    """作業ツリーの変更を `パス → 状態` で返す。同期の前後を比べるために使う。
-
-    無視されているファイルは現れない（`--porcelain` の既定）。改名は移動先の
-    パスだけを見る。
-    """
-    # `core.quotePath` の既定（true）では、非 ASCII を含むパスが `"` で囲まれ
-    # `\343` の形へエスケープされる。そのまま `git add` へ渡すと見つからない。
-    out = git_out(
-        work, ["-c", "core.quotePath=false", "status", "--porcelain", "-uall"],
-        strip=False,
-    )
-    changes: dict[str, str] = {}
-    for line in (out or "").splitlines():
-        if len(line) < 4:
-            continue
-        path = line[3:]
-        if " -> " in path:            # 改名。移動先だけを対象にする
-            path = path.split(" -> ", 1)[1]
-        changes[path.strip('"')] = line[:2]
-    return changes
-
-
-def _control_prefix(state: dict[str, Any], work: str) -> Optional[str]:
-    """作業ディレクトリから見た制御用ディレクトリの相対パス。外にあれば `None`。
-
-    状態ファイル・プロンプト・結果・ログの置き場所で、**同期コミットへ入れない**。
-    `prepare-worktrees.sh` が無視の設定を置くが、置き場所を環境変数で移した場合や
-    配置前に同期が走った場合に備えて、ここでも明示的に外す。
-    """
-    tmp_dir = str(state.get("tmp_dir") or "")
-    if not tmp_dir:
-        return None
-    try:
-        relative = pathlib.Path(tmp_dir).resolve().relative_to(
-            pathlib.Path(work).resolve()
-        )
-    except ValueError:
-        return None
-    return f"{relative}/"
-
-
-def _dirty_paths(state: dict[str, Any], work: str) -> list[str]:
-    """作業ツリーの未コミット変更のパス。制御用ディレクトリは除く。"""
-    control = _control_prefix(state, work)
-    return sorted(
-        path for path in _worktree_changes(work)
-        if not (control and path.startswith(control))
-    )
-
-
-def _discard_worktree_changes(work: str) -> None:
-    """作業ツリーと index の未コミット変更を捨てる。**着手前が綺麗なときだけ呼ぶ。**
-
-    **index も戻す。** `git checkout -- .` は staged された差分を戻さないため、
-    同期コマンドが `git add` してから失敗すると清浄性のチェックが通らないままになり、
-    `pending_push` の再試行が永久に進まない。
-
-    無視されたファイル（制御用ディレクトリを含む）は消さない（`git clean` に
-    `-x` を付けない）。
-    """
-    for args in (["reset", "--hard", "HEAD"], ["clean", "-fd"]):
-        subprocess.run(["git", *args], cwd=work, capture_output=True, text=True)
-
-
-def discard_impl_leftovers(state: dict[str, Any], work: str) -> None:
-    """実装担当が残した未コミットの変更を捨てる。取り込みの前に呼ぶ。
-
-    **公開は進行側が検証を通してから行う**ので、コミットされなかった変更は
-    どの検証も受けていない。Pull Request へ出す道が無い以上、残す意味がない。
-
-    残したまま進むと、push の直前の清浄性のチェックで中断する。実測では、修正
-    手順でコミットを作れなかった実装担当が直しかけの差分を置いたまま終え、
-    続く `merge-fix` が「修正 0 件」として先へ進むこともできなくなった。
-
-    制御用ディレクトリ（状態・結果・ログ）は無視の設定で守られており、
-    `git clean` に `-x` を付けないため消えない。
-    """
-    if not pathlib.Path(work).is_dir():
-        return
-    dirty = _dirty_paths(state, work)
-    if not dirty:
-        return
-    shown = "、".join(dirty[:5])
-    more = f" ほか {len(dirty) - 5} 件" if len(dirty) > 5 else ""
-    _discard_worktree_changes(work)
-    info(
-        f"🧹 コミットされなかった変更を捨てました（{shown}{more}）。"
-        "検証を受けていないため公開しません"
-    )
-
-
-def _require_clean_worktree(state: dict[str, Any], work: str) -> None:
-    """同期の前に作業ツリーが綺麗であることを求める。汚れていたら中断する。
-
-    汚れたまま同期すると、**同期が作った差分と元からあった差分を区別できない**。
-    区別しようと状態コードを比べても足りず、次の 2 つを取りこぼす。
-
-    - 元から ` M` のファイルを同期がさらに書き換えても、状態コードは ` M` のままで
-      検知できない。その変更がコミットされず、**push がまた落ちる**
-    - `git commit` は index の内容を全て含めるため、`git add` の対象を絞っても
-      **先に staged だった変更が検証を受けないまま Pull Request へ入る**
-
-    無視されたファイルはここに現れない。生成物やキャッシュを `.gitignore` へ
-    入れてあれば止まらない。
-    """
-    dirty = _dirty_paths(state, work)
-    if not dirty:
-        return
-    shown = ", ".join(dirty[:5])
-    more = f" ほか {len(dirty) - 5} 件" if len(dirty) > 5 else ""
-    die(
-        f"生成物を同期する前に、作業ツリーへ未コミットの変更があります（{shown}{more}）。"
-        "同期が作った差分と区別できず、検証を受けていない変更を公開しかねないため"
-        "中断します。コミットするか `.gitignore` へ入れてから再実行してください"
-    )
-
-
-def _run_sync_command(state: dict[str, Any], work: str, command: str) -> None:
-    """同期コマンドを実行する。失敗したら差分を捨てて中断する。
-
-    **黙って push しない。** 同期できない状態を公開すると、利用者のリポジトリの
-    チェックを壊したまま進むことになる。
-    """
-    code, timed_out = run_with_timeout(
-        command, work, timeline.state_test_timeout(state)
-    )
-    if not (timed_out or code != 0):
-        return
-    # **途中まで書き換えた差分を残さない。** 残すと次の実行は
-    # `_require_clean_worktree` で必ず止まり、`pending_push` の再試行が
-    # 永久に進まなくなる。着手前が綺麗だったことは確認済みなので、
-    # ここにある変更は全て同期が作ったものだと分かる。
-    _discard_worktree_changes(work)
-    die(
-        f"生成物の同期に失敗しました（{command}）: "
-        + ("打ち切りました" if timed_out else f"終了コード {code}")
-        + "。同期が作った差分は破棄したので、原因を直せばそのまま再開できます"
-    )
-
-
-def _write_plan_file(state: dict[str, Any], work: str, rel: str) -> None:
-    """改修計画を作業ディレクトリの中へ書き出す。
-
-    内容は状態から決まるので、**状態が動いていなければ差分は出ない**。
-    書き出しを毎回行っても、余計なコミットは積まれない。
-    """
-    path = pathlib.Path(work) / rel
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(format_plan(state), encoding="utf-8")
-
-
-def _publish_commit_message(produced: list[str], plan_rel: str) -> str:
-    """公開の直前に積むコミットのメッセージを、中身に合わせて選ぶ。"""
-    has_plan = bool(plan_rel) and plan_rel in produced
-    has_generated = any(p != plan_rel for p in produced)
-    if has_plan and has_generated:
-        return SYNC_AND_PLAN_COMMIT_MESSAGE
-    if has_plan:
-        return PLAN_COMMIT_MESSAGE
-    return SYNC_COMMIT_MESSAGE
-
-
-def _commit_sync_changes(
-    work: str, command: str, produced: list[str], plan_rel: str = ""
-) -> None:
-    """同期が作った差分を進行側のコミットとして積む。差分が無ければ何もしない。
-
-    このコミットはどの改善項目にも属さない。取り消しでは積み直されないが、
-    次の push で作り直されるので失われても問題にならない。
-    """
-    if not produced:
-        return
-    # **後段で落ちたときも差分を残さない。** `git add` / `git commit` の失敗で
-    # 作業ツリーを汚したまま中断すると、次の実行は `_require_clean_worktree` で
-    # 必ず止まり、`pending_push` の再試行が永久に進まない。捨ててよい根拠は
-    # 同期コマンド自身が失敗したときと同じで、着手前が綺麗だったことを
-    # 確認済みだからである。
-    try:
-        sh(["git", "add", "--", *produced], cwd=work)
-        sh(["git", "commit", "-m", _publish_commit_message(produced, plan_rel)],
-            cwd=work)
-    except SystemExit:
-        _discard_worktree_changes(work)
-        raise
-    if command:
-        info(f"🔧 生成物を同期しました（{command} / {len(produced)} ファイル）")
-    else:
-        info(f"📝 改修計画を記録しました（{len(produced)} ファイル）")
-
-
-def _sync_generated(state: dict[str, Any]) -> None:
-    """push の直前に生成物を同期し、差分があれば進行側のコミットとして積む。
-
-    同期を**実装担当の責務にすると範囲外の変更が生まれ**、範囲のチェックで全件失敗する
-    （実測ではラウンドの採用 5 件が全て範囲外で落ちた）。かといって同期しないと、
-    生成物の同期をチェックする pre-push を持つリポジトリでは push そのものが通らず、
-    取り消しを Pull Request へ反映できない。そこで**進行側が push の直前に同期する**。
-
-    このコミットはどの改善項目にも属さない。取り消しでは積み直されないが、
-    次の push で作り直されるので失われても問題にならない。
-
-    同期に失敗したら中断する。**黙って push しない。** 同期できない状態を公開すると、
-    利用者のリポジトリのチェックを壊したまま進むことになる。
-    """
-    command = str(state.get("sync_command") or "").strip()
-    # 状態ファイルの値も受け取った時点と同じ基準で通す。旧い状態ファイルや
-    # 手で書き換えられた値でも、作業ディレクトリの外へは書き出さない。
-    plan_rel = normalize_plan_file(state.get("plan_file"))
-    if not command and not plan_rel:
-        return
-    work = state["worktrees"]["work"]
-    # **同期の前に作業ツリーが綺麗であることを求める。** 汚れたまま同期すると、
-    # 同期が作った差分と元からあった差分を区別できない。
-    _require_clean_worktree(state, work)
-    # 改修計画も生成物と同じ経路に乗せる。**別のコミットに分けない。**
-    # 分けると、進行側のコミットが公開のたびに 2 つずつ積まれる。
-    if plan_rel:
-        _write_plan_file(state, work, plan_rel)
-    if command:
-        _run_sync_command(state, work, command)
-    _commit_sync_changes(work, command, _dirty_paths(state, work), plan_rel)
-
-
-# 退避に使う値は共通層が 1 か所で持つ（#524）。**複製は持たない。** 手順書と実装が
-# 別々に同じ文字列を持つと、片方だけが更新される。
-_CREDENTIAL_LIB = (
-    pathlib.Path(__file__).resolve().parents[4] / "scripts" / "lib" / "git-credential.sh"
-)
-
-
-def gh_available() -> bool:
-    """`gh` を使えるか。使えなければ退避しても通らない。"""
-    return shutil.which("gh") is not None
-
-
-def credential_fallback_args() -> list[str]:
-    """共通層が定める退避のオプションを読む。読めなければ空を返す。"""
-    if not _CREDENTIAL_LIB.is_file():
-        return []
-    out = subprocess.run(
-        ["bash", "-c", f'. "{_CREDENTIAL_LIB}"; ndf_git_credential_fallback_args'],
-        capture_output=True, text=True,
-    )
-    if out.returncode != 0:
-        return []
-    return [line for line in out.stdout.split("\n") if line]
-
-
-def _push_with_credential_fallback(args: list[str], cwd: str) -> None:
-    """`git` を実行し、失敗したときだけ退避して**1 度だけ**再試行する。
-
-    **既定の経路は変えない。** helper が正しく動く環境では 1 度目で終わる。
-    再試行を 1 度に限るのは、認証以外の理由（参照の競合・ネットワークの不通）で
-    失敗したときに同じ失敗を繰り返さないためである。
-    """
-    try:
-        sh(["git", *args], cwd=cwd)
-        return
-    except Exception:
-        fallback = credential_fallback_args() if gh_available() else []
-        if not fallback:
-            raise
-    info("↻ credential helper を退避して push をやり直します（gh の認証を使う）")
-    sh(["git", *fallback, *args], cwd=cwd)
-
-
-def push_head(state: dict[str, Any]) -> None:
-    """head ブランチへ push する。**`--force` は使わない。**
-
-    **公開するのは進行側だけである。** 実装担当に push させると、検証を通る前に
-    変更が Pull Request へ現れ、取り消しの反映漏れがそのまま残る。
-    """
-    _sync_generated(state)
-    _push_with_credential_fallback(
-        ["push", "origin", f"HEAD:{state['head_branch']}"],
-        state["worktrees"]["work"],
-    )
-    # **改修計画のコメントは push の後で更新する**（#436 決定 6）。差分に混ざらない
-    # ので push とは独立だが、公開した内容と食い違わないよう後ろへ置く。投稿に
-    # 失敗しても進行は止めない（`publish_plan_comment` が出力へ残す）。
-    publish_plan_comment(state)
-
-
-def push_with_retry_marker(
-    path: pathlib.Path, state: dict[str, Any], entry: dict[str, Any]
-) -> None:
-    """保留のフラグを立ててから push し、成功したらフラグを消す。
-
-    フラグを残さずに push すると、失敗したときに**取り消しがローカルだけに留まる**。
-    処理済みガードで次回は素通りするため、Pull Request へ永久に反映されない。
-    """
-    entry["pending_push"] = True
-    statefile.save(path, state)
-    push_head(state)
-    entry["pending_push"] = False
-    statefile.save(path, state)
-
-
-def flush_pending_push(
-    path: pathlib.Path, state: dict[str, Any], entry: dict[str, Any]
-) -> None:
-    """前回やり残した push を、処理済みの判定より**先に**片づける。"""
-    if not entry.get("pending_push"):
-        return
-    info("↻ 前回 push できなかった取り消しを反映します")
-    push_head(state)
-    entry["pending_push"] = False
-    statefile.save(path, state)
-
-
-def read_result(state: dict[str, Any], runtime: str, phase: str) -> LaunchOutcome:
-    """起動 1 回の結末を読む。**失敗しない。**
-
-    結果ファイルの名前の幹をここで 1 度だけ組み、共通層（`read_launch_outcome`）へ
-    渡す。取り込みが同じ組み立てを通るため、監視へ渡した名前の雛形
-    （`--stem-template`）と食い違う幹で読むことがない。
-
-    **中断も出力もしない。** 結果を読めなかったときに何をするかは、読んだ側
-    （取り込み）が終了コードとして決める。ここで `die` すると、未検証のコミットが
-    取り消されないまま残る（#728）。
-    """
-    return read_launch_outcome(state["tmp_dir"], stem_for(runtime, phase, state["id"]))
-
-
-# 監視が CLI を止めた結末（手順の上限。無進捗の許容も同じ値を渡す）。
-STOPPED_REASONS = frozenset({"timeout", "stalled"})
-
-
-def note_stopped(state: dict[str, Any], runtime: str, phase: str) -> None:
-    """監視が手順の上限で CLI を止めていたら、手順の記録に残す（決定 23）。
-
-    **取り込みは止めたかどうかで変えない。** 未コミットの変更は取り込みの前に捨て
-    （`discard_impl_leftovers`）、コミット済みの項目は git の時刻による判定へそのまま
-    流す。止めたことは `phases.<手順>.stopped` に残り、報告に 1 行出る。
-    """
-    monitor = read_result(state, runtime, phase).monitor or {}
-    reason = str(monitor.get("reason") or "")
-    if reason not in STOPPED_REASONS:
-        return
-    record = state.setdefault("phases", {}).setdefault(phase, {})
-    record["stopped"] = {"reason": reason, "timeout": record.get("timeout"),
-                         "at": monitor.get("ended_at")}
-    info(f"⏰ 監視が {phase} の CLI を上限（{record.get('timeout')} 秒）で止めました。"
-         "未コミットの変更は捨て、コミット済みの項目は締め切りで判定します")
-
-
-def record_observed_model(state: dict[str, Any], runtime: str, phase: str) -> None:
-    """実装担当の CLI の出力から、実際に使われたモデル名を拾って記録する。
-
-    取れるのは claude だけである。取れないランタイムは `None` のままにし、
-    報告では既定モデルの実行として区別する。
-    """
-    stem = stem_for(runtime, phase, state["id"])
-    stdout_log = pathlib.Path(state["tmp_dir"]) / f"{stem}-stdout.log"
-    if not stdout_log.exists():
-        return
-    observed = models_lib.observed_model(
-        runtime, stdout_log.read_text(encoding="utf-8", errors="replace")
-    )
-    if not observed:
-        return
-    model = state.setdefault("implementer_model", {"requested": None, "observed": None})
-    model["observed"] = observed
-    warning = models_lib.mismatch_warning(runtime, model.get("requested"), observed)
-    if warning:
-        info(warning)

@@ -3,7 +3,7 @@
 - `refactor_lib/gitfacts.py` はコミットの事実だけを定義し、分けた先（6 本）の名前を再エクスポートする
 - `drive.py` の `call`・`parse_vars`・`review_status` は `lib/loop_drive.py` のもの
 - `refactor_lib/clock.py` の時刻の関数は `lib/clock.py` のもの
-- 同じ本体の `_prepare` は 1 つ
+- worktree の置き場の slug は `lib/repo.py` のもの
 """
 from __future__ import annotations
 
@@ -88,12 +88,6 @@ def test_the_clock_keeps_the_offset_of_the_state_file(refactor):
     text = clock.iso(now)
     assert clock.parse(text) == now.replace(microsecond=0)
     assert clock.parse("2026-09-26T07:00:00Z").utcoffset().total_seconds() == 0
-
-
-def test_prepare_has_one_body(refactor):
-    converge = sys.modules["refactor_lib.commands.converge"]
-    implement = sys.modules["refactor_lib.commands.implement"]
-    assert converge._prepare is implement._prepare
 
 
 def test_the_repo_slug_is_the_library_slug(refactor):
