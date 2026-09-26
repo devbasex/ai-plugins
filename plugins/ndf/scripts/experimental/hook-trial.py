@@ -5,7 +5,7 @@
     python3 hook-trial.py parity [--work DIR]     # 1: 集めた入力のすべてを tree-sitter-bash で判定し、今の判定と比べる
     python3 hook-trial.py timing [--work DIR] [--runs N]  # 2: 今の worktree-guard.sh と 1 本のエントリポイントの所要の中央値
     python3 hook-trial.py passthrough [--work DIR]  # 3: 環境が無いとき・壊れているときに判定をせずに通す（終了コード 0・出力なし）か
-    python3 hook-trial.py sdk [--work DIR] [--live]  # 4a: claude-agent-sdk が supervise_lib/claude.py の契約を満たすか
+    python3 hook-trial.py sdk [--work DIR] [--live [--runs N]]  # 4a: claude-agent-sdk が supervise_lib/claude.py の契約を満たすか
     python3 hook-trial.py bump [--work DIR]       # 4b: bump-my-version が release-steps.py の cmd_bump の書き換えを満たすか
 
 依存は runner-trial.py と同じ形（uv の環境へ起動し直す）で解決し、宣言と lock は隣の hook-trial/ にある（extra は
@@ -222,7 +222,8 @@ def main() -> None:
         if name == "timing":
             s.add_argument("--runs", type=int, default=40)
         if name == "sdk":
-            s.add_argument("--live", action="store_true", help="claude を実際に 1 回ずつ呼んで結果の形と費用を比べる")
+            s.add_argument("--live", action="store_true", help="claude を実際に呼んで結果の形と費用を比べる")
+            s.add_argument("--runs", type=int, default=3, help="--live で CLI と SDK を何回ずつ呼ぶか")
     a = ap.parse_args()
     Path(a.work).mkdir(parents=True, exist_ok=True)
     if a.cmd in EXTRA:
