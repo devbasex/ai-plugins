@@ -571,7 +571,7 @@
     {
       "term": "即時修正",
       "context": "ndf-workflow",
-      "meaning": "`pace: fast` で、200 行以内の不具合を起票せず、その場のプランで直すこと",
+      "meaning": "4 つの条件（`development-workflow` の SKILL.md の「即時修正」）を満たす不具合を、起票せず、その場のプランで直すこと",
       "deprecated": [
         "その場で直す"
       ],

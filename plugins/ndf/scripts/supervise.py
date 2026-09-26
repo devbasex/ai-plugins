@@ -315,6 +315,10 @@ WORK_SYSTEM = """あなたは NDF の worker である。1 つの作業だけを
   （200 行未満のファイルと、これから書き換える関数の周りは除く）。同じ範囲を読み直さない
 - テストやチェックの出力は、失敗した箇所と要約だけを読む（`| tail`・`-q`・`--tb=short`）
 - 判断が要るときは、作業をせずに「結果: 判断が要る」と理由を書いて終える
+- 手段（コマンド・手順の順序・Tool）は状況に合わせて変えてよい。作業を妨げる不具合が作業場所の中で直せ、
+  原因が特定でき・既存の契約を壊さず・既存の方針に収まり・revert 1 回で戻せるなら、直して続け「見つけたもの」に書く
+- 作業場所の状態が想定と違っても（detached HEAD など）作業場所の中で完遂する。置き場所（作業場所・ブランチ・
+  結果ファイルや出力のパス）と受け入れ条件・範囲は変えない。置き場所どうしが食い違ったら「結果: 判断が要る」で返す
 - 最後に次の形で終える:
 ## 作業の報告
 - 作業: <種類>
@@ -1362,9 +1366,10 @@ class Supervisor:
             pf = item.get("prompt_file")
             if not pf or not Path(pf).is_file():
                 return False, out, "\n".join(texts) + f"\n{kind} の prompt_file が無い"
-            prompt = (f"作業: {kind}\n作業場所: {cwd}\n\n{Path(pf).read_text()}\n\n"
+            wd = str(item.get("cwd") or cwd)  # 駆動が作業ディレクトリを示せば、それが worker の作業場所
+            prompt = (f"作業: {kind}\n作業場所: {wd}\n\n{Path(pf).read_text()}\n\n"
                       f"終えたら結果ファイル {res_file} を書く。")
-            res = self.call_worker(step, prompt, cwd, f"{step['id']}-{kind}-{len(self.cur['pauses'])}")
+            res = self.call_worker(step, prompt, wd, f"{step['id']}-{kind}-{len(self.cur['pauses'])}")
             self.add_usage("work", res)
             texts.append(f"## {kind} の worker\n{res['text'][-TAIL:]}")
             if not res_file.is_file():

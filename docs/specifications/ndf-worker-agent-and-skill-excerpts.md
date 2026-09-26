@@ -171,7 +171,7 @@ conductor の起動指示と、それを写した手順が「10 個」と数で�
 ### worker の起動指示と定義
 
 `agent-layers.md` の「supervisor → worker」は `subagent_type: ndf:worker` を指し、`prompt` は
-作業・入力・手順・返す形・置き場所の 5 項目と守る規則 6 個を持つ。
+作業・入力・手順・返す形・置き場所の 5 項目と守る規則 7 個を持つ。
 
 | 項目 | 中身 |
 | --- | --- |

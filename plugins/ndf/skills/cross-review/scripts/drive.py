@@ -140,7 +140,8 @@ class Drive:
         pf = self.tmp / f"drive-pr{self.pr}-{kind}-prompt.md"
         pf.write_text(prompt)
         c = self.counts()
-        return dp.pause(TOOL, kind, pf, res, c["rounds"], c)
+        wt = self.state().get("worktree_path")
+        return dp.pause(TOOL, kind, pf, res, c["rounds"], c, **({"cwd": str(wt)} if wt else {}))
 
     # --- プロンプト（手順は写さず、呼び出しと PR 固有の穴埋めだけ） ---
     def fix_prompt(self) -> str:
@@ -157,6 +158,7 @@ class Drive:
 - PR: #{pr}（round {r.get('round')}）
 - 作業ディレクトリ: {s.get('worktree_path')}（外を触らない）
 - ブランチ: {s.get('head_branch')} / ベース: {s.get('base_branch')}
+- 作業ディレクトリは detached HEAD（PR の head）のままでよい。ブランチへ切り替えず、そこでコミットする。送る（push）のは取り込み
 - 前ラウンドのレビュー（件数はそのラウンドで投稿した数。対象は reviewThreads を数え直して決める）:
 {reviews}
 - 既存コメントのスナップショット: {self.tmp}/cross-review-pr{self.pr}-existing-comments.txt
@@ -174,6 +176,7 @@ class Drive:
 - リポジトリ: {s.get('repo')}
 - PR: #{pr}
 - 作業ディレクトリ: {s.get('worktree_path')}（外を触らない）
+- 作業ディレクトリは detached HEAD（PR の head）のままでよい。ブランチへ切り替えず、そこでコミットする。送る（push）のは取り込み
 - ループの終わり: {s.get('final')}
 
 GitHub と git の送信をしない。結果ファイル: {self.path('sweep')}
