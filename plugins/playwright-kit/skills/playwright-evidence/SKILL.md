@@ -183,5 +183,5 @@ uv run python scripts/upload_evidence.py reports/.../trace.zip \
 - `/playwright-kit:playwright-planning` — テスト計画
 - `/playwright-kit:playwright-kit-ops` — 実行環境の運用 (アップロードスクリプトの配置元)
 - `google-auth` / `google-drive` — Google API の認証と Drive 操作。どちらも NDF の 4 つの
-  manifest (`plugins/ndf/manifests/*-skills.txt`) に載っているが、playwright-kit とは別の
+  ランタイム (Claude Code / Codex / Kiro / agy) すべてへ配布されるが、playwright-kit とは別の
   プラグインである。置き場所が候補に無いときは `GOOGLE_AUTH_SCRIPTS` で指す
