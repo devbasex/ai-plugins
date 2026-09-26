@@ -93,11 +93,12 @@ import assignment  # noqa: E402  席の名前の規則（#727）
 import limits  # noqa: E402  上限の表（#598 / #537）
 import clock  # noqa: E402  時刻の書き出し（#1142 の L0）
 import deps  # noqa: E402  外部パッケージの環境（#1142 の決定 17・23）
-import monitor_outcome  # noqa: E402  監視の結果の語彙と読み書き（#662）
-import monitor_loop  # noqa: E402
-import monitor_patterns  # noqa: E402
-import monitor_proc  # noqa: E402
-import monitor_scan  # noqa: E402
+# 次の 5 つは、他のモジュールが monitor.monitor_proc のように使う再公開の import である（F401 の抑止の理由。#1323）
+import monitor_outcome  # noqa: E402,F401  監視の結果の語彙と読み書き（#662）
+import monitor_loop  # noqa: E402,F401
+import monitor_patterns  # noqa: E402,F401
+import monitor_proc  # noqa: E402,F401
+import monitor_scan  # noqa: E402,F401
 import monitor_types  # noqa: E402
 
 # 分けた 5 本の名前を再エクスポートする（既存の呼び出し側とシムの名前空間のため）。`_TMP_DIR_OVERRIDE` は
