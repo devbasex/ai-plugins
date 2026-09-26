@@ -169,7 +169,7 @@ S1 の例外リストは、その時点の違反をすべて載せて始める�
 | 2 | C2 cross-review | `skills/cross-review/scripts/state.py`・`review_lib/`（新設 16 本。`__init__` を含む）・`drive.py`・`measure.py`・`critique.sh`・`launch-reviewer.sh`・`skills/cross-review/tests/`・`skills/fix/tests/test_fix_steps.py`（差し替え先だけ） | `commands/init.py` 約 520 |
 | 2 | C3 外部 CLI と記録 | `lib/monitor.py`・`lib/monitor_patterns.py`（新設）・`lib/monitor_outcome.py`・`lib/run_metrics.py`・`lib/post_queue.py`・`lib/transcript_agents.py`・`skills/external-ai/scripts/external-ai.py`・`scripts/wait-notify.py`・`skills/skill-stats/scripts/skill-stats.py`・`scripts/parallel-measure.py`・テスト | `monitor.py` 約 860 |
 | 2 | C5 worktree | `lib/worktree-common.sh`・`lib/worktree-branch.sh`・`worktree-shell-lex.sh`・`worktree-write-target.sh`・`worktree-registry.sh`（新設）・`scripts/worktree-*.sh` 5 本・`lib/README.md` の worktree の行 | `worktree-write-target.sh` 約 950 |
-| 2 | C6 ラッパー | `scripts/relay.py`・`scripts/relay_lib/`（新設 9 本。`__init__` を含む）・`scripts/experimental/resume.py`・`scripts/tests/test_relay.py`・`skills/install-wrapper/SKILL.md`（束の説明だけ） | `relay_lib/run.py` 約 780 |
+| 2 | C6 ラッパー | `scripts/relay.py`・`scripts/relay_lib/`（新設 10 本。`__init__` を含む）・`scripts/experimental/resume.py`・`scripts/tests/test_relay.py`・`skills/install-wrapper/SKILL.md`（束の説明だけ） | `relay_lib/run.py` 約 780 |
 | 2 | C7 リリースと文書 | 「重複だけを置き換えるもの」のリリースと文書の検査の 11 本・`scripts/instructions-check.py`・`scripts/instructions_lib/`（新設 2 本）・`scripts/tests/test_instructions_check.py`（複製の対象に新設の 1 本を足す） | `instructions-check.py` 約 870 |
 | 3 | C4 cross-refactoring | `skills/cross-refactoring/scripts/drive.py`・`launch-cli.sh`・`refactor_lib/clock.py`・`paths.py`・`commands/converge.py`・`commands/implement.py`・`commands/setup.py`・テスト | 変わらず（最大 `gitfacts.py` 991） |
 

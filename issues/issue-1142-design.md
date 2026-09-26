@@ -31,6 +31,18 @@
 状態ファイルの形である。プランの実行は `drive.py` の結果 JSON の `metrics` だけを読み、レビューの状態の
 ファイルを直に読まない。**ライブラリは全コンテキストの共有カーネルで、どのコンテキストにも依存しない**（I1）。
 
+**コンテキストマップ。** 契約の形を決めるのは上流で、下流はその形に従う。形を変えるときは上流の PR が
+下流の読み手とそのテストを同じ PR で直す（I3・I10）。
+
+| 上流（契約を決める） | 下流（従う） | 関係 | 契約 |
+| --- | --- | --- | --- |
+| ライブラリ | ほかの 8 つすべて | 共有カーネル | 関数の引数と戻り値・結果 JSON の形（`lib/README.md`） |
+| 収束ループ | プランの実行 | 公開ホストサービス / 順応者 | `drive.py` の結果 JSON（`metrics`） |
+| 外部 CLI の起動 | 収束ループ | 公開ホストサービス / 順応者 | 監視の結果（`*-monitor.json`）と起動の上限時間 |
+| リリース | プランの実行 | 公開ホストサービス / 順応者 | `release-steps.py` などの結果 JSON |
+| worktree | プランの実行・収束ループ | 公開ホストサービス / 順応者 | 宣言と書き込み先の出力 |
+| 文書の検査 | プランの実行 | 公開ホストサービス / 順応者 | 検査のスクリプトの結果 JSON |
+| プランの実行 | 記録と測定 | 公開ホストサービス / 順応者 | 実行の状態・ミッション状態ファイルの形（I11） |
 ### 集約
 
 集約はどれも状態を持つファイルである。値オブジェクトはコードの中の型で、ファイルの形は変えない（I11）。
@@ -46,7 +58,7 @@
 | 検査の記録 | `check-trigger.py` | `checks/<owner>__<repo>.jsonl` | 評価・検査の行 | 件数 |
 | 使用量の帳簿 | `lib/usage_ledger.UsageLedger` | `usage/<owner>__<repo>.jsonl` | — | `UsageRecord` |
 | テスト環境の台帳 | `lib/worktree-registry.sh` | 台帳のディレクトリ | スロット | ポート |
-| ラッパーの記録 | `relay_lib.run.Relay` と `relay_lib.mark` | `log.jsonl`・`next.json` | セッション | ブロック |
+| ラッパーの記録 | `relay_lib.record.RelayRecord`（`run.Relay` と `mark` はこれを通して書く） | `log.jsonl`・`next.json` | セッション | ブロック |
 | ラッパーの束 | `relay_lib.bundle.Bundle` | `~/.claude/ndf/relay.current` | 版ごとの束 | 束の digest |
 | 版 | `release-steps.py bump` | `plugin.json` の `version` | — | 版数 |
 
@@ -60,7 +72,7 @@
 | I4 | （全体） | 本体の同じ関数が 2 つのファイルに無い。同じ名前で本体の違う関数は例外リストに載る | 構造チェックが落とす |
 | I5 | （全体） | テストを除くスクリプトは 1000 行以下。例外は例外リストに理由付きで載る | 構造チェックが落とす |
 | I6 | （全体） | 既定で動くものは `experimental/` を import しない。向きは試行 → 安定だけ | 既存の `test_experimental.py` が落とす |
-| I7 | レビューの状態 | `final` が決まった状態を、同じ PR の `init` が空の状態で上書きしない | `drive.py` が `init` を打たずに保存した値を使う |
+| I7 | 駆動の状態 | 段階が `sweep` か `done` で `init_vars` があるとき、`drive.py` は `init` を打たずに `init_vars` を使う。これでレビューの状態の `final` を同じ PR の空の状態で上書きさせない | `sweep` から打ち直して `metrics.rounds` が 0 でないテストが落とす |
 | I8 | 使用量の帳簿 | `claude -p` の 1 回の呼び出しにつき 1 行を追記し、既存の行を書き換えない | 追記に失敗しても呼び出しの結果は返し、stderr に 1 行を出す |
 | I9 | ラッパーの束 | 束を書き終えてから `relay.current` を 1 回の原子的な書き込みで替える | 書き終わらない束は `relay.current` から指されず、次の起動で消える |
 | I10 | （移行） | 移行ステップは 1 本の PR で閉じ、その revert 1 つで 1 つ前に戻る | 戻せない形の PR は分ける |
@@ -122,7 +134,7 @@
 | `scripts/supervise.py` と `scripts/supervise_lib/`（分割） | エントリポイントは引数の解析だけ。実行・雛形・queue は下のパッケージ |
 | `skills/cross-review/scripts/state.py` と `review_lib/`（分割） | エントリポイントは副命令の解析だけ。状態・GitHub・指摘・副命令の本体は下のパッケージ |
 | 2 つの `drive.py`（変更） | `final` の後に `init` を打たない（I7）。共通の部品は `lib/loop_drive.py` |
-| `scripts/relay.py` と `relay_lib/`（分割） | 起動の口だけを持つランチャーと、束に入るパッケージ |
+| `scripts/relay.py` と `relay_lib/`（分割） | 起動の口だけを持つランチャーと、束に入るパッケージ。`log.jsonl`・`next.json` を書くのは `relay_lib.record` だけ（I12） |
 | `lib/worktree-common.sh`（分割） | 読み込みの口として残し、字句解析・書き込み先・ブランチ・台帳の 4 本を読み込む |
 | `lib/monitor.py`（分割） | 照合の表を `lib/monitor_patterns.py` へ出す（`supervise.py` も読む） |
 | `instructions-check.py`（分割） | 型と宣言と観点を隣の `instructions_lib/model.py` へ出す（読み手が 1 つのためライブラリに置かない） |
@@ -220,7 +232,7 @@ plugins/ndf/scripts/
 ├── = supervise.py                # 引数の解析と main（約 450 行。説明文を短くする）
 ├── + supervise_lib/              # __init__・paths・decl・prompts・claude・plan・slow・steps・engine・templates・mission・queue・commands
 ├── = relay.py                    # ランチャー（約 80 行）。プラグインでも複製でも同じバイト列
-├── + relay_lib/                  # __init__・common・proc・mark・claude・terminal・run・bundle・install
+├── + relay_lib/                  # __init__・common・proc・record・mark・claude・terminal・run・bundle・install
 ├── > instructions-check.py       # 約 870 行
 ├── + instructions_lib/           # __init__・model
 └── lib/
