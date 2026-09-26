@@ -349,3 +349,11 @@ def test_create_reports_missing_user_changes_section(repo, env, tmp_path):
     code, out, err = call(["create", "--title", "題", "--body-file", str(b)], env, repo)
     assert code == 0, err
     assert out["metrics"]["user_changes"] is True and "next" not in out
+
+
+def test_user_changes_heading_inside_fence_does_not_count(repo, env, tmp_path):
+    """囲みの中の `## 利用者向けの変化` は節にしない（lib/md.py。行の字面で見ていた頃は節があるとみなした）。"""
+    b = body_file(tmp_path, "## Summary\n\n```md\n## 利用者向けの変化\n```\n\n## Test plan\n\n- [x] t\n")
+    code, out, err = call(["create", "--title", "題", "--body-file", str(b)], env, repo)
+    assert code == 0, err
+    assert out["metrics"]["user_changes"] is False
