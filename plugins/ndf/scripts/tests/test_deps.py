@@ -119,6 +119,14 @@ def test_after_reexec_a_missing_package_stops_with_code_3(tmp_path):
     assert not (tmp_path / "uv.log").exists()
 
 
+def test_reexec_mark_is_not_inherited_by_children(monkeypatch):
+    """起動し直した親（supervise.py）の子が別のグループを要るとき、印を継いで止まらない（v10.17.31-dev.1 の bump）。"""
+    monkeypatch.setenv("NDF_DEPS_REEXEC", "1")
+    monkeypatch.setitem(deps.GROUPS, "t", ["json"])
+    deps.require("t")
+    assert "NDF_DEPS_REEXEC" not in os.environ
+
+
 def test_uv_is_installed_when_missing_then_reexec(monkeypatch, tmp_path):
     monkeypatch.setattr(deps, "find_uv", lambda: None)
     monkeypatch.setattr(deps, "install_uv", lambda: "/opt/uv")
