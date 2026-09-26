@@ -20,6 +20,7 @@ import pathlib
 import pytest
 import review_lib
 import review_lib.commands.loop
+import gh_call  # review_lib が sys.path に足したライブラリの置き場から読む
 
 PR = 4244
 NEW_PR = 4299
@@ -58,7 +59,7 @@ def _args(**over) -> argparse.Namespace:
 def test_the_given_branch_is_written_back(tmp_dir, state_mod, monkeypatch):
     _seed(tmp_dir)
     monkeypatch.setattr(
-        review_lib, "_sh", lambda cmd, check=True: pytest.fail("引数があるのに GitHub を呼んでいる")
+        gh_call, "RUNNER", lambda *a, **k: pytest.fail("引数があるのに GitHub を呼んでいる")
     )
 
     review_lib.commands.loop.cmd_set_current_pr(_args(head_branch=NEW_BRANCH))
@@ -72,7 +73,8 @@ def test_the_branch_is_read_back_from_the_pull_request(tmp_dir, state_mod, monke
     _seed(tmp_dir)
     calls: list[list[str]] = []
     monkeypatch.setattr(
-        review_lib, "_sh", lambda cmd, check=True: calls.append(list(cmd)) or NEW_BRANCH
+        gh_call, "RUNNER",
+        lambda args, stdin=None, cwd=None: calls.append(list(args)) or gh_call.GhResult(0, NEW_BRANCH + "\n", "")
     )
 
     review_lib.commands.loop.cmd_set_current_pr(_args())
@@ -85,10 +87,10 @@ def test_the_previous_branch_is_kept_when_the_lookup_fails(tmp_dir, state_mod, m
     """取り直せないことで進行を止めない。次のラウンドの同期が書き戻す。"""
     _seed(tmp_dir)
 
-    def boom(cmd, check=True):
-        raise RuntimeError("network")
+    def boom(args, stdin=None, cwd=None):
+        return gh_call.GhResult(1, "", "network")
 
-    monkeypatch.setattr(review_lib, "_sh", boom)
+    monkeypatch.setattr(gh_call, "RUNNER", boom)
 
     review_lib.commands.loop.cmd_set_current_pr(_args())
 
@@ -100,7 +102,7 @@ def test_the_previous_branch_is_kept_when_the_lookup_fails(tmp_dir, state_mod, m
 
 def test_an_empty_lookup_keeps_the_previous_branch(tmp_dir, state_mod, monkeypatch):
     _seed(tmp_dir)
-    monkeypatch.setattr(review_lib, "_sh", lambda cmd, check=True: "  \n")
+    monkeypatch.setattr(gh_call, "RUNNER", lambda args, stdin=None, cwd=None: gh_call.GhResult(0, "  \n", ""))
 
     review_lib.commands.loop.cmd_set_current_pr(_args())
 
@@ -136,7 +138,7 @@ def test_only_the_current_pr_entry_is_closed_when_history_has_past_prs(
     (tmp_dir / f"cross-review-pr{PR}-state.json").write_text(json.dumps(state))
     # 引数で枝名を渡し、GitHub を呼ばない経路で確かめる。
     monkeypatch.setattr(
-        review_lib, "_sh", lambda cmd, check=True: pytest.fail("GitHub を呼んでいる")
+        gh_call, "RUNNER", lambda *a, **k: pytest.fail("GitHub を呼んでいる")
     )
 
     review_lib.commands.loop.cmd_set_current_pr(_args(head_branch=NEW_BRANCH))

@@ -73,6 +73,10 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import supervise_lib  # noqa: E402,F401  lib/ を sys.path へ足す
+import deps  # noqa: E402
+
+deps.require("mdtable", "schema", "procs")  # 表（pr・commands）・宣言の形（decl）・claude -p の打ち切り（claude）
 from supervise_lib import commands, mission, new_args, queue, templates  # noqa: E402
 from supervise_lib.decl import DeclError, apply_decls  # noqa: E402
 from supervise_lib.plan import EXAMPLE  # noqa: E402

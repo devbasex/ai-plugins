@@ -33,9 +33,15 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from supervise_lib.paths import sha256_of, state_dir_of  # noqa: E402  supervise_lib が lib/ を sys.path へ足す
+import supervise_lib  # noqa: E402,F401  lib/ を sys.path へ足す
+import deps  # noqa: E402
+
+deps.require("md", "mdtable", "schema")  # schema は supervise_lib.paths → decl が使う
+from supervise_lib.paths import sha256_of, state_dir_of  # noqa: E402
 import clock  # noqa: E402
 import jsonio  # noqa: E402
+import md  # noqa: E402
+import mdtable  # noqa: E402
 import step_result  # noqa: E402
 
 TOOL = "mission-state"
@@ -139,11 +145,12 @@ def other_shape(path: str) -> str:
 
 def mvv_sections(text: str) -> str | None:
     """説明から Mission / Vision / Value の節を順に取り出す。1 つでも無ければ None。"""
+    lines = text.splitlines()
     found = {}
-    for m in re.finditer(r"^## (Mission|Vision|Value)\b.*$", text, re.M):
-        rest = text[m.end():]
-        nxt = re.search(r"^#{1,2} ", rest, re.M)
-        found.setdefault(m.group(1), (m.group(0) + (rest if nxt is None else rest[:nxt.start()])).strip())
+    for s in md.md_sections(text):
+        m = re.match(r"(Mission|Vision|Value)\b", s.heading.title)
+        if s.heading.level == 2 and m and lines[s.heading.line].startswith("## "):
+            found.setdefault(m.group(1), "\n".join(lines[s.heading.line:s.end]).strip())
     if any(k not in found for k in MVV_SECTIONS):
         return None
     return "\n\n".join(found[k] for k in MVV_SECTIONS) + "\n"
@@ -333,19 +340,18 @@ def state_text(r: dict) -> str:
     return s
 
 
-def md_cell(text: str) -> str:
-    return (text or "—").replace("|", "\\|").replace("\n", " ")
+TABLE_HEAD = ("計画", "状態", "PR", "秒", "費用", "次")
+TABLE_ALIGN = (None, None, None, "right", "right", None)
 
 
 def section_body(m: dict) -> str:
     """節の本文（見出しの次の行から）。空行で始まり、空行で終わる。"""
-    lines = ["", "| 計画 | 状態 | PR | 秒 | 費用 | 次 |", "| --- | --- | --- | ---: | ---: | --- |"]
+    rows = []
     for p in m.get("plans", []):
         r = row_of(p)
-        lines.append("| " + " | ".join(md_cell(x) for x in (
-            p.get("label") or p["plan"], state_text(r), r.get("pr"), fmt_seconds(r.get("seconds")),
-            fmt_cost(r.get("cost")), p.get("next"))) + " |")
-    lines.append("")
+        rows.append([x or "—" for x in (p.get("label") or p["plan"], state_text(r), r.get("pr"),
+                                        fmt_seconds(r.get("seconds")), fmt_cost(r.get("cost")), p.get("next"))])
+    lines = ["", mdtable.table_markdown(TABLE_HEAD, rows, align=TABLE_ALIGN), ""]
     head = f"- ミッション: {m.get('name', '')}"
     if m.get("milestone"):
         head += f"（マイルストーン {m['milestone']}）"
@@ -369,29 +375,19 @@ def section_body(m: dict) -> str:
 def find_section(text: str, word: str) -> tuple[int, int, int, str] | None:
     """見出しに word を含む最初の節の (見出しの行の始まり, 本文の始まり, 本文の終わり, 見出しの行) を返す。
 
-    本文は、見出しと同じか浅い見出しの手前まで。囲みのコードブロックの中の # は見出しとみなさない。"""
+    本文は、見出しと同じか浅い見出しの手前まで。囲みのコードブロックの中の # は見出しとみなさない。
+    見出しは行頭の `#` で始まるもの（ATX）だけを数える。"""
     lines = text.splitlines(keepends=True)
-    pos, fence, start = 0, "", None
-    level = 0
-    head_start = body_start = 0
-    head_line = ""
+    offsets = [0]
     for line in lines:
-        s = line.rstrip("\r\n")
-        f = re.match(r"^(`{3,}|~{3,})", s)
-        if f and (not fence or s.startswith(fence[0] * len(fence)) and not s[len(fence):].strip()):
-            fence = "" if fence else f.group(1)
-        elif not fence:
-            h = re.match(r"^(#{1,6})\s", s)
-            if h:
-                if start is not None and len(h.group(1)) <= level:
-                    return head_start, body_start, pos, head_line
-                if start is None and word in s:
-                    start, level = pos, len(h.group(1))
-                    head_start, body_start, head_line = pos, pos + len(line), line
-        pos += len(line)
-    if start is None:
-        return None
-    return head_start, body_start, len(text), head_line
+        offsets.append(offsets[-1] + len(line))
+    atx = [h for h in md.headings(text) if lines[h.line].startswith("#")]
+    for k, h in enumerate(atx):
+        if word not in lines[h.line].rstrip("\r\n"):
+            continue
+        end = next((o.line for o in atx[k + 1:] if o.level <= h.level), None)
+        return offsets[h.line], offsets[h.line + 1], len(text) if end is None else offsets[end], lines[h.line]
+    return None
 
 
 def heading_text(line: str) -> str:

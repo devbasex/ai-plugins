@@ -4,6 +4,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import schema
+from pydantic import ConfigDict
+
 
 # プロジェクトごとの宣言（リポジトリの根の .ndf/）。形は DECLARATIONS の節にある
 WORKTREE_DECL = "worktree.json"    # base_branch（起点のブランチ）・production_branch（本番のブランチ）
@@ -12,6 +15,32 @@ SUPERVISE_DECL = "supervise.json"  # test・sync_checks・release
 
 class DeclError(Exception):
     """宣言が読めない・形が違う。"""
+
+
+class Decl(schema.Shape):
+    """宣言の最上位（オブジェクトであることだけを見る。項目はプロジェクトごとに違うので拒まない）。"""
+    model_config = ConfigDict(extra="allow")
+
+
+class SyncCheck(schema.Shape):
+    model_config = ConfigDict(extra="allow")
+    name: str
+    command: str
+
+
+class SuperviseDecl(Decl):
+    """.ndf/supervise.json のうち、形を見る項目（test・sync_checks）。"""
+    test: dict = {}
+    sync_checks: list[SyncCheck] = []
+
+
+def supervise_shape(decl: dict) -> SuperviseDecl:
+    """supervise.json の test と sync_checks の形を見る（空・null は無いとみなす）。違えば DeclError。"""
+    try:
+        return schema.load_shape(SuperviseDecl, {"test": decl.get("test") or {},
+                                                 "sync_checks": decl.get("sync_checks") or []})
+    except schema.ShapeError as e:
+        raise DeclError(f"supervise.json: {e}（test はオブジェクト、sync_checks は {{\"name\", \"command\"}} の並びで書く）") from e
 
 
 def read_decl(roots, name: str) -> dict:
@@ -24,8 +53,10 @@ def read_decl(roots, name: str) -> dict:
             d = json.loads(f.read_text(encoding="utf-8"))
         except ValueError as e:
             raise DeclError(f"{f}: JSON として読めない: {e}") from e
-        if not isinstance(d, dict):
-            raise DeclError(f"{f}: 最上位はオブジェクトで書く")
+        try:
+            schema.load_shape(Decl, d, str(f))
+        except schema.ShapeError as e:
+            raise DeclError(f"{e}（最上位はオブジェクトで書く）") from e
         return d
     return {}
 
@@ -52,12 +83,7 @@ def declared_base_of(roots) -> str | None:
 
 def sync_checks_of(decl: dict) -> list[tuple[str, str]]:
     """.ndf/supervise.json の sync_checks を [(名前, コマンド)] で返す。"""
-    checks = decl.get("sync_checks") or []
-    if not isinstance(checks, list) or not all(
-            isinstance(c, dict) and isinstance(c.get("name"), str) and isinstance(c.get("command"), str)
-            for c in checks):
-        raise DeclError("supervise.json: sync_checks は {\"name\", \"command\"} の並びで書く")
-    return [(c["name"], c["command"]) for c in checks]
+    return [(c.name, c.command) for c in supervise_shape(decl).sync_checks]
 
 
 # 雛形が宣言から受けるもの。引数が宣言より先に効く
@@ -78,9 +104,7 @@ def apply_decls(a) -> None:
     roots = decl_roots(a.worktree, getattr(a, "repo", None))
     wt = read_decl(roots, WORKTREE_DECL)
     sv = read_decl(roots, SUPERVISE_DECL)
-    test = sv.get("test") or {}
-    if not isinstance(test, dict):
-        raise DeclError("supervise.json: test はオブジェクトで書く")
+    test = supervise_shape(sv).test
     a.base = getattr(a, "base", None) or wt.get("base_branch") or None
     a.production_branch = getattr(a, "production_branch", None) or wt.get("production_branch") or None
     a.test_cmd = getattr(a, "test_cmd", None) or test.get("command") or None

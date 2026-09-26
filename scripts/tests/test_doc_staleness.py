@@ -1141,3 +1141,14 @@ def test_compare_plugin_table_row_with_mismatched_version_records_error(
         f"（記載: 1.4.1（L42） / {module.plugin_json_path('fixture-kit')}: 1.4.2）"
     ]
 
+
+
+def test_section_lines_reads_the_section_and_code_by_commonmark() -> None:
+    """#1142 の D8 で変わる入力: 節と囲みを lib/md.py が読む。インデントのコードブロックも囲みの中になり、
+    `~~~` の囲みの中の `## ` は節を閉じない（移す前は ``` と ~~~ の行だけを数えた）。"""
+    module = _load_checker()
+    lines = [module.VERSION_SECTION_HEADING, "", "    `9.6.0` 字下げのコード", "", "~~~", "## 囲みの中", "~~~", "外",
+             "## 次の章"]
+    got = module.section_lines(lines)
+    assert [(n, fenced) for n, _, fenced in got] == [(2, False), (3, True), (4, False), (5, True), (6, True),
+                                                     (7, True), (8, False)]

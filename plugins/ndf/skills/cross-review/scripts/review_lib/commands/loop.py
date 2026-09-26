@@ -8,6 +8,7 @@ import argparse
 import sys
 
 import review_lib  # noqa: E402
+import gh_call  # noqa: E402
 from review_lib import matching, store  # noqa: E402
 
 
@@ -83,12 +84,7 @@ def cmd_should_rotate(args: argparse.Namespace) -> None:
 
 def _head_branch_of(pr: int) -> str | None:
     """Pull Request の head branch を取り直す。取れなければ `None` を返す。"""
-    try:
-        out = review_lib._sh(["gh", "pr", "view", str(pr), "--json", "headRefName", "-q", ".headRefName"],
-                  check=False)
-    except Exception:
-        return None
-    name = str(out).strip()
+    name = gh_call.gh(["pr", "view", str(pr), "--json", "headRefName", "-q", ".headRefName"]).stdout.strip()
     return name or None
 
 

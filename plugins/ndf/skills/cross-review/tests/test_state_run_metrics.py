@@ -185,7 +185,7 @@ def test_new_init_writes_the_summary(state_mod, review_dirs, monkeypatch):
     monkeypatch.setattr(review_lib.github, "_fetch_changed_files", lambda pr, repo: [])
     monkeypatch.setattr(review_lib.workspace, "_is_registered_worktree", lambda wt: True)
     monkeypatch.setattr(review_lib.workspace, "_sync_worktree", lambda *a, **k: None)
-    monkeypatch.setattr(review_lib, "_sh", lambda cmd, check=True: "takemi")
+    monkeypatch.setattr(review_lib.github, "_viewer_login", lambda: "takemi")
     monkeypatch.setattr(
         subprocess, "run",
         lambda cmd, *a, **k: subprocess.CompletedProcess(cmd, 0, stdout="", stderr=""))

@@ -172,8 +172,9 @@ def cmd_init(args: argparse.Namespace) -> None:
     # この後の REST の応答が検証する（`_fetch_pr_metadata`）。
     # **キャッシュを GitHub より先に読む。** git から求まらないときの落とし先が `gh` だけだと、
     # 上限に達している環境では再開の経路へ入る前に止まる（#291）。
-    repo = github._repo_from_git() or github._repo_from_resume(pr, args.worktree) or review_lib._sh(
-        ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"])
+    repo = github._repo_from_git() or github._repo_from_resume(pr, args.worktree) or github._repo_from_gh()
+    if not repo:
+        review_lib.die("リポジトリを決められません（origin の URL・再開の状態ファイル・gh repo view のどれからも求まらない）")
     worktree = str(pathlib.Path(args.worktree).resolve()) if args.worktree else str(
         workspace_mod._default_worktree_base() / github._repo_slug(repo) / f"pr{pr}")
 
@@ -250,7 +251,9 @@ def _init_new_state(
         if meta.rate_remaining is not None:
             review_lib.info(f"ℹ GitHub REST の残量: {meta.rate_remaining}")
 
-        me = review_lib._sh(["gh", "api", "user", "--jq", ".login"])
+        me = github._viewer_login()
+        if not me:
+            review_lib.die("認証している利用者を gh api user で求められません")
         author = meta.author
         is_own = (me == author)
         event_downgrade = is_own

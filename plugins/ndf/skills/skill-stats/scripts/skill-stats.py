@@ -33,7 +33,12 @@ from typing import Iterable
 sys.path.insert(
     0, str(pathlib.Path(__file__).resolve().parents[3] / "scripts" / "lib"),
 )
+import deps  # noqa: E402  外部パッケージの環境（#1142 の決定 17・23）
+
+deps.require("mdtable", "yamlio")  # 表は tabulate、frontmatter は ruamel.yaml の包みで読み書きする
+import mdtable  # noqa: E402
 import transcript_agents  # noqa: E402
+import yamlio  # noqa: E402
 
 # 割る候補の目印を付ける目安。`development-workflow/references/context-window.md` の
 # 「遅くとも切る」値と揃える。**モデルに依る値であり、あの文書が書き換わったら揃え直す。**
@@ -108,7 +113,6 @@ def iter_events(path: pathlib.Path) -> Iterable[dict]:
         return
 
 
-_FRONT_MATTER_RE = re.compile(r"\A---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 # トリガ語の宣言は description 末尾の全角丸括弧に「・」区切りで並べる
 # （規約: plugins/ndf/skills/AUTHORING.md「トリガ語の書式」）。
 # 誤検出を避けるため、末尾にあり日本語を 1 文字以上含むものだけを宣言と見なす。
@@ -122,26 +126,26 @@ _STOPWORDS = {
 }
 
 
-def parse_front_matter(text: str) -> dict[str, str]:
-    m = _FRONT_MATTER_RE.match(text)
-    if not m:
+def _as_text(value) -> str:
+    """frontmatter の値を文字列で読む（配列は 1 要素 1 行、None は空）。"""
+    if value is None:
+        return ""
+    if isinstance(value, list):
+        return "\n".join(_as_text(v) for v in value)
+    return str(value)
+
+
+def parse_front_matter(text: str, where: str = "") -> dict[str, str]:
+    """SKILL.md の frontmatter を YAML として読み（`lib/yamlio.py`）、値を文字列にして返す。
+
+    YAML として読めない frontmatter は、理由を標準エラーへ 1 行出して空の辞書にする（名前はディレクトリから取る）。
+    """
+    try:
+        fm = yamlio.read_front_matter(text, where)
+    except yamlio.YamlError as exc:
+        print(f"[skill-stats] {exc}", file=sys.stderr)
         return {}
-    fm = m.group(1)
-    out: dict[str, str] = {}
-    key = None
-    buf: list[str] = []
-    for line in fm.splitlines():
-        if re.match(r"^[A-Za-z_-]+:\s*", line):
-            if key is not None:
-                out[key] = "\n".join(buf).strip()
-            k, _, v = line.partition(":")
-            key = k.strip()
-            buf = [v.strip()]
-        else:
-            buf.append(line)
-    if key is not None:
-        out[key] = "\n".join(buf).strip()
-    return out
+    return {str(k): _as_text(v) for k, v in fm.items()}
 
 
 def extract_triggers(
@@ -216,7 +220,7 @@ def load_skills(plugin_root: pathlib.Path, include_fallback: bool = False) -> li
             text = f.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
-        fm = parse_front_matter(text)
+        fm = parse_front_matter(text, str(f))
         name = fm.get("name", d.name).strip().strip('"')
         desc = fm.get("description", "").strip().strip('"')
         when = fm.get("when_to_use", "").strip().strip('"')
@@ -467,34 +471,29 @@ def build_rows(
     return rows, total
 
 
+SKILL_COLUMNS = (("skill", "left"), ("triggers源", "left"), ("計", "right"), ("自動", "right"),
+                 ("明示", "right"), ("関連話題", "right"), ("ヒット", "right"), ("ヒット率", "right"))
+
+
+def _md_table(columns, rows: list[list]) -> str:
+    """列の名前と寄せ方の組から表を組む（`lib/mdtable.py`）。"""
+    return mdtable.table_markdown([c for c, _ in columns], rows, align=[a for _, a in columns])
+
+
 def format_markdown(rows: list[dict], total: dict, heading: str | None = None) -> str:
-    lines: list[str] = []
-    if heading:
-        lines.append(heading)
-    lines.extend([
-        "| skill | triggers源 | 計 | 自動 | 明示 | 関連話題 | ヒット | ヒット率 |",
-        "|---|---|---:|---:|---:|---:|---:|---:|",
-    ])
+    body: list[list] = []
     for r in rows:
         src = r["triggers_source"]
         if src == "none":
-            rate = "-"
-            trig = "-"
-            hit = "-"
+            rate = trig = hit = "-"
         else:
             rate = f"{r['hit_rate_pct']}%" if r["triggers"] else "-"
-            trig = str(r["triggers"])
-            hit = str(r["hits"])
-        lines.append(
-            f"| {r['skill']} | {src} | {r['invocations']} | {r['auto']} | "
-            f"{r['explicit']} | {trig} | {hit} | {rate} |"
-        )
-    lines.append(
-        f"| **合計** | | **{total['invocations']}** | **{total['auto']}** | "
-        f"**{total['explicit']}** | **{total['triggers']}** | "
-        f"**{total['hits']}** | **{total['hit_rate_pct']}%** |"
-    )
-    return "\n".join(lines)
+            trig, hit = r["triggers"], r["hits"]
+        body.append([r["skill"], src, r["invocations"], r["auto"], r["explicit"], trig, hit, rate])
+    body.append(["**合計**", "", *(f"**{total[k]}**" for k in ("invocations", "auto", "explicit", "triggers", "hits")),
+                 f"**{total['hit_rate_pct']}%**"])
+    table = _md_table(SKILL_COLUMNS, body)
+    return f"{heading}\n{table}" if heading else table
 
 
 # ---------- 3 層の context window の測定（#550 の AC20〜AC37） ----------
@@ -610,57 +609,28 @@ def role_usage(records: list) -> list[dict]:
 
 
 def format_agent_summary_section(summary: list[dict], excluded: int) -> list[str]:
-    lines = [
-        "## 層・フェーズ・モデルごとの束ね",
-        "",
-        "| 層 | フェーズ | モデル | 件数 | 固定費の中央値 | 実作業の中央値 "
-        "| 実作業 < 固定費 | 最大充填の最大 | 目印 |",
-        "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |",
-    ]
-    for r in summary:
-        lines.append(
-            f"| {r['layer']} | {r['role']} | {r['model']} | {r['records']} | "
-            f"{r['fixed_median']} | {r['work_median']} | {r['work_below_fixed']} | "
-            f"{r['peak_max']} | {r['mark']} |"
-        )
-    lines.append("")
-    lines.append(f"束ねの表から外した記録: {excluded} 件（応答が 3 に満たない）")
-    return lines
+    columns = (("層", "left"), ("フェーズ", "left"), ("モデル", "left"), ("件数", "right"),
+               ("固定費の中央値", "right"), ("実作業の中央値", "right"), ("実作業 < 固定費", "right"),
+               ("最大充填の最大", "right"), ("目印", "left"))
+    keys = ("layer", "role", "model", "records", "fixed_median", "work_median", "work_below_fixed", "peak_max", "mark")
+    return ["## 層・フェーズ・モデルごとの束ね", "",
+            _md_table(columns, [[r[k] for k in keys] for r in summary]), "",
+            f"束ねの表から外した記録: {excluded} 件（応答が 3 に満たない）"]
 
 
 def format_layer_totals_section(totals_rows: list[dict], totals: dict) -> list[str]:
-    lines = [
-        "## 層ごとの合計",
-        "",
-        "| 層 | 件数 | 固定費の合計 | 実作業の合計 | 総消費 |",
-        "| --- | ---: | ---: | ---: | ---: |",
-    ]
-    for r in totals_rows:
-        lines.append(
-            f"| {r['layer']} | {r['records']} | {r['fixed_sum']} | "
-            f"{r['work_sum']} | {r['total_spend']} |"
-        )
-    lines.append(
-        f"| 合計 | {totals['records']} | {totals['fixed_sum']} | "
-        f"{totals['work_sum']} | {totals['total_spend']} |"
-    )
-    return lines
+    columns = (("層", "left"), ("件数", "right"), ("固定費の合計", "right"), ("実作業の合計", "right"),
+               ("総消費", "right"))
+    keys = ("records", "fixed_sum", "work_sum", "total_spend")
+    rows = [[r["layer"], *(r[k] for k in keys)] for r in totals_rows] + [["合計", *(totals[k] for k in keys)]]
+    return ["## 層ごとの合計", "", _md_table(columns, rows)]
 
 
 def format_role_usage_section(usage: list[dict]) -> list[str]:
-    lines = [
-        "## フェーズごとの worker の使い方",
-        "",
-        "| フェーズ | supervisor | supervisor の実作業 | worker の件数 "
-        "| supervisor と worker の固定費の合計 | 目印 |",
-        "| --- | ---: | ---: | ---: | ---: | --- |",
-    ]
-    for r in usage:
-        lines.append(
-            f"| {r['role']} | {r['supervisor']} | {r['supervisor_work']} | "
-            f"{r['workers']} | {r['fixed_sum']} | {r['mark']} |"
-        )
-    return lines
+    columns = (("フェーズ", "left"), ("supervisor", "right"), ("supervisor の実作業", "right"),
+               ("worker の件数", "right"), ("supervisor と worker の固定費の合計", "right"), ("目印", "left"))
+    keys = ("role", "supervisor", "supervisor_work", "workers", "fixed_sum", "mark")
+    return ["## フェーズごとの worker の使い方", "", _md_table(columns, [[r[k] for k in keys] for r in usage])]
 
 
 def format_agents_markdown(

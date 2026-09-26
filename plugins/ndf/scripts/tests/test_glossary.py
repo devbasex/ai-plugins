@@ -177,6 +177,25 @@ def test_source_paths_absent_does_not_check_sources(repo):
     assert code == 0, (out, err)
 
 
+def test_declared_paths_star_does_not_cross_slash(repo):
+    """check.paths の `*` は `/` をまたがない（lib/pathmatch.py。fnmatch の頃は issues/old/a.md にも当たった）。"""
+    write(repo, "issues/old/a.md", "オーダーを受ける。\n")
+    code, out, err = run(repo, "check", "--diff", "develop")
+    assert code == 0, (out, err)
+    config = json.loads((repo / ".ndf/glossary.json").read_text(encoding="utf-8"))
+    config["check"]["paths"] = ["issues/**/*.md"]
+    write_json(repo, ".ndf/glossary.json", config)
+    code, out, _ = run(repo, "check", "--diff", "develop")
+    assert code == 1 and [(it["path"], it["term"]) for it in out["items"]] == [("issues/old/a.md", "オーダー")]
+
+
+def test_fence_closes_only_with_the_same_mark(repo):
+    """囲みは CommonMark の規則で閉じる（lib/md.py）。``` の中の `~~~` の行では閉じない。"""
+    write(repo, "issues/a.md", "```\n~~~\nオーダー\n```\nオーダー\n")
+    code, out, _ = run(repo, "check", "--diff", "develop")
+    assert code == 1 and [(it["line"], it["term"]) for it in out["items"]] == [(5, "オーダー")]
+
+
 def test_i4_glossary_changed_without_render_is_stale_document(repo):
     g = shop_glossary()
     g["terms"].append({"term": "返品", "context": "ordering", "meaning": "受け取った品を戻すこと"})

@@ -5,9 +5,11 @@ External URLs, mailto links, and absolute filesystem paths are ignored. This
 keeps the check stable in CI while still catching broken links between
 repository documents.
 
-Heading references (`#name` and `other.md#name`) are matched against the ATX
-headings of the target document, named by GitHub's rule (#445). Documents
-outside the scanned set are not read for headings.
+Links and headings are read by `plugins/ndf/scripts/lib/md.py` (CommonMark),
+so code spans, code fences, and block quotes hold no checked link. Heading
+references (`#name` and `other.md#name`) are matched against the headings of
+the target document, named by GitHub's rule (#445). Documents outside the
+scanned set are not read for headings.
 """
 
 from __future__ import annotations
@@ -15,20 +17,16 @@ from __future__ import annotations
 import argparse
 import re
 import sys
-import unicodedata
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+from ndf_wrappers import require  # noqa: E402  根の lock で包みの依存を解決する（#1142 の決定 19）
 
-LINK_RE = re.compile(r"(?<!!)\[[^\]]+\]\(([^)]+)\)")
+require("md")
+import md  # noqa: E402  Markdown の構造は lib/md.py（markdown-it-py）で読む
+
 INLINE_HTML_RE = re.compile(r"<a\s+[^>]*href=[\"']([^\"']+)[\"']", re.IGNORECASE)
-TITLE_RE = re.compile(r"\s+(?:\"[^\"]*\"|'[^']*'|\([^)]*\))\s*$")
-HEADING_RE = re.compile(r"^#{1,6}\s+(.*)$")
-BACKTICK_RUN_RE = re.compile(r"`+")
-# GitHub の見出しアンカー規則: 記号は空白・ハイフン・アンダースコアだけ残す。
-SLUG_KEEP_PUNCTUATION = " -_"
-# 同規則: Unicode 一般カテゴリの先頭文字が L(字母)・M(結合文字)・N(数字) の文字を残す。
-SLUG_KEEP_CATEGORIES = "LMN"
 DEFAULT_SCAN_TARGETS = (
     "README.md",
     "AGENTS.md",
@@ -49,13 +47,6 @@ def iter_markdown_files(root: Path) -> list[Path]:
         elif item.is_dir():
             files.extend(item.rglob("*.md"))
     return sorted(set(files))
-
-
-def strip_title(target: str) -> str:
-    target = target.strip()
-    if target.startswith("<") and target.endswith(">"):
-        target = target[1:-1].strip()
-    return TITLE_RE.sub("", target)
 
 
 def should_skip(target: str) -> bool:
@@ -79,8 +70,8 @@ def resolve_document(source: Path, path_part: str) -> Path:
 
 
 def parse_target(raw: str) -> tuple[str, str, str]:
-    """Split a raw link into (path part, fragment, stripped target) after title stripping."""
-    target = strip_title(raw)
+    """Split a link destination into (path part, fragment, stripped target)."""
+    target = raw.strip()
     path_part, _, fragment = target.partition("#")
     return path_part, fragment, target
 
@@ -102,88 +93,43 @@ def target_path(source: Path, raw_target: str) -> Path | None:
     return resolve_document(source, path_part)
 
 
-def visible_lines(path: Path) -> list[str]:
-    """Lines outside code fences and block quotes."""
-    lines: list[str] = []
-    in_fence = False
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if line.lstrip().startswith("```"):
-            in_fence = not in_fence
-            continue
-        if in_fence or line.lstrip().startswith(">"):
-            continue
-        lines.append(line)
+def quoted_lines(text: str) -> set[int]:
+    """Line numbers (0-based) inside block quotes; links and headings there are not checked."""
+    lines: set[int] = set()
+    for token in md.md_tokens(text):
+        if token.type == "blockquote_open" and token.map:
+            lines.update(range(token.map[0], token.map[1]))
     return lines
 
 
-def _matching_closer(runs: list[re.Match], start: int) -> int | None:
-    width = len(runs[start].group())
-    return next(
-        (j for j in range(start + 1, len(runs)) if len(runs[j].group()) == width),
-        None,
-    )
-
-
-def _segments_without_inline_code(line: str, runs: list[re.Match]) -> list[str]:
-    parts: list[str] = []
-    pos = 0
-    i = 0
-    while i < len(runs):
-        closer = _matching_closer(runs, i)
-        if closer is None:
-            i += 1
+def _html_hrefs(text: str, quoted: set[int]) -> list[str]:
+    """`<a href>` in HTML blocks and inline HTML (code spans and fences hold no HTML tokens)."""
+    hrefs: list[str] = []
+    for token in md.md_tokens(text):
+        if not token.map or token.map[0] in quoted:
             continue
-        parts.append(line[pos:runs[i].start()])
-        parts.append(" ")
-        pos = runs[closer].end()
-        i = closer + 1
-    parts.append(line[pos:])
-    return parts
-
-
-def strip_inline_code(line: str) -> str:
-    """Replace each inline code span in one line with a single space (#543).
-
-    A span runs from a backtick run to the next run of the same length. A run
-    with no matching closer stays as text, so links after it are still read.
-    """
-    runs = list(BACKTICK_RUN_RE.finditer(line))
-    return "".join(_segments_without_inline_code(line, runs))
+        if token.type == "html_block":
+            hrefs.extend(m.group(1) for m in INLINE_HTML_RE.finditer(token.content))
+        elif token.type == "inline":
+            for child in token.children or []:
+                if child.type == "html_inline":
+                    hrefs.extend(m.group(1) for m in INLINE_HTML_RE.finditer(child.content))
+    return hrefs
 
 
 def link_targets(text: str) -> list[str]:
-    targets = [m.group(1) for m in LINK_RE.finditer(text)]
-    targets.extend(m.group(1) for m in INLINE_HTML_RE.finditer(text))
+    """Markdown link destinations first, then `<a href>`; images, code, and block quotes are left out."""
+    quoted = quoted_lines(text)
+    targets = [link.href for link in md.links(text) if link.line not in quoted]
+    targets.extend(_html_hrefs(text, quoted))
     return targets
 
 
-def _is_kept_char(ch: str) -> bool:
-    return ch in SLUG_KEEP_PUNCTUATION or unicodedata.category(ch)[0] in SLUG_KEEP_CATEGORIES
-
-
-def slugify(text: str) -> str:
-    """GitHub's heading anchor: keep letters, marks, digits, space, '-', '_'."""
-    kept = "".join(
-        ch for ch in text.strip().lower()
-        if _is_kept_char(ch)
-    )
-    return kept.replace(" ", "-")
-
-
 def heading_anchors(path: Path) -> set[str]:
-    anchors: set[str] = set()
-    occurrences: dict[str, int] = {}
-    for line in visible_lines(path):
-        match = HEADING_RE.match(line)
-        if not match:
-            continue
-        base = slugify(match.group(1))
-        anchor = base
-        while anchor in anchors:
-            occurrences[base] = occurrences.get(base, 0) + 1
-            anchor = f"{base}-{occurrences[base]}"
-        anchors.add(anchor)
-    return anchors
+    """GitHub anchors of the document's headings outside block quotes (`lib/md.py` numbers duplicates)."""
+    text = path.read_text(encoding="utf-8")
+    quoted = quoted_lines(text)
+    return {h.anchor for h in md.headings(text) if h.line not in quoted}
 
 
 def anchor_refs(text: str) -> list[tuple[str, str, str]]:
@@ -208,7 +154,7 @@ def main() -> int:
     failures: list[str] = []
 
     markdown_files = iter_markdown_files(root)
-    scanned = {md.resolve() for md in markdown_files}
+    scanned = {doc.resolve() for doc in markdown_files}
     anchors_by_path: dict[Path, set[str]] = {}
 
     def anchors_of(path: Path) -> set[str]:
@@ -216,29 +162,29 @@ def main() -> int:
             anchors_by_path[path] = heading_anchors(path)
         return anchors_by_path[path]
 
-    def report(md: Path, reason: str, raw: str) -> str:
-        return f"{md.relative_to(root)}: {reason}: {raw}"
+    def report(doc: Path, reason: str, raw: str) -> str:
+        return f"{doc.relative_to(root)}: {reason}: {raw}"
 
-    for md in markdown_files:
-        text = "\n".join(strip_inline_code(line) for line in visible_lines(md))
+    for doc in markdown_files:
+        text = doc.read_text(encoding="utf-8")
         for raw in link_targets(text):
-            resolved = target_path(md, raw)
+            resolved = target_path(doc, raw)
             if resolved is None:
                 continue
             try:
                 resolved.relative_to(root)
             except ValueError:
-                failures.append(report(md, "link escapes repository", raw))
+                failures.append(report(doc, "link escapes repository", raw))
                 continue
             if not resolved.exists():
-                failures.append(report(md, "missing link target", raw))
+                failures.append(report(doc, "missing link target", raw))
 
         for path_part, fragment, raw in anchor_refs(text):
-            document = resolve_document(md, path_part)
+            document = resolve_document(doc, path_part)
             if document not in scanned:
                 continue
             if unquote(fragment).lower() not in anchors_of(document):
-                failures.append(report(md, "missing heading anchor", raw))
+                failures.append(report(doc, "missing heading anchor", raw))
 
     if failures:
         print("Markdown link check failed:", file=sys.stderr)

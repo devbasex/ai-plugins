@@ -106,15 +106,23 @@ GitHub は `lib/gh_parts.py`（決定 16・17）、`claude -p` は `supervise_li
 | venv の python で bashlex を import して解析 | 参考 | 66〜88 ms |
 
 **hook は、PreToolUse・Stop・Notification を受ける 1 本の Python のエントリポイント（`scripts/hook.py`）へまとめる。**
-今の `worktree-guard.sh`・`token-guard.sh`・`wait-notify.py`・`relay.py` の hook の入口は、その中の関数になる。
+今の `worktree-guard.sh`・`token-guard.sh`・`wait-notify.py`・`relay.py` の hook の入口は、その中の関数になる（`relay.py` の入口は、ラッパーを移す D6 で移す。D5 の時点では、token の guard がラッパーの告知を `relay_lib.mark` から同じプロセスで読む）。`worktree-guard.sh`・`token-guard.sh`・`wait-notify.py --runtime` は、パスを変えずに結ぶ Kiro CLI と agy のために、環境の python で `hook.py` を起動する包みとして残す。
 シェルの字句解析は tree-sitter-bash（bashlex は `[[ -f y ]]` で ParsingError を出すので使えない）、`.env` と Slack と
 ロックはライブラリへ置き換え、bash と jq の fork が消える。
 
-**hook は `uv run` を挟まず、用意済みの環境の python を直に起動する。** SessionStart の hook が
-`deps.require()` と同じ手順で `~/.cache/ndf/venv/<版>` を `uv sync --frozen` で用意し、PreToolUse ほかの hook の
-コマンドはその環境の `bin/python` を指す。毎回の上乗せは python の起動と import だけになる。環境がまだ無い
-（SessionStart より前・uv を入れられない）ときは、hook は判定をせずにパススルーで終わる（hook が止まると Tool の
-呼び出しが全部止まる。今の guard も拒否しない案内が主である）。
+**hook は `uv run` を挟まず、用意済みの環境の python を直に起動する。** SessionStart の hook（`worktree-session.sh` が
+起動する `scripts/hook-env.py`）が `deps.require()` と同じ手順で `~/.cache/ndf/venv/<版>` を `uv sync --frozen` で用意し、
+プラグインの根ごとの目印 `~/.cache/ndf/roots<プラグインの根>` をその環境のディレクトリへ張る（symlink）。PreToolUse ほかの
+hook の command は、シェルの字面だけで目印の python を組み立て、`sh -c '[ -x "$0" ] || exit 0; exec "$0" "$@"'` の形で
+起動する（`"$HOME/.cache/ndf/roots${CLAUDE_PLUGIN_ROOT}/bin/python" <hook.py>` を渡す。版を読まない）。毎回の上乗せは
+python の起動と import だけになる。環境がまだ無い（SessionStart より前・uv を入れられない）ときは `[ -x ]` が偽になり、
+出力なし・終了コード 0 で通る（python を直に指す形は終了コード 127 で終わる。試行 T2）。hook が止まると Tool の呼び出しが
+全部止まるためで、今の guard も拒否しない案内が主である。目印を python の実行ファイルへ張らないのは、python が実行ファイルの
+symlink をたどった先で環境を探し、環境の外の python として動くためである。
+
+**構文木に読み直せない ERROR があるとき（`! case … esac`・`echo hi >` など）は、判定をせずに通して案内を出す。**
+構文木の癖 5 つ（試行 T2）は `lib/shparse.py` の包みが吸収し、癖で出る ERROR（`<>` の割れ・ヒアドキュメントの本文の
+`$((…))`）は読み直せるものとして数えない。
 
 **ラッパーのバージョンディレクトリは、複製のときに同じ lock から環境を作る**（複製先で `uv sync --frozen`）。
 `relay_lib/terminal.py` は ptyprocess、`proc`・`common`・`record` は psutil と filelock の上に置く。

@@ -214,7 +214,7 @@ pace: fast
 残っているのに後の工程の判断だけが悪くなる。** カットポイント・委譲してよい対象・残量の見方は
 [references/context-window.md](references/context-window.md) にある。
 
-**conductor は、`context-window.md` の 4 つのカットポイントとコンテキスト量の hook（`token-guard.sh`）に止められたときに、
+**conductor は、`context-window.md` の 4 つのカットポイントとコンテキスト量の hook（`hook.py` の token の guard）に止められたときに、
 次の工程を始める再開コマンド（`/ndf:development-workflow #<課題>`。今のセッションを `/goal` で始めていたときだけ先頭に `/goal `）を、
 情報文字列 `ndf-next` の囲みのコードブロック 1 つで出す。** 3 層では conductor がフェーズレポート（`## フェーズの報告`）かキューの done を
 受け取った時点で出し（supervisor とプランは出さない）、`結果: 関門` なら承認ゲートの承認と取り込みの後に出す。

@@ -23,6 +23,10 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import deps  # noqa: E402
+
+deps.require("md")
+import md  # noqa: E402
 from step_result import (EXIT_PRECONDITION, EXIT_UNREADABLE, StepError, common_parser, emit,  # noqa: E402
                          git, git_root, main_with, result, run)
 import gh_parts  # noqa: E402
@@ -322,8 +326,15 @@ def upsert(a, must_exist):
                 next=nxt))
 
 
+def h2_sections(body):
+    """本文の深さ 2 の節ごとに（見出しの字面, 節の行）。囲みの中の `##` は見出しにしない（lib/md.py）。"""
+    text = body or ""
+    lines = text.splitlines()
+    return [(s.heading.title, lines[s.start:s.end]) for s in md.md_sections(text) if s.heading.level == 2]
+
+
 def has_user_changes(body):
-    return any(l.strip() == CHANGES_HEADING for l in (body or "").splitlines())
+    return any(title == CHANGES_HEADING[3:] for title, _ in h2_sections(body))
 
 
 def cmd_template(a):
@@ -365,14 +376,8 @@ def pr_for_report(root, number):
 
 
 def section(body, heading):
-    lines, keep = [], False
-    for line in (body or "").splitlines():
-        if line.startswith("## "):
-            keep = line[3:].strip().lower().startswith(heading.lower())
-            continue
-        if keep:
-            lines.append(line)
-    return lines
+    """見出しが `heading` で始まる（大文字と小文字を区別しない）`## ` の節の行（子の節を含む）。"""
+    return [line for title, lines in h2_sections(body) if title.lower().startswith(heading.lower()) for line in lines]
 
 
 def cmd_report(a):

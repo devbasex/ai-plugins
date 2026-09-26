@@ -203,7 +203,7 @@ bash <プラグインのパス>/scripts/worktree-setup.sh init
 
 ### 待ちの問い合わせと長い会話を止める（Claude Code だけ）
 
-`scripts/token-guard.sh` が PreToolUse の `Bash` / `Read` / `Skill` / `Agent` で動き、3 つを
+`scripts/hook.py` の token の guard（`hook_lib/token_guard.py`）が PreToolUse の `Bash` / `Read` / `Skill` / `Agent` で動き、3 つを
 止めます。止めたときは、代わりの手段を理由の欄に出します。
 
 | 止めるもの | 止め方 | 上限 |

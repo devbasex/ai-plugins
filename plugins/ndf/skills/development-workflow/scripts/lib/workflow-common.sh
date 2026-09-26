@@ -191,54 +191,37 @@ wf_stages_before_pr() {
 # **展開はしない。** コマンドの本文を判定するだけで、実行はこの hook の役目ではない。
 # `$SCRIPTS` のような未展開の変数はそのままの文字列として残る。
 #
-# **bash の文字取り出しでは書かない。** tool 実行のたびに走るため、長い本文で費用が
-# 効く。実測では 27KB の本文に 2.4 秒かかり、hook の制限時間に近づいた。同じ処理を
-# awk に置くと 0.02 秒で終わる。
+# **分割は hook の 1 本のエントリポイント（`hook.py words`。本体は `hook_lib/words.py`）が持つ**（#1142 の
+# 決定 20）。構文木は tree-sitter-bash で読み、SessionStart が用意した hook の環境の python で起動する。
+# `NDF_HOOK_PYTHON` があればその python を使う。**環境が無いときは何も出さない。** 呼び出し側
+# （workflow-guard.sh）は、分割の前に `wf_hook_python` で環境を確かめ、無ければ粗い見分けへ倒す。
 #
 # **区切りは NUL である。** 引用符の中の改行は語の一部として残るため、行で区切ると
-# 1 つの語が複数に割れる。`pr` が必須と定めるヒアドキュメントの本文はこの形になり、
-# 行区切りで読むと 1 行目だけを本文として扱ってしまう（#427 のレビュー）。
+# 1 つの語が複数に割れる。`pr` が必須と定めるヒアドキュメントの本文はこの形になる。
 # 読む側は `read -r -d ""` で受ける。
 #
-# **コマンドの境目は空の語で表す（#565）。** 引用の外の `;` `|` `(` `)` `&` と、本文の
-# 途中の改行で出す。記録の値に `"設計";` のように演算子が密着すると、区切りが無ければ
-# 値の一部として読まれ、工程名ではないとして黙って捨てられていた。空の語は `""` を解いた
-# 結果として出ることがないため、実在の語と衝突しない。読む側は `[ -z "$tok" ]` で見分ける。
-#
-#   - `&` は直前が `>` `<` か直後が `>` のときリダイレクトの一部として残す（`2>&1` / `&>`）
-#   - 改行の区切りは次の行の頭で出す。awk は次の行を読むまで、行末が本文の途中だったかを
-#     知らない。空の行では出さずに持ち越すため、本文の末尾の改行（here-string が足すもの
-#     を含む）では出ない
-#   - 行末の `\` は継続として捨て、区切りを出さない
+# **コマンドの境目は空の語で表す（#565）。** 1 つのコマンドの語（名前・引数・リダイレクトの字面）の後、
+# 次のコマンドの前に出す。記録の値に `"設計";` のように演算子が密着しても、値は語として切り出される。
+# 空の語は `""` を解いた結果として出ることがないため、実在の語と衝突しない。読む側は `[ -z "$tok" ]` で
+# 見分ける。置換（`$(…)`）の中のコマンドは外のコマンドの後ろに並び、ヒアドキュメントの本文はコマンドとして読まない。
+WF_HOOK_PY="$(dirname "${BASH_SOURCE[0]}")/../../../../scripts/hook.py"
+
+# hook の環境の python のパスを出す。無ければ 1 を返す。プラグインの根は実体のパス（`cd -P`）で引く
+# （hook-env.py が目印を張る名前。Kiro CLI の配置の symlink を越えても同じ根になる）。
+wf_hook_python() {
+  local root py="${NDF_HOOK_PYTHON:-}"
+  if [ -z "$py" ]; then
+    root=$(cd -P "$(dirname "${BASH_SOURCE[0]}")/../../../.." 2>/dev/null && pwd -P) || return 1
+    py="$HOME/.cache/ndf/roots$root/bin/python"
+  fi
+  [ -x "$py" ] || return 1
+  printf '%s\n' "$py"
+}
+
 wf_split() {
-  awk '
-    function flush() { if (out != "") { printf "%s%c", out, 0; out = "" } }
-    function mark() { flush(); printf "%s%c", "", 0 }
-    {
-      n = length($0)
-      if (pending && n > 0) { printf "%s%c", "", 0; pending = 0 }
-      cont = 0
-      for (i = 1; i <= n; i++) {
-        ch = substr($0, i, 1)
-        if (quote != "") {
-          if (ch == quote) { quote = "" } else { out = out ch }
-          continue
-        }
-        if (ch == "\"" || ch == "'"'"'") { quote = ch; continue }
-        if (ch == " " || ch == "\t") { flush(); continue }
-        if (ch == ";" || ch == "|" || ch == "(" || ch == ")") { mark(); continue }
-        if (ch == "&") {
-          prev = substr($0, i - 1, 1)
-          if (prev != ">" && prev != "<" && substr($0, i + 1, 1) != ">") { mark(); continue }
-        }
-        if (ch == "\\" && i == n) { cont = 1; continue }
-        out = out ch
-      }
-      if (quote != "") { out = out "\n" }
-      else { flush(); pending = !cont }
-    }
-    END { flush() }
-  ' <<<"${1:-}"
+  local py
+  py=$(wf_hook_python) || return 0
+  printf '%s' "${1:-}" | "$py" "$WF_HOOK_PY" words 2>/dev/null
 }
 
 # 判定の対象になりうる本文かを、走査の前に安く見分ける。

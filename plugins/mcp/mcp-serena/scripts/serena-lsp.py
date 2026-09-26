@@ -2,14 +2,21 @@
 """mcp-serena の入口。サブコマンド detect / configure / check / hook。
 
 判断の要らない手順（言語の検出・project.yml の書き換え・起動の検証・導入のチェック・hook）を
-ここに置き、モデル（Skill）には判断だけを残す。Python 3 の標準ライブラリだけで動く。
+ここに置き、モデル（Skill）には判断だけを残す。
+
+外部パッケージ（ruamel.yaml）は mcp-serena の環境（`pyproject.toml` と `uv.lock`）にある（#1142 の決定 25。
+`serena_lsp/env.py`）。hook ではない副命令は、その環境で動いていなければ環境を用意して起動し直す。
+`hook session-start` は環境を用意し、用意できた環境の python で通知を行う（用意できなければ通知を飛ばす）。
+`hook pre-tool-use` は hook の command が環境の python を直に起動する（環境が無ければ command が素通しする）。
 """
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+CLI = str(Path(__file__).resolve())
 
 
 def _emit(result: dict, as_json: bool) -> None:
@@ -54,8 +61,23 @@ def cmd_check(args) -> int:
     return code
 
 
+def _session_env(args) -> bool:
+    """SessionStart の環境の用意。通知へ進むなら真（環境の python で動いている）。起動し直すときは戻らない。"""
+    from serena_lsp import env, hooks
+    if hooks._skip_for_client(args.client) or os.environ.get(env.REEXEC_ENV):
+        return env.importable()
+    python = env.prepare()
+    if env.importable():
+        return True
+    if python:
+        env.reexec(python, CLI, args.argv)
+    return False
+
+
 def cmd_hook(args) -> int:
     try:
+        if args.event == "session-start" and not _session_env(args):
+            return 0
         from serena_lsp import hooks
         raw = sys.stdin.read()
         payload = json.loads(raw) if raw.strip() else {}
@@ -105,6 +127,10 @@ def main(argv=None) -> int:
     p.set_defaults(func=cmd_hook)
 
     args = parser.parse_args(argv)
+    args.argv = list(sys.argv[1:] if argv is None else argv)
+    if args.command != "hook":
+        from serena_lsp import env
+        env.ensure(CLI, args.argv)
     return args.func(args)
 
 

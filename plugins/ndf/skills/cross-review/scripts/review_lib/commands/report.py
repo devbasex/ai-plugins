@@ -12,6 +12,7 @@ import sys
 from typing import Any
 
 import review_lib  # noqa: E402
+import mdtable  # noqa: E402  使う側（state.py）が deps.require("mdtable") を先に呼ぶ
 import run_metrics  # noqa: E402
 from review_lib import github, participants as participants_mod, posts, store  # noqa: E402
 
@@ -136,8 +137,7 @@ def _print_round_summary(rounds: list) -> None:
     print("## ラウンドサマリ")
     # **担当は 4 つの名前を取りうる。** 2 者を列にした表では、`claude` / `kiro` が
     # 担当したラウンドの結果が読めない。担当と判定を 1 つの列へまとめる。
-    print("| round | PR | レビュー | fix | CI |")
-    print("|---|---|---|---|---|")
+    rows = []
     for r in rounds:
         reviewers = r.get("reviewers") or list(participants_mod.LEGACY_AGENTS)
         parts = []
@@ -156,7 +156,8 @@ def _print_round_summary(rounds: list) -> None:
         if fix:
             fix_s = f"{(fix.get('commit') or '')[:7]} ({fix.get('fixed', 0)} fixed, {fix.get('deferred', 0)} deferred)"
         ci_s = fix.get("ci") or "-"
-        print(f"| {r['round']} | #{r['pr']} | {review_s} | {fix_s} | {ci_s} |")
+        rows.append([r["round"], f"#{r['pr']}", review_s, fix_s, ci_s])
+    print(mdtable.table_markdown(["round", "PR", "レビュー", "fix", "CI"], rows))
     print()
 
 

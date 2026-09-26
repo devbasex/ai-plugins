@@ -126,12 +126,6 @@ def _state_dir(arg, repo: str) -> Path:
     return d
 
 
-def _write_json(path: Path, obj) -> None:
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=1), encoding="utf-8")
-    tmp.replace(path)
-
-
 def _read_state(path: Path):
     """状態の JSON。無ければ None、読めなければ終了コード 2（読みは `jsonio`）。"""
     try:
@@ -371,7 +365,7 @@ def cmd_candidates(a):
     out = result(TOOL, "gate" if deferred else "ok", summary, items, metrics,
                  next=(f"上限 {a.limit} 件を超えた {len(deferred)} 件（deferred）は、次の回に"
                        " --add で渡すか --limit を上げる" if deferred else None))
-    _write_json(_state_dir(a.state_dir, repo) / "candidates.json", out)
+    jsonio.write_atomic(_state_dir(a.state_dir, repo) / "candidates.json", out, indent=1)
     emit(out, EXIT_PAUSE if deferred else None)
 
 
@@ -482,7 +476,7 @@ def cmd_apply(a):
             patch, add, remove = _diff(cur, ch, ms, n)
             if not (patch or add or remove):
                 ledger[key] = {"result": "unchanged"}
-                _write_json(ledger_path, ledger)
+                jsonio.write_atomic(ledger_path, ledger, indent=1)
                 put("unchanged", "変える内容が無い")
                 continue
             if patch:
@@ -495,7 +489,7 @@ def cmd_apply(a):
                 gh.call([f"repos/{repo}/issues/{n}/labels/{lb}", "-X", "DELETE"], target=n)
             ledger[key] = {"result": "applied", "fields": sorted(patch),
                            "add_labels": add, "remove_labels": remove}
-            _write_json(ledger_path, ledger)
+            jsonio.write_atomic(ledger_path, ledger, indent=1)
             put("applied", ", ".join(sorted(patch) + [f"+{x}" for x in add] + [f"-{x}" for x in remove]))
         except Partial as e:
             partial, why_partial = True, str(e)
@@ -541,7 +535,7 @@ def cmd_apply(a):
             parts.append("時間を置いて同じ plan で apply を打ち直す（済んだものは記録で飛ぶ）")
         nxt = "。".join(parts)
     out = result(TOOL, status, summary, items, metrics, presentation_path=pres, next=nxt)
-    _write_json(sd / "apply.json", out)
+    jsonio.write_atomic(sd / "apply.json", out, indent=1)
     emit(out, code)
 
 

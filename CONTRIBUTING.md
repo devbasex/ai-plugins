@@ -61,7 +61,7 @@ cd .worktrees/feature/<名前>
 
 ```bash
 # 1. テスト（継続的統合と同じ範囲を 1 回の起動で回す。-n auto でコア数だけ並列に回す）
-uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest pytest . -q -n auto
+uv run --frozen --project . --all-extras pytest . -q -n auto
 
 # 2. Skill の frontmatter の規約
 python3 scripts/check-skill-frontmatter.py

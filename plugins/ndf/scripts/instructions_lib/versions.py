@@ -9,7 +9,7 @@ import re
 import subprocess
 from pathlib import Path
 
-from instructions_lib.model import BULLET_RE, CheckError, Criteria, FENCE_RE, Finding, HEADING_RE, Target
+from instructions_lib.model import BULLET_RE, CheckError, Criteria, Finding, Target, atx_headings, code_lines
 from instructions_lib.declaration import Declaration
 from instructions_lib.collect import _inside_root, display_path
 
@@ -105,21 +105,17 @@ def paragraph_starts(text: str) -> list[tuple[int, str, bool]]:
     """（行番号, 本文, 見出しか）。**段落の先頭行と見出しだけ**を返す。"""
     starts: list[tuple[int, str, bool]] = []
     previous = "blank"
-    in_fence = False
-    for number, line in enumerate(text.splitlines(), start=1):
-        if FENCE_RE.match(line):
-            in_fence = not in_fence
-            previous = "blank" if not in_fence else "fence"
-            continue
-        if in_fence:
+    headings = atx_headings(text)
+    for number, (line, fenced) in enumerate(zip(text.splitlines(), code_lines(text)), start=1):
+        if fenced:
+            previous = "blank"  # 囲みの後ろの行は段落の先頭になる
             continue
         stripped = line.strip()
         if not stripped:
             previous = "blank"
             continue
-        heading = HEADING_RE.match(line)
-        if heading:
-            starts.append((number, heading.group(2), True))
+        if number in headings:
+            starts.append((number, headings[number], True))
             previous = "blank"
             continue
         if stripped.startswith("|") or stripped.startswith(">"):
@@ -174,12 +170,8 @@ def _inline_pending_findings(target: Target, text: str, latest: str, marker: str
         r"(?![0-9A-Za-z.-])\s*" + re.escape(marker))
     latest_base = base_triple(latest)
     findings: list[Finding] = []
-    in_fence = False
-    for number, line in enumerate(text.splitlines(), start=1):
-        if FENCE_RE.match(line):
-            in_fence = not in_fence
-            continue
-        if in_fence or number in reported:
+    for number, (line, fenced) in enumerate(zip(text.splitlines(), code_lines(text)), start=1):
+        if fenced or number in reported:
             continue
         for match in pattern.finditer(line):
             version = match.group("version")

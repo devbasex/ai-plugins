@@ -8,9 +8,14 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 SCRIPTS_DIR = Path(__file__).resolve().parents[3] / "scripts"
+# 編集時の guard の判定（hook_lib）を同じプロセスで import する（#1142 の決定 20）
+for _p in (SCRIPTS_DIR / "lib", SCRIPTS_DIR):
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
 LIB = SCRIPTS_DIR / "lib" / "worktree-common.sh"
 GUARD = SCRIPTS_DIR / "worktree-guard.sh"
 SESSION = SCRIPTS_DIR / "worktree-session.sh"

@@ -11,6 +11,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 SCRIPT = Path(__file__).resolve().parents[1] / "token-usage.py"
 WT = "/tmp/ndf-worktrees/acme--secret-repo/pr7"
 SID = "11111111-2222-3333-4444-555555555555"
@@ -379,3 +381,18 @@ def test_version_key_orders_dev_numbers_numerically():
     spec.loader.exec_module(mod)
     got = sorted(["10.17.30", "10.17.30-dev.10", "10.17.29", "10.17.30-dev.9", "10.17.30-dev.2"], key=mod.version_key)
     assert got == ["10.17.29", "10.17.30-dev.2", "10.17.30-dev.9", "10.17.30-dev.10", "10.17.30"]
+
+
+def test_a_version_outside_the_release_forms_is_not_a_version(tmp_path):
+    """#1142 の D8: 版の比較を lib/versions.py（SemVer 2.0 と -dev.N / -rc.N）へ移した。ほかの接尾辞の版は
+    版を判定できない会話に数え、version_key は ValueError を出す（移す前は字面で並べていた）。"""
+    r = run_json(build(tmp_path, version="10.16.0-beta"))
+    assert r["meta"]["sessions"] == 0
+    assert r["meta"]["skipped"].get("版を判定できない") == 1
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("token_usage", Path(__file__).parents[1] / "token-usage.py")
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["token_usage"] = mod
+    spec.loader.exec_module(mod)
+    with pytest.raises(ValueError):
+        mod.version_key("10.16.0-beta")

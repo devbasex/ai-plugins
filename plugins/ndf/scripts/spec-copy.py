@@ -17,18 +17,20 @@ from __future__ import annotations
 import argparse
 import difflib
 import json
-import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import deps  # noqa: E402
+
+deps.require("md")
+import md  # noqa: E402
 from step_result import EXIT_UNREADABLE, EXIT_VIOLATION, StepError, emit, main_with, result  # noqa: E402
 import gh_parts  # noqa: E402
 
 TOOL = "spec-copy"
 PROGRESS = "進行"
 MARKER = "正は課題の本文"
-SECTION = re.compile(r"^##\s+(.*?)\s*$")
 
 
 def fetch_issue(number: str, repo: str | None) -> dict:
@@ -49,25 +51,30 @@ def fetch_issue(number: str, repo: str | None) -> dict:
     return data
 
 
+def section_titles(text: str) -> dict[int, str]:
+    """深さ 2 の見出しの行（0 始まり）→ 見出しの字面（lib/md.py。コードの囲みの中の `##` は見出しにしない）。"""
+    return {h.line: h.title for h in md.headings(text) if h.level == 2}
+
+
 def before_progress(body: str) -> str:
-    lines = body.replace("\r\n", "\n").split("\n")
-    for i, line in enumerate(lines):
-        m = SECTION.match(line)
-        if m and m.group(1) == PROGRESS:
-            lines = lines[:i]
-            break
+    text = body.replace("\r\n", "\n")
+    lines = text.split("\n")
+    at = next((i for i, title in sorted(section_titles(text).items()) if title == PROGRESS), None)
+    if at is not None:
+        lines = lines[:at]
     return "\n".join(lines).rstrip() + "\n"
 
 
 def sections(text: str) -> tuple[list[str], dict[str, list[str]]]:
     """`##` の節ごとに行を分ける。見出しより前の行は先頭の分として返す。"""
+    text = text.replace("\r\n", "\n")
+    marks = section_titles(text)
     head: list[str] = []
     out: dict[str, list[str]] = {}
     cur = None
-    for line in text.replace("\r\n", "\n").split("\n"):
-        m = SECTION.match(line)
-        if m:
-            cur = m.group(1)
+    for i, line in enumerate(text.split("\n")):
+        if i in marks:
+            cur = marks[i]
             out.setdefault(cur, [])
             continue
         (out[cur] if cur is not None else head).append(line)

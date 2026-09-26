@@ -142,10 +142,10 @@ def area_of(path: str, decl: dict) -> tuple[str, bool]:
 
 def slug_of(root: Path) -> str:
     url = git_or_stop(root, "config", "--get", "remote.origin.url", check=False)
-    m = re.search(r"([^/:]+)/([^/]+?)(?:\.git)?/?$", url)
-    if not m:
+    found = repo.owner_repo_from_url(url)
+    if not found:
         raise Stop("origin の URL から所有者とリポジトリを決められない")
-    return f"{m.group(1)}__{m.group(2)}"
+    return found.replace("/", "__", 1)
 
 
 def state_base() -> Path:

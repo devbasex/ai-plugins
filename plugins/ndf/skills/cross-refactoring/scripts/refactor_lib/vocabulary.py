@@ -5,9 +5,9 @@
 from __future__ import annotations
 
 import pathlib
-import re
-
 from typing import Any
+
+import md
 
 
 # 兆候と手法の呼び名は `refactoring` が持つ（#444）。**ここでは読むだけで、自分では
@@ -29,9 +29,10 @@ VOCABULARY_TABLE = (
 
 
 def _read_table(heading: str, value_column: str) -> dict[str, str]:
-    """呼び名の表の 1 節を、識別子 → 値で返す。
+    """呼び名の表の 1 節（深さ 2 の見出し `heading`）の最初の表を、識別子 → 値で返す。
 
-    **列は見出しの名前で決める。** 並びが変わっても読み取りが壊れない。
+    **列は見出しの名前で決める。** 並びが変わっても読み取りが壊れない。節と表の読み取りは
+    ライブラリの `md` が持つ（コードの囲みの中の `## ` や `|` の行を節や表と取り違えない）。
     """
     try:
         text = VOCABULARY_TABLE.read_text(encoding="utf-8")
@@ -39,24 +40,19 @@ def _read_table(heading: str, value_column: str) -> dict[str, str]:
         raise VocabularyUnavailable(
             f"呼び名の表を読めません: {VOCABULARY_TABLE} ({exc})"
         ) from exc
-    body = re.search(rf"^## {re.escape(heading)}\n(.*?)(?=^## |\Z)", text, re.S | re.M)
-    if not body:
+    section = md.section_named(text, heading, level=2)
+    if section is None:
         raise VocabularyUnavailable(f"呼び名の表に「{heading}」の節がありません")
-    rows = [ln for ln in body.group(1).splitlines() if ln.strip().startswith("|")]
-    if len(rows) < 3:
+    table = next((t for t in md.tables(text) if section.start <= t.start < section.end), None)
+    if table is None or not table.rows:
         raise VocabularyUnavailable(f"呼び名の表の「{heading}」が空です")
-    header = [c.strip() for c in rows[0].strip("|").split("|")]
     try:
-        i_id, i_value = header.index("識別子"), header.index(value_column)
+        i_id, i_value = table.header.index("識別子"), table.header.index(value_column)
     except ValueError as exc:
         raise VocabularyUnavailable(
             f"呼び名の表の「{heading}」に列がありません: {exc}"
         ) from exc
-    out: dict[str, str] = {}
-    for line in rows[2:]:
-        cells = [c.strip() for c in line.strip("|").split("|")]
-        out[cells[i_id].strip("`")] = cells[i_value]
-    return out
+    return {row[i_id].strip("`"): row[i_value] for row in table.rows}
 
 
 SMELLS: dict[str, str] = _read_table("兆候", "日本語の名前")

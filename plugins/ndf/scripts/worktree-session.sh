@@ -23,6 +23,14 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# hook の環境（hook.py を起動する python と外部パッケージ）を用意する（#1142 の決定 20）。4 ランタイムの
+# 開始時の hook がここを通るため、用意はここで 1 回行う。用意済みなら uv を起動しない。8 秒で終わらなければ
+# 続きは背景で行い、それまでの hook は判定をせずに通る。NDF_HOOK_ENV=0 で止める（テストが使う）。
+if [ "${NDF_HOOK_ENV:-1}" != 0 ] && command -v python3 >/dev/null 2>&1; then
+  python3 "$SCRIPT_DIR/hook-env.py" --wait 8 </dev/null >/dev/null
+fi
+
 # shellcheck source=lib/worktree-common.sh
 . "$SCRIPT_DIR/lib/worktree-common.sh" 2>/dev/null || exit 0
 

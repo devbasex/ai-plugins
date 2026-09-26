@@ -7,9 +7,9 @@ from __future__ import annotations
 
 import pytest
 
-from worktree_helpers import run_lib
+from hook_lib import worktree
 
-DEFAULTS = '"${WT_DEFAULT_ALLOW_PATHS[@]}"'
+DEFAULTS = worktree.DEFAULT_ALLOW_PATHS
 
 
 @pytest.mark.parametrize(
@@ -27,8 +27,7 @@ DEFAULTS = '"${WT_DEFAULT_ALLOW_PATHS[@]}"'
     ],
 )
 def test_allowed_paths_are_silent(rel: str) -> None:
-    got = run_lib(f'wt_is_allowed_path "{rel}" {DEFAULTS}; echo $?')
-    assert got.stdout.strip() == "0", f"{rel}: {got.stderr}"
+    assert worktree.is_allowed(rel, DEFAULTS), rel
 
 
 @pytest.mark.parametrize(
@@ -42,34 +41,27 @@ def test_allowed_paths_are_silent(rel: str) -> None:
     ],
 )
 def test_protected_paths_are_notified(rel: str) -> None:
-    got = run_lib(f'wt_is_allowed_path "{rel}" {DEFAULTS}; echo $?')
-    assert got.stdout.strip() == "1", f"{rel}: {got.stderr}"
+    assert not worktree.is_allowed(rel, DEFAULTS), rel
 
 
 def test_prefix_must_stop_at_a_separator() -> None:
     """`docs/` の許可が `docs-internal/` まで広がらない。"""
-    got = run_lib('wt_is_allowed_path "docs-internal/x.md" "docs/"; echo $?')
-    assert got.stdout.strip() == "1", got.stderr
+    assert not worktree.is_allowed("docs-internal/x.md", ["docs/"])
 
 
 def test_file_entry_matches_exactly() -> None:
-    got = run_lib('wt_is_allowed_path ".gitignore" ".gitignore"; echo $?')
-    assert got.stdout.strip() == "0", got.stderr
-    got = run_lib('wt_is_allowed_path ".gitignore.bak" ".gitignore"; echo $?')
-    assert got.stdout.strip() == "1", got.stderr
+    assert worktree.is_allowed(".gitignore", [".gitignore"])
+    assert not worktree.is_allowed(".gitignore.bak", [".gitignore"])
 
 
 def test_empty_allow_list_notifies_everything() -> None:
-    got = run_lib('wt_is_allowed_path "issues/a.md"; echo $?')
-    assert got.stdout.strip() == "1", got.stderr
+    assert not worktree.is_allowed("issues/a.md", [])
 
 
 def test_directory_entry_matches_the_directory_itself() -> None:
     """`cp x docs/` の書き込み先は正規化で末尾のスラッシュが落ちて `docs` になる。"""
-    got = run_lib('wt_is_allowed_path "docs" "docs/"; echo $?')
-    assert got.stdout.strip() == "0", got.stderr
+    assert worktree.is_allowed("docs", ["docs/"])
 
 
 def test_directory_entry_still_stops_at_a_separator() -> None:
-    got = run_lib('wt_is_allowed_path "docs-internal" "docs/"; echo $?')
-    assert got.stdout.strip() == "1", got.stderr
+    assert not worktree.is_allowed("docs-internal", ["docs/"])

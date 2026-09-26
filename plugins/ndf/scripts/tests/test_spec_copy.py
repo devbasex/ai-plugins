@@ -88,3 +88,12 @@ def test_unreadable_body_is_2(tmp_path, sub):
     out_file = tmp_path / "copy.md"
     out_file.write_text("x")
     assert run(env, sub, "7", str(out_file))[0] == 2
+
+
+def test_heading_inside_fence_is_not_a_section(tmp_path):
+    """囲みの中の `## 進行` は節の見出しにしない（lib/md.py。行の字面で分けていた頃は、そこで本文を切った）。"""
+    body = BODY.replace("## 受け入れ条件", "```md\n## 進行\n```\n\n## 受け入れ条件")
+    env = fake_gh(tmp_path, body)
+    out_file = tmp_path / "copy.md"
+    run(env, "write", "7", str(out_file))
+    assert "注文を受けられる" in out_file.read_text()

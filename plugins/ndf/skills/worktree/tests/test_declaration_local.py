@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+from hook_lib import worktree
 from worktree_helpers import (
     SCRIPTS_DIR,
     SESSION,
@@ -225,13 +226,13 @@ def operational_values(main_repo: Path) -> str:
             [
                 f'wt_base_branch "{main_repo}"',
                 f'wt_production_branch "{main_repo}"',
-                f'decl=$(wt_declaration "{main_repo}"); wt_allow_paths "$decl"',
             ]
         ),
         cwd=main_repo,
     )
     assert got.returncode == 0, got.stderr
-    return got.stdout
+    # guard の許可パスは hook の判定（hook_lib/worktree.py）が共有の宣言だけから読む（#1142 の決定 20）
+    return got.stdout + "\n".join(worktree.allow_paths(worktree.declaration(str(main_repo)))) + "\n"
 
 
 def test_operational_keys_are_not_overridable(shared: Path) -> None:

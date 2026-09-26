@@ -1,7 +1,7 @@
 {
   "version": 1,
   "test": {
-    "command": "uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest --with pytest-xdist pytest {paths} -q -n 4",
+    "command": "uv run --frozen --project . --all-extras pytest {paths} -q -n 4",
     "all": ".",
     "no_reports": "-p no:playwright-kit"
   },

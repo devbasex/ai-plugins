@@ -29,7 +29,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import sys
 import tempfile
 from pathlib import Path
@@ -37,6 +36,10 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 PLUGIN_ROOT = HERE.parents[2]
 sys.path.insert(0, str(PLUGIN_ROOT / "scripts" / "lib"))
+import deps  # noqa: E402
+
+deps.require("md")
+import md  # noqa: E402
 from step_result import (  # noqa: E402
     EXIT_PRECONDITION, EXIT_UNREADABLE, StepError, emit, gh_json, git, git_root, main_with, result, run,
 )
@@ -139,20 +142,15 @@ def failed_log(branch: str, pr: int) -> str | None:
 
 
 def exclusion_sections(body: str) -> list[tuple[str, str]]:
-    """本文のうち、この PR で対応しない内容を書いた節（見出しと本文）。"""
-    out, cur, buf = [], None, []
-    for ln in (body or "").splitlines():
-        m = re.match(r"^(#{1,6})\s+(.*)$", ln)
-        if m:
-            if cur:
-                out.append((cur, "\n".join(buf).strip()))
-            title = m.group(2).strip()
-            cur = title if any(k.lower() in title.lower() for k in EXCLUDE_HEADINGS) else None
-            buf = []
-        elif cur:
-            buf.append(ln)
-    if cur:
-        out.append((cur, "\n".join(buf).strip()))
+    """本文のうち、この PR で対応しない内容を書いた節（見出しと、次の見出しまでの本文）。見出しは lib/md.py で読む。"""
+    text = body or ""
+    lines = text.splitlines()
+    marks = md.headings(text)
+    out = []
+    for k, h in enumerate(marks):
+        if any(w.lower() in h.title.lower() for w in EXCLUDE_HEADINGS):
+            end = marks[k + 1].line if k + 1 < len(marks) else len(lines)
+            out.append((h.title, "\n".join(lines[h.line + 1:end]).strip()))
     return out
 
 

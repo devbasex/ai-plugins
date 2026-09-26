@@ -36,6 +36,7 @@ import json
 import os
 import pathlib
 import re
+import statistics
 import sys
 from typing import Any, Callable, Mapping, Optional
 
@@ -43,6 +44,7 @@ _LIB = pathlib.Path(__file__).resolve().parent
 if str(_LIB) not in sys.path:
     sys.path.insert(0, str(_LIB))
 import clock  # noqa: E402
+import deps  # noqa: E402  外部パッケージの環境（#1142 の決定 17）
 import monitor_outcome  # noqa: E402
 
 SCHEMA = 1
@@ -324,13 +326,10 @@ def _select(rows: list[dict], args: argparse.Namespace) -> list[dict]:
 
 
 def _quantile(sorted_values: list[float], q: float) -> float:
-    """線形補間の分位点（`statistics.quantiles` の `inclusive` と同じ）。"""
+    """線形補間の分位点（`statistics.quantiles` の `inclusive`）。`q` は 0.05 刻みで渡す。"""
     if len(sorted_values) == 1:
         return sorted_values[0]
-    pos = (len(sorted_values) - 1) * q
-    low = int(pos)
-    high = min(low + 1, len(sorted_values) - 1)
-    return sorted_values[low] + (sorted_values[high] - sorted_values[low]) * (pos - low)
+    return statistics.quantiles(sorted_values, n=20, method="inclusive")[round(q * 20) - 1]
 
 
 def _wall_minutes(row: dict) -> Optional[float]:
@@ -345,10 +344,9 @@ def _one_decimal(value: float) -> str:
 
 
 def _table(header: list[str], rows: list[list[str]]) -> str:
-    align = ["---"] + ["---:" for _ in header[1:]]
-    lines = ["| " + " | ".join(header) + " |", "| " + " | ".join(align) + " |"]
-    lines += ["| " + " | ".join(r) + " |" for r in rows]
-    return "\n".join(lines)
+    """先頭の列を左、ほかを右へ寄せた表（`lib/mdtable.py`）。`mdtable` は集計を出すときだけ読む。"""
+    import mdtable  # deps.require("mdtable") の後でだけ import できる
+    return mdtable.table_markdown(header, rows, align=["left"] + ["right"] * (len(header) - 1))
 
 
 def _finished_rows(rows: list[dict]) -> list[list[str]]:
@@ -437,6 +435,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Optional[list[str]] = None) -> None:
+    deps.require("mdtable")
     args = build_parser().parse_args(argv)
     base = pathlib.Path(args.dir) if args.dir else metrics_dir()
     print(aggregate_table(base, args))

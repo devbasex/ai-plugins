@@ -93,7 +93,7 @@ def test_init_stores_an_empty_rejected_findings_list(tmp_dir, state_mod, monkeyp
     monkeypatch.setattr(review_lib.github, "_fetch_pr_metadata", lambda pr, repo:
                         review_lib.github.PrMetadata(REPO, "author", "feature/test", "abc",
                                              "develop", False, 4000, None))
-    monkeypatch.setattr(review_lib, "_sh", lambda cmd, check=True: "viewer")
+    monkeypatch.setattr(review_lib.github, "_viewer_login", lambda: "viewer")
     monkeypatch.setattr(review_lib.github, "_fetch_changed_files", lambda pr, repo: [])
     monkeypatch.setattr(review_lib.workspace, "_is_registered_worktree", lambda path: True)
     monkeypatch.setattr(review_lib.workspace, "_sync_worktree", lambda *args: None)

@@ -564,3 +564,18 @@ def test_evacuate_survives_cross_device(repo, tmp_path, monkeypatch):
     assert (trash / "untracked.txt").read_text(encoding="utf-8") == "u\n"
     assert (trash / "dir" / "f.txt").is_file()
     assert not (wt / "untracked.txt").exists()
+
+
+def test_parse_record_skips_a_distribution_heading_inside_a_fence():
+    """lib/md.py の上で読む（#1142 の D1）: 囲みの中の `## 配布の記録` は記録として読まない。"""
+    text = ("## 配布の記録\n段階: 配布なし\nミッション: #5\n\n"
+            "コメント\n\n```md\n## 配布の記録\n段階: 開発版\n```\n")
+    rec = load_mission_close().parse_record(text)
+    assert rec["stage"] == "配布なし"
+    assert rec["mission_prs"] == [5]
+
+
+def test_verification_verdicts_reads_a_missing_result_cell_as_not_passed():
+    """GFM の表は欠けたセルを空として読む。`結果` の欠けた行は合格でない（前は表ごと読めない扱い）。"""
+    block = "## リリース後テスト\n\n| 課題 | 条件 | 結果 |\n| --- | --- | --- |\n| #7 | a | 合格 |\n| #8 | b |\n\n合否: 不合格\n"
+    assert load_mission_close().verification_verdicts(block, "o/r") == {("o/r", 7): True, ("o/r", 8): False}

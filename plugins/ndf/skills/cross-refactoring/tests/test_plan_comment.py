@@ -164,3 +164,15 @@ def test_the_plan_says_none_when_nothing_was_deferred(plan, tmp_path):
     _, state = _state(tmp_path)
     section = plan.format_plan(state).split("## 見送った提案", 1)[1]
     assert "（なし）" in section
+
+
+def test_a_pipe_or_newline_in_a_cell_does_not_break_the_table(plan, tmp_path):
+    """#1142 の D4 で表を `mdtable` で組むようにして変わった入力。セルの `|` は `\\|` に、改行は空白になる
+    （前は `|` がそのまま列を増やし、改行が表を途中で切っていた）。"""
+    _, state = _state(tmp_path, deferred_items=[{
+        "item_id": "I-002", "path": "src/bar.py", "symbol": "Bar.run", "smell": "duplication",
+        "defer_reason": "not_done", "detail": "a | b\nc",
+    }])
+    section = plan.format_plan(state).split("## 見送った提案", 1)[1]
+    row = next(ln for ln in section.splitlines() if "src/bar.py#Bar.run" in ln)
+    assert row == "| `src/bar.py#Bar.run` | duplication | not_done | a \\| b c |"

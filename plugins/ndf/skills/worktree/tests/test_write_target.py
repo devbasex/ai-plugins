@@ -8,20 +8,13 @@ from __future__ import annotations
 
 import pytest
 
+from hook_lib import write_target
 from worktree_helpers import run_lib
 
 
 def extract(command: str) -> tuple[list[str], int]:
-    # 改行を含むコマンドも渡せるよう、ヒアドキュメントで受け渡す。
-    # 引数へ埋めると、改行が字面の `\n` になって 1 行に潰れる。
-    snippet = (
-        "cmd=$(cat <<'WT_EOF'\n" + command + "\nWT_EOF\n)\n"
-        'wt_extract_write_target "$cmd"; echo rc=$?'
-    )
-    got = run_lib(snippet)
-    lines = [ln for ln in got.stdout.splitlines() if ln]
-    rc = int(lines.pop().removeprefix("rc="))
-    return lines, rc
+    lines = write_target.shell_targets(command)
+    return lines, 0 if lines else 1
 
 
 @pytest.mark.parametrize(
@@ -500,14 +493,8 @@ def extract_at(command: str, base: str) -> tuple[list[str], int]:
     起点を渡した場合、出力は絶対パスになる。同じコマンドの中で先に実行される
     `cd` を反映するため、字面のままでは解決できない。
     """
-    snippet = (
-        "cmd=$(cat <<'WT_EOF'\n" + command + "\nWT_EOF\n)\n"
-        f'wt_extract_write_target "$cmd" "{base}"; echo rc=$?'
-    )
-    got = run_lib(snippet)
-    lines = [ln for ln in got.stdout.splitlines() if ln]
-    rc = int(lines.pop().removeprefix("rc="))
-    return lines, rc
+    lines = write_target.shell_targets(command, base)
+    return lines, 0 if lines else 1
 
 
 @pytest.mark.parametrize(
@@ -931,8 +918,6 @@ def test_a_subshell_resolves_relative_paths_at_its_own_cwd(
         ("case $x in a) cp p.txt q.txt;; esac", ["q.txt"]),
         # 関数定義の `()` も部分シェルではない。
         ("f() { cp a.txt b.txt; }", ["b.txt"]),
-        # `$(` の中の `)` も語の一部である。
-        ("cp a.txt $(basename b).txt", ["b).txt"]),
     ],
 )
 def test_parentheses_outside_a_subshell_stay_in_the_word(
@@ -942,6 +927,27 @@ def test_parentheses_outside_a_subshell_stay_in_the_word(
     targets, rc = extract(command)
     assert rc == 0, command
     assert targets == expected, command
+
+
+def test_a_word_with_a_command_substitution_is_not_a_target() -> None:
+    """`$(basename b).txt` は展開の後の名前が決まらないので、書き込み先にしない（展開前の変数と同じ扱い）。
+
+    シェルの字句解析（#1142 の決定 20 の前）は `b).txt` を出していた。置換の閉じ括弧を語の区切りと読んだ誤りである。
+    """
+    assert extract("cp a.txt $(basename b).txt") == ([], 1)
+
+
+def test_an_unreadable_command_is_not_judged() -> None:
+    """tree-sitter-bash が読み切れないコマンド（否定した `case`）は推定しない（#1142 の決定 20）。
+
+    guard は判定をせずに通し、読み切れなかったことだけを案内する。シェルの字句解析は
+    `/base/README.md` を出していた。
+    """
+    import shparse
+
+    command = "cd .worktrees/x; ! case x in x) cd ../..; cp a.txt README.md ;; esac"
+    assert shparse.has_unreadable_error(shparse.parse_bash(command))
+    assert extract_at(command, "/base") == ([], 1)
 
 
 @pytest.mark.parametrize(
@@ -1464,8 +1470,6 @@ def test_append_assignments_before_a_command_keep_the_command_position(
         ("cd .worktrees/x; if false; then true; else case x in x) cd ../..; cp a.txt README.md ;; esac; fi",
          "/base/README.md"),
         ("cd .worktrees/x; while true; do case x in x) cd ../..; cp a.txt README.md ;; esac; done",
-         "/base/README.md"),
-        ("cd .worktrees/x; ! case x in x) cd ../..; cp a.txt README.md ;; esac",
          "/base/README.md"),
     ],
 )

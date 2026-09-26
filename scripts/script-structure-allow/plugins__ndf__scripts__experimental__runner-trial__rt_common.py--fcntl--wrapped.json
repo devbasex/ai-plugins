@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/experimental/runner-trial/rt_common.py", "name": "fcntl", "kind": "wrapped", "reason": "L1 の時点の使用。試行は既定で動くものから参照しないため包みへ移さず、X1 で試行ごと消す"}

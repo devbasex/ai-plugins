@@ -1,0 +1,12 @@
+# mcp-serena のスクリプトが使う外部パッケージの宣言（#1142 の決定 25）。版は隣の uv.lock が固定する。
+# 環境は scripts/serena_lsp/env.py が ~/.cache/mcp-serena/venv/<版> へ `uv sync --frozen` で用意する（SessionStart の hook と、
+# hook ではないエントリポイント）。PreToolUse の hook はその環境の python を直に起動し、uv run を挟まない。
+# 版は plugins/ndf/pyproject.toml の同じパッケージと揃える。足す・版を上げるのは、この 2 つを変える PR だけで行う（理由を PR に書く）。
+[project]
+name = "mcp-serena-scripts"
+version = "0.0.0"
+requires-python = ">=3.10"
+dependencies = ["ruamel-yaml==0.19.1"]
+
+[tool.uv]
+package = false

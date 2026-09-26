@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 
 import gh_call
+import mdtable
 from pr_mode import with_mode_line
 from supervise_lib.claude import TAIL
 from supervise_lib.prompts import PR_SYSTEM
@@ -81,7 +82,7 @@ class PrStep:
         for sid, r in ctx.state.results.items():
             if r.get("type") == "run":
                 last = next((l for l in reversed(r.get("text", "").splitlines()) if l.strip()), "")
-                tests.append(f"| {sid} | {r.get('exit')} | {last[:120]} |")
+                tests.append([sid, r.get("exit"), last[:120]])
         issues = " ".join(f"#{i}" for i in ctx.plan.get("課題", []))
         docs = "\n".join(f"- `{d}`" for d in step.get("docs", [])) or "- 無し"
         title = step.get("title") or (self.git(ctx, "log", "--reverse", "--format=%s", rng).splitlines() or [branch])[0]
@@ -107,9 +108,7 @@ class PrStep:
 
 ## テスト（supervise.py の run のステップ）
 
-| ステップ | exit | 最後の行 |
-| --- | ---: | --- |
-{chr(10).join(tests) or '| 無し | | |'}
+{mdtable.table_markdown(("ステップ", "exit", "最後の行"), tests or [["無し", "", ""]], align=(None, "right", None))}
 
 {PR_FOOTER}
 """

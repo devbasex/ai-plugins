@@ -115,8 +115,7 @@ def target_name(out: Path, date: str, released: str) -> str:
 # ---------- 表 ----------
 
 def table(cols: list[str], rows: list[list[str]]) -> list[str]:
-    lines = ["| " + " | ".join(cols) + " |", "| " + " | ".join("---" for _ in cols) + " |"]
-    return lines + ["| " + " | ".join(r) + " |" for r in rows]
+    return tu.mdtable.table_markdown(cols, rows).split("\n")  # 包みは token-usage.py が根の lock で読み込み済み
 
 
 def diff_rows(per_pr: list[dict]) -> list[tuple[dict, float, float | None]]:
