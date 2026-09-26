@@ -1,4 +1,5 @@
 """想定最大時間から採る項目と締め切りを決める計算（#933 の「時間の決め方」）。"""
+
 from __future__ import annotations
 
 import datetime as dt
@@ -13,23 +14,30 @@ def budget(refactor):
 
 
 TABLE = {
-    "source": "defaults", "test": 2.7, "structure": 1.3, "verify": 0.2, "fix": 5.5,
+    "source": "defaults",
+    "test": 2.7,
+    "structure": 1.3,
+    "verify": 0.2,
+    "fix": 5.5,
     "kinds": {"structure/extract_method": 2.0},
 }
 START = dt.datetime(2026, 9, 24, 10, 0, 0)
 
 
 def _cand(tier="high", n=1, severity="major", est=None, key="k"):
-    return {"key": key, "tier": tier, "proposed_by": ["x"] * n, "severity": severity,
-            "estimate": est or {"test": 0.0, "implement": 1.3, "verify": 0.2}}
+    return {
+        "key": key,
+        "tier": tier,
+        "proposed_by": ["x"] * n,
+        "severity": severity,
+        "estimate": est or {"test": 0.0, "implement": 1.3, "verify": 0.2},
+    }
 
 
 def test_item_estimate_uses_technique_and_falls_back(budget):
-    assert budget.item_estimate(TABLE, "extract_method", True) == {
-        "test": 2.7, "implement": 2.0, "verify": 0.2}
+    assert budget.item_estimate(TABLE, "extract_method", True) == {"test": 2.7, "implement": 2.0, "verify": 0.2}
     # 標本の無い手法は structure/* をまとめた値へ落ちる。テストを足さなければ 0
-    assert budget.item_estimate(TABLE, "rename", False) == {
-        "test": 0.0, "implement": 1.3, "verify": 0.2}
+    assert budget.item_estimate(TABLE, "rename", False) == {"test": 0.0, "implement": 1.3, "verify": 0.2}
 
 
 def test_reserve_matches_the_917_example(budget):
@@ -43,8 +51,7 @@ def test_reserve_matches_the_917_example(budget):
 
 def test_reserve_ci_check_and_missing_baseline(budget):
     assert budget.reserve(120, True, 5.5)["final_whole_test"] == 0.0
-    assert budget.reserve(None, False, 3.0) == {
-        "danger_whole_test": 0.0, "final_whole_test": 0.0, "fix": 3.0, "final_fix": 3.0}
+    assert budget.reserve(None, False, 3.0) == {"danger_whole_test": 0.0, "final_whole_test": 0.0, "fix": 3.0, "final_fix": 3.0}
 
 
 def test_rank_key_orders_tier_votes_severity_then_cheaper(budget):
@@ -52,8 +59,7 @@ def test_rank_key_orders_tier_votes_severity_then_cheaper(budget):
     high_1 = _cand(tier="high", n=1, key="high_1")
     high_2 = _cand(tier="high", n=2, severity="minor", key="high_2")
     high_2_major = _cand(tier="high", n=2, severity="major", key="high_2_major")
-    cheap = _cand(tier="high", n=2, severity="major", key="cheap",
-                  est={"test": 0, "implement": 0.5, "verify": 0.2})
+    cheap = _cand(tier="high", n=2, severity="major", key="cheap", est={"test": 0, "implement": 0.5, "verify": 0.2})
     ranked = sorted([low, high_1, high_2, high_2_major, cheap], key=budget.rank_key)
     assert [c["key"] for c in ranked] == ["cheap", "high_2_major", "high_2", "high_1", "low"]
 

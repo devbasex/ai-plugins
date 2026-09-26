@@ -9,6 +9,7 @@
 進み、判定も記録される。未反映のまま「両方が承認した」と記録しないことが、この課題で
 守る一線である。
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -50,13 +51,10 @@ def _flushed_review(item: dict[str, Any]) -> tuple[Any, Any, str] | None:
     return agent, round_no, url
 
 
-def _flushed_review_target(
-        state: dict[str, Any], agent: Any, round_no: Any) -> dict[str, Any] | None:
+def _flushed_review_target(state: dict[str, Any], agent: Any, round_no: Any) -> dict[str, Any] | None:
     """レビューを積んだラウンドから、担当の書き戻し先を探す。"""
     return next(
-        (entry for entry in state.get("rounds", [])
-         if entry.get("round") == round_no
-         and isinstance(entry.get(agent), dict)),
+        (entry for entry in state.get("rounds", []) if entry.get("round") == round_no and isinstance(entry.get(agent), dict)),
         None,
     )
 
@@ -84,8 +82,7 @@ def _confirm_flushed(pr: int, item: dict[str, Any]) -> None:
     target = _flushed_review_target(st, agent, round_no)
     if target is None:
         return
-    exists = github._review_exists(str(st.get("repo") or ""),
-                            int(st.get("current_pr") or pr), url)
+    exists = github._review_exists(str(st.get("repo") or ""), int(st.get("current_pr") or pr), url)
     if exists is False:
         # #261 の決まり。届いていない投稿は結果なしとして扱い、起動し直しの経路へ乗せる。
         target[agent] = {
@@ -96,10 +93,7 @@ def _confirm_flushed(pr: int, item: dict[str, Any]) -> None:
             "review_url": None,
             "by_severity": {},
         }
-        review_lib.info(
-            f"⚠ {agent}: 流した後も投稿を確認できません (review_url={url!r})。"
-            " 結果なしとして記録します"
-        )
+        review_lib.info(f"⚠ {agent}: 流した後も投稿を確認できません (review_url={url!r})。 結果なしとして記録します")
     else:
         target[agent]["review_url"] = url
         target[agent]["queued"] = False

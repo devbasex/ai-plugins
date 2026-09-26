@@ -6,6 +6,7 @@
 隔離した作業領域で bash を子プロセスとして実行し、標準出力と終了コードを観測する。
 直接 import する補助は `worktree_helpers.py` にある。
 """
+
 from __future__ import annotations
 
 import sys
@@ -14,7 +15,6 @@ from pathlib import Path
 import pytest
 
 from worktree_helpers import git, init_repo
-
 
 
 @pytest.fixture(autouse=True)

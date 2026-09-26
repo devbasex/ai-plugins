@@ -68,6 +68,7 @@ Exit codes (target=both は最悪値を返す):
 Stdout: 各 agent の最終ステータスを JSON で 1 行ずつ吐く（メインがパース可能）。
 Stderr: 人間向けの進捗ログ（poll ごとに 1 行）。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -93,6 +94,7 @@ import assignment  # noqa: E402  席の名前の規則（#727）
 import limits  # noqa: E402  上限の表（#598 / #537）
 import clock  # noqa: E402  時刻の書き出し（#1142 の L0）
 import deps  # noqa: E402  外部パッケージの環境（#1142 の決定 17・23）
+
 # 次の 5 つは、他のモジュールが monitor.monitor_proc のように使う再公開の import である（F401 の抑止の理由。#1323）
 import monitor_outcome  # noqa: E402,F401  監視の結果の語彙と読み書き（#662）
 import monitor_loop  # noqa: E402,F401
@@ -104,27 +106,76 @@ import monitor_types  # noqa: E402
 # 分けた 5 本の名前を再エクスポートする（既存の呼び出し側とシムの名前空間のため）。`_TMP_DIR_OVERRIDE` は
 # `monitor_types` だけが持つ（ここで取り込むと代入が `_tmp_dir` へ届かない）。
 from monitor_patterns import (  # noqa: E402,F401
-    USAGE_LIMIT_FATAL, EARLY_ERROR_FATAL, EARLY_ERROR_FATAL_WARNING_SHAPED, EARLY_ERROR_WARN,
-    EARLY_ERROR_BENIGN, EARLY_ERROR_BENIGN_KEEP_WARNINGS, CLI_TIMEOUT_AFTER_EXIT, CODEX_SENTINEL, ANSI_ESCAPE,
-    CLAUDE_STDOUT_FATAL, CLAUDE_STDOUT_USAGE_LIMIT, _match_is_quoted, _unescaped_count, _strip_ansi,
+    USAGE_LIMIT_FATAL,
+    EARLY_ERROR_FATAL,
+    EARLY_ERROR_FATAL_WARNING_SHAPED,
+    EARLY_ERROR_WARN,
+    EARLY_ERROR_BENIGN,
+    EARLY_ERROR_BENIGN_KEEP_WARNINGS,
+    CLI_TIMEOUT_AFTER_EXIT,
+    CODEX_SENTINEL,
+    ANSI_ESCAPE,
+    CLAUDE_STDOUT_FATAL,
+    CLAUDE_STDOUT_USAGE_LIMIT,
+    _match_is_quoted,
+    _unescaped_count,
+    _strip_ansi,
 )
 from monitor_scan import (  # noqa: E402,F401
-    _read_tail, _safe_size, _tail_last_nonempty_line, _scan_patterns, _scan_early_fatal, _scan_early_warn,
-    _scan_claude_stdout, _scan_claude_stdout_fatal, _scan_claude_stdout_usage_limit, _scan_codex_sentinel,
-    EarlyFatal, _scan_usage_limit, _scan_fatal, _early_error,
+    _read_tail,
+    _safe_size,
+    _tail_last_nonempty_line,
+    _scan_patterns,
+    _scan_early_fatal,
+    _scan_early_warn,
+    _scan_claude_stdout,
+    _scan_claude_stdout_fatal,
+    _scan_claude_stdout_usage_limit,
+    _scan_codex_sentinel,
+    EarlyFatal,
+    _scan_usage_limit,
+    _scan_fatal,
+    _early_error,
 )
 from monitor_proc import (  # noqa: E402,F401
-    _read_pidfile, _pid_alive, _is_zombie, _leads_own_group, _kill_pid, _pid_cmdline_matches,
+    _read_pidfile,
+    _pid_alive,
+    _is_zombie,
+    _leads_own_group,
+    _kill_pid,
+    _pid_cmdline_matches,
 )
 from monitor_types import (  # noqa: E402,F401
-    DEFAULT_TIMEOUT, DEFAULT_STALL, DEFAULT_STALL_AGENT_BUILTIN, DEFAULT_POLL, RESULT_AGE_GRACE,
-    DEFAULT_NO_EARLY_ERROR, _safe_int_env, _agent_runtime, _agent_stall_default, TMP_DIR_ENV_VARS, _tmp_dir,
-    DEFAULT_STEM_TEMPLATE, MonitorConfig, AgentPaths, MonitorOutcome, AgentStatus,
+    DEFAULT_TIMEOUT,
+    DEFAULT_STALL,
+    DEFAULT_STALL_AGENT_BUILTIN,
+    DEFAULT_POLL,
+    RESULT_AGE_GRACE,
+    DEFAULT_NO_EARLY_ERROR,
+    _safe_int_env,
+    _agent_runtime,
+    _agent_stall_default,
+    TMP_DIR_ENV_VARS,
+    _tmp_dir,
+    DEFAULT_STEM_TEMPLATE,
+    MonitorConfig,
+    AgentPaths,
+    MonitorOutcome,
+    AgentStatus,
 )
 from monitor_loop import (  # noqa: E402,F401
-    monitor_agent, _initialize_monitor, _validate_pid_cmdline, _update_progress, _lingering_completion,
-    _timeout_outcome, _early_error_outcome, _process_exit_outcome, _stall_outcome, _finish_monitor,
-    _emit_progress, _emit_log,
+    monitor_agent,
+    _initialize_monitor,
+    _validate_pid_cmdline,
+    _update_progress,
+    _lingering_completion,
+    _timeout_outcome,
+    _early_error_outcome,
+    _process_exit_outcome,
+    _stall_outcome,
+    _finish_monitor,
+    _emit_progress,
+    _emit_log,
 )
 from monitor_outcome import (  # noqa: E402,F401
     _record_outcome,
@@ -157,44 +208,49 @@ def main() -> None:
     # `both` はこれまでの 2 者を指す省略形として残す（既存の呼び出し側が使い続けられる
     # ようにする）。3 者以上を監視するときは `--agents` を使う。
     p.add_argument("target", nargs="?", type=_seat_or_both)
-    p.add_argument("--agents", default=None,
-                   help="監視対象をカンマ区切りで指定 (例: claude,kiro)。"
-                        "位置引数 target の代わりに使う")
-    p.add_argument("--tmp-dir", default=None,
-                   help="一時ファイルの置き場所。未指定時は env "
-                        f"({' / '.join(TMP_DIR_ENV_VARS)}) と worktree から解決する")
-    p.add_argument("--stem-template", default=DEFAULT_STEM_TEMPLATE,
-                   help="一時ファイル名の骨格。`{agent}` と `{id}` を埋める "
-                        f"(default: {DEFAULT_STEM_TEMPLATE})")
+    p.add_argument("--agents", default=None, help="監視対象をカンマ区切りで指定 (例: claude,kiro)。位置引数 target の代わりに使う")
+    p.add_argument(
+        "--tmp-dir", default=None, help=f"一時ファイルの置き場所。未指定時は env ({' / '.join(TMP_DIR_ENV_VARS)}) と worktree から解決する"
+    )
+    p.add_argument(
+        "--stem-template",
+        default=DEFAULT_STEM_TEMPLATE,
+        help=f"一時ファイル名の骨格。`{{agent}}` と `{{id}}` を埋める (default: {DEFAULT_STEM_TEMPLATE})",
+    )
     # env (MONITOR_TIMEOUT / MONITOR_STALL / MONITOR_POLL) は呼び出し時に safe parse で読む。
     # 非数値設定でも上限の表の値 / `DEFAULT_POLL` に戻す。
     poll_default = _safe_int_env("MONITOR_POLL", DEFAULT_POLL)
     phases = " / ".join(f"{k}={v}" for k, v in limits.PHASE_TIMEOUT.items())
-    p.add_argument("--phase", default=None,
-                   help="監視の上限を上限の表から引く工程。"
-                        f"省略時は {limits.DEFAULT_PHASE} の値 ({phases})")
-    p.add_argument("--timeout", type=int, default=None,
-                   help="hard timeout in seconds。未指定時は env MONITOR_TIMEOUT_<AGENT> / "
-                        "MONITOR_TIMEOUT、無ければ --phase の工程の値")
+    p.add_argument("--phase", default=None, help=f"監視の上限を上限の表から引く工程。省略時は {limits.DEFAULT_PHASE} の値 ({phases})")
+    p.add_argument(
+        "--timeout",
+        type=int,
+        default=None,
+        help="hard timeout in seconds。未指定時は env MONITOR_TIMEOUT_<AGENT> / MONITOR_TIMEOUT、無ければ --phase の工程の値",
+    )
     stalls = ", ".join(f"{k}={v}" for k, v in limits.AGENT_STALL.items())
-    p.add_argument("--stall-timeout", type=int, default=None,
-                   help="stall timeout (err.log no progress) in seconds. "
-                        f"未指定時は env MONITOR_STALL_<AGENT> / MONITOR_STALL、無ければ agent 別既定 ({stalls})")
-    p.add_argument("--poll", type=int, default=poll_default,
-                   help=f"poll interval in seconds (default: {poll_default})")
-    p.add_argument("--no-require-result", action="store_true",
-                   help="プロセス終了後に result.json が無くても OK 扱い")
-    p.add_argument("--no-early-error", action="store_true",
-                   default=DEFAULT_NO_EARLY_ERROR,
-                   help="EARLY_ERROR 検知を無効化 "
-                        "(hard timeout / stall / sentinel / result.json のみで判定) "
-                        f"[env: MONITOR_NO_EARLY_ERROR; default: {DEFAULT_NO_EARLY_ERROR}]")
+    p.add_argument(
+        "--stall-timeout",
+        type=int,
+        default=None,
+        help="stall timeout (err.log no progress) in seconds. "
+        f"未指定時は env MONITOR_STALL_<AGENT> / MONITOR_STALL、無ければ agent 別既定 ({stalls})",
+    )
+    p.add_argument("--poll", type=int, default=poll_default, help=f"poll interval in seconds (default: {poll_default})")
+    p.add_argument("--no-require-result", action="store_true", help="プロセス終了後に result.json が無くても OK 扱い")
+    p.add_argument(
+        "--no-early-error",
+        action="store_true",
+        default=DEFAULT_NO_EARLY_ERROR,
+        help="EARLY_ERROR 検知を無効化 "
+        "(hard timeout / stall / sentinel / result.json のみで判定) "
+        f"[env: MONITOR_NO_EARLY_ERROR; default: {DEFAULT_NO_EARLY_ERROR}]",
+    )
     args = p.parse_args()
     # **表に無い工程は USAGE（終了コード 1）で拒む。** `choices` にすると argparse の
     # 終了コード 2（TIMEOUT と同じ値）になる。
     if args.phase is not None and args.phase not in limits.PHASE_TIMEOUT:
-        print(f"monitor.py: 上限の表に無い工程です: {args.phase!r} "
-              f"（{' / '.join(limits.PHASE_TIMEOUT)}）", file=sys.stderr, flush=True)
+        print(f"monitor.py: 上限の表に無い工程です: {args.phase!r} （{' / '.join(limits.PHASE_TIMEOUT)}）", file=sys.stderr, flush=True)
         sys.exit(1)
     phase = args.phase or limits.DEFAULT_PHASE
 
@@ -225,9 +281,7 @@ def _resolve_agents(args: argparse.Namespace, parser: argparse.ArgumentParser) -
     parser.error("target か --agents のどちらかを指定してください")
 
 
-def _run_all(
-    agents: list[str], args: argparse.Namespace, phase: str
-) -> dict[str, AgentStatus]:
+def _run_all(agents: list[str], args: argparse.Namespace, phase: str) -> dict[str, AgentStatus]:
     """各担当をスレッドで並列監視し、担当名から結果を引ける辞書を返す。"""
     require_result = not args.no_require_result
     results: dict[str, AgentStatus] = {}
@@ -238,13 +292,14 @@ def _run_all(
         runtime = _agent_runtime(agent)
         timeout = limits.monitor_timeout(phase, runtime, args.timeout)
         stall = limits.stall_timeout(runtime, args.stall_timeout)
-        print(f"[{agent}] ▶ hard timeout {timeout}s / stall {stall}s (phase {phase})",
-              file=sys.stderr, flush=True)
+        print(f"[{agent}] ▶ hard timeout {timeout}s / stall {stall}s (phase {phase})", file=sys.stderr, flush=True)
         if stall >= timeout:
             # 上書きの結果、無進捗の許容が効かない組になった。止めはしない（AC33）。
-            print(f"[{agent}] ⚠ 無進捗の許容 {stall}s が監視の上限 {timeout}s 以上です"
-                  "（無進捗では止まらず、監視の上限で止まります）",
-                  file=sys.stderr, flush=True)
+            print(
+                f"[{agent}] ⚠ 無進捗の許容 {stall}s が監視の上限 {timeout}s 以上です（無進捗では止まらず、監視の上限で止まります）",
+                file=sys.stderr,
+                flush=True,
+            )
         started_at = clock.now_iso()
         config = MonitorConfig(
             timeout=timeout,
@@ -260,8 +315,7 @@ def _run_all(
             pr=args.pr,
             config=config,
         )
-        _record_outcome(agent, args.pr, args.stem_template, results[agent], started_at,
-                        args.phase)
+        _record_outcome(agent, args.pr, args.stem_template, results[agent], started_at, args.phase)
 
     threads = [threading.Thread(target=run, args=(a,), daemon=False) for a in agents]
     for t in threads:
@@ -275,21 +329,26 @@ def _emit_results(agents: list[str], results: dict[str, AgentStatus]) -> None:
     """各担当の最終ステータスを 1 行 1 JSON で標準出力へ書く。"""
     for agent in agents:
         st = results[agent]
-        print(json.dumps({
-            "agent": agent,
-            "status": st.status,
-            "exit_code": st.exit_code,
-            "pid": st.pid,
-            "elapsed": round(st.elapsed, 1),
-            "detail": st.detail,
-            "err_log_size": st.err_log_size,
-            "stdout_log_size": st.stdout_log_size,
-            "progress_log_size": st.progress_log_size,
-            "progress_tail": st.progress_tail,
-            "idle_seconds": round(st.idle_seconds, 1),
-            "result_exists": st.result_exists,
-            "sentinel_seen": st.sentinel_seen,
-        }, ensure_ascii=False))
+        print(
+            json.dumps(
+                {
+                    "agent": agent,
+                    "status": st.status,
+                    "exit_code": st.exit_code,
+                    "pid": st.pid,
+                    "elapsed": round(st.elapsed, 1),
+                    "detail": st.detail,
+                    "err_log_size": st.err_log_size,
+                    "stdout_log_size": st.stdout_log_size,
+                    "progress_log_size": st.progress_log_size,
+                    "progress_tail": st.progress_tail,
+                    "idle_seconds": round(st.idle_seconds, 1),
+                    "result_exists": st.result_exists,
+                    "sentinel_seen": st.sentinel_seen,
+                },
+                ensure_ascii=False,
+            )
+        )
 
 
 if __name__ == "__main__":

@@ -106,14 +106,16 @@ def render_markdown(
     else:
         result_suffix = " / " + " / ".join(extra_parts) if extra_parts else ""
 
-    lines.extend([
-        f"- **結果: {passed}/{total} test PASS{result_suffix}**",
-        "",
-        "## サマリ",
-        "",
-        "| nodeid | role | page_role | status | duration | console.error | pageerror | body_check |",
-        "|---|---|---|---|---|---|---|---|",
-    ])
+    lines.extend(
+        [
+            f"- **結果: {passed}/{total} test PASS{result_suffix}**",
+            "",
+            "## サマリ",
+            "",
+            "| nodeid | role | page_role | status | duration | console.error | pageerror | body_check |",
+            "|---|---|---|---|---|---|---|---|",
+        ]
+    )
 
     # phase / priority / nodeid の順でソート
     sorted_entries = sorted(
@@ -149,10 +151,7 @@ def render_markdown(
     if body_check_hits:
         lines.extend(["", "## body_check 違反の詳細", ""])
         for e in body_check_hits:
-            lines.append(
-                f"### `{e.nodeid}` — body_check {e.body_check_violations} 件 "
-                f"({e.status_label})"
-            )
+            lines.append(f"### `{e.nodeid}` — body_check {e.body_check_violations} 件 ({e.status_label})")
             lines.append("")
             lines.append("| # | URL | category | pattern | snippet |")
             lines.append("|---:|---|---|---|---|")
@@ -165,9 +164,7 @@ def render_markdown(
                     snippet = snippet[:200] + "..."
                 lines.append(f"| {i} | `{url}` | {cat} | `{pat}` | {snippet} |")
             if len(e.body_check_detail) > 20:
-                lines.append(
-                    "\n_(表示は先頭 20 件のみ。詳細は ``body_check.jsonl`` を参照)_"
-                )
+                lines.append("\n_(表示は先頭 20 件のみ。詳細は ``body_check.jsonl`` を参照)_")
             lines.append("")
 
     return "\n".join(lines) + "\n"
@@ -179,14 +176,7 @@ def _escape_table_cell(text: str) -> str:
     改行・タブが残ると行が分割されて表が崩れるので空白に置換する。
     ``|`` と backtick もエスケープして表構造とコード span を破壊しないようにする。
     """
-    return (
-        text.replace("\r\n", " ")
-        .replace("\r", " ")
-        .replace("\n", " ")
-        .replace("\t", " ")
-        .replace("|", "\\|")
-        .replace("`", "\\`")
-    )
+    return text.replace("\r\n", " ").replace("\r", " ").replace("\n", " ").replace("\t", " ").replace("|", "\\|").replace("`", "\\`")
 
 
 def write_report(

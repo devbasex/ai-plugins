@@ -3,6 +3,7 @@
 gemini round 4 指摘: payload.json が dict 以外 (list 等) の場合、
 `payload.get("comments", [])` で AttributeError になる前に明示的に止める。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -40,9 +41,7 @@ def patched_tmp_dir(monkeypatch, tmp_path, state_mod):
     return tmp_path
 
 
-def _write_payload(
-    tmp_dir: pathlib.Path, agent: str, round_no: int, data: object
-) -> pathlib.Path:
+def _write_payload(tmp_dir: pathlib.Path, agent: str, round_no: int, data: object) -> pathlib.Path:
     p = tmp_dir / f"{agent}-review-pr{PR}-round{round_no}-payload.json"
     p.write_text(json.dumps(data))
     return p

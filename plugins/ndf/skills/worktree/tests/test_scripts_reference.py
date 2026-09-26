@@ -7,6 +7,7 @@
 
 外部への通信は行わない。配置は `tmp_path` の上に作る。
 """
+
 from __future__ import annotations
 
 import os
@@ -19,9 +20,7 @@ import pytest
 
 SKILL_DIR = Path(__file__).resolve().parents[1]
 SKILLS_ROOT = SKILL_DIR.parent
-LOOKUP_REFERENCE = (
-    SKILLS_ROOT / "development-workflow" / "references" / "scripts-lookup.md"
-)
+LOOKUP_REFERENCE = SKILLS_ROOT / "development-workflow" / "references" / "scripts-lookup.md"
 LOOKUP_HEADING = "## 入口を探すコマンド"
 # 解決の入口の実物。配置を作るたびに写す。
 RESOLVE_ENTRY = Path(__file__).resolve().parents[3] / "scripts" / "resolve.sh"
@@ -75,7 +74,10 @@ def resolve(cwd: Path, home: Path, plugin_root: Path | None = None) -> str:
     env.pop("CLAUDE_PLUGIN_ROOT", None)
     got = subprocess.run(
         ["bash", "-c", f'set -uo pipefail\n{snippet}\nprintf "%s\\n" "$SCRIPTS"\n'],
-        cwd=str(cwd), env=env, capture_output=True, text=True,
+        cwd=str(cwd),
+        env=env,
+        capture_output=True,
+        text=True,
     )
     assert got.returncode == 0, got.stderr
     return got.stdout.strip()
@@ -189,7 +191,7 @@ def test_environment_variables_are_excluded_by_name() -> None:
 
 def test_special_variables_are_not_treated_as_undefined() -> None:
     """`$?` のような特殊変数は、代入も宣言も無くても失敗にしない。"""
-    body = "```bash\nbash run.sh; echo $?\nls \"$1\" \"$@\"\n```\n"
+    body = '```bash\nbash run.sh; echo $?\nls "$1" "$@"\n```\n'
     assert used_variables(body) == set()
 
 
@@ -251,7 +253,8 @@ def test_skill_stops_when_scripts_is_unresolved() -> None:
     """`$SCRIPTS` が決まっていなければ、案内を出して終了コード 1 で止まる。"""
     got = subprocess.run(
         ["bash", "-c", f"set -u\n{guard_line()}\necho ここへは来ない\n"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     assert got.returncode == 1, got.stdout
     assert got.stderr.strip() != "", "案内が標準エラーへ出ていない"

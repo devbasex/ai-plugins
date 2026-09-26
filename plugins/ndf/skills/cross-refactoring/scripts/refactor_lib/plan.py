@@ -9,6 +9,7 @@
 | **Pull Request のコメント 1 件**（既定） | **永続** | 混ざらない | 編集 1 回 |
 | ファイル（`--plan-file`） | `<ref>` に依存。ブランチが消えると切れる | **混ざる** | コミットと push |
 """
+
 from __future__ import annotations
 
 import json
@@ -105,14 +106,12 @@ def publish_plan_comment(state: dict[str, Any]) -> Optional[str]:
     body = plan_comment_body(state)
     if comment_id:
         out = sh(
-            ["gh", "api", f"repos/{repo}/issues/comments/{comment_id}",
-             "-X", "PATCH", "-f", f"body={body}"],
+            ["gh", "api", f"repos/{repo}/issues/comments/{comment_id}", "-X", "PATCH", "-f", f"body={body}"],
             check=False,
         )
     else:
         out = sh(
-            ["gh", "api", f"repos/{repo}/issues/{int(pr)}/comments",
-             "-X", "POST", "-f", f"body={body}"],
+            ["gh", "api", f"repos/{repo}/issues/{int(pr)}/comments", "-X", "POST", "-f", f"body={body}"],
             check=False,
         )
     payload = _comment_payload(out)
@@ -178,8 +177,7 @@ def format_plan(state: dict[str, Any]) -> str:
         f"- 対象範囲: {', '.join(state.get('target_scope') or []) or '（未指定）'}",
         f"- 着手前のテスト: {baseline.get('command') or '（未指定）'}",
         f"- 着手前の全体のテストの結果: {baseline_line(baseline)}",
-        f"- 想定最大時間: {state.get('budget_minutes')} 分"
-        f" / 改修計画の時点で使えた時間: {plan.get('available_minutes', '—')} 分",
+        f"- 想定最大時間: {state.get('budget_minutes')} 分 / 改修計画の時点で使えた時間: {plan.get('available_minutes', '—')} 分",
         f"- 実装担当: {state.get('implementer') or '—'}",
         "",
         "## 改善項目",
@@ -236,8 +234,10 @@ def _plan_deferred_section(state: dict[str, Any]) -> list[str]:
     if not deferred:
         lines.extend(["（なし）", ""])
         return lines
-    rows = [(f"`{item_label(item)}`", item.get("smell") or "—", str(item.get("defer_reason", "—")),
-             item.get("detail") or "—") for item in deferred]
+    rows = [
+        (f"`{item_label(item)}`", item.get("smell") or "—", str(item.get("defer_reason", "—")), item.get("detail") or "—")
+        for item in deferred
+    ]
     lines.extend([mdtable.table_markdown(["対象", "兆候", "理由", "補足"], rows), ""])
     return lines
 
@@ -246,24 +246,35 @@ def _plan_item_section(item: dict[str, Any]) -> list[str]:
     """項目 1 件の見出し・要約表・理由・手順。"""
     status = ITEM_STATUS_LABELS.get(item.get("status"), item.get("status") or "—")
     commits = item.get("commits") or {}
-    count = len([s for s in (commits.get("test"), commits.get("implement"),
-                             *(commits.get("fix") or [])) if s])
+    count = len([s for s in (commits.get("test"), commits.get("implement"), *(commits.get("fix") or [])) if s])
     lines = [
         f"### {item['id']} — `{item_label(item)}`",
         "",
         mdtable.table_markdown(
             ["兆候", "手法", "重要度", "等級", "提案元", "状態", "コミット"],
-            [(item.get("smell") or "—", item.get("technique") or "—", item.get("severity") or "—",
-              item.get("tier") or "—", " / ".join(item.get("proposed_by") or []) or "—", status, count)]),
+            [
+                (
+                    item.get("smell") or "—",
+                    item.get("technique") or "—",
+                    item.get("severity") or "—",
+                    item.get("tier") or "—",
+                    " / ".join(item.get("proposed_by") or []) or "—",
+                    status,
+                    count,
+                )
+            ],
+        ),
         "",
         f"**なぜ**: {item.get('rationale') or '（記録なし）'}",
         "",
         f"**手順**: {item.get('plan') or '（記録なし）'}",
         "",
     ]
-    deadlines = [f"{label} {item[key]}" for key, label in (
-        ("test_start_deadline", "テストの追加の着手"), ("start_deadline", "実装の着手"))
-        if item.get(key)]
+    deadlines = [
+        f"{label} {item[key]}"
+        for key, label in (("test_start_deadline", "テストの追加の着手"), ("start_deadline", "実装の着手"))
+        if item.get(key)
+    ]
     if deadlines:
         lines.extend([f"**締め切り**: {' / '.join(deadlines)}", ""])
     if item.get("review_test_judgements"):

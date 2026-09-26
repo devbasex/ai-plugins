@@ -11,6 +11,7 @@
 | `VERIFY=fix` | 直す項目が残った | 修正を 1 回起動し、`merge-fix` の後に `verify` へ戻る |
 | `VERIFY=done` | 残った項目の範囲テストがすべて通った | 最終ゲートへ |
 """
+
 from __future__ import annotations
 
 import argparse
@@ -56,11 +57,11 @@ from ..verify import (
 
 # ---------- 範囲テスト ----------
 
+
 def _run_words(state: dict[str, Any], words: list[str], log: pathlib.Path) -> bool:
     """語の並びをシェルを通さずに走らせる（AC10b）。打ち切りは失敗。"""
     timeout = timeline.state_test_timeout(state)
-    code, timed_out = run_with_timeout(list(words), work_dir(state),
-                                       timeout, output=log)
+    code, timed_out = run_with_timeout(list(words), work_dir(state), timeout, output=log)
     return (not timed_out) and code == 0
 
 
@@ -90,7 +91,10 @@ def _newest_first(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _revert_shared(
-    path: pathlib.Path, state: dict[str, Any], group: list[dict[str, Any]], reason: str,
+    path: pathlib.Path,
+    state: dict[str, Any],
+    group: list[dict[str, Any]],
+    reason: str,
     command: Optional[list[str]] = None,
 ) -> bool:
     """同じ語の並びを共有した項目を、新しい方から 1 件ずつ取り消す（AC15）。
@@ -124,8 +128,7 @@ def _fix_stop(state: dict[str, Any]) -> bool:
     （決定 22）。1 回の修正 = 実装担当の 1 起動で、次の試行の前にここで時計を見る。
     """
     reserve = (state.get("plan") or {}).get("reserve") or {}
-    left = budget.fix_time_left(clock.parse(state["started_at"]), int(state["budget_minutes"]),
-                                reserve, clock.now())
+    left = budget.fix_time_left(clock.parse(state["started_at"]), int(state["budget_minutes"]), reserve, clock.now())
     return left < float(reserve.get("fix") or 0.0)
 
 
@@ -145,6 +148,7 @@ def _give_up(path: pathlib.Path, state: dict[str, Any]) -> None:
 
 
 # ---------- 危険フラグ ----------
+
 
 def _item_files(work: str, item: dict[str, Any]) -> list[str]:
     files: list[str] = []
@@ -183,9 +187,7 @@ def _flag_items(state: dict[str, Any]) -> list[str]:
         if item.get("status") != VERIFIED:
             continue
         if not item.get("danger_checked"):
-            found = danger.item_flags(
-                work, item, item_shas(item), _item_files(work, item), scope,
-                _test_files(state, item), _d5(item))
+            found = danger.item_flags(work, item, item_shas(item), _item_files(work, item), scope, _test_files(state, item), _d5(item))
             item["danger"], item["danger_hits"] = found["flags"], found["hits"]
             item["danger_checked"] = True
         flags.extend(f for f in item.get("danger") or [] if f not in flags)
@@ -209,14 +211,18 @@ def _whole_test(path: pathlib.Path, state: dict[str, Any], flags: list[str]) -> 
     info(f"⚠ 危険フラグ（{', '.join(flags)}）が立ったため、全体のテストを 1 度走らせます: {command}")
     started = time.monotonic()
     log = pathlib.Path(state["tmp_dir"]) / "verify-whole-test.log"
-    code, timed_out = run_with_timeout(command, work, timeline.state_test_timeout(state),
-                                       output=log)
+    code, timed_out = run_with_timeout(command, work, timeline.state_test_timeout(state), output=log)
     passed = (not timed_out) and code == 0
-    record.update({
-        "ran": True, "flags": flags, "status": "pass" if passed else "fail",
-        "seconds": round(time.monotonic() - started, 1),
-        "head": git_out(work, ["rev-parse", "HEAD"]), "reverted": False,
-    })
+    record.update(
+        {
+            "ran": True,
+            "flags": flags,
+            "status": "pass" if passed else "fail",
+            "seconds": round(time.monotonic() - started, 1),
+            "head": git_out(work, ["rev-parse", "HEAD"]),
+            "reverted": False,
+        }
+    )
     statefile.save(path, state)
     if passed:
         info("✅ 全体のテストが通りました")
@@ -228,8 +234,10 @@ def _whole_test(path: pathlib.Path, state: dict[str, Any], flags: list[str]) -> 
     if record.get("unparsed_reason"):
         _revert_all_flagged(path, state, record, flags, flagged)
         return False
-    info(f"🔎 落ちたテスト {len(record['failed_tests'])} 件: 揺れ {len(record['flaky'])} / "
-         f"元からの失敗 {len(record['preexisting'])} / 変更が原因 {len(record['caused'])}")
+    info(
+        f"🔎 落ちたテスト {len(record['failed_tests'])} 件: 揺れ {len(record['flaky'])} / "
+        f"元からの失敗 {len(record['preexisting'])} / 変更が原因 {len(record['caused'])}"
+    )
     if not record["caused"]:
         record["resolution"] = "kept"
         info("✅ 変更が原因の失敗はありません。危険フラグの項目は取り消しません（最終ゲートが全体のテストを走らせます）")
@@ -239,7 +247,10 @@ def _whole_test(path: pathlib.Path, state: dict[str, Any], flags: list[str]) -> 
 
 
 def _revert_all_flagged(
-    path: pathlib.Path, state: dict[str, Any], record: dict[str, Any], flags: list[str],
+    path: pathlib.Path,
+    state: dict[str, Any],
+    record: dict[str, Any],
+    flags: list[str],
     flagged: list[dict[str, Any]],
 ) -> None:
     """落ちたテストを取り出せないときは、見分けずに危険フラグの項目をまとめて取り消す（決定 15 のまま）。"""
@@ -259,7 +270,10 @@ def _whole_items(state: dict[str, Any], record: dict[str, Any]) -> list[dict[str
 
 
 def _fix_or_narrow(
-    path: pathlib.Path, state: dict[str, Any], record: dict[str, Any], log: pathlib.Path,
+    path: pathlib.Path,
+    state: dict[str, Any],
+    record: dict[str, Any],
+    log: pathlib.Path,
 ) -> bool:
     """締め切りの内なら危険フラグの項目を修正へ回し（真）、過ぎていれば絞って取り消す（偽）。
 
@@ -278,8 +292,7 @@ def _fix_or_narrow(
     passed = _revert_shared(path, state, items, reason, command=list(record.get("rerun_command") or []))
     record["reverted"] = True
     record["resolution"] = "narrowed"
-    info(f"↩ 危険フラグの項目を新しい順に取り消しました（{'落ちたテストが通った時点で止めた' if passed else '全件'}）。"
-         f"{plan_line(state)}")
+    info(f"↩ 危険フラグの項目を新しい順に取り消しました（{'落ちたテストが通った時点で止めた' if passed else '全件'}）。{plan_line(state)}")
     return False
 
 
@@ -300,6 +313,7 @@ def _recheck_whole(path: pathlib.Path, state: dict[str, Any], record: dict[str, 
 
 
 # ---------- verify ----------
+
 
 def _prepare(path: pathlib.Path, state: dict[str, Any]) -> None:
     discard_impl_leftovers(state, work_dir(state))
@@ -348,7 +362,10 @@ def cmd_verify(args: argparse.Namespace) -> None:
 
 
 def _to_fix(
-    path: pathlib.Path, state: dict[str, Any], failing: list[dict[str, Any]], started: float,
+    path: pathlib.Path,
+    state: dict[str, Any],
+    failing: list[dict[str, Any]],
+    started: float,
     what: str,
 ) -> None:
     """落ちた項目を修正へ回す（`VERIFY=fix`）。修正の起点は今の HEAD。"""
@@ -376,8 +393,11 @@ def _account(state: dict[str, Any], started: float) -> None:
 
 # ---------- merge-fix ----------
 
+
 def _fix_problems(
-    state: dict[str, Any], facts: list[dict[str, Any]], allowed: set[str],
+    state: dict[str, Any],
+    facts: list[dict[str, Any]],
+    allowed: set[str],
 ) -> list[str]:
     """修正のコミットが手順を満たすか。**1 件でも外れたら修正の範囲ごと取り消す。**"""
     scope = list(state.get("target_scope") or [])
@@ -395,7 +415,10 @@ def _fix_problems(
 
 
 def _inspect_fix_commits(
-    state: dict[str, Any], work: str, fix: dict[str, Any], targets: list[dict[str, Any]],
+    state: dict[str, Any],
+    work: str,
+    fix: dict[str, Any],
+    targets: list[dict[str, Any]],
 ) -> dict[str, Any]:
     """修正の起点からコミットを集め、取り込み可否の材料を返す。"""
     head = git_out(work, ["rev-parse", "HEAD"]) or ""
@@ -415,7 +438,10 @@ def _inspect_fix_commits(
 
 
 def _apply_fix_result(
-    path: pathlib.Path, state: dict[str, Any], work: str, result: dict[str, Any],
+    path: pathlib.Path,
+    state: dict[str, Any],
+    work: str,
+    result: dict[str, Any],
 ) -> None:
     """違反した修正を取り消し、または採用したコミットを項目へ関連付ける。"""
     ordered = result["ordered"]

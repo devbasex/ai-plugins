@@ -3,6 +3,7 @@
 止まるときの JSON の形と終了コードの表は `drive_pause.py` が持ち、ここは子のスクリプトの起動・
 KEY=VALUE の読み取り・最終ステータスの決定だけを持つ。
 """
+
 from __future__ import annotations
 
 import shlex
@@ -36,8 +37,12 @@ def parse_vars(text: str) -> dict:
 def review_status(state: dict) -> str:
     """最後の HEAD が承認されたなら approved、それ以外は final の値（cross-refactoring の finalize が読む）。"""
     sw = state.get("sweep") or {}
-    if (state.get("final") == "approved" and sw.get("verified") is True
-            and (sw.get("remaining_open") or 0) == 0 and sw.get("commit") is None):
+    if (
+        state.get("final") == "approved"
+        and sw.get("verified") is True
+        and (sw.get("remaining_open") or 0) == 0
+        and sw.get("commit") is None
+    ):
         return "approved"
     if state.get("final") == "approved":
         return "unverified"  # 最後の HEAD（スイープの修正・残り・未検証）は承認されていない

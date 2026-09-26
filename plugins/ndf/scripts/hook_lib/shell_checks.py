@@ -6,6 +6,7 @@
   いるものだけを見る（`echo` の引数・引用やヒアドキュメントの中の文字列は拾わない）。インタプリタのフラグ（`python3 -u`）と
   `env`・`nohup`・変数の代入は挟んでよい
 """
+
 from __future__ import annotations
 
 import re
@@ -47,8 +48,11 @@ def _sleep_in(n: sp.Node, limit: float, loop: bool, bg: bool, depth: int) -> boo
         return any(_sleep_in(c, limit, loop or c.type == "do_group", bg, depth) for c in n.children if c.is_named)
     if t in sp.STATEMENT_LISTS or t == "subshell":
         return any(_sleep_in(c, limit, loop, bg or b, depth) for c, b in sp.statement_list(n))
-    return any(_sleep_in(c, limit, loop, bg or (c.next_sibling is not None and c.next_sibling.type == "&"), depth)
-               for c in n.children if c.is_named)
+    return any(
+        _sleep_in(c, limit, loop, bg or (c.next_sibling is not None and c.next_sibling.type == "&"), depth)
+        for c in n.children
+        if c.is_named
+    )
 
 
 def _sleep_command(n: sp.Node, limit: float, loop: bool, depth: int) -> bool:
@@ -66,7 +70,7 @@ def _sleep_command(n: sp.Node, limit: float, loop: bool, depth: int) -> bool:
             i += 1
     if i >= len(words):
         return False
-    name, rest = words[i], words[i + 1:]
+    name, rest = words[i], words[i + 1 :]
     if name == "sleep" and rest:
         sec = sleep_seconds(rest[0])
         return loop or (sec is not None and sec > limit)

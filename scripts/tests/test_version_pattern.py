@@ -4,6 +4,7 @@
 なる。ここでは、共有の定義が拾う値と、2 つのチェックが自分で書式を持っていないことの両方を
 確かめる。
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -91,6 +92,4 @@ def test_the_manifest_checker_reads_a_prerelease_version(tmp_path: Path) -> None
 def test_the_shared_definition_is_copied_from_the_real_file(tmp_path: Path) -> None:
     """木へ置くのは実物の複製である。テスト用に書式を書き写さない。"""
     root = helpers.build_tree(tmp_path)
-    assert (root / "scripts/lib/version_pattern.py").read_text(encoding="utf-8") == SHARED.read_text(
-        encoding="utf-8"
-    )
+    assert (root / "scripts/lib/version_pattern.py").read_text(encoding="utf-8") == SHARED.read_text(encoding="utf-8")

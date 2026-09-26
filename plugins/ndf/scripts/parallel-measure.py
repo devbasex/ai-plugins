@@ -25,6 +25,7 @@
     capacity      0 測れた / 2 引数の誤り / 3 `--meminfo` を読めない
     concurrency   0 測れた / 1 `gh pr view` が失敗した / 2 引数の誤り
 """
+
 from __future__ import annotations
 
 import argparse
@@ -88,6 +89,7 @@ def emit_pairs(pairs: list[tuple[str, object]]) -> None:
 
 # --- capacity ---------------------------------------------------------------
 
+
 def read_meminfo(path: Path) -> dict[str, int]:
     """`/proc/meminfo` を kB の辞書として読む。`MemAvailable` が無ければ測れない。"""
     try:
@@ -109,8 +111,7 @@ def read_meminfo(path: Path) -> dict[str, int]:
     return values
 
 
-def resolve_cgroup_dir(given: Optional[str], *, root: Optional[Path] = None,
-                       proc_cgroup: Optional[Path] = None) -> Path:
+def resolve_cgroup_dir(given: Optional[str], *, root: Optional[Path] = None, proc_cgroup: Optional[Path] = None) -> Path:
     """`--cgroup-dir` が無いときだけ、自分の cgroup の位置を導く（`procs.cgroup_dir`）。
 
     コンテナの中では `/sys/fs/cgroup` がそのまま自分の cgroup だが、ホストでは
@@ -124,8 +125,9 @@ def resolve_cgroup_dir(given: Optional[str], *, root: Optional[Path] = None,
     """
     if given is not None:
         return Path(given)
-    return procs.cgroup_dir(procs.CGROUP_ROOT if root is None else Path(root),
-                            procs.PROC_SELF_CGROUP if proc_cgroup is None else Path(proc_cgroup))
+    return procs.cgroup_dir(
+        procs.CGROUP_ROOT if root is None else Path(root), procs.PROC_SELF_CGROUP if proc_cgroup is None else Path(proc_cgroup)
+    )
 
 
 def read_oom_kill(cgroup_dir: Path) -> object:
@@ -144,8 +146,7 @@ def read_cgroup_available_mib(cgroup_dir: Path) -> object:
     return max(0, (mem.limit - mem.current) // (1024 * 1024))
 
 
-def lanes_by_memory(available_mib: int, running: int, reserve_mib: int,
-                    per_lane_mib: int) -> int:
+def lanes_by_memory(available_mib: int, running: int, reserve_mib: int, per_lane_mib: int) -> int:
     """空きから導いた総本数。
 
     空きは動いている担当の使用量を引いた後の値なので、割った値は**追加できる本数**である。
@@ -176,8 +177,7 @@ def run_capacity(args: argparse.Namespace) -> int:
     if isinstance(cgroup_available, int):
         budget_mib = min(budget_mib, cgroup_available)
 
-    by_memory = lanes_by_memory(budget_mib, args.running, args.reserve_mib,
-                                args.per_lane_mib)
+    by_memory = lanes_by_memory(budget_mib, args.running, args.reserve_mib, args.per_lane_mib)
     allowed = min(args.max_lanes, by_memory)
     limited_by: list[str] = []
     if by_memory <= args.max_lanes:
@@ -201,22 +201,25 @@ def run_capacity(args: argparse.Namespace) -> int:
             allowed = 1
             limited_by.append("floor")
 
-    emit_pairs([
-        ("mem_available_mib", mem_available_mib),
-        ("swap_total_mib", swap_total_mib),
-        ("swap_free_mib", swap_free_mib),
-        ("cgroup_available_mib", cgroup_available),
-        ("oom_kill", oom_kill),
-        ("oom_kill_increased", oom_kill_increased),
-        ("running", args.running),
-        ("by_memory", by_memory),
-        ("allowed", allowed),
-        ("limited_by", ",".join(limited_by)),
-    ])
+    emit_pairs(
+        [
+            ("mem_available_mib", mem_available_mib),
+            ("swap_total_mib", swap_total_mib),
+            ("swap_free_mib", swap_free_mib),
+            ("cgroup_available_mib", cgroup_available),
+            ("oom_kill", oom_kill),
+            ("oom_kill_increased", oom_kill_increased),
+            ("running", args.running),
+            ("by_memory", by_memory),
+            ("allowed", allowed),
+            ("limited_by", ",".join(limited_by)),
+        ]
+    )
     return 0
 
 
 # --- concurrency ------------------------------------------------------------
+
 
 def parse_time(value: object, *, what: str) -> _dt.datetime:
     if not isinstance(value, str):
@@ -266,7 +269,7 @@ def intervals(records: list[dict], now: _dt.datetime) -> list[tuple[_dt.datetime
 
 
 def build_events(
-        spans: list[tuple[_dt.datetime, _dt.datetime]],
+    spans: list[tuple[_dt.datetime, _dt.datetime]],
 ) -> list[tuple[_dt.datetime, int]]:
     """期間を開始と終了の事象列に変換する。
 
@@ -297,17 +300,16 @@ def scan_events(events: list[tuple[_dt.datetime, int]]) -> tuple[int, float]:
 
 
 def summarize_measurement(
-        spans: list[tuple[_dt.datetime, _dt.datetime]],
-        max_open: int,
-        overlap_seconds: float,
+    spans: list[tuple[_dt.datetime, _dt.datetime]],
+    max_open: int,
+    overlap_seconds: float,
 ) -> dict[str, object]:
     """期間と走査結果を表示用の集計値に整形する。"""
     start = min(span[0] for span in spans)
     end = max(span[1] for span in spans)
     span_seconds = (end - start).total_seconds()
     if span_seconds > 0:
-        pct = (Decimal(overlap_seconds) / Decimal(span_seconds) * 100).quantize(
-            Decimal("0.1"), rounding=ROUND_HALF_UP)
+        pct = (Decimal(overlap_seconds) / Decimal(span_seconds) * 100).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
     else:
         pct = Decimal("0.0")
     return {
@@ -354,34 +356,27 @@ def run_concurrency(args: argparse.Namespace) -> int:
 
 # --- 入口 -------------------------------------------------------------------
 
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="parallel-measure.py", description="並列の本数と並行度を測る（#621）")
+    parser = argparse.ArgumentParser(prog="parallel-measure.py", description="並列の本数と並行度を測る（#621）")
     sub = parser.add_subparsers(dest="command", required=True)
 
     cap = sub.add_parser("capacity", help="起動してよい本数を出す")
-    cap.add_argument("--running", type=non_negative_int, default=0,
-                     help="いま動いている担当（作業ツリー 1 つ分）の数")
-    cap.add_argument("--oom-baseline", type=non_negative_int, default=None,
-                     help="実行計画に控えた oom_kill の起点")
+    cap.add_argument("--running", type=non_negative_int, default=0, help="いま動いている担当（作業ツリー 1 つ分）の数")
+    cap.add_argument("--oom-baseline", type=non_negative_int, default=None, help="実行計画に控えた oom_kill の起点")
     cap.add_argument("--reserve-mib", type=non_negative_int, default=DEFAULT_RESERVE_MIB)
     cap.add_argument("--per-lane-mib", type=non_negative_int, default=DEFAULT_PER_LANE_MIB)
-    cap.add_argument("--max", dest="max_lanes", type=non_negative_int,
-                     default=DEFAULT_MAX_LANES)
-    cap.add_argument("--swap-free-min-pct", type=non_negative_int,
-                     default=DEFAULT_SWAP_FREE_MIN_PCT)
+    cap.add_argument("--max", dest="max_lanes", type=non_negative_int, default=DEFAULT_MAX_LANES)
+    cap.add_argument("--swap-free-min-pct", type=non_negative_int, default=DEFAULT_SWAP_FREE_MIN_PCT)
     cap.add_argument("--meminfo", default=DEFAULT_MEMINFO)
     cap.add_argument("--cgroup-dir", default=None)
     cap.set_defaults(handler=run_capacity)
 
     con = sub.add_parser("concurrency", help="並行度と最大同時本数を出す")
-    con.add_argument("numbers", nargs="*", type=non_negative_int,
-                     help="対象の Pull Request の番号")
+    con.add_argument("numbers", nargs="*", type=non_negative_int, help="対象の Pull Request の番号")
     con.add_argument("--repo", default=None)
-    con.add_argument("--input", default=None,
-                     help="gh を呼ばず、番号と時刻の JSON を読む")
-    con.add_argument("--now", default=None,
-                     help="開いたままの Pull Request の期間の終わり")
+    con.add_argument("--input", default=None, help="gh を呼ばず、番号と時刻の JSON を読む")
+    con.add_argument("--now", default=None, help="開いたままの Pull Request の期間の終わり")
     con.set_defaults(handler=run_concurrency)
     return parser
 

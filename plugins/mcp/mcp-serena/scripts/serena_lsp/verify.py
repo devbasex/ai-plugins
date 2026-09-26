@@ -1,4 +1,5 @@
 """configure: 言語を検出し、`.serena/project.yml` を書き、1 言語ずつ起動を検証する（決定 7）。"""
+
 import difflib
 import os
 import shlex
@@ -26,8 +27,7 @@ def _serena_env() -> dict:
 
 
 def _run(cmd: list, root: Path, timeout: float):
-    proc = subprocess.Popen(cmd, cwd=root, env=_serena_env(), stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL, start_new_session=True)
+    proc = subprocess.Popen(cmd, cwd=root, env=_serena_env(), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
     try:
         return proc.wait(timeout=timeout)
     except BaseException:
@@ -50,6 +50,7 @@ def _latest_log(root: Path, since: float):
 def health_check(root: Path, serena_cmd: list, timeout: float) -> dict:
     """1 回の health-check。{"ok": bool, "reason": str, "log": str|None}。"""
     import time
+
     started = time.time() - 1
     try:
         code = _run([*serena_cmd, "project", "health-check", str(root)], root, timeout)
@@ -97,6 +98,7 @@ def _final_text(text: str, root: Path, verified: list, excluded: list) -> str:
 def _signals_to_exception():
     def handler(signum, frame):
         raise Terminated(signum)
+
     previous = {s: signal.signal(s, handler) for s in (signal.SIGTERM, signal.SIGINT)}
     return previous
 
@@ -117,12 +119,16 @@ def _not_selected_entries(not_selected: list) -> list:
 def _plan_dry_run(result: dict, original, root: Path, candidates: list, not_selected: list):
     planned_excluded = _not_selected_entries(not_selected)
     planned = _final_text(original or "", root, candidates, planned_excluded)
-    result["diff"] = "".join(difflib.unified_diff(
-        (original or "").splitlines(True), planned.splitlines(True), "project.yml", "project.yml"))
+    result["diff"] = "".join(
+        difflib.unified_diff((original or "").splitlines(True), planned.splitlines(True), "project.yml", "project.yml")
+    )
     result["written"].update(
-        language_servers=candidates, excluded=planned_excluded, created=original is None,
+        language_servers=candidates,
+        excluded=planned_excluded,
+        created=original is None,
         ignored_paths_added=_added_ignored_paths(original or "", planned),
-        serena_gitignore_added=_missing_serena_gitignore(root))
+        serena_gitignore_added=_missing_serena_gitignore(root),
+    )
     result["dry_run"] = True
     return result, 0 if candidates else 1
 
@@ -193,8 +199,7 @@ def _prepare(result: dict, root: Path, candidates: list, not_selected: list, dry
     if original is None:
         original = _create_project(cmd, root, candidates, timeout)
         if original is None:
-            return ({**result, "error": "serena project create が project.yml を作りませんでした"}, 2), \
-                None, None, None
+            return ({**result, "error": "serena project create が project.yml を作りませんでした"}, 2), None, None, None
         result["written"]["created"] = True
     return None, original, cmd, timeout
 
@@ -214,8 +219,7 @@ def _verify_each(root: Path, original: str, candidates: list, not_selected: list
             else:
                 failed.append({"language": lang, "reason": outcome["reason"], "log": outcome["log"]})
     finally:
-        excluded = [_excluded_entry(f["language"], f["reason"]) for f in failed] + \
-            _not_selected_entries(not_selected)
+        excluded = [_excluded_entry(f["language"], f["reason"]) for f in failed] + _not_selected_entries(not_selected)
         final = _final_text(original, root, verified, excluded)
         yml.write_text(final)
         for sig, handler in previous.items():
@@ -223,14 +227,25 @@ def _verify_each(root: Path, original: str, candidates: list, not_selected: list
     return verified, failed, excluded, final
 
 
-def configure(root: Path, dry_run=False, gitignore=False, serena_gitignore=False, only=None,
-              serena_cmd=SERENA_CMD):
+def configure(root: Path, dry_run=False, gitignore=False, serena_gitignore=False, only=None, serena_cmd=SERENA_CMD):
     """(結果の辞書, 終了コード) を返す。"""
     root = Path(root)
     data = table.load()
-    result = {"root": str(root), "detected": [], "skipped": [], "verified": [], "failed": [],
-              "written": {"created": False, "language_servers": [], "excluded": [],
-                          "ignored_paths_added": [], "gitignore": False, "serena_gitignore_added": []}}
+    result = {
+        "root": str(root),
+        "detected": [],
+        "skipped": [],
+        "verified": [],
+        "failed": [],
+        "written": {
+            "created": False,
+            "language_servers": [],
+            "excluded": [],
+            "ignored_paths_added": [],
+            "gitignore": False,
+            "serena_gitignore_added": [],
+        },
+    }
     try:
         detected, skipped = detect.detect(root, data)
     except detect.GitUnavailable as exc:
@@ -244,9 +259,7 @@ def configure(root: Path, dry_run=False, gitignore=False, serena_gitignore=False
 
     verified, failed, excluded, final = _verify_each(root, original, candidates, not_selected, cmd, timeout)
     result["verified"], result["failed"] = verified, failed
-    result["written"].update(
-        language_servers=verified, excluded=excluded,
-        ignored_paths_added=_added_ignored_paths(original, final))
+    result["written"].update(language_servers=verified, excluded=excluded, ignored_paths_added=_added_ignored_paths(original, final))
 
     _write_gitignores(root, result, gitignore, serena_gitignore)
     return result, 0 if verified else 1

@@ -2,6 +2,7 @@
 
 `_sync_worktree` の 1 つの手順（head の解決・取得・除外・差分の確認・巻き戻し・掃除）を関数に分けて持つ。
 """
+
 from __future__ import annotations
 
 import os
@@ -53,13 +54,15 @@ def _create_worktree(worktree: str, pr: int, head_branch: str) -> None:
     # 「パス登録済み」として失敗するため、追加前に prune で掃除しておく。
     subprocess.run(
         ["git", "worktree", "prune"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     # フォーク PR の場合 origin に head_branch がないことがある。
     # fetch 失敗時は gh pr checkout --detach でフォールバックする。
     fetch_result = subprocess.run(
         ["git", "fetch", "origin", head_branch],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     if fetch_result.returncode == 0:
         # head branch が既に別の worktree で checkout されている場合を避けるため
@@ -77,7 +80,8 @@ def _create_worktree(worktree: str, pr: int, head_branch: str) -> None:
             # die() の前に作成済み worktree をロールバックする。
             subprocess.run(
                 ["git", "worktree", "remove", "--force", worktree],
-                capture_output=True, text=True,
+                capture_output=True,
+                text=True,
             )
             review_lib.die(f"gh pr checkout --detach #{pr} 失敗: {checkout_result.stderr.strip()}")
         review_lib.info(f"✅ worktree 作成 (gh pr checkout --detach #{pr}): {worktree}")
@@ -126,11 +130,15 @@ def _fetch_head(worktree: str, pr: int, head: HeadRef) -> bool:
     target = f"refs/pull/{pr}/head" if head.is_fork else head.branch
     subprocess.run(
         ["git", "fetch", "origin", target],
-        capture_output=True, text=True, cwd=worktree,
+        capture_output=True,
+        text=True,
+        cwd=worktree,
     )
     have = subprocess.run(
         ["git", "cat-file", "-e", f"{head.oid}^{{commit}}"],
-        capture_output=True, text=True, cwd=worktree,
+        capture_output=True,
+        text=True,
+        cwd=worktree,
     )
     return have.returncode == 0
 
@@ -167,7 +175,9 @@ def _worktree_changes(
     """
     r = subprocess.run(
         ["git", "status", "--porcelain"],
-        capture_output=True, text=True, cwd=worktree,
+        capture_output=True,
+        text=True,
+        cwd=worktree,
     )
     if r.returncode != 0:
         review_lib.die(f"作業ツリーの状態を読み取れない: {r.stderr.strip()[:200]}", code=code)
@@ -202,14 +212,14 @@ def _is_synced(
     tracked, untracked = _worktree_changes(worktree, exclusions, code)
     if tracked:
         review_lib.die(
-            "作業ツリーに未 push の変更が残っています: "
-            f"{' '.join(tracked[:10])}。"
-            " 修正を push してから次のラウンドを開始してください",
+            f"作業ツリーに未 push の変更が残っています: {' '.join(tracked[:10])}。 修正を push してから次のラウンドを開始してください",
             code=code,
         )
     ahead = subprocess.run(
         ["git", "rev-list", "--count", f"{head.oid}..HEAD"],
-        capture_output=True, text=True, cwd=worktree,
+        capture_output=True,
+        text=True,
+        cwd=worktree,
     )
     if ahead.returncode != 0:
         review_lib.die(
@@ -223,13 +233,14 @@ def _is_synced(
         review_lib.die(f"基準 {head.oid[:7]} からの差を読み取れない: {ahead.stdout.strip()[:80]}", code=code)
     if extra > 0:
         review_lib.die(
-            f"作業ツリーに PR #{pr} の head へ含まれないコミットが {extra} 件あります。"
-            " push してから次のラウンドを開始してください",
+            f"作業ツリーに PR #{pr} の head へ含まれないコミットが {extra} 件あります。 push してから次のラウンドを開始してください",
             code=code,
         )
     current = subprocess.run(
         ["git", "rev-parse", "HEAD"],
-        capture_output=True, text=True, cwd=worktree,
+        capture_output=True,
+        text=True,
+        cwd=worktree,
     )
     if current.returncode != 0 or current.stdout.strip() != head.oid or untracked:
         return False
@@ -238,13 +249,18 @@ def _is_synced(
 
 
 def _reset_worktree_head(
-    worktree: str, pr: int, target: str | None, code: int,
+    worktree: str,
+    pr: int,
+    target: str | None,
+    code: int,
 ) -> None:
     """基準へ巻き戻す。基準が無ければ PR の checkout へフォールバックする。"""
     if target is not None:
         reset = subprocess.run(
             ["git", "reset", "--hard", target],
-            capture_output=True, text=True, cwd=worktree,
+            capture_output=True,
+            text=True,
+            cwd=worktree,
         )
         if reset.returncode != 0:
             review_lib.die(f"worktree を {target} へ同期できない: {reset.stderr.strip()}", code=code)
@@ -258,7 +274,9 @@ def _clean_untracked_files(worktree: str, exclusions: list[str], code: int) -> N
     """除外パスを残して追跡対象外のファイルを掃除する。"""
     clean = subprocess.run(
         ["git", "clean", "-fd", *[a for e in exclusions for a in ("-e", e)]],
-        capture_output=True, text=True, cwd=worktree,
+        capture_output=True,
+        text=True,
+        cwd=worktree,
     )
     if clean.returncode != 0:
         # 消せないまま進むと、残骸を抱えた作業ツリーで fix 担当が `git add -A` を
@@ -267,7 +285,9 @@ def _clean_untracked_files(worktree: str, exclusions: list[str], code: int) -> N
 
 
 def _resolve_sync_target(
-    worktree: str, pr: int, head: str | HeadRef,
+    worktree: str,
+    pr: int,
+    head: str | HeadRef,
 ) -> tuple[bool, str, str]:
     """同期する基準を取り込み、手元の有無・対象・表示名を返す。"""
     if isinstance(head, HeadRef):
@@ -276,7 +296,8 @@ def _resolve_sync_target(
     # 旧来の呼び出し（ブランチ名だけを渡す経路）。基準は `origin/<branch>` になる。
     fetch = subprocess.run(
         ["git", "fetch", "origin", head],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     return fetch.returncode == 0, f"origin/{head}", head
 
@@ -290,7 +311,9 @@ def _has_unpushed_commits(worktree: str, target: str) -> bool:
     """
     ahead = subprocess.run(
         ["git", "rev-list", "--count", f"{target}..HEAD"],
-        capture_output=True, text=True, cwd=worktree,
+        capture_output=True,
+        text=True,
+        cwd=worktree,
     )
     try:
         extra = int(ahead.stdout.strip() or "0") if ahead.returncode == 0 else 0
@@ -300,7 +323,9 @@ def _has_unpushed_commits(worktree: str, target: str) -> bool:
         return False
     ancestor = subprocess.run(
         ["git", "merge-base", "--is-ancestor", target, "HEAD"],
-        capture_output=True, text=True, cwd=worktree,
+        capture_output=True,
+        text=True,
+        cwd=worktree,
     )
     return ancestor.returncode == 0
 
@@ -342,20 +367,16 @@ def _sync_worktree(
     have_base, target, label = _resolve_sync_target(worktree, pr, head)
 
     if have_base:
-        if strict and isinstance(head, HeadRef) and _is_synced(
-                worktree, pr, head, exclusions, code):
+        if strict and isinstance(head, HeadRef) and _is_synced(worktree, pr, head, exclusions, code):
             return
         if not strict and _has_unpushed_commits(worktree, target):
-            review_lib.info(
-                f"↷ 作業ツリーに PR #{pr} の head より先の未 push のコミットがあるため巻き戻さない"
-            )
+            review_lib.info(f"↷ 作業ツリーに PR #{pr} の head より先の未 push のコミットがあるため巻き戻さない")
             return
     elif strict:
         # HEAD を動かす前に、何が失われるかを数える材料が無い（基準が手元に無いのだから、
         # 未 push のコミットを数えられない）。判定できない状態でフォールバックしない。
         review_lib.die(
-            f"PR #{pr} の基準のコミット {target[:7]} を取り込めない。"
-            " ネットワークか権限を確認してください",
+            f"PR #{pr} の基準のコミット {target[:7]} を取り込めない。 ネットワークか権限を確認してください",
             code=code,
         )
     else:
@@ -365,7 +386,9 @@ def _sync_worktree(
     _clean_untracked_files(worktree, exclusions, code)
     rev = subprocess.run(
         ["git", "rev-parse", "--short", "HEAD"],
-        capture_output=True, text=True, cwd=worktree,
+        capture_output=True,
+        text=True,
+        cwd=worktree,
     )
     sha = rev.stdout.strip() if rev.returncode == 0 else "?"
     review_lib.info(f"↻ 既存 worktree を PR #{pr} の head へ同期: {sha}")

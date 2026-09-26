@@ -1,4 +1,5 @@
 """プランの実行（supervise.py）の中身（#1142 の C1）。分け方は issues/issue-1142-design-modules.md の supervise_lib の節。"""
+
 import sys
 from pathlib import Path
 

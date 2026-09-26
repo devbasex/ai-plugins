@@ -13,6 +13,7 @@
   SDK の initialize の制御要求に答えないため双方が待ち合って止まる。stream-json の往復を話す偽物（cli_path）と
   query(transport=...) の差し替えが動くかを確かめる
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -29,15 +30,15 @@ from step_result import emit, result
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[1]))
 TOOL = "hook-trial"
-RECORDER = '''#!/bin/sh
+RECORDER = """#!/bin/sh
 printf '%s\\n' "$@" > "{out}"
 exit 1
-'''
-SLOW = '''#!/bin/sh
+"""
+SLOW = """#!/bin/sh
 exec sleep 120
-'''
+"""
 NO_TITLE = {"CLAUDE_CODE_DISABLE_TERMINAL_TITLE": "1"}
-FAKE_STREAM = '''import json, sys
+FAKE_STREAM = """import json, sys
 if "-v" in sys.argv:
     print("2.1.283 (Claude Code)")
     sys.exit(0)
@@ -53,11 +54,11 @@ for line in sys.stdin:
     print(json.dumps(r), flush=True)
     if r["type"] == "result":
         break
-'''
-FAKE = '''import json, sys
+"""
+FAKE = """import json, sys
 sys.stdin.read()
 print(json.dumps({"result": "ok", "is_error": False, "usage": {}, "total_cost_usd": 0, "num_turns": 1, "session_id": "s"}))
-'''
+"""
 
 
 def options(kind: str, system: str, cwd: str, cli: str | None, resume: str | None = None, env: dict | None = None):
@@ -69,16 +70,32 @@ def options(kind: str, system: str, cwd: str, cli: str | None, resume: str | Non
         common["model"] = os.environ["NDF_SUPERVISE_MODEL"]
     if kind == "full":
         common.pop("model", None)
-        return ClaudeAgentOptions(system_prompt={"type": "preset", "preset": "claude_code", "append": system},
-                                  allowed_tools=cl.FULL_TOOLS.split(","), permission_mode="acceptEdits",
-                                  resume=resume, setting_sources=["user", "project", "local"], **common)
-    base = dict(system_prompt=system, setting_sources=[], strict_mcp_config=True,
-                extra_args={"no-session-persistence": None, "disable-slash-commands": None}, **common)
+        return ClaudeAgentOptions(
+            system_prompt={"type": "preset", "preset": "claude_code", "append": system},
+            allowed_tools=cl.FULL_TOOLS.split(","),
+            permission_mode="acceptEdits",
+            resume=resume,
+            setting_sources=["user", "project", "local"],
+            **common,
+        )
+    base = dict(
+        system_prompt=system,
+        setting_sources=[],
+        strict_mcp_config=True,
+        extra_args={"no-session-persistence": None, "disable-slash-commands": None},
+        **common,
+    )
     if kind == "minimal":
         return ClaudeAgentOptions(tools=[], **base)
     tools = cl.WORK_TOOLS.split(",")
-    return ClaudeAgentOptions(tools=tools, allowed_tools=tools + ["mcp__serena"], permission_mode="acceptEdits",
-                              add_dirs=[cwd], mcp_servers=cl.SERENA_MCP["mcpServers"], **base)
+    return ClaudeAgentOptions(
+        tools=tools,
+        allowed_tools=tools + ["mcp__serena"],
+        permission_mode="acceptEdits",
+        add_dirs=[cwd],
+        mcp_servers=cl.SERENA_MCP["mcpServers"],
+        **base,
+    )
 
 
 async def drain(prompt: str, opts, timeout: float, transport=None):
@@ -89,6 +106,7 @@ async def drain(prompt: str, opts, timeout: float, transport=None):
         async for m in query(prompt=prompt, options=opts, transport=transport):
             last = m
         return last
+
     return await asyncio.wait_for(go(), timeout)
 
 
@@ -125,8 +143,16 @@ def check_args(work: Path, items: list, bad: list) -> None:
         except Exception:  # 偽物は応答しない。引数だけを読む
             pass
         sdk = pairs(rec.read_text(encoding="utf-8").splitlines()) if rec.exists() else {}
-        now = pairs(cl.claude_cmd("SYS", cl.WORK_TOOLS if kind == "work" else None, str(work), full=kind == "full",
-                                  serena=kind == "work", resume="sess-1" if kind == "full" else None)[1:])
+        now = pairs(
+            cl.claude_cmd(
+                "SYS",
+                cl.WORK_TOOLS if kind == "work" else None,
+                str(work),
+                full=kind == "full",
+                serena=kind == "work",
+                resume="sess-1" if kind == "full" else None,
+            )[1:]
+        )
         missing, differ = [], []
         for k, v in now.items():
             if k in ("--output-format", "--print"):
@@ -143,8 +169,16 @@ def check_args(work: Path, items: list, bad: list) -> None:
                 differ.append(f"{k}（{v!r} / {sdk[k]!r}）")
         extra = sorted(k for k in sdk if k not in now)
         ok = not missing and not differ
-        items.append({"kind": "sdk_args", "name": kind, "result": "same" if ok else "differs",
-                      "missing": missing, "differs": differ, "sdk_only": extra})
+        items.append(
+            {
+                "kind": "sdk_args",
+                "name": kind,
+                "result": "same" if ok else "differs",
+                "missing": missing,
+                "differs": differ,
+                "sdk_only": extra,
+            }
+        )
         if not ok:
             bad.append(f"引数（{kind}）")
 
@@ -166,8 +200,16 @@ def check_timeout(work: Path, items: list, bad: list) -> None:
     for pid in left:
         subprocess.run(["kill", pid], capture_output=True)
     ok = how == "打ち切り" and not left
-    items.append({"kind": "sdk_timeout", "name": "応答しない CLI を 2 秒で打ち切る", "result": "ok" if ok else "left",
-                  "how": how, "seconds": round(time.time() - t, 1), "left_processes": len(left)})
+    items.append(
+        {
+            "kind": "sdk_timeout",
+            "name": "応答しない CLI を 2 秒で打ち切る",
+            "result": "ok" if ok else "left",
+            "how": how,
+            "seconds": round(time.time() - t, 1),
+            "left_processes": len(left),
+        }
+    )
     if not ok:
         bad.append("打ち切り")
 
@@ -189,12 +231,24 @@ def check_fake(work: Path, items: list, bad: list) -> None:
             for line in data.splitlines():
                 m = json.loads(line)
                 if m.get("type") == "control_request":
-                    await self.box.put({"type": "control_response", "response": {
-                        "subtype": "success", "request_id": m["request_id"], "response": {}}})
+                    await self.box.put(
+                        {"type": "control_response", "response": {"subtype": "success", "request_id": m["request_id"], "response": {}}}
+                    )
                 elif m.get("type") == "user":
-                    await self.box.put({"type": "result", "subtype": "success", "result": "ok", "is_error": False,
-                                        "usage": {}, "total_cost_usd": 0, "num_turns": 1, "session_id": "s",
-                                        "duration_ms": 1, "duration_api_ms": 1})
+                    await self.box.put(
+                        {
+                            "type": "result",
+                            "subtype": "success",
+                            "result": "ok",
+                            "is_error": False,
+                            "usage": {},
+                            "total_cost_usd": 0,
+                            "num_turns": 1,
+                            "session_id": "s",
+                            "duration_ms": 1,
+                            "duration_api_ms": 1,
+                        }
+                    )
                     await self.box.put(None)
 
         async def read_messages(self):
@@ -214,7 +268,7 @@ def check_fake(work: Path, items: list, bad: list) -> None:
         py = work / f"{name}.py"
         py.write_text(body, encoding="utf-8")
         sh = work / f"{name}.sh"
-        sh.write_text(f"#!/bin/sh\nexec {shlex.quote(sys.executable)} {shlex.quote(str(py))} \"$@\"\n", encoding="utf-8")
+        sh.write_text(f'#!/bin/sh\nexec {shlex.quote(sys.executable)} {shlex.quote(str(py))} "$@"\n', encoding="utf-8")
         sh.chmod(0o755)
         return str(sh)
 
@@ -227,9 +281,11 @@ def check_fake(work: Path, items: list, bad: list) -> None:
         except Exception as e:
             return f"{type(e).__name__}: {str(e)[:120]}"
 
-    got = {"now": attempt(wrap("fake_claude", FAKE), timeout=10),
-           "stream_json": attempt(wrap("fake_stream", FAKE_STREAM)),
-           "transport": attempt(None, ReplyTransport())}
+    got = {
+        "now": attempt(wrap("fake_claude", FAKE), timeout=10),
+        "stream_json": attempt(wrap("fake_stream", FAKE_STREAM)),
+        "transport": attempt(None, ReplyTransport()),
+    }
     for name, how in got.items():
         ok = how == "ResultMessage"
         items.append({"kind": "sdk_fake", "name": name, "result": "works" if ok else "fails", "got": how})
@@ -252,14 +308,30 @@ def check_live(work: Path, items: list, bad: list, runs: int) -> None:
     def cli_once() -> dict:
         t = time.time()
         now = cl.call_claude(system, prompt, None, str(work), 120)
-        return {"ok": now["ok"], "text": now["text"], "usage": now["usage"], "model_usage": now["model_usage"],
-                "cost": now["cost"], "turns": now["turns"], "session": now["session"], "seconds": round(time.time() - t, 1)}
+        return {
+            "ok": now["ok"],
+            "text": now["text"],
+            "usage": now["usage"],
+            "model_usage": now["model_usage"],
+            "cost": now["cost"],
+            "turns": now["turns"],
+            "session": now["session"],
+            "seconds": round(time.time() - t, 1),
+        }
 
     def sdk_once(env: dict | None) -> dict:
         t = time.time()
         m = asyncio.run(drain(prompt, options("minimal", system, str(work), None, env=env), 120))
-        return {"ok": not m.is_error, "text": m.result, "usage": m.usage, "model_usage": m.model_usage,
-                "cost": m.total_cost_usd, "turns": m.num_turns, "session": m.session_id, "seconds": round(time.time() - t, 1)}
+        return {
+            "ok": not m.is_error,
+            "text": m.result,
+            "usage": m.usage,
+            "model_usage": m.model_usage,
+            "cost": m.total_cost_usd,
+            "turns": m.num_turns,
+            "session": m.session_id,
+            "seconds": round(time.time() - t, 1),
+        }
 
     rows: dict[str, list] = {"cli": [], "sdk": [], "sdk_no_title": []}
     try:
@@ -274,21 +346,39 @@ def check_live(work: Path, items: list, bad: list, runs: int) -> None:
     keys = ("ok", "text", "usage", "model_usage", "cost", "turns", "session")
     ref, got = rows["cli"][0], rows["sdk_no_title"][0]
     same_shape = all(bool(got[k]) == bool(ref[k]) for k in keys)
-    items.append({"kind": "sdk_live", "name": model, "result": "same_shape" if same_shape else "differs",
-                  "now": {k: bool(ref[k]) for k in keys}, "sdk": {k: bool(got[k]) for k in keys},
-                  "sdk_usage_keys": sorted(got["usage"] or {})})
+    items.append(
+        {
+            "kind": "sdk_live",
+            "name": model,
+            "result": "same_shape" if same_shape else "differs",
+            "now": {k: bool(ref[k]) for k in keys},
+            "sdk": {k: bool(got[k]) for k in keys},
+            "sdk_usage_keys": sorted(got["usage"] or {}),
+        }
+    )
     if not same_shape:
         bad.append("結果の読み取り")
     # 費用: usage（帳簿が読む値）と modelUsage の入力が合うか・CLI と同じ依頼で費用が変わらないか（中央値）
     base = median(r["cost"] or 0 for r in rows["cli"])
     for name in ("cli", "sdk", "sdk_no_title"):
         rs = rows[name]
-        tokens = {"runs": len(rs), "usage_in": [(r["usage"] or {}).get("input_tokens") for r in rs],
-                  "model_in": [model_in(r["model_usage"]) for r in rs], "cost": [r["cost"] for r in rs],
-                  "cost_ratio": round(median(r["cost"] or 0 for r in rs) / base, 2) if base else None}
+        tokens = {
+            "runs": len(rs),
+            "usage_in": [(r["usage"] or {}).get("input_tokens") for r in rs],
+            "model_in": [model_in(r["model_usage"]) for r in rs],
+            "cost": [r["cost"] for r in rs],
+            "cost_ratio": round(median(r["cost"] or 0 for r in rs) / base, 2) if base else None,
+        }
         ok = tokens["usage_in"] == tokens["model_in"] and (tokens["cost_ratio"] or 0) <= 1.2
-        items.append({"kind": "sdk_cost", "name": f"{model}・{name}", "result": "same" if ok else "differs",
-                      "env": NO_TITLE if name == "sdk_no_title" else {}, **tokens})
+        items.append(
+            {
+                "kind": "sdk_cost",
+                "name": f"{model}・{name}",
+                "result": "same" if ok else "differs",
+                "env": NO_TITLE if name == "sdk_no_title" else {},
+                **tokens,
+            }
+        )
         if name == "sdk_no_title" and not ok:
             bad.append(f"費用（タイトルを止めても入力 {tokens['model_in']} トークン・費用 {tokens['cost_ratio']} 倍）")
 
@@ -297,6 +387,7 @@ def cmd_sdk(a) -> None:
     work = Path(a.work) / "sdk"
     work.mkdir(parents=True, exist_ok=True)
     import claude_agent_sdk
+
     items: list = []
     bad: list = []
     check_args(work, items, bad)
@@ -305,6 +396,13 @@ def cmd_sdk(a) -> None:
     if a.live:
         check_live(work, items, bad, a.runs)
     status = "stopped" if bad else "ok"
-    emit(result(TOOL, status, (f"claude-agent-sdk {claude_agent_sdk.__version__}: " +
-                               ("今の契約を満たす" if not bad else "満たさない: " + " / ".join(bad))), items,
-                {"live": bool(a.live)}), 0 if status == "ok" else 1)
+    emit(
+        result(
+            TOOL,
+            status,
+            (f"claude-agent-sdk {claude_agent_sdk.__version__}: " + ("今の契約を満たす" if not bad else "満たさない: " + " / ".join(bad))),
+            items,
+            {"live": bool(a.live)},
+        ),
+        0 if status == "ok" else 1,
+    )

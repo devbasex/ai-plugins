@@ -3,6 +3,7 @@
 `log.jsonl` と `next.json` を書くのは `RelayRecord` だけである（I12）。`run` の `Relay` も Stop hook の `mark` も
 これを通して書くため、行とキーの形の定義は 1 か所に残る。形は版をまたいで変えない（I11）。
 """
+
 from __future__ import annotations
 
 import errno
@@ -11,8 +12,20 @@ import os
 import random
 import time
 
-from .common import (COUNT_LOCK, LOG_FILE, MARK_FILE, _lock, _unlock, env_num, load_json, parse_iso, remove,
-                     stamp, state_root, write_json_atomic)
+from .common import (
+    COUNT_LOCK,
+    LOG_FILE,
+    MARK_FILE,
+    _lock,
+    _unlock,
+    env_num,
+    load_json,
+    parse_iso,
+    remove,
+    stamp,
+    state_root,
+    write_json_atomic,
+)
 
 
 class RelayRecord:
@@ -41,13 +54,16 @@ class RelayRecord:
         return m
 
     def write_mark(self, command: str, data: dict) -> None:
-        write_json_atomic(self.path(MARK_FILE), {
-            "command": command,
-            "cwd": data.get("cwd") or "",
-            "session_id": data.get("session_id") or "",
-            "transcript_path": data.get("transcript_path") or "",
-            "written_at": stamp(),
-        })
+        write_json_atomic(
+            self.path(MARK_FILE),
+            {
+                "command": command,
+                "cwd": data.get("cwd") or "",
+                "session_id": data.get("session_id") or "",
+                "transcript_path": data.get("transcript_path") or "",
+                "written_at": stamp(),
+            },
+        )
 
     def drop_mark(self) -> None:
         remove(self.path(MARK_FILE))

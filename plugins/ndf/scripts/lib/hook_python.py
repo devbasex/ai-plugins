@@ -12,6 +12,7 @@ python として動くためである（環境の `pyvenv.cfg` は `bin/` の 1 
 目印が無い（SessionStart の前・uv を入れられない）ときは `[ -x ]` が偽になり、hook は判定をせずに通る。
 `NDF_HOOK_PYTHON` があれば、古いエントリポイント（`worktree-guard.sh` ほか）はその python を使う（テストが使う）。
 """
+
 from __future__ import annotations
 
 import importlib.util

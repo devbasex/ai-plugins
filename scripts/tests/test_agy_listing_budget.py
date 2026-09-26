@@ -7,6 +7,7 @@
 
 一時ディレクトリへ作った木に対して実行する。実物の Skill は読むだけで、書き換えない。
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -36,9 +37,7 @@ def build_tree(base: Path, count: int, description: str) -> Path:
         write_skill(skills_dir, name, description)
     (plugin / "manifests").mkdir(parents=True, exist_ok=True)
     for runtime in ("claude", "codex", "kiro", "agy"):
-        (plugin / f"manifests/{runtime}-skills.txt").write_text(
-            "".join(f"{name}\n" for name in names), encoding="utf-8"
-        )
+        (plugin / f"manifests/{runtime}-skills.txt").write_text("".join(f"{name}\n" for name in names), encoding="utf-8")
     return skills_dir
 
 

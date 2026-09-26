@@ -3,6 +3,7 @@
 claude は NDF_SUPERVISE_CLAUDE / NDF_MVV_CLAUDE で偽物へ差し替える。帳簿の置き場所は NDF_USAGE_DIR、
 プランの状態の実体の置き場所は NDF_SV_STATE_DIR で一時ディレクトリへ向ける。
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -28,17 +29,34 @@ def load(name: str, path: Path):
 
 sys.path.insert(0, str(SCRIPTS))
 from supervise_lib import claude, engine, paths, prompts  # noqa: E402
+
 mvv = load("mvv_gate_for_ledger", SCRIPTS / "mvv-gate.py")
 
-USAGE = {"input_tokens": 3, "output_tokens": 40, "cache_read_input_tokens": 500,
-         "cache_creation_input_tokens": 300,
-         "cache_creation": {"ephemeral_5m_input_tokens": 100, "ephemeral_1h_input_tokens": 200}}
-MODEL_USAGE = {"claude-opus-5-5": {"inputTokens": 3, "outputTokens": 30, "cacheReadInputTokens": 400,
-                                   "cacheCreationInputTokens": 300, "costUSD": 0.05},
-               "claude-haiku-4-5": {"inputTokens": 1, "outputTokens": 10, "cacheReadInputTokens": 100,
-                                    "cacheCreationInputTokens": 0, "costUSD": 0.01}}
-CLAUDE_OUT = {"result": "## 作業の報告\n- 結果: 完了", "usage": USAGE, "modelUsage": MODEL_USAGE,
-              "total_cost_usd": 0.06, "num_turns": 4, "session_id": "sess-1"}
+USAGE = {
+    "input_tokens": 3,
+    "output_tokens": 40,
+    "cache_read_input_tokens": 500,
+    "cache_creation_input_tokens": 300,
+    "cache_creation": {"ephemeral_5m_input_tokens": 100, "ephemeral_1h_input_tokens": 200},
+}
+MODEL_USAGE = {
+    "claude-opus-5-5": {
+        "inputTokens": 3,
+        "outputTokens": 30,
+        "cacheReadInputTokens": 400,
+        "cacheCreationInputTokens": 300,
+        "costUSD": 0.05,
+    },
+    "claude-haiku-4-5": {"inputTokens": 1, "outputTokens": 10, "cacheReadInputTokens": 100, "cacheCreationInputTokens": 0, "costUSD": 0.01},
+}
+CLAUDE_OUT = {
+    "result": "## 作業の報告\n- 結果: 完了",
+    "usage": USAGE,
+    "modelUsage": MODEL_USAGE,
+    "total_cost_usd": 0.06,
+    "num_turns": 4,
+    "session_id": "sess-1",
+}
 
 
 def fake_claude(tmp_path: Path, out: dict) -> Path:
@@ -62,9 +80,9 @@ def rows(d: Path) -> list[dict]:
 
 # --- ライブラリ ---
 
+
 def test_record_keeps_usage_and_picks_main_model():
-    r = usage_ledger.UsageRecord.from_claude(CLAUDE_OUT, source="supervise", kind="work", plan="p", step="s",
-                                             seconds=1.5)
+    r = usage_ledger.UsageRecord.from_claude(CLAUDE_OUT, source="supervise", kind="work", plan="p", step="s", seconds=1.5)
     d = json.loads(r.to_json())
     assert d["usage"]["cache_creation"] == USAGE["cache_creation"]
     assert d["model"] == "claude-opus-5-5" and d["model_usage"] == MODEL_USAGE
@@ -94,8 +112,7 @@ def test_append_only_adds_lines(tmp_path):
 
 def test_slug_comes_from_origin(tmp_path):
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
-    subprocess.run(["git", "-C", str(tmp_path), "remote", "add", "origin", "git@github.com:acme/widget.git"],
-                   check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "remote", "add", "origin", "git@github.com:acme/widget.git"], check=True)
     assert usage_ledger.UsageLedger(tmp_path, tmp_path / "u").path.name == "acme__widget.jsonl"
 
 
@@ -110,13 +127,13 @@ def test_ledger_dir_order(tmp_path):
 def test_append_safely_reports_failure(tmp_path, capsys):
     blocker = tmp_path / "file"
     blocker.write_text("")
-    assert not usage_ledger.append_safely(tmp_path, usage_ledger.UsageRecord(source="supervise", kind="work"),
-                                          blocker / "usage")
+    assert not usage_ledger.append_safely(tmp_path, usage_ledger.UsageRecord(source="supervise", kind="work"), blocker / "usage")
     err = capsys.readouterr().err.strip().splitlines()
     assert len(err) == 1 and "使用量の帳簿" in err[0]
 
 
 # --- supervise.py の呼び出し（ClaudeRunner に当たる口） ---
+
 
 def run_plan(tmp_path, steps, plan_path=None):
     plan = {"フェーズ": "試験", "課題": [1142], "作業場所": str(tmp_path), "steps": steps}
@@ -127,9 +144,11 @@ def run_plan(tmp_path, steps, plan_path=None):
 def test_each_call_appends_one_row_with_5m_and_1h(tmp_path, ledger):
     plan_file = tmp_path / "plan-x.json"
     plan_file.write_text("{}")
-    s, text = run_plan(tmp_path, [{"id": "impl", "type": "work", "prompt": "直す", "next": "j"},
-                                  {"id": "j", "type": "judge", "question": "?", "choices": ["end"]}],
-                       plan_path=str(plan_file))
+    s, text = run_plan(
+        tmp_path,
+        [{"id": "impl", "type": "work", "prompt": "直す", "next": "j"}, {"id": "j", "type": "judge", "question": "?", "choices": ["end"]}],
+        plan_path=str(plan_file),
+    )
     got = rows(ledger)
     assert [(r["kind"], r["step"]) for r in got] == [("work", "impl"), ("judge", "j")], text
     assert all(r["source"] == "supervise" and r["plan"] == str(plan_file.resolve()) for r in got)
@@ -161,8 +180,9 @@ def test_call_kinds_follow_the_system_prompt():
 
 def test_nested_drive_keeps_inner_metrics(tmp_path, monkeypatch):
     inner = tmp_path / "inner.py"
-    inner.write_text("import json\nprint(json.dumps({'status': 'ok', 'metrics': "
-                     "{'rounds': 3, 'findings': 5, 'review_status': 'approved'}}))\n")
+    inner.write_text(
+        "import json\nprint(json.dumps({'status': 'ok', 'metrics': {'rounds': 3, 'findings': 5, 'review_status': 'approved'}}))\n"
+    )
     res = tmp_path / "gate-result.json"
     outer = tmp_path / "outer.py"
     outer.write_text(
@@ -172,7 +192,8 @@ def test_nested_drive_keeps_inner_metrics(tmp_path, monkeypatch):
         "    print(json.dumps({'status': 'ok', 'metrics': {'adopted': 2}}))\n"
         "else:\n"
         "    print(json.dumps({'status': 'gate', 'items': [{'pause': 'final', 'result_file': str(res),"
-        f" 'command': {f'{PY} {inner}'!r}}}]}}))\n")
+        f" 'command': {f'{PY} {inner}'!r}}}]}}))\n"
+    )
     monkeypatch.setitem(paths.DRIVES, "fake", outer)
     s, text = run_plan(tmp_path, [{"id": "refactor", "type": "drive", "drive": "fake", "next": "end"}])
     assert "結果: 完了" in text, text
@@ -183,6 +204,7 @@ def test_nested_drive_keeps_inner_metrics(tmp_path, monkeypatch):
 
 
 # --- mvv-gate.py ---
+
 
 def test_mvv_ask_appends_one_row(tmp_path, monkeypatch):
     d = tmp_path / "usage"
@@ -198,6 +220,7 @@ def test_mvv_ask_appends_one_row(tmp_path, monkeypatch):
 
 
 # --- プランの状態の置き場所 ---
+
 
 @pytest.fixture
 def temp_root(tmp_path, monkeypatch):
@@ -247,14 +270,13 @@ def test_state_home_under_temp_makes_no_symlink(tmp_path, temp_root, monkeypatch
 
 # --- phase_cost.py の既定の置き場所 ---
 
+
 def test_phase_cost_reads_state_home_by_default(tmp_path):
     state = tmp_path / "xdg" / "ndf" / "sv"
     for d in (state / "r1" / "plan-a-state", state / "plan-b-1a2b3c4d"):
         d.mkdir(parents=True)
-        (d / "state.json").write_text(json.dumps({"log": [{"id": "w", "type": "work", "exit": 0,
-                                                           "llm": {"cost": 0.1, "turns": 1}}]}))
+        (d / "state.json").write_text(json.dumps({"log": [{"id": "w", "type": "work", "exit": 0, "llm": {"cost": 0.1, "turns": 1}}]}))
     env = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path), "XDG_STATE_HOME": str(tmp_path / "xdg")}
-    p = subprocess.run([PY, str(SCRIPTS / "experimental" / "phase_cost.py")], capture_output=True, text=True,
-                       env=env)
+    p = subprocess.run([PY, str(SCRIPTS / "experimental" / "phase_cost.py")], capture_output=True, text=True, env=env)
     assert p.returncode == 0, p.stderr
     assert "計画 2 件・ステップ 2 件" in p.stdout

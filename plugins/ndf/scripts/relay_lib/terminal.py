@@ -4,6 +4,7 @@
 擬似端末の子の起動と窓の大きさは ptyprocess で扱い、このモジュールがその包みを兼ねる（決定 19・20）。
 `pty`・`termios` を import するのもこのモジュールだけである（構造チェックの I14）。
 """
+
 from __future__ import annotations
 
 import errno
@@ -59,11 +60,13 @@ class Terminal:
         """今の設定を控えてから raw にする。戻すのは `restore`。"""
         import termios
         import tty
+
         self.saved = termios.tcgetattr(0)
         tty.setraw(0)
 
     def restore(self) -> None:
         import termios
+
         if self.saved is None:
             return
         try:
@@ -104,14 +107,14 @@ class Terminal:
 
         pid は子が exec する前に子自身が書く（子の hook が `child.pid` を読むより先に在る）。
         起動できなければ errno を持つ StartFailed。"""
+
         def write_pid() -> None:
             with open(child_file, "w") as f:
                 f.write(str(os.getpid()))
 
         at = time.time()
         try:
-            child = PtyProcess.spawn([claude, *args], cwd=cwd, env=env, preexec_fn=write_pid,
-                                     dimensions=self.winsize())
+            child = PtyProcess.spawn([claude, *args], cwd=cwd, env=env, preexec_fn=write_pid, dimensions=self.winsize())
         except OSError as e:
             # ptyprocess は実行できないコマンドを exec の前に errno なしで断る
             raise StartFailed(e.errno or (errno.EACCES if os.path.exists(claude) else errno.ENOENT)) from None
@@ -121,8 +124,7 @@ class Terminal:
 
     def stop_child(self) -> tuple[str, int]:
         """SIGTERM、SIGKILL の順に子を停止し、終了理由と wait 状態を返す。"""
-        for sig, how, wait in ((signal.SIGTERM, "sigterm", env_num("NDF_RELAY_TERM_WAIT", 10)),
-                               (signal.SIGKILL, "sigkill", None)):
+        for sig, how, wait in ((signal.SIGTERM, "sigterm", env_num("NDF_RELAY_TERM_WAIT", 10)), (signal.SIGKILL, "sigkill", None)):
             try:
                 os.kill(self.pid, sig)
             except ProcessLookupError:

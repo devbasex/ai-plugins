@@ -6,6 +6,7 @@ manifest が持つ**ため、そちらを固定する。
 
 `refactoring` の表を読む形と同じ条件である（#444）。
 """
+
 from __future__ import annotations
 
 import pathlib
@@ -25,10 +26,6 @@ def test_the_manifests_are_found() -> None:
 @pytest.mark.parametrize("manifest", MANIFESTS, ids=lambda p: p.stem)
 def test_both_skills_ride_together(manifest: pathlib.Path) -> None:
     """ゲートを起動させる側と起動される側が、同じ配布先へ揃うこと。"""
-    listed = {ln.strip() for ln in manifest.read_text(encoding="utf-8").splitlines()
-              if ln.strip() and not ln.startswith("#")}
+    listed = {ln.strip() for ln in manifest.read_text(encoding="utf-8").splitlines() if ln.strip() and not ln.startswith("#")}
     present = [name for name in PAIR if name in listed]
-    assert len(present) in (0, 2), (
-        f"{manifest.name} は {present} だけを載せている。"
-        "ゲートを起動させる側と起動される側は同じ配布先へ揃える"
-    )
+    assert len(present) in (0, 2), f"{manifest.name} は {present} だけを載せている。ゲートを起動させる側と起動される側は同じ配布先へ揃える"

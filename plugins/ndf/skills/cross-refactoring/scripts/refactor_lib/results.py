@@ -1,4 +1,5 @@
 """CLI の起動 1 回の結果ファイルの読み取りと、手順の記録への書き込み。"""
+
 from __future__ import annotations
 
 import pathlib
@@ -41,10 +42,11 @@ def note_stopped(state: dict[str, Any], runtime: str, phase: str) -> None:
     if reason not in STOPPED_REASONS:
         return
     record = state.setdefault("phases", {}).setdefault(phase, {})
-    record["stopped"] = {"reason": reason, "timeout": record.get("timeout"),
-                         "at": monitor.get("ended_at")}
-    info(f"⏰ 監視が {phase} の CLI を上限（{record.get('timeout')} 秒）で止めました。"
-         "未コミットの変更は捨て、コミット済みの項目は締め切りで判定します")
+    record["stopped"] = {"reason": reason, "timeout": record.get("timeout"), "at": monitor.get("ended_at")}
+    info(
+        f"⏰ 監視が {phase} の CLI を上限（{record.get('timeout')} 秒）で止めました。"
+        "未コミットの変更は捨て、コミット済みの項目は締め切りで判定します"
+    )
 
 
 def record_observed_model(state: dict[str, Any], runtime: str, phase: str) -> None:
@@ -57,9 +59,7 @@ def record_observed_model(state: dict[str, Any], runtime: str, phase: str) -> No
     stdout_log = pathlib.Path(state["tmp_dir"]) / f"{stem}-stdout.log"
     if not stdout_log.exists():
         return
-    observed = models_lib.observed_model(
-        runtime, stdout_log.read_text(encoding="utf-8", errors="replace")
-    )
+    observed = models_lib.observed_model(runtime, stdout_log.read_text(encoding="utf-8", errors="replace"))
     if not observed:
         return
     model = state.setdefault("implementer_model", {"requested": None, "observed": None})

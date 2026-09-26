@@ -12,6 +12,7 @@
 （`verify`）・修正の要約（`merge-fix`）・進行の報告（`report`）の 3 つが
 これにあたる。
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -53,7 +54,5 @@ def item_lines(state: dict[str, Any], item_ids: list[str]) -> list[str]:
     lines = []
     for item_id in item_ids:
         item = by_id.get(item_id)
-        lines.append(
-            f"{item_id} `{item_label(item)}`" if item else str(item_id)
-        )
+        lines.append(f"{item_id} `{item_label(item)}`" if item else str(item_id))
     return lines

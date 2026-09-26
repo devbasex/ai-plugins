@@ -3,6 +3,7 @@
 worktree の運用では、Pull Request の head ブランチが `.worktrees/<ブランチ名>` で checkout 済みのことが多い。
 git は同じブランチを 2 つの作業ツリーへ checkout できないため、書き込み用の作業ディレクトリは detach で作る。
 """
+
 import subprocess
 
 

@@ -1,4 +1,5 @@
 """new mission / close の組み立てと、pace: fast と MVV の拒否の判定（#1142 の C1）。"""
+
 from __future__ import annotations
 
 import json
@@ -10,9 +11,18 @@ from pathlib import Path
 from pace import PaceError, read_pace
 from step_result import result
 from supervise_lib.decl import SUPERVISE_DECL, decl_roots, with_decls
-from supervise_lib.mission_waves import (mission_branch, plan_fast_check, plan_fast_design, plan_fast_impl,
-                                         plan_fast_release, plan_mission_branch, plan_mission_check,
-                                         plan_mission_design, plan_mission_impl, plan_mission_release)
+from supervise_lib.mission_waves import (
+    mission_branch,
+    plan_fast_check,
+    plan_fast_design,
+    plan_fast_impl,
+    plan_fast_release,
+    plan_mission_branch,
+    plan_mission_check,
+    plan_mission_design,
+    plan_mission_impl,
+    plan_mission_release,
+)
 from supervise_lib.paths import CHECK_PY, HERE, MERGE_CMD, MERGE_PROBE, SELF, sha256_of
 from supervise_lib.release_templates import RELEASE_FORMS
 
@@ -29,20 +39,22 @@ def fast_mission_plans(a) -> list[dict]:
     waves = []
     if a.design:
         waves.append({"name": "設計", "plans": {f"design-{n}": plan_fast_design(a, n, repo) for n in a.design}})
-        waves.append({"name": "関門 1", "gate": "設計の計画がすべて完了なら通過する。結果が関門の計画の Pull Request だけ、"
-                                              "利用者の承認を取ってマージする"})
+        waves.append(
+            {
+                "name": "関門 1",
+                "gate": "設計の計画がすべて完了なら通過する。結果が関門の計画の Pull Request だけ、利用者の承認を取ってマージする",
+            }
+        )
     waves += [
         {"name": "実装", "plans": {f"impl-{n}": plan_fast_impl(a, n, repo) for n in a.issue}},
         {"name": "検査", "plans": {"check": plan_fast_check(a, repo, f"{a.name}-1")}, "then_of": "実装"},
-        {"name": "実装レビュー", "plans": {"review": plan_fast_check(a, repo, f"{a.name}-review", review_only=True)},
-         "then_of": "実装"},
+        {"name": "実装レビュー", "plans": {"review": plan_fast_check(a, repo, f"{a.name}-review", review_only=True)}, "then_of": "実装"},
     ]
     if not has_release_template(a):
         return waves + [manual_release_wave(a)]
     waves += [
         {"name": "開発版", "plans": {"release": plan_fast_release(a, repo, a.version, "dev")}, "then_of": "実装"},
-        {"name": "本番", "plans": {"release-prod": plan_fast_release(a, repo, prod_version(a.version), "prod")},
-         "then_of": "実装"},
+        {"name": "本番", "plans": {"release-prod": plan_fast_release(a, repo, prod_version(a.version), "prod")}, "then_of": "実装"},
     ]
     return waves
 
@@ -53,28 +65,69 @@ def close_plan(a, repo: str) -> dict:
     refs = " ".join(f"#{i}" for i in a.issue)
     branch = f"spec/{a.name}"
     stats = f"{CHECK_PY} stats --root {shlex.quote(repo)}"
-    return with_decls({
-        "フェーズ": "まとめ", "課題": a.issue, "モード": a.mode, "作業場所": f"{repo}/.worktrees/{branch}",
-        "branch": branch, "起点": f"origin/{a.base}", "リポジトリ": repo, "記録": str(HERE / "projects-sync.sh"),
-        "規則": "", "上限": 12, "進め方": "fast",
-        "steps": [
-            {"id": "spec", "type": "work", "full": True, "kind": "確定仕様化", "stage": "確定仕様化", "timeout": 3600,
-             "prompt": f"/ndf:plan-to-spec {refs}。課題の issues/ の計画と設計を docs/ へ移し、コミットする"
-                       "（push しない）。移すものが無ければ何もしない。", "next": "pr"},
-            {"id": "pr", "type": "pr", "stage": "Pull Request", "base": a.base, "title": f"確定仕様化: ミッション {a.name}",
-             "summary": f"ミッション {a.name}（{refs}）の計画と設計を docs/ へ移す。issues/ と docs/ だけを触る",
-             "changes": "無し（文書の置き場所だけ）", "next": "ready"},
-            {"id": "ready", "type": "run", "cmd": "sh -c 'git push -q && gh pr ready {pr}'", "next": "merge"},
-            {"id": "merge", "type": "run", "timeout": 7200, "cmd": MERGE_CMD, "probe": MERGE_PROBE, "next": "close"},
-            {"id": "close", "type": "run", "stage": "後片付け", "cwd": repo, "timeout": 900,
-             "cmd": f"python3 {HERE / 'mission-close.py'} --record-pr {{queue_pr:release-prod}} --issues {issues} "
-                    f"--with-verification --label {shlex.quote(f'ミッション {a.name}の後片付け')}", "next": "retro"},
-            {"id": "retro", "type": "work", "full": True, "kind": "振り返り", "stage": "振り返り", "timeout": 3600,
-             "prompt": f"/ndf:retrospective ミッション {a.name}（{refs}）。材料に検査の記録の集計（`{stats}` の出力: "
-                       "トリガーが立った回数・検査ごとの指摘の件数・検査の後に逃げた不具合の件数）を使い、閾値の"
-                       "見直しが要るかを書く。", "next": "end"},
-        ],
-    }, a)
+    return with_decls(
+        {
+            "フェーズ": "まとめ",
+            "課題": a.issue,
+            "モード": a.mode,
+            "作業場所": f"{repo}/.worktrees/{branch}",
+            "branch": branch,
+            "起点": f"origin/{a.base}",
+            "リポジトリ": repo,
+            "記録": str(HERE / "projects-sync.sh"),
+            "規則": "",
+            "上限": 12,
+            "進め方": "fast",
+            "steps": [
+                {
+                    "id": "spec",
+                    "type": "work",
+                    "full": True,
+                    "kind": "確定仕様化",
+                    "stage": "確定仕様化",
+                    "timeout": 3600,
+                    "prompt": f"/ndf:plan-to-spec {refs}。課題の issues/ の計画と設計を docs/ へ移し、コミットする"
+                    "（push しない）。移すものが無ければ何もしない。",
+                    "next": "pr",
+                },
+                {
+                    "id": "pr",
+                    "type": "pr",
+                    "stage": "Pull Request",
+                    "base": a.base,
+                    "title": f"確定仕様化: ミッション {a.name}",
+                    "summary": f"ミッション {a.name}（{refs}）の計画と設計を docs/ へ移す。issues/ と docs/ だけを触る",
+                    "changes": "無し（文書の置き場所だけ）",
+                    "next": "ready",
+                },
+                {"id": "ready", "type": "run", "cmd": "sh -c 'git push -q && gh pr ready {pr}'", "next": "merge"},
+                {"id": "merge", "type": "run", "timeout": 7200, "cmd": MERGE_CMD, "probe": MERGE_PROBE, "next": "close"},
+                {
+                    "id": "close",
+                    "type": "run",
+                    "stage": "後片付け",
+                    "cwd": repo,
+                    "timeout": 900,
+                    "cmd": f"python3 {HERE / 'mission-close.py'} --record-pr {{queue_pr:release-prod}} --issues {issues} "
+                    f"--with-verification --label {shlex.quote(f'ミッション {a.name}の後片付け')}",
+                    "next": "retro",
+                },
+                {
+                    "id": "retro",
+                    "type": "work",
+                    "full": True,
+                    "kind": "振り返り",
+                    "stage": "振り返り",
+                    "timeout": 3600,
+                    "prompt": f"/ndf:retrospective ミッション {a.name}（{refs}）。材料に検査の記録の集計（`{stats}` の出力: "
+                    "トリガーが立った回数・検査ごとの指摘の件数・検査の後に逃げた不具合の件数）を使い、閾値の"
+                    "見直しが要るかを書く。",
+                    "next": "end",
+                },
+            ],
+        },
+        a,
+    )
 
 
 def close_waves(a) -> list[dict]:
@@ -84,10 +137,8 @@ def close_waves(a) -> list[dict]:
     changed = {"cmd": f"{CHECK_PY} changed --id {final} --root {shlex.quote(repo)}", "skip_code": 3}
     return [
         {"name": "最終の検査", "plans": {"check": plan_fast_check(a, repo, final, final=True)}},
-        {"name": "開発版", "plans": {"release": plan_fast_release(a, repo, a.version, "dev", changed)},
-         "then_of": "最終の検査"},
-        {"name": "本番", "plans": {"release-prod": plan_fast_release(a, repo, a.prod, "prod", changed)},
-         "then_of": "最終の検査"},
+        {"name": "開発版", "plans": {"release": plan_fast_release(a, repo, a.version, "dev", changed)}, "then_of": "最終の検査"},
+        {"name": "本番", "plans": {"release-prod": plan_fast_release(a, repo, a.prod, "prod", changed)}, "then_of": "最終の検査"},
         {"name": "まとめ", "plans": {"close": close_plan(a, repo)}, "then_of": "最終の検査"},
     ]
 
@@ -109,9 +160,10 @@ def fast_refusal(a) -> str | None:
         return f"モード {a.mode} は fast に入れられない（入れられるモード: {' / '.join(pace['fast']['modes'])}）"
     prod = a.production_branch
     if not prod:
-        head = subprocess.run(["git", "-C", str(roots[0]), "symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
-                              capture_output=True, text=True).stdout.strip()
-        prod = head[len("origin/"):] if head.startswith("origin/") else None
+        head = subprocess.run(
+            ["git", "-C", str(roots[0]), "symbolic-ref", "--short", "refs/remotes/origin/HEAD"], capture_output=True, text=True
+        ).stdout.strip()
+        prod = head[len("origin/") :] if head.startswith("origin/") else None
     if not prod or prod == a.base:
         return "開発版のチャネルが無い（起点のブランチと本番のブランチが同じか、本番のブランチが分からない）"
     return mvv_refusal(a.state)
@@ -148,10 +200,12 @@ def has_release_template(a) -> bool:
 def manual_release_wave(a) -> dict:
     """雛形の無いリリースの形のミッションの最後に置く、手で行うリリースの段（計画を持たない）。"""
     form = (a.release or {}).get("form") if isinstance(a.release, dict) else None
-    why = (f"リリースの形 {form!r} に雛形が無い" if form
-           else f".ndf/{SUPERVISE_DECL} に release.form が無い")
-    return {"name": "リリース", "manual": MANUAL_RELEASE,
-            "note": f"{why}（雛形のある形: {', '.join(RELEASE_FORMS)}）。検査の後に {MANUAL_RELEASE} で行う"}
+    why = f"リリースの形 {form!r} に雛形が無い" if form else f".ndf/{SUPERVISE_DECL} に release.form が無い"
+    return {
+        "name": "リリース",
+        "manual": MANUAL_RELEASE,
+        "note": f"{why}（雛形のある形: {', '.join(RELEASE_FORMS)}）。検査の後に {MANUAL_RELEASE} で行う",
+    }
 
 
 def mission_plans(a) -> list[dict]:
@@ -169,8 +223,11 @@ def mission_plans(a) -> list[dict]:
         {"name": "実装", "plans": {f"impl-{n}": plan_mission_impl(a, n, repo) for n in a.issue}},
         {"name": "検査", "plans": {"check": plan_mission_check(a, repo)}},
     ]
-    waves.append({"name": "配布", "plans": {"release": plan_mission_release(a, repo)}, "then_of": "検査"}
-                 if has_release_template(a) else manual_release_wave(a))
+    waves.append(
+        {"name": "配布", "plans": {"release": plan_mission_release(a, repo)}, "then_of": "検査"}
+        if has_release_template(a)
+        else manual_release_wave(a)
+    )
     return waves
 
 
@@ -181,8 +238,14 @@ def cmd_new_mission(a, waves: list[dict] | None = None) -> dict:
     if fast:
         why = fast_refusal(a)
         if why:
-            return result("supervise-new", "stopped", f"pace: fast を使えない: {why}。計画を書かない", [],
-                          {"pace": "fast"}, next="normal で進める（--pace を渡さない）か、条件を満たしてから打ち直す")
+            return result(
+                "supervise-new",
+                "stopped",
+                f"pace: fast を使えない: {why}。計画を書かない",
+                [],
+                {"pace": "fast"},
+                next="normal で進める（--pace を渡さない）か、条件を満たしてから打ち直す",
+            )
     waves = waves if waves is not None else mission_plans(a)
     out = Path(a.out or f"mission-{a.name}")
     out.mkdir(parents=True, exist_ok=True)
@@ -206,8 +269,7 @@ def cmd_new_mission(a, waves: list[dict] | None = None) -> dict:
                 prev = next(e for e in index if e["name"] == wave["then_of"])
                 prev["command"] += " --then " + " ".join(map(shlex.quote, paths))
             else:
-                entry["command"] = (f"python3 {shlex.quote(str(SELF))} queue "
-                                    + " ".join(map(shlex.quote, paths)) + " --max 3")
+                entry["command"] = f"python3 {shlex.quote(str(SELF))} queue " + " ".join(map(shlex.quote, paths)) + " --max 3"
         index.append(entry)
         items.append(entry)
     manifest = out / "mission.json"
@@ -222,5 +284,11 @@ def cmd_new_mission(a, waves: list[dict] | None = None) -> dict:
     manual = next((e for e in index if "manual" in e), None)
     if manual:
         nxt += f"。リリースは {manual['manual']} で行う（{manual['note']}）"
-    return result("supervise-new", "ok", f"ミッション {a.name} の計画を {plans} 本・{len(index)} ステージで書いた: {manifest}",
-                  items, {"waves": len(index), "plans": plans, "manifest": str(manifest)}, next=nxt)
+    return result(
+        "supervise-new",
+        "ok",
+        f"ミッション {a.name} の計画を {plans} 本・{len(index)} ステージで書いた: {manifest}",
+        items,
+        {"waves": len(index), "plans": plans, "manifest": str(manifest)},
+        next=nxt,
+    )

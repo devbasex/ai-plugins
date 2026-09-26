@@ -4,6 +4,7 @@ hook が実際に登録されることは会話の単位を起こさないと確
 分けている。ここで固定するのは**書式と結線**である。書式が崩れると Skill の読み込み
 そのものが失敗し、モード判定を失う。
 """
+
 from __future__ import annotations
 
 import json
@@ -109,10 +110,7 @@ def test_the_hook_command_only_uses_the_plugin_root_variable() -> None:
 
     assert used, f"hook のコマンドが変数を持たない: {hook_command()}"
     forbidden = sorted(used - ALLOWED_HOOK_VARIABLES)
-    assert not forbidden, (
-        f"この hook が使ってよい変数の外を書いている: {forbidden}。"
-        f"書けるのは {sorted(ALLOWED_HOOK_VARIABLES)} だけである"
-    )
+    assert not forbidden, f"この hook が使ってよい変数の外を書いている: {forbidden}。書けるのは {sorted(ALLOWED_HOOK_VARIABLES)} だけである"
 
 
 def test_the_hook_command_resolves_to_the_guard_under_the_plugin_root() -> None:
@@ -180,4 +178,3 @@ def test_the_hook_block_is_nested_in_the_documented_order() -> None:
 def test_the_scripts_are_executable_shell(script) -> None:
     assert script.is_file(), script
     assert script.read_text(encoding="utf-8").startswith("#!/usr/bin/env bash")
-

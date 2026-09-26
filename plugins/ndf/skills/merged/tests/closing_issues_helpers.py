@@ -3,6 +3,7 @@
 conftest.py へ置くと、複数の Skill のテストを同時に実行したときに `conftest` という
 モジュール名が衝突する。直接 import する補助はこの固有名のモジュールへ置く。
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -19,9 +20,7 @@ def read(body: str, repo: str | None = DEFAULT_REPO, cwd: Path | None = None) ->
     args = ["bash", str(SCRIPT)]
     if repo is not None:
         args += ["--repo", repo]
-    return subprocess.run(
-        args, input=body, capture_output=True, text=True, cwd=str(cwd) if cwd else None
-    )
+    return subprocess.run(args, input=body, capture_output=True, text=True, cwd=str(cwd) if cwd else None)
 
 
 def entries(body: str, repo: str | None = DEFAULT_REPO, cwd: Path | None = None) -> list[tuple[str, str]]:

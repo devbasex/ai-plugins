@@ -3,6 +3,7 @@
 `projects-sync.sh` が入口である。通過記録はこのコマンドを観測して積むため、入口を
 変えずに issue の本文の更新（`progress-record.sh`）を中から呼ぶ（設計の決定 1）。
 """
+
 from __future__ import annotations
 
 import json
@@ -18,13 +19,15 @@ SYNC = SCRIPTS / "projects-sync.sh"
 RECORD = SCRIPTS / "progress-record.sh"
 
 ITEM = {"id": "PVTI_x", "content": {"number": 42, "repository": "acme/demo"}}
-FIELDS = {"fields": [
-    {"id": "F_stage", "name": "進行", "options": [{"id": "O_design", "name": "設計"}]},
-    {"id": "F_mode", "name": "モード", "options": [{"id": "O_std", "name": "standard"}]},
-    {"id": "F_status", "name": "Status", "options": [{"id": "O_done", "name": "Done"}]},
-    {"id": "F_wt", "name": "作業ツリー"},
-    {"id": "F_plan", "name": "計画ファイル"},
-]}
+FIELDS = {
+    "fields": [
+        {"id": "F_stage", "name": "進行", "options": [{"id": "O_design", "name": "設計"}]},
+        {"id": "F_mode", "name": "モード", "options": [{"id": "O_std", "name": "standard"}]},
+        {"id": "F_status", "name": "Status", "options": [{"id": "O_done", "name": "Done"}]},
+        {"id": "F_wt", "name": "作業ツリー"},
+        {"id": "F_plan", "name": "計画ファイル"},
+    ]
+}
 BODY = "# 課題\n\n本文\n\n## 進行\n\nモード: —\n\n- [x] 作業場所の用意 — 2026-01-01 00:00\n"
 
 
@@ -40,7 +43,8 @@ def repo(tmp_path):
     body = tmp_path / "body.md"
     body.write_text(BODY, encoding="utf-8")
     items = json.dumps({"items": [ITEM], "totalCount": 1})
-    (bin_dir / "gh").write_text(f"""#!/usr/bin/env bash
+    (bin_dir / "gh").write_text(
+        f"""#!/usr/bin/env bash
 echo "$@" >> {calls}
 case "$1 $2" in
   "issue view")
@@ -54,21 +58,21 @@ case "$1 $2" in
   "project item-edit") ;;
 esac
 exit 0
-""", encoding="utf-8")
+""",
+        encoding="utf-8",
+    )
     (bin_dir / "gh").chmod(0o755)
     return type("R", (), {"root": root, "bin": bin_dir, "calls": calls, "body": body})
 
 
 def declare(repo):
     (repo.root / ".ndf").mkdir(exist_ok=True)
-    (repo.root / ".ndf" / "projects.json").write_text(
-        json.dumps({"version": 1, "owner": "acme", "number": 1}), encoding="utf-8")
+    (repo.root / ".ndf" / "projects.json").write_text(json.dumps({"version": 1, "owner": "acme", "number": 1}), encoding="utf-8")
 
 
 def run(repo, script, *args):
     env = {**os.environ, "PATH": f"{repo.bin}:{os.environ['PATH']}", "LC_ALL": "C.UTF-8"}
-    return subprocess.run(["bash", str(script), *args], cwd=repo.root,
-                          capture_output=True, text=True, env=env, timeout=60)
+    return subprocess.run(["bash", str(script), *args], cwd=repo.root, capture_output=True, text=True, env=env, timeout=60)
 
 
 def calls(repo):
@@ -122,12 +126,15 @@ def test_status_does_not_write_the_issue_body(repo):
     assert "issue edit" not in calls(repo)
 
 
-@pytest.mark.parametrize("key,value,flag", [
-    ("stage", "設計", None),
-    ("mode", "standard", "--mode"),
-    ("worktree", ".worktrees/feat/x", "--worktree"),
-    ("plan", "issues/x.md", "--plan"),
-])
+@pytest.mark.parametrize(
+    "key,value,flag",
+    [
+        ("stage", "設計", None),
+        ("mode", "standard", "--mode"),
+        ("worktree", ".worktrees/feat/x", "--worktree"),
+        ("plan", "issues/x.md", "--plan"),
+    ],
+)
 def test_the_body_matches_the_two_commands_run_separately(repo, tmp_path, key, value, flag):
     """1 行で残る本文が、今の 2 コマンドの組（本文は `progress-record.sh`）と同じになる。"""
     out = run(repo, SYNC, "42", key, value)
@@ -147,14 +154,18 @@ def test_missing_gh_writes_nothing(repo, tmp_path):
     """`gh` が無ければ何もせず 0 で終わる。工程を止めない。"""
     bin_dir = tmp_path / "nogh"
     bin_dir.mkdir()
-    for name in ("bash", "git", "python3", "date", "mktemp", "cmp", "cat", "grep",
-                 "sed", "dirname", "rm", "cp", "jq"):
+    for name in ("bash", "git", "python3", "date", "mktemp", "cmp", "cat", "grep", "sed", "dirname", "rm", "cp", "jq"):
         found = shutil.which(name)
         if found:
             (bin_dir / name).symlink_to(found)
-    out = subprocess.run([str(bin_dir / "bash"), str(SYNC), "42", "stage", "設計"],
-                         cwd=repo.root, capture_output=True, text=True, timeout=60,
-                         env={**os.environ, "PATH": str(bin_dir)})
+    out = subprocess.run(
+        [str(bin_dir / "bash"), str(SYNC), "42", "stage", "設計"],
+        cwd=repo.root,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env={**os.environ, "PATH": str(bin_dir)},
+    )
     assert out.returncode == 0
     assert out.stdout == ""
     assert repo.body.read_text(encoding="utf-8") == BODY

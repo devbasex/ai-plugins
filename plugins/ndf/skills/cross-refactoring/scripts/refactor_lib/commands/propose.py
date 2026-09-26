@@ -3,6 +3,7 @@
 参加者の全員が 1 度だけ出した提案を読み、鍵が同じ提案を統合して、改修計画へ渡す候補を
 切り出す。**意味の上で同じ提案かはここで決めない**（改修計画の中で Jev か実装担当が問う）。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -32,10 +33,7 @@ def _read_runtime_proposal(result: pathlib.Path) -> Optional[list[dict[str, Any]
         info(f"⚠ {runtime} の提案結果が JSON として読めません: {e}")
         return None
     if not isinstance(payload, dict):
-        info(
-            f"⚠ {runtime} の提案結果が JSON オブジェクトではありません"
-            f"（{type(payload).__name__}）。提案なしとして扱います"
-        )
+        info(f"⚠ {runtime} の提案結果が JSON オブジェクトではありません（{type(payload).__name__}）。提案なしとして扱います")
         return []
     items = payload.get("items")
     if not isinstance(items, list):
@@ -73,8 +71,7 @@ def cmd_merge_proposals(args: argparse.Namespace) -> None:
         return
 
     proposals = load_proposals(state)
-    candidates, deferred = build_candidates(
-        proposals, threshold=str(state.get("severity_threshold") or "minor"))
+    candidates, deferred = build_candidates(proposals, threshold=str(state.get("severity_threshold") or "minor"))
     state["candidates"] = candidates
     for item, reason in deferred:
         defer(state, item, reason)
@@ -86,8 +83,10 @@ def cmd_merge_proposals(args: argparse.Namespace) -> None:
     total = sum(n for n in (state.get("proposed") or {}).values() if n)
     info(f"提案 {total} 件 → 候補 {len(candidates)} 件 / 見送り {len(deferred)} 件")
     for item in candidates:
-        info(f"  {item['id']} [{item['severity']}] {item_label(item)} "
-             f"{item['smell']} → {item['technique']}（賛同 {len(item['proposed_by'])}）")
+        info(
+            f"  {item['id']} [{item['severity']}] {item_label(item)} "
+            f"{item['smell']} → {item['technique']}（賛同 {len(item['proposed_by'])}）"
+        )
     if not candidates:
         info("候補が 0 件のため、最終ゲートへ進みます")
         sys.exit(2)

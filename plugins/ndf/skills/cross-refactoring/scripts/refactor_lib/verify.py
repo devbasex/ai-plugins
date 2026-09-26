@@ -3,6 +3,7 @@
 対象範囲の逸脱・コミットのトレーラー・差分予算・コミット粒度を判定する。判定に
 使う事実は git から取った値で、結果ファイルの申告は使わない。
 """
+
 from __future__ import annotations
 
 import ast
@@ -28,6 +29,7 @@ from .vocabulary import (
 # ここで使う事実（コミットの実在 / トレーラー / 差分行数 / テストの成否）は、すべて
 # **git と実際のテスト実行**から取る。結果ファイルから使うのは「どのコミットが
 # どの項目のものか」という対応付けの手がかりだけである。
+
 
 def path_in_scope(path: str, scope: Iterable[str]) -> bool:
     """`path` が対象範囲の中にあるか。判定は**前方一致だけ**で行う。
@@ -59,9 +61,7 @@ def out_of_scope_files(commit: dict[str, Any], scope: Iterable[str]) -> list[str
     paths = list(scope)
     if not paths:
         return []
-    return sorted(
-        p for p in (commit.get("files") or []) if not path_in_scope(p, paths)
-    )
+    return sorted(p for p in (commit.get("files") or []) if not path_in_scope(p, paths))
 
 
 def verify_scope(commit: dict[str, Any], scope: Iterable[str]) -> Optional[str]:
@@ -84,9 +84,7 @@ def verify_scope(commit: dict[str, Any], scope: Iterable[str]) -> Optional[str]:
     )
 
 
-def verify_commit_trailers(
-    commit: dict[str, Any], required: Iterable[str] = REQUIRED_TRAILERS
-) -> Optional[str]:
+def verify_commit_trailers(commit: dict[str, Any], required: Iterable[str] = REQUIRED_TRAILERS) -> Optional[str]:
     """コミットのトレーラーが揃っているか。欠けていれば理由を返す。
 
     `commit` は **git から取った事実**（`collect_commit_facts()` の戻り値）である。
@@ -130,16 +128,11 @@ def verify_commit_basics(
     if problem:
         return problem
     if check_test and commit.get("test_status") != "pass":
-        return (
-            f"コミット {commit.get('sha', '?')} でテストが成功していません "
-            f"({commit.get('test_status')})"
-        )
+        return f"コミット {commit.get('sha', '?')} でテストが成功していません ({commit.get('test_status')})"
     return None
 
 
-def verify_final_fix_commit(
-    commit: dict[str, Any], scope: Optional[Iterable[str]] = None
-) -> Optional[str]:
+def verify_final_fix_commit(commit: dict[str, Any], scope: Optional[Iterable[str]] = None) -> Optional[str]:
     """最終ゲート（Step 7）の修正コミットを検証する。問題があれば理由を返す。
 
     実装と修正の取り込みと**見る先が 2 つだけ違う**。
@@ -173,7 +166,8 @@ def diff_budget_factor(technique: Optional[str]) -> int:
 
 
 def verify_diff_budget(
-    items: list[dict[str, Any]], facts: list[dict[str, Any]],
+    items: list[dict[str, Any]],
+    facts: list[dict[str, Any]],
 ) -> Optional[str]:
     """実差分が、見積の行数から決まる差分予算に収まっているか。"""
     estimated = sum(safe_int(i.get("estimated_diff_lines")) for i in items)
@@ -184,28 +178,19 @@ def verify_diff_budget(
     budget = estimated * factor
     actual = sum(int(c.get("diff_lines") or 0) for c in facts)
     if budget and actual > budget:
-        return (
-            f"実差分 {actual} 行が差分予算 {budget} 行"
-            f"（見積 {estimated} 行 × {factor}）を超えました（範囲の逸脱）"
-        )
+        return f"実差分 {actual} 行が差分予算 {budget} 行（見積 {estimated} 行 × {factor}）を超えました（範囲の逸脱）"
     return None
 
 
-def unassigned_fix_commits(
-    work: str, reported_shas: list[str], ordered_range: list[str]
-) -> list[str]:
+def unassigned_fix_commits(work: str, reported_shas: list[str], ordered_range: list[str]) -> list[str]:
     """範囲内のコミットのうち、どの申告にも含まれていないものを返す。
 
     適用と同じく、**範囲のコミットは全て申告されていること**を求める。
     申告から漏れた修正コミットは検証を受けないまま Pull Request に残る。
     """
-    reported_full = {
-        full for full in (
-            git_out(work, ["rev-parse", "--verify", f"{s}^{{commit}}"])
-            for s in reported_shas
-        ) if full
-    }
+    reported_full = {full for full in (git_out(work, ["rev-parse", "--verify", f"{s}^{{commit}}"]) for s in reported_shas) if full}
     return sorted(set(ordered_range) - reported_full)
+
 
 # ---------- テストの変更の種類 ----------
 #
@@ -283,10 +268,7 @@ def undecidable_test_changes(
 
     **呼ぶ側はこれを最終ゲートのレビューへ引き継ぐ。** 空でないまま通さない。
     """
-    return sorted(
-        path for path, (before, after) in changes.items()
-        if assertion_change(before, after) == "undecidable"
-    )
+    return sorted(path for path, (before, after) in changes.items() if assertion_change(before, after) == "undecidable")
 
 
 def _changed_test_message(changed: list[str]) -> str:
@@ -318,10 +300,7 @@ def verify_test_changes(
     **判定できないものはここでは落とさない。** `undecidable_test_changes` が集め、
     呼ぶ側がレビューへ引き継ぐ。
     """
-    changed = sorted(
-        path for path, (before, after) in changes.items()
-        if assertion_change(before, after) == "changed"
-    )
+    changed = sorted(path for path, (before, after) in changes.items() if assertion_change(before, after) == "changed")
     if not changed:
         return None
     return _changed_test_message(changed)
@@ -356,15 +335,13 @@ def _names_markdown(literal: str, tracked: Iterable[str]) -> bool:
 
 
 def _markdown_literals(line: str, tracked: list[str]) -> list[str]:
-    return [m.group(2) for m in _STRING.finditer(line)
-            if _names_markdown(m.group(2), tracked)]
+    return [m.group(2) for m in _STRING.finditer(line) if _names_markdown(m.group(2), tracked)]
 
 
 def _added_lines(before: list[str], after: list[str]) -> list[str]:
     """変更の後にだけある行。置き換えた行も追加として数える。"""
     matcher = difflib.SequenceMatcher(None, before, after, autojunk=False)
-    return [line for tag, _, _, j1, j2 in matcher.get_opcodes()
-            if tag in {"insert", "replace"} for line in after[j1:j2]]
+    return [line for tag, _, _, j1, j2 in matcher.get_opcodes() if tag in {"insert", "replace"} for line in after[j1:j2]]
 
 
 def _parse(source: str) -> Optional[ast.Module]:
@@ -384,11 +361,14 @@ def _markdown_constants(tree: ast.Module, tracked: list[str]) -> dict[str, str]:
             targets, value = [node.target], node.value
         else:
             continue
-        literal = next((
-            c.value for c in ast.walk(value)
-            if isinstance(c, ast.Constant) and isinstance(c.value, str)
-            and _names_markdown(c.value, tracked)
-        ), None)
+        literal = next(
+            (
+                c.value
+                for c in ast.walk(value)
+                if isinstance(c, ast.Constant) and isinstance(c.value, str) and _names_markdown(c.value, tracked)
+            ),
+            None,
+        )
         if literal is None:
             continue
         for target in targets:
@@ -398,8 +378,10 @@ def _markdown_constants(tree: ast.Module, tracked: list[str]) -> dict[str, str]:
 
 
 def _helper_source(
-    helper: str, changes: dict[str, tuple[list[str], list[str]]],
-    work: Optional[str], sha: Optional[str],
+    helper: str,
+    changes: dict[str, tuple[list[str], list[str]]],
+    work: Optional[str],
+    sha: Optional[str],
 ) -> Optional[str]:
     """補助モジュールの変更の後の内容。群で触っていなければ git から読む。"""
     if helper in changes:
@@ -410,19 +392,20 @@ def _helper_source(
 
 
 def _imported_constants(
-    tree: ast.Module, test_path: str, tracked: list[str],
+    tree: ast.Module,
+    test_path: str,
+    tracked: list[str],
     changes: dict[str, tuple[list[str], list[str]]],
-    work: Optional[str], sha: Optional[str],
+    work: Optional[str],
+    sha: Optional[str],
 ) -> dict[str, str]:
     """同じディレクトリの補助モジュールから import した、`.md` を指す定数。"""
     found: dict[str, str] = {}
     folder = posixpath.dirname(test_path)
     for node in tree.body:
-        if (not isinstance(node, ast.ImportFrom) or not node.module
-                or "." in node.module or node.level > 1):
+        if not isinstance(node, ast.ImportFrom) or not node.module or "." in node.module or node.level > 1:
             continue
-        source = _helper_source(
-            posixpath.join(folder, f"{node.module}.py"), changes, work, sha)
+        source = _helper_source(posixpath.join(folder, f"{node.module}.py"), changes, work, sha)
         helper_tree = _parse(source) if source else None
         if helper_tree is None:
             continue
@@ -439,7 +422,8 @@ def _last_sha(facts: Iterable[dict[str, Any]]) -> Optional[str]:
 
 
 def doc_wording_tests(
-    facts: Iterable[dict[str, Any]], tracked_md: Iterable[str],
+    facts: Iterable[dict[str, Any]],
+    tracked_md: Iterable[str],
     work: Optional[str] = None,
 ) -> list[tuple[str, str]]:
     """追加したテストの行が、追跡している `.md` を指していれば `(ファイル, 文字列)` を返す。
@@ -464,9 +448,6 @@ def doc_wording_tests(
                 **_markdown_constants(tree, tracked),
                 **_imported_constants(tree, path, tracked, changes, work, sha),
             }
-            found.update(
-                literal for name, literal in names.items()
-                if any(re.search(rf"\b{re.escape(name)}\b", line) for line in added)
-            )
+            found.update(literal for name, literal in names.items() if any(re.search(rf"\b{re.escape(name)}\b", line) for line in added))
         hits.extend((path, literal) for literal in sorted(found))
     return hits

@@ -9,6 +9,7 @@
 **拒否しない。** 宣言（`.ndf/worktree.json`）が無いリポジトリと worktree の中では何も出さない。同じパスへの案内は
 セッションの内で繰り返さない。構文を読み切れない Bash のコマンドは、判定をせずに通して案内だけを出す。
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -24,8 +25,7 @@ import jsonio
 from . import payload as pl
 from . import write_target as wt
 
-DEFAULT_ALLOW_PATHS = ["issues/", "docs/", ".claude/", ".codex/", ".kiro/", ".agents/", ".serena/", ".ndf/",
-                       ".gitignore"]
+DEFAULT_ALLOW_PATHS = ["issues/", "docs/", ".claude/", ".codex/", ".kiro/", ".agents/", ".serena/", ".ndf/", ".gitignore"]
 DECLARATION_VERSION = 1
 DECLARATION_FILE = ".ndf/worktree.json"
 WORKTREE_DIR = ".worktrees"
@@ -45,8 +45,10 @@ CONTEXT = """この編集先は、リポジトリを clone した主ディレク
 変更を加えている場合は、同じ手順の移送で作業ツリー側へ移せます。
 
 この編集を止めてはいません。意図した操作であればそのまま続けてください。"""
-UNREAD = ("このコマンドは構文を読み切れないため、主ディレクトリへの書き込みかを判定していません（止めてはいません）。"
-          f"書き込むなら、開発の変更は {WORKTREE_DIR}/<ブランチ名> の作業ツリーの中で行ってください（/ndf:worktree）。")
+UNREAD = (
+    "このコマンドは構文を読み切れないため、主ディレクトリへの書き込みかを判定していません（止めてはいません）。"
+    f"書き込むなら、開発の変更は {WORKTREE_DIR}/<ブランチ名> の作業ツリーの中で行ってください（/ndf:worktree）。"
+)
 
 
 @dataclass
@@ -125,10 +127,11 @@ def is_allowed(rel: str, entries: list[str]) -> bool:
 def relative_to_main(path: str, main_dir: str) -> str | None:
     if path == main_dir:
         return "."
-    return path[len(main_dir) + 1:] if path.startswith(main_dir + "/") else None
+    return path[len(main_dir) + 1 :] if path.startswith(main_dir + "/") else None
 
 
 # --- セッションの状態ファイル（worktree-session.sh が `pending` を読む） ---------------------------------------
+
 
 def state_file(session: str) -> str | None:
     if not session:
@@ -154,22 +157,29 @@ def place(cwd: str, path: str | None) -> tuple[Place, dict] | None:
     if state and state.get("resolved_from") == cwd and state.get("main_dir"):
         if state.get("declaration_stamp", "") == declaration_stamp(state["main_dir"]):
             allow = [x for x in state.get("allow_paths") or [] if isinstance(x, str)]
-            return Place(state["main_dir"], bool(state.get("in_worktree")), bool(state.get("has_declaration")),
-                         allow), state
+            return Place(state["main_dir"], bool(state.get("in_worktree")), bool(state.get("has_declaration")), allow), state
     found = locate(cwd)
     if found is None:
         return None
     decl = declaration(found[0])
     p = Place(found[0], found[1], decl is not None, allow_paths(decl))
-    state = {"main_dir": p.main_dir, "resolved_from": cwd, "in_worktree": p.in_worktree,
-             "has_declaration": p.has_declaration, "declaration_stamp": declaration_stamp(p.main_dir),
-             "allow_paths": [x for x in p.allow_paths if x], "notified": [], "pending": []}
+    state = {
+        "main_dir": p.main_dir,
+        "resolved_from": cwd,
+        "in_worktree": p.in_worktree,
+        "has_declaration": p.has_declaration,
+        "declaration_stamp": declaration_stamp(p.main_dir),
+        "allow_paths": [x for x in p.allow_paths if x],
+        "notified": [],
+        "pending": [],
+    }
     if path:
         _save_state(path, state)
     return p, state
 
 
 # --- 判定 ---------------------------------------------------------------------------------------------
+
 
 def targets(ev: pl.Event) -> tuple[list[str], str, bool] | None:
     """(書き込み先の候補, 相対パスの起点, 構文を読み切れなかったか)。対象の Tool でなければ None。"""
@@ -187,6 +197,7 @@ def targets(ev: pl.Event) -> tuple[list[str], str, bool] | None:
         if cmd_cwd:
             base = wt.normalize_path(cmd_cwd, ev.cwd)
         import shparse  # 構文木が要るときだけ読む（Edit の呼び出しでは tree-sitter を読まない）
+
         if shparse.has_unreadable_error(shparse.parse_bash(cmd)):
             return [], base, True
         return wt.shell_targets(cmd, base), base, False

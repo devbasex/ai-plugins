@@ -8,6 +8,7 @@
 **根（`base`）は必ず引数で受ける。** ここで `run_metrics.metrics_dir()` を呼ぶと、
 テストが利用者の `~/.local/state` を読み書きする。根を決めるのは呼ぶ側である。
 """
+
 from __future__ import annotations
 
 import datetime as _dt
@@ -115,9 +116,7 @@ def _structure_samples(rows: list[dict[str, Any]]) -> list[tuple[float, float]]:
     return samples
 
 
-def _section_samples(
-    rows: list[dict[str, Any]], section: str, count_key: str
-) -> list[tuple[float, float]]:
+def _section_samples(rows: list[dict[str, Any]], section: str, count_key: str) -> list[tuple[float, float]]:
     samples = []
     for row in rows:
         entry = row.get(section)
@@ -133,16 +132,20 @@ def build_table(rows: list[dict[str, Any]], defaults: dict[str, float]) -> dict[
     `history` のまま残す。**何を材料にしたか**を表す目印であり、種類ごとの出所は
     改修計画の報告が値から読めばよい。
     """
+
     def pick(value: Optional[float], name: str) -> float:
         return float(defaults[name]) if value is None else value
 
     kinds: dict[str, float] = {}
-    names = sorted({
-        str(name)
-        for row in rows if isinstance(row.get("kinds"), dict)
-        for name in row["kinds"]
-        if str(name).startswith(_STRUCTURE_PREFIX)
-    })
+    names = sorted(
+        {
+            str(name)
+            for row in rows
+            if isinstance(row.get("kinds"), dict)
+            for name in row["kinds"]
+            if str(name).startswith(_STRUCTURE_PREFIX)
+        }
+    )
     for name in names:
         value = _per_unit(_kind_samples(rows, name))
         if value is not None:
@@ -180,8 +183,7 @@ def _ended_at(state: dict[str, Any]) -> Optional[str]:
     ends = [
         (parsed, str(span["ended_at"]))
         for span in (state.get("phases") or {}).values()
-        if isinstance(span, dict)
-        and (parsed := _parse_time(span.get("ended_at"))) is not None
+        if isinstance(span, dict) and (parsed := _parse_time(span.get("ended_at"))) is not None
     ]
     if not ends:
         return None
@@ -230,8 +232,7 @@ def build_row(state: dict[str, Any]) -> dict[str, Any]:
     started, ended = _parse_time(state.get("started_at")), _parse_time(at)
     elapsed = None
     if started and ended:
-        elapsed = int((ended.astimezone(_dt.timezone.utc)
-                       - started.astimezone(_dt.timezone.utc)).total_seconds())
+        elapsed = int((ended.astimezone(_dt.timezone.utc) - started.astimezone(_dt.timezone.utc)).total_seconds())
     verify = state.get("verify_stats") or {}
     fix = state.get("fix_stats") or {}
     whole = state.get("whole_test") or {}
@@ -244,11 +245,7 @@ def build_row(state: dict[str, Any]) -> dict[str, Any]:
         "implementer": state.get("implementer"),
         "budget_minutes": state.get("budget_minutes"),
         "elapsed_seconds": elapsed,
-        "phases": {
-            name: span.get("seconds")
-            for name, span in (state.get("phases") or {}).items()
-            if isinstance(span, dict)
-        },
+        "phases": {name: span.get("seconds") for name, span in (state.get("phases") or {}).items() if isinstance(span, dict)},
         "kinds": kinds,
         "verify": {"items": verify.get("items", 0), "seconds": verify.get("seconds", 0)},
         "fix": {"launches": fix.get("launches", 0), "seconds": fix.get("seconds", 0)},

@@ -12,6 +12,7 @@
 分は、工程表の「実装レビュー」（`pr` → `cross-review`）が持つ。ここへ軽量なレビューを
 足すと、同じ差分を 2 度レビューすることになる。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -76,7 +77,9 @@ def cmd_final_gate(args: argparse.Namespace) -> None:
 
     if passed and standalone:
         _emit_cross_review(
-            path, state, gate,
+            path,
+            state,
+            gate,
             f"✅ 最終ゲートのチェックが通りました（{detail}）。続けて /ndf:cross-review を実行します",
         )
         return
@@ -127,9 +130,7 @@ def _reusable_whole_test(state: dict[str, Any]) -> bool:
     return bool(head) and head == record.get("head")
 
 
-def _run_and_record_gate_check(
-    state: dict[str, Any], gate: dict[str, Any]
-) -> tuple[bool, str]:
+def _run_and_record_gate_check(state: dict[str, Any], gate: dict[str, Any]) -> tuple[bool, str]:
     """最終ゲートのチェックを 1 回走らせ、`checks` へ記録して結果を返す。"""
     # **排他である。** `--ci-check` があれば手元のテストを実行せず継続的統合の成功
     # だけで判定し、無ければ手元のテストだけで判定する。「どちらか一方が通れば通過」
@@ -137,9 +138,7 @@ def _run_and_record_gate_check(
     ci_check = str(state.get("ci_check") or "").strip()
     gate["mode"] = "ci" if ci_check else "test"
     started = time.monotonic()
-    passed, detail = (
-        _ci_gate(state, ci_check) if ci_check else _local_gate(state)
-    )
+    passed, detail = _ci_gate(state, ci_check) if ci_check else _local_gate(state)
     seconds = round(time.monotonic() - started, 1)
     _record_gate_check(gate, ci_check or _baseline_command(state), passed, detail, seconds)
     if not ci_check:
@@ -148,9 +147,7 @@ def _run_and_record_gate_check(
     return passed, detail
 
 
-def _emit_cross_review(
-    path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any], message: str
-) -> None:
+def _emit_cross_review(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any], message: str) -> None:
     """Step 7 を `cross-review` へ委譲する結末。"""
     # **チェックが通ったことを残す。** 履歴へ追記するかは、この目印と `cross-review` の
     # 最終ステータスの両方で決まる（`finalize`）。
@@ -162,32 +159,28 @@ def _emit_cross_review(
     statefile.emit(FINAL_GATE="cross-review")
 
 
-def _record_gate_check(
-    gate: dict[str, Any], command: str, passed: bool, detail: str, seconds: float
-) -> None:
+def _record_gate_check(gate: dict[str, Any], command: str, passed: bool, detail: str, seconds: float) -> None:
     """最終ゲートのチェック 1 件を `checks` へ追記する。"""
-    gate.setdefault("checks", []).append({
-        "at": statefile.now(),
-        "mode": gate["mode"],
-        "command": command,
-        "status": "pass" if passed else "fail",
-        "detail": detail,
-        "seconds": seconds,
-    })
+    gate.setdefault("checks", []).append(
+        {
+            "at": statefile.now(),
+            "mode": gate["mode"],
+            "command": command,
+            "status": "pass" if passed else "fail",
+            "detail": detail,
+            "seconds": seconds,
+        }
+    )
 
 
-def _gate_passed(
-    path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any], detail: str
-) -> None:
+def _gate_passed(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any], detail: str) -> None:
     gate["status"] = "passed"
     statefile.save(path, state)
     info(f"✅ 最終ゲートを通過しました（{detail}）")
     statefile.emit(FINAL_GATE="passed")
 
 
-def _gate_limit_reached(
-    path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any], detail: str, why: str
-) -> None:
+def _gate_limit_reached(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any], detail: str, why: str) -> None:
     gate["status"] = "failed"
     statefile.save(path, state)
     info(
@@ -199,7 +192,10 @@ def _gate_limit_reached(
 
 
 def _gate_failing(
-    path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any], detail: str,
+    path: pathlib.Path,
+    state: dict[str, Any],
+    gate: dict[str, Any],
+    detail: str,
 ) -> None:
     gate["fix_rounds"] = safe_int(gate.get("fix_rounds")) + 1
     gate["status"] = "failing"
@@ -211,13 +207,8 @@ def _gate_failing(
     gate["fix_base_sha"] = git_out(work_dir(state), ["rev-parse", "HEAD"])
     impl = _final_fix_impl(state, gate)
     statefile.save(path, state)
-    info(
-        f"❌ 最終ゲートが落ちました（{detail}）。修正ラウンド {gate['fix_rounds']}"
-        f" — 修正担当は {impl} です"
-    )
-    statefile.emit(
-        FINAL_GATE="failing", FINAL_FIX_IMPL=impl, FINAL_FIX_ROUND=gate["fix_rounds"]
-    )
+    info(f"❌ 最終ゲートが落ちました（{detail}）。修正ラウンド {gate['fix_rounds']} — 修正担当は {impl} です")
+    statefile.emit(FINAL_GATE="failing", FINAL_FIX_IMPL=impl, FINAL_FIX_ROUND=gate["fix_rounds"])
     sys.exit(2)
 
 
@@ -267,8 +258,7 @@ def _close_failed_final_fix(
     if closed.range_unknown:
         statefile.save(path, state)
         die(
-            "最終ゲートの修正の範囲を確定できませんでした"
-            f"（起点 {gate.get('fix_base_sha')}）。検証できない修正は採りません",
+            f"最終ゲートの修正の範囲を確定できませんでした（起点 {gate.get('fix_base_sha')}）。検証できない修正は採りません",
             code=2,
         )
     if not closed.relaunch_same_agent:
@@ -318,14 +308,13 @@ def _verify_final_fix_commits(
     # **テストコマンドは渡さない。** 合否は `final-gate` が採った側で 1 度だけ見る
     # （`--ci-check` を指定した実行で手元のテストを走らせないため）。
     facts = collect_commit_facts(
-        work, claimed_shas, set(ordered_range), "", state["head_branch"],
+        work,
+        claimed_shas,
+        set(ordered_range),
+        "",
+        state["head_branch"],
     )
-    problems = [
-        p for p in (
-            verify_final_fix_commit(c, state.get("target_scope") or [])
-            for c in facts
-        ) if p
-    ]
+    problems = [p for p in (verify_final_fix_commit(c, state.get("target_scope") or []) for c in facts) if p]
     return unassigned, problems
 
 
@@ -341,10 +330,7 @@ def _apply_final_fix_verdict(
 ) -> None:
     """検証の結果に応じて、修正を取り消すか最終ゲートの記録へ取り込む。"""
     if unassigned:
-        info(
-            f"❌ どの申告にも含まれていない修正コミットが {len(unassigned)} 件あります"
-            f"（{', '.join(s[:7] for s in unassigned[:5])}）"
-        )
+        info(f"❌ どの申告にも含まれていない修正コミットが {len(unassigned)} 件あります（{', '.join(s[:7] for s in unassigned[:5])}）")
     for problem in problems:
         info(f"❌ {problem}")
 
@@ -385,8 +371,7 @@ def cmd_merge_final_fix(args: argparse.Namespace) -> None:
     impl = str(gate.get("impl") or "")
     if not impl:
         die(
-            "最終ゲートの修正担当が記録されていません。"
-            "先に `final-gate` を実行してください",
+            "最終ゲートの修正担当が記録されていません。先に `final-gate` を実行してください",
             code=4,
         )
 
@@ -400,19 +385,31 @@ def cmd_merge_final_fix(args: argparse.Namespace) -> None:
         sys.exit(2)
 
     payload, head_now, ordered_range = _collect_final_fix_range(
-        path, state, gate, scope, impl, work,
+        path,
+        state,
+        gate,
+        scope,
+        impl,
+        work,
     )
     unassigned, problems = _verify_final_fix_commits(
-        state, work, payload, ordered_range,
+        state,
+        work,
+        payload,
+        ordered_range,
     )
     _apply_final_fix_verdict(
-        path, state, gate, scope, head_now, ordered_range, unassigned, problems,
+        path,
+        state,
+        gate,
+        scope,
+        head_now,
+        ordered_range,
+        unassigned,
+        problems,
     )
 
-    gate.setdefault("durations", {})["fix"] = (
-        gate.get("durations", {}).get("fix", 0)
-        + safe_int(payload.get("elapsed_seconds"))
-    )
+    gate.setdefault("durations", {})["fix"] = gate.get("durations", {}).get("fix", 0) + safe_int(payload.get("elapsed_seconds"))
     statefile.save(path, state)
     # **取り消したかどうかに関わらず公開する。** 最終ゲートは push 済みの地点なので、
     # 公開しないと Pull Request の内容と手元の HEAD が食い違ったまま次の判定へ入る。

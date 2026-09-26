@@ -10,6 +10,7 @@ cross-refactoring が同じ監視資産を使えるようにするために足�
 既存テストを 1 つも変更しないことが作業単位 9 の完了条件なので、
 ここでは **追加した経路だけ** を見る。
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -20,6 +21,7 @@ from unittest import mock
 
 
 # ---------- 1. stem template ----------
+
 
 def test_default_stem_keeps_cross_review_naming(monitor_mod, tmp_path):
     """既定の骨格は現行の `<agent>-review-pr<PR>` のままであること。"""
@@ -32,9 +34,7 @@ def test_default_stem_keeps_cross_review_naming(monitor_mod, tmp_path):
 def test_stem_template_overrides_naming(monitor_mod, tmp_path):
     """`{agent}` と `{id}` を埋めた任意の骨格を使えること。"""
     with mock.patch.object(monitor_mod.monitor_types, "_tmp_dir", return_value=tmp_path):
-        paths = monitor_mod.AgentPaths.for_(
-            "kiro", 130, "{agent}-propose-rf{id}"
-        )
+        paths = monitor_mod.AgentPaths.for_("kiro", 130, "{agent}-propose-rf{id}")
     assert paths.pidfile == tmp_path / "kiro-propose-rf130.pid"
     assert paths.err_log == tmp_path / "kiro-propose-rf130-err.log"
     assert paths.stdout_log == tmp_path / "kiro-propose-rf130-stdout.log"
@@ -48,26 +48,30 @@ def test_monitor_agent_uses_stem_template(monitor_mod, tmp_path):
     pidfile を骨格どおりの名前で置いたときだけ PIDFILE_BAD にならないことで確認する。
     """
     (tmp_path / "claude-apply-r1.pid").write_text("12345")
-    (tmp_path / "claude-apply-r1-result.json").write_text(
-        json.dumps({"items": []}), encoding="utf-8"
-    )
+    (tmp_path / "claude-apply-r1-result.json").write_text(json.dumps({"items": []}), encoding="utf-8")
     with (
         mock.patch.object(monitor_mod.monitor_types, "_tmp_dir", return_value=tmp_path),
         mock.patch.object(monitor_mod.monitor_proc, "_pid_alive", return_value=False),
     ):
         config = monitor_mod.MonitorConfig(
-            timeout=420, stall_timeout=900, poll=1,
-            require_result=True, no_early_error=True,
+            timeout=420,
+            stall_timeout=900,
+            poll=1,
+            require_result=True,
+            no_early_error=True,
             stem_template="{agent}-apply-r{id}",
         )
         st = monitor_mod.monitor_agent(
-            agent="claude", pr=1, config=config,
+            agent="claude",
+            pr=1,
+            config=config,
         )
     assert st.status == "OK"
     assert st.result_exists is True
 
 
 # ---------- 2. tmp ディレクトリの解決 ----------
+
 
 def test_tmp_dir_honors_cross_refactoring_env(monitor_mod, tmp_path, monkeypatch):
     """`CROSS_REFACTORING_TMP_DIR` も一時ディレクトリとして受け付けること。"""
@@ -77,9 +81,7 @@ def test_tmp_dir_honors_cross_refactoring_env(monitor_mod, tmp_path, monkeypatch
     assert monitor_mod._tmp_dir() == (tmp_path / "rf").resolve()
 
 
-def test_cross_review_env_wins_over_cross_refactoring(
-    monitor_mod, tmp_path, monkeypatch
-):
+def test_cross_review_env_wins_over_cross_refactoring(monitor_mod, tmp_path, monkeypatch):
     """両方あるときは cross-review 側を優先し、既存挙動を変えないこと。"""
     monkeypatch.setenv("CROSS_REVIEW_TMP_DIR", str(tmp_path / "cr"))
     monkeypatch.setenv("CROSS_REFACTORING_TMP_DIR", str(tmp_path / "rf"))
@@ -91,7 +93,9 @@ def test_tmp_dir_override_wins_over_env(monitor_mod, tmp_path, monkeypatch):
     """`--tmp-dir` 相当の明示指定が env より優先されること。"""
     monkeypatch.setenv("CROSS_REVIEW_TMP_DIR", str(tmp_path / "cr"))
     monkeypatch.setattr(
-        monitor_mod.monitor_types, "_TMP_DIR_OVERRIDE", (tmp_path / "explicit").resolve(),
+        monitor_mod.monitor_types,
+        "_TMP_DIR_OVERRIDE",
+        (tmp_path / "explicit").resolve(),
         raising=False,
     )
     try:
@@ -101,6 +105,7 @@ def test_tmp_dir_override_wins_over_env(monitor_mod, tmp_path, monkeypatch):
 
 
 # ---------- 3. ANSI エスケープの除去 ----------
+
 
 def test_strip_ansi_removes_color_codes(monitor_mod):
     assert monitor_mod._strip_ansi("\x1b[31mred\x1b[0m") == "red"
@@ -120,13 +125,11 @@ def test_early_error_detected_through_ansi_escapes(monitor_mod, tmp_path):
 
 # ---------- 4. claude / kiro の早期エラー ----------
 
+
 def test_kiro_tool_rejection_is_fatal(monitor_mod, tmp_path):
     """kiro のツール拒否は終了コード 0 で出るため、標準エラー出力で検知する。"""
     log = tmp_path / "err.log"
-    log.write_text(
-        "\x1b[33mTool 'execute_bash' is rejected because it matches one or more "
-        "rules on the denied list\x1b[0m\n"
-    )
+    log.write_text("\x1b[33mTool 'execute_bash' is rejected because it matches one or more rules on the denied list\x1b[0m\n")
     assert monitor_mod._scan_early_fatal(log) is not None
 
 
@@ -139,39 +142,58 @@ def test_kiro_trust_tools_spelling_warning_is_fatal(monitor_mod, tmp_path):
 
 def test_claude_root_permission_error_is_fatal(monitor_mod, tmp_path):
     log = tmp_path / "err.log"
-    log.write_text(
-        "--dangerously-skip-permissions cannot be used with root/sudo privileges\n"
-    )
+    log.write_text("--dangerously-skip-permissions cannot be used with root/sudo privileges\n")
     assert monitor_mod._scan_early_fatal(log) is not None
 
 
 def test_claude_permission_denials_detected_in_stdout_json(monitor_mod, tmp_path):
     """承認失敗は標準出力の JSON に出るため、そちらを見る必要がある。"""
     out = tmp_path / "stdout.log"
-    out.write_text(json.dumps({
-        "type": "result", "subtype": "success", "is_error": False,
-        "permission_denials": [{"tool_name": "Write", "tool_use_id": "x"}],
-    }), encoding="utf-8")
+    out.write_text(
+        json.dumps(
+            {
+                "type": "result",
+                "subtype": "success",
+                "is_error": False,
+                "permission_denials": [{"tool_name": "Write", "tool_use_id": "x"}],
+            }
+        ),
+        encoding="utf-8",
+    )
     assert monitor_mod._scan_claude_stdout_fatal(out) is not None
 
 
 def test_claude_is_error_true_detected_in_stdout_json(monitor_mod, tmp_path):
     out = tmp_path / "stdout.log"
-    out.write_text(json.dumps({
-        "type": "result", "subtype": "error_during_execution", "is_error": True,
-        "permission_denials": [],
-    }), encoding="utf-8")
+    out.write_text(
+        json.dumps(
+            {
+                "type": "result",
+                "subtype": "error_during_execution",
+                "is_error": True,
+                "permission_denials": [],
+            }
+        ),
+        encoding="utf-8",
+    )
     assert monitor_mod._scan_claude_stdout_fatal(out) is not None
 
 
 def test_claude_success_json_is_not_fatal(monitor_mod, tmp_path):
     """正常終了の JSON を致命と誤判定しないこと（空配列 / false）。"""
     out = tmp_path / "stdout.log"
-    out.write_text(json.dumps({
-        "type": "result", "subtype": "success", "is_error": False,
-        "permission_denials": [],
-        "modelUsage": {"claude-opus-5": {"inputTokens": 10}},
-    }), encoding="utf-8")
+    out.write_text(
+        json.dumps(
+            {
+                "type": "result",
+                "subtype": "success",
+                "is_error": False,
+                "permission_denials": [],
+                "modelUsage": {"claude-opus-5": {"inputTokens": 10}},
+            }
+        ),
+        encoding="utf-8",
+    )
     assert monitor_mod._scan_claude_stdout_fatal(out) is None
 
 
@@ -181,6 +203,7 @@ def test_claude_stdout_scan_ignores_missing_file(monitor_mod, tmp_path):
 
 # ---------- 5. 追加ランタイムの stall 既定 ----------
 
+
 def test_stall_defaults_cover_claude_and_kiro(monitor_mod):
     """`claude -p` は完了まで無出力なので、最も長い既定を持つこと。"""
     assert monitor_mod._agent_stall_default("claude") == 900
@@ -188,6 +211,7 @@ def test_stall_defaults_cover_claude_and_kiro(monitor_mod):
 
 
 # ---------- 6. 移設シム ----------
+
 
 def test_shim_exposes_implementation_namespace():
     """`scripts/monitor.py` が共通層の `monitor.py` の名前空間をそのまま持つこと。

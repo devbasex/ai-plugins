@@ -1,4 +1,5 @@
 """wait-review.sh wrapper の引数不足経路を固定する。"""
+
 from __future__ import annotations
 
 import pathlib
@@ -15,9 +16,7 @@ def test_wait_review_fails_before_monitor_when_pr_is_missing(tmp_path):
     called = tmp_path / "monitor-called"
     shutil.copy2(_SCRIPT, script)
     monitor.write_text(
-        "#!/usr/bin/env bash\n"
-        f"touch {called}\n"
-        "exit 99\n",
+        f"#!/usr/bin/env bash\ntouch {called}\nexit 99\n",
         encoding="utf-8",
     )
     monitor.chmod(0o755)
@@ -41,10 +40,7 @@ def test_wait_review_passes_args_to_monitor(tmp_path):
 
     shutil.copy2(_SCRIPT, script)
     monitor.write_text(
-        "#!/usr/bin/env python3\n"
-        "import sys\n"
-        f"with open('{args_record}', 'w') as f:\n"
-        "    f.write(repr(sys.argv[1:]))\n",
+        f"#!/usr/bin/env python3\nimport sys\nwith open('{args_record}', 'w') as f:\n    f.write(repr(sys.argv[1:]))\n",
         encoding="utf-8",
     )
     monitor.chmod(0o755)

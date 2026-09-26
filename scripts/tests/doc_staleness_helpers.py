@@ -7,6 +7,7 @@
 数は実物（33 / 31 / 32 / 31）と重ならない小さい値にしてある。版数も実物とは別の
 値（9.3.0）にしてある。テストが実物の値へ依存していないことを、値そのもので示すためである。
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -157,9 +158,7 @@ codex plugin list
 
 def _create_plugin_configs(root: Path, ndf: Path) -> None:
     (ndf / ".claude-plugin").mkdir(parents=True)
-    (ndf / ".claude-plugin/plugin.json").write_text(
-        '{\n  "name": "ndf",\n  "version": "%s"\n}\n' % VERSION, encoding="utf-8"
-    )
+    (ndf / ".claude-plugin/plugin.json").write_text('{\n  "name": "ndf",\n  "version": "%s"\n}\n' % VERSION, encoding="utf-8")
 
     other = root / "plugins" / OTHER_PLUGIN / ".claude-plugin"
     other.mkdir(parents=True)
@@ -222,9 +221,7 @@ def edit_all(path: Path, old: str, new: str, expected: int) -> None:
 
 def bump_plugin_version(root: Path, version: str) -> None:
     """木の `plugin.json` の版だけを上げる。説明文書には触らない。"""
-    (root / "plugins/ndf/.claude-plugin/plugin.json").write_text(
-        '{\n  "name": "ndf",\n  "version": "%s"\n}\n' % version, encoding="utf-8"
-    )
+    (root / "plugins/ndf/.claude-plugin/plugin.json").write_text('{\n  "name": "ndf",\n  "version": "%s"\n}\n' % version, encoding="utf-8")
 
 
 def base_of(version: str) -> str:

@@ -19,6 +19,7 @@
 **送るのは呼び出し側が組み立てた文だけである。** 差分の本文・ファイルの本文・テストの
 出力を入れない規則は呼び出し側（cross-refactoring の `commands/plan.py` と `converge.py`）が守る。
 """
+
 from __future__ import annotations
 
 import json
@@ -73,11 +74,14 @@ def _answer(payload: Optional[dict[str, Any]], name: str) -> Optional[dict[str, 
 
 
 def ask_boolean(
-    state: str, instructions: str, *, post: Post = _post, timeout: int = ASK_TIMEOUT,
+    state: str,
+    instructions: str,
+    *,
+    post: Post = _post,
+    timeout: int = ASK_TIMEOUT,
 ) -> Optional[tuple[bool, float]]:
     """真偽の問い。`(答え, 確信度)` を返す。確信度は答えの側の確率。失敗は `None`。"""
-    body = {"model": MODEL, "state": state,
-            "questions": {"q": {"type": "boolean", "instructions": instructions}}}
+    body = {"model": MODEL, "state": state, "questions": {"q": {"type": "boolean", "instructions": instructions}}}
     answer = _answer(post(body, timeout), "q")
     probability = (answer or {}).get("probability")
     if not isinstance(probability, (int, float)) or isinstance(probability, bool):
@@ -87,17 +91,19 @@ def ask_boolean(
 
 
 def ask_score(
-    state: str, instructions: str, criteria: list[str], *,
-    post: Post = _post, timeout: int = ASK_TIMEOUT,
+    state: str,
+    instructions: str,
+    criteria: list[str],
+    *,
+    post: Post = _post,
+    timeout: int = ASK_TIMEOUT,
 ) -> Optional[tuple[str, float]]:
     """段階の問い。`(選ばれた等級, 確信度)` を返す。失敗は `None`。
 
     等級は `probabilities` の最大の位置で決める（`score` は位置の期待値で、等級の名前へ
     そのまま戻せない）。確信度は応答の `confidence` を使い、無ければ最大の確率を使う。
     """
-    body = {"model": MODEL, "state": state,
-            "questions": {"q": {"type": "score", "criteria": list(criteria),
-                                "instructions": instructions}}}
+    body = {"model": MODEL, "state": state, "questions": {"q": {"type": "score", "criteria": list(criteria), "instructions": instructions}}}
     answer = _answer(post(body, timeout), "q")
     probabilities = (answer or {}).get("probabilities")
     if not isinstance(probabilities, dict) or not probabilities:
@@ -121,8 +127,10 @@ def ask_score(
 def probe(*, post: Post = _post) -> bool:
     """疎通の確認。固定の真偽の問いを 1 回送り、答えが返れば真。"""
     result = ask_boolean(
-        "The sky is blue today.", "Is the sky described as blue?",
-        post=post, timeout=PROBE_TIMEOUT,
+        "The sky is blue today.",
+        "Is the sky described as blue?",
+        post=post,
+        timeout=PROBE_TIMEOUT,
     )
     return result is not None
 
@@ -130,7 +138,8 @@ def probe(*, post: Post = _post) -> bool:
 def decide(
     is_public: Callable[[], Optional[bool]],
     env: Optional[Mapping[str, str]] = None,
-    *, post: Post = _post,
+    *,
+    post: Post = _post,
 ) -> dict[str, Any]:
     """この実行で Jev を使うかを 1 度だけ決め、状態ファイルの `judge` の形で返す。
 

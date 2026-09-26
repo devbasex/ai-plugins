@@ -4,6 +4,7 @@
 終わる（`PermissionRequest` の判断に使われないため、標準出力へは何も書かない）。`DEBUG_SLACK_NOTIFY=true` のときだけ
 `~/.claude/logs/wait-notify-<日付>.log` へ理由を書く。`.env` の読み取りは `lib/notify.py`、排他は `lib/locks.py` が持つ。
 """
+
 from __future__ import annotations
 
 import datetime as _dt
@@ -47,6 +48,7 @@ def log(*parts) -> None:
 def load_env_file(cwd: str) -> None:
     """`.env` を cwd から git のトップまで上へ探し、無ければスクリプトの置き場から上へ探す。既存の値は上書きしない。"""
     import notify
+
     found = notify.load_env_upward(cwd, SCRIPTS.parent)
     if found:
         log("env file:", found)
@@ -96,6 +98,7 @@ def read_transcript(path: str | None) -> tuple[str, str] | None:
 
 # --- 重複の抑止 ------------------------------------------------------------------------------------
 
+
 def state_dir() -> Path:
     base = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
     return Path(base) / "ndf" / "wait-notify"
@@ -118,6 +121,7 @@ def _prune(directory: Path, now: float) -> None:
 def claim(session: str, key: str, kind: str, window: bool, now: float | None = None) -> bool:
     """同じ待ちのキーの 2 回目なら False。初めてなら記録を書いて True（送る前に書く）。"""
     import locks
+
     now = time.time() if now is None else now
     directory = state_dir()
     directory.mkdir(parents=True, exist_ok=True)
@@ -206,15 +210,22 @@ def run_hook(runtime: str, hook_input: dict | None) -> None:
     is_stop = event in ("Stop", "stop") or runtime == "kiro"
     search = reply if is_stop else f"{wait.excerpt}\n{assistant_text}"
     payload = {
-        "runtime": runtime, "kind": wait.kind, "excerpt": wait.excerpt, "key": wait.key, "cwd": cwd,
+        "runtime": runtime,
+        "kind": wait.kind,
+        "excerpt": wait.excerpt,
+        "key": wait.key,
+        "cwd": cwd,
         "hook_input": {k: hook_input.get(k) for k in ("session_id", "conversation_id") if hook_input.get(k)},
         "search": search[-SEARCH_TEXT_LIMIT:],
     }
     log("notify:", wait.kind, wait.key)
     subprocess.Popen(
         [sys.executable, str(ENTRY), "--send", json.dumps(payload, ensure_ascii=False)],
-        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        start_new_session=True, cwd=cwd if os.path.isdir(cwd) else None,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+        cwd=cwd if os.path.isdir(cwd) else None,
     )
 
 

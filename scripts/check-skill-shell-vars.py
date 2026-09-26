@@ -27,6 +27,7 @@ bash のブロックは `lib/md.py`（CommonMark の囲み）で、bash その�
     python3 scripts/check-skill-shell-vars.py --skill-dir <パス> # 1 本だけ
     python3 scripts/check-skill-shell-vars.py --show-sources RUNTIMES
 """
+
 from __future__ import annotations
 
 import argparse
@@ -51,16 +52,44 @@ DEFAULT_SKILLS = ("plugins/ndf/skills/cross-refactoring",)
 
 # 骨組みの外から渡る値。利用者が引数として与えるものと、この Skill の入口が決めるもの。
 DEFAULT_EXTERNAL = (
-    "PR", "SCOPE", "BASELINE", "HOST", "MAX_FIX", "CI_CHECK", "WORKFLOW_STEP", "MODEL_ARGS", "SYNC_COMMAND",
-    "PLAN_FILE", "ROTATE_MODE", "ONLY", "FOCUS", "EXTRA_INSTRUCTIONS_FILE",
-    "INITIAL_PR", "MAX_ROUNDS", "ROTATE_AFTER",
+    "PR",
+    "SCOPE",
+    "BASELINE",
+    "HOST",
+    "MAX_FIX",
+    "CI_CHECK",
+    "WORKFLOW_STEP",
+    "MODEL_ARGS",
+    "SYNC_COMMAND",
+    "PLAN_FILE",
+    "ROTATE_MODE",
+    "ONLY",
+    "FOCUS",
+    "EXTRA_INSTRUCTIONS_FILE",
+    "INITIAL_PR",
+    "MAX_ROUNDS",
+    "ROTATE_AFTER",
 )
 
 # シェルと環境が持つ値。参照されても出所を問わない。
 SHELL_BUILTINS = {
-    "HOME", "PWD", "OLDPWD", "PATH", "USER", "SHELL", "TMPDIR", "IFS",
-    "RANDOM", "LINENO", "SECONDS", "BASH_SOURCE", "FUNCNAME", "PIPESTATUS",
-    "CLAUDE_PLUGIN_ROOT", "NDF_WORKTREE_BASE", "CROSS_REVIEW_TMP_DIR",
+    "HOME",
+    "PWD",
+    "OLDPWD",
+    "PATH",
+    "USER",
+    "SHELL",
+    "TMPDIR",
+    "IFS",
+    "RANDOM",
+    "LINENO",
+    "SECONDS",
+    "BASH_SOURCE",
+    "FUNCNAME",
+    "PIPESTATUS",
+    "CLAUDE_PLUGIN_ROOT",
+    "NDF_WORKTREE_BASE",
+    "CROSS_REVIEW_TMP_DIR",
     "CROSS_REFACTORING_TMP_DIR",
 }
 
@@ -74,8 +103,7 @@ _DEFAULTED = {":-", ":=", ":+", "-", "+"}
 
 def bash_blocks(text: str) -> list[str]:
     """Markdown の bash のコードブロック（情報文字列が `bash` / `sh` の囲み）を順に返す。"""
-    return [t.content.rstrip("\n") for t in md.md_tokens(text)
-            if t.type == "fence" and t.info.strip() in ("bash", "sh")]
+    return [t.content.rstrip("\n") for t in md.md_tokens(text) if t.type == "fence" and t.info.strip() in ("bash", "sh")]
 
 
 def emitted_keys(scripts_dir: pathlib.Path) -> dict[str, set[str]]:
@@ -109,7 +137,7 @@ def emitted_keys(scripts_dir: pathlib.Path) -> dict[str, set[str]]:
         if not name.startswith("cmd_"):
             continue
         total = set(keys)
-        for callee in calls.get(name, set()):        # ヘルパーは 1 階層だけ
+        for callee in calls.get(name, set()):  # ヘルパーは 1 階層だけ
             total |= per_function.get(callee, set())
         result[name[4:].replace("_", "-")] = total
     return result
@@ -161,8 +189,8 @@ class _Flow:
             name = _reference(node)
             if name and name not in self.known:
                 self.missing.append((name, node.start_point[0] + 1))
-                self.known.add(name)      # 同じ名前を何度も並べない
-            for c in node.children:       # `${X:-$Y}` の既定値の中の参照
+                self.known.add(name)  # 同じ名前を何度も並べない
+            for c in node.children:  # `${X:-$Y}` の既定値の中の参照
                 if c.type not in ("variable_name", "subscript"):
                     self.walk(c)
             return
@@ -231,12 +259,9 @@ def sources_of(skill_dir: pathlib.Path, name: str) -> list[str]:
 
 def main(argv: Optional[Iterable[str]] = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--skill-dir", action="append", default=None,
-                    help="チェックする Skill のディレクトリ（複数可）")
-    ap.add_argument("--external", default=None,
-                    help="骨組みの外から渡る値。コンマ区切り")
-    ap.add_argument("--show-sources", default=None,
-                    help="その変数を返す副コマンドを出して終わる")
+    ap.add_argument("--skill-dir", action="append", default=None, help="チェックする Skill のディレクトリ（複数可）")
+    ap.add_argument("--external", default=None, help="骨組みの外から渡る値。コンマ区切り")
+    ap.add_argument("--show-sources", default=None, help="その変数を返す副コマンドを出して終わる")
     args = ap.parse_args(list(argv) if argv is not None else None)
 
     targets = [pathlib.Path(d) for d in (args.skill_dir or [])]

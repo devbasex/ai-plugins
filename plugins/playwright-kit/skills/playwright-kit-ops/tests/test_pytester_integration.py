@@ -30,7 +30,6 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 
-
 # ---------------------------------------------------------------------------
 # (a) auth cache hit/miss の統合テスト
 # ---------------------------------------------------------------------------
@@ -227,10 +226,7 @@ def test_makereport_populates_artifact_paths_in_report(pytester, tmp_path: Path)
 
     # artifact path (request.har) が report.md に含まれていること
     # Codex Major-1 修正: teardown merge により call phase FAIL でも HAR path が乗る
-    assert "request.har" in content, (
-        f"request.har が report.md に含まれていない。\n"
-        f"report.md 内容:\n{content}"
-    )
+    assert "request.har" in content, f"request.har が report.md に含まれていない。\nreport.md 内容:\n{content}"
 
 
 # ---------------------------------------------------------------------------
@@ -351,9 +347,7 @@ def test_sessionstarttime_affects_report_header(tmp_path: Path):
 
     captured_started: list[_dt.datetime] = []
 
-    orig_write = __import__(
-        "playwright_kit.pytest_report", fromlist=["write_report"]
-    ).write_report
+    orig_write = __import__("playwright_kit.pytest_report", fromlist=["write_report"]).write_report
 
     def _capture_write(entries, *, out_dir, started_at, finished_at, **kwargs):
         captured_started.append(started_at)
@@ -370,9 +364,7 @@ def test_sessionstarttime_affects_report_header(tmp_path: Path):
 
     assert len(captured_started) == 1
     expected = _dt.datetime.fromtimestamp(fixed_ts)
-    assert captured_started[0] == expected, (
-        f"_sessionstarttime あり: started_at={captured_started[0]} != {expected}"
-    )
+    assert captured_started[0] == expected, f"_sessionstarttime あり: started_at={captured_started[0]} != {expected}"
 
     # _sessionstarttime なし: now() - sum(duration) で started_at が近似される
     tr_no_ts = MagicMock()

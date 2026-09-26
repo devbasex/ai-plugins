@@ -2,6 +2,7 @@
 
 ボードへの書き込みは行わない。宣言が無い環境で何も起きないことが、この層の主な責務である。
 """
+
 from __future__ import annotations
 
 import json
@@ -47,23 +48,24 @@ def test_owner_and_number_are_required(repo) -> None:
 def test_field_names_fall_back_to_defaults(repo) -> None:
     """宣言がフィールド名を持たないときは既定の名前を使う。"""
     write_declaration(repo, VALID)
-    got = run_lib(
-        f'json=$(pj_declaration "{repo}")\n'
-        'for k in stage mode worktree plan; do pj_field_name "$json" "$k"; done'
-    )
+    got = run_lib(f'json=$(pj_declaration "{repo}")\nfor k in stage mode worktree plan; do pj_field_name "$json" "$k"; done')
     assert got.stdout.split() == ["進行", "モード", "作業ツリー", "計画ファイル"]
 
 
 def test_field_names_can_be_overridden(repo) -> None:
     """ボードのフィールド名は利用者が決める。宣言で差し替えられる。"""
-    write_declaration(repo, json.dumps({
-        "version": 1, "owner": "devbasex", "number": 1,
-        "fields": {"stage": "Stage", "plan": "Plan file"},
-    }))
-    got = run_lib(
-        f'json=$(pj_declaration "{repo}")\n'
-        'for k in stage mode worktree plan; do pj_field_name "$json" "$k"; done'
+    write_declaration(
+        repo,
+        json.dumps(
+            {
+                "version": 1,
+                "owner": "devbasex",
+                "number": 1,
+                "fields": {"stage": "Stage", "plan": "Plan file"},
+            }
+        ),
     )
+    got = run_lib(f'json=$(pj_declaration "{repo}")\nfor k in stage mode worktree plan; do pj_field_name "$json" "$k"; done')
     assert got.stdout.splitlines() == ["Stage", "モード", "作業ツリー", "Plan file"]
 
 

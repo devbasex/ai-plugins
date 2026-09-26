@@ -125,21 +125,13 @@ class PwkEvidence:
     log_lines: list[str] = field(default_factory=list)
 
     _trace_started: bool = field(default=False, init=False, repr=False)
-    _tolerated_console_re: list[re.Pattern[str]] = field(
-        default_factory=list, init=False, repr=False
-    )
-    _tolerated_page_re: list[re.Pattern[str]] = field(
-        default_factory=list, init=False, repr=False
-    )
+    _tolerated_console_re: list[re.Pattern[str]] = field(default_factory=list, init=False, repr=False)
+    _tolerated_page_re: list[re.Pattern[str]] = field(default_factory=list, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.config is not None:
-            self._tolerated_console_re = [
-                re.compile(p) for p in self.config.tolerated_console_errors
-            ]
-            self._tolerated_page_re = [
-                re.compile(p) for p in self.config.tolerated_page_errors
-            ]
+            self._tolerated_console_re = [re.compile(p) for p in self.config.tolerated_console_errors]
+            self._tolerated_page_re = [re.compile(p) for p in self.config.tolerated_page_errors]
 
     # --- listener ------------------------------------------------------
 
@@ -252,9 +244,7 @@ def _resolve_har_mode(pytestconfig, pwk_config) -> str:
 
 
 @pytest.fixture()
-def browser_context_args(
-    browser_context_args, request, pytestconfig, pwk_out_dir, _pwk_config_optional
-) -> dict[str, Any]:
+def browser_context_args(browser_context_args, request, pytestconfig, pwk_out_dir, _pwk_config_optional) -> dict[str, Any]:
     """pytest-playwright の ``browser_context_args`` を function scope で override し、
     1 test = 1 HAR を実現する (Codex Major 1)。
 

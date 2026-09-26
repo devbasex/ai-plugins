@@ -8,6 +8,7 @@
 
 時刻と待ちは引数で差し替えられる（テストは実際には待たない）。
 """
+
 from __future__ import annotations
 
 import time
@@ -72,9 +73,15 @@ def with_fallback(primary: Callable[[], Attempt], alternate: Callable[[], Attemp
     return Attempt(None, f"{first.error}\n{second.error}", second.via)
 
 
-def wait_for_reset(op: Callable[[], Attempt], resource: str = "graphql", *,
-                   sleep: Callable[[float], None] = time.sleep, now: Callable[[], float] = time.time,
-                   limits: Callable[[], dict | None] = rate_limits, max_wait: float = MAX_WAIT) -> Attempt:
+def wait_for_reset(
+    op: Callable[[], Attempt],
+    resource: str = "graphql",
+    *,
+    sleep: Callable[[float], None] = time.sleep,
+    now: Callable[[], float] = time.time,
+    limits: Callable[[], dict | None] = rate_limits,
+    max_wait: float = MAX_WAIT,
+) -> Attempt:
     """`op` を行い、上限で落ちたら `resource` の回復の時刻まで待って 1 回やり直す。
 
     回復の時刻が読めなければ 60 秒待つ。待ちは `max_wait` 秒を超えない（壊れた時刻で待ち続けない）。
@@ -101,10 +108,16 @@ class PollInterval:
         return self.current
 
 
-def poll_until(path: str, done: Callable[[Any], bool], *, timeout: float,
-               interval: PollInterval | None = None, sleep: Callable[[float], None] = time.sleep,
-               now: Callable[[], float] = time.time,
-               read: Callable[[str], gh_call.RestResponse] | None = None) -> tuple[Any, bool]:
+def poll_until(
+    path: str,
+    done: Callable[[Any], bool],
+    *,
+    timeout: float,
+    interval: PollInterval | None = None,
+    sleep: Callable[[float], None] = time.sleep,
+    now: Callable[[], float] = time.time,
+    read: Callable[[str], gh_call.RestResponse] | None = None,
+) -> tuple[Any, bool]:
     """`path` を ETag 付きで読み直し、`done(本文)` が真になるまで待つ。`(最後の本文, 届いたか)`。
 
     変わっていない読み（304）は上限に数えられず、間隔を伸ばす。読めない回は変化なしとして数える。

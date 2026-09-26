@@ -8,6 +8,7 @@ v10.5.0 で 2 つとも配布へ回した（`optional-skills/` を無くした�
 欠ける状態を作らない**ことが、Skill の境界をまたぐ参照を例外として許した条件である。
 条件そのものをここで固定する。
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -22,11 +23,7 @@ PROVIDER = "google-auth"
 
 
 def _listed(manifest: Path) -> list[str]:
-    return [
-        line.split("#", 1)[0].strip()
-        for line in manifest.read_text(encoding="utf-8").splitlines()
-        if line.split("#", 1)[0].strip()
-    ]
+    return [line.split("#", 1)[0].strip() for line in manifest.read_text(encoding="utf-8").splitlines() if line.split("#", 1)[0].strip()]
 
 
 def test_the_manifests_are_found() -> None:
@@ -39,16 +36,11 @@ def test_the_provider_ships_wherever_the_consumer_does(manifest: Path) -> None:
     listed = _listed(manifest)
     if CONSUMER not in listed:
         pytest.skip(f"{manifest.name} は {CONSUMER} を配らない")
-    assert PROVIDER in listed, (
-        f"{manifest.name} は {CONSUMER} を配るが {PROVIDER} を配らない。"
-        f"{CONSUMER} の資格情報の取得が解決できない"
-    )
+    assert PROVIDER in listed, f"{manifest.name} は {CONSUMER} を配るが {PROVIDER} を配らない。{CONSUMER} の資格情報の取得が解決できない"
 
 
 def test_the_reference_still_points_at_the_provider() -> None:
     """参照が消えたら、この束とチェックの例外はもう要らない。"""
-    body = (
-        REPO / "plugins/ndf/skills/google-drive/scripts/gdrive_fetch.py"
-    ).read_text(encoding="utf-8")
+    body = (REPO / "plugins/ndf/skills/google-drive/scripts/gdrive_fetch.py").read_text(encoding="utf-8")
     assert "google-auth" in body
     assert "from google_auth import get_credentials" in body

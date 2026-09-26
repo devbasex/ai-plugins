@@ -1,4 +1,5 @@
 """spec-copy.py: 課題の本文（正）から写しを作り、食い違いを返す。gh は偽物に差し替える。"""
+
 from __future__ import annotations
 
 import json
@@ -67,8 +68,7 @@ def test_check_fails_when_body_section_changes_or_is_missing(tmp_path):
     env = fake_gh(tmp_path, BODY)
     out_file = tmp_path / "copy.md"
     run(env, "write", "7", str(out_file))
-    env = fake_gh(tmp_path, BODY.replace("荷物を送れる", "荷物を翌日に送れる")
-                   .replace("## 進行", "## 用語\n\n| 語 | 意味 |\n\n## 進行"))
+    env = fake_gh(tmp_path, BODY.replace("荷物を送れる", "荷物を翌日に送れる").replace("## 進行", "## 用語\n\n| 語 | 意味 |\n\n## 進行"))
     code, out = run(env, "check", "7", str(out_file))
     assert code == 1
     assert {(it["name"], it["result"]) for it in out["items"]} == {("受け入れ条件", "differs"), ("用語", "missing")}

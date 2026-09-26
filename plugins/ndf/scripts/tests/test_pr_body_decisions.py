@@ -4,6 +4,7 @@
 差し替えた `gh` は受け取った引数を 1 行ずつ記録するため、**読んでいないこと・書いて
 いないこと**も確かめられる。
 """
+
 from __future__ import annotations
 
 import json
@@ -20,7 +21,7 @@ REPO = "owner/repo"
 HEAD_SHA = "0123456789abcdef0123456789abcdef01234567"
 MARKER = "<!-- 設計文書の「決定の記録」の見出しから pr-body-decisions.sh sync が作る。手で書き換えない -->"
 
-FAKE_GH = r'''#!/usr/bin/env python3
+FAKE_GH = r"""#!/usr/bin/env python3
 import json, os, sys, urllib.parse
 
 
@@ -114,7 +115,7 @@ if len(parts) == 6 and parts[5] == "files":
 if len(parts) >= 5 and parts[3] == "contents":
     respond_contents(state, parts, query)
 sys.exit(1)
-'''
+"""
 
 
 class Fake:
@@ -146,9 +147,7 @@ class Fake:
             "FAKE_GH_LOG": str(self.log),
             "FAKE_GH_PATCHED": str(self.patched),
         }
-        return subprocess.run(
-            ["bash", str(SCRIPT), *args], capture_output=True, text=True, env=env, timeout=60, cwd=cwd
-        )
+        return subprocess.run(["bash", str(SCRIPT), *args], capture_output=True, text=True, env=env, timeout=60, cwd=cwd)
 
     def calls(self):
         if not self.log.exists():
@@ -183,10 +182,12 @@ def section(*blocks):
     return "\n".join(lines).rstrip("\n") + "\n"
 
 
-EXPECTED = section((
-    "issues/issue-1-design.md",
-    ["決定 1: 実行してよいコマンドは起動の引数で受け取る", "決定 2: 実行の結果を担当の支持より先に見る"],
-))
+EXPECTED = section(
+    (
+        "issues/issue-1-design.md",
+        ["決定 1: 実行してよいコマンドは起動の引数で受け取る", "決定 2: 実行の結果を担当の支持より先に見る"],
+    )
+)
 OLD_SECTION = EXPECTED.replace("実行してよいコマンドは起動の引数で受け取る", "実行してよいコマンドをリポジトリが宣言する")
 
 
@@ -283,8 +284,7 @@ def test_4_empty_decisions_without_subheadings_is_treated_as_zero_decisions(fake
 
 def test_5_headings_inside_code_fences_are_not_counted(fake):
     template = (
-        "# 雛形\n\n```markdown\n## 決定の記録\n\n### 決定 1: {結論を 1 文で}\n```\n\n"
-        "~~~~\n## 決定の記録\n### 決定 9: チルダの囲み\n~~~~\n"
+        "# 雛形\n\n```markdown\n## 決定の記録\n\n### 決定 1: {結論を 1 文で}\n```\n\n~~~~\n## 決定の記録\n### 決定 9: チルダの囲み\n~~~~\n"
     )
     body = "## Summary\n\n```markdown\n## 決めたこと\n\n- 例\n```\n\n## Test plan\n"
     fake.setup(body=body, files={"skills/decisions.md": "modified"}, contents={"skills/decisions.md": template})
@@ -311,10 +311,12 @@ def test_5_long_fence_closes_only_with_same_marker_and_sufficient_length(fake):
         "``````\n\n"
         "### 決定 2: 閉じ fence 後の決定\n"
     )
-    expected = section((
-        "issues/issue-1-design.md",
-        ["決定 1: fence 外の決定", "決定 2: 閉じ fence 後の決定"],
-    ))
+    expected = section(
+        (
+            "issues/issue-1-design.md",
+            ["決定 1: fence 外の決定", "決定 2: 閉じ fence 後の決定"],
+        )
+    )
     design_pr(fake, expected, design=design)
 
     out = fake.run("check", "7", "--repo", REPO)
@@ -324,16 +326,13 @@ def test_5_long_fence_closes_only_with_same_marker_and_sufficient_length(fake):
 
 def test_5_h1_heading_closes_decisions_section(fake):
     """現状固定: # で始まる h1 見出しが「## 決定の記録」を閉じ、後ろの ### は数えない。"""
-    design = (
-        "# 設計\n\n## 決定の記録\n\n"
-        "### 決定 A: 採用する方針\n\n"
-        "# 付録\n\n"
-        "### 数えない見出し: 付録の小見出し\n"
+    design = "# 設計\n\n## 決定の記録\n\n### 決定 A: 採用する方針\n\n# 付録\n\n### 数えない見出し: 付録の小見出し\n"
+    expected = section(
+        (
+            "issues/issue-1-design.md",
+            ["決定 A: 採用する方針"],
+        )
     )
-    expected = section((
-        "issues/issue-1-design.md",
-        ["決定 A: 採用する方針"],
-    ))
     design_pr(fake, body=f"## Summary\n\n{expected}\n## Test plan\n", design=design)
     out = fake.run("check", "7", "--repo", REPO)
     assert out.returncode == 0, out.stdout + out.stderr
@@ -348,10 +347,12 @@ def test_5_h1_appendix_subheadings_after_decisions_section_are_not_collected(fak
         "# 付録\n\n"
         "### 付録見出し\n\n付録の本文。\n"
     )
-    expected = section((
-        "issues/issue-1-design.md",
-        ["決定 1: 実行してよいコマンドは起動の引数で受け取る"],
-    ))
+    expected = section(
+        (
+            "issues/issue-1-design.md",
+            ["決定 1: 実行してよいコマンドは起動の引数で受け取る"],
+        )
+    )
     design_pr(fake, body=f"## Summary\n\n{expected}\n## Test plan\n", design=design)
     out = fake.run("check", "7", "--repo", REPO)
     assert out.returncode == 0, out.stdout + out.stderr
@@ -387,8 +388,7 @@ def test_6_unreadable_changed_files_returns_2(fake, files_response):
 
 def test_6_design_document_with_invalid_utf8_returns_2(fake):
     """中身が UTF-8 として読めなければ、未処理の例外（1）ではなく読み取り失敗（2）にする。"""
-    fake.setup(body=EXPECTED, files={"issues/issue-1-design.md": "added"},
-               contents_hex={"issues/issue-1-design.md": "23208080ff0a"})
+    fake.setup(body=EXPECTED, files={"issues/issue-1-design.md": "added"}, contents_hex={"issues/issue-1-design.md": "23208080ff0a"})
     out = fake.run("check", "7", "--repo", REPO)
     assert out.returncode == 2, out.stdout + out.stderr
     assert "Traceback" not in out.stderr
@@ -448,10 +448,13 @@ def test_multiple_documents_are_listed_in_path_order(fake):
     )
     expected = section(
         ("issues/issue-1-contracts.md", ["決定 6: 契約の決定"]),
-        ("issues/issue-1-design.md", [
-            "決定 1: 実行してよいコマンドは起動の引数で受け取る",
-            "決定 2: 実行の結果を担当の支持より先に見る",
-        ]),
+        (
+            "issues/issue-1-design.md",
+            [
+                "決定 1: 実行してよいコマンドは起動の引数で受け取る",
+                "決定 2: 実行の結果を担当の支持より先に見る",
+            ],
+        ),
     )
     out = fake.run("sync", "7", "--repo", REPO)
     assert out.returncode == 0, out.stdout + out.stderr
@@ -471,7 +474,7 @@ def test_9_only_the_section_changes_with_crlf(fake):
     written = fake.patched_body()
     assert written.startswith(before)
     assert written.endswith(after)
-    assert "実行してよいコマンドは起動の引数で受け取る" in written[len(before):-len(after)]
+    assert "実行してよいコマンドは起動の引数で受け取る" in written[len(before) : -len(after)]
 
 
 def test_9_section_is_removed_when_no_design_document(fake):
@@ -522,15 +525,15 @@ def test_12_write_that_does_not_stick_returns_1(fake):
 def test_12_head_advanced_during_sync_is_compared_at_new_head(fake):
     new_sha = "fedcba9876543210fedcba9876543210fedcba98"
     design_pr(
-        fake, "## Summary\n",
+        fake,
+        "## Summary\n",
         head_after_patch=new_sha,
         contents_at={new_sha: {"issues/issue-1-design.md": OLD_DESIGN}},
     )
     out = fake.run("sync", "7", "--repo", REPO)
     assert out.returncode == 1, out.stdout + out.stderr
     assert fake.writes()
-    refs = [urllib.parse.parse_qs(urllib.parse.urlsplit(a).query)["ref"][0]
-            for c in fake.calls() for a in c if "/contents/" in a]
+    refs = [urllib.parse.parse_qs(urllib.parse.urlsplit(a).query)["ref"][0] for c in fake.calls() for a in c if "/contents/" in a]
     assert new_sha in refs
 
 

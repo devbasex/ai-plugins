@@ -3,6 +3,7 @@
 一時の git リポジトリ（origin は bare）にマージコミットを積み、トリガーを 1 つずつ閾値の上下で
 立てる・立てない。gh は PATH の先頭に置いた偽物で置き換える。
 """
+
 from __future__ import annotations
 
 import json
@@ -19,7 +20,7 @@ SCRIPT = SCRIPTS / "check-trigger.py"
 sys.path.insert(0, str(SCRIPTS / "lib"))
 from step_result import validate_result  # noqa: E402
 
-FAKE_GH = r'''#!{py}
+FAKE_GH = r"""#!{py}
 import json, os, sys
 a = sys.argv[1:]
 path = os.environ["FAKE_GH_STATE"]
@@ -36,21 +37,19 @@ if a[:2] == ["pr", "view"]:
 if a[:2] in (["pr", "edit"], ["pr", "close"]):
     sys.exit(0)
 sys.exit(1)
-'''
+"""
 
 TRIGGERS = {"score": 3, "common_weight": 2, "lines": 1000, "escapes": 2, "hours": 24}
 DECL = {
     "version": 1,
     "fast": {"enabled": True, "verify": "true"},
-    "areas": [{"name": "駆動", "common": True, "paths": ["core/**"]},
-              {"name": "文書", "paths": ["docs/*.md"]}],
+    "areas": [{"name": "駆動", "common": True, "paths": ["core/**"]}, {"name": "文書", "paths": ["docs/*.md"]}],
     "boundary_paths": [],
 }
 
 
 def git(root: Path, *args: str, env: dict | None = None) -> str:
-    return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, check=True,
-                          env=env).stdout.strip()
+    return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, check=True, env=env).stdout.strip()
 
 
 @pytest.fixture
@@ -61,15 +60,14 @@ def repo(tmp_path):
     root = tmp_path / "work"
     root.mkdir()
     git(root, "init", "-q", "-b", "develop")
-    for k, v in (("user.email", "t@example.com"), ("user.name", "t"), ("commit.gpgsign", "false"),
-                 ("tag.gpgsign", "false")):
+    for k, v in (("user.email", "t@example.com"), ("user.name", "t"), ("commit.gpgsign", "false"), ("tag.gpgsign", "false")):
         git(root, "config", k, v)
     git(root, "remote", "add", "origin", str(origin))
     write_decl(root, TRIGGERS)
-    (root / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "base_branch": "develop",
-                                                             "production_branch": "main"}))
-    (root / ".ndf" / "supervise.json").write_text(json.dumps({"version": 1, "release": {
-        "form": "package-plugin", "plugin": "ndf", "runtimes": ["claude"]}}))
+    (root / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "base_branch": "develop", "production_branch": "main"}))
+    (root / ".ndf" / "supervise.json").write_text(
+        json.dumps({"version": 1, "release": {"form": "package-plugin", "plugin": "ndf", "runtimes": ["claude"]}})
+    )
     git(root, "add", "-A")
     git(root, "commit", "-q", "-m", "init")
     git(root, "tag", "-a", "ndf--v1.0.0", "-m", "v1.0.0")
@@ -92,8 +90,7 @@ def env(tmp_path):
     state = tmp_path / "gh-state.json"
     state.write_text("{}")
     e = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
-    e.update(PATH=f"{bindir}{os.pathsep}{e['PATH']}", FAKE_GH_STATE=str(state),
-             CLAUDE_PLUGIN_DATA=str(tmp_path / "data"))
+    e.update(PATH=f"{bindir}{os.pathsep}{e['PATH']}", FAKE_GH_STATE=str(state), CLAUDE_PLUGIN_DATA=str(tmp_path / "data"))
     return e
 
 
@@ -121,8 +118,7 @@ def merge_pr(root: Path, n: int, branch: str, files: dict[str, int]) -> str:
 
 
 def call(root: Path, env: dict, *args: str) -> tuple[int, dict | None, str]:
-    p = subprocess.run([sys.executable, str(SCRIPT), *args, "--root", str(root)], capture_output=True, text=True,
-                       env=env, cwd=root)
+    p = subprocess.run([sys.executable, str(SCRIPT), *args, "--root", str(root)], capture_output=True, text=True, env=env, cwd=root)
     lines = p.stdout.strip().splitlines()
     out = json.loads(lines[-1]) if lines and lines[-1].startswith("{") else None
     if out is not None:
@@ -151,11 +147,11 @@ def iso(delta_hours: float) -> str:
 
 
 def test_score_counts_common_layer_double_and_fires_at_threshold(repo, env):
-    merge_pr(repo, 11, "feat/a", {"core/x.py": 1})         # 共通層: 2 点
+    merge_pr(repo, 11, "feat/a", {"core/x.py": 1})  # 共通層: 2 点
     code, out, _ = call(repo, env, "eval", "--id", "c")
     assert (code, out["status"], out["items"]) == (3, "stopped", [])
     assert out["metrics"]["score"] == 2 and out["metrics"]["prs"] == 1
-    merge_pr(repo, 12, "feat/b", {"app/y.py": 1})          # 1 点で 3 点
+    merge_pr(repo, 12, "feat/b", {"app/y.py": 1})  # 1 点で 3 点
     code, out, _ = call(repo, env, "eval", "--id", "c")
     assert (code, out["status"]) == (0, "ok")
     assert out["items"] == [{"trigger": "score", "value": 3, "threshold": 3}]
@@ -189,7 +185,7 @@ def test_escapes_fire_on_the_second_in_the_same_area(repo, env):
     gh_set(env, files={"21": ["core/a.py"], "22": ["docs/x.md"], "23": ["core/b.py"]})
     assert call(repo, env, "escape", "--pr", "21", "--of", "11")[0] == 0
     assert call(repo, env, "escape", "--pr", "22")[0] == 0
-    assert call(repo, env, "eval")[0] == 3                  # 領域ごとに 1 件ずつ
+    assert call(repo, env, "eval")[0] == 3  # 領域ごとに 1 件ずつ
     call(repo, env, "escape", "--pr", "23", "--of", "0")
     code, out, _ = call(repo, env, "eval")
     assert code == 0 and out["items"][0] == {"trigger": "escapes", "value": 2, "threshold": 2}
@@ -203,9 +199,8 @@ def test_hours_fire_only_with_a_pr_in_the_range(repo, env):
     git(repo, "commit", "-qam", "decl")
     git(repo, "push", "-q", "origin", "develop")
     head = git(repo, "rev-parse", "HEAD")
-    append_event(env, repo, {"kind": "check", "at": iso(25), "id": "m-1", "from": head, "to": head,
-                             "result": "merged", "pr": 5})
-    assert call(repo, env, "eval")[0] == 3                  # 25 時間でも PR が無い
+    append_event(env, repo, {"kind": "check", "at": iso(25), "id": "m-1", "from": head, "to": head, "result": "merged", "pr": 5})
+    assert call(repo, env, "eval")[0] == 3  # 25 時間でも PR が無い
     merge_pr(repo, 11, "feat/a", {"app/a.py": 1})
     code, out, _ = call(repo, env, "eval")
     assert code == 0 and [i["trigger"] for i in out["items"]] == ["hours"]
@@ -214,8 +209,7 @@ def test_hours_fire_only_with_a_pr_in_the_range(repo, env):
 
 def test_hours_below_threshold_do_not_fire(repo, env):
     head = git(repo, "rev-parse", "HEAD")
-    append_event(env, repo, {"kind": "check", "at": iso(1), "id": "m-1", "from": head, "to": head,
-                             "result": "no_change"})
+    append_event(env, repo, {"kind": "check", "at": iso(1), "id": "m-1", "from": head, "to": head, "result": "no_change"})
     merge_pr(repo, 11, "feat/a", {"app/a.py": 1})
     assert call(repo, env, "eval")[0] == 3
 
@@ -279,7 +273,7 @@ def state_dir(tmp_path: Path, log: list[dict]) -> Path:
 def test_prepare_points_check_base_at_from_even_if_left_over(repo, env, tmp_path):
     base = git(repo, "rev-parse", "HEAD")
     merge_pr(repo, 11, "feat/a", {"app/a.py": 1})
-    git(repo, "branch", "check-base/m-1", "HEAD")           # 前の回の残り（別の点）
+    git(repo, "branch", "check-base/m-1", "HEAD")  # 前の回の残り（別の点）
     git(repo, "push", "-q", "origin", "check-base/m-1")
     st = state_dir(tmp_path, [])
     code, out, _ = call(repo, env, "prepare", "--id", "m-1", "--state", str(st))
@@ -296,14 +290,22 @@ def test_scope_orders_common_then_escaped_then_others(repo, env, tmp_path):
     merge_pr(repo, 11, "feat/a", {"app/a.py": 1, "docs/x.md": 1, "core/lib/c.py": 1})
     st = state_dir(tmp_path, [])
     call(repo, env, "prepare", "--id", "m-1", "--state", str(st))
-    p = subprocess.run([sys.executable, str(SCRIPT), "scope", "--id", "m-1", "--state", str(st), "--root",
-                        str(repo)], capture_output=True, text=True, env=env)
+    p = subprocess.run(
+        [sys.executable, str(SCRIPT), "scope", "--id", "m-1", "--state", str(st), "--root", str(repo)],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
     assert p.returncode == 0 and p.stdout.split() == ["core/lib", "docs", "app"]
 
 
 def test_scope_without_check_json_returns_two(repo, env, tmp_path):
-    p = subprocess.run([sys.executable, str(SCRIPT), "scope", "--id", "m-1", "--state", str(tmp_path / "none"),
-                        "--root", str(repo)], capture_output=True, text=True, env=env)
+    p = subprocess.run(
+        [sys.executable, str(SCRIPT), "scope", "--id", "m-1", "--state", str(tmp_path / "none"), "--root", str(repo)],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
     assert p.returncode == 2
 
 
@@ -311,16 +313,14 @@ def test_record_failed_keeps_from_and_removes_check_base(repo, env, tmp_path):
     merge_pr(repo, 11, "feat/a", {"core/a.py": 1})
     merge_pr(repo, 12, "feat/b", {"app/b.py": 1})
     _, before, _ = call(repo, env, "eval", "--id", "m-1")
-    st = state_dir(tmp_path, [{"id": "prepare", "exit": 0}, {"id": "test-all", "exit": 1},
-                              {"id": "judge", "exit": 0}])
+    st = state_dir(tmp_path, [{"id": "prepare", "exit": 0}, {"id": "test-all", "exit": 1}, {"id": "judge", "exit": 0}])
     call(repo, env, "prepare", "--id", "m-1", "--state", str(st))
     code, out, _ = call(repo, env, "record", "--id", "m-1", "--state", str(st), "--failed")
     assert (code, out["status"]) == (1, "stopped")
     row = events(env, "check")[-1]
     assert (row["result"], row["failed_at"]) == ("failed", "test-all")
     assert git(repo, "ls-remote", "origin", "refs/heads/check-base/m-1") == ""
-    assert subprocess.run(["git", "-C", str(repo), "rev-parse", "--verify", "-q", "check-base/m-1"],
-                          capture_output=True).returncode != 0
+    assert subprocess.run(["git", "-C", str(repo), "rev-parse", "--verify", "-q", "check-base/m-1"], capture_output=True).returncode != 0
     _, after, _ = call(repo, env, "eval", "--id", "m-1")
     assert after["metrics"]["from"] == before["metrics"]["from"]
 
@@ -334,8 +334,13 @@ def test_record_failed_closes_the_pr(repo, env, tmp_path):
 
 def test_record_merged_moves_the_start_of_the_next_range(repo, env, tmp_path):
     merge_pr(repo, 11, "feat/a", {"core/a.py": 1})
-    st = state_dir(tmp_path, [{"id": "refactor", "exit": 0, "counts": {"adopted": 2, "reverted": 1}},
-                              {"id": "review", "exit": 0, "counts": {"findings": 4, "unresolved": 0}}])
+    st = state_dir(
+        tmp_path,
+        [
+            {"id": "refactor", "exit": 0, "counts": {"adopted": 2, "reverted": 1}},
+            {"id": "review", "exit": 0, "counts": {"findings": 4, "unresolved": 0}},
+        ],
+    )
     call(repo, env, "prepare", "--id", "m-1", "--state", str(st))
     to = json.loads((st / "check.json").read_text())["to"]
     gh_set(env, states={"30": "MERGED"})
@@ -439,8 +444,10 @@ def test_a_failed_check_leaves_the_branch_on_origin(repo, env, tmp_path):
     st = state_dir(tmp_path / "f", [{"id": "review", "exit": 1}])
     call(repo, env, "prepare", "--id", "m-2", "--state", str(st))
     call(repo, env, "record", "--id", "m-2", "--state", str(st), "--failed")
-    assert subprocess.run(["git", "-C", str(repo), "rev-parse", "--verify", "-q", "origin/check-done/review"],
-                          capture_output=True).returncode != 0
+    assert (
+        subprocess.run(["git", "-C", str(repo), "rev-parse", "--verify", "-q", "origin/check-done/review"], capture_output=True).returncode
+        != 0
+    )
 
 
 def test_review_and_final_are_exclusive(repo, env):
@@ -449,7 +456,7 @@ def test_review_and_final_are_exclusive(repo, env):
 
 def test_changed_reads_no_change_skipped_and_missing(repo, env, tmp_path):
     assert call(repo, env, "changed", "--id", "none")[0] == 2
-    call(repo, env, "eval", "--id", "quiet", "--final")      # 範囲が空で立たない
+    call(repo, env, "eval", "--id", "quiet", "--final")  # 範囲が空で立たない
     assert call(repo, env, "changed", "--id", "quiet")[0] == 3
     st = state_dir(tmp_path, [])
     call(repo, env, "prepare", "--id", "m-2", "--state", str(st))

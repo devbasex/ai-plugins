@@ -5,6 +5,7 @@ Claude Code の Bash ツールは 1 回 600 秒で打ち切る。監視の上限
 あるので、待ちの呼び出しをまたいでも終了コードを失わない（設計の決定 13）。
 置き場所は共通層の `scripts/lib/` で、cross-review と cross-refactoring の駆動の待ちが使う（#731）。
 """
+
 from __future__ import annotations
 
 import os
@@ -26,8 +27,7 @@ pytestmark = pytest.mark.skipif(
 def _bg(*args: str, timeout: float = 30) -> subprocess.CompletedProcess:
     # **出力を捕まえて実行する。** 背景のコマンドが標準出力を握ったままだと、
     # 呼び出し側（Bash ツール）は背景が終わるまで戻らない。
-    return subprocess.run(["bash", str(BG_WAIT), *args], capture_output=True, text=True,
-                          timeout=timeout)
+    return subprocess.run(["bash", str(BG_WAIT), *args], capture_output=True, text=True, timeout=timeout)
 
 
 def _run(rc: pathlib.Path, script: str) -> subprocess.CompletedProcess:
@@ -35,6 +35,7 @@ def _run(rc: pathlib.Path, script: str) -> subprocess.CompletedProcess:
 
 
 # ---------- AC39 ----------
+
 
 def test_run_returns_0_at_once_while_the_command_keeps_running(tmp_path) -> None:
     rc = tmp_path / "job.rc"
@@ -84,6 +85,7 @@ def test_run_rejects_a_missing_command(tmp_path) -> None:
 
 
 # ---------- AC40 ----------
+
 
 def test_wait_returns_the_exit_code_when_the_command_ends(tmp_path) -> None:
     rc = tmp_path / "job.rc"

@@ -11,6 +11,7 @@
 
 比較だけを使う側は `deps.require("versions")`、書き換えも使う側は加えて `deps.require("bump")` を先に呼ぶ。
 """
+
 from __future__ import annotations
 
 import os
@@ -28,7 +29,7 @@ PRERELEASES = ("dev", "rc")
 class BumpResult(NamedTuple):
     ok: bool
     returncode: int
-    output: str      # 標準出力と標準エラーの末尾（失敗の理由を読むため）
+    output: str  # 標準出力と標準エラーの末尾（失敗の理由を読むため）
 
 
 def parse_version(v: str | None) -> semver.Version | None:
@@ -112,8 +113,7 @@ def bump_replace(config: os.PathLike[str] | str, current: str, new: str, cwd: os
     for v in (current, new):
         if parse_version(v) is None:
             raise ValueError(f"版の形が違う: {v}")
-    cmd = [*_bump_cli(), "replace", "--config-file", os.fspath(config), "--current-version", current,
-           "--new-version", new, "--allow-dirty"]
+    cmd = [*_bump_cli(), "replace", "--config-file", os.fspath(config), "--current-version", current, "--new-version", new, "--allow-dirty"]
     try:
         p = subprocess.run(cmd, cwd=os.fspath(cwd), capture_output=True, text=True)
     except OSError as exc:

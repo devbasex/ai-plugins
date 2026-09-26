@@ -1,4 +1,5 @@
 """時刻の読み書き（lib/clock.py・#1142 の L0）。8 つの `now` / `now_iso` と 5 つの `_parse_time` の形を 1 つで出せる。"""
+
 from __future__ import annotations
 
 import datetime as dt
@@ -19,10 +20,13 @@ def test_now_is_timezone_aware():
     assert clock.now(utc=True).utcoffset() == dt.timedelta(0)
 
 
-@pytest.mark.parametrize("form, pattern", [
-    ("utc", "2026-09-26T07:00:00+00:00"),
-    ("z-ms", "2026-09-26T07:00:00.123Z"),
-])
+@pytest.mark.parametrize(
+    "form, pattern",
+    [
+        ("utc", "2026-09-26T07:00:00+00:00"),
+        ("z-ms", "2026-09-26T07:00:00.123Z"),
+    ],
+)
 def test_iso_forms_in_utc(form, pattern):
     assert clock.iso(T, form) == pattern
 
@@ -45,8 +49,9 @@ def test_now_iso_round_trips_through_parse():
         assert clock.parse(clock.now_iso(form)) is not None
 
 
-@pytest.mark.parametrize("text", ["2026-09-26T07:00:00Z", "2026-09-26T07:00:00.123Z", "2026-09-26T07:00:00+00:00",
-                                  " 2026-09-26T16:00:00+09:00 "])
+@pytest.mark.parametrize(
+    "text", ["2026-09-26T07:00:00Z", "2026-09-26T07:00:00.123Z", "2026-09-26T07:00:00+00:00", " 2026-09-26T16:00:00+09:00 "]
+)
 def test_parse_reads_z_on_python_310(text):
     got = clock.parse(text)
     assert got is not None and got.astimezone(UTC).replace(microsecond=0) == T.replace(microsecond=0)

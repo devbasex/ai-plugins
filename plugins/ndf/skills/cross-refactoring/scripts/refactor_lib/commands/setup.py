@@ -3,6 +3,7 @@
 対象の Pull Request の文脈・参加者と実装担当の決定・Jev を使うかの判定・作業ツリーの
 用意・状態ファイル（版 2）の初期化と再開と、手順の開始の記録を扱う（#933）。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -49,8 +50,7 @@ SCHEMA = 2
 # 廃止した引数（決定 5・決定 24）。この変更を含む版では知らせて無視し、その次の版で外す。
 # 修正の回数（`--max-fix-rounds`）とテスト 1 回の上限（`--test-timeout`）は、想定最大
 # 時間から逆算する（決定 24）。
-DEPRECATED_ARGS = ("max_test_rounds", "max_outer_rounds", "max_items_per_round",
-                   "max_fix_rounds", "test_timeout")
+DEPRECATED_ARGS = ("max_test_rounds", "max_outer_rounds", "max_items_per_round", "max_fix_rounds", "test_timeout")
 
 # 開始を記録する手順（CLI を起動するもの）。
 # 改修計画の手順より前（予算と実装担当を当て直してよい間）の手順。
@@ -100,8 +100,7 @@ def runtime_list(value: str) -> list[str]:
         raise argparse.ArgumentTypeError("名前を 1 つ以上指定してください")
     for name in names:
         if name != NONE_WORD and name not in assignment.ALL_RUNTIMES:
-            raise argparse.ArgumentTypeError(
-                f"{'/'.join(assignment.ALL_RUNTIMES)} か {NONE_WORD} を指定してください: {name}")
+            raise argparse.ArgumentTypeError(f"{'/'.join(assignment.ALL_RUNTIMES)} か {NONE_WORD} を指定してください: {name}")
     return names
 
 
@@ -125,7 +124,10 @@ def _names_arg(args: argparse.Namespace, option: str) -> Optional[list[str]]:
 
 
 def resolve_participants(
-    host: str, include: list[str], exclude: list[str], require_all: bool,
+    host: str,
+    include: list[str],
+    exclude: list[str],
+    require_all: bool,
 ) -> dict[str, Any]:
     """参加者を決め、状態ファイルの `participants` を返す（#727 の決定 2〜5）。
 
@@ -138,23 +140,26 @@ def resolve_participants(
     try:
         pool = assignment.default_pool(host)
         resolved = assignment.resolve_participants(
-            pool, host=host, include=include, exclude=exclude,
+            pool,
+            host=host,
+            include=include,
+            exclude=exclude,
             probe=lambda names: auth.probe_auth(names, info=info),
             require_all=require_all,
         )
     except assignment.AssignmentError as e:
         die(str(e))
         raise
-    info(f"ホスト: {host} / 母集合: {' / '.join(pool)}"
-         f" / 使える者: {' / '.join(resolved.available) or 'なし'}")
+    info(f"ホスト: {host} / 母集合: {' / '.join(pool)} / 使える者: {' / '.join(resolved.available) or 'なし'}")
     if resolved.ignored_exclude:
-        info(f"ℹ --exclude {','.join(resolved.ignored_exclude)} は既定の母集合に無いため"
-             f"無視しました（母集合: {', '.join(pool)}）")
+        info(f"ℹ --exclude {','.join(resolved.ignored_exclude)} は既定の母集合に無いため無視しました（母集合: {', '.join(pool)}）")
     for name, reason in resolved.unavailable.items():
         info(f"⚠ {name} を担当から外しました（{reason}）")
     if not resolved.available:
-        die(f"使える者がいません: 参加者の全員が確認を通りませんでした"
-            f"（{' / '.join(f'{n}: {d}' for n, d in resolved.unavailable.items())}）")
+        die(
+            f"使える者がいません: 参加者の全員が確認を通りませんでした"
+            f"（{' / '.join(f'{n}: {d}' for n, d in resolved.unavailable.items())}）"
+        )
     return resolved.to_state()
 
 
@@ -170,9 +175,7 @@ def _apply_post_event(state: dict[str, Any], is_own_pr: bool) -> None:
     state["event_downgrade"] = is_own_pr
 
 
-def _warn_unmeasurable_models(
-    model_spec: dict[str, Optional[str]], participants: Iterable[str]
-) -> None:
+def _warn_unmeasurable_models(model_spec: dict[str, Optional[str]], participants: Iterable[str]) -> None:
     """実際に動いたモデルを取得できない指定を、**着手前に**知らせる。
 
     分離の対象は 2 つある。kiro の既定 `auto` はラウンドごとに違うモデルが動きうる。
@@ -236,8 +239,7 @@ def _fetch_pr_context(pr: int, repo: Optional[str] = None) -> tuple[str, str, st
             break
     if body is None:
         # 求めた名前が誤っていたときだけ、GraphQL で解決し直す。
-        fallback = sh(
-            ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"])
+        fallback = sh(["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"])
         body = _pr_payload(fallback, pr)
         if body is None:
             die(f"Pull Request #{pr} のメタデータを取得できません（リポジトリ名: {fallback}）")
@@ -289,9 +291,7 @@ class InitialContext:
     started_at: str
 
 
-def _build_initial_state(
-    args: argparse.Namespace, ctx: InitialContext
-) -> dict[str, Any]:
+def _build_initial_state(args: argparse.Namespace, ctx: InitialContext) -> dict[str, Any]:
     """確定済みの材料から、初期の状態を組み立てて返す。
 
     **判断はここでは行わない。** ホストの検出・母集合の確定・認証・Pull Request の
@@ -326,7 +326,8 @@ def _build_initial_state(
         # 名指しの記録。再開で `--implementer` を比べる相手（置き換えない。知らせるだけ）。
         "implementer_named": getattr(args, "implementer", None),
         "implementer_model": {
-            "requested": (ctx.model_spec or {}).get(ctx.implementer), "observed": None,
+            "requested": (ctx.model_spec or {}).get(ctx.implementer),
+            "observed": None,
         },
         "judge": ctx.judge,
         "resume_changes": [],
@@ -359,8 +360,7 @@ def _build_initial_state(
         "plan": None,
         "items": [],
         "deferred_items": [],
-        "whole_test": {"ran": False, "flags": [], "status": None, "seconds": None,
-                       "head": None, "reverted": False},
+        "whole_test": {"ran": False, "flags": [], "status": None, "seconds": None, "head": None, "reverted": False},
         "verify_stats": {"items": 0, "seconds": 0.0},
         "fix_stats": {"launches": 0, "seconds": 0.0},
         "final_gate": {"fix_rounds": 0, "checks": []},
@@ -393,8 +393,7 @@ def cmd_init(args: argparse.Namespace) -> None:
             setattr(args, key, value)
 
     participants, baseline, round_record = _verify_init(args, inputs, prep)
-    state = _save_initial_state(args, inputs, prep, participants, baseline, round_record,
-                                started_at)
+    state = _save_initial_state(args, inputs, prep, participants, baseline, round_record, started_at)
     # **出力は入口から直接呼ぶ。** 手順書の変数の出所のチェック
     # （`scripts/check-skill-shell-vars.py`）は `cmd_*` からヘルパーを 1 階層だけたどる。
     _emit_init(state)
@@ -414,8 +413,7 @@ def _normalize_args(args: argparse.Namespace) -> None:
     for name in DEPRECATED_ARGS:
         if getattr(args, name, None) is not None:
             option = "--" + name.replace("_", "-")
-            print(f"⚠ {option} は廃止しました（#933）。--budget-minutes で所要を決めます",
-                  file=sys.stderr, flush=True)
+            print(f"⚠ {option} は廃止しました（#933）。--budget-minutes で所要を決めます", file=sys.stderr, flush=True)
     # AC3b: ラウンドのテストが無く、全体のテストから範囲テストを組み立てられないなら、
     # 提案と改修計画に時間を使った後で全項目が `no_target` になる。着手前に止める。
     if not getattr(args, "round_test", None) and not is_known(args.baseline_test):
@@ -481,8 +479,7 @@ def _prepare_init(args: argparse.Namespace) -> _InitPreparation:
         info(f"⚠ 自分の Pull Request です（作成者 {author}）— 投稿は COMMENT へ倒します")
 
     root = (
-        pathlib.Path(args.worktree_root).resolve() if args.worktree_root
-        else default_worktree_base() / repo_lib.slug(repo) / f"rf{args.pr}"
+        pathlib.Path(args.worktree_root).resolve() if args.worktree_root else default_worktree_base() / repo_lib.slug(repo) / f"rf{args.pr}"
     )
     work = root / "work"
     _ensure_work_worktree(work, head_branch)
@@ -515,9 +512,7 @@ def _prepare_init(args: argparse.Namespace) -> _InitPreparation:
     )
 
 
-def _resume_if_pending(
-    args: argparse.Namespace, inputs: _InitInputs, prep: _InitPreparation
-) -> bool:
+def _resume_if_pending(args: argparse.Namespace, inputs: _InitInputs, prep: _InitPreparation) -> bool:
     """終わっていない前回の状態があれば再開し、`True` を返す。
 
     | 前回の状態 | 扱い |
@@ -541,8 +536,7 @@ def _resume_if_pending(
         return False
     if state.get("phase") == "done":
         return False
-    _resume(prep.state_file, state, args, inputs.model_spec,
-            inputs.include, inputs.exclude, prep.is_own_pr)
+    _resume(prep.state_file, state, args, inputs.model_spec, inputs.include, inputs.exclude, prep.is_own_pr)
     return True
 
 
@@ -552,9 +546,7 @@ def _verify_init(
     """参加者を確定し、着手前のテストとラウンドのテストを実行する。"""
     # **確認は着手前のテストより先に行う。** 使える者がいなければ、テストに時間を
     # 使わずに止める。
-    participants = resolve_participants(
-        inputs.host, inputs.include or [], inputs.exclude or [],
-        bool(getattr(args, "require_all", None)))
+    participants = resolve_participants(inputs.host, inputs.include or [], inputs.exclude or [], bool(getattr(args, "require_all", None)))
     _warn_unmeasurable_models(inputs.model_spec, participants["available"])
 
     hint = round_test_hint(prep.round_test, args.baseline_test, args.scope, str(prep.work))
@@ -569,7 +561,9 @@ def _verify_init(
 
 
 def _choose_implementer(
-    participants: dict[str, Any], host: str, named: Optional[str],
+    participants: dict[str, Any],
+    host: str,
+    named: Optional[str],
 ) -> tuple[str, str]:
     """実装担当を決める（決定 1）。名指しが参加者に無ければ中断する（AC21）。"""
     try:
@@ -581,8 +575,7 @@ def _choose_implementer(
 
 def _repo_is_public(repo: str) -> Optional[bool]:
     """対象のリポジトリが公開か。判定できなければ `None`（Jev を使わない側へ倒す）。"""
-    out = sh(["gh", "repo", "view", repo, "--json", "visibility", "-q", ".visibility"],
-             check=False)
+    out = sh(["gh", "repo", "view", repo, "--json", "visibility", "-q", ".visibility"], check=False)
     if not out:
         return None
     return out.strip().upper() == "PUBLIC"
@@ -608,8 +601,7 @@ def _save_initial_state(
     started_at: str,
 ) -> dict[str, Any]:
     """初期の状態を組み立てて保存し、保存した状態を返す。"""
-    implementer, reason = _choose_implementer(
-        participants, inputs.host, getattr(args, "implementer", None))
+    implementer, reason = _choose_implementer(participants, inputs.host, getattr(args, "implementer", None))
     context = InitialContext(
         implementer=implementer,
         implementer_reason=reason,
@@ -639,8 +631,7 @@ def _save_initial_state(
     statefile.save(prep.state_file, state)
     info(f"✅ 状態を初期化しました: {prep.state_file}")
     info(f"   ホスト: {inputs.host}（{inputs.detection}）")
-    info(f"   参加者（提案）: {' / '.join(state['runtimes'])}"
-         f" / 想定最大時間: {state['budget_minutes']} 分")
+    info(f"   参加者（提案）: {' / '.join(state['runtimes'])} / 想定最大時間: {state['budget_minutes']} 分")
     return state
 
 
@@ -655,18 +646,21 @@ def _rebuild_participants(
     include_eff = include if include is not None else list(recorded.get("included") or [])
     # `--exclude` を渡さない再開では、外した者と無視した除外の両方を足し戻す（#786 の AC4d。
     # 規則は cross-review と共通の `assignment.recorded_exclusions`）
-    exclude_eff = (exclude if exclude is not None
-                   else assignment.recorded_exclusions(recorded, include_eff))
+    exclude_eff = exclude if exclude is not None else assignment.recorded_exclusions(recorded, include_eff)
     participants = resolve_participants(
         str(state["host"]),
         include_eff,
         exclude_eff,
         bool(require_all) if require_all is not None else bool(recorded.get("require_all")),
     )
-    state.setdefault("resume_changes", []).append({
-        "at": statefile.now(), "field": "participants",
-        "from": state.get("participants"), "to": participants,
-    })
+    state.setdefault("resume_changes", []).append(
+        {
+            "at": statefile.now(),
+            "field": "participants",
+            "from": state.get("participants"),
+            "to": participants,
+        }
+    )
     state["participants"] = participants
     state["runtimes"] = list(participants["available"])
     worktrees = state.setdefault("worktrees", {})
@@ -728,21 +722,26 @@ def _recheck_implementer(state: dict[str, Any]) -> None:
         return
     if not _before_plan(state):
         die(f"実装担当 {current} が参加者から外れました。改修計画の後は実装担当を替えられません")
-    implementer, reason = _choose_implementer(
-        state["participants"], str(state["host"]), state.get("implementer_named"))
-    state.setdefault("resume_changes", []).append({
-        "at": statefile.now(), "field": "implementer",
-        "from": current, "to": f"{implementer}（{reason}）",
-    })
+    implementer, reason = _choose_implementer(state["participants"], str(state["host"]), state.get("implementer_named"))
+    state.setdefault("resume_changes", []).append(
+        {
+            "at": statefile.now(),
+            "field": "implementer",
+            "from": current,
+            "to": f"{implementer}（{reason}）",
+        }
+    )
     state["implementer"], state["implementer_reason"] = implementer, reason
     state["implementer_model"] = {
-        "requested": (state.get("models") or {}).get(implementer), "observed": None,
+        "requested": (state.get("models") or {}).get(implementer),
+        "observed": None,
     }
     info(f"↻ 実装担当を {implementer} へ替えました（{reason}）")
 
 
 def _notify_view(
-    state: dict[str, Any], args: argparse.Namespace,
+    state: dict[str, Any],
+    args: argparse.Namespace,
     model_spec: dict[str, Optional[str]],
 ) -> tuple[dict[str, Any], argparse.Namespace]:
     """「知らせる」の比較を、状態と引数の形を揃えて行うための複製を返す。
@@ -824,19 +823,19 @@ def _sync_work_worktree(work: pathlib.Path, head_branch: str) -> None:
     """
     fetched = subprocess.run(
         ["git", "fetch", "origin", head_branch],
-        cwd=str(work), capture_output=True, text=True,
+        cwd=str(work),
+        capture_output=True,
+        text=True,
     )
     if fetched.returncode != 0:
         # 取得できないまま古い `origin/<head>` へ早送りすると、同期したつもりで
         # **古い HEAD のまま**進んでしまう。通信・認証の失敗はここで止める。
-        die(
-            f"origin/{head_branch} を取得できませんでした: "
-            f"{fetched.stderr.strip()[:300]}。"
-            "古い HEAD のまま進めないため中断します"
-        )
+        die(f"origin/{head_branch} を取得できませんでした: {fetched.stderr.strip()[:300]}。古い HEAD のまま進めないため中断します")
     r = subprocess.run(
         ["git", "merge", "--ff-only", f"origin/{head_branch}"],
-        cwd=str(work), capture_output=True, text=True,
+        cwd=str(work),
+        capture_output=True,
+        text=True,
     )
     if r.returncode != 0:
         die(
@@ -864,27 +863,29 @@ def _run_baseline_test(command: str, work: pathlib.Path, timeout: int) -> dict[s
     code, timed_out = run_with_timeout(command, str(work), timeout)
     seconds = round(time.monotonic() - started, 1)
     if timed_out:
-        die(
-            f"着手前のテストが {timeout} 秒で終わりませんでした（{command}）。"
-            "打ち切りました"
-        )
+        die(f"着手前のテストが {timeout} 秒で終わりませんでした（{command}）。打ち切りました")
         raise SystemExit(1)
     status = "green" if code == 0 else "red"
     if status == "red":
-        die(
-            f"着手前のテストが失敗しています（{command}）。"
-            "先に直してから開始してください"
-        )
+        die(f"着手前のテストが失敗しています（{command}）。先に直してから開始してください")
     info(f"✅ 着手前のテスト成功: {command}（{seconds} 秒）")
     # **所要を残す。** 危険フラグと最終ゲートの全体のテストの予備時間を、この秒から見積もる。
     # **HEAD も残す。** 危険フラグの全体のテストが落ちたとき、元からの失敗かをこの SHA で
     # 見分け（決定 22）、報告と改修計画に基準として出す。
-    return {"command": command, "status": status, "checked_at": statefile.now(),
-            "seconds": seconds, "head": git_out(str(work), ["rev-parse", "HEAD"])}
+    return {
+        "command": command,
+        "status": status,
+        "checked_at": statefile.now(),
+        "seconds": seconds,
+        "head": git_out(str(work), ["rev-parse", "HEAD"]),
+    }
 
 
 def _run_round_test(
-    command: Optional[str], baseline: dict[str, Any], work: pathlib.Path, timeout: int,
+    command: Optional[str],
+    baseline: dict[str, Any],
+    work: pathlib.Path,
+    timeout: int,
 ) -> dict[str, Any]:
     """ラウンドのテストを着手前に 1 回実行して記録する（#880）。
 
@@ -897,8 +898,7 @@ def _run_round_test(
     if not command or command == baseline["command"]:
         # **省いたことを残す。** 項目の検証は `--round-test` をそのまま使えず、
         # 全体のテストから組み立てた語の並びだけを使う（AC10b）。
-        return {"command": None, "status": baseline["status"],
-                "checked_at": baseline["checked_at"]}
+        return {"command": None, "status": baseline["status"], "checked_at": baseline["checked_at"]}
     code, timed_out = run_with_timeout(command, str(work), timeout)
     if timed_out:
         die(f"ラウンドのテストが {timeout} 秒で終わりませんでした（{command}）。打ち切りました")

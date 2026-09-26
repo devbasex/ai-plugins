@@ -5,6 +5,7 @@
 （起点・本番のチャネル・案内を出さないパス・外部への公開）は個人の宣言では変わらない
 （設計の決定 7・決定 8）。
 """
+
 from __future__ import annotations
 
 import json
@@ -55,7 +56,10 @@ def run_script(script: Path, args: list[str], cwd: Path) -> dict:
     env["LC_ALL"] = "C"
     proc = subprocess.run(
         ["bash", str(script), *args],
-        cwd=str(cwd), env=env, capture_output=True, text=True,
+        cwd=str(cwd),
+        env=env,
+        capture_output=True,
+        text=True,
     )
     return {"rc": proc.returncode, "out": proc.stdout, "err": proc.stderr}
 
@@ -66,8 +70,11 @@ def run_session(cwd: Path) -> dict:
     payload = {"session_id": "local1", "cwd": str(cwd), "hook_event_name": "SessionStart"}
     proc = subprocess.run(
         ["bash", str(SESSION)],
-        input=json.dumps(payload), cwd=str(cwd), env=env,
-        capture_output=True, text=True,
+        input=json.dumps(payload),
+        cwd=str(cwd),
+        env=env,
+        capture_output=True,
+        text=True,
     )
     return {"rc": proc.returncode, "out": proc.stdout, "err": proc.stderr}
 
@@ -183,7 +190,9 @@ def test_follow_branch_can_be_enabled_locally(main_repo: Path, worktree: Path) -
     assert git(main_repo, "rev-parse", "HEAD").stdout.strip() == expected
     symbolic = subprocess.run(
         ["git", "symbolic-ref", "-q", "HEAD"],
-        cwd=str(main_repo), capture_output=True, text=True,
+        cwd=str(main_repo),
+        capture_output=True,
+        text=True,
     )
     assert symbolic.returncode != 0, "detached HEAD であること"
 
@@ -306,9 +315,7 @@ def observations(main_repo: Path, worktree: Path) -> tuple:
 
 
 @pytest.mark.parametrize("form", BROKEN_FORMS)
-def test_broken_local_declaration_falls_back_to_the_shared_one(
-    shared: Path, worktree: Path, form: str
-) -> None:
+def test_broken_local_declaration_falls_back_to_the_shared_one(shared: Path, worktree: Path, form: str) -> None:
     baseline = observations(shared, worktree)
 
     make_broken_local(shared, form)
@@ -470,8 +477,7 @@ def test_ignored_lists_expose_when_it_is_the_only_testenv_key(main_repo: Path) -
 
 
 def test_ignored_lists_mistyped_keys(shared: Path) -> None:
-    local_json(shared, {"version": 1, "testenv": "x", "follow_branch": "yes",
-                        "localenv": {"copy_from_main": ["z"]}})
+    local_json(shared, {"version": 1, "testenv": "x", "follow_branch": "yes", "localenv": {"copy_from_main": ["z"]}})
 
     assert local_ignored(shared) == ["follow_branch", "testenv"]
 
@@ -484,8 +490,7 @@ def test_ignored_lists_a_non_object_localenv(shared: Path) -> None:
 
 
 def test_ignored_is_empty_when_everything_applies(shared: Path) -> None:
-    local_json(shared, {"version": 1, "follow_branch": True,
-                        "testenv": {"port_band": [40000, 40999]}})
+    local_json(shared, {"version": 1, "follow_branch": True, "testenv": {"port_band": [40000, 40999]}})
 
     assert local_ignored(shared) == []
 

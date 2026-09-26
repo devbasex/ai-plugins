@@ -1,4 +1,5 @@
 """hook: SessionStart の通知（AC4b・AC17・AC18）と PreToolUse の誘導・自動許可（AC19〜AC22）。"""
+
 import json
 import shutil
 from pathlib import Path
@@ -13,6 +14,7 @@ PY_PLUGIN = "pyright-lsp@claude-plugins-official"
 
 # ---- SessionStart ------------------------------------------------------------
 
+
 def _yml(root, languages, excluded=None):
     (root / ".serena").mkdir(exist_ok=True)
     body = "language_servers:\n" + "".join(f"- {l}\n" for l in languages) if languages else "language_servers: []\n"
@@ -24,8 +26,7 @@ def _yml(root, languages, excluded=None):
 def _env(tmp_path, plugins=(PY_PLUGIN,), binaries=("pyright-langserver", "shellcheck"), plugin_root=True):
     home = tmp_path / "home"
     (home / ".claude/plugins").mkdir(parents=True, exist_ok=True)
-    (home / ".claude/plugins/installed_plugins.json").write_text(
-        json.dumps({"version": 2, "plugins": {p: [] for p in plugins}}))
+    (home / ".claude/plugins/installed_plugins.json").write_text(json.dumps({"version": 2, "plugins": {p: [] for p in plugins}}))
     bindir = tmp_path / "bin"
     bindir.mkdir(exist_ok=True)
     (bindir / "git").symlink_to(shutil.which("git"))
@@ -40,14 +41,20 @@ def _env(tmp_path, plugins=(PY_PLUGIN,), binaries=("pyright-langserver", "shellc
 
 def _session_start(root, env, client="claude-code"):
     import os
+
     full = {k: v for k, v in os.environ.items() if k != "CLAUDE_PLUGIN_ROOT"}
     full.update(env)
     import subprocess
     import sys
     from serena_lsp_testlib import CLI
-    proc = subprocess.run([sys.executable, str(CLI), "hook", "session-start", "--client", client],
-                          input=json.dumps({"cwd": str(root), "session_id": "s"}), capture_output=True,
-                          text=True, env=full)
+
+    proc = subprocess.run(
+        [sys.executable, str(CLI), "hook", "session-start", "--client", client],
+        input=json.dumps({"cwd": str(root), "session_id": "s"}),
+        capture_output=True,
+        text=True,
+        env=full,
+    )
     assert proc.returncode == 0
     if not proc.stdout.strip():
         return ""
@@ -191,8 +198,7 @@ def configured(tmp_path, monkeypatch):
 
 def _call(ctx, tool, tool_input=None, client="claude-code", mode="default", session="s1"):
     ctx["clock"]["now"] += 1
-    payload = {"session_id": session, "tool_name": tool, "tool_input": tool_input or {},
-               "permission_mode": mode, "cwd": str(ctx["root"])}
+    payload = {"session_id": session, "tool_name": tool, "tool_input": tool_input or {}, "permission_mode": mode, "cwd": str(ctx["root"])}
     out = (hooks.pre_tool_use(payload, client) or {}).get("hookSpecificOutput", {})
     if "additionalContext" in out:
         assert "permissionDecision" not in out  # 案内は実行を止めない
@@ -247,7 +253,8 @@ def test_count_expires_after_1000_seconds(configured):
 
 def test_symbolic_serena_tool_resets_but_search_and_diagnostics_do_not(configured):
     ctx = configured
-    _read(ctx, "a.py"); _read(ctx, "a.py")
+    _read(ctx, "a.py")
+    _read(ctx, "a.py")
     _call(ctx, SERENA + "find_symbol")
     assert _read(ctx, "a.py") is None
     _read(ctx, "a.py")
@@ -264,6 +271,7 @@ def test_parallel_calls_do_not_lose_counts(configured, monkeypatch):
     # 読みと書きの間を広げても、同じセッションの並列の呼び出しは直列になり、増分を失わない。
     import threading
     import time as _time
+
     load = hooks._load_counts
     monkeypatch.setattr(hooks, "_load_counts", lambda path: (_time.sleep(0.2), load(path))[1])
     threads = [threading.Thread(target=_read, args=(configured, "a.py")) for _ in range(2)]
@@ -284,8 +292,9 @@ def test_notice_names_symbol_tools_without_blocking(configured):
     for _ in range(2):
         _read(ctx, "a.py")
     ctx["clock"]["now"] += 1
-    out = hooks.pre_tool_use({"session_id": "s1", "tool_name": "Read", "tool_input": {"file_path": "a.py"},
-                              "cwd": str(ctx["root"])}, "claude-code")
+    out = hooks.pre_tool_use(
+        {"session_id": "s1", "tool_name": "Read", "tool_input": {"file_path": "a.py"}, "cwd": str(ctx["root"])}, "claude-code"
+    )
     assert "permissionDecision" not in out["hookSpecificOutput"]
     reason = out["hookSpecificOutput"]["additionalContext"]
     assert len(reason.splitlines()) <= 3
@@ -293,8 +302,7 @@ def test_notice_names_symbol_tools_without_blocking(configured):
         assert tool in reason
 
 
-@pytest.mark.parametrize("mode,expected", [("acceptEdits", "allow"), ("auto", "allow"),
-                                           ("default", None), ("bypassPermissions", None)])
+@pytest.mark.parametrize("mode,expected", [("acceptEdits", "allow"), ("auto", "allow"), ("default", None), ("bypassPermissions", None)])
 def test_auto_allow_serena_tools(configured, mode, expected):
     assert _call(configured, SERENA + "find_symbol", mode=mode) == expected
 
@@ -315,6 +323,7 @@ def test_codex_list_command_is_unwrapped(configured):
 def test_codex_hook_definition_matches_shell_tools():
     data = json.loads((PLUGIN / "hooks/codex.json").read_text())
     import re
+
     matcher = data["hooks"]["PreToolUse"][0]["matcher"]
     for name in ("Bash", "shell", "exec_command", "local_shell", "mcp__serena__find_symbol"):
         assert re.fullmatch(matcher, name), name
@@ -325,6 +334,5 @@ def test_codex_hook_definition_matches_shell_tools():
 
 def test_broken_input_prints_nothing(tmp_path):
     for stdin in ("", "not json", "[]", '{"cwd": 1}'):
-        proc = run_cli("hook", "pre-tool-use", "--client", "claude-code", stdin=stdin,
-                       env={"CLAUDE_PLUGIN_ROOT": str(PLUGIN)})
+        proc = run_cli("hook", "pre-tool-use", "--client", "claude-code", stdin=stdin, env={"CLAUDE_PLUGIN_ROOT": str(PLUGIN)})
         assert (proc.returncode, proc.stdout) == (0, "")

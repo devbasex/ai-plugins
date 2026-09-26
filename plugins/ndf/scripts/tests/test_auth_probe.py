@@ -3,6 +3,7 @@
 主題は止めない確認 `probe_auth`（#727）である。失敗しても例外を上げず、`ok` と理由を
 返し、`NDF_SKIP_AUTH_CHECK` が立てば確認コマンドを 1 回も呼ばない（AC5 / AC6）。
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -36,6 +37,7 @@ def _completed(cmd, returncode=0, stdout="", stderr=""):
 
 # ---------- probe_auth: 失敗の 4 つの形（AC6） ----------
 
+
 def test_probe_reports_a_missing_command(auth, monkeypatch):
     def missing(*args, **kwargs):
         raise FileNotFoundError(args[0][0])
@@ -52,8 +54,7 @@ def test_probe_reports_a_missing_command(auth, monkeypatch):
     assert messages == ["❌ codex: codex login status"]
 
 
-def test_probe_reports_a_command_it_cannot_start_with_a_real_unreadable_path(
-        auth, monkeypatch, tmp_path):
+def test_probe_reports_a_command_it_cannot_start_with_a_real_unreadable_path(auth, monkeypatch, tmp_path):
     """AC7: 読めないディレクトリだけの PATH で、確認コマンドが見つからないとき。
 
     実際に権限を外したディレクトリを PATH に置いて再現する。権限が効かない実行者
@@ -81,6 +82,7 @@ def test_probe_reports_a_command_it_cannot_start_with_a_real_unreadable_path(
 
 def test_probe_reports_a_command_it_cannot_start(auth, monkeypatch):
     """AC7: 起動が権限の例外で終わるときも、例外を上げずに理由を返す。"""
+
     def denied(*args, **kwargs):
         raise PermissionError(13, "Permission denied")
 
@@ -122,7 +124,8 @@ def test_probe_reports_a_timeout(auth, monkeypatch):
 
 def test_probe_reports_a_nonzero_exit(auth, monkeypatch):
     monkeypatch.setattr(
-        auth.subprocess, "run",
+        auth.subprocess,
+        "run",
         lambda cmd, **kw: _completed(cmd, 1, stdout="", stderr="error: no session\n"),
     )
 
@@ -135,7 +138,8 @@ def test_probe_reports_a_nonzero_exit(auth, monkeypatch):
 def test_probe_reports_an_unauthenticated_marker_despite_exit_zero(auth, monkeypatch):
     """kiro は成否を終了コードで表さない。終了コード 0 でも文言で未認証を拾う。"""
     monkeypatch.setattr(
-        auth.subprocess, "run",
+        auth.subprocess,
+        "run",
         lambda cmd, **kw: _completed(cmd, 0, stdout="Not logged in\n"),
     )
 
@@ -147,9 +151,11 @@ def test_probe_reports_an_unauthenticated_marker_despite_exit_zero(auth, monkeyp
 
 # ---------- probe_auth: 成功と飛ばし ----------
 
+
 def test_probe_reports_success(auth, monkeypatch):
     monkeypatch.setattr(
-        auth.subprocess, "run",
+        auth.subprocess,
+        "run",
         lambda cmd, **kw: _completed(cmd, 0, stdout="Logged in as x\n"),
     )
     messages: list[str] = []
@@ -158,14 +164,17 @@ def test_probe_reports_success(auth, monkeypatch):
 
     assert skipped is False
     assert results["claude"] == {
-        "command": "claude auth status", "ok": True, "detail": "Logged in as x",
+        "command": "claude auth status",
+        "ok": True,
+        "detail": "Logged in as x",
     }
     assert messages == ["✅ claude: claude auth status"]
 
 
 def test_probe_truncates_detail_to_200_chars(auth, monkeypatch):
     monkeypatch.setattr(
-        auth.subprocess, "run",
+        auth.subprocess,
+        "run",
         lambda cmd, **kw: _completed(cmd, 1, stderr="x" * 300),
     )
 
@@ -178,13 +187,16 @@ def test_probe_skips_without_running_any_command(auth, monkeypatch):
     """`NDF_SKIP_AUTH_CHECK` が立つと確認コマンドは 1 回も呼ばれない（AC5）。"""
     calls: list[list[str]] = []
     monkeypatch.setattr(
-        auth.subprocess, "run",
+        auth.subprocess,
+        "run",
         lambda cmd, **kw: calls.append(list(cmd)) or _completed(cmd, 0),
     )
     messages: list[str] = []
 
     results, skipped = auth.probe_auth(
-        ["codex", "agy"], info=messages.append, env={auth.SKIP_ENV: "1"},
+        ["codex", "agy"],
+        info=messages.append,
+        env={auth.SKIP_ENV: "1"},
     )
 
     assert (results, skipped) == ({}, True)
@@ -195,7 +207,8 @@ def test_probe_skips_without_running_any_command(auth, monkeypatch):
 def test_probe_ignores_an_unknown_runtime(auth, monkeypatch):
     calls: list[list[str]] = []
     monkeypatch.setattr(
-        auth.subprocess, "run",
+        auth.subprocess,
+        "run",
         lambda cmd, **kw: calls.append(list(cmd)) or _completed(cmd, 0),
     )
 
@@ -208,6 +221,7 @@ def test_probe_ignores_an_unknown_runtime(auth, monkeypatch):
 
 def test_probe_never_raises_and_returns_every_runtime(auth, monkeypatch):
     """1 者の失敗で残りの確認が止まらない。"""
+
     def run(cmd, **kw):
         if cmd[0] == "codex":
             raise FileNotFoundError(cmd[0])

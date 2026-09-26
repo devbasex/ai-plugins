@@ -3,6 +3,7 @@
 候補（LangGraph・Burr・DBOS）は、ここの `route` を遷移の規則として使い、ステップの実行を
 `exec_fake` に任せる。候補ごとに違うのは、状態の持ち方・再開・承認ゲートの止め方・キューである。
 """
+
 from __future__ import annotations
 
 import fcntl
@@ -39,8 +40,7 @@ TERMINAL = ("end", "stop", "limit")
 # シナリオ: ステップ → 訪問ごとの終了コード（judge は選んだ答え）。書かない訪問は 0（judge は pr）
 SCENARIOS = {
     "pass": {},
-    "branch": {"sync": [1, 0], "test-limited": [1, 0], "judge": ["fix", "doc-lint"], "test-all": [1],
-               "doc-lint": [1, 0]},
+    "branch": {"sync": [1, 0], "test-limited": [1, 0], "judge": ["fix", "doc-lint"], "test-all": [1], "doc-lint": [1, 0]},
     "loop": {"test-limited": [1] * 99, "judge": ["fix"] * 99},
     "gate": {"ready": [10]},
     "stop": {"test-limited": [1], "judge": ["stop"]},
@@ -147,9 +147,16 @@ class Ctx:
             self.event("end", step=sid, visit=visit, resources=st.get("resources", []))
             Slots.release(held)
         kind, target = route(sid, code, decision)
-        self.progress_line("step", step=sid, type=st["type"], exit=code, seconds=round(time.time() - t0, 2),
-                           cost=0, next=target if kind == "step" else kind,
-                           summary=f"visit {visit}" + (f" decision {decision}" if decision else ""))
+        self.progress_line(
+            "step",
+            step=sid,
+            type=st["type"],
+            exit=code,
+            seconds=round(time.time() - t0, 2),
+            cost=0,
+            next=target if kind == "step" else kind,
+            summary=f"visit {visit}" + (f" decision {decision}" if decision else ""),
+        )
         return code, decision
 
     def attention(self, step: str, reason: str, text: str) -> None:

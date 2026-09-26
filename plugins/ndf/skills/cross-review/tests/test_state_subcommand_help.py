@@ -7,6 +7,7 @@
 `argparse` の parser は `main()` の中で組み立てられるため、`--help` を副プロセスで
 実行して出力を見る。利用者が読むものをそのままチェックできる。
 """
+
 from __future__ import annotations
 
 import pathlib
@@ -58,19 +59,13 @@ def _entry(help_text: str, name: str) -> str:
     `argparse` は幅で折り返すため、次の副コマンドの行が来るまでを 1 件として読む。
     """
     lines = help_text.splitlines()
-    starts = [
-        i for i, line in enumerate(lines)
-        if line.strip().startswith(f"{name} ") or line.strip() == name
-    ]
+    starts = [i for i, line in enumerate(lines) if line.strip().startswith(f"{name} ") or line.strip() == name]
     assert starts, f"{name} の説明が --help に無い"
     start = starts[-1]
     out = [lines[start].strip()]
-    for line in lines[start + 1:]:
+    for line in lines[start + 1 :]:
         stripped = line.strip()
-        if not stripped or any(
-            stripped.startswith(f"{other} ") or stripped == other
-            for other in SUBCOMMANDS
-        ):
+        if not stripped or any(stripped.startswith(f"{other} ") or stripped == other for other in SUBCOMMANDS):
             break
         out.append(stripped)
     return " ".join(out)
@@ -92,17 +87,12 @@ def test_the_subcommand_list_appears_once(help_text: str, name: str) -> None:
     `usage` の行と `positional arguments` の選択肢の行は、名前を `,` で連ねた 1 行で
     出る。説明を伴う一覧の側だけを数える。
     """
-    described = [
-        line for line in help_text.splitlines()
-        if line.startswith("    ") and line.strip().startswith(f"{name} ")
-    ]
+    described = [line for line in help_text.splitlines() if line.startswith("    ") and line.strip().startswith(f"{name} ")]
     assert len(described) == 1, f"{name} の説明が {len(described)} 回現れる"
 
 
 @pytest.mark.parametrize("name,codes", sorted(BRANCHING_EXIT_CODES.items()))
-def test_the_branching_exit_codes_are_documented(
-    help_text: str, name: str, codes: tuple[str, ...]
-) -> None:
+def test_the_branching_exit_codes_are_documented(help_text: str, name: str, codes: tuple[str, ...]) -> None:
     entry = _entry(help_text, name)
     for code in codes:
         assert f"{code}=" in entry, f"{name} の説明に {code} が無い: {entry}"

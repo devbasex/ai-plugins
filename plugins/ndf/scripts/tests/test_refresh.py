@@ -4,6 +4,7 @@
 instructions-check のテストは `refresh.fetch` をスタブへ差し替えるため本体を通らない。
 ここでは **現状の戻り値をそのまま正解として記録する**。正しさの主張ではない。
 """
+
 from __future__ import annotations
 
 import importlib.util

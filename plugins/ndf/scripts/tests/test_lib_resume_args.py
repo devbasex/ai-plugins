@@ -3,6 +3,7 @@
 この関数は出力せず、標準エラーへ出す行の一覧を返す。予約語 `none` の正規化は
 呼び出し側が済ませてから渡すので、値はそのまま `!=` で比べる。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -132,7 +133,9 @@ def test_several_fields_are_handled_in_one_call_in_spec_order(statefile, frozen_
     ]
 
     lines = statefile.apply_resume_args(
-        state, _args(max_rounds=20, rotate_after=4, host="codex"), spec,
+        state,
+        _args(max_rounds=20, rotate_after=4, host="codex"),
+        spec,
     )
 
     assert lines == [

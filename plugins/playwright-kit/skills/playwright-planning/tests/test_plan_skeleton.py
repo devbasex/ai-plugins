@@ -18,7 +18,9 @@ SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "plan_skeleton.py"
 def run(*args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, str(SCRIPT), *args],
-        capture_output=True, text=True, check=False,
+        capture_output=True,
+        text=True,
+        check=False,
     )
 
 
@@ -55,10 +57,7 @@ def test_markdown_skeleton_has_empty_judgement_column(tmp_path: Path):
     proc = run("--role", "form", "--output", str(plan))
     assert proc.returncode == 0, proc.stderr
     assert json.loads(proc.stdout)["output"] == str(plan)
-    rows = [
-        line for line in plan.read_text(encoding="utf-8").splitlines()
-        if line.startswith("| FM1 ")
-    ]
+    rows = [line for line in plan.read_text(encoding="utf-8").splitlines() if line.startswith("| FM1 ")]
     assert len(rows) == 1
     cells = [c.strip() for c in rows[0].strip("|").split("|")]
     # 観点 ID / 観点 / 分類 / 判定 / 理由 のうち判定と理由は空
@@ -75,12 +74,17 @@ def test_role_alias_maps_to_combined_checklist():
 
 
 def test_classification_with_clear_winner_uses_primary_role(tmp_path: Path):
-    path = write_classification(tmp_path, [{
-        "url": "https://example.com/contact",
-        "primary_role": "form",
-        "primary_score": 2.3,
-        "alternates": [{"role": "auth", "score": 0.5, "evidence": []}],
-    }])
+    path = write_classification(
+        tmp_path,
+        [
+            {
+                "url": "https://example.com/contact",
+                "primary_role": "form",
+                "primary_score": 2.3,
+                "alternates": [{"role": "auth", "score": 0.5, "evidence": []}],
+            }
+        ],
+    )
     proc = run("--classification", str(path))
     assert proc.returncode == 0, proc.stderr
     out = json.loads(proc.stdout)
@@ -89,12 +93,17 @@ def test_classification_with_clear_winner_uses_primary_role(tmp_path: Path):
 
 
 def test_close_top_two_hands_off_to_human(tmp_path: Path):
-    path = write_classification(tmp_path, [{
-        "url": "https://example.com/signup",
-        "primary_role": "form",
-        "primary_score": 1.8,
-        "alternates": [{"role": "auth", "score": 1.5, "evidence": []}],
-    }])
+    path = write_classification(
+        tmp_path,
+        [
+            {
+                "url": "https://example.com/signup",
+                "primary_role": "form",
+                "primary_score": 1.8,
+                "alternates": [{"role": "auth", "score": 1.5, "evidence": []}],
+            }
+        ],
+    )
     proc = run("--classification", str(path))
     assert proc.returncode == 1
     out = json.loads(proc.stdout)
@@ -104,23 +113,33 @@ def test_close_top_two_hands_off_to_human(tmp_path: Path):
 
 
 def test_margin_is_adjustable(tmp_path: Path):
-    path = write_classification(tmp_path, [{
-        "url": "https://example.com/signup",
-        "primary_role": "form",
-        "primary_score": 1.8,
-        "alternates": [{"role": "auth", "score": 1.5, "evidence": []}],
-    }])
+    path = write_classification(
+        tmp_path,
+        [
+            {
+                "url": "https://example.com/signup",
+                "primary_role": "form",
+                "primary_score": 1.8,
+                "alternates": [{"role": "auth", "score": 1.5, "evidence": []}],
+            }
+        ],
+    )
     proc = run("--classification", str(path), "--margin", "0.2")
     assert proc.returncode == 0, proc.stderr
 
 
 def test_unknown_primary_hands_off_to_human(tmp_path: Path):
-    path = write_classification(tmp_path, [{
-        "url": "https://example.com/x",
-        "primary_role": "unknown",
-        "primary_score": 0.0,
-        "alternates": [],
-    }])
+    path = write_classification(
+        tmp_path,
+        [
+            {
+                "url": "https://example.com/x",
+                "primary_role": "unknown",
+                "primary_score": 0.0,
+                "alternates": [],
+            }
+        ],
+    )
     proc = run("--classification", str(path))
     assert proc.returncode == 1
     assert json.loads(proc.stdout)["status"] == "needs_human"
@@ -128,10 +147,8 @@ def test_unknown_primary_hands_off_to_human(tmp_path: Path):
 
 def test_multiple_entries_need_url(tmp_path: Path):
     entries = [
-        {"url": "https://example.com/a", "primary_role": "list",
-         "primary_score": 2.5, "alternates": []},
-        {"url": "https://example.com/b", "primary_role": "form",
-         "primary_score": 2.0, "alternates": []},
+        {"url": "https://example.com/a", "primary_role": "list", "primary_score": 2.5, "alternates": []},
+        {"url": "https://example.com/b", "primary_role": "form", "primary_score": 2.0, "alternates": []},
     ]
     path = write_classification(tmp_path, entries)
     assert run("--classification", str(path)).returncode == 2
@@ -162,10 +179,17 @@ def test_argument_errors_are_json_and_exit_2(tmp_path: Path):
 
 def test_margin_must_be_finite_and_non_negative(tmp_path: Path):
     """nan や負の margin は `gap < margin` を常に偽にし、僅差を人へ渡さずに通してしまう。"""
-    cls = write_classification(tmp_path, [{
-        "url": "https://example.com/signup", "primary_role": "form",
-        "primary_score": 1.5, "alternates": [{"role": "auth", "score": 1.5}],
-    }])
+    cls = write_classification(
+        tmp_path,
+        [
+            {
+                "url": "https://example.com/signup",
+                "primary_role": "form",
+                "primary_score": 1.5,
+                "alternates": [{"role": "auth", "score": 1.5}],
+            }
+        ],
+    )
     for margin in ("nan", "inf", "-0.1"):
         proc = run("--classification", str(cls), "--margin", margin)
         assert proc.returncode == 2, margin

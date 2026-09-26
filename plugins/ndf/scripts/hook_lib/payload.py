@@ -4,6 +4,7 @@ agy は事象名を持たず、Tool の名前と引数を `toolCall` へ入れ�
 セッションの識別子は `conversationId` にある。項目の名前がほかの 3 つと重ならないため、Tool の名前がどちらに
 入っているかで見分ける。Tool の名前はランタイムごとに違うので、ここで種別（編集・パッチ・シェル）へまとめる。
 """
+
 from __future__ import annotations
 
 import os
@@ -11,8 +12,19 @@ from dataclasses import dataclass
 from typing import Any
 
 # hook の matcher も同じ一覧から作る（`hooks/*.json` の PreToolUse。テストが突き合わせる）
-EDIT_TOOLS = ("Edit", "MultiEdit", "Write", "NotebookEdit", "fs_write", "edit_file", "write_file",
-              "str_replace_editor", "replace", "write_to_file", "replace_file_content")
+EDIT_TOOLS = (
+    "Edit",
+    "MultiEdit",
+    "Write",
+    "NotebookEdit",
+    "fs_write",
+    "edit_file",
+    "write_file",
+    "str_replace_editor",
+    "replace",
+    "write_to_file",
+    "replace_file_content",
+)
 PATCH_TOOLS = ("apply_patch",)
 SHELL_TOOLS = ("Bash", "shell", "execute_bash", "local_shell", "run_command", "run_shell_command")
 

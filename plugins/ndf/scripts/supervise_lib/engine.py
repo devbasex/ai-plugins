@@ -4,6 +4,7 @@
 記録は `RunState` が持ち、claude -p は `ClaudeRunner`、遅れの見張りは `SlowWatch` が持つ。
 `engine` を import するのは `commands` だけである。
 """
+
 from __future__ import annotations
 
 import os
@@ -30,15 +31,13 @@ from supervise_lib.worker_steps import DriveStep, WorkStep
 class Engine:
     """1 本のプランの実行。`state` が記録を、`ctx` がハンドラーへ渡す文脈を持つ。"""
 
-    def __init__(self, plan: dict, state_dir: Path, slow_args: list[str] | None = None,
-                 plan_path: str | None = None) -> None:
+    def __init__(self, plan: dict, state_dir: Path, slow_args: list[str] | None = None, plan_path: str | None = None) -> None:
         self.plan = normalize_plan(plan)
         plan["steps"] = expand_parts(plan["steps"])
         self.steps = {s["id"]: s for s in plan["steps"]}
         self.order = [s["id"] for s in plan["steps"]]
         self.state = RunState(state_dir, self.plan)
-        self.ctx = StepContext(self.plan, self.steps, self.state,
-                               str(Path(plan_path).resolve()) if plan_path else "")
+        self.ctx = StepContext(self.plan, self.steps, self.state, str(Path(plan_path).resolve()) if plan_path else "")
         self.ctx.tick = self.tick
         self.slow = self.ctx.slow = SlowWatch(self.ctx, slow_args)
         self.ctx.claude = ClaudeRunner(self.ctx)
@@ -55,8 +54,13 @@ class Engine:
         st = self.state
         st.read_worker_lines()
         if time.time() - st.last_line_at >= st.interval:
-            line = {"kind": "alive", "step": st.cur.get("id"), "type": st.cur.get("type"),
-                    "elapsed": round(time.time() - st.step_started, 1), "worker": st.worker_last or "無し"}
+            line = {
+                "kind": "alive",
+                "step": st.cur.get("id"),
+                "type": st.cur.get("type"),
+                "elapsed": round(time.time() - st.step_started, 1),
+                "worker": st.worker_last or "無し",
+            }
             last = st.run_last_output()
             if last:
                 line["last_output"] = last
@@ -83,16 +87,21 @@ class Engine:
         except ValueError:
             reset = None
         known = reset is not None and reset > time.time()
-        wait = reset - time.time() if known else min(60.0 * 2 ** k, 3600.0)
+        wait = reset - time.time() if known else min(60.0 * 2**k, 3600.0)
         short = os.environ.get("NDF_SUPERVISE_LIMIT_SLEEP")
         until = time.time() + (min(wait, float(short)) if short else wait)
         while time.time() < until:  # 待ちの間も「まだ動いている」を書く
             time.sleep(max(0.0, min(st.every, until - time.time())))
             self.tick()
         st.cur["gh_limit_waited"] = round(wait)
-        st.progress_write({"kind": "gh-limit", "step": sid, "waited": round(wait),
-                           "reset": datetime.fromtimestamp(reset).astimezone().isoformat(timespec="seconds")
-                           if known else None})
+        st.progress_write(
+            {
+                "kind": "gh-limit",
+                "step": sid,
+                "waited": round(wait),
+                "reset": datetime.fromtimestamp(reset).astimezone().isoformat(timespec="seconds") if known else None,
+            }
+        )
 
     def next_of(self, sid: str, step: dict) -> str | None:
         """成功したときの次のステップ。`next` が無ければ並びの次へ進むが、失敗したときにだけ通るステップ
@@ -100,9 +109,14 @@ class Engine:
         if step.get("next"):
             return None if step["next"] == "end" else step["next"]
         fail_only = {s["on_fail"] for s in self.steps.values() if s.get("on_fail")}
-        fail_only |= {s["id"] for s in self.steps.values()
-                      if s["type"] == "work" and s.get("next") in self.steps and s.get("inputs")
-                      and any(self.steps.get(i, {}).get("on_fail") for i in s["inputs"])}
+        fail_only |= {
+            s["id"]
+            for s in self.steps.values()
+            if s["type"] == "work"
+            and s.get("next") in self.steps
+            and s.get("inputs")
+            and any(self.steps.get(i, {}).get("on_fail") for i in s["inputs"])
+        }
         i = self.order.index(sid) + 1
         while i < len(self.order) and self.order[i] in fail_only:
             i += 1
@@ -207,9 +221,11 @@ class Engine:
                 result, reason, nxt = "止まった", "利用上限", None
             except SlowAction as e:
                 # 遅れの見張りがステップを打ち切った（子はプロセスグループごと止めてある）
-                st.cur.update(exit=SLOW_EXIT, seconds=round(time.time() - st.step_started, 1),
-                              text=f"遅れで打ち切った（{e.action}）: {e.reason}"
-                                   + (f"\n一次の調査: {e.summary}" if e.summary else ""))
+                st.cur.update(
+                    exit=SLOW_EXIT,
+                    seconds=round(time.time() - st.step_started, 1),
+                    text=f"遅れで打ち切った（{e.action}）: {e.reason}" + (f"\n一次の調査: {e.summary}" if e.summary else ""),
+                )
                 st.cur["slow"] = {"act": e.action, "reason": e.reason}
                 if e.action == "retry":
                     nxt, slow.carry = sid, slow.watch
@@ -230,21 +246,29 @@ class Engine:
         """計画の実行の条件を、作業ツリーを作る前に打つ。流すなら None、流さないなら報告を返す。"""
         cmd = str(cond.get("cmd") or "").replace("{state_dir}", str(self.state.dir))
         wt = Path(self.plan["作業場所"])
-        cwd = self.plan.get("リポジトリ") or (str(wt) if wt.is_dir() else
-                                          str(wt).split("/.worktrees/")[0] if "/.worktrees/" in str(wt) else None)
+        cwd = self.plan.get("リポジトリ") or (
+            str(wt) if wt.is_dir() else str(wt).split("/.worktrees/")[0] if "/.worktrees/" in str(wt) else None
+        )
         if cwd and not Path(cwd).is_dir():
             cwd = None
         started = time.time()
         try:
-            p = subprocess.run(cmd, shell=True, cwd=cwd, capture_output=True, text=True,
-                               timeout=cond.get("timeout", 900))
+            p = subprocess.run(cmd, shell=True, cwd=cwd, capture_output=True, text=True, timeout=cond.get("timeout", 900))
             code, text = p.returncode, p.stdout + p.stderr
         except subprocess.TimeoutExpired as e:
             code, text = 124, f"打ち切り（{e.timeout} 秒）"
         out = last_json(text) or {}
         summary = str(out.get("summary") or text.strip()[-200:] or f"exit={code}")
-        self.state.progress_write({"kind": "step", "step": "実行の条件", "type": "run", "exit": code,
-                                   "seconds": round(time.time() - started, 1), "summary": summary[:300]})
+        self.state.progress_write(
+            {
+                "kind": "step",
+                "step": "実行の条件",
+                "type": "run",
+                "exit": code,
+                "seconds": round(time.time() - started, 1),
+                "summary": summary[:300],
+            }
+        )
         if code == 0:
             return None
         if code == cond.get("skip_code", 3):
@@ -272,5 +296,6 @@ class Engine:
         if path:
             cur["presentation"] = path
         self.state.gates.append({"id": step["id"], "exit": cur.get("exit"), "presentation": path})
-        self.state.attention("関門", f"ステップ {step['id']} が関門を返した（exit={cur.get('exit')}）"
-                             + (f"。提示物 {path}" if path else ""))
+        self.state.attention(
+            "関門", f"ステップ {step['id']} が関門を返した（exit={cur.get('exit')}）" + (f"。提示物 {path}" if path else "")
+        )

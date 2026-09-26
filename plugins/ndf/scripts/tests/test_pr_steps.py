@@ -5,6 +5,7 @@
 FAKE_GH_GRAPHQL_LIMIT が立っていれば pr list / pr create / pr view を GraphQL の上限の文言で落とす。
 呼ばれた引数は FAKE_GH_LOG へ 1 行ずつ残す。
 """
+
 from __future__ import annotations
 
 import json
@@ -133,6 +134,7 @@ def check_shape(out):
 
 # --- plan ------------------------------------------------------------------------
 
+
 def test_plan_collects_branch_base_and_changes(repo, env):
     write(repo, "b.txt", "b\n")
     code, out, err = call(["plan", "--draft"], env, repo)
@@ -165,8 +167,9 @@ def test_plan_reports_existing_pr_and_closing_words_in_commits(repo, env):
     write(repo, "c.txt", "c\n")
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "Add: c\n\nCloses #5")
-    env["FAKE_GH_PRS"] = json.dumps({"feature/x": [{"number": 7, "url": "https://github.com/o/r/pull/7",
-                                                    "isDraft": True, "baseRefName": "develop"}]})
+    env["FAKE_GH_PRS"] = json.dumps(
+        {"feature/x": [{"number": 7, "url": "https://github.com/o/r/pull/7", "isDraft": True, "baseRefName": "develop"}]}
+    )
     code, out, _ = call(["plan"], env, repo)
     assert code == 0 and out["metrics"]["existing_pr"]["number"] == 7
     assert len(out["metrics"]["commits_with_closing_words"]) == 1
@@ -182,6 +185,7 @@ def test_plan_rest_fallback_when_graphql_limited(repo, env):
 
 
 # --- commit / push ---------------------------------------------------------------
+
 
 def test_commit_adds_all_and_refuses_closing_words(repo, env):
     write(repo, "d.txt", "d\n")
@@ -209,6 +213,7 @@ def test_push_failure_retries_then_stops(repo, env):
 
 # --- create / update -------------------------------------------------------------
 
+
 def body_file(tmp_path, text="## Summary\n\n- 要点\n\nCloses #858\n\n## Test plan\n\n- [x] pytest\n- [ ] lint\n"):
     p = tmp_path / "body.md"
     p.write_text(text, encoding="utf-8")
@@ -228,8 +233,9 @@ def test_create_makes_draft_pr_and_appends_review_mark(repo, env, tmp_path):
 
 
 def test_create_updates_when_pr_exists(repo, env, tmp_path):
-    env["FAKE_GH_PRS"] = json.dumps({"feature/x": [{"number": 7, "url": "https://github.com/o/r/pull/7",
-                                                    "isDraft": False, "baseRefName": "develop"}]})
+    env["FAKE_GH_PRS"] = json.dumps(
+        {"feature/x": [{"number": 7, "url": "https://github.com/o/r/pull/7", "isDraft": False, "baseRefName": "develop"}]}
+    )
     code, out, _ = call(["create", "--title", "題", "--body-file", str(body_file(tmp_path))], env, repo)
     assert code == 0 and out["metrics"]["action"] == "updated" and out["metrics"]["number"] == 7
     assert any(c[:3] == ["pr", "edit", "7"] for c in gh_calls(env))
@@ -254,10 +260,21 @@ def test_update_without_pr_is_precondition(repo, env, tmp_path):
 
 # --- report ----------------------------------------------------------------------
 
+
 def test_report_builds_six_lines(repo, env, tmp_path):
-    env["FAKE_GH_VIEW"] = json.dumps({"7": {"number": 7, "title": "題", "url": "https://github.com/o/r/pull/7",
-                                            "isDraft": True, "baseRefName": "develop", "headRefName": "feature/x",
-                                            "body": body_file(tmp_path).read_text()}})
+    env["FAKE_GH_VIEW"] = json.dumps(
+        {
+            "7": {
+                "number": 7,
+                "title": "題",
+                "url": "https://github.com/o/r/pull/7",
+                "isDraft": True,
+                "baseRefName": "develop",
+                "headRefName": "feature/x",
+                "body": body_file(tmp_path).read_text(),
+            }
+        }
+    )
     code, out, err = call(["report", "7"], env, repo)
     assert code == 0, err
     m = out["metrics"]
@@ -269,9 +286,19 @@ def test_report_builds_six_lines(repo, env, tmp_path):
 
 def test_report_uses_rest_when_graphql_limited(repo, env, tmp_path):
     env["FAKE_GH_GRAPHQL_LIMIT"] = "1"
-    env["FAKE_GH_VIEW"] = json.dumps({"7": {"number": 7, "title": "題", "url": "https://github.com/o/r/pull/7",
-                                            "isDraft": False, "baseRefName": "develop", "headRefName": "feature/x",
-                                            "body": ""}})
+    env["FAKE_GH_VIEW"] = json.dumps(
+        {
+            "7": {
+                "number": 7,
+                "title": "題",
+                "url": "https://github.com/o/r/pull/7",
+                "isDraft": False,
+                "baseRefName": "develop",
+                "headRefName": "feature/x",
+                "body": "",
+            }
+        }
+    )
     code, out, err = call(["report", "7"], env, repo)
     assert code == 0, err
     assert "ドラフト: なし" in out["next"] and "（Summary が無い）" in out["next"]
@@ -290,6 +317,7 @@ def test_bad_calls_exit_2(repo, env, args):
 
 # --- ミッションの宛て先とモードの 1 行（#1005） --------------------------------------
 
+
 def test_plan_mission_base_is_accepted_without_review(repo, env):
     git(repo, "push", "-q", "origin", "develop:mission/m1")
     git(repo, "fetch", "-q", "origin")
@@ -306,8 +334,9 @@ def test_plan_develop_base_needs_review(repo, env):
 
 def test_create_writes_mode_line_before_review_mark(repo, env, tmp_path):
     b = body_file(tmp_path)
-    code, out, err = call(["create", "--title", "題", "--body-file", str(b), "--base", "mission/m1",
-                           "--mode", "standard", "--stages", "設計,実装"], env, repo)
+    code, out, err = call(
+        ["create", "--title", "題", "--body-file", str(b), "--base", "mission/m1", "--mode", "standard", "--stages", "設計,実装"], env, repo
+    )
     assert code == 0, err
     create = next(c for c in gh_calls(env) if c[:2] == ["pr", "create"])
     assert create[create.index("--base") + 1] == "mission/m1"
@@ -316,19 +345,19 @@ def test_create_writes_mode_line_before_review_mark(repo, env, tmp_path):
 
 
 def test_update_replaces_existing_mode_line(repo, env, tmp_path):
-    env["FAKE_GH_PRS"] = json.dumps({"feature/x": [{"number": 7, "url": "https://github.com/o/r/pull/7",
-                                                    "isDraft": True, "baseRefName": "develop"}]})
+    env["FAKE_GH_PRS"] = json.dumps(
+        {"feature/x": [{"number": 7, "url": "https://github.com/o/r/pull/7", "isDraft": True, "baseRefName": "develop"}]}
+    )
     b = body_file(tmp_path, "## Summary\n\n- 要点\n\nモード: light / 通した工程: 実装\n")
-    code, _, err = call(["update", "--body-file", str(b), "--mode", "standard",
-                         "--stages", "構造改善,実装レビュー"], env, repo)
+    code, _, err = call(["update", "--body-file", str(b), "--mode", "standard", "--stages", "構造改善,実装レビュー"], env, repo)
     assert code == 0, err
     edit = next(c for c in gh_calls(env) if c[:2] == ["pr", "edit"])
     sent = Path(edit[edit.index("--body-file") + 1]).read_text()
-    assert [l for l in sent.splitlines() if l.startswith("モード: ")] == [
-        "モード: standard / 通した工程: 構造改善 → 実装レビュー"]
+    assert [l for l in sent.splitlines() if l.startswith("モード: ")] == ["モード: standard / 通した工程: 構造改善 → 実装レビュー"]
 
 
 # --- 利用者向けの変化の節（#1054）---
+
 
 def test_template_has_user_changes_section(repo, env, tmp_path):
     out_file = tmp_path / "tpl.md"

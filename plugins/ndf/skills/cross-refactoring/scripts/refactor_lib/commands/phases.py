@@ -1,4 +1,5 @@
 """手順の開始時刻と監視期限を記録する。"""
+
 from __future__ import annotations
 
 import argparse
@@ -31,8 +32,7 @@ def cmd_start_phase(args: argparse.Namespace) -> None:
         if phase == "final-fix":
             # 1 回目は予備時間の長さを必ず渡す（決定 26）。`final-gate` が起動の前に回数を上げる。
             first = int((state.get("final_gate") or {}).get("fix_rounds") or 0) <= 1
-            seconds = timeline.final_fix_timeout(
-                end, clock.now(), margin, limits_table.get("final_fix_seconds"), first)
+            seconds = timeline.final_fix_timeout(end, clock.now(), margin, limits_table.get("final_fix_seconds"), first)
         else:
             seconds = timeline.phase_timeout(end, clock.now(), margin)
         record["timeout"] = seconds

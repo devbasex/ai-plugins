@@ -26,8 +26,11 @@ pytestmark = pytest.mark.skipif(
 
 def run(*args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["bash", str(SCRIPT), *args], capture_output=True, text=True,
-        check=False, timeout=30,
+        ["bash", str(SCRIPT), *args],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
     )
 
 
@@ -90,7 +93,7 @@ def test_missing_url_is_usage_error():
     assert json.loads(proc.stdout)["ready"] is False
 
 
-@pytest.mark.parametrize("args", [("--bad\n\x01\"\\",), ("http://a\tb/", "--timeout", "x")])
+@pytest.mark.parametrize("args", [('--bad\n\x01"\\',), ("http://a\tb/", "--timeout", "x")])
 def test_usage_error_is_one_json_line(args: tuple[str, ...]):
     proc = run(*args)
     assert proc.returncode == 2

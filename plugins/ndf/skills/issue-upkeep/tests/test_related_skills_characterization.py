@@ -7,6 +7,7 @@ NOTE: 現状固定。期待値の根拠は仕様ではなく、構造改善の�
 | --- | --- |
 | `retrospective` | Pull Request の番号を引く 3 つの手順（開発の起点 → 基準ブランチ → マージ済みの Pull Request） |
 """
+
 from __future__ import annotations
 
 import json
@@ -69,11 +70,15 @@ def pr_blocks() -> dict[str, tuple[int, str]]:
 
 
 def git(cwd: pathlib.Path, *args: str) -> str:
-    env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.com",
-               GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@example.com",
-               GIT_TERMINAL_PROMPT="0")
-    done = subprocess.run(["git", *args], cwd=str(cwd), env=env,
-                          capture_output=True, text=True, check=True)
+    env = dict(
+        os.environ,
+        GIT_AUTHOR_NAME="t",
+        GIT_AUTHOR_EMAIL="t@example.com",
+        GIT_COMMITTER_NAME="t",
+        GIT_COMMITTER_EMAIL="t@example.com",
+        GIT_TERMINAL_PROMPT="0",
+    )
+    done = subprocess.run(["git", *args], cwd=str(cwd), env=env, capture_output=True, text=True, check=True)
     return done.stdout.strip()
 
 
@@ -96,26 +101,28 @@ def clone(tmp_path: pathlib.Path) -> pathlib.Path:
 
 def declare(work: pathlib.Path, branch: str) -> None:
     (work / ".ndf").mkdir(exist_ok=True)
-    (work / ".ndf" / "worktree.json").write_text(
-        json.dumps({"version": 1, "base_branch": branch}), encoding="utf-8")
+    (work / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "base_branch": branch}), encoding="utf-8")
 
 
 def run_stages(work: pathlib.Path, case: str) -> subprocess.CompletedProcess:
     """手順 1 と、場合に応じた手順 2 を続けて流し、2 つの変数を出す。"""
     blocks = pr_blocks()
-    script = (f"set -uo pipefail\n{blocks['dev_base'][1]}\n{blocks[case][1]}\n"
-              'printf "%s %s %s\\n" "$dev_base" "$record_base" '
-              '"$(git rev-parse "origin/$record_base")"\n')
-    return subprocess.run(["bash", "-c", script], cwd=str(work),
-                          capture_output=True, text=True)
+    script = (
+        f"set -uo pipefail\n{blocks['dev_base'][1]}\n{blocks[case][1]}\n"
+        'printf "%s %s %s\\n" "$dev_base" "$record_base" '
+        '"$(git rev-parse "origin/$record_base")"\n'
+    )
+    return subprocess.run(["bash", "-c", script], cwd=str(work), capture_output=True, text=True)
 
 
-@pytest.mark.parametrize(("case", "branch"), [
-    ("no_issue", "develop"),
-    ("group", "main"),
-])
-def test_retrospective_picks_the_branch_by_case(
-        clone: pathlib.Path, case: str, branch: str) -> None:
+@pytest.mark.parametrize(
+    ("case", "branch"),
+    [
+        ("no_issue", "develop"),
+        ("group", "main"),
+    ],
+)
+def test_retrospective_picks_the_branch_by_case(clone: pathlib.Path, case: str, branch: str) -> None:
     """起点の issue を持たない変更は開発の起点を、ミッションは配布した先（origin の HEAD）を使う。"""
     done = run_stages(clone, case)
     assert done.returncode == 0, done.stderr
@@ -150,9 +157,7 @@ def test_retrospective_keeps_only_merged_pull_requests() -> None:
     expression = re.search(r"--jq '([^']*)'", block).group(1)
     pulls = [
         {"number": 1, "merged_at": None, "base": {"ref": "main"}, "head": {"ref": "topic"}},
-        {"number": 2, "merged_at": "2026-09-01T00:00:00Z",
-         "base": {"ref": "main"}, "head": {"ref": "develop"}},
+        {"number": 2, "merged_at": "2026-09-01T00:00:00Z", "base": {"ref": "main"}, "head": {"ref": "develop"}},
     ]
-    done = subprocess.run(["jq", "-r", expression], input=json.dumps(pulls),
-                          capture_output=True, text=True, check=True)
+    done = subprocess.run(["jq", "-r", expression], input=json.dumps(pulls), capture_output=True, text=True, check=True)
     assert done.stdout.splitlines() == ["#2 main <- develop"]

@@ -1,4 +1,5 @@
 """work と drive のステップのハンドラー（#1142 の C1）。どちらも `call_worker` で worker を起動する。"""
+
 from __future__ import annotations
 
 import json
@@ -37,31 +38,53 @@ class WorkStep:
         """worker を 1 回起動する。`runtime` があれば external-ai.py run、無ければ最小構成の claude -p。"""
         rt = step.get("runtime")
         if not rt or rt == "claude-p":
-            return ctx.claude.call(WORK_SYSTEM, prompt, WORK_TOOLS, cwd, step.get("timeout", 1800),
-                                   serena=bool(step.get("serena")))
+            return ctx.claude.call(WORK_SYSTEM, prompt, WORK_TOOLS, cwd, step.get("timeout", 1800), serena=bool(step.get("serena")))
         pf, of = ctx.state.dir / f"{name}-prompt.md", ctx.state.dir / f"{name}-output.md"
         pf.write_text(WORK_SYSTEM + "\n\n" + prompt)
         started = time.time()
-        cmd = [sys.executable, str(paths.EXTERNAL_AI), "run", rt, "--prompt-file", str(pf), "--output-file", str(of),
-               "--phase", step.get("phase", "implement"), "--workdir", cwd,
-               "--timeout", str(step.get("timeout", 1800))]
+        cmd = [
+            sys.executable,
+            str(paths.EXTERNAL_AI),
+            "run",
+            rt,
+            "--prompt-file",
+            str(pf),
+            "--output-file",
+            str(of),
+            "--phase",
+            step.get("phase", "implement"),
+            "--workdir",
+            cwd,
+            "--timeout",
+            str(step.get("timeout", 1800)),
+        ]
         try:
             p = run_ticking(cmd, ctx.tick, ctx.state.every, cwd=cwd, timeout=step.get("timeout", 1800) + 120)
             out = last_json(p.stdout) or {}
         except subprocess.TimeoutExpired:
             out = {"status": "stopped", "summary": "打ち切り"}
         text = of.read_text() if of.is_file() else out.get("summary", "")
-        return {"ok": out.get("status") == "ok", "text": text, "usage": {}, "cost": None, "turns": None,
-                "seconds": round(time.time() - started, 1), "runtime": rt}
+        return {
+            "ok": out.get("status") == "ok",
+            "text": text,
+            "usage": {},
+            "cost": None,
+            "turns": None,
+            "seconds": round(time.time() - started, 1),
+            "runtime": rt,
+        }
 
     def execute(self, ctx, step: dict) -> tuple[bool, str]:
         issues = self.issue_text(ctx, step)
         cwd = step.get("cwd", ctx.cwd)
-        prompt = (f"作業: {step.get('kind', '修正')}\n作業場所: {cwd}\n\n"
-                  + (f"{issues}\n\n## 指示\n" if issues else "")
-                  + f"{step['prompt']}\n\n## 入力\n{ctx.inputs_text(step)}\n\n"
-                  + WORKDIR_PROMPT.format(path=ctx.state.work) + "\n\n"
-                  + PROGRESS_PROMPT.format(path=ctx.state.progress.resolve()))
+        prompt = (
+            f"作業: {step.get('kind', '修正')}\n作業場所: {cwd}\n\n"
+            + (f"{issues}\n\n## 指示\n" if issues else "")
+            + f"{step['prompt']}\n\n## 入力\n{ctx.inputs_text(step)}\n\n"
+            + WORKDIR_PROMPT.format(path=ctx.state.work)
+            + "\n\n"
+            + PROGRESS_PROMPT.format(path=ctx.state.progress.resolve())
+        )
         if step.get("full"):
             # Skill の本文が手順を持つ。プロンプトは Skill の呼び出しをそのまま渡す
             prompt = step["prompt"]
@@ -76,8 +99,7 @@ class WorkStep:
         for _ in range(3):
             if not full or REPORT_DONE.search(res["text"] or "") or not res.get("session"):
                 break
-            res = ctx.claude.call(FULL_SYSTEM, RESUME_PROMPT, WORK_TOOLS, cwd, step.get("timeout", 1800),
-                                  full=True, resume=res["session"])
+            res = ctx.claude.call(FULL_SYSTEM, RESUME_PROMPT, WORK_TOOLS, cwd, step.get("timeout", 1800), full=True, resume=res["session"])
             ctx.claude.record_usage("work", res)
         if (full and not REPORT_DONE.search(res["text"] or "")) or REPORT_NOT_DONE.search(res["text"] or ""):
             res["ok"] = False
@@ -100,8 +122,7 @@ class DriveStep:
         script = paths.DRIVES.get(step.get("drive", ""))
         return f"python3 {script} {step.get('args', '')}".strip() if script else ""
 
-    def drive_loop(self, ctx, step: dict, cmd: str, depth: int = 0,
-                   inner: list[dict] | None = None) -> tuple[bool, dict | None, str]:
+    def drive_loop(self, ctx, step: dict, cmd: str, depth: int = 0, inner: list[dict] | None = None) -> tuple[bool, dict | None, str]:
         """駆動を打ち、pause のたびに worker へ渡して打ち直す。(成功, 最後の結果, 出力) を返す。
 
         入れ子の駆動（最終ゲートの item.command）の metrics は `inner` へ足す（外側の結果は内側の件数を持たない）。"""
@@ -128,15 +149,13 @@ class DriveStep:
                 texts.append(sub_text)
                 if not ok:
                     return False, sub, "\n".join(texts) + f"\n{kind} の駆動が止まった"
-                res_file.write_text(json.dumps({"review_status": (sub.get("metrics") or {}).get("review_status")
-                                                or "unknown"}))
+                res_file.write_text(json.dumps({"review_status": (sub.get("metrics") or {}).get("review_status") or "unknown"}))
                 continue
             pf = item.get("prompt_file")
             if not pf or not Path(pf).is_file():
                 return False, out, "\n".join(texts) + f"\n{kind} の prompt_file が無い"
             wd = str(item.get("cwd") or cwd)  # 駆動が作業ディレクトリを示せば、それが worker の作業場所
-            prompt = (f"作業: {kind}\n作業場所: {wd}\n\n{Path(pf).read_text()}\n\n"
-                      f"終えたら結果ファイル {res_file} を書く。")
+            prompt = f"作業: {kind}\n作業場所: {wd}\n\n{Path(pf).read_text()}\n\n終えたら結果ファイル {res_file} を書く。"
             res = self.work.call_worker(ctx, step, prompt, wd, f"{step['id']}-{kind}-{len(ctx.state.cur['pauses'])}")
             ctx.claude.record_usage("work", res)
             texts.append(f"## {kind} の worker\n{res['text'][-TAIL:]}")

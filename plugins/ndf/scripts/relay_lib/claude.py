@@ -1,4 +1,5 @@
 """本物の claude: 実体の解決・素通し・引数の引き継ぎ・プラグインの版・会話の記録の読み取り（#895・#936・#1142 の C6）。"""
+
 from __future__ import annotations
 
 import json
@@ -12,39 +13,115 @@ from .common import config_dir, data_dir, env_num, launcher_path, parse_iso
 # 素通しにする引数と副命令（Claude Code 2.1.280 の `claude --help` から写す）
 PASS_FLAGS = {"-p", "--print", "-h", "--help", "-v", "--version"}
 SUBCOMMANDS = {
-    "agents", "attach", "auth", "auto-mode", "doctor", "gateway", "import", "install",
-    "logs", "mcp", "plugin", "plugins", "project", "respawn", "rm", "setup-token",
-    "stop", "kill", "ultrareview", "update", "upgrade",
+    "agents",
+    "attach",
+    "auth",
+    "auto-mode",
+    "doctor",
+    "gateway",
+    "import",
+    "install",
+    "logs",
+    "mcp",
+    "plugin",
+    "plugins",
+    "project",
+    "respawn",
+    "rm",
+    "setup-token",
+    "stop",
+    "kill",
+    "ultrareview",
+    "update",
+    "upgrade",
 }
 # 2 つ目以降の区間へ引き継ぐ引数の解析（#936・決定 22）。Claude Code 2.1.281 の `claude --help` から写す。
 # 値を取らない選択肢。これ以外の `-` で始まる選択肢は、次の語が `-` で始まらなければ値として取る
 BOOL_FLAGS = {
-    "--allow-dangerously-skip-permissions", "--ax-screen-reader", "--bg", "--background",
-    "--bare", "--brief", "--chrome", "--no-chrome", "-c", "--continue",
-    "--dangerously-skip-permissions", "--disable-slash-commands",
-    "--exclude-dynamic-system-prompt-sections", "--fork-session", "--forward-subagent-text",
-    "--ide", "--include-hook-events", "--include-partial-messages",
-    "--no-session-persistence", "--replay-user-messages", "--restricted", "--safe-mode",
-    "--strict-mcp-config", "--tmux", "--verbose",
+    "--allow-dangerously-skip-permissions",
+    "--ax-screen-reader",
+    "--bg",
+    "--background",
+    "--bare",
+    "--brief",
+    "--chrome",
+    "--no-chrome",
+    "-c",
+    "--continue",
+    "--dangerously-skip-permissions",
+    "--disable-slash-commands",
+    "--exclude-dynamic-system-prompt-sections",
+    "--fork-session",
+    "--forward-subagent-text",
+    "--ide",
+    "--include-hook-events",
+    "--include-partial-messages",
+    "--no-session-persistence",
+    "--replay-user-messages",
+    "--restricted",
+    "--safe-mode",
+    "--strict-mcp-config",
+    "--tmux",
+    "--verbose",
 }
 # 可変長（`<x...>`）の選択肢。後続の `-` で始まらない語をすべて取る
 VARIADIC_FLAGS = {
-    "--add-dir", "--allowedTools", "--allowed-tools", "--disallowedTools",
-    "--disallowed-tools", "--mcp-config", "--betas", "--tools", "--file",
+    "--add-dir",
+    "--allowedTools",
+    "--allowed-tools",
+    "--disallowedTools",
+    "--disallowed-tools",
+    "--mcp-config",
+    "--betas",
+    "--tools",
+    "--file",
 }
 # 必須の値（`<x>`）を取る選択肢。次の語が `-` で始まっても値として取る（commander と同じ）
 REQUIRED_FLAGS = {
-    "--agent", "--agents", "--append-system-prompt", "--autocompact", "--debug-file", "--effort",
-    "--environment", "--fallback-model", "--input-format", "--json-schema", "--max-budget-usd",
-    "--model", "-n", "--name", "--output-format", "--permission-mode", "--permission-prompts",
-    "--plugin-dir", "--plugin-url", "--remote-control-session-name-prefix", "--session-id",
-    "--setting-sources", "--settings", "--system-prompt", "--system-prompt-snapshot",
+    "--agent",
+    "--agents",
+    "--append-system-prompt",
+    "--autocompact",
+    "--debug-file",
+    "--effort",
+    "--environment",
+    "--fallback-model",
+    "--input-format",
+    "--json-schema",
+    "--max-budget-usd",
+    "--model",
+    "-n",
+    "--name",
+    "--output-format",
+    "--permission-mode",
+    "--permission-prompts",
+    "--plugin-dir",
+    "--plugin-url",
+    "--remote-control-session-name-prefix",
+    "--session-id",
+    "--setting-sources",
+    "--settings",
+    "--system-prompt",
+    "--system-prompt-snapshot",
 }
 # 会話ごと・区間ごとに変わるもの。次の区間は新しい会話を始めるので引き継がない
 SECTION_FLAGS = {
-    "-c", "--continue", "-r", "--resume", "--session-id", "--fork-session", "--from-pr",
-    "--teleport", "--cloud", "-n", "--name", "--bg", "--background", "--tmux",
-    "-w", "--worktree",
+    "-c",
+    "--continue",
+    "-r",
+    "--resume",
+    "--session-id",
+    "--fork-session",
+    "--from-pr",
+    "--teleport",
+    "--cloud",
+    "-n",
+    "--name",
+    "--bg",
+    "--background",
+    "--tmux",
+    "-w",
+    "--worktree",
 }
 # 子へ継がせない Claude Code の環境変数（中から起こしたプロセスが継ぐもの）
 DROP_ENV = ("CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_ENTRYPOINT")
@@ -52,8 +129,11 @@ DROP_ENV = ("CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_ENTRYPOINT")
 
 def _is_self(path: str) -> bool:
     real = os.path.realpath(path)
-    mine = {os.path.realpath(launcher_path()), os.path.realpath(os.path.join(data_dir(), "relay.py")),
-            os.path.realpath(os.path.join(config_dir(), "relay.py"))}
+    mine = {
+        os.path.realpath(launcher_path()),
+        os.path.realpath(os.path.join(data_dir(), "relay.py")),
+        os.path.realpath(os.path.join(config_dir(), "relay.py")),
+    }
     if real in mine:
         return True
     try:
@@ -100,7 +180,7 @@ def carried_args(args: list[str]) -> list[str]:
         group = [a]
         one_word = "=" in a if long else len(a) > 2
         if not one_word and name in REQUIRED_FLAGS:
-            group += args[i:i + 1]
+            group += args[i : i + 1]
             i += 1
         elif not one_word and name not in BOOL_FLAGS:
             take_all = name in VARIADIC_FLAGS
@@ -144,8 +224,7 @@ def child_env(relay_dir: str) -> dict:
 def plugin_cli(claude: str, args: list[str], timeout: float) -> subprocess.CompletedProcess | None:
     env = {k: v for k, v in os.environ.items() if k not in DROP_ENV and k != "NDF_RELAY_DIR"}
     try:
-        return subprocess.run([claude, "plugin"] + args, stdin=subprocess.DEVNULL,
-                              capture_output=True, text=True, timeout=timeout, env=env)
+        return subprocess.run([claude, "plugin"] + args, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=timeout, env=env)
     except (OSError, subprocess.SubprocessError):
         return None
 
@@ -175,8 +254,7 @@ def read_plugin(claude: str, marketplace: str | None = None) -> tuple[str, str] 
 def update_plugin(claude: str, marketplace: str) -> str | None:
     """マーケットプレイスと ndf を更新し、更新後の版を返す。どれかに失敗したら None。"""
     t = env_num("NDF_RELAY_UPDATE_TIMEOUT", 120)
-    for args in (["marketplace", "update", marketplace],
-                 ["update", f"ndf@{marketplace}", "-y"]):
+    for args in (["marketplace", "update", marketplace], ["update", f"ndf@{marketplace}", "-y"]):
         p = plugin_cli(claude, args, t)
         if p is None or p.returncode != 0:
             return None
@@ -232,9 +310,11 @@ def pending_wakeups(transcript_path: str, now: float) -> list[dict]:
                 fires = []
             elif isinstance(inp.get("delaySeconds"), (int, float)):
                 fires.append(at + min(max(inp["delaySeconds"], 60), 3600))
-    return [{"id": "ScheduleWakeup", "type": "wakeup",
-             "command": "発火の予定 " + time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(f))}
-            for f in fires if f > now]
+    return [
+        {"id": "ScheduleWakeup", "type": "wakeup", "command": "発火の予定 " + time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(f))}
+        for f in fires
+        if f > now
+    ]
 
 
 def replied_after(transcript_path: str, written: float) -> bool:
@@ -260,8 +340,7 @@ def _is_user_prompt(row: dict) -> bool:
         if not items or any(c.get("type") == "tool_result" for c in items):
             return False
         # Esc で応答を止めた記録（ラッパーが書いた Esc でも出る）は入力に数えない
-        return not all(str(c.get("text") or "").startswith("[Request interrupted by user")
-                       for c in items)
+        return not all(str(c.get("text") or "").startswith("[Request interrupted by user") for c in items)
     return False
 
 
@@ -272,9 +351,10 @@ def _starts_background(row: dict) -> bool:
     content = row["message"].get("content")
     if not isinstance(content, list):
         return False
-    return any(isinstance(c, dict) and c.get("type") == "tool_use"
-               and isinstance(c.get("input"), dict) and c["input"].get("run_in_background")
-               for c in content)
+    return any(
+        isinstance(c, dict) and c.get("type") == "tool_use" and isinstance(c.get("input"), dict) and c["input"].get("run_in_background")
+        for c in content
+    )
 
 
 def after_mark(transcript_path: str, written: float) -> tuple[bool, bool]:
@@ -286,9 +366,13 @@ def after_mark(transcript_path: str, written: float) -> tuple[bool, bool]:
         if t is None or t <= written:
             continue
         a = row.get("attachment")
-        if (row.get("type") == "attachment" and isinstance(a, dict)
-                and a.get("type") == "goal_status" and a.get("met") is False
-                and not a.get("sentinel")):
+        if (
+            row.get("type") == "attachment"
+            and isinstance(a, dict)
+            and a.get("type") == "goal_status"
+            and a.get("met") is False
+            and not a.get("sentinel")
+        ):
             unmet = True
         if _is_user_prompt(row) or _starts_background(row):
             cancel = True

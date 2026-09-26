@@ -37,7 +37,7 @@ def test_storage_state_cache_miss_then_hit():
     cache.put("admin", state)
 
     assert cache.get("admin") == state  # hit
-    assert cache.get("user") is None   # 別 role は miss のまま
+    assert cache.get("user") is None  # 別 role は miss のまま
 
 
 def test_storage_state_cache_multiple_roles():

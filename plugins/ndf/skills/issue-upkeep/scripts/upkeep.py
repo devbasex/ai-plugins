@@ -35,6 +35,7 @@ plan.json の形:
 要る / 20 = LLM の判断待ち（上限を超えた候補・照合で飛ばした課題・部分的に終わった反映）/
 1 = 反映の失敗 / 2 = 読めない / 3 = 前提が無い。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -52,21 +53,29 @@ _LIB = Path(__file__).resolve().parents[3] / "scripts" / "lib"
 sys.path.insert(0, str(_LIB))
 import jsonio  # noqa: E402
 import post_queue  # noqa: E402
-from step_result import (EXIT_PAUSE, EXIT_PRECONDITION, EXIT_UNREADABLE, StepError,  # noqa: E402
-                         approval_present, common_parser, emit, git, git_root, main_with,
-                         result)
+from step_result import (
+    EXIT_PAUSE,
+    EXIT_PRECONDITION,
+    EXIT_UNREADABLE,
+    StepError,  # noqa: E402
+    approval_present,
+    common_parser,
+    emit,
+    git,
+    git_root,
+    main_with,
+    result,
+)
 
 TOOL = "issue-upkeep"
 
-VERDICTS = ("そのまま", "追記が要る", "書き直しが要る", "閉じてよい", "やらない", "重複",
-            "ルートコーズ", "要判断")
+VERDICTS = ("そのまま", "追記が要る", "書き直しが要る", "閉じてよい", "やらない", "重複", "ルートコーズ", "要判断")
 # 承認を得てから反映する区分。承認の無いものは needs_approval へ回す。
 NEEDS_APPROVAL = ("やらない",)
 # 反映しない区分。人へ返す。
 RETURNED = ("要判断",)
 
-ROUTES = ("diff-path", "diff-identifier", "no-milestone", "closed-milestone", "sub-issue",
-          "commit-subject", "all", "manual")
+ROUTES = ("diff-path", "diff-identifier", "no-milestone", "closed-milestone", "sub-issue", "commit-subject", "all", "manual")
 
 # 待ちの既定。倍々の起点は、作成の二次的な制限で実測した 60 秒の間隔に合わせる。
 DOUBLING_START = 60.0
@@ -79,6 +88,7 @@ _MIN_TOKEN = 6
 
 
 # ---------------- 小関数 ----------------
+
 
 def digest(body) -> str:
     """本文の要約値。改行の違いと行末の空白は同じとみなす。"""
@@ -119,8 +129,7 @@ def _split_include(stdout: str) -> tuple[dict, str]:
 
 
 def _state_dir(arg, repo: str) -> Path:
-    base = arg or os.environ.get("NDF_UPKEEP_STATE_DIR") or str(
-        Path(tempfile.gettempdir()) / "ndf" / "issue-upkeep")
+    base = arg or os.environ.get("NDF_UPKEEP_STATE_DIR") or str(Path(tempfile.gettempdir()) / "ndf" / "issue-upkeep")
     d = Path(base) / repo.replace("/", "--")
     d.mkdir(parents=True, exist_ok=True)
     return d
@@ -136,6 +145,7 @@ def _read_state(path: Path):
 
 # ---------------- gh の呼び出しと待ち ----------------
 
+
 class Partial(Exception):
     """待ちの回数か長さが上限を超えた。"""
 
@@ -143,8 +153,7 @@ class Partial(Exception):
 class Gh:
     """gh api を呼ぶ。上限に当たれば応答から待つ長さを決めて待ち、再実行する。"""
 
-    def __init__(self, repo: str, max_waits: int = DEFAULT_MAX_WAITS,
-                 max_wait: float = DEFAULT_MAX_WAIT, sleep=None, now=None):
+    def __init__(self, repo: str, max_waits: int = DEFAULT_MAX_WAITS, max_wait: float = DEFAULT_MAX_WAIT, sleep=None, now=None):
         self.repo = repo
         self.max_waits = max_waits
         self.max_wait = max_wait
@@ -184,8 +193,7 @@ class Gh:
             if len(self.waits) >= self.max_waits or seconds > self.max_wait:
                 raise Partial(f"待ちが上限を超えた（{len(self.waits)} 回・次は {seconds:g} 秒）")
             self.waits.append({"number": target, "seconds": round(seconds, 1), "why": why})
-            print(f"⏳ 上限のため {seconds:g} 秒待つ（{why}）: gh api {' '.join(args)}",
-                  file=sys.stderr)
+            print(f"⏳ 上限のため {seconds:g} 秒待つ（{why}）: gh api {' '.join(args)}", file=sys.stderr)
             self.sleep(seconds)
 
 
@@ -199,6 +207,7 @@ def _repo(root, arg) -> str:
 
 
 # ---------------- candidates ----------------
+
 
 def _issues(gh: Gh, query: str) -> list[dict]:
     rows = gh.call([f"repos/{gh.repo}/issues?{query}&per_page=100"], paginate=True) or []
@@ -340,43 +349,71 @@ def cmd_candidates(a):
 
     # コミットの件名が指す課題は直っている見込みが高いため、上限で切るときも先に残す
     order = sorted(routes, key=lambda n: ("commit-subject" not in routes[n], -len(routes[n]), n))
-    keep = order if a.limit is None else order[:a.limit]
+    keep = order if a.limit is None else order[: a.limit]
     deferred = [n for n in order if n not in set(keep)]
     items = []
     # 上限を超えた候補は items に載せない（metrics.deferred にだけ並べる）。載せると
     # 区分を決める対象として求められ、上限が効かない。
     for n in keep:
         i = by_num[n]
-        items.append({"kind": "issue", "name": f"#{n}", "result": "candidate",
-                      "number": n, "title": i.get("title") or "",
-                      "routes": sorted(routes[n], key=ROUTES.index),
-                      "terms": sorted(terms.get(n, ())),
-                      "updated_at": i.get("updated_at"), "digest": digest(i.get("body"))})
+        items.append(
+            {
+                "kind": "issue",
+                "name": f"#{n}",
+                "result": "candidate",
+                "number": n,
+                "title": i.get("title") or "",
+                "routes": sorted(routes[n], key=ROUTES.index),
+                "terms": sorted(terms.get(n, ())),
+                "updated_at": i.get("updated_at"),
+                "digest": digest(i.get("body")),
+            }
+        )
     for t in empty_milestones:
         items.append({"kind": "milestone", "name": t, "result": "no-open-issue"})
     by_route = {r: sum(1 for n in keep if r in routes[n]) for r in ROUTES}
-    metrics = {"since_ref": a.since_ref, "since": since, "repo": repo, "open": len(open_issues),
-               "candidates": len(keep), "deferred": deferred, "by_route": by_route,
-               "closed_since": len(closed), "paths": len(paths), "identifiers": len(idents),
-               "notes": notes, "waits": gh.waits}
-    summary = (f"候補 {len(keep)} 件（open {len(open_issues)} 件中）: "
-               + "・".join(f"{r} {c}" for r, c in by_route.items() if c)
-               + (f"。上限 {a.limit} 件を超えた {len(deferred)} 件は次の回へ" if deferred else ""))
-    out = result(TOOL, "gate" if deferred else "ok", summary, items, metrics,
-                 next=(f"上限 {a.limit} 件を超えた {len(deferred)} 件（deferred）は、次の回に"
-                       " --add で渡すか --limit を上げる" if deferred else None))
+    metrics = {
+        "since_ref": a.since_ref,
+        "since": since,
+        "repo": repo,
+        "open": len(open_issues),
+        "candidates": len(keep),
+        "deferred": deferred,
+        "by_route": by_route,
+        "closed_since": len(closed),
+        "paths": len(paths),
+        "identifiers": len(idents),
+        "notes": notes,
+        "waits": gh.waits,
+    }
+    summary = (
+        f"候補 {len(keep)} 件（open {len(open_issues)} 件中）: "
+        + "・".join(f"{r} {c}" for r, c in by_route.items() if c)
+        + (f"。上限 {a.limit} 件を超えた {len(deferred)} 件は次の回へ" if deferred else "")
+    )
+    out = result(
+        TOOL,
+        "gate" if deferred else "ok",
+        summary,
+        items,
+        metrics,
+        next=(
+            f"上限 {a.limit} 件を超えた {len(deferred)} 件（deferred）は、次の回に --add で渡すか --limit を上げる" if deferred else None
+        ),
+    )
     jsonio.write_atomic(_state_dir(a.state_dir, repo) / "candidates.json", out, indent=1)
     emit(out, EXIT_PAUSE if deferred else None)
 
 
 # ---------------- apply ----------------
 
+
 def _load_plan(path: str) -> dict:
     plan = _read_state(Path(path))
     if plan is None:
         raise StepError(f"plan が無い: {path}", EXIT_PRECONDITION)
     if not isinstance(plan, dict) or not isinstance(plan.get("actions"), list):
-        raise StepError("plan は {\"actions\": [...]} の形で書く", EXIT_UNREADABLE)
+        raise StepError('plan は {"actions": [...]} の形で書く', EXIT_UNREADABLE)
     errs = []
     for k, act in enumerate(plan["actions"]):
         if not isinstance(act, dict) or not isinstance(act.get("number"), int):
@@ -405,12 +442,12 @@ class Milestones:
 
     def number(self, title: str, target) -> int:
         if self._by_title is None:
-            rows = self.gh.call([f"repos/{self.gh.repo}/milestones?state=all&per_page=100"],
-                                target=target, paginate=True) or []
+            rows = self.gh.call([f"repos/{self.gh.repo}/milestones?state=all&per_page=100"], target=target, paginate=True) or []
             self._by_title = {r["title"]: r["number"] for r in rows}
         if title not in self._by_title:
-            made = self.gh.call([f"repos/{self.gh.repo}/milestones", "-X", "POST", "--input", "-"],
-                                stdin=json.dumps({"title": title}), target=target)
+            made = self.gh.call(
+                [f"repos/{self.gh.repo}/milestones", "-X", "POST", "--input", "-"], stdin=json.dumps({"title": title}), target=target
+            )
             self._by_title[title] = made["number"]
         return self._by_title[title]
 
@@ -444,8 +481,7 @@ def cmd_apply(a):
     ledger = _read_state(ledger_path) or {}
     gh = Gh(repo, max_waits=a.max_waits, max_wait=a.max_wait)
     ms = Milestones(gh)
-    buckets = {k: [] for k in ("applied", "skipped_changed", "unchanged", "already", "needs_approval",
-                               "returned", "failed", "pending")}
+    buckets = {k: [] for k in ("applied", "skipped_changed", "unchanged", "already", "needs_approval", "returned", "failed", "pending")}
     items, partial, why_partial = [], False, ""
     actions = plan["actions"]
     for idx, act in enumerate(actions):
@@ -480,57 +516,69 @@ def cmd_apply(a):
                 put("unchanged", "変える内容が無い")
                 continue
             if patch:
-                gh.call([f"repos/{repo}/issues/{n}", "-X", "PATCH", "--input", "-"],
-                        stdin=json.dumps(patch, ensure_ascii=False), target=n)
+                gh.call([f"repos/{repo}/issues/{n}", "-X", "PATCH", "--input", "-"], stdin=json.dumps(patch, ensure_ascii=False), target=n)
             if add:
-                gh.call([f"repos/{repo}/issues/{n}/labels", "-X", "POST", "--input", "-"],
-                        stdin=json.dumps({"labels": add}, ensure_ascii=False), target=n)
+                gh.call(
+                    [f"repos/{repo}/issues/{n}/labels", "-X", "POST", "--input", "-"],
+                    stdin=json.dumps({"labels": add}, ensure_ascii=False),
+                    target=n,
+                )
             for lb in remove:
                 gh.call([f"repos/{repo}/issues/{n}/labels/{lb}", "-X", "DELETE"], target=n)
-            ledger[key] = {"result": "applied", "fields": sorted(patch),
-                           "add_labels": add, "remove_labels": remove}
+            ledger[key] = {"result": "applied", "fields": sorted(patch), "add_labels": add, "remove_labels": remove}
             jsonio.write_atomic(ledger_path, ledger, indent=1)
             put("applied", ", ".join(sorted(patch) + [f"+{x}" for x in add] + [f"-{x}" for x in remove]))
         except Partial as e:
             partial, why_partial = True, str(e)
             for rest in actions[idx:]:
                 buckets["pending"].append(rest["number"])
-                items.append({"kind": "issue", "name": f"#{rest['number']}", "result": "pending",
-                              "verdict": rest["verdict"]})
+                items.append({"kind": "issue", "name": f"#{rest['number']}", "result": "pending", "verdict": rest["verdict"]})
             break
         except StepError as e:
             put("failed", str(e))
 
-    closed = [act["number"] for act in actions
-              if act["number"] in buckets["applied"] and (act.get("changes") or {}).get("state") == "closed"]
-    metrics = {**buckets, "closed": closed, "waits": gh.waits, "partial": partial,
-               "verdicts": {v: sum(1 for act in actions if act["verdict"] == v) for v in VERDICTS}}
-    summary = (f"反映 {len(buckets['applied'])} 件（閉じた {len(closed)} 件）・照合で飛ばした "
-               f"{len(buckets['skipped_changed'])} 件・変更なし {len(buckets['unchanged'])} 件・済み "
-               f"{len(buckets['already'])} 件・承認待ち {len(buckets['needs_approval'])} 件・返した "
-               f"{len(buckets['returned'])} 件・失敗 {len(buckets['failed'])} 件・待ち {len(gh.waits)} 回"
-               + (f"。部分的に終えた（{why_partial}）" if partial else ""))
+    closed = [
+        act["number"] for act in actions if act["number"] in buckets["applied"] and (act.get("changes") or {}).get("state") == "closed"
+    ]
+    metrics = {
+        **buckets,
+        "closed": closed,
+        "waits": gh.waits,
+        "partial": partial,
+        "verdicts": {v: sum(1 for act in actions if act["verdict"] == v) for v in VERDICTS},
+    }
+    summary = (
+        f"反映 {len(buckets['applied'])} 件（閉じた {len(closed)} 件）・照合で飛ばした "
+        f"{len(buckets['skipped_changed'])} 件・変更なし {len(buckets['unchanged'])} 件・済み "
+        f"{len(buckets['already'])} 件・承認待ち {len(buckets['needs_approval'])} 件・返した "
+        f"{len(buckets['returned'])} 件・失敗 {len(buckets['failed'])} 件・待ち {len(gh.waits)} 回"
+        + (f"。部分的に終えた（{why_partial}）" if partial else "")
+    )
     status, code, nxt, pres = "ok", None, None, None
     if buckets["failed"]:
         status, code = "stopped", 1
     elif buckets["needs_approval"]:
         status, code = "gate", 10
         pres = approval_present(
-            TOOL, repo.replace("/", "--") + "-no-work",
+            TOOL,
+            repo.replace("/", "--") + "-no-work",
             title="「やらない」で閉じる課題の承認",
             targets=[{"url": f"https://github.com/{repo}/issues/{x}"} for x in buckets["needs_approval"]],
             change=f"{len(buckets['needs_approval'])} 件を wontfix で閉じる",
-            judge=[(f"#{act['number']}", (act.get("changes") or {}).get("body", "")[:300])
-                   for act in actions if act["number"] in buckets["needs_approval"]],
+            judge=[
+                (f"#{act['number']}", (act.get("changes") or {}).get("body", "")[:300])
+                for act in actions
+                if act["number"] in buckets["needs_approval"]
+            ],
             consent=[f"#{x} を「やらない」で閉じる" for x in buckets["needs_approval"]],
-            rollback="閉じた課題を reopen し、wontfix を外す（本文は GitHub の編集履歴から戻せる）")
-        nxt = "承認を得た課題に \"approved\": true を付けて同じ plan で apply を打ち直す（済んだものは記録で飛ぶ）"
+            rollback="閉じた課題を reopen し、wontfix を外す（本文は GitHub の編集履歴から戻せる）",
+        )
+        nxt = '承認を得た課題に "approved": true を付けて同じ plan で apply を打ち直す（済んだものは記録で飛ぶ）'
     elif partial or buckets["skipped_changed"]:
         status, code = "gate", EXIT_PAUSE
         parts = []
         if buckets["skipped_changed"]:
-            parts.append("照合で飛ばした " + " ".join(f"#{x}" for x in buckets["skipped_changed"])
-                         + " を手順 2A へ戻す")
+            parts.append("照合で飛ばした " + " ".join(f"#{x}" for x in buckets["skipped_changed"]) + " を手順 2A へ戻す")
         if partial:
             parts.append("時間を置いて同じ plan で apply を打ち直す（済んだものは記録で飛ぶ）")
         nxt = "。".join(parts)
@@ -540,6 +588,7 @@ def cmd_apply(a):
 
 
 # ---------------- report ----------------
+
 
 def cmd_report(a):
     root = git_root(a.root)
@@ -551,35 +600,65 @@ def cmd_report(a):
     items, metrics = [], {"repo": repo}
     if cand:
         cm = cand["metrics"]
-        metrics.update({"targets": cm["candidates"], "by_route": cm["by_route"],
-                        "deferred": cm["deferred"], "notes": cm.get("notes", []),
-                        "empty_milestones": [i["name"] for i in cand["items"] if i["kind"] == "milestone"]})
-        items.append({"kind": "section", "name": "対象", "result": "ok",
-                      "value": f"{cm['candidates']} 件（" + "・".join(
-                          f"{r} {c}" for r, c in cm["by_route"].items() if c) + "）"
-                      if cm["candidates"] else "0 件のため飛ばした"})
+        metrics.update(
+            {
+                "targets": cm["candidates"],
+                "by_route": cm["by_route"],
+                "deferred": cm["deferred"],
+                "notes": cm.get("notes", []),
+                "empty_milestones": [i["name"] for i in cand["items"] if i["kind"] == "milestone"],
+            }
+        )
+        items.append(
+            {
+                "kind": "section",
+                "name": "対象",
+                "result": "ok",
+                "value": f"{cm['candidates']} 件（" + "・".join(f"{r} {c}" for r, c in cm["by_route"].items() if c) + "）"
+                if cm["candidates"]
+                else "0 件のため飛ばした",
+            }
+        )
     if app:
         am = app["metrics"]
         waits = am.get("waits", [])
-        metrics.update({"verdicts": am["verdicts"], "applied": len(am["applied"]),
-                        "closed": len(am["closed"]), "returned": len(am["returned"]),
-                        "skipped_changed": am["skipped_changed"], "needs_approval": am["needs_approval"],
-                        "failed": am["failed"], "pending": am["pending"], "partial": am["partial"],
-                        "wait_count": len(waits),
-                        "wait_seconds": round(sum(w["seconds"] for w in waits), 1)})
+        metrics.update(
+            {
+                "verdicts": am["verdicts"],
+                "applied": len(am["applied"]),
+                "closed": len(am["closed"]),
+                "returned": len(am["returned"]),
+                "skipped_changed": am["skipped_changed"],
+                "needs_approval": am["needs_approval"],
+                "failed": am["failed"],
+                "pending": am["pending"],
+                "partial": am["partial"],
+                "wait_count": len(waits),
+                "wait_seconds": round(sum(w["seconds"] for w in waits), 1),
+            }
+        )
         items += [
-            {"kind": "section", "name": "区分の内訳", "result": "ok",
-             "value": "・".join(f"{v} {c}" for v, c in am["verdicts"].items() if c)},
-            {"kind": "section", "name": "反映", "result": "partial" if am["partial"] else "ok",
-             "value": f"直した {len(am['applied']) - len(am['closed'])} 件・閉じた {len(am['closed'])} 件・"
-                      f"返した {len(am['returned'])} 件"},
-            {"kind": "section", "name": "待った回数", "result": "ok",
-             "value": f"{len(waits)} 回・計 {metrics['wait_seconds']:g} 秒"}]
+            {
+                "kind": "section",
+                "name": "区分の内訳",
+                "result": "ok",
+                "value": "・".join(f"{v} {c}" for v, c in am["verdicts"].items() if c),
+            },
+            {
+                "kind": "section",
+                "name": "反映",
+                "result": "partial" if am["partial"] else "ok",
+                "value": f"直した {len(am['applied']) - len(am['closed'])} 件・閉じた {len(am['closed'])} 件・"
+                f"返した {len(am['returned'])} 件",
+            },
+            {"kind": "section", "name": "待った回数", "result": "ok", "value": f"{len(waits)} 回・計 {metrics['wait_seconds']:g} 秒"},
+        ]
     summary = " / ".join(f"{i['name']}: {i['value']}" for i in items)
     emit(result(TOOL, "ok", summary, items, metrics))
 
 
 # ---------------- CLI ----------------
+
 
 def _numbers(s: str) -> list[int]:
     try:

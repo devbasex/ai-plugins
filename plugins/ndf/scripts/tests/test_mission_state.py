@@ -3,6 +3,7 @@
 入力は `supervise.py queue` の done の JSON と `report.md` の形（r6 の実物の形）から作る。
 LLM も gh も呼ばない。
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -57,33 +58,65 @@ def write_plan(d: Path, name: str, issues: list[int], phase: str, rep: str | Non
 @pytest.fixture()
 def r6(tmp_path):
     """r6 と同じ形: 実装 3 本の queue（1 本止まった）と、本番の queue。"""
-    a = write_plan(tmp_path, "plan-1053", [1053], "実装",
-                   report("実装", "#1053", "完了", "https://github.com/devbasex/ai-plugins/pull/1056", "1.178"))
-    b = write_plan(tmp_path, "plan-1054", [1054], "実装",
-                   report("実装", "#1054", "止まった", "https://github.com/devbasex/ai-plugins/pull/1058", "2.170",
-                          reason="merge のステップで衝突"))
-    prod = write_plan(tmp_path, "plan-release-prod", [1053, 1054], "配布（本番）",
-                      report("配布（本番）", "#1053 #1054", "完了", "無し", "0.000"))
+    a = write_plan(
+        tmp_path, "plan-1053", [1053], "実装", report("実装", "#1053", "完了", "https://github.com/devbasex/ai-plugins/pull/1056", "1.178")
+    )
+    b = write_plan(
+        tmp_path,
+        "plan-1054",
+        [1054],
+        "実装",
+        report("実装", "#1054", "止まった", "https://github.com/devbasex/ai-plugins/pull/1058", "2.170", reason="merge のステップで衝突"),
+    )
+    prod = write_plan(
+        tmp_path, "plan-release-prod", [1053, 1054], "配布（本番）", report("配布（本番）", "#1053 #1054", "完了", "無し", "0.000")
+    )
     dev = write_plan(tmp_path, "plan-release-dev", [1053, 1054], "配布（開発版）", None)
     done = tmp_path / "queue-done.json"
-    done.write_text(json.dumps({
-        "tool": "supervise-queue", "status": "stopped", "summary": "2 本: 完了 1 / 関門 0 / 止まった 1",
-        "items": [
-            {"plan": a, "result": "完了", "exit": 0, "report": str(Path(a).with_suffix("")) + "-state/report.md",
-             "seconds": 586.4},
-            {"plan": b, "result": "止まった", "exit": 3,
-             "report": str(Path(b).with_suffix("")) + "-state/report.md", "seconds": 816.0}],
-        "metrics": {"plans": 2, "stopped": 1, "gate": 0, "not_run": 0, "max": 3, "done": str(done)}},
-        ensure_ascii=False))
+    done.write_text(
+        json.dumps(
+            {
+                "tool": "supervise-queue",
+                "status": "stopped",
+                "summary": "2 本: 完了 1 / 関門 0 / 止まった 1",
+                "items": [
+                    {"plan": a, "result": "完了", "exit": 0, "report": str(Path(a).with_suffix("")) + "-state/report.md", "seconds": 586.4},
+                    {
+                        "plan": b,
+                        "result": "止まった",
+                        "exit": 3,
+                        "report": str(Path(b).with_suffix("")) + "-state/report.md",
+                        "seconds": 816.0,
+                    },
+                ],
+                "metrics": {"plans": 2, "stopped": 1, "gate": 0, "not_run": 0, "max": 3, "done": str(done)},
+            },
+            ensure_ascii=False,
+        )
+    )
     pdone = tmp_path / "done-release-prod.json"
-    pdone.write_text(json.dumps({
-        "tool": "supervise-queue", "status": "ok", "summary": "1 本",
-        "items": [{"plan": prod, "result": "完了", "exit": 0,
-                   "report": str(Path(prod).with_suffix("")) + "-state/report.md", "seconds": 300.3}],
-        "metrics": {}}, ensure_ascii=False))
+    pdone.write_text(
+        json.dumps(
+            {
+                "tool": "supervise-queue",
+                "status": "ok",
+                "summary": "1 本",
+                "items": [
+                    {
+                        "plan": prod,
+                        "result": "完了",
+                        "exit": 0,
+                        "report": str(Path(prod).with_suffix("")) + "-state/report.md",
+                        "seconds": 300.3,
+                    }
+                ],
+                "metrics": {},
+            },
+            ensure_ascii=False,
+        )
+    )
     mission = tmp_path / "mission.json"
-    return {"dir": tmp_path, "a": a, "b": b, "dev": dev, "prod": prod, "done": str(done), "pdone": str(pdone),
-            "mission": str(mission)}
+    return {"dir": tmp_path, "a": a, "b": b, "dev": dev, "prod": prod, "done": str(done), "pdone": str(pdone), "mission": str(mission)}
 
 
 def run(*args: str) -> subprocess.CompletedProcess:
@@ -96,15 +129,41 @@ def ok(*args: str) -> dict:
     return json.loads(p.stdout)
 
 
-GOAL = ("/goal /ndf:development-workflow https://github.com/devbasex/ai-plugins/milestone/{milestone}\n"
-        "issues/handoff.md の「{heading}」から続ける。版は {prod}。")
+GOAL = (
+    "/goal /ndf:development-workflow https://github.com/devbasex/ai-plugins/milestone/{milestone}\n"
+    "issues/handoff.md の「{heading}」から続ける。版は {prod}。"
+)
 
 
 def init(r6) -> None:
-    ok("init", r6["mission"], "--name", "(a)(b) 置き換え", "--milestone", "26", "--issue", "1053", "--issue", "1054",
-       "--plan", f"実装={r6['a']}", "--plan", f"実装={r6['b']}", "--plan", f"開発版={r6['dev']}",
-       "--plan", f"本番={r6['prod']}", "--done", r6["done"], "--dev", "10.17.17-dev.1", "--prod", "10.17.17",
-       "--goal", GOAL)
+    ok(
+        "init",
+        r6["mission"],
+        "--name",
+        "(a)(b) 置き換え",
+        "--milestone",
+        "26",
+        "--issue",
+        "1053",
+        "--issue",
+        "1054",
+        "--plan",
+        f"実装={r6['a']}",
+        "--plan",
+        f"実装={r6['b']}",
+        "--plan",
+        f"開発版={r6['dev']}",
+        "--plan",
+        f"本番={r6['prod']}",
+        "--done",
+        r6["done"],
+        "--dev",
+        "10.17.17-dev.1",
+        "--prod",
+        "10.17.17",
+        "--goal",
+        GOAL,
+    )
 
 
 DOC = """# 引継ぎ
@@ -141,8 +200,12 @@ def test_update_fills_rows_and_render_writes_table(r6):
     init(r6)
     out = ok("update", r6["mission"], "--done", r6["pdone"], "--next", f"{r6['a']}=次のミッションからチェインで流す")
     rows = {i["plan"]: i for i in out["items"]}
-    assert (rows[r6["a"]]["result"], rows[r6["a"]]["pr"], rows[r6["a"]]["seconds"], rows[r6["a"]]["cost"]) == \
-        ("完了", "#1056", 586.4, 1.178)
+    assert (rows[r6["a"]]["result"], rows[r6["a"]]["pr"], rows[r6["a"]]["seconds"], rows[r6["a"]]["cost"]) == (
+        "完了",
+        "#1056",
+        586.4,
+        1.178,
+    )
     assert (rows[r6["b"]]["result"], rows[r6["b"]]["exit"], rows[r6["b"]]["reason"]) == ("止まった", 3, "merge のステップで衝突")
     assert rows[r6["dev"]]["result"] == "まだ"
     assert (rows[r6["prod"]]["result"], rows[r6["prod"]]["pr"], rows[r6["prod"]]["seconds"]) == ("完了", "", 300.3)
@@ -196,8 +259,17 @@ def test_render_demote_adds_new_section_before(r6):
     ok("update", r6["mission"])
     doc = r6["dir"] / "handoff.md"
     doc.write_text(DOC)
-    ok("render", r6["mission"], str(doc), "--section", "今の会話の進み", "--demote", "前の会話の進み",
-       "--heading", "今の会話の進み（07:33〜 UTC）")
+    ok(
+        "render",
+        r6["mission"],
+        str(doc),
+        "--section",
+        "今の会話の進み",
+        "--demote",
+        "前の会話の進み",
+        "--heading",
+        "今の会話の進み（07:33〜 UTC）",
+    )
     text = doc.read_text()
     i_new = text.index("## 今の会話の進み（07:33〜 UTC）\n")
     i_old = text.index("## 前の会話の進み（06:53〜07:33 UTC）\n")
@@ -264,8 +336,10 @@ def test_next_is_ndf_next_block_for_relay(r6):
     p = run("next", r6["mission"], "--doc", str(doc), "--section", "今の会話の進み")
     assert p.returncode == 0, p.stderr
     blocks = load_relay().next_blocks("前置き\n\n" + p.stdout)
-    assert blocks == ["/goal /ndf:development-workflow https://github.com/devbasex/ai-plugins/milestone/26\n"
-                      "issues/handoff.md の「今の会話の進み（06:53〜07:33 UTC）」から続ける。版は 10.17.17。"]
+    assert blocks == [
+        "/goal /ndf:development-workflow https://github.com/devbasex/ai-plugins/milestone/26\n"
+        "issues/handoff.md の「今の会話の進み（06:53〜07:33 UTC）」から続ける。版は 10.17.17。"
+    ]
 
 
 def test_next_replace_rewrites_command_section(r6):
@@ -312,6 +386,7 @@ MILESTONE = """マイルストーン 26 の説明
 
 def gh_env(tmp_path: Path, description: str | None) -> dict:
     import os
+
     bindir = tmp_path / "bin"
     bindir.mkdir(exist_ok=True)
     gh = bindir / "gh"
@@ -319,7 +394,7 @@ def gh_env(tmp_path: Path, description: str | None) -> dict:
         gh.write_text("#!/bin/sh\necho 'HTTP 404' >&2\nexit 1\n")
     else:
         (tmp_path / "desc.txt").write_text(description)
-        gh.write_text(f"#!/bin/sh\necho \"$@\" >> {tmp_path / 'gh-calls.txt'}\ncat {tmp_path / 'desc.txt'}\n")
+        gh.write_text(f'#!/bin/sh\necho "$@" >> {tmp_path / "gh-calls.txt"}\ncat {tmp_path / "desc.txt"}\n')
     gh.chmod(0o755)
     return {**os.environ, "PATH": f"{bindir}:{os.environ['PATH']}"}
 
@@ -330,6 +405,7 @@ def run_env(env: dict, *args: str) -> subprocess.CompletedProcess:
 
 def test_init_fast_copies_the_three_sections_and_hashes_them(tmp_path):
     import hashlib
+
     env = gh_env(tmp_path, MILESTONE)
     mission = tmp_path / "state" / "mission-state.json"
     p = run_env(env, "init", str(mission), "--name", "m", "--pace", "fast", "--milestone", "26")
@@ -367,18 +443,36 @@ def test_init_normal_keeps_the_old_shape(r6):
 
 def test_mvv_approval_and_the_gate_by_the_judgement(tmp_path):
     import hashlib
+
     mvv = tmp_path / "given.md"
     mvv.write_text("## Mission\nx\n## Vision\ny\n## Value\nz\n")
     mission = tmp_path / "mission-state.json"
     ok("init", str(mission), "--name", "m", "--pace", "fast", "--mvv", str(mvv))
     ok("gate", str(mission), "MVV", "--what", "MVV を承認")
-    ok("gate", str(mission), "関門 2", "--what", "本番 10.17.30", "--by", "mvv", "--verdict", "follow",
-       "--reasons", '["Value 1"]', "--log", "/x/mvv-gate.jsonl")
+    ok(
+        "gate",
+        str(mission),
+        "関門 2",
+        "--what",
+        "本番 10.17.30",
+        "--by",
+        "mvv",
+        "--verdict",
+        "follow",
+        "--reasons",
+        '["Value 1"]',
+        "--log",
+        "/x/mvv-gate.jsonl",
+    )
     g = {x["name"]: x for x in json.loads(mission.read_text())["gates"]}
     assert g["MVV"]["sha256"] == hashlib.sha256(mvv.read_bytes()).hexdigest()
     assert g["MVV"].get("by", "user") == "user"
-    assert (g["関門 2"]["by"], g["関門 2"]["verdict"], g["関門 2"]["reasons"], g["関門 2"]["log"]) == \
-        ("mvv", "follow", ["Value 1"], "/x/mvv-gate.jsonl")
+    assert (g["関門 2"]["by"], g["関門 2"]["verdict"], g["関門 2"]["reasons"], g["関門 2"]["log"]) == (
+        "mvv",
+        "follow",
+        ["Value 1"],
+        "/x/mvv-gate.jsonl",
+    )
     p = run("status", str(mission))
     assert "関門 2: MVV 判定 " in p.stdout
 
@@ -415,8 +509,7 @@ def test_plan_kind_reads_the_old_key_too(tmp_path, key):
 
 def test_mvv_sections_keep_a_heading_inside_a_fence():
     """lib/md.py の上で読む（#1142 の D1）: 囲みの中の `## ` は Mission の節を切らない。"""
-    text = ("## Mission\n\n使命\n\n```md\n## 囲みの中\n```\n\n"
-            "## Vision\n\n像\n\n## Value\n\n価値\n\n# 別の文書\n")
+    text = "## Mission\n\n使命\n\n```md\n## 囲みの中\n```\n\n## Vision\n\n像\n\n## Value\n\n価値\n\n# 別の文書\n"
     out = load_mission_state().mvv_sections(text)
     assert out == ("## Mission\n\n使命\n\n```md\n## 囲みの中\n```\n\n## Vision\n\n像\n\n## Value\n\n価値\n")
 

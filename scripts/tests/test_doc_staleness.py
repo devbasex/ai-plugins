@@ -3,6 +3,7 @@
 記号（A〜F）は `issues/old/issue-178-doc-staleness-checks.md` の受け入れ条件に、
 記号（G〜M）は `issues/parallel-batch-03/04-issue-209.md` の「チェックする記載」に対応する。
 """
+
 from __future__ import annotations
 
 import shutil
@@ -396,9 +397,7 @@ def test_codex_cache_path_partial_stale_fails(tree: Path) -> None:
         ("M", "plugins/ndf/README.md", "# => ndf@ai-plugins  installed, enabled  9.3.0  <path>\n", 1),
     ],
 )
-def test_body_version_removed_fails(
-    tree: Path, mark: str, document: str, fragment: str, occurrences: int
-) -> None:
+def test_body_version_removed_fails(tree: Path, mark: str, document: str, fragment: str, occurrences: int) -> None:
     """記載を消してチェックを通せる状態にしない。"""
     edit_all(tree / document, fragment, "", occurrences)
     result = run_check(tree)
@@ -439,9 +438,7 @@ def test_plugin_table_unknown_plugin_fails(tree: Path) -> None:
 
 def test_plugin_table_malformed_plugin_json_fails(tree: Path) -> None:
     """`plugin.json` が構文不正な場合、例外ではなくチェックの失敗として出す。"""
-    (tree / "plugins/fixture-kit/.claude-plugin/plugin.json").write_text(
-        "{\n  not json\n", encoding="utf-8"
-    )
+    (tree / "plugins/fixture-kit/.claude-plugin/plugin.json").write_text("{\n  not json\n", encoding="utf-8")
     result = run_check(tree)
     out = output_of(result)
     assert result.returncode != 0
@@ -473,8 +470,7 @@ def add_to_version_section(tree: Path, line: str) -> None:
     edit(
         versioning_md(tree),
         "- 接尾辞は次に出す正式版の版数へ付ける。`9.3.0` の次を開発するなら `9.4.0-dev.1`\n",
-        "- 接尾辞は次に出す正式版の版数へ付ける。`9.3.0` の次を開発するなら `9.4.0-dev.1`\n"
-        f"{line}\n",
+        f"- 接尾辞は次に出す正式版の版数へ付ける。`9.3.0` の次を開発するなら `9.4.0-dev.1`\n{line}\n",
     )
 
 
@@ -826,9 +822,7 @@ def test_malformed_plugin_version_is_reported_as_a_failure(tree: Path, version: 
 
 def test_missing_plugin_version_is_reported_as_a_failure(tree: Path) -> None:
     """`version` キーが無ければ、例外ではなくチェックの失敗として出す。"""
-    (tree / "plugins/ndf/.claude-plugin/plugin.json").write_text(
-        '{\n  "name": "ndf"\n}\n', encoding="utf-8"
-    )
+    (tree / "plugins/ndf/.claude-plugin/plugin.json").write_text('{\n  "name": "ndf"\n}\n', encoding="utf-8")
     result = run_check(tree)
     out = output_of(result)
     assert result.returncode != 0
@@ -875,10 +869,7 @@ def test_version_failure_output_names_path_subject_line_and_both_values(tree: Pa
     edit(root_readme(tree), "**NDFプラグイン v9.3.0**", "**NDFプラグイン v9.2.1**")
     result = run_check(tree)
     out = output_of(result)
-    assert (
-        "ERROR: README.md: 概要の版数が食い違う"
-        "（記載: 9.2.1（L3） / plugins/ndf/.claude-plugin/plugin.json: 9.3.0）"
-    ) in out
+    assert ("ERROR: README.md: 概要の版数が食い違う（記載: 9.2.1（L3） / plugins/ndf/.claude-plugin/plugin.json: 9.3.0）") in out
 
 
 def test_count_failure_output_is_unchanged(tree: Path) -> None:
@@ -886,10 +877,7 @@ def test_count_failure_output_is_unchanged(tree: Path) -> None:
     edit(root_readme(tree), "Claude Code向け core 5個", "Claude Code向け core 9個")
     result = run_check(tree)
     out = output_of(result)
-    assert (
-        "ERROR: README.md: 公開Skills の Claude Code の数が食い違う"
-        "（記載: 9 / plugins/ndf/manifests/claude-skills.txt: 5）"
-    ) in out
+    assert ("ERROR: README.md: 公開Skills の Claude Code の数が食い違う（記載: 9 / plugins/ndf/manifests/claude-skills.txt: 5）") in out
 
 
 def test_missing_agents_md_fails(tree: Path) -> None:
@@ -999,8 +987,7 @@ def test_version_section_at_end_of_document_scans_until_eof() -> None:
     body = f"{module.VERSION_SECTION_HEADING}\n\n開発版の例は `9.2.1` である。\n"
     module.check_version_section(body, "9.3.0", report)
     assert report.errors == [
-        f"{module.VERSIONING_MD}: 版の付け方の節の版数が現行版より古い"
-        f"（記載: 9.2.1（L3） / {module.PLUGIN_JSON}: 9.3.0）"
+        f"{module.VERSIONING_MD}: 版の付け方の節の版数が現行版より古い（記載: 9.2.1（L3） / {module.PLUGIN_JSON}: 9.3.0）"
     ]
 
 
@@ -1008,21 +995,11 @@ def test_version_section_finds_stale_version_inside_code_fence() -> None:
     """囲みの中の版数も走査し、古い版数なら記録する（現状固定）。"""
     module = _load_checker()
     report = module.Report()
-    body = (
-        f"{module.VERSION_SECTION_HEADING}\n"
-        "\n"
-        "```text\n"
-        "古い版の例は `9.2.1` である。\n"
-        "```\n"
-        "\n"
-        "現行版の例は `9.3.0` である。\n"
-    )
+    body = f"{module.VERSION_SECTION_HEADING}\n\n```text\n古い版の例は `9.2.1` である。\n```\n\n現行版の例は `9.3.0` である。\n"
     module.check_version_section(body, "9.3.0", report)
     assert report.errors == [
-        f"{module.VERSIONING_MD}: 版の付け方の節の版数が現行版より古い"
-        f"（記載: 9.2.1（L4） / {module.PLUGIN_JSON}: 9.3.0）"
+        f"{module.VERSIONING_MD}: 版の付け方の節の版数が現行版より古い（記載: 9.2.1（L4） / {module.PLUGIN_JSON}: 9.3.0）"
     ]
-
 
 
 def test_category_breakdown_ideographic_comma_names_are_split() -> None:
@@ -1034,12 +1011,7 @@ def test_category_breakdown_ideographic_comma_names_are_split() -> None:
     """
     module = _load_checker()
     report = module.Report()
-    body = (
-        "- **元Skills（5個）**:\n"
-        "  - 第1群 (4): alpha、bravo、charlie、delta\n"
-        "  - 第2群 (1): echo\n"
-        "- 次の行\n"
-    )
+    body = "- **元Skills（5個）**:\n  - 第1群 (4): alpha、bravo、charlie、delta\n  - 第2群 (1): echo\n- 次の行\n"
     module.check_category_breakdown(body, 5, "src", report)
     assert report.errors == []
 
@@ -1050,29 +1022,17 @@ def test_category_breakdown_ideographic_comma_names_are_split() -> None:
 def test_category_lines_without_source_count_returns_none() -> None:
     """本文中に元Skills行が存在しない場合、None を返す（現状固定）。"""
     module = _load_checker()
-    markdown = (
-        "# ドキュメント\n"
-        "\n"
-        "- カテゴリA: 3個\n"
-        "- カテゴリB: 2個\n"
-    )
+    markdown = "# ドキュメント\n\n- カテゴリA: 3個\n- カテゴリB: 2個\n"
     assert module.category_lines(markdown) is None
 
 
 def test_category_lines_stops_at_first_non_category_line() -> None:
     """カテゴリ内訳が途切れた後のカテゴリ行は拾わない（現状固定）。"""
     module = _load_checker()
-    markdown = (
-        "- **元Skills（5個）**:\n"
-        "  - 第1群 (4): alpha, bravo, charlie, delta\n"
-        "通常文\n"
-        "  - 第2群 (1): echo\n"
-    )
+    markdown = "- **元Skills（5個）**:\n  - 第1群 (4): alpha, bravo, charlie, delta\n通常文\n  - 第2群 (1): echo\n"
     matched = module.category_lines(markdown)
     assert matched is not None
-    assert [found.group(0) for found in matched] == [
-        "  - 第1群 (4): alpha, bravo, charlie, delta"
-    ]
+    assert [found.group(0) for found in matched] == ["  - 第1群 (4): alpha, bravo, charlie, delta"]
 
 
 # --- location_of: index が lines の要素数以上である境界（単体）---
@@ -1116,9 +1076,7 @@ def test_version_examples_skips_base_comparison_when_stable_row_is_duplicated() 
         "`9.3.0` の次を開発するなら `9.4.0-dev.1`\n"
     )
     module.check_version_examples(body, report)
-    assert report.errors == [
-        f"{module.VERSIONING_MD}: 版の付け方の節の版の形の表に同じ行が複数ある（正式版: L2, L3）"
-    ]
+    assert report.errors == [f"{module.VERSIONING_MD}: 版の付け方の節の版の形の表に同じ行が複数ある（正式版: L2, L3）"]
     assert not any("正式版の行より新しい版を指していない" in err for err in report.errors)
 
 
@@ -1142,13 +1100,10 @@ def test_compare_plugin_table_row_with_mismatched_version_records_error(
     ]
 
 
-
 def test_section_lines_reads_the_section_and_code_by_commonmark() -> None:
     """#1142 の D8 で変わる入力: 節と囲みを lib/md.py が読む。インデントのコードブロックも囲みの中になり、
     `~~~` の囲みの中の `## ` は節を閉じない（移す前は ``` と ~~~ の行だけを数えた）。"""
     module = _load_checker()
-    lines = [module.VERSION_SECTION_HEADING, "", "    `9.6.0` 字下げのコード", "", "~~~", "## 囲みの中", "~~~", "外",
-             "## 次の章"]
+    lines = [module.VERSION_SECTION_HEADING, "", "    `9.6.0` 字下げのコード", "", "~~~", "## 囲みの中", "~~~", "外", "## 次の章"]
     got = module.section_lines(lines)
-    assert [(n, fenced) for n, _, fenced in got] == [(2, False), (3, True), (4, False), (5, True), (6, True),
-                                                     (7, True), (8, False)]
+    assert [(n, fenced) for n, _, fenced in got] == [(2, False), (3, True), (4, False), (5, True), (6, True), (7, True), (8, False)]

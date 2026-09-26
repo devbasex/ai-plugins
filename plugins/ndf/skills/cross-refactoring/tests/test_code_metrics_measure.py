@@ -3,6 +3,7 @@
 偽の測定ツール（`metrics_fakes.py`）を PATH の先頭に置き、git の作業ディレクトリで `measure` を打つ。
 ツールが無い・落ちる・読めない・遅い経路もこの偽物で起こす。実物の取得（通信）には頼らない。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -20,8 +21,7 @@ from crossref_helpers import make_state_v2, read_state
 from metrics_fakes import ALL_TOOLS, calls, env_for, git, install, make_repo, which_in
 
 FILES = {
-    "src/app.py": "class Box:\n    def run(self):\n        x = 1\n        return x\n\n\n"
-                  "def helper(a):\n    return a\n",
+    "src/app.py": "class Box:\n    def run(self):\n        x = 1\n        return x\n\n\ndef helper(a):\n    return a\n",
     "src/b.ts": "function alpha() {\n  return 1;\n}\nfunction beta() {\n  return 2;\n}\n",
     "src/c.ts": "function gamma() {\n  return 3;\n}\n",
     "tests/test_app.py": "def test_run():\n    assert True\n",
@@ -32,8 +32,18 @@ UNTRACKED = {"src/untracked.py": "def untracked_fn():\n    return 1\n"}
 
 
 class Run:
-    def __init__(self, tmp_path, monkeypatch, codemetrics_record, files=FILES, tools=ALL_TOOLS,
-                 declaration=None, enabled=True, scope=("src", "tests"), **overrides):
+    def __init__(
+        self,
+        tmp_path,
+        monkeypatch,
+        codemetrics_record,
+        files=FILES,
+        tools=ALL_TOOLS,
+        declaration=None,
+        enabled=True,
+        scope=("src", "tests"),
+        **overrides,
+    ):
         self.work = tmp_path / "work"
         make_repo(self.work, files, UNTRACKED)
         if declaration is not None:
@@ -43,8 +53,7 @@ class Run:
         self.log = env_for(monkeypatch, tmp_path, self.bin)
         monkeypatch.setattr(shutil, "which", which_in(self.bin))
         record = codemetrics_record.code_metrics_record(self.work, enabled)
-        self.path = make_state_v2(tmp_path, self.work, target_scope=list(scope),
-                                  code_metrics=record, **overrides)
+        self.path = make_state_v2(tmp_path, self.work, target_scope=list(scope), code_metrics=record, **overrides)
         self.tmp = self.path.parent
         monkeypatch.setenv("CROSS_REFACTORING_TMP_DIR", str(self.tmp))
 
@@ -75,7 +84,7 @@ class Run:
 def _section(text: str, heading: str) -> str:
     start = text.index(heading)
     end = text.find("\n#", start + len(heading))
-    return text[start:end if end != -1 else None]
+    return text[start : end if end != -1 else None]
 
 
 @pytest.fixture
@@ -113,8 +122,7 @@ def test_measure_writes_one_file_per_language_with_main_and_test(run, cmd_measur
     symilar = next(c for c in log if c["tool"] == "symilar")
     assert [a for a in symilar["argv"] if a.endswith(".py")] == ["src/app.py", "tests/test_app.py"]
     jscpd = next(c for c in log if c["tool"] == "jscpd")
-    assert [a for a in jscpd["argv"] if a.endswith(".ts")] == [
-        str(r.work / "src/b.ts"), str(r.work / "src/c.ts")]
+    assert [a for a in jscpd["argv"] if a.endswith(".ts")] == [str(r.work / "src/b.ts"), str(r.work / "src/c.ts")]
     assert "--no-gitignore" in jscpd["argv"]
     assert pathlib.Path(jscpd["cwd"]) == r.tmp / "jscpd-rf130"
     assert r.by_tool()["jscpd"]["clones"] == 1
@@ -142,8 +150,7 @@ def test_no_tools_and_no_runner_still_reaches_the_proposal(run, cmd_measure, cap
     assert {x["reason"] for x in r.record["languages"]} == {"tool_missing"}
     assert {x["reason"] for x in r.record["duplication"]} == {"tool_missing"}
     assert "tool_missing" in r.text()
-    lines = [line for line in sys.modules["refactor_lib.codemetrics_view"].record_lines(r.state)
-             if line.strip()]
+    lines = [line for line in sys.modules["refactor_lib.codemetrics_view"].record_lines(r.state) if line.strip()]
     body = plan.format_plan(r.state)
     cmd_report.cmd_report(argparse.Namespace(id=130, metrics=False))
     report = capsys.readouterr().out
@@ -161,10 +168,13 @@ def test_jscpd_missing_leaves_the_other_metrics(run, cmd_measure, capsys):
     assert r.by_tool()["jscpd"]["detail"] == "npx / jscpd"
 
 
-@pytest.mark.parametrize("files, language, status, reason", [
-    ({"src/main.go": "func main() {\n}\n"}, "go", "measured", None),
-    ({"src/run.sh": "echo hi\n"}, "shell", "failed", "unsupported_language"),
-])
+@pytest.mark.parametrize(
+    "files, language, status, reason",
+    [
+        ({"src/main.go": "func main() {\n}\n"}, "go", "measured", None),
+        ({"src/run.sh": "echo hi\n"}, "shell", "failed", "unsupported_language"),
+    ],
+)
 def test_languages_without_a_dedicated_tool(run, cmd_measure, capsys, files, language, status, reason):
     """AC10: `.go` だけの範囲は lizard で測る。`.sh` だけは `unsupported_language` で進む（重複は探す）。"""
     r = run(files=files, scope=("src",))
@@ -182,15 +192,17 @@ def test_no_language_in_scope(run, cmd_measure, capsys):
     assert calls(r.log) == []
 
 
-@pytest.mark.parametrize("env, language, reason", [
-    ({"FAKE_RUFF": "fail"}, "python", "tool_failed"),
-    ({"FAKE_COMPLEXIPY": "fail"}, "python", "tool_failed"),
-    ({"FAKE_RUFF": "garbage"}, "python", "unreadable_output"),
-    ({"FAKE_LIZARD": "garbage"}, "typescript", "unreadable_output"),
-    ({"FAKE_LIZARD": "fail"}, "typescript", "tool_failed"),
-])
-def test_a_failing_tool_fails_only_its_language(run, cmd_measure, capsys, monkeypatch,
-                                                env, language, reason):
+@pytest.mark.parametrize(
+    "env, language, reason",
+    [
+        ({"FAKE_RUFF": "fail"}, "python", "tool_failed"),
+        ({"FAKE_COMPLEXIPY": "fail"}, "python", "tool_failed"),
+        ({"FAKE_RUFF": "garbage"}, "python", "unreadable_output"),
+        ({"FAKE_LIZARD": "garbage"}, "typescript", "unreadable_output"),
+        ({"FAKE_LIZARD": "fail"}, "typescript", "tool_failed"),
+    ],
+)
+def test_a_failing_tool_fails_only_its_language(run, cmd_measure, capsys, monkeypatch, env, language, reason):
     """AC11: その言語だけが理由つきで失敗になり、ほかの言語と重複検出は測る。片方の値だけで載せない。"""
     for k, v in env.items():
         monkeypatch.setenv(k, v)
@@ -246,8 +258,7 @@ def test_declaration_replaces_one_language(run, cmd_measure, capsys):
     """AC6: 宣言で python を lizard にすると、python は lizard、typescript は既定の lizard。"""
     r = run(declaration='{"version": 1, "tools": {"python": "lizard"}}')
     r.measure(cmd_measure, capsys)
-    assert {k: v["tool"] for k, v in r.by_language().items()} == {"python": "lizard",
-                                                                  "typescript": "lizard"}
+    assert {k: v["tool"] for k, v in r.by_language().items()} == {"python": "lizard", "typescript": "lizard"}
     assert "ruff" not in {c["tool"] for c in calls(r.log)}
 
 
@@ -302,9 +313,9 @@ def test_timeout_stops_the_process_group(run, cmd_measure, monkeypatch, tmp_path
     monkeypatch.setenv("FAKE_LIZARD", "slow")
     now = time.time()
     import datetime as _dt
+
     end = _dt.datetime.fromtimestamp(now + 4).astimezone().isoformat(timespec="seconds")
-    r = run(files={"src/b.ts": FILES["src/b.ts"]}, scope=("src",),
-            limits={"measure_timeout": 90, "propose_end_at": end})
+    r = run(files={"src/b.ts": FILES["src/b.ts"]}, scope=("src",), limits={"measure_timeout": 90, "propose_end_at": end})
     state = r.state
     started = time.monotonic()
     cmd_measure.Measurement(state, state["code_metrics"], kill_grace=0.5).run()
@@ -326,6 +337,7 @@ def test_timeout_stops_the_process_group(run, cmd_measure, monkeypatch, tmp_path
 def test_no_time_left_skips_reading_and_launching(run, cmd_measure):
     """締め切りが 0 なら、ソースを読まず・ツールを起動せず、全部を `timeout` にして書く。"""
     import datetime as _dt
+
     end = _dt.datetime.fromtimestamp(time.time() - 60).astimezone().isoformat(timespec="seconds")
     r = run(limits={"measure_timeout": 90, "propose_end_at": end})
     state = r.state
@@ -340,6 +352,7 @@ def test_no_time_left_skips_reading_and_launching(run, cmd_measure):
 
 
 # ---------------- init と再開 ----------------
+
 
 def test_init_writes_measure_timeout_and_a_pending_record(codemetrics_record, tmp_path):
     """AC13: 状態の `limits` に `measure_timeout` が載る。記録は `pending` から始まる。"""
@@ -356,8 +369,7 @@ def test_resume_of_an_old_state_measures_only_before_the_proposal(codemetrics_re
     codemetrics_record.ensure_record(before, None)
     assert before["code_metrics"]["status"] == "pending"
     assert codemetrics_record.recorded_enabled(before) is True
-    after = {"worktrees": {"work": str(tmp_path)},
-             "phases": {"propose": {"started_at": "2026-09-26T10:00:00+09:00"}}}
+    after = {"worktrees": {"work": str(tmp_path)}, "phases": {"propose": {"started_at": "2026-09-26T10:00:00+09:00"}}}
     codemetrics_record.ensure_record(after, None)
     assert "code_metrics" not in after and codemetrics_record.recorded_enabled(after) is None
 

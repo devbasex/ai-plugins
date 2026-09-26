@@ -1,5 +1,5 @@
-"""指摘の扱いの判定と出力（`instructions-check.py` から分けた。#1142 の C7）。
-"""
+"""指摘の扱いの判定と出力（`instructions-check.py` から分けた。#1142 の C7）。"""
+
 from __future__ import annotations
 
 import sys
@@ -15,6 +15,7 @@ ACTION_REPORT = "報告"
 
 
 # --- 扱いの判定 --------------------------------------------------------------
+
 
 def action_of(finding: Finding, in_ndf_repo: bool) -> str:
     """扱いは**スコープと、NDF の開発リポジトリかどうか**の 2 つで決まる。"""

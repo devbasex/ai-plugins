@@ -52,11 +52,7 @@ def _marker_name(node: ast.expr) -> tuple[str, ast.Call | None] | None:
     """``pytest.mark.<name>`` / ``pytest.mark.<name>(...)`` なら (name, call) を返す。"""
     call = node if isinstance(node, ast.Call) else None
     target = node.func if call else node
-    if (
-        isinstance(target, ast.Attribute)
-        and isinstance(target.value, ast.Attribute)
-        and target.value.attr == "mark"
-    ):
+    if isinstance(target, ast.Attribute) and isinstance(target.value, ast.Attribute) and target.value.attr == "mark":
         return target.attr, call
     return None
 
@@ -72,9 +68,7 @@ def _markers(nodes: list[ast.expr]) -> dict[str, list[ast.Call | None]]:
 
 def _module_markers(tree: ast.Module) -> dict[str, list[ast.Call | None]]:
     for stmt in tree.body:
-        if isinstance(stmt, ast.Assign) and any(
-            isinstance(t, ast.Name) and t.id == "pytestmark" for t in stmt.targets
-        ):
+        if isinstance(stmt, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "pytestmark" for t in stmt.targets):
             value = stmt.value
             items = list(value.elts) if isinstance(value, (ast.List, ast.Tuple)) else [value]
             return _markers(items)
@@ -97,8 +91,7 @@ def _docstring_nodes(tree: ast.Module) -> set[int]:
     for node in ast.walk(tree):
         if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
             body = node.body
-            if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant) \
-                    and isinstance(body[0].value.value, str):
+            if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant) and isinstance(body[0].value.value, str):
                 ids.add(id(body[0].value))
     return ids
 
@@ -126,16 +119,14 @@ def lint_tree(tree: ast.Module, file: str) -> tuple[int, list[dict[str, Any]]]:
     violations: list[dict[str, Any]] = []
 
     def add(rule: str, node: ast.AST, test: str | None, message: str) -> None:
-        violations.append({"file": file, "line": node.lineno, "test": test,
-                           "rule": rule, "message": message})
+        violations.append({"file": file, "line": node.lineno, "test": test, "rule": rule, "message": message})
 
     module_marks = _module_markers(tree)
     tests = 0
     for func, cls in _iter_tests(tree):
         tests += 1
         marks: dict[str, list[ast.Call | None]] = {}
-        for source in (module_marks, _markers(cls.decorator_list) if cls else {},
-                       _markers(func.decorator_list)):
+        for source in (module_marks, _markers(cls.decorator_list) if cls else {}, _markers(func.decorator_list)):
             for name, calls in source.items():
                 marks.setdefault(name, []).extend(calls)
 
@@ -146,12 +137,10 @@ def lint_tree(tree: ast.Module, file: str) -> tuple[int, list[dict[str, Any]]]:
         fixture_ids = {m["id"] for p in params if (m := _ROLE_FIXTURE.match(p))}
         marker_ids = _role_ids(marks.get("role", []))
         for rid in sorted(marker_ids - fixture_ids):
-            add("role_pair", func, func.name,
-                f"@pytest.mark.role({rid!r}) があるが fixture pwk_role_{rid} を受け取っていない")
+            add("role_pair", func, func.name, f"@pytest.mark.role({rid!r}) があるが fixture pwk_role_{rid} を受け取っていない")
         if marker_ids:
             for rid in sorted(fixture_ids - marker_ids):
-                add("role_pair", func, func.name,
-                    f"fixture pwk_role_{rid} が @pytest.mark.role の {sorted(marker_ids)} と食い違う")
+                add("role_pair", func, func.name, f"fixture pwk_role_{rid} が @pytest.mark.role の {sorted(marker_ids)} と食い違う")
 
     docstrings = _docstring_nodes(tree)
     owner = _enclosing_test(tree)
@@ -161,18 +150,14 @@ def lint_tree(tree: ast.Module, file: str) -> tuple[int, list[dict[str, Any]]]:
         if isinstance(node, ast.JoinedStr):
             head = node.values[0] if node.values else None
             if isinstance(head, ast.Constant) and isinstance(head.value, str) and _URL.match(head.value):
-                add("hardcoded_url", node, owner.get(id(node)),
-                    f"URL の直書き: {head.value!r}… (pwk_config.base_url から組み立てる)")
+                add("hardcoded_url", node, owner.get(id(node)), f"URL の直書き: {head.value!r}… (pwk_config.base_url から組み立てる)")
         elif isinstance(node, ast.Constant) and isinstance(node.value, str):
             if id(node) in docstrings or id(node) in fstring_parts or not _URL.match(node.value):
                 continue
-            add("hardcoded_url", node, owner.get(id(node)),
-                f"URL の直書き: {node.value!r} (pwk_config.base_url から組み立てる)")
-        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
-                and node.func.attr in NAVIGATION_METHODS:
+            add("hardcoded_url", node, owner.get(id(node)), f"URL の直書き: {node.value!r} (pwk_config.base_url から組み立てる)")
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in NAVIGATION_METHODS:
             if not any(k.arg == "wait_until" for k in node.keywords):
-                add("wait_until", node, owner.get(id(node)),
-                    f"{node.func.attr}() に wait_until= が無い")
+                add("wait_until", node, owner.get(id(node)), f"{node.func.attr}() に wait_until= が無い")
     return tests, violations
 
 

@@ -10,6 +10,7 @@
 | AC16b | 最終ゲートは、検証の中の全体のテストが通り HEAD が進んでいなければ使い回す |
 | AC17 | 単独起動は `cross-review` が `approved` のときだけ履歴へ追記する |
 """
+
 from __future__ import annotations
 
 import argparse
@@ -37,18 +38,41 @@ def flow(tmp_path, monkeypatch, refactor, patch_lib, env_tmp_dir):
     return build_git_flow(tmp_path, monkeypatch, patch_lib, env_tmp_dir)
 
 
-def _item(item_id, rank, symbol="total", *, tests=(), targets=("tests/test_calc.py",),
-          deadline=FAR, test_deadline=FAR, estimated_diff_lines=20, technique="extract_method"):
+def _item(
+    item_id,
+    rank,
+    symbol="total",
+    *,
+    tests=(),
+    targets=("tests/test_calc.py",),
+    deadline=FAR,
+    test_deadline=FAR,
+    estimated_diff_lines=20,
+    technique="extract_method",
+):
     return {
-        "id": item_id, "rank": rank, "path": "src/calc.py", "symbol": symbol,
-        "smell": "long_method", "technique": technique, "severity": "major",
-        "proposed_by": ["codex"], "tier": "high", "risk": False,
-        "tests": list(tests), "test_targets": list(targets),
-        "command": ["pytest", "-q", *targets], "command_source": "targets",
+        "id": item_id,
+        "rank": rank,
+        "path": "src/calc.py",
+        "symbol": symbol,
+        "smell": "long_method",
+        "technique": technique,
+        "severity": "major",
+        "proposed_by": ["codex"],
+        "tier": "high",
+        "risk": False,
+        "tests": list(tests),
+        "test_targets": list(targets),
+        "command": ["pytest", "-q", *targets],
+        "command_source": "targets",
         "estimate": {"test": 2.7 if tests else 0.0, "implement": 1.3, "verify": 0.2},
-        "start_deadline": deadline, "test_start_deadline": test_deadline if tests else None,
-        "status": "planned", "commits": {"test": None, "implement": None, "fix": []},
-        "seconds": {}, "fix_count": 0, "danger": [],
+        "start_deadline": deadline,
+        "test_start_deadline": test_deadline if tests else None,
+        "status": "planned",
+        "commits": {"test": None, "implement": None, "fix": []},
+        "seconds": {},
+        "fix_count": 0,
+        "danger": [],
         "estimated_diff_lines": estimated_diff_lines,
     }
 
@@ -59,7 +83,9 @@ def _plan(flow, *items, **plan_overrides):
     state["plan"] = {
         "base_sha": git("rev-parse", "HEAD", cwd=flow["work"]).stdout.strip(),
         "reserve": {"danger_whole_test": 0.1, "final_whole_test": 0.1, "fix": 5.5},
-        "end_at": FAR, "table_source": "defaults", **plan_overrides,
+        "end_at": FAR,
+        "table_source": "defaults",
+        **plan_overrides,
     }
     state["phase"] = "add-tests"
     write_state(flow["path"], state)
@@ -82,9 +108,13 @@ def _write(work, rel, text):
 
 
 def _refactor_total(work):
-    _write(work, "src/calc.py", CALC.replace(
-        "    result = 0\n    for v in values:\n        result = add(result, v)\n    return result\n",
-        "    return sum(values)\n"))
+    _write(
+        work,
+        "src/calc.py",
+        CALC.replace(
+            "    result = 0\n    for v in values:\n        result = add(result, v)\n    return result\n", "    return sum(values)\n"
+        ),
+    )
 
 
 def _break_total(work):
@@ -101,12 +131,11 @@ def _deferred(flow):
 
 # ---------- テストの追加（merge-tests） ----------
 
-def test_a_test_failing_on_the_current_code_defers_the_item_as_test_failed(
-        flow, cmd_setup, cmd_implement):
+
+def test_a_test_failing_on_the_current_code_defers_the_item_as_test_failed(flow, cmd_setup, cmd_implement):
     """AC10: 今のコードで落ちるテストを足した項目は見送り、そのテストのコミットを取り消す。"""
     work = flow["work"]
-    _plan(flow, _item("I-001", 1, tests=["tests/test_total.py"], targets=["tests/test_total.py"]),
-          _item("I-002", 2, symbol="add"))
+    _plan(flow, _item("I-001", 1, tests=["tests/test_total.py"], targets=["tests/test_total.py"]), _item("I-002", 2, symbol="add"))
     _call(cmd_setup, "cmd_start_phase", phase="add-tests")
     _write(work, "tests/test_total.py", TEST_TOTAL.replace("== 6", "== 7"))
     commit_with_trailers(work, "Test", item_trailers("I-001"))
@@ -122,8 +151,7 @@ def test_a_test_failing_on_the_current_code_defers_the_item_as_test_failed(
 
 def test_an_item_without_a_test_commit_is_not_done(flow, cmd_setup, cmd_implement):
     """AC12: テストを足すはずの項目にコミットが無ければ `not_done`。"""
-    _plan(flow, _item("I-001", 1, tests=["tests/test_total.py"], targets=["tests/test_total.py"]),
-          _item("I-002", 2, symbol="add"))
+    _plan(flow, _item("I-001", 1, tests=["tests/test_total.py"], targets=["tests/test_total.py"]), _item("I-002", 2, symbol="add"))
     _call(cmd_setup, "cmd_start_phase", phase="add-tests")
 
     _call(cmd_implement, "cmd_merge_tests")
@@ -134,9 +162,11 @@ def test_an_item_without_a_test_commit_is_not_done(flow, cmd_setup, cmd_implemen
 def test_a_test_commit_after_its_completion_deadline_is_not_done(flow, cmd_setup, cmd_implement):
     """AC12: 完了の締め切り（着手の締め切り + 見積り）を過ぎたコミットは取り込まない。"""
     work = flow["work"]
-    _plan(flow, _item("I-001", 1, tests=["tests/test_total.py"], targets=["tests/test_total.py"],
-                      test_deadline=PAST),
-          _item("I-002", 2, symbol="add"))
+    _plan(
+        flow,
+        _item("I-001", 1, tests=["tests/test_total.py"], targets=["tests/test_total.py"], test_deadline=PAST),
+        _item("I-002", 2, symbol="add"),
+    )
     _call(cmd_setup, "cmd_start_phase", phase="add-tests")
     _write(work, "tests/test_total.py", TEST_TOTAL)
     commit_with_trailers(work, "Test", item_trailers("I-001"))
@@ -167,14 +197,13 @@ def test_a_commit_without_a_planned_item_is_reverted_alone(flow, cmd_setup, cmd_
     # 積み直しで SHA が変わっても、記録は履歴にあるコミットを指す。
     recorded = items["I-001"]["commits"]["test"]
     assert git("cat-file", "-t", recorded, cwd=work).stdout.strip() == "commit"
-    assert recorded != kept          # 積み直したコミットを指す
+    assert recorded != kept  # 積み直したコミットを指す
 
 
 def test_a_test_commit_touching_production_code_rejects_the_item(flow, cmd_setup, cmd_implement):
     """I5: テストの追加でテスト以外を変えた項目は取り消す。見送りには入れない。"""
     work = flow["work"]
-    _plan(flow, _item("I-001", 1, tests=["tests/test_total.py"], targets=["tests/test_total.py"]),
-          _item("I-002", 2, symbol="add"))
+    _plan(flow, _item("I-001", 1, tests=["tests/test_total.py"], targets=["tests/test_total.py"]), _item("I-002", 2, symbol="add"))
     _call(cmd_setup, "cmd_start_phase", phase="add-tests")
     _write(work, "tests/test_total.py", TEST_TOTAL)
     _refactor_total(work)
@@ -188,6 +217,7 @@ def test_a_test_commit_touching_production_code_rejects_the_item(flow, cmd_setup
 
 
 # ---------- 実装（merge-implement） ----------
+
 
 def _implement_phase(flow, cmd_setup, *items):
     _plan(flow, *items)
@@ -244,7 +274,7 @@ def test_a_commit_outside_the_scope_rejects_the_item(flow, cmd_setup, cmd_implem
     with pytest.raises(SystemExit) as exc:
         _call(cmd_implement, "cmd_merge_implement")
 
-    assert exc.value.code == 2          # 残る項目 0 件で最終ゲートへ
+    assert exc.value.code == 2  # 残る項目 0 件で最終ゲートへ
     assert "対象範囲の外" in _items(flow)["I-001"]["failure_reason"]
 
 
@@ -265,6 +295,7 @@ def test_a_changed_expectation_rejects_the_item(flow, cmd_setup, cmd_implement):
 
 # ---------- 検証と修正（verify / merge-fix） ----------
 
+
 def _verify_phase(flow, cmd_setup, cmd_implement, *items, change=_refactor_total, item_id="I-001"):
     _implement_phase(flow, cmd_setup, *items)
     change(flow["work"])
@@ -272,12 +303,15 @@ def _verify_phase(flow, cmd_setup, cmd_implement, *items, change=_refactor_total
     _call(cmd_implement, "cmd_merge_implement")
 
 
-def test_a_failing_item_goes_to_fix_and_returns_after_the_fix(
-        flow, cmd_setup, cmd_implement, cmd_converge, capsys):
+def test_a_failing_item_goes_to_fix_and_returns_after_the_fix(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
     work = flow["work"]
-    _verify_phase(flow, cmd_setup, cmd_implement,
-                  _item("I-001", 1, targets=["tests/test_total.py"], tests=["tests/test_total.py"]),
-                  change=lambda w: (_write(w, "tests/test_total.py", TEST_TOTAL), _break_total(w)))
+    _verify_phase(
+        flow,
+        cmd_setup,
+        cmd_implement,
+        _item("I-001", 1, targets=["tests/test_total.py"], tests=["tests/test_total.py"]),
+        change=lambda w: (_write(w, "tests/test_total.py", TEST_TOTAL), _break_total(w)),
+    )
     # 実装にテストのファイルを含めた形でも、期待値を変えなければ取り込む。
     capsys.readouterr()
     _call(cmd_converge, "cmd_verify")
@@ -300,8 +334,7 @@ def test_a_failing_item_goes_to_fix_and_returns_after_the_fix(
     assert stats["launches"] == 1
 
 
-def test_an_item_without_time_to_fix_is_reverted_alone(
-        flow, cmd_setup, cmd_implement, cmd_converge, capsys):
+def test_an_item_without_time_to_fix_is_reverted_alone(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
     """AC15 決定 23: 修正に使える時間が尽きたら落ちた項目だけを取り消し、他の項目のコミットは残す。"""
     work = flow["work"]
     first = _item("I-001", 1, symbol="add", targets=["tests/test_calc.py"])
@@ -328,8 +361,7 @@ def test_an_item_without_time_to_fix_is_reverted_alone(
     assert "return result + 1" not in (work / "src" / "calc.py").read_text()
 
 
-def test_items_sharing_a_command_are_reverted_newest_first_until_it_passes(
-        flow, cmd_setup, cmd_implement, cmd_converge, capsys):
+def test_items_sharing_a_command_are_reverted_newest_first_until_it_passes(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
     """AC15: 同じ語の並びを共有した項目は新しい方から 1 件ずつ取り消し、通った時点で止める（時間切れ）。"""
     work = flow["work"]
     older = _item("I-001", 1, symbol="add", targets=["tests/test_calc.py"])
@@ -337,9 +369,12 @@ def test_items_sharing_a_command_are_reverted_newest_first_until_it_passes(
     _implement_phase(flow, cmd_setup, older, newer)
     _write(work, "src/other.py", "X = 1\n")
     commit_with_trailers(work, "Refactor add", item_trailers("I-001"))
-    _write(work, "tests/test_calc.py",
-           (work / "tests" / "test_calc.py").read_text() + "\nfrom src.calc import total\n\n\n"
-           "def test_total_is_sum():\n    assert total([1, 2]) == 3\n")
+    _write(
+        work,
+        "tests/test_calc.py",
+        (work / "tests" / "test_calc.py").read_text() + "\nfrom src.calc import total\n\n\n"
+        "def test_total_is_sum():\n    assert total([1, 2]) == 3\n",
+    )
     _break_total(work)
     commit_with_trailers(work, "Refactor total", item_trailers("I-002"))
     _call(cmd_implement, "cmd_merge_implement")
@@ -357,7 +392,8 @@ def test_items_sharing_a_command_are_reverted_newest_first_until_it_passes(
 
 
 def test_the_whole_test_runs_once_when_a_danger_flag_is_raised_and_the_gate_reuses_it(
-        flow, cmd_setup, cmd_implement, cmd_converge, cmd_gate, capsys):
+    flow, cmd_setup, cmd_implement, cmd_converge, cmd_gate, capsys
+):
     """AC13 AC14 AC16b: ファイルを消した項目（D2）で全体のテストを 1 度。最終ゲートは使い回す。"""
     work = flow["work"]
 
@@ -379,7 +415,8 @@ def test_the_whole_test_runs_once_when_a_danger_flag_is_raised_and_the_gate_reus
 
 
 def test_a_whole_test_failure_left_unfixed_reverts_the_flagged_item_and_the_gate_runs_again(
-        flow, cmd_setup, cmd_implement, cmd_converge, cmd_gate):
+    flow, cmd_setup, cmd_implement, cmd_converge, cmd_gate
+):
     """決定 22: 直す時間が無ければ危険フラグの項目を取り消す。全体のテストは検証の中で
     走らせ直さず、最終ゲートが走らせる。"""
     work = flow["work"]
@@ -410,8 +447,8 @@ def test_a_whole_test_failure_left_unfixed_reverts_the_flagged_item_and_the_gate
 
 # ---------- 最終ゲートと履歴（final-gate / finalize） ----------
 
-def test_standalone_runs_cross_review_and_appends_history_only_when_approved(
-        flow, cmd_gate, cmd_report, capsys):
+
+def test_standalone_runs_cross_review_and_appends_history_only_when_approved(flow, cmd_gate, cmd_report, capsys):
     """AC16b AC17: 単独起動は全体のテストの後に cross-review。approved のときだけ追記する。"""
     state = read_state(flow["path"])
     state["workflow_step"] = False
@@ -443,8 +480,7 @@ def test_a_failed_gate_does_not_append_history(flow, cmd_gate, cmd_report, monke
     assert not (flow["metrics"] / "acme--demo" / "cross-refactoring-allocation.jsonl").exists()
 
 
-def test_a_resumed_intake_reuses_its_conclusion_and_does_not_drop_twice(
-        flow, cmd_setup, cmd_implement):
+def test_a_resumed_intake_reuses_its_conclusion_and_does_not_drop_twice(flow, cmd_setup, cmd_implement):
     """取り消しの後に落ちて再開しても、積み直したコミットを 2 コミット目と数えない。"""
     work = flow["work"]
     _implement_phase(flow, cmd_setup, _item("I-001", 1), _item("I-002", 2, symbol="add"))
@@ -455,7 +491,7 @@ def test_a_resumed_intake_reuses_its_conclusion_and_does_not_drop_twice(
     _call(cmd_implement, "cmd_merge_implement")
     head = git("rev-parse", "HEAD", cwd=work).stdout.strip()
     state = read_state(flow["path"])
-    state["phases"]["implement"].pop("ended_at")      # 終わりを書く前に落ちたことにする
+    state["phases"]["implement"].pop("ended_at")  # 終わりを書く前に落ちたことにする
     write_state(flow["path"], state)
 
     _call(cmd_implement, "cmd_merge_implement")
@@ -467,8 +503,8 @@ def test_a_resumed_intake_reuses_its_conclusion_and_does_not_drop_twice(
 
 # ---------- 監視が手順の上限で CLI を止めたとき（決定 23 / I15） ----------
 
-def test_a_phase_stopped_by_the_monitor_is_taken_in_by_the_deadline_and_reported(
-        flow, cmd_setup, cmd_implement, cmd_report, capsys):
+
+def test_a_phase_stopped_by_the_monitor_is_taken_in_by_the_deadline_and_reported(flow, cmd_setup, cmd_implement, cmd_report, capsys):
     """止めたときは未コミットの変更を捨て、コミット済みの項目は git の時刻で判定し、報告に出す。"""
     work = flow["work"]
     done = _item("I-001", 1, symbol="add")
@@ -478,9 +514,10 @@ def test_a_phase_stopped_by_the_monitor_is_taken_in_by_the_deadline_and_reported
     commit_with_trailers(work, "Refactor add", item_trailers("I-001"))
     _refactor_total(work)
     commit_with_trailers(work, "Refactor total", item_trailers("I-002"))
-    _write(work, "src/half.py", "Y = 1\n")                   # 止められた時点の書きかけ
+    _write(work, "src/half.py", "Y = 1\n")  # 止められた時点の書きかけ
     (flow["path"].parent / "claude-implement-rf130-monitor.json").write_text(
-        json.dumps({"reason": "timeout", "ended_at": "2026-09-24T10:40:00"}), encoding="utf-8")
+        json.dumps({"reason": "timeout", "ended_at": "2026-09-24T10:40:00"}), encoding="utf-8"
+    )
 
     _call(cmd_implement, "cmd_merge_implement")
 

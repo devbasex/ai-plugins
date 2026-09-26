@@ -4,6 +4,7 @@
 プラン・ステップ・作業場所・実行の状態（`state`）・claude の呼び出し（`claude`）・遅れの見張り（`slow`）・
 待ちの間に呼ぶ `tick` を渡す。ハンドラーは `engine` を import しない。
 """
+
 from __future__ import annotations
 
 import json
@@ -67,8 +68,11 @@ class StepContext:
         if not number:
             return cmd, "cmd の {pr} を置き換える Pull Request がまだ無い"
         if "{pr_url}" in cmd:
-            url = value if "/pull/" in value else gh_call.gh(
-                ["pr", "view", number, "--json", "url", "--jq", ".url"], cwd=self.cwd).stdout.strip()
+            url = (
+                value
+                if "/pull/" in value
+                else gh_call.gh(["pr", "view", number, "--json", "url", "--jq", ".url"], cwd=self.cwd).stdout.strip()
+            )
             if not url:
                 return cmd, f"cmd の {{pr_url}} を置き換える Pull Request #{number} の URL を読めない"
             cmd = cmd.replace("{pr_url}", url)
@@ -139,8 +143,16 @@ class RunStep:
         env["PYTEST_ADDOPTS"] = " ".join(a for a in addopts if a)
         ctx.state.run_log = ctx.state.dir / "run-stderr.log"
         try:
-            p = run_ticking(cmd, ctx.tick, ctx.state.every, shell=True, cwd=step.get("cwd", ctx.cwd),
-                            timeout=step.get("timeout", 3600), env=env, err_path=ctx.state.run_log)
+            p = run_ticking(
+                cmd,
+                ctx.tick,
+                ctx.state.every,
+                shell=True,
+                cwd=step.get("cwd", ctx.cwd),
+                timeout=step.get("timeout", 3600),
+                env=env,
+                err_path=ctx.state.run_log,
+            )
             return p.returncode, p.stdout + p.stderr
         except subprocess.TimeoutExpired as e:
             return 124, f"打ち切り（{e.timeout} 秒）"
@@ -150,8 +162,7 @@ class RunStep:
     def execute(self, ctx, step: dict) -> tuple[bool, str]:
         started = time.time()
         code, text = self.run_cmd(ctx, step)
-        if (code not in (0, 124, SLOW_EXIT) and not is_gate(code) and step.get("rerun_failed")
-                and not self.is_skip(step, code)):
+        if code not in (0, 124, SLOW_EXIT) and not is_gate(code) and step.get("rerun_failed") and not self.is_skip(step, code):
             # 落ちたテストだけを走らせ直す。通れば揺れとして成功にする
             code2, text2 = self.run_cmd(ctx, step, "--lf")
             ctx.state.cur["rerun"] = {"exit": code2}
@@ -169,11 +180,13 @@ class JudgeStep:
 
     def execute(self, ctx, step: dict) -> dict:
         choices = step.get("choices")
-        prompt = (f"フェーズ: {ctx.plan.get('フェーズ')} / 課題: {ctx.plan.get('課題')}\n"
-                  f"問い: {step['question']}\n"
-                  + (f"選べる値: {', '.join(choices)}（関門なら gate、止めるなら stop）\n" if choices else "")
-                  + f"作業ディレクトリ: {ctx.state.work}（worker の作業ファイルの置き場所）\n"
-                  + f"\n## 規則\n{ctx.plan.get('規則', '（無し）')}\n\n## 結果\n{ctx.inputs_text(step)}")
+        prompt = (
+            f"フェーズ: {ctx.plan.get('フェーズ')} / 課題: {ctx.plan.get('課題')}\n"
+            f"問い: {step['question']}\n"
+            + (f"選べる値: {', '.join(choices)}（関門なら gate、止めるなら stop）\n" if choices else "")
+            + f"作業ディレクトリ: {ctx.state.work}（worker の作業ファイルの置き場所）\n"
+            + f"\n## 規則\n{ctx.plan.get('規則', '（無し）')}\n\n## 結果\n{ctx.inputs_text(step)}"
+        )
         res = ctx.claude.call(JUDGE_SYSTEM, prompt, None, ctx.cwd, step.get("timeout", 600))
         ctx.claude.record_usage("judge", res)
         d = parse_decision(res["text"]) if res["ok"] else {"decision": "stop", "reason": res["text"][:200]}

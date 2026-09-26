@@ -1,4 +1,5 @@
 """追加レビュー観点をプロンプトへ描画する分岐の現状固定。"""
+
 import json
 import os
 import pathlib
@@ -24,7 +25,8 @@ def test_extra_review_block_follows_state_instructions(tmp_path, instructions):
         "rounds": [{"round": 1, "head_sha": "1" * 40}],
     }
     (tmp_dir / f"cross-review-pr{PR}-state.json").write_text(
-        json.dumps(state), encoding="utf-8",
+        json.dumps(state),
+        encoding="utf-8",
     )
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -34,9 +36,11 @@ def test_extra_review_block_follows_state_instructions(tmp_path, instructions):
 
     subprocess.run(
         ["bash", str(SCRIPT), "codex", str(PR), "1"],
-        env={**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
-             "CROSS_REVIEW_TMP_DIR": str(tmp_dir)},
-        check=True, capture_output=True, text=True, timeout=10,
+        env={**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "CROSS_REVIEW_TMP_DIR": str(tmp_dir)},
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=10,
     )
 
     prompt = (tmp_dir / f"codex-review-pr{PR}-prompt.md").read_text(encoding="utf-8")

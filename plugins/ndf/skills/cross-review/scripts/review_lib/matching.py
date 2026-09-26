@@ -1,4 +1,5 @@
 """指摘どうし・指摘とコメントの照合（#1142 の C2）。新規性の数え方と振動の判定が同じ照合を使う。"""
+
 from __future__ import annotations
 
 import json
@@ -49,9 +50,7 @@ def _evidence_completed(st: dict[str, Any], round_no: int) -> bool:
     return False
 
 
-def _finding_keys(
-    st: dict[str, Any], pr: int, round_no: int
-) -> list[tuple[str, int, str]]:
+def _finding_keys(st: dict[str, Any], pr: int, round_no: int) -> list[tuple[str, int, str]]:
     """そのラウンドの指摘を (ファイル, 行, 正規化した本文) の並びで返す。
 
     **新規性の判定と振動の検知が同じ形を使う。** どちらも「前のラウンドと同じ指摘か」を
@@ -87,17 +86,13 @@ def _read_finding_payload(agent: str, p: pathlib.Path) -> dict[str, Any] | None:
     # 即時 die(code=3) で停止させる。
     if not isinstance(payload, dict):
         review_lib.die(
-            f"{agent}: payload.json が dict ではない "
-            f"({p}, type={type(payload).__name__})。"
-            " review launcher の出力形式不正。",
+            f"{agent}: payload.json が dict ではない ({p}, type={type(payload).__name__})。 review launcher の出力形式不正。",
             code=3,
         )
     return payload
 
 
-def _comment_keys(
-    agent: str, p: pathlib.Path, payload: dict[str, Any]
-) -> list[tuple[str, int, str]]:
+def _comment_keys(agent: str, p: pathlib.Path, payload: dict[str, Any]) -> list[tuple[str, int, str]]:
     """`comments[]` を (ファイル, 行, 正規化した本文) の 3 つ組へ変換する（第 2 段）。
 
     要素が dict でなければ `die(code=3)`。位置（path / line）が欠ける要素と、行が
@@ -108,8 +103,7 @@ def _comment_keys(
         if not isinstance(c, dict):
             # comments エントリが dict でない場合も同様に致命扱い
             review_lib.die(
-                f"{agent}: payload.comments のエントリが dict ではない "
-                f"({p}, type={type(c).__name__})。",
+                f"{agent}: payload.comments のエントリが dict ではない ({p}, type={type(c).__name__})。",
                 code=3,
             )
         path = c.get("path")
@@ -122,9 +116,7 @@ def _comment_keys(
     return keys
 
 
-def _counted_finding_keys(
-    st: dict[str, Any], round_no: int
-) -> list[tuple[str, int, str]]:
+def _counted_finding_keys(st: dict[str, Any], round_no: int) -> list[tuple[str, int, str]]:
     """新規性が数える指摘を、`_finding_keys` と同じ 3 つ組で返す（#156）。
 
     **一致の判定は変えない。** 変えるのは母集合だけである。

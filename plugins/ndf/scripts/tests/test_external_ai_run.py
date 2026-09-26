@@ -1,4 +1,5 @@
 """`external-ai.py run / check` を見本の CLI で確かめる（実機の CLI は起動しない）。"""
+
 from __future__ import annotations
 
 import json
@@ -44,9 +45,14 @@ def _env(tmp_path: pathlib.Path, runtime: str, mode: str, **extra) -> dict:
     stub = bin_dir / exe
     stub.write_text(FAKE, encoding="utf-8")
     stub.chmod(0o755)
-    env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
-           "FAKE_MODE": mode, "FAKE_NAME": runtime, "FAKE_OUT": str(tmp_path / "out.md"),
-           "NDF_EXTERNAL_AI_TMP_DIR": str(tmp_path / "t")}
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+        "FAKE_MODE": mode,
+        "FAKE_NAME": runtime,
+        "FAKE_OUT": str(tmp_path / "out.md"),
+        "NDF_EXTERNAL_AI_TMP_DIR": str(tmp_path / "t"),
+    }
     env.pop("NDF_SKIP_AUTH_CHECK", None)
     env.update(extra)
     return env
@@ -58,9 +64,26 @@ def _run(tmp_path, runtime, mode, *args, **extra):
     work = tmp_path / "work"
     work.mkdir(exist_ok=True)
     p = subprocess.run(
-        [sys.executable, str(SCRIPT), "run", runtime, "--prompt-file", str(prompt),
-         "--output-file", str(tmp_path / "out.md"), "--workdir", str(work), "--poll", "1", *args],
-        env=_env(tmp_path, runtime, mode, **extra), capture_output=True, text=True, timeout=60)
+        [
+            sys.executable,
+            str(SCRIPT),
+            "run",
+            runtime,
+            "--prompt-file",
+            str(prompt),
+            "--output-file",
+            str(tmp_path / "out.md"),
+            "--workdir",
+            str(work),
+            "--poll",
+            "1",
+            *args,
+        ],
+        env=_env(tmp_path, runtime, mode, **extra),
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
     out = json.loads(p.stdout.strip().splitlines()[-1])
     assert step_result.validate_result(out, p.returncode) == [], (out, p.stderr[-2000:])
     return p.returncode, out
@@ -95,8 +118,7 @@ def test_no_result_reason_matches_monitor_record(tmp_path):
     assert m["outcome"] == "no_result" and m["source"] == "stderr"
     stem = pathlib.Path(m["stem"])
     rec = monitor_outcome.read_outcome(stem.parent, stem.name)
-    assert (rec["status"], rec["reason"]) == (m["monitor_status"], m["reason"]) == (
-        "NO_RESULT", "missing")
+    assert (rec["status"], rec["reason"]) == (m["monitor_status"], m["reason"]) == ("NO_RESULT", "missing")
     assert "何も書かずに終わる" in pathlib.Path(m["result"]).read_text(encoding="utf-8")
 
 
@@ -116,8 +138,7 @@ def test_usage_limit(tmp_path):
     code, out = _run(tmp_path, "kiro", "usage", "--timeout", "20")
     assert code == 1
     m = out["metrics"]
-    assert (m["outcome"], m["monitor_status"], m["reason"]) == (
-        "usage_limit", "EARLY_ERROR", "usage_limit")
+    assert (m["outcome"], m["monitor_status"], m["reason"]) == ("usage_limit", "EARLY_ERROR", "usage_limit")
 
 
 def test_auth_failure_does_not_launch(tmp_path):
@@ -128,17 +149,14 @@ def test_auth_failure_does_not_launch(tmp_path):
 
 def test_check(tmp_path):
     env = _env(tmp_path, "agy", "ok")
-    p = subprocess.run([sys.executable, str(SCRIPT), "check", "agy"], env=env,
-                       capture_output=True, text=True)
+    p = subprocess.run([sys.executable, str(SCRIPT), "check", "agy"], env=env, capture_output=True, text=True)
     assert p.returncode == 0 and json.loads(p.stdout)["status"] == "ok"
     env["FAKE_AUTH"] = "fail"
-    p = subprocess.run([sys.executable, str(SCRIPT), "check", "agy"], env=env,
-                       capture_output=True, text=True)
+    p = subprocess.run([sys.executable, str(SCRIPT), "check", "agy"], env=env, capture_output=True, text=True)
     assert p.returncode == 3 and json.loads(p.stdout)["metrics"]["outcome"] == "auth"
 
 
 def test_missing_cli(tmp_path):
     env = {**os.environ, "PATH": "/nonexistent"}
-    p = subprocess.run([sys.executable, str(SCRIPT), "check", "kiro"], env=env,
-                       capture_output=True, text=True)
+    p = subprocess.run([sys.executable, str(SCRIPT), "check", "kiro"], env=env, capture_output=True, text=True)
     assert p.returncode == 3 and json.loads(p.stdout)["metrics"]["outcome"] == "missing_cli"

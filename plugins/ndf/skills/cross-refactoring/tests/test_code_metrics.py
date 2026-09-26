@@ -3,6 +3,7 @@
 起動と書き出しは `test_code_metrics_measure.py` が見る。実物のツールの出力の形は、
 2026-09-26（lizard）と 2026-09-27（Ruff・complexipy・symilar・jscpd）に保存した形をもとにする。
 """
+
 from __future__ import annotations
 
 import datetime as _dt
@@ -22,10 +23,10 @@ def timeline(refactor):
 
 # ---------------- 既定と宣言 ----------------
 
+
 def test_defaults_carry_no_repository_paths_or_settings(codemetrics):
     """AC8: 既定の表にパスとこのリポジトリ固有の設定が無い。"""
-    blob = json.dumps([codemetrics.LANGUAGE_EXTENSIONS, codemetrics.DEFAULT_TOOLS,
-                       codemetrics.COMMANDS, codemetrics.TOOL_COMMANDS])
+    blob = json.dumps([codemetrics.LANGUAGE_EXTENSIONS, codemetrics.DEFAULT_TOOLS, codemetrics.COMMANDS, codemetrics.TOOL_COMMANDS])
     assert "/" not in blob.replace("==", "")
     assert "plugins" not in blob and "ndf" not in blob
 
@@ -42,24 +43,26 @@ def test_no_declaration_uses_the_defaults(codemetrics):
 
 def test_declaration_replaces_only_the_declared_language(codemetrics):
     """AC6: 宣言した言語だけを置き換え、ほかは既定のまま。`null` はその言語を止める。"""
-    config = codemetrics.load_config(json.dumps({"version": 1, "tools": {"python": "lizard",
-                                                                          "go": None}}))
+    config = codemetrics.load_config(json.dumps({"version": 1, "tools": {"python": "lizard", "go": None}}))
     assert config["source"] == codemetrics.SOURCE_DECLARED
     assert codemetrics.language_tool(config, "python") == (codemetrics.TOOL_LIZARD, None)
     assert codemetrics.language_tool(config, "typescript") == (codemetrics.TOOL_LIZARD, None)
     assert codemetrics.language_tool(config, "go") == (None, codemetrics.DISABLED)
 
 
-@pytest.mark.parametrize("text", [
-    "{not json",
-    json.dumps([1]),
-    json.dumps({"version": 2, "tools": {}}),
-    json.dumps({"version": True, "tools": {}}),
-    json.dumps({"version": 1, "tools": {}, "extra": 1}),
-    json.dumps({"version": 1, "tools": {"cobol": "lizard"}}),
-    json.dumps({"version": 1, "tools": {"python": "radon"}}),
-    json.dumps({"version": 1, "tools": {"typescript": "ruff-complexipy", "python": "lizard"}}),
-])
+@pytest.mark.parametrize(
+    "text",
+    [
+        "{not json",
+        json.dumps([1]),
+        json.dumps({"version": 2, "tools": {}}),
+        json.dumps({"version": True, "tools": {}}),
+        json.dumps({"version": 1, "tools": {}, "extra": 1}),
+        json.dumps({"version": 1, "tools": {"cobol": "lizard"}}),
+        json.dumps({"version": 1, "tools": {"python": "radon"}}),
+        json.dumps({"version": 1, "tools": {"typescript": "ruff-complexipy", "python": "lizard"}}),
+    ],
+)
 def test_broken_declaration_falls_back_to_defaults_as_a_whole(codemetrics, text):
     """AC12: 壊れた宣言は全体を使わず既定で測り、理由を残す。一部の鍵だけを生かさない。"""
     config = codemetrics.load_config(text)
@@ -70,11 +73,10 @@ def test_broken_declaration_falls_back_to_defaults_as_a_whole(codemetrics, text)
 
 # ---------------- ファイルと重複検出の対象 ----------------
 
+
 def test_classify_splits_by_extension_and_counts_the_rest(codemetrics):
-    by_lang, ignored = codemetrics.split_by_language(
-        ["src/a.py", "src/b.ts", "src/c.TSX", "run.sh", "README.md", "Makefile"])
-    assert by_lang == {"python": ["src/a.py"], "shell": ["run.sh"],
-                       "typescript": ["src/b.ts", "src/c.TSX"]}
+    by_lang, ignored = codemetrics.split_by_language(["src/a.py", "src/b.ts", "src/c.TSX", "run.sh", "README.md", "Makefile"])
+    assert by_lang == {"python": ["src/a.py"], "shell": ["run.sh"], "typescript": ["src/b.ts", "src/c.TSX"]}
     assert ignored == 2
 
 
@@ -82,12 +84,9 @@ def test_duplication_targets_split_python_from_the_rest(codemetrics):
     """重複検出の起動: symilar に `.py` だけ、jscpd にほかの言語（shell を含む）をまとめて。"""
     by_lang = {"python": ["a.py"], "shell": ["r.sh"], "typescript": ["b.ts"]}
     targets = codemetrics.duplication_targets(codemetrics.load_config(None), by_lang)
-    assert targets == [("symilar", ["python"], ["a.py"]),
-                       ("jscpd", ["shell", "typescript"], ["b.ts", "r.sh"])]
-    declared = codemetrics.load_config(json.dumps({"version": 1, "tools": {"python": "lizard",
-                                                                            "shell": None}}))
-    assert codemetrics.duplication_targets(declared, by_lang) == [
-        ("symilar", ["python"], ["a.py"]), ("jscpd", ["typescript"], ["b.ts"])]
+    assert targets == [("symilar", ["python"], ["a.py"]), ("jscpd", ["shell", "typescript"], ["b.ts", "r.sh"])]
+    declared = codemetrics.load_config(json.dumps({"version": 1, "tools": {"python": "lizard", "shell": None}}))
+    assert codemetrics.duplication_targets(declared, by_lang) == [("symilar", ["python"], ["a.py"]), ("jscpd", ["typescript"], ["b.ts"])]
 
 
 def test_to_relative_drops_paths_outside_the_work_tree(codemetrics):
@@ -104,17 +103,15 @@ def test_count_lines_skips_blank_lines(codemetrics):
 
 # ---------------- ランナーとコマンド ----------------
 
+
 def test_runner_pins_the_version_and_falls_back_to_path_only_without_uvx(codemetrics):
     """AC22: uvx があれば版を固定して起動し、無いときだけ PATH のコマンドを使う。"""
     both = {"uvx", "ruff", "npx", "jscpd"}
-    assert codemetrics.resolve_runner("ruff", lambda n: n in both or None) == (
-        "uvx", ["uvx", "--from", "ruff==0.16.9", "ruff"])
-    assert codemetrics.resolve_runner("complexipy", lambda n: n == "uvx" or None)[1][:3] == [
-        "uvx", "--from", "complexipy==8.0.1"]
+    assert codemetrics.resolve_runner("ruff", lambda n: n in both or None) == ("uvx", ["uvx", "--from", "ruff==0.16.9", "ruff"])
+    assert codemetrics.resolve_runner("complexipy", lambda n: n == "uvx" or None)[1][:3] == ["uvx", "--from", "complexipy==8.0.1"]
     assert codemetrics.resolve_runner("lizard", lambda n: n == "uvx" or None)[1][2] == "lizard==1.24.0"
     assert codemetrics.resolve_runner("symilar", lambda n: n == "uvx" or None)[1][2] == "pylint==4.0.9"
-    assert codemetrics.resolve_runner("jscpd", lambda n: n in both or None) == (
-        "npx", ["npx", "-y", "jscpd@4.3.0"])
+    assert codemetrics.resolve_runner("jscpd", lambda n: n in both or None) == ("npx", ["npx", "-y", "jscpd@4.3.0"])
     assert codemetrics.resolve_runner("ruff", lambda n: n == "ruff" or None) == ("path", ["ruff"])
     assert codemetrics.resolve_runner("ruff", lambda n: None) is None
 
@@ -132,18 +129,35 @@ def test_commands_keep_the_target_repository_unwritten(codemetrics):
 
 # ---------------- 出力の読み取り ----------------
 
-RUFF_SAMPLE = json.dumps([
-    {"code": "C901", "filename": "/w/work/src/a.py", "location": {"row": 3, "column": 5},
-     "message": "`check_new` is too complex (11 > 0)"},
-    {"code": "PLR0912", "filename": "/w/work/src/a.py", "location": {"row": 3, "column": 5},
-     "message": "Too many branches (29 > 0)"},
-    {"code": "PLR0913", "filename": "/w/work/src/a.py", "location": {"row": 3, "column": 5},
-     "message": "Too many arguments in function definition (2 > 0)"},
-    {"code": "C901", "filename": "/w/work/src/a.py", "location": {"row": 9, "column": 5},
-     "message": "`Box.run` is too complex (1 > 0)"},
-    {"code": "invalid-syntax", "filename": "/w/work/src/bad.py", "location": {"row": 1, "column": 1},
-     "message": "Expected `)`, found newline"},
-])
+RUFF_SAMPLE = json.dumps(
+    [
+        {
+            "code": "C901",
+            "filename": "/w/work/src/a.py",
+            "location": {"row": 3, "column": 5},
+            "message": "`check_new` is too complex (11 > 0)",
+        },
+        {"code": "PLR0912", "filename": "/w/work/src/a.py", "location": {"row": 3, "column": 5}, "message": "Too many branches (29 > 0)"},
+        {
+            "code": "PLR0913",
+            "filename": "/w/work/src/a.py",
+            "location": {"row": 3, "column": 5},
+            "message": "Too many arguments in function definition (2 > 0)",
+        },
+        {
+            "code": "C901",
+            "filename": "/w/work/src/a.py",
+            "location": {"row": 9, "column": 5},
+            "message": "`Box.run` is too complex (1 > 0)",
+        },
+        {
+            "code": "invalid-syntax",
+            "filename": "/w/work/src/bad.py",
+            "location": {"row": 1, "column": 1},
+            "message": "Expected `)`, found newline",
+        },
+    ]
+)
 
 SOURCE = """\
 import functools
@@ -177,8 +191,7 @@ def test_ruff_values_bind_by_path_and_def_line(codemetrics, codemetrics_read):
 
 
 def test_ruff_message_without_the_trailing_value_is_unreadable(codemetrics, codemetrics_read):
-    bad = json.dumps([{"code": "C901", "filename": "/w/work/a.py", "location": {"row": 1},
-                       "message": "`f` is too complex (11)"}])
+    bad = json.dumps([{"code": "C901", "filename": "/w/work/a.py", "location": {"row": 1}, "message": "`f` is too complex (11)"}])
     with pytest.raises(codemetrics_read.UnreadableOutput):
         codemetrics_read.parse_ruff(bad, ROOTS)
     with pytest.raises(codemetrics_read.UnreadableOutput):
@@ -190,8 +203,9 @@ def test_python_functions_reads_nothing_from_broken_syntax(codemetrics, codemetr
 
 
 def test_complexipy_names_use_dots(codemetrics, codemetrics_read):
-    text = json.dumps([{"complexity": 74, "file_name": "engine.py", "function_name": "Engine::run",
-                        "path": "src/engine.py", "refactor_plans": []}])
+    text = json.dumps(
+        [{"complexity": 74, "file_name": "engine.py", "function_name": "Engine::run", "path": "src/engine.py", "refactor_plans": []}]
+    )
     assert codemetrics_read.parse_complexipy(text, ROOTS) == {("src/engine.py", "Engine.run"): 74}
     with pytest.raises(codemetrics_read.UnreadableOutput):
         codemetrics_read.parse_complexipy(json.dumps([{"path": "a.py"}]), ROOTS)
@@ -200,7 +214,8 @@ def test_complexipy_names_use_dots(codemetrics, codemetrics_read):
 def test_lizard_csv_needs_eleven_columns(codemetrics, codemetrics_read):
     row = '21,35,268,2,22,"check_new@144-165@src/n.py","src/n.py","check_new","check_new( a )",144,165'
     assert codemetrics_read.parse_lizard(row + "\n", ROOTS) == [
-        {"path": "src/n.py", "symbol": "check_new", "cc": 35, "lines": 22, "role": "main"}]
+        {"path": "src/n.py", "symbol": "check_new", "cc": 35, "lines": 22, "role": "main"}
+    ]
     with pytest.raises(codemetrics_read.UnreadableOutput):
         codemetrics_read.parse_lizard("1,2,3\n", ROOTS)
 
@@ -247,15 +262,22 @@ def test_symilar_without_total_is_unreadable(codemetrics, codemetrics_read):
 
 def test_jscpd_report_and_missing_report(codemetrics, codemetrics_read):
     """jscpd の報告が無い（調べるファイルが 0 本）なら 0 箇所。読めない報告は `unreadable_output`。"""
-    report = json.dumps({
-        "statistics": {"total": {"lines": 4752, "sources": 27, "clones": 1, "duplicatedLines": 8}},
-        "duplicates": [{"format": "bash", "lines": 9,
-                        "firstFile": {"name": "/w/work/a.sh", "start": 30, "end": 38},
-                        "secondFile": {"name": "/w/work/b.sh", "start": 30, "end": 39}}]})
+    report = json.dumps(
+        {
+            "statistics": {"total": {"lines": 4752, "sources": 27, "clones": 1, "duplicatedLines": 8}},
+            "duplicates": [
+                {
+                    "format": "bash",
+                    "lines": 9,
+                    "firstFile": {"name": "/w/work/a.sh", "start": 30, "end": 38},
+                    "secondFile": {"name": "/w/work/b.sh", "start": 30, "end": 39},
+                }
+            ],
+        }
+    )
     parsed = codemetrics_read.parse_jscpd(report, ROOTS)
     assert parsed["sources"] == 27 and parsed["duplicated_lines"] == 8
-    assert parsed["clones"][0]["locations"] == [{"path": "a.sh", "start": 30, "end": 38},
-                                                {"path": "b.sh", "start": 30, "end": 39}]
+    assert parsed["clones"][0]["locations"] == [{"path": "a.sh", "start": 30, "end": 38}, {"path": "b.sh", "start": 30, "end": 39}]
     assert codemetrics_read.parse_jscpd(None, ROOTS)["clones"] == []
     with pytest.raises(codemetrics_read.UnreadableOutput):
         codemetrics_read.parse_jscpd("{", ROOTS)
@@ -264,14 +286,17 @@ def test_jscpd_report_and_missing_report(codemetrics, codemetrics_read):
 def test_file_metrics_come_from_the_collected_list(codemetrics, codemetrics_read):
     """関数の無いファイルも載る（ツールの出力からファイルを数えない）。読めなかったファイルは載せない。"""
     functions = [{"path": "src/a.py", "lines": 12}, {"path": "src/a.py", "lines": 40}]
-    rows = codemetrics_read.file_metrics(["src/a.py", "src/__init__.py", "src/bad.py"],
-                                    {"src/a.py": 90, "src/__init__.py": 1}, functions, {"src/bad.py"})
+    rows = codemetrics_read.file_metrics(
+        ["src/a.py", "src/__init__.py", "src/bad.py"], {"src/a.py": 90, "src/__init__.py": 1}, functions, {"src/bad.py"}
+    )
     assert rows == [
         {"path": "src/__init__.py", "lines": 1, "functions": 0, "max_function_lines": 0, "role": "main"},
-        {"path": "src/a.py", "lines": 90, "functions": 2, "max_function_lines": 40, "role": "main"}]
+        {"path": "src/a.py", "lines": 90, "functions": 2, "max_function_lines": 40, "role": "main"},
+    ]
 
 
 # ---------------- 時間 ----------------
+
 
 @pytest.mark.parametrize("budget", [30, 60, 7])
 def test_measure_timeout_comes_from_the_budget(timeline, budget):

@@ -1,4 +1,5 @@
 """危険フラグ（D1〜D5）の判定を、**実際の git リポジトリ**で確かめる（#933 の「危険フラグ」）。"""
+
 from __future__ import annotations
 
 import importlib
@@ -13,8 +14,7 @@ def danger(refactor):
 
 
 def _git(*args, cwd):
-    return subprocess.run(["git", *args], cwd=cwd, capture_output=True,
-                          text=True, check=True).stdout.strip()
+    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True).stdout.strip()
 
 
 def _write(repo, rel, text):
@@ -86,16 +86,14 @@ def test_d3_ignores_non_code_files_and_scope(danger, repo):
     _commit(repo)
     assert danger.d3(str(repo), ["src/refactor_lib/plan.py"], "run", SCOPE) == []
     # --scope の中（tests/）からの参照は外からの参照でない
-    assert danger.d3(str(repo), ["src/refactor_lib/plan.py"], "", ["src"]) == [
-        "refactor_lib import .*\\bplan\\b"]
+    assert danger.d3(str(repo), ["src/refactor_lib/plan.py"], "", ["src"]) == ["refactor_lib import .*\\bplan\\b"]
 
 
 def test_d3_qualified_symbol_and_entry(danger, repo):
     _write(repo, "app/use.py", "obj = Foo.run\n")
     _commit(repo)
     assert danger.d3(str(repo), ["src/refactor_lib/other.py"], "Foo.run", SCOPE) == ["Foo\\.run"]
-    assert danger.d3(str(repo), ["src/refactor_lib/__init__.py"], "", SCOPE) == [
-        "entry:src/refactor_lib/__init__.py"]
+    assert danger.d3(str(repo), ["src/refactor_lib/__init__.py"], "", SCOPE) == ["entry:src/refactor_lib/__init__.py"]
     # テストのファイルは探さない
     assert danger.d3(str(repo), ["tests/test_plan.py"], "", SCOPE) == []
 
@@ -124,11 +122,11 @@ def test_d4_name_or_symbol_in_limited_tests(danger, repo):
 
 
 def test_limited_test_files(danger, repo):
-    assert danger.limited_test_files_from_targets(
-        ["tests/test_plan.py::test_run", "tests/test_plan.py", "tests/x.py"]
-    ) == ["tests/test_plan.py", "tests/x.py"]
-    assert danger.limited_test_files_from_round_test("pytest tests -q", str(repo)) == [
-        "tests/test_plan.py"]
+    assert danger.limited_test_files_from_targets(["tests/test_plan.py::test_run", "tests/test_plan.py", "tests/x.py"]) == [
+        "tests/test_plan.py",
+        "tests/x.py",
+    ]
+    assert danger.limited_test_files_from_round_test("pytest tests -q", str(repo)) == ["tests/test_plan.py"]
     # 対象の語が無いコマンドは挙げられない（決定 21）
     assert danger.limited_test_files_from_round_test("make test", str(repo)) is None
 
@@ -144,6 +142,5 @@ def test_item_flags_combines(danger, repo):
     # other.py の名前は範囲テストに現れない → D4
     assert out == {"flags": ["D1", "D4", "D5"], "hits": []}
 
-    only = danger.item_flags(str(repo), item, [sha], ["src/refactor_lib/plan.py"],
-                             SCOPE, ["tests/test_plan.py"], False)
+    only = danger.item_flags(str(repo), item, [sha], ["src/refactor_lib/plan.py"], SCOPE, ["tests/test_plan.py"], False)
     assert only == {"flags": [], "hits": []}

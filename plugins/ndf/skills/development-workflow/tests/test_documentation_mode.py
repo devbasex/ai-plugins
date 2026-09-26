@@ -4,6 +4,7 @@
 並びは変わらない。このチェックは新しい値だけを見て、既存の値が動いていないことも同時に見る。
 
 """
+
 from __future__ import annotations
 
 import re
@@ -27,7 +28,11 @@ def test_the_existing_modes_are_unchanged() -> None:
     found = re.search(r"WF_MODES=\$'([^']*)'", body)
     assert found, "モードの一覧を読み取れない"
     assert found.group(1).split("\\t") == [
-        "light", "operation", "legacy-refactor", "standard", MODE,
+        "light",
+        "operation",
+        "legacy-refactor",
+        "standard",
+        MODE,
     ]
 
 

@@ -1,4 +1,5 @@
 """収束ループの drive の部品（lib/loop_drive.py・#1142 の L0）。2 つの drive.py の同じ本体と同じ振る舞いを持つ。"""
+
 from __future__ import annotations
 
 import importlib.util
@@ -26,14 +27,17 @@ def test_parse_vars_reads_quoted_values_and_skips_noise():
     assert loop_drive.parse_vars(text) == {"A": "1", "B": "x y", "C": ""}
 
 
-@pytest.mark.parametrize("state, want", [
-    ({"final": "approved", "sweep": {"verified": True, "remaining_open": 0, "commit": None}}, "approved"),
-    ({"final": "approved", "sweep": {"verified": True, "remaining_open": 1, "commit": None}}, "unverified"),
-    ({"final": "approved", "sweep": {"verified": True, "remaining_open": 0, "commit": "abc"}}, "unverified"),
-    ({"final": "approved"}, "unverified"),
-    ({"final": "max_rounds"}, "max_rounds"),
-    ({}, "unknown"),
-])
+@pytest.mark.parametrize(
+    "state, want",
+    [
+        ({"final": "approved", "sweep": {"verified": True, "remaining_open": 0, "commit": None}}, "approved"),
+        ({"final": "approved", "sweep": {"verified": True, "remaining_open": 1, "commit": None}}, "unverified"),
+        ({"final": "approved", "sweep": {"verified": True, "remaining_open": 0, "commit": "abc"}}, "unverified"),
+        ({"final": "approved"}, "unverified"),
+        ({"final": "max_rounds"}, "max_rounds"),
+        ({}, "unknown"),
+    ],
+)
 def test_review_status(state, want):
     assert loop_drive.review_status(state) == want
 

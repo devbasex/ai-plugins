@@ -4,6 +4,7 @@ conftest.py へ置くと、複数の Skill のテストを同時に実行した�
 モジュール名が衝突し、別の Skill の conftest が解決されてしまう。直接 import する
 補助はこの固有名のモジュールへ置く。
 """
+
 from __future__ import annotations
 
 import os

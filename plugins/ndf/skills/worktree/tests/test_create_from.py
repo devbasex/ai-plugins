@@ -3,6 +3,7 @@
 ミッションのブランチ（`mission/<名前>`）は宣言の base_branch（develop）から切り、課題の
 作業ツリーは `--from` にミッションのブランチを渡して切る。宣言の base_branch は変えない。
 """
+
 from __future__ import annotations
 
 import json
@@ -19,7 +20,11 @@ def run(args: list[str], cwd: Path) -> subprocess.CompletedProcess:
     env = os.environ.copy()
     env["LC_ALL"] = "C"
     return subprocess.run(
-        ["bash", str(SETUP), *args], cwd=str(cwd), env=env, capture_output=True, text=True,
+        ["bash", str(SETUP), *args],
+        cwd=str(cwd),
+        env=env,
+        capture_output=True,
+        text=True,
     )
 
 

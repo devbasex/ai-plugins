@@ -5,6 +5,7 @@
 優先順位、指定先に対象 ID が無いときの現在地へのフォールバック、環境変数が
 未設定のときの経路を、公開入口 `paths.load_state(id)` を実際に呼んで固定する。
 """
+
 from __future__ import annotations
 
 import json
@@ -48,16 +49,12 @@ def test_the_env_dir_wins_when_both_have_the_target(paths, tmp_path, monkeypatch
     assert state["phase"] == "from-env"
 
 
-def test_it_falls_back_to_the_cwd_when_the_env_dir_lacks_the_target(
-    paths, tmp_path, monkeypatch
-):
+def test_it_falls_back_to_the_cwd_when_the_env_dir_lacks_the_target(paths, tmp_path, monkeypatch):
     """現状固定: 指定先に対象 ID が無ければ現在地の .cross_refactoring を読む。"""
     env_dir = tmp_path / "env"
     env_dir.mkdir(parents=True, exist_ok=True)
     # 指定先には別 ID の状態だけを置く（対象 ID は無い）
-    (env_dir / "cross-refactoring-rf999-state.json").write_text(
-        json.dumps({"id": 999, "phase": "different"}), encoding="utf-8"
-    )
+    (env_dir / "cross-refactoring-rf999-state.json").write_text(json.dumps({"id": 999, "phase": "different"}), encoding="utf-8")
 
     cwd = tmp_path / "cwd"
     cwd.mkdir()
@@ -87,9 +84,7 @@ def test_it_uses_the_cwd_when_the_env_var_is_unset(paths, tmp_path, monkeypatch)
     assert state["phase"] == "from-cwd"
 
 
-def test_load_state_exits_4_when_the_target_is_missing(
-    paths, tmp_path, monkeypatch, capsys
-):
+def test_load_state_exits_4_when_the_target_is_missing(paths, tmp_path, monkeypatch, capsys):
     """現状固定: 指定先と現在地のどちらにも対象 ID が無ければ停止する。"""
     env_dir = tmp_path / "env"
     env_dir.mkdir()

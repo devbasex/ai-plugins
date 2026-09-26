@@ -1,4 +1,5 @@
 """参加者の決め方と、参加者ごとの結果の読み方（#1142 の C2）。"""
+
 from __future__ import annotations
 
 import argparse
@@ -49,8 +50,7 @@ def _apply_resume_args_block(st: dict[str, Any], args: argparse.Namespace) -> bo
         if st.get("only") is not None:
             old = st.get("only")
             st["only"] = None
-            st.setdefault("resume_changes", []).append(
-                {"at": statefile.now(), "field": "only", "from": old, "to": None})
+            st.setdefault("resume_changes", []).append({"at": statefile.now(), "field": "only", "from": old, "to": None})
             review_lib.info(f"↻ only: {old} → None")
 
     for line in statefile.apply_resume_args(st, args_copy, REVIEW_RESUME_FIELDS):
@@ -68,16 +68,14 @@ def _apply_resume_args_block(st: dict[str, Any], args: argparse.Namespace) -> bo
         rebuild = argparse.Namespace(
             only=st.get("only"),
             include=include_eff,
-            exclude=(exclude if exclude is not None
-                     else assignment.recorded_exclusions(recorded, include_eff, st.get("only"))),
-            require_all=(args.require_all if getattr(args, "require_all", None) is not None
-                         else bool(recorded.get("require_all"))),
+            exclude=(exclude if exclude is not None else assignment.recorded_exclusions(recorded, include_eff, st.get("only"))),
+            require_all=(args.require_all if getattr(args, "require_all", None) is not None else bool(recorded.get("require_all"))),
         )
         participants = _resolve_reviewers(host, rebuild)
         st["participants"] = participants
         st.setdefault("resume_changes", []).append(
-            {"at": statefile.now(), "field": "participants",
-             "from": old_participants, "to": participants})
+            {"at": statefile.now(), "field": "participants", "from": old_participants, "to": participants}
+        )
 
     return len(st.get("resume_changes") or []) > before
 
@@ -125,8 +123,7 @@ def _round_reviewers(st: dict[str, Any], round_no: int) -> list[str]:
     if host:
         # **`default_pool(host)` を呼ばない。** `host` だけを持つ状態ファイルの担当は、
         # ホストを除く全ランタイムから選んでいた。その担当を保つため、この母集合を式で持つ。
-        return assignment.review_seats(
-            max(round_no, 1), [r for r in assignment.ALL_RUNTIMES if r != host], [])
+        return assignment.review_seats(max(round_no, 1), [r for r in assignment.ALL_RUNTIMES if r != host], [])
     return list(LEGACY_AGENTS)
 
 
@@ -184,18 +181,23 @@ def _resolve_reviewers(host: str, args: argparse.Namespace) -> dict[str, Any]:
     try:
         pool = assignment.default_pool(host)
         resolved = assignment.resolve_participants(
-            pool, host=host, include=include or [], exclude=exclude or [], only=only,
-            probe=probe, require_all=bool(getattr(args, "require_all", None)),
+            pool,
+            host=host,
+            include=include or [],
+            exclude=exclude or [],
+            only=only,
+            probe=probe,
+            require_all=bool(getattr(args, "require_all", None)),
         )
     except assignment.AssignmentError as e:
         review_lib.die(str(e), code=1)
         raise
     available = resolved.available
-    review_lib.info(f"ホスト: {host} / 母集合: {' / '.join(pool)}"
-         f" / 使える者: {' / '.join(available) or 'なし'}")
+    review_lib.info(f"ホスト: {host} / 母集合: {' / '.join(pool)} / 使える者: {' / '.join(available) or 'なし'}")
     if resolved.ignored_exclude:
-        review_lib.info(f"ℹ --exclude {','.join(resolved.ignored_exclude)} は既定の母集合に無いため"
-             f"無視しました（母集合: {', '.join(pool)}）")
+        review_lib.info(
+            f"ℹ --exclude {','.join(resolved.ignored_exclude)} は既定の母集合に無いため無視しました（母集合: {', '.join(pool)}）"
+        )
     for name, reason in resolved.unavailable.items():
         review_lib.info(f"⚠ {name} を担当から外しました（{reason}）")
 
@@ -205,9 +207,12 @@ def _resolve_reviewers(host: str, args: argparse.Namespace) -> dict[str, Any]:
     # 担当が席に座ると、レビューが行われないまま収束する。埋め合わせは 1 者指定では
     # 行わないため（決定 9）、ここで止めるほかにない。
     if only is not None and not available:
-        review_lib.die(f"1 者指定の {only} が確認を通りません"
+        review_lib.die(
+            f"1 者指定の {only} が確認を通りません"
             f"（{resolved.unavailable.get(only, '')}）。"
-            f"{only} で認証し直すか、1 者指定を外して再実行してください", code=1)
+            f"{only} で認証し直すか、1 者指定を外して再実行してください",
+            code=1,
+        )
     if only is None and not available:
         review_lib.die(f"使える者がいません: 母集合 {' / '.join(pool)} の全員が確認を通りません", code=1)
     if only is None and len(available) == 1:
@@ -251,26 +256,24 @@ def _agent_intent(round_entry: dict[str, Any], agent: str, only: str | None) -> 
 
 
 def _no_result_agents(
-    round_entry: dict[str, Any], only: str | None,
+    round_entry: dict[str, Any],
+    only: str | None,
     reviewers: list[str] | None = None,
 ) -> list[str]:
     """そのラウンドで、起動したのに使える結果が残らなかったレビュアーを返す。"""
-    return [
-        a
-        for a in (reviewers or AGENTS)
-        if not _skipped_by_only(a, only) and _agent_intent(round_entry, a, only) == posts.NO_RESULT
-    ]
+    return [a for a in (reviewers or AGENTS) if not _skipped_by_only(a, only) and _agent_intent(round_entry, a, only) == posts.NO_RESULT]
 
 
 def _round_passes(
-    round_entry: dict[str, Any], only: str | None,
+    round_entry: dict[str, Any],
+    only: str | None,
     reviewers: list[str] | None = None,
 ) -> bool:
     """そのラウンドで新しく投稿された指摘だけを見た pass 判定。
 
     引き継いだ指摘はここでは見ない（`cmd_judge` が別に扱う）。
     """
-    for agent in (reviewers or AGENTS):
+    for agent in reviewers or AGENTS:
         if _skipped_by_only(agent, only):
             continue
         entry = round_entry.get(agent) or {}

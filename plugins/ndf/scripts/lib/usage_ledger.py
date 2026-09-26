@@ -14,6 +14,7 @@
 
 ライブラリなので、標準ライブラリとライブラリだけを import する（I1）。
 """
+
 from __future__ import annotations
 
 import functools
@@ -51,8 +52,9 @@ def ledger_dir(env: Optional[dict] = None) -> Path:
 def repo_key(root: str) -> str:
     """origin の URL から `<owner>__<repo>`。決められなければ `unknown`。"""
     try:
-        url = subprocess.run(["git", "config", "--get", "remote.origin.url"], cwd=root,
-                             capture_output=True, text=True, timeout=10).stdout.strip()
+        url = subprocess.run(
+            ["git", "config", "--get", "remote.origin.url"], cwd=root, capture_output=True, text=True, timeout=10
+        ).stdout.strip()
     except (OSError, subprocess.SubprocessError):
         return UNKNOWN
     m = re.search(r"([^/:]+)/([^/]+?)(?:\.git)?/?$", url)
@@ -101,6 +103,7 @@ def main_model(model_usage: Optional[dict]) -> str:
 @dataclass
 class UsageRecord:
     """帳簿の 1 行。空を許さない列は `at`・`ndf_version`・`source`・`kind`・`usage`。"""
+
     source: str
     kind: str
     usage: dict = field(default_factory=dict)
@@ -122,14 +125,24 @@ class UsageRecord:
             self.model = main_model(self.model_usage)
 
     @classmethod
-    def from_claude(cls, data: dict, *, source: str, kind: str, plan: str = "", step: str = "",
-                    seconds: Optional[float] = None) -> "UsageRecord":
+    def from_claude(
+        cls, data: dict, *, source: str, kind: str, plan: str = "", step: str = "", seconds: Optional[float] = None
+    ) -> "UsageRecord":
         """`claude -p --output-format json` の結果の dict から作る。"""
         data = data if isinstance(data, dict) else {}
         mu = data.get("modelUsage")
-        return cls(source=source, kind=kind, usage=data.get("usage") or {}, plan=plan, step=step,
-                   model_usage=mu if isinstance(mu, dict) else None, cost_usd=data.get("total_cost_usd"),
-                   turns=data.get("num_turns"), seconds=seconds, session_id=data.get("session_id"))
+        return cls(
+            source=source,
+            kind=kind,
+            usage=data.get("usage") or {},
+            plan=plan,
+            step=step,
+            model_usage=mu if isinstance(mu, dict) else None,
+            cost_usd=data.get("total_cost_usd"),
+            turns=data.get("num_turns"),
+            seconds=seconds,
+            session_id=data.get("session_id"),
+        )
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), ensure_ascii=False, sort_keys=True)

@@ -10,6 +10,7 @@
 
 使う側は `deps.require("yamlio")` を先に呼ぶ。
 """
+
 from __future__ import annotations
 
 import io
@@ -24,9 +25,9 @@ class YamlError(ValueError):
 
 
 class FrontMatter(NamedTuple):
-    raw: str          # 区切りの行の間の YAML の字面
-    body: str         # 閉じの区切りの次の行からの本文
-    body_line: int    # 本文の最初の行の番号（0 始まり）
+    raw: str  # 区切りの行の間の YAML の字面
+    body: str  # 閉じの区切りの次の行からの本文
+    body_line: int  # 本文の最初の行の番号（0 始まり）
 
 
 def _yaml() -> YAML:
@@ -63,7 +64,7 @@ def split_front_matter(text: str) -> FrontMatter | None:
         return None
     for k in range(1, len(lines)):
         if lines[k].rstrip("\r\n").rstrip() in ("---", "..."):
-            return FrontMatter("".join(lines[1:k]), "".join(lines[k + 1:]), k + 1)
+            return FrontMatter("".join(lines[1:k]), "".join(lines[k + 1 :]), k + 1)
     return None
 
 

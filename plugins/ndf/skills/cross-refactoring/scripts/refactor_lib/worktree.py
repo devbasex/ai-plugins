@@ -1,4 +1,5 @@
 """コミットの取り消しと積み直し、worktree の未コミットの変更の掃除。"""
+
 from __future__ import annotations
 
 import pathlib
@@ -9,9 +10,7 @@ from . import die, info
 from .paths import git_out
 
 
-def revert_item_commits(
-    state: dict[str, Any], item: dict[str, Any], dry_run: bool = False
-) -> int:
+def revert_item_commits(state: dict[str, Any], item: dict[str, Any], dry_run: bool = False) -> int:
     """改善項目のコミットを取り消し、取り消した件数を返す。
 
     **新しいコミットから順に戻す。** 逆順にすると後続の取り消しが競合する。
@@ -29,9 +28,7 @@ def revert_item_commits(
         return 0
 
     work = state["worktrees"]["work"]
-    shas = _order_newest_first(
-        work, [s for s in (item.get("commits") or []) if isinstance(s, str) and s]
-    )
+    shas = _order_newest_first(work, [s for s in (item.get("commits") or []) if isinstance(s, str) and s])
     if dry_run:
         for sha in shas:
             info(f"（dry-run）git revert --no-edit {sha}")
@@ -48,13 +45,10 @@ def revert_item_commits(
 def reset_hard(work: str, sha: Optional[str]) -> None:
     """着手前の HEAD へ戻す。半端な履歴を Pull Request に残さないための後始末。"""
     if sha:
-        subprocess.run(["git", "reset", "--hard", sha], cwd=work,
-                       capture_output=True, text=True)
+        subprocess.run(["git", "reset", "--hard", sha], cwd=work, capture_output=True, text=True)
 
 
-def revert_range(
-    work: str, ordered: list[str], before: Optional[str], prefix: str = ""
-) -> None:
+def revert_range(work: str, ordered: list[str], before: Optional[str], prefix: str = "") -> None:
     """範囲を**新しい順に**全て取り消す。失敗したら着手前へ戻して中断する。
 
     範囲全体を新しい順にたどる取り消しは、履歴をそのまま逆再生するだけなので
@@ -63,16 +57,14 @@ def revert_range(
     for sha in ordered:
         r = subprocess.run(
             ["git", "revert", "--no-edit", sha],
-            cwd=work, capture_output=True, text=True,
+            cwd=work,
+            capture_output=True,
+            text=True,
         )
         if r.returncode != 0:
-            subprocess.run(["git", "revert", "--abort"], cwd=work,
-                           capture_output=True, text=True)
+            subprocess.run(["git", "revert", "--abort"], cwd=work, capture_output=True, text=True)
             reset_hard(work, before)
-            die(
-                f"{prefix}コミット {sha} を取り消せませんでした: {r.stderr.strip()[:400]}"
-                f"（HEAD を {before} へ戻しました）"
-            )
+            die(f"{prefix}コミット {sha} を取り消せませんでした: {r.stderr.strip()[:400]}（HEAD を {before} へ戻しました）")
 
 
 def replay_commits(work: str, shas: list[str]) -> Optional[dict[str, str]]:
@@ -85,11 +77,12 @@ def replay_commits(work: str, shas: list[str]) -> Optional[dict[str, str]]:
     for sha in shas:
         r = subprocess.run(
             ["git", "cherry-pick", "--allow-empty", sha],
-            cwd=work, capture_output=True, text=True,
+            cwd=work,
+            capture_output=True,
+            text=True,
         )
         if r.returncode != 0:
-            subprocess.run(["git", "cherry-pick", "--abort"], cwd=work,
-                           capture_output=True, text=True)
+            subprocess.run(["git", "cherry-pick", "--abort"], cwd=work, capture_output=True, text=True)
             info(f"⚠ {sha[:7]} を積み直せませんでした: {r.stderr.strip()[:200]}")
             return None
         mapping[sha] = git_out(work, ["rev-parse", "HEAD"]) or sha
@@ -107,11 +100,8 @@ def _order_newest_first(work: str, shas: list[str]) -> list[str]:
     history = git_out(work, ["rev-list", "HEAD"])
     if history is None:
         return list(shas)
-    rank = {sha: i for i, sha in enumerate(history.split())}   # 0 が最も新しい
-    resolved = {
-        s: (git_out(work, ["rev-parse", "--verify", f"{s}^{{commit}}"]) or s)
-        for s in shas
-    }
+    rank = {sha: i for i, sha in enumerate(history.split())}  # 0 が最も新しい
+    resolved = {s: (git_out(work, ["rev-parse", "--verify", f"{s}^{{commit}}"]) or s) for s in shas}
     return sorted(shas, key=lambda s: rank.get(resolved[s], len(rank)))
 
 
@@ -124,7 +114,8 @@ def _worktree_changes(work: str) -> dict[str, str]:
     # `core.quotePath` の既定（true）では、非 ASCII を含むパスが `"` で囲まれ
     # `\343` の形へエスケープされる。そのまま `git add` へ渡すと見つからない。
     out = git_out(
-        work, ["-c", "core.quotePath=false", "status", "--porcelain", "-uall"],
+        work,
+        ["-c", "core.quotePath=false", "status", "--porcelain", "-uall"],
         strip=False,
     )
     changes: dict[str, str] = {}
@@ -132,7 +123,7 @@ def _worktree_changes(work: str) -> dict[str, str]:
         if len(line) < 4:
             continue
         path = line[3:]
-        if " -> " in path:            # 改名。移動先だけを対象にする
+        if " -> " in path:  # 改名。移動先だけを対象にする
             path = path.split(" -> ", 1)[1]
         changes[path.strip('"')] = line[:2]
     return changes
@@ -149,9 +140,7 @@ def _control_prefix(state: dict[str, Any], work: str) -> Optional[str]:
     if not tmp_dir:
         return None
     try:
-        relative = pathlib.Path(tmp_dir).resolve().relative_to(
-            pathlib.Path(work).resolve()
-        )
+        relative = pathlib.Path(tmp_dir).resolve().relative_to(pathlib.Path(work).resolve())
     except ValueError:
         return None
     return f"{relative}/"
@@ -160,10 +149,7 @@ def _control_prefix(state: dict[str, Any], work: str) -> Optional[str]:
 def _dirty_paths(state: dict[str, Any], work: str) -> list[str]:
     """作業ツリーの未コミット変更のパス。制御用ディレクトリは除く。"""
     control = _control_prefix(state, work)
-    return sorted(
-        path for path in _worktree_changes(work)
-        if not (control and path.startswith(control))
-    )
+    return sorted(path for path in _worktree_changes(work) if not (control and path.startswith(control)))
 
 
 def _discard_worktree_changes(work: str) -> None:
@@ -201,10 +187,7 @@ def discard_impl_leftovers(state: dict[str, Any], work: str) -> None:
     shown = "、".join(dirty[:5])
     more = f" ほか {len(dirty) - 5} 件" if len(dirty) > 5 else ""
     _discard_worktree_changes(work)
-    info(
-        f"🧹 コミットされなかった変更を捨てました（{shown}{more}）。"
-        "検証を受けていないため公開しません"
-    )
+    info(f"🧹 コミットされなかった変更を捨てました（{shown}{more}）。検証を受けていないため公開しません")
 
 
 def _require_clean_worktree(state: dict[str, Any], work: str) -> None:

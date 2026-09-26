@@ -2,6 +2,7 @@
 
 駆動が呼ぶスクリプトは `call` を差し替えて模す。gh と claude は PATH の先頭に置いた偽物。実機の claude は起動しない。
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -43,14 +44,22 @@ def run_main(mod, argv, capsys):
 
 # --- cross-review ---------------------------------------------------------------
 
+
 class FakeReview:
     """state.py などの応答を模す。judges は判定の終了コードを順に返す。"""
 
     def __init__(self, tmp: Path, judges, rotate=False):
         self.tmp, self.judges, self.rotate = tmp, list(judges), rotate
         self.calls = []
-        self.state = {"repo": "o/r", "current_pr": 5, "worktree_path": str(tmp / "wt"), "head_branch": "feat/x",
-                      "base_branch": "develop", "rounds": [], "pr_history": [{"pr": 5}]}
+        self.state = {
+            "repo": "o/r",
+            "current_pr": 5,
+            "worktree_path": str(tmp / "wt"),
+            "head_branch": "feat/x",
+            "base_branch": "develop",
+            "rounds": [],
+            "pr_history": [{"pr": 5}],
+        }
         self.save()
 
     def save(self):
@@ -68,10 +77,14 @@ class FakeReview:
                 if not self.judges:
                     return 1, ""
                 n = len(self.state["rounds"]) + 1
-                self.state["rounds"].append({"round": n, "reviewers": ["codex", "kiro"],
-                                             "codex": {"intent": "REQUEST_CHANGES", "comments": 3,
-                                                       "review_url": "https://x/r1"},
-                                             "kiro": {"intent": "APPROVE", "comments": 1}})
+                self.state["rounds"].append(
+                    {
+                        "round": n,
+                        "reviewers": ["codex", "kiro"],
+                        "codex": {"intent": "REQUEST_CHANGES", "comments": 3, "review_url": "https://x/r1"},
+                        "kiro": {"intent": "APPROVE", "comments": 1},
+                    }
+                )
                 self.save()
                 return 0, f"ROUND={n}\nREVIEWERS='codex kiro'\nREVIEWERS_CSV=codex,kiro\n"
             if sub == "judge":
@@ -110,7 +123,13 @@ def test_review_drive_pauses_for_fix_then_sweep_then_finishes(tmp_path, monkeypa
     assert item["pause"] == "fix" and item["round"] == 1
     assert item["cwd"] == str(tmp_path / "wt")  # 直しの worker の作業場所は cross-review の worktree
     prompt = Path(item["prompt_file"]).read_text()
-    assert "/ndf:fix 5`" in prompt and "--defer-nit" not in prompt and "CROSS_REVIEW_STATE=" in prompt and str(tmp_path / "wt") in prompt and "https://x/r1" in prompt
+    assert (
+        "/ndf:fix 5`" in prompt
+        and "--defer-nit" not in prompt
+        and "CROSS_REVIEW_STATE=" in prompt
+        and str(tmp_path / "wt") in prompt
+        and "https://x/r1" in prompt
+    )
     for tool in ("pint", "larastan", "phpstan", "ruff", "eslint", "mypy"):
         assert tool not in prompt
     assert "02-fix-and-rotation" not in prompt  # 修正の手順は /ndf:fix が持ち、雛形を読ませない
@@ -131,8 +150,7 @@ def test_review_drive_pauses_for_fix_then_sweep_then_finishes(tmp_path, monkeypa
     code, out = run_main(cr, ["5"], capsys)
     assert code == 0 and out["status"] == "ok"
     m = out["metrics"]
-    assert (m["rounds"], m["findings"], m["fixed"], m["rejected"], m["unresolved"], m["final"]) == \
-        (2, 8, 2, 1, 1, "approved")
+    assert (m["rounds"], m["findings"], m["fixed"], m["rejected"], m["unresolved"], m["final"]) == (2, 8, 2, 1, 1, "approved")
     assert any(c[0] == "result_posts.py" for c in fake.calls)
     assert Path(out["items"][0]["report"]).read_text() == "## 報告\n"
 
@@ -191,6 +209,7 @@ def test_pause_table_gives_exit_codes():
 
 # --- cross-refactoring ----------------------------------------------------------
 
+
 class FakeRefactor:
     def __init__(self, tmp: Path, gate: str, rc: dict | None = None):
         self.tmp, self.gate, self.rc = tmp, gate, rc or {}
@@ -207,8 +226,10 @@ class FakeRefactor:
             if sub in self.rc:
                 return self.rc[sub], ""
             if sub == "init":
-                return 0, (f"ID=7\nTMP_DIR={self.tmp}\nPHASE=propose\nIMPL=codex\nRUNTIMES='codex kiro'\n"
-                           f"RUNTIMES_CSV=codex,kiro\nWORK={self.tmp}\n")
+                return 0, (
+                    f"ID=7\nTMP_DIR={self.tmp}\nPHASE=propose\nIMPL=codex\nRUNTIMES='codex kiro'\n"
+                    f"RUNTIMES_CSV=codex,kiro\nWORK={self.tmp}\n"
+                )
             if sub == "merge-proposals":
                 return 2, ""  # 候補 0 件 → 最終ゲートへ
             if sub == "final-gate":
@@ -363,8 +384,10 @@ sys.exit(23)
     s, text = run_plan(tmp_path, [{"id": "refactor", "type": "drive", "cmd": f"{PY} {outer}", "next": "end"}])
     assert "結果: 完了" in text
     # 外側の metrics に、入れ子の駆動の metrics を inner として足す（#1142 の不足 d の入れ子）
-    assert s.state.results["refactor"]["counts"] == {"review_status": "approved", "inner": {
-        "findings": 3, "review_status": "approved", "rounds": 2, "unresolved": 0}}
+    assert s.state.results["refactor"]["counts"] == {
+        "review_status": "approved",
+        "inner": {"findings": 3, "review_status": "approved", "rounds": 2, "unresolved": 0},
+    }
 
 
 def test_drive_step_resolves_known_drive(tmp_path):
@@ -382,8 +405,7 @@ open(out, "w").write("## 作業の報告\\n- 結果: 完了\\n" + a[1] + "\\n" +
 print(json.dumps({"tool": "external-ai", "status": "ok", "summary": "ok", "items": [], "metrics": {}}))
 """)
     monkeypatch.setattr(paths, "EXTERNAL_AI", fake)
-    s, text = run_plan(tmp_path, [{"id": "impl", "type": "work", "runtime": "codex", "prompt": "実装する",
-                                   "next": "end"}])
+    s, text = run_plan(tmp_path, [{"id": "impl", "type": "work", "runtime": "codex", "prompt": "実装する", "next": "end"}])
     assert "結果: 完了" in text
     assert "codex" in s.state.results["impl"]["text"]
     assert "作業の報告" in (tmp_path / "state" / "impl-prompt.md").read_text()
@@ -391,8 +413,17 @@ print(json.dumps({"tool": "external-ai", "status": "ok", "summary": "ok", "items
 
 def test_new_check_with_scope_uses_drive_steps(tmp_path):
     import argparse
-    a = argparse.Namespace(pr=998, scope=["plugins/ndf/scripts"], issue=[870], mode="standard",
-                           worktree=str(tmp_path), base="main", test_cmd="pytest {paths}", test_all=".")
+
+    a = argparse.Namespace(
+        pr=998,
+        scope=["plugins/ndf/scripts"],
+        issue=[870],
+        mode="standard",
+        worktree=str(tmp_path),
+        base="main",
+        test_cmd="pytest {paths}",
+        test_all=".",
+    )
     steps = {s["id"]: s for s in templates.plan_check(a)["steps"]}
     assert steps["refactor"]["type"] == "drive" and "--workflow-step" in steps["refactor"]["args"]
     assert steps["review"]["type"] == "drive" and steps["review"]["drive"] == "cross-review"

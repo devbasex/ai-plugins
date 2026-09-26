@@ -13,6 +13,7 @@
 | インラインが 0 件でも結果なしにならない | AC17 |
 | 指摘のファイルが無ければ投稿を 0 件にする | AC3 |
 """
+
 from __future__ import annotations
 
 import argparse
@@ -39,22 +40,18 @@ def _seed(tmp_dir: pathlib.Path, **over) -> None:
         "viewer_login": ACTOR,
         "is_own_pr": False,
         "event_downgrade": False,
-        "rounds": [{"round": ROUND, "pr": PR, "head_sha": SHA,
-                    "started_at": "2026-09-22T00:00:00+00:00"}],
+        "rounds": [{"round": ROUND, "pr": PR, "head_sha": SHA, "started_at": "2026-09-22T00:00:00+00:00"}],
         "final": None,
     }
     state.update(over)
-    (tmp_dir / f"cross-review-pr{PR}-state.json").write_text(
-        json.dumps(state), encoding="utf-8")
+    (tmp_dir / f"cross-review-pr{PR}-state.json").write_text(json.dumps(state), encoding="utf-8")
 
 
 def _note(tmp_dir: pathlib.Path, comments: list[dict] | None = None) -> pathlib.Path:
     if comments is None:
-        comments = [{"path": "a.py", "line": 12, "body": INLINE_TEXT,
-                     "severity": "major"}]
+        comments = [{"path": "a.py", "line": 12, "body": INLINE_TEXT, "severity": "major"}]
     path = tmp_dir / f"{AGENT}-review-pr{PR}-round{ROUND}-payload.json"
-    path.write_text(json.dumps({"summary": SUMMARY_TEXT, "comments": comments},
-                               ensure_ascii=False), encoding="utf-8")
+    path.write_text(json.dumps({"summary": SUMMARY_TEXT, "comments": comments}, ensure_ascii=False), encoding="utf-8")
     return path
 
 
@@ -71,8 +68,7 @@ def _args() -> argparse.Namespace:
 
 
 def _state(tmp_dir: pathlib.Path) -> dict:
-    return json.loads(
-        (tmp_dir / f"cross-review-pr{PR}-state.json").read_text(encoding="utf-8"))
+    return json.loads((tmp_dir / f"cross-review-pr{PR}-state.json").read_text(encoding="utf-8"))
 
 
 def _entry(tmp_dir: pathlib.Path) -> dict:
@@ -85,14 +81,15 @@ def tmp_dir(monkeypatch, tmp_path, state_mod):
     return tmp_path
 
 
-_ACCEPT = {"match": f"pulls/{PR}/reviews", "stdout": json.dumps(
-    {"id": 555, "html_url": f"https://github.com/o/r/pull/{PR}#pullrequestreview-555"})}
+_ACCEPT = {
+    "match": f"pulls/{PR}/reviews",
+    "stdout": json.dumps({"id": 555, "html_url": f"https://github.com/o/r/pull/{PR}#pullrequestreview-555"}),
+}
 _NO_PRIOR = {"match": f"pulls/{PR}/reviews?", "stdout": "[]"}
 _URL = f"https://github.com/o/r/pull/{PR}#pullrequestreview-555"
 
 
-def test_the_take_in_posts_the_review_and_records_the_response(
-        tmp_dir, state_mod, fake_gh, capsys) -> None:
+def test_the_take_in_posts_the_review_and_records_the_response(tmp_dir, state_mod, fake_gh, capsys) -> None:
     _seed(tmp_dir)
     _note(tmp_dir)
     _result(tmp_dir)
@@ -101,8 +98,8 @@ def test_the_take_in_posts_the_review_and_records_the_response(
     review_lib.commands.read_result.cmd_read_result(_args())
 
     entry = _entry(tmp_dir)
-    assert entry["review_url"] == _URL         # 送信の応答から取る（AC15）
-    assert entry["comments"] == 1              # 送れたインラインの数
+    assert entry["review_url"] == _URL  # 送信の応答から取る（AC15）
+    assert entry["comments"] == 1  # 送れたインラインの数
     assert entry["intent"] == "REQUEST_CHANGES"
     assert entry["queued"] is False
     out = capsys.readouterr().out
@@ -137,14 +134,12 @@ def test_the_body_is_sent_from_the_note(tmp_dir, state_mod, fake_gh) -> None:
 
     sent = [c for c in fake_gh.calls() if "--method POST" in " ".join(c["argv"])]
     body = json.loads(sent[-1]["stdin"])
-    assert body["body"].splitlines()[0] == \
-        f"## 🤖 cross-review | round {ROUND} | {AGENT} | REQUEST_CHANGES"
+    assert body["body"].splitlines()[0] == f"## 🤖 cross-review | round {ROUND} | {AGENT} | REQUEST_CHANGES"
     assert body["commit_id"] == SHA
     assert body["comments"][0]["path"] == "a.py"
 
 
-def test_a_second_take_in_does_not_add_a_second_review(
-        tmp_dir, state_mod, fake_gh) -> None:
+def test_a_second_take_in_does_not_add_a_second_review(tmp_dir, state_mod, fake_gh) -> None:
     """投稿の後・記録の前で止めた実行をやり直しても、レビューは増えない（AC12・AC20）。"""
     _seed(tmp_dir)
     _note(tmp_dir)
@@ -156,14 +151,25 @@ def test_a_second_take_in_does_not_add_a_second_review(
     # 記録を消して、投稿だけが残った状態を作る。
     st = _state(tmp_dir)
     st["rounds"][-1].pop(AGENT, None)
-    (tmp_dir / f"cross-review-pr{PR}-state.json").write_text(
-        json.dumps(st), encoding="utf-8")
-    fake_gh.set_rules([
-        {"match": f"pulls/{PR}/reviews?", "stdout": json.dumps([{
-            "user": {"login": ACTOR}, "state": "CHANGES_REQUESTED", "id": 555,
-            "body": f"## 🤖 cross-review | round {ROUND} | {AGENT} | REQUEST_CHANGES\n",
-            "html_url": _URL}])},
-    ])
+    (tmp_dir / f"cross-review-pr{PR}-state.json").write_text(json.dumps(st), encoding="utf-8")
+    fake_gh.set_rules(
+        [
+            {
+                "match": f"pulls/{PR}/reviews?",
+                "stdout": json.dumps(
+                    [
+                        {
+                            "user": {"login": ACTOR},
+                            "state": "CHANGES_REQUESTED",
+                            "id": 555,
+                            "body": f"## 🤖 cross-review | round {ROUND} | {AGENT} | REQUEST_CHANGES\n",
+                            "html_url": _URL,
+                        }
+                    ]
+                ),
+            },
+        ]
+    )
 
     review_lib.commands.read_result.cmd_read_result(_args())
 
@@ -171,8 +177,7 @@ def test_a_second_take_in_does_not_add_a_second_review(
     assert _entry(tmp_dir)["review_url"] == _URL
 
 
-def test_findings_without_an_inline_are_still_a_result(
-        tmp_dir, state_mod, fake_gh, capsys) -> None:
+def test_findings_without_an_inline_are_still_a_result(tmp_dir, state_mod, fake_gh, capsys) -> None:
     """指摘があってインラインが 0 件でも、その担当は結果なしにならない（AC17）。"""
     _seed(tmp_dir)
     _note(tmp_dir, comments=[{"body": SUMMARY_TEXT, "severity": "major"}])
@@ -200,8 +205,7 @@ def test_a_note_alone_is_treated_as_no_result(tmp_dir, state_mod, fake_gh) -> No
     assert [c for c in fake_gh.joined() if "--method POST" in c] == []
 
 
-def test_only_what_is_sent_is_downgraded_on_ones_own_pull_request(
-        tmp_dir, state_mod, fake_gh) -> None:
+def test_only_what_is_sent_is_downgraded_on_ones_own_pull_request(tmp_dir, state_mod, fake_gh) -> None:
     """自分の Pull Request では送った形だけを落とす（AC32）。"""
     _seed(tmp_dir, is_own_pr=True, event_downgrade=True)
     _note(tmp_dir)
@@ -216,8 +220,7 @@ def test_only_what_is_sent_is_downgraded_on_ones_own_pull_request(
     assert entry["intent"] == "REQUEST_CHANGES" and entry["posted_as"] == "COMMENT"
 
 
-def test_a_reviewer_that_wrote_nothing_adds_no_review(
-        tmp_dir, state_mod, fake_gh) -> None:
+def test_a_reviewer_that_wrote_nothing_adds_no_review(tmp_dir, state_mod, fake_gh) -> None:
     """指摘のファイルも結果も書かずに終わった担当では、レビューが 1 件も増えない（AC4）。"""
     _seed(tmp_dir)
     # 書きかけの一時の名前だけが残った状態も、正式の名前が無ければ結果なしである。

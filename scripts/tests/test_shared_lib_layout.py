@@ -14,6 +14,7 @@
 届くことだけでは契約が守られているか見分けられないため、**避ける側・求める側の両方を
 外した場合も測る**。
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -53,6 +54,7 @@ LAUNCHERS = (
 
 # ---------- A1: 置き場所 ----------
 
+
 @pytest.mark.parametrize("name", MOVED)
 def test_the_shared_layer_sits_at_the_plugin_root(name: str) -> None:
     assert (LIB / name).is_file(), f"{name} が {LIB} にありません"
@@ -65,6 +67,7 @@ def test_the_old_place_under_cross_review_is_gone() -> None:
 
 # ---------- A3 / A4: 4 ランタイムの配置で届くこと ----------
 
+
 def _build_layouts(tmp_path: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
     """プラグインルート直下の配置と、Kiro CLI の symlink の配置を組み立てる。
 
@@ -75,25 +78,23 @@ def _build_layouts(tmp_path: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
     """
     plugin = tmp_path / "plugin"
     (plugin / "scripts" / "lib").mkdir(parents=True)
-    (plugin / "scripts" / "lib" / "probe.sh").write_text(
-        'probe_value() { echo shared; }\n', encoding="utf-8"
-    )
+    (plugin / "scripts" / "lib" / "probe.sh").write_text("probe_value() { echo shared; }\n", encoding="utf-8")
     scripts = plugin / "skills" / "probe" / "scripts"
     scripts.mkdir(parents=True)
 
     (scripts / "string-form.sh").write_text(
-        '#!/usr/bin/env bash\nset -euo pipefail\n'
+        "#!/usr/bin/env bash\nset -euo pipefail\n"
         'DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)\n'
         '. "$DIR/../../../scripts/lib/probe.sh"\n'
-        'probe_value\n',
+        "probe_value\n",
         encoding="utf-8",
     )
     (scripts / "cd-form.sh").write_text(
-        '#!/usr/bin/env bash\nset -euo pipefail\n'
+        "#!/usr/bin/env bash\nset -euo pipefail\n"
         'DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)\n'
         'L=$(cd -- "$DIR/../../../scripts/lib" && pwd)\n'
         '. "$L/probe.sh"\n'
-        'probe_value\n',
+        "probe_value\n",
         encoding="utf-8",
     )
     (scripts / "probe.py").write_text(
@@ -112,16 +113,12 @@ def _build_layouts(tmp_path: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
     # 囮。Kiro CLI が作るのは agents / prompts / skills / steering の 4 つで
     # `.kiro/scripts` は作られないが、作られた場合に `cd` が選ぶ先である。
     (kiro / "scripts" / "lib").mkdir(parents=True)
-    (kiro / "scripts" / "lib" / "probe.sh").write_text(
-        'probe_value() { echo decoy; }\n', encoding="utf-8"
-    )
+    (kiro / "scripts" / "lib" / "probe.sh").write_text("probe_value() { echo decoy; }\n", encoding="utf-8")
     return plugin, kiro
 
 
 def _bash(script: pathlib.Path) -> str:
-    return subprocess.run(
-        ["bash", str(script)], capture_output=True, text=True, timeout=60, check=True
-    ).stdout.strip()
+    return subprocess.run(["bash", str(script)], capture_output=True, text=True, timeout=60, check=True).stdout.strip()
 
 
 def test_the_shell_form_reaches_the_shared_layer_in_both_layouts(tmp_path) -> None:
@@ -146,25 +143,36 @@ def test_the_python_form_reaches_the_shared_layer_in_both_layouts(tmp_path) -> N
         plugin / "skills" / "probe" / "scripts" / "probe.py",
         kiro / "skills" / "probe" / "scripts" / "probe.py",
     ):
-        out = json.loads(subprocess.run(
-            [sys.executable, str(entry)],
-            capture_output=True, text=True, timeout=60, check=True,
-        ).stdout)
+        out = json.loads(
+            subprocess.run(
+                [sys.executable, str(entry)],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=True,
+            ).stdout
+        )
         assert pathlib.Path(out["resolved"]) == shared.resolve()
 
 
 def test_the_python_form_without_resolve_misses_the_shared_layer(tmp_path) -> None:
     """`.resolve()` を外すと `.kiro` で止まる。"""
     plugin, kiro = _build_layouts(tmp_path)
-    out = json.loads(subprocess.run(
-        [sys.executable, str(kiro / "skills" / "probe" / "scripts" / "probe.py")],
-        capture_output=True, text=True, timeout=60, check=True,
-    ).stdout)
+    out = json.loads(
+        subprocess.run(
+            [sys.executable, str(kiro / "skills" / "probe" / "scripts" / "probe.py")],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=True,
+        ).stdout
+    )
     assert pathlib.Path(out["plain"]) == kiro / "scripts" / "lib"
     assert pathlib.Path(out["plain"]) != (plugin / "scripts" / "lib").resolve()
 
 
 # ---------- 実体が契約どおりに指していること ----------
+
 
 @pytest.mark.parametrize(
     "path",
@@ -202,6 +210,7 @@ def test_the_python_callers_resolve_before_counting_parents(path: pathlib.Path) 
 
 # ---------- A5 / A6: 2 つのシム ----------
 
+
 def test_the_monitor_shim_exposes_the_implementation_namespace() -> None:
     shim = SKILLS / "cross-review" / "scripts" / "monitor.py"
     name = "shared_lib_layout_monitor_shim"
@@ -224,7 +233,9 @@ def test_the_tmpdir_shim_still_defines_tmpdir(tmp_path) -> None:
     shim = SKILLS / "cross-review" / "scripts" / "_tmpdir.sh"
     out = subprocess.run(
         ["bash", "-c", f'. "{shim}"; type -t tmpdir; tmpdir'],
-        capture_output=True, text=True, timeout=60,
+        capture_output=True,
+        text=True,
+        timeout=60,
         env={**os.environ, "CROSS_REVIEW_TMP_DIR": str(tmp_path / "tmp")},
     )
     assert out.returncode == 0, out.stderr
@@ -233,11 +244,14 @@ def test_the_tmpdir_shim_still_defines_tmpdir(tmp_path) -> None:
 
 # ---------- A7: 3 本の起動スクリプト ----------
 
+
 def test_the_wait_wrapper_starts_the_moved_monitor() -> None:
     """`wait-review.sh` → シム → 共通層の実体、までが 1 回の起動で通ること。"""
     out = subprocess.run(
         ["bash", str(SKILLS / "cross-review" / "scripts" / "wait-review.sh"), "--help"],
-        capture_output=True, text=True, timeout=120,
+        capture_output=True,
+        text=True,
+        timeout=120,
     )
     assert out.returncode == 0, out.stderr
     assert "--stem-template" in out.stdout
@@ -247,7 +261,9 @@ def test_the_agy_launcher_gets_past_the_shared_layer(tmp_path) -> None:
     """互換のために残した名前から呼んでも、委譲先が共通層まで届くこと。"""
     out = subprocess.run(
         ["bash", str(SKILLS / "cross-review" / "scripts" / "launch-agy.sh"), "1", "1"],
-        capture_output=True, text=True, timeout=120,
+        capture_output=True,
+        text=True,
+        timeout=120,
         env={**os.environ, "CROSS_REVIEW_TMP_DIR": str(tmp_path)},
     )
     # 状態ファイルが無いことで止まる。共通層の読み込みでは止まらない。
@@ -257,9 +273,10 @@ def test_the_agy_launcher_gets_past_the_shared_layer(tmp_path) -> None:
 
 def test_the_cross_refactoring_launcher_gets_past_the_shared_layer(tmp_path) -> None:
     out = subprocess.run(
-        ["bash", str(SKILLS / "cross-refactoring" / "scripts" / "launch-cli.sh"),
-         "claude", "propose", "1"],
-        capture_output=True, text=True, timeout=120,
+        ["bash", str(SKILLS / "cross-refactoring" / "scripts" / "launch-cli.sh"), "claude", "propose", "1"],
+        capture_output=True,
+        text=True,
+        timeout=120,
         env={**os.environ, "CROSS_REFACTORING_TMP_DIR": str(tmp_path)},
     )
     assert "状態ファイルがありません" in out.stdout + out.stderr
@@ -274,17 +291,19 @@ def test_the_paths_written_in_the_launchers_resolve(path: pathlib.Path) -> None:
             continue
         tail = line.split("../../../scripts/lib", 1)[1]
         name = tail.split('"')[0].split()[0].lstrip("/") if tail.strip() else ""
-        target = (path.parent / "../../../scripts/lib" / name) if name else \
-            (path.parent / "../../../scripts/lib")
+        target = (path.parent / "../../../scripts/lib" / name) if name else (path.parent / "../../../scripts/lib")
         assert target.exists(), f"{path.name}: {line.strip()}"
 
 
 # ---------- A10: 監視の引数と終了コード ----------
 
+
 def _monitor(*args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, str(LIB / "monitor.py"), *args],
-        capture_output=True, text=True, timeout=180,
+        capture_output=True,
+        text=True,
+        timeout=180,
     )
 
 
@@ -296,9 +315,18 @@ def test_the_monitor_still_takes_a_replaceable_naming_scheme(tmp_path) -> None:
     (tmp_path / "deploy-job99.pid").write_text(f"{proc.pid}\n", encoding="utf-8")
     try:
         out = _monitor(
-            "99", "--agents", "deploy", "--tmp-dir", str(tmp_path),
-            "--stem-template", "{agent}-job{id}", "--no-require-result",
-            "--timeout", "60", "--poll", "2",
+            "99",
+            "--agents",
+            "deploy",
+            "--tmp-dir",
+            str(tmp_path),
+            "--stem-template",
+            "{agent}-job{id}",
+            "--no-require-result",
+            "--timeout",
+            "60",
+            "--poll",
+            "2",
         )
     finally:
         proc.wait(timeout=30)
@@ -309,9 +337,18 @@ def test_the_monitor_still_takes_a_replaceable_naming_scheme(tmp_path) -> None:
 def test_the_monitor_still_reports_a_bad_pidfile_as_six(tmp_path) -> None:
     (tmp_path / "deploy-job99.pid").write_text("not-a-pid\n", encoding="utf-8")
     out = _monitor(
-        "99", "--agents", "deploy", "--tmp-dir", str(tmp_path),
-        "--stem-template", "{agent}-job{id}", "--no-require-result",
-        "--timeout", "60", "--poll", "2",
+        "99",
+        "--agents",
+        "deploy",
+        "--tmp-dir",
+        str(tmp_path),
+        "--stem-template",
+        "{agent}-job{id}",
+        "--no-require-result",
+        "--timeout",
+        "60",
+        "--poll",
+        "2",
     )
     assert out.returncode == 6, out.stdout + out.stderr
     assert json.loads(out.stdout.strip().splitlines()[-1])["status"] == "PIDFILE_BAD"
@@ -334,11 +371,19 @@ RETIRED_FUNCTIONS = ("check_auth", "impl_pool", "review_assign", "assign")
 
 def test_the_retired_assignment_functions_are_gone() -> None:
     result = subprocess.run(
-        ["git", "grep", "-n", "-w",
-         *[arg for name in RETIRED_FUNCTIONS for arg in ("-e", name)],
-         "--", "plugins/ndf/scripts/lib/",
-         "plugins/ndf/skills/cross-review/scripts/",
-         "plugins/ndf/skills/cross-refactoring/scripts/"],
-        cwd=ROOT, capture_output=True, text=True,
+        [
+            "git",
+            "grep",
+            "-n",
+            "-w",
+            *[arg for name in RETIRED_FUNCTIONS for arg in ("-e", name)],
+            "--",
+            "plugins/ndf/scripts/lib/",
+            "plugins/ndf/skills/cross-review/scripts/",
+            "plugins/ndf/skills/cross-refactoring/scripts/",
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
     )
     assert result.returncode == 1, f"旧関数の名前が残っている:\n{result.stdout}"

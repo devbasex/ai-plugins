@@ -23,6 +23,7 @@ stale_again（再実行しても取り残し）/ settled・queued・running（wa
 結果は lib/step_result.py の形の 1 行の JSON。終了コードは 0 = ok / 10 = `git branch -D` が要る
 ブランチがある（同意が要る。提示物を書く）/ 1 = 取り込み・CI・マージが失敗 / 2 = 読めない。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -38,14 +39,29 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import deps  # noqa: E402
 
 deps.require("waits")
-from step_result import (StepError, approval_present, common_parser, emit, git,  # noqa: E402
-                         git_root, main_with, repo_slug, result, run)
+from step_result import (
+    StepError,
+    approval_present,
+    common_parser,
+    emit,
+    git,  # noqa: E402
+    git_root,
+    main_with,
+    repo_slug,
+    result,
+    run,
+)
 import gh_parts  # noqa: E402
 import repo  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from merged_lib.checks import (FAIL_CONCLUSIONS, GreenWatch, check_states, probe_checks,  # noqa: E402
-                               queued_run_count)
+from merged_lib.checks import (
+    FAIL_CONCLUSIONS,
+    GreenWatch,
+    check_states,
+    probe_checks,  # noqa: E402
+    queued_run_count,
+)
 
 TOOL = "merged"
 
@@ -56,13 +72,13 @@ def list_worktrees(root):
     items, cur = [], None
     for line in out.splitlines():
         if line.startswith("worktree "):
-            cur = {"path": line[len("worktree "):], "branch": None, "detached": False}
+            cur = {"path": line[len("worktree ") :], "branch": None, "detached": False}
             items.append(cur)
         elif cur is None:
             continue
         elif line.startswith("branch "):
-            ref = line[len("branch "):]
-            cur["branch"] = ref[len("refs/heads/"):] if ref.startswith("refs/heads/") else ref
+            ref = line[len("branch ") :]
+            cur["branch"] = ref[len("refs/heads/") :] if ref.startswith("refs/heads/") else ref
         elif line == "detached":
             cur["detached"] = True
     return items
@@ -214,22 +230,32 @@ def cleanup(root, prs):
             add("main_dir", main_dir, "pulled")
 
     count = {k: sum(1 for i in items if i["result"] == k) for k in ("removed", "deleted", "absent", "kept", "stopped")}
-    metrics = {"removed_worktrees": count["removed"], "deleted_branches": count["deleted"],
-               "absent_branches": count["absent"], "kept": count["kept"], "stopped": count["stopped"]}
-    summary = (f"作業ツリー {count['removed']} 件を外し、ブランチ {count['deleted']} 件を消した"
-               f"（残した {count['kept']} 件・止まった {count['stopped']} 件）")
+    metrics = {
+        "removed_worktrees": count["removed"],
+        "deleted_branches": count["deleted"],
+        "absent_branches": count["absent"],
+        "kept": count["kept"],
+        "stopped": count["stopped"],
+    }
+    summary = (
+        f"作業ツリー {count['removed']} 件を外し、ブランチ {count['deleted']} 件を消した"
+        f"（残した {count['kept']} 件・止まった {count['stopped']} 件）"
+    )
     if pull_err:
         return "stopped", pull_err, items, metrics, None, None
     need_force = [i for i in items if i["kind"] == "branch" and i["result"] == "stopped"]
     if need_force:
         names = [i["name"] for i in need_force]
         path = approval_present(
-            TOOL, "-".join(str(n) for n in prs), title="未マージのコミットを持つブランチの削除",
+            TOOL,
+            "-".join(str(n) for n in prs),
+            title="未マージのコミットを持つブランチの削除",
             targets=[{"url": f"{i['name']}（{i['sha'][:8]}）"} for i in need_force],
             change=f"ブランチ {len(names)} 件",
             judge=[(i["name"], i["reason"]) for i in need_force],
             consent=[f"`git branch -D {n}` で消す" for n in names],
-            rollback="\n".join(f"- `git branch {i['name']} {i['sha']}`" for i in need_force))
+            rollback="\n".join(f"- `git branch {i['name']} {i['sha']}`" for i in need_force),
+        )
         return "gate", summary, items, metrics, path, "同意を得たら git branch -D " + " ".join(names)
     return "ok", summary, items, metrics, None, None
 
@@ -241,6 +267,7 @@ def cmd_cleanup(a):
 
 # --- merge-when-green ---------------------------------------------------------
 
+
 def cmd_merge_when_green(a):
     root = git_root(a.root)
     n = a.pr
@@ -251,14 +278,19 @@ def cmd_merge_when_green(a):
     if not any(i["kind"] == "pr" and i["result"] == "already_merged" for i in items):
         p = gh_parts.gh(["pr", "merge", str(n), "--admin", f"--{a.method}"], cwd=root)
         if p.returncode != 0:
-            emit(result(TOOL, "stopped", f"gh pr merge --admin が失敗: {p.stderr.strip()[:300]}",
-                        items + [{"kind": "pr", "name": f"#{n}", "result": "stopped", "reason": p.stderr.strip()[:300]}],
-                        {"waits": waits}))
+            emit(
+                result(
+                    TOOL,
+                    "stopped",
+                    f"gh pr merge --admin が失敗: {p.stderr.strip()[:300]}",
+                    items + [{"kind": "pr", "name": f"#{n}", "result": "stopped", "reason": p.stderr.strip()[:300]}],
+                    {"waits": waits},
+                )
+            )
         items.append({"kind": "pr", "name": f"#{n}", "result": "merged", "method": a.method})
 
     if a.no_cleanup:
-        emit(result(TOOL, "ok", f"#{n} をマージした（後片付けは行わない）", items,
-                    {"waits": waits, "queued_runs": queued_runs}))
+        emit(result(TOOL, "ok", f"#{n} をマージした（後片付けは行わない）", items, {"waits": waits, "queued_runs": queued_runs}))
     status, summary, citems, metrics, path, nxt = cleanup(root, [n])
     metrics = {**metrics, "waits": waits, "queued_runs": queued_runs}
     emit(result(TOOL, status, f"#{n} をマージした。{summary}", items + citems, metrics, path, nxt))
@@ -268,8 +300,16 @@ def cmd_merge_when_green(a):
 
 # 分類は強い順。PR が 2 つ以上に当たれば上を採り、複数の PR は最も上の分類で全体を表す
 PROBE_CLASSES = ("failed", "stale", "stale_again", "settled", "queued", "running", "passed", "none")
-PROBE_ACTIONS = {"failed": "fix", "stale": "judge", "stale_again": "judge", "settled": "wait", "queued": "wait",
-                 "running": "wait", "passed": "judge", "none": "judge"}
+PROBE_ACTIONS = {
+    "failed": "fix",
+    "stale": "judge",
+    "stale_again": "judge",
+    "settled": "wait",
+    "queued": "wait",
+    "running": "wait",
+    "passed": "judge",
+    "none": "judge",
+}
 
 
 def probe_prs(root, a):
@@ -308,12 +348,15 @@ def probe_one(root, n, act, items):
         cls = "stale"
     elif again:
         cls = "stale_again"
-        items += [{"kind": "check", "pr": int(n), "name": s[0], "result": "stale_again", "run": s[1], "job": s[2],
-                   "attempt": s[3]} for s in again]
+        items += [
+            {"kind": "check", "pr": int(n), "name": s[0], "result": "stale_again", "run": s[1], "job": s[2], "attempt": s[3]} for s in again
+        ]
     elif settled:
         cls = "settled"
-        items += [{"kind": "check", "pr": int(n), "name": s[0], "result": "settled", "run": s[1], "job": s[2],
-                   "conclusion": s[3]} for s in settled]
+        items += [
+            {"kind": "check", "pr": int(n), "name": s[0], "result": "settled", "run": s[1], "job": s[2], "conclusion": s[3]}
+            for s in settled
+        ]
     elif queued:
         cls = "queued"
         items += [{"kind": "check", "pr": int(n), "name": q, "result": "queued"} for q in queued]
@@ -326,8 +369,7 @@ def probe_one(root, n, act, items):
     if cls == "stale":
         done = True
         for name, run_id, job_id, attempt in first:
-            item = {"kind": "check", "pr": int(n), "name": name, "result": "stale", "run": run_id, "job": job_id,
-                    "attempt": attempt}
+            item = {"kind": "check", "pr": int(n), "name": name, "result": "stale", "run": run_id, "job": job_id, "attempt": attempt}
             if act:
                 r = gh_parts.gh(["run", "rerun", run_id, "--job", job_id], cwd=root)
                 item["result"] = "rerun" if r.returncode == 0 else "rerun_failed"
@@ -367,34 +409,39 @@ def cmd_probe(a):
         "none": "開いた PR が無い・読めない",
     }[cls]
     pr_text = " ".join(f"#{n}" for n in prs)
-    emit(result(TOOL, "ok", f"{pr_text} {summary}".strip(), items,
-                {"class": cls, "action": action, "prs": prs, "queued_runs": queued_runs}), 0)
+    emit(
+        result(TOOL, "ok", f"{pr_text} {summary}".strip(), items, {"class": cls, "action": action, "prs": prs, "queued_runs": queued_runs}),
+        0,
+    )
 
 
 def build_parser():
-    ap = argparse.ArgumentParser(prog="merged-steps.py", description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(prog="merged-steps.py", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--root", help="対象のリポジトリの根（既定はカレントの git の根）")
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("cleanup", parents=[common_parser()], help="マージ済みの PR の作業ツリーとローカルブランチを片付ける")
     p.add_argument("prs", nargs="+", type=int, metavar="PR番号")
     p.set_defaults(func=cmd_cleanup)
-    m = sub.add_parser("merge-when-green", parents=[common_parser()],
-                       help="CI が通るまで待ち、--admin でマージして後片付けまで行う")
+    m = sub.add_parser("merge-when-green", parents=[common_parser()], help="CI が通るまで待ち、--admin でマージして後片付けまで行う")
     m.add_argument("pr", type=int, metavar="PR番号")
     m.add_argument("--method", choices=("merge", "squash", "rebase"), default="merge")
     m.add_argument("--interval", type=float, default=10.0, help="CI を読み直す間隔（秒）")
-    m.add_argument("--recheck", type=float, default=5.0,
-                   help="pending を見ずに通っていたとき、確かめ直すまでの間隔（秒）")
-    m.add_argument("--no-checks-after", type=float, default=60.0,
-                   help="rollup が空のままこの秒数を過ぎたら、CI の無いリポジトリとしてマージする")
+    m.add_argument("--recheck", type=float, default=5.0, help="pending を見ずに通っていたとき、確かめ直すまでの間隔（秒）")
+    m.add_argument(
+        "--no-checks-after", type=float, default=60.0, help="rollup が空のままこの秒数を過ぎたら、CI の無いリポジトリとしてマージする"
+    )
     m.add_argument("--timeout", type=float, default=3600.0, help="CI を待つ上限（秒）")
-    m.add_argument("--stale-after", type=float, default=300.0,
-                   help="実行が終わったのにチェックが pending のまま続けば、ジョブを 1 度だけ再実行するまでの秒数")
+    m.add_argument(
+        "--stale-after",
+        type=float,
+        default=300.0,
+        help="実行が終わったのにチェックが pending のまま続けば、ジョブを 1 度だけ再実行するまでの秒数",
+    )
     m.add_argument("--no-cleanup", action="store_true", help="マージだけ行い、後片付けをしない")
     m.set_defaults(func=cmd_merge_when_green)
-    pr = sub.add_parser("probe", parents=[common_parser()],
-                        help="開いた PR のチェックを分類する（遅れの一次の調査）。--act なら取り残しを再実行する")
+    pr = sub.add_parser(
+        "probe", parents=[common_parser()], help="開いた PR のチェックを分類する（遅れの一次の調査）。--act なら取り残しを再実行する"
+    )
     pr.add_argument("--pr", type=int, action="append", default=[], metavar="PR番号")
     pr.add_argument("--head", action="append", default=[], metavar="ブランチ")
     pr.add_argument("--act", action="store_true", help="取り残されたジョブを gh run rerun --job で再実行する")

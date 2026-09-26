@@ -4,6 +4,7 @@
 （<tmp>/sess/subagents/agent-<id>.jsonl / .meta.json）を作り、標準入力へ JSON を渡して
 `bash statusline.sh` の出力を突き合わせる。
 """
+
 from __future__ import annotations
 
 import json
@@ -29,19 +30,24 @@ def _usage(tokens: int) -> dict:
     return {"input_tokens": tokens, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}
 
 
-def write_agent(root: Path, agent_id: str, *, tokens: int = 10_000, end: str = "tool_use",
-                model: str = "claude-opus-5", description: str | None = None,
-                age: float = 0) -> Path:
+def write_agent(
+    root: Path,
+    agent_id: str,
+    *,
+    tokens: int = 10_000,
+    end: str = "tool_use",
+    model: str = "claude-opus-5",
+    description: str | None = None,
+    age: float = 0,
+) -> Path:
     """end: tool_use（実行中）/ end_turn（終了）/ text（stop_reason 無しの text で終わる）"""
     sub = root / "sess" / "subagents"
     sub.mkdir(parents=True, exist_ok=True)
-    content = [{"type": "tool_use", "id": "t1", "name": "Bash", "input": {}}] if end == "tool_use" \
-        else [{"type": "text", "text": "done"}]
+    content = [{"type": "tool_use", "id": "t1", "name": "Bash", "input": {}}] if end == "tool_use" else [{"type": "text", "text": "done"}]
     stop = "end_turn" if end == "end_turn" else None
     lines = [
         {"type": "user", "message": {"role": "user", "content": "go"}},
-        {"type": "assistant", "message": {"model": model, "content": content,
-                                          "stop_reason": stop, "usage": _usage(tokens)}},
+        {"type": "assistant", "message": {"model": model, "content": content, "stop_reason": stop, "usage": _usage(tokens)}},
     ]
     f = sub / f"agent-{agent_id}.jsonl"
     f.write_text("".join(json.dumps(line) + "\n" for line in lines))
@@ -57,10 +63,8 @@ def render(root: Path, total: int = 100_000, size: int | None = None) -> str:
     cw: dict = {"total_input_tokens": total}
     if size is not None:
         cw["context_window_size"] = size
-    payload = {"transcript_path": str(root / "sess.jsonl"),
-               "model": {"display_name": "Opus 5 (1M context)"}, "context_window": cw}
-    r = subprocess.run(["bash", str(STATUSLINE)], input=json.dumps(payload),
-                       capture_output=True, text=True, check=True)
+    payload = {"transcript_path": str(root / "sess.jsonl"), "model": {"display_name": "Opus 5 (1M context)"}, "context_window": cw}
+    r = subprocess.run(["bash", str(STATUSLINE)], input=json.dumps(payload), capture_output=True, text=True, check=True)
     return r.stdout
 
 
@@ -125,6 +129,7 @@ def test_control_chars_in_description_are_dropped(tmp_path):
     assert "\u001b[2J" not in out
     assert "\u009b" not in out
     assert "[2J画 21k" in plain(out)
+
 
 def test_path_with_spaces(tmp_path):
     root = tmp_path / "my project dir"

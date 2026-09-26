@@ -4,6 +4,7 @@
 FAKE_SERENA_LOG: 記録の JSONL
 FAKE_SERENA_RESULT: "bash=1,php=hang" のような言語ごとの結果（既定は 0）
 """
+
 import json
 import os
 import sys
@@ -24,8 +25,7 @@ def main():
     if args[:2] == ["project", "create"]:
         langs = [args[i + 1] for i, a in enumerate(args) if a == "--ls"]
         root = Path(args[-1])
-        text = TEMPLATE.read_text().replace("language_servers:\n- python\n",
-                                            "language_servers:\n" + "".join(f"- {l}\n" for l in langs))
+        text = TEMPLATE.read_text().replace("language_servers:\n- python\n", "language_servers:\n" + "".join(f"- {l}\n" for l in langs))
         (root / ".serena").mkdir(parents=True, exist_ok=True)
         (root / ".serena/project.yml").write_text(text)
         return 0

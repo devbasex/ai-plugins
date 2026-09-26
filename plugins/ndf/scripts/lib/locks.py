@@ -13,6 +13,7 @@
 
 使う側は `deps.require("locks")` を先に呼ぶ。
 """
+
 from __future__ import annotations
 
 import os
@@ -70,6 +71,6 @@ def append_locked(target: os.PathLike[str] | str, line: str, timeout: float | No
         try:
             view = memoryview(data)
             while view:
-                view = view[os.write(fd, view):]
+                view = view[os.write(fd, view) :]
         finally:
             os.close(fd)

@@ -10,8 +10,8 @@ agy は err.log にほぼ進捗を出さないため、ビルトイン既定を 
 
 実行した人の `MONITOR_*` は、根の `conftest.py` が実行中だけ外す（#678）。
 """
-from __future__ import annotations
 
+from __future__ import annotations
 
 
 def test_builtin_default_codex(monitor_mod):
@@ -79,9 +79,7 @@ def test_shared_env_non_numeric_falls_back_to_builtin(monkeypatch, monitor_mod, 
     assert "int に変換できません" in captured.err
 
 
-def test_per_agent_env_non_numeric_falls_back_to_builtin(
-    monkeypatch, monitor_mod, capsys
-):
+def test_per_agent_env_non_numeric_falls_back_to_builtin(monkeypatch, monitor_mod, capsys):
     """env `MONITOR_STALL_<AGENT>` が非数値なら builtin にフォールバック。"""
     monkeypatch.setenv("MONITOR_STALL_AGY", "not-a-number")
     # agy は builtin (480) にフォールバック
@@ -93,9 +91,7 @@ def test_per_agent_env_non_numeric_falls_back_to_builtin(
     assert "int に変換できません" in captured.err
 
 
-def test_per_agent_env_non_numeric_does_not_affect_other_agent(
-    monkeypatch, monitor_mod
-):
+def test_per_agent_env_non_numeric_does_not_affect_other_agent(monkeypatch, monitor_mod):
     """non-numeric な per-agent env は対象 agent だけに影響する。"""
     monkeypatch.setenv("MONITOR_STALL_AGY", "xxx")
     monkeypatch.setenv("MONITOR_STALL_CODEX", "200")  # codex 側は正常

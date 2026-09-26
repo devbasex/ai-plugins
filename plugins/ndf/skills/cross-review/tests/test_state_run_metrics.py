@@ -3,6 +3,7 @@
 状態ファイルを一時ディレクトリへ置き、`state.py` の副コマンドを呼んで要約を読む。
 要約の置き場所は各テストが `NDF_METRICS_DIR` で一時ディレクトリへ向ける。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -33,13 +34,11 @@ def _state(tmp_dir: pathlib.Path) -> dict:
         "host": "claude",
         "repo": "devbasex/ai-plugins",
         "current_pr": PR,
-        "pr_history": [{"pr": PR, "opened_at": "2026-09-15T10:00:00+09:00",
-                        "closed_at": None, "rounds": 1}],
+        "pr_history": [{"pr": PR, "opened_at": "2026-09-15T10:00:00+09:00", "closed_at": None, "rounds": 1}],
         "tmp_dir": str(tmp_dir),
         "max_rounds": 12,
         "review_instructions": "レビュー観点の本文",
-        "rounds": [{"round": 1, "pr": PR, "started_at": "2026-09-15T10:00:00+09:00",
-                    "reviewers": ["codex", "kiro"]}],
+        "rounds": [{"round": 1, "pr": PR, "started_at": "2026-09-15T10:00:00+09:00", "reviewers": ["codex", "kiro"]}],
         "review_findings": [],
         "final": None,
     }
@@ -62,6 +61,7 @@ def _summaries(metrics: pathlib.Path) -> list[pathlib.Path]:
 
 
 # ---------- AC8 / AC11 / AC13 ----------
+
 
 def test_every_save_rewrites_one_summary_outside_the_worktree(state_mod, review_dirs):
     worktree, tmp_dir, metrics = review_dirs
@@ -91,7 +91,9 @@ def test_summary_measure_equals_measure_py_output(state_mod, review_dirs):
 
     proc = subprocess.run(
         [sys.executable, str(_MEASURE), str(tmp_dir / f"cross-review-pr{PR}-state.json")],
-        capture_output=True, text=True, check=True,
+        capture_output=True,
+        text=True,
+        check=True,
     )
     assert json.loads(path.read_text())["measure"] == json.loads(proc.stdout)
 
@@ -104,6 +106,7 @@ def test_summary_does_not_carry_review_instructions(state_mod, review_dirs):
 
 
 # ---------- AC16 ----------
+
 
 def _run(state_mod, func, capsys) -> tuple[int, str, str]:
     code = 0
@@ -140,10 +143,10 @@ def test_summary_failure_keeps_exit_code_and_stdout(state_mod, review_dirs, monk
 
 # ---------- AC23 ----------
 
+
 def test_report_ends_with_the_summary_path(state_mod, review_dirs, capsys):
     _, tmp_dir, metrics = review_dirs
-    (tmp_dir / f"cross-review-pr{PR}-state.json").write_text(
-        json.dumps(_state(tmp_dir), ensure_ascii=False), encoding="utf-8")
+    (tmp_dir / f"cross-review-pr{PR}-state.json").write_text(json.dumps(_state(tmp_dir), ensure_ascii=False), encoding="utf-8")
 
     review_lib.commands.report.cmd_report(argparse.Namespace(pr=PR))
 
@@ -155,8 +158,7 @@ def test_report_ends_with_the_summary_path(state_mod, review_dirs, capsys):
 def test_report_says_why_it_did_not_write(state_mod, review_dirs, monkeypatch, capsys):
     _, tmp_dir, metrics = review_dirs
     monkeypatch.setenv("NDF_METRICS", "0")
-    (tmp_dir / f"cross-review-pr{PR}-state.json").write_text(
-        json.dumps(_state(tmp_dir), ensure_ascii=False), encoding="utf-8")
+    (tmp_dir / f"cross-review-pr{PR}-state.json").write_text(json.dumps(_state(tmp_dir), ensure_ascii=False), encoding="utf-8")
 
     review_lib.commands.report.cmd_report(argparse.Namespace(pr=PR))
 
@@ -167,9 +169,11 @@ def test_report_says_why_it_did_not_write(state_mod, review_dirs, monkeypatch, c
 
 # ---------- AC8: init の保存も要約を書く ----------
 
+
 def _init_args(worktree: pathlib.Path, **over) -> argparse.Namespace:
-    args = dict(pr=PR, max_rounds=12, rotate_after=8, only=None, worktree=str(worktree),
-                focus=None, extra_instructions_file=None, host="claude")
+    args = dict(
+        pr=PR, max_rounds=12, rotate_after=8, only=None, worktree=str(worktree), focus=None, extra_instructions_file=None, host="claude"
+    )
     args.update(over)
     return argparse.Namespace(**args)
 
@@ -179,16 +183,17 @@ def test_new_init_writes_the_summary(state_mod, review_dirs, monkeypatch):
     worktree, tmp_dir, metrics = review_dirs
     monkeypatch.setattr(review_lib.github, "_repo_from_git", lambda: "devbasex/ai-plugins")
     monkeypatch.setattr(
-        review_lib.github, "_fetch_pr_metadata",
+        review_lib.github,
+        "_fetch_pr_metadata",
         lambda pr, repo=None: review_lib.github.PrMetadata(
-            "devbasex/ai-plugins", "takemi", "feat/x", "abc123", "develop", True, 4000, None))
+            "devbasex/ai-plugins", "takemi", "feat/x", "abc123", "develop", True, 4000, None
+        ),
+    )
     monkeypatch.setattr(review_lib.github, "_fetch_changed_files", lambda pr, repo: [])
     monkeypatch.setattr(review_lib.workspace, "_is_registered_worktree", lambda wt: True)
     monkeypatch.setattr(review_lib.workspace, "_sync_worktree", lambda *a, **k: None)
     monkeypatch.setattr(review_lib.github, "_viewer_login", lambda: "takemi")
-    monkeypatch.setattr(
-        subprocess, "run",
-        lambda cmd, *a, **k: subprocess.CompletedProcess(cmd, 0, stdout="", stderr=""))
+    monkeypatch.setattr(subprocess, "run", lambda cmd, *a, **k: subprocess.CompletedProcess(cmd, 0, stdout="", stderr=""))
     monkeypatch.setenv("NDF_SKIP_AUTH_CHECK", "1")
 
     review_lib.commands.init.cmd_init(_init_args(worktree))
@@ -203,8 +208,7 @@ def test_resume_that_updates_the_state_rewrites_the_summary(state_mod, review_di
     worktree, tmp_dir, metrics = review_dirs
     state = _state(tmp_dir)
     state.update(auto_review_instructions="", worktree_path=str(worktree))
-    (tmp_dir / f"cross-review-pr{PR}-state.json").write_text(
-        json.dumps(state, ensure_ascii=False), encoding="utf-8")
+    (tmp_dir / f"cross-review-pr{PR}-state.json").write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
     monkeypatch.setattr(review_lib.github, "_repo_from_git", lambda: "devbasex/ai-plugins")
     monkeypatch.setattr(review_lib.github, "_fetch_unresolved_threads", lambda repo, pr: [])
     monkeypatch.setattr(review_lib.workspace, "_sync_worktree", lambda *a, **k: None)

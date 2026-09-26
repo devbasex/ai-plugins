@@ -9,6 +9,7 @@
 理由。`commands` どうしの取り込みを作らない）。git の事実の読み取り
 （`gitfacts`）にも置かない。取り消しは事実の読み取りではなく進行の手順である。
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -121,11 +122,7 @@ def already_closed(scope: IntakeScope) -> bool:
 
 def failed_impls(scope: IntakeScope) -> list[str]:
     """この工程で結果を残さなかった担当を、記録の順に返す。"""
-    return [
-        str(record.get("impl") or "")
-        for record in (scope.records.get("failed_attempts") or [])
-        if record.get("phase") == scope.phase
-    ]
+    return [str(record.get("impl") or "") for record in (scope.records.get("failed_attempts") or []) if record.get("phase") == scope.phase]
 
 
 def close_without_result(
@@ -150,22 +147,21 @@ def close_without_result(
             range_unknown=True,
         )
     reverted = discard_unverified(path, state, scope, ordered_range)
-    scope.records.setdefault("failed_attempts", []).append({
-        "phase": scope.phase,
-        "attempt": scope.attempt,
-        "impl": scope.impl,
-        "reason": reason,
-        "detail": detail,
-        "at": statefile.now(),
-        "reverted": reverted,
-    })
+    scope.records.setdefault("failed_attempts", []).append(
+        {
+            "phase": scope.phase,
+            "attempt": scope.attempt,
+            "impl": scope.impl,
+            "reason": reason,
+            "detail": detail,
+            "at": statefile.now(),
+            "reverted": reverted,
+        }
+    )
     statefile.save(path, state)
     if reverted:
         push_with_retry_marker(path, state, scope.holder)
-    info(
-        f"⚠ {scope.impl} は結果を残しませんでした（{reason}）。"
-        f"取り消したコミットは {reverted} 件です"
-    )
+    info(f"⚠ {scope.impl} は結果を残しませんでした（{reason}）。取り消したコミットは {reverted} 件です")
     return ClosedAttempt(
         reason=reason,
         detail=detail,

@@ -24,6 +24,7 @@
     python3 scripts/check-skill-frontmatter.py --strict
     python3 scripts/check-skill-frontmatter.py --report   # 実測値の一覧だけ出す
 """
+
 from __future__ import annotations
 
 import argparse
@@ -41,13 +42,13 @@ import yamlio  # noqa: E402  frontmatter は lib/yamlio.py（ruamel.yaml）で�
 
 # --- 規約の上限値 -----------------------------------------------------------
 # 出典は plugins/ndf/skills/AUTHORING.md「上限値」。
-NAME_MAX = 64                 # Agent Skills 仕様
-DESCRIPTION_SPEC_MAX = 1024   # Agent Skills 仕様
-DESCRIPTION_OPS_MAX = 300     # 運用目標
-DESC_LEAD_CHARS = 160         # この範囲に用途またはトリガ語を置く（Codex の短縮対策）
-COMPATIBILITY_MAX = 500       # Agent Skills 仕様
-DESC_PLUS_WTU_MAX = 1536      # Claude Code の一覧切り詰め
-SKILL_MD_MAX_LINES = 500      # 仕様の推奨 / コンパクション対策
+NAME_MAX = 64  # Agent Skills 仕様
+DESCRIPTION_SPEC_MAX = 1024  # Agent Skills 仕様
+DESCRIPTION_OPS_MAX = 300  # 運用目標
+DESC_LEAD_CHARS = 160  # この範囲に用途またはトリガ語を置く（Codex の短縮対策）
+COMPATIBILITY_MAX = 500  # Agent Skills 仕様
+DESC_PLUS_WTU_MAX = 1536  # Claude Code の一覧切り詰め
+SKILL_MD_MAX_LINES = 500  # 仕様の推奨 / コンパクション対策
 
 # --- 初期一覧の予算 ---------------------------------------------------------
 # 各ランタイムは起動時に Skill の一覧（name / description / パス）を読み込み、
@@ -181,11 +182,11 @@ FRONTMATTER_TOTAL_MAX = 20_000
 #
 # 出典: 2026-08-12 に Claude Code の `/` メニューで観測（issue #83）。
 KNOWN_EXTERNAL_SKILL_NAMES = (
-    "code-review",              # Claude Code 組み込み（`code-review`）/ `coderabbit:code-review`
-    "security-review",          # Claude Code 組み込み（`security-review`）
-    "coderabbit-review",        # `coderabbit:coderabbit-review`
-    "requesting-code-review",   # `superpowers:requesting-code-review`
-    "receiving-code-review",    # `superpowers:receiving-code-review`
+    "code-review",  # Claude Code 組み込み（`code-review`）/ `coderabbit:code-review`
+    "security-review",  # Claude Code 組み込み（`security-review`）
+    "coderabbit-review",  # `coderabbit:coderabbit-review`
+    "requesting-code-review",  # `superpowers:requesting-code-review`
+    "receiving-code-review",  # `superpowers:receiving-code-review`
 )
 
 # --- 許可する frontmatter の項目 -------------------------------------------
@@ -193,8 +194,17 @@ KNOWN_EXTERNAL_SKILL_NAMES = (
 # 未知の項目はハイフン誤り（when-to-use など）を弾くために失敗させる。
 SPEC_KEYS = {"name", "description", "license", "compatibility", "metadata", "allowed-tools"}
 CLAUDE_KEYS = {
-    "when_to_use", "argument-hint", "arguments", "disable-model-invocation",
-    "user-invocable", "paths", "effort", "context", "background", "agent", "model",
+    "when_to_use",
+    "argument-hint",
+    "arguments",
+    "disable-model-invocation",
+    "user-invocable",
+    "paths",
+    "effort",
+    "context",
+    "background",
+    "agent",
+    "model",
     # Skill が呼ばれた会話の単位へ hook を登録する（公式ドキュメント "Hooks in skills
     # and agents"）。書式は settings.json の hooks と同じで、入れ子で書く。
     "hooks",
@@ -210,7 +220,8 @@ DOUBLE_QUOTED_DESC_RE = re.compile(r'^description:[ \t]*"', re.MULTILINE)
 LEGACY_TRIGGER_RE = re.compile(
     # ラベルの直後に引用符付きの語が続くものだけを旧書式と見なす。
     # 「This will trigger: ...」のような一般名詞としての用法で失敗させないため。
-    r"(?:Triggers?|明示トリガ|トリガー?|追加トリガ)\s*[:：]\s*['\"]", re.IGNORECASE
+    r"(?:Triggers?|明示トリガ|トリガー?|追加トリガ)\s*[:：]\s*['\"]",
+    re.IGNORECASE,
 )
 # 末尾の全角丸括弧に「・」区切りで並べたトリガ語（規約「トリガ語の書式」）。
 #
@@ -252,11 +263,7 @@ def takes_arguments(fm: dict[str, str], body: str) -> bool:
     """SKILL.md が引数を取ると読めるかを判定する（判定根拠は上のコメント）。"""
     if "arguments" in fm:
         return True
-    return bool(
-        ARGUMENTS_VAR_RE.search(body)
-        or ARGUMENTS_TEXT_RE.search(body)
-        or ARGUMENTS_HEADING_RE.search(body)
-    )
+    return bool(ARGUMENTS_VAR_RE.search(body) or ARGUMENTS_TEXT_RE.search(body) or ARGUMENTS_HEADING_RE.search(body))
 
 
 class Finding:
@@ -333,15 +340,17 @@ def load_skills(skills_dir: pathlib.Path) -> list[dict]:
         except yamlio.YamlError as exc:
             fm, block, error = None, (yamlio.front_matter_text(text) or "").removesuffix("\n"), str(exc)
         split = yamlio.split_front_matter(text)
-        skills.append({
-            "dir": d.name,
-            "path": f,
-            "fm": fm,
-            "fm_error": error,
-            "block": block,
-            "body": split.body if split else text,
-            "lines": len(text.splitlines()),
-        })
+        skills.append(
+            {
+                "dir": d.name,
+                "path": f,
+                "fm": fm,
+                "fm_error": error,
+                "block": block,
+                "body": split.body if split else text,
+                "lines": len(text.splitlines()),
+            }
+        )
     return skills
 
 
@@ -369,8 +378,7 @@ def check_skill(s: dict) -> list[Finding]:
         if len(name) > NAME_MAX:
             add("error", "spec/name", f"name が {len(name)} 文字（上限 {NAME_MAX}）")
         if not NAME_RE.match(name):
-            add("error", "spec/name",
-                f"name '{name}' は小文字英数とハイフンのみ・先頭末尾ハイフン不可・連続ハイフン不可")
+            add("error", "spec/name", f"name '{name}' は小文字英数とハイフンのみ・先頭末尾ハイフン不可・連続ハイフン不可")
 
     if not desc:
         add("error", "spec/description", "description がない、または空")
@@ -385,17 +393,14 @@ def check_skill(s: dict) -> list[Finding]:
     # Agent Skills 仕様がシステムプロンプトへの注入リスクとして警告している。
     if "<" in s["block"] or ">" in s["block"]:
         bad = [k for k, v in fm.items() if "<" in v or ">" in v]
-        add("error", "safety/angle-bracket",
-            f"frontmatter に < または > が含まれる（{', '.join(bad) or '不明'}）")
+        add("error", "safety/angle-bracket", f"frontmatter に < または > が含まれる（{', '.join(bad) or '不明'}）")
 
     # --- 可搬性 ---
     # Codex と Kiro は when_to_use を読まないため、発動条件は description に要る。
     if desc and not USE_WHEN_RE.search(desc):
-        add("error", "portability/use-when",
-            "description に発動条件を示す語（Use when / 使う / とき）がない")
+        add("error", "portability/use-when", "description に発動条件を示す語（Use when / 使う / とき）がない")
     if desc and not DOUBLE_QUOTED_DESC_RE.search(s["block"]):
-        add("error", "portability/quote",
-            "description が二重引用符で囲まれていない（Kiro が未引用のコロンで検出に失敗する）")
+        add("error", "portability/quote", "description が二重引用符で囲まれていない（Kiro が未引用のコロンで検出に失敗する）")
     if desc:
         # Codex は初期一覧が予算を超えると description を先頭から残して短縮する。
         # 「いつ使うか」が後半にしかないと、短縮後は暗黙起動の判定に届かない。
@@ -405,28 +410,34 @@ def check_skill(s: dict) -> list[Finding]:
         triggers = extract_triggers(desc, wtu)
         has_trigger = any(t.lower() in lead.lower() for t in triggers)
         if not has_trigger and not USE_WHEN_RE.search(lead):
-            add("warn", "portability/lead",
+            add(
+                "warn",
+                "portability/lead",
                 f"description の先頭 {DESC_LEAD_CHARS} 文字に用途もトリガ語も現れない"
-                "（Codex は予算超過時に description を先頭から残して短縮する）")
+                "（Codex は予算超過時に description を先頭から残して短縮する）",
+            )
 
     if LEGACY_TRIGGER_RE.search(desc) or LEGACY_TRIGGER_RE.search(wtu):
-        add("error", "portability/legacy-trigger",
-            "廃止した旧書式のトリガ宣言（Triggers: / 明示トリガ:）が残っている。"
-            "末尾の全角括弧へ `（語・語）` の形で並べる")
+        add(
+            "error",
+            "portability/legacy-trigger",
+            "廃止した旧書式のトリガ宣言（Triggers: / 明示トリガ:）が残っている。末尾の全角括弧へ `（語・語）` の形で並べる",
+        )
 
     positional = sorted({m.group(0) for m in POSITIONAL_ARG_RE.finditer(s["body"])})
     if positional:
-        add("error", "portability/positional-arg",
+        add(
+            "error",
+            "portability/positional-arg",
             f"本文に位置引数（{', '.join(positional)}）がある。Claude Code が起動時の引数へ"
-            "置き換えるため、名前付きの変数で受けるか処理をスクリプトへ移す")
+            "置き換えるため、名前付きの変数で受けるか処理をスクリプトへ移す",
+        )
 
     # --- 運用 ---
     if len(desc) > DESCRIPTION_OPS_MAX:
-        add("error", "ops/description-length",
-            f"description が {len(desc)} 文字（運用上限 {DESCRIPTION_OPS_MAX}）")
+        add("error", "ops/description-length", f"description が {len(desc)} 文字（運用上限 {DESCRIPTION_OPS_MAX}）")
     if len(desc) + len(wtu) > DESC_PLUS_WTU_MAX:
-        add("error", "ops/desc-plus-wtu",
-            f"description + when_to_use が {len(desc) + len(wtu)} 文字（上限 {DESC_PLUS_WTU_MAX}）")
+        add("error", "ops/desc-plus-wtu", f"description + when_to_use が {len(desc) + len(wtu)} 文字（上限 {DESC_PLUS_WTU_MAX}）")
     if s["lines"] > SKILL_MD_MAX_LINES:
         add("error", "ops/skill-lines", f"SKILL.md が {s['lines']} 行（上限 {SKILL_MD_MAX_LINES}）")
 
@@ -436,32 +447,35 @@ def check_skill(s: dict) -> list[Finding]:
         d_trigs = {t.lower() for t in extract_triggers(desc)}
         w_trigs = {t.lower() for t in extract_triggers(wtu)}
         if w_trigs and not (w_trigs - d_trigs):
-            add("warn", "ops/wtu-no-extra",
-                "when_to_use のトリガ語が description と同一で、追加トリガがない")
+            add("warn", "ops/wtu-no-extra", "when_to_use のトリガ語が description と同一で、追加トリガがない")
 
     # Codex と Kiro には disable-model-invocation / user-invocable がなく description は
     # 常に読まれる。発動制御の意図を description 自体へ書き残す必要がある。
     if fm.get("disable-model-invocation", "").lower() == "true":
         if not re.search(r"明示|explicit|Explicit", desc):
-            add("error", "portability/explicit-only",
+            add(
+                "error",
+                "portability/explicit-only",
                 "明示指示専用の Skill は description に「利用者が明示的に指示したときのみ実行する」"
-                "旨を書く（Codex / Kiro は disable-model-invocation を解釈しない）")
+                "旨を書く（Codex / Kiro は disable-model-invocation を解釈しない）",
+            )
     if fm.get("user-invocable", "").lower() == "false":
         if not re.search(r"知識として|参照する|実行しない|reference only|do not execute", desc):
-            add("error", "portability/inject-only",
+            add(
+                "error",
+                "portability/inject-only",
                 "常時注入のみの Skill は description に「知識として参照する。手順として実行しない」"
-                "旨を書く（Codex / Kiro は user-invocable を解釈しない）")
+                "旨を書く（Codex / Kiro は user-invocable を解釈しない）",
+            )
 
     dmi = fm.get("disable-model-invocation", "").lower() == "true"
     uinv = fm.get("user-invocable", "").lower() == "false"
     if dmi and uinv:
-        add("error", "ops/uninvocable",
-            "disable-model-invocation: true と user-invocable: false の同時指定は誰も起動できない")
+        add("error", "ops/uninvocable", "disable-model-invocation: true と user-invocable: false の同時指定は誰も起動できない")
     if dmi and takes_arguments(fm, s["body"]) and not fm.get("argument-hint"):
         # 規約は「引数を取るなら + argument-hint」。引数を取らない明示指示専用 Skill には
         # 要求しない（判定方法は takes_arguments の説明を参照）。
-        add("error", "ops/argument-hint",
-            "引数を取る明示指示専用 Skill に argument-hint がない（明示起動時の引数が伝わらない）")
+        add("error", "ops/argument-hint", "引数を取る明示指示専用 Skill に argument-hint がない（明示起動時の引数が伝わらない）")
 
     ctx = fm.get("context", "")
     for k in ("agent", "background"):
@@ -481,8 +495,7 @@ def load_calibration() -> tuple[float, str]:
         try:
             d = json.loads(CALIBRATION_FILE.read_text(encoding="utf-8"))
             cpt = float(d["chars_per_token"])
-            src = (f"{CALIBRATION_FILE.name}"
-                   f"（{d.get('measured_at', '?')} に {d.get('runtime', '?')} で実測）")
+            src = f"{CALIBRATION_FILE.name}（{d.get('measured_at', '?')} に {d.get('runtime', '?')} で実測）"
             return cpt, src
         except (ValueError, KeyError, OSError):
             pass
@@ -572,20 +585,26 @@ def check_budget(metrics: dict) -> list[Finding]:
     """
     out: list[Finding] = []
     limits = listing_limits()
-    levels = {"claude": "error", "codex": CODEX_LISTING_LEVEL, "kiro": "error",
-              "agy": "error"}
+    levels = {"claude": "error", "codex": CODEX_LISTING_LEVEL, "kiro": "error", "agy": "error"}
     for runtime, total in sorted(metrics["listings"].items()):
         limit = limits.get(runtime)
         if limit is not None and total > limit:
-            out.append(Finding("(全体)", levels.get(runtime, "error"),
-                               f"ops/{runtime}-listing",
-                               f"{runtime} の初期一覧に載る合計が {total} 文字（上限 {limit}）"))
+            out.append(
+                Finding(
+                    "(全体)",
+                    levels.get(runtime, "error"),
+                    f"ops/{runtime}-listing",
+                    f"{runtime} の初期一覧に載る合計が {total} 文字（上限 {limit}）",
+                )
+            )
     fm_total = metrics["frontmatter_total"]
     if fm_total > FRONTMATTER_TOTAL_MAX:
         # ランタイムの制約ではなく独自の目安なので警告にとどめる。
-        out.append(Finding("(全体)", "warn", "ops/frontmatter-total",
-                           f"全 Skill の frontmatter 合計が {fm_total} 文字"
-                           f"（目安 {FRONTMATTER_TOTAL_MAX}）"))
+        out.append(
+            Finding(
+                "(全体)", "warn", "ops/frontmatter-total", f"全 Skill の frontmatter 合計が {fm_total} 文字（目安 {FRONTMATTER_TOTAL_MAX}）"
+            )
+        )
     return out
 
 
@@ -598,16 +617,14 @@ def check_trigger_collisions(skills: list[dict]) -> list[Finding]:
     owners: dict[str, list[str]] = {}
     for s in skills:
         fm = s["fm"] or {}
-        trigs = extract_triggers(fm.get("description", ""),
-                                 fm.get("when_to_use", ""))
+        trigs = extract_triggers(fm.get("description", ""), fm.get("when_to_use", ""))
         for t in trigs:
             owners.setdefault(t.lower(), []).append(s["dir"])
     out: list[Finding] = []
     for trig, names in sorted(owners.items()):
         uniq = sorted(set(names))
         if len(uniq) > 1:
-            out.append(Finding(", ".join(uniq), "error", "ops/trigger-collision",
-                               f"トリガ語 '{trig}' が複数の Skill で重複している"))
+            out.append(Finding(", ".join(uniq), "error", "ops/trigger-collision", f"トリガ語 '{trig}' が複数の Skill で重複している"))
     return out
 
 
@@ -636,19 +653,23 @@ def check_external_name_collisions(skills: list[dict]) -> list[Finding]:
         # すり抜けるのを防ぐためである。`/` メニューの表示名をコピーしてしまう誤りは起きやすく、
         # `-` だけの判定だと衝突があっても警告が出ず、見逃したことにも気づけない。
         # 規約どおりのエントリしかない現状では、この分岐があっても挙動は変わらない。
-        hits = [e for e in KNOWN_EXTERNAL_SKILL_NAMES
-                if e == name or e.endswith(("-" + name, ":" + name))]
+        hits = [e for e in KNOWN_EXTERNAL_SKILL_NAMES if e == name or e.endswith(("-" + name, ":" + name))]
         if hits:
-            out.append(Finding(s["dir"], "warn", "portability/external-name",
-                               f"Skill 名 '{name}' が既知の外部 Skill "
-                               f"({', '.join(hits)}) の末尾要素になっている。"
-                               "`/` メニューで外部側に埋もれるため、"
-                               "接頭辞で区別できる名前へ寄せる"))
+            out.append(
+                Finding(
+                    s["dir"],
+                    "warn",
+                    "portability/external-name",
+                    f"Skill 名 '{name}' が既知の外部 Skill "
+                    f"({', '.join(hits)}) の末尾要素になっている。"
+                    "`/` メニューで外部側に埋もれるため、"
+                    "接頭辞で区別できる名前へ寄せる",
+                )
+            )
     return out
 
 
-SKILLS_ROW_RE = re.compile(
-    r"^\|\s*(?:[\w.-]+:)?([\w.-]+)\s*\|[^|]*\|\s*[~<]?\s*([\d.]+)\s*k?\s*\|", re.M)
+SKILLS_ROW_RE = re.compile(r"^\|\s*(?:[\w.-]+:)?([\w.-]+)\s*\|[^|]*\|\s*[~<]?\s*([\d.]+)\s*k?\s*\|", re.M)
 
 
 def calibrate(skills_dirs: list[pathlib.Path]) -> int:
@@ -666,8 +687,7 @@ def calibrate(skills_dirs: list[pathlib.Path]) -> int:
         print(f"[calibrate] claude の実行に失敗: {e}", file=sys.stderr)
         return 1
     if proc.returncode != 0:
-        print(f"[calibrate] claude が異常終了（exit {proc.returncode}）\n{proc.stderr[-500:]}",
-              file=sys.stderr)
+        print(f"[calibrate] claude が異常終了（exit {proc.returncode}）\n{proc.stderr[-500:]}", file=sys.stderr)
         return 1
     try:
         result = json.loads(proc.stdout).get("result", "")
@@ -677,8 +697,7 @@ def calibrate(skills_dirs: list[pathlib.Path]) -> int:
 
     head = result.find("### Skills")
     if head < 0:
-        print("[calibrate] 出力に Skills の内訳がない。/context の書式が変わった可能性がある",
-              file=sys.stderr)
+        print("[calibrate] 出力に Skills の内訳がない。/context の書式が変わった可能性がある", file=sys.stderr)
         return 1
     measured: dict[str, float] = {}
     for name, tok in SKILLS_ROW_RE.findall(result[head:]):
@@ -698,8 +717,7 @@ def calibrate(skills_dirs: list[pathlib.Path]) -> int:
                 continue
             fm = sk["fm"] or {}
             name = fm.get("name", sk["dir"])
-            body = (fm.get("description", "") +
-                    fm.get("when_to_use", ""))[:CLAUDE_ITEM_TRUNCATE]
+            body = (fm.get("description", "") + fm.get("when_to_use", ""))[:CLAUDE_ITEM_TRUNCATE]
             chars[sk["dir"]] = len(name) + len(body)
 
     common = sorted(set(chars) & set(measured))
@@ -723,8 +741,7 @@ def calibrate(skills_dirs: list[pathlib.Path]) -> int:
         "chars_per_token": cpt,
         "note": "Skill 単位のトークンを出せるのは Claude Code だけのため、これを基準にする。",
     }
-    CALIBRATION_FILE.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-                                encoding="utf-8")
+    CALIBRATION_FILE.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"[calibrate] 突き合わせ {len(common)} 個 / {total_chars} 文字 / {total_tokens:.0f} トークン")
     print(f"[calibrate] 換算比 {cpt} 文字/トークン を {CALIBRATION_FILE} へ保存した")
     for runtime, limit in listing_limits().items():
@@ -733,17 +750,16 @@ def calibrate(skills_dirs: list[pathlib.Path]) -> int:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--skills-dir", action="append", default=None,
-                    help="チェック対象の Skill ディレクトリ。複数指定できる"
-                         "（既定: manifests/ を持つ plugin family の skills/ を全てチェック）")
-    ap.add_argument("--strict", action="store_true",
-                    help="警告も失敗として扱う")
-    ap.add_argument("--report", action="store_true",
-                    help="判定せず実測値の一覧だけ出力する")
-    ap.add_argument("--calibrate", action="store_true",
-                    help="Claude Code の /context を実測し、文字数→トークンの換算比を保存する")
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument(
+        "--skills-dir",
+        action="append",
+        default=None,
+        help="チェック対象の Skill ディレクトリ。複数指定できる（既定: manifests/ を持つ plugin family の skills/ を全てチェック）",
+    )
+    ap.add_argument("--strict", action="store_true", help="警告も失敗として扱う")
+    ap.add_argument("--report", action="store_true", help="判定せず実測値の一覧だけ出力する")
+    ap.add_argument("--calibrate", action="store_true", help="Claude Code の /context を実測し、文字数→トークンの換算比を保存する")
     args = ap.parse_args()
 
     if args.skills_dir:
@@ -806,32 +822,32 @@ def main() -> int:
 
     if args.report:
         for skills_dir, m in per_family:
-            print(f"# {skills_dir}  Skill {sum(1 for s in skills if str(skills_dir) in str(s['path']))} 個"
-                  f" / frontmatter {m['frontmatter_total']} 文字"
-                  f" / claude 一覧 {m['listings'].get('claude', 0)} 文字")
+            print(
+                f"# {skills_dir}  Skill {sum(1 for s in skills if str(skills_dir) in str(s['path']))} 個"
+                f" / frontmatter {m['frontmatter_total']} 文字"
+                f" / claude 一覧 {m['listings'].get('claude', 0)} 文字"
+            )
         print()
         print(f"{'skill':34} {'lines':>5} {'desc':>5} {'wtu':>5}  flags")
         for s in sorted(skills, key=lambda x: x["dir"]):
             fm = s["fm"] or {}
-            flags = [k for k in ("disable-model-invocation", "user-invocable", "paths",
-                                 "effort", "context", "arguments", "license")
-                     if k in fm]
-            print(f"{s['dir']:34} {s['lines']:>5} "
-                  f"{len(fm.get('description', '')):>5} "
-                  f"{len(fm.get('when_to_use', '')):>5}  {','.join(flags)}")
+            flags = [
+                k for k in ("disable-model-invocation", "user-invocable", "paths", "effort", "context", "arguments", "license") if k in fm
+            ]
+            print(
+                f"{s['dir']:34} {s['lines']:>5} {len(fm.get('description', '')):>5} {len(fm.get('when_to_use', '')):>5}  {','.join(flags)}"
+            )
         print(f"\nSkill 数: {len(skills)}")
         # 予算は plugin family をまたいだ合計で判定するが、利用者が片方しか入れない
         # 場合もあるため family 別の内訳も出す。
         limits = listing_limits()
         names = [d.parent.name.replace("-shared", "") for d, _ in per_family]
-        print(f"\n{'runtime':8} {'合計':>7} {'上限':>7}  " +
-              "  ".join(f"{n:>14}" for n in names))
+        print(f"\n{'runtime':8} {'合計':>7} {'上限':>7}  " + "  ".join(f"{n:>14}" for n in names))
         for runtime, total in sorted(metrics["listings"].items()):
             limit = limits.get(runtime)
             cells = "  ".join(f"{m['listings'].get(runtime, 0):>14}" for _, m in per_family)
             print(f"{runtime:8} {total:>7} {(limit or '—'):>7}  {cells}")
-        print(f"\nfrontmatter 合計: {metrics['frontmatter_total']} 文字 "
-              f"(目安 {FRONTMATTER_TOTAL_MAX})")
+        print(f"\nfrontmatter 合計: {metrics['frontmatter_total']} 文字 (目安 {FRONTMATTER_TOTAL_MAX})")
         return 0
 
     errors = [f for f in findings if f.level == "error"]

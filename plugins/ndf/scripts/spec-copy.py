@@ -12,6 +12,7 @@
 結果は lib/step_result.py の形の 1 行の JSON（`tool: "spec-copy"`）。終了コードは
 0 = 書いた・一致した / 1 = 無い節か中身の違う節がある / 2 = 本文か写しを読めない。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -93,8 +94,10 @@ def normalize(lines: list[str]) -> list[str]:
 def cmd_write(a):
     data = fetch_issue(a.issue, a.repo)
     title = str(data.get("title") or "").strip()
-    text = f"# #{a.issue}: {title}\n\n{MARKER}（#{a.issue}）で、この文書はその写しである。" \
-           f"`spec-copy.py write` で作り直す。手で直さない。\n\n" + before_progress(data["body"]).lstrip("\n")
+    text = (
+        f"# #{a.issue}: {title}\n\n{MARKER}（#{a.issue}）で、この文書はその写しである。"
+        f"`spec-copy.py write` で作り直す。手で直さない。\n\n" + before_progress(data["body"]).lstrip("\n")
+    )
     path = Path(a.file)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -126,8 +129,15 @@ def cmd_check(a):
             diff = "\n".join(difflib.unified_diff(w, h, "本文", "写し", lineterm="", n=1))
             items.append({"name": label, "result": "differs", "diff": diff})
     if items:
-        emit(result(TOOL, "stopped", f"{len(items)} 節が本文と食い違う。本文に合わせて write で作り直す: "
-                                     + " / ".join(it["name"] for it in items), items), EXIT_VIOLATION)
+        emit(
+            result(
+                TOOL,
+                "stopped",
+                f"{len(items)} 節が本文と食い違う。本文に合わせて write で作り直す: " + " / ".join(it["name"] for it in items),
+                items,
+            ),
+            EXIT_VIOLATION,
+        )
     emit(result(TOOL, "ok", f"{a.file} は #{a.issue} の本文と一致する", [], {"sections": len(pairs)}))
 
 

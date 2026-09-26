@@ -181,8 +181,7 @@ def _pwk_body_check_autouse(request) -> Iterator[None]:
             _write_jsonl(ev)
 
             ev.log_lines.append(
-                f"[body_check] {len(ev.body_check_violations)} 件の違反: "
-                + _format_violation_summary(ev.body_check_violations)
+                f"[body_check] {len(ev.body_check_violations)} 件の違反: " + _format_violation_summary(ev.body_check_violations)
             )
 
             if config.body_check.fail_on_match:

@@ -1,4 +1,5 @@
 """GitHub の呼び出しの最下層（lib/gh_call.py・#1142 の L0・不足 g）。ETag 付きの読み直しと、githubkit と gh api の切り替え。"""
+
 from __future__ import annotations
 
 import sys
@@ -30,8 +31,7 @@ def test_rest_failure_is_none_and_request_keeps_the_reason(fake):
 
 def test_rest_cached_sends_the_etag_and_a_304_is_not_a_failure(fake):
     """読み直しは If-None-Match を付け、304（gh api は終了コード 1）なら前の本文を返す。"""
-    responses = [(0, rest_out({"state": "open"}, etag='W/"e1"')),
-                 (1, rest_out(None, status="304 Not Modified", etag='W/"e1"'))]
+    responses = [(0, rest_out({"state": "open"}, etag='W/"e1"')), (1, rest_out(None, status="304 Not Modified", etag='W/"e1"'))]
     fake.on_fn("api", fn=lambda args, stdin: gh_call.GhResult(*responses.pop(0), "gh: HTTP 304" if not responses else ""))
     first = gh_call.rest_cached("repos/o/r/pulls/1")
     second = gh_call.rest_cached("repos/o/r/pulls/1")
@@ -57,6 +57,7 @@ def test_client_is_not_used_when_the_runner_is_replaced(fake):
 class FakeResponse:
     def __init__(self, status, body, headers=None, revalidated=False):
         import json
+
         self.status_code, self.headers = status, headers or {}
         self.content = json.dumps(body).encode() if body is not None else b""
         self._body = body
@@ -79,8 +80,10 @@ class FakeClient:
 
 
 def test_request_goes_through_githubkit_when_available(monkeypatch):
-    c = FakeClient(FakeResponse(200, {"number": 1}, {"X-RateLimit-Remaining": "10", "ETag": '"e"'}),
-                   FakeResponse(200, {"number": 1}, {"ETag": '"e"'}, revalidated=True))
+    c = FakeClient(
+        FakeResponse(200, {"number": 1}, {"X-RateLimit-Remaining": "10", "ETag": '"e"'}),
+        FakeResponse(200, {"number": 1}, {"ETag": '"e"'}, revalidated=True),
+    )
     monkeypatch.setattr(gh_call, "client", lambda: c)
     monkeypatch.setattr(gh_call, "_ETAGS", {})
     first = gh_call.rest_cached("repos/o/r/pulls/1")
@@ -94,9 +97,16 @@ def test_githubkit_failures_become_a_response_with_the_reason(monkeypatch):
     class Failed(Exception):
         def __init__(self):
             super().__init__("Request failed")
-            self.response = type("R", (), {"raw_response": type("Raw", (), {
-                "status_code": 403, "headers": {"X-RateLimit-Remaining": "0"},
-                "text": "API rate limit exceeded"})()})()
+            self.response = type(
+                "R",
+                (),
+                {
+                    "raw_response": type(
+                        "Raw", (), {"status_code": 403, "headers": {"X-RateLimit-Remaining": "0"}, "text": "API rate limit exceeded"}
+                    )()
+                },
+            )()
+
     monkeypatch.setattr(gh_call, "client", lambda: FakeClient(Failed()))
     resp = gh_call.request("repos/o/r/pulls/1", "PATCH", {"body": "x"})
     assert resp.status == 403 and resp.rate_remaining == 0 and "rate limit" in resp.error
@@ -113,6 +123,7 @@ def test_rest_response_keeps_the_four_positional_fields():
 def test_gh_modules_import_in_one_direction():
     """どの gh_* も gh_parts を import しない。gh_call・gh_fields・gh_sections は他の gh_* を import しない（循環しない）。"""
     import ast
+
     for f in sorted(LIB.glob("gh_*.py")):
         tree = ast.parse(f.read_text())
         names = {a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
@@ -123,11 +134,22 @@ def test_gh_modules_import_in_one_direction():
 
 def test_gh_parts_reexports_but_not_the_runner():
     import importlib.util
+
     spec = importlib.util.spec_from_file_location("ndf_lib_gh_parts_reexport", LIB / "gh_parts.py")
     gp = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(gp)
-    for name in ("GhResult", "RestResponse", "parse_rest_headers", "gh", "is_rate_limited", "view_json",
-                 "unresolved_threads", "fetch_check_runs", "fold_check_runs", "check_result"):
+    for name in (
+        "GhResult",
+        "RestResponse",
+        "parse_rest_headers",
+        "gh",
+        "is_rate_limited",
+        "view_json",
+        "unresolved_threads",
+        "fetch_check_runs",
+        "fold_check_runs",
+        "check_result",
+    ):
         assert hasattr(gp, name), name
     assert not hasattr(gp, "RUNNER")
 

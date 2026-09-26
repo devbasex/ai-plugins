@@ -1,4 +1,5 @@
 """statefile.emit が現在出力する bash 向けの値を固定する。"""
+
 from __future__ import annotations
 
 import importlib.util
@@ -81,4 +82,3 @@ def test_save_writes_state_creates_parent_directory_and_calls_registered_hook(mo
 
     assert loaded == state
     assert calls == [(path, state)]
-

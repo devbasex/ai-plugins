@@ -20,6 +20,7 @@
 立てて保存し、終わったらフラグを消して保存する。フラグが残ったまま再開したら、最初から
 やり直す（取り消し済みの項目は `status: reverted` で飛ばす）。
 """
+
 from __future__ import annotations
 
 import pathlib
@@ -64,7 +65,10 @@ def _files_of(work: str, state: dict[str, Any], item_ids: Iterable[str]) -> set[
 
 
 def _attempt(
-    work: str, ordered: list[str], owner: dict[str, str], keep: set[str],
+    work: str,
+    ordered: list[str],
+    owner: dict[str, str],
+    keep: set[str],
     before: Optional[str],
 ) -> Optional[dict[str, str]]:
     """範囲を取り消し、`keep` の項目のコミットを古い順に積み直す。競合したら `None`。
@@ -104,7 +108,11 @@ def _close_commitless(state: dict[str, Any], targets: list[str], reason: str) ->
 
 
 def _replay_without_dropped(
-    work: str, state: dict[str, Any], ordered: list[str], targets: list[str], head: Optional[str],
+    work: str,
+    state: dict[str, Any],
+    ordered: list[str],
+    targets: list[str],
+    head: Optional[str],
 ) -> dict[str, Any]:
     """item、widened、all の順で積み直し、採用した方式と対応表を返す。"""
     owner = _owner(work, state)
@@ -114,8 +122,7 @@ def _replay_without_dropped(
     mapping = _attempt(work, ordered, owner, live - dropped, head)
     if mapping is None:
         files = _files_of(work, state, dropped)
-        widened = {i for i in live
-                   if i not in dropped and _files_of(work, state, [i]) & files}
+        widened = {i for i in live if i not in dropped and _files_of(work, state, [i]) & files}
         if widened:
             info(f"⚠ 積み直しが競合したため、同じファイルを触った {len(widened)} 件も取り消します")
             dropped |= widened
@@ -131,7 +138,10 @@ def _replay_without_dropped(
 
 
 def _record_drop(
-    state: dict[str, Any], work: str, result: dict[str, Any], context: dict[str, Any],
+    state: dict[str, Any],
+    work: str,
+    result: dict[str, Any],
+    context: dict[str, Any],
 ) -> dict[str, Any]:
     """積み直し結果を項目の状態、履歴、pending 状態へ反映する。"""
     mode, dropped, mapping = result["mode"], result["dropped"], result["mapping"]
@@ -143,13 +153,16 @@ def _record_drop(
         item["status"] = REVERTED
         item.setdefault(
             "failure_reason",
-            context["reason"] if item_id in context["targets"]
-            else f"{context['reason']}（{mode} の取り消しに巻き込まれた）",
+            context["reason"] if item_id in context["targets"] else f"{context['reason']}（{mode} の取り消しに巻き込まれた）",
         )
     record = {
-        "at": statefile.now(), "mode": mode, "reason": context["reason"],
-        "dropped": sorted(dropped), "extra": sorted(context["extra"]),
-        "reverted_commits": len(context["ordered"]), "replayed": len(mapping),
+        "at": statefile.now(),
+        "mode": mode,
+        "reason": context["reason"],
+        "dropped": sorted(dropped),
+        "extra": sorted(context["extra"]),
+        "reverted_commits": len(context["ordered"]),
+        "replayed": len(mapping),
     }
     state.setdefault("drops", []).append(record)
     state["pending_drop"] = None
@@ -173,8 +186,7 @@ def drop(
     """
     work = work_dir(state)
     base = (state.get("plan") or {}).get("base_sha")
-    targets = [i for i in item_ids
-               if (find_item(state, i, required=False) or {}).get("status") in LIVE]
+    targets = [i for i in item_ids if (find_item(state, i, required=False) or {}).get("status") in LIVE]
     targets = _close_commitless(state, targets, reason)
     extra = {_full(work, s) for s in extra_shas}
     if not targets and not extra:
@@ -185,6 +197,7 @@ def drop(
     ordered = commits_in_range(work, base, head or "HEAD")
     if ordered is None:
         from . import die
+
         die(f"取り消しの範囲を確定できません（起点 {base} / HEAD {head}）")
         raise SystemExit(4)
 
@@ -210,5 +223,4 @@ def resume_pending_drop(path: pathlib.Path, state: dict[str, Any]) -> None:
     if not pending:
         return
     info("↻ 前回終わらなかった取り消しをやり直します")
-    drop(path, state, list(pending.get("items") or []), str(pending.get("reason") or ""),
-         pending.get("extra") or [])
+    drop(path, state, list(pending.get("items") or []), str(pending.get("reason") or ""), pending.get("extra") or [])

@@ -2,6 +2,7 @@
 
 err.log・stdout.log の末尾を読み、照合の表（`monitor_patterns`）で利用上限・致命・警告を見分ける。
 """
+
 from __future__ import annotations
 
 import pathlib
@@ -16,6 +17,7 @@ import monitor_types
 @dataclass(frozen=True)
 class EarlyFatal:
     """早期の致命の一致。どのファイルで・何が・理由は何か（`None` なら `early_error`）。"""
+
     source: str
     message: str
     reason: Optional[str] = None
@@ -112,7 +114,7 @@ def _scan_claude_stdout(path: pathlib.Path, patterns: list[re.Pattern[str]]) -> 
     for pat in patterns:
         m = pat.search(data)
         if m:
-            return data[max(0, m.start() - 80):m.end() + 80].strip()
+            return data[max(0, m.start() - 80) : m.end() + 80].strip()
     return None
 
 

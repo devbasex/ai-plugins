@@ -9,6 +9,7 @@
 **経路そのものは `gh` を要するため実行では確かめない。** 関数の構造（同じ文が 2 回
 現れない・出力が 1 回だけ）を構文木で見る。
 """
+
 from __future__ import annotations
 
 import ast
@@ -45,9 +46,7 @@ def test_no_statement_appears_twice(init_new_state: ast.FunctionDef) -> None:
     """
     dumps = [ast.dump(stmt) for stmt in init_new_state.body]
     repeated = [d for d, n in collections.Counter(dumps).items() if n > 1]
-    assert not repeated, (
-        f"_init_new_state の本体に同じ文が {len(repeated)} 種類、2 回以上現れる"
-    )
+    assert not repeated, f"_init_new_state の本体に同じ文が {len(repeated)} 種類、2 回以上現れる"
 
 
 def _called_name(func: ast.expr) -> str | None:
@@ -59,9 +58,5 @@ def _called_name(func: ast.expr) -> str | None:
 
 @pytest.mark.parametrize("name", SINGLE_CALL)
 def test_the_call_appears_once(init_new_state: ast.FunctionDef, name: str) -> None:
-    calls = [
-        node for node in ast.walk(init_new_state)
-        if isinstance(node, ast.Call)
-        and _called_name(node.func) == name
-    ]
+    calls = [node for node in ast.walk(init_new_state) if isinstance(node, ast.Call) and _called_name(node.func) == name]
     assert len(calls) == 1, f"{name} が {len(calls)} 回呼ばれている"

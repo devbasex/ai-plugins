@@ -9,6 +9,7 @@
 
 3 つ目が `true` なら書かずに確かめ、食い違いを標準エラーに出して終了コード 1 で終わる。
 """
+
 from __future__ import annotations
 
 import json
@@ -28,9 +29,9 @@ def yaml_double_quoted(value: str) -> str:
 
 
 def published_skills(manifest_path: Path) -> set[str]:
-    return {line.split("#", 1)[0].strip()
-            for line in manifest_path.read_text(encoding="utf-8").splitlines()
-            if line.split("#", 1)[0].strip()}
+    return {
+        line.split("#", 1)[0].strip() for line in manifest_path.read_text(encoding="utf-8").splitlines() if line.split("#", 1)[0].strip()
+    }
 
 
 def expected_policies(skills_dir: Path, published: set[str]) -> dict[Path, str]:

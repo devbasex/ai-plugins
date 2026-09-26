@@ -9,6 +9,7 @@
 ここで見るのは、**他の項目に触れないこと**・**冪等であること**・**相対の指定を
 導入先の絶対パスへ直すこと**・**壊れた設定を黙って上書きしないこと**の 4 つである。
 """
+
 from __future__ import annotations
 
 import json
@@ -25,9 +26,7 @@ OTHER = {"other-tool": {"PreInvocation": [{"type": "command", "command": "true"}
 
 
 def run(*args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["bash", str(INSTALLER), *args], capture_output=True, text=True
-    )
+    return subprocess.run(["bash", str(INSTALLER), *args], capture_output=True, text=True)
 
 
 @pytest.fixture()
@@ -68,9 +67,7 @@ def config(tmp_path: Path) -> Path:
     return path
 
 
-def test_it_adds_the_plugin_hook_without_touching_other_entries(
-    config: Path, plugin_dir: Path
-) -> None:
+def test_it_adds_the_plugin_hook_without_touching_other_entries(config: Path, plugin_dir: Path) -> None:
     result = run("--config", str(config), "--plugin-dir", str(plugin_dir))
 
     assert result.returncode == 0, result.stderr
@@ -79,9 +76,7 @@ def test_it_adds_the_plugin_hook_without_touching_other_entries(
     assert written["other-tool"] == OTHER["other-tool"]
 
 
-def test_it_rewrites_relative_commands_to_the_installed_path(
-    config: Path, plugin_dir: Path
-) -> None:
+def test_it_rewrites_relative_commands_to_the_installed_path(config: Path, plugin_dir: Path) -> None:
     """利用者の設定へ差し込むと、実行時の現在地はプラグインの位置と揃わない。"""
     run("--config", str(config), "--plugin-dir", str(plugin_dir))
 
@@ -111,9 +106,7 @@ def test_dry_run_does_not_write(config: Path, plugin_dir: Path) -> None:
     assert config.read_text(encoding="utf-8") == before
 
 
-def test_uninstall_removes_only_the_plugin_entries(
-    config: Path, plugin_dir: Path
-) -> None:
+def test_uninstall_removes_only_the_plugin_entries(config: Path, plugin_dir: Path) -> None:
     run("--config", str(config), "--plugin-dir", str(plugin_dir))
 
     result = run("--config", str(config), "--plugin-dir", str(plugin_dir), "--uninstall")
@@ -143,12 +136,13 @@ def test_it_stops_on_a_broken_config(tmp_path: Path, plugin_dir: Path) -> None:
     assert broken.read_text(encoding="utf-8") == "{ this is not json"
 
 
-def test_it_falls_back_to_the_repository_definition(
-    config: Path, tmp_path: Path
-) -> None:
+def test_it_falls_back_to_the_repository_definition(config: Path, tmp_path: Path) -> None:
     """導入前でも中身を確かめられる。実体が無ければリポジトリの定義を読む。"""
     result = run(
-        "--config", str(config), "--plugin-dir", str(tmp_path / "not-installed"),
+        "--config",
+        str(config),
+        "--plugin-dir",
+        str(tmp_path / "not-installed"),
         "--dry-run",
     )
 
@@ -158,16 +152,12 @@ def test_it_falls_back_to_the_repository_definition(
 
 def test_the_repository_definition_is_the_one_that_is_distributed() -> None:
     """差し込む定義は、配布する `hooks.json` と同じものである。"""
-    source = json.loads(
-        (INSTALLER.parent / "hooks.json").read_text(encoding="utf-8")
-    )
+    source = json.loads((INSTALLER.parent / "hooks.json").read_text(encoding="utf-8"))
     assert sorted(source) == ["ndf-worktree"]
     assert sorted(source["ndf-worktree"]) == ["PreInvocation", "PreToolUse"]
 
 
-def test_a_relative_plugin_dir_is_resolved_to_an_absolute_path(
-    config: Path, plugin_dir: Path, tmp_path: Path
-) -> None:
+def test_a_relative_plugin_dir_is_resolved_to_an_absolute_path(config: Path, plugin_dir: Path, tmp_path: Path) -> None:
     """agy はリポジトリの外でも起動する。相対のまま保存すると hook が落ちる（#417 の 3）。
 
     `plugins/ndf/README.md` の案内は clone からの相対パスで書いてあるため、書かれた
@@ -175,11 +165,16 @@ def test_a_relative_plugin_dir_is_resolved_to_an_absolute_path(
     """
     result = subprocess.run(
         [
-            "bash", str(INSTALLER),
-            "--config", str(config),
-            "--plugin-dir", str(plugin_dir.relative_to(tmp_path)),
+            "bash",
+            str(INSTALLER),
+            "--config",
+            str(config),
+            "--plugin-dir",
+            str(plugin_dir.relative_to(tmp_path)),
         ],
-        cwd=str(tmp_path), capture_output=True, text=True,
+        cwd=str(tmp_path),
+        capture_output=True,
+        text=True,
     )
 
     assert result.returncode == 0, result.stderr
@@ -193,9 +188,7 @@ def spaced_plugin_dir(tmp_path: Path) -> Path:
     """空白とシェルの特殊文字を含む導入先。"""
     target = tmp_path / "plugin space" / "ndf$x"
     (target / "scripts").mkdir(parents=True)
-    (target / "scripts" / "worktree-guard.sh").write_text(
-        "#!/usr/bin/env bash\nexit 0\n", encoding="utf-8"
-    )
+    (target / "scripts" / "worktree-guard.sh").write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
     (target / "hooks.json").write_text(
         json.dumps(
             {
@@ -215,9 +208,7 @@ def spaced_plugin_dir(tmp_path: Path) -> Path:
     return target
 
 
-def test_a_command_with_a_spaced_path_is_runnable(
-    config: Path, spaced_plugin_dir: Path
-) -> None:
+def test_a_command_with_a_spaced_path_is_runnable(config: Path, spaced_plugin_dir: Path) -> None:
     """文字列の一致だけでは、シェルの語として壊れていることを捕まえられない（#417 の 4）。
 
     **正常終了するのに hook が効かない**形になるため、利用者から見て失敗が見えない。
@@ -231,9 +222,7 @@ def test_a_command_with_a_spaced_path_is_runnable(
     assert executed.returncode == 0, f"{command}\n{executed.stderr}"
 
 
-def test_uninstall_keeps_entries_the_plugin_does_not_distribute(
-    config: Path, plugin_dir: Path
-) -> None:
+def test_uninstall_keeps_entries_the_plugin_does_not_distribute(config: Path, plugin_dir: Path) -> None:
     """`ndf-` で始まる利用者の項目まで消さない（#417 の 8）。"""
     mine = {"PreInvocation": [{"type": "command", "command": "true"}]}
     current = json.loads(config.read_text(encoding="utf-8"))
@@ -249,39 +238,22 @@ def test_uninstall_keeps_entries_the_plugin_does_not_distribute(
     assert written["ndf-mine"] == mine
 
 
-def test_the_write_leaves_no_temporary_file_behind(
-    config: Path, plugin_dir: Path
-) -> None:
+def test_the_write_leaves_no_temporary_file_behind(config: Path, plugin_dir: Path) -> None:
     """置き換えで書く。中断で壊れた設定を残さない（#417 の 8）。"""
     result = run("--config", str(config), "--plugin-dir", str(plugin_dir))
 
     assert result.returncode == 0, result.stderr
-    leftovers = sorted(
-        p.name for p in config.parent.iterdir()
-        if p.name not in {"hooks.json", "hooks.json.bak"}
-    )
+    leftovers = sorted(p.name for p in config.parent.iterdir() if p.name not in {"hooks.json", "hooks.json.bak"})
     assert leftovers == []
-    assert sorted(json.loads(config.read_text(encoding="utf-8"))) == [
-        "ndf-worktree", "other-tool"
-    ]
+    assert sorted(json.loads(config.read_text(encoding="utf-8"))) == ["ndf-worktree", "other-tool"]
 
 
-def test_it_reports_a_command_it_could_not_rewrite(
-    config: Path, tmp_path: Path
-) -> None:
+def test_it_reports_a_command_it_could_not_rewrite(config: Path, tmp_path: Path) -> None:
     """黙って相対パスのまま保存すると、正常終了して効かない状態になる（決定 6）。"""
     target = tmp_path / "odd"
     (target / "scripts").mkdir(parents=True)
     (target / "hooks.json").write_text(
-        json.dumps(
-            {
-                "ndf-odd": {
-                    "PreInvocation": [
-                        {"type": "command", "command": "sh -c './scripts/x.sh'"}
-                    ]
-                }
-            }
-        ),
+        json.dumps({"ndf-odd": {"PreInvocation": [{"type": "command", "command": "sh -c './scripts/x.sh'"}]}}),
         encoding="utf-8",
     )
 

@@ -8,6 +8,7 @@
 ruamel.yaml は mcp-serena の環境（`pyproject.toml` と `uv.lock`。`serena_lsp/env.py` が用意する）にある。import は
 読むときまで遅らせる（hook は控えが使えれば読まない。`hooks.py`）。
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -21,6 +22,7 @@ def _parse(text: str):
     from ruamel.yaml import YAML
     from ruamel.yaml.comments import CommentedMap
     from ruamel.yaml.error import YAMLError
+
     try:
         data = YAML(typ="rt", pure=True).load(text)
     except YAMLError as exc:
@@ -35,6 +37,7 @@ def _parse(text: str):
 def _block(data, key: str):
     """(キーの行, ブロックの終わりの次の行, 要素) を返す。キーが無ければ None。"""
     from ruamel.yaml.comments import CommentedSeq
+
     if key not in data:
         return None
     start = data.lc.key(key)[0]
@@ -99,7 +102,7 @@ def append_list(text: str, key: str, values: list) -> str:
     _, end, _ = found
     lines = text.splitlines()
     last = lines[end - 1]
-    indent = last[:len(last) - len(last.lstrip())]
+    indent = last[: len(last) - len(last.lstrip())]
     return _join(lines[:end] + [f"{indent}- {v}" for v in added] + lines[end:], text)
 
 
@@ -132,5 +135,8 @@ def load_state(root):
         if override is not None:
             languages = override
     excluded = read_list(text, "mcp_serena_excluded")
-    return {"languages": languages, "marked": excluded is not None,
-            "excluded": [item.split()[0] for item in excluded or [] if item.split()]}
+    return {
+        "languages": languages,
+        "marked": excluded is not None,
+        "excluded": [item.split()[0] for item in excluded or [] if item.split()],
+    }

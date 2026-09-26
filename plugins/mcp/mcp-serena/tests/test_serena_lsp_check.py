@@ -1,4 +1,5 @@
 """check: 導入のチェック（AC13・AC14・AC15）と、対応表だけで言語を足せること。"""
+
 import json
 from pathlib import Path
 
@@ -122,8 +123,7 @@ def test_codex_skips_claude_code_items(tmp_path):
 
 def _custom_table(tmp_path, extra):
     data = table.load()
-    data["languages"].append({"serena": "zig", "extensions": [".zig"], "claude_plugin": None,
-                              "binaries": [], "extra_checks": extra})
+    data["languages"].append({"serena": "zig", "extensions": [".zig"], "claude_plugin": None, "binaries": [], "extra_checks": extra})
     path = tmp_path / "languages.json"
     path.write_text(json.dumps(data))
     return str(path)
@@ -145,6 +145,7 @@ def test_unknown_extra_check_exits_2(tmp_path):
 
 def test_installed_plugins_top_level_array_is_unreadable(tmp_path, monkeypatch):
     from serena_lsp import check
+
     (tmp_path / "plugins").mkdir()
     (tmp_path / "plugins/installed_plugins.json").write_text("[]")
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path))
@@ -155,6 +156,7 @@ def test_installed_plugins_top_level_array_is_unreadable(tmp_path, monkeypatch):
 def test_broken_table_json_exits_2(tmp_path, monkeypatch):
     # 対応表の JSON が壊れている（table.load が ValueError）→ Unreadable → 終了コード 2
     from serena_lsp import check
+
     root = _project(tmp_path / "r", ["python"])
     broken = tmp_path / "broken.json"
     broken.write_text("{")
@@ -169,6 +171,7 @@ def test_table_item_missing_extra_checks_is_rejected_by_validate_exits_2(tmp_pat
     # 対応表の要素に extra_checks キーが欠けている → table.load の validate が InvalidTable（ValueError）
     # で弾く → Unreadable → 終了コード 2。_load_languages の要素の参照（KeyError）までは届かない。
     from serena_lsp import check
+
     root = _project(tmp_path / "r", ["python"])
     data = table.load()
     del data["languages"][0]["extra_checks"]  # extra_checks だけを欠かせ、他は version 1 の形のまま
@@ -184,6 +187,7 @@ def test_table_item_missing_extra_checks_is_rejected_by_validate_exits_2(tmp_pat
 def test_flow_form_project_yml_exits_2(tmp_path, monkeypatch):
     # project.yml が流れの形の非空配列（UnsupportedShape）→ Unreadable → 終了コード 2
     from serena_lsp import check
+
     monkeypatch.delenv("SERENA_LSP_TABLE", raising=False)
     root = tmp_path / "r"
     (root / ".serena").mkdir(parents=True)

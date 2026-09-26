@@ -12,6 +12,7 @@ githubkit は `deps.require("github")` を呼んだエントリポイントの�
 `gh api` は 304 のとき終了コード 1 を返す（stdout にヘッダー、stderr に `gh: HTTP 304`）。ここでは終了コードでなく
 状態行の状態コードで 304 を見分け、失敗として扱わない。
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -94,8 +95,7 @@ def _response(status: int, headers: dict[str, str], body: Any, error: str = "") 
         rate_remaining = int(remaining) if remaining is not None else None
     except ValueError:
         rate_remaining = None
-    return RestResponse(headers, body, rate_remaining, headers.get("x-ratelimit-reset"), status,
-                        status == 304, error)
+    return RestResponse(headers, body, rate_remaining, headers.get("x-ratelimit-reset"), status, status == 304, error)
 
 
 def _via_gh(path: str, method: str, payload: Any, etag: str | None) -> RestResponse:
@@ -147,6 +147,7 @@ def client() -> Any:
         if not token:
             return None
         from githubkit import GitHub
+
         _CLIENT.append(GitHub(token, http_cache=True, auto_retry=True))
     return _CLIENT[0]
 

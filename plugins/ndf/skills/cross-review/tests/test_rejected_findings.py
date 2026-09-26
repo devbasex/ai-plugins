@@ -7,6 +7,7 @@
 
 `deferred_nits` が既に per-item を蓄積しているため、同じ形にする。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -34,16 +35,17 @@ def _state(**over) -> dict:
         "max_rounds": 12,
         "rotate_after": 8,
         "only": None,
-        "rounds": [{
-            "round": 1,
-            "pr": PR,
-            "started_at": "2026-09-09T00:00:00+00:00",
-            "codex": {"intent": "APPROVE", "by_severity": {}},
-            "agy": {"intent": "APPROVE", "by_severity": {}},
-        }],
+        "rounds": [
+            {
+                "round": 1,
+                "pr": PR,
+                "started_at": "2026-09-09T00:00:00+00:00",
+                "codex": {"intent": "APPROVE", "by_severity": {}},
+                "agy": {"intent": "APPROVE", "by_severity": {}},
+            }
+        ],
         "deferred_nits": [],
-        "pr_history": [{"pr": PR, "opened_at": "2026-09-09T00:00:00+00:00",
-                        "closed_at": None, "rounds": 1}],
+        "pr_history": [{"pr": PR, "opened_at": "2026-09-09T00:00:00+00:00", "closed_at": None, "rounds": 1}],
         "final": None,
     }
     state.update(over)
@@ -60,8 +62,13 @@ def _read(tmp_dir: pathlib.Path) -> dict:
 
 def _fix_result(tmp_dir: pathlib.Path, **over) -> None:
     payload = {
-        "pr": PR, "fix_commit": "abc1234", "ci_status": "SUCCESS",
-        "fixed_count": 0, "resolved_threads": [], "deferred": [], "rejected": [],
+        "pr": PR,
+        "fix_commit": "abc1234",
+        "ci_status": "SUCCESS",
+        "fixed_count": 0,
+        "resolved_threads": [],
+        "deferred": [],
+        "rejected": [],
     }
     payload.update(over)
     (tmp_dir / f"fix-pr{PR}-result.json").write_text(json.dumps(payload))
@@ -85,27 +92,40 @@ REJECTED = {
 
 # ---------------- 蓄積 ----------------
 
+
 def test_init_stores_an_empty_rejected_findings_list(tmp_dir, state_mod, monkeypatch):
     """新規初期化で保存される却下記録の初期値を固定する。"""
     worktree = tmp_dir / "worktree"
     worktree.mkdir()
     monkeypatch.setattr(review_lib.github, "_repo_from_git", lambda: REPO)
-    monkeypatch.setattr(review_lib.github, "_fetch_pr_metadata", lambda pr, repo:
-                        review_lib.github.PrMetadata(REPO, "author", "feature/test", "abc",
-                                             "develop", False, 4000, None))
+    monkeypatch.setattr(
+        review_lib.github,
+        "_fetch_pr_metadata",
+        lambda pr, repo: review_lib.github.PrMetadata(REPO, "author", "feature/test", "abc", "develop", False, 4000, None),
+    )
     monkeypatch.setattr(review_lib.github, "_viewer_login", lambda: "viewer")
     monkeypatch.setattr(review_lib.github, "_fetch_changed_files", lambda pr, repo: [])
     monkeypatch.setattr(review_lib.workspace, "_is_registered_worktree", lambda path: True)
     monkeypatch.setattr(review_lib.workspace, "_sync_worktree", lambda *args: None)
-    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs:
-                        subprocess.CompletedProcess(args[0], 0, stdout="", stderr=""))
-    monkeypatch.setattr(review_lib.participants.auth, "probe_auth", lambda runtimes, **kwargs: (
-        {r: {"command": r, "ok": True, "detail": ""} for r in runtimes}, False))
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, stdout="", stderr=""))
+    monkeypatch.setattr(
+        review_lib.participants.auth,
+        "probe_auth",
+        lambda runtimes, **kwargs: ({r: {"command": r, "ok": True, "detail": ""} for r in runtimes}, False),
+    )
 
-    review_lib.commands.init.cmd_init(argparse.Namespace(
-        pr=PR, max_rounds=12, rotate_after=8, only=None, worktree=str(worktree),
-        focus=None, extra_instructions_file=None, host="codex",
-    ))
+    review_lib.commands.init.cmd_init(
+        argparse.Namespace(
+            pr=PR,
+            max_rounds=12,
+            rotate_after=8,
+            only=None,
+            worktree=str(worktree),
+            focus=None,
+            extra_instructions_file=None,
+            host="codex",
+        )
+    )
 
     saved = _read(tmp_dir)
     assert "rejected_findings" in saved
@@ -120,8 +140,7 @@ def test_a_rejected_finding_is_kept_with_its_location(tmp_dir, state_mod):
 
     kept = _read(tmp_dir)["rejected_findings"]
     assert len(kept) == 1
-    for key in ("comment_id", "path", "line", "severity", "summary",
-                "reason_for_rejection"):
+    for key in ("comment_id", "path", "line", "severity", "summary", "reason_for_rejection"):
         assert kept[0][key] == REJECTED[key], key
 
 
@@ -144,11 +163,15 @@ def test_records_accumulate_across_rounds(tmp_dir, state_mod):
     review_lib.commands.merge_fix.cmd_merge_fix(argparse.Namespace(pr=PR, file=None))
 
     st = _read(tmp_dir)
-    st["rounds"].append({
-        "round": 2, "pr": PR, "started_at": "2026-09-09T01:00:00+00:00",
-        "codex": {"intent": "APPROVE", "by_severity": {}},
-        "agy": {"intent": "APPROVE", "by_severity": {}},
-    })
+    st["rounds"].append(
+        {
+            "round": 2,
+            "pr": PR,
+            "started_at": "2026-09-09T01:00:00+00:00",
+            "codex": {"intent": "APPROVE", "by_severity": {}},
+            "agy": {"intent": "APPROVE", "by_severity": {}},
+        }
+    )
     _write(tmp_dir, st)
     second = {**REJECTED, "comment_id": 3222849091, "line": 99}
     _fix_result(tmp_dir, rejected=[second])
@@ -163,8 +186,11 @@ def test_the_shape_matches_the_deferred_records(tmp_dir, state_mod):
     """`deferred_nits` と同じ形で読めること。"""
     _write(tmp_dir, _state())
     deferred = {
-        "comment_id": 3222849092, "path": "src/bar.py", "line": 7,
-        "severity": "nit", "summary": "末尾の空白",
+        "comment_id": 3222849092,
+        "path": "src/bar.py",
+        "line": 7,
+        "severity": "nit",
+        "summary": "末尾の空白",
         "reason_for_deferral": "好みの範囲",
     }
     _fix_result(tmp_dir, rejected=[REJECTED], deferred=[deferred])
@@ -178,6 +204,7 @@ def test_the_shape_matches_the_deferred_records(tmp_dir, state_mod):
 
 
 # ---------------- 既存の値を変えない ----------------
+
 
 def test_the_round_level_count_is_unchanged(tmp_dir, state_mod):
     """ラウンドごとの報告が読む件数は残す。"""
@@ -244,6 +271,7 @@ def test_non_dict_items_in_rejected_list_are_filtered_out(tmp_dir, state_mod):
 
 # ---------------- 報告 ----------------
 
+
 def test_the_report_lists_the_rejected_findings(tmp_dir, state_mod, capsys):
     _write(tmp_dir, _state(rejected_findings=[{**REJECTED, "pr": PR, "round": 1}]))
 
@@ -254,8 +282,7 @@ def test_the_report_lists_the_rejected_findings(tmp_dir, state_mod, capsys):
     assert "src/foo.py:42" in out
 
 
-NIT = {"comment_id": 91, "path": "src/bar.py", "line": 7,
-       "severity": "nit", "summary": "末尾の空白"}
+NIT = {"comment_id": 91, "path": "src/bar.py", "line": 7, "severity": "nit", "summary": "末尾の空白"}
 
 
 def test_the_nit_list_and_the_none_line_are_exclusive(tmp_dir, state_mod, capsys):
@@ -275,8 +302,7 @@ def test_the_nit_list_and_the_none_line_are_exclusive(tmp_dir, state_mod, capsys
 
 def test_the_none_line_survives_a_rejected_finding(tmp_dir, state_mod, capsys):
     """却下した指摘があっても、nit が無ければ「なし」を出す。"""
-    _write(tmp_dir, _state(deferred_nits=[],
-                           rejected_findings=[{**REJECTED, "pr": PR, "round": 1}]))
+    _write(tmp_dir, _state(deferred_nits=[], rejected_findings=[{**REJECTED, "pr": PR, "round": 1}]))
 
     review_lib.commands.report.cmd_report(argparse.Namespace(pr=PR))
 

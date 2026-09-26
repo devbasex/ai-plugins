@@ -44,6 +44,7 @@ NDF の Skill は任意のリポジトリに対して実行される。本文が
 **`--report` は出力を足すだけで、終了コードは上表のまま**である。レポートを常に 0 で
 返すと、同じチェックを一覧として実行した利用者と自動処理が違反を成功として扱う。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -96,24 +97,16 @@ SCRIPT_SKIP_DIRS = ("tests", "experimental")
 # 除外の基準は「記述の主題が NDF 自身の配置・配布であること」と「配布物の形で分岐した
 # 先の参照であること」の 2 つに限る。対象リポジトリへの指示は除外しない。
 EXCLUSIONS: dict[str, str] = {
-    "plugins/ndf/skills/release/references/form-package-plugin.md":
-        "配布物の形がプラグインのときだけ読む参照。形で分岐済み",
-    "plugins/ndf/skills/development-workflow/references/projects-tracking.md":
-        "agy が NDF 自身を複製する位置の説明。対象リポジトリを指していない",
-    "plugins/ndf/skills/official-skills-autoloader/SKILL.md":
-        "NDF 自身の配布先の指定。対象リポジトリを指していない",
-    "plugins/ndf/skills/out-of-scope/references/issue-target.md":
-        "NDF の実体を持つ clone を見分ける手順。対象リポジトリを指していない",
+    "plugins/ndf/skills/release/references/form-package-plugin.md": "配布物の形がプラグインのときだけ読む参照。形で分岐済み",
+    "plugins/ndf/skills/development-workflow/references/projects-tracking.md": "agy が NDF 自身を複製する位置の説明。対象リポジトリを指していない",
+    "plugins/ndf/skills/official-skills-autoloader/SKILL.md": "NDF 自身の配布先の指定。対象リポジトリを指していない",
+    "plugins/ndf/skills/out-of-scope/references/issue-target.md": "NDF の実体を持つ clone を見分ける手順。対象リポジトリを指していない",
     # 配布するスクリプト。キーは family の scripts/ を含むパスで書く
-    "plugins/ndf/scripts/release-steps.py":
-        "配布の形が package-plugin のときの部品（プラグインの版・changelog・release）。"
-        "supervise.py は .ndf/supervise.json の release.form が package-plugin のときだけ呼ぶ",
-    "plugins/ndf/scripts/release-verification-steps.py":
-        "配布の形が package-plugin のときの導入の確かめ（ランタイムごとの導入の経路）。形で分岐済み",
-    "plugins/ndf/scripts/lib/step_result.py":
-        "release-steps.py が使うプラグインの置き場（plugin_dir）。package-plugin の形の中だけで使う",
-    "plugins/ndf/scripts/worktree-setup.sh":
-        "NDF 自身の宣言の形（worktree.schema.json）の URL。対象リポジトリを指していない",
+    "plugins/ndf/scripts/release-steps.py": "配布の形が package-plugin のときの部品（プラグインの版・changelog・release）。"
+    "supervise.py は .ndf/supervise.json の release.form が package-plugin のときだけ呼ぶ",
+    "plugins/ndf/scripts/release-verification-steps.py": "配布の形が package-plugin のときの導入の確かめ（ランタイムごとの導入の経路）。形で分岐済み",
+    "plugins/ndf/scripts/lib/step_result.py": "release-steps.py が使うプラグインの置き場（plugin_dir）。package-plugin の形の中だけで使う",
+    "plugins/ndf/scripts/worktree-setup.sh": "NDF 自身の宣言の形（worktree.schema.json）の URL。対象リポジトリを指していない",
 }
 
 RUNTIMES = ("claude", "codex", "kiro", "agy")
@@ -222,8 +215,7 @@ def owning_skills_dir(key: str, skills_dirs: list[pathlib.Path]) -> pathlib.Path
     return None
 
 
-def validate_exclusions(exclusions: dict[str, str], scanned: set[str],
-                        skills_dirs: list[pathlib.Path], exhaustive: bool) -> list[str]:
+def validate_exclusions(exclusions: dict[str, str], scanned: set[str], skills_dirs: list[pathlib.Path], exhaustive: bool) -> list[str]:
     """除外の宣言が成立しているかを確かめ、成立しない理由を返す。
 
     実在のチェックは、**チェックした Skill ディレクトリに属する宣言だけ**へ掛ける。`--skills-dir`
@@ -241,14 +233,10 @@ def validate_exclusions(exclusions: dict[str, str], scanned: set[str],
         owner = owning_skills_dir(canon(key), skills_dirs)
         if owner is None:
             if exhaustive:
-                problems.append(
-                    f"除外の対象がどの Skill ディレクトリにも属さない: {key}"
-                    "（消したか移したなら、除外の宣言も外す）")
+                problems.append(f"除外の対象がどの Skill ディレクトリにも属さない: {key}（消したか移したなら、除外の宣言も外す）")
             continue
         if canon(key) not in scanned:
-            problems.append(
-                f"除外の対象が走査の範囲に実在しない: {key}"
-                "（消したか移したなら、除外の宣言も外す）")
+            problems.append(f"除外の対象が走査の範囲に実在しない: {key}（消したか移したなら、除外の宣言も外す）")
     return problems
 
 
@@ -264,16 +252,17 @@ def resolve_skills_dirs(given: list[str] | None) -> list[pathlib.Path]:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--skills-dir", action="append", default=None,
-                    help="チェック対象の Skill ディレクトリ。複数指定できる"
-                         "（既定: manifests/ を持つ plugin family の skills/ を全てチェック）")
-    ap.add_argument("--exclusions", default=None,
-                    help="除外の宣言を JSON（{相対パス: 理由}）で差し替える"
-                         "（既定: 本スクリプトの EXCLUSIONS）")
-    ap.add_argument("--report", action="store_true",
-                    help="走査した本数とヒット数を出す")
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument(
+        "--skills-dir",
+        action="append",
+        default=None,
+        help="チェック対象の Skill ディレクトリ。複数指定できる（既定: manifests/ を持つ plugin family の skills/ を全てチェック）",
+    )
+    ap.add_argument(
+        "--exclusions", default=None, help="除外の宣言を JSON（{相対パス: 理由}）で差し替える（既定: 本スクリプトの EXCLUSIONS）"
+    )
+    ap.add_argument("--report", action="store_true", help="走査した本数とヒット数を出す")
     args = ap.parse_args()
 
     skills_dirs = resolve_skills_dirs(args.skills_dir)
@@ -293,8 +282,7 @@ def main() -> int:
             print(f"[check-skill-repo-assumptions] 除外の宣言を読めない: {e}", file=sys.stderr)
             return 2
         if not isinstance(loaded, dict):
-            print("[check-skill-repo-assumptions] 除外の宣言は {相対パス: 理由} の対で書く",
-                  file=sys.stderr)
+            print("[check-skill-repo-assumptions] 除外の宣言は {相対パス: 理由} の対で書く", file=sys.stderr)
             return 2
         exclusions = loaded
 
@@ -314,21 +302,19 @@ def main() -> int:
         all_hits.extend(hits)
         report_lines.append(
             f"{skills_dir}: 公開する Skill {len(load_manifest_union(skills_dir))} 個 / "
-            f"Markdown {len(docs)} 本 / スクリプト {len(scripts)} 本 / ヒット {len(hits)} 行")
+            f"Markdown {len(docs)} 本 / スクリプト {len(scripts)} 本 / ヒット {len(hits)} 行"
+        )
 
     # 走査の範囲が欠けたままの結果は、ヒットが 0 でも「無い」ことの根拠にならない。
     # 除外の宣言より先に見る。範囲が欠けていると、除外の実在の判定も当てにならない。
     if unscanned:
-        print("[check-skill-repo-assumptions] manifest に載る Skill の本文を走査できない:",
-              file=sys.stderr)
+        print("[check-skill-repo-assumptions] manifest に載る Skill の本文を走査できない:", file=sys.stderr)
         for path in unscanned:
-            print(f"  - {path}（ディレクトリか、走査の対象になる Markdown が無い）",
-                  file=sys.stderr)
+            print(f"  - {path}（ディレクトリか、走査の対象になる Markdown が無い）", file=sys.stderr)
         print("\n配らなくなったなら manifests/*-skills.txt からも外す。", file=sys.stderr)
         return 2
 
-    problems = validate_exclusions(exclusions, scanned, skills_dirs,
-                                   exhaustive=args.skills_dir is None)
+    problems = validate_exclusions(exclusions, scanned, skills_dirs, exhaustive=args.skills_dir is None)
     if problems:
         print("[check-skill-repo-assumptions] 除外の宣言が成立していない:", file=sys.stderr)
         for p in problems:
@@ -344,8 +330,7 @@ def main() -> int:
     if args.report:
         for line in report_lines:
             print(line)
-        print(f"除外の宣言 {len(exclusions)} 件 / ヒット {len(all_hits)} 行 "
-              f"（うち除外の外 {len(outside)} 行）")
+        print(f"除外の宣言 {len(exclusions)} 件 / ヒット {len(all_hits)} 行 （うち除外の外 {len(outside)} 行）")
         for h in all_hits:
             mark = "除外" if h.key in excluded_keys else "検知"
             print(f"  [{mark}] {h}")
@@ -354,9 +339,11 @@ def main() -> int:
         print("[check-skill-repo-assumptions] 対象リポジトリを仮定した記述がある:", file=sys.stderr)
         for h in outside:
             print(f"  {h}", file=sys.stderr)
-        print("\n対象リポジトリに無い場合の振る舞いを、コマンドとセットで書く。"
-              "書き方は plugins/ndf/skills/AUTHORING.md「対象リポジトリを仮定しない」にある。",
-              file=sys.stderr)
+        print(
+            "\n対象リポジトリに無い場合の振る舞いを、コマンドとセットで書く。"
+            "書き方は plugins/ndf/skills/AUTHORING.md「対象リポジトリを仮定しない」にある。",
+            file=sys.stderr,
+        )
         return 1
 
     return 0

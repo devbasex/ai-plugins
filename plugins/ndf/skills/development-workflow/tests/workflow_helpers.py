@@ -5,6 +5,7 @@ conftest.py へ置くと、複数の Skill のテストを同時に実行した�
 
 **通信は行わない。** `gh` は PATH の差し替えで作り物へ向ける。
 """
+
 from __future__ import annotations
 
 import json
@@ -39,22 +40,32 @@ def run_lib(snippet: str, cwd: Path | None = None, env: dict | None = None) -> s
     """共通ライブラリを読み込んだ上で `snippet` を bash で実行する。"""
     script = f'set -uo pipefail\n. "{LIB}"\n{snippet}\n'
     return subprocess.run(
-        ["bash", "-c", script], cwd=str(cwd) if cwd else None,
-        env=env or os.environ.copy(), capture_output=True, text=True,
+        ["bash", "-c", script],
+        cwd=str(cwd) if cwd else None,
+        env=env or os.environ.copy(),
+        capture_output=True,
+        text=True,
     )
 
 
 def run_stage_check(*args: str, cwd: Path, env: dict) -> subprocess.CompletedProcess:
     return subprocess.run(
-        ["bash", str(STAGE_CHECK), *args], cwd=str(cwd), env=env,
-        capture_output=True, text=True,
+        ["bash", str(STAGE_CHECK), *args],
+        cwd=str(cwd),
+        env=env,
+        capture_output=True,
+        text=True,
     )
 
 
 def run_guard(payload: dict, cwd: Path, env: dict) -> subprocess.CompletedProcess:
     return subprocess.run(
-        ["bash", str(GUARD)], cwd=str(cwd), env=env,
-        input=json.dumps(payload, ensure_ascii=False), capture_output=True, text=True,
+        ["bash", str(GUARD)],
+        cwd=str(cwd),
+        env=env,
+        input=json.dumps(payload, ensure_ascii=False),
+        capture_output=True,
+        text=True,
     )
 
 
@@ -99,15 +110,13 @@ def stub_gh(bin_dir: Path, responses: dict[str, str]) -> Path:
     `!<終了コード>:<本文>` の形のときは、その終了コードで本文を標準エラーへ書く。
     """
     bin_dir.mkdir(parents=True, exist_ok=True)
-    table = "\n".join(
-        f'  *{json.dumps(key)}*) __ndf_reply {json.dumps(value)} ;;' for key, value in responses.items()
-    )
+    table = "\n".join(f"  *{json.dumps(key)}*) __ndf_reply {json.dumps(value)} ;;" for key, value in responses.items())
     (bin_dir / "gh").write_text(
         "#!/usr/bin/env bash\n"
         "__ndf_reply() {\n"
         '  case "$1" in\n'
         '    "!"*) local rest=${1#!}; printf "%s" "${rest#*:}" >&2; exit "${rest%%:*}" ;;\n'
-        '  esac\n'
+        "  esac\n"
         '  printf "%s" "$1"; exit 0\n'
         "}\n"
         'args="$*"\n'

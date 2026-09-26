@@ -9,6 +9,7 @@ hook の 1 本のエントリポイント（`hook.py` の token-guard。#1142 �
 **判定が失敗してもツールを止めない。** 拒否は `permissionDecision: deny` で返し、終了コードは
 常に 0 にする。
 """
+
 from __future__ import annotations
 
 import json
@@ -28,11 +29,19 @@ HOOKS = ROOT / "hooks" / "claude.json"
 MANIFESTS = ROOT / "manifests"
 
 STAGE_SKILLS = {
-    "implementation-plan", "document-drafting",
-    "cross-refactoring", "cross-review", "pr-review", "quality-gates",
-    "plan-to-spec", "merged",
-    "layout-review", "release-verification", "retrospective",
-    "development-workflow", "issue-plan-strategy",
+    "implementation-plan",
+    "document-drafting",
+    "cross-refactoring",
+    "cross-review",
+    "pr-review",
+    "quality-gates",
+    "plan-to-spec",
+    "merged",
+    "layout-review",
+    "release-verification",
+    "retrospective",
+    "development-workflow",
+    "issue-plan-strategy",
 }
 
 
@@ -55,8 +64,7 @@ def run(payload, state_dir, env=None, raw=None):
     if env:
         e.update(env)
     data = raw if raw is not None else json.dumps(payload)
-    return subprocess.run([sys.executable, str(SCRIPT), "token-guard"], input=data, capture_output=True,
-                          text=True, env=e, timeout=20)
+    return subprocess.run([sys.executable, str(SCRIPT), "token-guard"], input=data, capture_output=True, text=True, env=e, timeout=20)
 
 
 def denied(proc):
@@ -120,7 +128,7 @@ DENY_SLEEP = [
 ]
 
 ALLOW_SLEEP = [
-    "while read l; do echo \"$l\"; done < f; sleep 1",
+    'while read l; do echo "$l"; done < f; sleep 1',
     "python3 -m http.server & sleep 2",
     "for p in 1 2; do gh api x; sleep 1; done",
     "for i in 1 2; do sleep 3; done",
@@ -206,6 +214,7 @@ def test_sleep_guard_env(state):
 
 
 # ---------------------------------------------------------------- 連続 Read（AC7）
+
 
 def read(path, session="s1", **extra):
     ti = {"file_path": str(path)}
@@ -320,6 +329,7 @@ def test_parallel_reads_do_not_lose_updates(tmp_path, state):
 
 # ---------------------------------------------------------------- 可用性（AC9）
 
+
 def test_broken_json_passes(state):
     p = run(None, state, raw="{not json")
     assert p.returncode == 0 and p.stdout == ""
@@ -329,8 +339,14 @@ def test_without_hook_packages_passes(tmp_path, state):
     """hook の環境の外部パッケージ（tree-sitter-bash ほか）を import できない python では、判定をせずに通す。"""
     e = {k: v for k, v in os.environ.items() if not k.startswith("NDF_")}
     e["CLAUDE_PLUGIN_DATA"] = str(state)
-    p = subprocess.run([sys.executable, "-S", str(SCRIPT), "token-guard"], input=json.dumps(bash("sleep 30")),
-                       capture_output=True, text=True, env=e, timeout=20)
+    p = subprocess.run(
+        [sys.executable, "-S", str(SCRIPT), "token-guard"],
+        input=json.dumps(bash("sleep 30")),
+        capture_output=True,
+        text=True,
+        env=e,
+        timeout=20,
+    )
     assert p.returncode == 0 and p.stdout == ""
 
 
@@ -339,8 +355,7 @@ def test_unwritable_state_skips_read_but_keeps_sleep(tmp_path):
     ro.mkdir()
     ro.chmod(0o500)
     try:
-        env = {"CLAUDE_PLUGIN_DATA": "", "XDG_STATE_HOME": str(ro), "HOME": str(ro),
-               "TMPDIR": str(ro)}
+        env = {"CLAUDE_PLUGIN_DATA": "", "XDG_STATE_HOME": str(ro), "HOME": str(ro), "TMPDIR": str(ro)}
         f = tmp_path / "x.txt"
         f.write_text("")
         for _ in range(4):
@@ -356,6 +371,7 @@ def test_lock_held_passes(tmp_path, state):
     guards = state / "guards"
     guards.mkdir(parents=True)
     import filelock
+
     held = filelock.FileLock(str(guards / "s1.guard.lock"))
     held.acquire()
     try:
@@ -367,14 +383,15 @@ def test_lock_held_passes(tmp_path, state):
         held.release()
 
 
-@pytest.mark.parametrize("env,expect", [
-    ({"CLAUDE_PLUGIN_DATA": "{d}/pd"}, "{d}/pd/guards"),
-    ({"CLAUDE_PLUGIN_DATA": "", "XDG_STATE_HOME": "{d}/xdg"}, "{d}/xdg/ndf/guards"),
-    ({"CLAUDE_PLUGIN_DATA": "", "XDG_STATE_HOME": "", "HOME": "{d}/home"},
-     "{d}/home/.local/state/ndf/guards"),
-    ({"CLAUDE_PLUGIN_DATA": "", "XDG_STATE_HOME": "", "HOME": "", "TMPDIR": "{d}/tmp"},
-     "{d}/tmp/ndf-guards"),
-])
+@pytest.mark.parametrize(
+    "env,expect",
+    [
+        ({"CLAUDE_PLUGIN_DATA": "{d}/pd"}, "{d}/pd/guards"),
+        ({"CLAUDE_PLUGIN_DATA": "", "XDG_STATE_HOME": "{d}/xdg"}, "{d}/xdg/ndf/guards"),
+        ({"CLAUDE_PLUGIN_DATA": "", "XDG_STATE_HOME": "", "HOME": "{d}/home"}, "{d}/home/.local/state/ndf/guards"),
+        ({"CLAUDE_PLUGIN_DATA": "", "XDG_STATE_HOME": "", "HOME": "", "TMPDIR": "{d}/tmp"}, "{d}/tmp/ndf-guards"),
+    ],
+)
 def test_guards_dir_follows_wf_state_dir(tmp_path, env, expect):
     env = {k: v.format(d=tmp_path) for k, v in env.items()}
     (tmp_path / "tmp").mkdir()
@@ -382,16 +399,18 @@ def test_guards_dir_follows_wf_state_dir(tmp_path, env, expect):
     f.write_text("")
     e = {k: v for k, v in os.environ.items() if not k.startswith("NDF_")}
     e.update(env)
-    subprocess.run([sys.executable, str(SCRIPT), "token-guard"], input=json.dumps(read(f)), text=True,
-                   capture_output=True, env=e, check=True)
+    subprocess.run(
+        [sys.executable, str(SCRIPT), "token-guard"], input=json.dumps(read(f)), text=True, capture_output=True, env=e, check=True
+    )
     assert (pathlib.Path(expect.format(d=tmp_path)) / "read-s1.json").is_file()
     wf = subprocess.run(
-        ["bash", "-c", f". '{WF_DOCS}/scripts/lib/workflow-common.sh'; wf_state_dir"],
-        text=True, capture_output=True, env=e).stdout.strip()
+        ["bash", "-c", f". '{WF_DOCS}/scripts/lib/workflow-common.sh'; wf_state_dir"], text=True, capture_output=True, env=e
+    ).stdout.strip()
     assert pathlib.Path(wf).parent == pathlib.Path(expect.format(d=tmp_path)).parent
 
 
 # ---------------------------------------------------------------- 文脈量（AC12〜AC16）
+
 
 def transcript(tmp_path, total, name="t.jsonl", usage=True):
     path = tmp_path / name
@@ -399,8 +418,7 @@ def transcript(tmp_path, total, name="t.jsonl", usage=True):
     lines = [{"type": "user", "message": {"content": "x"}}]
     msg = {"role": "assistant", "content": []}
     if usage:
-        msg["usage"] = {"input_tokens": 10, "cache_read_input_tokens": total - 110,
-                        "cache_creation_input_tokens": 100, "output_tokens": 5}
+        msg["usage"] = {"input_tokens": 10, "cache_read_input_tokens": total - 110, "cache_creation_input_tokens": 100, "output_tokens": 5}
     lines.append({"type": "assistant", "message": msg})
     lines.append({"type": "attachment"})
     path.write_text("\n".join(json.dumps(x) for x in lines) + "\n")
@@ -413,25 +431,34 @@ def transcript_multi(tmp_path, totals, name="t.jsonl"):
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = [{"type": "user", "message": {"content": "x"}}]
     for total in totals:
-        lines.append({"type": "assistant", "message": {
-            "role": "assistant", "content": [],
-            "usage": {"input_tokens": 10, "cache_read_input_tokens": total - 110,
-                      "cache_creation_input_tokens": 100, "output_tokens": 5}}})
+        lines.append(
+            {
+                "type": "assistant",
+                "message": {
+                    "role": "assistant",
+                    "content": [],
+                    "usage": {
+                        "input_tokens": 10,
+                        "cache_read_input_tokens": total - 110,
+                        "cache_creation_input_tokens": 100,
+                        "output_tokens": 5,
+                    },
+                },
+            }
+        )
     lines.append({"type": "attachment"})
     path.write_text("\n".join(json.dumps(x) for x in lines) + "\n")
     return path
 
 
 def skill(tp, name="ndf:implementation-plan", args="#829", session="s1", **extra):
-    p = {"tool_name": "Skill", "tool_input": {"skill": name, "args": args},
-         "session_id": session, "transcript_path": str(tp)}
+    p = {"tool_name": "Skill", "tool_input": {"skill": name, "args": args}, "session_id": session, "transcript_path": str(tp)}
     p.update(extra)
     return p
 
 
 def agent(tp, desc="設計: #829 #830", session="s1", tool="Agent", **extra):
-    p = {"tool_name": tool, "tool_input": {"description": desc, "prompt": "x"},
-         "session_id": session, "transcript_path": str(tp)}
+    p = {"tool_name": tool, "tool_input": {"description": desc, "prompt": "x"}, "session_id": session, "transcript_path": str(tp)}
     p.update(extra)
     return p
 
@@ -509,8 +536,7 @@ def test_context_subagent_passes(tmp_path, state):
 
 def test_context_non_stage_passes(tmp_path, state):
     tp = transcript(tmp_path, 250_000)
-    for name in ("ndf:markdown-writing", "ndf:worktree", "ndf:progress-tracking",
-                 "ndf:out-of-scope"):
+    for name in ("ndf:markdown-writing", "ndf:worktree", "ndf:progress-tracking", "ndf:out-of-scope"):
         assert denied(run(skill(tp, name=name), state)) is None, name
     assert denied(run(agent(tp, desc="調査: 既存の規約"), state)) is None
     assert denied(run(agent(tp, desc="何かの説明"), state)) is None
@@ -568,13 +594,16 @@ def test_context_date_is_not_issue_number(tmp_path, state):
     assert reason and "/ndf:development-workflow #844（" in reason
 
 
-@pytest.mark.parametrize("desc, expect", [
-    ("設計: v10.16.1 のリリース #844", "#844（"),
-    ("設計: 2026-09-23 の作業 v10.16.1", "<課題番号>（"),
-    ("検査: #829-830", "#829 #830（"),
-    ("設計: 829-830 の作業", "#829 #830（"),
-    ("実装: 2026-09-23 に #829-830 を v10.16.1 へ", "#829 #830（"),
-])
+@pytest.mark.parametrize(
+    "desc, expect",
+    [
+        ("設計: v10.16.1 のリリース #844", "#844（"),
+        ("設計: 2026-09-23 の作業 v10.16.1", "<課題番号>（"),
+        ("検査: #829-830", "#829 #830（"),
+        ("設計: 829-830 の作業", "#829 #830（"),
+        ("実装: 2026-09-23 に #829-830 を v10.16.1 へ", "#829 #830（"),
+    ],
+)
 def test_context_issue_extraction(tmp_path, state, desc, expect):
     # 版数・日付を課題番号と読まず、範囲は両端の番号として案内する
     tp = transcript(tmp_path, 250_000)
@@ -615,6 +644,7 @@ def test_context_parallel_second_call_passes_once(tmp_path, state):
 
 def test_context_large_transcript_is_fast(tmp_path, state):
     import time
+
     tp = tmp_path / "big.jsonl"
     line = json.dumps({"type": "user", "message": {"content": "y" * 1000}}) + "\n"
     with tp.open("w") as fh:
@@ -630,9 +660,9 @@ def test_context_large_transcript_is_fast(tmp_path, state):
 
 # ---------------------------------------------------------------- 一覧と登録（AC14 / AC24）
 
+
 def test_stage_list_matches_design():
-    names = {l.strip() for l in STAGES.read_text().splitlines()
-             if l.strip() and not l.startswith("#")}
+    names = {l.strip() for l in STAGES.read_text().splitlines() if l.strip() and not l.startswith("#")}
     assert names == STAGE_SKILLS
     listed = set()
     for m in MANIFESTS.glob("*-skills.txt"):
@@ -732,8 +762,7 @@ RELAY_PY = ROOT / "scripts" / "relay.py"
 def notice_line(env):
     e = {k: v for k, v in os.environ.items() if not k.startswith("NDF_")}
     e.update(env)
-    out = subprocess.run([sys.executable, str(RELAY_PY), "notice"], capture_output=True,
-                         text=True, env=e, timeout=20).stdout.splitlines()
+    out = subprocess.run([sys.executable, str(RELAY_PY), "notice"], capture_output=True, text=True, env=e, timeout=20).stdout.splitlines()
     assert out[0] == "relay"
     return out[1]
 
@@ -762,6 +791,7 @@ def test_context_outside_relay_reason_has_no_notice(tmp_path, state):
 
 # ---------------------------------------------------------------- プランの起動（#1191）
 
+
 def plan_bash(tp, cmd, session="s1", **extra):
     p = bash(cmd, **{k: v for k, v in extra.items() if k != "agent_id"})
     p.update({"session_id": session, "transcript_path": str(tp)})
@@ -773,14 +803,17 @@ def plan_bash(tp, cmd, session="s1", **extra):
 QUEUE_CMD = "python3 /x/scripts/supervise.py queue --max 3 a.json b.json"
 
 
-@pytest.mark.parametrize("cmd", [
-    QUEUE_CMD,
-    "python3 /x/scripts/supervise.py run plan.json --from 3",
-    "cd /w && python3 '/x/scripts/supervise.py' queue --max 2 a.json",
-    "X=1 nohup python3 \"/x/scripts/supervise.py\" run plan.json",
-    "python3 -u /x/scripts/supervise.py run plan.json",
-    "cat <<EOF > f\ndon't\nEOF\npython3 /x/scripts/supervise.py run plan.json",
-])
+@pytest.mark.parametrize(
+    "cmd",
+    [
+        QUEUE_CMD,
+        "python3 /x/scripts/supervise.py run plan.json --from 3",
+        "cd /w && python3 '/x/scripts/supervise.py' queue --max 2 a.json",
+        'X=1 nohup python3 "/x/scripts/supervise.py" run plan.json',
+        "python3 -u /x/scripts/supervise.py run plan.json",
+        "cat <<EOF > f\ndon't\nEOF\npython3 /x/scripts/supervise.py run plan.json",
+    ],
+)
 def test_context_over_limit_denies_plan_bash(tmp_path, state, cmd):
     tp = transcript(tmp_path, 250_000)
     reason = denied(run(plan_bash(tp, cmd), state))
@@ -788,20 +821,23 @@ def test_context_over_limit_denies_plan_bash(tmp_path, state, cmd):
     assert denied(run(plan_bash(tp, cmd, session="s2", run_in_background=True), state))
 
 
-@pytest.mark.parametrize("cmd", [
-    "python3 /x/scripts/supervise.py wait /x/done",
-    "python3 /x/scripts/supervise.py new mission --name m --issue 1",
-    "python3 /x/scripts/supervise.py note r.md",
-    "python3 /x/scripts/supervise.py history import",
-    "echo queue",
-    "echo 'python3 /x/scripts/supervise.py queue a.json'",
-    "# python3 /x/scripts/supervise.py run plan.json",
-    "printf '%s\\n' 'supervise.py run を打つ'",
-    'git commit -m "docs: 中断の手順（supervise.py run --from）"',
-    'git commit -m "docs: (supervise.py run --from)"',
-    "gh pr create --body \"$(cat <<'EOF'\npython3 /x/scripts/supervise.py queue a.json\nEOF\n)\"",
-    "cat <<-EOF > f\n\tpython3 /x/scripts/supervise.py queue a.json\n\tEOF\necho ok",
-])
+@pytest.mark.parametrize(
+    "cmd",
+    [
+        "python3 /x/scripts/supervise.py wait /x/done",
+        "python3 /x/scripts/supervise.py new mission --name m --issue 1",
+        "python3 /x/scripts/supervise.py note r.md",
+        "python3 /x/scripts/supervise.py history import",
+        "echo queue",
+        "echo 'python3 /x/scripts/supervise.py queue a.json'",
+        "# python3 /x/scripts/supervise.py run plan.json",
+        "printf '%s\\n' 'supervise.py run を打つ'",
+        'git commit -m "docs: 中断の手順（supervise.py run --from）"',
+        'git commit -m "docs: (supervise.py run --from)"',
+        "gh pr create --body \"$(cat <<'EOF'\npython3 /x/scripts/supervise.py queue a.json\nEOF\n)\"",
+        "cat <<-EOF > f\n\tpython3 /x/scripts/supervise.py queue a.json\n\tEOF\necho ok",
+    ],
+)
 def test_context_over_limit_passes_other_bash(tmp_path, state, cmd):
     tp = transcript(tmp_path, 250_000)
     assert denied(run(plan_bash(tp, cmd, run_in_background=True), state)) is None
@@ -832,6 +868,7 @@ def test_plan_bash_still_checks_sleep(tmp_path, state):
 
 
 # ---------------------------------------------------------------- Agent の supervisor への案内（#1191）
+
 
 def hint(proc):
     assert proc.returncode == 0, proc.stderr

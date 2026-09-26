@@ -10,6 +10,7 @@
 CLI そのものは起動しない。PATH へ何もしない実行ファイルを置き、組み立て済みの
 プロンプトだけを読む。
 """
+
 from __future__ import annotations
 
 import os
@@ -28,18 +29,34 @@ TEST_DEADLINE = "2026-09-24T10:20:00+00:00"
 
 
 def _items() -> list[dict]:
-    base = {"path": "src/a.py", "smell": "long_method", "technique": "extract_method",
-            "rationale": "r", "plan": "p", "fix_count": 0}
+    base = {"path": "src/a.py", "smell": "long_method", "technique": "extract_method", "rationale": "r", "plan": "p", "fix_count": 0}
     return [
-        {**base, "id": "I-017", "rank": 1, "symbol": "Foo", "tests": ["tests/test_a.py"],
-         "test_targets": ["tests/test_a.py"], "command": ["pytest", "-q", "tests/test_a.py"],
-         "estimate": {"test": 2.7, "implement": 1.3, "verify": 0.2},
-         "start_deadline": DEADLINE, "test_start_deadline": TEST_DEADLINE, "status": "planned"},
-        {**base, "id": "I-042", "rank": 2, "symbol": "Bar", "tests": [],
-         "test_targets": ["tests/test_b.py"], "command": ["pytest", "-q", "tests/test_b.py"],
-         "estimate": {"test": 0.0, "implement": 1.3, "verify": 0.2},
-         "start_deadline": "2026-09-24T10:43:00+00:00", "test_start_deadline": None,
-         "status": "planned"},
+        {
+            **base,
+            "id": "I-017",
+            "rank": 1,
+            "symbol": "Foo",
+            "tests": ["tests/test_a.py"],
+            "test_targets": ["tests/test_a.py"],
+            "command": ["pytest", "-q", "tests/test_a.py"],
+            "estimate": {"test": 2.7, "implement": 1.3, "verify": 0.2},
+            "start_deadline": DEADLINE,
+            "test_start_deadline": TEST_DEADLINE,
+            "status": "planned",
+        },
+        {
+            **base,
+            "id": "I-042",
+            "rank": 2,
+            "symbol": "Bar",
+            "tests": [],
+            "test_targets": ["tests/test_b.py"],
+            "command": ["pytest", "-q", "tests/test_b.py"],
+            "estimate": {"test": 0.0, "implement": 1.3, "verify": 0.2},
+            "start_deadline": "2026-09-24T10:43:00+00:00",
+            "test_start_deadline": None,
+            "status": "planned",
+        },
     ]
 
 
@@ -50,11 +67,25 @@ def render(refactor, tmp_path):
     for name in ("work", RUNTIME):
         (tmp_path / name).mkdir(parents=True, exist_ok=True)
     state_path = make_state_v2(
-        tmp_path, work, runtimes=[RUNTIME, "kiro"], vocabulary=vocabulary, budget_minutes=45,
-        candidates=[{"path": "src/a.py", "symbol": "Foo", "smell": "long_method",
-                     "technique": "extract_method", "severity": "major", "rationale": "r",
-                     "plan": "p", "proposed_by": ["codex", "kiro"]}],
-        items=_items())
+        tmp_path,
+        work,
+        runtimes=[RUNTIME, "kiro"],
+        vocabulary=vocabulary,
+        budget_minutes=45,
+        candidates=[
+            {
+                "path": "src/a.py",
+                "symbol": "Foo",
+                "smell": "long_method",
+                "technique": "extract_method",
+                "severity": "major",
+                "rationale": "r",
+                "plan": "p",
+                "proposed_by": ["codex", "kiro"],
+            }
+        ],
+        items=_items(),
+    )
     stub_dir = tmp_path / "bin"
     stub_dir.mkdir(exist_ok=True)
     stub = stub_dir / RUNTIME
@@ -64,13 +95,12 @@ def render(refactor, tmp_path):
     def _render(phase: str) -> str:
         subprocess.run(
             [str(LAUNCH), RUNTIME, phase, "130"],
-            env={**os.environ,
-                 "CROSS_REFACTORING_TMP_DIR": str(state_path.parent),
-                 "PATH": f"{stub_dir}{os.pathsep}{os.environ['PATH']}"},
-            check=True, capture_output=True, text=True,
+            env={**os.environ, "CROSS_REFACTORING_TMP_DIR": str(state_path.parent), "PATH": f"{stub_dir}{os.pathsep}{os.environ['PATH']}"},
+            check=True,
+            capture_output=True,
+            text=True,
         )
-        return (state_path.parent / f"{RUNTIME}-{phase}-rf130-prompt.md").read_text(
-            encoding="utf-8")
+        return (state_path.parent / f"{RUNTIME}-{phase}-rf130-prompt.md").read_text(encoding="utf-8")
 
     return _render, vocabulary
 
@@ -86,7 +116,7 @@ def test_propose_lists_every_viewpoint_and_the_vocabulary(render):
         assert f"`{key}`" in text
     for severity in vocabulary["severities"]:
         assert f"`{severity}`" in text
-    assert "45" in text                  # 想定最大時間
+    assert "45" in text  # 想定最大時間
     assert "$RF_" not in text
 
 
@@ -102,7 +132,7 @@ def test_add_tests_passes_only_items_with_tests_and_their_test_deadline(render):
     _render, _ = render
     text = _render("add-tests")
     assert "I-017" in text and TEST_DEADLINE in text
-    assert "I-042" not in text           # 足すテストの無い項目は渡さない
+    assert "I-042" not in text  # 足すテストの無い項目は渡さない
     assert "$RF_" not in text
 
 
@@ -119,5 +149,5 @@ def test_implement_passes_each_item_with_its_deadline_and_command(render):
 def test_fix_passes_only_the_failing_items(render, tmp_path):
     _render, _ = render
     text = _render("fix")
-    assert "I-017" not in text and "I-042" not in text   # 落ちた項目が無い
+    assert "I-017" not in text and "I-042" not in text  # 落ちた項目が無い
     assert "$RF_" not in text

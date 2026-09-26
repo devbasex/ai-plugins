@@ -16,13 +16,13 @@ monitor.py の import そのものが落ち、監視プロセスが起動でき�
 本テストは fixture 経由ではなく **毎回 fresh に source loader で import** し、
 非数値 env が設定された状態でも import が成功することを確認する。
 """
+
 from __future__ import annotations
 
 import importlib.util
 import pathlib
 import sys
 import types
-
 
 
 _HERE = pathlib.Path(__file__).resolve().parent

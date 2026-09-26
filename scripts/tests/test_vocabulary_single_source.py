@@ -7,6 +7,7 @@
 **読み込んだ結果と表を突き合わせる。** 読む側のリテラルを見る形は採らない
 （読む側は呼び名を持たなくなったため、比べる相手が無い）。
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -32,11 +33,7 @@ def _table(heading: str, value_column: str = "日本語の名前") -> dict[str, 
     assert len(rows) >= 3, f"{heading} の表が短い"
     header = [c.strip() for c in rows[0].strip("|").split("|")]
     i_id, i_value = header.index("識別子"), header.index(value_column)
-    return {
-        cells[i_id].strip("`"): cells[i_value]
-        for line in rows[2:]
-        for cells in [[c.strip() for c in line.strip("|").split("|")]]
-    }
+    return {cells[i_id].strip("`"): cells[i_value] for line in rows[2:] for cells in [[c.strip() for c in line.strip("|").split("|")]]}
 
 
 @pytest.fixture(scope="module")
@@ -63,7 +60,8 @@ def test_the_techniques_come_from_the_table(vocabulary: types.ModuleType) -> Non
 def test_the_budget_factors_come_from_the_table(vocabulary: types.ModuleType) -> None:
     """倍率が高い手法が、表と一致すること。"""
     high = {
-        name for name, factor in _table("手法ごとの差分予算の倍率", "倍率").items()
+        name
+        for name, factor in _table("手法ごとの差分予算の倍率", "倍率").items()
         if factor == str(vocabulary.EXTRACTION_DIFF_BUDGET_FACTOR)
     }
     assert high == set(vocabulary.EXTRACTION_TECHNIQUES)

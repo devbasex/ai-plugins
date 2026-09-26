@@ -4,6 +4,7 @@
 の組を上位 30 組、組の中は上位 3 件）を持つ。**意味の上で同じ提案かの判断はここで
 しない**（改修計画の中で Jev か実装担当が行う）。
 """
+
 from __future__ import annotations
 
 from typing import Any, Iterable, Optional
@@ -57,8 +58,7 @@ def normalize_evidence(raw: Any) -> dict[str, Any]:
     """
     if not isinstance(raw, dict):
         return {}
-    return {key: raw[key] for key in EVIDENCE_KEYS
-            if isinstance(raw.get(key), (int, float)) and not isinstance(raw.get(key), bool)}
+    return {key: raw[key] for key in EVIDENCE_KEYS if isinstance(raw.get(key), (int, float)) and not isinstance(raw.get(key), bool)}
 
 
 def _normalize_proposal(raw: dict[str, Any], source: str) -> Optional[dict[str, Any]]:
@@ -77,12 +77,9 @@ def _normalize_proposal(raw: dict[str, Any], source: str) -> Optional[dict[str, 
     smell = str(raw.get("smell") or "").strip()
     technique = str(raw.get("technique") or "").strip()
     severity = str(raw.get("severity") or "").strip().lower()
-    smell, smell_degraded = _degrade_if_unknown(
-        smell, SMELLS, source, "兆候", f"{path}#{symbol}")
-    technique, technique_degraded = _degrade_if_unknown(
-        technique, TECHNIQUES, source, "手法", f"{path}#{symbol}")
-    severity, severity_degraded = _degrade_if_unknown(
-        severity, SEVERITY_ORDER, source, "重要度", f"{path}#{symbol}")
+    smell, smell_degraded = _degrade_if_unknown(smell, SMELLS, source, "兆候", f"{path}#{symbol}")
+    technique, technique_degraded = _degrade_if_unknown(technique, TECHNIQUES, source, "手法", f"{path}#{symbol}")
+    severity, severity_degraded = _degrade_if_unknown(severity, SEVERITY_ORDER, source, "重要度", f"{path}#{symbol}")
     degraded = smell_degraded or technique_degraded or severity_degraded
     if degraded:
         severity = "unknown"
@@ -136,9 +133,7 @@ def _merge_one(existing: dict[str, Any], incoming: dict[str, Any]) -> None:
         existing["technique"] = incoming["technique"]
     existing["test_gap"] = existing["test_gap"] or incoming["test_gap"]
     existing["degraded"] = existing["degraded"] and incoming["degraded"]
-    existing["estimated_diff_lines"] = max(
-        existing["estimated_diff_lines"], incoming["estimated_diff_lines"]
-    )
+    existing["estimated_diff_lines"] = max(existing["estimated_diff_lines"], incoming["estimated_diff_lines"])
 
 
 def _merge_by_key(
@@ -164,7 +159,9 @@ def order_key(item: dict[str, Any]) -> tuple:
     return (
         -len(item["proposed_by"]),
         -SEVERITY_ORDER[item["severity"]],
-        item["path"], item["symbol"], item["smell"],
+        item["path"],
+        item["symbol"],
+        item["smell"],
     )
 
 
