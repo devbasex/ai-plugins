@@ -6,7 +6,7 @@
 
 候補は langgraph（SqliteSaver）・burr（SQLitePersister）・dbos（DBOS Transact の SQLite）。プランは
 supervise.py new impl の雛形（rt_common.PLAN_STEPS）を、ステップを偽物（sleep と決めた終了コード）にして流す。
-依存は deps-trial.py と同じ形（uv の環境へ起動し直す）で解決し、宣言と lock は隣の runner-trial/ にある。
+依存は lib/deps.py と同じ形（uv の環境へ起動し直す）で解決し、宣言と lock は隣の runner-trial/ にある。
 環境は ~/.cache/ndf/venv/runner-trial-<候補> に置く（NDF_DEPS_VENV を接頭辞に変えられる）。
 結果は lib/step_result.py の形の 1 行の JSON。終了コード 0 = ok / 1 = 確かめたことが成り立たない / 3 = 前提が無い。
 
@@ -32,6 +32,7 @@ HERE = Path(__file__).resolve()
 PROJECT = HERE.parent / "runner-trial"
 sys.path.insert(0, str(HERE.parents[1] / "lib"))
 sys.path.insert(0, str(PROJECT))
+import deps as dt  # noqa: E402  uv を探す・入れる手は安定版の lib/deps.py のものを使う
 from step_result import emit, result  # noqa: E402
 
 import rt_common as rc  # noqa: E402
@@ -46,14 +47,6 @@ SUPERVISE = HERE.parents[1] / "supervise.py"
 EXIT = {"done": 0, "gate": 10, "stopped": 1, "limit": 1}
 
 
-def deps_trial():
-    """uv を探す・入れる手は deps-trial.py のものを使う（同じ試行の続き）。"""
-    spec = importlib.util.spec_from_file_location("deps_trial", HERE.parent / "deps-trial.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-
 def venv_of(cand: str) -> str:
     return (os.environ.get("NDF_DEPS_VENV") or str(Path.home() / ".cache/ndf/venv/runner-trial")) + f"-{cand}"
 
@@ -64,7 +57,6 @@ def reexec_into(cand: str) -> None:
         return
     if os.environ.get("NDF_DEPS_REEXEC"):
         emit(result(TOOL, "stopped", f"uv の環境へ起動し直したが {cand} を import できない"), 3)
-    dt = deps_trial()
     uv = dt.find_uv() or dt.install_uv()
     if not uv:
         emit(result(TOOL, "stopped", f"uv を入れられない（{dt.UV_VERSION}）"), 3)
@@ -356,7 +348,6 @@ def cost_of(cand: str, uv: str, work: Path) -> dict:
 
 
 def cmd_cost(a) -> None:
-    dt = deps_trial()
     uv = dt.find_uv() or dt.install_uv()
     if not uv:
         emit(result(TOOL, "stopped", "uv を入れられない"), 3)

@@ -190,15 +190,30 @@ def collect(paths: list[str]) -> tuple[list[Path], list[str]]:
     return files, missing
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="テストスクリプトを構文木で検査する")
-    parser.add_argument("paths", nargs="+", help="テストのディレクトリかファイル")
-    args = parser.parse_args(argv)
+class _UsageError(Exception):
+    pass
 
-    files, missing = collect(args.paths)
-    errors: list[dict[str, Any]] = [{"file": m, "message": "見つからない"} for m in missing]
+
+class _Parser(argparse.ArgumentParser):
+    """引数の誤りも標準出力の 1 つの JSON で返す（argparse は既定で標準エラーへ出して終える）。"""
+
+    def error(self, message: str):  # type: ignore[override]
+        raise _UsageError(message)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = _Parser(description="テストスクリプトを構文木で検査する")
+    parser.add_argument("paths", nargs="+", help="テストのディレクトリかファイル")
+    files: list[Path] = []
     violations: list[dict[str, Any]] = []
     tests = 0
+    try:
+        args = parser.parse_args(argv)
+    except _UsageError as exc:
+        errors: list[dict[str, Any]] = [{"file": "", "message": f"引数の誤り: {exc}"}]
+    else:
+        files, missing = collect(args.paths)
+        errors = [{"file": m, "message": "見つからない"} for m in missing]
     for f in files:
         try:
             tree = ast.parse(f.read_text(encoding="utf-8"), filename=str(f))

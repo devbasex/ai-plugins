@@ -263,8 +263,15 @@ def build(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
     return 0, result
 
 
+class _Parser(argparse.ArgumentParser):
+    """引数の誤りも標準出力の 1 つの JSON で返す（argparse は既定で標準エラーへ出して終える）。"""
+
+    def error(self, message: str):  # type: ignore[override]
+        raise UsageError(message)
+
+
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="テスト計画書の雛形を作る")
+    parser = _Parser(description="テスト計画書の雛形を作る")
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--role", help="page role（form / list / checkout など）")
     source.add_argument("--classification",
@@ -277,10 +284,8 @@ def main(argv: list[str] | None = None) -> int:
                         help=f"上位 2 件のスコアの差がこれ未満なら人へ渡す（既定 {DEFAULT_MARGIN}）")
     parser.add_argument("--output", default=None, help="Markdown の雛形の書き出し先")
     parser.add_argument("--docs-dir", default=str(DOCS_DIR), help=argparse.SUPPRESS)
-    args = parser.parse_args(argv)
-
     try:
-        code, result = build(args)
+        code, result = build(parser.parse_args(argv))
     except UsageError as exc:
         code, result = 2, {"status": "error", "message": str(exc)}
     print(json.dumps(result, ensure_ascii=False, indent=2))

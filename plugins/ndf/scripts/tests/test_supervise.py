@@ -823,6 +823,7 @@ def test_new_mission_writes_waves_in_order(tmp_path):
     pr = next(s for s in check["steps"] if s["type"] == "pr")
     assert pr["base"] == "develop" and "関連: #11 #12" in pr["summary"]
     assert "Closes" not in pr["summary"]
+    assert "関連" not in pr["changes"]  # 関連の行は「利用者向けの変化」へ入れない
     assert [s["id"] for s in check["steps"]][:3] == ["collect", "pr", "assess"]
 
 
@@ -1385,7 +1386,7 @@ def test_judge_retry_waits_until_graphql_reset(tmp_path, seq, monkeypatch):
     assert "結果: 完了" in text, text
     rows = _gh_limit_rows(s)
     assert len(rows) == 1 and rows[0]["step"] == "t" and 290 <= rows[0]["waited"] <= 300
-    assert asked == [["api", "rate_limit", "--jq", ".resources.graphql.reset"]]
+    assert asked == [["api", "rate_limit", "--jq", ".resources.graphql | select(.remaining == 0) | .reset"]]
 
 
 def test_judge_retry_waits_doubling_from_60_when_reset_is_unknown(tmp_path, seq, monkeypatch):
@@ -1395,6 +1396,20 @@ def test_judge_retry_waits_doubling_from_60_when_reset_is_unknown(tmp_path, seq,
              GH_RATE_STEP[1]]
     s, _ = run_plan(tmp_path, steps, 上限=5)
     assert [r["waited"] for r in _gh_limit_rows(s)] == [60, 120]
+
+
+def test_judge_retry_doubling_wait_is_capped_at_one_hour(tmp_path, seq, monkeypatch):
+    """graphql の残りがある（jq が空を返す）ときは reset を採らず、倍々の待ちは 1 時間で頭打ち。"""
+    seq[0](JUDGE_RETRY_T)
+    monkeypatch.setattr(gh_call, "RUNNER", lambda args, stdin=None, cwd=None: gh_call.GhResult(0, "\n", ""))
+    monkeypatch.chdir(tmp_path)
+    s = engine.Engine({"フェーズ": "試験", "作業場所": str(tmp_path), "steps": GH_RATE_STEP}, tmp_path / "state")
+    s.gh_limit_waits["t"] = 10
+    monkeypatch.setenv("NDF_SUPERVISE_LIMIT_SLEEP", "0")
+    s.state.results["t"] = {"exit": 1, "text": "API rate limit exceeded for user ID 1."}
+    s.gh_limit_wait("t")
+    rows = _gh_limit_rows(s)
+    assert rows[-1]["waited"] == 3600 and rows[-1]["reset"] is None
 
 
 def test_judge_retry_without_rate_limit_does_not_wait(tmp_path, seq, monkeypatch):

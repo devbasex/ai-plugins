@@ -15,13 +15,14 @@ Redash MCP サーバーをマルチ環境対応で利用するための Claude C
 - Claude Code
 - Node.js（npx が使える環境）
 
-## v2.0.0 へ更新するとき
+## v3.0.0 へ更新するとき
 
-配布ディレクトリが `plugins/mcp/{shared,claude,codex,kiro}/mcp-redash/` から
-`plugins/mcp/mcp-redash/` へ変わりました。マーケットプレイスの参照先が変わるため、**導入済みの
-環境では再インストールが要ります**。Kiro CLI の installer は `dev.kiro/install.sh` へ移りました。
+**互換を壊す変更です。** `/redash-add` / `/redash-remove` / `/redash-list` / `/redash-status` の
+4 つの Skill を `/redash` の 1 本にまとめ、操作は最初の引数（`add` / `remove` / `list` / `status`）で
+選ぶようにしました。旧名の Skill は無くなります。呼び方の対応と、Kiro CLI に残る symlink の片付けは
+下の「[`/redash-add` などの名前で呼んでいた場合](#redash-add-などの名前で呼んでいた場合)」にあります。
 
-MCP サーバの定義（`.mcp.json`）の内容は変えていません。
+追加済みの `redash-*` MCP と MCP サーバの定義（`.mcp.json`）の内容は変えていません。
 
 ## インストール
 

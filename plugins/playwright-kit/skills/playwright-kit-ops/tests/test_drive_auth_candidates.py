@@ -59,3 +59,22 @@ def test_google_auth_is_distributed_to_every_runtime() -> None:
 def test_the_module_docstring_matches_the_distribution(drive_auth) -> None:
     assert drive_auth.__doc__ is not None
     assert "同梱していない" not in drive_auth.__doc__
+
+
+def test_claude_code_plugin_cache_is_searched_at_the_latest_version(
+    drive_auth, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Claude Code は Skill を `~/.claude/plugins/cache/<取得元>/ndf/<版>/` に置く。版は数で比べる。"""
+    for ver in ("10.9.1", "10.17.8", "10.17.7"):
+        d = tmp_path / ".claude/plugins/cache/ai-plugins/ndf" / ver / "skills/google-auth/scripts"
+        d.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    found = drive_auth._claude_plugin_cache()
+    assert found is not None and Path(found).parents[2].name == "10.17.8"
+
+
+def test_claude_code_plugin_cache_absent(
+    drive_auth, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    assert drive_auth._claude_plugin_cache() is None

@@ -186,3 +186,12 @@ def test_nothing_checked_is_exit_2(tmp_path: Path, files: dict[str, str]):
     proc = run(str(tests))
     assert proc.returncode == 2
     assert json.loads(proc.stdout)["errors"][0]["message"] == "検査したテストが 0 件"
+
+
+@pytest.mark.parametrize("args", [(), ("--bogus", "x")])
+def test_argument_error_is_json_and_exit_2(args: tuple[str, ...]):
+    """引数なし・未知のオプションでも標準出力は 1 つの JSON（argparse の既定は標準エラーだけ）。"""
+    proc = run(*args)
+    assert proc.returncode == 2
+    out = json.loads(proc.stdout)
+    assert out["errors"] and out["errors"][0]["message"].startswith("引数の誤り")

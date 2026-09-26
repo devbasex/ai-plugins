@@ -84,7 +84,8 @@ cd /path/to/your-app
 Drive 連携は optional dependency として扱う。`google-auth` / `google-drive` skill は
 NDF の 4 つのランタイム (Claude Code / Codex / Kiro / agy) すべてへ配布されるが、
 playwright-kit とは別のプラグインであるため、置かれる場所は導入したランタイムで変わる。
-スクリプトは各ランタイムの標準の導入先と、この Skill と並ぶ `google-auth/scripts` を探す
+スクリプトは各ランタイムの標準の導入先・Claude Code のプラグインのキャッシュ
+(`~/.claude/plugins/cache/<取得元>/ndf/<版>/` の最新の版)と、この Skill と並ぶ `google-auth/scripts` を探す
 (`scripts/_drive_auth.py`)。候補で見つからないときは `GOOGLE_AUTH_SCRIPTS` を
 `google-auth/scripts` へ設定する。
 

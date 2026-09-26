@@ -149,3 +149,12 @@ def test_unknown_data_type_is_usage_error():
 def test_role_without_checklist_is_usage_error():
     proc = run("--role", "settings")
     assert proc.returncode == 2
+
+
+def test_argument_errors_are_json_and_exit_2(tmp_path: Path):
+    """role の指定が無い・両方ある・--margin が数でないときも、標準出力は 1 つの JSON で終了コード 2。"""
+    cls = write_classification(tmp_path, [])
+    for args in ((), ("--role", "form", "--classification", str(cls)), ("--role", "form", "--margin", "abc")):
+        proc = run(*args)
+        assert proc.returncode == 2, args
+        assert json.loads(proc.stdout)["status"] == "error", args

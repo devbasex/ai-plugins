@@ -66,8 +66,9 @@ class Engine:
     def gh_limit_wait(self, sid: str) -> None:
         """judge が打ち直すステップの前の出力が GitHub の上限なら、回復の時刻まで待つ。
 
-        回復の時刻は `gh api rate_limit` の graphql の reset。読めない（過ぎている）なら、同じステップの
-        待ちごとに 60 秒から倍々にする。待った秒は progress の `"kind": "gh-limit"` に残す。
+        回復の時刻は `gh api rate_limit` の graphql の reset（残りが 0 のときだけ。reset は枠が残っていても
+        窓の終わりを返す）。読めない（残りがある・過ぎている）なら、同じステップの待ちごとに 60 秒から
+        倍々にし、1 時間（graphql の窓の長さ）で頭打ちにする。待った秒は progress の `"kind": "gh-limit"` に残す。
         待ちの実際の秒数は NDF_SUPERVISE_LIMIT_SLEEP で短くできる（試験用）。
         """
         st = self.state
@@ -76,13 +77,13 @@ class Engine:
             return
         k = self.gh_limit_waits.get(sid, 0)
         self.gh_limit_waits[sid] = k + 1
-        r = gh_call.gh(["api", "rate_limit", "--jq", ".resources.graphql.reset"])
+        r = gh_call.gh(["api", "rate_limit", "--jq", ".resources.graphql | select(.remaining == 0) | .reset"])
         try:
             reset = float(r.stdout.strip()) if r.returncode == 0 else None
         except ValueError:
             reset = None
         known = reset is not None and reset > time.time()
-        wait = reset - time.time() if known else 60.0 * 2 ** k
+        wait = reset - time.time() if known else min(60.0 * 2 ** k, 3600.0)
         short = os.environ.get("NDF_SUPERVISE_LIMIT_SLEEP")
         until = time.time() + (min(wait, float(short)) if short else wait)
         while time.time() < until:  # 待ちの間も「まだ動いている」を書く
