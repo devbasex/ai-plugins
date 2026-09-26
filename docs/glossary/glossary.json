@@ -1897,6 +1897,48 @@
       "context": "ndf-workflow",
       "meaning": "進め方で変えることを記録し、起票の取りこぼしを拾う工程",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "ライブラリ",
+      "code": "library",
+      "context": "ndf-workflow",
+      "meaning": "2 つ以上のスクリプトが使う関数とクラスの置き場。今の plugins/ndf/scripts/lib/ に当たる。pace.json の「共通層」（点数を重くする領域）とは別",
+      "pending_source": "issues/issue-1142-requirements.md"
+    },
+    {
+      "term": "エントリポイント",
+      "code": "entry_point",
+      "context": "ndf-workflow",
+      "meaning": "Skill・プラン・hook・宣言・利用者が呼ぶスクリプトのパスと副命令と引数と出力の形",
+      "pending_source": "issues/issue-1142-requirements.md"
+    },
+    {
+      "term": "移行ステップ",
+      "code": "migration_step",
+      "context": "ndf-workflow",
+      "meaning": "設計の決める移行の順序の 1 つ分。1 本の PR で閉じる。プランの「ステップ」とは別",
+      "pending_source": "issues/issue-1142-requirements.md"
+    },
+    {
+      "term": "使用量の帳簿",
+      "code": "usage_ledger",
+      "context": "ndf-workflow",
+      "meaning": "claude -p の 1 回の呼び出しごとに、版・プラン・ステップ・usage を 1 行で追記する jsonl（usage/<owner>__<repo>.jsonl）",
+      "pending_source": "issues/issue-1142-design.md"
+    },
+    {
+      "term": "ラッパーの束",
+      "code": "relay_bundle",
+      "context": "ndf-relay",
+      "meaning": "~/.claude/ndf/ に版ごとに置く、ラッパーの relay_lib/ と使うライブラリの写し。relay.current が使う束を指す",
+      "pending_source": "issues/issue-1142-design.md"
+    },
+    {
+      "term": "構造チェック",
+      "code": "structure_check",
+      "context": "ndf-workflow",
+      "meaning": "テストを除くスクリプトの行数と、本体の同じ関数・同じ名前で本体の違う関数を構文木で数える継続的統合のチェック",
+      "pending_source": "issues/issue-1142-design.md"
     }
   ]
 }
