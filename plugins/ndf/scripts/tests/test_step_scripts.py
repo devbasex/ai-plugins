@@ -165,6 +165,19 @@ def test_spec_finalize_removes_design_and_indexes_spec(repo, env):
     assert out["metrics"]["commit"] == git(repo, "rev-parse", "HEAD").strip()
 
 
+def test_spec_finalize_skips_index_lines_inside_a_fence(repo, env):
+    """索引の行は囲みの外だけを数える（lib/md.py。行の字面で見ていた頃は、囲みの中の例の後ろへ足した）。"""
+    spec_repo(repo)
+    write(repo, "docs/specifications/README.md", "# 索引\n\n- [a.md](a.md) — A\n\n```md\n- [z.md](z.md) — Z\n```\n")
+    git(repo, "commit", "-q", "-am", "index")
+    code, _, err = call("plan-to-spec-steps.py",
+                        ["spec-finalize", "--spec", "docs/specifications/x.md",
+                         "--design", "docs/design/x-design.md", "--title", "X", "--root", str(repo)], env)
+    assert code == 0, err
+    idx = (repo / "docs/specifications/README.md").read_text(encoding="utf-8")
+    assert idx.startswith("# 索引\n\n- [a.md](a.md) — A\n- [x.md](x.md) — X\n\n```md\n")
+
+
 @pytest.mark.parametrize("repeat", [True, False])
 def test_spec_finalize_removes_every_design_given_by_repeated_or_listed_flags(repo, env, repeat):
     designs = ["docs/design/x-design.md", "issues/PLAN1_x.md", "issues/PLAN1_x-measure.py"]
