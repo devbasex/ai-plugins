@@ -108,3 +108,21 @@ def test_the_parts_are_found_relative_to_the_common_file(tmp_path: pathlib.Path)
         capture_output=True, text=True, timeout=60, cwd=str(tmp_path),
     )
     assert got.stdout.strip() == "ok", (got.stdout, got.stderr)
+
+
+def test_declaration_get_reads_a_filter_from_the_declaration() -> None:
+    """`worktree-localenv.sh` と `worktree-testenv.sh` が別々に持っていた `decl_get` の置き換え先。"""
+    got = _bash(f'. "{COMMON}" || exit 9\nwt_declaration_get \'{{"a":{{"b":"x"}}}}\' ".a.b"; echo "rc=$?"\n'
+                'wt_declaration_get "not json" ".a"; echo "rc=$?"')
+    assert got.stdout.split() == ["x", "rc=0", "rc=5"], got.stdout
+
+
+def test_current_branch_names_the_checked_out_branch(tmp_path: pathlib.Path) -> None:
+    """`target_branch` の置き換え先。detached HEAD では何も出さず 1 を返す。"""
+    repo = tmp_path / "r"
+    subprocess.run(["git", "init", "-q", "-b", "feat/x", str(repo)], check=True)
+    subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@e",
+                    "commit", "-q", "--allow-empty", "-m", "c"], check=True)
+    got = _bash(f'. "{COMMON}" || exit 9\nwt_current_branch "{repo}"; echo "rc=$?"\n'
+                f'git -C "{repo}" checkout -q --detach\nwt_current_branch "{repo}"; echo "rc=$?"')
+    assert got.stdout.split() == ["feat/x", "rc=0", "rc=1"], got.stdout
