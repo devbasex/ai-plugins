@@ -31,6 +31,8 @@ CRITERIA = {
     4: "設計の文書で、実装する人が違うものを作ってしまう食い違い",
 }
 FOCUS_LABEL = "このプロジェクトのレビューの重点に当たる"
+FOCUS_CRITERION = 3
+CRITERION_NUMBERS = tuple(sorted({*CRITERIA, FOCUS_CRITERION}))
 
 # 見送りの種類（値 → 返信の括弧に入る名前）。「書かないもの」と 1 対 1（設計の決定 6）
 WAIVE_KINDS = {
@@ -87,7 +89,7 @@ def focus_from(status, names, error=None) -> Focus:
 def _criteria_lines(focus: Focus) -> list[str]:
     lines = [f"1. {CRITERIA[1]}", f"2. {CRITERIA[2]}"]
     if focus.status == "declared" and focus.names:
-        lines.append(f"3. {FOCUS_LABEL}: {' / '.join(focus.names)}")
+        lines.append(f"{FOCUS_CRITERION}. {FOCUS_LABEL}: {' / '.join(focus.names)}")
     lines.append(f"4. {CRITERIA[4]}")
     return lines
 

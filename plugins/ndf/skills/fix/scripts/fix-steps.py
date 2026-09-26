@@ -58,7 +58,6 @@ SEVERITIES = ("critical", "major", "minor", "nit")
 FIX_SEVERITIES = ("critical", "major")
 WAIVE_SEVERITIES = ("minor", "nit")
 DECISIONS = ("fixed", "waived", "deferred", "rejected", "separate_pr")
-CRITERIA = (1, 2, 3, 4)
 EXCLUDE_HEADINGS = ("やらないこと", "別 PR", "別PR", "対応しない", "スコープ外", "範囲外", "out of scope",
                     "non-goals", "not in scope")
 CI_FAILED = ("FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE")
@@ -289,9 +288,9 @@ def check_decisions(decs: list, focus_names=()) -> list[dict]:
                 why.append(f"waived には waive_kind（{'/'.join(review_criteria.WAIVE_KINDS)}）が要る: "
                            f"{e.get('waive_kind')!r}")
         c = e.get("criterion")
-        if c not in (None, "") and (isinstance(c, bool) or c not in CRITERIA):
-            why.append(f"criterion は {'/'.join(map(str, CRITERIA))} のどれか: {c!r}")
-        elif c == 3 and not focus_names:
+        if c not in (None, "") and (isinstance(c, bool) or c not in review_criteria.CRITERION_NUMBERS):
+            why.append(f"criterion は {'/'.join(map(str, review_criteria.CRITERION_NUMBERS))} のどれか: {c!r}")
+        elif c == review_criteria.FOCUS_CRITERION and not focus_names:
             why.append("criterion 3 はレビューの重点の宣言があるとき（review_focus が空でない）だけ")
         if why:
             bad.append({"index": i, "thread_id": e.get("thread_id"), "path": e.get("path"),
