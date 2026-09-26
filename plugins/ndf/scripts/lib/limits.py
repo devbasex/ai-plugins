@@ -16,7 +16,8 @@ cross-refactoring の `add-tests` / `implement` / `fix` / `final-fix` には、�
 渡す（テスト 1 回を含む無出力の最長が工程で決まるため）。その許容はこの表に持たない。
 
 Usage:
-  limits.py cli-timeout <工程> <担当>      # 秒数を 1 行
+  limits.py cli-timeout <工程> <担当> [--override N] [--no-floor]
+                                           # 秒数を 1 行。--override は導いた値より短くできない（--no-floor でそのまま）
   limits.py monitor-timeout <工程> <担当>  # 同上
   limits.py check                          # 表の順序のチェック。崩れていれば組を出して終了コード 1
 
@@ -123,6 +124,40 @@ def cli_timeout(phase: str, agent: str) -> int:
     return monitor_timeout(phase, agent) + CLI_MARGIN
 
 
+def resolve_cli_timeout(phase: str, agent: str, override=None, floor: bool = True) -> tuple[int, Optional[str]]:
+    """CLI の上限と、標準エラーへ出す 1 行（無ければ `None`）。3 つの起動のスクリプトの規則を 1 つにしたもの。
+
+    `override` が無い（`None`・空）なら導いた値（`cli_timeout`）。秒数でなければ導いた値を使い、そのことを返す。
+    `floor` なら導いた値より短くできない（短いと CLI が監視より先に打ち切り、結果ファイルが残らない）。
+    `floor` でなければ `override` をそのまま使う（駆動が予算から導いた上限）。工程名は常に表と照らす。
+    """
+    derived = cli_timeout(phase, agent)
+    if override is None or override == "":
+        return derived, None
+    text = str(override)
+    if not text.isdigit():
+        return derived, f"⚠ CLI の上限 {text!r} は秒数ではないため、監視の上限から導いた {derived} 秒を使います"
+    value = int(text)
+    if floor and value < derived:
+        return derived, f"⚠ CLI の上限 {value} 秒は監視の上限から導いた値より短いため、{derived} 秒を使います"
+    return value, None
+
+
+def _parse_cli_options(rest: list[str]) -> Optional[tuple[Optional[str], bool]]:
+    override, floor = None, True
+    i = 0
+    while i < len(rest):
+        if rest[i] == "--no-floor":
+            floor = False
+        elif rest[i] == "--override" and i + 1 < len(rest):
+            override = rest[i + 1]
+            i += 1
+        else:
+            return None
+        i += 1
+    return override, floor
+
+
 def check() -> list[tuple[str, str, int, int, int]]:
     """表の既定値の全組で順序をチェックし、崩れた組を返す。環境変数は見ない。"""
     broken = []
@@ -141,14 +176,20 @@ def main(argv: list[str]) -> int:
             print(f"{phase} × {agent}: 無進捗の許容 {stall} / 監視の上限 {monitor} / "
                   f"CLI の上限 {cli}", file=sys.stderr)
         return 1 if broken else 0
-    if len(argv) == 3 and argv[0] in ("cli-timeout", "monitor-timeout"):
-        command, phase, agent = argv
+    options = _parse_cli_options(argv[3:]) if argv[:1] == ["cli-timeout"] else ((None, True) if len(argv) == 3 else None)
+    if len(argv) >= 3 and argv[0] in ("cli-timeout", "monitor-timeout") and options is not None:
+        command, phase, agent = argv[:3]
+        warning = None
         try:
-            value = cli_timeout(phase, agent) if command == "cli-timeout" \
-                else monitor_timeout(phase, agent)
+            if command == "cli-timeout":
+                value, warning = resolve_cli_timeout(phase, agent, *options)
+            else:
+                value = monitor_timeout(phase, agent)
         except KeyError as exc:
             print(exc.args[0], file=sys.stderr)
             return 1
+        if warning:
+            print(warning, file=sys.stderr)
         print(value)
         return 0
     print(__doc__.split("Usage:", 1)[1].strip(), file=sys.stderr)
