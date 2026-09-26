@@ -182,6 +182,12 @@ C2 の後に置く。`lib/README.md` の索引は、各移行ステップが自�
 シム越しの 43 か所のうち 41 か所が `monitor_types`・`monitor_proc` へ向き直り、シムの名前空間を確かめる
 `test_monitor_generic_stem.py` の assert は `_run_all.__globals__` を見る形に変わる。
 
+### ミッション 2b: 汎用の処理をライブラリへ（決定 19・20）
+
+ミッション 2 の開発版の後、ミッション 3 の前に置く。ステージと触るファイルは
+[issue-1142-design-libraries.md](issue-1142-design-libraries.md) の「移行の順序」にある。計画の実行とキュー
+（不足 i）は決定 21（DBOS）で、ミッション 2b の後のミッション 2c にする。
+
 ### ミッション 3: 語・撤去・測り直し
 
 | ステージ | 移行ステップ | 触るファイル |
