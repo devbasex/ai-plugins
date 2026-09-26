@@ -27,7 +27,7 @@ jobs:
     outputs:
       skip: ${{ steps.decide.outputs.skip }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: github.event_name == 'pull_request'
         with:
           fetch-depth: 0
@@ -58,7 +58,7 @@ jobs:
       - name: Skip (release PR with version and description changes only)
         if: env.SKIP_HEAVY == 'true'
         run: echo "判定が重いジョブを省いた（ci-scope の出力を見る）"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: env.SKIP_HEAVY != 'true'
       - name: Run unauthenticated runtime smoke
         if: env.SKIP_HEAVY != 'true'
