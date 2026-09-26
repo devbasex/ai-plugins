@@ -1,0 +1,110 @@
+"""`lib/worktree-common.sh` を 8 本に分けた形を固定する（#1142 の C5）。
+
+呼び出し側は `worktree-common.sh` だけを source する。`worktree-common.sh` は同じディレクトリの
+7 本を決まった順に source し、1 本でも読めなければ 1 を返す（呼び出し側は `|| exit 0` で抜ける）。
+`_wt_extract_scan` の中で定義していた関数は最上位へ移し、接頭辞のない名前には `_wt_scan_` を付けた。
+"""
+
+from __future__ import annotations
+
+import pathlib
+import shutil
+import subprocess
+
+import pytest
+
+LIB = pathlib.Path(__file__).resolve().parents[1] / "lib"
+COMMON = LIB / "worktree-common.sh"
+PARTS = (
+    "worktree-declaration.sh",
+    "worktree-branch.sh",
+    "worktree-shell-lex.sh",
+    "worktree-write-target.sh",
+    "worktree-write-target-scan.sh",
+    "worktree-write-target-track.sh",
+    "worktree-registry.sh",
+)
+
+# 各ファイルが定義する最上位の関数の代表。source の後にすべて引けること。
+REPRESENTATIVES = {
+    "worktree-common.sh": ("wt_tool_matcher", "wt_main_dir", "wt_is_allowed_path", "wt_normalize_path"),
+    "worktree-declaration.sh": ("_wt_local_overrides", "wt_declaration", "wt_declaration_stamp"),
+    "worktree-branch.sh": ("wt_dev_worktrees", "wt_base_branch", "wt_dirty_paths"),
+    "worktree-shell-lex.sh": ("_wt_tok_emit", "_wt_tokenize"),
+    "worktree-write-target.sh": ("wt_extract_write_target", "_wt_strip_heredocs", "wt_extract_patch_target"),
+    "worktree-write-target-scan.sh": (
+        "_wt_extract_scan", "_wt_scan_redir_target", "_wt_scan_redir_span", "_wt_take_redirect_operand",
+        "_wt_scan_emit", "_wt_extract_sed_targets", "_wt_extract_cp_mv_target", "_wt_scan_emit_word",
+        "_wt_scan_command_position",
+    ),
+    "worktree-write-target-track.sh": (
+        "_wt_scan_track_word", "_wt_scan_cd", "_wt_scan_push_group", "_wt_scan_pop_group",
+        "_wt_scan_push_subshell", "_wt_scan_pop_subshell", "_wt_scan_close_function_body",
+        "_wt_scan_or_group_exits", "_wt_scan_or_exit_redirs",
+    ),
+    "worktree-registry.sh": ("wt_registry_update", "wt_lock_acquire", "wt_slot_acquire", "ndf_lock_acquire"),
+}
+
+# 接頭辞を付ける前の名前。走査を 1 回回した後も定義されていないこと（ほかのスクリプトの関数を潰さない）。
+OLD_NAMES = (
+    "_emit", "_push_group", "_pop_group", "_push_subshell", "_pop_subshell",
+    "_close_function_body", "_or_group_exits", "_or_exit_redirs", "_redir_target", "_redir_span",
+)
+
+
+def _bash(script: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=60)
+
+
+@pytest.mark.parametrize("name", ("worktree-common.sh",) + PARTS)
+def test_each_file_stays_within_500_lines(name: str) -> None:
+    lines = (LIB / name).read_text(encoding="utf-8").count("\n")
+    assert lines <= 500, f"{name} は {lines} 行"
+
+
+def test_sourcing_the_common_file_defines_every_part() -> None:
+    names = [n for group in REPRESENTATIVES.values() for n in group]
+    probe = " ".join(names)
+    got = _bash(f'. "{COMMON}" || exit 9\nfor f in {probe}; do declare -F "$f" >/dev/null || echo "missing $f"; done')
+    assert got.returncode == 0, got.stderr
+    assert got.stdout == "", got.stdout
+
+
+def test_the_scan_does_not_define_the_old_unprefixed_names() -> None:
+    probe = " ".join(OLD_NAMES)
+    got = _bash(
+        f'. "{COMMON}" || exit 9\n'
+        'wt_extract_write_target "echo hi > out.txt && (cd sub; cat a >> b) || { echo x > c; }" >/dev/null\n'
+        f'for f in {probe}; do declare -F "$f" >/dev/null && echo "defined $f"; done; true'
+    )
+    assert got.returncode == 0, got.stderr
+    assert got.stdout == "", got.stdout
+
+
+def test_the_scan_still_extracts_write_targets() -> None:
+    got = _bash(f'. "{COMMON}" || exit 9\nwt_extract_write_target "echo hi > out.txt; sed -i s/a/b/ f.txt"')
+    assert got.returncode == 0, got.stderr
+    assert got.stdout.split() == ["out.txt", "f.txt"], got.stdout
+
+
+def _copy_lib(dst: pathlib.Path) -> pathlib.Path:
+    shutil.copytree(LIB, dst, symlinks=True)
+    return dst / "worktree-common.sh"
+
+
+@pytest.mark.parametrize("missing", PARTS)
+def test_a_missing_part_makes_the_source_fail(tmp_path: pathlib.Path, missing: str) -> None:
+    common = _copy_lib(tmp_path / "lib")
+    (tmp_path / "lib" / missing).unlink()
+    got = _bash(f'. "{common}" 2>/dev/null; echo "rc=$?"')
+    assert "rc=1" in got.stdout, (missing, got.stdout, got.stderr)
+
+
+def test_the_parts_are_found_relative_to_the_common_file(tmp_path: pathlib.Path) -> None:
+    """呼び出し側の作業ディレクトリに依らず、`worktree-common.sh` の隣から読む。"""
+    common = _copy_lib(tmp_path / "lib")
+    got = subprocess.run(
+        ["bash", "-c", f'. "{common}" || exit 9\ndeclare -F wt_slot_acquire >/dev/null && echo ok'],
+        capture_output=True, text=True, timeout=60, cwd=str(tmp_path),
+    )
+    assert got.stdout.strip() == "ok", (got.stdout, got.stderr)
