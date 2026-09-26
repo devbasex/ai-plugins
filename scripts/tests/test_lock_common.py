@@ -204,7 +204,7 @@ def test_the_libraries_do_not_locate_the_common_file_with_cd(tmp_path: Path) -> 
     手前へ戻り、プラグインルートを外す。**この形は配置を変えずに壊れる**ため、
     テストで固定する。
     """
-    for lib in (WT_LIB, WF_LIB):
+    for lib in (WT_LIB.with_name("worktree-registry.sh"), WF_LIB):
         line = next(
             l for l in lib.read_text(encoding="utf-8").splitlines()
             if "lock-common.sh" in l and '. "' in l

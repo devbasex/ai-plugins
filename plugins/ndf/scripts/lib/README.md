@@ -15,7 +15,14 @@
 
 | ファイル | 役割 | 読む側 |
 | --- | --- | --- |
-| [worktree-common.sh](worktree-common.sh) | worktree の判定・台帳・書き込み先の推定 | `worktree` / hook |
+| [worktree-common.sh](worktree-common.sh) | worktree の判定のエントリポイント。位置の解決・パスの判定と正規化を持ち、下の 7 本を順に source する（1 本でも読めなければ 1 を返す）。読む側はこのファイルだけを source する | `worktree` / hook |
+| [worktree-declaration.sh](worktree-declaration.sh) | 宣言ファイルと個人の宣言の読み取り（`wt_declaration_get` ほか） | `worktree-common.sh` |
+| [worktree-branch.sh](worktree-branch.sh) | worktree の一覧・追従先・ブランチの判定（`wt_current_branch` ほか） | 同上 |
+| [worktree-shell-lex.sh](worktree-shell-lex.sh) | 書き込み先の推定に使うシェルコマンドの字句解析 | 同上 |
+| [worktree-write-target.sh](worktree-write-target.sh) | シェルコマンドとパッチ本文からの書き込み先の推定のエントリポイントと前処理 | 同上 |
+| [worktree-write-target-scan.sh](worktree-write-target-scan.sh) | 書き込み先の推定の走査の本体と、書き込み先を出す関数 | 同上 |
+| [worktree-write-target-track.sh](worktree-write-target-track.sh) | 走査が使う現在地と複合構文の入れ子の追跡 | 同上 |
+| [worktree-registry.sh](worktree-registry.sh) | テスト環境の採番と台帳・排他・スロット | 同上 |
 | [projects-common.sh](projects-common.sh) | GitHub Projects のボードへの記録 | `development-workflow` |
 | [lock-common.sh](lock-common.sh) | 排他の取得と解放（#293） | 上の 2 つと `development-workflow` |
 | [monitor.py](monitor.py) | 別プロセスの多軸監視。対象と命名規則を引数で受ける | 収束ループの 2 つ / `external-ai.py` |
