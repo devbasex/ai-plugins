@@ -249,6 +249,9 @@ Pull Request のレビューを CLI へ委譲し、新しい指摘が出なく�
 | 着手期限 | — | 実装・テスト追加でその改善項目に着手してよい最後の時刻（start_deadline） | 着手の締め切り | — | `docs/specifications/cross-refactoring-time-budget.md` |
 | 完了期限 | — | 着手期限にその改善項目の見積りを足した時刻。マージ処理はコミットの時刻をこれと比べる | 完了の締め切り | — | `docs/specifications/cross-refactoring-time-budget.md` |
 | フレーキー / 既存失敗 / 変更起因 | — | 危険フラグで走らせた全体テストが落ちたときの 3 つの分類（whole_test.flaky / preexisting / caused） | 元からの失敗 | — | `docs/specifications/cross-refactoring-verify-and-final-gate.md` |
+| 指標 | — | `cross-refactoring` が提案の前に対象範囲のコードを測定ツールで測った値。関数ごとの循環的複雑度、ファイルごとの保守性か大きさ、行数 | — | — | — |
+| 指標のファイル | — | 提案の前に 1 回だけ作り、参加者の全員が読む指標の測定の結果 | — | — | — |
+| 測定ツール | — | 言語ごとに指標を測る外部のコマンド（radon・lizard など） | — | — | — |
 
 ## NDF のラッパー（`ndf-relay`）
 

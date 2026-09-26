@@ -1994,6 +1994,27 @@
       "meaning": "収束ループを抜けた後に /ndf:fix を通し、open thread を 0 にする工程",
       "source": "",
       "pending_source": "issues/issue-1287-design.md"
+    },
+    {
+      "term": "指標",
+      "context": "ndf-cross-refactoring",
+      "meaning": "`cross-refactoring` が提案の前に対象範囲のコードを測定ツールで測った値。関数ごとの循環的複雑度、ファイルごとの保守性か大きさ、行数",
+      "source": "",
+      "pending_source": "issues/issue-1319-requirements.md"
+    },
+    {
+      "term": "指標のファイル",
+      "context": "ndf-cross-refactoring",
+      "meaning": "提案の前に 1 回だけ作り、参加者の全員が読む指標の測定の結果",
+      "source": "",
+      "pending_source": "issues/issue-1319-requirements.md"
+    },
+    {
+      "term": "測定ツール",
+      "context": "ndf-cross-refactoring",
+      "meaning": "言語ごとに指標を測る外部のコマンド（radon・lizard など）",
+      "source": "",
+      "pending_source": "issues/issue-1319-requirements.md"
     }
   ]
 }
