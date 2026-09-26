@@ -56,7 +56,7 @@
 | 外す | `/ndf:install-wrapper uninstall`。`~/.bashrc`・`~/.bash_profile`・`~/.zshrc` の管理ブロックを外し（バックアップの後。管理ブロックの外は変えない）、読み込み先のファイル・ラッパーの rc・コピー・10.17.4〜10.17.6 のコピーを消す。開いているシェルでは `unset -f claude`（10.17.4〜10.17.6 の管理ブロックなら `unalias claude`）で外れる |
 | 手で外す | 管理ブロックの行を消し、`~/.claude/ndf/` の `relay.py`・`relay.version`・`shellrc` を消す |
 | 過去の版へ戻した | `/ndf:install-wrapper` を打ち直す（明示の導入は版を比べずに今の版を置く） |
-| `/ndf:install-wrapper` を持たない 10.17.6 以前へ戻す | **戻す前に** `/ndf:install-wrapper uninstall` を打つ。戻した後なら管理ブロックと `~/.claude/ndf/` を手で消す |
+| `/ndf:install-wrapper` を持たない版（10.17.6 まで）へ戻す | **戻す前に** `/ndf:install-wrapper uninstall` を打つ。戻した後なら管理ブロックと `~/.claude/ndf/` を手で消す |
 
 ## ラッパーを挟まない起動
 
@@ -231,4 +231,4 @@ cat ~/.local/state/ndf/relay/*/log.jsonl | jq -c 'select(.event == "stop")'
 | --- | --- |
 | 次のセッションへ引き継ぐ | `ndf-next` のブロックの中身の先頭に `/goal ` を付ける（[context-window.md](context-window.md) の「新しい会話で戻す」） |
 | 目標が未達のとき | 判定が止めを拒んで応答が続く。カットポイントでは未達が当然なので、ラッパーは切り替える。シグナルファイルを書いた後に目標の判定（`goal_status` の `met: false`）の行があれば、会話の記録の更新をアイドルに数えず、利用者の入力のアイドルだけを待つ。Esc を 1 回書いて応答を止め、1 秒おいて `/exit` を書く。利用者の入力・質問・背景の処理の起動があれば切り替えない |
-| `/ndf:restart` の引数が無いとき | 定型の 1 文ではなく、目標の入力をそのまま再開コマンドにする |
+| `/ndf:restart` の引数が無いとき | 目標の入力をそのまま再開コマンドにする |

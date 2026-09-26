@@ -216,7 +216,7 @@ Pull Request のレビューを CLI へ委譲し、新しい指摘が出なく�
 | 修正担当 | 指摘を直してコミットするサブエージェント（/ndf:fix を実行する） | 修正の担当 | `docs/specifications/cross-review-writes-to-conductor.md` |
 | 投稿キュー | 送る前に投稿を積み、上限で送れなければ残す仕組み（lib/post_queue.py） | 投稿の待ち行列 | `docs/specifications/cross-review-writes-to-conductor.md` |
 | 重複投稿 | 送ろうとした投稿と同じものとして、すでに Pull Request にある投稿 | 先客 | `docs/specifications/cross-review-writes-to-conductor.md` |
-| 総評 | インラインではなく、レビュー本体に書く文章（body） | — | `docs/specifications/cross-review-writes-to-conductor.md` |
+| 総評 | レビュー本体に書く文章（body）。インラインのコメントとは別に置く | — | `docs/specifications/cross-review-writes-to-conductor.md` |
 
 ## NDF の cross-refactoring（`ndf-cross-refactoring`）
 
