@@ -10,7 +10,7 @@ from pathlib import Path
 import gh_rest
 from supervise_lib import paths
 from supervise_lib.claude import TAIL, WORK_TOOLS, run_ticking
-from supervise_lib.prompts import FULL_SYSTEM, PROGRESS_PROMPT, REPORT_DONE, RESUME_PROMPT, WORK_SYSTEM, WORKDIR_PROMPT
+from supervise_lib.prompts import FULL_SYSTEM, PROGRESS_PROMPT, REPORT_DONE, REPORT_NOT_DONE, RESUME_PROMPT, WORK_SYSTEM, WORKDIR_PROMPT
 from supervise_lib.steps import RunStep, last_json
 
 
@@ -79,7 +79,7 @@ class WorkStep:
             res = ctx.claude.call(FULL_SYSTEM, RESUME_PROMPT, WORK_TOOLS, cwd, step.get("timeout", 1800),
                                   full=True, resume=res["session"])
             ctx.claude.record_usage("work", res)
-        if full and not REPORT_DONE.search(res["text"] or ""):
+        if (full and not REPORT_DONE.search(res["text"] or "")) or REPORT_NOT_DONE.search(res["text"] or ""):
             res["ok"] = False
         ctx.state.cur.update(exit=0 if res["ok"] else 1, text=res["text"], seconds=res["seconds"])
         return res["ok"], res["text"]

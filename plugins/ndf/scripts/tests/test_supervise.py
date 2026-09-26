@@ -1404,3 +1404,21 @@ def test_judge_retry_without_rate_limit_does_not_wait(tmp_path, seq, monkeypatch
     monkeypatch.chdir(tmp_path)
     s, text = run_plan(tmp_path, steps)
     assert "結果: 完了" in text and _gh_limit_rows(s) == []
+
+
+@pytest.mark.parametrize("result", ["判断が要る", "できなかった"])
+def test_work_report_not_done_fails_the_step(tmp_path, seq, result):
+    """claude -p の worker が「結果: 判断が要る / できなかった」で終えたら、CLI が正常に終わってもステップは落ちる。"""
+    seq[0]({"out": {"result": f"止めた\n\n## 作業の報告\n- 作業: 実装\n- 結果: {result}\n- 見つけたもの: 1 件",
+                    "usage": {}, "total_cost_usd": 0.01, "num_turns": 1}})
+    s, _ = run_plan(tmp_path, [{"id": "impl", "type": "work", "prompt": "実装する", "on_fail": "end", "next": "next"},
+                               {"id": "next", "type": "run", "cmd": "true", "next": "end"}])
+    assert s.state.results["impl"]["exit"] == 1
+    assert "next" not in s.state.results
+
+
+def test_work_without_report_keeps_cli_result(tmp_path, seq):
+    """報告の無い応答（judge・fix の短い応答）は、今までどおり CLI の終わり方で決める。"""
+    seq[0]({"out": {"result": "直した", "usage": {}, "total_cost_usd": 0.01, "num_turns": 1}})
+    s, _ = run_plan(tmp_path, [{"id": "impl", "type": "work", "prompt": "直す", "next": "end"}])
+    assert s.state.results["impl"]["exit"] == 0
