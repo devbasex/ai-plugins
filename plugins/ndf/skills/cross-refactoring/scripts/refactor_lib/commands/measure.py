@@ -184,15 +184,27 @@ class Measurement:
             info(f"📏 指標のファイル: {target}")
         record["seconds"] = round(time.monotonic() - started, 1)
 
+    def _timed_out(self, result: dict[str, Any]) -> bool:
+        """残りが無ければ `timeout` を書いて `True`。起動も読込もせずに次へ進むために使う。"""
+        if self.left() > 0:
+            return False
+        self._fail(result, cm.TIMEOUT, f"{self.budget} 秒")
+        return True
+
     def _read_sources(self, by_lang: dict[str, list[str]]) -> None:
+        """ソースを読み、Python を解析する。締め切りを過ぎたらやめる（残りは言語ごとに `timeout`）。"""
         for files in by_lang.values():
             for rel in files:
+                if self.left() <= 0:
+                    return
                 try:
                     data = pathlib.Path(self.work, rel).read_bytes()
                 except OSError:
                     continue
                 self.sources[rel] = data.decode("utf-8", errors="replace")
         for rel in by_lang.get("python", []):
+            if self.left() <= 0:
+                return
             text = self.sources.get(rel)
             self.parsed[rel] = read.python_functions(text) if text is not None else None
 
@@ -205,7 +217,7 @@ class Measurement:
             "detail": None, "unreadable_files": 0,
         }
         section: dict[str, Any] = {"functions": [], "files": []}
-        if reason is not None:
+        if reason is not None or self._timed_out(result):
             return result, section
         prefixes = self._resolve(cm.TOOL_COMMANDS[tool], result)
         if prefixes is None:
@@ -288,6 +300,8 @@ class Measurement:
             "files": len(files), "seconds": 0.0, "status": cm.FAILED, "reason": None,
             "detail": None, "clones": 0, "duplicated_lines": 0, "total_lines": 0,
         }
+        if self._timed_out(result):
+            return result, []
         size = cm.arg_bytes(files if tool == cm.TOOL_SYMILAR
                             else [os.path.join(self.work, p) for p in files])
         if size > cm.DUPLICATE_ARG_BYTES:

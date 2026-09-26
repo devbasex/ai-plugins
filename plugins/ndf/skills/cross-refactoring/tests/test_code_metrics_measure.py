@@ -323,6 +323,22 @@ def test_timeout_stops_the_process_group(run, cmd_measure, monkeypatch, tmp_path
     assert all(_dead(p) for p in pids)
 
 
+def test_no_time_left_skips_reading_and_launching(run, cmd_measure):
+    """締め切りが 0 なら、ソースを読まず・ツールを起動せず、全部を `timeout` にして書く。"""
+    import datetime as _dt
+    end = _dt.datetime.fromtimestamp(time.time() - 60).astimezone().isoformat(timespec="seconds")
+    r = run(limits={"measure_timeout": 90, "propose_end_at": end})
+    state = r.state
+    m = cmd_measure.Measurement(state, state["code_metrics"])
+    m.run()
+    record = state["code_metrics"]
+    assert record["deadline_seconds"] == 0 and record["status"] == "written"
+    assert m.sources == {} and m.parsed == {}
+    assert {x["reason"] for x in record["languages"]} == {"timeout"}
+    assert {x["reason"] for x in record["duplication"]} == {"timeout"}
+    assert calls(r.log) == []
+
+
 # ---------------- init と再開 ----------------
 
 def test_init_writes_measure_timeout_and_a_pending_record(codemetrics_record, tmp_path):
