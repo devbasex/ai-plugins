@@ -355,11 +355,11 @@ def _cp_mv_destination(args: list[str]) -> str:
 def shell_targets(cmd: str, base: str = "") -> list[str]:
     """シェルのコマンドの書き込み先（実行の順。1 つのコマンドの中は語の書き込み先・リダイレクトの順。重複あり）。`base` を渡すと絶対パスで返す。
 
-    構文を読み切れないコマンド（`shparse.unreadable()`。`! case … esac` など）は推定しない（空を返す）。"""
+    構文を読み切れないコマンド（`shparse.has_unreadable_error()`。`! case … esac` など）は推定しない（空を返す）。"""
     if not cmd:
         return []
     root = sp.parse_bash(cmd)
-    if sp.unreadable(root):
+    if sp.has_unreadable_error(root):
         return []
     scan = _Scan(base)
     scan.seq(root, scan.root)

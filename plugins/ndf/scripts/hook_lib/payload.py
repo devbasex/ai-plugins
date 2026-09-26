@@ -21,15 +21,15 @@ def tool_matcher() -> str:
     return "|".join((*EDIT_TOOLS, *PATCH_TOOLS, *SHELL_TOOLS))
 
 
-def _str(v: Any) -> str:
+def _as_str(v: Any) -> str:
     return v if isinstance(v, str) else ""
 
 
-def _dict(v: Any) -> dict:
+def _as_dict(v: Any) -> dict:
     return v if isinstance(v, dict) else {}
 
 
-def _list(v: Any) -> list:
+def _as_list(v: Any) -> list:
     return v if isinstance(v, list) else []
 
 
@@ -44,11 +44,11 @@ class Event:
 
     @property
     def tool_input(self) -> dict:
-        return _dict(self.raw.get("tool_input"))
+        return _as_dict(self.raw.get("tool_input"))
 
     @property
     def agy_args(self) -> dict:
-        return _dict(_dict(self.raw.get("toolCall")).get("args"))
+        return _as_dict(_as_dict(self.raw.get("toolCall")).get("args"))
 
     @property
     def tool_kind(self) -> str:
@@ -72,8 +72,8 @@ class Event:
     def edit_paths(self) -> list[str]:
         ti = self.tool_input
         found = [ti.get("file_path"), ti.get("path"), ti.get("notebook_path")]
-        found += [_dict(e).get("file_path") for e in _list(ti.get("edits"))]
-        found += [_dict(o).get("path") for o in _list(ti.get("operations"))]
+        found += [_as_dict(e).get("file_path") for e in _as_list(ti.get("edits"))]
+        found += [_as_dict(o).get("path") for o in _as_list(ti.get("operations"))]
         found.append(self.agy_args.get("TargetFile"))
         return sorted({p for p in found if isinstance(p, str) and p})
 
@@ -83,7 +83,7 @@ class Event:
             return " ".join(str(w) for w in cmd)
         if isinstance(cmd, str):
             return cmd
-        return _str(self.agy_args.get("CommandLine"))
+        return _as_str(self.agy_args.get("CommandLine"))
 
     def command_cwd(self) -> str:
         """コマンドの実行ディレクトリの指定（`run_shell_command` は `dir_path`、agy は `Cwd`）。無ければ空。"""
@@ -91,19 +91,19 @@ class Event:
         for k in ("dir_path", "cwd", "workdir"):
             if isinstance(ti.get(k), str):
                 return ti[k]
-        return _str(self.agy_args.get("Cwd"))
+        return _as_str(self.agy_args.get("Cwd"))
 
 
 def event_of(raw: dict) -> Event:
-    tool, cwd = _str(raw.get("tool_name")), _str(raw.get("cwd"))
+    tool, cwd = _as_str(raw.get("tool_name")), _as_str(raw.get("cwd"))
     agy = False
     if not tool:
-        name = _str(_dict(raw.get("toolCall")).get("name"))
+        name = _as_str(_as_dict(raw.get("toolCall")).get("name"))
         if name:
             agy, tool = True, name
             paths = raw.get("workspacePaths")
             if not cwd and isinstance(paths, list) and paths and isinstance(paths[0], str):
                 cwd = paths[0]
-    session = _str(raw.get("session_id")) or _str(raw.get("conversationId")) or os.environ.get("KIRO_SESSION_ID", "")
+    session = _as_str(raw.get("session_id")) or _as_str(raw.get("conversationId")) or os.environ.get("KIRO_SESSION_ID", "")
     here = cwd if cwd and os.path.isdir(cwd) else os.getcwd()
-    return Event(raw, _str(raw.get("hook_event_name")), tool, os.path.realpath(here), session, agy)
+    return Event(raw, _as_str(raw.get("hook_event_name")), tool, os.path.realpath(here), session, agy)

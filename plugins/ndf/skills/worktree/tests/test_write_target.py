@@ -946,7 +946,7 @@ def test_an_unreadable_command_is_not_judged() -> None:
     import shparse
 
     command = "cd .worktrees/x; ! case x in x) cd ../..; cp a.txt README.md ;; esac"
-    assert shparse.unreadable(shparse.parse_bash(command))
+    assert shparse.has_unreadable_error(shparse.parse_bash(command))
     assert extract_at(command, "/base") == ([], 1)
 
 

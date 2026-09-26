@@ -35,7 +35,7 @@ def _say(msg: str) -> None:
     print(f"[ndf hook-env] {msg}", file=sys.stderr)
 
 
-def stamp() -> str:
+def env_stamp() -> str:
     """lock と入れるグループから作る目印。環境の中の `.ndf-hook-env` と同じなら用意し直さない。"""
     h = hashlib.sha256((deps.PLUGIN_ROOT / "uv.lock").read_bytes())
     h.update(" ".join(hook_python.GROUPS).encode())
@@ -79,7 +79,7 @@ def ready(venv: Path, want: str) -> bool:
 def sync() -> int:
     """切り離した子の本体。uv を用意して環境を作り、目印を張る。"""
     venv = Path(deps.venv_dir())
-    want = stamp()
+    want = env_stamp()
     if not ready(venv, want):
         uv = deps.find_uv()
         if not uv:
@@ -106,7 +106,7 @@ def main(argv: list[str]) -> int:
     wait = float(argv[argv.index("--wait") + 1]) if "--wait" in argv[:-1] else 50.0
     try:
         venv = Path(deps.venv_dir())
-        if ready(venv, stamp()):
+        if ready(venv, env_stamp()):
             link_pointers(venv)
             return 0
         LOG.parent.mkdir(parents=True, exist_ok=True)

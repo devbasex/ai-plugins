@@ -19,12 +19,13 @@ import json
 import os
 import re
 import subprocess
-import tempfile
 import time
 from collections import deque
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
+
+import jsonio
 
 from . import payload as pl
 
@@ -100,10 +101,7 @@ def session_lock(directory: Path, sid: str) -> Iterator[bool]:
 def write_json(path: Path, body: dict) -> None:
     """置き換えで書く（途中で落ちても壊れた JSON を残さない）。7 日より古い記録を消す。"""
     try:
-        fd, tmp = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=path.parent)
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(json.dumps(body, ensure_ascii=False) + "\n")
-        os.replace(tmp, path)
+        jsonio.write_atomic(path, body, indent=None)
     except OSError:
         return
     now = time.time()
@@ -115,12 +113,8 @@ def write_json(path: Path, body: dict) -> None:
             pass
 
 
-def _read_json(path: Path) -> dict:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-    return data if isinstance(data, dict) else {}
+def _load_record(path: Path) -> dict:
+    return jsonio.read(path, missing={}, broken={}, want=dict)
 
 
 # --- sleep ---------------------------------------------------------------------------------------------
@@ -135,7 +129,7 @@ def guard_sleep(raw: dict) -> dict | None:
     import shparse
     from . import shell_checks
     try:
-        if shparse.unreadable(shparse.parse_bash(cmd)) or not shell_checks.sleep_deny(cmd, float(mx)):
+        if shparse.has_unreadable_error(shparse.parse_bash(cmd)) or not shell_checks.foreground_sleep(cmd, float(mx)):
             return None
     except (ValueError, RecursionError):  # 読めないコマンド・読めない上限は通す
         return None
@@ -171,7 +165,7 @@ def guard_read(raw: dict) -> dict | None:
             return None
         size, mtime, inode = _file_stat(path)
         state = d / f"read-{sid}.json"
-        prev = _read_json(state)
+        prev = _load_record(state)
         same = (prev.get("key") == key and prev.get("size") == size and prev.get("mtime") == mtime
                 and prev.get("inode") == inode)
         count = (prev.get("count") if same and isinstance(prev.get("count"), int) else 0) + 1
@@ -261,7 +255,7 @@ def guard_context(raw: dict, tool: str) -> dict | None:
     if tool == "Bash":
         cmd = _field(raw, "tool_input", "command")
         from . import shell_checks
-        if not shell_checks.plan_command(cmd):
+        if not shell_checks.starts_plan(cmd):
             return None
         key, words = f"plan\t{cmd}", ""
     elif tool == "Skill":
@@ -293,7 +287,7 @@ def guard_context(raw: dict, tool: str) -> dict | None:
         mark = d / f"context-{sid}.json"
         # ラッパーの直接の子の conductor では 1 度の通しをやめ、上限を超えている限り止め続ける（#895）
         notice = relay_notice() if os.environ.get("NDF_RELAY_DIR") and total > limit else None
-        if notice is None and _read_json(mark).get("key") == key:
+        if notice is None and _load_record(mark).get("key") == key:
             try:
                 mark.unlink()
             except OSError:
@@ -361,7 +355,7 @@ def plan_hint(raw: dict) -> dict | None:
 TOOLS = ("Bash", "Read", "Skill", "Agent", "Task")
 
 
-def guard(ev: pl.Event) -> dict | None:
+def decision(ev: pl.Event) -> dict | None:
     raw, tool = ev.raw, ev.tool
     if tool == "Bash":
         return guard_context(raw, tool) or guard_sleep(raw)

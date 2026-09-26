@@ -107,7 +107,7 @@ def _read_stdin() -> dict | None:
     return data if isinstance(data, dict) else None
 
 
-def run_hook(runtime: str) -> None:
+def run_legacy_hook(runtime: str) -> None:
     """古いエントリポイント（`--runtime`）。hook の環境の python で `hook.py` の関数を呼ぶ。"""
     import hook_python
     if not hook_python.hook_packages_importable():
@@ -125,7 +125,7 @@ def main(argv: list[str]) -> int:
             deps.require("notify")
             send_notice(json.loads(argv[1]))
         elif len(argv) >= 2 and argv[0] == "--runtime" and argv[1] in RUNTIMES:
-            run_hook(argv[1])
+            run_legacy_hook(argv[1])
         else:
             log("skip: bad arguments", argv)
     except Exception as exc:  # noqa: BLE001 — フックを失敗させない（I9〜I12）

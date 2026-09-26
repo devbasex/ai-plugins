@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""NDF のスクリプトの構造チェック（#1142 の不変条件 I4・I5・I14）。
+"""NDF のスクリプトの構造チェック（#1142 の不変条件 I4・I5・I13・I14）。
 
 見るのは `plugins/ndf/` の下の `.py` と `.sh` のうち、テストを除くもの（`tests/`・`test/` の下と
 `test_` で始まるファイル）。git の作業ツリーでは git が追跡するファイルだけを見る。
@@ -14,6 +14,10 @@
   モジュールが使う（I14）。部品と持ち主は `WRAPPED` の表で、`fcntl`・`pty`・`termios`・`urllib.request` の import、
   `/proc/` の読み取り（docstring を除く文字列）、囲み（```` ``` ```` / `~~~`）を追う正規表現と `startswith` を見る。
   例外リストの `name` は部品の名前（`fcntl` など）
+- `hook-deps`: hook の経路が `deps.require()` を呼ぶ（I13・決定 20）。hook の経路は、hook のエントリポイント
+  （`HOOK_ENTRIES`）から import でたどれる `scripts/` の中のモジュールと、`plugins/*/hooks/*.json` の command である。
+  モジュールは `deps` を import したら落ち、command は `uv run` を挟んだら落ちる（hook は SessionStart が用意した
+  環境の python を直に起動する）。例外リストの `name` は `deps` か `uv run`
 
 副命令のハンドラー（`cmd_*`）・`main`・`build_parser`・`_build_parser`・シェルの `usage` は規則で外す。
 
@@ -45,7 +49,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 SCAN = "plugins/ndf"
 MAX_LINES = 500
-KINDS = ("lines", "same-body", "same-name", "wrapped")
+KINDS = ("lines", "same-body", "same-name", "wrapped", "hook-deps")
 LIB = "plugins/ndf/scripts/"
 # I14: 部品 → 使ってよい包み（決定 19。擬似端末は relay_lib/terminal.py が包みを兼ねる）
 WRAPPED = {
@@ -56,6 +60,9 @@ WRAPPED = {
     "proc-fs": (LIB + "lib/procs.py",),
     "fence-regex": (LIB + "lib/md.py",),
 }
+# I13: hook のエントリポイント（決定 20）。ここから import でたどれるモジュールは deps を import しない
+HOOK_ENTRIES = (LIB + "hook.py",)
+IMPORT_ROOTS = (LIB, LIB + "lib/")
 RE_FUNCS = {"compile", "match", "search", "fullmatch", "finditer", "findall", "sub", "subn", "split"}
 FENCE_HINT = re.compile(r"```|~~~|`\{3|~\{3|\[`~\]|\[~`\]")
 RULE_NAMES = {"main", "build_parser", "_build_parser"}
@@ -290,8 +297,60 @@ def scan(root: Path) -> tuple[list[dict], dict]:
                 if diff:
                     violations.append({"kind": "same-name", "path": path, "function": name,
                                        "detail": "同じ名前で本体が違う: " + ", ".join(diff)})
+    violations += hook_deps(root)
     metrics = {"files": len(files), "functions": sum(len(v) for v in defs.values()), "unparsed": unparsed}
     return violations, metrics
+
+
+def _imported(rel: str, text: str) -> set[str]:
+    """モジュールが import する名前（関数の中の import も含む。`from . import x` は `<パッケージ>.x`）。"""
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return set()
+    pkg = Path(rel).parent.name if Path(rel).parent.as_posix() + "/" not in IMPORT_ROOTS else ""
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names |= {a.name for a in node.names}
+        elif isinstance(node, ast.ImportFrom):
+            base = node.module or ""
+            if node.level and pkg:
+                base = f"{pkg}.{base}" if base else pkg
+            names.add(base) if base else None
+            names |= {f"{base}.{a.name}" if base else a.name for a in node.names}
+    return names
+
+
+def _module_file(root: Path, name: str) -> str | None:
+    for base in IMPORT_ROOTS:
+        stem = base + name.replace(".", "/")
+        for cand in (stem + ".py", stem + "/__init__.py"):
+            if (root / cand).is_file():
+                return cand
+    return None
+
+
+def hook_deps(root: Path) -> list[dict]:
+    """I13: hook の経路のモジュールと hook の command が、deps と uv run を使わないか。"""
+    out: list[dict] = []
+    todo, seen = [e for e in HOOK_ENTRIES if (root / e).is_file()], set()
+    while todo:
+        rel = todo.pop()
+        if rel in seen:
+            continue
+        seen.add(rel)
+        names = _imported(rel, (root / rel).read_text(errors="ignore"))
+        if "deps" in names:
+            out.append({"kind": "hook-deps", "path": rel, "function": "deps",
+                        "detail": "hook の経路のモジュールが deps を import する（hook は用意済みの環境で動き、deps.require() を呼ばない）"})
+        todo += [f for f in (_module_file(root, n) for n in names) if f and f not in seen]
+    for f in sorted(root.glob("plugins/*/hooks/*.json")):
+        rel = f.relative_to(root).as_posix()
+        if "uv run" in f.read_text(errors="ignore"):
+            out.append({"kind": "hook-deps", "path": rel, "function": "uv run",
+                        "detail": "hook の command が uv run を挟む（用意済みの環境の python を直に起動する）"})
+    return out
 
 
 def item(kind: str, path: str, function: str, result: str, detail: str) -> dict:

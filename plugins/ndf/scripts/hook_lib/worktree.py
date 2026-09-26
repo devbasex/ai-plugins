@@ -16,9 +16,10 @@ import json
 import os
 import re
 import subprocess
-import tempfile
 from dataclasses import dataclass, field
 from typing import Any
+
+import jsonio
 
 from . import payload as pl
 from . import write_target as wt
@@ -64,7 +65,7 @@ def _git_lines(cwd: str, *args: str) -> list[str] | None:
     return p.stdout.split("\n") if p.returncode == 0 else None
 
 
-def resolve(cwd: str) -> tuple[str, bool] | None:
+def locate(cwd: str) -> tuple[str, bool] | None:
     """(メインディレクトリ, worktree の中か)。サブモジュールの中は通常のリポジトリとして扱う。外なら None。"""
     lines = _git_lines(cwd, "--git-dir", "--git-common-dir", "--show-superproject-working-tree")
     if lines is None or len(lines) < 2:
@@ -79,12 +80,8 @@ def resolve(cwd: str) -> tuple[str, bool] | None:
 
 def declaration(main_dir: str) -> dict | None:
     """共有の宣言。無い・JSON として読めない・版が未対応なら None（個人の宣言は guard の項目を変えない）。"""
-    try:
-        with open(os.path.join(main_dir, DECLARATION_FILE), encoding="utf-8") as f:
-            data = json.load(f)
-    except (OSError, ValueError):
-        return None
-    if not isinstance(data, dict):
+    data = jsonio.read(os.path.join(main_dir, DECLARATION_FILE), missing=None, broken=None, want=dict)
+    if data is None:
         return None
     version = data.get("version")
     if isinstance(version, bool) or not isinstance(version, (int, float)) or version != DECLARATION_VERSION:
@@ -140,42 +137,26 @@ def state_file(session: str) -> str | None:
     return os.path.join(os.environ.get("TMPDIR") or "/tmp", f"ndf-worktree-{safe}.json")
 
 
-def _read_state(path: str | None) -> dict | None:
-    if not path:
-        return None
-    try:
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
-    except (OSError, ValueError):
-        return None
-    return data if isinstance(data, dict) else None
+def _load_state(path: str | None) -> dict | None:
+    return jsonio.read(path, missing=None, broken=None, want=dict) if path else None
 
 
-def _write_state(path: str, data: dict[str, Any]) -> None:
+def _save_state(path: str, data: dict[str, Any]) -> None:
     try:
-        fd, tmp = tempfile.mkstemp(prefix=os.path.basename(path) + ".", dir=os.path.dirname(path) or ".")
+        jsonio.write_atomic(path, data, indent=None)
     except OSError:
-        return
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False)
-        os.replace(tmp, path)
-    except OSError:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
+        pass
 
 
 def place(cwd: str, path: str | None) -> tuple[Place, dict] | None:
     """位置と宣言の控え（Tool の呼び出しのたびに git を起動しない）。解決したときの cwd と宣言の目印が合えば使う。"""
-    state = _read_state(path)
+    state = _load_state(path)
     if state and state.get("resolved_from") == cwd and state.get("main_dir"):
         if state.get("declaration_stamp", "") == declaration_stamp(state["main_dir"]):
             allow = [x for x in state.get("allow_paths") or [] if isinstance(x, str)]
             return Place(state["main_dir"], bool(state.get("in_worktree")), bool(state.get("has_declaration")),
                          allow), state
-    found = resolve(cwd)
+    found = locate(cwd)
     if found is None:
         return None
     decl = declaration(found[0])
@@ -184,7 +165,7 @@ def place(cwd: str, path: str | None) -> tuple[Place, dict] | None:
              "has_declaration": p.has_declaration, "declaration_stamp": declaration_stamp(p.main_dir),
              "allow_paths": [x for x in p.allow_paths if x], "notified": [], "pending": []}
     if path:
-        _write_state(path, state)
+        _save_state(path, state)
     return p, state
 
 
@@ -206,13 +187,13 @@ def targets(ev: pl.Event) -> tuple[list[str], str, bool] | None:
         if cmd_cwd:
             base = wt.normalize_path(cmd_cwd, ev.cwd)
         import shparse  # 構文木が要るときだけ読む（Edit の呼び出しでは tree-sitter を読まない）
-        if shparse.unreadable(shparse.parse_bash(cmd)):
+        if shparse.has_unreadable_error(shparse.parse_bash(cmd)):
             return [], base, True
         return wt.shell_targets(cmd, base), base, False
     return None
 
 
-def guard(ev: pl.Event) -> dict | str | None:
+def notice(ev: pl.Event) -> dict | str | None:
     """PreToolUse とプロンプト送信時の判定。返り値は hook の出力（辞書）か、Kiro へ書く文字列か、None（何も出さない）。"""
     path = state_file(ev.session)
     found = place(ev.cwd, path)
@@ -245,19 +226,19 @@ def guard(ev: pl.Event) -> dict | str | None:
         flagged = [r for r in flagged if r not in seen]
         if not flagged:
             return None
-        state = _read_state(path) or state
+        state = _load_state(path) or state
         state["notified"] = sorted(set(state.get("notified") or []) | set(flagged))
-        _write_state(path, state)
+        _save_state(path, state)
     paths = "\n".join(f"  - {r}" for r in flagged)
     return _output(ev, path, SUMMARY, CONTEXT.format(paths=paths, wdir=WORKTREE_DIR))
 
 
 def _output(ev: pl.Event, path: str | None, summary: str | None, context: str) -> dict:
     if ev.agy:  # 案内は状態ファイルへ積み、次のモデル呼び出しの前に worktree-session.sh が渡す
-        state = _read_state(path) if path and os.path.isfile(path) else None
+        state = _load_state(path) if path and os.path.isfile(path) else None
         if state is not None:
             state["pending"] = list(state.get("pending") or []) + [context]
-            _write_state(path, state)
+            _save_state(path, state)
         return {"decision": "allow"}
     out: dict[str, Any] = {"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": context}}
     if summary:

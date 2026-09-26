@@ -63,7 +63,7 @@ def _merge(outs: list) -> dict | str | None:
     return merged or None
 
 
-def run(command: str, runtime: str, raw: dict | None) -> dict | str | None:
+def dispatch(command: str, runtime: str, raw: dict | None) -> dict | str | None:
     from hook_lib import payload as pl
     if command == "wait-notify":
         from hook_lib import wait_notify
@@ -75,11 +75,11 @@ def run(command: str, runtime: str, raw: dict | None) -> dict | str | None:
     outs = []
     if command in ("", "worktree-guard") and (ev.tool_kind or ev.event in ("userPromptSubmit", "UserPromptSubmit")):
         from hook_lib import worktree
-        outs.append(worktree.guard(ev))
+        outs.append(worktree.notice(ev))
     if command == "token-guard" or (not command and runtime == "claude" and ev.event == "PreToolUse"):
         from hook_lib import token_guard
         if ev.tool in token_guard.TOOLS:
-            outs.append(token_guard.guard(ev))
+            outs.append(token_guard.decision(ev))
     if not command and (ev.event in NOTIFY_EVENTS or ev.tool == "AskUserQuestion"):
         from hook_lib import wait_notify
         wait_notify.hook(runtime, raw)
@@ -93,7 +93,7 @@ def main(argv: list[str]) -> int:
             raw = json.loads(sys.stdin.read() or "null")
         except (OSError, ValueError):
             raw = None
-        out = run(command, runtime, raw if isinstance(raw, dict) else None)
+        out = dispatch(command, runtime, raw if isinstance(raw, dict) else None)
         if isinstance(out, str):
             sys.stdout.write(out)
         elif out:

@@ -88,7 +88,7 @@ def _heredoc_arithmetic(n: Node) -> bool:
             and node_text(n).startswith("$(("))
 
 
-def unreadable(root: Node) -> bool:
+def has_unreadable_error(root: Node) -> bool:
     """構文木に、包みが読み直せない ERROR・欠けた字句があるか（`! case … esac`・`echo hi >` など）。
 
     真のとき、呼び出し側は判定をせずに通す。`<>` の割れとヒアドキュメントの本文の `$((…))` は読み直せるので数えない。"""
