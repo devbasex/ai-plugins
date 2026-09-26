@@ -84,8 +84,8 @@ GitHub は `lib/gh_parts.py`（決定 16・17）、`claude -p` は `supervise_li
 ように名前で引く）。起動し直しの上乗せは 2 回目以降 0.12〜0.18 秒で（決定 17 の実測）、hook ではない
 エントリポイントには十分小さい。根の `scripts/`（開発と CI の検査）は、リポジトリの根に `pyproject.toml` と
 `uv.lock` を新設して同じ形で解決する。playwright-kit はすでに自分の `pyproject.toml` と `uv.lock` を持つため、
-そこへ足す。mcp-serena の `project_yml.py` は、mcp-serena に `pyproject.toml` と `uv.lock` を新設して同じ形で解決する
-（D8 に含める）。
+そこへ足す。mcp-serena の `project_yml.py` は、mcp-serena に `pyproject.toml` と `uv.lock` を新設して解決する。hook の経路で
+読むため、起動の形は決定 25 に従う（D5 に含める）。
 
 **構造チェックに I14 を足す**: 包みが受け持つ標準ライブラリの部品（`fcntl`・`pty`・`termios`・
 `urllib.request`・`/proc/` の読み取り・囲みの正規表現）を、包みの外のモジュールが使ったら落とす。自作が
@@ -194,6 +194,40 @@ pytest と pytest-xdist を、根の `uv.lock` の 1 つで固定する。CI と
 Python の中の hook）は今の使い方で使わない。**`supervise_lib/claude.py` は `-p --output-format json` のまま残し、
 プロセスの管理だけを `lib/procs.py` へ寄せる**（2026-09-26 利用者が決定）。
 
+## 決定 25: mcp-serena の hook も、用意済みの環境の python を直に起動する（決定 20 と同じ形）
+
+**mcp-serena の PreToolUse の hook は、Grep・Read・Bash・Serena の Tool の呼び出しのたびに `.serena/project.yml` を
+読む**（`plugins/mcp/mcp-serena/hooks/hooks.json` の `PreToolUse`・タイムアウト 5 秒、`scripts/serena_lsp/hooks.py`）。
+読み書きは自作の `scripts/serena_lsp/project_yml.py`（147 行）で、置き換え先の ruamel.yaml はシステムの python3 に無い。
+2026-09-26 のステージ 2 で、D8 はここで止まった。
+
+| 案 | 得 | 失 |
+| --- | --- | --- |
+| **決定 20 と同じ形**（採る） | hook の起動の形が 2 つのプラグインで 1 つになる。自作の 147 行が消える | mcp-serena にも環境の用意とバージョンごとの環境が要る |
+| 自作のまま残す（例外の一覧へ載せる） | hook の所要は今のまま | 自作が残り、「汎用の処理は自作しない」に例外が 1 つ増える |
+| 呼ぶたびに `uv run` で起動し直す | 仕組みを新しく作らない | Tool の呼び出しのたびに 0.12〜0.18 秒増える（決定 17 の実測） |
+
+2026-09-26 に利用者が「NDF の hook と同じ形にする」と決めた。
+
+**SessionStart の hook（`serena-lsp.py hook session-start`）が、mcp-serena の `pyproject.toml` と `uv.lock` から
+`~/.cache/mcp-serena/venv/<版>` を `uv sync --frozen` で用意する。** PreToolUse の hook のコマンドはその環境の
+`bin/python` を指し、T2 で確かめた形 `sh -c '[ -x "$0" ] || exit 0; exec "$0" …'` で起動する。環境がまだ無い
+（SessionStart より前・uv を入れられない）ときは、判定をせずにパススルーで終わる。SessionStart の中の食い違いの
+通知は、環境を用意できたときだけその python で行い、用意できなければ通知を飛ばす。
+
+**hook ではないエントリポイント（`serena-lsp.py` の `check`・`configure` ほか。Skill の `language-servers` が呼ぶ）は、
+同じ環境へ自分を起動し直す。** 環境が無ければ用意し、uv が無ければ終了コード 3 で終わる（`deps.require()` と同じ
+契約）。**NDF の `lib/deps.py` は import しない。** プラグインは別々に配布され、mcp-serena だけを入れた利用者の
+手元に NDF は無い。起動し直しの数十行は `scripts/serena_lsp/env.py` に置く。
+
+Codex の hook（`hooks/codex.json`）と Kiro（`dev.kiro/install.sh`）の経路も同じ環境を指す。全体テストは決定 22 の
+根の環境に ruamel.yaml が入っているので、mcp-serena のテストはそのまま import できる。
+
+**移行は D5 に含める**（NDF の hook と同じ時期。「移行の順序」の表）。受け入れ条件に次の 2 つを足す。
+
+- mcp-serena の PreToolUse の hook 1 回の所要が、移行の前と比べて悪くなっていない（移行の前を D5 の最初に測る。T2 と同じ測り方）
+- 環境が無いとき、mcp-serena の hook は判定をせずに終了コード 0 で終わる
+
 ## 移行の順序（ミッション 2b。ミッション 2 の開発版の後、ミッション 3 の前）
 
 **ミッション 3（語の移行）の前に置く。** 語の移行は同じファイルを触るため、先に中身を置き換えておけば、語を
@@ -210,8 +244,8 @@ Python の中の hook）は今の使い方で使わない。**`supervise_lib/cla
 | 2 | D3 外部 CLI と記録 | C3 と同じファイルと、`skills/cross-review/tests` の monitor を差し替えるテスト（`wait-notify.py` は切り離した子の `--send` の Slack だけ。hook が同期で呼ぶ `.env` とロックは D5 が移す） |
 | 2 | D4 cross-refactoring | C4 と同じファイル |
 | 2 | D7 リリースと文書 | C7 と同じファイルと `glossary.py`・`doc-lint.py`・`spec-copy.py`・`pr-steps.py` |
-| 2 | D8 根の scripts・playwright-kit・mcp-serena | 根の `scripts/`（`check-*.py`・`build-runtime-plugins.sh`・`validate-runtime-plugins.sh`・`token-usage*.py`）・playwright-kit の `config.py` |
-| 3 | D5 hook（決定 20） | `scripts/worktree-*.sh`・`token-guard.sh`・`lib/worktree-*.sh`・`lib/token_guard_sleep.py`・`workflow-common.sh`・`wait-notify.py`・`hooks/*.json` |
+| 2 | D8 根の scripts・playwright-kit | 根の `scripts/`（`check-*.py`・`build-runtime-plugins.sh`・`validate-runtime-plugins.sh`・`token-usage*.py`）・playwright-kit の `config.py`（mcp-serena は決定 25 で D5 へ移した） |
+| 3 | D5 hook（決定 20） | `scripts/worktree-*.sh`・`token-guard.sh`・`lib/worktree-*.sh`・`lib/token_guard_sleep.py`・`workflow-common.sh`・`wait-notify.py`・`hooks/*.json`・mcp-serena（決定 25。`hooks/`・`scripts/serena_lsp/`・`dev.kiro/install.sh`・`pyproject.toml` と `uv.lock`（新設）） |
 | 3 | D6 ラッパー（決定 20） | `relay_lib/`（`proc`・`common`・`record`・`terminal`・`version_dir`・`mark`） |
 
 **ステージ 2 は 6 本で、並列の上限に収まる。** 触るファイルは C1〜C7 の区切りに合わせてあり、重ならない。
