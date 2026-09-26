@@ -234,7 +234,13 @@ def _print_sweep(st: dict) -> None:
 
 def _print_deferred_nits(st: dict) -> None:
     """cmd_report の残 deferred nit の節を出す。"""
-    nits = st.get("deferred_nits") or []
+    every = st.get("deferred_nits") or []
+    # 基準外の見送り（`/ndf:fix` の waived）は返信を付けて閉じたもので、残りではない。件数だけを別に出す
+    waived = [n for n in every if isinstance(n, dict) and n.get("waived")]
+    nits = [n for n in every if not (isinstance(n, dict) and n.get("waived"))]
+    if waived:
+        print(f"## 基準外の見送り: {len(waived)} 件（見送りの返信を付けて閉じた）")
+        print()
     if nits:
         print(f"## 残 deferred nit ({len(nits)} 件)")
         for n in nits:
@@ -264,6 +270,14 @@ def _print_rejected(st: dict) -> None:
             print(f"  却下の理由: {r.get('reason_for_rejection')}")
 
 
+def _print_review_focus(st: dict) -> None:
+    """レビューの重点の宣言が読めなかったときだけ出す（基準 1・2・4 で続けた）。"""
+    crit = st.get("review_criteria") or {}
+    if isinstance(crit, dict) and crit.get("status") == "unreadable":
+        print(f"## レビューの重点の宣言: 読めなかった（基準 1・2・4 だけで続けた）: {crit.get('error')}")
+        print()
+
+
 def cmd_report(args: argparse.Namespace) -> None:
     """Step 8 — deferred nit + ラウンドサマリ表示。"""
     pr = args.pr
@@ -284,6 +298,7 @@ def cmd_report(args: argparse.Namespace) -> None:
     _print_participants(st)
     _print_round_summary(st["rounds"])
     _print_sweep(st)
+    _print_review_focus(st)
     _print_deferred_nits(st)
     _print_rejected(st)
     # **最後の行に置く**（#662 の AC23）。作業ツリーを消した後に要約を探す手がかりになる。

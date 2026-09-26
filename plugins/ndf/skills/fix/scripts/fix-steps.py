@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
 """fix-steps.py: `/ndf:fix` の手順のうち、判断の要らない取得と集計を行う。
 
-    fix-steps.py context  <PR> [--repo <所有者>/<リポジトリ>]
+    fix-steps.py context  <PR> [--repo <所有者>/<リポジトリ>] [--root <作業ツリー>]
     fix-steps.py finalize --decisions <振り分けの JSON> [--pr <PR>] [--root <作業ツリー>]
     fix-steps.py remaining <PR> [--repo <所有者>/<リポジトリ>]
 
 context   未解決のスレッド・3 種のコメント・CI の状態（失敗した check と失敗ログの保存先）・
-          本文の除外の節を 1 つのファイルへ書き、振り分けの雛形（decisions）を書き出す
+          本文の除外の節と「指摘の基準」の節（`scripts/lib/review_criteria.py`）を 1 つのファイルへ書き、
+          振り分けの雛形（decisions）を書き出す。レビューの重点は、環境変数 `CROSS_REVIEW_STATE` が
+          cross-review の状態ファイルを指し `review_criteria` を持てばそれを写し、無ければ `--root`
+          （既定はカレントの作業ツリーの根）の `.ndf/review.json` を読む
 finalize  振り分けの JSON から件数と by_severity を数え、`cross-review` の `state.py merge-fix`
-          が読む戻り値ファイル `$TMP_DIR/fix-pr<PR>-result.json` を組む。設計 PR の本文の
+          が読む戻り値ファイル `$TMP_DIR/fix-pr<PR>-result.json` を組む。`waived` は見送りの返信を
+          組んで `deferred` へ `resolve: true` で載せ、`fixed` も CI の修正（`ci_fixed`）も無ければ `fix_commit` を捨てる。設計 PR の本文の
           「決めたこと」の節も揃える（`pr-body-decisions.sh sync`）
 remaining 返信と決着の後に未解決のスレッドを数え直し、見送り・却下で残したもの以外が
           残っていれば止まる
@@ -18,11 +22,17 @@ remaining 返信と決着の後に未解決のスレッドを数え直し、見�
 
 振り分けの JSON（`context` が雛形を書き、LLM が `decision` と理由を埋める）:
 
-    {"pr": 812, "fix_commit": "abc1234"（省くと HEAD）, "ci_note": null,
+    {"pr": 812, "fix_commit": "abc1234"（省くと HEAD）, "ci_fixed": false（CI の失敗を直したら true）, "ci_note": null,
+     "review_focus": ["<重点の名前>"], "review_focus_status": "declared|none|unreadable",
      "decisions": [{"thread_id": "PRRT_...", "comment_id": 1, "path": "a.py", "line": 3,
-                    "severity": "minor", "category": "style", "summary": "...",
-                    "decision": "fixed|deferred|rejected|separate_pr", "reason": "...",
+                    "severity": "major", "category": "style", "summary": "...",
+                    "decision": "fixed|waived|deferred|rejected|separate_pr", "reason": "...",
+                    "criterion": 1（当たった基準の番号。任意。waived では持たない）,
+                    "waive_kind": "wording"（waived のとき）,
                     "issue": "#123"（separate_pr のとき）}]}
+
+振り分けの規則（破れば finalize が止まる）: fixed は critical / major だけ。waived は minor / nit だけで、
+criterion を持たず、waive_kind が見送りの種類のどれか。criterion 3 は review_focus が空でないときだけ。
 """
 from __future__ import annotations
 
@@ -44,10 +54,13 @@ from step_result import (  # noqa: E402
     EXIT_PRECONDITION, EXIT_UNREADABLE, StepError, emit, gh_json, git, git_root, main_with, result, run,
 )
 import gh_parts  # noqa: E402
+import review_criteria  # noqa: E402
 
 TOOL = "fix"
 SEVERITIES = ("critical", "major", "minor", "nit")
-DECISIONS = ("fixed", "deferred", "rejected", "separate_pr")
+FIX_SEVERITIES = ("critical", "major")
+WAIVE_SEVERITIES = ("minor", "nit")
+DECISIONS = ("fixed", "waived", "deferred", "rejected", "separate_pr")
 EXCLUDE_HEADINGS = ("やらないこと", "別 PR", "別PR", "対応しない", "スコープ外", "範囲外", "out of scope",
                     "non-goals", "not in scope")
 CI_FAILED = ("FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE")
@@ -158,9 +171,27 @@ def head_line(s: str, n: int = 100) -> str:
     return (s or "").strip().splitlines()[0][:n] if (s or "").strip() else ""
 
 
+def focus_for_context(root_arg) -> review_criteria.Focus:
+    """cross-review の中なら状態ファイルに写した重点（I8）、単独なら作業ツリーの宣言。"""
+    state = os.environ.get("CROSS_REVIEW_STATE")
+    if state:
+        try:
+            crit = json.loads(Path(state).read_text(encoding="utf-8")).get("review_criteria")
+        except (OSError, ValueError, AttributeError):
+            crit = None
+        if isinstance(crit, dict):
+            return review_criteria.focus_from(crit.get("status"), crit.get("focus"), crit.get("error"))
+    try:
+        root = git_root(root_arg)
+    except StepError:
+        root = Path.cwd()
+    return review_criteria.load_focus(root)
+
+
 def cmd_context(a):
     pr = a.pr
     repo = repo_of(a)
+    focus = focus_for_context(a.root)
     view = pr_for_fix(pr)
     threads = threads_with_first_comment(repo, pr)
     comments_text, comments_n = fetch_comments(repo, pr)
@@ -184,17 +215,20 @@ def cmd_context(a):
     if log_path:
         lines += ["", f"失敗ログ: {log_path}"]
     lines += ["", f"## コメント（3 種、{comments_n} 行）", "", "```", comments_text.rstrip(), "```", ""]
+    lines += [review_criteria.fixer_block(focus), ""]
     ctx.write_text("\n".join(lines), encoding="utf-8")
 
     dec = d / f"fix-pr{pr}-decisions.json"
     dec.write_text(json.dumps({
-        "pr": pr, "fix_commit": None, "ci_note": None,
+        "pr": pr, "fix_commit": None, "ci_fixed": False, "ci_note": None,
+        "review_focus": list(focus.names), "review_focus_status": focus.status,
         "decisions": [{"thread_id": t["thread_id"], "comment_id": t["comment_id"], "path": t["path"],
                        "line": t["line"], "severity": "", "category": "", "summary": head_line(t["body"]),
                        "decision": "", "reason": ""} for t in threads],
     }, ensure_ascii=False, indent=1), encoding="utf-8")
 
-    items = [{"name": "context", "path": str(ctx)}, {"name": "decisions", "path": str(dec)}]
+    items = [{"name": "context", "path": str(ctx)}, {"name": "decisions", "path": str(dec)},
+             {"name": "review-focus", "result": focus.status, "reason": focus.error}]
     items += [{"name": c.get("name"), "result": "ci_failed", "state": c.get("state"), "link": c.get("link")}
               for c in failed]
     if log_path:
@@ -202,7 +236,8 @@ def cmd_context(a):
     emit(result(TOOL, "ok",
                 f"未解決 {len(threads)} 件 / コメント {comments_n} 行 / CI {ci_status}（失敗 {len(failed)} 件）",
                 items, {"pr": pr, "repo": repo, "unresolved": len(threads), "comments": comments_n,
-                        "ci_status": ci_status, "ci_failed": len(failed), "excluded_sections": len(excluded)},
+                        "ci_status": ci_status, "ci_failed": len(failed), "excluded_sections": len(excluded),
+                        "review_focus": focus.status},
                 next=f"{ctx} を読み、{dec} の decision を埋める"))
 
 
@@ -221,8 +256,8 @@ def load_decisions(path: str) -> dict:
     return d
 
 
-def check_decisions(decs: list) -> list[dict]:
-    """振り分けの誤りを items の形で返す。空なら通る。"""
+def check_decisions(decs: list, focus_names=()) -> list[dict]:
+    """振り分けの誤りを items の形で返す。空なら通る（設計の不変条件 I1〜I3）。"""
     bad = []
     for i, e in enumerate(decs):
         if not isinstance(e, dict):
@@ -239,12 +274,31 @@ def check_decisions(decs: list) -> list[dict]:
             why.append("deferred / rejected には reason が要る")
         if e.get("decision") == "separate_pr" and not str(e.get("issue") or "").strip():
             why.append("separate_pr には issue（起票した番号）が要る")
-        if e.get("decision") == "fixed" and e.get("severity") not in SEVERITIES:
-            why.append(f"fixed には severity（{'/'.join(SEVERITIES)}）が要る")
+        if e.get("decision") == "fixed" and e.get("severity") not in FIX_SEVERITIES:
+            why.append(f"fixed は severity が {'/'.join(FIX_SEVERITIES)} のときだけ（minor / nit は waived にする。"
+                       f"基準に当たるなら重要度を判定し直して criterion を書く）: {e.get('severity')!r}")
+        if e.get("decision") == "waived":
+            if e.get("severity") not in WAIVE_SEVERITIES:
+                why.append(f"waived は severity が {'/'.join(WAIVE_SEVERITIES)} のときだけ: {e.get('severity')!r}")
+            if e.get("criterion") not in (None, ""):
+                why.append("waived は criterion を持たない（基準に当たるなら major 以上で直す）")
+            if e.get("waive_kind") not in review_criteria.WAIVE_KINDS:
+                why.append(f"waived には waive_kind（{'/'.join(review_criteria.WAIVE_KINDS)}）が要る: "
+                           f"{e.get('waive_kind')!r}")
+        c = e.get("criterion")
+        if c not in (None, "") and (isinstance(c, bool) or c not in review_criteria.CRITERION_NUMBERS):
+            why.append(f"criterion は {'/'.join(map(str, review_criteria.CRITERION_NUMBERS))} のどれか: {c!r}")
+        elif c == review_criteria.FOCUS_CRITERION and not focus_names:
+            why.append("criterion 3 はレビューの重点の宣言があるとき（review_focus が空でない）だけ")
         if why:
             bad.append({"index": i, "thread_id": e.get("thread_id"), "path": e.get("path"),
                         "line": e.get("line"), "result": "invalid", "reason": "; ".join(why)})
     return bad
+
+
+def focus_names(d: dict) -> list[str]:
+    names = d.get("review_focus")
+    return [n for n in names if isinstance(n, str) and n.strip()] if isinstance(names, list) else []
 
 
 def pick(e: dict, *keys) -> dict:
@@ -259,8 +313,14 @@ def build_result(pr: int, d: dict, commit: str | None, ci_status: str, failed_na
         by[e["severity"]] += 1
     resolved = [pick(e, "thread_id", "comment_id", "path", "line") for e in fixed]
     deferred = []
+    names = focus_names(d)
     for e in decs:
-        if e["decision"] == "deferred":
+        if e["decision"] == "waived":
+            reply = review_criteria.waiver_reply(e["waive_kind"], names)
+            deferred.append({**pick(e, "comment_id", "thread_id", "path", "line", "severity", "category", "summary"),
+                             "reason_for_deferral": reply, "reply": reply, "resolve": True,
+                             "waived": e["waive_kind"]})
+        elif e["decision"] == "deferred":
             deferred.append({**pick(e, "comment_id", "thread_id", "path", "line", "severity", "category", "summary"),
                              "reason_for_deferral": e.get("reason")})
         elif e["decision"] == "separate_pr":
@@ -292,27 +352,42 @@ def cmd_finalize(a):
     pr = a.pr or d.get("pr")
     if not isinstance(pr, int):
         raise StepError("PR 番号が無い（--pr か JSON の pr）", EXIT_UNREADABLE)
-    bad = check_decisions(d["decisions"])
+    bad = check_decisions(d["decisions"], focus_names(d))
     if bad:
         emit(result(TOOL, "stopped", f"振り分けに誤りが {len(bad)} 件", bad, {"pr": pr},
-                    next=f"{a.decisions} の decision / reason / severity を直して打ち直す"))
+                    next=f"{a.decisions} の decision / reason / severity / criterion / waive_kind を直して打ち直す"))
     commit = d.get("fix_commit")
-    if not commit and any(e["decision"] == "fixed" for e in d["decisions"]):
+    has_fixed = any(e["decision"] == "fixed" for e in d["decisions"])
+    # CI の失敗を直したコミットは、指摘の fixed が 0 件でも送る
+    keep = has_fixed or d.get("ci_fixed") is True
+    dropped = None
+    if not keep and commit:
+        # 直したものが無ければ送るコミットも無い（I4）。push と CI を起こさない
+        dropped = {"name": "fix-commit", "result": "dropped",
+                   "reason": f"fixed が 0 件で CI の修正も無いため {commit} を捨てた"}
+        commit = None
+    if not commit and keep:
         root = git_root(a.root)
         commit = git(root, "rev-parse", "--short", "HEAD").stdout.strip()
-    ci_status, failed = ci_snapshot(pr)
+    if d.get("ci_fixed") is True:
+        # 照会できるのは送信前の head で、直した失敗が残って見える。送った後の CI を待つ
+        ci_status, failed = "PENDING", []
+    else:
+        ci_status, failed = ci_snapshot(pr)
     res = build_result(pr, d, commit, ci_status, [str(c.get("name")) for c in failed])
     out = Path(a.out) if a.out else result_dir() / f"fix-pr{pr}-result.json"
     out.write_text(json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
 
     sync = {"name": "pr-body-decisions", "result": "skipped", "code": None} if a.no_sync else \
         sync_pr_body(pr, a.sync_script, getattr(a, "repo", None))
-    items = [{"name": "result", "path": str(out)}, sync]
+    items = [{"name": "result", "path": str(out)}, sync] + ([dropped] if dropped else [])
     items += [{"name": c.get("name"), "result": "ci_failed", "state": c.get("state")} for c in failed]
-    metrics = {"pr": pr, "fixed": res["fixed_count"], "deferred": len(res["deferred"]),
+    waived = sum(1 for e in res["deferred"] if e.get("waived"))
+    metrics = {"pr": pr, "fixed": res["fixed_count"], "deferred": len(res["deferred"]), "waived": waived,
                "rejected": len(res["rejected"]), "by_severity": res["by_severity"],
                "ci_status": ci_status, "pr_body_decisions_code": sync["code"]}
-    summary = (f"修正 {res['fixed_count']} 件 / 見送り {len(res['deferred'])} 件 / 却下 {len(res['rejected'])} 件 / "
+    summary = (f"修正 {res['fixed_count']} 件 / 見送り {len(res['deferred'])} 件（うち基準外 {waived} 件）/ "
+               f"却下 {len(res['rejected'])} 件 / "
                f"CI {ci_status} / 本文の節 {sync['result']}")
     if sync["result"] == "invalid_call":
         emit(result(TOOL, "stopped", summary + "（pr-body-decisions.sh の呼び出しが誤り）", items, metrics,
@@ -351,6 +426,7 @@ def main(argv=None):
     s = sub.add_parser("context", help="PR の文脈を 1 ファイルへ集め、振り分けの雛形を書く")
     s.add_argument("pr", type=int)
     s.add_argument("--repo")
+    s.add_argument("--root", help="レビューの重点の宣言を読む作業ツリー（既定はカレントの作業ツリーの根）")
     s.set_defaults(func=cmd_context)
     s = sub.add_parser("finalize", help="振り分けから戻り値ファイルを組む")
     s.add_argument("--decisions", required=True)

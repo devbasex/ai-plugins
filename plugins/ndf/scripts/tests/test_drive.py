@@ -110,7 +110,7 @@ def test_review_drive_pauses_for_fix_then_sweep_then_finishes(tmp_path, monkeypa
     assert item["pause"] == "fix" and item["round"] == 1
     assert item["cwd"] == str(tmp_path / "wt")  # 直しの worker の作業場所は cross-review の worktree
     prompt = Path(item["prompt_file"]).read_text()
-    assert "/ndf:fix 5 --defer-nit" in prompt and str(tmp_path / "wt") in prompt and "https://x/r1" in prompt
+    assert "/ndf:fix 5`" in prompt and "--defer-nit" not in prompt and "CROSS_REVIEW_STATE=" in prompt and str(tmp_path / "wt") in prompt and "https://x/r1" in prompt
     for tool in ("pint", "larastan", "phpstan", "ruff", "eslint", "mypy"):
         assert tool not in prompt
     assert "02-fix-and-rotation" not in prompt  # 修正の手順は /ndf:fix が持ち、雛形を読ませない

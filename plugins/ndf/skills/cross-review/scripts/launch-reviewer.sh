@@ -63,6 +63,14 @@ SHA=$(jq -r '(.rounds[-1].head_sha // "")' "$STATE")
 # 分類（design / code）と前のラウンドの head（#1005）。規則は classifications.py の diff_scope
 REVIEW_KIND=$(jq -r '.review_kind // "code"' "$STATE")
 PREV_SHA=$(jq -r '(.rounds // []) | if length >= 2 then (.[-2].head_sha // "") else "" end' "$STATE")
+# 指摘の基準（#1287）。init が重点の宣言を読んで写した節を使い、無ければ宣言を読まない既定の節
+# （基準 3 の無い形）を正本から組む。どのラウンドの担当も同じ基準を受け取る
+REVIEW_CRITERIA_BLOCK=$(jq -r '.review_criteria.reviewer_block // ""' "$STATE")
+if [ -z "$REVIEW_CRITERIA_BLOCK" ]; then
+  REVIEW_CRITERIA_BLOCK=$(python3 "$SCRIPT_DIR/../../../scripts/lib/review_criteria.py" reviewer) ||
+    { echo "⚠️ 指摘の基準の正本（scripts/lib/review_criteria.py）を読めないため、基準の節なしで起動する" >&2
+      REVIEW_CRITERIA_BLOCK=; }
+fi
 }
 
 prepare_prompt_context() {
@@ -143,20 +151,17 @@ $EXISTING_INLINE
 $EXTRA_REVIEW_BLOCK
 $DIFF_SCOPE_BLOCK
 
-## 出し切り
-- **見つけた指摘はこのラウンドですべて出す。次のラウンドへ回さない。** 重要度が minor のものも書く
-  （出すのは修正アクションのある指摘だけで、下の「含めてはいけないもの」は変わらない）
+$REVIEW_CRITERIA_BLOCK
 
 ## 指摘に **含めてはいけないもの**（Resolve 負荷を増やすため）
 - ❌ **「良い点」/「Strengths」/「評価できる点」** — 総評にも書かない
 - ❌ **対応アクションが無い指摘** — 観察・感想・現状説明だけは禁止
-- ❌ **nit / スタイル指摘** — 好みの問題は指摘にしない (無視する)
 - ❌ **コード引用 (\`\`\` ... \`\`\`) だけで指摘内容が無い指摘**
 - ❌ **判定 \`COMMENT\` での雑感** — 直すべき点が無ければ \`APPROVE\` にする
 
 ### 指摘の書式
 - \`[重要度 / カテゴリ]\` プレフィックス必須 (例: \`[major / 正確性]\`)
-- 重要度は \`critical\` / \`major\` / \`minor\` のみ使う (nit は指摘にしない)
+- 重要度は \`critical\` / \`major\` のみ使う（上の「指摘の基準」）
 - 本文は **1 指摘 = 1 修正アクション** で完結させる。1〜2 文で具体的な修正提案を書く
 - 指す行が分かる指摘は \`path\` と \`line\` を埋める。**差分の外の行でもよい**
   （差分の外を指す指摘は、投稿する側が総評へ移す）

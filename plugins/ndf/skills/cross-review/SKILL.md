@@ -117,7 +117,8 @@ PR を**既定の参加者プール（claude / codex / kiro とホスト）か�
 1 ラウンドは「2 スロットの並列レビュー → 根拠の検証 → 判定（`intent` ベース）」で、一方でも REQUEST_CHANGES なら
 修正 → 収束チェック（`max-rounds`・振動・CI の失敗・`rotate-after` の巻き直し）→ 次のラウンドへ進む。結果を残さなかった
 スロットは同じラウンドで 1 度だけ起動し直す。ループを抜けたら（`final` がどの値でも）最終スイープで open thread を 0 にし、
-`verify-sweep` が GitHub 側の実数で確かめる。
+`verify-sweep` が GitHub 側の実数で確かめる。担当が書くのは指摘の基準（`references/design-principles.md` の「指摘の基準」）に
+当たる `critical` / `major` だけで、修正と最終スイープがコードを直すのも `major` 以上だけである。`minor` / `nit` は見送りの返信を付けて閉じる。
 
 ## 実行
 
@@ -178,7 +179,8 @@ JSON の形と終了コードの表は共通ライブラリの `scripts/lib/driv
 - **最終ステータス**（`final`: `approved` / `max_rounds` / `oscillation` / `error`）・**ラウンド数 / PR 数**（`rounds` / `prs`）
 - **各ラウンドのサマリ表**（round・PR・担当と判定・fix・CI。担当はラウンドごとに変わるため、担当と判定を 1 つの列にする）
 - **最終スイープ結果**: `resolved` / `fixed_in_sweep` / `remaining_open`（`unresolved`）。**0 が正常**で、0 でなければ理由を書く
-- **残 deferred nit**・**rejected 件数**・**最終 PR URL**
+- **基準外の見送りの件数**・**残 deferred nit**・**rejected 件数**・**最終 PR URL**
+- レビューの重点の宣言（`.ndf/review.json`）が読めなかったときは、その理由（基準 1・2・4 だけで続けた）
 - **検証**（スイープの結果ファイルの `verification`）: 実行したコマンドと終了コード。実行しなかったときはその理由
 
 詳細は PR 上のインラインコメントと state.json に残っているため、本報告では繰り返さない。
