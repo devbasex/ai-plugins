@@ -167,7 +167,7 @@ def _prune(directory: Path, now: float) -> None:
 
 
 def claim(session: str, key: str, kind: str, window: bool, now: float | None = None) -> bool:
-    """同じ待ちの鍵の 2 回目なら False。初めてなら記録を書いて True（送る前に書く）。"""
+    """同じ待ちのキーの 2 回目なら False。初めてなら記録を書いて True（送る前に書く）。"""
     now = time.time() if now is None else now
     directory = state_dir()
     directory.mkdir(parents=True, exist_ok=True)
@@ -191,7 +191,7 @@ def claim(session: str, key: str, kind: str, window: bool, now: float | None = N
 
 
 def wait_key(runtime: str, hook_input: dict, transcript: tuple[str, str] | None) -> tuple[str, bool]:
-    """(待ちの鍵, 60 秒の窓で扱うか)。"""
+    """(待ちのキー, 60 秒の窓で扱うか)。"""
     session = session_of(runtime, hook_input)
     if runtime == "claude" and transcript:
         return transcript[0], False

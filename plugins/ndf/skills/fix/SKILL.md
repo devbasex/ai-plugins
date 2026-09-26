@@ -36,8 +36,8 @@ allowed-tools:
 `/ndf:cross-review` からは **必ずサブエージェント経由で起動** される。サブエージェントは
 **修正 → コミット → 戻り値ファイル** までを行い、メインへの戻り値は最小限のサマリだけにする。
 
-**修正の担当は GitHub と git へ書かない。** 送信・返信・スレッドの決着・まとめの投稿は、
-戻り値ファイルを読んだ側が行う。担当が送ると、送ったという報告と実物が食い違う状態と、
+**修正担当は GitHub と git へ書かない。** 送信・返信・スレッドの決着・まとめの投稿は、
+戻り値ファイルを読んだ側が行う。修正担当が送ると、送ったという報告と実物が食い違う状態と、
 途中で止まったときに投稿だけが残る状態が作れる。
 
 | 起動のされ方 | 書き込みを行う側 |
@@ -78,7 +78,7 @@ FIX=$(bash "$R/scripts/resolve.sh" scripts fix) || exit 3
    節を設計文書に揃える（対象かどうかはスクリプトが決める。コミットが無くても行う）
 
    ```bash
-   python3 "$FIX/fix-steps.py" finalize --decisions <雛形の JSON> [--root <作業ツリー>]
+   python3 "$FIX/fix-steps.py" finalize --decisions <雛形の JSON> [--root <worktree>]
    ```
 
    `fix_commit` を省くと HEAD を採る。`items[].name` が `pr-body-decisions` の `result`

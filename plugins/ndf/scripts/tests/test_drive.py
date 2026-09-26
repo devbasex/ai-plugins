@@ -107,6 +107,7 @@ def test_review_drive_pauses_for_fix_then_sweep_then_finishes(tmp_path, monkeypa
     assert code == 20 and out["status"] == "gate" and out["next"] == "fix"
     item = out["items"][0]
     assert item["pause"] == "fix" and item["round"] == 1
+    assert item["cwd"] == str(tmp_path / "wt")  # 直しの worker の作業場所は cross-review の worktree
     prompt = Path(item["prompt_file"]).read_text()
     assert "/ndf:fix 5 --defer-nit" in prompt and str(tmp_path / "wt") in prompt and "https://x/r1" in prompt
     for tool in ("pint", "larastan", "phpstan", "ruff", "eslint", "mypy"):
@@ -122,6 +123,7 @@ def test_review_drive_pauses_for_fix_then_sweep_then_finishes(tmp_path, monkeypa
     Path(item["result_file"]).write_text("{}")
     code, out = run_main(cr, ["5"], capsys)
     assert code == 21 and out["items"][0]["pause"] == "sweep"
+    assert out["items"][0]["cwd"] == str(tmp_path / "wt")
     assert any(c[:2] == ("state.py", "merge-fix") for c in fake.calls)
 
     Path(out["items"][0]["result_file"]).write_text("{}")
@@ -152,6 +154,7 @@ def test_review_drive_light_rotation_pauses_for_newtext(tmp_path, monkeypatch, c
     code, out = run_main(cr, ["5"], capsys)
     assert code == 22 and out["items"][0]["pause"] == "newtext"
     assert "Step 6b" in Path(out["items"][0]["prompt_file"]).read_text()
+    assert out["items"][0]["cwd"] == str(tmp_path / "wt")
     Path(out["items"][0]["result_file"]).write_text('{"title": "t", "body": "b"}')
     code, out = run_main(cr, ["5"], capsys)
     assert code == 21
@@ -273,7 +276,7 @@ sys.exit(20)
 FAKE_CLAUDE = """#!{py}
 import json, os, re, sys
 text = sys.stdin.read()
-open(os.environ["FAKE_CLAUDE_LOG"], "a").write(text + "\\n=====\\n")
+open(os.environ["FAKE_CLAUDE_LOG"], "a").write(text + "\\nCWD=" + os.getcwd() + "\\n=====\\n")
 m = re.search(r"結果ファイル (\\S+) を書く", text)
 if m and os.environ.get("FAKE_CLAUDE_WRITE", "1") == "1":
     open(m.group(1), "w").write("{{}}")
@@ -318,6 +321,19 @@ def test_drive_step_hands_pause_to_worker_and_reports_counts(tmp_path, fake_clau
     prompt = fake_claude.read_text()
     assert "作業: fix" in prompt and "PR を直す指示" in prompt
     assert s.llm["work"] == 1
+
+
+def test_drive_step_uses_pause_cwd_as_worker_workdir(tmp_path, fake_claude):
+    wt = tmp_path / "pr-wt"
+    wt.mkdir()
+    d = tmp_path / "drive"
+    d.mkdir()
+    drv = d / "drive.py"
+    drv.write_text(FAKE_DRIVE.format(py=PY, d=str(d)).replace('"round": 1', f'"round": 1, "cwd": {str(wt)!r}'))
+    s, text = run_plan(tmp_path, [{"id": "review", "type": "drive", "cmd": f"{PY} {drv}", "next": "end"}])
+    assert "結果: 完了" in text
+    prompt = fake_claude.read_text()
+    assert f"作業場所: {wt}\n" in prompt and f"CWD={wt}\n" in prompt
 
 
 def test_drive_step_fails_when_worker_writes_no_result(tmp_path, fake_claude, monkeypatch):

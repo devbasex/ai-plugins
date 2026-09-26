@@ -1,6 +1,6 @@
 # NDF Plugin
 
-PR 運用、レビュー、調査、実装計画、仕様書化、開発方法論（要求定義・テスト駆動・構造改善・
+PR 運用、レビュー、調査、実装計画、仕様書化、開発方法論（要求定義・テスト駆動・リファクタリング・
 完了判定）、Docker container access、statusline、外部 AI 委譲、Slack 通知を提供します。
 
 配布物は `plugins/ndf/` の 1 ディレクトリにまとまっています。Skill の実体は `skills/` の
@@ -89,7 +89,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.17.26）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.17.27）
 ```
 
 ### agy
@@ -103,10 +103,10 @@ agy plugin uninstall ndf && agy plugin install plugins/ndf/dev.agy   # 新しい
 ```
 
 導入すると `manifests/agy-skills.txt` に載る Skill 43 個と、エージェント 11 個（専門 8 個と、3 層の定義 3 個（supervisor 2・worker 1））、hook 1 個が
-`~/.gemini/config/plugins/ndf/` へ複製されます。symlink は実体へ解決されて複製されるため、
+`~/.gemini/config/plugins/ndf/` へコピーされます。symlink は実体へ解決されてコピーされるため、
 clone を消しても導入した内容は残ります。
 
-**hook は複製されるだけで、agy はそれを読み込みません**（agy 1.1.26 で実測）。読む先は
+**hook はコピーされるだけで、agy はそれを読み込みません**（agy 1.1.26 で実測）。読む先は
 `~/.gemini/config/hooks.json` の 1 か所だけです。次を実行して差し込みます。**冪等で、他の
 項目には触れません**（`--dry-run` で内容を確認でき、`--uninstall` で外せます）。
 
@@ -119,23 +119,52 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.17.26 へ更新するとき
+## v10.17.27 へ更新するとき
 
-- Fix: 中身の変わらない版を入れると複製の版の記録が古いまま残る（#1149）
-- Docs: 複数 PR のマージ順の提示物に、strict の保護での取り込みの段を足す（#1150）
-- mcp-serena の hook は grep や読み込みが続いてもツールの実行を拒否せず、案内だけを出します。拒否で 1 手番を失うことはありません（#1151）
-- 設計: #821（#1152）
-- Fix: 設計の計画で cross-review の直しに追いつかずに push が拒まれる（#1153）
-- Fix: 設計の計画が決定の節を同期せず、利用者の承認で再開すると approve が止まる（#1154）
-- Slack 通知は、回答待ち・承認待ちになったときだけ届く（#1155）
-- Claude Code と Codex の hook は、どちらも待ちの通知を送る入口を使う（#1155）
-- Kiro の導入スクリプトと導入時の確かめは、待ちの通知を前提にしている（#1155）
-- `plugins/ndf/README.md` と Kiro の文書は、待ちの通知の使い方を説明している（#1155）
-- 無し（検査の修正だけ）（#1156）
-- Fix: 用語集の語の正本を確定仕様に限り、確定前は pending_source に置く（#1157）
-- Fix: sleep の hook の案内を NDF の待ちとマージのスクリプトへ向ける（#1158）
-- 用語集の仕組みの確定仕様を `docs/specifications/ndf-ubiquitous-language.md` で読める（#1159）
-- 無し（検査の修正だけ）（#1160）
+- Docs: 用語集に「チェイン」を足す（#1163）
+- Fix: 書き込み先の案内が ~ で始まるパスを主ディレクトリの中と見なす（#1165）
+- cross-review と cross-refactoring の文書とプロンプトは、エンジニアになじむ業界の用語で書かれています（#1167）
+- design・refactoring・release の Skill の文書を、エンジニアになじむ用語で記述（#1168）
+- external-ai・issue-upkeep・markdown-writing・requirements-design・worktree の各 Skill の文書は、エンジニアになじみのある用語で書かれています（#1169）
+- requirements-design の Skill では、仕様を写したものを「仕様のコピー」と呼びます（#1169）
+- Skill・エージェント・README の説明は、エンジニアになじみのある語で書かれています。（#1170）
+- 仕様・README・AGENTS.md などの文書は、エンジニアになじむ用語（承認ゲート・カットポイント・ラウンドテスト・ラッパーなど）で書かれている（#1171）
+- 仕様の文では、直訳の語（器・束・入れ物・段）を使わない（#1171）
+- development-workflow の文書は、業界で通じる語で書かれている。例はセッション・シグナルファイル・アイドル・プラン・キュー・進捗ログ。（#1172）
+- 用語集の「廃止した語」で、使わなくなった語に対応する今の語を引ける。（#1172）
+- 工程表の行名は stage の値として読める。（#1172）
+- 無し（検査の修正だけ）（#1173）
+- release・refactoring・design の Skill の説明と参照文書は、ユビキタス言語の用語で書かれている（#1175）
+- worktree の Skill の文書では、「設定」「worktree レジストリ」「開発 worktree」など用語集の語を使う（#1176）
+- issue-upkeep の Skill の文書では、「再検討条件」「修正方針」「課題グループ」など用語集の語を使う（#1176）
+- external-ai・document-systems・document-drafting・requirements-design の Skill の文書では、用語集の語を使う（#1176）
+- cross-review と cross-refactoring の文書・プロンプトの語が、用語集のユビキタス言語に揃っている（#1177）
+- Skill と README の文書は用語集の語で書かれている。（#1178）
+- 用語集には、Skill と README で使う語が載っている。（#1178）
+- development-workflow の SKILL と references は、用語集に載った語で書かれている（#1179）
+- 用語集に判断表の語とコンテキストが載っている（#1179）
+- 仕様の文書・CLAUDE.md・AGENTS.md・README で、同じものを同じ語で呼ぶ（例: リリース済み版・@インポート・worktree レジストリ・進捗記録・ミッション課題）（#1180）
+- 仕様に出てくる語は用語集で意味を引ける（#1180）
+- Fix: doc-lint が用語集の生成物を調べ、直しのステップが生成物を手で直す（#1181）
+- 無し（検査の修正だけ）（#1182）
+- 用語集の語ごとに、コードで使う識別子を `code` で持たせられる（#1185）
+- 廃止した識別子は `deprecated_code` に書き、言い換え先の識別子と並べて示せる（#1185）
+- NDF の用語集の語に識別子が入り、語からコード上の名前を引ける（#1185）
+- 無し（検査の修正だけ）（#1186）
+- 駆動が pause したとき、直しの worker は pause に載った作業ディレクトリで動く（#1189）
+- 即時修正するかどうかは pace に関わらず、行数ではなく 4 条件（原因・契約・方針・revert）で決まる（#1189）
+- worker は手段を自分で選べる。置き場所は変えない（#1189）
+- 無し（検査の修正だけ）（#1190）
+- プランの起動にも文脈量のガードが掛かります（#1195）
+- Agent で supervisor を起動すると、ガードがプランを使うよう案内します（#1195）
+- フェーズをプランで流すか supervisor で回すかを、`agent-layers.md` の表で引ける（#1196）
+- 判定結果の手順 3 に次に打つコマンドが載り、そのまま実行できる（#1196）
+- normal のミッションを流すコマンドは `waiting.md` に 1 か所で載っている（#1196）
+- 中断と再開の手順は `interrupt-resume.md` にまとまっている（#1196）
+- new mission は、プラグインでないリポジトリ（リリースの雛形が無いリポジトリ）でも使える（#1197）
+- new mission は、用語集の無いリポジトリでも使える（#1197）
+- new mission の help が、種別ごとに説明を示す（#1197）
+- 無し（検査の修正だけ）（#1198）
 
 ## Playwright テストについて
 
@@ -151,17 +180,17 @@ bash plugins/playwright-kit/dev.kiro/install.sh       # Kiro CLI
 
 ## Hooks
 
-### 作業ツリー運用（4 ランタイム共通）
+### worktree 運用（4 ランタイム共通）
 
-開発の変更を、リポジトリを clone したディレクトリ（主ディレクトリ）ではなく `.worktrees/` の
-作業ツリーの中で行う運用を支えます。**編集は止めません。** 案内が出ても操作は成立します。
+開発の変更を `.worktrees/` の worktree の中で行い、リポジトリを clone したディレクトリ
+（メインディレクトリ）では行わない運用を支えます。**編集は止めません。** 案内が出ても操作は成立します。
 
 | 起きること | 担う hook | Claude Code | Codex | Kiro CLI | agy |
 | --- | --- | --- | --- | --- | --- |
-| 主ディレクトリの保護対象パスを編集しようとすると案内が出る | tool 実行前 | `PreToolUse` | `PreToolUse` | — | `PreToolUse` |
-| 作業ツリーで作業する旨の案内がプロンプトごとに出る | プロンプト送信時 | — | — | `userPromptSubmit` | — |
-| 主ディレクトリに残った未コミット変更が提示される | セッション開始時 | `SessionStart` | `SessionStart` | `agentSpawn` | `PreInvocation` |
-| 主ディレクトリのブランチが稼働中の作業ツリーへ追従する（既定では動かさない。宣言の `follow_branch: true` で有効にする） | セッション開始時 | `SessionStart` | `SessionStart` | `agentSpawn` | `PreInvocation` |
+| メインディレクトリの保護対象パスを編集しようとすると案内が出る | tool 実行前 | `PreToolUse` | `PreToolUse` | — | `PreToolUse` |
+| worktree で作業する旨の案内がプロンプトごとに出る | プロンプト送信時 | — | — | `userPromptSubmit` | — |
+| メインディレクトリに残った未コミット変更が提示される | セッション開始時 | `SessionStart` | `SessionStart` | `agentSpawn` | `PreInvocation` |
+| メインディレクトリのブランチが稼働中の worktree へ追従する（既定では動かさない。worktree の設定の `follow_branch: true` で有効にする） | セッション開始時 | `SessionStart` | `SessionStart` | `agentSpawn` | `PreInvocation` |
 
 Kiro CLI に tool 実行前の案内が無いのは、この事象でモデルへ案内を渡す手段が終了コード 2 に
 限られ、それが tool の実行を拒否するためです。拒否しない方針のもとでは置けないため、パスを
@@ -175,10 +204,10 @@ Kiro CLI に tool 実行前の案内が無いのは、この事象でモデル�
 `injectSteps` で渡します。セッション開始時にあたる事象も持たないため、モデル呼び出しの通し番号が
 0 のときを開始時として扱います。
 
-**この仕組みはリポジトリ側の宣言ファイル `.ndf/worktree.json` があるときだけ動きます。**
-宣言が無いリポジトリでは、いずれの hook も何も出力せず終了コード 0 で終わります。
+**この仕組みはリポジトリ側の設定ファイル `.ndf/worktree.json` があるときだけ動きます。**
+設定が無いリポジトリでは、いずれの hook も何も出力せず終了コード 0 で終わります。
 
-宣言ファイルは `/ndf:worktree` を起動すると手順 0 で作られます。手で作るなら次を実行します。
+設定ファイルは `/ndf:worktree` を起動すると手順 0 で作られます。手で作るなら次を実行します。
 
 ```bash
 bash <プラグインのパス>/scripts/worktree-setup.sh init
@@ -193,7 +222,7 @@ bash <プラグインのパス>/scripts/worktree-setup.sh init
 }
 ```
 
-`guard.allow_paths` は、主ディレクトリで編集しても案内を出さないパスです。省略すると
+`guard.allow_paths` は、メインディレクトリで編集しても案内を出さないパスです。省略すると
 組み込みの既定（上記と同じ一覧に `.agents/` `.serena/` を加えたもの）を使います。
 空の配列を書くと「何も許可しない」という指定になります。
 
@@ -213,10 +242,10 @@ bash <プラグインのパス>/scripts/worktree-setup.sh init
 
 | ランタイム | 待ち方 | 会話を切る |
 | --- | --- | --- |
-| Claude Code | hook ＋ 規約 | hook ＋ 引継ぎの 1 行 |
-| Codex | 規約だけ | 引継ぎの 1 行だけ |
-| Kiro CLI | 規約だけ | 引継ぎの 1 行だけ |
-| agy | 規約だけ | 引継ぎの 1 行だけ |
+| Claude Code | hook ＋ 規約 | hook ＋ 再開コマンド |
+| Codex | 規約だけ | 再開コマンドだけ |
+| Kiro CLI | 規約だけ | 再開コマンドだけ |
+| agy | 規約だけ | 再開コマンドだけ |
 
 規約は `skills/development-workflow/references/waiting.md`（待ち方）と
 `skills/development-workflow/references/context-window.md`（会話を切る）にあります。
@@ -227,14 +256,14 @@ Claude Code の SessionStart hook（`hooks/claude.json`）は上記に加えて�
 
 - `~/.claude/settings.json` の `cleanupPeriodDays` を 90 日以上に保つ
 - statusline 未設定時に NDF 標準 statusline を設定する
-- カットポイントで claude を起動し直すラッパー（`scripts/relay.py`）の複製が在れば今の版で置き直す（`relay.py startup`。
-  版は後退させない）。10.17.4〜10.17.6 が自動で足した alias の囲みが残っていれば 1 度だけ知らせる。
+- カットポイントで claude を起動し直すラッパー（`scripts/relay.py`）のコピーが在れば今の版で置き直す（`relay.py startup`。
+  版は後退させない）。10.17.4〜10.17.6 が自動で足した alias の管理ブロックが残っていれば 1 度だけ知らせる。
   **シェルの設定は書かない。** ラッパーを入れる・外すのは `/ndf:install-wrapper`（Claude Code だけ）
 
 Claude Code の Stop・Notification・PermissionRequest hook と `AskUserQuestion` の PreToolUse hook は、
 利用者の回答か承認を待つときだけ Slack へ知らせます（下の「Slack 通知」）。ラッパーの下（`NDF_RELAY_DIR` がある）では、最後の応答の
-`ndf-next` のブロックをラッパーの合図へ写します（`relay.py mark`）。`AskUserQuestion` の PreToolUse /
-PostToolUse hook は、ラッパーの下で質問の表示中の合図を作る・消します（ラッパーが質問の答えを代わりに
+`ndf-next` のブロックをラッパーのシグナルファイルへ写します（`relay.py mark`）。`AskUserQuestion` の PreToolUse /
+PostToolUse hook は、ラッパーの下で質問の表示中のシグナルファイルを作る・消します（ラッパーが質問の答えを代わりに
 送らないため）。好きな時点で切り替えるのは `/ndf:restart` です。ラッパーの始め方・止め方・上限は
 `skills/development-workflow/references/relay.md` にあります。
 
@@ -281,7 +310,7 @@ Codex の選択式の問いと、Kiro の承認の画面・選択式の問いは
   Kiro の非対話の実行は対話と見分けられないため、問いの形で終われば通知が出ることがあります
 - 本文の 1 行目は種類の印・リポジトリ名・求めている文（200 字まで）です。要約は作りません
 
-### 戻り先と関連 URL
+### 復帰先と関連 URL
 
 | 場合 | 載る行 |
 | --- | --- |
@@ -342,7 +371,7 @@ Antigravity CLI をインストールしてログインします。ログイン�
 ```bash
 curl -fsSL https://antigravity.google/cli/install.sh | bash
 agy          # 初回だけ。ブラウザでログインする
-agy models   # 認証の確認
+agy models   # 認証確認
 ```
 
 ## Codex の暗黙起動抑止
@@ -372,7 +401,7 @@ agy models   # 認証の確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.17.26/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.17.27/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -394,14 +423,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.26/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.27/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.17.26  <path>
+# => ndf@ai-plugins  installed, enabled  10.17.27  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。
@@ -430,13 +459,13 @@ installer の主なオプション・既定エージェントの切り替え・�
 
 ## 実機検証の記録
 
-kiro-cli の実機検証と、Skill 数が文脈量へ与える影響の実測は
+kiro-cli の実機検証と、Skill 数がコンテキスト量へ与える影響の実測は
 [docs/field-test-records.md](docs/field-test-records.md) にある。
 **その時点の実測であり、以後の構成変更には追随しない。**
 
 ## 変更するとき
 
-Skill の実体は `skills/` の 1 箇所だけです。ランタイムごとの複製はありません。変更したら
+Skill の実体は `skills/` の 1 箇所だけです。ランタイムごとのコピーはありません。変更したら
 [CONTRIBUTING.md の「手元での検証」](../../CONTRIBUTING.md#手元での検証)の検証を実行してください。
 frontmatter の規約は [skills/AUTHORING.md](skills/AUTHORING.md) にあり、
 `python3 scripts/check-skill-frontmatter.py` でチェックします。

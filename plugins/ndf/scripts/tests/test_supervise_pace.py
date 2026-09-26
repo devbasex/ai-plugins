@@ -101,7 +101,7 @@ def test_fast_mission_puts_check_then_dev_then_prod_after_the_implementation(tmp
     ds = steps_of(design)
     assert "--gate design" in ds["mvv"]["cmd"] and ds["mvv"]["next"] == "approve" and ds["mvv"]["gate_next"] == "end"
     assert "design-approved" in ds["approve"]["cmd"] and ds["approve"]["next"] == "merge"
-    assert ds["review"]["next"] == "sync-review" and ds["push-glossary"]["next"] == "mvv"  # 語のチェックの後で判定する
+    assert ds["review"]["next"] == "sync-review" and ds["push-glossary"]["next"] == "mvv"  # 用語チェックの後で判定する
     # 直し切れずに残った当たりは mvv を通さず、当たりを入力に持つ関門 1 の judge へ回る
     assert ds["glossary-recheck"]["on_fail"] == "push-glossary-gate" and ds["glossary-recheck"]["next"] == "push-glossary"
     assert ds["push-glossary-gate"]["next"] == "gate" and "glossary-recheck" in ds["gate"]["inputs"]

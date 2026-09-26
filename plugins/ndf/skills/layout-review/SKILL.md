@@ -13,7 +13,7 @@ allowed-tools:
 
 **生成物を描画して、版面を見る。** ソースを読んでも分からない欠陥を拾う。
 
-**配布（生成）の後、制作物承認の前に置く。** Markdown の時点では版面が存在しないため、
+**リリース（生成）の後、制作物承認の前に置く。** Markdown の時点では版面が存在しないため、
 生成してはじめて描画できる。
 
 ## 内容は見ない
@@ -22,8 +22,8 @@ allowed-tools:
 
 | 何を | どこが見るか |
 | --- | --- |
-| 事実・数値・出典・表現・構成 | 実装レビュー（`cross-review`）と完了判定の事実確認 |
-| 生成物と正本の内容の一致 | 配布の工程の内容照合（`document-systems` の `import.md`） |
+| 事実・数値・出典・表現・構成 | コードレビュー（`cross-review`）と完了判定の事実確認 |
+| 生成物と正本の内容の一致 | リリースの工程の内容照合（`document-systems` の `import.md`） |
 | **版面**（文字あふれ・図の重なり・改ページ・書体） | **この Skill** |
 
 **重なる観点を持たない。** 版面の指摘と内容の指摘が混ざると、どちらの工程へ戻すのかが
@@ -92,12 +92,12 @@ allowed-tools:
 | 原因 | 戻す先 |
 | --- | --- |
 | 版面の決め方（余白・文字の大きさ・1 枚あたりの情報量） | 体裁設計（`design` の `layout-<出力の形>.md`） |
-| 生成の経路（変換器の設定、指示の与え方） | 配布の生成の手順（`release` の `form-<出力の形>.md`） |
+| 生成の経路（変換器の設定、指示の与え方） | リリースの生成の手順（`release` の `form-<出力の形>.md`） |
 | 内容が多すぎて収まらない | **執筆へ戻す**（主張の数を減らす） |
 
 ## 見た結果を残す
 
-**制作物承認の提示物になる。** 描画した画像と、見た結果を残す。
+**制作物承認の承認資料になる。** 描画した画像と、見た結果を残す。
 
 ```markdown
 ## 体裁レビュー
@@ -118,11 +118,11 @@ allowed-tools:
 版面の外の課題（内容の誤り、別の文書の不整合）に気づいたら、その場で `/ndf:out-of-scope` が
 issue にする。**この工程では直さない。**
 
-この工程に入ったら記録のコマンド `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "体裁レビュー"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「記録のコマンド」を使う）。
+この工程に入ったら進捗記録 `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "体裁レビュー"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「進捗記録」を使う）。
 
 ## 関連
 
-- `/ndf:release` — 配布（生成と提出）。この工程はその間に入る
+- `/ndf:release` — リリース（生成と提出）。この工程はその間に入る
 - `/ndf:document-systems` — 描画して見る手段（システムごと）
 - `/ndf:design` — 体裁設計（`references/layout-<出力の形>.md`）
 - `playwright-kit` の `playwright-evidence` — HTML のスクリーンショット

@@ -44,14 +44,14 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 
 ### 0. 用語集を用意する（`standard`）
 
-プロジェクトのユビキタス言語を、要求と設計より先に用意する。宣言と用語集の形は
+プロジェクトのユビキタス言語を、要求と設計より先に用意する。用語集の設定と用語集の形は
 [references/glossary-format.md](references/glossary-format.md) にある。
 
 1. `python3 "$SCRIPTS/glossary.py" gate --mode standard` を打つ
-   - 0: 宣言と用語集が揃っている。手順 1 へ進む
-   - 1: 宣言か用語集が無い。下の 2〜4 を行う
-   - 2: 宣言か用語集が壊れている。作り直さずに止まり、利用者へ直す箇所を示す（上書きすると採った語が消える）
-2. `python3 "$SCRIPTS/glossary.py" init` で、宣言・ほぼ空の用語集・人が読む文書を作る（欠けたものだけを作る）
+   - 0: 用語集の設定と用語集が揃っている。手順 1 へ進む
+   - 1: 用語集の設定か用語集が無い。下の 2〜4 を行う
+   - 2: 用語集の設定か用語集が壊れている。作り直さずに止まり、利用者へ直す箇所を示す（上書きすると採った語が消える）
+2. `python3 "$SCRIPTS/glossary.py" init` で、用語集の設定・ほぼ空の用語集・人が読む文書を作る（欠けたものだけを作る）
 3. `python3 "$SCRIPTS/glossary.py" candidates` で語の候補を集める
    - 1 件以上（既に文書かコードのあるプロジェクト）: 候補から領域の語を選び、語・意味・コンテキストの案を添えて
      利用者へ一覧で示す
@@ -152,14 +152,14 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 課題を読む人が GitHub の上で受け入れ条件を読めるように、要求の全文を本文へ書く
 （`gh issue edit <番号> --body-file <ファイル>`）。本文にファイルのパスだけを書かない。
 
-`standard` では、設計と要求を同じ差分でレビューするために、本文の写しを `issues/` に置く。
+`standard` では、設計と要求を同じ差分でレビューするために、本文のコピー（仕様のコピー）を `issues/` に置く。
 
-1. `python3 "$SCRIPTS/spec-copy.py" write <課題> issues/issue-<番号>-requirements.md` で写しを作る
+1. `python3 "$SCRIPTS/spec-copy.py" write <課題> issues/issue-<番号>-requirements.md` でコピーを作る
    （本文の `## 進行` より前の全文）
-2. 写しは設計 PR と一緒にコミットする。本文を直したら `write` で写しを作り直す（手で直さない）
+2. コピーは設計 PR と一緒にコミットする。本文を直したら `write` でコピーを作り直す（手で直さない）
 3. 設計 PR を出す前に `spec-copy.py check <課題> <写し>` が 0 であることを確かめる（`design` の手順 5）
 
-`implementation-plan` が同じ変更の実装計画を作る場合は、写しの**別の節**にする。写しにしか無い節は
+`implementation-plan` が同じ変更の実装計画を作る場合は、コピーの**別の節**にする。コピーにしか無い節は
 `check` が許す。仕様と分解を別ファイルに分けると、片方だけが更新されて食い違う。
 
 ## 曖昧なまま実装しない
@@ -194,8 +194,8 @@ description: "Turn a vague request into verifiable acceptance criteria before im
 - [references/acceptance-criteria.md](references/acceptance-criteria.md) — 受け入れ条件の形式と性質
 - [references/nonfunctional-requirements.md](references/nonfunctional-requirements.md) — 非機能の 6 大項目の書き方・例・該当の判定
 - [references/spec-template.md](references/spec-template.md) — 仕様の雛形
-- [references/glossary-format.md](references/glossary-format.md) — 用語集の宣言・用語集・人が読む文書の形と、語のチェックの規則
+- [references/glossary-format.md](references/glossary-format.md) — 用語集の設定・用語集・人が読む文書の形と、用語チェックの規則
 - [references/document-requirements.md](references/document-requirements.md) — 読み手へ渡す文書の受け入れ条件
 
-この工程に入ったら記録のコマンド `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "要求と受け入れ条件"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「記録のコマンド」を使う）。
+この工程に入ったら進捗記録のコマンド `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "要求と受け入れ条件"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の進捗記録のコマンドを使う）。
 

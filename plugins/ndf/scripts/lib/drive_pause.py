@@ -5,7 +5,7 @@
 `pause` が示し、本文ではなくファイルのパスを載せる。
 
     {"tool": "cross-review-drive", "status": "gate", "next": "fix", "summary": "...",
-     "items": [{"pause": "fix", "prompt_file": "...", "result_file": "...", "round": 3}],
+     "items": [{"pause": "fix", "prompt_file": "...", "result_file": "...", "round": 3, "cwd": "..."}],
      "metrics": {...}}
 
 | 終了コード | status | pause | 意味 | 起こす側がすること |
@@ -16,6 +16,13 @@
 | 22 | gate | `newtext` | 巻き直しの新しい title・body 待ち | 同上 |
 | 23 | gate | `cross-review` | 最終ゲートの cross-review 待ち | 同上（`items[0].command` が cross-review の drive） |
 | 1 | stopped | — | 中断（`metrics.exit` に元の終了コード） | 理由（summary）を報告する |
+
+`items[0]` の項目: `pause`・`prompt_file`・`result_file`・`round` は必ずある。任意の項目は次の通り。
+
+| 項目 | 意味 |
+| --- | --- |
+| `cwd` | その pause の作業ディレクトリ。起こす側は worker の作業場所（指示の「作業場所:」と起動の cwd）にこれを使う |
+| `command` | 先に打つ駆動のコマンド（pause `cross-review`） |
 
 再開は同じコマンドを打ち直すだけである。進みは各 drive が一時ディレクトリの状態ファイルに持つ。
 件数（metrics）の中身は drive ごとに決め、各 drive の docstring が並べる。
@@ -44,7 +51,7 @@ class Stop(Exception):
 
 def pause(tool: str, kind: str, prompt_file: Path | str, result_file: Path | str, round_: int,
           metrics: dict, **extra) -> dict:
-    """止まる地点の結果を組む。extra は items[0] へ足す（例 `command`）。"""
+    """止まる地点の結果を組む。extra は items[0] へ足す（例 `cwd`・`command`）。"""
     if kind not in PAUSE_CODES:
         raise ValueError(f"知らない pause: {kind}")
     item = {"pause": kind, "prompt_file": str(prompt_file), "result_file": str(result_file),

@@ -327,7 +327,7 @@ def test_missing_slack_vars_do_nothing(world, slack):
 
 
 # ---------------------------------------------------------------------------
-# 戻り先（I7）
+# 復帰先（I7）
 # ---------------------------------------------------------------------------
 
 def test_bridge_session_url_converts_cse(world, slack):

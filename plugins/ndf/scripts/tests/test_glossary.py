@@ -1,4 +1,4 @@
-"""glossary.py: プロジェクトの用語集の宣言・入口の検査・文書の生成・語のチェック・差分。
+"""glossary.py: プロジェクトの用語集の設定・入口の検査・文書の生成・用語チェック・差分。
 
 用語集の語は、どのプロジェクトにも無い通販の領域の語だけで書く（I6: スクリプトは特定の
 プロジェクトの語を持たず、すべて用語集から読む）。
@@ -308,14 +308,14 @@ def test_init_uses_given_places_without_declaration(bare):
 
 # --- 文書（render） ----------------------------------------------------------------
 
-def test_render_has_heading_and_four_columns_per_context(repo):
+def test_render_has_heading_and_six_columns_per_context(repo):
     doc = (repo / DEFAULT_DOCUMENT).read_text()
     assert doc.startswith("# 用語集\n")
     assert DEFAULT_SOURCE in doc
     assert doc.index("## 受注（`ordering`）") < doc.index("## 配送（`shipping`）")
-    assert "| 語 | 意味 | 廃止した語 | 正本 |" in doc
-    assert "| 注文 | 顧客が買うと決めた品の組 | オーダー | `docs/ordering.md` |" in doc
-    assert "| カートリッジ | 交換できる部品 | — | — |" in doc
+    assert "| 語 | 識別子 | 意味 | 廃止した語 | 廃止した識別子 | 正本 |" in doc
+    assert "| 注文 | — | 顧客が買うと決めた品の組 | オーダー | — | `docs/ordering.md` |" in doc
+    assert "| カートリッジ | — | 交換できる部品 | — | — | — |" in doc
     assert doc.index("| 注文 |") < doc.index("| カートリッジ |")
 
 
@@ -324,10 +324,10 @@ def test_render_escapes_pipes_and_newlines(repo):
     g["terms"][0]["meaning"] = "a|b\nc"
     write_json(repo, DEFAULT_SOURCE, g)
     run(repo, "render")
-    assert "| 注文 | a\\|b c |" in (repo / DEFAULT_DOCUMENT).read_text()
+    assert "| 注文 | — | a\\|b c |" in (repo / DEFAULT_DOCUMENT).read_text()
 
 
-# --- 語のチェック（check） --------------------------------------------------------
+# --- 用語チェック（check） --------------------------------------------------------
 
 TERMS_DOC = "# 要求\n\n## 用語\n\n| 用語 | 意味 |\n| --- | --- |\n| 注文 | 買う品 |\n"
 
@@ -470,6 +470,169 @@ def test_missing_required_field_is_schema(repo):
     write_json(repo, DEFAULT_SOURCE, g)
     code, out, _ = run(repo, "check", "--rules", "structure")
     assert code == 1 and "schema" in rules_of(out)
+
+
+# --- 識別子（code / deprecated_code） ----------------------------------------------
+
+def import_glossary():
+    sys.path.insert(0, str(SCRIPTS))
+    import glossary
+    return glossary
+
+
+def test_code_forms_derive_every_spelling_from_snake_case():
+    assert import_glossary().code_forms("shopping_cart") == \
+        ["shopping_cart", "ShoppingCart", "SHOPPING_CART", "shopping-cart"]
+    assert import_glossary().code_forms("plan") == ["plan", "Plan", "PLAN"]
+
+
+@pytest.mark.parametrize("field,value", [
+    ("code", "ShoppingCart"), ("code", "shopping-cart"), ("code", "shopping__cart"), ("code", "_cart"),
+    ("code", "2cart"), ("code", ""), ("code", 1), ("deprecated_code", "cart"), ("deprecated_code", ["Cart"]),
+    ("deprecated_code", [1]),
+])
+def test_malformed_code_is_schema(repo, field, value):
+    g = shop_glossary()
+    g["terms"][0][field] = value
+    write_json(repo, DEFAULT_SOURCE, g)
+    run(repo, "render")
+    code, out, _ = run(repo, "check", "--rules", "structure")
+    assert code == 1 and rules_of(out) == ["schema"], out
+
+
+def test_same_code_in_one_context_is_schema_and_other_context_is_allowed(repo):
+    g = shop_glossary()
+    g["terms"][0]["code"] = "order"
+    g["terms"][1]["code"] = "order"
+    write_json(repo, DEFAULT_SOURCE, g)
+    run(repo, "render")
+    code, out, _ = run(repo, "check", "--rules", "structure")
+    assert code == 1 and rules_of(out) == ["schema"] and out["items"][0]["term"] == "order"
+    g["terms"][1]["code"] = "cartridge"
+    g["terms"][2]["code"] = "order"
+    write_json(repo, DEFAULT_SOURCE, g)
+    run(repo, "render")
+    assert run(repo, "check", "--rules", "structure")[0] == 0
+
+
+def test_deprecated_code_overlapping_live_code_in_same_context_is_schema(repo):
+    g = shop_glossary()
+    g["terms"][0]["code"] = "order"
+    g["terms"][1]["code"] = "cartridge"
+    g["terms"][1]["deprecated_code"] = ["order"]
+    write_json(repo, DEFAULT_SOURCE, g)
+    run(repo, "render")
+    code, out, _ = run(repo, "check", "--rules", "structure")
+    assert code == 1 and rules_of(out) == ["schema"]
+
+
+def test_render_has_code_columns(repo):
+    g = shop_glossary()
+    g["terms"][0].update({"code": "order", "deprecated_code": ["purchase_order", "po_item"]})
+    write_json(repo, DEFAULT_SOURCE, g)
+    run(repo, "render")
+    doc = (repo / DEFAULT_DOCUMENT).read_text()
+    assert "| 語 | 識別子 | 意味 | 廃止した語 | 廃止した識別子 | 正本 |" in doc
+    assert "| 注文 | `order` | 顧客が買うと決めた品の組 | オーダー | `purchase_order`、`po_item` | `docs/ordering.md` |" in doc
+    assert "| カートリッジ | — | 交換できる部品 | — | — | — |" in doc
+
+
+def coded_repo(repo):
+    g = shop_glossary()
+    g["terms"][0].update({"code": "order", "deprecated_code": ["purchase_order", "cart"]})
+    g["terms"][1]["code"] = "shopping_cart"
+    write_json(repo, DEFAULT_SOURCE, g)
+    run(repo, "render")
+    commit(repo, "code")
+    git(repo, "branch", "-f", "develop")
+
+
+def test_diff_finds_deprecated_code_in_every_spelling_on_added_code_lines(repo):
+    coded_repo(repo)
+    write(repo, "src/a.py", "purchase_order = 1\n")
+    commit(repo, "old")
+    git(repo, "branch", "-f", "develop")
+    write(repo, "src/a.py", "purchase_order = 1\nclass PurchaseOrder: pass\n")
+    write(repo, "src/b.sh", "PURCHASE_ORDER=1\ncmd --purchase-order\n")
+    write(repo, "src/c.js", "const x = cart;\n")
+    write(repo, "src/d.ts", "let y: Cart;\n")
+    code, out, err = run(repo, "check", "--diff", "develop")
+    assert code == 1
+    assert sorted((it["rule"], it["path"], it["line"], it["term"]) for it in out["items"]) == [
+        ("deprecated_code", "src/a.py", 2, "PurchaseOrder"),
+        ("deprecated_code", "src/b.sh", 1, "PURCHASE_ORDER"),
+        ("deprecated_code", "src/b.sh", 2, "purchase-order"),
+        ("deprecated_code", "src/c.js", 1, "cart"),
+        ("deprecated_code", "src/d.ts", 1, "Cart"),
+    ]
+    assert "PurchaseOrder" not in out["items"][0]["detail"] and "Order（注文）" in out["items"][0]["detail"]
+    assert "ERROR: src/a.py:2: deprecated_code: PurchaseOrder" in err
+
+
+def test_deprecated_code_inside_live_code_or_other_files_is_not_matched(repo):
+    coded_repo(repo)
+    write(repo, "src/a.py", "shopping_cart = ShoppingCart(SHOPPING_CART)\nrun('--shopping-cart')\nsub_cart = 1\n")
+    write(repo, "src/notes.txt", "cart\n")
+    write(repo, "issues/a.md", "`cart` と書く。\n")
+    code, out, err = run(repo, "check", "--diff", "develop")
+    assert code == 0, (out, err)
+
+
+def test_deprecated_code_in_comments_is_not_matched_but_in_strings_is(repo):
+    coded_repo(repo)
+    write(repo, "src/a.py", "# cart is the old name\nx = 1  # Cart\ny = '#' + cart\n")
+    write(repo, "src/b.sh", "#!/bin/sh\n# CART\necho ${#cart} # cart\n")
+    write(repo, "src/c.js", "// cart\nconst u = 'http://x'; /* Cart\n cart */ cart;\n")
+    write(repo, "src/d.ts", "let s = \"// \\\" \" + Cart; // cart\n")
+    code, out, err = run(repo, "check", "--diff", "develop")
+    assert code == 1, (out, err)
+    assert sorted((it["path"], it["line"], it["term"]) for it in out["items"]) == [
+        ("src/a.py", 3, "cart"), ("src/b.sh", 3, "cart"), ("src/c.js", 3, "cart"), ("src/d.ts", 1, "Cart"),
+    ]
+
+
+def test_comment_marks_inside_multiline_strings_are_not_comments(repo):
+    coded_repo(repo)
+    write(repo, "src/a.py", 's = """\n# cart\n"""  # cart\n')
+    write(repo, "src/c.js", "const t = `\n// Cart ${x} src/*\n`; cart; // cart\n")
+    code, out, err = run(repo, "check", "--diff", "develop")
+    assert code == 1, (out, err)
+    assert sorted((it["path"], it["line"], it["term"]) for it in out["items"]) == [
+        ("src/a.py", 2, "cart"), ("src/c.js", 2, "Cart"), ("src/c.js", 3, "cart"),
+    ]
+
+
+def test_escaped_newline_inside_plain_strings_carries_the_quote(repo):
+    coded_repo(repo)
+    write(repo, "src/a.py", "s = 'a\\\n# cart' # cart\nt = '\\\\' # cart\n")
+    write(repo, "src/c.js", "const u = \"a\\\n// Cart\"; // cart\n")
+    code, out, err = run(repo, "check", "--diff", "develop")
+    assert code == 1, (out, err)
+    assert sorted((it["path"], it["line"], it["term"]) for it in out["items"]) == [
+        ("src/a.py", 2, "cart"), ("src/c.js", 2, "Cart"),
+    ]
+
+
+def test_shell_backslash_outside_quotes_and_inside_single_quotes(repo):
+    coded_repo(repo)
+    write(repo, "src/b.sh", "echo 'it'\\''s' # cart\necho \\' # cart\ntr -d '\\' # cart\n"
+                            "echo \"a\n# cart\" # cart\n")
+    code, out, err = run(repo, "check", "--diff", "develop")
+    assert code == 1, (out, err)
+    assert [(it["path"], it["line"], it["term"]) for it in out["items"]] == [("src/b.sh", 5, "cart")]
+
+
+def test_check_file_finds_deprecated_code_in_a_code_file(repo):
+    coded_repo(repo)
+    p = write(repo, "tool.py", "Cart()\n")
+    code, out, _ = run(repo, "check", "--file", str(p))
+    assert code == 1 and [(it["rule"], it["term"]) for it in out["items"]] == [("deprecated_code", "Cart")]
+
+
+def test_structure_rules_skip_deprecated_code(repo):
+    coded_repo(repo)
+    write(repo, "src/a.py", "cart = 1\n")
+    assert run(repo, "check", "--diff", "develop", "--rules", "structure")[0] == 0
 
 
 def test_no_declaration_check_and_diff_are_ok(bare):

@@ -1,7 +1,7 @@
 # 進行をボードへ記録する
 
 工程の進行を GitHub Projects のボードへ残す。セッションが変わっても、いまどの工程にいるか・
-どのモードで判定したか・対応する作業ツリーと実装計画のファイルがどれかを引き継げる。
+どのモードで判定したか・対応する worktree と実装計画のファイルがどれかを引き継げる。
 
 **この仕組みは任意である。** リポジトリに `.ndf/projects.json` が無ければ、呼び出しは何も
 出力せず終了コード 0 で終わる。ボードが使えない環境でも工程はそのまま通る。
@@ -12,9 +12,9 @@
 | --- | --- |
 | ボード | GitHub Projects v2 のプロジェクト 1 つ |
 | アイテム | ボードに載る 1 行。1 つの issue に対応する |
-| 宣言 | リポジトリの `.ndf/projects.json`。これが無ければ何も動かない |
+| 設定 | リポジトリの `.ndf/projects.json`。これが無ければ何も動かない |
 
-## 宣言ファイル
+## 設定ファイル
 
 ```json
 {
@@ -26,15 +26,15 @@
 
 | キー | 内容 |
 | --- | --- |
-| `version` | 宣言の形式。現在は `1` のみ。違う値は読まない |
+| `version` | 設定の形式。現在は `1` のみ。違う値は読まない |
 | `owner` | ボードを持つ組織または利用者のログイン名 |
 | `number` | ボードの番号（`https://github.com/orgs/<owner>/projects/<number>`） |
 | `fields` | 省略可。ボードのフィールド名を差し替える（後述） |
 
-`owner` と `number` のどちらかが欠けていると、宣言は無効として扱う。ボードを特定できない
+`owner` と `number` のどちらかが欠けていると、設定は無効として扱う。ボードを特定できない
 まま推測で書き込むと、別のボードを更新しかねない。
 
-**宣言はコミットする。** リポジトリの設定であり、同じ運用を他の開発者にも適用する。
+**設定はコミットする。** リポジトリ全体の設定であり、同じ運用を他の開発者にも適用する。
 
 ## ボードに要るフィールド
 
@@ -49,7 +49,7 @@
 `Linked pull requests` と `Repository` は GitHub が最初から持つ。1 つの issue から複数の
 Pull Request が出る場合も、既定の `Linked pull requests` に並ぶため対応付けを新しく作らない。
 
-名前を変えたい場合は宣言で差し替える。
+名前を変えたい場合は設定で差し替える。
 
 ```json
 { "version": 1, "owner": "devbasex", "number": 1,
@@ -71,8 +71,8 @@ Pull Request が出る場合も、既定の `Linked pull requests` に並ぶた�
 | ドキュメントレビュー | `design` が `pr` / `cross-review` / `merged` を呼ぶ | `ドキュメントレビュー` |
 | 計画 | `implementation-plan` | `計画` |
 | 実装 | `tdd-cycle` | `実装` |
-| 構造改善 | `refactoring` / `cross-refactoring` | `構造改善` |
-| 実装レビュー | `cross-review` / `pr-review` | `実装レビュー` |
+| `構造改善` | `refactoring` / `cross-refactoring` | `構造改善` |
+| `実装レビュー` | `cross-review` / `pr-review` | `実装レビュー` |
 | 完了判定 | `quality-gates` | `完了判定` |
 | Pull Request | `pr` | `Pull Request` |
 | 確定仕様化 | `plan-to-spec` | `確定仕様化` |

@@ -30,7 +30,7 @@
 | ランタイム | 待ち方 |
 | --- | --- |
 | Claude Code | **条件の until ループを Bash の `run_in_background: true` で起動し、完了通知を 1 回受ける。** 出来事を 1 つずつ受けるなら `Monitor`。サブエージェントは完了通知を待つ |
-| Codex / Kiro / agy | 1 回の前景の until ループ。600 秒を超えるなら共通層の `scripts/lib/bg-wait.sh`（`run` で背景に起動し、`wait` を 124 のあいだ別の呼び出しとして打ち直す） |
+| Codex / Kiro / agy | 1 回の前景の until ループ。600 秒を超えるなら共通ライブラリの `scripts/lib/bg-wait.sh`（`run` で背景に起動し、`wait` を 124 のあいだ別の呼び出しとして打ち直す） |
 
 **1 回で足りる待ちは `Monitor` ではなく `run_in_background` にする。** `Monitor` は出来事の
 たびに通知が届き、その都度文脈を読む。終わりだけを知りたい待ちでは通知が 1 回で済む
@@ -57,38 +57,38 @@
 | Pull Request のチェック | `gh pr checks <番号> --watch` を `run_in_background: true` で起動する |
 | 新しいコメントを 1 件ずつ | `Monitor` |
 | `supervise.py run` | `report.md` が揃うか、`progress.jsonl` に `attention` の行が足されるまでの until ループを `run_in_background: true` で起動する（下の節） |
-| `supervise.py queue` | `supervise.py wait <done のパス>` を `run_in_background: true` で 1 回起動する。queue の終わり（done）か、queue が流す計画の `attention` の行で終わる（下の節）。done のパスは `queue --done` で渡した所（省けば最初の計画の `<計画>-state/queue-done.json`） |
+| `supervise.py queue` | `supervise.py wait <done のパス>` を `run_in_background: true` で 1 回起動する。キューの終わり（done）か、キューが流すプランの `attention` の行で終わる（下の節）。done のパスは `queue --done` で渡した所（省けば最初のプランの `<プラン>-state/queue-done.json`） |
 | Pull Request の CI とマージ | `merged-steps.py merge-when-green <PR 番号>` を `run_in_background: true` で 1 回起動する。CI がまだ現れない間も待ち、緑になればマージする。マージの承認を得た後に限る。CI を待つだけなら `gh pr checks <PR 番号> --watch` を同じく背景で起動する。`gh pr checks --watch` と `gh pr merge` を手でつながない |
-| queue の後に続ける計画（配布など） | 手でチェインを組まず、`queue <実装の計画>... --then <後続の計画>` で渡す。後続は前の計画がすべて `完了` のときだけ流れ、1 本でも `止まった` / `関門` なら `流さなかった` と理由が結果に残る。配布の計画を `new release --prs-from-queue` で作れば、実装の PR の番号を知らずに渡せる |
+| キューの後に続けるプラン（リリースなど） | 手でパイプラインを組まず、`queue <実装のプラン>... --then <後続のプラン>` で渡す。後続は前のプランがすべて `完了` のときだけ流れ、1 本でも `止まった` / `関門` なら `流さなかった` と理由が結果に残る。リリースプランを `new release --prs-from-queue` で作れば、実装の PR の番号を知らずに渡せる |
 
-### supervise.py の途中の報告
+### supervise.py の進捗ログ
 
 **フェーズを `supervise.py run` / `queue` で回すとき、conductor は `report.md` が揃うか、
 `progress.jsonl` に conductor 向けの行が足されるまでを 1 回の背景の待ちで待つ。**
-`progress.jsonl` は計画の状態ディレクトリ（`<計画>-state/`）に置かれ、1 行が 1 つの JSON である。
+`progress.jsonl` はプランの状態ディレクトリ（`<プラン>-state/`）に置かれ、1 行が 1 つの JSON である。
 書くのは supervise.py と worker で、LLM は使わない。
 
 | `kind` | 書く時点 | 中身 | conductor の読み方 |
 | --- | --- | --- | --- |
 | `step` | ステップの切り替わりごと | `step`・`type`・`exit`・`seconds`・`cost`・`next`・`summary` | 起きたときに末尾を読む。これだけでは起きない |
-| `alive` | 最後の行から計画の `"report_interval"`（既定 600 秒）動きが無いとき | `step`・`elapsed`・`worker`（worker の最後の報告） | 同上 |
+| `alive` | 最後の行からプランの `"report_interval"`（既定 600 秒）動きが無いとき | `step`・`elapsed`・`worker`（worker の最後の報告） | 同上 |
 | `worker` | work のステップの worker が区切り（課題を読み終えた・テストを足した・実装を 1 つ終えた・コミットした）ごと | `text`（1 行の要約） | 同上 |
 | `slow` | run・work・drive のステップの経過が想定時間を超え、一次の調査を流すたび | `step`・`round`・`elapsed`・`expected`・`basis`・`probe`（`name`・`class`・`action`・`summary`）・`act`・`by`（`rule` / `llm`）・`llm`・`next_check` | `step` と同じ |
 | `attention` | conductor の判断が要るとき | `step`・`reason`（`止まった` / `関門` / `同じ失敗の繰り返し` / `judge のステップで stop が出そう` / `遅れ`）・`text` | **この行が足されたら起きて読む** |
 
-- **conductor 向けの行は `attention` だけである。** supervise.py が worker の行の語（止まった・関門・
-  失敗）と繰り返し、ステップの結果からスクリプトで分ける。`step` / `alive` / `worker` / `slow` は起こさない
+- **conductor 向けの行は `attention` だけである。** supervise.py が worker の行の語（`止まった`・`関門`・
+  `失敗`）と繰り返し、ステップの結果からスクリプトで分ける。`step` / `alive` / `worker` / `slow` は起こさない
   （起こすたびに conductor の文脈の全体を読み直すため）
 - `queue` は `attention` の行を標準出力の 1 行 `{"tool": "supervise-queue", "event": "attention", ...}`
   で知らせる。最後の行は結果の JSON のままである
 - `attention` で起きたら、その行と `progress.jsonl` の末尾だけを読み、止めるか続けるかを決める。
-  続けるなら同じ待ちを起動し直す。フェーズの報告は `report.md` で読む
+  続けるなら同じ待ちを起動し直す。フェーズレポートは `report.md` で読む
 - **遅れの見張りは supervise.py がステップの待ちの中で行う。** 想定は同じステップ（フェーズ, ステップの id）の直近 10 回の
   所要の中央値 × 3（下限 300 秒。履歴が 3 回未満なら 900 秒）。超えたら一次の調査を流し、決まった手
   （待ち直し・取り残しの再実行）で解けなければ Tool なしの `claude -p` が retry / fix / stop / wait を選ぶ。
   `attention`（reason `遅れ`）は、調査が手を打ったとき・判定へ回したとき・ステップを打ち切ったとき・判定の
   回数が上限に達したときだけ書く。打ち切ったステップの終了コードは 125
-- `## フェーズの報告` の `途中の報告` の欄が、行の種類ごとの数（`遅れの調査` を含む）と、LLM へ回した
+- フェーズレポート（`## フェーズの報告`）の `途中の報告` の欄が、行の種類ごとの数（`遅れの調査` を含む）と、LLM へ回した
   回数・費用を持つ。手を打ったステップは `- 遅れ:` の行に並ぶ
 - 待ちのコマンドは下のとおり
 
@@ -96,8 +96,8 @@
 `step` / `alive` / `worker` の行では起きない。
 
 ```bash
-# Bash の run_in_background: true で起動する（前景で打たない）。S は計画の状態ディレクトリ
-S="<計画>-state"; n=$(cat "$S/progress.jsonl" 2>/dev/null | grep -c '"kind": "attention"')
+# Bash の run_in_background: true で起動する（前景で打たない）。S はプランの状態ディレクトリ
+S="<プラン>-state"; n=$(cat "$S/progress.jsonl" 2>/dev/null | grep -c '"kind": "attention"')
 timeout 3600 bash -c 'c() { cat "$1/progress.jsonl" 2>/dev/null | grep -c "\"kind\": \"attention\""; }
 until [ -s "$1/report.md" ] || [ "$(c "$1")" -gt "$2" ]; do sleep 5; done' _ "$S" "$n"; rc=$?; echo "exit=$rc"; exit "$rc"
 ```
@@ -107,9 +107,9 @@ until [ -s "$1/report.md" ] || [ "$(c "$1")" -gt "$2" ]; do sleep 5; done' _ "$S
 - 124（上限の 3600 秒）で終わったら、`progress.jsonl` の最後の行（`alive` ならステップと経過）を 1 度読み、
   同じ待ちを起動し直す
 
-### queue の待ち（supervise.py wait）
+### キューの待ち（supervise.py wait）
 
-**conductor は queue を背景で起動し、`supervise.py wait <done のパス>` を `run_in_background: true` で
+**conductor はキューを背景で起動し、`supervise.py wait <done のパス>` を `run_in_background: true` で
 1 回起動する。** 待ちの見張り（until ループ・`attention` の読み取り・上限）を手で書かない。
 
 ```bash
@@ -120,29 +120,53 @@ python3 plugins/ndf/scripts/supervise.py wait q/done.json
 
 | 終わり方 | 終了コード | 次にすること |
 | --- | --- | --- |
-| queue が終わった（done に結果の JSON が書かれた） | 0 | 結果の JSON の `items[0]`（queue の結果）の `status` を見る。`gate` なら関門の計画の `report.md` を読んで提示する |
-| queue が流す計画の `progress.jsonl` に `attention` の行が足された | 20 | その行（結果の `items`）と `progress.jsonl` の末尾だけを読み、止めるか続けるかを決める。続けるなら同じ `wait` を打つ。知らせた行の続きから待つ |
-| 上限（`--timeout`、既定 10800 秒）に達した | 3 | queue の `<計画>.log` と `progress.jsonl` の最後の行を 1 度読み、同じ `wait` を打つ |
+| キューが終わった（done に結果の JSON が書かれた） | 0 | 結果の JSON の `items[0]`（キューの結果）の `status` を見る。`gate` なら承認ゲートを返したプランの `report.md` を読んで提示する |
+| キューが流すプランの `progress.jsonl` に `attention` の行が足された | 20 | その行（結果の `items`）と `progress.jsonl` の末尾だけを読み、止めるか続けるかを決める。続けるなら同じ `wait` を打つ。知らせた行の続きから待つ |
+| 上限（`--timeout`、既定 10800 秒）に達した | 3 | キューの `<プラン>.log` と `progress.jsonl` の最後の行を 1 度読み、同じ `wait` を打つ |
 
 - 出力は要約の 1 行と結果の JSON の 1 行だけである
-- queue は始めに流す計画の一覧（`--then` を含む）と読み始める所を done の隣の `<done>.plans.json` へ書き、
+- キューは始めに流すプランの一覧（`--then` を含む）と読み始める所を done の隣の `<done>.plans.json` へ書き、
   wait はそれを読む。知らせた `attention` の続きは `<done>.wait.json` に残る
 
 ### 1 ミッションの流し方
 
-**1 ミッション（実装 → 開発版 → 関門 2 → 本番 → 後片付け）で conductor が起きるのは、関門・`attention`・
-queue の終わりだけである。** 計画の組み立て・待ちの見張り・次の計画の起動のために起きない。
+**1 ミッション（実装 → 開発版 → ゲート 2 → 本番 → 後片付け）で conductor が起きるのは、承認ゲート・`attention`・
+キューの終わりだけである。** プランの組み立て・待ちの見張り・次のプランの起動のために起きない。
 
-1. 実装の計画を並べ、開発版の配布の計画を `new release --channel dev --prs-from-queue` で作る
-   （固定の PR があれば `--prs 1052` を併せて渡す）。queue は `--then` の計画を流す前に、先行の計画の
+1. 実装のプランを並べ、開発版のリリースプランを `new release --channel dev --prs-from-queue` で作る
+   （固定の PR があれば `--prs 1052` を併せて渡す）。キューは `--then` のプランを流す前に、先行のプランの
    報告の `Pull Request` の番号を changelog・approval-facts のステップの `--prs` へ入れる。
-   先行の報告に Pull Request が 1 件も無ければ、配布の計画は `流さなかった` になる
-2. `queue <実装の計画>... --then <開発版の計画> --done <パス>` と `wait <パス>` を背景で起動する
-3. `wait` が 0 で終わり、queue の結果が `gate`（開発版の facts のステップの関門 2）なら、提示物を添えて本番の承認を取る
-4. 承認の後、`queue <本番の計画> --done <パス>` と `wait <パス>` を背景で起動する。本番の計画のステップの最後は
-   後片付け（`merged-steps.py cleanup`）で、配布の PR（`release/v<版>` → main）とミッションの PR（`--prs`）の
-   ブランチ・作業ツリーを片付ける。`git branch -D` が要るブランチがあれば関門で止まる
+   先行の報告に Pull Request が 1 件も無ければ、リリースプランは `流さなかった` になる
+2. `queue <実装のプラン>... --then <開発版のプラン> --done <パス>` と `wait <パス>` を背景で起動する
+3. `wait` が 0 で終わり、キューの結果が `gate`（開発版の facts のステップのゲート 2）なら、承認資料を添えて本番の承認を取る
+4. 承認の後、`queue <本番のプラン> --done <パス>` と `wait <パス>` を背景で起動する。本番のプランのステップの最後は
+   後片付け（`merged-steps.py cleanup`）で、リリースの PR（`release/v<版>` → main）とミッションの PR（`--prs`）の
+   ブランチ・worktree を片付ける。`git branch -D` が要るブランチがあれば承認ゲートで止まる
 5. `wait` が 0 で終わったら、引継ぎ文書を `supervise.py note` で更新し、`ndf-next` を出す
+
+### ミッションを流すコマンド
+
+**`normal` の 1 ミッション（設計 → 承認ゲート 1 → ミッションブランチ → 実装 → 検査 → 開発版 → 承認ゲート 2 → 本番）で
+conductor が起きるのは、承認ゲート・`attention`・キューの終わりだけである。** 例はミッション `m6`（課題 1052・1053、
+設計 Pull Request は 1052）で、`sv() { python3 "$SCRIPTS/supervise.py" "$@"; }`、`O=<作業ディレクトリ>/mission-m6` とする。
+キューと `wait` は背景で起動し、done は上の「supervise.py の進捗ログ」で読む。
+
+1. プランを書き出す。ステージごとのプランとミッション状態ファイル（`$O/mission.json`）ができる:
+   `sv new mission --name m6 --worktree <リポジトリの根> --issue 1052 1053 --design 1052 --version 10.18.0-dev.1 --out $O`
+2. 設計: `sv queue $O/1-design-1052.json --max 3 --done $O/done-1.json` と `sv wait $O/done-1.json`
+3. 承認ゲート 1: キューの結果が `gate` なら、設計 Pull Request をまとめて 1 回の承認に載せる。承認の後、
+   conductor が `python3 "$SCRIPTS/merged-steps.py" merge-when-green <設計 PR 番号>` でマージする
+4. ミッションブランチ: `sv queue $O/3-mission-branch.json --done $O/done-3.json` と `sv wait $O/done-3.json`
+5. 実装: `sv queue $O/4-impl-1052.json $O/4-impl-1053.json --max 3 --done $O/done-4.json` と `sv wait $O/done-4.json`
+6. 検査 → 開発版: `sv queue $O/5-check.json --max 3 --then $O/6-release.json --done $O/done-5.json` と
+   `sv wait $O/done-5.json`。検査のプランがミッションの Pull Request をベースブランチへマージし、開発版のリリースプランが続けて流れる
+7. 承認ゲート 2: キューの結果が `gate`（開発版の facts のステップ）なら、承認資料を添えて本番の承認を取る
+8. 本番: `sv new release --version 10.18.0 --prs <ミッションの PR 番号> --channel prod --worktree <リポジトリの根>/.worktrees/release/v10.18.0 --out $O/7-release-prod.json`、
+   続けて `sv queue $O/7-release-prod.json --done $O/done-7.json` と `sv wait $O/done-7.json`。最後のステップが後片付けを行う
+
+- ステージの番号とプランのファイル名は `new mission` の出力（`mission.json` の `ステージ`）が正である。書き出した `command` に `--done` を足して打つ
+- 確定仕様化と振り返りは `normal` のプランが持たないため、supervisor で回す（[agent-layers.md](agent-layers.md) の表の取り込み・仕上げの行）
+- 本番の後に続けるコマンドは [relay.md](relay.md)、`pace: fast` の並びは [pace.md](pace.md) にある
 
 **サブエージェントは、背景の処理を残したまま応答を終えない。** 完了通知で再開はされるが、
 **親には応答を終えた時点で 1 度「終わった」と通知が届き、途中の文面が結果として渡る**
@@ -153,31 +177,31 @@ queue の終わりだけである。** 計画の組み立て・待ちの見張�
 他の作業を進め、通知を受けてから次の作業へ進む。他の作業が無いまま待つときの手は #656 が扱う。
 親の側の手は、受け取る層ごとに次の節が持つ。
 
-### 途中の通知を受けたとき
+### 中間通知を受けたとき
 
-**途中の通知**は、背景の処理を残したまま応答を終えたサブエージェントについて届く 1 回目の
+**中間通知**は、背景の処理を残したまま応答を終えたサブエージェントについて届く 1 回目の
 通知である。見分けは通知の注記（「background work of its own still running」「may be
 interim」）で行う。
 
 | 受け取る層 | 手 |
 | --- | --- |
 | conductor | **2 回目の通知を待ってから報告を読む。** conductor は応答を終えても次の通知で起こされる |
-| supervisor | **応答を終える前に、自分の背景の処理として報告の複製の待ちを起動する。** 下のコマンドを `run_in_background: true` で起動し、完了通知で再開する |
+| supervisor | **応答を終える前に、自分の背景の処理として報告コピーの待ちを起動する。** 下のコマンドを `run_in_background: true` で起動し、完了通知で再開する |
 
 **supervisor が「2 回目の通知を待つ」で応答を終えると止まる。** supervisor が起動した worker
 は supervisor の背景の子に数えられず、worker が後で終わっても、応答を終えた supervisor は
 起こされない（#901）。自分で起動した背景の Bash の完了通知なら、supervisor は再開する。
 
 **worker の規則 5（背景の処理を残したまま応答を終えない）は保つ。** 規則を守る worker では
-途中の通知は起きない。この手は、守れなかった worker（`Monitor` や背景の待ちを残して応答を
+中間通知は起きない。この手は、守れなかった worker（`Monitor` や背景の待ちを残して応答を
 終えた worker）への備えである。
 
 **supervisor は worker を起動する前に、`置き場所` のファイルを worker ごとに新しいパスで空に
-作り、完了の目印を消す**（`: > <置き場所>; rm -f <置き場所>.done`）。前の worker の報告や目印が
-残ったパスを渡すと、複製の待ちがその目印に即座に反応し、今の worker の報告を待たずに終わる。
+作り、完了マーカーを消す**（`: > <置き場所>; rm -f <置き場所>.done`）。前の worker の報告や完了マーカーが
+残ったパスを渡すと、コピーの待ちがその完了マーカーに即座に反応し、今の worker の報告を待たずに終わる。
 
-**待つのは `置き場所` の中身ではなく、完了の目印のファイル `<置き場所>.done` である。** worker
-は報告の複製を `置き場所` の末尾へ書き終えた後に、空のファイル `<置き場所>.done` を作る
+**待つのは完了マーカーのファイル `<置き場所>.done` である。** worker
+は報告コピーを `置き場所` の末尾へ書き終えた後に、空のファイル `<置き場所>.done` を作る
 （[agent-layers.md](agent-layers.md) の起動指示の `置き場所`）。
 
 ```bash
@@ -188,10 +212,10 @@ timeout 3600 bash -c 'until [ -e "$1.done" ]; do sleep 5; done' _ "<置き場所
 | 終了コード | supervisor の動き |
 | --- | --- |
 | 0（`<置き場所>.done` が現れた） | `置き場所` の最後の `## 作業の報告` から末尾までを読み、フェーズを進める |
-| 124（上限の 3600 秒に達した） | [agent-layers.md](agent-layers.md) の「supervisor の worker の点検」を 1 回行う。上限の中断でなければ「報告が無いまま終わったとき」の規則で `SendMessage` を送る |
+| 124（上限の 3600 秒に達した） | [interrupt-resume.md](interrupt-resume.md) の「supervisor の worker の点検」を 1 回行う。レートリミット中断でなければ「報告が無いまま終わったとき」の規則で `SendMessage` を送る |
 
-- **worker の 2 回目の通知は、複製を読んだ後に届いても読み直さない。** 同じ報告である
-- 途中の通知でない通知（報告の見出しが無く、背景の処理も残っていない）は、今のまま
+- **worker の 2 回目の通知は、コピーを読んだ後に届いても読み直さない。** 同じ報告である
+- 中間通知でない通知（報告の見出しが無く、背景の処理も残っていない）は、今のまま
   「報告が無いまま終わったとき」の規則で扱う
 - 待つ間に問い合わせを繰り返さない。起動は 1 回で、通知も 1 回である（「許す待ち方」）
 
@@ -202,7 +226,7 @@ timeout 3600 bash -c 'until [ -e "$1.done" ]; do sleep 5; done' _ "<置き場所
 一致しない。確かめる側の `grep -v pgrep` は、`pgrep` を含む待ちのコマンド行ごと結果から除く）。
 止まったかは完了通知（`failed` / `killed`）で確かめる。
 
-背景の作業が残っていると、ラッパーの Stop hook（`relay.py mark`）は `ndf-next` の合図を書かない。そのときは
+背景の作業が残っていると、ラッパーの Stop hook（`relay.py mark`）は `ndf-next` のシグナルファイルを書かない。そのときは
 Stop を 1 度だけ止め、動いている作業を並べて知らせる。supervisor や `supervise.py queue` のように
 止めてはいけない作業なら、止めずに終わりを待ってから `ndf-next` を出し直す。
 
@@ -213,7 +237,7 @@ Stop を 1 度だけ止め、動いている作業を並べて知らせる。sup
 
 | 判定 | 止める条件 | 止め方 | 上限を変える |
 | --- | --- | --- | --- |
-| sleep | 前景の Bash で、コマンドの位置（先頭の代入語 `X=1` と、`timeout 590` / `nohup` / `env` などの前置きの後ろを含む）の `sleep` が `while` / `until` のループの本体にある（秒数が変数でも止める）か、秒数が上限を超える。コメント・引用・ヒアドキュメントの本文は見ず、コマンドの位置にある `bash -c` / `sh -c` / `zsh -c` / `dash -c` / `eval` の中身は見る（`echo bash -c ...` のような引数の中の語は見ない） | `NDF_SLEEP_GUARD=0` | `NDF_SLEEP_MAX_SEC`（既定 5） |
+| sleep | フォアグラウンド Bash で、コマンドの位置（先頭の代入語 `X=1` と、`timeout 590` / `nohup` / `env` などの前置きの後ろを含む）の `sleep` が `while` / `until` のループの本体にある（秒数が変数でも止める）か、秒数が上限を超える。コメント・引用・ヒアドキュメントの本文は見ず、コマンドの位置にある `bash -c` / `sh -c` / `zsh -c` / `dash -c` / `eval` の中身は見る（`echo bash -c ...` のような引数の中の語は見ない） | `NDF_SLEEP_GUARD=0` | `NDF_SLEEP_MAX_SEC`（既定 5） |
 | 連続 Read | 同じ `file_path`・`offset`・`limit` の Read が、ファイルの大きさ・更新時刻・inode が変わらないまま上限の回数に達する | `NDF_READ_REPEAT_GUARD=0` | `NDF_READ_REPEAT_LIMIT`（既定 3） |
 | スイッチポイント | 寿命 5 分の supervisor（入力の `agent_type` が `ndf:supervisor`）が `cross-review` / `cross-refactoring` の Skill を起動し、自身の記録の今の文脈が最初の呼び出しの文脈の比以上ある（やり直しても止め続ける）。PreToolUse の `Skill` で動く | `NDF_SUPERVISOR_CUT_GUARD=0` | `NDF_SUPERVISOR_CUT_RATIO`（既定 1.5） |
 
@@ -228,7 +252,7 @@ Stop を 1 度だけ止め、動いている作業を並べて知らせる。sup
 
 | ランタイム | 待ち方（#829） | 会話を切る（#830） | 理由 |
 | --- | --- | --- | --- |
-| Claude Code | hook ＋ この規約 | hook ＋ 引継ぎの 1 行 | 代わりの待ち方（`Monitor` / `run_in_background` の通知）と会話の記録の場所を持つ |
-| Codex | この規約だけ | 引継ぎの 1 行だけ | 背景の起動と完了通知が無く、1 回の前景のループが待ち方になる |
-| Kiro | この規約だけ | 引継ぎの 1 行だけ | 実行前の hook は拒否しか返せず、既存の設計も実行前の hook を置いていない |
-| agy | この規約だけ | 引継ぎの 1 行だけ | 実行前の hook は案内を記録へ積む形で、拒否の口を使っていない |
+| Claude Code | hook ＋ この規約 | hook ＋ 再開コマンド | 代わりの待ち方（`Monitor` / `run_in_background` の通知）と会話の記録の場所を持つ |
+| Codex | この規約だけ | 再開コマンドだけ | 背景の起動と完了通知が無く、1 回の前景のループが待ち方になる |
+| Kiro | この規約だけ | 再開コマンドだけ | 実行前の hook は拒否しか返せず、既存の設計も実行前の hook を置いていない |
+| agy | この規約だけ | 再開コマンドだけ | 実行前の hook は案内を記録へ積む形で、拒否の口を使っていない |

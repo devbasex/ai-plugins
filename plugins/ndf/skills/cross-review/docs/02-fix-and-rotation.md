@@ -29,20 +29,20 @@
 | リポジトリ・PR・ラウンド | state.json の `repo` / `current_pr` / `rounds[-1].round` |
 | 作業ディレクトリ・ブランチ・ベース | state.json の `worktree_path` / `head_branch` / `base_branch` |
 | 前ラウンドのレビュー | `rounds[-1]` の担当ごとの `intent` / `posted_as` / `comments` / `review_url`。件数はそのラウンドで投稿した数で、対応の対象は `/ndf:fix` が PR の未解決のスレッドから数え直す |
-| 既存コメントのスナップショット | `$TMP_DIR/cross-review-pr<PR>-existing-comments.txt` |
+| コメントのスナップショット | `$TMP_DIR/cross-review-pr<PR>-existing-comments.txt` |
 | 戻り値ファイル | `$TMP_DIR/fix-pr<PR>-result.json`。環境変数 `CROSS_REVIEW_TMP_DIR` を渡すと `/ndf:fix` がここへ書く |
 
 **送信・返信・決着・まとめは取り込み（`state.py merge-fix`）が行う**。worker は
 GitHub と git へ書かない。取り込みは現在の頭を指定して送り（`git push origin HEAD:<ブランチ名>`）、
 戻り値ファイルが報告したコミットが送り先に載ったことを確かめてから、`resolved_threads` /
-`deferred` / `rejected` の配列から返信と決着を、件数からまとめを組み立てて待ち行列で送る。
+`deferred` / `rejected` の配列から返信と決着を、件数からまとめを組み立てて投稿キューで送る。
 載っていなければ記録も投稿もせずに止まる。担当が送ると、切り離された頭ではブランチ名だけの
 送信が何も送らずに終了コード 0 で終わり、送ったという報告と実物が食い違う。
 
 **レビュー本文の指摘は `thread_id` を `null` にし、`comment_id` にはレビューの ID を書く。**
 スレッドを持たない要素には返信を積まず、`summary` と理由をまとめのコメントへ載せる。
-待ち行列は、送り直しても届かない項目（`HTTP 400` / `404` / `410` / `422`、レビューの
-投稿を除く）を飛ばして待ち行列の `dropped/` へ移し、後ろの決着とまとめを送る。飛ばした数は
+投稿キューは、送り直しても届かない項目（`HTTP 400` / `404` / `410` / `422`、レビューの
+投稿を除く）を飛ばして投稿キューの `dropped/` へ移し、後ろの決着とまとめを送る。飛ばした数は
 `DROPPED=` / `PENDING_DROPPED=` に出る。
 
 ### Step 5 後段: fix 戻り値マージ + CI 分類
@@ -262,7 +262,7 @@ while ループ脱出後にメインが以下のプロンプトでサブエー�
 > 3. bot 誤指摘 → 却下理由を添えて `rejected` へ入れ、`"resolve": true` を付ける。
 >
 > **GitHub と git へ書かない。** 返信・決着・送信は、メインがこの結果ファイルを読んで
-> 共通層の 1 行（`result_posts.py fix`）で行う。
+> 共通ライブラリの 1 行（`result_posts.py fix`）で行う。
 >
 > **修正をコミットした場合は、対象リポジトリの検証を 1 度通すこと。** 何を実行するかは
 > 対象リポジトリを見て決める。**コマンドを推測して組み立てない。**

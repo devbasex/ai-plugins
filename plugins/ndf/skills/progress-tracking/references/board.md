@@ -3,7 +3,7 @@
 ボード（GitHub Projects）へ書くときの、宛先の決め方・アイテムの追加・問い合わせの減らし方。
 **リポジトリに `.ndf/projects.json` があるときだけ動く。**
 
-ボードの設定（宣言ファイルの形・要るフィールド・工程との対応）は
+ボードの設定（設定ファイルの形・要るフィールド・工程との対応）は
 [references/projects-tracking.md](../../development-workflow/references/projects-tracking.md)
 にある。
 
@@ -13,7 +13,7 @@
 
 | 順 | 経路 | 決め方 |
 | --- | --- | --- |
-| 1 | 宣言 | `.ndf/projects.json` の `owner` と `number` |
+| 1 | ボードの設定 | `.ndf/projects.json` の `owner` と `number` |
 | 2 | その issue が載っているボード | GraphQL の `issue.projectItems.nodes.project` |
 | 3 | リポジトリにリンクされたボード | GraphQL の `repository.projectsV2` |
 | 4 | 所有者のボードが 1 つだけ | `gh project list --owner <owner>` |
@@ -28,8 +28,8 @@ $ gh api graphql -f query='{ repository(owner:"acme", name:"demo") {
       number title owner { __typename ... on Organization { login } ... on User { login } } } } } } } }'
 ```
 
-**2〜4 で決まった宛先は宣言へ書き戻す。** 次回からは 1 の経路で決まり、問い合わせが要らなく
-なる。書き戻しは作業ツリーの中で行い、その変更の Pull Request に載せる。
+**2〜4 で決まった宛先はボードの設定へ書き戻す。** 次回からは 1 の経路で決まり、問い合わせが要らなく
+なる。書き戻しは worktree の中で行い、その変更の Pull Request に載せる。
 
 ## 同じボードを何度も読まない
 
@@ -48,9 +48,9 @@ $ gh api graphql -f query='{ repository(owner:"acme", name:"demo") {
 **アイテムの識別子は issue とボードの組で決まり、工程が進んでも変わらない。**
 
 キャッシュの位置は `git rev-parse --git-common-dir` が返すディレクトリの下（`<共通の git
-ディレクトリ>/ndf/`）である。**作業ツリーでは `.git` がファイルである**ため、`.git/ndf/` を
-作ろうとすると失敗する。共通の git ディレクトリなら、作業ツリーを消してもキャッシュが残り、同じ
-リポジトリの複数の作業ツリーで 1 つのキャッシュを共有できる。
+ディレクトリ>/ndf/`）である。**worktree では `.git` がファイルである**ため、`.git/ndf/` を
+作ろうとすると失敗する。共通の git ディレクトリなら、worktree を消してもキャッシュが残り、同じ
+リポジトリの複数のworktree で 1 つのキャッシュを共有できる。
 
 ## アイテムが無いとき
 

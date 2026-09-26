@@ -119,6 +119,22 @@ def declared_base(root: Path) -> str | None:
     return f"origin/{v}" if isinstance(v, str) and v else None
 
 
+def generated_documents(root: Path) -> tuple[str, ...]:
+    """.ndf/glossary.json の document（render の生成物）。直すなら正本を直すため、--exclude によらず見ない。
+
+    git diff のパスと突き合わせるため、`./` や区切りの揺れを正規化して返す。読めない設定は無いものとして扱う。
+    """
+    f = root / ".ndf" / "glossary.json"
+    try:
+        v = json.loads(f.read_text(encoding="utf-8")).get("document") if f.is_file() else None
+    except (OSError, ValueError, AttributeError):
+        return ()
+    if not isinstance(v, str) or not v:
+        return ()
+    p = Path(v.replace("\\", "/")).as_posix()
+    return (p,) if p not in (".", "") else ()
+
+
 def cmd_lint(a):
     root = Path(a.root).resolve() if a.root else Path(git(".", "rev-parse", "--show-toplevel").strip())
     base = a.base or declared_base(root)
@@ -130,7 +146,9 @@ def cmd_lint(a):
     start = p.stdout.strip()
     files = added_lines(root, start)
     excl = tuple(a.exclude) if a.exclude is not None else DEFAULT_EXCLUDE
-    files = {k: v for k, v in files.items() if not any(k.startswith(e) or k == e.rstrip("/") for e in excl)}
+    generated = set(generated_documents(root))
+    files = {k: v for k, v in files.items()
+             if k not in generated and not any(k.startswith(e) or k == e.rstrip("/") for e in excl)}
     items, total = scan(root, files, a.all_lines)
     metrics = {"base": base, "files": len(files), "lines": total, "hits": len(items),
                "rules": {r: sum(1 for i in items if i["rule"] == r) for r in RULES}}

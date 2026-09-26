@@ -165,7 +165,7 @@ description: "Delete merged branches and worktrees, stopping only where git refu
 | 2 | **他者が読む新しい内容を外へ出すか** | push と Pull Request の作成、課題の起票、外部リポジトリの取得と配置 |
 | 3 | **操作そのものが判断を問うか** | 「やらない」と判断して閉じる、範囲外として起票する |
 
-**git が拒む操作と、事後の復元の手段がある操作は対象から外す。** 拒否そのものが止める合図であり、
+**git が拒む操作と、事後の復元の手段がある操作は対象から外す。** 拒否そのものが止まる理由になり、
 `git branch <名前> <ハッシュ>`・Restore branch・`gh issue reopen` で戻せる操作を止めても二重の確認が残るだけである。
 **課題を閉じることは問い 3 に当たらない**（判断はミッションの工程を通った時点で済んでいる）。`issue-upkeep` の「やらない」は閉じること自体が判断であり、そこが違う。
 
@@ -187,7 +187,7 @@ description: "Delete merged branches and worktrees, stopping only where git refu
 | `deploy` / `cherry-pick-pr` / `statusline` | 明示指示専用 | 本番デプロイ / 環境ブランチへの push / 利用者の設定ファイルの書き換え | 1（いずれも明示起動の運用が定着） |
 | `merged` | 自動発動 + 事後の報告 | worktree・ローカルブランチ・Pull Request の head のリモートブランチの削除 | なし（拒まれた対象だけ 1 に当たり、そこで止まる） |
 | `pr` | 自動発動 + 実行前確認 | push / Pull Request の作成 | 2 |
-| `release` | 自動発動 + 実行前確認 | 本番への配布（関門 2） | 1・2 |
+| `release` | 自動発動 + 実行前確認 | 本番へのリリース（ゲート 2） | 1・2 |
 | `out-of-scope` | 自動発動 + 実行前確認 | 起票 | 2・3 |
 | `issue-upkeep` | 自動発動 + 実行前確認 | やらないと判断して閉じる | 3 |
 | `official-skills-autoloader` | 自動発動 + 実行前確認 | 外部リポジトリの取得と symlink の作成 | 2 |
@@ -386,10 +386,8 @@ Skill の一覧 7.4k は、他のプラグインと組み込みを含む全量�
 この前提を出力する。モデルの一覧を取る手段が kiro-cli の版によって変わるため、機械でのチェックは
 置いていない）。
 
-起動時に読み込む文脈量（Kiro が全 `SKILL.md` を読む合計）に**上限は置かない**。以前は
-`tests/runtime-smoke/assertions/assert-kiro-agent.sh` が 200,000 文字で落としていたが、その
-根拠は当時のモデルのコンテキスト長を前提にした余裕分だった。コンテキスト長が同じ Claude Code に
-同種の上限が無い以上、片方だけを縛る根拠が無い。数は smoke test のログへ残るため、増え方は
+起動時に読み込むコンテキスト量（Kiro が全 `SKILL.md` を読む合計）に**上限は置かない**。
+コンテキスト長が同じ Claude Code に上限を置かないため、Kiro だけを縛る根拠が無い。数は smoke test のログへ残るため、増え方は
 後から追える。
 
 **コンテキストが最も長い Claude Code ではなく、Codex が全体の制約になる。** 比率が 2 倍でも

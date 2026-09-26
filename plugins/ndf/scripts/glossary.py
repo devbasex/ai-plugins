@@ -45,6 +45,8 @@ SEPARATOR = re.compile(r"^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$")
 BOLD = re.compile(r"\*\*([^*\n]{1,12}?)\*\*")
 TYPE_NAME = re.compile(r"\b(?:class|interface|struct|enum)\s+([A-Za-z_][A-Za-z0-9_]*)|\btype\s+([A-Za-z_][A-Za-z0-9_]*)\s*=")
 ASCII_WORD = re.compile(r"^[A-Za-z0-9_\-]+$")
+CODE_SHAPE = re.compile(r"[a-z][a-z0-9]*(?:_[a-z0-9]+)*")
+CODE_SUFFIXES = (".py", ".sh", ".js", ".ts")
 MAX_CODE_BYTES = 1_000_000
 
 
@@ -139,6 +141,28 @@ def deprecated_of(t: dict) -> list[str]:
     return [w for w in d if isinstance(w, str)] if isinstance(d, list) else []
 
 
+def code_of(t: dict) -> str | None:
+    c = t.get("code")
+    return c if isinstance(c, str) and CODE_SHAPE.fullmatch(c) else None
+
+
+def deprecated_code_of(t: dict) -> list[str]:
+    d = t.get("deprecated_code") or []
+    return [w for w in d if isinstance(w, str) and CODE_SHAPE.fullmatch(w)] if isinstance(d, list) else []
+
+
+def spellings(code: str) -> tuple[str, str, str, str]:
+    """識別子の基本形（snake_case）から 4 つの書き方を導く。基本形（JSON のキー・変数・関数）・PascalCase（クラス）・
+    大文字（定数）・kebab-case（CLI の引数・ファイル名）の順。書き方の変換はここだけで行う。"""
+    parts = code.split("_")
+    return code, "".join(w.capitalize() for w in parts), code.upper(), "-".join(parts)
+
+
+def code_forms(code: str) -> list[str]:
+    """spellings の重なる形を 1 つにした一覧（`plan` なら plan / Plan / PLAN）。"""
+    return list(dict.fromkeys(spellings(code)))
+
+
 def live_words(g: dict) -> set[str]:
     return {t["term"] for t in terms_of(g) if isinstance(t.get("term"), str) and t["term"]}
 
@@ -161,11 +185,15 @@ def render_text(g: dict, source: str) -> str:
         if not rows:
             out += ["語はまだ無い。", ""]
             continue
-        out += ["| 語 | 意味 | 廃止した語 | 正本 |", "| --- | --- | --- | --- |"]
+        out += ["| 語 | 識別子 | 意味 | 廃止した語 | 廃止した識別子 | 正本 |",
+                "| --- | --- | --- | --- | --- | --- |"]
         for t in rows:
             dep = "、".join(deprecated_of(t))
+            code = f"`{code_of(t)}`" if code_of(t) else ""
+            dep_code = "、".join(f"`{w}`" for w in deprecated_code_of(t))
             src = f"`{t['source']}`" if t.get("source") else ""
-            out.append(f"| {cell(t.get('term'))} | {cell(t.get('meaning'))} | {cell(dep)} | {cell(src)} |")
+            out.append(f"| {cell(t.get('term'))} | {cell(code)} | {cell(t.get('meaning'))} | {cell(dep)} | "
+                       f"{cell(dep_code)} | {cell(src)} |")
         out.append("")
     return "\n".join(out).rstrip("\n") + "\n"
 
@@ -199,10 +227,14 @@ def structure_findings(g: dict, decl: Declaration) -> list[dict]:
             hit("schema", c["id"], f"contexts[{i}] の id が重なる")
         ids.append(c["id"])
     seen: dict[tuple[str, str], int] = {}
+    code_seen: dict[tuple[str, str], int] = {}
     live_by_ctx: dict[str, set[str]] = {}
+    codes_by_ctx: dict[str, set[str]] = {}
     for t in terms_of(g):
         if isinstance(t.get("term"), str) and isinstance(t.get("context"), str):
             live_by_ctx.setdefault(t["context"], set()).add(t["term"])
+        if isinstance(t.get("context"), str) and code_of(t):
+            codes_by_ctx.setdefault(t["context"], set()).add(code_of(t))
     for i, t in enumerate(g.get("terms", [])):
         if not isinstance(t, dict):
             hit("schema", "", f"terms[{i}] はオブジェクトで書く")
@@ -231,6 +263,21 @@ def structure_findings(g: dict, decl: Declaration) -> list[dict]:
                 hit("schema", w, f"terms[{i}] の廃止した語が 1 文字で照合できない")
             elif w in live_by_ctx.get(t["context"], set()):
                 hit("schema", w, f"terms[{i}] の廃止した語が同じコンテキストの生きた語と重なる")
+        if "code" in t and code_of(t) is None:
+            hit("schema", str(t["code"]), f"terms[{i}] の code は英小文字の snake_case で書く（例: approval_gate）")
+        if "deprecated_code" in t and (not isinstance(t["deprecated_code"], list)
+                                       or len(deprecated_code_of(t)) != len(t["deprecated_code"])):
+            hit("schema", t["term"], f"terms[{i}] の deprecated_code は英小文字の snake_case の文字列の配列で書く")
+        for w in deprecated_code_of(t):
+            if w in codes_by_ctx.get(t["context"], set()):
+                hit("schema", w, f"terms[{i}] の廃止した識別子が同じコンテキストの生きた識別子と重なる")
+        if code_of(t):
+            ckey = (t["context"], code_of(t))
+            if ckey in code_seen:
+                hit("schema", code_of(t),
+                    f"コンテキスト {t['context']} で terms[{code_seen[ckey]}] と terms[{i}] が同じ識別子")
+            else:
+                code_seen[ckey] = i
         key = (t["context"], t["term"])
         if key in seen:
             hit("duplicate", t["term"], f"コンテキスト {t['context']} で terms[{seen[key]}] と terms[{i}] が同じ語")
@@ -336,6 +383,85 @@ def text_findings(rel: str, text: str, wanted: set[int] | None, g: dict, decl: D
             items.append({"rule": "deprecated", "path": rel, "line": n, "term": m.group(0),
                           "detail": f"廃止した語。{replacement(g, m.group(0))} と書く"})
     return items
+
+
+def mask_comments(lines: list[str], suffix: str) -> list[str]:
+    """コードの行のコメントを空白に置き換える。`#` は .py / .sh（.sh は語の頭だけ）、`//` と `/* */` は .js / .ts。
+    文字列の内側の記号はコメントとみなさない（`"--cart"` の識別子は残す）。行をまたぐ文字列（.py の三連引用符、
+    .js / .ts のバッククォート、.sh の引用）は次の行へ持ち越す。.sh は引用の外の `\\` で次の 1 文字を飛ばし、
+    `'` の内側の `\\` はエスケープとみなさない。.py / .js / .ts の通常の引用も、行末の `\\` で改行を
+    エスケープしたときは次の行へ持ち越す。"""
+    hash_style, sh = suffix in (".py", ".sh"), suffix == ".sh"
+    opens = {".py": ('"""', "'''", '"', "'"), ".sh": ('"', "'")}.get(suffix, ("`", '"', "'"))
+    multiline = {'"', "'"} if sh else {'"""', "'''", "`"}
+    out, block, quote = [], False, None
+    for line in lines:
+        chars, i, escaped_eol = list(line), 0, False
+        while i < len(line):
+            if block:
+                end = line.find("*/", i)
+                stop = len(line) if end < 0 else end + 2
+                chars[i:stop] = " " * (stop - i)
+                block, i = end < 0, stop
+                continue
+            c = line[i]
+            if quote:
+                if c == "\\" and not (sh and quote == "'"):
+                    escaped_eol, i = i + 1 == len(line), i + 2
+                elif line.startswith(quote, i):
+                    i, quote = i + len(quote), None
+                else:
+                    i += 1
+                continue
+            if sh and c == "\\":
+                i += 2
+                continue
+            opened = next((q for q in opens if line.startswith(q, i)), None)
+            if opened:
+                i, quote = i + len(opened), opened
+                continue
+            if (c == "#" and hash_style and (suffix == ".py" or i == 0 or line[i - 1] in " \t;|&(")) \
+                    or (not hash_style and line.startswith("//", i)):
+                chars[i:] = " " * (len(line) - i)
+                break
+            if not hash_style and line.startswith("/*", i):
+                chars[i:i + 2], block, i = "  ", True, i + 2
+                continue
+            i += 1
+        if quote not in multiline and not escaped_eol:
+            quote = None
+        out.append("".join(chars))
+    return out
+
+
+def code_findings(rel: str, text: str, wanted: set[int] | None, g: dict, dep_re, live_re) -> list[dict]:
+    """コードの行から、廃止した識別子とその書き方を変えた形を拾う。生きた識別子の内側とコメントの中の出現は当てない。"""
+    items = []
+    for n, line in enumerate(mask_comments(text.splitlines(), Path(rel).suffix), 1):
+        if wanted is not None and n not in wanted:
+            continue
+        spans = [m.span() for m in live_re.finditer(line)] if live_re else []
+        for m in dep_re.finditer(line):
+            s, e = m.span()
+            if any(a <= s and e <= b for a, b in spans):
+                continue
+            items.append({"rule": "deprecated_code", "path": rel, "line": n, "term": m.group(0),
+                          "detail": f"廃止した識別子。{code_replacement(g, m.group(0))} と書く"})
+    return items
+
+
+def code_replacement(g: dict, form: str) -> str:
+    """廃止した識別子の出た書き方に合わせて、生きた識別子を同じ書き方で返す（PascalCase で出たら PascalCase）。"""
+    names = []
+    for t in terms_of(g):
+        if not code_of(t) or not isinstance(t.get("term"), str):
+            continue
+        for w in deprecated_code_of(t):
+            hits = [live for dep, live in zip(spellings(w), spellings(code_of(t))) if dep == form]
+            if hits:
+                names.append(f"{hits[0]}（{t['term']}）")
+                break
+    return " / ".join(dict.fromkeys(names)) or "用語集の識別子"
 
 
 def replacement(g: dict, word: str) -> str:
@@ -528,12 +654,15 @@ def cmd_check(a):
     root = Path(a.root)
     decl = load_declaration(root)
     if decl is None:
-        emit(result(TOOL, "ok", f"宣言が無い（{DECLARATION}）。語のチェックをしない"))
+        emit(result(TOOL, "ok", f"宣言が無い（{DECLARATION}）。用語チェックをしない"))
     g = load_glossary(decl)
     items = structure_findings(g, decl) + stale_findings(g, decl)
     if a.rules == "all" and (a.diff or a.file):
         dep_words = {w for t in terms_of(g) for w in deprecated_of(t) if len(w) >= 2} - live_words(g)
         dep_re, live_re = word_pattern(dep_words), word_pattern(live_words(g))
+        live_forms = {f for t in terms_of(g) if code_of(t) for f in code_forms(code_of(t))}
+        dep_forms = {f for t in terms_of(g) for w in deprecated_code_of(t) for f in code_forms(w)} - live_forms
+        dep_code_re, live_code_re = word_pattern(dep_forms), word_pattern(live_forms)
         targets: list[tuple[str, str, set[int] | None]] = []
         if a.file:
             for f in a.file:
@@ -545,13 +674,17 @@ def cmd_check(a):
                 targets.append((f, text, None))
         else:
             for rel, lines in sorted(added_lines(root, a.diff).items()):
-                if rel == decl.document or not matches(rel, decl.paths):
+                if rel == decl.document or not (rel.endswith(CODE_SUFFIXES) or matches(rel, decl.paths)):
                     continue
                 p = root / rel
                 if p.is_file():
                     targets.append((rel, p.read_text(encoding="utf-8", errors="replace"), lines))
         for rel, text, wanted in targets:
             if a.file and (root / decl.document).resolve() == Path(rel).resolve():
+                continue
+            if rel.endswith(CODE_SUFFIXES):
+                if dep_code_re is not None:
+                    items += code_findings(rel, text, wanted, g, dep_code_re, live_code_re)
                 continue
             items += text_findings(rel, text, wanted, g, decl, dep_re, live_re)
     for it in items:

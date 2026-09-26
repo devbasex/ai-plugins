@@ -47,7 +47,7 @@ issue のことではない。
 
 `python3 "$SCRIPTS/glossary.py" gate --mode <モード>` を打つ（`$SCRIPTS` の決め方は `development-workflow` の
 `references/scripts-lookup.md`）。**0 以外なら設計へ進まない。** 出力の `items` の 3 行（`init` のコマンド・候補の
-集め方・`requirements-design` の手順 0）を示して止まる。1 は宣言か用語集が無い、2 は壊れている。
+集め方・`requirements-design` の手順 0）を示して止まる。1 は用語集の設定か用語集が無い、2 は壊れている。
 ほかのモードは 0 を返し、この手順で止まらない。
 
 ### 1. 触る領域を決める
@@ -117,17 +117,17 @@ issue のことではない。
 
 **この手順を行うのは、設計 Pull Request が必須または任意のモードだけである**（「設計の
 書き先」の表）。`light` と `operation` は独立した設計文書を作らないため、この手順と、次節の
-`document-restructuring`、進行の記録の「ドキュメントレビュー」を通らない。
+`document-restructuring`、進捗記録の「ドキュメントレビュー」を通らない。
 
 `standard` では、**実装より先に設計をレビューへ通す**。設計の誤りを実装した
 後で直す費用が大きいためである。
 
-**出す前に、要求の写しが課題の本文と一致しているかを確かめる。**
+**出す前に、仕様のコピーが課題の本文と一致しているかを確かめる。**
 `python3 "$SCRIPTS/spec-copy.py" check <課題> issues/issue-<番号>-requirements.md` が 0 であること。1 なら
-本文が正なので、`spec-copy.py write` で写しを作り直す。
+本文が正なので、`spec-copy.py write` でコピーを作り直す。
 
-設計 PR の cross-review は、1 ラウンド目でドメインモデルの節だけを見て（モデルの段）、2 ラウンド目以降で
-残りを見る（詳細の段）。関門 1 は詳細の段の後の 1 回だけである。
+設計 PR の cross-review は、1 ラウンド目でドメインモデルの節だけを見て（モデルレビュー）、2 ラウンド目以降で
+残りを見る（詳細レビュー）。ゲート 1 は詳細レビューの後の 1 回だけである。
 
 ```text
 pr → cross-review → merged → worktree（実装用に作り直す）
@@ -145,7 +145,7 @@ pr → cross-review → merged → worktree（実装用に作り直す）
 マージした時点で課題が閉じ、実装の工程が残っていることが課題の一覧から見えなくなる。課題を
 指すときは番号だけを書く。
 
-**マージした後、実装は新しい作業ツリーで行う。** `merged` が設計のブランチと作業ツリーを消す
+**マージした後、実装は新しい worktree で行う。** `merged` が設計のブランチと worktree を消す
 ため、そのまま実装を続けられない。`worktree` を実装用のブランチ名で呼び直す。
 
 ## 設計で重視する 4 点
@@ -189,10 +189,10 @@ API の記述を求めない。
 
 ## 進行を記録する
 
-**契機は 2 つあり、別々の時点で 1 つずつ記録のコマンドを打つ。** 手順 1（触る領域を決める）に
+**契機は 2 つあり、別々の時点で 1 つずつ進捗記録を打つ。** 手順 1（触る領域を決める）に
 入るときに 1 つ目、手順 5（設計 Pull Request を出す）に入るときに 2 つ目を打つ。issue の本文の
 `## 進行` とボードの両方に残る（`$SCRIPTS` の決め方は `development-workflow` の
-`references/scripts-lookup.md`。3 層では起動指示の「記録のコマンド」をそのまま使う）。
+`references/scripts-lookup.md`。3 層では起動指示にある進捗記録のコマンドをそのまま使う）。
 
 ```bash
 bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "設計"

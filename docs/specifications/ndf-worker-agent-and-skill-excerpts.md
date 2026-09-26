@@ -1,9 +1,9 @@
-# サブエージェントに Skill 本文を読ませず、仕事を分ける器を選ぶ
+# サブエージェントに Skill 本文を読ませず、仕事を渡す実行方式を選ぶ
 
 3 層（conductor → supervisor → worker）のサブエージェントに、Skill の本文を丸ごと読ませない。
-supervisor は進行を記録のコマンド 1 行で残し、worker は Skill と Agent のツールを外した
+supervisor は進行を進捗記録 1 行で残し、worker は Skill と Agent のツールを外した
 エージェント定義 `ndf:worker` で動き、要る手順は起動指示に写した抜粋で受け取る。あわせて、
-仕事を別の文脈・別のプロセスへ渡すときの器を 1 つの表から選び、小さな作業にはサブエージェントを
+仕事を別の文脈・別のプロセスへ渡すときの実行方式を 1 つの表から選び、小さな作業にはサブエージェントを
 起こさない。この文書は、構成・入出力の契約・規則と、それぞれをそう決めた理由を残す。
 
 **規約は Skill の文書が正である。** 起動指示の雛形・規則の本文・比較表をここへ書き写さない。
@@ -11,18 +11,18 @@ supervisor は進行を記録のコマンド 1 行で残し、worker は Skill �
 | 何を読むか | 正本 |
 | --- | --- |
 | conductor → supervisor / supervisor → worker の起動指示の雛形と守る規則、委譲の線 | `plugins/ndf/skills/development-workflow/references/agent-layers.md` |
-| 器の比較表、仕事ごとの選び方、小さな作業の線引き、サブエージェントの Tool を定義で絞る理由 | `plugins/ndf/skills/development-workflow/references/work-vessels.md` |
+| 実行方式の比較表、仕事ごとの選び方、小さな作業の線引き、サブエージェントの Tool を定義で絞る理由 | `plugins/ndf/skills/development-workflow/references/work-vessels.md` |
 | 抜粋の形・置き場所・入れるもの / 入れないもの・上限を超えたときの扱い | `plugins/ndf/skills/EXCERPTS.md` |
-| 記録のコマンドのキーと打つ時点、「ミッションを閉じる」手順 | `plugins/ndf/skills/progress-tracking/SKILL.md`（抜粋は `references/excerpt.md`） |
+| 進捗記録のキーと打つ時点、「ミッションを閉じる」手順 | `plugins/ndf/skills/progress-tracking/SKILL.md`（抜粋は `references/excerpt.md`） |
 | worker のエージェント定義 | `plugins/ndf/agents/worker.md` |
 
 ## 概要
 
 **例（設計のフェーズの supervisor が 1 工程を記録する）。** conductor は `development-workflow` を
-読んでモードを判定し、`$SCRIPTS` を解いた絶対パスで起動指示の「記録のコマンド」を書く。
+読んでモードを判定し、`$SCRIPTS` を解いた絶対パスで起動指示の「進捗記録」を書く。
 
 ```text
-記録のコマンド: bash "/home/u/.claude/plugins/cache/ai-plugins/ndf/10.17.1/scripts/projects-sync.sh" <課題番号> <キー> "<値>"
+進捗記録: bash "/home/u/.claude/plugins/cache/ai-plugins/ndf/10.17.1/scripts/projects-sync.sh" <課題番号> <キー> "<値>"
 ```
 
 supervisor は設計の工程に入った時点で `bash "<絶対パス>/projects-sync.sh" 828 stage "設計"` を
@@ -34,46 +34,46 @@ supervisor は設計の工程に入った時点で `bash "<絶対パス>/project
 **背景は #827 の実測である。** 2026-09-20 以降のサブエージェント 156 件で、Skill 本文は持ち越し
 量の 16% を占めた。読み込みの多い Skill のうち、supervisor / worker が本文の大半を使わないのは
 `progress-tracking`（40 回 × 7,649）と `development-workflow`（28 回 × 10,679）の 2 つだった。
-また、同じ種類の仕事で渡す器が回ごとに割れ、小さな作業にもサブエージェントの固定費を
+また、同じ種類の仕事で渡す実行方式が回ごとに割れ、小さな作業にもサブエージェントの固定費を
 払っていた（#680）。
 
-**工程の Skill の起動は減らさない。** supervisor が `requirements-design` / `design` / `pr` /
+**工程 Skill の起動は減らさない。** supervisor が `requirements-design` / `design` / `pr` /
 `cross-review` などを起動するのはフェーズの仕事そのものである。外すのは、工程の外から読まされる
 `development-workflow`（振り分けは conductor が済ませている）と `progress-tracking`（使うのは
-1 行）と、worker が読む Skill である。工程の Skill の本文を縮めるのは #845 の子が行う。
+1 行）と、worker が読む Skill である。工程 Skill の本文を縮めるのは #845 の子が行う。
 
 ## 用語
 
 | 用語 | 意味 |
 | --- | --- |
 | Skill 本文の読み込み | Skill ツールで Skill を起動すること、または `SKILL.md` を Read すること。どちらも本文全体が文脈に載る |
-| 工程の Skill | `development-workflow` の工程表が起動する Skill |
-| 工程の外の Skill | 工程表に載らず、どの工程からも呼ばれる Skill（`progress-tracking` / `out-of-scope` など）と、工程の振り分けを持つ `development-workflow` |
-| 記録のコマンド | `projects-sync.sh <課題番号> <キー> <値>` の 1 行。issue の本文・ボード・通過記録へ同時に残る |
+| 工程 Skill | `development-workflow` の工程表が起動する Skill |
+| 横断 Skill | 工程表に載らず、どの工程からも呼ばれる Skill（`progress-tracking` / `out-of-scope` など）と、工程の振り分けを持つ `development-workflow` |
+| 進捗記録 | `projects-sync.sh <課題番号> <キー> <値>` の 1 行。issue の本文・ボード・通過記録へ同時に残る |
 | 抜粋 | Skill の本文から、呼ぶ側が要る部分だけを取り出したもの。形は「呼び出し・結果の読み方・判断の基準」 |
-| 器 | 仕事を渡す先の実行の形。会話の中 / サブエージェント / CLI 実行 / 最小構成の `claude -p` / スクリプト（背景の bash を含む）の 5 つ |
-| 固定費 | 器を 1 つ起こすたびに、仕事の前に読む量（システムプロンプト・ツール定義・指示）。`context-window.md` の定義と同じ |
+| 実行方式 | 仕事を渡す先の実行の形。インライン実行 / サブエージェント / CLI 実行 / 最小構成の `claude -p` / スクリプト（背景の bash を含む）の 5 つ |
+| 固定費 | 実行を 1 つ起こすたびに、仕事の前に読む量（システムプロンプト・ツール定義・指示）。`context-window.md` の定義と同じ |
 
 ## 構成要素
 
 | 要素 | 責務 |
 | --- | --- |
-| `plugins/ndf/scripts/projects-sync.sh` | **記録のコマンドの入口。** 引数をチェックした後、`stage` / `mode` / `worktree` / `plan` ではボードの宣言があってもなくても先に `progress-record.sh` を呼んで issue の本文を更新し、その後でボードを更新する。`status` はボードだけに書く |
-| `plugins/ndf/scripts/progress-record.sh` | issue の本文の `## 進行` の更新。工程名の位置に `-` を受けると、チェックリストを変えずに見出し行（モード・作業ツリー・実装計画のファイル）だけを更新する |
+| `plugins/ndf/scripts/projects-sync.sh` | **進捗記録の入口。** 引数をチェックした後、`stage` / `mode` / `worktree` / `plan` ではボードの設定があってもなくても先に `progress-record.sh` を呼んで issue の本文を更新し、その後でボードを更新する。`status` はボードだけに書く |
+| `plugins/ndf/scripts/progress-record.sh` | issue の本文の `## 進行` の更新。工程名の位置に `-` を受けると、チェックリストを変えずに見出し行（モード・ worktree ・実装計画のファイル）だけを更新する |
 | `plugins/ndf/agents/worker.md` | worker のエージェント定義（`ndf:worker`）。frontmatter の `disallowedTools: Skill, Agent` で 2 つのツールを外す |
 | `plugins/ndf/.claude-plugin/plugin.json` | `agents` 配列に `./agents/worker.md` を載せる。agy へは `plugins/ndf/dev.agy/agents`（`../agents` への symlink）で同じ定義が配られる |
 | `development-workflow/references/agent-layers.md` | 起動指示の雛形と守る規則。「委譲の線」から `work-vessels.md` を指す |
-| `development-workflow/references/work-vessels.md` | 器の比較表、仕事ごとの選び方、小さな作業の線引き、Tool を定義で絞る理由 |
+| `development-workflow/references/work-vessels.md` | 実行方式の比較表、仕事ごとの選び方、小さな作業の線引き、Tool を定義で絞る理由 |
 | `development-workflow/references/context-window.md` | 「委譲する対象と、しない対象」から `work-vessels.md` を指す（写さない） |
-| `development-workflow/references/stage-completeness.md` | 用語「進行の記録」に、同じ 1 回で issue の本文も更新されることを書く。通過記録の読み方は変えない |
-| `development-workflow/SKILL.md` | conductor が `$SCRIPTS` を解いてから supervisor を起動し、記録のコマンドを絶対パスで書くこと |
+| `development-workflow/references/stage-completeness.md` | 用語「進捗記録」に、同じ 1 回で issue の本文も更新されることを書く。通過記録の読み方は変えない |
+| `development-workflow/SKILL.md` | conductor が `$SCRIPTS` を解いてから supervisor を起動し、進捗記録を絶対パスで書くこと |
 | `plugins/ndf/skills/EXCERPTS.md` | 抜粋の規約。`AUTHORING.md` から 1 文で指す（`AUTHORING.md` は分割の基準の 500 行に達しているため別ファイルにした） |
-| `progress-tracking/SKILL.md` / `references/excerpt.md` | 「呼び方」を記録のコマンド 1 行にし、抜粋を指す。抜粋は形の見本を兼ねる |
-| 工程の Skill 20 個の末尾の記録の文 | 「この工程に入ったら記録のコマンド `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "<工程名>"` を 1 行打つ」の形。`design` は契機が 2 つあり、2 行を示す |
+| `progress-tracking/SKILL.md` / `references/excerpt.md` | 「呼び方」を進捗記録 1 行にし、抜粋を指す。抜粋は形の見本を兼ねる |
+| 工程 Skill 20 個の末尾の記録の文 | 「この工程に入ったら進捗記録 `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "<工程名>"` を 1 行打つ」の形。`design` は契機が 2 つあり、2 行を示す |
 
 ```mermaid
 flowchart TB
-  C[conductor] -- 起動指示<br/>モード・工程・記録のコマンド --> S[supervisor]
+  C[conductor] -- 起動指示<br/>モード・工程・進捗記録 --> S[supervisor]
   S -- "起動指示（ndf:worker）<br/>作業・手順の抜粋" --> W[worker]
   S -- 1 行 --> PS[projects-sync.sh]
   PS --> PR[progress-record.sh]
@@ -81,7 +81,7 @@ flowchart TB
   PS --> BD[(ボード)]
   H[PreToolUse hook] -. コマンドを観測 .-> PS
   H --> ST[(通過記録)]
-  S -. 器を選ぶ .-> WV[work-vessels.md]
+  S -. 実行方式を選ぶ .-> WV[work-vessels.md]
   EX[excerpt.md] -. 写す .-> C
   EX -. 写す .-> S
 ```
@@ -90,20 +90,20 @@ flowchart TB
 
 ### 常に成り立つ条件
 
-- **記録のコマンドの失敗で工程を止めない。** 呼び出し側の誤り（知らないキー・工程表に無い値・
+- **進捗記録の失敗で工程を止めない。** 呼び出し側の誤り（知らないキー・工程表に無い値・
   引数の不足）だけが終了コード 2 で、それ以外はすべて 0 で終わる。`progress-record.sh` が
   失敗してもボードの更新へ進む
 - **引数のチェックは何かを書く前に行う。** 値の誤りで 2 を返すときに、issue の本文だけが書かれた
   状態を作らない
-- **記録のコマンドは 1 回の Bash 実行に 1 件である。** 通過記録は 1 回の実行の最初の記録しか
+- **進捗記録は 1 回の Bash 実行に 1 件である。** 通過記録は 1 回の実行の最初の記録しか
   読まない
 - **supervisor は `development-workflow` を起動しない。** `progress-tracking` を起動するのは、
-  終わりの工程で「ミッションを閉じる」手順を行うときだけである
+  最終工程で「ミッションを閉じる」手順を行うときだけである
 - **worker は Skill を起動せず、`SKILL.md` を読まない。** 起動指示が Skill の起動そのものを
   手順として渡したときだけ、その 1 つを起動してよい。起動してよいかは起動指示を書く側が決める
 - **抜粋の正本は本文である。** 抜粋に本文に無い規則を置かない
 
-### 記録のコマンド
+### 進捗記録
 
 入口を `projects-sync.sh` にしたのは、通過記録がこのコマンドを観測して積むためである。
 入口を変えなければ hook の照合と `stage-completeness.md` の「変わらない 4 つの契約」を変えずに、
@@ -119,18 +119,18 @@ projects-sync.sh <課題番号> <キー> <値>
 | --- | --- | --- | --- | --- |
 | `stage` | 工程に入るたび（課題ごと） | `progress-record.sh <課題> "<値>"`（チェックを付ける） | 工程のフィールド | 工程を積む |
 | `mode` | フェーズの最初の工程で 1 度 | `progress-record.sh <課題> - --mode <値>`（見出し行だけ） | モードのフィールド | モードを書く |
-| `worktree` | 作業場所の用意の後に 1 度 | `progress-record.sh <課題> - --worktree <値>` | 作業ツリーのフィールド | 読まない |
+| `worktree` | 作業場所の用意の後に 1 度 | `progress-record.sh <課題> - --worktree <値>` | worktree のフィールド | 読まない |
 | `plan` | 計画の後に 1 度 | `progress-record.sh <課題> - --plan <値>` | 実装計画のファイルのフィールド | 読まない |
 | `status` | 「ミッションを閉じる」だけ | 書かない | Status | 読まない |
 
-見出し行だけを更新するときは、既にある見出し行のモード・作業ツリー・実装計画のファイルのうち
+見出し行だけを更新するときは、既にある見出し行のモード・ worktree ・実装計画のファイルのうち
 渡さなかったものを引き継ぐ。
 
 | 条件 | 終了コード | 出力 |
 | --- | --- | --- |
-| issue の本文を書き換えた | 0 | `stage` は `#<課題> 進行 = <工程>`、他のキーは `#<課題> 進行の見出し = モード: …`。ボードの宣言があればボードの行が続く |
-| 同じ値を記録し直した（issue の本文が変わらない） | 0 | issue の本文の行は出ない。ボードの宣言があればボードの行だけが出る |
-| ボードの宣言が無い | 0 | issue の本文の行だけ |
+| issue の本文を書き換えた | 0 | `stage` は `#<課題> 進行 = <工程>`、他のキーは `#<課題> 進行の見出し = モード: …`。ボードの設定があればボードの行が続く |
+| 同じ値を記録し直した（issue の本文が変わらない） | 0 | issue の本文の行は出ない。ボードの設定があればボードの行だけが出る |
+| ボードの設定が無い | 0 | issue の本文の行だけ |
 | `gh` が無い | 0 | 出力なし。issue の本文もボードも書かない |
 | issue を取得できない | 0 | issue の本文の行は出ない。ボードの更新は続ける |
 | ボードが上限・ボードにアイテムを追加できない | 0 | `NOTE:` の 1 行 |
@@ -142,11 +142,11 @@ projects-sync.sh <課題番号> <キー> <値>
 ### supervisor の起動指示
 
 `agent-layers.md` の「conductor → supervisor」の `prompt` は 9 項目と守る規則 10 個を持つ。
-この仕様が足した項目は「記録のコマンド」である。
+この仕様が足した項目は「進捗記録」である。
 
 | 項目 | 中身 |
 | --- | --- |
-| 記録のコマンド | コマンドの頭 `bash "<絶対パス>/projects-sync.sh" <課題番号> <キー> "<値>"` と、キー（`stage` / `mode` / `worktree` / `plan`）ごとの打つ時点。conductor が `$SCRIPTS` を解いた絶対パスを二重引用符で囲んで書く。打つ時点は `progress-tracking` の抜粋の「呼び出し」を写す |
+| 進捗記録 | コマンドの頭 `bash "<絶対パス>/projects-sync.sh" <課題番号> <キー> "<値>"` と、キー（`stage` / `mode` / `worktree` / `plan`）ごとの打つ時点。conductor が `$SCRIPTS` を解いた絶対パスを二重引用符で囲んで書く。打つ時点は `progress-tracking` の抜粋の「呼び出し」を写す |
 
 - **`$SCRIPTS` は conductor が解く。** 解決は `scripts-lookup.md` の長いコードブロックで、
   supervisor がそのたびに読むと本文を外した効果の一部が戻る。conductor は `development-workflow` を
@@ -162,8 +162,8 @@ conductor の起動指示と、それを写した手順が「10 個」と数で�
 
 | # | 規則 |
 | --- | --- |
-| 3 | 工程に入った時点で起動指示の「記録のコマンド」を課題ごとに 1 回打つ。1 回の Bash 実行に 1 件。`development-workflow` を起動しない。ミッションを閉じるときだけ `progress-tracking` を起動して本文の手順に従う |
-| 7 | 委譲してよい作業は worker へ出し、委譲しない 5 つは自分で行う。小さな作業は worker へ出さずに会話の中で行う（`work-vessels.md` の線引き） |
+| 3 | 工程に入った時点で起動指示の「進捗記録」を課題ごとに 1 回打つ。1 回の Bash 実行に 1 件。`development-workflow` を起動しない。ミッションを閉じるときだけ `progress-tracking` を起動して本文の手順に従う |
+| 7 | 委譲してよい作業は worker へ出し、委譲しない 5 つは自分で行う。小さな作業は worker へ出さずにインライン実行にする（`work-vessels.md` の線引き） |
 
 「ミッションを閉じる」手順は `progress-tracking` の本文に残る。#856 がこれを `mission-close.py` へ
 移した時点で、この例外も要らなくなる。
@@ -171,17 +171,17 @@ conductor の起動指示と、それを写した手順が「10 個」と数で�
 ### worker の起動指示と定義
 
 `agent-layers.md` の「supervisor → worker」は `subagent_type: ndf:worker` を指し、`prompt` は
-作業・入力・手順・返す形・置き場所の 5 項目と守る規則 6 個を持つ。
+作業・入力・手順・返す形・置き場所の 5 項目と守る規則 7 個を持つ。
 
 | 項目 | 中身 |
 | --- | --- |
 | 手順 | 作業に要る手順の抜粋（呼び出し・結果の読み方・判断の基準）。抜粋の元の Skill の `references/excerpt.md` を写す。抜粋が無い Skill の手順が要るときは、supervisor が要る段落だけを写す |
-| 置き場所 | 長い出力と報告の複製を書くファイルの絶対パス。supervisor が必ず渡し、worker は複製を書き終えた後に完了の目印 `<置き場所>.done` を作る（#901。理由は [待ち方の仕様](ndf-token-waits-and-context-cut.md) の「途中の通知を受けたとき」） |
+| 置き場所 | 長い出力と報告コピーを書くファイルの絶対パス。supervisor が必ず渡し、worker はコピーを書き終えた後に完了マーカー `<置き場所>.done` を作る（#901。理由は [待ち方の仕様](ndf-token-waits-and-context-cut.md) の「中間通知を受けたとき」） |
 
 worker の規則 6 は「Skill を起動しない。`SKILL.md` を読まない。手順は起動指示の『手順』に従い、
 足りないときは `結果: 判断が要る` で返す。起動指示が Skill の起動そのものを手順として渡したとき
-だけ、その 1 つを起動してよい」である。worker が自分の判断で工程の Skill を起動すると、進行の
-記録・確認の手順・関門の判断のように worker が持たない責務が worker の文脈で動く。「必須」の手順が
+だけ、その 1 つを起動してよい」である。worker が自分の判断で工程 Skill を起動すると、進行の
+記録・確認の手順・承認ゲートの判断のように worker が持たない責務が worker の文脈で動く。「必須」の手順が
 担当の判断で置き換わった前例（#676）があるため、判断を worker に任せない。
 
 「委譲の線」の `修正` は「レビューの指摘の修正とコミット。送る（push）のは起動した側」である。
@@ -209,7 +209,7 @@ disallowedTools: Skill, Agent
 - **`SKILL.md` の Read は定義では塞げない。** worker は抜粋を読むために `skills/` 配下の Read を
   要し、Read をパスで分ける手段は定義に無い。規則 6 の文面で縛り、起動指示の「手順」に抜粋を
   写して渡すことで読む理由を無くす
-- **hook で Skill の起動を拒む形は採らない。** hook の入力から起動元の worker を見分けられるかを
+- **hook で Skill の起動を拒む形は採らない。** hook の入力から呼び出し元の worker を見分けられるかを
   確かめておらず、定義の 1 行で足りる
 - **worker は専門エージェントの一覧に入れない。** 説明の数は「専門エージェント 8 個と、3 層の
   worker の定義 1 個」と別枠で書く（`README.md` / `plugins/ndf/README.md` /
@@ -235,14 +235,14 @@ disallowedTools: Skill, Agent
 
 | 規約 | 内容 |
 | --- | --- |
-| 目印 | 1 行目の `<!-- ndf-excerpt: <Skill名> -->`。抜粋と本文の一致のチェックが抜粋を見つける起点 |
+| マーカー | 1 行目の `<!-- ndf-excerpt: <Skill名> -->`。抜粋と本文の一致のチェックが抜粋を見つける起点 |
 | 見出し | `## 呼び出し` / `## 結果の読み方` / `## 判断の基準` の 3 つだけ、この順 |
-| 分量 | 40 行以内かつ 2,000 文字以内（目印・見出し・空行を含む） |
+| 分量 | 40 行以内かつ 2,000 文字以内（マーカー・見出し・空行を含む） |
 | 本文から指す | `SKILL.md` に「呼ぶ側へ渡す抜粋は `references/excerpt.md`」の 1 行を置く |
 
 | 入れる | 入れない |
 | --- | --- |
-| worker（または supervisor）がその作業で打つコマンド | 上の層の責務（進行の記録・push・投稿・起票・関門の判断） |
+| worker（または supervisor）がその作業で打つコマンド | 上の層の責務（進捗記録・push・投稿・起票・承認ゲートの判断） |
 | 結果の読み方（出力・終了コード・結果ファイルの形） | 対話の確認（利用者へ問う手順）。worker では「行わない」側に読み替えて書く |
 | その作業の中で下す判断の基準 | 値を解決するコード（`$SCRIPTS` / `$SKILL_DIR` / 起点ブランチ / 起票先）。上の層が解いた値を起動指示の「入力」で渡す |
 | | 例・図・チェックリスト・理由の説明 |
@@ -279,19 +279,19 @@ disallowedTools: Skill, Agent
 テスト環境のコマンドは supervisor が「入力」で渡す。`pr` は push の前に同意が要り、人へ問えない
 worker には渡さない。
 
-### 器の選び方
+### 実行方式の選び方
 
-器の比較表（上の層の文脈・固定費・確実性・止まりにくさ・独立性・資源・観測性・手順の従いやすさの
-8 観点 × 5 つの器）と、仕事ごとの選び方の表は `work-vessels.md` にある。器と #845 の判断の 3 つのレベルの
+実行方式の比較表（上の層の文脈・固定費・確実性・止まりにくさ・独立性・資源・観測性・手順の従いやすさの
+8 観点 × 5 つの実行方式）と、仕事ごとの選び方の表は `work-vessels.md` にある。実行方式と #845 の判断の 3 つの実行レベルの
 対応は次のとおりである。
 
-| 器 | #845 のレベル | 主に渡す仕事 |
+| 実行方式 | #845 の実行レベル | 主に渡す仕事 |
 | --- | --- | --- |
-| 会話の中 | レベル 3（その会話の LLM） | 小さな読解・1 コマンドの実行 |
-| サブエージェント | レベル 3 | 読む量が大きく返す量が小さい読解（worker の `調査` / `集計`）、作業ツリーを書き換える修正（worker の `修正`） |
-| CLI 実行 | レベル 3（別の LLM） | 別の視点のレビュー・提案 |
-| 最小構成の `claude -p` | レベル 2（分類の判断） | 分類の判断 1 つ。#841 が入るまでは選ばず、会話の中で行う |
-| スクリプト | レベル 1 | 決まった手順（進行の記録・集計・チェックの実行・待ち）、600 秒を超える待ち（背景で起動して完了通知を待つ） |
+| インライン実行 | 実行レベル 3（その会話の LLM） | 小さな読解・1 コマンドの実行 |
+| サブエージェント | 実行レベル 3 | 読む量が大きく返す量が小さい読解（worker の `調査` / `集計`）、worktree を書き換える修正（worker の `修正`） |
+| CLI 実行 | 実行レベル 3（別の LLM） | 別の視点のレビュー・提案 |
+| 最小構成の `claude -p` | 実行レベル 2（分類の判断） | 分類の判断 1 つ。#841 が入るまでは選ばず、インライン実行にする |
+| スクリプト | 実行レベル 1 | 決まった手順（進捗記録・集計・チェックの実行・待ち）、600 秒を超える待ち（背景で起動して完了通知を待つ） |
 
 - **比較表は `agent-layers.md` とは別の文書に置く。** `agent-layers.md` に足すと分割の基準の
   500 行を超える。`context-window.md` に足すと、カットポイントと委譲の線と残量を持つ文書の責務が広がる
@@ -301,17 +301,17 @@ worker には渡さない。
 
 ### 小さな作業にサブエージェントを起こさない
 
-**起こす前に 1 件ごとに判定する。** 次のどちらかに当たる作業は worker へ出さず、会話の中で行う。
+**起こす前に 1 件ごとに判定する。** 次のどちらかに当たる作業は worker へ出さず、インライン実行にする。
 
 | # | 条件 | 例 |
 | --- | --- | --- |
-| 1 | 読む量の見込みが、worker の固定費を下回る | 1 つのファイルの数十行を読む、`gh issue view` を 1 回打つ、記録のコマンドを打つ |
+| 1 | 読む量の見込みが、worker の固定費を下回る | 1 つのファイルの数十行を読む、`gh issue view` を 1 回打つ、進捗記録を打つ |
 | 2 | 返す量が読む量と変わらない（結果を上の層がそのまま読む） | 1 つのコマンドの出力を全部読む必要がある確認、短い差分の確認 |
 
 - **線引きは比で書き、固定費の値を書かない。** 固定費はリポジトリとモデルで変わる。導入した先で
   `skill-stats --agents` が測った値を使い、測っていなければ「起こす会話の最初の 1 回の読み込みの
   量」を目安にする。行数やトークン数の閾値で書くと、書いたリポジトリの値が別の環境の値として読まれる
-- **読む量が見込めないときは、会話の中で量だけを測ってから決める**（`wc -l` や件数の問い合わせ）
+- **読む量が見込めないときは、インライン実行で量だけを測ってから決める**（`wc -l` や件数の問い合わせ）
 - **この判定は起こす前の見込みである。** 起こした後の測定で、フェーズの中の小さな worker を束ねるかを
   決めるのは #773 の候補 2 である。この線引きは #773 の測定の入力になるが、#773 の判定を置き換えない
 
@@ -343,27 +343,27 @@ CLI の worker（#760）で Skill を塞ぐ手段は次のとおりで、今の 
 
 ## 運用
 
-- **性能:** 記録のコマンドは、ボードへの問い合わせを分けて呼んでいたときと同じ回数に保つ。issue の
+- **性能:** 進捗記録は、ボードへの問い合わせを分けて呼んでいたときと同じ回数に保つ。issue の
   本文の取得と更新は `progress-record.sh` の 2 回である
-- **対話の会話:** 工程の Skill の末尾の文が 1 行になったため、対話の会話も `progress-tracking` を
+- **対話の会話:** 工程 Skill の末尾の文が 1 行になったため、対話の会話も `progress-tracking` を
   読まずに記録する。`$SCRIPTS` の決め方は `scripts-lookup.md` を読む（#847 が 1 コマンドにする）
 - **切り戻し:** Pull Request を revert すれば戻る。issue の本文とボードに残る値の形は変わらないため、
   データの移行は無い
 
 ## テスト観点
 
-記録のコマンドのテストは `plugins/ndf/scripts/tests/test_projects_sync_record.py`、定義のチェックは
+進捗記録のテストは `plugins/ndf/scripts/tests/test_projects_sync_record.py`、定義のチェックは
 `plugins/ndf/scripts/tests/test_worker_agent.py` にある。`gh` は既存のテストと同じ偽物で置き換える。
 
-- ボードの宣言が無いリポジトリで `stage` を打つと、issue の本文だけが更新されること
-- 宣言があるリポジトリで、issue の本文とボードの両方が更新されること
+- ボードの設定が無いリポジトリで `stage` を打つと、issue の本文だけが更新されること
+- ボードの設定があるリポジトリで、issue の本文とボードの両方が更新されること
 - `mode` でチェックリストが変わらず、見出し行だけが変わること
 - 知らないキー・工程表に無い値で 2 を返し、issue の本文を書かないこと
 - `status` が issue の本文を書かないこと
 - `stage` / `mode` / `worktree` / `plan` の 4 キーそれぞれで、issue の本文が `progress-record.sh` と
   `projects-sync.sh` を別々に呼んだときと同じになること
 - `gh` が無いとき、何も書かず 0 で終わること
-- 通過記録が記録のコマンドの実行を読めること（`plugins/ndf/skills/development-workflow/tests/` の
+- 通過記録が進捗記録の実行を読めること（`plugins/ndf/skills/development-workflow/tests/` の
   既存の `test_stage_check.py` / `test_workflow_guard.py` が変更なしで通る）
 - `worker.md` の frontmatter の `disallowedTools` に `Skill` と `Agent` があり、`plugin.json` の
   `agents` に載っていること。`ndf:worker` を起動すると `ToolSearch select:Skill` が
@@ -372,16 +372,16 @@ CLI の worker（#760）で Skill を塞ぐ手段は次のとおりで、今の 
   起動・読み込みさせる文が無いこと。残ってよいのは conductor 側の説明、「3 層の責務」の表の
   conductor の行、supervisor の規則 3 の禁止の文と「ミッションを閉じる」の例外だけである
 - `grep -rn "この工程に入ったら.*progress-tracking" plugins/ndf/skills/*/SKILL.md` が 0 件で、
-  `design` の「進行を記録する」の節も記録のコマンドの形であること
-- `progress-tracking/references/excerpt.md` が 1 行目の目印と 3 つの見出しを持ち、40 行かつ
+  `design` の「進行を記録する」の節も進捗記録の形であること
+- `progress-tracking/references/excerpt.md` が 1 行目のマーカーと 3 つの見出しを持ち、40 行かつ
   2,000 文字に収まること
 - `work-vessels.md` が `agent-layers.md` と `context-window.md` から指されていること
   （`grep -n "work-vessels.md"`）
 
-効果の数値は、配布後に #827 の計測スクリプトを変更前と同じ条件で回して比べる。計測の期間で
+効果の数値は、リリース後に #827 の計測スクリプトを変更前と同じ条件で回して比べる。計測の期間で
 サブエージェントの件数が変わるため、回数ではなく 1 件あたりの値で比べ、`progress-tracking` と
 `development-workflow` の両方で変更前を下回れば合格とする。他の Skill（`markdown-writing` /
-`cross-review` / `fix` / `pr`）はこの変更では減らない。supervisor が起動する工程の Skill と、
+`cross-review` / `fix` / `pr`）はこの変更では減らない。supervisor が起動する工程 Skill と、
 その下で呼ばれる Skill だからである。
 
 | 値（#827、2026-09-20 以降、5 リポジトリ、サブエージェント 156 件） | 変更前 |
@@ -395,7 +395,7 @@ CLI の worker（#760）で Skill を塞ぐ手段は次のとおりで、今の 
 ## 関連リンク
 
 - [#828](https://github.com/devbasex/ai-plugins/issues/828) / [#680](https://github.com/devbasex/ai-plugins/issues/680)（親は [#827](https://github.com/devbasex/ai-plugins/issues/827)）
-- [#845](https://github.com/devbasex/ai-plugins/issues/845) — 工程の Skill を呼び出しと判断に縮める（抜粋の中身を作る）
+- [#845](https://github.com/devbasex/ai-plugins/issues/845) — 工程 Skill を呼び出しと判断に縮める（抜粋の中身を作る）
 - [#855](https://github.com/devbasex/ai-plugins/issues/855) — Skill の書き方の規約とチェック（抜粋と本文の一致のチェックを持つ）
 - [#888](https://github.com/devbasex/ai-plugins/issues/888) / [#889](https://github.com/devbasex/ai-plugins/issues/889) — 4 ランタイムの可搬性 / 共有する外部の枠
 - [ndf-agent-layers-unattended-run.md](ndf-agent-layers-unattended-run.md) — 3 層の運転

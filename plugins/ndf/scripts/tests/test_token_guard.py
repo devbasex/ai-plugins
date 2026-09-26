@@ -760,3 +760,124 @@ def test_context_outside_relay_reason_has_no_notice(tmp_path, state):
     reason = denied(run(agent(tp), state))
     assert "1 度だけ通る" in reason
     assert "自動で新しい会話へ切り替わる" not in reason
+
+
+# ---------------------------------------------------------------- プランの起動（#1191）
+
+def plan_bash(tp, cmd, session="s1", **extra):
+    p = bash(cmd, **{k: v for k, v in extra.items() if k != "agent_id"})
+    p.update({"session_id": session, "transcript_path": str(tp)})
+    if "agent_id" in extra:
+        p["agent_id"] = extra["agent_id"]
+    return p
+
+
+QUEUE_CMD = "python3 /x/scripts/supervise.py queue --max 3 a.json b.json"
+
+
+@pytest.mark.parametrize("cmd", [
+    QUEUE_CMD,
+    "python3 /x/scripts/supervise.py run plan.json --from 3",
+    "cd /w && python3 '/x/scripts/supervise.py' queue --max 2 a.json",
+    "X=1 nohup python3 \"/x/scripts/supervise.py\" run plan.json",
+    "python3 -u /x/scripts/supervise.py run plan.json",
+    "cat <<EOF > f\ndon't\nEOF\npython3 /x/scripts/supervise.py run plan.json",
+])
+def test_context_over_limit_denies_plan_bash(tmp_path, state, cmd):
+    tp = transcript(tmp_path, 250_000)
+    reason = denied(run(plan_bash(tp, cmd), state))
+    assert reason and "250000" in reason
+    assert denied(run(plan_bash(tp, cmd, session="s2", run_in_background=True), state))
+
+
+@pytest.mark.parametrize("cmd", [
+    "python3 /x/scripts/supervise.py wait /x/done",
+    "python3 /x/scripts/supervise.py new mission --name m --issue 1",
+    "python3 /x/scripts/supervise.py note r.md",
+    "python3 /x/scripts/supervise.py history import",
+    "echo queue",
+    "echo 'python3 /x/scripts/supervise.py queue a.json'",
+    "# python3 /x/scripts/supervise.py run plan.json",
+    "printf '%s\\n' 'supervise.py run を打つ'",
+    'git commit -m "docs: 中断の手順（supervise.py run --from）"',
+    'git commit -m "docs: (supervise.py run --from)"',
+    "gh pr create --body \"$(cat <<'EOF'\npython3 /x/scripts/supervise.py queue a.json\nEOF\n)\"",
+    "cat <<-EOF > f\n\tpython3 /x/scripts/supervise.py queue a.json\n\tEOF\necho ok",
+])
+def test_context_over_limit_passes_other_bash(tmp_path, state, cmd):
+    tp = transcript(tmp_path, 250_000)
+    assert denied(run(plan_bash(tp, cmd, run_in_background=True), state)) is None
+
+
+def test_context_plan_bash_within_limit_or_subagent_passes(tmp_path, state):
+    assert denied(run(plan_bash(transcript(tmp_path, 150_000), QUEUE_CMD), state)) is None
+    tp = transcript(tmp_path, 250_000, name="big.jsonl")
+    assert denied(run(plan_bash(tp, QUEUE_CMD, agent_id="a1"), state)) is None
+
+
+def test_context_plan_bash_once_then_pass(tmp_path, state):
+    tp = transcript(tmp_path, 250_000)
+    assert denied(run(plan_bash(tp, QUEUE_CMD), state))
+    assert denied(run(plan_bash(tp, QUEUE_CMD), state)) is None
+
+
+def test_context_plan_bash_under_relay_keeps_denying(tmp_path, state, relay_dir):
+    tp = transcript(tmp_path, 250_000)
+    env = {"NDF_RELAY_DIR": str(relay_dir)}
+    assert denied(run(plan_bash(tp, QUEUE_CMD), state, env))
+    assert denied(run(plan_bash(tp, QUEUE_CMD), state, env))
+
+
+def test_plan_bash_still_checks_sleep(tmp_path, state):
+    tp = transcript(tmp_path, 150_000)
+    assert denied(run(plan_bash(tp, QUEUE_CMD + "; sleep 600"), state))
+
+
+# ---------------------------------------------------------------- Agent の supervisor への案内（#1191）
+
+def hint(proc):
+    assert proc.returncode == 0, proc.stderr
+    if not proc.stdout.strip():
+        return None
+    spec = json.loads(proc.stdout)["hookSpecificOutput"]
+    assert spec["hookEventName"] == "PreToolUse"
+    assert "permissionDecision" not in spec
+    return spec["additionalContext"]
+
+
+def repo(tmp_path, decl="supervise.json"):
+    root = tmp_path / "repo"
+    (root / "sub").mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    if decl:
+        (root / ".ndf").mkdir()
+        (root / ".ndf" / decl).write_text("{}")
+    return root
+
+
+def sv_agent(tp, cwd, kind="ndf:supervisor", **extra):
+    p = agent(tp, desc="設計: #829", cwd=str(cwd), **extra)
+    p["tool_input"]["subagent_type"] = kind
+    return p
+
+
+@pytest.mark.parametrize("decl", ["supervise.json", "worktree.json"])
+@pytest.mark.parametrize("kind", ["ndf:supervisor", "ndf:supervisor-waits"])
+def test_supervisor_agent_gets_plan_hint(tmp_path, state, decl, kind):
+    tp = transcript(tmp_path, 1000)
+    text = hint(run(sv_agent(tp, repo(tmp_path, decl) / "sub", kind), state))
+    assert text and "supervise.py" in text
+
+
+def test_supervisor_agent_hint_conditions(tmp_path, state):
+    tp = transcript(tmp_path, 1000)
+    assert hint(run(sv_agent(tp, repo(tmp_path, None)), state)) is None
+    root = repo(tmp_path / "b")
+    assert hint(run(sv_agent(tp, root, kind="ndf:worker"), state)) is None
+    assert hint(run(sv_agent(tp, root, agent_id="a1"), state)) is None
+    assert hint(run(sv_agent(tp, root), state, {"NDF_PLAN_HINT": "0"})) is None
+
+
+def test_supervisor_agent_over_limit_is_still_denied(tmp_path, state):
+    tp = transcript(tmp_path, 250_000)
+    assert denied(run(sv_agent(tp, repo(tmp_path)), state))

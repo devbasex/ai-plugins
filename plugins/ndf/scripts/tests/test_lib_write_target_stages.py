@@ -103,3 +103,31 @@ def test_the_public_entry_point_keeps_its_output(
     command: str, base: str, targets: list[str], rc: int,
 ) -> None:
     assert _extract(command, base) == (targets, rc)
+
+
+@pytest.mark.parametrize(
+    ("command", "targets", "rc"),
+    [
+        pytest.param("cp a ~/.local/state/x.md", ["/home/u/.local/state/x.md"], 0, id="tilde_slash"),
+        pytest.param("echo hi > ~", ["/home/u"], 0, id="tilde_alone"),
+        pytest.param("echo hi > ~other/x.md", [], 1, id="tilde_user"),
+        # 引用符・エスケープの中の `~` は展開されず、現在地の下の名前になる。
+        pytest.param('cp a "~/.local/x"', ["/base/~/.local/x"], 0, id="tilde_double_quoted"),
+        pytest.param("cp a '~/.local/x'", ["/base/~/.local/x"], 0, id="tilde_single_quoted"),
+        pytest.param("cp a \\~/.local/x", ["/base/~/.local/x"], 0, id="tilde_escaped"),
+        pytest.param('echo hi > "~"', ["/base/~"], 0, id="tilde_alone_quoted"),
+        # `~` から最初の引用されていない `/` までに引用が 1 つでもあれば展開されない。
+        pytest.param('cp a ""~/.local/x', ["/base/~/.local/x"], 0, id="tilde_after_empty_quote"),
+        pytest.param('cp a ~"/.local/x"', ["/base/~/.local/x"], 0, id="tilde_prefix_quoted"),
+        pytest.param('cp a ~/".local/x"', ["/home/u/.local/x"], 0, id="tilde_quoted_after_slash"),
+        pytest.param('cp "" ~/.local/x', ["/home/u/.local/x"], 0, id="tilde_after_quoted_word"),
+    ],
+)
+def test_a_leading_tilde_is_the_home_directory(
+    command: str, targets: list[str], rc: int, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # bash は引用符の無い語の先頭の `~` を $HOME へ展開する。起点へ継ぎ足すと、
+    # リポジトリの外への書き込みを主ディレクトリの編集として案内する。
+    # `~user` は利用者の家を引かないと決められないため出さない。
+    monkeypatch.setenv("HOME", "/home/u")
+    assert _extract(command, "/base") == (targets, rc)

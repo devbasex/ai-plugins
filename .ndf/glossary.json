@@ -14,7 +14,8 @@
     ],
     "source_paths": [
       "docs/specifications/*.md",
-      "plugins/ndf/skills/*.md"
+      "plugins/*/skills/*.md",
+      "plugins/ndf/scripts/lib/README.md"
     ]
   }
 }

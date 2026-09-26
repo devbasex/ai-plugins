@@ -100,3 +100,39 @@ def test_no_base_is_unreadable(repo):
 def test_unknown_base_is_unreadable(repo):
     p = subprocess.run([PY, str(SCRIPTS / "doc-lint.py"), "--base", "nope"], capture_output=True, text=True, cwd=repo)
     assert p.returncode == 2 and json.loads(p.stdout.strip().splitlines()[-1])["status"] == "stopped"
+
+
+def test_generated_glossary_document_is_skipped(repo):
+    # 用語集の設定の document は glossary.py render の生成物。直すなら正本を直すため見ない
+    write(repo, ".ndf/glossary.json", json.dumps({"version": 1, "format": "json",
+                                                   "source": "docs/g.json", "document": "docs/glossary.md"}))
+    write(repo, "docs/glossary.md", "以前は別の語だった。\n")
+    write(repo, "docs/d.md", "以前は別の語だった。\n")
+    code, out, _ = lint(repo)
+    assert code == 1 and {i["name"] for i in out["items"]} == {"docs/d.md:1"}
+    code, out, _ = lint(repo, "--exclude", "issues/")
+    assert {i["name"] for i in out["items"]} == {"docs/d.md:1"}
+
+
+def test_generated_document_is_matched_exactly_after_normalizing(repo):
+    # 生成物は完全一致で外す。`./` 付きの宣言も git diff のパスと揃え、同じ名前で始まる別の文書は見る
+    write(repo, ".ndf/glossary.json", json.dumps({"version": 1, "format": "json",
+                                                   "source": "docs/g.json", "document": "./docs/glossary.md"}))
+    write(repo, "docs/glossary.md", "以前は別の語だった。\n")
+    write(repo, "docs/glossary.md-notes.md", "以前は別の語だった。\n")
+    code, out, _ = lint(repo)
+    assert code == 1 and {i["name"] for i in out["items"]} == {"docs/glossary.md-notes.md:1"}
+
+
+def test_unreadable_glossary_config_is_ignored(repo, monkeypatch):
+    # 設定が読めない（OSError）ときは生成物の宣言が無いものとして続け、例外で止まらない
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("ndf_doc_lint", SCRIPTS / "doc-lint.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    write(repo, ".ndf/glossary.json", "{}")
+
+    def deny(self, *a, **k):
+        raise PermissionError("denied")
+    monkeypatch.setattr(Path, "read_text", deny)
+    assert mod.generated_documents(repo) == ()

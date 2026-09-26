@@ -13,15 +13,15 @@ allowed-tools:
 
 # クロスレビュー収束ループ
 
-PR を**既定の母集合（claude / codex / kiro とホスト）から選んだ 2 者**にレビューさせ、**新しい指摘が出なくなるまで**
+PR を**既定の参加者プール（claude / codex / kiro とホスト）から選んだ 2 者**にレビューさせ、**新しい指摘が出なくなるまで**
 `/ndf:pr-review` と `/ndf:fix` を自動で回す。
 
-既定の母集合は claude / codex / kiro とホストで、agy は `--include agy` で戻す（#786。agy は
-テストを背景で起動したまま結果を残さずに終わることがある）。そのうち使える者から毎ラウンド 2 席を埋める
-（実装は共通層の `lib/assignment.py`）。**1 者が使えなくても始まり**、使える者が 1 者なら
+既定の参加者プールは claude / codex / kiro とホストで、agy は `--include agy` で戻す（#786。agy は
+テストを背景で起動したまま結果を残さずに終わることがある）。そのうち利用可能な参加者から毎ラウンド 2 スロットを埋める
+（実装は共通ライブラリの `lib/assignment.py`）。**1 者が使えなくても始まり**、利用可能な参加者が 1 者なら
 その者と同じランタイムの 2 つ目で埋める（`docs/05`）。**ホストも輪番に入れる**のは、
 レビュー担当を CLI プロセスとして起動するためである。ホストと同じランタイムでも、ホストの
-会話の作業文脈は持ち込まれない。外したい相手は `--exclude` で名指しする（既定の母集合に無い者の
+会話の作業文脈は持ち込まれない。外したい相手は `--exclude` で名指しする（既定の参加者プールに無い者の
 指定は止めずに無視し、`ℹ` の 1 行で知らせる）。
 
 /goalの引数として、または development-workflow の工程として呼ばれた場合は、新しい指摘が出なくなるまで/cross-reviewを繰り返す。
@@ -35,15 +35,15 @@ PR を**既定の母集合（claude / codex / kiro とホスト）から選ん�
 - [docs/02-fix-and-rotation.md](docs/02-fix-and-rotation.md) — Step 5〜8 (サブエージェント修正 / PR ローテーション / 終了処理)
 - [docs/03-review-output.md](docs/03-review-output.md) — レビュー出力の制約 / CI failure の分類 / アンチパターン / monitor.py の誤検知
 - [docs/04-contracts.md](docs/04-contracts.md) — 状態ファイルの形式と AI への入出力の契約（手順の途中では読まない）
-- [docs/05-pool-and-convergence.md](docs/05-pool-and-convergence.md) — 誰がレビューし、いつ止めるか（母集合・担当の輪番・認証・終了基準の 3 層）
-- [docs/06-evidence.md](docs/06-evidence.md) — 指摘に求める根拠と反証条件、独立発見の規約、効果の測定（4 つの方式と限界）
+- [docs/05-pool-and-convergence.md](docs/05-pool-and-convergence.md) — 誰がレビューし、いつ止めるか（参加者プール・担当の輪番・認証・終了基準の 3 層）
+- [docs/06-evidence.md](docs/06-evidence.md) — 指摘に求める根拠と反証条件、独立発見の規約、効果の測定（4 つの集約方式と限界）
 - [scripts/drive.py](scripts/drive.py) — 収束ループの駆動（LLM が要る地点で pause を返して止まる）
 - [scripts/state.py](scripts/state.py) — state.json 操作。起動・監視・巻き直しは `launch-reviewer.sh` / `monitor.py` / `rotate-pr.sh`、効果の測定は `measure.py`（状態を保存するたびに呼ばれる）
 
 ## 設計方針
 
 長丁場のため、メインの文脈の消費を最小にする。投稿の担い手・修正の担い手・最終スイープ・再開・
-巻き直し・振動・終了基準・母集合の方針は [references/design-principles.md](references/design-principles.md)、
+巻き直し・振動・終了基準・参加者プールの方針は [references/design-principles.md](references/design-principles.md)、
 「メイン」が何を指すかと、この形になっている理由は [references/context-budget.md](references/context-budget.md) にある。
 
 ## 引数
@@ -54,11 +54,11 @@ PR を**既定の母集合（claude / codex / kiro とホスト）から選ん�
 | `--max-rounds N` | 全体最大ラウンド数（PR ローテーションを含む通算） | 設計 PR は `3`、それ以外は `12`（「設計 PR と実装 PR の戦略」） |
 | `--rotate-after K` | この round 数で未収束なら PR ローテーション | `8` |
 | `--rotate-mode light\|squash` | ローテーション方式。`light`: 同ブランチで旧 PR を close → 新 PR (title/body は現状の差分・実装から再生成)。`squash`: squash 統合 + 新ブランチ + `(rotated)` suffix | `light` |
-| `--host claude\|codex\|agy\|kiro` | この収束ループを起動している CLI。母集合には残る（外すなら `--exclude`） | 環境変数から推定。**推定できなければ失敗する** |
-| `--only RUNTIME` | 1 者だけで回す。**そのラウンドの担当を 1 者へ絞り、席の埋め合わせを行わない。** 既定の母集合に無い者（agy）も名指しできる。外した者を指定したときと、その 1 者が確認を通らないときは `init` が弾く | 担当 2 者 |
-| `--exclude NAMES` | 母集合から外す者。カンマ区切りで複数、繰り返しも可。既定の母集合に無い者の指定は止めずに無視し、`ℹ` の 1 行と完了報告の 1 行で知らせる。再開で `none` を渡すと空へ戻す | なし |
-| `--include NAMES` | 母集合に足す者。agy を戻すときに使う。既に母集合にいる者（ホストを含む）を指定しても結果は変わらない（エラーにはしない）。書き方は `--exclude` と同じ | なし |
-| `--require-all` | 確認を通らない者が 1 者でもいれば `init` を失敗させる。全員が揃わないなら始めたくない運用向け | 使える者で始める |
+| `--host claude\|codex\|agy\|kiro` | この収束ループを起動している CLI。参加者プールには残る（外すなら `--exclude`） | 環境変数から推定。**推定できなければ失敗する** |
+| `--only RUNTIME` | 1 者だけで回す。**そのラウンドの担当を 1 者へ絞り、スロットのフォールバックを行わない。** 既定の参加者プールに無い者（agy）も名指しできる。外した者を指定したときと、その 1 者が確認を通らないときは `init` が弾く | 担当 2 者 |
+| `--exclude NAMES` | 参加者プールから外す者。カンマ区切りで複数、繰り返しも可。既定の参加者プールに無い者の指定は止めずに無視し、`ℹ` の 1 行と完了報告の 1 行で知らせる。再開で `none` を渡すと空へ戻す | なし |
+| `--include NAMES` | 参加者プールに足す者。agy を戻すときに使う。既に参加者プールにいる者（ホストを含む）を指定しても結果は変わらない（エラーにはしない）。書き方は `--exclude` と同じ | なし |
+| `--require-all` | 確認を通らない者が 1 者でもいれば `init` を失敗させる。全員が揃わないなら始めたくない運用向け | 利用可能な参加者で始める |
 | `--focus TEXT` | 自動レビュー観点に上乗せして**そのラウンドのレビュー担当 2 者**に渡す追加観点。短い重点チェック向け | なし |
 | `--extra-instructions-file PATH` | 自動レビュー観点に上乗せして**そのラウンドのレビュー担当 2 者**に渡す追加観点を UTF-8 テキストファイルから読む。長いチェックリスト向け | なし |
 | `--verify-command CMD` | 実行検証（Step 2.5）で実行してよいコマンド。**渡さなければ実行検証を行わない** | なし |
@@ -88,11 +88,11 @@ PR を**既定の母集合（claude / codex / kiro とホスト）から選ん�
 
 | | design | code |
 | --- | --- | --- |
-| 収束の条件 | 上限 3 ラウンドで関門 1 へ渡す。**収束を待たない**（指摘の連鎖は文書の修正が生むため、回すほど増える） | 新しい指摘が出なくなるまで |
+| 収束の条件 | 上限 3 ラウンドでゲート 1 へ渡す。**収束を待たない**（指摘の連鎖は文書の修正が生むため、回すほど増える） | 新しい指摘が出なくなるまで |
 | `--max-rounds` を渡さないときの上限 | `3` | `12` |
 | 担当へ渡す差分 | 2 ラウンド目以降は前のラウンドの head からの変更だけ（`git diff <前の head> <今の head>` をプロンプトに書く） | 全差分 |
 | 大きさ | 設計文書 1 本は 1,000 行以下。超えると `init` が文書と行数を標準エラーへ出し、状態ファイルの `design_doc_oversize` に残す（止めない） | 制限なし |
-| レビューの段 | 設計文書に `## ドメインモデル` の節があれば、1 ラウンド目はその節と用語集の差分だけを見る（モデルの段）。2 ラウンド目以降は確定したモデルを前提に残りを見る（詳細の段）。モデルの段の承認では抜けない。観点と状態ファイルの項目は [docs/04-contracts.md](docs/04-contracts.md) の「設計 PR の 2 段」 | 段を持たない |
+| レビューの種類 | 設計文書に `## ドメインモデル` の節があれば、1 ラウンド目はその節と用語集の差分だけを見る（モデルレビュー）。2 ラウンド目以降は確定したモデルを前提に残りを見る（詳細レビュー）。モデルレビューの承認では抜けない。観点と状態ファイルの項目は [docs/04-contracts.md](docs/04-contracts.md) の「設計 PR のモデルレビューと詳細レビュー」 | 分けない |
 
 `--max-rounds` を渡せば、どちらの分類でも渡した値が勝つ。
 
@@ -109,14 +109,14 @@ PR を**既定の母集合（claude / codex / kiro とホスト）から選ん�
 
 ## 事前確認
 
-自分の PR の判定・作業ツリーの分離・agy の作業領域・既存コメントのスナップショットの 4 つは `state.py init` が行う。
+自分の PR の判定・worktree の分離・agy の作業領域・コメントのスナップショットの 4 つは `state.py init` が行う。
 中身と `intent` / `posted_as` の両保持は [docs/04-contracts.md](docs/04-contracts.md) の「事前確認」にある。
 
 ## 全体フロー
 
-1 ラウンドは「2 席の並列レビュー → 根拠の検証 → 判定（`intent` ベース）」で、一方でも REQUEST_CHANGES なら
+1 ラウンドは「2 スロットの並列レビュー → 根拠の検証 → 判定（`intent` ベース）」で、一方でも REQUEST_CHANGES なら
 修正 → 収束チェック（`max-rounds`・振動・CI の失敗・`rotate-after` の巻き直し）→ 次のラウンドへ進む。結果を残さなかった
-席は同じラウンドで 1 度だけ起動し直す。ループを抜けたら（`final` がどの値でも）最終スイープで open thread を 0 にし、
+スロットは同じラウンドで 1 度だけ起動し直す。ループを抜けたら（`final` がどの値でも）最終スイープで open thread を 0 にし、
 `verify-sweep` が GitHub 側の実数で確かめる。
 
 ## 実行
@@ -130,7 +130,7 @@ python3 scripts/drive.py <PR> [--rotate-mode light|squash] [--max-rounds N] [--r
 ```
 
 待ちはコマンドの中で行う（1 ラウンドで 20 分を超えうる）。Claude Code では `run_in_background` で起動し、
-完了通知を 1 回受ける。Codex / Kiro / agy では共通層の `scripts/lib/bg-wait.sh` で背景に起動し、区切った待ちを
+完了通知を 1 回受ける。Codex / Kiro / agy では共通ライブラリの `scripts/lib/bg-wait.sh` で背景に起動し、区切った待ちを
 124 が返るあいだ**別の呼び出しとして**打ち直す。終わると駆動の出力の全体を出し、駆動の終了コードで終わる。
 
 ```bash
@@ -141,7 +141,7 @@ bash ../../scripts/lib/bg-wait.sh wait "$RC"   # 1 回 540 秒以内。124 = ま
 
 待ち方の規約は [waiting.md](../development-workflow/references/waiting.md)、待ちから戻った後に同じ応答で次の手順へ
 進む規則は [agent-layers.md](../development-workflow/references/agent-layers.md) の supervisor の規則にある。
-JSON の形と終了コードの表は共通層の `scripts/lib/drive_pause.py` にある。
+JSON の形と終了コードの表は共通ライブラリの `scripts/lib/drive_pause.py` にある。
 
 | 終了コード（`items[0].pause`） | 止まった地点 | すること |
 | --- | --- | --- |
@@ -183,7 +183,7 @@ JSON の形と終了コードの表は共通層の `scripts/lib/drive_pause.py` 
 
 詳細は PR 上のインラインコメントと state.json に残っているため、本報告では繰り返さない。
 
-この工程に入ったら、起動指示の「記録のコマンド」で `実装レビュー` を 1 行記録する。設計だけを載せた
+この工程に入ったら、起動指示の進捗記録で `実装レビュー` を 1 行記録する。設計だけを載せた
 Pull Request で呼ばれたときは `ドキュメントレビュー` を記録する。
 
 ## 関連

@@ -16,7 +16,7 @@ description: "Write a failing test first, then the smallest implementation that 
 | Skill | 参照している内容 | 未追加のあいだの代替 |
 | --- | --- | --- |
 | `requirements-design` | 受け入れ条件の作り方 | 受け入れ条件を「観測可能・一意・テスト可能」な 1 文へ自分で書き下す |
-| `refactoring` | 構造改善と現状固定テスト | サイクル内の整理にとどめ、構造改善は別タスクへ切り出す |
+| `refactoring` | リファクタリングと現状固定テスト | サイクル内の整理にとどめ、リファクタリングは別タスクへ切り出す |
 | `quality-gates` | 全体テストの実行とカバレッジ閾値の判定 | 対象プロジェクトのカバレッジツール設定に従い、設定がなければ測定値の記録だけ行う |
 
 ## 適用しない対象
@@ -108,7 +108,7 @@ E   ImportError: cannot import name 'validate'   ← 期待と違う。先にこ
 ### 4. 整理する
 
 テストを**通ったまま**保って構造を整える。整理中にテストが落ちたら、整理をいったん戻す。
-コードの兆候起点の本格的な構造改善は `refactoring`※ に委ねる。
+コードの兆候起点の本格的なリファクタリングは `refactoring`※ に委ねる。
 
 ### 5. 次の条件へ進む
 
@@ -161,5 +161,5 @@ E   ImportError: cannot import name 'validate'   ← 期待と違う。先にこ
 - [references/testing-levels.md](references/testing-levels.md) — 単体・結合・契約・端から端までの使い分け
 - `/ndf:out-of-scope` — 対象の外で見つけた課題の起票と、起票先のリポジトリの判断
 
-この工程に入ったら記録のコマンド `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "実装"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「記録のコマンド」を使う）。
+この工程に入ったら進捗記録 `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "実装"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「進捗記録」を使う）。
 
