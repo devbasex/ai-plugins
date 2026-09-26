@@ -10,6 +10,7 @@ import pathlib
 import subprocess
 from typing import Any, Optional
 
+import proc
 import statefile
 
 from . import die
@@ -31,10 +32,6 @@ def default_worktree_base() -> pathlib.Path:
     if env:
         return pathlib.Path(env).resolve()
     return pathlib.Path(tempfile.gettempdir()) / "ndf-worktrees"
-
-
-def repo_slug(repo: str) -> str:
-    return repo.replace("/", "--")
 
 
 def tmp_dir_for(work: pathlib.Path) -> pathlib.Path:
@@ -118,8 +115,11 @@ def git_out(work: str, args: list[str], strip: bool = True) -> Optional[str]:
     状態コードは未 stage の変更で ` M` と先頭が空白になるため、`strip()` すると
     1 行目だけ 1 文字ずれ、切り出したパスの先頭が欠ける。欠けたパスは
     `git add` で `pathspec ... did not match any files` になり、同期が止まる。
+
+    起動はライブラリの `proc.run` が行う。名前と引数の形（語の並びと `strip`）は、ここを使う
+    モジュールのために残す（`proc.git_out` は前後の空白を必ず落とす）。
     """
-    r = subprocess.run(["git", *args], cwd=work, capture_output=True, text=True)
+    r = proc.run(["git", *args], cwd=work, check=False)
     if r.returncode != 0:
         return None
     return r.stdout.strip() if strip else r.stdout.rstrip("\n")

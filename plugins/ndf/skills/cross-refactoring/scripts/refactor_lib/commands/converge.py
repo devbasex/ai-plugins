@@ -56,7 +56,7 @@ from ..verify import (
 
 # ---------- 範囲テスト ----------
 
-def _run(state: dict[str, Any], words: list[str], log: pathlib.Path) -> bool:
+def _run_words(state: dict[str, Any], words: list[str], log: pathlib.Path) -> bool:
     """語の並びをシェルを通さずに走らせる（AC10b）。打ち切りは失敗。"""
     timeout = timeline.state_test_timeout(state)
     code, timed_out = run_with_timeout(list(words), work_dir(state),
@@ -75,7 +75,7 @@ def _run_limited(state: dict[str, Any], items: list[dict[str, Any]]) -> None:
         key = tuple(item.get("command") or [])
         if key not in results:
             log = _log_path(state, item["id"])
-            results[key] = (_run(state, list(key), log), log)
+            results[key] = (_run_words(state, list(key), log), log)
         passed, log = results[key]
         item["status"] = VERIFIED if passed else FAILING
         item["last_log"] = str(log)
@@ -109,7 +109,7 @@ def _revert_shared(
         if not remaining:
             return False
         words = command if command is not None else list(remaining[0].get("command") or [])
-        if _run(state, list(words), _log_path(state, remaining[0]["id"])):
+        if _run_words(state, list(words), _log_path(state, remaining[0]["id"])):
             for item in remaining:
                 item["status"] = VERIFIED
             return True
@@ -290,7 +290,7 @@ def _recheck_whole(path: pathlib.Path, state: dict[str, Any], record: dict[str, 
         record["resolution"] = "narrowed"
         return False
     log = pathlib.Path(state["tmp_dir"]) / "verify-whole-rerun.log"
-    if _run(state, list(record.get("rerun_command") or []), log):
+    if _run_words(state, list(record.get("rerun_command") or []), log):
         record["resolution"] = "fixed"
         for item in items:
             item.pop("whole_test_command", None)
