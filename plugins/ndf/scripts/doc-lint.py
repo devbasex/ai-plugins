@@ -17,6 +17,10 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import deps  # noqa: E402
+
+deps.require("md", "mdtable", "textparse", "pathmatch")  # glossary.py の分を含めて 1 回で入れる（決定 23）
+import md  # noqa: E402
 from step_result import EXIT_UNREADABLE, StepError, emit, main_with, result  # noqa: E402
 import proc  # noqa: E402
 import repo  # noqa: E402
@@ -38,29 +42,15 @@ RULES = {
 DEFAULT_EXCLUDE = ("CHANGELOG.md", "issues/", ".worktrees/", "docs/presentations/")
 
 
-def fenced(lines: list[str]) -> set[int]:
-    """コードブロックの中の行番号（1 始まり）。"""
-    inside, mark, out = False, "", set()
-    for i, line in enumerate(lines, 1):
-        s = line.lstrip()
-        if not inside and (s.startswith("```") or s.startswith("~~~")):
-            inside, mark = True, s[:3]
-            out.add(i)
-        elif inside:
-            out.add(i)
-            if s.startswith(mark):
-                inside = False
-    return out
-
-
 def lint_files(root: Path, files: dict[str, set[int]], all_lines: bool) -> tuple[list[dict], int]:
     items, total = [], 0
     for rel, nums in sorted(files.items()):
         path = root / rel
         if not path.is_file():
             continue
-        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-        skip = fenced(lines)
+        text = path.read_text(encoding="utf-8", errors="replace")
+        lines = text.splitlines()
+        skip = {i for i, inside in enumerate(md.fenced_lines(text), 1) if inside}
         targets = range(1, len(lines) + 1) if all_lines else sorted(nums)
         for n in targets:
             if n in skip or n > len(lines):

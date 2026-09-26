@@ -9,7 +9,9 @@ import re
 import subprocess
 from pathlib import Path
 
-from instructions_lib.model import CheckError, FENCE_RE, ScopeRoot, Source, Target
+import pathmatch
+
+from instructions_lib.model import CheckError, ScopeRoot, Source, Target, code_lines
 from instructions_lib.declaration import Declaration
 
 
@@ -21,15 +23,8 @@ IMPORT_RE = re.compile(r"(?:(?<=^)|(?<=[\s*_~]))@([A-Za-z0-9._\-/~]+)")
 # --- 指示書を集める ----------------------------------------------------------
 
 def _matches_file_pattern(rel: str, patterns: list[str]) -> bool:
-    """`/` を含まない値はファイル名の一致、含む値は根からの相対パスの一致。"""
-    name = rel.rsplit("/", 1)[-1]
-    for pattern in patterns:
-        if "/" in pattern:
-            if rel == pattern:
-                return True
-        elif name == pattern:
-            return True
-    return False
+    """`/` を含まない値はどの階層のファイル名にも、含む値は根からの相対パスに当てる（git の wildmatch）。"""
+    return pathmatch.path_matches(rel, [p if "/" in p else f"**/{p}" for p in patterns])
 
 
 def _expand(value: str, root: Path) -> Path:
@@ -133,16 +128,11 @@ def display_path(target: Target) -> str:
 
 # --- 本文の読み方 ------------------------------------------------------------
 
-def mask_code(lines: list[str]) -> list[str]:
-    """コードブロックとコードスパンを空白へ潰す。**位置は保つ**（行と桁が動かない）。"""
+def mask_code(text: str) -> list[str]:
+    """コードブロックとコードスパンを空白へ潰した行の並び。**位置は保つ**（行と桁が動かない）。"""
     masked: list[str] = []
-    in_fence = False
-    for line in lines:
-        if FENCE_RE.match(line):
-            in_fence = not in_fence
-            masked.append(" " * len(line))
-            continue
-        if in_fence:
+    for line, fenced in zip(text.splitlines(), code_lines(text)):
+        if fenced:
             masked.append(" " * len(line))
             continue
         out: list[str] = []
@@ -164,7 +154,7 @@ def interprets_imports(target: Target, decl: Declaration) -> bool:
 def references(text: str) -> list[tuple[int, str]]:
     """本文から即時読み込みの参照を拾う。返すのは（行番号, 書かれたとおりの名前）。"""
     found: list[tuple[int, str]] = []
-    for number, line in enumerate(mask_code(text.splitlines()), start=1):
+    for number, line in enumerate(mask_code(text), start=1):
         for match in IMPORT_RE.finditer(line):
             name = match.group(1).rstrip("._~")
             if name:
