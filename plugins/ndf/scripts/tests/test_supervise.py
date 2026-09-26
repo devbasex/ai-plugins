@@ -821,7 +821,8 @@ def test_new_mission_writes_waves_in_order(tmp_path):
     check = json.loads(Path(waves["検査"]["plans"][0]).read_text())
     assert check["branch"] == "mission/v10-18" and "Pull Request" not in check
     pr = next(s for s in check["steps"] if s["type"] == "pr")
-    assert pr["base"] == "develop" and "Closes #11" in pr["summary"] and "Closes #12" in pr["summary"]
+    assert pr["base"] == "develop" and "関連: #11 #12" in pr["summary"]
+    assert "Closes" not in pr["summary"]
     assert [s["id"] for s in check["steps"]][:3] == ["collect", "pr", "assess"]
 
 
