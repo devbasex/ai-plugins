@@ -20,7 +20,6 @@ import argparse
 import importlib.util
 import json
 import os
-import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -30,7 +29,7 @@ SKILL = HERE.parent
 LIB = HERE.parents[2] / "scripts" / "lib"
 sys.path.insert(0, str(LIB))
 import drive_pause as dp  # noqa: E402
-from drive_pause import Stop  # noqa: E402
+from drive_pause import Stop, parse_vars  # noqa: E402
 
 TOOL = "cross-review-drive"
 DOCS02 = SKILL / "docs" / "02-fix-and-rotation.md"
@@ -55,20 +54,6 @@ def call(cmd: list[str], env: dict | None = None, cwd: str | None = None) -> tup
     if p.stderr:
         sys.stderr.write(p.stderr)
     return p.returncode, p.stdout
-
-
-def parse_vars(text: str) -> dict:
-    out = {}
-    for line in text.splitlines():
-        try:
-            words = shlex.split(line)
-        except ValueError:
-            continue
-        for w in words:
-            k, sep, v = w.partition("=")
-            if sep and k.isidentifier():
-                out[k] = v
-    return out
 
 
 def review_status(state: dict) -> str:
