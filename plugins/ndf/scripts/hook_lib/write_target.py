@@ -252,16 +252,8 @@ class _Scan:
             words.append(sp.unquote(c))
         i = sp.command_name_index(words)
         name = words[i] if i < len(words) else ""
-        for k, w in enumerate(words):
-            if w == "tee":
-                for a in words[k + 1:]:
-                    if not a.startswith("-"):
-                        self.emit(a, st)
-            elif w == "sed":
-                for f in _sed_inplace_files(words[k + 1:]):
-                    self.emit(f, st)
-            elif w in ("cp", "mv"):
-                self.emit(_cp_mv_destination(words[k + 1:]), st)
+        for v in _command_targets(words):
+            self.emit(v, st)
         # リダイレクトは cd より前の位置で開く（出す順は、語の書き込み先の後）
         self.redirects(rs, st)
         if st.base is not None and name in st.moving:
@@ -311,6 +303,19 @@ def _cd_destination(args: list[str]) -> str:
         else:
             dest = dest or a
     return dest
+
+
+def _command_targets(words: list[str]) -> list[str]:
+    """語の並びから `tee`・`sed -i`・`cp` / `mv` の書き込み先を、語の順に列挙する（正規化の前の字面）。"""
+    out: list[str] = []
+    for k, w in enumerate(words):
+        if w == "tee":
+            out.extend(a for a in words[k + 1:] if not a.startswith("-"))
+        elif w == "sed":
+            out.extend(_sed_inplace_files(words[k + 1:]))
+        elif w in ("cp", "mv"):
+            out.append(_cp_mv_destination(words[k + 1:]))
+    return out
 
 
 def _sed_inplace_files(args: list[str]) -> list[str]:
