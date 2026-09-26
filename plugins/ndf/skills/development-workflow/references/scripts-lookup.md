@@ -11,6 +11,7 @@ SCRIPTS=$(bash "$R/scripts/resolve.sh" scripts fix)           # skills/<Skill名
 ```
 
 見つからなければ理由を標準エラーへ書き、終了コード 3 で終わる（引数の誤りは 2）。
+conductor が `$SCRIPTS` の下で直に使うエントリポイントは [conductor-entrypoints.md](conductor-entrypoints.md) にある。
 
 **この手順の値はボードの記録の外でも使う。** `worktree` は `worktree-setup.sh` /
 `worktree-localenv.sh` / `worktree-testenv.sh` の 3 本を呼ぶ。ボードの説明の中に置くと、
