@@ -1918,6 +1918,27 @@
       "context": "ndf-workflow",
       "meaning": "設計の決める移行の順序の 1 つ分。1 本の PR で閉じる。プランの「ステップ」とは別",
       "pending_source": "issues/issue-1142-requirements.md"
+    },
+    {
+      "term": "使用量の帳簿",
+      "code": "usage_ledger",
+      "context": "ndf-workflow",
+      "meaning": "claude -p の 1 回の呼び出しごとに、版・プラン・ステップ・usage を 1 行で追記する jsonl（usage/<owner>__<repo>.jsonl）",
+      "pending_source": "issues/issue-1142-design.md"
+    },
+    {
+      "term": "ラッパーの束",
+      "code": "relay_bundle",
+      "context": "ndf-relay",
+      "meaning": "~/.claude/ndf/ に版ごとに置く、ラッパーの relay_lib/ と使うライブラリの写し。relay.current が使う束を指す",
+      "pending_source": "issues/issue-1142-design.md"
+    },
+    {
+      "term": "構造チェック",
+      "code": "structure_check",
+      "context": "ndf-workflow",
+      "meaning": "テストを除くスクリプトの行数と、本体の同じ関数・同じ名前で本体の違う関数を構文木で数える継続的統合のチェック",
+      "pending_source": "issues/issue-1142-design.md"
     }
   ]
 }
