@@ -42,6 +42,8 @@
     "thread_ids": ["PRRT_kwDO..."],
     "fixed_in_round": null
   },
+  "review_criteria": {"status": "declared", "focus": ["..."], "error": null,
+                      "reviewer_block": "## 指摘の基準\n..."},
   "sweep": {
     "declared_remaining_open": 0,
     "remaining_open": 0,
@@ -71,7 +73,9 @@
   ],
   "deferred_nits": [
     {"pr": 123, "round": 1, "path": "src/foo.py", "line": 42, "severity": "nit",
-     "summary": "...", "comment_url": "..."}
+     "summary": "...", "comment_url": "..."},
+    {"pr": 123, "round": 1, "path": "docs/a.md", "line": 7, "severity": "minor",
+     "summary": "...", "reply": "直しません。…", "resolve": true, "waived": "doc_mismatch"}
   ],
   "review_findings": [
     {"finding_id": "agy-r1-0", "pr": 123, "round": 1, "agent": "agy",
@@ -222,6 +226,14 @@
 - `review_instructions_by_stage` — 設計 PR のレビューの種類ごとの観点（`{"model": ..., "detail": ...}`）。`model` は
   モデルレビューの観点と手動の観点、`detail` は `review_instructions` と同じ値。`launch-reviewer.sh` がそのラウンドの
   `stage` の値を「追加レビュー観点」へ差し込み、この項目かレビューの種類の無い状態ファイルは `review_instructions` を使う
+- `review_criteria` — 指摘の基準（#1287）。`init` が新規・再開のどちらでも PR の worktree の
+  `.ndf/review.json`（レビューの重点の宣言）を読んで書き直す。`status` は `declared` / `none` /
+  `unreadable`（`error` に理由）、`focus` は重点の名前の列、`reviewer_block` はレビュー担当への節
+  （正本 `scripts/lib/review_criteria.py` が組む）。`launch-reviewer.sh` が `reviewer_block` を指示へ
+  差し込み、空なら宣言を読まない既定の節（基準 3 の無い形）を使う。修正担当は `drive.py` が渡す
+  `CROSS_REVIEW_STATE` から `status` と `focus` を読む。`init` の出力の `REVIEW_FOCUS=<status>` に同じ値が出る
+- `deferred_nits[].waived` — `/ndf:fix` が基準外として見送った指摘の種類。見送りの返信（`reply`）を
+  付けて決着したもので、`report` は残 deferred の一覧から外して件数だけを出す
 - `sweep` — 最終スイープ後の検証結果。`remaining_open` は GitHub 側で数え直した実数で、
   `declared_remaining_open` は結果ファイルの申告値。両者が食い違う場合は実数を採る
 

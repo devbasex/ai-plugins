@@ -7,8 +7,9 @@
 | 投稿の担い手 | **GitHub と git へ書くのはオーケストレーターだけ**。担当は指摘ファイルと結果ファイルを書き、取り込み（`read-result`）が組み立てて投稿キューから送る。修正担当はコミットまでで、送信・返信・決着・まとめは `merge-fix` が行う。書き込みと記録が同じ手順で続くため、担当が途中で止まっても投稿だけが残らない |
 | 投稿の記録 | 参照は送信の応答から、件数は送れたインラインの数から取る。本文は取り込みのプロセスの中だけを通り、メインの応答に載らない |
 | 修正 | **必ず worker（`general-purpose` のサブエージェント）で実行**。メイン context に diff は載せない |
-| ユーザ問い合わせ | 自動判断を最大化（`critical`/`major`/`minor` は自動修正、ループ中の `nit` は deferred） |
-| 取りこぼし防止 | **ループ終了時（approved / max_rounds / oscillation / error いずれも）に最終スイープを必須実行**。`/ndf:fix` を再実行し、残った open review thread（最終 APPROVE ラウンドの minor/nit インラインコメント含む）を **全て解消**。修正可能なものは修正 + push、判断保留 nit も reply + resolveReviewThread して **open thread 0 で終了**。件数は `state.py verify-sweep` が GitHub 側の実数で確認する |
+| 指摘の基準 | **利用者が困る不具合と、処理を悪くする変更をマージの前に止める。仕上げの磨き込みはしない。** 担当が書くのは指摘の基準（正本は `scripts/lib/review_criteria.py`。1 利用者が普通に使う経路の誤動作・2 秘密・認証認可・利用者のデータ・戻せない操作・3 プロジェクトが `.ndf/review.json` で宣言したレビューの重点・4 実装を違えさせる設計の食い違い）に当たるものだけで、重要度は `critical` / `major` である。宣言が無ければ基準 3 は無く、読めなければ基準 1・2・4 で続ける |
+| ユーザ問い合わせ | 自動判断を最大化（**自動で直すのは `critical` / `major` だけ**。`minor` / `nit` は直さず、見送りの返信を付けて閉じる） |
+| 取りこぼし防止 | **ループ終了時（approved / max_rounds / oscillation / error いずれも）に最終スイープを必須実行**。`/ndf:fix` を再実行し、残った open review thread を **全て閉じる**。コードを直すのは `major` 以上が残っていたときだけで、`minor` / `nit` だけならコードを変えずに見送りの返信で閉じる。判断保留も reply + resolveReviewThread して **open thread 0 で終了**。件数は `state.py verify-sweep` が GitHub 側の実数で確認する |
 | 再開時の引継ぎ | 再開の時点で残っていた未解決の指摘は `carried_over` に記録し、**修正の工程を 1 度通すまで収束させない**。増えるラウンドは最大 1 回。通した後の再開では、新しい指摘が出ていなければ抑止しない |
 | 状態の永続化 | `<worktree>/.cross_review/cross-review-pr<番号>-state.json` に集約。中断・再開可能 |
 | 長尺PR対策 | **`--rotate-after` ラウンドで PR をローテーション**（default=light: 同ブランチで PR 巻き直し / squash: 新ブランチ + squash 統合） |
