@@ -4,7 +4,6 @@ claude は NDF_SUPERVISE_CLAUDE の偽物で置き換える。待ちの秒はス
 """
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
 import subprocess
@@ -18,9 +17,8 @@ SCRIPTS = Path(__file__).resolve().parents[1]
 SUPERVISE = SCRIPTS / "supervise.py"
 PY = sys.executable
 
-spec = importlib.util.spec_from_file_location("supervise_slow", SUPERVISE)
-sv = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(sv)
+sys.path.insert(0, str(SCRIPTS))
+from supervise_lib import engine  # noqa: E402
 
 FAKE_CLAUDE = r'''
 import json, os, sys, time
@@ -74,7 +72,7 @@ def probe_of(tmp_path, action, cls="c"):
 def run_plan(tmp_path, steps, slow=None, **extra):
     plan = {"フェーズ": "試験", "課題": [1102], "作業場所": str(tmp_path), "report_interval": 0.4, "steps": steps,
             "slow": {"history": str(tmp_path / "history.jsonl"), **(slow or {})}, **extra}
-    s = sv.Supervisor(plan, tmp_path / "state")
+    s = engine.Engine(plan, tmp_path / "state")
     return s, s.run()
 
 
@@ -134,7 +132,7 @@ def test_judge_stop_stops_plan_with_reason(env, monkeypatch):
     assert "結果: 止まった" in text and "遅れ: 理由の目印 stop" in text
     slow = lines(env, "slow")[-1]
     assert (slow["by"], slow["act"], slow["llm"]["reason"]) == ("llm", "stop", "理由の目印 stop")
-    assert s.results["slow"]["exit"] == 125
+    assert s.state.results["slow"]["exit"] == 125
     assert any("打ち切った（stop）" in a["text"] for a in lines(env, "attention"))
 
 
@@ -155,7 +153,7 @@ def test_judge_fix_goes_to_on_fail(env, monkeypatch):
          "on_fail": "after", "next": "end"},
         {"id": "after", "type": "run", "cmd": f"touch {mark}", "next": "end"}])
     assert mark.exists() and "結果: 完了" in text
-    assert s.results["slow"]["exit"] == 125 and "理由の目印 fix" in s.results["slow"]["text"]
+    assert s.state.results["slow"]["exit"] == 125 and "理由の目印 fix" in s.state.results["slow"]["text"]
 
 
 def test_judge_wait_extends_next_check(env, monkeypatch):

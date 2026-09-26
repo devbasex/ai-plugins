@@ -19,7 +19,7 @@ RELAY = SCRIPTS / "relay.py"
 
 
 def report(phase: str, issues: str, res: str, pr: str, cost: str, reason: str = "無し") -> str:
-    """supervise.py の Supervisor.report と同じ形の報告。"""
+    """supervise_lib/state.py の RunState.write_report と同じ形の報告。"""
     return f"""## フェーズの報告
 
 - フェーズ: {phase}

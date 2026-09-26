@@ -19,7 +19,7 @@ from workflow_helpers import SKILL_DIR, init_repo
 SKILL = SKILL_DIR / "SKILL.md"
 PLUGIN_ROOT = SKILL_DIR.parents[1]
 SCRIPTS_DIR = PLUGIN_ROOT / "scripts"
-COMMON_LIB = SCRIPTS_DIR / "lib" / "worktree-common.sh"
+COMMON_LIB = SCRIPTS_DIR / "lib" / "worktree-declaration.sh"
 
 JUDGE_HEADING = "## 判定の手順"
 STEP0_HEADING = "### 0. "

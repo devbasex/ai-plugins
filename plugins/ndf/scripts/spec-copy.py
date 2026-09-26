@@ -18,12 +18,12 @@ import argparse
 import difflib
 import json
 import re
-import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 from step_result import EXIT_UNREADABLE, EXIT_VIOLATION, StepError, emit, main_with, result  # noqa: E402
+import gh_parts  # noqa: E402
 
 TOOL = "spec-copy"
 PROGRESS = "進行"
@@ -31,16 +31,17 @@ MARKER = "正は課題の本文"
 SECTION = re.compile(r"^##\s+(.*?)\s*$")
 
 
-def fetch(number: str, repo: str | None) -> dict:
-    cmd = ["gh", "issue", "view", str(number), "--json", "title,body"] + (["--repo", repo] if repo else [])
+def fetch_issue(number: str, repo: str | None) -> dict:
+    """課題の題と本文。GraphQL が上限なら `gh_parts.view_json` が REST で読み直す。"""
+    if not str(number).isdigit():
+        raise StepError(f"#{number} の本文を読めない: 課題の番号でない", EXIT_UNREADABLE)
+    r = gh_parts.view_json("issue", int(number), "title,body", repo=repo)
+    if r.returncode == 127:
+        raise StepError(f"gh を起動できない: {r.stderr.strip()[:300]}", EXIT_UNREADABLE)
+    if r.returncode != 0:
+        raise StepError(f"#{number} の本文を読めない: {r.stderr.strip()[:300]}", EXIT_UNREADABLE)
     try:
-        p = subprocess.run(cmd, capture_output=True, text=True)
-    except OSError as e:
-        raise StepError(f"gh を起動できない: {e}", EXIT_UNREADABLE)
-    if p.returncode != 0:
-        raise StepError(f"#{number} の本文を読めない: {p.stderr.strip()[:300]}", EXIT_UNREADABLE)
-    try:
-        data = json.loads(p.stdout)
+        data = json.loads(r.stdout)
     except ValueError as e:
         raise StepError(f"#{number} の本文を読めない: {e}", EXIT_UNREADABLE)
     if not isinstance(data, dict) or not isinstance(data.get("body"), str):
@@ -83,7 +84,7 @@ def normalize(lines: list[str]) -> list[str]:
 
 
 def cmd_write(a):
-    data = fetch(a.issue, a.repo)
+    data = fetch_issue(a.issue, a.repo)
     title = str(data.get("title") or "").strip()
     text = f"# #{a.issue}: {title}\n\n{MARKER}（#{a.issue}）で、この文書はその写しである。" \
            f"`spec-copy.py write` で作り直す。手で直さない。\n\n" + before_progress(data["body"]).lstrip("\n")
@@ -97,7 +98,7 @@ def cmd_write(a):
 
 
 def cmd_check(a):
-    data = fetch(a.issue, a.repo)
+    data = fetch_issue(a.issue, a.repo)
     try:
         copy = Path(a.file).read_text(encoding="utf-8")
     except OSError as e:
