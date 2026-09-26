@@ -211,6 +211,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -513,6 +514,13 @@ def claude_cmd(system: str, tools: str | None, cwd: str, full: bool = False,
     return cmd
 
 
+def claude_kind(system: str, full: bool) -> str:
+    """使用量の帳簿の `kind`（work / full / judge / slow / pr）。system プロンプトで見分ける。"""
+    if full:
+        return "full"
+    return {JUDGE_SYSTEM: "judge", SLOW_SYSTEM: "slow", PR_SYSTEM: "pr"}.get(system, "work")
+
+
 def call_claude(system: str, prompt: str, tools: str | None, cwd: str, timeout: int,
                 full: bool = False, serena: bool = False, resume: str | None = None,
                 env: dict | None = None, tick=None, every: float = TICK) -> dict:
@@ -526,7 +534,8 @@ def call_claude(system: str, prompt: str, tools: str | None, cwd: str, timeout: 
         p = run_ticking(claude_cmd(system, tools, cwd, full, serena, resume), tick, every, input=prompt,
                         cwd=cwd, timeout=timeout, env={**os.environ, **env} if env else None)
     except subprocess.TimeoutExpired:
-        return {"ok": False, "text": f"打ち切り（{timeout} 秒）", "usage": {}, "seconds": timeout}
+        return {"ok": False, "text": f"打ち切り（{timeout} 秒）", "usage": {}, "seconds": timeout,
+                "kind": claude_kind(system, full), "model_usage": None}
     try:
         data = json.loads(p.stdout)
     except json.JSONDecodeError:
@@ -540,6 +549,8 @@ def call_claude(system: str, prompt: str, tools: str | None, cwd: str, timeout: 
         "ok": ok,
         "text": text,
         "usage": data.get("usage") or {},
+        "model_usage": data.get("modelUsage") if isinstance(data.get("modelUsage"), dict) else None,
+        "kind": claude_kind(system, full),
         "cost": data.get("total_cost_usd"),
         "turns": data.get("num_turns"),
         "session": data.get("session_id"),
@@ -1104,7 +1115,9 @@ class Supervisor:
         return "\n\n".join(parts) or "（入力なし）"
 
     def add_usage(self, kind: str, res: dict) -> None:
+        import usage_ledger  # lib/ は起動の時に sys.path へ足してある
         u = res.get("usage", {})
+        w5, w1h = usage_ledger.cache_writes(u)
         self.llm[kind] += 1
         self.llm["input"] += u.get("input_tokens", 0)
         self.llm["cache_read"] += u.get("cache_read_input_tokens", 0)
@@ -1121,6 +1134,26 @@ class Supervisor:
         c["cache_write"] += u.get("cache_creation_input_tokens", 0)
         c["output"] += u.get("output_tokens", 0)
         c["cost"] = round(c["cost"] + (res.get("cost") or 0.0), 4)
+        # 書き込みの 5 分と 1 時間、モデルごとの呼び出し回数とトークン（#1142 の不足 f。キーの追加だけ）
+        c["cache_write_5m"] = c.get("cache_write_5m", 0) + w5
+        c["cache_write_1h"] = c.get("cache_write_1h", 0) + w1h
+        models = c.setdefault("models", {})
+        for name, mu in (res.get("model_usage") or {}).items():
+            mu = mu if isinstance(mu, dict) else {}
+            m = models.setdefault(name, {"calls": 0, "input": 0, "cache_read": 0, "cache_write": 0,
+                                         "output": 0, "cost": 0.0})
+            m["calls"] += 1
+            m["input"] += mu.get("inputTokens") or 0
+            m["cache_read"] += mu.get("cacheReadInputTokens") or 0
+            m["cache_write"] += mu.get("cacheCreationInputTokens") or 0
+            m["output"] += mu.get("outputTokens") or 0
+            m["cost"] = round(m["cost"] + (mu.get("costUSD") or 0.0), 4)
+        # 使用量の帳簿へ 1 呼び出し 1 行（I8）。追記に失敗しても呼び出しの結果は失わない
+        rec = usage_ledger.UsageRecord(
+            source="supervise", kind=res.get("kind") or kind, usage=u, plan=self.plan_path,
+            step=str(self.cur.get("id") or ""), model_usage=res.get("model_usage"), cost_usd=res.get("cost"),
+            turns=res.get("turns"), seconds=res.get("seconds"), session_id=res.get("session"))
+        usage_ledger.append_safely(self.cwd, rec)
 
     def claude(self, system: str, prompt: str, tools: str | None, cwd: str, timeout: int, **kw) -> dict:
         """claude -p を呼ぶ唯一の口（work / drive の worker / judge / pr）。利用上限をここで扱う。
@@ -1427,9 +1460,25 @@ class Supervisor:
         if err:
             self.cur.update(exit=2, text=err)
             return False, err
-        ok, out, text = self.drive_loop(step, cmd)
-        if out:
-            self.cur["counts"] = out.get("metrics") or {}
+        # 入れ子の駆動（最終ゲートの item.command）の metrics を控える。外側の結果は内側の件数を持たない
+        inner: list[dict] = []
+        loop = self.drive_loop
+
+        def watched(st: dict, c: str, depth: int = 0) -> tuple[bool, dict | None, str]:
+            got = loop(st, c, depth)
+            if depth and got[1] and isinstance(got[1].get("metrics"), dict):
+                inner.append(got[1]["metrics"])
+            return got
+
+        self.drive_loop = watched
+        try:
+            ok, out, text = self.drive_loop(step, cmd)
+        finally:
+            del self.drive_loop
+        if out or inner:
+            self.cur["counts"] = dict((out or {}).get("metrics") or {})
+            if inner:
+                self.cur["counts"]["inner"] = inner[-1]
         self.cur.update(exit=0 if ok else 1, text=text, seconds=round(time.time() - started, 1))
         return ok, text
 
@@ -2753,7 +2802,60 @@ def report_result(text: str) -> str:
 
 
 def state_dir_of(plan: str) -> Path:
-    return Path(plan).parent / (Path(plan).stem + "-state")
+    """プランの状態ディレクトリ `<プラン>-state`（パスは変えない）。
+
+    プランが一時ディレクトリの下にあり、状態の置き場所がそうでないときだけ、実体を
+    `<状態の置き場所>/<stem>-<プランの絶対パスの sha256 の先頭 8 字>/` に作り、`<プラン>-state` を
+    そこへのシンボリックリンクにする（#1142 の不足 f。OS の再起動と /tmp の掃除で記録を失わない）。
+    実体にはプランの写し `plan.json` を置く。既にある `<プラン>-state` はそのまま使う。
+    """
+    link = Path(plan).parent / (Path(plan).stem + "-state")
+    try:
+        if link.exists() or link.is_symlink():
+            return link
+        home = sv_state_home()
+        if not under_temp(Path(plan)) or under_temp(home):
+            return link
+        digest = hashlib.sha256(str(Path(plan).resolve()).encode()).hexdigest()[:8]
+        real = home / f"{Path(plan).stem}-{digest}"
+        real.mkdir(parents=True, exist_ok=True)
+        if Path(plan).is_file() and not (real / "plan.json").exists():
+            shutil.copyfile(plan, real / "plan.json")
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(real, target_is_directory=True)
+    except FileExistsError:
+        pass  # 並行する起動が先に作った
+    except OSError as e:
+        print(f"supervise: 状態の実体を置けない（{link} をそのまま使う）: {e}", file=sys.stderr)
+    return link
+
+
+def temp_roots() -> tuple[Path, ...]:
+    """一時ディレクトリとみなす場所（OS の再起動や掃除で消えうる）。"""
+    roots = {Path(tempfile.gettempdir()), Path("/tmp")}
+    out = []
+    for r in roots:
+        try:
+            out.append(r.resolve())
+        except OSError:
+            continue
+    return tuple(out)
+
+
+def under_temp(path: Path) -> bool:
+    try:
+        p = Path(os.path.abspath(path)).resolve()
+    except OSError:
+        return False
+    return any(p == r or r in p.parents for r in temp_roots())
+
+
+def sv_state_home() -> Path:
+    """プランの状態の実体の置き場所。`NDF_SV_STATE_DIR` → `${XDG_STATE_HOME}/ndf/sv` → `~/.local/state/ndf/sv`。"""
+    if os.environ.get("NDF_SV_STATE_DIR"):
+        return Path(os.environ["NDF_SV_STATE_DIR"])
+    base = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
+    return Path(base) / "ndf" / "sv"
 
 
 def attention_lines(prog: Path, offset: int) -> tuple[list[dict], int]:

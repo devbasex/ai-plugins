@@ -104,7 +104,11 @@ def build_prompt(mvv: str, gate: str, materials: list[str]) -> str:
 
 
 def ask(prompt: str) -> tuple[dict | None, str, dict]:
-    """(判定, 生の文, 使用量) を返す。読めなければ判定は None。"""
+    """(判定, 生の文, 使用量) を返す。読めなければ判定は None。
+
+    呼び出しごとに使用量の帳簿へ 1 行を足す（#1142 の不足 f。source は mvv-gate、プランの外の呼び出し）。
+    """
+    import usage_ledger  # lib/ は起動の時に sys.path へ足してある
     base = shlex.split(os.environ.get("NDF_MVV_CLAUDE", "claude"))
     cmd = base + ["-p", "--output-format", "json", "--no-session-persistence", "--setting-sources", "",
                   "--strict-mcp-config", "--disable-slash-commands", "--system-prompt", SYSTEM, "--tools", ""]
@@ -115,9 +119,15 @@ def ask(prompt: str) -> tuple[dict | None, str, dict]:
     try:
         outer = json.loads(p.stdout)
     except json.JSONDecodeError:
+        outer = None
+    if not isinstance(outer, dict):
+        usage_ledger.append_safely(os.getcwd(), usage_ledger.UsageRecord(source="mvv-gate", kind="mvv"))
         return None, (p.stdout + p.stderr)[-500:], {}
     text = outer.get("result") or ""
     usage = {"cost_usd": outer.get("total_cost_usd"), "seconds": (outer.get("duration_ms") or 0) / 1000}
+    usage_ledger.append_safely(os.getcwd(), usage_ledger.UsageRecord.from_claude(
+        outer, source="mvv-gate", kind="mvv",
+        seconds=usage["seconds"] if outer.get("duration_ms") is not None else None))
     start, end = text.find("{"), text.rfind("}")
     try:
         verdict = json.loads(text[start:end + 1]) if start >= 0 else None
