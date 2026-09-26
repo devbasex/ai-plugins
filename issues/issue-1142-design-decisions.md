@@ -281,8 +281,13 @@ githubkit の ETag 付きの読み直しが上限に数えられないこと、4
 要る処理）の自作は 69 項目・20 種類あった。種類ごとの置き換え先・包みのモジュール・構造チェックの I14・
 移行のミッション 2b は [issue-1142-design-libraries.md](issue-1142-design-libraries.md) にある。
 
-### 決定 20: hook とラッパーの経路（I13）は、試行 T2 の後に利用者が決める
+### 決定 20: hook は 1 本の Python のエントリポイントへまとめ、用意済みの環境で依存を持つ（I13 を改める）
 
-汎用の自作のうち約 2,300 行（シェルの字句解析の約 1,960 行を含む）が I13 の経路にある。I13 を保つ案 A と、
-hook を 1 本の Python プロセスへまとめて依存を持たせる案 B を並べ、T2 で hook 1 回の所要と判定の一致を測ってから
-決める（[issue-1142-design-libraries.md](issue-1142-design-libraries.md) の「決定 20」）。
+汎用の自作のうち約 2,300 行（シェルの字句解析の約 1,960 行を含む）が I13 の経路にある。2026-09-26 に利用者が
+「判断が要る箇所は、最終的に一番綺麗になるやり方で」と決め、I13 を保つ案を採らなかった。SessionStart が環境を
+用意し、ほかの hook はその環境の python を直に起動する（[issue-1142-design-libraries.md](issue-1142-design-libraries.md) の「決定 20」）。
+
+### 決定 21: 計画の実行とキューは DBOS Transact（SQLite）の上に置く
+
+試行（PR #1258）で 3 候補とも成り立ち、キューと資源のタグごとの枠を持ち自作が残らない DBOS を選んだ。比べた表と
+置き換える範囲は [issue-1142-design-libraries.md](issue-1142-design-libraries.md) の「決定 21」にある。移行はミッション 2c。
