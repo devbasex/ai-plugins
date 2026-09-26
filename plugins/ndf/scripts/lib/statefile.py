@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
-import os
 import pathlib
 import shlex
 import sys
@@ -141,11 +140,3 @@ def apply_resume_args(
             option = "--" + field.arg.replace("_", "-")
             lines.append(f"ℹ {option} は再開では反映しません（状態: {old} / 指定: {new}）")
     return lines
-
-
-def sv_state_home() -> pathlib.Path:
-    """プランの状態の実体の置き場所。`NDF_SV_STATE_DIR` → `${XDG_STATE_HOME}/ndf/sv` → `~/.local/state/ndf/sv`。"""
-    if os.environ.get("NDF_SV_STATE_DIR"):
-        return pathlib.Path(os.environ["NDF_SV_STATE_DIR"])
-    base = os.environ.get("XDG_STATE_HOME") or str(pathlib.Path.home() / ".local" / "state")
-    return pathlib.Path(base) / "ndf" / "sv"
