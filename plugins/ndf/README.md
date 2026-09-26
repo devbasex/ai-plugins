@@ -89,7 +89,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.17.28）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.17.29-dev.1）
 ```
 
 ### agy
@@ -119,16 +119,14 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.17.28 へ更新するとき
+## v10.17.29-dev.1 へ更新するとき
 
-- Fix: bash 3.2 の UTF-8 で $VAR の直後の全角が変数名に取り込まれる形を ${VAR} に直す（#1203）
-- 確定仕様化で `--design` を繰り返し渡しても、計画ファイルが残らない（#1204）
-- 拡張子の無いシェルスクリプトの差分でも、構造改善が飛ばされずに行われる（#1205）
-- 設計文書のテスト設計には、縛る振る舞いと壊し方までを書く。テストの組み方の細部は実装のときに決める（#1206）
-- 受け入れ条件の「人が見る」確認は、振る舞いと見た目に分けて書く（#1206）
-- 端末で確かめる振る舞いの条件は、マージ前に擬似端末で確かめる（#1206）
-- `/ndf:install-wrapper status` に、今のセッションがラッパー経由で起動したかの 1 行が出る（#1207）
-- 無し（検査の修正だけ）（#1208）
+- ミッション m1142 の課題を develop へ取り込む。（#1230）
+- 関連: #1142（#1230）
+- Docs: markdown-writing に「エンジニア向けの文書は業界で流通している語で書く」を足す（#1217）
+- Docs: #1142 の設計に外部パッケージの扱い・行数の上限 500・関数の単位の分け方を足し、語を業界の語へ揃える（#1215）
+- Fix: cross-refactoring の書き込み用の作業ディレクトリを detach で作り、開発用の worktree と同じブランチでも起動できるようにする（#1231）
+- Fix: cross-refactoring の --baseline-test の探索の起点から、オプションの値と作業ディレクトリの根を外す（#1232）
 
 ## Playwright テストについて
 
@@ -365,7 +363,7 @@ agy models   # 認証確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.17.28/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.17.29-dev.1/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -387,14 +385,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.28/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.29-dev.1/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.17.28  <path>
+# => ndf@ai-plugins  installed, enabled  10.17.29-dev.1  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。
