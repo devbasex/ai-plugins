@@ -309,3 +309,8 @@ githubkit の ETag 付きの読み直しが上限に数えられないこと、4
 claude-agent-sdk は成り立つが、費用を保つ手段が文書に無い環境変数だけで、消える自作は約 130 行にとどまる
 （試行 T2・T2b。[issue-1142-design-libraries.md](issue-1142-design-libraries.md) の「決定 24」）。
 
+### 決定 25: mcp-serena の hook も、用意済みの環境の python を直に起動する
+
+mcp-serena の PreToolUse の hook が Tool の呼び出しのたびに `.serena/project.yml` を読むため、ruamel.yaml の入れ方が
+設計に無く D8 が止まった。決定 20 と同じ形（SessionStart が環境を用意し、hook はその python を直に起動する）にし、
+移行を D5 へ移す。NDF の `lib/deps.py` は別の配布単位なので使わない（[issue-1142-design-libraries.md](issue-1142-design-libraries.md) の「決定 25」）。
