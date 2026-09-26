@@ -18,7 +18,7 @@
   posted_by_severity       スレッドの最初のコメントの `[重要度 / …]` の件数
   posted_minor_ratio       posted の minor と nit の和 ÷ 全件（担当が基準外を書かなくなったか）
   raised_from_minor        最初のラベルが minor / nit で、「対応しました」の返信を持つスレッドの数
-  verdict                  minor_ratio ≤ 上限 かつ minor_only_rounds ≤ 上限 × prs
+  verdict                  minor_ratio ≤ 上限 かつ minor_only_rounds ≤ 上限 × prs。まとめが 0 件なら null（判定不能）
 """
 from __future__ import annotations
 
@@ -88,7 +88,8 @@ def aggregate(summaries: list[tuple[int, str]], threads: list[list[str]],
         "posted_minor_ratio": round((posted["minor"] + posted["nit"]) / posted_total, 4) if posted_total else 0.0,
         "raised_from_minor": raised,
         "thresholds": {"max_minor_ratio": max_minor_ratio, "max_minor_only_per_pr": max_minor_only_per_pr},
-        "verdict": minor_ratio <= max_minor_ratio and minor_only <= max_minor_only_per_pr * prs,
+        # まとめが 1 件も無ければ判定できない（期間や --repo の誤りを合格にしない）
+        "verdict": (minor_ratio <= max_minor_ratio and minor_only <= max_minor_only_per_pr * prs) if prs else None,
     }
 
 

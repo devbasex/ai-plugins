@@ -46,7 +46,8 @@ def test_threads_measure_posted_minor_and_raised():
     res = fs.aggregate([], threads)
     assert res["posted_by_severity"] == {"critical": 0, "major": 1, "minor": 1, "nit": 1}
     assert res["posted_minor_ratio"] == round(2 / 3, 4) and res["raised_from_minor"] == 1
-    assert res["minor_ratio"] == 0.0 and res["verdict"] is True
+    # まとめが 0 件なら判定できない
+    assert res["minor_ratio"] == 0.0 and res["prs"] == 0 and res["verdict"] is None
 
 
 def test_collect_cuts_summaries_by_period():

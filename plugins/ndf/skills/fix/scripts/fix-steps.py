@@ -371,7 +371,11 @@ def cmd_finalize(a):
     if not commit and keep:
         root = git_root(a.root)
         commit = git(root, "rev-parse", "--short", "HEAD").stdout.strip()
-    ci_status, failed = ci_snapshot(pr)
+    if d.get("ci_fixed") is True:
+        # 照会できるのは送信前の head で、直した失敗が残って見える。送った後の CI を待つ
+        ci_status, failed = "PENDING", []
+    else:
+        ci_status, failed = ci_snapshot(pr)
     res = build_result(pr, d, commit, ci_status, [str(c.get("name")) for c in failed])
     out = Path(a.out) if a.out else result_dir() / f"fix-pr{pr}-result.json"
     out.write_text(json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")

@@ -331,6 +331,9 @@ def test_ci_only_fix_keeps_the_commit(env):
     res = json.loads((env["tmp"] / f"fix-pr{PR}-result.json").read_text())
     assert res["fix_commit"] == "abc1234" and res["fixed_count"] == 0
     assert not any(i["name"] == "fix-commit" for i in out["items"])
+    # 照会できる失敗は送信前の head のもの。直した後は送った先の CI を待つ
+    assert res["ci_status"] == "PENDING" and res["ci_failed_checks"] == []
+    assert not any(i.get("result") == "ci_failed" for i in out["items"])
 
 
 def test_ci_only_fix_takes_commit_from_head_when_omitted(env):

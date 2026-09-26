@@ -84,7 +84,8 @@ FIX=$(bash "$R/scripts/resolve.sh" scripts fix) || exit 3
    ```
 
    `fix_commit` を省くと HEAD を採る。CI の失敗を直したコミットがあれば雛形の `ci_fixed` を `true` に
-   する。`fixed` が 0 件で `ci_fixed` も `true` でなければ `fix_commit` を捨てて `null` にし（`items`
+   する。`ci_fixed` が `true` なら CI を照会せず、`ci_status` を `PENDING`・`ci_failed_checks` を空にする
+   （照会できるのは送信前の head で、直した失敗が残って見えるため）。`fixed` が 0 件で `ci_fixed` も `true` でなければ `fix_commit` を捨てて `null` にし（`items`
    の `fix-commit` が `dropped`）、送信も CI も起きない。振り分けが「重要度の判定」の規則を破れば
    `stopped` で止まり、戻り値ファイルを書かない。`items[].name` が `pr-body-decisions` の `result`
    （`synced` / `mismatch` / `unreadable` / `invalid_call`）と `code` を作業完了報告へ写す。
