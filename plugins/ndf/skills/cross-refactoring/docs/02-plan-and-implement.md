@@ -109,6 +109,8 @@ rf_eval merge-plan "$ID"          # TESTS_NEEDED=0|1。2 = 項目 0 件（最終
 | 余裕 | `0.05·B` | `init` |
 | 着手前のテスト 1 回の上限 | `0.10·B`（w はまだ無い） | `init` |
 | テスト 1 回の上限 | `max(3·w, 0.01·B)` | `init` |
+| 指標の測定の上限（`measure_timeout`） | `0.05·B`。提案の枠の中から割き、枠の終わりを動かさない | `init` |
+| 指標の測定に使える時間（`deadline_seconds`） | `min(measure_timeout, 0.5·max(0, 提案の枠の終わり − 今))` | `measure` |
 | 提案の枠の終わり | `開始 + 0.20·B` | `init` |
 | リファクタリング計画の枠の終わり | `開始 + 0.30·B` | `init` |
 | テストの追加の終わり | 最後の項目の `test_start_deadline + test` の見積り | `merge-plan` |

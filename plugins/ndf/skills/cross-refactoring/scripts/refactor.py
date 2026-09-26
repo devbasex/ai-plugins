@@ -58,6 +58,7 @@ from refactor_lib.commands.implement import (  # noqa: E402
     cmd_merge_implement,
     cmd_merge_tests,
 )
+from refactor_lib.commands.measure import cmd_measure  # noqa: E402
 from refactor_lib.commands.plan import cmd_merge_plan  # noqa: E402
 from refactor_lib.commands.propose import cmd_merge_proposals  # noqa: E402
 from refactor_lib.commands.report import (  # noqa: E402
@@ -167,6 +168,11 @@ def add_init_parser(sub: argparse._SubParsersAction) -> None:
                       help="`development-workflow` の 1 工程として起動したことを"
                            "伝える。最終ゲートの `cross-review` を省き、"
                            "全体のテストで判定する")
+    # **提案の前に指標を測る**（#1319）。言語ごとのツールの置き換えは `.ndf/code-metrics.json`。
+    init.add_argument("--code-metrics", dest="code_metrics",
+                      action=argparse.BooleanOptionalAction, default=None,
+                      help="提案の前に対象範囲の指標（循環的複雑度・行数・重複）を測る。"
+                           "--no-code-metrics で測らない (default: 測る)")
     init.add_argument("--worktree-root", default=None)
     init.set_defaults(func=cmd_init)
 
@@ -174,6 +180,8 @@ def add_init_parser(sub: argparse._SubParsersAction) -> None:
 def add_id_commands(sub: argparse._SubParsersAction) -> None:
     """実行の番号 `id` だけを受け取る副コマンドを登録する。"""
     for name, func, help_ in (
+        ("measure", cmd_measure,
+         "提案の前に指標を 1 回だけ測り、指標のファイルを書く（失敗しても 0）"),
         ("merge-proposals", cmd_merge_proposals,
          "提案の統合・語彙としきい値・候補の切り出し（30 組 × 組の中 3 件）"),
         ("merge-plan", cmd_merge_plan,
