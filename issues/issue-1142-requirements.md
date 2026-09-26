@@ -22,8 +22,8 @@ NDF のスクリプト（`plugins/ndf/scripts/` と各 Skill の `scripts/`。�
 
 | スクリプト | 行数 | 中身 |
 | --- | ---: | --- |
-| `skills/cross-review/scripts/state.py` | 5121 | 関数 227 個・副命令 14 個。待ち行列・参加者の解決・GitHub の呼び出しを同じファイルに持つ |
-| `scripts/supervise.py` | 3126 | `Supervisor` クラス 1 つがステップの 5 種類を持つ。計画の雛形・queue・wait も同じファイル。直近 1 週間で 48 回変更 |
+| `skills/cross-review/scripts/state.py` | 5121 | 関数 227 個・副命令 14 個。キュー・参加者の解決・GitHub の呼び出しを同じファイルに持つ |
+| `scripts/supervise.py` | 3126 | `Supervisor` クラス 1 つがステップの 5 種類を持つ。計画のテンプレート・queue・wait も同じファイル。直近 1 週間で 48 回変更 |
 | `scripts/lib/worktree-common.sh` | 2492 | hook とworktreeの共通の関数 |
 | `scripts/relay.py` | 2057 | `~/.claude/ndf/relay.py` へファイル 1 本で複製して動かす |
 | `scripts/lib/monitor.py` | 1256 | |
@@ -38,7 +38,7 @@ NDF のスクリプト（`plugins/ndf/scripts/` と各 Skill の `scripts/`。�
 | 時刻の読み取り（`_parse_time`） | 5 | `lib/post_queue.py`・`lib/run_metrics.py`・`lib/transcript_agents.py`・cross-refactoring `allocation.py`・cross-review `measure.py` |
 | JSON の読み書き・結果の出力（`read_json` / `load` / `emit` / `die` / `info`） | 12 | `check-trigger.py`・`glossary.py`・`relay.py`・`lib/statefile.py`・`lib/step_result.py`・`mission-state.py`・`release-steps.py` ほか |
 | リポジトリの識別（`repo_slug`・`declared_base`） | 6 | `lib/step_result.py`・cross-refactoring `paths.py`・`fix-steps.py`・`doc-lint.py`・`pr-steps.py`・`supervise.py` |
-| 収束ループの駆動（`parse_vars` / `review_status` / `call`） | 2 | cross-review と cross-refactoring の `drive.py`（本体が同じ） |
+| 収束ループの drive（`parse_vars` / `review_status` / `call`） | 2 | cross-review と cross-refactoring の `drive.py`（本体が同じ） |
 | 外部 CLI の起動（`launch-cli.sh`・`resolve_print_timeout`） | 3 | `lib/launch-cli.sh`・cross-refactoring の `launch-cli.sh`（差 365 行）・cross-review `critique.sh` |
 
 **使う側から見えている不足**（2026-09-25 区間 12 と、この課題の計測で観測）
@@ -157,7 +157,7 @@ NDF のスクリプト（`plugins/ndf/scripts/` と各 Skill の `scripts/`。�
 - [ ] `mvv-gate.py` の設計の判定に、設計 PR の設計文書が材料として渡る（e）
 - [ ] 計画が起動した `claude -p` の消費が、版ごとの集計に入る。計画の状態は OS の再起動と `/tmp` の掃除で消えない場所に残り、usage はステップごとにモデル・呼び出し回数・書き込みの 5 分と 1 時間を分けて持つ（f）
 - [ ] GitHub の読み書きが 1 つのライブラリを通る。読み直し（CI と PR の状態の待ち）は REST の ETag 付きの要求で行い、変わっていない間は上限に数えられない。片方の枠が上限のときは、代われる操作をもう片方の枠で行い、代われない操作は回復の時刻まで待ってからやり直す。待ちの問い合わせの間隔は、変化が無い間は伸ばす（g）
-- [ ] 外部パッケージを、1 つの宣言と lock で版を固定して使える。エントリポイントを起動する形（`python3 <パス>`）は変わらず、依存の解決は uv が行う。uv が無い環境では版を固定して入れてから続け、入れられないとき（ネットワークが無いなど）は理由を出して止まる。hook とラッパーの束は標準ライブラリだけで動く（h）
+- [ ] 外部パッケージを、1 つの宣言と lock で版を固定して使える。エントリポイントを起動する形（`python3 <パス>`）は変わらず、依存の解決は uv が行う。uv が無い環境では版を固定して入れてから続け、入れられないとき（ネットワークが無いなど）は理由を出して止まる。hook とラッパーのバージョンディレクトリは標準ライブラリだけで動く（h）
 
 退行しないこと:
 - [ ] 既存のテストが、置き換え先の変更だけで通る
@@ -172,7 +172,7 @@ NDF のスクリプト（`plugins/ndf/scripts/` と各 Skill の `scripts/`。�
 | 性能・拡張性 | worker がスクリプトを 1 つ直すときに読むファイルの大きさの中央値が、移行の前より小さい（計測は E1 と E9 で同じスクリプト） |
 | 運用・保守性 | 並列のミッションが同じファイルを触った件数が、移行の後の 10 本の PR で移行の前より少ない |
 | 移行性 | 途中の版を導入した利用者の手順が変わらない。どの移行ステップでも 1 つ前へ戻せる |
-| システム環境 | Python 3.10 以上・bash 3.2（macOS 既定）で動く。外部パッケージは宣言と lock に載るものだけを使い、uv で解決する。hook とラッパーの束は外部パッケージを使わない |
+| システム環境 | Python 3.10 以上・bash 3.2（macOS 既定）で動く。外部パッケージは宣言と lock に載るものだけを使い、uv で解決する。hook とラッパーのバージョンディレクトリは外部パッケージを使わない |
 
 ## 影響
 
