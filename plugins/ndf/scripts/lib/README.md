@@ -15,13 +15,9 @@
 
 | ファイル | 役割 | 読む側 |
 | --- | --- | --- |
-| [worktree-common.sh](worktree-common.sh) | worktree の判定のエントリポイント。位置の解決・パスの判定と正規化を持ち、下の 7 本を順に source する（1 本でも読めなければ 1 を返す）。読む側はこのファイルだけを source する | `worktree` / hook |
+| [worktree-common.sh](worktree-common.sh) | worktree の判定のエントリポイント。位置の解決・パスの判定と正規化を持ち、下の 3 本を順に source する（1 本でも読めなければ 1 を返す）。読む側はこのファイルだけを source する。編集時の guard（書き込み先の推定・許可パス）は `hook_lib/` が持つ | `worktree`（`worktree-session.sh`・`worktree-setup.sh` ほか） |
 | [worktree-declaration.sh](worktree-declaration.sh) | 宣言ファイルと個人の宣言の読み取り（`wt_declaration_get` ほか） | `worktree-common.sh` |
 | [worktree-branch.sh](worktree-branch.sh) | worktree の一覧・追従先・ブランチの判定（`wt_current_branch` ほか） | 同上 |
-| [worktree-shell-lex.sh](worktree-shell-lex.sh) | 書き込み先の推定に使うシェルコマンドの字句解析 | 同上 |
-| [worktree-write-target.sh](worktree-write-target.sh) | シェルコマンドとパッチ本文からの書き込み先の推定のエントリポイントと前処理 | 同上 |
-| [worktree-write-target-scan.sh](worktree-write-target-scan.sh) | 書き込み先の推定の走査の本体と、書き込み先を出す関数 | 同上 |
-| [worktree-write-target-track.sh](worktree-write-target-track.sh) | 走査が使う現在地と複合構文の入れ子の追跡 | 同上 |
 | [worktree-registry.sh](worktree-registry.sh) | テスト環境の採番と台帳・排他・スロット | 同上 |
 | [projects-common.sh](projects-common.sh) | GitHub Projects のボードへの記録 | `development-workflow` |
 | [lock-common.sh](lock-common.sh) | 排他の取得と解放（#293） | 上の 2 つと `development-workflow` |
@@ -69,15 +65,16 @@
 | [mdtable.py](mdtable.py) | Markdown の表の組み立て（列の幅を揃えない行・セルの縦棒のエスケープ・数の列の右寄せ）。tabulate を呼ぶのはここだけ | `cross-refactoring`（`refactor_lib/plan.py`・`commands/report.py`）。ほかは D1〜D8 が呼び出し側を置き換える |
 | [schema.py](schema.py) | JSON と設定の形の検証（`Shape` と `load_shape`）。pydantic の誤りを日本語の 1 行（`ShapeError`）へ直し、語彙に無い値を下げる読みは `lenient_choice` | L1 の時点では無し（D1〜D8 が呼び出し側を置き換える） |
 | [procs.py](procs.py) | プロセスの生死（ゾンビは死）・親子・木の停止（グループの先頭ならグループへ）・メモリと cgroup。psutil を呼び、`/proc/` を読むのはここだけ | 同上 |
-| [locks.py](locks.py) | ファイルロック（`<対象>.lock` で取る排他・待たない取得・排他つきの 1 行の追記）。filelock を呼び、`fcntl` を使うのはここだけ | 同上 |
-| [shparse.py](shparse.py) | シェルの構文木（tree-sitter-bash）。試行 T2 で見つけた構文木の癖 5 つを直して渡す。hook の経路で使うため `deps.require()` を呼ばない | 同上 |
 | [versions.py](versions.py) | 版数（`X.Y.Z`・`-dev.N`・`-rc.N`）の比較と次の版、bump-my-version の `replace`。semver と bump-my-version を呼ぶのはここだけ | 同上 |
 | [pathmatch.py](pathmatch.py) | パスのパターン照合（git の wildmatch を根からのパス全体に当てる。`*` は `/` をまたがない）。pathspec を呼ぶのはここだけ | 同上 |
 | [textparse.py](textparse.py) | unified diff の足した行の番号と、コードのコメントを空白へ置き換える処理。unidiff と pygments を呼ぶのはここだけ | 同上 |
 | [yamlio.py](yamlio.py) | frontmatter と YAML の往復の読み書き（値は YAML の型。引用符とコメントを保つ）。ruamel.yaml を呼ぶのはここだけ | 同上 |
 | [waits.py](waits.py) | 条件が揃うまでの問い合わせ（変化が無い間は間隔を伸ばす）とやり直し。tenacity を呼ぶのはここだけ。GitHub の上限の待ちは `gh_quota` | 同上 |
-| [notify.py](notify.py) | HTTP の 1 回の要求・Slack の Web API・`.env` の読み取り。httpx・slack_sdk・python-dotenv を呼び、`urllib.request` を使うのはここだけ | 同上 |
-| [wait_notice.py](wait_notice.py) | Slack の待ち通知の判定（応答の本文から回答待ち・承認待ち・待ちでない）・フックの事象の訳し・復帰先・関連 URL・本文の組み立て。入出力を持たない | `scripts/wait-notify.py` |
+| [notify.py](notify.py) | HTTP の 1 回の要求・Slack の Web API・`.env` の読み取り。httpx・slack_sdk・python-dotenv を呼び、`urllib.request` を使うのはここだけ | `scripts/wait-notify.py`（送信）・`hook_lib/wait_notify.py`（`.env`） |
+| [wait_notice.py](wait_notice.py) | Slack の待ち通知の判定（応答の本文から回答待ち・承認待ち・待ちでない）・フックの事象の訳し・復帰先・関連 URL・本文の組み立て。入出力を持たない | `scripts/wait-notify.py`・`hook_lib/wait_notify.py` |
+| [hook_python.py](hook_python.py) | hook の用意済みの環境の python の置き場（`~/.cache/ndf/roots<プラグインの根>` の目印）と、その python での起動し直し。標準ライブラリだけで、`deps.require()` を呼ばない（I13・決定 20） | `scripts/hook-env.py`・`scripts/wait-notify.py` |
+| [shparse.py](shparse.py) | シェルの構文木（tree-sitter-bash）。試行 T2 で見つけた構文木の癖 5 つを直して渡し、読み直せない ERROR があるか（`has_unreadable_error`）を返す。hook の経路で使うため `deps.require()` を呼ばない | `hook_lib/`（書き込み先の推定・Bash の判定・語の分割） |
+| [locks.py](locks.py) | ファイルロック（`<対象>.lock` で取る排他・待たない取得・排他つきの 1 行の追記）。filelock を呼び、`fcntl` を使うのはここだけ | `hook_lib/`（token の guard・待ちの通知） |
 | [drive_pause.py](drive_pause.py) | 収束ループの駆動が止まるときの結果の形（pause の 1 行 JSON）と終了コードの表（0 完了 / 20 fix / 21 sweep / 22 newtext / 23 cross-review / 1 中断） | 収束ループの 2 つの `drive.py` |
 
 ## 手順のスクリプトの結果

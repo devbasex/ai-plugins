@@ -357,7 +357,7 @@ def test_lock_held_passes(tmp_path, state):
     guards = state / "guards"
     guards.mkdir(parents=True)
     import filelock
-    held = filelock.FileLock(str(guards / "s1.lock"))
+    held = filelock.FileLock(str(guards / "s1.guard.lock"))
     held.acquire()
     try:
         # 3 回目は排他を取れれば拒否される回数である（test_repeat_read_denied_on_third）。

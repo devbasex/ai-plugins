@@ -134,7 +134,7 @@ def sync() -> int:
         if not uv:
             _say(f"uv を入れられない（ネットワークか権限が無い）。手で入れてから打ち直す: {INSTALL_HINT}")
             return EXIT_PRECONDITION
-        p = subprocess.run([uv, "sync", "--quiet", "--frozen", "--project", str(PLUGIN_ROOT)],
+        p = subprocess.run([uv, "sync", "--quiet", "--frozen", "--compile-bytecode", "--project", str(PLUGIN_ROOT)],
                            env=dict(os.environ, UV_PROJECT_ENVIRONMENT=str(venv)), stdin=subprocess.DEVNULL,
                            capture_output=True, text=True)
         if p.returncode != 0:

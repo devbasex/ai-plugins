@@ -83,10 +83,13 @@ def guards_dir() -> Path | None:
 
 @contextmanager
 def session_lock(directory: Path, sid: str) -> Iterator[bool]:
-    """セッションごとの排他（`<dir>/<sid>.lock`）。取れなければ偽を渡す（呼び出し側は判定せずに通す）。"""
+    """セッションごとの排他（`<dir>/<sid>.guard.lock`）。取れなければ偽を渡す（呼び出し側は判定せずに通す）。
+
+    錠の名前を移行の前の `<sid>.lock`（`lock-common.sh` のディレクトリ）と分け、版をまたいだ 2 つの錠が互いを
+    読めずに両方とも通す形を作らない。"""
     wait = os.environ.get("NDF_TOKEN_GUARD_LOCK_WAIT", "1")
     import locks  # 排他が要る判定のときだけ読む（filelock の import は Bash と Edit の判定に載せない）
-    held = locks.exclusive(directory / sid, timeout=int(wait) if wait.isdigit() else 1)
+    held = locks.exclusive(directory / f"{sid}.guard", timeout=int(wait) if wait.isdigit() else 1)
     try:
         held.__enter__()
     except (locks.LockTimeout, OSError):
@@ -160,16 +163,22 @@ def guard_read(raw: dict) -> dict | None:
     d = guards_dir()
     if d is None:
         return None
-    with session_lock(d, sid) as held:
-        if not held:
-            return None
-        size, mtime, inode = _file_stat(path)
-        state = d / f"read-{sid}.json"
-        prev = _load_record(state)
-        same = (prev.get("key") == key and prev.get("size") == size and prev.get("mtime") == mtime
-                and prev.get("inode") == inode)
-        count = (prev.get("count") if same and isinstance(prev.get("count"), int) else 0) + 1
-        write_json(state, {"key": key, "size": size, "mtime": mtime, "inode": inode, "count": count})
+    size, mtime, inode = _file_stat(path)
+    state = d / f"read-{sid}.json"
+    record = {"key": key, "size": size, "mtime": mtime, "inode": inode}
+    if any(_load_record(state).get(k) != v for k, v in record.items()):
+        # 新しい範囲か、変わったファイルなら 1 回目で、前の数を読まない。排他を取らずに書く（Read は hook の経路で
+        # 最も多く、排他の import を載せない）。並列に同じ 1 回目が重なると 1 回分を数え損ねる（拒否が遅れる側）
+        count = 1
+        write_json(state, {**record, "count": count})
+    else:
+        with session_lock(d, sid) as held:
+            if not held:
+                return None
+            prev = _load_record(state)
+            same = all(prev.get(k) == v for k, v in record.items())
+            count = (prev.get("count") if same and isinstance(prev.get("count"), int) else 0) + 1
+            write_json(state, {**record, "count": count})
     if count < limit:
         return None
     return deny(f"同じファイルの同じ範囲を、変わらないまま {count} 回続けて読もうとした（{path}）。queue の終わりを待つなら python3 {HERE}/supervise.py wait <done のパス> を、それ以外の書き終わりを待つなら until [ -s <ファイル> ]; do sleep 1; done を Bash の run_in_background: true で起動して完了通知を待つか、背景の処理そのものの完了通知を待つ。サブエージェントの tasks/*.output は読まずに完了通知を待つ。規約: {WAITING_DOC}（止めるなら NDF_READ_REPEAT_GUARD=0）")

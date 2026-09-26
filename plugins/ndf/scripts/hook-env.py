@@ -90,7 +90,7 @@ def sync() -> int:
             return 3
         extras = [x for g in hook_python.GROUPS for x in ("--extra", g)]
         env = dict(os.environ, UV_PROJECT_ENVIRONMENT=str(venv))
-        p = subprocess.run([uv, "sync", "--quiet", "--frozen", "--inexact", "--project", str(deps.PLUGIN_ROOT),
+        p = subprocess.run([uv, "sync", "--quiet", "--frozen", "--inexact", "--compile-bytecode", "--project", str(deps.PLUGIN_ROOT),
                             *extras], env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True)
         if p.returncode != 0:
             _say(f"uv sync が失敗した（終了コード {p.returncode}）: {(p.stderr or '').strip()[-300:]}")
