@@ -76,8 +76,8 @@
 | `slow` | run・work・drive のステップの経過が想定時間を超え、一次の調査を流すたび | `step`・`round`・`elapsed`・`expected`・`basis`・`probe`（`name`・`class`・`action`・`summary`）・`act`・`by`（`rule` / `llm`）・`llm`・`next_check` | `step` と同じ |
 | `attention` | conductor の判断が要るとき | `step`・`reason`（`止まった` / `関門` / `同じ失敗の繰り返し` / `judge のステップで stop が出そう` / `遅れ`）・`text` | **この行が足されたら起きて読む** |
 
-- **conductor 向けの行は `attention` だけである。** supervise.py が worker の行の語（止まった・関門・
-  失敗）と繰り返し、ステップの結果からスクリプトで分ける。`step` / `alive` / `worker` / `slow` は起こさない
+- **conductor 向けの行は `attention` だけである。** supervise.py が worker の行の語（`止まった`・`関門`・
+  `失敗`）と繰り返し、ステップの結果からスクリプトで分ける。`step` / `alive` / `worker` / `slow` は起こさない
   （起こすたびに conductor の文脈の全体を読み直すため）
 - `queue` は `attention` の行を標準出力の 1 行 `{"tool": "supervise-queue", "event": "attention", ...}`
   で知らせる。最後の行は結果の JSON のままである
@@ -153,31 +153,31 @@ python3 plugins/ndf/scripts/supervise.py wait q/done.json
 他の作業を進め、通知を受けてから次の作業へ進む。他の作業が無いまま待つときの手は #656 が扱う。
 親の側の手は、受け取る層ごとに次の節が持つ。
 
-### 途中の通知を受けたとき
+### 中間通知を受けたとき
 
-**途中の通知**は、背景の処理を残したまま応答を終えたサブエージェントについて届く 1 回目の
+**中間通知**は、背景の処理を残したまま応答を終えたサブエージェントについて届く 1 回目の
 通知である。見分けは通知の注記（「background work of its own still running」「may be
 interim」）で行う。
 
 | 受け取る層 | 手 |
 | --- | --- |
 | conductor | **2 回目の通知を待ってから報告を読む。** conductor は応答を終えても次の通知で起こされる |
-| supervisor | **応答を終える前に、自分の背景の処理として報告のコピーの待ちを起動する。** 下のコマンドを `run_in_background: true` で起動し、完了通知で再開する |
+| supervisor | **応答を終える前に、自分の背景の処理として報告コピーの待ちを起動する。** 下のコマンドを `run_in_background: true` で起動し、完了通知で再開する |
 
 **supervisor が「2 回目の通知を待つ」で応答を終えると止まる。** supervisor が起動した worker
 は supervisor の背景の子に数えられず、worker が後で終わっても、応答を終えた supervisor は
 起こされない（#901）。自分で起動した背景の Bash の完了通知なら、supervisor は再開する。
 
 **worker の規則 5（背景の処理を残したまま応答を終えない）は保つ。** 規則を守る worker では
-途中の通知は起きない。この手は、守れなかった worker（`Monitor` や背景の待ちを残して応答を
+中間通知は起きない。この手は、守れなかった worker（`Monitor` や背景の待ちを残して応答を
 終えた worker）への備えである。
 
 **supervisor は worker を起動する前に、`置き場所` のファイルを worker ごとに新しいパスで空に
-作り、完了の目印を消す**（`: > <置き場所>; rm -f <置き場所>.done`）。前の worker の報告や目印が
-残ったパスを渡すと、コピーの待ちがその目印に即座に反応し、今の worker の報告を待たずに終わる。
+作り、完了マーカーを消す**（`: > <置き場所>; rm -f <置き場所>.done`）。前の worker の報告や完了マーカーが
+残ったパスを渡すと、コピーの待ちがその完了マーカーに即座に反応し、今の worker の報告を待たずに終わる。
 
-**待つのは `置き場所` の中身ではなく、完了の目印のファイル `<置き場所>.done` である。** worker
-は報告のコピーを `置き場所` の末尾へ書き終えた後に、空のファイル `<置き場所>.done` を作る
+**待つのは完了マーカーのファイル `<置き場所>.done` である。** worker
+は報告コピーを `置き場所` の末尾へ書き終えた後に、空のファイル `<置き場所>.done` を作る
 （[agent-layers.md](agent-layers.md) の起動指示の `置き場所`）。
 
 ```bash
@@ -188,10 +188,10 @@ timeout 3600 bash -c 'until [ -e "$1.done" ]; do sleep 5; done' _ "<置き場所
 | 終了コード | supervisor の動き |
 | --- | --- |
 | 0（`<置き場所>.done` が現れた） | `置き場所` の最後の `## 作業の報告` から末尾までを読み、フェーズを進める |
-| 124（上限の 3600 秒に達した） | [agent-layers.md](agent-layers.md) の「supervisor の worker の点検」を 1 回行う。上限の中断でなければ「報告が無いまま終わったとき」の規則で `SendMessage` を送る |
+| 124（上限の 3600 秒に達した） | [agent-layers.md](agent-layers.md) の「supervisor の worker の点検」を 1 回行う。レートリミット中断でなければ「報告が無いまま終わったとき」の規則で `SendMessage` を送る |
 
 - **worker の 2 回目の通知は、コピーを読んだ後に届いても読み直さない。** 同じ報告である
-- 途中の通知でない通知（報告の見出しが無く、背景の処理も残っていない）は、今のまま
+- 中間通知でない通知（報告の見出しが無く、背景の処理も残っていない）は、今のまま
   「報告が無いまま終わったとき」の規則で扱う
 - 待つ間に問い合わせを繰り返さない。起動は 1 回で、通知も 1 回である（「許す待ち方」）
 
@@ -213,7 +213,7 @@ Stop を 1 度だけ止め、動いている作業を並べて知らせる。sup
 
 | 判定 | 止める条件 | 止め方 | 上限を変える |
 | --- | --- | --- | --- |
-| sleep | 前景の Bash で、コマンドの位置（先頭の代入語 `X=1` と、`timeout 590` / `nohup` / `env` などの前置きの後ろを含む）の `sleep` が `while` / `until` のループの本体にある（秒数が変数でも止める）か、秒数が上限を超える。コメント・引用・ヒアドキュメントの本文は見ず、コマンドの位置にある `bash -c` / `sh -c` / `zsh -c` / `dash -c` / `eval` の中身は見る（`echo bash -c ...` のような引数の中の語は見ない） | `NDF_SLEEP_GUARD=0` | `NDF_SLEEP_MAX_SEC`（既定 5） |
+| sleep | フォアグラウンド Bash で、コマンドの位置（先頭の代入語 `X=1` と、`timeout 590` / `nohup` / `env` などの前置きの後ろを含む）の `sleep` が `while` / `until` のループの本体にある（秒数が変数でも止める）か、秒数が上限を超える。コメント・引用・ヒアドキュメントの本文は見ず、コマンドの位置にある `bash -c` / `sh -c` / `zsh -c` / `dash -c` / `eval` の中身は見る（`echo bash -c ...` のような引数の中の語は見ない） | `NDF_SLEEP_GUARD=0` | `NDF_SLEEP_MAX_SEC`（既定 5） |
 | 連続 Read | 同じ `file_path`・`offset`・`limit` の Read が、ファイルの大きさ・更新時刻・inode が変わらないまま上限の回数に達する | `NDF_READ_REPEAT_GUARD=0` | `NDF_READ_REPEAT_LIMIT`（既定 3） |
 | スイッチポイント | 寿命 5 分の supervisor（入力の `agent_type` が `ndf:supervisor`）が `cross-review` / `cross-refactoring` の Skill を起動し、自身の記録の今の文脈が最初の呼び出しの文脈の比以上ある（やり直しても止め続ける）。PreToolUse の `Skill` で動く | `NDF_SUPERVISOR_CUT_GUARD=0` | `NDF_SUPERVISOR_CUT_RATIO`（既定 1.5） |
 
@@ -228,7 +228,7 @@ Stop を 1 度だけ止め、動いている作業を並べて知らせる。sup
 
 | ランタイム | 待ち方（#829） | 会話を切る（#830） | 理由 |
 | --- | --- | --- | --- |
-| Claude Code | hook ＋ この規約 | hook ＋ 引継ぎの 1 行 | 代わりの待ち方（`Monitor` / `run_in_background` の通知）と会話の記録の場所を持つ |
-| Codex | この規約だけ | 引継ぎの 1 行だけ | 背景の起動と完了通知が無く、1 回の前景のループが待ち方になる |
-| Kiro | この規約だけ | 引継ぎの 1 行だけ | 実行前の hook は拒否しか返せず、既存の設計も実行前の hook を置いていない |
-| agy | この規約だけ | 引継ぎの 1 行だけ | 実行前の hook は案内を記録へ積む形で、拒否の口を使っていない |
+| Claude Code | hook ＋ この規約 | hook ＋ 再開コマンド | 代わりの待ち方（`Monitor` / `run_in_background` の通知）と会話の記録の場所を持つ |
+| Codex | この規約だけ | 再開コマンドだけ | 背景の起動と完了通知が無く、1 回の前景のループが待ち方になる |
+| Kiro | この規約だけ | 再開コマンドだけ | 実行前の hook は拒否しか返せず、既存の設計も実行前の hook を置いていない |
+| agy | この規約だけ | 再開コマンドだけ | 実行前の hook は案内を記録へ積む形で、拒否の口を使っていない |
