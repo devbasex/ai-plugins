@@ -24,7 +24,7 @@ import statefile
 
 from .. import ABORT, die, info
 from ..gitfacts import run_with_timeout
-from .. import codemetrics, timeline
+from .. import timeline
 from ..paths import (
     git_out,
     default_worktree_base,
@@ -32,6 +32,7 @@ from ..paths import (
     state_path,
     tmp_dir_for,
 )
+from ..codemetrics_record import code_metrics_record, ensure_record, recorded_enabled
 from ..plan import PLAN_COMMENT, PLAN_FILE, PLAN_NONE, normalize_plan_file
 from ..scope import require_scope_covers_tests, round_test_hint
 from ..testcmd import is_known
@@ -66,8 +67,6 @@ NEW_RUN_DEFAULTS: dict[str, Any] = {
     "budget_minutes": DEFAULT_BUDGET_MINUTES,
     "severity_threshold": DEFAULT_SEVERITY_THRESHOLD,
     "workflow_step": False,
-    # 提案の前に指標を測る（#1319）。`--no-code-metrics` で止める。
-    "code_metrics": True,
 }
 
 # 再開で渡した引数の反映の表（#727 の決定 13）。**状態ファイルに載る引数は、この表の
@@ -90,7 +89,6 @@ RESUME_NOTIFY_FIELDS = (
     statefile.ResumeField("plan_file", "plan_file", "notify"),
     statefile.ResumeField("workflow_step", "workflow_step", "notify"),
     statefile.ResumeField("worktree_root", "worktree_root", "notify"),
-    # 測定の設定は `init` の時点で決まる。再開では変えず、違えば知らせる（#1319）。
     statefile.ResumeField("code_metrics", "code_metrics", "notify"),
 )
 
@@ -369,29 +367,8 @@ def _build_initial_state(
         "pending_push": False,
         "pending_drop": None,
         "history_written": False,
-        # 指標の測定の記録（#1319）。`measure` が提案の前に 1 回だけ埋める。
         "code_metrics": code_metrics_record(ctx.work, getattr(args, "code_metrics", None) is not False),
     }
-
-
-def code_metrics_record(work: pathlib.Path, enabled: bool) -> dict[str, Any]:
-    """測定の設定を読み、`pending` の記録を作る（E1）。
-
-    読むのは書き込み用の作業ディレクトリ（Pull Request の head）の宣言である。**宣言が壊れていても
-    止めない**（前提 8）。既定で測り、宣言を使わなかった理由を設定に残す。
-    """
-    try:
-        text: Optional[str] = (work / codemetrics.DECLARATION_FILE).read_text(encoding="utf-8")
-    except FileNotFoundError:
-        text = None
-    except (OSError, UnicodeDecodeError) as exc:
-        config = codemetrics.load_config(None, enabled)
-        config.update(source=codemetrics.SOURCE_INVALID, error=f"読めない（{exc}）")
-        return {"config": config, "status": codemetrics.STATUS_PENDING}
-    config = codemetrics.load_config(text, enabled)
-    if config["source"] == codemetrics.SOURCE_INVALID:
-        info(f"⚠ {codemetrics.DECLARATION_FILE} を使いません（{config['error']}）。既定で測ります")
-    return {"config": config, "status": codemetrics.STATUS_PENDING}
 
 
 def cmd_init(args: argparse.Namespace) -> None:
@@ -714,7 +691,7 @@ def _resume(
     書き込みの前に中断するため、状態ファイルは変わらない。
     """
     info(f"↻ 前回中断した状態から再開します（手順 {state.get('phase')}）")
-    _ensure_code_metrics(state, args)
+    ensure_record(state, getattr(args, "code_metrics", None))
     budget_spec = RESUME_BUDGET_REPLACE if _before_plan(state) else RESUME_BUDGET_NOTIFY
     for line in statefile.apply_resume_args(state, args, budget_spec):
         info(line)
@@ -733,20 +710,6 @@ def _resume(
         state["limits"] = timeline.of_state(state)
     statefile.save(state_file, state)
     _emit_init(state)
-
-
-def _ensure_code_metrics(state: dict[str, Any], args: argparse.Namespace) -> None:
-    """旧い状態ファイル（測定の記録が無い）の再開。提案を始める前だけ記録を作る（決定 8）。
-
-    始めた後に測ると、既に動いている参加者と後から読む者で材料が食い違う（前提 6）。
-    """
-    if isinstance(state.get("code_metrics"), dict):
-        return
-    if ((state.get("phases") or {}).get("propose") or {}).get("started_at"):
-        return
-    enabled = getattr(args, "code_metrics", None)
-    state["code_metrics"] = code_metrics_record(
-        pathlib.Path(state["worktrees"]["work"]), True if enabled is None else bool(enabled))
 
 
 def _before_plan(state: dict[str, Any]) -> bool:
@@ -788,7 +751,7 @@ def _notify_view(
     辞書で、作業ディレクトリ root を解決済みのパスで持つ。引数の形のまま比べると、
     同じ値でも「違う」と知らせてしまう。
     """
-    view = dict(state)
+    view = {**state, "code_metrics": recorded_enabled(state)}
     view["baseline_test"] = (state.get("baseline_test") or {}).get("command")
     # ラウンドのテストを省いた（または全体のテストと同じ文字列だった）実行は `None` を持つ。
     # 同じ文字列を渡し直した再開を「違う」と知らせないため、全体のテストと同じなら同じと読む。
@@ -797,9 +760,6 @@ def _notify_view(
     if recorded is None and given_round == view["baseline_test"]:
         recorded = given_round
     view["round_test"] = recorded
-    record = state.get("code_metrics")
-    view["code_metrics"] = ((record.get("config") or {}).get("enabled")
-                            if isinstance(record, dict) else None)
     given = argparse.Namespace(**{f.arg: getattr(args, f.arg, None) for f in RESUME_NOTIFY_FIELDS})
     if given.model is not None:
         given.model = model_spec

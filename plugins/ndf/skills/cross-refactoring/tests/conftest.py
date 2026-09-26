@@ -46,7 +46,7 @@ def refactor() -> types.ModuleType:
 _MODULES = (
     "commands.converge", "commands.gate", "commands.implement", "commands.plan",
     "commands.phases", "commands.propose", "commands.report", "commands.setup",
-    "commands.measure", "codemetrics", "codemetrics_view",
+    "commands.measure", "codemetrics", "codemetrics_read", "codemetrics_record", "codemetrics_view",
     "allocation", "budget", "clock", "danger", "gitfacts", "github", "intake", "items",
     "outbound", "pathkinds", "paths", "phases", "plan", "process", "proposals", "publish",
     "results", "scope", "testcmd", "triage", "undo", "verify", "vocabulary", "worktree",

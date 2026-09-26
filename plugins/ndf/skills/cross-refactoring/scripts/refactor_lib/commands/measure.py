@@ -18,7 +18,8 @@ from typing import Any, Callable, Optional
 
 import statefile
 
-from .. import clock, codemetrics as cm, codemetrics_view as view, info, timeline
+from .. import clock, codemetrics as cm, codemetrics_read as read, codemetrics_view as view, info, timeline
+from ..codemetrics_record import propose_started
 from ..paths import git_out, load_state, work_dir
 from ..process import run_capture
 
@@ -29,10 +30,6 @@ KILL_GRACE = 5.0
 def metrics_path(tmp_dir: pathlib.Path, run_id: Any) -> pathlib.Path:
     """指標のファイルの置き場。"""
     return tmp_dir / f"code-metrics-rf{run_id}.md"
-
-
-def _propose_started(state: dict[str, Any]) -> bool:
-    return bool(((state.get("phases") or {}).get("propose") or {}).get("started_at"))
 
 
 def cmd_measure(args: argparse.Namespace) -> None:
@@ -48,7 +45,7 @@ def cmd_measure(args: argparse.Namespace) -> None:
     path, state = load_state(args.id)
     record = state.get("code_metrics")
     if isinstance(record, dict) and record.get("status") == cm.STATUS_PENDING \
-            and not _propose_started(state):
+            and not propose_started(state):
         if (record.get("config") or {}).get("enabled") is False:
             record["status"] = cm.STATUS_DISABLED
             info("ℹ 指標は測りません（--no-code-metrics）")
@@ -107,7 +104,7 @@ class Measurement:
 
     def _resolve(self, commands: tuple[str, ...], result: dict[str, Any]) -> Optional[dict[str, list[str]]]:
         """コマンドの起動の頭を決める。どれかが無ければ `tool_missing` にして `None`。"""
-        resolved = {c: cm.resolve(c, self.which) for c in commands}
+        resolved = {c: cm.resolve_runner(c, self.which) for c in commands}
         missing = [c for c, r in resolved.items() if r is None]
         if missing:
             runner = cm.COMMANDS[commands[0]][0]
@@ -129,7 +126,7 @@ class Measurement:
             self._fail(result, cm.TIMEOUT, f"{self.budget} 秒")
             return False
         if code not in ok:
-            tail = cm.tail_lines(err)
+            tail = read.tail_lines(err)
             self._fail(result, cm.TOOL_FAILED, f"終了コード {code}" + (f": {tail}" if tail else ""))
             return False
         return True
@@ -148,7 +145,7 @@ class Measurement:
             info(f"⚠ {cm.DECLARATION_FILE} を使わず既定で測ります"
                  f"（{cm.DECLARATION_INVALID}: {self.config.get('error')}）")
         files = tracked_files(self.work, list(self.state.get("target_scope") or []))
-        by_lang, ignored = cm.classify(files)
+        by_lang, ignored = cm.split_by_language(files)
         record["ignored_files"] = ignored
         if not by_lang:
             record.update(status=cm.STATUS_NO_LANGUAGE, languages=[], duplication=[],
@@ -197,7 +194,7 @@ class Measurement:
                 self.sources[rel] = data.decode("utf-8", errors="replace")
         for rel in by_lang.get("python", []):
             text = self.sources.get(rel)
-            self.parsed[rel] = cm.python_functions(text) if text is not None else None
+            self.parsed[rel] = read.python_functions(text) if text is not None else None
 
     # --- 言語ごと ---
     def language(self, lang: str, files: list[str]) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -226,7 +223,7 @@ class Measurement:
                       unreadable_files=len(unreadable))
         counts = {p: cm.count_lines(self.sources.get(p, "")) for p in files}
         section["functions"] = functions
-        section["files"] = cm.file_metrics(files, counts, functions, unreadable)
+        section["files"] = read.file_metrics(files, counts, functions, unreadable)
         return result, section
 
     def _python(self, files: list[str], prefixes: dict[str, list[str]],
@@ -240,8 +237,8 @@ class Measurement:
             if not self._outcome(result, code, err, timed_out):
                 return None
             try:
-                values, bad = cm.parse_ruff(out, self.roots)
-            except cm.UnreadableOutput as exc:
+                values, bad = read.parse_ruff(out, self.roots)
+            except read.UnreadableOutput as exc:
                 self._fail(result, cm.UNREADABLE_OUTPUT, str(exc))
                 return None
             ruff_values.update(values)
@@ -255,8 +252,8 @@ class Measurement:
                 return None
             try:
                 text = output.read_text(encoding="utf-8")
-                cognitive.update(cm.parse_complexipy(text, self.roots))
-            except (OSError, cm.UnreadableOutput) as exc:
+                cognitive.update(read.parse_complexipy(text, self.roots))
+            except (OSError, read.UnreadableOutput) as exc:
                 if code == 1:
                     self._outcome(result, code, err, False)
                 else:
@@ -264,7 +261,7 @@ class Measurement:
                 return None
         unreadable = invalid | {p for p in files if self.parsed.get(p) is None}
         listed = {p: self.parsed.get(p) for p in files}
-        return cm.python_function_metrics(listed, ruff_values, cognitive, unreadable), unreadable
+        return read.python_function_metrics(listed, ruff_values, cognitive, unreadable), unreadable
 
     def _lizard(self, files: list[str], prefixes: dict[str, list[str]],
                 result: dict[str, Any]) -> Optional[tuple[list[dict[str, Any]], set[str]]]:
@@ -274,8 +271,8 @@ class Measurement:
             if not self._outcome(result, code, err, timed_out):
                 return None
             try:
-                functions += cm.parse_lizard(out, self.roots)
-            except cm.UnreadableOutput as exc:
+                functions += read.parse_lizard(out, self.roots)
+            except read.UnreadableOutput as exc:
                 self._fail(result, cm.UNREADABLE_OUTPUT, str(exc))
                 return None
         return functions, set()
@@ -320,8 +317,8 @@ class Measurement:
         if not self._outcome(result, code, err, timed_out):
             return None
         try:
-            return cm.parse_symilar(out, self.roots)
-        except cm.UnreadableOutput as exc:
+            return read.parse_symilar(out, self.roots)
+        except read.UnreadableOutput as exc:
             self._fail(result, cm.UNREADABLE_OUTPUT, str(exc))
             return None
 
@@ -339,7 +336,7 @@ class Measurement:
         report = out_dir / "jscpd-report.json"
         try:
             text: Optional[str] = report.read_text(encoding="utf-8") if report.is_file() else None
-            return cm.parse_jscpd(text, self.roots)
-        except (OSError, cm.UnreadableOutput) as exc:
+            return read.parse_jscpd(text, self.roots)
+        except (OSError, read.UnreadableOutput) as exc:
             self._fail(result, cm.UNREADABLE_OUTPUT, str(exc))
             return None

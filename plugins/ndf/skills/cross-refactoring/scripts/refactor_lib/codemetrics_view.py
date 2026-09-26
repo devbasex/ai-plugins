@@ -28,7 +28,7 @@ _ROLE_LABELS = {"main": "本体", "test": "テスト"}
 _SOURCE_LABELS = {cm.SOURCE_DEFAULT: "既定", cm.SOURCE_DECLARED: "宣言"}
 
 
-def _num(value: Any) -> str:
+def _metric_cell(value: Any) -> str:
     return "—" if value is None else f"{value:,}" if isinstance(value, int) else str(value)
 
 
@@ -61,10 +61,10 @@ def _summary(functions: list[dict[str, Any]], files: list[dict[str, Any]], role:
         cog = [f["cognitive"] for f in fns if f.get("cognitive") is not None]
         parts.append(f"認知的複雑度 {COGNITIVE_THRESHOLD} 以上 "
                      f"{sum(1 for v in cog if v >= COGNITIVE_THRESHOLD):,} 個")
-        parts.append(f"最大 {_num(max(cog) if cog else None)}")
+        parts.append(f"最大 {_metric_cell(max(cog) if cog else None)}")
     cc = [f["cc"] for f in fns if f.get("cc") is not None]
     parts.append(f"CC {CC_THRESHOLD} 以上 {sum(1 for v in cc if v >= CC_THRESHOLD):,} 個")
-    parts.append(f"最大 {_num(max(cc) if cc else None)}")
+    parts.append(f"最大 {_metric_cell(max(cc) if cc else None)}")
     return f"{_ROLE_LABELS[role]}: " + "・".join(parts)
 
 
@@ -84,12 +84,12 @@ def _function_table(functions: list[dict[str, Any]], role: str, python: bool, li
         return [*lines, "（なし）", ""]
     if python:
         headers = ["ファイル", "関数", "認知", "CC", "分岐", "文", "引数", "return", "行"]
-        body = [(f["path"], f["symbol"], _num(f.get("cognitive")), _num(f.get("cc")),
-                 _num(f.get("branches")), _num(f.get("statements")), _num(f.get("args")),
-                 _num(f.get("returns")), _num(f.get("lines"))) for f in rows[:limit]]
+        body = [(f["path"], f["symbol"], _metric_cell(f.get("cognitive")), _metric_cell(f.get("cc")),
+                 _metric_cell(f.get("branches")), _metric_cell(f.get("statements")), _metric_cell(f.get("args")),
+                 _metric_cell(f.get("returns")), _metric_cell(f.get("lines"))) for f in rows[:limit]]
     else:
         headers = ["ファイル", "関数", "CC", "行"]
-        body = [(f["path"], f["symbol"], _num(f.get("cc")), _num(f.get("lines")))
+        body = [(f["path"], f["symbol"], _metric_cell(f.get("cc")), _metric_cell(f.get("lines")))
                 for f in rows[:limit]]
     return [*lines, mdtable.table_markdown(headers, body), ""]
 
@@ -100,8 +100,8 @@ def _file_table(files: list[dict[str, Any]], role: str, limit: int) -> list[str]
     lines = [f"### ファイル（{_ROLE_LABELS[role]}・行数の降順・上位 {limit}）", ""]
     if not rows:
         return [*lines, "（なし）", ""]
-    body = [(f["path"], _num(f.get("lines")), _num(f.get("functions")),
-             _num(f.get("max_function_lines"))) for f in rows[:limit]]
+    body = [(f["path"], _metric_cell(f.get("lines")), _metric_cell(f.get("functions")),
+             _metric_cell(f.get("max_function_lines"))) for f in rows[:limit]]
     return [*lines, mdtable.table_markdown(["ファイル", "行", "関数", "最長の関数の行"], body), ""]
 
 
@@ -135,7 +135,7 @@ def _clone_table(clones: list[dict[str, Any]], role: str, limit: int) -> list[st
     lines = [f"### 重複の箇所（{_ROLE_LABELS[role]}・行の降順・上位 {limit}）", ""]
     if not rows:
         return [*lines, "（なし）", ""]
-    body = [(_num(c.get("lines")), c.get("format") or "—",
+    body = [(_metric_cell(c.get("lines")), c.get("format") or "—",
              " ・ ".join(f"{loc['path']}:{loc['start']}-{loc['end']}" for loc in c["locations"]))
             for c in rows[:limit]]
     return [*lines, mdtable.table_markdown(["行", "形式", "場所"], body), ""]
@@ -177,7 +177,7 @@ def metrics_markdown(
     if failed:
         lines.append(mdtable.table_markdown(
             ["言語", "ツール", "ファイル", "理由"],
-            [(r["language"], r.get("tool") or "—", _num(r.get("files")), _failure_text(r))
+            [(r["language"], r.get("tool") or "—", _metric_cell(r.get("files")), _failure_text(r))
              for r in failed]))
     else:
         lines.append("（なし）")
@@ -224,15 +224,15 @@ def record_lines(state: dict[str, Any]) -> list[str]:
     lines.append(
         f"- 状態: {status} / 言語とツールの対応: {mapping_label(config)} / 所要: "
         f"{'—' if seconds is None else f'{seconds} 秒'}（使えた時間 "
-        f"{_num(record.get('deadline_seconds'))} 秒 / 上限 {_num(limit)} 秒）")
+        f"{_metric_cell(record.get('deadline_seconds'))} 秒 / 上限 {_metric_cell(limit)} 秒）")
     lines.append(f"- 指標のファイル: {record.get('file') or '（作らなかった）'}")
     if record.get("error"):
         lines.append(f"- 書き出せなかった理由: {record['error']}")
     rows = [(r.get("language"), r.get("tool") or "—", r.get("version") or "—",
-             r.get("runner") or "—", _num(r.get("files")), _seconds_cell(r), _result_cell(r, False))
+             r.get("runner") or "—", _metric_cell(r.get("files")), _seconds_cell(r), _result_cell(r, False))
             for r in record.get("languages") or []]
     rows += [(f"重複: {', '.join(r.get('languages') or [])}", r.get("tool") or "—",
-              r.get("version") or "—", r.get("runner") or "—", _num(r.get("files")),
+              r.get("version") or "—", r.get("runner") or "—", _metric_cell(r.get("files")),
               _seconds_cell(r), _result_cell(r, True))
              for r in record.get("duplication") or []]
     if rows:
@@ -249,5 +249,5 @@ def stderr_line(result: dict[str, Any], duplication: bool = False) -> str:
         return f"⚠ {who} {_failure_text(result)}"
     extra = f" ・ {int(result.get('clones') or 0):,} 箇所" if duplication else ""
     versions = " ・ ".join(v for v in (result.get("version"), result.get("runner")) if v)
-    return (f"✅ {who}（{versions}）{_num(result.get('files'))} ファイル "
+    return (f"✅ {who}（{versions}）{_metric_cell(result.get('files'))} ファイル "
             f"{float(result.get('seconds') or 0):.1f} 秒{extra}")

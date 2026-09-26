@@ -32,7 +32,7 @@ UNTRACKED = {"src/untracked.py": "def untracked_fn():\n    return 1\n"}
 
 
 class Run:
-    def __init__(self, tmp_path, monkeypatch, cmd_setup, files=FILES, tools=ALL_TOOLS,
+    def __init__(self, tmp_path, monkeypatch, codemetrics_record, files=FILES, tools=ALL_TOOLS,
                  declaration=None, enabled=True, scope=("src", "tests"), **overrides):
         self.work = tmp_path / "work"
         make_repo(self.work, files, UNTRACKED)
@@ -42,7 +42,7 @@ class Run:
         self.bin = install(tmp_path / "bin", tools)
         self.log = env_for(monkeypatch, tmp_path, self.bin)
         monkeypatch.setattr(shutil, "which", which_in(self.bin))
-        record = cmd_setup.code_metrics_record(self.work, enabled)
+        record = codemetrics_record.code_metrics_record(self.work, enabled)
         self.path = make_state_v2(tmp_path, self.work, target_scope=list(scope),
                                   code_metrics=record, **overrides)
         self.tmp = self.path.parent
@@ -79,8 +79,8 @@ def _section(text: str, heading: str) -> str:
 
 
 @pytest.fixture
-def run(tmp_path, monkeypatch, cmd_setup):
-    return lambda **kw: Run(tmp_path, monkeypatch, cmd_setup, **kw)
+def run(tmp_path, monkeypatch, codemetrics_record):
+    return lambda **kw: Run(tmp_path, monkeypatch, codemetrics_record, **kw)
 
 
 def test_measure_writes_one_file_per_language_with_main_and_test(run, cmd_measure, capsys):
@@ -325,26 +325,25 @@ def test_timeout_stops_the_process_group(run, cmd_measure, monkeypatch, tmp_path
 
 # ---------------- init と再開 ----------------
 
-def test_init_writes_measure_timeout_and_a_pending_record(cmd_setup, tmp_path):
+def test_init_writes_measure_timeout_and_a_pending_record(codemetrics_record, tmp_path):
     """AC13: 状態の `limits` に `measure_timeout` が載る。記録は `pending` から始まる。"""
-    record = cmd_setup.code_metrics_record(tmp_path, True)
+    record = codemetrics_record.code_metrics_record(tmp_path, True)
     assert record["status"] == "pending" and record["config"]["source"] == "default"
-    assert "code_metrics" in cmd_setup.NEW_RUN_DEFAULTS
     timeline = sys.modules["refactor_lib.timeline"]
     state = {"started_at": "2026-09-26T10:00:00+09:00", "budget_minutes": 30}
     assert timeline.of_state(state)["measure_timeout"] == 90
 
 
-def test_resume_of_an_old_state_measures_only_before_the_proposal(cmd_setup, tmp_path):
+def test_resume_of_an_old_state_measures_only_before_the_proposal(codemetrics_record, tmp_path):
     """決定 8: 記録の無い状態で再開したとき、提案を始める前だけ `pending` の記録を作る。"""
-    args = argparse.Namespace(code_metrics=None)
     before = {"worktrees": {"work": str(tmp_path)}, "phases": {}}
-    cmd_setup._ensure_code_metrics(before, args)
+    codemetrics_record.ensure_record(before, None)
     assert before["code_metrics"]["status"] == "pending"
+    assert codemetrics_record.recorded_enabled(before) is True
     after = {"worktrees": {"work": str(tmp_path)},
              "phases": {"propose": {"started_at": "2026-09-26T10:00:00+09:00"}}}
-    cmd_setup._ensure_code_metrics(after, args)
-    assert "code_metrics" not in after
+    codemetrics_record.ensure_record(after, None)
+    assert "code_metrics" not in after and codemetrics_record.recorded_enabled(after) is None
 
 
 def test_record_lines_without_a_record(codemetrics_view):
