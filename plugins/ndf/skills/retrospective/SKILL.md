@@ -46,7 +46,7 @@ allowed-tools:
 RECORD_REPO="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
 ```
 
-**起票先とは別のものである。** 起票先は課題の性質が決めるため、配布元のリポジトリになる
+**起票先とは別のものである。** 起票先は課題の性質が決めるため、上流リポジトリになる
 ことがある（[out-of-scope の判断表](../out-of-scope/references/issue-target.md)）。記録の
 投稿先は性質で変わらない。範囲外の課題を配布元へ回した変更でも、記録はこちらに残る。
 
@@ -99,7 +99,7 @@ issue と Pull Request の両方で検索する。**
 | 用語集 | `python3 "$SCRIPTS/glossary.py" diff --base <起点> --head <終点>` | その変更で足された語・廃止された語・意味の変わった語（コンテキストごと） |
 
 **用語集の変化は、その変更の起点と終点の 2 つの版で `glossary.py diff` を打って取る。** 起点と終点は
-「Pull Request の番号を特定する」で決めた Pull Request の base と merge のコミットである。宣言の無い
+「Pull Request の番号を特定する」で決めた Pull Request の base と merge のコミットである。用語集の設定の無い
 プロジェクトでは `items` が空になり、投稿に何も載せない。
 
 **context window の値は測って取る。** 記憶や体感で書かない。ミッションを複数のセッションで
@@ -153,7 +153,7 @@ python3 "$CLAUDE_PLUGIN_ROOT/skills/skill-stats/scripts/skill-stats.py" \
 
 | 手順 | 入力 | 出力 | 止まる条件 |
 | --- | --- | --- | --- |
-| 1. 開発の起点を解決する | `.ndf/worktree.json` の `base_branch`、origin | `$dev_base` | 宣言したブランチが origin にもローカルにも無い |
+| 1. 開発の起点を解決する | `.ndf/worktree.json` の `base_branch`、origin | `$dev_base` | 設定したブランチが origin にもローカルにも無い |
 | 2. 記録対象の基準ブランチを決める | 下表の場合、`$dev_base`（起点の issue を持たない変更だけが使う） | `$record_base` | ミッションをリリースした先のブランチを判別できない |
 | 3. 基準コミットから Pull Request を引く | `$record_base`、`$RECORD_REPO` | マージ済みの Pull Request 1 件の番号 | マージ済みへ絞った結果が 1 件でない |
 
@@ -292,7 +292,7 @@ worker を減らす・そのままのどれにするかと、その理由を 1 �
 ```
 
 **context window の表は貼るだけにする。** 載せてよいのは測定が出す値（数値・層・フェーズ・
-作業の種類・モデル名・終わり方・フェーズの中の連番）と、そこから導いた目印と判断の理由の文
+作業種別・モデル名・終わり方・フェーズの中の連番）と、そこから導いた目印と判断の理由の文
 だけである。**プロンプト・応答の本文・ファイルのパス・サブエージェントの識別子は投稿しない**
 （#159）。測定の出力はこの列だけを持つため、加工せずに貼れば足りる。
 
@@ -331,11 +331,11 @@ gh issue edit <issue番号> --repo "$RECORD_REPO" --body-file /tmp/issue-body.md
 | 成果物の良し悪し | コードレビューの工程が扱う |
 | 経緯の時系列そのもの | git の履歴と Pull Request に残っている |
 
-この工程に入ったら記録のコマンド `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "振り返り"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「記録のコマンド」を使う）。 **入口のこの記録ではボードの `Status` を書かない。** 先に `Done` にすると、ボードの `Auto-close issue` が課題を閉じ、reopen の手段が報告から落ちる。
+この工程に入ったら進捗記録 `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "振り返り"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「進捗記録」を使う）。 **入口のこの記録ではボードの `Status` を書かない。** 先に `Done` にすると、ボードの `Auto-close issue` が課題を閉じ、reopen の手段が報告から落ちる。
 
 ## ミッションを閉じる
 
-**振り返りを通る変更では、この工程がその実行の終わりの工程である。** 記録を投稿した後に、
+**振り返りを通る変更では、この工程がその実行の最終工程である。** 記録を投稿した後に、
 `progress-tracking` の「ミッションを閉じる」を行う。**手順はそこが正本で、ここには写さない。**
 ボードの `Status` を `Done` にするのも、課題を閉じるのも、その手順の中で行う。
 

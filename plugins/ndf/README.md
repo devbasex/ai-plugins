@@ -157,7 +157,7 @@ bash plugins/playwright-kit/dev.kiro/install.sh       # Kiro CLI
 | メインディレクトリの保護対象パスを編集しようとすると案内が出る | tool 実行前 | `PreToolUse` | `PreToolUse` | — | `PreToolUse` |
 | worktree で作業する旨の案内がプロンプトごとに出る | プロンプト送信時 | — | — | `userPromptSubmit` | — |
 | メインディレクトリに残った未コミット変更が提示される | セッション開始時 | `SessionStart` | `SessionStart` | `agentSpawn` | `PreInvocation` |
-| メインディレクトリのブランチが稼働中の worktree へ追従する（既定では動かさない。宣言の `follow_branch: true` で有効にする） | セッション開始時 | `SessionStart` | `SessionStart` | `agentSpawn` | `PreInvocation` |
+| メインディレクトリのブランチが稼働中の worktree へ追従する（既定では動かさない。worktree の設定の `follow_branch: true` で有効にする） | セッション開始時 | `SessionStart` | `SessionStart` | `agentSpawn` | `PreInvocation` |
 
 Kiro CLI に tool 実行前の案内が無いのは、この事象でモデルへ案内を渡す手段が終了コード 2 に
 限られ、それが tool の実行を拒否するためです。拒否しない方針のもとでは置けないため、パスを
@@ -171,10 +171,10 @@ Kiro CLI に tool 実行前の案内が無いのは、この事象でモデル�
 `injectSteps` で渡します。セッション開始時にあたる事象も持たないため、モデル呼び出しの通し番号が
 0 のときを開始時として扱います。
 
-**この仕組みはリポジトリ側の宣言ファイル `.ndf/worktree.json` があるときだけ動きます。**
-宣言が無いリポジトリでは、いずれの hook も何も出力せず終了コード 0 で終わります。
+**この仕組みはリポジトリ側の設定ファイル `.ndf/worktree.json` があるときだけ動きます。**
+設定が無いリポジトリでは、いずれの hook も何も出力せず終了コード 0 で終わります。
 
-宣言ファイルは `/ndf:worktree` を起動すると手順 0 で作られます。手で作るなら次を実行します。
+設定ファイルは `/ndf:worktree` を起動すると手順 0 で作られます。手で作るなら次を実行します。
 
 ```bash
 bash <プラグインのパス>/scripts/worktree-setup.sh init
@@ -209,10 +209,10 @@ bash <プラグインのパス>/scripts/worktree-setup.sh init
 
 | ランタイム | 待ち方 | 会話を切る |
 | --- | --- | --- |
-| Claude Code | hook ＋ 規約 | hook ＋ 引継ぎの 1 行 |
-| Codex | 規約だけ | 引継ぎの 1 行だけ |
-| Kiro CLI | 規約だけ | 引継ぎの 1 行だけ |
-| agy | 規約だけ | 引継ぎの 1 行だけ |
+| Claude Code | hook ＋ 規約 | hook ＋ 再開コマンド |
+| Codex | 規約だけ | 再開コマンドだけ |
+| Kiro CLI | 規約だけ | 再開コマンドだけ |
+| agy | 規約だけ | 再開コマンドだけ |
 
 規約は `skills/development-workflow/references/waiting.md`（待ち方）と
 `skills/development-workflow/references/context-window.md`（会話を切る）にあります。
@@ -224,7 +224,7 @@ Claude Code の SessionStart hook（`hooks/claude.json`）は上記に加えて�
 - `~/.claude/settings.json` の `cleanupPeriodDays` を 90 日以上に保つ
 - statusline 未設定時に NDF 標準 statusline を設定する
 - カットポイントで claude を起動し直すラッパー（`scripts/relay.py`）のコピーが在れば今の版で置き直す（`relay.py startup`。
-  版は後退させない）。10.17.4〜10.17.6 が自動で足した alias の囲みが残っていれば 1 度だけ知らせる。
+  版は後退させない）。10.17.4〜10.17.6 が自動で足した alias の管理ブロックが残っていれば 1 度だけ知らせる。
   **シェルの設定は書かない。** ラッパーを入れる・外すのは `/ndf:install-wrapper`（Claude Code だけ）
 
 Claude Code の Stop・Notification・PermissionRequest hook と `AskUserQuestion` の PreToolUse hook は、
@@ -338,7 +338,7 @@ Antigravity CLI をインストールしてログインします。ログイン�
 ```bash
 curl -fsSL https://antigravity.google/cli/install.sh | bash
 agy          # 初回だけ。ブラウザでログインする
-agy models   # 認証の確認
+agy models   # 認証確認
 ```
 
 ## Codex の暗黙起動抑止
@@ -426,7 +426,7 @@ installer の主なオプション・既定エージェントの切り替え・�
 
 ## 実機検証の記録
 
-kiro-cli の実機検証と、Skill 数が文脈量へ与える影響の実測は
+kiro-cli の実機検証と、Skill 数がコンテキスト量へ与える影響の実測は
 [docs/field-test-records.md](docs/field-test-records.md) にある。
 **その時点の実測であり、以後の構成変更には追随しない。**
 
