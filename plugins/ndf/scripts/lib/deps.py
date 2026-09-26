@@ -13,7 +13,8 @@
 
 `require()` は次の順に動く（決定 17 の表）。
 
-1. 渡したグループのパッケージがすべて import できる → そのまま戻る（uv の環境の中で起動されたとき）
+1. 渡したグループのパッケージがすべて import できる → `NDF_DEPS_REEXEC` を環境から外して戻る（uv の環境の中で
+   起動されたとき）。外すのは、子のプロセスが別のグループを要るときに起動し直せるようにするため
 2. 環境変数 `NDF_DEPS_REEXEC` がある → 起動し直したのに import できない。理由を出して終了コード 3
 3. uv が見つかる（`PATH`・`~/.local/bin`・`~/.cargo/bin`）→ `uv run --frozen --project <プラグインの根> --extra <グループ> ...
    python <パス> <引数>` で自分を起動し直す（`os.execve`）。環境は `UV_PROJECT_ENVIRONMENT` で
@@ -129,6 +130,8 @@ def require(group: str, *more: str, project: Path | None = None) -> None:
         raise ValueError(f"外部パッケージのグループに無い: {', '.join(unknown)}（{' / '.join(GROUPS)}）")
     missing = [g for g in groups if not importable(g)]
     if not missing:
+        # 起動し直した印は子のプロセス（別のグループを要るエントリポイント）へ継がせない。継ぐと子は起動し直さずに止まる
+        os.environ.pop(REEXEC_ENV, None)
         return
     if os.environ.get(REEXEC_ENV):
         mods = ", ".join(m for g in missing for m in GROUPS[g])
