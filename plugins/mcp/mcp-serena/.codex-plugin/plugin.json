@@ -1,6 +1,6 @@
 {
   "name": "mcp-serena",
-  "version": "2.1.2",
+  "version": "2.1.3",
   "description": "Serena MCP server (serena-agent 1.7.0) for symbol-level code reading and editing, with a per-project language-server setup skill and hooks that steer repeated grep/reads toward symbol tools",
   "author": {
     "name": "takemi-ohama",
