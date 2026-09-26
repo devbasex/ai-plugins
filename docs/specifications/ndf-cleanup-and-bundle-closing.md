@@ -141,7 +141,7 @@ Pull Request では `merged` の対象が起点ブランチそのものになる
   `progress-tracking` だけである
 - `merged` は課題を閉じない。閉じる語が指す課題のうち OPEN のものを報告に載せるだけである
 - 起点・本番のチャネル・現在のブランチは、同意の有無にかかわらず削除の対象に入らない
-- 退避が 1 件でも失敗した worktree は、同意の有無にかかわらず消さない（`--force` も使わない）
+- 退避が 1 件でも失敗した worktree は、同意があっても消さない（`--force` も使わない）
 - 止まらずに行った削除は、すべて完了報告に戻し方つきで載る
 
 ### 実行前確認の守り方
@@ -246,7 +246,7 @@ Pull Request を選ぶため、別のミッションの課題を閉じうる。
 
 | 観点 | 確かめ方 |
 | --- | --- |
-| `gh issue close` と `status "Done"` を持つ `SKILL.md` が `progress-tracking` だけ、承認ゲートが 2 つのまま | 文書を読んで確かめる（照合していたテストは #885 で削除） |
+| `gh issue close` と `status "Done"` を持つ `SKILL.md` が `progress-tracking` だけ、承認ゲートが 2 つのまま | 文書を読んで確かめる |
 | 3 つの終わりの工程で「ミッションを閉じる」が `issue-upkeep` より前にある | 同上 |
 | リリースの記録の読み取りと閉じる手順が手順書のコード例のとおりに動く（本番の版のブロックの選択、`配布なし` の後のブロック、`ミッション:` の行の取り出し、ボード → close → 読み直しの順、一覧が空なら止まる、最初の読みに失敗したらボードを触らない） | `plugins/ndf/skills/development-workflow/tests/test_workflow_hooks.py`（`closing_step` / `record_reader` を名前に持つテスト。疑似 `gh` で呼び出しの順を固定する） |
 | `release/SKILL.md` の行数が上限（365 行）に収まる | `plugins/ndf/skills/release/tests/test_completion_check.py`（`test_the_skill_md_stays_within_its_budget`） |

@@ -4,7 +4,7 @@
 直前のアナウンスを「約 N 秒後に自動で新しい会話へ切り替わる。キー入力やスクロールをせずに、そのまま待つ」に
 固定する。N はアイドルの秒数（`NDF_RELAY_QUIET`、既定 5）である。文面と秒数は `relay.py notice` が出し、
 conductor・`/ndf:restart`・文脈量の hook（`token-guard.sh`）はそれを写す。あわせて、カットポイントの
-再起動は承認ゲートではなく、ブロックの前に承認・確認を挟まない。Claude Code だけが対象である（#980）。
+再起動の前には承認・確認を挟まない。Claude Code だけが対象である。
 
 **ラッパーの本体の契約は [ndf-relay-segment-restart.md](ndf-relay-segment-restart.md)、`/ndf:restart` と
 承認ゲートを越えない守りは [ndf-relay-install-and-restart.md](ndf-relay-install-and-restart.md) が持つ。**
@@ -155,5 +155,5 @@ Python の `round`（最も近い整数、ちょうど半分は偶数へ。切�
 
 - [#980](https://github.com/devbasex/ai-plugins/issues/980)（設計は [PR #983](https://github.com/devbasex/ai-plugins/pull/983)、実装は [PR #988](https://github.com/devbasex/ai-plugins/pull/988)）
 - [ndf-relay-segment-restart.md](ndf-relay-segment-restart.md) — ラッパーの本体
-- [ndf-relay-install-and-restart.md](ndf-relay-install-and-restart.md) — `/ndf:restart` と承認ゲートを越えない守り（#928）
+- [ndf-relay-install-and-restart.md](ndf-relay-install-and-restart.md) — `/ndf:restart` と承認ゲートを越えない守り
 - [ndf-token-waits-and-context-cut.md](ndf-token-waits-and-context-cut.md) — 文脈量の hook
