@@ -24,6 +24,7 @@ import pytest
 import review_lib
 import review_lib.commands.read_result
 import review_lib.github
+import gh_call  # review_lib が sys.path に足したライブラリの置き場から読む
 
 PR = 4261
 AGENT = "agy"
@@ -83,7 +84,8 @@ def test_a_posted_review_is_merged(tmp_dir, state_mod, monkeypatch):
 def test_the_lookup_reads_the_review_id_from_the_url(state_mod, monkeypatch):
     calls: list[list[str]] = []
     monkeypatch.setattr(
-        review_lib, "_sh", lambda cmd, check=True: calls.append(list(cmd)) or "4961230016"
+        gh_call, "RUNNER",
+        lambda args, stdin=None, cwd=None: calls.append(list(args)) or gh_call.GhResult(0, "4961230016\n", "")
     )
 
     assert review_lib.github._review_exists("o/r", PR, REVIEW_URL) is True
@@ -92,7 +94,7 @@ def test_the_lookup_reads_the_review_id_from_the_url(state_mod, monkeypatch):
 
 def test_the_lookup_is_false_without_a_review_id(state_mod, monkeypatch):
     monkeypatch.setattr(
-        review_lib, "_sh", lambda cmd, check=True: pytest.fail("識別子が無いのに GitHub を呼んでいる")
+        gh_call, "RUNNER", lambda *a, **k: pytest.fail("識別子が無いのに GitHub を呼んでいる")
     )
 
     assert review_lib.github._review_exists("o/r", PR, "https://example.test/") is False
@@ -100,16 +102,16 @@ def test_the_lookup_is_false_without_a_review_id(state_mod, monkeypatch):
 
 
 def test_the_lookup_is_none_when_the_api_fails(state_mod, monkeypatch):
-    def boom(cmd, check=True):
-        raise RuntimeError("network")
+    def boom(args, stdin=None, cwd=None):
+        return gh_call.GhResult(1, "", "network")
 
-    monkeypatch.setattr(review_lib, "_sh", boom)
+    monkeypatch.setattr(gh_call, "RUNNER", boom)
 
     assert review_lib.github._review_exists("o/r", PR, REVIEW_URL) is None
 
 
 def test_the_lookup_is_none_when_the_api_returns_nothing(state_mod, monkeypatch):
     """取得できなかったことと、無いことを混同しない。"""
-    monkeypatch.setattr(review_lib, "_sh", lambda cmd, check=True: "")
+    monkeypatch.setattr(gh_call, "RUNNER", lambda args, stdin=None, cwd=None: gh_call.GhResult(0, "", ""))
 
     assert review_lib.github._review_exists("o/r", PR, REVIEW_URL) is None

@@ -19,7 +19,6 @@ import socket
 import subprocess
 import sys
 import time
-import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
@@ -322,21 +321,10 @@ def current_pr(cwd: str) -> str | None:
 
 
 def slack_api(method: str, data: dict) -> dict | None:
-    base = (os.environ.get("NDF_SLACK_API_BASE") or "https://slack.com").rstrip("/")
-    req = urllib.request.Request(
-        f"{base}/api/{method}", data=json.dumps(data).encode("utf-8"), method="POST",
-        headers={"Authorization": f"Bearer {os.environ.get('SLACK_BOT_TOKEN', '')}",
-                 "Content-Type": "application/json; charset=utf-8"})
-    try:
-        with urllib.request.urlopen(req, timeout=SLACK_TIMEOUT) as res:
-            result = json.loads(res.read().decode("utf-8") or "{}")
-    except (OSError, ValueError) as exc:
-        log("slack error:", method, type(exc).__name__)
-        return None
-    if not result.get("ok"):
-        log("slack not ok:", method, result.get("error"))
-        return None
-    return result
+    """Slack の Web API を 1 回呼ぶ（`lib/notify.py`）。失敗は None で、理由はログへ書く。"""
+    import notify  # 切り離した子（--send）の中でだけ読む。hook の経路は外部パッケージを使わない
+    return notify.slack_call(method, data, timeout=SLACK_TIMEOUT,
+                             on_error=lambda m, why: log("slack error:", m, why))
 
 
 def build_notice(payload: dict) -> wn.Notice:
@@ -377,6 +365,8 @@ def send_notice(payload: dict) -> None:
 def main(argv: list[str]) -> int:
     try:
         if len(argv) >= 2 and argv[0] == "--send":
+            import deps  # 切り離した子だけが uv の環境へ起動し直す（hook の経路は D5 まで標準ライブラリだけ）
+            deps.require("notify")
             send_notice(json.loads(argv[1]))
         elif len(argv) >= 2 and argv[0] == "--runtime" and argv[1] in RUNTIMES:
             run_hook(argv[1])

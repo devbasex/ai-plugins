@@ -28,6 +28,11 @@ sys.path.insert(
 )
 
 import assignment  # noqa: E402
+import deps  # noqa: E402
+
+# `refactor_lib` の呼び名の表の読み取り（md）と報告の表（mdtable）が外部パッケージを使う。
+# **`refactor_lib` の import より前に呼ぶ**（呼び名の表は取り込みの時点で読む）。
+deps.require("md", "mdtable")
 
 # 分割したモジュールは同じディレクトリの `refactor_lib/` にある。**自身の
 # ディレクトリを探索先へ入れる。** `uv run --script` で起動したときの現在地は、

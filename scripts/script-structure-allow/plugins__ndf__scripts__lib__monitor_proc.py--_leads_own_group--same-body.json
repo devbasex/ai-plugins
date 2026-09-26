@@ -1,1 +1,0 @@
-{"path": "plugins/ndf/scripts/lib/monitor_proc.py", "name": "_leads_own_group", "kind": "same-body", "reason": "L1 で包みの lib/procs.py に同じ判定を置いた。D3 が monitor_proc を procs の上へ置き換えたら消す"}

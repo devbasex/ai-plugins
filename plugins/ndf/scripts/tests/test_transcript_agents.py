@@ -310,10 +310,12 @@ def test_format_list_omits_agent_id_column_when_disabled(mod, records) -> None:
     rec_list = list(records.values())
     text = mod.format_list(rec_list, with_agent_id=False)
     lines = text.splitlines()
-    assert lines[0] == mod.LIST_HEADER
-    assert lines[1] == mod.LIST_RULE
+    header = ("| 層 | フェーズ | 深さ | モデル | 固定費 | 最大充填 | 実作業 | 応答数 "
+              "| 所要（分） | 終わり方 | 中断 |")
+    assert lines[0] == header
+    assert lines[1] == "| --- | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | --- | ---: |"
     assert "agent_id" not in lines[0]
-    expected_col_count = len(mod.LIST_HEADER.split("|")[1:-1])
+    expected_col_count = len(header.split("|")[1:-1])
     for line in lines[2:]:
         cols = line.split("|")[1:-1]
         assert len(cols) == expected_col_count

@@ -411,3 +411,19 @@ def test_plan_kind_reads_the_old_key_too(tmp_path, key):
     plan = tmp_path / "plan.json"
     plan.write_text(json.dumps({key: "配布（開発版）"}, ensure_ascii=False))
     assert load_mission_state().plan_kind(str(plan)) == "開発版"
+
+
+def test_mvv_sections_keep_a_heading_inside_a_fence():
+    """lib/md.py の上で読む（#1142 の D1）: 囲みの中の `## ` は Mission の節を切らない。"""
+    text = ("## Mission\n\n使命\n\n```md\n## 囲みの中\n```\n\n"
+            "## Vision\n\n像\n\n## Value\n\n価値\n\n# 別の文書\n")
+    out = load_mission_state().mvv_sections(text)
+    assert out == ("## Mission\n\n使命\n\n```md\n## 囲みの中\n```\n\n## Vision\n\n像\n\n## Value\n\n価値\n")
+
+
+def test_find_section_skips_headings_inside_a_fence():
+    text = "# 文書\n\n```\n## 今の会話の進み\n```\n\n## 今の会話の進み\n\n本文\n\n## 次\n"
+    head_start, body_start, body_end, head_line = load_mission_state().find_section(text, "今の会話の進み")
+    assert head_line == "## 今の会話の進み\n"
+    assert text[body_start:body_end] == "\n本文\n\n"
+    assert text[head_start:body_start] == head_line

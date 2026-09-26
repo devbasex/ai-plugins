@@ -22,6 +22,9 @@ import sys
 # `review_lib` はこのスクリプトの隣にある。テストと drive.py は `spec_from_file_location` で読むため、
 # スクリプトの置き場所は `sys.path` に自動では入らない。
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[3] / "scripts" / "lib"))
+import deps  # noqa: E402
+deps.require("github", "mdtable")  # GitHub の REST は githubkit、報告の表は tabulate（外部パッケージの import より前）
 from review_lib import participants as participants_mod  # noqa: E402
 from review_lib.commands import (  # noqa: E402
     collect_critiques, init, judge, loop, merge_fix, read_result, report, start_round, verify_findings)

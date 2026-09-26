@@ -58,6 +58,7 @@ _LIB = pathlib.Path(__file__).resolve().parent
 if str(_LIB) not in sys.path:
     sys.path.insert(0, str(_LIB))
 import clock  # noqa: E402  時刻の読み取り（#1142 の L0）
+import deps  # noqa: E402  外部パッケージの環境（#1142 の決定 17）
 import gh_quota  # noqa: E402  上限の語（#1142 の L0）
 import proc  # noqa: E402  子プロセスの起動（#1142 の L0）
 
@@ -739,19 +740,17 @@ def retry(cmd: list[str], max_wait: float = 900.0, interval: float = 30.0,
     **Pull Request の作成は積めない。** 作成が終わるまで新しい番号が決まらず、番号が
     決まらないと以降のすべての項目の宛先が決まらない。巻き直しの 3 種（作成・close・
     reopen）はこの経路で回復を待つ。待つあいだラウンドは進まないが、巻き直しは
-    8 ラウンドに 1 度しか起きない。
+    8 ラウンドに 1 度しか起きない。待ちとやり直しは `lib/waits.py`（tenacity の包み）が持つ。
     """
-    waited = 0.0
-    while True:
-        attempt = run(cmd, stdin=stdin)
-        if attempt.ok or not is_rate_limited(attempt):
-            return attempt
-        if interval <= 0 or waited + interval > max_wait:
-            return attempt
-        print(f"⏳ 上限のため {interval:g} 秒待って再実行します: {' '.join(cmd)}",
-              file=sys.stderr)
-        sleep(interval)
-        waited += interval
+    import waits  # 読む側（state.py ほか）が tenacity を要しないよう、ここで読む
+
+    def announce(_seconds: float, _next: int) -> None:
+        print(f"⏳ 上限のため {interval:g} 秒待って再実行します: {' '.join(cmd)}", file=sys.stderr)
+
+    return waits.retry_call(lambda: run(cmd, stdin=stdin),
+                            lambda a: not a.ok and is_rate_limited(a),
+                            max_wait=max_wait, interval=interval, sleep=sleep,
+                            on_wait=announce).value
 
 
 # ---------------- CLI ----------------
@@ -797,6 +796,7 @@ def cmd_count(args: argparse.Namespace) -> int:
 
 
 def cmd_retry(args: argparse.Namespace) -> int:
+    deps.require("waits")  # 標準入力を読む前に起動し直す
     stdin = None if sys.stdin.isatty() else sys.stdin.read()
     attempt = retry(args.command, max_wait=args.max_wait, interval=args.interval,
                     stdin=stdin)

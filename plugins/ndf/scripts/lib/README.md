@@ -25,10 +25,10 @@
 | [worktree-registry.sh](worktree-registry.sh) | テスト環境の採番と台帳・排他・スロット | 同上 |
 | [projects-common.sh](projects-common.sh) | GitHub Projects のボードへの記録 | `development-workflow` |
 | [lock-common.sh](lock-common.sh) | 排他の取得と解放（#293） | 上の 2 つと `development-workflow` |
-| [monitor.py](monitor.py) | 別プロセスの多軸監視。対象と命名規則を引数で受ける | 収束ループの 2 つ / `external-ai.py` |
+| [monitor.py](monitor.py) | 別プロセスの多軸監視。対象と命名規則を引数で受ける。`main()` が `deps.require("procs", "locks")` を呼ぶ | 収束ループの 2 つ / `external-ai.py` |
 | [monitor_patterns.py](monitor_patterns.py) | 監視の照合の表（利用上限・致命・警告・無害・CLI の上限・codex の終わりの印）。標準ライブラリだけを読む | `monitor.py` / `supervise_lib/claude.py`（`USAGE_LIMIT_FATAL`） |
 | [monitor_scan.py](monitor_scan.py) | 監視のログの末尾の読み取りと、照合の表による致命・警告・利用上限の判定 | `monitor.py` |
-| [monitor_proc.py](monitor_proc.py) | 監視する CLI の pid ファイル・生死とゾンビの判定・cmdline の照合・停止（プロセスグループごと）。標準ライブラリだけを読む | `monitor.py` |
+| [monitor_proc.py](monitor_proc.py) | 監視する CLI の pid ファイル・停止（プロセスグループごと）。生死とゾンビの判定・cmdline の照合は `procs.py` へ渡す（使う関数の中で import する） | `monitor.py` |
 | [monitor_types.py](monitor_types.py) | 監視の既定値（上限の表の別名）・一時ディレクトリ・設定と状態の型 | `monitor.py` / `monitor_outcome.py` |
 | [monitor_loop.py](monitor_loop.py) | 担当 1 者の監視ループ（上限・無進捗・早期のエラー・プロセスの終了から結末を決める） | `monitor.py` |
 | [limits.py](limits.py) | 監視の上限（工程ごと）・無進捗の許容（担当ごと）・CLI の上限（監視の上限 + 120 秒）の表。既定値はここだけが持つ（#598 / #537）。CLI の上限の上書きは `resolve_cli_timeout` と `cli-timeout --override N [--no-floor]` の 1 つで決める（既定では導いた値より短くできない） | 同上 |
@@ -65,9 +65,9 @@
 | [repo.py](repo.py) | メインディレクトリ・`owner/repo`・slug・宣言のベースブランチ（git だけで決める） | `cross-review`（`review_lib/`） / `cross-refactoring`（`drive.py`・`commands/setup.py`）（C1〜C7 で各スクリプト） |
 | [loop_drive.py](loop_drive.py) | 収束ループの drive の部品（`call`・`parse_vars`・`review_status`） | 収束ループの 2 つの `drive.py` |
 | [deps.py](deps.py) | 外部パッケージを使うエントリポイントが最初に呼ぶ `require("<グループ>")`。import できなければ uv の環境（宣言と版の固定はプラグインルートの `pyproject.toml` と `uv.lock`。`project=` を渡せばその根の 1 組と `<根>/.venv`）で起動し直し、uv が無ければ版を固定して入れる。入れられなければ終了コード 3。hook とラッパーのバージョンディレクトリは使わない | 外部パッケージを使うエントリポイント・根の `scripts/`（`scripts/lib/ndf_wrappers.py` を通す） |
-| [md.py](md.py) | Markdown の構造の読み取り（囲み・見出し・節・表・地の文・リンクとアンカー）。markdown-it-py を呼ぶのはここだけ。書き込みは読み取った行の区間で呼び出し側が行う | L1 の時点では無し（D1〜D8 が呼び出し側を置き換える） |
-| [mdtable.py](mdtable.py) | Markdown の表の組み立て（列の幅を揃えない行・セルの縦棒のエスケープ・数の列の右寄せ）。tabulate を呼ぶのはここだけ | 同上 |
-| [schema.py](schema.py) | JSON と設定の形の検証（`Shape` と `load_shape`）。pydantic の誤りを日本語の 1 行（`ShapeError`）へ直し、語彙に無い値を下げる読みは `lenient_choice` | 同上 |
+| [md.py](md.py) | Markdown の構造の読み取り（囲み・見出し・節・表・地の文・リンクとアンカー）。markdown-it-py を呼ぶのはここだけ。書き込みは読み取った行の区間で呼び出し側が行う | `cross-refactoring`（`refactor_lib/vocabulary.py`）。ほかは D1〜D8 が呼び出し側を置き換える |
+| [mdtable.py](mdtable.py) | Markdown の表の組み立て（列の幅を揃えない行・セルの縦棒のエスケープ・数の列の右寄せ）。tabulate を呼ぶのはここだけ | `cross-refactoring`（`refactor_lib/plan.py`・`commands/report.py`）。ほかは D1〜D8 が呼び出し側を置き換える |
+| [schema.py](schema.py) | JSON と設定の形の検証（`Shape` と `load_shape`）。pydantic の誤りを日本語の 1 行（`ShapeError`）へ直し、語彙に無い値を下げる読みは `lenient_choice` | L1 の時点では無し（D1〜D8 が呼び出し側を置き換える） |
 | [procs.py](procs.py) | プロセスの生死（ゾンビは死）・親子・木の停止（グループの先頭ならグループへ）・メモリと cgroup。psutil を呼び、`/proc/` を読むのはここだけ | 同上 |
 | [locks.py](locks.py) | ファイルロック（`<対象>.lock` で取る排他・待たない取得・排他つきの 1 行の追記）。filelock を呼び、`fcntl` を使うのはここだけ | 同上 |
 | [shparse.py](shparse.py) | シェルの構文木（tree-sitter-bash）。試行 T2 で見つけた構文木の癖 5 つを直して渡す。hook の経路で使うため `deps.require()` を呼ばない | 同上 |
