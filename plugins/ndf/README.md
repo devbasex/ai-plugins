@@ -89,7 +89,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.17.30-dev.1）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.17.30-dev.2）
 ```
 
 ### agy
@@ -119,20 +119,16 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.17.30-dev.1 へ更新するとき
+## v10.17.30-dev.2 へ更新するとき
 
-- ミッション m1142b の課題を develop へ取り込む。（#1255）
-- 差分が 20000 行を超える大きな PR でも、cross-refactoring の検査の範囲に PR の変更ファイルがすべて入り、init が通る（#1256）
-- Add: 決定 17 の試行を実験版に置き、結果を記録する（#1142 ミッション 2 の L0 の前）（#1238）
-- new mission が書く検査のプランの PR 本文は、課題を閉じる語を含まず、課題を「関連: #番号」として並べる（#1239）
-- NDF のスクリプトのエントリポイントは、必要な外部パッケージを揃えた uv の環境で起動し直してから動きます。（#1242）
-- Refactor: #1142 ミッション 2 の C5 worktree（worktree-common.sh を分ける）（#1243）
-- Refactor: #1142 ミッション 2 の C2 cross-review（state.py を review_lib へ分ける）（#1244）
-- Refactor: #1142 ミッション 2 の C6 ラッパー（relay.py を relay_lib へ分ける）（#1245）
-- Refactor: #1142 ミッション 2 の C7 リリースと文書（instructions-check を instructions_lib へ分け、重複をライブラリへ置き換える）（#1246）
-- Refactor: #1142 ミッション 2 の C1 プランの実行（supervise.py を supervise_lib へ分ける）（#1247）
-- Refactor: #1142 ミッション 2 の C4 cross-refactoring（gitfacts を分け、loop_drive の呼び出しを揃える）（#1252）
-- Refactor: #1142 ミッション 2 の C3 外部 CLI と記録（monitor を分ける）（#1254）
+- mcp-redash の操作は `/redash <add|list|remove|status>` の 1 本で行う（#1250）
+- 以前の 4 Skill の呼び方からの移行手順は README に載っている（#1250）
+- 計画書の雛形を plan_skeleton.py で作れる（#1251）
+- シナリオを lint_scenario.py で静的に検査できる。playwright-authoring には app_ready.sh も入る（#1251）
+- playwright-kit-ops のスクリプトは標準出力へ JSON を出す（#1251）
+- 文書に終了コードの表がある（#1251）
+- 無し（検査の修正だけ）（#1260）
+- `scripts/token-usage.py` は、版を接尾辞の数字の大きさの順に並べる（`10.17.30-dev.9` の次に `10.17.30-dev.10`）（#1261）
 
 ## Playwright テストについて
 
@@ -369,7 +365,7 @@ agy models   # 認証確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.17.30-dev.1/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.17.30-dev.2/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -391,14 +387,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.30-dev.1/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.30-dev.2/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.17.30-dev.1  <path>
+# => ndf@ai-plugins  installed, enabled  10.17.30-dev.2  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。
