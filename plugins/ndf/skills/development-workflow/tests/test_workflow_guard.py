@@ -234,29 +234,29 @@ def test_a_missing_jq_is_denied(repo: Path, state: Path, tmp_path: Path) -> None
                    extra={"PATH": path_with(tmp_path / "bin", without=("jq",))})
 
     assert decision(result)["permissionDecision"] == "deny"
-    assert "判定に要る jq または awk が無い" in decision(result)["permissionDecisionReason"]
+    assert "判定に要る jq または hook の環境が無い" in decision(result)["permissionDecisionReason"]
 
 
-def test_a_missing_awk_is_denied(repo: Path, state: Path, tmp_path: Path) -> None:
-    """語の分割に要る awk が無くても、マージらしい本文は止める。
+def test_a_missing_hook_environment_is_denied(repo: Path, state: Path, tmp_path: Path) -> None:
+    """語の分割に要る hook の環境（#1142 の決定 20）が無くても、マージらしい本文は止める。
 
-    awk が無いと `wf_split` が何も出さず、`wf_merge_target` は「マージではない」と
+    環境が無いと `wf_split` が何も出さず、`wf_merge_target` は「マージではない」と
     読める 1 を返す。そのまま通すと拒否の判定へ一度も入らない fail-open になる。
     """
     result = guard(repo, state, "gh pr merge 268 --squash",
-                   extra={"PATH": path_with(tmp_path / "bin", without=("awk",))})
+                   extra={"NDF_HOOK_PYTHON": str(tmp_path / "no-python")})
 
     assert decision(result)["permissionDecision"] == "deny"
-    assert "awk" in decision(result)["permissionDecisionReason"]
+    assert "hook の環境" in decision(result)["permissionDecisionReason"]
 
 
-def test_a_missing_awk_with_a_global_option_is_denied(repo: Path, state: Path, tmp_path: Path) -> None:
+def test_a_missing_hook_environment_with_a_global_option_is_denied(repo: Path, state: Path, tmp_path: Path) -> None:
     """粗い見分けも `gh` と `pr` の間のグローバルオプションを越える。"""
     result = guard(repo, state, "gh -R devbasex/ai-plugins pr merge 268 --squash",
-                   extra={"PATH": path_with(tmp_path / "bin", without=("awk",))})
+                   extra={"NDF_HOOK_PYTHON": str(tmp_path / "no-python")})
 
     assert decision(result)["permissionDecision"] == "deny"
-    assert "awk" in decision(result)["permissionDecisionReason"]
+    assert "hook の環境" in decision(result)["permissionDecisionReason"]
 
 
 def test_a_detached_head_without_a_number_is_denied(repo: Path, state: Path, tmp_path: Path) -> None:
@@ -505,12 +505,13 @@ def stages_of(state: Path, issue: int) -> list[str]:
     [
         ('a "b c"; d', ["a", "b c", "", "d"]),
         ("x 2>&1 | y", ["x", "2>&1", "", "y"]),
-        ("cd x&&gh pr merge 1", ["cd", "x", "", "", "gh", "pr", "merge", "1"]),
+        # 境目はコマンドの間に 1 つ（#1142 の決定 20 の前は演算子の 1 文字ごとに出ていた）
+        ("cd x&&gh pr merge 1", ["cd", "x", "", "gh", "pr", "merge", "1"]),
         ("cmd &>/dev/null", ["cmd", "&>/dev/null"]),
         ("a b\nc", ["a", "b", "", "c"]),
         ("gh pr \\\nmerge 268", ["gh", "pr", "merge", "268"]),
         ("echo >&2 x", ["echo", ">&2", "x"]),
-        ("(a)|b||c", ["", "a", "", "", "b", "", "", "c"]),
+        ("(a)|b||c", ["a", "", "b", "", "c"]),
         ("sleep 1 & wait", ["sleep", "1", "", "wait"]),
         ('echo "a;b|c&&d(e)"', ["echo", "a;b|c&&d(e)"]),
         ("echo 'x\ny' z", ["echo", "x\ny", "z"]),

@@ -2,6 +2,7 @@
 """NDF の hook の 1 本のエントリポイント（#1142 の決定 20）。PreToolUse・Stop・Notification ほかを標準入力の JSON で受ける。
 
     <hook の環境の python> hook.py [worktree-guard | token-guard | wait-notify] [--runtime claude|codex|kiro]
+    <hook の環境の python> hook.py words     < コマンドの本文   # 語の分割（workflow-guard.sh の wf_split）
 
 副命令を省くと、事象と Tool の名前で振り分ける。
 
@@ -26,7 +27,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE / "lib"))
 sys.path.insert(0, str(HERE))
 
-COMMANDS = ("worktree-guard", "token-guard", "wait-notify")
+COMMANDS = ("worktree-guard", "token-guard", "wait-notify", "words")
 RUNTIMES = ("claude", "codex", "kiro")
 NOTIFY_EVENTS = ("Stop", "stop", "Notification", "PermissionRequest")
 
@@ -89,6 +90,11 @@ def dispatch(command: str, runtime: str, raw: dict | None) -> dict | str | None:
 def main(argv: list[str]) -> int:
     try:
         command, runtime = _args(argv)
+        if command == "words":  # 本文は JSON でない。語を NUL で区切って出す（hook_lib/words.py）
+            from hook_lib import words
+            got = words.command_stream(sys.stdin.read())
+            sys.stdout.write("".join(w + "\0" for w in got))
+            return 0
         try:
             raw = json.loads(sys.stdin.read() or "null")
         except (OSError, ValueError):
