@@ -89,7 +89,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.17.30）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.17.31-dev.1）
 ```
 
 ### agy
@@ -119,25 +119,10 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.17.30 へ更新するとき
+## v10.17.31-dev.1 へ更新するとき
 
-- Add: 決定 17 の試行を実験版に置き、結果を記録する（#1142 ミッション 2 の L0 の前）（#1238）
-- new mission が書く検査のプランの PR 本文は、課題を閉じる語を含まず、課題を「関連: #番号」として並べる（#1239）
-- mcp-redash の操作は `/redash <add|list|remove|status>` の 1 本で行う（#1250）
-- 以前の 4 Skill の呼び方からの移行手順は README に載っている（#1250）
-- 計画書の雛形を plan_skeleton.py で作れる（#1251）
-- シナリオを lint_scenario.py で静的に検査できる。playwright-authoring には app_ready.sh も入る（#1251）
-- playwright-kit-ops のスクリプトは標準出力へ JSON を出す（#1251）
-- 文書に終了コードの表がある（#1251）
-- ミッション m1142b の課題を develop へ取り込む。（#1255）
-- 関連: #1142（#1255）
-- Docs: #1142 の設計の追加（汎用の処理を外部ライブラリへ・決定 19・20・ミッション 2b）（#1257）
-- Add: 計画の実行とキューを置き換えるライブラリの候補を実験版で試し、結果を記録する（#1142 の不足 i）（#1258）
-- 無し（検査の修正だけ）（#1260）
-- `scripts/token-usage.py` は、版を接尾辞の数字の大きさの順に並べる（`10.17.30-dev.9` の次に `10.17.30-dev.10`）（#1261）
-- Fix: 行数の上限の例外リストを 1 項目 1 ファイルへ分け、並列の計画の衝突を無くす（#1262）
-- Add: 試行 T2（hook を 1 本の Python と tree-sitter-bash へまとめる成り立ちと所要）（#1264）
-- supervise.py の run では、claude -p の worker が「結果: 判断が要る」か「結果: できなかった」で終えると、そのステップは失敗になります。（#1265）
+- ミッション m1142c の課題を develop へ取り込む。（#1300）
+- 関連: #1142（#1300）
 
 ## Playwright テストについて
 
@@ -374,7 +359,7 @@ agy models   # 認証確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.17.30/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.17.31-dev.1/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -396,14 +381,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.30/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.31-dev.1/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.17.30  <path>
+# => ndf@ai-plugins  installed, enabled  10.17.31-dev.1  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。

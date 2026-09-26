@@ -60,7 +60,7 @@ def test_reexec_through_uv_with_the_lock_and_the_venv_outside_the_plugin(tmp_pat
     assert log[:9] == ["run", "--quiet", "--frozen", "--project", str(PLUGIN), "--extra", "t", "python",
                        str((tmp_path / "entry.py").resolve())]
     assert log[9:11] == ["a1", "--x"]
-    assert "REEXEC=1" in log and f"VENV={tmp_path / 'venv'}" in log
+    assert f"REEXEC={(tmp_path / 'entry.py').resolve()}" in log and f"VENV={tmp_path / 'venv'}" in log
 
 
 def test_several_groups_reexec_once_with_every_extra(tmp_path):
@@ -80,7 +80,8 @@ def test_several_importable_groups_return_without_reexec(tmp_path):
 
 
 def test_after_reexec_a_missing_group_among_several_stops_with_code_3(tmp_path):
-    p = run_entry(tmp_path, ["json"], uv=True, more={"u": ["ndf_no_such_module"]}, NDF_DEPS_REEXEC="1")
+    p = run_entry(tmp_path, ["json"], uv=True, more={"u": ["ndf_no_such_module"]},
+                  NDF_DEPS_REEXEC=str((tmp_path / "entry.py").resolve()))
     assert p.returncode == 3 and "after" not in p.stdout
     assert "u のパッケージ（ndf_no_such_module）" in p.stderr
 
@@ -113,7 +114,7 @@ def test_reexec_argv_keeps_the_single_group_form():
 
 
 def test_after_reexec_a_missing_package_stops_with_code_3(tmp_path):
-    p = run_entry(tmp_path, ["ndf_no_such_module"], uv=True, NDF_DEPS_REEXEC="1")
+    p = run_entry(tmp_path, ["ndf_no_such_module"], uv=True, NDF_DEPS_REEXEC=str((tmp_path / "entry.py").resolve()))
     assert p.returncode == 3 and "after" not in p.stdout
     assert "import できない" in p.stderr
     assert not (tmp_path / "uv.log").exists()
@@ -125,6 +126,13 @@ def test_reexec_mark_is_not_inherited_by_children(monkeypatch):
     monkeypatch.setitem(deps.GROUPS, "t", ["json"])
     deps.require("t")
     assert "NDF_DEPS_REEXEC" not in os.environ
+
+
+def test_a_mark_inherited_from_another_script_reexecs(tmp_path):
+    """印を外す前の版の親（`1` を付けたまま子を走らせる）から継いでも、子は起動し直す（v10.17.31-dev.1 の bump）。"""
+    p = run_entry(tmp_path, ["ndf_no_such_module"], uv=True, NDF_DEPS_REEXEC="1")
+    assert p.returncode == 7, p.stderr
+    assert f"REEXEC={(tmp_path / 'entry.py').resolve()}" in (tmp_path / "uv.log").read_text().splitlines()
 
 
 def test_uv_is_installed_when_missing_then_reexec(monkeypatch, tmp_path):
@@ -141,7 +149,8 @@ def test_uv_is_installed_when_missing_then_reexec(monkeypatch, tmp_path):
     with pytest.raises(SystemExit):
         deps.require("t")
     path, argv, env = calls[0]
-    assert path == "/opt/uv" and argv[:3] == ["/opt/uv", "run", "--quiet"] and env["NDF_DEPS_REEXEC"] == "1"
+    assert path == "/opt/uv" and argv[:3] == ["/opt/uv", "run", "--quiet"]
+    assert env["NDF_DEPS_REEXEC"] == str(Path(sys.argv[0]).resolve())
 
 
 def test_uv_that_cannot_be_installed_stops_with_the_manual_command(monkeypatch, capsys):
