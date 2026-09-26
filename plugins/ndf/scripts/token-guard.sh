@@ -5,12 +5,14 @@
 # | tool_name          | 判定                                                       |
 # | ------------------ | ---------------------------------------------------------- |
 # | Bash               | 前景の `sleep` で待つ（ループの本体にあるか、上限を超える）  |
+# | Bash               | 文脈が上限を超えた conductor が supervise.py queue / run でプランを起こす |
 # | Read               | 変わらないファイルの同じ範囲を続けて読み直す                 |
 # | Skill / Agent・Task | 文脈が上限を超えた conductor が工程へ入る                   |
+# | Agent・Task        | supervisor の起動に、プランで流せることを案内する（止めない） |
 # | Skill              | 寿命 5 分の supervisor が文脈を伸ばしたまま収束ループを始める |
 #
-# **拒否は `permissionDecision: deny` で返し、終了コードは常に 0 にする。** 通すときは何も
-# 出さない。判定が失敗したとき（入力が読めない・jq が無い・記録を書けない・記録を読めない・
+# **拒否は `permissionDecision: deny` で返し、終了コードは常に 0 にする。** 案内は
+# `additionalContext` で返す。通すときは何も出さない。判定が失敗したとき（入力が読めない・jq が無い・記録を書けない・記録を読めない・
 # ロックを待ちの上限の内に取れない）は通す。hook の失敗でツールの実行を止めないためである。
 # 待ちの上限は `NDF_TOKEN_GUARD_LOCK_WAIT`（秒・0 以上の整数。既定 1）で変えられる。
 # 本番は既定の 1 秒のままにする。延ばすのは負荷の高い環境で並列の試験を動かすときである（#950）。
@@ -149,6 +151,11 @@ issue_refs() {
   printf '%s' "${refs% }"
 }
 
+# Bash のコマンドが supervise.py の queue か run（プランを起こす副命令）を起動するなら 0
+plan_command() {
+  [[ "$1" =~ supervise\.py[\'\"]?[[:space:]]+(queue|run)([[:space:]]|$|[\;\&\|\)]) ]]
+}
+
 guard_context() {
   [ "${NDF_CONTEXT_GUARD:-1}" = 0 ] && exit 0
   # サブエージェントの中の起動は見ない。agent_id はサブエージェントの中でだけ付く
@@ -159,7 +166,13 @@ guard_context() {
   case "$tp" in */subagents/*) exit 0 ;; esac
   sid=$(field '.session_id')
   [ -n "$tp" ] && [ -n "$sid" ] || exit 0
-  if [ "$TOOL" = Skill ]; then
+  if [ "$TOOL" = Bash ]; then
+    # プランを起こす副命令（queue / run）だけを見る。背景での起動も同じに扱う
+    words=$(field '.tool_input.command')
+    plan_command "$words" || exit 0
+    key="plan"$'\t'"$words"
+    words=
+  elif [ "$TOOL" = Skill ]; then
     skill=$(field '.tool_input.skill')
     skill=${skill#ndf:}
     grep -qxF "$skill" "$HERE/lib/token-guard-stages.txt" 2>/dev/null || exit 0
@@ -193,9 +206,9 @@ guard_context() {
   issues=$(issue_refs "$words")
   local next="/ndf:development-workflow ${issues:-<課題番号>}"
   if [ "$relayed" = 1 ]; then
-    deny "会話の文脈が ${total} トークンで、上限 ${limit} を超えた。ラッパーの下なので、上限を超えている限りこの起動を止め続ける。新しいフェーズを起動せず、動いている supervisor の報告を待ってから、引継ぎ文書（/goal の指示が名指ししたもの。無ければ書かない）を更新し、次のコマンドを情報文字列 ndf-next の囲みのコードブロック 1 つで出して応答を終える（中身: /goal ${next}、名指しの引継ぎ文書があれば「<文書> の続きから」）。<課題番号> のままなら、進めている課題の番号を補う。ブロックの直前に次の 1 文をそのまま書き、承認や確認を挟まずに出して終える: ${notice}。規約: ${CONTEXT_DOC}（止めるなら NDF_CONTEXT_GUARD=0、上限は NDF_CONTEXT_LIMIT）"
+    deny "会話の文脈が ${total} トークンで、上限 ${limit} を超えた。ラッパーの下なので、上限を超えている限りこの起動を止め続ける。新しいフェーズ（プランを含む）を起動せず、動いているプランと supervisor の報告を待ってから、引継ぎ文書（/goal の指示が名指ししたもの。無ければ書かない）を更新し、次のコマンドを情報文字列 ndf-next の囲みのコードブロック 1 つで出して応答を終える（中身: /goal ${next}、名指しの引継ぎ文書があれば「<文書> の続きから」）。<課題番号> のままなら、進めている課題の番号を補う。ブロックの直前に次の 1 文をそのまま書き、承認や確認を挟まずに出して終える: ${notice}。規約: ${CONTEXT_DOC}（止めるなら NDF_CONTEXT_GUARD=0、上限は NDF_CONTEXT_LIMIT）"
   fi
-  deny "会話の文脈が ${total} トークンで、上限 ${limit} を超えた。この工程は新しい会話で始める。次のコマンドを情報文字列 ndf-next の囲みのコードブロック 1 つで示して応答を終える。中身: ${next}（今の区間を /goal で始めていたなら /goal ${next}）。<課題番号> のままなら、進めている課題の番号を補って示す。このまま続けると利用者が決めたら、同じ起動をもう一度行うと 1 度だけ通る。規約: ${CONTEXT_DOC}（止めるなら NDF_CONTEXT_GUARD=0、上限は NDF_CONTEXT_LIMIT）"
+  deny "会話の文脈が ${total} トークンで、上限 ${limit} を超えた。この工程（プランを含む）は新しい会話で始める。次のコマンドを情報文字列 ndf-next の囲みのコードブロック 1 つで示して応答を終える。中身: ${next}（今の区間を /goal で始めていたなら /goal ${next}）。<課題番号> のままなら、進めている課題の番号を補って示す。このまま続けると利用者が決めたら、同じ起動をもう一度行うと 1 度だけ通る。規約: ${CONTEXT_DOC}（止めるなら NDF_CONTEXT_GUARD=0、上限は NDF_CONTEXT_LIMIT）"
 }
 
 # 記録の先頭から最初の assistant 行を探し、その文脈量を読む（スイッチポイントの判定の P）。見つけた時点で読むのをやめる。
@@ -238,10 +251,35 @@ guard_supervisor_cut() {
   deny "この supervisor の文脈が ${last} トークンで、最初の呼び出し（${first}）の ${ratio} 倍以上ある。寿命 5 分のまま収束ループ（${skill}）を始めると、待ちの後のたびに文脈の全体を書き直す。同じ起動をやり直さずに、Pull Request を出す・進行を記録するなど起動の前に済ませることを済ませてから、フェーズの報告を「結果: スイッチポイント」「次のフェーズ: <今と同じフェーズ>」「次の工程: ${stage}」で返す（規則 12。conductor が寿命 1 時間の supervisor で続ける）。規約: ${CONTEXT_DOC}（止めるなら NDF_SUPERVISOR_CUT_GUARD=0、比は NDF_SUPERVISOR_CUT_RATIO）"
 }
 
+# conductor が Agent で supervisor を起こすとき、リポジトリに .ndf/ の宣言があれば、プランで
+# 流せることを案内する（#1191）。止めない
+plan_hint() {
+  [ "${NDF_PLAN_HINT:-1}" = 0 ] && exit 0
+  [ -n "$(field '.agent_id')" ] && exit 0
+  case "$(field '.transcript_path')" in */subagents/*) exit 0 ;; esac
+  case "$(field '.tool_input.subagent_type')" in ndf:supervisor|ndf:supervisor-waits) ;; *) exit 0 ;; esac
+  local cwd root
+  cwd=$(field '.cwd')
+  root=$(git -C "${cwd:-.}" rev-parse --show-toplevel 2>/dev/null) || exit 0
+  [ -f "$root/.ndf/supervise.json" ] || [ -f "$root/.ndf/worktree.json" ] || exit 0
+  jq -cn --arg c "このリポジトリには .ndf/ の宣言がある。このフェーズは python3 $HERE/supervise.py new <種別>（mission / impl / check / release）のプランで作り、supervise.py queue で流せる。Agent の supervisor に落とすのはプランの雛形が無いときだけ（development-workflow の references/agent-layers.md のフェーズの表）。この案内を止めるなら NDF_PLAN_HINT=0" \
+    '{hookSpecificOutput:{hookEventName:"PreToolUse", additionalContext:$c}}'
+  exit 0
+}
+
+# guard_context を子のシェルで判定し、拒否したらそれを出して終える（通すときは次の判定へ進む）
+context_first() {
+  local out
+  out=$(guard_context)
+  [ -n "$out" ] || return 0
+  printf '%s\n' "$out"
+  exit 0
+}
+
 case "$TOOL" in
-  Bash) guard_sleep ;;
+  Bash) context_first; guard_sleep ;;
   Read) guard_read ;;
   Skill) guard_supervisor_cut; guard_context ;;
-  Agent|Task) guard_context ;;
+  Agent|Task) context_first; plan_hint ;;
 esac
 exit 0
