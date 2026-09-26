@@ -9,6 +9,22 @@
 **開発版（接尾辞の付いた版）は載せない。** `9.8.0` は `9.8.0-dev.1` までしか出ておらず、
 その内容は `10.0.0` で届いている。
 
+## [ndf 10.17.30] - 2026-09-26
+
+- ミッション m1142b の課題を develop へ取り込む。（#1255）
+- 関連: #1142（#1255）
+- 差分が 20000 行を超える大きな PR でも、cross-refactoring の検査の範囲に PR の変更ファイルがすべて入り、init が通る（#1256）
+- Add: 決定 17 の試行を実験版に置き、結果を記録する（#1142 ミッション 2 の L0 の前）（#1238）
+- new mission が書く検査のプランの PR 本文は、課題を閉じる語を含まず、課題を「関連: #番号」として並べる（#1239）
+- NDF のスクリプトのエントリポイントは、必要な外部パッケージを揃えた uv の環境で起動し直してから動きます。（#1242）
+- Refactor: #1142 ミッション 2 の C5 worktree（worktree-common.sh を分ける）（#1243）
+- Refactor: #1142 ミッション 2 の C2 cross-review（state.py を review_lib へ分ける）（#1244）
+- Refactor: #1142 ミッション 2 の C6 ラッパー（relay.py を relay_lib へ分ける）（#1245）
+- Refactor: #1142 ミッション 2 の C7 リリースと文書（instructions-check を instructions_lib へ分け、重複をライブラリへ置き換える）（#1246）
+- Refactor: #1142 ミッション 2 の C1 プランの実行（supervise.py を supervise_lib へ分ける）（#1247）
+- Refactor: #1142 ミッション 2 の C4 cross-refactoring（gitfacts を分け、loop_drive の呼び出しを揃える）（#1252）
+- Refactor: #1142 ミッション 2 の C3 外部 CLI と記録（monitor を分ける）（#1254）
+
 ## [ndf 10.17.29] - 2026-09-26
 
 - ミッション m1142 の課題を develop へ取り込む。（#1230）
