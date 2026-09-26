@@ -89,7 +89,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.17.29-dev.1）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.17.29）
 ```
 
 ### agy
@@ -119,7 +119,7 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.17.29-dev.1 へ更新するとき
+## v10.17.29 へ更新するとき
 
 - ミッション m1142 の課題を develop へ取り込む。（#1230）
 - 関連: #1142（#1230）
@@ -127,6 +127,7 @@ agy plugin list
 - Docs: #1142 の設計に外部パッケージの扱い・行数の上限 500・関数の単位の分け方を足し、語を業界の語へ揃える（#1215）
 - Fix: cross-refactoring の書き込み用の作業ディレクトリを detach で作り、開発用の worktree と同じブランチでも起動できるようにする（#1231）
 - Fix: cross-refactoring の --baseline-test の探索の起点から、オプションの値と作業ディレクトリの根を外す（#1232）
+- Test: pace のテストがミッションのブランチの有無を、作業場所のパスでなくブランチ名で見る（#1234）
 
 ## Playwright テストについて
 
@@ -363,7 +364,7 @@ agy models   # 認証確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.17.29-dev.1/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.17.29/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -385,14 +386,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.29-dev.1/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.29/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.17.29-dev.1  <path>
+# => ndf@ai-plugins  installed, enabled  10.17.29  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。
