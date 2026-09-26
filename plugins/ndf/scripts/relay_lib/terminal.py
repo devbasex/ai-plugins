@@ -1,15 +1,18 @@
 """端末と、擬似端末の子の claude（#895・#1142 の C6）。
 
 入出力の中継・子の起動と停止・端末の raw の設定と戻しを持つ。区間の切り替えの判断は `run.Relay` が持つ。
+擬似端末の子の起動と窓の大きさは ptyprocess で扱い、このモジュールがその包みを兼ねる（決定 19・20）。
+`pty`・`termios` を import するのもこのモジュールだけである（構造チェックの I14）。
 """
 from __future__ import annotations
 
 import errno
-import fcntl
 import os
 import select
 import signal
 import time
+
+from ptyprocess import PtyProcess
 
 from .common import env_num
 
@@ -18,6 +21,17 @@ class StartFailed(Exception):
     def __init__(self, err: int):
         super().__init__(err)
         self.err = err
+
+
+def pty_available() -> bool:
+    """擬似端末と端末の設定を使えるか（使えない OS ではラッパーを始めない）。"""
+    try:
+        import pty  # noqa: F401
+        import termios  # noqa: F401
+        import tty  # noqa: F401
+    except ImportError:
+        return False
+    return True
 
 
 def wait_exit_code(status: int) -> int:
@@ -32,6 +46,7 @@ class Terminal:
     def __init__(self):
         self.pid = 0
         self.fd = -1
+        self.child: PtyProcess | None = None
         self.last_input = 0.0
         self.last_tick = 0.0
         self.stdin_open = True
@@ -56,14 +71,21 @@ class Terminal:
         except (OSError, termios.error):
             pass
 
-    def copy_winsize(self, fd: int | None = None) -> None:
-        import termios
-        fd = self.fd if fd is None else fd
-        if fd < 0:
+    @staticmethod
+    def winsize() -> tuple[int, int]:
+        """端末の (行, 列)。端末でなければ ptyprocess の既定の 24 × 80。"""
+        try:
+            size = os.get_terminal_size(0)
+        except OSError:
+            return 24, 80
+        return size.lines, size.columns
+
+    def copy_winsize(self) -> None:
+        """端末の大きさを子の擬似端末へ写す（SIGWINCH のたび）。"""
+        if self.child is None or self.fd < 0:
             return
         try:
-            ws = fcntl.ioctl(0, termios.TIOCGWINSZ, b"\0" * 8)
-            fcntl.ioctl(fd, termios.TIOCSWINSZ, ws)
+            self.child.setwinsize(*self.winsize())
         except OSError:
             pass
 
@@ -77,58 +99,24 @@ class Terminal:
 
     # -- 子の起動と停止
 
-    @staticmethod
-    def _child_exec(sync_r: int, sync_w: int, res_r: int, res_w: int,
-                    claude: str, args: list[str], cwd: str, env: dict) -> None:
-        """子側: 親だけが使う fd を閉じ、同期を待って chdir と execve を行う。
-        失敗したら errno を結果 pipe へ書き、127 で終わる。"""
-        try:
-            os.close(sync_w)
-            os.close(res_r)
-            os.read(sync_r, 1)
-            os.chdir(cwd)
-            os.execve(claude, [claude] + args, env)
-        except OSError as e:
-            os.write(res_w, str(e.errno or errno.EIO).encode())
-        finally:
-            os._exit(127)
-
-    @staticmethod
-    def _read_errno(res_r: int) -> bytes:
-        """親側: 結果 pipe を最後まで読む。InterruptedError は読み直す。"""
-        data = b""
-        while True:
-            try:
-                chunk = os.read(res_r, 64)
-            except InterruptedError:
-                continue
-            if not chunk:
-                break
-            data += chunk
-        os.close(res_r)
-        return data
-
     def spawn(self, claude: str, args: list[str], cwd: str, env: dict, child_file: str) -> float:
-        """claude を擬似端末の子として起動し、`child_file` へ pid を書く。起動の時刻を返す。"""
-        import pty
-        sync_r, sync_w = os.pipe()
-        res_r, res_w = os.pipe()
-        pid, fd = pty.fork()
-        if pid == 0:
-            self._child_exec(sync_r, sync_w, res_r, res_w, claude, args, cwd, env)
-        os.close(sync_r)
-        os.close(res_w)
-        self.copy_winsize(fd)
-        with open(child_file, "w") as f:
-            f.write(str(pid))
+        """claude を擬似端末の子として起動し、`child_file` へ pid を書く。起動の時刻を返す。
+
+        pid は子が exec する前に子自身が書く（子の hook が `child.pid` を読むより先に在る）。
+        起動できなければ errno を持つ StartFailed。"""
+        def write_pid() -> None:
+            with open(child_file, "w") as f:
+                f.write(str(os.getpid()))
+
         at = time.time()
-        os.close(sync_w)
-        data = self._read_errno(res_r)
-        if data:
-            os.waitpid(pid, 0)
-            os.close(fd)
-            raise StartFailed(int(data or errno.EIO))
-        self.pid, self.fd = pid, fd
+        try:
+            child = PtyProcess.spawn([claude, *args], cwd=cwd, env=env, preexec_fn=write_pid,
+                                     dimensions=self.winsize())
+        except OSError as e:
+            # ptyprocess は実行できないコマンドを exec の前に errno なしで断る
+            raise StartFailed(e.errno or (errno.EACCES if os.path.exists(claude) else errno.ENOENT)) from None
+        child.delayafterclose = 0
+        self.child, self.pid, self.fd = child, child.pid, child.fd
         return at
 
     def stop_child(self) -> tuple[str, int]:
@@ -177,9 +165,18 @@ class Terminal:
         if not wpid:
             return None
         self.drain()
-        os.close(self.fd)
-        self.fd = -1
+        self._close_child()
         return status
+
+    def _close_child(self) -> None:
+        """刈り取った子の擬似端末を閉じる。子は刈り取り済みなので、ptyprocess に止めさせない。"""
+        if self.child is not None:
+            self.child.terminated = True
+            try:
+                self.child.close()
+            except OSError:
+                pass
+        self.child, self.fd = None, -1
 
     def _relay_ready(self, r: list[int], master_open: bool) -> bool:
         """読める fd の入出力を転送し、master が開いたままかを返す。"""

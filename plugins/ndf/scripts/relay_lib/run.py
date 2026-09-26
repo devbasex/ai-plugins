@@ -5,7 +5,6 @@
 """
 from __future__ import annotations
 
-import fcntl
 import os
 import shlex
 import signal
@@ -14,10 +13,10 @@ import time
 from . import claude as cl
 from . import record, version_dir
 from .common import (CHILD_FILE, LOCK_FILE, LOG_FILE, MARK_FILE, PID_FILE, QUESTION_FILE, QUESTION_LOCK,
-                     STOP_FILE, _lock, env_num, fallback_cwd, parse_iso, quiet_seconds, remove, stamp)
+                     STOP_FILE, _lock, _unlock, env_num, fallback_cwd, parse_iso, quiet_seconds, remove, stamp)
 from .mark import asked_after
 from .record import RelayRecord, StartLimit
-from .terminal import StartFailed, Terminal, wait_exit_code
+from .terminal import StartFailed, Terminal, pty_available, wait_exit_code
 
 
 class Relay:
@@ -40,8 +39,7 @@ class Relay:
         self.exited = None
         self.saw_question = False
         self.quiet = quiet_seconds()
-        self.lock_fd = os.open(self.path(LOCK_FILE), os.O_RDWR | os.O_CREAT, 0o600)
-        fcntl.flock(self.lock_fd, fcntl.LOCK_EX)
+        self.lock = _lock(self.path(LOCK_FILE), None)  # 動いている間は持ち続ける（relay_running が見る）
         with open(self.path(PID_FILE), "w") as f:
             f.write(str(os.getpid()))
 
@@ -193,7 +191,7 @@ class Relay:
             self._pump_for(env_num("NDF_RELAY_EXIT_HOLD", 1), watch_question=True)
             return True
         finally:
-            os.close(fd)
+            _unlock(fd)
 
     def wait_for_normal_exit(self, left: float, questioned: bool):
         """質問中は期限を減らさず、子の通常終了を待つ。"""
@@ -299,11 +297,8 @@ class Relay:
     def close(self) -> None:
         self.limit.release()
         remove(self.path(PID_FILE))
-        try:
-            fcntl.flock(self.lock_fd, fcntl.LOCK_UN)
-            os.close(self.lock_fd)
-        except OSError:
-            pass
+        _unlock(self.lock)
+        self.lock = None
 
 
 def cmd_run(args: list[str]) -> int:
@@ -324,11 +319,7 @@ def cmd_run(args: list[str]) -> int:
         cl.passthrough(claude, args)
     if not (os.isatty(0) and os.isatty(1)):
         cl.passthrough(claude, args)
-    try:
-        import pty  # noqa: F401
-        import termios  # noqa: F401
-        import tty  # noqa: F401
-    except ImportError:
+    if not pty_available():
         cl.say("ラッパーを始めない（擬似端末を作れない）。カットポイントでは示されたコマンドを手で入力する")
         cl.passthrough(claude, args)
     got = cl.read_plugin(claude)

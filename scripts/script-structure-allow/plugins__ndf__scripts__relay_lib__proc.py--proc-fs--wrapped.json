@@ -1,1 +1,0 @@
-{"path": "plugins/ndf/scripts/relay_lib/proc.py", "name": "proc-fs", "kind": "wrapped", "reason": "L1 の時点の使用。D6 が lib/procs.py（psutil） の上へ置き換えたら消す"}

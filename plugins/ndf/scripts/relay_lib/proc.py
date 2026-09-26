@@ -1,29 +1,19 @@
-"""hook を呼んだ claude とラッパーとの位置を、親のプロセスをたどって決める（#895・#1016・#1142 の C6）。"""
+"""hook を呼んだ claude とラッパーとの位置を、親のプロセスをたどって決める（#895・#1016・#1142 の C6）。
+
+プロセスの親と名前は、プロセスの包み `lib/procs.py`（psutil）で読む（決定 20）。
+"""
 from __future__ import annotations
 
 import os
-import subprocess
 
 from .common import CHILD_FILE, relay_running
 
+import procs  # noqa: E402,I001  common が lib/ を sys.path に置く
+
 
 def proc_info(pid: int) -> tuple[int, str] | None:
-    """(親の pid, 名前)。Linux は /proc、それ以外は ps で読む。"""
-    try:
-        with open(f"/proc/{pid}/stat") as f:
-            s = f.read()
-        name = s[s.index("(") + 1:s.rindex(")")]
-        ppid = int(s[s.rindex(")") + 2:].split()[1])
-        return ppid, name
-    except (OSError, ValueError, IndexError):
-        pass
-    try:
-        out = subprocess.run(["ps", "-o", "ppid=,comm=", "-p", str(pid)], capture_output=True,
-                             text=True, timeout=2).stdout.strip()
-        ppid, name = out.split(None, 1)
-        return int(ppid), os.path.basename(name)
-    except (OSError, ValueError, subprocess.SubprocessError):
-        return None
+    """(親の pid, 名前)。読めなければ None。"""
+    return procs.parent_and_name(pid)
 
 
 def is_direct_child(d: str, start: int | None = None) -> bool:

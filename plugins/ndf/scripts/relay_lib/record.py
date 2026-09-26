@@ -6,13 +6,12 @@
 from __future__ import annotations
 
 import errno
-import fcntl
 import json
 import os
 import random
 import time
 
-from .common import (COUNT_LOCK, LOG_FILE, MARK_FILE, _lock, env_num, load_json, parse_iso, remove,
+from .common import (COUNT_LOCK, LOG_FILE, MARK_FILE, _lock, _unlock, env_num, load_json, parse_iso, remove,
                      stamp, state_root, write_json_atomic)
 
 
@@ -90,24 +89,22 @@ class StartLimit:
 
     def __init__(self, log_path: str):
         self.log_path = log_path
-        self.lock: int | None = None
+        self.lock = None  # 取った `count.lock`（common._lock の戻り値）
         self.max_starts = int(env_num("NDF_RELAY_MAX_STARTS", 20))
         self.spin = env_num("NDF_RELAY_SPIN", 120)
 
     def take(self) -> bool:
         if self.lock is not None:
             return True
-        fd = _lock(os.path.join(state_root(), COUNT_LOCK), 0)
-        if fd is None:
+        held = _lock(os.path.join(state_root(), COUNT_LOCK), 0)
+        if held is None:
             return False
-        self.lock = fd
+        self.lock = held
         return True
 
     def release(self) -> None:
-        if self.lock is not None:
-            fcntl.flock(self.lock, fcntl.LOCK_UN)
-            os.close(self.lock)
-            self.lock = None
+        _unlock(self.lock)
+        self.lock = None
 
     def refusal(self, written: float, started_at: float) -> tuple[str, str] | None:
         if self.count_today() >= self.max_starts:
