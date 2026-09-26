@@ -29,7 +29,6 @@
 """
 from __future__ import annotations
 
-import shlex
 from pathlib import Path
 from typing import Callable
 
@@ -40,20 +39,6 @@ MEANINGS = {"fix": "修正待ち", "sweep": "最終スイープ待ち", "newtext
             "cross-review": "最終ゲートの cross-review 待ち"}
 EXIT_DONE = 0
 EXIT_STOPPED = 1
-
-
-def parse_vars(text: str) -> dict:
-    out = {}
-    for line in text.splitlines():
-        try:
-            words = shlex.split(line)
-        except ValueError:
-            continue
-        for w in words:
-            k, sep, v = w.partition("=")
-            if sep and k.isidentifier():
-                out[k] = v
-    return out
 
 
 class Stop(Exception):
