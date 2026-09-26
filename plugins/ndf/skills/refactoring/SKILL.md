@@ -119,7 +119,7 @@ Serena が使えるときは、ファイルを丸ごと読まずに `get_symbols
 次のいずれかに当てはまったら、そこで止めて報告する。
 
 - 固定テストが書けない（副作用が分離できない、実行に外部環境が要る）
-- 1 手で終わらず、テストを通すために本番コードの分岐を足す必要が出た
+- 1 手で終わらず、テストを通すためにプロダクションコードの分岐を足す必要が出た
 - 改善の途中で仕様の不明点が出た（`requirements-design` へ戻る）
 - 差分が [code-smells.md](references/code-smells.md) の「手を付ける範囲」を超えて広がった
 
@@ -163,5 +163,5 @@ Serena が使えるときは、ファイルを丸ごと読まずに `get_symbols
   工程表は `standard` と `legacy-refactor` のリファクタリングにそちらを置く。適用を担う側は
   この Skill を手順として読む
 
-この工程に入ったら記録のコマンド `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "構造改善"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「記録のコマンド」を使う）。
+この工程に入ったら進捗記録 `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "構造改善"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示にある進捗記録のコマンドを使う）。
 
