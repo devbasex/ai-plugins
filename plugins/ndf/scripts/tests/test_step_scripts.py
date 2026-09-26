@@ -165,6 +165,23 @@ def test_spec_finalize_removes_design_and_indexes_spec(repo, env):
     assert out["metrics"]["commit"] == git(repo, "rev-parse", "HEAD").strip()
 
 
+@pytest.mark.parametrize("repeat", [True, False])
+def test_spec_finalize_removes_every_design_given_by_repeated_or_listed_flags(repo, env, repeat):
+    designs = ["docs/design/x-design.md", "issues/PLAN1_x.md", "issues/PLAN1_x-measure.py"]
+    for rel in designs[1:]:
+        write(repo, rel, "x\n")
+    spec_repo(repo)
+    flags = ([f for d in designs for f in ("--design", d)] if repeat else ["--design", *designs])
+    code, out, err = call("plan-to-spec-steps.py",
+                          ["spec-finalize", "--spec", "docs/specifications/x.md", *flags,
+                           "--title", "X", "--root", str(repo)], env)
+    assert code == 0, err
+    assert out["metrics"]["removed_designs"] == 3
+    for rel in designs:
+        assert not (repo / rel).exists(), rel
+    assert git(repo, "status", "--porcelain").strip() == ""
+
+
 def test_spec_finalize_promotes_glossary_terms_of_the_removed_design(repo, env):
     """消した設計を pending_source に持つ語だけ、source を確定仕様へ移して文書ごと同じコミットに入れる。"""
     spec_repo(repo)
