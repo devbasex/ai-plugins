@@ -7,7 +7,8 @@
     python3 scripts/token-usage.py [--min-version 10.14.0] [--by version,mode,model]
                                    [--format md|json]
 
-読む記録:
+読む記録（ほかに、計画が起動した `claude -p` の使用量の帳簿 `--usage-root` の行を、その時刻に動いていた
+会話の supervisor / worker の層へ加える。Skill を回すステップの行（`full`）は会話が残るため読まない）:
 
 | ランタイム | 場所 | 取る値 |
 | --- | --- | --- |
@@ -36,6 +37,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "plugins/ndf/scripts/lib"))
 from transcript_agents import layer_of, role_of  # フェーズの語彙は 1 か所に置く
+import usage_ledger  # 計画が起動した claude -p の使用量の帳簿（#1142）
 
 # 換算費用の重み（input=1）。cache read だけはモデルで倍率が違うため READ_RATES で決める
 WEIGHTS = {"inp": 1.0, "w5": 1.25, "w1h": 2.0, "out": 5.0}
@@ -477,6 +479,51 @@ def link_external(sessions: list[Session], externals: list[External]) -> int:
     return unlinked
 
 
+# ---------- 使用量の帳簿 ----------
+
+# 帳簿の kind ごとの層。full（Skill を回すステップ）は会話が残り、会話の記録として別に数えるため読まない
+LEDGER_LAYER = {"work": "worker", "judge": "supervisor", "slow": "supervisor", "pr": "supervisor",
+                "mvv": "supervisor"}
+LEDGER_AGENT = "claude -p"
+
+
+def read_ledger(root: Path, until: float | None = None) -> list[tuple[float, dict]]:
+    """帳簿の行のうち、層へ加えるもの（時刻・行）。時刻を読めない行と `until` より後の行は捨てる。"""
+    out = []
+    for r in usage_ledger.read_all(root):
+        t = parse_ts(r.get("at"))
+        if t is None or r.get("kind") not in LEDGER_LAYER or (until is not None and t > until):
+            continue
+        out.append((t, r))
+    return out
+
+
+def ledger_usage(r: dict) -> Usage:
+    u = r.get("usage") if isinstance(r.get("usage"), dict) else {}
+    w5, w1h = usage_ledger.cache_writes(u)
+    read = u.get("cache_read_input_tokens") or 0
+    return Usage(int(r.get("turns") or 1), u.get("input_tokens") or 0, read, w5, w1h, u.get("output_tokens") or 0,
+                 read * read_rate(r.get("model")))
+
+
+def link_ledger(sessions: list[Session], rows: list[tuple[float, dict]]) -> int:
+    """帳簿の行を、その時刻に動いていた会話の層へ加える。同じ版の会話を先に選ぶ。寄せ先が無い件数を返す。"""
+    unlinked = 0
+    for t, r in rows:
+        cand = [s for s in sessions if s.start - LINK_MARGIN <= t <= s.end + LINK_MARGIN]
+        same = [s for s in cand if s.version == r.get("ndf_version")]
+        if not (same or cand):
+            unlinked += 1
+            continue
+        s = min(same or cand, key=lambda s: s.end - s.start)
+        kind = r["kind"]
+        role = s.roles.setdefault((LEDGER_LAYER[kind], kind, LEDGER_AGENT), Role())
+        role.usage.add(ledger_usage(r))
+        role.n += 1
+        role.sec += float(r.get("seconds") or 0)
+    return unlinked
+
+
 # ---------- 集計 ----------
 
 def _m(x: float) -> str:
@@ -587,7 +634,8 @@ def render_md(result: dict, by: list[str]) -> str:
 
     meta = result["meta"]
     summary = (f"対象の会話: {meta['sessions']} 件 / PR を作った会話: {meta['sessions_with_pr']} 件 / "
-               f"寄せ先の無い外部 CLI: {meta['unlinked_external']} 件")
+               f"寄せ先の無い外部 CLI: {meta['unlinked_external']} 件 / "
+               f"寄せ先の無い帳簿の行: {meta.get('unlinked_ledger', 0)} 件")
     rates = " / ".join(f"{m} {r}" for m, r in READ_RATES)
     legend = (f"換算は input を 1 とした費用（cache read はモデル別: {rates} / 他 {READ_RATE_DEFAULT}。"
               "cache write 5 分 1.25・1 時間 2 / output 5）。入力は input + cache read + cache write。所要は分。")
@@ -642,14 +690,20 @@ def render_md(result: dict, by: list[str]) -> str:
 
 
 def collect(claude_root: Path, codex_root: Path, kiro_root: Path, idle_cap: int = IDLE_CAP,
-            until: float | None = None, min_version: str | None = None) -> tuple[list[Session], int, dict]:
-    """記録を 1 回読み、外部 CLI を寄せてから版で絞る。（会話, 寄せ先の無い外部 CLI の件数, 読み飛ばした件数）を返す。
+            until: float | None = None, min_version: str | None = None,
+            usage_root: Path | None = None) -> tuple[list[Session], int, dict]:
+    """記録を 1 回読み、外部 CLI と帳簿の行を寄せてから版で絞る。（会話, 寄せ先の無い外部 CLI の件数, 読み飛ばした件数）を返す。
 
-    `token-usage-snapshot.py` が読み込みを 1 回にするために関数として呼ぶ。
+    `token-usage-snapshot.py` が読み込みを 1 回にするために関数として呼ぶ。`usage_root` を渡したときだけ
+    使用量の帳簿を読み、寄せ先の無い行の件数を読み飛ばした件数の「帳簿の寄せ先が無い」に数える。
     """
     sessions, seats, skipped = read_claude(claude_root, idle_cap, until)
     externals = seats + read_codex(codex_root, idle_cap, until) + read_kiro(kiro_root, until)
     unlinked = link_external(sessions, externals)  # 版で絞る前に寄せる（古い版の会話の分を未対応に数えない）
+    if usage_root is not None:
+        lost = link_ledger(sessions, read_ledger(usage_root, until))
+        if lost:
+            skipped["帳簿の寄せ先が無い"] = lost
     if min_version:
         floor = version_key(min_version)
         sessions = [s for s in sessions if version_key(s.version) >= floor]
@@ -666,6 +720,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--by", default="version,mode,model", help=f"表の軸（カンマ区切り）: {', '.join(AXES)}")
     ap.add_argument("--idle-cap", type=int, default=IDLE_CAP, help="所要に入れる行の間隔の上限（秒）")
     ap.add_argument("--format", choices=("md", "json"), default="md")
+    ap.add_argument("--usage-root", type=Path, default=usage_ledger.ledger_dir(),
+                    help="計画が起動した claude -p の使用量の帳簿のディレクトリ（既定は lib/usage_ledger.py の置き場所）")
     ap.add_argument("--until", help="この時刻より後の記録の行を読まない（ISO 8601。例: 2026-09-24T09:00:00Z）。"
                                      "進行中の会話を含むときに、同じ集計を後から作り直せるようにする")
     args = ap.parse_args(argv)
@@ -682,11 +738,11 @@ def main(argv: list[str] | None = None) -> int:
         if datetime.fromisoformat(args.until.replace("Z", "+00:00")).tzinfo is None:  # 機械の時間帯で打ち切りが変わる
             ap.error(f"--until に時間帯を付ける（例: 2026-09-24T09:00:00Z）: {args.until}")
     sessions, unlinked, skipped = collect(args.claude_root, args.codex_root, args.kiro_root, args.idle_cap, until,
-                                          args.min_version)
+                                          args.min_version, args.usage_root)
     result = aggregate(sessions, by)
     result["meta"] = {"by": by, "min_version": args.min_version, "until": args.until, "sessions": len(sessions),
                       "sessions_with_pr": sum(1 for s in sessions if s.prs), "unlinked_external": unlinked,
-                      "skipped": skipped}
+                      "unlinked_ledger": skipped.pop("帳簿の寄せ先が無い", 0), "skipped": skipped}
     if args.format == "json":
         json.dump(result, sys.stdout, ensure_ascii=False, indent=1)
         sys.stdout.write("\n")

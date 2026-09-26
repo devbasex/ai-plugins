@@ -19,6 +19,8 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
     supervise.py expected <plan.json> [--history F] [--slow K=V]...  # 計画のステップごとの想定時間と根拠を出す
     supervise.py new impl --issue N --worktree DIR --tests PATH... --title T [--files PATH...] [--changes TEXT] [--prompt-file F] [--branch B] [--out F]
     supervise.py new impl ... --escape-of <PR番号|0>   # マージの後に逃げた不具合を記録する（check-trigger.py escape）
+    supervise.py new fix (--worktree DIR | --branch B) --tests PATH... --title T [--issue N] [--escape-of N] [--summary S] [--out F]
+        # 即時修正: 作業場所の今のコミットを 範囲テスト → Pull Request → 全体テスト → doc-lint → ready → マージ で流す
     supervise.py new check --pr N --worktree DIR [--issue N...] [--scope PATH...] [--out F]
     supervise.py new check --since-last --id <名> --worktree <リポジトリの根> [--mission <状態>] [--final] [--since-ref R] [--out F]
         # 前回の検査からの差分を範囲にする検査（pace: fast）。実行の条件 check-trigger.py eval が立ったときだけ流れる
@@ -211,6 +213,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -513,6 +516,13 @@ def claude_cmd(system: str, tools: str | None, cwd: str, full: bool = False,
     return cmd
 
 
+def claude_kind(system: str, full: bool) -> str:
+    """使用量の帳簿の `kind`（work / full / judge / slow / pr）。system プロンプトで見分ける。"""
+    if full:
+        return "full"
+    return {JUDGE_SYSTEM: "judge", SLOW_SYSTEM: "slow", PR_SYSTEM: "pr"}.get(system, "work")
+
+
 def call_claude(system: str, prompt: str, tools: str | None, cwd: str, timeout: int,
                 full: bool = False, serena: bool = False, resume: str | None = None,
                 env: dict | None = None, tick=None, every: float = TICK) -> dict:
@@ -526,7 +536,8 @@ def call_claude(system: str, prompt: str, tools: str | None, cwd: str, timeout: 
         p = run_ticking(claude_cmd(system, tools, cwd, full, serena, resume), tick, every, input=prompt,
                         cwd=cwd, timeout=timeout, env={**os.environ, **env} if env else None)
     except subprocess.TimeoutExpired:
-        return {"ok": False, "text": f"打ち切り（{timeout} 秒）", "usage": {}, "seconds": timeout}
+        return {"ok": False, "text": f"打ち切り（{timeout} 秒）", "usage": {}, "seconds": timeout,
+                "kind": claude_kind(system, full), "model_usage": None}
     try:
         data = json.loads(p.stdout)
     except json.JSONDecodeError:
@@ -540,6 +551,8 @@ def call_claude(system: str, prompt: str, tools: str | None, cwd: str, timeout: 
         "ok": ok,
         "text": text,
         "usage": data.get("usage") or {},
+        "model_usage": data.get("modelUsage") if isinstance(data.get("modelUsage"), dict) else None,
+        "kind": claude_kind(system, full),
         "cost": data.get("total_cost_usd"),
         "turns": data.get("num_turns"),
         "session": data.get("session_id"),
@@ -1104,7 +1117,9 @@ class Supervisor:
         return "\n\n".join(parts) or "（入力なし）"
 
     def add_usage(self, kind: str, res: dict) -> None:
+        import usage_ledger  # lib/ は起動の時に sys.path へ足してある
         u = res.get("usage", {})
+        w5, w1h = usage_ledger.cache_writes(u)
         self.llm[kind] += 1
         self.llm["input"] += u.get("input_tokens", 0)
         self.llm["cache_read"] += u.get("cache_read_input_tokens", 0)
@@ -1121,6 +1136,26 @@ class Supervisor:
         c["cache_write"] += u.get("cache_creation_input_tokens", 0)
         c["output"] += u.get("output_tokens", 0)
         c["cost"] = round(c["cost"] + (res.get("cost") or 0.0), 4)
+        # 書き込みの 5 分と 1 時間、モデルごとの呼び出し回数とトークン（#1142 の不足 f。キーの追加だけ）
+        c["cache_write_5m"] = c.get("cache_write_5m", 0) + w5
+        c["cache_write_1h"] = c.get("cache_write_1h", 0) + w1h
+        models = c.setdefault("models", {})
+        for name, mu in (res.get("model_usage") or {}).items():
+            mu = mu if isinstance(mu, dict) else {}
+            m = models.setdefault(name, {"calls": 0, "input": 0, "cache_read": 0, "cache_write": 0,
+                                         "output": 0, "cost": 0.0})
+            m["calls"] += 1
+            m["input"] += mu.get("inputTokens") or 0
+            m["cache_read"] += mu.get("cacheReadInputTokens") or 0
+            m["cache_write"] += mu.get("cacheCreationInputTokens") or 0
+            m["output"] += mu.get("outputTokens") or 0
+            m["cost"] = round(m["cost"] + (mu.get("costUSD") or 0.0), 4)
+        # 使用量の帳簿へ 1 呼び出し 1 行（I8）。追記に失敗しても呼び出しの結果は失わない
+        rec = usage_ledger.UsageRecord(
+            source="supervise", kind=res.get("kind") or kind, usage=u, plan=self.plan_path,
+            step=str(self.cur.get("id") or ""), model_usage=res.get("model_usage"), cost_usd=res.get("cost"),
+            turns=res.get("turns"), seconds=res.get("seconds"), session_id=res.get("session"))
+        usage_ledger.append_safely(self.cwd, rec)
 
     def claude(self, system: str, prompt: str, tools: str | None, cwd: str, timeout: int, **kw) -> dict:
         """claude -p を呼ぶ唯一の口（work / drive の worker / judge / pr）。利用上限をここで扱う。
@@ -1427,9 +1462,25 @@ class Supervisor:
         if err:
             self.cur.update(exit=2, text=err)
             return False, err
-        ok, out, text = self.drive_loop(step, cmd)
-        if out:
-            self.cur["counts"] = out.get("metrics") or {}
+        # 入れ子の駆動（最終ゲートの item.command）の metrics を控える。外側の結果は内側の件数を持たない
+        inner: list[dict] = []
+        loop = self.drive_loop
+
+        def watched(st: dict, c: str, depth: int = 0) -> tuple[bool, dict | None, str]:
+            got = loop(st, c, depth)
+            if depth and got[1] and isinstance(got[1].get("metrics"), dict):
+                inner.append(got[1]["metrics"])
+            return got
+
+        self.drive_loop = watched
+        try:
+            ok, out, text = self.drive_loop(step, cmd)
+        finally:
+            del self.drive_loop
+        if out or inner:
+            self.cur["counts"] = dict((out or {}).get("metrics") or {})
+            if inner:
+                self.cur["counts"]["inner"] = inner[-1]
         self.cur.update(exit=0 if ok else 1, text=text, seconds=round(time.time() - started, 1))
         return ok, text
 
@@ -1858,7 +1909,7 @@ MERGE_PROBE = {"cmd": f"python3 {HERE / 'merged-steps.py'} probe --pr {{pr}} --a
 
 # 雛形が宣言から受けるもの。引数が宣言より先に効く
 # mission はリリースの形を要らない（雛形の無い形ならリリースの段を書かず、/ndf:release で行うと返す）
-NEEDS = {"impl": ("base", "test"), "check": ("base", "test"), "release": ("base", "release"),
+NEEDS = {"impl": ("base", "test"), "fix": ("base", "test"), "check": ("base", "test"), "release": ("base", "release"),
          "mission": ("base", "test"), "close": ("base", "test", "release")}
 
 
@@ -1963,13 +2014,33 @@ def impl_prompt(a, out: Path | None) -> str:
 def plan_impl(a, out: Path | None = None) -> dict:
     if out is None and hasattr(a, "out"):
         out = Path(a.out or f"plan-{a.issue[0]}.json")
-    prompt = impl_prompt(a, out)
+    impl = {"id": "impl", "type": "work", "kind": "実装", "serena": True, "stage": "実装", "issues": True,
+            "timeout": 3600, "prompt": impl_prompt(a, out)}
+    return plan_to_merge(a, [impl])
+
+
+def plan_fix(a) -> dict:
+    """即時修正のプラン（不足 a）。impl の雛形から worker の実装のステップを除き、作業場所の今のコミットを
+    範囲テスト → Pull Request → 全体テスト → doc-lint → ready → マージへ流す。"""
+    return plan_to_merge(a, [])
+
+
+def fix_worktree(branch: str) -> str:
+    """new fix に --worktree が無いときの作業場所。今のディレクトリのリポジトリの .worktrees/<ブランチ>。"""
+    p = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                       capture_output=True, text=True)
+    repo = Path(p.stdout.strip()).parent if p.returncode == 0 and p.stdout.strip() else Path.cwd()
+    return str(repo.resolve() / ".worktrees" / branch)
+
+
+def plan_to_merge(a, head: list[dict]) -> dict:
+    """head（impl なら worker の実装）の後に、同期とチェック → 範囲テスト → Pull Request → 全体テスト →
+    doc-lint → ready → マージ（--escape-of なら逃げた不具合の記録）を続けた実装のプラン。"""
     tests = " ".join(a.tests)
     sync = bool(getattr(a, "sync_checks", None))
-    steps = [
-        {"id": "impl", "type": "work", "kind": "実装", "serena": True, "stage": "実装", "issues": True,
-         "timeout": 3600, "prompt": prompt, "next": "sync" if sync else "test-limited"},
-    ]
+    if head:
+        head[-1]["next"] = "sync" if sync else "test-limited"
+    steps = list(head)
     if sync:  # 同期とチェックの宣言が無いプロジェクトではステップを置かない
         steps += [
             {"id": "sync", "type": "run", "preset": "sync-check", "stage": "実装", "on_fail": "fix-sync",
@@ -2172,7 +2243,8 @@ def plan_release_package_plugin(a) -> dict:
     """Claude Code のプラグインを配る形（package-plugin）の計画。宣言の release は
     {"form": "package-plugin", "plugin": <名前>, "runtimes": [<導入を確かめるランタイム>...]}。
     dev: bump → changelog → 説明文 → sync-check → release → verify-install（起点のブランチ）→ approval-facts
-    → 提示物の欄。prod: bump → changelog → 説明文 → 消費の記録 → sync-check → release → verify-install
+    → 提示物の欄。prod: bump → bump-others（前のタグからの差分のある他のプラグインの PATCH。
+    release-steps.py changed-plugins）→ changelog → 説明文 → 消費の記録 → sync-check → release → verify-install
     （本番のブランチ）→ 後片付け。sync-check は同期とチェックの宣言があるときだけ置く。
     説明文と提示物の欄は release-steps.py notes が PR 本文の「利用者向けの変化」から組む（LLM を使わない）。"""
     rel = a.release
@@ -2192,14 +2264,17 @@ def plan_release_package_plugin(a) -> dict:
     repo = a.repo or (a.worktree.split("/.worktrees/")[0] if "/.worktrees/" in a.worktree else None)
     sync = bool(getattr(a, "sync_checks", None))
     after_notes = "sync" if sync else "release"
-    run_ids = ["bump", "changelog", "notes"] + ([] if dev else ["snapshot"]) + (["sync"] if sync else []) + [
+    run_ids = ["bump", *([] if dev else ["bump-others"]), "changelog", "notes"] + ([] if dev else ["snapshot"]) + (
+        ["sync"] if sync else []) + [
         "release", "verify"] + (["facts", "explain"] if dev else [])
     # 説明文は PR 本文の「利用者向けの変化」から機械で組む（節が無い PR は題名）
     notes = (f"sh -c '{STEPS_PY} notes --version {v} --prs {prs} && git add -A && "
              f"(git diff --cached --quiet || git commit -q -m \"Release: {plugin} v{v}\")'")
     steps = [
         {"id": "bump", "type": "run", "stage": "配布", "cmd": f"{STEPS_PY} bump --plugin {plugin} --to {v} --base {a.base}",
-         "on_fail": "judge", "next": "changelog"},
+         "on_fail": "judge", "next": "changelog" if dev else "bump-others"},
+        *([] if dev else [{"id": "bump-others", "type": "run", "stage": "配布", "cmd": bump_others_cmd(a, plugin),
+                           "on_fail": "judge", "next": "changelog"}]),
         {"id": "changelog", "type": "run", "cmd": f"{STEPS_PY} changelog --version {v} --prs {prs}",
          "on_fail": "judge", "next": "notes"},
         {"id": "notes", "type": "run", "stage": "配布", "cmd": notes, "on_fail": "judge",
@@ -2279,15 +2354,31 @@ def plan_release_package_plugin(a) -> dict:
     return plan
 
 
+# changed-plugins の結果 JSON（最後の行）の items を「名前 版」の行にする
+PICK_BUMPS = ('import json,sys; [print(i[\\"name\\"], i[\\"to\\"]) '
+              'for i in json.loads(sys.stdin.read().strip().splitlines()[-1])[\\"items\\"]]')
+
+
+def bump_others_cmd(a, plugin: str) -> str:
+    """本番のリリースプランの bump-others（不足 c）。前のタグからの差分のある、宣言の release.plugin 以外の
+    プラグインを changed-plugins で列挙し、1 つずつ PATCH を 1 つ上げる。どれかが落ちたら止まる。"""
+    since = f" --since {shlex.quote(a.prev_tag)}" if getattr(a, "prev_tag", None) else ""
+    return (f'out=$({STEPS_PY} changed-plugins --plugin {plugin}{since}) || {{ printf "%s\\n" "$out"; exit 1; }}; '
+            f'printf "%s\\n" "$out"; printf "%s\\n" "$out" | python3 -c "{PICK_BUMPS}" | while read -r n to; do '
+            f'{STEPS_PY} bump --plugin "$n" --to "$to" --base {a.base} || exit 1; done')
+
+
 # 配布の形（release の form-<形>.md）ごとの雛形。無い形は /ndf:release で配る
 RELEASE_FORMS = {"package-plugin": plan_release_package_plugin}
 
 
 def cmd_new(a) -> dict:
     since = a.kind == "check" and getattr(a, "since_last", False)
-    maker = plan_check_since if since else {"impl": plan_impl, "check": plan_check, "release": plan_release}[a.kind]
+    maker = plan_check_since if since else {"impl": plan_impl, "fix": plan_fix, "check": plan_check,
+                                             "release": plan_release}[a.kind]
     plan = maker(a)
-    key = {"impl": lambda: a.issue[0], "check": lambda: f"{a.id}-check" if since else f"{a.pr}-check",
+    key = {"impl": lambda: a.issue[0], "fix": lambda: f"fix-{a.issue[0] if a.issue else Path(a.worktree).name}",
+           "check": lambda: f"{a.id}-check" if since else f"{a.pr}-check",
            "release": lambda: f"release-{a.version}"}[a.kind]()
     out = Path(a.out or f"plan-{key}.json")
     out.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n")
@@ -2753,7 +2844,60 @@ def report_result(text: str) -> str:
 
 
 def state_dir_of(plan: str) -> Path:
-    return Path(plan).parent / (Path(plan).stem + "-state")
+    """プランの状態ディレクトリ `<プラン>-state`（パスは変えない）。
+
+    プランが一時ディレクトリの下にあり、状態の置き場所がそうでないときだけ、実体を
+    `<状態の置き場所>/<stem>-<プランの絶対パスの sha256 の先頭 8 字>/` に作り、`<プラン>-state` を
+    そこへのシンボリックリンクにする（#1142 の不足 f。OS の再起動と /tmp の掃除で記録を失わない）。
+    実体にはプランの写し `plan.json` を置く。既にある `<プラン>-state` はそのまま使う。
+    """
+    link = Path(plan).parent / (Path(plan).stem + "-state")
+    try:
+        if link.exists() or link.is_symlink():
+            return link
+        home = sv_state_home()
+        if not under_temp(Path(plan)) or under_temp(home):
+            return link
+        digest = hashlib.sha256(str(Path(plan).resolve()).encode()).hexdigest()[:8]
+        real = home / f"{Path(plan).stem}-{digest}"
+        real.mkdir(parents=True, exist_ok=True)
+        if Path(plan).is_file() and not (real / "plan.json").exists():
+            shutil.copyfile(plan, real / "plan.json")
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(real, target_is_directory=True)
+    except FileExistsError:
+        pass  # 並行する起動が先に作った
+    except OSError as e:
+        print(f"supervise: 状態の実体を置けない（{link} をそのまま使う）: {e}", file=sys.stderr)
+    return link
+
+
+def temp_roots() -> tuple[Path, ...]:
+    """一時ディレクトリとみなす場所（OS の再起動や掃除で消えうる）。"""
+    roots = {Path(tempfile.gettempdir()), Path("/tmp")}
+    out = []
+    for r in roots:
+        try:
+            out.append(r.resolve())
+        except OSError:
+            continue
+    return tuple(out)
+
+
+def under_temp(path: Path) -> bool:
+    try:
+        p = Path(os.path.abspath(path)).resolve()
+    except OSError:
+        return False
+    return any(p == r or r in p.parents for r in temp_roots())
+
+
+def sv_state_home() -> Path:
+    """プランの状態の実体の置き場所。`NDF_SV_STATE_DIR` → `${XDG_STATE_HOME}/ndf/sv` → `~/.local/state/ndf/sv`。"""
+    if os.environ.get("NDF_SV_STATE_DIR"):
+        return Path(os.environ["NDF_SV_STATE_DIR"])
+    base = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
+    return Path(base) / "ndf" / "sv"
 
 
 def attention_lines(prog: Path, offset: int) -> tuple[list[dict], int]:
@@ -3136,6 +3280,7 @@ MAIN_EPILOG = """フェーズごとの種別（new <種別> --help で、書き�
   フェーズ                                 種別
   設計 → 承認ゲート 1 → 実装 → 検査（ミッション）  new mission（リリースの形に雛形があればリリースまで）
   実装（1 課題の Pull Request）              new impl
+  即時修正（worker の実装なしで Pull Request）  new fix
   検査（1 本の Pull Request か前回からの差分）   new check
   リリース（開発版か本番）                   new release
   ミッションの終わり                         new close
@@ -3150,13 +3295,17 @@ NEW_KINDS = {
     "impl": ("1 課題を実装するプラン",
              "ステップ: 実装（worker）→ 同期とチェック（宣言があるとき）→ 範囲テスト → Pull Request → 全体テスト → "
              "doc-lint → ready → マージ。落ちた run は judge が fix・やり直し・stop を選ぶ"),
+    "fix": ("即時修正のプラン（worker の実装のステップが無い）",
+            "作業場所の今のコミットを流す。ステップ: 同期とチェック（宣言があるとき）→ 範囲テスト → Pull Request → "
+            "全体テスト → doc-lint → ready → マージ（merge-when-green）。落ちた run は judge が fix・やり直し・stop を選ぶ。"
+            "--escape-of なら最後に逃げた不具合を記録する"),
     "check": ("検査のプラン",
               "--pr N: 構造改善の要否 → 構造改善 → cross-review → 全体テスト → ready → マージ。\n"
               "--since-last: 前回の検査からの差分を範囲にし、check/<名> のブランチで Pull Request を出して同じ並びを"
               "通す（pace: fast。--review-only なら実装レビューだけ）"),
     "release": ("リリースのプラン（形は .ndf/supervise.json の release.form ごと。雛形の無い形は /ndf:release で行う）",
                 "package-plugin の dev: bump → changelog → 説明文 → sync-check → release → verify-install → "
-                "approval-facts → 提示物の説明文。prod: bump → changelog → 説明文 → トークン消費の記録 → sync-check → "
+                "approval-facts → 提示物の説明文。prod: bump → 差分のある他のプラグインの bump → changelog → 説明文 → トークン消費の記録 → sync-check → "
                 "release → verify-install（本番のブランチ）→ 後片付け。実装の queue へ --then で渡すと、実装がすべて"
                 "完了した後に続けて流れる"),
     "mission": ("ミッションのステージごとのプランと mission.json を書き出す",
@@ -3175,39 +3324,40 @@ NEW_KINDS = {
 NEW_ARGS = [
     ("--worktree", {"required": True, "help": {"*": "作業場所（worktree）", "mission": "リポジトリの根",
                                                "close": "リポジトリの根",
-                                               "check": "作業場所（worktree。--since-last はリポジトリの根）"}},
-     "impl check release mission close"),
+                                               "check": "作業場所（worktree。--since-last はリポジトリの根）",
+                                               "fix": "作業場所（worktree。省けば --branch から <リポジトリ>/.worktrees/<ブランチ>）"}},
+     "impl fix check release mission close"),
     ("--issue", {"type": int, "nargs": "+", "default": [],
                  "help": {"*": "課題の番号", "mission": "実装する課題（課題ごとに実装のプランを書く）",
-                          "close": "ミッションの課題（最後に閉じる）"}},
-     "impl check release mission close"),
+                          "close": "ミッションの課題（最後に閉じる）", "fix": "関連する課題の番号（任意）"}},
+     "impl fix check release mission close"),
     ("--base", {"help": "起点のブランチ（PR の宛先。既定は .ndf/worktree.json の base_branch）"},
-     "impl check release mission close"),
+     "impl fix check release mission close"),
     ("--production-branch", {"help": "本番のブランチ（既定は .ndf/worktree.json の production_branch）"},
      "release mission close"),
     ("--test-cmd", {"help": "テストのコマンド。{paths} を範囲に置き換える（既定は .ndf/supervise.json の test.command）"},
-     "impl check mission close"),
+     "impl fix check mission close"),
     ("--test-all", {"help": "全体テストの範囲（既定は .ndf/supervise.json の test.all か .）"},
-     "impl check mission close"),
-    ("--mode", {"default": "standard", "help": "モード（既定 standard）"}, "impl check release mission close"),
+     "impl fix check mission close"),
+    ("--mode", {"default": "standard", "help": "モード（既定 standard）"}, "impl fix check release mission close"),
     ("--out", {"help": {"*": "書き出すプランのファイル", "mission": "書き出すディレクトリ（既定 mission-<名前>）",
                         "close": "書き出すディレクトリ（既定 mission-<名前>）"}},
-     "impl check release mission close"),
+     "impl fix check release mission close"),
     ("--tests", {"nargs": "+", "default": [], "metavar": "PATH",
                  "help": {"*": "範囲テストの対象（テストのコマンドの {paths} に入る）",
                           "mission": "課題ごとの実装のプランの範囲テストの対象（{paths} に入る。既定 .）"}},
-     "impl mission"),
+     "impl fix mission"),
     ("--scope", {"nargs": "+", "default": [], "metavar": "PATH", "help": "構造改善の範囲"}, "check mission"),
-    ("--title", {"help": "Pull Request の題名"}, "impl"),
-    ("--summary", {"help": "Pull Request 本文の要約"}, "impl"),
+    ("--title", {"help": "Pull Request の題名"}, "impl fix"),
+    ("--summary", {"help": "Pull Request 本文の要約"}, "impl fix"),
     ("--prompt", {"help": "実装の指示文"}, "impl"),
     ("--prompt-file", {"help": "実装の指示文のファイル"}, "impl"),
     ("--files", {"nargs": "+", "default": [], "metavar": "PATH",
                  "help": "触るファイル。同じ出力先の、まだ終わっていない他のプランの指示文へ除外として載る"}, "impl"),
     ("--changes", {"help": "PR 本文の「利用者向けの変化」の材料（リリースの説明文になる）"}, "impl"),
-    ("--branch", {"help": "作業場所が無ければ作る worktree のブランチ"}, "impl release"),
+    ("--branch", {"help": "作業場所が無ければ作る worktree のブランチ"}, "impl fix release"),
     ("--escape-of", {"type": int, "help": "直す不具合を持ち込んだ PR（分からなければ 0）。check-trigger.py escape で記録する"},
-     "impl"),
+     "impl fix"),
     ("--pr", {"type": int, "help": "検査する Pull Request（--since-last と排他）"}, "check"),
     ("--since-last", {"action": "store_true", "help": "前回の検査からの差分を範囲にする（--pr と排他）"}, "check"),
     ("--id", {"help": "検査の名前（--since-last と組。ブランチ check/<名>）"}, "check"),
@@ -3224,7 +3374,7 @@ NEW_ARGS = [
     ("--prs-from-queue", {"action": "store_true",
                           "help": "queue が --then で流す前に、先行のプランの報告の Pull Request を --prs に足す"}, "release"),
     ("--channel", {"choices": ["dev", "prod"], "help": "開発版（dev）か本番（prod）か"}, "release"),
-    ("--prev-tag", {"help": "dev: approval-facts の前のタグ（省略時は自動）"}, "release"),
+    ("--prev-tag", {"help": "dev: approval-facts の前のタグ。prod: 他のプラグインの差分の起点（省略時は自動）"}, "release"),
     ("--repo", {"help": "元のリポジトリ（省略時は作業場所の /.worktrees/ より前）"}, "release"),
     ("--mvv", {"help": "承認ゲート 2 を MVV で判定する（ミッションの状態）"}, "release"),
     ("--name", {"help": "ミッションの名前（英数字・. _ -。ブランチは mission/<名前>）"}, "mission close"),
@@ -3238,7 +3388,7 @@ NEW_ARGS = [
     ("--prod", {"help": "本番の版（例 10.18.0）"}, "close"),
     ("--milestone", {"help": "マイルストーン（振り返りの材料）"}, "close"),
 ]
-NEW_REQUIRED = {"impl": "--issue・--tests・--title", "check": "--pr か --since-last（--id と組）",
+NEW_REQUIRED = {"impl": "--issue・--tests・--title", "fix": "--worktree か --branch・--tests・--title", "check": "--pr か --since-last（--id と組）",
                 "release": "--version・--prs（か --prs-from-queue）・--channel",
                 "mission": "--name・--issue・--version", "close": "--name・--issue・--version・--prod・--state"}
 
@@ -3258,7 +3408,9 @@ def add_new_parsers(sub) -> None:
         for name, kw, allowed in NEW_ARGS:
             if kind in allowed.split():
                 helps = kw.get("help")
-                k.add_argument(name, **{**kw, "help": helps.get(kind, helps["*"]) if isinstance(helps, dict) else helps})
+                extra = {"required": False} if (name, kind) == ("--worktree", "fix") else {}  # --branch でもよい
+                k.add_argument(name, **{**kw, **extra,
+                                        "help": helps.get(kind, helps["*"]) if isinstance(helps, dict) else helps})
 
 
 def fill_new_defaults(a) -> None:
@@ -3357,6 +3509,10 @@ def main() -> int:
     if a.cmd == "new":
         if a.kind == "impl" and not (a.issue and a.tests and a.title):
             ap.error("new impl には --issue・--tests・--title が要る")
+        if a.kind == "fix" and not ((a.worktree or a.branch) and a.tests and a.title):
+            ap.error("new fix には --worktree か --branch・--tests・--title が要る")
+        if a.kind == "fix" and not a.worktree:
+            a.worktree = fix_worktree(a.branch)
         if a.kind == "check" and a.since_last and a.pr:
             ap.error("new check の --since-last と --pr は同時に渡せない")
         if a.kind == "check" and a.since_last and not a.id:

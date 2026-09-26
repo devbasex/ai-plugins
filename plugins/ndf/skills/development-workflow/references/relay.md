@@ -136,7 +136,7 @@ conductor では、コンテキスト量の hook が工程へ入る起動を 1 �
 
 例: セッション 7 の実装 3 本と開発版・本番を流す。
 
-1. プランを作った後に 1 度: `mission-state.py init /tmp/ndf-sv/r7/mission.json --name <ミッション> --milestone 26 --plan 実装=<plan.json> ... --plan 開発版=<plan.json> --plan 本番=<plan.json> --done <queue の done> --dev <開発版> --prod <本番> --goal @<雛形>`（雛形は次のセッションの `/goal` の文面。`{heading}`・`{dev}`・`{prod}`・`{milestone}`・`{name}`・`{issues}` を差し込む）
+1. プランを作った後に 1 度: `mission-state.py init ~/.local/state/ndf/sv/r7/mission.json --name <ミッション> --milestone 26 --plan 実装=<plan.json> ... --plan 開発版=<plan.json> --plan 本番=<plan.json> --done <queue の done> --dev <開発版> --prod <本番> --goal @<雛形>`（雛形は次のセッションの `/goal` の文面。`{heading}`・`{dev}`・`{prod}`・`{milestone}`・`{name}`・`{issues}` を差し込む）
 2. 承認ゲートで承認を得たら: `mission-state.py gate <mission.json> "関門 2" --what "本番 <版>"`
    - `pace: fast` のミッションは、1 に `--pace fast --milestone <M>`（MVV のコピー元。`--mvv <ファイル>` でもよい）を足し、利用者が
      `mvv.md` を承認した後に `mission-state.py gate <mission.json> MVV --what <要約>` を打つ。ゲート 1・2 の記録は、MVV 判定が
@@ -149,7 +149,7 @@ conductor では、コンテキスト量の hook が工程へ入る起動を 1 �
 **本番へのリリースの後は、カットポイントの 3 つを本番のキューと同じ背景の Bash で続けて流す。** ゲート 2 の承認から次のセッションの起動までに、conductor が組み立てる文は無くなる。conductor は完了の通知を受けたら `relay.py notice` のアナウンスと、出力の `ndf-next` の囲みをそのまま出す。ラッパーがプラグインを本番の版へ更新し、次のセッションを起動する。
 
 ```bash
-O=/tmp/ndf-sv/r7; M=plugins/ndf/scripts/mission-state.py; DOC=issues/handoff-<名>.md
+O=~/.local/state/ndf/sv/r7; M=plugins/ndf/scripts/mission-state.py; DOC=issues/handoff-<名>.md
 python3 plugins/ndf/scripts/supervise.py queue $O/plan-release-prod.json --done $O/done-release-prod.json >/dev/null &&
 python3 plugins/ndf/scripts/supervise.py wait $O/done-release-prod.json --timeout 3600 >/dev/null &&
 python3 $M update $O/mission.json >/dev/null &&

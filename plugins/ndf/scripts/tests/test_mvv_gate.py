@@ -159,3 +159,58 @@ def test_a_missing_material_goes_back_to_the_user(mission):
     mission["material"].unlink()
     code, out, _ = run(mission, FOLLOW)
     assert (code, llm_calls(mission)) == (10, 0)
+
+
+DESIGN_DOC = "# 設計\n\nドメインモデルの節\n"
+
+
+def fake_gh_with_design(tmp_path: Path, files: list[str], api_fails: bool = False) -> str:
+    """`gh pr view` は PR の情報を、`gh api .../contents/...` は設計文書の中身を返す偽物。呼び出しを gh-calls.txt へ残す。"""
+    bindir = tmp_path / "bin"
+    bindir.mkdir(exist_ok=True)
+    info = {"title": "設計", "body": "本文", "headRefOid": "abc123",
+            "files": [{"path": f, "additions": 1, "deletions": 0} for f in files]}
+    (tmp_path / "info.json").write_text(json.dumps(info, ensure_ascii=False))
+    (tmp_path / "doc.md").write_text(DESIGN_DOC)
+    api = "echo 'HTTP 404' >&2; exit 1" if api_fails else f"cat {tmp_path / 'doc.md'}"
+    gh = bindir / "gh"
+    gh.write_text(f"#!/bin/sh\necho \"$*\" >> {tmp_path / 'gh-calls.txt'}\n"
+                  f"if [ \"$1\" = api ]; then {api}; exit 0; fi\ncat {tmp_path / 'info.json'}\n")
+    gh.chmod(0o755)
+    return str(bindir)
+
+
+def run_design(m: dict, files: list[str], gate: str = "design", api_fails: bool = False) -> tuple[int, dict, list[dict]]:
+    tmp = m["tmp"]
+    env = {"PATH": f"{fake_gh_with_design(tmp, files, api_fails)}:/usr/bin:/bin", "HOME": str(tmp),
+           "NDF_MVV_CLAUDE": fake_claude(tmp, FOLLOW)}
+    p = subprocess.run([sys.executable, str(SCRIPT), "check", "--mission", str(m["state"]), "--gate", gate,
+                        "--pr", "7", "--log", str(m["log"]), "--root", str(m["root"]), "--repo", "o/r"],
+                       capture_output=True, text=True, env=env, cwd=m["root"])
+    out = json.loads(p.stdout.splitlines()[-1])
+    assert validate_result(out, p.returncode) == [], (out, p.returncode, p.stderr)
+    rows = [json.loads(ln) for ln in m["log"].read_text().splitlines()] if m["log"].exists() else []
+    return p.returncode, out, rows
+
+
+def test_design_gate_passes_the_design_doc_of_the_pr_as_material(mission):
+    code, out, rows = run_design(mission, ["issues/x-design.md", "app/x.py"])
+    assert code == 0, out
+    assert "ドメインモデルの節" in (mission["tmp"] / "prompt.txt").read_text()
+    assert rows[-1]["material"] == ["#7 issues/x-design.md"]
+    api = [ln for ln in (mission["tmp"] / "gh-calls.txt").read_text().splitlines() if ln.startswith("api")]
+    assert len(api) == 1 and "repos/o/r/contents/issues/x-design.md?ref=abc123" in api[0]
+
+
+def test_release_gate_does_not_fetch_design_docs(mission):
+    code, out, rows = run_design(mission, ["issues/x-design.md"], gate="release")
+    assert code == 0, out
+    assert "ドメインモデルの節" not in (mission["tmp"] / "prompt.txt").read_text()
+    assert rows[-1]["material"] == []
+
+
+def test_an_unreadable_design_doc_goes_back_to_the_user(mission):
+    code, out, rows = run_design(mission, ["issues/x-design.md"], api_fails=True)
+    assert (code, llm_calls(mission)) == (10, 0)
+    assert "issues/x-design.md" in out["summary"]
+    assert rows[-1]["verdict"] == "machine"

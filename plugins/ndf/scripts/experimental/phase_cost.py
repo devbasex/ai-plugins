@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """phase_cost.py: フェーズとステップの粒度を測る表を出す（試行。#773）。
 
-    python3 phase_cost.py [--state-glob GLOB] [--session ID ...] [--window-limit N]
+    python3 phase_cost.py [--state-glob GLOB ...] [--session ID ...] [--window-limit N]
 
 出すもの:
 - supervise.py のステップ（`<plan>-state/state.json` の `log`）の種類ごとの件数と、費用・所要・往復・
@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import glob
 import json
+import os
 import statistics
 import sys
 from collections import defaultdict
@@ -28,7 +29,14 @@ sys.path.insert(0, str(HERE.parent / "lib"))
 import transcript_agents  # noqa: E402
 from step_result import emit, result  # noqa: E402
 
-DEFAULT_GLOB = "/tmp/ndf-sv/*/plan-*-state"
+
+def default_globs() -> list[str]:
+    """既定で読む状態ディレクトリ。状態の置き場所（`NDF_SV_STATE_DIR` → `${XDG_STATE_HOME:-~/.local/state}/ndf/sv`）の下の
+    `<置き場所>/*/plan-*-state` と、一時ディレクトリの下のプランの実体 `<置き場所>/plan-*`（#1142）、
+    古い置き場所の `/tmp/ndf-sv/*/plan-*-state`。同じ実体は 1 度だけ読む。"""
+    base = (Path(os.environ["NDF_SV_STATE_DIR"]) if os.environ.get("NDF_SV_STATE_DIR") else
+            Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local" / "state") / "ndf" / "sv")
+    return [str(base / "*" / "plan-*-state"), str(base / "plan-*"), "/tmp/ndf-sv/*/plan-*-state"]
 
 
 def median(values: list) -> int | float | str:
@@ -39,11 +47,17 @@ def median(values: list) -> int | float | str:
     return round(m, 2) if isinstance(m, float) and m < 100 else int(m)
 
 
-def read_steps(pattern: str) -> tuple[list[dict], int]:
-    """ステップの記録を返す。読めた計画の数も返す。"""
+def read_steps(patterns: str | list[str]) -> tuple[list[dict], int]:
+    """ステップの記録を返す。読めた計画の数も返す。同じ実体（シンボリックリンクの先）は 1 度だけ読む。"""
     steps: list[dict] = []
     plans = 0
-    for d in sorted(glob.glob(pattern)):
+    seen: set[str] = set()
+    found = [d for pat in ([patterns] if isinstance(patterns, str) else patterns) for d in sorted(glob.glob(pat))]
+    for d in found:
+        real = os.path.realpath(d)
+        if real in seen:
+            continue
+        seen.add(real)
         try:
             state = json.loads((Path(d) / "state.json").read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
@@ -132,12 +146,13 @@ def table(header: list[str], keys: list[str], rows: list[dict]) -> list[str]:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--state-glob", default=DEFAULT_GLOB)
+    ap.add_argument("--state-glob", action="append", default=None,
+                    help="状態ディレクトリの glob（繰り返せる）。既定は default_globs() の 3 つ")
     ap.add_argument("--session", action="append", default=[])
     ap.add_argument("--window-limit", type=int, default=200_000)
     args = ap.parse_args()
 
-    steps, plans = read_steps(args.state_glob)
+    steps, plans = read_steps(args.state_glob or default_globs())
     srows = step_rows(steps)
     lines = [f"## supervise.py のステップ（計画 {plans} 件・ステップ {len(steps)} 件）", ""]
     lines += table(
