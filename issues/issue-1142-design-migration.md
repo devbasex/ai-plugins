@@ -42,7 +42,7 @@ X = ほかのスクリプト、CI = 継続的統合。
 
 ### 変えないもの（12 本）
 
-重複を持たず、1000 行以下のもの: `scripts/projects-sync.sh`・`progress-record.sh`・`resolve.sh`・
+重複を持たず、500 行以下のもの（500 行を超えるものは例外リストに行数付きで残す）: `scripts/projects-sync.sh`・`progress-record.sh`・`resolve.sh`・
 `token-guard.sh`・`ensure-retention.sh`・`statusline-switch.sh`・`statusline.sh`・`install-official-skills.sh`・
 `skills/development-workflow/scripts/workflow-guard.sh`・`stage-check.sh`・`skills/google-auth` と `google-drive` の
 2 本（`google_auth.py`・`gdrive_fetch.py`）。語の移行（W1〜W7）で文面だけ触るものがある。
@@ -164,7 +164,7 @@ S1 の例外リストは、その時点の違反をすべて載せて始める�
 
 | ステージ | 移行ステップ | 触るファイル | 見積りの行数（移行後の最大） |
 | --- | --- | --- | --- |
-| 1 | L0 ライブラリ | `lib/` に `clock.py`・`jsonio.py`・`proc.py`・`repo.py`・`loop_drive.py` を新設。`lib/limits.py`（`resolve_cli_timeout`・V3）・`lib/launch-cli.sh`（`resolve_print_timeout` を `limits.py` の 1 回へ）・`lib/step_result.py`（`git`・`gh_json` を `proc` の上へ）・`lib/statefile.py`（`now`・`die`・`info` を再エクスポート）・`lib/deps.py`（新設。`require()`・h）・`plugins/ndf/pyproject.toml` と `plugins/ndf/uv.lock`（新設。h）・`lib/gh_parts.py`（ETag 付きの読み直し・PR と課題の単発の読み書きの REST の関数・枠の使い分けと上限の代替・待ちの間隔の伸長・g。試行が成り立てば githubkit の上に置く。決定 17）・`lib/README.md`・テスト。**呼び出し側はまだ変えない**。C1〜C7 は、移すファイルの `gh pr` / `gh issue` の呼び出しを `gh_parts` の関数へ置き換える | 各 150 以下 |
+| 1 | L0 ライブラリ | `lib/` に `clock.py`・`jsonio.py`・`proc.py`・`repo.py`・`loop_drive.py` を新設。`lib/limits.py`（`resolve_cli_timeout`・V3）・`lib/launch-cli.sh`（`resolve_print_timeout` を `limits.py` の 1 回へ）・`lib/step_result.py`（`git`・`gh_json` を `proc` の上へ）・`lib/statefile.py`（`now`・`die`・`info` を再エクスポート）・`lib/deps.py`（新設。`require()`・h）・`plugins/ndf/pyproject.toml` と `plugins/ndf/uv.lock`（新設。h）・`lib/gh_parts.py`（ETag 付きの読み直し・PR と課題の単発の読み書きの REST の関数・枠の使い分けと上限の代替・待ちの間隔の伸長・g。試行が成り立てば githubkit の上に置く。決定 17）・根の `scripts/check-script-structure.py` と `scripts/script-structure-allow.json`（行数の上限を 500 へ下げ、500 行を超えるファイルを行数付きで例外リストへ載せ、載せた行数を超えたら落とす。決定 18）・`lib/README.md`・テスト。**呼び出し側はまだ変えない**。C1〜C7 は、移すファイルの `gh pr` / `gh issue` の呼び出しを `gh_parts` の関数へ置き換える | 各 150 以下 |
 | 2 | C1 プランの実行 | `scripts/supervise.py`・`scripts/supervise_lib/`（新設 13 本。`__init__` を含む）・`mission-state.py`・`mvv-gate.py`・`check-trigger.py`・`mission-close.py`・`scripts/tests/test_supervise*.py` ほか差し替え先 | `supervise.py` 約 450・`engine.py` 約 550 |
 | 2 | C2 cross-review | `skills/cross-review/scripts/state.py`・`review_lib/`（新設 16 本。`__init__` を含む）・`drive.py`・`measure.py`・`critique.sh`・`launch-reviewer.sh`・`skills/cross-review/tests/`・`skills/fix/tests/test_fix_steps.py`（差し替え先だけ） | `commands/init.py` 約 520 |
 | 2 | C3 外部 CLI と記録 | `lib/monitor.py`・`lib/monitor_patterns.py`（新設）・`lib/monitor_outcome.py`・`lib/run_metrics.py`・`lib/post_queue.py`・`lib/transcript_agents.py`・`skills/external-ai/scripts/external-ai.py`・`scripts/wait-notify.py`・`skills/skill-stats/scripts/skill-stats.py`・`scripts/parallel-measure.py`・テスト | `monitor.py` 約 860 |
