@@ -131,7 +131,7 @@ class Drive:
             f"  - {who}: intent={(r.get(who) or {}).get('intent')}, posted_as={(r.get(who) or {}).get('posted_as')}, "
             f"{(r.get(who) or {}).get('comments', 0)} 件, {(r.get(who) or {}).get('review_url', '')}"
             for who in r.get("reviewers") or []) or "  - 無し"
-        return f"""`/ndf:fix {pr} --defer-nit` を行う。修正の手順・方針・戻り値ファイルの形は `/ndf:fix` が持つ。
+        return f"""`/ndf:fix {pr}` を行う。修正の手順・方針・戻り値ファイルの形は `/ndf:fix` が持つ。
 
 - リポジトリ: {s.get('repo')}
 - PR: #{pr}（round {r.get('round')}）
@@ -144,6 +144,7 @@ class Drive:
 
 コミットまでで、送らない。GitHub へ書かない（送信・返信・決着は取り込みが行う）。
 戻り値ファイル: {self.path('fix')}（環境変数 `CROSS_REVIEW_TMP_DIR={self.tmp}` を渡すと `/ndf:fix` がここへ書く）
+`fix-steps.py context` には環境変数 `CROSS_REVIEW_STATE={self.tmp}/cross-review-pr{self.pr}-state.json` も渡す（担当と同じ指摘の基準を使う）
 """
 
     def sweep_prompt(self) -> str:

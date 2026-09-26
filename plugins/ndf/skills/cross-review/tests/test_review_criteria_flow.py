@@ -113,3 +113,47 @@ def test_new_state_criteria_without_declaration_has_no_criterion_3(tmp_path):
     crit = review_lib.commands.init._review_criteria(tmp_path)
     assert crit["status"] == "none" and crit["focus"] == []
     assert "\n3. " not in crit["reviewer_block"] and "\n4. " in crit["reviewer_block"]
+
+
+# ---- 最終スイープと完了報告 ----
+
+import review_lib.commands.report  # noqa: E402
+import review_lib.github  # noqa: E402
+import result_posts  # noqa: E402
+
+
+def _waived(tid: str, cid: int, kind: str) -> dict:
+    reply = review_lib.commands.init.review_criteria.waiver_reply(kind)
+    return {"comment_id": cid, "thread_id": tid, "path": "a.md", "line": 1, "severity": "minor",
+            "summary": "x", "reason_for_deferral": reply, "reply": reply, "resolve": True, "waived": kind}
+
+
+def test_a_sweep_of_only_waived_threads_closes_them_without_a_commit(tmp_path, monkeypatch, state_mod, capsys):
+    monkeypatch.setenv("CROSS_REVIEW_TMP_DIR", str(tmp_path))
+    sweep = {"resolved": 2, "fixed_in_sweep": 0, "commit": None, "fix_commit": None, "resolved_threads": [],
+             "deferred": [_waived("PRRT_a", 1, "wording"), _waived("PRRT_b", 2, "unlikely")], "rejected": [],
+             "remaining_open": 0, "remaining_reason": None, "items": []}
+    (tmp_path / f"sweep-pr{PR}-result.json").write_text(json.dumps(sweep, ensure_ascii=False))
+    posts = result_posts.fix_posts(tmp_path / f"sweep-pr{PR}-result.json", "o/r", PR)
+    closed = {p["fields"]["thread_id"] for p in posts if p["kind"] == "thread-resolve"}
+    assert closed == {"PRRT_a", "PRRT_b"}
+    assert result_posts.push_fix(tmp_path, "feat/x", sweep["fix_commit"]).pushed is False
+
+    (tmp_path / f"cross-review-pr{PR}-state.json").write_text(json.dumps({
+        "current_pr": PR, "repo": "o/r", "rounds": [], "deferred_nits": [], "final": "approved",
+        "pr_history": [{"pr": PR, "opened_at": "...", "closed_at": None, "rounds": 1}]}))
+    monkeypatch.setattr(review_lib.github, "_fetch_unresolved_threads", lambda repo, pr: [])
+    with pytest.raises(SystemExit) as e:
+        review_lib.commands.report.cmd_verify_sweep(argparse.Namespace(pr=PR, file=None))
+    assert e.value.code == 0 and "REMAINING_OPEN=0" in capsys.readouterr().out
+
+
+def test_the_report_counts_waived_apart_from_the_remaining_nits(state_mod, capsys):
+    st = {"deferred_nits": [_waived("PRRT_a", 1, "wording"),
+                            {"severity": "nit", "path": "b.py", "line": 2, "summary": "残り"}],
+          "review_criteria": {"status": "unreadable", "error": "壊れた宣言"}}
+    review_lib.commands.report._print_review_focus(st)
+    review_lib.commands.report._print_deferred_nits(st)
+    out = capsys.readouterr().out
+    assert "基準外の見送り: 1 件" in out and "## 残 deferred nit (1 件)" in out and "b.py:2" in out
+    assert "a.md:1" not in out and "壊れた宣言" in out
