@@ -50,12 +50,28 @@ class PrStep:
             msg = "PR の宛先（起点のブランチ）が分からない（ステップの base、計画か .ndf/worktree.json の base_branch）"
             ctx.state.cur.update(exit=2, text=msg)
             return False, msg
+        branch, err = self._push(ctx)
+        if err is not None:
+            return False, err
+        title, changes, issues, body = self._machine_body(ctx, step, base, branch)
+        if step.get("body", "llm") == "llm":
+            body = self._llm_body(ctx, step, body, changes, issues)
+        body = self.with_appended(ctx, body, step)
+        body = with_mode_line(body, ctx.plan.get("モード"), self.passed_stages(ctx, step))
+        return self._publish(ctx, base, branch, title, body)
+
+    def _push(self, ctx) -> tuple[str, str | None]:
+        """HEAD を push する。`(ブランチ, 失敗の出力 | None)`。"""
         branch = self.git(ctx, "rev-parse", "--abbrev-ref", "HEAD")
         push = subprocess.run(["git", "push", "-q", "-u", "origin", "HEAD"], cwd=ctx.cwd,
                               capture_output=True, text=True)
         if push.returncode != 0:
             ctx.state.cur.update(exit=push.returncode, text=push.stderr)
-            return False, push.stderr
+            return branch, push.stderr
+        return branch, None
+
+    def _machine_body(self, ctx, step: dict, base: str, branch: str) -> tuple[str, str, str, str]:
+        """PR の材料を集めて機械生成の本文を作る。`(タイトル, 変更の節, 課題, 本文)`。"""
         subprocess.run(["git", "fetch", "-q", "origin", base], cwd=ctx.cwd, capture_output=True, text=True)
         rng = f"origin/{base}..HEAD"
         commits = self.git(ctx, "log", "--reverse", "--format=- %s", rng) or "- （無し）"
@@ -97,24 +113,29 @@ class PrStep:
 
 {PR_FOOTER}
 """
-        if step.get("body", "llm") == "llm":
-            design = ""
-            for d in step.get("docs", []):
-                f = Path(ctx.cwd) / d
-                if f.is_file():
-                    design += f"\n### {d}\n" + f.read_text()[:TAIL]
-            res = ctx.claude.call(PR_SYSTEM, f"課題: {issues}\n要約の手がかり: {step.get('summary', '')}\n\n"
-                                  f"## 材料\n{body}\n## 設計文書（抜粋）{design or ' 無し'}",
-                                  None, ctx.cwd, step.get("timeout", 600))
-            ctx.claude.record_usage("judge", res)
-            if res["ok"] and res["text"].strip():
-                body = res["text"].strip() + "\n"
-                if not re.search(rf"^{CHANGES_HEADING}\s*$", body, re.M):
-                    body = changes + "\n\n" + body
-                if PR_FOOTER not in body:
-                    body = body.rstrip() + f"\n\n{PR_FOOTER}\n"
-        body = self.with_appended(ctx, body, step)
-        body = with_mode_line(body, ctx.plan.get("モード"), self.passed_stages(ctx, step))
+        return title, changes, issues, body
+
+    def _llm_body(self, ctx, step: dict, body: str, changes: str, issues: str) -> str:
+        """LLM で本文を補う。使えない応答のときは機械生成の本文を返す。"""
+        design = ""
+        for d in step.get("docs", []):
+            f = Path(ctx.cwd) / d
+            if f.is_file():
+                design += f"\n### {d}\n" + f.read_text()[:TAIL]
+        res = ctx.claude.call(PR_SYSTEM, f"課題: {issues}\n要約の手がかり: {step.get('summary', '')}\n\n"
+                              f"## 材料\n{body}\n## 設計文書（抜粋）{design or ' 無し'}",
+                              None, ctx.cwd, step.get("timeout", 600))
+        ctx.claude.record_usage("judge", res)
+        if res["ok"] and res["text"].strip():
+            body = res["text"].strip() + "\n"
+            if not re.search(rf"^{CHANGES_HEADING}\s*$", body, re.M):
+                body = changes + "\n\n" + body
+            if PR_FOOTER not in body:
+                body = body.rstrip() + f"\n\n{PR_FOOTER}\n"
+        return body
+
+    def _publish(self, ctx, base: str, branch: str, title: str, body: str) -> tuple[bool, str]:
+        """既存の PR があれば本文を書き直し、無ければ Draft で作る。"""
         found = gh_call.gh(["pr", "list", "--head", branch, "--state", "open", "--json", "url", "--jq", ".[0].url"],
                            cwd=ctx.cwd).stdout.rstrip()
         if found:
