@@ -34,82 +34,8 @@ sync_codex_skill_policies() {
   local manifest="$plugin_dir/manifests/codex-skills.txt"
 
   [ -f "$manifest" ] || return 0
-  python3 - "$plugin_dir/skills" "$manifest" "$CHECK" <<'PY'
-import sys
-from pathlib import Path
-
-skills_dir, manifest_path, check = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3] == "true"
-
-
-def parse_frontmatter(text: str) -> dict[str, str]:
-    lines = text.splitlines()
-    if not lines or lines[0].strip() != "---":
-        return {}
-    fields: dict[str, str] = {}
-    for line in lines[1:]:
-        if line.strip() == "---":
-            break
-        if not line or line[0].isspace() or ":" not in line:
-            continue
-        key, _, value = line.partition(":")
-        value = value.strip()
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-            value = value[1:-1]
-        fields[key.strip()] = value
-    return fields
-
-
-def yaml_double_quoted(value: str) -> str:
-    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
-
-
-published = {
-    line.split("#", 1)[0].strip()
-    for line in manifest_path.read_text(encoding="utf-8").splitlines()
-    if line.split("#", 1)[0].strip()
-}
-
-expected: dict[Path, str] = {}
-for skill_dir in sorted(p for p in skills_dir.iterdir() if p.is_dir()):
-    skill_md = skill_dir / "SKILL.md"
-    if not skill_md.is_file() or skill_dir.name not in published:
-        continue
-    fields = parse_frontmatter(skill_md.read_text(encoding="utf-8"))
-    if fields.get("disable-model-invocation") != "true":
-        continue
-    lines = ["policy:", "  allow_implicit_invocation: false"]
-    argument_hint = fields.get("argument-hint")
-    if argument_hint:
-        lines += ["interface:", f"  default_prompt: {yaml_double_quoted(argument_hint)}"]
-    expected[skill_dir / "agents" / "openai.yaml"] = "\n".join(lines) + "\n"
-
-actual = {p for p in skills_dir.glob("*/agents/openai.yaml")}
-stale = actual - set(expected)
-
-failed = False
-for path, content in expected.items():
-    if check:
-        if not path.is_file():
-            print(f"Generated file missing: {path}", file=sys.stderr)
-            failed = True
-        elif path.read_text(encoding="utf-8") != content:
-            print(f"Generated file is out of date: {path}", file=sys.stderr)
-            failed = True
-    else:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
-
-for path in sorted(stale):
-    if check:
-        print(f"Generated file is stale: {path}", file=sys.stderr)
-        failed = True
-    else:
-        path.unlink()
-        if not any(path.parent.iterdir()):
-            path.parent.rmdir()
-
-raise SystemExit(1 if failed else 0)
-PY
+  # frontmatter を YAML として読むため、根の uv の環境で動く生成の本体へ渡す（#1142 の D8）
+  python3 "$ROOT_DIR/scripts/lib/codex_skill_policies.py" "$plugin_dir/skills" "$manifest" "$CHECK"
 }
 
 # agy は配る Skill を絞る手段を利用者側の設定にしか持たない（`plugins.json` の絞り込みは
