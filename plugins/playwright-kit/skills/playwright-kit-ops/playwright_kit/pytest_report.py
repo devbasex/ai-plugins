@@ -166,7 +166,7 @@ def render_markdown(
                 lines.append(f"| {i} | `{url}` | {cat} | `{pat}` | {snippet} |")
             if len(e.body_check_detail) > 20:
                 lines.append(
-                    f"\n_(表示は先頭 20 件のみ。詳細は ``body_check.jsonl`` を参照)_"
+                    "\n_(表示は先頭 20 件のみ。詳細は ``body_check.jsonl`` を参照)_"
                 )
             lines.append("")
 

@@ -38,7 +38,7 @@ def test_wait_review_passes_args_to_monitor(tmp_path):
     script = tmp_path / "wait-review.sh"
     monitor = tmp_path / "monitor.py"
     args_record = tmp_path / "args.txt"
-    
+
     shutil.copy2(_SCRIPT, script)
     monitor.write_text(
         "#!/usr/bin/env python3\n"

@@ -12,9 +12,7 @@ Amazon Q Critical-2: context.close() 例外で browser.close() がスキップ�
 
 from __future__ import annotations
 
-from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock
 
 import pytest
 

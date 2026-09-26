@@ -7,7 +7,6 @@
 """
 from __future__ import annotations
 
-import pytest
 import review_lib.commands.collect_critiques
 import review_lib.commands.verify_findings
 

@@ -484,7 +484,7 @@ PARENT_BODY = (
 def split(text: str) -> list[str]:
     """`wf_split` の出力を語の並びで返す。区切りは空文字になる。"""
     result = subprocess.run(
-        ["bash", "-c", f'. "$1"; wf_split "$2"', "_", str(LIB), text],
+        ["bash", "-c", '. "$1"; wf_split "$2"', "_", str(LIB), text],
         capture_output=True,
     )
     assert result.returncode == 0, result.stderr

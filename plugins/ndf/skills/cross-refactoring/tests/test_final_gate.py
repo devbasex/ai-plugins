@@ -13,7 +13,6 @@ AC16b）。検証の中で全体のテストが通り、取り消しが無く、
 """
 from __future__ import annotations
 
-import sys
 import json
 
 import pytest

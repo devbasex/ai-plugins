@@ -12,7 +12,6 @@ require() は決定 17 の表の順 1〜5 の試作である。宣言と lock �
 from __future__ import annotations
 
 import importlib.util
-import json
 import os
 import shutil
 import subprocess

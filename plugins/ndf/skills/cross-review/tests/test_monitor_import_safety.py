@@ -23,7 +23,6 @@ import pathlib
 import sys
 import types
 
-import pytest
 
 
 _HERE = pathlib.Path(__file__).resolve().parent

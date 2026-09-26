@@ -14,7 +14,6 @@ from __future__ import annotations
 import json
 import os
 import pathlib
-import shutil
 import subprocess
 import sys
 import threading
@@ -726,7 +725,6 @@ def test_context_reason_asks_for_ndf_next_block(tmp_path, state):
 
 # ---------------------------------------------------------------- ラッパーの下の告知（#980 AC6）
 
-import sys  # noqa: E402
 
 RELAY_PY = ROOT / "scripts" / "relay.py"
 

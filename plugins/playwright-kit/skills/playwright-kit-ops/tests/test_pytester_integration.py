@@ -29,7 +29,6 @@ import textwrap
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import pytest
 
 
 # ---------------------------------------------------------------------------
@@ -192,7 +191,7 @@ def test_makereport_populates_artifact_paths_in_report(pytester, tmp_path: Path)
     # har_path を手動で作成する fixture を挟む。
     pytester.makepyfile(
         textwrap.dedent(
-            f"""
+            """
             import pytest
             from pathlib import Path
             from unittest.mock import MagicMock
@@ -203,7 +202,7 @@ def test_makereport_populates_artifact_paths_in_report(pytester, tmp_path: Path)
                 confirm_har() が har_relpath を設定できるようにする。\"\"\"
                 if pwk_evidence.har_path:
                     pwk_evidence.har_path.parent.mkdir(parents=True, exist_ok=True)
-                    pwk_evidence.har_path.write_text("{{}}", encoding="utf-8")
+                    pwk_evidence.har_path.write_text("{}", encoding="utf-8")
                 yield
 
             def test_fail_with_evidence(pwk_evidence):
@@ -325,7 +324,7 @@ def test_sessionstarttime_affects_report_header(tmp_path: Path):
     """
     import datetime as _dt
     from types import SimpleNamespace
-    from unittest.mock import MagicMock, patch
+    from unittest.mock import patch
 
     from playwright_kit.pytest_plugin import pytest_terminal_summary
 

@@ -8,7 +8,14 @@ E1（移行の前）と E9（移行の後）を同じコマンドで打つ。数
 `--prs N` は、マージ済みの直近 N 本の Pull Request の変更ファイルの重なり（2 本以上が触ったファイルの数と、
 同じファイルを触った Pull Request の組の数）を足して出す（非機能の条件の運用・保守性）。`gh` を使う。
 """
-import argparse, ast, collections, itertools, json, pathlib, statistics, subprocess
+import argparse
+import ast
+import collections
+import itertools
+import json
+import pathlib
+import statistics
+import subprocess
 ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
 ap.add_argument("root", nargs="?", default="plugins/ndf")
 ap.add_argument("--prs", type=int, help="マージ済みの直近 N 本の Pull Request の変更ファイルの重なりも出す")

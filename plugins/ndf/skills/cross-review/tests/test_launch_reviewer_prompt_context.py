@@ -99,7 +99,7 @@ def test_the_prompt_asks_to_rename_the_note_before_the_result(tmp_path) -> None:
     note_tmp = f"codex-review-pr{PR}-round1-payload.json.tmp"
     result_tmp = f"codex-review-pr{PR}-result.json.tmp"
     assert note_tmp in prompt and result_tmp in prompt
-    first_mv = prompt.index(f"mv ") 
+    first_mv = prompt.index("mv ")
     assert prompt.index(note_tmp, first_mv) < prompt.index(result_tmp, first_mv)
 
 

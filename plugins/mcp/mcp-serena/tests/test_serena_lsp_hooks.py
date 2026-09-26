@@ -42,7 +42,8 @@ def _session_start(root, env, client="claude-code"):
     import os
     full = {k: v for k, v in os.environ.items() if k != "CLAUDE_PLUGIN_ROOT"}
     full.update(env)
-    import subprocess, sys
+    import subprocess
+    import sys
     from serena_lsp_testlib import CLI
     proc = subprocess.run([sys.executable, str(CLI), "hook", "session-start", "--client", client],
                           input=json.dumps({"cwd": str(root), "session_id": "s"}), capture_output=True,
@@ -261,7 +262,8 @@ def test_search_for_pattern_counts_as_grep(configured):
 
 def test_parallel_calls_do_not_lose_counts(configured, monkeypatch):
     # 読みと書きの間を広げても、同じセッションの並列の呼び出しは直列になり、増分を失わない。
-    import threading, time as _time
+    import threading
+    import time as _time
     load = hooks._load_counts
     monkeypatch.setattr(hooks, "_load_counts", lambda path: (_time.sleep(0.2), load(path))[1])
     threads = [threading.Thread(target=_read, args=(configured, "a.py")) for _ in range(2)]

@@ -10,7 +10,6 @@
 """
 from __future__ import annotations
 
-import pytest
 
 from crossref_helpers import make_state_v2, read_state
 

@@ -10,14 +10,12 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from playwright_kit.pytest_plugin import (
     _collect_entries,
     pytest_sessionfinish,
     pytest_terminal_summary,
 )
-from playwright_kit.pytest_report import PwkTestEntry
 
 
 def _make_rep(

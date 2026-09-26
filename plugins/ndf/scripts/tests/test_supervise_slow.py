@@ -5,7 +5,6 @@ claude は NDF_SUPERVISE_CLAUDE の偽物で置き換える。待ちの秒はス
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 import time

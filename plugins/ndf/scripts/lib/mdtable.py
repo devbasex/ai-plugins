@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from typing import Any, Iterable, Sequence
 
-from tabulate import DataRow, Line, TableFormat, tabulate
+from tabulate import TableFormat, tabulate
 
 _ALIGNS = {"left", "right", "center"}
 

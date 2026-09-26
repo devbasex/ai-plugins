@@ -12,7 +12,6 @@ agy は err.log にほぼ進捗を出さないため、ビルトイン既定を 
 """
 from __future__ import annotations
 
-import pytest
 
 
 def test_builtin_default_codex(monitor_mod):

@@ -11,7 +11,6 @@ worktree を `git worktree remove --force` で取り除いてから中断する�
 from __future__ import annotations
 
 import argparse
-import json
 import pathlib
 import subprocess
 

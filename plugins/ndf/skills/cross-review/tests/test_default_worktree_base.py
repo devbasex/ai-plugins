@@ -9,7 +9,6 @@ worktree path は `<base>/<owner>--<name>/pr<N>` 形式で、他リポジトリ�
 """
 from __future__ import annotations
 
-import pathlib
 import review_lib
 import review_lib.github
 import review_lib.workspace
