@@ -43,13 +43,13 @@ allowed-tools:
 
 | 用途 | 選ぶシステム | 何が決めるか |
 | --- | --- | --- |
-| 投稿 | 文書を置く先 | `.ndf/document.json` の `destinations[].system`。**宣言が無ければ投稿へ進まない**（形と書き方は `development-workflow` の `references/document-destinations.md`） |
+| 投稿 | 文書を置く先 | `.ndf/document.json` の `destinations[].system`。**設定が無ければ投稿へ進まない**（形と書き方は `development-workflow` の `references/document-destinations.md`） |
 | 取得 | **素材や既存の文書がある側** | 呼び出し側が渡したシステム名。渡されないときは取得元の URL から見分ける |
 | 描画 | 生成物が載っている先 | 生成した先。本番の提出先ではなく、対になる下書き先である |
 
-**取得で提出先の宣言を要求しない。** 素材が Google Drive にあり、提出先が Notion である構成が
+**取得で提出先の設定を要求しない。** 素材が Google Drive にあり、提出先が Notion である構成が
 ある。提出先だけを見ると、取得の参照を取り違える。**提出先がまだ決まっていない既存文書の
-取り込み（[references/import.md](references/import.md) の用途 2）も、宣言の有無によらず行う。**
+取り込み（[references/import.md](references/import.md) の用途 2）も、提出先の設定なしで行う。**
 
 取得元の URL から見分けるときの手掛かりは次のとおり。
 
@@ -119,4 +119,4 @@ SharePoint は別のリポジトリにある実装の知識から書いており
 - `/ndf:release` — 生成と提出（形ごとの手順は `form-<出力の形>.md`）
 - `/ndf:google-drive` — Google Drive / Docs の取得とアップロード
 - `/ndf:notion-writing` — Notion のページの書き方
-- `/ndf:development-workflow` — 提出先の宣言（`references/document-destinations.md`）
+- `/ndf:development-workflow` — 提出先の設定（`references/document-destinations.md`）

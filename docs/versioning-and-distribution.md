@@ -2,7 +2,7 @@
 
 NDF プラグインの版数の付け方と、正式版・開発版のリリースの手順・実測・一覧を持つ。**この主題の正本である。**
 判断の基準（何を選ぶか）は [AGENTS.md](../AGENTS.md) の「版と配布の方針」にあり、この文書は
-どう動くかとどう確かめるかを扱う。出た版ごとの判断は [ndf-version-decisions.md](ndf-version-decisions.md) にある。
+どう動くかとどう確かめるかを扱う。リリース済み版ごとの判断は [ndf-version-decisions.md](ndf-version-decisions.md) にある。
 
 ## チャネルと ref
 
@@ -322,7 +322,7 @@ claude plugin tag plugins/ndf --push      # ndf--v<版> を作って origin へ�
 5. Skill の数が増減した場合は、`README.md` と `plugins/ndf/README.md` に書かれた数を書き直す
 6. `python3 scripts/check-doc-staleness.py --root .` を実行し、説明文書に残った古い版数を
    出力の行番号のとおりに直す
-7. `python3 plugins/ndf/scripts/instructions-check.py --root .` を実行し、出た版の段落が
+7. `python3 plugins/ndf/scripts/instructions-check.py --root .` を実行し、リリース済み版の段落が
    指示書に残っていないかを見る。落ちた段落は `docs/ndf-version-decisions.md` へ移す
 8. 破壊的変更がある場合は明示
 9. テストを実行

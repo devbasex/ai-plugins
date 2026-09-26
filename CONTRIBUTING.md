@@ -43,10 +43,10 @@ cd ai-plugins
   `--base develop` を付けます
 - `main` と `develop` へ直接コミットしません
 - ブランチ名は `feature/<名前>` / `fix/<名前>` / `docs/<名前>` の形にします
-- 変更は `.worktrees/<ブランチ名>` の作業ツリーの中で行います。clone したディレクトリを
+- 変更は `.worktrees/<ブランチ名>` の worktree の中で行います。clone したディレクトリを
   編集対象から外すことで、複数の作業が同じ場所で混ざらなくなります
 
-作業ツリーの用意は次のコマンドで行えます。
+worktree の用意は次のコマンドで行えます。
 
 ```bash
 git fetch origin

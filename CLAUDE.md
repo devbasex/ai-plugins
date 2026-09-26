@@ -35,26 +35,26 @@ Skill の配布は `plugins/ndf/manifests/` が唯一の基準（数と内訳は
 
 ## 版ごとの判断の記録
 
-**出た版の判断は [docs/ndf-version-decisions.md](docs/ndf-version-decisions.md) にある。** 版ごとに
+**リリース済み版の判断は [docs/ndf-version-decisions.md](docs/ndf-version-decisions.md) にある。** 版ごとに
 「何を決め、なぜそう決めたか」を残す。変更点の列挙は `CHANGELOG.md` が持つ。**過去の版の決定を
 たどるとき**（同じ判断を繰り返しそうなとき、規約の理由が分からないとき）に読む。
 
-**この参照に `@` を付けない。** 付けると内容そのものが毎回コンテキストへ載り、出た版の記録を
+**この参照に `@` を付けない。** 付けると内容そのものが毎回コンテキストへ載り、リリース済み版の記録を
 全セッション・全サブエージェントが毎回読むことになる。
 
 **`CLAUDE.md` に残すのは現行版で決めたことだけである。** 版をリリースした時点でその段落は過去の
 記録になるため、退避先へ移す（手順は `release` にある）。
 
 **版が決まる前の段落は「の次の版で」で書き出す。** 版数はミッションをマージするまで決まらない
-ため、書く時点では直前の正式版しか書けない。この目印を付けておくと、リリースで新しい版が出た
+ため、書く時点では直前の正式版しか書けない。このマーカーを付けておくと、リリースで新しい版が出た
 時点でチェックが拾う（`.ndf/instructions.json` の `pending_marker`）。
 
 ```bash
 python3 plugins/ndf/scripts/instructions-check.py --root .
 ```
 
-出た版の段落・許可していない即時読み込み・読み込みの量の上限を見る。判定の強さは
-`.ndf/instructions.json` が決め、宣言の書き方は `release` の
+リリース済み版の段落・許可していない @インポート・読み込み量の上限を見る。判定の強さは
+`.ndf/instructions.json` が決め、設定の書き方は `release` の
 `references/instruction-files.md` にある。
 
 ## cross-refactoring
@@ -68,7 +68,7 @@ python3 plugins/ndf/scripts/instructions-check.py --root .
 
 - `--scope` は必須。提案が発散して PR が肥大するのを防ぐ。**検証にも効く**ので、現状固定テストの置き場所も含める
 - 計画は配分テーブル（履歴の直近 10 回から集計。初期値は #917）で見積もり、「想定最大時間 − 経過 − バッファ」に収まる件数だけを採る。見送った提案は理由（`budget` / `rank` / `duplicate` / `vocabulary` / `threshold` / `no_target` / `test_failed` / `not_done`）とともに計画に残る
-- 項目の検証は**範囲テスト**（`--round-test` か `--baseline-test` の対象を計画の `test_targets` へ差し替えたもの）で走らせる。全体のテストは着手前・危険フラグ（D1〜D5）が立ったときの 1 回・最終ゲートだけ。危険フラグの 1 回が落ちたら落ちたテストだけ走らせ直して揺れ・元からの失敗を除き、変更が原因なら締め切りまで直す。直らなければ危険フラグの項目を新しい順に絞って取り消す。`--baseline-test` が pytest / jest / vitest でなければ `--round-test` は必須
+- 項目の検証は**範囲テスト**（`--round-test` か `--baseline-test` の対象を計画の `test_targets` へ差し替えたもの）で走らせる。全体テストは着手前・危険フラグ（D1〜D5）が立ったときの 1 回・最終ゲートだけ。危険フラグの 1 回が落ちたら落ちたテストだけ走らせ直してフレーキー・既存失敗を除き、変更起因なら締め切りまで直す。直らなければ危険フラグの項目を新しい順に絞って取り消す。`--baseline-test` が pytest / jest / vitest でなければ `--round-test` は必須
 - 時間に関わる数値（手順の上限・テスト 1 回の上限・無音の打ち切り・直しの打ち切り）はすべて `--budget-minutes` から算術で出し、計画の終わりまでに状態ファイルと計画へ書き出す。監視はその手順の終わり + 余裕で CLI を止め、修正は回数でなく締め切りまで試みる。計画の後で LLM が動くのは作業の CLI だけ
 - 廃止: `--max-test-rounds` / `--max-outer-rounds` / `--max-items-per-round` / `--max-fix-rounds` / `--test-timeout` は知らせて無視する
 - ホストと同じランタイムが実装担当になる場合も、サブエージェントではなく **CLI プロセス**として起動する
@@ -81,7 +81,7 @@ python3 plugins/ndf/scripts/instructions-check.py --root .
 
 ## cross-review
 
-`/ndf:cross-review` は既定の母集合（claude / codex / kiro とホスト）のうち使える者から毎ラウンド 2 席を選んで PR レビューを委譲し、新しい指摘が出なくなるまで修正ループを回す。使える者が 2 者に満たなければ同じランタイムの 2 つ目が席を埋める。ホストのランタイムも CLI プロセスとして起動する。agy は既定から外してあり、`--include agy` で戻す。外すなら `--exclude` で名指しする（既定の母集合に無い者の指定は止めずに無視する）。2 ラウンド目以降は既存コメントのスナップショットを取り直す。agy の progress log を heartbeat に表示するため、無言に見える時間でも `scan` / `analyze` / `post` / `done` などの作業段階を確認できる。
+`/ndf:cross-review` は既定の参加者プール（claude / codex / kiro とホスト）の利用可能な参加者から毎ラウンド 2 スロットを選んで PR レビューを委譲し、新しい指摘が出なくなるまで修正ループを回す。2 者に満たなければ同じランタイムの 2 つ目で埋める。ホストのランタイムも CLI プロセスとして起動する。agy は既定から外してあり、`--include agy` で戻す。外すなら `--exclude` で名指しする（既定に無い者の指定は止めずに無視する）。2 ラウンド目以降はコメントのスナップショットを取り直す。agy の progress log を heartbeat に表示し、無言に見える時間も `scan` / `analyze` / `post` / `done` などの作業段階が分かる。
 
 追加レビュー観点は以下のどちらかで渡す:
 
@@ -90,4 +90,4 @@ python3 plugins/ndf/scripts/instructions-check.py --root .
 /ndf:cross-review 123 --extra-instructions-file /tmp/review-focus.md
 ```
 
-PR の変更ファイルから docs only / 設計（`issues/` の要求・設計・決定の記録）/ code / DB migration / test / dependency / CI設定 / API契約 / 認証認可 / frontend / performance / deletion / generated / i18n / infra を自動分類し、該当するレビュー観点テンプレートも両席に渡す。
+PR の変更ファイルから docs only / 設計（`issues/` の要求・設計・決定の記録）/ code / DB migration / test / dependency / CI設定 / API契約 / 認証認可 / frontend / performance / deletion / generated / i18n / infra を自動分類し、該当するレビュー観点テンプレートも両スロットに渡す。

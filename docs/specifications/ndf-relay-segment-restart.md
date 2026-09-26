@@ -1,7 +1,7 @@
 # カットポイントで claude を起動し直すラッパー
 
 `/ndf:development-workflow` のカットポイントで人が行っていた「`/exit`・起動し直し・次の
-コマンドの貼り付け」を、端末の前景に常駐するラッパー（`plugins/ndf/scripts/relay.py`）が行う。
+コマンドの貼り付け」を、端末のフォアグラウンドに常駐するラッパー（`plugins/ndf/scripts/relay.py`）が行う。
 人が入力するのは承認ゲートの答えだけになる。ラッパーは利用者が `/ndf:install-wrapper` で入れたときだけ挟まる。ラッパーが動けないとき・止まると決めたときは、`ndf-relay:` の
 1 行を出して、人がコマンドを貼り付ける今までどおりの運用へ落ちる。Claude Code だけが対象である。
 この文書は、ラッパーの入出力の契約・状態の置き場所・判定の条件と、それぞれをそう決めた理由を残す。
@@ -12,9 +12,9 @@
 | --- | --- |
 | 次のコマンドを出す形（`ndf-next` のブロック）、出す時点、引継ぎ文書の「次に実行するコマンド」 | `plugins/ndf/skills/development-workflow/references/context-window.md` の「新しい会話で戻す」 |
 | ラッパーの始め方・ラッパーを挟まない起動・止め方・上限・落ちたときの続け方・記録の読み方 | `plugins/ndf/skills/development-workflow/references/relay.md` |
-| 文脈量の hook の判定（上限・文脈量の読み方・工程へ入る起動の見分け方） | [ndf-token-waits-and-context-cut.md](ndf-token-waits-and-context-cut.md) の「文脈量の判定」 |
+| コンテキスト量の hook の判定（上限・コンテキスト量の読み方・工程へ入る起動の見分け方） | [ndf-token-waits-and-context-cut.md](ndf-token-waits-and-context-cut.md) の「コンテキスト量の判定」 |
 | 3 層（conductor / supervisor / worker）の運転 | [ndf-agent-layers-unattended-run.md](ndf-agent-layers-unattended-run.md) |
-| 導入・取り外し（`install` / `uninstall` / `status` / `startup`）・`/ndf:restart`・承認ゲートを越えない守り・起動の方針の引数の引継ぎ | [ndf-relay-install-and-restart.md](ndf-relay-install-and-restart.md) |
+| 導入・取り外し（`install` / `uninstall` / `status` / `startup`）・`/ndf:restart`・承認ゲートを越えない守り・起動オプションの引継ぎ | [ndf-relay-install-and-restart.md](ndf-relay-install-and-restart.md) |
 
 ## 概要
 
@@ -42,7 +42,7 @@
 | --- | --- | --- |
 | 対話でない起動（`-p`・パイプ・副命令・`--help` など）か、ラッパーの下で打たれた | 何も出さず、本物の claude をそのまま exec する（パススルー） | 何もしない |
 | 対話だがラッパーを始められない（擬似端末・プラグインの名前と版・作業ディレクトリ） | `ndf-relay: ラッパーを始めない（<理由>）。カットポイントでは示されたコマンドを手で入力する` を出してからパススルー | カットポイントで `/exit` し、ブロックの中身を貼り付ける |
-| カットポイントで停止のシグナルファイル・上限・空回り・ラッパーの中の例外 | `ndf-relay: 次の区間を起動しない（<理由>）。このまま続けるか、/exit して示されたコマンドを手で入力する` | 同上（今のセッションは動いたまま） |
+| カットポイントで停止シグナルファイル・上限・再起動ループ・ラッパーの中の例外 | `ndf-relay: 次の区間を起動しない（<理由>）。このまま続けるか、/exit して示されたコマンドを手で入力する` | 同上（今のセッションは動いたまま） |
 | カットポイントで更新・起動に失敗 | `ndf-relay: 次の区間を起動できない（<理由>）。次のコマンド:` と中身。ラッパーは終了コード 2 で終わる | 表示された中身で claude を起動する |
 
 ## 用語
@@ -50,12 +50,12 @@
 | 用語 | 意味 |
 | --- | --- |
 | セッション | 1 つの Claude Code のプロセス（conductor の会話）が受け持つ範囲。カットポイントから次のカットポイントまで |
-| カットポイント | `context-window.md` の切ってよい 4 点、承認ゲートの承認と取り込みの後、文脈量の hook が工程へ入る起動を止めた後 |
-| ラッパー | 端末の前景に常駐し、claude を擬似端末の子として起動して、シグナルファイルを見てセッションを切り替えるプロセス（`relay.py run`） |
+| カットポイント | `context-window.md` の切ってよい 4 点、承認ゲートの承認と取り込みの後、コンテキスト量の hook が工程へ入る起動を止めた後 |
+| ラッパー | 端末のフォアグラウンドに常駐し、claude を擬似端末の子として起動して、シグナルファイルを見てセッションを切り替えるプロセス（`relay.py run`） |
 | シグナルファイル | Stop hook がラッパーへ次のセッションの開始を知らせるファイル（`next.json`） |
-| 停止のシグナルファイル | ラッパーに次のセッションを起動させないために置く空のファイル（`stop`） |
+| 停止シグナルファイル | ラッパーに次のセッションを起動させないために置く空のファイル（`stop`） |
 | アイドル | シグナルファイル・会話の記録・利用者の入力が決まった秒数動かないこと。ラッパーはこれを待ってから `/exit` を入力する。目標が未達の判定の後は会話の記録を数えない |
-| 空回り | シグナルファイルを書いて終わったセッションが短い時間で続くこと。進まずに起動だけが重なる状態 |
+| 再起動ループ | シグナルファイルを書いて終わったセッションが短い時間で続くこと。進まずに起動だけが重なる状態 |
 | パススルー | ラッパーを挟まず、本物の claude を引数のまま exec すること |
 | 落ちる | ラッパーがセッションを切り替えず、人が次のコマンドを入力する運用に戻ること |
 
@@ -63,18 +63,18 @@
 
 | 要素 | 責務 |
 | --- | --- |
-| `plugins/ndf/scripts/relay.py` | ラッパーの本体。副命令 `run` / `stop` / `mark`、導入の `install` / `uninstall` / `status` / `startup`、質問のシグナルファイルの `question`、ラッパーの直接の子かを返す `is-child`、文脈量の hook と `/ndf:restart` と conductor が使うカットポイントのアナウンス `notice`（[ndf-relay-segment-notice.md](ndf-relay-segment-notice.md)）を持つ。標準ライブラリだけで書く |
+| `plugins/ndf/scripts/relay.py` | ラッパーの本体。副命令 `run` / `stop` / `mark`、導入の `install` / `uninstall` / `status` / `startup`、質問シグナルファイルの `question`、ラッパーの直接の子かを返す `is-child`、コンテキスト量の hook と `/ndf:restart` と conductor が使うカットポイントのアナウンス `notice`（[ndf-relay-segment-notice.md](ndf-relay-segment-notice.md)）を持つ。標準ライブラリだけで書く |
 | `plugins/ndf/hooks/claude.json` の `Stop` | `NDF_RELAY_DIR` があるときだけ `python3 <root>/scripts/relay.py mark` を呼ぶ（既存の Slack 通知の後、`timeout` 5 秒、`continueOnError: true`）。無ければ `python3` を起こさない |
 | `plugins/ndf/hooks/claude.json` の `SessionStart`（`matcher: startup\|resume`） | コピーか記録があるときだけ `relay.py startup` を呼ぶ。シェルの設定は書かない（[導入の仕様](ndf-relay-install-and-restart.md)） |
 | `plugins/ndf/hooks/claude.json` の `PreToolUse` / `PostToolUse`（`matcher: AskUserQuestion`） | `NDF_RELAY_DIR` があるときだけ `relay.py question open` / `close` を呼ぶ（`timeout` 10 秒） |
 | `plugins/ndf/skills/install-wrapper/` / `restart/` | 明示の導入・取り外しと、好きな時点の切り替え（Claude Code だけ） |
-| `plugins/ndf/scripts/token-guard.sh` | 文脈量の判定で、ラッパーの直接の子の conductor なら 1 度の通しをせずに止め続ける（下の「文脈の上限で切る」） |
+| `plugins/ndf/scripts/token-guard.sh` | コンテキスト量の判定で、ラッパーの直接の子の conductor なら 1 度の通しをせずに止め続ける（下の「文脈の上限で切る」） |
 | `development-workflow/references/context-window.md` / `relay.md` / `SKILL.md` | 次のコマンドの形・ラッパーの案内・引継ぎの規約 |
 
 ```mermaid
 graph TB
     subgraph term["利用者の端末"]
-        R["ラッパー（relay.py run）<br/>前景で常駐"]
+        R["ラッパー（relay.py run）<br/>フォアグラウンドで常駐"]
         subgraph pty["擬似端末"]
             C["claude（セッション n）"]
         end
@@ -83,7 +83,7 @@ graph TB
     subgraph state["NDF_RELAY_DIR（0700）"]
         P[relay.lock / relay.pid / child.pid]
         M["next.json（シグナルファイル）"]
-        S["stop（停止のシグナルファイル）"]
+        S["stop（停止シグナルファイル）"]
         L[log.jsonl]
     end
     R -->|キー入力・大きさ・/exit| C
@@ -105,7 +105,7 @@ graph TB
 
 | 決定 | 理由 |
 | --- | --- |
-| ラッパーは端末の前景に常駐し、claude を擬似端末の子として起動する形だけにする。tmux を前提にしない | 前提が端末と Python 3 だけになり、tmux や VS Code の設定を確かめて入れる処理が要らない。2 つの形を持つと使われない側が古くなる。tmux の中で使うなら、ペインの中で `claude` と打てば同じに動く |
+| ラッパーは端末のフォアグラウンドに常駐し、claude を擬似端末の子として起動する形だけにする。tmux を前提にしない | 前提が端末と Python 3 だけになり、tmux や VS Code の設定を確かめて入れる処理が要らない。2 つの形を持つと使われない側が古くなる。tmux の中で使うなら、ペインの中で `claude` と打てば同じに動く |
 | 始められない・止まると決めたときは、終了コード 1 で止めずに今までどおりの運用へ落ちる | 止めると、利用者は前提をそろえるまで claude を起動できない。conductor はラッパーがあってもなくてもブロックを出すので、人は貼り付けて続けられる |
 | セッションの終わりは、最後の応答の `ndf-next` のブロック 1 つで決める | Stop hook に `last_assistant_message` が来る。情報文字列を `text` にしないのは説明の例と取り違えないためで、外側の囲みの中も数えない。引継ぎ文書の見出しは置き場所も名前も決まっていない |
 | 承認ゲートはセッションの中で `AskUserQuestion` のまま受け、ブロックは承認と取り込みの後に出す | 答えを待つあいだは Stop が起きないので、ラッパーは承認ゲートを知らなくてよい。画面の文言から承認ゲートを読むと、Claude Code の版で文言が変わったときに承認ゲートの前で切る |
@@ -113,22 +113,22 @@ graph TB
 | 前のセッションは子の端末へ `/exit` を入力して終わらせる。30 秒で終わらなければ SIGTERM、さらに 10 秒で SIGKILL | `/exit` は人の終了と同じ終わり方（終了コード 0・SessionEnd の理由 `prompt_input_exit`）になる。Stop hook の `{"continue": false}` はプロセスを終わらせない。子が終わらないまま次を起動すると claude が 2 つ動く |
 | シグナルファイルを書くのは、ラッパーが起動した子の claude だけにする | conductor が Bash から起こす `claude -p` も `NDF_RELAY_DIR` を継ぎ、Stop hook が走る。環境変数だけでは見分けられないため、親をたどって最初に当たる claude が `child.pid` と一致するかで見る |
 | プラグインはカットポイントごとに毎回更新し、失敗したら次のセッションを起動しない | リリースの直後かを判定する材料が無い。版が変わっていなければ更新は数秒で何も変えない。古い版で始めると、リリースした hook と Skill で進んだと記録が誤って示す |
-| 子がシグナルファイルなしで終わればラッパーも終わる。空回りは「3 つ続けて起動から 120 秒未満でシグナルファイル」で見る | シグナルファイルの無い終わりは人の `/exit`・Ctrl-C の 2 回・落ちたのいずれかで、同じコマンドで起動し直しても意図に反するか同じく落ちる。同じコマンドの繰り返しでは見ない。入口のコマンドはセッションが違っても同じ文字列になりうる |
-| 1 日の起動回数の上限は 20、アイドルは 5 秒を初期値にし、環境変数で変える | 1 日に 2〜3 のミッションを進めても 20 には届かず、空回りの検出を抜けた暴走は 1 日で止まる。アイドルは切り替えの待ちにそのまま足されるため短くする（15 秒では Stop から次のセッションの起動まで約 34 秒かかった）。`/exit` を早く打ちすぎないことは、シグナルファイルの後の利用者の入力・質問・背景の処理の起動・応答の再開の判定と、利用者の入力の待ちが受け持つ |
+| 子がシグナルファイルなしで終わればラッパーも終わる。再起動ループは「3 つ続けて起動から 120 秒未満でシグナルファイル」で見る | シグナルファイルの無い終わりは人の `/exit`・Ctrl-C の 2 回・落ちたのいずれかで、同じコマンドで起動し直しても意図に反するか同じく落ちる。同じコマンドの繰り返しでは見ない。入口のコマンドはセッションが違っても同じ文字列になりうる |
+| 1 日の起動回数の上限は 20、アイドルは 5 秒を初期値にし、環境変数で変える | 1 日に 2〜3 のミッションを進めても 20 には届かず、再起動ループの検出を抜けた暴走は 1 日で止まる。アイドルは切り替えの待ちにそのまま足されるため短くする（15 秒では Stop から次のセッションの起動まで約 34 秒かかった）。`/exit` を早く打ちすぎないことは、シグナルファイルの後の利用者の入力・質問・背景の処理の起動・応答の再開の判定と、利用者の入力の待ちが受け持つ |
 | ラッパーと hook は Python の 1 ファイルにする | シグナルファイルの形・作業ディレクトリ・親のたどりを共有し、片方だけが変わって食い違わない。擬似端末・端末の属性・JSON・引数の配列での起動を標準ライブラリだけで書ける。bash では擬似端末の入出力をラッパーできない |
 | 次のコマンドはシェルを通さず、絶対パスと引数の配列で `os.execve` に渡す | 中身は LLM の出力で、引用符や `$(...)` を含みうる |
 | 記録はセッションごとに `start` と `end` の 2 行に分ける | 版は起動の時点で、長さと終わり方は終わった後に分かる。1 行にまとめると、起動の後に落ちたセッションの行が書かれないか、行を書き直すことになる |
 | 次のセッションの作業ディレクトリが消えていたら、メインディレクトリか在る最も近い親で起動する | 設計 Pull Request のマージで worktree が消えるカットポイントは毎回起きうる。次のセッションは「新しい会話で戻す」で worktree を戻すので、メインディレクトリから始めて足りる |
 | `claude` の関数で常にラッパーを挟み、`run` の後ろはすべて claude の引数として受ける | ラッパーの設定を引数で受けると claude の引数と名前がぶつかる。設定は環境変数（`NDF_RELAY_*`）だけで受ける |
-| 2 つ目以降のセッションへ、`run` の引数のうち起動の方針を表すものだけを引き継ぐ | 何も引き継がないと、devbase の `alias claude` が足す `--dangerously-skip-permissions` が 2 つ目のセッションで落ちる。`--resume` や `-c`・最初のプロンプトを引き継ぐと捨てた会話へ戻るので、会話ごと・セッションごとのものは値ごと落とす（[導入の仕様](ndf-relay-install-and-restart.md)の「起動の方針の引数の引継ぎ」） |
+| 2 つ目以降のセッションへ、`run` の引数のうち起動オプションに当たるものだけを引き継ぐ | 何も引き継がないと、devbase の `alias claude` が足す `--dangerously-skip-permissions` が 2 つ目のセッションで落ちる。`--resume` や `-c`・最初のプロンプトを引き継ぐと捨てた会話へ戻るので、会話ごと・セッションごとのものは値ごと落とす（[導入の仕様](ndf-relay-install-and-restart.md)の「起動オプションの引継ぎ」） |
 | ラッパーが要らない起動は、深さの変数だけを足して本物の claude を exec する | 擬似端末を挟むと出力の形・終了コード・シグナルの届き方が変わる。Claude Code から継いだ環境変数を外すと、直接打ったときと振る舞いが変わる |
 | `claude` の関数は版に依らないコピーを指し、SessionStart hook が在るコピーだけを起動ごとに置き直す（版は後退させない） | 版つきのキャッシュを指すと古い版に固定され、古い版のディレクトリが消えると壊れる。動いているラッパーは入れ替えない（子の端末を手放すことになる） |
 | 導入は利用者が明示に打つ `/ndf:install-wrapper` だけにし、SessionStart hook はシェルの設定を書かない（#928。10.17.6 までは hook が alias の囲みを自動で足した） | 利用者のシェル設定を黙って書き換えない。既存の `claude` の定義があれば足さない（選んだ起動の仕方が黙って替わる）。bash と zsh 以外は書き方が違い、読み違えると設定を壊す |
-| 文脈の上限は既存の文脈量の hook が作り、ラッパーの下では 1 度の通しをやめる | 上限の値と読み方を 1 つにし、測る側と止める側を食い違わせない。人の居ない前提で LLM が「続ける」と決めると上限を超えたまま進む。Stop hook で上限を見て応答を続けさせると、文で尋ねた承認ゲートまで承認の前に切る |
+| 文脈の上限は既存のコンテキスト量の hook が作り、ラッパーの下では 1 度の通しをやめる | 上限の値と読み方を 1 つにし、測る側と止める側を食い違わせない。人の居ない前提で LLM が「続ける」と決めると上限を超えたまま進む。Stop hook で上限を見て応答を続けさせると、文で尋ねた承認ゲートまで承認の前に切る |
 | 背景の処理が動いている Stop ではシグナルファイルを書かない。判定は `background_tasks` の `status: running` だけで行う | 動いているあいだに切ると、その処理（supervisor を含む）が子の claude と一緒に終わる。背景の Bash もサブエージェントも同じ形で載る。conductor が自分で数えると数え違えて子を失う |
 | 背景の処理のためにシグナルファイルを書けない Stop は、同じセッションの同じ候補で 1 度だけ止め（`decision: block`）、動いている作業の id とコマンドの先頭を conductor へ渡す。止め方は `TaskStop <id>` と書き、止めてはいけない作業（supervisor・`supervise.py queue`）なら終わりを待たせる。シグナルファイルを書かなかった Stop は `log.jsonl` に `mark_skipped` で残す | 黙って抜けると conductor も利用者も切り替わらない理由に気づかず、切り替わりが遅れて利用者の手が入る。conductor はプロセス名で探すしかなく、Claude Code が包んだコマンド行に `pkill -f` / `pgrep -f` が一致しないので止め損ねる。2 度目も止めると、待つと決めた conductor の応答を繰り返し起こす |
 | 次のセッションの中身は位置引数 1 つで渡す | 複数行の中身でも、改行ごと 1 つの入力として届く |
-| 文脈量の hook は `relay.py notice` の 1 行目（`is-child` と同じ判定）でラッパーの直接の子かを見る | bash の hook に親のたどりを写すと、2 つの実装が食い違う |
+| コンテキスト量の hook は `relay.py notice` の 1 行目（`is-child` と同じ判定）でラッパーの直接の子かを見る | bash の hook に親のたどりを写すと、2 つの実装が食い違う |
 | 質問が表示されているあいだと、シグナルファイルの後に質問・利用者の入力・背景の処理の起動・応答の再開があったあいだは子の端末へ書かない。`/exit` と改行は質問の hook と同じロックの中で 1 回の write で書く | 質問の表示中に書いた `\r` は選択肢 1 を決める（実測）。10.17.6 までの 1 秒あけた `/exit` と `\r` のあいだに質問が出ると、`\r` が答えになる（[導入の仕様](ndf-relay-install-and-restart.md)の「承認ゲートを越えない守り」） |
 | シグナルファイルを書いた後は切り替えを確定とし、取りやめるのは利用者の入力・質問・背景の処理の起動があったときだけにする。目標が未達の判定の後は、会話の記録の更新をアイドルの判定に数えず、Esc で応答を止めてから `/exit` を書く | カットポイントでは目標は未達が当然で、判定が止めを拒んで応答が続く。判定のたびに応答が起こされ会話の記録が動き続けるため、記録のアイドルを待つと切り替わらない。Esc は応答の途中なら止め、入力待ちなら何もしない。2 回続けると巻き戻しの画面が開くので 1 回に限る |
 | 待ちの秒数と打ち切りはすべて環境変数で短くできる | 擬似端末の上の単体テストを数十秒で終える |
@@ -146,7 +146,7 @@ graph TB
   受け取りのすべての経路で `tcsetattr` で戻す。端末が閉じていて戻せないときは、その失敗を無視する
 - **シグナルファイルを書くのはラッパーの直接の子の claude だけで、`AskUserQuestion` の答えを待つあいだと背景の処理が
   動いているあいだは書かない。** 直接の子でない claude の Stop はシグナルファイルを読みも消しもしない
-- **ラッパーは、質問のシグナルファイル（`question`）がある間・シグナルファイルの後に応答の行がある間は、子の端末へ何も書かない**
+- **ラッパーは、質問シグナルファイル（`question`）がある間・シグナルファイルの後に応答の行がある間は、子の端末へ何も書かない**
 - **ラッパーは同じ起動の作業ディレクトリしか読まない。** 起動ごとに新しいディレクトリを作るので、pid が
   再利用されても前の起動の `stop` や `next.json` を読まない
 - **ラッパーが生きているかは `relay.lock` の排他で見る。** pid の生死では見ない
@@ -163,11 +163,11 @@ graph TB
 | 副命令 | 引数 | 終了コード | 出力 |
 | --- | --- | --- | --- |
 | `run` | `[claude の引数 ...]`。ラッパーは解釈しない | パススルーでは claude の終了コードそのもの（exec で置き換わる）。ラッパーでは最後のセッションの claude の終了コード（シグナルで終わったら 128 + 番号）/ 2: 次のセッションの更新か起動に失敗した / 127: 本物の claude が見つからない・起動の入れ子・1 つ目のセッションの exec の失敗 | 区切りの 1 行と `ndf-relay:` の 1 行。シグナルファイルなしで終わるときは何も出さない |
-| `stop` | 無し | 0: 動いているラッパーに停止のシグナルファイルを置いた（1 つ以上）/ 1: 動いているラッパーが無い | 置いたラッパーの pid を 1 行ずつ |
+| `stop` | 無し | 0: 動いているラッパーに停止シグナルファイルを置いた（1 つ以上）/ 1: 動いているラッパーが無い | 置いたラッパーの pid を 1 行ずつ |
 | `mark` | 標準入力に Stop hook の JSON | 常に 0 | 無し |
 | `install` / `uninstall` / `status` / `startup` / `question` | [導入の仕様](ndf-relay-install-and-restart.md)の副命令の表 | 同左 | 同左 |
 | `is-child` | 無し（内部用。`relay.md` に載せない） | 0: ラッパーが動いていて、呼んだ claude がラッパーの直接の子 / 1: それ以外 | 無し |
-| `notice` | 無し（内部用。文脈量の hook・`/ndf:restart`・conductor が呼ぶ） | 常に 0 | 1 行目 `relay` / `outside`（`is-child` と同じ判定）、2 行目にアナウンスの 1 文。[アナウンスの仕様](ndf-relay-segment-notice.md)の契約の表 |
+| `notice` | 無し（内部用。コンテキスト量の hook・`/ndf:restart`・conductor が呼ぶ） | 常に 0 | 1 行目 `relay` / `outside`（`is-child` と同じ判定）、2 行目にアナウンスの 1 文。[アナウンスの仕様](ndf-relay-segment-notice.md)の契約の表 |
 
 副命令が無い・知らない副命令は、使い方を標準エラーへ出して終了コード 2 で終わる。
 
@@ -214,7 +214,7 @@ stateDiagram-v2
     [*] --> 中継する: 1 つ目のセッションを起動した
     中継する --> アイドルを待つ: シグナルファイルが現れた
     アイドルを待つ --> 中継する: シグナルファイルが消えた・記録か入力が動いた
-    アイドルを待つ --> 続けさせる: 停止のシグナルファイル・上限・空回り・例外
+    アイドルを待つ --> 続けさせる: 停止シグナルファイル・上限・再起動ループ・例外
     アイドルを待つ --> 終わらせる: アイドルになった
     続けさせる --> [*]: 子が終わった（子の終了コード）
     終わらせる --> 起動する: 子が終わった
@@ -226,9 +226,9 @@ stateDiagram-v2
 | 手順 | すること |
 | --- | --- |
 | 中継する | 端末の属性を保存して標準入力を raw にし、`select` で標準入力 → マスタ、マスタ → 標準出力を流す（Ctrl-C もバイトのまま子へ届く）。SIGWINCH で端末の大きさをマスタへ `TIOCSWINSZ` で写す。`NDF_RELAY_POLL` 秒（既定 2）ごとにシグナルファイルを見る。1 つ目のセッションは今の作業ディレクトリで `<本物の claude> <run の引数>` を起動する |
-| アイドルを待つ | 次がそろうまで待つ。(1) シグナルファイルの `written_at`・`transcript_path` の更新時刻・利用者の最後の入力の時刻のうち最も遅いものから `NDF_RELAY_QUIET` 秒。シグナルファイルより後に目標が未達の判定の行（`attachment.type: "goal_status"`・`met: false`・`sentinel` 無し）があれば、`transcript_path` の更新時刻は数えない。(2) シグナルファイルが消えていない。(3) 質問のシグナルファイルが無く、`asked` の時刻がシグナルファイルの `written_at` より前。(4) 会話の記録に、シグナルファイルより後の利用者の入力の行（`type: "user"` で `isMeta` が無く、Tool の結果でも Esc の中断の記録でもない）と、`run_in_background` が真の Tool の呼び出しを含む `assistant` の行が無い。目標が未達の判定の行が無ければ、シグナルファイルより後の `assistant` / `user` の行も無い |
-| 続けさせる | 停止のシグナルファイル・1 日の起動回数・空回りのどれかに当たるか、判定の中で例外が起きたら、`/exit` を入力しない。`stop` の行を書き、シグナルファイルを消し、`ndf-relay:` の 1 行を出す。以後は入出力を中継するだけで、次のシグナルファイルでは何もしない。子が終わると `end`（`no-mark`）を書いて子の終了コードで終わる |
-| 終わらせる | `question.lock` の中で (2)(3)(4) と記録の大きさ・更新時刻を確かめ直し（目標が未達の判定の後は大きさ・更新時刻を除く）、子の端末へ `/exit\r` を 1 回の write で書いて `NDF_RELAY_EXIT_HOLD` 秒（既定 1）後に放す。目標が未達の判定の後は、先に Esc（`\x1b`）を 1 回書いて `NDF_RELAY_ESC_WAIT` 秒（既定 1）待ち、そのあいだに利用者の入力があれば書かずに戻り、無ければ確かめ直してから `/exit\r` を書く。`NDF_RELAY_EXIT_WAIT` 秒（既定 30。質問のシグナルファイルがある間は数えない）で終わらなければ SIGTERM、`NDF_RELAY_TERM_WAIT` 秒（既定 10）でも終わらなければ SIGKILL を送り、終わりを `waitpid` で確かめてから `end` を書く |
+| アイドルを待つ | 次がそろうまで待つ。(1) シグナルファイルの `written_at`・`transcript_path` の更新時刻・利用者の最後の入力の時刻のうち最も遅いものから `NDF_RELAY_QUIET` 秒。シグナルファイルより後に目標が未達の判定の行（`attachment.type: "goal_status"`・`met: false`・`sentinel` 無し）があれば、`transcript_path` の更新時刻は数えない。(2) シグナルファイルが消えていない。(3) 質問シグナルファイルが無く、`asked` の時刻がシグナルファイルの `written_at` より前。(4) 会話の記録に、シグナルファイルより後の利用者の入力の行（`type: "user"` で `isMeta` が無く、Tool の結果でも Esc の中断の記録でもない）と、`run_in_background` が真の Tool の呼び出しを含む `assistant` の行が無い。目標が未達の判定の行が無ければ、シグナルファイルより後の `assistant` / `user` の行も無い |
+| 続けさせる | 停止シグナルファイル・1 日の起動回数・再起動ループのどれかに当たるか、判定の中で例外が起きたら、`/exit` を入力しない。`stop` の行を書き、シグナルファイルを消し、`ndf-relay:` の 1 行を出す。以後は入出力を中継するだけで、次のシグナルファイルでは何もしない。子が終わると `end`（`no-mark`）を書いて子の終了コードで終わる |
+| 終わらせる | `question.lock` の中で (2)(3)(4) と記録の大きさ・更新時刻を確かめ直し（目標が未達の判定の後は大きさ・更新時刻を除く）、子の端末へ `/exit\r` を 1 回の write で書いて `NDF_RELAY_EXIT_HOLD` 秒（既定 1）後に放す。目標が未達の判定の後は、先に Esc（`\x1b`）を 1 回書いて `NDF_RELAY_ESC_WAIT` 秒（既定 1）待ち、そのあいだに利用者の入力があれば書かずに戻り、無ければ確かめ直してから `/exit\r` を書く。`NDF_RELAY_EXIT_WAIT` 秒（既定 30。質問シグナルファイルがある間は数えない）で終わらなければ SIGTERM、`NDF_RELAY_TERM_WAIT` 秒（既定 10）でも終わらなければ SIGKILL を送り、終わりを `waitpid` で確かめてから `end` を書く |
 | 起動する | `claude plugin marketplace update <名前>` → `claude plugin update ndf@<名前> -y` → `claude plugin list --json` で版を読む。どれかが 0 以外・打ち切り・版が読めなければ `update-failed`。作業ディレクトリはシグナルファイルの `cwd`、消えていればパスの `/.worktrees/` の手前（メインディレクトリ）、無ければ在る最も近い親、それも無ければ HOME。区切りの 1 行を出し、`<本物の claude> <起動の方針の引数> <合図の中身>`（中身は 1 つの引数）を起動する。exec に失敗したら `start-failed` |
 
 **更新と起動に失敗したときは、`stop` の行を書き、次のコマンドの中身を画面に出して終了コード 2 で
@@ -253,8 +253,8 @@ stateDiagram-v2
 | 上限・手段 | 判定 |
 | --- | --- |
 | 1 日の起動回数 | `${XDG_STATE_HOME:-$HOME/.local/state}/ndf/relay/` の全 `log.jsonl` の `start` のうち、`at` が端末の地方時で今日のものを数え、`NDF_RELAY_MAX_STARTS`（既定 20）以上なら `max-starts`。**数えてから `start` を書くまで（失敗なら放すまで）親の `count.lock` を排他で持つ。** 取れなければ次の確認まで待つ。同時に動くラッパーが残り 1 枠を取り合っても上限を超えない |
-| 空回り | このラッパーの記録の直前 2 つの `end` の `seconds` がともに `NDF_RELAY_SPIN`（既定 120）未満で、今のセッションの長さ（シグナルファイルの `written_at` − セッションの起動の時刻）も未満なら `spin`。1 つ目のセッション（`run` の引数で起動したセッション）も数える |
-| 停止のシグナルファイル | 作業ディレクトリに `stop` があれば `stop-file`。`relay.py stop` か `touch <作業ディレクトリ>/stop` で置く |
+| 再起動ループ | このラッパーの記録の直前 2 つの `end` の `seconds` がともに `NDF_RELAY_SPIN`（既定 120）未満で、今のセッションの長さ（シグナルファイルの `written_at` − セッションの起動の時刻）も未満なら `spin`。1 つ目のセッション（`run` の引数で起動したセッション）も数える |
+| 停止シグナルファイル | 作業ディレクトリに `stop` があれば `stop-file`。`relay.py stop` か `touch <作業ディレクトリ>/stop` で置く |
 | セッションの中の `/exit`・Ctrl-C の 2 回・子が落ちた | シグナルファイルが無いまま子が終わるので、ラッパーも次のセッションを起動せずに終わる |
 
 ### `mark` の判定
@@ -286,8 +286,8 @@ stateDiagram-v2
 
 | 誰が | 何をする |
 | --- | --- |
-| 文脈量の hook | conductor が工程へ入る起動（工程 Skill・フェーズの Agent）で上限を超えていれば止める。これが「前のフェーズレポートを受け取った後で、次のフェーズを起動する前」の切りの良いところに当たる |
-| 文脈量の hook（ラッパーの下） | `NDF_RELAY_DIR` があり、上限を超えていて、`relay.py notice` の 1 行目が `relay` なら、同じ起動の 1 度の通しをしない。理由の欄は「新しいフェーズを起動せず、動いている supervisor の報告を待ち、引継ぎ文書を更新し、`ndf-next` のブロックを出して終える」と、ブロックの直前に書く `notice` の 2 行目、承認や確認を挟まないことを示す。ラッパーの外では今までどおり 1 度だけ通す |
+| コンテキスト量の hook | conductor が工程へ入る起動（工程 Skill・フェーズの Agent）で上限を超えていれば止める。これが「前のフェーズレポートを受け取った後で、次のフェーズを起動する前」の切りの良いところに当たる |
+| コンテキスト量の hook（ラッパーの下） | `NDF_RELAY_DIR` があり、上限を超えていて、`relay.py notice` の 1 行目が `relay` なら、同じ起動の 1 度の通しをしない。理由の欄は「新しいフェーズを起動せず、動いている supervisor の報告を待ち、引継ぎ文書を更新し、`ndf-next` のブロックを出して終える」と、ブロックの直前に書く `notice` の 2 行目、承認や確認を挟まないことを示す。ラッパーの外では今までどおり 1 度だけ通す |
 | conductor | 背景の supervisor の報告をすべて受け取ってから、引継ぎ文書（起動の指示が名指ししたもの。無ければ書かない）を更新し、ブロックを出して終える。中身は `/ndf:development-workflow #<課題>`、名指しの引継ぎ文書があれば「<文書> の続きから」 |
 | Stop hook とラッパー | 背景の処理が残っていればシグナルファイルを書かず、Stop を 1 度止めて残っている作業を知らせる。すべて終わった後の Stop でシグナルファイルが書かれ、ラッパーがほかのカットポイントと同じく次のセッションを起動する |
 
@@ -297,7 +297,7 @@ hook が止めるのは工程へ入る起動だけで、フェーズの中の Ba
 
 **導入・取り外し・状態の表示・コピーの置き直しは [ndf-relay-install-and-restart.md](ndf-relay-install-and-restart.md) が持つ。**
 10.17.6 までは SessionStart hook の `install` が `${XDG_DATA_HOME:-$HOME/.local/share}/ndf/relay.py` へ写し、
-`~/.bashrc`（zsh なら `.zshrc`）へ alias の囲みを 1 度だけ足していた。今は利用者の `/ndf:install-wrapper`
+`~/.bashrc`（zsh なら `.zshrc`）へ alias の管理ブロックを 1 度だけ足していた。今は利用者の `/ndf:install-wrapper`
 だけがコピーを `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/ndf/` に置き、シェルの設定へ読み込みの 1 行を置く。
 
 ## データ・設定
@@ -315,12 +315,12 @@ hook が止めるのは工程へ入る起動だけで、フェーズの中の Ba
 | `relay.pid` | `run` | ラッパーの pid（表示のため。生死の判定には使わない） |
 | `child.pid` | `run` | 今のセッションの claude の pid。セッションごとに書き換える |
 | `next.json` | `mark` | シグナルファイル。権限 `0600` の一時ファイルに書いてから置き換える |
-| `question` / `question.lock` | `question open` / `close`・`mark`・`run` | 質問のシグナルファイル（`0600`、空）と、質問の始まりと `/exit` の write を排他にするロック |
+| `question` / `question.lock` | `question open` / `close`・`mark`・`run` | 質問シグナルファイル（`0600`、空）と、質問の始まりと `/exit` の write を排他にするロック |
 | `asked` | `question open` | 最後に質問が出た時刻（`{"at": "<ISO 8601 UTC>"}`）。シグナルファイルより後に質問が出たかを `mark` と `run` が見る |
-| `stop` | `stop` か利用者 | 空。在れば停止のシグナルファイル |
+| `stop` | `stop` か利用者 | 空。在れば停止シグナルファイル |
 | `log.jsonl` | `run` | 記録 |
 
-状態の親には、作業ディレクトリのほかに `count.lock`・`install.lock`・`rc-added`・`rc-skipped`・`rc-user`・`rc-noticed` を置く。
+状態ディレクトリには、作業ディレクトリのほかに `count.lock`・`install.lock`・`rc-added`・`rc-skipped`・`rc-user`・`rc-noticed` を置く。
 
 ### シグナルファイル（`next.json`）
 
@@ -342,7 +342,7 @@ hook が止めるのは工程へ入る起動だけで、フェーズの中の Ba
 | `command` | 起動に渡した中身（`start`）。1 つ目のセッションは `run` の引数をシェルの形でつないだもの（引数なしなら空） |
 | `from_session` | 前のセッションの `session_id`（`start`。1 つ目は空） |
 | `plugin_version` | 起動の直前に読んだ `ndf@<名前>` の版（`start`） |
-| `carried` | 2 つ目以降のセッションの先頭に付けた起動の方針の引数（`start`。1 つ目のセッションには無い） |
+| `carried` | 2 つ目以降のセッションの先頭に付けた起動オプション（`start`。1 つ目のセッションには無い） |
 | `cwd` / `cwd_fallback` | 起動した作業ディレクトリと、シグナルファイルの `cwd` が消えていたときの元の値（`start`。消えていなければ `cwd_fallback` は無い） |
 | `seconds` | セッションの長さ（`end`）。起動から、シグナルファイルの `written_at`（`mark` / `sigterm` / `sigkill`）か子の終わり（`no-mark`）まで |
 | `ended_by` | `mark`（`/exit` で終わった）/ `no-mark`（シグナルファイルなしで終わった）/ `sigterm` / `sigkill`（`end`） |
@@ -359,14 +359,14 @@ hook が止めるのは工程へ入る起動だけで、フェーズの中の Ba
 | `NDF_RELAY` | — | `0` で `run` を常にパススルーにする |
 | `NDF_RELAY_MAX_STARTS` | `20` | 1 日の起動回数の上限（全部のラッパーの合計） |
 | `NDF_RELAY_QUIET` | `5` | アイドルの秒数 |
-| `NDF_RELAY_SPIN` | `120` | 空回りとみなすセッションの秒数 |
+| `NDF_RELAY_SPIN` | `120` | 再起動ループとみなすセッションの秒数 |
 | `NDF_RELAY_POLL` | `2` | シグナルファイルを見る間隔（秒） |
 | `NDF_RELAY_EXIT_HOLD` / `NDF_RELAY_EXIT_WAIT` / `NDF_RELAY_TERM_WAIT` | `1` / `30` / `10` | `/exit` を書いた後に `question.lock` を持つ秒・`/exit` の後の待ち・SIGTERM の後の待ち（秒） |
 | `NDF_RELAY_ESC_WAIT` | `1` | 目標が未達の判定の後に、Esc を書いてから `/exit` を書くまでの秒 |
 | `NDF_RELAY_QUESTION_WAIT` | `3` | `question open` が `question.lock` を待つ秒 |
 | `NDF_RELAY_LIST_TIMEOUT` / `NDF_RELAY_UPDATE_TIMEOUT` | `15` / `120` | `plugin list` と `marketplace update`・`plugin update` の打ち切り（秒） |
 | `NDF_RELAY_CLAUDE` | — | 本物の claude の絶対パス（最優先） |
-| `NDF_RELAY_DIR` | — | ラッパーが子に置く作業ディレクトリ。hook と文脈量の hook がラッパーの下かをこれで見る |
+| `NDF_RELAY_DIR` | — | ラッパーが子に置く作業ディレクトリ。hook とコンテキスト量の hook がラッパーの下かをこれで見る |
 | `NDF_RELAY_DEPTH` | `0` | 起動の深さ。パススルーと子の起動で 1 増やし、2 以上の `run` は止まる |
 
 ## 外部連携
@@ -388,15 +388,15 @@ hook が止めるのは工程へ入る起動だけで、フェーズの中の Ba
 - `NDF_RELAY_DIR` とその親は `0700`、シグナルファイルは `0600` で、同じ利用者のプロセスだけが読み書きできる
 - 次のコマンドはシェルも `PATH` の探索も通さず、本物の claude の絶対パスと引数の配列で `os.execve` に
   渡す。`claude` という名前の別のスクリプトへ戻らない
-- `install` / `uninstall` が書くのはシェルの設定の目印のついた囲みの中だけで、囲みの外は読むだけである。
+- `install` / `uninstall` が書くのはシェルの設定のマーカーのついた管理ブロックの中だけで、管理ブロックの外は読むだけである。
   書く前にバックアップを取る。SessionStart hook はシェルの設定を書かない
 
 ## 運用
 
 - **始める:** `/ndf:install-wrapper` を 1 度打つ。次に開いたシェルから効く
-- **止める:** 1 回だけなら `NDF_RELAY=0 claude`。切り替えだけを止めるなら `relay.py stop` か停止のシグナルファイル。
+- **止める:** 1 回だけなら `NDF_RELAY=0 claude`。切り替えだけを止めるなら `relay.py stop` か停止シグナルファイル。
   関数を外すなら `/ndf:install-wrapper uninstall`
-- **セッションをまたいで設定を保つ:** 最初のセッションに付けた起動の方針の引数（`--model` など）は 2 つ目以降のセッションにも
+- **セッションをまたいで設定を保つ:** 最初のセッションに付けた起動オプション（`--model` など）は 2 つ目以降のセッションにも
   付く。会話ごと・セッションごとの引数（`--resume` など）は付かない
 - **前のセッションの画面:** claude はセッションごとに代替画面を使うため、端末の履歴に残るのは
   `Resume this session with: claude --resume <id>` と区切りの 1 行だけである。会話の記録は残る
@@ -437,10 +437,10 @@ hook が止めるのは工程へ入る起動だけで、フェーズの中の Ba
   `spin`、119・121・119 では送ること。`/exit` にも SIGTERM にも反応しない子で `sigkill` を書くこと。更新の
   失敗・打ち切り・次の子の exec の失敗で `stop` と次のコマンドを出して終了コード 2、1 つ目の子の exec の
   失敗で終了コード 127 になること
-- `stop`: 動いているラッパーすべてにだけ停止のシグナルファイルを置き、`relay.pid` が無関係な生きたプロセスを指すディレクトリを
+- `stop`: 動いているラッパーすべてにだけ停止シグナルファイルを置き、`relay.pid` が無関係な生きたプロセスを指すディレクトリを
   飛ばし、動いているラッパーが無ければ終了コード 1 であること。同じ pid で 2 回作った作業ディレクトリが別で（`0700`・空）、
   前の起動の `stop` と `next.json` を持ち込まず、親が無くても作ること
-- 文脈量の hook: ラッパーの直接の子の conductor では、上限を超えたフェーズの起動が 2 回続けて止まり、理由が
+- コンテキスト量の hook: ラッパーの直接の子の conductor では、上限を超えたフェーズの起動が 2 回続けて止まり、理由が
   `ndf-next` と supervisor の報告の待ちを含むこと。直接の子でない・ラッパーが動いていないときは 1 度だけ通すこと
 - Codex / agy の hook の定義に `relay.py` が無いこと（`claude plugin validate .` を含む）
 
@@ -479,8 +479,8 @@ hook が止めるのは工程へ入る起動だけで、フェーズの中の Ba
 ## 関連リンク
 
 - [#895](https://github.com/devbasex/ai-plugins/issues/895)（設計は [PR #908](https://github.com/devbasex/ai-plugins/pull/908)、実装は [PR #921](https://github.com/devbasex/ai-plugins/pull/921)）
-- [#928](https://github.com/devbasex/ai-plugins/issues/928) / [#936](https://github.com/devbasex/ai-plugins/issues/936) — 明示の導入・`/ndf:restart`・承認ゲートを越えない守り・起動の方針の引数の引継ぎ（[ndf-relay-install-and-restart.md](ndf-relay-install-and-restart.md)）
+- [#928](https://github.com/devbasex/ai-plugins/issues/928) / [#936](https://github.com/devbasex/ai-plugins/issues/936) — 明示の導入・`/ndf:restart`・承認ゲートを越えない守り・起動オプションの引継ぎ（[ndf-relay-install-and-restart.md](ndf-relay-install-and-restart.md)）
 - [#827](https://github.com/devbasex/ai-plugins/issues/827) — supervisor の層のスクリプト駆動。「何が claude を起動し、状態をどこに持つか」の答え（スクリプトが起動し、正本は会話の外の記録、LLM の結果は hook がファイルへ写す）を共有する
-- [ndf-token-waits-and-context-cut.md](ndf-token-waits-and-context-cut.md) — 文脈量の hook と引継ぎの 1 行
+- [ndf-token-waits-and-context-cut.md](ndf-token-waits-and-context-cut.md) — コンテキスト量の hook と再開コマンド
 - [ndf-agent-layers-unattended-run.md](ndf-agent-layers-unattended-run.md) — 3 層の運転
-- [ndf-context-window-metrics.md](ndf-context-window-metrics.md) — 会話の記録から文脈量を測る部品
+- [ndf-context-window-metrics.md](ndf-context-window-metrics.md) — 会話の記録からコンテキスト量を測る部品

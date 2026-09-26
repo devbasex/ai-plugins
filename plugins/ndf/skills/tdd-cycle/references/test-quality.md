@@ -82,7 +82,7 @@ expect(res.body.code).toBe("quantity_out_of_range");
 ✅ test_confirm_rejects_when_stock_is_insufficient
 ```
 
-### 7. テストを通すために本番コードへ分岐を足す
+### 7. テストを通すためにプロダクションコードへ分岐を足す
 
 ```python
 # ❌ テスト用の抜け道

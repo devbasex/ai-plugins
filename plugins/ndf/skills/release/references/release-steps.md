@@ -1,8 +1,8 @@
 # リリースコマンドを走らせる
 
-**リポジトリに固有のリリースの手順は、リポジトリの宣言 `.ndf/release.json` が
-リリースコマンドとして持つ。** `release` は手順 3 で、宣言されたコマンドを 1 行のコマンドで走らせるだけである。
-宣言が無いリポジトリでは何も起きない。
+**リポジトリに固有のリリースの手順は、リポジトリのリリースの設定 `.ndf/release.json` が
+リリースコマンドとして持つ。** `release` は手順 3 で、設定されたコマンドを 1 行のコマンドで走らせるだけである。
+リリースの設定が無いリポジトリでは何も起きない。
 
 ## 例: 正式版 2.4.0 を出すリポジトリ
 
@@ -39,20 +39,20 @@ echo "exit=$rc"
 
 `$SCRIPTS` の決め方は [scripts-lookup.md](../../development-workflow/references/scripts-lookup.md) にある。
 
-## 段階の値
+## リリース種別の値
 
 | `--stage` | いつ渡すか | 走るコマンドの `stage` |
 | --- | --- | --- |
 | `production` | 本番リリース（正式版として公開する・本番へ反映する） | `production` / `any` |
 | `verification` | 検証リリース（開発版として公開する・検証環境へ反映する） | `verification` / `any` |
 
-## 宣言の項目
+## 設定の項目
 
 形は [../schemas/release.schema.json](../schemas/release.schema.json) が定める。
 
 | 項目 | 必須 | 何を決めるか |
 | --- | --- | --- |
-| `version` | 必須 | 宣言の形の版。`1` だけを読む |
+| `version` | 必須 | 設定の形の版。`1` だけを読む |
 | `steps` | 必須 | コマンドの並び。書いた順に実行し、最初に落ちたコマンドで止める |
 | `steps[].name` | 必須 | 出力と完了報告に出す名前 |
 | `steps[].stage` | 必須 | `production` / `verification` / `any` |
@@ -69,10 +69,10 @@ echo "exit=$rc"
 
 | 終了コード | 意味 | どうするか |
 | --- | --- | --- |
-| 0 | 宣言が無い（何も出力しない）・段階に合うコマンドが無い・すべてのコマンドが通った | `guide:` の行があれば、その手引きに従う |
+| 0 | 設定が無い（何も出力しない）・リリース種別に合うコマンドが無い・すべてのコマンドが通った | `guide:` の行があれば、その手引きに従う |
 | 1 | コマンドが 0 以外で終わった・時間切れ・書いてよい場所の外を変えた | 出力を読んで直す。直すまでリリースの Pull Request を作らない |
-| 2 | `check` だけが返す。宣言が無い | 宣言の有無で分岐する側が使う |
-| 3 | 宣言が読めない（壊れた JSON・未対応の `version`・必須の項目が無い・値が不正） | 標準エラーに出た項目を直す |
+| 2 | `check` だけが返す。設定が無い | 設定の有無で分岐する側が使う |
+| 3 | 設定が読めない（壊れた JSON・未対応の `version`・必須の項目が無い・値が不正） | 標準エラーに出た項目を直す |
 
 **1 と 3 を 0 へ畳まない。** 走らなかったコマンドを、通ったと報告しない。
 
@@ -87,7 +87,7 @@ python3 "$SCRIPTS/release-steps.py" run --root . --stage production --version 2.
 
 ## Claude Code のプラグインの形のサブコマンド
 
-宣言のコマンドとは別に、Claude Code のプラグインの形ではリリースの手順そのものをスクリプトが行う。
+設定したコマンドとは別に、Claude Code のプラグインの形ではリリースの手順そのものをスクリプトが行う。
 どれも結果 JSON を出し、`status` と終了コードで読む（`ok` = 0 で次へ、`gate` = 10 で承認を得る、
 `stopped` = 1 / 2 / 3 なら `summary` を読んで直すか報告して止まる）。
 
@@ -106,8 +106,8 @@ python3 "$SCRIPTS/release-steps.py" release --version <版> --channel dev --root
 python3 "$SCRIPTS/release-steps.py" release --version <版> --channel prod --root .  # 本番リリース（承認を得てから）
 ```
 
-- `approval-facts`: `gate` なら `presentation_path` の承認資料の「配る中身」と「検証への配布で
-  確かめたこと」を `notes --approval` で埋めて利用者へ示し、承認を得てから `next` のコマンドを打つ。`stopped`
+- `approval-facts`: `gate` なら `presentation_path` の承認資料の「`配る中身`」と「`検証への配布で確かめたこと`」を
+  `notes --approval` で埋めて利用者へ示し、承認を得てから `next` のコマンドを打つ。`stopped`
   （3 = 前のタグを決められない）なら `--prev-tag` を渡して打ち直す
 - `bump`: `items[]` に手で直す箇所が載っていれば直す
 - `changelog`: 見出しと PR のタイトルを並べるだけで、本文は書かない。未マージの PR は載せず、番号を

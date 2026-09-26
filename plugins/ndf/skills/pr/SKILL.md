@@ -57,8 +57,8 @@ python3 "$SCRIPTS/pr-steps.py" plan [--draft] [--base <base>] [--message "<コ�
 ```
 
 - `metrics.redirect` が `worktree`: ベースブランチにいる。`/ndf:worktree` で worktree を用意し、
-  そこへ移ってから打ち直す（入れ子の worktreeは作らない）
-- `metrics.redirect` が `cherry-pick-pr`: 起点が `main`/`master` でも宣言のブランチでもない。警告を出して
+  そこへ移ってから打ち直す（入れ子の worktree は作らない）
+- `metrics.redirect` が `cherry-pick-pr`: 起点が `main`/`master` でも設定のブランチでもない。警告を出して
   `/ndf:cherry-pick-pr <base>` へ誘導し、利用者が明示的に継続を指示したときだけ `--force` で進める
 - `metrics.closing_words_in_message` に語がある: メッセージから外す（「閉じる語は本文だけに書く」）
 - `metrics.existing_pr` が null なら新規作成、あれば更新になる
@@ -132,7 +132,7 @@ URL は最終行に生のまま置く（Markdown リンクにすると利用者�
 | 宛て先 | 何の Pull Request か | コードレビュー | `metrics` |
 | --- | --- | --- | --- |
 | `mission/<名前>` | 課題の Pull Request。課題の worktree からミッションブランチへ集める | 通さない。緑になったらミッションブランチへ取り込む | `target: mission` / `review: false` |
-| develop（宣言の `base_branch`） | ミッションの Pull Request（ミッションで 1 本）か、ミッションブランチを経ない単独の Pull Request | 通す（リファクタリング・`cross-review`・完了判定を 1 回） | `target: develop` / `review: true` |
+| develop（worktree の設定の `base_branch`） | ミッションの Pull Request（ミッションで 1 本）か、ミッションブランチを経ない単独の Pull Request | 通す（リファクタリング・`cross-review`・完了判定を 1 回） | `target: develop` / `review: true` |
 
 課題の Pull Request は `--base mission/<名前>` で出す。ミッションの Pull Request は、
 ミッションブランチの worktree から `--base` を省いて出し、本文にミッションが閉じる課題を番号ごとに書く。
@@ -169,13 +169,13 @@ URL は最終行に生のまま置く（Markdown リンクにすると利用者�
 | マージ先 | 承認 |
 | --- | --- |
 | 開発版・検証環境のチャネル | 要らない |
-| **本番のチャネル** | **要る** |
+| **本番チャネル** | **要る** |
 | head のブランチ名が `design/` で始まる Pull Request | **どのチャネルでも要る**（ドキュメントレビューの承認ゲート） |
 
-**規則は `/ndf:release` が持つ。** 本番のチャネルは `.ndf/worktree.json` の `production_branch`、
-宣言が無ければ既定ブランチ。全体像は `/ndf:development-workflow` の「人手の承認を求める関門」。
+**規則は `/ndf:release` が持つ。** 本番チャネルは `.ndf/worktree.json` の `production_branch`、
+設定が無ければ既定ブランチ。全体像は `/ndf:development-workflow` の「人手の承認を求める承認ゲート」。
 
-この工程に入ったら `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "Pull Request"` を 1 行打つ（3 層では起動指示の「記録のコマンド」を使う）。
+この工程に入ったら `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "Pull Request"` を 1 行打つ（3 層では起動指示の「進捗記録」を使う）。
 
 ## 関連
 
@@ -184,4 +184,4 @@ URL は最終行に生のまま置く（Markdown リンクにすると利用者�
 - `/ndf:pr-tests` — Test Plan 自動実行
 - `/ndf:pr-review` — PR単位レビュー
 - `/ndf:merged` — マージ後のブランチ整理 / 現ブランチにベースブランチを取り込み
-- `/ndf:release` — リリース。**本番の系へ届く操作の承認の規則を持つ**
+- `/ndf:release` — リリース。**本番系へ届く操作の承認の規則を持つ**
