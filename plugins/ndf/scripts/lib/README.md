@@ -19,13 +19,13 @@
 | [projects-common.sh](projects-common.sh) | GitHub Projects のボードへの記録 | `development-workflow` |
 | [lock-common.sh](lock-common.sh) | 排他の取得と解放（#293） | 上の 2 つと `development-workflow` |
 | [monitor.py](monitor.py) | 別プロセスの多軸監視。対象と命名規則を引数で受ける | 収束ループの 2 つ / `external-ai.py` |
-| [limits.py](limits.py) | 監視の上限（工程ごと）・無進捗の許容（担当ごと）・CLI の上限（監視の上限 + 120 秒）の表。既定値はここだけが持つ（#598 / #537） | 同上 |
+| [limits.py](limits.py) | 監視の上限（工程ごと）・無進捗の許容（担当ごと）・CLI の上限（監視の上限 + 120 秒）の表。既定値はここだけが持つ（#598 / #537）。CLI の上限の上書きは `resolve_cli_timeout` と `cli-timeout --override N [--no-floor]` の 1 つで決める（既定では導いた値より短くできない） | 同上 |
 | [monitor_outcome.py](monitor_outcome.py) | 監視の結果の理由の語彙（9 語）と起動し直しの可否、結果ファイル・監視の記録の読み書き（#662）、起動 1 回の結末を 1 つの値として読む `read_launch_outcome`（#729） | 同上 |
 | [bg-wait.sh](bg-wait.sh) | 600 秒を超える待ちを、背景の起動（`run`）と 540 秒以内に区切った待ち（`wait`）に分ける。終了コードは rc ファイルに残る | 収束ループの 2 つ（Codex / Kiro / agy で `drive.py` を待つ）/ `cross-review` の手順の監視 |
 | [launch-cli.sh](launch-cli.sh) | claude / codex / agy / kiro をランタイム名で分岐して背景起動する | 同上 |
 | （`skills/external-ai/scripts/external-ai.py`） | 上の 2 つと `auth.py` / `limits.py` を束ね、外部 CLI 1 回の起動・上限つきの待ち・回収（結果ファイル → stdout → stderr）を 1 本で行う。結果は `step_result` の形 | `external-ai` / `corder` / supervisor の worker |
 | [_tmpdir.sh](_tmpdir.sh) | 一時ディレクトリの解決。環境変数名とディレクトリ名を引数で受ける | 同上 |
-| [statefile.py](statefile.py) | 状態ファイルの読み書きと KEY=VALUE 出力、保存の後の差し込み口、再開で渡した引数の反映（#727） | 同上 |
+| [statefile.py](statefile.py) | 状態ファイルの読み書きと KEY=VALUE 出力、保存の後の差し込み口、再開で渡した引数の反映。`now`・`die`・`info`・`write_json_atomic` は `clock`・`proc`・`jsonio` の再エクスポート | 同上 |
 | [auth.py](auth.py) | 参加する CLI の認証の確認。止めずに結果だけを返す形を持つ（#727） | 同上 |
 | [run_metrics.py](run_metrics.py) | 実行の要約をworktree の外へ書き、集計して出す（`aggregate`、#662） | 同上 |
 | [assignment.py](assignment.py) | ホスト判定、母集合の確定、使える者の解決、席の埋め方と席の名前、担当の輪番（#727） | 同上 |
@@ -37,8 +37,22 @@
 | [closing-issues.sh](closing-issues.sh) | Pull Request の本文から、閉じる語が指す issue を取り出す | `progress-tracking`（ミッションを閉じる） / `merged`（OPEN の一覧） / `development-workflow` の hook |
 | [refresh.py](refresh.py) | 観点の出典の取得・指紋の比較・一覧の提示・待ちの扱い（#554）。**提示するだけで書き換えない** | `instructions-check.py` |
 | [transcript_agents.py](transcript_agents.py) | 会話の記録を conductor / supervisor / worker の層の単位で読む（#550）。上限の中断の一覧（`interrupted`）と解除の待ち（`wait-reset`）も持つ（#657）。**読むだけで送信の経路を持たない** | `skill-stats` / `development-workflow` |
-| [step_result.py](step_result.py) | 手順のスクリプトの結果 JSON の形・検証（`validate_result`）・出力と終了（`emit`）・承認資料（`approval_present`）と、git / gh を呼ぶ小関数 | `merged-steps.py` / `plan-to-spec-steps.py` / `release-steps.py` / `release-verification-steps.py` / `mission-close.py` / `drive_pause.py` |
-| [gh_parts.py](gh_parts.py) | PR / issue の取得と本文の節の差し替え。`pr-info`（メタ・本文・差分の統計・checks を名前ごとの最新の実行へ畳んだもの・未解決のスレッド。GraphQL が上限なら REST へ退避。差分とログはファイルへ書く）、`unresolved-threads`、`body-section`（節の取得・置換・末尾への 1 行の追記。節の終わりに `<!-- ndf:section-end -->` を置き、後ろへ足した行を節に含めない）、`review-post`（自分の PR なら REQUEST_CHANGES を COMMENT へ下げる）。結果は `step_result` の形。GitHub を呼ぶのは `RUNNER` 1 か所 | `cross-review`（`state.py` の未解決のスレッドと checks） |
+| [step_result.py](step_result.py) | 手順のスクリプトの結果 JSON の形・検証（`validate_result`）・出力と終了（`emit`）・承認資料（`approval_present`）と、git / gh を呼ぶ小関数（`StepError`・`run`・`git`・`git_root` は `proc` の再エクスポート） | `merged-steps.py` / `plan-to-spec-steps.py` / `release-steps.py` / `release-verification-steps.py` / `mission-close.py` / `drive_pause.py` |
+| [gh_parts.py](gh_parts.py) | PR / issue の取得と本文の節の差し替え。`pr-info`（メタ・本文・差分の統計・checks を名前ごとの最新の実行へ畳んだもの・未解決のスレッド。GraphQL が上限なら REST へ退避。差分とログはファイルへ書く）、`unresolved-threads`、`body-section`（節の取得・置換・末尾への 1 行の追記。節の終わりに `<!-- ndf:section-end -->` を置き、後ろへ足した行を節に含めない）、`review-post`（自分の PR なら REQUEST_CHANGES を COMMENT へ下げる）。結果は `step_result` の形。エントリポイントと再エクスポートだけを持ち、部品は下の `gh_*` の 8 本にある | `cross-review`（`state.py` の未解決のスレッドと checks） |
+| [gh_call.py](gh_call.py) | GitHub の呼び出しの最下層。GitHub を呼ぶのはここだけで、テストは `RUNNER` を差し替える。REST の 1 回の要求（githubkit が import できれば githubkit、できなければ `gh api`）と、ETag 付きの読み直し（`rest_cached`。変わっていなければ 304 で上限に数えられない） | `gh_*` |
+| [gh_quota.py](gh_quota.py) | 上限の見分け・枠（GraphQL と REST）の残り・枠の代替（`with_fallback`）・回復の時刻までの待ち（`wait_for_reset`）・変化が無い間に伸ばす待ちの間隔（`PollInterval`・`poll_until`） | `gh_*` |
+| [gh_fields.py](gh_fields.py) | REST の応答を GraphQL の `--json` の形へ変える対応表 | `gh_rest` |
+| [gh_rest.py](gh_rest.py) | PR と課題の単発の読み書き（読み取り・一覧・作成・編集・コメント・マージ）。REST で行い、REST が上限なら `gh pr` / `gh issue` で代わる。値は `Attempt`（`value`・`error`・`via`） | `gh_parts` |
+| [gh_graphql.py](gh_graphql.py) | 入れ子の読み取り（未解決のスレッド）と GraphQL の 1 回の要求（`graphql`） | `gh_parts` / `gh_pr_info` |
+| [gh_checks.py](gh_checks.py) | チェックジョブの読み取りと、名前ごとの最新の実行への畳み方・失敗のログの保存 | `gh_parts` / `gh_pr_info` |
+| [gh_pr_info.py](gh_pr_info.py) | `pr-info` の組み立て | `gh_parts` |
+| [gh_sections.py](gh_sections.py) | 本文の節の取得・置換・末尾への 1 行の追記（GitHub を呼ばない） | `gh_parts` |
+| [clock.py](clock.py) | 今の時刻・ISO の書き出し（`local` / `utc` / `naive` / `z-ms` を引数で選ぶ）と読み取り（`Z` を含む）・秒の差。標準ライブラリだけ | `statefile.py`（C1〜C7 で各スクリプト） |
+| [jsonio.py](jsonio.py) | JSON の読み（無い・壊れた・形が違うときの扱いを引数で選ぶ）と原子的な書き込み。標準ライブラリだけ | 同上 |
+| [proc.py](proc.py) | 子プロセスと git の起動（失敗は `StepError(msg, code)`）・`die`・`info` | `step_result.py` / `statefile.py` / `repo.py` |
+| [repo.py](repo.py) | メインディレクトリ・`owner/repo`・slug・宣言のベースブランチ（git だけで決める） | C1〜C7 で各スクリプト |
+| [loop_drive.py](loop_drive.py) | 収束ループの drive の部品（`call`・`parse_vars`・`review_status`） | C2・C4 で収束ループの 2 つの `drive.py` |
+| [deps.py](deps.py) | 外部パッケージを使うエントリポイントが最初に呼ぶ `require("<グループ>")`。import できなければ uv の環境（宣言と版の固定はプラグインルートの `pyproject.toml` と `uv.lock`）で起動し直し、uv が無ければ版を固定して入れる。入れられなければ終了コード 3。hook とラッパーのバージョンディレクトリは使わない | 外部パッケージを使うエントリポイント |
 | [wait_notice.py](wait_notice.py) | Slack の待ち通知の判定（応答の本文から回答待ち・承認待ち・待ちでない）・フックの事象の訳し・復帰先・関連 URL・本文の組み立て。入出力を持たない | `scripts/wait-notify.py` |
 | [drive_pause.py](drive_pause.py) | 収束ループの駆動が止まるときの結果の形（pause の 1 行 JSON）と終了コードの表（0 完了 / 20 fix / 21 sweep / 22 newtext / 23 cross-review / 1 中断） | 収束ループの 2 つの `drive.py` |
 

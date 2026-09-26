@@ -4,7 +4,7 @@
 見るのは `plugins/ndf/` の下の `.py` と `.sh` のうち、テストを除くもの（`tests/`・`test/` の下と
 `test_` で始まるファイル）。git の作業ツリーでは git が追跡するファイルだけを見る。
 
-- `lines`: 1000 行を超えるファイル（I5）
+- `lines`: 500 行を超えるファイル（I5・決定 18）。例外リストに載るファイルは、載せた行数を超えたら落ちる
 - `same-body`: 本体の同じ最上位の関数が 2 つ以上のファイルにある（I4）。Python は docstring・型注釈・
   関数名を除いた構文木で、シェルは空行とコメントの行を除き前後の空白を落とした行で比べる
 - `same-name`: 同じ名前で本体の違う最上位の関数が 2 つ以上のファイルにある（I4）。Python とシェルは
@@ -13,8 +13,8 @@
 副命令のハンドラー（`cmd_*`）・`main`・`build_parser`・`_build_parser`・シェルの `usage` は規則で外す。
 
 例外リスト（既定は `scripts/script-structure-allow.json`）は `{"path", "name", "kind", "reason"}` の
-配列である。`lines` の行は `name` を空にする。違反に当たらない行は `unused-allow` として落とす。
-直した移行ステップは、同じ PR で例外リストの行を消す。
+配列である。`lines` の行は `name` を空にし、載せた時点の行数を `lines` に持つ（ラチェット）。
+違反に当たらない行は `unused-allow` として落とす。直した移行ステップは、同じ PR で例外リストの行を消す。
 
     python3 scripts/check-script-structure.py [--root <リポジトリ>] [--allow <json>]
 
@@ -36,7 +36,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 SCAN = "plugins/ndf"
-MAX_LINES = 1000
+MAX_LINES = 500
 KINDS = ("lines", "same-body", "same-name")
 RULE_NAMES = {"main", "build_parser", "_build_parser"}
 SHELL_RULE_NAMES = {"usage"}
@@ -153,8 +153,11 @@ def load_allow(path: Path) -> list[dict]:
     if not isinstance(rows, list):
         raise UsageError(f"例外リストは配列にする: {path}")
     for i, r in enumerate(rows):
-        if not isinstance(r, dict) or set(r) != {"path", "name", "kind", "reason"}:
-            raise UsageError(f"例外リストの {i + 1} 行目は path・name・kind・reason の 4 つを持つ: {r}")
+        keys = {"path", "name", "kind", "reason"} | ({"lines"} if isinstance(r, dict) and r.get("kind") == "lines" else set())
+        if not isinstance(r, dict) or set(r) != keys:
+            raise UsageError(f"例外リストの {i + 1} 行目は {'・'.join(sorted(keys))} を持つ: {r}")
+        if "lines" in r and (isinstance(r["lines"], bool) or not isinstance(r["lines"], int) or r["lines"] <= MAX_LINES):
+            raise UsageError(f"例外リストの {i + 1} 行目の lines は {MAX_LINES} を超える整数: {r['lines']}")
         if r["kind"] not in KINDS:
             raise UsageError(f"例外リストの {i + 1} 行目の kind は {'/'.join(KINDS)} のどれか: {r['kind']}")
         if not isinstance(r["reason"], str) or not r["reason"].strip():
@@ -171,7 +174,7 @@ def scan(root: Path) -> tuple[list[dict], dict]:
         text = (root / rel).read_text(errors="ignore")
         n = text.count("\n") + (0 if text.endswith("\n") or not text else 1)
         if n > MAX_LINES:
-            violations.append({"kind": "lines", "path": rel, "function": "", "detail": f"{n} 行"})
+            violations.append({"kind": "lines", "path": rel, "function": "", "detail": f"{n} 行", "lines": n})
         lang = "py" if rel.endswith(".py") else "sh"
         found = py_functions(text) if lang == "py" else sh_functions(text)
         if found is None:
@@ -211,13 +214,17 @@ def item(kind: str, path: str, function: str, result: str, detail: str) -> dict:
 
 def check(root: Path, allow: list[dict]) -> tuple[list[dict], dict]:
     violations, metrics = scan(root)
-    allowed = {(r["path"], r["name"], r["kind"]) for r in allow}
+    allowed = {(r["path"], r["name"], r["kind"]): r for r in allow}
     hit = set()
     items = []
     for v in violations:
         k = (v["path"], v["function"], v["kind"])
-        if k in allowed:
+        row = allowed.get(k)
+        if row is not None:
             hit.add(k)
+            if v["kind"] == "lines" and v["lines"] > row["lines"]:
+                items.append(item("lines", v["path"], "", "violation",
+                                  f"{v['lines']} 行。例外リストの {row['lines']} 行を超えた"))
             continue
         items.append(item(v["kind"], v["path"], v["function"], "violation", v["detail"]))
     for r in allow:

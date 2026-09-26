@@ -45,14 +45,35 @@ def test_clean_tree_is_ok(tmp_path: Path):
     assert r["tool"] == "check-script-structure" and r["status"] == "ok" and r["items"] == []
 
 
-def test_file_over_1000_lines_fails_unless_allowed(tmp_path: Path):
-    put(tmp_path, "scripts/big.py", "x = 1\n" * 1001)
-    put(tmp_path, "scripts/ok.py", "x = 1\n" * 1000)
+def test_file_over_500_lines_fails_unless_allowed(tmp_path: Path):
+    put(tmp_path, "scripts/big.py", "x = 1\n" * 501)
+    put(tmp_path, "scripts/ok.py", "x = 1\n" * 500)
     code, r = run(tmp_path, [])
     assert code == 1 and r["status"] == "stopped"
     assert kinds(r) == {("lines", "plugins/ndf/scripts/big.py")}
-    row = {"path": "plugins/ndf/scripts/big.py", "name": "", "kind": "lines", "reason": "分ける前"}
+    row = {"path": "plugins/ndf/scripts/big.py", "name": "", "kind": "lines", "reason": "分ける前", "lines": 501}
     assert run(tmp_path, [row])[0] == 0
+
+
+def test_allowed_file_fails_when_it_grows_past_the_listed_lines(tmp_path: Path):
+    """例外リストのラチェット（決定 18）: 載せた行数を 1 行でも超えたら落ちる。減るのはよい。"""
+    row = {"path": "plugins/ndf/scripts/big.py", "name": "", "kind": "lines", "reason": "分ける前", "lines": 600}
+    put(tmp_path, "scripts/big.py", "x = 1\n" * 601)
+    code, r = run(tmp_path, [row])
+    assert code == 1
+    assert kinds(r) == {("lines", "plugins/ndf/scripts/big.py")}
+    assert "600" in r["items"][0]["detail"]
+    put(tmp_path, "scripts/big.py", "x = 1\n" * 599)
+    assert run(tmp_path, [row])[0] == 0
+
+
+def test_new_file_over_500_lines_is_not_covered_by_other_rows(tmp_path: Path):
+    row = {"path": "plugins/ndf/scripts/big.py", "name": "", "kind": "lines", "reason": "分ける前", "lines": 600}
+    put(tmp_path, "scripts/big.py", "x = 1\n" * 600)
+    put(tmp_path, "scripts/new.py", "x = 1\n" * 501)
+    code, r = run(tmp_path, [row])
+    assert code == 1
+    assert kinds(r) == {("lines", "plugins/ndf/scripts/new.py")}
 
 
 def test_same_body_ignores_docstring_annotations_and_name(tmp_path: Path):
@@ -83,7 +104,7 @@ def test_rule_excluded_names_and_tests_are_not_counted(tmp_path: Path):
     put(tmp_path, "scripts/b.py", body)
     put(tmp_path, "scripts/a.sh", "usage() {\n  echo a\n}\n")
     put(tmp_path, "scripts/b.sh", "usage() {\n  echo a\n}\n")
-    put(tmp_path, "scripts/tests/test_x.py", "def helper():\n    return 0\n" + "x = 1\n" * 1001)
+    put(tmp_path, "scripts/tests/test_x.py", "def helper():\n    return 0\n" + "x = 1\n" * 501)
     put(tmp_path, "scripts/tests/helpers.py", "def helper():\n    return 0\n")
     code, r = run(tmp_path, [])
     assert code == 0 and r["items"] == []
@@ -122,6 +143,9 @@ def test_unused_allow_row_fails(tmp_path: Path):
     {"path": "plugins/ndf/scripts/a.py", "name": "f", "kind": "same-name"},
     {"path": "plugins/ndf/scripts/a.py", "name": "f", "kind": "same-name", "reason": ""},
     {"path": "plugins/ndf/scripts/a.py", "name": "f", "kind": "other", "reason": "x"},
+    {"path": "plugins/ndf/scripts/a.py", "name": "", "kind": "lines", "reason": "x"},
+    {"path": "plugins/ndf/scripts/a.py", "name": "", "kind": "lines", "reason": "x", "lines": "600"},
+    {"path": "plugins/ndf/scripts/a.py", "name": "f", "kind": "same-name", "reason": "x", "lines": 600},
 ])
 def test_broken_allow_row_is_a_usage_error(tmp_path: Path, row: dict):
     put(tmp_path, "scripts/a.py", "def f():\n    return 1\n")

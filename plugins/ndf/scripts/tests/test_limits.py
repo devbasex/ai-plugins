@@ -193,3 +193,58 @@ def test_an_argv_matching_no_form_prints_usage_to_stderr(args: tuple[str, ...]) 
     assert r.returncode == 1
     assert r.stdout == ""
     assert "monitor-timeout" in r.stderr
+
+
+# ---------- CLI の上限の上書き（#1142 の V3。3 つの resolve_print_timeout を 1 つにする） ----------
+
+def test_resolve_cli_timeout_without_override_is_the_derived_value(limits) -> None:
+    assert limits.resolve_cli_timeout("critique", "agy") == (1320, None)
+
+
+def test_an_override_shorter_than_the_derived_value_is_floored(limits) -> None:
+    """既定では導いた値より短くできない。短いと CLI が監視より先に打ち切る（critique.sh の規則）。"""
+    seconds, warning = limits.resolve_cli_timeout("critique", "agy", override="600")
+    assert seconds == 1320 and "1320" in warning
+
+
+def test_an_override_longer_than_the_derived_value_is_used(limits) -> None:
+    assert limits.resolve_cli_timeout("critique", "agy", override="4000") == (4000, None)
+
+
+def test_no_floor_uses_the_override_as_is(limits) -> None:
+    """駆動が予算から導いた上限はそのまま渡す（cross-refactoring の規則）。"""
+    assert limits.resolve_cli_timeout("implement", "agy", override=600, floor=False) == (600, None)
+
+
+@pytest.mark.parametrize("override", ["abc", "12x", "-5"])
+def test_a_non_numeric_override_falls_back_to_the_derived_value(limits, override: str) -> None:
+    seconds, warning = limits.resolve_cli_timeout("review", "agy", override=override)
+    assert seconds == 1320 and warning
+
+
+def test_an_empty_override_is_no_override(limits) -> None:
+    assert limits.resolve_cli_timeout("review", "agy", override="") == (1320, None)
+
+
+def test_the_override_does_not_skip_the_phase_check(limits) -> None:
+    with pytest.raises(KeyError):
+        limits.resolve_cli_timeout("apply", "agy", override="600", floor=False)
+
+
+def test_the_cli_timeout_command_takes_override_and_no_floor() -> None:
+    r = _run("cli-timeout", "critique", "agy", "--override", "600")
+    assert (r.returncode, r.stdout) == (0, "1320\n") and "1320" in r.stderr
+    r = _run("cli-timeout", "critique", "agy", "--override", "600", "--no-floor")
+    assert (r.returncode, r.stdout, r.stderr) == (0, "600\n", "")
+    r = _run("cli-timeout", "critique", "agy", "--no-floor", "--override", "4000")
+    assert (r.returncode, r.stdout) == (0, "4000\n")
+
+
+@pytest.mark.parametrize("args", [
+    ("cli-timeout", "critique", "agy", "--override"),
+    ("cli-timeout", "critique", "agy", "--bogus"),
+    ("monitor-timeout", "critique", "agy", "--no-floor"),
+])
+def test_broken_cli_timeout_options_print_usage(args: tuple[str, ...]) -> None:
+    r = _run(*args)
+    assert r.returncode == 1 and r.stdout == ""
