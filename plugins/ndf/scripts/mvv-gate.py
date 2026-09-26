@@ -38,7 +38,11 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from supervise_lib.paths import sha256_of  # noqa: E402  supervise_lib が lib/ を sys.path へ足す
+import supervise_lib  # noqa: E402,F401  lib/ を sys.path へ足す
+import deps  # noqa: E402
+
+deps.require("schema")  # supervise_lib.paths → decl が使う
+from supervise_lib.paths import sha256_of  # noqa: E402
 from step_result import EXIT_GATE, emit, result  # noqa: E402
 import clock  # noqa: E402
 import gh_call  # noqa: E402

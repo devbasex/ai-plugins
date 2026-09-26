@@ -1422,3 +1422,27 @@ def test_work_without_report_keeps_cli_result(tmp_path, seq):
     seq[0]({"out": {"result": "直した", "usage": {}, "total_cost_usd": 0.01, "num_turns": 1}})
     s, _ = run_plan(tmp_path, [{"id": "impl", "type": "work", "prompt": "直す", "next": "end"}])
     assert s.state.results["impl"]["exit"] == 0
+
+
+def test_run_ticking_timeout_stops_the_group_after_the_leader_exits(tmp_path):
+    """打ち切りは lib/procs.py で木を止め、先頭が先に終わったグループの孫も残さない（#1142 の D1）。"""
+    import procs
+    pidfile = tmp_path / "pid"
+    with pytest.raises(subprocess.TimeoutExpired):
+        claude.run_ticking(f"sleep 30 & echo $! > {pidfile}; exit 0", shell=True, timeout=1)
+    assert procs.wait_gone(int(pidfile.read_text()), timeout=3)
+
+
+@pytest.mark.parametrize("sv", [{"sync_checks": [{"name": 1, "command": "x"}]}, {"sync_checks": "x"}, {"test": [1]}])
+def test_supervise_decl_shape_is_checked_by_the_schema_wrapper(sv):
+    """supervise.json の test と sync_checks の形は lib/schema.py で見る。違えば DeclError（#1142 の D1）。"""
+    from supervise_lib import decl
+    with pytest.raises(decl.DeclError, match="^supervise.json: "):
+        decl.supervise_shape(sv)
+
+
+def test_supervise_decl_keeps_unknown_keys_and_empty_values():
+    from supervise_lib import decl
+    sv = {"test": None, "sync_checks": [{"name": "a", "command": "b", "note": "x"}], "release": {"form": "f"}}
+    assert decl.sync_checks_of(sv) == [("a", "b")]
+    assert decl.supervise_shape(sv).test == {}
