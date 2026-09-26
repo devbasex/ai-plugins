@@ -1352,3 +1352,52 @@ def test_steps_after_worktree_removal_run_in_repository(tmp_path):
     assert "結果: 完了" in text
     rec = [r for r in progress(s) if r.get("kind") == "step" and r["step"] == "record"]
     assert rec and rec[0]["exit"] == 0 and rec[0]["summary"] == str(repo)
+
+
+# --- judge の retry: 落ちたステップが GitHub の上限なら回復まで待つ ---------------------
+
+GH_RATE_STEP = [
+    {"id": "t", "type": "run", "on_fail": "j", "next": "end",
+     "cmd": "if [ -f done ]; then exit 0; fi; touch done; "
+            "echo 'GraphQL: API rate limit already exceeded for user ID 1.' >&2; exit 1"},
+    {"id": "j", "type": "judge", "question": "直すか", "choices": ["t", "stop"]}]
+JUDGE_RETRY_T = {"out": {"result": '{"decision": "t", "reason": "もう 1 度"}', "usage": {}, "total_cost_usd": 0.0}}
+
+
+def _gh_limit_rows(s):
+    return [r for r in progress(s) if r["kind"] == "gh-limit"]
+
+
+def test_judge_retry_waits_until_graphql_reset(tmp_path, seq, monkeypatch):
+    seq[0](JUDGE_RETRY_T)
+    reset = int(sv.time.time()) + 300
+    asked = []
+
+    def runner(args, stdin=None, cwd=None):
+        asked.append(args)
+        return sv.gh_parts.GhResult(0, str(reset), "")
+    monkeypatch.setattr(sv.gh_parts, "RUNNER", runner)
+    monkeypatch.chdir(tmp_path)
+    s, text = run_plan(tmp_path, GH_RATE_STEP)
+    assert "結果: 完了" in text, text
+    rows = _gh_limit_rows(s)
+    assert len(rows) == 1 and rows[0]["step"] == "t" and 290 <= rows[0]["waited"] <= 300
+    assert asked == [["api", "rate_limit", "--jq", ".resources.graphql.reset"]]
+
+
+def test_judge_retry_waits_doubling_from_60_when_reset_is_unknown(tmp_path, seq, monkeypatch):
+    seq[0](JUDGE_RETRY_T, JUDGE_RETRY_T)
+    monkeypatch.setattr(sv.gh_parts, "RUNNER", lambda args, stdin=None, cwd=None: sv.gh_parts.GhResult(1, "", "x"))
+    steps = [{**GH_RATE_STEP[0], "cmd": "echo 'GraphQL: API rate limit already exceeded' >&2; exit 1"},
+             GH_RATE_STEP[1]]
+    s, _ = run_plan(tmp_path, steps, 上限=5)
+    assert [r["waited"] for r in _gh_limit_rows(s)] == [60, 120]
+
+
+def test_judge_retry_without_rate_limit_does_not_wait(tmp_path, seq, monkeypatch):
+    seq[0](JUDGE_RETRY_T)
+    monkeypatch.setattr(sv.gh_parts, "RUNNER", lambda *a, **k: pytest.fail("上限でないのに rate_limit を読んだ"))
+    steps = [{**GH_RATE_STEP[0], "cmd": "if [ -f done ]; then exit 0; fi; touch done; exit 1"}, GH_RATE_STEP[1]]
+    monkeypatch.chdir(tmp_path)
+    s, text = run_plan(tmp_path, steps)
+    assert "結果: 完了" in text and _gh_limit_rows(s) == []

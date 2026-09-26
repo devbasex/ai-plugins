@@ -169,6 +169,9 @@ queue の置き換え: `{queue_prs}` は前のすべてのステージの Pull R
   待ちは区切って見るので、ステップの途中でも書く
 - `"kind": "worker"`: work のステップの worker が区切りごとに追記する 1 行（プロンプトに書き方と置き場を渡す）
 - `"kind": "slow"`: ステップの経過が想定を超え、一次の調査を流すたびに 1 行（下の「遅れの見張り」）
+- `"kind": "gh-limit"`: judge が打ち直すステップの前の出力が GitHub の上限（`gh_parts.is_rate_limited`）のとき、
+  打ち直す前に待った 1 回ごとに 1 行（step・waited・reset）。待つのは `gh api rate_limit` の graphql の reset まで。
+  読めなければ同じステップの待ちごとに 60 秒から倍々
 - `"kind": "attention"`: conductor の判断が要る出来事（reason が 止まった・関門・同じ失敗の繰り返し・
   judge のステップで stop が出そう・遅れ）。worker の行の語と繰り返し、ステップの結果からスクリプトで分ける。
   `queue` はこの行を標準出力の `{"tool": "supervise-queue", "event": "attention", ...}` で知らせる
@@ -220,6 +223,7 @@ from monitor import USAGE_LIMIT_FATAL  # noqa: E402  利用上限の文言の表
 from pr_mode import with_mode_line  # noqa: E402
 from pace import PaceError, read_pace  # noqa: E402
 import slow_step as ss  # noqa: E402  遅れの見張りの材料
+import gh_parts  # noqa: E402  GitHub の上限の見分けと rate_limit の読み取り
 
 WORK_TOOLS = "Read,Edit,Write,Bash,Grep,Glob"
 # work のステップに載せる MCP は Serena だけ（mcp-serena の .mcp.json と同じ起動）。シンボル単位で読み・直し、
@@ -778,6 +782,7 @@ class Supervisor:
         self.slow_cfg = ss.SlowConfig()
         self.history: Path | None = None
         self.watch: SlowWatch | None = None
+        self.gh_limit_waits: dict[str, int] = {}  # judge の retry で GitHub の上限を待った回数（ステップごと）
         self.slow_carry: SlowWatch | None = None  # 見張りの retry で打ち直すステップへ引き継ぐ見張り
         self.slow_busy = False     # 調査と判定の間（判定の claude -p の tick から見張りを呼ばない）
         self.slow_paused = False   # 利用上限の待ちの間（経過に入れない）
@@ -1163,6 +1168,35 @@ class Supervisor:
                     self.watch.paused += time.time() - paused_at
             waited += wait
             self.cur["limit_waited"] = round(self.cur.get("limit_waited", 0) + wait, 1)
+
+    def gh_limit_wait(self, sid: str) -> None:
+        """judge が打ち直すステップの前の出力が GitHub の上限なら、回復の時刻まで待つ。
+
+        回復の時刻は `gh api rate_limit` の graphql の reset。読めない（過ぎている）なら、同じステップの
+        待ちごとに 60 秒から倍々にする。待った秒は progress の `"kind": "gh-limit"` に残す。
+        待ちの実際の秒数は NDF_SUPERVISE_LIMIT_SLEEP で短くできる（試験用）。
+        """
+        prev = self.results.get(sid) or {}
+        if prev.get("exit") in (0, None) or not gh_parts.is_rate_limited(prev.get("text", "")):
+            return
+        k = self.gh_limit_waits.get(sid, 0)
+        self.gh_limit_waits[sid] = k + 1
+        r = gh_parts.gh(["api", "rate_limit", "--jq", ".resources.graphql.reset"])
+        try:
+            reset = float(r.stdout.strip()) if r.returncode == 0 else None
+        except ValueError:
+            reset = None
+        known = reset is not None and reset > time.time()
+        wait = reset - time.time() if known else 60.0 * 2 ** k
+        short = os.environ.get("NDF_SUPERVISE_LIMIT_SLEEP")
+        until = time.time() + (min(wait, float(short)) if short else wait)
+        while time.time() < until:  # 待ちの間も「まだ動いている」を書く
+            time.sleep(max(0.0, min(self.every, until - time.time())))
+            self.tick()
+        self.cur["gh_limit_waited"] = round(wait)
+        self.progress_write({"kind": "gh-limit", "step": sid, "waited": round(wait),
+                             "reset": datetime.fromtimestamp(reset).astimezone().isoformat(timespec="seconds")
+                             if known else None})
 
     def note_limit(self, res: dict) -> None:
         self.cur["limit"] = True
@@ -1585,6 +1619,7 @@ class Supervisor:
                     elif dec == "gate":
                         result, reason, nxt = "関門", d.get("reason", ""), None
                     elif dec in self.steps:
+                        self.gh_limit_wait(dec)
                         nxt = dec
                     else:
                         result, reason, nxt = "止まった", f"判断が知らない値を返した: {dec}", None
