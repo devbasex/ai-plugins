@@ -133,6 +133,8 @@ NDF の `scripts/glossary.py` はこの形でだけ読み、語はすべて用�
 - 識別子は英数字と `_` の境界で照合する。廃止した `gate` は `approval_gate` にも `ApprovalGate` にも当たらない。
   生きた識別子の出現の内側（`approval-gate` の `gate`）も当てない。コードは `check.paths` の外でも見る。
   コードに `deprecated` と `unregistered` は当てない
+- コードのコメント（`.py` / `.sh` の `#`、`.js` / `.ts` の `//` と `/* */`）の中は当てない。古い名前を説明する
+  ために書けるようにする。文字列の中（`"--gate"`）はコードの一部として当てる
 - `--diff BASE` は `BASE` と `HEAD` の分岐点からの追加した行を見る。`BASE` が先へ進んでも、ほかの変更が
   足した行は当たらない。追跡していないファイルは全行を見る。見るのは `check.paths` に当たるファイルだけである
 - 当たりは標準エラーへも `ERROR: <path>:<line>: <rule>: <term>` の 1 行ずつで出す

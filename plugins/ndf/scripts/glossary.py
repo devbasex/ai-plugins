@@ -385,10 +385,58 @@ def text_findings(rel: str, text: str, wanted: set[int] | None, g: dict, decl: D
     return items
 
 
+def mask_comments(lines: list[str], suffix: str) -> list[str]:
+    """コードの行のコメントを空白に置き換える。`#` は .py / .sh（.sh は語の頭だけ）、`//` と `/* */` は .js / .ts。
+    文字列の内側の記号はコメントとみなさない（`"--cart"` の識別子は残す）。行をまたぐ文字列（.py の三連引用符、
+    .js / .ts のバッククォート、.sh の引用）は次の行へ持ち越す。.sh は引用の外の `\\` で次の 1 文字を飛ばし、
+    `'` の内側の `\\` はエスケープとみなさない。"""
+    hash_style, sh = suffix in (".py", ".sh"), suffix == ".sh"
+    opens = {".py": ('"""', "'''", '"', "'"), ".sh": ('"', "'")}.get(suffix, ("`", '"', "'"))
+    multiline = {'"', "'"} if sh else {'"""', "'''", "`"}
+    out, block, quote = [], False, None
+    for line in lines:
+        chars, i = list(line), 0
+        while i < len(line):
+            if block:
+                end = line.find("*/", i)
+                stop = len(line) if end < 0 else end + 2
+                chars[i:stop] = " " * (stop - i)
+                block, i = end < 0, stop
+                continue
+            c = line[i]
+            if quote:
+                if c == "\\" and not (sh and quote == "'"):
+                    i += 2
+                elif line.startswith(quote, i):
+                    i, quote = i + len(quote), None
+                else:
+                    i += 1
+                continue
+            if sh and c == "\\":
+                i += 2
+                continue
+            opened = next((q for q in opens if line.startswith(q, i)), None)
+            if opened:
+                i, quote = i + len(opened), opened
+                continue
+            if (c == "#" and hash_style and (suffix == ".py" or i == 0 or line[i - 1] in " \t;|&(")) \
+                    or (not hash_style and line.startswith("//", i)):
+                chars[i:] = " " * (len(line) - i)
+                break
+            if not hash_style and line.startswith("/*", i):
+                chars[i:i + 2], block, i = "  ", True, i + 2
+                continue
+            i += 1
+        if quote not in multiline:
+            quote = None
+        out.append("".join(chars))
+    return out
+
+
 def code_findings(rel: str, text: str, wanted: set[int] | None, g: dict, dep_re, live_re) -> list[dict]:
-    """コードの行から、廃止した識別子とその書き方を変えた形を拾う。生きた識別子の内側の出現は当てない。"""
+    """コードの行から、廃止した識別子とその書き方を変えた形を拾う。生きた識別子の内側とコメントの中の出現は当てない。"""
     items = []
-    for n, line in enumerate(text.splitlines(), 1):
+    for n, line in enumerate(mask_comments(text.splitlines(), Path(rel).suffix), 1):
         if wanted is not None and n not in wanted:
             continue
         spans = [m.span() for m in live_re.finditer(line)] if live_re else []
