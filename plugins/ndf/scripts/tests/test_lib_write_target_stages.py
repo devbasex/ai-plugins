@@ -116,6 +116,11 @@ def test_the_public_entry_point_keeps_its_output(
         pytest.param("cp a '~/.local/x'", ["/base/~/.local/x"], 0, id="tilde_single_quoted"),
         pytest.param("cp a \\~/.local/x", ["/base/~/.local/x"], 0, id="tilde_escaped"),
         pytest.param('echo hi > "~"', ["/base/~"], 0, id="tilde_alone_quoted"),
+        # `~` から最初の引用されていない `/` までに引用が 1 つでもあれば展開されない。
+        pytest.param('cp a ""~/.local/x', ["/base/~/.local/x"], 0, id="tilde_after_empty_quote"),
+        pytest.param('cp a ~"/.local/x"', ["/base/~/.local/x"], 0, id="tilde_prefix_quoted"),
+        pytest.param('cp a ~/".local/x"', ["/home/u/.local/x"], 0, id="tilde_quoted_after_slash"),
+        pytest.param('cp "" ~/.local/x', ["/home/u/.local/x"], 0, id="tilde_after_quoted_word"),
     ],
 )
 def test_a_leading_tilde_is_the_home_directory(
