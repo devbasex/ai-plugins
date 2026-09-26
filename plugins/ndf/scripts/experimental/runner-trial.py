@@ -277,17 +277,21 @@ def check_resume(cand: str, root: Path) -> dict:
         return any(r["step"] == "test-limited" for r in steps_started(d))
     while time.time() < deadline and proc.poll() is None and not reached():
         time.sleep(0.05)
+    def kill_group() -> None:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:  # 子のグループが既に終わっていれば落とすものは無い
+            pass
+        proc.wait()
     if not reached():  # 落とす前に子が終わった、または時間切れ。再開を確かめる前提が成り立たない
         exited = proc.poll()
         if exited is None:
-            os.killpg(proc.pid, signal.SIGKILL)
-            proc.wait()
+            kill_group()
         reason = "120 秒で test-limited に届かない" if exited is None else f"test-limited の前に終了した（{exited}）"
         return {"check": "resume", "items": [{"before_kill": [r["step"] for r in steps_started(d)],
                                               "error": reason}], "ok": False}
     time.sleep(0.5)
-    os.killpg(proc.pid, signal.SIGKILL)  # プランのプロセスと、流れているステップの子プロセスをまとめて落とす
-    proc.wait()
+    kill_group()  # プランのプロセスと、流れているステップの子プロセスをまとめて落とす
     first = [r["step"] for r in steps_started(d)]
     code, out = run_sub(cand, d, "k", "slow")
     rows = steps_started(d)
