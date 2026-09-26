@@ -81,11 +81,11 @@ Claude Code 向けには `pyright-lsp` の導入と `pyright-langserver` の有�
 | 9 | SessionStart は、設定済みでは食い違いと欠けがあるときだけ、未設定では未設定だけを知らせ、何も導入しない。外した言語は `project.yml` の `mcp_serena_excluded` に残す | 揃っているときの通知は読み飛ばされる。導入はネットワークへ出て手元に書き込む。外した言語を残さないと毎回食い違いとして出る。注釈に置くと Serena の書き直しで消える（知らないキーは残る） |
 | 10 | エージェント定義は Serena の行だけを直す | 構成の整理は #877 #869 が同じファイルを変える。古いツール名（`mcp__plugin_ndf_serena__*` など）は待つ間もモデルを誤らせる |
 | 11 | `initial_instructions`・Claude Code の `LSP` ツール・`get_diagnostics_for_file` は一覧に残す | サーバの説明が `initial_instructions` を指す。どれも遅延読み込みで文脈はほとんど増えない。`excluded_tools` はランタイムで共有され Codex からも消える |
-| 12 | `.serena/project.yml` を追跡するかは利用者が選び、既定では `.gitignore` と `.serena/.gitignore` に触らない | 追跡すれば作業ツリーにも設定が揃う。どちらの書き換えもリポジトリの方針で決まる |
+| 12 | `.serena/project.yml` を追跡するかは利用者が選び、既定では `.gitignore` と `.serena/.gitignore` に触らない | 追跡すれば worktree にも設定が揃う。どちらの書き換えもリポジトリの方針で決まる |
 | 13 | クラス図を持たない | スクリプトは関数の集まりで型を定義しない。データの形は下の「データ・設定」が持つ |
 | 14 | 規則だけで決まる手順はすべてスクリプトにし、モデルには 4 つの判断を残す | 下の「スクリプトとモデルの境界」 |
 | 15 | Kiro は Claude Code と同じ起動定義と hook の定義を受け取る。`--client claude-code` の hook は `CLAUDE_PLUGIN_ROOT` が無ければ何も出さない | Serena に Kiro の文脈は無い。Kiro の installer が SessionStart を `agentSpawn` へ写すため、そのままでは `installed_plugins.json` の無い Kiro に LSP の欠けを毎回出す |
-| 16 | `SERENA_HOME` は `.serena`（cwd からの相対）のまま保ち、作業ツリーごとの言語サーバの取得を受け入れる | 変えると既存の利用者の設定と言語サーバの置き場所が移る。`~/.serena` は公式と全体の設定を共有し、絶対パスは `.mcp.json` の展開に頼る |
+| 16 | `SERENA_HOME` は `.serena`（cwd からの相対）のまま保ち、worktree ごとの言語サーバの取得を受け入れる | 変えると既存の利用者の設定と言語サーバの置き場所が移る。`~/.serena` は公式と全体の設定を共有し、絶対パスは `.mcp.json` の展開に頼る |
 
 **誘導は拒まず、止めない案内にする。** 拒んでもモデルは Serena へ切り替わらず、
 同じ grep を打ち直すなど 1 手番を無駄にするだけになる。
@@ -179,9 +179,9 @@ graph TB
 | Claude Code（`claude-code`） | 14 | `activate_project`・memory の 6 ツール（`write_memory` / `read_memory` / `list_memories` / `delete_memory` / `edit_memory` / `rename_memory`）・`onboarding`・`get_current_config`・`search_for_pattern` |
 | Codex（`codex`） | 23 | `replace_content` |
 
-作業ツリー（`.worktrees/<ブランチ名>`）で起動した Serena は作業ツリーを根にし、作業ツリーごとに
+worktree（`.worktrees/<ブランチ名>`）で起動した Serena は worktree を根にし、worktree ごとに
 `.serena/language_servers/` を持つ（決定 16。実測で初回の `find_symbol` 3.8 秒・48M）。
-`project.yml` を追跡しない作業ツリーでは Serena が目印の無い設定を自動で作るため、hook は
+`project.yml` を追跡しない worktree では Serena が目印の無い設定を自動で作るため、hook は
 未設定を知らせる。
 
 ### `serena-lsp.py` のサブコマンド
@@ -455,7 +455,7 @@ uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest 
 | Claude Code の定義で memory など 10 ツールが一覧に無いこと | 14 ツール。Codex の定義は 23 ツール |
 | 壊れた言語サーバが 1 つあるとき、その言語だけが外れ、残りで `find_symbol` と `find_referencing_symbols` が通ること | bash の言語サーバを壊すと `bash health_check_exit_1` だけが外れた |
 | 言語構成の違う 2 リポジトリで `configure` → `check` が通ること | ai-plugins（python + bash、10 秒）と Python 以外が主のリポジトリ（typescript + python + bash、19 秒） |
-| 作業ツリーで起動した Serena が作業ツリーを根にすること | 初回の `find_symbol` 3.8 秒、言語サーバ 48M |
+| worktree で起動した Serena が worktree を根にすること | 初回の `find_symbol` 3.8 秒、言語サーバ 48M |
 | Claude Code に編集の後の診断が届くこと（Python / TypeScript 5 / PHP） | `<new-diagnostics>` が届いた。intelephense の無料版も型の食い違い（P1006）を返した |
 | Codex で `find_referencing_symbols` と `get_diagnostics_for_file` が返り、hook の通知が効き、Skill から `$ROOT` が解決されること | いずれも通った。hook は `/hooks` で信頼した後に効いた |
 | Codex（0.157.0）の PreToolUse が `permissionDecision` の無い `additionalContext` を、コマンドを止めずにモデルへ渡すこと | 2026-09-25 に確かめた。コマンドは走り、モデルは渡した文を引用した |
