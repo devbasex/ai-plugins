@@ -119,6 +119,7 @@
 | F9 | プランが起動した `claude -p` の消費を版ごとに集計する（不足 f） | 振り返り |
 | F10 | ラッパーを複数のモジュールに分けたまま、1 回の導入で複製して動かす | 利用者 |
 | F11 | 移行の前後を同じコマンドで測る | 振り返り |
+| F12 | GraphQL が上限でも、REST で代われる読み取りで進み、代われない操作は回復を待ってやり直す（不足 g） | conductor |
 
 ## 構成要素
 
@@ -131,7 +132,7 @@
 | `lib/loop_drive.py`（新設） | 2 つの `drive.py` が使う `call`・`parse_vars`・`review_status` |
 | `lib/usage_ledger.py`（新設） | 使用量の帳簿の追記と読み取り |
 | `lib/limits.py`（変更） | 外部 CLI の起動の上限時間を 1 つの関数で決める（`resolve_cli_timeout`） |
-| `lib/step_result.py`・`lib/gh_parts.py`・`lib/statefile.py`（変更） | 結果 JSON・GitHub の部品・KEY=VALUE の出力に絞る。git と時刻は新設の 3 本へ移す |
+| `lib/step_result.py`・`lib/gh_parts.py`・`lib/statefile.py`（変更） | 結果 JSON・GitHub の部品・KEY=VALUE の出力に絞る。git と時刻は新設の 3 本へ移す。GitHub の読み書きは `gh_parts` だけが `gh` を呼び、GraphQL が上限のときの REST の読み取り（`view_json`）と回復の時刻までの待ちを持つ（不足 g） |
 | `scripts/supervise.py` と `scripts/supervise_lib/`（分割） | エントリポイントは引数の解析だけ。実行・雛形・queue は下のパッケージ |
 | `skills/cross-review/scripts/state.py` と `review_lib/`（分割） | エントリポイントは副命令の解析だけ。状態・GitHub・指摘・副命令の本体は下のパッケージ |
 | 2 つの `drive.py`（変更） | `final` の後に `init` を打たない（I7）。共通の部品は `lib/loop_drive.py` |

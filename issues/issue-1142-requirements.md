@@ -51,6 +51,7 @@ NDF のスクリプト（`plugins/ndf/scripts/` と各 Skill の `scripts/`。�
 | d | 検査の指摘の数が記録に残らない | 検査 #821 は 3 ラウンド回ったのに、フェーズレポートは `rounds 0 / review_status unknown`、`check-trigger.py stats` は 4 回とも `findings 0` |
 | e | `mvv-gate` の設計の判定に設計文書が材料として渡らない | 承認ゲート 1 の判定で `material: []` になった |
 | f | 計画が起動した `claude -p` の消費が版ごとの集計に入らない | `scripts/token-usage.py --by version` は 10.17.10 以降で supervisor と worker の値が 0 になる。原因は 3 つ: worker と判断の `claude -p` は `--no-session-persistence` で起動するため会話の記録が残らない / 計画の状態を `/tmp/ndf-sv/` に置き、消えた（72 本のうち使用量が残ったのは 14 本）/ usage を合計でしか残さず、モデル・呼び出し回数・書き込みの 5 分と 1 時間の区別が無い。Skill を回すステップの会話は、別の conductor としてその時に入っていた版で数えられる（計測の詳細は課題のコメント） |
+| g | GitHub の GraphQL が上限のとき、REST の枠が空いていても配布が止まる | 2026-09-26 の本番 10.17.28 で、`release-steps.py changelog` の `gh pr view` が `GraphQL: API rate limit already exceeded` で落ち、judge が待たずに 10 回やり直して止まった（REST の残りは 5000）。GraphQL を使う `gh pr` / `gh issue` の呼び出しは 23 ファイル・115 か所にあり、上限の見分けと REST の読み取りを持つ `lib/gh_parts.py` を使うのは 5 ファイルだけ。配布の経路（`release-steps.py` の読み取り・bump の打ち直し・judge の待ち）は即時修正 #1211 で直した |
 
 ## 直さないと何が起きるか
 
@@ -152,6 +153,7 @@ NDF のスクリプト（`plugins/ndf/scripts/` と各 Skill の `scripts/`。�
 - [ ] 検査のフェーズレポートと `check-trigger.py stats` が、実際に回ったラウンド数と指摘の数を返す（d）
 - [ ] `mvv-gate.py` の設計の判定に、設計 PR の設計文書が材料として渡る（e）
 - [ ] 計画が起動した `claude -p` の消費が、版ごとの集計に入る。計画の状態は OS の再起動と `/tmp` の掃除で消えない場所に残り、usage はステップごとにモデル・呼び出し回数・書き込みの 5 分と 1 時間を分けて持つ（f）
+- [ ] GitHub の読み書きが 1 つのライブラリを通り、GraphQL が上限のときは、REST で代われる読み取りを REST で行い、代われない操作は回復の時刻まで待ってからやり直す（g）
 
 退行しないこと:
 - [ ] 既存のテストが、置き換え先の変更だけで通る
