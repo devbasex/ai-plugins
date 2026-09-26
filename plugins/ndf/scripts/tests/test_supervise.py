@@ -1312,7 +1312,9 @@ def test_new_check_without_scope_drives_over_the_pr_directories(tmp_path):
     assert p.returncode == 0, p.stderr
     refactor = next(s for s in json.loads(out.read_text())["steps"] if s["id"] == "refactor")
     assert refactor["type"] == "drive" and not refactor.get("full")
-    assert "gh pr diff 999 --name-only" in refactor["args"]
+    # 差分が 20000 行を超える PR は gh pr diff が 406 で拒むため、ファイルの一覧は REST から取る
+    assert "gh api 'repos/{owner}/{repo}/pulls/999/files' --paginate" in refactor["args"]
+    assert "gh pr diff" not in refactor["args"]
 
 
 def test_new_mission_check_and_release_run_without_a_whole_skill(tmp_path):
