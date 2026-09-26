@@ -96,6 +96,11 @@ except ImportError as exc:  # pragma: no cover - 読み込めないこと自体�
     raise SystemExit(
         f"版数の書式を読み込めない（scripts/lib/version_pattern.py）: {exc}"
     )
+from ndf_wrappers import require  # noqa: E402  根の lock で包みの依存を解決する（#1142 の決定 19）
+
+require("md", "versions")
+import md  # noqa: E402  節と囲みは lib/md.py（markdown-it-py）で読む
+import versions  # noqa: E402  版の比較は lib/versions.py（semver）
 
 # F: 更新案内の見出し。版数の拾い方は `VERSION` へ揃える。数字 3 つだけで拾うと、接尾辞の
 # 付いた版（`9.7.0-dev.1`）では見出しを読み落とし、接尾辞を外して書けば今度は古いと判定
@@ -111,15 +116,10 @@ PLUGIN_TABLE_ROW = re.compile(r"^\|\s*\*\*(?P<name>[A-Za-z0-9_.-]+)\*\*\s*\|\s*"
 # J: 節のチェック。正本のこの見出しから次の同位以上の見出しの直前までに並ぶ版数を、
 # 現行版の基底と比べる。
 VERSION_SECTION_HEADING = "## 版の付け方と開発版の配布"
-# 終端は自身と同じか上位の見出しで取り、深さは位置決めの見出しから導く。同じ深さだけで
-# 区切ると、次が上位の見出しのときに節が閉じず、後ろの章に並ぶ前の版の版数まで現行版と
-# 比べてしまう。深さを固定すると、位置決めの見出しの深さを変えたときに規則から外れる
-# （`## ` の章を深さを 3 に固定して閉じると、章の中の `### ` 小見出しで章が途切れる）。
+# 節は lib/md.py が CommonMark の規則で決める（自身と同じか上位の見出しで閉じ、囲みの中の `# ` は見出しに
+# しない）。深さは位置決めの見出しから導く。深さを固定すると、位置決めの見出しの深さを変えたときに規則から外れる。
 _SECTION_DEPTH = len(VERSION_SECTION_HEADING) - len(VERSION_SECTION_HEADING.lstrip("#"))
-SECTION_HEADING = re.compile(r"^#{1,%d}\s" % _SECTION_DEPTH)
-# 囲みの中の `# ` 始まりはシェルのコメントであって見出しではない。囲みを跨いで数えると、
-# 節の途中の実行例で節が切れる。
-CODE_FENCE = re.compile(r"^\s*(?:```|~~~)")
+_SECTION_TITLE = VERSION_SECTION_HEADING.lstrip("#").strip()
 # 囲みまで含めて位置を固定する。前後の 1 文字を塞ぐだけでは、空白で区切られた
 # `codex-cli 0.146.1` の `0.146.1` が走査へ入り、現行版より小さい基底として誤検出になる。
 # この章の版数はすべて `` `9.6.0` `` の形で書く（正本へ移した時点の章の中の 10 箇所すべてが
@@ -343,7 +343,8 @@ def plugin_version(root: Path, report: Report) -> str | None:
     if version is None:
         report.add_source(f"{PLUGIN_JSON} に version がない")
         return None
-    if not VERSION_VALUE.fullmatch(version):
+    # `\d` は全角の数字にも当たるため、版として読めるか（lib/versions.py）も見る
+    if not VERSION_VALUE.fullmatch(version) or versions.version_order(version.partition("-")[0]) is None:
         report.add_source(
             f"{PLUGIN_JSON} の version が `<major>.<minor>.<patch>` の形でない"
             f"（記載: {version}）"
@@ -361,17 +362,17 @@ def named_plugin_version(root: Path, name: str) -> str | None:
     return read_version_field(root / plugin_json_path(name))
 
 
-def base_of(version: str) -> tuple[int, int, int]:
-    """接尾辞を捨てた数字 3 つ。`9.6.0-dev.1` の基底は `(9, 6, 0)` になる。
+def base_of(version: str):
+    """接尾辞を捨てた基底（`lib/versions.py` の版。`9.6.0-dev.1` の基底は `9.6.0` と等しい）。
 
-    整数の組にするのは、桁数によらず順序を揃えるためである。文字列のままだと
-    `"9.10.0" < "9.9.0"` が真になり、minor か patch が 10 に達した時点で順序を取り違える。
-
-    渡る値が数字 3 つに割れることは呼び出し側が保証する。文書側の版数は `SECTION_VERSION`
-    が、`plugin.json` の版数は `plugin_version` が形を確かめてから渡す。
+    文字列のままだと `"9.10.0" < "9.9.0"` が真になるため、版として比べる。渡る値が数字 3 つで始まることは
+    呼び出し側が保証する（文書側は `SECTION_VERSION`、`plugin.json` は `plugin_version` が形を確かめる）。
+    接尾辞は `-dev.N` / `-rc.N` のほかの形でも捨てる。
     """
-    major, minor, patch = version.split("-", 1)[0].split(".")
-    return int(major), int(minor), int(patch)
+    base = versions.version_order(version.partition("-")[0])
+    if base is None:
+        raise ValueError(f"版の形が違う: {version}")
+    return base
 
 
 def read_document(root: Path, relative: str, report: Report) -> str | None:
@@ -508,29 +509,17 @@ def check_plugin_table(root: Path, body: str, report: Report) -> None:
 
 
 def section_lines(lines: list[str]) -> list[tuple[int, str, bool]] | None:
-    """「版の付け方と開発版の配布」章の行を、行番号と囲みの中かどうかを付けて返す。
+    """「版の付け方と開発版の配布」章の行を、行番号（1 始まり）と囲みの中かどうかを付けて返す。
 
-    見出しを見つけ、次の同位以上の見出しの直前までを返す。節の終わりは自身と同じか
-    上位の見出しであり、囲みの中は見出しとして数えない。囲みの開始と終了の行そのものも
-    囲みの中として扱う。見出しが無ければ `None` を返す。
+    節と囲みは `lib/md.py` が読む。節の終わりは自身と同じか上位の見出しで、囲みの中は見出しとして数えない。
+    囲みの開始と終了の行、インデントのコードブロックも囲みの中として扱う。見出しが無ければ `None` を返す。
     """
-    start = next(
-        (index for index, line in enumerate(lines) if line.strip() == VERSION_SECTION_HEADING),
-        None,
-    )
-    if start is None:
+    text = "\n".join(lines)
+    section = md.section_named(text, _SECTION_TITLE, _SECTION_DEPTH)
+    if section is None:
         return None
-    section: list[tuple[int, str, bool]] = []
-    in_fence = False
-    for number, line in enumerate(lines[start + 1 :], start + 2):
-        if CODE_FENCE.match(line):
-            in_fence = not in_fence
-            section.append((number, line, True))
-            continue
-        if not in_fence and SECTION_HEADING.match(line):
-            break
-        section.append((number, line, in_fence))
-    return section
+    fenced = md.fenced_lines(text)
+    return [(number + 1, lines[number], fenced[number]) for number in range(section.start, min(section.end, len(lines)))]
 
 
 def scan_section_versions(lines: list[str]) -> tuple[list[str], list[int]]:

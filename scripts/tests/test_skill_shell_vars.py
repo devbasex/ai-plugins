@@ -127,3 +127,25 @@ def test_the_real_skeleton_gets_the_pool_from_init():
     skill = REPO_ROOT / "plugins/ndf/skills/cross-refactoring"
     result = run("--skill-dir", str(skill), "--show-sources", "RUNTIMES")
     assert "init" in result.stdout, result.stdout + result.stderr
+
+
+# ---------- 構文木で読む（#1142 の D8。移す前は行を字面で割っていた） ----------
+
+def test_a_reference_after_a_hash_inside_quotes_is_read(tmp_path):
+    """移す前は行の `#` から後ろをコメントとして捨て、引用符の中の `#` の後ろの参照を見落とした。"""
+    skill = make_skill(tmp_path, 'echo "issue #1 $NOWHERE"  # $IN_COMMENT')
+    out = run("--skill-dir", str(skill)).stdout
+    assert "$NOWHERE" in out and "$IN_COMMENT" not in out
+
+
+def test_a_quoted_heredoc_body_is_not_a_reference(tmp_path):
+    """移す前は引用符で囲んだヒアドキュメントの本文の `$X` も参照に数えた。"""
+    skill = make_skill(tmp_path, "cat <<'EOF'\n$LITERAL\nEOF\ncat <<EOF\n$EXPANDED\nEOF")
+    out = run("--skill-dir", str(skill)).stdout
+    assert "$EXPANDED" in out and "$LITERAL" not in out
+
+
+def test_a_length_reference_is_a_reference(tmp_path):
+    """移す前は `${#X}` を参照に数えなかった（`set -u` では未定義で止まる）。"""
+    skill = make_skill(tmp_path, 'echo "${#NOWHERE[@]}"')
+    assert "$NOWHERE" in run("--skill-dir", str(skill)).stdout

@@ -418,6 +418,20 @@ def test_bump_to_the_version_of_the_base_still_stops(repo):
     assert "旧版と新版が同じ" in p.stdout + p.stderr
 
 
+def test_bump_leaves_a_line_repeated_elsewhere_to_the_hand(repo):
+    """書き換えは bump-my-version がファイルの中の同じ字面をすべて直すため、集めた行と同じ字面がほかにもあれば
+    書き換えずに manual へ回す（行ごとに直していた頃は最初の 1 行だけを直した）。"""
+    bump_repo(repo, "1.2.3", "1.2.3")
+    plugin_json(repo, "plugins/ndf", "1.2.3")
+    (repo / "README.md").write_text("| **ndf** | 1.2.3 |\n\n| **ndf** | 1.2.3 |\n", encoding="utf-8")
+    p = run(repo, "bump", "--plugin", "ndf", "--to", "1.2.4")
+    res = json.loads(p.stdout.strip().splitlines()[-1])
+    assert any(i["result"] == "manual" and "プラグイン一覧表" in i["name"] for i in res["items"]), res
+    assert (repo / "README.md").read_text(encoding="utf-8") == "| **ndf** | 1.2.3 |\n\n| **ndf** | 1.2.3 |\n"
+    got = json.loads((repo / "plugins/ndf/.claude-plugin/plugin.json").read_text(encoding="utf-8"))
+    assert got["version"] == "1.2.4"
+
+
 # --- changed-plugins（#1142 の不足 c） ---------------------------------------------------
 
 def plugin_json(root: Path, rel: str, version: str) -> None:

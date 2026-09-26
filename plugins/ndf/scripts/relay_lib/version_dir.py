@@ -5,10 +5,13 @@
     relay.py                     ランチャー（プラグインの scripts/relay.py と同じバイト列）
     relay.version                複製の版
     relay.current                使うバージョンディレクトリの名前 1 行。原子的に書き換える
-    relay-<版>-<digest 8 字>/    relay_lib/・lib/clock.py・lib/jsonio.py・MANIFEST・inuse-<pid>
+    relay-<版>-<digest 8 字>/    relay_lib/・lib/（LIB_FILES）・pyproject.toml・uv.lock・MANIFEST・.venv/・inuse-<pid>
 
 digest は MANIFEST（ファイルごとの sha256 と相対パス）の sha256 である。バージョンディレクトリは書き終えてから
 `relay.current` を替え（I9）、動いている run が使うもの（生きている pid の `inuse-<pid>`）は消さない。
+
+`.venv/` はラッパーを動かす環境で、書きかけのディレクトリの中でプラグインと同じ `pyproject.toml` と `uv.lock` から
+`uv sync --frozen` で作る（決定 20。`runtime.sync`）。作れなければバージョンディレクトリを置かない。
 """
 from __future__ import annotations
 
@@ -17,13 +20,20 @@ import os
 import re
 import shutil
 
+from . import runtime
 from .common import (COPY_LOCK, PKG_ROOT, _lock, _read_bytes, _unlock, _write_file, config_dir, copy_path, data_dir,
                      launcher_path, load_json, read_text)
 
-VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:-(dev|rc)\.(\d+))?$")
+import procs  # noqa: E402,I001  common が lib/ を sys.path に置く
+import versions  # noqa: E402
+
 CURRENT_FILE = "relay.current"
-MANIFEST = "MANIFEST"
-LIB_FILES = ("lib/clock.py", "lib/jsonio.py")
+MANIFEST = runtime.MANIFEST
+# ラッパーが import するライブラリ（包みと、venv が使う deps）
+LIB_FILES = ("lib/clock.py", "lib/deps.py", "lib/jsonio.py", "lib/locks.py", "lib/md.py", "lib/procs.py",
+             "lib/versions.py")
+# 環境の宣言と lock。プラグインではプラグインの根（scripts/ の 1 つ上）、バージョンディレクトリでは中にある
+PROJECT_FILES = ("pyproject.toml", "uv.lock")
 DIR_RE = re.compile(r"^relay-.+-[0-9a-f]{8}$")
 TMP_RE = re.compile(r"^relay-.+-[0-9a-f]{8}\.tmp-(\d+)$")
 KEEP = 2
@@ -47,12 +57,8 @@ def plugin_version(root: str | None = None) -> str | None:
 
 
 def version_key(v: str | None):
-    """`X.Y.Z` < 同じ `X.Y.Z` では `-dev.N` < `-rc.N` < 接尾辞なし。読めなければ None。"""
-    m = VERSION_RE.match((v or "").strip())
-    if not m:
-        return None
-    rank = {"dev": 0, "rc": 1, None: 2}[m.group(4)]
-    return (int(m.group(1)), int(m.group(2)), int(m.group(3)), rank, int(m.group(5) or 0))
+    """`X.Y.Z` < 同じ `X.Y.Z` では `-dev.N` < `-rc.N` < 接尾辞なし。読めなければ None（`lib/versions.py`）。"""
+    return versions.version_order(v)
 
 
 def _self_body() -> bytes:
@@ -69,13 +75,7 @@ def place_copy_to(dst: str, body: bytes, mode: int = 0o755) -> bool:
 
 
 def _alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except OSError:
-        return True
-    return True
+    return procs.pid_alive(pid)
 
 
 def claim_inuse(root: str = PKG_ROOT, pid: int | None = None) -> str | None:
@@ -109,12 +109,18 @@ class VersionDir:
         """バージョンディレクトリに入れるファイルの相対パス。"""
         pkg = os.path.join(self.source, "relay_lib")
         mods = sorted(f"relay_lib/{n}" for n in os.listdir(pkg) if n.endswith(".py"))
-        return mods + list(LIB_FILES)
+        return mods + list(LIB_FILES) + list(PROJECT_FILES)
+
+    def src(self, rel: str) -> str:
+        """`rel` の元のファイル。環境の宣言と lock は、元がプラグインならプラグインの根から取る。"""
+        if rel in PROJECT_FILES and not runtime.is_version_dir(self.source):
+            return os.path.join(os.path.dirname(self.source), rel)
+        return os.path.join(self.source, rel)
 
     def manifest(self) -> str:
         rows = []
         for rel in self.files():
-            with open(os.path.join(self.source, rel), "rb") as f:
+            with open(self.src(rel), "rb") as f:
                 rows.append(f"{hashlib.sha256(f.read()).hexdigest()}  {rel}\n")
         return "".join(rows)
 
@@ -138,7 +144,8 @@ class VersionDir:
         manifest = self.manifest()
         name = self.name_for(version, manifest)
         target = os.path.join(self.base, name)
-        if read_text(os.path.join(target, MANIFEST)) != manifest:
+        if (read_text(os.path.join(target, MANIFEST)) != manifest
+                or not os.path.isfile(runtime.python_of(runtime.version_env(target)))):
             self._write(target, manifest)
         if self.current() != name:
             _write_file(os.path.join(self.base, CURRENT_FILE), (name + "\n").encode(), 0o644)
@@ -146,16 +153,17 @@ class VersionDir:
         return name
 
     def _write(self, target: str, manifest: str) -> None:
-        """`<target>.tmp-<pid>` へ書き終えてから rename する。途中で落ちたら書きかけを消して上げる。"""
+        """`<target>.tmp-<pid>` へ書き終え、環境を作ってから rename する。途中で落ちたら書きかけを消して上げる。"""
         os.makedirs(self.base, mode=0o700, exist_ok=True)
         tmp = f"{target}.tmp-{os.getpid()}"
         shutil.rmtree(tmp, ignore_errors=True)
         try:
             for rel in self.files():
                 os.makedirs(os.path.dirname(os.path.join(tmp, rel)), exist_ok=True)
-                shutil.copyfile(os.path.join(self.source, rel), os.path.join(tmp, rel))
+                shutil.copyfile(self.src(rel), os.path.join(tmp, rel))
             with open(os.path.join(tmp, MANIFEST), "w") as f:
                 f.write(manifest)
+            runtime.sync(tmp, runtime.version_env(tmp))
             if os.path.isdir(target):  # 中身の壊れた同じ名前のもの
                 shutil.rmtree(target)
             os.rename(tmp, target)

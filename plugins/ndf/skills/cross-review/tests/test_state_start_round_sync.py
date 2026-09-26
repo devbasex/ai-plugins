@@ -22,6 +22,7 @@ import subprocess
 import pytest
 import review_lib.commands.start_round
 import review_lib.workspace
+import gh_call  # review_lib が sys.path に足したライブラリの置き場から読む
 
 PR = 6170
 REPO = "o/r"
@@ -151,6 +152,9 @@ def tmp_dir(monkeypatch, tmp_path, state_mod, real_github):
 def run(monkeypatch, state_mod):
     def _set(rec: _Recorder) -> _Recorder:
         monkeypatch.setattr(subprocess, "run", rec)
+        # RUNNER を差し替えると gh_call は githubkit を使わず、`gh` を subprocess.run で起こす
+        monkeypatch.setattr(gh_call, "RUNNER",
+                            lambda args, stdin=None, cwd=None: gh_call._subprocess_gh(args, stdin, cwd))
         return rec
     return _set
 

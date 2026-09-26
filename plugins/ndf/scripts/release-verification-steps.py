@@ -103,15 +103,38 @@ def manifest_version(d):
     return None
 
 
-def compare_files(src_root, dst, rel_plugin, files, label):
-    """ref の展開物と導入先とで、変わったファイルを比べ、一致しないものを返す。"""
+def same_entry(s, t):
+    """s と t の中身が同じか。symlink はリンク先の文字列か、辿った先の中身で比べる。
+
+    導入先は symlink をそのまま残すことも、辿った先を複製することもあるため、どちらでも一致とする。
+    ディレクトリ（例: dev.agy/skills/<名前> → ../../skills/<名前>）は配下のファイルをすべて比べる。
+    """
+    s, t = Path(s), Path(t)
+    if s.is_symlink() and t.is_symlink() and os.readlink(s) == os.readlink(t):
+        return True
+    if not t.exists():
+        return False
+    if s.is_dir():
+        if not t.is_dir():
+            return False
+        return all(same_entry(c, t / c.name) for c in s.iterdir())
+    return t.is_file() and filecmp.cmp(s, t, shallow=False)
+
+
+def compare_files(src_root, dst, rel_plugin, files, label, keeps_symlinks=True):
+    """ref の展開物と導入先とで、変わったファイルを比べ、一致しないものを返す。
+
+    keeps_symlinks=False の runtime（codex は導入時に symlink をすべて落とす）では、symlink を比べない。
+    """
     out = []
     for f in files:
         s = Path(src_root) / f
         t = Path(dst) / Path(f).relative_to(rel_plugin)
         if not s.exists():
             continue  # ref で消えたファイル
-        if not t.exists() or not filecmp.cmp(s, t, shallow=False):
+        if not keeps_symlinks and s.is_symlink():
+            continue  # 導入先に入らない（例: dev.agy/skills/<名前> → ../../skills/<名前>）
+        if not same_entry(s, t):
             out.append(f"{label}: {f}")
     return out
 
@@ -225,7 +248,8 @@ def cmd_verify_install(a):
                 if d is None:
                     mismatch.append(f"{name}: {p} の導入先が無い")
                 else:
-                    mismatch += compare_files(src, d, rel[p], changed[p], name)
+                    mismatch += compare_files(src, d, rel[p], changed[p], name,
+                                              keeps_symlinks=(name != "codex"))
         if "kiro" in runtimes:
             runtimes_res["kiro"], _ = verify_kiro(env, src, tmp, a.expect)
     finally:

@@ -51,8 +51,19 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from typing import Literal
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import deps  # noqa: E402
+
+deps.require("schema", "versions", "bump", "md", "mdtable")
+import md  # noqa: E402
+import mdtable  # noqa: E402
+import schema  # noqa: E402
+import versions  # noqa: E402
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from release_lib import bump  # noqa: E402
 from step_result import (EXIT_GATE, EXIT_PRECONDITION, StepError, approval_present, base_of,  # noqa: E402
                          common_parser, emit, gh_json, git, git_root, main_with, plugin_dir,
                          result, run, today, version_arg)
@@ -65,7 +76,6 @@ DECLARATION = ".ndf/release.json"
 SUPPORTED_VERSIONS = (1,)
 STAGES = ("production", "verification", "any")
 DEFAULT_TIMEOUT = 600
-STEP_KEYS = {"name", "stage", "command", "writes", "guide", "timeout_seconds"}
 
 
 class DeclarationError(Exception):
@@ -91,45 +101,44 @@ def _relative(value, where: str) -> str:
     return value
 
 
+class _StepShape(schema.Shape):
+    model_config = {**schema.Shape.model_config, "strict": True}
+    name: str
+    stage: Literal["production", "verification", "any"]
+    command: list[str]
+    writes: list[str]
+    guide: str | None = None
+    timeout_seconds: int = DEFAULT_TIMEOUT
+
+
+class _DeclarationShape(schema.Shape):
+    model_config = {**schema.Shape.model_config, "strict": True}
+    version: int
+    steps: list[_StepShape]
+
+
 def parse_steps(raw) -> list[Step]:
+    """宣言の形は lib/schema.py で見て、値の決まり（空でない・相対パス・1 以上）はここで見る。"""
     if not isinstance(raw, dict):
         raise DeclarationError("release.json: 最上位はオブジェクトで書く")
-    unknown = set(raw) - {"$schema", "version", "steps"}
-    if unknown:
-        raise DeclarationError(f"release.json: 知らない項目: {', '.join(sorted(unknown))}")
-    version = raw.get("version")
-    if isinstance(version, bool) or version not in SUPPORTED_VERSIONS:
-        raise DeclarationError(f"version: 無いか未対応である: {version!r}（読めるのは {SUPPORTED_VERSIONS}）")
-    steps = raw.get("steps")
-    if not isinstance(steps, list):
-        raise DeclarationError("steps: コマンドの配列で書く（必須）")
+    try:
+        decl = schema.load_shape(_DeclarationShape, {k: v for k, v in raw.items() if k != "$schema"})
+    except schema.ShapeError as e:
+        raise DeclarationError(f"release.json: {e}") from None
+    if decl.version not in SUPPORTED_VERSIONS:
+        raise DeclarationError(f"version: 無いか未対応である: {decl.version!r}（読めるのは {SUPPORTED_VERSIONS}）")
     out = []
-    for i, s in enumerate(steps):
+    for i, s in enumerate(decl.steps):
         where = f"steps[{i}]"
-        if not isinstance(s, dict):
-            raise DeclarationError(f"{where}: オブジェクトで書く")
-        unknown = set(s) - STEP_KEYS
-        if unknown:
-            raise DeclarationError(f"{where}: 知らない項目: {', '.join(sorted(unknown))}")
-        name = s.get("name")
-        if not isinstance(name, str) or not name.strip():
+        if not s.name.strip():
             raise DeclarationError(f"{where}.name: 空でない文字列で書く（必須）")
-        if s.get("stage") not in STAGES:
-            raise DeclarationError(f"{where}.stage: {' / '.join(STAGES)} のどれかで書く（必須）: {s.get('stage')!r}")
-        command = s.get("command")
-        if not isinstance(command, list) or not command or not all(isinstance(c, str) for c in command):
+        if not s.command:
             raise DeclarationError(f"{where}.command: 空でない文字列の配列で書く（必須）")
-        writes = s.get("writes")
-        if not isinstance(writes, list):
-            raise DeclarationError(f"{where}.writes: パスの前置きの配列で書く（必須。何も書かないコマンドは []）")
-        writes = [_relative(w, f"{where}.writes[{j}]") for j, w in enumerate(writes)]
-        guide = s.get("guide")
-        if guide is not None:
-            guide = _relative(guide, f"{where}.guide")
-        timeout = s.get("timeout_seconds", DEFAULT_TIMEOUT)
-        if isinstance(timeout, bool) or not isinstance(timeout, int) or timeout < 1:
-            raise DeclarationError(f"{where}.timeout_seconds: 1 以上の整数で書く: {timeout!r}")
-        out.append(Step(name, s["stage"], command, writes, guide, timeout))
+        writes = [_relative(w, f"{where}.writes[{j}]") for j, w in enumerate(s.writes)]
+        guide = None if s.guide is None else _relative(s.guide, f"{where}.guide")
+        if s.timeout_seconds < 1:
+            raise DeclarationError(f"{where}.timeout_seconds: 1 以上の整数で書く: {s.timeout_seconds!r}")
+        out.append(Step(s.name, s.stage, s.command, writes, guide, s.timeout_seconds))
     return out
 
 
@@ -253,127 +262,6 @@ def _head_digest(root: Path, path: str) -> str | None:
 TOOL = "release"
 
 
-def ver_pat(v):
-    """版の文字列を、前後に版の続きが無いときだけ当てる正規表現にする。"""
-    return r"(?:(?<=v)|(?<![0-9A-Za-z.\-]))" + re.escape(v) + r"(?![0-9A-Za-z\-]|\.[0-9A-Za-z])"
-
-
-class Editor:
-    """行単位で旧版を新版へ直す。書き換えたファイルと、見つからなかった箇所を集める。"""
-
-    def __init__(self, root, old, new):
-        self.root, self.old, self.new = root, old, new
-        self.files, self.manual = [], []
-
-    def lines(self, path):
-        return path.read_text(encoding="utf-8").split("\n")
-
-    def save(self, path, lines):
-        path.write_text("\n".join(lines), encoding="utf-8")
-        rel = path.relative_to(self.root).as_posix()
-        if rel not in self.files:
-            self.files.append(rel)
-
-    def sub(self, path, line_re, what, count=1, start=0, stop=None, required=True):
-        """line_re に合う行の中の旧版を新版へ。直した行数を返す。"""
-        if not path.is_file():
-            if required:
-                self.manual.append(f"{path.relative_to(self.root).as_posix()} が無い（{what}）")
-            return 0
-        lines = self.lines(path)
-        stop = len(lines) if stop is None else stop
-        done, already = 0, 0
-        rx = re.compile(line_re)
-        for i in range(start, stop):
-            if done >= count:
-                break
-            if not rx.search(lines[i]):
-                continue
-            new_line = re.sub(ver_pat(self.old), self.new, lines[i])
-            if new_line != lines[i]:
-                lines[i] = new_line
-                done += 1
-            elif re.search(ver_pat(self.new), lines[i]):
-                already += 1
-        if done:
-            self.save(path, lines)
-        if required and done + already < count:
-            self.manual.append(
-                f"{path.relative_to(self.root).as_posix()}: {what} の旧版 {self.old} が"
-                f" {count} 箇所見つからず {done + already} 箇所だけ（手で直す）")
-        return done
-
-
-def bump_update_heading(ed, readme):
-    """README の更新案内の見出しを新しい版へ書き換える（チェックは見出しを現行の版の 1 つだけに求める）。"""
-    rel = readme.relative_to(ed.root).as_posix()
-    if not readme.is_file():
-        ed.manual.append(f"{rel} が無い（更新案内の見出し）")
-        return
-    lines = ed.lines(readme)
-    new_h = f"## v{ed.new} へ更新するとき"
-    if new_h in lines:
-        return
-    rx = re.compile(r"^## v\S+ へ更新するとき$")
-    at = next((i for i, l in enumerate(lines) if rx.match(l)), None)
-    if at is None:
-        ed.manual.append(f"{rel}: 更新案内の見出しが無い（「{new_h}」を手で足す）")
-        return
-    lines[at] = new_h
-    ed.save(readme, lines)
-    if base_of(ed.old) != base_of(ed.new):
-        ed.manual.append(f"{rel}: 更新案内の本文を v{ed.new} の変更へ書き直す（changelog が PR の一覧へ差し替える）")
-
-
-def bump_versioning_doc(ed):
-    """docs/versioning-and-distribution.md の「版の付け方と開発版の配布」章の正式版の版数。"""
-    doc = ed.root / "docs" / "versioning-and-distribution.md"
-    rel = "docs/versioning-and-distribution.md"
-    ob, nb = base_of(ed.old), base_of(ed.new)
-    if ob == nb:
-        return
-    if not doc.is_file():
-        ed.manual.append(f"{rel} が無い（この章は手で直す）")
-        return
-    lines = ed.lines(doc)
-    targets = [
-        (re.compile(r"^\| 正式版 \| `([^`]+)` \|"), "正式版の表の行"),
-        (re.compile(r"`([^`]+)` の次を開発するなら"), "接尾辞の例"),
-    ]
-    changed = False
-    for rx, what in targets:
-        hits = [i for i, l in enumerate(lines) if rx.search(l)]
-        if len(hits) != 1:
-            ed.manual.append(f"{rel}: 「版の付け方と開発版の配布」章の{what}が特定できない（この章は手で直す）")
-            continue
-        i = hits[0]
-        cur = rx.search(lines[i]).group(1)
-        if cur == nb:
-            continue
-        if cur != ob:
-            ed.manual.append(f"{rel}: {what}の版が {cur} で旧版 {ob} と違う（この章は手で直す）")
-            continue
-        lines[i] = lines[i].replace(f"`{ob}`", f"`{nb}`", 1)
-        changed = True
-    if changed:
-        ed.save(doc, lines)
-
-
-def marketplace_range(lines, name):
-    """marketplace.json の中で、その plugin の項目の行の範囲（name の行から次の name の行まで）。"""
-    rx = re.compile(r'^\s*"name"\s*:\s*"([^"]+)"')
-    start = None
-    for i, l in enumerate(lines):
-        m = rx.match(l)
-        if not m:
-            continue
-        if start is not None:
-            return start, i
-        if m.group(1) == name:
-            start = i
-    return (start, len(lines)) if start is not None else (None, None)
-
-
 def run_staleness(root, expected=()):
     """check-doc-staleness.py を走らせる。expected に合う ERROR だけなら通ったと見なす。"""
     script = root / "scripts" / "check-doc-staleness.py"
@@ -400,6 +288,79 @@ def base_version(root, pdir, ref):
         return None
 
 
+def bump_versioning_doc(ed):
+    """docs/versioning-and-distribution.md の「版の付け方と開発版の配布」章の正式版の版数。"""
+    doc = ed.root / "docs" / "versioning-and-distribution.md"
+    rel = "docs/versioning-and-distribution.md"
+    ob, nb = base_of(ed.old), base_of(ed.new)
+    if ob == nb:
+        return
+    if not doc.is_file():
+        ed.manual.append(f"{rel} が無い（この章は手で直す）")
+        return
+    lines = ed.lines(doc)
+    targets = [
+        (re.compile(r"^\| 正式版 \| `([^`]+)` \|"), "正式版の表の行"),
+        (re.compile(r"`([^`]+)` の次を開発するなら"), "接尾辞の例"),
+    ]
+    for rx, what in targets:
+        hits = [i for i, l in enumerate(lines) if rx.search(l)]
+        if len(hits) != 1:
+            ed.manual.append(f"{rel}: 「版の付け方と開発版の配布」章の{what}が特定できない（この章は手で直す）")
+            continue
+        i = hits[0]
+        cur = rx.search(lines[i]).group(1)
+        if cur == nb:
+            continue
+        if cur != ob:
+            ed.manual.append(f"{rel}: {what}の版が {cur} で旧版 {ob} と違う（この章は手で直す）")
+            continue
+        esc = bump.braces(lines[i])
+        ed.place(doc, [i], esc.replace(f"`{ob}`", f"`{bump.CUR_BASE}`", 1),
+                 esc.replace(f"`{ob}`", f"`{bump.NEW_BASE}`", 1), what)
+
+
+def plan_bump(root, pdir, plugin, old, new):
+    """`plugin` の版を `old` から `new` へ上げる箇所を集めた `BumpPlan` を返す（まだ書き換えない）。"""
+    ed = bump.BumpPlan(root, old, new)
+    desc_re = r'^\s*"description"\s*:.*\(v' + re.escape(old) + r"\)"
+
+    for rel, _ in ((".claude-plugin/plugin.json", True), (".codex-plugin/plugin.json", False),
+                   ("dev.agy/plugin.json", False), ("plugin.json", False)):
+        f = pdir / rel
+        if not f.is_file():
+            continue
+        ed.sub(f, r'^\s*"version"\s*:', f"{rel} の version")
+        if f"(v{old})" in f.read_text(encoding="utf-8"):
+            ed.sub(f, desc_re, f"{rel} の description")
+
+    mp = root / ".claude-plugin" / "marketplace.json"
+    if mp.is_file():
+        s, e = bump.marketplace_range(ed.lines(mp), plugin)
+        if s is None:
+            ed.manual.append(f".claude-plugin/marketplace.json に {plugin} の項目が無い")
+        elif any(f"(v{old})" in l for l in ed.lines(mp)[s:e]):
+            ed.sub(mp, desc_re, "marketplace.json の description", start=s, stop=e)
+
+    readme = root / "README.md"
+    rows = [l for l in (ed.lines(readme) if readme.is_file() else []) if l.startswith(f"| **{plugin}** |")]
+    if rows:
+        ed.sub(readme, r"^\| \*\*" + re.escape(plugin) + r"\*\* \|", "README.md のプラグイン一覧表")
+    elif plugin in ("ndf", "playwright-kit"):
+        ed.manual.append(f"README.md のプラグイン一覧表に {plugin} の行が無い")
+    if plugin == "ndf":
+        ed.sub(readme, r"\*\*NDFプラグイン v", "README.md の概要の版")
+        ed.sub(root / "AGENTS.md", r"主要プラグインです（v", "AGENTS.md の版")
+        nr = pdir / "README.md"
+        ed.sub(nr, r"（Kiro CLI用 / v", "plugins/ndf/README.md の Kiro の確認例")
+        ed.sub(nr, r"/plugins/cache/ai-plugins/ndf/", "plugins/ndf/README.md の Codex のパス例", count=2)
+        ed.sub(nr, r"ndf@ai-plugins\s+installed", "plugins/ndf/README.md の codex plugin list の出力例")
+        bump_versioning_doc(ed)
+
+    bump.bump_update_heading(ed, pdir / "README.md")
+    return ed
+
+
 def cmd_bump(a):
     root = git_root(a.root)
     pdir = plugin_dir(root, a.plugin)
@@ -416,42 +377,8 @@ def cmd_bump(a):
         # 同じステップの打ち直し（作業場所の版はすでに上げてある）
         emit(result(TOOL, "ok", f"{a.plugin} はすでに {new}（origin/{a.base} は {base_ver}）。上げ直さない",
                     [], {"plugin": a.plugin, "from": base_ver, "to": new, "already": True}))
-    ed = Editor(root, old, new)
-    desc_re = r'^\s*"description"\s*:.*\(v' + re.escape(old) + r"\)"
-
-    for rel, _ in ((".claude-plugin/plugin.json", True), (".codex-plugin/plugin.json", False),
-                   ("dev.agy/plugin.json", False), ("plugin.json", False)):
-        f = pdir / rel
-        if not f.is_file():
-            continue
-        ed.sub(f, r'^\s*"version"\s*:', f"{rel} の version")
-        if f"(v{old})" in f.read_text(encoding="utf-8"):
-            ed.sub(f, desc_re, f"{rel} の description")
-
-    mp = root / ".claude-plugin" / "marketplace.json"
-    if mp.is_file():
-        s, e = marketplace_range(ed.lines(mp), a.plugin)
-        if s is None:
-            ed.manual.append(f".claude-plugin/marketplace.json に {a.plugin} の項目が無い")
-        elif any(f"(v{old})" in l for l in ed.lines(mp)[s:e]):
-            ed.sub(mp, desc_re, "marketplace.json の description", start=s, stop=e)
-
-    readme = root / "README.md"
-    rows = [l for l in (ed.lines(readme) if readme.is_file() else []) if l.startswith(f"| **{a.plugin}** |")]
-    if rows:
-        ed.sub(readme, r"^\| \*\*" + re.escape(a.plugin) + r"\*\* \|", "README.md のプラグイン一覧表")
-    elif a.plugin in ("ndf", "playwright-kit"):
-        ed.manual.append(f"README.md のプラグイン一覧表に {a.plugin} の行が無い")
-    if a.plugin == "ndf":
-        ed.sub(readme, r"\*\*NDFプラグイン v", "README.md の概要の版")
-        ed.sub(root / "AGENTS.md", r"主要プラグインです（v", "AGENTS.md の版")
-        nr = pdir / "README.md"
-        ed.sub(nr, r"（Kiro CLI用 / v", "plugins/ndf/README.md の Kiro の確認例")
-        ed.sub(nr, r"/plugins/cache/ai-plugins/ndf/", "plugins/ndf/README.md の Codex のパス例", count=2)
-        ed.sub(nr, r"ndf@ai-plugins\s+installed", "plugins/ndf/README.md の codex plugin list の出力例")
-        bump_versioning_doc(ed)
-
-    bump_update_heading(ed, pdir / "README.md")
+    ed = plan_bump(root, pdir, a.plugin, old, new)
+    ed.apply()
 
     expected = []
     if base_of(old) != base_of(new):
@@ -476,6 +403,14 @@ def release_tag_before(root, plugin, current=None):
     return next((t for t in tags if t != current and "-" not in t[len(head):]), None)
 
 
+def next_release(name, old):
+    """PATCH を 1 つ上げた正式版（`2.3.4` と `2.3.4-dev.1` は `2.3.5`）。"""
+    try:
+        return versions.next_patch(versions.release_base(old))
+    except ValueError as e:
+        raise StepError(f"{name} の版を読めない: {e}", 2)
+
+
 def cmd_changed_plugins(a):
     """前のタグからの差分にある --plugin 以外のプラグインと、PATCH を 1 つ上げた版を items に返す。"""
     root = git_root(a.root)
@@ -489,7 +424,7 @@ def cmd_changed_plugins(a):
         old, head = base_version(root, pdir, since), base_version(root, pdir, "HEAD")
         if old and head == old:  # 差分の中でまだ上げていない
             items.append({"kind": "plugin", "name": name, "result": "bump", "from": old,
-                          "to": re.sub(r"\d+$", lambda m: str(int(m[0]) + 1), base_of(old))})
+                          "to": next_release(name, old)})
         elif head:
             already.append(name)
     emit(result(TOOL, "ok", f"{since} からの差分で版を上げるプラグイン {len(items)} 件（{a.plugin} を除く）", items,
@@ -551,7 +486,7 @@ def cmd_changelog(a):
     lines = cl.read_text(encoding="utf-8").split("\n")
     head, (at, end) = f"## [{a.plugin} {base_of(a.version)}]", changelog_span(lines, a.plugin, a.version)
     if at is None:
-        first = next((i for i, l in enumerate(lines) if l.startswith("## [")), len(lines))
+        first = next((i for i in h2_lines(lines) if lines[i].startswith("## [")), len(lines))
         block = [f"{head} - {today()}", ""] + [b for _, b in items] + [""]
         if first == len(lines) and lines and lines[-1] != "":
             block = [""] + block
@@ -578,9 +513,9 @@ def cmd_changelog(a):
     h = f"## v{a.version} へ更新するとき"
     if readme and readme.is_file():
         rl = readme.read_text(encoding="utf-8").split("\n")
-        if h in rl:
-            i = rl.index(h)
-            end = next((j for j in range(i + 1, len(rl)) if rl[j].startswith("## ")), len(rl))
+        i = next((j for j in h2_lines(rl) if rl[j] == h), None)
+        if i is not None:
+            end = next_h2(rl, i)
             if not any(f"（#{n}）" in l for l in rl[i:end] for n, _ in items):
                 rl[i + 1:end] = [""] + [b for _, b in items] + [""]
                 readme.write_text("\n".join(rl), encoding="utf-8")
@@ -593,12 +528,21 @@ def cmd_changelog(a):
                 next="更新案内の本文を利用者向けの説明へ書き直す" if readme_done else None))
 
 
+def h2_lines(lines):
+    """深さ 2 の見出しの行（0 始まり）。コードの囲みの中の `##` は見出しにしない（lib/md.py）。"""
+    return [h.line for h in md.headings("\n".join(lines)) if h.level == 2]
+
+
+def next_h2(lines, at):
+    """lines[at] の次の `## ` の見出しの行。無ければ行の数。"""
+    return next((i for i in h2_lines(lines) if i > at), len(lines))
+
+
 def changelog_span(lines, plugin, version):
     """CHANGELOG.md の `## [<plugin> <基底の版>]` の節の (見出しの行, 次の節の行)。無ければ (None, None)。"""
     head = f"## [{plugin} {base_of(version)}]"
-    at = next((i for i, l in enumerate(lines) if l == head or l.startswith(head + " ")), None)
-    return (None, None) if at is None else (
-        at, next((i for i in range(at + 1, len(lines)) if lines[i].startswith("## ")), len(lines)))
+    at = next((i for i in h2_lines(lines) if lines[i] == head or lines[i].startswith(head + " ")), None)
+    return (None, None) if at is None else (at, next_h2(lines, at))
 
 
 def changelog_section(root, version, plugin="ndf"):
@@ -839,8 +783,7 @@ def pr_notes(root, prs, skipped=None):
 
 def replace_lines_under(lines, at, block):
     """lines[at] の見出しから次の `## ` までの中身を block に差し替える。"""
-    end = next((j for j in range(at + 1, len(lines)) if lines[j].startswith("## ")), len(lines))
-    lines[at + 1:end] = [""] + block + [""]
+    lines[at + 1:next_h2(lines, at)] = [""] + block + [""]
 
 
 def write_notes(root, version, plugin, bullets):
@@ -850,7 +793,7 @@ def write_notes(root, version, plugin, bullets):
         raise StepError("CHANGELOG.md が無い", EXIT_PRECONDITION)
     lines = cl.read_text(encoding="utf-8").split("\n")
     head = f"## [{plugin} {base_of(version)}]"
-    at = next((i for i, l in enumerate(lines) if l == head or l.startswith(head + " ")), None)
+    at = changelog_span(lines, plugin, version)[0]
     if at is None:
         raise StepError(f"CHANGELOG.md に {head} の節が無い（先に changelog を走らせる）", EXIT_PRECONDITION)
     replace_lines_under(lines, at, bullets)
@@ -865,8 +808,9 @@ def write_notes(root, version, plugin, bullets):
     h = f"## v{version} へ更新するとき"
     if readme and readme.is_file():
         rl = readme.read_text(encoding="utf-8").split("\n")
-        if h in rl:
-            replace_lines_under(rl, rl.index(h), bullets)
+        ra = next((j for j in h2_lines(rl) if rl[j] == h), None)
+        if ra is not None:
+            replace_lines_under(rl, ra, bullets)
             readme.write_text("\n".join(rl), encoding="utf-8")
             items.append({"kind": "section", "name": readme.relative_to(root).as_posix(), "result": "replaced",
                           "heading": h, "lines": len(bullets)})
@@ -875,7 +819,7 @@ def write_notes(root, version, plugin, bullets):
 
 def approval_cell(text):
     """提示物の表の 1 セル（改行は <br>）。"""
-    return text.replace("|", "\\|").replace("\n", "<br>")
+    return mdtable.cell_text(text.replace("\n", "<br>"))
 
 
 def write_approval(path, version, bullets, risks, verified, ref):

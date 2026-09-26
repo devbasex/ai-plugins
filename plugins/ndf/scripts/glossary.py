@@ -18,7 +18,6 @@
 from __future__ import annotations
 
 import argparse
-import fnmatch
 import json
 import re
 import subprocess
@@ -26,6 +25,13 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import deps  # noqa: E402
+
+deps.require("md", "mdtable", "textparse", "pathmatch")
+import md  # noqa: E402
+import mdtable  # noqa: E402
+import pathmatch  # noqa: E402
+import textparse  # noqa: E402
 from step_result import EXIT_UNREADABLE, EXIT_VIOLATION, StepError, emit, main_with, result  # noqa: E402
 import jsonio  # noqa: E402
 import proc  # noqa: E402
@@ -39,11 +45,7 @@ DEFAULT_TERM_SECTIONS = ["用語"]
 DESIGN_MODES = ("standard", "legacy-refactor")
 FORMATS = ("json",)
 STRUCTURE_RULES = ("schema", "duplicate", "stale_document")
-HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
-HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
-FENCE = re.compile(r"^\s*(```|~~~)")
 INLINE_CODE = re.compile(r"(`+)(.+?)\1")
-SEPARATOR = re.compile(r"^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$")
 BOLD = re.compile(r"\*\*([^*\n]{1,12}?)\*\*")
 TYPE_NAME = re.compile(r"\b(?:class|interface|struct|enum)\s+([A-Za-z_][A-Za-z0-9_]*)|\btype\s+([A-Za-z_][A-Za-z0-9_]*)\s*=")
 ASCII_WORD = re.compile(r"^[A-Za-z0-9_\-]+$")
@@ -171,9 +173,13 @@ def live_words(g: dict) -> set[str]:
 
 # --- 文書の生成 -------------------------------------------------------------------
 
+def _plain(value) -> str:
+    """セルと地の文に書く字面（改行は空白、空は「—」）。`|` のエスケープは呼ぶ側（mdtable）が持つ。"""
+    return str(value or "").replace("\r\n", "\n").replace("\n", " ").strip() or "—"
+
+
 def cell(value) -> str:
-    s = str(value or "").replace("\r\n", "\n").replace("\n", " ").replace("|", "\\|").strip()
-    return s or "—"
+    return mdtable.cell_text(_plain(value))
 
 
 def render_text(g: dict, source: str) -> str:
@@ -187,16 +193,15 @@ def render_text(g: dict, source: str) -> str:
         if not rows:
             out += ["語はまだ無い。", ""]
             continue
-        out += ["| 語 | 識別子 | 意味 | 廃止した語 | 廃止した識別子 | 正本 |",
-                "| --- | --- | --- | --- | --- | --- |"]
+        body = []
         for t in rows:
             dep = "、".join(deprecated_of(t))
             code = f"`{code_of(t)}`" if code_of(t) else ""
             dep_code = "、".join(f"`{w}`" for w in deprecated_code_of(t))
             src = f"`{t['source']}`" if t.get("source") else ""
-            out.append(f"| {cell(t.get('term'))} | {cell(code)} | {cell(t.get('meaning'))} | {cell(dep)} | "
-                       f"{cell(dep_code)} | {cell(src)} |")
-        out.append("")
+            body.append([_plain(v) for v in (t.get("term"), code, t.get("meaning"), dep, dep_code, src)])
+        out += [mdtable.table_markdown(["語", "識別子", "意味", "廃止した語", "廃止した識別子", "正本"], body,
+                                       align=["left"] * 6), ""]
     return "\n".join(out).rstrip("\n") + "\n"
 
 
@@ -315,15 +320,6 @@ def mask_inline_code(line: str) -> str:
     return INLINE_CODE.sub(lambda m: " " * len(m.group(0)), line)
 
 
-def split_row(line: str) -> list[str]:
-    s = line.strip()
-    if s.startswith("|"):
-        s = s[1:]
-    if s.endswith("|") and not s.endswith("\\|"):
-        s = s[:-1]
-    return [c.strip() for c in re.split(r"(?<!\\)\|", s)]
-
-
 def clean_term(cell_text: str) -> str:
     s = cell_text.strip()
     for mark in ("**", "__", "`"):
@@ -332,44 +328,36 @@ def clean_term(cell_text: str) -> str:
     return s
 
 
-def scan(lines: list[str], term_sections: list[str]):
+def term_rows(text: str, term_sections: list[str]) -> dict[int, str]:
+    """用語の節（`term_sections` の見出しの下。同じか浅い見出しまで）の表の本体の行の 1 列目の語を、行番号（1 始まり）で返す。"""
+    spans = [(s.start, s.end) for s in md.md_sections(text) if s.heading.title in term_sections]
+    out: dict[int, str] = {}
+    for tb in md.tables(text):
+        if not any(a <= tb.start < b for a, b in spans):
+            continue
+        for k, row in enumerate(tb.rows):
+            term = clean_term(row[0]) if row else ""
+            if term:
+                out[tb.start + 3 + k] = term
+    return out
+
+
+def scan(text: str, term_sections: list[str]):
     """行ごとに (行番号, 照合する本文, 用語の表の 1 列目の語か None) を返す。コードブロックは飛ばす。"""
-    in_fence = False
-    section_level, in_terms = 0, False
-    table_row = -1
+    lines = text.splitlines()
+    fenced = md.fenced_lines(text)
+    terms = term_rows(text, term_sections)
     for n, line in enumerate(lines, 1):
-        if FENCE.match(line):
-            in_fence = not in_fence
-            table_row = -1
+        if fenced[n - 1]:
             continue
-        if in_fence:
-            continue
-        m = HEADING.match(line)
-        if m:
-            level, title = len(m.group(1)), m.group(2).strip()
-            if in_terms and level <= section_level:
-                in_terms = False
-            if title in term_sections:
-                in_terms, section_level = True, level
-            table_row = -1
-            yield n, mask_inline_code(line), None
-            continue
-        term = None
-        if line.lstrip().startswith("|"):
-            table_row += 1
-            if in_terms and table_row >= 2 and not SEPARATOR.match(line):
-                first = split_row(line)[0] if split_row(line) else ""
-                term = clean_term(first) or None
-        else:
-            table_row = -1
-        yield n, mask_inline_code(line), term
+        yield n, mask_inline_code(line), terms.get(n)
 
 
 def text_findings(rel: str, text: str, wanted: set[int] | None, g: dict, decl: Declaration,
                   dep_re, live_re) -> list[dict]:
     live = live_words(g)
     items = []
-    for n, body, term in scan(text.splitlines(), decl.term_sections):
+    for n, body, term in scan(text, decl.term_sections):
         if wanted is not None and n not in wanted:
             continue
         if term and term not in live:
@@ -485,24 +473,10 @@ def added_lines(root: Path, base: str, pathspecs: tuple[str, ...] = ()) -> dict[
     追跡していないファイルは全行とする。`pathspecs` を渡すとそのパスに絞る（doc-lint.py は `*.md`）。"""
     mb = git_checked(root, "merge-base", base, "HEAD").stdout.strip()
     diff = git_checked(root, "diff", "--unified=0", "--no-color", "--diff-filter=AM", mb, "--", *pathspecs).stdout
-    out: dict[str, set[int]] = {}
-    cur, ln = None, 0
-    for line in diff.splitlines():
-        if line.startswith("+++ "):
-            path = line[4:]
-            cur = None if path == "/dev/null" else path[2:] if path.startswith("b/") else path
-            continue
-        m = HUNK.match(line)
-        if m:
-            ln = int(m.group(1))
-            continue
-        if cur is None or line.startswith("---") or line.startswith("diff "):
-            continue
-        if line.startswith("+"):
-            out.setdefault(cur, set()).add(ln)
-            ln += 1
-        elif not line.startswith("-") and not line.startswith("\\"):
-            ln += 1
+    try:
+        out = textparse.diff_added_lines(diff)
+    except textparse.DiffParseError as e:
+        raise unreadable(f"git diff の出力を読めない: {e}")
     for rel in git_checked(root, "ls-files", "--others", "--exclude-standard", "--", *pathspecs).stdout.splitlines():
         rel = rel.strip()
         p = root / rel
@@ -512,8 +486,9 @@ def added_lines(root: Path, base: str, pathspecs: tuple[str, ...] = ()) -> dict[
     return out
 
 
-def declared_path_matches(rel: str, patterns: list[str]) -> bool:  # fnmatch（`*` は `/` をまたぐ）
-    return any(fnmatch.fnmatchcase(rel, p) or fnmatch.fnmatchcase(rel, p.replace("**/", "")) for p in patterns)
+def declared_path_matches(rel: str, patterns: list[str]) -> bool:
+    """宣言のパスのパターン（git の wildmatch。`*` は `/` をまたがない）に当たるか。"""
+    return pathmatch.path_matches(rel, patterns)
 
 
 # --- 副命令 ----------------------------------------------------------------------------
@@ -607,7 +582,7 @@ def cmd_candidates(a):
             continue
         lines = text.splitlines()
         if rel.endswith(".md"):
-            for n, body, term in scan(lines, sections):
+            for n, body, term in scan(text, sections):
                 if term:
                     add(term, "table", f"{rel}:{n}")
                 for m in BOLD.finditer(body):

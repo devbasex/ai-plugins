@@ -2,26 +2,13 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Edit|MultiEdit|Write|NotebookEdit|fs_write|edit_file|write_file|str_replace_editor|replace|write_to_file|replace_file_content|apply_patch|Bash|shell|execute_bash|local_shell|run_command|run_shell_command",
+        "matcher": "Edit|MultiEdit|Write|NotebookEdit|fs_write|edit_file|write_file|str_replace_editor|replace|write_to_file|replace_file_content|apply_patch|Bash|shell|execute_bash|local_shell|run_command|run_shell_command|Read|Skill|Agent|Task|AskUserQuestion",
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/worktree-guard.sh",
-            "description": "NDF: notify when the main directory is edited",
-            "timeout": 5,
-            "continueOnError": true,
-            "suppressOutput": false
-          }
-        ]
-      },
-      {
-        "matcher": "Bash|Read|Skill|Agent|Task",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/token-guard.sh",
-            "description": "NDF: stop polling waits and ask a long conductor to continue in a new session",
-            "timeout": 5,
+            "command": "sh -c '[ -x \"$0\" ] || exit 0; exec \"$0\" \"$@\"' \"$HOME/.cache/ndf/roots${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/bin/python\" \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/hook.py\"",
+            "description": "NDF: notify when the main directory is edited, stop polling waits and long conductors, and notify Slack that a question waits",
+            "timeout": 10,
             "continueOnError": true,
             "suppressOutput": false
           }
@@ -34,13 +21,6 @@
             "type": "command",
             "command": "sh -c '[ -n \"${NDF_RELAY_DIR:-}\" ] || exit 0; ROOT=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; [ -n \"$ROOT\" ] || exit 0; exec python3 \"$ROOT/scripts/relay.py\" question open'",
             "description": "NDF: under the relay, mark that a question is shown so the relay never types into it",
-            "timeout": 10,
-            "continueOnError": true
-          },
-          {
-            "type": "command",
-            "command": "sh -c 'ROOT=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; [ -n \"$ROOT\" ] || exit 0; python3 \"$ROOT/scripts/wait-notify.py\" --runtime claude; exit 0'",
-            "description": "NDF: notify Slack that a question waits for an answer",
             "timeout": 10,
             "continueOnError": true
           }
@@ -67,7 +47,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh -c 'ROOT=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; [ -n \"$ROOT\" ] || exit 0; python3 \"$ROOT/scripts/wait-notify.py\" --runtime claude; exit 0'",
+            "command": "sh -c '[ -x \"$0\" ] || exit 0; exec \"$0\" \"$@\"' \"$HOME/.cache/ndf/roots${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/bin/python\" \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/hook.py\"",
             "description": "NDF: notify Slack that a permission prompt or input form waits",
             "timeout": 10,
             "continueOnError": true
@@ -81,7 +61,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh -c 'ROOT=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; [ -n \"$ROOT\" ] || exit 0; python3 \"$ROOT/scripts/wait-notify.py\" --runtime claude; exit 0'",
+            "command": "sh -c '[ -x \"$0\" ] || exit 0; exec \"$0\" \"$@\"' \"$HOME/.cache/ndf/roots${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/bin/python\" \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/hook.py\"",
             "description": "NDF: notify Slack that a plan waits for approval",
             "timeout": 10,
             "continueOnError": true
@@ -135,7 +115,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh -c 'ROOT=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; [ -n \"$ROOT\" ] || exit 0; python3 \"$ROOT/scripts/wait-notify.py\" --runtime claude; exit 0'",
+            "command": "sh -c '[ -x \"$0\" ] || exit 0; exec \"$0\" \"$@\"' \"$HOME/.cache/ndf/roots${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/bin/python\" \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/hook.py\"",
             "description": "NDF: notify Slack when the reply ends waiting for an answer or approval",
             "timeout": 15,
             "continueOnError": true

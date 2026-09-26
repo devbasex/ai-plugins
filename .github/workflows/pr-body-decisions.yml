@@ -20,7 +20,7 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Compare the decisions section with the design documents
         # 番号とリポジトリ名は環境変数で渡す。ブランチ名と本文はシェルの本文へ埋めない。
         # 設計文書は head のコミットから、本文は Pull Request から API で読む。

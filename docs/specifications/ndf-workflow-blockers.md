@@ -24,7 +24,7 @@
 
 | 用語 | 意味 |
 | --- | --- |
-| 参加者プール | 提案とレビューを担当するランタイムの集合。ホストを含む。既定は cross-refactoring が codex / kiro とホスト、cross-review が claude / codex / kiro とホストで、`--include` / `--exclude` で変える |
+| 参加者プール | 提案とレビューを担当するランタイムの集合。ホストを含む。既定は cross-review と cross-refactoring で共通の claude / codex / kiro とホストで、`--include` / `--exclude` で変える |
 | スケルトン | `SKILL.md` の「実行」節に置く bash。利用者はこれを写して起動する |
 | 退避 | credential helper が応答しないときに、`gh` の認証を使って `git` を通すこと |
 | 置き場所 | テストを置くディレクトリ。`--scope` のゲートが範囲に含まれているかを見る |

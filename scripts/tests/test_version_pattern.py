@@ -45,7 +45,7 @@ def test_the_shared_format_reads_the_version_in_a_description(value: str) -> Non
     assert found and found.group(1) == value
 
 
-@pytest.mark.parametrize("path", [CHECKER, VALIDATE])
+@pytest.mark.parametrize("path", [CHECKER, VALIDATE, helpers.MANIFEST_CHECKER])
 def test_neither_checker_writes_the_version_format_itself(path: Path) -> None:
     """書式を書き写した行が残っていないことを、ファイルを読んで確かめる。"""
     assert INLINE_PATTERN not in path.read_text(encoding="utf-8")
@@ -56,8 +56,7 @@ def test_the_manifest_checker_stops_when_the_shared_definition_is_missing(tmp_pa
     root = helpers.build_tree(tmp_path)
     (root / "scripts/lib/version_pattern.py").unlink()
     result = subprocess.run(
-        [sys.executable, "-", str(root), helpers.FAMILY],
-        input=helpers.extract_checker(),
+        [sys.executable, str(helpers.MANIFEST_CHECKER), str(root), helpers.FAMILY],
         capture_output=True,
         text=True,
     )
@@ -82,8 +81,7 @@ def test_the_manifest_checker_reads_a_prerelease_version(tmp_path: Path) -> None
     """共有の定義を経由しても、接尾辞付きの版数がこれまでどおり通る。"""
     root = helpers.build_tree(tmp_path, version="9.8.0-dev.3")
     result = subprocess.run(
-        [sys.executable, "-", str(root), helpers.FAMILY],
-        input=helpers.extract_checker(),
+        [sys.executable, str(helpers.MANIFEST_CHECKER), str(root), helpers.FAMILY],
         capture_output=True,
         text=True,
     )

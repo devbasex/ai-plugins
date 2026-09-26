@@ -15,20 +15,16 @@
 
 | ファイル | 役割 | 読む側 |
 | --- | --- | --- |
-| [worktree-common.sh](worktree-common.sh) | worktree の判定のエントリポイント。位置の解決・パスの判定と正規化を持ち、下の 7 本を順に source する（1 本でも読めなければ 1 を返す）。読む側はこのファイルだけを source する | `worktree` / hook |
+| [worktree-common.sh](worktree-common.sh) | worktree の判定のエントリポイント。位置の解決・パスの判定と正規化を持ち、下の 3 本を順に source する（1 本でも読めなければ 1 を返す）。読む側はこのファイルだけを source する。編集時の guard（書き込み先の推定・許可パス）は `hook_lib/` が持つ | `worktree`（`worktree-session.sh`・`worktree-setup.sh` ほか） |
 | [worktree-declaration.sh](worktree-declaration.sh) | 宣言ファイルと個人の宣言の読み取り（`wt_declaration_get` ほか） | `worktree-common.sh` |
 | [worktree-branch.sh](worktree-branch.sh) | worktree の一覧・追従先・ブランチの判定（`wt_current_branch` ほか） | 同上 |
-| [worktree-shell-lex.sh](worktree-shell-lex.sh) | 書き込み先の推定に使うシェルコマンドの字句解析 | 同上 |
-| [worktree-write-target.sh](worktree-write-target.sh) | シェルコマンドとパッチ本文からの書き込み先の推定のエントリポイントと前処理 | 同上 |
-| [worktree-write-target-scan.sh](worktree-write-target-scan.sh) | 書き込み先の推定の走査の本体と、書き込み先を出す関数 | 同上 |
-| [worktree-write-target-track.sh](worktree-write-target-track.sh) | 走査が使う現在地と複合構文の入れ子の追跡 | 同上 |
 | [worktree-registry.sh](worktree-registry.sh) | テスト環境の採番と台帳・排他・スロット | 同上 |
 | [projects-common.sh](projects-common.sh) | GitHub Projects のボードへの記録 | `development-workflow` |
 | [lock-common.sh](lock-common.sh) | 排他の取得と解放（#293） | 上の 2 つと `development-workflow` |
-| [monitor.py](monitor.py) | 別プロセスの多軸監視。対象と命名規則を引数で受ける | 収束ループの 2 つ / `external-ai.py` |
+| [monitor.py](monitor.py) | 別プロセスの多軸監視。対象と命名規則を引数で受ける。`main()` が `deps.require("procs", "locks")` を呼ぶ | 収束ループの 2 つ / `external-ai.py` |
 | [monitor_patterns.py](monitor_patterns.py) | 監視の照合の表（利用上限・致命・警告・無害・CLI の上限・codex の終わりの印）。標準ライブラリだけを読む | `monitor.py` / `supervise_lib/claude.py`（`USAGE_LIMIT_FATAL`） |
 | [monitor_scan.py](monitor_scan.py) | 監視のログの末尾の読み取りと、照合の表による致命・警告・利用上限の判定 | `monitor.py` |
-| [monitor_proc.py](monitor_proc.py) | 監視する CLI の pid ファイル・生死とゾンビの判定・cmdline の照合・停止（プロセスグループごと）。標準ライブラリだけを読む | `monitor.py` |
+| [monitor_proc.py](monitor_proc.py) | 監視する CLI の pid ファイル・停止（プロセスグループごと）。生死とゾンビの判定・cmdline の照合は `procs.py` へ渡す（使う関数の中で import する） | `monitor.py` |
 | [monitor_types.py](monitor_types.py) | 監視の既定値（上限の表の別名）・一時ディレクトリ・設定と状態の型 | `monitor.py` / `monitor_outcome.py` |
 | [monitor_loop.py](monitor_loop.py) | 担当 1 者の監視ループ（上限・無進捗・早期のエラー・プロセスの終了から結末を決める） | `monitor.py` |
 | [limits.py](limits.py) | 監視の上限（工程ごと）・無進捗の許容（担当ごと）・CLI の上限（監視の上限 + 120 秒）の表。既定値はここだけが持つ（#598 / #537）。CLI の上限の上書きは `resolve_cli_timeout` と `cli-timeout --override N [--no-floor]` の 1 つで決める（既定では導いた値より短くできない） | 同上 |
@@ -44,6 +40,7 @@
 | [models.py](models.py) | `--model` の解析、フラグ生成、実測値の突き合わせ | `cross-refactoring` / `external-ai.py` / `metrics.py` |
 | [metrics.py](metrics.py) | 担当ごとの指標算出と報告の整形 | テストだけ（収束ループの 2 つはまだ読まない） |
 | [post_queue.py](post_queue.py) | 上限のときに投稿を積む待ち行列と、上限の見分け | `cross-review`（`review_lib/` / `rotate-pr.sh`） |
+| [review_criteria.py](review_criteria.py) | 指摘の基準の正本（基準 1〜4・書かないもの・見送りの種類・見送りの返信の雛形）と、レビューの重点の宣言（`.ndf/review.json`）の読み取り。レビュー担当への節・修正担当への節・見送りの返信を組む。宣言が読めなくても例外を上げず基準 1・2・4 で返す | `cross-review`（`review_lib/commands/init.py`・`launch-reviewer.sh`） / `fix-steps.py` |
 | [result_posts.py](result_posts.py) | 結果ファイル（指摘ファイル・修正の戻り値）を投稿へ組み立て、待ち行列から送る | `cross-review`（`review_lib/` / `drive.py`） / `fix-steps.py` |
 | [git-credential.sh](git-credential.sh) | credential helper が応答しない環境で git を通す退避の値 | `cross-refactoring`（`refactor_lib/publish.py`） |
 | [closing-issues.sh](closing-issues.sh) | Pull Request の本文から、閉じる語が指す issue を取り出す | `progress-tracking`（ミッションを閉じる） / `merged`（OPEN の一覧） / `development-workflow` の hook |
@@ -64,8 +61,21 @@
 | [proc.py](proc.py) | 子プロセスと git の起動（失敗は `StepError(msg, code)`）・`die`・`info` | `step_result.py` / `statefile.py` / `repo.py` / `cross-review`（`review_lib/`） / `cross-refactoring`（`refactor_lib/paths.py`・`commands/setup.py`） |
 | [repo.py](repo.py) | メインディレクトリ・`owner/repo`・slug・宣言のベースブランチ（git だけで決める） | `cross-review`（`review_lib/`） / `cross-refactoring`（`drive.py`・`commands/setup.py`）（C1〜C7 で各スクリプト） |
 | [loop_drive.py](loop_drive.py) | 収束ループの drive の部品（`call`・`parse_vars`・`review_status`） | 収束ループの 2 つの `drive.py` |
-| [deps.py](deps.py) | 外部パッケージを使うエントリポイントが最初に呼ぶ `require("<グループ>")`。import できなければ uv の環境（宣言と版の固定はプラグインルートの `pyproject.toml` と `uv.lock`）で起動し直し、uv が無ければ版を固定して入れる。入れられなければ終了コード 3。hook とラッパーのバージョンディレクトリは使わない | 外部パッケージを使うエントリポイント |
-| [wait_notice.py](wait_notice.py) | Slack の待ち通知の判定（応答の本文から回答待ち・承認待ち・待ちでない）・フックの事象の訳し・復帰先・関連 URL・本文の組み立て。入出力を持たない | `scripts/wait-notify.py` |
+| [deps.py](deps.py) | 外部パッケージを使うエントリポイントが最初に呼ぶ `require("<グループ>")`。import できなければ uv の環境（宣言と版の固定はプラグインルートの `pyproject.toml` と `uv.lock`。`project=` を渡せばその根の 1 組と `<根>/.venv`）で起動し直し、uv が無ければ版を固定して入れる。入れられなければ終了コード 3。hook とラッパーは `require()` を呼ばない（ラッパーの環境は `relay_lib/runtime.py` が `find_uv`・`install_uv`・`venv_dir` で用意する） | 外部パッケージを使うエントリポイント・根の `scripts/`（`scripts/lib/ndf_wrappers.py` を通す）・`relay_lib/runtime.py` |
+| [md.py](md.py) | Markdown の構造の読み取り（囲み・見出し・節・表・地の文・リンクとアンカー）。markdown-it-py を呼ぶのはここだけ。書き込みは読み取った行の区間で呼び出し側が行う | `cross-refactoring`（`refactor_lib/vocabulary.py`）・`relay_lib/mark.py`。ほかは D1〜D8 が呼び出し側を置き換える |
+| [mdtable.py](mdtable.py) | Markdown の表の組み立て（列の幅を揃えない行・セルの縦棒のエスケープ・数の列の右寄せ）。tabulate を呼ぶのはここだけ | `cross-refactoring`（`refactor_lib/plan.py`・`commands/report.py`）。ほかは D1〜D8 が呼び出し側を置き換える |
+| [schema.py](schema.py) | JSON と設定の形の検証（`Shape` と `load_shape`）。pydantic の誤りを日本語の 1 行（`ShapeError`）へ直し、語彙に無い値を下げる読みは `lenient_choice` | L1 の時点では無し（D1〜D8 が呼び出し側を置き換える） |
+| [procs.py](procs.py) | プロセスの生死（ゾンビは死）・親子・木の停止（グループの先頭ならグループへ）・メモリと cgroup。psutil を呼び、`/proc/` を読むのはここだけ | 同上 |
+| [versions.py](versions.py) | 版数（`X.Y.Z`・`-dev.N`・`-rc.N`）の比較と次の版、bump-my-version の `replace`。semver と bump-my-version を呼ぶのはここだけ | 同上 |
+| [pathmatch.py](pathmatch.py) | パスのパターン照合（git の wildmatch を根からのパス全体に当てる。`*` は `/` をまたがない）。pathspec を呼ぶのはここだけ | 同上 |
+| [textparse.py](textparse.py) | unified diff の足した行の番号と、コードのコメントを空白へ置き換える処理。unidiff と pygments を呼ぶのはここだけ | 同上 |
+| [yamlio.py](yamlio.py) | frontmatter と YAML の往復の読み書き（値は YAML の型。引用符とコメントを保つ）。ruamel.yaml を呼ぶのはここだけ | 同上 |
+| [waits.py](waits.py) | 条件が揃うまでの問い合わせ（変化が無い間は間隔を伸ばす）とやり直し。tenacity を呼ぶのはここだけ。GitHub の上限の待ちは `gh_quota` | 同上 |
+| [notify.py](notify.py) | HTTP の 1 回の要求・Slack の Web API・`.env` の読み取り。httpx・slack_sdk・python-dotenv を呼び、`urllib.request` を使うのはここだけ | `scripts/wait-notify.py`（送信）・`hook_lib/wait_notify.py`（`.env`） |
+| [wait_notice.py](wait_notice.py) | Slack の待ち通知の判定（応答の本文から回答待ち・承認待ち・待ちでない）・フックの事象の訳し・復帰先・関連 URL・本文の組み立て。入出力を持たない | `scripts/wait-notify.py`・`hook_lib/wait_notify.py` |
+| [hook_python.py](hook_python.py) | hook の用意済みの環境の python の置き場（`~/.cache/ndf/roots<プラグインの根>` の目印）と、その python での起動し直し。標準ライブラリだけで、`deps.require()` を呼ばない（I13・決定 20） | `scripts/hook-env.py`・`scripts/wait-notify.py` |
+| [shparse.py](shparse.py) | シェルの構文木（tree-sitter-bash）。試行 T2 で見つけた構文木の癖 5 つを直して渡し、読み直せない ERROR があるか（`has_unreadable_error`）を返す。hook の経路で使うため `deps.require()` を呼ばない | `hook_lib/`（書き込み先の推定・Bash の判定・語の分割） |
+| [locks.py](locks.py) | ファイルロック（`<対象>.lock` で取る排他・待たない取得・排他つきの 1 行の追記）。filelock を呼び、`fcntl` を使うのはここだけ | `hook_lib/`（token の guard・待ちの通知） |
 | [drive_pause.py](drive_pause.py) | 収束ループの駆動が止まるときの結果の形（pause の 1 行 JSON）と終了コードの表（0 完了 / 20 fix / 21 sweep / 22 newtext / 23 cross-review / 1 中断） | 収束ループの 2 つの `drive.py` |
 
 ## 手順のスクリプトの結果

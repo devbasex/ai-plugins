@@ -165,6 +165,19 @@ def test_spec_finalize_removes_design_and_indexes_spec(repo, env):
     assert out["metrics"]["commit"] == git(repo, "rev-parse", "HEAD").strip()
 
 
+def test_spec_finalize_skips_index_lines_inside_a_fence(repo, env):
+    """索引の行は囲みの外だけを数える（lib/md.py。行の字面で見ていた頃は、囲みの中の例の後ろへ足した）。"""
+    spec_repo(repo)
+    write(repo, "docs/specifications/README.md", "# 索引\n\n- [a.md](a.md) — A\n\n```md\n- [z.md](z.md) — Z\n```\n")
+    git(repo, "commit", "-q", "-am", "index")
+    code, _, err = call("plan-to-spec-steps.py",
+                        ["spec-finalize", "--spec", "docs/specifications/x.md",
+                         "--design", "docs/design/x-design.md", "--title", "X", "--root", str(repo)], env)
+    assert code == 0, err
+    idx = (repo / "docs/specifications/README.md").read_text(encoding="utf-8")
+    assert idx.startswith("# 索引\n\n- [a.md](a.md) — A\n- [x.md](x.md) — X\n\n```md\n")
+
+
 @pytest.mark.parametrize("repeat", [True, False])
 def test_spec_finalize_removes_every_design_given_by_repeated_or_listed_flags(repo, env, repeat):
     designs = ["docs/design/x-design.md", "issues/PLAN1_x.md", "issues/PLAN1_x-measure.py"]
@@ -337,6 +350,53 @@ def test_verify_install_unknown_runtime_is_2(repo, env):
                         ["verify-install", "--ref", "develop", "--expect", "1.0.0", "--runtimes", "nope",
                          "--root", str(repo)], env)
     assert code == 2 and out["tool"] == "release-verification" and out["status"] == "stopped"
+
+
+def load_verification():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("release_verification_steps",
+                                                  SCRIPTS / "release-verification-steps.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+@pytest.mark.parametrize("installed", ["symlink", "copy", "differs", "missing"])
+def test_compare_files_follows_a_symlink_to_a_directory(tmp_path, installed):
+    """dev.agy/skills/<名前> → ../../skills/<名前> のようなディレクトリへの symlink を比べられる。"""
+    mod = load_verification()
+    src = tmp_path / "src" / "p"
+    (src / "skills" / "a").mkdir(parents=True)
+    (src / "skills" / "a" / "SKILL.md").write_text("x\n")
+    (src / "agy").mkdir()
+    (src / "agy" / "a").symlink_to("../skills/a")
+    dst = tmp_path / "dst"
+    (dst / "skills" / "a").mkdir(parents=True)
+    (dst / "skills" / "a" / "SKILL.md").write_text("x\n")
+    (dst / "agy").mkdir()
+    if installed == "symlink":
+        (dst / "agy" / "a").symlink_to("../skills/a")
+    elif installed in ("copy", "differs"):
+        (dst / "agy" / "a").mkdir()
+        (dst / "agy" / "a" / "SKILL.md").write_text("x\n" if installed == "copy" else "y\n")
+    out = mod.compare_files(tmp_path / "src", dst, "p", ["p/agy/a", "p/skills/a/SKILL.md"], "claude")
+    assert out == ([] if installed in ("symlink", "copy") else ["claude: p/agy/a"])
+
+
+def test_compare_files_skips_symlinks_for_a_runtime_that_drops_them(tmp_path):
+    """codex は symlink を導入先へ入れないので、symlink が無くても不一致にしない。"""
+    mod = load_verification()
+    src = tmp_path / "src" / "p"
+    (src / "skills" / "a").mkdir(parents=True)
+    (src / "skills" / "a" / "SKILL.md").write_text("x\n")
+    (src / "agy").mkdir()
+    (src / "agy" / "a").symlink_to("../skills/a")
+    dst = tmp_path / "dst"
+    (dst / "skills" / "a").mkdir(parents=True)
+    (dst / "skills" / "a" / "SKILL.md").write_text("y\n")
+    files = ["p/agy/a", "p/skills/a/SKILL.md"]
+    out = mod.compare_files(tmp_path / "src", dst, "p", files, "codex", keeps_symlinks=False)
+    assert out == ["codex: p/skills/a/SKILL.md"]
 
 
 # --- phase-steps.py（互換の入口） --------------------------------------------

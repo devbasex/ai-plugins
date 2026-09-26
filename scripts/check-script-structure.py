@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""NDF のスクリプトの構造チェック（#1142 の不変条件 I4・I5）。
+"""NDF のスクリプトの構造チェック（#1142 の不変条件 I4・I5・I13・I14）。
 
 見るのは `plugins/ndf/` の下の `.py` と `.sh` のうち、テストを除くもの（`tests/`・`test/` の下と
 `test_` で始まるファイル）。git の作業ツリーでは git が追跡するファイルだけを見る。
@@ -9,6 +9,16 @@
   関数名を除いた構文木で、シェルは空行とコメントの行を除き前後の空白を落とした行で比べる
 - `same-name`: 同じ名前で本体の違う最上位の関数が 2 つ以上のファイルにある（I4）。Python とシェルは
   別々に数える
+
+- `wrapped`: 汎用の処理の包み（`lib/` の包み。決定 19）が受け持つ標準ライブラリの部品を、包みの外の Python の
+  モジュールが使う（I14）。部品と持ち主は `WRAPPED` の表で、`fcntl`・`pty`・`termios`・`urllib.request` の import、
+  `/proc/` の読み取り（docstring を除く文字列）、囲み（```` ``` ```` / `~~~`）を追う正規表現と `startswith` を見る。
+  例外リストの `name` は部品の名前（`fcntl` など）
+- `hook-deps`: hook の経路が `deps.require()` を呼ぶ（I13・決定 20）。hook の経路は、hook のエントリポイント
+  （`HOOK_ENTRIES`）から import でたどれる `scripts/` の中のモジュールと、`plugins/*/hooks/*.json` の command である。
+  モジュールは `require` を呼んだら（`deps.require(…)`・`from deps import require`）落ち、command は `uv run` を
+  挟んだら落ちる（hook は SessionStart が用意した環境の python を直に起動する）。例外リストの `name` は
+  `deps.require` か `uv run`
 
 副命令のハンドラー（`cmd_*`）・`main`・`build_parser`・`_build_parser`・シェルの `usage` は規則で外す。
 
@@ -40,7 +50,22 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 SCAN = "plugins/ndf"
 MAX_LINES = 500
-KINDS = ("lines", "same-body", "same-name")
+KINDS = ("lines", "same-body", "same-name", "wrapped", "hook-deps")
+LIB = "plugins/ndf/scripts/"
+# I14: 部品 → 使ってよい包み（決定 19。擬似端末は relay_lib/terminal.py が包みを兼ねる）
+WRAPPED = {
+    "fcntl": (LIB + "lib/locks.py",),
+    "pty": (LIB + "relay_lib/terminal.py",),
+    "termios": (LIB + "relay_lib/terminal.py",),
+    "urllib.request": (LIB + "lib/notify.py",),
+    "proc-fs": (LIB + "lib/procs.py",),
+    "fence-regex": (LIB + "lib/md.py",),
+}
+# I13: hook のエントリポイント（決定 20）。ここから import でたどれるモジュールは deps を import しない
+HOOK_ENTRIES = (LIB + "hook.py",)
+IMPORT_ROOTS = (LIB, LIB + "lib/")
+RE_FUNCS = {"compile", "match", "search", "fullmatch", "finditer", "findall", "sub", "subn", "split"}
+FENCE_HINT = re.compile(r"```|~~~|`\{3|~\{3|\[`~\]|\[~`\]")
 RULE_NAMES = {"main", "build_parser", "_build_parser"}
 SHELL_RULE_NAMES = {"usage"}
 SH_FUNC_RE = re.compile(r"^(\s*)(?:function\s+([A-Za-z_][\w:.-]*)\s*(?:\(\))?|([A-Za-z_][\w:.-]*)\s*\(\))\s*(\{.*)?$")
@@ -107,6 +132,57 @@ def py_functions(text: str) -> list[tuple[str, str]] | None:
     except SyntaxError:
         return None
     return [(n.name, py_body_key(n)) for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+
+
+def _docstring_ids(tree: ast.AST) -> set[int]:
+    ids = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and node.body:
+            first = node.body[0]
+            if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant) \
+                    and isinstance(first.value.value, str):
+                ids.add(id(first.value))
+    return ids
+
+
+def _strings(node: ast.AST) -> list[str]:
+    return [n.value for n in ast.walk(node) if isinstance(n, ast.Constant) and isinstance(n.value, str)]
+
+
+def wrapped_parts(text: str) -> dict[str, str]:
+    """I14: 包みが受け持つ部品の使用を `{部品: 最初の行と形}` で返す（読めない Python は空）。"""
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return {}
+    found: dict[str, str] = {}
+
+    def hit(part: str, node: ast.AST, how: str) -> None:
+        found.setdefault(part, f"{node.lineno} 行: {how}")
+
+    docs = _docstring_ids(tree)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for a in node.names:
+                for part in ("fcntl", "pty", "termios", "urllib.request"):
+                    if a.name == part or a.name.startswith(part + "."):
+                        hit(part, node, f"import {a.name}")
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            names = {a.name for a in node.names}
+            for part in ("fcntl", "pty", "termios", "urllib.request"):
+                if node.module == part or node.module.startswith(part + ".") \
+                        or (part == "urllib.request" and node.module == "urllib" and "request" in names):
+                    hit(part, node, f"from {node.module} import")
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in docs \
+                and "/proc/" in node.value:
+            hit("proc-fs", node, repr(node.value[:40]))
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            f = node.func
+            regex = f.attr in RE_FUNCS and isinstance(f.value, ast.Name) and f.value.id == "re"
+            if (regex or f.attr in ("startswith", "endswith")) \
+                    and any(FENCE_HINT.search(s) for a in node.args for s in _strings(a)):
+                hit("fence-regex", node, f"{'re.' if regex else '.'}{f.attr}")
+    return found
 
 
 def _norm_sh(lines: list[str]) -> str:
@@ -190,6 +266,11 @@ def scan(root: Path) -> tuple[list[dict], dict]:
         if n > MAX_LINES:
             violations.append({"kind": "lines", "path": rel, "function": "", "detail": f"{n} 行", "lines": n})
         lang = "py" if rel.endswith(".py") else "sh"
+        if lang == "py":
+            for part, where in sorted(wrapped_parts(text).items()):
+                if rel not in WRAPPED[part]:
+                    violations.append({"kind": "wrapped", "path": rel, "function": part,
+                                       "detail": f"包み {' / '.join(WRAPPED[part])} が受け持つ部品を使う（{where}）"})
         found = py_functions(text) if lang == "py" else sh_functions(text)
         if found is None:
             unparsed += 1
@@ -217,8 +298,76 @@ def scan(root: Path) -> tuple[list[dict], dict]:
                 if diff:
                     violations.append({"kind": "same-name", "path": path, "function": name,
                                        "detail": "同じ名前で本体が違う: " + ", ".join(diff)})
+    violations += hook_deps(root)
     metrics = {"files": len(files), "functions": sum(len(v) for v in defs.values()), "unparsed": unparsed}
     return violations, metrics
+
+
+def _calls_require(tree: ast.AST) -> bool:
+    """`deps.require(…)` を呼ぶか、`from deps import require` するか。"""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == "deps" and any(a.name == "require" for a in node.names):
+            return True
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "require"
+                and isinstance(node.func.value, ast.Name) and node.func.value.id == "deps"):
+            return True
+    return False
+
+
+def _imported(rel: str, text: str) -> set[str]:
+    """モジュールが import する名前（関数の中の import も含む。`from . import x` は `<パッケージ>.x`）。"""
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return set()
+    pkg = Path(rel).parent.name if Path(rel).parent.as_posix() + "/" not in IMPORT_ROOTS else ""
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names |= {a.name for a in node.names}
+        elif isinstance(node, ast.ImportFrom):
+            base = node.module or ""
+            if node.level and pkg:
+                base = f"{pkg}.{base}" if base else pkg
+            names.add(base) if base else None
+            names |= {f"{base}.{a.name}" if base else a.name for a in node.names}
+    return names
+
+
+def _module_file(root: Path, name: str) -> str | None:
+    for base in IMPORT_ROOTS:
+        stem = base + name.replace(".", "/")
+        for cand in (stem + ".py", stem + "/__init__.py"):
+            if (root / cand).is_file():
+                return cand
+    return None
+
+
+def hook_deps(root: Path) -> list[dict]:
+    """I13: hook の経路のモジュールと hook の command が、deps と uv run を使わないか。"""
+    out: list[dict] = []
+    todo, seen = [e for e in HOOK_ENTRIES if (root / e).is_file()], set()
+    while todo:
+        rel = todo.pop()
+        if rel in seen:
+            continue
+        seen.add(rel)
+        text = (root / rel).read_text(errors="ignore")
+        names = _imported(rel, text)
+        try:
+            calls = _calls_require(ast.parse(text))
+        except SyntaxError:
+            calls = False
+        if calls:
+            out.append({"kind": "hook-deps", "path": rel, "function": "deps.require",
+                        "detail": "hook の経路のモジュールが deps.require() を呼ぶ（hook は用意済みの環境の python で動く）"})
+        todo += [f for f in (_module_file(root, n) for n in names) if f and f not in seen]
+    for f in sorted(root.glob("plugins/*/hooks/*.json")):
+        rel = f.relative_to(root).as_posix()
+        if "uv run" in f.read_text(errors="ignore"):
+            out.append({"kind": "hook-deps", "path": rel, "function": "uv run",
+                        "detail": "hook の command が uv run を挟む（用意済みの環境の python を直に起動する）"})
+    return out
 
 
 def item(kind: str, path: str, function: str, result: str, detail: str) -> dict:

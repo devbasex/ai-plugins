@@ -53,21 +53,10 @@ def test_host_detection_fails_loudly_when_unknown(assignment):
 # ---------- 母集合 ----------
 
 @pytest.mark.parametrize("host", HOSTS)
-def test_review_pool_is_the_default_three_and_the_host(assignment, host):
-    """#786 の決定 1: claude / codex / kiro とホスト（ホストが agy のときだけ 4 者）。"""
+def test_default_pool_is_the_default_three_and_the_host(assignment, host):
+    """cross-review と cross-refactoring で共通: claude / codex / kiro とホスト（ホストが agy のときだけ 4 者）。"""
     expected = [r for r in assignment.ALL_RUNTIMES if r in {"claude", "codex", "kiro", host}]
-    assert assignment.review_pool(host) == expected
-
-
-@pytest.mark.parametrize("host, expected", [
-    ("claude", ["claude", "codex", "kiro"]),
-    ("codex", ["codex", "kiro"]),
-    ("agy", ["codex", "agy", "kiro"]),
-    ("kiro", ["codex", "kiro"]),
-])
-def test_refactor_pool_is_codex_kiro_and_the_host(assignment, host, expected):
-    """AC31 / AC32 — cross-refactoring の既定はホストを含む。並びは固定の順。"""
-    assert assignment.refactor_pool(host) == expected
+    assert assignment.default_pool(host) == expected
 
 
 def test_no_runtime_is_excluded_from_applying(assignment):
@@ -83,7 +72,7 @@ def test_no_runtime_is_excluded_from_applying(assignment):
 @pytest.mark.parametrize("host", HOSTS)
 def test_the_host_implements_when_it_participates(assignment, host):
     """名指しが無ければ、参加者にいるホストが実装担当になる。"""
-    participants = assignment.refactor_pool(host)
+    participants = assignment.default_pool(host)
     assert assignment.choose_implementer(participants, host) == (host, "host")
 
 
@@ -111,7 +100,7 @@ def test_no_participant_cannot_choose_an_implementer(assignment):
 @pytest.mark.parametrize("host", HOSTS)
 def test_the_implementer_is_deterministic(assignment, host):
     """再開しても担当が変わらないこと（同じ入力なら同じ結果。状態に依らない）。"""
-    participants = assignment.refactor_pool(host)
+    participants = assignment.default_pool(host)
     assert assignment.choose_implementer(participants, host) == \
         assignment.choose_implementer(list(participants), host)
 
@@ -151,7 +140,7 @@ def _previous_review_rotation(round_no: int, pool: list[str]) -> list[str]:
 def test_review_seats_match_the_previous_rotation_for_three_available(assignment):
     """AC8: 使える者が 3 者のとき、変更前の輪番と同じ値になる（4 ホスト × ラウンド 1〜12）。"""
     for host in assignment.HOST_RUNTIMES:
-        # 変更の前の母集合（全ランタイム − ホスト）。`review_pool` は #892 でホストを含む形へ変わった
+        # `host` だけを持つ状態ファイルの母集合（全ランタイム − ホスト）。`default_pool` はホストを含む
         pool = [r for r in assignment.ALL_RUNTIMES if r != host]
         for round_no in range(1, 13):
             assert assignment.review_seats(round_no, pool, []) == \

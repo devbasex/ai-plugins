@@ -74,7 +74,7 @@ def resume(state_mod, monkeypatch, tmp_path):
     """再開の入口を、GitHub にも git にも触れずに通す。"""
     monkeypatch.setenv("CROSS_REVIEW_TMP_DIR", str(tmp_path))
     monkeypatch.setattr(review_lib.github, "_repo_from_git", lambda: REPO)
-    monkeypatch.setattr(review_lib, "_sh", lambda cmd, check=True: REPO)
+    monkeypatch.setattr(review_lib.github, "_repo_from_gh", lambda: REPO)
     monkeypatch.setattr(review_lib.posts, "_auto_flush", lambda pr: None)
     monkeypatch.setattr(review_lib.findings, "_record_carried_over", lambda *a, **k: False)
     monkeypatch.setattr(review_lib.workspace, "_sync_worktree", lambda *a, **k: None)

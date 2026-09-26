@@ -84,8 +84,8 @@ GitHub は `lib/gh_parts.py`（決定 16・17）、`claude -p` は `supervise_li
 ように名前で引く）。起動し直しの上乗せは 2 回目以降 0.12〜0.18 秒で（決定 17 の実測）、hook ではない
 エントリポイントには十分小さい。根の `scripts/`（開発と CI の検査）は、リポジトリの根に `pyproject.toml` と
 `uv.lock` を新設して同じ形で解決する。playwright-kit はすでに自分の `pyproject.toml` と `uv.lock` を持つため、
-そこへ足す。mcp-serena の `project_yml.py` は、mcp-serena に `pyproject.toml` と `uv.lock` を新設して同じ形で解決する
-（D8 に含める）。
+そこへ足す。mcp-serena の `project_yml.py` は、mcp-serena に `pyproject.toml` と `uv.lock` を新設して解決する。hook の経路で
+読むため、起動の形は決定 25 に従う（D5 に含める）。
 
 **構造チェックに I14 を足す**: 包みが受け持つ標準ライブラリの部品（`fcntl`・`pty`・`termios`・
 `urllib.request`・`/proc/` の読み取り・囲みの正規表現）を、包みの外のモジュールが使ったら落とす。自作が
@@ -106,15 +106,23 @@ GitHub は `lib/gh_parts.py`（決定 16・17）、`claude -p` は `supervise_li
 | venv の python で bashlex を import して解析 | 参考 | 66〜88 ms |
 
 **hook は、PreToolUse・Stop・Notification を受ける 1 本の Python のエントリポイント（`scripts/hook.py`）へまとめる。**
-今の `worktree-guard.sh`・`token-guard.sh`・`wait-notify.py`・`relay.py` の hook の入口は、その中の関数になる。
+今の `worktree-guard.sh`・`token-guard.sh`・`wait-notify.py`・`relay.py` の hook の入口は、その中の関数になる（`relay.py` の入口は、ラッパーを移す D6 で移す。D5 の時点では、token の guard がラッパーの告知を `relay_lib.mark` から同じプロセスで読む）。`worktree-guard.sh`・`token-guard.sh`・`wait-notify.py --runtime` は、パスを変えずに結ぶ Kiro CLI と agy のために、環境の python で `hook.py` を起動する包みとして残す。
 シェルの字句解析は tree-sitter-bash（bashlex は `[[ -f y ]]` で ParsingError を出すので使えない）、`.env` と Slack と
 ロックはライブラリへ置き換え、bash と jq の fork が消える。
 
-**hook は `uv run` を挟まず、用意済みの環境の python を直に起動する。** SessionStart の hook が
-`deps.require()` と同じ手順で `~/.cache/ndf/venv/<版>` を `uv sync --frozen` で用意し、PreToolUse ほかの hook の
-コマンドはその環境の `bin/python` を指す。毎回の上乗せは python の起動と import だけになる。環境がまだ無い
-（SessionStart より前・uv を入れられない）ときは、hook は判定をせずにパススルーで終わる（hook が止まると Tool の
-呼び出しが全部止まる。今の guard も拒否しない案内が主である）。
+**hook は `uv run` を挟まず、用意済みの環境の python を直に起動する。** SessionStart の hook（`worktree-session.sh` が
+起動する `scripts/hook-env.py`）が `deps.require()` と同じ手順で `~/.cache/ndf/venv/<版>` を `uv sync --frozen` で用意し、
+プラグインの根ごとの目印 `~/.cache/ndf/roots<プラグインの根>` をその環境のディレクトリへ張る（symlink）。PreToolUse ほかの
+hook の command は、シェルの字面だけで目印の python を組み立て、`sh -c '[ -x "$0" ] || exit 0; exec "$0" "$@"'` の形で
+起動する（`"$HOME/.cache/ndf/roots${CLAUDE_PLUGIN_ROOT}/bin/python" <hook.py>` を渡す。版を読まない）。毎回の上乗せは
+python の起動と import だけになる。環境がまだ無い（SessionStart より前・uv を入れられない）ときは `[ -x ]` が偽になり、
+出力なし・終了コード 0 で通る（python を直に指す形は終了コード 127 で終わる。試行 T2）。hook が止まると Tool の呼び出しが
+全部止まるためで、今の guard も拒否しない案内が主である。目印を python の実行ファイルへ張らないのは、python が実行ファイルの
+symlink をたどった先で環境を探し、環境の外の python として動くためである。
+
+**構文木に読み直せない ERROR があるとき（`! case … esac`・`echo hi >` など）は、判定をせずに通して案内を出す。**
+構文木の癖 5 つ（試行 T2）は `lib/shparse.py` の包みが吸収し、癖で出る ERROR（`<>` の割れ・ヒアドキュメントの本文の
+`$((…))`）は読み直せるものとして数えない。
 
 **ラッパーのバージョンディレクトリは、複製のときに同じ lock から環境を作る**（複製先で `uv sync --frozen`）。
 `relay_lib/terminal.py` は ptyprocess、`proc`・`common`・`record` は psutil と filelock の上に置く。
@@ -151,6 +159,83 @@ DBOS だけである。Burr は軽いが、キューの自作が残る（決定 
 共有の一覧の衝突（#1249）は、キューへ入れる前の検査として置き換えの中で入れる。移行はミッション 2c
 （ミッション 2b の後）で、ステップの切り方は 2b の後に決める。
 
+## 決定 22: 全体テストは、根の 1 つの環境で本番と同じパッケージを入れて流す
+
+**包みを呼ぶ側のテストが、全体テストの環境に無いパッケージを import して落ちる。** 全体テストは CI
+（`.github/workflows/pytest.yml`）でも手元でも playwright-kit の venv で流しており、そこには包みが使う
+markdown-it・tabulate・pydantic・githubkit・psutil・filelock・ruamel.yaml・tenacity・slack_sdk が無い。
+エントリポイントは `deps.require()` で uv の環境へ起動し直すため実行時は動くが、テストはスクリプトを同じプロセスで
+import する（`test_mission_state.py`・`test_mission_close_merge_green.py` ほか）。2026-09-26 のステージ 2 で
+D1〜D4 がこれで止まった。
+
+**根の `pyproject.toml` を全体テストの環境にする。** playwright_kit（パスで指定）・`plugins/ndf` の全 extra・
+pytest と pytest-xdist を、根の `uv.lock` の 1 つで固定する。CI と手元は
+`uv run --frozen --project . --all-extras pytest . -q -n auto` で流す。根の `requires-python` は playwright_kit に
+合わせて 3.11 以上にする。
+
+| 比べた案 | 採らない理由 |
+| --- | --- |
+| 呼ぶ側のテストも uv の環境で流し直す | テストが二重に流れて遅くなり、流し直しの仕組みが呼ぶ側の数だけ増える |
+| 包みの import を関数の中へ遅らせる | 置き換えた関数に触れるテストは結局流れず、上のどちらかが要る |
+
+**包みのテストの流し直し（`test_wrappers_uv_env.py`）は消す。** 全体テストの環境で包みのテストがその場で流れる。
+**子のプロセスを起こすテストは `sys.executable` で起動する。** `PATH` を絞って `python3` を探すと、包みの
+パッケージの無い python に当たり、`deps.require()` がテストの中で uv を取りに行く。
+
+**playwright_kit と ndf の依存が 1 つの lock で解けることを、L1b の最初に確かめる。** 解けなければ、そこで
+利用者へ戻す。
+
+## 決定 23: `deps.require()` は複数のグループを 1 回で入れる
+
+**1 回の起動し直しで入るグループが 1 つだけだと、2 つ要るエントリポイントが止まる。** 2 つ目の `require()` は
+起動し直した後なので import できないとみなし、終了コード 3 で終わる。`wait-notify.py`（notify と locks）・
+`skill-stats.py`（mdtable と yamlio）・monitor（procs と locks）が当たる。
+
+**`require("notify", "locks")` のように可変長で受け、`uv run` へ `--extra` を並べる。** 起動し直すのは 1 回である。
+
+## 決定 24: `claude -p` の包みは CLI の直の起動のまま残す
+
+試行 T2・T2b（PR #1264・#1267）で claude-agent-sdk 0.2.160 は今の 3 つの呼び出しの形を満たした。ただし既定のままだと
+子の CLI が会話タイトルを作る呼び出しを 1 回足し、費用が 2.77 倍になる。止める手段は文書に無い環境変数
+（`CLAUDE_CODE_DISABLE_TERMINAL_TITLE`）だけで、CLI の更新で効かなくなると気づかないまま費用が戻る。置き換えで
+消える自作は約 130 行（起動・打ち切り・JSON の読み取り）で、SDK だけが持つ機能（型付きのメッセージ・逐次の受け取り・
+Python の中の hook）は今の使い方で使わない。**`supervise_lib/claude.py` は `-p --output-format json` のまま残し、
+プロセスの管理だけを `lib/procs.py` へ寄せる**（2026-09-26 利用者が決定）。
+
+## 決定 25: mcp-serena の hook も、用意済みの環境の python を直に起動する（決定 20 と同じ形）
+
+**mcp-serena の PreToolUse の hook は、Grep・Read・Bash・Serena の Tool の呼び出しのたびに `.serena/project.yml` を
+読む**（`plugins/mcp/mcp-serena/hooks/hooks.json` の `PreToolUse`・タイムアウト 5 秒、`scripts/serena_lsp/hooks.py`）。
+読み書きは自作の `scripts/serena_lsp/project_yml.py`（147 行）で、置き換え先の ruamel.yaml はシステムの python3 に無い。
+2026-09-26 のステージ 2 で、D8 はここで止まった。
+
+| 案 | 得 | 失 |
+| --- | --- | --- |
+| **決定 20 と同じ形**（採る） | hook の起動の形が 2 つのプラグインで 1 つになる。自作の 147 行が消える | mcp-serena にも環境の用意とバージョンごとの環境が要る |
+| 自作のまま残す（例外の一覧へ載せる） | hook の所要は今のまま | 自作が残り、「汎用の処理は自作しない」に例外が 1 つ増える |
+| 呼ぶたびに `uv run` で起動し直す | 仕組みを新しく作らない | Tool の呼び出しのたびに 0.12〜0.18 秒増える（決定 17 の実測） |
+
+2026-09-26 に利用者が「NDF の hook と同じ形にする」と決めた。
+
+**SessionStart の hook（`serena-lsp.py hook session-start`）が、mcp-serena の `pyproject.toml` と `uv.lock` から
+`~/.cache/mcp-serena/venv/<版>` を `uv sync --frozen` で用意する。** PreToolUse の hook のコマンドはその環境の
+`bin/python` を指し、T2 で確かめた形 `sh -c '[ -x "$0" ] || exit 0; exec "$0" …'` で起動する。環境がまだ無い
+（SessionStart より前・uv を入れられない）ときは、判定をせずにパススルーで終わる。SessionStart の中の食い違いの
+通知は、環境を用意できたときだけその python で行い、用意できなければ通知を飛ばす。
+
+**hook ではないエントリポイント（`serena-lsp.py` の `check`・`configure` ほか。Skill の `language-servers` が呼ぶ）は、
+同じ環境へ自分を起動し直す。** 環境が無ければ用意し、uv が無ければ終了コード 3 で終わる（`deps.require()` と同じ
+契約）。**NDF の `lib/deps.py` は import しない。** プラグインは別々に配布され、mcp-serena だけを入れた利用者の
+手元に NDF は無い。起動し直しの数十行は `scripts/serena_lsp/env.py` に置く。
+
+Codex の hook（`hooks/codex.json`）と Kiro（`dev.kiro/install.sh`）の経路も同じ環境を指す。全体テストは決定 22 の
+根の環境に ruamel.yaml が入っているので、mcp-serena のテストはそのまま import できる。
+
+**移行は D5 に含める**（NDF の hook と同じ時期。「移行の順序」の表）。受け入れ条件に次の 2 つを足す。
+
+- mcp-serena の PreToolUse の hook 1 回の所要が、移行の前と比べて悪くなっていない（移行の前を D5 の最初に測る。T2 と同じ測り方）
+- 環境が無いとき、mcp-serena の hook は判定をせずに終了コード 0 で終わる
+
 ## 移行の順序（ミッション 2b。ミッション 2 の開発版の後、ミッション 3 の前）
 
 **ミッション 3（語の移行）の前に置く。** 語の移行は同じファイルを触るため、先に中身を置き換えておけば、語を
@@ -161,13 +246,14 @@ DBOS だけである。Burr は軽いが、キューの自作が残る（決定 
 | 0 | T2 試行（決定 20 の成り立ちと hook の所要・claude-agent-sdk と bump-my-version が今の契約を満たすか） | `experimental/` だけ |
 | 0 | 即時修正: `token-usage.py:version_key`、#1249（並列の計画が例外リストで衝突する） | 根の `scripts/token-usage.py`・構造チェックと実装の雛形 |
 | 1 | L1 包み | `lib/` の包み 12 本（新設。各 300 行以下）・`plugins/ndf/pyproject.toml` と `uv.lock` の extra・根の `pyproject.toml` と `uv.lock`（新設）・構造チェックの I14・`lib/README.md`・テスト。**呼び出し側はまだ変えない** |
-| 2 | D1 プランの実行 | C1 と同じファイル（`claude -p` の包みは T2 の結果で） |
-| 2 | D2 cross-review | C2 と同じファイル |
-| 2 | D3 外部 CLI と記録 | C3 と同じファイル（`wait-notify.py` の hook の入口は D5 が移す） |
+| 1 | L1b テストの環境（決定 22・23） | 根の `pyproject.toml` と `uv.lock`・`.github/workflows/pytest.yml`・`.ndf/supervise.json` のテストのコマンド・`lib/deps.py`・`test_wrappers_uv_env.py`（消す）・全体テストのコマンドを書いた文書（`CONTRIBUTING.md`・`.github/pull_request_template.md`・`docs/specifications/` の 3 本） |
+| 2 | D1 プランの実行 | C1 と同じファイル（`claude -p` の包みは決定 24 でプロセスの管理だけ） |
+| 2 | D2 cross-review | C2 と同じファイル（`skills/cross-review/tests` の monitor を差し替えるテストは D3） |
+| 2 | D3 外部 CLI と記録 | C3 と同じファイルと、`skills/cross-review/tests` の monitor を差し替えるテスト（`wait-notify.py` は切り離した子の `--send` の Slack だけ。hook が同期で呼ぶ `.env` とロックは D5 が移す） |
 | 2 | D4 cross-refactoring | C4 と同じファイル |
 | 2 | D7 リリースと文書 | C7 と同じファイルと `glossary.py`・`doc-lint.py`・`spec-copy.py`・`pr-steps.py` |
-| 2 | D8 根の scripts・playwright-kit・mcp-serena | 根の `scripts/`（`check-*.py`・`build-runtime-plugins.sh`・`validate-runtime-plugins.sh`・`token-usage*.py`）・playwright-kit の `config.py` |
-| 3 | D5 hook（決定 20） | `scripts/worktree-*.sh`・`token-guard.sh`・`lib/worktree-*.sh`・`lib/token_guard_sleep.py`・`workflow-common.sh`・`wait-notify.py`・`hooks/*.json` |
+| 2 | D8 根の scripts・playwright-kit | 根の `scripts/`（`check-*.py`・`build-runtime-plugins.sh`・`validate-runtime-plugins.sh`・`token-usage*.py`）・playwright-kit の `config.py`（mcp-serena は決定 25 で D5 へ移した） |
+| 3 | D5 hook（決定 20） | `scripts/worktree-*.sh`・`token-guard.sh`・`lib/worktree-*.sh`・`lib/token_guard_sleep.py`・`workflow-common.sh`・`wait-notify.py`・`hooks/*.json`・mcp-serena（決定 25。`hooks/`・`scripts/serena_lsp/`・`dev.kiro/install.sh`・`pyproject.toml` と `uv.lock`（新設）） |
 | 3 | D6 ラッパー（決定 20） | `relay_lib/`（`proc`・`common`・`record`・`terminal`・`version_dir`・`mark`） |
 
 **ステージ 2 は 6 本で、並列の上限に収まる。** 触るファイルは C1〜C7 の区切りに合わせてあり、重ならない。

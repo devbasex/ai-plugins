@@ -1,27 +1,15 @@
 #!/usr/bin/env bash
 # NDF plugin: 作業ツリー運用の判定を集めた共通ライブラリ。
 #
-# 入口のスクリプト (worktree-guard.sh / worktree-session.sh など) は入力の受け取りと
+# 入口のスクリプト (worktree-session.sh / worktree-setup.sh など) は入力の受け取りと
 # 出力の整形だけを行い、判定はすべてこのファイルの関数が持つ。同じ判定を 3 ランタイム
 # 分の入口へ書くと片方だけが古くなるため、テストもこの層に対して書く。
 #
+# 編集時の guard（書き込み先の推定・許可パス・Tool の名前の一覧）は hook の 1 本のエントリポイント
+# （hook.py。本体は hook_lib/worktree.py と hook_lib/write_target.py）が持つ（#1142 の決定 20）。
+#
 # このファイルは source して使う。単体で実行しても何も起きない。
 # 依存は bash と git、宣言ファイルを読むときだけ jq。無い場合は各関数が 1 を返す。
-
-# 主ディレクトリで編集しても案内を出さないパスの既定。
-# 宣言ファイルの guard.allow_paths が指定されていればそちらが優先する。
-# 末尾が `/` の項目は前方一致、それ以外は完全一致とその配下を許可する。
-WT_DEFAULT_ALLOW_PATHS=(
-  "issues/"
-  "docs/"
-  ".claude/"
-  ".codex/"
-  ".kiro/"
-  ".agents/"
-  ".serena/"
-  ".ndf/"
-  ".gitignore"
-)
 
 # 読み取れる宣言ファイルの版。知らない版は読まずに終わる。
 WT_DECLARATION_VERSION=1
@@ -38,23 +26,6 @@ WT_WORKTREE_DIR=".worktrees"
 
 # 逸脱検知でパスを並べる上限。超えた分は件数へ丸める。
 WT_DIRTY_LIST_MAX=20
-
-# 誘導の対象になる tool 名。ランタイムごとに名乗りが違うため、ここで 1 箇所に
-# まとめる。hook の matcher もこの一覧から作る（両方に書くと片方が古くなる）。
-#   編集系 — Claude Code は Edit / Write、Kiro CLI は fs_write、agy は write_to_file と
-#            replace_file_content。ほかのランタイムが名乗る write_file / replace なども
-#            同じ一覧へ並べる。**agy の `write_file` は権限の名前であって tool の名前では
-#            ない。** hook が受け取る `toolCall.name` は `write_to_file` である（実測）
-#   パッチ系 — Codex CLI はパッチ本文で編集先を渡す
-#   シェル系 — 書き込みを伴うコマンドの形から編集先を推定する
-WT_EDIT_TOOLS="Edit|MultiEdit|Write|NotebookEdit|fs_write|edit_file|write_file|str_replace_editor|replace|write_to_file|replace_file_content"
-WT_PATCH_TOOLS="apply_patch"
-WT_SHELL_TOOLS="Bash|shell|execute_bash|local_shell|run_command|run_shell_command"
-
-# hook の matcher に書く正規表現を出力する。
-wt_tool_matcher() {
-  printf '%s|%s|%s\n' "$WT_EDIT_TOOLS" "$WT_PATCH_TOOLS" "$WT_SHELL_TOOLS"
-}
 
 # --- 補助 -------------------------------------------------------------------
 
@@ -143,45 +114,7 @@ wt_in_worktree() {
   return "$_WT_IN_WORKTREE"
 }
 
-# 案内を出さないパスを 1 行 1 件で出力する。
-# 引数は wt_declaration の出力。空や未指定なら既定を返す。
-wt_allow_paths() {
-  local decl="${1:-}"
-  # 空の配列は「何も許可しない」という指定である。出力が空であることと
-  # 項目が無いことを区別するため、既定へ戻すかは配列の有無で決める。
-  if [ -n "$decl" ] && command -v jq >/dev/null 2>&1 &&
-     printf '%s' "$decl" | jq -e '(.guard.allow_paths | type) == "array"' >/dev/null 2>&1; then
-    printf '%s' "$decl" | jq -r '.guard.allow_paths | .[]' 2>/dev/null
-    return 0
-  fi
-  printf '%s\n' "${WT_DEFAULT_ALLOW_PATHS[@]}"
-}
-
 # --- パスの判定 -------------------------------------------------------------
-
-# 主ディレクトリからの相対パスが許可一覧に該当すれば 0 を返す。
-# 使い方: wt_is_allowed_path <相対パス> <許可項目>...
-wt_is_allowed_path() {
-  local rel="${1:-}" entry
-  [ -n "$rel" ] || return 1
-  shift || true
-  for entry in "$@"; do
-    [ -n "$entry" ] || continue
-    case "$entry" in
-      */)
-        # ディレクトリそのものを指す形も許可する。`cp x docs/` の書き込み先は
-        # 正規化の途中で末尾のスラッシュが落ち、`docs` として渡ってくる。
-        [ "$rel" = "${entry%/}" ] && return 0
-        case "$rel" in "$entry"*) return 0 ;; esac
-        ;;
-      *)
-        [ "$rel" = "$entry" ] && return 0
-        case "$rel" in "$entry"/*) return 0 ;; esac
-        ;;
-    esac
-  done
-  return 1
-}
 
 # 宣言に書かれた相対パスが、主ディレクトリと作業ツリーの中に収まるかを見る。
 # 宣言の誤りで外側を読み書きしないよう、絶対パスと上位への移動を弾く。
@@ -206,17 +139,6 @@ wt_compose_project() {
     | sed -e 's/[^a-z0-9_-]//g' -e 's/^[-_]*//')
   [ -n "$name" ] || return 1
   printf '%s\n' "$name"
-}
-
-# 絶対パスを主ディレクトリからの相対パスへ直す。外を指すなら 1 を返す。
-wt_relative_to_main() {
-  local path="${1:-}" main_dir="${2:-}"
-  [ -n "$path" ] && [ -n "$main_dir" ] || return 1
-  case "$path" in
-    "$main_dir") printf '.\n'; return 0 ;;
-    "$main_dir"/*) printf '%s\n' "${path#"$main_dir"/}"; return 0 ;;
-    *) return 1 ;;
-  esac
 }
 
 # --- パスの正規化 -----------------------------------------------------------
@@ -273,7 +195,7 @@ wt_normalize_path() {
 
 # --- 分けたファイルの読み込み ------------------------------------------------
 #
-# 残りの判定は同じディレクトリの 7 本が持つ。自分の位置からの相対で指し、`cd` で戻ってから
+# 残りの判定は同じディレクトリの 3 本が持つ。自分の位置からの相対で指し、`cd` で戻ってから
 # `pwd` を取る形は採らない（`lock-common.sh` を指すときと同じ理由。Kiro CLI の配置で
 # プラグインルートを外す）。関数どうしの呼び出しは実行時に解決されるため、読む順序に
 # 定義の制約はない。**1 本でも読めなければ 1 を返す。** 呼び出し側は `|| exit 0` で抜ける。
@@ -282,14 +204,6 @@ _wt_lib_dir=$(dirname "${BASH_SOURCE[0]}")
 . "$_wt_lib_dir/worktree-declaration.sh" || { unset _wt_lib_dir; return 1; }
 # shellcheck source=worktree-branch.sh
 . "$_wt_lib_dir/worktree-branch.sh" || { unset _wt_lib_dir; return 1; }
-# shellcheck source=worktree-shell-lex.sh
-. "$_wt_lib_dir/worktree-shell-lex.sh" || { unset _wt_lib_dir; return 1; }
-# shellcheck source=worktree-write-target.sh
-. "$_wt_lib_dir/worktree-write-target.sh" || { unset _wt_lib_dir; return 1; }
-# shellcheck source=worktree-write-target-scan.sh
-. "$_wt_lib_dir/worktree-write-target-scan.sh" || { unset _wt_lib_dir; return 1; }
-# shellcheck source=worktree-write-target-track.sh
-. "$_wt_lib_dir/worktree-write-target-track.sh" || { unset _wt_lib_dir; return 1; }
 # shellcheck source=worktree-registry.sh
 . "$_wt_lib_dir/worktree-registry.sh" || { unset _wt_lib_dir; return 1; }
 unset _wt_lib_dir

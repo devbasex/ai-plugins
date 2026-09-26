@@ -13,12 +13,15 @@
 | `is-child` | ラッパーの直接の子の claude から呼ばれていれば 0 |
 | `notice` | カットポイントの告知。1 行目に `relay` か `outside`（`is-child` と同じ判定）、2 行目に告知の 1 文を出す（#980）。外のときの 2 行目は理由（ラッパーが無い・終わっている・直接の子でない）で変わる（#1016） |
 
-**標準ライブラリだけで書く**（バージョンディレクトリに入る `lib/clock.py`・`lib/jsonio.py` を除く。I2）。合図と作業ディレクトリの形
-（`next.json` のキーと `NDF_RELAY_DIR` のファイル）は版をまたいで変えない。hook は区間ごとに新しい版で動き、
-動いているラッパーは古い版のままでありうるためである。動いているラッパーは起動時にこのパッケージの全モジュールを
-import するため、途中でバージョンディレクトリが替わっても別の版を読まない（決定 5）。
+**外部パッケージの包みの上に置く**（プロセスは `lib/procs.py`・排他は `lib/locks.py`・囲みは `lib/md.py`・版は
+`lib/versions.py`・擬似端末は ptyprocess。決定 20）。ランチャーは素の `python3` から起動されるため、`main` は副命令を
+動かす前に `runtime.enter` でそれらを import できる環境の python を選ぶ（起動し直す）。環境が無いとき、hook の
+副命令は判定をせずに終わり、`run` は本物の claude を素通しする。副命令のモジュールはそのあとで import する。
+合図と作業ディレクトリの形（`next.json` のキーと `NDF_RELAY_DIR` のファイル）は版をまたいで変えない。hook は
+区間ごとに新しい版で動き、動いているラッパーは古い版のままでありうるためである。動いているラッパーは起動時に
+このパッケージの全モジュールを import するため、途中でバージョンディレクトリが替わっても別の版を読まない（決定 5）。
 
-モジュール: `common`（定数と小さな関数）・`proc`（親のたどり）・`record`（`log.jsonl` と `next.json`）・
+モジュール: `runtime`（ラッパーを動かす python と環境）・`common`（定数と小さな関数）・`proc`（親のたどり）・`record`（`log.jsonl` と `next.json`）・
 `mark`（hook の本体）・`claude`（本物の claude と会話の記録）・`terminal`（端末と子）・`run`（`Relay`）・
 `shellrc`（シェルの設定の囲み）・`version_dir`（複製）・`install`（導入の副命令）。
 
@@ -28,10 +31,15 @@ from __future__ import annotations
 
 import sys
 
-from . import install, mark, proc, run
+from . import runtime
+from .common import launcher_path
 
 
 def main(argv: list[str]) -> int:
+    code = runtime.enter(argv, launcher_path())
+    if code is not None:
+        return code
+    from . import install, mark, proc, run  # 外部パッケージの包みを import する
     if not argv:
         print("usage: relay.py run|stop|mark|install|uninstall|status|startup|question open|close|is-child|notice",
               file=sys.stderr)

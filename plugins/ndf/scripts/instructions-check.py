@@ -42,12 +42,15 @@ from pathlib import Path
 # スクリプトのディレクトリが sys.path に入らない）
 _HERE = Path(__file__).resolve().parent
 sys.path[:0] = [str(_HERE), str(_HERE / "lib")]
+import deps  # noqa: E402
+
+deps.require("md", "pathmatch")
 import refresh as refresh_lib  # noqa: E402
 
 # 分けた名前をここから引けるように再エクスポートする（先頭が _ のものを含む）
 from instructions_lib.model import (  # noqa: E402,F401
-    SUPPORTED_CRITERIA_VERSIONS, KNOWN_CRITERIA, HEADING_RE, FENCE_RE, BULLET_RE, CheckError, Source,
-    Finding, Target, ScopeRoot, Criteria, load_criteria,
+    SUPPORTED_CRITERIA_VERSIONS, KNOWN_CRITERIA, BULLET_RE, CheckError, Source,
+    Finding, Target, ScopeRoot, Criteria, load_criteria, code_lines, atx_headings,
 )
 from instructions_lib.declaration import (  # noqa: E402,F401
     DEFAULT_FILES, DEFAULT_IMPORT_SYNTAX, DEFAULT_IMPORT_DEPTH, DEFAULT_REVIEW_INTERVAL_DAYS,

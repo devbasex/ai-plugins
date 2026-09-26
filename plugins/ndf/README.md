@@ -8,10 +8,10 @@ PR 運用、レビュー、調査、実装計画、仕様書化、開発方法�
 
 | ランタイム | 公開 Skill | マニフェスト |
 | --- | --- | --- |
-| Claude Code | 47 個 | `.claude-plugin/plugin.json` |
-| Codex | 43 個 | `.codex-plugin/plugin.json` |
-| Kiro CLI | 44 個 | `dev.kiro/install.sh`（プラグイン機構が無いため installer で導入） |
-| agy | 43 個 | `dev.agy/plugin.json`（取得元の登録が無いため clone から導入） |
+| Claude Code | 48 個 | `.claude-plugin/plugin.json` |
+| Codex | 44 個 | `.codex-plugin/plugin.json` |
+| Kiro CLI | 45 個 | `dev.kiro/install.sh`（プラグイン機構が無いため installer で導入） |
+| agy | 44 個 | `dev.agy/plugin.json`（取得元の登録が無いため clone から導入） |
 
 ## レイアウト
 
@@ -19,7 +19,7 @@ PR 運用、レビュー、調査、実装計画、仕様書化、開発方法�
 plugins/ndf/
 ├── .claude-plugin/plugin.json   # Claude Code のマニフェスト
 ├── .codex-plugin/plugin.json    # Codex のマニフェスト
-├── skills/                      # 配布 Skill の唯一の実体（47 個）
+├── skills/                      # 配布 Skill の唯一の実体（48 個）
 ├── skills/AUTHORING.md          # Skill 執筆の規約
 ├── manifests/                   # ランタイム別の配布 Skill 一覧
 ├── agents/                      # Claude Code のサブエージェント定義（専門 8 個と、3 層の定義 3 個（supervisor 2・worker 1））
@@ -89,7 +89,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.17.30）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.17.31）
 ```
 
 ### agy
@@ -102,7 +102,7 @@ agy plugin install plugins/ndf/dev.agy                               # 初回
 agy plugin uninstall ndf && agy plugin install plugins/ndf/dev.agy   # 新しい版へ
 ```
 
-導入すると `manifests/agy-skills.txt` に載る Skill 43 個と、エージェント 11 個（専門 8 個と、3 層の定義 3 個（supervisor 2・worker 1））、hook 1 個が
+導入すると `manifests/agy-skills.txt` に載る Skill 44 個と、エージェント 11 個（専門 8 個と、3 層の定義 3 個（supervisor 2・worker 1））、hook 1 個が
 `~/.gemini/config/plugins/ndf/` へコピーされます。symlink は実体へ解決されてコピーされるため、
 clone を消しても導入した内容は残ります。
 
@@ -119,25 +119,24 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.17.30 へ更新するとき
+## v10.17.31 へ更新するとき
 
-- Add: 決定 17 の試行を実験版に置き、結果を記録する（#1142 ミッション 2 の L0 の前）（#1238）
-- new mission が書く検査のプランの PR 本文は、課題を閉じる語を含まず、課題を「関連: #番号」として並べる（#1239）
-- mcp-redash の操作は `/redash <add|list|remove|status>` の 1 本で行う（#1250）
-- 以前の 4 Skill の呼び方からの移行手順は README に載っている（#1250）
-- 計画書の雛形を plan_skeleton.py で作れる（#1251）
-- シナリオを lint_scenario.py で静的に検査できる。playwright-authoring には app_ready.sh も入る（#1251）
-- playwright-kit-ops のスクリプトは標準出力へ JSON を出す（#1251）
-- 文書に終了コードの表がある（#1251）
-- ミッション m1142b の課題を develop へ取り込む。（#1255）
-- 関連: #1142（#1255）
-- Docs: #1142 の設計の追加（汎用の処理を外部ライブラリへ・決定 19・20・ミッション 2b）（#1257）
-- Add: 計画の実行とキューを置き換えるライブラリの候補を実験版で試し、結果を記録する（#1142 の不足 i）（#1258）
-- 無し（検査の修正だけ）（#1260）
-- `scripts/token-usage.py` は、版を接尾辞の数字の大きさの順に並べる（`10.17.30-dev.9` の次に `10.17.30-dev.10`）（#1261）
-- Fix: 行数の上限の例外リストを 1 項目 1 ファイルへ分け、並列の計画の衝突を無くす（#1262）
-- Add: 試行 T2（hook を 1 本の Python と tree-sitter-bash へまとめる成り立ちと所要）（#1264）
-- supervise.py の run では、claude -p の worker が「結果: 判断が要る」か「結果: できなかった」で終えると、そのステップは失敗になります。（#1265）
+- Update: Bump actions/checkout from 4 to 7（#402）
+- Update: Bump actions/setup-node from 4 to 7（#403）
+- Update: Bump actions/setup-python from 5 to 7（#404）
+- Update: Bump actions/upload-artifact from 4 to 7（#405）
+- 判断を求めるとき、質問の前の応答に次の 5 つが並ぶ: 何を決めるか / 分かったこと / 根拠の場所（生のパス・URL・コマンド）/ 選択肢ごとに何が変わるか / 推奨とその理由（未確認のことを含む）（#1277）
+- 選択肢だけを並べて聞く・推奨の印だけを付ける・聞き返されてから説明する、を「しないこと」として定めた（#1277）
+- Docs: #1142 の設計の追加（全体テストの環境・require の複数化・claude -p の包み）（#1278）
+- Docs: #1142 の設計の追加（mcp-serena の hook の起動の形）（#1288）
+- 設計: #1287（#1292）
+- ミッション m1142c の課題を develop へ取り込む。（#1300）
+- 関連: #1142（#1300）
+- ミッション m1287 の課題を develop へ取り込む。（#1302）
+- Refactor: 参加者の母集合を cross-review と共通にし、cross-refactoring の SKILL.md から経緯を外す（#1304）
+- Fix: 導入の確認でディレクトリへの symlink を中身で比べる（#1306）
+- Fix: 導入の確認で codex が落とす symlink を比べない（#1307）
+- Fix: resume.py が procs を読む前に deps.require を呼ぶ（#1310）
 
 ## Playwright テストについて
 
@@ -203,7 +202,7 @@ bash <プラグインのパス>/scripts/worktree-setup.sh init
 
 ### 待ちの問い合わせと長い会話を止める（Claude Code だけ）
 
-`scripts/token-guard.sh` が PreToolUse の `Bash` / `Read` / `Skill` / `Agent` で動き、3 つを
+`scripts/hook.py` の token の guard（`hook_lib/token_guard.py`）が PreToolUse の `Bash` / `Read` / `Skill` / `Agent` で動き、3 つを
 止めます。止めたときは、代わりの手段を理由の欄に出します。
 
 | 止めるもの | 止め方 | 上限 |
@@ -374,7 +373,7 @@ agy models   # 認証確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.17.30/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.17.31/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -396,14 +395,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.30/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.31/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.17.30  <path>
+# => ndf@ai-plugins  installed, enabled  10.17.31  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。

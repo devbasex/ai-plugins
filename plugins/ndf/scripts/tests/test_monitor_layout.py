@@ -30,7 +30,7 @@ HOLDS = {
         "_scan_codex_sentinel", "EarlyFatal", "_scan_usage_limit", "_scan_fatal", "_early_error",
     ],
     "monitor_proc": [
-        "_read_pidfile", "_proc_state", "_pid_alive", "_is_zombie", "_leads_own_group", "_kill_pid",
+        "_read_pidfile", "_pid_alive", "_is_zombie", "_leads_own_group", "_kill_pid",
         "_pid_cmdline_matches",
     ],
     "monitor_types": [
@@ -48,15 +48,15 @@ HOLDS = {
 }
 # 各モジュールが読んでよいライブラリのモジュール（標準ライブラリは数えない）
 MAY_IMPORT = {
-    "monitor": {"assignment", "clock", "limits", "monitor_outcome", "monitor_patterns", "monitor_scan", "monitor_proc",
+    "monitor": {"assignment", "clock", "deps", "limits", "monitor_outcome", "monitor_patterns", "monitor_scan", "monitor_proc",
                 "monitor_types", "monitor_loop"},
     "monitor_loop": {"limits", "monitor_outcome", "monitor_patterns", "monitor_scan", "monitor_proc",
                      "monitor_types"},
     "monitor_scan": {"monitor_patterns", "monitor_types"},
-    "monitor_proc": set(),
+    "monitor_proc": {"procs"},
     "monitor_patterns": set(),
     "monitor_types": {"assignment", "limits"},
-    "monitor_outcome": {"clock", "monitor_types"},
+    "monitor_outcome": {"clock", "locks", "monitor_types"},
 }
 LIB_MODULES = {p.stem for p in LIB.glob("*.py")}
 

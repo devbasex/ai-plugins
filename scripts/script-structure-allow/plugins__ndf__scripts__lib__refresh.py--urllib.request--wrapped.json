@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/lib/refresh.py", "name": "urllib.request", "kind": "wrapped", "reason": "L1 の時点の使用。D7 が lib/notify.py（httpx・slack_sdk） の上へ置き換えたら消す"}

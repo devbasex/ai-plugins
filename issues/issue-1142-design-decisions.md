@@ -213,8 +213,9 @@ import するモジュールは、構造チェックが落とす（I1）。
 2026-09-26 の実測（uv 0.12.19・githubkit 0.16.1）では、初回の解決と取得が 1.19 秒、2 回目以降の起動し直しの
 上乗せは 0.12〜0.18 秒である（標準ライブラリだけの `python3` の起動は 0.014 秒）。
 
-**hook とラッパーのバージョンディレクトリは外部パッケージを使わない**（I13）。hook は Tool の呼び出しごとに起動され、0.1 秒の
-上乗せが毎回かかる。ラッパーのバージョンディレクトリは `~/.claude/ndf/` へ複製して動くため、プラグインの宣言を参照できない。
+**hook とラッパーの経路は `deps.require()` を呼ばない**（I13）。hook は Tool の呼び出しごとに起動され、起動し直しの 0.1 秒の
+上乗せが毎回かかる。hook は SessionStart が用意した環境の python を直に起動し、ラッパーのバージョンディレクトリは複製のときに
+同じ lock から環境を作る（決定 20）。
 それ以外のエントリポイント（プランの実行・リリース・収束ループ・記録と測定など）は外部パッケージを使ってよい。どれも外部の呼び出しを持ち、1 回の起動が 0.1 秒の上乗せより十分に長い。
 
 **最初に使うのは GitHub のクライアントである。** `lib/gh_parts.py` の中身を githubkit の上に置き、
@@ -293,3 +294,24 @@ githubkit の ETag 付きの読み直しが上限に数えられないこと、4
 
 試行（PR #1258）で 3 候補とも成り立ち、キューと資源のタグごとの枠を持ち自作が残らない DBOS を選んだ。比べた表と
 置き換える範囲は [issue-1142-design-libraries.md](issue-1142-design-libraries.md) の「決定 21」にある。移行はミッション 2c。
+
+### 決定 22: 全体テストは、根の 1 つの環境で本番と同じパッケージを入れて流す
+
+包みを呼ぶ側のテストが、全体テストの環境（playwright-kit の venv）に無いパッケージを import して落ちる（2026-09-26 の
+ステージ 2 で D1〜D4 が止まった）。根の `pyproject.toml` に playwright_kit と ndf の全 extra と pytest を 1 つの lock で
+固定し、CI と手元はその環境で流す。比べた案と移行は [issue-1142-design-libraries.md](issue-1142-design-libraries.md) の「決定 22」にある。
+
+### 決定 23: `deps.require()` は複数のグループを 1 回で入れる
+
+1 回の起動し直しで 1 つのグループしか入らず、2 つ要るエントリポイントが止まるため（[issue-1142-design-libraries.md](issue-1142-design-libraries.md) の「決定 23」）。
+
+### 決定 24: `claude -p` の包みは CLI の直の起動のまま残す
+
+claude-agent-sdk は成り立つが、費用を保つ手段が文書に無い環境変数だけで、消える自作は約 130 行にとどまる
+（試行 T2・T2b。[issue-1142-design-libraries.md](issue-1142-design-libraries.md) の「決定 24」）。
+
+### 決定 25: mcp-serena の hook も、用意済みの環境の python を直に起動する
+
+mcp-serena の PreToolUse の hook が Tool の呼び出しのたびに `.serena/project.yml` を読むため、ruamel.yaml の入れ方が
+設計に無く D8 が止まった。決定 20 と同じ形（SessionStart が環境を用意し、hook はその python を直に起動する）にし、
+移行を D5 へ移す。NDF の `lib/deps.py` は別の配布単位なので使わない（[issue-1142-design-libraries.md](issue-1142-design-libraries.md) の「決定 25」）。

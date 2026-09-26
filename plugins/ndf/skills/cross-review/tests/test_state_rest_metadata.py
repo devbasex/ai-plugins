@@ -10,12 +10,12 @@
 from __future__ import annotations
 
 import json
-import subprocess
 
 import pytest
 import review_lib
 import review_lib.ci
 import review_lib.github
+import gh_call  # review_lib が sys.path に足したライブラリの置き場から読む
 
 PR = 320
 REPO = "devbasex/ai-plugins"
@@ -63,6 +63,16 @@ def test_the_repository_name_comes_from_the_git_remote(state_mod, monkeypatch, u
     assert review_lib.github._repo_from_git() == REPO
 
 
+def test_a_remote_on_another_host_also_gives_the_name(state_mod, monkeypatch):
+    """URL の読み取りはライブラリの `repo.owner_repo_from_url` が持ち、ホストを github.com に限らない（#1142 の D2）。
+
+    名前が誤っていれば `repos/{owner}/{repo}/pulls/{PR}` の応答が失敗し、`gh repo view` で解決し直す。
+    """
+    monkeypatch.setattr(review_lib.github, "_git_remote_url", lambda: "git@ghe.example.com:devbasex/ai-plugins.git")
+
+    assert review_lib.github._repo_from_git() == REPO
+
+
 def test_an_unreadable_remote_gives_no_name(state_mod, monkeypatch):
     monkeypatch.setattr(review_lib.github, "_git_remote_url", lambda: "")
 
@@ -75,7 +85,7 @@ def test_one_rest_response_fills_author_head_and_base(state_mod, real_github, mo
     paths: list[str] = []
     monkeypatch.setattr(review_lib.github, "_repo_from_git", lambda: REPO)
     monkeypatch.setattr(review_lib.github, "_gh_rest", lambda p: (paths.append(p), _response(state_mod))[1])
-    monkeypatch.setattr(review_lib, "_sh", lambda *a, **k: pytest.fail("GraphQL へ落ちてはならない"))
+    monkeypatch.setattr(review_lib.github, "_repo_from_gh", lambda: pytest.fail("GraphQL へ落ちてはならない"))
 
     meta = review_lib.github._fetch_pr_metadata(PR)
 
@@ -107,7 +117,7 @@ def test_a_wrong_repository_name_falls_back_to_gh_repo_view(state_mod, real_gith
 
     monkeypatch.setattr(review_lib.github, "_repo_from_git", lambda: "wrong/name")
     monkeypatch.setattr(review_lib.github, "_gh_rest", _rest)
-    monkeypatch.setattr(review_lib, "_sh", lambda cmd, check=True: REPO)
+    monkeypatch.setattr(review_lib.github, "_repo_from_gh", lambda: REPO)
 
     meta = review_lib.github._fetch_pr_metadata(PR)
 
@@ -118,7 +128,7 @@ def test_a_wrong_repository_name_falls_back_to_gh_repo_view(state_mod, real_gith
 def test_an_unreachable_pull_request_gives_nothing(state_mod, real_github, monkeypatch):
     monkeypatch.setattr(review_lib.github, "_repo_from_git", lambda: REPO)
     monkeypatch.setattr(review_lib.github, "_gh_rest", lambda p: None)
-    monkeypatch.setattr(review_lib, "_sh", lambda cmd, check=True: REPO)
+    monkeypatch.setattr(review_lib.github, "_repo_from_gh", lambda: REPO)
 
     assert review_lib.github._fetch_pr_metadata(PR) is None
 
@@ -127,11 +137,11 @@ def test_an_unreachable_pull_request_gives_nothing(state_mod, real_github, monke
 
 def test_the_rate_limit_is_read_from_the_response_header(state_mod, monkeypatch):
     """残量を読むためだけの呼び出しは置かない（`gh api rate_limit` は 0 を返す）。"""
-    def _run(cmd, capture_output=True, text=True):
-        assert cmd[:3] == ["gh", "api", "-i"]
-        return subprocess.CompletedProcess(cmd, 0, stdout=RAW, stderr="")
+    def _run(args, stdin=None, cwd=None):
+        assert args[:2] == ["api", "-i"]
+        return gh_call.GhResult(0, RAW, "")
 
-    monkeypatch.setattr(subprocess, "run", _run)
+    monkeypatch.setattr(gh_call, "RUNNER", _run)
 
     resp = review_lib.github._gh_rest(f"repos/{REPO}/pulls/{PR}")
 
@@ -143,11 +153,8 @@ def test_the_rate_limit_is_read_from_the_response_header(state_mod, monkeypatch)
 
 def test_a_failed_call_returns_nothing(state_mod, monkeypatch):
     """失敗は例外にせず `None` で返す。待ち行列を挟む位置になる（#291）。"""
-    monkeypatch.setattr(
-        subprocess, "run",
-        lambda cmd, capture_output=True, text=True:
-            subprocess.CompletedProcess(cmd, 1, stdout="", stderr="HTTP 422"),
-    )
+    monkeypatch.setattr(gh_call, "RUNNER",
+                        lambda args, stdin=None, cwd=None: gh_call.GhResult(1, "", "HTTP 422"))
 
     assert review_lib.github._gh_rest("repos/o/r/commits/x/check-runs") is None
 

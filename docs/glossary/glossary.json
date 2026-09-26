@@ -828,7 +828,7 @@
     {
       "term": "参加者プール",
       "context": "ndf-agent-cli",
-      "meaning": "Skill ごとに決まる参加者の出発点。cross-review は claude / codex / kiro とホスト、cross-refactoring は codex / kiro とホスト（review_pool / refactor_pool）",
+      "meaning": "Skill ごとに決まる参加者の出発点。cross-review と cross-refactoring で共通の claude / codex / kiro とホスト（default_pool）",
       "source": "docs/specifications/cross-review-participants-and-seats.md",
       "deprecated": [
         "参加の母集合"
@@ -1959,6 +1959,41 @@
       "context": "ndf-workflow",
       "meaning": "テストを除くスクリプトの行数と、本体の同じ関数・同じ名前で本体の違う関数を構文木で数える継続的統合のチェック",
       "pending_source": "issues/issue-1142-design.md"
+    },
+    {
+      "term": "指摘の基準",
+      "context": "ndf-cross-review",
+      "meaning": "指摘として出してよいものを決める 4 つの条件（利用者が普通に使う経路の誤動作・レッドラインに触れるもの・レビューの重点・実装を違えさせる設計の食い違い）。当たるものが major 以上になる",
+      "source": "",
+      "pending_source": "issues/issue-1287-design.md"
+    },
+    {
+      "term": "レビューの重点",
+      "context": "ndf-cross-review",
+      "meaning": "プロジェクトが .ndf/review.json で宣言した、指摘の基準 3 に使う観点。宣言が無ければ基準 3 は無い",
+      "source": "",
+      "pending_source": "issues/issue-1287-design.md"
+    },
+    {
+      "term": "見送りの返信",
+      "context": "ndf-cross-review",
+      "meaning": "修正担当が minor / nit の指摘を直さずに閉じるときに書く返信。雛形から組み、理由の種類（見送りの種類の名前）と直す条件（使って困る場面が出たら直す）を定型文で書く",
+      "source": "",
+      "pending_source": "issues/issue-1287-design.md"
+    },
+    {
+      "term": "見送りの種類",
+      "context": "ndf-cross-review",
+      "meaning": "見送りの返信の括弧に書く、指摘の基準に当たらない理由の 5 分類（waive_kind）",
+      "source": "",
+      "pending_source": "issues/issue-1287-design.md"
+    },
+    {
+      "term": "最終スイープ",
+      "context": "ndf-cross-review",
+      "meaning": "収束ループを抜けた後に /ndf:fix を通し、open thread を 0 にする工程",
+      "source": "",
+      "pending_source": "issues/issue-1287-design.md"
     }
   ]
 }

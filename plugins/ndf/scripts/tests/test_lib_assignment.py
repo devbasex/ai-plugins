@@ -63,11 +63,10 @@ def test_detect_host_rejects_an_environment_without_hints(assignment):
 
 
 @pytest.mark.parametrize("host", ("gemini", "unknown"))
-@pytest.mark.parametrize("pool", ("review_pool", "refactor_pool"))
-def test_the_default_pools_reject_a_host_outside_host_runtimes(assignment, pool, host):
-    """HOST_RUNTIMES に含まれないホストを、どちらの母集合の既定も拒否する。"""
+def test_the_default_pool_rejects_a_host_outside_host_runtimes(assignment, host):
+    """HOST_RUNTIMES に含まれないホストを、母集合の既定が拒否する。"""
     with pytest.raises(assignment.AssignmentError) as excinfo:
-        getattr(assignment, pool)(host)
+        assignment.default_pool(host)
 
     assert "ホストになれないランタイムです" in str(excinfo.value)
 
@@ -177,7 +176,7 @@ def test_review_seats_rejects_a_bad_round(assignment):
         assignment.review_seats(-1, ["codex", "kiro"], [])
 
 
-# ---------- cross-review の既定の母集合と座席（#786 の決定 1） ----------
+# ---------- 既定の母集合（cross-review と cross-refactoring で共通）と座席 ----------
 
 @pytest.mark.parametrize("host, expected", [
     ("claude", ["claude", "codex", "kiro"]),
@@ -185,9 +184,9 @@ def test_review_seats_rejects_a_bad_round(assignment):
     ("kiro", ["claude", "codex", "kiro"]),
     ("agy", ["claude", "codex", "agy", "kiro"]),
 ])
-def test_review_pool_leaves_agy_out_unless_it_is_the_host(assignment, host, expected):
+def test_default_pool_leaves_agy_out_unless_it_is_the_host(assignment, host, expected):
     """AC1〜AC3。"""
-    assert assignment.review_pool(host) == expected
+    assert assignment.default_pool(host) == expected
 
 
 def _no_probe(names):
@@ -197,7 +196,7 @@ def _no_probe(names):
 def test_default_seats_for_a_claude_host(assignment):
     """AC1: round 1 codex+kiro / round 2 claude+kiro / round 3 claude+codex。"""
     p = assignment.resolve_participants(
-        assignment.review_pool("claude"), host="claude", probe=_no_probe,
+        assignment.default_pool("claude"), host="claude", probe=_no_probe,
     )
     seats = [assignment.review_seats(r, p.available, []) for r in (1, 2, 3)]
     assert seats == [["codex", "kiro"], ["claude", "kiro"], ["claude", "codex"]]
@@ -206,14 +205,14 @@ def test_default_seats_for_a_claude_host(assignment):
 def test_include_agy_restores_the_previous_rotation(assignment):
     """AC4: `--include agy` の座席は 4 者の母集合の輪番と同じ。`--exclude agy` は止めない。"""
     p = assignment.resolve_participants(
-        assignment.review_pool("claude"), host="claude", include=["agy"], probe=_no_probe,
+        assignment.default_pool("claude"), host="claude", include=["agy"], probe=_no_probe,
     )
     four = list(assignment.ALL_RUNTIMES)
     for r in range(1, 5):
         assert assignment.review_seats(r, p.available, []) == assignment.review_seats(r, four, [])
 
     q = assignment.resolve_participants(
-        assignment.review_pool("claude"), host="claude", exclude=["agy"], probe=_no_probe,
+        assignment.default_pool("claude"), host="claude", exclude=["agy"], probe=_no_probe,
     )
     assert q.ignored_exclude == ["agy"]
     assert "agy" not in q.available
@@ -221,7 +220,7 @@ def test_include_agy_restores_the_previous_rotation(assignment):
 
 def test_only_agy_without_include_and_its_conflicts(assignment):
     """AC4b: `--only agy` は agy 1 者。`--exclude agy` と重ねると止まる。綴りの誤りは確認の前に止まる。"""
-    pool = assignment.review_pool("claude")
+    pool = assignment.default_pool("claude")
     p = assignment.resolve_participants(pool, host="claude", only="agy", probe=_no_probe)
     assert p.available == ["agy"]
     assert p.included == []

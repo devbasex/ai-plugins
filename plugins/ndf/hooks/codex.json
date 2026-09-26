@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh -c 'if [ -n \"$PLUGIN_ROOT\" ]; then bash \"$PLUGIN_ROOT/scripts/worktree-guard.sh\"; fi; exit 0'",
+            "command": "sh -c '[ -x \"$0\" ] || exit 0; exec \"$0\" \"$@\"' \"$HOME/.cache/ndf/roots$PLUGIN_ROOT/bin/python\" \"$PLUGIN_ROOT/scripts/hook.py\" --runtime codex",
             "timeout": 5,
             "statusMessage": "Checking the edit target against the main directory"
           }
@@ -30,7 +30,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh -c 'if [ -n \"$PLUGIN_ROOT\" ]; then python3 \"$PLUGIN_ROOT/scripts/wait-notify.py\" --runtime codex; fi; exit 0'",
+            "command": "sh -c '[ -x \"$0\" ] || exit 0; exec \"$0\" \"$@\"' \"$HOME/.cache/ndf/roots$PLUGIN_ROOT/bin/python\" \"$PLUGIN_ROOT/scripts/hook.py\" --runtime codex",
             "timeout": 15,
             "statusMessage": "Checking whether the reply waits for an answer or approval"
           }
@@ -42,7 +42,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh -c 'if [ -n \"$PLUGIN_ROOT\" ]; then python3 \"$PLUGIN_ROOT/scripts/wait-notify.py\" --runtime codex; fi; exit 0'",
+            "command": "sh -c '[ -x \"$0\" ] || exit 0; exec \"$0\" \"$@\"' \"$HOME/.cache/ndf/roots$PLUGIN_ROOT/bin/python\" \"$PLUGIN_ROOT/scripts/hook.py\" --runtime codex",
             "timeout": 15,
             "statusMessage": "Notifying that an approval waits"
           }

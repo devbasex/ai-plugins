@@ -17,8 +17,9 @@
 `emit(...)` のキーワードを集め、`_emit_init` のようなヘルパーを経由する呼び出しも
 **1 階層だけ**たどる。
 
-**シェルの構文解析器は使わない。** 骨組みは代入・`for`・コマンド置換に限られており、
-この範囲は後ろ向きの状態だけで読める（#201 で同じ判断をしている）。
+bash のブロックは `lib/md.py`（CommonMark の囲み）で、bash そのものは `lib/shparse.py`（tree-sitter-bash）の
+構文木で読む（#1142 の D8）。構文木を書かれた順にたどり、代入・`for`・`read`・`eval` で得た名前を、それより
+後ろの参照の出所にする。引用符で囲んだヒアドキュメントの本文とコメントは参照に数えない。
 
 使い方:
 
@@ -34,6 +35,13 @@ import pathlib
 import re
 import sys
 from typing import Iterable, Optional
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
+from ndf_wrappers import require  # noqa: E402  根の lock で包みの依存を解決する（#1142 の決定 19）
+
+require("md", "shparse")
+import md  # noqa: E402
+import shparse  # noqa: E402
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -56,31 +64,18 @@ SHELL_BUILTINS = {
     "CROSS_REFACTORING_TMP_DIR",
 }
 
-_VAR_REF = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)([^}]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)")
-_ASSIGN = re.compile(r"^\s*(?:export\s+|local\s+|declare\s+)?([A-Za-z_][A-Za-z0-9_]*)=")
-_FOR = re.compile(r"\bfor\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\b")
-_READ = re.compile(r"\bread\b[^|;]*?\s([A-Za-z_][A-Za-z0-9_]*)\s*$")
-# `rf_eval <副コマンド>` / `eval "$(... <副コマンド> ...)"` の形で値を受け取る行
-_EVAL_CALL = re.compile(r"\b(?:rf_eval|eval)\b[^\n]*?\b([a-z][a-z0-9-]{2,})\b")
-# 1 行の中の区切り。**引用符の中の区切りも割れるが、判定は「定義が早く効く」
-# 側へ倒れるだけである。** 出所の無い参照を見落とす向きには働かない。
-_SEPARATOR = re.compile(r"[;&|]+")
+# `rf_eval <副コマンド>` / `eval "$(... <副コマンド> ...)"` の形で値を受け取るコマンドの副コマンドの語
+_EVAL_COMMANDS = {"rf_eval", "eval"}
+_SUBCOMMAND = re.compile(r"\b([a-z][a-z0-9-]{2,})\b")
+_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+# 既定値を持つ参照（`${X:-...}` ほか）の演算子。出所を問わない
+_DEFAULTED = {":-", ":=", ":+", "-", "+"}
 
 
 def bash_blocks(text: str) -> list[str]:
-    """Markdown の bash のコードブロックを順に返す。"""
-    blocks, current, inside = [], [], False
-    for line in text.split("\n"):
-        if line.startswith("```"):
-            if inside:
-                blocks.append("\n".join(current))
-                current, inside = [], False
-            elif line.strip() in ("```bash", "```sh"):
-                inside = True
-            continue
-        if inside:
-            current.append(line)
-    return blocks
+    """Markdown の bash のコードブロック（情報文字列が `bash` / `sh` の囲み）を順に返す。"""
+    return [t.content.rstrip("\n") for t in md.md_tokens(text)
+            if t.type == "fence" and t.info.strip() in ("bash", "sh")]
 
 
 def emitted_keys(scripts_dir: pathlib.Path) -> dict[str, set[str]]:
@@ -128,17 +123,81 @@ def _call_name(node: ast.expr) -> Optional[str]:
     return None
 
 
-def referenced(line: str) -> list[str]:
-    """その行が参照する変数。既定値を持つ参照（`${X:-...}`）は除く。"""
-    names = []
-    for braced, modifier, plain in _VAR_REF.findall(line):
-        if braced:
-            if modifier.startswith((":-", ":=", ":+", "-", "+")):
-                continue
-            names.append(braced)
-        elif plain:
-            names.append(plain)
-    return names
+def _reference(node) -> Optional[str]:
+    """`$X` / `${X}` の名前。既定値を持つ参照と特殊な変数（`$?`・`$1`）は None。"""
+    if node.type == "simple_expansion":
+        names = [c for c in node.children if c.type == "variable_name"]
+        return shparse.node_text(names[0]) if names else None
+    kids = node.children
+    for k, c in enumerate(kids):
+        if c.type == "subscript":
+            c = next((d for d in c.children if d.type == "variable_name"), None)
+            if c is None:
+                return None
+        if c.type == "variable_name":
+            after = kids[k + 1].type if k + 1 < len(kids) else ""
+            return None if after in _DEFAULTED else shparse.node_text(c)
+    return None
+
+
+def _command_name(node) -> str:
+    head = node.child_by_field_name("name")
+    return shparse.node_text(head) if head is not None else ""
+
+
+class _Flow:
+    """構文木を書かれた順にたどり、出所の無い参照を集める。"""
+
+    def __init__(self, known: set[str], emits: dict[str, set[str]]):
+        self.known = known
+        self.emits = emits
+        self.missing: list[tuple[str, int]] = []
+
+    def walk(self, node) -> None:
+        kind = node.type
+        if kind == "comment":
+            return
+        if kind in ("simple_expansion", "expansion"):
+            name = _reference(node)
+            if name and name not in self.known:
+                self.missing.append((name, node.start_point[0] + 1))
+                self.known.add(name)      # 同じ名前を何度も並べない
+            for c in node.children:       # `${X:-$Y}` の既定値の中の参照
+                if c.type not in ("variable_name", "subscript"):
+                    self.walk(c)
+            return
+        if kind == "variable_assignment":
+            for c in node.children:
+                if c.type != "variable_name":
+                    self.walk(c)
+            name = node.child_by_field_name("name")
+            if name is not None:
+                self.known.add(shparse.node_text(name))
+            return
+        if kind == "for_statement":
+            var = node.child_by_field_name("variable")
+            body = node.child_by_field_name("body")
+            for c in node.children:
+                if c != var and c != body:  # 節は取り出すたびに作り直されるため、同一性ではなく等しさで比べる
+                    self.walk(c)
+            if var is not None:
+                self.known.add(shparse.node_text(var))
+            if body is not None:
+                self.walk(body)
+            return
+        for c in node.children:
+            self.walk(c)
+        if kind == "command":
+            self._command_defines(node)
+
+    def _command_defines(self, node) -> None:
+        name = _command_name(node)
+        if name == "read":
+            words = [shparse.node_text(c) for c in node.children if c.type == "word"]
+            self.known |= {w for w in words if _NAME.fullmatch(w)}
+        elif name in _EVAL_COMMANDS:
+            for sub in _SUBCOMMAND.findall(shparse.node_text(node)):
+                self.known |= self.emits.get(sub, set())
 
 
 def check_skill(skill_dir: pathlib.Path, external: set[str]) -> list[str]:
@@ -155,26 +214,12 @@ def check_skill(skill_dir: pathlib.Path, external: set[str]) -> list[str]:
         shown = skill_md
     problems: list[str] = []
     for block in bash_blocks(skill_md.read_text(encoding="utf-8")):
-        known = set(external) | SHELL_BUILTINS
-        for lineno, line in enumerate(block.split("\n"), 1):
-            code = line.split("#", 1)[0]
-            # **1 行に複数のコマンドが並ぶ。** `out=$(...); rc=$?` や
-            # `for a in $X; do echo "$a"; done` は、同じ行の左で定義した値を
-            # 右で読む。行をそのまま見ると、定義より先に参照を判定してしまう。
-            for part in _SEPARATOR.split(code):
-                for name in referenced(part):
-                    if name in known or name.isdigit():
-                        continue
-                    problems.append(
-                        f"{shown}: ${name} の出所がありません"
-                        f"（bash ブロックの {lineno} 行目）"
-                    )
-                    known.add(name)      # 同じ名前を何度も並べない
-                known |= set(_ASSIGN.findall(part))
-                known |= set(_FOR.findall(part))
-                known |= set(_READ.findall(part))
-                for subcommand in _EVAL_CALL.findall(part):
-                    known |= emits.get(subcommand, set())
+        flow = _Flow(set(external) | SHELL_BUILTINS, emits)
+        flow.walk(shparse.parse_bash(block))
+        for name, lineno in flow.missing:
+            if name.isdigit():
+                continue
+            problems.append(f"{shown}: ${name} の出所がありません（bash ブロックの {lineno} 行目）")
     return problems
 
 

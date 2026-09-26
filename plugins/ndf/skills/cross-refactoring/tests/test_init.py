@@ -167,7 +167,7 @@ def test_init_creates_the_writable_worktree_from_origin(run_init, tmp_path):
 
 
 def test_init_uses_codex_kiro_and_the_host_as_the_participants(run_init, tmp_path, capsys):
-    """AC31 — 既定の参加者は codex / kiro とホスト。agy は確かめず、母集合は 1 つだけ。"""
+    """既定の参加者は claude / codex / kiro とホスト。agy は確かめず、母集合は 1 つだけ。"""
     run_init(_args(tmp_path), probe={})
     _, state = _state_of(tmp_path)
     assert state["runtimes"] == ["claude", "codex", "kiro"]
@@ -182,12 +182,12 @@ def test_init_uses_codex_kiro_and_the_host_as_the_participants(run_init, tmp_pat
 
 
 @pytest.mark.parametrize("host, expected", [
-    ("codex", ["codex", "kiro"]),
-    ("agy", ["codex", "agy", "kiro"]),
-    ("kiro", ["codex", "kiro"]),
+    ("codex", ["claude", "codex", "kiro"]),
+    ("agy", ["claude", "codex", "agy", "kiro"]),
+    ("kiro", ["claude", "codex", "kiro"]),
 ])
 def test_the_participants_follow_the_host(run_init, tmp_path, host, expected):
-    """AC32 — ホストが既定の参加者の表にいれば 2 者、いなければ 3 者になる。"""
+    """ホストが既定の参加者の表にいれば 3 者、いなければ（agy）4 者になる。"""
     run_init(_args(tmp_path, host=host), probe={})
     assert _state_of(tmp_path)[1]["runtimes"] == expected
 
@@ -379,7 +379,7 @@ def test_init_accepts_agy_as_host(run_init, tmp_path):
     run_init(_args(tmp_path, host="agy"))
     _, state = _state_of(tmp_path)
     assert state["host"] == "agy"
-    assert state["runtimes"] == ["codex", "agy", "kiro"]
+    assert state["runtimes"] == ["claude", "codex", "agy", "kiro"]
 
 
 def test_init_runs_the_baseline_test(run_init, tmp_path):

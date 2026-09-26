@@ -1,7 +1,7 @@
 """指示書のチェックの型と観点のデータ（`instructions-check.py` から分けた。#1142 の C7）。
 
 指摘・対象・スコープの型、観点のデータ（`data/instruction-criteria.json`）の読み込み、複数のモジュールが使う
-正規表現を持つ。ほかの `instructions_lib` のモジュールを import しない。
+本文の読み方（見出しと囲みは lib/md.py）を持つ。ほかの `instructions_lib` のモジュールを import しない。
 """
 from __future__ import annotations
 
@@ -9,6 +9,8 @@ import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+
+import md
 
 
 SUPPORTED_CRITERIA_VERSIONS = (1,)
@@ -22,9 +24,23 @@ KNOWN_CRITERIA = {
     "read-size-budget": "budget_findings",
     "instruction-count": "count_findings",
 }
-HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
-FENCE_RE = re.compile(r"^\s*(```|~~~)")
 BULLET_RE = re.compile(r"^\s*(?:[-*+]\s+|\d+\.\s+)")
+
+
+def code_lines(text: str) -> list[bool]:
+    """行ごとに、コードの囲み（開き・閉じの行を含む）かコードブロックの中なら真（CommonMark の規則）。"""
+    return md.fenced_lines(text)
+
+
+def atx_headings(text: str) -> dict[int, str]:
+    """`#` で書いた見出しの行番号（1 始まり）→ `#` の後ろの字面。引用や箇条書きの中の見出しは含めない。"""
+    lines = text.splitlines()
+    out: dict[int, str] = {}
+    for h in md.headings(text):
+        raw = lines[h.line].strip() if h.line < len(lines) else ""
+        if raw.startswith("#"):
+            out[h.line + 1] = raw.lstrip("#").strip()
+    return out
 
 
 class CheckError(Exception):

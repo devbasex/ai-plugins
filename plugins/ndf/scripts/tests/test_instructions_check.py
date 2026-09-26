@@ -116,6 +116,16 @@ def test_ac4_files_matches_name_or_relative_path(tmp_path):
     assert "notes/POLICY.md" in proc.stdout
 
 
+def test_files_accepts_wildmatch_patterns(tmp_path):
+    """files の値は git の wildmatch で当てる（lib/pathmatch.py。`*` は `/` をまたがない）。字面の一致だった頃は
+    `docs/*.md` がどのファイルにも当たらなかった。"""
+    root = make_repo(tmp_path, {"docs/a.md": "# a\n", "docs/x/b.md": "# b\n", "c.md": "# c\n"})
+    declare(root, {"version": 1, "files": ["docs/*.md"]})
+    proc = run(root)
+    assert proc.returncode == 0, proc.stderr
+    assert "1 本" in proc.stdout
+
+
 def test_ac5_files_replaces_the_defaults(tmp_path):
     root = make_repo(tmp_path, {"AGENTS.md": "# a\n", "CLAUDE.md": "# c\n"})
     declare(root, {"version": 1, "files": ["AGENTS.md"]})
@@ -378,7 +388,8 @@ def install_script(root: Path) -> Path:
     (dest / "lib").mkdir(parents=True, exist_ok=True)
     (dest / "data").mkdir(parents=True, exist_ok=True)
     (dest / "instructions-check.py").write_bytes(SCRIPT.read_bytes())
-    (dest / "lib" / "refresh.py").write_bytes((SCRIPT.parent / "lib" / "refresh.py").read_bytes())
+    for name in ("refresh.py", "deps.py", "md.py", "pathmatch.py"):
+        (dest / "lib" / name).write_bytes((SCRIPT.parent / "lib" / name).read_bytes())
     shutil.copytree(SCRIPT.parent / "instructions_lib", dest / "instructions_lib", dirs_exist_ok=True,
                     ignore=shutil.ignore_patterns("__pycache__"))
     src = SCRIPT.parent / "data" / "instruction-criteria.json"

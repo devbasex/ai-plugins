@@ -8,7 +8,7 @@
 
 <!-- 実行したコマンドと結果を書く。実行していないものはチェックを付けず、理由を残す -->
 
-- [ ] `uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest pytest . -q -n auto`
+- [ ] `uv run --frozen --project . --all-extras pytest . -q -n auto`
 - [ ] `python3 scripts/check-skill-frontmatter.py`
 - [ ] `python3 scripts/check-doc-staleness.py`
 - [ ] `python3 scripts/check-markdown-links.py --root .`

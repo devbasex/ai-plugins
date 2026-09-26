@@ -5,6 +5,7 @@ import argparse
 from collections import Counter
 from typing import Any
 
+import mdtable
 import models as models_lib
 import run_metrics
 import statefile
@@ -191,32 +192,28 @@ def _whole_detail(whole: dict[str, Any]) -> str:
 
 
 def _phase_table(state: dict[str, Any]) -> str:
-    lines = ["| 手順 | 所要（分） |", "| --- | ---: |"]
-    for name in ("propose", "plan", "add-tests", "implement", "verify", "fix"):
-        record = phase_record(state, name)
-        seconds = record.get("seconds")
-        lines.append(f"| {name} | {'—' if seconds is None else f'{seconds / 60:.1f}'} |")
-    final = (state.get("final_gate") or {}).get("whole_test_seconds")
-    lines.append(f"| 最終ゲートの全体のテスト | {'—' if final is None else f'{final / 60:.1f}'} |")
-    return "\n".join(lines)
+    def minutes(seconds: Any) -> str:
+        return "—" if seconds is None else f"{seconds / 60:.1f}"
+
+    rows = [(name, minutes(phase_record(state, name).get("seconds")))
+            for name in ("propose", "plan", "add-tests", "implement", "verify", "fix")]
+    rows.append(("最終ゲートの全体のテスト", minutes((state.get("final_gate") or {}).get("whole_test_seconds"))))
+    return mdtable.table_markdown(["手順", "所要（分）"], rows, align=["left", "right"])
 
 
 def _item_table(state: dict[str, Any]) -> str:
     items = state.get("items") or []
     if not items:
         return "（改善項目なし）"
-    lines = [
-        "| ID | 対象 | 兆候 | 手法 | 等級 | 見積り（分） | 状態 | 危険フラグ | 修正 |",
-        "| --- | --- | --- | --- | --- | ---: | --- | --- | ---: |",
-    ]
+    rows = []
     for item in items:
         estimate = sum(float(v or 0) for v in (item.get("estimate") or {}).values())
-        lines.append(
-            f"| {item['id']} | {item_label(item)} | {item.get('smell')} | {item.get('technique')} | "
-            f"{item.get('tier')} | {estimate:.1f} | {item.get('status')} | "
-            f"{', '.join(item.get('danger') or []) or '—'} | {item.get('fix_count', 0)} |"
-        )
-    return "\n".join(lines)
+        rows.append((item["id"], item_label(item), str(item.get("smell")), str(item.get("technique")),
+                     str(item.get("tier")), f"{estimate:.1f}", str(item.get("status")),
+                     ", ".join(item.get("danger") or []) or "—", str(item.get("fix_count", 0))))
+    return mdtable.table_markdown(
+        ["ID", "対象", "兆候", "手法", "等級", "見積り（分）", "状態", "危険フラグ", "修正"], rows,
+        align=["left", "left", "left", "left", "left", "right", "left", "left", "right"])
 
 
 def _print_participants(state: dict[str, Any]) -> None:
@@ -268,10 +265,9 @@ def _print_deferred(state: dict[str, Any]) -> None:
 def _kind_table(state: dict[str, Any]) -> str:
     """種類別の件数と所要（実装計画 I10）。履歴へ書く行と同じ値。"""
     row = allocation.build_row(state)
-    lines = ["| 種類 | 件数 | 秒 |", "| --- | ---: | ---: |"]
-    for kind, value in sorted((row.get("kinds") or {}).items()):
-        lines.append(f"| {kind} | {value.get('count')} | {value.get('seconds')} |")
     verify, fix = row.get("verify") or {}, row.get("fix") or {}
-    lines.append(f"| verify | {verify.get('items')} | {verify.get('seconds')} |")
-    lines.append(f"| fix | {fix.get('launches')} | {fix.get('seconds')} |")
-    return "\n".join(lines)
+    rows = [(kind, value.get("count"), value.get("seconds"))
+            for kind, value in sorted((row.get("kinds") or {}).items())]
+    rows += [("verify", verify.get("items"), verify.get("seconds")), ("fix", fix.get("launches"), fix.get("seconds"))]
+    return mdtable.table_markdown(["種類", "件数", "秒"], [(k, str(c), str(s)) for k, c, s in rows],
+                                  align=["left", "right", "right"])

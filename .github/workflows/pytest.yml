@@ -38,7 +38,7 @@ jobs:
     outputs:
       skip: ${{ steps.decide.outputs.skip }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: github.event_name == 'pull_request'
         with:
           fetch-depth: 0
@@ -65,18 +65,19 @@ jobs:
       matrix:
         shard: [0, 1]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.x"
       - name: Install uv
         run: python3 -m pip install --upgrade uv
-      # 起点はリポジトリの根に置く。playwright-kit のテストはその skill の pyproject.toml が
-      # 宣言する依存を使うため、--project でそこを指す。
+      # 起点はリポジトリの根に置く。環境は根の pyproject.toml と uv.lock が固定する（#1142 の決定 22）。
+      # playwright_kit・plugins/ndf の全グループ（--all-extras）・pytest と pytest-xdist が入り、
+      # 包みを呼ぶ側のテストも同じプロセスで外部パッケージを import できる。
       #
       # 前提のコマンドの確認と git の身元の設定は、根の conftest.py が行う。前提を
       # ワークフローの側にも置くと、増えたときに片方だけが更新される
-      - run: uv run --project plugins/playwright-kit/skills/playwright-kit-ops --with pytest pytest . -q -n auto
+      - run: uv run --frozen --project . --all-extras pytest . -q -n auto
         env:
           SHARD_TOTAL: 2
           SHARD_INDEX: ${{ matrix.shard }}

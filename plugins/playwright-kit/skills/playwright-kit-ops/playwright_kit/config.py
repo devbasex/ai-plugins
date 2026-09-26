@@ -1,18 +1,22 @@
-"""共通設定 (config.yaml) のロードとデータクラス。
+"""共通設定 (config.yaml) のロードと設定のモデル。
 
 テストケース YAML ではなく、対象環境・ロール別ログイン・Playwright/Runner 設定、
 およびページ検査・スラッグ正規化・レポート生成のプロジェクト固有パラメータを保持する。
+
+各節の形と型の変換は pydantic のモデルが持つ (#1142 の D8)。どの節も、書いていない項目と
+値が null の項目は既定値になり、知らない項目は読み飛ばす。数は文字列の項目へ書いてもよい。
 """
 
 from __future__ import annotations
 
 import os
 import re
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
 import yaml
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic_core import PydanticUseDefault
 
 
 # ---------------------------------------------------------------------------
@@ -49,66 +53,85 @@ def _expand_env(value: Any) -> Any:
     return value
 
 
+class _Section(BaseModel):
+    """設定の節の基底。null の項目は既定値、知らない項目は読み飛ばし、数は文字列の項目へ入れてよい。"""
+
+    model_config = ConfigDict(extra="ignore", coerce_numbers_to_str=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _null_is_default(cls, data: Any) -> Any:
+        if data is None:
+            return {}
+        if isinstance(data, dict):
+            return {k: v for k, v in data.items() if v is not None}
+        return data
+
+
+def _default_if_empty(value: Any) -> Any:
+    """空 (空の配列・空の文字列) なら既定値を使う before validator の本体。"""
+    if not value:
+        raise PydanticUseDefault()
+    return value
+
+
+def _choice(value: Any, choices: tuple[str, ...], where: str) -> str:
+    chosen = str(value).lower()
+    if chosen not in choices:
+        raise ValueError(f"{where} は {choices} のいずれかを指定してください (指定値: {chosen!r})")
+    return chosen
+
+
 # --- ブラウザ接続 ---------------------------------------------------
 
 BrowserMode = Literal["local", "cdp-remote"]
 BROWSER_MODES: tuple[BrowserMode, ...] = ("local", "cdp-remote")
 
 
-@dataclass
-class BrowserConfig:
+class BrowserConfig(_Section):
     """ブラウザ接続設定。
 
-    cdp_endpoint が空文字列や空白のみの場合はデフォルト値
+    mode が空なら ``local``。cdp_endpoint が空文字列や空白のみの場合はデフォルト値
     ``http://localhost:9222`` にフォールバックする。
     """
 
     mode: BrowserMode = "local"
     cdp_endpoint: str = "http://localhost:9222"
 
+    @field_validator("mode", mode="before")
+    @classmethod
+    def _mode(cls, value: Any) -> str:
+        return _choice(_default_if_empty(value), BROWSER_MODES, "browser.mode")
+
+    @field_validator("cdp_endpoint", mode="before")
+    @classmethod
+    def _endpoint(cls, value: Any) -> str:
+        return _default_if_empty(str(value).strip() if value else "")
+
     @classmethod
     def from_raw(cls, raw: dict[str, Any]) -> "BrowserConfig":
-        base = cls()
-        mode_raw = str(raw.get("mode") or base.mode).lower()
-        if mode_raw not in BROWSER_MODES:
-            raise ValueError(
-                f"browser.mode は {BROWSER_MODES} のいずれかを指定してください "
-                f"(指定値: {mode_raw!r})"
-            )
-        mode: BrowserMode = mode_raw  # type: ignore[assignment]
-        # cdp_endpoint: 空文字列・空白のみの場合はデフォルト値にフォールバック
-        cdp_raw = raw.get("cdp_endpoint")
-        cdp_endpoint = str(cdp_raw).strip() if cdp_raw else ""
-        if not cdp_endpoint:
-            cdp_endpoint = base.cdp_endpoint
-        return cls(
-            mode=mode,
-            cdp_endpoint=cdp_endpoint,
-        )
+        return cls.model_validate(raw)
 
 
 # --- 接続/認証 -------------------------------------------------------
 
-@dataclass
-class BasicAuth:
-    user: str
-    password: str
+class BasicAuth(_Section):
+    user: str = ""
+    password: str = ""
 
 
-@dataclass
-class Login:
+class Login(_Section):
     path: str
-    requires_basic_auth: bool
+    requires_basic_auth: bool = False
     fields: dict[str, str]
     fail_if_url_contains: str
     # ログイン送信ボタンを特定するためのプロジェクト固有セレクタ (CSS / role / text)。
     # auth fixture の _submit_login_form が「これ → role/type=submit フォールバック
     # → Password で Enter」の順で試す。空のままでも汎用フォールバックで通常はログインできる。
-    submit_selectors: list[str] = field(default_factory=list)
+    submit_selectors: list[str] = Field(default_factory=list)
 
 
-@dataclass
-class Role:
+class Role(_Section):
     id: str
     label: str
     login: Login
@@ -116,11 +139,10 @@ class Role:
 
 # --- レポート設定 ---------------------------------------------------
 
-@dataclass
-class ReportConfig:
+class ReportConfig(_Section):
     title: str = "シナリオ E2E テスト 実施報告書"
     test_plan_link: str = "./test-plan.md"
-    phase_labels: dict[int, str] = field(default_factory=dict)
+    phase_labels: dict[int, str] = Field(default_factory=dict)
 
 
 # --- Playwright / Runner -------------------------------------------
@@ -133,8 +155,7 @@ HarMode = Literal["minimal", "full", "none"]
 HAR_MODES: tuple[HarMode, ...] = ("minimal", "full", "none")
 
 
-@dataclass
-class PlaywrightConfig:
+class PlaywrightConfig(_Section):
     headless: bool = True
     viewport_width: int = 1280
     viewport_height: int = 720
@@ -161,35 +182,34 @@ class PlaywrightConfig:
     # - "none": HAR を一切出力しない (= ``record_har_path`` を inject しない)。
     har_mode: HarMode = "minimal"
 
+    @model_validator(mode="before")
+    @classmethod
+    def _flatten_sizes(cls, data: Any) -> Any:
+        """config.yaml の ``viewport`` / ``video_size`` の ``width`` / ``height`` を平らな項目へ移す。"""
+        if not isinstance(data, dict):
+            return data
+        flat = {k: v for k, v in data.items() if k not in ("viewport", "video_size")}
+        for key, prefix in (("viewport", "viewport"), ("video_size", "video")):
+            size = data.get(key) or {}
+            for side in ("width", "height"):
+                if size.get(side) is not None:
+                    flat[f"{prefix}_{side}"] = size[side]
+        return flat
+
+    @field_validator("har_mode", mode="before")
+    @classmethod
+    def _har_mode(cls, value: Any) -> str:
+        return _choice(value, HAR_MODES, "playwright.har_mode")
+
+    @field_validator("video_format", mode="before")
+    @classmethod
+    def _video_format(cls, value: Any) -> str:
+        return str(value).lower()
+
     @classmethod
     def from_raw(cls, raw: dict[str, Any]) -> "PlaywrightConfig":
-        # dataclass の default を真実の源 (single source of truth) とする。
-        # fallback 値を base = cls() から参照することで、dataclass default と
-        # from_raw() の fallback が乖離するバグを防ぐ (Codex Minor 6)。
-        base = cls()
-        viewport = raw.get("viewport") or {}
-        video_size = raw.get("video_size") or {}
-        har_mode_raw = str(raw.get("har_mode", base.har_mode)).lower()
-        if har_mode_raw not in HAR_MODES:
-            raise ValueError(
-                f"playwright.har_mode は {HAR_MODES} のいずれかを指定してください "
-                f"(指定値: {har_mode_raw!r})"
-            )
-        har_mode: HarMode = har_mode_raw  # type: ignore[assignment]
-        return cls(
-            headless=bool(raw.get("headless", base.headless)),
-            viewport_width=int(viewport.get("width", base.viewport_width)),
-            viewport_height=int(viewport.get("height", base.viewport_height)),
-            slow_mo_ms=int(raw.get("slow_mo_ms", base.slow_mo_ms)),
-            video_width=int(video_size.get("width", base.video_width)),
-            video_height=int(video_size.get("height", base.video_height)),
-            navigation_timeout_ms=int(raw.get("navigation_timeout_ms", base.navigation_timeout_ms)),
-            step_delay_ms=int(raw.get("step_delay_ms", base.step_delay_ms)),
-            enable_overlay=bool(raw.get("enable_overlay", base.enable_overlay)),
-            enable_trace=bool(raw.get("enable_trace", base.enable_trace)),
-            video_format=str(raw.get("video_format", base.video_format)).lower(),
-            har_mode=har_mode,
-        )
+        # 既定値はモデルの項目の既定値だけが持つ (from_raw の fallback と乖離させない。Codex Minor 6)
+        return cls.model_validate(raw)
 
     @classmethod
     def defaults(cls) -> "PlaywrightConfig":
@@ -197,51 +217,48 @@ class PlaywrightConfig:
         return cls()
 
 
-@dataclass
-class RunnerConfig:
+class RunnerConfig(_Section):
     workers: int = 4
     testcases_dir: str = "./testcases"
 
     @classmethod
     def from_raw(cls, raw: dict[str, Any]) -> "RunnerConfig":
-        return cls(
-            workers=int(raw.get("workers", 4)),
-            testcases_dir=str(raw.get("testcases_dir", "./testcases")),
-        )
+        return cls.model_validate(raw)
 
 
 # --- accessibility / web vitals (v0.3.0) -----------------------------
 
-@dataclass
-class AccessibilityConfig:
-    """axe-core 自動スキャンの設定 (page_role に応じて runner が自動実行)。"""
+class AccessibilityConfig(_Section):
+    """axe-core 自動スキャンの設定 (page_role に応じて runner が自動実行)。空の配列は既定値に戻る。"""
     enabled: bool = True
-    auto_roles: list[str] = field(default_factory=lambda: [
+    auto_roles: list[str] = Field(default_factory=lambda: [
         "lp", "list", "form", "dashboard", "cart", "checkout", "settings", "auth",
     ])
-    tags: list[str] = field(default_factory=lambda: [
+    tags: list[str] = Field(default_factory=lambda: [
         "wcag2a", "wcag2aa", "wcag21aa", "wcag22aa",
     ])
     # 検出した violations を testcase の FAIL 要因として扱うか (false なら情報出力のみ)
     fail_on_violations: bool = True
 
+    _lists = field_validator("auto_roles", "tags", mode="before")(_default_if_empty)
 
-@dataclass
-class WebVitalsConfig:
-    """Core Web Vitals 自動計測の設定 (page_role に応じて runner が自動実行)。"""
+
+class WebVitalsConfig(_Section):
+    """Core Web Vitals 自動計測の設定 (page_role に応じて runner が自動実行)。空の配列は既定値に戻る。"""
     enabled: bool = True
-    auto_roles: list[str] = field(default_factory=lambda: [
+    auto_roles: list[str] = Field(default_factory=lambda: [
         "lp", "list", "dashboard", "search",
     ])
     observe_ms: int = 5000
     # poor 判定が 1 件でもあれば testcase を FAIL とするか
     fail_on_poor: bool = True
 
+    _lists = field_validator("auto_roles", mode="before")(_default_if_empty)
+
 
 # --- body_check (PHP / SSR エラー検出, v0.4.0) ----------------------
 
-@dataclass
-class BodyCheckConfig:
+class BodyCheckConfig(_Section):
     """ページ本文の文字列マッチ検出 (PHP / SSR プロジェクト向け)。
 
     JavaScript ランタイム由来の console.error / pageerror では拾えない、
@@ -262,15 +279,16 @@ class BodyCheckConfig:
 
     default は ``enabled=True`` + PHP 系のフロント漏れ検出パターンを内蔵。
     config.yaml を書かなくてもまず PHP プロジェクトで素直に動く。
+    パターンの配列は、省略か null なら既定値、明示的な空の配列なら空のまま (カテゴリの無効化)。
     """
 
     enabled: bool = True
-    fatal_patterns: list[str] = field(default_factory=lambda: [
+    fatal_patterns: list[str] = Field(default_factory=lambda: [
         "Fatal error",
         "Uncaught",
         "Parse error",
     ])
-    warning_patterns: list[str] = field(default_factory=lambda: [
+    warning_patterns: list[str] = Field(default_factory=lambda: [
         "STRICT:",
         "Warning:",
         "Notice:",
@@ -279,17 +297,24 @@ class BodyCheckConfig:
     # 文字数ベースの head 切り出し閾値 (code points)。PLAN18 のフィールド名は
     # ``warning_head_bytes`` だったが、説明文は「先頭 300 文字」と書かれており
     # 矛盾していた。実用上は文字数の方が日本語ページで安定するため採用。
+    # 旧名 ``warning_head_bytes`` も alias として受理する。
     warning_head_chars: int = 300
-    not_found_patterns: list[str] = field(default_factory=lambda: [
+    not_found_patterns: list[str] = Field(default_factory=lambda: [
         "File not found",
     ])
     fail_on_match: bool = True
 
+    @model_validator(mode="before")
+    @classmethod
+    def _head_bytes_alias(cls, data: Any) -> Any:
+        if isinstance(data, dict) and data.get("warning_head_chars") is None and "warning_head_bytes" in data:
+            data = {**data, "warning_head_chars": data["warning_head_bytes"]}
+        return data
+
 
 # --- ルート ---------------------------------------------------------
 
-@dataclass
-class Config:
+class Config(_Section):
     base_url: str
     basic_auth: BasicAuth
     verify_tls: bool
@@ -298,18 +323,18 @@ class Config:
     runner: RunnerConfig
     report: ReportConfig
     config_path: Path  # 設定ファイルの絶対パス（testcases_dir の解決基点）
-    browser: BrowserConfig = field(default_factory=BrowserConfig)
+    browser: BrowserConfig = Field(default_factory=BrowserConfig)
     # docs/checklists/checklist-common.md C8/C9 の境界曖昧さに対応する「除外」設定。
     # console.error / pageerror の本文がいずれかの正規表現にマッチした場合は
     # 集計から除外し FAIL を抑制する。3rd party の既知 warning などを許容するための
     # 抜け穴。空 (デフォルト) なら従来どおり 1 件で FAIL。
-    tolerated_console_errors: list[str] = field(default_factory=list)
-    tolerated_page_errors: list[str] = field(default_factory=list)
+    tolerated_console_errors: list[str] = Field(default_factory=list)
+    tolerated_page_errors: list[str] = Field(default_factory=list)
     # accessibility / web_vitals 自動実行 (page_role に応じて runner が判定)
-    accessibility: AccessibilityConfig = field(default_factory=AccessibilityConfig)
-    web_vitals: WebVitalsConfig = field(default_factory=WebVitalsConfig)
+    accessibility: AccessibilityConfig = Field(default_factory=AccessibilityConfig)
+    web_vitals: WebVitalsConfig = Field(default_factory=WebVitalsConfig)
     # PHP / SSR ページ本文エラー検出 (v0.4.0, opt-in)
-    body_check: BodyCheckConfig = field(default_factory=BodyCheckConfig)
+    body_check: BodyCheckConfig = Field(default_factory=BodyCheckConfig)
 
     @property
     def testcases_dir(self) -> Path:
@@ -346,29 +371,25 @@ class Config:
         # basic_auth は省略可能 (サイトに Basic 認証が掛かっていない場合)。
         # 省略時は空 BasicAuth を使い、role 側で `requires_basic_auth: true` を
         # 指定したテストケースだけが basic_auth ヘッダを要求する設計。
-        ba_raw = target.get("basic_auth") or {}
-        basic_auth = BasicAuth(
-            user=str(ba_raw.get("user", "")),
-            password=str(ba_raw.get("password", "")),
-        )
+        basic_auth = BasicAuth.model_validate(target.get("basic_auth") or {})
         roles = {rid: _role_from_raw(rid, r) for rid, r in (raw.get("roles") or {}).items()}
 
-        cfg = cls(
-            base_url=target["base_url"].rstrip("/"),
-            basic_auth=basic_auth,
-            verify_tls=bool(raw.get("verify_tls", False)),
-            roles=roles,
-            playwright=PlaywrightConfig.from_raw(raw.get("playwright") or {}),
-            runner=RunnerConfig.from_raw(raw.get("runner") or {}),
-            report=_report_from_raw(raw.get("report") or {}),
-            config_path=config_path,
-            browser=BrowserConfig.from_raw(raw.get("browser") or {}),
-            tolerated_console_errors=list(raw.get("tolerated_console_errors") or []),
-            tolerated_page_errors=list(raw.get("tolerated_page_errors") or []),
-            accessibility=_accessibility_from_raw(raw.get("accessibility") or {}),
-            web_vitals=_web_vitals_from_raw(raw.get("web_vitals") or {}),
-            body_check=_body_check_from_raw(raw.get("body_check") or {}),
-        )
+        cfg = cls.model_validate({
+            "base_url": target["base_url"].rstrip("/"),
+            "basic_auth": basic_auth,
+            "verify_tls": raw.get("verify_tls", False),
+            "roles": roles,
+            "playwright": raw.get("playwright") or {},
+            "runner": raw.get("runner") or {},
+            "report": raw.get("report") or {},
+            "config_path": config_path,
+            "browser": raw.get("browser") or {},
+            "tolerated_console_errors": raw.get("tolerated_console_errors") or [],
+            "tolerated_page_errors": raw.get("tolerated_page_errors") or [],
+            "accessibility": raw.get("accessibility") or {},
+            "web_vitals": raw.get("web_vitals") or {},
+            "body_check": raw.get("body_check") or {},
+        })
 
         # fail-fast: requires_basic_auth=True なロールが宣言されているのに
         # basic_auth.user が空ならば実行時に HTTP 401 で必ず落ちる。先に検出して
@@ -384,78 +405,27 @@ class Config:
 
 
 def _role_from_raw(rid: str, raw: dict[str, Any]) -> Role:
-    login = raw["login"]
-    return Role(
-        id=rid,
-        label=str(raw.get("label", rid)),
-        login=Login(
-            path=login["path"],
-            requires_basic_auth=bool(login.get("requires_basic_auth", False)),
-            fields=dict(login["fields"]),
-            fail_if_url_contains=login["fail_if_url_contains"],
-            submit_selectors=list(login.get("submit_selectors") or []),
-        ),
-    )
+    return Role.model_validate({"id": rid, "label": raw.get("label", rid), "login": raw["login"]})
 
 
 def _report_from_raw(raw: dict[str, Any]) -> ReportConfig:
-    labels_raw = raw.get("phase_labels") or {}
-    return ReportConfig(
-        title=str(raw.get("title", "シナリオ E2E テスト 実施報告書")),
-        test_plan_link=str(raw.get("test_plan_link", "./test-plan.md")),
-        phase_labels={int(k): str(v) for k, v in labels_raw.items()},
-    )
+    return ReportConfig.model_validate(raw)
 
 
 def _accessibility_from_raw(raw: dict[str, Any]) -> AccessibilityConfig:
-    base = AccessibilityConfig()
-    return AccessibilityConfig(
-        enabled=bool(raw.get("enabled", base.enabled)),
-        auto_roles=list(raw.get("auto_roles") or base.auto_roles),
-        tags=list(raw.get("tags") or base.tags),
-        fail_on_violations=bool(raw.get("fail_on_violations", base.fail_on_violations)),
-    )
+    return AccessibilityConfig.model_validate(raw)
 
 
 def _web_vitals_from_raw(raw: dict[str, Any]) -> WebVitalsConfig:
-    base = WebVitalsConfig()
-    return WebVitalsConfig(
-        enabled=bool(raw.get("enabled", base.enabled)),
-        auto_roles=list(raw.get("auto_roles") or base.auto_roles),
-        observe_ms=int(raw.get("observe_ms", base.observe_ms)),
-        fail_on_poor=bool(raw.get("fail_on_poor", base.fail_on_poor)),
-    )
+    return WebVitalsConfig.model_validate(raw)
 
 
 def _body_check_from_raw(raw: dict[str, Any]) -> BodyCheckConfig:
     """``body_check`` セクションを ``BodyCheckConfig`` に変換する。
 
-    - キーが **省略** されている場合は dataclass の default 値を採用する
+    - キーが **省略** されている (か null の) 場合は既定値を採用する
       (config を書かなくても PHP 系のデフォルトパターンが効くようにするため)。
     - キーが **明示的に空リスト** で書かれている場合はそのまま空リストにする
       (default を上書きしてカテゴリを無効化したい場合の挙動)。
     """
-    base = BodyCheckConfig()
-
-    def _patterns(key: str, default: list[str]) -> list[str]:
-        if key not in raw:
-            return list(default)
-        value = raw.get(key)
-        if value is None:
-            return list(default)
-        return [str(s) for s in value]
-
-    # ``warning_head_chars`` を新フィールド名として採用。旧名 ``warning_head_bytes``
-    # も alias として受理する (PLAN18 がフィールド名と説明文で矛盾していた経緯)。
-    head_chars = raw.get("warning_head_chars")
-    if head_chars is None:
-        head_chars = raw.get("warning_head_bytes", base.warning_head_chars)
-
-    return BodyCheckConfig(
-        enabled=bool(raw.get("enabled", base.enabled)),
-        fatal_patterns=_patterns("fatal_patterns", base.fatal_patterns),
-        warning_patterns=_patterns("warning_patterns", base.warning_patterns),
-        warning_head_chars=int(head_chars),
-        not_found_patterns=_patterns("not_found_patterns", base.not_found_patterns),
-        fail_on_match=bool(raw.get("fail_on_match", base.fail_on_match)),
-    )
+    return BodyCheckConfig.model_validate(raw)

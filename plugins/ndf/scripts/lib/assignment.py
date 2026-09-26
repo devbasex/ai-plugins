@@ -1,11 +1,7 @@
 """ホスト判定と担当の決定（収束ループ共通層）。
 
-**母集合の既定は Skill ごとに違う**ことがこの層の要点である。
-
-| Skill | 母集合の既定 | 中身 |
-| --- | --- | --- |
-| cross-review | `review_pool(host)` | `DEFAULT_REVIEW_RUNTIMES`（claude / codex / kiro）とホスト（#786） |
-| cross-refactoring | `refactor_pool(host)` | `DEFAULT_REFACTOR_RUNTIMES`（codex / kiro）とホスト |
+**母集合の既定は cross-review と cross-refactoring で共通**で、`default_pool(host)` が
+`DEFAULT_RUNTIMES`（claude / codex / kiro）とホストを返す。
 
 参加者は「母集合の既定 ∪ 足す者 − 外す者」で決め（`resolve_participants`）、確認を
 通った者だけを使える者（`available`）として記録する。担当の単位は席の名前
@@ -28,14 +24,10 @@ ALL_RUNTIMES: tuple[str, ...] = ("claude", "codex", "agy", "kiro")
 # 別の問いで、配布先でない CLI が参加 CLI に加わると 2 つは再び分かれる。
 HOST_RUNTIMES: tuple[str, ...] = ALL_RUNTIMES
 
-# cross-refactoring の既定の参加者の表（ホストを除いた部分。設計の決定 4）。ホストは
-# `refactor_pool(host)` が足す。表に無い者（agy）は `--include` で足す（#727）。
-DEFAULT_REFACTOR_RUNTIMES: tuple[str, ...] = ("codex", "kiro")
-
-# cross-review の既定の母集合の表（ホストを除いた部分。#786 の決定 1）。agy はテストを背景で
-# 起動したまま結果を残さずに終わることがあるため外し、`--include agy` で足す。ホストは
-# `review_pool(host)` が足す（#892 の「ホストも輪番に入る」を保つ）。
-DEFAULT_REVIEW_RUNTIMES: tuple[str, ...] = ("claude", "codex", "kiro")
+# cross-review と cross-refactoring の既定の母集合の表（ホストを除いた部分）。agy はテストを
+# バックグラウンドで起動したまま結果を残さずに終わることがあり、起動の失敗と所要も最も多いため外し、
+# `--include agy` で足す。ホストは `default_pool(host)` が足す。
+DEFAULT_RUNTIMES: tuple[str, ...] = ("claude", "codex", "kiro")
 
 # 席の名前の形: `^(claude|codex|agy|kiro)(-[2-9])?$`。ランタイム名そのままが 1 つ目の席、
 # ハイフンと 2〜9 の接尾辞が同じランタイムの 2 つ目以降（設計の決定 10）。ランタイム名に
@@ -95,26 +87,15 @@ def _in_fixed_order(names: Iterable[str]) -> list[str]:
     return [r for r in ALL_RUNTIMES if r in wanted]
 
 
-def review_pool(host: str) -> list[str]:
-    """cross-review の母集合の既定。`DEFAULT_REVIEW_RUNTIMES` とホストの和集合（#786）。
+def default_pool(host: str) -> list[str]:
+    """cross-review と cross-refactoring の母集合の既定。`DEFAULT_RUNTIMES` とホストの和集合。
 
-    レビュー担当は CLI プロセスとして起動するため、ホストと同じランタイムでもホストの
-    会話の作業文脈は持ち込まれない。ホストが agy のときだけ 4 者になる。
+    担当は CLI プロセスとして起動するため、ホストと同じランタイムでもホストの会話の
+    作業文脈は持ち込まれない。ホストが agy のときだけ 4 者になる。並びは `ALL_RUNTIMES` の順。
     """
     if host not in HOST_RUNTIMES:
         raise AssignmentError(f"ホストになれないランタイムです: {host}")
-    return _in_fixed_order((*DEFAULT_REVIEW_RUNTIMES, host))
-
-
-def refactor_pool(host: str) -> list[str]:
-    """cross-refactoring の母集合の既定。`DEFAULT_REFACTOR_RUNTIMES` とホストの和集合。
-
-    ホストが変わっても一覧を書き直さずに済むように、既定は「ホストを除いた部分」
-    だけを持ち、ホストをここで足す（設計の決定 4）。並びは `ALL_RUNTIMES` の順。
-    """
-    if host not in HOST_RUNTIMES:
-        raise AssignmentError(f"ホストになれないランタイムです: {host}")
-    return _in_fixed_order((*DEFAULT_REFACTOR_RUNTIMES, host))
+    return _in_fixed_order((*DEFAULT_RUNTIMES, host))
 
 
 @dataclass

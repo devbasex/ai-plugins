@@ -57,7 +57,7 @@ python3 "$RELAY" <副命令>; echo "exit=$?"
 | もの | パス |
 | --- | --- |
 | コピー・コピーの版・ラッパーの rc | `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/relay.py`・`relay.version`・`shellrc` |
-| バージョンディレクトリ | `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/relay-<版>-<digest 8 字>/`（ラッパーの中身の `relay_lib/` と `lib/clock.py`・`lib/jsonio.py`・`MANIFEST`）と、使うものの名前を持つ `relay.current`。コピーの `relay.py` はこれを読むランチャーである。`install` と SessionStart hook が版ごとに作って `relay.current` を替え、指されず動いているラッパーも使っていない古いものは新しい 2 つを残して消す。`uninstall` はすべて消す |
+| バージョンディレクトリ | `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/relay-<版>-<digest 8 字>/`（ラッパーの中身の `relay_lib/`・`lib/` の包み・`pyproject.toml` と `uv.lock`・その lock から `uv sync --frozen` で作った環境 `.venv/`・`MANIFEST`）と、使うものの名前を持つ `relay.current`。コピーの `relay.py` はこれを読むランチャーである。`install` と SessionStart hook が版ごとに作って `relay.current` を替え、指されず動いているラッパーも使っていない古いものは新しい 2 つを残して消す。`uninstall` はすべて消す |
 | 読み込みの 1 行 | `DEVBASE_SHELLRC_DIR` がディレクトリを指せば `$DEVBASE_SHELLRC_DIR/ndf-relay.sh`、無ければ `$SHELL` の設定（bash は `~/.bashrc`（macOS では `~/.bash_profile`）、zsh は `${ZDOTDIR:-~}/.zshrc`）の管理ブロック |
 | 記録 | `${XDG_STATE_HOME:-~/.local/state}/ndf/relay/`（`rc-added`・`rc-user` など） |
 

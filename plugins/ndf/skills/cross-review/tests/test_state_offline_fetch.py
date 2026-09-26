@@ -134,7 +134,8 @@ def test_the_viewer_login_is_kept_in_the_state(state_mod, tmp_dir, monkeypatch,
                         review_lib.github.PrMetadata(REPO, "takemi", "feat/x", "abc",
                                              "develop", False, 4000, None))
     monkeypatch.setattr(review_lib.github, "_fetch_changed_files", lambda pr, repo: [])
-    monkeypatch.setattr(review_lib, "_sh", lambda cmd, check=True: "takemi")
+    monkeypatch.setattr(review_lib.github, "_viewer_login", lambda: "takemi")
+    monkeypatch.setattr(review_lib.github, "_repo_from_gh", lambda: REPO)
     monkeypatch.setattr(review_lib.workspace, "_create_worktree", lambda *a: None)
     monkeypatch.setattr(review_lib.workspace, "_is_registered_worktree", lambda p: True)
     monkeypatch.setattr(review_lib.workspace, "_sync_worktree", lambda *a, **k: None)

@@ -68,6 +68,16 @@ def test_only_added_lines_are_checked(repo):
     assert out["metrics"]["files"] == 2 and out["next"]
 
 
+def test_longer_fence_is_not_closed_by_a_shorter_one(repo):
+    """囲みは CommonMark の規則で閉じる（lib/md.py）。```` の中の ``` の行では閉じない（3 文字の前置きで閉じていた頃は、
+    その後ろの例を地の文として見た）。"""
+    write(repo, "docs/c.md", "# 例\n\n````md\n```bash\n```\n以前は x だった。\n````\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "docs")
+    code, out, err = lint(repo)
+    assert code == 0, (out, err)
+
+
 def test_uncommitted_changes_and_excludes(repo):
     write(repo, "CHANGELOG.md", "# 変更\n\n以前は壊れていた。\n")
     write(repo, "issues/h.md", "従来の形。\n")

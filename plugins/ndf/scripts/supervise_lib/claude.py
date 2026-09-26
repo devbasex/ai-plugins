@@ -16,6 +16,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import procs
 import usage_ledger
 from monitor import USAGE_LIMIT_FATAL  # 利用上限の文言の表
 from supervise_lib.prompts import JUDGE_SYSTEM, PR_SYSTEM, SLOW_SYSTEM
@@ -59,11 +60,13 @@ TICK = 5.0             # 子プロセスの待ちを区切って見る秒数の�
 
 
 def kill_group(p: subprocess.Popen) -> None:
-    """子をプロセスグループごと止める（shell=True のステップの孫も残さない）。止まらなければ 5 秒で見切る。"""
+    """子をプロセスグループごと止める（shell=True のステップの孫も残さない。lib/procs.py）。止まらなければ 5 秒で見切る。"""
+    procs.stop_tree(p.pid, grace=0)
+    # 先頭が先に終わった（ゾンビの）グループの残りを procs.stop_tree は止めない。孫を残さないためグループへも送る
     try:
         os.killpg(p.pid, signal.SIGKILL)
     except OSError:
-        p.kill()
+        pass
     try:
         p.communicate(timeout=5)
     except (subprocess.TimeoutExpired, ValueError, OSError):
