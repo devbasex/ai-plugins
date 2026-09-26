@@ -92,6 +92,7 @@ if str(_lib_dir()) not in sys.path:
 import assignment  # noqa: E402  席の名前の規則（#727）
 import limits  # noqa: E402  上限の表（#598 / #537）
 import clock  # noqa: E402  時刻の書き出し（#1142 の L0）
+import deps  # noqa: E402  外部パッケージの環境（#1142 の決定 17・23）
 import monitor_outcome  # noqa: E402  監視の結果の語彙と読み書き（#662）
 import monitor_loop  # noqa: E402
 import monitor_patterns  # noqa: E402
@@ -112,7 +113,7 @@ from monitor_scan import (  # noqa: E402,F401
     EarlyFatal, _scan_usage_limit, _scan_fatal, _early_error,
 )
 from monitor_proc import (  # noqa: E402,F401
-    _read_pidfile, _proc_state, _pid_alive, _is_zombie, _leads_own_group, _kill_pid, _pid_cmdline_matches,
+    _read_pidfile, _pid_alive, _is_zombie, _leads_own_group, _kill_pid, _pid_cmdline_matches,
 )
 from monitor_types import (  # noqa: E402,F401
     DEFAULT_TIMEOUT, DEFAULT_STALL, DEFAULT_STALL_AGENT_BUILTIN, DEFAULT_POLL, RESULT_AGE_GRACE,
@@ -145,6 +146,8 @@ def _seat_or_both(value: str) -> str:
 
 
 def main() -> None:
+    # 生死と停止は psutil（procs）、記録の追記は filelock（locks）の上にある。1 回で両方を入れる（決定 23）
+    deps.require("procs", "locks")
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("pr", type=int)
     # 後方互換: cross-review は位置引数 `target` で codex / agy / both を渡す。

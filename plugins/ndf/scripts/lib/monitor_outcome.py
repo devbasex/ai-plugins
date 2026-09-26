@@ -36,11 +36,6 @@ if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 import clock  # noqa: E402  時刻の書き出し（#1142 の L0）
 
-try:  # Windows には無い。無ければスレッドの排他だけで書く。
-    import fcntl
-except ImportError:  # pragma: no cover - POSIX では通らない
-    fcntl = None  # type: ignore[assignment]
-
 # 理由の語彙。先頭の 6 語は監視の状態（`status`）から決まる。`usage_limit` / `cli_timeout` は
 # 監視が文言の照合で結末に添えたときだけ現れ、`unparsable` は読む側（`read_launch_outcome`）
 # だけが書く（#729 の決定 7）。
@@ -78,9 +73,6 @@ OUTCOME_KEYS = (
 )
 
 JOURNAL_NAME = "monitor-outcomes.jsonl"
-
-# 同じプロセスの担当ごとのスレッドが同じ記録へ追記する。
-_JOURNAL_LOCK = threading.Lock()
 
 
 def iso_from_timestamp(ts: float) -> str:
@@ -198,23 +190,15 @@ def _unusable_detail(path: pathlib.Path, result_reason: str) -> str:
 def append_journal(tmp_dir: os.PathLike[str] | str, outcome: dict[str, Any]) -> None:
     """記録へ 1 行を追記する。
 
-    **1 行を 1 回の `write` で書き、ファイルの排他を掛ける。** 担当ごとのスレッドと、
-    別プロセスの監視（レビューと反証）が同じファイルへ追記しうる。`O_APPEND` だけでは
+    **1 行を排他の中で書く**（`lib/locks.py` の `append_locked`。錠は `<記録>.lock`）。担当ごとの
+    スレッドと、別プロセスの監視（レビューと反証）が同じファイルへ追記しうる。`O_APPEND` だけでは
     書き込みが分割されたときに行が混ざりうるため、排他で塞ぐ。
+
+    `locks` はここで import する。記録を書くのは `deps.require("procs", "locks")` を呼んだ `monitor.py` だけで、
+    読む側（`state.py` ほか）は filelock を入れずにこのモジュールを読む。
     """
-    line = (json.dumps(outcome, ensure_ascii=False) + "\n").encode("utf-8")
-    path = journal_path(tmp_dir)
-    with _JOURNAL_LOCK:
-        fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
-        try:
-            if fcntl is not None:
-                fcntl.flock(fd, fcntl.LOCK_EX)
-            view = memoryview(line)
-            while view:
-                written = os.write(fd, view)
-                view = view[written:]
-        finally:
-            os.close(fd)  # 閉じれば排他も外れる
+    import locks  # deps.require("locks") の後でだけ import できる
+    locks.append_locked(journal_path(tmp_dir), json.dumps(outcome, ensure_ascii=False))
 
 
 def read_journal(tmp_dir: os.PathLike[str] | str) -> list[dict[str, Any]]:
