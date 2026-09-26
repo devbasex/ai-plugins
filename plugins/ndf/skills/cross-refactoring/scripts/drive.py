@@ -134,6 +134,8 @@ class Drive:
         if self.todo("propose"):
             _, head = call(["git", "-C", self.v["WORK"], "rev-parse", "HEAD"])
             call(["bash", str(HERE / "prepare-worktrees.sh"), i, "sync", head.strip()], self.env)
+            # 提案の前に指標を 1 回だけ測る（#1319）。測定の失敗では止めない（4 だけが中断）。
+            self.rf("measure", i, ok=(0, 1))
             self.rf("start-phase", i, "propose")
             for a in self.v.get("RUNTIMES", "").split():
                 call(["bash", str(HERE / "launch-cli.sh"), a, "propose", i], self.env)

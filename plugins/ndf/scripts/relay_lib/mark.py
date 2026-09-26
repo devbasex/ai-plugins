@@ -10,6 +10,7 @@ import os
 import sys
 import time
 
+from . import claude as cl
 from . import proc
 from .common import (ASKED_FILE, HELD_FILE, MARK_FILE, PID_FILE, QUESTION_FILE, QUESTION_LOCK, STOP_FILE, LockBusy,
                      _lock, _unlock, env_num, load_json, parse_iso, quiet_seconds, relay_running, remove, stamp,
@@ -52,6 +53,8 @@ def hold_reason(tasks: list[dict]) -> str:
         "（Claude Code が包んだコマンド行に一致しない）。止まったかは完了通知（failed / killed）で確かめる。",
         "止めてから ndf-next を出し直す。supervisor や supervise.py queue のように止めてはいけない作業なら、"
         "止めずに終わりを待ってから ndf-next を出し直す。",
+        *(["ScheduleWakeup の予約は ScheduleWakeup を stop: true で呼んで取り消す（残すと /exit で選択肢が出て、"
+           "ラッパーが 30 秒で SIGTERM を送る）。"] if any(t["type"] == "wakeup" for t in tasks) else []),
     ])
 
 
@@ -91,7 +94,8 @@ def cmd_mark() -> int:
     remove(os.path.join(d, QUESTION_FILE))
     record = RelayRecord(d)
     blocks = next_blocks(str(data.get("last_assistant_message") or ""))
-    tasks = running_tasks(data.get("background_tasks"))
+    tasks = (running_tasks(data.get("background_tasks"))
+             + cl.pending_wakeups(str(data.get("transcript_path") or ""), time.time()))
     if tasks or len(blocks) > 1:
         record.drop_mark()
         if blocks:

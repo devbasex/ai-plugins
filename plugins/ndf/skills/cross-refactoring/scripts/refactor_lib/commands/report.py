@@ -11,6 +11,7 @@ import run_metrics
 import statefile
 
 from .. import allocation, clock, info, timeline
+from ..codemetrics_view import record_lines
 from ..items import item_label
 from ..measure import summary_extra
 from ..outbound import plan_reference
@@ -97,6 +98,9 @@ def cmd_report(args: argparse.Namespace) -> None:
     _print_participants(state)
     print()
     _print_deferred(state)
+    print()
+    # 計画と同じ行を出す（AC20）。組み立ては `codemetrics_view` の 1 か所にある。
+    print("\n".join(record_lines(state)).rstrip())
     print()
     _print_fixed_values()
     if args.metrics:

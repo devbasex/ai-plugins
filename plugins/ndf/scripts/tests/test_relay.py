@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import ast
+import datetime as dt
 import errno
 import fcntl
 import hashlib
@@ -305,6 +306,45 @@ def test_mark_skipped_logs_two_blocks_without_holding(relay):
     quiet_ok(mark(relay.dir, stop_input(fence("a") + "\n" + fence("b"))))
     rows = log_rows(relay, "mark_skipped")
     assert [(r["reason"], r["held"], r["tasks"]) for r in rows] == [("blocks", False, [])]
+
+
+def wakeup_row(at, **inp):
+    return {"type": "assistant", "timestamp": at,
+            "message": {"content": [{"type": "tool_use", "name": "ScheduleWakeup", "input": inp}]}}
+
+
+def write_rows(path, rows):
+    path.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    return str(path)
+
+
+def test_pending_wakeups_after_last_stop(tmp_path):
+    """発火の前の ScheduleWakeup の予約を返す。stop: true より前の予約・発火済みの予約は数えない。"""
+    now = relay_common.parse_iso("2026-09-26T18:50:00Z")
+    tp = write_rows(tmp_path / "t.jsonl", [
+        wakeup_row("2026-09-26T18:00:00Z", delaySeconds=1200),  # 18:20 に発火済み
+        wakeup_row("2026-09-26T18:36:37Z", delaySeconds=1200),  # 18:56:37 に発火する
+    ])
+    assert [w["command"] for w in relay_claude.pending_wakeups(tp, now)] == ["発火の予定 2026-09-26T18:56:37Z"]
+    tp = write_rows(tmp_path / "s.jsonl", [wakeup_row("2026-09-26T18:36:37Z", delaySeconds=1200),
+                                           wakeup_row("2026-09-26T18:40:00Z", stop=True)])
+    assert relay_claude.pending_wakeups(tp, now) == []
+    assert relay_claude.pending_wakeups("", now) == []
+    assert relay_claude.pending_wakeups(str(tmp_path / "none.jsonl"), now) == []
+
+
+def test_mark_holds_stop_once_for_pending_wakeup(relay, tmp_path):
+    """発火の前の予約が残る ndf-next の Stop は 1 度だけ止める。/exit で Claude Code が選択肢を出し、
+    ラッパーが 30 秒で SIGTERM を送るため（区間 7・16）。取り消し方は ScheduleWakeup の stop: true。"""
+    now = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    tp = write_rows(tmp_path / "t.jsonl", [wakeup_row(now, delaySeconds=1200)])
+    p = mark(relay.dir, stop_input(fence("/goal x"), transcript_path=tp))
+    out = json.loads(p.stdout)
+    assert out["decision"] == "block" and "ScheduleWakeup" in out["reason"] and "stop: true" in out["reason"]
+    assert not relay.next.exists()
+    write_rows(tmp_path / "t.jsonl", [wakeup_row(now, delaySeconds=1200), wakeup_row(now, stop=True)])
+    quiet_ok(mark(relay.dir, stop_input(fence("/goal x"), transcript_path=tp)))
+    assert relay.next.exists()
 
 
 def test_mark_background_without_block_logs_nothing(relay):

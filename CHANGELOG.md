@@ -9,6 +9,12 @@
 **開発版（接尾辞の付いた版）は載せない。** `9.8.0` は `9.8.0-dev.1` までしか出ておらず、
 その内容は `10.0.0` で届いている。
 
+## [ndf 10.17.32] - 2026-09-26
+
+- cross-refactoring は、提案を作る前にコードの指標を測ります（#1324）
+- refactoring の言語別リファレンス（Python・JavaScript・TypeScript・PHP）に、指標の測り方が載っています（#1324）
+- ミッション m1319 の課題を develop へ取り込む。（#1325）
+
 ## [ndf 10.17.31] - 2026-09-26
 
 - Update: Bump actions/checkout from 4 to 7（#402）

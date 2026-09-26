@@ -25,10 +25,12 @@ INIT_TEST_SHARE = 0.10    # 着手前のテスト 1 回の上限 = 0.10·B（w �
 MARGIN_SHARE = 0.05       # 余裕 = 0.05·B（手順の上限と CLI の上限に足す）
 TEST_FACTOR = 3.0         # テスト 1 回の上限 = max(3·w, 0.01·B)
 TEST_FLOOR_SHARE = 0.01
+MEASURE_SHARE = 0.05      # 指標の測定の上限 = 0.05·B（提案の枠の中から割く。#1319 の決定 7）
+MEASURE_PROPOSE_CAP = 0.5  # 測定に使える時間は、提案の枠の終わりまでの残りの半分まで
 
 # 固定のまま残す値（決定 24）。OS の後始末と通信の待ちで、予算と性質が違う。報告に並べる。
 FIXED_VALUES = (
-    ("gitfacts.run_with_timeout の kill_grace", "5 秒", "打ち切ったプロセスグループへ SIGKILL を送るまでの待ち"),
+    ("gitfacts.run_with_timeout の kill_grace", "5 秒", "打ち切ったプロセスグループへ SIGKILL を送るまでの待ち（テストと指標の測定）"),
     ("monitor.py の SIGTERM の猶予", "3 秒", "監視が止めた CLI へ SIGKILL を送るまでの待ち"),
     ("monitor.py の RESULT_AGE_GRACE", "30 秒", "結果ファイルを書き終えたとみなす経過"),
     ("monitor.py の見回りの間隔", "15 秒", "監視の 1 周期"),
@@ -59,6 +61,25 @@ def margin(budget_minutes: int) -> int:
 def init_test_timeout(budget_minutes: int) -> int:
     """着手前の全体のテストとラウンドのテスト 1 回の上限（秒）。"""
     return _seconds(budget_minutes, INIT_TEST_SHARE)
+
+
+def measure_timeout(budget_minutes: int) -> int:
+    """指標の測定の上限（秒）。"""
+    return _seconds(budget_minutes, MEASURE_SHARE)
+
+
+def measure_deadline(now: _dt.datetime, limits: dict[str, Any]) -> int:
+    """その実行で測定に使える秒 = min(上限, 0.5·max(0, 提案の枠の終わり − 今))。
+
+    **提案の枠の終わりは動かさない**（決定 7）。着手前のテストが長い実行でも、提案の時間を
+    測定が食い尽くさない。
+    """
+    cap = int(limits.get("measure_timeout") or 0)
+    end = clock.parse(limits.get("propose_end_at"))
+    if end is None:
+        return cap
+    left = max(0.0, (end - now).total_seconds())
+    return max(0, min(cap, math.floor(MEASURE_PROPOSE_CAP * left)))
 
 
 def test_timeout(budget_minutes: int, baseline_seconds: Optional[float]) -> int:
@@ -98,6 +119,7 @@ def compute(
         "budget_minutes": b,
         "margin_seconds": margin(b),
         "init_test_timeout": init_test_timeout(b),
+        "measure_timeout": measure_timeout(b),
         "test_timeout": test_timeout(b, baseline_seconds),
         "propose_end_at": _iso(propose_end),
         "plan_end_at": _iso(plan_end),

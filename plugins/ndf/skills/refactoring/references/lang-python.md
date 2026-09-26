@@ -80,6 +80,29 @@ def import_rows(rows):
 例外を握りつぶさず、最初の失敗で打ち切らない。ここは明示的なループでよい（逐次依存では
 ないが、失敗の収集がある）。
 
+## 指標の測定
+
+`/ndf:cross-refactoring` は提案の前に、既定で次のツールを版を固定して測る（`.ndf/code-metrics.json` で置き換えられる）。
+
+| 指標 | ツール | 読み方 |
+| --- | --- | --- |
+| 認知的複雑度 | complexipy 8.0.1 | 入れ子の深さに重みを付ける。16 以上（既定の上限 15 を超える）から読みにくさを疑う |
+| 循環的複雑度・分岐・文・引数・return の数 | Ruff 0.16.9（`C901` と `PLR0911` `PLR0912` `PLR0913` `PLR0915`） | mccabe はブール演算子を数えない。CC 11 以上（既定の上限 10 を超える）から分岐の多さを疑う |
+| 関数とファイルの行数 | 標準ライブラリの `ast` と、空行を除いた行の数 | 長い関数は抽出の候補、長いファイルは責務の混在の候補 |
+| 重複 | pylint 4.0.9 同梱の `symilar`（最小 8 行・docstring と import と関数の頭を除く） | 2 か所以上に同じ 8 行以上があれば、抽出と統合の候補 |
+
+手で測るときは、閾値を 0 にして全関数の値を出させる。対象プロジェクトの設定は読ませない。
+
+```bash
+uvx --from ruff==0.16.9 ruff check --isolated --no-cache --exit-zero \
+    --select C901,PLR0911,PLR0912,PLR0913,PLR0915 \
+    --config lint.mccabe.max-complexity=0 --config lint.pylint.max-branches=0 \
+    --config lint.pylint.max-returns=0 --config lint.pylint.max-args=0 \
+    --config lint.pylint.max-statements=0 --output-format json src/
+uvx --from complexipy==8.0.1 complexipy src/ --max-complexity-allowed 1000000 --no-ignore
+uvx --from pylint==4.0.9 symilar -d 8 -i --ignore-docstrings --ignore-imports --ignore-signatures src/*.py
+```
+
 ## 出典
 
 - [numpy.vectorize — 性能目的ではないという公式注記](https://numpy.org/doc/stable/reference/generated/numpy.vectorize.html)

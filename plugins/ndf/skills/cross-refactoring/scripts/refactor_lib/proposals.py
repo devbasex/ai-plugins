@@ -45,6 +45,22 @@ def _degrade_if_unknown(
     return value, False
 
 
+# 提案の根拠の値（`evidence`）に書ける鍵（#1319 の決定 5）。値は数。
+EVIDENCE_KEYS = ("cc", "cognitive", "lines", "functions", "max_function_lines", "duplicate_lines")
+
+
+def normalize_evidence(raw: Any) -> dict[str, Any]:
+    """根拠の値を正規化する。**形が悪くても提案は残し、見送りの理由を作らない**（I7・AC17）。
+
+    オブジェクトでなければ空にする。知らない鍵と数でない値は、その鍵だけ落とす。値は
+    指標のファイルと照らさない（照らして落とすと、指標が採否に効く。前提 7）。
+    """
+    if not isinstance(raw, dict):
+        return {}
+    return {key: raw[key] for key in EVIDENCE_KEYS
+            if isinstance(raw.get(key), (int, float)) and not isinstance(raw.get(key), bool)}
+
+
 def _normalize_proposal(raw: dict[str, Any], source: str) -> Optional[dict[str, Any]]:
     """1 件の提案を正規化する。必須項目を欠くものは捨てる。
 
@@ -72,8 +88,9 @@ def _normalize_proposal(raw: dict[str, Any], source: str) -> Optional[dict[str, 
         severity = "unknown"
 
     estimated = safe_int(raw.get("estimated_diff_lines"))
+    evidence = normalize_evidence(raw.get("evidence"))
 
-    return {
+    proposal = {
         "path": path,
         "symbol": symbol,
         "smell": smell,
@@ -88,6 +105,9 @@ def _normalize_proposal(raw: dict[str, Any], source: str) -> Optional[dict[str, 
         # に残す（AC9）。
         "degraded": degraded,
     }
+    if evidence:
+        proposal["evidence"] = evidence
+    return proposal
 
 
 def _merge_common_attributes(existing: dict[str, Any], incoming: dict[str, Any]) -> None:
@@ -99,6 +119,9 @@ def _merge_common_attributes(existing: dict[str, Any], incoming: dict[str, Any])
         existing["rationale"] = incoming["rationale"]
     if len(incoming["plan"]) > len(existing["plan"]):
         existing["plan"] = incoming["plan"]
+    # 根拠の値は、既にある鍵を残し、無い鍵だけ足す。
+    if incoming.get("evidence"):
+        existing["evidence"] = {**incoming["evidence"], **(existing.get("evidence") or {})}
 
 
 def _merge_one(existing: dict[str, Any], incoming: dict[str, Any]) -> None:
