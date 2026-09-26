@@ -2267,12 +2267,12 @@ def plan_mission_design(a, n: int, repo: str) -> dict:
             # レビューの直しは別の場所から PR のブランチへ push される。追いついてから語を見て push する
             {"id": "sync-review", "type": "run", "stage": "ドキュメントレビュー", "timeout": 120,
              "cmd": "git fetch -q && git merge -q --ff-only '@{u}'", "next": "glossary-check"},
-            # 語のチェック。当たりは 1 回だけ直し、残った当たりは関門 1 の提示へ載せる
+            # 用語チェック。当たりは 1 回だけ直し、残った当たりは関門 1 の提示へ載せる
             {"id": "glossary-check", "type": "run", "stage": "ドキュメントレビュー", "timeout": 120,
              "cmd": glossary_check, "on_fail": "fix-glossary", "next": "push-glossary"},
             {"id": "fix-glossary", "type": "work", "kind": "修正", "stage": "ドキュメントレビュー",
              "inputs": ["glossary-check"], "timeout": 1800, "next": "glossary-recheck",
-             "prompt": "語のチェックの当たりを直す。未登録の語は用語集へ足す（source は空にし、pending_source に"
+             "prompt": "用語チェックの当たりを直す。未登録の語は用語集へ足す（source は空にし、pending_source に"
                        "設計文書のパスを書く）か、用語集の語へ言い換える。廃止した語は"
                        "用語集の語へ言い換える。用語集を変えたら `glossary.py render` で文書を作り直し、コミットする"
                        "（push しない）。利用者が採るかを決めるべき語は直さずに「判断が要る」と報告する。"},
@@ -2282,7 +2282,7 @@ def plan_mission_design(a, n: int, repo: str) -> dict:
              "cmd": PUSH_DESIGN, "next": "gate"},
             {"id": "gate", "type": "judge", "inputs": ["review", "glossary-recheck"],
              "question": "関門 1（設計 Pull Request のマージ）へ渡す（gate）か、止める（stop）か。glossary-recheck に"
-                         "語のチェックの当たりが残っていれば、関門 1 の提示に載せる",
+                         "用語チェックの当たりが残っていれば、関門 1 の提示に載せる",
              "choices": ["gate", "stop"]},
         ],
     }
@@ -2348,7 +2348,7 @@ def plan_fast_design(a, n: int, repo: str) -> dict:
     plan = plan_mission_design(a, n, repo)
     state = shlex.quote(str(Path(a.state).resolve()))
     note = "{state_dir}/work/mvv-note.md"
-    # 語のチェックの当たりが直し切れずに残ったら、mvv の判定へ渡さず関門 1 の judge（gate）へ回す
+    # 用語チェックの当たりが直し切れずに残ったら、mvv の判定へ渡さず関門 1 の judge（gate）へ回す
     for s in plan["steps"]:
         if s["id"] == "push-glossary":
             s["next"] = "mvv"

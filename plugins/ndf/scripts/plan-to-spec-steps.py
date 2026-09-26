@@ -4,11 +4,11 @@
     python3 plan-to-spec-steps.py spec-finalize --spec <確定仕様> --design <設計>... [--title <説明>] [--root <dir>]
 
 設計のファイルを消し、確定仕様を docs/specifications/README.md の索引へ載せてコミットする。
-用語集の宣言（.ndf/glossary.json）があれば、消した設計を確定前の出所（pending_source）に持つ語の
+用語集の設定（.ndf/glossary.json）があれば、消した設計を確定前の出所（pending_source）に持つ語の
 正本（source）を確定仕様へ移し、文書を作り直して同じコミットに含める。
 確定仕様の本文は呼ぶ前に LLM が書いておく。結果は lib/step_result.py の形の 1 行の JSON。
 終了コードは 0 = ok / 1 = コミットする変更が無い・git が失敗 /
-3 = 確定仕様か設計のファイルが無い、または用語集の宣言か正本が読めない。
+3 = 確定仕様か設計のファイルが無い、または用語集の設定か正本が読めない。
 """
 from __future__ import annotations
 
@@ -56,14 +56,14 @@ def update_index(index, text, name, link, title):
 
 
 def load_glossary(root: Path):
-    """用語集の宣言と正本。宣言が無ければ None。宣言・正本が読めないか語の形が崩れていれば設計を消す前に止める。"""
+    """用語集の設定と正本。宣言が無ければ None。宣言・正本が読めないか語の形が崩れていれば設計を消す前に止める。"""
     try:
         decl = glossary.load_declaration(root)
         if decl is None:
             return None
         g = glossary.load_glossary(decl)
     except StepError as e:
-        raise StepError(f"用語集の宣言（.ndf/glossary.json）か正本が読めない: {e}", EXIT_PRECONDITION)
+        raise StepError(f"用語集の設定（.ndf/glossary.json）か正本が読めない: {e}", EXIT_PRECONDITION)
     bad = [f["detail"] for f in glossary.structure_findings(g, decl) if f["rule"] == "schema"]
     if bad:
         raise StepError(f"用語集の正本の形が崩れている（glossary.py check --rules structure で直す）: {bad[0]}",

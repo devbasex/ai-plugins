@@ -537,16 +537,29 @@ _wt_tokenize() {
   # 見出しを閉じる `)` は部分シェルの終わりではない。数だけで決めると、部分
   # シェルの中の見出し (`( case $x in a) ... )`) で親の段を戻してしまう。
   local case_depth=0 case_states=""
+  # 語の頭の `~` が展開されるのは、`~` から最初の引用されていない `/` までに
+  # 引用もエスケープも無いときだけである（`""~/x` と `~"/x"` は字面の `~/x`、
+  # `~/"x"` は展開される）。語を出すと引用の有無が消えるため、その範囲で引用か
+  # エスケープを見たか（`tilde_quoted`）と、引用されていない `/` を見たか
+  # （`bare_slash`）を語ごとに持ち、確定するときに `./` を前へ足して現在地から
+  # の相対パスとして残す。
+  local tilde_quoted=0 bare_slash=0
   # 見出しを閉じる語の直前で `cur` を 1 語として確定する。`_wt_tok_emit` は
   # 直前の語（`prev_out`）を見て case の深さと状態を更新するため、確定と同時に
   # その同期も行う。`out` / `cur` / `case_depth` / `case_states` は動的スコープで
   # 共有する（末尾で unset -f する）。`cur` が空なら何もしない。
   _wt_tok_flush_word() {
+    _wt_tok_mark_literal_tilde
     [ -n "$cur" ] || return 0
     prev_out=""; ((${#out[@]} > 0)) && prev_out=${out[${#out[@]} - 1]}
     _wt_tok_emit "$cur" "$prev_out" "$case_depth" "$case_states"
     case_depth=$_WT_TOK_CASE_DEPTH; case_states=$_WT_TOK_CASE_STATES
     out+=("$cur"); cur=""
+  }
+  # 展開されない語頭の `~` に `./` を足し、語ごとの記録を戻す。
+  _wt_tok_mark_literal_tilde() {
+    [ "$tilde_quoted" -eq 1 ] && [ "${cur:0:1}" = "~" ] && cur="./$cur"
+    tilde_quoted=0 bare_slash=0
   }
   for ((i = 0; i < n; i++)); do
     c=${s:i:1}
@@ -557,6 +570,7 @@ _wt_tokenize() {
     # 込む（検知漏れ）。引用符の外では `\ ` を区切り、`\)` を部分シェルの終わり
     # と読む（語の取り違えと誤検知）。
     if _wt_tok_consume_escape "$s" "$i" "$quote"; then
+      [ -n "$_WT_TOK_TEXT" ] && [ "$bare_slash" -eq 0 ] && tilde_quoted=1
       cur+="$_WT_TOK_TEXT"
       i=$((i + _WT_TOK_ADVANCE))
       continue
@@ -566,7 +580,7 @@ _wt_tokenize() {
       continue
     fi
     case "$c" in
-      "'"|'"') quote="$c" ;;
+      "'"|'"') quote="$c"; [ "$bare_slash" -eq 0 ] && tilde_quoted=1 ;;
       # 改行と `;` はコマンドの区切りである。空白として捨てると、次の行の語を
       # 前のコマンドの対象と取り違える（`cp a b` の次の行の `echo c` の `c` を
       # 複製先として拾うなど）。区切りの目印を独立した語として出す。
@@ -667,15 +681,17 @@ _wt_tokenize() {
           word) cur+="$c" ;;
         esac
         ;;
+      /) cur+="$c"; bare_slash=1 ;;
       *) cur+="$c" ;;
     esac
   done
+  _wt_tok_mark_literal_tilde
   if [ -n "$cur" ]; then
     prev_out=""; ((${#out[@]} > 0)) && prev_out=${out[${#out[@]} - 1]}
     _wt_tok_emit "$cur" "$prev_out" "$case_depth" "$case_states"
     out+=("$cur")
   fi
-  unset -f _wt_tok_flush_word
+  unset -f _wt_tok_flush_word _wt_tok_mark_literal_tilde
   printf '%s\n' "${out[@]+"${out[@]}"}"
 }
 

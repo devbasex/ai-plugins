@@ -528,7 +528,7 @@ def cmd_check(a):
     root = Path(a.root)
     decl = load_declaration(root)
     if decl is None:
-        emit(result(TOOL, "ok", f"宣言が無い（{DECLARATION}）。語のチェックをしない"))
+        emit(result(TOOL, "ok", f"宣言が無い（{DECLARATION}）。用語チェックをしない"))
     g = load_glossary(decl)
     items = structure_findings(g, decl) + stale_findings(g, decl)
     if a.rules == "all" and (a.diff or a.file):
