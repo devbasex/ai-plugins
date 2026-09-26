@@ -82,6 +82,49 @@ def _save_diff(repo: str, pr: int, out_dir: pathlib.Path) -> tuple[str | None, s
     return str(path), ""
 
 
+def _check_items(slug: str, meta: dict[str, Any], parts: set[str], out: pathlib.Path
+                 ) -> tuple[list[dict[str, Any]], dict[str, Any], str | None]:
+    """checks を名前ごとの最新の実行へ畳んで items にする。取得できなければ note は None。"""
+    raw = gh_checks.fetch_check_runs(slug, meta["head_sha"])
+    if raw is None:
+        return [], {"failed_checks": None, "pending_checks": None}, None
+    folded = gh_checks.fold_check_runs(raw)
+    items: list[dict[str, Any]] = []
+    failed = pending = 0
+    for run in folded:
+        res = gh_checks.run_result(run)
+        item = {"kind": "check", "name": str(run.get("name") or ""), "result": res,
+                "url": run.get("details_url") or run.get("html_url") or ""}
+        if res in gh_checks.FAILED_CONCLUSIONS:
+            failed += 1
+            if "logs" in parts:
+                path, why = gh_checks.save_failed_log(slug, run, out)
+                item.update({"log_path": path} if path else {"log_error": why})
+        elif res == "pending":
+            pending += 1
+        items.append(item)
+    metrics = {"failed_checks": failed, "pending_checks": pending,
+               "superseded_checks": len(raw) - len(folded)}
+    return items, metrics, f"checks 失敗 {failed} / 保留 {pending}"
+
+
+def _thread_items(slug: str, pr: int) -> tuple[list[dict[str, Any]], int | None]:
+    """未解決のスレッドを items にする。取得できなければ件数は None。"""
+    threads = gh_graphql.unresolved_threads(slug, pr)
+    if threads is None:
+        return [], None
+    items: list[dict[str, Any]] = []
+    for t in threads:
+        line: Any = t["line"]
+        try:
+            line = int(line)
+        except (TypeError, ValueError):
+            line = None
+        items.append({"kind": "thread", "name": t["thread_id"], "result": "unresolved",
+                      "thread_id": t["thread_id"], "path": t["path"], "line": line})
+    return items, len(threads)
+
+
 def pr_info(pr: int, repo: str | None = None, with_parts: set[str] | None = None,
             out_dir: pathlib.Path | None = None) -> tuple[dict[str, Any], int]:
     """PR の取得を 1 つの結果にまとめる。`(結果, 終了コード)`。
@@ -115,45 +158,22 @@ def pr_info(pr: int, repo: str | None = None, with_parts: set[str] | None = None
             unavailable.append("diff")
 
     if "checks" in parts or "logs" in parts:
-        raw = gh_checks.fetch_check_runs(slug, meta["head_sha"])
-        if raw is None:
+        check_items, check_metrics, note = _check_items(slug, meta, parts, out)
+        items.extend(check_items)
+        metrics.update(check_metrics)
+        if note is None:
             unavailable.append("checks")
-            metrics.update(failed_checks=None, pending_checks=None)
         else:
-            folded = gh_checks.fold_check_runs(raw)
-            failed = pending = 0
-            for run in folded:
-                res = gh_checks.run_result(run)
-                item = {"kind": "check", "name": str(run.get("name") or ""), "result": res,
-                        "url": run.get("details_url") or run.get("html_url") or ""}
-                if res in gh_checks.FAILED_CONCLUSIONS:
-                    failed += 1
-                    if "logs" in parts:
-                        path, why = gh_checks.save_failed_log(slug, run, out)
-                        item.update({"log_path": path} if path else {"log_error": why})
-                elif res == "pending":
-                    pending += 1
-                items.append(item)
-            metrics.update(failed_checks=failed, pending_checks=pending,
-                           superseded_checks=len(raw) - len(folded))
-            notes.append(f"checks 失敗 {failed} / 保留 {pending}")
+            notes.append(note)
 
     if "threads" in parts:
-        threads = gh_graphql.unresolved_threads(slug, pr)
-        if threads is None:
+        thread_items, count = _thread_items(slug, pr)
+        items.extend(thread_items)
+        metrics["unresolved_threads"] = count
+        if count is None:
             unavailable.append("threads")
-            metrics["unresolved_threads"] = None
         else:
-            for t in threads:
-                line: Any = t["line"]
-                try:
-                    line = int(line)
-                except (TypeError, ValueError):
-                    line = None
-                items.append({"kind": "thread", "name": t["thread_id"], "result": "unresolved",
-                              "thread_id": t["thread_id"], "path": t["path"], "line": line})
-            metrics["unresolved_threads"] = len(threads)
-            notes.append(f"未解決 {len(threads)}")
+            notes.append(f"未解決 {count}")
 
     if unavailable:
         metrics["unavailable"] = unavailable
