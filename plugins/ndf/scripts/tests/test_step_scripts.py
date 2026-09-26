@@ -352,6 +352,37 @@ def test_verify_install_unknown_runtime_is_2(repo, env):
     assert code == 2 and out["tool"] == "release-verification" and out["status"] == "stopped"
 
 
+def load_verification():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("release_verification_steps",
+                                                  SCRIPTS / "release-verification-steps.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+@pytest.mark.parametrize("installed", ["symlink", "copy", "differs", "missing"])
+def test_compare_files_follows_a_symlink_to_a_directory(tmp_path, installed):
+    """dev.agy/skills/<名前> → ../../skills/<名前> のようなディレクトリへの symlink を比べられる。"""
+    mod = load_verification()
+    src = tmp_path / "src" / "p"
+    (src / "skills" / "a").mkdir(parents=True)
+    (src / "skills" / "a" / "SKILL.md").write_text("x\n")
+    (src / "agy").mkdir()
+    (src / "agy" / "a").symlink_to("../skills/a")
+    dst = tmp_path / "dst"
+    (dst / "skills" / "a").mkdir(parents=True)
+    (dst / "skills" / "a" / "SKILL.md").write_text("x\n")
+    (dst / "agy").mkdir()
+    if installed == "symlink":
+        (dst / "agy" / "a").symlink_to("../skills/a")
+    elif installed in ("copy", "differs"):
+        (dst / "agy" / "a").mkdir()
+        (dst / "agy" / "a" / "SKILL.md").write_text("x\n" if installed == "copy" else "y\n")
+    out = mod.compare_files(tmp_path / "src", dst, "p", ["p/agy/a", "p/skills/a/SKILL.md"], "claude")
+    assert out == ([] if installed in ("symlink", "copy") else ["claude: p/agy/a"])
+
+
 # --- phase-steps.py（互換の入口） --------------------------------------------
 
 @pytest.mark.parametrize("root_first", [True, False])

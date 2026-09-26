@@ -103,6 +103,24 @@ def manifest_version(d):
     return None
 
 
+def same_entry(s, t):
+    """s と t の中身が同じか。symlink はリンク先の文字列か、辿った先の中身で比べる。
+
+    導入先は symlink をそのまま残すことも、辿った先を複製することもあるため、どちらでも一致とする。
+    ディレクトリ（例: dev.agy/skills/<名前> → ../../skills/<名前>）は配下のファイルをすべて比べる。
+    """
+    s, t = Path(s), Path(t)
+    if s.is_symlink() and t.is_symlink() and os.readlink(s) == os.readlink(t):
+        return True
+    if not t.exists():
+        return False
+    if s.is_dir():
+        if not t.is_dir():
+            return False
+        return all(same_entry(c, t / c.name) for c in s.iterdir())
+    return t.is_file() and filecmp.cmp(s, t, shallow=False)
+
+
 def compare_files(src_root, dst, rel_plugin, files, label):
     """ref の展開物と導入先とで、変わったファイルを比べ、一致しないものを返す。"""
     out = []
@@ -111,7 +129,7 @@ def compare_files(src_root, dst, rel_plugin, files, label):
         t = Path(dst) / Path(f).relative_to(rel_plugin)
         if not s.exists():
             continue  # ref で消えたファイル
-        if not t.exists() or not filecmp.cmp(s, t, shallow=False):
+        if not same_entry(s, t):
             out.append(f"{label}: {f}")
     return out
 
