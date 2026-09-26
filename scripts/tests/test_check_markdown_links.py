@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import importlib.util
 import subprocess
+import sys
 from pathlib import Path
 from urllib.parse import quote
 
@@ -18,11 +19,13 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[2]
 CHECK = REPO / "scripts" / "check-markdown-links.py"
+sys.path.insert(0, str(REPO / "plugins" / "ndf" / "scripts" / "lib"))
+import md  # noqa: E402  見出しのアンカーの規則の持ち主（#1142 の D8）
 
 
 def run(root: Path) -> subprocess.CompletedProcess:
     return subprocess.run(
-        ["python3", str(CHECK), "--root", str(root)],
+        [sys.executable, str(CHECK), "--root", str(root)],
         capture_output=True, text=True,
     )
 
@@ -135,26 +138,6 @@ def test_unclosed_backtick_run_does_not_hide_link(tmp_path: Path) -> None:
     result = run(tmp_path)
     assert result.returncode == 1
     assert failure_lines(result) == ["- docs/a.md: missing link target: 無い.md"]
-
-
-@pytest.mark.parametrize(
-    ("line", "expected"),
-    [
-        ("a `b` c", "a   c"),
-        ("a ``b ` c`` d", "a   d"),
-        ("a ``b` c", "a ``b` c"),
-        ("`a`[x](y.md)`b`", " [x](y.md) "),
-        ("[x](y.md)", "[x](y.md)"),
-    ],
-)
-def test_strip_inline_code(line: str, expected: str) -> None:
-    """#543: インラインコードの範囲を空白 1 つへ置き換える。"""
-    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-
-    assert module.strip_inline_code(line) == expected
 
 
 def test_reference_inside_code_fence_is_ignored(tmp_path: Path) -> None:
@@ -295,28 +278,6 @@ def test_link_targets_returns_empty_list_for_plain_text_and_empty_string() -> No
     assert module.link_targets("") == []
     assert module.link_targets("リンク記法を含まない通常のプレーンテキスト") == []
     assert module.link_targets("Markdown や HTML のタグのない複数行\nテキストです。") == []
-
-
-@pytest.mark.parametrize(
-    ("target", "expected"),
-    [
-        ("<path>", "path"),
-        ('path "title"', "path"),
-        ("path 'title'", "path"),
-        ("path (title)", "path"),
-        ('<path> "title"', "<path>"),
-        ("  <path>  ", "path"),
-        ('  path "title"  ', "path"),
-    ],
-)
-def test_strip_title_current_behavior(target: str, expected: str) -> None:
-    """strip_title の山括弧・タイトル除去の現状を固定する（R1-005）。"""
-    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-
-    assert module.strip_title(target) == expected
 
 
 def test_should_skip() -> None:
@@ -495,13 +456,8 @@ def test_iter_markdown_files_returns_empty_list_for_empty_root(tmp_path: Path) -
     ],
 )
 def test_slugify_boundary_and_character_retention(text: str, expected: str) -> None:
-    """slugify の空白展開・記号保持・記号除去の境界値規則を固定する（R2-005）。"""
-    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-
-    assert module.slugify(text) == expected
+    """見出しのアンカーの空白展開・記号保持・記号除去の境界値規則を固定する（R2-005）。"""
+    assert md.heading_anchor(text) == expected
 
 
 def test_slugify_keeps_combining_mark(tmp_path: Path) -> None:
@@ -512,12 +468,7 @@ def test_slugify_keeps_combining_mark(tmp_path: Path) -> None:
     結合アキュートアクセント（U+0301）を含む文字列を渡し、その結合文字が
     落とされずに残る現状の振る舞いを記録する。
     """
-    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-
-    assert module.slugify("Cafe\u0301 Menu") == "cafe\u0301-menu"
+    assert md.heading_anchor("Cafe\u0301 Menu") == "cafe\u0301-menu"
 
 
 def test_target_path_current_behavior(tmp_path: Path) -> None:
@@ -538,37 +489,10 @@ def test_target_path_current_behavior(tmp_path: Path) -> None:
     assert module.target_path(source, "#heading") is None
     assert module.target_path(source, "#") is None
 
-    # 相対パス（フラグメント・タイトル・山括弧付き含む）は解決先 Path
+    # 相対パス（フラグメント付き含む）は解決先 Path。タイトルと山括弧は lib/md.py が外した後の値を受ける
     assert module.target_path(source, "other.md") == (tmp_path / "docs" / "other.md").resolve()
     assert module.target_path(source, "other.md#heading") == (tmp_path / "docs" / "other.md").resolve()
     assert module.target_path(source, "../readme.md") == (tmp_path / "readme.md").resolve()
-    assert module.target_path(source, '<other.md>') == (tmp_path / "docs" / "other.md").resolve()
-    assert module.target_path(source, 'other.md "title"') == (tmp_path / "docs" / "other.md").resolve()
-    assert module.target_path(source, '<other.md> "title"') == (tmp_path / "docs" / "<other.md>").resolve()
-
-
-def test_visible_lines_skips_code_fences_and_quotes(tmp_path: Path) -> None:
-    """visible_lines のコードフェンスおよび引用行スキップの現状を固定する（R1-002）。"""
-    spec = importlib.util.spec_from_file_location("check_markdown_links", CHECK)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-
-    path = tmp_path / "test.md"
-    body = (
-        "可視行 1\n"
-        "```\n"
-        "フェンス内の行\n"
-        "```\n"
-        "> 引用（> 始まり）行\n"
-        "  > インデント後に > を持つ行\n"
-        "可視行 2\n"
-    )
-    path.write_text(body, encoding="utf-8")
-
-    result = module.visible_lines(path)
-
-    assert result == ["可視行 1", "可視行 2"]
 
 
 def test_no_scanned_markdown_files_passes(tmp_path: Path) -> None:
@@ -588,3 +512,26 @@ def test_html_anchor_with_missing_heading_fragment_fails(tmp_path: Path) -> None
     result = run(tmp_path)
     assert result.returncode == 1
     assert failure_lines(result) == ["- docs/a.md: missing heading anchor: b.md#無い見出し"]
+
+
+def test_title_and_angle_brackets_are_left_to_the_markdown_parser(tmp_path: Path) -> None:
+    """#1142 の D8: リンク先のタイトルと山括弧は lib/md.py（CommonMark）が外す。"""
+    write(tmp_path, "docs/other.md", "# o\n")
+    write(tmp_path, "docs/a.md", '[x](<other.md> "t") [y](other.md \'t\') [z](other.md (t))\n[w](<無い.md> "t")\n')
+    result = run(tmp_path)
+    assert failure_lines(result) == ["- docs/a.md: missing link target: 無い.md"]
+
+
+def test_reference_links_are_checked_and_spaces_need_angle_brackets(tmp_path: Path) -> None:
+    """#1142 の D8 で変わる入力: 参照の形のリンクも確かめる（移す前は読まなかった）。空白を含むリンク先は
+    山括弧で囲んだときだけリンクになる（移す前は `[x](a b.md)` も読んだ）。"""
+    write(tmp_path, "docs/a.md", "[x][r] [y](無い 1.md)\n\n[r]: 無い2.md\n")
+    result = run(tmp_path)
+    assert failure_lines(result) == ["- docs/a.md: missing link target: 無い2.md"]
+
+
+def test_setext_headings_have_anchors(tmp_path: Path) -> None:
+    """#1142 の D8 で変わる入力: 下線の形（Setext）の見出しにもアンカーがある（移す前は `#` の形だけ）。"""
+    write(tmp_path, "docs/a.md", "見出し\n===\n\n[x](#見出し)\n")
+    result = run(tmp_path)
+    assert result.returncode == 0, result.stderr
