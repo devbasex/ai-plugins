@@ -38,6 +38,7 @@ _LIB = pathlib.Path(__file__).resolve().parent
 if str(_LIB) not in sys.path:
     sys.path.insert(0, str(_LIB))
 import clock  # noqa: E402  時刻の読み取り（#1142 の L0）
+import deps  # noqa: E402  外部パッケージの環境（#1142 の決定 17）
 
 
 def _parse_utc(value) -> datetime | None:
@@ -502,11 +503,16 @@ def _cell(value) -> str:
     return "-" if value is None else str(value)
 
 
-LIST_HEADER = (
-    "| 層 | フェーズ | 深さ | モデル | 固定費 | 最大充填 | 実作業 | 応答数 "
-    "| 所要（分） | 終わり方 | 中断 |"
-)
-LIST_RULE = "| --- | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | --- | ---: |"
+# 列の名前と寄せ方（`lib/mdtable.py` へ渡す）
+LIST_COLUMNS = (("層", "left"), ("フェーズ", "left"), ("深さ", "right"), ("モデル", "left"),
+                ("固定費", "right"), ("最大充填", "right"), ("実作業", "right"), ("応答数", "right"),
+                ("所要（分）", "right"), ("終わり方", "left"), ("中断", "right"))
+
+
+def _agents_table(columns, rows: list[list]) -> str:
+    """表を組む（`lib/mdtable.py`）。`mdtable` は表を出すときだけ読む（記録を読むだけの側は tabulate を要しない）。"""
+    import mdtable  # deps.require("mdtable") の後でだけ import できる
+    return mdtable.table_markdown([c for c, _ in columns], rows, align=[a for _, a in columns])
 
 
 def format_list(records: list[AgentRecord], with_agent_id: bool = True) -> str:
@@ -515,17 +521,11 @@ def format_list(records: list[AgentRecord], with_agent_id: bool = True) -> str:
     **`agent_id` はこの一覧にだけ出す。** `skill-stats` の集計は識別子を持たない
     （振り返りのコメントへ貼る表に載せないため。契約の文書の「出力に含めないもの」）。
     """
-    header = LIST_HEADER + (" agent_id |" if with_agent_id else "")
-    rule = LIST_RULE + (" --- |" if with_agent_id else "")
-    lines = [header, rule]
-    for r in records:
-        row = (
-            f"| {r.layer} | {r.role} | {r.depth} | {_cell(r.model)} | "
-            f"{_cell(r.fixed)} | {_cell(r.peak)} | {_cell(r.work)} | {r.responses} | "
-            f"{_minutes(r.duration_seconds)} | {r.ending} | {r.interruptions} |"
-        )
-        lines.append(row + (f" {_cell(r.agent_id)} |" if with_agent_id else ""))
-    return "\n".join(lines)
+    columns = LIST_COLUMNS + ((("agent_id", "left"),) if with_agent_id else ())
+    rows = [[r.layer, r.role, r.depth, _cell(r.model), _cell(r.fixed), _cell(r.peak), _cell(r.work),
+             r.responses, _minutes(r.duration_seconds), r.ending, r.interruptions]
+            + ([_cell(r.agent_id)] if with_agent_id else []) for r in records]
+    return _agents_table(columns, rows)
 
 
 # ---------- 中断と再開（#657） ----------
@@ -582,26 +582,19 @@ def interrupted(
     return out
 
 
-INTERRUPTED_HEADER = (
-    "| 層 | フェーズ | 深さ | 終わり方 | 上限の種類 | 解除時刻 | 解除済み "
-    "| 起動元 | agent_id |"
-)
-INTERRUPTED_RULE = "| --- | --- | ---: | --- | --- | --- | --- | --- | --- |"
+INTERRUPTED_COLUMNS = (("層", "left"), ("フェーズ", "left"), ("深さ", "right"), ("終わり方", "left"),
+                       ("上限の種類", "left"), ("解除時刻", "left"), ("解除済み", "left"), ("起動元", "left"),
+                       ("agent_id", "left"))
 
 
 def format_interrupted(
     records: list[AgentRecord], now: datetime | None = None,
 ) -> str:
     """中断した記録の一覧を返す。**解除時刻と起動元が読める**（AC47）。"""
-    lines = [INTERRUPTED_HEADER, INTERRUPTED_RULE]
-    for r in records:
-        passed = "済" if resets_passed(r, now) else "まだ"
-        lines.append(
-            f"| {r.layer} | {r.role} | {r.depth} | {r.ending} | "
-            f"{_cell(r.rate_limit_type)} | {_cell(r.resets_at)} | {passed} | "
-            f"{_cell(r.parent_agent_id)} | {_cell(r.agent_id)} |"
-        )
-    return "\n".join(lines)
+    return _agents_table(INTERRUPTED_COLUMNS, [
+        [r.layer, r.role, r.depth, r.ending, _cell(r.rate_limit_type), _cell(r.resets_at),
+         "済" if resets_passed(r, now) else "まだ", _cell(r.parent_agent_id), _cell(r.agent_id)]
+        for r in records])
 
 
 def _sleep(seconds: float) -> None:
@@ -780,6 +773,7 @@ def _run_wait_reset(args) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    deps.require("mdtable")
     args = _build_parser().parse_args(argv)
     if args.command == "interrupted":
         return _run_interrupted(args)
