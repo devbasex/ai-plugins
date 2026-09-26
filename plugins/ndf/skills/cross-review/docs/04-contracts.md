@@ -226,7 +226,7 @@
 - `review_instructions_by_stage` — 設計 PR のレビューの種類ごとの観点（`{"model": ..., "detail": ...}`）。`model` は
   モデルレビューの観点と手動の観点、`detail` は `review_instructions` と同じ値。`launch-reviewer.sh` がそのラウンドの
   `stage` の値を「追加レビュー観点」へ差し込み、この項目かレビューの種類の無い状態ファイルは `review_instructions` を使う
-- `review_criteria` — 指摘の基準（#1287）。`init` が新規・再開のどちらでも PR の worktree の
+- `review_criteria` — 指摘の基準。`init` が新規・再開のどちらでも PR の worktree の
   `.ndf/review.json`（レビューの重点の宣言）を読んで書き直す。`status` は `declared` / `none` /
   `unreadable`（`error` に理由）、`focus` は重点の名前の列、`reviewer_block` はレビュー担当への節
   （正本 `scripts/lib/review_criteria.py` が組む）。`launch-reviewer.sh` が `reviewer_block` を指示へ
