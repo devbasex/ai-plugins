@@ -828,7 +828,7 @@
     {
       "term": "参加者プール",
       "context": "ndf-agent-cli",
-      "meaning": "Skill ごとに決まる参加者の出発点。cross-review は claude / codex / kiro とホスト、cross-refactoring は codex / kiro とホスト（review_pool / refactor_pool）",
+      "meaning": "Skill ごとに決まる参加者の出発点。cross-review と cross-refactoring で共通の claude / codex / kiro とホスト（default_pool）",
       "source": "docs/specifications/cross-review-participants-and-seats.md",
       "deprecated": [
         "参加の母集合"
