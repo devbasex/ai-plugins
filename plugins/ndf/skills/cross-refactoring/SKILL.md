@@ -1,7 +1,7 @@
 ---
 name: cross-refactoring
 description: "Let every CLI propose refactorings on a PR once, then one CLI plans, tests, applies, and verifies what fits a time budget. Use when structural improvement should be done across runtimes within a set time（クロスリファクタリング・多AIリファクタリング・時間内のリファクタリング）."
-argument-hint: "[PR番号] --scope PATH... [--budget-minutes N] [--implementer NAME] [--host claude|codex|agy|kiro] [--exclude NAMES] [--include NAMES] [--require-all] [--model RT=MODEL] [--baseline-test CMD] [--round-test CMD] [--ci-check NAME] [--workflow-step]"
+argument-hint: "[PR番号] --scope PATH... [--budget-minutes N] [--implementer NAME] [--host claude|codex|agy|kiro] [--exclude NAMES] [--include NAMES] [--require-all] [--model RT=MODEL] [--baseline-test CMD] [--round-test CMD] [--ci-check NAME] [--workflow-step] [--no-code-metrics]"
 allowed-tools:
   - Bash
   - Read
@@ -76,6 +76,7 @@ allowed-tools:
 | `--severity-threshold LEVEL` | この重要度未満は `threshold` で見送る | `minor` |
 | `--sync-command CMD` | 生成物を同期するコマンド。push の直前にオーケストレーターが実行する | なし |
 | `--plan-file PATH` | リファクタリング計画を**ファイル**へ書き出す先（対象リポジトリからの相対）。空文字なら記録しない | PR のコメント 1 件 |
+| `--no-code-metrics` | 提案の前に指標を測らない。言語ごとのツールの置き換えは引数でなく `.ndf/code-metrics.json` で行う（[docs/01](docs/01-state-and-propose.md) の「指標の測定」） | 測る |
 
 **値を使わない引数**: `--max-test-rounds` / `--max-outer-rounds` / `--max-items-per-round` /
 `--max-fix-rounds` / `--test-timeout` は、渡すと使わないことを知らせる 1 行を出して**値を使わずに続ける**。
@@ -127,7 +128,8 @@ python3 scripts/refactor.py assess --base origin/develop; echo "exit=$?"
 
 ```mermaid
 flowchart TD
-    Init([init: 予算・実装担当・Jev・着手前のテスト]):::phase --> P
+    Init([init: 予算・実装担当・Jev・着手前のテスト]):::phase --> M
+    M["measure: 指標を 1 回だけ測る<br/>測れなくても止めない"] --> P
     P["提案（参加者の全員が 1 度・並行）"]:::phase --> MP{"改善候補 0 件 ?"}
     MP -->|はい| Gate
     MP -->|いいえ| Plan["リファクタリング計画（実装担当）<br/>グレード・足すテスト・範囲テスト"]:::phase
@@ -225,3 +227,4 @@ cross-review の最終ステータスを受けてから finalize を呼ぶ。
 - 判断に Jev を使ったか（使わなかった理由・呼び出しの失敗の数）
 - 最終ゲートの結果（`cross-review` の収束、または全体テスト／継続的統合の合否）
 - 監視が手順の上限で CLI を止めた手順と、固定のまま残した値（OS の後始末と通信の待ち）
+- 指標の測定（言語・ツール・版・ランナー・所要秒と、測れなかった言語と理由の識別子）。リファクタリング計画と同じ表
