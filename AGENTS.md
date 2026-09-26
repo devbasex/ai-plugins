@@ -145,13 +145,13 @@ ai-plugins/
 
 ## NDFプラグインについて
 
-**NDFプラグイン**は、このマーケットプレイスの主要プラグインです（v10.17.26）。plugin 名は全ランタイムで `ndf` を維持し、配布物は `plugins/ndf/` の1ディレクトリにまとまっています。
+**NDFプラグイン**は、このマーケットプレイスの主要プラグインです（v10.17.27-dev.1）。plugin 名は全ランタイムで `ndf` を維持し、配布物は `plugins/ndf/` の1ディレクトリにまとまっています。
 - Skill の実体は `plugins/ndf/skills/` の1箇所。配布先は `plugins/ndf/manifests/*-skills.txt` が決める
 - Claude Code版は 8個の専門サブエージェントと 3 層の worker の定義 1 個、公開Skills、PreToolUse/SessionStart/Stopフックを提供
 - Codex版は Codex向け公開Skillsと任意Slack通知hookを提供
 - Kiro版は `plugins/ndf/dev.kiro/install.sh` で `.kiro/skills/`、`.kiro/steering/ndf-policies.md`、`.kiro/agents/ndf.json` を生成
 - agy版は `plugins/ndf/dev.agy/` を `agy plugin install` で導入し、公開Skills・エージェント定義・PreToolUse/PreInvocationフックを提供
-- 外部AI委譲は `/ndf:external-ai` skill と `corder` エージェント経由で Codex / agy を呼び出し（v4.0.0 で Codex MCP サーバは廃止）
+- 外部AI委譲は `/ndf:external-ai` skill と `corder` エージェント経由で Codex / agy を呼び出す
 
 詳細は各 runtime README と `docs/ndf-plugin-reference.md` を参照。
 

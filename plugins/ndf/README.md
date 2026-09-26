@@ -89,7 +89,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.17.26）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.17.27-dev.1）
 ```
 
 ### agy
@@ -119,23 +119,19 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.17.26 へ更新するとき
+## v10.17.27-dev.1 へ更新するとき
 
-- Fix: 中身の変わらない版を入れると複製の版の記録が古いまま残る（#1149）
-- Docs: 複数 PR のマージ順の提示物に、strict の保護での取り込みの段を足す（#1150）
-- mcp-serena の hook は grep や読み込みが続いてもツールの実行を拒否せず、案内だけを出します。拒否で 1 手番を失うことはありません（#1151）
-- 設計: #821（#1152）
-- Fix: 設計の計画で cross-review の直しに追いつかずに push が拒まれる（#1153）
-- Fix: 設計の計画が決定の節を同期せず、利用者の承認で再開すると approve が止まる（#1154）
-- Slack 通知は、回答待ち・承認待ちになったときだけ届く（#1155）
-- Claude Code と Codex の hook は、どちらも待ち通知を送る入口を使う（#1155）
-- Kiro の導入スクリプトと導入時の確かめは、待ち通知を前提にしている（#1155）
-- `plugins/ndf/README.md` と Kiro の文書は、待ち通知の使い方を説明している（#1155）
-- 無し（検査の修正だけ）（#1156）
-- Fix: 用語集の語の正本を確定仕様に限り、確定前は pending_source に置く（#1157）
-- Fix: sleep の hook の案内を NDF の待ちとマージのスクリプトへ向ける（#1158）
-- 用語集の仕組みの確定仕様を `docs/specifications/ndf-ubiquitous-language.md` で読める（#1159）
-- 無し（検査の修正だけ）（#1160）
+- cross-review と cross-refactoring の文書とプロンプトは、エンジニアになじむ業界の用語で書かれています（#1167）
+- design・refactoring・release の Skill の文書を、エンジニアになじむ用語で記述（#1168）
+- external-ai・issue-upkeep・markdown-writing・requirements-design・worktree の各 Skill の文書は、エンジニアになじみのある用語で書かれています（#1169）
+- requirements-design の Skill では、仕様を写したものを「仕様のコピー」と呼びます（#1169）
+- Skill・エージェント・README の説明は、エンジニアになじみのある語で書かれています。（#1170）
+- 仕様・README・AGENTS.md などの文書は、エンジニアになじむ用語（承認ゲート・カットポイント・ラウンドテスト・ラッパーなど）で書かれている（#1171）
+- 仕様の文では、直訳の語（器・束・入れ物・段）を使わない（#1171）
+- development-workflow の文書は、業界で通じる語で書かれている。例はセッション・シグナルファイル・アイドル・プラン・キュー・進捗ログ。（#1172）
+- 用語集の「廃止した語」で、使わなくなった語に対応する今の語を引ける。（#1172）
+- 工程表の行名は stage の値として読める。（#1172）
+- 無し（検査の修正だけ）（#1173）
 
 ## Playwright テストについて
 
@@ -372,7 +368,7 @@ agy models   # 認証の確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.17.26/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.17.27-dev.1/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -394,14 +390,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.26/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.27-dev.1/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.17.26  <path>
+# => ndf@ai-plugins  installed, enabled  10.17.27-dev.1  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。
