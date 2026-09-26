@@ -11,7 +11,7 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
 | work  | 1 つの作業（修正・調査）を worker として行わせる | Tool あり（Read/Edit/Write/Bash/Grep/Glob）。`"full": true` なら設定・プラグイン・Skill をそのまま読む claude -p で Skill を回す（cross-review など） |
 | drive | 駆動（cross-review / cross-refactoring の drive.py）を run として回し、`pause` のときだけ worker に判断・修正をさせて駆動へ返す | pause のときだけ（work と同じ最小構成） |
 | judge | 結果ファイルと規則の抜粋だけを渡し、次のステップを決めさせる | Tool なし |
-| pr    | push して Draft の Pull Request を作る（スクリプト）。本文は材料（計画の値・コミット・変更の統計・run の結果・設計文書）から LLM が書く。`"body": "template"` なら材料をそのまま本文にする。本文には必ず「## 利用者向けの変化」の節を置く（ステップの `changes`、無ければ `summary`、それも無ければ題名から。配布の説明文の材料）。末尾の署名は本文に無いときだけ足す | 本文だけTool なし |
+| pr    | push して Draft の Pull Request を作る（スクリプト）。本文は材料（計画の値・コミット・変更の統計・run の結果・設計文書）から LLM が書く。`"body": "template"` なら材料をそのまま本文にする。本文には必ず「## 利用者向けの変化」の節を置く（ステップの `changes`、無ければ `summary`、それも無ければ題名から。配布の説明文の材料）。`"append": [<パス>...]`（`{state_dir}` を置き換える）のうち、あるファイルの中身を署名の前へそのまま足す。末尾の署名は本文に無いときだけ足す | 本文だけTool なし |
 
 使い方:
     supervise.py run <plan.json> [--state-dir DIR] [--from <ステップの id>] [--slow K=V]...
@@ -34,10 +34,15 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
     supervise.py new mission --name M --worktree <リポジトリの根> --issue N... --version <開発版> [--design N...] [--tests PATH...] [--out DIR]
         # 並列の設計 → 関門 1 → ミッションのブランチ → 並列の実装（ミッションのブランチへ集める）→ 検査 1 回 → 配布
         # をステージごとの計画の JSON と mission.json へ書き出す。ステージの中は queue --max 3 で流す。配布は検査の queue が --then で流す
+        # 設計の計画: 用語集（無ければ worktree の中で起こしてコミットする）→ 要求と受け入れ条件（本文と写しが一致すれば
+        # 飛ばす）→ 設計 → 設計 PR → cross-review → 用語チェック → 関門 1
+        # release.form が無いか雛形の無い形なら配布の計画を書かず、最後のステージを「/ndf:release で行う」にする
         # --pace fast --state <ミッションの状態>: 使ってよい条件を確かめ、設計（関門 1 は MVV 判定）→ 実装（develop へ直接）
         # → 検査（実行の条件）→ 開発版 → 本番（関門 2 は MVV 判定）を書く。条件に外れれば計画を書かずに止まる
     supervise.py new close --name M --worktree <根> --issue N... --version <開発版> --prod <正式版> --state <状態> [--out DIR]
         # ミッションの終わり: 最終の検査 → 開発版 → 本番（最終の検査で変更があったときだけ）→ 確定仕様化・閉じる・振り返り
+    supervise.py design-glossary --mode M --root . --out <候補の語.md>
+        # 設計の計画の入口: 用語集が揃えば何もしない。無ければ init と candidates を打ってコミットし、候補の語を書く
     supervise.py queue <plan.json>... [--max 3] [--then <plan.json>...]... [--done <パス>]
         # 空いた枠へ順に流す。作業ツリーは起動の前に 1 本ずつ作る。--then の計画は前の計画がすべて完了のときだけ
         # 続けて流す（実装の queue の後の配布など）。--then を繰り返すとステージになり、ステージは前のステージがすべて完了のときだけ
@@ -50,6 +55,7 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
     supervise.py sync-check [--root DIR] [--commit]   # 宣言した同期とチェック（.ndf/supervise.json の sync_checks）
     supervise.py example            # 計画の例を出す
 
+new <種別> --help は、その種別の書き出すステップの並び・要る宣言・引数だけを出す。
 new / queue / wait / note / sync-check の結果は lib/step_result.py の形の 1 行の JSON（status を見る）。
 
 計画（JSON）:
@@ -106,7 +112,8 @@ drive のステップ: `cmd`（または `"drive": "cross-review" | "cross-refac
        "release": {"form": "package-plugin", "plugin": "<名前>", "runtimes": ["claude", ...]}}
   テストの範囲の選び方（--tests）と配布してよいかの判断は、宣言にせず conductor と judge のステップに残す
 
-配布の雛形（new release）: 形（`release.form`）ごとにある。無い形は /ndf:release で配る。
+配布の雛形（new release）: 形（`release.form`）ごとにある。無い形は /ndf:release で配る（new mission は配布の計画を
+書かずに検査までを書き、結果の next と items に /ndf:release で行うことを載せる。new close と new release は形を要る）。
 - `package-plugin`（Claude Code のプラグイン）: dev は bump → changelog → 説明文 → sync-check → release →
   verify-install（起点のブランチ）→ approval-facts → 提示物の説明文。approval-facts の提示物は
   `issues/approval-<plugin>-v<正式版>.md` へ写す。prod は bump → changelog → 説明文 → トークン消費の記録 →
@@ -1395,6 +1402,19 @@ class Supervisor:
     def git(self, *args: str) -> str:
         return subprocess.run(["git", *args], cwd=self.cwd, capture_output=True, text=True).stdout.rstrip()
 
+    def with_appended(self, body: str, step: dict) -> str:
+        """pr のステップの `append`（{state_dir} を置き換えたパス）のうち、あるファイルの中身を署名の前へそのまま足す。"""
+        extra = []
+        for raw in step.get("append", []):
+            f = Path(str(raw).replace("{state_dir}", str(self.dir)))
+            if f.is_file():
+                extra.append(f.read_text().strip())
+        if not extra:
+            return body
+        at = body.rfind(PR_FOOTER)
+        head, tail = (body[:at], body[at:]) if at >= 0 else (body, "")
+        return head.rstrip() + "\n\n" + "\n\n".join(extra) + "\n\n" + tail
+
     def do_pr(self, step: dict) -> tuple[bool, str]:
         """push して Draft の Pull Request を作る。既にあれば本文だけを書き直す。LLM を使わない。"""
         base = step.get("base") or self.base_branch()
@@ -1465,6 +1485,7 @@ class Supervisor:
                     body = changes + "\n\n" + body
                 if PR_FOOTER not in body:
                     body = body.rstrip() + f"\n\n{PR_FOOTER}\n"
+        body = self.with_appended(body, step)
         body = with_mode_line(body, self.plan.get("モード"), self.passed_stages(step))
         found = subprocess.run(["gh", "pr", "list", "--head", branch, "--state", "open", "--json", "url",
                                 "--jq", ".[0].url"], cwd=self.cwd, capture_output=True, text=True).stdout.rstrip()
@@ -1801,8 +1822,9 @@ MERGE_CMD = f"python3 {HERE / 'merged-steps.py'} merge-when-green {{pr}}"
 MERGE_PROBE = {"cmd": f"python3 {HERE / 'merged-steps.py'} probe --pr {{pr}} --act"}
 
 # 雛形が宣言から受けるもの。引数が宣言より先に効く
+# mission はリリースの形を要らない（雛形の無い形ならリリースの段を書かず、/ndf:release で行うと返す）
 NEEDS = {"impl": ("base", "test"), "check": ("base", "test"), "release": ("base", "release"),
-         "mission": ("base", "test", "release")}
+         "mission": ("base", "test"), "close": ("base", "test", "release")}
 
 
 def apply_decls(a) -> None:
@@ -2091,6 +2113,8 @@ RULE_RELEASE_PROD_MVV = ("関門 2 は利用者か MVV 判定が承認した（�
                          "外部の待ち（CI・ネットワーク）の揺れなら同じステップをもう一度。タグの重複・権限の不足は stop。")
 MVV_PY = f"python3 {HERE / 'mvv-gate.py'}"
 GLOSSARY_PY = f"python3 {HERE / 'glossary.py'}"
+SPEC_COPY_PY = f"python3 {HERE / 'spec-copy.py'}"
+DESIGN_GLOSSARY_NOTE = "{state_dir}/work/glossary-candidates.md"  # 設計のプランが起こした用語集の候補の語
 # 設計の PR の本文の「決めたこと」を設計文書の決定へ合わせてから push する（CI の pr-body-decisions が見る）
 PUSH_DESIGN = f"git push -q && bash {HERE / 'pr-body-decisions.sh'} sync {{pr}}"
 STEPS_PY = f"python3 {HERE / 'release-steps.py'}"
@@ -2252,19 +2276,30 @@ def plan_mission_design(a, n: int, repo: str) -> dict:
     """設計のフェーズ: 設計文書を書き、設計 PR を出し、cross-review（設計の既定 3 ラウンド）の後に関門 1 で止まる。"""
     branch = f"design/issue-{n}"
     glossary_check = f"{GLOSSARY_PY} check --diff origin/{shlex.quote(a.base)} --root ."
+    copy = f"issues/issue-{n}-requirements.md"
     return {
         "フェーズ": "設計", "課題": [n], "モード": a.mode, "作業場所": f"{repo}/.worktrees/{branch}",
         "branch": branch, "起点": f"origin/{a.base}", "リポジトリ": repo, "規則": RULE_DESIGN, "上限": 12,
         "steps": [
-            # 設計の工程の入口の検査（#1111 の I5）。0 以外は on_fail を置かずに止まり、作る手順は結果の summary に載る
-            {"id": "glossary", "type": "run", "stage": "設計", "timeout": 120,
-             "cmd": f"{GLOSSARY_PY} gate --mode {shlex.quote(a.mode)} --root .", "next": "design"},
+            # 設計の工程の入口の検査（#1111 の I5）。用語集が無ければ worktree の中で起こし、設計 PR と一緒に
+            # コミットする（承認ゲートを増やさない。語の採否は承認ゲート 1 で利用者が見る）。それ以外の失敗は止まる
+            {"id": "glossary", "type": "run", "stage": "設計", "timeout": 300,
+             "cmd": f"python3 {shlex.quote(str(SELF))} design-glossary --mode {shlex.quote(a.mode)} --root . "
+                    f"--out {DESIGN_GLOSSARY_NOTE}", "next": "requirements-check"},
+            # 要求が課題の本文にあり、写しが一致すれば要求のステップを飛ばす
+            {"id": "requirements-check", "type": "run", "stage": "要求と受け入れ条件", "timeout": 120,
+             "cmd": f"{SPEC_COPY_PY} check {n} {copy}", "on_fail": "requirements", "next": "design"},
+            {"id": "requirements", "type": "work", "full": True, "kind": "要求", "stage": "要求と受け入れ条件",
+             "issues": True, "timeout": 3600, "next": "design",
+             "prompt": f"/ndf:requirements-design #{n}。人へ問わずに進め、決められない点は前提か未決として課題の本文へ"
+                       f"書く。本文を書いたら `spec-copy.py write {n} {copy}` で写しを作り、コミットする（push しない）。"},
             {"id": "design", "type": "work", "full": True, "kind": "設計", "stage": "設計", "issues": True,
              "timeout": 3600, "next": "pr",
              "prompt": f"/ndf:design #{n}。設計文書は 1,000 行以下にする（超える主題は設計を 2 本に分けると報告する）。"
                        "コミットする（push しない）。"},
+            # glossary のステップが用語集を起こしたときは、候補の語を PR 本文へ載せる（承認ゲート 1 の材料）
             {"id": "pr", "type": "pr", "stage": "ドキュメントレビュー", "base": a.base, "title": f"設計: #{n}",
-             "summary": f"#{n} の設計（ミッション {a.name}）", "next": "review"},
+             "summary": f"#{n} の設計（ミッション {a.name}）", "append": [DESIGN_GLOSSARY_NOTE], "next": "review"},
             # --max-rounds を渡さない。設計の分類の既定（3 ラウンド・前のラウンドからの変更だけ）で回る
             {"id": "review", "type": "drive", "drive": "cross-review", "kind": "ドキュメントレビュー",
              "stage": "ドキュメントレビュー", "timeout": 3600, "args": "{pr}", "on_fail": "gate",
@@ -2426,6 +2461,10 @@ def fast_mission_plans(a) -> list[dict]:
         {"name": "検査", "plans": {"check": plan_fast_check(a, repo, f"{a.name}-1")}, "then_of": "実装"},
         {"name": "実装レビュー", "plans": {"review": plan_fast_check(a, repo, f"{a.name}-review", review_only=True)},
          "then_of": "実装"},
+    ]
+    if not has_release_template(a):
+        return waves + [manual_release_wave(a)]
+    waves += [
         {"name": "開発版", "plans": {"release": plan_fast_release(a, repo, a.version, "dev")}, "then_of": "実装"},
         {"name": "本番", "plans": {"release-prod": plan_fast_release(a, repo, prod_version(a.version), "prod")},
          "then_of": "実装"},
@@ -2523,8 +2562,26 @@ def mvv_refusal(state_path: str | None) -> str | None:
     return None
 
 
+MANUAL_RELEASE = "/ndf:release"
+
+
+def has_release_template(a) -> bool:
+    """宣言のリリースの形（release.form）に雛形があるか。無い・知らない形なら False。"""
+    return isinstance(a.release, dict) and a.release.get("form") in RELEASE_FORMS
+
+
+def manual_release_wave(a) -> dict:
+    """雛形の無いリリースの形のミッションの最後に置く、手で行うリリースの段（計画を持たない）。"""
+    form = (a.release or {}).get("form") if isinstance(a.release, dict) else None
+    why = (f"リリースの形 {form!r} に雛形が無い" if form
+           else f".ndf/{SUPERVISE_DECL} に release.form が無い")
+    return {"name": "リリース", "manual": MANUAL_RELEASE,
+            "note": f"{why}（雛形のある形: {', '.join(RELEASE_FORMS)}）。検査の後に {MANUAL_RELEASE} で行う"}
+
+
 def mission_plans(a) -> list[dict]:
-    """ミッションのステージを順に返す。ステージの中の計画は queue --max 3 で同時に流してよい。"""
+    """ミッションのステージを順に返す。ステージの中の計画は queue --max 3 で同時に流してよい。
+    リリースの形に雛形が無ければ、リリースの段の代わりに手で行う段（manual_release_wave）を最後に置く。"""
     if getattr(a, "pace", "normal") == "fast":
         return fast_mission_plans(a)
     repo = str(Path(a.worktree).resolve())
@@ -2536,8 +2593,9 @@ def mission_plans(a) -> list[dict]:
         {"name": "ミッションのブランチ", "plans": {"mission-branch": plan_mission_branch(a, repo)}},
         {"name": "実装", "plans": {f"impl-{n}": plan_mission_impl(a, n, repo) for n in a.issue}},
         {"name": "検査", "plans": {"check": plan_mission_check(a, repo)}},
-        {"name": "配布", "plans": {"release": plan_mission_release(a, repo)}, "then_of": "検査"},
     ]
+    waves.append({"name": "配布", "plans": {"release": plan_mission_release(a, repo)}, "then_of": "検査"}
+                 if has_release_template(a) else manual_release_wave(a))
     return waves
 
 
@@ -2558,6 +2616,8 @@ def cmd_new_mission(a, waves: list[dict] | None = None) -> dict:
         entry = {"wave": i, "name": wave["name"]}
         if "gate" in wave:
             entry["gate"] = wave["gate"]
+        elif "manual" in wave:
+            entry.update(manual=wave["manual"], note=wave["note"])
         else:
             paths = []
             for key, plan in wave["plans"].items():
@@ -2583,9 +2643,62 @@ def cmd_new_mission(a, waves: list[dict] | None = None) -> dict:
         head["ブランチ"] = mission_branch(a.name)
     manifest.write_text(json.dumps({**head, "ステージ": index}, ensure_ascii=False, indent=2) + "\n")
     plans = sum(len(e.get("plans", [])) for e in index)
+    nxt = "ステージの番号の順に command を打つ。関門のステージでは承認を取ってから次へ進む"
+    manual = next((e for e in index if "manual" in e), None)
+    if manual:
+        nxt += f"。リリースは {manual['manual']} で行う（{manual['note']}）"
     return result("supervise-new", "ok", f"ミッション {a.name} の計画を {plans} 本・{len(index)} ステージで書いた: {manifest}",
-                  items, {"waves": len(index), "plans": plans, "manifest": str(manifest)},
-                  next="ステージの番号の順に command を打つ。関門のステージでは承認を取ってから次へ進む")
+                  items, {"waves": len(index), "plans": plans, "manifest": str(manifest)}, next=nxt)
+
+
+def cmd_design_glossary(root: str, mode: str, out: str) -> tuple[dict, int | None]:
+    """設計のプランの入口（glossary のステップ）。glossary.py gate が通ればそのまま進む。宣言か用語集が無くて
+    止まったら、worktree の中で init と candidates を打ち、起こしたファイルをコミットし、候補の語を out へ
+    書く（pr のステップが PR 本文へ足す。語の採否は承認ゲート 1 で利用者が見る）。それ以外の失敗は止まる。"""
+    gl = [sys.executable, str(HERE / "glossary.py")]
+
+    def call(*args) -> tuple[int, dict]:
+        p = subprocess.run([*gl, *args, "--root", root], capture_output=True, text=True, cwd=root)
+        last = next((l for l in reversed(p.stdout.splitlines()) if l.strip()), "")
+        try:
+            return p.returncode, json.loads(last)
+        except ValueError:
+            return p.returncode, {"summary": (p.stderr or p.stdout).strip()[-300:]}
+
+    code, res = call("gate", "--mode", mode)
+    if code == 0:
+        return result("supervise-design-glossary", "ok", res.get("summary", "用語集は揃っている"), [],
+                      {"initialized": 0}), None
+    if code != 1:
+        return result("supervise-design-glossary", "stopped", f"glossary.py gate が失敗した: {res.get('summary')}",
+                      [], {"initialized": 0}), code
+    code, init = call("init")
+    if code != 0:
+        return result("supervise-design-glossary", "stopped", f"glossary.py init が失敗した: {init.get('summary')}",
+                      [], {"initialized": 0}), code
+    created = [it["name"] for it in init.get("items") or []]
+    code, cand = call("candidates")
+    words = (cand.get("items") or []) if code == 0 else []
+    if created:
+        for args in (["add", "--", *created],
+                     ["commit", "-q", "-m", "docs(glossary): 設計の入口で用語集を起こす", "--", *created]):
+            p = subprocess.run(["git", *args], cwd=root, capture_output=True, text=True)
+            if p.returncode != 0:
+                return result("supervise-design-glossary", "stopped",
+                              f"起こした用語集をコミットできない: {p.stderr.strip()[-300:]}", [],
+                              {"initialized": 1}), 1
+    rows = "\n".join(f"| {w.get('term')} | {w.get('count')} | {w.get('kind')} | `{w.get('first')}` |" for w in words)
+    note = ("## 用語集の候補\n\nこの Pull Request で用語集を起こした（`glossary.py init`）: "
+            + "、".join(f"`{c}`" for c in created) + "。\n語の採否は承認ゲート 1 で見る。候補の語（`glossary.py candidates`）:\n\n"
+            + ("| 語 | 回数 | 種類 | 最初の場所 |\n| --- | ---: | --- | --- |\n" + rows if rows
+               else "候補は 0 件（要求から語を起こす）") + "\n")
+    Path(out).parent.mkdir(parents=True, exist_ok=True)
+    Path(out).write_text(note)
+    shown = "、".join(str(w.get("term")) for w in words[:10])
+    return result("supervise-design-glossary", "ok",
+                  f"用語集を起こしてコミットした（候補 {len(words)} 件{': ' + shown if shown else ''}）",
+                  [{"name": c, "result": "created"} for c in created],
+                  {"initialized": 1, "candidates": len(words)}), None
 
 
 def report_result(text: str) -> str:
@@ -2973,12 +3086,154 @@ def cmd_expected(plan_path: str, history: str | None, slow_pairs: list[str]) -> 
                   items, {"history": str(target), "enabled": cfg.enabled}), None
 
 
+MAIN_EPILOG = """フェーズごとの種別（new <種別> --help で、書き出すステップの並び・要る設定・引数を出す）:
+  フェーズ                                 種別
+  設計 → 承認ゲート 1 → 実装 → 検査（ミッション）  new mission（リリースの形に雛形があればリリースまで）
+  実装（1 課題の Pull Request）              new impl
+  検査（1 本の Pull Request か前回からの差分）   new check
+  リリース（開発版か本番）                   new release
+  ミッションの終わり                         new close
+書き出したプランは run で 1 本、queue で並べて流し、wait で終わりか attention まで待つ。"""
+
+DECL_HELP = ("要る設定（引数が先に効く）: {needs}。new は作業場所 → 元のリポジトリ → 今のディレクトリの順に .ndf/ を探す")
+DECL_WORDS = {"base": "起点のブランチ（--base か .ndf/worktree.json の base_branch）",
+              "test": "テストのコマンド（--test-cmd か .ndf/supervise.json の test.command。{paths} を範囲に置き換える）",
+              "release": "リリースの形（.ndf/supervise.json の release.form。雛形のある形: package-plugin）"}
+
+NEW_KINDS = {
+    "impl": ("1 課題を実装するプラン",
+             "ステップ: 実装（worker）→ 同期とチェック（宣言があるとき）→ 範囲テスト → Pull Request → 全体テスト → "
+             "doc-lint → ready → マージ。落ちた run は judge が fix・やり直し・stop を選ぶ"),
+    "check": ("検査のプラン",
+              "--pr N: 構造改善の要否 → 構造改善 → cross-review → 全体テスト → ready → マージ。\n"
+              "--since-last: 前回の検査からの差分を範囲にし、check/<名> のブランチで Pull Request を出して同じ並びを"
+              "通す（pace: fast。--review-only なら実装レビューだけ）"),
+    "release": ("リリースのプラン（形は .ndf/supervise.json の release.form ごと。雛形の無い形は /ndf:release で行う）",
+                "package-plugin の dev: bump → changelog → 説明文 → sync-check → release → verify-install → "
+                "approval-facts → 提示物の説明文。prod: bump → changelog → 説明文 → トークン消費の記録 → sync-check → "
+                "release → verify-install（本番のブランチ）→ 後片付け。実装の queue へ --then で渡すと、実装がすべて"
+                "完了した後に続けて流れる"),
+    "mission": ("ミッションのステージごとのプランと mission.json を書き出す",
+                "ステージ: 設計（--design の課題ごと。用語集 → 要求と受け入れ条件 → 設計 → 設計 Pull Request → "
+                "cross-review → 用語チェック）→ 承認ゲート 1 → ミッションのブランチ → 実装（課題ごと。ミッションの"
+                "ブランチへ集める）→ 検査 1 回 → リリース（開発版）。ステージの中は queue --max 3 で流す。\n"
+                "リリースの形（release.form）が無いか雛形の無い形なら、リリースのプランを書かず、最後のステージに"
+                "「/ndf:release で行う」を置く。\n"
+                "--pace fast --state <状態>: 使ってよい条件を確かめ、設計（承認ゲート 1 は MVV 判定）→ 実装（起点の"
+                "ブランチへ直接）→ 検査（実行の条件）→ 開発版 → 本番（承認ゲート 2 は MVV 判定）を書く"),
+    "close": ("ミッションの終わりのプラン",
+              "ステージ: 最終の検査 → 開発版 → 本番（最終の検査で変更があったときだけ）→ 確定仕様化・課題を閉じる・振り返り"),
+}
+
+# 引数: (名前, add_argument の引数, 受ける種別)
+NEW_ARGS = [
+    ("--worktree", {"required": True, "help": {"*": "作業場所（worktree）", "mission": "リポジトリの根",
+                                               "close": "リポジトリの根",
+                                               "check": "作業場所（worktree。--since-last はリポジトリの根）"}},
+     "impl check release mission close"),
+    ("--issue", {"type": int, "nargs": "+", "default": [],
+                 "help": {"*": "課題の番号", "mission": "実装する課題（課題ごとに実装のプランを書く）",
+                          "close": "ミッションの課題（最後に閉じる）"}},
+     "impl check release mission close"),
+    ("--base", {"help": "起点のブランチ（PR の宛先。既定は .ndf/worktree.json の base_branch）"},
+     "impl check release mission close"),
+    ("--production-branch", {"help": "本番のブランチ（既定は .ndf/worktree.json の production_branch）"},
+     "release mission close"),
+    ("--test-cmd", {"help": "テストのコマンド。{paths} を範囲に置き換える（既定は .ndf/supervise.json の test.command）"},
+     "impl check mission close"),
+    ("--test-all", {"help": "全体テストの範囲（既定は .ndf/supervise.json の test.all か .）"},
+     "impl check mission close"),
+    ("--mode", {"default": "standard", "help": "モード（既定 standard）"}, "impl check release mission close"),
+    ("--out", {"help": {"*": "書き出すプランのファイル", "mission": "書き出すディレクトリ（既定 mission-<名前>）",
+                        "close": "書き出すディレクトリ（既定 mission-<名前>）"}},
+     "impl check release mission close"),
+    ("--tests", {"nargs": "+", "default": [], "metavar": "PATH",
+                 "help": {"*": "範囲テストの対象（テストのコマンドの {paths} に入る）",
+                          "mission": "課題ごとの実装のプランの範囲テストの対象（{paths} に入る。既定 .）"}},
+     "impl mission"),
+    ("--scope", {"nargs": "+", "default": [], "metavar": "PATH", "help": "構造改善の範囲"}, "check mission"),
+    ("--title", {"help": "Pull Request の題名"}, "impl"),
+    ("--summary", {"help": "Pull Request 本文の要約"}, "impl"),
+    ("--prompt", {"help": "実装の指示文"}, "impl"),
+    ("--prompt-file", {"help": "実装の指示文のファイル"}, "impl"),
+    ("--files", {"nargs": "+", "default": [], "metavar": "PATH",
+                 "help": "触るファイル。同じ出力先の、まだ終わっていない他のプランの指示文へ除外として載る"}, "impl"),
+    ("--changes", {"help": "PR 本文の「利用者向けの変化」の材料（リリースの説明文になる）"}, "impl"),
+    ("--branch", {"help": "作業場所が無ければ作る worktree のブランチ"}, "impl release"),
+    ("--escape-of", {"type": int, "help": "直す不具合を持ち込んだ PR（分からなければ 0）。check-trigger.py escape で記録する"},
+     "impl"),
+    ("--pr", {"type": int, "help": "検査する Pull Request（--since-last と排他）"}, "check"),
+    ("--since-last", {"action": "store_true", "help": "前回の検査からの差分を範囲にする（--pr と排他）"}, "check"),
+    ("--id", {"help": "検査の名前（--since-last と組。ブランチ check/<名>）"}, "check"),
+    ("--final", {"action": "store_true", "help": "ミッションの終わりの検査（--since-last と組）"}, "check"),
+    ("--since-ref", {"help": "前回の検査の位置が origin にも手元の記録にも無いときの範囲の起点"
+                             "（--since-last と組。初めて使うリポジトリで、どこまで見たか）"}, "check"),
+    ("--review-only", {"action": "store_true",
+                       "help": "実装レビューだけ（--since-last と組。開発版ごと。構造改善はトリガーが立ったときの検査）"}, "check"),
+    ("--mission", {"help": "ミッションの状態（--since-last と組。課題を読む）"}, "check"),
+    ("--version", {"help": {"*": "配る版（例 10.17.11-dev.1）", "mission": "開発版の版（例 3.8.0-dev.1。リリースの雛形があるとき"
+                                                           "開発版のプランに使う）",
+                            "close": "開発版の版（最終の検査で変更があったときに配る）"}}, "release mission close"),
+    ("--prs", {"type": int, "nargs": "+", "default": [], "help": "含む Pull Request"}, "release"),
+    ("--prs-from-queue", {"action": "store_true",
+                          "help": "queue が --then で流す前に、先行のプランの報告の Pull Request を --prs に足す"}, "release"),
+    ("--channel", {"choices": ["dev", "prod"], "help": "開発版（dev）か本番（prod）か"}, "release"),
+    ("--prev-tag", {"help": "dev: approval-facts の前のタグ（省略時は自動）"}, "release"),
+    ("--repo", {"help": "元のリポジトリ（省略時は作業場所の /.worktrees/ より前）"}, "release"),
+    ("--mvv", {"help": "承認ゲート 2 を MVV で判定する（ミッションの状態）"}, "release"),
+    ("--name", {"help": "ミッションの名前（英数字・. _ -。ブランチは mission/<名前>）"}, "mission close"),
+    ("--design", {"type": int, "nargs": "+", "default": [],
+                  "help": "設計のプラン（設計 Pull Request と承認ゲート 1）を作る課題。省けば設計と承認ゲート 1 のステージを置かない"},
+     "mission"),
+    ("--pace", {"choices": ["normal", "fast"], "default": "normal",
+                "help": "進め方（fast は使ってよい条件と MVV の承認を確かめる）"}, "mission"),
+    ("--state", {"help": {"*": "ミッションの状態（mission-state.py のファイル）",
+                          "mission": "ミッションの状態（--pace fast と組。mission-state.py のファイル）"}}, "mission close"),
+    ("--prod", {"help": "本番の版（例 10.18.0）"}, "close"),
+    ("--milestone", {"help": "マイルストーン（振り返りの材料）"}, "close"),
+]
+NEW_REQUIRED = {"impl": "--issue・--tests・--title", "check": "--pr か --since-last（--id と組）",
+                "release": "--version・--prs（か --prs-from-queue）・--channel",
+                "mission": "--name・--issue・--version", "close": "--name・--issue・--version・--prod・--state"}
+
+
+def add_new_parsers(sub) -> None:
+    """new を種別ごとの subparser にする。new <種別> --help はその種別の説明・要る設定・引数だけを出す。"""
+    n = sub.add_parser("new", help="雛形からプランを作る（new <種別> --help で種別ごとの説明）",
+                       description="雛形からプランを作る。種別ごとの説明・要る設定・引数は new <種別> --help",
+                       epilog=MAIN_EPILOG, formatter_class=argparse.RawDescriptionHelpFormatter)
+    kinds = n.add_subparsers(dest="kind", required=True, metavar="{" + ",".join(NEW_KINDS) + "}")
+    for kind, (short, steps) in NEW_KINDS.items():
+        needs = "・".join(DECL_WORDS[k] for k in NEEDS[kind])
+        k = kinds.add_parser(kind, help=short, description=f"{short}。\n\n{steps}",
+                             epilog=f"必須の引数: {NEW_REQUIRED[kind]}。\n" + DECL_HELP.format(needs=needs)
+                             + ("。\n任意の設定: " + DECL_WORDS["release"] if kind == "mission" else ""),
+                             formatter_class=argparse.RawDescriptionHelpFormatter)
+        for name, kw, allowed in NEW_ARGS:
+            if kind in allowed.split():
+                helps = kw.get("help")
+                k.add_argument(name, **{**kw, "help": helps.get(kind, helps["*"]) if isinstance(helps, dict) else helps})
+
+
+def fill_new_defaults(a) -> None:
+    """種別の parser に無い引数を既定値で埋める（雛形は種別をまたいで属性を読む）。"""
+    for name, kw, _ in NEW_ARGS:
+        dest = name.lstrip("-").replace("-", "_")
+        if not hasattr(a, dest):
+            setattr(a, dest, kw.get("default", False if kw.get("action") == "store_true" else None))
+
+
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0], epilog=MAIN_EPILOG,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    r = sub.add_parser("run")
-    r.add_argument("plan")
-    r.add_argument("--state-dir")
+    r = sub.add_parser("run", help="プランを 1 本流す",
+                       description="プランを 1 本流す。ステップを順に進め、報告を標準出力へ出す"
+                                   "（終了コード: 完了か関門 = 0 / それ以外 = 3）",
+                       epilog="状態は --state-dir（省けば <プラン>-state/）に progress.jsonl・報告・ステップの出力として残る。"
+                              "途中で止まったら --from <ステップの id> で続きから流す")
+    r.add_argument("plan", help="プランの JSON")
+    r.add_argument("--state-dir", help="状態の置き場（既定は <プラン>-state/）")
     r.add_argument("--from", dest="start", help="このステップから始める（途中から再開するとき）")
     r.add_argument("--slow", action="append", default=[], metavar="K=V",
                    help="遅れの見張りの設定を上書きする（計画と .ndf/supervise.json の slow より先に効く。繰り返せる）")
@@ -2992,67 +3247,33 @@ def main() -> int:
     ex.add_argument("--history")
     ex.add_argument("--slow", action="append", default=[], metavar="K=V")
     sub.add_parser("example")
-    n = sub.add_parser("new", help="雛形から計画を作る。release の計画は、実装の queue へ --then で渡すと"
-                                   "実装がすべて完了した後に続けて流れる")
-    n.add_argument("kind", choices=["impl", "check", "release", "mission", "close"])
-    n.add_argument("--issue", type=int, nargs="+", default=[])
-    n.add_argument("--pr", type=int)
-    n.add_argument("--worktree", required=True)
-    n.add_argument("--tests", nargs="+", default=[], help="impl: 範囲テストの対象")
-    n.add_argument("--scope", nargs="+", default=[], help="check: 構造改善の範囲")
-    n.add_argument("--title", help="impl: PR の題名")
-    n.add_argument("--summary")
-    n.add_argument("--prompt", help="impl: 実装の指示文")
-    n.add_argument("--prompt-file", help="impl: 実装の指示文のファイル")
-    n.add_argument("--files", nargs="+", default=[], metavar="PATH",
-                   help="impl: 触るファイル。同じ出力先の、まだ終わっていない他の計画の指示文へ除外として載る")
-    n.add_argument("--changes", help="impl: PR 本文の「利用者向けの変化」の材料（配布の説明文になる）")
-    n.add_argument("--branch", help="作業場所が無ければ作る作業ツリーのブランチ")
-    n.add_argument("--base", help="起点のブランチ（PR の宛先。既定は .ndf/worktree.json の base_branch）")
-    n.add_argument("--production-branch",
-                   help="release prod: 本番のブランチ（既定は .ndf/worktree.json の production_branch）")
-    n.add_argument("--test-cmd", help="impl / check: テストのコマンド。{paths} を範囲に置き換える"
-                                      "（既定は .ndf/supervise.json の test.command）")
-    n.add_argument("--test-all", help="impl / check: 全体テストの範囲（既定は .ndf/supervise.json の test.all か .）")
-    n.add_argument("--mode", default="standard")
-    n.add_argument("--version", help="release: 配る版（例 10.17.11-dev.1）")
-    n.add_argument("--prs", type=int, nargs="+", default=[], help="release: 含む PR")
-    n.add_argument("--prs-from-queue", action="store_true",
-                   help="release: queue が --then で流す前に、先行の計画の報告の Pull Request を --prs に足す")
-    n.add_argument("--channel", choices=["dev", "prod"], help="release: 開発版（dev）か本番（prod）か")
-    n.add_argument("--prev-tag", help="release dev: approval-facts の前のタグ（省略時は自動）")
-    n.add_argument("--repo", help="release: 元のリポジトリ（省略時は作業場所の /.worktrees/ より前）")
-    n.add_argument("--out")
-    n.add_argument("--name", help="mission: ミッションの名前（ブランチは mission/<名前>）")
-    n.add_argument("--design", type=int, nargs="+", default=[], help="mission: 設計 PR を出す課題")
-    n.add_argument("--pace", choices=["normal", "fast"], default="normal",
-                   help="mission: 進め方（fast は使ってよい条件と MVV の承認を確かめる）")
-    n.add_argument("--state", help="mission --pace fast / close: ミッションの状態（mission-state.py のファイル）")
-    n.add_argument("--since-last", action="store_true", help="check: 前回の検査からの差分を範囲にする（--pr と排他）")
-    n.add_argument("--id", help="check --since-last: 検査の名前（ブランチ check/<名>）")
-    n.add_argument("--final", action="store_true", help="check --since-last: ミッションの終わりの検査")
-    n.add_argument("--since-ref", help="check --since-last: 前回の検査の位置が origin にも手元の記録にも無いときの"
-                                       "範囲の起点（初めて使うリポジトリで、どこまで見たか）")
-    n.add_argument("--review-only", action="store_true",
-                   help="check --since-last: 実装レビューだけ（開発版ごと。構造改善はトリガーが立ったときの検査）")
-    n.add_argument("--mission", help="check --since-last: ミッションの状態（課題を読む）")
-    n.add_argument("--mvv", help="release: 関門 2 を MVV で判定する（ミッションの状態）")
-    n.add_argument("--escape-of", type=int, help="impl: 直す不具合を持ち込んだ PR（分からなければ 0）")
-    n.add_argument("--prod", help="close: 本番の版（例 10.18.0）")
-    n.add_argument("--milestone", help="close: マイルストーン（振り返りの材料）")
-    q = sub.add_parser("queue", help="計画を同時に --max 本まで順に流す")
-    q.add_argument("plans", nargs="+")
-    q.add_argument("--max", type=int, default=3)
-    q.add_argument("--poll", type=float, default=5.0)
+    add_new_parsers(sub)
+    q = sub.add_parser("queue", help="プランを同時に --max 本まで順に流す",
+                       description="プランを同時に --max 本まで順に流す。空いた枠へ順に流し、worktree は起動の前に 1 本ずつ作る",
+                       epilog="--then のプランは前のプランがすべて完了のときだけ続けて流す（実装の queue の後のリリースなど）。"
+                              "--then を繰り返すとステージになる。終わると結果の JSON を --done へ書き、始めに流すプランの"
+                              "一覧を <done>.plans.json へ書く")
+    q.add_argument("plans", nargs="+", help="流すプランの JSON")
+    q.add_argument("--max", type=int, default=3, help="同時に流す本数（既定 3）")
+    q.add_argument("--poll", type=float, default=5.0, help="終わりを見る間隔（秒）")
     q.add_argument("--then", nargs="+", action="append", default=[], metavar="PLAN",
                    help="前の計画がすべて完了したときだけ続けて流す計画（例: 配布の計画）。繰り返すとステージになり、"
                         "ステージは前のすべてのステージが完了のときだけ流れる")
     q.add_argument("--done", help="終わったときに結果の JSON を書く所（省けば最初の計画の状態ディレクトリの "
                                   "queue-done.json）。待つ側は wait <このパス> で待つ")
-    w = sub.add_parser("wait", help="queue の終わりか attention の行まで待つ（done = 0 / attention = 20 / 上限 = 3）")
+    w = sub.add_parser("wait", help="queue の終わりか attention の行まで待つ（done = 0 / attention = 20 / 上限 = 3）",
+                       description="queue の終わり（done）か、queue が流すプランの attention の行まで待つ。"
+                                   "出力は要約の 1 行と結果の JSON",
+                       epilog="終了コード: done = 0 / attention = 20 / 上限 = 3。attention の後にもう一度打つと、その続きから待つ")
     w.add_argument("done", help="queue の --done のパス（省いた queue なら <最初の計画>-state/queue-done.json）")
     w.add_argument("--timeout", type=float, default=10800.0, help="待つ上限（秒）")
-    w.add_argument("--poll", type=float, default=5.0)
+    w.add_argument("--poll", type=float, default=5.0, help="見る間隔（秒）")
+    g = sub.add_parser("design-glossary", help="設計のプランの入口: 用語集が無ければ worktree の中で起こしてコミットする",
+                       description="glossary.py gate が通れば何もしない。宣言か用語集が無ければ init と candidates を打ち、"
+                                   "起こしたファイルをコミットし、候補の語を --out へ書く（pr のステップが PR 本文へ足す）")
+    g.add_argument("--mode", default="standard", help="モード（設計の工程の入口で用語集を見るモードか）")
+    g.add_argument("--root", default=".", help="worktree の根")
+    g.add_argument("--out", required=True, help="候補の語を書く Markdown のパス")
     t = sub.add_parser("note", help="報告から引継ぎ文書の表へ 1 行を足す")
     t.add_argument("doc")
     t.add_argument("--report", required=True)
@@ -3062,6 +3283,10 @@ def main() -> int:
     c.add_argument("--root", default=".")
     c.add_argument("--commit", action="store_true", help="同期で変わったファイルをコミットする")
     a = ap.parse_args()
+    if a.cmd == "new":
+        fill_new_defaults(a)
+    if a.cmd == "design-glossary":
+        emit(*cmd_design_glossary(a.root, a.mode, a.out))
     if a.cmd == "example":
         print(json.dumps(EXAMPLE, ensure_ascii=False, indent=2))
         return 0
@@ -3076,7 +3301,6 @@ def main() -> int:
             a.state = None
         try:
             if a.kind == "close":
-                a.kind = "mission"  # 宣言の要るもの（base・test・release）は mission と同じ
                 apply_decls(a)
                 emit(cmd_new_mission(a, close_waves(a)))
             apply_decls(a)
