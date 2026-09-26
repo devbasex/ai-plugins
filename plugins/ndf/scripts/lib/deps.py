@@ -115,9 +115,13 @@ def reexec_argv(uv: str, groups: str | Sequence[str], script: str, args: list[st
     return [uv, "run", "--quiet", "--frozen", "--project", str(root), *extras, "python", script, *args]
 
 
-def require(group: str, *more: str) -> None:
+def require(group: str, *more: str, project: Path | None = None) -> None:
     """渡したグループのパッケージが import できる環境で動いていることを保証する。できなければ、足りないグループを
-    すべて `--extra` に並べた uv の環境で 1 回だけ起動し直す。"""
+    すべて `--extra` に並べた uv の環境で 1 回だけ起動し直す。
+
+    `project` は宣言と lock を持つ根（既定はプラグインの根）。リポジトリの根の `scripts/` は根を渡し、環境は
+    `<根>/.venv`（全体テストと同じ環境）に置く。"""
+    root = PLUGIN_ROOT if project is None else Path(project).resolve()
     groups = list(dict.fromkeys((group, *more)))
     unknown = [g for g in groups if g not in GROUPS]
     if unknown:
@@ -128,15 +132,16 @@ def require(group: str, *more: str) -> None:
     if os.environ.get(REEXEC_ENV):
         mods = ", ".join(m for g in missing for m in GROUPS[g])
         _stop(f"uv の環境へ起動し直したが {' / '.join(missing)} のパッケージ（{mods}）を import できない。"
-              f"{PLUGIN_ROOT / 'uv.lock'} に載っているかを見る")
-    if not (PLUGIN_ROOT / "pyproject.toml").is_file() or not (PLUGIN_ROOT / "uv.lock").is_file():
-        _stop(f"外部パッケージの宣言が無い: {PLUGIN_ROOT}/pyproject.toml と uv.lock")
+              f"{root / 'uv.lock'} に載っているかを見る")
+    if not (root / "pyproject.toml").is_file() or not (root / "uv.lock").is_file():
+        _stop(f"外部パッケージの宣言が無い: {root}/pyproject.toml と uv.lock")
     uv = find_uv()
     if not uv:
         print(f"[ndf deps] uv が無いため {UV_VERSION} を ~/.local/bin へ入れる", file=sys.stderr)
         uv = install_uv()
     if not uv:
         _stop(f"uv を入れられない（ネットワークか権限が無い）。手で入れてから打ち直す: {INSTALL_HINT}")
-    env = dict(os.environ, **{REEXEC_ENV: "1", "UV_PROJECT_ENVIRONMENT": venv_dir()})
+    venv = venv_dir() if root == PLUGIN_ROOT else str(root / ".venv")
+    env = dict(os.environ, **{REEXEC_ENV: "1", "UV_PROJECT_ENVIRONMENT": venv})
     script = str(Path(sys.argv[0]).resolve())
-    os.execve(uv, reexec_argv(uv, groups, script, sys.argv[1:]), env)
+    os.execve(uv, reexec_argv(uv, groups, script, sys.argv[1:], root), env)

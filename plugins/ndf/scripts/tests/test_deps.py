@@ -85,6 +85,28 @@ def test_after_reexec_a_missing_group_among_several_stops_with_code_3(tmp_path):
     assert "u のパッケージ（ndf_no_such_module）" in p.stderr
 
 
+def test_a_project_root_reexecs_with_its_own_lock_and_venv(tmp_path):
+    """根の scripts/ は根の宣言と lock で解決し、環境は根の .venv に置く（決定 19・22）。"""
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "pyproject.toml").write_text("[project]\n")
+    (root / "uv.lock").write_text("")
+    script = tmp_path / "entry.py"
+    script.write_text(f"import sys\nsys.path.insert(0, {str(LIB)!r})\nimport deps\n"
+                      f"deps.GROUPS.update({{'t': ['ndf_no_such_module']}})\ndeps.require('t', project={str(root)!r})\n")
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    (bindir / "uv").write_text(FAKE_UV)
+    (bindir / "uv").chmod(0o755)
+    env = {k: v for k, v in os.environ.items() if k not in ("NDF_DEPS_REEXEC", "UV_PROJECT_ENVIRONMENT", "NDF_DEPS_VENV")}
+    env.update(PATH=str(bindir), HOME=str(tmp_path / "home"), FAKE_UV_LOG=str(tmp_path / "uv.log"))
+    p = subprocess.run([sys.executable, str(script)], capture_output=True, text=True, env=env)
+    assert p.returncode == 7, p.stderr
+    log = (tmp_path / "uv.log").read_text().splitlines()
+    assert log[:7] == ["run", "--quiet", "--frozen", "--project", str(root.resolve()), "--extra", "t"]
+    assert f"VENV={root.resolve() / '.venv'}" in log
+
+
 def test_reexec_argv_keeps_the_single_group_form():
     assert deps.reexec_argv("uv", "md", "s.py", ["a"], Path("/p")) == deps.reexec_argv("uv", ["md"], "s.py", ["a"],
                                                                                        Path("/p"))
