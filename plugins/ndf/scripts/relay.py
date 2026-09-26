@@ -1825,10 +1825,45 @@ def cmd_status() -> int:
     ver = (_read(copy_version_path()) or "").strip() or "不明"
     out(f"複製 {copy_path()}: {_same(copy_path(), body)}（複製の版 {ver}）")
     out(f"旧い複製 {old_copy_path()}: {_same(old_copy_path(), body)}")
+    out(session_line())
     warn = None if loader else login_warning()
     if warn:
         out(warn)
     return 0
+
+
+def session_line() -> str:
+    """今のセッションとラッパーとの位置を 1 行で示す（#1187）。
+
+    `status` → シェル → claude と親をたどって最初に当たる claude は、hook のときと同じなので
+    `relay_position()` をそのまま使う。親がたどれない環境では「判定できない」とする。
+    """
+    pos = relay_position()
+    head = "このセッション: "
+    if pos == "relay":
+        pid = (_read(os.path.join(os.environ["NDF_RELAY_DIR"], PID_FILE)) or "").strip() or "不明"
+        child = relay_child_pid()
+        return f"{head}ラッパー経由（relay PID {pid}、claude PID {child}）"
+    if pos == "no-dir":
+        line = f"{head}ラッパーを通らずに起動（NDF_RELAY_DIR が無い）"
+        loader = loader_file()
+        loaded = ([loader] if loader and os.path.exists(loader) else []) + \
+            [rc for rc in rc_files() if _has_loader(rc)]
+        if loaded:
+            line += (f"。{'・'.join(loaded)} に読み込みの行はあるので、"
+                     "このセッションは読み込みの前に開いたシェル、または IDE から起動した")
+        return line
+    if pos == "not-running":
+        return f"{head}ラッパーは終わっている（NDF_RELAY_DIR はあるがラッパーが動いていない）"
+    if proc_info(os.getppid()) is None:
+        return f"{head}判定できない（親のプロセスをたどれない）"
+    return f"{head}ラッパーの直接の子ではない（fork・bg-pty-host・別の入口。#1016）"
+
+
+def _has_loader(rc: str) -> bool:
+    """`rc` に閉じた囲みがあり、中が読み込みの行（直の alias でない）か。"""
+    found, unclosed, text = rc_blocks(rc)
+    return bool(found) and not unclosed and not has_direct_alias(text, found)
 
 
 def _startup_copy(body: bytes) -> None:

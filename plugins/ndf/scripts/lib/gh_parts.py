@@ -47,20 +47,22 @@ class GhResult(NamedTuple):
     stderr: str
 
 
-def _subprocess_gh(args: list[str], stdin: str | None = None) -> GhResult:
+def _subprocess_gh(args: list[str], stdin: str | None = None, cwd: str | None = None) -> GhResult:
     try:
-        p = subprocess.run(["gh", *args], input=stdin, capture_output=True, text=True)
+        p = subprocess.run(["gh", *args], input=stdin, capture_output=True, text=True, cwd=cwd)
     except OSError as exc:
         return GhResult(127, "", f"gh を実行できない: {exc}")
     return GhResult(p.returncode, p.stdout, p.stderr)
 
 
-# テストはここを見本の応答へ差し替える。引数は `gh` の後ろの argv と標準入力。
+# テストはここを見本の応答へ差し替える。引数は `gh` の後ろの argv と標準入力（`cwd` を渡すときだけ `cwd=`）。
 RUNNER: Callable[..., GhResult] = _subprocess_gh
 
 
-def gh(args: list[str], stdin: str | None = None) -> GhResult:
-    return RUNNER(list(args), stdin)
+def gh(args: list[str], stdin: str | None = None, cwd: str | None = None) -> GhResult:
+    if cwd is None:
+        return RUNNER(list(args), stdin)
+    return RUNNER(list(args), stdin, cwd=str(cwd))
 
 
 _RATE_LIMIT_MARKERS = ("rate limit", "RATE_LIMIT", "unknown owner type")
@@ -150,6 +152,72 @@ def _output_via_runner(cmd: list[str]) -> str | None:
     """`gh ...` の argv を受け、標準出力を返す。失敗は `None`。"""
     r = gh(cmd[1:] if cmd and cmd[0] == "gh" else cmd)
     return r.stdout if r.returncode == 0 else None
+
+
+# ---------------- view-json（gh pr view / gh issue view の --json） ----------------
+
+
+def _rest_state(d: dict[str, Any]) -> str:
+    """REST の state を GraphQL の形（OPEN / CLOSED / MERGED）へ揃える。MERGED は merged_at で見分ける。"""
+    if d.get("merged_at"):
+        return "MERGED"
+    return str(d.get("state") or "").upper()
+
+
+def _rest_merge_commit(d: dict[str, Any]) -> dict[str, str] | None:
+    """GraphQL の mergeCommit は `{"oid": ...}` か null。REST の merge_commit_sha は未マージでも試しの
+    マージを指すので、merged_at があるときだけ載せる。"""
+    sha = d.get("merge_commit_sha")
+    return {"oid": sha} if d.get("merged_at") and sha else None
+
+
+# REST の応答から GraphQL の `--json` のフィールドを作る対応表。release-steps.py が読むフィールドだけ
+_VIEW_FIELDS: dict[str, dict[str, Callable[[dict[str, Any]], Any]]] = {
+    "pr": {
+        "number": lambda d: d.get("number"),
+        "title": lambda d: d.get("title") or "",
+        "body": lambda d: d.get("body") or "",
+        "state": _rest_state,
+        "url": lambda d: d.get("html_url") or "",
+        "mergeCommit": _rest_merge_commit,
+    },
+    "issue": {
+        "number": lambda d: d.get("number"),
+        "title": lambda d: d.get("title") or "",
+        "body": lambda d: d.get("body") or "",
+        "state": lambda d: str(d.get("state") or "").upper(),
+        "url": lambda d: d.get("html_url") or "",
+    },
+}
+_VIEW_REST_PATH = {"pr": "pulls", "issue": "issues"}
+
+
+def view_json(kind: str, number: int, fields: str, repo: str | None = None,
+              cwd: str | None = None) -> GhResult:
+    """`gh <pr|issue> view <n> --json <fields>` を呼ぶ。GraphQL が上限のときだけ REST で読み直し、
+    GraphQL の `--json` と同じ形の JSON を stdout に入れて返す。
+
+    上限以外の失敗と、対応表（`_VIEW_FIELDS`）に無いフィールドを頼まれたときは、元の結果をそのまま返す。
+    `repo` を省くと `gh` が `cwd` のリポジトリを使う（REST は `{owner}/{repo}` の置き換え）。
+    """
+    args = [kind, "view", str(int(number))] + (["--repo", repo] if repo else []) + ["--json", fields]
+    r = gh(args, cwd=cwd)
+    if r.returncode == 0 or not is_rate_limited(r.stderr + r.stdout):
+        return r
+    table = _VIEW_FIELDS[kind]
+    names = [f.strip() for f in fields.split(",") if f.strip()]
+    if not names or any(f not in table for f in names):
+        return r
+    path = f"repos/{repo or '{owner}/{repo}'}/{_VIEW_REST_PATH[kind]}/{int(number)}"
+    rr = gh(["api", path], cwd=cwd)
+    try:
+        d = json.loads(rr.stdout) if rr.returncode == 0 else None
+    except ValueError:
+        d = None
+    if not isinstance(d, dict):
+        why = rr.stderr.strip() or "REST の応答を読めない"
+        return GhResult(rr.returncode or 1, "", f"{r.stderr.strip()}\nREST でも読めない: {why}")
+    return GhResult(0, json.dumps({f: table[f](d) for f in names}, ensure_ascii=False), "")
 
 
 # ---------------- unresolved-threads ----------------

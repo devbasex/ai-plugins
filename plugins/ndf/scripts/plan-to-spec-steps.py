@@ -149,7 +149,7 @@ def build_parser():
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("spec-finalize", parents=[common_parser()], help="設計を消し、確定仕様を索引へ載せてコミットする")
     p.add_argument("--spec", required=True)
-    p.add_argument("--design", nargs="+", required=True)
+    p.add_argument("--design", nargs="+", action="extend", required=True)
     p.add_argument("--title")
     p.set_defaults(func=cmd_spec_finalize)
     return ap

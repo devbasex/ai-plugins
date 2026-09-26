@@ -636,7 +636,8 @@ def mod(tmp_path, monkeypatch):
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)
     for k in list(os.environ):
-        if k.startswith(("NDF_", "XDG_", "CLAUDE")):
+        # DEVBASE_SHELLRC_DIR と ZDOTDIR も落とす（isolated_env と同じ。本物の読み込み先を見ない）
+        if k.startswith(("NDF_", "XDG_", "CLAUDE", "DEVBASE_")) or k == "ZDOTDIR":
             monkeypatch.delenv(k, raising=False)
     home = tmp_path / "home"
     home.mkdir()
@@ -1650,6 +1651,92 @@ def test_mac_status_warns_when_only_bashrc_has_loader(mac, tmp_path, capsys):
     (home / ".bash_profile").write_text('[ -f "$HOME/.bashrc" ] && . "$HOME/.bashrc"\n')
     assert mac.cmd_status() == 0
     assert "警告" not in capsys.readouterr().out
+
+
+# -- status は今のセッションとラッパーとの位置を示す（#1187）
+
+
+def session_lines(m, capsys):
+    before = {p for p in home_of_now().rglob("*")}
+    assert m.cmd_status() == 0
+    assert {p for p in home_of_now().rglob("*")} == before
+    return [x for x in capsys.readouterr().out.splitlines() if x.startswith("ndf-relay: このセッション:")]
+
+
+def home_of_now():
+    return pathlib.Path(os.environ["HOME"])
+
+
+def test_status_session_relay(mod, tmp_path, monkeypatch, capsys):
+    # 関数で呼ぶ status の親は pytest の親。そこを child.pid にすると最初に当たる claude がラッパーの子になる
+    r = Relay(tmp_path, child_pid=os.getppid())
+    (r.dir / "relay.pid").write_text("4321")
+    monkeypatch.setenv("NDF_RELAY_DIR", str(r.dir))
+    try:
+        assert session_lines(mod, capsys) == [
+            f"ndf-relay: このセッション: ラッパー経由（relay PID 4321、claude PID {os.getppid()}）"]
+    finally:
+        r.release()
+
+
+def test_status_session_no_dir(mod, capsys):
+    assert session_lines(mod, capsys) == [
+        "ndf-relay: このセッション: ラッパーを通らずに起動（NDF_RELAY_DIR が無い）"]
+
+
+def test_status_session_no_dir_hints_when_loader_is_in_rc(mod, tmp_path, capsys):
+    home = home_of(tmp_path)
+    (home / ".bashrc").write_text("# >>> ndf relay >>>\n" + mod.loader_body() + "# <<< ndf relay <<<\n")
+    assert session_lines(mod, capsys) == [
+        "ndf-relay: このセッション: ラッパーを通らずに起動（NDF_RELAY_DIR が無い）。"
+        f"{home / '.bashrc'} に読み込みの行はあるので、このセッションは読み込みの前に開いたシェル、"
+        "または IDE から起動した"]
+
+
+def test_status_session_no_dir_hints_when_loader_is_in_zshrc(mod, tmp_path, capsys):
+    home = home_of(tmp_path)
+    (home / ".zshrc").write_text("# >>> ndf relay >>>\n" + mod.loader_body() + "# <<< ndf relay <<<\n")
+    assert f"{home / '.zshrc'} に読み込みの行はある" in session_lines(mod, capsys)[0]
+
+
+def test_status_session_no_dir_hints_when_devbase_loader_exists(mod, tmp_path, monkeypatch, capsys):
+    dl = tmp_path / "shellrc.d"
+    dl.mkdir()
+    (dl / "ndf-relay.sh").write_text(mod.loader_body())
+    monkeypatch.setenv("DEVBASE_SHELLRC_DIR", str(dl))
+    assert f"{dl / 'ndf-relay.sh'} に読み込みの行はある" in session_lines(mod, capsys)[0]
+
+
+def test_status_session_not_running(mod, tmp_path, monkeypatch, capsys):
+    r = Relay(tmp_path)
+    r.release()
+    monkeypatch.setenv("NDF_RELAY_DIR", str(r.dir))
+    assert session_lines(mod, capsys) == [
+        "ndf-relay: このセッション: ラッパーは終わっている（NDF_RELAY_DIR はあるがラッパーが動いていない）"]
+
+
+def test_status_session_not_child(mod, tmp_path, monkeypatch, capsys):
+    r = Relay(tmp_path, child_pid=999999)
+    monkeypatch.setenv("NDF_RELAY_DIR", str(r.dir))
+    try:
+        assert session_lines(mod, capsys) == [
+            "ndf-relay: このセッション: ラッパーの直接の子ではない（fork・bg-pty-host・別の入口。#1016）"]
+    finally:
+        r.release()
+
+
+def test_status_session_cannot_trace_parents(mod, tmp_path, monkeypatch, capsys):
+    # /proc も ps も使えない環境。ほかの行はそのまま出す
+    r = Relay(tmp_path, child_pid=999999)
+    monkeypatch.setenv("NDF_RELAY_DIR", str(r.dir))
+    monkeypatch.setattr(mod, "proc_info", lambda pid: None)
+    try:
+        assert mod.cmd_status() == 0
+        out = capsys.readouterr().out
+        assert "ndf-relay: このセッション: 判定できない（親のプロセスをたどれない）" in out.splitlines()
+        assert "ndf-relay: 読み込み先:" in out and "ndf-relay: 複製 " in out
+    finally:
+        r.release()
 
 
 def test_mac_uninstall_removes_blocks_in_both_files(mac, tmp_path):

@@ -89,7 +89,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.17.27）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.17.28）
 ```
 
 ### agy
@@ -119,52 +119,16 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.17.27 へ更新するとき
+## v10.17.28 へ更新するとき
 
-- Docs: 用語集に「チェイン」を足す（#1163）
-- Fix: 書き込み先の案内が ~ で始まるパスを主ディレクトリの中と見なす（#1165）
-- cross-review と cross-refactoring の文書とプロンプトは、エンジニアになじむ業界の用語で書かれています（#1167）
-- design・refactoring・release の Skill の文書を、エンジニアになじむ用語で記述（#1168）
-- external-ai・issue-upkeep・markdown-writing・requirements-design・worktree の各 Skill の文書は、エンジニアになじみのある用語で書かれています（#1169）
-- requirements-design の Skill では、仕様を写したものを「仕様のコピー」と呼びます（#1169）
-- Skill・エージェント・README の説明は、エンジニアになじみのある語で書かれています。（#1170）
-- 仕様・README・AGENTS.md などの文書は、エンジニアになじむ用語（承認ゲート・カットポイント・ラウンドテスト・ラッパーなど）で書かれている（#1171）
-- 仕様の文では、直訳の語（器・束・入れ物・段）を使わない（#1171）
-- development-workflow の文書は、業界で通じる語で書かれている。例はセッション・シグナルファイル・アイドル・プラン・キュー・進捗ログ。（#1172）
-- 用語集の「廃止した語」で、使わなくなった語に対応する今の語を引ける。（#1172）
-- 工程表の行名は stage の値として読める。（#1172）
-- 無し（検査の修正だけ）（#1173）
-- release・refactoring・design の Skill の説明と参照文書は、ユビキタス言語の用語で書かれている（#1175）
-- worktree の Skill の文書では、「設定」「worktree レジストリ」「開発 worktree」など用語集の語を使う（#1176）
-- issue-upkeep の Skill の文書では、「再検討条件」「修正方針」「課題グループ」など用語集の語を使う（#1176）
-- external-ai・document-systems・document-drafting・requirements-design の Skill の文書では、用語集の語を使う（#1176）
-- cross-review と cross-refactoring の文書・プロンプトの語が、用語集のユビキタス言語に揃っている（#1177）
-- Skill と README の文書は用語集の語で書かれている。（#1178）
-- 用語集には、Skill と README で使う語が載っている。（#1178）
-- development-workflow の SKILL と references は、用語集に載った語で書かれている（#1179）
-- 用語集に判断表の語とコンテキストが載っている（#1179）
-- 仕様の文書・CLAUDE.md・AGENTS.md・README で、同じものを同じ語で呼ぶ（例: リリース済み版・@インポート・worktree レジストリ・進捗記録・ミッション課題）（#1180）
-- 仕様に出てくる語は用語集で意味を引ける（#1180）
-- Fix: doc-lint が用語集の生成物を調べ、直しのステップが生成物を手で直す（#1181）
-- 無し（検査の修正だけ）（#1182）
-- 用語集の語ごとに、コードで使う識別子を `code` で持たせられる（#1185）
-- 廃止した識別子は `deprecated_code` に書き、言い換え先の識別子と並べて示せる（#1185）
-- NDF の用語集の語に識別子が入り、語からコード上の名前を引ける（#1185）
-- 無し（検査の修正だけ）（#1186）
-- 駆動が pause したとき、直しの worker は pause に載った作業ディレクトリで動く（#1189）
-- 即時修正するかどうかは pace に関わらず、行数ではなく 4 条件（原因・契約・方針・revert）で決まる（#1189）
-- worker は手段を自分で選べる。置き場所は変えない（#1189）
-- 無し（検査の修正だけ）（#1190）
-- プランの起動にも文脈量のガードが掛かります（#1195）
-- Agent で supervisor を起動すると、ガードがプランを使うよう案内します（#1195）
-- フェーズをプランで流すか supervisor で回すかを、`agent-layers.md` の表で引ける（#1196）
-- 判定結果の手順 3 に次に打つコマンドが載り、そのまま実行できる（#1196）
-- normal のミッションを流すコマンドは `waiting.md` に 1 か所で載っている（#1196）
-- 中断と再開の手順は `interrupt-resume.md` にまとまっている（#1196）
-- new mission は、プラグインでないリポジトリ（リリースの雛形が無いリポジトリ）でも使える（#1197）
-- new mission は、用語集の無いリポジトリでも使える（#1197）
-- new mission の help が、種別ごとに説明を示す（#1197）
-- 無し（検査の修正だけ）（#1198）
+- Fix: bash 3.2 の UTF-8 で $VAR の直後の全角が変数名に取り込まれる形を ${VAR} に直す（#1203）
+- 確定仕様化で `--design` を繰り返し渡しても、計画ファイルが残らない（#1204）
+- 拡張子の無いシェルスクリプトの差分でも、構造改善が飛ばされずに行われる（#1205）
+- 設計文書のテスト設計には、縛る振る舞いと壊し方までを書く。テストの組み方の細部は実装のときに決める（#1206）
+- 受け入れ条件の「人が見る」確認は、振る舞いと見た目に分けて書く（#1206）
+- 端末で確かめる振る舞いの条件は、マージ前に擬似端末で確かめる（#1206）
+- `/ndf:install-wrapper status` に、今のセッションがラッパー経由で起動したかの 1 行が出る（#1207）
+- 無し（検査の修正だけ）（#1208）
 
 ## Playwright テストについて
 
@@ -401,7 +365,7 @@ agy models   # 認証確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.17.27/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.17.28/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -423,14 +387,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.27/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.28/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.17.27  <path>
+# => ndf@ai-plugins  installed, enabled  10.17.28  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。

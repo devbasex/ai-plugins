@@ -109,7 +109,7 @@ if [ "$REVIEW_KIND" = design ] && [ "$ROUND" -ge 2 ] 2>/dev/null && [ -n "$PREV_
   DIFF_SCOPE_BLOCK=$(cat <<SCOPE_EOF
 
 ## このラウンドで見る差分（設計 Pull Request の round 2 以降）
-前のラウンドのレビュー対象（$PREV_SHA）からの変更だけを見る:
+前のラウンドのレビュー対象（${PREV_SHA}）からの変更だけを見る:
 
 \`\`\`bash
 git -C "$WORKTREE" diff $PREV_SHA $SHA

@@ -22,7 +22,7 @@
 `lib/step_result.py` の形の 1 行の JSON で、終了コードは 0 = ok / 1 = 失敗（stopped）/
 2 = 読めない / 3 = 前提が無い / 10 = 本番への配布の承認が要る（approval-facts）。
 
-    python3 release-steps.py bump           --plugin <名前> --to <版> [--root <dir>]
+    python3 release-steps.py bump           --plugin <名前> --to <版> [--base develop] [--root <dir>]
     python3 release-steps.py changelog      --version <版> --prs <PR番号>... [--plugin ndf] [--root <dir>]
     python3 release-steps.py release        --version <版> --channel dev|prod [--plugins ndf,...] [--root <dir>]
     python3 release-steps.py approval-facts --version <版> --prs <PR番号>... [--prev-tag <タグ>] [--root <dir>]
@@ -33,7 +33,11 @@ notes は PR 本文の `## 利用者向けの変化` の節（無い・「無し
 plugin の README の `## v<版> へ更新するとき` の節を組み直す。`--approval` を渡すと、代わりに本番承認の提示物の
 「配る中身」「検証への配布で確かめたこと」の欄と、PR 本文の `## 未検証・残る危険` を集めた節を書く。
 changelog と notes は未マージの PR を載せず、番号を metrics.unmerged へ出す。渡した PR がすべて未マージなら
-書き込む前に 3（前提エラー）で止まる。
+書き込む前に 3（前提エラー）で止まる。PR の読み取り（`gh pr view --json`）は、GraphQL が上限なら REST で読み直す
+（`lib/gh_parts.py` の `view_json`）。
+
+bump は、作業場所の版がすでに `--to` で起点（origin/<base>）の版と違うなら、同じステップの打ち直しとして何もせず
+ok を返す。起点の版がすでに `--to` なら（同じ版を出し直そうとしている）止まる。
 """
 from __future__ import annotations
 
@@ -51,6 +55,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 from step_result import (EXIT_GATE, EXIT_PRECONDITION, StepError, approval_present, base_of,  # noqa: E402
                          common_parser, emit, gh_json, git, git_root, main_with, plugin_dir,
                          repo_slug, result, run, today, version_arg)
+import gh_parts  # noqa: E402
 
 DECLARATION = ".ndf/release.json"
 SUPPORTED_VERSIONS = (1,)
@@ -385,6 +390,16 @@ def run_staleness(root, expected=()):
     return False, " / ".join((rest or out)[-10:])[:1000]
 
 
+def base_version(root, pdir, base):
+    """起点のブランチ（origin/<base>）の plugin.json の版。読めなければ None。"""
+    rel = (pdir / ".claude-plugin" / "plugin.json").relative_to(root).as_posix()
+    p = git(root, "show", f"origin/{base}:{rel}", check=False)
+    try:
+        return json.loads(p.stdout)["version"] if p.returncode == 0 else None
+    except (ValueError, KeyError, TypeError):
+        return None
+
+
 def cmd_bump(a):
     root = git_root(a.root)
     pdir = plugin_dir(root, a.plugin)
@@ -394,7 +409,13 @@ def cmd_bump(a):
         raise StepError(f"旧版を plugin.json から読めない: {e}", 2)
     new = a.to
     if old == new:
-        raise StepError(f"旧版と新版が同じ: {old}")
+        base_ver = base_version(root, pdir, a.base)
+        if base_ver is None or base_ver == new:
+            raise StepError(f"旧版と新版が同じ: {old}"
+                            + ("" if base_ver else f"（origin/{a.base} の版を読めない）"))
+        # 同じステップの打ち直し（作業場所の版はすでに上げてある）
+        emit(result(TOOL, "ok", f"{a.plugin} はすでに {new}（origin/{a.base} は {base_ver}）。上げ直さない",
+                    [], {"plugin": a.plugin, "from": base_ver, "to": new, "already": True}))
     ed = Editor(root, old, new)
     desc_re = r'^\s*"description"\s*:.*\(v' + re.escape(old) + r"\)"
 
@@ -448,6 +469,20 @@ def cmd_bump(a):
                 items, metrics, next="items の manual を手で直す" if ed.manual else None))
 
 
+def pr_view(root, n, fields):
+    """gh pr view <n> --json <fields> を読む。GraphQL が上限なら gh_parts が REST で読み直す。"""
+    what = f"gh pr view {n}"
+    r = gh_parts.view_json("pr", n, fields, cwd=str(root))
+    if r.returncode == 127 and "gh を実行できない" in r.stderr:
+        raise StepError("gh が無い", EXIT_PRECONDITION)
+    if r.returncode != 0:
+        raise StepError(f"{what} が失敗: {r.stderr.strip()[:300]}")
+    try:
+        return json.loads(r.stdout or "null")
+    except ValueError:
+        raise StepError(f"{what} の出力を読めない", 2)
+
+
 def unmerged(d):
     """gh pr view の出力がマージされていない PR を指すか。state の無い出力はマージ済みとして扱う。"""
     return isinstance(d, dict) and d.get("state", "MERGED") != "MERGED"
@@ -464,7 +499,7 @@ def pr_titles(root, prs, skipped=None):
     """PR ごとに (番号, 箇条) を返す。マージされていない PR は載せず、番号を skipped へ足す。"""
     items = []
     for n in prs:
-        d = gh_json(root, ["pr", "view", str(n), "--json", "title,state"], f"gh pr view {n}")
+        d = pr_view(root, n, "title,state")
         if unmerged(d):
             skipped is not None and skipped.append(n)
             continue
@@ -617,7 +652,7 @@ def wait_and_merge(root, n):
 
 
 def merge_commit_of(root, n):
-    d = gh_json(root, ["pr", "view", str(n), "--json", "mergeCommit"], f"gh pr view {n}") or {}
+    d = pr_view(root, n, "mergeCommit") or {}
     return ((d.get("mergeCommit") or {}).get("oid")) or None
 
 
@@ -712,8 +747,7 @@ def cmd_approval_facts(a):
 
     items, rows = [], []
     for n in a.prs:
-        d = gh_json(root, ["pr", "view", str(n), "--json", "number,title,state,mergeCommit,url"],
-                    f"gh pr view {n}") or {}
+        d = pr_view(root, n, "number,title,state,mergeCommit,url") or {}
         oid = (d.get("mergeCommit") or {}).get("oid") or ""
         checks = pr_check_buckets(root, n)
         passed = sum(1 for c in checks if c.get("bucket") == "pass")
@@ -778,7 +812,7 @@ def pr_notes(root, prs, skipped=None):
     マージされていない PR は配る中身に入らないため載せず、番号を skipped へ足す。"""
     out = []
     for n in prs:
-        d = gh_json(root, ["pr", "view", str(n), "--json", "title,body,state"], f"gh pr view {n}")
+        d = pr_view(root, n, "title,body,state")
         if unmerged(d):
             skipped is not None and skipped.append(n)
             continue
@@ -901,6 +935,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("bump", parents=[common], help="plugin の版数を持つ箇所を旧版から新版へ上げる")
     p.add_argument("--plugin", required=True, help="ndf / playwright-kit / plugins/mcp の名前（例 mcp-serena）")
     p.add_argument("--to", required=True, type=version_arg)
+    p.add_argument("--base", default="develop",
+                   help="起点のブランチ。作業場所の版がすでに --to で、origin/<base> の版と違うなら打ち直しとして ok を返す")
     p.set_defaults(func=cmd_bump)
 
     p = sub.add_parser("changelog", parents=[common], help="CHANGELOG.md と plugin の README の更新案内へ PR のタイトルを並べる")
