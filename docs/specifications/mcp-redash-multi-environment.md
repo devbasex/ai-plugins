@@ -34,7 +34,7 @@ Claude Code / shared / Kiro の `.mcp.json` は `mcpServers.redash` を定義す
 
 ### 追加 MCP
 
-追加環境は `/redash-add <suffix>` により project `.mcp.json` に追加する。suffix を `dev` とした場合、MCP 名は `redash-dev`、参照環境変数は `REDASH_DEV_URL` と `REDASH_DEV_API_KEY` になる。
+追加環境は `/redash add <suffix>` により project `.mcp.json` に追加する。suffix を `dev` とした場合、MCP 名は `redash-dev`、参照環境変数は `REDASH_DEV_URL` と `REDASH_DEV_API_KEY` になる。
 
 suffix と名前の変換:
 
@@ -49,17 +49,23 @@ suffix は `^[a-z0-9][a-z0-9-]*$` に一致する英小文字、数字、ハイ�
 
 ### Skill
 
-`mcp-redash` は次の user-invocable Skill を提供する。
+`mcp-redash` は次の 2 つの user-invocable Skill を提供する。
 
 | Skill | 用途 |
 |---|---|
-| `redash-add` | 指定 suffix の `redash-*` MCP server を project `.mcp.json` に追加する |
-| `redash-remove` | 指定 suffix の `redash-*` MCP server を project `.mcp.json` から削除する |
-| `redash-list` | plugin 同梱 `redash` と project `.mcp.json` 上の `redash-*` を一覧表示する |
-| `redash-status` | 各 Redash MCP が必要とする環境変数名と未設定警告を表示する |
+| `redash` | `/redash <add\|list\|remove\|status> [suffix]` で Redash MCP を操作する |
 | `redash-guide` | 利用手順と命名規則を表示する |
 
-各操作 Skill は `scripts/redash-mcp-config.js` を呼び出す。`redash-guide` は利用者向けの説明を持つ。
+`redash` の操作は次の 4 つである。
+
+| 操作 | 用途 |
+|---|---|
+| `add <suffix>` | 指定 suffix の `redash-*` MCP server を project `.mcp.json` に追加する |
+| `remove <suffix>` | 指定 suffix の `redash-*` MCP server を project `.mcp.json` から削除する |
+| `list` | plugin 同梱 `redash` と project `.mcp.json` 上の `redash-*` を一覧表示する |
+| `status` | 各 Redash MCP が必要とする環境変数名と未設定警告を表示する |
+
+`redash` は Skill のディレクトリを 1 回だけ解決し、操作と suffix をそのまま `scripts/redash-mcp-config.js` へ渡す。知らない操作は script が使い方を出して非 0 で終了する。`redash-guide` は利用者向けの説明を持つ。
 
 ### 設定操作 script
 
@@ -92,7 +98,7 @@ Kiro runtime では、`redash-mcp-config.js` が `.mcp.json` の Redash MCP serv
 | `.env.example` | `REDASH_URL` / `REDASH_API_KEY` と suffix 付き環境変数の例 |
 | `README.md` | runtime ごとの導入方法、使い方、トラブルシューティング |
 | `scripts/redash-mcp-config.js` | project `.mcp.json` の追加・削除・一覧・状態確認 |
-| `skills/*/SKILL.md` | `redash-add` / `redash-remove` / `redash-list` / `redash-status` / `redash-guide` |
+| `skills/*/SKILL.md` | `redash` / `redash-guide` |
 
 runtime 配布物は shared から生成され、Claude Code は `.claude-plugin/plugin.json`、Codex は `.codex-plugin/plugin.json`、Kiro CLI は `install.sh` を導入入口として持つ。
 
@@ -117,24 +123,24 @@ Redash への接続可否や API 権限は、利用者が設定した `REDASH_*_
 - API key や secret の実値は repository に含めない。
 - `.mcp.json` は `${REDASH_API_KEY}` や `${REDASH_DEV_API_KEY}` などの placeholder だけを保持する。
 - `.env.example` はサンプル値だけを保持する。
-- `redash-status` は必要な環境変数名と未設定警告だけを表示し、環境変数の値は表示しない。
+- `/redash status` は必要な環境変数名と未設定警告だけを表示し、環境変数の値は表示しない。
 
 ## 運用
 
 単一 Redash 環境だけを使う project では、plugin を導入し、project 環境に `REDASH_URL` と `REDASH_API_KEY` を設定する。
 
-複数 Redash 環境を使う project では、`/redash-add dev` のように suffix を指定して追加し、表示された環境変数名を project `.env` など利用者環境に設定する。設定状況は `/redash-list` と `/redash-status` で確認する。不要になった追加環境は `/redash-remove dev` で project `.mcp.json` から削除する。
+複数 Redash 環境を使う project では、`/redash add dev` のように suffix を指定して追加し、表示された環境変数名を project `.env` など利用者環境に設定する。設定状況は `/redash list` と `/redash status` で確認する。不要になった追加環境は `/redash remove dev` で project `.mcp.json` から削除する。
 
 ## テスト観点
 
 - plugin 導入直後の同梱 MCP が `redash` だけであること。
-- `/redash-add dev` が project `.mcp.json` に `redash-dev` を追加し、`REDASH_DEV_URL` と `REDASH_DEV_API_KEY` を参照すること。
+- `/redash add dev` が project `.mcp.json` に `redash-dev` を追加し、`REDASH_DEV_URL` と `REDASH_DEV_API_KEY` を参照すること。
 - 任意 suffix の追加で MCP 名と環境変数名が衝突しないこと。
 - 既存 suffix の再追加が変更なしの成功扱いになること。
-- `/redash-remove dev` が `redash-dev` を削除すること。
+- `/redash remove dev` が `redash-dev` を削除すること。
 - 存在しない suffix の削除が変更なしの成功扱いになること。
 - `.mcp.json` が壊れている場合に上書きしないこと。
-- `redash-status` が secret 値を出さず、未設定の環境変数名だけを警告すること。
+- `/redash status` が secret 値を出さず、未設定の環境変数名だけを警告すること。
 - `bash scripts/validate-runtime-plugins.sh` が runtime 配布物の同期、manifest、`.mcp.json`、installer、docs link を検証すること。
 
 ## 関連リンク

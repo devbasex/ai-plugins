@@ -1,22 +1,32 @@
 ---
-name: redash-add
-description: 任意 suffix の Redash MCP を project .mcp.json に追加する
+name: redash
+description: "Redash MCP を project の .mcp.json に追加・削除し、一覧と設定状況を表示する。明示指示のみで実行する。Use when Redash の環境を足す・消す・確かめるとき（/redash add dev・/redash list・/redash status・/redash remove dev）."
+argument-hint: "add|list|remove|status [suffix]"
 disable-model-invocation: true
 user-invocable: true
 arguments:
+  - name: action
+    description: "操作（add / list / remove / status）"
   - name: suffix
-    description: "環境識別子（dev, stg, prod2, sandbox など）"
+    description: "環境識別子（dev, stg, prod2, sandbox など）。add と remove で指定する"
 allowed-tools:
   - Bash
 ---
 
-# /redash-add
+# /redash
 
-任意 suffix の Redash MCP をプロジェクトの `.mcp.json` に追加します。
+`/redash <add|list|remove|status> [suffix]` で Redash MCP を操作します。
+
+| 操作 | 内容 |
+|------|------|
+| `add <suffix>` | 任意 suffix の Redash MCP をプロジェクトの `.mcp.json` に追加する |
+| `remove <suffix>` | 指定 suffix の Redash MCP をプロジェクトの `.mcp.json` から削除する |
+| `list` | 現在有効な Redash MCP を一覧表示する |
+| `status` | 各 MCP が必要とする環境変数と、未設定の警告を表示する |
 
 ## 実行方法
 
-以下のコマンドを実行してください。`$ARGUMENTS` にはユーザーが指定した suffix が入ります。
+以下のコマンドを実行してください。`$ARGUMENTS` にはユーザーが指定した操作と suffix が入ります。
 
 ```bash
 # この Skill のディレクトリを決める。候補を順に試し、最初に当たったものを絶対パスで採る。
@@ -27,7 +37,7 @@ allowed-tools:
 # パスへ置き換えること**。置き換えないまま実行しても、その候補が外れるだけで別の場所を
 # 読むことはない。Kiro CLI は installer が `.kiro/skills/` へ symlink を張るため、置き換え
 # なくてもその位置で当たる。
-SKILL_NAME=redash-add
+SKILL_NAME=redash
 PLUGIN_ROOT='${CLAUDE_PLUGIN_ROOT}'
 case "$PLUGIN_ROOT" in '$'*) PLUGIN_ROOT= ;; esac
 SKILL_DIR=
@@ -47,7 +57,13 @@ do
 done
 [ -n "$SKILL_DIR" ] || { echo "この Skill のディレクトリを解決できない" >&2; exit 1; }
 CONFIG="$SKILL_DIR/../../scripts/redash-mcp-config.js"
-node "$CONFIG" add "$ARGUMENTS"
+# 操作と suffix を分ける。操作の検査は redash-mcp-config.js が行い、知らない操作なら使い方を
+# 出して失敗する。
+ACTION= SUFFIX=
+read -r ACTION SUFFIX _ <<'EOF' || true
+$ARGUMENTS
+EOF
+node "$CONFIG" "$ACTION" ${SUFFIX:+"$SUFFIX"}
 ```
 
 ## 実行後

@@ -342,11 +342,11 @@ function cmdStatus() {
     }
     if (names.length === 0) {
       console.log('追加の Redash MCP はありません。');
-      console.log('/redash-add <suffix> で追加できます。');
+      console.log('/redash add <suffix> で追加できます。');
     }
   } else {
     console.log('追加の Redash MCP はありません。');
-    console.log('/redash-add <suffix> で追加できます。');
+    console.log('/redash add <suffix> で追加できます。');
   }
 }
 
