@@ -316,7 +316,7 @@ do_mode() {
       case "$path" in
         $pattern)
           # 1 つのパスが複数の条件に当たっても、一覧へは 1 度だけ載せる。
-          matched="$matched  - $path（$pattern）
+          matched="$matched  - ${path}（${pattern}）
 "
           break
           ;;

@@ -67,7 +67,7 @@ resolve_print_timeout() {
       local limits phase=${PRINT_TIMEOUT:-implement}
       limits=$(dirname -- "${BASH_SOURCE[0]}")/limits.py
       PRINT_TIMEOUT=$(python3 "$limits" cli-timeout "$phase" "$RUNTIME") || {
-        echo "CLI の上限を決められません（工程: $phase）" >&2; exit 1; }
+        echo "CLI の上限を決められません（工程: ${phase}）" >&2; exit 1; }
       ;;
   esac
 }

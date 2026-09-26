@@ -273,7 +273,7 @@ validate_compose_file() {
   case "$resolved" in
     "$TARGET"/*) ;;
     *)
-      printf '%s\n' "compose_files の $f の実体が作業ツリーの外（$resolved）にあります" >&2
+      printf '%s\n' "compose_files の $f の実体が作業ツリーの外（${resolved}）にあります" >&2
       return 1
       ;;
   esac

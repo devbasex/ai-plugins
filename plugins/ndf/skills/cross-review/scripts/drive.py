@@ -35,7 +35,7 @@ DOCS02 = SKILL / "docs" / "02-fix-and-rotation.md"
 
 def call(cmd: list[str], env: dict | None = None, cwd: str | None = None) -> tuple[int, str]:
     """スクリプトを 1 本実行し、終了コードと標準出力を返す。標準エラーはそのまま流す。"""
-    p = subprocess.run(cmd, capture_output=True, text=True, env=env, cwd=cwd)
+    p = subprocess.run(cmd, capture_output=True, text=True, errors="replace", env=env, cwd=cwd)
     if p.stderr:
         sys.stderr.write(p.stderr)
     return p.returncode, p.stdout

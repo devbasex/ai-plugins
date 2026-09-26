@@ -166,7 +166,7 @@ if [ "$MODE" = "sync" ]; then
 fi
 
 mkdir -p "$ROOT"
-[ -d "$WORK" ] || { echo "書き込み用の作業ディレクトリがありません: $WORK（init を先に実行してください）" >&2; exit 1; }
+[ -d "$WORK" ] || { echo "書き込み用の作業ディレクトリがありません: ${WORK}（init を先に実行してください）" >&2; exit 1; }
 
 for rt in "${RUNTIMES[@]}"; do
   ensure_readonly_worktree "$ROOT/$rt" "$HEAD_SHA"
