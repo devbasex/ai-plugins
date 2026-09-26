@@ -8,7 +8,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from hook_lib import worktree
 from worktree_helpers import run_lib, write_declaration
+
+
+def allow_paths(main_repo: Path) -> list[str]:
+    """guard の許可パス（hook の判定 hook_lib/worktree.py。#1142 の決定 20）。"""
+    return worktree.allow_paths(worktree.declaration(str(main_repo)))
 
 
 def read_declaration(main_repo: Path) -> tuple[str, int]:
@@ -77,12 +83,9 @@ def test_unknown_fields_are_kept(main_repo: Path) -> None:
 def test_allow_paths_falls_back_to_defaults(main_repo: Path) -> None:
     """`guard.allow_paths` が無ければ組み込みの既定を使う。"""
     write_declaration(main_repo, json.dumps({"version": 1}))
-    got = run_lib(
-        f'decl=$(wt_declaration "{main_repo}"); wt_allow_paths "$decl"',
-        cwd=main_repo,
-    )
-    assert "issues/" in got.stdout.splitlines(), got.stdout
-    assert ".gitignore" in got.stdout.splitlines(), got.stdout
+    got = allow_paths(main_repo)
+    assert "issues/" in got, got
+    assert ".gitignore" in got, got
 
 
 def test_allow_paths_uses_declaration_when_present(main_repo: Path) -> None:
@@ -90,29 +93,20 @@ def test_allow_paths_uses_declaration_when_present(main_repo: Path) -> None:
         main_repo,
         json.dumps({"version": 1, "guard": {"allow_paths": ["notes/"]}}),
     )
-    got = run_lib(
-        f'decl=$(wt_declaration "{main_repo}"); wt_allow_paths "$decl"',
-        cwd=main_repo,
-    )
-    assert got.stdout.splitlines() == ["notes/"], got.stdout
+    got = allow_paths(main_repo)
+    assert got == ["notes/"], got
 
 
 def test_empty_allow_paths_allows_nothing(main_repo: Path) -> None:
     """空の配列は「何も許可しない」という指定で、既定へは戻さない。"""
     write_declaration(main_repo, json.dumps({"version": 1, "guard": {"allow_paths": []}}))
-    got = run_lib(
-        f'decl=$(wt_declaration "{main_repo}"); wt_allow_paths "$decl"; echo rc=$?',
-        cwd=main_repo,
-    )
-    assert got.stdout.strip() == "rc=0", got.stdout
+    got = allow_paths(main_repo)
+    assert got == [], got
 
 
 def test_allow_paths_of_wrong_type_falls_back(main_repo: Path) -> None:
     """配列でない値は指定として読まず、既定へ戻す。"""
     write_declaration(main_repo, json.dumps({"version": 1, "guard": {"allow_paths": "issues/"}}))
-    got = run_lib(
-        f'decl=$(wt_declaration "{main_repo}"); wt_allow_paths "$decl"',
-        cwd=main_repo,
-    )
-    assert "issues/" in got.stdout.splitlines()
-    assert ".gitignore" in got.stdout.splitlines(), got.stdout
+    got = allow_paths(main_repo)
+    assert "issues/" in got
+    assert ".gitignore" in got, got

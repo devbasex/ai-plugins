@@ -66,14 +66,14 @@ class _Scan:
     """構文木を bash の実行の順に読み、書き込み先を `out` へ積む。"""
 
     def __init__(self, base: str | None) -> None:
-        self.out: list[str] = []
+        self.out: list[tuple[int, str]] = []   # (字面の位置, 書き込み先)。最後に字面の順へ並べる
         self.root = _Place(base or None)
 
-    def emit(self, v: str, st: _Place) -> None:
+    def emit(self, v: str, st: _Place, pos: int) -> None:
         if v in NOT_TARGET or v.startswith(("&", "|")) or "$" in v:
             return
         if st.base is None:
-            self.out.append(v)
+            self.out.append((pos, v))
             return
         if getattr(v, "tilde", False):  # 引用した `~` は字面のまま（bash も展開しない）
             if v == "~" or v.startswith("~/"):
@@ -84,7 +84,7 @@ class _Scan:
             if st.cwd is None:
                 return
             v = st.cwd + "/" + v
-        self.out.append(normalize_path(v, "/"))
+        self.out.append((pos, normalize_path(v, "/")))
 
     # 戻り値は (この並びで数えた cd の数, 最後が cd か, `||` を跨いだか)
     def seq(self, n: sp.Node, st: _Place) -> tuple[int, bool, bool]:
@@ -235,7 +235,7 @@ class _Scan:
             v = sp.unquote(dest)
             if sp.redirect_operator(r) == ">&" and (v == "-" or v.isdigit()):
                 continue
-            self.emit(v, st)
+            self.emit(v, st, dest.start_byte)
 
     def substs(self, n: sp.Node, st: _Place) -> None:
         """語の中のコマンド置換とプロセス置換を、部分シェルとして流す。"""
@@ -246,7 +246,7 @@ class _Scan:
         nodes, rs, assigns = sp.command_parts(n, redirs)
         for a in assigns:
             self.substs(a, st)
-        words = []
+        words, pos = [], [c.start_byte for c in nodes]
         for c in nodes:
             self.substs(c, st)
             words.append(sp.unquote(c))
@@ -254,15 +254,17 @@ class _Scan:
         name = words[i] if i < len(words) else ""
         self.redirects(rs, st)  # リダイレクトは命令より先に（cd の前の位置で）開く
         for k, w in enumerate(words):
+            rest = list(zip(words[k + 1:], pos[k + 1:]))
             if w == "tee":
-                for a in words[k + 1:]:
+                for a, at in rest:
                     if not a.startswith("-"):
-                        self.emit(a, st)
+                        self.emit(a, st, at)
             elif w == "sed":
-                for f in _sed_inplace_files(words[k + 1:]):
-                    self.emit(f, st)
+                for f, at in _sed_inplace_files(rest):
+                    self.emit(f, st, at)
             elif w in ("cp", "mv"):
-                self.emit(_cp_mv_destination(words[k + 1:]), st)
+                dest, at = _cp_mv_destination(rest)
+                self.emit(dest, st, at)
         if st.base is not None and name in st.moving:
             st.cwd = None
         if name != "cd" or st.base is None:
@@ -312,9 +314,9 @@ def _cd_destination(args: list[str]) -> str:
     return dest
 
 
-def _sed_inplace_files(args: list[str]) -> list[str]:
+def _sed_inplace_files(args: list[tuple[str, int]]) -> list[tuple[str, int]]:
     inplace, seen, skip, files = False, False, False, []
-    for a in args:
+    for a, at in args:
         if skip:
             skip = False
         elif a == "--in-place" or a.startswith("--in-place="):
@@ -330,33 +332,39 @@ def _sed_inplace_files(args: list[str]) -> list[str]:
         elif not seen:
             seen = True
         else:
-            files.append(a)
+            files.append((a, at))
     return files if inplace else []
 
 
-def _cp_mv_destination(args: list[str]) -> str:
-    dest, tdir, take = "", "", False
-    for a in args:
+def _cp_mv_destination(args: list[tuple[str, int]]) -> tuple[str, int]:
+    """(宛先, 字面の位置)。`-t` / `--target-directory` があればそれ、無ければ最後の被演算子。"""
+    dest, tdir, take = ("", 0), ("", 0), False
+    for a, at in args:
         if take:
-            tdir, take = a, False
+            tdir, take = (a, at), False
         elif a in ("-t", "--target-directory"):
             take = True
         elif a.startswith("--target-directory="):
-            tdir = a.split("=", 1)[1]
+            tdir = (a.split("=", 1)[1], at)
         elif a.startswith("-t"):
-            tdir = a[2:]
+            tdir = (a[2:], at)
         elif not a.startswith("-"):
-            dest = a
-    return tdir or dest
+            dest = (a, at)
+    return tdir if tdir[0] else dest
 
 
 def shell_targets(cmd: str, base: str = "") -> list[str]:
-    """シェルのコマンドの書き込み先（出た順・重複あり）。`base` を渡すと絶対パスで返す。"""
+    """シェルのコマンドの書き込み先（字面の順・重複あり）。`base` を渡すと絶対パスで返す。
+
+    構文を読み切れないコマンド（`shparse.unreadable()`。`! case … esac` など）は推定しない（空を返す）。"""
     if not cmd:
         return []
+    root = sp.parse_bash(cmd)
+    if sp.unreadable(root):
+        return []
     scan = _Scan(base)
-    scan.seq(sp.parse_bash(cmd), scan.root)
-    return scan.out
+    scan.seq(root, scan.root)
+    return [v for _, v in sorted(scan.out, key=lambda x: x[0])]
 
 
 def patch_targets(patch: str) -> list[str]:

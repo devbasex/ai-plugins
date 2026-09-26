@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -26,6 +27,10 @@ def _own_tmpdir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     d = tmp_path / "tmpdir"
     d.mkdir()
     monkeypatch.setenv("TMPDIR", str(d))
+    # guard の入口（worktree-guard.sh）はテストを流す python で hook.py を起動し、開始時の hook は
+    # hook の環境を用意しない（#1142 の決定 20。~/.cache へ環境を作らない）
+    monkeypatch.setenv("NDF_HOOK_PYTHON", sys.executable)
+    monkeypatch.setenv("NDF_HOOK_ENV", "0")
 
 
 @pytest.fixture()

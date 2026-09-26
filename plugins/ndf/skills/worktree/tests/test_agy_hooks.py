@@ -21,7 +21,8 @@ from pathlib import Path
 
 import pytest
 
-from worktree_helpers import GUARD, SCRIPTS_DIR, SESSION, run_lib, write_declaration
+from hook_lib import payload
+from worktree_helpers import GUARD, SCRIPTS_DIR, SESSION, write_declaration
 
 HOOKS_JSON = SCRIPTS_DIR.parent / "dev.agy" / "hooks.json"
 CONVERSATION = "c-0001"
@@ -259,7 +260,7 @@ def test_hooks_json_matcher_matches_the_library() -> None:
         for hook in config.values()
         for entry in hook.get("PreToolUse", [])
     }
-    assert run_lib("wt_tool_matcher").stdout.strip() in matchers, matchers
+    assert payload.tool_matcher() in matchers, matchers
 
 
 def test_hooks_json_wires_both_scripts() -> None:
@@ -286,5 +287,4 @@ def test_hooks_json_wires_both_scripts() -> None:
 @pytest.mark.parametrize("tool", ["write_to_file", "replace_file_content"])
 def test_agy_tool_names_are_in_the_library(tool: str) -> None:
     """agy の tool 名は共通ライブラリの一覧に載っている。"""
-    got = run_lib(f'printf "%s\\n" "$WT_EDIT_TOOLS"').stdout.strip()
-    assert tool in got.split("|"), got
+    assert tool in payload.EDIT_TOOLS, payload.EDIT_TOOLS
