@@ -1,6 +1,6 @@
 """PR / issue の取得と本文の節の差し替えの共通部品（`lib/gh_parts.py`、#849）。
 
-`gh` は `gh_parts.RUNNER` を見本の応答へ差し替えて呼ぶ。GitHub へは届かない。
+`gh` は定義元の `gh_call.RUNNER` を見本の応答へ差し替えて呼ぶ（#1142 の L0 で分けた）。GitHub へは届かない。
 """
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ sys.path.insert(0, str(LIB))
 _spec = importlib.util.spec_from_file_location("ndf_lib_gh_parts", LIB / "gh_parts.py")
 gp = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(gp)
+import gh_call  # noqa: E402
 
 REPO = "o/r"
 PR = 812
@@ -58,7 +59,7 @@ class FakeGh:
 @pytest.fixture()
 def fake(monkeypatch):
     f = FakeGh()
-    monkeypatch.setattr(gp, "RUNNER", f)
+    monkeypatch.setattr(gh_call, "RUNNER", f)
     return f
 
 

@@ -1,6 +1,6 @@
 """外部パッケージを使うエントリポイントが最初に呼ぶ `require()`（#1142 の決定 17・不足 h）。標準ライブラリだけで書く。
 
-宣言と版の固定は `plugins/ndf/pyproject.toml` と `plugins/ndf/uv.lock` の 1 組が持つ。パッケージは用途ごとの
+宣言と版の固定は、プラグインの根（`PLUGIN_ROOT`。このファイルの 2 つ上）の `pyproject.toml` と `uv.lock` の 1 組が持つ。パッケージは用途ごとの
 グループ（extra）に分け、エントリポイントは使うグループを名前で渡す。
 
     sys.path.insert(0, str(<lib>))

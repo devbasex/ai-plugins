@@ -373,7 +373,7 @@ def test_pr_reads_fall_back_to_rest_when_graphql_is_rate_limited(monkeypatch, tm
             "number": n, "title": f"題 {n}", "body": "## 利用者向けの変化\n\n- 変わる\n", "state": "closed",
             "merged_at": "2026-09-26T00:00:00Z" if n == 5 else None, "merge_commit_sha": "abc",
             "html_url": f"https://github.com/o/r/pull/{n}"}), "")
-    monkeypatch.setattr(mod.gh_parts, "RUNNER", runner)
+    monkeypatch.setattr(mod.gh_parts.gh_call, "RUNNER", runner)
     skipped = []
     assert mod.pr_titles(tmp_path, [5, 6], skipped) == [(5, "- 題 5（#5）")]
     assert skipped == [6]
@@ -385,7 +385,7 @@ def test_pr_reads_fall_back_to_rest_when_graphql_is_rate_limited(monkeypatch, tm
 
 def test_pr_read_failure_other_than_rate_limit_stops(monkeypatch, tmp_path):
     mod = _release_steps_module(monkeypatch)
-    monkeypatch.setattr(mod.gh_parts, "RUNNER",
+    monkeypatch.setattr(mod.gh_parts.gh_call, "RUNNER",
                         lambda args, stdin=None, cwd=None: mod.gh_parts.GhResult(1, "", "not found"))
     with pytest.raises(mod.StepError, match="gh pr view 5 が失敗: not found"):
         mod.pr_titles(tmp_path, [5])
