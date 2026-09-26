@@ -2,7 +2,7 @@
 
 `/ndf:development-workflow <指示>` で呼ばれたとき、工程を 3 層のサブエージェントへ出し、
 2 つの承認ゲート以外を無人で通す運転を決めた。あわせて、利用上限（429）で中断した層を上の層が
-**通知ではなく記録から**見分け、解除時刻を過ぎてから直下だけを再開する手順を置いた。この文書は、
+**通知ではなく記録から**見分け、リセット時刻を過ぎてから直下だけを再開する手順を置いた。この文書は、
 決めたことの理由と、層の間で交わす報告と指示の契約を残す。
 
 **手順と文言は `development-workflow` の `references/agent-layers.md` が正である。** 起動の指示の
@@ -29,8 +29,8 @@
 supervisor へ返し、supervisor はそれを畳んで 11 項目のフェーズレポートを conductor へ返す。
 conductor が 1 つのフェーズについて読むのは 1 件である。
 
-**上限の中断は記録で見分け、直下だけを再開する。** 通知は目を覚ます契機にだけ使い、分類と
-解除時刻は会話の記録から取る。conductor は supervisor と自分が直接起動した worker を、
+**レートリミット中断は記録で見分け、直下だけを再開する。** 通知は目を覚ます契機にだけ使い、分類と
+リセット時刻は会話の記録から取る。conductor は supervisor と自分が直接起動した worker を、
 supervisor は自分の worker を再開する。
 
 ## 用語
@@ -39,20 +39,20 @@ supervisor は自分の worker を再開する。
 | --- | --- |
 | セッション | 会話を保持しているプロセス。1 つのセッションが 1 つの context window を持つ |
 | conductor | 人間と対話しているセッション。`/ndf:development-workflow` を受け、supervisor を起動し、報告を受け取り、承認ゲートで人間に問う |
-| supervisor | 1 つのフェーズ（連続する工程の束）を通すサブエージェント。工程の Skill を起動し、進行を記録し、worker を起動する |
+| supervisor | 1 つのフェーズ（連続する工程のセット）を通すサブエージェント。工程 Skill を起動し、進行を記録し、worker を起動する |
 | worker | 1 つの作業を行うサブエージェント。終われば消え、supervisor には作業の報告だけが残る。別のサブエージェントを起動しない |
 | フェーズ | supervisor 1 つが通す工程のセット。`設計` / `実装` / `検査` / `取り込み` / `仕上げ`、プランが通す `配布` |
-| 作業の種類 | worker 1 つが行う作業の分類。`調査` / `修正` / `検証` / `集計`。どれにも当たらなければ `その他` |
+| 作業種別 | worker 1 つが行う作業の分類。`調査` / `修正` / `検証` / `集計`。どれにも当たらなければ `その他` |
 | context window | セッションが保持している内容の全体と、その量。捨てると前の内容は残らない |
 | 報告 | 下の層が最後に返す、項目の決まった結果。supervisor と worker で形が違う |
 | 直下 | 上の層が自分で起動した相手。conductor から見れば深さ 1、supervisor から見れば自分が起動した worker |
-| 上限の中断 | 利用上限（429）で層が途中で終わること。記録の `ending` が `rate_limit` |
-| 解除時刻 | 上限が解ける時刻。記録の `quotaLimits.resetsAt` が持つ |
-| 自動の継続 | 解除時刻に Claude Code が conductor へ積む入力（`origin.kind` が `auto-continuation`） |
-| 起動元 | その記録を起動した相手。`.meta.json` の `toolUseId` でたどる |
+| レートリミット中断 | 利用上限（429）で層が途中で終わること。記録の `ending` が `rate_limit` |
+| リセット時刻 | 上限が解ける時刻。記録の `quotaLimits.resetsAt` が持つ |
+| 自動継続 | リセット時刻に Claude Code が conductor へ積む入力（`origin.kind` が `auto-continuation`） |
+| 親エージェント | その記録を起動した相手。`.meta.json` の `toolUseId` でたどる |
 
 層の語は `conductor` / `supervisor` / `worker`、量を指す語は `context window`、起動した側は
-`起動元` と書く。「窓」「親」は規約の文書に使わない。
+`親エージェント` と書く。「窓」と単独の「親」は規約の文書に使わない。
 
 ## 背景
 
@@ -105,7 +105,7 @@ conductor が判定をやり直す。
 **報告の形を持たずに終わった相手は、同じ相手で 3 回まで続けさせる。** 待ちで応答を終える事象
 （#656）は上の層から `completed` で届く。上の層は報告の見出しが無ければ完了として扱わず、
 `SendMessage` で続けさせる。3 回続けても報告が出なければ、相手の名前と最後の応答の 1 行を添えて
-上へ返す。上限の中断からの再開はこの回数に数えない。
+上へ返す。レートリミット中断からの再開はこの回数に数えない。
 
 **モデルの既定は上の層と同じにし、落とすのは worker から始める。** 軽いモデルへ落としてよいのは、
 決定・受け入れ条件・収束の判定を書かず、かつ出力を外のチェックが受け止める相手である。worker の
@@ -113,12 +113,12 @@ conductor が判定をやり直す。
 落とすかどうかは測定を見て振り返りで決める。
 
 **cross-review の「メイン」は、収束ループを駆動している supervisor である。** 「メイン context に
-diff を載せない」の対象は `state.py` の骨組みを回している層で、3 層では設計と検査のフェーズの
+diff を載せない」の対象は `state.py` のスケルトンを回している層で、3 層では設計と検査のフェーズの
 supervisor に当たり、conductor ではない。修正はその supervisor が起動する worker（`修正`）で行う。
 定義は `cross-review/references/context-budget.md` に置く。手順書（`SKILL.md`）は 420 行の余白の
 規約を持つため、手順書からは指し示すだけにする。
 
-**上限の中断は、通知ではなく記録で見分ける。** 通知の本文は人が読む文言で、書式を約束していない。
+**レートリミット中断は、通知ではなく記録で見分ける。** 通知の本文は人が読む文言で、書式を約束していない。
 上の層が自動の要約で通知を失っても、記録からは同じ一覧が得られる。
 
 **再開は直下だけを見る。** conductor が supervisor の下の worker を直接再開すると、再開した
@@ -126,7 +126,7 @@ supervisor と worker が同じ作業や外部への書き込みを重ねる。�
 後に上から順に 1 層ずつ再開する。**既定は同じ相手で続けること**で、工程の頭からを後段にした。
 実測で `SendMessage` の再開が成立しており、途中まで進めた判断を捨てずに済む。
 
-**解除を待つ手段は 3 つである。** Claude Code の自動の継続（conductor も上限に当たったとき）、
+**解除を待つ手段は 3 つである。** Claude Code の自動継続（conductor も上限に当たったとき）、
 背景で起動した待ち（`wait-reset`）の終わりの通知（下の層だけが中断したとき）、人が送る 1 通
 （どちらも起きなかったとき。承認ゲートに数えない）。どれで起きても conductor は同じ
 「中断の点検」を 1 回行う。`/goal` の見回りには頼らない。
@@ -148,7 +148,7 @@ supervisor と worker が同じ作業や外部への書き込みを重ねる。�
 `transcript_agents.py` / `--agents` / `AgentRecord` は層の語、`context-window.md` / `--window-limit` /
 `fixed` / `peak` / `work` は量の語である。
 
-**並行の本数は supervisor で数え、worker はその 1 本の中に収める。** 実行計画の「担当 1 本」は
+**並行の本数は supervisor で数え、worker はその 1 本の中に収める。** 実行計画の 1 本は
 supervisor 1 つ（1 つの worktree）に当たる。同時に動かす worker は 1 つの supervisor につき既定
 1 つで、増やすときは `parallel-measure.py capacity` を測り直して 1 本の見込みを上げてから増やす
 （[ndf-execution-plan-and-parallel-capacity.md](ndf-execution-plan-and-parallel-capacity.md)）。
@@ -186,7 +186,7 @@ supervisor 1 つ（1 つの worktree）に当たる。同時に動かす worker 
 | --- | --- | --- |
 | conductor | `<セッション>.jsonl`（深さ 0） | — |
 | supervisor | `spawnDepth` が 1 で、先頭語がフェーズの語彙にある | `<フェーズ>: <課題番号を空白区切り>`（例 `設計: #550 #657`） |
-| worker | `spawnDepth` が 2 以上、または 1 で先頭語が作業の種類の語彙にある | `<作業の種類>: <一言>`（例 `調査: 既存の規約の突き合わせ`） |
+| worker | `spawnDepth` が 2 以上、または 1 で先頭語が作業種別の語彙にある | `<作業の種類>: <一言>`（例 `調査: 既存の規約の突き合わせ`） |
 
 層を `description` へ書かせない。書かせると、書き忘れた相手が層の分からない行になる。深さ 1 で
 語彙が決められないときは supervisor とし、`role` は `その他` になる。**この形は規約であり、測定
@@ -216,8 +216,8 @@ conductor → supervisor の `subagent_type` は、その supervisor が最初�
 
 | 報告 | 項目 |
 | --- | --- |
-| `## 作業の報告`（worker → supervisor） | 作業（作業の種類）/ 結果（`完了` / `判断が要る` / `できなかった`）/ 見つけたもの / 置き場所 / 次にすること |
-| `## フェーズの報告`（supervisor → conductor） | フェーズ / 課題 / 結果（`完了` / `関門` / `止まった` / `スイッチポイント`）/ 関門（`設計 Pull Request のマージ` / `本番の系へ届く操作`）/ 次のフェーズ / 次の工程（`スイッチポイント` のときだけ）/ Pull Request / 最後に記録した工程 / 使った worker / 提示物 / 理由 |
+| `## 作業の報告`（worker → supervisor） | 作業（作業種別）/ 結果（`完了` / `判断が要る` / `できなかった`）/ 見つけたもの / 置き場所 / 次にすること |
+| `## フェーズの報告`（supervisor → conductor） | フェーズ / 課題 / 結果（`完了` / `関門` / `止まった` / `スイッチポイント`）/ `関門`（`設計 Pull Request のマージ` / `本番の系へ届く操作`）/ 次のフェーズ / 次の工程（`スイッチポイント` のときだけ）/ Pull Request / 最後に記録した工程 / 使った worker / `提示物` / 理由 |
 
 supervisor の報告は最後の応答の**末尾**に置き、見出しの後ろに他の見出しを置かない。空の項目は `無し`。
 
@@ -240,7 +240,7 @@ supervisor が worker の報告を見るときも同じ規則を使う。`結果
 
 **conductor は、止まるときに `## フェーズの一覧` を 1 回出す。** 出す時点は `AskUserQuestion` を出す前・
 失敗を報告する前・背景の待ちを起動して応答を終える前の 3 つである。列は フェーズ / 課題 / 結果 /
-使った worker / 報告なしで続けさせた回数 / 上限の中断から再開した回数 で、続けさせた回数は記録から
+使った worker / 報告なしで続けさせた回数 / レートリミット中断から再開した回数 で、続けさせた回数は記録から
 見分けられないため conductor が `SendMessage` を送るたびに数えて持つ。同じフェーズを工程の頭から
 起動し直したときと、`スイッチポイント` の後に工程の途中から起動し直したときは別の行にする。
 
@@ -250,7 +250,7 @@ supervisor が worker の報告を見るときも同じ規則を使う。`結果
 | --- | --- | --- | --- |
 | worker | supervisor（失敗の通知）。supervisor も落ちていれば conductor が supervisor を起こした後に supervisor が見る | supervisor | 生きていれば `SendMessage`。生きていなければ conductor → supervisor → worker の順 |
 | supervisor | conductor（失敗の通知） | conductor | `SendMessage`。失敗したら進捗記録が指す工程の頭から新しい supervisor（`subagent_type` はその工程で選ぶ） |
-| conductor | 人間か Claude Code（自動の継続） | conductor 自身 | 自動の継続・人の 1 通・背景の待ちの終わり |
+| conductor | 人間か Claude Code（自動継続） | conductor 自身 | 自動継続・人の 1 通・背景の待ちの終わり |
 
 **conductor の中断の点検**は、目を覚ますたびに 1 回行う。`interrupted --depth 1` で中断した
 supervisor と直接起動した worker を一覧し、`resets_passed` が真の記録ごとに `SendMessage` で続け
@@ -289,7 +289,7 @@ supervisor と直接起動した worker を一覧し、`resets_passed` が真の
 ため承認ゲートは保たれるが、掛からないと supervisor の進捗記録が通過記録に積まれない。その場合は
 起動の指示で supervisor の最初に `development-workflow` を「判定済み」として起動させる。
 
-**自動の継続が 5 時間の上限・見回りが止まった後でも入るか、背景の待ちを数時間続けられるか、
+**自動継続が 5 時間の上限・見回りが止まった後でも入るか、背景の待ちを数時間続けられるか、
 `--resume` で開き直した後も `SendMessage` が効くかは、リリース後テストで確かめる。** 効かなければ
 それぞれ人の 1 通・`--max-sleep 540`・工程の頭からの新しい supervisor へ落ちる。
 
