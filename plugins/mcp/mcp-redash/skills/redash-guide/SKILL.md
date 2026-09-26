@@ -26,8 +26,8 @@ dev / stg / prod など複数の Redash を使う場合:
 ### 1. 環境を追加
 
 ```
-/redash-add dev
-/redash-add stg
+/redash add dev
+/redash add stg
 ```
 
 ### 2. 環境変数を設定
@@ -51,8 +51,8 @@ REDASH_STG_API_KEY=your-stg-api-key
 ### 3. 確認
 
 ```
-/redash-list     # 有効な MCP 一覧
-/redash-status   # 環境変数の設定状況
+/redash list     # 有効な MCP 一覧
+/redash status   # 環境変数の設定状況
 ```
 
 ## suffix 命名ルール
@@ -73,7 +73,7 @@ REDASH_STG_API_KEY=your-stg-api-key
 不要になった環境は削除できます。
 
 ```
-/redash-remove dev
+/redash remove dev
 ```
 
 plugin 同梱の `redash` は削除できません。
@@ -82,7 +82,7 @@ plugin 同梱の `redash` は削除できません。
 
 | コマンド | 説明 |
 |---------|------|
-| `/redash-add <suffix>` | Redash MCP を追加 |
-| `/redash-remove <suffix>` | Redash MCP を削除 |
-| `/redash-list` | 有効な MCP 一覧 |
-| `/redash-status` | 設定状況の詳細確認 |
+| `/redash add <suffix>` | Redash MCP を追加 |
+| `/redash remove <suffix>` | Redash MCP を削除 |
+| `/redash list` | 有効な MCP 一覧 |
+| `/redash status` | 設定状況の詳細確認 |

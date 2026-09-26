@@ -19,7 +19,7 @@
 終了コード:
     0  違反なし
     1  違反あり
-    2  引数の誤り・構文エラーのファイルがある
+    2  引数の誤り・構文エラーのファイルがある・検査したテストが 0 件
 
 Usage:
     python scripts/lint_scenario.py scenario-test/tests/
@@ -208,6 +208,9 @@ def main(argv: list[str] | None = None) -> int:
         n, v = lint_tree(tree, str(f))
         tests += n
         violations.extend(v)
+    if not errors and tests == 0:
+        # 何も検査していない実行を合格にしない（空のディレクトリ・test_*.py が無い・test 関数が無い）
+        errors.append({"file": " ".join(args.paths), "message": "検査したテストが 0 件"})
 
     violations.sort(key=lambda v: (v["file"], v["line"], v["rule"]))
     result = {

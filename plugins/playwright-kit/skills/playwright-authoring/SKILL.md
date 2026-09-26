@@ -148,7 +148,7 @@ python scripts/lint_scenario.py /path/to/your-app/scenario-test/tests/
 | `wait_until` | `goto` / `reload` / `go_back` / `go_forward` に `wait_until=` が無い |
 
 標準出力は 1 つの JSON (`violations` に file / line / test / rule / message)。
-終了コードは 0 = 違反なし、1 = 違反あり、2 = 引数の誤り・構文エラーのファイルがある。
+終了コードは 0 = 違反なし、1 = 違反あり、2 = 引数の誤り・構文エラーのファイルがある・検査したテストが 0 件。
 
 ## テスト実行
 
@@ -157,6 +157,8 @@ python scripts/lint_scenario.py /path/to/your-app/scenario-test/tests/
 ```bash
 # 2xx / 3xx / 4xx が返れば起動済み。5xx と接続できない状態は --timeout 秒まで繰り返す
 scripts/app_ready.sh http://localhost:8080/ --timeout 60
+# HTTPS の証明書は検証する。自己署名の証明書を使う開発環境だけ --insecure を足す
+scripts/app_ready.sh https://localhost:8443/ --insecure
 ```
 
 標準出力は 1 行の JSON (`ready` / `status` / `attempts` / `elapsed_s`)。

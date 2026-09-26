@@ -12,6 +12,8 @@ import sys
 import textwrap
 from pathlib import Path
 
+import pytest
+
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "lint_scenario.py"
 TEMPLATES = (
     Path(__file__).resolve().parents[2] / "playwright-kit-ops" / "templates"
@@ -173,3 +175,14 @@ def test_syntax_error_is_exit_2(tmp_path: Path):
 def test_missing_path_is_exit_2(tmp_path: Path):
     proc = run(str(tmp_path / "nope"))
     assert proc.returncode == 2
+
+
+@pytest.mark.parametrize("files", [{}, {"conftest.py": "X = 1\n"}, {"test_helpers.py": "def helper():\n    pass\n"}])
+def test_nothing_checked_is_exit_2(tmp_path: Path, files: dict[str, str]):
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    for name, body in files.items():
+        (tests / name).write_text(body, encoding="utf-8")
+    proc = run(str(tests))
+    assert proc.returncode == 2
+    assert json.loads(proc.stdout)["errors"][0]["message"] == "検査したテストが 0 件"
