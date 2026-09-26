@@ -2257,105 +2257,73 @@ def plan_release_package_plugin(a) -> dict:
     if not dev and not a.production_branch:
         raise DeclError(f"本番の配布に要る本番のブランチが無い（--production-branch か .ndf/{WORKTREE_DECL} の "
                         "production_branch）")
+    rts = ",".join(runtimes)
     base = re.sub(r"-.*$", "", v)  # 開発版の本番承認の提示物は正式版の番号で作る
+    # --prs-from-queue なら、queue が先行の計画の Pull Request の番号で QUEUE_PRS を置き換える
+    prs = " ".join([*map(str, a.prs), *([QUEUE_PRS] if getattr(a, "prs_from_queue", False) else [])])
+    repo = a.repo or (a.worktree.split("/.worktrees/")[0] if "/.worktrees/" in a.worktree else None)
     sync = bool(getattr(a, "sync_checks", None))
-    c = {
-        "plugin": plugin, "v": v, "base": base, "rts": ",".join(runtimes),
-        # --prs-from-queue なら、queue が先行の計画の Pull Request の番号で QUEUE_PRS を置き換える
-        "prs": " ".join([*map(str, a.prs), *([QUEUE_PRS] if getattr(a, "prs_from_queue", False) else [])]),
-        "repo": a.repo or (a.worktree.split("/.worktrees/")[0] if "/.worktrees/" in a.worktree else None),
-        "sync": sync, "after_notes": "sync" if sync else "release",
-        "approval": f"issues/approval-{plugin}-v{base}.md", "mvv": getattr(a, "mvv", None),
-    }
-    build = build_dev_package_release_steps if dev else build_prod_package_release_steps
-    steps, run_ids = build(a, c)
-    steps += package_release_judge_steps(run_ids, c["after_notes"])
-    if c["mvv"] and not dev:
-        steps.insert(0, package_release_mvv_step(a, c))
-    return package_release_plan(a, c, steps, dev)
-
-
-def _package_head_steps(a, c: dict, bump_next: str, notes_next: str) -> list:
-    """bump → changelog → 説明文。本番は bump と changelog の間へ bump-others を差す。"""
-    v, prs, plugin = c["v"], c["prs"], c["plugin"]
+    after_notes = "sync" if sync else "release"
+    run_ids = ["bump", *([] if dev else ["bump-others"]), "changelog", "notes"] + ([] if dev else ["snapshot"]) + (
+        ["sync"] if sync else []) + [
+        "release", "verify"] + (["facts", "explain"] if dev else [])
     # 説明文は PR 本文の「利用者向けの変化」から機械で組む（節が無い PR は題名）
     notes = (f"sh -c '{STEPS_PY} notes --version {v} --prs {prs} && git add -A && "
              f"(git diff --cached --quiet || git commit -q -m \"Release: {plugin} v{v}\")'")
-    return [
+    steps = [
         {"id": "bump", "type": "run", "stage": "配布", "cmd": f"{STEPS_PY} bump --plugin {plugin} --to {v} --base {a.base}",
-         "on_fail": "judge", "next": bump_next},
+         "on_fail": "judge", "next": "changelog" if dev else "bump-others"},
+        *([] if dev else [{"id": "bump-others", "type": "run", "stage": "配布", "cmd": bump_others_cmd(a, plugin),
+                           "on_fail": "judge", "next": "changelog"}]),
         {"id": "changelog", "type": "run", "cmd": f"{STEPS_PY} changelog --version {v} --prs {prs}",
          "on_fail": "judge", "next": "notes"},
         {"id": "notes", "type": "run", "stage": "配布", "cmd": notes, "on_fail": "judge",
-         "next": notes_next},
+         "next": after_notes if dev else "snapshot"},
     ]
-
-
-def _package_ship_steps(a, c: dict, ref: str, release_timeout: int, verify_stage: str, verify_next: str) -> list:
-    """sync-check（宣言があるときだけ）→ release → verify-install。"""
-    v = c["v"]
-    steps = [{"id": "sync", "type": "run", "preset": "sync-check", "on_fail": "judge", "next": "release"}] if c["sync"] else []
-    return steps + [
-        {"id": "release", "type": "run", "stage": "配布", "timeout": release_timeout,
+    if not dev:
+        steps.append({"id": "snapshot", "type": "run", "stage": "配布", "timeout": 900,
+                      "cmd": f"sh -c '{STEPS_PY} run --root . --stage production --version {v} && git add -A && "
+                             f"(git diff --cached --quiet || git commit -q -m \"Release: {plugin} v{v} のトークン消費の記録\")'",
+                      "on_fail": "judge", "next": after_notes})
+    ref = a.base if dev else a.production_branch
+    if sync:
+        steps.append({"id": "sync", "type": "run", "preset": "sync-check", "on_fail": "judge", "next": "release"})
+    steps += [
+        {"id": "release", "type": "run", "stage": "配布", "timeout": 2400 if dev else 3000,
          "cmd": f"{STEPS_PY} release --version {v} --channel {a.channel}", "on_fail": "judge", "next": "verify",
          # 配布の PR（release/v<版> → 起点）と、本番では続く 起点 → 本番 の PR のチェックを調べる
          "probe": {"cmd": f"{MERGED_PY} probe --head {{branch}} --head {{base}} --act"}},
-        {"id": "verify", "type": "run", "stage": verify_stage, "timeout": 1500, "cwd": c["repo"],
+        {"id": "verify", "type": "run", "stage": "配布" if dev else "リリース後テスト", "timeout": 1500, "cwd": repo,
          "cmd": f"sh -c 'git pull -q --ff-only origin {a.base} && {VERIFY_PY} verify-install --ref {ref} "
-                f"--expect {v} --runtimes {c['rts']}'",
-         "on_fail": "judge", "next": verify_next},
+                f"--expect {v} --runtimes {rts}'",
+         "on_fail": "judge", "next": "facts" if dev else "cleanup"},
     ]
-
-
-def build_dev_package_release_steps(a, c: dict) -> tuple[list, list]:
-    """開発版: bump → changelog → 説明文 → sync-check → release → verify-install（起点のブランチ）→ approval-facts
-    → 提示物の欄。"""
-    v, prs, repo, base, approval = c["v"], c["prs"], c["repo"], c["base"], c["approval"]
-    run_ids = ["bump", "changelog", "notes"] + (["sync"] if c["sync"] else []) + ["release", "verify", "facts", "explain"]
-    steps = _package_head_steps(a, c, "changelog", c["after_notes"])
-    steps += _package_ship_steps(a, c, a.base, 2400, "配布", "facts")
-    prev = f" --prev-tag {a.prev_tag}" if a.prev_tag else ""
-    facts = {"id": "facts", "type": "run", "cwd": repo,
-             "cmd": f"{STEPS_PY} approval-facts --version {base} --prs {prs}{prev}",
-             "presentation_to": approval, "on_fail": "judge", "gate_next": "explain", "next": "explain"}
-    if c["mvv"]:
-        facts["gate_as_ok"] = True  # 関門 2 は本番の計画の先頭で MVV が判定する
+    if not dev:
+        # 後片付け: 配布の PR（head が release/v{v} で始まる。開発版の release/v{v}-dev.N も含む。宛先は起点のブランチ）と
+        # ミッションの PR（--prs）のブランチと作業ツリー
+        run_ids.append("cleanup")
+        steps.append(
+            {"id": "cleanup", "type": "run", "stage": "後片付け", "cwd": repo,
+             "cmd": f"sh -c '{MERGED_PY} cleanup $(gh pr list --state merged --limit 30 --json number,headRefName "
+                    f"--jq \".[] | select(.headRefName | startswith(\\\"release/v{v}\\\")) | .number\") {prs}'",
+             "on_fail": "judge", "next": "end"})
+    approval = f"issues/approval-{plugin}-v{base}.md"
+    mvv = getattr(a, "mvv", None)
+    if dev:
+        prev = f" --prev-tag {a.prev_tag}" if a.prev_tag else ""
+        facts = {"id": "facts", "type": "run", "cwd": repo,
+                 "cmd": f"{STEPS_PY} approval-facts --version {base} --prs {prs}{prev}",
+                 "presentation_to": approval, "on_fail": "judge", "gate_next": "explain", "next": "explain"}
+        if mvv:
+            facts["gate_as_ok"] = True  # 関門 2 は本番の計画の先頭で MVV が判定する
+        steps += [
+            facts,
+            {"id": "explain", "type": "run", "cwd": repo,
+             "cmd": f"{STEPS_PY} notes --version {v} --prs {prs} --approval {approval} "
+                    f"--verified {rts} --ref {a.base}",
+             "on_fail": "judge", "next": "end"},
+        ]
     steps += [
-        facts,
-        {"id": "explain", "type": "run", "cwd": repo,
-         "cmd": f"{STEPS_PY} notes --version {v} --prs {prs} --approval {approval} "
-                f"--verified {c['rts']} --ref {a.base}",
-         "on_fail": "judge", "next": "end"},
-    ]
-    return steps, run_ids
-
-
-def build_prod_package_release_steps(a, c: dict) -> tuple[list, list]:
-    """本番: bump → bump-others → changelog → 説明文 → 消費の記録 → sync-check → release → verify-install
-    （本番のブランチ）→ 後片付け。"""
-    v, prs, plugin = c["v"], c["prs"], c["plugin"]
-    run_ids = ["bump", "bump-others", "changelog", "notes", "snapshot"] + (["sync"] if c["sync"] else []) + [
-        "release", "verify", "cleanup"]
-    steps = _package_head_steps(a, c, "bump-others", "snapshot")
-    steps.insert(1, {"id": "bump-others", "type": "run", "stage": "配布", "cmd": bump_others_cmd(a, plugin),
-                     "on_fail": "judge", "next": "changelog"})
-    steps.append({"id": "snapshot", "type": "run", "stage": "配布", "timeout": 900,
-                  "cmd": f"sh -c '{STEPS_PY} run --root . --stage production --version {v} && git add -A && "
-                         f"(git diff --cached --quiet || git commit -q -m \"Release: {plugin} v{v} のトークン消費の記録\")'",
-                  "on_fail": "judge", "next": c["after_notes"]})
-    steps += _package_ship_steps(a, c, a.production_branch, 3000, "リリース後テスト", "cleanup")
-    # 後片付け: 配布の PR（head が release/v{v} で始まる。開発版の release/v{v}-dev.N も含む。宛先は起点のブランチ）と
-    # ミッションの PR（--prs）のブランチと作業ツリー
-    steps.append(
-        {"id": "cleanup", "type": "run", "stage": "後片付け", "cwd": c["repo"],
-         "cmd": f"sh -c '{MERGED_PY} cleanup $(gh pr list --state merged --limit 30 --json number,headRefName "
-                f"--jq \".[] | select(.headRefName | startswith(\\\"release/v{v}\\\")) | .number\") {prs}'",
-         "on_fail": "judge", "next": "end"})
-    return steps, run_ids
-
-
-def package_release_judge_steps(run_ids: list, after_notes: str) -> list:
-    return [
         {"id": "judge", "type": "judge", "inputs": run_ids,
          "question": "落ちたステップを直す（fix）か、同じステップをもう一度（retry）か、止める（stop）か。retry なら decision に"
                      "落ちたステップの id を返す",
@@ -2364,26 +2332,19 @@ def package_release_judge_steps(run_ids: list, after_notes: str) -> list:
          "prompt": "落ちたステップの出力を読み、原因を直してコミットする（push しない）。直したら次は落ちたステップからやり直す。",
          "next": after_notes},
     ]
-
-
-def package_release_mvv_step(a, c: dict) -> dict:
-    """関門 2 を MVV で判定する。関門（10）なら報告は 結果: 関門 で止まり、conductor が承認を取ってから
-    run <計画> --from bump で続ける。"""
-    repo, approval = c["repo"], c["approval"]
-    material = f"{repo}/{approval}" if repo else approval
-    return {"id": "mvv", "type": "run", "timeout": 900,
-            "cmd": f"{MVV_PY} check --mission {shlex.quote(str(Path(c['mvv']).resolve()))} --gate release "
-                   f"--material {shlex.quote(material)} --pr {c['prs']} --mode {a.mode}"
-                   + (f" --root {shlex.quote(repo)}" if repo else ""),
-            "next": "bump", "gate_next": "end"}
-
-
-def package_release_plan(a, c: dict, steps: list, dev: bool) -> dict:
-    repo = c["repo"]
-    rule = RULE_RELEASE_DEV if dev else RULE_RELEASE_PROD_MVV if c["mvv"] else RULE_RELEASE_PROD
+    if mvv and not dev:
+        # 関門 2 を MVV で判定する。関門（10）なら報告は 結果: 関門 で止まり、conductor が承認を取ってから
+        # run <計画> --from bump で続ける
+        material = f"{repo}/{approval}" if repo else approval
+        steps.insert(0, {"id": "mvv", "type": "run", "timeout": 900,
+                         "cmd": f"{MVV_PY} check --mission {shlex.quote(str(Path(mvv).resolve()))} --gate release "
+                                f"--material {shlex.quote(material)} --pr {prs} --mode {a.mode}"
+                                + (f" --root {shlex.quote(repo)}" if repo else ""),
+                         "next": "bump", "gate_next": "end"})
+    rule = RULE_RELEASE_DEV if dev else RULE_RELEASE_PROD_MVV if mvv else RULE_RELEASE_PROD
     plan = {
         "フェーズ": f"配布（{'開発版' if dev else '本番'}）", "課題": a.issue, "モード": a.mode, "作業場所": a.worktree,
-        "branch": a.branch or f"release/v{c['v']}", "起点": f"origin/{a.base}",
+        "branch": a.branch or f"release/v{v}", "起点": f"origin/{a.base}",
         "規則": rule, "上限": 20, "steps": steps,
     }
     with_decls(plan, a)
