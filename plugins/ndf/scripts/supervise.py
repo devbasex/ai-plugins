@@ -2163,7 +2163,7 @@ def plan_release_package_plugin(a) -> dict:
     notes = (f"sh -c '{STEPS_PY} notes --version {v} --prs {prs} && git add -A && "
              f"(git diff --cached --quiet || git commit -q -m \"Release: {plugin} v{v}\")'")
     steps = [
-        {"id": "bump", "type": "run", "stage": "配布", "cmd": f"{STEPS_PY} bump --plugin {plugin} --to {v}",
+        {"id": "bump", "type": "run", "stage": "配布", "cmd": f"{STEPS_PY} bump --plugin {plugin} --to {v} --base {a.base}",
          "on_fail": "judge", "next": "changelog"},
         {"id": "changelog", "type": "run", "cmd": f"{STEPS_PY} changelog --version {v} --prs {prs}",
          "on_fail": "judge", "next": "notes"},
