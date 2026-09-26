@@ -69,18 +69,18 @@ def link_pointers(venv: Path) -> None:
             _say(f"目印を張れない（{p}: {exc}）")
 
 
-def ready(venv: Path, want: str) -> bool:
+def env_ready(venv: Path, want: str) -> bool:
     try:
         return (venv / "bin" / "python").exists() and (venv / STAMP).read_text(encoding="utf-8") == want
     except OSError:
         return False
 
 
-def sync() -> int:
+def sync_env() -> int:
     """切り離した子の本体。uv を用意して環境を作り、目印を張る。"""
     venv = Path(deps.venv_dir())
     want = env_stamp()
-    if not ready(venv, want):
+    if not env_ready(venv, want):
         uv = deps.find_uv()
         if not uv:
             _say(f"uv が無いため {deps.UV_VERSION} を ~/.local/bin へ入れる")
@@ -102,11 +102,11 @@ def sync() -> int:
 
 def main(argv: list[str]) -> int:
     if argv[:1] == ["--sync"]:
-        return sync()
+        return sync_env()
     wait = float(argv[argv.index("--wait") + 1]) if "--wait" in argv[:-1] else 50.0
     try:
         venv = Path(deps.venv_dir())
-        if ready(venv, env_stamp()):
+        if env_ready(venv, env_stamp()):
             link_pointers(venv)
             return 0
         LOG.parent.mkdir(parents=True, exist_ok=True)

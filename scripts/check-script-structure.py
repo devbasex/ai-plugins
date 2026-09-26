@@ -16,8 +16,9 @@
   例外リストの `name` は部品の名前（`fcntl` など）
 - `hook-deps`: hook の経路が `deps.require()` を呼ぶ（I13・決定 20）。hook の経路は、hook のエントリポイント
   （`HOOK_ENTRIES`）から import でたどれる `scripts/` の中のモジュールと、`plugins/*/hooks/*.json` の command である。
-  モジュールは `deps` を import したら落ち、command は `uv run` を挟んだら落ちる（hook は SessionStart が用意した
-  環境の python を直に起動する）。例外リストの `name` は `deps` か `uv run`
+  モジュールは `require` を呼んだら（`deps.require(…)`・`from deps import require`）落ち、command は `uv run` を
+  挟んだら落ちる（hook は SessionStart が用意した環境の python を直に起動する）。例外リストの `name` は
+  `deps.require` か `uv run`
 
 副命令のハンドラー（`cmd_*`）・`main`・`build_parser`・`_build_parser`・シェルの `usage` は規則で外す。
 
@@ -302,6 +303,17 @@ def scan(root: Path) -> tuple[list[dict], dict]:
     return violations, metrics
 
 
+def _calls_require(tree: ast.AST) -> bool:
+    """`deps.require(…)` を呼ぶか、`from deps import require` するか。"""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == "deps" and any(a.name == "require" for a in node.names):
+            return True
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "require"
+                and isinstance(node.func.value, ast.Name) and node.func.value.id == "deps"):
+            return True
+    return False
+
+
 def _imported(rel: str, text: str) -> set[str]:
     """モジュールが import する名前（関数の中の import も含む。`from . import x` は `<パッケージ>.x`）。"""
     try:
@@ -340,10 +352,15 @@ def hook_deps(root: Path) -> list[dict]:
         if rel in seen:
             continue
         seen.add(rel)
-        names = _imported(rel, (root / rel).read_text(errors="ignore"))
-        if "deps" in names:
-            out.append({"kind": "hook-deps", "path": rel, "function": "deps",
-                        "detail": "hook の経路のモジュールが deps を import する（hook は用意済みの環境で動き、deps.require() を呼ばない）"})
+        text = (root / rel).read_text(errors="ignore")
+        names = _imported(rel, text)
+        try:
+            calls = _calls_require(ast.parse(text))
+        except SyntaxError:
+            calls = False
+        if calls:
+            out.append({"kind": "hook-deps", "path": rel, "function": "deps.require",
+                        "detail": "hook の経路のモジュールが deps.require() を呼ぶ（hook は用意済みの環境の python で動く）"})
         todo += [f for f in (_module_file(root, n) for n in names) if f and f not in seen]
     for f in sorted(root.glob("plugins/*/hooks/*.json")):
         rel = f.relative_to(root).as_posix()

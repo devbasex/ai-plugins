@@ -288,18 +288,20 @@ def test_wrapped_part_can_be_allowed_per_file_and_part(tmp_path: Path):
 
 
 def test_hook_path_must_not_use_deps(tmp_path: Path):
-    """I13（決定 20）: hook.py から import でたどれるモジュールは deps を import せず、hook の command は uv run を挟まない。"""
+    """I13（決定 20）: hook.py から import でたどれるモジュールは deps.require() を呼ばず、hook の command は uv run を挟まない。"""
     put(tmp_path, "scripts/hook.py", "import helper\nfrom hook_lib import guard\n")
     put(tmp_path, "scripts/lib/helper.py", "def f():\n    import deps\n    deps.require('x')\n")
     put(tmp_path, "scripts/hook_lib/__init__.py", "")
-    put(tmp_path, "scripts/hook_lib/guard.py", "from . import inner\n")
-    put(tmp_path, "scripts/hook_lib/inner.py", "import deps\n")
-    put(tmp_path, "scripts/other.py", "import deps\n")  # hook の経路でない
+    put(tmp_path, "scripts/hook_lib/guard.py", "from . import inner\nfrom . import guard2\n")
+    put(tmp_path, "scripts/hook_lib/inner.py", "from deps import require\n")
+    put(tmp_path, "scripts/hook_lib/plain.py", "import deps\nV = deps.venv_dir()\n")  # require を呼ばなければよい
+    put(tmp_path, "scripts/hook_lib/guard2.py", "from . import plain\n")
+    put(tmp_path, "scripts/other.py", "import deps\ndeps.require('x')\n")  # hook の経路でない
     put(tmp_path, "hooks/claude.json", '{"hooks": {"Stop": [{"hooks": [{"command": "uv run python x.py"}]}]}}\n')
     code, r = run(tmp_path, [])
     assert code == 1
     assert kinds(r) == {
-        ("hook-deps", "plugins/ndf/scripts/lib/helper.py:deps"),
-        ("hook-deps", "plugins/ndf/scripts/hook_lib/inner.py:deps"),
+        ("hook-deps", "plugins/ndf/scripts/lib/helper.py:deps.require"),
+        ("hook-deps", "plugins/ndf/scripts/hook_lib/inner.py:deps.require"),
         ("hook-deps", "plugins/ndf/hooks/claude.json:uv run"),
     }

@@ -476,7 +476,7 @@ graph LR
 | エントリポイントの形が変わらない（I3） | `scripts/tests/test_entrypoints.py`（新設）が一覧の各エントリポイントの `--help` の副命令と、代表の出力の形を固定する |
 | `build-runtime-plugins.sh --check` が通り、配布物に新しいモジュールが入る | `--check` と、開発版の `verify-install` の後に 3 ランタイムの導入先で `supervise_lib` などの有無を見る |
 | 複製が 1 回の導入で動く（F10・I2・I9） | `test_relay.py` にバージョンディレクトリの作成・切り替え・古いバージョンディレクトリの削除（生きている pid の `inuse-<pid>` があるものは残す）・書きかけのバージョンディレクトリが指されないテスト。手動確認はラッパーの下でセッションを 1 回切り替える |
-| I1・I2・I13 | 構造チェックの import の検査（ライブラリとバージョンディレクトリの中身の import 先を構文木で見る。`hook.py` から import でたどれるモジュールが `deps` を import しないこと、`plugins/*/hooks/*.json` の command が `uv run` を挟まないこと（`hook-deps`）） |
+| I1・I2・I13 | 構造チェックの import の検査（ライブラリとバージョンディレクトリの中身の import 先を構文木で見る。`hook.py` から import でたどれるモジュールが `deps.require()` を呼ばないこと、`plugins/*/hooks/*.json` の command が `uv run` を挟まないこと（`hook-deps`）） |
 | 外部パッケージを固定して使え、uv が無ければ入れる（h・F13） | `test_deps.py`（uv を置いた・置かない一時の `PATH`、`NDF_DEPS_REEXEC` での打ち切り、入れられないときの終了コード 3）。試行で 4 ランタイムからの起動し直しと 304 が上限に数えられないことを確かめ、結果を課題のコメントに残す |
 | I6 | 既存の `test_experimental.py` |
 | I10 | 各 PR のテスト計画に revert の確認を載せる |
