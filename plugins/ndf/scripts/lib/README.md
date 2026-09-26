@@ -25,7 +25,7 @@
 | [launch-cli.sh](launch-cli.sh) | claude / codex / agy / kiro をランタイム名で分岐して背景起動する | 同上 |
 | （`skills/external-ai/scripts/external-ai.py`） | 上の 2 つと `auth.py` / `limits.py` を束ね、外部 CLI 1 回の起動・上限つきの待ち・回収（結果ファイル → stdout → stderr）を 1 本で行う。結果は `step_result` の形 | `external-ai` / `corder` / supervisor の worker |
 | [_tmpdir.sh](_tmpdir.sh) | 一時ディレクトリの解決。環境変数名とディレクトリ名を引数で受ける | 同上 |
-| [statefile.py](statefile.py) | 状態ファイルの読み書きと KEY=VALUE 出力、保存の後の差し込み口、再開で渡した引数の反映（#727）。`now`・`die`・`info`・`write_json_atomic` は `clock`・`proc`・`jsonio` の再エクスポート | 同上 |
+| [statefile.py](statefile.py) | 状態ファイルの読み書きと KEY=VALUE 出力、保存の後の差し込み口、再開で渡した引数の反映。`now`・`die`・`info`・`write_json_atomic` は `clock`・`proc`・`jsonio` の再エクスポート | 同上 |
 | [auth.py](auth.py) | 参加する CLI の認証の確認。止めずに結果だけを返す形を持つ（#727） | 同上 |
 | [run_metrics.py](run_metrics.py) | 実行の要約をworktree の外へ書き、集計して出す（`aggregate`、#662） | 同上 |
 | [assignment.py](assignment.py) | ホスト判定、母集合の確定、使える者の解決、席の埋め方と席の名前、担当の輪番（#727） | 同上 |
