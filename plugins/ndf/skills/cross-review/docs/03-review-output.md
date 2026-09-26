@@ -74,7 +74,7 @@ fix 戻り値ファイル (`$TMP_DIR/fix-pr<PR>-result.json`) を受け取った
 
 | 分類 | パターン | 振る舞い |
 |---|---|---|
-| code-fail | テスト・lint・型検査・ビルドを指す名前（語の一覧は `state.py` の `CI_CODE_PATTERNS`） | `final=error` で中断 (exit 3) |
+| code-fail | メタのチェックの名前（`review_lib/ci.py` の `CI_META_PATTERNS`）に当たらない名前。テスト・lint・型検査・ビルドはここに入る | `final=error` で中断 (exit 3) |
 | meta-only | `check_pr_requirements` / `assignees` / `reviewers` / `labels` / `meta`（区切りで挟まれた語として一致したときだけ） | `ci_note` に記録して継続 |
 | 不明 | 上記以外 | 保守的に **code-fail 扱い** |
 

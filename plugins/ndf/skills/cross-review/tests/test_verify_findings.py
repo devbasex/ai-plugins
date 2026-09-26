@@ -10,6 +10,7 @@ import os
 import pathlib
 
 import pytest
+import review_lib.commands.verify_findings
 
 
 def _finding(fid, check, **over):
@@ -24,7 +25,7 @@ def _finding(fid, check, **over):
 
 def verify(state_mod, findings, allowed, work, **kw):
     st = {"review_findings": list(findings)}
-    state_mod._verify_findings(st, round_no=1, allowed=allowed, work=str(work), **kw)
+    review_lib.commands.verify_findings._verify_findings(st, round_no=1, allowed=allowed, work=str(work), **kw)
     return st["review_findings"]
 
 

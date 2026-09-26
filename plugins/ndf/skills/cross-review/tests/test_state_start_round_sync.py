@@ -20,6 +20,8 @@ import pathlib
 import subprocess
 
 import pytest
+import review_lib.commands.start_round
+import review_lib.workspace
 
 PR = 6170
 REPO = "o/r"
@@ -141,14 +143,14 @@ def _read(tmp_dir: pathlib.Path) -> dict:
 @pytest.fixture()
 def tmp_dir(monkeypatch, tmp_path, state_mod, real_github):
     monkeypatch.setenv("CROSS_REVIEW_TMP_DIR", str(tmp_path))
-    monkeypatch.setattr(state_mod, "_is_registered_worktree", lambda path: True)
+    monkeypatch.setattr(review_lib.workspace, "_is_registered_worktree", lambda path: True)
     return tmp_path
 
 
 @pytest.fixture()
 def run(monkeypatch, state_mod):
     def _set(rec: _Recorder) -> _Recorder:
-        monkeypatch.setattr(state_mod.subprocess, "run", rec)
+        monkeypatch.setattr(subprocess, "run", rec)
         return rec
     return _set
 
@@ -160,7 +162,7 @@ def test_syncs_before_opening_a_round(tmp_dir, state_mod, run):
     rec = run(_Recorder())
     _write(tmp_dir, _state())
 
-    state_mod.cmd_start_round(argparse.Namespace(pr=PR))
+    review_lib.commands.start_round.cmd_start_round(argparse.Namespace(pr=PR))
 
     assert ["git", "fetch", "origin", BRANCH] in rec.commands()
     assert ["git", "reset", "--hard", OID] in rec.commands()
@@ -176,7 +178,7 @@ def test_does_nothing_when_already_at_head(tmp_dir, state_mod, run, capsys):
     rec = run(_Recorder(head_oid=OID))
     _write(tmp_dir, _state())
 
-    state_mod.cmd_start_round(argparse.Namespace(pr=PR))
+    review_lib.commands.start_round.cmd_start_round(argparse.Namespace(pr=PR))
 
     assert not rec.issued(["git", "reset", "--hard"])
     assert not rec.issued(["git", "clean"])
@@ -192,7 +194,7 @@ def test_stops_when_tracked_files_are_modified(tmp_dir, state_mod, run, capsys):
     _write(tmp_dir, _state())
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_start_round(argparse.Namespace(pr=PR))
+        review_lib.commands.start_round.cmd_start_round(argparse.Namespace(pr=PR))
 
     assert e.value.code == 8
     assert not rec.issued(["git", "reset", "--hard"])
@@ -206,7 +208,7 @@ def test_stops_when_local_commits_are_not_pushed(tmp_dir, state_mod, run):
     _write(tmp_dir, _state())
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_start_round(argparse.Namespace(pr=PR))
+        review_lib.commands.start_round.cmd_start_round(argparse.Namespace(pr=PR))
 
     assert e.value.code == 8
     assert not rec.issued(["git", "reset", "--hard"])
@@ -218,7 +220,7 @@ def test_no_round_is_opened_when_sync_fails(tmp_dir, state_mod, run):
     _write(tmp_dir, _state(rounds=[]))
 
     with pytest.raises(SystemExit):
-        state_mod.cmd_start_round(argparse.Namespace(pr=PR))
+        review_lib.commands.start_round.cmd_start_round(argparse.Namespace(pr=PR))
 
     assert len(_read(tmp_dir)["rounds"]) == 0
 
@@ -229,7 +231,7 @@ def test_a_sync_failure_does_not_end_the_loop(tmp_dir, state_mod, run):
     _write(tmp_dir, _state())
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_start_round(argparse.Namespace(pr=PR))
+        review_lib.commands.start_round.cmd_start_round(argparse.Namespace(pr=PR))
 
     assert e.value.code != 1
     assert e.value.code == 8
@@ -246,7 +248,7 @@ def test_head_ref_comes_from_github(tmp_dir, state_mod, run):
     rec = run(_Recorder())
     _write(tmp_dir, _state(head_branch="fix/stale"))
 
-    state_mod.cmd_start_round(argparse.Namespace(pr=PR))
+    review_lib.commands.start_round.cmd_start_round(argparse.Namespace(pr=PR))
 
     assert ["gh", "api", "-i", f"repos/{REPO}/pulls/{PR}"] in rec.commands()
     # GraphQL 側の枠は使わない。
@@ -259,7 +261,7 @@ def test_resolved_head_branch_is_written_back(tmp_dir, state_mod, run):
     run(_Recorder())
     _write(tmp_dir, _state(head_branch="fix/stale"))
 
-    state_mod.cmd_start_round(argparse.Namespace(pr=PR))
+    review_lib.commands.start_round.cmd_start_round(argparse.Namespace(pr=PR))
 
     assert _read(tmp_dir)["head_branch"] == BRANCH
 
@@ -270,7 +272,7 @@ def test_stops_when_head_ref_cannot_be_resolved(tmp_dir, state_mod, run):
     _write(tmp_dir, _state())
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_start_round(argparse.Namespace(pr=PR))
+        review_lib.commands.start_round.cmd_start_round(argparse.Namespace(pr=PR))
 
     assert e.value.code == 8
     assert not rec.issued(["git", "reset", "--hard"])
@@ -284,7 +286,7 @@ def test_fetches_the_pull_ref_for_a_fork(tmp_dir, state_mod, run):
     rec = run(_Recorder(view_stdout=_rest(fork=True)))
     _write(tmp_dir, _state())
 
-    state_mod.cmd_start_round(argparse.Namespace(pr=PR))
+    review_lib.commands.start_round.cmd_start_round(argparse.Namespace(pr=PR))
 
     assert ["git", "fetch", "origin", f"refs/pull/{PR}/head"] in rec.commands()
     assert not any(f"origin/{BRANCH}" in c for cmd in rec.commands() for c in cmd)
@@ -300,7 +302,7 @@ def test_strict_stops_when_the_base_commit_is_missing(tmp_dir, state_mod, run):
     _write(tmp_dir, _state())
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_start_round(argparse.Namespace(pr=PR))
+        review_lib.commands.start_round.cmd_start_round(argparse.Namespace(pr=PR))
 
     assert e.value.code == 8
     assert not rec.issued(["gh", "pr", "checkout"])
@@ -315,7 +317,7 @@ def test_continues_without_a_worktree_path(tmp_dir, state_mod, run):
     del state["worktree_path"]
     _write(tmp_dir, state)
 
-    state_mod.cmd_start_round(argparse.Namespace(pr=PR))
+    review_lib.commands.start_round.cmd_start_round(argparse.Namespace(pr=PR))
 
     assert len(_read(tmp_dir)["rounds"]) == 1
     assert not rec.issued(["gh", "pr", "view"])

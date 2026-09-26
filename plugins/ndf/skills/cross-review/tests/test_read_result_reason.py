@@ -25,6 +25,8 @@ import pathlib
 import re
 
 import pytest
+import review_lib.commands.read_result
+import review_lib.github
 
 PR = 7729
 AGENT = "kiro"
@@ -51,7 +53,7 @@ def tmp_dir(monkeypatch, tmp_path, state_mod):
 @pytest.fixture(autouse=True)
 def review_posted(monkeypatch, state_mod):
     """投稿の実在確認は届いた前提にする。ここで見るのは結末の読み方である。"""
-    monkeypatch.setattr(state_mod, "_review_exists", lambda repo, pr, url: True)
+    monkeypatch.setattr(review_lib.github, "_review_exists", lambda repo, pr, url: True)
 
 
 def _seed_state(tmp_dir: pathlib.Path) -> None:
@@ -86,7 +88,7 @@ def _read_result(state_mod, rfile: pathlib.Path | None) -> int:
     """`read-result` を呼び、終了コードを返す。`rfile` が None なら既定のパスを使う。"""
     args = argparse.Namespace(pr=PR, agent=AGENT, file=str(rfile) if rfile else None)
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_read_result(args)
+        review_lib.commands.read_result.cmd_read_result(args)
     return int(e.value.code or 0)
 
 
@@ -189,7 +191,7 @@ def test_a_readable_result_file_wins_over_the_monitor_reason(tmp_dir, state_mod)
         "review_url": "https://example/pr/1#1", "by_severity": {},
     }))
 
-    state_mod.cmd_read_result(argparse.Namespace(pr=PR, agent=AGENT, file=str(rfile)))
+    review_lib.commands.read_result.cmd_read_result(argparse.Namespace(pr=PR, agent=AGENT, file=str(rfile)))
 
     entry = _entry(tmp_dir)
     assert entry["intent"] == "APPROVE"

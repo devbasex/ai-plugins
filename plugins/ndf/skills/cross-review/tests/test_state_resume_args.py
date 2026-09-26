@@ -11,6 +11,15 @@ import json
 import pathlib
 
 import pytest
+import review_lib
+import review_lib.commands.init
+import review_lib.commands.report
+import review_lib.commands.start_round
+import review_lib.findings
+import review_lib.github
+import review_lib.participants
+import review_lib.posts
+import review_lib.workspace
 
 PR = 6100
 REPO = "acme/demo"
@@ -64,26 +73,26 @@ def _state(tmp_dir: pathlib.Path, **over) -> pathlib.Path:
 def resume(state_mod, monkeypatch, tmp_path):
     """再開の入口を、GitHub にも git にも触れずに通す。"""
     monkeypatch.setenv("CROSS_REVIEW_TMP_DIR", str(tmp_path))
-    monkeypatch.setattr(state_mod, "_repo_from_git", lambda: REPO)
-    monkeypatch.setattr(state_mod, "_sh", lambda cmd, check=True: REPO)
-    monkeypatch.setattr(state_mod, "_auto_flush", lambda pr: None)
-    monkeypatch.setattr(state_mod, "_record_carried_over", lambda *a, **k: False)
-    monkeypatch.setattr(state_mod, "_sync_worktree", lambda *a, **k: None)
-    monkeypatch.setattr(state_mod, "_is_registered_worktree", lambda path: False)
-    monkeypatch.setattr(state_mod, "_fetch_changed_files", lambda pr, repo: [])
-    monkeypatch.setattr(state_mod, "_sync_before_round", lambda st, pr: None)
+    monkeypatch.setattr(review_lib.github, "_repo_from_git", lambda: REPO)
+    monkeypatch.setattr(review_lib, "_sh", lambda cmd, check=True: REPO)
+    monkeypatch.setattr(review_lib.posts, "_auto_flush", lambda pr: None)
+    monkeypatch.setattr(review_lib.findings, "_record_carried_over", lambda *a, **k: False)
+    monkeypatch.setattr(review_lib.workspace, "_sync_worktree", lambda *a, **k: None)
+    monkeypatch.setattr(review_lib.workspace, "_is_registered_worktree", lambda path: False)
+    monkeypatch.setattr(review_lib.github, "_fetch_changed_files", lambda pr, repo: [])
+    monkeypatch.setattr(review_lib.commands.start_round, "_sync_before_round", lambda st, pr: None)
     calls: list[list[str]] = []
 
     def probe(runtimes, *, info, env=None):
         calls.append(list(runtimes))
         return ({r: {"command": r, "ok": True, "detail": ""} for r in runtimes}, False)
 
-    monkeypatch.setattr(state_mod.auth, "probe_auth", probe)
+    monkeypatch.setattr(review_lib.participants.auth, "probe_auth", probe)
 
     def run(*argv: str) -> dict:
         args = state_mod.build_parser().parse_args(
             ["init", str(PR), "--worktree", str(tmp_path), *argv])
-        state_mod.cmd_init(args)
+        review_lib.commands.init.cmd_init(args)
         return json.loads((tmp_path / f"cross-review-pr{PR}-state.json").read_text())
 
     run.calls = calls
@@ -92,7 +101,7 @@ def resume(state_mod, monkeypatch, tmp_path):
 
 
 def _seats(state_mod, tmp_path) -> list[str]:
-    state_mod.cmd_start_round(type("A", (), {"pr": PR})())
+    review_lib.commands.start_round.cmd_start_round(type("A", (), {"pr": PR})())
     st = json.loads((tmp_path / f"cross-review-pr{PR}-state.json").read_text())
     return st["rounds"][-1]["reviewers"]
 
@@ -173,7 +182,7 @@ def test_only_that_cannot_be_reached_stops_before_writing(
     def probe(runtimes, *, info, env=None):
         return ({r: {"command": r, "ok": False, "detail": "未認証"} for r in runtimes}, False)
 
-    monkeypatch.setattr(state_mod.auth, "probe_auth", probe)
+    monkeypatch.setattr(review_lib.participants.auth, "probe_auth", probe)
     with pytest.raises(SystemExit) as e:
         resume("--only", "kiro")
     assert e.value.code == 1
@@ -258,7 +267,7 @@ def test_ignored_exclusions_survive_a_resume_without_exclude(resume, state_mod, 
     (tmp_path / f"cross-review-pr{PR}-state.json").write_text(
         json.dumps(st, ensure_ascii=False), encoding="utf-8")
     capsys.readouterr()
-    state_mod.cmd_report(type("A", (), {"pr": PR})())
+    review_lib.commands.report.cmd_report(type("A", (), {"pr": PR})())
     assert "- --exclude で指定したが既定の母集合に無かった者: agy" in capsys.readouterr().out
 
 
@@ -334,7 +343,7 @@ def test_a_failed_rebuild_leaves_the_state_untouched(resume, state_mod, tmp_path
     def probe(runtimes, *, info, env=None):
         return ({r: {"command": r, "ok": False, "detail": "未認証"} for r in runtimes}, False)
 
-    monkeypatch.setattr(state_mod.auth, "probe_auth", probe)
+    monkeypatch.setattr(review_lib.participants.auth, "probe_auth", probe)
     with pytest.raises(SystemExit) as e:
         resume("--exclude", "agy", "--require-all")
     assert e.value.code == 1

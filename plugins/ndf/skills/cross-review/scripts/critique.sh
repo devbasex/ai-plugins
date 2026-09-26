@@ -26,7 +26,7 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=_tmpdir.sh
 . "$SCRIPT_DIR/_tmpdir.sh"
 
-load_context() {
+load_critique_context() {
   SEAT=${1:?seat required}
   STATE_PR=${2:?STATE_PR required}
   ROUND=${3:?ROUND required}
@@ -42,7 +42,7 @@ load_context() {
   PR=$(jq -r '.current_pr' "$STATE")
 }
 
-load_context "$@"
+load_critique_context "$@"
 
 STEM=$TMP_DIR/$SEAT-critique-pr$STATE_PR
 # **前のラウンドの pid ファイルを先に捨てる。** 監視は `<stem>.pid` の有無で起動を
@@ -148,27 +148,14 @@ EOF
 
 render_critique_prompt
 
-# 実行時間の上限。既定は工程名 `critique` を渡し、共通層が上限の表から「監視の上限 + 120 秒」を
+# 実行時間の上限。ライブラリ（`limits.py`）が工程名 `critique` の上限の表から「監視の上限 + 120 秒」を
 # 導く。`NDF_CRITIQUE_PRINT_TIMEOUT` はそれより短くできない。短いと CLI が監視より先に
-# 打ち切り、結果ファイルが残らない（#598 / #537）。
-resolve_print_timeout() {
-PRINT_TIMEOUT=critique
-case "${NDF_CRITIQUE_PRINT_TIMEOUT:-}" in
-  '') ;;
-  *[!0-9]*)
-    echo "⚠ NDF_CRITIQUE_PRINT_TIMEOUT=$NDF_CRITIQUE_PRINT_TIMEOUT は秒数ではないため、監視の上限から導いた値を使います" >&2 ;;
-  *)
-    DERIVED=$(python3 "$SCRIPT_DIR/../../../scripts/lib/limits.py" cli-timeout critique "$RUNTIME")
-    if [ "$NDF_CRITIQUE_PRINT_TIMEOUT" -lt "$DERIVED" ]; then
-      echo "⚠ NDF_CRITIQUE_PRINT_TIMEOUT=$NDF_CRITIQUE_PRINT_TIMEOUT は監視の上限から導いた値より短いため、${DERIVED} 秒を使います" >&2
-      PRINT_TIMEOUT=$DERIVED
-    else
-      PRINT_TIMEOUT=$NDF_CRITIQUE_PRINT_TIMEOUT
-    fi ;;
-esac
-}
-
-resolve_print_timeout
+# 打ち切り、結果ファイルが残らない（#598 / #537）。秒数でなければ導いた値を使う。
+# 上限の決め方は `limits.py cli-timeout` の 1 か所だけが持つ（#1142 の V3）。
+LIMITS_OUT=$(python3 "$SCRIPT_DIR/../../../scripts/lib/limits.py" cli-timeout critique "$RUNTIME" \
+  --override "${NDF_CRITIQUE_PRINT_TIMEOUT:-}" 2>&1) || { echo "$LIMITS_OUT" >&2; exit 1; }
+PRINT_TIMEOUT=${LIMITS_OUT##*$'\n'}
+[ "$PRINT_TIMEOUT" = "$LIMITS_OUT" ] || echo "NDF_CRITIQUE_PRINT_TIMEOUT=$NDF_CRITIQUE_PRINT_TIMEOUT: ${LIMITS_OUT%$'\n'*}" >&2
 
 # **接頭辞は絶対パスで渡す。** `launch-cli.sh` は作業ツリーへ `cd` してから
 # `<stem>.pid` と `<stem>-stdout.log` を作る。相対の値を渡すと、作業ツリーの直下に

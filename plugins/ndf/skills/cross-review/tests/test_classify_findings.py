@@ -6,6 +6,10 @@
 from __future__ import annotations
 
 import pytest
+import review_lib.commands.collect_critiques
+import review_lib.commands.judge
+import review_lib.findings
+import review_lib.matching
 
 
 def _finding(**over):
@@ -29,7 +33,7 @@ def _critique(agent, verdict):
 
 
 def classify(state_mod, finding):
-    return state_mod._classify_finding(finding)
+    return review_lib.findings._classify_finding(finding)
 
 
 # ---------- 順 1・2: 実行で再現した ----------
@@ -164,14 +168,14 @@ def test_a_lone_minor_with_evidence_is_insufficient(state_mod):
 
 def test_an_unrefuted_finding_without_critiques_says_no_critique(state_mod):
     f = _finding(has_evidence=True)
-    state_mod._apply_classification(f)
+    review_lib.findings._apply_classification(f)
     assert f["classification"] == "unrefuted"
     assert f["unrefuted_reason"] == "no_critique"
 
 
 def test_an_unrefuted_finding_with_critiques_says_not_supported(state_mod):
     f = _finding(has_evidence=True, critiques=[_critique("kiro", "insufficient_evidence")])
-    state_mod._apply_classification(f)
+    review_lib.findings._apply_classification(f)
     assert f["classification"] == "unrefuted"
     assert f["unrefuted_reason"] == "not_supported"
 
@@ -179,11 +183,11 @@ def test_an_unrefuted_finding_with_critiques_says_not_supported(state_mod):
 def test_the_unrefuted_reason_is_dropped_when_the_classification_changes(state_mod):
     """**理由は区分が未反証のときだけ存在する**（棄却の理由と同じ扱い）。"""
     f = _finding(has_evidence=True)
-    state_mod._apply_classification(f)
+    review_lib.findings._apply_classification(f)
     assert f["unrefuted_reason"] == "no_critique"
 
     f["critiques"] = [_critique("kiro", "refute")]
-    state_mod._apply_classification(f)
+    review_lib.findings._apply_classification(f)
 
     assert f["classification"] == "rejected"
     assert "unrefuted_reason" not in f
@@ -196,7 +200,7 @@ def test_other_classifications_carry_no_unrefuted_reason(state_mod):
         _finding(has_evidence=True, critiques=[_critique("kiro", "support")]),
         _finding(severity="minor"),
     ):
-        state_mod._apply_classification(f)
+        review_lib.findings._apply_classification(f)
         assert f["classification"] != "unrefuted"
         assert "unrefuted_reason" not in f
 
@@ -205,21 +209,21 @@ def test_other_classifications_carry_no_unrefuted_reason(state_mod):
 
 def test_a_rejection_carries_its_reason(state_mod):
     f = _finding(critiques=[_critique("kiro", "refute")])
-    state_mod._apply_classification(f)
+    review_lib.findings._apply_classification(f)
     assert f["classification"] == "rejected"
     assert "refute" in f["rejection_reason"] or "kiro" in f["rejection_reason"]
 
 
 def test_a_not_reproduced_rejection_names_the_run(state_mod):
     f = _finding(verification=_verified("not_reproduced"))
-    state_mod._apply_classification(f)
+    review_lib.findings._apply_classification(f)
     assert f["classification"] == "rejected"
     assert f["rejection_reason"]
 
 
 def test_a_kept_finding_has_no_rejection_reason(state_mod):
     f = _finding(verification=_verified("reproduced"))
-    state_mod._apply_classification(f)
+    review_lib.findings._apply_classification(f)
     assert f["classification"] == "verified_blocking"
     assert "rejection_reason" not in f
 
@@ -236,7 +240,7 @@ def _round_state(findings, rounds=1):
 
 def counted(state_mod, findings, round_no=1):
     st = _round_state(findings, rounds=round_no)
-    return state_mod._counted_finding_ids(st, round_no)
+    return review_lib.findings._counted_finding_ids(st, round_no)
 
 
 def test_only_three_classifications_are_counted(state_mod):
@@ -298,7 +302,7 @@ def test_the_new_count_uses_the_classification(state_mod, tmp_path, monkeypatch)
         {"path": "b.py", "line": 2, "body": "y", "severity": "major"},
     ])
 
-    count, measurable = state_mod._new_finding_count(st, 1)
+    count, measurable = review_lib.matching._new_finding_count(st, 1)
 
     assert measurable is True
     assert count == 1          # rejected の 1 件は数えない
@@ -313,7 +317,7 @@ def test_the_old_path_is_used_without_classifications(state_mod, tmp_path, monke
         {"path": "b.py", "line": 2, "body": "y", "severity": "major"},
     ])
 
-    count, measurable = state_mod._new_finding_count(st, 1)
+    count, measurable = review_lib.matching._new_finding_count(st, 1)
 
     assert measurable is True
     assert count == 2          # 区分が無いため全件を数える
@@ -341,7 +345,7 @@ def test_an_old_review_findings_does_not_switch_to_the_classification(
     _payload(tmp_path, "codex", 1, 1, [
         {"path": "a.py", "line": 1, "body": "x", "severity": "major"}])
 
-    count, measurable = state_mod._new_finding_count(st, 1)
+    count, measurable = review_lib.matching._new_finding_count(st, 1)
 
     assert measurable is True
     assert count == 1          # 従来どおり全件を数える（0 件にしない）
@@ -370,11 +374,11 @@ def test_the_marker_is_written_by_the_last_step_of_the_pipeline(
             {"critiques": [{"finding_id": "codex-r1-0",
                             "verdict": "insufficient_evidence", "reason": "?"}]}))
 
-    state_mod.cmd_collect_critiques(argparse.Namespace(pr=1))
+    review_lib.commands.collect_critiques.cmd_collect_critiques(argparse.Namespace(pr=1))
 
     got = json.loads((tmp_path / "cross-review-pr1-state.json").read_text())
     assert got["evidence_rounds"] == [1]
-    assert state_mod._evidence_completed(got, 1) is True
+    assert review_lib.matching._evidence_completed(got, 1) is True
 
 
 def test_measurability_is_decided_before_narrowing(state_mod, tmp_path, monkeypatch):
@@ -396,7 +400,7 @@ def test_measurability_is_decided_before_narrowing(state_mod, tmp_path, monkeypa
     _payload(tmp_path, "codex", 1, 1, [
         {"path": "a.py", "line": 1, "body": "x", "severity": "major"}])
 
-    count, measurable = state_mod._new_finding_count(st, 1)
+    count, measurable = review_lib.matching._new_finding_count(st, 1)
 
     assert measurable is True   # 読めている
     assert count == 0           # 数える区分が 0 件
@@ -407,7 +411,7 @@ def test_measurability_is_decided_before_narrowing(state_mod, tmp_path, monkeypa
 def _judge_rc(state_mod, pr):
     import argparse
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_judge(argparse.Namespace(pr=pr))
+        review_lib.commands.judge.cmd_judge(argparse.Namespace(pr=pr))
     return e.value.code
 
 
@@ -444,7 +448,7 @@ def test_a_single_reviewer_unrefuted_major_is_counted(state_mod, tmp_path, monke
     monkeypatch.setenv("CROSS_REVIEW_TMP_DIR", str(tmp_path))
     st = _single_reviewer_state(tmp_path, _finding(has_evidence=True))
 
-    assert state_mod._new_finding_count(st, 1) == (1, True)
+    assert review_lib.matching._new_finding_count(st, 1) == (1, True)
     assert st["review_findings"][0]["classification"] == "unrefuted"
     assert _judge_rc(state_mod, 1) == 2
 
@@ -455,7 +459,7 @@ def test_a_single_reviewer_major_without_evidence_is_still_counted(
     monkeypatch.setenv("CROSS_REVIEW_TMP_DIR", str(tmp_path))
     st = _single_reviewer_state(tmp_path, _finding(has_evidence=False))
 
-    assert state_mod._new_finding_count(st, 1) == (1, True)
+    assert review_lib.matching._new_finding_count(st, 1) == (1, True)
     assert st["review_findings"][0]["classification"] == "unrefuted"
     assert st["review_findings"][0]["has_evidence"] is False
     assert _judge_rc(state_mod, 1) == 2
@@ -467,7 +471,7 @@ def test_a_single_reviewer_minor_is_not_counted(state_mod, tmp_path, monkeypatch
     st = _single_reviewer_state(
         tmp_path, _finding(severity="minor", has_evidence=True))
 
-    assert state_mod._new_finding_count(st, 1) == (0, True)
+    assert review_lib.matching._new_finding_count(st, 1) == (0, True)
     assert st["review_findings"][0]["classification"] == "insufficient_evidence"
 
 
@@ -495,7 +499,7 @@ def test_a_relaunched_reviewers_major_without_critiques_is_counted(
     _payload(tmp_path, "kiro", 1, 1, [
         {"path": "b.py", "line": 2, "body": "y", "severity": "major"}])
 
-    assert state_mod._new_finding_count(st, 1) == (1, True)
+    assert review_lib.matching._new_finding_count(st, 1) == (1, True)
     assert agy["classification"] == "unrefuted"
     assert agy["unrefuted_reason"] == "no_critique"
     assert kiro["classification"] == "rejected"

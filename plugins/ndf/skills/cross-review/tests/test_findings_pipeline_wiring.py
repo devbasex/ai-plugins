@@ -15,8 +15,12 @@ import json
 import pathlib
 
 import pytest
+import review_lib.commands.collect_critiques
+import review_lib.commands.verify_findings
 
-STATE_PY = pathlib.Path(__file__).resolve().parent.parent / "scripts" / "state.py"
+SCRIPTS = pathlib.Path(__file__).resolve().parent.parent / "scripts"
+# `state.py` と、その中身を持つ `review_lib/`（#1142 の C2）
+SOURCES = (SCRIPTS / "state.py", *sorted((SCRIPTS / "review_lib").rglob("*.py")))
 
 PR = 6101
 
@@ -28,17 +32,20 @@ WIRED_HELPERS = ("_merge_duplicates", "_verify_findings", "_merge_declared_dupli
 
 
 def _called_names(fn: ast.FunctionDef) -> set[str]:
+    # ほかのモジュールの関数は `mod.f(...)` の形で呼ぶ（#1142 の C2）
     return {
-        node.func.id for node in ast.walk(fn)
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+        node.func.id if isinstance(node.func, ast.Name) else node.func.attr
+        for node in ast.walk(fn)
+        if isinstance(node, ast.Call) and isinstance(node.func, (ast.Name, ast.Attribute))
     }
 
 
 @pytest.fixture(scope="module")
 def functions() -> dict[str, ast.FunctionDef]:
-    tree = ast.parse(STATE_PY.read_text(encoding="utf-8"))
     return {
-        node.name: node for node in tree.body
+        node.name: node
+        for path in SOURCES
+        for node in ast.parse(path.read_text(encoding="utf-8")).body
         if isinstance(node, ast.FunctionDef)
     }
 
@@ -59,7 +66,7 @@ def test_the_helper_is_reachable_from_a_subcommand(functions, helper: str) -> No
 
 def test_the_subcommand_is_registered(state_mod) -> None:
     args = state_mod.build_parser().parse_args(["verify-findings", str(PR)])
-    assert args.func is state_mod.cmd_verify_findings
+    assert args.func is review_lib.commands.verify_findings.cmd_verify_findings
 
 
 def test_init_takes_the_verification_arguments(state_mod) -> None:
@@ -119,7 +126,7 @@ def test_verify_findings_merges_and_records(tmp_dir, tmp_path, state_mod) -> Non
         verify_commands=["pytest"],
     )
 
-    state_mod.cmd_verify_findings(argparse.Namespace(pr=PR))
+    review_lib.commands.verify_findings.cmd_verify_findings(argparse.Namespace(pr=PR))
 
     findings = {f["finding_id"]: f for f in _read(tmp_dir)["review_findings"]}
     # 同じファイル・同じ行・同じ本文なので 1 件へ束ねられる。
@@ -137,7 +144,7 @@ def test_verify_findings_records_not_run_without_a_command(
     work.mkdir()
     _write(tmp_dir, [_finding("codex-r1-0", "codex", suggested_check="rm -rf /")], work)
 
-    state_mod.cmd_verify_findings(argparse.Namespace(pr=PR))
+    review_lib.commands.verify_findings.cmd_verify_findings(argparse.Namespace(pr=PR))
 
     record = _read(tmp_dir)["review_findings"][0]["verification"]
     assert record["result"] == "not_run"
@@ -163,7 +170,7 @@ def test_collect_critiques_merges_declared_duplicates(
                 {"finding_id": fid, "verdict": "duplicate",
                  "duplicate_of": other, "reason": "同じ主張である"}]}))
 
-    state_mod.cmd_collect_critiques(argparse.Namespace(pr=PR))
+    review_lib.commands.collect_critiques.cmd_collect_critiques(argparse.Namespace(pr=PR))
 
     findings = {f["finding_id"]: f for f in _read(tmp_dir)["review_findings"]}
     assert findings["kiro-r1-0"]["merged_into"] == "codex-r1-0"

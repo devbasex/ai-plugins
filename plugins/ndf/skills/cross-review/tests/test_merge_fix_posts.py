@@ -18,6 +18,8 @@ import json
 import pathlib
 
 import pytest
+import review_lib.commands.merge_fix
+import review_lib.commands.read_result
 
 PR = 5850
 REPO = "o/r"
@@ -57,7 +59,7 @@ def _state(tmp_dir: pathlib.Path) -> dict:
 @pytest.fixture()
 def calls(monkeypatch, state_mod):
     """送信と投稿の呼び出しを記録する。共通層の口をそのまま差し替える。"""
-    rp = state_mod.result_posts
+    rp = review_lib.commands.read_result.result_posts
     seen: dict = {"push": [], "post": []}
 
     def push(worktree, head, commit):
@@ -79,7 +81,7 @@ def test_the_take_in_pushes_the_head_and_posts_the_replies(tmp_dir, state_mod, c
     _seed(tmp_dir)
     _fix(tmp_dir)
 
-    state_mod.cmd_merge_fix(argparse.Namespace(pr=PR, file=None))
+    review_lib.commands.merge_fix.cmd_merge_fix(argparse.Namespace(pr=PR, file=None))
 
     assert calls["push"] == [(str(tmp_dir), "feat/x", "abc1234")]
     assert calls["post"] == [["review-reply", "thread-resolve", "pr-comment"]]
@@ -95,7 +97,7 @@ def test_the_take_in_stops_when_the_commit_is_not_on_the_branch(
     calls["push_ok"] = False
 
     with pytest.raises(SystemExit) as e:
-        state_mod.cmd_merge_fix(argparse.Namespace(pr=PR, file=None))
+        review_lib.commands.merge_fix.cmd_merge_fix(argparse.Namespace(pr=PR, file=None))
 
     assert e.value.code != 0
     assert calls["post"] == []

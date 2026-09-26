@@ -44,7 +44,7 @@ TMP_DIR=$(tmpdir)
 STATE=$TMP_DIR/cross-review-pr$STATE_PR-state.json
 [ -s "$STATE" ] || { echo "state.json not found: $STATE" >&2; exit 1; }
 
-load_context() {
+load_review_context() {
 WORKTREE=$(jq -r '.worktree_path' "$STATE")
 REPO=$(jq -r '.repo' "$STATE")
 # 設計 PR は段（モデル / 詳細、#1111）ごとの観点を持つ。そのラウンドの段の観点を選び、段の観点を
@@ -244,7 +244,7 @@ esac
   "$EXTRA_DIR" review
 }
 
-load_context
+load_review_context
 prepare_prompt_context
 render_review_prompt
 launch_reviewer

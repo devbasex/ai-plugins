@@ -21,6 +21,9 @@ import json
 import pathlib
 
 import pytest
+import review_lib
+import review_lib.commands.read_result
+import review_lib.github
 
 PR = 4261
 AGENT = "agy"
@@ -67,9 +70,9 @@ def _round(tmp_dir: pathlib.Path) -> dict:
 
 def test_a_posted_review_is_merged(tmp_dir, state_mod, monkeypatch):
     _seed_state(tmp_dir)
-    monkeypatch.setattr(state_mod, "_review_exists", lambda repo, pr, url: True)
+    monkeypatch.setattr(review_lib.github, "_review_exists", lambda repo, pr, url: True)
 
-    state_mod.cmd_read_result(_args(_result(tmp_dir)))
+    review_lib.commands.read_result.cmd_read_result(_args(_result(tmp_dir)))
 
     assert _round(tmp_dir)[AGENT]["intent"] == "REQUEST_CHANGES"
 
@@ -80,33 +83,33 @@ def test_a_posted_review_is_merged(tmp_dir, state_mod, monkeypatch):
 def test_the_lookup_reads_the_review_id_from_the_url(state_mod, monkeypatch):
     calls: list[list[str]] = []
     monkeypatch.setattr(
-        state_mod, "_sh", lambda cmd, check=True: calls.append(list(cmd)) or "4961230016"
+        review_lib, "_sh", lambda cmd, check=True: calls.append(list(cmd)) or "4961230016"
     )
 
-    assert state_mod._review_exists("o/r", PR, REVIEW_URL) is True
+    assert review_lib.github._review_exists("o/r", PR, REVIEW_URL) is True
     assert calls and f"repos/o/r/pulls/{PR}/reviews/4961230016" in calls[0]
 
 
 def test_the_lookup_is_false_without_a_review_id(state_mod, monkeypatch):
     monkeypatch.setattr(
-        state_mod, "_sh", lambda cmd, check=True: pytest.fail("識別子が無いのに GitHub を呼んでいる")
+        review_lib, "_sh", lambda cmd, check=True: pytest.fail("識別子が無いのに GitHub を呼んでいる")
     )
 
-    assert state_mod._review_exists("o/r", PR, "https://example.test/") is False
-    assert state_mod._review_exists("o/r", PR, None) is False
+    assert review_lib.github._review_exists("o/r", PR, "https://example.test/") is False
+    assert review_lib.github._review_exists("o/r", PR, None) is False
 
 
 def test_the_lookup_is_none_when_the_api_fails(state_mod, monkeypatch):
     def boom(cmd, check=True):
         raise RuntimeError("network")
 
-    monkeypatch.setattr(state_mod, "_sh", boom)
+    monkeypatch.setattr(review_lib, "_sh", boom)
 
-    assert state_mod._review_exists("o/r", PR, REVIEW_URL) is None
+    assert review_lib.github._review_exists("o/r", PR, REVIEW_URL) is None
 
 
 def test_the_lookup_is_none_when_the_api_returns_nothing(state_mod, monkeypatch):
     """取得できなかったことと、無いことを混同しない。"""
-    monkeypatch.setattr(state_mod, "_sh", lambda cmd, check=True: "")
+    monkeypatch.setattr(review_lib, "_sh", lambda cmd, check=True: "")
 
-    assert state_mod._review_exists("o/r", PR, REVIEW_URL) is None
+    assert review_lib.github._review_exists("o/r", PR, REVIEW_URL) is None

@@ -15,6 +15,13 @@ import pathlib
 import subprocess
 
 import pytest
+import review_lib
+import review_lib.commands.init
+import review_lib.commands.merge_fix
+import review_lib.commands.report
+import review_lib.github
+import review_lib.participants
+import review_lib.workspace
 
 PR = 6001
 REPO = "o/r"
@@ -82,20 +89,20 @@ def test_init_stores_an_empty_rejected_findings_list(tmp_dir, state_mod, monkeyp
     """新規初期化で保存される却下記録の初期値を固定する。"""
     worktree = tmp_dir / "worktree"
     worktree.mkdir()
-    monkeypatch.setattr(state_mod, "_repo_from_git", lambda: REPO)
-    monkeypatch.setattr(state_mod, "_fetch_pr_metadata", lambda pr, repo:
-                        state_mod.PrMetadata(REPO, "author", "feature/test", "abc",
+    monkeypatch.setattr(review_lib.github, "_repo_from_git", lambda: REPO)
+    monkeypatch.setattr(review_lib.github, "_fetch_pr_metadata", lambda pr, repo:
+                        review_lib.github.PrMetadata(REPO, "author", "feature/test", "abc",
                                              "develop", False, 4000, None))
-    monkeypatch.setattr(state_mod, "_sh", lambda cmd, check=True: "viewer")
-    monkeypatch.setattr(state_mod, "_fetch_changed_files", lambda pr, repo: [])
-    monkeypatch.setattr(state_mod, "_is_registered_worktree", lambda path: True)
-    monkeypatch.setattr(state_mod, "_sync_worktree", lambda *args: None)
-    monkeypatch.setattr(state_mod.subprocess, "run", lambda *args, **kwargs:
+    monkeypatch.setattr(review_lib, "_sh", lambda cmd, check=True: "viewer")
+    monkeypatch.setattr(review_lib.github, "_fetch_changed_files", lambda pr, repo: [])
+    monkeypatch.setattr(review_lib.workspace, "_is_registered_worktree", lambda path: True)
+    monkeypatch.setattr(review_lib.workspace, "_sync_worktree", lambda *args: None)
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs:
                         subprocess.CompletedProcess(args[0], 0, stdout="", stderr=""))
-    monkeypatch.setattr(state_mod.auth, "probe_auth", lambda runtimes, **kwargs: (
+    monkeypatch.setattr(review_lib.participants.auth, "probe_auth", lambda runtimes, **kwargs: (
         {r: {"command": r, "ok": True, "detail": ""} for r in runtimes}, False))
 
-    state_mod.cmd_init(argparse.Namespace(
+    review_lib.commands.init.cmd_init(argparse.Namespace(
         pr=PR, max_rounds=12, rotate_after=8, only=None, worktree=str(worktree),
         focus=None, extra_instructions_file=None, host="codex",
     ))
@@ -109,7 +116,7 @@ def test_a_rejected_finding_is_kept_with_its_location(tmp_dir, state_mod):
     _write(tmp_dir, _state())
     _fix_result(tmp_dir, rejected=[REJECTED])
 
-    state_mod.cmd_merge_fix(argparse.Namespace(pr=PR, file=None))
+    review_lib.commands.merge_fix.cmd_merge_fix(argparse.Namespace(pr=PR, file=None))
 
     kept = _read(tmp_dir)["rejected_findings"]
     assert len(kept) == 1
@@ -123,7 +130,7 @@ def test_the_record_carries_the_pr_and_round(tmp_dir, state_mod):
     _write(tmp_dir, _state())
     _fix_result(tmp_dir, rejected=[REJECTED])
 
-    state_mod.cmd_merge_fix(argparse.Namespace(pr=PR, file=None))
+    review_lib.commands.merge_fix.cmd_merge_fix(argparse.Namespace(pr=PR, file=None))
 
     kept = _read(tmp_dir)["rejected_findings"][0]
     assert kept["pr"] == PR
@@ -134,7 +141,7 @@ def test_records_accumulate_across_rounds(tmp_dir, state_mod):
     """ラウンドをまたいで積む。既にある記録を書き換えない。"""
     _write(tmp_dir, _state())
     _fix_result(tmp_dir, rejected=[REJECTED])
-    state_mod.cmd_merge_fix(argparse.Namespace(pr=PR, file=None))
+    review_lib.commands.merge_fix.cmd_merge_fix(argparse.Namespace(pr=PR, file=None))
 
     st = _read(tmp_dir)
     st["rounds"].append({
@@ -145,7 +152,7 @@ def test_records_accumulate_across_rounds(tmp_dir, state_mod):
     _write(tmp_dir, st)
     second = {**REJECTED, "comment_id": 3222849091, "line": 99}
     _fix_result(tmp_dir, rejected=[second])
-    state_mod.cmd_merge_fix(argparse.Namespace(pr=PR, file=None))
+    review_lib.commands.merge_fix.cmd_merge_fix(argparse.Namespace(pr=PR, file=None))
 
     kept = _read(tmp_dir)["rejected_findings"]
     assert [k["round"] for k in kept] == [1, 2]
@@ -162,7 +169,7 @@ def test_the_shape_matches_the_deferred_records(tmp_dir, state_mod):
     }
     _fix_result(tmp_dir, rejected=[REJECTED], deferred=[deferred])
 
-    state_mod.cmd_merge_fix(argparse.Namespace(pr=PR, file=None))
+    review_lib.commands.merge_fix.cmd_merge_fix(argparse.Namespace(pr=PR, file=None))
 
     st = _read(tmp_dir)
     common = {"comment_id", "path", "line", "severity", "summary", "pr", "round"}
@@ -177,7 +184,7 @@ def test_the_round_level_count_is_unchanged(tmp_dir, state_mod):
     _write(tmp_dir, _state())
     _fix_result(tmp_dir, rejected=[REJECTED, {**REJECTED, "comment_id": 2}])
 
-    state_mod.cmd_merge_fix(argparse.Namespace(pr=PR, file=None))
+    review_lib.commands.merge_fix.cmd_merge_fix(argparse.Namespace(pr=PR, file=None))
 
     assert _read(tmp_dir)["rounds"][-1]["fix"]["rejected"] == 2
 
@@ -189,7 +196,7 @@ def test_a_state_file_without_the_key_is_readable(tmp_dir, state_mod):
     _write(tmp_dir, st)
     _fix_result(tmp_dir, rejected=[REJECTED])
 
-    state_mod.cmd_merge_fix(argparse.Namespace(pr=PR, file=None))
+    review_lib.commands.merge_fix.cmd_merge_fix(argparse.Namespace(pr=PR, file=None))
 
     assert len(_read(tmp_dir)["rejected_findings"]) == 1
 
@@ -199,7 +206,7 @@ def test_an_int_count_leaves_the_records_empty(tmp_dir, state_mod):
     _write(tmp_dir, _state())
     _fix_result(tmp_dir, rejected=3)
 
-    state_mod.cmd_merge_fix(argparse.Namespace(pr=PR, file=None))
+    review_lib.commands.merge_fix.cmd_merge_fix(argparse.Namespace(pr=PR, file=None))
 
     st = _read(tmp_dir)
     assert st["rejected_findings"] == []
@@ -212,7 +219,7 @@ def test_items_missing_the_location_are_still_kept(tmp_dir, state_mod):
     partial = {"comment_id": 5, "summary": "...", "reason_for_rejection": "..."}
     _fix_result(tmp_dir, rejected=[partial])
 
-    state_mod.cmd_merge_fix(argparse.Namespace(pr=PR, file=None))
+    review_lib.commands.merge_fix.cmd_merge_fix(argparse.Namespace(pr=PR, file=None))
 
     kept = _read(tmp_dir)["rejected_findings"]
     assert len(kept) == 1
@@ -224,7 +231,7 @@ def test_non_dict_items_in_rejected_list_are_filtered_out(tmp_dir, state_mod):
     _write(tmp_dir, _state())
     _fix_result(tmp_dir, rejected=[REJECTED, "string-item", None, 123, ["nested"]])
 
-    state_mod.cmd_merge_fix(argparse.Namespace(pr=PR, file=None))
+    review_lib.commands.merge_fix.cmd_merge_fix(argparse.Namespace(pr=PR, file=None))
 
     st = _read(tmp_dir)
     kept = st["rejected_findings"]
@@ -240,7 +247,7 @@ def test_non_dict_items_in_rejected_list_are_filtered_out(tmp_dir, state_mod):
 def test_the_report_lists_the_rejected_findings(tmp_dir, state_mod, capsys):
     _write(tmp_dir, _state(rejected_findings=[{**REJECTED, "pr": PR, "round": 1}]))
 
-    state_mod.cmd_report(argparse.Namespace(pr=PR))
+    review_lib.commands.report.cmd_report(argparse.Namespace(pr=PR))
 
     out = capsys.readouterr().out
     assert "却下" in out
@@ -259,7 +266,7 @@ def test_the_nit_list_and_the_none_line_are_exclusive(tmp_dir, state_mod, capsys
     """
     _write(tmp_dir, _state(deferred_nits=[NIT], rejected_findings=[]))
 
-    state_mod.cmd_report(argparse.Namespace(pr=PR))
+    review_lib.commands.report.cmd_report(argparse.Namespace(pr=PR))
 
     out = capsys.readouterr().out
     assert "## 残 deferred nit (1 件)" in out
@@ -271,7 +278,7 @@ def test_the_none_line_survives_a_rejected_finding(tmp_dir, state_mod, capsys):
     _write(tmp_dir, _state(deferred_nits=[],
                            rejected_findings=[{**REJECTED, "pr": PR, "round": 1}]))
 
-    state_mod.cmd_report(argparse.Namespace(pr=PR))
+    review_lib.commands.report.cmd_report(argparse.Namespace(pr=PR))
 
     out = capsys.readouterr().out
     assert "## 残 deferred nit: なし" in out

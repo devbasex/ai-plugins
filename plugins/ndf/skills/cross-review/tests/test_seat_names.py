@@ -17,6 +17,8 @@ import pathlib
 import sys
 
 import pytest
+import review_lib.commands.read_result
+import review_lib.github
 
 PR = 4243
 SEAT = "claude-2"
@@ -31,7 +33,7 @@ def tmp_dir(monkeypatch, tmp_path, state_mod) -> pathlib.Path:
 @pytest.fixture(autouse=True)
 def review_posted(monkeypatch, state_mod):
     """投稿の実在確認は届いた前提にする。ここで見るのは席の名前である。"""
-    monkeypatch.setattr(state_mod, "_review_exists", lambda repo, pr, url: True)
+    monkeypatch.setattr(review_lib.github, "_review_exists", lambda repo, pr, url: True)
 
 
 def _seed_state(tmp_dir: pathlib.Path) -> None:
@@ -75,7 +77,7 @@ def test_the_result_of_a_second_seat_is_recorded_under_its_seat_name(tmp_dir, st
         "review_url": "https://example/pr/1#1", "by_severity": {},
     }))
 
-    state_mod.cmd_read_result(argparse.Namespace(pr=PR, agent=SEAT, file=str(rfile)))
+    review_lib.commands.read_result.cmd_read_result(argparse.Namespace(pr=PR, agent=SEAT, file=str(rfile)))
 
     st = json.loads((tmp_dir / f"cross-review-pr{PR}-state.json").read_text())
     assert st["rounds"][-1][SEAT]["intent"] == "APPROVE"

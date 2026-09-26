@@ -17,7 +17,7 @@ import pathlib
 
 import pytest
 
-STATE_PY = pathlib.Path(__file__).resolve().parent.parent / "scripts" / "state.py"
+INIT_PY = pathlib.Path(__file__).resolve().parent.parent / "scripts" / "review_lib" / "commands" / "init.py"
 
 # 1 回しか呼んではいけないもの。**副作用を持つ**か、標準出力の機械可読ブロックを書く。
 SINGLE_CALL = (
@@ -30,7 +30,7 @@ SINGLE_CALL = (
 
 @pytest.fixture(scope="module")
 def init_new_state() -> ast.FunctionDef:
-    tree = ast.parse(STATE_PY.read_text(encoding="utf-8"))
+    tree = ast.parse(INIT_PY.read_text(encoding="utf-8"))
     for node in ast.walk(tree):
         if isinstance(node, ast.FunctionDef) and node.name == "_init_new_state":
             return node
@@ -50,12 +50,18 @@ def test_no_statement_appears_twice(init_new_state: ast.FunctionDef) -> None:
     )
 
 
+def _called_name(func: ast.expr) -> str | None:
+    """`f(...)` と、ほかのモジュールの関数を属性として呼ぶ `mod.f(...)`（#1142 の C2）の `f`。"""
+    if isinstance(func, ast.Name):
+        return func.id
+    return func.attr if isinstance(func, ast.Attribute) else None
+
+
 @pytest.mark.parametrize("name", SINGLE_CALL)
 def test_the_call_appears_once(init_new_state: ast.FunctionDef, name: str) -> None:
     calls = [
         node for node in ast.walk(init_new_state)
         if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == name
+        and _called_name(node.func) == name
     ]
     assert len(calls) == 1, f"{name} が {len(calls)} 回呼ばれている"

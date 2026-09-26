@@ -23,6 +23,7 @@ import json
 import pathlib
 
 import pytest
+import review_lib.matching
 
 REPO = "o/r"
 PR = 291
@@ -48,7 +49,7 @@ def _posted(calls: list[str]) -> list[str]:
 
 def test_the_widths_of_the_body_comparison_are_the_same(queue_mod, state_mod) -> None:
     """冪等の照合と振動の検知は、同じ幅で本文を比べる。別々に決めない。"""
-    assert queue_mod.BODY_MATCH_CHARS == state_mod.OSCILLATION_BODY_CHARS
+    assert queue_mod.BODY_MATCH_CHARS == review_lib.matching.OSCILLATION_BODY_CHARS
 
 
 def test_a_pr_comment_already_on_github_is_not_posted_again(
