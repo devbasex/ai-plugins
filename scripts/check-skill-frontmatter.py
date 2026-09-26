@@ -33,6 +33,12 @@ import subprocess
 import re
 import sys
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
+from ndf_wrappers import require  # noqa: E402  根の lock で包みの依存を解決する（#1142 の決定 19）
+
+require("yamlio")
+import yamlio  # noqa: E402  frontmatter は lib/yamlio.py（ruamel.yaml）で読む
+
 # --- 規約の上限値 -----------------------------------------------------------
 # 出典は plugins/ndf/skills/AUTHORING.md「上限値」。
 NAME_MAX = 64                 # Agent Skills 仕様
@@ -196,8 +202,8 @@ CLAUDE_KEYS = {
 ALLOWED_KEYS = SPEC_KEYS | CLAUDE_KEYS
 
 NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
-FRONT_MATTER_RE = re.compile(r"\A---\s*\n(.*?)\n---\s*\n", re.DOTALL)
-KEY_RE = re.compile(r"^([A-Za-z][A-Za-z0-9_-]*):\s*(.*)$")
+# description を二重引用符で書いたか（Kiro は未引用のコロンで検出に失敗する）。YAML の値は引用符を外して返るため、字面で見る
+DOUBLE_QUOTED_DESC_RE = re.compile(r'^description:[ \t]*"', re.MULTILINE)
 # 廃止した旧書式（`Triggers: 'a', 'b'`）。残っていたら失敗させる。ラベルと引用符の分だけ
 # 長いうえ、実測では description 末尾の列挙は暗黙起動へ届きにくかった
 # （docs/specifications/ndf-skill-inventory/02-frontmatter-and-triggers.md）。
@@ -267,38 +273,28 @@ class Finding:
         return f"{mark} [{self.code}] {self.skill}: {self.message}"
 
 
+def field_text(value) -> str:
+    """frontmatter の YAML の値を、チェックが比べる文字列にする（真偽値は `true` / `false`、配列は改行区切り）。"""
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (list, tuple)):
+        return "\n".join(field_text(v) for v in value)
+    return str(value)
+
+
 def parse_front_matter(text: str) -> tuple[dict[str, str], str] | tuple[None, str]:
-    """frontmatter を {key: 生の値} と生ブロックの組で返す。
+    """frontmatter を {key: 値の文字列} と生ブロックの組で返す（`lib/yamlio.py` が YAML として読む）。
 
-    値は引用符を外さずそのまま保持する。二重引用符の有無をチェックするため。
-    リスト値（allowed-tools 等）は改行区切りの文字列にまとめる。
+    値は YAML の引用符を外した値を `field_text` で文字列にする。読めない YAML は `yamlio.YamlError`。
     """
-    m = FRONT_MATTER_RE.match(text)
-    if not m:
+    block = yamlio.front_matter_text(text)
+    if block is None:
         return None, ""
-    block = m.group(1)
-    out: dict[str, str] = {}
-    key: str | None = None
-    buf: list[str] = []
-    for line in block.splitlines():
-        km = KEY_RE.match(line)
-        if km:
-            if key is not None:
-                out[key] = "\n".join(buf).strip()
-            key = km.group(1)
-            buf = [km.group(2)]
-        elif key is not None:
-            buf.append(line.strip())
-    if key is not None:
-        out[key] = "\n".join(buf).strip()
-    return out, block
-
-
-def unquote(value: str) -> str:
-    v = value.strip()
-    if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
-        return v[1:-1]
-    return v
+    block = block.removesuffix("\n")  # 生ブロックは閉じの `---` の前の改行を含めない（frontmatter の合計の字数）
+    data = yamlio.read_front_matter(text, "frontmatter")
+    return {str(k): field_text(v) for k, v in data.items()}, block
 
 
 def extract_triggers(*fields: str) -> list[str]:
@@ -331,14 +327,19 @@ def load_skills(skills_dir: pathlib.Path) -> list[dict]:
         if not d.is_dir() or not f.exists():
             continue
         text = f.read_text(encoding="utf-8", errors="replace")
-        fm, block = parse_front_matter(text)
-        m = FRONT_MATTER_RE.match(text)
+        error = ""
+        try:
+            fm, block = parse_front_matter(text)
+        except yamlio.YamlError as exc:
+            fm, block, error = None, (yamlio.front_matter_text(text) or "").removesuffix("\n"), str(exc)
+        split = yamlio.split_front_matter(text)
         skills.append({
             "dir": d.name,
             "path": f,
             "fm": fm,
+            "fm_error": error,
             "block": block,
-            "body": text[m.end():] if m else text,
+            "body": split.body if split else text,
             "lines": len(text.splitlines()),
         })
     return skills
@@ -348,16 +349,16 @@ def check_skill(s: dict) -> list[Finding]:
     name_hint = s["dir"]
     fm = s["fm"]
     if fm is None:
+        if s.get("fm_error"):
+            return [Finding(name_hint, "error", "spec/frontmatter", f"YAML として読めない（{s['fm_error']}）")]
         return [Finding(name_hint, "error", "spec/frontmatter", "frontmatter がない")]
 
     out: list[Finding] = []
     add = lambda level, code, msg: out.append(Finding(name_hint, level, code, msg))
 
-    raw_desc = fm.get("description", "")
-    desc = unquote(raw_desc)
-    raw_wtu = fm.get("when_to_use", "")
-    wtu = unquote(raw_wtu)
-    name = unquote(fm.get("name", ""))
+    desc = fm.get("description", "")
+    wtu = fm.get("when_to_use", "")
+    name = fm.get("name", "")
 
     # --- 仕様準拠 ---
     if not name:
@@ -376,7 +377,7 @@ def check_skill(s: dict) -> list[Finding]:
     elif len(desc) > DESCRIPTION_SPEC_MAX:
         add("error", "spec/description", f"description が {len(desc)} 文字（仕様上限 {DESCRIPTION_SPEC_MAX}）")
 
-    compat = unquote(fm.get("compatibility", ""))
+    compat = fm.get("compatibility", "")
     if len(compat) > COMPATIBILITY_MAX:
         add("error", "spec/compatibility", f"compatibility が {len(compat)} 文字（上限 {COMPATIBILITY_MAX}）")
 
@@ -392,7 +393,7 @@ def check_skill(s: dict) -> list[Finding]:
     if desc and not USE_WHEN_RE.search(desc):
         add("error", "portability/use-when",
             "description に発動条件を示す語（Use when / 使う / とき）がない")
-    if raw_desc and not raw_desc.startswith('"'):
+    if desc and not DOUBLE_QUOTED_DESC_RE.search(s["block"]):
         add("error", "portability/quote",
             "description が二重引用符で囲まれていない（Kiro が未引用のコロンで検出に失敗する）")
     if desc:
@@ -440,19 +441,19 @@ def check_skill(s: dict) -> list[Finding]:
 
     # Codex と Kiro には disable-model-invocation / user-invocable がなく description は
     # 常に読まれる。発動制御の意図を description 自体へ書き残す必要がある。
-    if unquote(fm.get("disable-model-invocation", "")).lower() == "true":
+    if fm.get("disable-model-invocation", "").lower() == "true":
         if not re.search(r"明示|explicit|Explicit", desc):
             add("error", "portability/explicit-only",
                 "明示指示専用の Skill は description に「利用者が明示的に指示したときのみ実行する」"
                 "旨を書く（Codex / Kiro は disable-model-invocation を解釈しない）")
-    if unquote(fm.get("user-invocable", "")).lower() == "false":
+    if fm.get("user-invocable", "").lower() == "false":
         if not re.search(r"知識として|参照する|実行しない|reference only|do not execute", desc):
             add("error", "portability/inject-only",
                 "常時注入のみの Skill は description に「知識として参照する。手順として実行しない」"
                 "旨を書く（Codex / Kiro は user-invocable を解釈しない）")
 
-    dmi = unquote(fm.get("disable-model-invocation", "")).lower() == "true"
-    uinv = unquote(fm.get("user-invocable", "")).lower() == "false"
+    dmi = fm.get("disable-model-invocation", "").lower() == "true"
+    uinv = fm.get("user-invocable", "").lower() == "false"
     if dmi and uinv:
         add("error", "ops/uninvocable",
             "disable-model-invocation: true と user-invocable: false の同時指定は誰も起動できない")
@@ -462,7 +463,7 @@ def check_skill(s: dict) -> list[Finding]:
         add("error", "ops/argument-hint",
             "引数を取る明示指示専用 Skill に argument-hint がない（明示起動時の引数が伝わらない）")
 
-    ctx = unquote(fm.get("context", ""))
+    ctx = fm.get("context", "")
     for k in ("agent", "background"):
         if k in fm and ctx != "fork":
             add("error", "ops/context-fork", f"{k} は context: fork のときだけ指定できる")
@@ -541,9 +542,9 @@ def measure_aggregate(skills: list[dict], skills_dir: pathlib.Path) -> dict:
     fm_total = 0
     for s in skills:
         fm = s["fm"] or {}
-        name = unquote(fm.get("name", s["dir"]))
-        desc = unquote(fm.get("description", ""))
-        wtu = unquote(fm.get("when_to_use", ""))
+        name = fm.get("name", s["dir"])
+        desc = fm.get("description", "")
+        wtu = fm.get("when_to_use", "")
         rel = f"{skills_dir.name}/{s['dir']}/SKILL.md"
         fm_total += len(s["block"])
         for runtime, members in manifests.items():
@@ -597,8 +598,8 @@ def check_trigger_collisions(skills: list[dict]) -> list[Finding]:
     owners: dict[str, list[str]] = {}
     for s in skills:
         fm = s["fm"] or {}
-        trigs = extract_triggers(unquote(fm.get("description", "")),
-                                 unquote(fm.get("when_to_use", "")))
+        trigs = extract_triggers(fm.get("description", ""),
+                                 fm.get("when_to_use", ""))
         for t in trigs:
             owners.setdefault(t.lower(), []).append(s["dir"])
     out: list[Finding] = []
@@ -627,7 +628,7 @@ def check_external_name_collisions(skills: list[dict]) -> list[Finding]:
     """
     out: list[Finding] = []
     for s in skills:
-        name = unquote((s["fm"] or {}).get("name", "")) or s["dir"]
+        name = (s["fm"] or {}).get("name", "") or s["dir"]
         # 区切りは `-`（`code-review` の `review`）と `:`（`plugin:review` の `review`）の両方を見る。
         # KNOWN_EXTERNAL_SKILL_NAMES の規約は「名前空間を除いた Skill 名」で確定していて、これを
         # 変える予定はない。`:` を見るのは規約を変える想定だからではなく、規約に反して
@@ -696,9 +697,9 @@ def calibrate(skills_dirs: list[pathlib.Path]) -> int:
             if sk["dir"] not in members:
                 continue
             fm = sk["fm"] or {}
-            name = unquote(fm.get("name", sk["dir"]))
-            body = (unquote(fm.get("description", "")) +
-                    unquote(fm.get("when_to_use", "")))[:CLAUDE_ITEM_TRUNCATE]
+            name = fm.get("name", sk["dir"])
+            body = (fm.get("description", "") +
+                    fm.get("when_to_use", ""))[:CLAUDE_ITEM_TRUNCATE]
             chars[sk["dir"]] = len(name) + len(body)
 
     common = sorted(set(chars) & set(measured))
@@ -816,8 +817,8 @@ def main() -> int:
                                  "effort", "context", "arguments", "license")
                      if k in fm]
             print(f"{s['dir']:34} {s['lines']:>5} "
-                  f"{len(unquote(fm.get('description', ''))):>5} "
-                  f"{len(unquote(fm.get('when_to_use', ''))):>5}  {','.join(flags)}")
+                  f"{len(fm.get('description', '')):>5} "
+                  f"{len(fm.get('when_to_use', '')):>5}  {','.join(flags)}")
         print(f"\nSkill 数: {len(skills)}")
         # 予算は plugin family をまたいだ合計で判定するが、利用者が片方しか入れない
         # 場合もあるため family 別の内訳も出す。
