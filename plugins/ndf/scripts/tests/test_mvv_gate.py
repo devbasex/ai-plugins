@@ -32,12 +32,25 @@ def fake_claude(tmp_path: Path, text: str) -> str:
     return str(fake)
 
 
-def fake_gh(tmp_path: Path, files: list[str]) -> str:
+def write_rest_files(tmp_path: Path, files: list) -> None:
+    """REST の `pulls/<n>/files` の形で、2 ページに分けて書く（`--paginate` の出力）。要素が (旧, 新) なら rename。"""
+    rows = [
+        {"filename": f[1], "previous_filename": f[0], "status": "renamed", "additions": 0, "deletions": 0}
+        if isinstance(f, tuple)
+        else {"filename": f, "status": "modified", "additions": 1, "deletions": 0}
+        for f in files
+    ]
+    (tmp_path / "files.json").write_text(json.dumps(rows[:1]) + json.dumps(rows[1:]))
+
+
+def fake_gh(tmp_path: Path, files: list) -> str:
     bindir = tmp_path / "bin"
     bindir.mkdir(exist_ok=True)
-    info = {"title": "変更", "body": "本文", "files": [{"path": f, "additions": 1, "deletions": 0} for f in files]}
+    info = {"title": "変更", "body": "本文"}
+    (tmp_path / "info.json").write_text(json.dumps(info, ensure_ascii=False))
+    write_rest_files(tmp_path, files)
     gh = bindir / "gh"
-    gh.write_text(f"#!/bin/sh\ncat <<'EOF'\n{json.dumps(info, ensure_ascii=False)}\nEOF\n")
+    gh.write_text(f'#!/bin/sh\nif [ "$1" = api ]; then cat {tmp_path / "files.json"}; exit 0; fi\ncat {tmp_path / "info.json"}\n')
     gh.chmod(0o755)
     return str(bindir)
 
@@ -87,7 +100,7 @@ def mission(tmp_path):
     return {"root": root, "state": state, "mvv": mvv, "material": material, "log": tmp_path / "log.jsonl", "tmp": tmp_path}
 
 
-def run(m: dict, text: str, *extra: str, files: list[str] | None = None) -> tuple[int, dict, list[dict]]:
+def run(m: dict, text: str, *extra: str, files: list | None = None) -> tuple[int, dict, list[dict]]:
     tmp = m["tmp"]
     env = {"PATH": f"{fake_gh(tmp, files or ['app/x.py'])}:/usr/bin:/bin", "HOME": str(tmp), "NDF_MVV_CLAUDE": fake_claude(tmp, text)}
     args = [
@@ -212,6 +225,12 @@ def test_boundary_paths_never_skip_the_gate(mission, path):
     assert rows[-1]["verdict"] == "machine"
 
 
+def test_a_rename_out_of_a_boundary_path_never_skips_the_gate(mission):
+    code, out, rows = run(mission, FOLLOW, "--pr", "5", files=["app/x.py", ("lib/auth.py", "lib/plain.py")])
+    assert (code, llm_calls(mission)) == (10, 0)
+    assert "lib/auth.py → lib/plain.py" in out["summary"] and rows[-1]["verdict"] == "machine"
+
+
 def test_a_missing_material_goes_back_to_the_user(mission):
     mission["material"].unlink()
     code, out, _ = run(mission, FOLLOW)
@@ -225,13 +244,14 @@ def fake_gh_with_design(tmp_path: Path, files: list[str], api_fails: bool = Fals
     """`gh pr view` は PR の情報を、`gh api .../contents/...` は設計文書の中身を返す偽物。呼び出しを gh-calls.txt へ残す。"""
     bindir = tmp_path / "bin"
     bindir.mkdir(exist_ok=True)
-    info = {"title": "設計", "body": "本文", "headRefOid": "abc123", "files": [{"path": f, "additions": 1, "deletions": 0} for f in files]}
+    info = {"title": "設計", "body": "本文", "headRefOid": "abc123"}
     (tmp_path / "info.json").write_text(json.dumps(info, ensure_ascii=False))
+    write_rest_files(tmp_path, files)
     (tmp_path / "doc.md").write_text(DESIGN_DOC)
     api = "echo 'HTTP 404' >&2; exit 1" if api_fails else f"cat {tmp_path / 'doc.md'}"
     gh = bindir / "gh"
     gh.write_text(
-        f'#!/bin/sh\necho "$*" >> {tmp_path / "gh-calls.txt"}\nif [ "$1" = api ]; then {api}; exit 0; fi\ncat {tmp_path / "info.json"}\n'
+        f'#!/bin/sh\necho "$*" >> {tmp_path / "gh-calls.txt"}\ncase "$*" in *pulls/*/files*) cat {tmp_path / "files.json"}; exit 0;; esac\nif [ "$1" = api ]; then {api}; exit 0; fi\ncat {tmp_path / "info.json"}\n'
     )
     gh.chmod(0o755)
     return str(bindir)
@@ -278,7 +298,7 @@ def test_design_gate_passes_the_design_doc_of_the_pr_as_material(mission):
     assert code == 0, out
     assert "ドメインモデルの節" in (mission["tmp"] / "prompt.txt").read_text()
     assert rows[-1]["material"] == ["#7 issues/x-design.md"]
-    api = [ln for ln in (mission["tmp"] / "gh-calls.txt").read_text().splitlines() if ln.startswith("api")]
+    api = [ln for ln in (mission["tmp"] / "gh-calls.txt").read_text().splitlines() if ln.startswith("api") and "/contents/" in ln]
     assert len(api) == 1 and "repos/o/r/contents/issues/x-design.md?ref=abc123" in api[0]
 
 
