@@ -11,6 +11,7 @@ deferred nit レポート）を 1 つの CLI に集約する。
 
 すべての出力は人間可読 + KEY=VALUE 形式（eval / read で取り回し可能）。
 """
+
 # 副命令の本体は隣の `review_lib/` が持ち、ここは副命令の引数の解析と `main` だけを持つ（#1142 の C2）。
 # docstring は `--help` の説明に出るため、ここに書く。
 from __future__ import annotations
@@ -24,10 +25,20 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[3] / "scripts" / "lib"))
 import deps  # noqa: E402
+
 deps.require("github", "mdtable")  # GitHub の REST は githubkit、報告の表は tabulate（外部パッケージの import より前）
 from review_lib import participants as participants_mod  # noqa: E402
 from review_lib.commands import (  # noqa: E402
-    collect_critiques, init, judge, loop, merge_fix, read_result, report, start_round, verify_findings)
+    collect_critiques,
+    init,
+    judge,
+    loop,
+    merge_fix,
+    read_result,
+    report,
+    start_round,
+    verify_findings,
+)
 import assignment  # noqa: E402  `review_lib` がライブラリの置き場所を `sys.path` に足した後に読む
 
 
@@ -35,8 +46,7 @@ def _runtime_or_none(value: str) -> str:
     """`--only` の型。4 つの名前か `none`（決定 15: 再開で指定を外す予約語）。"""
     if value == participants_mod.NONE_WORD or value in assignment.ALL_RUNTIMES:
         return value
-    raise argparse.ArgumentTypeError(
-        f"{'/'.join(assignment.ALL_RUNTIMES)} か {participants_mod.NONE_WORD} を指定してください: {value}")
+    raise argparse.ArgumentTypeError(f"{'/'.join(assignment.ALL_RUNTIMES)} か {participants_mod.NONE_WORD} を指定してください: {value}")
 
 
 def _runtime_list(value: str) -> list[str]:
@@ -69,30 +79,44 @@ def _add_init_parser(sub: _Subparsers) -> None:
     sp.add_argument("pr", type=int)
     sp.add_argument("--max-rounds", type=int, default=None)
     sp.add_argument("--rotate-after", type=int, default=None)
+    sp.add_argument("--only", type=_runtime_or_none, default=None, help="1 者だけで回す。席の埋め合わせを行わない。none で指定を外す")
     sp.add_argument(
-        "--only", type=_runtime_or_none, default=None,
-        help="1 者だけで回す。席の埋め合わせを行わない。none で指定を外す")
+        "--exclude",
+        action="append",
+        type=_runtime_list,
+        default=None,
+        help="母集合から外す者。カンマ区切り・繰り返し可。再開で `none` を渡すと空へ戻す",
+    )
     sp.add_argument(
-        "--exclude", action="append", type=_runtime_list, default=None,
-        help="母集合から外す者。カンマ区切り・繰り返し可。再開で `none` を渡すと空へ戻す")
+        "--include",
+        action="append",
+        type=_runtime_list,
+        default=None,
+        help="母集合に足す者（ホストも足せる）。カンマ区切り・繰り返し可。`none` で空へ戻す",
+    )
     sp.add_argument(
-        "--include", action="append", type=_runtime_list, default=None,
-        help="母集合に足す者（ホストも足せる）。カンマ区切り・繰り返し可。`none` で空へ戻す")
+        "--require-all",
+        dest="require_all",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="確認を通らない者が 1 者でもいれば失敗する（従来の関門）。既定は外して続ける",
+    )
     sp.add_argument(
-        "--require-all", dest="require_all",
-        action=argparse.BooleanOptionalAction, default=None,
-        help="確認を通らない者が 1 者でもいれば失敗する（従来の関門）。既定は外して続ける")
-    sp.add_argument(
-        "--host", choices=list(assignment.HOST_RUNTIMES), default=None,
-        help="この収束ループを起動している CLI。省略時は環境変数から推定する")
+        "--host",
+        choices=list(assignment.HOST_RUNTIMES),
+        default=None,
+        help="この収束ループを起動している CLI。省略時は環境変数から推定する",
+    )
     sp.add_argument("--worktree", default=None)
     sp.add_argument(
-        "--verify-command", action="append", default=None,
-        help="実行検証で実行してよいコマンド。繰り返し指定できる。"
-             "渡されなければ実行検証を行わない")
+        "--verify-command",
+        action="append",
+        default=None,
+        help="実行検証で実行してよいコマンド。繰り返し指定できる。渡されなければ実行検証を行わない",
+    )
     sp.add_argument(
-        "--verify-exit-code", action="append", type=int, default=None,
-        help="再現とみなす終了コード（既定 1）。繰り返し指定できる")
+        "--verify-exit-code", action="append", type=int, default=None, help="再現とみなす終了コード（既定 1）。繰り返し指定できる"
+    )
     sp.add_argument(
         "--focus",
         default=None,
@@ -141,8 +165,7 @@ def _add_flush_parser(sub: _Subparsers) -> None:
 def _add_judge_parser(sub: _Subparsers) -> None:
     sp = sub.add_parser(
         "judge",
-        help="Step 3 — intent ベース pass 判定 "
-             "(0=approved/2=continue/7=起動し直し/8=待ち行列に残あり)",
+        help="Step 3 — intent ベース pass 判定 (0=approved/2=continue/7=起動し直し/8=待ち行列に残あり)",
     )
     sp.add_argument("pr", type=int)
     sp.set_defaults(func=judge.cmd_judge)
@@ -158,17 +181,13 @@ def _add_check_oscillation_parser(sub: _Subparsers) -> None:
 
 
 def _add_verify_findings_parser(sub: _Subparsers) -> None:
-    sp = sub.add_parser(
-        "verify-findings",
-        help="Step 2.5 前段 — 重複の統合（1 段目）と実行検証（#156）")
+    sp = sub.add_parser("verify-findings", help="Step 2.5 前段 — 重複の統合（1 段目）と実行検証（#156）")
     sp.add_argument("pr", type=int)
     sp.set_defaults(func=verify_findings.cmd_verify_findings)
 
 
 def _add_collect_critiques_parser(sub: _Subparsers) -> None:
-    sp = sub.add_parser(
-        "collect-critiques",
-        help="Step 2.5 後段 — 反証の結果を指摘へ結び、申告の重複を束ねる（#156）")
+    sp = sub.add_parser("collect-critiques", help="Step 2.5 後段 — 反証の結果を指摘へ結び、申告の重複を束ねる（#156）")
     sp.add_argument("pr", type=int)
     sp.set_defaults(func=collect_critiques.cmd_collect_critiques)
 

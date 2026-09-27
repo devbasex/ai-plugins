@@ -26,7 +26,7 @@ from urllib.parse import quote
 
 # 拡張子 → kind の自動判定
 _EXT_KIND: dict[str, str] = {
-    ".zip": "trace",     # Playwright trace.zip
+    ".zip": "trace",  # Playwright trace.zip
     ".har": "har",
     ".mp4": "video",
     ".webm": "video",
@@ -86,9 +86,7 @@ def upload(
     """
     # Min-7: Python API として呼ばれた場合の防御的検査 (CLI argparse は別途 choices)
     if kind not in ALLOWED_KINDS:
-        raise ValueError(
-            f"未対応の kind: {kind!r} (allowed: {sorted(ALLOWED_KINDS)})"
-        )
+        raise ValueError(f"未対応の kind: {kind!r} (allowed: {sorted(ALLOWED_KINDS)})")
 
     from _drive_auth import drive_service  # noqa: E402
     from googleapiclient.http import MediaFileUpload  # noqa: E402
@@ -99,16 +97,24 @@ def upload(
     if parent_folder_id:
         metadata["parents"] = [parent_folder_id]
     media = MediaFileUpload(
-        str(file_path), mimetype=detect_mime(file_path, kind),
+        str(file_path),
+        mimetype=detect_mime(file_path, kind),
     )
-    f = service.files().create(
-        body=metadata, media_body=media, fields="id,webViewLink",
-    ).execute()
+    f = (
+        service.files()
+        .create(
+            body=metadata,
+            media_body=media,
+            fields="id,webViewLink",
+        )
+        .execute()
+    )
     file_id = f["id"]
 
     if public:
         service.permissions().create(
-            fileId=file_id, body={"type": "anyone", "role": "reader"},
+            fileId=file_id,
+            body={"type": "anyone", "role": "reader"},
         ).execute()
 
     direct_url: str | None = None
@@ -116,9 +122,7 @@ def upload(
     if public:
         direct_url = f"https://drive.google.com/uc?export=download&id={file_id}"
         if kind == "trace":
-            viewer_url = (
-                f"https://trace.playwright.dev/?trace={quote(direct_url, safe='')}"
-            )
+            viewer_url = f"https://trace.playwright.dev/?trace={quote(direct_url, safe='')}"
 
     return {
         "file_id": file_id,
@@ -136,22 +140,25 @@ def main() -> int:
     )
     parser.add_argument("file", type=Path, help="アップロードするファイル")
     parser.add_argument(
-        "--kind", choices=["trace", "har", "video", "any"], default=None,
+        "--kind",
+        choices=["trace", "har", "video", "any"],
+        default=None,
         help="evidence 種別 (省略時は拡張子から自動判定)",
     )
     parser.add_argument(
-        "--parent-folder-id", default=None,
+        "--parent-folder-id",
+        default=None,
         help="Drive の親フォルダ ID (省略時はマイドライブ直下)",
     )
     parser.add_argument(
-        "--public", action="store_true",
+        "--public",
+        action="store_true",
         help="anyone/read 公開リンクを付与する (既定は非公開、明示 opt-in)",
     )
     args = parser.parse_args()
 
     if not args.file.exists():
-        print(json.dumps({"status": "error", "message": f"file not found: {args.file}"},
-                         ensure_ascii=False))
+        print(json.dumps({"status": "error", "message": f"file not found: {args.file}"}, ensure_ascii=False))
         return 2
 
     kind = args.kind or detect_kind(args.file)

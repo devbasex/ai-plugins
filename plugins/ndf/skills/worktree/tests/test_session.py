@@ -7,6 +7,7 @@
 主ディレクトリの HEAD が動かないようにするためで、宣言に `follow_branch: true` を
 書いたときだけ従来の追従が動く。
 """
+
 from __future__ import annotations
 
 import json
@@ -78,7 +79,9 @@ def branch_of(repo: Path) -> str:
     """ブランチ名。detached HEAD なら空文字。"""
     proc = subprocess.run(
         ["git", "symbolic-ref", "--short", "-q", "HEAD"],
-        cwd=str(repo), capture_output=True, text=True,
+        cwd=str(repo),
+        capture_output=True,
+        text=True,
     )
     return proc.stdout.strip()
 
@@ -157,13 +160,16 @@ def test_single_worktree_is_followed_detached(main_repo: Path, worktree: Path) -
     assert head_of(main_repo) == expected
     symbolic = subprocess.run(
         ["git", "symbolic-ref", "-q", "HEAD"],
-        cwd=str(main_repo), capture_output=True, text=True,
+        cwd=str(main_repo),
+        capture_output=True,
+        text=True,
     )
     assert symbolic.returncode != 0, "detached HEAD であること"
 
 
 def test_already_at_target_commit_skips_checkout_and_guidance(
-    main_repo: Path, worktree: Path,
+    main_repo: Path,
+    worktree: Path,
 ) -> None:
     """既に追従先のコミットにいるときは checkout を行わず案内も出さない。"""
     declared(main_repo, True)
@@ -194,7 +200,8 @@ def test_two_worktrees_fall_back_to_default(main_repo: Path, worktree: Path) -> 
 
 
 def test_two_worktrees_follow_declared_base_branch(
-    main_repo: Path, worktree: Path,
+    main_repo: Path,
+    worktree: Path,
 ) -> None:
     expected = put_develop_on_origin_only(main_repo)
     declared(main_repo, True, base_branch="develop")
@@ -253,7 +260,10 @@ def run_session_event(cwd: Path, event: str) -> dict:
     proc = subprocess.run(
         ["bash", str(SESSION)],
         input=json.dumps(payload),
-        cwd=str(cwd), env=env, capture_output=True, text=True,
+        cwd=str(cwd),
+        env=env,
+        capture_output=True,
+        text=True,
     )
     return {"rc": proc.returncode, "out": proc.stdout}
 
@@ -391,8 +401,7 @@ def test_default_keeps_detached_head(main_repo: Path, worktrees: int) -> None:
     git(main_repo, "commit", "-q", "--allow-empty", "-m", "newer")
     git(main_repo, "checkout", "-q", "--detach", start)
     for i in range(worktrees):
-        git(main_repo, "worktree", "add", "-q", "-b", f"fix/w{i}",
-            str(main_repo / ".worktrees" / "fix" / f"w{i}"))
+        git(main_repo, "worktree", "add", "-q", "-b", f"fix/w{i}", str(main_repo / ".worktrees" / "fix" / f"w{i}"))
     declared(main_repo)
     before = position_of(main_repo)
 
@@ -437,7 +446,9 @@ def test_default_never_checks_out_while_worktrees_change(main_repo: Path) -> Non
     ids=["agy-PreInvocation", "no-event-name"],
 )
 def test_default_keeps_head_for_other_runtimes(
-    main_repo: Path, worktree: Path, payload_extra: dict,
+    main_repo: Path,
+    worktree: Path,
+    payload_extra: dict,
 ) -> None:
     """agy の通し番号 0 と、事象名を持たない入力でも動かない（AC4）。"""
     declared(main_repo)
@@ -451,7 +462,8 @@ def test_default_keeps_head_for_other_runtimes(
 
 
 def test_agy_later_invocation_does_not_follow(
-    main_repo: Path, worktree: Path,
+    main_repo: Path,
+    worktree: Path,
 ) -> None:
     """agy の通し番号が 0 を越えた再呼び出しでは、有効な宣言があっても追従しない。"""
     declared(main_repo, True)
@@ -505,10 +517,7 @@ def test_default_does_not_contact_origin(main_repo: Path, tmp_path: Path) -> Non
     assert run_session_traced["rc"] == 0
     assert not (main_repo / ".git" / "FETCH_HEAD").exists()
     recorded = trace.read_text(encoding="utf-8") if trace.exists() else ""
-    remote_calls = [
-        line for line in recorded.splitlines()
-        if any(word in line for word in ("ls-remote", "fetch", "upload-pack"))
-    ]
+    remote_calls = [line for line in recorded.splitlines() if any(word in line for word in ("ls-remote", "fetch", "upload-pack"))]
     assert remote_calls == [], recorded
 
 
@@ -517,7 +526,9 @@ def test_default_does_not_contact_origin(main_repo: Path, tmp_path: Path) -> Non
 
 @pytest.mark.parametrize("follow", [None, True, False], ids=["unset", "true", "false"])
 def test_dirty_changes_are_reported_regardless_of_follow(
-    main_repo: Path, worktree: Path, follow: object,
+    main_repo: Path,
+    worktree: Path,
+    follow: object,
 ) -> None:
     """追跡対象の未コミット変更の件数と一覧は、`follow_branch` の値によらず出る（AC8）。
 

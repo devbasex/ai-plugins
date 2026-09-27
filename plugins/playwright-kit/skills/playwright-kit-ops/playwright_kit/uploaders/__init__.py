@@ -28,6 +28,7 @@ def _drive_service(scopes: list[str]):
     if str(_SCRIPTS_DIR) not in sys.path:
         sys.path.insert(0, str(_SCRIPTS_DIR))
     from _drive_auth import drive_service  # type: ignore  # noqa: E402
+
     return drive_service(scopes)
 
 
@@ -84,9 +85,7 @@ def upload(
     共有相手を信頼できるメンバーに限定してください (Amazon Q Critical-5 / Codex Minor 8)。
     """
     if kind not in ALLOWED_KINDS:
-        raise ValueError(
-            f"未対応の kind: {kind!r} (allowed: {sorted(ALLOWED_KINDS)})"
-        )
+        raise ValueError(f"未対応の kind: {kind!r} (allowed: {sorted(ALLOWED_KINDS)})")
 
     from googleapiclient.http import MediaFileUpload  # noqa: E402
 
@@ -96,16 +95,24 @@ def upload(
     if parent_folder_id:
         metadata["parents"] = [parent_folder_id]
     media = MediaFileUpload(
-        str(file_path), mimetype=detect_mime(file_path, kind),
+        str(file_path),
+        mimetype=detect_mime(file_path, kind),
     )
-    f = service.files().create(
-        body=metadata, media_body=media, fields="id,webViewLink",
-    ).execute()
+    f = (
+        service.files()
+        .create(
+            body=metadata,
+            media_body=media,
+            fields="id,webViewLink",
+        )
+        .execute()
+    )
     file_id = f["id"]
 
     if public:
         service.permissions().create(
-            fileId=file_id, body={"type": "anyone", "role": "reader"},
+            fileId=file_id,
+            body={"type": "anyone", "role": "reader"},
         ).execute()
 
     direct_url: str | None = None
@@ -113,9 +120,7 @@ def upload(
     if public:
         direct_url = f"https://drive.google.com/uc?export=download&id={file_id}"
         if kind == "trace":
-            viewer_url = (
-                f"https://trace.playwright.dev/?trace={quote(direct_url, safe='')}"
-            )
+            viewer_url = f"https://trace.playwright.dev/?trace={quote(direct_url, safe='')}"
 
     return {
         "file_id": file_id,

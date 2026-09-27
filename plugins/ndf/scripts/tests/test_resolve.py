@@ -4,6 +4,7 @@
 bash のコードブロックにある。テストはそのブロックを読み出し、入口の実物を写した配置の上で
 実行する。配置は一時の HOME とディレクトリに作り、実ユーザの導入物を拾わない。
 """
+
 from __future__ import annotations
 
 import json
@@ -41,25 +42,29 @@ def base_env(home: Path, claude: bool) -> dict[str, str]:
     return env
 
 
-def run_finder(cwd: Path, home: Path, *, substitute: Path | None = None,
-               claude: bool = False) -> str:
+def run_finder(cwd: Path, home: Path, *, substitute: Path | None = None, claude: bool = False) -> str:
     """入口を探すコマンドを実行し、決まった `$SCRIPTS` を返す（見つからなければ空）。"""
     snippet = finder()
     if substitute is not None:
         snippet = snippet.replace(TOKEN, f"'{substitute}'", 1)
     got = subprocess.run(
         ["bash", "-c", f'set -uo pipefail\n{snippet}\nprintf "%s\\n" "$SCRIPTS"\n'],
-        cwd=str(cwd), env=base_env(home, claude), capture_output=True, text=True,
+        cwd=str(cwd),
+        env=base_env(home, claude),
+        capture_output=True,
+        text=True,
     )
     assert got.returncode == 0, got.stderr
     return got.stdout.strip()
 
 
-def run_entry(entry: Path, cwd: Path, home: Path, *args: str,
-              claude: bool = False) -> subprocess.CompletedProcess[str]:
+def run_entry(entry: Path, cwd: Path, home: Path, *args: str, claude: bool = False) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["bash", str(entry), *args], cwd=str(cwd), env=base_env(home, claude),
-        capture_output=True, text=True,
+        ["bash", str(entry), *args],
+        cwd=str(cwd),
+        env=base_env(home, claude),
+        capture_output=True,
+        text=True,
     )
 
 
@@ -78,8 +83,10 @@ def make_plugin(root: Path, *, entry: bool = True, skills=("fix", "worktree")) -
 def install_claude(home: Path, version: str = "10.0.0") -> Path:
     root = make_plugin(home / ".claude" / "plugins" / "cache" / "ai-plugins" / "ndf" / version)
     record = home / ".claude" / "plugins" / "installed_plugins.json"
-    record.write_text(json.dumps({"version": 2, "plugins": {"ndf@ai-plugins": [
-        {"scope": "user", "installPath": str(root), "version": version}]}}), encoding="utf-8")
+    record.write_text(
+        json.dumps({"version": 2, "plugins": {"ndf@ai-plugins": [{"scope": "user", "installPath": str(root), "version": version}]}}),
+        encoding="utf-8",
+    )
     return root
 
 
@@ -143,8 +150,7 @@ def test_development(runtime, tmp_path, home) -> None:
 
 def test_issue_590_old_codex_copy_is_not_taken(home, project) -> None:
     """#590: 参照ファイルで置き換わらなくても、Claude Code では Codex の古い複製を採らない。"""
-    make_plugin(home / ".codex" / ".tmp" / "marketplaces" / "ai-plugins" / "plugins" / "ndf",
-                entry=False)
+    make_plugin(home / ".codex" / ".tmp" / "marketplaces" / "ai-plugins" / "plugins" / "ndf", entry=False)
     root = install_claude(home)
     assert run_finder(project, home, claude=True) == str(root / "scripts")
 

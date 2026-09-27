@@ -1,4 +1,5 @@
 """指摘の基準の正本とレビューの重点の宣言（lib/review_criteria.py・#1287）。"""
+
 from __future__ import annotations
 
 import json
@@ -58,9 +59,16 @@ def test_declared_focus_appears_by_name_in_criterion_3(tmp_path):
     assert "起動の回数を増やす変更 / 外部 API の費用" in reply and rc.WAIVE_KINDS["wording"] in reply
 
 
-@pytest.mark.parametrize("text", ["{not json", json.dumps({"version": 1, "focus": "文字列"}),
-                                  json.dumps({"version": 2, "focus": ["x"]}), json.dumps(["x"]),
-                                  json.dumps({"version": 1, "focus": ["", "x"]})])
+@pytest.mark.parametrize(
+    "text",
+    [
+        "{not json",
+        json.dumps({"version": 1, "focus": "文字列"}),
+        json.dumps({"version": 2, "focus": ["x"]}),
+        json.dumps(["x"]),
+        json.dumps({"version": 1, "focus": ["", "x"]}),
+    ],
+)
 def test_unreadable_declaration_falls_back_to_criteria_1_2_4(tmp_path, text):
     _declare(tmp_path, text)
     focus = rc.load_focus(tmp_path)
@@ -95,13 +103,13 @@ def test_as_state_carries_reviewer_block(tmp_path):
 
 def test_cli_unreadable_reports_on_stderr_and_exits_zero(tmp_path):
     _declare(tmp_path, "{broken")
-    p = subprocess.run([sys.executable, str(LIB / "review_criteria.py"), "reviewer", "--root", str(tmp_path)],
-                       capture_output=True, text=True)
+    p = subprocess.run(
+        [sys.executable, str(LIB / "review_criteria.py"), "reviewer", "--root", str(tmp_path)], capture_output=True, text=True
+    )
     assert p.returncode == 0 and "読めない" in p.stderr
     assert _criterion_numbers(p.stdout) == ["1", "2", "4"]
 
 
 def test_cli_without_root_ignores_declaration(tmp_path):
-    p = subprocess.run([sys.executable, str(LIB / "review_criteria.py"), "fixer"], capture_output=True, text=True,
-                       cwd=tmp_path)
+    p = subprocess.run([sys.executable, str(LIB / "review_criteria.py"), "fixer"], capture_output=True, text=True, cwd=tmp_path)
     assert p.returncode == 0 and "waive_kind" in p.stdout and not p.stderr

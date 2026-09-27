@@ -8,6 +8,7 @@
 前の区間と今の区間で合図を書かなかった Stop（mark_skipped: 背景の作業が残った・ブロックが 2 つ以上）。人が読む数行の後に step_result の 1 行の JSON。
 ラッパーの外でも exit 0 で終わる。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -54,7 +55,7 @@ def previous_end(d: Path | None, rows: list[dict]) -> tuple[dict | None, str | N
     """今の区間の前の end。今の状態ディレクトリに無ければ、1 つ前の状態ディレクトリの最後の end。"""
     starts = [i for i, r in enumerate(rows) if r.get("event") == "start"]
     if starts:
-        before = [r for r in rows[:starts[-1]] if r.get("event") == "end"]
+        before = [r for r in rows[: starts[-1]] if r.get("event") == "end"]
         if before:
             return before[-1], str(d)
     root = Path(relay_common.state_root())
@@ -66,8 +67,7 @@ def previous_end(d: Path | None, rows: list[dict]) -> tuple[dict | None, str | N
     return None, None
 
 
-def skipped_marks(d: Path | None, rows: list[dict], start: dict | None, end: dict | None,
-                  end_dir: str | None) -> list[dict]:
+def skipped_marks(d: Path | None, rows: list[dict], start: dict | None, end: dict | None, end_dir: str | None) -> list[dict]:
     """前の区間（end の区間）と今の区間の mark_skipped の行。"""
     out = []
     if end and end_dir:
@@ -79,11 +79,13 @@ def skipped_marks(d: Path | None, rows: list[dict], start: dict | None, end: dic
 
 
 def skipped_line(r: dict) -> str:
-    what = {"background": "背景の作業が残った", "blocks": "ndf-next のブロックが 2 つ以上"}.get(
-        r.get("reason"), str(r.get("reason")))
+    what = {"background": "背景の作業が残った", "blocks": "ndf-next のブロックが 2 つ以上"}.get(r.get("reason"), str(r.get("reason")))
     tasks = "、".join(f"{t.get('id') or '?'}（{t.get('command') or '?'}）" for t in r.get("tasks") or [])
-    return (f"合図を書かなかった Stop: 区間 {r.get('section')}・{r.get('at')}・{what}"
-            + (f": {tasks}" if tasks else "") + ("・Stop を止めて知らせた" if r.get("held") else ""))
+    return (
+        f"合図を書かなかった Stop: 区間 {r.get('section')}・{r.get('at')}・{what}"
+        + (f": {tasks}" if tasks else "")
+        + ("・Stop を止めて知らせた" if r.get("held") else "")
+    )
 
 
 def installed_version() -> str | None:
@@ -115,28 +117,41 @@ def main() -> int:
     started_by = None
     if start:
         started_by = "自動（合図から）" if start.get("from_session") else "手（利用者の起動）"
-    vers = {"区間の起動時": (start or {}).get("plugin_version"), "導入済み": installed_version(),
-            "複製": copy_version()}
+    vers = {"区間の起動時": (start or {}).get("plugin_version"), "導入済み": installed_version(), "複製": copy_version()}
     known = {v for v in vers.values() if v}
     lines = [f"ラッパー: {pos}" + (f"（{a.relay_dir}）" if a.relay_dir else "")]
     if start:
         lines.append(f"この区間: {start.get('section')}・{started_by}・{start.get('at')}")
     if end:
-        lines.append(f"前の区間の終わり: {end.get('ended_by')}（区間 {end.get('section')}・"
-                     f"{end.get('seconds')} 秒・{end.get('at')}・{end_dir}）")
+        lines.append(
+            f"前の区間の終わり: {end.get('ended_by')}（区間 {end.get('section')}・{end.get('seconds')} 秒・{end.get('at')}・{end_dir}）"
+        )
     else:
         lines.append("前の区間の終わり: 記録なし")
     skipped = skipped_marks(d, rows, start, end, end_dir)
     lines += [skipped_line(r) for r in skipped]
-    lines.append("版: " + " / ".join(f"{k} {v or '-'}" for k, v in vers.items())
-                 + ("（食い違いあり）" if len(known) > 1 else ""))
+    lines.append("版: " + " / ".join(f"{k} {v or '-'}" for k, v in vers.items()) + ("（食い違いあり）" if len(known) > 1 else ""))
     for line in lines:
         print(line)
-    item = {"position": pos, "relay_dir": a.relay_dir, "section": (start or {}).get("section"),
-            "started_by": started_by, "previous_end": end, "previous_dir": end_dir, "versions": vers,
-            "mark_skipped": skipped}
-    emit(result("resume", "ok", " / ".join(lines), [item],
-                {"version_mismatch": len(known) > 1, "under_relay": pos == "relay", "mark_skipped": len(skipped)}))
+    item = {
+        "position": pos,
+        "relay_dir": a.relay_dir,
+        "section": (start or {}).get("section"),
+        "started_by": started_by,
+        "previous_end": end,
+        "previous_dir": end_dir,
+        "versions": vers,
+        "mark_skipped": skipped,
+    }
+    emit(
+        result(
+            "resume",
+            "ok",
+            " / ".join(lines),
+            [item],
+            {"version_mismatch": len(known) > 1, "under_relay": pos == "relay", "mark_skipped": len(skipped)},
+        )
+    )
 
 
 if __name__ == "__main__":

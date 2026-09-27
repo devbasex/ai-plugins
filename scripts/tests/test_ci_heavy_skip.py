@@ -3,6 +3,7 @@
 一時ディレクトリに最小のリポジトリを作り、版上げの差分とコードの差分を比べる。
 GitHub の API は偽物（呼ばれたパスから返す値を決める関数）で置き換える。
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -32,8 +33,7 @@ def mod(monkeypatch):
 
 
 def git(root: Path, *args: str) -> str:
-    return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True,
-                          check=True).stdout.strip()
+    return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, check=True).stdout.strip()
 
 
 def write(root: Path, rel: str, text: str) -> None:
@@ -49,8 +49,7 @@ def commit(root: Path, msg: str = "c") -> str:
 
 
 def manifest(version: str, name: str = "ndf") -> str:
-    return json.dumps({"name": name, "version": version,
-                       "description": f"NDF (v{version})", "skills": "./skills/"}, indent=2) + "\n"
+    return json.dumps({"name": name, "version": version, "description": f"NDF (v{version})", "skills": "./skills/"}, indent=2) + "\n"
 
 
 @pytest.fixture
@@ -92,6 +91,7 @@ def decide(mod, root: Path, base: str, head: str, api=none_passed, event="pull_r
 
 # --- 1. 版数と説明だけの差分 -------------------------------------------------------
 
+
 def test_version_and_description_only_diff_skips(mod, repo):
     base = git(repo, "rev-parse", "HEAD")
     git(repo, "switch", "-q", "-c", "release/v1.0.1")
@@ -101,12 +101,15 @@ def test_version_and_description_only_diff_skips(mod, repo):
     assert skip, reason
 
 
-@pytest.mark.parametrize("rel, text", [
-    ("plugins/ndf/scripts/tool.py", "print(2)\n"),
-    ("scripts/tests/test_x.py", "def test_x():\n    assert True\n"),
-    ("docs/other.md", "changed\n"),
-    (".github/workflows/pytest.yml", "on: push\n"),
-])
+@pytest.mark.parametrize(
+    "rel, text",
+    [
+        ("plugins/ndf/scripts/tool.py", "print(2)\n"),
+        ("scripts/tests/test_x.py", "def test_x():\n    assert True\n"),
+        ("docs/other.md", "changed\n"),
+        (".github/workflows/pytest.yml", "on: push\n"),
+    ],
+)
 def test_one_line_outside_version_and_description_runs(mod, repo, rel, text):
     base = git(repo, "rev-parse", "HEAD")
     git(repo, "switch", "-q", "-c", "release/v1.0.1")
@@ -144,6 +147,7 @@ def test_push_never_skips(mod, repo):
 
 # --- 2. develop で通ったコミットを進める main 宛の PR -------------------------------
 
+
 def release_history(repo: Path) -> tuple[str, str, str]:
     """main ← develop の形を作る。(main の先端, develop で通った P, 版上げを入れた M) を返す。"""
     main = git(repo, "rev-parse", "HEAD")
@@ -166,6 +170,7 @@ def fake_api(passed: set[str], calls: list[str] | None = None):
         assert "event=push" in path and "branch=develop" in path and "/workflows/pytest.yml/" in path
         runs = [{"head_sha": sha, "event": "push", "head_branch": "develop", "conclusion": "success"}]
         return {"workflow_runs": runs if sha in passed else []}
+
     return api
 
 
@@ -217,35 +222,59 @@ def test_main_pr_runs_when_base_has_commits_not_in_head(mod, repo):
 
 def test_failed_or_other_branch_run_does_not_count(mod):
     def api(path):
-        return {"workflow_runs": [
-            {"head_sha": "abc", "event": "push", "head_branch": "develop", "conclusion": "failure"},
-            {"head_sha": "abc", "event": "pull_request", "head_branch": "develop", "conclusion": "success"},
-            {"head_sha": "abc", "event": "push", "head_branch": "feat/x", "conclusion": "success"},
-        ]}
+        return {
+            "workflow_runs": [
+                {"head_sha": "abc", "event": "push", "head_branch": "develop", "conclusion": "failure"},
+                {"head_sha": "abc", "event": "pull_request", "head_branch": "develop", "conclusion": "success"},
+                {"head_sha": "abc", "event": "push", "head_branch": "feat/x", "conclusion": "success"},
+            ]
+        }
+
     assert not mod.passed_on_branch("o/r", "pytest.yml", "abc", "develop", api)
 
 
 def test_api_error_does_not_skip(mod):
     def api(path):
         raise RuntimeError("HTTP 403")
+
     assert not mod.passed_on_branch("o/r", "pytest.yml", "abc", "develop", api)
 
 
 # --- 出力 ---------------------------------------------------------------------------
+
 
 def test_cli_writes_github_output(repo, tmp_path):
     base = git(repo, "rev-parse", "HEAD")
     bump(repo)
     head = commit(repo)
     out = tmp_path / "out.txt"
-    p = subprocess.run([sys.executable, str(SCRIPT), "--root", str(repo), "--event", "pull_request",
-                        "--base", base, "--head", head, "--repo", "o/r", "--workflow", "pytest.yml"],
-                       capture_output=True, text=True, env={"PATH": "/usr/bin:/bin", "GITHUB_OUTPUT": str(out)})
+    p = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--root",
+            str(repo),
+            "--event",
+            "pull_request",
+            "--base",
+            base,
+            "--head",
+            head,
+            "--repo",
+            "o/r",
+            "--workflow",
+            "pytest.yml",
+        ],
+        capture_output=True,
+        text=True,
+        env={"PATH": "/usr/bin:/bin", "GITHUB_OUTPUT": str(out)},
+    )
     assert p.returncode == 0, p.stderr
     assert "skip=true" in out.read_text()
 
 
 # --- release-steps.py の待ちとマージ -------------------------------------------------
+
 
 def test_merge_when_green_accepts_skipped_heavy_jobs(monkeypatch):
     """省いたジョブ（SKIPPED）と、ステップを省いて通ったジョブ（SUCCESS）は通ったものとして数える。
@@ -253,9 +282,10 @@ def test_merge_when_green_accepts_skipped_heavy_jobs(monkeypatch):
     配布の PR の待ち（release-steps.py の wait_and_merge）は merged-steps.py merge-when-green に任せる。
     """
     ms = load(RELEASE_STEPS.parent / "merged-steps.py", "merged_steps_for_ci_skip", monkeypatch)
-    rollup = [{"__typename": "CheckRun", "name": n, "status": "COMPLETED", "conclusion": c}
-              for n, c in [("pytest", "SUCCESS"), ("pytest (0/2)", "SKIPPED"),
-                           ("runtime-smoke (claude)", "SUCCESS"), ("ci-scope", "SUCCESS")]]
+    rollup = [
+        {"__typename": "CheckRun", "name": n, "status": "COMPLETED", "conclusion": c}
+        for n, c in [("pytest", "SUCCESS"), ("pytest (0/2)", "SKIPPED"), ("runtime-smoke (claude)", "SUCCESS"), ("ci-scope", "SUCCESS")]
+    ]
     pending, failed, passed = ms.check_states(rollup)
     assert pending == [] and failed == []
     assert sorted(passed) == ["ci-scope", "pytest", "pytest (0/2)", "runtime-smoke (claude)"]

@@ -4,6 +4,7 @@
 API 出力で欠けやすい形（空文字列・空行のみ・列が欠けた行）は固定されていない。件数が
 崩れない現状の振る舞いを記録する（現状固定テスト。正しさを主張しない）。
 """
+
 from __future__ import annotations
 import review_lib.github
 
@@ -57,27 +58,21 @@ def test_a_line_without_a_previous_column_yields_one_path(state_mod):
 
 def test_a_previous_equal_to_path_yields_one_path(state_mod):
     """previous と path が同じ行は、paths が path 1 件になる。"""
-    assert review_lib.github._parse_pr_files_api_lines(
-        "renamed\tsrc/app.py\tsrc/app.py"
-    ) == [
+    assert review_lib.github._parse_pr_files_api_lines("renamed\tsrc/app.py\tsrc/app.py") == [
         {"status": "R", "paths": ["src/app.py"]},
     ]
 
 
 def test_a_distinct_previous_yields_two_paths(state_mod):
     """previous が path と異なる行は、previous と path の 2 件になる。"""
-    assert review_lib.github._parse_pr_files_api_lines(
-        "renamed\tsrc/new.py\tsrc/old.py"
-    ) == [
+    assert review_lib.github._parse_pr_files_api_lines("renamed\tsrc/new.py\tsrc/old.py") == [
         {"status": "R", "paths": ["src/old.py", "src/new.py"]},
     ]
 
 
 def test_blank_lines_between_entries_are_skipped(state_mod):
     """行の間に空行が挟まっても、実データの行だけが残る。"""
-    assert review_lib.github._parse_pr_files_api_lines(
-        "added\ta.py\n\nremoved\tb.py\n"
-    ) == [
+    assert review_lib.github._parse_pr_files_api_lines("added\ta.py\n\nremoved\tb.py\n") == [
         {"status": "A", "paths": ["a.py"]},
         {"status": "D", "paths": ["b.py"]},
     ]

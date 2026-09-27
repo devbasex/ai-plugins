@@ -4,6 +4,7 @@
 置く。共通層（`plugins/ndf/scripts/lib`）の読み込みと、進行の合図（`info`）と
 中断（`die`）である。
 """
+
 from __future__ import annotations
 
 import pathlib

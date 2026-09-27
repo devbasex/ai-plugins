@@ -4,6 +4,7 @@
 - 設計 PR の 2 ラウンド目以降は、前のラウンドからの変更だけを担当へ渡す。code は全差分
 - 設計文書が 1,000 行を超えたら init が知らせる（止めない）
 """
+
 from __future__ import annotations
 
 import argparse
@@ -17,8 +18,12 @@ import pytest
 
 SCRIPTS = pathlib.Path(__file__).resolve().parent.parent / "scripts"
 sys.path.insert(0, str(SCRIPTS))
-from classifications import (default_max_rounds, diff_scope, oversized_design_docs,  # noqa: E402
-                             review_kind)
+from classifications import (
+    default_max_rounds,
+    diff_scope,
+    oversized_design_docs,  # noqa: E402
+    review_kind,
+)
 import review_lib
 import review_lib.commands.init
 import review_lib.github
@@ -31,13 +36,17 @@ LAUNCH = SCRIPTS / "launch-reviewer.sh"
 
 # ---------------- 分類と既定 ----------------
 
-@pytest.mark.parametrize("branch, cats, kind", [
-    ("design/issue-1", ["common", "code"], "design"),
-    ("feat/x", ["common", "docs_only", "design"], "design"),
-    ("feat/x", ["common", "design", "code"], "code"),
-    ("feat/x", ["common", "code"], "code"),
-    (None, [], "code"),
-])
+
+@pytest.mark.parametrize(
+    "branch, cats, kind",
+    [
+        ("design/issue-1", ["common", "code"], "design"),
+        ("feat/x", ["common", "docs_only", "design"], "design"),
+        ("feat/x", ["common", "design", "code"], "code"),
+        ("feat/x", ["common", "code"], "code"),
+        (None, [], "code"),
+    ],
+)
 def test_review_kind(branch, cats, kind):
     assert review_kind(branch, cats) == kind
 
@@ -53,12 +62,12 @@ def test_oversized_design_docs(tmp_path):
     (tmp_path / "issues" / "1-design.md").write_text("x\n" * 1001)
     (tmp_path / "issues" / "2-design.md").write_text("x\n" * 1000)
     (tmp_path / "issues" / "3-requirements.md").write_text("x\n" * 2000)
-    got = oversized_design_docs(tmp_path, ["issues/1-design.md", "issues/2-design.md",
-                                           "issues/3-requirements.md", "issues/9-design.md"])
+    got = oversized_design_docs(tmp_path, ["issues/1-design.md", "issues/2-design.md", "issues/3-requirements.md", "issues/9-design.md"])
     assert got == [{"path": "issues/1-design.md", "lines": 1001}]
 
 
 # ---------------- init が既定を置く ----------------
+
 
 @pytest.fixture()
 def init_env(monkeypatch, state_mod, tmp_path, fake_gh):
@@ -79,20 +88,34 @@ def init_env(monkeypatch, state_mod, tmp_path, fake_gh):
         return real_run(cmd, *args, **kwargs)
 
     monkeypatch.setattr(subprocess, "run", _run)
-    fake_gh.set_rules([
-        {"match": f"repos/{REPO}/pulls/{PR}/files", "stdout": "", "exit": 1},
-        {"match": f"pr view {PR} --json files",
-         "stdout": json.dumps({"files": [{"path": "issues/1-design.md", "changeType": "ADDED"}]})},
-    ])
+    fake_gh.set_rules(
+        [
+            {"match": f"repos/{REPO}/pulls/{PR}/files", "stdout": "", "exit": 1},
+            {
+                "match": f"pr view {PR} --json files",
+                "stdout": json.dumps({"files": [{"path": "issues/1-design.md", "changeType": "ADDED"}]}),
+            },
+        ]
+    )
 
     def run(branch, max_rounds=None):
         monkeypatch.setattr(
-            review_lib.github, "_fetch_pr_metadata",
-            lambda pr, repo=None: review_lib.github.PrMetadata(
-                REPO, "takemi", branch, "abc123", "develop", False, 4000, None))
-        review_lib.commands.init.cmd_init(argparse.Namespace(
-            pr=PR, max_rounds=max_rounds, rotate_after=None, only=None, worktree=str(worktree),
-            focus=None, extra_instructions_file=None, host="claude"))
+            review_lib.github,
+            "_fetch_pr_metadata",
+            lambda pr, repo=None: review_lib.github.PrMetadata(REPO, "takemi", branch, "abc123", "develop", False, 4000, None),
+        )
+        review_lib.commands.init.cmd_init(
+            argparse.Namespace(
+                pr=PR,
+                max_rounds=max_rounds,
+                rotate_after=None,
+                only=None,
+                worktree=str(worktree),
+                focus=None,
+                extra_instructions_file=None,
+                host="claude",
+            )
+        )
         return json.loads((tmp_path / f"cross-review-pr{PR}-state.json").read_text(encoding="utf-8"))
 
     return run
@@ -111,18 +134,21 @@ def test_explicit_max_rounds_wins(init_env):
 
 # ---------------- 担当へ渡す差分 ----------------
 
+
 def _prompt(tmp_path, kind, rnd, rounds):
-    state = {"current_pr": PR, "repo": REPO, "worktree_path": str(tmp_path), "review_kind": kind,
-             "rounds": rounds}
+    state = {"current_pr": PR, "repo": REPO, "worktree_path": str(tmp_path), "review_kind": kind, "rounds": rounds}
     (tmp_path / f"cross-review-pr{PR}-state.json").write_text(json.dumps(state))
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
     stub = bin_dir / "codex"
     stub.write_text("#!/bin/sh\nexit 0\n")
     stub.chmod(0o755)
-    p = subprocess.run(["bash", str(LAUNCH), "codex", str(PR), str(rnd)], capture_output=True, text=True,
-                       env={**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
-                            "CROSS_REVIEW_TMP_DIR": str(tmp_path)})
+    p = subprocess.run(
+        ["bash", str(LAUNCH), "codex", str(PR), str(rnd)],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "CROSS_REVIEW_TMP_DIR": str(tmp_path)},
+    )
     assert p.returncode == 0, p.stderr
     return (tmp_path / f"codex-review-pr{PR}-prompt.md").read_text()
 
@@ -135,9 +161,12 @@ def test_design_round_two_gets_only_the_previous_changes(tmp_path):
     assert f"diff {'a' * 40} {'b' * 40}" in prompt
 
 
-@pytest.mark.parametrize("kind, rnd, rounds", [
-    ("code", 2, TWO_ROUNDS),
-    ("design", 1, TWO_ROUNDS[:1]),
-])
+@pytest.mark.parametrize(
+    "kind, rnd, rounds",
+    [
+        ("code", 2, TWO_ROUNDS),
+        ("design", 1, TWO_ROUNDS[:1]),
+    ],
+)
 def test_code_and_first_round_get_the_full_diff(tmp_path, kind, rnd, rounds):
     assert f"diff {'a' * 40}" not in _prompt(tmp_path, kind, rnd, rounds)

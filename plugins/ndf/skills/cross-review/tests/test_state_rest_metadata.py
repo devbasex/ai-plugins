@@ -7,6 +7,7 @@
 リポジトリ名は git の設定から求める。`repos/{owner}/{repo}/pulls/{PR}` がそのまま
 検証になるため、誤った名前のまま進む経路はできない。
 """
+
 from __future__ import annotations
 
 import json
@@ -37,26 +38,31 @@ RAW = (
     "X-Ratelimit-Remaining: 4972\r\n"
     "X-Ratelimit-Reset: 1788519069\r\n"
     "X-Ratelimit-Resource: core\r\n"
-    "\r\n"
-    + json.dumps(PULL_BODY)
+    "\r\n" + json.dumps(PULL_BODY)
 )
 
 
 def _response(state_mod, body=None, remaining=None):
     return review_lib.github.RestResponse(
-        headers={}, body=PULL_BODY if body is None else body,
-        rate_remaining=remaining, rate_reset=None,
+        headers={},
+        body=PULL_BODY if body is None else body,
+        rate_remaining=remaining,
+        rate_reset=None,
     )
 
 
 # ---------------- リポジトリ名を git から求める ----------------
 
-@pytest.mark.parametrize("url", [
-    "https://github.com/devbasex/ai-plugins.git",
-    "https://github.com/devbasex/ai-plugins",
-    "git@github.com:devbasex/ai-plugins.git",
-    "ssh://git@github.com/devbasex/ai-plugins.git",
-])
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://github.com/devbasex/ai-plugins.git",
+        "https://github.com/devbasex/ai-plugins",
+        "git@github.com:devbasex/ai-plugins.git",
+        "ssh://git@github.com/devbasex/ai-plugins.git",
+    ],
+)
 def test_the_repository_name_comes_from_the_git_remote(state_mod, monkeypatch, url):
     monkeypatch.setattr(review_lib.github, "_git_remote_url", lambda: url)
 
@@ -80,6 +86,7 @@ def test_an_unreadable_remote_gives_no_name(state_mod, monkeypatch):
 
 
 # ---------------- 1 回の応答から全部を埋める ----------------
+
 
 def test_one_rest_response_fills_author_head_and_base(state_mod, real_github, monkeypatch):
     paths: list[str] = []
@@ -135,8 +142,10 @@ def test_an_unreachable_pull_request_gives_nothing(state_mod, real_github, monke
 
 # ---------------- 残量は通常の要求の応答ヘッダから読む ----------------
 
+
 def test_the_rate_limit_is_read_from_the_response_header(state_mod, monkeypatch):
     """残量を読むためだけの呼び出しは置かない（`gh api rate_limit` は 0 を返す）。"""
+
     def _run(args, stdin=None, cwd=None):
         assert args[:2] == ["api", "-i"]
         return gh_call.GhResult(0, RAW, "")
@@ -153,13 +162,13 @@ def test_the_rate_limit_is_read_from_the_response_header(state_mod, monkeypatch)
 
 def test_a_failed_call_returns_nothing(state_mod, monkeypatch):
     """失敗は例外にせず `None` で返す。待ち行列を挟む位置になる（#291）。"""
-    monkeypatch.setattr(gh_call, "RUNNER",
-                        lambda args, stdin=None, cwd=None: gh_call.GhResult(1, "", "HTTP 422"))
+    monkeypatch.setattr(gh_call, "RUNNER", lambda args, stdin=None, cwd=None: gh_call.GhResult(1, "", "HTTP 422"))
 
     assert review_lib.github._gh_rest("repos/o/r/commits/x/check-runs") is None
 
 
 # ---------------- チェックジョブの一覧はページを読み切る ----------------
+
 
 def _check_run(name: str) -> dict:
     return {"name": name, "status": "completed", "conclusion": "success"}
@@ -167,8 +176,10 @@ def _check_run(name: str) -> dict:
 
 def _check_runs_response(state_mod, total: int, names: list[str]):
     return review_lib.github.RestResponse(
-        headers={}, body={"total_count": total, "check_runs": [_check_run(n) for n in names]},
-        rate_remaining=None, rate_reset=None,
+        headers={},
+        body={"total_count": total, "check_runs": [_check_run(n) for n in names]},
+        rate_remaining=None,
+        rate_reset=None,
     )
 
 
@@ -212,6 +223,7 @@ def test_check_runs_beyond_one_page_are_followed(state_mod, real_github, monkeyp
 
 def test_a_failing_later_page_gives_nothing(state_mod, real_github, monkeypatch):
     """途中のページを取れないときは「確かめられなかった」に倒す。"""
+
     def _rest(path):
         if path.endswith("page=1"):
             return _check_runs_response(state_mod, 120, [f"job{i}" for i in range(100)])
@@ -224,6 +236,7 @@ def test_a_failing_later_page_gives_nothing(state_mod, real_github, monkeypatch)
 
 def test_reading_stops_at_the_page_limit(state_mod, real_github, monkeypatch):
     """上限に達しても止めず、読めた範囲で判定する。"""
+
     def _rest(path):
         page = path.rsplit("page=", 1)[1]
         return _check_runs_response(state_mod, 10_000, [f"p{page}-job{i}" for i in range(100)])

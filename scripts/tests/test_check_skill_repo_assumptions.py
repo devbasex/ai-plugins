@@ -5,6 +5,7 @@
 チェックそのものは `scripts/check-skill-repo-assumptions.py` にある。実物の Skill は
 書き換えず、一時ディレクトリへ最小の木を作ってそこをチェックさせる（T6 だけが実物を読む）。
 """
+
 from __future__ import annotations
 
 import json
@@ -52,8 +53,9 @@ def build_tree(tmp_path: Path, *, listed: str, unlisted: str) -> Path:
     return skills
 
 
-def run_check(skills_dir: Path | None, exclusions: dict[str, str] | None = None,
-              tmp_path: Path | None = None) -> subprocess.CompletedProcess[str]:
+def run_check(
+    skills_dir: Path | None, exclusions: dict[str, str] | None = None, tmp_path: Path | None = None
+) -> subprocess.CompletedProcess[str]:
     """チェックを起動する。`exclusions` を省くと、チェックが持つ既定の宣言を使う。
 
     `skills_dir` を None にすると `--skills-dir` を渡さず、family をすべて見る走査になる。
@@ -141,9 +143,7 @@ def test_excluded_script_passes(tmp_path: Path) -> None:
 def test_excluded_file_passes(tmp_path: Path) -> None:
     """同じ本文でも、除外に載せたファイルなら終了コード 0 で終わる。"""
     skills = build_tree(tmp_path, listed=ASSUMING_BODY, unlisted=CLEAN_BODY)
-    result = run_check(
-        skills, {key_for(skills, f"{LISTED_SKILL}/SKILL.md"): "この文書の主題は NDF 自身である"},
-        tmp_path)
+    result = run_check(skills, {key_for(skills, f"{LISTED_SKILL}/SKILL.md"): "この文書の主題は NDF 自身である"}, tmp_path)
     assert result.returncode == 0, output_of(result)
 
 
@@ -174,8 +174,7 @@ def test_exclusion_pointing_at_missing_file_fails_the_check(tmp_path: Path) -> N
 def test_exclusion_outside_scan_scope_fails_the_check(tmp_path: Path) -> None:
     """実在しても走査の範囲外なら、除外として成立しないので失敗させる。"""
     skills = build_tree(tmp_path, listed=CLEAN_BODY, unlisted=CLEAN_BODY)
-    result = run_check(
-        skills, {key_for(skills, f"{UNLISTED_SKILL}/SKILL.md"): "配らない Skill"}, tmp_path)
+    result = run_check(skills, {key_for(skills, f"{UNLISTED_SKILL}/SKILL.md"): "配らない Skill"}, tmp_path)
     assert result.returncode == 2, output_of(result)
     assert f"{UNLISTED_SKILL}/SKILL.md" in output_of(result)
 
@@ -234,8 +233,7 @@ def test_real_repository_passes() -> None:
 
 def test_default_scan_covers_the_real_repository() -> None:
     """`--skills-dir` を省いても、実物の Skill を走査して通る。"""
-    result = subprocess.run([sys.executable, str(CHECKER)],
-                            capture_output=True, text=True, cwd=REPO_ROOT)
+    result = subprocess.run([sys.executable, str(CHECKER)], capture_output=True, text=True, cwd=REPO_ROOT)
     assert result.returncode == 0, output_of(result)
 
 
@@ -250,13 +248,12 @@ def test_report_shows_scan_size() -> None:
 
     見るのは形である。**数そのものではなく、数が出ていることを確かめる。**
     """
-    result = subprocess.run([sys.executable, str(CHECKER), "--report"],
-                            capture_output=True, text=True, cwd=REPO_ROOT)
+    result = subprocess.run([sys.executable, str(CHECKER), "--report"], capture_output=True, text=True, cwd=REPO_ROOT)
     assert result.returncode == 0, output_of(result)
     out = output_of(result)
     summary = re.search(
-        r"^plugins/ndf/skills: 公開する Skill (\d+) 個 / Markdown (\d+) 本 / スクリプト (\d+) 本 / ヒット (\d+) 行$",
-        out, re.MULTILINE)
+        r"^plugins/ndf/skills: 公開する Skill (\d+) 個 / Markdown (\d+) 本 / スクリプト (\d+) 本 / ヒット (\d+) 行$", out, re.MULTILINE
+    )
     assert summary is not None, f"走査の要約が出ていない: {out}"
     skills, markdown, scripts, _hits = (int(value) for value in summary.groups())
     assert skills > 0, f"公開する Skill の数が 0 になっている: {out}"
@@ -272,8 +269,8 @@ def test_report_still_fails_on_a_hit(tmp_path: Path) -> None:
     """
     skills = build_tree(tmp_path, listed=ASSUMING_BODY, unlisted=CLEAN_BODY)
     result = subprocess.run(
-        [sys.executable, str(CHECKER), "--skills-dir", str(skills), "--report"],
-        capture_output=True, text=True, cwd=REPO_ROOT)
+        [sys.executable, str(CHECKER), "--skills-dir", str(skills), "--report"], capture_output=True, text=True, cwd=REPO_ROOT
+    )
     assert result.returncode == 1, output_of(result)
     # 判定を足しても、レポートの出力そのものは残る。
     assert "[検知]" in result.stdout, output_of(result)

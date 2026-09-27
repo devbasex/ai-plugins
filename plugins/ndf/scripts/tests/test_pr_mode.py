@@ -1,4 +1,5 @@
 """lib/pr_mode.py（#1005）: 宛て先の区別と、本文の末尾のモードの 1 行。"""
+
 from __future__ import annotations
 
 import sys

@@ -140,6 +140,7 @@ queue の置き換え: `{queue_prs}` は前のすべてのステージの Pull R
   `max_waits`（3）・`max_llm`（2）・`max_retry`（1）・`probe_timeout`（120）・`judge_timeout`（300）・`history`。
   知らない鍵・形の違う値はステップを始める前に `結果: 止まった`・`理由: slow の設定が読めない（<鍵>）`
 """
+
 from __future__ import annotations
 
 import re
@@ -168,10 +169,12 @@ def expand_parts(steps: list[dict]) -> list[dict]:
                 p["next"] = f"{s['id']}-{i + 1}"
             elif s.get("next"):
                 p["next"] = s["next"]
-            p["prompt"] = (s["prompt"] + f"\n\n## このパート（{i}/{len(parts)}: {part['name']}）\n"
-                           f"触るのは次のファイルだけ: {', '.join(part['files'])}。"
-                           "他のパートは別の作業が受け持つ。前のパートの成果は git log と該当ファイルの要る範囲で確かめる。"
-                           "このパートの変更をコミットして終える。")
+            p["prompt"] = (
+                s["prompt"] + f"\n\n## このパート（{i}/{len(parts)}: {part['name']}）\n"
+                f"触るのは次のファイルだけ: {', '.join(part['files'])}。"
+                "他のパートは別の作業が受け持つ。前のパートの成果は git log と該当ファイルの要る範囲で確かめる。"
+                "このパートの変更をコミットして終える。"
+            )
             out.append(p)
         # 元の id を指す遷移は最初のパートへ
         for t in steps:
@@ -200,18 +203,32 @@ def pr_number(value) -> str:
 
 
 EXAMPLE = {
-    "フェーズ": "検査", "課題": [0], "モード": "light", "作業場所": "/abs/worktree",
+    "フェーズ": "検査",
+    "課題": [0],
+    "モード": "light",
+    "作業場所": "/abs/worktree",
     "規則": "テストが落ちたら、失敗が変更に起因するなら fix、環境や揺れなら stop。",
     "上限": 10,
     "steps": [
-        {"id": "test", "type": "run", "cmd": "pytest -q", "stage": "完了判定", "on_fail": "judge-test",
-         "next": "pr"},
-        {"id": "judge-test", "type": "judge", "inputs": ["test"],
-         "question": "テストの失敗を直すか止めるか", "choices": ["fix", "stop"]},
-        {"id": "fix", "type": "work", "kind": "修正", "inputs": ["test"],
-         "prompt": "失敗したテストを直してコミットする（push しない）", "next": "test"},
-        {"id": "pr", "type": "pr", "stage": "Pull Request", "base": "main",
-         "title": "変更の要約（#0）", "summary": "何を変えたかの 1〜2 文", "docs": ["issues/issue-0-design.md"],
-         "next": "end"},
+        {"id": "test", "type": "run", "cmd": "pytest -q", "stage": "完了判定", "on_fail": "judge-test", "next": "pr"},
+        {"id": "judge-test", "type": "judge", "inputs": ["test"], "question": "テストの失敗を直すか止めるか", "choices": ["fix", "stop"]},
+        {
+            "id": "fix",
+            "type": "work",
+            "kind": "修正",
+            "inputs": ["test"],
+            "prompt": "失敗したテストを直してコミットする（push しない）",
+            "next": "test",
+        },
+        {
+            "id": "pr",
+            "type": "pr",
+            "stage": "Pull Request",
+            "base": "main",
+            "title": "変更の要約（#0）",
+            "summary": "何を変えたかの 1〜2 文",
+            "docs": ["issues/issue-0-design.md"],
+            "next": "end",
+        },
     ],
 }

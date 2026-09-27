@@ -3,6 +3,7 @@
 REST の関数（`gh_rest`）は、`gh pr view --json` / `gh issue list --json` と同じ形で返す。呼び出し側は枠を知らない。
 対応表に無いフィールドは REST では作れないため、`to_json_shape` は `None` を返し、呼び出し側が GraphQL で読む。
 """
+
 from __future__ import annotations
 
 from typing import Any, Callable

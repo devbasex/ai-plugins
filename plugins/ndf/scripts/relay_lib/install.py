@@ -2,6 +2,7 @@
 
 シェルの設定の読み書きは `shellrc`、複製（ランチャーとバージョンディレクトリ）は `version_dir` が持つ。
 """
+
 from __future__ import annotations
 
 import json
@@ -9,15 +10,58 @@ import os
 import sys
 
 from . import proc
-from .common import (BLOCK_CLOSE, BLOCK_OPEN, COPY_LOCK, INSTALL_LOCK, PID_FILE, LockBusy, _lock,
-                     _read_bytes, _unlock, config_dir, copy_path, data_dir, read_text, state_root)
-from .shellrc import (UNSAFE, _add_record, _auto_blocks, _backup, _drop_records, _has_loader,
-                      _startup_notice_message, _startup_record_noticed, bash_look, block_inner,
-                      has_definition, has_direct_alias, loader_body, loader_file, loader_inner, loader_line,
-                      login_shadow, login_warning, rc_blocks, rc_files, rewrite_blocks, shell_rc,
-                      shellrc_body, shellrc_path)
-from .version_dir import (VersionDir, _self_body, _startup_copy, _startup_refresh_old_copy,
-                          copy_version_path, old_copy_path, place_copy_to, plugin_version)
+from .common import (
+    BLOCK_CLOSE,
+    BLOCK_OPEN,
+    COPY_LOCK,
+    INSTALL_LOCK,
+    PID_FILE,
+    LockBusy,
+    _lock,
+    _read_bytes,
+    _unlock,
+    config_dir,
+    copy_path,
+    data_dir,
+    read_text,
+    state_root,
+)
+from .shellrc import (
+    UNSAFE,
+    _add_record,
+    _auto_blocks,
+    _backup,
+    _drop_records,
+    _has_loader,
+    _startup_notice_message,
+    _startup_record_noticed,
+    bash_look,
+    block_inner,
+    has_definition,
+    has_direct_alias,
+    loader_body,
+    loader_file,
+    loader_inner,
+    loader_line,
+    login_shadow,
+    login_warning,
+    rc_blocks,
+    rc_files,
+    rewrite_blocks,
+    shell_rc,
+    shellrc_body,
+    shellrc_path,
+)
+from .version_dir import (
+    VersionDir,
+    _self_body,
+    _startup_copy,
+    _startup_refresh_old_copy,
+    copy_version_path,
+    old_copy_path,
+    place_copy_to,
+    plugin_version,
+)
 
 
 def out(line: str) -> None:
@@ -61,12 +105,13 @@ def cmd_install() -> int:
         if rc_blocks(rc)[1]:
             out(f"{rc} の囲みに閉じが無い。直してから打ち直す")
             return 1
-    shadow = login_shadow() if loader is None and sh and sh[0] == "bash" and sys.platform == "darwin" \
-        else None
+    shadow = login_shadow() if loader is None and sh and sh[0] == "bash" and sys.platform == "darwin" else None
     if shadow:
-        out(f"{shadow[0]} が無く、ログインシェルは {shadow[1]} を読んでいる。{shadow[0]} を作ると "
+        out(
+            f"{shadow[0]} が無く、ログインシェルは {shadow[1]} を読んでいる。{shadow[0]} を作ると "
             f"{shadow[1]} が読まれなくなるため足さない。使うなら {shadow[0]} を作り、{shadow[1]} を読む行と"
-            f"次の 1 行を置く: {loader_line()}")
+            f"次の 1 行を置く: {loader_line()}"
+        )
         return 1
     try:
         os.makedirs(config_dir(), mode=0o700, exist_ok=True)
@@ -164,8 +209,7 @@ def _uninstall_locked() -> int:
         removed_rc.append(rc)
         lines.append(f"{rc} の囲みを外した（バックアップ {bak}）")
     loader = loader_file()
-    for p in ([loader] if loader else []) + [shellrc_path(), copy_version_path(), copy_path(),
-                                               old_copy_path()]:
+    for p in ([loader] if loader else []) + [shellrc_path(), copy_version_path(), copy_path(), old_copy_path()]:
         if os.path.lexists(p):
             os.unlink(p)
             lines.append(f"{p} を消した")
@@ -246,11 +290,9 @@ def session_line() -> str:
     if pos == "no-dir":
         line = f"{head}ラッパーを通らずに起動（NDF_RELAY_DIR が無い）"
         loader = loader_file()
-        loaded = ([loader] if loader and os.path.exists(loader) else []) + \
-            [rc for rc in rc_files() if _has_loader(rc)]
+        loaded = ([loader] if loader and os.path.exists(loader) else []) + [rc for rc in rc_files() if _has_loader(rc)]
         if loaded:
-            line += (f"。{'・'.join(loaded)} に読み込みの行はあるので、"
-                     "このセッションは読み込みの前に開いたシェル、または IDE から起動した")
+            line += f"。{'・'.join(loaded)} に読み込みの行はあるので、このセッションは読み込みの前に開いたシェル、または IDE から起動した"
         return line
     if pos == "not-running":
         return f"{head}ラッパーは終わっている（NDF_RELAY_DIR はあるがラッパーが動いていない）"
@@ -261,8 +303,7 @@ def session_line() -> str:
 
 def startup_once() -> str | None:
     root = state_root()
-    if not (os.path.exists(os.path.join(root, "rc-added")) or os.path.exists(copy_path())
-            or os.path.exists(old_copy_path())):
+    if not (os.path.exists(os.path.join(root, "rc-added")) or os.path.exists(copy_path()) or os.path.exists(old_copy_path())):
         return None
     os.makedirs(root, mode=0o700, exist_ok=True)
     fd = _lock(os.path.join(root, INSTALL_LOCK), 1)

@@ -4,6 +4,7 @@
 辞書へ直す。形が合わなければ `UnreadableOutput` を上げ、呼び出し側が `unreadable_output` にする。
 言語とツールの表・宣言・コマンドの組み立ては `codemetrics` にある。
 """
+
 from __future__ import annotations
 
 import ast
@@ -24,7 +25,8 @@ class UnreadableOutput(ValueError):
 
 
 def parse_ruff(
-    text: str, roots: Iterable[str],
+    text: str,
+    roots: Iterable[str],
 ) -> tuple[dict[tuple[str, int], dict[str, int]], set[str]]:
     """Ruff の JSON から `((パス, def の行) → 欄 → 値, 構文を読めなかったファイル)`。
 
@@ -71,8 +73,12 @@ def parse_complexipy(text: str, roots: Iterable[str]) -> dict[tuple[str, str], i
         raise UnreadableOutput("complexipy の出力が配列でない")
     out: dict[tuple[str, str], int] = {}
     for entry in data:
-        if not isinstance(entry, dict) or not isinstance(entry.get("complexity"), int) \
-                or not entry.get("path") or not entry.get("function_name"):
+        if (
+            not isinstance(entry, dict)
+            or not isinstance(entry.get("complexity"), int)
+            or not entry.get("path")
+            or not entry.get("function_name")
+        ):
             raise UnreadableOutput(f"complexipy の要素を読めない: {entry!r:.80}")
         path = to_relative(str(entry["path"]), roots)
         if path is None:
@@ -93,8 +99,7 @@ class _FunctionCollector(ast.NodeVisitor):
 
     def visit_FunctionDef(self, node: "ast.FunctionDef | ast.AsyncFunctionDef") -> None:
         end = getattr(node, "end_lineno", None) or node.lineno
-        self.found.append({"symbol": ".".join([*self.stack, node.name]),
-                           "lineno": node.lineno, "end_lineno": end})
+        self.found.append({"symbol": ".".join([*self.stack, node.name]), "lineno": node.lineno, "end_lineno": end})
         self.stack.append(node.name)
         self.generic_visit(node)
         self.stack.pop()
@@ -133,17 +138,20 @@ def python_function_metrics(
             continue
         for fn in functions:
             values = ruff.get((path, fn["lineno"]), {})
-            out.append({
-                "path": path, "symbol": fn["symbol"],
-                "cc": values.get("cc"),
-                "cognitive": cognitive.get((path, fn["symbol"])),
-                "branches": values.get("branches", 0),
-                "statements": values.get("statements", 0),
-                "args": values.get("args", 0),
-                "returns": values.get("returns", 0),
-                "lines": fn["end_lineno"] - fn["lineno"] + 1,
-                "role": path_role(path),
-            })
+            out.append(
+                {
+                    "path": path,
+                    "symbol": fn["symbol"],
+                    "cc": values.get("cc"),
+                    "cognitive": cognitive.get((path, fn["symbol"])),
+                    "branches": values.get("branches", 0),
+                    "statements": values.get("statements", 0),
+                    "args": values.get("args", 0),
+                    "returns": values.get("returns", 0),
+                    "lines": fn["end_lineno"] - fn["lineno"] + 1,
+                    "role": path_role(path),
+                }
+            )
     return out
 
 
@@ -163,13 +171,14 @@ def parse_lizard(text: str, roots: Iterable[str]) -> list[dict[str, Any]]:
         path = to_relative(row[6], roots)
         if path is None:
             continue
-        out.append({"path": path, "symbol": row[7], "cc": cc, "lines": length,
-                    "role": path_role(path)})
+        out.append({"path": path, "symbol": row[7], "cc": cc, "lines": length, "role": path_role(path)})
     return out
 
 
 def file_metrics(
-    paths: Iterable[str], line_counts: dict[str, int], functions: list[dict[str, Any]],
+    paths: Iterable[str],
+    line_counts: dict[str, int],
+    functions: list[dict[str, Any]],
     unreadable: Iterable[str] = (),
 ) -> list[dict[str, Any]]:
     """ファイルごとの行数・関数の数・最長の関数の行。**ファイルの集合は集めた一覧が正**。"""
@@ -177,11 +186,17 @@ def file_metrics(
     by_path: dict[str, list[int]] = {}
     for fn in functions:
         by_path.setdefault(fn["path"], []).append(int(fn["lines"]))
-    return [{"path": p, "lines": int(line_counts.get(p, 0)),
-             "functions": len(by_path.get(p, [])),
-             "max_function_lines": max(by_path.get(p, [0])),
-             "role": path_role(p)}
-            for p in sorted(paths) if p not in skip]
+    return [
+        {
+            "path": p,
+            "lines": int(line_counts.get(p, 0)),
+            "functions": len(by_path.get(p, [])),
+            "max_function_lines": max(by_path.get(p, [0])),
+            "role": path_role(p),
+        }
+        for p in sorted(paths)
+        if p not in skip
+    ]
 
 
 def _clone(tool: str, fmt: str, lines: int, locations: list[dict[str, Any]]) -> dict[str, Any]:
@@ -210,13 +225,12 @@ def parse_symilar(text: str, roots: Iterable[str]) -> dict[str, Any]:
         if head:
             count, k = int(head.group(1)), int(head.group(2))
             locations = []
-            for line in lines[i + 1:i + 1 + k]:
+            for line in lines[i + 1 : i + 1 + k]:
                 loc = _SIM_LOC.match(line)
                 if loc is None:
                     raise UnreadableOutput(f"symilar の場所の行を読めない: {line!r:.80}")
                 path = to_relative(loc.group(1), roots) or loc.group(1)
-                locations.append({"path": path, "start": int(loc.group(2)) + 1,
-                                  "end": int(loc.group(3))})
+                locations.append({"path": path, "start": int(loc.group(2)) + 1, "end": int(loc.group(3))})
             if len(locations) < k:
                 raise UnreadableOutput("symilar の場所の行が足りない")
             clones.append(_clone(TOOL_SYMILAR, "python", count, locations))
@@ -246,13 +260,14 @@ def parse_jscpd(text: Optional[str], roots: Iterable[str]) -> dict[str, Any]:
             for side in ("firstFile", "secondFile"):
                 entry = dup[side]
                 name = str(entry["name"])
-                locations.append({"path": to_relative(name, roots) or name,
-                                  "start": int(entry["start"]), "end": int(entry["end"])})
-            clones.append(_clone(TOOL_JSCPD, str(dup.get("format") or "—"),
-                                 int(dup["lines"]), locations))
-        return {"clones": clones, "total_lines": int(stats.get("lines") or 0),
-                "duplicated_lines": int(stats.get("duplicatedLines") or 0),
-                "sources": int(stats.get("sources") or 0)}
+                locations.append({"path": to_relative(name, roots) or name, "start": int(entry["start"]), "end": int(entry["end"])})
+            clones.append(_clone(TOOL_JSCPD, str(dup.get("format") or "—"), int(dup["lines"]), locations))
+        return {
+            "clones": clones,
+            "total_lines": int(stats.get("lines") or 0),
+            "duplicated_lines": int(stats.get("duplicatedLines") or 0),
+            "sources": int(stats.get("sources") or 0),
+        }
     except (json.JSONDecodeError, KeyError, TypeError, ValueError, AttributeError) as exc:
         raise UnreadableOutput(f"jscpd の報告を読めない（{exc}）") from exc
 

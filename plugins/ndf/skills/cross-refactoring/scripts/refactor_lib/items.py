@@ -4,6 +4,7 @@
 改善項目（`state["items"]`）、候補は提案を統合したもの（`state["candidates"]`）で、
 どちらも `path` + `symbol` + `smell` を鍵に持つ。
 """
+
 from __future__ import annotations
 
 from typing import Any, Optional
@@ -17,7 +18,7 @@ IMPLEMENTED = "implemented"
 FAILING = "failing"
 VERIFIED = "verified"
 REVERTED = "reverted"
-DEFERRED = "deferred"     # 締め切り・足したテストの失敗で見送った（取り消しと別に数える）
+DEFERRED = "deferred"  # 締め切り・足したテストの失敗で見送った（取り消しと別に数える）
 
 # 取り消しの対象になりうる（コミットを持ちうる）状態。
 LIVE = (PLANNED, TESTED, IMPLEMENTED, FAILING, VERIFIED)
@@ -84,9 +85,7 @@ def defer(state: dict[str, Any], item: dict[str, Any], reason: str, detail: str 
     deferred.append(deferred_record(item, reason, detail))
 
 
-def find_item(
-    state: dict[str, Any], item_id: Optional[str], required: bool = True
-) -> Any:
+def find_item(state: dict[str, Any], item_id: Optional[str], required: bool = True) -> Any:
     """改修計画が採った項目を ID で引く。"""
     for item in state.get("items") or []:
         if item.get("id") == item_id:

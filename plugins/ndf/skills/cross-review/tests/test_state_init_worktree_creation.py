@@ -8,10 +8,10 @@ worktree を `git worktree remove --force` で取り除いてから中断する�
 公開入口から通して固定する。`subprocess.run` を記録スタブに差し替え、実際の git/gh を
 呼ばない。
 """
+
 from __future__ import annotations
 
 import argparse
-import json
 import pathlib
 import subprocess
 
@@ -55,8 +55,7 @@ class _RecordingRun:
             return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
         if argv[:2] == ["gh", "pr"] and "checkout" in argv:
             # gh pr checkout --detach フォールバックも失敗する。
-            return subprocess.CompletedProcess(
-                argv, 1, stdout="", stderr="gh: could not determine base repo")
+            return subprocess.CompletedProcess(argv, 1, stdout="", stderr="gh: could not determine base repo")
         if argv[:3] == ["git", "worktree", "remove"]:
             return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
         if "fetch-pr-comments.sh" in argv[0]:
@@ -66,11 +65,13 @@ class _RecordingRun:
 
 def _sh_via_recorder(recorder: _RecordingRun):
     """`_sh()` の代替。記録スタブへ委譲し、失敗時は `die` 相当で SystemExit する。"""
+
     def _sh(cmd, check=True):
         result = recorder(cmd)
         if check and result.returncode != 0:
             raise SystemExit(1)
         return result.stdout.strip()
+
     return _sh
 
 
@@ -80,9 +81,9 @@ def stub_init_scaffolding(monkeypatch, state_mod, tmp_path):
     worktree = tmp_path / "wt-not-created-yet"  # 存在しないパス（新規作成扱い）
 
     monkeypatch.setattr(
-        review_lib.github, "_fetch_pr_metadata",
-        lambda pr, repo=None: review_lib.github.PrMetadata(
-            REPO, "takemi", HEAD_BRANCH, "abc123", "develop", True, 4000, None),
+        review_lib.github,
+        "_fetch_pr_metadata",
+        lambda pr, repo=None: review_lib.github.PrMetadata(REPO, "takemi", HEAD_BRANCH, "abc123", "develop", True, 4000, None),
     )
     monkeypatch.setattr(review_lib.github, "_fetch_changed_files", lambda pr, repo: [])
     monkeypatch.setattr(review_lib.github, "_repo_from_git", lambda: REPO)
@@ -96,12 +97,11 @@ def stub_init_scaffolding(monkeypatch, state_mod, tmp_path):
 
 def _init_args(worktree: pathlib.Path) -> argparse.Namespace:
     return argparse.Namespace(
-        pr=PR, max_rounds=12, rotate_after=8, only=None, worktree=str(worktree),
-        focus=None, extra_instructions_file=None, host="claude")
+        pr=PR, max_rounds=12, rotate_after=8, only=None, worktree=str(worktree), focus=None, extra_instructions_file=None, host="claude"
+    )
 
 
-def test_a_failed_fallback_checkout_removes_the_worktree_and_aborts(
-        state_mod, tmp_dir, stub_init_scaffolding, capsys) -> None:
+def test_a_failed_fallback_checkout_removes_the_worktree_and_aborts(state_mod, tmp_dir, stub_init_scaffolding, capsys) -> None:
     worktree, recorder = stub_init_scaffolding
 
     with pytest.raises(SystemExit) as e:
@@ -118,19 +118,13 @@ def test_a_failed_fallback_checkout_removes_the_worktree_and_aborts(
     assert not (tmp_dir / f"cross-review-pr{PR}-state.json").exists()
 
 
-def test_the_checkout_is_attempted_inside_the_worktree(
-        state_mod, tmp_dir, stub_init_scaffolding) -> None:
+def test_the_checkout_is_attempted_inside_the_worktree(state_mod, tmp_dir, stub_init_scaffolding) -> None:
     """`gh pr checkout --detach` は worktree 内で（cwd を伴って）実行される。"""
     worktree, recorder = stub_init_scaffolding
 
     with pytest.raises(SystemExit):
         review_lib.commands.init.cmd_init(_init_args(worktree))
 
-    checkout_idx = [
-        i for i, c in enumerate(recorder.calls)
-        if c[:2] == ["gh", "pr"] and "checkout" in c
-    ]
-    assert [recorder.calls[i] for i in checkout_idx] == [
-        ["gh", "pr", "checkout", str(PR), "--detach"]
-    ]
+    checkout_idx = [i for i, c in enumerate(recorder.calls) if c[:2] == ["gh", "pr"] and "checkout" in c]
+    assert [recorder.calls[i] for i in checkout_idx] == [["gh", "pr", "checkout", str(PR), "--detach"]]
     assert recorder.kwargs[checkout_idx[0]].get("cwd") == str(worktree)

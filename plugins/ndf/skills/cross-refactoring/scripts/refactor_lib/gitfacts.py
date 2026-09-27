@@ -4,6 +4,7 @@
 （`pathkinds`・`process`・`github`・`worktree`・`publish`・`results`）が持つ。ここはそれらの名前を
 再エクスポートし、`from .gitfacts import ...` で使う側の import を変えずに済ませる（#1142 の C4）。
 """
+
 from __future__ import annotations
 
 import re
@@ -161,7 +162,8 @@ def _parse_trailer_paragraph(paragraph: str) -> dict[str, str]:
     result = subprocess.run(
         ["git", "interpret-trailers", "--parse"],
         input=f"subject\n\n{paragraph}\n",
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     if result.returncode != 0:
         return {}
@@ -182,7 +184,7 @@ def commit_diff_lines(work: str, sha: str) -> int:
         if len(parts) < 3:
             continue
         for n in parts[:2]:
-            if n.isdigit():          # バイナリは `-` になるので数えない
+            if n.isdigit():  # バイナリは `-` になるので数えない
                 total += int(n)
     return total
 
@@ -206,8 +208,7 @@ def commit_test_changes(work: str, sha: str) -> dict[str, tuple[list[str], list[
             continue
         before = git_out(work, ["show", f"{sha}^:{path}"]) or ""
         after = git_out(work, ["show", f"{sha}:{path}"]) or ""
-        changes[path] = (before.splitlines(keepends=True),
-                         after.splitlines(keepends=True))
+        changes[path] = (before.splitlines(keepends=True), after.splitlines(keepends=True))
     return changes
 
 
@@ -237,8 +238,12 @@ def commit_time(work: str, sha: str) -> Optional[str]:
 
 
 def collect_commit_facts(
-    work: str, shas: list[str], in_range: set[str], test_command: str,
-    head_branch: str, test_timeout: int = 0,
+    work: str,
+    shas: list[str],
+    in_range: set[str],
+    test_command: str,
+    head_branch: str,
+    test_timeout: int = 0,
 ) -> list[dict[str, Any]]:
     """申告されたコミットについて、git と実際のテスト実行から事実を集める。
 
@@ -253,20 +258,20 @@ def collect_commit_facts(
         if full is None or full not in in_range:
             facts.append({"sha": sha, "exists": False})
             continue
-        facts.append({
-            "sha": sha,
-            "exists": True,
-            "trailers": commit_trailers(work, full),
-            "diff_lines": commit_diff_lines(work, full),
-            "files": commit_files(work, full),
-            "touches_tests": commit_touches_tests(work, full),
-            # **テストの期待値が変わっていないかを検証が見る**（#443）。
-            "test_changes": commit_test_changes(work, full),
-            # **テストコマンドが空なら走らせない。** 適用の検証は「適用そのものが
-            # 通ったか」だけを見る。テストの合否は適用ラウンドの単位で
-            # `verify-round` が 1 度だけ実行する（決定 3）。
-            "test_status": run_test_at(
-                work, full, test_command, head_branch, test_timeout
-            ) if test_command else "skipped",
-        })
+        facts.append(
+            {
+                "sha": sha,
+                "exists": True,
+                "trailers": commit_trailers(work, full),
+                "diff_lines": commit_diff_lines(work, full),
+                "files": commit_files(work, full),
+                "touches_tests": commit_touches_tests(work, full),
+                # **テストの期待値が変わっていないかを検証が見る**（#443）。
+                "test_changes": commit_test_changes(work, full),
+                # **テストコマンドが空なら走らせない。** 適用の検証は「適用そのものが
+                # 通ったか」だけを見る。テストの合否は適用ラウンドの単位で
+                # `verify-round` が 1 度だけ実行する（決定 3）。
+                "test_status": run_test_at(work, full, test_command, head_branch, test_timeout) if test_command else "skipped",
+            }
+        )
     return facts

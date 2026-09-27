@@ -7,9 +7,9 @@
 worktree path は `<base>/<owner>--<name>/pr<N>` 形式で、他リポジトリの
 同一 PR 番号と衝突しない。
 """
+
 from __future__ import annotations
 
-import pathlib
 import review_lib
 import review_lib.github
 import review_lib.workspace
@@ -38,7 +38,8 @@ def test_is_registered_worktree_rejects_foreign_dir(monkeypatch, tmp_path, state
     registered = tmp_path / "registered"
     foreign = tmp_path / "foreign"
     monkeypatch.setattr(
-        review_lib, "_sh",
+        review_lib,
+        "_sh",
         lambda cmd, check=True: f"worktree {registered}\nHEAD abc\n",
     )
     assert review_lib.workspace._is_registered_worktree(str(registered)) is True

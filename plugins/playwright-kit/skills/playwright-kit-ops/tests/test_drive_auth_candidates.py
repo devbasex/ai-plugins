@@ -4,6 +4,7 @@
 いない」と書いたままの案内は、読んだ利用者を要らない設定へ誘導する。あわせて agy の
 導入先が候補から抜けていた。
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -32,13 +33,9 @@ def test_every_runtime_has_a_candidate(drive_auth) -> None:
         assert any(marker in path for path in candidates), f"{marker} の候補が無い"
 
 
-def test_the_message_does_not_claim_it_is_undistributed(
-    drive_auth, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_the_message_does_not_claim_it_is_undistributed(drive_auth, monkeypatch: pytest.MonkeyPatch) -> None:
     """配布前の前提のまま残ると、読んだ利用者を要らない設定へ誘導する。"""
-    monkeypatch.setattr(
-        drive_auth, "_CANDIDATES", (Path("/nonexistent/google-auth/scripts"),)
-    )
+    monkeypatch.setattr(drive_auth, "_CANDIDATES", (Path("/nonexistent/google-auth/scripts"),))
     with pytest.raises(RuntimeError) as raised:
         drive_auth._ensure_google_auth_on_path()
 
@@ -61,9 +58,7 @@ def test_the_module_docstring_matches_the_distribution(drive_auth) -> None:
     assert "同梱していない" not in drive_auth.__doc__
 
 
-def test_claude_code_plugin_cache_is_searched_at_the_latest_version(
-    drive_auth, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_claude_code_plugin_cache_is_searched_at_the_latest_version(drive_auth, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Claude Code は Skill を `~/.claude/plugins/cache/<取得元>/ndf/<版>/` に置く。版は数で比べる。"""
     for ver in ("10.9.1", "10.17.8", "10.17.7"):
         d = tmp_path / ".claude/plugins/cache/ai-plugins/ndf" / ver / "skills/google-auth/scripts"
@@ -94,8 +89,6 @@ def test_claude_code_plugin_cache_orders_prereleases_by_semver(
     assert found is not None and Path(found).parents[2].name == latest
 
 
-def test_claude_code_plugin_cache_absent(
-    drive_auth, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_claude_code_plugin_cache_absent(drive_auth, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     assert drive_auth._claude_plugin_cache() is None

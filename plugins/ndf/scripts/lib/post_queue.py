@@ -42,6 +42,7 @@ JSON である。名前は `<連番 4 桁>-<種別>-<識別子>.json` で、**�
 | `match` | 冪等の照会で「同じ」とみなす条件 |
 | `extra` | 呼び出し側が使う付随情報（担当・ラウンドなど）。この層は読まない |
 """
+
 from __future__ import annotations
 
 import argparse
@@ -96,10 +97,7 @@ query($owner: String!, $name: String!, $pr: Int!, $endCursor: String) {
   }
 }
 """
-_UNRESOLVED_JQ = (
-    ".data.repository.pullRequest.reviewThreads.nodes[]"
-    " | select(.isResolved == false) | .id"
-)
+_UNRESOLVED_JQ = ".data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false) | .id"
 
 _RESOLVE_MUTATION = """
 mutation($threadId: ID!) {
@@ -185,8 +183,7 @@ def quota_remaining() -> int | None:
     読めなければ `None`。決まらないときの最後の材料であり、読めないときは上限では
     ないものとして扱う（止める側へ倒す）。
     """
-    a = run(["gh", "api", "rate_limit", "--jq",
-             "[.resources.core.remaining, .resources.graphql.remaining] | min"])
+    a = run(["gh", "api", "rate_limit", "--jq", "[.resources.core.remaining, .resources.graphql.remaining] | min"])
     if not a.ok:
         return None
     text = a.stdout.strip().splitlines()
@@ -260,9 +257,7 @@ def is_permanent_failure(item: dict[str, Any], attempt: Attempt) -> bool:
 
 def _request_pr_comment(repo: str, pr: int, fields: dict[str, Any]) -> dict[str, Any]:
     return {
-        "request": {"method": "POST",
-                    "path": f"repos/{repo}/issues/{int(pr)}/comments",
-                    "fields": {"body": fields["body"]}},
+        "request": {"method": "POST", "path": f"repos/{repo}/issues/{int(pr)}/comments", "fields": {"body": fields["body"]}},
         "match": {"body": fields["body"]},
     }
 
@@ -284,9 +279,7 @@ def _request_review_post(repo: str, pr: int, fields: dict[str, Any]) -> dict[str
     if fields.get("since"):
         match["since"] = fields["since"]
     return {
-        "request": {"method": "POST",
-                    "path": f"repos/{repo}/pulls/{int(pr)}/reviews",
-                    "fields": body},
+        "request": {"method": "POST", "path": f"repos/{repo}/pulls/{int(pr)}/reviews", "fields": body},
         "match": match,
     }
 
@@ -294,19 +287,18 @@ def _request_review_post(repo: str, pr: int, fields: dict[str, Any]) -> dict[str
 def _request_review_reply(repo: str, pr: int, fields: dict[str, Any]) -> dict[str, Any]:
     target = int(fields["in_reply_to"])
     return {
-        "request": {"method": "POST",
-                    "path": f"repos/{repo}/pulls/{int(pr)}/comments/"
-                            f"{target}/replies",
-                    "fields": {"body": fields["body"]}},
+        "request": {
+            "method": "POST",
+            "path": f"repos/{repo}/pulls/{int(pr)}/comments/{target}/replies",
+            "fields": {"body": fields["body"]},
+        },
         "match": {"in_reply_to": target, "body": fields["body"]},
     }
 
 
 def _request_thread_resolve(repo: str, pr: int, fields: dict[str, Any]) -> dict[str, Any]:
     return {
-        "request": {"method": "GRAPHQL", "path": "graphql",
-                    "query": _RESOLVE_MUTATION,
-                    "fields": {"threadId": fields["thread_id"]}},
+        "request": {"method": "GRAPHQL", "path": "graphql", "query": _RESOLVE_MUTATION, "fields": {"threadId": fields["thread_id"]}},
         "match": {"thread_id": fields["thread_id"]},
     }
 
@@ -370,9 +362,24 @@ def unresolved_thread_ids(repo: str, pr: int) -> list[str] | None:
     owner, sep, name = str(repo or "").partition("/")
     if not (owner and sep and name):
         return None
-    a = run(["gh", "api", "graphql", "--paginate",
-             "-F", f"owner={owner}", "-F", f"name={name}", "-F", f"pr={int(pr)}",
-             "-f", f"query={_UNRESOLVED_QUERY}", "--jq", _UNRESOLVED_JQ])
+    a = run(
+        [
+            "gh",
+            "api",
+            "graphql",
+            "--paginate",
+            "-F",
+            f"owner={owner}",
+            "-F",
+            f"name={name}",
+            "-F",
+            f"pr={int(pr)}",
+            "-f",
+            f"query={_UNRESOLVED_QUERY}",
+            "--jq",
+            _UNRESOLVED_JQ,
+        ]
+    )
     if not a.ok:
         return None
     return [line.strip() for line in a.stdout.splitlines() if line.strip()]
@@ -424,19 +431,12 @@ def _review_match(match: dict[str, Any], actor: str | None):
         submitted = clock.parse(row.get("submitted_at"), naive="reject")
         return since is None or submitted is None or submitted >= since
 
-    return lambda row: (
-        _by_actor(row, actor)
-        and review_match_key(row.get("body")) == key
-        and _in_this_run(row)
-    )
+    return lambda row: _by_actor(row, actor) and review_match_key(row.get("body")) == key and _in_this_run(row)
 
 
 def _reply_match(match: dict[str, Any], actor: str | None):
     head = _head(match.get("body"))
-    return lambda row: (
-        str(row.get("in_reply_to_id") or "") == str(match.get("in_reply_to"))
-        and _head(row.get("body")) == head
-    )
+    return lambda row: str(row.get("in_reply_to_id") or "") == str(match.get("in_reply_to")) and _head(row.get("body")) == head
 
 
 _POSTED_MATCH_RULES = {
@@ -585,8 +585,7 @@ class Queue:
         return dest
 
     def _next_seq(self) -> int:
-        seqs = [int(m.group(1)) for m in
-                (_SEQ_RE.match(p.name) for p in self.paths()) if m]
+        seqs = [int(m.group(1)) for m in (_SEQ_RE.match(p.name) for p in self.paths()) if m]
         return (max(seqs) + 1) if seqs else 1
 
     def add(self, item: dict[str, Any], ident: str | int) -> pathlib.Path:
@@ -609,17 +608,18 @@ class Queue:
                 json.dump(item, f, indent=2, ensure_ascii=False)
             return path
 
-    def _item_to_send(
-        self, path: pathlib.Path
-    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None,
-               dict[str, Any] | None]:
+    def _item_to_send(self, path: pathlib.Path) -> tuple[dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None]:
         """項目を読み、送る項目・既投稿・読込失敗のいずれかを返す。"""
         item = _read_item(path)
         if item is None:
-            return None, None, {
-                "path": str(path),
-                "last_error": f"待ち行列の項目を読めない ({path.name})",
-            }
+            return (
+                None,
+                None,
+                {
+                    "path": str(path),
+                    "last_error": f"待ち行列の項目を読めない ({path.name})",
+                },
+            )
         found, row = posted_match(item)
         if found is not True:
             return item, None, None
@@ -680,9 +680,17 @@ class Queue:
         return FlushResult(sent, skipped, failed, self.count(), rate_limited, dropped)
 
 
-def enqueue(queue: Queue, kind: str, repo: str, pr: int, fields: dict[str, Any],
-            actor: str | None = None, extra: dict[str, Any] | None = None,
-            last_error: str = "", attempts: int = 0) -> pathlib.Path:
+def enqueue(
+    queue: Queue,
+    kind: str,
+    repo: str,
+    pr: int,
+    fields: dict[str, Any],
+    actor: str | None = None,
+    extra: dict[str, Any] | None = None,
+    last_error: str = "",
+    attempts: int = 0,
+) -> pathlib.Path:
     """投稿する内容を 1 件積む。"""
     if kind not in KINDS:
         raise ValueError(f"未知の種別: {kind}")
@@ -693,8 +701,7 @@ def enqueue(queue: Queue, kind: str, repo: str, pr: int, fields: dict[str, Any],
         "repo": repo,
         "pr": int(pr),
         "actor": actor,
-        "created_at": _dt.datetime.now(_dt.timezone.utc).astimezone().isoformat(
-            timespec="seconds"),
+        "created_at": _dt.datetime.now(_dt.timezone.utc).astimezone().isoformat(timespec="seconds"),
         "attempts": attempts,
         "last_error": last_error,
         "request": built["request"],
@@ -704,9 +711,9 @@ def enqueue(queue: Queue, kind: str, repo: str, pr: int, fields: dict[str, Any],
     return queue.add(item, extra.get("ident") if extra else pr)
 
 
-def post(queue: Queue, kind: str, repo: str, pr: int, fields: dict[str, Any],
-         actor: str | None = None, extra: dict[str, Any] | None = None
-         ) -> tuple[str, Attempt | None]:
+def post(
+    queue: Queue, kind: str, repo: str, pr: int, fields: dict[str, Any], actor: str | None = None, extra: dict[str, Any] | None = None
+) -> tuple[str, Attempt | None]:
     """投稿を 1 件行う。上限のときは積んで先へ進む。
 
     **待ち行列に先客がいるときは、送らずに積む。** 先に流してから送らないと、
@@ -718,14 +725,12 @@ def post(queue: Queue, kind: str, repo: str, pr: int, fields: dict[str, Any],
         enqueue(queue, kind, repo, pr, fields, actor=actor, extra=extra)
         return QUEUED, None
     built = request_for(kind, repo, int(pr), fields)
-    item = {"kind": kind, "repo": repo, "pr": int(pr), "actor": actor,
-            "request": built["request"], "match": built["match"]}
+    item = {"kind": kind, "repo": repo, "pr": int(pr), "actor": actor, "request": built["request"], "match": built["match"]}
     attempt = send(item)
     if attempt.ok:
         return POSTED, attempt
     if is_rate_limited(attempt):
-        enqueue(queue, kind, repo, pr, fields, actor=actor, extra=extra,
-                last_error=attempt.summary(), attempts=1)
+        enqueue(queue, kind, repo, pr, fields, actor=actor, extra=extra, last_error=attempt.summary(), attempts=1)
         return QUEUED, attempt
     return FAILED, attempt
 
@@ -733,8 +738,7 @@ def post(queue: Queue, kind: str, repo: str, pr: int, fields: dict[str, Any],
 # ---------------- 上限のときに待って再実行する ----------------
 
 
-def retry(cmd: list[str], max_wait: float = 900.0, interval: float = 30.0,
-          stdin: str | None = None, sleep=time.sleep) -> Attempt:
+def retry(cmd: list[str], max_wait: float = 900.0, interval: float = 30.0, stdin: str | None = None, sleep=time.sleep) -> Attempt:
     """上限のときだけ待って再実行する。ほかの失敗はそのまま返す。
 
     **Pull Request の作成は積めない。** 作成が終わるまで新しい番号が決まらず、番号が
@@ -747,32 +751,32 @@ def retry(cmd: list[str], max_wait: float = 900.0, interval: float = 30.0,
     def announce(_seconds: float, _next: int) -> None:
         print(f"⏳ 上限のため {interval:g} 秒待って再実行します: {' '.join(cmd)}", file=sys.stderr)
 
-    return waits.retry_call(lambda: run(cmd, stdin=stdin),
-                            lambda a: not a.ok and is_rate_limited(a),
-                            max_wait=max_wait, interval=interval, sleep=sleep,
-                            on_wait=announce).value
+    return waits.retry_call(
+        lambda: run(cmd, stdin=stdin),
+        lambda a: not a.ok and is_rate_limited(a),
+        max_wait=max_wait,
+        interval=interval,
+        sleep=sleep,
+        on_wait=announce,
+    ).value
 
 
 # ---------------- CLI ----------------
 
 
 def _read_body(path: str) -> str:
-    return sys.stdin.read() if path == "-" else pathlib.Path(path).read_text(
-        encoding="utf-8")
+    return sys.stdin.read() if path == "-" else pathlib.Path(path).read_text(encoding="utf-8")
 
 
 def cmd_post(args: argparse.Namespace) -> int:
     q = Queue(args.dir)
-    outcome, attempt = post(q, args.kind, args.repo, args.pr,
-                            {"body": _read_body(args.body_file)},
-                            actor=args.actor or None)
+    outcome, attempt = post(q, args.kind, args.repo, args.pr, {"body": _read_body(args.body_file)}, actor=args.actor or None)
     print(f"QUEUED={'1' if outcome == QUEUED else '0'}")
     if outcome == QUEUED:
         print(f"⏳ 上限のため待ち行列へ積みました（残り {q.count()} 件）", file=sys.stderr)
         return 0
     if outcome == FAILED:
-        print(f"❌ 投稿に失敗しました: {attempt.summary() if attempt else ''}",
-              file=sys.stderr)
+        print(f"❌ 投稿に失敗しました: {attempt.summary() if attempt else ''}", file=sys.stderr)
         return 1
     return 0
 
@@ -785,8 +789,7 @@ def cmd_flush(args: argparse.Namespace) -> int:
     print(f"PENDING_DROPPED={len(result.dropped)}")
     print(f"PENDING_REMAINING={result.remaining}")
     for item in result.dropped:
-        print(f"⚠️ 送れない項目を飛ばしました ({item.get('kind')} #{item.get('seq')}):"
-              f" {item.get('last_error') or ''}", file=sys.stderr)
+        print(f"⚠️ 送れない項目を飛ばしました ({item.get('kind')} #{item.get('seq')}): {item.get('last_error') or ''}", file=sys.stderr)
     return 0
 
 
@@ -798,8 +801,7 @@ def cmd_count(args: argparse.Namespace) -> int:
 def cmd_retry(args: argparse.Namespace) -> int:
     deps.require("waits")  # 標準入力を読む前に起動し直す
     stdin = None if sys.stdin.isatty() else sys.stdin.read()
-    attempt = retry(args.command, max_wait=args.max_wait, interval=args.interval,
-                    stdin=stdin)
+    attempt = retry(args.command, max_wait=args.max_wait, interval=args.interval, stdin=stdin)
     sys.stdout.write(attempt.stdout)
     sys.stderr.write(attempt.stderr)
     return attempt.code

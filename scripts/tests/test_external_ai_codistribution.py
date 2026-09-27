@@ -9,6 +9,7 @@
 要点の字面を突き合わせる案は採らない。2 か所の書き方が違うため、突き合わせるにはどちらかを
 正本と同じ字面へ揃えることになり、揃えるなら片方を消すのと変わらない。
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -32,19 +33,14 @@ def _skills_pointing_at_external_ai() -> list[str]:
     for skill in sorted(p for p in SKILLS.iterdir() if p.is_dir()):
         if skill.name == PROVIDER:
             continue
-        if any(
-            POINTER in md.read_text(encoding="utf-8")
-            for md in skill.rglob("*.md")
-        ):
+        if any(POINTER in md.read_text(encoding="utf-8") for md in skill.rglob("*.md")):
             names.append(skill.name)
     return names
 
 
 def _distributed(manifest: Path) -> set[str]:
     return {
-        line.strip()
-        for line in manifest.read_text(encoding="utf-8").splitlines()
-        if line.strip() and not line.lstrip().startswith("#")
+        line.strip() for line in manifest.read_text(encoding="utf-8").splitlines() if line.strip() and not line.lstrip().startswith("#")
     }
 
 
@@ -65,7 +61,4 @@ def test_a_skill_that_points_at_external_ai_is_distributed_with_it(
     pointing = [s for s in _skills_pointing_at_external_ai() if s in distributed]
     if not pointing:
         pytest.skip(f"{manifest.name} は external-ai を指す Skill を配らない")
-    assert PROVIDER in distributed, (
-        f"{manifest.name} は {pointing} を配るが {PROVIDER} を配らない。"
-        " 起動の約束を読めない配布先ができる"
-    )
+    assert PROVIDER in distributed, f"{manifest.name} は {pointing} を配るが {PROVIDER} を配らない。 起動の約束を読めない配布先ができる"

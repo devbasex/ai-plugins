@@ -1,4 +1,5 @@
 """ファイルロックの包み（lib/locks.py・#1142 の決定 19）。外部パッケージは全体テストの環境（根の pyproject.toml）が入れる。"""
+
 from __future__ import annotations
 
 import subprocess
@@ -16,8 +17,10 @@ import locks  # noqa: E402
 
 def hold(target: Path, seconds: float) -> subprocess.Popen:
     """別のプロセスで排他を `seconds` 秒持つ。取れたら標準出力へ 1 行を出す。"""
-    code = (f"import sys, time; sys.path.insert(0, {str(LIB)!r}); import locks\n"
-            f"with locks.exclusive({str(target)!r}):\n    print('held', flush=True); time.sleep({seconds})\n")
+    code = (
+        f"import sys, time; sys.path.insert(0, {str(LIB)!r}); import locks\n"
+        f"with locks.exclusive({str(target)!r}):\n    print('held', flush=True); time.sleep({seconds})\n"
+    )
     p = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE, text=True)
     assert p.stdout.readline().strip() == "held"
     return p

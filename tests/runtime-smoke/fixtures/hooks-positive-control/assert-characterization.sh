@@ -104,6 +104,7 @@ SH
   chmod +x "$base/bin/codex"
 
   local rc=0
+  # shellcheck disable=SC2097,SC2098  # 起動するスクリプトは外の REPO_ROOT で指し、子へは別の REPO_ROOT を渡す（#1323）
   RUNTIME_CALLED="$base/runtime-called" \
   REPO_ROOT="$REPO_ROOT/tests/runtime-smoke/fixtures/hooks-positive-control/no-hooks" \
   ARTIFACT_DIR="$base/artifacts" HOME="$base/home" PATH="$base/bin:$PATH" \

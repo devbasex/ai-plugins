@@ -4,6 +4,7 @@
 **Pull Request を読む側からは、なぜ直したのかも、どう直す改修計画だったのかも見えない。**
 改修計画を差分の中へ置き、公開は生成物の同期と同じ経路（進行側の 1 コミット）に乗せる。
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -14,8 +15,7 @@ from crossref_helpers import make_state_v2, read_state
 
 
 def _git(*args, cwd):
-    return subprocess.run(["git", *args], cwd=cwd, capture_output=True,
-                          text=True, check=True)
+    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True)
 
 
 def _commit(repo, message):
@@ -39,13 +39,20 @@ def _make_work(tmp_path):
 
 def _item(**over):
     base = {
-        "id": "I-001", "rank": 1, "path": "src/foo.py", "symbol": "Foo.handle",
-        "smell": "long_method", "technique": "extract_method", "severity": "major",
+        "id": "I-001",
+        "rank": 1,
+        "path": "src/foo.py",
+        "symbol": "Foo.handle",
+        "smell": "long_method",
+        "technique": "extract_method",
+        "severity": "major",
         "tier": "high",
         "rationale": "1 関数が 6 つの処理を通しで行っている",
         "plan": "1. 範囲の確定を切り出す 2. 検証を切り出す",
-        "tests": [], "estimated_diff_lines": 40,
-        "proposed_by": ["codex", "agy"], "status": "verified",
+        "tests": [],
+        "estimated_diff_lines": 40,
+        "proposed_by": ["codex", "agy"],
+        "status": "verified",
         "commits": {"test": None, "implement": "abc1234", "fix": []},
     }
     base.update(over)
@@ -61,6 +68,7 @@ def _state(tmp_path, work=None, **over):
 
 
 # ---------- 改修計画の本文 ----------
+
 
 def test_plan_names_the_item_and_the_target(plan, tmp_path):
     _, state = _state(tmp_path)
@@ -84,8 +92,7 @@ def test_plan_shows_the_smell_the_technique_and_the_tier(plan, tmp_path):
 
 def test_plan_counts_the_commits_of_an_item(plan, tmp_path):
     """テスト・実装・修正のコミットを足した数を載せる（1 改善項目 = 1 コミットの確かめ）。"""
-    _, state = _state(tmp_path, items=[_item(commits={
-        "test": "t" * 7, "implement": "i" * 7, "fix": ["f" * 7]})])
+    _, state = _state(tmp_path, items=[_item(commits={"test": "t" * 7, "implement": "i" * 7, "fix": ["f" * 7]})])
     assert "| 採用 | 3 |" in plan.format_plan(state)
 
 
@@ -94,11 +101,16 @@ def test_plan_lists_the_deferred_proposals_with_their_reason(plan, tmp_path):
     _, state = _state(
         tmp_path,
         items=[],
-        deferred_items=[{
-            "item_id": "I-002", "path": "src/paths.py", "symbol": "load_state",
-            "smell": "duplicated_code", "defer_reason": "budget",
-            "detail": "想定最大時間に収まらない",
-        }],
+        deferred_items=[
+            {
+                "item_id": "I-002",
+                "path": "src/paths.py",
+                "symbol": "load_state",
+                "smell": "duplicated_code",
+                "defer_reason": "budget",
+                "detail": "想定最大時間に収まらない",
+            }
+        ],
     )
 
     text = plan.format_plan(state)
@@ -114,9 +126,10 @@ def test_plan_records_who_proposed_it(plan, tmp_path):
 
 def test_plan_marks_a_reverted_item_with_its_reason(plan, tmp_path):
     """取り消した項目も残す。同じ提案が再び来たときの判断材料になる。"""
-    _, state = _state(tmp_path, items=[_item(
-        status="reverted", commits={"test": None, "implement": None, "fix": []},
-        failure_reason="修正の上限に達した")])
+    _, state = _state(
+        tmp_path,
+        items=[_item(status="reverted", commits={"test": None, "implement": None, "fix": []}, failure_reason="修正の上限に達した")],
+    )
     text = plan.format_plan(state)
     assert "取り消し" in text
     assert "修正の上限に達した" in text
@@ -138,11 +151,9 @@ def test_plan_names_the_budget_and_the_implementer(plan, tmp_path):
 
 def test_plan_shows_every_limit_and_marks_a_missing_one(plan, tmp_path):
     """上限の表は値を 1 行ずつ出し、決まっていない値は — にする。"""
-    _, state = _state(tmp_path, limits={"fix_end_at": "2026-09-24T10:40:00",
-                                        "final_fix_seconds": None, "test_timeout": 300})
-    rows = [line for line in plan.format_plan(state).splitlines()
-            if line.startswith("| ") and not line.startswith("| 値")]
-    values = [row.rsplit("|", 2)[1].strip() for row in rows[-len(plan._LIMIT_ROWS):]]
+    _, state = _state(tmp_path, limits={"fix_end_at": "2026-09-24T10:40:00", "final_fix_seconds": None, "test_timeout": 300})
+    rows = [line for line in plan.format_plan(state).splitlines() if line.startswith("| ") and not line.startswith("| 値")]
+    values = [row.rsplit("|", 2)[1].strip() for row in rows[-len(plan._LIMIT_ROWS) :]]
     assert len(values) == len(plan._LIMIT_ROWS)
     keys = [key for key, _ in plan._LIMIT_ROWS]
     assert values[keys.index("fix_end_at")] == "2026-09-24T10:40:00"
@@ -158,6 +169,7 @@ def test_plan_is_stable_for_the_same_state(plan, tmp_path):
 
 # ---------- 置き場所 ----------
 
+
 def test_the_plan_file_is_written_inside_the_work_dir(gitfacts, tmp_path):
     work = _make_work(tmp_path)
     _, state = _state(tmp_path, work=work, plan_file="issues/plan.md")
@@ -170,11 +182,11 @@ def test_the_plan_file_is_written_inside_the_work_dir(gitfacts, tmp_path):
 
 # ---------- 公開 ----------
 
+
 def test_the_plan_lands_in_one_commit_with_the_generated_files(gitfacts, tmp_path):
     """改修計画書と生成物で 2 コミットに分けない。"""
     work = _make_work(tmp_path)
-    _, state = _state(tmp_path, work=work, plan_file="issues/plan.md",
-                      sync_command="printf 'x = 2\\n' > generated/out.py")
+    _, state = _state(tmp_path, work=work, plan_file="issues/plan.md", sync_command="printf 'x = 2\\n' > generated/out.py")
 
     gitfacts._sync_generated(state)
 
@@ -184,12 +196,9 @@ def test_the_plan_lands_in_one_commit_with_the_generated_files(gitfacts, tmp_pat
     assert subject and "cross-refactoring" in subject
 
 
-def test_a_repository_without_a_sync_command_still_records_the_plan(
-    refactor, gitfacts, tmp_path
-):
+def test_a_repository_without_a_sync_command_still_records_the_plan(refactor, gitfacts, tmp_path):
     work = _make_work(tmp_path)
-    _, state = _state(tmp_path, work=work, plan_file="issues/plan.md",
-                      sync_command=None)
+    _, state = _state(tmp_path, work=work, plan_file="issues/plan.md", sync_command=None)
 
     gitfacts._sync_generated(state)
 
@@ -200,8 +209,7 @@ def test_a_repository_without_a_sync_command_still_records_the_plan(
 def test_an_unchanged_plan_does_not_add_a_commit(gitfacts, tmp_path):
     """状態が動いていないのにコミットを積まない。"""
     work = _make_work(tmp_path)
-    _, state = _state(tmp_path, work=work, plan_file="issues/plan.md",
-                      sync_command=None)
+    _, state = _state(tmp_path, work=work, plan_file="issues/plan.md", sync_command=None)
     gitfacts._sync_generated(state)
     before = _git("rev-parse", "HEAD", cwd=work).stdout.strip()
 
@@ -221,6 +229,7 @@ def test_an_empty_plan_file_setting_turns_the_record_off(gitfacts, tmp_path):
 
 
 # ---------- 書き出し先の検証 ----------
+
 
 def test_a_relative_path_is_kept(plan):
     assert plan.normalize_plan_file("issues/plan.md") == "issues/plan.md"

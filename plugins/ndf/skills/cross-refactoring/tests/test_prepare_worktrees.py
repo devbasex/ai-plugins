@@ -2,6 +2,7 @@
 
 一時的な git リポジトリを作って実際に実行する。gh / 各 CLI は呼ばない。
 """
+
 from __future__ import annotations
 
 import json
@@ -18,11 +19,8 @@ REQUIRED = ["refactoring", "tdd-cycle", "quality-gates"]
 RUNTIMES = ["codex", "agy", "kiro"]
 
 
-
 def _git(*args, cwd):
-    return subprocess.run(
-        ["git", *args], cwd=cwd, capture_output=True, text=True, check=True
-    )
+    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True)
 
 
 @pytest.fixture
@@ -31,8 +29,7 @@ def repo(tmp_path):
     origin = tmp_path / "origin.git"
     work_repo = tmp_path / "repo"
     subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
-    subprocess.run(["git", "clone", "-q", str(origin), str(work_repo)],
-                   check=True, capture_output=True)
+    subprocess.run(["git", "clone", "-q", str(origin), str(work_repo)], check=True, capture_output=True)
     _git("config", "user.email", "t@e.st", cwd=work_repo)
     _git("config", "user.name", "test", cwd=work_repo)
     (work_repo / "src").mkdir()
@@ -53,21 +50,32 @@ def repo(tmp_path):
     tmp_dir = root / "work" / ".cross_refactoring"
     tmp_dir.mkdir(parents=True)
     state = {
-        "id": 130, "repo": "acme/demo", "current_pr": 130,
-        "base_branch": "main", "head_branch": "refactor/target",
+        "id": 130,
+        "repo": "acme/demo",
+        "current_pr": 130,
+        "base_branch": "main",
+        "head_branch": "refactor/target",
         "worktree_root": str(root),
-        "worktrees": {"work": str(root / "work"),
-                      **{r: str(root / r) for r in RUNTIMES}},
-        "tmp_dir": str(tmp_dir), "target_scope": ["src"],
-        "host": "claude", "host_detection": "explicit",
-        "runtimes": RUNTIMES, "impl_capable": ["claude", "codex", "kiro"],
+        "worktrees": {"work": str(root / "work"), **{r: str(root / r) for r in RUNTIMES}},
+        "tmp_dir": str(tmp_dir),
+        "target_scope": ["src"],
+        "host": "claude",
+        "host_detection": "explicit",
+        "runtimes": RUNTIMES,
+        "impl_capable": ["claude", "codex", "kiro"],
         "models": {r: None for r in ["claude", "codex", "agy", "kiro"]},
         "skills": {"required": REQUIRED},
-        "max_outer_rounds": 3, "max_fix_rounds": 3, "max_items_per_round": 5,
+        "max_outer_rounds": 3,
+        "max_fix_rounds": 3,
+        "max_items_per_round": 5,
         "severity_threshold": "minor",
         "baseline_test": {"command": "true", "status": "green", "checked_at": "x"},
-        "outer_round": 0, "phase": "init", "rounds": [], "items": [],
-        "deferred_items": [], "final": None,
+        "outer_round": 0,
+        "phase": "init",
+        "rounds": [],
+        "items": [],
+        "deferred_items": [],
+        "final": None,
     }
     state_path = tmp_dir / "cross-refactoring-rf130-state.json"
     state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
@@ -78,7 +86,10 @@ def _run(repo, *args, expect_ok=True):
     env = {**os.environ, "CROSS_REFACTORING_TMP_DIR": str(repo["tmp_dir"])}
     r = subprocess.run(
         ["bash", str(_SCRIPT), "130", *args],
-        cwd=repo["repo"], env=env, capture_output=True, text=True,
+        cwd=repo["repo"],
+        env=env,
+        capture_output=True,
+        text=True,
     )
     if expect_ok:
         assert r.returncode == 0, r.stderr
@@ -103,7 +114,9 @@ def test_work_is_the_only_checked_out_branch(repo):
 def test_skills_are_provisioned_into_runtime_locations(repo):
     _run(repo)
     layout = {
-        "codex": ".agents/skills", "agy": ".agents/skills", "kiro": ".kiro/skills",
+        "codex": ".agents/skills",
+        "agy": ".agents/skills",
+        "kiro": ".kiro/skills",
     }
     for rt, rel in layout.items():
         for name in REQUIRED:
@@ -146,16 +159,14 @@ def test_existing_skill_is_not_overwritten(repo):
     tracked.mkdir(parents=True)
     (tracked / "SKILL.md").write_text("利用者の設定\n", encoding="utf-8")
     _git("add", "-A", cwd=work)
-    _git("-c", "user.email=t@e.st", "-c", "user.name=test",
-         "commit", "-qm", "add own skill", cwd=work)
+    _git("-c", "user.email=t@e.st", "-c", "user.name=test", "commit", "-qm", "add own skill", cwd=work)
     _git("push", "-q", "origin", "HEAD:refactor/target", cwd=work)
 
     _run(repo)
 
     codex_copy = repo["root"] / "codex" / ".agents" / "skills" / "refactoring"
     assert codex_copy.joinpath("SKILL.md").read_text() == "利用者の設定\n"
-    assert (work / ".agents" / "skills" / "refactoring" / "SKILL.md").read_text() \
-        == "利用者の設定\n"
+    assert (work / ".agents" / "skills" / "refactoring" / "SKILL.md").read_text() == "利用者の設定\n"
     skills = json.loads(repo["state"].read_text())["skills"]
     assert skills["codex"]["refactoring"] == "preexisting"
     assert skills["codex"]["tdd-cycle"] == "provisioned"
@@ -251,6 +262,7 @@ def test_empty_destination_is_provisioned(repo):
 
 
 # ---------- 起動前の設定整形は要らない（#214） ----------
+
 
 def test_the_worktree_keeps_its_diff_clean(repo):
     _run(repo)

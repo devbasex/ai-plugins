@@ -3,6 +3,7 @@
 試行 T2（docs/ndf-experiments.md の hook-trial の行）で見つけた構文木の癖 5 つを包みが直すことと、
 読めない 2 つの形の扱いを固定する。
 """
+
 from __future__ import annotations
 
 import sys
@@ -51,7 +52,7 @@ def test_heredoc_body_skips_arithmetic_and_reads_backticks():
     n = first("cat <<EOF\n$((1+2)) `touch x` $(touch y)\nEOF")
     assert [shparse.node_text(x) for x in shparse.substitutions(n)] == ["touch x", "$(touch y)"]
     assert list(shparse.substitutions(first("cat <<'EOF'\n$(touch y) `z`\nEOF"))) == []
-    assert [shparse.node_text(x) for x in shparse.substitutions(first("echo \"$(a)\" <(b)"))] == ["$(a)", "<(b)"]
+    assert [shparse.node_text(x) for x in shparse.substitutions(first('echo "$(a)" <(b)'))] == ["$(a)", "<(b)"]
 
 
 def test_unreadable_forms():

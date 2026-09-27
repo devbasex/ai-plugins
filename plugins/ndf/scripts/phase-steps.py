@@ -11,6 +11,7 @@
 
 結果の形と終了コードは lib/README.md の「手順のスクリプトの結果」にある。
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -43,11 +44,11 @@ def split(argv):
             i += 2
             continue
         if t.startswith("--root="):
-            root = t[len("--root="):]
+            root = t[len("--root=") :]
             i += 1
             continue
         if t in ROUTES:
-            return t, argv[i + 1:], root
+            return t, argv[i + 1 :], root
         return None, f"知らない引数かサブコマンド: {t}", None
     return None, "サブコマンドが無い", None
 

@@ -27,6 +27,7 @@
 
 規約は skills/development-workflow/references/relay.md にある。
 """
+
 from __future__ import annotations
 
 import sys
@@ -40,9 +41,9 @@ def main(argv: list[str]) -> int:
     if code is not None:
         return code
     from . import install, mark, proc, run  # 外部パッケージの包みを import する
+
     if not argv:
-        print("usage: relay.py run|stop|mark|install|uninstall|status|startup|question open|close|is-child|notice",
-              file=sys.stderr)
+        print("usage: relay.py run|stop|mark|install|uninstall|status|startup|question open|close|is-child|notice", file=sys.stderr)
         return 2
     sub, rest = argv[0], argv[1:]
     if sub == "mark":

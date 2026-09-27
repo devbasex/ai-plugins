@@ -7,6 +7,7 @@
 あわせて、agy の定義ファイル（`plugins/ndf/dev.agy/plugin.json`）の版数が
 Claude 版と突き合わされることを固定する（#215 の受け入れ条件 A11）。
 """
+
 from __future__ import annotations
 
 import json
@@ -71,10 +72,7 @@ def test_missing_version_in_description_still_fails(tmp_path: Path) -> None:
     result = run_check(root, tmp_path)
 
     assert result.returncode == 1
-    assert (
-        "plugins/ndf/.claude-plugin/plugin.json の description に `(vX.Y.Z)` 形式の版数がない"
-        in output_of(result)
-    )
+    assert "plugins/ndf/.claude-plugin/plugin.json の description に `(vX.Y.Z)` 形式の版数がない" in output_of(result)
 
 
 @pytest.mark.parametrize("version", ["9.6.0", *PRERELEASE])
@@ -114,9 +112,7 @@ def rewrite_agy_manifest(root: Path, mutate: Callable[[dict[str, Any]], None]) -
     path = root / AGY_MANIFEST
     manifest = json.loads(path.read_text(encoding="utf-8"))
     mutate(manifest)
-    path.write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
+    path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def test_agy_consistent_manifest_passes(tmp_path: Path) -> None:
@@ -156,9 +152,7 @@ def test_agy_stale_version_in_description_fails(tmp_path: Path) -> None:
     root = build_tree(tmp_path)
     rewrite_agy_manifest(
         root,
-        lambda m: m.update(
-            description=m["description"].replace(f"(v{helpers.VERSION})", "(v9.2.1)")
-        ),
+        lambda m: m.update(description=m["description"].replace(f"(v{helpers.VERSION})", "(v9.2.1)")),
     )
 
     result = run_check(root, tmp_path)
@@ -179,9 +173,7 @@ def test_agy_missing_version_in_description_fails(tmp_path: Path) -> None:
     result = run_check(root, tmp_path)
 
     assert result.returncode == 1
-    assert (
-        f"{AGY_MANIFEST} の description に `(vX.Y.Z)` 形式の版数がない" in output_of(result)
-    )
+    assert f"{AGY_MANIFEST} の description に `(vX.Y.Z)` 形式の版数がない" in output_of(result)
 
 
 def test_agy_skill_count_is_read_from_its_own_manifest(tmp_path: Path) -> None:
@@ -189,15 +181,10 @@ def test_agy_skill_count_is_read_from_its_own_manifest(tmp_path: Path) -> None:
     root = build_tree(tmp_path)
     rewrite_agy_manifest(
         root,
-        lambda m: m.update(
-            description=m["description"].replace("2 focused skills", "3 focused skills")
-        ),
+        lambda m: m.update(description=m["description"].replace("2 focused skills", "3 focused skills")),
     )
 
     result = run_check(root, tmp_path)
 
     assert result.returncode == 1
-    assert (
-        f"{AGY_MANIFEST} の description の Skill 数が食い違う"
-        "（description: 3 / agy-skills.txt: 2）" in output_of(result)
-    )
+    assert f"{AGY_MANIFEST} の description の Skill 数が食い違う（description: 3 / agy-skills.txt: 2）" in output_of(result)

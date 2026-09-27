@@ -9,6 +9,7 @@
 パッチが前提にしている文脈も消えるためである。広げてでも Pull Request を決定的な
 状態に保つことを優先する。
 """
+
 from __future__ import annotations
 
 import copy
@@ -46,10 +47,22 @@ def _repo(tmp_path, second_line, second_file="foo.py"):
 
 def _state(tmp_path, work, base, c1, c2):
     items = [
-        {"id": "I-001", "rank": 1, "path": "src/foo.py", "symbol": "a", "status": "implemented",
-         "commits": {"test": None, "implement": c1, "fix": []}},
-        {"id": "I-002", "rank": 2, "path": "src/foo.py", "symbol": "b", "status": "implemented",
-         "commits": {"test": None, "implement": c2, "fix": []}},
+        {
+            "id": "I-001",
+            "rank": 1,
+            "path": "src/foo.py",
+            "symbol": "a",
+            "status": "implemented",
+            "commits": {"test": None, "implement": c1, "fix": []},
+        },
+        {
+            "id": "I-002",
+            "rank": 2,
+            "path": "src/foo.py",
+            "symbol": "b",
+            "status": "implemented",
+            "commits": {"test": None, "implement": c2, "fix": []},
+        },
     ]
     return make_state_v2(tmp_path, work, items=items, plan={"base_sha": base})
 
@@ -95,8 +108,7 @@ def test_an_item_without_commits_is_closed_without_touching_git(tmp_path, undo):
     work, base, c1, c2 = _repo(tmp_path, 30)
     path = _state(tmp_path, work, base, c1, c2)
     state = read_state(path)
-    state["items"].append({"id": "I-003", "rank": 3, "status": "planned",
-                           "commits": {"test": None, "implement": None, "fix": []}})
+    state["items"].append({"id": "I-003", "rank": 3, "status": "planned", "commits": {"test": None, "implement": None, "fix": []}})
     head = git("rev-parse", "HEAD", cwd=work).stdout.strip()
 
     record = undo.drop(path, state, ["I-003"], "テスト")

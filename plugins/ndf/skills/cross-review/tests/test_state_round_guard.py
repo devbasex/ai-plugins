@@ -11,6 +11,7 @@ Resolve が飛ばされる。飛ばされたまま進むと、未解決の指摘
 | 前のラウンドで Resolve したと申告されたスレッドが、GitHub 側で未解決のまま | 終了コード 5 で止める |
 | 未解決の指摘を取得できない | チェックを行わず、確認できなかったことを残して進む |
 """
+
 from __future__ import annotations
 
 import argparse
@@ -71,13 +72,16 @@ def tmp_dir(monkeypatch, tmp_path, state_mod):
 def unresolved(monkeypatch, state_mod):
     def _set(threads):
         monkeypatch.setattr(
-            review_lib.github, "_fetch_unresolved_threads",
+            review_lib.github,
+            "_fetch_unresolved_threads",
             lambda repo, pr: threads,
         )
+
     return _set
 
 
 # ---------------- 修正の記録が無い ----------------
+
 
 def test_missing_fix_record_after_a_change_request_fails(tmp_dir, state_mod, unresolved, capsys):
     unresolved([])
@@ -123,7 +127,8 @@ def test_an_approved_previous_round_needs_no_fix_record(tmp_dir, state_mod, unre
 def test_the_first_round_is_not_checked(tmp_dir, state_mod, monkeypatch):
     """前のラウンドが無ければチェックしない。GitHub も見に行かない。"""
     monkeypatch.setattr(
-        review_lib.github, "_fetch_unresolved_threads",
+        review_lib.github,
+        "_fetch_unresolved_threads",
         lambda repo, pr: pytest.fail("前のラウンドが無いのに GitHub を呼んでいる"),
     )
     _write(tmp_dir, _state([]))
@@ -134,6 +139,7 @@ def test_the_first_round_is_not_checked(tmp_dir, state_mod, monkeypatch):
 
 
 # ---------------- 申告どおり Resolve されていない ----------------
+
 
 def test_a_thread_claimed_resolved_but_still_open_fails(tmp_dir, state_mod, unresolved, capsys):
     unresolved([{"id": "PRRT_a", "path": "src/foo.py", "line": "42"}])
@@ -162,7 +168,8 @@ def test_resolved_claims_that_hold_let_the_round_start(tmp_dir, state_mod, unres
 def test_no_claimed_identifier_skips_the_check(tmp_dir, state_mod, monkeypatch):
     """識別子の申告が無ければ突き合わせる相手がいない。GitHub を見に行かない。"""
     monkeypatch.setattr(
-        review_lib.github, "_fetch_unresolved_threads",
+        review_lib.github,
+        "_fetch_unresolved_threads",
         lambda repo, pr: pytest.fail("識別子が無いのに GitHub を呼んでいる"),
     )
     prev = _round(1, fix={"commit": "abc1234", "resolved_thread_ids": []})
@@ -222,7 +229,9 @@ def test_the_guard_counts_the_reviewers_recorded_on_the_round(tmp_dir, state_mod
     """
     unresolved([])
     prev = {
-        "round": 1, "pr": PR, "started_at": "2026-08-31T00:00:00+00:00",
+        "round": 1,
+        "pr": PR,
+        "started_at": "2026-08-31T00:00:00+00:00",
         "reviewers": ["agy", "kiro"],
         "agy": {"intent": "REQUEST_CHANGES", "by_severity": {"major": 1}},
         "kiro": {"intent": "REQUEST_CHANGES", "by_severity": {"major": 1}},

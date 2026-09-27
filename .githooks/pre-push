@@ -4,3 +4,6 @@ set -euo pipefail
 ROOT_DIR="$(git rev-parse --show-toplevel)"
 
 bash "$ROOT_DIR/scripts/validate-runtime-plugins.sh"
+
+# formatter と静的解析（#1323 の決定 10）。CI の lint.yml と同じ検査を push の前に走らせる
+bash "$ROOT_DIR/scripts/check-lint.sh"

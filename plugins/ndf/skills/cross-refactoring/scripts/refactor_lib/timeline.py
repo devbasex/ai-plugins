@@ -10,6 +10,7 @@
 
 **純粋な処理だけを置く。** 今の時刻は引数で受ける。
 """
+
 from __future__ import annotations
 
 import datetime as _dt
@@ -19,13 +20,13 @@ from typing import Any, Optional
 from . import budget, clock
 
 # 係数（決定 24）。B と w に掛ける比率で、秒や分の固定値は持たない。
-PROPOSE_SHARE = 0.20      # 提案の枠の終わり = 開始 + 0.20·B
-PLAN_SHARE = 0.10         # 改修計画の枠の終わり = 提案の枠の終わり + 0.10·B
-INIT_TEST_SHARE = 0.10    # 着手前のテスト 1 回の上限 = 0.10·B（w はまだ測れていない）
-MARGIN_SHARE = 0.05       # 余裕 = 0.05·B（手順の上限と CLI の上限に足す）
-TEST_FACTOR = 3.0         # テスト 1 回の上限 = max(3·w, 0.01·B)
+PROPOSE_SHARE = 0.20  # 提案の枠の終わり = 開始 + 0.20·B
+PLAN_SHARE = 0.10  # 改修計画の枠の終わり = 提案の枠の終わり + 0.10·B
+INIT_TEST_SHARE = 0.10  # 着手前のテスト 1 回の上限 = 0.10·B（w はまだ測れていない）
+MARGIN_SHARE = 0.05  # 余裕 = 0.05·B（手順の上限と CLI の上限に足す）
+TEST_FACTOR = 3.0  # テスト 1 回の上限 = max(3·w, 0.01·B)
 TEST_FLOOR_SHARE = 0.01
-MEASURE_SHARE = 0.05      # 指標の測定の上限 = 0.05·B（提案の枠の中から割く。#1319 の決定 7）
+MEASURE_SHARE = 0.05  # 指標の測定の上限 = 0.05·B（提案の枠の中から割く。#1319 の決定 7）
 MEASURE_PROPOSE_CAP = 0.5  # 測定に使える時間は、提案の枠の終わりまでの残りの半分まで
 
 # 固定のまま残す値（決定 24）。OS の後始末と通信の待ちで、予算と性質が違う。報告に並べる。
@@ -86,8 +87,7 @@ def test_timeout(budget_minutes: int, baseline_seconds: Optional[float]) -> int:
     """着手の後のテスト 1 回の上限（秒）。測れていなければ着手前の上限を使う。"""
     if baseline_seconds is None:
         return init_test_timeout(budget_minutes)
-    return math.ceil(max(TEST_FACTOR * float(baseline_seconds),
-                         float(budget_minutes) * 60 * TEST_FLOOR_SHARE))
+    return math.ceil(max(TEST_FACTOR * float(baseline_seconds), float(budget_minutes) * 60 * TEST_FLOOR_SHARE))
 
 
 def _completion(items: list[dict[str, Any]], start_key: str, estimate_key: str) -> Optional[_dt.datetime]:
@@ -107,8 +107,11 @@ def _iso(value: Optional[_dt.datetime]) -> Optional[str]:
 
 
 def compute(
-    started_at: _dt.datetime, budget_minutes: int, baseline_seconds: Optional[float],
-    items: Optional[list[dict[str, Any]]] = None, reserve: Optional[dict[str, Any]] = None,
+    started_at: _dt.datetime,
+    budget_minutes: int,
+    baseline_seconds: Optional[float],
+    items: Optional[list[dict[str, Any]]] = None,
+    reserve: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     """実行時の値の表。`items` と `reserve`（改修計画の後）が無ければ、その行は `None`。"""
     b = int(budget_minutes)
@@ -128,8 +131,7 @@ def compute(
         "fix_end_at": _iso(budget.fix_end(started_at, b, reserve)) if planned else None,
         "final_end_at": _iso(started_at + _dt.timedelta(minutes=b)),
         # 最終ゲートの修正の 1 回目に必ず渡す長さ（決定 26）。予備時間の `final_fix`。
-        "final_fix_seconds": (math.ceil(float(reserve.get("final_fix") or 0.0) * 60)
-                              if planned else None),
+        "final_fix_seconds": (math.ceil(float(reserve.get("final_fix") or 0.0) * 60) if planned else None),
     }
 
 
@@ -137,7 +139,8 @@ def of_state(state: dict[str, Any]) -> dict[str, Any]:
     """状態の値から表を組む。改修計画の後なら項目と予備時間も使う。"""
     plan = state.get("plan") or None
     return compute(
-        clock.parse(state["started_at"]), int(state["budget_minutes"]),
+        clock.parse(state["started_at"]),
+        int(state["budget_minutes"]),
         (state.get("baseline_test") or {}).get("seconds"),
         state.get("items") if plan else None,
         (plan or {}).get("reserve") if plan else None,
@@ -160,8 +163,11 @@ def phase_timeout(end: _dt.datetime, now: _dt.datetime, margin_seconds: int) -> 
 
 
 def final_fix_timeout(
-    end: _dt.datetime, now: _dt.datetime, margin_seconds: int,
-    floor_seconds: Optional[int], first: bool,
+    end: _dt.datetime,
+    now: _dt.datetime,
+    margin_seconds: int,
+    floor_seconds: Optional[int],
+    first: bool,
 ) -> int:
     """最終ゲートの修正の監視の上限（秒）。
 

@@ -8,6 +8,7 @@
 `state: "pending"` / `total_count: 0` を返す（実測）。保留として読むと、承認された
 ラウンドが収束しなくなる。
 """
+
 from __future__ import annotations
 
 import re
@@ -23,8 +24,7 @@ CI_META_PATTERNS = ("check_pr_requirements", "assignees", "reviewers", "labels",
 # `metabase tests` や `metadata lint` のようなコードチェックまで meta-only になり、失敗した
 # まま収束する。前後が英数字でないことを求めるため、区切り（空白・`_`・`-`・`/`）で
 # 挟まれた語だけが一致する。**一覧に無い名前を code-related へ倒す既定は変わらない。**
-_CI_META_RE = re.compile(
-    "(?<![0-9a-z])(?:" + "|".join(re.escape(p) for p in CI_META_PATTERNS) + ")(?![0-9a-z])")
+_CI_META_RE = re.compile("(?<![0-9a-z])(?:" + "|".join(re.escape(p) for p in CI_META_PATTERNS) + ")(?![0-9a-z])")
 # 完了したチェックジョブのうち、失敗として数える結論。`cancelled` / `skipped` / `neutral`
 # は失敗にしない。
 CI_FAILED_CONCLUSIONS = ("failure", "timed_out", "action_required", "startup_failure")
@@ -76,9 +76,7 @@ def _classify_failed_names(names: list[str]) -> CiClassification:
     （`name` / `status` / `conclusion`）と、完了・失敗を表す文字列（`completed` /
     `failure`）を握るのはここ 1 か所にする。呼び出し側は失敗名の一覧を渡すだけでよい。
     """
-    return _classify_ci(
-        [{"name": str(n), "status": "completed", "conclusion": "failure"} for n in names]
-    )
+    return _classify_ci([{"name": str(n), "status": "completed", "conclusion": "failure"} for n in names])
 
 
 def _fetch_check_runs(repo: str, sha: str) -> list[dict[str, Any]] | None:
@@ -98,8 +96,8 @@ def _fetch_check_runs(repo: str, sha: str) -> list[dict[str, Any]] | None:
     （`pr-info --with checks` と同じ実装）が持ち、ここは REST の呼び出しだけを渡す。
     """
     runs = gh_parts.fetch_check_runs(
-        repo, sha, rest_get=lambda path: github._gh_rest(path),
-        per_page=CHECK_RUNS_PER_PAGE, max_pages=CHECK_RUNS_MAX_PAGES)
+        repo, sha, rest_get=lambda path: github._gh_rest(path), per_page=CHECK_RUNS_PER_PAGE, max_pages=CHECK_RUNS_MAX_PAGES
+    )
     return gh_parts.fold_check_runs(runs) if runs else None
 
 
@@ -131,12 +129,15 @@ def _round_ci(st: dict[str, Any], last: dict[str, Any], pr: int) -> dict[str, An
         }
     c = _classify_ci(runs)
     if c.code_failed:
-        return {"verdict": "code_failure", "sha": sha, "failed": c.code_failed,
-                "meta_failed": c.meta_failed, "pending": c.pending}
+        return {"verdict": "code_failure", "sha": sha, "failed": c.code_failed, "meta_failed": c.meta_failed, "pending": c.pending}
     if c.meta_failed:
-        return {"verdict": "meta_only", "sha": sha, "meta_failed": c.meta_failed,
-                "pending": c.pending,
-                "note": f"メタチェックのみ失敗: {c.meta_failed} — コードと無関係のため収束"}
+        return {
+            "verdict": "meta_only",
+            "sha": sha,
+            "meta_failed": c.meta_failed,
+            "pending": c.pending,
+            "note": f"メタチェックのみ失敗: {c.meta_failed} — コードと無関係のため収束",
+        }
     if c.pending:
         return {"verdict": "pending", "sha": sha, "pending": c.pending}
     return {"verdict": "success", "sha": sha}

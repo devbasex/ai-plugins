@@ -20,20 +20,30 @@ FOLDER_MIME = "application/vnd.google-apps.folder"
 
 def get_or_create_folder(service, name: str, parent_id: str) -> str:
     """parent 配下に同名フォルダがあればその ID、なければ作成して ID を返す。"""
-    q = (
-        f"'{parent_id}' in parents and name='{name}' "
-        f"and mimeType='{FOLDER_MIME}' and trashed=false"
+    q = f"'{parent_id}' in parents and name='{name}' and mimeType='{FOLDER_MIME}' and trashed=false"
+    found = (
+        service.files()
+        .list(
+            q=q,
+            spaces="drive",
+            fields="files(id,name)",
+            supportsAllDrives=True,
+            includeItemsFromAllDrives=True,
+        )
+        .execute()
+        .get("files", [])
     )
-    found = service.files().list(
-        q=q, spaces="drive", fields="files(id,name)",
-        supportsAllDrives=True, includeItemsFromAllDrives=True,
-    ).execute().get("files", [])
     if found:
         return found[0]["id"]
-    folder = service.files().create(
-        body={"name": name, "mimeType": FOLDER_MIME, "parents": [parent_id]},
-        fields="id", supportsAllDrives=True,
-    ).execute()
+    folder = (
+        service.files()
+        .create(
+            body={"name": name, "mimeType": FOLDER_MIME, "parents": [parent_id]},
+            fields="id",
+            supportsAllDrives=True,
+        )
+        .execute()
+    )
     print(f"  [folder] created: {name} -> {folder['id']}", file=sys.stderr)
     return folder["id"]
 
@@ -41,18 +51,21 @@ def get_or_create_folder(service, name: str, parent_id: str) -> str:
 def upload_file(service, path: Path, parent_id: str) -> str:
     mime = mimetypes.guess_type(str(path))[0] or "application/octet-stream"
     media = MediaFileUpload(str(path), mimetype=mime, resumable=True)
-    file = service.files().create(
-        body={"name": path.name, "parents": [parent_id]},
-        media_body=media, fields="id,name,size",
-        supportsAllDrives=True,
-    ).execute()
-    print(f"  [file]   {path.name} ({path.stat().st_size:,} bytes) -> {file['id']}",
-          file=sys.stderr)
+    file = (
+        service.files()
+        .create(
+            body={"name": path.name, "parents": [parent_id]},
+            media_body=media,
+            fields="id,name,size",
+            supportsAllDrives=True,
+        )
+        .execute()
+    )
+    print(f"  [file]   {path.name} ({path.stat().st_size:,} bytes) -> {file['id']}", file=sys.stderr)
     return file["id"]
 
 
-def upload_dir(service, local_dir: Path, drive_parent_id: str,
-               uploaded: list[dict] | None = None) -> list[dict]:
+def upload_dir(service, local_dir: Path, drive_parent_id: str, uploaded: list[dict] | None = None) -> list[dict]:
     """local_dir を再帰的に上げ、上げたファイルの {path, id} を uploaded に足して返す。"""
     if uploaded is None:
         uploaded = []
@@ -74,10 +87,18 @@ def main() -> int:
     service = drive_service(SCOPES)
     print(f"Upload {args.local} -> drive folder {args.parent}", file=sys.stderr)
     uploaded = upload_dir(service, args.local, args.parent)
-    print(json.dumps({
-        "local": str(args.local), "parent": args.parent,
-        "count": len(uploaded), "files": uploaded,
-    }, ensure_ascii=False, indent=2))
+    print(
+        json.dumps(
+            {
+                "local": str(args.local),
+                "parent": args.parent,
+                "count": len(uploaded),
+                "files": uploaded,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
     return 0
 
 

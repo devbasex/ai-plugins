@@ -13,6 +13,7 @@
 
 **書式が 1 ファイルであることを前提にする文書も外す。** 外した理由は `EXEMPT` に書く。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -53,7 +54,9 @@ def tracked_markdown(root: Path) -> list[str]:
     """
     result = subprocess.run(
         ["git", "-C", str(root), "ls-files", "-z", "*.md"],
-        capture_output=True, text=True, check=True,
+        capture_output=True,
+        text=True,
+        check=True,
     )
     return [entry for entry in result.stdout.split("\0") if entry]
 
@@ -99,10 +102,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # **除外は片方向ではない。** 基準を下回った文書も、指し先を失った文書も、除外
     # そのものが要らなくなっている（後者は #417 の 6）。
-    stale = sorted(
-        rel for rel in EXEMPT
-        if (root / rel).is_file() and line_count(root / rel) <= LIMIT
-    )
+    stale = sorted(rel for rel in EXEMPT if (root / rel).is_file() and line_count(root / rel) <= LIMIT)
     missing = sorted(rel for rel in EXEMPT if not (root / rel).is_file())
 
     # 除外の後に 1 件も残らないなら、チェックは働いていない。`git ls-files` が非空でも

@@ -3,6 +3,7 @@
 判定は `plugins/ndf/scripts/lib/projects-common.sh` に集約されている。テストはこの層に
 対して書き、GitHub への通信は行わない。
 """
+
 from __future__ import annotations
 
 import sys

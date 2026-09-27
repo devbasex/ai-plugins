@@ -33,15 +33,28 @@ def main() -> int:
         "mimeType": "application/vnd.google-apps.document",
         "parents": [args.parent],
     }
-    file = service.files().create(
-        body=meta, media_body=media,
-        fields="id,name,webViewLink,mimeType",
-        supportsAllDrives=True,
-    ).execute()
-    print(json.dumps({
-        "id": file["id"], "name": file["name"],
-        "mime_type": file["mimeType"], "url": file["webViewLink"],
-    }, ensure_ascii=False, indent=2))
+    file = (
+        service.files()
+        .create(
+            body=meta,
+            media_body=media,
+            fields="id,name,webViewLink,mimeType",
+            supportsAllDrives=True,
+        )
+        .execute()
+    )
+    print(
+        json.dumps(
+            {
+                "id": file["id"],
+                "name": file["name"],
+                "mime_type": file["mimeType"],
+                "url": file["webViewLink"],
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
     return 0
 
 

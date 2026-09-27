@@ -3,6 +3,7 @@
 予算を変えると、各上限が式どおりに変わることを固定する。式は
 `docs/02-plan-and-implement.md` の「締め切り」の節にある。
 """
+
 from __future__ import annotations
 
 import datetime as dt
@@ -23,10 +24,14 @@ RESERVE = {"danger_whole_test": 1.0, "final_whole_test": 1.0, "fix": 5.5, "final
 
 def _items(start_offsets):
     """着手の締め切り（開始からの分）と見積り（分）を持つ項目。"""
-    return [{"start_deadline": (START + a * M).isoformat(),
-             "test_start_deadline": (START + t * M).isoformat() if t is not None else None,
-             "estimate": {"test": 2.7 if t is not None else 0.0, "implement": 1.3, "verify": 0.2}}
-            for a, t in start_offsets]
+    return [
+        {
+            "start_deadline": (START + a * M).isoformat(),
+            "test_start_deadline": (START + t * M).isoformat() if t is not None else None,
+            "estimate": {"test": 2.7 if t is not None else 0.0, "implement": 1.3, "verify": 0.2},
+        }
+        for a, t in start_offsets
+    ]
 
 
 @pytest.mark.parametrize("budget_minutes", [10, 60])
@@ -51,9 +56,9 @@ def test_every_limit_follows_the_budget(timeline, budget_minutes):
 
 
 def test_the_test_limit_grows_with_the_measured_whole_test(timeline):
-    assert timeline.test_timeout(30, 59.0) == 177          # 3 × 59
-    assert timeline.test_timeout(30, 1.0) == 18            # 0.01 × 1800 が下限
-    assert timeline.test_timeout(30, None) == 180          # 測れていなければ着手前の上限
+    assert timeline.test_timeout(30, 59.0) == 177  # 3 × 59
+    assert timeline.test_timeout(30, 1.0) == 18  # 0.01 × 1800 が下限
+    assert timeline.test_timeout(30, None) == 180  # 測れていなければ着手前の上限
 
 
 def test_values_after_the_plan_are_empty_before_the_plan(timeline):

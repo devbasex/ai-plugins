@@ -18,6 +18,7 @@
 
 使う側は `deps.require("pathmatch")` を先に呼ぶ。
 """
+
 from __future__ import annotations
 
 from functools import lru_cache

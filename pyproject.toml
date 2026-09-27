@@ -35,3 +35,39 @@ package = false
 
 [tool.uv.sources]
 playwright_kit = { path = "plugins/playwright-kit/skills/playwright-kit-ops", editable = true }
+
+# 検査のツール（#1323 の決定 6）。scripts/check-lint.sh が `uv run --frozen --project . --only-group lint` から起動する。
+# 手元と CI とこの版だけを読む。上げるときは、ここと uv.lock を同じ PR で変え（`uv add --group lint ruff==<版>`）、
+# 同じ PR で `bash scripts/check-lint.sh` が 0 で終わるまで新しい違反を直すか抑止する。
+# cross-refactoring の指標の測定（codemetrics.py）が固定する ruff の版とは共有しない（決定 8）。
+[dependency-groups]
+lint = [
+    "ruff==0.16.9",
+    "shellcheck-py==0.11.0.1",
+]
+
+# Ruff の設定（#1323）。このリポジトリの開発の検査だけが読む。
+# cross-refactoring の指標の測定は --isolated で起動するので、この設定を読まない（決定 8）。
+[tool.ruff]
+# NDF のスクリプトは利用者の環境で 3.10 以上で動く（plugins/ndf/pyproject.toml）。根の requires-python からの推定に任せない
+target-version = "py310"
+# ruff は全角の文字を幅 2 と数える。140 は supervise_lib の各ファイルが 500 行の上限
+# （test_supervise_layout.py）に収まる最も狭い候補（決定 4）
+line-length = 140
+
+[tool.ruff.lint]
+# 未定義名・未使用の import・構文に近い誤りを見る規則だけを選ぶ（決定 1）。
+# I（import の並べ替え）は、sys.path へ経路を足した後の import の順序を崩すので採らない
+select = ["E4", "E7", "E9", "F", "W"]
+ignore = [
+    # sys.path に経路を足してから隣のモジュールを import するのがリポジトリの規約の形（決定 2）
+    "E402",
+    # l・O などの紛らわしい名前は字形の規則で、誤りではない。名前を変える修正は最小の修正を超える（決定 2）
+    "E741",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# gh_fake のフィクスチャ fake を import し、テストの引数で同じ名前を受ける pytest の形（決定 3）
+"plugins/ndf/scripts/tests/test_gh_call.py" = ["F811"]
+"plugins/ndf/scripts/tests/test_gh_quota.py" = ["F811"]
+"plugins/ndf/scripts/tests/test_gh_rest.py" = ["F811"]

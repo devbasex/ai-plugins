@@ -13,6 +13,7 @@
 対象の語の見分けは `scope.round_test_roots` と同じ規則を使う。範囲の関門と検証とで
 同じコマンドを別々に読むと、関門を通したコマンドが検証で違う形に組み立てられる。
 """
+
 from __future__ import annotations
 
 import os
@@ -94,12 +95,12 @@ def runner_index(words: list[str]) -> Optional[int]:
     while progressed:
         progressed = False
         for prefix in _PREFIXES:
-            if tuple(words[i:i + len(prefix)]) == prefix:
+            if tuple(words[i : i + len(prefix)]) == prefix:
                 i = _skip_options(words, i + len(prefix))
                 progressed = True
                 break
     for runner in KNOWN_RUNNERS:
-        if tuple(words[i:i + len(runner)]) == runner:
+        if tuple(words[i : i + len(runner)]) == runner:
             return i + len(runner) - 1
     return None
 
@@ -156,11 +157,14 @@ def build(command: str, targets: list[str], work: str) -> Optional[list[str]]:
         return words + list(targets)
     kept = [word for i, word in enumerate(words) if i not in set(hits)]
     # 取り除いた語はすべて最初の位置以降にあるため、最初の位置は残した並びでも同じである。
-    return kept[:hits[0]] + list(targets) + kept[hits[0]:]
+    return kept[: hits[0]] + list(targets) + kept[hits[0] :]
 
 
 def valid_targets(
-    targets: list[str], work: str, scope: list[str], planned: Iterable[str] = (),
+    targets: list[str],
+    work: str,
+    scope: list[str],
+    planned: Iterable[str] = (),
 ) -> bool:
     """`test_targets` が組み立てに使えるか。1 つでも満たさなければ偽。
 
@@ -203,7 +207,9 @@ def _command_of(value: Any) -> Optional[str]:
 
 
 def limited_command(
-    state_like: dict[str, Any], test_targets: list[str], work: str,
+    state_like: dict[str, Any],
+    test_targets: list[str],
+    work: str,
     planned: Iterable[str] = (),
 ) -> tuple[Optional[list[str]], str]:
     """項目の検証に使う語の並びと、その由来（`targets` / `round_test` / `none`）。
@@ -259,7 +265,7 @@ def failed_nodes(output: str) -> list[str]:
     for line in str(output or "").splitlines():
         for prefix in _SUMMARY_PREFIXES:
             if line.startswith(prefix):
-                node = _node_of(line[len(prefix):])
+                node = _node_of(line[len(prefix) :])
                 if node and node not in found:
                     found.append(node)
     return found
@@ -279,6 +285,5 @@ def rerun_command(command: str, nodes: list[str], work: str) -> Optional[list[st
     idx = runner_index(words)
     if idx is None or words[idx] != "pytest":
         return None
-    kept = [word for i, word in enumerate(words)
-            if not (i > idx and os.path.normpath(word) == "." and words[i - 1] not in VALUE_OPTIONS)]
+    kept = [word for i, word in enumerate(words) if not (i > idx and os.path.normpath(word) == "." and words[i - 1] not in VALUE_OPTIONS)]
     return build(shlex.join(kept), list(nodes), work)

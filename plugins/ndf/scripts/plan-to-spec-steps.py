@@ -10,6 +10,7 @@
 終了コードは 0 = ok / 1 = コミットする変更が無い・git が失敗 /
 3 = 確定仕様か設計のファイルが無い、または用語集の設定か正本が読めない。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -23,8 +24,17 @@ import deps  # noqa: E402
 
 deps.require("md", "mdtable", "textparse", "pathmatch")  # glossary.py の分を含めて 1 回で入れる（決定 23）
 import md  # noqa: E402
-from step_result import (EXIT_PRECONDITION, StepError, commit, common_parser, emit, git,  # noqa: E402
-                         git_root, main_with, result)
+from step_result import (
+    EXIT_PRECONDITION,
+    StepError,
+    commit,
+    common_parser,
+    emit,
+    git,  # noqa: E402
+    git_root,
+    main_with,
+    result,
+)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import glossary  # noqa: E402
@@ -38,8 +48,7 @@ def update_index(index, text, name, link, title):
     desc = title or name
     linked = {ln.line for ln in md.links(text) if ln.href.split("#", 1)[0].endswith(".md")}
     rows = {tb.start + 2 + k for tb in md.tables(text) for k in range(len(tb.rows))}
-    items = {t.map[0] for t in md.md_tokens(text) if t.type == "list_item_open" and t.map
-             and lines[t.map[0]].lstrip()[:2] in ("- ", "* ")}
+    items = {t.map[0] for t in md.md_tokens(text) if t.type == "list_item_open" and t.map and lines[t.map[0]].lstrip()[:2] in ("- ", "* ")}
     found = [(i, "table" if i in rows else "list") for i in sorted(linked) if i in rows or i in items]
     last, kind = found[-1] if found else (None, None)
     if last is None:
@@ -68,8 +77,7 @@ def load_checked_glossary(root: Path):
         raise StepError(f"用語集の設定（.ndf/glossary.json）か正本が読めない: {e}", EXIT_PRECONDITION)
     bad = [f["detail"] for f in glossary.structure_findings(g, decl) if f["rule"] == "schema"]
     if bad:
-        raise StepError(f"用語集の正本の形が崩れている（glossary.py check --rules structure で直す）: {bad[0]}",
-                        EXIT_PRECONDITION)
+        raise StepError(f"用語集の正本の形が崩れている（glossary.py check --rules structure で直す）: {bad[0]}", EXIT_PRECONDITION)
     return decl, g
 
 
@@ -132,21 +140,26 @@ def cmd_spec_finalize(a):
         if f"]({link})" not in text and f"]({spec_rel})" not in text and f"](./{link})" not in text:
             update_index(index, text, spec.name, link, a.title)
             git(root, "add", "--", index.relative_to(root).as_posix())
-            items.append({"kind": "index", "name": index.relative_to(root).as_posix(), "result": "added",
-                          "link": link})
+            items.append({"kind": "index", "name": index.relative_to(root).as_posix(), "result": "added", "link": link})
 
     git(root, "add", "--", spec_rel)
     if git(root, "diff", "--cached", "--quiet", check=False).returncode == 0:
         raise StepError("コミットする変更が無い")
     sha = commit(root, f"Docs: {spec.name} を確定仕様にする")
     items.append({"kind": "commit", "name": sha, "result": "committed"})
-    emit(result(TOOL, "ok", f"{spec_rel} を確定仕様にした（設計 {len(a.design)} 件を削除、{sha[:8]}）",
-                items, {"removed_designs": len(a.design), "commit": sha}))
+    emit(
+        result(
+            TOOL,
+            "ok",
+            f"{spec_rel} を確定仕様にした（設計 {len(a.design)} 件を削除、{sha[:8]}）",
+            items,
+            {"removed_designs": len(a.design), "commit": sha},
+        )
+    )
 
 
 def build_parser():
-    ap = argparse.ArgumentParser(prog="plan-to-spec-steps.py", description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(prog="plan-to-spec-steps.py", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--root", help="対象のリポジトリの根（既定はカレントの git の根）")
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("spec-finalize", parents=[common_parser()], help="設計を消し、確定仕様を索引へ載せてコミットする")

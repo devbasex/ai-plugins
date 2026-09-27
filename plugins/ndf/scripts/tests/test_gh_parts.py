@@ -2,6 +2,7 @@
 
 `gh` は定義元の `gh_call.RUNNER` を見本の応答へ差し替えて呼ぶ（#1142 の L0 で分けた）。GitHub へは届かない。
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -25,8 +26,7 @@ RATE = "GraphQL: API rate limit exceeded for user ID 1."
 
 
 def _rest_out(body, remaining=4999):
-    return (f"HTTP/2.0 200 OK\nX-Ratelimit-Remaining: {remaining}\r\n"
-            f"X-Ratelimit-Reset: 1700000000\r\n\r\n{json.dumps(body)}")
+    return f"HTTP/2.0 200 OK\nX-Ratelimit-Remaining: {remaining}\r\nX-Ratelimit-Reset: 1700000000\r\n\r\n{json.dumps(body)}"
 
 
 class FakeGh:
@@ -47,8 +47,7 @@ class FakeGh:
     def __call__(self, args, stdin=None):
         self.calls.append((list(args), stdin))
         for prefix, res in self.routes:
-            if tuple(args[:len(prefix)]) == prefix or (
-                    len(prefix) == 1 and prefix[0] in " ".join(args)):
+            if tuple(args[: len(prefix)]) == prefix or (len(prefix) == 1 and prefix[0] in " ".join(args)):
                 return res(args, stdin) if callable(res) else res
         pytest.fail(f"想定外の gh の呼び出し: {args}")
 
@@ -64,24 +63,48 @@ def fake(monkeypatch):
 
 
 GRAPHQL_PR = {
-    "number": PR, "title": "t", "body": "本文", "state": "OPEN", "isDraft": False,
-    "author": {"login": "alice"}, "headRefName": "feat/x", "headRefOid": SHA,
-    "baseRefName": "main", "url": "https://github.com/o/r/pull/812",
-    "additions": 10, "deletions": 2, "changedFiles": 3, "labels": [{"name": "bug"}],
+    "number": PR,
+    "title": "t",
+    "body": "本文",
+    "state": "OPEN",
+    "isDraft": False,
+    "author": {"login": "alice"},
+    "headRefName": "feat/x",
+    "headRefOid": SHA,
+    "baseRefName": "main",
+    "url": "https://github.com/o/r/pull/812",
+    "additions": 10,
+    "deletions": 2,
+    "changedFiles": 3,
+    "labels": [{"name": "bug"}],
     "isCrossRepository": False,
 }
 REST_PR = {
-    "number": PR, "title": "t", "body": "本文", "state": "open", "draft": False,
-    "user": {"login": "alice"}, "head": {"ref": "feat/x", "sha": SHA, "repo": {"full_name": REPO}},
-    "base": {"ref": "main"}, "html_url": "https://github.com/o/r/pull/812",
-    "additions": 10, "deletions": 2, "changed_files": 3, "labels": [],
+    "number": PR,
+    "title": "t",
+    "body": "本文",
+    "state": "open",
+    "draft": False,
+    "user": {"login": "alice"},
+    "head": {"ref": "feat/x", "sha": SHA, "repo": {"full_name": REPO}},
+    "base": {"ref": "main"},
+    "html_url": "https://github.com/o/r/pull/812",
+    "additions": 10,
+    "deletions": 2,
+    "changed_files": 3,
+    "labels": [],
 }
 
 
 def _run(name, conclusion, started, run_id, status="completed"):
-    return {"id": run_id, "name": name, "status": status, "conclusion": conclusion,
-            "started_at": started,
-            "details_url": f"https://github.com/o/r/actions/runs/9/job/{run_id}"}
+    return {
+        "id": run_id,
+        "name": name,
+        "status": status,
+        "conclusion": conclusion,
+        "started_at": started,
+        "details_url": f"https://github.com/o/r/actions/runs/9/job/{run_id}",
+    }
 
 
 def _checks(*runs):
@@ -90,18 +113,23 @@ def _checks(*runs):
 
 # ---------------- 上限の見分け ----------------
 
-@pytest.mark.parametrize("text, expected", [
-    (RATE, True),
-    ("RATE_LIMITED", True),
-    ("unknown owner type", True),
-    ("HTTP 404: Not Found", False),
-    ("", False),
-])
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        (RATE, True),
+        ("RATE_LIMITED", True),
+        ("unknown owner type", True),
+        ("HTTP 404: Not Found", False),
+        ("", False),
+    ],
+)
 def test_rate_limit_is_recognized_with_the_same_words_as_projects_common(text, expected):
     assert gp.is_rate_limited(text) is expected
 
 
 # ---------------- pr-info ----------------
+
 
 def test_pr_info_returns_meta_body_and_diff_stats_in_one_result(fake, tmp_path):
     fake.on("pr", "view", out=json.dumps(GRAPHQL_PR))
@@ -112,8 +140,7 @@ def test_pr_info_returns_meta_body_and_diff_stats_in_one_result(fake, tmp_path):
     pr = obj["items"][0]
     assert pr["kind"] == "pr" and pr["author"] == "alice" and pr["body"] == "本文"
     assert pr["head_sha"] == SHA and pr["state"] == "open"
-    assert obj["metrics"] == {"source": "graphql", "additions": 10, "deletions": 2,
-                              "changed_files": 3}
+    assert obj["metrics"] == {"source": "graphql", "additions": 10, "deletions": 2, "changed_files": 3}
 
 
 def test_pr_info_falls_back_to_rest_when_graphql_is_rate_limited(fake, tmp_path):
@@ -141,11 +168,15 @@ def test_pr_info_does_not_fall_back_on_other_failures(fake, tmp_path):
 def test_checks_fold_to_the_latest_run_per_name(fake, tmp_path):
     """同名の check が failure → success の順に 2 件あるとき success を返す（#632）。"""
     fake.on("pr", "view", out=json.dumps(GRAPHQL_PR))
-    fake.on("api", "-i", out=_checks(
-        _run("pytest", "failure", "2026-09-25T01:00:00Z", 101),
-        _run("lint", "success", "2026-09-25T01:00:00Z", 102),
-        _run("pytest", "success", "2026-09-25T02:00:00Z", 103),
-    ))
+    fake.on(
+        "api",
+        "-i",
+        out=_checks(
+            _run("pytest", "failure", "2026-09-25T01:00:00Z", 101),
+            _run("lint", "success", "2026-09-25T01:00:00Z", 102),
+            _run("pytest", "success", "2026-09-25T02:00:00Z", 103),
+        ),
+    )
 
     obj, _ = gp.pr_info(PR, REPO, {"checks"}, tmp_path)
 
@@ -156,12 +187,10 @@ def test_checks_fold_to_the_latest_run_per_name(fake, tmp_path):
 
 
 def test_fold_uses_run_order_when_times_are_missing():
-    runs = [{"name": "t", "status": "completed", "conclusion": "failure"},
-            {"name": "t", "status": "completed", "conclusion": "success"}]
+    runs = [{"name": "t", "status": "completed", "conclusion": "failure"}, {"name": "t", "status": "completed", "conclusion": "success"}]
     assert [gp.run_result(r) for r in gp.fold_check_runs(runs)] == ["success"]
     # 一覧が新しい順でも、開始時刻の新しい方が勝つ
-    newest_first = [_run("t", "success", "2026-09-25T02:00:00Z", 2),
-                    _run("t", "failure", "2026-09-25T01:00:00Z", 1)]
+    newest_first = [_run("t", "success", "2026-09-25T02:00:00Z", 2), _run("t", "failure", "2026-09-25T01:00:00Z", 1)]
     assert gp.check_result(newest_first, "t") == "success"
     assert gp.check_result(newest_first, "other") is None
     assert gp.check_result(None, "t") is None
@@ -169,9 +198,13 @@ def test_fold_uses_run_order_when_times_are_missing():
 
 def test_failed_check_logs_are_saved_to_files_not_embedded(fake, tmp_path):
     fake.on("pr", "view", out=json.dumps(GRAPHQL_PR))
-    fake.on("api", "-i", out=_checks(_run("pytest", "failure", "2026-09-25T01:00:00Z", 101),
-                                     _run("build", None, "2026-09-25T01:00:00Z", 102,
-                                          status="in_progress")))
+    fake.on(
+        "api",
+        "-i",
+        out=_checks(
+            _run("pytest", "failure", "2026-09-25T01:00:00Z", 101), _run("build", None, "2026-09-25T01:00:00Z", 102, status="in_progress")
+        ),
+    )
     fake.on("run", "view", out="E   assert 1 == 2\n")
 
     obj, _ = gp.pr_info(PR, REPO, {"checks", "logs"}, tmp_path)
@@ -207,10 +240,15 @@ def test_diff_is_written_to_a_file(fake, tmp_path):
 
 def test_check_runs_are_read_to_total_count_across_pages(fake):
     first = [_run(f"c{i}", "success", "", i) for i in range(100)]
-    fake.on("api", "-i", f"repos/{REPO}/commits/{SHA}/check-runs?per_page=100&page=1",
-            out=_rest_out({"total_count": 101, "check_runs": first}))
-    fake.on("api", "-i", f"repos/{REPO}/commits/{SHA}/check-runs?per_page=100&page=2",
-            out=_rest_out({"total_count": 101, "check_runs": [_run("last", "failure", "", 999)]}))
+    fake.on(
+        "api", "-i", f"repos/{REPO}/commits/{SHA}/check-runs?per_page=100&page=1", out=_rest_out({"total_count": 101, "check_runs": first})
+    )
+    fake.on(
+        "api",
+        "-i",
+        f"repos/{REPO}/commits/{SHA}/check-runs?per_page=100&page=2",
+        out=_rest_out({"total_count": 101, "check_runs": [_run("last", "failure", "", 999)]}),
+    )
 
     runs = gp.fetch_check_runs(REPO, SHA)
 
@@ -219,13 +257,16 @@ def test_check_runs_are_read_to_total_count_across_pages(fake):
 
 # ---------------- unresolved-threads ----------------
 
+
 def test_unresolved_threads_carry_thread_id(fake):
     fake.on("api", "graphql", out="PRRT_a\tsrc/foo.py\t42\nPRRT_b\tdocs/bar.md\t\n")
 
     threads = gp.unresolved_threads(REPO, PR)
 
-    assert threads == [{"thread_id": "PRRT_a", "path": "src/foo.py", "line": "42"},
-                       {"thread_id": "PRRT_b", "path": "docs/bar.md", "line": ""}]
+    assert threads == [
+        {"thread_id": "PRRT_a", "path": "src/foo.py", "line": "42"},
+        {"thread_id": "PRRT_b", "path": "docs/bar.md", "line": ""},
+    ]
     joined = fake.argvs()[0]
     assert "owner=o" in joined and "name=r" in joined and f"pr={PR}" in joined
 
@@ -303,7 +344,7 @@ def test_append_is_idempotent():
 
 
 def test_heading_must_match_a_whole_line_outside_code_blocks():
-    body = ("## 進行状況\n\n別の節\n\n```md\n## 進行\n```\n")
+    body = "## 進行状況\n\n別の節\n\n```md\n## 進行\n```\n"
     assert gp.get_section(body, "## 進行") is None
     new = gp.replace_section(body, "## 進行", "x")
     assert new.startswith(body.rstrip("\n")) and new.count("## 進行\n") == 2
@@ -344,6 +385,7 @@ def test_body_section_command_stops_when_the_body_cannot_be_read(fake):
 
 # ---------------- review-post ----------------
 
+
 @pytest.mark.parametrize("viewer, own", [("alice", True), ("bob", False)])
 def test_review_post_downgrades_on_own_pr(fake, monkeypatch, tmp_path, viewer, own):
     import result_posts
@@ -355,15 +397,20 @@ def test_review_post_downgrades_on_own_pr(fake, monkeypatch, tmp_path, viewer, o
     def _post(queue, payload, result, repo, pr, round_no, seat, head_sha, is_own_pr, **kw):
         seen.update(repo=repo, pr=pr, head_sha=head_sha, is_own_pr=is_own_pr)
         return result_posts.ReviewOutcome(
-            review_url="https://github.com/o/r/pull/812#pullrequestreview-1", posted_inline=2,
-            posted_body=0, queued=0, findings=2, failed=False,
+            review_url="https://github.com/o/r/pull/812#pullrequestreview-1",
+            posted_inline=2,
+            posted_body=0,
+            queued=0,
+            findings=2,
+            failed=False,
             posted_as="COMMENT" if is_own_pr else "REQUEST_CHANGES",
-            intent="REQUEST_CHANGES", detail="")
+            intent="REQUEST_CHANGES",
+            detail="",
+        )
 
     monkeypatch.setattr(result_posts, "post_review", _post)
 
-    obj, code = gp.review_post("p.json", "r.json", PR, 1, "codex", REPO,
-                               queue_dir=str(tmp_path / "q"))
+    obj, code = gp.review_post("p.json", "r.json", PR, 1, "codex", REPO, queue_dir=str(tmp_path / "q"))
 
     assert code == 0 and seen == {"repo": REPO, "pr": PR, "head_sha": SHA, "is_own_pr": own}
     assert obj["items"][0]["posted_as"] == ("COMMENT" if own else "REQUEST_CHANGES")
@@ -374,8 +421,7 @@ def test_review_post_stops_when_the_viewer_is_unknown(fake, tmp_path):
     fake.on("api", "-i", f"repos/{REPO}/pulls/{PR}", out=_rest_out(REST_PR))
     fake.on("api", "user", rc=1, err="HTTP 401")
 
-    obj, code = gp.review_post("p.json", "r.json", PR, 1, "codex", REPO,
-                               queue_dir=str(tmp_path / "q"))
+    obj, code = gp.review_post("p.json", "r.json", PR, 1, "codex", REPO, queue_dir=str(tmp_path / "q"))
 
     assert (obj["status"], code) == ("stopped", 3)
 
@@ -385,19 +431,38 @@ def test_fold_takes_the_newer_of_completed_and_started_times():
 
     長く走って後に終わった失敗は、後に始まって先に終わった成功より新しい。
     """
-    long_failure = {"id": 1, "name": "t", "status": "completed", "conclusion": "failure",
-                    "started_at": "2026-09-25T01:00:00Z", "completed_at": "2026-09-25T03:00:00Z"}
-    short_success = {"id": 2, "name": "t", "status": "completed", "conclusion": "success",
-                     "started_at": "2026-09-25T02:00:00Z", "completed_at": "2026-09-25T02:10:00Z"}
+    long_failure = {
+        "id": 1,
+        "name": "t",
+        "status": "completed",
+        "conclusion": "failure",
+        "started_at": "2026-09-25T01:00:00Z",
+        "completed_at": "2026-09-25T03:00:00Z",
+    }
+    short_success = {
+        "id": 2,
+        "name": "t",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-09-25T02:00:00Z",
+        "completed_at": "2026-09-25T02:10:00Z",
+    }
     assert gp.check_result([long_failure, short_success], "t") == "failure"
     assert gp.check_result([short_success, long_failure], "t") == "failure"
 
 
 # ---------------- view-json（gh pr view / gh issue view の --json） ----------------
 
-REST_MERGED = {"number": 1210, "title": "Release", "body": "本文", "state": "closed",
-               "merged_at": "2026-09-26T03:52:01Z", "merged": True,
-               "merge_commit_sha": "8a0cdaa7", "html_url": "https://github.com/o/r/pull/1210"}
+REST_MERGED = {
+    "number": 1210,
+    "title": "Release",
+    "body": "本文",
+    "state": "closed",
+    "merged_at": "2026-09-26T03:52:01Z",
+    "merged": True,
+    "merge_commit_sha": "8a0cdaa7",
+    "html_url": "https://github.com/o/r/pull/1210",
+}
 
 
 def test_view_json_returns_graphql_output_as_is(fake):
@@ -412,16 +477,24 @@ def test_view_json_reads_rest_in_graphql_shape_when_rate_limited(fake):
     fake.on("api", out=json.dumps(REST_MERGED))
     r = gp.view_json("pr", 1210, "number,title,state,mergeCommit,url,body")
     assert r.returncode == 0
-    assert json.loads(r.stdout) == {"number": 1210, "title": "Release", "state": "MERGED",
-                                    "mergeCommit": {"oid": "8a0cdaa7"},
-                                    "url": "https://github.com/o/r/pull/1210", "body": "本文"}
+    assert json.loads(r.stdout) == {
+        "number": 1210,
+        "title": "Release",
+        "state": "MERGED",
+        "mergeCommit": {"oid": "8a0cdaa7"},
+        "url": "https://github.com/o/r/pull/1210",
+        "body": "本文",
+    }
     assert fake.argvs()[-1] == "api repos/{owner}/{repo}/pulls/1210"
 
 
-@pytest.mark.parametrize("rest, state, merge", [
-    ({"state": "open", "merged_at": None, "merge_commit_sha": "x"}, "OPEN", None),
-    ({"state": "closed", "merged_at": None, "merge_commit_sha": "x"}, "CLOSED", None),
-])
+@pytest.mark.parametrize(
+    "rest, state, merge",
+    [
+        ({"state": "open", "merged_at": None, "merge_commit_sha": "x"}, "OPEN", None),
+        ({"state": "closed", "merged_at": None, "merge_commit_sha": "x"}, "CLOSED", None),
+    ],
+)
 def test_view_json_rest_state_of_unmerged_pr(fake, rest, state, merge):
     fake.on("pr", "view", rc=1, err=RATE)
     fake.on("api", out=json.dumps({"number": 5, **rest}))
@@ -432,8 +505,10 @@ def test_view_json_rest_state_of_unmerged_pr(fake, rest, state, merge):
 
 def test_view_json_issue_reads_issues_endpoint(fake):
     fake.on("issue", "view", rc=1, err=RATE)
-    fake.on("api", out=json.dumps({"number": 7, "title": "課題", "state": "closed", "body": None,
-                                   "html_url": "https://github.com/o/r/issues/7"}))
+    fake.on(
+        "api",
+        out=json.dumps({"number": 7, "title": "課題", "state": "closed", "body": None, "html_url": "https://github.com/o/r/issues/7"}),
+    )
     d = json.loads(gp.view_json("issue", 7, "title,state,body,url").stdout)
     assert d == {"title": "課題", "state": "CLOSED", "body": "", "url": "https://github.com/o/r/issues/7"}
     assert fake.argvs()[-1] == "api repos/{owner}/{repo}/issues/7"

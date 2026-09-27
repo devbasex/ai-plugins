@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2034  # WF_ の変数は source する側（workflow-guard.sh・stage-check.sh）が読む（#1323）
 # NDF plugin: 工程の飛ばしの検知（#221）と、設計 Pull Request のマージの判定（#266）。
 #
 # **判定はすべてこのライブラリが持つ。** 入口のスクリプト（workflow-guard.sh /
@@ -341,7 +342,7 @@ _wf_pr_create_body_token() {
   [ "$found" -eq 0 ] || return 0
   case "$tok" in
     --body|-b) want=text ;;
-    --body-file|-F) want=file ;;
+    --body-file|-F) want='file' ;;
     --body=*) body="${tok#--body=}" ;;
     --body-file=*)
       body=$(_wf_read_file "${tok#--body-file=}")
@@ -448,6 +449,7 @@ _wf_unpack_collected() {
     printf -v "${_wf_uc_targets_name}[$_wf_uc_index]" '%s' "$_wf_uc_line"
     _wf_uc_index=$((_wf_uc_index + 1))
   done
+  # shellcheck disable=SC2229  # 読み込む先の配列の名前を引数で受ける（間接の代入。#1323）
   read -r -a "$_wf_uc_modes_name" <<<"${!_wf_uc_modes_str_name}"
 }
 

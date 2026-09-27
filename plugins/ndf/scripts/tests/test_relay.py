@@ -12,6 +12,7 @@
 **利用者の手元の設定は書き換えない。** 導入の副命令と `run` は、テストごとの一時の HOME と
 `XDG_*`・`CLAUDE_CONFIG_DIR` の下でだけ動かす（`isolated_env`）。
 """
+
 from __future__ import annotations
 
 import ast
@@ -54,9 +55,10 @@ def fake_uv(tmp_path):
             '[ -z "$FAKE_UV_LOG" ] || echo "$*" >> "$FAKE_UV_LOG"\n'
             '[ "${FAKE_UV_EXIT:-0}" = 0 ] || { echo "fake uv: no network" >&2; exit "$FAKE_UV_EXIT"; }\n'
             'mkdir -p "$UV_PROJECT_ENVIRONMENT/bin"\n'
-            "printf '#!/bin/sh\\n[ -z \"$FAKE_PY_LOG\" ] || echo \"$0\" >> \"$FAKE_PY_LOG\"\\nexec %s \"$@\"\\n' "
+            'printf \'#!/bin/sh\\n[ -z "$FAKE_PY_LOG" ] || echo "$0" >> "$FAKE_PY_LOG"\\nexec %s "$@"\\n\' '
             f"'{sys.executable}' > \"$UV_PROJECT_ENVIRONMENT/bin/python\"\n"
-            'chmod 755 "$UV_PROJECT_ENVIRONMENT/bin/python"\n')
+            'chmod 755 "$UV_PROJECT_ENVIRONMENT/bin/python"\n'
+        )
         uv.chmod(0o755)
     return uv
 
@@ -75,8 +77,7 @@ def isolated_env(tmp_path, **extra):
     """
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
-    e = {k: v for k, v in os.environ.items()
-         if not k.startswith(("NDF_", "XDG_", "CLAUDE", "DEVBASE_")) and k not in ("ZDOTDIR",)}
+    e = {k: v for k, v in os.environ.items() if not k.startswith(("NDF_", "XDG_", "CLAUDE", "DEVBASE_")) and k not in ("ZDOTDIR",)}
     e["HOME"] = str(home)
     e["NDF_RELAY_UV"] = str(fake_uv(tmp_path))
     e.update({k: str(v) for k, v in extra.items()})
@@ -121,9 +122,14 @@ def relay(tmp_path):
 
 
 def stop_input(message, **extra):
-    d = {"session_id": "sess-1", "transcript_path": "/tmp/t.jsonl", "cwd": "/work/x",
-         "stop_hook_active": False, "last_assistant_message": message,
-         "background_tasks": []}
+    d = {
+        "session_id": "sess-1",
+        "transcript_path": "/tmp/t.jsonl",
+        "cwd": "/work/x",
+        "stop_hook_active": False,
+        "last_assistant_message": message,
+        "background_tasks": [],
+    }
     d.update(extra)
     return json.dumps(d)
 
@@ -172,8 +178,7 @@ def test_mark_writes_even_when_stop_hook_active(relay):
     assert relay.next.exists()
 
 
-@pytest.mark.parametrize("case", ["no-dir", "not-running", "zero", "two", "quoted-only",
-                                  "broken-json", "not-direct-child", "text-info"])
+@pytest.mark.parametrize("case", ["no-dir", "not-running", "zero", "two", "quoted-only", "broken-json", "not-direct-child", "text-info"])
 def test_mark_does_nothing(tmp_path, relay, case):
     msg = fence("/goal x")
     env_dir = relay.dir
@@ -215,14 +220,14 @@ def test_mark_not_direct_child_claude_keeps_mark(tmp_path, relay):
     # 名前が claude の別のスクリプトを間に挟む。mark から見て最初の claude はこのスクリプトになる
     wrapper = tmp_path / "bin" / "claude"
     wrapper.parent.mkdir()
-    wrapper.write_text(f"#!{sys.executable}\nimport subprocess, sys\n"
-                       f"sys.exit(subprocess.run([{sys.executable!r}, {str(RELAY)!r}, 'mark']).returncode)\n")
+    wrapper.write_text(
+        f"#!{sys.executable}\nimport subprocess, sys\nsys.exit(subprocess.run([{sys.executable!r}, {str(RELAY)!r}, 'mark']).returncode)\n"
+    )
     wrapper.chmod(0o755)
     e = {k: v for k, v in os.environ.items() if not k.startswith("NDF_")}
     e["NDF_RELAY_DIR"] = str(relay.dir)
     for msg in ("ブロックは無い", fence("/goal other")):
-        p = subprocess.run([str(wrapper)], input=stop_input(msg), capture_output=True,
-                           text=True, env=e, timeout=20)
+        p = subprocess.run([str(wrapper)], input=stop_input(msg), capture_output=True, text=True, env=e, timeout=20)
         quiet_ok(p)
         assert relay.next.read_text() == '{"command": "keep"}'
 
@@ -259,8 +264,13 @@ def log_rows(relay, event):
     return [r for r in rows if r.get("event") == event]
 
 
-WATCH = {"id": "bxl0kh7gi", "type": "shell", "status": "running", "description": "見張り",
-         "command": "until grep -q '\"event\": \"attention\"' q.log; do sleep 30; done " + "x" * 100}
+WATCH = {
+    "id": "bxl0kh7gi",
+    "type": "shell",
+    "status": "running",
+    "description": "見張り",
+    "command": 'until grep -q \'"event": "attention"\' q.log; do sleep 30; done ' + "x" * 100,
+}
 
 
 def test_mark_holds_stop_once_and_lists_tasks(relay):
@@ -277,8 +287,7 @@ def test_mark_holds_stop_once_and_lists_tasks(relay):
     # 同じ候補の 2 度目は止めない
     quiet_ok(mark(relay.dir, data))
     rows = log_rows(relay, "mark_skipped")
-    assert [(r["section"], r["reason"], r["held"]) for r in rows] == [(2, "background", True),
-                                                                      (2, "background", False)]
+    assert [(r["section"], r["reason"], r["held"]) for r in rows] == [(2, "background", True), (2, "background", False)]
     assert rows[0]["tasks"] == [{"id": "bxl0kh7gi", "type": "shell", "command": WATCH["command"][:80]}]
     # TaskStop の後に出し直した ndf-next で合図が書かれる
     quiet_ok(mark(relay.dir, stop_input(fence("/goal x"))))
@@ -309,8 +318,7 @@ def test_mark_skipped_logs_two_blocks_without_holding(relay):
 
 
 def wakeup_row(at, **inp):
-    return {"type": "assistant", "timestamp": at,
-            "message": {"content": [{"type": "tool_use", "name": "ScheduleWakeup", "input": inp}]}}
+    return {"type": "assistant", "timestamp": at, "message": {"content": [{"type": "tool_use", "name": "ScheduleWakeup", "input": inp}]}}
 
 
 def write_rows(path, rows):
@@ -321,13 +329,17 @@ def write_rows(path, rows):
 def test_pending_wakeups_after_last_stop(tmp_path):
     """発火の前の ScheduleWakeup の予約を返す。stop: true より前の予約・発火済みの予約は数えない。"""
     now = relay_common.parse_iso("2026-09-26T18:50:00Z")
-    tp = write_rows(tmp_path / "t.jsonl", [
-        wakeup_row("2026-09-26T18:00:00Z", delaySeconds=1200),  # 18:20 に発火済み
-        wakeup_row("2026-09-26T18:36:37Z", delaySeconds=1200),  # 18:56:37 に発火する
-    ])
+    tp = write_rows(
+        tmp_path / "t.jsonl",
+        [
+            wakeup_row("2026-09-26T18:00:00Z", delaySeconds=1200),  # 18:20 に発火済み
+            wakeup_row("2026-09-26T18:36:37Z", delaySeconds=1200),  # 18:56:37 に発火する
+        ],
+    )
     assert [w["command"] for w in relay_claude.pending_wakeups(tp, now)] == ["発火の予定 2026-09-26T18:56:37Z"]
-    tp = write_rows(tmp_path / "s.jsonl", [wakeup_row("2026-09-26T18:36:37Z", delaySeconds=1200),
-                                           wakeup_row("2026-09-26T18:40:00Z", stop=True)])
+    tp = write_rows(
+        tmp_path / "s.jsonl", [wakeup_row("2026-09-26T18:36:37Z", delaySeconds=1200), wakeup_row("2026-09-26T18:40:00Z", stop=True)]
+    )
     assert relay_claude.pending_wakeups(tp, now) == []
     assert relay_claude.pending_wakeups("", now) == []
     assert relay_claude.pending_wakeups(str(tmp_path / "none.jsonl"), now) == []
@@ -382,8 +394,7 @@ import time
 
 FAKE = ROOT / "scripts" / "tests" / "fixtures" / "relay_fake_claude.py"
 
-FAST = {"NDF_RELAY_QUIET": "0.3", "NDF_RELAY_POLL": "0.1",
-        "NDF_RELAY_EXIT_WAIT": "5", "NDF_RELAY_TERM_WAIT": "2"}
+FAST = {"NDF_RELAY_QUIET": "0.3", "NDF_RELAY_POLL": "0.1", "NDF_RELAY_EXIT_WAIT": "5", "NDF_RELAY_TERM_WAIT": "2"}
 
 
 class Term:
@@ -392,8 +403,7 @@ class Term:
     def __init__(self, tmp_path, args=(), env=None, cwd=None, rows=24, cols=80, cmd=None):
         self.fake_dir = tmp_path / "fake"
         self.fake_dir.mkdir(exist_ok=True)
-        e = isolated_env(tmp_path, NDF_RELAY_CLAUDE=FAKE, FAKE_DIR=self.fake_dir,
-                         FAKE_RELAY=RELAY, **FAST)
+        e = isolated_env(tmp_path, NDF_RELAY_CLAUDE=FAKE, FAKE_DIR=self.fake_dir, FAKE_RELAY=RELAY, **FAST)
         e.update({k: str(v) for k, v in (env or {}).items()})
         self.env = e
         self.master, slave = pty.openpty()
@@ -401,9 +411,9 @@ class Term:
         self.before = termios.tcgetattr(slave)
         self.slave = slave
         cmd = cmd or [sys.executable, str(RELAY), "run"]
-        self.proc = subprocess.Popen([*cmd, *args], stdin=slave,
-                                     stdout=slave, stderr=slave, env=e, cwd=cwd or tmp_path,
-                                     start_new_session=True)
+        self.proc = subprocess.Popen(
+            [*cmd, *args], stdin=slave, stdout=slave, stderr=slave, env=e, cwd=cwd or tmp_path, start_new_session=True
+        )
         self.out = b""
         self.lock = threading.Lock()
         self.reader = threading.Thread(target=self._read, daemon=True)
@@ -434,8 +444,7 @@ class Term:
             if pred():
                 return
             time.sleep(0.05)
-        raise AssertionError(f"待ちが切れた: {what}\n画面: {self.text[-2000:]}\n"
-                             f"記録: {self.rows()}")
+        raise AssertionError(f"待ちが切れた: {what}\n画面: {self.text[-2000:]}\n記録: {self.rows()}")
 
     def starts(self):
         p = self.fake_dir / "starts.jsonl"
@@ -484,7 +493,6 @@ class Term:
                 pass
 
 
-
 @pytest.fixture()
 def term(tmp_path):
     made = []
@@ -493,6 +501,7 @@ def term(tmp_path):
         t = Term(tmp_path, args, **kw)
         made.append(t)
         return t
+
     yield make
     for t in made:
         t.close()
@@ -544,14 +553,12 @@ def test_run_switches_to_next_section(term, tmp_path):
     first, second = t.starts()[:2]
     assert second["argv"] == ["--model", "haiku", "/goal 次のステップ"]
     assert t.child_input(0).endswith(b"/exit\r")
-    assert t.calls() == [["list", "--json"], ["marketplace", "update", "mk"],
-                         ["update", "ndf@mk", "-y"], ["list", "--json"]]
+    assert t.calls() == [["list", "--json"], ["marketplace", "update", "mk"], ["update", "ndf@mk", "-y"], ["list", "--json"]]
     assert "── ndf-relay: 区間 2 ──" in t.text
     rows = t.rows()
     assert [r["event"] for r in rows] == ["start", "end", "start"]
     s1, e1, s2 = rows
-    assert set(s1) == {"event", "at", "section", "pid", "command", "from_session",
-                       "plugin_version", "cwd"}
+    assert set(s1) == {"event", "at", "section", "pid", "command", "from_session", "plugin_version", "cwd"}
     assert s1["command"] == "--model haiku"
     assert s1["plugin_version"] == "1.0.0"
     assert s2["plugin_version"] == "2.0.0"
@@ -568,16 +575,33 @@ def test_run_carries_policy_args_through_shell_function(term, tmp_path):
     区間へ引き継ぐ。区間ごとの引数（会話・名前・最初のプロンプト・`--` 以後）は落とす（#936）。"""
     assert relay_cmd(tmp_path, "install", NDF_RELAY_CLAUDE=FAKE).returncode == 0
     shellrc = cfg(tmp_path) / "shellrc"
-    script = ("shopt -s expand_aliases\n"
-              f". {shellrc}\n"
-              "alias claude='claude --dangerously-skip-permissions'\n"
-              "claude --model x --add-dir a b --resume id -c --session-id u -n nm 最初 -- --verbose\n")
+    script = (
+        "shopt -s expand_aliases\n"
+        f". {shellrc}\n"
+        "alias claude='claude --dangerously-skip-permissions'\n"
+        "claude --model x --add-dir a b --resume id -c --session-id u -n nm 最初 -- --verbose\n"
+    )
     t = term(cmd=["bash", "--norc", "--noprofile", "-c", script])
     t.wait_start(1)
     first = t.starts()[0]
-    assert first["argv"] == ["--dangerously-skip-permissions", "--model", "x", "--add-dir", "a", "b",
-                             "--resume", "id", "-c", "--session-id", "u", "-n", "nm", "最初",
-                             "--", "--verbose"]
+    assert first["argv"] == [
+        "--dangerously-skip-permissions",
+        "--model",
+        "x",
+        "--add-dir",
+        "a",
+        "b",
+        "--resume",
+        "id",
+        "-c",
+        "--session-id",
+        "u",
+        "-n",
+        "nm",
+        "最初",
+        "--",
+        "--verbose",
+    ]
     t.type("mark /goal 次のステップ\r")
     t.wait_start(2)
     carried = ["--dangerously-skip-permissions", "--model", "x", "--add-dir", "a", "b"]
@@ -688,7 +712,8 @@ def test_run_exception_keeps_child_and_restores(term, tmp_path):
         "def boom(*a, **k): raise RuntimeError('boom')\n"
         "import relay_lib.run\n"
         "relay_lib.run.Relay._tick = boom\n"
-        "sys.exit(m.main(sys.argv[1:]))\n")
+        "sys.exit(m.main(sys.argv[1:]))\n"
+    )
     t = term(cmd=[sys.executable, str(wrapper), "run"])
     t.wait_start(1)
     t.wait(lambda: "ndf-relay: 次の区間を起動しない" in t.text, what="例外の 1 行")
@@ -728,33 +753,58 @@ def mod(tmp_path, monkeypatch):
     def fake_execve(path, argv, env):
         calls.append((path, argv, dict(env)))
         raise Execd()
+
     monkeypatch.setattr(m.os, "execve", fake_execve)
     m.calls = calls
     return m
 
 
-@pytest.mark.parametrize("args, expected", [
-    (["--dangerously-skip-permissions"], ["--dangerously-skip-permissions"]),
-    (["--model", "x", "最初"], ["--model", "x"]),
-    (["--model=x", "--resume=abc", "最初"], ["--model=x"]),
-    (["--add-dir", "a", "b", "--verbose"], ["--add-dir", "a", "b", "--verbose"]),
-    (["--mcp-config", "a.json", "b.json", "--permission-mode", "plan"],
-     ["--mcp-config", "a.json", "b.json", "--permission-mode", "plan"]),
-    (["--resume", "id", "--model", "x"], ["--model", "x"]),
-    (["-r", "--model", "x"], ["--model", "x"]),
-    (["-c", "--dangerously-skip-permissions", "最初"], ["--dangerously-skip-permissions"]),
-    (["--session-id", "u", "--fork-session", "-n", "nm", "--name", "nm2", "--bg", "--background",
-      "--tmux", "--from-pr", "12", "--teleport", "--cloud", "desc", "--continue"], []),
-    (["--dangerously-skip-permissions", "--", "--model", "x"], ["--dangerously-skip-permissions"]),
-    (["--debug", "api", "--verbose", "最初"], ["--debug", "api", "--verbose"]),
-    (["--unknown-opt", "v", "最初"], ["--unknown-opt", "v"]),
-    (["-nfoo", "-rabc", "--session-id=u", "--model", "x"], ["--model", "x"]),
-    (["-w", "wt", "--worktree", "--model", "x"], ["--model", "x"]),
-    (["--system-prompt", "--guard", "最初"], ["--system-prompt", "--guard"]),
-    (["--system-prompt", "-guard", "最初"], ["--system-prompt", "-guard"]),
-    (["-n", "-x", "--model", "m"], ["--model", "m"]),
-    ([], []),
-])
+@pytest.mark.parametrize(
+    "args, expected",
+    [
+        (["--dangerously-skip-permissions"], ["--dangerously-skip-permissions"]),
+        (["--model", "x", "最初"], ["--model", "x"]),
+        (["--model=x", "--resume=abc", "最初"], ["--model=x"]),
+        (["--add-dir", "a", "b", "--verbose"], ["--add-dir", "a", "b", "--verbose"]),
+        (
+            ["--mcp-config", "a.json", "b.json", "--permission-mode", "plan"],
+            ["--mcp-config", "a.json", "b.json", "--permission-mode", "plan"],
+        ),
+        (["--resume", "id", "--model", "x"], ["--model", "x"]),
+        (["-r", "--model", "x"], ["--model", "x"]),
+        (["-c", "--dangerously-skip-permissions", "最初"], ["--dangerously-skip-permissions"]),
+        (
+            [
+                "--session-id",
+                "u",
+                "--fork-session",
+                "-n",
+                "nm",
+                "--name",
+                "nm2",
+                "--bg",
+                "--background",
+                "--tmux",
+                "--from-pr",
+                "12",
+                "--teleport",
+                "--cloud",
+                "desc",
+                "--continue",
+            ],
+            [],
+        ),
+        (["--dangerously-skip-permissions", "--", "--model", "x"], ["--dangerously-skip-permissions"]),
+        (["--debug", "api", "--verbose", "最初"], ["--debug", "api", "--verbose"]),
+        (["--unknown-opt", "v", "最初"], ["--unknown-opt", "v"]),
+        (["-nfoo", "-rabc", "--session-id=u", "--model", "x"], ["--model", "x"]),
+        (["-w", "wt", "--worktree", "--model", "x"], ["--model", "x"]),
+        (["--system-prompt", "--guard", "最初"], ["--system-prompt", "--guard"]),
+        (["--system-prompt", "-guard", "最初"], ["--system-prompt", "-guard"]),
+        (["-n", "-x", "--model", "m"], ["--model", "m"]),
+        ([], []),
+    ],
+)
 def test_carried_args(mod, args, expected):
     """最初の区間の引数から、2 つ目以降の区間へ引き継ぐものを選ぶ（#936）。"""
     assert relay_claude.carried_args(args) == expected
@@ -801,14 +851,12 @@ def real_claude(tmp_path, name="real"):
     return p
 
 
-@pytest.mark.parametrize("case", ["relay-off", "under-relay", "print", "help", "subcommand",
-                                  "stdin-pipe"])
+@pytest.mark.parametrize("case", ["relay-off", "under-relay", "print", "help", "subcommand", "stdin-pipe"])
 def test_run_passthrough(mod, tmp_path, monkeypatch, capsys, case):
     claude = real_claude(tmp_path)
     monkeypatch.setenv("NDF_RELAY_CLAUDE", str(claude))
     monkeypatch.setattr(mod.os, "isatty", lambda fd: case != "stdin-pipe")
-    args = {"print": ["-p", "hi"], "help": ["--help"], "subcommand": ["mcp", "list"]}.get(
-        case, ["--model", "haiku"])
+    args = {"print": ["-p", "hi"], "help": ["--help"], "subcommand": ["mcp", "list"]}.get(case, ["--model", "haiku"])
     if case == "relay-off":
         monkeypatch.setenv("NDF_RELAY", "0")
     if case == "under-relay":
@@ -830,9 +878,12 @@ def test_run_passthrough(mod, tmp_path, monkeypatch, capsys, case):
 def test_run_cannot_start_says_then_passthrough(mod, tmp_path, monkeypatch, capsys, case):
     claude = tmp_path / "bin" / "claude"
     claude.parent.mkdir()
-    body = {"list-fails": "exit 1", "no-ndf": "echo '[{\"id\": \"x@y\", \"version\": \"1\"}]'",
-            "list-hangs": "sleep 30", "list-bad-json": "echo 'not json at all'"}.get(
-        case, "echo '[{\"id\": \"ndf@m\", \"version\": \"1\"}]'")
+    body = {
+        "list-fails": "exit 1",
+        "no-ndf": 'echo \'[{"id": "x@y", "version": "1"}]\'',
+        "list-hangs": "sleep 30",
+        "list-bad-json": "echo 'not json at all'",
+    }.get(case, 'echo \'[{"id": "ndf@m", "version": "1"}]\'')
     claude.write_text(f"#!/bin/sh\n{body}\n")
     claude.chmod(0o755)
     monkeypatch.setenv("NDF_RELAY_CLAUDE", str(claude))
@@ -852,7 +903,7 @@ def test_run_relay_dir_oserror_says_then_passthrough(mod, tmp_path, monkeypatch,
     実体へ素通しする（cmd_run の make_relay_dir が OSError になる経路）。"""
     claude = tmp_path / "bin" / "claude"
     claude.parent.mkdir()
-    claude.write_text("#!/bin/sh\necho '[{\"id\": \"ndf@m\", \"version\": \"1\"}]'\n")
+    claude.write_text('#!/bin/sh\necho \'[{"id": "ndf@m", "version": "1"}]\'\n')
     claude.chmod(0o755)
     monkeypatch.setenv("NDF_RELAY_CLAUDE", str(claude))
     monkeypatch.setenv("NDF_RELAY_LIST_TIMEOUT", "5")
@@ -860,6 +911,7 @@ def test_run_relay_dir_oserror_says_then_passthrough(mod, tmp_path, monkeypatch,
 
     def boom():
         raise OSError(errno.EACCES, "no dir")
+
     monkeypatch.setattr(relay_record, "make_relay_dir", boom)
     with pytest.raises(Execd):
         relay_run.cmd_run([])
@@ -878,8 +930,7 @@ def test_resolve_skips_wrappers(mod, tmp_path, monkeypatch):
     link.parent.mkdir()
     link.symlink_to(RELAY)
     real = real_claude(tmp_path)
-    monkeypatch.setenv("PATH", os.pathsep.join([str(wrapper.parent), str(link.parent),
-                                                str(real.parent), "/usr/bin"]))
+    monkeypatch.setenv("PATH", os.pathsep.join([str(wrapper.parent), str(link.parent), str(real.parent), "/usr/bin"]))
     assert relay_claude.resolve_claude() == str(real)
     forced = real_claude(tmp_path, "forced")
     monkeypatch.setenv("NDF_RELAY_CLAUDE", str(forced))
@@ -899,16 +950,14 @@ def test_resolve_keeps_unreadable_claude(mod, tmp_path, monkeypatch):
 
 def test_run_nested_stops_127(tmp_path):
     e = isolated_env(tmp_path, NDF_RELAY_DEPTH=2, NDF_RELAY_CLAUDE=real_claude(tmp_path))
-    p = subprocess.run([sys.executable, str(RELAY), "run"], capture_output=True, text=True,
-                       env=e, timeout=20)
+    p = subprocess.run([sys.executable, str(RELAY), "run"], capture_output=True, text=True, env=e, timeout=20)
     assert p.returncode == 127
     assert p.stderr.startswith("ndf-relay: 起動が入れ子になっている（") and p.stderr.count("\n") == 1
 
 
 def test_run_no_real_claude_127(tmp_path):
     e = isolated_env(tmp_path, PATH=str(tmp_path / "empty"))
-    p = subprocess.run([sys.executable, str(RELAY), "run", "-p", "x"], capture_output=True,
-                       text=True, env=e, timeout=20)
+    p = subprocess.run([sys.executable, str(RELAY), "run", "-p", "x"], capture_output=True, text=True, env=e, timeout=20)
     assert p.returncode == 127
     assert "本物の claude が見つからない" in p.stderr
 
@@ -920,8 +969,7 @@ def test_run_passthrough_real_exec(tmp_path):
     claude.write_text('#!/bin/sh\necho "args:$*"\nexit 7\n')
     claude.chmod(0o755)
     e = isolated_env(tmp_path, NDF_RELAY_CLAUDE=claude)
-    p = subprocess.run([sys.executable, str(RELAY), "run", "-p", "a b"], capture_output=True,
-                       text=True, env=e, timeout=20)
+    p = subprocess.run([sys.executable, str(RELAY), "run", "-p", "a b"], capture_output=True, text=True, env=e, timeout=20)
     assert (p.returncode, p.stdout, p.stderr) == (7, "args:-p a b\n", "")
 
 
@@ -1012,6 +1060,7 @@ def test_run_max_starts_race_one_wins(tmp_path):
             t.wait_start(1)
         for t in ts:
             t.type("mark next\r")
+
         # HOME を共有するので t.rows() は両方の記録を含む。自分のラッパーの記録だけを見る。
         # 負けた側の stop は勝った側の start の記録の後に出るが、勝った側の子が
         # starts.jsonl へ書くのはさらに後になりうる。両方が決まるまで待つ
@@ -1061,8 +1110,7 @@ def test_run_spin_broken_by_long_section(term):
 
 
 def test_run_sigkill_when_child_ignores_exit(term):
-    t = term(env={"FAKE_IGNORE_EXIT": "1", "NDF_RELAY_EXIT_WAIT": "0.5",
-                  "NDF_RELAY_TERM_WAIT": "0.5"})
+    t = term(env={"FAKE_IGNORE_EXIT": "1", "NDF_RELAY_EXIT_WAIT": "0.5", "NDF_RELAY_TERM_WAIT": "0.5"})
     t.wait_start(1)
     t.type("mark next\r")
     t.wait_start(2)
@@ -1134,8 +1182,7 @@ def test_stop_marks_running_relays_only(term, tmp_path):
     alive_other.mkdir()
     (alive_other / "relay.lock").touch()
     (alive_other / "relay.pid").write_text(str(os.getpid()))
-    p = subprocess.run([sys.executable, str(RELAY), "stop"], capture_output=True, text=True,
-                       env=t.env, timeout=20)
+    p = subprocess.run([sys.executable, str(RELAY), "stop"], capture_output=True, text=True, env=t.env, timeout=20)
     assert p.returncode == 0
     assert p.stdout.split() == [str(t.proc.pid)]
     assert not (dead / "stop").exists() and not (alive_other / "stop").exists()
@@ -1145,8 +1192,7 @@ def test_stop_marks_running_relays_only(term, tmp_path):
     assert len(t.starts()) == 1
     t.type("/exit\r")
     t.finish()
-    p = subprocess.run([sys.executable, str(RELAY), "stop"], capture_output=True, text=True,
-                       env=t.env, timeout=20)
+    p = subprocess.run([sys.executable, str(RELAY), "stop"], capture_output=True, text=True, env=t.env, timeout=20)
     assert p.returncode == 1
 
 
@@ -1154,8 +1200,7 @@ def test_stop_without_root_exits_1(tmp_path):
     """状態の根が無ければ 1 で終わり、何も出さず、根も作らない。"""
     state = tmp_path / "state"
     env = isolated_env(tmp_path, XDG_STATE_HOME=state)
-    p = subprocess.run([sys.executable, str(RELAY), "stop"], capture_output=True, text=True,
-                       env=env, timeout=20)
+    p = subprocess.run([sys.executable, str(RELAY), "stop"], capture_output=True, text=True, env=env, timeout=20)
     assert p.returncode == 1
     assert p.stdout == ""
     assert not (state / "ndf" / "relay").exists()
@@ -1175,8 +1220,7 @@ def test_stop_prints_dir_name_when_pid_missing_or_empty(tmp_path):
             locks.append(f)
             fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
         (root / "b-emptypid" / "relay.pid").write_text("")
-        p = subprocess.run([sys.executable, str(RELAY), "stop"], capture_output=True, text=True,
-                           env=env, timeout=20)
+        p = subprocess.run([sys.executable, str(RELAY), "stop"], capture_output=True, text=True, env=env, timeout=20)
     finally:
         for f in locks:
             fcntl.flock(f, fcntl.LOCK_UN)
@@ -1236,9 +1280,12 @@ def test_run_switches_when_goal_unmet(term):
     def keep_writing():
         while not stop.is_set():
             with open(tp, "a") as f:
-                f.write(json.dumps({"type": "assistant", "timestamp": iso_now(),
-                                    "message": {"content": [{"type": "text", "text": "続き"}]}}) + "\n")
+                f.write(
+                    json.dumps({"type": "assistant", "timestamp": iso_now(), "message": {"content": [{"type": "text", "text": "続き"}]}})
+                    + "\n"
+                )
             time.sleep(0.2)
+
     th = threading.Thread(target=keep_writing, daemon=True)
     th.start()
     try:
@@ -1269,8 +1316,11 @@ def test_run_goal_unmet_cancelled(term, case):
         t.wait(lambda: (d / "question").exists(), what="質問の合図")
         t.type("q close\r")
     else:
-        row = {"type": "assistant", "timestamp": iso_now(), "message": {"content": [
-            {"type": "tool_use", "name": "Bash", "input": {"command": "x", "run_in_background": True}}]}}
+        row = {
+            "type": "assistant",
+            "timestamp": iso_now(),
+            "message": {"content": [{"type": "tool_use", "name": "Bash", "input": {"command": "x", "run_in_background": True}}]},
+        }
         t.type(f"tr {json.dumps(row)}\r")
     t.type(f"tr {goal_row(met=False, at=iso_now())}\r")
     t.type("stop\r")
@@ -1296,10 +1346,9 @@ def test_run_does_not_wait_for_goal_judgement(term):
 
 
 OLD_ALIAS = """alias claude='python3 "${XDG_DATA_HOME:-$HOME/.local/share}/ndf/relay.py" run'"""
-OLD_BLOCK = ("# >>> ndf relay >>>\n"
-             "# ndf の中継（区間の切れ目で claude を自動で起動し直す）。消せば元に戻る。\n"
-             f"{OLD_ALIAS}\n"
-             "# <<< ndf relay <<<\n")
+OLD_BLOCK = (
+    f"# >>> ndf relay >>>\n# ndf の中継（区間の切れ目で claude を自動で起動し直す）。消せば元に戻る。\n{OLD_ALIAS}\n# <<< ndf relay <<<\n"
+)
 
 
 def plugin_root(tmp_path, version, name="plugin"):
@@ -1310,8 +1359,9 @@ def plugin_root(tmp_path, version, name="plugin"):
     (root / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "ndf", "version": version}))
     body = RELAY.read_bytes() + f"\n# 版 {version}\n".encode()
     (root / "scripts" / "relay.py").write_bytes(body)
-    shutil.copytree(ROOT / "scripts" / "relay_lib", root / "scripts" / "relay_lib", dirs_exist_ok=True,
-                    ignore=shutil.ignore_patterns("__pycache__"))
+    shutil.copytree(
+        ROOT / "scripts" / "relay_lib", root / "scripts" / "relay_lib", dirs_exist_ok=True, ignore=shutil.ignore_patterns("__pycache__")
+    )
     (root / "scripts" / "lib").mkdir(exist_ok=True)
     for rel in relay_version_dir.LIB_FILES:
         shutil.copyfile(ROOT / "scripts" / rel, root / "scripts" / rel)
@@ -1323,8 +1373,7 @@ def plugin_root(tmp_path, version, name="plugin"):
 def relay_cmd(tmp_path, sub, relay=RELAY, env_extra=None, **env):
     e = isolated_env(tmp_path, **{"SHELL": "/bin/bash", **env})
     e.update(env_extra or {})
-    return subprocess.run([sys.executable, str(relay), *sub.split()], capture_output=True,
-                          text=True, env=e, timeout=30)
+    return subprocess.run([sys.executable, str(relay), *sub.split()], capture_output=True, text=True, env=e, timeout=30)
 
 
 def home_of(tmp_path):
@@ -1368,16 +1417,19 @@ def test_install_bash_first_then_idempotent(tmp_path, home):
     assert "source" not in p.stdout  # シェルへ貼るコマンドを示さない
     copy = cfg(tmp_path) / "relay.py"
     assert copy.read_bytes() == RELAY.read_bytes() and copy.stat().st_mode & 0o777 == 0o755
-    assert (cfg(tmp_path) / "relay.version").read_text().strip() == \
-        json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text())["version"]
+    assert (cfg(tmp_path) / "relay.version").read_text().strip() == json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text())[
+        "version"
+    ]
     shellrc = (cfg(tmp_path) / "shellrc").read_text()
     assert "function claude {" in shellrc
     assert '"$HOME/.claude/ndf/relay.py" run "$@"' in shellrc and 'command claude "$@"' in shellrc
     body = rc.read_text()
-    assert body == ("export A=1\n\n# >>> ndf relay >>>\n"
-                    "# ndf のラッパー（/ndf:install-wrapper uninstall で外れる）\n"
-                    '[ -f "$HOME/.claude/ndf/shellrc" ] && . "$HOME/.claude/ndf/shellrc"\n'
-                    "# <<< ndf relay <<<\n")
+    assert body == (
+        "export A=1\n\n# >>> ndf relay >>>\n"
+        "# ndf のラッパー（/ndf:install-wrapper uninstall で外れる）\n"
+        '[ -f "$HOME/.claude/ndf/shellrc" ] && . "$HOME/.claude/ndf/shellrc"\n'
+        "# <<< ndf relay <<<\n"
+    )
     backups = list(home.glob(".bashrc.ndf-bak-*"))
     assert len(backups) == 1 and backups[0].read_text() == "export A=1\n"
     assert (state(tmp_path) / "rc-added").read_text().splitlines() == [str(rc)]
@@ -1429,8 +1481,9 @@ def test_install_zsh_uses_zdotdir(tmp_path, home):
     assert not (home / ".zshrc").exists() and not (home / ".bashrc").exists()
 
 
-@pytest.mark.parametrize("definition", ["alias claude='x'", "claude () { :; }", "function claude { :; }",
-                                        "claude() { :; }", "function claude() { :; }"])
+@pytest.mark.parametrize(
+    "definition", ["alias claude='x'", "claude () { :; }", "function claude { :; }", "claude() { :; }", "function claude() { :; }"]
+)
 def test_install_existing_definition_skips(tmp_path, home, definition):
     rc = home / ".bashrc"
     rc.write_text(definition + "\n")
@@ -1519,13 +1572,14 @@ def shell_run(tmp_path, script, rcfile):
     e = isolated_env(tmp_path)
     fake = tmp_path / "bin"
     fake.mkdir(exist_ok=True)
-    (fake / "claude").write_text("#!/bin/sh\necho REAL \"$@\"\n")
+    (fake / "claude").write_text('#!/bin/sh\necho REAL "$@"\n')
     (fake / "claude").chmod(0o755)
-    (fake / "python3").write_text("#!/bin/sh\necho RELAY \"$@\"\n")
+    (fake / "python3").write_text('#!/bin/sh\necho RELAY "$@"\n')
     (fake / "python3").chmod(0o755)
     e["PATH"] = f"{fake}:/usr/bin:/bin"
-    return subprocess.run(["bash", "--norc", "-c", f"shopt -s expand_aliases\n. {rcfile}\n{script}"],
-                          capture_output=True, text=True, env=e, timeout=20)
+    return subprocess.run(
+        ["bash", "--norc", "-c", f"shopt -s expand_aliases\n. {rcfile}\n{script}"], capture_output=True, text=True, env=e, timeout=20
+    )
 
 
 def test_install_function_falls_back_when_copy_removed(tmp_path, home):
@@ -1584,8 +1638,7 @@ def test_install_devbase_loader_with_non_bash_zsh_shell(tmp_path, home):
     p = relay_cmd(tmp_path, "install", SHELL="/usr/bin/fish", DEVBASE_SHELLRC_DIR=dl)
     assert p.returncode == 0, p.stdout + p.stderr
     # 読み込み先は loader。bash と zsh 以外でも loader があれば置く
-    assert (dl / "ndf-relay.sh").read_text().endswith(
-        '[ -f "$HOME/.claude/ndf/shellrc" ] && . "$HOME/.claude/ndf/shellrc"\n')
+    assert (dl / "ndf-relay.sh").read_text().endswith('[ -f "$HOME/.claude/ndf/shellrc" ] && . "$HOME/.claude/ndf/shellrc"\n')
     # ラッパーの本体と rc は置かれる
     assert (cfg(tmp_path) / "relay.py").read_bytes() == RELAY.read_bytes()
     assert (cfg(tmp_path) / "shellrc").exists()
@@ -1634,8 +1687,7 @@ def test_uninstall_removes_blocks_and_files(tmp_path, home):
     assert p.returncode == 0, p.stdout
     assert rc.read_text() == "a\n\n"  # 足した空行も残す（囲みの外は変えない）
     assert zrc.read_text() == "z1\nz2\n"
-    for f in (cfg(tmp_path) / "relay.py", cfg(tmp_path) / "relay.version", cfg(tmp_path) / "shellrc",
-              old, dl / "ndf-relay.sh"):
+    for f in (cfg(tmp_path) / "relay.py", cfg(tmp_path) / "relay.version", cfg(tmp_path) / "shellrc", old, dl / "ndf-relay.sh"):
         assert not f.exists(), f
     assert (st / "rc-noticed").read_text() == ""
     assert (st / "rc-skipped").read_text() == "other\n"
@@ -1761,15 +1813,13 @@ def test_status_session_relay(mod, tmp_path, monkeypatch, capsys):
     (r.dir / "relay.pid").write_text("4321")
     monkeypatch.setenv("NDF_RELAY_DIR", str(r.dir))
     try:
-        assert session_lines(mod, capsys) == [
-            f"ndf-relay: このセッション: ラッパー経由（relay PID 4321、claude PID {os.getppid()}）"]
+        assert session_lines(mod, capsys) == [f"ndf-relay: このセッション: ラッパー経由（relay PID 4321、claude PID {os.getppid()}）"]
     finally:
         r.release()
 
 
 def test_status_session_no_dir(mod, capsys):
-    assert session_lines(mod, capsys) == [
-        "ndf-relay: このセッション: ラッパーを通らずに起動（NDF_RELAY_DIR が無い）"]
+    assert session_lines(mod, capsys) == ["ndf-relay: このセッション: ラッパーを通らずに起動（NDF_RELAY_DIR が無い）"]
 
 
 def test_status_session_no_dir_hints_when_loader_is_in_rc(mod, tmp_path, capsys):
@@ -1778,7 +1828,8 @@ def test_status_session_no_dir_hints_when_loader_is_in_rc(mod, tmp_path, capsys)
     assert session_lines(mod, capsys) == [
         "ndf-relay: このセッション: ラッパーを通らずに起動（NDF_RELAY_DIR が無い）。"
         f"{home / '.bashrc'} に読み込みの行はあるので、このセッションは読み込みの前に開いたシェル、"
-        "または IDE から起動した"]
+        "または IDE から起動した"
+    ]
 
 
 def test_status_session_no_dir_hints_when_loader_is_in_zshrc(mod, tmp_path, capsys):
@@ -1800,15 +1851,15 @@ def test_status_session_not_running(mod, tmp_path, monkeypatch, capsys):
     r.release()
     monkeypatch.setenv("NDF_RELAY_DIR", str(r.dir))
     assert session_lines(mod, capsys) == [
-        "ndf-relay: このセッション: ラッパーは終わっている（NDF_RELAY_DIR はあるがラッパーが動いていない）"]
+        "ndf-relay: このセッション: ラッパーは終わっている（NDF_RELAY_DIR はあるがラッパーが動いていない）"
+    ]
 
 
 def test_status_session_not_child(mod, tmp_path, monkeypatch, capsys):
     r = Relay(tmp_path, child_pid=999999)
     monkeypatch.setenv("NDF_RELAY_DIR", str(r.dir))
     try:
-        assert session_lines(mod, capsys) == [
-            "ndf-relay: このセッション: ラッパーの直接の子ではない（fork・bg-pty-host・別の入口。#1016）"]
+        assert session_lines(mod, capsys) == ["ndf-relay: このセッション: ラッパーの直接の子ではない（fork・bg-pty-host・別の入口。#1016）"]
     finally:
         r.release()
 
@@ -1872,8 +1923,12 @@ def test_linux_bash_still_adds_to_bashrc(mod, tmp_path, monkeypatch, capsys):
 # -- startup（AC1・AC9〜AC11・AC29）
 
 
-HOOK_STARTUP = next(h["command"] for e in json.loads((ROOT / "hooks" / "claude.json").read_text())
-                    ["hooks"]["SessionStart"] for h in e["hooks"] if "relay.py" in h["command"])
+HOOK_STARTUP = next(
+    h["command"]
+    for e in json.loads((ROOT / "hooks" / "claude.json").read_text())["hooks"]["SessionStart"]
+    for h in e["hooks"]
+    if "relay.py" in h["command"]
+)
 
 
 def run_hook(tmp_path, command, root=ROOT, **env):
@@ -1931,8 +1986,10 @@ def test_startup_notice_concurrent_once(tmp_path, home):
     state(tmp_path).mkdir(parents=True)
     (state(tmp_path) / "rc-added").write_text(f"{rc}\n")
     e = isolated_env(tmp_path, SHELL="/bin/bash")
-    procs = [subprocess.Popen([sys.executable, str(RELAY), "startup"], stdout=subprocess.PIPE,
-                              stderr=subprocess.PIPE, text=True, env=e) for _ in range(4)]
+    procs = [
+        subprocess.Popen([sys.executable, str(RELAY), "startup"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=e)
+        for _ in range(4)
+    ]
     outs = [p.communicate(timeout=20)[0] for p in procs]
     assert all(p.returncode == 0 for p in procs)
     assert sum(len(o.splitlines()) for o in outs) == 1
@@ -1971,16 +2028,19 @@ def test_startup_refreshes_existing_copies_only(tmp_path, home):
     assert snapshot(rc) == before and not (cfg(tmp_path) / "shellrc").exists()
 
 
-@pytest.mark.parametrize("copy_ver,plugin_ver,replaced", [
-    ("10.17.5-dev.2", "10.17.5-dev.10", True),
-    ("10.17.5-dev.2", "10.17.5-dev.1", False),
-    ("10.18.0-rc.1", "10.18.0-dev.3", False),
-    ("10.18.0-rc.1", "10.18.0", True),
-    ("10.17.5", "10.17.5-dev.9", False),
-    ("10.17.6", "10.17.5", False),
-    (None, "10.17.5", True),
-    ("壊れた", "10.17.5", True),
-])
+@pytest.mark.parametrize(
+    "copy_ver,plugin_ver,replaced",
+    [
+        ("10.17.5-dev.2", "10.17.5-dev.10", True),
+        ("10.17.5-dev.2", "10.17.5-dev.1", False),
+        ("10.18.0-rc.1", "10.18.0-dev.3", False),
+        ("10.18.0-rc.1", "10.18.0", True),
+        ("10.17.5", "10.17.5-dev.9", False),
+        ("10.17.6", "10.17.5", False),
+        (None, "10.17.5", True),
+        ("壊れた", "10.17.5", True),
+    ],
+)
 def test_startup_never_downgrades(tmp_path, home, copy_ver, plugin_ver, replaced):
     relay = plugin_root(tmp_path, plugin_ver)
     cfg(tmp_path).mkdir(parents=True)
@@ -2119,8 +2179,7 @@ def test_guard_attachment_row_does_not_block(term):
     t.type("mark 次\r")
     d = pathlib.Path(t.starts()[0]["relay_dir"])
     t.wait(lambda: (d / "next.json").exists(), what="合図")
-    t.type("tr " + json.dumps({"type": "attachment", "timestamp": iso_after(2),
-                               "attachment": {"type": "other"}}) + "\r")
+    t.type("tr " + json.dumps({"type": "attachment", "timestamp": iso_after(2), "attachment": {"type": "other"}}) + "\r")
     t.wait_start(2)
     t.type("/exit\r")
     t.finish()
@@ -2133,8 +2192,7 @@ def test_guard_single_write(term):
     t.type("mark 次\r")
     t.wait_start(2)
     pid = t.starts()[0]["pid"]
-    chunks = [bytes.fromhex(json.loads(x)["hex"])
-              for x in (t.fake_dir / f"chunks-{pid}.jsonl").read_text().splitlines()]
+    chunks = [bytes.fromhex(json.loads(x)["hex"]) for x in (t.fake_dir / f"chunks-{pid}.jsonl").read_text().splitlines()]
     assert chunks[-1] == b"/exit\r"
     t.type("/exit\r")
     t.finish()
@@ -2165,9 +2223,13 @@ def test_guard_question_open_waits_for_relay_lock(tmp_path, relay):
     """ラッパーが question.lock を持つ間、question open は放されるまで待ち、放された後に合図を作る。"""
     lock = open(relay.dir / "question.lock", "a")
     fcntl.flock(lock, fcntl.LOCK_EX)
-    p = subprocess.Popen([sys.executable, str(RELAY), "question", "open"], stdin=subprocess.PIPE,
-                         stdout=subprocess.PIPE, text=True,
-                         env={**isolated_env(tmp_path), "NDF_RELAY_DIR": str(relay.dir)})
+    p = subprocess.Popen(
+        [sys.executable, str(RELAY), "question", "open"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        text=True,
+        env={**isolated_env(tmp_path), "NDF_RELAY_DIR": str(relay.dir)},
+    )
     p.stdin.write("{}")
     p.stdin.close()
     time.sleep(1)
@@ -2186,8 +2248,7 @@ def question(tmp_path, env_dir, action="open"):
     command = [sys.executable, str(RELAY), "question"]
     if action is not None:
         command.append(action)
-    return subprocess.run(command, input="{}",
-                          capture_output=True, text=True, env=e, timeout=20)
+    return subprocess.run(command, input="{}", capture_output=True, text=True, env=e, timeout=20)
 
 
 @pytest.mark.parametrize("case", ["no-dir", "not-running", "not-direct-child"])
@@ -2310,21 +2371,24 @@ def test_relay_quiet_defaults_to_five_seconds(mod, tmp_path, monkeypatch):
 # ---------------------------------------------------------------- notice（#980 AC1〜AC3c）
 
 WAIT_TAIL = "キー入力やスクロールをせずに、そのまま待つ（切り替わらずに ndf-relay: で始まる 1 行が出たら、その案内に従う）"
-NOTICE_OUTSIDE = ("/exit してから claude を起動し、下の中身を最初の入力として貼り付ける"
-                  "（/ndf:install-wrapper でラッパーを入れると自動になる）")
+NOTICE_OUTSIDE = (
+    "/exit してから claude を起動し、下の中身を最初の入力として貼り付ける（/ndf:install-wrapper でラッパーを入れると自動になる）"
+)
 NOTICE_SOON = "まもなく自動で新しい会話へ切り替わる。" + WAIT_TAIL
-NOTICE_ENDED = ("ラッパーは既に終わっている。"
-                "/exit してから claude を起動し、下の中身を最初の入力として貼り付ける")
+NOTICE_ENDED = "ラッパーは既に終わっている。/exit してから claude を起動し、下の中身を最初の入力として貼り付ける"
 
 
 def notice_not_child(pid):
-    return (f"ラッパーは元の会話（子 pid {pid}）しか見ていないため、この会話で出した ndf-next は自動では拾われない。"
-            "元の会話へ戻って同じ ndf-next を出すか、元の会話を /exit してから"
-            " claude を起動し、下の中身を最初の入力として貼り付ける")
+    return (
+        f"ラッパーは元の会話（子 pid {pid}）しか見ていないため、この会話で出した ndf-next は自動では拾われない。"
+        "元の会話へ戻って同じ ndf-next を出すか、元の会話を /exit してから"
+        " claude を起動し、下の中身を最初の入力として貼り付ける"
+    )
 
 
-NOTICE_INF = ("NDF_RELAY_QUIET が有限でないため、ラッパーは自動で切り替えない。"
-              "/exit してから claude を起動し、下の中身を最初の入力として貼り付ける")
+NOTICE_INF = (
+    "NDF_RELAY_QUIET が有限でないため、ラッパーは自動で切り替えない。/exit してから claude を起動し、下の中身を最初の入力として貼り付ける"
+)
 
 
 def notice_in(n):
@@ -2337,8 +2401,7 @@ def notice(env_dir, quiet=None):
         e["NDF_RELAY_DIR"] = str(env_dir)
     if quiet is not None:
         e["NDF_RELAY_QUIET"] = quiet
-    return subprocess.run([sys.executable, str(RELAY), "notice"], capture_output=True,
-                          text=True, env=e, timeout=20)
+    return subprocess.run([sys.executable, str(RELAY), "notice"], capture_output=True, text=True, env=e, timeout=20)
 
 
 def notice_lines(proc):
@@ -2349,17 +2412,21 @@ def notice_lines(proc):
     return lines
 
 
-@pytest.mark.parametrize("quiet,expected", [
-    (None, notice_in(5)),
-    ("6.4", notice_in(6)),
-    ("abc", notice_in(5)),
-    ("2.5", notice_in(2)),
-    ("0", NOTICE_SOON),
-    ("-3", NOTICE_SOON),
-    ("nan", NOTICE_SOON),
-    ("-inf", NOTICE_SOON),
-    ("inf", NOTICE_INF),
-], ids=["default", "6.4", "abc", "2.5", "0", "-3", "nan", "-inf", "inf"])
+@pytest.mark.parametrize(
+    "quiet,expected",
+    [
+        (None, notice_in(5)),
+        ("6.4", notice_in(6)),
+        ("abc", notice_in(5)),
+        ("2.5", notice_in(2)),
+        ("0", NOTICE_SOON),
+        ("-3", NOTICE_SOON),
+        ("nan", NOTICE_SOON),
+        ("-inf", NOTICE_SOON),
+        ("inf", NOTICE_INF),
+    ],
+    ids=["default", "6.4", "abc", "2.5", "0", "-3", "nan", "-inf", "inf"],
+)
 def test_notice_under_relay(relay, quiet, expected):
     first, second = notice_lines(notice(relay.dir, quiet))
     assert first == "relay"
@@ -2391,11 +2458,15 @@ def test_notice_not_direct_child_without_child_pid(relay):
     assert second.startswith("ラッパーは元の会話しか見ていないため")
 
 
-@pytest.mark.parametrize("case,expected", [
-    ("no-dir", NOTICE_OUTSIDE),
-    ("not-running", NOTICE_ENDED),
-    ("not-child", notice_not_child(999999)),
-], ids=["no-dir", "not-running", "not-child"])
+@pytest.mark.parametrize(
+    "case,expected",
+    [
+        ("no-dir", NOTICE_OUTSIDE),
+        ("not-running", NOTICE_ENDED),
+        ("not-child", notice_not_child(999999)),
+    ],
+    ids=["no-dir", "not-running", "not-child"],
+)
 def test_notice_outside_reason(relay, case, expected):
     # 外である理由ごとに 2 行目が変わる。1 行目は outside のまま（#1016）
     env_dir = relay.dir
@@ -2419,16 +2490,19 @@ def is_child(env_dir):
     e = {k: v for k, v in os.environ.items() if not k.startswith("NDF_")}
     if env_dir is not None:
         e["NDF_RELAY_DIR"] = str(env_dir)
-    return subprocess.run([sys.executable, str(RELAY), "is-child"], capture_output=True,
-                          text=True, env=e, timeout=20)
+    return subprocess.run([sys.executable, str(RELAY), "is-child"], capture_output=True, text=True, env=e, timeout=20)
 
 
-@pytest.mark.parametrize("case,expected", [
-    ("relay", "relay"),
-    ("no-dir", "outside"),
-    ("not-running", "outside"),
-    ("not-direct-child", "outside"),
-], ids=["relay", "no-dir", "not-running", "not-direct-child"])
+@pytest.mark.parametrize(
+    "case,expected",
+    [
+        ("relay", "relay"),
+        ("no-dir", "outside"),
+        ("not-running", "outside"),
+        ("not-direct-child", "outside"),
+    ],
+    ids=["relay", "no-dir", "not-running", "not-direct-child"],
+)
 def test_is_child_matches_notice(tmp_path, relay, case, expected):
     env_dir = relay.dir
     if case == "no-dir":
@@ -2529,6 +2603,7 @@ def test_version_dir_half_written_is_not_pointed(tmp_path, monkeypatch):
         if len(n) > 2:
             raise OSError("disk full")
         return real(src, dst, *a, **k)
+
     monkeypatch.setattr(relay_version_dir.shutil, "copyfile", boom)
     with pytest.raises(OSError):
         relay_version_dir.VersionDir(str(base)).ensure("10.18.0")
@@ -2581,11 +2656,15 @@ def test_version_dir_imports_only_stdlib_and_itself():
     """バージョンディレクトリの中身とランチャーは、標準ライブラリ・バージョンディレクトリの中・ラッパーの環境に
     入るパッケージ（relay_lib/runtime.py の GROUPS）だけを import する（I2・決定 20）。"""
     from relay_lib import runtime
+
     libs = {pathlib.Path(rel).stem for rel in relay_version_dir.LIB_FILES}
     packages = {m.split(".")[0] for g in runtime.GROUPS for m in runtime.deps.GROUPS[g]}
     allowed = set(sys.stdlib_module_names) | libs | packages | {"relay_lib", "__future__"}
-    files = [RELAY, *(ROOT / "scripts" / rel for rel in relay_version_dir.LIB_FILES),
-             *sorted((ROOT / "scripts" / "relay_lib").glob("*.py"))]
+    files = [
+        RELAY,
+        *(ROOT / "scripts" / rel for rel in relay_version_dir.LIB_FILES),
+        *sorted((ROOT / "scripts" / "relay_lib").glob("*.py")),
+    ]
     for f in files:
         for node in ast.walk(ast.parse(f.read_text())):
             if isinstance(node, ast.Import):
@@ -2601,19 +2680,22 @@ def test_version_dir_imports_only_stdlib_and_itself():
 # ---------------------------------------------------------------- 囲みの読み取り（lib/md.py。#1142 の D6）
 
 
-@pytest.mark.parametrize("text, expected", [
-    # 変わった入力: CommonMark の囲みとして読む（前は行頭の ``` だけを追い、~~~ を囲みと見なさなかった）
-    ("~~~\n" + fence("x") + "\n~~~", []),                                   # ~~~ の囲みの中は中身の文字列
-    ("```ndf-next\n/goal 続き", ["/goal 続き"]),                              # 閉じの無い囲みは文書の終わりまで
-    ("- " + fence("li").replace("\n", "\n  "), ["li"]),                       # 箇条書きの中の囲み
-    ("> " + fence("q").replace("\n", "\n> "), ["q"]),                         # 引用の中の囲み
-    ("  " + fence("ind"), ["ind"]),                                           # 3 つまでの空白で字下げした囲み
-    # 変わらない入力
-    (fence("a") + "\n\n" + fence("b"), ["a", "b"]),
-    ("````\n" + fence("x") + "\n````", []),
-    (fence("x", ticks=4), []),
-    (fence("x", info="ndf-next extra"), []),
-])
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        # 変わった入力: CommonMark の囲みとして読む（前は行頭の ``` だけを追い、~~~ を囲みと見なさなかった）
+        ("~~~\n" + fence("x") + "\n~~~", []),  # ~~~ の囲みの中は中身の文字列
+        ("```ndf-next\n/goal 続き", ["/goal 続き"]),  # 閉じの無い囲みは文書の終わりまで
+        ("- " + fence("li").replace("\n", "\n  "), ["li"]),  # 箇条書きの中の囲み
+        ("> " + fence("q").replace("\n", "\n> "), ["q"]),  # 引用の中の囲み
+        ("  " + fence("ind"), ["ind"]),  # 3 つまでの空白で字下げした囲み
+        # 変わらない入力
+        (fence("a") + "\n\n" + fence("b"), ["a", "b"]),
+        ("````\n" + fence("x") + "\n````", []),
+        (fence("x", ticks=4), []),
+        (fence("x", info="ndf-next extra"), []),
+    ],
+)
 def test_next_blocks_reads_commonmark_fences(text, expected):
     assert relay_mark.next_blocks(text) == expected
 
@@ -2624,12 +2706,10 @@ def test_next_blocks_reads_commonmark_fences(text, expected):
 def bare(tmp_path, sub, relay=RELAY, **env):
     """外部パッケージを import できない python（-S でサイトのパッケージを読まない）でランチャーを起動する。"""
     e = isolated_env(tmp_path, SHELL="/bin/bash", **env)
-    return subprocess.run([sys.executable, "-S", str(relay), *sub.split()], capture_output=True, text=True,
-                          env=e, timeout=30)
+    return subprocess.run([sys.executable, "-S", str(relay), *sub.split()], capture_output=True, text=True, env=e, timeout=30)
 
 
-@pytest.mark.parametrize("sub, code", [("mark", 0), ("question open", 0), ("question close", 0),
-                                       ("is-child", 1), ("notice", 0)])
+@pytest.mark.parametrize("sub, code", [("mark", 0), ("question open", 0), ("question close", 0), ("is-child", 1), ("notice", 0)])
 def test_hook_without_env_passes_through(tmp_path, home, sub, code):
     """環境がまだ無いとき、hook の副命令は判定をせずに決まった終了コードで終わる（環境も作らない）。"""
     log = tmp_path / "uv.log"
@@ -2658,7 +2738,7 @@ def test_install_prepares_env_then_copy_runs_in_it(tmp_path, home):
     syncs = log.read_text().splitlines()
     assert len(syncs) == 2 and all(s.startswith("sync --frozen") for s in syncs)
     groups = " ".join(f"--extra {g}" for g in ("procs", "locks", "md", "versions", "terminal"))
-    assert groups in syncs[0] and syncs[0].endswith("--inexact")      # 共有のプラグインの環境は消さずに足す
+    assert groups in syncs[0] and syncs[0].endswith("--inexact")  # 共有のプラグインの環境は消さずに足す
     assert f"--project {ROOT}" in syncs[0]
     assert groups in syncs[1] and "--inexact" not in syncs[1]
     name = current_of(cfg(tmp_path))

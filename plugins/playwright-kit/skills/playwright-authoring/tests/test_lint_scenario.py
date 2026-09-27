@@ -15,15 +15,15 @@ from pathlib import Path
 import pytest
 
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "lint_scenario.py"
-TEMPLATES = (
-    Path(__file__).resolve().parents[2] / "playwright-kit-ops" / "templates"
-)
+TEMPLATES = Path(__file__).resolve().parents[2] / "playwright-kit-ops" / "templates"
 
 
 def run(*args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, str(SCRIPT), *args],
-        capture_output=True, text=True, check=False,
+        capture_output=True,
+        text=True,
+        check=False,
     )
 
 
@@ -62,25 +62,28 @@ def test_templates_pass(tmp_path: Path):
     tests = tmp_path / "tests"
     tests.mkdir()
     for tpl in TEMPLATES.glob("test_*.py.template"):
-        (tests / tpl.name.removesuffix(".template")).write_text(
-            tpl.read_text(encoding="utf-8"), encoding="utf-8"
-        )
+        (tests / tpl.name.removesuffix(".template")).write_text(tpl.read_text(encoding="utf-8"), encoding="utf-8")
     proc = run(str(tests))
     assert proc.returncode == 0, proc.stdout
 
 
 def test_missing_page_role(tmp_path: Path):
-    code, out = lint_source(tmp_path, """
+    code, out = lint_source(
+        tmp_path,
+        """
         def test_no_marker(page, pwk_config):
             page.goto(pwk_config.base_url, wait_until="load")
-    """)
+    """,
+    )
     assert code == 1
     assert rules(out) == ["page_role"]
     assert out["violations"][0]["test"] == "test_no_marker"
 
 
 def test_page_role_from_module_or_class_marker(tmp_path: Path):
-    code, out = lint_source(tmp_path, """
+    code, out = lint_source(
+        tmp_path,
+        """
         import pytest
 
         pytestmark = [pytest.mark.page_role("list")]
@@ -92,38 +95,47 @@ def test_page_role_from_module_or_class_marker(tmp_path: Path):
         class TestItem:
             def test_b(self, page, pwk_config):
                 page.goto(pwk_config.base_url, wait_until="load")
-    """)
+    """,
+    )
     assert code == 0, out
 
 
 def test_role_marker_without_fixture(tmp_path: Path):
-    code, out = lint_source(tmp_path, """
+    code, out = lint_source(
+        tmp_path,
+        """
         import pytest
 
         @pytest.mark.page_role("form")
         @pytest.mark.role("admin")
         def test_x(page, pwk_config):
             page.goto(pwk_config.base_url, wait_until="load")
-    """)
+    """,
+    )
     assert code == 1
     assert rules(out) == ["role_pair"]
 
 
 def test_role_marker_and_fixture_disagree(tmp_path: Path):
-    code, out = lint_source(tmp_path, """
+    code, out = lint_source(
+        tmp_path,
+        """
         import pytest
 
         @pytest.mark.page_role("form")
         @pytest.mark.role("admin")
         def test_x(page, pwk_role_viewer, pwk_config):
             page.goto(pwk_config.base_url, wait_until="load")
-    """)
+    """,
+    )
     assert code == 1
     assert rules(out) == ["role_pair", "role_pair"]
 
 
 def test_hardcoded_url(tmp_path: Path):
-    code, out = lint_source(tmp_path, """
+    code, out = lint_source(
+        tmp_path,
+        """
         import pytest
 
         BASE = "https://staging.example.com"
@@ -131,13 +143,16 @@ def test_hardcoded_url(tmp_path: Path):
         @pytest.mark.page_role("lp")
         def test_x(page):
             page.goto(f"http://localhost:8080/", wait_until="load")
-    """)
+    """,
+    )
     assert code == 1
     assert rules(out) == ["hardcoded_url", "hardcoded_url"]
 
 
 def test_docstring_url_is_ignored(tmp_path: Path):
-    code, out = lint_source(tmp_path, '''
+    code, out = lint_source(
+        tmp_path,
+        '''
         """See https://example.com/docs."""
         import pytest
 
@@ -145,19 +160,23 @@ def test_docstring_url_is_ignored(tmp_path: Path):
         def test_x(page, pwk_config):
             """Opens https://example.com/ via base_url."""
             page.goto(pwk_config.base_url, wait_until="load")
-    ''')
+    ''',
+    )
     assert code == 0, out
 
 
 def test_goto_without_wait_until(tmp_path: Path):
-    code, out = lint_source(tmp_path, """
+    code, out = lint_source(
+        tmp_path,
+        """
         import pytest
 
         @pytest.mark.page_role("lp")
         def test_x(page, pwk_config):
             page.goto(pwk_config.base_url)
             page.reload()
-    """)
+    """,
+    )
     assert code == 1
     assert rules(out) == ["wait_until", "wait_until"]
     assert {v["line"] for v in out["violations"]} == {6, 7}

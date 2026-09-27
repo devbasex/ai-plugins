@@ -44,11 +44,7 @@ def _same_origin(origin_url: str, base_url: str) -> bool:
     except ValueError:
         return False
     return (
-        bool(a.scheme)
-        and bool(a.hostname)
-        and a.scheme == b.scheme
-        and a.hostname == b.hostname
-        and (a.port or None) == (b.port or None)
+        bool(a.scheme) and bool(a.hostname) and a.scheme == b.scheme and a.hostname == b.hostname and (a.port or None) == (b.port or None)
     )
 
 
@@ -102,9 +98,7 @@ def _submit_login_form(page, login: Login) -> None:
     if pw_field:
         page.locator(f'input[name="{pw_field}"]').press("Enter")
         return
-    raise RuntimeError(
-        "ログイン送信ボタンが見つかりません (submit_selectors を設定してください)"
-    )
+    raise RuntimeError("ログイン送信ボタンが見つかりません (submit_selectors を設定してください)")
 
 
 def _login_and_get_storage_state(
@@ -147,40 +141,26 @@ def _login_and_get_storage_state(
             try:
                 page.goto(url, wait_until="domcontentloaded", timeout=nav_timeout_ms)
             except Exception as exc:  # pragma: no cover - depends on remote target
-                pytest.fail(
-                    f"[pwk_role_{role.id}] login page open failed: {url} ({exc})"
-                )
+                pytest.fail(f"[pwk_role_{role.id}] login page open failed: {url} ({exc})")
 
             for name, value in role.login.fields.items():
                 try:
-                    page.locator(f'input[name="{name}"]').fill(
-                        value, timeout=nav_timeout_ms
-                    )
+                    page.locator(f'input[name="{name}"]').fill(value, timeout=nav_timeout_ms)
                 except Exception as exc:  # pragma: no cover
-                    pytest.fail(
-                        f"[pwk_role_{role.id}] fill {name!r} failed: {exc}"
-                    )
+                    pytest.fail(f"[pwk_role_{role.id}] fill {name!r} failed: {exc}")
 
             try:
-                with page.expect_navigation(
-                    wait_until="domcontentloaded", timeout=nav_timeout_ms
-                ):
+                with page.expect_navigation(wait_until="domcontentloaded", timeout=nav_timeout_ms):
                     _submit_login_form(page, role.login)
             except Exception as exc:  # pragma: no cover
-                pytest.fail(
-                    f"[pwk_role_{role.id}] navigation 失敗: "
-                    f"{type(exc).__name__}: {exc}"
-                )
+                pytest.fail(f"[pwk_role_{role.id}] navigation 失敗: {type(exc).__name__}: {exc}")
 
             final_url = page.url
             # Amazon Q Critical-1: fail_if_url_contains が空文字列の場合、空文字列は
             # あらゆる文字列に含まれるため常に True になり全 login が失敗する。
             # 空文字列 (= 未設定) の場合はチェックをスキップする。
             if role.login.fail_if_url_contains and role.login.fail_if_url_contains in final_url:
-                pytest.fail(
-                    f"[pwk_role_{role.id}] login 失敗: "
-                    f"final_url={final_url} に '{role.login.fail_if_url_contains}' を含む"
-                )
+                pytest.fail(f"[pwk_role_{role.id}] login 失敗: final_url={final_url} に '{role.login.fail_if_url_contains}' を含む")
 
             state = context.storage_state()
             return state
@@ -218,10 +198,7 @@ def pwk_config(pytestconfig) -> Config:
         if candidate.exists():
             raw_path = str(candidate)
     if not raw_path:
-        pytest.skip(
-            "pwk_config 未指定: --pwk-config <path> もしくは PWK_CONFIG env、"
-            "または ./scenario.config.yaml を用意してください。"
-        )
+        pytest.skip("pwk_config 未指定: --pwk-config <path> もしくは PWK_CONFIG env、または ./scenario.config.yaml を用意してください。")
 
     path = Path(raw_path).resolve()
     return Config.load(path)
@@ -290,9 +267,7 @@ def _make_role_fixture(role_id: str) -> Callable:
         return role
 
     _fixture.__name__ = f"pwk_role_{role_id}"
-    _fixture.__doc__ = (
-        f"role={role_id!r} で login 済の storage_state を context に注入する。"
-    )
+    _fixture.__doc__ = f"role={role_id!r} で login 済の storage_state を context に注入する。"
     return _fixture
 
 

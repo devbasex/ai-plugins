@@ -74,10 +74,16 @@ def parse_checklist(path: Path) -> list[dict[str, str]]:
     for line in path.read_text(encoding="utf-8").splitlines():
         m = _HEADING_ID.match(line)
         if m:
-            items.append({
-                "id": m["id"], "title": m["title"], "tags": m["tags"] or "",
-                "source": path.name, "judgement": "", "reason": "",
-            })
+            items.append(
+                {
+                    "id": m["id"],
+                    "title": m["title"],
+                    "tags": m["tags"] or "",
+                    "source": path.name,
+                    "judgement": "",
+                    "reason": "",
+                }
+            )
     return items
 
 
@@ -91,11 +97,16 @@ def parse_common(path: Path) -> list[dict[str, str]]:
     for line in path.read_text(encoding="utf-8").splitlines():
         m = _COMMON_ROW.match(line)
         if m:
-            items.append({
-                "id": m["id"], "title": m["title"],
-                "tags": " / ".join(t for t in (m["tech"], m["oracle"]) if t),
-                "source": path.name, "judgement": "", "reason": "",
-            })
+            items.append(
+                {
+                    "id": m["id"],
+                    "title": m["title"],
+                    "tags": " / ".join(t for t in (m["tech"], m["oracle"]) if t),
+                    "source": path.name,
+                    "judgement": "",
+                    "reason": "",
+                }
+            )
     return items
 
 
@@ -113,10 +124,13 @@ def parse_technique_rules(path: Path) -> list[dict[str, str]]:
     for line in section.splitlines():
         m = _TECHNIQUE_ROW.match(line.strip())
         if m and m["role"].strip() != "role":
-            rules.append({
-                "role": m["role"].strip(), "data_type": m["data"].strip(),
-                "techniques": m["tech"],
-            })
+            rules.append(
+                {
+                    "role": m["role"].strip(),
+                    "data_type": m["data"].strip(),
+                    "techniques": m["tech"],
+                }
+            )
     return rules
 
 
@@ -196,11 +210,9 @@ def _margin(text: str) -> float:
 
 def judge_classification(entry: dict[str, Any], margin: float) -> dict[str, Any]:
     """上位 2 件の差を見て、role を決めてよいかを返す。"""
-    primary = {"role": entry.get("primary_role", "unknown"),
-               "score": float(entry.get("primary_score") or 0.0)}
+    primary = {"role": entry.get("primary_role", "unknown"), "score": float(entry.get("primary_score") or 0.0)}
     alternates = sorted(
-        ({"role": a.get("role"), "score": float(a.get("score") or 0.0)}
-         for a in entry.get("alternates", [])),
+        ({"role": a.get("role"), "score": float(a.get("score") or 0.0)} for a in entry.get("alternates", [])),
         key=lambda a: -a["score"],
     )
     candidates = [primary, *alternates]
@@ -213,8 +225,7 @@ def judge_classification(entry: dict[str, Any], margin: float) -> dict[str, Any]
         reason = f"上位 2 件の差 {gap} が margin {margin} 未満"
     elif primary["role"] not in CHECKLIST_OF_ROLE:
         reason = f"role {primary['role']} に対応するチェックリストが無い"
-    return {"url": entry.get("url"), "role": primary["role"], "gap": gap,
-            "margin": margin, "candidates": candidates, "reason": reason}
+    return {"url": entry.get("url"), "role": primary["role"], "gap": gap, "margin": margin, "candidates": candidates, "reason": reason}
 
 
 def render_markdown(result: dict[str, Any]) -> str:
@@ -272,9 +283,7 @@ def build(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
     else:
         role = args.role
         if role not in CHECKLIST_OF_ROLE:
-            raise UsageError(
-                f"role {role} に対応するチェックリストが無い（使える値: {sorted(CHECKLIST_OF_ROLE)}）"
-            )
+            raise UsageError(f"role {role} に対応するチェックリストが無い（使える値: {sorted(CHECKLIST_OF_ROLE)}）")
 
     checklist = docs / "checklists" / f"checklist-{CHECKLIST_OF_ROLE[role]}.md"
     common = docs / "checklists" / "checklist-common.md"
@@ -311,14 +320,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = _Parser(description="テスト計画書の雛形を作る")
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--role", help="page role（form / list / checkout など）")
-    source.add_argument("--classification",
-                        help="classify_page_role.py の出力 JSON。上位 2 件の差で role を決める")
-    parser.add_argument("--url", default=None,
-                        help="--classification が複数 URL を含むときに選ぶ URL")
-    parser.add_argument("--data-types", nargs="*", default=[],
-                        help="§11 のデータ型（数値 / 文字列 / 日付 / ファイル / 金額 など）")
-    parser.add_argument("--margin", type=_margin, default=DEFAULT_MARGIN,
-                        help=f"上位 2 件のスコアの差がこれ未満なら人へ渡す（既定 {DEFAULT_MARGIN}）")
+    source.add_argument("--classification", help="classify_page_role.py の出力 JSON。上位 2 件の差で role を決める")
+    parser.add_argument("--url", default=None, help="--classification が複数 URL を含むときに選ぶ URL")
+    parser.add_argument("--data-types", nargs="*", default=[], help="§11 のデータ型（数値 / 文字列 / 日付 / ファイル / 金額 など）")
+    parser.add_argument(
+        "--margin", type=_margin, default=DEFAULT_MARGIN, help=f"上位 2 件のスコアの差がこれ未満なら人へ渡す（既定 {DEFAULT_MARGIN}）"
+    )
     parser.add_argument("--output", default=None, help="Markdown の雛形の書き出し先")
     parser.add_argument("--docs-dir", default=str(DOCS_DIR), help=argparse.SUPPRESS)
     try:

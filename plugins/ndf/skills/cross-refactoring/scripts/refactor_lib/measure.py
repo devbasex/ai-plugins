@@ -4,6 +4,7 @@
 あわせて監視の記録から、手順ごとの CLI の起動回数と合計秒を足す。CLI の時間と
 手順の所要の差が、進行側が回したテストと取り込みの時間である。
 """
+
 from __future__ import annotations
 
 import pathlib
@@ -48,8 +49,7 @@ def phases(state: dict[str, Any], launches: list[dict[str, Any]]) -> dict[str, A
     return out
 
 
-def summary_extra(path: pathlib.Path, state: dict[str, Any],
-                  launches: list[dict[str, Any]]) -> dict[str, Any]:
+def summary_extra(path: pathlib.Path, state: dict[str, Any], launches: list[dict[str, Any]]) -> dict[str, Any]:
     """`run_metrics.after_save` へ渡す、cross-refactoring だけが持つ鍵。"""
     return {
         "phases": phases(state, launches),

@@ -4,6 +4,7 @@
 宣言の読み取り・複製・照合の終了コード・モードの提示までで、コンテナの起動と
 切り替えは手動確認が担う。
 """
+
 from __future__ import annotations
 
 import json
@@ -66,8 +67,7 @@ def test_setup_copies_declared_paths(main_repo: Path, worktree: Path) -> None:
     (main_repo / ".env").write_text("APP=1\n", encoding="utf-8")
     (main_repo / "vendor").mkdir()
     (main_repo / "vendor" / "lib.txt").write_text("x\n", encoding="utf-8")
-    declare(main_repo, {"kind": "compose", "layout": "indirect",
-                        "copy_from_main": [".env", "vendor"]})
+    declare(main_repo, {"kind": "compose", "layout": "indirect", "copy_from_main": [".env", "vendor"]})
 
     result = run(["setup", str(worktree)], cwd=main_repo)
 
@@ -91,9 +91,7 @@ def test_setup_replaces_copy_as_real_with_a_real_copy(main_repo: Path, worktree:
     (main_repo / "vendor").mkdir()
     (main_repo / "vendor" / "composer").mkdir()
     (main_repo / "vendor" / "composer" / "map.txt").write_text("a\n", encoding="utf-8")
-    declare(main_repo, {"kind": "compose",
-                        "copy_from_main": ["vendor"],
-                        "copy_as_real": ["vendor/composer"]})
+    declare(main_repo, {"kind": "compose", "copy_from_main": ["vendor"], "copy_as_real": ["vendor/composer"]})
 
     run(["setup", str(worktree)], cwd=main_repo)
 
@@ -194,9 +192,7 @@ def test_verify_empty_probe_output_is_not_running(main_repo: Path, worktree: Pat
 
 def test_healthcheck_runs_only_after_a_match(main_repo: Path, worktree: Path) -> None:
     marker = main_repo / "ran.txt"
-    declare(main_repo, {"kind": "compose",
-                        "branch_probe": "echo feature/x",
-                        "healthcheck": f"touch {marker}"})
+    declare(main_repo, {"kind": "compose", "branch_probe": "echo feature/x", "healthcheck": f"touch {marker}"})
     result = run(["healthcheck", str(worktree)], cwd=main_repo)
     assert result["rc"] == 0, result
     assert marker.exists()
@@ -204,9 +200,7 @@ def test_healthcheck_runs_only_after_a_match(main_repo: Path, worktree: Path) ->
 
 def test_healthcheck_stops_on_a_mismatch(main_repo: Path, worktree: Path) -> None:
     marker = main_repo / "ran.txt"
-    declare(main_repo, {"kind": "compose",
-                        "branch_probe": "echo main",
-                        "healthcheck": f"touch {marker}"})
+    declare(main_repo, {"kind": "compose", "branch_probe": "echo main", "healthcheck": f"touch {marker}"})
     result = run(["healthcheck", str(worktree)], cwd=main_repo)
     assert result["rc"] == 1, result
     assert not marker.exists(), "照合が通らないうちは実行しない"
@@ -214,9 +208,7 @@ def test_healthcheck_stops_on_a_mismatch(main_repo: Path, worktree: Path) -> Non
 
 def test_healthcheck_returns_the_command_exit_code(main_repo: Path, worktree: Path) -> None:
     """実行したコマンドの終了コードをそのまま返す。"""
-    declare(main_repo, {"kind": "compose",
-                        "branch_probe": "echo feature/x",
-                        "healthcheck": "exit 5"})
+    declare(main_repo, {"kind": "compose", "branch_probe": "echo feature/x", "healthcheck": "exit 5"})
     result = run(["healthcheck", str(worktree)], cwd=main_repo)
     assert result["rc"] == 5, result
 
@@ -234,8 +226,7 @@ def test_mode_defaults_to_sharing(main_repo: Path, worktree: Path) -> None:
 
 
 def test_mode_suggests_isolation_for_matching_paths(main_repo: Path, worktree: Path) -> None:
-    declare(main_repo, {"kind": "compose",
-                        "isolate_when": ["database/migrations/**", "docker-compose*.yml"]})
+    declare(main_repo, {"kind": "compose", "isolate_when": ["database/migrations/**", "docker-compose*.yml"]})
     (worktree / "database" / "migrations").mkdir(parents=True)
     (worktree / "database" / "migrations" / "001.sql").write_text("x\n", encoding="utf-8")
     git(worktree, "add", "-A")
@@ -299,8 +290,7 @@ def test_copy_as_real_does_not_discard_local_edits(main_repo: Path, worktree: Pa
 
 def test_mode_lists_a_path_once(main_repo: Path, worktree: Path) -> None:
     """1 つのパスが複数の条件に当たっても、一覧へは 1 度だけ載せる。"""
-    declare(main_repo, {"kind": "compose",
-                        "isolate_when": ["docker-compose*.yml", "*.yml"]})
+    declare(main_repo, {"kind": "compose", "isolate_when": ["docker-compose*.yml", "*.yml"]})
     (worktree / "docker-compose.dev.yml").write_text("x\n", encoding="utf-8")
     git(worktree, "add", "-A")
     result = run(["mode", str(worktree)], cwd=main_repo)
@@ -401,9 +391,7 @@ def test_mode_checks_both_sides_of_a_rename(main_repo: Path, worktree: Path) -> 
 # --- issue #173: 主ディレクトリを対象から解決する ---------------------------
 
 
-def test_the_declaration_and_sources_come_from_the_target(
-    tmp_path: Path, main_repo: Path, worktree: Path
-) -> None:
+def test_the_declaration_and_sources_come_from_the_target(tmp_path: Path, main_repo: Path, worktree: Path) -> None:
     """別のリポジトリから実行しても、対象側の主ディレクトリから複製する。"""
     (main_repo / ".env").write_text("from-main\n", encoding="utf-8")
     declare(main_repo, localenv={"kind": "compose", "copy_from_main": [".env"]})
@@ -412,8 +400,7 @@ def test_the_declaration_and_sources_come_from_the_target(
     (other / ".env").write_text("from-other\n", encoding="utf-8")
     write_declaration(
         other,
-        json.dumps({"version": 1,
-                    "localenv": {"kind": "compose", "copy_from_main": [".env"]}}),
+        json.dumps({"version": 1, "localenv": {"kind": "compose", "copy_from_main": [".env"]}}),
     )
 
     result = run(["setup", str(worktree)], cwd=other)

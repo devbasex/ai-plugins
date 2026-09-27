@@ -9,9 +9,7 @@ LIB = pathlib.Path(__file__).resolve().parents[1] / "lib"
 
 
 def _load_monitor_outcome():
-    spec = importlib.util.spec_from_file_location(
-        "ndf_lib_monitor_outcome_unit", LIB / "monitor_outcome.py"
-    )
+    spec = importlib.util.spec_from_file_location("ndf_lib_monitor_outcome_unit", LIB / "monitor_outcome.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
@@ -53,15 +51,29 @@ MONITOR_REASONS = ("timeout", "stalled", "early_error", "usage_limit", "cli_time
 
 def test_reasons_are_the_nine_words():
     assert _load_monitor_outcome().REASONS == (
-        "ok", "timeout", "stalled", "early_error", "missing", "pidfile_bad",
-        "usage_limit", "cli_timeout", "unparsable",
+        "ok",
+        "timeout",
+        "stalled",
+        "early_error",
+        "missing",
+        "pidfile_bad",
+        "usage_limit",
+        "cli_timeout",
+        "unparsable",
     )
 
 
-@pytest.mark.parametrize(("status", "reason"), [
-    ("OK", "ok"), ("TIMEOUT", "timeout"), ("STALLED", "stalled"),
-    ("EARLY_ERROR", "early_error"), ("NO_RESULT", "missing"), ("PIDFILE_BAD", "pidfile_bad"),
-])
+@pytest.mark.parametrize(
+    ("status", "reason"),
+    [
+        ("OK", "ok"),
+        ("TIMEOUT", "timeout"),
+        ("STALLED", "stalled"),
+        ("EARLY_ERROR", "early_error"),
+        ("NO_RESULT", "missing"),
+        ("PIDFILE_BAD", "pidfile_bad"),
+    ],
+)
 def test_reason_for_keeps_the_six_status_mappings(status, reason):
     assert _load_monitor_outcome().reason_for(status) == reason
 
@@ -87,8 +99,7 @@ def _place(tmp_path, *, monitor=None, result=None):
 
 
 def _monitor_json(reason, detail="early error (fatal) in err.log: Monthly request limit reached"):
-    return json.dumps({"agent": "kiro", "stem": STEM, "status": "EARLY_ERROR",
-                       "reason": reason, "detail": detail})
+    return json.dumps({"agent": "kiro", "stem": STEM, "status": "EARLY_ERROR", "reason": reason, "detail": detail})
 
 
 @pytest.mark.parametrize("monitor", [None, "{broken", *[_monitor_json(r) for r in ("ok", "usage_limit")]])
@@ -126,10 +137,17 @@ def test_monitor_reason_is_taken_when_the_monitor_knows_why(tmp_path, reason, re
 
 
 @pytest.mark.parametrize("monitor", [None, "{broken", '"scalar"', _monitor_json("ok"), _monitor_json("missing")])
-@pytest.mark.parametrize(("result", "reason"), [
-    (None, "missing"), ("", "missing"), ("   \n", "missing"),
-    ("[1, 2]", "unparsable"), ("{broken", "unparsable"), ('"text"', "unparsable"),
-])
+@pytest.mark.parametrize(
+    ("result", "reason"),
+    [
+        (None, "missing"),
+        ("", "missing"),
+        ("   \n", "missing"),
+        ("[1, 2]", "unparsable"),
+        ("{broken", "unparsable"),
+        ('"text"', "unparsable"),
+    ],
+)
 def test_missing_or_unparsable_is_decided_by_the_result_file(tmp_path, monitor, result, reason, capsys):
     mod = _load_monitor_outcome()
     _place(tmp_path, monitor=monitor, result=result)
@@ -152,8 +170,7 @@ def test_missing_or_unparsable_is_decided_by_the_result_file(tmp_path, monitor, 
 def test_detail_without_monitor_explains_why_the_result_is_unusable(tmp_path):
     mod = _load_monitor_outcome()
     (tmp_path / f"{STEM}-result.json").write_text("[1]", encoding="utf-8")
-    assert mod.read_launch_outcome(tmp_path, STEM).detail != mod.read_launch_outcome(
-        tmp_path, "other-stem").detail
+    assert mod.read_launch_outcome(tmp_path, STEM).detail != mod.read_launch_outcome(tmp_path, "other-stem").detail
 
 
 def test_result_path_overrides_the_default_location(tmp_path):

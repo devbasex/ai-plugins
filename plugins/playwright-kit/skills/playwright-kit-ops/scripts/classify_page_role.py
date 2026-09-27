@@ -18,7 +18,6 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -97,23 +96,23 @@ def _score_from_dom(roles: dict[str, int], url: str) -> list[RoleSignal]:
     n = roles.get
     # auth: textbox + Email/Password label (label は別途 page から取得)
     if n("textbox", 0) >= 2 and n("button", 0) >= 1:
-        add("auth", 0.5, f"textbox×{n('textbox',0)} + button")
+        add("auth", 0.5, f"textbox×{n('textbox', 0)} + button")
     # dialog
     if n("dialog", 0) >= 1:
-        add("modal", 1.5, f"dialog×{n('dialog',0)}")
+        add("modal", 1.5, f"dialog×{n('dialog', 0)}")
     # list: row >= 5 (table) or listitem >= 5 or article >= 3
     if n("row", 0) >= 5:
-        add("list", 1.5, f"row×{n('row',0)}")
+        add("list", 1.5, f"row×{n('row', 0)}")
     if n("listitem", 0) >= 5:
-        add("list", 1.0, f"listitem×{n('listitem',0)}")
+        add("list", 1.0, f"listitem×{n('listitem', 0)}")
     if n("article", 0) >= 3:
-        add("list", 0.8, f"article×{n('article',0)}")
+        add("list", 0.8, f"article×{n('article', 0)}")
     # search
     if n("searchbox", 0) >= 1:
-        add("search", 1.5, f"searchbox×{n('searchbox',0)}")
+        add("search", 1.5, f"searchbox×{n('searchbox', 0)}")
     # form: textbox >= 3 + form 要素
     if n("textbox", 0) >= 3 and n("form", 0) >= 1:
-        add("form", 1.0, f"textbox×{n('textbox',0)} + form")
+        add("form", 1.0, f"textbox×{n('textbox', 0)} + form")
     if n("aria_current", 0) >= 1:
         add("form", 0.5, "aria-current 検出 (step ?)")
         add("wizard", 0.5, "aria-current 検出 (step ?)")
@@ -127,7 +126,7 @@ def _score_from_dom(roles: dict[str, int], url: str) -> list[RoleSignal]:
         add("dashboard", 1.0, f"region×{region_count}")
     # lp: link 多数 + heading + button (CTA)
     if n("link", 0) >= 8 and n("heading_1", 0) == 1 and n("textbox", 0) <= 2:
-        add("lp", 1.0, f"link×{n('link',0)} + h1 + textbox≤2")
+        add("lp", 1.0, f"link×{n('link', 0)} + h1 + textbox≤2")
 
     # URL pattern からの加算
     parsed = urlparse(url)
@@ -180,8 +179,7 @@ def classify(
                     s.evidence.append("Email + Password label 検出")
                     break
             else:
-                signals.insert(0, RoleSignal(role="auth", score=2.0,
-                                             evidence=["Email + Password label 検出"]))
+                signals.insert(0, RoleSignal(role="auth", score=2.0, evidence=["Email + Password label 検出"]))
 
         # 上位を取り、score ≥ 1.0 のみ採用
         primary = signals[0] if signals and signals[0].score >= 1.0 else None
@@ -204,10 +202,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="URL の page role を判定する")
     parser.add_argument("--url", help="判定対象 URL")
     parser.add_argument("--url-list", type=Path, help="URL を 1 行 1 件で書いたファイル")
-    parser.add_argument("--storage-state", default=None,
-                        help="ログイン済み storage_state.json (任意)")
-    parser.add_argument("--output", type=Path, default=None,
-                        help="JSON 出力先 (省略時は stdout)")
+    parser.add_argument("--storage-state", default=None, help="ログイン済み storage_state.json (任意)")
+    parser.add_argument("--output", type=Path, default=None, help="JSON 出力先 (省略時は stdout)")
     parser.add_argument("--headed", action="store_true", help="ブラウザを headed で起動")
     args = parser.parse_args()
 
@@ -220,19 +216,21 @@ def main() -> int:
     else:
         urls = [args.url]
 
-    results = [
-        classify(u, storage_state=args.storage_state, headless=not args.headed)
-        for u in urls
-    ]
+    results = [classify(u, storage_state=args.storage_state, headless=not args.headed) for u in urls]
 
     output_text = json.dumps(results, indent=2, ensure_ascii=False)
     if args.output:
         args.output.write_text(output_text, encoding="utf-8")
-        print(json.dumps({
-            "output": str(args.output),
-            "count": len(results),
-            "errors": sum(1 for r in results if "error" in r),
-        }, ensure_ascii=False))
+        print(
+            json.dumps(
+                {
+                    "output": str(args.output),
+                    "count": len(results),
+                    "errors": sum(1 for r in results if "error" in r),
+                },
+                ensure_ascii=False,
+            )
+        )
     else:
         print(output_text)
     return 0

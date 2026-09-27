@@ -11,6 +11,7 @@
 | 新しい Pull Request から取り直す | 引数が無いとき |
 | 既存の値を残す | 取り直せないとき。取れなかったことを出力へ残す |
 """
+
 from __future__ import annotations
 
 import argparse
@@ -58,9 +59,7 @@ def _args(**over) -> argparse.Namespace:
 
 def test_the_given_branch_is_written_back(tmp_dir, state_mod, monkeypatch):
     _seed(tmp_dir)
-    monkeypatch.setattr(
-        gh_call, "RUNNER", lambda *a, **k: pytest.fail("引数があるのに GitHub を呼んでいる")
-    )
+    monkeypatch.setattr(gh_call, "RUNNER", lambda *a, **k: pytest.fail("引数があるのに GitHub を呼んでいる"))
 
     review_lib.commands.loop.cmd_set_current_pr(_args(head_branch=NEW_BRANCH))
 
@@ -73,8 +72,7 @@ def test_the_branch_is_read_back_from_the_pull_request(tmp_dir, state_mod, monke
     _seed(tmp_dir)
     calls: list[list[str]] = []
     monkeypatch.setattr(
-        gh_call, "RUNNER",
-        lambda args, stdin=None, cwd=None: calls.append(list(args)) or gh_call.GhResult(0, NEW_BRANCH + "\n", "")
+        gh_call, "RUNNER", lambda args, stdin=None, cwd=None: calls.append(list(args)) or gh_call.GhResult(0, NEW_BRANCH + "\n", "")
     )
 
     review_lib.commands.loop.cmd_set_current_pr(_args())
@@ -109,9 +107,7 @@ def test_an_empty_lookup_keeps_the_previous_branch(tmp_dir, state_mod, monkeypat
     assert _state(tmp_dir)["head_branch"] == OLD_BRANCH
 
 
-def test_only_the_current_pr_entry_is_closed_when_history_has_past_prs(
-    tmp_dir, state_mod, monkeypatch
-):
+def test_only_the_current_pr_entry_is_closed_when_history_has_past_prs(tmp_dir, state_mod, monkeypatch):
     """現状固定（R2-005）。過去に閉じた PR を含む履歴で、直前の現在 PR だけを閉じる。
 
     `pr_history` に閉じた過去 PR（`closed_at` 設定済み）と現在の PR（`closed_at`
@@ -137,16 +133,13 @@ def test_only_the_current_pr_entry_is_closed_when_history_has_past_prs(
     }
     (tmp_dir / f"cross-review-pr{PR}-state.json").write_text(json.dumps(state))
     # 引数で枝名を渡し、GitHub を呼ばない経路で確かめる。
-    monkeypatch.setattr(
-        gh_call, "RUNNER", lambda *a, **k: pytest.fail("GitHub を呼んでいる")
-    )
+    monkeypatch.setattr(gh_call, "RUNNER", lambda *a, **k: pytest.fail("GitHub を呼んでいる"))
 
     review_lib.commands.loop.cmd_set_current_pr(_args(head_branch=NEW_BRANCH))
 
     history = _state(tmp_dir)["pr_history"]
     # 過去 PR は変わらない。
-    assert history[0] == {
-        "pr": past_pr, "opened_at": "t0", "closed_at": "t1", "rounds": 1}
+    assert history[0] == {"pr": past_pr, "opened_at": "t0", "closed_at": "t1", "rounds": 1}
     # 直前の現在 PR に closed_at と rounds（その PR のラウンド数 2）が入る。
     assert history[1]["pr"] == PR
     assert history[1]["closed_at"] is not None

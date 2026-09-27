@@ -12,6 +12,7 @@ import の向きは `__init__` ← `store`・`github`・`categories`・`review_f
 **モジュール名を `queue` にしない。** 標準ライブラリに同じ名前があり、ライブラリを
 `sys.path` の先頭へ入れるとプロセス全体で標準ライブラリ側が隠れる。
 """
+
 from __future__ import annotations
 
 import pathlib

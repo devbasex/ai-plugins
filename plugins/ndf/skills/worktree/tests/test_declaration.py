@@ -3,6 +3,7 @@
 宣言が無い・読めない・版が未対応のいずれの場合も、何も出力せず呼び出し側が
 作業を止めない値を返す（詳細設計 06 の決定 9）。
 """
+
 from __future__ import annotations
 
 import json

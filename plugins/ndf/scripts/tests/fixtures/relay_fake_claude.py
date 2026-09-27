@@ -30,6 +30,7 @@
 
 最後の引数（区間のプロンプト）が `mark ` で始まれば、起動の直後にその行を 1 度実行する。
 """
+
 import fcntl
 import json
 import os
@@ -60,8 +61,7 @@ def plugin(args):
     if kind == "list":
         calls = [json.loads(x) for x in open(os.path.join(D, "calls.jsonl"))]
         updated = any(c["args"][:1] == ["update"] for c in calls)
-        ver = os.environ.get("FAKE_VERSION_AFTER" if updated else "FAKE_VERSION") \
-            or os.environ.get("FAKE_VERSION") or "1.0.0"
+        ver = os.environ.get("FAKE_VERSION_AFTER" if updated else "FAKE_VERSION") or os.environ.get("FAKE_VERSION") or "1.0.0"
         print(json.dumps([{"id": "other@x", "version": "9"}, {"id": "ndf@mk", "version": ver}]))
         lists = sum(c["args"][:1] == ["list"] for c in calls)
         if str(lists) == os.environ.get("FAKE_BREAK_ON_LIST"):
@@ -75,8 +75,14 @@ def transcript():
 
 def do_mark(body):
     msg = f"次の区間:\n\n```ndf-next\n{body}\n```" if body is not None else "ブロックは無い"
-    data = {"session_id": f"s{os.getpid()}", "transcript_path": transcript(), "cwd": os.getcwd(),
-            "stop_hook_active": False, "last_assistant_message": msg, "background_tasks": []}
+    data = {
+        "session_id": f"s{os.getpid()}",
+        "transcript_path": transcript(),
+        "cwd": os.getcwd(),
+        "stop_hook_active": False,
+        "last_assistant_message": msg,
+        "background_tasks": [],
+    }
     subprocess.run([sys.executable, RELAY, "mark"], input=json.dumps(data), text=True)
 
 
@@ -90,8 +96,7 @@ def handle(line):
             open(os.path.join(os.environ["NDF_RELAY_DIR"], "question"), "w").close()
             with open(os.path.join(os.environ["NDF_RELAY_DIR"], "asked"), "w") as f:  # `question open` と同じ
                 t = time.time()
-                f.write(json.dumps({"at": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(t))
-                                    + f".{int(t * 1000) % 1000:03d}Z"}))
+                f.write(json.dumps({"at": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(t)) + f".{int(t * 1000) % 1000:03d}Z"}))
         elif os.environ.get("FAKE_IGNORE_EXIT") != "1":
             sys.exit(0)
     elif line.startswith("mark "):
@@ -107,8 +112,7 @@ def handle(line):
         with open(transcript(), "a") as f:
             f.write(line[3:] + "\n")
     elif line.startswith("q "):
-        p = subprocess.run([sys.executable, RELAY, "question", line[2:]], input="{}", text=True,
-                           capture_output=True)
+        p = subprocess.run([sys.executable, RELAY, "question", line[2:]], input="{}", text=True, capture_output=True)
         log(f"question-{os.getpid()}.jsonl", {"action": line[2:], "stdout": p.stdout, "code": p.returncode})
     elif line == "answer" or line.startswith("answer mark "):
         do_mark(line[12:] if line.startswith("answer mark ") else None)
@@ -129,14 +133,23 @@ def main():
     if os.environ.get("FAKE_IGNORE_EXIT") == "1":
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
     if os.environ.get("FAKE_EXIT_QUESTION") == "1":
+
         def on_term(*_):
             open(os.path.join(D, f"sigterm-{os.getpid()}"), "w").close()
             os._exit(143)
+
         signal.signal(signal.SIGTERM, on_term)
-    log("starts.jsonl", {"argv": args, "cwd": os.getcwd(), "pid": os.getpid(),
-                         "relay_dir": os.environ.get("NDF_RELAY_DIR"),
-                         "claudecode": os.environ.get("CLAUDECODE"),
-                         "depth": os.environ.get("NDF_RELAY_DEPTH")})
+    log(
+        "starts.jsonl",
+        {
+            "argv": args,
+            "cwd": os.getcwd(),
+            "pid": os.getpid(),
+            "relay_dir": os.environ.get("NDF_RELAY_DIR"),
+            "claudecode": os.environ.get("CLAUDECODE"),
+            "depth": os.environ.get("NDF_RELAY_DEPTH"),
+        },
+    )
     open(transcript(), "a").close()
     if args and args[-1].startswith("mark "):
         do_mark(args[-1][5:])

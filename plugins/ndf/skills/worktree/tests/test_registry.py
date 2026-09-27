@@ -3,6 +3,7 @@
 割り当てを解放しても行を消さず、解放の時刻を書き込む（詳細設計 06 の決定 7）。
 同じ番号を別の作業ツリーが使った履歴と、外部公開の記録を残すためである。
 """
+
 from __future__ import annotations
 
 import json
@@ -207,7 +208,12 @@ exit 0
 
 
 def _run_lock_race(
-    tmp_path: Path, lib: Path, acquire: str, release: str, parallel: int, trials: int,
+    tmp_path: Path,
+    lib: Path,
+    acquire: str,
+    release: str,
+    parallel: int,
+    trials: int,
     timeout: int = 6,
 ) -> dict:
     """同じロックを `parallel` 個のプロセスで取りに行く試行を `trials` 回行う。
@@ -231,7 +237,8 @@ def _run_lock_race(
         procs = [
             subprocess.Popen(
                 ["bash", str(worker), str(lib), acquire, release, str(base), str(timeout)],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
             )
             for _ in range(parallel)
         ]
@@ -258,9 +265,7 @@ def test_many_at_once_never_share_the_critical_section(tmp_path: Path) -> None:
     が見ている。入口 × 並列数の 4 通りで同じ臨界区間を試しても、検出できる不具合は増えない。
     並列数は多い側（12）を残す。重なりは同時に取りに行く数が多いほど出やすい。
     """
-    got = _run_lock_race(
-        tmp_path, LIB, "wt_lock_acquire", "wt_lock_release", parallel=12, trials=3
-    )
+    got = _run_lock_race(tmp_path, LIB, "wt_lock_acquire", "wt_lock_release", parallel=12, trials=3)
 
     assert got["overlap"] == 0, f"臨界区間が重なった試行 {got['overlap']} 件"
     assert got["miss"] == 0, f"上限に達して取れなかった回数 {got['miss']} 回"
@@ -268,16 +273,10 @@ def test_many_at_once_never_share_the_critical_section(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(("lib", "acquire", "release"), LOCK_LIBS)
-def test_the_lock_does_not_leave_noclobber_on_the_caller(
-    tmp_path: Path, lib: Path, acquire: str, release: str
-) -> None:
+def test_the_lock_does_not_leave_noclobber_on_the_caller(tmp_path: Path, lib: Path, acquire: str, release: str) -> None:
     """#297-7: 取得の成否のどちらでも、呼び出し側のシェルの `$-` に `C` を残さない。"""
     lock = tmp_path / "flag.lock"
-    script = (
-        f'set -uo pipefail\n. "{lib}"\n'
-        f'{acquire} "{lock}" 1; echo taken=$-\n'
-        f'{acquire} "{lock}" 1; echo missed=$-\n'
-    )
+    script = f'set -uo pipefail\n. "{lib}"\n{acquire} "{lock}" 1; echo taken=$-\n{acquire} "{lock}" 1; echo missed=$-\n'
     got = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
 
     for line in got.stdout.split():
@@ -288,7 +287,8 @@ def _run_lock_lib(lib: Path, snippet: str) -> subprocess.CompletedProcess:
     """`lib` を読み込んだうえで `snippet` を bash で実行する。2 つの読み込む側へ同じチェックをかける。"""
     return subprocess.run(
         ["bash", "-c", f'set -uo pipefail\n. "{lib}"\n{snippet}\n'],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
 
 
@@ -300,9 +300,7 @@ LOCK_HELPERS = [
 
 
 @pytest.mark.parametrize(("lib", "prefix"), LOCK_HELPERS)
-def test_a_lock_that_changed_hands_is_not_judged_stale(
-    tmp_path: Path, lib: Path, prefix: str
-) -> None:
+def test_a_lock_that_changed_hands_is_not_judged_stale(tmp_path: Path, lib: Path, prefix: str) -> None:
     """#297-1 / 2: 判定の間に持ち主が替わったロックを、陳腐化と読まない。
 
     `kill -0` が偽になるのは、見始めたときの持ち主が離れたときにも起きる。離れた後に
@@ -321,9 +319,7 @@ def test_a_lock_that_changed_hands_is_not_judged_stale(
 
 
 @pytest.mark.parametrize(("lib", "prefix"), LOCK_HELPERS)
-def test_a_lock_that_changed_hands_is_never_moved_out(
-    tmp_path: Path, lib: Path, prefix: str
-) -> None:
+def test_a_lock_that_changed_hands_is_never_moved_out(tmp_path: Path, lib: Path, prefix: str) -> None:
     """#297-1 / 2: 判定と違うロックは、いっとき外へ出すこともしない。
 
     外へ出している間はロックの名前が空く。持ち主が臨界区間にいるまま、別の担当が
@@ -374,9 +370,7 @@ exit $rc
 
 
 @pytest.mark.parametrize(("lib", "prefix"), LOCK_HELPERS)
-def test_a_discard_shuts_out_another_discard_of_the_same_lock(
-    tmp_path: Path, lib: Path, prefix: str
-) -> None:
+def test_a_discard_shuts_out_another_discard_of_the_same_lock(tmp_path: Path, lib: Path, prefix: str) -> None:
     """#297-1 / 2: 確かめてから取り除くまでの間に、別の担当が取り直せない。
 
     確かめることと取り除くことが別々だと、その間に別の担当が同じロックを捨てて取り直す。
@@ -393,9 +387,7 @@ def test_a_discard_shuts_out_another_discard_of_the_same_lock(
     (lock / "token").write_text("old-owner\n", encoding="utf-8")
     real_cat = shutil.which("cat")
     assert real_cat is not None
-    (shim_dir / "cat").write_text(
-        LOCK_CAT_SHIM.replace("REAL_CAT", real_cat), encoding="utf-8"
-    )
+    (shim_dir / "cat").write_text(LOCK_CAT_SHIM.replace("REAL_CAT", real_cat), encoding="utf-8")
     (shim_dir / "cat").chmod(0o755)
 
     acquire = f"{prefix[1:]}_lock_acquire"
@@ -438,7 +430,9 @@ def test_six_registrations_at_once_all_survive(main_repo: Path, tmp_path: Path) 
         procs = [
             subprocess.Popen(
                 ["bash", str(worker), str(LIB), str(main_repo), str(base), str(i)],
-                cwd=str(main_repo), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                cwd=str(main_repo),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
             )
             for i in range(6)
         ]
@@ -461,14 +455,10 @@ def _lock_body(path: Path, name: str) -> str:
     lines = path.read_text(encoding="utf-8").splitlines()
     start = lines.index(f"{name}() {{")
     end = lines.index("}", start)
-    kept = [
-        " ".join(line.split())
-        for line in lines[start + 1:end]
-        if line.strip() and not line.strip().startswith("#")
-    ]
+    kept = [" ".join(line.split()) for line in lines[start + 1 : end] if line.strip() and not line.strip().startswith("#")]
     body = "\n".join(kept)
     # 2 つの読み込む側で違ってよいのは、接頭辞と上限の既定値だけである。
-    body = re.sub(r'timeout="\$\{2:-[^}]*\}"', 'timeout=DEFAULT', body)
+    body = re.sub(r'timeout="\$\{2:-[^}]*\}"', "timeout=DEFAULT", body)
     body = re.sub(r"\bW[TF]_LOCK_", "LOCK_", body)
     return body.replace("_wt_", "_lock_").replace("_wf_", "_lock_")
 

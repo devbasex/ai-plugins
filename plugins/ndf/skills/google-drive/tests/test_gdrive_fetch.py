@@ -2,6 +2,7 @@
 
 Google の API は呼ばない。認証とクライアントを差し替え、送られる要求だけを見る。
 """
+
 from __future__ import annotations
 
 import importlib.util

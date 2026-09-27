@@ -8,6 +8,7 @@
 `agy` そのものは起動しない。PATH へ引数を書き出すだけの実行ファイルを置き、
 記録された引数を読む。
 """
+
 from __future__ import annotations
 
 import os
@@ -63,7 +64,9 @@ def _run(tmp_path: pathlib.Path, *extra: str) -> list[str]:
             "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
             "NDF_TEST_ARGS_FILE": str(args_file),
         },
-        check=True, capture_output=True, text=True,
+        check=True,
+        capture_output=True,
+        text=True,
     )
     # 背景起動なので、書き出しを待つ。
     for _ in range(200):
@@ -80,6 +83,7 @@ def args(tmp_path) -> list[str]:
 
 
 # ---------- 受け入れ条件 3 / 5（作業領域） ----------
+
 
 def test_the_worktree_is_declared_as_the_workspace(tmp_path) -> None:
     """`--add-dir` に担当の作業ツリーが入る。渡さないと見えない場所で作業する。"""
@@ -104,6 +108,7 @@ def test_only_the_two_declared_directories_are_added(args) -> None:
 
 # ---------- 受け入れ条件 6 / 7 / 8（プロンプトと承認） ----------
 
+
 def test_the_prompt_is_the_value_of_p(args) -> None:
     """`agy` は標準入力からプロンプトを受け取らない。`-p=<本文>` で渡す。"""
     assert args[-1] == f"-p={PROMPT_BODY.rstrip(chr(10))}"
@@ -126,6 +131,7 @@ def test_the_output_format_is_text(args) -> None:
 
 # ---------- 受け入れ条件 9（モデル） ----------
 
+
 def test_the_model_is_passed_when_given(tmp_path) -> None:
     got = _run(tmp_path, "gemini-3-pro")
     assert got[got.index("--model") + 1] == "gemini-3-pro"
@@ -136,6 +142,7 @@ def test_the_model_is_absent_when_not_given(args) -> None:
 
 
 # ---------- 受け入れ条件 10（実行時間の上限） ----------
+
 
 def test_the_print_timeout_is_passed(tmp_path) -> None:
     """CLI 側が先に打ち切ると、結果ファイルが残らない場合と区別が付かない。"""
@@ -155,6 +162,7 @@ def test_the_print_timeout_defaults_to_the_longest_phase(args) -> None:
 
 
 # ---------- 受け入れ条件 15（設定ファイルを触らない） ----------
+
 
 def test_the_settings_file_in_the_worktree_is_left_alone(tmp_path) -> None:
     """起動前の退避も、起動後の復元もしない。"""

@@ -13,6 +13,7 @@
   7. (PLAN21 round 3) `pr` フィールドが数値として解釈できない → skip
   8. (PLAN21 round 3) `_is_fresh_fix_result` 戻り値のタプル化追従
 """
+
 from __future__ import annotations
 
 import argparse
@@ -32,9 +33,7 @@ PR = 9919
 def _seed_state(tmp_dir: pathlib.Path) -> None:
     state = {
         "current_pr": PR,
-        "rounds": [
-            {"round": 1, "pr": PR, "started_at": "2026-05-23T00:00:00+00:00"}
-        ],
+        "rounds": [{"round": 1, "pr": PR, "started_at": "2026-05-23T00:00:00+00:00"}],
         "deferred_nits": [],
         "final": None,
     }
@@ -294,9 +293,7 @@ def test_explicit_file_bypasses_stale_check(patched_tmp_dir, state_mod, tmp_path
 # ---------------- PLAN21 round 3: 正規パス parse 失敗 / pr 型不正 / 戻り値タプル化 ----------------
 
 
-def test_canonical_path_json_parse_failure_dies_immediately(
-    patched_tmp_dir, state_mod, capsys
-):
+def test_canonical_path_json_parse_failure_dies_immediately(patched_tmp_dir, state_mod, capsys):
     """正規パス ($TMP_DIR/fix-prN-result.json) の JSON parse 失敗は即時 die(code=3)。
 
     codex round 2 指摘: 壊れた正規パスをスキップして /tmp/ fallback に流れると
@@ -355,9 +352,7 @@ def test_fallback_pr_field_non_numeric_is_skipped(patched_tmp_dir, state_mod, ca
     assert "fix" not in st["rounds"][-1]
 
 
-def test_is_fresh_fix_result_returns_tuple_with_parsed_payload(
-    patched_tmp_dir, state_mod
-):
+def test_is_fresh_fix_result_returns_tuple_with_parsed_payload(patched_tmp_dir, state_mod):
     """`_is_fresh_fix_result` は (is_fresh, parsed_payload) を返す。
 
     gemini round 2 指摘の性能改善: cmd_merge_fix 側で再パースしないよう、
@@ -388,9 +383,7 @@ def test_is_fresh_fix_result_returns_none_when_stale(patched_tmp_dir, state_mod)
     stale_ts = now_dt.timestamp() - 3600
     os.utime(p, (stale_ts, stale_ts))
 
-    is_fresh, parsed = review_lib.fix_result._is_fresh_fix_result(
-        p, PR, now_dt.timestamp(), is_canonical=False
-    )
+    is_fresh, parsed = review_lib.fix_result._is_fresh_fix_result(p, PR, now_dt.timestamp(), is_canonical=False)
     assert is_fresh is False
     assert parsed is None
 
@@ -413,9 +406,7 @@ def test_is_fresh_fix_result_non_dict_json_is_skipped(patched_tmp_dir, state_mod
     # JSON として valid だが dict ではない (list)
     p.write_text(json.dumps([{"fix_commit": "should_be_ignored"}]))
 
-    is_fresh, parsed = review_lib.fix_result._is_fresh_fix_result(
-        p, PR, past_ts, is_canonical=False
-    )
+    is_fresh, parsed = review_lib.fix_result._is_fresh_fix_result(p, PR, past_ts, is_canonical=False)
     assert is_fresh is False
     assert parsed is None
     captured = capsys.readouterr()
@@ -423,9 +414,7 @@ def test_is_fresh_fix_result_non_dict_json_is_skipped(patched_tmp_dir, state_mod
     assert "dict ではない" in captured.err
 
 
-def test_is_fresh_fix_result_non_dict_json_canonical_dies_round5(
-    patched_tmp_dir, state_mod, capsys
-):
+def test_is_fresh_fix_result_non_dict_json_canonical_dies_round5(patched_tmp_dir, state_mod, capsys):
     """PLAN21 round 5 で挙動変更: 正規パス (is_canonical=True) で非 dict なら die(code=3)。
 
     旧 round 4 では skip (False, None) だったが、codex round 4 指摘により
@@ -472,9 +461,7 @@ def test_explicit_file_non_dict_json_dies(patched_tmp_dir, state_mod, capsys, tm
 # ---------------- PLAN21 round 5: 正規パス non-dict 即時 die / --file 厳格化 ----------------
 
 
-def test_canonical_path_non_dict_json_dies_immediately(
-    patched_tmp_dir, state_mod, capsys
-):
+def test_canonical_path_non_dict_json_dies_immediately(patched_tmp_dir, state_mod, capsys):
     """正規パス ($TMP_DIR/fix-prN-result.json) の JSON が dict 以外なら即時 die(code=3)。
 
     codex round 4 指摘: parse 失敗と同様、非 dict も「壊れた正規出力」として扱う。
@@ -809,9 +796,7 @@ def test_merge_fix_records_resolved_thread_positions(patched_tmp_dir, state_mod)
     assert merged["resolved_thread_ids"] == ["T1", "T2"]
 
 
-def test_merge_fix_resolved_thread_positions_int_form_does_not_crash(
-    patched_tmp_dir, state_mod
-):
+def test_merge_fix_resolved_thread_positions_int_form_does_not_crash(patched_tmp_dir, state_mod):
     """件数(int) しか返らない劣化表現では位置を作れない。**落ちない。**"""
     tmp_dir = patched_tmp_dir
     _seed_state(tmp_dir)
@@ -827,9 +812,7 @@ def test_merge_fix_resolved_thread_positions_int_form_does_not_crash(
     assert merged["resolved_thread_ids"] == []
 
 
-def test_merge_fix_resolved_thread_positions_keeps_incomplete_items(
-    patched_tmp_dir, state_mod
-):
+def test_merge_fix_resolved_thread_positions_keeps_incomplete_items(patched_tmp_dir, state_mod):
     """位置の欠けた要素も落とさない。
 
     落とすと、解決したスレッドの件数と位置の件数が食い違う。欠けた要素は

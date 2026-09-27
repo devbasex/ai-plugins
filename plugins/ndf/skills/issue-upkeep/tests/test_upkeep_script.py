@@ -4,6 +4,7 @@ gh は PATH の先頭に置いた偽物で置き換える。偽物は FAKE_GH_ST
 読み書きし、呼ばれた引数を calls に積む。`throttle` に積んだ応答は、書き込みの呼び出しへ
 先頭から 1 つずつ返す（上限に当たった応答を作るため）。
 """
+
 from __future__ import annotations
 
 import json
@@ -24,7 +25,7 @@ from step_result import validate_result  # noqa: E402
 PY = sys.executable
 FUTURE = "2999-01-01T00:00:00Z"
 
-FAKE_GH = r'''#!{py}
+FAKE_GH = r"""#!{py}
 import json, os, re, sys
 a = sys.argv[1:]
 path = os.environ["FAKE_GH_STATE"]
@@ -92,13 +93,20 @@ if m:
         i["updated_at"] = "2026-09-25T00:00:09Z"
     done(i)
 done("", 1, stderr="not found (HTTP 404)")
-'''
+"""
 
 
 def _issue(n, title, body="", state="open", milestone=None, **kw):
-    return {"number": n, "title": title, "body": body, "state": state,
-            "milestone": {"number": 1, "title": milestone} if milestone else None,
-            "labels": [], "updated_at": "2026-09-01T00:00:00Z", **kw}
+    return {
+        "number": n,
+        "title": title,
+        "body": body,
+        "state": state,
+        "milestone": {"number": 1, "title": milestone} if milestone else None,
+        "labels": [],
+        "updated_at": "2026-09-01T00:00:00Z",
+        **kw,
+    }
 
 
 def _git(repo, *args):
@@ -135,21 +143,27 @@ def env(tmp_path):
         _issue(10, "閉じた", state="closed", milestone="M1", closed_at=FUTURE),
         _issue(11, "閉じた親", state="closed", closed_at=FUTURE, sub_issues_summary={"total": 1}),
     ]
-    state = {"issues": {str(i["number"]): i for i in issues},
-             "milestones": [{"number": 1, "title": "M1"}, {"number": 2, "title": "M2"}],
-             "sub_issues": {"11": [5]}}
+    state = {
+        "issues": {str(i["number"]): i for i in issues},
+        "milestones": [{"number": 1, "title": "M1"}, {"number": 2, "title": "M2"}],
+        "sub_issues": {"11": [5]},
+    }
     sp = tmp_path / "gh-state.json"
     sp.write_text(json.dumps(state, ensure_ascii=False))
-    e = dict(os.environ, PATH=f"{bindir}:{os.environ['PATH']}", FAKE_GH_STATE=str(sp),
-             NDF_UPKEEP_STATE_DIR=str(tmp_path / "state"), NDF_UPKEEP_NO_SLEEP="1",
-             NDF_PRESENTATION_DIR=str(tmp_path / "pres"))
+    e = dict(
+        os.environ,
+        PATH=f"{bindir}:{os.environ['PATH']}",
+        FAKE_GH_STATE=str(sp),
+        NDF_UPKEEP_STATE_DIR=str(tmp_path / "state"),
+        NDF_UPKEEP_NO_SLEEP="1",
+        NDF_PRESENTATION_DIR=str(tmp_path / "pres"),
+    )
 
     class Env:
         root, path = repo, tmp_path
 
         def run(self, *args):
-            p = subprocess.run([PY, str(SCRIPT), *args, "--root", str(repo)], env=e,
-                               capture_output=True, text=True)
+            p = subprocess.run([PY, str(SCRIPT), *args, "--root", str(repo)], env=e, capture_output=True, text=True)
             out = json.loads(p.stdout.strip().splitlines()[-1])
             assert validate_result(out, p.returncode) == [], (out, p.returncode, p.stderr)
             return p.returncode, out
@@ -178,16 +192,28 @@ def env(tmp_path):
 
 
 def _action(snap, verdict, changes, **kw):
-    return {"number": snap["number"], "verdict": verdict, "updated_at": snap["updated_at"],
-            "digest": snap["digest"], "changes": changes, **kw}
+    return {
+        "number": snap["number"],
+        "verdict": verdict,
+        "updated_at": snap["updated_at"],
+        "digest": snap["digest"],
+        "changes": changes,
+        **kw,
+    }
 
 
 def test_candidates_collect_each_route(env):
     code, out = env.run("candidates", "--since-ref", "v1")
     assert code == 0
     routes = {i["number"]: i["routes"] for i in out["items"] if i["kind"] == "issue"}
-    assert routes == {1: ["diff-path"], 2: ["diff-identifier"], 3: ["no-milestone"],
-                      4: ["closed-milestone"], 5: ["sub-issue"], 6: ["sub-issue"]}
+    assert routes == {
+        1: ["diff-path"],
+        2: ["diff-identifier"],
+        3: ["no-milestone"],
+        4: ["closed-milestone"],
+        5: ["sub-issue"],
+        6: ["sub-issue"],
+    }
     assert out["metrics"]["candidates"] == 6
     assert all(i["kind"] == "issue" for i in out["items"])  # M1 には open の #4 が残る
 
@@ -226,8 +252,9 @@ def test_candidates_limit_caps_one_run(env):
 
 def test_apply_writes_only_what_differs(env):
     snap = env.snapshot(3)
-    code, out = env.run("apply", "--plan", env.plan([
-        _action(snap, "追記が要る", {"body": "新しい本文", "milestone": "M3", "add_labels": ["bug"]})]))
+    code, out = env.run(
+        "apply", "--plan", env.plan([_action(snap, "追記が要る", {"body": "新しい本文", "milestone": "M3", "add_labels": ["bug"]})])
+    )
     assert code == 0, out
     assert out["metrics"]["applied"] == [3]
     issue = env.state()["issues"]["3"]
@@ -289,23 +316,26 @@ def test_waits_follow_retry_after_then_double(env):
     snap = env.snapshot(3)
     code, out = env.run("apply", "--plan", env.plan([_action(snap, "追記が要る", {"body": "新"})]))
     assert code == 0, out
-    assert [(w["why"], w["seconds"]) for w in out["metrics"]["waits"]] == [
-        ("retry-after", 7.0), ("doubling", 60.0), ("doubling", 120.0)]
+    assert [(w["why"], w["seconds"]) for w in out["metrics"]["waits"]] == [("retry-after", 7.0), ("doubling", 60.0), ("doubling", 120.0)]
 
 
 def test_waits_over_limit_stop_as_partial(env):
     env.set(lambda st: st.update(throttle=[{}] * 5))
     s3, s4 = env.snapshot(3), env.snapshot(4)
-    code, out = env.run("apply", "--max-waits", "2", "--plan", env.plan([
-        _action(s3, "追記が要る", {"body": "新"}), _action(s4, "追記が要る", {"body": "新"})]))
+    code, out = env.run(
+        "apply",
+        "--max-waits",
+        "2",
+        "--plan",
+        env.plan([_action(s3, "追記が要る", {"body": "新"}), _action(s4, "追記が要る", {"body": "新"})]),
+    )
     assert code == 20 and out["metrics"]["partial"] is True
     assert out["metrics"]["pending"] == [3, 4] and len(out["metrics"]["waits"]) == 2
 
 
 def test_report_summarises_candidates_and_apply(env):
     snap = env.snapshot(4)
-    env.run("apply", "--plan", env.plan([
-        _action(snap, "閉じてよい", {"state": "closed", "state_reason": "completed"})]))
+    env.run("apply", "--plan", env.plan([_action(snap, "閉じてよい", {"state": "closed", "state_reason": "completed"})]))
     code, out = env.run("report")
     assert code == 0
     m = out["metrics"]
@@ -314,9 +344,12 @@ def test_report_summarises_candidates_and_apply(env):
 
 
 def test_report_without_records_is_precondition(env):
-    p = subprocess.run([PY, str(SCRIPT), "report", "--root", str(env.root), "--repo", "x/none",
-                        "--state-dir", str(env.path / "empty")], capture_output=True, text=True,
-                       env=dict(os.environ, NDF_UPKEEP_NO_SLEEP="1"))
+    p = subprocess.run(
+        [PY, str(SCRIPT), "report", "--root", str(env.root), "--repo", "x/none", "--state-dir", str(env.path / "empty")],
+        capture_output=True,
+        text=True,
+        env=dict(os.environ, NDF_UPKEEP_NO_SLEEP="1"),
+    )
     assert p.returncode == 3
 
 
@@ -328,8 +361,7 @@ def test_candidates_do_not_match_a_path_inside_a_longer_path(env):
 
 def test_candidates_pick_issues_named_in_commit_subjects(env):
     # 配布に入ったコミットの件名が番号を指す open の課題は、直っていても閉じ忘れのまま残る
-    _git(env.root, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q",
-         "--allow-empty", "-m", "Fix: 落ちる所を直す (#7 #10)")
+    _git(env.root, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "Fix: 落ちる所を直す (#7 #10)")
     code, out = env.run("candidates", "--since-ref", "v1", "--limit", "1")
     assert code == 20
     first = out["items"][0]

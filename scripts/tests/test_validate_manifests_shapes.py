@@ -2,6 +2,7 @@
 
 移す前に isinstance で見ていた項目の誤りが、同じ文言の ERROR になることを固定する。
 """
+
 from __future__ import annotations
 
 import json

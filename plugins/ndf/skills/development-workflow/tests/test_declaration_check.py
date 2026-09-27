@@ -7,6 +7,7 @@
 **本文は終了コードで分岐するだけで、宣言ファイルを自分で調べない。** 状態を分ける
 基準は `worktree-common.sh` の `wt_declaration_state` の 1 か所にある。
 """
+
 from __future__ import annotations
 
 import os
@@ -35,7 +36,7 @@ def step0() -> str:
     body = skill()
     judge = body.index(JUDGE_HEADING)
     head = body.index(STEP0_HEADING, judge)
-    return body[head: body.index(STEP1_HEADING, head)]
+    return body[head : body.index(STEP1_HEADING, head)]
 
 
 def step0_bash() -> str:
@@ -52,7 +53,10 @@ def run_step0(cwd: Path, scripts: str | None) -> subprocess.CompletedProcess:
         env["SCRIPTS"] = scripts
     return subprocess.run(
         ["bash", "-c", f"set -uo pipefail\n{step0_bash()}"],
-        cwd=str(cwd), env=env, capture_output=True, text=True,
+        cwd=str(cwd),
+        env=env,
+        capture_output=True,
+        text=True,
     )
 
 

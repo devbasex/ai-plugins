@@ -3,6 +3,7 @@
 実機の `state.py init` は、`final` が決まった状態を再開の対象にせず、空の状態で上書きする。
 偽物の `call` がその振る舞いを模し、打ち直した駆動が実際のラウンド数と指摘数を返すことを確かめる。
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -39,8 +40,7 @@ class FakeReview:
         self.save()
 
     def empty(self) -> dict:
-        return {"repo": "o/r", "current_pr": 5, "worktree_path": str(self.tmp / "wt"), "rounds": [],
-                "pr_history": [{"pr": 5}]}
+        return {"repo": "o/r", "current_pr": 5, "worktree_path": str(self.tmp / "wt"), "rounds": [], "pr_history": [{"pr": 5}]}
 
     def save(self):
         (self.tmp / "cross-review-pr5-state.json").write_text(json.dumps(self.state))
@@ -186,7 +186,6 @@ def test_drive_state_of_other_dir_is_not_used(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("CROSS_REVIEW_TMP_DIR", str(tmp_path))
     fake = FakeReview(tmp_path)
     monkeypatch.setattr(cr, "call", fake)
-    (tmp_path / "drive-pr5.json").write_text(json.dumps(
-        {"stage": "done", "init_vars": {"TMP_DIR": str(tmp_path / "other")}}))
+    (tmp_path / "drive-pr5.json").write_text(json.dumps({"stage": "done", "init_vars": {"TMP_DIR": str(tmp_path / "other")}}))
     run_main(["5"], capsys)
     assert fake.inits() == 1

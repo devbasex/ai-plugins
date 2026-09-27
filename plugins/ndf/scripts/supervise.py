@@ -67,6 +67,7 @@ new / queue / wait / note / sync-check の結果は lib/step_result.py の形の
 最後に `## フェーズの報告` を標準出力と `<state-dir>/report.md` へ書く。conductor はこの
 スクリプトを背景の Bash で起動し、終わりの通知で報告を読む。
 """
+
 import argparse
 import json
 import sys
@@ -94,19 +95,27 @@ MAIN_EPILOG = """フェーズごとの種別（new <種別> --help で、書き�
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0], epilog=MAIN_EPILOG,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__.splitlines()[0], epilog=MAIN_EPILOG, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     sub = ap.add_subparsers(dest="cmd", required=True)
-    r = sub.add_parser("run", help="プランを 1 本流す",
-                       description="プランを 1 本流す。ステップを順に進め、報告を標準出力へ出す"
-                                   "（終了コード: 完了か関門 = 0 / それ以外 = 3）",
-                       epilog="状態は --state-dir（省けば <プラン>-state/）に progress.jsonl・報告・ステップの出力として残る。"
-                              "途中で止まったら --from <ステップの id> で続きから流す")
+    r = sub.add_parser(
+        "run",
+        help="プランを 1 本流す",
+        description="プランを 1 本流す。ステップを順に進め、報告を標準出力へ出す（終了コード: 完了か関門 = 0 / それ以外 = 3）",
+        epilog="状態は --state-dir（省けば <プラン>-state/）に progress.jsonl・報告・ステップの出力として残る。"
+        "途中で止まったら --from <ステップの id> で続きから流す",
+    )
     r.add_argument("plan", help="プランの JSON")
     r.add_argument("--state-dir", help="状態の置き場（既定は <プラン>-state/）")
     r.add_argument("--from", dest="start", help="このステップから始める（途中から再開するとき）")
-    r.add_argument("--slow", action="append", default=[], metavar="K=V",
-                   help="遅れの見張りの設定を上書きする（計画と .ndf/supervise.json の slow より先に効く。繰り返せる）")
+    r.add_argument(
+        "--slow",
+        action="append",
+        default=[],
+        metavar="K=V",
+        help="遅れの見張りの設定を上書きする（計画と .ndf/supervise.json の slow より先に効く。繰り返せる）",
+    )
     hp = sub.add_parser("history", help="ステップの所要の履歴（遅れの見張りの想定の材料）")
     hs = hp.add_subparsers(dest="hcmd", required=True)
     hi = hs.add_parser("import", help="既存の progress.jsonl のステップの所要を履歴へ取り込む")
@@ -118,29 +127,45 @@ def main() -> int:
     ex.add_argument("--slow", action="append", default=[], metavar="K=V")
     sub.add_parser("example")
     new_args.add_new_parsers(sub, MAIN_EPILOG)
-    q = sub.add_parser("queue", help="プランを同時に --max 本まで順に流す",
-                       description="プランを同時に --max 本まで順に流す。空いた枠へ順に流し、worktree は起動の前に 1 本ずつ作る",
-                       epilog="--then のプランは前のプランがすべて完了のときだけ続けて流す（実装の queue の後のリリースなど）。"
-                              "--then を繰り返すとステージになる。終わると結果の JSON を --done へ書き、始めに流すプランの"
-                              "一覧を <done>.plans.json へ書く")
+    q = sub.add_parser(
+        "queue",
+        help="プランを同時に --max 本まで順に流す",
+        description="プランを同時に --max 本まで順に流す。空いた枠へ順に流し、worktree は起動の前に 1 本ずつ作る",
+        epilog="--then のプランは前のプランがすべて完了のときだけ続けて流す（実装の queue の後のリリースなど）。"
+        "--then を繰り返すとステージになる。終わると結果の JSON を --done へ書き、始めに流すプランの"
+        "一覧を <done>.plans.json へ書く",
+    )
     q.add_argument("plans", nargs="+", help="流すプランの JSON")
     q.add_argument("--max", type=int, default=3, help="同時に流す本数（既定 3）")
     q.add_argument("--poll", type=float, default=5.0, help="終わりを見る間隔（秒）")
-    q.add_argument("--then", nargs="+", action="append", default=[], metavar="PLAN",
-                   help="前の計画がすべて完了したときだけ続けて流す計画（例: 配布の計画）。繰り返すとステージになり、"
-                        "ステージは前のすべてのステージが完了のときだけ流れる")
-    q.add_argument("--done", help="終わったときに結果の JSON を書く所（省けば最初の計画の状態ディレクトリの "
-                                  "queue-done.json）。待つ側は wait <このパス> で待つ")
-    w = sub.add_parser("wait", help="queue の終わりか attention の行まで待つ（done = 0 / attention = 20 / 上限 = 3）",
-                       description="queue の終わり（done）か、queue が流すプランの attention の行まで待つ。"
-                                   "出力は要約の 1 行と結果の JSON",
-                       epilog="終了コード: done = 0 / attention = 20 / 上限 = 3。attention の後にもう一度打つと、その続きから待つ")
+    q.add_argument(
+        "--then",
+        nargs="+",
+        action="append",
+        default=[],
+        metavar="PLAN",
+        help="前の計画がすべて完了したときだけ続けて流す計画（例: 配布の計画）。繰り返すとステージになり、"
+        "ステージは前のすべてのステージが完了のときだけ流れる",
+    )
+    q.add_argument(
+        "--done",
+        help="終わったときに結果の JSON を書く所（省けば最初の計画の状態ディレクトリの queue-done.json）。待つ側は wait <このパス> で待つ",
+    )
+    w = sub.add_parser(
+        "wait",
+        help="queue の終わりか attention の行まで待つ（done = 0 / attention = 20 / 上限 = 3）",
+        description="queue の終わり（done）か、queue が流すプランの attention の行まで待つ。出力は要約の 1 行と結果の JSON",
+        epilog="終了コード: done = 0 / attention = 20 / 上限 = 3。attention の後にもう一度打つと、その続きから待つ",
+    )
     w.add_argument("done", help="queue の --done のパス（省いた queue なら <最初の計画>-state/queue-done.json）")
     w.add_argument("--timeout", type=float, default=10800.0, help="待つ上限（秒）")
     w.add_argument("--poll", type=float, default=5.0, help="見る間隔（秒）")
-    g = sub.add_parser("design-glossary", help="設計のプランの入口: 用語集が無ければ worktree の中で起こしてコミットする",
-                       description="glossary.py gate が通れば何もしない。宣言か用語集が無ければ init と candidates を打ち、"
-                                   "起こしたファイルをコミットし、候補の語を --out へ書く（pr のステップが PR 本文へ足す）")
+    g = sub.add_parser(
+        "design-glossary",
+        help="設計のプランの入口: 用語集が無ければ worktree の中で起こしてコミットする",
+        description="glossary.py gate が通れば何もしない。宣言か用語集が無ければ init と candidates を打ち、"
+        "起こしたファイルをコミットし、候補の語を --out へ書く（pr のステップが PR 本文へ足す）",
+    )
     g.add_argument("--mode", default="standard", help="モード（設計の工程の入口で用語集を見るモードか）")
     g.add_argument("--root", default=".", help="worktree の根")
     g.add_argument("--out", required=True, help="候補の語を書く Markdown のパス")

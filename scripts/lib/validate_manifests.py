@@ -6,6 +6,7 @@
 形（項目が文字列か・配列か）は `lib/schema.py`（pydantic）で確かめる（#1142 の D8）。見つけた食い違いを
 `ERROR: ` で標準エラーへ出し、1 件でもあれば終了コード 1 で終わる。
 """
+
 import importlib.util
 import json
 import re
@@ -60,9 +61,11 @@ def plugin_dir_of(family: str) -> Path:
     """プラグインの配布ディレクトリ。3 ランタイムとも同じ場所を読む。"""
     return root / f"plugins/{family}"
 
+
 def read_json(path: Path):
     with path.open(encoding="utf-8") as fh:
         return json.load(fh)
+
 
 errors: list[str] = []
 
@@ -92,19 +95,14 @@ for plugin in claude_marketplace.get("plugins", []):
     plugin_dir = (root / source).resolve()
     if not plugin_dir.is_dir():
         continue
-    if not (
-        (plugin_dir / ".codex-plugin/plugin.json").is_file()
-        or (plugin_dir / "plugin.json").is_file()
-    ):
-        errors.append(
-            f"Codex plugin manifest missing under {source}"
-            "（.codex-plugin/plugin.json かルートの plugin.json のどちらかが要る）"
-        )
+    if not ((plugin_dir / ".codex-plugin/plugin.json").is_file() or (plugin_dir / "plugin.json").is_file()):
+        errors.append(f"Codex plugin manifest missing under {source}（.codex-plugin/plugin.json かルートの plugin.json のどちらかが要る）")
     # Codex は policy / category / interface を要求する。統合した定義から欠けると
     # Codex 側の一覧に出ない。
     for key in ("policy", "category", "interface"):
         if key not in plugin:
             errors.append(f"marketplace entry {plugin.get('name')} に {key} がない（Codex が要求する）")
+
 
 # 版数と Skill 数は plugin.json と marketplace の description に重複して書かれている。
 # `.claude-plugin/marketplace.json` と Codex 版 plugin.json は build-runtime-plugins.sh の
@@ -126,9 +124,7 @@ def _version_in_description(lib: Path):
 try:
     VERSION_IN_DESCRIPTION = _version_in_description(root / "scripts" / "lib")
 except (ImportError, AttributeError, OSError) as exc:
-    raise SystemExit(
-        f"版数の書式を読み込めない（scripts/lib/version_pattern.py）: {exc}"
-    )
+    raise SystemExit(f"版数の書式を読み込めない（scripts/lib/version_pattern.py）: {exc}")
 # `<数> ... skills` の形で書く規約。版数（8.0.0）や製品名（E2E）の数字を拾わないよう前後が
 # 英数字・ドットでない整数だけを見て、さらに `skills` との間に挟める語を 3 語までに絞る。
 # こうしないと離れた位置にある無関係な数（`8 specialized agents` など）を Skill 数と誤認する。
@@ -139,11 +135,7 @@ def manifest_skill_count(family: str, runtime: str):
     manifest = plugin_dir_of(family) / f"manifests/{runtime}-skills.txt"
     if not manifest.is_file():
         return None
-    return sum(
-        1
-        for line in manifest.read_text(encoding="utf-8").splitlines()
-        if line.split("#", 1)[0].strip()
-    )
+    return sum(1 for line in manifest.read_text(encoding="utf-8").splitlines() if line.split("#", 1)[0].strip())
 
 
 def published_skill_count(family: str):
@@ -169,25 +161,16 @@ def check_description(label: str, manifest: dict, version: str, expected, source
     if not found:
         errors.append(f"{label} の description に `(vX.Y.Z)` 形式の版数がない")
     elif found.group(1) != version:
-        errors.append(
-            f"{label} の description の版数が古い"
-            f"（description: v{found.group(1)} / Claude 版 plugin.json: v{version}）"
-        )
+        errors.append(f"{label} の description の版数が古い（description: v{found.group(1)} / Claude 版 plugin.json: v{version}）")
     if expected is None:
         return
     # 抽出できないこと自体をエラーにする。素通りさせると、Skill 数の記述を消すか書式を変える
     # だけでこのチェックを無効化できてしまう。
     described = described_skill_count(description)
     if described is None:
-        errors.append(
-            f"{label} の description から Skill 数を読み取れない"
-            f"（`<数> ... skills` の形で書く。{source}: {expected}）"
-        )
+        errors.append(f"{label} の description から Skill 数を読み取れない（`<数> ... skills` の形で書く。{source}: {expected}）")
     elif described != expected:
-        errors.append(
-            f"{label} の description の Skill 数が食い違う"
-            f"（description: {described} / {source}: {expected}）"
-        )
+        errors.append(f"{label} の description の Skill 数が食い違う（description: {described} / {source}: {expected}）")
 
 
 for family in families:
@@ -301,11 +284,7 @@ for family in families:
     manifest = source / "manifests/codex-skills.txt"
     if not manifest.is_file():
         continue
-    listed = {
-        line.split("#", 1)[0].strip()
-        for line in manifest.read_text(encoding="utf-8").splitlines()
-        if line.split("#", 1)[0].strip()
-    }
+    listed = {line.split("#", 1)[0].strip() for line in manifest.read_text(encoding="utf-8").splitlines() if line.split("#", 1)[0].strip()}
     present = {d.name for d in (source / "skills").iterdir() if (d / "SKILL.md").is_file()}
     for extra in sorted(present - listed):
         errors.append(
@@ -322,9 +301,7 @@ for family in families:
     listed: set[str] = set()
     for manifest in sorted((source / "manifests").glob("*-skills.txt")):
         listed |= {
-            line.split("#", 1)[0].strip()
-            for line in manifest.read_text(encoding="utf-8").splitlines()
-            if line.split("#", 1)[0].strip()
+            line.split("#", 1)[0].strip() for line in manifest.read_text(encoding="utf-8").splitlines() if line.split("#", 1)[0].strip()
         }
     for skill_dir in sorted((source / "skills").iterdir()):
         if not (skill_dir / "SKILL.md").is_file():
@@ -339,54 +316,45 @@ for family in families:
 # 読み込まれないため、manifest と一致していないと配布漏れになる。ディレクトリの中身を
 # 見る上のチェックでは検出できないので、ここで突き合わせる。
 for family in families:
-  for runtime, manifest_key in (("claude", ".claude-plugin"), ("codex", ".codex-plugin")):
-    skills_manifest = plugin_dir_of(family) / f"manifests/{runtime}-skills.txt"
-    plugin_json = plugin_dir_of(family) / f"{manifest_key}/plugin.json"
-    if not (skills_manifest.is_file() and plugin_json.is_file()):
-        continue
-    expected = [
-        line.split("#", 1)[0].strip()
-        for line in skills_manifest.read_text(encoding="utf-8").splitlines()
-    ]
-    expected_set = {name for name in expected if name}
-    manifest_data = json.loads(plugin_json.read_text(encoding="utf-8"))
-    declared = manifest_data.get("skills")
-    try:
-        schema.load_shape(SkillPaths, manifest_data)
-        bad: set[str] = set()
-    except schema.ShapeError as exc:
-        bad = {where for where, _ in exc.problems}
-    if "skills" in bad:
-        # 配列以外（ディレクトリ指定・欠落）を許すと、この突き合わせが黙って skip され
-        # 配布漏れの再発を検出できなくなる。配列で明示する形式に固定する。
-        errors.append(
-            f"{family} の {runtime} plugin.json の skills が配列ではない"
-            f"（実際: {type(declared).__name__}）。manifest との突き合わせができない"
-        )
-    else:
-        # 比較はパス全体で行う。basename だけを見ると `./wrong/pr` のように
-        # 実在しない場所を指す項目を通してしまう（claude CLI が無い環境では
-        # 後段の `claude plugin validate` も skip されるため気づけない）。
-        expected_entries = {f"./skills/{name}" for name in expected_set}
-        declared_entries = set()
-        for index, entry in enumerate(declared):
-            if f"skills[{index}]" in bad:
+    for runtime, manifest_key in (("claude", ".claude-plugin"), ("codex", ".codex-plugin")):
+        skills_manifest = plugin_dir_of(family) / f"manifests/{runtime}-skills.txt"
+        plugin_json = plugin_dir_of(family) / f"{manifest_key}/plugin.json"
+        if not (skills_manifest.is_file() and plugin_json.is_file()):
+            continue
+        expected = [line.split("#", 1)[0].strip() for line in skills_manifest.read_text(encoding="utf-8").splitlines()]
+        expected_set = {name for name in expected if name}
+        manifest_data = json.loads(plugin_json.read_text(encoding="utf-8"))
+        declared = manifest_data.get("skills")
+        try:
+            schema.load_shape(SkillPaths, manifest_data)
+            bad: set[str] = set()
+        except schema.ShapeError as exc:
+            bad = {where for where, _ in exc.problems}
+        if "skills" in bad:
+            # 配列以外（ディレクトリ指定・欠落）を許すと、この突き合わせが黙って skip され
+            # 配布漏れの再発を検出できなくなる。配列で明示する形式に固定する。
+            errors.append(
+                f"{family} の {runtime} plugin.json の skills が配列ではない"
+                f"（実際: {type(declared).__name__}）。manifest との突き合わせができない"
+            )
+        else:
+            # 比較はパス全体で行う。basename だけを見ると `./wrong/pr` のように
+            # 実在しない場所を指す項目を通してしまう（claude CLI が無い環境では
+            # 後段の `claude plugin validate` も skip されるため気づけない）。
+            expected_entries = {f"./skills/{name}" for name in expected_set}
+            declared_entries = set()
+            for index, entry in enumerate(declared):
+                if f"skills[{index}]" in bad:
+                    errors.append(f"{runtime} plugin.json の skills 配列に文字列以外の項目がある（{type(entry).__name__}）")
+                    continue
+                declared_entries.add(entry)
+            for missing in sorted(expected_entries - declared_entries):
+                errors.append(f"{family} の {runtime} plugin.json の skills 配列に載っていない: {missing}（manifest には登録済み）")
+            for extra in sorted(declared_entries - expected_entries):
                 errors.append(
-                    f"{runtime} plugin.json の skills 配列に文字列以外の項目がある"
-                    f"（{type(entry).__name__}）"
+                    f"{family} の {runtime} plugin.json の skills 配列に余分な項目: {extra}"
+                    "（manifest に無い、またはパスが `./skills/<Skill 名>` の形式でない）"
                 )
-                continue
-            declared_entries.add(entry)
-        for missing in sorted(expected_entries - declared_entries):
-            errors.append(
-                f"{family} の {runtime} plugin.json の skills 配列に載っていない: {missing}"
-                "（manifest には登録済み）"
-            )
-        for extra in sorted(declared_entries - expected_entries):
-            errors.append(
-                f"{family} の {runtime} plugin.json の skills 配列に余分な項目: {extra}"
-                "（manifest に無い、またはパスが `./skills/<Skill 名>` の形式でない）"
-            )
 
 # MCP プラグインも 1 ディレクトリにまとめた。runtime ごとの配布物は無く、
 # 3 runtime が同じ .mcp.json を読む（Codex だけ .codex.mcp.json を読ませる例外がある）。

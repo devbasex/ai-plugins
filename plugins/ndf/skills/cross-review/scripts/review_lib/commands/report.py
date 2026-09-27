@@ -2,6 +2,7 @@
 
 GitHub 上に残っている未解決の指摘を数え、完了報告の数を確かめる。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -39,10 +40,7 @@ def cmd_unresolved_threads(args: argparse.Namespace) -> None:
     pr = int(st.get("current_pr") or args.pr)
     threads = github._fetch_unresolved_threads(repo, pr)
     if threads is None:
-        review_lib.die(
-            f"未解決の指摘を取得できませんでした (repo={repo or '不明'}, PR #{pr})。"
-            " 0 件として扱わず、取得し直してください"
-        )
+        review_lib.die(f"未解決の指摘を取得できませんでした (repo={repo or '不明'}, PR #{pr})。 0 件として扱わず、取得し直してください")
     print(f"UNRESOLVED_COUNT={len(threads)}")
     print(f"UNRESOLVED_THREAD_IDS={shlex.quote(' '.join(t['id'] for t in threads))}")
     for t in threads:
@@ -56,10 +54,7 @@ def _read_sweep_result(pr: int, file: str | None) -> dict[str, Any]:
     """
     path = pathlib.Path(file) if file else store._resolve_tmp_dir(pr) / f"sweep-pr{pr}-result.json"
     if not (path.exists() and path.stat().st_size > 0):
-        review_lib.die(
-            f"最終スイープの結果ファイルがありません ({path})。"
-            " Step 7.5 を実行してから完了報告へ進んでください"
-        )
+        review_lib.die(f"最終スイープの結果ファイルがありません ({path})。 Step 7.5 を実行してから完了報告へ進んでください")
     try:
         sweep = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -69,15 +64,10 @@ def _read_sweep_result(pr: int, file: str | None) -> dict[str, Any]:
     return sweep
 
 
-def _reconcile_sweep_result(
-    sweep: dict[str, Any], declared: int, threads: list | None
-) -> tuple[int, bool, Any]:
+def _reconcile_sweep_result(sweep: dict[str, Any], declared: int, threads: list | None) -> tuple[int, bool, Any]:
     """申告された残件数と GitHub 上の未解決スレッドから (残件数, 照会できたか, 理由) を決める。"""
     if threads is None:
-        review_lib.info(
-            "⚠ 未解決の指摘を確認できません — 申告された残件数"
-            f"（{declared} 件）をそのまま採用します"
-        )
+        review_lib.info(f"⚠ 未解決の指摘を確認できません — 申告された残件数（{declared} 件）をそのまま採用します")
         remaining, verified = declared, False
     else:
         remaining, verified = len(threads), True
@@ -88,9 +78,7 @@ def _reconcile_sweep_result(
     return remaining, verified, reason
 
 
-def _sweep_record(
-    sweep: dict[str, Any], declared: int, remaining: int, verified: bool, reason: Any
-) -> dict[str, Any]:
+def _sweep_record(sweep: dict[str, Any], declared: int, remaining: int, verified: bool, reason: Any) -> dict[str, Any]:
     """状態ファイルへ保存する最終スイープの記録を作る。"""
     return {
         "declared_remaining_open": declared,
@@ -199,8 +187,7 @@ def _print_participants(st: dict) -> None:
     else:
         print("- 再開で変えた値:")
         for c in changes:
-            print(f"  - {c.get('at')} {c.get('field')}: "
-                  f"{_resume_value(c.get('from'))} → {_resume_value(c.get('to'))}")
+            print(f"  - {c.get('at')} {c.get('field')}: {_resume_value(c.get('from'))} → {_resume_value(c.get('to'))}")
     print()
 
 
@@ -263,10 +250,7 @@ def _print_rejected(st: dict) -> None:
     if rejected:
         print(f"## 却下した指摘 ({len(rejected)} 件)")
         for r in rejected:
-            print(
-                f"- [round {r.get('round')}] [{r.get('severity')}] "
-                f"{r.get('path')}:{r.get('line')} — {r.get('summary')}"
-            )
+            print(f"- [round {r.get('round')}] [{r.get('severity')}] {r.get('path')}:{r.get('line')} — {r.get('summary')}")
             print(f"  却下の理由: {r.get('reason_for_rejection')}")
 
 

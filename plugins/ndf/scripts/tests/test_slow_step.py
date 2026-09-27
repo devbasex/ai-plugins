@@ -1,4 +1,5 @@
 """lib/slow_step.py: 想定時間・設定の重ね方・所要の履歴・組み込みの一次の調査。"""
+
 from __future__ import annotations
 
 import json
@@ -19,8 +20,7 @@ def test_config_layers_args_over_plan_over_decl_over_default():
     assert ss.resolve_config().max_retry == 1
 
 
-@pytest.mark.parametrize("layer", [{"nope": 1}, {"window": "x"}, {"enabled": "maybe"}, {"window": 1.5},
-                                   {"factor": -1}])
+@pytest.mark.parametrize("layer", [{"nope": 1}, {"window": "x"}, {"enabled": "maybe"}, {"window": 1.5}, {"factor": -1}])
 def test_config_rejects_unknown_key_and_bad_value(layer):
     with pytest.raises(ss.SlowConfigError):
         ss.resolve_config(None, layer, None)
@@ -37,8 +37,7 @@ def test_expected_uses_default_floor_history_and_step():
     cfg = ss.resolve_config()
     assert ss.expected_for([100, 100], cfg)[0] == 900.0
     assert ss.expected_for([100, 100], cfg)[1]["source"] == "default"
-    assert ss.expected_for([10, 10, 10], cfg) == (300.0, {"source": "floor", "samples": 3, "factor": 3.0,
-                                                          "floor": 300.0, "median": 10.0})
+    assert ss.expected_for([10, 10, 10], cfg) == (300.0, {"source": "floor", "samples": 3, "factor": 3.0, "floor": 300.0, "median": 10.0})
     value, basis = ss.expected_for([200, 200, 200], cfg)
     assert (value, basis["source"]) == (600.0, "history")
     assert ss.expected_for([1, 2, 3], cfg, step_expected=5) == (5.0, {"source": "step"})
@@ -93,11 +92,13 @@ def write_progress(d: Path, name: str, rows):
 
 
 def test_import_keeps_success_and_gate_and_skips_duplicates(tmp_path):
-    rows = [{"kind": "step", "at": "a1", "step": "impl", "type": "work", "exit": 0, "seconds": 10},
-            {"kind": "step", "at": "a2", "step": "merge", "type": "run", "exit": 1, "seconds": 20},
-            {"kind": "step", "at": "a3", "step": "gate", "type": "run", "exit": 10, "seconds": 5},
-            {"kind": "step", "at": "a4", "step": "judge", "type": "judge", "exit": 0, "seconds": 3},
-            {"kind": "alive", "at": "a5", "step": "impl", "elapsed": 600}]
+    rows = [
+        {"kind": "step", "at": "a1", "step": "impl", "type": "work", "exit": 0, "seconds": 10},
+        {"kind": "step", "at": "a2", "step": "merge", "type": "run", "exit": 1, "seconds": 20},
+        {"kind": "step", "at": "a3", "step": "gate", "type": "run", "exit": 10, "seconds": 5},
+        {"kind": "step", "at": "a4", "step": "judge", "type": "judge", "exit": 0, "seconds": 3},
+        {"kind": "alive", "at": "a5", "step": "impl", "elapsed": 600},
+    ]
     p = write_progress(tmp_path, "one", rows)
     h = tmp_path / "h.jsonl"
     assert ss.import_progress([p], h)["added"] == 2
@@ -131,8 +132,9 @@ def test_probe_worker():
 
 def test_probe_cmd_does_not_go_through_shell(tmp_path):
     script = tmp_path / "p.py"
-    script.write_text("import json, sys\nprint(json.dumps({'status': 'ok', 'summary': sys.argv[1], "
-                      "'metrics': {'class': 'c', 'action': 'wait'}}))\n")
+    script.write_text(
+        "import json, sys\nprint(json.dumps({'status': 'ok', 'summary': sys.argv[1], 'metrics': {'class': 'c', 'action': 'wait'}}))\n"
+    )
     out = ss.probe_cmd(f"{sys.executable} {script} {{branch}}", {"branch": "a;touch x"}, tmp_path, 10)
     assert out["summary"] == "a;touch x" and out["action"] == "wait"
     assert not (tmp_path / "x").exists()

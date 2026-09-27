@@ -7,6 +7,7 @@ additionalContext で案内する）と、token-guard.sh の 2 つの判定（�
 **環境が無い・壊れているときは判定をせずに通す（出力なし・終了コード 0）。** hook が止まると Tool の
 呼び出しが全部止まるためである。宣言（.ndf/）の許可パスと agy・Kiro の入力の形は試作に含めない（所要を測るため）。
 """
+
 from __future__ import annotations
 
 import json
@@ -20,8 +21,9 @@ EDIT_TOOLS = {"Edit", "MultiEdit", "Write", "NotebookEdit"}
 
 def main_dir(cwd: str, session: str) -> tuple[str, bool] | None:
     """(メインディレクトリ, worktree の中か)。worktree-guard.sh と同じくセッションごとに TMPDIR へ控える。"""
-    state = os.path.join(os.environ.get("TMPDIR", "/tmp"),
-                         "ndf-hook-trial-" + "".join(c if c.isalnum() or c in "._-" else "_" for c in session) + ".json")
+    state = os.path.join(
+        os.environ.get("TMPDIR", "/tmp"), "ndf-hook-trial-" + "".join(c if c.isalnum() or c in "._-" else "_" for c in session) + ".json"
+    )
     try:
         with open(state, encoding="utf-8") as f:
             d = json.load(f)
@@ -29,8 +31,9 @@ def main_dir(cwd: str, session: str) -> tuple[str, bool] | None:
             return d["main_dir"], d["in_worktree"]
     except (OSError, ValueError, KeyError):
         pass
-    p = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir", "--show-toplevel"],
-                       cwd=cwd, capture_output=True, text=True)
+    p = subprocess.run(
+        ["git", "rev-parse", "--path-format=absolute", "--git-common-dir", "--show-toplevel"], cwd=cwd, capture_output=True, text=True
+    )
     if p.returncode:
         return None
     common, top = p.stdout.split("\n")[:2]
@@ -56,8 +59,13 @@ def run(payload: dict) -> dict | None:
     if tool in SHELL_TOOLS and isinstance(ti.get("command"), str):
         cmd = ti["command"]
         if not ti.get("run_in_background") and "sleep" in cmd and ss.sleep_deny(cmd, float(os.environ.get("NDF_SLEEP_MAX_SEC", 5))):
-            return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
-                                           "permissionDecisionReason": "前景の sleep（T2 の試作）"}}
+            return {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": "前景の sleep（T2 の試作）",
+                }
+            }
         if ss.plan_command(cmd):
             out.append("プランを起こす副命令（T2 の試作）")
         targets = sp.write_targets(cmd, cwd)

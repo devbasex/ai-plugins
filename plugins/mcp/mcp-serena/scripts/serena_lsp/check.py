@@ -1,4 +1,5 @@
 """check: 導入のチェック（公式 LSP プラグイン・本体・追加のチェック）。導入のコマンドは載せるだけで打たない。"""
+
 import json
 import os
 import shutil
@@ -28,17 +29,14 @@ def _typescript_major_5(lang: dict):
                 version = ""
             if version.split(".")[0] == "5":
                 return None
-            return {"item": "typescript_major_5", "name": f"typescript {version or '不明'}",
-                    "install": "npm install -g typescript@5"}
-    return {"item": "typescript_major_5", "name": "typescript（見つからない）",
-            "install": "npm install -g typescript@5"}
+            return {"item": "typescript_major_5", "name": f"typescript {version or '不明'}", "install": "npm install -g typescript@5"}
+    return {"item": "typescript_major_5", "name": "typescript（見つからない）", "install": "npm install -g typescript@5"}
 
 
 def _shellcheck(lang: dict):
     if shutil.which("shellcheck"):
         return None
-    return {"item": "shellcheck", "name": "shellcheck",
-            "install": "apt-get install shellcheck（macOS は brew install shellcheck）"}
+    return {"item": "shellcheck", "name": "shellcheck", "install": "apt-get install shellcheck（macOS は brew install shellcheck）"}
 
 
 # 名前 → (チェックの関数, 当てるランタイム)。既にある種類で足りない言語だけ、ここへ関数を 1 つ足す
@@ -86,13 +84,13 @@ def _missing_for_language(name: str, lang: dict, runtime: str, plugins: set) -> 
     claude = runtime == CLAUDE_CODE
     missing = []
     if claude and lang["claude_plugin"] and lang["claude_plugin"] not in plugins:
-        missing.append({"language": name, "item": "plugin", "name": lang["claude_plugin"],
-                        "install": f"claude plugin install {lang['claude_plugin']}"})
+        missing.append(
+            {"language": name, "item": "plugin", "name": lang["claude_plugin"], "install": f"claude plugin install {lang['claude_plugin']}"}
+        )
     if claude:
         for binary in lang["binaries"]:
             if not shutil.which(binary["command"]):
-                missing.append({"language": name, "item": "binary", "name": binary["command"],
-                                "install": binary["install"]})
+                missing.append({"language": name, "item": "binary", "name": binary["command"], "install": binary["install"]})
     for check_name in lang["extra_checks"]:
         func, runtimes = EXTRA_CHECKS[check_name]
         if runtime in runtimes:

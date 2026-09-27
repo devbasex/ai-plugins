@@ -12,6 +12,7 @@
 #743（Skill の陳腐化）が同じ引き金と同じ出典の持ち方を必要とするため、取得・指紋の比較・
 一覧の提示・待ちの扱いをここへ置く。観点のデータと判定の手続きは呼ぶ側が持つ。
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -112,8 +113,7 @@ def fetch(url: str, timeout: float, opener=None) -> FetchResult:
 def _timeout_reason(timeout: float, bounded: bool) -> str:
     if bounded:
         return f"{timeout} 秒を越えた"
-    return (f"{timeout} 秒を越えた"
-            "（読み取りの最中は上限を掛けられなかった。socket へ届いていない）")
+    return f"{timeout} 秒を越えた（読み取りの最中は上限を掛けられなかった。socket へ届いていない）"
 
 
 def _reason(exc: Exception) -> str:
@@ -138,13 +138,15 @@ def compare(result: FetchResult, previous: str | None) -> str:
 def row(source: dict, result: FetchResult) -> str:
     """出典ごとの 1 行。名前・前回の参照日・取得の成否・変化・主張を並べる。"""
     state = "取得できた" if result.ok else f"取得できなかった（{result.error}）"
-    return "  ".join([
-        source.get("name", source.get("id", "?")),
-        source.get("checked_at", "-"),
-        state,
-        compare(result, source.get("fingerprint")),
-        source.get("claim", "-"),
-    ])
+    return "  ".join(
+        [
+            source.get("name", source.get("id", "?")),
+            source.get("checked_at", "-"),
+            state,
+            compare(result, source.get("fingerprint")),
+            source.get("claim", "-"),
+        ]
+    )
 
 
 def refresh(sources: list[dict], timeout: float, opener=None) -> tuple[list[str], int]:

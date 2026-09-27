@@ -4,6 +4,7 @@
 外部公開の実物は手動確認が担う。ここで確かめるのは採番・タグの計算・
 テスト実行の受け渡し・公開の拒否条件までである。
 """
+
 from __future__ import annotations
 
 import json
@@ -23,7 +24,10 @@ def run(args: list[str], cwd: Path, env: dict | None = None) -> dict:
     env["LC_ALL"] = "C"
     proc = subprocess.run(
         ["bash", str(TESTENV), *args],
-        cwd=str(cwd), env=env, capture_output=True, text=True,
+        cwd=str(cwd),
+        env=env,
+        capture_output=True,
+        text=True,
     )
     return {"rc": proc.returncode, "out": proc.stdout, "err": proc.stderr}
 
@@ -71,8 +75,7 @@ def test_missing_test_kind_is_silent(main_repo: Path, worktree: Path) -> None:
 
 
 def test_env_outputs_name_slot_and_ports(main_repo: Path, worktree: Path) -> None:
-    declare(main_repo, testenv={"port_band": [20000, 29999],
-                                "port_roles": {"http": 0, "db": 1}})
+    declare(main_repo, testenv={"port_band": [20000, 29999], "port_roles": {"http": 0, "db": 1}})
     result = run(["env", str(worktree)], cwd=main_repo)
     assert result["rc"] == 0, result
     payload = json.loads(result["out"])
@@ -165,7 +168,8 @@ def test_tag_is_out_of_scope_without_declared_paths(main_repo: Path, worktree: P
 
 
 def test_bake_reports_when_every_golden_volume_already_exists(
-    main_repo: Path, worktree: Path,
+    main_repo: Path,
+    worktree: Path,
 ) -> None:
     """同じタグの基準がすべて存在すると、新しく作らず 2 を返す。"""
     declare(main_repo, testenv={"golden_volumes": {"source-data": "golden-data"}})
@@ -186,29 +190,34 @@ def test_bake_reports_when_every_golden_volume_already_exists(
 
 def test_test_returns_the_command_exit_code(main_repo: Path, worktree: Path) -> None:
     """テストの成否を包み隠さない。"""
-    declare(main_repo, testenv={"port_band": [20000, 29999],
-                                "test_kinds": {"pure": {"run": "exit 3"}}})
+    declare(main_repo, testenv={"port_band": [20000, 29999], "test_kinds": {"pure": {"run": "exit 3"}}})
     result = run(["test", str(worktree), "--kind", "pure"], cwd=main_repo)
     assert result["rc"] == 3, result
 
 
 def test_test_passes_the_skip_reset_variables(main_repo: Path, worktree: Path) -> None:
-    declare(main_repo, testenv={
-        "port_band": [20000, 29999],
-        "test_kinds": {"stateful": {"run": "printf '%s' \"$TEST_SKIP_MIGRATE_FRESH\"",
-                                    "skip_reset": {"TEST_SKIP_MIGRATE_FRESH": "true"}}},
-    })
+    declare(
+        main_repo,
+        testenv={
+            "port_band": [20000, 29999],
+            "test_kinds": {
+                "stateful": {"run": "printf '%s' \"$TEST_SKIP_MIGRATE_FRESH\"", "skip_reset": {"TEST_SKIP_MIGRATE_FRESH": "true"}}
+            },
+        },
+    )
     result = run(["test", str(worktree), "--kind", "stateful"], cwd=main_repo)
     assert result["out"] == "true", result
 
 
 def test_test_passes_the_base_url(main_repo: Path, worktree: Path) -> None:
-    declare(main_repo, testenv={
-        "port_band": [20000, 29999],
-        "port_roles": {"http": 0},
-        "test_kinds": {"browser": {"run": "printf '%s' \"$PWK_BASE_URL\"",
-                                   "base_url_env": "PWK_BASE_URL"}},
-    })
+    declare(
+        main_repo,
+        testenv={
+            "port_band": [20000, 29999],
+            "port_roles": {"http": 0},
+            "test_kinds": {"browser": {"run": "printf '%s' \"$PWK_BASE_URL\"", "base_url_env": "PWK_BASE_URL"}},
+        },
+    )
     run(["env", str(worktree)], cwd=main_repo)
     result = run(["test", str(worktree), "--kind", "browser"], cwd=main_repo)
     assert result["out"] == "http://localhost:20000", result
@@ -216,21 +225,25 @@ def test_test_passes_the_base_url(main_repo: Path, worktree: Path) -> None:
 
 def test_evidence_goes_under_the_worktree(main_repo: Path, worktree: Path) -> None:
     """証跡は作業ツリー配下へ固定する。共有の保管先へは送らない。"""
-    declare(main_repo, testenv={
-        "port_band": [20000, 29999],
-        "test_kinds": {"browser": {"run": "printf '%s' \"$PWK_OUT_DIR\"",
-                                   "out_env": "PWK_OUT_DIR"}},
-    })
+    declare(
+        main_repo,
+        testenv={
+            "port_band": [20000, 29999],
+            "test_kinds": {"browser": {"run": "printf '%s' \"$PWK_OUT_DIR\"", "out_env": "PWK_OUT_DIR"}},
+        },
+    )
     result = run(["test", str(worktree), "--kind", "browser"], cwd=main_repo)
     assert result["out"].startswith(str(worktree)), result
 
 
 def test_evidence_path_can_be_given(main_repo: Path, worktree: Path) -> None:
-    declare(main_repo, testenv={
-        "port_band": [20000, 29999],
-        "test_kinds": {"browser": {"run": "printf '%s' \"$PWK_OUT_DIR\"",
-                                   "out_env": "PWK_OUT_DIR"}},
-    })
+    declare(
+        main_repo,
+        testenv={
+            "port_band": [20000, 29999],
+            "test_kinds": {"browser": {"run": "printf '%s' \"$PWK_OUT_DIR\"", "out_env": "PWK_OUT_DIR"}},
+        },
+    )
     out = worktree / "evidence" / "run1"
     result = run(["test", str(worktree), "--kind", "browser", "--out", str(out)], cwd=main_repo)
     assert result["out"] == str(out), result
@@ -238,8 +251,7 @@ def test_evidence_path_can_be_given(main_repo: Path, worktree: Path) -> None:
 
 
 def test_test_runs_in_the_worktree(main_repo: Path, worktree: Path) -> None:
-    declare(main_repo, testenv={"port_band": [20000, 29999],
-                                "test_kinds": {"pure": {"run": "pwd -P"}}})
+    declare(main_repo, testenv={"port_band": [20000, 29999], "test_kinds": {"pure": {"run": "pwd -P"}}})
     result = run(["test", str(worktree), "--kind", "pure"], cwd=main_repo)
     assert result["out"].strip() == str(worktree.resolve()), result
 
@@ -277,13 +289,11 @@ def test_test_respects_inuse_lock_and_releases_after_failure(main_repo: Path, wo
     assert not lock.exists(), "テストコマンド失敗後にも実行中ロックが残らない"
 
 
-
 # --- 外部公開の拒否 ---------------------------------------------------------
 
 
 def test_expose_is_refused_when_disabled(main_repo: Path, worktree: Path) -> None:
-    declare(main_repo, testenv={"port_band": [20000, 29999],
-                                "expose": {"enabled": False}})
+    declare(main_repo, testenv={"port_band": [20000, 29999], "expose": {"enabled": False}})
     result = run(["expose", str(worktree)], cwd=main_repo)
     assert result["rc"] == 1, result
     assert "enabled" in result["err"], result["err"]
@@ -303,14 +313,15 @@ def test_expose_is_refused_by_default(main_repo: Path, worktree: Path) -> None:
         {"enabled": True, "public_tag": "golden-public"},
     ],
 )
-def test_expose_is_refused_when_public_tag_or_base_domain_is_missing(
-    main_repo: Path, worktree: Path, expose_conf: dict
-) -> None:
+def test_expose_is_refused_when_public_tag_or_base_domain_is_missing(main_repo: Path, worktree: Path, expose_conf: dict) -> None:
     marker = main_repo / "opened.txt"
-    declare(main_repo, testenv={
-        "port_band": [20000, 29999],
-        "expose": {**expose_conf, "open_command": f'printf "%s" "$NDF_EXPOSE_URL" > {marker}'},
-    })
+    declare(
+        main_repo,
+        testenv={
+            "port_band": [20000, 29999],
+            "expose": {**expose_conf, "open_command": f'printf "%s" "$NDF_EXPOSE_URL" > {marker}'},
+        },
+    )
     run(["env", str(worktree)], cwd=main_repo)
 
     result = run(["expose", str(worktree)], cwd=main_repo)
@@ -322,10 +333,13 @@ def test_expose_is_refused_when_public_tag_or_base_domain_is_missing(
 
 
 def test_expose_is_refused_when_the_golden_tag_differs(main_repo: Path, worktree: Path) -> None:
-    declare(main_repo, testenv={
-        "port_band": [20000, 29999],
-        "expose": {"enabled": True, "public_tag": "golden-public", "base_domain": "example.test"},
-    })
+    declare(
+        main_repo,
+        testenv={
+            "port_band": [20000, 29999],
+            "expose": {"enabled": True, "public_tag": "golden-public", "base_domain": "example.test"},
+        },
+    )
     run(["env", str(worktree)], cwd=main_repo)
     result = run(["expose", str(worktree)], cwd=main_repo)
     assert result["rc"] == 1, result
@@ -333,12 +347,20 @@ def test_expose_is_refused_when_the_golden_tag_differs(main_repo: Path, worktree
 
 
 def test_expose_records_the_url_and_closing_time(main_repo: Path, worktree: Path) -> None:
-    declare(main_repo, testenv={
-        "port_band": [20000, 29999],
-        "expose": {"enabled": True, "public_tag": "golden-public",
-                   "base_domain": "example.test", "ttl": "8h",
-                   "open_command": "true", "close_command": "true"},
-    })
+    declare(
+        main_repo,
+        testenv={
+            "port_band": [20000, 29999],
+            "expose": {
+                "enabled": True,
+                "public_tag": "golden-public",
+                "base_domain": "example.test",
+                "ttl": "8h",
+                "open_command": "true",
+                "close_command": "true",
+            },
+        },
+    )
     run(["env", str(worktree)], cwd=main_repo)
     # 公開を許す基準が載っている状態を作る。
     path = main_repo / ".git" / "ndf" / "worktree-registry.json"
@@ -357,11 +379,13 @@ def test_expose_records_the_url_and_closing_time(main_repo: Path, worktree: Path
 
 
 def test_expose_allows_only_one_at_a_time(main_repo: Path, worktree: Path) -> None:
-    declare(main_repo, testenv={
-        "port_band": [20000, 29999],
-        "expose": {"enabled": True, "public_tag": "golden-public",
-                   "base_domain": "example.test", "open_command": "true"},
-    })
+    declare(
+        main_repo,
+        testenv={
+            "port_band": [20000, 29999],
+            "expose": {"enabled": True, "public_tag": "golden-public", "base_domain": "example.test", "open_command": "true"},
+        },
+    )
     second = main_repo / ".worktrees" / "fix" / "y"
     git(main_repo, "worktree", "add", "-q", "-b", "fix/y", str(second))
     run(["env", str(worktree)], cwd=main_repo)
@@ -390,12 +414,14 @@ def test_down_releases_the_slot(main_repo: Path, worktree: Path) -> None:
 
 def test_base_url_uses_the_declared_port_role(main_repo: Path, worktree: Path) -> None:
     """入口の役割名は宣言で決める。`http` 以外の名前を使うリポジトリがある。"""
-    declare(main_repo, testenv={
-        "port_band": [20000, 29999],
-        "port_roles": {"web": 3},
-        "test_kinds": {"browser": {"run": "printf '%s' \"$BASE\"",
-                                   "base_url_env": "BASE", "port_role": "web"}},
-    })
+    declare(
+        main_repo,
+        testenv={
+            "port_band": [20000, 29999],
+            "port_roles": {"web": 3},
+            "test_kinds": {"browser": {"run": "printf '%s' \"$BASE\"", "base_url_env": "BASE", "port_role": "web"}},
+        },
+    )
     run(["env", str(worktree)], cwd=main_repo)
     result = run(["test", str(worktree), "--kind", "browser"], cwd=main_repo)
     assert result["out"] == "http://localhost:20003", result
@@ -403,8 +429,7 @@ def test_base_url_uses_the_declared_port_role(main_repo: Path, worktree: Path) -
 
 def test_quote_in_a_kind_name_does_not_break_the_lookup(main_repo: Path, worktree: Path) -> None:
     """種類名やプロファイル名を jq の式へ埋め込まない。"""
-    declare(main_repo, testenv={"port_band": [20000, 29999],
-                                "test_kinds": {'weird"name': {"run": "exit 4"}}})
+    declare(main_repo, testenv={"port_band": [20000, 29999], "test_kinds": {'weird"name': {"run": "exit 4"}}})
     result = run(["test", str(worktree), "--kind", 'weird"name'], cwd=main_repo)
     assert result["rc"] == 4, result
 
@@ -535,10 +560,13 @@ def test_evidence_directory_is_excluded_from_tracking(main_repo: Path, worktree:
 
     git は空のディレクトリを追跡しない。証跡を実際に書いたうえで確かめる。
     """
-    declare(main_repo, testenv={
-        "port_band": [20000, 29999],
-        "test_kinds": {"browser": {"run": 'printf "x" > "$OUT/evidence.txt"', "out_env": "OUT"}},
-    })
+    declare(
+        main_repo,
+        testenv={
+            "port_band": [20000, 29999],
+            "test_kinds": {"browser": {"run": 'printf "x" > "$OUT/evidence.txt"', "out_env": "OUT"}},
+        },
+    )
     result = run(["test", str(worktree), "--kind", "browser"], cwd=main_repo)
     assert result["rc"] == 0, result
 
@@ -546,17 +574,23 @@ def test_evidence_directory_is_excluded_from_tracking(main_repo: Path, worktree:
     assert written, "証跡が書かれていること（書かれないと除外のチェックにならない）"
 
     status = subprocess.run(
-        ["git", "status", "--porcelain"], cwd=str(worktree), capture_output=True, text=True,
+        ["git", "status", "--porcelain"],
+        cwd=str(worktree),
+        capture_output=True,
+        text=True,
     )
     assert ".ndf-evidence" not in status.stdout, status.stdout
 
 
 def test_evidence_exclusion_is_written_to_the_common_git_dir(main_repo: Path, worktree: Path) -> None:
     """作業ツリー固有の info/exclude は git が読まない。共通の側へ書く。"""
-    declare(main_repo, testenv={
-        "port_band": [20000, 29999],
-        "test_kinds": {"browser": {"run": 'printf "x" > "$OUT/evidence.txt"', "out_env": "OUT"}},
-    })
+    declare(
+        main_repo,
+        testenv={
+            "port_band": [20000, 29999],
+            "test_kinds": {"browser": {"run": 'printf "x" > "$OUT/evidence.txt"', "out_env": "OUT"}},
+        },
+    )
     run(["test", str(worktree), "--kind", "browser"], cwd=main_repo)
 
     common = main_repo / ".git" / "info" / "exclude"
@@ -571,9 +605,7 @@ def test_lock_helpers_are_exclusive(tmp_path: Path) -> None:
     from worktree_helpers import run_lib
 
     lock = tmp_path / "a.lock"
-    got = run_lib(
-        f'wt_lock_acquire "{lock}" 1; echo first=$?; wt_lock_acquire "{lock}" 1; echo second=$?'
-    )
+    got = run_lib(f'wt_lock_acquire "{lock}" 1; echo first=$?; wt_lock_acquire "{lock}" 1; echo second=$?')
     lines = got.stdout.split()
     assert lines[0] == "first=0", got.stdout
     assert lines[1] == "second=1", "同じロックは 2 度取れない"
@@ -583,10 +615,7 @@ def test_lock_is_released(tmp_path: Path) -> None:
     from worktree_helpers import run_lib
 
     lock = tmp_path / "b.lock"
-    got = run_lib(
-        f'wt_lock_acquire "{lock}" 1 && wt_lock_release "{lock}"; '
-        f'wt_lock_acquire "{lock}" 1; echo again=$?'
-    )
+    got = run_lib(f'wt_lock_acquire "{lock}" 1 && wt_lock_release "{lock}"; wt_lock_acquire "{lock}" 1; echo again=$?')
     assert "again=0" in got.stdout, got.stdout
 
 
@@ -674,9 +703,7 @@ def test_takeover_does_not_break_a_fresh_lock(tmp_path: Path) -> None:
     (lock / "token").write_text("old-token\n", encoding="utf-8")
 
     # 判定に使う目印だけを古い値にして、実体は新しいものへ差し替える。
-    got = run_lib(
-        f'_wt_lock_discard "{lock}" "seen-but-different" "tok"; echo rc=$?'
-    )
+    got = run_lib(f'_wt_lock_discard "{lock}" "seen-but-different" "tok"; echo rc=$?')
     assert "rc=1" in got.stdout, got.stdout
     assert lock.is_dir(), "戻すか、取り直した側が持っている"
 
@@ -699,9 +726,7 @@ def test_an_old_lock_without_a_pid_is_not_held(tmp_path: Path) -> None:
     lock = tmp_path / "i.lock"
     lock.mkdir()
     make_old(lock)
-    got = run_lib(
-        f'ndf_lock_is_held "{lock}"; echo ndf=$?; wt_lock_is_held "{lock}"; echo wt=$?'
-    )
+    got = run_lib(f'ndf_lock_is_held "{lock}"; echo ndf=$?; wt_lock_is_held "{lock}"; echo wt=$?')
     assert "ndf=1" in got.stdout, got.stdout
     assert "wt=1" in got.stdout, got.stdout
 
@@ -736,9 +761,7 @@ def test_a_fresh_lock_without_a_pid_is_held(tmp_path: Path, state: str) -> None:
     from worktree_helpers import run_lib
 
     lock = lock_state(tmp_path, state)
-    got = run_lib(
-        f'ndf_lock_is_held "{lock}"; echo ndf=$?; wt_lock_is_held "{lock}"; echo wt=$?'
-    )
+    got = run_lib(f'ndf_lock_is_held "{lock}"; echo ndf=$?; wt_lock_is_held "{lock}"; echo wt=$?')
     assert "ndf=0" in got.stdout and "wt=0" in got.stdout, got.stdout
 
 
@@ -747,9 +770,7 @@ def test_a_living_owner_holds_the_lock_even_when_old(tmp_path: Path) -> None:
     from worktree_helpers import run_lib
 
     lock = lock_state(tmp_path, "alive-pid-old")
-    got = run_lib(
-        f'ndf_lock_is_held "{lock}"; echo ndf=$?; wt_lock_is_held "{lock}"; echo wt=$?'
-    )
+    got = run_lib(f'ndf_lock_is_held "{lock}"; echo ndf=$?; wt_lock_is_held "{lock}"; echo wt=$?')
     assert "ndf=0" in got.stdout and "wt=0" in got.stdout, got.stdout
 
 
@@ -759,24 +780,20 @@ def test_a_lock_without_a_living_owner_is_not_held(tmp_path: Path, state: str) -
     from worktree_helpers import run_lib
 
     arg = "" if state == "empty-arg" else str(lock_state(tmp_path, state))
-    got = run_lib(
-        f'ndf_lock_is_held "{arg}"; echo ndf=$?; wt_lock_is_held "{arg}"; echo wt=$?'
-    )
+    got = run_lib(f'ndf_lock_is_held "{arg}"; echo ndf=$?; wt_lock_is_held "{arg}"; echo wt=$?')
     assert "ndf=1" in got.stdout and "wt=1" in got.stdout, got.stdout
 
 
 @pytest.mark.parametrize(
-    "state", ["empty", "empty-with-held", "empty-old", "alive-pid", "alive-pid-old", "dead-pid"],
+    "state",
+    ["empty", "empty-with-held", "empty-old", "alive-pid", "alive-pid-old", "dead-pid"],
 )
 def test_held_is_the_negation_of_stale(tmp_path: Path, state: str) -> None:
     """AC5: 判定の規則は 1 つ。保持の判定は陳腐化の判定の否定と一致する。"""
     from worktree_helpers import run_lib
 
     lock = lock_state(tmp_path, state)
-    got = run_lib(
-        f'ndf_lock_is_held "{lock}"; echo held=$?; '
-        f'_ndf_lock_is_stale "{lock}" "$(cat "{lock}/token")"; echo stale=$?'
-    )
+    got = run_lib(f'ndf_lock_is_held "{lock}"; echo held=$?; _ndf_lock_is_stale "{lock}" "$(cat "{lock}/token")"; echo stale=$?')
     values = dict(line.split("=") for line in got.stdout.split())
     assert values["held"] != values["stale"], got.stdout
 
@@ -798,20 +815,26 @@ def test_held_check_leaves_the_caller_shell_alone(tmp_path: Path) -> None:
 @pytest.mark.parametrize("bad", ["/tmp/elsewhere", "../outside", "evidence/../../outside"])
 def test_evidence_outside_the_worktree_is_refused(main_repo: Path, worktree: Path, bad: str) -> None:
     """外から渡された置き場所も、作業ツリーの中に収まるかを確かめる。"""
-    declare(main_repo, testenv={
-        "port_band": [20000, 29999],
-        "test_kinds": {"browser": {"run": "true", "out_env": "OUT"}},
-    })
+    declare(
+        main_repo,
+        testenv={
+            "port_band": [20000, 29999],
+            "test_kinds": {"browser": {"run": "true", "out_env": "OUT"}},
+        },
+    )
     result = run(["test", str(worktree), "--kind", "browser", "--out", bad], cwd=main_repo)
     assert result["rc"] == 1, result
     assert "作業ツリーの外" in result["err"], result["err"]
 
 
 def test_evidence_inside_the_worktree_is_accepted(main_repo: Path, worktree: Path) -> None:
-    declare(main_repo, testenv={
-        "port_band": [20000, 29999],
-        "test_kinds": {"browser": {"run": "printf '%s' \"$OUT\"", "out_env": "OUT"}},
-    })
+    declare(
+        main_repo,
+        testenv={
+            "port_band": [20000, 29999],
+            "test_kinds": {"browser": {"run": "printf '%s' \"$OUT\"", "out_env": "OUT"}},
+        },
+    )
     out = worktree / "evidence" / "run1"
     result = run(["test", str(worktree), "--kind", "browser", "--out", str(out)], cwd=main_repo)
     assert result["rc"] == 0, result
@@ -829,11 +852,13 @@ def golden(main_repo: Path, worktree: Path) -> None:
 
 def test_expose_without_a_command_records_nothing(main_repo: Path, worktree: Path) -> None:
     """口を開ける手段が無ければ、公開したことにしない。"""
-    declare(main_repo, testenv={
-        "port_band": [20000, 29999],
-        "expose": {"enabled": True, "public_tag": "golden-public",
-                   "base_domain": "example.test"},
-    })
+    declare(
+        main_repo,
+        testenv={
+            "port_band": [20000, 29999],
+            "expose": {"enabled": True, "public_tag": "golden-public", "base_domain": "example.test"},
+        },
+    )
     run(["env", str(worktree)], cwd=main_repo)
     golden(main_repo, worktree)
 
@@ -846,12 +871,18 @@ def test_expose_without_a_command_records_nothing(main_repo: Path, worktree: Pat
 
 def test_expose_runs_the_declared_command(main_repo: Path, worktree: Path) -> None:
     marker = main_repo / "opened.txt"
-    declare(main_repo, testenv={
-        "port_band": [20000, 29999],
-        "expose": {"enabled": True, "public_tag": "golden-public",
-                   "base_domain": "example.test",
-                   "open_command": f'printf "%s" "$NDF_EXPOSE_URL" > {marker}'},
-    })
+    declare(
+        main_repo,
+        testenv={
+            "port_band": [20000, 29999],
+            "expose": {
+                "enabled": True,
+                "public_tag": "golden-public",
+                "base_domain": "example.test",
+                "open_command": f'printf "%s" "$NDF_EXPOSE_URL" > {marker}',
+            },
+        },
+    )
     run(["env", str(worktree)], cwd=main_repo)
     golden(main_repo, worktree)
 
@@ -863,11 +894,13 @@ def test_expose_runs_the_declared_command(main_repo: Path, worktree: Path) -> No
 
 def test_expose_rolls_back_when_the_command_fails(main_repo: Path, worktree: Path) -> None:
     """口を開けられなければ記録を戻す。残すと次の公開が拒まれ続ける。"""
-    declare(main_repo, testenv={
-        "port_band": [20000, 29999],
-        "expose": {"enabled": True, "public_tag": "golden-public",
-                   "base_domain": "example.test", "open_command": "exit 1"},
-    })
+    declare(
+        main_repo,
+        testenv={
+            "port_band": [20000, 29999],
+            "expose": {"enabled": True, "public_tag": "golden-public", "base_domain": "example.test", "open_command": "exit 1"},
+        },
+    )
     run(["env", str(worktree)], cwd=main_repo)
     golden(main_repo, worktree)
 
@@ -880,14 +913,20 @@ def test_expose_rolls_back_when_the_command_fails(main_repo: Path, worktree: Pat
 
 def test_unexpose_runs_the_declared_command(main_repo: Path, worktree: Path) -> None:
     marker = main_repo / "closed.txt"
-    declare(main_repo, testenv={
-        "port_band": [20000, 29999],
-        "expose": {"enabled": True, "public_tag": "golden-public",
-                   "base_domain": "example.test", "open_command": "true",
-                   "close_command":
-                       f'printf "%s|%s|%s|%s" "$NDF_EXPOSE_URL" "$NDF_EXPOSE_HOST" '
-                       f'"$NDF_EXPOSE_ENVIRONMENT" "$NDF_EXPOSE_SLOT" > {marker}'},
-    })
+    declare(
+        main_repo,
+        testenv={
+            "port_band": [20000, 29999],
+            "expose": {
+                "enabled": True,
+                "public_tag": "golden-public",
+                "base_domain": "example.test",
+                "open_command": "true",
+                "close_command": f'printf "%s|%s|%s|%s" "$NDF_EXPOSE_URL" "$NDF_EXPOSE_HOST" '
+                f'"$NDF_EXPOSE_ENVIRONMENT" "$NDF_EXPOSE_SLOT" > {marker}',
+            },
+        },
+    )
     run(["env", str(worktree)], cwd=main_repo)
     golden(main_repo, worktree)
     run(["expose", str(worktree)], cwd=main_repo)
@@ -916,12 +955,19 @@ def test_env_name_keeps_the_digest_for_long_branches(main_repo: Path) -> None:
 
 def test_unexpose_keeps_the_record_when_closing_fails(main_repo: Path, worktree: Path) -> None:
     """閉じられていないのに台帳だけ閉じると、口が開いたまま次の公開が通る。"""
-    declare(main_repo, testenv={
-        "port_band": [20000, 29999],
-        "expose": {"enabled": True, "public_tag": "golden-public",
-                   "base_domain": "example.test",
-                   "open_command": "true", "close_command": "exit 1"},
-    })
+    declare(
+        main_repo,
+        testenv={
+            "port_band": [20000, 29999],
+            "expose": {
+                "enabled": True,
+                "public_tag": "golden-public",
+                "base_domain": "example.test",
+                "open_command": "true",
+                "close_command": "exit 1",
+            },
+        },
+    )
     run(["env", str(worktree)], cwd=main_repo)
     golden(main_repo, worktree)
     assert run(["expose", str(worktree)], cwd=main_repo)["rc"] == 0
@@ -934,12 +980,19 @@ def test_unexpose_keeps_the_record_when_closing_fails(main_repo: Path, worktree:
 
 def test_next_expose_is_refused_while_a_close_failed(main_repo: Path, worktree: Path) -> None:
     """閉じられていない公開が残っている間は、次の公開を通さない。"""
-    declare(main_repo, testenv={
-        "port_band": [20000, 29999],
-        "expose": {"enabled": True, "public_tag": "golden-public",
-                   "base_domain": "example.test",
-                   "open_command": "true", "close_command": "exit 1"},
-    })
+    declare(
+        main_repo,
+        testenv={
+            "port_band": [20000, 29999],
+            "expose": {
+                "enabled": True,
+                "public_tag": "golden-public",
+                "base_domain": "example.test",
+                "open_command": "true",
+                "close_command": "exit 1",
+            },
+        },
+    )
     second = main_repo / ".worktrees" / "fix" / "y"
     git(main_repo, "worktree", "add", "-q", "-b", "fix/y", str(second))
     run(["env", str(worktree)], cwd=main_repo)
@@ -956,12 +1009,18 @@ def test_next_expose_is_refused_while_a_close_failed(main_repo: Path, worktree: 
 def test_expose_is_idempotent(main_repo: Path, worktree: Path) -> None:
     """既に開いているなら、開ける手段を再実行しない。"""
     counter = main_repo / "opens.txt"
-    declare(main_repo, testenv={
-        "port_band": [20000, 29999],
-        "expose": {"enabled": True, "public_tag": "golden-public",
-                   "base_domain": "example.test",
-                   "open_command": f'printf "x" >> {counter}'},
-    })
+    declare(
+        main_repo,
+        testenv={
+            "port_band": [20000, 29999],
+            "expose": {
+                "enabled": True,
+                "public_tag": "golden-public",
+                "base_domain": "example.test",
+                "open_command": f'printf "x" >> {counter}',
+            },
+        },
+    )
     run(["env", str(worktree)], cwd=main_repo)
     golden(main_repo, worktree)
 
@@ -976,13 +1035,19 @@ def test_expose_is_idempotent(main_repo: Path, worktree: Path) -> None:
 def test_unexpose_after_down_still_knows_the_environment(main_repo: Path, worktree: Path) -> None:
     """`down` で割り当てを解放した後でも、閉じる対象を特定できる。"""
     marker = main_repo / "closed2.txt"
-    declare(main_repo, testenv={
-        "port_band": [20000, 29999],
-        "expose": {"enabled": True, "public_tag": "golden-public",
-                   "base_domain": "example.test", "open_command": "true",
-                   "close_command":
-                       f'printf "%s|%s" "$NDF_EXPOSE_ENVIRONMENT" "$NDF_EXPOSE_SLOT" > {marker}'},
-    })
+    declare(
+        main_repo,
+        testenv={
+            "port_band": [20000, 29999],
+            "expose": {
+                "enabled": True,
+                "public_tag": "golden-public",
+                "base_domain": "example.test",
+                "open_command": "true",
+                "close_command": f'printf "%s|%s" "$NDF_EXPOSE_ENVIRONMENT" "$NDF_EXPOSE_SLOT" > {marker}',
+            },
+        },
+    )
     run(["env", str(worktree)], cwd=main_repo)
     golden(main_repo, worktree)
     run(["expose", str(worktree)], cwd=main_repo)
@@ -999,12 +1064,19 @@ def test_unexpose_after_down_still_knows_the_environment(main_repo: Path, worktr
 def test_unexpose_without_an_open_record_changes_nothing(main_repo: Path, worktree: Path) -> None:
     """開いている公開記録が 0 件のとき、何も変更せず正常終了する。"""
     marker = main_repo / "closed.txt"
-    declare(main_repo, testenv={
-        "port_band": [20000, 29999],
-        "expose": {"enabled": True, "public_tag": "golden-public",
-                   "base_domain": "example.test", "open_command": "true",
-                   "close_command": f"touch {marker}"},
-    })
+    declare(
+        main_repo,
+        testenv={
+            "port_band": [20000, 29999],
+            "expose": {
+                "enabled": True,
+                "public_tag": "golden-public",
+                "base_domain": "example.test",
+                "open_command": "true",
+                "close_command": f"touch {marker}",
+            },
+        },
+    )
     run(["env", str(worktree)], cwd=main_repo)
     before = registry(main_repo)["assignments"]
 
@@ -1031,10 +1103,7 @@ def stub_docker(main_repo: Path, dump: Path) -> Path:
     """環境変数と引数を書き出すだけの偽のコンテナ実行系。"""
     stub = main_repo.parent / "fake-docker"
     stub.write_text(
-        "#!/bin/sh\n"
-        f'env | grep "^NDF_" | sort > "{dump}"\n'
-        f'printf "%s\\n" "$*" >> "{dump}"\n'
-        "exit 0\n",
+        f'#!/bin/sh\nenv | grep "^NDF_" | sort > "{dump}"\nprintf "%s\\n" "$*" >> "{dump}"\nexit 0\n',
         encoding="utf-8",
     )
     stub.chmod(0o755)
@@ -1046,8 +1115,7 @@ def test_up_passes_the_numbered_values_to_compose(main_repo: Path, worktree: Pat
     (worktree / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
     declare(
         main_repo,
-        testenv={"port_band": [20000, 29999], "port_roles": {"http": 0, "db": 1},
-                 "shared_network": "ndf-shared"},
+        testenv={"port_band": [20000, 29999], "port_roles": {"http": 0, "db": 1}, "shared_network": "ndf-shared"},
         localenv={"kind": "compose", "compose_files": ["docker-compose.yml"]},
     )
     dump = main_repo.parent / "compose-env.txt"
@@ -1057,7 +1125,10 @@ def test_up_passes_the_numbered_values_to_compose(main_repo: Path, worktree: Pat
     env["WT_DOCKER_COMMAND"] = str(stub)
     proc = subprocess.run(
         ["bash", str(TESTENV), "up", str(worktree)],
-        cwd=str(main_repo), env=env, capture_output=True, text=True,
+        cwd=str(main_repo),
+        env=env,
+        capture_output=True,
+        text=True,
     )
     assert proc.returncode == 0, proc
 
@@ -1075,8 +1146,7 @@ def test_up_passes_the_profile_services_to_compose(main_repo: Path, worktree: Pa
     (worktree / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
     declare(
         main_repo,
-        testenv={"port_band": [20000, 29999], "port_roles": {"http": 0},
-                 "profiles": {"minimal": ["web", "api"]}},
+        testenv={"port_band": [20000, 29999], "port_roles": {"http": 0}, "profiles": {"minimal": ["web", "api"]}},
         localenv={"kind": "compose", "compose_files": ["docker-compose.yml"]},
     )
     dump = main_repo.parent / "compose-profile.txt"
@@ -1086,7 +1156,10 @@ def test_up_passes_the_profile_services_to_compose(main_repo: Path, worktree: Pa
     env["WT_DOCKER_COMMAND"] = str(stub)
     proc = subprocess.run(
         ["bash", str(TESTENV), "up", str(worktree), "--profile", "minimal"],
-        cwd=str(main_repo), env=env, capture_output=True, text=True,
+        cwd=str(main_repo),
+        env=env,
+        capture_output=True,
+        text=True,
     )
     assert proc.returncode == 0, proc
 
@@ -1108,7 +1181,10 @@ def test_role_names_become_upper_case_variables(main_repo: Path, worktree: Path)
     env["WT_DOCKER_COMMAND"] = str(stub)
     subprocess.run(
         ["bash", str(TESTENV), "up", str(worktree)],
-        cwd=str(main_repo), env=env, capture_output=True, text=True,
+        cwd=str(main_repo),
+        env=env,
+        capture_output=True,
+        text=True,
     )
 
     assert "NDF_PORT_OBJECT_STORE=20004" in dump.read_text(), dump.read_text()
@@ -1129,7 +1205,10 @@ def test_compose_files_outside_the_worktree_are_refused(main_repo: Path, worktre
     env["WT_DOCKER_COMMAND"] = str(stub)
     proc = subprocess.run(
         ["bash", str(TESTENV), "up", str(worktree)],
-        cwd=str(main_repo), env=env, capture_output=True, text=True,
+        cwd=str(main_repo),
+        env=env,
+        capture_output=True,
+        text=True,
     )
 
     assert proc.returncode == 1, proc
@@ -1154,7 +1233,10 @@ def test_compose_file_symlink_is_refused(main_repo: Path, worktree: Path, tmp_pa
     env["WT_DOCKER_COMMAND"] = str(stub)
     proc = subprocess.run(
         ["bash", str(TESTENV), "up", str(worktree)],
-        cwd=str(main_repo), env=env, capture_output=True, text=True,
+        cwd=str(main_repo),
+        env=env,
+        capture_output=True,
+        text=True,
     )
 
     assert proc.returncode == 1, proc
@@ -1179,7 +1261,10 @@ def test_down_keeps_the_slot_when_it_fails(main_repo: Path, worktree: Path) -> N
     env["WT_DOCKER_COMMAND"] = str(failing)
     proc = subprocess.run(
         ["bash", str(TESTENV), "down", str(worktree)],
-        cwd=str(main_repo), env=env, capture_output=True, text=True,
+        cwd=str(main_repo),
+        env=env,
+        capture_output=True,
+        text=True,
     )
 
     assert proc.returncode == 1, proc
@@ -1202,7 +1287,10 @@ def test_down_releases_the_slot_when_it_succeeds(main_repo: Path, worktree: Path
     env["WT_DOCKER_COMMAND"] = str(stub)
     proc = subprocess.run(
         ["bash", str(TESTENV), "down", str(worktree)],
-        cwd=str(main_repo), env=env, capture_output=True, text=True,
+        cwd=str(main_repo),
+        env=env,
+        capture_output=True,
+        text=True,
     )
 
     assert proc.returncode == 0, proc
@@ -1211,8 +1299,7 @@ def test_down_releases_the_slot_when_it_succeeds(main_repo: Path, worktree: Path
 
 @pytest.mark.parametrize(
     ("given", "expected"),
-    [("ai-plugins", "ai-plugins"), ("My_Repo", "my_repo"),
-     ("Carmo System!", "carmosystem"), ("___x", "x")],
+    [("ai-plugins", "ai-plugins"), ("My_Repo", "my_repo"), ("Carmo System!", "carmosystem"), ("___x", "x")],
 )
 def test_compose_project_normalization(given: str, expected: str) -> None:
     """実行系は名前を小文字へ揃え、`a-z0-9_-` 以外を落としてから使う。"""
@@ -1240,9 +1327,7 @@ def test_lock_timeout_is_measured_in_real_time(tmp_path: Path) -> None:
     assert elapsed < 6, f"上限 2 秒の待ちに {elapsed:.1f} 秒かかった"
 
 
-def test_compose_file_under_a_symlinked_directory_is_refused(
-    main_repo: Path, worktree: Path, tmp_path: Path
-) -> None:
+def test_compose_file_under_a_symlinked_directory_is_refused(main_repo: Path, worktree: Path, tmp_path: Path) -> None:
     """途中のディレクトリが symlink で外を指していても読み込ませない。"""
     outside = tmp_path / "outside-compose"
     outside.mkdir()
@@ -1260,7 +1345,10 @@ def test_compose_file_under_a_symlinked_directory_is_refused(
     env["WT_DOCKER_COMMAND"] = str(stub)
     proc = subprocess.run(
         ["bash", str(TESTENV), "up", str(worktree)],
-        cwd=str(main_repo), env=env, capture_output=True, text=True,
+        cwd=str(main_repo),
+        env=env,
+        capture_output=True,
+        text=True,
     )
 
     assert proc.returncode == 1, proc
@@ -1306,7 +1394,10 @@ def test_reap_stops_the_idle_environment_with_its_slot(main_repo: Path, worktree
     env["WT_DOCKER_COMMAND"] = str(stub_docker_with_running_container(main_repo, dump))
     proc = subprocess.run(
         ["bash", str(TESTENV), "reap", "--idle", "45m"],
-        cwd=str(main_repo), env=env, capture_output=True, text=True,
+        cwd=str(main_repo),
+        env=env,
+        capture_output=True,
+        text=True,
     )
 
     assert proc.returncode == 0, proc
@@ -1321,28 +1412,22 @@ def test_reap_stops_the_idle_environment_with_its_slot(main_repo: Path, worktree
     ("args", "option"),
     [(["test"], "--kind"), (["bake"], "--tag")],
 )
-def test_a_missing_option_is_reported_as_text(
-    main_repo: Path, worktree: Path, args: list[str], option: str
-) -> None:
+def test_a_missing_option_is_reported_as_text(main_repo: Path, worktree: Path, args: list[str], option: str) -> None:
     """案内の本文が `--` で始まっても、書式指定として解釈されない。"""
-    declare(main_repo, testenv={"port_band": [20000, 29999],
-                                "test_kinds": {"pure": {"run": "true"}}})
+    declare(main_repo, testenv={"port_band": [20000, 29999], "test_kinds": {"pure": {"run": "true"}}})
     result = run([*args, str(worktree)], cwd=main_repo)
     assert result["rc"] == 1, result
     assert option in result["err"], result["err"]
     assert "invalid option" not in result["err"], result["err"]
 
 
-def test_the_declaration_and_registry_come_from_the_target(
-    tmp_path: Path, main_repo: Path, worktree: Path
-) -> None:
+def test_the_declaration_and_registry_come_from_the_target(tmp_path: Path, main_repo: Path, worktree: Path) -> None:
     """別のリポジトリから実行しても、対象側の宣言・台帳・帯で動く。"""
     declare(main_repo, testenv={"port_band": [20000, 29999], "port_roles": {"http": 0}})
     other = init_repo(tmp_path / "other")
     write_declaration(
         other,
-        json.dumps({"version": 1,
-                    "testenv": {"port_band": [30000, 30199], "port_roles": {"http": 0}}}),
+        json.dumps({"version": 1, "testenv": {"port_band": [30000, 30199], "port_roles": {"http": 0}}}),
     )
 
     result = run(["env", str(worktree)], cwd=other)
@@ -1352,13 +1437,10 @@ def test_the_declaration_and_registry_come_from_the_target(
     assert payload["ports"]["http"] == 20000, payload
     assert payload["environment"].startswith("main-wt-feature-x-"), payload
     assert len(registry(main_repo)["assignments"]) == 1, registry(main_repo)
-    assert not (other / ".git" / "ndf" / "worktree-registry.json").exists(), \
-        "実行位置側の台帳には記録しない"
+    assert not (other / ".git" / "ndf" / "worktree-registry.json").exists(), "実行位置側の台帳には記録しない"
 
 
-def test_a_target_outside_a_repository_keeps_the_existing_report(
-    main_repo: Path, tmp_path: Path
-) -> None:
+def test_a_target_outside_a_repository_keeps_the_existing_report(main_repo: Path, tmp_path: Path) -> None:
     """対象がリポジトリの外にあるときは、サブコマンド自身の案内で終わる。"""
     declare(main_repo, testenv={"port_band": [20000, 29999]})
     outside = tmp_path / "outside"
@@ -1370,9 +1452,7 @@ def test_a_target_outside_a_repository_keeps_the_existing_report(
     assert "ブランチを取れません" in result["err"], result["err"]
 
 
-def test_tag_refuses_when_the_declared_paths_have_no_match(
-    main_repo: Path, worktree: Path
-) -> None:
+def test_tag_refuses_when_the_declared_paths_have_no_match(main_repo: Path, worktree: Path) -> None:
     """宣言したパスが 1 件も見つからないとき、空の内容に対する値を返さない。"""
     declare(main_repo, testenv={"golden_tag_paths": ["database/migrations"]})
 
@@ -1396,7 +1476,10 @@ def reap_with_running_container(main_repo: Path, worktree: Path) -> tuple[dict, 
     env["WT_DOCKER_COMMAND"] = str(stub_docker_with_running_container(main_repo, dump))
     proc = subprocess.run(
         ["bash", str(TESTENV), "reap", "--idle", "45m"],
-        cwd=str(main_repo), env=env, capture_output=True, text=True,
+        cwd=str(main_repo),
+        env=env,
+        capture_output=True,
+        text=True,
     )
     return {"rc": proc.returncode, "out": proc.stdout, "err": proc.stderr}, dump
 
@@ -1493,7 +1576,9 @@ def test_env_reports_when_the_release_after_a_band_overflow_fails(main_repo: Pat
     declare(main_repo, testenv={"port_band": [20000, 20005], "port_roles": {"far": 9}})
 
     result = run(
-        ["env", str(worktree)], cwd=main_repo, env=failing_jq(main_repo, ".released_at = (now"),
+        ["env", str(worktree)],
+        cwd=main_repo,
+        env=failing_jq(main_repo, ".released_at = (now"),
     )
 
     assert result["rc"] == 1, result
@@ -1571,7 +1656,8 @@ def test_test_warns_and_keeps_the_command_exit_code(main_repo: Path, worktree: P
 
     result = run(
         ["test", str(worktree), "--kind", "unit"],
-        cwd=main_repo, env=failing_jq(main_repo, ".last_used_at = (now"),
+        cwd=main_repo,
+        env=failing_jq(main_repo, ".last_used_at = (now"),
     )
 
     assert result["rc"] == 3, result
@@ -1595,11 +1681,13 @@ def test_down_reports_when_the_release_cannot_be_recorded(main_repo: Path, workt
 
 def exposed(main_repo: Path, worktree: Path, **expose: str) -> None:
     """公開を許す基準が載った割り当てを作り、公開する。"""
-    declare(main_repo, testenv={
-        "port_band": [20000, 29999],
-        "expose": {"enabled": True, "public_tag": "golden-public",
-                   "base_domain": "example.test", "open_command": "true", **expose},
-    })
+    declare(
+        main_repo,
+        testenv={
+            "port_band": [20000, 29999],
+            "expose": {"enabled": True, "public_tag": "golden-public", "base_domain": "example.test", "open_command": "true", **expose},
+        },
+    )
     run(["env", str(worktree)], cwd=main_repo)
     golden(main_repo, worktree)
     assert run(["expose", str(worktree)], cwd=main_repo)["rc"] == 0
@@ -1611,7 +1699,8 @@ def test_unexpose_reports_when_the_record_cannot_be_closed(main_repo: Path, work
     exposed(main_repo, worktree, close_command=f"touch {marker}")
 
     result = run(
-        ["unexpose", str(worktree)], cwd=main_repo,
+        ["unexpose", str(worktree)],
+        cwd=main_repo,
         env=failing_jq(main_repo, ".expose.closed_at = (now"),
     )
 
@@ -1624,16 +1713,19 @@ def test_unexpose_reports_when_the_record_cannot_be_closed(main_repo: Path, work
 
 def test_expose_reports_when_the_rollback_fails(main_repo: Path, worktree: Path) -> None:
     """AC15: 公開の手段が失敗し、記録も戻せなければ、戻したとは言わず unexpose を案内する。"""
-    declare(main_repo, testenv={
-        "port_band": [20000, 29999],
-        "expose": {"enabled": True, "public_tag": "golden-public",
-                   "base_domain": "example.test", "open_command": "exit 1"},
-    })
+    declare(
+        main_repo,
+        testenv={
+            "port_band": [20000, 29999],
+            "expose": {"enabled": True, "public_tag": "golden-public", "base_domain": "example.test", "open_command": "exit 1"},
+        },
+    )
     run(["env", str(worktree)], cwd=main_repo)
     golden(main_repo, worktree)
 
     result = run(
-        ["expose", str(worktree)], cwd=main_repo,
+        ["expose", str(worktree)],
+        cwd=main_repo,
         env=failing_jq(main_repo, ".expose.closed_at = (now"),
     )
 

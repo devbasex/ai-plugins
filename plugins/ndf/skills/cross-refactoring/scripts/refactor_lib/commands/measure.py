@@ -7,6 +7,7 @@
 測定は書き込み用の作業ディレクトリ（`work/`）で行う。書くのは一時ディレクトリ（全件無視の
 `.gitignore` の中）だけで、対象リポジトリの追跡されたファイルを変えない（I8）。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -44,8 +45,7 @@ def cmd_measure(args: argparse.Namespace) -> None:
     """
     path, state = load_state(args.id)
     record = state.get("code_metrics")
-    if isinstance(record, dict) and record.get("status") == cm.STATUS_PENDING \
-            and not propose_started(state):
+    if isinstance(record, dict) and record.get("status") == cm.STATUS_PENDING and not propose_started(state):
         if (record.get("config") or {}).get("enabled") is False:
             record["status"] = cm.STATUS_DISABLED
             info("ℹ 指標は測りません（--no-code-metrics）")
@@ -53,8 +53,7 @@ def cmd_measure(args: argparse.Namespace) -> None:
             Measurement(state, record).run()
         statefile.save(path, state)
     record = record if isinstance(record, dict) else {}
-    statefile.emit(CODE_METRICS=record.get("status") or "",
-                   CODE_METRICS_FILE=record.get("file") or "")
+    statefile.emit(CODE_METRICS=record.get("status") or "", CODE_METRICS_FILE=record.get("file") or "")
 
 
 def tracked_files(work: str, scope: list[str]) -> list[str]:
@@ -68,9 +67,13 @@ def tracked_files(work: str, scope: list[str]) -> list[str]:
 class Measurement:
     """1 回の測定。締め切り（`measure_deadline`）を言語ごとの測定と重複検出で分け合う。"""
 
-    def __init__(self, state: dict[str, Any], record: dict[str, Any],
-                 which: Optional[Callable[[str], Optional[str]]] = None,
-                 kill_grace: float = KILL_GRACE) -> None:
+    def __init__(
+        self,
+        state: dict[str, Any],
+        record: dict[str, Any],
+        which: Optional[Callable[[str], Optional[str]]] = None,
+        kill_grace: float = KILL_GRACE,
+    ) -> None:
         self.state = state
         self.record = record
         self.config = record.get("config") or cm.load_config(None)
@@ -119,8 +122,7 @@ class Measurement:
     def _fail(self, result: dict[str, Any], reason: str, detail: Optional[str]) -> None:
         result.update(status=cm.FAILED, reason=reason, detail=detail)
 
-    def _outcome(self, result: dict[str, Any], code: Optional[int], err: str, timed_out: bool,
-                 ok: tuple[int, ...] = (0,)) -> bool:
+    def _outcome(self, result: dict[str, Any], code: Optional[int], err: str, timed_out: bool, ok: tuple[int, ...] = (0,)) -> bool:
         """起動の結果が正常か。正常でなければ理由を書いて `False`。"""
         if timed_out:
             self._fail(result, cm.TIMEOUT, f"{self.budget} 秒")
@@ -142,14 +144,12 @@ class Measurement:
         record["deadline_seconds"] = self.budget
         self.end = started + self.budget
         if record.get("config", {}).get("source") == cm.SOURCE_INVALID:
-            info(f"⚠ {cm.DECLARATION_FILE} を使わず既定で測ります"
-                 f"（{cm.DECLARATION_INVALID}: {self.config.get('error')}）")
+            info(f"⚠ {cm.DECLARATION_FILE} を使わず既定で測ります（{cm.DECLARATION_INVALID}: {self.config.get('error')}）")
         files = tracked_files(self.work, list(self.state.get("target_scope") or []))
         by_lang, ignored = cm.split_by_language(files)
         record["ignored_files"] = ignored
         if not by_lang:
-            record.update(status=cm.STATUS_NO_LANGUAGE, languages=[], duplication=[],
-                          seconds=round(time.monotonic() - started, 1))
+            record.update(status=cm.STATUS_NO_LANGUAGE, languages=[], duplication=[], seconds=round(time.monotonic() - started, 1))
             info("ℹ 測る言語がありません（対象範囲に言語を判定できるファイルが無い）")
             return
         self._read_sources(by_lang)
@@ -168,10 +168,16 @@ class Measurement:
         record["languages"] = languages
         record["duplication"] = duplication
         text = view.metrics_markdown(
-            run_id=self.run_id, head=record.get("head"),
-            scope=list(self.state.get("target_scope") or []), config=self.config,
-            ignored=ignored, languages=languages, sections=sections,
-            duplication=duplication, clones=clones)
+            run_id=self.run_id,
+            head=record.get("head"),
+            scope=list(self.state.get("target_scope") or []),
+            config=self.config,
+            ignored=ignored,
+            languages=languages,
+            sections=sections,
+            duplication=duplication,
+            clones=clones,
+        )
         target = metrics_path(self.tmp, self.run_id)
         try:
             self.tmp.mkdir(parents=True, exist_ok=True)
@@ -212,9 +218,16 @@ class Measurement:
     def language(self, lang: str, files: list[str]) -> tuple[dict[str, Any], dict[str, Any]]:
         tool, reason = cm.language_tool(self.config, lang)
         result: dict[str, Any] = {
-            "language": lang, "tool": tool, "version": None, "runner": None,
-            "files": len(files), "seconds": 0.0, "status": cm.FAILED, "reason": reason,
-            "detail": None, "unreadable_files": 0,
+            "language": lang,
+            "tool": tool,
+            "version": None,
+            "runner": None,
+            "files": len(files),
+            "seconds": 0.0,
+            "status": cm.FAILED,
+            "reason": reason,
+            "detail": None,
+            "unreadable_files": 0,
         }
         section: dict[str, Any] = {"functions": [], "files": []}
         if reason is not None or self._timed_out(result):
@@ -231,15 +244,15 @@ class Measurement:
         if measured is None:
             return result, section
         functions, unreadable = measured
-        result.update(status=cm.MEASURED, reason=None, detail=None,
-                      unreadable_files=len(unreadable))
+        result.update(status=cm.MEASURED, reason=None, detail=None, unreadable_files=len(unreadable))
         counts = {p: cm.count_lines(self.sources.get(p, "")) for p in files}
         section["functions"] = functions
         section["files"] = read.file_metrics(files, counts, functions, unreadable)
         return result, section
 
-    def _python(self, files: list[str], prefixes: dict[str, list[str]],
-                result: dict[str, Any]) -> Optional[tuple[list[dict[str, Any]], set[str]]]:
+    def _python(
+        self, files: list[str], prefixes: dict[str, list[str]], result: dict[str, Any]
+    ) -> Optional[tuple[list[dict[str, Any]], set[str]]]:
         ruff_values: dict = {}
         cognitive: dict = {}
         invalid: set[str] = set()
@@ -257,8 +270,7 @@ class Measurement:
             invalid |= bad
             output = self.tmp / f"complexipy-rf{self.run_id}-{n}.json"
             output.unlink(missing_ok=True)
-            code, _, err, timed_out = self.call(
-                cm.complexipy_argv(prefixes["complexipy"], batch, str(output), str(cache)))
+            code, _, err, timed_out = self.call(cm.complexipy_argv(prefixes["complexipy"], batch, str(output), str(cache)))
             # 0 と、1 で `--output` が読めるとき（構文を読めないファイルがある）を正常とする。
             if not self._outcome(result, code, err, timed_out, ok=(0, 1)):
                 return None
@@ -275,8 +287,9 @@ class Measurement:
         listed = {p: self.parsed.get(p) for p in files}
         return read.python_function_metrics(listed, ruff_values, cognitive, unreadable), unreadable
 
-    def _lizard(self, files: list[str], prefixes: dict[str, list[str]],
-                result: dict[str, Any]) -> Optional[tuple[list[dict[str, Any]], set[str]]]:
+    def _lizard(
+        self, files: list[str], prefixes: dict[str, list[str]], result: dict[str, Any]
+    ) -> Optional[tuple[list[dict[str, Any]], set[str]]]:
         functions: list[dict[str, Any]] = []
         for batch in cm.chunks(files):
             code, out, err, timed_out = self.call(cm.lizard_argv(prefixes["lizard"], batch))
@@ -290,20 +303,27 @@ class Measurement:
         return functions, set()
 
     # --- 重複検出 ---
-    def duplicate(self, tool: str, langs: list[str],
-                  files: list[str]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    def duplicate(self, tool: str, langs: list[str], files: list[str]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         if tool == cm.TOOL_SYMILAR:
             # 1 本でも読めないファイルがあると symilar の全体が落ちる。`ast` が読めたものだけを渡す。
             files = [p for p in files if self.parsed.get(p) is not None]
         result: dict[str, Any] = {
-            "tool": tool, "version": None, "runner": None, "languages": list(langs),
-            "files": len(files), "seconds": 0.0, "status": cm.FAILED, "reason": None,
-            "detail": None, "clones": 0, "duplicated_lines": 0, "total_lines": 0,
+            "tool": tool,
+            "version": None,
+            "runner": None,
+            "languages": list(langs),
+            "files": len(files),
+            "seconds": 0.0,
+            "status": cm.FAILED,
+            "reason": None,
+            "detail": None,
+            "clones": 0,
+            "duplicated_lines": 0,
+            "total_lines": 0,
         }
         if self._timed_out(result):
             return result, []
-        size = cm.arg_bytes(files if tool == cm.TOOL_SYMILAR
-                            else [os.path.join(self.work, p) for p in files])
+        size = cm.arg_bytes(files if tool == cm.TOOL_SYMILAR else [os.path.join(self.work, p) for p in files])
         if size > cm.DUPLICATE_ARG_BYTES:
             self._fail(result, cm.TOO_MANY_FILES, f"{len(files):,} ファイル・{size:,} バイト")
             return result, []
@@ -311,20 +331,19 @@ class Measurement:
         if prefixes is None:
             return result, []
         started = time.monotonic()
-        parsed = self._symilar(files, prefixes[tool], result) if tool == cm.TOOL_SYMILAR \
-            else self._jscpd(files, prefixes[tool], result)
+        parsed = self._symilar(files, prefixes[tool], result) if tool == cm.TOOL_SYMILAR else self._jscpd(files, prefixes[tool], result)
         result["seconds"] = round(time.monotonic() - started, 1)
         if parsed is None:
             return result, []
         clones = parsed["clones"]
-        result.update(status=cm.MEASURED, clones=len(clones),
-                      duplicated_lines=parsed["duplicated_lines"], total_lines=parsed["total_lines"])
+        result.update(
+            status=cm.MEASURED, clones=len(clones), duplicated_lines=parsed["duplicated_lines"], total_lines=parsed["total_lines"]
+        )
         if "sources" in parsed:
             result["sources"] = parsed["sources"]
         return result, clones
 
-    def _symilar(self, files: list[str], prefix: list[str],
-                 result: dict[str, Any]) -> Optional[dict[str, Any]]:
+    def _symilar(self, files: list[str], prefix: list[str], result: dict[str, Any]) -> Optional[dict[str, Any]]:
         if not files:
             return {"clones": [], "total_lines": 0, "duplicated_lines": 0}
         code, out, err, timed_out = self.call(cm.symilar_argv(prefix, files))
@@ -336,15 +355,13 @@ class Measurement:
             self._fail(result, cm.UNREADABLE_OUTPUT, str(exc))
             return None
 
-    def _jscpd(self, files: list[str], prefix: list[str],
-               result: dict[str, Any]) -> Optional[dict[str, Any]]:
+    def _jscpd(self, files: list[str], prefix: list[str], result: dict[str, Any]) -> Optional[dict[str, Any]]:
         # cwd を空のディレクトリにする。jscpd は cwd の `.jscpd.json` と `package.json` を読む。
         out_dir = self.tmp / f"jscpd-rf{self.run_id}"
         shutil.rmtree(out_dir, ignore_errors=True)
         out_dir.mkdir(parents=True, exist_ok=True)
         abs_files = [os.path.join(self.work, p) for p in files]
-        code, _, err, timed_out = self.call(cm.jscpd_argv(prefix, abs_files, str(out_dir)),
-                                            cwd=str(out_dir))
+        code, _, err, timed_out = self.call(cm.jscpd_argv(prefix, abs_files, str(out_dir)), cwd=str(out_dir))
         if not self._outcome(result, code, err, timed_out):
             return None
         report = out_dir / "jscpd-report.json"

@@ -14,6 +14,7 @@
 - AC7: `usage_limit` は監視の結果ファイルと記録の `reason` に入り、標準出力のキーは変わらない
 - 照合の順序は利用上限 → 致命 → 警告の見た目の致命（設計文書の未確認 5 を固定する）
 """
+
 from __future__ import annotations
 
 import json
@@ -27,15 +28,24 @@ _HERE = pathlib.Path(__file__).resolve().parent
 _MONITOR_LIB = _HERE.parents[2] / "scripts" / "lib" / "monitor.py"
 
 STDOUT_KEYS = {
-    "agent", "status", "exit_code", "pid", "elapsed", "detail", "err_log_size",
-    "stdout_log_size", "progress_log_size", "progress_tail", "idle_seconds",
-    "result_exists", "sentinel_seen",
+    "agent",
+    "status",
+    "exit_code",
+    "pid",
+    "elapsed",
+    "detail",
+    "err_log_size",
+    "stdout_log_size",
+    "progress_log_size",
+    "progress_tail",
+    "idle_seconds",
+    "result_exists",
+    "sentinel_seen",
 }
 
 # 設計文書「実測」の 10 行。見出しはそのまま、行は実物の形に合わせて組み立てた。
 KIRO_LIMIT = "Monthly request limit reached"
-CLAUDE_429 = ('{"type":"result","subtype":"success","is_error":false,'
-              '"api_error_status":429,"result":"rate limited"}')
+CLAUDE_429 = '{"type":"result","subtype":"success","is_error":false,"api_error_status":429,"result":"rate limited"}'
 CLAUDE_429_SPACED = '{"type": "result", "api_error_status" : 429, "is_error": false}'
 HTTP_429 = "HTTP/1.1 429 Too Many Requests"
 HTTP_401 = "HTTP/1.1 401 Unauthorized"
@@ -43,8 +53,7 @@ IN_TABLE = "| usage_limit | Monthly request limit reached | 利用上限 |"
 IN_BACKTICKS = "see `Monthly request limit reached` in err.log"
 IN_QUOTE = "> Monthly request limit reached"
 AGY_PRINT_TIMEOUT = "[agy] print timeout after 10m0s with turn in progress; returning partial output"
-IN_GREP = ('plugins/ndf/skills/cross-review/tests/test_monitor_usage_limit.py:12:'
-           '    KIRO_LIMIT = "Monthly request limit reached"')
+IN_GREP = 'plugins/ndf/skills/cross-review/tests/test_monitor_usage_limit.py:12:    KIRO_LIMIT = "Monthly request limit reached"'
 
 # (見出し, 行, 利用上限の表の一致, CLI の上限の表の一致, 利用上限を除いた致命の表の一致)
 # 設計文書の「現行fatal」は変更前の表で測った値。HTTP 429 はこの変更で利用上限の表へ移る（AC4）。
@@ -67,22 +76,25 @@ TEN_LINES = [
 # 文言そのものはここにある。
 # 推測で作った文言は入れない。出所は記録（`~/.codex/sessions` / `~/.claude/projects`）と
 # 導入済みの実行ファイルの文字列である。
-CODEX_USAGE_LIMIT = ("You've hit your usage limit. Visit "
-                     "https://chatgpt.com/codex/settings/usage to purchase more credits "
-                     "or try again at 5:44 PM.")
+CODEX_USAGE_LIMIT = (
+    "You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 5:44 PM."
+)
 CODEX_USAGE_LIMIT_PREFIXED = f"ERROR: {CODEX_USAGE_LIMIT}"
 CODEX_RETRY_429 = "ERROR: exceeded retry limit, last status: 429"
 CODEX_RETRY_503 = "ERROR: exceeded retry limit, last status: 503 Service Unavailable"
-CODEX_BAD_REQUEST = ('ERROR: {"type":"error","status":400,"error":{"type":'
-                     '"invalid_request_error","message":"The \'ndf-no-such-model-xyz\' model '
-                     'is not supported when using Codex with a ChatGPT account."}}')
+CODEX_BAD_REQUEST = (
+    'ERROR: {"type":"error","status":400,"error":{"type":'
+    '"invalid_request_error","message":"The \'ndf-no-such-model-xyz\' model '
+    'is not supported when using Codex with a ChatGPT account."}}'
+)
 CLAUDE_WEEKLY = "You've hit your weekly limit · resets Sep 22, 6am (UTC)"
 CLAUDE_SESSION = "You've hit your session limit · resets 6:30pm (UTC)"
-CLAUDE_INDIVIDUAL_SPEND = ("You've hit your individual spend limit · run /usage-credits "
-                           "to raise it, or visit claude.ai/admin-settings/usage")
-CLAUDE_MONTHLY_SPEND = ("You've hit your monthly spend limit. Run /usage-credits to manage "
-                        "your limit and keep using the model or switch models to continue "
-                        "this chat.")
+CLAUDE_INDIVIDUAL_SPEND = "You've hit your individual spend limit · run /usage-credits to raise it, or visit claude.ai/admin-settings/usage"
+CLAUDE_MONTHLY_SPEND = (
+    "You've hit your monthly spend limit. Run /usage-credits to manage "
+    "your limit and keep using the model or switch models to continue "
+    "this chat."
+)
 CLAUDE_BARE_LIMIT = "You've hit your limit"
 
 # 実物として一致すべき 7 行（codex 2 形 + claude 5 形）。行頭の目印の有無は codex が決める。
@@ -122,10 +134,9 @@ def _write(path: pathlib.Path, text: str) -> pathlib.Path:
 
 # ---------- 照合の単体（AC4 / AC6） ----------
 
-@pytest.mark.parametrize(("label", "line", "usage_hit", "cli_timeout_hit", "fatal_hit"), TEN_LINES,
-                         ids=[t[0] for t in TEN_LINES])
-def test_ten_measured_lines_match_as_the_design_records(tmp_path, monitor_mod, label, line,
-                                                        usage_hit, cli_timeout_hit, fatal_hit):
+
+@pytest.mark.parametrize(("label", "line", "usage_hit", "cli_timeout_hit", "fatal_hit"), TEN_LINES, ids=[t[0] for t in TEN_LINES])
+def test_ten_measured_lines_match_as_the_design_records(tmp_path, monitor_mod, label, line, usage_hit, cli_timeout_hit, fatal_hit):
     log = _write(tmp_path / "err.log", line)
     assert (monitor_mod._scan_patterns(log, monitor_mod.USAGE_LIMIT_FATAL) is not None) is usage_hit
     assert (monitor_mod._scan_patterns(log, monitor_mod.CLI_TIMEOUT_AFTER_EXIT) is not None) is cli_timeout_hit
@@ -134,16 +145,14 @@ def test_ten_measured_lines_match_as_the_design_records(tmp_path, monitor_mod, l
     assert (monitor_mod._scan_early_fatal(log) is not None) is (usage_hit or fatal_hit)
 
 
-@pytest.mark.parametrize(("label", "line"), MEASURED_USAGE_LIMIT_LINES,
-                         ids=[t[0] for t in MEASURED_USAGE_LIMIT_LINES])
+@pytest.mark.parametrize(("label", "line"), MEASURED_USAGE_LIMIT_LINES, ids=[t[0] for t in MEASURED_USAGE_LIMIT_LINES])
 def test_measured_codex_and_claude_lines_are_usage_limits(tmp_path, monitor_mod, label, line):
     """AC1〜AC3 / AC6: 実測の実物の行は利用上限の表に一致する。"""
     log = _write(tmp_path / "err.log", line)
     assert monitor_mod._scan_patterns(log, monitor_mod.USAGE_LIMIT_FATAL) is not None
 
 
-@pytest.mark.parametrize(("label", "line"), NOT_USAGE_LIMIT_LINES,
-                         ids=[t[0] for t in NOT_USAGE_LIMIT_LINES])
+@pytest.mark.parametrize(("label", "line"), NOT_USAGE_LIMIT_LINES, ids=[t[0] for t in NOT_USAGE_LIMIT_LINES])
 def test_quoted_and_non_limit_lines_are_not_usage_limits(tmp_path, monitor_mod, label, line):
     """AC2 の後半 / AC5: 状態が 429 でない行と、引用・差分・文の途中は一致しない。"""
     log = _write(tmp_path / "err.log", line)
@@ -164,8 +173,7 @@ def test_existing_limit_matches_moved_to_usage_limit(tmp_path, monitor_mod, line
     assert monitor_mod._scan_patterns(log, monitor_mod.EARLY_ERROR_FATAL) is None
 
 
-@pytest.mark.parametrize("line", [HTTP_401, "HTTP/2 403 Forbidden", "Authentication failed: token",
-                                  "Internal sandbox error: cannot start"])
+@pytest.mark.parametrize("line", [HTTP_401, "HTTP/2 403 Forbidden", "Authentication failed: token", "Internal sandbox error: cannot start"])
 def test_other_fatal_lines_stay_early_error(tmp_path, monitor_mod, line):
     log = _write(tmp_path / "err.log", line)
     assert monitor_mod._scan_patterns(log, monitor_mod.USAGE_LIMIT_FATAL) is None
@@ -174,11 +182,15 @@ def test_other_fatal_lines_stay_early_error(tmp_path, monitor_mod, line):
 
 # ---------- 照合の順序（利用上限 → 致命 → 警告の見た目の致命） ----------
 
+
 def _paths(monitor_mod, tmp_path, agent="kiro"):
     return monitor_mod.AgentPaths(
-        agent=agent, pr=7,
-        pidfile=tmp_path / "x.pid", err_log=tmp_path / "err.log",
-        stdout_log=tmp_path / "stdout.log", progress_log=tmp_path / "progress.log",
+        agent=agent,
+        pr=7,
+        pidfile=tmp_path / "x.pid",
+        err_log=tmp_path / "err.log",
+        stdout_log=tmp_path / "stdout.log",
+        progress_log=tmp_path / "progress.log",
         result=tmp_path / "result.json",
     )
 
@@ -196,8 +208,7 @@ def test_usage_limit_wins_over_other_fatal_lines_in_either_order(tmp_path, monit
 
 
 def test_usage_limit_wins_over_warning_shaped_fatal(tmp_path, monitor_mod):
-    _write(tmp_path / "err.log",
-           "WARNING: --trust-tools arg for custom tool foo\n" + KIRO_LIMIT)
+    _write(tmp_path / "err.log", "WARNING: --trust-tools arg for custom tool foo\n" + KIRO_LIMIT)
     fatal, _warn = monitor_mod._early_error(_paths(monitor_mod, tmp_path), "kiro", False)
     assert fatal.reason == "usage_limit"
 
@@ -231,6 +242,7 @@ def test_monitor_outcome_create_keeps_the_two_argument_form(monitor_mod):
 
 # ---------- 監視を実プロセスで呼ぶ（AC2 / AC3 / AC4 / AC7） ----------
 
+
 def _dead_pid() -> int:
     proc = subprocess.Popen(["true"])
     proc.wait()
@@ -239,14 +251,14 @@ def _dead_pid() -> int:
 
 def _run_monitor(tmp_dir: pathlib.Path, agent: str, *extra: str) -> subprocess.CompletedProcess:
     return subprocess.run(
-        [sys.executable, str(_MONITOR_LIB), "7", "--agents", agent,
-         "--tmp-dir", str(tmp_dir), "--poll", "1", *extra],
-        capture_output=True, text=True, timeout=60,
+        [sys.executable, str(_MONITOR_LIB), "7", "--agents", agent, "--tmp-dir", str(tmp_dir), "--poll", "1", *extra],
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
 
 
-def _finished(tmp_dir: pathlib.Path, agent: str, *, err: str = "", stdout: str = "",
-              result: bool = False) -> str:
+def _finished(tmp_dir: pathlib.Path, agent: str, *, err: str = "", stdout: str = "", result: bool = False) -> str:
     stem = f"{agent}-review-pr7"
     (tmp_dir / f"{stem}.pid").write_text(str(_dead_pid()))
     if err:
@@ -262,14 +274,17 @@ def _outcome(tmp_dir: pathlib.Path, stem: str) -> dict:
     return json.loads((tmp_dir / f"{stem}-monitor.json").read_text(encoding="utf-8"))
 
 
-@pytest.mark.parametrize(("agent", "err", "stdout"), [
-    ("kiro", KIRO_LIMIT, ""),            # AC2
-    ("codex", CLAUDE_429, ""),           # AC3: err.log は全担当
-    ("claude", "", CLAUDE_429),          # AC3: stdout.log は claude だけ
-    ("claude", "", CLAUDE_429_SPACED),   # AC3: 空白の有無を問わない
-    ("agy", "quota exceeded: upgrade", ""),  # AC4
-    ("agy", HTTP_429, ""),               # AC4
-])
+@pytest.mark.parametrize(
+    ("agent", "err", "stdout"),
+    [
+        ("kiro", KIRO_LIMIT, ""),  # AC2
+        ("codex", CLAUDE_429, ""),  # AC3: err.log は全担当
+        ("claude", "", CLAUDE_429),  # AC3: stdout.log は claude だけ
+        ("claude", "", CLAUDE_429_SPACED),  # AC3: 空白の有無を問わない
+        ("agy", "quota exceeded: upgrade", ""),  # AC4
+        ("agy", HTTP_429, ""),  # AC4
+    ],
+)
 def test_usage_limit_stops_the_agent_as_early_error_with_reason_usage_limit(tmp_path, agent, err, stdout):
     stem = _finished(tmp_path, agent, err=err, stdout=stdout)
 
@@ -286,13 +301,16 @@ def test_usage_limit_stops_the_agent_as_early_error_with_reason_usage_limit(tmp_
     assert len(out) == 1 and set(out[0]) == STDOUT_KEYS and out[0]["exit_code"] == 4
 
 
-@pytest.mark.parametrize(("agent", "err"), [
-    ("codex", CODEX_USAGE_LIMIT_PREFIXED),   # AC1
-    ("codex", CODEX_USAGE_LIMIT),            # AC1
-    ("codex", CODEX_RETRY_429),              # AC2
-    ("claude", CLAUDE_WEEKLY),               # AC3
-    ("claude", CLAUDE_SESSION),              # AC3
-])
+@pytest.mark.parametrize(
+    ("agent", "err"),
+    [
+        ("codex", CODEX_USAGE_LIMIT_PREFIXED),  # AC1
+        ("codex", CODEX_USAGE_LIMIT),  # AC1
+        ("codex", CODEX_RETRY_429),  # AC2
+        ("claude", CLAUDE_WEEKLY),  # AC3
+        ("claude", CLAUDE_SESSION),  # AC3
+    ],
+)
 def test_measured_lines_stop_the_agent_with_reason_usage_limit(tmp_path, agent, err):
     """AC1〜AC3: 実測の行で担当が止まり、理由は利用上限、終了コードは 4。"""
     stem = _finished(tmp_path, agent, err=err)
@@ -316,9 +334,7 @@ def test_the_retry_limit_with_another_status_is_not_a_usage_limit(tmp_path):
 
 def test_quoted_measured_lines_do_not_stop_the_agent(tmp_path):
     """AC5: 引用・差分・文の途中に出た実物の文言では止まらない。"""
-    stem = _finished(tmp_path, "codex",
-                     err="\n".join(line for _label, line in NOT_USAGE_LIMIT_LINES),
-                     result=True)
+    stem = _finished(tmp_path, "codex", err="\n".join(line for _label, line in NOT_USAGE_LIMIT_LINES), result=True)
 
     proc = _run_monitor(tmp_path, "codex")
 
@@ -333,8 +349,7 @@ def test_other_fatal_lines_keep_reason_early_error(tmp_path, err):
     proc = _run_monitor(tmp_path, "kiro")
 
     assert proc.returncode == 4, proc.stderr
-    assert (_outcome(tmp_path, stem)["status"], _outcome(tmp_path, stem)["reason"]) == (
-        "EARLY_ERROR", "early_error")
+    assert (_outcome(tmp_path, stem)["status"], _outcome(tmp_path, stem)["reason"]) == ("EARLY_ERROR", "early_error")
 
 
 def test_claude_json_in_kiro_stdout_is_not_seen(tmp_path):
@@ -348,8 +363,7 @@ def test_claude_json_in_kiro_stdout_is_not_seen(tmp_path):
 
 
 def test_quoted_usage_limit_in_err_log_is_not_a_hit(tmp_path):
-    stem = _finished(tmp_path, "kiro", err="\n".join([IN_TABLE, IN_BACKTICKS, IN_QUOTE, IN_GREP]),
-                     result=True)
+    stem = _finished(tmp_path, "kiro", err="\n".join([IN_TABLE, IN_BACKTICKS, IN_QUOTE, IN_GREP]), result=True)
 
     proc = _run_monitor(tmp_path, "kiro")
 
@@ -358,6 +372,7 @@ def test_quoted_usage_limit_in_err_log_is_not_a_hit(tmp_path):
 
 
 # ---------- CLI の上限（AC5） ----------
+
 
 def test_cli_timeout_without_result_is_no_result_with_reason_cli_timeout(tmp_path):
     stem = _finished(tmp_path, "agy", err=AGY_PRINT_TIMEOUT)

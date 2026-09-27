@@ -1,4 +1,5 @@
 """副命令 `init`（新規と再開）（#1142 の C2）。"""
+
 from __future__ import annotations
 
 import argparse
@@ -13,8 +14,15 @@ import assignment  # noqa: E402
 import review_criteria  # noqa: E402
 from classifications import default_max_rounds, review_kind  # noqa: E402
 from review_lib import (  # noqa: E402
-    categories as categories_mod, findings as findings_mod, github, participants as participants_mod, posts,
-    review_focus, store, workspace as workspace_mod)
+    categories as categories_mod,
+    findings as findings_mod,
+    github,
+    participants as participants_mod,
+    posts,
+    review_focus,
+    store,
+    workspace as workspace_mod,
+)
 
 
 class _InitResult(NamedTuple):
@@ -45,11 +53,11 @@ def _print_init_result(result: _InitResult) -> None:
     元の両分岐に合わせて quote しない（数値のため）。
     """
     print(f"PR={result.pr}")
-    print(f'WORKTREE={shlex.quote(str(result.worktree))}')
-    print(f'TMP_DIR={shlex.quote(str(result.tmp_dir))}')
-    print(f'REPO={shlex.quote(str(result.repo))}')
-    print(f'HEAD_BRANCH={shlex.quote(str(result.head_branch))}')
-    print(f'BASE_BRANCH={shlex.quote(str(result.base_branch))}')
+    print(f"WORKTREE={shlex.quote(str(result.worktree))}")
+    print(f"TMP_DIR={shlex.quote(str(result.tmp_dir))}")
+    print(f"REPO={shlex.quote(str(result.repo))}")
+    print(f"HEAD_BRANCH={shlex.quote(str(result.head_branch))}")
+    print(f"BASE_BRANCH={shlex.quote(str(result.base_branch))}")
     print(f"IS_OWN_PR={'1' if result.is_own else '0'}")
     print(f"EVENT_DOWNGRADE={'1' if result.event_downgrade else '0'}")
     print(f"HAS_EXTRA_REVIEW_INSTRUCTIONS={'1' if result.has_extra else '0'}")
@@ -87,7 +95,10 @@ def _rewrite_review_criteria(state_file: pathlib.Path, worktree: object) -> str:
 
 
 def _refresh_resume_state(
-    st: dict[str, Any], pr: object, repo: str, manual_extra_review: str,
+    st: dict[str, Any],
+    pr: object,
+    repo: str,
+    manual_extra_review: str,
     args: argparse.Namespace,
 ) -> bool:
     """再開する state を最新化し、書き換えたかどうかを返す。
@@ -209,8 +220,11 @@ def cmd_init(args: argparse.Namespace) -> None:
     repo = github._repo_from_git() or github._repo_from_resume(pr, args.worktree) or github._repo_from_gh()
     if not repo:
         review_lib.die("リポジトリを決められません（origin の URL・再開の状態ファイル・gh repo view のどれからも求まらない）")
-    worktree = str(pathlib.Path(args.worktree).resolve()) if args.worktree else str(
-        workspace_mod._default_worktree_base() / github._repo_slug(repo) / f"pr{pr}")
+    worktree = (
+        str(pathlib.Path(args.worktree).resolve())
+        if args.worktree
+        else str(workspace_mod._default_worktree_base() / github._repo_slug(repo) / f"pr{pr}")
+    )
 
     # worktree 存在チェック用: _tmp_dir() は mkdir するため、先に呼ぶと
     # worktree ディレクトリが副作用で作成され exists() が常に true になる。
@@ -268,9 +282,7 @@ def _init_new_state(
 ) -> None:
     """新規 init 経路: プリチェック → worktree 作成 → state 構築 → 出力。"""
 
-    def _resolve_pr_and_ownership(
-        pr: object, repo: str, worktree: str, args_worktree: str | None
-    ) -> _InitPRContext | None:
+    def _resolve_pr_and_ownership(pr: object, repo: str, worktree: str, args_worktree: str | None) -> _InitPRContext | None:
         # 新規 init: プリチェック。
         # **作成者・head・base は REST の 1 回でまとめて取る。** 項目ごとに `gh pr view` を
         # 投げていた分（GraphQL 3 点）と、リポジトリ名の解決（同 1 点）が 0 点になる。
@@ -289,7 +301,7 @@ def _init_new_state(
         if not me:
             review_lib.die("認証している利用者を gh api user で求められません")
         author = meta.author
-        is_own = (me == author)
+        is_own = me == author
         event_downgrade = is_own
         if is_own:
             review_lib.info(f"⚠ 自分の PR (author={me}) — REQUEST_CHANGES → COMMENT 強制ダウングレード")
@@ -304,9 +316,7 @@ def _init_new_state(
             event_downgrade=event_downgrade,
         )
 
-    def _prepare_review_instructions(
-        pr: object, repo: str, manual_extra_review: str
-    ) -> _InitReviewContext:
+    def _prepare_review_instructions(pr: object, repo: str, manual_extra_review: str) -> _InitReviewContext:
         changed_files = github._fetch_changed_files(pr, repo)
         auto_review_categories = categories_mod._classify_changed_files(changed_files)
         auto_review = review_focus._auto_review_instructions(auto_review_categories)
@@ -318,9 +328,7 @@ def _init_new_state(
             review_instructions=review_instructions,
         )
 
-    def _prepare_worktree_and_comments(
-        worktree: str, pr: object, head_branch: str, repo: str
-    ) -> _InitWorkspaceContext:
+    def _prepare_worktree_and_comments(worktree: str, pr: object, head_branch: str, repo: str) -> _InitWorkspaceContext:
         # worktree 分離 — _tmp_dir() より先に worktree を作成/確認する
         if not pathlib.Path(worktree).exists():
             workspace_mod._create_worktree(worktree, pr, head_branch)
@@ -365,8 +373,7 @@ def _init_new_state(
         # 使える者の解決は共通層が持つ（#727）。通らない者は外して続け、使える者が
         # 1 者なら同じランタイムの 2 つ目で席を埋める。名前の矛盾と 0 者は終了コード 1。
         participants = participants_mod._resolve_reviewers(host, args)
-        return _InitialAssignment(
-            host=host, host_source=host_source, participants=participants)
+        return _InitialAssignment(host=host, host_source=host_source, participants=participants)
 
     def _build_initial_review_state(
         args: argparse.Namespace,
@@ -425,15 +432,14 @@ def _init_new_state(
         manual_extra_review: str,
     ) -> None:
         initial_assignment = _prepare_initial_assignment(args)
-        context = _InitialStateContext(
-            pr, pr_ctx, review_ctx, ws_ctx, initial_assignment, manual_extra_review
-        )
+        context = _InitialStateContext(pr, pr_ctx, review_ctx, ws_ctx, initial_assignment, manual_extra_review)
         state = _build_initial_review_state(args, context)
-        state["design_doc_oversize"] = categories_mod._warn_oversized_design_docs(
-            pr_ctx.worktree, review_ctx.changed_files)
-        state.update(review_focus._design_stage_fields(
-            state["review_kind"], pr_ctx.worktree, review_ctx.changed_files,
-            review_ctx.review_instructions, manual_extra_review))
+        state["design_doc_oversize"] = categories_mod._warn_oversized_design_docs(pr_ctx.worktree, review_ctx.changed_files)
+        state.update(
+            review_focus._design_stage_fields(
+                state["review_kind"], pr_ctx.worktree, review_ctx.changed_files, review_ctx.review_instructions, manual_extra_review
+            )
+        )
         state["review_criteria"] = _review_criteria(pr_ctx.worktree)
         store._write_state(ws_ctx.state_file, state)
         review_lib.info(f"✅ state 初期化: {ws_ctx.state_file}")
@@ -459,9 +465,5 @@ def _init_new_state(
         return
 
     review_ctx = _prepare_review_instructions(pr, pr_ctx.repo, manual_extra_review)
-    ws_ctx = _prepare_worktree_and_comments(
-        pr_ctx.worktree, pr, pr_ctx.meta.head_branch, pr_ctx.repo
-    )
-    _finalize_initial_state(
-        args, pr, pr_ctx, review_ctx, ws_ctx, manual_extra_review
-    )
+    ws_ctx = _prepare_worktree_and_comments(pr_ctx.worktree, pr, pr_ctx.meta.head_branch, pr_ctx.repo)
+    _finalize_initial_state(args, pr, pr_ctx, review_ctx, ws_ctx, manual_extra_review)

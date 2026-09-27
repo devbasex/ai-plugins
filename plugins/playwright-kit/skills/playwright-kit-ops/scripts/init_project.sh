@@ -88,6 +88,7 @@ echo "[init] ランタイム配置先   : $RUNTIME_DIR"
 [[ $DRY_RUN -eq 1 ]] && echo "[init] (dry-run モード: 実際にはコピーしません)"
 
 # ---------- 必要コマンドチェック ----------
+# shellcheck disable=SC2043  # 要るコマンドを足せる形の一覧で、今は 1 つだけ（#1323）
 for cmd in rsync; do
   command -v "$cmd" >/dev/null 2>&1 || {
     echo "[init] 必要なコマンドが見つかりません: $cmd" >&2

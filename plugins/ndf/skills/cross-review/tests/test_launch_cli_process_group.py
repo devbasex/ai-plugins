@@ -8,6 +8,7 @@
 - AC20: `_kill_pid` で止めて 4 秒待っても結果ファイルが無い
 - AC21: 先頭でない pid では `os.killpg` を呼ばず、pid だけへ送る
 """
+
 from __future__ import annotations
 
 import os
@@ -50,17 +51,18 @@ def launched(tmp_path):
     prompt.write_text("レビューしてください\n", encoding="utf-8")
     stem = tmp_dir / "codex-review-pr7"
     result = tmp_dir / "codex-review-pr7-result.json"
-    env = dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}",
-               NDF_TEST_RESULT_FILE=str(result))
+    env = dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}", NDF_TEST_RESULT_FILE=str(result))
 
     proc = subprocess.run(
         ["bash", str(_LAUNCH_CLI), "codex", str(work), str(prompt), str(stem)],
-        capture_output=True, text=True, env=env, timeout=30,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=30,
     )
     assert proc.returncode == 0, proc.stderr
     # 起動の案内の 1 行だけが出る（ジョブ制御の通知が混ざらない）
-    assert [l for l in proc.stderr.splitlines() if l.strip()] == [
-        l for l in proc.stderr.splitlines() if "launched" in l], proc.stderr
+    assert [l for l in proc.stderr.splitlines() if l.strip()] == [l for l in proc.stderr.splitlines() if "launched" in l], proc.stderr
     pid = int((tmp_dir / "codex-review-pr7.pid").read_text().strip())
     for _ in range(500):
         if (tmp_dir / "codex-review-pr7-result.json.ready").exists():
@@ -92,8 +94,8 @@ def _alive(pid: int) -> bool:
 def test_launched_cli_leads_its_own_process_group(launched):
     pid, _ = launched
     assert _alive(pid)
-    assert os.getpgid(pid) == pid                    # AC19
-    assert os.getpgid(pid) != os.getpgrp()           # 起動元（このテスト）のグループではない
+    assert os.getpgid(pid) == pid  # AC19
+    assert os.getpgid(pid) != os.getpgrp()  # 起動元（このテスト）のグループではない
 
 
 def test_killing_the_group_prevents_the_child_from_writing_the_result(launched, monitor_mod):
@@ -103,7 +105,7 @@ def test_killing_the_group_prevents_the_child_from_writing_the_result(launched, 
     monitor_mod._kill_pid(pid)
     time.sleep(4)
 
-    assert not result.exists()                       # AC20
+    assert not result.exists()  # AC20
     assert not _alive(pid) or monitor_mod._is_zombie(pid)
 
 

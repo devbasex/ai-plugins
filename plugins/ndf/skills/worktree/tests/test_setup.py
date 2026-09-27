@@ -3,6 +3,7 @@
 作業ツリー運用の仕組みは、リポジトリ側に宣言ファイルがあるときだけ動く。
 このスクリプトだけが、宣言が無い状態で意味を持つ。
 """
+
 from __future__ import annotations
 
 import json
@@ -22,7 +23,10 @@ def run(args: list[str], cwd: Path) -> dict:
     env["LC_ALL"] = "C"
     proc = subprocess.run(
         ["bash", str(SETUP), *args],
-        cwd=str(cwd), env=env, capture_output=True, text=True,
+        cwd=str(cwd),
+        env=env,
+        capture_output=True,
+        text=True,
     )
     return {"rc": proc.returncode, "out": proc.stdout, "err": proc.stderr}
 
@@ -63,8 +67,11 @@ def test_init_makes_the_guard_active(main_repo: Path) -> None:
         "tool_input": {"file_path": str(main_repo / "plugins" / "ndf" / "README.md")},
     }
     proc = subprocess.run(
-        ["bash", str(GUARD)], input=json.dumps(payload),
-        cwd=str(main_repo), capture_output=True, text=True,
+        ["bash", str(GUARD)],
+        input=json.dumps(payload),
+        cwd=str(main_repo),
+        capture_output=True,
+        text=True,
     )
     assert "plugins/ndf/README.md" in proc.stdout, proc.stdout
 
@@ -420,7 +427,7 @@ def test_check_does_not_query_origin(main_repo: Path) -> None:
 def test_status_and_check_share_the_state(main_repo: Path) -> None:
     """受け入れ条件 3 / 10: status は check と同じ関数から状態を得る。"""
     body = SETUP.read_text(encoding="utf-8")
-    status = body[body.index("do_status() {"):]
+    status = body[body.index("do_status() {") :]
     status = status[: status.index("\n}\n")]
     assert "wt_declaration_state" in status, "status が状態の関数を呼んでいない"
     assert "wt_declaration " not in status, "status に独自の分岐が残っている"
@@ -461,6 +468,7 @@ def test_status_lines_are_unchanged_for_the_three_states(main_repo: Path) -> Non
 
 def test_declaration_state_function(main_repo: Path) -> None:
     """wt_declaration_state は 3 語のいずれかを出し、引数が空なら 1 を返す。"""
+
     def state() -> str:
         got = run_lib(f'wt_declaration_state "{main_repo}"')
         assert got.returncode == 0, got.stderr
@@ -504,7 +512,8 @@ def test_declaration_state_absent_for_a_nonexistent_path() -> None:
 
 
 def test_declaration_state_present_for_a_symlink_to_a_readable_declaration(
-    main_repo: Path, tmp_path: Path,
+    main_repo: Path,
+    tmp_path: Path,
 ) -> None:
     """現状固定: 読める宣言を指す symlink は、たどった先を読んで present と判定する。"""
     target = tmp_path / "outside.json"
@@ -524,16 +533,24 @@ def test_hooks_stay_silent_without_a_declaration(main_repo: Path) -> None:
     """受け入れ条件 7: 宣言が無ければ、2 つの hook は何も出さず 0 で終わる。"""
     cases = [
         (SESSION, {"session_id": "s527", "cwd": str(main_repo), "hook_event_name": "SessionStart"}),
-        (GUARD, {
-            "session_id": "s527", "cwd": str(main_repo), "hook_event_name": "PreToolUse",
-            "tool_name": "Write",
-            "tool_input": {"file_path": str(main_repo / "src" / "a.py"), "content": "x"},
-        }),
+        (
+            GUARD,
+            {
+                "session_id": "s527",
+                "cwd": str(main_repo),
+                "hook_event_name": "PreToolUse",
+                "tool_name": "Write",
+                "tool_input": {"file_path": str(main_repo / "src" / "a.py"), "content": "x"},
+            },
+        ),
     ]
     for script, payload in cases:
         proc = subprocess.run(
-            ["bash", str(script)], input=json.dumps(payload),
-            cwd=str(main_repo), capture_output=True, text=True,
+            ["bash", str(script)],
+            input=json.dumps(payload),
+            cwd=str(main_repo),
+            capture_output=True,
+            text=True,
         )
         assert proc.returncode == 0, (script.name, proc.stderr)
         assert proc.stdout == "", (script.name, proc.stdout)
@@ -726,13 +743,9 @@ def test_status_and_check_are_unchanged_for_unreadable_forms(main_repo: Path, fo
 # --- 個人の宣言の報告と追跡からの除外（#495 の AC19、AC21〜AC26） -------------
 
 LOCAL_PRESENT_LINE = "個人の宣言: あり（.ndf/worktree.local.json）"
-LOCAL_UNREADABLE_LINE = (
-    "個人の宣言: 読めません（版が未対応か、JSON として壊れています。共有の宣言だけで動きます）"
-)
+LOCAL_UNREADABLE_LINE = "個人の宣言: 読めません（版が未対応か、JSON として壊れています。共有の宣言だけで動きます）"
 LOCAL_UNUSED_LINE = "個人の宣言: 使っていません（共有の宣言ファイルが無いか、読めません）"
-LOCAL_REGISTER_LINE = (
-    "個人の宣言の登録: なし。.ndf/.gitignore へ worktree.local.json を足してください"
-)
+LOCAL_REGISTER_LINE = "個人の宣言の登録: なし。.ndf/.gitignore へ worktree.local.json を足してください"
 
 LOCAL_BROKEN_FORMS = ["broken_json", "empty", "top_level_array", "unsupported_version", "directory"]
 
@@ -875,7 +888,9 @@ def test_init_creates_the_ndf_gitignore(main_repo: Path) -> None:
 def ignored(repo: Path, path: str) -> int:
     return subprocess.run(
         ["git", "check-ignore", "-q", path],
-        cwd=str(repo), capture_output=True, text=True,
+        cwd=str(repo),
+        capture_output=True,
+        text=True,
     ).returncode
 
 

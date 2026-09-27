@@ -24,6 +24,7 @@
 
     python3 scripts/check-doc-staleness.py --root .
 """
+
 from __future__ import annotations
 
 import argparse
@@ -66,6 +67,7 @@ PLUGIN_README_RUNTIMES = {
     "agy": "agy",
 }
 
+
 def runtime_alternation(labels: dict[str, str]) -> str:
     """対応表のキーから、ランタイム名を拾う正規表現の選択肢を作る。
 
@@ -93,9 +95,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 try:
     from version_pattern import VERSION, VERSION_VALUE
 except ImportError as exc:  # pragma: no cover - 読み込めないこと自体がチェックの前提の崩れ
-    raise SystemExit(
-        f"版数の書式を読み込めない（scripts/lib/version_pattern.py）: {exc}"
-    )
+    raise SystemExit(f"版数の書式を読み込めない（scripts/lib/version_pattern.py）: {exc}")
 from ndf_wrappers import require  # noqa: E402  根の lock で包みの依存を解決する（#1142 の決定 19）
 
 require("md", "versions")
@@ -133,9 +133,7 @@ SECTION_VERSION = re.compile(r"`v?" + VERSION + r"`")
 # 比べる相手は現行版ではなく同じ章の例である。`develop` の版は接尾辞付きになりうるため、
 # 現行版との一致を求めると開発版の配布のたびに正しい例が落ちる。正式版の行を現行版へ結び
 # 付けるのは、上の節の規則（基底が現行版より小さければ落ちる）が持つ。
-VERSION_FORM_ROW = re.compile(
-    r"^\|\s*(?P<label>正式版|開発版|公開前の確認版)\s*\|\s*`v?" + VERSION + r"`\s*\|"
-)
+VERSION_FORM_ROW = re.compile(r"^\|\s*(?P<label>正式版|開発版|公開前の確認版)\s*\|\s*`v?" + VERSION + r"`\s*\|")
 NEXT_DEVELOPMENT = re.compile(r"`v?" + VERSION + r"`\s*の次を開発するなら\s*`v?" + VERSION + r"`")
 # 表の行の語ごとに、版数が終わるべき接尾辞の形。`None` は接尾辞を持たないことを求める。
 VERSION_FORM_SUFFIX: dict[str, tuple[re.Pattern[str] | None, str]] = {
@@ -279,8 +277,7 @@ def verify(claim: Claim, report: Report) -> None:
     if not claim.described:
         report.add(
             claim.path,
-            f"{claim.subject}を読み取れない"
-            f"（`{claim.wording}` の形で書く。{claim.source}: {claim.expected}）",
+            f"{claim.subject}を読み取れない（`{claim.wording}` の形で書く。{claim.source}: {claim.expected}）",
         )
         return
     if claim.expected is None:
@@ -289,8 +286,7 @@ def verify(claim: Claim, report: Report) -> None:
         if value != claim.expected:
             report.add(
                 claim.path,
-                f"{claim.subject}が食い違う"
-                f"（記載: {value}{location_of(claim, index)} / {claim.source}: {claim.expected}）",
+                f"{claim.subject}が食い違う（記載: {value}{location_of(claim, index)} / {claim.source}: {claim.expected}）",
             )
 
 
@@ -306,11 +302,7 @@ def manifest_skill_count(root: Path, runtime: str, report: Report) -> int | None
     if not manifest.is_file():
         report.add_source(f"{manifest_path(runtime)} が無い（{runtime} の配布 Skill 数を数える相手）")
         return None
-    return sum(
-        1
-        for line in manifest.read_text(encoding="utf-8").splitlines()
-        if line.split("#", 1)[0].strip()
-    )
+    return sum(1 for line in manifest.read_text(encoding="utf-8").splitlines() if line.split("#", 1)[0].strip())
 
 
 def skill_dir_count(root: Path, relative: str, report: Report) -> int | None:
@@ -345,10 +337,7 @@ def plugin_version(root: Path, report: Report) -> str | None:
         return None
     # `\d` は全角の数字にも当たるため、版として読めるか（lib/versions.py）も見る
     if not VERSION_VALUE.fullmatch(version) or versions.version_order(version.partition("-")[0]) is None:
-        report.add_source(
-            f"{PLUGIN_JSON} の version が `<major>.<minor>.<patch>` の形でない"
-            f"（記載: {version}）"
-        )
+        report.add_source(f"{PLUGIN_JSON} の version が `<major>.<minor>.<patch>` の形でない（記載: {version}）")
         return None
     return version
 
@@ -501,8 +490,7 @@ def check_plugin_table(root: Path, body: str, report: Report) -> None:
     if not any(name == FAMILY for name, _, _ in rows):
         report.add(
             ROOT_README,
-            f"プラグイン一覧表の {FAMILY} の版数を読み取れない"
-            f"（`| **{FAMILY}** | <版> | ... |` の形で書く。{PLUGIN_JSON} と突き合わせる）",
+            f"プラグイン一覧表の {FAMILY} の版数を読み取れない（`| **{FAMILY}** | <版> | ... |` の形で書く。{PLUGIN_JSON} と突き合わせる）",
         )
     for name, value, number in rows:
         compare_plugin_table_row(root, name, value, number, report)
@@ -558,9 +546,7 @@ def check_version_section(body: str, version: str | None, report: Report) -> boo
     if not values:
         report.add(
             VERSIONING_MD,
-            "版の付け方の節の版数を読み取れない"
-            f"（`{VERSION_SECTION_HEADING}` の節へ版数の例を囲みで置く。"
-            f"{PLUGIN_JSON}: {version}）",
+            f"版の付け方の節の版数を読み取れない（`{VERSION_SECTION_HEADING}` の節へ版数の例を囲みで置く。{PLUGIN_JSON}: {version}）",
         )
         return False
     if version is None:
@@ -570,8 +556,7 @@ def check_version_section(body: str, version: str | None, report: Report) -> boo
         if base_of(value) < current:
             report.add(
                 VERSIONING_MD,
-                "版の付け方の節の版数が現行版より古い"
-                f"（記載: {value}（L{number}） / {PLUGIN_JSON}: {version}）",
+                f"版の付け方の節の版数が現行版より古い（記載: {value}（L{number}） / {PLUGIN_JSON}: {version}）",
             )
     return True
 
@@ -599,8 +584,7 @@ def check_version_form_rows_presence(rows: dict[str, list[tuple[str, int]]], rep
         if not found_rows:
             report.add(
                 VERSIONING_MD,
-                f"版の付け方の節の版の形の表を読み取れない（無い行: {label}。"
-                f"| {label} | `<版>` | ... | の形で書く）",
+                f"版の付け方の節の版の形の表を読み取れない（無い行: {label}。| {label} | `<版>` | ... | の形で書く）",
             )
         elif len(found_rows) > 1:
             numbers = ", ".join(f"L{number}" for _, number in found_rows)
@@ -615,8 +599,7 @@ def check_version_form_row_suffixes(rows: dict[str, list[tuple[str, int]]], repo
             if ("-" in value) if suffix is None else not suffix.search(value):
                 report.add(
                     VERSIONING_MD,
-                    f"版の付け方の節の{label}の行の接尾辞が違う"
-                    f"（記載: {value}（L{number}） / 求める形: {wording}）",
+                    f"版の付け方の節の{label}の行の接尾辞が違う（記載: {value}（L{number}） / 求める形: {wording}）",
                 )
 
 
@@ -642,8 +625,7 @@ def check_next_development_examples(examples: list[tuple[str, str, int]], report
     if not examples:
         report.add(
             VERSIONING_MD,
-            "版の付け方の節の次の開発の例を読み取れない"
-            "（`<版>` の次を開発するなら `<版>-dev.<連番>` の形で書く）",
+            "版の付け方の節の次の開発の例を読み取れない（`<版>` の次を開発するなら `<版>-dev.<連番>` の形で書く）",
         )
     for left, right, number in examples:
         if base_of(right) <= base_of(left) or not DEV_SUFFIX.search(right):
@@ -739,8 +721,7 @@ def check_category_breakdown(body: str, total: int | None, source: str, report: 
         if declared != len(listed):
             report.add(
                 ROOT_README,
-                f"カテゴリ内訳「{label}」の数が、並ぶ Skill 名の数と食い違う"
-                f"（宣言: {declared} / 並ぶ名前: {len(listed)}）",
+                f"カテゴリ内訳「{label}」の数が、並ぶ Skill 名の数と食い違う（宣言: {declared} / 並ぶ名前: {len(listed)}）",
             )
     verify(
         Claim(
@@ -801,8 +782,7 @@ def check_upgrade_heading(body: str, version: str | None, report: Report) -> Non
     if len(headings) > 1:
         report.add(
             PLUGIN_README,
-            f"更新案内の見出しが {len(headings)} 個ある（v{' / v'.join(headings)}）。"
-            "この節は現行の版の 1 つだけにする",
+            f"更新案内の見出しが {len(headings)} 個ある（v{' / v'.join(headings)}）。この節は現行の版の 1 つだけにする",
         )
         return
     if version is not None and headings[0] != version:
@@ -819,10 +799,7 @@ def main() -> int:
     root = Path(args.root).resolve()
 
     report = Report()
-    counts = {
-        runtime: manifest_skill_count(root, runtime, report)
-        for runtime in ("claude", "codex", "kiro", "agy")
-    }
+    counts = {runtime: manifest_skill_count(root, runtime, report) for runtime in ("claude", "codex", "kiro", "agy")}
     skills = skill_dir_count(root, SKILLS_DIR, report)
     version = plugin_version(root, report)
 

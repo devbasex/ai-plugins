@@ -1,4 +1,5 @@
 """副命令 `read-result`（#1142 の C2）。"""
+
 from __future__ import annotations
 
 import argparse
@@ -13,7 +14,10 @@ from review_lib import posts, store  # noqa: E402
 
 
 def _record_no_result(
-    pr: int, agent: str, reason: str, monitor_detail: str | None = None,
+    pr: int,
+    agent: str,
+    reason: str,
+    monitor_detail: str | None = None,
 ) -> None:
     """使える結果が残らなかったことを、そのラウンドへ残す。
 
@@ -63,8 +67,7 @@ def _read_review_result_file(pr: int, agent: str, rfile: pathlib.Path) -> dict[s
     である（読めない結果は 3、それ以外は 1。変更前と同じ）。理由の語彙も起動し直しの可否も
     ここには置かない。
     """
-    outcome = monitor_outcome.read_launch_outcome(
-        store._resolve_tmp_dir(pr), f"{agent}-review-pr{pr}", rfile)
+    outcome = monitor_outcome.read_launch_outcome(store._resolve_tmp_dir(pr), f"{agent}-review-pr{pr}", rfile)
     if outcome.payload is not None:
         return outcome.payload
     reason = outcome.reason or "missing"
@@ -75,8 +78,7 @@ def _read_review_result_file(pr: int, agent: str, rfile: pathlib.Path) -> dict[s
     if reason == "unparsable":
         # 結果ファイルはあるが JSON の dict として parse できない。launcher の出力形式不正
         review_lib.die(
-            f"{agent}: result.json の parse に失敗、または dict ではない ({rfile}):"
-            f" {outcome.detail}",
+            f"{agent}: result.json の parse に失敗、または dict ではない ({rfile}): {outcome.detail}",
             code=3,
         )
     review_lib.die(f"{agent}: 使える結果が無い (reason={reason}, {rfile}): {outcome.detail}")
@@ -100,10 +102,7 @@ def _has_evidence(finding: dict[str, Any]) -> bool:
     片方だけでは、別の担当がその指摘を確かめられない。根拠は「何がそう言えるか」で、
     反証条件は「何が成り立てば棄却できるか」である。
     """
-    return all(
-        str(finding.get(key) or "").strip()
-        for key in ("evidence", "falsification")
-    )
+    return all(str(finding.get(key) or "").strip() for key in ("evidence", "falsification"))
 
 
 def _load_payload(agent: str, path: pathlib.Path) -> list[dict[str, Any]] | None:
@@ -111,33 +110,36 @@ def _load_payload(agent: str, path: pathlib.Path) -> list[dict[str, Any]] | None
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as exc:
-        review_lib.info(f"⚠ {agent}: payload.json を読めません（{path}: {exc}）。"
-             "指摘の記録は 0 件です")
+        review_lib.info(f"⚠ {agent}: payload.json を読めません（{path}: {exc}）。指摘の記録は 0 件です")
         return None
     if not isinstance(payload, dict):
         # 実測: dict 以外（`[]` / `null` / 文字列 / 数値）を渡すと
         # `payload.get(...)` が AttributeError で落ち、取り込みが例外で終わっていた。
-        review_lib.info(f"⚠ {agent}: payload.json が dict ではありません"
-             f"（{path}, type={type(payload).__name__}）。指摘の記録は 0 件です。"
-             " review launcher の出力形式不正で、判定は中断します")
+        review_lib.info(
+            f"⚠ {agent}: payload.json が dict ではありません"
+            f"（{path}, type={type(payload).__name__}）。指摘の記録は 0 件です。"
+            " review launcher の出力形式不正で、判定は中断します"
+        )
         return None
     raw = payload.get("comments")
     if not isinstance(raw, list):
-        review_lib.info(f"⚠ {agent}: payload.comments が list ではありません"
-             f"（{path}, type={type(raw).__name__}）。指摘の記録は 0 件です。"
-             " review launcher の出力形式不正で、判定は中断します")
+        review_lib.info(
+            f"⚠ {agent}: payload.comments が list ではありません"
+            f"（{path}, type={type(raw).__name__}）。指摘の記録は 0 件です。"
+            " review launcher の出力形式不正で、判定は中断します"
+        )
         return None
     items = [c for c in raw if isinstance(c, dict)]
     if len(items) != len(raw):
-        review_lib.info(f"⚠ {agent}: payload.comments に dict でないエントリが"
-             f" {len(raw) - len(items)} 件あります（{path}）。"
-             "その分を除いて記録します。判定は中断します")
+        review_lib.info(
+            f"⚠ {agent}: payload.comments に dict でないエントリが"
+            f" {len(raw) - len(items)} 件あります（{path}）。"
+            "その分を除いて記録します。判定は中断します"
+        )
     return items
 
 
-def _collect_review_findings(
-    st: dict[str, Any], agent: str, pr: int, round_no: int
-) -> int:
+def _collect_review_findings(st: dict[str, Any], agent: str, pr: int, round_no: int) -> int:
     """その担当の `payload.json` を読み、`review_findings[]` へ積む。
 
     **`comments[]` は投稿の複製ではなく、その担当が出した指摘の全件である**（#156）。
@@ -167,21 +169,21 @@ def _collect_review_findings(
     # （実測: 3 回の実行で 1 件が 3 件になった）。
     # **落とすのは、書き込む中身が確定した後である。** 読めなかったときに先へ落とすと、
     # 一度取り込めていた記録を、再実行の失敗が消してしまう。
-    findings[:] = [
-        f for f in findings
-        if not (f.get("pr") == pr and f.get("round") == round_no
-                and f.get("agent") == agent)
-    ]
+    findings[:] = [f for f in findings if not (f.get("pr") == pr and f.get("round") == round_no and f.get("agent") == agent)]
     for index, item in enumerate(items):
         finding = {**_FINDING_DEFAULTS, **item}
-        finding.update({
-            # **識別子は取り込みの時点で採番する**（#156）。統合・反証・実行検証の記録が、
-            # どの指摘を指すかをこの値で結ぶ。担当とラウンドを含めるため、別の担当が
-            # 同じ索引を持っても衝突しない。
-            "finding_id": f"{agent}-r{round_no}-{index}",
-            "pr": pr, "round": round_no, "agent": agent,
-            "has_evidence": _has_evidence(finding),
-        })
+        finding.update(
+            {
+                # **識別子は取り込みの時点で採番する**（#156）。統合・反証・実行検証の記録が、
+                # どの指摘を指すかをこの値で結ぶ。担当とラウンドを含めるため、別の担当が
+                # 同じ索引を持っても衝突しない。
+                "finding_id": f"{agent}-r{round_no}-{index}",
+                "pr": pr,
+                "round": round_no,
+                "agent": agent,
+                "has_evidence": _has_evidence(finding),
+            }
+        )
         findings.append(finding)
     return len(items)
 
@@ -244,16 +246,12 @@ def cmd_read_result(args: argparse.Namespace) -> None:
     store._save(pr, st)
     if posted.review_url:
         print(f"POSTED review_url={posted.review_url}")
-    print(f"INLINE={posted.posted_inline} BODY={posted.posted_body}"
-          f" QUEUED={posted.queued}")
+    print(f"INLINE={posted.posted_inline} BODY={posted.posted_body} QUEUED={posted.queued}")
     print(f"FINDINGS={collected}")
-    review_lib.info(f"✅ {agent}: intent={posted.intent} posted_as={posted.posted_as}"
-         f" comments={posted.posted_inline}")
+    review_lib.info(f"✅ {agent}: intent={posted.intent} posted_as={posted.posted_as} comments={posted.posted_inline}")
 
 
-def _validate_review_result(
-    pr: int, agent: str, rfile: pathlib.Path
-) -> dict[str, Any]:
+def _validate_review_result(pr: int, agent: str, rfile: pathlib.Path) -> dict[str, Any]:
     """結果ファイルを読み、`event` / `intent` を検証して中身を返す。
 
     判定の値を持たないときは `NO_RESULT` をラウンドへ残してから止める（終了コードは
@@ -266,8 +264,7 @@ def _validate_review_result(
             pr,
             agent,
             "no_verdict",
-            f"{agent}: result.json に event / intent フィールドが無い ({rfile})。"
-            " launcher prompt のスキーマ違反の可能性。",
+            f"{agent}: result.json に event / intent フィールドが無い ({rfile})。 launcher prompt のスキーマ違反の可能性。",
         )
     return r
 

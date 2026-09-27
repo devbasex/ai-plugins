@@ -23,6 +23,7 @@ LLM を呼ばない。入力は supervise.py queue の done の JSON と各計�
 計画の種類は 実装・開発版・本番（ほかの語もそのまま使える）。done を登録しなければ、計画の
 状態ディレクトリ（`<計画>-state/queue-done.json`）を探す。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -150,7 +151,7 @@ def mvv_sections(text: str) -> str | None:
     for s in md.md_sections(text):
         m = re.match(r"(Mission|Vision|Value)\b", s.heading.title)
         if s.heading.level == 2 and m and lines[s.heading.line].startswith("## "):
-            found.setdefault(m.group(1), "\n".join(lines[s.heading.line:s.end]).strip())
+            found.setdefault(m.group(1), "\n".join(lines[s.heading.line : s.end]).strip())
     if any(k not in found for k in MVV_SECTIONS):
         return None
     return "\n\n".join(found[k] for k in MVV_SECTIONS) + "\n"
@@ -175,15 +176,17 @@ def init_mvv(a) -> tuple[dict | None, dict | None]:
             return None, outcome("stopped", f"MVV のファイルが無い: {a.mvv}", exit=EXIT_PRECONDITION)
         return {"path": str(path), "sha256": sha256_of(path)}, None
     if not a.milestone:
-        return None, outcome("stopped", "--pace fast には --milestone（MVV の複製元）か --mvv が要る",
-                            exit=EXIT_UNREADABLE)
+        return None, outcome("stopped", "--pace fast には --milestone（MVV の複製元）か --mvv が要る", exit=EXIT_UNREADABLE)
     try:
         text = mvv_sections(milestone_description(a.milestone, a.repo))
     except (OSError, FileNotFoundError) as e:
         return None, outcome("stopped", f"マイルストーン {a.milestone} の説明を読めない: {e}", exit=EXIT_PRECONDITION)
     if text is None:
-        return None, outcome("stopped", f"マイルストーン {a.milestone} の説明に ## Mission / ## Vision / ## Value の"
-                            "見出しがそろっていない。説明を直してから打ち直す", exit=EXIT_PRECONDITION)
+        return None, outcome(
+            "stopped",
+            f"マイルストーン {a.milestone} の説明に ## Mission / ## Vision / ## Value の見出しがそろっていない。説明を直してから打ち直す",
+            exit=EXIT_PRECONDITION,
+        )
     path = Path(a.mission).resolve().parent / "mvv.md"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
@@ -193,9 +196,11 @@ def init_mvv(a) -> tuple[dict | None, dict | None]:
 def cmd_init(a) -> dict:
     why = other_shape(a.mission)
     if why:
-        return outcome("stopped", f"別の形の JSON があるため上書きしない（{why}）: {a.mission}。"
-                      " 状態のファイルは別の名前か別の場所に置く",
-                      metrics={"path": a.mission, "reason": why})
+        return outcome(
+            "stopped",
+            f"別の形の JSON があるため上書きしない（{why}）: {a.mission}。 状態のファイルは別の名前か別の場所に置く",
+            metrics={"path": a.mission, "reason": why},
+        )
     mvv, stop = init_mvv(a)
     if stop:
         return stop
@@ -203,21 +208,29 @@ def cmd_init(a) -> dict:
     if goal.startswith("@"):
         goal = Path(goal[1:]).read_text().rstrip("\n")
     m = {
-        "name": a.name, "milestone": a.milestone or "", "issues": a.issue or [],
+        "name": a.name,
+        "milestone": a.milestone or "",
+        "issues": a.issue or [],
         "versions": {"dev": a.dev or "", "prod": a.prod or ""},
-        "plans": [], "done": list(a.done or []), "gates": [], "goal_template": goal, "pace": a.pace,
+        "plans": [],
+        "done": list(a.done or []),
+        "gates": [],
+        "goal_template": goal,
+        "pace": a.pace,
     }
     if mvv:
         m["mvv"] = mvv
     for text in a.plan or []:
         kind, plan = parse_pair(text, "--plan")
         issues = plan_issues(plan)
-        m["plans"].append({"kind": kind, "plan": plan, "issues": issues,
-                           "label": default_label(kind, issues, m), "next": ""})
+        m["plans"].append({"kind": kind, "plan": plan, "issues": issues, "label": default_label(kind, issues, m), "next": ""})
     jsonio.write_atomic(a.mission, m, indent=1)
-    return outcome("ok", f"ミッション {a.name} を書いた（計画 {len(m['plans'])} 本）: {a.mission}",
-                  [{"plan": p["plan"], "kind": p["kind"]} for p in m["plans"]],
-                  {"plans": len(m["plans"]), "done": len(m["done"])})
+    return outcome(
+        "ok",
+        f"ミッション {a.name} を書いた（計画 {len(m['plans'])} 本）: {a.mission}",
+        [{"plan": p["plan"], "kind": p["kind"]} for p in m["plans"]],
+        {"plans": len(m["plans"]), "done": len(m["done"])},
+    )
 
 
 def done_items(m: dict) -> dict[str, dict]:
@@ -269,8 +282,7 @@ def cmd_update(a) -> dict:
         if plan not in known:
             issues = plan_issues(plan)
             kind = plan_kind(plan)
-            m["plans"].append({"kind": kind, "plan": plan, "issues": issues,
-                               "label": default_label(kind, issues, m), "next": ""})
+            m["plans"].append({"kind": kind, "plan": plan, "issues": issues, "label": default_label(kind, issues, m), "next": ""})
     for p in m["plans"]:
         if p["plan"] in nexts:
             p["next"] = nexts[p["plan"]]
@@ -281,8 +293,12 @@ def cmd_update(a) -> dict:
     rows = [{"plan": p["plan"], **p["row"]} for p in m["plans"]]
     finished = sum(1 for r in rows if r["result"] != NOT_DONE)
     stopped = sum(1 for r in rows if r["result"] not in (NOT_DONE, "完了"))
-    return outcome("ok", f"計画 {len(rows)} 本: 終わった {finished} / 完了でない {stopped}", rows,
-                  {"plans": len(rows), "finished": finished, "stopped": stopped})
+    return outcome(
+        "ok",
+        f"計画 {len(rows)} 本: 終わった {finished} / 完了でない {stopped}",
+        rows,
+        {"plans": len(rows), "finished": finished, "stopped": stopped},
+    )
 
 
 def cmd_gate(a) -> dict:
@@ -301,8 +317,7 @@ def cmd_gate(a) -> dict:
             reasons = json.loads(a.reasons or "[]")
         except ValueError:
             return outcome("stopped", f"--reasons は JSON の配列で渡す: {a.reasons}", exit=EXIT_UNREADABLE)
-        entry.update(by="mvv", verdict=a.verdict, reasons=reasons if isinstance(reasons, list) else [reasons],
-                     log=a.log or "")
+        entry.update(by="mvv", verdict=a.verdict, reasons=reasons if isinstance(reasons, list) else [reasons], log=a.log or "")
     gates = [g for g in m.get("gates", []) if g.get("name") != a.name]
     gates.append(entry)
     m["gates"] = gates
@@ -349,8 +364,19 @@ def section_body(m: dict) -> str:
     rows = []
     for p in m.get("plans", []):
         r = row_of(p)
-        rows.append([x or "—" for x in (p.get("label") or p["plan"], state_text(r), r.get("pr"),
-                                        fmt_seconds(r.get("seconds")), fmt_cost(r.get("cost")), p.get("next"))])
+        rows.append(
+            [
+                x or "—"
+                for x in (
+                    p.get("label") or p["plan"],
+                    state_text(r),
+                    r.get("pr"),
+                    fmt_seconds(r.get("seconds")),
+                    fmt_cost(r.get("cost")),
+                    p.get("next"),
+                )
+            ]
+        )
     lines = ["", mdtable.table_markdown(TABLE_HEAD, rows, align=TABLE_ALIGN), ""]
     head = f"- ミッション: {m.get('name', '')}"
     if m.get("milestone"):
@@ -385,7 +411,7 @@ def find_section(text: str, word: str) -> tuple[int, int, int, str] | None:
     for k, h in enumerate(atx):
         if word not in lines[h.line].rstrip("\r\n"):
             continue
-        end = next((o.line for o in atx[k + 1:] if o.level <= h.level), None)
+        end = next((o.line for o in atx[k + 1 :] if o.level <= h.level), None)
         return offsets[h.line], offsets[h.line + 1], len(text) if end is None else offsets[end], lines[h.line]
     return None
 
@@ -406,7 +432,7 @@ def cmd_render(a) -> dict:
         if not a.heading:
             return outcome("stopped", "--demote には新しい見出し（--heading）が要る")
         hashes = re.match(r"^#+", head_line).group(0)
-        eol = head_line[len(head_line.rstrip("\r\n")):] or "\n"
+        eol = head_line[len(head_line.rstrip("\r\n")) :] or "\n"
         old_head = head_line.replace(a.section, a.demote, 1)
         new = f"{hashes} {a.heading}{eol}{body}"
         out = text[:head_start] + new + old_head + text[body_start:]
@@ -416,8 +442,7 @@ def cmd_render(a) -> dict:
         summary = f"節「{heading_text(head_line)}」の本文を置き換えた"
     if out != text:
         Path(a.doc).write_text(out)
-    return outcome("ok", summary, [{"doc": a.doc, "changed": out != text}],
-                  {"plans": len(m.get("plans", [])), "bytes": len(body.encode())})
+    return outcome("ok", summary, [{"doc": a.doc, "changed": out != text}], {"plans": len(m.get("plans", [])), "bytes": len(body.encode())})
 
 
 def status_lines(m: dict) -> list[str]:
@@ -427,8 +452,15 @@ def status_lines(m: dict) -> list[str]:
     out = [head]
     for p in m.get("plans", []):
         r = row_of(p)
-        extra = "・".join(x for x in (r.get("pr"), (f"{fmt_seconds(r['seconds'])} 秒" if r.get("seconds") is not None
-                                                  else ""), (fmt_cost(r["cost"]) if r.get("cost") is not None else "")) if x)
+        extra = "・".join(
+            x
+            for x in (
+                r.get("pr"),
+                (f"{fmt_seconds(r['seconds'])} 秒" if r.get("seconds") is not None else ""),
+                (fmt_cost(r["cost"]) if r.get("cost") is not None else ""),
+            )
+            if x
+        )
         state = state_text(r) + (f"（{extra}）" if extra else "")
         out.append(f"{p.get('label') or p['plan']}: {state}。次: {p.get('next') or '—'}")
     for g in m.get("gates", []):
@@ -452,9 +484,14 @@ class Blank(dict):
 
 def next_block(m: dict, heading: str) -> str:
     v = m.get("versions", {})
-    values = Blank(name=m.get("name", ""), milestone=m.get("milestone", ""), heading=heading,
-                   dev=v.get("dev", ""), prod=v.get("prod", ""),
-                   issues=" ".join(f"#{i}" for i in m.get("issues", [])))
+    values = Blank(
+        name=m.get("name", ""),
+        milestone=m.get("milestone", ""),
+        heading=heading,
+        dev=v.get("dev", ""),
+        prod=v.get("prod", ""),
+        issues=" ".join(f"#{i}" for i in m.get("issues", [])),
+    )
     body = (m.get("goal_template") or "").format_map(values).strip("\n")
     return f"```ndf-next\n{body}\n```\n"
 
@@ -487,8 +524,9 @@ def cmd_next(a) -> dict | None:
     out = text[:body_start] + "\n" + block + tail + text[body_end:]
     if out != text:
         Path(a.doc).write_text(out)
-    return outcome("ok", f"節「{heading_text(head_line)}」を ndf-next の囲みで置き換えた", [block],
-                  {"heading": heading, "changed": out != text})
+    return outcome(
+        "ok", f"節「{heading_text(head_line)}」を ndf-next の囲みで置き換えた", [block], {"heading": heading, "changed": out != text}
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -539,16 +577,16 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("mission")
     s.add_argument("--doc")
     s.add_argument("--section", default=SECTION_DEFAULT, help="現在地の見出しを読む節")
-    s.add_argument("--replace", nargs="?", const=NEXT_SECTION_DEFAULT,
-                   help=f"引継ぎ文書のこの語の節を置き換える（既定 {NEXT_SECTION_DEFAULT}）")
+    s.add_argument(
+        "--replace", nargs="?", const=NEXT_SECTION_DEFAULT, help=f"引継ぎ文書のこの語の節を置き換える（既定 {NEXT_SECTION_DEFAULT}）"
+    )
     s.add_argument("--json", action="store_true")
     return ap
 
 
 def main(argv: list[str] | None = None) -> int:
     a = build_parser().parse_args(argv)
-    fn = {"init": cmd_init, "update": cmd_update, "gate": cmd_gate, "render": cmd_render,
-          "status": cmd_status, "next": cmd_next}[a.cmd]
+    fn = {"init": cmd_init, "update": cmd_update, "gate": cmd_gate, "render": cmd_render, "status": cmd_status, "next": cmd_next}[a.cmd]
     try:
         out = fn(a)
     except (OSError, ValueError) as e:

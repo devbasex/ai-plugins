@@ -2,6 +2,7 @@
 
 `engine` を import するのはこのモジュールだけである。
 """
+
 from __future__ import annotations
 
 import json
@@ -28,30 +29,36 @@ def sync_check(root: str, commit: bool, checks: list[tuple[str, str]] | None = N
         except DeclError as e:
             return result("supervise-sync-check", "stopped", str(e), [], {"failed": 0, "changed": 0})
     if not checks:
-        return result("supervise-sync-check", "stopped",
-                      f"同期とチェックの宣言が無い（{root}/.ndf/{SUPERVISE_DECL} の sync_checks）", [],
-                      {"failed": 0, "changed": 0})
+        return result(
+            "supervise-sync-check",
+            "stopped",
+            f"同期とチェックの宣言が無い（{root}/.ndf/{SUPERVISE_DECL} の sync_checks）",
+            [],
+            {"failed": 0, "changed": 0},
+        )
     items, failed = [], []
     for name, cmd in checks:
         p = subprocess.run(cmd, shell=True, cwd=root, capture_output=True, text=True)
         out = (p.stdout + p.stderr).strip()
-        items.append({"name": name, "result": "ok" if p.returncode == 0 else "failed", "exit": p.returncode,
-                      "tail": out[-1500:] if p.returncode else ""})
+        items.append(
+            {
+                "name": name,
+                "result": "ok" if p.returncode == 0 else "failed",
+                "exit": p.returncode,
+                "tail": out[-1500:] if p.returncode else "",
+            }
+        )
         if p.returncode:
             failed.append(name)
-    changed = subprocess.run(["git", "status", "--porcelain"], cwd=root, capture_output=True,
-                             text=True).stdout.splitlines()
+    changed = subprocess.run(["git", "status", "--porcelain"], cwd=root, capture_output=True, text=True).stdout.splitlines()
     if commit and changed and "build" not in failed:
         subprocess.run(["git", "add", "-A"], cwd=root, capture_output=True, text=True)
-        c = subprocess.run(["git", "commit", "-q", "-m", "Update: 生成物を同期する"], cwd=root,
-                           capture_output=True, text=True)
-        items.append({"name": "commit", "result": "ok" if c.returncode == 0 else "failed",
-                      "exit": c.returncode, "files": len(changed)})
+        c = subprocess.run(["git", "commit", "-q", "-m", "Update: 生成物を同期する"], cwd=root, capture_output=True, text=True)
+        items.append({"name": "commit", "result": "ok" if c.returncode == 0 else "failed", "exit": c.returncode, "files": len(changed)})
         if c.returncode:
             failed.append("commit")
     summary = f"失敗: {', '.join(failed)}" if failed else f"同期とチェック {len(checks)} 本が通った"
-    return result("supervise-sync-check", "stopped" if failed else "ok", summary, items,
-                  {"failed": len(failed), "changed": len(changed)})
+    return result("supervise-sync-check", "stopped" if failed else "ok", summary, items, {"failed": len(failed), "changed": len(changed)})
 
 
 def cmd_design_glossary(root: str, mode: str, out: str) -> tuple[dict, int | None]:
@@ -70,56 +77,72 @@ def cmd_design_glossary(root: str, mode: str, out: str) -> tuple[dict, int | Non
 
     code, res = call("gate", "--mode", mode)
     if code == 0:
-        return result("supervise-design-glossary", "ok", res.get("summary", "用語集は揃っている"), [],
-                      {"initialized": 0}), None
+        return result("supervise-design-glossary", "ok", res.get("summary", "用語集は揃っている"), [], {"initialized": 0}), None
     if code != 1:
-        return result("supervise-design-glossary", "stopped", f"glossary.py gate が失敗した: {res.get('summary')}",
-                      [], {"initialized": 0}), code
+        return result(
+            "supervise-design-glossary", "stopped", f"glossary.py gate が失敗した: {res.get('summary')}", [], {"initialized": 0}
+        ), code
     # candidates は init より前に打つ（宣言が無くても既定の節で動く）。init の後で止まると起こしたファイルが
     # 未コミットで残り、打ち直しの gate が通って用語集のコミットも候補の語も書かれずに進むため
     code, cand = call("candidates")
     if code != 0:
         # 候補の欠落を「0 件」と区別できなくなるので、承認ゲート 1 の材料が揃わないまま進めない
-        return result("supervise-design-glossary", "stopped", f"glossary.py candidates が失敗した: {cand.get('summary')}",
-                      [], {"initialized": 0}), code
+        return result(
+            "supervise-design-glossary", "stopped", f"glossary.py candidates が失敗した: {cand.get('summary')}", [], {"initialized": 0}
+        ), code
     words = cand.get("items") or []
     code, init = call("init")
     if code != 0:
-        return result("supervise-design-glossary", "stopped", f"glossary.py init が失敗した: {init.get('summary')}",
-                      [], {"initialized": 0}), code
+        return result(
+            "supervise-design-glossary", "stopped", f"glossary.py init が失敗した: {init.get('summary')}", [], {"initialized": 0}
+        ), code
     created = [it["name"] for it in init.get("items") or []]
     if created:
-        for args in (["add", "--", *created],
-                     ["commit", "-q", "-m", "docs(glossary): 設計の入口で用語集を起こす", "--", *created]):
+        for args in (["add", "--", *created], ["commit", "-q", "-m", "docs(glossary): 設計の入口で用語集を起こす", "--", *created]):
             p = subprocess.run(["git", *args], cwd=root, capture_output=True, text=True)
             if p.returncode != 0:
                 # 起こしたファイルを消して、打ち直しが同じ経路（gate の停止 → init → コミット）を通るようにする
-                subprocess.run(["git", "rm", "-q", "--cached", "--ignore-unmatch", "--", *created],
-                               cwd=root, capture_output=True, text=True)
+                subprocess.run(
+                    ["git", "rm", "-q", "--cached", "--ignore-unmatch", "--", *created], cwd=root, capture_output=True, text=True
+                )
                 for c in created:
                     Path(root, c).unlink(missing_ok=True)
-                return result("supervise-design-glossary", "stopped",
-                              f"起こした用語集をコミットできない: {p.stderr.strip()[-300:]}", [],
-                              {"initialized": 0}), 1
+                return result(
+                    "supervise-design-glossary",
+                    "stopped",
+                    f"起こした用語集をコミットできない: {p.stderr.strip()[-300:]}",
+                    [],
+                    {"initialized": 0},
+                ), 1
     rows = [[w.get("term"), w.get("count"), w.get("kind"), f"`{w.get('first')}`"] for w in words]
-    note = ("## 用語集の候補\n\nこの Pull Request で用語集を起こした（`glossary.py init`）: "
-            + "、".join(f"`{c}`" for c in created) + "。\n語の採否は承認ゲート 1 で見る。候補の語（`glossary.py candidates`）:\n\n"
-            + (mdtable.table_markdown(("語", "回数", "種類", "最初の場所"), rows, align=(None, "right", None, None))
-               if rows
-               else "候補は 0 件（要求から語を起こす）") + "\n")
+    note = (
+        "## 用語集の候補\n\nこの Pull Request で用語集を起こした（`glossary.py init`）: "
+        + "、".join(f"`{c}`" for c in created)
+        + "。\n語の採否は承認ゲート 1 で見る。候補の語（`glossary.py candidates`）:\n\n"
+        + (
+            mdtable.table_markdown(("語", "回数", "種類", "最初の場所"), rows, align=(None, "right", None, None))
+            if rows
+            else "候補は 0 件（要求から語を起こす）"
+        )
+        + "\n"
+    )
     Path(out).parent.mkdir(parents=True, exist_ok=True)
     Path(out).write_text(note)
     shown = "、".join(str(w.get("term")) for w in words[:10])
-    return result("supervise-design-glossary", "ok",
-                  f"用語集を起こしてコミットした（候補 {len(words)} 件{': ' + shown if shown else ''}）",
-                  [{"name": c, "result": "created"} for c in created],
-                  {"initialized": 1, "candidates": len(words)}), None
+    return result(
+        "supervise-design-glossary",
+        "ok",
+        f"用語集を起こしてコミットした（候補 {len(words)} 件{': ' + shown if shown else ''}）",
+        [{"name": c, "result": "created"} for c in created],
+        {"initialized": 1, "candidates": len(words)},
+    ), None
 
 
 def note_row(report: str, next_text: str) -> str:
     def field(name: str) -> str:
         m = re.search(rf"^- {name}: (.*)$", report, re.M)
         return m.group(1).strip() if m else ""
+
     cost = re.search(r"/ \$([0-9.]+)\s*$", field("LLM の使用量"))
     pr = field("Pull Request")
     state = f"{field('フェーズ') or field('持ち場')}: {field('結果')}"  # 旧い報告（持ち場）も読む
@@ -150,8 +173,7 @@ def cmd_note(doc: str, report_path: str, next_text: str, section: str) -> dict:
     row = note_row(Path(report_path).read_text(), next_text)
     lines.insert(last + 1, row)
     Path(doc).write_text("\n".join(lines) + "\n")
-    return result("supervise-note", "ok", "表へ 1 行を足した", [{"path": doc, "line": last + 2, "row": row}],
-                  {"rows": 1})
+    return result("supervise-note", "ok", "表へ 1 行を足した", [{"path": doc, "line": last + 2, "row": row}], {"rows": 1})
 
 
 def cmd_history_import(paths: list[str], history: str | None) -> dict:
@@ -171,8 +193,13 @@ def cmd_history_import(paths: list[str], history: str | None) -> dict:
     items = [{"kind": "file", "name": u, "result": "unreadable"} for u in got["unreadable"]]
     if len(got["unreadable"]) == len(paths):
         return result("supervise-history", "stopped", "progress.jsonl を 1 本も読めない", items)
-    return result("supervise-history", "ok", f"{got['added']} 行を {target} へ取り込んだ（重複 {got['skipped']} 行）",
-                  items, {"added": got["added"], "skipped": got["skipped"], "history": str(target)})
+    return result(
+        "supervise-history",
+        "ok",
+        f"{got['added']} 行を {target} へ取り込んだ（重複 {got['skipped']} 行）",
+        items,
+        {"added": got["added"], "skipped": got["skipped"], "history": str(target)},
+    )
 
 
 def cmd_expected(plan_path: str, history: str | None, slow_pairs: list[str]) -> tuple[dict, int | None]:
@@ -198,8 +225,13 @@ def cmd_expected(plan_path: str, history: str | None, slow_pairs: list[str]) -> 
             continue
         value, basis = ss.expected_for(ss.read_history(target, phase, st["id"], cfg.window), cfg, st.get("expected"))
         items.append({"kind": "step", "name": st["id"], "type": st["type"], "expected": value, "basis": basis})
-    return result("supervise-expected", "ok", f"{len(items)} ステップの想定を出した（フェーズ {phase}・履歴 {target}）",
-                  items, {"history": str(target), "enabled": cfg.enabled}), None
+    return result(
+        "supervise-expected",
+        "ok",
+        f"{len(items)} ステップの想定を出した（フェーズ {phase}・履歴 {target}）",
+        items,
+        {"history": str(target), "enabled": cfg.enabled},
+    ), None
 
 
 def cmd_run(plan_path: str, state_dir: str | None, slow: list[str], start: str | None) -> int:

@@ -7,6 +7,7 @@
 
 `scripts/tests/` へ置くのは、チェックの対象が 2 つの Skill と配布の経路にまたがるためである。
 """
+
 from __future__ import annotations
 
 import os
@@ -29,7 +30,9 @@ def run_lib(lib: Path, snippet: str, env: dict | None = None) -> subprocess.Comp
     """`lib` を読み込んだうえで `snippet` を bash で実行する。"""
     return subprocess.run(
         ["bash", "-c", f'set -uo pipefail\n. "{lib}"\n{snippet}\n'],
-        env=env, capture_output=True, text=True,
+        env=env,
+        capture_output=True,
+        text=True,
     )
 
 
@@ -47,6 +50,7 @@ def _shell_files() -> list[Path]:
 
 # --- A1: 取得の手順が 1 箇所だけにある --------------------------------------
 
+
 def test_the_two_stage_gate_lives_in_one_file() -> None:
     """A1: 1 段目の `mkdir` と 2 段目の `set -C` を両方持つファイルは 1 つだけである。"""
     holders = sorted(
@@ -60,16 +64,13 @@ def test_the_two_stage_gate_lives_in_one_file() -> None:
 
 def test_no_other_file_holds_the_gate_of_the_second_stage() -> None:
     """A1: 握りの目印を作る関門も、共通ファイルの外に複製を持たない。"""
-    holders = sorted(
-        p.relative_to(ROOT).as_posix()
-        for p in _shell_files()
-        if "/held" in p.read_text(encoding="utf-8")
-    )
+    holders = sorted(p.relative_to(ROOT).as_posix() for p in _shell_files() if "/held" in p.read_text(encoding="utf-8"))
 
     assert holders == ["plugins/ndf/scripts/lib/lock-common.sh"], holders
 
 
 # --- A2 / A3: 既存の名前で呼べる --------------------------------------------
+
 
 @pytest.mark.parametrize(
     ("lib", "names"),
@@ -80,7 +81,7 @@ def test_no_other_file_holds_the_gate_of_the_second_stage() -> None:
 )
 def test_the_existing_names_stay_callable(lib: Path, names: tuple[str, ...]) -> None:
     """A2 / A3: 読み込む側は、寄せる前と同じ名前で呼べる。"""
-    got = run_lib(lib, "\n".join(f'declare -F {n} >/dev/null && echo have={n}' for n in names))
+    got = run_lib(lib, "\n".join(f"declare -F {n} >/dev/null && echo have={n}" for n in names))
 
     for name in names:
         assert f"have={name}" in got.stdout, got
@@ -93,9 +94,7 @@ def test_the_existing_names_stay_callable(lib: Path, names: tuple[str, ...]) -> 
         pytest.param(WF_LIB, "wf_lock_acquire", "wf_lock_release", id="workflow"),
     ],
 )
-def test_the_existing_names_take_and_release_the_lock(
-    tmp_path: Path, lib: Path, acquire: str, release: str
-) -> None:
+def test_the_existing_names_take_and_release_the_lock(tmp_path: Path, lib: Path, acquire: str, release: str) -> None:
     """A2 / A3: 名前だけでなく、取得と解放の結果も寄せる前と変わらない。"""
     lock = tmp_path / "a.lock"
     got = run_lib(
@@ -111,6 +110,7 @@ def test_the_existing_names_take_and_release_the_lock(
 
 
 # --- A4: 待ちの上限の上書きは工程の通過記録の側だけに効く -----------------------
+
 
 def _held_lock(path: Path) -> Path:
     """生きている持ち主がいるロックを作る。陳腐化と読まれないため、上限まで待つ。"""
@@ -144,6 +144,7 @@ def test_the_timeout_override_reaches_only_the_stage_state(tmp_path: Path) -> No
 
 
 # --- A5: 4 つの配布先ランタイムの配置で読み込める ---------------------------
+
 
 def _flat_layout(base: Path) -> Path:
     """プラグインルート直下に `scripts/` と `skills/` が並ぶ配置。
@@ -188,8 +189,7 @@ def test_the_common_file_is_reached_from_every_layout(tmp_path: Path, layout) ->
 
     got = run_lib(
         skill / "scripts" / "lib" / "workflow-common.sh",
-        'declare -F ndf_lock_is_held >/dev/null && echo reached=yes\n'
-        f'wf_lock_acquire "{lock}" 1; echo rc=$?',
+        f'declare -F ndf_lock_is_held >/dev/null && echo reached=yes\nwf_lock_acquire "{lock}" 1; echo rc=$?',
     )
 
     assert "reached=yes" in got.stdout, got
@@ -205,15 +205,13 @@ def test_the_libraries_do_not_locate_the_common_file_with_cd(tmp_path: Path) -> 
     テストで固定する。
     """
     for lib in (WT_LIB.with_name("worktree-registry.sh"), WF_LIB):
-        line = next(
-            l for l in lib.read_text(encoding="utf-8").splitlines()
-            if "lock-common.sh" in l and '. "' in l
-        )
+        line = next(l for l in lib.read_text(encoding="utf-8").splitlines() if "lock-common.sh" in l and '. "' in l)
         assert '$(dirname "${BASH_SOURCE[0]}")' in line, (lib, line)
         assert "pwd" not in line, (lib, line)
 
 
 # --- A6: 共通ファイルを読み込めないとき -------------------------------------
+
 
 def test_a_missing_common_file_stops_the_write_but_not_the_step(tmp_path: Path) -> None:
     """A6: 共通ファイルが無くても工程は続き、通過記録へは書かない。
@@ -230,8 +228,7 @@ def test_a_missing_common_file_stops_the_write_but_not_the_step(tmp_path: Path) 
 
     got = run_lib(
         skill / "scripts" / "lib" / "workflow-common.sh",
-        'echo sourced=ok\n'
-        'wf_record "devbasex/ai-plugins" 293 stage "構造改善"; echo rc=$?',
+        'echo sourced=ok\nwf_record "devbasex/ai-plugins" 293 stage "構造改善"; echo rc=$?',
         env=env,
     )
 
@@ -249,6 +246,7 @@ def test_a_missing_common_file_stops_the_write_but_not_the_step(tmp_path: Path) 
 
 # --- A8: 呼び出し側のシェルの状態を変えない ---------------------------------
 
+
 def test_the_common_file_leaves_no_noclobber_on_the_caller(tmp_path: Path) -> None:
     """A8: 取得の成否のどちらでも、呼び出し側の `$-` に `C` を残さない。
 
@@ -258,8 +256,7 @@ def test_the_common_file_leaves_no_noclobber_on_the_caller(tmp_path: Path) -> No
     lock = tmp_path / "flag.lock"
     got = run_lib(
         LOCK_LIB,
-        f'ndf_lock_acquire "{lock}" 1; echo taken=$-\n'
-        f'ndf_lock_acquire "{lock}" 1; echo missed=$-',
+        f'ndf_lock_acquire "{lock}" 1; echo taken=$-\nndf_lock_acquire "{lock}" 1; echo missed=$-',
     )
 
     reported = [l for l in got.stdout.split() if "=" in l]
@@ -295,5 +292,3 @@ def test_acquire_reclaims_stale_discard_gate_before_taking_stale_lock(tmp_path: 
     assert (lock / "pid").is_file(), "新しい pid が作られている"
     assert (lock / "held").is_file(), "新しい held が作られている"
     assert not (lock / "discard").exists(), "古い discard 関門が残っていない"
-
-

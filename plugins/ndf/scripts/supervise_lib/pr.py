@@ -1,4 +1,5 @@
 """pr のステップのハンドラー（#1142 の C1）。push と GitHub への書き込みを行う唯一のハンドラーである。"""
+
 from __future__ import annotations
 
 import re
@@ -64,8 +65,7 @@ class PrStep:
     def _push(self, ctx) -> tuple[str, str | None]:
         """HEAD を push する。`(ブランチ, 失敗の出力 | None)`。"""
         branch = self.git(ctx, "rev-parse", "--abbrev-ref", "HEAD")
-        push = subprocess.run(["git", "push", "-q", "-u", "origin", "HEAD"], cwd=ctx.cwd,
-                              capture_output=True, text=True)
+        push = subprocess.run(["git", "push", "-q", "-u", "origin", "HEAD"], cwd=ctx.cwd, capture_output=True, text=True)
         if push.returncode != 0:
             ctx.state.cur.update(exit=push.returncode, text=push.stderr)
             return branch, push.stderr
@@ -87,7 +87,7 @@ class PrStep:
         docs = "\n".join(f"- `{d}`" for d in step.get("docs", [])) or "- 無し"
         title = step.get("title") or (self.git(ctx, "log", "--reverse", "--format=%s", rng).splitlines() or [branch])[0]
         changes = user_changes(step, title)
-        body = f"""{step.get('summary', '')}
+        body = f"""{step.get("summary", "")}
 
 {changes}
 
@@ -121,9 +121,13 @@ class PrStep:
             f = Path(ctx.cwd) / d
             if f.is_file():
                 design += f"\n### {d}\n" + f.read_text()[:TAIL]
-        res = ctx.claude.call(PR_SYSTEM, f"課題: {issues}\n要約の手がかり: {step.get('summary', '')}\n\n"
-                              f"## 材料\n{body}\n## 設計文書（抜粋）{design or ' 無し'}",
-                              None, ctx.cwd, step.get("timeout", 600))
+        res = ctx.claude.call(
+            PR_SYSTEM,
+            f"課題: {issues}\n要約の手がかり: {step.get('summary', '')}\n\n## 材料\n{body}\n## 設計文書（抜粋）{design or ' 無し'}",
+            None,
+            ctx.cwd,
+            step.get("timeout", 600),
+        )
         ctx.claude.record_usage("judge", res)
         if res["ok"] and res["text"].strip():
             body = res["text"].strip() + "\n"
@@ -135,8 +139,9 @@ class PrStep:
 
     def _publish(self, ctx, base: str, branch: str, title: str, body: str) -> tuple[bool, str]:
         """既存の PR があれば本文を書き直し、無ければ Draft で作る。"""
-        found = gh_call.gh(["pr", "list", "--head", branch, "--state", "open", "--json", "url", "--jq", ".[0].url"],
-                           cwd=ctx.cwd).stdout.rstrip()
+        found = gh_call.gh(
+            ["pr", "list", "--head", branch, "--state", "open", "--json", "url", "--jq", ".[0].url"], cwd=ctx.cwd
+        ).stdout.rstrip()
         if found:
             p = gh_call.gh(["pr", "edit", found, "--body", body], cwd=ctx.cwd)
             url = found

@@ -3,6 +3,7 @@
 
 配布物の Skill が旧名で呼ぶ間だけ残す。結果と終了コードは mission-close.py のものである。
 """
+
 import os
 import sys
 from pathlib import Path

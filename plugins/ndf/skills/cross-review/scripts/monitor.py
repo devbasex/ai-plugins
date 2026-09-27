@@ -14,6 +14,7 @@
 `mock.patch.object(monitor_mod, "_pid_alive", ...)` のような既存テストの差し替えが
 実体側モジュールへ届かず、既存テストを書き換える必要が出る。
 """
+
 from __future__ import annotations
 
 import pathlib

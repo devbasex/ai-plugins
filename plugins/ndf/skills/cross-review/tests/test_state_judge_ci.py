@@ -13,6 +13,7 @@
 
 **進行を止めない側へ倒す。** 照会できないことは、承認されたラウンドを差し戻す理由にならない。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -48,6 +49,7 @@ def check_runs(monkeypatch, state_mod):
         def _fetch(repo, sha):
             calls.append((repo, sha))
             return runs
+
         monkeypatch.setattr(review_lib.ci, "_fetch_check_runs", _fetch)
         return calls
 
@@ -94,6 +96,7 @@ def _read(tmp_dir: pathlib.Path) -> dict:
 
 # ---------------- 条件 3: 落ちているラウンドを収束させない ----------------
 
+
 def test_a_code_related_failure_sends_the_round_to_the_fix_step(tmp_dir, state_mod, check_runs):
     check_runs([_run("pytest", conclusion="failure"), _run("markdown-link-check")])
     _write(tmp_dir, _state([_approved_round()]))
@@ -103,7 +106,7 @@ def test_a_code_related_failure_sends_the_round_to_the_fix_step(tmp_dir, state_m
 
     assert e.value.code == 2
     st = _read(tmp_dir)
-    assert st["final"] is None            # 中断しない。修正の機会を残す
+    assert st["final"] is None  # 中断しない。修正の機会を残す
     assert st["rounds"][-1]["verdict"] == "changes_requested"
     assert st["rounds"][-1]["ci"]["verdict"] == "code_failure"
     assert st["rounds"][-1]["ci"]["failed"] == ["pytest"]
@@ -136,6 +139,7 @@ def test_all_green_converges(tmp_dir, state_mod, check_runs):
 
 # ---------------- 条件 4: 実行中のチェックジョブを失敗として扱わない ----------------
 
+
 def test_a_running_check_is_not_a_failure(tmp_dir, state_mod, check_runs, capsys):
     check_runs([_run("pytest", status="in_progress", conclusion=""), _run("lint")])
     _write(tmp_dir, _state([_approved_round()]))
@@ -152,6 +156,7 @@ def test_a_running_check_is_not_a_failure(tmp_dir, state_mod, check_runs, capsys
 
 
 # ---------------- 条件 5: 照会できないときに収束を止めない ----------------
+
 
 def test_an_unavailable_query_still_converges(tmp_dir, state_mod, check_runs):
     check_runs(None)
@@ -174,10 +179,13 @@ def test_no_check_run_is_treated_as_unavailable(tmp_dir, state_mod, real_github,
     REST の応答そのものから、その扱いになることを見る。
     """
     monkeypatch.setattr(
-        review_lib.github, "_gh_rest",
+        review_lib.github,
+        "_gh_rest",
         lambda path: review_lib.github.RestResponse(
-            headers={}, body={"total_count": 0, "check_runs": []},
-            rate_remaining=None, rate_reset=None,
+            headers={},
+            body={"total_count": 0, "check_runs": []},
+            rate_remaining=None,
+            rate_reset=None,
         ),
     )
     _write(tmp_dir, _state([_approved_round()]))
@@ -190,6 +198,7 @@ def test_no_check_run_is_treated_as_unavailable(tmp_dir, state_mod, real_github,
 
 
 # ---------------- 照会の位置 ----------------
+
 
 def test_the_query_runs_only_on_the_converging_branch(tmp_dir, state_mod, check_runs):
     """修正へ回るラウンドでは照会しない。収束するラウンドでだけ 1 回投げる。"""
@@ -241,8 +250,14 @@ def test_the_head_commit_is_fetched_when_the_state_has_none(tmp_dir, state_mod, 
     def _meta(pr, repo=None):
         asked.append(pr)
         return review_lib.github.PrMetadata(
-            repo=REPO, author="someone", head_branch="feat/x", head_sha="deadbee",
-            base_branch="develop", is_fork=False, rate_remaining=None, rate_reset=None,
+            repo=REPO,
+            author="someone",
+            head_branch="feat/x",
+            head_sha="deadbee",
+            base_branch="develop",
+            is_fork=False,
+            rate_remaining=None,
+            rate_reset=None,
         )
 
     monkeypatch.setattr(review_lib.github, "_fetch_pr_metadata", _meta)

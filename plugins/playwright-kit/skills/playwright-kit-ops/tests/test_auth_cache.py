@@ -12,9 +12,7 @@ Amazon Q Critical-2: context.close() 例外で browser.close() がスキップ�
 
 from __future__ import annotations
 
-from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -39,7 +37,7 @@ def test_storage_state_cache_miss_then_hit():
     cache.put("admin", state)
 
     assert cache.get("admin") == state  # hit
-    assert cache.get("user") is None   # 別 role は miss のまま
+    assert cache.get("user") is None  # 別 role は miss のまま
 
 
 def test_storage_state_cache_multiple_roles():

@@ -31,6 +31,7 @@ _BASE_RAW = {
 
 def _from_dict(raw: dict) -> Config:
     from pathlib import Path
+
     return Config._from_dict(raw, config_path=Path("/tmp/_test.yaml"))
 
 

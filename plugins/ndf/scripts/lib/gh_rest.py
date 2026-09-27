@@ -7,6 +7,7 @@
 `view_json` は L0 の時点の呼び出し側のため、GraphQL を先に読み、上限のときだけ REST で読む形のまま残す。
 REST を先に読むのは `view` で、呼び出し側は C1〜C7 で `view` へ移る。
 """
+
 from __future__ import annotations
 
 import json
@@ -22,12 +23,10 @@ Attempt = gh_quota.Attempt
 PER_PAGE = 100
 _NUMBER_IN_URL = re.compile(r"/(?:pull|issues)/(\d+)")
 # `view_json` が REST で読み替えるフィールド（#1211 の範囲のまま。広い対応表を使うのは `view`）
-_VIEW_JSON_FIELDS = {"pr": {"number", "title", "body", "state", "url", "mergeCommit"},
-                     "issue": {"number", "title", "body", "state", "url"}}
+_VIEW_JSON_FIELDS = {"pr": {"number", "title", "body", "state", "url", "mergeCommit"}, "issue": {"number", "title", "body", "state", "url"}}
 
 
-def view_json(kind: str, number: int, fields: str, repo: str | None = None,
-              cwd: str | None = None) -> gh_call.GhResult:
+def view_json(kind: str, number: int, fields: str, repo: str | None = None, cwd: str | None = None) -> gh_call.GhResult:
     """`gh <pr|issue> view <n> --json <fields>` を呼ぶ。GraphQL が上限のときだけ REST で読み直し、
     GraphQL の `--json` と同じ形の JSON を stdout に入れて返す。
 
@@ -89,6 +88,7 @@ def view(kind: str, number: int, fields: str, repo: str | None = None) -> Attemp
     def by_rest() -> Attempt:
         a = _rest(f"repos/{slug}/{gh_fields._VIEW_REST_PATH[kind]}/{int(number)}")
         return a if not a.ok else a._replace(value=gh_fields.to_json_shape(kind, a.value or {}, fields))
+
     return gh_quota.with_fallback(by_rest, graphql)
 
 
@@ -127,14 +127,12 @@ def _list(kind: str, repo: str | None, fields: str, state: str, labels: list[str
     return gh_quota.with_fallback(by_rest, graphql) if gh_fields.covers(kind, fields) else graphql()
 
 
-def pr_list(repo: str | None, fields: str, state: str = "open", labels: list[str] | None = None,
-            limit: int = 30) -> Attempt:
+def pr_list(repo: str | None, fields: str, state: str = "open", labels: list[str] | None = None, limit: int = 30) -> Attempt:
     """`gh pr list --json` と同じ形の一覧。`state` は open / closed / merged / all。"""
     return _list("pr", repo, fields, state, labels, limit)
 
 
-def issue_list(repo: str | None, fields: str, state: str = "open", labels: list[str] | None = None,
-               limit: int = 30) -> Attempt:
+def issue_list(repo: str | None, fields: str, state: str = "open", labels: list[str] | None = None, limit: int = 30) -> Attempt:
     """`gh issue list --json` と同じ形の一覧（PR を含めない）。`state` は open / closed / all。"""
     return _list("issue", repo, fields, state, labels, limit)
 
@@ -154,8 +152,11 @@ def pr_create(repo: str | None, title: str, body: str, head: str, base: str, dra
     slug = _slug(repo)
     payload = {"title": title, "body": body, "head": head, "base": base, "draft": draft}
     args = ["pr", "create", "--repo", slug, "--title", title, "--body-file", "-", "--head", head, "--base", base]
-    return _created(gh_quota.with_fallback(lambda: _rest(f"repos/{slug}/pulls", "POST", payload),
-                                           lambda: _graphql_cli(args + (["--draft"] if draft else []), body, False)))
+    return _created(
+        gh_quota.with_fallback(
+            lambda: _rest(f"repos/{slug}/pulls", "POST", payload), lambda: _graphql_cli(args + (["--draft"] if draft else []), body, False)
+        )
+    )
 
 
 def issue_create(repo: str | None, title: str, body: str, labels: list[str] | None = None) -> Attempt:
@@ -164,12 +165,18 @@ def issue_create(repo: str | None, title: str, body: str, labels: list[str] | No
     args = ["issue", "create", "--repo", slug, "--title", title, "--body-file", "-"]
     for name in labels or []:
         args += ["--label", name]
-    return _created(gh_quota.with_fallback(lambda: _rest(f"repos/{slug}/issues", "POST", payload),
-                                           lambda: _graphql_cli(args, body, False)))
+    return _created(gh_quota.with_fallback(lambda: _rest(f"repos/{slug}/issues", "POST", payload), lambda: _graphql_cli(args, body, False)))
 
 
-def _edit(kind: str, repo: str | None, number: int, title: str | None, body: str | None,
-          add_labels: list[str] | None, remove_labels: list[str] | None) -> Attempt:
+def _edit(
+    kind: str,
+    repo: str | None,
+    number: int,
+    title: str | None,
+    body: str | None,
+    add_labels: list[str] | None,
+    remove_labels: list[str] | None,
+) -> Attempt:
     slug = _slug(repo)
     n = int(number)
 
@@ -196,19 +203,33 @@ def _edit(kind: str, repo: str | None, number: int, title: str | None, body: str
         args += ["--add-label", name]
     for name in remove_labels or []:
         args += ["--remove-label", name]
+
     def by_graphql() -> Attempt:
         a = _graphql_cli(args, body, False)
         return a._replace(value=True) if a.ok else a
+
     return gh_quota.with_fallback(by_rest, by_graphql)
 
 
-def pr_edit(repo: str | None, number: int, title: str | None = None, body: str | None = None,
-            add_labels: list[str] | None = None, remove_labels: list[str] | None = None) -> Attempt:
+def pr_edit(
+    repo: str | None,
+    number: int,
+    title: str | None = None,
+    body: str | None = None,
+    add_labels: list[str] | None = None,
+    remove_labels: list[str] | None = None,
+) -> Attempt:
     return _edit("pr", repo, number, title, body, add_labels, remove_labels)
 
 
-def issue_edit(repo: str | None, number: int, title: str | None = None, body: str | None = None,
-               add_labels: list[str] | None = None, remove_labels: list[str] | None = None) -> Attempt:
+def issue_edit(
+    repo: str | None,
+    number: int,
+    title: str | None = None,
+    body: str | None = None,
+    add_labels: list[str] | None = None,
+    remove_labels: list[str] | None = None,
+) -> Attempt:
     return _edit("issue", repo, number, title, body, add_labels, remove_labels)
 
 
@@ -217,7 +238,8 @@ def comment(repo: str | None, number: int, body: str) -> Attempt:
     slug = _slug(repo)
     a = gh_quota.with_fallback(
         lambda: _rest(f"repos/{slug}/issues/{int(number)}/comments", "POST", {"body": body}),
-        lambda: _graphql_cli(["issue", "comment", str(int(number)), "--repo", slug, "--body-file", "-"], body, False))
+        lambda: _graphql_cli(["issue", "comment", str(int(number)), "--repo", slug, "--body-file", "-"], body, False),
+    )
     if not a.ok:
         return a
     url = a.value.get("html_url") if isinstance(a.value, dict) else str(a.value or "").strip()
@@ -235,8 +257,9 @@ def pr_merge(repo: str | None, number: int, method: str = "merge", sha: str | No
     payload = {"merge_method": method, **({"sha": sha} if sha else {})}
     args = ["pr", "merge", str(int(number)), "--repo", slug, f"--{method}"]
     args += ["--match-head-commit", sha] if sha else []
-    a = gh_quota.with_fallback(lambda: _rest(f"repos/{slug}/pulls/{int(number)}/merge", "PUT", payload),
-                               lambda: _graphql_cli(args, None, False))
+    a = gh_quota.with_fallback(
+        lambda: _rest(f"repos/{slug}/pulls/{int(number)}/merge", "PUT", payload), lambda: _graphql_cli(args, None, False)
+    )
     if not a.ok:
         return a
     if isinstance(a.value, dict):

@@ -26,6 +26,7 @@
 
 hook とラッパーは `require()` を呼ばない（I13・決定 20）。ラッパー（`relay_lib/runtime.py`）は `find_uv`・`install_uv`・`venv_dir` だけを使う。
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -112,8 +113,7 @@ def venv_dir(root: Path = PLUGIN_ROOT) -> str:
     return os.environ.get("NDF_DEPS_VENV") or str(Path.home() / ".cache" / "ndf" / "venv" / venv_version(root))
 
 
-def reexec_argv(uv: str, groups: str | Sequence[str], script: str, args: list[str],
-                root: Path = PLUGIN_ROOT) -> list[str]:
+def reexec_argv(uv: str, groups: str | Sequence[str], script: str, args: list[str], root: Path = PLUGIN_ROOT) -> list[str]:
     extras = [x for g in ([groups] if isinstance(groups, str) else groups) for x in ("--extra", g)]
     return [uv, "run", "--quiet", "--frozen", "--project", str(root), *extras, "python", script, *args]
 
@@ -137,8 +137,10 @@ def require(group: str, *more: str, project: Path | None = None) -> None:
     script = str(Path(sys.argv[0]).resolve())
     if os.environ.get(REEXEC_ENV) == script:
         mods = ", ".join(m for g in missing for m in GROUPS[g])
-        _stop(f"uv の環境へ起動し直したが {' / '.join(missing)} のパッケージ（{mods}）を import できない。"
-              f"{root / 'uv.lock'} に載っているかを見る")
+        _stop(
+            f"uv の環境へ起動し直したが {' / '.join(missing)} のパッケージ（{mods}）を import できない。"
+            f"{root / 'uv.lock'} に載っているかを見る"
+        )
     if not (root / "pyproject.toml").is_file() or not (root / "uv.lock").is_file():
         _stop(f"外部パッケージの宣言が無い: {root}/pyproject.toml と uv.lock")
     uv = find_uv()

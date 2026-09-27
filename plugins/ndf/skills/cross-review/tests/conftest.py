@@ -4,6 +4,7 @@
 で起動される運用だが、テストでは関数を直接 import したい。
 importlib.util で source loader 経由で読み込む。
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -109,10 +110,7 @@ def _no_github(monkeypatch) -> None:
 
     def _guard(cmd, *args, **kwargs):
         if isinstance(cmd, (list, tuple)) and cmd and str(cmd[0]) == "gh":
-            raise AssertionError(
-                f"テストが gh を実行しようとしました: {list(cmd)}。"
-                " 呼び出しを差し替えてください"
-            )
+            raise AssertionError(f"テストが gh を実行しようとしました: {list(cmd)}。 呼び出しを差し替えてください")
         return real(cmd, *args, **kwargs)
 
     monkeypatch.setattr(subprocess, "run", _guard)
@@ -140,25 +138,29 @@ def _no_github_state(request, monkeypatch) -> None:
     if "fake_gh" not in request.fixturenames:
         rp = sys.modules["review_lib.commands.read_result"].result_posts
         monkeypatch.setattr(rp, "post_review", _post_review_offline(rp))
-        monkeypatch.setattr(rp, "push_fix",
-                            lambda worktree, head, commit: rp.PushResult(
-                                True, bool(commit), True, ""))
+        monkeypatch.setattr(rp, "push_fix", lambda worktree, head, commit: rp.PushResult(True, bool(commit), True, ""))
         monkeypatch.setattr(rp, "post_fix", _post_fix_offline(rp))
 
 
 def _post_review_offline(rp):
     """送信を行わず、組み立てた内容がそのまま届いたものとして結果を返す。"""
-    def _post(queue, payload_path, result_path, repo, pr, round_no, seat, head_sha,
-              is_own_pr, actor=None, since=None):
-        item = rp.review_posts(payload_path, result_path, repo, pr, round_no, seat,
-                               head_sha, is_own_pr, since=since)[0]
+
+    def _post(queue, payload_path, result_path, repo, pr, round_no, seat, head_sha, is_own_pr, actor=None, since=None):
+        item = rp.review_posts(payload_path, result_path, repo, pr, round_no, seat, head_sha, is_own_pr, since=since)[0]
         extra = item["extra"]
         findings = len(rp._findings(rp._read_json(payload_path)))
         return rp.ReviewOutcome(
             review_url=f"https://github.com/{repo}/pull/{pr}#pullrequestreview-1",
-            posted_inline=extra["inline"], posted_body=extra["body"], queued=0,
-            findings=findings, failed=False, posted_as=extra["posted_as"],
-            intent=extra["intent"], detail="")
+            posted_inline=extra["inline"],
+            posted_body=extra["body"],
+            queued=0,
+            findings=findings,
+            failed=False,
+            posted_as=extra["posted_as"],
+            intent=extra["intent"],
+            detail="",
+        )
+
     return _post
 
 
@@ -245,8 +247,7 @@ sys.stdout.write("[]")
 class FakeGh:
     """模した `gh` の置き場所と、記録された呼び出しの読み出し。"""
 
-    def __init__(self, directory: pathlib.Path, log: pathlib.Path,
-                 rules: pathlib.Path, monkeypatch) -> None:
+    def __init__(self, directory: pathlib.Path, log: pathlib.Path, rules: pathlib.Path, monkeypatch) -> None:
         self.dir = directory
         self.log = log
         self.rules_file = rules
@@ -263,8 +264,7 @@ class FakeGh:
     def calls(self) -> list[dict]:
         if not self.log.exists():
             return []
-        return [json.loads(line) for line in
-                self.log.read_text(encoding="utf-8").splitlines() if line.strip()]
+        return [json.loads(line) for line in self.log.read_text(encoding="utf-8").splitlines() if line.strip()]
 
     def argv(self) -> list[list[str]]:
         return [c["argv"] for c in self.calls()]
@@ -300,10 +300,16 @@ def queue_mod() -> types.ModuleType:
 
 def _post_fix_offline(rp):
     """送信を行わず、組み立てた返信・決着・まとめがすべて届いたものとして返す。"""
+
     def _post(queue, result_path, repo, pr, round_no=None, actor=None):
         kinds = [i["kind"] for i in rp.fix_posts(result_path, repo, pr, round_no)]
         return rp.FixOutcome(
             summary_url=f"https://github.com/{repo}/pull/{pr}#issuecomment-1",
-            replied=kinds.count("review-reply"), resolved=kinds.count("thread-resolve"),
-            queued=0, failed=False, detail="")
+            replied=kinds.count("review-reply"),
+            resolved=kinds.count("thread-resolve"),
+            queued=0,
+            failed=False,
+            detail="",
+        )
+
     return _post

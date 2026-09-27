@@ -6,6 +6,7 @@
 
 使う側は `deps.require("versions", "bump")` を先に呼び、`lib/` を `sys.path` に入れてから import する。
 """
+
 from __future__ import annotations
 
 import json
@@ -82,10 +83,9 @@ class BumpPlan:
             if not rx.search(lines[i]) or (self.rel(path), i) in self._taken:
                 continue
             if re.search(ver_pat(self.old), lines[i]):
-                twins = [j for j in range(i, stop) if lines[j] == lines[i] and rx.search(lines[j])][:count - done]
+                twins = [j for j in range(i, stop) if lines[j] == lines[i] and rx.search(lines[j])][: count - done]
                 esc = braces(lines[i])
-                if self.place(path, twins, re.sub(ver_pat(self.old), CUR, esc), re.sub(ver_pat(self.old), NEW, esc),
-                              what):
+                if self.place(path, twins, re.sub(ver_pat(self.old), CUR, esc), re.sub(ver_pat(self.old), NEW, esc), what):
                     done += len(twins)
                 else:
                     return done
@@ -93,18 +93,22 @@ class BumpPlan:
                 already += 1
         if required and done + already < count:
             self.manual.append(
-                f"{self.rel(path)}: {what} の旧版 {self.old} が"
-                f" {count} 箇所見つからず {done + already} 箇所だけ（手で直す）")
+                f"{self.rel(path)}: {what} の旧版 {self.old} が {count} 箇所見つからず {done + already} 箇所だけ（手で直す）"
+            )
         return done
 
     def config(self):
-        head = ["[tool.bumpversion]", f"current_version = {json.dumps(self.old)}",
-                f"parse = {json.dumps(BUMP_PARSE)}", f"serialize = {json.dumps(BUMP_SERIALIZE)}",
-                "commit = false", "tag = false"]
+        head = [
+            "[tool.bumpversion]",
+            f"current_version = {json.dumps(self.old)}",
+            f"parse = {json.dumps(BUMP_PARSE)}",
+            f"serialize = {json.dumps(BUMP_SERIALIZE)}",
+            "commit = false",
+            "tag = false",
+        ]
         body = []
         for pl in self.places:
-            body += ["", "[[tool.bumpversion.files]]"] + [f"{k} = {json.dumps(v, ensure_ascii=False)}"
-                                                         for k, v in pl.items()]
+            body += ["", "[[tool.bumpversion.files]]"] + [f"{k} = {json.dumps(v, ensure_ascii=False)}" for k, v in pl.items()]
         return "\n".join(head + body) + "\n"
 
     def apply(self):

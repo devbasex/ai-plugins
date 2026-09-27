@@ -8,6 +8,7 @@ GitHub へはライブラリの `gh_call`（`gh` の CLI と REST の 1 回の�
 1 リクエストのままだが、REST 側は上限 5,000 のうち大半が残ったまま進行が止まる。
 項目をまとめる先を REST にして、GraphQL の消費を実行ごと・ラウンドごとに 0 点へ寄せる。
 """
+
 from __future__ import annotations
 
 import json
@@ -53,7 +54,9 @@ def _git_remote_url() -> str:
     """`origin` の取得元を返す。読めなければ空文字。"""
     try:
         r = subprocess.run(
-            ["git", "remote", "get-url", "origin"], capture_output=True, text=True,
+            ["git", "remote", "get-url", "origin"],
+            capture_output=True,
+            text=True,
         )
     except OSError:
         return ""
@@ -159,12 +162,10 @@ def _fetch_pr_metadata(pr: int, repo: str | None = None) -> PrMetadata | None:
 
 
 # 既存コメントの 3 ソースを一括で取る fix skill の共有スクリプト。テストが偽物へ差し替える。
-FETCH_COMMENTS_SCRIPT = (pathlib.Path(__file__).resolve().parents[3]
-                         / "fix" / "scripts" / "fetch-pr-comments.sh")
+FETCH_COMMENTS_SCRIPT = pathlib.Path(__file__).resolve().parents[3] / "fix" / "scripts" / "fetch-pr-comments.sh"
 
 
-def _fetch_existing_comments(repo: str, pr: int, path: pathlib.Path, *,
-                             strict: bool) -> str | None:
+def _fetch_existing_comments(repo: str, pr: int, path: pathlib.Path, *, strict: bool) -> str | None:
     """既存コメントのスナップショットを取り、成功なら `path` へ書いて None、失敗なら理由の文を返す。
 
     `strict=True` は `--strict` を付け（3 ソースのどれか 1 つの失敗でも失敗にする）、一時の
@@ -249,11 +250,15 @@ def _parse_pr_files_api_lines(output: str) -> list[dict[str, Any]]:
 
 
 def _fetch_changed_files(pr: int, repo: str) -> list[dict[str, Any]]:
-    r = gh_call.gh([
-        "api", f"repos/{repo}/pulls/{pr}/files",
-        "--paginate",
-        "--jq", '.[] | [.status, .filename, (.previous_filename // "")] | @tsv',
-    ])
+    r = gh_call.gh(
+        [
+            "api",
+            f"repos/{repo}/pulls/{pr}/files",
+            "--paginate",
+            "--jq",
+            '.[] | [.status, .filename, (.previous_filename // "")] | @tsv',
+        ]
+    )
     if r.returncode == 0:
         entries = _parse_pr_files_api_lines(r.stdout)
         if entries:

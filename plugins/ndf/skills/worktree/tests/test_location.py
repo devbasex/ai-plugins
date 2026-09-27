@@ -5,6 +5,7 @@
 作業ディレクトリ固有の git ディレクトリと共通の git ディレクトリは異なるため、
 サブモジュールを作業ツリーと取り違えないことを併せて確かめる。
 """
+
 from __future__ import annotations
 
 from pathlib import Path

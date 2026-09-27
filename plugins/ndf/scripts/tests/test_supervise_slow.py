@@ -2,10 +2,10 @@
 
 claude は NDF_SUPERVISE_CLAUDE の偽物で置き換える。待ちの秒はステップの expected と report_interval で縮める。
 """
+
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 import time
@@ -20,7 +20,7 @@ PY = sys.executable
 sys.path.insert(0, str(SCRIPTS))
 from supervise_lib import engine  # noqa: E402
 
-FAKE_CLAUDE = r'''
+FAKE_CLAUDE = r"""
 import json, os, sys, time
 prompt = sys.stdin.read()
 log = os.environ["FAKE_CLAUDE_LOG"]
@@ -42,13 +42,13 @@ if counter and not os.path.exists(counter):
     sys.exit(1)
 time.sleep(float(os.environ.get("FAKE_CLAUDE_SLEEP", "0")))
 print(json.dumps({"result": "## 作業の報告\n- 結果: 完了", "usage": {}, "total_cost_usd": 0.01, "num_turns": 1}))
-'''
+"""
 
-PROBE = r'''
+PROBE = r"""
 import json, sys
 print(json.dumps({"status": "ok", "summary": "調べた目印 " + sys.argv[1],
                   "metrics": {"class": sys.argv[2], "action": sys.argv[1]}}))
-'''
+"""
 
 
 @pytest.fixture
@@ -59,8 +59,7 @@ def env(tmp_path, monkeypatch):
     probe.write_text(PROBE)
     monkeypatch.setenv("NDF_SUPERVISE_CLAUDE", f"{PY} {fake}")
     monkeypatch.setenv("FAKE_CLAUDE_LOG", str(tmp_path / "claude.log"))
-    for k in ("FAKE_DECISION", "FAKE_CLAUDE_FORBID", "FAKE_LIMIT_ONCE", "FAKE_CLAUDE_SLEEP",
-              "NDF_SUPERVISE_CLAUDE_FALLBACK"):
+    for k in ("FAKE_DECISION", "FAKE_CLAUDE_FORBID", "FAKE_LIMIT_ONCE", "FAKE_CLAUDE_SLEEP", "NDF_SUPERVISE_CLAUDE_FALLBACK"):
         monkeypatch.delenv(k, raising=False)
     return tmp_path
 
@@ -70,8 +69,15 @@ def probe_of(tmp_path, action, cls="c"):
 
 
 def run_plan(tmp_path, steps, slow=None, **extra):
-    plan = {"フェーズ": "試験", "課題": [1102], "作業場所": str(tmp_path), "report_interval": 0.4, "steps": steps,
-            "slow": {"history": str(tmp_path / "history.jsonl"), **(slow or {})}, **extra}
+    plan = {
+        "フェーズ": "試験",
+        "課題": [1102],
+        "作業場所": str(tmp_path),
+        "report_interval": 0.4,
+        "steps": steps,
+        "slow": {"history": str(tmp_path / "history.jsonl"), **(slow or {})},
+        **extra,
+    }
     s = engine.Engine(plan, tmp_path / "state")
     return s, s.run()
 
@@ -87,8 +93,11 @@ def claude_calls(tmp_path):
 
 
 def test_probe_runs_when_elapsed_passes_expected(env):
-    s, text = run_plan(env, [{"id": "wait", "type": "run", "cmd": "sleep 1", "expected": 0.4,
-                              "probe": probe_of(env, "wait", "running"), "next": "end"}], slow={"max_waits": 10})
+    s, text = run_plan(
+        env,
+        [{"id": "wait", "type": "run", "cmd": "sleep 1", "expected": 0.4, "probe": probe_of(env, "wait", "running"), "next": "end"}],
+        slow={"max_waits": 10},
+    )
     assert "結果: 完了" in text
     slow = lines(env, "slow")
     assert slow and slow[0]["probe"]["class"] == "running" and slow[0]["act"] == "wait"
@@ -99,8 +108,9 @@ def test_probe_runs_when_elapsed_passes_expected(env):
 
 
 def test_builtin_probes_output_and_worker(env, monkeypatch):
-    run_plan(env, [{"id": "r", "type": "run", "cmd": "sh -c 'echo a >&2; sleep 1'", "expected": 0.3, "next": "end"}],
-             slow={"max_waits": 10})
+    run_plan(
+        env, [{"id": "r", "type": "run", "cmd": "sh -c 'echo a >&2; sleep 1'", "expected": 0.3, "next": "end"}], slow={"max_waits": 10}
+    )
     assert lines(env, "slow")[0]["probe"]["name"] == "output"
     (env / "state" / "progress.jsonl").unlink()
     monkeypatch.setenv("FAKE_CLAUDE_SLEEP", "1")
@@ -112,8 +122,10 @@ def test_builtin_probes_output_and_worker(env, monkeypatch):
 def test_remedied_is_solved_without_llm_and_tells_conductor(env, monkeypatch):
     forbid = env / "forbidden"
     monkeypatch.setenv("FAKE_CLAUDE_FORBID", str(forbid))
-    _, text = run_plan(env, [{"id": "release", "type": "run", "cmd": "sleep 1", "expected": 0.4,
-                              "probe": probe_of(env, "remedied", "stale"), "next": "end"}])
+    _, text = run_plan(
+        env,
+        [{"id": "release", "type": "run", "cmd": "sleep 1", "expected": 0.4, "probe": probe_of(env, "remedied", "stale"), "next": "end"}],
+    )
     assert "結果: 完了" in text and not forbid.exists()
     att = [a for a in lines(env, "attention") if a["reason"] == "遅れ"]
     assert att and "待ち直す" in att[0]["text"] and "調べた目印 remedied" in att[0]["text"]
@@ -121,8 +133,9 @@ def test_remedied_is_solved_without_llm_and_tells_conductor(env, monkeypatch):
 
 def judge_plan(env, decision, monkeypatch, cmd="sleep 3", **step):
     monkeypatch.setenv("FAKE_DECISION", decision)
-    return run_plan(env, [{"id": "slow", "type": "run", "cmd": cmd, "expected": 0.3,
-                           "probe": probe_of(env, "judge", "unknown"), "next": "end", **step}])
+    return run_plan(
+        env, [{"id": "slow", "type": "run", "cmd": cmd, "expected": 0.3, "probe": probe_of(env, "judge", "unknown"), "next": "end", **step}]
+    )
 
 
 def test_judge_stop_stops_plan_with_reason(env, monkeypatch):
@@ -148,10 +161,21 @@ def test_judge_retry_reruns_step_then_stops_over_max_retry(env, monkeypatch):
 def test_judge_fix_goes_to_on_fail(env, monkeypatch):
     mark = env / "fixed"
     monkeypatch.setenv("FAKE_DECISION", "fix")
-    s, text = run_plan(env, [
-        {"id": "slow", "type": "run", "cmd": "sleep 3", "expected": 0.3, "probe": probe_of(env, "judge"),
-         "on_fail": "after", "next": "end"},
-        {"id": "after", "type": "run", "cmd": f"touch {mark}", "next": "end"}])
+    s, text = run_plan(
+        env,
+        [
+            {
+                "id": "slow",
+                "type": "run",
+                "cmd": "sleep 3",
+                "expected": 0.3,
+                "probe": probe_of(env, "judge"),
+                "on_fail": "after",
+                "next": "end",
+            },
+            {"id": "after", "type": "run", "cmd": f"touch {mark}", "next": "end"},
+        ],
+    )
     assert mark.exists() and "結果: 完了" in text
     assert s.state.results["slow"]["exit"] == 125 and "理由の目印 fix" in s.state.results["slow"]["text"]
 
@@ -190,8 +214,7 @@ def test_stop_kills_grandchild(env, monkeypatch):
 
 
 def test_history_keeps_only_success_and_gate(env):
-    run_plan(env, [{"id": "ok", "type": "run", "cmd": "true", "next": "bad"},
-                   {"id": "bad", "type": "run", "cmd": "false", "next": "end"}])
+    run_plan(env, [{"id": "ok", "type": "run", "cmd": "true", "next": "bad"}, {"id": "bad", "type": "run", "cmd": "false", "next": "end"}])
     run_plan(env, [{"id": "gate", "type": "run", "cmd": "sh -c 'exit 10'", "next": "end"}])
     rows = [json.loads(l) for l in (env / "history.jsonl").read_text().splitlines()]
     assert [(r["step"], r["exit"], r["phase"]) for r in rows] == [("ok", 0, "試験"), ("gate", 10, "試験")]
@@ -207,8 +230,7 @@ def test_limit_wait_is_not_counted_as_slow(env, monkeypatch):
 
 def test_bad_slow_config_stops_before_steps(env):
     mark = env / "ran"
-    _, text = run_plan(env, [{"id": "a", "type": "run", "cmd": f"touch {mark}", "next": "end"}],
-                       slow={"nope": 1})
+    _, text = run_plan(env, [{"id": "a", "type": "run", "cmd": f"touch {mark}", "next": "end"}], slow={"nope": 1})
     assert "結果: 止まった" in text and "slow の設定が読めない（nope）" in text and not mark.exists()
 
 
@@ -222,11 +244,22 @@ def test_expected_follows_declaration_and_argument(tmp_path):
     (wt / ".ndf").mkdir(parents=True)
     (wt / ".ndf" / "supervise.json").write_text(json.dumps({"version": 1, "slow": {"factor": 5}}))
     h = tmp_path / "h.jsonl"
-    h.write_text("".join(json.dumps({"at": f"t{i}", "phase": "実装", "step": "impl", "type": "work",
-                                     "seconds": 200, "exit": 0, "plan": ""}) + "\n" for i in range(3)))
+    h.write_text(
+        "".join(
+            json.dumps({"at": f"t{i}", "phase": "実装", "step": "impl", "type": "work", "seconds": 200, "exit": 0, "plan": ""}) + "\n"
+            for i in range(3)
+        )
+    )
     plan = tmp_path / "p.json"
-    plan.write_text(json.dumps({"フェーズ": "実装", "作業場所": str(wt), "steps": [
-        {"id": "impl", "type": "work", "prompt": "x"}, {"id": "j", "type": "judge", "question": "q"}]}))
+    plan.write_text(
+        json.dumps(
+            {
+                "フェーズ": "実装",
+                "作業場所": str(wt),
+                "steps": [{"id": "impl", "type": "work", "prompt": "x"}, {"id": "j", "type": "judge", "question": "q"}],
+            }
+        )
+    )
     code, out = cli("expected", str(plan), "--history", str(h))
     assert code == 0 and [i["expected"] for i in out["items"]] == [1000.0]
     _, out = cli("expected", str(plan), "--history", str(h), "--slow", "factor=2")
@@ -237,8 +270,9 @@ def test_history_import_twice_adds_nothing_second_time(tmp_path):
     st = tmp_path / "a-state"
     st.mkdir()
     (tmp_path / "a.json").write_text(json.dumps({"フェーズ": "実装", "steps": []}))
-    (st / "progress.jsonl").write_text(json.dumps({"kind": "step", "at": "t", "step": "impl", "type": "work",
-                                                   "exit": 0, "seconds": 5}) + "\n")
+    (st / "progress.jsonl").write_text(
+        json.dumps({"kind": "step", "at": "t", "step": "impl", "type": "work", "exit": 0, "seconds": 5}) + "\n"
+    )
     h = tmp_path / "h.jsonl"
     code, out = cli("history", "import", str(st / "progress.jsonl"), "--history", str(h))
     assert code == 0 and out["metrics"]["added"] == 1

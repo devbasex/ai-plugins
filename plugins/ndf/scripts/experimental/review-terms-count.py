@@ -10,6 +10,7 @@
 
 結果は lib/step_result.py の形の 1 行の JSON（`tool: "review-terms-count"`）。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -54,8 +55,7 @@ def count(comments: list, reviews: list) -> dict:
         for k, words in TERMS.items():
             if any(w in body for w in words):
                 hits[k] += 1
-    rounds = [int(m.group(1)) for r in reviews if isinstance(r, dict)
-              for m in [ROUND.match(str(r.get("body") or ""))] if m]
+    rounds = [int(m.group(1)) for r in reviews if isinstance(r, dict) for m in [ROUND.match(str(r.get("body") or ""))] if m]
     return {"findings": len(findings), **hits, "rounds": max(rounds, default=0)}
 
 
@@ -69,8 +69,15 @@ def cmd(a):
         comments = gh_json(f"repos/{a.repo}/pulls/{a.pr}/comments")
         reviews = gh_json(f"repos/{a.repo}/pulls/{a.pr}/reviews")
     m = count(comments, reviews)
-    emit(result(TOOL, "ok", f"指摘 {m['findings']} 件のうち語・定義 {m['terms']} 件・食い違い {m['mismatch']} 件"
-                            f"（{m['rounds']} ラウンド）", [], m))
+    emit(
+        result(
+            TOOL,
+            "ok",
+            f"指摘 {m['findings']} 件のうち語・定義 {m['terms']} 件・食い違い {m['mismatch']} 件（{m['rounds']} ラウンド）",
+            [],
+            m,
+        )
+    )
 
 
 def main(argv=None):

@@ -6,6 +6,7 @@
 
 外部への通信は行わない。配置は `tmp_path` の上に作る。
 """
+
 from __future__ import annotations
 
 import os
@@ -16,9 +17,7 @@ from pathlib import Path
 
 import pytest
 
-REFERENCE = (
-    Path(__file__).resolve().parents[1] / "references" / "scripts-lookup.md"
-)
+REFERENCE = Path(__file__).resolve().parents[1] / "references" / "scripts-lookup.md"
 HEADING = "## 入口を探すコマンド"
 # 解決の入口の実物。配置を作るたびに写す。
 RESOLVE_ENTRY = Path(__file__).resolve().parents[3] / "scripts" / "resolve.sh"
@@ -49,7 +48,10 @@ def resolve(cwd: Path, home: Path, plugin_root: Path | None = None) -> str:
     env.pop("CLAUDE_PLUGIN_ROOT", None)
     got = subprocess.run(
         ["bash", "-c", f'set -uo pipefail\n{snippet}\nprintf "%s\\n" "$SCRIPTS"\n'],
-        cwd=str(cwd), env=env, capture_output=True, text=True,
+        cwd=str(cwd),
+        env=env,
+        capture_output=True,
+        text=True,
     )
     assert got.returncode == 0, got.stderr
     return got.stdout.strip()
@@ -187,9 +189,7 @@ def test_kiro_relative_symlink(tmp_path, home) -> None:
     skills = project / ".kiro" / "skills"
     skills.mkdir(parents=True)
     src = plugin / "skills" / "development-workflow"
-    (skills / src.name).symlink_to(
-        os.path.relpath(src, start=skills), target_is_directory=True
-    )
+    (skills / src.name).symlink_to(os.path.relpath(src, start=skills), target_is_directory=True)
     assert resolve(project, home) == str(plugin / "scripts")
 
 

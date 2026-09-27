@@ -3,6 +3,7 @@
 `SlowWatch` は `Engine` が持ち、ハンドラーからは `ctx.slow` として使う。`ctx` から読むもの: `plan`・`steps`・
 `cwd`・`state`（途中の報告と worker の行）・`claude`（判定の claude -p）・`base_branch()`・`plan_path`。
 """
+
 from __future__ import annotations
 
 import json
@@ -33,6 +34,7 @@ class SlowAction(Exception):
 @dataclass
 class StepWatch:
     """走っているステップ 1 つの見張りの状態。ステップの開始で作り、ステップの終わりで捨てる。"""
+
     step_id: str
     type: str
     started: float
@@ -78,8 +80,11 @@ class SlowWatch:
             if exp is not None and (isinstance(exp, bool) or not isinstance(exp, (int, float)) or exp <= 0):
                 raise ss.SlowConfigError(f"ステップ {s['id']} の expected")
             probe = s.get("probe", "output")
-            if not (probe in ("output", "worker") or probe is False
-                    or (isinstance(probe, dict) and isinstance(probe.get("cmd"), str) and probe["cmd"])):
+            if not (
+                probe in ("output", "worker")
+                or probe is False
+                or (isinstance(probe, dict) and isinstance(probe.get("cmd"), str) and probe["cmd"])
+            ):
                 raise ss.SlowConfigError(f"ステップ {s['id']} の probe")
         return cfg
 
@@ -90,14 +95,21 @@ class SlowWatch:
         if carry:
             expected, basis, retries = carry.expected, carry.basis, carry.retries + 1
         else:
-            hist = ss.read_history(self.history, self.ctx.plan.get("フェーズ") or "?", step["id"],
-                                   self.cfg.window) if self.history else []
+            hist = ss.read_history(self.history, self.ctx.plan.get("フェーズ") or "?", step["id"], self.cfg.window) if self.history else []
             expected, basis = ss.expected_for(hist, self.cfg, step.get("expected"))
             retries = 0
         commits = ss.commit_count(step.get("cwd", self.ctx.cwd)) if step["type"] == "work" else None
-        return StepWatch(step_id=step["id"], type=step["type"], started=time.time(), expected=expected,
-                         basis=basis, next_check=expected, retries=retries,
-                         worker_seen=self.ctx.state.pcount["worker"], commits=commits)
+        return StepWatch(
+            step_id=step["id"],
+            type=step["type"],
+            started=time.time(),
+            expected=expected,
+            basis=basis,
+            next_check=expected,
+            retries=retries,
+            worker_seen=self.ctx.state.pcount["worker"],
+            commits=commits,
+        )
 
     def end_watch(self) -> None:
         """ステップの終わり。成功か関門なら所要（利用上限の待ちを除く）を履歴へ積み、見張りを捨てる。"""
@@ -106,8 +118,10 @@ class SlowWatch:
         if not w or not self.history or not ss.keeps(cur.get("exit")) or cur.get("slow"):
             return
         seconds = max(0.0, time.time() - w.started - w.paused)
-        err = ss.append_history(self.history, ss.history_record(
-            self.ctx.plan.get("フェーズ"), w.step_id, w.type, seconds, cur["exit"], self.ctx.plan_path, clock.now_iso()))
+        err = ss.append_history(
+            self.history,
+            ss.history_record(self.ctx.plan.get("フェーズ"), w.step_id, w.type, seconds, cur["exit"], self.ctx.plan_path, clock.now_iso()),
+        )
         if err:
             cur["slow_history"] = err
 
@@ -173,8 +187,7 @@ class SlowWatch:
         if act == "wait":
             w.waits = 0
             wait_s = w.expected
-            if llm and d["ok"] and isinstance(d.get("wait_seconds"), (int, float)) \
-                    and not isinstance(d["wait_seconds"], bool):
+            if llm and d["ok"] and isinstance(d.get("wait_seconds"), (int, float)) and not isinstance(d["wait_seconds"], bool):
                 wait_s = min(max(float(d["wait_seconds"]), 60.0), w.expected)
             w.next_check = round(el + wait_s, 1)
             self.slow_write({**line, "act": "wait", "by": by, "next_check": w.next_check})
@@ -189,11 +202,18 @@ class SlowWatch:
         """probe の cmd の置き換え: {pr} {base} {branch} {state_dir}。"""
         cwd = step.get("cwd", self.ctx.cwd)
         origin = str(self.ctx.plan.get("起点") or "")
-        base = origin[len("origin/"):] if origin.startswith("origin/") else (origin or self.ctx.base_branch() or "")
-        branch = subprocess.run(["git", "branch", "--show-current"], cwd=cwd, capture_output=True,
-                                text=True).stdout.strip() if Path(cwd).is_dir() else ""
-        return {"pr": plan_mod.pr_number(self.ctx.plan.get("Pull Request")), "base": base, "branch": branch,
-                "state_dir": str(self.ctx.state.dir)}
+        base = origin[len("origin/") :] if origin.startswith("origin/") else (origin or self.ctx.base_branch() or "")
+        branch = (
+            subprocess.run(["git", "branch", "--show-current"], cwd=cwd, capture_output=True, text=True).stdout.strip()
+            if Path(cwd).is_dir()
+            else ""
+        )
+        return {
+            "pr": plan_mod.pr_number(self.ctx.plan.get("Pull Request")),
+            "base": base,
+            "branch": branch,
+            "state_dir": str(self.ctx.state.dir),
+        }
 
     def slow_probe(self, w: StepWatch) -> dict:
         """ステップの probe（既定は run・drive が output、work が worker）で一次の調査を流す。"""
@@ -202,8 +222,7 @@ class SlowWatch:
         if kind is False:
             return {"name": "none", "class": "unknown", "action": "judge", "summary": "調べずに判定へ回す（probe: false）"}
         if isinstance(kind, dict):
-            return ss.probe_cmd(kind["cmd"], self.probe_values(step), step.get("cwd", self.ctx.cwd),
-                                self.cfg.probe_timeout)
+            return ss.probe_cmd(kind["cmd"], self.probe_values(step), step.get("cwd", self.ctx.cwd), self.cfg.probe_timeout)
         if kind == "worker":
             self.ctx.state.read_worker_lines()
             new_lines = self.ctx.state.pcount["worker"] - w.worker_seen
@@ -230,17 +249,19 @@ class SlowWatch:
                 tail = log.read_text(encoding="utf-8", errors="replace")[-TAIL:] if log else ""
             except OSError:
                 tail = ""
-        hist = ss.read_history(self.history, self.ctx.plan.get("フェーズ") or "?", w.step_id,
-                               self.cfg.window) if self.history else []
-        prompt = (f"フェーズ: {self.ctx.plan.get('フェーズ')} / 課題: {self.ctx.plan.get('課題')}\n"
-                  f"## ステップ\n{json.dumps(spec, ensure_ascii=False)}\n\n"
-                  f"## 経過と想定\n経過 {el} 秒 / 想定 {round(w.expected, 1)} 秒 / 根拠 "
-                  f"{json.dumps(w.basis, ensure_ascii=False)}\n\n"
-                  f"## 一次の調査（古い順）\n" + "\n".join(json.dumps(p, ensure_ascii=False) for p in w.probes)
-                  + f"\n\n## 出力の末尾\n{tail or '（出力なし）'}\n\n"
-                  f"## 同じステップの履歴の所要（秒、古い順）\n{hist or '無し'}\n\n"
-                  "## 手の意味\nretry = ステップを止めて同じステップを打ち直す / fix = ステップを止めて on_fail へ / "
-                  "stop = 計画を止める / wait = 待ち直す（wait_seconds を付けてよい）")
+        hist = ss.read_history(self.history, self.ctx.plan.get("フェーズ") or "?", w.step_id, self.cfg.window) if self.history else []
+        prompt = (
+            f"フェーズ: {self.ctx.plan.get('フェーズ')} / 課題: {self.ctx.plan.get('課題')}\n"
+            f"## ステップ\n{json.dumps(spec, ensure_ascii=False)}\n\n"
+            f"## 経過と想定\n経過 {el} 秒 / 想定 {round(w.expected, 1)} 秒 / 根拠 "
+            f"{json.dumps(w.basis, ensure_ascii=False)}\n\n"
+            f"## 一次の調査（古い順）\n"
+            + "\n".join(json.dumps(p, ensure_ascii=False) for p in w.probes)
+            + f"\n\n## 出力の末尾\n{tail or '（出力なし）'}\n\n"
+            f"## 同じステップの履歴の所要（秒、古い順）\n{hist or '無し'}\n\n"
+            "## 手の意味\nretry = ステップを止めて同じステップを打ち直す / fix = ステップを止めて on_fail へ / "
+            "stop = 計画を止める / wait = 待ち直す（wait_seconds を付けてよい）"
+        )
         res = self.ctx.claude.call(SLOW_SYSTEM, prompt, None, str(self.ctx.state.work), int(self.cfg.judge_timeout))
         self.ctx.claude.record_usage("judge", res)
         self.ctx.state.pcount["llm"] += 1
@@ -255,5 +276,10 @@ class SlowWatch:
             d = None
         if not isinstance(d, dict) or d.get("decision") not in ss.DECISIONS:
             return {**out, "decision": "wait", "reason": f"答えを読めない: {(res.get('text') or '')[:200]}"}
-        return {**out, "ok": True, "decision": d["decision"], "reason": str(d.get("reason") or "")[:300],
-                "wait_seconds": d.get("wait_seconds")}
+        return {
+            **out,
+            "ok": True,
+            "decision": d["decision"],
+            "reason": str(d.get("reason") or "")[:300],
+            "wait_seconds": d.get("wait_seconds"),
+        }

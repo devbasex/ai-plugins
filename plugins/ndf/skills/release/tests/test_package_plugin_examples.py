@@ -1,4 +1,5 @@
 """公開されている配布起点の Bash 例を、本物の Git で現状固定する。"""
+
 from __future__ import annotations
 
 import json
@@ -30,8 +31,12 @@ def repository(tmp_path: Path):
 
     def git(*args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            ["git", *args], cwd=tmp_path, env=env,
-            text=True, capture_output=True, check=True,
+            ["git", *args],
+            cwd=tmp_path,
+            env=env,
+            text=True,
+            capture_output=True,
+            check=True,
         )
 
     git("init", "--template=", "--initial-branch=development")
@@ -45,7 +50,8 @@ def repository(tmp_path: Path):
 def commit_package(repository, version: str, payload: str) -> None:
     root, _, git = repository
     (root / PLUGIN_JSON).write_text(
-        json.dumps({"version": version}) + "\n", encoding="utf-8",
+        json.dumps({"version": version}) + "\n",
+        encoding="utf-8",
     )
     (root / PAYLOAD).write_text(payload + "\n", encoding="utf-8")
     git("add", "plugins/ndf")
@@ -59,7 +65,10 @@ def run_base_example(repository) -> subprocess.CompletedProcess[str]:
     assert example, "文書の最初の Bash ブロックが見つからない"
     return subprocess.run(
         ["bash", "--noprofile", "--norc", "-euo", "pipefail", "-c", example.group(1)],
-        cwd=root, env=env, text=True, capture_output=True,
+        cwd=root,
+        env=env,
+        text=True,
+        capture_output=True,
     )
 
 

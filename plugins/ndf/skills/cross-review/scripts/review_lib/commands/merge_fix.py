@@ -1,4 +1,5 @@
 """副命令 `merge-fix`（#1142 の C2）。"""
+
 from __future__ import annotations
 
 import argparse
@@ -16,10 +17,7 @@ def _thread_ids(value: Any) -> list[str]:
     取り出せない形は空の一覧として扱い、後段のチェックを行わない。
     """
     items = value if isinstance(value, list) else [value] if isinstance(value, dict) else []
-    return [
-        str(d["thread_id"]) for d in items
-        if isinstance(d, dict) and d.get("thread_id")
-    ]
+    return [str(d["thread_id"]) for d in items if isinstance(d, dict) and d.get("thread_id")]
 
 
 def _thread_positions(value: Any) -> list[dict[str, Any]]:
@@ -43,11 +41,13 @@ def _thread_positions(value: Any) -> list[dict[str, Any]]:
             line: int | None = int(d.get("line"))
         except (TypeError, ValueError):
             line = None
-        positions.append({
-            "thread_id": str(thread_id) if thread_id else None,
-            "path": str(path) if path else None,
-            "line": line,
-        })
+        positions.append(
+            {
+                "thread_id": str(thread_id) if thread_id else None,
+                "path": str(path) if path else None,
+                "line": line,
+            }
+        )
     return positions
 
 
@@ -221,8 +221,7 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     # 送れない・報告されたコミットが送り先に載っていないときは、記録も投稿もせずに
     # 止まる。同じ取り込みをやり直せば、同じ手順を最初から通る。
     commit = fix.get("fix_commit") or fix.get("commit_sha")
-    pushed = result_posts.push_fix(str(st.get("worktree_path") or ""),
-                                   str(st.get("head_branch") or ""), commit)
+    pushed = result_posts.push_fix(str(st.get("worktree_path") or ""), str(st.get("head_branch") or ""), commit)
     if not pushed.ok:
         review_lib.die(f"修正を送れないか、報告されたコミットが送り先に載っていません: {pushed.detail}")
     print(f"PUSHED={1 if pushed.pushed else 0} COMMIT_ON_HEAD={1 if pushed.contains else 0}")
@@ -231,15 +230,18 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     store._save(pr, st)
 
     posted = result_posts.post_fix(
-        posts._queue(pr), fix[fix_result.FIX_SOURCE_KEY], str(st.get("repo") or ""),
-        int(st.get("current_pr") or pr), round_no=st["rounds"][-1].get("round"),
-        actor=str(st.get("viewer_login") or "") or None)
+        posts._queue(pr),
+        fix[fix_result.FIX_SOURCE_KEY],
+        str(st.get("repo") or ""),
+        int(st.get("current_pr") or pr),
+        round_no=st["rounds"][-1].get("round"),
+        actor=str(st.get("viewer_login") or "") or None,
+    )
     st["rounds"][-1]["fix"]["summary_comment_url"] = posted.summary_url
     store._save(pr, st)
     if posted.summary_url:
         print(f"POSTED summary_url={posted.summary_url}")
-    print(f"REPLIED={posted.replied} RESOLVED={posted.resolved} QUEUED={posted.queued}"
-          f" DROPPED={posted.dropped}")
+    print(f"REPLIED={posted.replied} RESOLVED={posted.resolved} QUEUED={posted.queued} DROPPED={posted.dropped}")
     if posted.dropped and not posted.failed:
         review_lib.info(f"⚠️ 送れない項目を {posted.dropped} 件飛ばしました ({posted.detail})")
     if posted.failed:

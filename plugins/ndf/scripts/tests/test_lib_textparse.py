@@ -1,4 +1,5 @@
 """unified diff の解釈とコメントの除去の包み（lib/textparse.py・#1142 の決定 19）。外部パッケージは全体テストの環境（根の pyproject.toml）が入れる。"""
+
 from __future__ import annotations
 
 import sys

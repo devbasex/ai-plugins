@@ -56,7 +56,7 @@ cd .worktrees/feature/<名前>
 
 ## 手元での検証
 
-**Pull Request を出す前に、次の 4 つをこの順で実行します。** 継続的統合が実行するものと同じ
+**Pull Request を出す前に、次の 5 つをこの順で実行します。** 継続的統合が実行するものと同じ
 チェックです。リポジトリの根から実行します。
 
 ```bash
@@ -71,7 +71,26 @@ python3 scripts/check-doc-staleness.py
 
 # 4. 文書間のリンク
 python3 scripts/check-markdown-links.py --root .
+
+# 5. formatter と静的解析（ruff format --check・ruff check・shellcheck -S warning）
+bash scripts/check-lint.sh
 ```
+
+**5 は git が追跡する Python と sh の全体を検査します。** 版と設定は根の `pyproject.toml`
+（`[tool.ruff]` と `[dependency-groups] lint`）と `uv.lock` が固定し、継続的統合の `lint.yml` も
+同じコマンドを呼びます。違反があれば 1、`uv` が無いなど検査の仕組みが落ちたら 2 で終わります。
+`bash scripts/check-lint.sh --fix` は、ruff が自動で直せる違反を直して整形してから検査します
+（sh は直しません）。`bash scripts/install-dev-hooks.sh` を入れた clone では、`git push` の前に
+`.githooks/pre-push` が同じコマンドを走らせます。
+
+抑止には理由を添えます。行の抑止は同じ行か直前の行に、設定の除外は `pyproject.toml` のコメントに書きます。
+
+```python
+# 次の 5 つは、他のモジュールが monitor.monitor_proc のように使う再公開の import である（F401 の抑止の理由。#1323）
+import monitor_proc  # noqa: E402,F401
+```
+
+（`plugins/ndf/scripts/lib/monitor.py` から）
 
 プラグイン定義そのものを変えたときは、あわせて次を実行します。**引数にプラグインのパスが
 要ります。**
@@ -82,7 +101,56 @@ bash scripts/build-runtime-plugins.sh --check
 bash scripts/validate-runtime-plugins.sh
 ```
 
-`plugins/ndf/skills/` だけを触った場合は 1〜4 で足ります。
+`plugins/ndf/skills/` だけを触った場合は 1〜5 で足ります。
+
+## 一括の整形と git blame
+
+**Python の全体は一度だけ一括で整形してある。** 一括の自動修正（`ruff check --fix`）と
+一括の整形（`ruff format`）の 2 つのコミットは、根の `.git-blame-ignore-revs` に載っています。
+GitHub の blame の画面はこのファイルを自動で読みます。手元の `git blame` に読ませるには、clone ごとに
+1 回設定します。
+
+```bash
+git config blame.ignoreRevsFile .git-blame-ignore-revs
+```
+
+この設定のまま、`.git-blame-ignore-revs` の無い版（一括の整形より前のタグやブランチ）を checkout した
+作業ツリーで `git blame` を打つと、`fatal: could not open object name list` で落ちます。そのときは
+1 回だけ設定を外して打ちます。
+
+```bash
+git -c blame.ignoreRevsFile= blame <ファイル>
+```
+
+### 一括の整形の前から続くブランチを取り込む
+
+そのまま `develop` を取り込むと、触ったファイルが整形の差で衝突します。次の順で取り込むと、衝突は
+自分の変更だけに残ります。
+
+```bash
+git fetch origin
+AUTOFIX=$(git show origin/develop:.git-blame-ignore-revs | grep -E '^[0-9a-f]{40}$' | sed -n 1p)
+FORMAT=$(git show origin/develop:.git-blame-ignore-revs | grep -E '^[0-9a-f]{40}$' | sed -n 2p)
+
+# 1. 一括の自動修正の直前まで取り込む（検査の設定と scripts/check-lint.sh が入る）
+git merge "$AUTOFIX^"
+
+# 2. 自分のブランチへ同じツールを掛けてコミットする。直せない違反が残ると 1 で終わるが、ここでは続ける
+bash scripts/check-lint.sh --fix
+git commit -am "Refactor: 一括の整形（#1323）に合わせて整形する"
+
+# 3. 一括の整形を取り込む。両側とも同じツールの出力なので、衝突は自分の側を採る
+git merge -X ours "$FORMAT"
+
+# 4. 残りの develop をふつうに取り込む（ここで出る衝突は、ふつうの衝突として解く）
+git merge origin/develop
+
+# 5. 自分の変更に残る違反を直して、0 で終わるまで繰り返す
+bash scripts/check-lint.sh
+```
+
+**`-X ours` は 3 の 1 回だけに使います。** 4 で使うと、一括の整形の後に `develop` へ入った手の修正を、
+衝突した箇所で捨てます。
 
 ## コミットメッセージ
 
@@ -120,7 +188,7 @@ Skill 執筆規約の「上限値」にあります。
 
 ## Pull Request を出す
 
-1. 手元での検証の 4 つを通します
+1. 手元での検証の 5 つを通します
 2. `--base develop` を付けて Pull Request を作ります
 3. 本文に、変更の要約・関連する issue・検証した手段と結果・影響するランタイムを書きます
 4. 継続的統合の結果を確かめます

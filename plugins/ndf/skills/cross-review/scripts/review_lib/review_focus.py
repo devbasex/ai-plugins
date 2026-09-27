@@ -1,4 +1,5 @@
 """レビュー観点のテンプレートと、ラウンドごとの観点の組み立て（#1142 の C2）。"""
+
 from __future__ import annotations
 
 import argparse
@@ -128,8 +129,9 @@ CATEGORY_TEMPLATES = {
 }
 
 
-def _design_stage_fields(kind: str, worktree: object, changed_files: list[dict[str, Any]],
-                         review_instructions: str, manual: str) -> dict[str, Any]:
+def _design_stage_fields(
+    kind: str, worktree: object, changed_files: list[dict[str, Any]], review_instructions: str, manual: str
+) -> dict[str, Any]:
     """設計 PR の段（モデル / 詳細）の材料を返す（#1111）。設計 PR でなければ空。
 
     `design_has_model` は変更した設計文書のどれかに見出し `## ドメインモデル` があるか。
@@ -137,8 +139,7 @@ def _design_stage_fields(kind: str, worktree: object, changed_files: list[dict[s
     """
     if kind != "design":
         return {}
-    paths = [p for entry in changed_files or [] if isinstance(entry, dict)
-             for p in entry.get("paths", []) if isinstance(p, str)]
+    paths = [p for entry in changed_files or [] if isinstance(entry, dict) for p in entry.get("paths", []) if isinstance(p, str)]
     paths += [entry for entry in changed_files or [] if isinstance(entry, str)]
     return {
         "design_has_model": has_domain_model(str(worktree) if worktree else None, paths),

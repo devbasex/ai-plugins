@@ -1,4 +1,5 @@
 """hook-trial.py の timing（2）・passthrough（3）を持つ。sdk と bump（4）は ht_sdk.py・ht_bump.py。"""
+
 from __future__ import annotations
 
 import json
@@ -43,11 +44,13 @@ def make_repo(work: Path) -> Path:
 def payloads(repo: Path) -> dict:
     base = {"hook_event_name": "PreToolUse", "session_id": "t2-timing", "cwd": str(repo)}
     return {
-        "bash_write": {**base, "tool_name": "Bash",
-                       "tool_input": {"command": "cd sub 2>/dev/null; sed -i 's/a/b/' README.md && echo ok > out.txt"}},
+        "bash_write": {
+            **base,
+            "tool_name": "Bash",
+            "tool_input": {"command": "cd sub 2>/dev/null; sed -i 's/a/b/' README.md && echo ok > out.txt"},
+        },
         "bash_read": {**base, "tool_name": "Bash", "tool_input": {"command": "git status --short | head -5"}},
-        "edit": {**base, "tool_name": "Edit", "tool_input": {"file_path": str(repo / "README.md"),
-                                                               "old_string": "a", "new_string": "b"}},
+        "edit": {**base, "tool_name": "Edit", "tool_input": {"file_path": str(repo / "README.md"), "old_string": "a", "new_string": "b"}},
     }
 
 
@@ -69,8 +72,7 @@ def cmd_timing(a) -> None:
         "python 直": [py, str(HOOK)],
         "sh + python": ["sh", "-c", LAUNCH, py, str(HOOK)],
     }
-    bases = {"python -c pass": [py, "-c", "pass"],
-             "python + import tree_sitter_bash": [py, "-c", "import tree_sitter, tree_sitter_bash"]}
+    bases = {"python -c pass": [py, "-c", "pass"], "python + import tree_sitter_bash": [py, "-c", "import tree_sitter, tree_sitter_bash"]}
     rows, items = {}, []
     # steady: 同じセッションで打ち直す（状態ファイルが温まり、今の guard は同じパスの案内を 2 回目から出さない）
     # fresh: 1 回ごとに新しいセッション（状態を解決し直し、案内まで出す）
@@ -91,9 +93,13 @@ def cmd_timing(a) -> None:
                     samples[name].append(ms)
                     outs[name] = (p.returncode, bool(p.stdout.strip()))
             for name, xs in samples.items():
-                rows[f"{key} / {name}"] = {"median_ms": round(statistics.median(xs), 1),
-                                          "p90_ms": round(sorted(xs)[int(len(xs) * 0.9) - 1], 1),
-                                          "runs": len(xs), "exit": outs[name][0], "notice": outs[name][1]}
+                rows[f"{key} / {name}"] = {
+                    "median_ms": round(statistics.median(xs), 1),
+                    "p90_ms": round(sorted(xs)[int(len(xs) * 0.9) - 1], 1),
+                    "runs": len(xs),
+                    "exit": outs[name][0],
+                    "notice": outs[name][1],
+                }
     for name, argv in bases.items():
         xs = [once(argv, b"", env)[0] for _ in range(a.runs)]
         rows[name] = {"median_ms": round(statistics.median(xs), 1), "runs": len(xs)}
@@ -102,19 +108,34 @@ def cmd_timing(a) -> None:
         now = rows[f"{pname} / worktree-guard.sh"]["median_ms"]
         for name in ("python 直", "sh + python"):
             new = rows[f"{pname} / {name}"]["median_ms"]
-            items.append({"kind": "timing", "name": f"{pname} / {name}", "result": "faster" if new <= now else "slower",
-                          "now_ms": now, "new_ms": new})
+            items.append(
+                {
+                    "kind": "timing",
+                    "name": f"{pname} / {name}",
+                    "result": "faster" if new <= now else "slower",
+                    "now_ms": now,
+                    "new_ms": new,
+                }
+            )
             if new > now:
                 worse.append(f"{pname} / {name}")
         # 案内の有無が同じか（同じ仕事をしているか）。steady の今の guard は 2 回目から案内を出さないので比べない
         n0 = rows[f"{pname} / worktree-guard.sh"]["notice"]
-        for name in (("python 直", "sh + python") if pname.startswith("fresh") else ()):
+        for name in ("python 直", "sh + python") if pname.startswith("fresh") else ():
             if rows[f"{pname} / {name}"]["notice"] != n0:
                 worse.append(f"{pname} / {name} の案内の有無が今と違う")
     (work / "timing.json").write_text(json.dumps(rows, ensure_ascii=False, indent=1), encoding="utf-8")
     status = "stopped" if worse else "ok"
-    emit(result(TOOL, status, f"hook 1 回の所要の中央値（{a.runs} 回ずつ）" + ("。悪くなった: " + " / ".join(worse) if worse else ""),
-                items, rows), 0 if status == "ok" else 1)
+    emit(
+        result(
+            TOOL,
+            status,
+            f"hook 1 回の所要の中央値（{a.runs} 回ずつ）" + ("。悪くなった: " + " / ".join(worse) if worse else ""),
+            items,
+            rows,
+        ),
+        0 if status == "ok" else 1,
+    )
 
 
 def cmd_passthrough(a) -> None:
@@ -134,8 +155,9 @@ def cmd_passthrough(a) -> None:
     items, bad = [], []
     for name, argv in cases.items():
         if argv is None:
-            items.append({"kind": "passthrough", "name": name, "result": "skipped",
-                          "reason": f"{sys_py} が tree_sitter_bash を import できる"})
+            items.append(
+                {"kind": "passthrough", "name": name, "result": "skipped", "reason": f"{sys_py} が tree_sitter_bash を import できる"}
+            )
             continue
         try:
             p = subprocess.run(argv, input=data, capture_output=True, env=env)
@@ -144,14 +166,28 @@ def cmd_passthrough(a) -> None:
             rc, out, err = 127, "", str(e)
         passed = rc == 0 and not out
         want = name != "環境がある（対照）"
-        items.append({"kind": "passthrough", "name": name, "result": "passthrough" if passed else "not_passthrough",
-                      "exit": rc, "stdout": out[:120], "stderr": err[:120]})
+        items.append(
+            {
+                "kind": "passthrough",
+                "name": name,
+                "result": "passthrough" if passed else "not_passthrough",
+                "exit": rc,
+                "stdout": out[:120],
+                "stderr": err[:120],
+            }
+        )
         if want and not passed and "python 直" not in name:
             bad.append(name)
         if not want and passed:
             bad.append(name + "（案内が出ない）")
     direct = next(i for i in items if "python 直" in i["name"])
     status = "stopped" if bad else "ok"
-    summary = ("環境が無いときも壊れているときも判定をせずに通す（hook の command は sh で環境の有無を見る形にする。"
-               f"python を直に指す形は終了コード {direct['exit']} で終わる）") if not bad else "判定をせずに通す形にならない: " + " / ".join(bad)
+    summary = (
+        (
+            "環境が無いときも壊れているときも判定をせずに通す（hook の command は sh で環境の有無を見る形にする。"
+            f"python を直に指す形は終了コード {direct['exit']} で終わる）"
+        )
+        if not bad
+        else "判定をせずに通す形にならない: " + " / ".join(bad)
+    )
     emit(result(TOOL, status, summary, items), 0 if status == "ok" else 1)

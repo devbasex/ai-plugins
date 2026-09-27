@@ -5,6 +5,7 @@
 `parse` はタイムゾーンの無い時刻にこの機械の地方時を付ける（付けないまま比べると `TypeError` になる）。
 状態ファイルへ書く形（`iso`）はタイムゾーン付きで秒まで。
 """
+
 from __future__ import annotations
 
 from clock import iso, now, parse, seconds_between  # noqa: F401  ライブラリの時刻をこのパッケージの名前で使う

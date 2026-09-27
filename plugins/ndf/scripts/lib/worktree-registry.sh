@@ -140,6 +140,7 @@ if ! . "$(dirname "${BASH_SOURCE[0]}")/lock-common.sh" 2>/dev/null; then
 fi
 
 # 捨ててよいと見なすまでの分数。共通ファイルの値を、既存の名前でも引けるようにする。
+# shellcheck disable=SC2034  # source する側が既存の名前で読む（#1323）
 WT_LOCK_STALE_MINUTES="${NDF_LOCK_STALE_MINUTES:-5}"
 
 # 待ちの上限の既定は 5 秒である。**この既定に環境変数の上書きは置かない。**

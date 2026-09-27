@@ -10,6 +10,7 @@ python で動いていなければその python で `hook.py` を起動し直し
 どの失敗も終了コード 0 で、標準出力へは何も書かない（`PermissionRequest` の判断に使われないため）。
 `DEBUG_SLACK_NOTIFY=true` のときだけ `~/.claude/logs/wait-notify-<日付>.log` へ理由を書く。
 """
+
 from __future__ import annotations
 
 import json
@@ -36,6 +37,7 @@ DELETE_DELAY = 0.5
 # 子: 本文の組み立てと送信
 # ---------------------------------------------------------------------------
 
+
 def _stdout_of(cmd: list[str], cwd: str, timeout: float) -> str | None:
     """`cmd` の標準出力（前後の空白を落とす）。失敗・起動できない・時間切れは `None`。"""
     try:
@@ -58,8 +60,8 @@ def current_pr(cwd: str) -> str | None:
 def slack_api(method: str, data: dict) -> dict | None:
     """Slack の Web API を 1 回呼ぶ（`lib/notify.py`）。失敗は None で、理由はログへ書く。"""
     import notify  # 切り離した子（--send）の中でだけ読む（deps.require("notify") の後）
-    return notify.slack_call(method, data, timeout=SLACK_TIMEOUT,
-                             on_error=lambda m, why: log("slack error:", m, why))
+
+    return notify.slack_call(method, data, timeout=SLACK_TIMEOUT, on_error=lambda m, why: log("slack error:", m, why))
 
 
 def build_notice(payload: dict) -> wn.Notice:
@@ -110,11 +112,13 @@ def _read_stdin() -> dict | None:
 def run_legacy_hook(runtime: str) -> None:
     """古いエントリポイント（`--runtime`）。hook の環境の python で `hook.py` の関数を呼ぶ。"""
     import hook_python
+
     if not hook_python.hook_packages_importable():
         hook_python.exec_hook_python(str(HERE / "hook.py"), ["wait-notify", "--runtime", runtime])
         log("skip: the hook environment is not prepared")
         return
     from hook_lib import wait_notify
+
     wait_notify.hook(runtime, _read_stdin())
 
 
@@ -122,6 +126,7 @@ def main(argv: list[str]) -> int:
     try:
         if len(argv) >= 2 and argv[0] == "--send":
             import deps  # 切り離した子は hook の経路ではないので、uv の環境へ起動し直してよい
+
             deps.require("notify")
             send_notice(json.loads(argv[1]))
         elif len(argv) >= 2 and argv[0] == "--runtime" and argv[1] in RUNTIMES:

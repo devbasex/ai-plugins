@@ -4,6 +4,7 @@
 読み込まずに動く数行を書いている。複製である以上、両者が食い違う経路が残る。同じ入力に
 対して同じ名前を返すことを、ここで突き合わせる（issue #202）。
 """
+
 from __future__ import annotations
 
 import json
@@ -75,11 +76,7 @@ def repo_without_origin_head(tmp_path: Path) -> Path:
 def snippet_of(name: str) -> str:
     """起点を解決する bash のコードブロックを取り出す。"""
     text = (SKILLS / name / "SKILL.md").read_text(encoding="utf-8")
-    blocks = [
-        block
-        for block in re.findall(r"^```bash\n(.*?)^```$", text, re.S | re.M)
-        if MARKER in block
-    ]
+    blocks = [block for block in re.findall(r"^```bash\n(.*?)^```$", text, re.S | re.M) if MARKER in block]
     assert len(blocks) == 1, f"{name}: 起点を解決する bash が 1 つではない（{len(blocks)} 個）"
     return blocks[0]
 
@@ -87,14 +84,18 @@ def snippet_of(name: str) -> str:
 def run_inline(name: str, repo: Path) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["bash", "-c", f'set -uo pipefail\n{snippet_of(name)}\nprintf "%s\\n" "$dev_base"\n'],
-        cwd=str(repo), capture_output=True, text=True,
+        cwd=str(repo),
+        capture_output=True,
+        text=True,
     )
 
 
 def run_library(repo: Path) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["bash", "-c", f'set -uo pipefail\n. "{LIB}"\nwt_base_branch "{repo}"\n'],
-        cwd=str(repo), capture_output=True, text=True,
+        cwd=str(repo),
+        capture_output=True,
+        text=True,
     )
 
 
@@ -136,9 +137,7 @@ def test_inline_resolution_matches_library(name: str, case: str, repo: Path) -> 
 
 @pytest.mark.parametrize("name", INLINE_SKILLS)
 @pytest.mark.parametrize("case", list(DECLARATIONS))
-def test_inline_resolution_matches_library_without_origin_head(
-    name: str, case: str, repo_without_origin_head: Path
-) -> None:
+def test_inline_resolution_matches_library_without_origin_head(name: str, case: str, repo_without_origin_head: Path) -> None:
     """origin の HEAD が取れないときの落とし先も突き合わせる。
 
     既定ブランチの解決は `origin の HEAD → main → master` の順で、最後の 1 段は
@@ -155,9 +154,7 @@ def test_inline_resolution_matches_library_without_origin_head(
 
 
 @pytest.mark.parametrize("name", INLINE_SKILLS)
-def test_inline_matches_library_when_declared_branch_is_missing(
-    name: str, repo_without_develop: Path
-) -> None:
+def test_inline_matches_library_when_declared_branch_is_missing(name: str, repo_without_develop: Path) -> None:
     """宣言した名前がどこにも無いとき、手順も共通ライブラリも落とさずに失敗する。
 
     ここを突き合わせないと、手順だけが実在しない名前をそのまま返す状態が残る。返した名前は
@@ -176,9 +173,7 @@ def test_inline_matches_library_when_declared_branch_is_missing(
 
 
 @pytest.mark.parametrize("name", INLINE_SKILLS)
-def test_inline_matches_library_when_declared_branch_is_unfetched(
-    name: str, repo_with_unfetched_develop: Path
-) -> None:
+def test_inline_matches_library_when_declared_branch_is_unfetched(name: str, repo_with_unfetched_develop: Path) -> None:
     """取得していないだけで origin にあるブランチも、どちらも起点として使う。
 
     起点を `develop` へ移した直後の作業ディレクトリがこの形になる。取得済みの参照だけを
@@ -190,9 +185,7 @@ def test_inline_matches_library_when_declared_branch_is_unfetched(
 
 
 @pytest.mark.parametrize("name", INLINE_SKILLS)
-def test_inline_matches_library_when_only_a_lookalike_branch_exists(
-    name: str, repo_with_lookalike_develop: Path
-) -> None:
+def test_inline_matches_library_when_only_a_lookalike_branch_exists(name: str, repo_with_lookalike_develop: Path) -> None:
     """末尾が一致するだけの別のブランチを、どちらも起点として採らない。
 
     `git ls-remote` のパターンは参照名の末尾に一致するため、完全な参照名で問い合わせても
@@ -225,9 +218,7 @@ LOCAL_BASE_BRANCH = {"version": 1, "base_branch": "main"}
 
 @pytest.mark.parametrize("name", INLINE_SKILLS)
 @pytest.mark.parametrize("case", list(DECLARATIONS))
-def test_local_declaration_does_not_change_the_resolution(
-    name: str, case: str, repo: Path
-) -> None:
+def test_local_declaration_does_not_change_the_resolution(name: str, case: str, repo: Path) -> None:
     """起点は共有の宣言だけが決める。個人の宣言を置いても、手順と共通ライブラリの
     解決結果は個人の宣言が無い木と一致する（#495 の決定 7）。"""
     body = DECLARATIONS[case]

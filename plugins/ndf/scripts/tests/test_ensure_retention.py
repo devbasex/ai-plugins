@@ -1,4 +1,5 @@
 """ensure-retention.sh が書く settings.json の場所を検証する。"""
+
 from __future__ import annotations
 
 import json

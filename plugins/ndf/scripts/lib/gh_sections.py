@@ -4,6 +4,7 @@
 節に含めないため、書いた節の終わりへ目印（`SECTION_END`）を置く。** 目印があれば節は目印で終わり、
 目印より後ろは節の外として残す（#659: 最後の節を差し替えると、末尾へ足した 1 行が消えた）。
 """
+
 from __future__ import annotations
 
 import re
@@ -15,11 +16,11 @@ _HEADING = re.compile(r"^(#{1,6})[ \t]+\S")
 
 
 class _Span(NamedTuple):
-    start: int      # 見出しの行
-    content: int    # 見出しの次の行
-    end: int        # 節の終わり（目印の行を含まない）
-    after: int      # 節の外が始まる行（目印があれば目印の次）
-    last: bool      # 後ろに見出しが無い
+    start: int  # 見出しの行
+    content: int  # 見出しの次の行
+    end: int  # 節の終わり（目印の行を含まない）
+    after: int  # 節の外が始まる行（目印があれば目印の次）
+    last: bool  # 後ろに見出しが無い
 
 
 def _lines(body: str) -> list[str]:
@@ -49,7 +50,7 @@ def _find(lines: list[str], heading: str) -> _Span | None:
     for n, (i, _) in enumerate(heads):
         if lines[i].rstrip() != heading:
             continue
-        nxt = next((j for j, lv in heads[n + 1:] if lv <= level), None)
+        nxt = next((j for j, lv in heads[n + 1 :] if lv <= level), None)
         end = len(lines) if nxt is None else nxt
         marker = next((k for k in range(i + 1, end) if lines[k].strip() == SECTION_END), None)
         if marker is not None:
@@ -64,7 +65,7 @@ def get_section(body: str, heading: str) -> str | None:
     span = _find(lines, heading)
     if span is None:
         return None
-    return "\n".join(lines[span.content:span.end]).strip("\n")
+    return "\n".join(lines[span.content : span.end]).strip("\n")
 
 
 def _section_block(heading: str, content: str) -> list[str]:
@@ -83,11 +84,11 @@ def replace_section(body: str, heading: str, content: str) -> str:
     if span is None:
         head = "\n".join(lines).rstrip("\n")
         return (head + "\n\n" if head else "") + "\n".join(block) + "\n"
-    before = lines[:span.start]
+    before = lines[: span.start]
     if span.after != span.end:
         # 目印の後ろは節の外である。空行も含めてそのまま残す。
-        return "\n".join(before + block + lines[span.after:])
-    after = lines[span.after:]
+        return "\n".join(before + block + lines[span.after :])
+    after = lines[span.after :]
     while after and not after[0].strip():
         after = after[1:]
     if any(x.strip() for x in after):
@@ -108,7 +109,7 @@ def append_line(body: str, line: str) -> str:
     heads = _heading_lines(lines)
     if heads:
         last_i, _ = heads[-1]
-        tail = lines[last_i + 1:]
+        tail = lines[last_i + 1 :]
         if not any(x.strip() == SECTION_END for x in tail):
             while lines and not lines[-1].strip():
                 lines.pop()

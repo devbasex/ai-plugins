@@ -3,6 +3,7 @@
 今の `wait-notify.py:_parse_env` から変わる入力を固定する: `export KEY=v` は `KEY` として読む（今は `export KEY`）、
 引用しない値の後ろの ` # 注記` は値に含めない（今は含める）。すでにある環境変数を上書きしないのは今と同じ。
 """
+
 from __future__ import annotations
 
 import json
@@ -83,8 +84,7 @@ def test_env_file_is_found_up_to_the_git_top_and_does_not_override(tmp_path: Pat
         monkeypatch.delenv(k, raising=False)
     monkeypatch.setenv("NDF_T_B", "set")
     assert notify.load_env_upward(top / "a" / "b") == top / ".env"
-    assert (os.environ["NDF_T_A"], os.environ["NDF_T_B"], os.environ["NDF_T_C"], os.environ["NDF_T_D"]) == \
-        ("q v", "set", "3", "v")
+    assert (os.environ["NDF_T_A"], os.environ["NDF_T_B"], os.environ["NDF_T_C"], os.environ["NDF_T_D"]) == ("q v", "set", "3", "v")
     assert "NDF_T_OUT" not in os.environ and "export NDF_T_C" not in os.environ
 
 

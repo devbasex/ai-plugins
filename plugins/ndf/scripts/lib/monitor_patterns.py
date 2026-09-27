@@ -3,6 +3,7 @@
 ログ（err.log・stdout.log）の行を、利用上限・致命・警告・無害・CLI の上限・codex の終わりの印の表と照らす。
 標準ライブラリだけを import する。`supervise.py` は利用上限の表（`USAGE_LIMIT_FATAL`）をここから読む。
 """
+
 from __future__ import annotations
 
 import re
@@ -25,8 +26,7 @@ USAGE_LIMIT_FATAL = [
     # コマンドの出力（差分・ファイルの中身）も err.log へ書くため、文書やテストを
     # 読み上げた行に一致させない。codex は誤りの行に `ERROR: ` を付ける。
     # claude は `You've hit your ` の後に期間や種類（週・セッション・支出）を差し込む。
-    re.compile(r"^(?:ERROR:\s*)?You['’]ve hit your (?:[\w'’ ]+ )?(?:limit|budget)\b",
-               re.MULTILINE),
+    re.compile(r"^(?:ERROR:\s*)?You['’]ve hit your (?:[\w'’ ]+ )?(?:limit|budget)\b", re.MULTILINE),
     # codex の再試行の上限。**最後の状態が 429 のときだけ利用上限と読む**（503 などの
     # 一時的な誤りは起動し直せば解けうる）。
     re.compile(r"^(?:ERROR:\s*)?exceeded retry limit, last status: 429\b", re.MULTILINE),
@@ -97,10 +97,7 @@ EARLY_ERROR_BENIGN = [
 
 # `EARLY_ERROR_FATAL_WARNING_SHAPED` に適用する benign 規則。
 # 「行頭が warning:」だけを外し、ドキュメント引用の除外は維持する。
-EARLY_ERROR_BENIGN_KEEP_WARNINGS = [
-    p for p in EARLY_ERROR_BENIGN
-    if p.pattern != r"^warning: "
-]
+EARLY_ERROR_BENIGN_KEEP_WARNINGS = [p for p in EARLY_ERROR_BENIGN if p.pattern != r"^warning: "]
 
 
 def _match_is_quoted(line: str, match_start: int, match_end: int) -> bool:
@@ -152,6 +149,7 @@ def _unescaped_count(text: str, quote: str) -> int:
         if backslashes % 2 == 0:
             count += 1
     return count
+
 
 CODEX_SENTINEL = re.compile(r"^tokens used$", re.MULTILINE)
 

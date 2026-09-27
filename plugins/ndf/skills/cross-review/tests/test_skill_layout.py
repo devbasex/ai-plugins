@@ -1,4 +1,5 @@
 """反証のプロンプトの語を固定する（#732）。"""
+
 from __future__ import annotations
 
 import pathlib

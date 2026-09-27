@@ -5,6 +5,7 @@
 `_classify_failed_names` へ寄せても、code-related / meta-only の分岐が変わらないことを
 固定する。分岐は `_classify_ci` を直接呼んだ結果と一致していなければならない。
 """
+
 from __future__ import annotations
 import review_lib.ci
 
@@ -15,9 +16,7 @@ def test_failed_names_split_matches_the_explicit_mapping(state_mod):
 
     got = review_lib.ci._classify_failed_names(names)
 
-    expected = review_lib.ci._classify_ci(
-        [{"name": n, "status": "completed", "conclusion": "failure"} for n in names]
-    )
+    expected = review_lib.ci._classify_ci([{"name": n, "status": "completed", "conclusion": "failure"} for n in names])
 
     assert got == expected
     # 分岐そのものも固定する（申告された失敗はすべて completed 扱い）。

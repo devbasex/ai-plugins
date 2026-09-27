@@ -11,6 +11,7 @@
 `python3 scripts/<名前>.py` で起動したときは、根の uv の環境（`<根>/.venv`）へ 1 回だけ起動し直す。
 全体テスト（`uv run --frozen --project . --all-extras pytest`）の中では、そのまま戻る。
 """
+
 from __future__ import annotations
 
 import sys

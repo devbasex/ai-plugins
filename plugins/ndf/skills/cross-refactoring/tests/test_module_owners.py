@@ -5,6 +5,7 @@
 - `refactor_lib/clock.py` の時刻の関数は `lib/clock.py` のもの
 - worktree の置き場の slug は `lib/repo.py` のもの
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -18,24 +19,61 @@ LIB = SKILL.parents[1] / "scripts" / "lib"
 
 # 分けた先のモジュール → そこで定義する名前（issue-1142-design-modules.md の表）
 OWNERS = {
-    "pathkinds": ("is_test_path", "_has_shebang", "_is_code_path", "production_code_changes",
-                  "TEST_PATH_MARKERS", "TEST_NAME_MARKERS", "CODE_EXTENSIONS"),
+    "pathkinds": (
+        "is_test_path",
+        "_has_shebang",
+        "_is_code_path",
+        "production_code_changes",
+        "TEST_PATH_MARKERS",
+        "TEST_NAME_MARKERS",
+        "CODE_EXTENSIONS",
+    ),
     "process": ("run_with_timeout", "_process_group_alive", "_kill_process_group", "run_test_at"),
-    "github": ("resolved_threads_on_github", "_fetch_review_threads_page", "_REVIEW_THREADS_QUERY",
-               "check_run_result", "_gh_api_get"),
-    "worktree": ("revert_item_commits", "reset_hard", "revert_range", "replay_commits",
-                 "_order_newest_first", "_worktree_changes", "_control_prefix", "_dirty_paths",
-                 "_discard_worktree_changes", "discard_impl_leftovers", "_require_clean_worktree"),
-    "publish": ("_sync_generated", "_run_sync_command", "_write_plan_file", "_publish_commit_message",
-                "_commit_sync_changes", "push_head", "push_with_retry_marker", "flush_pending_push",
-                "_push_with_credential_fallback", "credential_fallback_args", "gh_available",
-                "_CREDENTIAL_LIB"),
+    "github": ("resolved_threads_on_github", "_fetch_review_threads_page", "_REVIEW_THREADS_QUERY", "check_run_result", "_gh_api_get"),
+    "worktree": (
+        "revert_item_commits",
+        "reset_hard",
+        "revert_range",
+        "replay_commits",
+        "_order_newest_first",
+        "_worktree_changes",
+        "_control_prefix",
+        "_dirty_paths",
+        "_discard_worktree_changes",
+        "discard_impl_leftovers",
+        "_require_clean_worktree",
+    ),
+    "publish": (
+        "_sync_generated",
+        "_run_sync_command",
+        "_write_plan_file",
+        "_publish_commit_message",
+        "_commit_sync_changes",
+        "push_head",
+        "push_with_retry_marker",
+        "flush_pending_push",
+        "_push_with_credential_fallback",
+        "credential_fallback_args",
+        "gh_available",
+        "_CREDENTIAL_LIB",
+    ),
     "results": ("read_result", "note_stopped", "STOPPED_REASONS", "record_observed_model"),
 }
 
-GITFACTS_OWN = ("safe_int", "reported_shas", "commits_in_range", "commit_trailers",
-                "_parse_trailer_paragraph", "commit_diff_lines", "commit_files", "commit_test_changes",
-                "tracked_markdown", "commit_touches_tests", "commit_time", "collect_commit_facts")
+GITFACTS_OWN = (
+    "safe_int",
+    "reported_shas",
+    "commits_in_range",
+    "commit_trailers",
+    "_parse_trailer_paragraph",
+    "commit_diff_lines",
+    "commit_files",
+    "commit_test_changes",
+    "tracked_markdown",
+    "commit_touches_tests",
+    "commit_time",
+    "collect_commit_facts",
+)
 
 
 @pytest.mark.parametrize("module, name", [(m, n) for m, names in OWNERS.items() for n in names])

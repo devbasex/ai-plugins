@@ -16,6 +16,7 @@
 着手前の HEAD は、作業ディレクトリを checkout で動かさず、一時の detach の作業ツリーで
 走らせて消す。作業ディレクトリを動かすと、途中で落ちたときに HEAD が戻らない。
 """
+
 from __future__ import annotations
 
 import pathlib
@@ -38,12 +39,10 @@ def _read(log: pathlib.Path) -> str:
 
 def _reported(nodes: list[str], reported: list[str]) -> list[str]:
     """`nodes` のうち、出力が落ちたと報じたもの。収集の失敗はファイルの単位で出る。"""
-    return [n for n in nodes
-            if n in reported or any(n.startswith(r + "::") for r in reported)]
+    return [n for n in nodes if n in reported or any(n.startswith(r + "::") for r in reported)]
 
 
-def failing_now(words: list[str], cwd: str, nodes: list[str], timeout: int,
-                log: pathlib.Path) -> list[str]:
+def failing_now(words: list[str], cwd: str, nodes: list[str], timeout: int, log: pathlib.Path) -> list[str]:
     """落ちたテストだけを走らせ直し、まだ落ちているものを返す。読めなければ全部。"""
     code, timed_out = run_with_timeout(list(words), cwd, timeout, output=log)
     if not timed_out and code == 0:
@@ -52,8 +51,7 @@ def failing_now(words: list[str], cwd: str, nodes: list[str], timeout: int,
     return hit or list(nodes)
 
 
-def failing_at(work: str, sha: str, words: list[str], nodes: list[str], timeout: int,
-               log: pathlib.Path) -> list[str]:
+def failing_at(work: str, sha: str, words: list[str], nodes: list[str], timeout: int, log: pathlib.Path) -> list[str]:
     """着手前の HEAD（`sha`）でも落ちるものを返す。読めなければ空（元からの失敗とみなさない）。"""
     holder = pathlib.Path(tempfile.mkdtemp(prefix="rf-baseline-"))
     tree = holder / "tree"
@@ -73,8 +71,7 @@ def failing_at(work: str, sha: str, words: list[str], nodes: list[str], timeout:
 
 def baseline_head(state: dict[str, Any]) -> Optional[str]:
     """着手前の HEAD。`init` が残した SHA、無ければ（旧い状態ファイル）改修計画の起点。"""
-    return ((state.get("baseline_test") or {}).get("head")
-            or (state.get("plan") or {}).get("base_sha") or None)
+    return (state.get("baseline_test") or {}).get("head") or (state.get("plan") or {}).get("base_sha") or None
 
 
 def classify(state: dict[str, Any], whole_log: pathlib.Path, timed_out: bool) -> dict[str, Any]:
@@ -94,9 +91,11 @@ def classify(state: dict[str, Any], whole_log: pathlib.Path, timed_out: bool) ->
     rerun_log = tmp / "verify-whole-rerun.log"
     still = failing_now(words, work, nodes, timeout, rerun_log)
     base = baseline_head(state)
-    before = (failing_at(work, base, rerun_command(command, still, work) or [], still, timeout,
-                         tmp / "verify-whole-baseline.log")
-              if still and base else [])
+    before = (
+        failing_at(work, base, rerun_command(command, still, work) or [], still, timeout, tmp / "verify-whole-baseline.log")
+        if still and base
+        else []
+    )
     caused = [n for n in still if n not in before]
     return {
         "failed_tests": nodes,

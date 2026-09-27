@@ -1,4 +1,5 @@
 """副命令 `judge` と、その続きの `flush`（#1142 の C2）。"""
+
 from __future__ import annotations
 
 import argparse
@@ -8,7 +9,13 @@ from typing import Any
 import review_lib  # noqa: E402
 import monitor_outcome  # noqa: E402
 from review_lib import (  # noqa: E402
-    ci as ci_mod, findings as findings_mod, matching, participants as participants_mod, posts, store)
+    ci as ci_mod,
+    findings as findings_mod,
+    matching,
+    participants as participants_mod,
+    posts,
+    store,
+)
 
 
 def cmd_flush(args: argparse.Namespace) -> None:
@@ -25,8 +32,7 @@ def cmd_flush(args: argparse.Namespace) -> None:
     print(f"PENDING_DROPPED={len(result.dropped)}")
     print(f"PENDING_REMAINING={result.remaining}")
     for item in result.dropped:
-        review_lib.info(f"⚠️ 送れない項目を飛ばしました ({item.get('kind')} #{item.get('seq')}):"
-             f" {item.get('last_error') or ''}")
+        review_lib.info(f"⚠️ 送れない項目を飛ばしました ({item.get('kind')} #{item.get('seq')}): {item.get('last_error') or ''}")
     if result.remaining:
         reason = (result.failed or {}).get("last_error", "")
         review_lib.info(
@@ -43,9 +49,7 @@ def _no_result_reasons(last: dict[str, Any], no_result: list[str]) -> dict[str, 
 
     どの出口でも進行側が理由を読めるように、先頭で 1 度だけ出す（#729 の AC14）。
     """
-    reasons = {
-        a: (last.get(a) or {}).get("no_result_reason") or "missing" for a in no_result
-    }
+    reasons = {a: (last.get(a) or {}).get("no_result_reason") or "missing" for a in no_result}
     print(f"NO_RESULT_REASONS='{' '.join(f'{a}={r}' for a, r in reasons.items())}'")
     return reasons
 
@@ -62,9 +66,7 @@ def _abort_no_result_round(pr: int, st: dict[str, Any], msg: str) -> None:
     review_lib.die(msg, code=1)
 
 
-def _record_relaunch(
-    pr: int, st: dict[str, Any], last: dict[str, Any], pending: list[str]
-) -> None:
+def _record_relaunch(pr: int, st: dict[str, Any], last: dict[str, Any], pending: list[str]) -> None:
     """同じラウンドで起動し直す担当を記録し、シェル向けの出力を出す。"""
     last["relaunched"] = (last.get("relaunched") or []) + pending
     store._save(pr, st)
@@ -73,15 +75,10 @@ def _record_relaunch(
     # 互換のために残す。**`both` は codex / agy の 2 者だけを指す語**であるため、
     # 担当がそれ以外を含むラウンドでは CSV の側を使う。
     print(f"RELAUNCH_TARGET={'both' if len(pending) == 2 else pending[0]}")
-    review_lib.info(
-        f"→ 結果を残さなかったレビュアーがいる: {' '.join(pending)}。"
-        "同じラウンドで 1 度だけ起動し直す。"
-    )
+    review_lib.info(f"→ 結果を残さなかったレビュアーがいる: {' '.join(pending)}。同じラウンドで 1 度だけ起動し直す。")
 
 
-def _handle_no_result_round(
-    pr: int, st: dict[str, Any], last: dict[str, Any], no_result: list[str]
-) -> None:
+def _handle_no_result_round(pr: int, st: dict[str, Any], last: dict[str, Any], no_result: list[str]) -> None:
     """結果なしの担当があるラウンドの出口を決める。
 
     先に理由の行（`NO_RESULT_REASONS`）を出す。どの出口でも進行側が理由を読めるようにする
@@ -92,14 +89,14 @@ def _handle_no_result_round(
     """
     last["verdict"] = "no_result"
     reasons = _no_result_reasons(last, no_result)
-    blocked = [a for a, r in reasons.items()
-               if not monitor_outcome.relaunch_same_agent(r)]
+    blocked = [a for a, r in reasons.items() if not monitor_outcome.relaunch_same_agent(r)]
     if blocked:
         for a in blocked:
             detail = (last.get(a) or {}).get("monitor_detail")
             review_lib.info(f"  {a}: reason={reasons[a]}" + (f" detail={detail}" if detail else ""))
         _abort_no_result_round(
-            pr, st,
+            pr,
+            st,
             f"起動し直しても解けない理由で結果が残りませんでした: {' '.join(blocked)}。"
             " 同じラウンドで起動し直さずに中断します。最終スイープを通してから"
             "完了報告へ進んでください",
@@ -109,7 +106,8 @@ def _handle_no_result_round(
     if not pending:
         # 2 度続けて結果が残らないのは、対象や負荷ではなく実行環境の側の事象である。
         _abort_no_result_round(
-            pr, st,
+            pr,
+            st,
             f"起動し直した後も結果が残りませんでした: {' '.join(no_result)}。"
             " 実行環境の側の問題として中断します。最終スイープを通してから"
             "完了報告へ進んでください",
@@ -130,10 +128,7 @@ def _finalize_converged_round(
     if ci["verdict"] == "code_failure":
         last["verdict"] = "changes_requested"
         store._save(pr, st)
-        review_lib.info(
-            f"→ 両方 APPROVE だが継続的統合が失敗している: {' '.join(ci['failed'])}。"
-            "修正へ。"
-        )
+        review_lib.info(f"→ 両方 APPROVE だが継続的統合が失敗している: {' '.join(ci['failed'])}。修正へ。")
         sys.exit(2)
     last["verdict"] = "approved"
     st["final"] = "approved"
@@ -142,16 +137,10 @@ def _finalize_converged_round(
     if ci["verdict"] == "meta_only":
         review_lib.info(f"⚠ {ci['note']}")
     elif ci["verdict"] == "pending":
-        review_lib.info(
-            f"⚠ 未完了のチェックジョブが残ったまま収束する: {' '.join(ci['pending'])}。"
-            "完了は待たない"
-        )
+        review_lib.info(f"⚠ 未完了のチェックジョブが残ったまま収束する: {' '.join(ci['pending'])}。完了は待たない")
     elif ci["verdict"] == "unverified":
         review_lib.info(f"⚠ 継続的統合を確かめられないまま収束する: {ci['reason']}")
-    review_lib.info(
-        "✅ 新しい指摘が出なくなった。収束。" if findings_measurable
-        else "✅ 全員が承認した。収束。"
-    )
+    review_lib.info("✅ 新しい指摘が出なくなった。収束。" if findings_measurable else "✅ 全員が承認した。収束。")
     sys.exit(0)
 
 
@@ -164,8 +153,7 @@ def _print_judge_status(
     pending_posts: int,
 ) -> None:
     """`cmd_judge` の冒頭で出す状態表示の print 群。"""
-    print("REVIEWER_INTENTS='" + " ".join(
-        f"{a}={intents[a]}" for a in reviewers) + "'")
+    print("REVIEWER_INTENTS='" + " ".join(f"{a}={intents[a]}" for a in reviewers) + "'")
     print(f"NEW_FINDINGS={new_findings if findings_measurable else '-'}")
     print(f"CARRIED_OVER_THREADS={carried_count}")
     print(f"PENDING_POSTS={pending_posts}")
@@ -182,13 +170,13 @@ def _evaluate_convergence(
     **新規の指摘が 0 件なら収束する。** 全員 `APPROVE` は最も止まらない参加者に
     律速される。同じ論点の再提出では止まり、新しい観点が出るあいだは回る。
     """
-    return carried is None and (
-        round_passes or (findings_measurable and new_findings == 0)
-    )
+    return carried is None and (round_passes or (findings_measurable and new_findings == 0))
 
 
 def _collect_reviewer_intents(
-    st: dict[str, Any], last: dict[str, Any], only: str | None,
+    st: dict[str, Any],
+    last: dict[str, Any],
+    only: str | None,
 ) -> tuple[list[str], dict[str, str], bool]:
     """このラウンドの担当を洗い出し、各担当の intent と pass 判定を集計する。"""
     reviewers = participants_mod._round_reviewers(st, last.get("round", 1))
@@ -223,10 +211,7 @@ def _finalize_round_if_converged(
         # 修正の工程（2）へは回さず、流し直す先（8）へ分ける。
         last["verdict"] = "queued"
         store._save(pr, st)
-        review_lib.info(
-            f"→ 待ち行列に {pending_posts} 件残っている。"
-            "流し切るまで収束させない（`state.py flush` で流す）。"
-        )
+        review_lib.info(f"→ 待ち行列に {pending_posts} 件残っている。流し切るまで収束させない（`state.py flush` で流す）。")
         sys.exit(8)
     _finalize_converged_round(pr, st, last, findings_measurable)
 
@@ -261,8 +246,12 @@ def cmd_judge(args: argparse.Namespace) -> None:
     pending_posts = posts._pending_posts(pr)
 
     _print_judge_status(
-        reviewers, intents, new_findings, findings_measurable,
-        carried_count, pending_posts,
+        reviewers,
+        intents,
+        new_findings,
+        findings_measurable,
+        carried_count,
+        pending_posts,
     )
 
     no_result = participants_mod._no_result_agents(last, only, reviewers)
@@ -270,23 +259,29 @@ def cmd_judge(args: argparse.Namespace) -> None:
         _handle_no_result_round(pr, st, last, no_result)
 
     converged = _evaluate_convergence(
-        carried, round_passes, findings_measurable, new_findings,
+        carried,
+        round_passes,
+        findings_measurable,
+        new_findings,
     )
 
     _finalize_round_if_converged(
-        pr, st, last, converged, findings_measurable, pending_posts,
+        pr,
+        st,
+        last,
+        converged,
+        findings_measurable,
+        pending_posts,
     )
 
     last["verdict"] = "changes_requested"
     store._save(pr, st)
     if carried is not None:
-        review_lib.info(
-            f"→ 引き継いだ指摘が {carried_count} 件残っている。"
-            "修正の工程を 1 度通すまで収束させない。"
-        )
+        review_lib.info(f"→ 引き継いだ指摘が {carried_count} 件残っている。修正の工程を 1 度通すまで収束させない。")
     else:
         review_lib.info(
-            "→ " + " ".join(f"{a}={intents[a]}" for a in reviewers)
+            "→ "
+            + " ".join(f"{a}={intents[a]}" for a in reviewers)
             + (f"（新しい指摘 {new_findings} 件）" if findings_measurable else "")
             + "。修正へ。"
         )

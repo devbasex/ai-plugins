@@ -7,6 +7,7 @@
 形（`cd` 単独・`cd -`・展開前の変数・`||` の左辺のどこで失敗したのかを決められない形）の後は、相対パスの書き込み先を
 出さない。起点を渡さない呼び方では字面のまま返す。展開前の変数を含む語は、どのパスを指すかを決められないので出さない。
 """
+
 from __future__ import annotations
 
 import os
@@ -18,8 +19,7 @@ NOT_TARGET = frozenset({"", ";", "&&", "/dev/null", "/dev/stdout", "/dev/stderr"
 NONCONT = frozenset({"exit", "return", "break", "continue"})
 WRITE_OPS = frozenset({">", ">>", "&>", "&>>", ">|", ">&", "<>"})
 LOOPS = ("if_statement", "while_statement", "for_statement", "c_style_for_statement", "case_statement")
-STATEMENTS = frozenset({"command", "list", "pipeline", "redirected_statement", "compound_statement",
-                        "subshell", "negated_command"})
+STATEMENTS = frozenset({"command", "list", "pipeline", "redirected_statement", "compound_statement", "subshell", "negated_command"})
 SED_INPLACE = re.compile(r"-[a-zA-Z]*i([a-zA-Z]*|\..*)")
 PATCH_MARKS = ("*** Update File: ", "*** Add File: ", "*** Delete File: ", "*** Move to: ")
 
@@ -261,7 +261,7 @@ class _Scan:
         if name != "cd" or st.base is None:
             return (0, False, False)
         st.cds += 1
-        dest = _cd_destination(words[i + 1:])
+        dest = _cd_destination(words[i + 1 :])
         if dest == "" or "$" in dest or dest.startswith("~"):
             st.cwd = None
         elif dest.startswith("/"):
@@ -310,11 +310,11 @@ def _command_targets(words: list[str]) -> list[str]:
     out: list[str] = []
     for k, w in enumerate(words):
         if w == "tee":
-            out.extend(a for a in words[k + 1:] if not a.startswith("-"))
+            out.extend(a for a in words[k + 1 :] if not a.startswith("-"))
         elif w == "sed":
-            out.extend(_sed_inplace_files(words[k + 1:]))
+            out.extend(_sed_inplace_files(words[k + 1 :]))
         elif w in ("cp", "mv"):
-            out.append(_cp_mv_destination(words[k + 1:]))
+            out.append(_cp_mv_destination(words[k + 1 :]))
     return out
 
 
@@ -377,7 +377,7 @@ def patch_targets(patch: str) -> list[str]:
     for line in (patch or "").splitlines():
         for mark in PATCH_MARKS:
             if line.startswith(mark):
-                target = line[len(mark):].strip()
+                target = line[len(mark) :].strip()
                 if target:
                     out.append(target)
                 break

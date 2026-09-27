@@ -3,6 +3,7 @@
 作業ディレクトリの解決・状態ファイルの探索と読み込み・結果ファイルの名前付けを
 持つ。外部コマンドの実行（`sh`）も、置き場所を確かめる手として同居する。
 """
+
 from __future__ import annotations
 
 import os
@@ -28,6 +29,7 @@ def default_worktree_base() -> pathlib.Path:
     2. `<システム tmpdir>/ndf-worktrees`（非永続領域。コンテナ再作成で自動消滅）
     """
     import tempfile
+
     env = os.environ.get("NDF_WORKTREE_BASE")
     if env:
         return pathlib.Path(env).resolve()
@@ -58,17 +60,11 @@ def _find_state(state_id: int) -> pathlib.Path:
     candidates = []
     if env:
         candidates.append(pathlib.Path(env) / f"cross-refactoring-rf{state_id}-state.json")
-    candidates.append(
-        pathlib.Path.cwd() / ".cross_refactoring"
-        / f"cross-refactoring-rf{state_id}-state.json"
-    )
+    candidates.append(pathlib.Path.cwd() / ".cross_refactoring" / f"cross-refactoring-rf{state_id}-state.json")
     for c in candidates:
         if c.exists():
             return c
-    die(
-        f"状態ファイルが見つかりません（rf{state_id}）。"
-        "CROSS_REFACTORING_TMP_DIR を export してから実行してください"
-    )
+    die(f"状態ファイルが見つかりません（rf{state_id}）。CROSS_REFACTORING_TMP_DIR を export してから実行してください")
     raise SystemExit(1)  # die が抜けることはないが型のために置く
 
 

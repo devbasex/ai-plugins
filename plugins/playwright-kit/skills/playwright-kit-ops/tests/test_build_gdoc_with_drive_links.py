@@ -27,9 +27,7 @@ _STARTED = _dt.datetime(2026, 4, 26, 12, 0, 0)
 _FINISHED = _dt.datetime(2026, 4, 26, 12, 0, 5)
 
 
-def _report_markdown(
-    case_dir: str = ABS_CASE_DIR, error_message: str = "AssertionError: boom"
-) -> str:
+def _report_markdown(case_dir: str = ABS_CASE_DIR, error_message: str = "AssertionError: boom") -> str:
     """report.md の実出力を得る。証跡 2 件 (trace / HAR) を持つ FAIL 1 件。"""
     return render_markdown(
         [
@@ -68,10 +66,7 @@ class TestReportRegression:
     def test_code_span_becomes_a_link_keeping_the_original_path(self):
         md = _report_markdown()
         out, _ = rewrite_links(md, _mapping())
-        assert (
-            f"- trace: [{ABS_CASE_DIR}/trace.zip]"
-            "(https://drive.google.com/file/d/TRACEID/view)"
-        ) in out
+        assert (f"- trace: [{ABS_CASE_DIR}/trace.zip](https://drive.google.com/file/d/TRACEID/view)") in out
         # 置換後にコード表記が残らない
         assert f"`{ABS_CASE_DIR}/trace.zip`" not in out
 
@@ -184,9 +179,7 @@ class TestFailureMessageIsPreserved:
 
     def test_code_span_in_failure_message_is_left_untouched(self):
         message = "AssertionError: `case-a/trace.zip` が見つからない"
-        out, replaced = rewrite_links(
-            _report_markdown(error_message=message), self.MAPPING
-        )
+        out, replaced = rewrite_links(_report_markdown(error_message=message), self.MAPPING)
         assert replaced == 2  # 証跡フィールドの trace / HAR だけ
         assert message in out
         assert "OTHERID" not in out
@@ -194,9 +187,7 @@ class TestFailureMessageIsPreserved:
     def test_parenthesized_path_in_failure_message_is_left_untouched(self):
         """リンク記法ではない丸括弧の中身は候補にしない。"""
         message = "AssertionError: open(case-a/trace.zip) failed"
-        out, replaced = rewrite_links(
-            _report_markdown(error_message=message), self.MAPPING
-        )
+        out, replaced = rewrite_links(_report_markdown(error_message=message), self.MAPPING)
         assert replaced == 2
         assert message in out
         assert "OTHERID" not in out

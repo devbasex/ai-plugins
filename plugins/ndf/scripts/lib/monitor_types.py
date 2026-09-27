@@ -3,6 +3,7 @@
 上限の既定値は上限の表（`limits.py`）を指す別名で、ここには値を持たない。ライブラリからは `assignment` と
 `limits` だけを import する。
 """
+
 from __future__ import annotations
 
 import os
@@ -40,13 +41,16 @@ def _agent_runtime(agent: str) -> str:
 DEFAULT_TIMEOUT = limits.PHASE_TIMEOUT[limits.DEFAULT_PHASE]
 DEFAULT_STALL = limits.DEFAULT_STALL
 DEFAULT_STALL_AGENT_BUILTIN = limits.AGENT_STALL
-DEFAULT_POLL = 15          # 15 sec — env `MONITOR_POLL` で上書き可
+DEFAULT_POLL = 15  # 15 sec — env `MONITOR_POLL` で上書き可
 # result.json が書き込まれた後もプロセスがハングするケース (実測) の
 # fallback: mtime から RESULT_AGE_GRACE 秒以上経過していれば完了とみなす。
 RESULT_AGE_GRACE = 30
 # `MONITOR_NO_EARLY_ERROR=1` で EARLY_ERROR 検知を無効化 (escape hatch)
 DEFAULT_NO_EARLY_ERROR = os.environ.get("MONITOR_NO_EARLY_ERROR", "").lower() in {
-    "1", "true", "yes", "on",
+    "1",
+    "true",
+    "yes",
+    "on",
 }
 
 
@@ -103,9 +107,11 @@ def _tmp_dir() -> pathlib.Path:
         return d
     # git worktree root を取得。サブディレクトリから起動しても一貫したパスにする。
     import subprocess as _sp
+
     r = _sp.run(
         ["git", "rev-parse", "--show-toplevel"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     if r.returncode == 0 and r.stdout.strip():
         root = pathlib.Path(r.stdout.strip()).resolve()
@@ -124,6 +130,7 @@ DEFAULT_STEM_TEMPLATE = "{agent}-review-pr{id}"
 @dataclass(frozen=True)
 class MonitorConfig:
     """1 agent の監視実行設定。"""
+
     timeout: int
     stall_timeout: int
     poll: int
@@ -144,12 +151,11 @@ class AgentPaths:
     result: pathlib.Path
 
     @classmethod
-    def for_(
-        cls, agent: str, pr: int, stem_template: str = DEFAULT_STEM_TEMPLATE
-    ) -> "AgentPaths":
+    def for_(cls, agent: str, pr: int, stem_template: str = DEFAULT_STEM_TEMPLATE) -> "AgentPaths":
         base = _tmp_dir() / stem_template.format(agent=agent, id=pr)
         return cls(
-            agent=agent, pr=pr,
+            agent=agent,
+            pr=pr,
             pidfile=pathlib.Path(f"{base}.pid"),
             err_log=pathlib.Path(f"{base}-err.log"),
             stdout_log=pathlib.Path(f"{base}-stdout.log"),

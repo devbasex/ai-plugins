@@ -3,6 +3,7 @@
 conftest.py へ置くと、複数の Skill のテストを同時に実行したときに `conftest` という
 モジュール名が衝突する。直接 import する補助はこの固有名のモジュールへ置く。
 """
+
 from __future__ import annotations
 
 import os
@@ -22,8 +23,11 @@ def run_lib(snippet: str, cwd: Path | None = None, env: dict | None = None) -> s
     if env:
         run_env.update(env)
     return subprocess.run(
-        ["bash", "-c", script], cwd=str(cwd) if cwd else None,
-        env=run_env, capture_output=True, text=True,
+        ["bash", "-c", script],
+        cwd=str(cwd) if cwd else None,
+        env=run_env,
+        capture_output=True,
+        text=True,
     )
 
 
@@ -34,8 +38,11 @@ def run_sync(*args: str, cwd: Path, env: dict | None = None) -> subprocess.Compl
     if env:
         run_env.update(env)
     return subprocess.run(
-        ["bash", str(SYNC), *args], cwd=str(cwd),
-        env=run_env, capture_output=True, text=True,
+        ["bash", str(SYNC), *args],
+        cwd=str(cwd),
+        env=run_env,
+        capture_output=True,
+        text=True,
     )
 
 

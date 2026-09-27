@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2034  # WT_ の変数は source する側（worktree-*.sh）が読む（#1323）
 # NDF plugin: 作業ツリー運用の判定を集めた共通ライブラリ。
 #
 # 入口のスクリプト (worktree-session.sh / worktree-setup.sh など) は入力の受け取りと

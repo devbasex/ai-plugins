@@ -25,6 +25,7 @@ PR の先頭のコミットの中身も足す）と MVV を最小構成の claud
 判定は毎回 --log（既定 ~/.local/state/ndf/mvv-gate.jsonl）へ 1 行で残す。--note を渡すと、Pull Request の
 コメントに使う判定の記録（判定・理由・ログ）を Markdown で書く。claude は NDF_MVV_CLAUDE で差し替えられる。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -96,16 +97,20 @@ def pr_facts(n: int, repo: str | None, cwd: Path) -> dict:
 
 
 def pr_material(n: int, info: dict) -> str:
-    files = "\n".join(f"- {f['path']} (+{f.get('additions', 0)} -{f.get('deletions', 0)})"
-                      for f in info.get("files", []))
+    files = "\n".join(f"- {f['path']} (+{f.get('additions', 0)} -{f.get('deletions', 0)})" for f in info.get("files", []))
     return f"## Pull Request #{n}: {info.get('title', '')}\n\n{info.get('body') or ''}\n\n### 変更したファイル\n{files}"
 
 
 def design_docs(info: dict) -> list[str]:
     """PR が足したか直した `issues/` の設計文書のパス（消しただけのものは読めないので除く）。"""
-    return [f["path"] for f in info.get("files", [])
-            if f.get("path", "").startswith("issues/") and f["path"].endswith(".md") and "design" in Path(f["path"]).name
-            and not (f.get("additions", 0) == 0 and f.get("deletions", 0) > 0)]
+    return [
+        f["path"]
+        for f in info.get("files", [])
+        if f.get("path", "").startswith("issues/")
+        and f["path"].endswith(".md")
+        and "design" in Path(f["path"]).name
+        and not (f.get("additions", 0) == 0 and f.get("deletions", 0) > 0)
+    ]
 
 
 def design_material(n: int, path: str, info: dict, repo: str | None, cwd: Path) -> str:
@@ -132,9 +137,22 @@ def ask(prompt: str) -> tuple[dict | None, str, dict]:
     呼び出しごとに使用量の帳簿へ 1 行を足す（#1142 の不足 f。source は mvv-gate、プランの外の呼び出し）。
     """
     import usage_ledger  # lib/ は起動の時に sys.path へ足してある
+
     base = shlex.split(os.environ.get("NDF_MVV_CLAUDE", "claude"))
-    cmd = base + ["-p", "--output-format", "json", "--no-session-persistence", "--setting-sources", "",
-                  "--strict-mcp-config", "--disable-slash-commands", "--system-prompt", SYSTEM, "--tools", ""]
+    cmd = base + [
+        "-p",
+        "--output-format",
+        "json",
+        "--no-session-persistence",
+        "--setting-sources",
+        "",
+        "--strict-mcp-config",
+        "--disable-slash-commands",
+        "--system-prompt",
+        SYSTEM,
+        "--tools",
+        "",
+    ]
     try:
         p = subprocess.run(cmd, input=prompt, capture_output=True, text=True, timeout=600)
     except (OSError, subprocess.TimeoutExpired) as e:
@@ -148,12 +166,15 @@ def ask(prompt: str) -> tuple[dict | None, str, dict]:
         return None, (p.stdout + p.stderr)[-500:], {}
     text = outer.get("result") or ""
     usage = {"cost_usd": outer.get("total_cost_usd"), "seconds": (outer.get("duration_ms") or 0) / 1000}
-    usage_ledger.append_safely(os.getcwd(), usage_ledger.UsageRecord.from_claude(
-        outer, source="mvv-gate", kind="mvv",
-        seconds=usage["seconds"] if outer.get("duration_ms") is not None else None))
+    usage_ledger.append_safely(
+        os.getcwd(),
+        usage_ledger.UsageRecord.from_claude(
+            outer, source="mvv-gate", kind="mvv", seconds=usage["seconds"] if outer.get("duration_ms") is not None else None
+        ),
+    )
     start, end = text.find("{"), text.rfind("}")
     try:
-        verdict = json.loads(text[start:end + 1]) if start >= 0 else None
+        verdict = json.loads(text[start : end + 1]) if start >= 0 else None
     except json.JSONDecodeError:
         verdict = None
     if not isinstance(verdict, dict) or verdict.get("verdict") not in VERDICTS:
@@ -183,8 +204,7 @@ def boundary_hits(root: Path, infos: dict[int, dict]) -> list[str]:
         patterns = read_pace(root)["boundary_paths"]
     except PaceError as e:
         raise Back(str(e))
-    return [f"#{n} {f['path']}" for n, info in infos.items() for f in info.get("files", [])
-            if matches(f.get("path", ""), patterns)]
+    return [f"#{n} {f['path']}" for n, info in infos.items() for f in info.get("files", []) if matches(f.get("path", ""), patterns)]
 
 
 def write_log(path: str, record: dict) -> None:
@@ -196,11 +216,24 @@ def write_log(path: str, record: dict) -> None:
 
 def record_gate(a, record: dict) -> str | None:
     """関門の記録をミッションの状態へ書く。書けなければ理由を返す。"""
-    what = "MVV 判定: " + " / ".join([*(f"#{n}" for n in a.pr), *a.material]) if (a.pr or a.material) \
-        else "MVV 判定"
-    cmd = [sys.executable, str(HERE / "mission-state.py"), "gate", a.mission, GATE_NAMES[a.gate], "--what", what,
-           "--by", "mvv", "--verdict", record["verdict"], "--reasons", json.dumps(record["reasons"], ensure_ascii=False),
-           "--log", str(Path(a.log).expanduser())]
+    what = "MVV 判定: " + " / ".join([*(f"#{n}" for n in a.pr), *a.material]) if (a.pr or a.material) else "MVV 判定"
+    cmd = [
+        sys.executable,
+        str(HERE / "mission-state.py"),
+        "gate",
+        a.mission,
+        GATE_NAMES[a.gate],
+        "--what",
+        what,
+        "--by",
+        "mvv",
+        "--verdict",
+        record["verdict"],
+        "--reasons",
+        json.dumps(record["reasons"], ensure_ascii=False),
+        "--log",
+        str(Path(a.log).expanduser()),
+    ]
     p = subprocess.run(cmd, capture_output=True, text=True)
     return None if p.returncode == 0 else (p.stdout + p.stderr).strip()[-300:] or f"終了コード {p.returncode}"
 
@@ -212,20 +245,33 @@ def write_note(path: str, a, record: dict) -> None:
         f"## MVV 判定（{GATES[a.gate]}）\n\n"
         f"- 判定: {record['verdict']}（関門を省いた。利用者が承認した MVV を事前の許可として扱う）\n"
         f"- 時刻: {record['at']}\n- ログ: `{Path(a.log).expanduser()}` の {record['at']} の行\n\n"
-        f"### 理由\n\n{reasons}\n", encoding="utf-8")
+        f"### 理由\n\n{reasons}\n",
+        encoding="utf-8",
+    )
 
 
 def cmd_check(a) -> tuple[dict, int | None]:
     root = Path(a.root or ".").resolve()
-    record = {"at": clock.now_iso("utc"), "gate": a.gate, "mission": a.mission, "material": list(a.material), "pr": a.pr,
-              "mode": a.mode or ""}
+    record = {
+        "at": clock.now_iso("utc"),
+        "gate": a.gate,
+        "mission": a.mission,
+        "material": list(a.material),
+        "pr": a.pr,
+        "mode": a.mode or "",
+    }
 
     def back(why: str, verdict: str, extra: dict | None = None, usage: dict | None = None):
-        record.update(verdict=verdict, reasons=[why] if verdict == "machine" else record.get("reasons", []),
-                      passed=False, **(usage or {}))
+        record.update(verdict=verdict, reasons=[why] if verdict == "machine" else record.get("reasons", []), passed=False, **(usage or {}))
         write_log(a.log, record)
-        return result(TOOL, "gate", f"{GATES[a.gate]}: {why}。利用者の承認を求める", [{**record, **(extra or {})}],
-                      usage or {}, next="利用者の承認を求める"), EXIT_GATE
+        return result(
+            TOOL,
+            "gate",
+            f"{GATES[a.gate]}: {why}。利用者の承認を求める",
+            [{**record, **(extra or {})}],
+            usage or {},
+            next="利用者の承認を求める",
+        ), EXIT_GATE
 
     try:
         state = json.loads(Path(a.mission).read_text(encoding="utf-8"))
@@ -267,8 +313,14 @@ def cmd_check(a) -> tuple[dict, int | None]:
     err = record_gate(a, record)
     if err:
         record["passed"] = False
-        return result(TOOL, "gate", f"{GATES[a.gate]}: MVV に従うが、関門の記録を書けない（{err}）。利用者の承認を求める",
-                      [record], usage, next="利用者の承認を求める"), EXIT_GATE
+        return result(
+            TOOL,
+            "gate",
+            f"{GATES[a.gate]}: MVV に従うが、関門の記録を書けない（{err}）。利用者の承認を求める",
+            [record],
+            usage,
+            next="利用者の承認を求める",
+        ), EXIT_GATE
     if a.note:
         write_note(a.note, a, record)
     return result(TOOL, "ok", f"{GATES[a.gate]}: MVV に従う。関門を省いて進めてよい", [record], usage), None

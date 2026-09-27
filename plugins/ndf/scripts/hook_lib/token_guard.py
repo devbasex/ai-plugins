@@ -13,6 +13,7 @@
 ロックを待ちの上限の内に取れない・構文を読み切れない）は通す。待ちの上限は `NDF_TOKEN_GUARD_LOCK_WAIT`（秒・0 以上の
 整数。既定 1）。規約は skills/development-workflow/references/waiting.md と context-window.md にある。
 """
+
 from __future__ import annotations
 
 import json
@@ -40,8 +41,7 @@ RECORD_DAYS = 7
 
 
 def deny(reason: str) -> dict:
-    return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
-                                   "permissionDecisionReason": reason}}
+    return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason}}
 
 
 def _off(name: str) -> bool:
@@ -89,6 +89,7 @@ def session_lock(directory: Path, sid: str) -> Iterator[bool]:
     読めずに両方とも通す形を作らない。"""
     wait = os.environ.get("NDF_TOKEN_GUARD_LOCK_WAIT", "1")
     import locks  # 排他が要る判定のときだけ読む（filelock の import は Bash と Edit の判定に載せない）
+
     held = locks.exclusive(directory / f"{sid}.guard", timeout=int(wait) if wait.isdigit() else 1)
     try:
         held.__enter__()
@@ -122,6 +123,7 @@ def _load_record(path: Path) -> dict:
 
 # --- sleep ---------------------------------------------------------------------------------------------
 
+
 def guard_sleep(raw: dict) -> dict | None:
     if _off("NDF_SLEEP_GUARD") or _field(raw, "tool_input", "run_in_background") == "true":
         return None
@@ -131,15 +133,19 @@ def guard_sleep(raw: dict) -> dict | None:
     mx = os.environ.get("NDF_SLEEP_MAX_SEC") or "5"
     import shparse
     from . import shell_checks
+
     try:
         if shparse.has_unreadable_error(shparse.parse_bash(cmd)) or not shell_checks.foreground_sleep(cmd, float(mx)):
             return None
     except (ValueError, RecursionError):  # 読めないコマンド・読めない上限は通す
         return None
-    return deny(f"前景で sleep を使って待つと、待つ呼び出しのたびに会話の文脈の全体を読み直す（ループの本体の sleep と、{mx} 秒を超える sleep を止めている）。待つ相手に NDF のスクリプトがあればそれを Bash の run_in_background: true で起動し、完了通知を待つ（通知は 1 回で、待つ間は呼び出しが増えない）。queue の終わり: python3 {HERE}/supervise.py wait <done のパス>（途中の知らせで終了コード 20 で返るので、中身を読んで待ち直す）。PR の CI を待ってマージ（マージの承認を得た後に限る。緑ならそのまま --admin でマージする）: python3 {HERE}/merged-steps.py merge-when-green <PR 番号>。CI を待つだけなら gh pr checks <PR 番号> --watch を同じく背景で起動する。どちらでもなければ同じ条件の until ループ（例: until [ -s <ファイル> ]; do sleep 5; done）を同じく背景で起動する。出来事を 1 つずつ受けるなら Monitor を使う。規約: {WAITING_DOC}（止めるなら NDF_SLEEP_GUARD=0）")
+    return deny(
+        f"前景で sleep を使って待つと、待つ呼び出しのたびに会話の文脈の全体を読み直す（ループの本体の sleep と、{mx} 秒を超える sleep を止めている）。待つ相手に NDF のスクリプトがあればそれを Bash の run_in_background: true で起動し、完了通知を待つ（通知は 1 回で、待つ間は呼び出しが増えない）。queue の終わり: python3 {HERE}/supervise.py wait <done のパス>（途中の知らせで終了コード 20 で返るので、中身を読んで待ち直す）。PR の CI を待ってマージ（マージの承認を得た後に限る。緑ならそのまま --admin でマージする）: python3 {HERE}/merged-steps.py merge-when-green <PR 番号>。CI を待つだけなら gh pr checks <PR 番号> --watch を同じく背景で起動する。どちらでもなければ同じ条件の until ループ（例: until [ -s <ファイル> ]; do sleep 5; done）を同じく背景で起動する。出来事を 1 つずつ受けるなら Monitor を使う。規約: {WAITING_DOC}（止めるなら NDF_SLEEP_GUARD=0）"
+    )
 
 
 # --- Read ----------------------------------------------------------------------------------------------
+
 
 def _file_stat(path: str) -> tuple[int, str, int]:
     """(大きさ, 更新時刻（ナノ秒まで）, inode)。無いファイルは (-1, "-1", -1)。"""
@@ -181,10 +187,13 @@ def guard_read(raw: dict) -> dict | None:
             write_json(state, {**record, "count": count})
     if count < limit:
         return None
-    return deny(f"同じファイルの同じ範囲を、変わらないまま {count} 回続けて読もうとした（{path}）。queue の終わりを待つなら python3 {HERE}/supervise.py wait <done のパス> を、それ以外の書き終わりを待つなら until [ -s <ファイル> ]; do sleep 1; done を Bash の run_in_background: true で起動して完了通知を待つか、背景の処理そのものの完了通知を待つ。サブエージェントの tasks/*.output は読まずに完了通知を待つ。規約: {WAITING_DOC}（止めるなら NDF_READ_REPEAT_GUARD=0）")
+    return deny(
+        f"同じファイルの同じ範囲を、変わらないまま {count} 回続けて読もうとした（{path}）。queue の終わりを待つなら python3 {HERE}/supervise.py wait <done のパス> を、それ以外の書き終わりを待つなら until [ -s <ファイル> ]; do sleep 1; done を Bash の run_in_background: true で起動して完了通知を待つか、背景の処理そのものの完了通知を待つ。サブエージェントの tasks/*.output は読まずに完了通知を待つ。規約: {WAITING_DOC}（止めるなら NDF_READ_REPEAT_GUARD=0）"
+    )
 
 
 # --- 文脈量 -------------------------------------------------------------------------------------------
+
 
 class _Broken(ValueError):
     """記録の行が JSON として読めない（jq が読めないのと同じに、判定をせずに通す）。"""
@@ -203,8 +212,7 @@ def _usage_total(line: str) -> int | None:
     if not isinstance(usage, dict):
         return None
     try:
-        return sum(int(usage.get(k) or 0) for k in ("input_tokens", "cache_read_input_tokens",
-                                                     "cache_creation_input_tokens"))
+        return sum(int(usage.get(k) or 0) for k in ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"))
     except (TypeError, ValueError):
         raise _Broken(line[:80]) from None
 
@@ -237,6 +245,7 @@ def relay_notice() -> str | None:
     """ラッパー（relay.py）の直接の子なら告知の文面、外なら None（`relay_lib.mark.notice_lines` の 1 回の呼び出し。#980）。"""
     try:
         from relay_lib import mark
+
         kind, text = mark.notice_lines()
     except Exception:  # noqa: BLE001 — ラッパーの判定が失敗したら、外として扱う
         return None
@@ -264,6 +273,7 @@ def guard_context(raw: dict, tool: str) -> dict | None:
     if tool == "Bash":
         cmd = _field(raw, "tool_input", "command")
         from . import shell_checks
+
         if not shell_checks.starts_plan(cmd):
             return None
         key, words = f"plan\t{cmd}", ""
@@ -307,8 +317,12 @@ def guard_context(raw: dict, tool: str) -> dict | None:
         write_json(mark, {"key": key})
     nxt = f"/ndf:development-workflow {issue_refs(words) or '<課題番号>'}"
     if notice is not None:
-        return deny(f"会話の文脈が {total} トークンで、上限 {limit} を超えた。ラッパーの下なので、上限を超えている限りこの起動を止め続ける。新しいフェーズ（プランを含む）を起動せず、動いているプランと supervisor の報告を待ってから、引継ぎ文書（/goal の指示が名指ししたもの。無ければ書かない）を更新し、次のコマンドを情報文字列 ndf-next の囲みのコードブロック 1 つで出して応答を終える（中身: /goal {nxt}、名指しの引継ぎ文書があれば「<文書> の続きから」）。<課題番号> のままなら、進めている課題の番号を補う。ブロックの直前に次の 1 文をそのまま書き、承認や確認を挟まずに出して終える: {notice}。規約: {CONTEXT_DOC}（止めるなら NDF_CONTEXT_GUARD=0、上限は NDF_CONTEXT_LIMIT）")
-    return deny(f"会話の文脈が {total} トークンで、上限 {limit} を超えた。この工程（プランを含む）は新しい会話で始める。次のコマンドを情報文字列 ndf-next の囲みのコードブロック 1 つで示して応答を終える。中身: {nxt}（今の区間を /goal で始めていたなら /goal {nxt}）。<課題番号> のままなら、進めている課題の番号を補って示す。このまま続けると利用者が決めたら、同じ起動をもう一度行うと 1 度だけ通る。規約: {CONTEXT_DOC}（止めるなら NDF_CONTEXT_GUARD=0、上限は NDF_CONTEXT_LIMIT）")
+        return deny(
+            f"会話の文脈が {total} トークンで、上限 {limit} を超えた。ラッパーの下なので、上限を超えている限りこの起動を止め続ける。新しいフェーズ（プランを含む）を起動せず、動いているプランと supervisor の報告を待ってから、引継ぎ文書（/goal の指示が名指ししたもの。無ければ書かない）を更新し、次のコマンドを情報文字列 ndf-next の囲みのコードブロック 1 つで出して応答を終える（中身: /goal {nxt}、名指しの引継ぎ文書があれば「<文書> の続きから」）。<課題番号> のままなら、進めている課題の番号を補う。ブロックの直前に次の 1 文をそのまま書き、承認や確認を挟まずに出して終える: {notice}。規約: {CONTEXT_DOC}（止めるなら NDF_CONTEXT_GUARD=0、上限は NDF_CONTEXT_LIMIT）"
+        )
+    return deny(
+        f"会話の文脈が {total} トークンで、上限 {limit} を超えた。この工程（プランを含む）は新しい会話で始める。次のコマンドを情報文字列 ndf-next の囲みのコードブロック 1 つで示して応答を終える。中身: {nxt}（今の区間を /goal で始めていたなら /goal {nxt}）。<課題番号> のままなら、進めている課題の番号を補って示す。このまま続けると利用者が決めたら、同じ起動をもう一度行うと 1 度だけ通る。規約: {CONTEXT_DOC}（止めるなら NDF_CONTEXT_GUARD=0、上限は NDF_CONTEXT_LIMIT）"
+    )
 
 
 def guard_supervisor_cut(raw: dict) -> dict | None:
@@ -318,8 +332,7 @@ def guard_supervisor_cut(raw: dict) -> dict | None:
     if _off("NDF_SUPERVISOR_CUT_GUARD"):
         return None
     skill = _field(raw, "tool_input", "skill").removeprefix("ndf:")
-    stage = {"cross-refactoring": "構造改善",
-             "cross-review": "<実装レビューかドキュメントレビューのうち、始めようとした工程>"}.get(skill)
+    stage = {"cross-refactoring": "構造改善", "cross-review": "<実装レビューかドキュメントレビューのうち、始めようとした工程>"}.get(skill)
     aid = _field(raw, "agent_id")
     if stage is None or not aid or _field(raw, "agent_type") != "ndf:supervisor":
         return None
@@ -339,7 +352,9 @@ def guard_supervisor_cut(raw: dict) -> dict | None:
         r = 0.0
     if not (r > 0 and last >= r * first):
         return None
-    return deny(f"この supervisor の文脈が {last} トークンで、最初の呼び出し（{first}）の {ratio} 倍以上ある。寿命 5 分のまま収束ループ（{skill}）を始めると、待ちの後のたびに文脈の全体を書き直す。同じ起動をやり直さずに、Pull Request を出す・進行を記録するなど起動の前に済ませることを済ませてから、フェーズの報告を「結果: スイッチポイント」「次のフェーズ: <今と同じフェーズ>」「次の工程: {stage}」で返す（規則 12。conductor が寿命 1 時間の supervisor で続ける）。規約: {CONTEXT_DOC}（止めるなら NDF_SUPERVISOR_CUT_GUARD=0、比は NDF_SUPERVISOR_CUT_RATIO）")
+    return deny(
+        f"この supervisor の文脈が {last} トークンで、最初の呼び出し（{first}）の {ratio} 倍以上ある。寿命 5 分のまま収束ループ（{skill}）を始めると、待ちの後のたびに文脈の全体を書き直す。同じ起動をやり直さずに、Pull Request を出す・進行を記録するなど起動の前に済ませることを済ませてから、フェーズの報告を「結果: スイッチポイント」「次のフェーズ: <今と同じフェーズ>」「次の工程: {stage}」で返す（規則 12。conductor が寿命 1 時間の supervisor で続ける）。規約: {CONTEXT_DOC}（止めるなら NDF_SUPERVISOR_CUT_GUARD=0、比は NDF_SUPERVISOR_CUT_RATIO）"
+    )
 
 
 def plan_hint(raw: dict) -> dict | None:
@@ -349,8 +364,9 @@ def plan_hint(raw: dict) -> dict | None:
     if _field(raw, "tool_input", "subagent_type") not in ("ndf:supervisor", "ndf:supervisor-waits"):
         return None
     try:
-        p = subprocess.run(["git", "-C", _field(raw, "cwd") or ".", "rev-parse", "--show-toplevel"],
-                           capture_output=True, text=True, timeout=5)
+        p = subprocess.run(
+            ["git", "-C", _field(raw, "cwd") or ".", "rev-parse", "--show-toplevel"], capture_output=True, text=True, timeout=5
+        )
     except (OSError, subprocess.SubprocessError):
         return None
     root = p.stdout.strip()
@@ -358,7 +374,12 @@ def plan_hint(raw: dict) -> dict | None:
         return None
     if not (Path(root, ".ndf", "supervise.json").is_file() or Path(root, ".ndf", "worktree.json").is_file()):
         return None
-    return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": f"このリポジトリには .ndf/ の宣言がある。このフェーズは python3 {HERE}/supervise.py new <種別>（mission / impl / check / release）のプランで作り、supervise.py queue で流せる。Agent の supervisor に落とすのはプランの雛形が無いときだけ（development-workflow の references/agent-layers.md のフェーズの表）。この案内を止めるなら NDF_PLAN_HINT=0"}}
+    return {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "additionalContext": f"このリポジトリには .ndf/ の宣言がある。このフェーズは python3 {HERE}/supervise.py new <種別>（mission / impl / check / release）のプランで作り、supervise.py queue で流せる。Agent の supervisor に落とすのはプランの雛形が無いときだけ（development-workflow の references/agent-layers.md のフェーズの表）。この案内を止めるなら NDF_PLAN_HINT=0",
+        }
+    }
 
 
 TOOLS = ("Bash", "Read", "Skill", "Agent", "Task")
