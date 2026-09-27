@@ -276,17 +276,22 @@ GitHub と git の送信をしない。結果ファイル: {self.path("sweep")}
         return "fix"
 
     def after_fix(self, ds: dict) -> dict | None:
-        """修正の取り込みと巻き直し。止まるなら pause の結果を返す。"""
+        """修正の取り込み。取り込めたら段階を rotate として先に確定する（打ち直しで merge-fix を 2 度走らせない）。"""
         rc, _ = self.st("merge-fix", str(self.pr))
         if rc == 3:
             ds["stage"] = "sweep-start"  # final = error。最終スイープへ
             return None
         if rc != 0:
             raise Stop(f"state.py merge-fix が終了コード {rc} で止まった", rc)
-        ds["stage"] = "round"
-        self.save_ds(ds)  # 取り込み済みを先に確定する。後の巻き直しで止まっても merge-fix を打ち直さない
+        ds["stage"] = "rotate"
+        self.save_ds(ds)
+        return self.rotate(ds)
+
+    def rotate(self, ds: dict) -> dict | None:
+        """巻き直しの要否と準備。prepare で止まっても段階は rotate のまま残り、打ち直しでここからやり直す。"""
         rrc, _ = self.st("should-rotate", str(self.pr))
         if rrc != 0:
+            ds["stage"] = "round"
             return None
         self.must(self.sh("rotate-pr.sh", "prepare", str(self.pr)), "rotate-pr.sh prepare")
         if ds.get("rotate_mode", "light") == "light":
@@ -296,10 +301,19 @@ GitHub と git の送信をしない。結果ファイル: {self.path("sweep")}
     def rotate_execute(self, ds: dict) -> None:
         out = self.must(self.sh("rotate-pr.sh", "execute", str(self.pr), "--mode", ds.get("rotate_mode", "light")), "rotate-pr.sh execute")
         rv = parse_vars(out)
+        # 作った PR を先に残す。set-current-pr で止まっても、打ち直しは execute を再実行せず（PR を 2 つ作らない）ここから続ける
+        ds["rotated"] = {"new_pr": rv.get("NEW_PR", ""), "new_branch": rv.get("NEW_BRANCH", "")}
+        ds["stage"] = "rotate-created"
+        self.save_ds(ds)
+        return self.set_current(ds)
+
+    def set_current(self, ds: dict) -> None:
+        rot = ds.get("rotated") or {}
         self.must(
-            self.st("set-current-pr", str(self.pr), rv.get("NEW_PR", ""), "--head-branch", rv.get("NEW_BRANCH", "")),
+            self.st("set-current-pr", str(self.pr), rot.get("new_pr", ""), "--head-branch", rot.get("new_branch", "")),
             "state.py set-current-pr",
         )
+        ds.pop("rotated", None)
         ds["stage"] = "round"
         return None
 
@@ -352,6 +366,12 @@ GitHub と git の送信をしない。結果ファイル: {self.path("sweep")}
                 if not self.path("fix").is_file():
                     return self.pause(ds, "fix", self.fix_prompt())
                 paused = self.after_fix(ds)
+                self.save_ds(ds)
+                if paused:
+                    return paused
+                continue
+            if stage in ("rotate", "rotate-created"):
+                paused = self.rotate(ds) if stage == "rotate" else self.set_current(ds)
                 self.save_ds(ds)
                 if paused:
                     return paused

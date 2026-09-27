@@ -219,6 +219,60 @@ def test_rerun_after_rotate_failure_does_not_merge_fix_again(tmp_path, monkeypat
     assert sum(1 for c in fake.calls if c[:2] == ("state.py", "merge-fix")) == 1
 
 
+def test_rerun_after_prepare_failure_retries_rotation(tmp_path, monkeypatch, capsys):
+    """prepare で止まった打ち直しは、次のラウンドへ進まずに巻き直しからやり直す。"""
+    monkeypatch.setenv("CROSS_REVIEW_TMP_DIR", str(tmp_path))
+    fake = FakeRotateFails(tmp_path)
+    monkeypatch.setattr(cr, "call", fake)
+    code, out = run_main(["5"], capsys)
+    Path(out["items"][0]["result_file"]).write_text("{}")
+    run_main(["5"], capsys)
+    starts = sum(1 for c in fake.calls if c[:2] == ("state.py", "start-round"))
+    run_main(["5"], capsys)
+    assert sum(1 for c in fake.calls if c[:2] == ("state.py", "start-round")) == starts
+    assert sum(1 for c in fake.calls if c[:2] == ("rotate-pr.sh", "prepare")) == 2
+    assert json.loads((tmp_path / "drive-pr5.json").read_text())["stage"] == "rotate"
+
+
+class FakeSetCurrentFails(FakeReview):
+    """squash の巻き直しで execute は PR を作り、1 度目の set-current-pr が失敗する。"""
+
+    def __init__(self, tmp: Path):
+        super().__init__(tmp)
+        self.set_fails = 1
+
+    def __call__(self, cmd, env=None, cwd=None):
+        name = Path(cmd[1]).name if cmd[0] in (PY, "bash") else cmd[0]
+        if name == "rotate-pr.sh":
+            self.calls.append((name, *cmd[2:]))
+            return 0, ("NEW_PR=9\nNEW_BRANCH=b9\n" if cmd[2] == "execute" else "")
+        if name == "state.py" and cmd[2] == "should-rotate":
+            self.calls.append((name, *cmd[2:]))
+            return 0, ""
+        if name == "state.py" and cmd[2] == "set-current-pr" and self.set_fails:
+            self.calls.append((name, *cmd[2:]))
+            self.set_fails -= 1
+            return 1, ""
+        return super().__call__(cmd, env, cwd)
+
+
+def test_rerun_after_set_current_failure_does_not_create_pr_again(tmp_path, monkeypatch, capsys):
+    """PR を作った後の set-current-pr で止まっても、打ち直しは execute を再実行せず、作った PR で続ける。"""
+    monkeypatch.setenv("CROSS_REVIEW_TMP_DIR", str(tmp_path))
+    fake = FakeSetCurrentFails(tmp_path)
+    monkeypatch.setattr(cr, "call", fake)
+    argv = ["5", "--rotate-mode", "squash"]
+    code, out = run_main(argv, capsys)
+    Path(out["items"][0]["result_file"]).write_text("{}")
+    code, _ = run_main(argv, capsys)
+    assert code != 0
+    assert json.loads((tmp_path / "drive-pr5.json").read_text())["stage"] == "rotate-created"
+    run_main(argv, capsys)
+    assert sum(1 for c in fake.calls if c[:2] == ("rotate-pr.sh", "execute")) == 1
+    sets = [c for c in fake.calls if c[:2] == ("state.py", "set-current-pr")]
+    assert len(sets) == 2 and sets[-1][3:] == ("9", "--head-branch", "b9")
+
+
 class FakeMissingResult(FakeReview):
     """1 度目の read-result が結果なしで 1 を返し、judge が起動し直しを求める。"""
 
