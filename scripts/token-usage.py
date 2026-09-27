@@ -556,6 +556,17 @@ def link_external(sessions: list[Session], externals: list[External]) -> int:
 # 帳簿の kind ごとの層。full（Skill を回すステップ）は会話が残り、会話の記録として別に数えるため読まない
 LEDGER_LAYER = {"work": "worker", "judge": "supervisor", "slow": "supervisor", "pr": "supervisor", "mvv": "supervisor"}
 LEDGER_AGENT = "claude -p"
+# 呼び出しの並びから求める値。帳簿は起動ごとの合計しか持たないため、帳簿の役には載せない（`-`）
+SEQ_KEYS = (
+    "p",
+    "rewrites",
+    "rewrites_after_5m",
+    "rewrites_untimed",
+    "rewrite_tokens",
+    "rewrite_tokens_after_5m",
+    "read_tokens_after_5m",
+    "rewrite_gap_median",
+)
 
 
 def read_ledger(root: Path, until: float | None = None) -> list[tuple[float, dict]]:
@@ -686,6 +697,10 @@ def aggregate(sessions: list[Session], by: list[str]) -> dict:
                 roles[rk].sec += r.sec
         layer_order = {"conductor": 0, "supervisor": 1, "worker": 2}
         for (layer, role, agent_type), r in sorted(roles.items(), key=lambda x: (layer_order[x[0][0]], x[0][1], x[0][2])):
+            stats = call_stats(r.usage, r.n)
+            if agent_type == LEDGER_AGENT:  # 呼び出しの並びが分からない起動は P・書き直しを出さない
+                for k in SEQ_KEYS:
+                    stats.pop(k)
             per_role.append(
                 axis
                 | {
@@ -697,7 +712,7 @@ def aggregate(sessions: list[Session], by: list[str]) -> dict:
                     "context": r.usage.context / r.n,
                     "out": r.usage.out / r.n,
                     "minutes": r.sec / r.n / 60,
-                    **call_stats(r.usage, r.n),
+                    **stats,
                 }
             )
         ext_groups: dict = defaultdict(list)
@@ -844,15 +859,15 @@ def render_md(result: dict, by: list[str]) -> str:
                 r["role"],
                 r["agent_type"],
                 str(r["count"]),
-                _k(r["p"]),
+                _k(r["p"]) if "p" in r else "-",
                 f"{r['k']:.1f}",
                 _m(r["w5"]),
                 _m(r["w1h"]),
-                str(r["rewrites"]),
-                str(r["rewrites_after_5m"]),
-                _m(r["rewrite_tokens_after_5m"]),
-                _m(r["read_tokens_after_5m"]),
-                _min(r["rewrite_gap_median"]),
+                str(r.get("rewrites", "-")),
+                str(r.get("rewrites_after_5m", "-")),
+                _m(r["rewrite_tokens_after_5m"]) if "rewrite_tokens_after_5m" in r else "-",
+                _m(r["read_tokens_after_5m"]) if "read_tokens_after_5m" in r else "-",
+                _min(r.get("rewrite_gap_median")),
             ]
             for r in result["per_role"]
         ],
