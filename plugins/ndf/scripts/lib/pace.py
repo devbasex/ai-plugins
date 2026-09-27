@@ -58,12 +58,16 @@ def read_pace(root) -> dict:
         raise PaceError(f"進め方の宣言を読めない: {path}: {e}")
     if not isinstance(d, dict):
         raise PaceError(f"進め方の宣言はオブジェクトで書く: {path}")
+    if d.get("version") != 1 or isinstance(d.get("version"), bool):
+        raise PaceError(f"進め方の宣言の version は 1 で書く: {path}")
     areas = d.get("areas") or []
     if not isinstance(areas, list) or not all(
-        isinstance(a, dict) and isinstance(a.get("name"), str) and a["name"] and isinstance(a.get("paths"), list) and a["paths"]
-        for a in areas
+        isinstance(a, dict) and isinstance(a.get("name"), str) and a["name"] and _globs(a.get("paths")) and a["paths"] for a in areas
     ):
-        raise PaceError(f"進め方の宣言の areas は name と paths を持つ: {path}")
+        raise PaceError(f"進め方の宣言の areas は name と paths（glob の文字列の配列）を持つ: {path}")
+    boundary_paths = d.get("boundary_paths") or []
+    if not _globs(boundary_paths):
+        raise PaceError(f"進め方の宣言の boundary_paths は glob の文字列の配列で書く: {path}")
     triggers = {**DEFAULT_TRIGGERS, **(d.get("triggers") or {})}
     if not all(isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0 for v in triggers.values()):
         raise PaceError(f"進め方の宣言の triggers は 0 以上の数で書く: {path}")
@@ -71,9 +75,16 @@ def read_pace(root) -> dict:
     if not isinstance(fast, dict):
         raise PaceError(f"進め方の宣言の fast はオブジェクトで書く: {path}")
     modes = fast.get("modes") or list(DEFAULT_MODES)
+    if not _globs(modes):
+        raise PaceError(f"進め方の宣言の fast.modes は文字列の配列で書く: {path}")
     fast = {
         "enabled": fast.get("enabled") is True,
         "verify": str(fast.get("verify") or ""),
         "modes": [m for m in modes if m not in EXCLUDED_MODES],
     }
-    return {**d, "fast": fast, "areas": areas, "triggers": triggers, "boundary_paths": list(d.get("boundary_paths") or [])}
+    return {**d, "fast": fast, "areas": areas, "triggers": triggers, "boundary_paths": list(boundary_paths)}
+
+
+def _globs(value) -> bool:
+    """空でない文字列だけの配列か（文字列 1 つは 1 文字ずつのパターンに化けるので受けない）。"""
+    return isinstance(value, list) and all(isinstance(p, str) and p for p in value)

@@ -163,11 +163,15 @@ def review_post(
     """レビューを 1 回で投稿する。PR の作成者が自分なら REQUEST_CHANGES を COMMENT へ下げる。
 
     投稿そのものは `result_posts.post_review`（待ち行列・位置の拒否の退避）に任せる。
+    入口の時刻を `since` として渡し、二度書かない照合をこの実行の中のレビューに限る
+    （前の実行で同じラウンド・席のレビューがあっても「既投稿」にしない）。
     """
+    import clock
     import post_queue
     import result_posts
 
     tool = "review-post"
+    since = clock.now_iso("utc")
     slug = gh_call.resolve_repo(repo)
     if not slug:
         return step_result.result(tool, "stopped", "リポジトリを決められない"), step_result.EXIT_PRECONDITION
@@ -181,7 +185,17 @@ def review_post(
     is_own = meta["author"] == me
     qdir = pathlib.Path(queue_dir) if queue_dir else gh_pr_info.default_out_dir(slug, pr) / post_queue.QUEUE_DIRNAME
     posted = result_posts.post_review(
-        post_queue.Queue(qdir), payload, result, slug, int(pr), int(round_no), seat, head_sha or meta["head_sha"], is_own, actor=me
+        post_queue.Queue(qdir),
+        payload,
+        result,
+        slug,
+        int(pr),
+        int(round_no),
+        seat,
+        head_sha or meta["head_sha"],
+        is_own,
+        actor=me,
+        since=since,
     )
     item = {
         "kind": "review",
