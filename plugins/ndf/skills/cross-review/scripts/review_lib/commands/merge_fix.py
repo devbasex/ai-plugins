@@ -230,7 +230,8 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
         str(st.get("repo") or ""), int(st.get("current_pr") or pr), str(st.get("head_branch") or ""), pushed.pushed
     )
     if unsynced:
-        review_lib.info(f"⚠️ 本文の「決めたこと」を揃えられませんでした ({unsynced})")
+        # 本文が古いまま round を取り込み済みにしない。送信は済んでいるため、打ち直すと揃えからやり直す。
+        review_lib.die(f"本文の「決めたこと」を揃えられないため止めます。打ち直してください ({unsynced})")
 
     round_fix = _merge_fix_records(st, fix, pr)
     store._save(pr, st)

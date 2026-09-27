@@ -487,7 +487,7 @@ def cmd_finalize(a):
         # 設計文書は PR の head から読まれる。送る側が送った直後に揃える（`design_body.sync_after_push`）
         sync = {"name": "pr-body-decisions", "result": "after_push", "code": None, "reason": f"{commit} を送った後に送る側が揃える"}
     else:
-        sync = design_body.sync(pr, getattr(a, "repo", None), a.sync_script)
+        sync = design_body.sync_decisions(pr, getattr(a, "repo", None), a.sync_script)
     items = [{"name": "result", "path": str(out)}, sync] + ([dropped] if dropped else [])
     items += [{"name": c.get("name"), "result": "ci_failed", "state": c.get("state")} for c in failed]
     waived = sum(1 for e in res["deferred"] if e.get("waived"))
@@ -514,7 +514,7 @@ def cmd_finalize(a):
                 summary + "（pr-body-decisions.sh の呼び出しが誤り）",
                 items,
                 metrics,
-                next="design_body.sync の呼び出しを直す",
+                next="design_body.sync_decisions の呼び出しを直す",
             )
         )
     emit(

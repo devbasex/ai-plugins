@@ -881,3 +881,24 @@ def test_sync_after_push_runs_only_after_pushing_a_design_pr(monkeypatch):
     assert ran == []
     reason = design_body.sync_after_push("o/r", 5, "design/x", True)
     assert ran[0][-4:] == ["sync", "5", "--repo", "o/r"] and "mismatch" in reason
+
+
+def test_the_standalone_command_stops_when_the_body_is_not_synced(tmp_path, monkeypatch, capsys) -> None:
+    """設計 PR で送った後に本文を揃えられなければ、返信・まとめへ進まず止める。"""
+    import design_body
+
+    work = tmp_path / "work"
+    work.mkdir()
+    monkeypatch.setattr(result_posts, "push_fix", lambda *_: result_posts.PushResult(True, True, True, ""))
+    monkeypatch.setattr(design_body, "sync_after_push", lambda *_: "pr-body-decisions.sh sync が unreadable（2）: api")
+    posted: list[object] = []
+    monkeypatch.setattr(result_posts, "post_fix", lambda *a, **k: posted.append(a))
+    monkeypatch.delenv("CROSS_REVIEW_TMP_DIR", raising=False)
+    fix = _fix_file(tmp_path)
+    args = result_posts.argparse.Namespace(
+        repo=REPO, pr=str(PR), result=str(fix), head="design/x", worktree=str(work), round=ROUND, actor=ACTOR
+    )
+
+    assert result_posts.cmd_fix(args) == 1
+    assert "揃えられない" in capsys.readouterr().err
+    assert posted == []

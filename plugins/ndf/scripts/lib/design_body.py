@@ -14,7 +14,7 @@ SCRIPT = Path(__file__).resolve().parents[1] / "pr-body-decisions.sh"
 LABELS = {0: "synced", 1: "mismatch", 2: "unreadable", 3: "invalid_call"}
 
 
-def sync(pr: int, repo: str | None = None, script: str | Path | None = None) -> dict[str, Any]:
+def sync_decisions(pr: int, repo: str | None = None, script: str | Path | None = None) -> dict[str, Any]:
     """揃えて、`{"name", "result", "code", "reason"}` を返す。スクリプトが無ければ `missing`。"""
     path = Path(script) if script else SCRIPT
     if not path.is_file():
@@ -34,5 +34,5 @@ def sync_after_push(repo: str, pr: int, head_branch: str, pushed: bool) -> str |
     """
     if not (pushed and str(head_branch or "").startswith("design/")):
         return None
-    got = sync(pr, repo or None)
+    got = sync_decisions(pr, repo or None)
     return None if got["result"] == "synced" else f"pr-body-decisions.sh sync が {got['result']}（{got['code']}）: {got['reason']}"
