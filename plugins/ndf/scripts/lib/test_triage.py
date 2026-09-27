@@ -13,8 +13,10 @@
 
 from __future__ import annotations
 
+import os
 import pathlib
 import shutil
+import signal
 import subprocess
 import tempfile
 import time
@@ -28,18 +30,63 @@ SLEEP = time.sleep  # CI の待ちの眠り。テストが差し替える
 
 
 def run_command(command: Any, cwd: str, timeout: int, log: Optional[pathlib.Path] = None) -> tuple[Optional[int], bool]:
-    """語の並びはシェルを通さず、文字列はシェルで走らせる。`(終了コード, 打ち切ったか)`。"""
+    """語の並びはシェルを通さず、文字列はシェルで走らせる。`(終了コード, 打ち切ったか)`。
+
+    **打ち切るときはプロセスグループごと止める。** `subprocess.run(timeout=...)` が止めるのは直接の子
+    （シェル）だけで、pytest などの孫が残って作業ツリーを書き換え続ける（`refactor_lib.process.run_with_timeout` と同じ理由）。
+    """
     sink = open(log, "wb") if log is not None else subprocess.DEVNULL
     try:
-        p = subprocess.run(
-            command, shell=isinstance(command, str), cwd=cwd, stdout=sink, stderr=subprocess.STDOUT, timeout=timeout, start_new_session=True
-        )
-        return p.returncode, False
-    except subprocess.TimeoutExpired:
-        return None, True
+        try:
+            proc = subprocess.Popen(
+                command, shell=isinstance(command, str), cwd=cwd, stdout=sink, stderr=subprocess.STDOUT, start_new_session=True
+            )
+        except OSError:
+            return 127, False
+        try:
+            return proc.wait(timeout=timeout), False
+        except subprocess.TimeoutExpired:
+            stop_group(proc)
+            return None, True
     finally:
         if sink is not subprocess.DEVNULL:
             sink.close()
+
+
+def stop_group(proc: "subprocess.Popen[bytes]", grace: float = 5.0) -> None:
+    """`start_new_session` で起こしたプロセスのグループへ SIGTERM、猶予の後も残れば SIGKILL を送り、親を回収する。
+
+    判定はグループの存否で行う（親のシェルが終わっても SIGTERM を無視する子が残るため）。
+    """
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+    except OSError:
+        proc.kill()
+    deadline = time.monotonic() + grace
+    while time.monotonic() < deadline:
+        proc.poll()  # 親を先に回収する（ゾンビがグループに残ると猶予を最後まで待つ）
+        if not _group_alive(proc.pid):
+            break
+        time.sleep(0.2)
+    else:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except OSError:
+            pass
+    try:
+        proc.wait(timeout=grace)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+
+
+def _group_alive(pgid: int) -> bool:
+    try:
+        os.killpg(pgid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True  # 判断できないときは残っている側へ倒す（SIGKILL まで進める）
 
 
 def run_within(limit: float, started: float, run: Callable[[int], tuple[Optional[int], bool]]) -> tuple[Optional[int], bool]:
@@ -131,15 +178,27 @@ def rerun_words(strategy: ts.Strategy, files: list[str]) -> list[list[str]]:
 
 
 def failing_in(
-    work: str, strategy: ts.Strategy, ids: list[str], timeout: int, log_dir: pathlib.Path, label: str, run: Runner
+    work: str,
+    strategy: ts.Strategy,
+    ids: list[str],
+    timeout: int,
+    log_dir: pathlib.Path,
+    label: str,
+    run: Runner,
+    started: Optional[float] = None,
 ) -> tuple[list[str], bool]:
-    """`ids` のファイルだけを `work` で走らせ直し、まだ落ちている ID と JUnit を読めたかを返す。読めなければその群の全部。"""
+    """`ids` のファイルだけを `work` で走らせ直し、まだ落ちている ID と JUnit を読めたかを返す。読めなければその群の全部。
+
+    上限 `timeout` は `started`（`time.monotonic()`。省けば今）からの suite 群全体で 1 つ（`run_within`）。
+    """
+    started = time.monotonic() if started is None else started
     still: list[str] = []
     readable = True
     tracked = tracked_files(work)
     for suite, paths in rerun_groups(strategy, list(by_file(ids))):
         clear_junit(work, strategy)
-        code, timed_out = run(ts.scope_words(str(suite.scope_command), paths), work, timeout, log_dir / f"{label}-{suite.name}.log")
+        words, log = ts.scope_words(str(suite.scope_command), paths), log_dir / f"{label}-{suite.name}.log"
+        code, timed_out = run_within(timeout, started, lambda left, words=words, log=log: run(words, work, left, log))
         if not timed_out and code == 0:
             continue
         found, _ = read_junit(work, ts.Strategy(strategy.name, strategy.source, [suite]), tracked)
@@ -151,14 +210,23 @@ def failing_in(
     return still, readable
 
 
-def failing_at(work: str, sha: str, strategy: ts.Strategy, ids: list[str], timeout: int, log_dir: pathlib.Path, run: Runner) -> list[str]:
+def failing_at(
+    work: str,
+    sha: str,
+    strategy: ts.Strategy,
+    ids: list[str],
+    timeout: int,
+    log_dir: pathlib.Path,
+    run: Runner,
+    started: Optional[float] = None,
+) -> list[str]:
     """着手前の HEAD（`sha`）の一時のworktreeでも落ちる ID。作れない・読めなければ空（既存失敗とみなさない）。"""
     holder = pathlib.Path(tempfile.mkdtemp(prefix="ndf-baseline-"))
     tree = holder / "tree"
     try:
         if not _git(work, ["worktree", "add", "--detach", "-q", str(tree), sha]):
             return []
-        still, readable = failing_in(str(tree), strategy, ids, timeout, log_dir, "baseline", run)
+        still, readable = failing_in(str(tree), strategy, ids, timeout, log_dir, "baseline", run, started)
         return still if readable else []
     finally:
         _git(work, ["worktree", "remove", "--force", str(tree)])
@@ -194,12 +262,13 @@ def classify(
             "baseline_head": base_sha,
         }
     known = set(existing_failures or [])
-    still, _ = failing_in(work, strategy, failed, timeout, log_dir, "rerun", run)
+    started = time.monotonic()  # 上限 `timeout` は走らせ直しと着手前の HEAD の再実行の全体で 1 つ
+    still, _ = failing_in(work, strategy, failed, timeout, log_dir, "rerun", run, started)
     flaky = [i for i in failed if i not in still]
     at_base = [i for i in still if i in known]
     unknown = [i for i in still if i not in known]
     if unknown and base_sha:
-        at_base += failing_at(work, base_sha, strategy, unknown, timeout, log_dir, run)
+        at_base += failing_at(work, base_sha, strategy, unknown, timeout, log_dir, run, started)
     caused = [i for i in still if i not in at_base]
     return {
         "failed_tests": list(failed),

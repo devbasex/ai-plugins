@@ -125,7 +125,13 @@ def cmd_scope(a) -> int:
     failed_any = False
     for i, w in enumerate(words):
         command = w[0] if strategy.name == ts.ROUND_ONLY else w
-        code, timed_out = test_triage.run_command(command, str(root), int(limits["test_timeout"]), root / LOG_DIR / f"scope-{i}.log")
+        log = root / LOG_DIR / f"scope-{i}.log"
+        # 上限は suite 群全体で 1 つ（cmd_whole と同じ）
+        code, timed_out = test_triage.run_within(
+            float(limits["test_timeout"]),
+            started,
+            lambda left, command=command, log=log: test_triage.run_command(command, str(root), left, log),
+        )
         if timed_out:
             emit(result(TOOL, "stopped", f"範囲テストが {limits['test_timeout']} 秒で終わらなかった", [], {}))
             return 2

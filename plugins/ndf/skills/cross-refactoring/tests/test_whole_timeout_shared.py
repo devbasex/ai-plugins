@@ -69,3 +69,13 @@ def test_run_baseline_shares_the_limit_across_suites(refactor, monkeypatch, tmp_
     with pytest.raises(SystemExit):
         baseline.run_baseline(types.SimpleNamespace(), tmp_path, 100, [], tmp_path)
     assert given == [100, 40], "2 本目で合計の上限に届いて止まる（suite ごとに 100 秒を渡さない）"
+
+
+def test_a_derived_round_command_does_not_run_the_suites_twice(refactor, tmp_path):
+    """宣言から導いた round-only のラウンドテストは全体テストの `&&` 連結で、着手前に 2 度走らせない。"""
+    baseline = sys.modules["refactor_lib.baseline"]
+    ts = baseline.ts
+    strategy = ts.Strategy(
+        "round-only", "derived:test.suites", [ts.Suite("a", "run a"), ts.Suite("b", "run b")], round_command="run a && run b"
+    )
+    assert baseline.commands_of(strategy, [], tmp_path) == ("round", ["run a", "run b"])

@@ -25,8 +25,9 @@ def commands_of(strategy: ts.Strategy, scope: list[str], work: pathlib.Path) -> 
     """着手前に走らせるもの。`(mode, コマンドの並び)`。mode は `whole` / `scope` / `round`。"""
     if strategy.name == ts.ROUND_ONLY:
         # 全体テストの後にラウンドテストを 1 回。同じコマンドなら 2 度走らせない（#880）。
+        # 宣言から導いたラウンドテストは全体テストの `&&` 連結で、中身が同じなのでこれも 2 度走らせない。
         commands = list(strategy.whole_commands())
-        if strategy.round_command and strategy.round_command not in commands:
+        if strategy.round_command and strategy.round_command not in commands and strategy.round_command != " && ".join(commands):
             commands.append(strategy.round_command)
         return "round", commands
     if strategy.whole_on_ci:
