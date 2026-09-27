@@ -17,9 +17,9 @@ import subprocess
 from pathlib import Path
 
 import md
+from pace import MVV_PACES  # noqa: F401  承認ゲートを MVV 判定で通す進め方（mission-state.py が mission_mvv.MVV_PACES として読む）
 
 MVV_SECTIONS = ("Mission", "Vision", "Value")
-MVV_PACES = ("fast", "auto")  # 承認ゲートを MVV 判定で通す進め方（MVV を写し、プロジェクト MVV の参照を残す）
 EXIT_UNREADABLE, EXIT_PRECONDITION = 2, 3
 
 

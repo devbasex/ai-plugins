@@ -22,6 +22,7 @@ DECL_NAME = "pace.json"
 DEFAULT_TRIGGERS = {"score": 15, "common_weight": 2, "lines": 5000, "escapes": 2, "hours": 24}
 DEFAULT_MODES = ("light", "standard", "legacy-refactor")
 EXCLUDED_MODES = ("operation", "documentation")  # fast と auto に入れられないモード（書いても無視する）
+MVV_PACES = ("fast", "auto")  # 承認ゲートを MVV 判定で通す進め方（宣言の節の名前でもある）
 
 
 class PaceError(Exception):
@@ -75,9 +76,8 @@ def read_pace(root) -> dict:
     triggers = {**DEFAULT_TRIGGERS, **given}
     if not all(isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0 for v in triggers.values()):
         raise PaceError(f"進め方の宣言の triggers は 0 以上の数で書く: {path}")
-    fast = _pace_section(d, "fast", path)
-    auto = _pace_section(d, "auto", path)
-    return {**d, "fast": fast, "auto": auto, "areas": areas, "triggers": triggers, "boundary_paths": list(boundary_paths)}
+    sections = {n: _pace_section(d, n, path) for n in MVV_PACES}
+    return {**d, **sections, "areas": areas, "triggers": triggers, "boundary_paths": list(boundary_paths)}
 
 
 def _pace_section(d: dict, name: str, path: Path) -> dict:
