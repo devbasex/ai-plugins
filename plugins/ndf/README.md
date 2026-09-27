@@ -89,7 +89,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.17.32）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.17.33-dev.1）
 ```
 
 ### agy
@@ -119,11 +119,9 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.17.32 へ更新するとき
+## v10.17.33-dev.1 へ更新するとき
 
-- cross-refactoring は、提案を作る前にコードの指標を測ります（#1324）
-- refactoring の言語別リファレンス（Python・JavaScript・TypeScript・PHP）に、指標の測り方が載っています（#1324）
-- ミッション m1319 の課題を develop へ取り込む。（#1325）
+- ミッション m1323 の課題を develop へ取り込む。（#1342）
 
 ## Playwright テストについて
 
@@ -360,7 +358,7 @@ agy models   # 認証確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.17.32/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.17.33-dev.1/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -382,14 +380,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.32/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.33-dev.1/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.17.32  <path>
+# => ndf@ai-plugins  installed, enabled  10.17.33-dev.1  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。
