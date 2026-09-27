@@ -261,6 +261,36 @@ def test_wait_and_merge_stops_with_the_summary_of_merge_when_green(monkeypatch):
         mod.wait_and_merge(".", 5)
 
 
+@pytest.mark.parametrize("in_develop", [True, False])
+def test_release_remakes_the_pr_when_merged_pr_misses_new_commits(monkeypatch, in_develop):
+    """release/v<版> の PR がマージ済みでも、後から積んだコミットが develop に無ければ PR を作り直してマージする。"""
+    import argparse
+
+    mod = _release_steps_module(monkeypatch)
+    calls = []
+
+    def git(root, *args, check=True):
+        calls.append(args)
+        rc = 0 if args[0] != "merge-base" or in_develop else 1
+        out = "release/v1.2.3" if args[:2] == ("rev-parse", "--abbrev-ref") else ""
+        return subprocess.CompletedProcess(args, rc, out, "")
+
+    monkeypatch.setattr(mod, "git", git)
+    monkeypatch.setattr(mod, "git_root", lambda r: ".")
+    monkeypatch.setattr(mod, "find_pr", lambda root, head, base, states: {"number": 7, "state": "MERGED"})
+    monkeypatch.setattr(mod, "changelog_section", lambda root, ver: "")
+    monkeypatch.setattr(mod, "run_checks", lambda root: [])
+    monkeypatch.setattr(mod, "create_pr", lambda *a: 9)
+    monkeypatch.setattr(mod, "wait_and_merge", lambda root, n: f"new-{n}")
+    monkeypatch.setattr(mod, "merge_commit_of", lambda root, n: f"old-{n}")
+    monkeypatch.setattr(mod, "emit", lambda obj, *a, **k: (_ for _ in ()).throw(SystemExit(obj)))
+    with pytest.raises(SystemExit) as e:
+        mod.cmd_release(argparse.Namespace(root=".", version="1.2.3", plugins="ndf", channel="dev"))
+    out = e.value.code
+    assert ("merge-base", "--is-ancestor", "HEAD", "origin/develop") in calls
+    assert (out["metrics"]["release_pr"], out["metrics"]["merge_commit"]) == ((7, "old-7") if in_develop else (9, "new-9"))
+
+
 def fake_gh(tmp_path: Path, prs: dict) -> dict:
     """gh pr view N --json title,body に prs[N] を返す偽の gh を PATH の先頭へ置いた環境を返す。"""
     import os
