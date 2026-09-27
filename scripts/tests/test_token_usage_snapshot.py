@@ -295,3 +295,22 @@ def test_outputs_carry_no_body_path_repository_or_session_id(tmp_path):
     for text in ((env["out"] / "2026-09-10.json").read_text(), (env["out"] / "2026-09-10.md").read_text(), p.stdout):
         for secret in ("secret-repo", "acme", "aaaaaaaa-0000", "/work/", "/tmp/ndf-worktrees", "Base directory", str(tmp_path)):
             assert secret not in text, secret
+
+
+def test_layer_rows_keep_ledger_roles_out_of_p_and_rewrites():
+    """帳簿の役（P・書き直しを持たない）は、層の P と 1 起動あたりの書き直しの分母に入らない。"""
+    import importlib.util
+
+    sys.path.insert(0, str(SCRIPT.parent))
+    spec = importlib.util.spec_from_file_location("token_usage_snapshot", SCRIPT)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = mod  # dataclass が自分のモジュールを引く
+    spec.loader.exec_module(mod)
+    seat = {"version": "10.2.0", "layer": "worker", "count": 2, "p": 30_000, "k": 4, "w5": 0, "w1h": 100}
+    seat |= {"rewrites": 2, "rewrites_after_5m": 1}
+    ledger = {"version": "10.2.0", "layer": "worker", "count": 6, "k": 8, "w5": 0, "w1h": 100}
+    [row] = mod.layer_rows([seat, ledger])
+    assert row[2] == "8" and row[3] == "30.0k"  # 起動は 8、P は席の 2 起動だけで割る
+    assert row[4] == "7.0" and row[9] == "1.00"  # k は全起動、書き直しは席の 2 起動で割る
+    [only] = mod.layer_rows([ledger])
+    assert only[3] == "-" and only[7] == "-" and only[9] == "-"

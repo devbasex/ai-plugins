@@ -141,25 +141,28 @@ def layer_rows(per_role: list[dict]) -> list[list[str]]:
         a = acc[(r["version"], r["layer"])]
         n = r["count"]
         a["n"] += n
-        for k in ("p", "k", "w5", "w1h"):
+        for k in ("k", "w5", "w1h"):
             a[k] += r[k] * n
-        a["rewrites"] += r["rewrites"]
-        a["after"] += r["rewrites_after_5m"]
+        if "p" in r:  # 帳簿の役は呼び出しの並びを持たないため、P・書き直しの分母から外す
+            a["pn"] += n
+            a["p"] += r["p"] * n
+            a["rewrites"] += r["rewrites"]
+            a["after"] += r["rewrites_after_5m"]
     rows = []
     for (v, layer), a in sorted(acc.items(), key=lambda x: (tu.version_key(x[0][0]), order.get(x[0][1], 9))):
-        n = a["n"]
+        n, pn = a["n"], a["pn"]
         rows.append(
             [
                 v,
                 layer,
                 str(int(n)),
-                tu._k(a["p"] / n),
+                tu._k(a["p"] / pn) if pn else "-",
                 f"{a['k'] / n:.1f}",
                 tu._m(a["w5"] / n),
                 tu._m(a["w1h"] / n),
-                str(int(a["rewrites"])),
-                str(int(a["after"])),
-                f"{a['rewrites'] / n:.2f}",
+                str(int(a["rewrites"])) if pn else "-",
+                str(int(a["after"])) if pn else "-",
+                f"{a['rewrites'] / pn:.2f}" if pn else "-",
             ]
         )
     return rows
