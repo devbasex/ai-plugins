@@ -575,3 +575,30 @@ def test_cleanup_base_follows_declaration(tmp_path, env):
     code, out, err = call("merged-steps.py", ["cleanup", "1", "--root", str(main)], env)
     assert code == 0, err
     assert {(i["kind"], i["name"]): i for i in out["items"]}[("main_dir", str(main))]["result"] == "pulled"
+
+
+@pytest.mark.parametrize(("local", "same"), [(b"a\nb\n", True), (b"a\r\nb\r\n", False)])
+def test_same_untracked_compares_bytes_not_text(repo, tmp_path, local, same):
+    """上流が LF で手元の未追跡が CRLF なら別物とみなし、消す一覧に入れない。"""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("merged_steps", SCRIPTS / "merged-steps.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    up = tmp_path / "up.git"
+    git(tmp_path, "clone", "-q", "--bare", str(repo), str(up))
+    git(repo, "remote", "add", "origin", str(up))
+    git(repo, "fetch", "-q", "origin")
+    git(repo, "checkout", "-q", "-b", "side")
+    (repo / "new.txt").write_bytes(b"a\nb\n")
+    git(repo, "add", "new.txt")
+    git(repo, "commit", "-q", "-m", "new")
+    git(repo, "push", "-q", "origin", "side:develop")
+    git(repo, "checkout", "-q", "develop")
+    git(repo, "branch", "-q", "-D", "side")
+    git(repo, "branch", "-q", "--set-upstream-to", "origin/develop")
+    git(repo, "fetch", "-q", "origin")
+    (repo / "new.txt").write_bytes(local)
+    pull = subprocess.run(["git", "-C", str(repo), "pull", "--ff-only", "-q"], capture_output=True, text=True)
+    assert "untracked working tree files would be overwritten" in pull.stderr
+    assert mod.same_untracked(repo, pull) == (["new.txt"] if same else [])
