@@ -840,8 +840,11 @@ def _run_wait_reset(args) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    deps.require("mdtable")
     args = _build_parser().parse_args(argv)
+    # tabulate（uv での起動し直し）を要するのは Markdown の表を出すときだけ。`wait-reset` と
+    # `--format json` は標準ライブラリだけで動かし、利用上限からの再開経路をオフラインでも止めない
+    if getattr(args, "format", None) == "md":
+        deps.require("mdtable")
     if args.command == "interrupted":
         return _run_interrupted(args)
     if args.command == "wait-reset":
