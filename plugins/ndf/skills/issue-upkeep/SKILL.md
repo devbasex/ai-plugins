@@ -289,7 +289,8 @@ python3 "$UPKEEP/upkeep.py" apply --plan plan.json [--max-waits N]
 
 `apply` がこの待ち方を持つ（`metrics.waits`）。回数の上限は `--max-waits`、1 回の長さの上限は
 `--max-wait` で、超えると `partial` を立てて残りを `pending` に並べる。同じ plan で打ち直すと、
-済んだ課題は記録で飛ぶ。
+済んだ課題は記録で飛ぶ。`report` の反映と待ちの件数は、同じ回（前の `candidates` 以降）に打った
+`apply` をすべて足し合わせた値（`metrics.round`）である。
 
 ## 他のリポジトリで動くこと
 

@@ -404,6 +404,20 @@ def test_report_summarises_candidates_and_apply(env):
     assert m["wait_count"] == 0
 
 
+def test_report_sums_reruns_within_round(env):
+    s4, s7 = env.snapshot(4), env.snapshot(7)
+    close = _action(s4, "閉じてよい", {"state": "closed", "state_reason": "completed"})
+    ch = {"state": "closed", "state_reason": "not_planned", "add_labels": ["wontfix"]}
+    env.set(lambda st: st.update(throttle=[{"headers": {"Retry-After": "7"}}]))
+    code, _ = env.run("apply", "--plan", env.plan([close, _action(s7, "やらない", ch)]))
+    assert code == 10
+    code, out = env.run("apply", "--plan", env.plan([close, _action(s7, "やらない", ch, approved=True)]))
+    assert code == 0 and out["metrics"]["already"] == [4] and out["metrics"]["applied"] == [7]
+    code, out = env.run("report")
+    m = out["metrics"]
+    assert code == 0 and m["applied"] == 2 and m["closed"] == 2 and m["wait_count"] == 1 and m["apply_runs"] == 2
+
+
 def test_report_after_new_candidates_drops_previous_apply(env):
     snap = env.snapshot(4)
     env.run("apply", "--plan", env.plan([_action(snap, "閉じてよい", {"state": "closed", "state_reason": "completed"})]))
