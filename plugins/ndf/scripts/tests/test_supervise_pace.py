@@ -33,7 +33,9 @@ def mission_state(tmp_path: Path, approve: bool = True) -> Path:
     mvv.write_text("## Mission\n速く\n## Vision\n回る\n## Value\n実測\n")
     state = tmp_path / "state" / "mission-state.json"
     subprocess.run(
-        [PY, str(MISSION_STATE), "init", str(state), "--name", "m", "--pace", "fast", "--mvv", str(mvv)], check=True, capture_output=True
+        [PY, str(MISSION_STATE), "init", str(state), "--name", "m", "--pace", "fast", "--mvv", str(mvv), "--root", str(tmp_path)],
+        check=True,
+        capture_output=True,
     )
     if approve:
         subprocess.run([PY, str(MISSION_STATE), "gate", str(state), "MVV", "--what", "MVV を承認"], check=True, capture_output=True)

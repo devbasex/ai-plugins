@@ -355,8 +355,8 @@ def test_next_replace_rewrites_command_section(r6):
 
 
 def test_no_llm_calls():
-    """LLM を呼ばない。外へ出るのは MVV を写すときの gh api だけである。"""
-    src = SCRIPT.read_text()
+    """LLM を直接呼ばない。外へ出るのは MVV を写すときの gh api（lib/mission_mvv.py）だけで、照合は mvv_llm.vet_body に任せる。"""
+    src = SCRIPT.read_text() + (SCRIPTS / "lib" / "mission_mvv.py").read_text()
     assert "claude" not in src
     assert src.count("subprocess.run(") == 1 and '["gh", "api"' in src
 
@@ -408,7 +408,7 @@ def test_init_fast_copies_the_three_sections_and_hashes_them(tmp_path):
 
     env = gh_env(tmp_path, MILESTONE)
     mission = tmp_path / "state" / "mission-state.json"
-    p = run_env(env, "init", str(mission), "--name", "m", "--pace", "fast", "--milestone", "26")
+    p = run_env(env, "init", str(mission), "--name", "m", "--pace", "fast", "--milestone", "26", "--root", str(tmp_path))
     assert p.returncode == 0, p.stdout + p.stderr
     m = json.loads(mission.read_text())
     mvv = Path(m["mvv"]["path"])
@@ -424,13 +424,13 @@ def test_init_fast_copies_the_three_sections_and_hashes_them(tmp_path):
 def test_init_fast_without_the_sections_writes_nothing_and_returns_three(tmp_path, description):
     env = gh_env(tmp_path, description)
     mission = tmp_path / "state" / "mission-state.json"
-    p = run_env(env, "init", str(mission), "--name", "m", "--pace", "fast", "--milestone", "26")
+    p = run_env(env, "init", str(mission), "--name", "m", "--pace", "fast", "--milestone", "26", "--root", str(tmp_path))
     assert p.returncode == 3, p.stdout + p.stderr
     assert not mission.exists()
 
 
 def test_init_fast_without_a_source_returns_two(tmp_path):
-    p = run("init", str(tmp_path / "m.json"), "--name", "m", "--pace", "fast")
+    p = run("init", str(tmp_path / "m.json"), "--name", "m", "--pace", "fast", "--root", str(tmp_path))
     assert p.returncode == 2
     assert not (tmp_path / "m.json").exists()
 
@@ -447,7 +447,7 @@ def test_mvv_approval_and_the_gate_by_the_judgement(tmp_path):
     mvv = tmp_path / "given.md"
     mvv.write_text("## Mission\nx\n## Vision\ny\n## Value\nz\n")
     mission = tmp_path / "mission-state.json"
-    ok("init", str(mission), "--name", "m", "--pace", "fast", "--mvv", str(mvv))
+    ok("init", str(mission), "--name", "m", "--pace", "fast", "--mvv", str(mvv), "--root", str(tmp_path))
     ok("gate", str(mission), "MVV", "--what", "MVV を承認")
     ok(
         "gate",
@@ -510,7 +510,10 @@ def test_plan_kind_reads_the_old_key_too(tmp_path, key):
 def test_mvv_sections_keep_a_heading_inside_a_fence():
     """lib/md.py の上で読む（#1142 の D1）: 囲みの中の `## ` は Mission の節を切らない。"""
     text = "## Mission\n\n使命\n\n```md\n## 囲みの中\n```\n\n## Vision\n\n像\n\n## Value\n\n価値\n\n# 別の文書\n"
-    out = load_mission_state().mvv_sections(text)
+    load_mission_state()  # lib/ を sys.path へ足す
+    import mission_mvv
+
+    out = mission_mvv.mvv_sections(text)
     assert out == ("## Mission\n\n使命\n\n```md\n## 囲みの中\n```\n\n## Vision\n\n像\n\n## Value\n\n価値\n")
 
 

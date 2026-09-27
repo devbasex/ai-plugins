@@ -1,0 +1,154 @@
+"""project_mvv_signals.py: 改訂の兆候の記録と集計（#1366 の I13・I18）。標準ライブラリだけで書く。
+
+覆し（`project-mvv-signals.jsonl`）は `mission-state.py gate --by user` が、同じ承認ゲートの直前の MVV 判定と食い違うときだけ書く。
+「判定できない」（`mvv-gate.jsonl`）と流出不具合（検査の記録の `kind: escape`）は既存の記録を読む。
+"""
+
+from __future__ import annotations
+
+import datetime
+import json
+from pathlib import Path
+
+import project_mvv as pm
+
+
+def read_jsonl(path) -> list[dict]:
+    p = Path(path)
+    if not p.is_file():
+        return []
+    rows = []
+    for ln in p.read_text(encoding="utf-8").splitlines():
+        try:
+            d = json.loads(ln)
+        except ValueError:
+            continue
+        if isinstance(d, dict):
+            rows.append(d)
+    return rows
+
+
+def append_jsonl(path, row: dict) -> None:
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    with p.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def _parse_at(s) -> datetime.datetime | None:
+    if not isinstance(s, str) or not s:
+        return None
+    try:
+        d = datetime.datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return d if d.tzinfo else d.replace(tzinfo=datetime.timezone.utc)
+
+
+def _after(row: dict, since: datetime.datetime | None) -> bool:
+    at = _parse_at(row.get("at"))
+    return since is None or (at is not None and at > since)
+
+
+def unknown_streak(gate_rows: list[dict], sha: str | None) -> int:
+    """同じプロジェクト MVV の sha256 のもとで、末尾から続いた「判定できない」の回数（I13）。"""
+    n = 0
+    for r in reversed(gate_rows):
+        ref = r.get("project_mvv") or {}
+        if ref.get("sha256") != sha:
+            break
+        if r.get("verdict") in ("machine",):
+            continue  # 機械の検査で戻したものは判定ではない
+        if r.get("verdict") != "unknown":
+            break
+        n += 1
+    return n
+
+
+def signals(root, mvv: pm.ProjectMvv, *, signals_log=None, gate_log=None, escapes: list[dict] | None = None) -> dict:
+    """改訂の兆候の集計（I18）。現行の版の sha256 と承認の日時より後の記録だけを数え、閾値と比べる。"""
+    st = pm.resolve_settings(mvv.settings)
+    th = st["revise_after"]
+    key = pm.mvv_repo_key(root)
+    since = _parse_at(mvv.approved_at) if mvv.approved else None
+    sha = mvv.sha256 if mvv.approved else None
+    sig = [r for r in read_jsonl(signals_log or pm.signals_log_path()) if r.get("repo") == key and _after(r, since)]
+    if mvv.approved:
+        sig = [r for r in sig if r.get("project_sha256") == sha]
+    gate_rows = [
+        r for r in read_jsonl(gate_log or pm.gate_log_path()) if (r.get("project_mvv") or {}).get("sha256") == sha and _after(r, since)
+    ]
+    if mvv.approved:
+        gate_rows = [r for r in gate_rows if r.get("repo") in (None, key)]
+    esc = [e for e in (escapes or []) if e.get("kind") == "escape" and _after(e, since)]
+    counts = {
+        "overrides": len(sig),
+        "override_reject": sum(1 for r in sig if r.get("kind") == "override_reject"),
+        "override_pass": sum(1 for r in sig if r.get("kind") == "override_pass"),
+        "unknowns": sum(1 for r in gate_rows if r.get("verdict") == "unknown"),
+        "escapes": len(esc),
+        "unknown_streak": unknown_streak(gate_rows, sha),
+    }
+    over = [k for k in ("overrides", "unknowns", "escapes") if counts[k] >= th[k]]
+    if counts["unknown_streak"] >= st["unknown_streak"]:
+        over.append("unknown_streak")
+    return {"counts": counts, "thresholds": {**th, "unknown_streak": st["unknown_streak"]}, "over": over, "version": mvv.version}
+
+
+def revise_suggestion(sig: dict) -> dict | None:
+    """閾値を超えていれば改訂の提案の 1 件（`items` に載せる）。"""
+    if not sig["over"]:
+        return None
+    parts = [f"{k} {sig['counts'][k]} 件（閾値 {sig['thresholds'][k]}）" for k in sig["over"]]
+    return {
+        "kind": "revise",
+        "result": "suggest",
+        "name": "MVV の改訂を提案する",
+        "reason": "現行の版のもとで " + "・".join(parts) + " に届いた。`references/project-mvv.md` の改訂の手順へ入る",
+    }
+
+
+GATE_KEYS = {"関門 1": "design", "関門 2": "release"}  # mvv-gate.py の --gate
+
+
+def last_mvv_verdict(state: dict, mission: str, gate: str, gate_log) -> str | None:
+    """同じ承認ゲートの直前の MVV 判定（状態の `by: mvv` の記録か、mvv-gate.jsonl の同じミッションの最後の行の新しい方）。"""
+    found = []
+    g = next((g for g in state.get("gates", []) if g.get("name") == gate and g.get("by") == "mvv"), None)
+    if g:
+        found.append((g.get("at") or "", g.get("verdict")))
+    me = str(Path(mission).resolve())
+    rows = [
+        r
+        for r in read_jsonl(Path(gate_log).expanduser())
+        if r.get("gate") == GATE_KEYS.get(gate) and str(Path(str(r.get("mission") or "")).resolve()) == me
+    ]
+    if rows:
+        found.append((rows[-1].get("at") or "", rows[-1].get("verdict")))
+    if not found:
+        return None
+    verdict = max(found, key=lambda x: x[0])[1]
+    return verdict if verdict in ("follow", "not_follow", "unknown") else None
+
+
+def record_override(state: dict, mission: str, gate: str, outcome: str | None, at: str, root, gate_log) -> dict | None:
+    """利用者の答え（`outcome`。省くと approved）が直前の MVV 判定と食い違えば、覆しを 1 行書いて返す（I18）。"""
+    verdict = last_mvv_verdict(state, mission, gate, gate_log)
+    if outcome == "rejected" and verdict == "follow":
+        kind = "override_reject"
+    elif outcome != "rejected" and verdict in ("not_follow", "unknown"):
+        kind = "override_pass"
+    else:
+        return None
+    ref = state.get("project_mvv") or {}
+    row = {
+        "at": at,
+        "repo": pm.mvv_repo_key(root),
+        "mission": str(Path(mission).resolve()),
+        "gate": gate,
+        "kind": kind,
+        "mvv_verdict": verdict,
+        "project_sha256": ref.get("sha256") or pm.load_mvv(root).sha256 or "",
+    }
+    append_jsonl(pm.signals_log_path(), row)
+    return row

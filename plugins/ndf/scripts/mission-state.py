@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 r"""ミッションの状態を mission.json に持ち、引継ぎ文書の節・status・ndf-next を生成する（#1063）。
 
-LLM を呼ばない。入力は supervise.py queue の done の JSON と各計画の report.md だけである。
+LLM を直接呼ばない（ミッション MVV の照合だけ `lib/mission_mvv.py` に任せる）。入力は supervise.py queue の done の JSON と
+各計画の report.md だけである。
 
 | 副命令 | 何をする |
 | --- | --- |
 | `init <mission.json> --name <名> [--milestone M] [--issue N]... [--plan <種類>=<plan.json>]... [--done <done.json>]... [--dev <版>] [--prod <版>] [--goal <雛形の文字列か @ファイル>] [--pace normal\|fast] [--mvv <ファイル>] [--repo OWNER/REPO]` | 状態のファイルを作る。同じパスに別の形の JSON があれば上書きせずに止まる（終了コード 1） |
 | `update <mission.json> [--done <done.json>]... [--next <plan.json>=<文>]...` | done の JSON と報告を読み、行の状態・PR・秒・費用を埋める。何度走らせても同じ結果 |
-| `gate <mission.json> <関門の名> --what <何を> [--at <ISO 8601>] [--by user\|mvv --verdict V --reasons <JSON> --log <jsonl>]` | 関門の承認の時刻を書く。名前が `MVV` なら今の MVV のハッシュも書く |
+| `gate <mission.json> <関門の名> --what <何を> [--at <ISO 8601>] [--by user\|mvv --verdict V --reasons <JSON> --log <jsonl>] [--outcome approved\|rejected] [--root DIR]` | 関門の承認の時刻を書く。名前が `MVV` なら今の MVV のハッシュも書く。`--by user --outcome rejected` は関門を通さず差し戻しだけを残す。利用者の答えが同じ関門の直前の MVV 判定と食い違えば、改訂の兆候（覆し）を `project-mvv-signals.jsonl` へ 1 行書く |
 | `render <mission.json> <引継ぎ文書> --section <見出しの語> [--demote <前の節の語> --heading <新しい見出し>]` | 見出しに語を含む節の本文を置き換える。節の外は変えない |
 | `status <mission.json>` | 端末向けに 1 行ずつ（ミッション・状態・次） |
 | `next <mission.json> [--doc <引継ぎ文書> --section <見出しの語>] [--replace <見出しの語>]` | ndf-next の囲みを出す。`--replace` なら引継ぎ文書のその節も置き換える |
@@ -15,10 +16,8 @@ LLM を呼ばない。入力は supervise.py queue の done の JSON と各計�
 雛形（`--goal`）は `{name}`・`{milestone}`・`{heading}`（現在地の見出し）・`{dev}`・`{prod}`・
 `{issues}` を差し込む。
 
-`--pace fast`（#1078）: マイルストーンの説明（`gh api repos/<所有者>/<リポジトリ>/milestones/<M>`）から
-`## Mission` / `## Vision` / `## Value` の節を状態のファイルの隣の `mvv.md` へ写し、`pace`・`mvv.path`・
-`mvv.sha256` を書く。見出しが 1 つでも無い・取得できないときは状態を書かずに終了コード 3。`--mvv` を渡せば
-写さずにそのファイルを使う。どちらも無ければ終了コード 2。外へ出るのはこの gh api だけである。
+`--pace fast`（#1078・#1366）: ミッション MVV の写しとプロジェクト MVV の参照の書き方は `lib/mission_mvv.py` にある。
+外へ出るのはマイルストーンの説明を読む gh api だけである。
 
 計画の種類は 実装・開発版・本番（ほかの語もそのまま使える）。done を登録しなければ、計画の
 状態ディレクトリ（`<計画>-state/queue-done.json`）を探す。
@@ -29,7 +28,6 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import subprocess
 import sys
 from pathlib import Path
 
@@ -44,6 +42,9 @@ import jsonio  # noqa: E402
 import md  # noqa: E402
 import mdtable  # noqa: E402
 import step_result  # noqa: E402
+import project_mvv as pm  # noqa: E402
+import project_mvv_signals as pms  # noqa: E402
+import mission_mvv  # noqa: E402
 
 TOOL = "mission-state"
 SECTION_DEFAULT = "今の会話の進み"
@@ -51,7 +52,6 @@ NEXT_SECTION_DEFAULT = "次に実行するコマンド"
 NOT_DONE = "まだ"
 PACES = ("normal", "fast")
 MVV_GATE = "MVV"  # 利用者が MVV を承認した記録の名前
-MVV_SECTIONS = ("Mission", "Vision", "Value")
 EXIT_UNREADABLE, EXIT_PRECONDITION = 2, 3
 
 
@@ -144,53 +144,10 @@ def other_shape(path: str) -> str:
     return ""
 
 
-def mvv_sections(text: str) -> str | None:
-    """説明から Mission / Vision / Value の節を順に取り出す。1 つでも無ければ None。"""
-    lines = text.splitlines()
-    found = {}
-    for s in md.md_sections(text):
-        m = re.match(r"(Mission|Vision|Value)\b", s.heading.title)
-        if s.heading.level == 2 and m and lines[s.heading.line].startswith("## "):
-            found.setdefault(m.group(1), "\n".join(lines[s.heading.line : s.end]).strip())
-    if any(k not in found for k in MVV_SECTIONS):
-        return None
-    return "\n\n".join(found[k] for k in MVV_SECTIONS) + "\n"
-
-
-def milestone_description(milestone: str, repo: str | None) -> str:
-    """マイルストーンの説明を gh api で読む。読めなければ OSError。"""
-    path = f"repos/{repo or '{owner}/{repo}'}/milestones/{milestone}"
-    p = subprocess.run(["gh", "api", path, "--jq", ".description"], capture_output=True, text=True)
-    if p.returncode != 0:
-        raise OSError(f"gh api {path}: {p.stderr.strip()[:300]}")
-    return p.stdout
-
-
-def init_mvv(a) -> tuple[dict | None, dict | None]:
-    """(状態へ書く mvv, 止まるときの結果)。pace が normal なら (None, None)。"""
-    if a.pace != "fast":
-        return None, None
-    if a.mvv:
-        path = Path(a.mvv).resolve()
-        if not path.is_file():
-            return None, outcome("stopped", f"MVV のファイルが無い: {a.mvv}", exit=EXIT_PRECONDITION)
-        return {"path": str(path), "sha256": sha256_of(path)}, None
-    if not a.milestone:
-        return None, outcome("stopped", "--pace fast には --milestone（MVV の複製元）か --mvv が要る", exit=EXIT_UNREADABLE)
-    try:
-        text = mvv_sections(milestone_description(a.milestone, a.repo))
-    except (OSError, FileNotFoundError) as e:
-        return None, outcome("stopped", f"マイルストーン {a.milestone} の説明を読めない: {e}", exit=EXIT_PRECONDITION)
-    if text is None:
-        return None, outcome(
-            "stopped",
-            f"マイルストーン {a.milestone} の説明に ## Mission / ## Vision / ## Value の見出しがそろっていない。説明を直してから打ち直す",
-            exit=EXIT_PRECONDITION,
-        )
-    path = Path(a.mission).resolve().parent / "mvv.md"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-    return {"path": str(path), "sha256": sha256_of(path)}, None
+def init_mvv_outcome(a, project) -> tuple[dict | None, dict | None]:
+    """(状態へ書く mvv, 止まるときの結果)。中身は `lib/mission_mvv.py`。"""
+    mvv, stop = mission_mvv.init_mvv(a, project)
+    return mvv, (outcome("stopped", stop[0], stop[2], exit=stop[1]) if stop else None)
 
 
 def cmd_init(a) -> dict:
@@ -201,9 +158,14 @@ def cmd_init(a) -> dict:
             f"別の形の JSON があるため上書きしない（{why}）: {a.mission}。 状態のファイルは別の名前か別の場所に置く",
             metrics={"path": a.mission, "reason": why},
         )
-    mvv, stop = init_mvv(a)
+    project = pm.load_mvv(Path(a.root or ".").resolve())
+    mvv, stop = init_mvv_outcome(a, project)
     if stop:
         return stop
+    if a.pace == "fast" and project.approved and mvv:
+        stop = mission_mvv.vet_stop(Path(a.root or ".").resolve(), mvv["path"])
+        if stop:
+            return outcome("stopped", stop[0], stop[2], exit=stop[1])
     goal = a.goal or ""
     if goal.startswith("@"):
         goal = Path(goal[1:]).read_text().rstrip("\n")
@@ -220,6 +182,8 @@ def cmd_init(a) -> dict:
     }
     if mvv:
         m["mvv"] = mvv
+    if a.pace == "fast" and project.approved:
+        m["project_mvv"] = {"version": project.version, "sha256": project.sha256}
     for text in a.plan or []:
         kind, plan = parse_pair(text, "--plan")
         issues = plan_issues(plan)
@@ -305,6 +269,20 @@ def cmd_gate(a) -> dict:
     m = jsonio.read(a.mission)
     at = a.at or clock.now_iso("utc")
     entry = {"name": a.name, "what": a.what, "at": at}
+    if a.by == "user":
+        override = pms.record_override(m, a.mission, a.name, a.outcome, at, Path(a.root or ".").resolve(), a.mvv_log)
+        if a.outcome == "rejected":
+            m.setdefault("rejections", []).append({**entry, "by": "user", "outcome": "rejected"})
+            jsonio.write_atomic(a.mission, m, indent=1)
+            extra = f"。覆しを記録した（{override['kind']}）" if override else ""
+            return outcome(
+                "ok",
+                f"{a.name} の差し戻しを書いた（{at}。関門は通さない）{extra}",
+                [override] if override else [],
+                {"gates": len(m.get("gates", []))},
+            )
+        if a.outcome:
+            entry["outcome"] = "approved"
     if a.name == MVV_GATE:
         mvv = m.get("mvv") or {}
         if not mvv.get("path") or not Path(mvv["path"]).is_file():
@@ -546,6 +524,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--pace", choices=PACES, default="normal", help="ミッションの進め方（既定 normal）")
     s.add_argument("--mvv", help="--pace fast: マイルストーンから写さずに使う MVV のファイル")
     s.add_argument("--repo", help="--pace fast: マイルストーンを読むリポジトリ（OWNER/REPO。既定はカレント）")
+    s.add_argument("--root", help="プロジェクト MVV（.ndf/mvv.md・mvv.json）を読むリポジトリの根（既定はカレント）")
 
     s = sub.add_parser("update")
     s.add_argument("mission")
@@ -561,6 +540,11 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--verdict", help="--by mvv: 判定")
     s.add_argument("--reasons", help="--by mvv: 理由（JSON の配列）")
     s.add_argument("--log", help="--by mvv: 判定のログ（mvv-gate.jsonl）のパス")
+    s.add_argument(
+        "--outcome", choices=("approved", "rejected"), help="--by user: 利用者の答え（省くと approved。記録に outcome を書かない）"
+    )
+    s.add_argument("--mvv-log", default=str(pm.gate_log_path()), help="--by user: 直前の MVV 判定を読むログ（既定 mvv-gate.jsonl）")
+    s.add_argument("--root", help="覆しの記録の repo（既定はカレント）")
 
     s = sub.add_parser("render")
     s.add_argument("mission")

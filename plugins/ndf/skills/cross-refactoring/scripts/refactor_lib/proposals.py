@@ -97,6 +97,10 @@ def _normalize_proposal(raw: dict[str, Any], source: str) -> Optional[dict[str, 
         "plan": str(raw.get("plan") or "").strip(),
         "test_gap": bool(raw.get("test_gap")),
         "estimated_diff_lines": max(estimated, 0),
+        # 根拠にした MVV の項目（#1366）。正規化は取り込み（`merge-proposals`）が状態の MVV の参照で行う
+        "mvv_basis": [v.strip() for v in raw.get("mvv_basis") or [] if isinstance(v, str) and v.strip()]
+        if isinstance(raw.get("mvv_basis"), list)
+        else [],
         "proposed_by": [source],
         # 語彙外を含んだ提案。見送りの理由を `vocabulary` と `threshold` で分けるため
         # に残す（AC9）。
@@ -116,6 +120,9 @@ def _merge_common_attributes(existing: dict[str, Any], incoming: dict[str, Any])
         existing["rationale"] = incoming["rationale"]
     if len(incoming["plan"]) > len(existing["plan"]):
         existing["plan"] = incoming["plan"]
+    for b in incoming.get("mvv_basis") or []:
+        if b not in existing.setdefault("mvv_basis", []):
+            existing["mvv_basis"].append(b)
     # 根拠の値は、既にある鍵を残し、無い鍵だけ足す。
     if incoming.get("evidence"):
         existing["evidence"] = {**incoming["evidence"], **(existing.get("evidence") or {})}
