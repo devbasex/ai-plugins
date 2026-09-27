@@ -116,7 +116,14 @@ def build(tmp: Path) -> dict:
         "## [ndf 10.1.5] - x\n\n## [ndf 10.1.0] - x\n\n## [ndf 10.0.0] - x\n",
         encoding="utf-8",
     )
-    return {"claude": tmp / "claude", "codex": tmp / "codex", "kiro": tmp / "kiro", "out": out, "changelog": changelog}
+    return {
+        "claude": tmp / "claude",
+        "codex": tmp / "codex",
+        "kiro": tmp / "kiro",
+        "usage": tmp / "usage",  # 手元の帳簿を読まない
+        "out": out,
+        "changelog": changelog,
+    }
 
 
 def run(env: dict, *args: str, until: str | None = UNTIL) -> subprocess.CompletedProcess:
@@ -129,6 +136,8 @@ def run(env: dict, *args: str, until: str | None = UNTIL) -> subprocess.Complete
         str(env["codex"]),
         "--kiro-root",
         str(env["kiro"]),
+        "--usage-root",
+        str(env["usage"]),
         "--out",
         str(env["out"]),
         "--changelog",
@@ -164,6 +173,16 @@ def test_writes_md_and_json_named_by_until_date(tmp_path):
     assert data["meta"]["until"] == UNTIL
     assert data["meta"]["by"] == ["version", "mode", "model", "cc", "reviewers"]
     assert set(data) == {"per_pr", "per_role", "external", "meta"}
+
+
+def test_ledger_rows_join_the_record(tmp_path):
+    """計画が起動した claude -p の使用量も、token-usage.py の通常の実行と同じく記録へ入る。"""
+    env = build(tmp_path)
+    row = {"at": _ts(21), "ndf_version": "10.2.0", "kind": "work", "model": "claude-opus-5", "usage": U, "seconds": 60.0}
+    _jsonl(env["usage"] / "x.jsonl", [row])
+    ok(env, "--released", "10.3.0")
+    data = json.loads((env["out"] / "2026-09-10.json").read_text(encoding="utf-8"))
+    assert {(x["layer"], x["role"]) for x in data["per_role"] if x["agent_type"] == "claude -p"} == {("worker", "work")}
 
 
 def test_other_version_on_same_date_gets_suffix(tmp_path):

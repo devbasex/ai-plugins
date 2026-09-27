@@ -339,13 +339,21 @@ def read_meta(path: Path) -> dict:
         return {}
 
 
+# 名前をそのまま載せてよい組み込みの定義。これと ndf: 以外は利用者や他社の定義の名前なので載せない
+BUILTIN_AGENT_TYPES = frozenset({"general-purpose", "Explore", "Plan", "statusline-setup", "output-style-setup", "claude-code-guide"})
+
+
 def agent_type_of(meta: dict, launched: dict) -> str:
     """サブエージェントの定義の名前。meta の agentType が ndf: で始まればその値、そうでなければ起動した
-    Agent 呼び出しの subagent_type（meta の toolUseId で引く）。どちらも取れなければ -。"""
+    Agent 呼び出しの subagent_type（meta の toolUseId で引く）。どちらも取れなければ -。
+    ndf: で始まるものと組み込みの定義以外は、利用者のリポジトリや他社のプラグインの名前を記録へ残さないよう「その他」にまとめる。"""
     at = meta.get("agentType") or ""
     if at.startswith("ndf:"):
         return at
-    return launched.get(meta.get("toolUseId")) or "-"
+    name = launched.get(meta.get("toolUseId")) or ""
+    if not name:
+        return "-"
+    return name if name.startswith("ndf:") or name in BUILTIN_AGENT_TYPES else "その他"
 
 
 def mode_of(modes: Counter) -> str:
@@ -396,6 +404,8 @@ def read_claude(root: Path, idle_cap: int, until: float | None = None) -> tuple[
         c.sec += active_seconds(s.times, idle_cap)
         modes, prs, keys = Counter(s.modes), set(s.prs), set(s.keys)
         for _, sub, meta in subs:
+            if until is not None and not sub.times:  # 打ち切りより後に起動した分は、作り直したときに起動数を増やさない
+                continue
             depth = int(meta.get("spawnDepth") or 1)
             layer = layer_of(depth, meta.get("description"))
             r = roles[(layer, role_of(meta.get("description"), layer), agent_type_of(meta, launched))]
