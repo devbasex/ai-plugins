@@ -44,8 +44,10 @@ allowed-tools:
 | 改善項目 | リファクタリング計画が採った改善候補。`I-001` の形の ID を持ち、**1 改善項目 = 1 コミット**（テストを足す項目は 2 コミット） |
 | グレード | 改善候補ごとに付ける適用の価値（`tier`: high / medium / low）。Jev か実装担当が付け、改善項目の順位の最初の鍵にする |
 | 配分テーブル | 種類（`test` / `structure/<手法>` / `verify` / `fix`）ごとの 1 件あたりの所要。履歴の直近 10 回からリファクタリング計画のたびに集計する |
-| 範囲テスト | 項目が触った箇所に限って走らせるテスト。リファクタリング計画の `test_targets` からオーケストレーターが組み立てる |
-| 危険フラグ | 範囲テストでは覆えない変更（D1〜D5）。立ったら全体テストを 1 度だけ走らせる |
+| テストの戦略 | 範囲テストの走らせ方・全体テストの置き場（手元か CI か）・落ちたテストの見分け方の組。`local-full` / `local-scoped-ci-whole` / `round-only`。宣言（`.ndf/project.json` の `test.strategy`）か、同じ関数が所要から導く |
+| 範囲テスト | 項目が触った箇所に限って走らせるテスト。宣言の `scope_command`（`{paths}` の雛形）にリファクタリング計画の `test_targets` を入れてオーケストレーターが組み立てる |
+| 危険フラグ | 範囲テストでは覆えない変更（D1〜D5）。立ったら全体テストを 1 度だけ走らせる（全体テストを CI に任せる戦略では最終ゲートへ寄せる） |
+| フレーキー / 既存失敗 / 変更起因 | 全体テスト（着手前・危険フラグ・最終ゲート）で落ちたテストの 3 つの分類。ID は JUnit XML から読み、落ちたファイルだけを HEAD と着手前の HEAD で走らせ直して分ける |
 | リファクタリング計画 | 採る改善項目と、見送った提案とその理由を決める手順と、その出力（PR のコメントか `--plan-file`） |
 | バッファ | リファクタリング計画の見積りで、想定最大時間から経過を引いた後に差し引いておく時間（危険フラグと最終ゲートの全体テスト・修正 1 回・最終ゲート修正 1 回） |
 
@@ -69,9 +71,9 @@ allowed-tools:
 | `--include NAMES` | 参加者に足す者（例: `--include agy`） | なし |
 | `--require-all` | 確認を通らない者が 1 者でもいれば中断する（終了コード 4） | 外して続ける |
 | `--model RT=MODEL` | ランタイムごとのモデル。繰り返し指定できる | CLI の既定 |
-| `--baseline-test CMD` | 着手前・危険フラグ・最終ゲートで実行する全体テスト | 必須 |
-| `--round-test CMD` | ラウンドテスト。項目ごとの範囲テストを組み立てる元で、組み立てられない項目はそのまま走らせる。**`--baseline-test` の実行器が `pytest` / `python -m pytest` / `jest` / `vitest` でなければ必須** | `--baseline-test` から組み立てる |
-| `--ci-check NAME` | 最終ゲートで手元のテストの代わりに見るチェックの名前（排他） | なし |
+| `--baseline-test CMD` | 全体テスト。`{paths}` を含めば範囲テストの雛形（全体は `{paths}` を `.` にしたもの）、含まなければ全体テストとしてそのまま走らせる（戦略は `round-only`）。文字列の中身は解析しない | 宣言の `test` を読む |
+| `--round-test CMD` | ラウンドテスト。`{paths}` を含めば範囲テストの雛形、含まなければ項目ごとにそのまま走らせる（戦略は `round-only`）。宣言に `test` が無いときの逃げ道 | なし |
+| `--ci-check NAME` | 最終ゲートで待つチェックの名前。宣言の `test.ci.check` より先に効き、`limits.ci_wait_timeout` まで待つ | 宣言の `test.ci.check` |
 | `--workflow-step` | `development-workflow` の 1 工程として起動したことを伝える。`cross-review` を省く | 単独起動 |
 | `--severity-threshold LEVEL` | この重要度未満は `threshold` で見送る | `minor` |
 | `--sync-command CMD` | 生成物を同期するコマンド。push の直前にオーケストレーターが実行する | なし |
@@ -83,11 +85,15 @@ allowed-tools:
 回数と所要は `--budget-minutes` が決める（修正は締め切りまで試み、テスト 1 回の上限は想定最大時間から導く）。
 
 ```text
-/ndf:cross-refactoring 130 --scope src/services tests/services --round-test "pytest tests/services -q" --baseline-test "pytest -q"
-/ndf:cross-refactoring 130 --scope src tests --baseline-test "pytest -q" --budget-minutes 30
-/ndf:cross-refactoring 130 --scope src tests --baseline-test "pytest -q" --implementer codex --sync-command "make generate"
-/ndf:cross-refactoring 130 --scope src tests --baseline-test "pytest -q" --include agy --exclude kiro
+/ndf:cross-refactoring 130 --scope src/services tests/services
+/ndf:cross-refactoring 130 --scope src tests --budget-minutes 30
+/ndf:cross-refactoring 130 --scope src tests --implementer codex --sync-command "make generate"
+/ndf:cross-refactoring 130 --scope src tests --include agy --exclude kiro
+/ndf:cross-refactoring 130 --scope src tests --round-test "make test-unit"   # 宣言に test が無いリポジトリ
 ```
+
+**テストの走らせ方は宣言（`.ndf/project.json` の `test`）の戦略で決まる**（[docs/01](docs/01-state-and-propose.md) の「テストの戦略」）。
+`init` は `STRATEGY` / `STRATEGY_SOURCE` を返し、コマンドの文字列を解析しない。
 
 **モデルを比べたいなら `--model <ランタイム>=<name>` を参加者の全員に指定する。**
 実際に動いたモデルを取得できるのは claude だけで、残る者は指定値で代用する。
@@ -149,7 +155,7 @@ flowchart TD
     W -->|取り出せない| DropAll["危険フラグの項目をまとめて取り消す"]:::stop --> Gate
     D -->|無い| Gate{"最終ゲート"}
     Gate -->|単独| CR["全体テスト → /ndf:cross-review"]
-    Gate -->|工程の 1 つ| Whole["全体テスト（使い回しあり）<br/>--ci-check なら継続的統合"]
+    Gate -->|工程の 1 つ| Whole["全体テスト（使い回しあり）<br/>CI に任せる戦略・--ci-check なら継続的統合を待つ"]
     CR --> Fin["finalize: 通った実行だけ配分の履歴へ 1 行"]:::ok
     Whole --> Fin
 
@@ -164,11 +170,11 @@ flowchart TD
 
 ## 実行
 
-メインが決めるのは `--scope` / `--baseline-test` / `--round-test` / `--sync-command` である。決めたら Skill の
+メインが決めるのは `--scope` / `--sync-command`（宣言に `test` が無ければ `--round-test`）である。決めたら Skill の
 ディレクトリで次の 1 行を打ち、最後の行の結果 JSON の `status` と終了コードを見る。
 
 ```bash
-python3 scripts/drive.py <PR> --scope <範囲...> --baseline-test "<全体テスト>" [「引数」の表のうち値のあるもの]
+python3 scripts/drive.py <PR> --scope <範囲...> [「引数」の表のうち値のあるもの]
 ```
 
 待ちはコマンドの中で行う。Claude Code では `run_in_background` で起動し、完了通知を 1 回受ける。Codex / Kiro /
@@ -177,7 +183,7 @@ agy では共通ライブラリの `scripts/lib/bg-wait.sh` で背景に起動�
 
 ```bash
 RC="${TMPDIR:-/tmp}/cross-refactoring-drive-pr<PR>.rc"
-bash ../../scripts/lib/bg-wait.sh run "$RC" -- python3 scripts/drive.py <PR> --scope <範囲...> --baseline-test "<全体テスト>" [上と同じ引数]
+bash ../../scripts/lib/bg-wait.sh run "$RC" -- python3 scripts/drive.py <PR> --scope <範囲...> [上と同じ引数]
 bash ../../scripts/lib/bg-wait.sh wait "$RC"   # 1 回 540 秒以内。124 = まだ終わっていない
 ```
 
@@ -197,7 +203,7 @@ bash ../../scripts/lib/bg-wait.sh wait "$RC"   # 1 回 540 秒以内。124 = ま
 `deferred` / `fix_rounds` / `final_gate` / `review_status`）である。
 
 最終ゲートの判定の相手は起動のされ方で変わる（[docs/04-verify-and-report.md](docs/04-verify-and-report.md)）。
-`--workflow-step` なら全体テスト（`--ci-check` なら継続的統合）で判定して finalize まで進み、単独起動なら
+`--workflow-step` なら全体テスト（CI に任せる戦略か `--ci-check` なら継続的統合）で判定して finalize まで進み、単独起動なら
 cross-review の最終ステータスを受けてから finalize を呼ぶ。
 
 ## アンチパターン

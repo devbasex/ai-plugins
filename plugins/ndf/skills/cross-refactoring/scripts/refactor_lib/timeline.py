@@ -1,12 +1,12 @@
-"""時間の上限を想定最大時間から逆算する（#933 決定 23・24、実装計画 I15 I16）。
+"""時間の上限を想定最大時間から逆算する（#933 決定 23・24、#1334 決定 8）。
 
-**時間に関わる数値は、想定最大時間 B（`--budget-minutes`）と着手前の全体のテストの
-実測 w（`baseline_test.seconds`）からの算術だけで出す。** 係数はここにだけ置き、式は
-`docs/02-plan-and-implement.md` の「締め切り」の節にまとめてある。実行の途中で数値を
-決めるために LLM へ問わない。
+**時間に関わる数値は、想定最大時間 B（`--budget-minutes`）・宣言の全体テストの所要 w・着手前に手元で走らせたテストの
+実測 x・CI の壁時計 c からの算術だけで出す。** テストと CI の待ちの係数は共通層の `test_strategy` にあり、
+supervise と同じ式で出す（I10）。手順の枠の係数はここに置く。式は `docs/02-plan-and-implement.md` の「締め切り」の
+節にまとめてある。実行の途中で数値を決めるために LLM へ問わない。
 
-値は `init`（改修計画の前の値）と `merge-plan`（改修計画の後の値）が `state["limits"]` へ書き
-出す。以後の手順は、書き出した値と時計の比較だけで進み、止まる。
+値は `init`（改修計画の前の値）と `merge-plan`（改修計画の後の値）が `state["limits"]` へ書き出す。以後の手順は、
+書き出した値と時計の比較だけで進み、止まる。
 
 **純粋な処理だけを置く。** 今の時刻は引数で受ける。
 """
@@ -17,17 +17,21 @@ import datetime as _dt
 import math
 from typing import Any, Optional
 
+import test_strategy as ts
+
 from . import budget, clock
 
-# 係数（決定 24）。B と w に掛ける比率で、秒や分の固定値は持たない。
+# 手順の枠の係数（決定 24）。B に掛ける比率で、秒や分の固定値は持たない。
 PROPOSE_SHARE = 0.20  # 提案の枠の終わり = 開始 + 0.20·B
 PLAN_SHARE = 0.10  # 改修計画の枠の終わり = 提案の枠の終わり + 0.10·B
-INIT_TEST_SHARE = 0.10  # 着手前のテスト 1 回の上限 = 0.10·B（w はまだ測れていない）
 MARGIN_SHARE = 0.05  # 余裕 = 0.05·B（手順の上限と CLI の上限に足す）
-TEST_FACTOR = 3.0  # テスト 1 回の上限 = max(3·w, 0.01·B)
-TEST_FLOOR_SHARE = 0.01
 MEASURE_SHARE = 0.05  # 指標の測定の上限 = 0.05·B（提案の枠の中から割く。#1319 の決定 7）
 MEASURE_PROPOSE_CAP = 0.5  # 測定に使える時間は、提案の枠の終わりまでの残りの半分まで
+# テストと CI の待ちの係数は `test_strategy` が持つ（cross-refactoring と supervise で同じ値）。
+INIT_TEST_SHARE = ts.INIT_TEST_SHARE
+TEST_FACTOR = ts.TEST_FACTOR
+TEST_FLOOR_SHARE = ts.TEST_FLOOR_SHARE
+CI_WAIT_SHARE = ts.CI_WAIT_SHARE
 
 # 固定のまま残す値（決定 24）。OS の後始末と通信の待ちで、予算と性質が違う。報告に並べる。
 FIXED_VALUES = (
@@ -59,11 +63,6 @@ def margin(budget_minutes: int) -> int:
     return _seconds(budget_minutes, MARGIN_SHARE)
 
 
-def init_test_timeout(budget_minutes: int) -> int:
-    """着手前の全体のテストとラウンドのテスト 1 回の上限（秒）。"""
-    return _seconds(budget_minutes, INIT_TEST_SHARE)
-
-
 def measure_timeout(budget_minutes: int) -> int:
     """指標の測定の上限（秒）。"""
     return _seconds(budget_minutes, MEASURE_SHARE)
@@ -83,11 +82,31 @@ def measure_deadline(now: _dt.datetime, limits: dict[str, Any]) -> int:
     return max(0, min(cap, math.floor(MEASURE_PROPOSE_CAP * left)))
 
 
-def test_timeout(budget_minutes: int, baseline_seconds: Optional[float]) -> int:
-    """着手の後のテスト 1 回の上限（秒）。測れていなければ着手前の上限を使う。"""
-    if baseline_seconds is None:
-        return init_test_timeout(budget_minutes)
-    return math.ceil(max(TEST_FACTOR * float(baseline_seconds), float(budget_minutes) * 60 * TEST_FLOOR_SHARE))
+def strategy_of(state: dict[str, Any]) -> ts.Strategy:
+    """状態の戦略。無い（この変更より前の状態ファイル）ときは、記録の `baseline_test.command` を全体テスト、
+    `round_test.command` をラウンドテストとして読む（値を読むだけで、文字列は解析しない）。"""
+    data = state.get("strategy")
+    if isinstance(data, dict) and data.get("name"):
+        return ts.Strategy.from_state(data)
+    whole = (state.get("baseline_test") or {}).get("command")
+    round_command = (state.get("round_test") or {}).get("command")
+    suites = [ts.Suite("baseline", str(whole), paths=["."])] if whole else []
+    if round_command:
+        return ts.Strategy(ts.ROUND_ONLY, "state:round_test", suites, round_command=str(round_command))
+    return ts.Strategy(ts.LOCAL_FULL, "state:baseline_test", suites)
+
+
+def test_limits(state: dict[str, Any]) -> dict[str, Any]:
+    """テストと CI の待ちの上限（`test_strategy.limits`）。入力は着手前の記録から取る。"""
+    baseline = state.get("baseline_test") or {}
+    return ts.limits(
+        strategy_of(state),
+        int(state["budget_minutes"]),
+        whole_seconds_value=baseline.get("whole_seconds"),
+        whole_source=baseline.get("whole_source"),
+        ci_seconds=baseline.get("ci_seconds"),
+        measured_seconds=baseline.get("seconds"),
+    )
 
 
 def _completion(items: list[dict[str, Any]], start_key: str, estimate_key: str) -> Optional[_dt.datetime]:
@@ -109,21 +128,27 @@ def _iso(value: Optional[_dt.datetime]) -> Optional[str]:
 def compute(
     started_at: _dt.datetime,
     budget_minutes: int,
-    baseline_seconds: Optional[float],
+    tests: Any,
     items: Optional[list[dict[str, Any]]] = None,
     reserve: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
-    """実行時の値の表。`items` と `reserve`（改修計画の後）が無ければ、その行は `None`。"""
+    """実行時の値の表。`tests` は `test_strategy.limits` の表（数値か `None` なら、着手前の実測として `local-full` の表を組む）。
+    `items` と `reserve`（改修計画の後）が無ければ、その行は `None`。"""
     b = int(budget_minutes)
+    if not isinstance(tests, dict):
+        tests = ts.limits(ts.Strategy(ts.LOCAL_FULL, "args"), b, measured_seconds=tests)
     propose_end = started_at + _dt.timedelta(minutes=b * PROPOSE_SHARE)
     plan_end = propose_end + _dt.timedelta(minutes=b * PLAN_SHARE)
     planned = reserve is not None
     return {
         "budget_minutes": b,
         "margin_seconds": margin(b),
-        "init_test_timeout": init_test_timeout(b),
+        "init_test_timeout": int(tests["init_test_timeout"]),
         "measure_timeout": measure_timeout(b),
-        "test_timeout": test_timeout(b, baseline_seconds),
+        "test_timeout": int(tests["test_timeout"]),
+        "whole_timeout": int(tests["whole_timeout"]),
+        "ci_wait_timeout": int(tests["ci_wait_timeout"]),
+        "basis": dict(tests.get("basis") or {}),
         "propose_end_at": _iso(propose_end),
         "plan_end_at": _iso(plan_end),
         "add_tests_end_at": _iso(_completion(list(items or []), "test_start_deadline", "test")),
@@ -141,7 +166,7 @@ def of_state(state: dict[str, Any]) -> dict[str, Any]:
     return compute(
         clock.parse(state["started_at"]),
         int(state["budget_minutes"]),
-        (state.get("baseline_test") or {}).get("seconds"),
+        test_limits(state),
         state.get("items") if plan else None,
         (plan or {}).get("reserve") if plan else None,
     )
@@ -155,6 +180,20 @@ def limits_of(state: dict[str, Any]) -> dict[str, Any]:
 def state_test_timeout(state: dict[str, Any]) -> int:
     """テスト 1 回の上限（秒）。"""
     return int(limits_of(state)["test_timeout"])
+
+
+def state_whole_timeout(state: dict[str, Any]) -> int:
+    """手元の全体テスト 1 回の上限（秒）。旧い表なら `test_timeout`。"""
+    limits = limits_of(state)
+    return int(limits.get("whole_timeout") or limits["test_timeout"])
+
+
+def state_ci_wait_timeout(state: dict[str, Any]) -> int:
+    """CI の待ちの上限（秒）。"""
+    limits = limits_of(state)
+    if limits.get("ci_wait_timeout") is not None:
+        return int(limits["ci_wait_timeout"])
+    return int(test_limits(state)["ci_wait_timeout"])
 
 
 def phase_timeout(end: _dt.datetime, now: _dt.datetime, margin_seconds: int) -> int:

@@ -18,7 +18,6 @@ import gh_call
 from supervise_lib import decl, paths, plan as plan_mod
 from supervise_lib.claude import TAIL, run_ticking
 from supervise_lib.prompts import JUDGE_SYSTEM
-from supervise_lib.slow import SLOW_EXIT
 
 
 def is_gate(code: int | None) -> bool:
@@ -119,7 +118,7 @@ class RunStep:
             return ""
         return str(test.get("no_reports") or "") if isinstance(test, dict) else ""
 
-    def run_cmd(self, ctx, step: dict, extra_addopts: str = "") -> tuple[int, str]:
+    def run_cmd(self, ctx, step: dict) -> tuple[int, str]:
         cmd = step.get("cmd") or paths.PRESETS.get(step.get("preset", ""), "")
         if not cmd:
             return 2, f"ステップ {step['id']} に cmd も知っている preset も無い"
@@ -139,7 +138,6 @@ class RunStep:
         addopts = [(inherited.replace(no_reports, "") if no_reports else inherited).strip()]
         if no_reports and not step.get("reports"):
             addopts.append(no_reports)
-        addopts.append(extra_addopts)
         env["PYTEST_ADDOPTS"] = " ".join(a for a in addopts if a)
         ctx.state.run_log = ctx.state.dir / "run-stderr.log"
         try:
@@ -160,15 +158,9 @@ class RunStep:
             ctx.state.run_log = None
 
     def execute(self, ctx, step: dict) -> tuple[bool, str]:
+        # 落ちたテストの走らせ直しは持たない。テストのステップは test-run.py が JUnit で見分ける（#1334）
         started = time.time()
         code, text = self.run_cmd(ctx, step)
-        if code not in (0, 124, SLOW_EXIT) and not is_gate(code) and step.get("rerun_failed") and not self.is_skip(step, code):
-            # 落ちたテストだけを走らせ直す。通れば揺れとして成功にする
-            code2, text2 = self.run_cmd(ctx, step, "--lf")
-            ctx.state.cur["rerun"] = {"exit": code2}
-            text = f"{text}\n\n## 落ちたテストだけの再実行（exit={code2}）\n{text2}"
-            if code2 == 0:
-                code, text = 0, text + "\n再実行で通った（揺れとして進む）"
         ctx.state.cur.update(exit=code, text=text, seconds=round(time.time() - started, 1))
         return code == 0, text
 

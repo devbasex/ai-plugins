@@ -81,22 +81,14 @@ def test_work_without_issues_does_not_call_gh(tmp_path, fakes):
     assert "## 課題" not in fakes.read_text()
 
 
-def test_rerun_failed_passes_when_last_failed_run_passes(tmp_path):
-    # 1 回目は落ち、PYTEST_ADDOPTS に --lf が付いた 2 回目は通る
-    cmd = 'case "$PYTEST_ADDOPTS" in *--lf*) exit 0;; *) echo boom; exit 1;; esac'
-    s, text = run_plan(tmp_path, [{"id": "t", "type": "run", "cmd": cmd, "rerun_failed": True, "next": "end"}])
-    assert "結果: 完了" in text
-    assert s.state.results["t"]["rerun"] == {"exit": 0}
-    assert "揺れとして進む" in s.state.results["t"]["text"]
-
-
-def test_rerun_failed_still_failing_goes_to_on_fail(tmp_path):
+def test_a_failed_run_step_is_not_rerun_by_the_engine(tmp_path):
+    """落ちたテストの走らせ直しは run のステップが持たない（test-run.py が JUnit で見分ける。#1334 AC1）。"""
     steps = [
-        {"id": "t", "type": "run", "cmd": "exit 1", "rerun_failed": True, "on_fail": "after"},
+        {"id": "t", "type": "run", "cmd": "exit 1", "on_fail": "after"},
         {"id": "after", "type": "run", "cmd": "true", "next": "end"},
     ]
     s, text = run_plan(tmp_path, steps)
-    assert s.state.results["t"]["rerun"] == {"exit": 1}
+    assert "rerun" not in s.state.results["t"]
     assert [e["id"] for e in s.state.log] == ["t", "after"]
 
 
@@ -348,8 +340,14 @@ def test_new_impl_in_other_repo_uses_declarations_only(tmp_path):
     plan = json.loads(out.read_text())
     steps = {s["id"]: s for s in plan["steps"]}
     assert "sync" not in steps and steps["impl"]["next"] == "test-limited"
-    assert steps["test-limited"]["cmd"] == "npm test -- src/a.test.js"
-    assert steps["test-all"]["cmd"] == "npm test -- src"
+    # テストのステップは test-run.py が宣言（supervise.json の test.command を 1 つの suite として読む）から走らせる（#1334）
+    assert steps["test-limited"]["cmd"] == f"python3 {SCRIPTS / 'test-run.py'} scope --paths src/a.test.js"
+    assert steps["test-all"]["cmd"] == f"python3 {SCRIPTS / 'test-run.py'} whole --pr {{pr}}"
+    assert "rerun_failed" not in steps["test-limited"] and "rerun_failed" not in steps["test-all"]
+    assert plan["テストの戦略"]["name"] == "local-full" and "supervise.json" in plan["テストの戦略"]["note"]
+    assert plan["テストの時間"]["basis"]["unknown_duration"] is True
+    assert steps["test-limited"]["timeout"] == 990 and steps["test-all"]["timeout"] == 1980
+    assert steps["merge"]["cmd"].endswith("merge-when-green {pr} --timeout 3600") and steps["merge"]["timeout"] == 3960
     assert steps["pr"]["base"] == "main" and plan["base_branch"] == "main" and "no_reports" not in plan
     for cmd in run_cmds(plan):
         assert not any(w in cmd for w in AI_PLUGINS_WORDS), cmd
@@ -387,8 +385,11 @@ def test_new_impl_without_declaration_stops(tmp_path):
         cwd=root,
     )
     assert p.returncode == 0, p.stderr
-    steps = {s["id"]: s for s in json.loads((tmp_path / "p.json").read_text())["steps"]}
-    assert steps["test-limited"]["cmd"] == "make test t" and steps["pr"]["base"] == "trunk"
+    plan = json.loads((tmp_path / "p.json").read_text())
+    steps = {s["id"]: s for s in plan["steps"]}
+    # `--test-cmd` は雛形として test-run.py へ渡す。`{paths}` が無いのでそのまま走らせる round-only になる
+    assert steps["test-limited"]["cmd"].endswith("scope --paths t --template 'make test'") and steps["pr"]["base"] == "trunk"
+    assert plan["テストの戦略"]["name"] == "round-only"
 
 
 def test_new_release_needs_release_form(tmp_path):
@@ -478,7 +479,7 @@ def test_new_impl_writes_plan(tmp_path):
     assert steps["impl"]["issues"] is True and steps["impl"]["prompt"].startswith("指示\n")
     assert steps["sync"]["preset"] == "sync-check"
     assert steps["merge"]["probe"]["cmd"].endswith("merged-steps.py probe --pr {pr} --act")
-    assert "plugins/ndf/scripts/tests" in steps["test-limited"]["cmd"] and steps["test-limited"]["rerun_failed"]
+    assert "plugins/ndf/scripts/tests" in steps["test-limited"]["cmd"] and "test-run.py" in steps["test-limited"]["cmd"]
     assert plan["branch"] == "feat/issue-858-x"
     # ステップの遷移がすべて知っているステップを指す
     for s in plan["steps"]:
@@ -850,7 +851,6 @@ def test_run_gate_exit_goes_next_and_copies_presentation(tmp_path):
                 "cmd": f"echo '{out}'; exit 10",
                 "presentation_to": "issues/a.md",
                 "on_fail": "bad",
-                "rerun_failed": True,
                 "gate_next": "after",
             },
             {"id": "bad", "type": "run", "cmd": "false", "next": "end"},
@@ -1837,3 +1837,92 @@ def test_pr_body_tests_table_escapes_a_pipe_in_the_last_line(tmp_path, monkeypat
     }
     assert "結果: 完了" in engine.Engine(plan, tmp_path / "state").run()
     assert "| test | 0 | a \\| b |" in body.read_text().splitlines()
+
+
+CARMO_PROJECT = {
+    "version": 1,
+    "test": {
+        "strategy": "local-scoped-ci-whole",
+        "ci": {"check": "test-results", "junit_artifacts": "junit-*"},
+        "suites": [
+            {
+                "name": "phpunit",
+                "runner": "phpunit",
+                "command": "docker compose exec -T app ./vendor/bin/phpunit --log-junit build/ndf/junit.xml",
+                "scope_command": "docker compose exec -T app ./vendor/bin/phpunit --log-junit build/ndf/junit.xml {paths}",
+                "junit": "build/ndf/junit.xml",
+                "container": {"service": "app"},
+                "paths": ["tests"],
+            }
+        ],
+    },
+    "test_duration": {"measured": [{"seconds": 3827.0, "source": "ci-junit", "detail": "run"}]},
+    "ci": {"provider": "github-actions", "workflows": [{"path": ".github/workflows/test-results.yml", "jobs": 24, "wall_seconds": 360.0}]},
+}
+
+
+def _carmo_repo(tmp_path):
+    root = foreign_repo(tmp_path)
+    (root / ".ndf" / "project.json").write_text(json.dumps(CARMO_PROJECT))
+    return root
+
+
+def test_new_check_with_a_ci_whole_declaration_passes_no_test_command_to_the_refactoring(tmp_path):
+    """#1334 AC7 — carmo の形の宣言で `new check` を作ると、リファクタリングのステップは `--baseline-test` / `--round-test` を持たず
+    （cross-refactoring が同じ宣言から戦略を読む）、全体テストと CI の待ちの打ち切りは宣言の所要から出た値で、計画に書かれる。"""
+    root = _carmo_repo(tmp_path)
+    out = tmp_path / "check.json"
+    p = cli("new", "check", "--pr", "5", "--worktree", str(root), "--scope", "app", "tests", "--out", str(out), cwd=root)
+    assert p.returncode == 0, p.stderr
+    plan = json.loads(out.read_text())
+    steps = {s["id"]: s for s in plan["steps"]}
+    assert "--baseline-test" not in steps["refactor"]["args"] and "--round-test" not in steps["refactor"]["args"]
+    assert plan["テストの戦略"]["name"] == "local-scoped-ci-whole" and plan["テストの戦略"]["source"] == "test.strategy"
+    limits = plan["テストの時間"]
+    # 予算を持たない supervise は、テストが 3·w（w = 3,827 秒）、CI の待ちが 3·c（c = 360 秒）
+    assert limits["test_timeout"] == 3 * 3827 and limits["ci_wait_timeout"] == 3 * 360
+    assert limits["basis"]["unknown_duration"] is False
+    ci_wait = limits["ci_wait_timeout"]
+    assert steps["merge"]["cmd"].endswith(f"--timeout {ci_wait}")
+    assert steps["test-all"]["timeout"] == steps["merge"]["timeout"] > ci_wait
+    for fixed in (900, 1800, 3600):
+        assert f"--timeout {fixed}" not in steps["merge"]["cmd"]
+
+
+def test_new_impl_with_a_ci_whole_declaration_takes_the_scope_timeout_from_the_limits(tmp_path):
+    """#1334 AC7 — 範囲テストのステップの打ち切りは `limits.test_timeout` に余裕を足した値で、900 秒の固定でない。"""
+    root = _carmo_repo(tmp_path)
+    out = tmp_path / "impl.json"
+    p = cli(
+        "new", "impl", "--issue", "1", "--worktree", str(root), "--tests", "tests/Unit/A.php", "--title", "T", "--out", str(out), cwd=root
+    )
+    assert p.returncode == 0, p.stderr
+    plan = json.loads(out.read_text())
+    steps = {s["id"]: s for s in plan["steps"]}
+    assert steps["test-limited"]["cmd"] == f"python3 {SCRIPTS / 'test-run.py'} scope --paths tests/Unit/A.php"
+    assert steps["test-limited"]["timeout"] > plan["テストの時間"]["test_timeout"] > 990
+
+
+def test_new_stops_on_a_template_whose_paths_is_not_a_word(tmp_path):
+    """#1334 決定 14 — `--filter={paths}` のように `{paths}` が 1 語で立たない雛形では計画を作らない。"""
+    root = foreign_repo(tmp_path)
+    out = tmp_path / "p.json"
+    p = cli(
+        "new",
+        "impl",
+        "--issue",
+        "1",
+        "--worktree",
+        str(root),
+        "--tests",
+        "t",
+        "--title",
+        "T",
+        "--test-cmd",
+        "phpunit --filter={paths}",
+        "--out",
+        str(out),
+        cwd=root,
+    )
+    assert p.returncode == 2 and "1 語" in p.stderr
+    assert not out.exists()

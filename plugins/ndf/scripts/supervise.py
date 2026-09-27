@@ -26,7 +26,8 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
         # 前回の検査からの差分を範囲にする検査（pace: fast）。実行の条件 check-trigger.py eval が立ったときだけ流れる
     supervise.py new check --since-last --review-only --id <名> --worktree <リポジトリの根> [--mission <状態>] [--since-ref R] [--out F]
         # 実装レビューだけ（開発版ごと）。前回のレビューから PR が 1 本以上で流れ、構造改善のトリガーの起点は動かさない
-        # new の共通: [--base B] [--test-cmd CMD] [--test-all PATH] [--production-branch B]（宣言より先に効く。下の「宣言」）
+        # new の共通: [--base B] [--test-cmd CMD] [--production-branch B]（宣言より先に効く。下の「宣言」）。
+        # テストは .ndf/project.json の test（戦略・suites[].scope_command の {paths}・junit）を test-run.py が読む
     supervise.py new release --version V (--prs N... | --prs-from-queue) --channel dev|prod --worktree DIR
                              [--issue N...] [--prev-tag T] [--repo DIR] [--out F]
         # --prs-from-queue: queue が --then でこの計画を流す前に、先行の計画の報告の Pull Request を集めて

@@ -62,7 +62,7 @@ python3 "$SCRIPTS/project-decl.py" write --measure "$TMP/measure.json" --answers
 
 | 項目 | 答えの `value` の形 | 決め方 |
 | --- | --- | --- |
-| `test`（P2） | `{"suites": [{"name", "runner", "command", "scope_command"?, "container"?: {"service", "compose_files"}, "needs", "paths"}]}` | 指示書・README の走らせ方の行を正とする。コンテナ越しなら `container` を書き、`scope_command` の `{paths}` に範囲のパスが入る |
+| `test`（P2） | `{"strategy"?, "ci"?: {"check"?, "junit_artifacts"?}, "suites": [{"name", "runner", "command", "scope_command"?, "junit"?, "container"?: {"service", "compose_files"}, "needs", "paths"}]}` | 指示書・README の走らせ方の行を正とする。コンテナ越しなら `container` を書き、`scope_command` の `{paths}`（空白で区切った 1 語）に範囲のパスが入る。`junit` はコマンドが JUnit XML を書く相対パス（pytest は `-o junit_family=xunit1 --junitxml=<パス>` をコマンドに書く。無ければ落ちたテストの見分けが全体の走らせ直しへ落ちる）。`strategy` は `local-full`（全体テストを手元で走らせる）/ `local-scoped-ci-whole`（範囲は手元、全体は CI に任せる。`ci.check` に待つチェック、`ci.junit_artifacts` に JUnit の成果物の名前の glob）/ `round-only`（パスでテストを選べない。suite の `command` をそのまま走らせる）。空なら所要と suite から導く（600 秒を超え CI が読めれば `local-scoped-ci-whole`。`scope_command` が無ければ `round-only`。ほかは `local-full`）ので、その既定を答えとして示し、手元で全体テストを回さない方針があるときだけ書き換える |
 | `branches`（P6） | `{"base": "<起点>", "production": "<本番>"}` | origin の HEAD・直近 100 件のマージ先・最後のコミットの日時を見る。放置したブランチ（長くコミットが無い `develop` など）は採らない |
 | `delivery`（P7） | `[{"target", "kind": "auto" / "manual", "trigger", "branch"?, "versioned"}]` | 配布の設定ファイル・ワークフローの `deploy` の行・版数の置き場とタグから決める |
 | `issues`（P8） | `{"primary", "others"}`。名前は `github`・`markdown`・`redmine`・`external` など | 名前だけを書き、URL や識別子を書かない |
@@ -71,12 +71,15 @@ python3 "$SCRIPTS/project-decl.py" write --measure "$TMP/measure.json" --answers
 答えのファイルの例:
 
 ```json
-{"test": {"value": {"suites": [{"name": "phpunit", "runner": "phpunit",
-                                "command": "docker compose exec -T app ./vendor/bin/phpunit",
-                                "scope_command": "docker compose exec -T app ./vendor/bin/phpunit {paths}",
+{"test": {"value": {"strategy": "local-scoped-ci-whole",
+                    "ci": {"check": "test-results", "junit_artifacts": "junit-*"},
+                    "suites": [{"name": "phpunit", "runner": "phpunit",
+                                "command": "docker compose exec -T app ./vendor/bin/phpunit --log-junit build/ndf/junit.xml",
+                                "scope_command": "docker compose exec -T app ./vendor/bin/phpunit --log-junit build/ndf/junit.xml {paths}",
+                                "junit": "build/ndf/junit.xml",
                                 "container": {"service": "app", "compose_files": ["docker-compose.yml"]},
                                 "needs": ["mysql"], "paths": ["tests"]}]},
-          "reason": "AGENTS.md:34 の手順"},
+          "reason": "AGENTS.md:34 の手順。全体は約 64 分で CI が 24 本に分けて回すため CI に任せる"},
  "branches": {"value": {"base": "main", "production": "main"}, "reason": "マージ先の多くが main。develop が無い"},
  "delivery": {"unknown": "デプロイの設定がリポジトリに無い"}}
 ```
