@@ -40,7 +40,8 @@
 | --- | --- | --- | --- | --- |
 | プロジェクト MVV の宣言 | `project-mvv.py approve` だけ | 宣言（`.ndf/mvv.json` ） | 版 | 本文・sha256・承認の記録（日時・承認者）・理由・差分・照合の記録・設定（閾値） |
 | 上位の原則 | NDF の配布物（リリースだけが変える） | 原則の文（`scripts/data/mvv-principle.md` ） | — | 原則の文・序列・3 択の規則 |
-| MVV 候補の抽出（1 回の実行） | `project-mvv.py collect`（材料）と `propose`（候補） | 抽出の実行 | 候補 | 材料の出典・モード（履歴 / 傾向）・欠け・分かれる点 |
+| MVV の材料（1 回の収集） | `project-mvv.py collect` だけ | 材料（`materials.json` ） | 出典 | 出典の ID と種類・モード（履歴 / 傾向）・件数と閾値・欠け |
+| MVV 候補（1 回の生成） | `project-mvv.py propose` だけ | 候補の組（`candidates.json` ） | 候補 | 4 節の本文・根拠（材料の出典の ID）・分かれる点・種類（新規 / 改訂） |
 | MVV の照合（1 回） | `project-mvv.py vet` | 照合の記録 | — | 種類（candidate / revision / mission）・対象の sha256・判定・箇所 |
 | ミッション状態ファイル（既存） | `mission-state.py` | `mission.json` | 承認ゲートの記録 | プロジェクト MVV の参照（版・sha256）を足す |
 | 判断の記録（既存・地点ごと） | 各地点の既存の持ち主（`mvv-gate.py`・`fix-steps.py`・`refactor.py`・supervise の engine） | 各地点の状態ファイル・jsonl | 判断 1 件 | MVV の参照（状態・版・sha256）・根拠の項目 |
@@ -57,11 +58,11 @@
 | I3 | 宣言 | 版は 1 から 1 ずつ上がり、`versions` は追記だけで過去の版（本文・理由・差分・承認の記録）を書き換えない。版 2 以降は理由を必ず持つ | `approve` が理由の無い改訂と、本文が現行と同じ改訂を止める（AC10） |
 | I4 | 宣言 | 本文は `## Mission` / `## Vision` / `## Value`（番号つきの箇条）/ `## レッドライン`（`R<番号>` の表）を持ち、上位の原則の節を持たない | `approve` が欠けた見出しと原則の節を示して止まる（前提 8） |
 | I5 | 上位の原則 | 判断の地点へ渡す MVV の節・候補の生成・照合のプロンプトは、原則の文を先頭に持つ。プロジェクト MVV が無くても持つ | 原則の文が先頭に無いプロンプトができたら誤り（AC16） |
-| I6 | 判断の記録 | プロジェクト MVV が無い・承認と一致しない・壊れているとき、mvv-gate 以外の地点は止まらず「MVV なし」として進み、状態をその記録に書く。mvv-gate は承認と一致しない・壊れているなら LLM を呼ばずに 10 を返し、無ければミッション MVV だけで判定する | 地点が止まったら誤り。mvv-gate が一致しない宣言で LLM を呼んだら誤り（AC7・E7） |
+| I6 | 判断の記録 | プロジェクト MVV が無い・未承認（`.ndf/mvv.md` だけがあり `.ndf/mvv.json` が無い）・承認と一致しない・壊れているとき、mvv-gate 以外の地点は止まらず「MVV なし」として進み、状態をその記録に書く。mvv-gate は未承認・承認と一致しない・壊れているなら LLM を呼ばずに 10 を返し、無ければミッション MVV だけで判定する | 地点が止まったら誤り。mvv-gate が未承認か一致しない宣言で LLM を呼んだら誤り（AC7・E7） |
 | I7 | 判断の記録 | LLM が判断した記録（`mvv-gate.jsonl`・修正の振り分けと見送りの返信・提案と候補と見送り・judge の結果）は根拠の項目を必ず持つ。MVV が無ければ「MVV なし」、あって LLM が返さなければ「根拠なし」を入れ、根拠の欠けで止めない | 根拠の項目が空の記録ができたら誤り（AC9） |
-| I8 | MVV 候補の抽出 | `check` と `collect` は LLM を呼ばない。`gh` は読み取りだけに使う。`check` はファイルを書かない | LLM か `gh` の書き込みを呼んだら誤り（AC1・AC2） |
-| I9 | MVV 候補の抽出 | コミット数と課題数の両方が閾値に満たないときだけ傾向モードになり、傾向モードの材料は README・指示書・依頼文だけから作る | 片方が閾値以上で傾向モードになったら誤り。傾向モードで履歴の出典が材料に入ったら誤り（AC3） |
-| I10 | MVV 候補の抽出 | 候補は 2 案以上で、各案が 4 節を持ち、根拠が材料の出典の ID を指す。分かれる点が 1 つ以上ある | 満たさない応答は終了コード 1 で止まり、材料のパスを示す（AC4・E3） |
+| I8 | MVV の材料 | `check` と `collect` は LLM を呼ばない。`gh` は読み取りだけに使う。`check` はファイルを書かない | LLM か `gh` の書き込みを呼んだら誤り（AC1・AC2） |
+| I9 | MVV の材料 | コミット数と課題数の両方が閾値に満たないときだけ傾向モードになり、傾向モードの材料は README・指示書・依頼文だけから作る | 片方が閾値以上で傾向モードになったら誤り。傾向モードで履歴の出典が材料に入ったら誤り（AC3） |
+| I10 | MVV 候補 | 候補は 2 案以上で、各案が 4 節を持ち、根拠が材料の出典の ID を指す。分かれる点が 1 つ以上ある | 満たさない応答は終了コード 1 で止まり、材料のパスを示す（AC4・E3） |
 | I11 | ミッション状態ファイル | 承認済みのプロジェクト MVV があるときの `init --pace fast` は、ミッション MVV があればその照合（`mission`）が「従う」のときだけ状態を書き、プロジェクト MVV の参照（版・sha256）を残す。`new mission --pace fast` はその sha256 と現行の宣言が食い違えば断る | 「反する疑い」で状態が書かれたら誤り。改訂の後に fast が通ったら誤り（AC12・AC10・前提 6） |
 | I12 | 宣言 | 閾値・パス・ブランチ名に ai-plugins の値を既定として持たない。閾値は汎用の既定と、引数と、宣言の `settings` で受ける | 既定に ai-plugins の値があれば誤り（AC14） |
 | I13 | 判断の記録 | mvv-gate が同じプロジェクト MVV の sha256 のもとで「判定できない」を `unknown_streak` 回続けて返したら、結果に改訂の提案を載せる。ほかの判定か版の更新で数え直す | 回数に届いて提案が無い、または別の版をまたいで数えたら誤り（AC11） |
@@ -76,13 +77,17 @@
 | E2 | 材料を集めた | `project-mvv.py collect` | `propose` |
 | E3 | 候補を書いた | `project-mvv.py propose` | conductor |
 | E4 | 候補と分かれる点を利用者へ示した | conductor（`AskUserQuestion` ） | 利用者 |
-| E5 | 利用者が答え、本文が固まり、承認した | 利用者 | `vet`・`approve` |
-| E6 | 宣言を書いた | `project-mvv.py approve` | `check`・判断の地点 |
-| E7 | 判断の地点がプロジェクト MVV を読んだ | `lib/project_mvv.load`（各地点） | 各地点の状態ファイル・jsonl |
-| E8 | 判断の記録に根拠の項目を残した | 各地点（`lib/project_mvv.basis` で正規化） | 各地点の記録 |
-| E9 | 改訂の契機が立った | `retrospective` の問い・mvv-gate の連続・利用者の指示 | conductor（改訂の手順） |
-| E10 | 改訂案を示し、承認して版を上げた | `propose --current`・`vet --kind revision`・`approve --reason` | 宣言・`new mission --pace fast`（参照の食い違いで断る） |
-| E11 | ミッション MVV がプロジェクト MVV と矛盾し、ミッションの開始が止まった | `mission-state.py init`（`vet --kind mission` ） | conductor |
+| E5 | 利用者が答え、本文が固まった | 利用者（conductor が答えから本文を組む） | `vet --kind candidate` |
+| E6 | 照合が「従う」を返した後に、利用者が同じ本文を承認した | 利用者（`AskUserQuestion` ） | `approve` |
+| E7 | 宣言を書いた | `project-mvv.py approve` | `check`・判断の地点 |
+| E8 | 判断の地点がプロジェクト MVV を読んだ | `lib/project_mvv.load`（各地点） | 各地点の状態ファイル・jsonl |
+| E9 | 判断の記録に根拠の項目を残した | 各地点（`lib/project_mvv.basis` で正規化） | 各地点の記録 |
+| E10 | 改訂の契機が立った | `retrospective` の問い・mvv-gate の連続・利用者の指示 | conductor（改訂の手順） |
+| E11 | 改訂案を示し、照合の後に承認して版を上げた | `propose --current`・`vet --kind revision`・利用者の承認・`approve --reason` | 宣言・`new mission --pace fast`（参照の食い違いで断る） |
+| E12 | ミッション MVV がプロジェクト MVV と矛盾し、ミッションの開始が止まった | `mission-state.py init`（`vet --kind mission` ） | conductor |
+
+順序は E5 → `vet` → E6 → `approve` → E7 である。`vet` が「従う」を返す前（または「判定できない」を人が引き受ける前）に承認を問わず、
+承認の後に本文を変えたら E5 へ戻る（I1）。
 
 ### 用語
 
@@ -93,6 +98,14 @@
 | MVV の照合 | 本文（候補・改訂案・ミッション MVV）が上位の原則とプロジェクト MVV に従うかを「従う / 反する疑い / 判定できない」の 3 択で判定すること。従う以外は人へ戻す | 追加 |
 | MVV の節 | 判断の地点へ渡す塊。上位の原則を先頭に置き、承認済みのプロジェクト MVV の本文か「MVV なし」とその理由を続ける | 追加 |
 | 根拠の項目 | 判断の記録に残す MVV の項目の番号（`Mission` / `Vision` / `Value 3` / `R2` ）。MVV が無ければ「MVV なし」、返されなければ「根拠なし」 | 追加 |
+| 上位の原則 | 「人類を守り、発展させる」。NDF が持つ固定の文で、すべてのプロジェクト MVV の上に立ち、上書きできない | 追加 |
+| プロジェクト MVV | プロジェクト全体の Mission / Vision / Value とレッドライン。`.ndf/` に宣言し、利用者が承認する。判断の基準の上位 | 追加 |
+| ミッション MVV | ミッション単位の MVV（既存の `mvv.md` ）。プロジェクト MVV の範囲での具体化 | 追加 |
+| MVV の版 | プロジェクト MVV の承認のたびに 1 ずつ上がる番号。改訂の理由と前の版との差分を伴う | 追加 |
+| MVV の改訂 | プロジェクト MVV の本文を変え、利用者の承認で新しい版にすること | 追加 |
+| 判断の地点 | NDF が LLM の判断を挟む場所（承認ゲートの判定・レビューの指摘と修正の可否・リファクタリングの提案の採否・judge のステップ・範囲外の起票の 3 択） | 追加 |
+| MVV 候補 | 材料から書いたプロジェクト MVV の案。2 案以上と分かれる点を利用者へ示す | 追加 |
+| 傾向モード | 履歴が育っていないプロジェクトで、README・指示書・依頼文の傾向から MVV 候補を出す抽出の形 | 追加 |
 
 ## 機能一覧
 
@@ -115,7 +128,7 @@
 | 要素 | 新設 / 変更 | 責務 |
 | --- | --- | --- |
 | 上位の原則（`scripts/data/mvv-principle.md` ） | 新設 | 原則の 1 文・序列・「機械は照合と 3 択だけ、判定できなければ人へ」の規則。どのプロンプトも先頭にこの本文を置く |
-| MVV の読み取りと節（`scripts/lib/project_mvv.py` ） | 新設 | 宣言の読み取り（例外を上げず `approved` / `none` / `mismatch` / `unreadable` を返す）・本文の解析（見出しと項目の番号）・MVV の節の組み立て・根拠の項目の正規化・状態への写し・宣言の型（`lib/schema.py` の `Shape` ）・ミッションの承認の照合（`approved_mvv` と `mvv_refusal` の 2 つを 1 つに寄せる） |
+| MVV の読み取りと節（`scripts/lib/project_mvv.py` ） | 新設 | 宣言の読み取り（例外を上げず `approved` / `none` / `unapproved` / `mismatch` / `unreadable` を返す）・本文の解析（見出しと項目の番号）・MVV の節の組み立て・根拠の項目の正規化・状態への写し・宣言の型（`lib/schema.py` の `Shape` ）・ミッションの承認の照合（`approved_mvv` と `mvv_refusal` の 2 つを 1 つに寄せる） |
 | MVV のエントリポイント（`scripts/project-mvv.py` ） | 新設 | `check` / `collect` / `propose` / `vet` / `approve` / `show` / `context` の 7 副命令。LLM を呼ぶのは `propose` と `vet` だけで、`supervise_lib/claude.py` の `call_claude` を Tool なしで呼ぶ |
 | 宣言のスキーマ（`development-workflow/schemas/mvv.schema.json` ） | 新設 | `lib/project_mvv.py` の型から生成し、一致をテストが見る |
 | 承認ゲートの判定（`scripts/mvv-gate.py` ） | 変更 | 材料の先頭へ MVV の節を置き、ミッション MVV を続ける。宣言の状態による機械の検査（I6・I15）。`mvv-gate.jsonl` に MVV の参照と根拠の項目。「判定できない」の連続で改訂を提案する |
@@ -232,7 +245,7 @@ classDiagram
 | --- | --- |
 | `ProjectMvv`（`lib/project_mvv.py` ） | 読み取りの結果。`status` が `approved` のときだけ `body` と `version` を持つ |
 | `MvvDecl` / `MvvVersion` | `.ndf/mvv.json` の型。`lib/schema.py` の `Shape` を継ぐ |
-| `load(root) -> ProjectMvv` | 例外を上げない。`mvv.json` が無ければ `none` 、形が違えば `unreadable` 、sha256 が最後の版と違えば `mismatch` |
+| `load(root) -> ProjectMvv` | 例外を上げない。`mvv.md` も `mvv.json` も無ければ `none` 、`mvv.md` だけがあれば `unapproved` 、`mvv.json` の形が違えば `unreadable` 、sha256 が最後の版と違えば `mismatch` |
 | `block(mvv) -> str` | MVV の節。原則の文 → 本文（または「MVV なし（理由）」）→「判断の根拠に項目の番号を書く」の指示 |
 | `record(mvv) -> dict` | 状態への写し `{status, version, sha256}` |
 | `basis(raw, mvv) -> list[str]` | 根拠の項目の正規化（I7）。本文に無い番号は落とす |
@@ -320,7 +333,7 @@ classDiagram
 
 | 副命令 | 入力 | 出力 | 終了コード |
 | --- | --- | --- | --- |
-| `check [--root]` | 宣言 | 状態・版・次にすることの案内（`items` ） | 0 承認済みで一致 / 2 無い / 3 壊れている / 4 承認と一致しない。LLM・`gh` を呼ばず、書かない |
+| `check [--root]` | 宣言 | 状態・版・次にすることの案内（`items` ） | 0 承認済みで一致 / 2 無い / 3 壊れている / 4 承認と一致しない・未承認（`mvv.md` だけがある）。LLM・`gh` を呼ばず、書かない |
 | `collect [--root] [--out-dir] [--request-file] [--trend-commits N] [--trend-issues N] [--budget 60]` | git・`gh`（読み取り）・ファイル | `materials.json` のパス・モード・件数・欠け | 0（欠けがあっても集められた材料で進む）/ 3 宣言の `settings` が壊れている |
 | `propose --materials F [--current] [--reason-file F] [--out-dir]` | 材料・原則（`--current` なら現行の本文と改訂の理由） | `candidates.json` / `candidates.md` のパス | 0 / 1 LLM が返さない・形が I10 を満たさない（`items` に材料のパスと「利用者に直接問う」を示す） |
 | `vet --body F --kind candidate\|revision\|mission [--root]` | 本文・原則・承認済みのプロジェクト MVV（`mission` と `revision` のとき） | 判定・箇所 | 0 従う / 10 反する疑い・判定できない・読めない |
@@ -333,7 +346,7 @@ classDiagram
 | 約束 | 変更 | 互換性 |
 | --- | --- | --- |
 | mvv-gate の LLM の出力 | `{"verdict","reasons","boundary"}` に `basis` を足す | 無ければ「根拠なし」として記録する |
-| mvv-gate の機械の検査 | 承認と一致しない・壊れている宣言（I6）と、宣言を変える PR（I15）で 10 | 宣言の無いリポジトリは今と同じ |
+| mvv-gate の機械の検査 | 未承認・承認と一致しない・壊れている宣言（I6）と、宣言を変える PR（I15）で 10 | 宣言の無いリポジトリは今と同じ |
 | judge の出力 | `{"decision","reason"}` に `basis` を足す | 無ければ「根拠なし」 |
 | 修正の振り分け（`fix-pr<N>-decisions.json` ） | 各指摘に `mvv_basis` を足す | 無ければ「根拠なし」。検査で止めない |
 | cross-refactoring の提案と計画の答え | 各提案・各候補に `mvv_basis` を足す | 無ければ「根拠なし」 |
@@ -413,7 +426,7 @@ graph TD
     A[開始] --> P{PR が宣言を変える}
     P -->|はい| X[10 利用者へ]
     P -->|いいえ| S{プロジェクト MVV の状態}
-    S -->|mismatch / unreadable| X
+    S -->|unapproved / mismatch / unreadable| X
     S -->|approved / none| M{ミッション MVV}
     M -->|承認と一致しない| X
     M -->|あり / 無くてプロジェクト MVV が approved| B[既存の機械の検査]
@@ -426,7 +439,7 @@ graph TD
     K -->|はい| SUG[items に改訂の提案]
 ```
 
-### 改訂（F3・F5・F6・F9・E9〜E10）
+### 改訂（F3・F5・F6・F9・E10〜E11）
 
 ```mermaid
 sequenceDiagram
@@ -456,6 +469,8 @@ sequenceDiagram
 stateDiagram-v2
     [*] --> 無い
     無い --> 承認済み: approve（版 1）
+    無い --> 未承認: mvv.md だけを手で書く
+    未承認 --> 承認済み: vet の後に approve（版 1）
     承認済み --> 承認済み: approve（版 N+1）
     承認済み --> 承認と一致しない: mvv.md を手で変える
     承認と一致しない --> 承認済み: 手で戻す / approve（版 N+1）
