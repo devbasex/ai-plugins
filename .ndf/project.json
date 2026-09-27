@@ -24,8 +24,9 @@
       {
         "name": "pytest",
         "runner": "pytest",
-        "command": "uv run --frozen --project . --all-extras pytest . -q -n 4",
-        "scope_command": "uv run --frozen --project . --all-extras pytest {paths} -q -n 4",
+        "command": "uv run --frozen --project . --all-extras pytest . -q -n 4 -o junit_family=xunit1 --junitxml=.ndf/tmp/junit.xml",
+        "scope_command": "uv run --frozen --project . --all-extras pytest {paths} -q -n 4 -o junit_family=xunit1 --junitxml=.ndf/tmp/junit.xml",
+        "junit": ".ndf/tmp/junit.xml",
         "needs": [],
         "paths": [
           "."
