@@ -18,7 +18,9 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -180,6 +182,56 @@ def load_mvv(root) -> ProjectMvv:
         approved_at=last["approved_at"],
         versions=data["versions"],
     )
+
+
+def _git_show(root, ref: str, rel: str) -> bytes | None:
+    """`ref` の `rel` を返す。ファイルが無ければ None。ref が引けなければ OSError。"""
+    cp = subprocess.run(["git", "-C", str(root), "cat-file", "-e", f"{ref}:{rel}"], capture_output=True)
+    if cp.returncode != 0:
+        return None
+    cp = subprocess.run(["git", "-C", str(root), "show", f"{ref}:{rel}"], capture_output=True)
+    if cp.returncode != 0:
+        raise OSError(f"git show {ref}:{rel} が失敗した")
+    out = cp.stdout
+    return out if isinstance(out, bytes) else str(out or "").encode("utf-8")
+
+
+def load_mvv_at_ref(root, refs: list[str]) -> ProjectMvv:
+    """git の `refs` のうち最初に引けるものの宣言を読む。例外を上げない（#1366）。
+
+    PR のレビューでは、PR の head が MVV を足す・書き換えると、その PR 自身の判断の基準を
+    変更者が決められてしまう。そのため base の側で承認済みの宣言を読む。どの ref も引けなければ
+    `unreadable`（MVV なしで続ける）。
+    """
+    for ref in refs:
+        cp = subprocess.run(["git", "-C", str(root), "rev-parse", "--verify", "-q", f"{ref}^{{commit}}"], capture_output=True)
+        if cp.returncode == 0:
+            break
+    else:
+        return ProjectMvv("unreadable", error=f"base の ref（{' / '.join(refs) or 'なし'}）を引けない")
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp) / DECL_DIR
+            d.mkdir()
+            decl = _git_show(root, ref, f"{DECL_DIR}/{DECL_FILE}")
+            name = BODY_FILE
+            if decl is not None:
+                (d / DECL_FILE).write_bytes(decl)
+                try:
+                    named = json.loads(decl).get("body")
+                except (ValueError, AttributeError):
+                    named = None
+                if isinstance(named, str) and named and "/" not in named and "\\" not in named and named != "..":
+                    name = named
+            body = _git_show(root, ref, f"{DECL_DIR}/{name}")
+            if body is not None:
+                (d / name).write_bytes(body)
+            mvv = load_mvv(tmp)
+    except OSError as e:
+        return ProjectMvv("unreadable", error=f"{ref} の宣言を読めない: {e}")
+    if mvv.error:
+        mvv.error = mvv.error.replace(str(Path(tmp)), ref)
+    return mvv
 
 
 def read_settings(root) -> tuple[dict, str | None]:

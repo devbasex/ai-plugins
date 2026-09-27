@@ -371,6 +371,40 @@ def test_the_same_body_cannot_be_a_new_version(env):
     assert code == 1 and "同じ" in out["summary"]
 
 
+def test_a_failed_history_write_restores_the_old_body(env, monkeypatch):
+    assert approve(env) == 0
+    body_path, decl_path = pm.decl_paths(env["root"])
+    old_body, old_decl = body_path.read_text(), decl_path.read_text()
+    real = Path.replace
+
+    def failing(self, target):
+        if Path(target).name == "mvv.json":
+            raise OSError("書けない")
+        return real(self, target)
+
+    monkeypatch.setattr(Path, "replace", failing)
+    with pytest.raises(OSError):
+        pmd.write_decl(body_path, BODY + "\n追記\n", decl_path, {"version": 1})
+    assert body_path.read_text() == old_body and decl_path.read_text() == old_decl
+    assert sorted(p.name for p in body_path.parent.iterdir()) == ["mvv.json", "mvv.md"]
+    assert pm.load_mvv(env["root"]).status == "approved"
+
+
+def test_load_mvv_at_ref_reads_the_base_and_ignores_the_head_edit(env):
+    root = env["root"]
+    assert pm.load_mvv_at_ref(root, ["HEAD"]).status == "none"
+    assert approve(env) == 0
+    subprocess.run(["git", "add", "."], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-qm", "MVV"], cwd=root, check=True)
+    body_path, _ = pm.decl_paths(root)
+    body_path.write_text(BODY.replace("実測で示す", "変更者の都合で決める"))
+    assert pm.load_mvv(root).status == "mismatch"
+    base = pm.load_mvv_at_ref(root, ["origin/nothing", "HEAD"])
+    assert base.status == "approved" and base.body == BODY
+    missing = pm.load_mvv_at_ref(root, ["origin/nothing"])
+    assert missing.status == "unreadable" and "origin/nothing" in missing.error
+
+
 # ---------------------------------------------------------------- 節と根拠（AC8・AC9・AC16・I5・I7・I16）
 
 

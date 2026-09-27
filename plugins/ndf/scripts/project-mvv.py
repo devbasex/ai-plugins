@@ -309,9 +309,7 @@ def cmd_approve(a):
     if errs:
         raise StepError("宣言の形が合わない: " + "／".join(errs), 1)
     try:
-        body_path.parent.mkdir(parents=True, exist_ok=True)
-        body_path.write_text(body, encoding="utf-8")
-        jsonio.write_atomic(decl_path, decl)
+        pmd.write_decl(body_path, body, decl_path, decl)
     except OSError as e:
         raise StepError(f"宣言を書けない: {e}。本文を利用者へ示す", 1) from None
     print(f"プロジェクト MVV: 版 {v['version']} を書いた（{body_path}・{decl_path}）")

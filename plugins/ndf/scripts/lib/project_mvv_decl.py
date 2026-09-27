@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 BODY_FILE = "mvv.md"
 DECL_VERSION = 1
@@ -137,3 +138,30 @@ def mvv_json_schema() -> str:
     s["$schema"] = "https://json-schema.org/draft/2020-12/schema"
     s["title"] = "NDF のプロジェクト MVV の宣言（.ndf/mvv.json）"
     return json.dumps(s, ensure_ascii=False, indent=2) + "\n"
+
+
+def write_decl(body_path: Path, body: str, decl_path: Path, decl: dict) -> None:
+    """本文と承認の記録を、失敗しても旧版か新版のどちらかに揃う形で書く（#1366）。
+
+    両方を一時ファイルへ用意してから本文・記録の順に置き換え、記録の置き換えに失敗したら本文を旧版へ戻す。
+    本文だけが新しく記録が古い状態（承認済みだった宣言が `mismatch` に見える）を残さない。
+    """
+    body_path.parent.mkdir(parents=True, exist_ok=True)
+    old_body = body_path.read_bytes() if body_path.is_file() else None
+    body_tmp = body_path.with_name(body_path.name + ".tmp")
+    decl_tmp = decl_path.with_name(decl_path.name + ".tmp")
+    try:
+        body_tmp.write_text(body, encoding="utf-8")
+        decl_tmp.write_text(json.dumps(decl, indent=2, ensure_ascii=False), encoding="utf-8")
+        body_tmp.replace(body_path)
+        try:
+            decl_tmp.replace(decl_path)
+        except BaseException:
+            if old_body is None:
+                body_path.unlink(missing_ok=True)
+            else:
+                body_path.write_bytes(old_body)
+            raise
+    finally:
+        body_tmp.unlink(missing_ok=True)
+        decl_tmp.unlink(missing_ok=True)
