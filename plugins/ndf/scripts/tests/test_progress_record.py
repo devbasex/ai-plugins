@@ -1,8 +1,9 @@
 """issue の本文への進行の記録（#243）。
 
-**盤面の宣言が無いリポジトリでも進行が残る。** 記録先は本文の `## 進行` の節で、節の外は
+**ボードの宣言が無いリポジトリでも進行が残る。** 記録先は本文の `## 進行` の節で、節の外は
 書き換えない。人が本文へ書いた内容を消さないためである。
 """
+
 from __future__ import annotations
 
 import os
@@ -25,12 +26,14 @@ def fake_gh(tmp_path):
     (bin_dir / "gh").write_text(
         "#!/usr/bin/env bash\n"
         'if [ "$2" = "view" ] || [ "$1" = "issue" ] && [ "$2" = "view" ]; then\n'
-        f'  cat {body}\n'
+        f"  cat {body}\n"
         "  exit 0\n"
         "fi\n"
         'for i in "$@"; do\n'
-        '  case "$prev" in --body-file) cp "$i" ' f"{written}" '; exit 0 ;; esac\n'
-        '  prev=$i\n'
+        '  case "$prev" in --body-file) cp "$i" '
+        f"{written}"
+        "; exit 0 ;; esac\n"
+        "  prev=$i\n"
         "done\n"
         "exit 0\n",
         encoding="utf-8",
@@ -41,9 +44,7 @@ def fake_gh(tmp_path):
 
 def run(fake_gh, *args):
     env = {**os.environ, "PATH": f"{fake_gh.bin}:{os.environ['PATH']}"}
-    return subprocess.run(
-        ["bash", str(SCRIPT), *args], capture_output=True, text=True, env=env, timeout=60
-    )
+    return subprocess.run(["bash", str(SCRIPT), *args], capture_output=True, text=True, env=env, timeout=60)
 
 
 def test_the_section_is_appended_when_it_is_missing(fake_gh):
@@ -62,11 +63,11 @@ def test_the_section_is_appended_when_it_is_missing(fake_gh):
 def test_nothing_outside_the_section_changes(fake_gh):
     """**節の外は書き換えない。** 前後に別の節があっても残る。"""
     fake_gh.body.write_text(
-        "# 課題\n\n## 概要\n\nこれは残る\n\n## 進行\n\nモード: —\n\n- [ ] 設計\n\n"
-        "## 受け入れ条件\n\n- [ ] 何か\n",
+        "# 課題\n\n## 概要\n\nこれは残る\n\n## 進行\n\nモード: —\n\n- [ ] 設計\n\n## 受け入れ条件\n\n- [ ] 何か\n",
         encoding="utf-8",
     )
-    run(fake_gh, "123", "設計")
+    out = run(fake_gh, "123", "設計")
+    assert out.returncode == 0, out.stderr
     written = fake_gh.written.read_text(encoding="utf-8")
     assert "## 概要\n\nこれは残る" in written
     assert "## 受け入れ条件\n\n- [ ] 何か" in written
@@ -74,10 +75,9 @@ def test_nothing_outside_the_section_changes(fake_gh):
 
 
 def test_the_marks_already_there_are_kept(fake_gh):
-    """済んだ工程の印と記録は残る。飛ばした工程は空欄のままになる。"""
+    """済んだ工程の目印と記録は残る。飛ばした工程は空欄のままになる。"""
     fake_gh.body.write_text(
-        "## 進行\n\nモード: standard / 作業ツリー: `.worktrees/x`\n\n"
-        "- [x] 作業場所の用意 — 2026-09-04 06:12\n- [ ] 要求と受け入れ条件\n",
+        "## 進行\n\nモード: standard / 作業ツリー: `.worktrees/x`\n\n- [x] 作業場所の用意 — 2026-09-04 06:12\n- [ ] 要求と受け入れ条件\n",
         encoding="utf-8",
     )
     run(fake_gh, "123", "設計")
@@ -119,14 +119,15 @@ def test_missing_gh_is_not_an_error(tmp_path):
     """
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    for name in ("bash", "python3", "date", "mktemp", "cmp", "cat", "grep", "sed",
-                 "dirname", "cd", "rm", "cp"):
+    for name in ("bash", "python3", "date", "mktemp", "cmp", "cat", "grep", "sed", "dirname", "cd", "rm", "cp"):
         found = shutil.which(name)
         if found:
             (bin_dir / name).symlink_to(found)
     out = subprocess.run(
         [str(bin_dir / "bash"), str(SCRIPT), "123", "設計"],
-        capture_output=True, text=True, timeout=60,
+        capture_output=True,
+        text=True,
+        timeout=60,
         env={**os.environ, "PATH": str(bin_dir)},
     )
     assert out.returncode == 0
@@ -155,8 +156,7 @@ def test_the_time_a_stage_was_entered_is_not_overwritten(fake_gh):
 
     書き換えると、途中で止まった実行を再開したときに「いつ入ったか」が失われる。
     """
-    fake_gh.body.write_text(
-        "## 進行\n\nモード: —\n\n- [x] 設計 — 2026-01-01 00:00\n", encoding="utf-8")
+    fake_gh.body.write_text("## 進行\n\nモード: —\n\n- [x] 設計 — 2026-01-01 00:00\n", encoding="utf-8")
     run(fake_gh, "123", "設計")
     written = fake_gh.written.read_text(encoding="utf-8") if fake_gh.written.exists() else ""
     if written:
@@ -165,8 +165,49 @@ def test_the_time_a_stage_was_entered_is_not_overwritten(fake_gh):
 
 def test_a_new_note_is_appended_to_the_existing_record(fake_gh):
     """付随情報を新しく渡したときは、既存の記録へ足す。"""
-    fake_gh.body.write_text(
-        "## 進行\n\nモード: —\n\n- [x] 設計 — 2026-01-01 00:00\n", encoding="utf-8")
+    fake_gh.body.write_text("## 進行\n\nモード: —\n\n- [x] 設計 — 2026-01-01 00:00\n", encoding="utf-8")
     run(fake_gh, "123", "設計", "--note", "PR #379")
     written = fake_gh.written.read_text(encoding="utf-8")
     assert "- [x] 設計 — 2026-01-01 00:00 / PR #379" in written
+
+
+def test_the_confirmation_line_works_with_a_strict_sed(fake_gh):
+    """BSD sed（macOS）でも確認の行が出る（#946）。
+
+    BSD sed は `{...}` の最後のコマンドの後に `;` を要する。Linux の上で確かめるため、
+    `;` の無い `p}` を誤りとする `sed` を PATH の先頭に置き、残りは本物へ渡す。
+    """
+    real_sed = shutil.which("sed")
+    (fake_gh.bin / "sed").write_text(
+        "#!/usr/bin/env bash\n"
+        'for a in "$@"; do\n'
+        '  case "$a" in *[a-z]\\}*) echo "sed: extra characters at the end of p command" >&2; exit 1 ;; esac\n'
+        "done\n"
+        f'exec {real_sed} "$@"\n',
+        encoding="utf-8",
+    )
+    (fake_gh.bin / "sed").chmod(0o755)
+    fake_gh.body.write_text("# 課題\n\n本文\n", encoding="utf-8")
+    out = run(fake_gh, "123", "-", "--mode", "standard")
+    assert out.returncode == 0, out.stderr
+    assert "sed:" not in out.stderr
+    assert "#123 進行の見出し = モード: standard" in out.stdout
+
+
+def test_pace_fast_is_written_after_the_mode_and_kept(fake_gh):
+    """#1078: 進め方は fast のときだけ見出し行へ書き、後の記録でも残る。"""
+    fake_gh.body.write_text("## 進行\n\nモード: standard / 作業ツリー: `.worktrees/x`\n\n- [ ] 設計\n", encoding="utf-8")
+    out = run(fake_gh, "123", "-", "--pace", "fast")
+    assert out.returncode == 0, out.stderr
+    written = fake_gh.written.read_text(encoding="utf-8")
+    assert "モード: standard / 進め方: fast / 作業ツリー: `.worktrees/x`" in written
+    fake_gh.body.write_text(written, encoding="utf-8")
+    run(fake_gh, "123", "設計")
+    assert "モード: standard / 進め方: fast / 作業ツリー: `.worktrees/x`" in fake_gh.written.read_text(encoding="utf-8")
+
+
+def test_pace_normal_is_not_written_and_an_unknown_pace_is_rejected(fake_gh):
+    fake_gh.body.write_text("## 進行\n\nモード: standard\n\n- [ ] 設計\n", encoding="utf-8")
+    run(fake_gh, "123", "設計", "--pace", "normal")
+    assert "進め方" not in fake_gh.written.read_text(encoding="utf-8")
+    assert run(fake_gh, "123", "-", "--pace", "slow").returncode == 2

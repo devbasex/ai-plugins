@@ -1,16 +1,18 @@
-"""手順書が使う変数と、`$SCRIPTS` の解決手順の対応を検査する（#193）。
+"""手順書が使う変数と、`$SCRIPTS` の解決手順の対応をチェックする（#193）。
 
 `worktree` の手順書は、プラグイン配下のスクリプトを変数経由で呼ぶ。その変数を決める
 手順は `development-workflow/references/scripts-lookup.md` の「候補の並び」
-節にしかない。**このテストは解決手順の写しを持たず、その節の bash を読み出して実行する。**
-写しを持つと、写しだけが正しくて配布された手順が外れている状態を作れてしまう。
+節にしかない。**このテストは解決手順の複製を持たず、その節の bash を読み出して実行する。**
+複製を持つと、複製だけが正しくて配布された手順が外れている状態を作れてしまう。
 
 外部への通信は行わない。配置は `tmp_path` の上に作る。
 """
+
 from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -18,10 +20,10 @@ import pytest
 
 SKILL_DIR = Path(__file__).resolve().parents[1]
 SKILLS_ROOT = SKILL_DIR.parent
-LOOKUP_REFERENCE = (
-    SKILLS_ROOT / "development-workflow" / "references" / "scripts-lookup.md"
-)
-LOOKUP_HEADING = "## 候補の並び"
+LOOKUP_REFERENCE = SKILLS_ROOT / "development-workflow" / "references" / "scripts-lookup.md"
+LOOKUP_HEADING = "## 入口を探すコマンド"
+# 解決の入口の実物。配置を作るたびに写す。
+RESOLVE_ENTRY = Path(__file__).resolve().parents[3] / "scripts" / "resolve.sh"
 # Claude Code が SKILL.md の中で置き換える語。テストでも同じ置き換えを行う。
 PLUGIN_ROOT_TOKEN = "'${CLAUDE_PLUGIN_ROOT}'"
 
@@ -67,9 +69,15 @@ def resolve(cwd: Path, home: Path, plugin_root: Path | None = None) -> str:
     env = os.environ.copy()
     env["LC_ALL"] = "C"
     env["HOME"] = str(home)
+    # 呼んだ側のランタイムの手がかりを持ち込まない。
+    env.pop("CLAUDECODE", None)
+    env.pop("CLAUDE_PLUGIN_ROOT", None)
     got = subprocess.run(
         ["bash", "-c", f'set -uo pipefail\n{snippet}\nprintf "%s\\n" "$SCRIPTS"\n'],
-        cwd=str(cwd), env=env, capture_output=True, text=True,
+        cwd=str(cwd),
+        env=env,
+        capture_output=True,
+        text=True,
     )
     assert got.returncode == 0, got.stderr
     return got.stdout.strip()
@@ -78,6 +86,7 @@ def resolve(cwd: Path, home: Path, plugin_root: Path | None = None) -> str:
 def make_plugin(root: Path) -> Path:
     """プラグインの配布物を作る。`worktree` の手順が呼ぶスクリプトを持つ。"""
     (root / "scripts").mkdir(parents=True, exist_ok=True)
+    shutil.copy(RESOLVE_ENTRY, root / "scripts" / "resolve.sh")
     for name in ("projects-sync.sh", "worktree-setup.sh"):
         (root / "scripts" / name).write_text("#!/usr/bin/env bash\n", encoding="utf-8")
     for name in ("development-workflow", "worktree"):
@@ -182,7 +191,7 @@ def test_environment_variables_are_excluded_by_name() -> None:
 
 def test_special_variables_are_not_treated_as_undefined() -> None:
     """`$?` のような特殊変数は、代入も宣言も無くても失敗にしない。"""
-    body = "```bash\nbash run.sh; echo $?\nls \"$1\" \"$@\"\n```\n"
+    body = '```bash\nbash run.sh; echo $?\nls "$1" "$@"\n```\n'
     assert used_variables(body) == set()
 
 
@@ -244,7 +253,8 @@ def test_skill_stops_when_scripts_is_unresolved() -> None:
     """`$SCRIPTS` が決まっていなければ、案内を出して終了コード 1 で止まる。"""
     got = subprocess.run(
         ["bash", "-c", f"set -u\n{guard_line()}\necho ここへは来ない\n"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     assert got.returncode == 1, got.stdout
     assert got.stderr.strip() != "", "案内が標準エラーへ出ていない"
@@ -252,5 +262,5 @@ def test_skill_stops_when_scripts_is_unresolved() -> None:
 
 
 def test_lookup_leaves_empty_value_when_nothing_is_found(elsewhere, home) -> None:
-    """盤面への記録は従来どおり飛ばす。解決手順は空の値を残し、止めない。"""
+    """ボードへの記録は従来どおり飛ばす。解決手順は空の値を残し、止めない。"""
     assert resolve(elsewhere, home) == ""

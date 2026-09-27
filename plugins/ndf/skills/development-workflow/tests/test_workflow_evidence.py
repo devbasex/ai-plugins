@@ -6,6 +6,7 @@ v10.5.0 は判定したモードに対する工程を通さずに配布まで進
 **拒否はしない。** 記録が無いことは、その工程を通っていないことと同じではない。記録の
 側が遅れているだけの状態で Pull Request の作成が止まると、正当な操作が止まる。
 """
+
 from __future__ import annotations
 
 import json
@@ -28,8 +29,15 @@ from workflow_helpers import (
 
 # `standard` で Pull Request の作成までに求める工程（「実装レビュー」を除く）。
 STANDARD_BEFORE_PR = (
-    "要求と受け入れ条件", "作業場所の用意", "設計", "ドキュメント再構成", "ドキュメントレビュー",
-    "計画", "実装", "構造改善", "完了判定",
+    "要求と受け入れ条件",
+    "作業場所の用意",
+    "設計",
+    "ドキュメント再構成",
+    "ドキュメントレビュー",
+    "計画",
+    "実装",
+    "構造改善",
+    "完了判定",
 )
 
 
@@ -51,8 +59,7 @@ def seed(repo: Path, state: Path, issue: int, mode: str | None, stages: tuple[st
         run_stage_check("record", str(issue), "stage", stage, cwd=repo, env=env)
 
 
-def guard(repo: Path, state: Path, command: str, extra: dict | None = None,
-          env: dict | None = None) -> subprocess.CompletedProcess:
+def guard(repo: Path, state: Path, command: str, extra: dict | None = None, env: dict | None = None) -> subprocess.CompletedProcess:
     return run_guard(pre_tool_use(command, repo), cwd=repo, env=env or base_env(state, extra))
 
 
@@ -65,9 +72,7 @@ def context(result: subprocess.CompletedProcess) -> str:
 
 
 def create(body: str, base: str = "develop") -> str:
-    return (
-        f'gh pr create --base {base} --head feature/x --title "t" --body "{body}"'
-    )
+    return f'gh pr create --base {base} --head feature/x --title "t" --body "{body}"'
 
 
 # --- C1: 走査の絞り込み -----------------------------------------------------
@@ -89,7 +94,7 @@ def test_the_candidate_filter_still_rejects_unrelated_commands() -> None:
 
 def test_it_reads_the_closing_words_from_the_body(repo: Path) -> None:
     command = create("Closes #417")
-    result = run_lib(f'wf_parse_pr_create {shlex.quote(command)}', cwd=repo)
+    result = run_lib(f"wf_parse_pr_create {shlex.quote(command)}", cwd=repo)
     assert result.stdout.strip() == "devbasex/ai-plugins\t417", result.stderr
 
 
@@ -102,16 +107,12 @@ def test_it_reads_the_closing_words_from_a_body_equals_option(repo: Path) -> Non
 def test_it_reads_the_closing_words_from_a_body_file(repo: Path, tmp_path: Path) -> None:
     body = tmp_path / "body.md"
     body.write_text("まとめ\n\nCloses #418\nCloses #420\n", encoding="utf-8")
-    command = f'gh pr create --base develop --body-file {body}'
-    result = run_lib(f'wf_parse_pr_create {shlex.quote(command)}', cwd=repo)
-    assert result.stdout.split() == [
-        "devbasex/ai-plugins", "418", "devbasex/ai-plugins", "420"
-    ], result.stderr
+    command = f"gh pr create --base develop --body-file {body}"
+    result = run_lib(f"wf_parse_pr_create {shlex.quote(command)}", cwd=repo)
+    assert result.stdout.split() == ["devbasex/ai-plugins", "418", "devbasex/ai-plugins", "420"], result.stderr
 
 
-def test_it_reads_the_closing_words_from_a_body_file_equals_option(
-    repo: Path, tmp_path: Path
-) -> None:
+def test_it_reads_the_closing_words_from_a_body_file_equals_option(repo: Path, tmp_path: Path) -> None:
     body = tmp_path / "body.md"
     body.write_text("まとめ\n\nCloses #421\n", encoding="utf-8")
     command = f"gh pr create --base develop --body-file={body}"
@@ -126,22 +127,18 @@ def test_it_reads_the_closing_words_from_a_short_body_option(repo: Path) -> None
     assert result.stdout.strip() == "devbasex/ai-plugins\t417", result.stderr
 
 
-def test_it_reads_the_closing_words_from_a_short_body_file_option(
-    repo: Path, tmp_path: Path
-) -> None:
+def test_it_reads_the_closing_words_from_a_short_body_file_option(repo: Path, tmp_path: Path) -> None:
     """現状固定: -F の本文ファイルから複数の組を返す。"""
     body = tmp_path / "body.md"
     body.write_text("まとめ\n\nCloses #418\nCloses #420\n", encoding="utf-8")
     command = f"gh pr create -F {body}"
     result = run_lib(f"wf_parse_pr_create {shlex.quote(command)}", cwd=repo)
-    assert result.stdout.split() == [
-        "devbasex/ai-plugins", "418", "devbasex/ai-plugins", "420"
-    ], result.stderr
+    assert result.stdout.split() == ["devbasex/ai-plugins", "418", "devbasex/ai-plugins", "420"], result.stderr
 
 
 def test_a_body_without_closing_words_yields_nothing(repo: Path) -> None:
     command = create("ただの説明")
-    result = run_lib(f'wf_parse_pr_create {shlex.quote(command)}', cwd=repo)
+    result = run_lib(f"wf_parse_pr_create {shlex.quote(command)}", cwd=repo)
     assert result.stdout.strip() == ""
     assert result.returncode != 0
 
@@ -248,7 +245,7 @@ def test_conflicting_modes_take_the_highest_and_say_so(repo: Path, state: Path) 
 
 def test_standard_outranks_legacy_refactor(repo: Path, state: Path) -> None:
     """高さは `WF_MODE_HEIGHT` が持つ。`WF_MODES` の並びからは導かない（決定 2-b）。"""
-    result = run_lib('wf_higher_mode legacy-refactor standard')
+    result = run_lib("wf_higher_mode legacy-refactor standard")
     assert result.stdout.strip() == "standard", result.stderr
 
 
@@ -256,9 +253,8 @@ def test_standard_outranks_legacy_refactor(repo: Path, state: Path) -> None:
 
 
 def test_another_repository_uses_its_own_note(repo: Path, state: Path) -> None:
-    """番号だけへ潰さない。同じ番号の別リポジトリの控えに当たらない。"""
-    seed(repo, state, 5, "light", ("要求と受け入れ条件", "作業場所の用意", "実装",
-                                   "完了判定"))
+    """番号だけへ潰さない。同じ番号の別リポジトリの通過記録に当たらない。"""
+    seed(repo, state, 5, "light", ("要求と受け入れ条件", "作業場所の用意", "実装", "完了判定"))
     out = context(guard(repo, state, create("Closes other/repo#5")))
     assert "other/repo" in out
     assert "モードの記録" in out
@@ -315,6 +311,14 @@ def test_the_repository_option_before_pr_is_skipped(repo: Path) -> None:
 def test_a_multi_line_body_keeps_every_closing_word(repo: Path) -> None:
     command = 'gh pr create --body "Closes #418\nCloses #420"'
     result = run_lib(f"wf_parse_pr_create {shlex.quote(command)}", cwd=repo)
-    assert result.stdout.split() == [
-        "devbasex/ai-plugins", "418", "devbasex/ai-plugins", "420"
-    ], result.stderr
+    assert result.stdout.split() == ["devbasex/ai-plugins", "418", "devbasex/ai-plugins", "420"], result.stderr
+
+
+def test_fast_does_not_ask_for_the_refactoring_before_the_pr(repo: Path, state: Path) -> None:
+    """#1078: fast では構造改善をトリガーで通すため、Pull Request の作成時に求めない。"""
+    before = tuple(s for s in STANDARD_BEFORE_PR if s != "構造改善")
+    seed(repo, state, 1078, "standard", before)
+    run_stage_check("record", "1078", "pace", "fast", cwd=repo, env=base_env(state))
+    assert guard(repo, state, create("Closes #1078")).stdout.strip() == ""
+    seed(repo, state, 1079, "standard", before)
+    assert "構造改善" in context(guard(repo, state, create("Closes #1079")))
