@@ -318,7 +318,8 @@ def cmd_merge_when_green(a):
     items, waits, queued_runs = watch.items, watch.waits, watch.queued_runs
 
     if not any(i["kind"] == "pr" and i["result"] == "already_merged" for i in items):
-        p = gh_parts.gh(["pr", "merge", str(n), "--admin", f"--{a.method}"], cwd=root)
+        pin = ["--match-head-commit", watch.last_sha] if watch.last_sha else []  # 緑を確かめた先頭だけをマージする
+        p = gh_parts.gh(["pr", "merge", str(n), "--admin", f"--{a.method}", *pin], cwd=root)
         if p.returncode != 0:
             emit(
                 result(
