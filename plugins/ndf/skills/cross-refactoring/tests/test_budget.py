@@ -40,8 +40,15 @@ def test_item_estimate_uses_technique_and_falls_back(budget):
     assert budget.item_estimate(TABLE, "rename", False) == {"test": 0.0, "implement": 1.3, "verify": 0.2}
 
 
+def _strategy(name):
+    import sys
+
+    ts = sys.modules["test_strategy"]
+    return ts.Strategy(name, "test.strategy")
+
+
 def test_reserve_matches_the_917_example(budget):
-    r = budget.reserve(60, False, 5.5)
+    r = budget.reserve(_strategy("local-full"), 60, None, False, 5.5)
     # 最終ゲートの修正 1 回分（final_fix）も改修計画の時点で差し引く（決定 26）
     assert r == {"danger_whole_test": 1.0, "final_whole_test": 1.0, "fix": 5.5, "final_fix": 5.5}
     assert budget.reserve_total(r) == pytest.approx(13.0)
@@ -49,9 +56,23 @@ def test_reserve_matches_the_917_example(budget):
     assert budget.available_minutes(60, 9, r) == pytest.approx(38.0)
 
 
-def test_reserve_ci_check_and_missing_baseline(budget):
-    assert budget.reserve(120, True, 5.5)["final_whole_test"] == 0.0
-    assert budget.reserve(None, False, 3.0) == {"danger_whole_test": 0.0, "final_whole_test": 0.0, "fix": 3.0, "final_fix": 3.0}
+def test_reserve_with_a_ci_gate_and_a_missing_baseline(budget):
+    """CI で見る最終ゲートは CI の壁時計 c を、測れていなければ 0 を入れる（#1334 決定 8）。"""
+    assert budget.reserve(_strategy("local-full"), 120, 180, True, 5.5)["final_whole_test"] == 3.0
+    assert budget.reserve(_strategy("local-full"), 120, None, True, 5.5)["final_whole_test"] == 0.0
+    assert budget.reserve(_strategy("local-full"), None, None, False, 3.0) == {
+        "danger_whole_test": 0.0,
+        "final_whole_test": 0.0,
+        "fix": 3.0,
+        "final_fix": 3.0,
+    }
+
+
+def test_reserve_does_not_hold_the_whole_test_when_the_ci_runs_it(budget):
+    """AC9 — 全体テストを CI に任せる戦略は、手元で走らせない全体テストの時間を引かない。危険フラグの分は 0、最終ゲートは c。"""
+    r = budget.reserve(_strategy("local-scoped-ci-whole"), 3827, 360, True, 5.5)
+    assert r["danger_whole_test"] == 0.0
+    assert r["final_whole_test"] == pytest.approx(6.0)
 
 
 def test_rank_key_orders_tier_votes_severity_then_cheaper(budget):

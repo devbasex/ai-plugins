@@ -35,9 +35,8 @@ PRESETS = {
 }
 
 
-def with_paths(cmd: str, paths: str) -> str:
-    """テストのコマンドの {paths} を範囲に置き換える。{paths} が無ければ末尾に足す。"""
-    return cmd.replace("{paths}", paths) if "{paths}" in cmd else f"{cmd} {paths}"
+# テストの実行の入口（#1334）。範囲テスト（scope）と全体テスト（whole）を、宣言の戦略に沿って走らせる
+TEST_RUN_PY = f"python3 {HERE / 'test-run.py'}"
 
 
 WORKTREE_LOCK_RETRIES = 5  # .git/config の lock で落ちたときのやり直しの回数

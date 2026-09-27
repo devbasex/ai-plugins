@@ -101,7 +101,7 @@ def test_the_five_phases_run_once_and_append_one_history_row(
     # `add` は round_test が無く test_targets も空なので no_target で見送られる（AC10b）。
     assert [i["id"] for i in state["items"]] == ["I-001"]
     item = state["items"][0]
-    assert item["command"] == ["pytest", "-q", "tests/test_total.py"]
+    assert item["command"][-1] == "tests/test_total.py" and item["command"][:2] == ["pytest", "-q"]
     assert item["command_source"] == "targets"
     assert {d["defer_reason"] for d in state["deferred_items"]} == {"vocabulary", "no_target"}
     assert state["plan"]["table_source"] == "defaults"

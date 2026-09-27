@@ -12,7 +12,7 @@ from supervise_lib.templates import fix_worktree
 DECL_HELP = "要る設定（引数が先に効く）: {needs}。new は作業場所 → 元のリポジトリ → 今のディレクトリの順に .ndf/ を探す"
 DECL_WORDS = {
     "base": "起点のブランチ（--base か .ndf/worktree.json の base_branch）",
-    "test": "テストのコマンド（--test-cmd か .ndf/supervise.json の test.command。{paths} を範囲に置き換える）",
+    "test": "テストの宣言（.ndf/project.json の test。無ければ --test-cmd か .ndf/supervise.json の test.command。{paths} を範囲に置き換える）",
     "release": "リリースの形（.ndf/supervise.json の release.form。雛形のある形: package-plugin）",
 }
 NEW_KINDS = {
@@ -90,10 +90,10 @@ NEW_ARGS = [
     ("--production-branch", {"help": "本番のブランチ（既定は .ndf/worktree.json の production_branch）"}, "release mission close"),
     (
         "--test-cmd",
-        {"help": "テストのコマンド。{paths} を範囲に置き換える（既定は .ndf/supervise.json の test.command）"},
+        {"help": "範囲テストの雛形（{paths} を 1 語で含むコマンド）。宣言（.ndf/project.json の test）より先に効く"},
         "impl fix check mission close",
     ),
-    ("--test-all", {"help": "全体テストの範囲（既定は .ndf/supervise.json の test.all か .）"}, "impl fix check mission close"),
+    ("--test-all", {"help": "廃止（知らせて無視する。全体テストは宣言の suites[].command）"}, "impl fix check mission close"),
     ("--mode", {"default": "standard", "help": "モード（既定 standard）"}, "impl fix check release mission close"),
     (
         "--out",

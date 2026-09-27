@@ -7,9 +7,10 @@ import shlex
 from pathlib import Path
 
 from supervise_lib.decl import decl_fields
-from supervise_lib.paths import GLOSSARY_PY, MERGE_CMD, MERGE_PROBE, MVV_PY, PUSH_DESIGN, SELF, SPEC_COPY_PY, WORKTREE_SETUP
+from supervise_lib.paths import GLOSSARY_PY, MVV_PY, PUSH_DESIGN, SELF, SPEC_COPY_PY, WORKTREE_SETUP
 from supervise_lib.release_templates import plan_release
 from supervise_lib.templates import plan_check, plan_check_since, plan_impl
+from supervise_lib.verify_steps import merge_step
 
 
 DESIGN_GLOSSARY_NOTE = "{state_dir}/work/glossary-candidates.md"  # 設計のプランが起こした用語集の候補の語
@@ -283,7 +284,7 @@ def plan_fast_design(a, n: int, repo: str) -> dict:
             f"{{ [ ! -f {note} ] || gh pr comment {{pr}} --body-file {note}; }} && gh pr ready {{pr}}'",
             "next": "merge",
         },
-        {"id": "merge", "type": "run", "timeout": 7200, "cmd": MERGE_CMD, "probe": MERGE_PROBE, "next": "end"},
+        merge_step(a, next="end"),
     ]
     plan["規則"] = (
         "設計の cross-review は上限 3 ラウンドで関門 1 の判定（mvv のステップ）へ渡す（収束を待たない）。駆動そのものが失敗したら gate。"

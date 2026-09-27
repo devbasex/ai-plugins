@@ -17,7 +17,7 @@ import jev
 import run_metrics
 import statefile
 
-from .. import allocation, budget, clock, info, testcmd, timeline
+from .. import allocation, budget, clock, info, targets, timeline
 from ..gitfacts import read_result, record_observed_model
 from ..items import PLANNED, defer, group_key, item_kind, item_label, key_text
 from ..paths import git_out, load_state, work_dir
@@ -219,18 +219,18 @@ def _allocation_table(state: dict[str, Any]) -> dict[str, Any]:
 
 
 def _limited_commands(state: dict[str, Any], items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """項目ごとの範囲テストの語の並びを決める。決まらない項目は `no_target` で見送る（AC10b）。"""
+    """項目ごとの範囲テストの語の並びを、戦略の雛形の `{paths}` の置き換えで決める。決まらない項目は `no_target` で見送る（AC10b）。"""
     work = work_dir(state)
-    source_state = {
-        "round_test": (state.get("round_test") or {}).get("command"),
-        "baseline_test": (state.get("baseline_test") or {}).get("command"),
-        "target_scope": list(state.get("target_scope") or []),
-    }
     kept = []
     for item in items:
-        words, origin = testcmd.limited_command(source_state, item.get("test_targets") or [], work, item.get("tests") or [])
+        words, origin = targets.limited_command(state, item.get("test_targets") or [], work, item.get("tests") or [])
         if words is None:
-            defer(state, item, DEFER_NO_TARGET, "範囲テストを組み立てられず、--round-test も無い")
+            defer(
+                state,
+                item,
+                DEFER_NO_TARGET,
+                "範囲テストを組み立てられない（test_targets が --scope のテストの置き場所に無いか、雛形を持つ suite が無い）",
+            )
             continue
         item["command"], item["command_source"] = list(words), origin
         kept.append(item)
@@ -307,12 +307,23 @@ def cmd_merge_plan(args: argparse.Namespace) -> None:
     remaining = _limited_commands(state, remaining)
 
     table = _allocation_table(state)
+    baseline = state.get("baseline_test") or {}
+    # 項目の検証の見積りは、配分の `verify` と着手前に手元で走らせた範囲テストの実測の大きい方（#1334 決定 8）。
+    measured_verify = float(baseline.get("seconds") or 0.0) / 60 if baseline.get("mode") == "scope" else 0.0
     for item in remaining:
         item["estimate"] = budget.item_estimate(table, str(item.get("technique")), bool(item["tests"]))
+        item["estimate"]["verify"] = max(float(item["estimate"]["verify"]), measured_verify)
     ranked = sorted(remaining, key=budget.rank_key)
 
-    baseline_seconds = (state.get("baseline_test") or {}).get("seconds")
-    reserve = budget.reserve(baseline_seconds, bool(state.get("ci_check")), float(table["fix"]))
+    strategy = timeline.strategy_of(state)
+    whole_seconds = baseline.get("seconds") if baseline.get("mode") in ("whole", "round") else baseline.get("whole_seconds")
+    reserve = budget.reserve(
+        strategy,
+        whole_seconds,
+        baseline.get("ci_seconds"),
+        strategy.whole_on_ci or bool(state.get("ci_check")),
+        float(table["fix"]),
+    )
     elapsed = elapsed_minutes(state)
     available = budget.available_minutes(int(state["budget_minutes"]), elapsed, reserve)
     selected, skipped = budget.select(ranked, available)

@@ -22,7 +22,7 @@ from typing import Any, Optional
 from . import info
 from .gitfacts import CODE_EXTENSIONS, is_test_path
 from .paths import git_out
-from .scope import round_test_roots
+from .scope import test_locations, tracked_files_under
 
 # 再 export を持ちうるパッケージの入口。中身を探さずに D3 を立てる。入口の名前で
 # 参照する側は、入口のパス（`pkg/__init__`）ではなくパッケージの名前で読むため、
@@ -83,7 +83,8 @@ def d2(work: str, shas: list[str]) -> bool:
 def _module_patterns(path: str, symbol: str) -> list[str]:
     """触ったファイルを参照する形の正規表現（`git grep -E`）。
 
-    拡張子を落としたリポジトリ相対パスの末尾 2 区切り（親と語幹）から作る。
+    拡張子を落としたリポジトリ相対パスの末尾 2 区切り（親と語幹）から作る。区切りは `/`・`.`・
+    `\\`（PHP の名前空間 `use App\\Services\\UserService;`）・`::`（Rust のパス）で、言語の表は持たない（#1334 決定 13）。
     語幹だけで探すと `plan` のような一般的な名前が無関係の箇所に当たる。
     リポジトリの直下のファイル（親が無い）は、行頭の `import` / `from` の形に限る。
     `import plan` を行の途中で許すと `from x import plan` にも当たる（実測）。
@@ -94,7 +95,7 @@ def _module_patterns(path: str, symbol: str) -> list[str]:
     s = _ere_escape(stem)
     if parent:
         p = _ere_escape(parent)
-        patterns = [f"{p}/{s}", f"{p}\\.{s}", f"{p} import .*\\b{s}\\b"]
+        patterns = [f"{p}/{s}", f"{p}\\.{s}", f"{p}\\\\{s}", f"{p}::{s}", f"{p} import .*\\b{s}\\b"]
     else:
         patterns = [f"^[[:space:]]*import {s}\\b", f"^[[:space:]]*from {s}\\b"]
     if symbol and "." in symbol:
@@ -185,21 +186,21 @@ def limited_test_files_from_targets(test_targets: list[str]) -> list[str]:
     return files
 
 
-def limited_test_files_from_round_test(round_test: str, work: str) -> Optional[list[str]]:
-    """`--round-test` の対象の語の配下の追跡されたファイル。対象の語が無ければ `None`（決定 21）。
+def limited_test_files_from_scope(scope: list[str], work: str) -> Optional[list[str]]:
+    """`--scope` のテストの置き場所の配下の追跡されたファイル。置き場所が無ければ `None`（#1334 決定 13）。
 
-    `make test` やラッパーは走ったファイルを挙げられないため、呼ぶ側は D4 を立てる。
+    ラウンドテストをそのまま走らせる項目の D4 はここから見る。コマンドの語からは読まない
+    （`docker compose exec -T app ...` の `app` を起点と読み違えるため）。
     """
-    roots = round_test_roots(round_test, work)
-    if not roots:
+    locations = test_locations(list(scope or []), work)
+    if not locations:
         return None
     files: list[str] = []
-    for root in roots:
-        out = git_out(work, ["ls-files", "-z", "--", root], strip=False) or ""
-        for path in out.split("\0"):
-            if path and path not in files:
+    for root in locations:
+        for path in tracked_files_under(root, work):
+            if path not in files:
                 files.append(path)
-    return files
+    return files or None
 
 
 def item_flags(

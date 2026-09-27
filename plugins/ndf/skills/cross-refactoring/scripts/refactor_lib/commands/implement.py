@@ -24,7 +24,7 @@ from typing import Any, Optional
 import project_decl
 import statefile
 
-from .. import clock, die, info, testcmd, timeline
+from .. import clock, die, info, targets, timeline
 from ..gitfacts import (
     collect_commit_facts,
     commit_time,
@@ -229,17 +229,17 @@ def _finish(path: pathlib.Path, state: dict[str, Any], phase: str) -> None:
 def _test_words(state: dict[str, Any], item: dict[str, Any], files: list[str]) -> Optional[list[str]]:
     """足したテストを今のコードで走らせる語の並び。
 
-    項目の範囲テストが対象から組み立てたものならそれを使う。`--round-test` をそのまま
-    使う項目は、元が既知の実行器なら足したテストのファイルへ差し替え、無理なら
-    `--round-test` をそのまま走らせる。
+    項目の範囲テストが対象から組み立てたものならそれを使う。ラウンドテストをそのまま使う項目は、
+    戦略に雛形（`scope_command`）があれば足したテストのファイルを `{paths}` へ入れ、無ければ
+    ラウンドテストをそのまま走らせる。
     """
     if item.get("command_source") == "targets":
         return list(item["command"])
     work = work_dir(state)
-    source = (state.get("round_test") or {}).get("command") or (state.get("baseline_test") or {}).get("command")
-    tests = [f for f in files if testcmd.valid_targets([f], work, list(state.get("target_scope") or []))]
-    if source and tests:
-        built = testcmd.build(source, tests, work)
+    strategy = timeline.strategy_of(state)
+    tests = [f for f in files if targets.valid_targets([f], work, list(state.get("target_scope") or []))]
+    if tests:
+        built = targets.scope_words_for(strategy, tests)
         if built is not None:
             return built
     return list(item.get("command") or []) or None

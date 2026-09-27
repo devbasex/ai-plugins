@@ -8,23 +8,19 @@
 from __future__ import annotations
 
 import datetime as _dt
-import io
 import json
 import re
 import statistics
 import subprocess
 import time
-import xml.etree.ElementTree as ET
-import zipfile
 
+import junit
 import repo as repo_id
 import run_metrics
 
 from .measure_repo import Tree, measured, question, unknown, url_hosts
 
 CALL_LIMIT = 30.0
-ARTIFACT_BYTES = 50 * 1024 * 1024
-JUNIT_NAME = re.compile(r"junit|test-?result|test-?report|phpunit|pytest|jest|vitest", re.I)
 TEST_STEP = re.compile(r"(?<![a-z])test|pytest|phpunit|jest|vitest|rspec", re.I)
 RECORD_NAME = "cross-refactoring-allocation.jsonl"
 RECORD_ROWS = 10
@@ -104,50 +100,16 @@ def workflow_jobs(tree: Tree) -> dict[str, int]:
     return out
 
 
-def junit_seconds(xml_bytes: bytes) -> float | None:
-    """JUnit の XML 1 本の直列の所要（根の `time`、無ければ直下の `testsuite` の `time` の合計）。"""
-    try:
-        root = ET.fromstring(xml_bytes)
-    except ET.ParseError:
-        return None
-    if root.get("time"):
-        try:
-            return float(root.get("time"))
-        except ValueError:
-            return None
-    total = 0.0
-    for child in root.findall("testsuite"):
-        try:
-            total += float(child.get("time") or 0)
-        except ValueError:
-            continue
-    return total if root.findall("testsuite") else None
-
-
 def _junit_of_run(gh: Gh, run: dict) -> dict | None:
-    arts = (gh.get(f"repos/{gh.repo}/actions/runs/{run['id']}/artifacts?per_page=100") or {}).get("artifacts") or []
-    picked = [a for a in arts if JUNIT_NAME.search(a.get("name", "")) and not a.get("expired")]
-    if not picked:
+    """run の成果物の JUnit（`lib/junit.py` の読み取り。名前の規則は `junit.JUNIT_NAME`）の直列の合計。"""
+    seconds = [s for s in (junit.total_seconds(xml) for xml in junit.artifact_xmls(gh.get, gh.raw, gh.repo, run["id"])) if s is not None]
+    if not seconds:
         return None
-    total, files, size = 0.0, 0, 0
-    for a in picked:
-        size += int(a.get("size_in_bytes") or 0)
-        if size > ARTIFACT_BYTES:
-            break
-        data = gh.raw(f"repos/{gh.repo}/actions/artifacts/{a['id']}/zip")
-        try:
-            with zipfile.ZipFile(io.BytesIO(data)) as z:
-                for name in z.namelist():
-                    if name.lower().endswith(".xml"):
-                        sec = junit_seconds(z.read(name))
-                        if sec is not None:
-                            total += sec
-                            files += 1
-        except zipfile.BadZipFile:
-            continue
-    if not files:
-        return None
-    return {"seconds": round(total, 1), "source": "ci-junit", "detail": f"run {run['id']}（{run.get('path')}）の JUnit {files} 本の合計"}
+    return {
+        "seconds": round(sum(seconds), 1),
+        "source": "ci-junit",
+        "detail": f"run {run['id']}（{run.get('path')}）の JUnit {len(seconds)} 本の合計",
+    }
 
 
 def _steps_of(jobs: list[dict], run: dict) -> dict | None:

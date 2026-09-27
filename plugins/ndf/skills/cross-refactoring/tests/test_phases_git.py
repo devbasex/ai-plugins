@@ -471,7 +471,8 @@ def test_standalone_runs_cross_review_and_appends_history_only_when_approved(flo
 
 def test_a_failed_gate_does_not_append_history(flow, cmd_gate, cmd_report, monkeypatch):
     state = read_state(flow["path"])
-    state["baseline_test"]["command"] = "false"
+    # 最終ゲートの全体テストは戦略の suite の `command`（#1334）。
+    state["strategy"]["suites"][0]["command"] = "false"
     write_state(flow["path"], state)
     with pytest.raises(SystemExit):
         _call(cmd_gate, "cmd_final_gate")

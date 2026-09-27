@@ -20,14 +20,15 @@ import auth
 import jev
 import models as models_lib
 import proc
+import project_decl
 import repo as repo_lib
 import statefile
+import test_strategy as ts
 
 from .. import ABORT, die, info
-from ..gitfacts import run_with_timeout
+from .. import baseline as baseline_lib
 from .. import timeline
 from ..paths import (
-    git_out,
     default_worktree_base,
     sh,
     state_path,
@@ -35,8 +36,7 @@ from ..paths import (
 )
 from ..codemetrics_record import code_metrics_record, ensure_record, recorded_enabled
 from ..plan import PLAN_COMMENT, PLAN_FILE, PLAN_NONE, normalize_plan_file
-from ..scope import require_scope_covers_tests, round_test_hint
-from ..testcmd import is_known
+from ..scope import require_scope_covers_tests
 from ..vocabulary import (
     DEFAULT_BUDGET_MINUTES,
     DEFAULT_SEVERITY_THRESHOLD,
@@ -289,6 +289,7 @@ class InitialContext:
     implementer_reason: str
     judge: dict[str, Any]
     started_at: str
+    strategy: ts.Strategy
 
 
 def _build_initial_state(args: argparse.Namespace, ctx: InitialContext) -> dict[str, Any]:
@@ -342,8 +343,10 @@ def _build_initial_state(args: argparse.Namespace, ctx: InitialContext) -> dict[
         # 最終ゲートの分かれ道。**単独起動が既定である。**
         "workflow_step": bool(args.workflow_step),
         "severity_threshold": args.severity_threshold,
+        # 解いたテストの戦略（#1334 E1）。**以後変えない。** 宣言を途中で直しても、この実行はこの戦略のまま進む。
+        "strategy": ctx.strategy.as_state(),
         "baseline_test": ctx.baseline,
-        # 項目の検証の元になるコマンド（#880 / #933 の AC10b）。省けば全体テストを元に組み立てる。
+        # `round-only` のラウンドテスト（#880）。ほかの戦略は `command` が空で、範囲テストは戦略の雛形から組み立てる。
         "round_test": ctx.round_test,
         # 生成物の同期は**進行側の責務**。push の直前に実行する。
         "sync_command": args.sync_command,
@@ -400,7 +403,7 @@ def cmd_init(args: argparse.Namespace) -> None:
 
 
 def _normalize_args(args: argparse.Namespace) -> None:
-    """予算のチェックと、廃止した引数の知らせ。**提案の前に止める**（AC1 AC2 AC3b）。"""
+    """予算のチェックと、廃止した引数の知らせ。**提案の前に止める**（AC1 AC2）。"""
     raw = getattr(args, "budget_minutes", None)
     if raw is not None:
         try:
@@ -414,14 +417,6 @@ def _normalize_args(args: argparse.Namespace) -> None:
         if getattr(args, name, None) is not None:
             option = "--" + name.replace("_", "-")
             print(f"⚠ {option} は廃止しました（#933）。--budget-minutes で所要を決めます", file=sys.stderr, flush=True)
-    # AC3b: ラウンドのテストが無く、全体のテストから範囲テストを組み立てられないなら、
-    # 提案と改修計画に時間を使った後で全項目が `no_target` になる。着手前に止める。
-    if not getattr(args, "round_test", None) and not is_known(args.baseline_test):
-        die(
-            f"--baseline-test（{args.baseline_test}）からは項目ごとのテストを組み立てられません"
-            "（既知の実行器: pytest / python -m pytest / jest / vitest）。"
-            "--round-test でラウンドのテストを渡してください"
-        )
 
 
 @dataclass
@@ -437,7 +432,7 @@ class _InitInputs:
 
 @dataclass
 class _InitPreparation:
-    """Pull Request の文脈と、用意した作業ディレクトリ。"""
+    """Pull Request の文脈と、用意した作業ディレクトリ、解いたテストの戦略。"""
 
     repo: str
     base_branch: str
@@ -447,7 +442,8 @@ class _InitPreparation:
     work: pathlib.Path
     tmp_dir: pathlib.Path
     state_file: pathlib.Path
-    round_test: Optional[str]
+    strategy: ts.Strategy
+    decl: dict[str, Any]
 
 
 def _resolve_init_inputs(args: argparse.Namespace) -> Optional[_InitInputs]:
@@ -472,7 +468,7 @@ def _resolve_init_inputs(args: argparse.Namespace) -> Optional[_InitInputs]:
 
 
 def _prepare_init(args: argparse.Namespace) -> _InitPreparation:
-    """Pull Request の文脈を取り、作業ディレクトリを用意して `--scope` の関門を通す。"""
+    """Pull Request の文脈を取り、作業ディレクトリを用意して `--scope` の関門を通し、テストの戦略を解く。"""
     # リポジトリ名は git の設定から求め、Pull Request の応答で確かめる（#271）。
     repo, base_branch, head_branch, is_own_pr, author = _fetch_pr_context(args.pr)
     if is_own_pr:
@@ -484,18 +480,26 @@ def _prepare_init(args: argparse.Namespace) -> _InitPreparation:
     work = root / "work"
     _ensure_work_worktree(work, head_branch)
 
-    # **`--scope` の関門はここで通す**（#436 決定 5）。テストの置き場所が範囲に
-    # 無い、または `--baseline-test` の実行集合に入らないまま進むと、テスト整備
-    # ラウンドが足したテストが検証に効かない。案内だけでは同じ失敗を繰り返す
-    # ため、**止める**。作業ディレクトリが要るのは、探索範囲の語がディレクトリか
-    # どうかを実物で確かめるためである。
-    # **足したテストが入るべき実行集合は `--round-test` である**（#880）。群の検証が
-    # 走らせるのはこちらで、全体テストは着手前と最終ゲートにしか走らない。
-    round_test = getattr(args, "round_test", None)
-    if round_test:
-        require_scope_covers_tests(args.scope, round_test, str(work), round_test=True)
-    else:
-        require_scope_covers_tests(args.scope, args.baseline_test, str(work))
+    # **`--scope` の関門はここで通す**（#436 決定 5）。テストの置き場所が範囲に無いまま進むと、
+    # テスト整備ラウンドが足したテストが検証に効かない。案内だけでは同じ失敗を繰り返すため、**止める**。
+    require_scope_covers_tests(args.scope, str(work))
+
+    # **テストの戦略は宣言（`.ndf/project.json` の `test`）と引数から解く**（#1334 E1）。コマンドの文字列は
+    # 解析しない。解けなければ欠けたキーと直し方を出して止める（I3）。
+    decl = project_decl.read_project_decl(str(work))
+    try:
+        strategy = ts.resolve(
+            decl,
+            baseline_test=getattr(args, "baseline_test", None),
+            round_test=getattr(args, "round_test", None),
+            ci_check=getattr(args, "ci_check", None),
+        )
+    except ts.StrategyError as e:
+        die(str(e))
+        raise SystemExit(ABORT)
+    info(f"🧭 テストの戦略: {strategy.name}（根拠 {strategy.source}）")
+    for note in strategy.notes:
+        info(f"   ℹ {note}")
 
     tmp_dir = tmp_dir_for(work)
     tmp_dir.mkdir(parents=True, exist_ok=True)
@@ -508,7 +512,8 @@ def _prepare_init(args: argparse.Namespace) -> _InitPreparation:
         work=work,
         tmp_dir=tmp_dir,
         state_file=state_path(tmp_dir, args.pr),
-        round_test=round_test,
+        strategy=strategy,
+        decl=decl,
     )
 
 
@@ -543,21 +548,21 @@ def _resume_if_pending(args: argparse.Namespace, inputs: _InitInputs, prep: _Ini
 def _verify_init(
     args: argparse.Namespace, inputs: _InitInputs, prep: _InitPreparation
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
-    """参加者を確定し、着手前のテストとラウンドのテストを実行する。"""
+    """参加者を確定し、戦略に沿った着手前のテストを実行する。"""
     # **確認は着手前のテストより先に行う。** 使える者がいなければ、テストに時間を
     # 使わずに止める。
     participants = resolve_participants(inputs.host, inputs.include or [], inputs.exclude or [], bool(getattr(args, "require_all", None)))
     _warn_unmeasurable_models(inputs.model_spec, participants["available"])
 
-    hint = round_test_hint(prep.round_test, args.baseline_test, args.scope, str(prep.work))
-    if hint:
-        info(hint)
-
-    # 着手前のテストの上限は予算から導く（決定 24。全体のテストの実測はまだ無い）。
-    timeout = timeline.init_test_timeout(args.budget_minutes)
-    baseline = _run_baseline_test(args.baseline_test, prep.work, timeout)
-    round_record = _run_round_test(prep.round_test, baseline, prep.work, timeout)
-    return participants, baseline, round_record
+    # 着手前のテストの上限は予算と宣言の所要から導く（決定 8）。
+    w, w_source = ts.whole_seconds(prep.decl)
+    c = ts.ci_wall_seconds(prep.decl, (prep.strategy.ci or {}).get("check") if prep.strategy.ci else None)
+    timeout = ts.limits(prep.strategy, int(args.budget_minutes), whole_seconds_value=w, whole_source=w_source, ci_seconds=c)[
+        "init_test_timeout"
+    ]
+    baseline = baseline_lib.run_baseline(prep.strategy, prep.work, timeout, list(args.scope), prep.tmp_dir)
+    baseline.update({"whole_seconds": w, "whole_source": w_source, "ci_seconds": c})
+    return participants, baseline, baseline_lib.round_record(prep.strategy, baseline)
 
 
 def _choose_implementer(
@@ -619,6 +624,7 @@ def _save_initial_state(
         baseline=baseline,
         round_test=round_record,
         started_at=started_at,
+        strategy=prep.strategy,
     )
     state = _build_initial_state(args, context)
     # **実行時の値を書き出す**（決定 24）。改修計画の後の値は `merge-plan` が足す。
@@ -790,6 +796,9 @@ def _emit_init(state: dict[str, Any]) -> None:
         HEAD_BRANCH=state["head_branch"],
         BASE_BRANCH=state["base_branch"],
         SCOPE=" ".join(state["target_scope"]),
+        # 解いたテストの戦略と根拠（#1334）。駆動と手順書が読む。
+        STRATEGY=(state.get("strategy") or {}).get("name") or "",
+        STRATEGY_SOURCE=(state.get("strategy") or {}).get("source") or "",
     )
 
 
@@ -850,64 +859,3 @@ def _is_registered_worktree(path: pathlib.Path) -> bool:
     out = sh(["git", "worktree", "list", "--porcelain"], check=False)
     target = str(path.resolve())
     return any(line == f"worktree {target}" for line in out.splitlines())
-
-
-def _run_baseline_test(command: str, work: pathlib.Path, timeout: int) -> dict[str, Any]:
-    """着手前のテストを実行して記録する。
-
-    失敗している状態で構造改善に入ると、**壊したのか元から壊れていたのか**
-    区別できない。そもそも振る舞いが変わっていないことを示す手段が無い書き換えは
-    構造改善ではないため、テストコマンドは必須にしている。
-    """
-    started = time.monotonic()
-    code, timed_out = run_with_timeout(command, str(work), timeout)
-    seconds = round(time.monotonic() - started, 1)
-    if timed_out:
-        die(f"着手前のテストが {timeout} 秒で終わりませんでした（{command}）。打ち切りました")
-        raise SystemExit(1)
-    status = "green" if code == 0 else "red"
-    if status == "red":
-        die(f"着手前のテストが失敗しています（{command}）。先に直してから開始してください")
-    info(f"✅ 着手前のテスト成功: {command}（{seconds} 秒）")
-    # **所要を残す。** 危険フラグと最終ゲートの全体のテストの予備時間を、この秒から見積もる。
-    # **HEAD も残す。** 危険フラグの全体のテストが落ちたとき、元からの失敗かをこの SHA で
-    # 見分け（決定 22）、報告と改修計画に基準として出す。
-    return {
-        "command": command,
-        "status": status,
-        "checked_at": statefile.now(),
-        "seconds": seconds,
-        "head": git_out(str(work), ["rev-parse", "HEAD"]),
-    }
-
-
-def _run_round_test(
-    command: Optional[str],
-    baseline: dict[str, Any],
-    work: pathlib.Path,
-    timeout: int,
-) -> dict[str, Any]:
-    """ラウンドのテストを着手前に 1 回実行して記録する（#880）。
-
-    **省いたとき、または全体テストと同じ文字列のときは実行しない。** 同じコマンドを
-    2 度走らせても判定は変わらず、時間だけが掛かる。全体テストの結果を写す。
-
-    **失敗は全体テストと別に止める。** 全体テストが通ってもラウンドのテストが通らない
-    （テストが 1 件も集まらない終了コード 5 を含む）なら、群の検証が初回から落ちる。
-    """
-    if not command or command == baseline["command"]:
-        # **省いたことを残す。** 項目の検証は `--round-test` をそのまま使えず、
-        # 全体のテストから組み立てた語の並びだけを使う（AC10b）。
-        return {"command": None, "status": baseline["status"], "checked_at": baseline["checked_at"]}
-    code, timed_out = run_with_timeout(command, str(work), timeout)
-    if timed_out:
-        die(f"ラウンドのテストが {timeout} 秒で終わりませんでした（{command}）。打ち切りました")
-        raise SystemExit(ABORT)
-    if code != 0:
-        die(
-            f"ラウンドのテストが成功しません（{command} / 終了コード {code}）。"
-            "--round-test が --scope のテストの置き場所を走らせるかを確かめてください"
-        )
-        raise SystemExit(ABORT)
-    info(f"✅ 着手前のラウンドのテスト成功: {command}")
-    return {"command": command, "status": "green", "checked_at": statefile.now()}
