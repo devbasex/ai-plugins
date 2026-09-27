@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 import tempfile
@@ -144,7 +145,8 @@ def existing_pr(root, branch):
 
 
 def diff_numbers(root, ref):
-    last = (git(root, "diff", "--shortstat", f"{ref}..HEAD").stdout.strip().splitlines() or [""])[-1]
+    # 3 点（分岐点からの差分）。2 点だと起点が進んでいたとき他 PR の変更まで数える
+    last = (git(root, "diff", "--shortstat", f"{ref}...HEAD").stdout.strip().splitlines() or [""])[-1]
     m = STAT_RE.search(last)
     files, ins, dels = (int(m.group(1)), int(m.group(2) or 0), int(m.group(3) or 0)) if m else (0, 0, 0)
     commits = int(git(root, "rev-list", "--count", f"{ref}..HEAD").stdout.strip() or 0)
@@ -335,21 +337,26 @@ def rest_create(root, branch, base, title, body, draft):
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False)
         tmp = f.name
-    p = gh_parts.gh(["api", f"repos/{owner}/{name}/pulls", "--input", tmp], cwd=root)
+    try:
+        p = gh_parts.gh(["api", f"repos/{owner}/{name}/pulls", "--input", tmp], cwd=root)
+    finally:
+        remove_temp(tmp)
     if p.returncode != 0:
         raise StepError(f"REST でも作成が失敗: {p.stderr.strip()[:300]}")
     d = json.loads(p.stdout)
     return d["number"], d["html_url"]
 
 
-def upsert(a, must_exist):
-    root = git_root(a.root)
-    branch = current_branch(root)
-    body = with_mode_line(body_with_mark(a.body_file), getattr(a, "mode", None), split_stages(getattr(a, "stages", None)))
-    with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8") as f:
-        f.write(body)
-        body_path = f.name
-    pr = None
+def remove_temp(path):
+    """PR 本文を入れた一時ファイルを消す。gh へ渡した後に残すと本文が /tmp に残り続ける。"""
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        pass
+
+
+def send_body(root, branch, body, body_path, a, must_exist):
+    """gh へ本文ファイルを渡して PR を作る・更新する。(番号, URL, action) を返す。"""
     if getattr(a, "pr", None):
         pr = {"number": a.pr, "url": f"#{a.pr}"}
     else:
@@ -361,28 +368,37 @@ def upsert(a, must_exist):
         p = gh_parts.gh(args, cwd=root)
         if p.returncode != 0:
             raise StepError(f"gh pr edit {pr['number']} が失敗: {p.stderr.strip()[:300]}")
-        number, url, action = pr["number"], pr["url"], "updated"
-    else:
-        if must_exist:
-            raise StepError(f"{branch} の OPEN の PR が無い（create を使う）", EXIT_PRECONDITION)
-        if not a.title:
-            raise StepError("--title が要る", EXIT_UNREADABLE)
-        base = a.base or repo.base_branch(root) or "main"
-        args = ["pr", "create", "--base", base, "--title", a.title, "--body-file", body_path]
-        if a.draft:
-            args.append("--draft")
-        p = gh_parts.gh(args, cwd=root)
-        rest = False
-        if p.returncode == 0:
-            url = (p.stdout.strip().splitlines() or [""])[-1]
-            m = re.search(r"/pull/(\d+)", url)
-            number = int(m.group(1)) if m else None
-        elif gh_parts.is_rate_limited(p.stderr):
-            rest = True
-            number, url = rest_create(root, branch, base, a.title, body, a.draft)
-        else:
-            raise StepError(f"gh pr create が失敗: {p.stderr.strip()[:300]}")
-        action = "created_rest" if rest else "created"
+        return pr["number"], pr["url"], "updated"
+    if must_exist:
+        raise StepError(f"{branch} の OPEN の PR が無い（create を使う）", EXIT_PRECONDITION)
+    if not a.title:
+        raise StepError("--title が要る", EXIT_UNREADABLE)
+    base = a.base or repo.base_branch(root) or "main"
+    args = ["pr", "create", "--base", base, "--title", a.title, "--body-file", body_path]
+    if a.draft:
+        args.append("--draft")
+    p = gh_parts.gh(args, cwd=root)
+    if p.returncode == 0:
+        url = (p.stdout.strip().splitlines() or [""])[-1]
+        m = re.search(r"/pull/(\d+)", url)
+        return (int(m.group(1)) if m else None), url, "created"
+    if gh_parts.is_rate_limited(p.stderr):
+        number, url = rest_create(root, branch, base, a.title, body, a.draft)
+        return number, url, "created_rest"
+    raise StepError(f"gh pr create が失敗: {p.stderr.strip()[:300]}")
+
+
+def upsert(a, must_exist):
+    root = git_root(a.root)
+    branch = current_branch(root)
+    body = with_mode_line(body_with_mark(a.body_file), getattr(a, "mode", None), split_stages(getattr(a, "stages", None)))
+    with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8") as f:
+        f.write(body)
+        body_path = f.name
+    try:
+        number, url, action = send_body(root, branch, body, body_path, a, must_exist)
+    finally:
+        remove_temp(body_path)
     sync_exit = decisions_sync(root, number) if number else None
     metrics = {
         "number": number,

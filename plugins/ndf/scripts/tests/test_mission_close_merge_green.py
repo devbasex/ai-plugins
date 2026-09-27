@@ -603,6 +603,46 @@ def test_evacuate_survives_cross_device(repo, tmp_path, monkeypatch):
     assert not (wt / "untracked.txt").exists()
 
 
+def load_merged():
+    spec = importlib.util.spec_from_file_location("merged_steps", SCRIPTS / "merged-steps.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+@pytest.mark.parametrize("change", ["modified", "staged", "deleted"])
+def test_remove_worktree_keeps_uncommitted_tracked_changes(repo, tmp_path, change):
+    """追跡ファイルの未コミットの変更は退避できないので、--force で消さず kept にする。"""
+    mod = load_merged()
+    wt = tmp_path / "wt"
+    git(repo, "worktree", "add", "-q", "-b", "feat/z", str(wt))
+    (wt / "untracked.txt").write_text("u\n", encoding="utf-8")
+    if change == "deleted":
+        (wt / "keep.txt").unlink()
+    else:
+        (wt / "keep.txt").write_text("edited\n", encoding="utf-8")
+        if change == "staged":
+            git(wt, "add", "keep.txt")
+    ok, why = mod.remove_worktree(str(repo), str(wt), "feat/z")
+    assert ok is False and "keep.txt" in why and "--force" in why
+    assert wt.is_dir() and (wt / "untracked.txt").exists()
+    if change != "deleted":
+        assert (wt / "keep.txt").read_text(encoding="utf-8") == "edited\n"
+    assert any(w["path"] == str(wt) for w in mod.list_worktrees(str(repo)))
+
+
+def test_remove_worktree_evacuates_untracked_and_removes(repo, tmp_path):
+    """未追跡だけなら退避してから外す（従来どおり）。"""
+    mod = load_merged()
+    wt = tmp_path / "wt"
+    git(repo, "worktree", "add", "-q", "-b", "feat/w", str(wt))
+    (wt / "untracked.txt").write_text("u\n", encoding="utf-8")
+    ok, why = mod.remove_worktree(str(repo), str(wt), "feat/w")
+    assert ok is True and why.startswith("退避先 ")
+    assert not wt.exists()
+    assert (Path(why[len("退避先 ") :]) / "untracked.txt").read_text(encoding="utf-8") == "u\n"
+
+
 def test_parse_record_skips_a_distribution_heading_inside_a_fence():
     """lib/md.py の上で読む（#1142 の D1）: 囲みの中の `## 配布の記録` は記録として読まない。"""
     text = "## 配布の記録\n段階: 配布なし\nミッション: #5\n\nコメント\n\n```md\n## 配布の記録\n段階: 開発版\n```\n"

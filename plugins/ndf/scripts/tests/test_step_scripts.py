@@ -442,6 +442,49 @@ def test_compare_files_skips_symlinks_for_a_runtime_that_drops_them(tmp_path):
     assert out == ["codex: p/skills/a/SKILL.md"]
 
 
+def kiro_project(tmp_path):
+    """この checkout の dev.kiro/install.sh で <tmp>/proj へ導入し、(src, proj) を返す。"""
+    src = SCRIPTS.parents[2]
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    p = subprocess.run(
+        ["bash", str(src / "plugins/ndf/dev.kiro/install.sh"), "--project", str(proj), "--yes"],
+        capture_output=True,
+        text=True,
+        cwd=str(src),
+    )
+    assert p.returncode == 0, p.stdout + p.stderr
+    return src, proj
+
+
+def test_compare_kiro_accepts_what_the_installer_made(tmp_path):
+    src, proj = kiro_project(tmp_path)
+    assert load_verification().compare_kiro(src, proj) == []
+
+
+@pytest.mark.parametrize("broken", ["skill_link", "prompt", "steering", "agent", "policy_link"])
+def test_compare_kiro_reports_missing_or_changed_outputs(tmp_path, broken):
+    """Kiro の生成物（skills / prompts / steering / agents）の欠落・内容違いを不一致にする。"""
+    src, proj = kiro_project(tmp_path)
+    kiro = proj / ".kiro"
+    if broken == "skill_link":
+        (kiro / "skills" / "pr").unlink()
+        want = "kiro: .kiro/skills/pr"
+    elif broken == "prompt":
+        (kiro / "prompts" / "pr.md").write_text("changed\n", encoding="utf-8")
+        want = "kiro: .kiro/prompts/pr.md"
+    elif broken == "steering":
+        (kiro / "steering" / "ndf-policies.md").write_text("stale\n", encoding="utf-8")
+        want = "kiro: .kiro/steering/ndf-policies.md"
+    elif broken == "agent":
+        (kiro / "agents" / "ndf.json").write_text("{", encoding="utf-8")
+        want = "kiro: .kiro/agents/ndf.json"
+    else:
+        (kiro / "skills" / "ndf-policies").symlink_to(src / "plugins/ndf/skills/ndf-policies")
+        want = "kiro: .kiro/skills/ndf-policies が残っている（steering へ移した Skill）"
+    assert load_verification().compare_kiro(src, proj) == [want]
+
+
 # --- phase-steps.py（互換の入口） --------------------------------------------
 
 
