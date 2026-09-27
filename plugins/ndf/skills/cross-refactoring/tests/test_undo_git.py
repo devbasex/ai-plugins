@@ -9,6 +9,7 @@
 パッチが前提にしている文脈も消えるためである。広げてでも Pull Request を決定的な
 状態に保つことを優先する。
 """
+
 from __future__ import annotations
 
 import copy
@@ -46,10 +47,22 @@ def _repo(tmp_path, second_line, second_file="foo.py"):
 
 def _state(tmp_path, work, base, c1, c2):
     items = [
-        {"id": "I-001", "rank": 1, "path": "src/foo.py", "symbol": "a", "status": "implemented",
-         "commits": {"test": None, "implement": c1, "fix": []}},
-        {"id": "I-002", "rank": 2, "path": "src/foo.py", "symbol": "b", "status": "implemented",
-         "commits": {"test": None, "implement": c2, "fix": []}},
+        {
+            "id": "I-001",
+            "rank": 1,
+            "path": "src/foo.py",
+            "symbol": "a",
+            "status": "implemented",
+            "commits": {"test": None, "implement": c1, "fix": []},
+        },
+        {
+            "id": "I-002",
+            "rank": 2,
+            "path": "src/foo.py",
+            "symbol": "b",
+            "status": "implemented",
+            "commits": {"test": None, "implement": c2, "fix": []},
+        },
     ]
     return make_state_v2(tmp_path, work, items=items, plan={"base_sha": base})
 
@@ -95,8 +108,7 @@ def test_an_item_without_commits_is_closed_without_touching_git(tmp_path, undo):
     work, base, c1, c2 = _repo(tmp_path, 30)
     path = _state(tmp_path, work, base, c1, c2)
     state = read_state(path)
-    state["items"].append({"id": "I-003", "rank": 3, "status": "planned",
-                           "commits": {"test": None, "implement": None, "fix": []}})
+    state["items"].append({"id": "I-003", "rank": 3, "status": "planned", "commits": {"test": None, "implement": None, "fix": []}})
     head = git("rev-parse", "HEAD", cwd=work).stdout.strip()
 
     record = undo.drop(path, state, ["I-003"], "テスト")
@@ -113,12 +125,12 @@ def test_an_unowned_extra_commit_is_removed_while_item_commits_are_replayed(tmp_
     (work / "src" / "extra.py").write_text("unowned\n", encoding="utf-8")
     extra = commit_with_trailers(work, "unowned", {})
 
-    record = undo.drop(path, state, [], "計画外", [extra])
+    record = undo.drop(path, state, [], "改修計画外", [extra])
 
     assert record == {
         "at": record["at"],
         "mode": "item",
-        "reason": "計画外",
+        "reason": "改修計画外",
         "dropped": [],
         "extra": [extra],
         "reverted_commits": 3,
@@ -134,7 +146,7 @@ def test_an_unowned_extra_commit_is_removed_while_item_commits_are_replayed(tmp_
 
 
 def test_an_interrupted_drop_is_redone_on_resume(tmp_path, undo):
-    """印（`pending_drop`）が残ったまま再開したら、同じ取り消しをやり直す。"""
+    """フラグ（`pending_drop`）が残ったまま再開したら、同じ取り消しをやり直す。"""
     work, base, c1, c2 = _repo(tmp_path, 30)
     path = _state(tmp_path, work, base, c1, c2)
     state = read_state(path)
@@ -156,7 +168,7 @@ def test_a_drop_interrupted_after_replay_keeps_the_remaining_item_on_resume(tmp_
     path = _state(tmp_path, work, base, c1, c2)
     before = copy.deepcopy(read_state(path))
     undo.drop(path, read_state(path), ["I-001"], "中断")
-    # git は積み直しまで進み、状態は着手直後（印だけ立った旧 SHA のまま）で残った
+    # git は積み直しまで進み、状態は着手直後（フラグだけ立った旧 SHA のまま）で残った
     before["pending_drop"] = {"items": ["I-001"], "extra": [], "reason": "中断"}
     path.write_text(json.dumps(before, ensure_ascii=False), encoding="utf-8")
 
@@ -168,4 +180,36 @@ def test_a_drop_interrupted_after_replay_keeps_the_remaining_item_on_resume(tmp_
     assert items["I-001"]["status"] == "reverted"
     assert items["I-002"]["status"] == "implemented"
     assert git("rev-parse", "HEAD", cwd=work).stdout.strip() == items["I-002"]["commits"]["implement"]
+    assert read_state(path)["pending_drop"] is None
+
+
+def test_a_replay_conflict_without_a_shared_file_drops_every_item(tmp_path, undo):
+    """広げる相手が無いまま積み直しが競合したら、改修計画の項目をすべて取り消す（`all`）。
+
+    残す I-002 は、取り消す改修計画外のコミットの隣の行を触っている。I-002 は I-001 と
+    同じファイルを触らないため広げる相手にならず、積み直しは競合する。
+    """
+    work, base, c1, _ = _repo(tmp_path, 30)
+    git("reset", "-q", "--hard", c1, cwd=work)
+    bar = list(LINES)
+    bar[2] = "line3-unowned\n"
+    (work / "src" / "bar.py").write_text("".join(bar), encoding="utf-8")
+    extra = commit_with_trailers(work, "unowned", {})
+    bar[3] = "changed-by-I-002\n"
+    (work / "src" / "bar.py").write_text("".join(bar), encoding="utf-8")
+    c2 = commit_with_trailers(work, "I-002", item_trailers("I-002"))
+    path = _state(tmp_path, work, base, c1, c2)
+    state = read_state(path)
+    state["items"][1]["path"] = "src/bar.py"
+
+    record = undo.drop(path, state, ["I-001"], "テスト", [extra])
+
+    assert record["mode"] == "all"
+    assert sorted(record["dropped"]) == ["I-001", "I-002"]
+    for name in ("foo.py", "bar.py"):
+        assert (work / "src" / name).read_text(encoding="utf-8") == "".join(LINES)
+    items = {i["id"]: i for i in read_state(path)["items"]}
+    assert items["I-001"]["status"] == "reverted"
+    assert items["I-002"]["status"] == "reverted"
+    assert "巻き込まれた" in items["I-002"]["failure_reason"]
     assert read_state(path)["pending_drop"] is None

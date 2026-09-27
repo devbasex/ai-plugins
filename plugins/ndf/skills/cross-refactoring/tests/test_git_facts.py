@@ -3,6 +3,7 @@
 他のテストは `collect_commit_facts()` を差し替えるため、git の呼び出し方そのものが
 間違っていても気付けない。ここだけは本物の git を通す。
 """
+
 from __future__ import annotations
 
 import json
@@ -11,10 +12,8 @@ import subprocess
 import pytest
 
 
-
 def _git(*args, cwd):
-    return subprocess.run(["git", *args], cwd=cwd, capture_output=True,
-                          text=True, check=True)
+    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True)
 
 
 @pytest.fixture
@@ -42,29 +41,26 @@ def _commit(repo, message, files):
     return _git("rev-parse", "HEAD", cwd=repo).stdout.strip()
 
 
-TRAILERS = (
-    "\n\nItem-Id: I-001\nImpl-Runtime: codex\nImpl-Model: gpt-5.5"
-)
+TRAILERS = "\n\nItem-Id: I-001\nImpl-Runtime: codex\nImpl-Model: gpt-5.5"
 
 
 def test_facts_come_from_a_real_repository(gitfacts, work):
     base = _git("rev-parse", "HEAD", cwd=work).stdout.strip()
-    first = _commit(work, "Test: 現状固定テストを足す" + TRAILERS,
-                    {"tests/test_foo.py": "def test_f():\n    assert True\n"})
-    second = _commit(work, "Refactor: extract_method" + TRAILERS,
-                     {"src/foo.py": "def _one():\n    return 1\n\n\ndef f():\n"
-                                    "    return _one()\n"})
+    first = _commit(work, "Test: 現状固定テストを足す" + TRAILERS, {"tests/test_foo.py": "def test_f():\n    assert True\n"})
+    second = _commit(
+        work, "Refactor: extract_method" + TRAILERS, {"src/foo.py": "def _one():\n    return 1\n\n\ndef f():\n    return _one()\n"}
+    )
 
     ordered = gitfacts.commits_in_range(str(work), base, "HEAD")
     assert ordered == [second, first], "新しい順で返っていない"
 
-    facts = gitfacts.collect_commit_facts(
-        str(work), [first, second], set(ordered), "true", "main", 60
-    )
+    facts = gitfacts.collect_commit_facts(str(work), [first, second], set(ordered), "true", "main", 60)
     assert [f["sha"] for f in facts] == [first, second]
     assert all(f["exists"] for f in facts)
     assert facts[0]["trailers"] == {
-        "Item-Id": "I-001", "Impl-Runtime": "codex", "Impl-Model": "gpt-5.5",
+        "Item-Id": "I-001",
+        "Impl-Runtime": "codex",
+        "Impl-Model": "gpt-5.5",
     }
     # 現状固定テストの追加が先行している
     assert facts[0]["touches_tests"] is True
@@ -77,10 +73,14 @@ def test_facts_come_from_a_real_repository(gitfacts, work):
 
 def test_commit_test_changes_reads_an_added_test(gitfacts, work):
     """現状固定: 行途中の改行は残り、末尾の改行は除かれる。"""
-    sha = _commit(work, "Test: テストを追加", {
-        "tests/test_foo.py": "def test_f():\n    assert f() == 1\n",
-        "src/foo.py": "def f():\n    return 2\n",
-    })
+    sha = _commit(
+        work,
+        "Test: テストを追加",
+        {
+            "tests/test_foo.py": "def test_f():\n    assert f() == 1\n",
+            "src/foo.py": "def f():\n    return 2\n",
+        },
+    )
 
     assert gitfacts.commit_test_changes(str(work), sha) == {
         "tests/test_foo.py": ([], ["def test_f():\n", "    assert f() == 1"]),
@@ -89,13 +89,21 @@ def test_commit_test_changes_reads_an_added_test(gitfacts, work):
 
 def test_commit_test_changes_reads_both_sides_of_a_modified_test(gitfacts, work):
     """現状固定: 変更前後の期待値を Git からそれぞれ読み取る。"""
-    _commit(work, "Test: 変更前", {
-        "tests/test_foo.py": "def test_f():\n    assert f() == 1\n",
-    })
-    sha = _commit(work, "Test: 期待値を変更", {
-        "tests/test_foo.py": "def test_f():\n    assert f() == 2\n",
-        "src/foo.py": "def f():\n    return 2\n",
-    })
+    _commit(
+        work,
+        "Test: 変更前",
+        {
+            "tests/test_foo.py": "def test_f():\n    assert f() == 1\n",
+        },
+    )
+    sha = _commit(
+        work,
+        "Test: 期待値を変更",
+        {
+            "tests/test_foo.py": "def test_f():\n    assert f() == 2\n",
+            "src/foo.py": "def f():\n    return 2\n",
+        },
+    )
 
     assert gitfacts.commit_test_changes(str(work), sha) == {
         "tests/test_foo.py": (
@@ -107,13 +115,21 @@ def test_commit_test_changes_reads_both_sides_of_a_modified_test(gitfacts, work)
 
 def test_commit_test_changes_reads_a_deleted_test(gitfacts, work):
     """現状固定: 削除したテストは変更前の行と空の変更後を返す。"""
-    _commit(work, "Test: 削除前", {
-        "tests/test_foo.py": "def test_f():\n    assert f() == 2\n",
-    })
+    _commit(
+        work,
+        "Test: 削除前",
+        {
+            "tests/test_foo.py": "def test_f():\n    assert f() == 2\n",
+        },
+    )
     (work / "tests" / "test_foo.py").unlink()
-    sha = _commit(work, "Test: テストを削除", {
-        "src/foo.py": "def f():\n    return 2\n",
-    })
+    sha = _commit(
+        work,
+        "Test: テストを削除",
+        {
+            "src/foo.py": "def f():\n    return 2\n",
+        },
+    )
 
     assert gitfacts.commit_test_changes(str(work), sha) == {
         "tests/test_foo.py": (["def test_f():\n", "    assert f() == 2"], []),
@@ -123,9 +139,7 @@ def test_commit_test_changes_reads_a_deleted_test(gitfacts, work):
 def test_missing_trailers_are_seen_as_missing(verify, gitfacts, work):
     base = _git("rev-parse", "HEAD", cwd=work).stdout.strip()
     sha = _commit(work, "Refactor: トレーラーなし", {"src/foo.py": "def f():\n    return 2\n"})
-    facts = gitfacts.collect_commit_facts(
-        str(work), [sha], {sha}, "true", "main"
-    )
+    facts = gitfacts.collect_commit_facts(str(work), [sha], {sha}, "true", "main")
     problem = verify.verify_commit_trailers(facts[0])
     assert problem is not None and "Item-Id" in problem
     assert base != sha
@@ -139,9 +153,7 @@ def test_commit_outside_the_range_is_rejected(gitfacts, work):
 
     ordered = gitfacts.commits_in_range(str(work), base, "HEAD")
     assert ordered == [new]
-    facts = gitfacts.collect_commit_facts(
-        str(work), [old], set(ordered), "true", "main"
-    )
+    facts = gitfacts.collect_commit_facts(str(work), [old], set(ordered), "true", "main")
     assert facts[0]["exists"] is False
 
 
@@ -149,26 +161,21 @@ def test_failing_test_is_detected_by_running_it(gitfacts, work):
     """`test_status` は実際に走らせて決まる。申告では決まらない。"""
     base = _git("rev-parse", "HEAD", cwd=work).stdout.strip()
     sha = _commit(work, "Refactor: 壊した" + TRAILERS, {"src/foo.py": "def f():\n    return 9\n"})
-    facts = gitfacts.collect_commit_facts(
-        str(work), [sha], {sha}, "false", "main"
-    )
+    facts = gitfacts.collect_commit_facts(str(work), [sha], {sha}, "false", "main")
     assert facts[0]["test_status"] == "fail"
     assert _git("rev-parse", "--abbrev-ref", "HEAD", cwd=work).stdout.strip() == "main"
     assert base != sha
 
 
 def test_fix_commits_pass_verification_through_real_git(cmd_converge, gitfacts, work):
-    """修正コミットが git 経由の検証を通ること（`merge-fix` の検査）。
+    """修正コミットが git 経由の検証を通ること（`merge-fix` のチェック）。
 
     範囲に空集合を渡していた頃は、全ての修正コミットが必ず不正扱いになっていた。
     """
     base = _git("rev-parse", "HEAD", cwd=work).stdout.strip()
-    sha = _commit(work, "Fix: レビュー指摘の反映" + TRAILERS,
-                  {"src/foo.py": "def f():\n    return 1  # 直した\n"})
+    sha = _commit(work, "Fix: レビュー指摘の反映" + TRAILERS, {"src/foo.py": "def f():\n    return 1  # 直した\n"})
     ordered = gitfacts.commits_in_range(str(work), base, "HEAD")
-    facts = gitfacts.collect_commit_facts(
-        str(work), [sha], set(ordered), "true", "main"
-    )
+    facts = gitfacts.collect_commit_facts(str(work), [sha], set(ordered), "true", "main")
     state = {"target_scope": ["src", "tests"]}
     assert cmd_converge._fix_problems(state, facts, {"I-001"}) == []
     # 修正の対象でない項目のコミットは弾く（`Item-Id` だけで対応づける。I4）
@@ -199,7 +206,7 @@ def test_reverting_in_history_order_succeeds(gitfacts, work):
     second = _commit(work, "two", {"src/a.py": "a = 2\n"})
 
     state = {"worktrees": {"work": str(work)}}
-    item = {"item_id": "I-001", "commits": [first, second]}   # 古い順の申告
+    item = {"item_id": "I-001", "commits": [first, second]}  # 古い順の申告
     assert gitfacts.revert_item_commits(state, item) == 2
     assert item["reverted"] is True
 
@@ -224,11 +231,8 @@ def test_hanging_test_is_cut_off(gitfacts, work):
 
     無限ループに入ったコードを待ち続けると、進行全体が止まる。
     """
-    sha = _commit(work, "Refactor: 無限ループ" + TRAILERS,
-                  {"src/foo.py": "def f():\n    return 2\n"})
-    status = gitfacts.run_test_at(
-        str(work), sha, "sleep 30", "main", timeout=1
-    )
+    sha = _commit(work, "Refactor: 無限ループ" + TRAILERS, {"src/foo.py": "def f():\n    return 2\n"})
+    status = gitfacts.run_test_at(str(work), sha, "sleep 30", "main", timeout=1)
     assert status == "fail"
     assert _git("rev-parse", "--abbrev-ref", "HEAD", cwd=work).stdout.strip() == "main"
 
@@ -257,8 +261,7 @@ def test_cutting_off_a_test_kills_its_children(gitfacts, work):
     """
     import time
 
-    sha = _commit(work, "Refactor: 子プロセスを残す" + TRAILERS,
-                  {"src/foo.py": "def f():\n    return 3\n"})
+    sha = _commit(work, "Refactor: 子プロセスを残す" + TRAILERS, {"src/foo.py": "def f():\n    return 3\n"})
     marker = work / "child-ran"
     # 子プロセスが 2 秒後に痕跡を残そうとする
     command = f"(sleep 2 && touch {marker}) & sleep 30"
@@ -278,15 +281,12 @@ def test_cutting_off_kills_children_that_ignore_sigterm(gitfacts, work):
     """
     import time
 
-    sha = _commit(work, "Refactor: TERM を無視" + TRAILERS,
-                  {"src/foo.py": "def f():\n    return 4\n"})
+    sha = _commit(work, "Refactor: TERM を無視" + TRAILERS, {"src/foo.py": "def f():\n    return 4\n"})
     marker = work / "stubborn-ran"
     command = f"trap '' TERM; (sleep 3 && touch {marker}) & sleep 30"
 
     started = time.monotonic()
-    status = gitfacts.run_test_at(
-        str(work), sha, command, "main", timeout=1, kill_grace=1.0
-    )
+    status = gitfacts.run_test_at(str(work), sha, command, "main", timeout=1, kill_grace=1.0)
     elapsed = time.monotonic() - started
 
     assert status == "fail"
@@ -313,8 +313,7 @@ def test_read_result_returns_a_value_when_the_file_is_missing(gitfacts, tmp_path
 
 def test_read_result_returns_unparsable_for_broken_json(gitfacts, tmp_path):
     """JSON として読めない結果ファイルは、理由 `unparsable` の結果なしになる。"""
-    (tmp_path / "claude-implement-rf130-result.json").write_text(
-        '{"items": [', encoding="utf-8")
+    (tmp_path / "claude-implement-rf130-result.json").write_text('{"items": [', encoding="utf-8")
     state = {"id": 130, "tmp_dir": str(tmp_path)}
 
     outcome = gitfacts.read_result(state, "claude", "implement")
@@ -323,9 +322,7 @@ def test_read_result_returns_unparsable_for_broken_json(gitfacts, tmp_path):
 
 
 @pytest.mark.parametrize("body", ['[{"item_id": "I-001"}]', "42"])
-def test_read_result_returns_unparsable_when_the_json_is_not_an_object(
-    gitfacts, tmp_path, body
-):
+def test_read_result_returns_unparsable_when_the_json_is_not_an_object(gitfacts, tmp_path, body):
     """配列や数値も結果なしとして返す。
 
     呼び出し側は `payload.get(...)` を呼ぶため、辞書でないものを渡すと
@@ -399,7 +396,11 @@ def test_revert_range_failure_message_has_no_item_id_prefix(gitfacts, work, caps
     assert _git("rev-parse", "HEAD", cwd=work).stdout.strip() == second
 
 
-def test_check_run_result_characterization(gitfacts, monkeypatch):
+def _check_runs(*runs):
+    return json.dumps({"total_count": len(runs), "check_runs": list(runs)})
+
+
+def test_check_run_result_characterization(gitfacts, github, monkeypatch):
     """check_run_result の公開契約を固定する現状固定テスト。"""
     # 1. 引数が空なら None
     assert gitfacts.check_run_result("", "sha", "ci") is None
@@ -407,80 +408,114 @@ def test_check_run_result_characterization(gitfacts, monkeypatch):
     assert gitfacts.check_run_result("repo", "sha", "") is None
 
     # 2. gh api の実行失敗（sh が None または空）なら None
-    monkeypatch.setattr(gitfacts, "sh", lambda *args, **kwargs: None)
+    monkeypatch.setattr(github, "sh", lambda *args, **kwargs: None)
     assert gitfacts.check_run_result("repo", "sha", "ci") is None
 
-    monkeypatch.setattr(gitfacts, "sh", lambda *args, **kwargs: "")
+    monkeypatch.setattr(github, "sh", lambda *args, **kwargs: "")
     assert gitfacts.check_run_result("repo", "sha", "ci") is None
 
     # 3. 不正 JSON なら None
-    monkeypatch.setattr(gitfacts, "sh", lambda *args, **kwargs: "not-json{")
+    monkeypatch.setattr(github, "sh", lambda *args, **kwargs: "not-json{")
     assert gitfacts.check_run_result("repo", "sha", "ci") is None
 
-    # 4. check_runs 欠損（非 dict、または check_runs がリストでない）なら None
-    monkeypatch.setattr(gitfacts, "sh", lambda *args, **kwargs: "[]")
+    # 4. check_runs 欠損（非 dict、または check_runs がリストでない）・0 件なら None
+    monkeypatch.setattr(github, "sh", lambda *args, **kwargs: "[]")
     assert gitfacts.check_run_result("repo", "sha", "ci") is None
 
-    monkeypatch.setattr(gitfacts, "sh", lambda *args, **kwargs: json.dumps({"check_runs": "not-a-list"}))
+    monkeypatch.setattr(github, "sh", lambda *args, **kwargs: json.dumps({"total_count": 1, "check_runs": "not-a-list"}))
+    assert gitfacts.check_run_result("repo", "sha", "ci") is None
+
+    monkeypatch.setattr(github, "sh", lambda *args, **kwargs: _check_runs())
     assert gitfacts.check_run_result("repo", "sha", "ci") is None
 
     # 5. 対象名なし（一致する name がない）なら None
     monkeypatch.setattr(
-        gitfacts,
-        "sh",
-        lambda *args, **kwargs: json.dumps({
-            "check_runs": [{"name": "other", "status": "completed", "conclusion": "success"}]
-        }),
+        github, "sh", lambda *args, **kwargs: _check_runs({"name": "other", "status": "completed", "conclusion": "success"})
     )
     assert gitfacts.check_run_result("repo", "sha", "ci") is None
 
-    # 6. 未完了（status != completed）なら "pending"
+    # 6. 最新の実行が未完了（status != completed）なら "pending"
     monkeypatch.setattr(
-        gitfacts,
+        github,
         "sh",
-        lambda *args, **kwargs: json.dumps({
-            "check_runs": [
-                {"name": "ci", "status": "in_progress", "conclusion": None},
-                {"name": "ci", "status": "completed", "conclusion": "success"},
-            ]
-        }),
+        lambda *args, **kwargs: _check_runs(
+            {
+                "name": "ci",
+                "status": "completed",
+                "conclusion": "success",
+                "started_at": "2026-09-25T01:00:00Z",
+                "completed_at": "2026-09-25T01:05:00Z",
+            },
+            {"name": "ci", "status": "in_progress", "conclusion": None, "started_at": "2026-09-25T02:00:00Z"},
+        ),
     )
     assert gitfacts.check_run_result("repo", "sha", "ci") == "pending"
 
-    # 7. 失敗（completed だが conclusion != success）ならその結論（または unknown）
+    # 7. 最新の実行が失敗ならその結論（または unknown）
     monkeypatch.setattr(
-        gitfacts,
+        github,
         "sh",
-        lambda *args, **kwargs: json.dumps({
-            "check_runs": [
-                {"name": "ci", "status": "completed", "conclusion": "failure"},
-                {"name": "ci", "status": "completed", "conclusion": "success"},
-            ]
-        }),
+        lambda *args, **kwargs: _check_runs(
+            {"name": "ci", "status": "completed", "conclusion": "success", "completed_at": "2026-09-25T01:00:00Z"},
+            {"name": "ci", "status": "completed", "conclusion": "failure", "completed_at": "2026-09-25T02:00:00Z"},
+        ),
     )
     assert gitfacts.check_run_result("repo", "sha", "ci") == "failure"
 
-    monkeypatch.setattr(
-        gitfacts,
-        "sh",
-        lambda *args, **kwargs: json.dumps({
-            "check_runs": [
-                {"name": "ci", "status": "completed", "conclusion": None},
-            ]
-        }),
-    )
+    monkeypatch.setattr(github, "sh", lambda *args, **kwargs: _check_runs({"name": "ci", "status": "completed", "conclusion": None}))
     assert gitfacts.check_run_result("repo", "sha", "ci") == "unknown"
 
-    # 8. 全成功なら "success"
-    monkeypatch.setattr(
-        gitfacts,
-        "sh",
-        lambda *args, **kwargs: json.dumps({
-            "check_runs": [
-                {"name": "ci", "status": "completed", "conclusion": "success"},
-                {"name": "ci", "status": "COMPLETED", "conclusion": "SUCCESS"},
-            ]
-        }),
-    )
+    # 8. 成功なら "success"（大文字でも）
+    monkeypatch.setattr(github, "sh", lambda *args, **kwargs: _check_runs({"name": "ci", "status": "COMPLETED", "conclusion": "SUCCESS"}))
     assert gitfacts.check_run_result("repo", "sha", "ci") == "success"
 
+
+def test_check_run_result_reads_the_latest_run_after_a_rerun(gitfacts, github, monkeypatch):
+    """同名のチェックが failure → success の順に 2 件あるとき success を返す（#632）。
+
+    本文の編集で同じワークフローが別の check suite として走ると、前の suite の失敗が
+    `check-runs` に残る。前の失敗を数えると、最終ゲートが修正ラウンドへ回る。
+    """
+    monkeypatch.setattr(
+        github,
+        "sh",
+        lambda *args, **kwargs: _check_runs(
+            {
+                "id": 1,
+                "name": "check",
+                "status": "completed",
+                "conclusion": "failure",
+                "started_at": "2026-09-25T02:09:30Z",
+                "completed_at": "2026-09-25T02:09:44Z",
+            },
+            {
+                "id": 2,
+                "name": "check",
+                "status": "completed",
+                "conclusion": "success",
+                "started_at": "2026-09-25T02:14:20Z",
+                "completed_at": "2026-09-25T02:14:31Z",
+            },
+        ),
+    )
+    assert gitfacts.check_run_result("repo", "sha", "check") == "success"
+
+
+def test_check_run_result_reads_every_page(gitfacts, github, monkeypatch):
+    """1 ページに収まらない一覧は total_count に届くまで読む。"""
+    pages = {
+        "1": {
+            "total_count": 2,
+            "check_runs": [{"name": "ci", "status": "completed", "conclusion": "failure", "completed_at": "2026-09-25T01:00:00Z"}],
+        },
+        "2": {
+            "total_count": 2,
+            "check_runs": [{"name": "ci", "status": "completed", "conclusion": "success", "completed_at": "2026-09-25T02:00:00Z"}],
+        },
+    }
+
+    def _sh(cmd, *args, **kwargs):
+        return json.dumps(pages[cmd[-1].rsplit("page=", 1)[1]])
+
+    monkeypatch.setattr(github, "sh", _sh)
+    assert gitfacts.check_run_result("repo", "sha", "ci") == "success"

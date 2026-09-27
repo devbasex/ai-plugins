@@ -1,12 +1,13 @@
-"""複数の CLI が出した提案を、計画へ渡す候補へまとめる（#933）。
+"""複数の CLI が出した提案を、改修計画へ渡す候補へまとめる（#933）。
 
 語彙の検証・鍵が同じ提案の機械的な統合・しきい値・候補の切り出し（`path` + `symbol`
 の組を上位 30 組、組の中は上位 3 件）を持つ。**意味の上で同じ提案かの判断はここで
-しない**（計画の中で Jev か実装担当が行う）。
+しない**（改修計画の中で Jev か実装担当が行う）。
 """
+
 from __future__ import annotations
 
-from typing import Any, Callable, Iterable, Optional
+from typing import Any, Iterable, Optional
 
 from . import info
 from .gitfacts import safe_int
@@ -45,6 +46,21 @@ def _degrade_if_unknown(
     return value, False
 
 
+# 提案の根拠の値（`evidence`）に書ける鍵（#1319 の決定 5）。値は数。
+EVIDENCE_KEYS = ("cc", "cognitive", "lines", "functions", "max_function_lines", "duplicate_lines")
+
+
+def normalize_evidence(raw: Any) -> dict[str, Any]:
+    """根拠の値を正規化する。**形が悪くても提案は残し、見送りの理由を作らない**（I7・AC17）。
+
+    オブジェクトでなければ空にする。知らない鍵と数でない値は、その鍵だけ落とす。値は
+    指標のファイルと照らさない（照らして落とすと、指標が採否に効く。前提 7）。
+    """
+    if not isinstance(raw, dict):
+        return {}
+    return {key: raw[key] for key in EVIDENCE_KEYS if isinstance(raw.get(key), (int, float)) and not isinstance(raw.get(key), bool)}
+
+
 def _normalize_proposal(raw: dict[str, Any], source: str) -> Optional[dict[str, Any]]:
     """1 件の提案を正規化する。必須項目を欠くものは捨てる。
 
@@ -61,19 +77,17 @@ def _normalize_proposal(raw: dict[str, Any], source: str) -> Optional[dict[str, 
     smell = str(raw.get("smell") or "").strip()
     technique = str(raw.get("technique") or "").strip()
     severity = str(raw.get("severity") or "").strip().lower()
-    smell, smell_degraded = _degrade_if_unknown(
-        smell, SMELLS, source, "兆候", f"{path}#{symbol}")
-    technique, technique_degraded = _degrade_if_unknown(
-        technique, TECHNIQUES, source, "手法", f"{path}#{symbol}")
-    severity, severity_degraded = _degrade_if_unknown(
-        severity, SEVERITY_ORDER, source, "重要度", f"{path}#{symbol}")
+    smell, smell_degraded = _degrade_if_unknown(smell, SMELLS, source, "兆候", f"{path}#{symbol}")
+    technique, technique_degraded = _degrade_if_unknown(technique, TECHNIQUES, source, "手法", f"{path}#{symbol}")
+    severity, severity_degraded = _degrade_if_unknown(severity, SEVERITY_ORDER, source, "重要度", f"{path}#{symbol}")
     degraded = smell_degraded or technique_degraded or severity_degraded
     if degraded:
         severity = "unknown"
 
     estimated = safe_int(raw.get("estimated_diff_lines"))
+    evidence = normalize_evidence(raw.get("evidence"))
 
-    return {
+    proposal = {
         "path": path,
         "symbol": symbol,
         "smell": smell,
@@ -88,6 +102,9 @@ def _normalize_proposal(raw: dict[str, Any], source: str) -> Optional[dict[str, 
         # に残す（AC9）。
         "degraded": degraded,
     }
+    if evidence:
+        proposal["evidence"] = evidence
+    return proposal
 
 
 def _merge_common_attributes(existing: dict[str, Any], incoming: dict[str, Any]) -> None:
@@ -99,6 +116,9 @@ def _merge_common_attributes(existing: dict[str, Any], incoming: dict[str, Any])
         existing["rationale"] = incoming["rationale"]
     if len(incoming["plan"]) > len(existing["plan"]):
         existing["plan"] = incoming["plan"]
+    # 根拠の値は、既にある鍵を残し、無い鍵だけ足す。
+    if incoming.get("evidence"):
+        existing["evidence"] = {**incoming["evidence"], **(existing.get("evidence") or {})}
 
 
 def _merge_one(existing: dict[str, Any], incoming: dict[str, Any]) -> None:
@@ -113,9 +133,7 @@ def _merge_one(existing: dict[str, Any], incoming: dict[str, Any]) -> None:
         existing["technique"] = incoming["technique"]
     existing["test_gap"] = existing["test_gap"] or incoming["test_gap"]
     existing["degraded"] = existing["degraded"] and incoming["degraded"]
-    existing["estimated_diff_lines"] = max(
-        existing["estimated_diff_lines"], incoming["estimated_diff_lines"]
-    )
+    existing["estimated_diff_lines"] = max(existing["estimated_diff_lines"], incoming["estimated_diff_lines"])
 
 
 def _merge_by_key(
@@ -141,7 +159,9 @@ def order_key(item: dict[str, Any]) -> tuple:
     return (
         -len(item["proposed_by"]),
         -SEVERITY_ORDER[item["severity"]],
-        item["path"], item["symbol"], item["smell"],
+        item["path"],
+        item["symbol"],
+        item["smell"],
     )
 
 
@@ -159,7 +179,7 @@ def build_candidates(
        上位 `groups` 組を取る。取った組の中は上位 `per_group` 件まで渡す
     4. 外れた組の提案と、組の中の `per_group` 件目より後は `rank` で見送る
 
-    **件数ではなく組で切る。** 件数で切ると、意味の上で同じ提案が枠を占め、計画の中で
+    **件数ではなく組で切る。** 件数で切ると、意味の上で同じ提案が枠を占め、改修計画の中で
     統合された後に空いた枠を埋められない。「同じ変更か」は同じ組の中でしか問わない
     ため、組で切れば統合で組の数は減らない。
     """

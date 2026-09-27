@@ -1,20 +1,22 @@
 """実行の終わりと報告（`finalize` / `status` / `report`、#933 の F8 と AC26）。"""
+
 from __future__ import annotations
 
 import argparse
-import pathlib
 from collections import Counter
 from typing import Any
 
+import mdtable
 import models as models_lib
 import run_metrics
 import statefile
 
 from .. import allocation, clock, info, timeline
+from ..codemetrics_view import record_lines
 from ..items import item_label
 from ..measure import summary_extra
 from ..outbound import plan_reference
-from ..plan import baseline_line
+from ..plan import baseline_line, existing_failures_line, strategy_lines
 from ..paths import load_state
 from ..phases import phase_record
 from ..vocabulary import DEFER_REASONS
@@ -32,7 +34,7 @@ def cmd_finalize(args: argparse.Namespace) -> None:
 
     | 起動のされ方 | 追記する条件 |
     | --- | --- |
-    | 単独 | 最終ゲートの検査が通り、`--review-status` が `approved` |
+    | 単独 | 最終ゲートのチェックが通り、`--review-status` が `approved` |
     | 工程の 1 つ | 最終ゲートが通った（全体のテストか継続的統合） |
 
     **単独起動で `--review-status` を渡さなければ追記しない。** その時点では
@@ -50,8 +52,11 @@ def cmd_finalize(args: argparse.Namespace) -> None:
     if state.get("history_written"):
         info("↻ 履歴へは追記済みです")
     elif not ok:
-        why = ("cross-review の最終ステータスが渡されていない" if standalone and status is None
-               else f"最終ゲートが通っていない（{gate.get('status') or gate.get('mode')} / {status}）")
+        why = (
+            "cross-review の最終ステータスが渡されていない"
+            if standalone and status is None
+            else f"最終ゲートが通っていない（{gate.get('status') or gate.get('mode')} / {status}）"
+        )
         info(f"ℹ 配分の履歴へは追記しません（{why}）")
     else:
         _append_history(state)
@@ -75,18 +80,18 @@ def cmd_status(args: argparse.Namespace) -> None:
     print(f"# cross-refactoring rf{state['id']}（{state['repo']} #{state['current_pr']}）")
     print(f"ホスト: {state['host']}（{state['host_detection']}）")
     print(f"参加者（提案）: {' / '.join(state['runtimes'])} / 実装担当: {state.get('implementer')}")
-    print(f"フェーズ: {state.get('phase')} / 想定最大時間: {state.get('budget_minutes')} 分")
+    print(f"手順: {state.get('phase')} / 想定最大時間: {state.get('budget_minutes')} 分")
     print()
     print(_item_table(state))
 
 
 def cmd_report(args: argparse.Namespace) -> None:
-    """完了報告（AC26）。フェーズ別の所要・想定最大時間との差・採用と見送りの件数（理由別）・
+    """完了報告（AC26）。手順別の所要・想定最大時間との差・採用と見送りの件数（理由別）・
     全体のテスト・Jev の使用を並べる。"""
     path, state = load_state(args.id)
     _print_header(state)
     print()
-    print("## フェーズ別の所要")
+    print("## 手順別の所要")
     print()
     print(_phase_table(state))
     print()
@@ -97,6 +102,9 @@ def cmd_report(args: argparse.Namespace) -> None:
     _print_participants(state)
     print()
     _print_deferred(state)
+    print()
+    # 計画と同じ行を出す（AC20）。組み立ては `codemetrics_view` の 1 か所にある。
+    print("\n".join(record_lines(state)).rstrip())
     print()
     _print_fixed_values()
     if args.metrics:
@@ -112,7 +120,7 @@ def cmd_report(args: argparse.Namespace) -> None:
 def _elapsed_seconds(state: dict[str, Any]) -> float:
     """`init` の開始から、最終ゲートの全体のテストの終わりまで（非機能の条件）。
 
-    `cross-review` の所要は含めない。終わりは最終ゲートの最後の検査、無ければ検証の
+    `cross-review` の所要は含めない。終わりは最終ゲートの最後のチェック、無ければ検証の
     終わり、それも無ければ今。
     """
     gate = state.get("final_gate") or {}
@@ -131,31 +139,52 @@ def _print_header(state: dict[str, Any]) -> None:
     print(f"# cross-refactoring 実行報告 — {state['repo']} #{state['current_pr']}")
     print()
     print(f"- 対象範囲: {', '.join(state['target_scope']) or '（未指定）'}")
-    print(f"- 想定最大時間: {state.get('budget_minutes')} 分 / 所要: {elapsed / 60:.1f} 分"
-          f"（差 {(budget_seconds - elapsed) / 60:+.1f} 分。cross-review を除く）")
-    print(f"- 実装担当: {state.get('implementer')}（{state.get('implementer_reason')}）"
-          f" / モデル: {models_lib.label((state.get('implementer_model') or {}).get('requested'))}")
+    print(
+        f"- 想定最大時間: {state.get('budget_minutes')} 分 / 所要: {elapsed / 60:.1f} 分"
+        f"（差 {(budget_seconds - elapsed) / 60:+.1f} 分。cross-review を除く）"
+    )
+    print(
+        f"- 実装担当: {state.get('implementer')}（{state.get('implementer_reason')}）"
+        f" / モデル: {models_lib.label((state.get('implementer_model') or {}).get('requested'))}"
+    )
     jev_line = "使った" if judge.get("kind") == "jev" else f"使わなかった（{judge.get('reason')}）"
     print(f"- 判断に Jev を: {jev_line} / 呼び出しの失敗 {judge.get('failures', 0)} 回")
-    print(f"- 着手前の全体のテスト: {baseline_line(state.get('baseline_test') or {})}")
+    for line in strategy_lines(state):
+        print(line)
+    baseline = state.get("baseline_test") or {}
+    print(f"- 着手前のテスト（{baseline.get('mode') or 'whole'}）: {baseline_line(baseline)} / 既存失敗 {existing_failures_line(baseline)}")
     if whole.get("ran"):
-        print(f"- 検証の中の全体のテスト: 走らせた（印 {', '.join(whole.get('flags') or [])} / "
-              f"{whole.get('status')}{_whole_detail(whole)}）")
+        print(
+            f"- 検証の中の全体のテスト: 走らせた（危険フラグ {', '.join(whole.get('flags') or [])} / "
+            f"{whole.get('status')}{_whole_detail(whole)}）"
+        )
+    elif whole.get("deferred"):
+        deferred = whole["deferred"]
+        print(
+            f"- 検証の中の全体のテスト: 最終ゲートへ寄せた（危険フラグ {', '.join(deferred.get('flags') or [])} / 項目 {', '.join(deferred.get('items') or [])}）"
+        )
     else:
-        print("- 検証の中の全体のテスト: 走らせなかった（危険の印が立たなかった）")
-    print(f"- 最終ゲート: {gate.get('mode') or '—'}（{gate.get('status') or '未実行'}"
-          f"{' / 検証の結果を使い回した' if gate.get('whole_test_reused') else ''}"
-          f" / 修正 {gate.get('fix_rounds', 0)} 回）")
-    print(f"- 監視が止めた段: {_stopped_line(state)}")
+        print("- 検証の中の全体のテスト: 走らせなかった（危険フラグが立たなかった）")
+    triage = gate.get("triage") or {}
+    if triage:
+        print(f"- 最終ゲートの見分け: {_triage_line(triage)}")
+    print(
+        f"- 最終ゲート: {gate.get('mode') or '—'}（{gate.get('status') or '未実行'}"
+        f"{' / 検証の結果を使い回した' if gate.get('whole_test_reused') else ''}"
+        f" / 修正 {gate.get('fix_rounds', 0)} 回）"
+    )
+    print(f"- 監視が止めた手順: {_stopped_line(state)}")
     print(f"- 配分テーブル: {(state.get('plan') or {}).get('table_source') or '—'}")
     print(f"- 改修計画: {plan_reference(state)}")
 
 
 def _stopped_line(state: dict[str, Any]) -> str:
-    """段の上限で監視が CLI を止めた段（決定 23）。止めていなければ「なし」。"""
-    stopped = [f"{name}（上限 {record['stopped'].get('timeout')} 秒）"
-               for name, record in (state.get("phases") or {}).items()
-               if isinstance(record, dict) and record.get("stopped")]
+    """手順の上限で監視が CLI を止めた手順（決定 23）。止めていなければ「なし」。"""
+    stopped = [
+        f"{name}（上限 {record['stopped'].get('timeout')} 秒）"
+        for name, record in (state.get("phases") or {}).items()
+        if isinstance(record, dict) and record.get("stopped")
+    ]
     return " / ".join(stopped) or "なし"
 
 
@@ -172,9 +201,17 @@ _RESOLUTIONS = {
     "kept": "変更が原因の失敗は無く、取り消さなかった",
     "fixing": "直しの途中",
     "fixed": "直して通った",
-    "narrowed": "直らず、印の項目を新しい順に取り消した",
-    "reverted_all": "落ちたテストを取り出せず、印の項目をまとめて取り消した",
+    "narrowed": "直らず、危険フラグの項目を新しい順に取り消した",
+    "reverted_all": "落ちたテストを見分けられず、危険フラグの項目をまとめて取り消した",
+    "deferred": "全体テストを CI に任せる戦略のため、最終ゲートへ寄せた",
 }
+
+
+def _triage_line(triage: dict[str, Any]) -> str:
+    """見分けの結果の 1 行。JUnit で見分けられなかったときは落とした理由。"""
+    if triage.get("fallback_reason"):
+        return f"全体の走らせ直しに落とした（{triage['fallback_reason']}）"
+    return f"フレーキー {len(triage.get('flaky') or [])}・既存失敗 {len(triage.get('preexisting') or [])}・変更起因 {len(triage.get('caused') or [])}"
 
 
 def _whole_detail(whole: dict[str, Any]) -> str:
@@ -182,42 +219,47 @@ def _whole_detail(whole: dict[str, Any]) -> str:
     if whole.get("status") != "fail":
         return ""
     if not whole.get("resolution"):
-        return " / 印の項目を取り消した" if whole.get("reverted") else ""
-    counts = ""
-    if whole.get("failed_tests") is not None:
-        counts = (f" / 揺れ {len(whole.get('flaky') or [])}・元からの失敗 "
-                  f"{len(whole.get('preexisting') or [])}・変更が原因 {len(whole.get('caused') or [])}")
-    why = f"（{whole['unparsed_reason']}）" if whole.get("unparsed_reason") else ""
-    return f"{counts} / {_RESOLUTIONS.get(whole['resolution'], whole['resolution'])}{why}"
+        return " / 危険フラグの項目を取り消した" if whole.get("reverted") else ""
+    counts = f" / {_triage_line(whole)}" if whole.get("failed_tests") is not None or whole.get("fallback_reason") else ""
+    return f"{counts} / {_RESOLUTIONS.get(whole['resolution'], whole['resolution'])}"
 
 
 def _phase_table(state: dict[str, Any]) -> str:
-    lines = ["| フェーズ | 所要（分） |", "| --- | ---: |"]
-    for name in ("propose", "plan", "add-tests", "implement", "verify", "fix"):
-        record = phase_record(state, name)
-        seconds = record.get("seconds")
-        lines.append(f"| {name} | {'—' if seconds is None else f'{seconds / 60:.1f}'} |")
-    final = (state.get("final_gate") or {}).get("whole_test_seconds")
-    lines.append(f"| 最終ゲートの全体のテスト | {'—' if final is None else f'{final / 60:.1f}'} |")
-    return "\n".join(lines)
+    def minutes(seconds: Any) -> str:
+        return "—" if seconds is None else f"{seconds / 60:.1f}"
+
+    rows = [
+        (name, minutes(phase_record(state, name).get("seconds"))) for name in ("propose", "plan", "add-tests", "implement", "verify", "fix")
+    ]
+    rows.append(("最終ゲートの全体のテスト", minutes((state.get("final_gate") or {}).get("whole_test_seconds"))))
+    return mdtable.table_markdown(["手順", "所要（分）"], rows, align=["left", "right"])
 
 
 def _item_table(state: dict[str, Any]) -> str:
     items = state.get("items") or []
     if not items:
         return "（改善項目なし）"
-    lines = [
-        "| ID | 対象 | 兆候 | 手法 | 段 | 見積り（分） | 状態 | 危険の印 | 修正 |",
-        "| --- | --- | --- | --- | --- | ---: | --- | --- | ---: |",
-    ]
+    rows = []
     for item in items:
         estimate = sum(float(v or 0) for v in (item.get("estimate") or {}).values())
-        lines.append(
-            f"| {item['id']} | {item_label(item)} | {item.get('smell')} | {item.get('technique')} | "
-            f"{item.get('tier')} | {estimate:.1f} | {item.get('status')} | "
-            f"{', '.join(item.get('danger') or []) or '—'} | {item.get('fix_count', 0)} |"
+        rows.append(
+            (
+                item["id"],
+                item_label(item),
+                str(item.get("smell")),
+                str(item.get("technique")),
+                str(item.get("tier")),
+                f"{estimate:.1f}",
+                str(item.get("status")),
+                ", ".join(item.get("danger") or []) or "—",
+                str(item.get("fix_count", 0)),
+            )
         )
-    return "\n".join(lines)
+    return mdtable.table_markdown(
+        ["ID", "対象", "兆候", "手法", "等級", "見積り（分）", "状態", "危険フラグ", "修正"],
+        rows,
+        align=["left", "left", "left", "left", "left", "right", "left", "left", "right"],
+    )
 
 
 def _print_participants(state: dict[str, Any]) -> None:
@@ -230,8 +272,13 @@ def _print_participants(state: dict[str, Any]) -> None:
         return " / ".join(values) if values else "なし"
 
     unavailable = p.get("unavailable") or {}
-    failed = (" / ".join(f"{n}（{d}）" for n, d in unavailable.items()) if unavailable
-              else "確認を飛ばした（NDF_SKIP_AUTH_CHECK）" if p.get("probe_skipped") else "なし")
+    failed = (
+        " / ".join(f"{n}（{d}）" for n, d in unavailable.items())
+        if unavailable
+        else "確認を飛ばした（NDF_SKIP_AUTH_CHECK）"
+        if p.get("probe_skipped")
+        else "なし"
+    )
     print(f"- 母集合: {_names(p.get('pool'))}")
     print(f"- 使える者: {_names(p.get('available'))}")
     print(f"- --exclude で外した者: {_names(p.get('excluded'))}")
@@ -260,8 +307,10 @@ def _print_deferred(state: dict[str, Any]) -> None:
     reverted = [i for i in state.get("items") or [] if i.get("status") == "reverted"]
     print("## 見送った提案と取り消した項目")
     print()
-    print(f"- 採用: {sum(1 for i in state.get('items') or [] if i.get('status') == 'verified')} 件"
-          f" / 取り消し: {len(reverted)} 件 / 見送り: {len(deferred)} 件")
+    print(
+        f"- 採用: {sum(1 for i in state.get('items') or [] if i.get('status') == 'verified')} 件"
+        f" / 取り消し: {len(reverted)} 件 / 見送り: {len(deferred)} 件"
+    )
     print("- 見送りの理由別: " + " / ".join(f"{r} {counts.get(r, 0)}" for r in DEFER_REASONS))
     print(f"- 内訳: 改修計画にある — {plan_reference(state)}")
 
@@ -269,10 +318,7 @@ def _print_deferred(state: dict[str, Any]) -> None:
 def _kind_table(state: dict[str, Any]) -> str:
     """種類別の件数と所要（実装計画 I10）。履歴へ書く行と同じ値。"""
     row = allocation.build_row(state)
-    lines = ["| 種類 | 件数 | 秒 |", "| --- | ---: | ---: |"]
-    for kind, value in sorted((row.get("kinds") or {}).items()):
-        lines.append(f"| {kind} | {value.get('count')} | {value.get('seconds')} |")
     verify, fix = row.get("verify") or {}, row.get("fix") or {}
-    lines.append(f"| verify | {verify.get('items')} | {verify.get('seconds')} |")
-    lines.append(f"| fix | {fix.get('launches')} | {fix.get('seconds')} |")
-    return "\n".join(lines)
+    rows = [(kind, value.get("count"), value.get("seconds")) for kind, value in sorted((row.get("kinds") or {}).items())]
+    rows += [("verify", verify.get("items"), verify.get("seconds")), ("fix", fix.get("launches"), fix.get("seconds"))]
+    return mdtable.table_markdown(["種類", "件数", "秒"], [(k, str(c), str(s)) for k, c, s in rows], align=["left", "right", "right"])

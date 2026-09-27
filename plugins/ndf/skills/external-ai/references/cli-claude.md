@@ -45,7 +45,7 @@ $ claude -p --permission-mode bypassPermissions < prompt.md
 
 ## 完了検知は JSON で確定する
 
-`--output-format json` を使えば**完了印のファイルは要らない**。
+`--output-format json` を使えば**完了マーカーのファイルは要らない**。
 
 ```bash
 jq -r '.is_error, (.permission_denials | length), .subtype' /tmp/claude-stdout.json
@@ -91,10 +91,9 @@ claude -p --model claude-opus-5 < prompt.md
 
 ## 出力の回収
 
-三段フォールバック（[SKILL.md](../SKILL.md) の手順 5）では、`--output-format json` を
-使うなら `STDOUT` が構造化されているため、**結果ファイルより stdout を優先してよい**。
-ただし結果ファイルを書かせる指示は残す。JSON の `result` は 1 本の文字列で、
-長い成果物には向かない。
+`external-ai.py run claude` が結果ファイル → stdout（JSON の `result`。`is_error` が真なら使わない） →
+標準エラー出力の順に拾い、`modelUsage` から実測のモデルを `metrics.model` に載せる。JSON の `result` は
+1 本の文字列で長い成果物には向かないため、結果ファイルを書かせる指示を残す。
 
 | 優先 | 次点 | 最後の手段 |
 | --- | --- | --- |
