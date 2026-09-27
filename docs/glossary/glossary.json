@@ -1764,6 +1764,54 @@
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
+      "term": "上位の原則",
+      "context": "ndf-workflow",
+      "meaning": "「人類を守り、発展させる」。NDF が持つ固定の文で、すべてのプロジェクト MVV の上に立ち、上書きできない",
+      "pending_source": "issues/issue-1366-requirements.md"
+    },
+    {
+      "term": "プロジェクト MVV",
+      "context": "ndf-workflow",
+      "meaning": "プロジェクト全体の Mission / Vision / Value とレッドライン。`.ndf/` に宣言し、利用者が承認する。判断の基準の上位",
+      "pending_source": "issues/issue-1366-requirements.md"
+    },
+    {
+      "term": "ミッション MVV",
+      "context": "ndf-workflow",
+      "meaning": "ミッション単位の MVV（既存の `mvv.md`）。プロジェクト MVV の範囲での具体化",
+      "pending_source": "issues/issue-1366-requirements.md"
+    },
+    {
+      "term": "MVV の版",
+      "context": "ndf-workflow",
+      "meaning": "プロジェクト MVV の承認のたびに 1 ずつ上がる番号。改訂の理由と前の版との差分を伴う",
+      "pending_source": "issues/issue-1366-requirements.md"
+    },
+    {
+      "term": "MVV の改訂",
+      "context": "ndf-workflow",
+      "meaning": "プロジェクト MVV の本文を変え、利用者の承認で新しい版にすること",
+      "pending_source": "issues/issue-1366-requirements.md"
+    },
+    {
+      "term": "判断の地点",
+      "context": "ndf-workflow",
+      "meaning": "NDF が LLM の判断を挟む場所（承認ゲートの判定・レビューの指摘と修正の可否・リファクタリングの提案の採否・judge のステップ・範囲外の起票の 3 択）",
+      "pending_source": "issues/issue-1366-requirements.md"
+    },
+    {
+      "term": "MVV 候補",
+      "context": "ndf-workflow",
+      "meaning": "材料から書いたプロジェクト MVV の案。2 案以上と分かれる点を利用者へ示す",
+      "pending_source": "issues/issue-1366-requirements.md"
+    },
+    {
+      "term": "傾向モード",
+      "context": "ndf-workflow",
+      "meaning": "履歴が育っていないプロジェクトで、README・指示書・依頼文の傾向から MVV 候補を出す抽出の形",
+      "pending_source": "issues/issue-1366-requirements.md"
+    },
+    {
       "term": "トリガー",
       "context": "ndf-workflow",
       "meaning": "fast でリファクタリングとコードレビューを流す条件。点数・行数・流出不具合・経過時間・最終の 5 つ",
