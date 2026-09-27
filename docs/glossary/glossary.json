@@ -2118,6 +2118,13 @@
       "meaning": "解析が読んだファイルの、HEAD の木での blob の SHA と、ブランチの構成の組。プロジェクトの宣言の新しさの判定に使う",
       "source": "",
       "pending_source": "issues/issue-1333-design.md"
+    },
+    {
+      "term": "テストの戦略",
+      "context": "ndf-cross-refactoring",
+      "meaning": "範囲テストの走らせ方・全体テストの置き場（手元か CI か）・落ちたテストの見分け方の組。cross-refactoring と supervise が宣言から選ぶ（#1334）",
+      "source": "",
+      "pending_source": "issues/issue-1334-requirements.md"
     }
   ]
 }
