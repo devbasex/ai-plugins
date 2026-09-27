@@ -1,7 +1,7 @@
 #!/bin/bash
 # ndf-statusline: managed (do not edit; auto-updated by ndf:statusline)
 # NDF plugin 標準 statusline:
-#   <project_dir> [<モデル名> 使用トークン │ <サブエージェントの説明> 使用トークン · ...]
+#   <project_dir> [<モデル名> 使用トークン │ <サブエージェントの説明> 使用トークン · ...] <接続先>
 input=$(cat)
 
 # claude root のパスを取得（project_dir を優先し、なければ current_dir を使用）
@@ -93,9 +93,36 @@ if [ -n "$total_input" ]; then
   ctx_info="$ctx_info]"
 fi
 
+# 接続先。Bedrock なら環境変数で分かる。Anthropic のアカウントは `claude auth status` の email で、
+# 0.4 秒かかるので 60 秒控える（更新は 5 秒ごと）。取れなければ何も足さない
+account=""
+if [ -n "${CLAUDE_CODE_USE_BEDROCK:-}" ]; then
+  account="bedrock${AWS_PROFILE:+:$AWS_PROFILE}"
+else
+  auth_cache="${NDF_STATUSLINE_AUTH_CACHE:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.ndf-statusline-auth.json}"
+  cache_age=999
+  if [ -f "$auth_cache" ]; then
+    cache_age=$(( $(date +%s) - $(stat -c %Y "$auth_cache" 2>/dev/null || echo 0) ))
+  fi
+  if [ "$cache_age" -ge 60 ]; then
+    auth_out=""
+    if command -v timeout >/dev/null 2>&1; then
+      auth_out=$(timeout 1 claude auth status 2>/dev/null)
+    else
+      auth_out=$(claude auth status 2>/dev/null)
+    fi
+    # 取れなかったときは古い控えを消し、次の更新で取り直す
+    if [ -n "$auth_out" ]; then printf "%s" "$auth_out" > "$auth_cache" 2>/dev/null; else rm -f "$auth_cache" 2>/dev/null; fi
+  fi
+  # 同じメールアドレスに Team と個人の契約がありうるので、契約の種別（team / pro / max ...）を添える
+  [ -f "$auth_cache" ] && account=$(jq -r 'select(.loggedIn == true) | select(.email != null) | .email + (if .subscriptionType then " (" + .subscriptionType + ")" else "" end)' "$auth_cache" 2>/dev/null)
+fi
+account_info=""
+[ -n "$account" ] && account_info=$(printf " \033[2m%s\033[0m" "$account")
+
 # コンテナ名・ホスト名は出さない。区別は端末やエディタのウィンドウタイトルに任せる
 if [ -n "$claude_root" ]; then
-  printf "\033[0;33m%s\033[00m%s" "$claude_root" "$ctx_info"
+  printf "\033[0;33m%s\033[00m%s%s" "$claude_root" "$ctx_info" "$account_info"
 else
-  printf "%s" "${ctx_info# }"
+  printf "%s%s" "${ctx_info# }" "$account_info"
 fi
