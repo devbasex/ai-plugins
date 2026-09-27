@@ -11,6 +11,8 @@ import json
 import subprocess
 from pathlib import Path
 
+from project_lib import WORKTREE_FILE
+
 WORKFLOWS = ".github/workflows/*"
 # 根と 1 段下のファイル名で当てる表
 INPUT_NAMES = (
@@ -90,14 +92,19 @@ def branch_state(root, declared=()) -> dict:
 
 def declared_branches(main_dir) -> list[str]:
     """`.ndf/worktree.json` の起点と本番の名前（読めなければ空）。"""
-    f = Path(main_dir) / ".ndf" / "worktree.json"
+    f = Path(main_dir) / WORKTREE_FILE
     try:
         data = json.loads(f.read_text(encoding="utf-8")) if f.is_file() else {}
     except (OSError, ValueError):
         return []
     if not isinstance(data, dict):
         return []
-    return [v for v in (data.get("base_branch"), data.get("production_branch")) if isinstance(v, str) and v]
+    return [v for v in branch_names(data) if v]
+
+
+def branch_names(data: dict) -> list[str]:
+    """worktree.json の中身から起点と本番の名前（文字列のものだけ）。"""
+    return [v for v in (data.get("base_branch"), data.get("production_branch")) if isinstance(v, str)]
 
 
 def diff(recorded: dict, current: dict) -> list[str]:

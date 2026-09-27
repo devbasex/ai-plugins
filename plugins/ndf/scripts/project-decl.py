@@ -302,7 +302,7 @@ def _merge_worktree_part(main, wt, meas, answers, check, written_before):
         files.append(
             (main / WORKTREE_FILE, str(WORKTREE_FILE), (main / WORKTREE_FILE).read_text(encoding="utf-8"), merge.dumps(new_wt))
         )
-    declared = [v for v in (new_wt.get("base_branch"), new_wt.get("production_branch")) if isinstance(v, str)]
+    declared = fingerprint.branch_names(new_wt)
     return files, rows, wt_written, declared
 
 
