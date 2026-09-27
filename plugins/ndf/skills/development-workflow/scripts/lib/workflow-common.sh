@@ -55,10 +55,11 @@ legacy-refactor\t3
 standard\t4
 documentation\t5'
 
-# 進め方（#1078）。`fast` では次の工程を課題ごとに求めない。トリガーの工程は検査のトリガーが
+# 進め方（#1078・#1370）。`auto` は `normal` と同じ工程を求める（承認ゲートの担い手だけが違う）。
+# `fast` では次の工程を課題ごとに求めない。トリガーの工程は検査のトリガーが
 # 立ったときに前回の検査からの差分へ通し、まとめる工程はミッションの終わりに 1 回通す。
 # 並びは SKILL.md の「進め方」の表と同じである。
-WF_PACES=$'normal\tfast'
+WF_PACES=$'normal\tfast\tauto'
 WF_FAST_TRIGGER_STAGES=$'構造改善\n実装レビュー'
 WF_FAST_DEFERRED_STAGES=$'確定仕様化\n振り返り'
 
@@ -850,8 +851,8 @@ wf_report() {
     esac
   done < <(_wf_classify_stages "$mode" "$frontier" "$pace" "${recorded[@]}")
 
-  if [ -n "$mode" ] && [ "$pace" = "fast" ]; then
-    printf '#%s の通過工程（%s・進め方 fast）\n' "$issue" "$mode"
+  if [ -n "$mode" ] && { [ "$pace" = "fast" ] || [ "$pace" = "auto" ]; }; then
+    printf '#%s の通過工程（%s・進め方 %s）\n' "$issue" "$mode" "$pace"
   elif [ -n "$mode" ]; then
     printf '#%s の通過工程（%s）\n' "$issue" "$mode"
   else

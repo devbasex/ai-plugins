@@ -129,7 +129,7 @@ Pull Request が最後かどうかを判断できない。
 | リリース種別 | 提示の後 |
 | --- | --- |
 | 検証リリース | 提示して進めてよい。記録のために残す |
-| 本番リリース | **承認を得るまで進めない。** 得られなければ検証リリースまでで止める。`pace: fast` では MVV 判定の記録（「従う」でレッドラインなし）も承認として扱う（条件は `AGENTS.md` と [pace.md](../development-workflow/references/pace.md)） |
+| 本番リリース | **承認を得るまで進めない。** 得られなければ検証リリースまでで止める。`pace: fast` と `pace: auto` では MVV 判定の記録（「従う」でレッドラインなし）も承認として扱う（条件は `AGENTS.md` と [pace.md](../development-workflow/references/pace.md)） |
 
 **承認を求めるときに提示するものは
 [references/approval-request.md](../development-workflow/references/approval-request.md) が

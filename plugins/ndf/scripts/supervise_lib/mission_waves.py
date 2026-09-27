@@ -8,9 +8,9 @@ from pathlib import Path
 
 from supervise_lib.decl import decl_fields
 from supervise_lib.paths import GLOSSARY_PY, MVV_PY, PUSH_DESIGN, SELF, SPEC_COPY_PY, WORKTREE_SETUP
-from supervise_lib.release_templates import plan_release
+from supervise_lib.release_templates import MVV_NOTE, plan_release
 from supervise_lib.templates import plan_check, plan_check_since, plan_impl
-from supervise_lib.verify_steps import merge_step
+from supervise_lib.verify_steps import handoff_step, merge_step
 
 
 DESIGN_GLOSSARY_NOTE = "{state_dir}/work/glossary-candidates.md"  # 設計のプランが起こした用語集の候補の語
@@ -254,11 +254,12 @@ def plan_mission_release(a, repo: str) -> dict:
     return plan_release(ns)
 
 
-def plan_fast_design(a, n: int, repo: str) -> dict:
-    """pace: fast の設計: 関門 1 の judge を MVV 判定のステップへ替える。従えばラベルとコメントを付けてマージする。"""
+def plan_mvv_design(a, n: int, repo: str) -> dict:
+    """pace: fast と auto の設計: 関門 1 の judge を MVV 判定のステップへ替える。従えばラベルとコメントを付けてマージする。
+    ラベルの付与かマージが落ちたら handoff で関門 1 の by: mvv の記録を外し、プランを関門で終える（#1370 の I8）。"""
     plan = plan_mission_design(a, n, repo)
     state = shlex.quote(str(Path(a.state).resolve()))
-    note = "{state_dir}/work/mvv-note.md"
+    note = MVV_NOTE
     # 用語チェックの当たりが直し切れずに残ったら、mvv の判定へ渡さず関門 1 の judge（gate）へ回す
     for s in plan["steps"]:
         if s["id"] == "push-glossary":
@@ -282,9 +283,11 @@ def plan_fast_design(a, n: int, repo: str) -> dict:
             # 控えは mvv が従うときだけ書く。関門を利用者が承認して --from approve で続けたときは無い
             "cmd": f"sh -c 'gh pr edit {{pr}} --add-label design-approved && "
             f"{{ [ ! -f {note} ] || gh pr comment {{pr}} --body-file {note}; }} && gh pr ready {{pr}}'",
+            "on_fail": "handoff",
             "next": "merge",
         },
-        merge_step(a, next="end"),
+        merge_step(a, next="end", on_fail="handoff"),
+        handoff_step(str(Path(a.state).resolve()), "関門 1", "承認ラベルの付与かマージ"),
     ]
     plan["規則"] = (
         "設計の cross-review は上限 3 ラウンドで関門 1 の判定（mvv のステップ）へ渡す（収束を待たない）。駆動そのものが失敗したら gate。"
@@ -329,12 +332,14 @@ def plan_fast_check(a, repo: str, name: str, final: bool = False, review_only: b
     return plan_check_since(ns)
 
 
-def plan_fast_release(a, repo: str, version: str, channel: str, condition: dict | None = None) -> dict:
+def plan_mvv_release(a, repo: str, version: str, channel: str, condition: dict | None = None, prs: list[str] | None = None) -> dict:
+    """pace: fast と auto のリリース。開発版は承認資料を gate_as_ok で写し、本番は先頭の mvv のステップが関門 2 を判定する。
+    prs を渡せばその Pull Request（`{queue_pr:<名>}` でもよい）を出す版の PR にし、省けば前のステージの PR のすべて。"""
     ns = argparse.Namespace(
         **decl_fields(a),
         version=version,
-        prs=[],
-        prs_from_queue=True,
+        prs=prs or [],
+        prs_from_queue=prs is None,
         channel=channel,
         repo=repo,
         prev_tag=None,

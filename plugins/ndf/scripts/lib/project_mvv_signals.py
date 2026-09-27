@@ -112,7 +112,8 @@ GATE_KEYS = {"関門 1": "design", "関門 2": "release"}  # mvv-gate.py の --g
 
 
 def last_mvv_verdict(state: dict, mission: str, gate: str, gate_log) -> str | None:
-    """同じ承認ゲートの直前の MVV 判定（状態の `by: mvv` の記録か、mvv-gate.jsonl の同じミッションの最後の行の新しい方）。"""
+    """同じ承認ゲートの直前の MVV 判定（状態の `by: mvv` の記録か、mvv-gate.jsonl の同じミッションの最後の行の新しい方）。
+    それより新しい取り消し（`withdrawals`）があれば None。"""
     found = []
     g = next((g for g in state.get("gates", []) if g.get("name") == gate and g.get("by") == "mvv"), None)
     if g:
@@ -125,9 +126,11 @@ def last_mvv_verdict(state: dict, mission: str, gate: str, gate_log) -> str | No
     ]
     if rows:
         found.append((rows[-1].get("at") or "", rows[-1].get("verdict")))
+    # 自動の通過を取り消した（mission-state.py gate --withdraw）なら、それより前の判定は直前の判定として読まない
+    found += [(w.get("at") or "", "withdrawn") for w in state.get("withdrawals", []) if w.get("name") == gate]
     if not found:
         return None
-    verdict = max(found, key=lambda x: x[0])[1]
+    verdict = max(found, key=lambda x: (x[0], x[1] == "withdrawn"))[1]  # 同じ時刻なら取り消しを後とみなす
     return verdict if verdict in ("follow", "not_follow", "unknown") else None
 
 
