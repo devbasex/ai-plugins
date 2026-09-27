@@ -189,3 +189,62 @@ def test_drive_state_of_other_dir_is_not_used(tmp_path, monkeypatch, capsys):
     (tmp_path / "drive-pr5.json").write_text(json.dumps({"stage": "done", "init_vars": {"TMP_DIR": str(tmp_path / "other")}}))
     run_main(["5"], capsys)
     assert fake.inits() == 1
+
+
+class FakeRotateFails(FakeReview):
+    """巻き直しが要ると答え、`rotate-pr.sh prepare` が失敗する。"""
+
+    def __call__(self, cmd, env=None, cwd=None):
+        name = Path(cmd[1]).name if cmd[0] in (PY, "bash") else cmd[0]
+        if name == "rotate-pr.sh":
+            self.calls.append((name, *cmd[2:]))
+            return 1, ""
+        if name == "state.py" and cmd[2] == "should-rotate":
+            self.calls.append((name, *cmd[2:]))
+            return 0, ""
+        return super().__call__(cmd, env, cwd)
+
+
+def test_rerun_after_rotate_failure_does_not_merge_fix_again(tmp_path, monkeypatch, capsys):
+    """merge-fix の後の巻き直しで止まっても、打ち直しで merge-fix を 2 度走らせない。"""
+    monkeypatch.setenv("CROSS_REVIEW_TMP_DIR", str(tmp_path))
+    fake = FakeRotateFails(tmp_path)
+    monkeypatch.setattr(cr, "call", fake)
+    code, out = run_main(["5"], capsys)
+    assert code == 20
+    Path(out["items"][0]["result_file"]).write_text("{}")
+    code, _ = run_main(["5"], capsys)
+    assert code != 0
+    run_main(["5"], capsys)
+    assert sum(1 for c in fake.calls if c[:2] == ("state.py", "merge-fix")) == 1
+
+
+class FakeMissingResult(FakeReview):
+    """1 度目の read-result が結果なしで 1 を返し、judge が起動し直しを求める。"""
+
+    def __init__(self, tmp: Path):
+        super().__init__(tmp)
+        self.judges = [7, 0]
+        self.reads = [1, 0]
+
+    def __call__(self, cmd, env=None, cwd=None):
+        name = Path(cmd[1]).name if cmd[0] in (PY, "bash") else cmd[0]
+        if name == "state.py" and cmd[2] == "read-result":
+            self.calls.append((name, *cmd[2:]))
+            return self.reads.pop(0), ""
+        if name == "state.py" and cmd[2] == "judge" and self.judges[0] == 7:
+            self.calls.append((name, *cmd[2:]))
+            self.judges.pop(0)
+            return 7, "RELAUNCH_AGENTS='codex'\n"
+        return super().__call__(cmd, env, cwd)
+
+
+def test_missing_result_skips_verify_and_critique_until_relaunch(tmp_path, monkeypatch, capsys):
+    """結果の欠けた担当がいるラウンドでは、検証と反証を起動し直した後の 1 回だけ通す。"""
+    monkeypatch.setenv("CROSS_REVIEW_TMP_DIR", str(tmp_path))
+    fake = FakeMissingResult(tmp_path)
+    monkeypatch.setattr(cr, "call", fake)
+    run_main(["5"], capsys)
+    assert sum(1 for c in fake.calls if c[:2] == ("state.py", "verify-findings")) == 1
+    assert sum(1 for c in fake.calls if c[0] == "critique-round.sh") == 1
+    assert sum(1 for c in fake.calls if c[0] == "launch-reviewer.sh") == 2
