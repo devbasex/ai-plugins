@@ -42,6 +42,7 @@ JSON である。名前は `<連番 4 桁>-<種別>-<識別子>.json` で、**�
 | `match` | 冪等の照会で「同じ」とみなす条件 |
 | `extra` | 呼び出し側が使う付随情報（担当・ラウンドなど）。この層は読まない |
 """
+
 from __future__ import annotations
 
 import argparse
@@ -50,10 +51,17 @@ import json
 import os
 import pathlib
 import re
-import subprocess
 import sys
 import time
 from typing import Any, NamedTuple
+
+_LIB = pathlib.Path(__file__).resolve().parent
+if str(_LIB) not in sys.path:
+    sys.path.insert(0, str(_LIB))
+import clock  # noqa: E402  時刻の読み取り（#1142 の L0）
+import deps  # noqa: E402  外部パッケージの環境（#1142 の決定 17）
+import gh_quota  # noqa: E402  上限の語（#1142 の L0）
+import proc  # noqa: E402  子プロセスの起動（#1142 の L0）
 
 # 積める種別。**この版で積む側があるのは `pr-comment` だけである。** ほかの 3 つは
 # 受け皿として持つ（投稿の責務を進行側へ移すのは次の変更、#350）。
@@ -89,10 +97,7 @@ query($owner: String!, $name: String!, $pr: Int!, $endCursor: String) {
   }
 }
 """
-_UNRESOLVED_JQ = (
-    ".data.repository.pullRequest.reviewThreads.nodes[]"
-    " | select(.isResolved == false) | .id"
-)
+_UNRESOLVED_JQ = ".data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false) | .id"
 
 _RESOLVE_MUTATION = """
 mutation($threadId: ID!) {
@@ -160,15 +165,16 @@ class Attempt(NamedTuple):
 def run(cmd: list[str], stdin: str | None = None) -> Attempt:
     """`gh` を 1 回実行する。**例外を投げない。**"""
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, input=stdin)
+        r = proc.run(cmd, check=False, input=stdin)
     except OSError as exc:
         return Attempt(127, "", f"gh の実行に失敗: {exc}")
     return Attempt(r.returncode, r.stdout or "", r.stderr or "")
 
 
 def _has_rate_words(text: str) -> bool:
+    """上限の語があるか。ライブラリの語（`gh_quota.is_rate_limited`）に、二次の上限の言い回しを足して見る。"""
     low = (text or "").lower()
-    return any(w in low for w in _RATE_WORDS)
+    return gh_quota.is_rate_limited(text or "") or any(w in low for w in _RATE_WORDS)
 
 
 def quota_remaining() -> int | None:
@@ -177,8 +183,7 @@ def quota_remaining() -> int | None:
     読めなければ `None`。決まらないときの最後の材料であり、読めないときは上限では
     ないものとして扱う（止める側へ倒す）。
     """
-    a = run(["gh", "api", "rate_limit", "--jq",
-             "[.resources.core.remaining, .resources.graphql.remaining] | min"])
+    a = run(["gh", "api", "rate_limit", "--jq", "[.resources.core.remaining, .resources.graphql.remaining] | min"])
     if not a.ok:
         return None
     text = a.stdout.strip().splitlines()
@@ -228,14 +233,31 @@ def is_position_unresolved(attempt: Attempt) -> bool:
     return _POSITION_WORD in f"{attempt.message} {attempt.stderr}".lower()
 
 
+# 項目そのものが送れないことを表す状態。送り直しても同じ応答が返る（宛先が無い・
+# 要求が受け付けられない）。401 / 403 は項目ではなく認証か上限の問題であり、後ろの
+# 項目も同じく送れないため含めない。
+PERMANENT_STATUSES = (400, 404, 410, 422)
+# 飛ばさない種別。レビューの拒否は呼び出し側が退避（`is_position_unresolved`）か
+# 失敗かを決めるため、先頭で止めて返す。
+_NOT_DROPPED_KINDS = ("review-post",)
+
+
+def is_permanent_failure(item: dict[str, Any], attempt: Attempt) -> bool:
+    """この項目の失敗が、送り直しても変わらない恒久的なものか（#962）。
+
+    例はレビューの ID を宛先にした返信で、GitHub は `Parent comment not found` を返す。
+    """
+    if attempt.ok or item.get("kind") in _NOT_DROPPED_KINDS:
+        return False
+    return attempt.http in PERMANENT_STATUSES and not is_rate_limited(attempt)
+
+
 # ---------------- 送る内容の組み立て ----------------
 
 
 def _request_pr_comment(repo: str, pr: int, fields: dict[str, Any]) -> dict[str, Any]:
     return {
-        "request": {"method": "POST",
-                    "path": f"repos/{repo}/issues/{int(pr)}/comments",
-                    "fields": {"body": fields["body"]}},
+        "request": {"method": "POST", "path": f"repos/{repo}/issues/{int(pr)}/comments", "fields": {"body": fields["body"]}},
         "match": {"body": fields["body"]},
     }
 
@@ -257,9 +279,7 @@ def _request_review_post(repo: str, pr: int, fields: dict[str, Any]) -> dict[str
     if fields.get("since"):
         match["since"] = fields["since"]
     return {
-        "request": {"method": "POST",
-                    "path": f"repos/{repo}/pulls/{int(pr)}/reviews",
-                    "fields": body},
+        "request": {"method": "POST", "path": f"repos/{repo}/pulls/{int(pr)}/reviews", "fields": body},
         "match": match,
     }
 
@@ -267,19 +287,18 @@ def _request_review_post(repo: str, pr: int, fields: dict[str, Any]) -> dict[str
 def _request_review_reply(repo: str, pr: int, fields: dict[str, Any]) -> dict[str, Any]:
     target = int(fields["in_reply_to"])
     return {
-        "request": {"method": "POST",
-                    "path": f"repos/{repo}/pulls/{int(pr)}/comments/"
-                            f"{target}/replies",
-                    "fields": {"body": fields["body"]}},
+        "request": {
+            "method": "POST",
+            "path": f"repos/{repo}/pulls/{int(pr)}/comments/{target}/replies",
+            "fields": {"body": fields["body"]},
+        },
         "match": {"in_reply_to": target, "body": fields["body"]},
     }
 
 
 def _request_thread_resolve(repo: str, pr: int, fields: dict[str, Any]) -> dict[str, Any]:
     return {
-        "request": {"method": "GRAPHQL", "path": "graphql",
-                    "query": _RESOLVE_MUTATION,
-                    "fields": {"threadId": fields["thread_id"]}},
+        "request": {"method": "GRAPHQL", "path": "graphql", "query": _RESOLVE_MUTATION, "fields": {"threadId": fields["thread_id"]}},
         "match": {"thread_id": fields["thread_id"]},
     }
 
@@ -343,9 +362,24 @@ def unresolved_thread_ids(repo: str, pr: int) -> list[str] | None:
     owner, sep, name = str(repo or "").partition("/")
     if not (owner and sep and name):
         return None
-    a = run(["gh", "api", "graphql", "--paginate",
-             "-F", f"owner={owner}", "-F", f"name={name}", "-F", f"pr={int(pr)}",
-             "-f", f"query={_UNRESOLVED_QUERY}", "--jq", _UNRESOLVED_JQ])
+    a = run(
+        [
+            "gh",
+            "api",
+            "graphql",
+            "--paginate",
+            "-F",
+            f"owner={owner}",
+            "-F",
+            f"name={name}",
+            "-F",
+            f"pr={int(pr)}",
+            "-f",
+            f"query={_UNRESOLVED_QUERY}",
+            "--jq",
+            _UNRESOLVED_JQ,
+        ]
+    )
     if not a.ok:
         return None
     return [line.strip() for line in a.stdout.splitlines() if line.strip()]
@@ -382,14 +416,6 @@ def _comment_match(match: dict[str, Any], actor: str | None):
     return lambda row: _by_actor(row, actor) and _head(row.get("body")) == head
 
 
-def _parse_time(value: Any) -> _dt.datetime | None:
-    try:
-        parsed = _dt.datetime.fromisoformat(str(value or "").replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    return parsed if parsed.tzinfo is not None else None
-
-
 def _review_match(match: dict[str, Any], actor: str | None):
     """同じラウンド・同じ席のレビューか。
 
@@ -399,25 +425,18 @@ def _review_match(match: dict[str, Any], actor: str | None):
     倒さない）。
     """
     key = review_match_key(match.get("body"))
-    since = _parse_time(match.get("since"))
+    since = clock.parse(match.get("since"), naive="reject")
 
     def _in_this_run(row: dict[str, Any]) -> bool:
-        submitted = _parse_time(row.get("submitted_at"))
+        submitted = clock.parse(row.get("submitted_at"), naive="reject")
         return since is None or submitted is None or submitted >= since
 
-    return lambda row: (
-        _by_actor(row, actor)
-        and review_match_key(row.get("body")) == key
-        and _in_this_run(row)
-    )
+    return lambda row: _by_actor(row, actor) and review_match_key(row.get("body")) == key and _in_this_run(row)
 
 
 def _reply_match(match: dict[str, Any], actor: str | None):
     head = _head(match.get("body"))
-    return lambda row: (
-        str(row.get("in_reply_to_id") or "") == str(match.get("in_reply_to"))
-        and _head(row.get("body")) == head
-    )
+    return lambda row: str(row.get("in_reply_to_id") or "") == str(match.get("in_reply_to")) and _head(row.get("body")) == head
 
 
 _POSTED_MATCH_RULES = {
@@ -511,6 +530,8 @@ class FlushResult(NamedTuple):
     failed: dict[str, Any] | None
     remaining: int
     rate_limited: bool
+    # 恒久的な失敗で飛ばし、`dropped/` へ移した項目（#962）。
+    dropped: list[dict[str, Any]] = []
 
 
 class Queue:
@@ -555,9 +576,16 @@ class Queue:
                 return True
         return False
 
+    def set_aside(self, path: pathlib.Path) -> pathlib.Path:
+        """送れない項目を待ち行列から外し、`dropped/` へ移して残す。"""
+        dest_dir = self.dir / "dropped"
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / path.name
+        path.replace(dest)
+        return dest
+
     def _next_seq(self) -> int:
-        seqs = [int(m.group(1)) for m in
-                (_SEQ_RE.match(p.name) for p in self.paths()) if m]
+        seqs = [int(m.group(1)) for m in (_SEQ_RE.match(p.name) for p in self.paths()) if m]
         return (max(seqs) + 1) if seqs else 1
 
     def add(self, item: dict[str, Any], ident: str | int) -> pathlib.Path:
@@ -580,17 +608,18 @@ class Queue:
                 json.dump(item, f, indent=2, ensure_ascii=False)
             return path
 
-    def _item_to_send(
-        self, path: pathlib.Path
-    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None,
-               dict[str, Any] | None]:
+    def _item_to_send(self, path: pathlib.Path) -> tuple[dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None]:
         """項目を読み、送る項目・既投稿・読込失敗のいずれかを返す。"""
         item = _read_item(path)
         if item is None:
-            return None, None, {
-                "path": str(path),
-                "last_error": f"待ち行列の項目を読めない ({path.name})",
-            }
+            return (
+                None,
+                None,
+                {
+                    "path": str(path),
+                    "last_error": f"待ち行列の項目を読めない ({path.name})",
+                },
+            )
         found, row = posted_match(item)
         if found is not True:
             return item, None, None
@@ -619,10 +648,13 @@ class Queue:
         """積んだ項目を連番の順に送る。
 
         **1 件でも送れなければそこで止める。** 先の項目を飛ばして後の項目を送ると、
-        Pull Request 上での順序が入れ替わる。
+        Pull Request 上での順序が入れ替わる。**ただし恒久的な失敗（`is_permanent_failure`）
+        の項目は飛ばし、`dropped/` へ移して後ろを送る**（#962）。送り直しても届かない
+        項目で止まると、後ろの決着とまとめが何度流しても送られない。
         """
         sent: list[dict[str, Any]] = []
         skipped: list[dict[str, Any]] = []
+        dropped: list[dict[str, Any]] = []
         failed: dict[str, Any] | None = None
         rate_limited = False
         for path in self.paths():
@@ -638,15 +670,27 @@ class Queue:
             if ok:
                 sent.append(item)
                 continue
+            if is_permanent_failure(item, attempt):
+                self.set_aside(path)
+                dropped.append(item)
+                continue
             failed = item
             rate_limited = is_rate_limited(attempt)
             break
-        return FlushResult(sent, skipped, failed, self.count(), rate_limited)
+        return FlushResult(sent, skipped, failed, self.count(), rate_limited, dropped)
 
 
-def enqueue(queue: Queue, kind: str, repo: str, pr: int, fields: dict[str, Any],
-            actor: str | None = None, extra: dict[str, Any] | None = None,
-            last_error: str = "", attempts: int = 0) -> pathlib.Path:
+def enqueue(
+    queue: Queue,
+    kind: str,
+    repo: str,
+    pr: int,
+    fields: dict[str, Any],
+    actor: str | None = None,
+    extra: dict[str, Any] | None = None,
+    last_error: str = "",
+    attempts: int = 0,
+) -> pathlib.Path:
     """投稿する内容を 1 件積む。"""
     if kind not in KINDS:
         raise ValueError(f"未知の種別: {kind}")
@@ -657,8 +701,7 @@ def enqueue(queue: Queue, kind: str, repo: str, pr: int, fields: dict[str, Any],
         "repo": repo,
         "pr": int(pr),
         "actor": actor,
-        "created_at": _dt.datetime.now(_dt.timezone.utc).astimezone().isoformat(
-            timespec="seconds"),
+        "created_at": _dt.datetime.now(_dt.timezone.utc).astimezone().isoformat(timespec="seconds"),
         "attempts": attempts,
         "last_error": last_error,
         "request": built["request"],
@@ -668,9 +711,9 @@ def enqueue(queue: Queue, kind: str, repo: str, pr: int, fields: dict[str, Any],
     return queue.add(item, extra.get("ident") if extra else pr)
 
 
-def post(queue: Queue, kind: str, repo: str, pr: int, fields: dict[str, Any],
-         actor: str | None = None, extra: dict[str, Any] | None = None
-         ) -> tuple[str, Attempt | None]:
+def post(
+    queue: Queue, kind: str, repo: str, pr: int, fields: dict[str, Any], actor: str | None = None, extra: dict[str, Any] | None = None
+) -> tuple[str, Attempt | None]:
     """投稿を 1 件行う。上限のときは積んで先へ進む。
 
     **待ち行列に先客がいるときは、送らずに積む。** 先に流してから送らないと、
@@ -682,14 +725,12 @@ def post(queue: Queue, kind: str, repo: str, pr: int, fields: dict[str, Any],
         enqueue(queue, kind, repo, pr, fields, actor=actor, extra=extra)
         return QUEUED, None
     built = request_for(kind, repo, int(pr), fields)
-    item = {"kind": kind, "repo": repo, "pr": int(pr), "actor": actor,
-            "request": built["request"], "match": built["match"]}
+    item = {"kind": kind, "repo": repo, "pr": int(pr), "actor": actor, "request": built["request"], "match": built["match"]}
     attempt = send(item)
     if attempt.ok:
         return POSTED, attempt
     if is_rate_limited(attempt):
-        enqueue(queue, kind, repo, pr, fields, actor=actor, extra=extra,
-                last_error=attempt.summary(), attempts=1)
+        enqueue(queue, kind, repo, pr, fields, actor=actor, extra=extra, last_error=attempt.summary(), attempts=1)
         return QUEUED, attempt
     return FAILED, attempt
 
@@ -697,48 +738,45 @@ def post(queue: Queue, kind: str, repo: str, pr: int, fields: dict[str, Any],
 # ---------------- 上限のときに待って再実行する ----------------
 
 
-def retry(cmd: list[str], max_wait: float = 900.0, interval: float = 30.0,
-          stdin: str | None = None, sleep=time.sleep) -> Attempt:
+def retry(cmd: list[str], max_wait: float = 900.0, interval: float = 30.0, stdin: str | None = None, sleep=time.sleep) -> Attempt:
     """上限のときだけ待って再実行する。ほかの失敗はそのまま返す。
 
     **Pull Request の作成は積めない。** 作成が終わるまで新しい番号が決まらず、番号が
     決まらないと以降のすべての項目の宛先が決まらない。巻き直しの 3 種（作成・close・
     reopen）はこの経路で回復を待つ。待つあいだラウンドは進まないが、巻き直しは
-    8 ラウンドに 1 度しか起きない。
+    8 ラウンドに 1 度しか起きない。待ちとやり直しは `lib/waits.py`（tenacity の包み）が持つ。
     """
-    waited = 0.0
-    while True:
-        attempt = run(cmd, stdin=stdin)
-        if attempt.ok or not is_rate_limited(attempt):
-            return attempt
-        if interval <= 0 or waited + interval > max_wait:
-            return attempt
-        print(f"⏳ 上限のため {interval:g} 秒待って再実行します: {' '.join(cmd)}",
-              file=sys.stderr)
-        sleep(interval)
-        waited += interval
+    import waits  # 読む側（state.py ほか）が tenacity を要しないよう、ここで読む
+
+    def announce(_seconds: float, _next: int) -> None:
+        print(f"⏳ 上限のため {interval:g} 秒待って再実行します: {' '.join(cmd)}", file=sys.stderr)
+
+    return waits.retry_call(
+        lambda: run(cmd, stdin=stdin),
+        lambda a: not a.ok and is_rate_limited(a),
+        max_wait=max_wait,
+        interval=interval,
+        sleep=sleep,
+        on_wait=announce,
+    ).value
 
 
 # ---------------- CLI ----------------
 
 
 def _read_body(path: str) -> str:
-    return sys.stdin.read() if path == "-" else pathlib.Path(path).read_text(
-        encoding="utf-8")
+    return sys.stdin.read() if path == "-" else pathlib.Path(path).read_text(encoding="utf-8")
 
 
 def cmd_post(args: argparse.Namespace) -> int:
     q = Queue(args.dir)
-    outcome, attempt = post(q, args.kind, args.repo, args.pr,
-                            {"body": _read_body(args.body_file)},
-                            actor=args.actor or None)
+    outcome, attempt = post(q, args.kind, args.repo, args.pr, {"body": _read_body(args.body_file)}, actor=args.actor or None)
     print(f"QUEUED={'1' if outcome == QUEUED else '0'}")
     if outcome == QUEUED:
         print(f"⏳ 上限のため待ち行列へ積みました（残り {q.count()} 件）", file=sys.stderr)
         return 0
     if outcome == FAILED:
-        print(f"❌ 投稿に失敗しました: {attempt.summary() if attempt else ''}",
-              file=sys.stderr)
+        print(f"❌ 投稿に失敗しました: {attempt.summary() if attempt else ''}", file=sys.stderr)
         return 1
     return 0
 
@@ -748,7 +786,10 @@ def cmd_flush(args: argparse.Namespace) -> int:
     result = q.flush()
     print(f"PENDING_SENT={len(result.sent)}")
     print(f"PENDING_SKIPPED={len(result.skipped)}")
+    print(f"PENDING_DROPPED={len(result.dropped)}")
     print(f"PENDING_REMAINING={result.remaining}")
+    for item in result.dropped:
+        print(f"⚠️ 送れない項目を飛ばしました ({item.get('kind')} #{item.get('seq')}): {item.get('last_error') or ''}", file=sys.stderr)
     return 0
 
 
@@ -758,9 +799,9 @@ def cmd_count(args: argparse.Namespace) -> int:
 
 
 def cmd_retry(args: argparse.Namespace) -> int:
+    deps.require("waits")  # 標準入力を読む前に起動し直す
     stdin = None if sys.stdin.isatty() else sys.stdin.read()
-    attempt = retry(args.command, max_wait=args.max_wait, interval=args.interval,
-                    stdin=stdin)
+    attempt = retry(args.command, max_wait=args.max_wait, interval=args.interval, stdin=stdin)
     sys.stdout.write(attempt.stdout)
     sys.stderr.write(attempt.stderr)
     return attempt.code
