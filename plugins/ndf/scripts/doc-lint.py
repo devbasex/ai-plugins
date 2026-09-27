@@ -5,6 +5,7 @@
 
 起点（--base と HEAD の分岐点。--base が無ければ origin/<.ndf/worktree.json の base_branch>）から追加した Markdown の行に、markdown-writing のセルフチェックの
 「検討痕跡・変更履歴」の語と、課題番号の由来・以前との比較の語を掛ける。コードブロックの中は見ない。
+掛けるのは `.ndf/project.json` の `ndf_policies.doc_lint` が `true` のときだけで、ほかは `skipped` の ok で 0 を返す。
 結果は lib/step_result.py の形の 1 行の JSON。終了コードは 0 = ヒット無し / 1 = ヒットあり / 2 = 読めない。
 `items[]` は 1 ヒット 1 件（`name` は `パス:行`、`rule` は当たった規則、`text` は行）。
 """
@@ -24,6 +25,7 @@ deps.require("md", "mdtable", "textparse", "pathmatch")  # glossary.py の分を
 import md  # noqa: E402
 from step_result import EXIT_UNREADABLE, StepError, emit, main_with, result  # noqa: E402
 import proc  # noqa: E402
+import project_decl  # noqa: E402
 import repo  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -96,6 +98,16 @@ def generated_documents(root: Path) -> tuple[str, ...]:
 
 def cmd_lint(a):
     root = proc.git_root(a.root)
+    if not project_decl.policy(root, "doc_lint"):
+        emit(
+            result(
+                TOOL,
+                "ok",
+                "文体の規則を掛けない（.ndf/project.json の ndf_policies.doc_lint が true でない）",
+                [],
+                {"skipped": True},
+            )
+        )
     base = a.base or repo.declared_base(root, remote=True)
     if not base:
         raise StepError("起点が分からない（--base か .ndf/worktree.json の base_branch）", EXIT_UNREADABLE)

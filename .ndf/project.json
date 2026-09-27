@@ -1,0 +1,193 @@
+{
+  "$schema": "https://raw.githubusercontent.com/devbasex/ai-plugins/main/plugins/ndf/skills/development-workflow/schemas/project.schema.json",
+  "version": 1,
+  "languages": [
+    {
+      "name": "python",
+      "frameworks": [],
+      "files": 633,
+      "version": "3.11"
+    },
+    {
+      "name": "shell",
+      "frameworks": [],
+      "files": 77
+    },
+    {
+      "name": "javascript",
+      "frameworks": [],
+      "files": 2
+    }
+  ],
+  "test": {
+    "suites": [
+      {
+        "name": "pytest",
+        "runner": "pytest",
+        "command": "uv run --frozen --project . --all-extras pytest . -q -n 4",
+        "scope_command": "uv run --frozen --project . --all-extras pytest {paths} -q -n 4",
+        "needs": [],
+        "paths": [
+          "."
+        ]
+      }
+    ]
+  },
+  "test_duration": {
+    "measured": [
+      {
+        "seconds": 424.0,
+        "source": "ci-steps",
+        "detail": "run 36284835140（.github/workflows/pytest.yml）のテストの step 4 個の合計"
+      }
+    ]
+  },
+  "ci": {
+    "provider": "github-actions",
+    "workflows": [
+      {
+        "path": ".github/workflows/glossary.yml",
+        "jobs": 1,
+        "wall_seconds": 12.0
+      },
+      {
+        "path": ".github/workflows/lint.yml",
+        "jobs": 1,
+        "wall_seconds": 16.0
+      },
+      {
+        "path": ".github/workflows/pr-base-guard.yml",
+        "jobs": 1,
+        "wall_seconds": 9.0
+      },
+      {
+        "path": ".github/workflows/pr-body-decisions.yml",
+        "jobs": 1,
+        "wall_seconds": 12.0
+      },
+      {
+        "path": ".github/workflows/pytest.yml",
+        "jobs": 4,
+        "wall_seconds": 296.0
+      },
+      {
+        "path": ".github/workflows/runtime-plugin-authenticated-smoke.yml",
+        "jobs": 1
+      },
+      {
+        "path": ".github/workflows/runtime-plugin-smoke.yml",
+        "jobs": 5,
+        "wall_seconds": 60.0
+      },
+      {
+        "path": ".github/workflows/runtime-plugin-validate.yml",
+        "jobs": 8,
+        "wall_seconds": 25.0
+      },
+      {
+        "path": ".github/workflows/script-structure.yml",
+        "jobs": 1,
+        "wall_seconds": 13.0
+      },
+      {
+        "path": "dynamic/pages/pages-build-deployment",
+        "jobs": 3,
+        "wall_seconds": 29.0
+      }
+    ],
+    "required_checks": [
+      "guard",
+      "instruction-files-check",
+      "markdown-link-check",
+      "pytest",
+      "runtime-plugin-build-check",
+      "runtime-plugin-validate",
+      "runtime-smoke (agy)",
+      "runtime-smoke (claude)",
+      "runtime-smoke (codex)",
+      "runtime-smoke (kiro)",
+      "skill-frontmatter-check",
+      "skill-repo-assumptions-check"
+    ]
+  },
+  "services": {
+    "container": false,
+    "compose_files": [],
+    "databases": []
+  },
+  "delivery": [
+    {
+      "target": "ndf プラグイン（Claude Code・Codex・Kiro）",
+      "kind": "manual",
+      "trigger": "release の工程で版を上げ、main へマージしてタグ ndf--v<版> を打つ",
+      "branch": "main",
+      "versioned": true
+    }
+  ],
+  "issues": {
+    "primary": "github",
+    "others": [
+      "markdown"
+    ]
+  },
+  "checks": {
+    "tools": [
+      {
+        "name": "ruff",
+        "config": "pyproject.toml [tool.ruff]"
+      }
+    ]
+  },
+  "ndf_policies": {
+    "doc_lint": true,
+    "reject_md_wording_tests": true
+  },
+  "instructions": {
+    "files": [
+      "AGENTS.md",
+      "CLAUDE.md",
+      "KIRO.md"
+    ],
+    "imports": [],
+    "notes": []
+  },
+  "analysis": {
+    "analyzer": 1,
+    "at": "2026-09-27T03:04:04+00:00",
+    "inputs": {
+      ".github/workflows/glossary.yml": "5b79e8c79e18ad4df0d8f2f63e909c4481bf1aa6",
+      ".github/workflows/lint.yml": "56129aea1429a46cadbcdc1d99e02eb264cbbb95",
+      ".github/workflows/pr-base-guard.yml": "71c0cda668b533694c48064813b68bbd03cd6efc",
+      ".github/workflows/pr-body-decisions.yml": "189d6e18ce07444d9947b72cc4f91e2181aeb8db",
+      ".github/workflows/pytest.yml": "28b588d100201a77607a6e601bb50ac547243698",
+      ".github/workflows/runtime-plugin-authenticated-smoke.yml": "1235813a9da744349b7a8a632aebdb7e3398d060",
+      ".github/workflows/runtime-plugin-smoke.yml": "f5ddec37af8f7893488433084f0a2cb082d3f718",
+      ".github/workflows/runtime-plugin-validate.yml": "a35749abebcf580d6a7bd00175741e2d69cb78fd",
+      ".github/workflows/script-structure.yml": "69dbe26a83b9728e823e2f68314ed07e025f62be",
+      "AGENTS.md": "284d264afd238bb74f2450c8c97c45887d081c19",
+      "CLAUDE.md": "9ddeb20e7b8480012e218e60891971907f886206",
+      "KIRO.md": "73383b2d2a593eaaba35d626f73931df78da47c1",
+      "pyproject.toml": "8070c90c878003392767b4fc877edcd5ab9fd9ce",
+      "pytest.ini": "47b2c6e3d414cf343d7f45cda0d08980d28b1a5d"
+    },
+    "branches": {
+      "head": "main",
+      "present": [
+        "develop",
+        "main"
+      ]
+    },
+    "written": {
+      "languages": "5d3339f70f1b230e90928da915da309a6854c2277d0c14ba9e8fea42c7cb3a75",
+      "test": "82dfd6cdb46070f65d57323b597a620812d3dc70f945bf55f727498a1867e0dd",
+      "test_duration": "fee345186423404ef87f5fc2eaad90581a699fc14222e23c9be0a44d81fe24a4",
+      "ci": "410acdb0a2a2713bb935fa7d61e39474cb512549a87695d6e6b9c74f9e394db9",
+      "services": "53f4e4c15a04bde773f9d0d89be06cd65f1a9248c0603b06b78bfa8a5f8a0771",
+      "delivery": "d4f1c6e5121b913e9147eb9552c3c78f2a4944bba1562c14c6a4056b1da7ac77",
+      "issues": "c851aa29d3c11745f1307194db49eba6a488771771ea86c21c7237e400e336b8",
+      "checks": "c53dec6a7bc99ba9a736a0eb9cf4fdaf9bf0d10ccb7be539658df958ed84c50b",
+      "ndf_policies": "9f70d0f7e679e584f06860208c0540040cb74a8b6c2161894239a60ebefc63ef",
+      "instructions": "9137fe41c9b4a240dcee33f0311f83fb59a55b9165b80c22f8f20218dfc2a95f"
+    }
+  }
+}

@@ -59,7 +59,8 @@
 | [clock.py](clock.py) | 今の時刻・ISO の書き出し（`local` / `utc` / `naive` / `z-ms` を引数で選ぶ）と読み取り（`Z` を含む）・秒の差。標準ライブラリだけ | `statefile.py` / `cross-review`（`review_lib/`） / `cross-refactoring`（`refactor_lib/clock.py`）（C1〜C7 で各スクリプト） |
 | [jsonio.py](jsonio.py) | JSON の読み（無い・壊れた・形が違うときの扱いを引数で選ぶ）と原子的な書き込み。標準ライブラリだけ | 同上 |
 | [proc.py](proc.py) | 子プロセスと git の起動（失敗は `StepError(msg, code)`）・`die`・`info` | `step_result.py` / `statefile.py` / `repo.py` / `cross-review`（`review_lib/`） / `cross-refactoring`（`refactor_lib/paths.py`・`commands/setup.py`） |
-| [repo.py](repo.py) | メインディレクトリ・`owner/repo`・slug・宣言のベースブランチ（git だけで決める） | `cross-review`（`review_lib/`） / `cross-refactoring`（`drive.py`・`commands/setup.py`）（C1〜C7 で各スクリプト） |
+| [repo.py](repo.py) | メインディレクトリ・`owner/repo`・slug・起点（宣言のベースブランチ → origin の HEAD → `main` → `master`。git だけで決める） | `cross-review`（`review_lib/`） / `cross-refactoring`（`drive.py`・`commands/setup.py`） / `pr-steps.py` / `merged-steps.py`（C1〜C7 で各スクリプト） |
+| [project_decl.py](project_decl.py) | プロジェクトの宣言（`.ndf/project.json`）の読み取りと `ndf_policies` の判定。読めなければ `{}` で、キーが無ければ方針の検査を掛けない | `doc-lint.py` / `cross-refactoring`（`commands/implement.py`） |
 | [loop_drive.py](loop_drive.py) | 収束ループの drive の部品（`call`・`parse_vars`・`review_status`） | 収束ループの 2 つの `drive.py` |
 | [deps.py](deps.py) | 外部パッケージを使うエントリポイントが最初に呼ぶ `require("<グループ>")`。import できなければ uv の環境（宣言と版の固定はプラグインルートの `pyproject.toml` と `uv.lock`。`project=` を渡せばその根の 1 組と `<根>/.venv`）で起動し直し、uv が無ければ版を固定して入れる。入れられなければ終了コード 3。hook とラッパーは `require()` を呼ばない（ラッパーの環境は `relay_lib/runtime.py` が `find_uv`・`install_uv`・`venv_dir` で用意する） | 外部パッケージを使うエントリポイント・根の `scripts/`（`scripts/lib/ndf_wrappers.py` を通す）・`relay_lib/runtime.py` |
 | [md.py](md.py) | Markdown の構造の読み取り（囲み・見出し・節・表・地の文・リンクとアンカー）。markdown-it-py を呼ぶのはここだけ。書き込みは読み取った行の区間で呼び出し側が行う | `cross-refactoring`（`refactor_lib/vocabulary.py`）・`relay_lib/mark.py`。ほかは D1〜D8 が呼び出し側を置き換える |

@@ -142,11 +142,7 @@ class Engine:
         st, slow = self.state, self.slow
         sid = start or self.order[0]
         if start and not self.plan.get("Pull Request"):
-            # 途中から再開するときは、前の実行の報告に残った Pull Request を {pr} に使う
-            prev = st.dir / "report.md"
-            m = re.search(r"^- Pull Request: (\S*/pull/\d+)", prev.read_text(), re.M) if prev.is_file() else None
-            if m:
-                self.plan["Pull Request"] = m.group(1)
+            self._restore_pr()
         result, reason = "完了", "無し"
         limit = self.plan.get("上限", 30)
         n = 0
@@ -179,60 +175,19 @@ class Engine:
             slow.watch = slow.start_watch(step, carry if carry and carry.step_id == sid else None)
             try:
                 if step["type"] == "judge":
-                    d = self.handlers["judge"].execute(self.ctx, step)
-                    dec = d.get("decision", "stop")
-                    st.cur["decision"] = dec
-                    if dec == "next":
-                        nxt = self.next_of(sid, step)
-                    elif dec == "stop":
-                        result, reason, nxt = "止まった", d.get("reason", "判断が止めた"), None
-                    elif dec == "gate":
-                        result, reason, nxt = "関門", d.get("reason", ""), None
-                    elif dec in self.steps:
-                        self.gh_limit_wait(dec)
-                        nxt = dec
-                    else:
-                        result, reason, nxt = "止まった", f"判断が知らない値を返した: {dec}", None
+                    nxt, r_result, r_reason = self._next_after_judge(sid, step)
                 else:
                     ok, _ = self.handlers[step["type"]].execute(self.ctx, step)
-                    is_run = step["type"] == "run"
-                    if is_run and self.run_step.is_skip(step, st.cur.get("exit")):
-                        nxt = None if step["skip_to"] == "end" else step["skip_to"]
-                        st.cur["skipped"] = True
-                    elif is_run and is_gate(st.cur.get("exit")) and step.get("gate_as_ok"):
-                        # 関門として数えない（MVV 判定が前もって通した関門 2 の提示物など）。提示物だけを写す
-                        st.cur["presentation"] = self.copy_presentation(step)
-                        st.cur["gate_as_ok"] = True
-                        nxt = self.next_of(sid, step)
-                    elif is_run and is_gate(st.cur.get("exit")):
-                        self.take_gate(step)
-                        gnext = step.get("gate_next")
-                        nxt = (None if gnext == "end" else gnext) if gnext else self.next_of(sid, step)
-                    elif ok:
-                        nxt = self.next_of(sid, step)
-                    elif step.get("on_fail"):
-                        nxt = step["on_fail"]
-                    else:
-                        result, reason, nxt = "止まった", f"ステップ {sid} が失敗した（exit={st.cur['exit']}）", None
+                    nxt, r_result, r_reason = self._next_after_step(sid, step, ok)
             except UsageLimit as e:
                 # 利用上限はステップの失敗と区別する（on_fail・judge へ回さない）
                 st.cur.setdefault("exit", 1)
                 st.cur["text"] = str(e)
-                result, reason, nxt = "止まった", "利用上限", None
+                nxt, r_result, r_reason = None, "止まった", "利用上限"
             except SlowAction as e:
-                # 遅れの見張りがステップを打ち切った（子はプロセスグループごと止めてある）
-                st.cur.update(
-                    exit=SLOW_EXIT,
-                    seconds=round(time.time() - st.step_started, 1),
-                    text=f"遅れで打ち切った（{e.action}）: {e.reason}" + (f"\n一次の調査: {e.summary}" if e.summary else ""),
-                )
-                st.cur["slow"] = {"act": e.action, "reason": e.reason}
-                if e.action == "retry":
-                    nxt, slow.carry = sid, slow.watch
-                elif e.action == "fix" and step.get("on_fail"):
-                    nxt = step["on_fail"]
-                else:
-                    result, reason, nxt = "止まった", f"遅れ: {e.reason}", None
+                nxt, r_result, r_reason = self._next_after_slow(e, sid, step)
+            if r_result is not None:
+                result, reason = r_result, r_reason
             slow.end_watch()
             st.record(n, sid, nxt, (self.steps.get(nxt) or {}).get("type") if nxt else None, is_gate)
             sid = nxt
@@ -241,6 +196,67 @@ class Engine:
             if reason == "無し":
                 reason = "; ".join(f"ステップ {g['id']} が関門を返した（exit={g['exit']}）" for g in st.gates)
         return self.report(result, reason)
+
+    def _restore_pr(self) -> None:
+        """途中から再開するときは、前の実行の報告に残った Pull Request を {pr} に使う。"""
+        prev = self.state.dir / "report.md"
+        m = re.search(r"^- Pull Request: (\S*/pull/\d+)", prev.read_text(), re.M) if prev.is_file() else None
+        if m:
+            self.plan["Pull Request"] = m.group(1)
+
+    def _next_after_judge(self, sid: str, step: dict) -> tuple[str | None, str | None, str | None]:
+        """judge の決定から (次のステップ, 結果, 理由) を返す。結果を変えないときは結果・理由が None。"""
+        d = self.handlers["judge"].execute(self.ctx, step)
+        dec = d.get("decision", "stop")
+        self.state.cur["decision"] = dec
+        if dec == "next":
+            return self.next_of(sid, step), None, None
+        if dec == "stop":
+            return None, "止まった", d.get("reason", "判断が止めた")
+        if dec == "gate":
+            return None, "関門", d.get("reason", "")
+        if dec in self.steps:
+            self.gh_limit_wait(dec)
+            return dec, None, None
+        return None, "止まった", f"判断が知らない値を返した: {dec}"
+
+    def _next_after_step(self, sid: str, step: dict, ok: bool) -> tuple[str | None, str | None, str | None]:
+        """run ほか judge 以外のステップの結果から (次のステップ, 結果, 理由) を返す。"""
+        st = self.state
+        is_run = step["type"] == "run"
+        if is_run and self.run_step.is_skip(step, st.cur.get("exit")):
+            st.cur["skipped"] = True
+            return (None if step["skip_to"] == "end" else step["skip_to"]), None, None
+        if is_run and is_gate(st.cur.get("exit")) and step.get("gate_as_ok"):
+            # 関門として数えない（MVV 判定が前もって通した関門 2 の提示物など）。提示物だけを写す
+            st.cur["presentation"] = self.copy_presentation(step)
+            st.cur["gate_as_ok"] = True
+            return self.next_of(sid, step), None, None
+        if is_run and is_gate(st.cur.get("exit")):
+            self.take_gate(step)
+            gnext = step.get("gate_next")
+            return ((None if gnext == "end" else gnext) if gnext else self.next_of(sid, step)), None, None
+        if ok:
+            return self.next_of(sid, step), None, None
+        if step.get("on_fail"):
+            return step["on_fail"], None, None
+        return None, "止まった", f"ステップ {sid} が失敗した（exit={st.cur['exit']}）"
+
+    def _next_after_slow(self, e: SlowAction, sid: str, step: dict) -> tuple[str | None, str | None, str | None]:
+        """遅れの見張りがステップを打ち切った後始末（子はプロセスグループごと止めてある）。"""
+        st, slow = self.state, self.slow
+        st.cur.update(
+            exit=SLOW_EXIT,
+            seconds=round(time.time() - st.step_started, 1),
+            text=f"遅れで打ち切った（{e.action}）: {e.reason}" + (f"\n一次の調査: {e.summary}" if e.summary else ""),
+        )
+        st.cur["slow"] = {"act": e.action, "reason": e.reason}
+        if e.action == "retry":
+            slow.carry = slow.watch
+            return sid, None, None
+        if e.action == "fix" and step.get("on_fail"):
+            return step["on_fail"], None, None
+        return None, "止まった", f"遅れ: {e.reason}"
 
     def check_condition(self, cond: dict) -> str | None:
         """計画の実行の条件を、作業ツリーを作る前に打つ。流すなら None、流さないなら報告を返す。"""

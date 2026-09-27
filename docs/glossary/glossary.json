@@ -2069,6 +2069,55 @@
       "meaning": "静的解析の指摘を、行のコメント（# noqa・# shellcheck disable=）か設定の除外で出さなくすること。理由を添える",
       "source": "",
       "pending_source": "issues/issue-1323-design.md"
+    },
+    {
+      "term": "プロジェクトの宣言",
+      "context": "ndf-workflow",
+      "meaning": "リポジトリの根の `.ndf/` に置く、そのプロジェクトの形（言語・テスト・CI・ブランチ・配布・課題の正本など）を表すファイルの集まり。機能ごとの JSON と、解析が書く `project.json` からなる",
+      "source": "",
+      "pending_source": "issues/issue-1333-requirements.md"
+    },
+    {
+      "term": "解析",
+      "context": "ndf-workflow",
+      "meaning": "プロジェクトの宣言を作るために、リポジトリと CI を決定論で測り、測った値から宣言の中身を決めること",
+      "source": "",
+      "pending_source": "issues/issue-1333-requirements.md"
+    },
+    {
+      "term": "不明",
+      "context": "ndf-workflow",
+      "meaning": "解析が測れなかった・決められなかった項目の値。ai-plugins の値で埋めない",
+      "source": "",
+      "pending_source": "issues/issue-1333-requirements.md"
+    },
+    {
+      "term": "測った値",
+      "context": "ndf-workflow",
+      "meaning": "解析の測定が、ファイル・git・`gh` の出力から決定論で決めた項目の値",
+      "source": "",
+      "pending_source": "issues/issue-1333-design.md"
+    },
+    {
+      "term": "問い",
+      "context": "ndf-workflow",
+      "meaning": "解析の測定が値を 1 つに決められず、候補と根拠を付けて conductor へ渡す項目",
+      "source": "",
+      "pending_source": "issues/issue-1333-design.md"
+    },
+    {
+      "term": "答え",
+      "context": "ndf-workflow",
+      "meaning": "解析の問いごとに conductor が選んだ値か不明。書き出しが形を確かめて宣言へ書く",
+      "source": "",
+      "pending_source": "issues/issue-1333-design.md"
+    },
+    {
+      "term": "入力の指紋",
+      "context": "ndf-workflow",
+      "meaning": "解析が読んだファイルの、HEAD の木での blob の SHA と、ブランチの構成の組。プロジェクトの宣言の新しさの判定に使う",
+      "source": "",
+      "pending_source": "issues/issue-1333-design.md"
     }
   ]
 }

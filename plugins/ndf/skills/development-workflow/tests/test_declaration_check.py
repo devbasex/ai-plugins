@@ -87,5 +87,7 @@ def test_step0_reports_the_exit_code_of_check(tmp_path: Path) -> None:
     repo = init_repo(tmp_path / "main")
     got = run_step0(repo, scripts=str(SCRIPTS_DIR))
     assert got.returncode == 0, got.stderr
-    assert got.stdout.splitlines()[-1] == "exit=2", got.stdout
+    lines = got.stdout.splitlines()
+    assert "exit=2" in lines, got.stdout
+    assert lines[-1] == "decl=2", got.stdout  # 続けてプロジェクトの宣言を判定する（#1333）
     assert not (repo / ".ndf").exists(), "確認は宣言を作らない"
