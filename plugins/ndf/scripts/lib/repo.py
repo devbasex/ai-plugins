@@ -1,4 +1,4 @@
-"""リポジトリの識別（#1142 の L0）: メインディレクトリ・`owner/repo`・slug・宣言のベースブランチ。
+"""リポジトリの識別（#1142 の L0）: メインディレクトリ・`owner/repo`・slug・起点（宣言のベースブランチと既定ブランチ）。
 
 git だけで決める（`proc` の上に置く）。`gh repo view` まで使って決めるのは `gh_call.resolve_repo` で、
 GitHub を呼ぶのは `gh_*` のモジュールだけにする。
@@ -48,3 +48,19 @@ def declared_base(root, remote: bool = False) -> str | None:
     if not isinstance(v, str) or not v:
         return None
     return f"origin/{v}" if remote else v
+
+
+def default_branch(root) -> str | None:
+    """既定ブランチ。origin の HEAD の指す先 → ローカルの `main` → `master` の順。どれも無ければ `None`。"""
+    head = proc.git_out(root, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+    if head:
+        return head.split("/", 1)[-1]
+    for b in ("main", "master"):
+        if proc.git_out(root, "rev-parse", "--verify", "--quiet", f"refs/heads/{b}") is not None:
+            return b
+    return None
+
+
+def base_branch(root) -> str | None:
+    """開発の起点。`.ndf/worktree.json` の `base_branch` → 既定ブランチ（`default_branch`）の順。決まらなければ `None`。"""
+    return declared_base(root) or default_branch(root)

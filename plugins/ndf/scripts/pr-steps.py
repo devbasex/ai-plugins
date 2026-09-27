@@ -82,16 +82,6 @@ def current_branch(root):
     return b
 
 
-def default_branch(root):
-    p = git(root, "symbolic-ref", "--short", "refs/remotes/origin/HEAD", check=False)
-    if p.returncode == 0 and p.stdout.strip():
-        return p.stdout.strip().split("/", 1)[-1]
-    for b in ("main", "master"):
-        if git(root, "rev-parse", "--verify", "--quiet", f"refs/heads/{b}", check=False).returncode == 0:
-            return b
-    return "main"
-
-
 def compare_ref(root, base):
     """比較に使う ref。origin/<base> があればそれ、無ければローカルの <base>。"""
     for ref in (f"origin/{base}", base):
@@ -167,7 +157,7 @@ def diff_numbers(root, ref):
 def cmd_plan(a):
     root = git_root(a.root)
     branch = current_branch(root)
-    default = default_branch(root)
+    default = repo.default_branch(root) or "main"
     declared = repo.declared_base(root)
     base = a.base or declared or default
     allowed = {default} | ({declared} if declared else set())
@@ -377,7 +367,7 @@ def upsert(a, must_exist):
             raise StepError(f"{branch} の OPEN の PR が無い（create を使う）", EXIT_PRECONDITION)
         if not a.title:
             raise StepError("--title が要る", EXIT_UNREADABLE)
-        base = a.base or repo.declared_base(root) or default_branch(root)
+        base = a.base or repo.base_branch(root) or "main"
         args = ["pr", "create", "--base", base, "--title", a.title, "--body-file", body_path]
         if a.draft:
             args.append("--draft")

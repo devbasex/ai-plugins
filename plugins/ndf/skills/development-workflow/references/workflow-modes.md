@@ -199,10 +199,11 @@
 条件は別である。
 
 ```bash
-python3 "$RF/refactor.py" assess --base origin/develop; rc=$?; echo "exit=$rc"
+python3 "$RF/refactor.py" assess --base "origin/$BASE"; rc=$?; echo "exit=$rc"
 ```
 
-`$RF` は `cross-refactoring` の `scripts/` の絶対パスである。
+`$RF` は `cross-refactoring` の `scripts/` の絶対パスである。`$BASE` は開発の起点で、`worktree-setup.sh check` の
+`開発の起点:` の行の名前を使う。
 
 **飛ばす。** 次に当たるときは何も起動しない。
 
