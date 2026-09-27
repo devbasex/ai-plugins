@@ -219,7 +219,9 @@ def _update_main_dir(main_dir, add):
     """主ディレクトリが base にいれば pull --ff-only する。失敗の理由（無ければ None）を返す。"""
     base = repo.base_branch(main_dir)
     if not base:
-        add("main_dir", main_dir, "kept", "起点が決まらない（宣言の base_branch も origin の HEAD も main / master も無い）ため pull しない")
+        add(
+            "main_dir", main_dir, "kept", "起点が決まらない（宣言の base_branch も origin の HEAD も main / master も無い）ため pull しない"
+        )
         return None
     cur = git(main_dir, "branch", "--show-current", check=False).stdout.strip()
     if cur != base:
