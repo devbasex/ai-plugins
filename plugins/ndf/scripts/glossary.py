@@ -362,12 +362,13 @@ def term_rows(text: str, term_sections: list[str]) -> dict[int, str]:
 
 
 def scan(text: str, term_sections: list[str]):
-    """行ごとに (行番号, 照合する本文, 用語の表の 1 列目の語か None) を返す。コードブロックは飛ばす。"""
+    """行ごとに (行番号, 照合する本文, 用語の表の 1 列目の語か None) を返す。コードブロックと引用（`>` で始まる行。
+    依頼の原文など他者の言葉の写し）は飛ばす。"""
     lines = text.splitlines()
     fenced = md.fenced_lines(text)
     terms = term_rows(text, term_sections)
     for n, line in enumerate(lines, 1):
-        if fenced[n - 1]:
+        if fenced[n - 1] or line.lstrip().startswith(">"):
             continue
         yield n, mask_inline_code(line), terms.get(n)
 
