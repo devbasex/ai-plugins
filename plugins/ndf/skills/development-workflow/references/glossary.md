@@ -147,8 +147,10 @@ flowchart TB
 | バッファ | `cross-refactoring` の見積りで、想定最大時間から経過を引いた後に残しておく時間 | 「想定最大時間 − 経過 − バッファ」 | [cross-refactoring](../../cross-refactoring/SKILL.md) の「この Skill で使う語」 |
 | 完了判定 | コマンドの証跡で完了を判定する工程 | `/ndf:quality-gates` | [quality-gates](../../quality-gates/SKILL.md) |
 | 範囲テスト | 変更が触った範囲に限って走らせるテスト | `new impl --tests`、プランの `test-limited` のステップ、`cross-refactoring` の `test_targets` | [supervise.py](../../../scripts/supervise.py) の docstring、[cross-refactoring](../../cross-refactoring/SKILL.md) の「この Skill で使う語」 |
-| ラウンドテスト | `cross-refactoring` で、`--scope` のテストの置き場所を走らせるコマンド。範囲テストを組み立てる元になる | `--round-test`、`round_test` | [cross-refactoring](../../cross-refactoring/SKILL.md) の「引数」 |
-| 全体テスト | リポジトリ全体を範囲にするテスト | プランの `test-all` のステップ、`.ndf/supervise.json` の `test.all` | [supervise.py](../../../scripts/supervise.py) の docstring |
+| ラウンドテスト | `cross-refactoring` の `round-only` で、項目ごとにそのまま走らせるコマンド（`{paths}` を含まない `--round-test`、または `scope_command` の無い suite の `command`） | `--round-test`、`round_test` | [cross-refactoring](../../cross-refactoring/SKILL.md) の「引数」 |
+| 範囲テストの雛形 | `{paths}` を空白で区切った 1 語として含むテストのコマンド（宣言の `scope_command` か、`{paths}` を含む引数）。`{paths}` を対象の語の並びへ置き換えて走らせる | `scope_command` | [project-analysis.md](project-analysis.md) の P2 |
+| JUnit の置き場 | テストのコマンドが JUnit XML を書くファイルの、作業ディレクトリからの相対パス（宣言の `suites[].junit`）。NDF はコマンドへ引数を足さず、このファイルから落ちたテストの ID を読む | `junit` | [project-analysis.md](project-analysis.md) の P2 |
+| 全体テスト | リポジトリ全体を範囲にするテスト。戦略が `local-scoped-ci-whole` なら手元で走らせず CI の結果で見る | プランの `test-all` のステップ、`.ndf/project.json` の `test.suites[].command` | [supervise.py](../../../scripts/supervise.py) の docstring |
 | 危険フラグ | `cross-refactoring` で、範囲テストでは覆えない変更（D1〜D5）。立てば全体テストを 1 度走らせる | D1〜D5 | [cross-refactoring](../../cross-refactoring/SKILL.md) の「この Skill で使う語」 |
 | グレード | `cross-refactoring` が候補ごとに付ける適用の価値（high / medium / low）。改善項目の順位の最初のキー | `tier` | [cross-refactoring](../../cross-refactoring/SKILL.md) の「この Skill で使う語」 |
 | コメントのスナップショット | `cross-review` が取る既存コメントの一覧。2 ラウンド目以降は取り直す | `state.py init` | [cross-review](../../cross-review/SKILL.md) |

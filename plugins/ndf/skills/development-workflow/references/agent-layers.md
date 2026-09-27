@@ -88,7 +88,7 @@ context window を埋めるときは、**読解だけを worker へ出す**（co
 | 条件 | 見分け方 | conductor の動き |
 | --- | --- | --- |
 | プランの雛形が無い | 表の「supervisor で回すとき」の列の工程、表に無いモードの組み方（`operation` の実行、`documentation` の素材の収集など）、リリースの形（`.ndf/supervise.json` の `release.form`）の雛形が無い | その工程だけを supervisor で回し、残りはプランで流す |
-| 雛形に要る設定が無い | `supervise.py new` が設定の不足（`.ndf/worktree.json` の `base_branch`、`.ndf/supervise.json` の `test`。`new release` では `release` も）で止まる。`new mission` は `release` が無くても止まらず、手で行うリリースのステージを最後に置く | 設定を足せるなら足して打ち直す。足せなければそのフェーズを supervisor で回す |
+| 雛形に要る設定が無い | `supervise.py new` が設定の不足（`.ndf/worktree.json` の `base_branch`、テストの宣言（`.ndf/project.json` の `test`、無ければ `.ndf/supervise.json` の `test.command`）。`new release` では `release` も）で止まる。`new mission` は `release` が無くても止まらず、手で行うリリースのステージを最後に置く | 設定を足せるなら足して打ち直す。足せなければそのフェーズを supervisor で回す |
 
 **`supervise.py --help` の説明を読んでプランを外さない。** `new mission` は承認ゲート 1 の前の設計から
 書き出す（`--design` を渡したとき）。

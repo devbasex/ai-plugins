@@ -23,16 +23,14 @@
 | `BUDGET_MINUTES` | 想定最大時間 |
 | `WORKTREE_ROOT` / `WORK` / `TMP_DIR` | 作業ディレクトリと一時ディレクトリ |
 | `REPO` / `HEAD_BRANCH` / `BASE_BRANCH` / `SCOPE` | 対象の情報 |
+| `STRATEGY` / `STRATEGY_SOURCE` | 解いたテストの戦略とその根拠（`test.strategy` / `derived:test_duration` / `derived:test.suites` / `args`） |
 
 `init` が内部で行うこと。
 
 1. **引数のチェック** — `--budget-minutes` は 1 以上の整数でなければ止める（終了コード 4。
    argparse の 2 にしない）。廃止した 5 引数（`--max-test-rounds` / `--max-outer-rounds` / `--max-items-per-round` /
    `--max-fix-rounds` / `--test-timeout`）は `⚠ <引数> は廃止しました（#933）` の 1 行を
-   出して値を使わない。`--round-test` が無く、`--baseline-test` の実行器が既知
-   （`pytest` / `python -m pytest` / `python3 -m pytest` / `jest` / `vitest`。前置きの
-   `uv run` / `poetry run` / `npx` は読み飛ばす）でなければ止める。提案とリファクタリング計画に時間を
-   使った後で、全項目が「範囲テストを組み立てられない」（`no_target`）になるためである
+   出して値を使わない
 2. **ホストの確定** — `--host` の明示指定を第一とし、未指定時のみ環境変数から推定する。
    推定できなければ**既定値を置かずに失敗する**
 3. **参加者の確定** — 既定（claude / codex / kiro とホスト）に `--include` を足し、`--exclude` を
@@ -56,10 +54,14 @@
 10. **リファクタリング計画の置き場所と生成物の同期コマンドの記録** — 既定は**対象の Pull Request の
     コメント 1 件**。書き出しと同期は push の直前にオーケストレーターが行う
 11. **`--scope` のゲート**（下の節）
-12. **着手前のテスト** — `--baseline-test` を実行し、`--round-test` を渡したときはそれも
-    1 回実行する。**どちらかが失敗していたら開始しない**。全体テストの秒は
-    `baseline_test.seconds` に残し、危険フラグと最終ゲートの全体テストのバッファに使う
-13. **測定の設定の読み込み** — 書き込み用の作業ディレクトリの `.ndf/code-metrics.json` を読み、
+12. **テストの戦略の解決**（下の節）— 宣言（`.ndf/project.json` の `test`）と引数から戦略を解き、状態の `strategy` に写す。
+    以後は変えない。解けなければ欠けたキーと直し方を出して止める（終了コード 4）
+13. **着手前のテスト** — 戦略ごとに走らせる（`local-full` は全体テスト、`local-scoped-ci-whole` は `--scope` のテストの
+    置き場所の範囲テスト、`round-only` は全体テストとラウンドテスト）。**落ちても止めない。** 落ちたテストは JUnit から読んで
+    `baseline_test.existing_failures`（既存失敗）に書き、最終ゲートは既存失敗の外で新しく落ちたテストが無ければ通る。
+    JUnit を読めなければ `null` と理由を書く。上限（`limits.init_test_timeout`）を超えたときだけ止める。
+    実測の秒は `baseline_test.seconds`、宣言の所要は `whole_seconds`・`ci_seconds` に残し、時間の上限とバッファに使う
+14. **測定の設定の読み込み** — 書き込み用の作業ディレクトリの `.ndf/code-metrics.json` を読み、
     既定の対応と重ねて状態の `code_metrics.config` に書く。`status` は `pending` から始まる。
     `limits.measure_timeout` もここで書く（下の「指標の測定」）
 
@@ -78,28 +80,47 @@
 | 再開で渡した引数 | 扱い |
 | --- | --- |
 | `--max-fix-rounds` / `--test-timeout` | 廃止を知らせて無視する（決定 24。修正は締め切りまで、テストの上限は予算から導く） |
+| `--baseline-test` / `--round-test` | 知らせるだけ（戦略は `init` で解いたまま） |
 | `--budget-minutes` | **リファクタリング計画の前**（`phase` が `propose` か `plan` でリファクタリング計画が無い）だけ置き換え、上限の表（`limits`）を組み直す。後は知らせるだけ。採用の件数・締め切り・バッファはリファクタリング計画の時点の予算で固定されている |
 | `--implementer` | 知らせるだけ（置き換えない） |
 | `--exclude` / `--include` / `--require-all` | 参加者を作り直す。**実装担当が外れたら**、リファクタリング計画の前は決め方を当て直し、リファクタリング計画の後は止める |
 | そのほか状態に載る引数 | 状態と違えば「反映しない」と知らせる |
 
-### `--scope` のゲートは 2 つを 1 度に見る
+### `--scope` のゲート
 
-| 見るもの | 見ない場合に起きること |
-| --- | --- |
-| `--scope` にテストの置き場所が含まれているか | テストの追加で足すテストが範囲外になり、その項目は必ず取り消される |
-| その置き場所が `--round-test`（省けば `--baseline-test`）の実行集合に入るか | 足したテストが一度も実行されず、検証の判定に効かない |
+`--scope` にテストの置き場所が含まれているかを見る。含まれていないと、テストの追加で足すテストが範囲外になり、
+その項目は必ず取り消される。コマンドの実行集合は見ない（範囲テストは雛形の `{paths}` に置き場所が直に入る）。
 
-**2 つを 1 つのゲートで見る。** 直す先はどちらも利用者が与える引数であり、別々に
-止めると 2 度直すことになる。
+- テストの置き場所は、名前（`tests` / `spec` / `__tests__` などのディレクトリ名と、`test_*` / `*_test.*` などのファイル名）→
+  配下の 1 階層にテストの名前のディレクトリがある → 配下の追跡ファイルにテストの名前の形がある（テストを本体と同じ場所に置く
+  `src/**/*.spec.ts` の構成）の順に判定する。`--scope` は範囲の設定なので、**まだ無いディレクトリを指すことがある**
 
-- テストの置き場所かどうかは**名前だけ**で判定する（`tests` / `spec` / `__tests__`
-  などのディレクトリ名と、`test_*` / `*_test.*` などのファイル名）。`--scope` は
-  範囲の設定なので、**まだ無いディレクトリを指すことがある**
-- `--baseline-test` の探索範囲とみなすのは、コマンドに現れる語のうち**実在する
-  ディレクトリだけ**である。ファイルを指す語は実行するスクリプトそのもの
-  （`bash scripts/run-tests.sh`）であることが多く、範囲の設定とは限らない
-- ディレクトリを 1 つも名指ししないコマンド（`pytest -q` など）は**限定なし**として扱う
+### テストの戦略
+
+宣言（`.ndf/project.json` の `test`。[project-analysis.md](../../development-workflow/references/project-analysis.md) の P2）と
+引数から、共通層 `scripts/lib/test_strategy.py` の `resolve` が決める。supervise の `new` も同じ関数を使う。
+**コマンドの語・実行器の名前・前置きは見ない。** コマンドへの加工は `{paths}`（空白で区切った 1 語）を対象の語の並びへ
+置き換えることだけである。
+
+| 入力（上から順に当てる） | 戦略 | 根拠 |
+| --- | --- | --- |
+| `--round-test` が `{paths}` を含まない | `round-only`（ラウンドテスト = その値。全体テストは `--baseline-test` か宣言の suite の `command`） | `args` |
+| `--round-test` か `--baseline-test` が `{paths}` を含む | 宣言の `test.strategy` があればそれ、無ければ `local-full`（雛形 = その値） | `args` |
+| `--baseline-test` だけが `{paths}` を含まない | `round-only`（ラウンドテスト = 全体テスト = その値。項目ごとに全体を走らせると知らせる） | `args` |
+| 宣言の `test.strategy` | その値 | `test.strategy` |
+| 宣言の suite に `scope_command` が 1 つも無い | `round-only`（ラウンドテスト = suite の `command`） | `derived:test.suites` |
+| 所要 w（`test_duration`。`ndf-record` → `ci-junit` → `ci-steps` の順）> 600 秒で、宣言の `ci` が読める | `local-scoped-ci-whole` | `derived:test_duration` |
+| それ以外 | `local-full` | `derived:test_duration` |
+| 宣言の `test` が無い・不明 | 止める（`.ndf/project.json の test が無い（か不明: <理由>）。/ndf:development-workflow の手順 0 で解析するか、--round-test を渡す`） | — |
+
+| 戦略 | 範囲テスト | 着手前 | 危険フラグの全体テスト | 最終ゲート |
+| --- | --- | --- | --- | --- |
+| `local-full` | `scope_command` の `{paths}` へ `test_targets` | 全体テストを手元で | 手元で 1 度 | 手元で全体テスト（使い回しあり） |
+| `local-scoped-ci-whole` | 同上（コンテナ越しでよい） | `--scope` の置き場所の範囲テストだけ | 走らせず最終ゲートへ寄せる（`whole_test.deferred`） | push 済みの HEAD のチェック（`test.ci.check` か必須のチェック）を `limits.ci_wait_timeout` まで待つ |
+| `round-only` | ラウンドテストをそのまま | 全体テストとラウンドテスト | 手元で 1 度 | 手元で全体テスト |
+
+雛形の不備（`{paths}` が無い・`--filter={paths}` のように 1 語として立っていない）と、`local-scoped-ci-whole` なのに
+`scope_command` を持つ suite が無いときは、理由を出して止める。
 
 ### 作業ディレクトリの構成
 
