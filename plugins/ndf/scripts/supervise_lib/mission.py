@@ -312,7 +312,25 @@ def cmd_new_mission(a, waves: list[dict] | None = None) -> dict:
     waves = waves if waves is not None else mission_plans(a)
     out = Path(a.out or f"mission-{a.name}")
     out.mkdir(parents=True, exist_ok=True)
-    items, index = [], []
+    index = write_stage_index(waves, out)
+    add_resume(index)
+    manifest = out / "mission.json"
+    head = manifest_head(a, pace)
+    manifest.write_text(json.dumps({**head, "ステージ": index}, ensure_ascii=False, indent=2) + "\n")
+    plans = sum(len(e.get("plans", [])) for e in index)
+    return result(
+        "supervise-new",
+        "ok",
+        f"ミッション {a.name} の計画を {plans} 本・{len(index)} ステージで書いた: {manifest}",
+        index,
+        {"waves": len(index), "plans": plans, "manifest": str(manifest)},
+        next=next_text(pace, index),
+    )
+
+
+def write_stage_index(waves: list[dict], out: Path) -> list[dict]:
+    """ステージごとのプランをファイルへ書き、ステージの一覧（command / then_of の連結を含む）を返す。"""
+    index = []
     for i, wave in enumerate(waves, 1):
         entry = {"wave": i, "name": wave["name"]}
         if "gate" in wave:
@@ -334,18 +352,27 @@ def cmd_new_mission(a, waves: list[dict] | None = None) -> dict:
             else:
                 entry["command"] = f"python3 {shlex.quote(str(SELF))} queue " + " ".join(map(shlex.quote, paths)) + " --max 3"
         index.append(entry)
-        items.append(entry)
-    add_resume(index)
-    manifest = out / "mission.json"
+    return index
+
+
+def manifest_head(a, pace: str) -> dict:
+    """manifest の見出し（ミッション / 進め方 / 状態 / ブランチ）。"""
     head = {"ミッション": a.name}
+    if pace in MVV_PACES:
+        head.update({"進め方": pace, "状態": str(Path(a.state).resolve())})
+        if pace != "fast":
+            head["ブランチ"] = mission_branch(a.name)
+        return head
     # new close（waves を渡す）は --pace を持たず、状態があれば fast のミッションの終わり
-    shown = pace if pace in MVV_PACES else "fast" if getattr(a, "state", None) else None
-    if shown:
-        head.update({"進め方": shown, "状態": str(Path(a.state).resolve())})
-    if shown != "fast":
-        head["ブランチ"] = mission_branch(a.name)
-    manifest.write_text(json.dumps({**head, "ステージ": index}, ensure_ascii=False, indent=2) + "\n")
-    plans = sum(len(e.get("plans", [])) for e in index)
+    if getattr(a, "state", None):
+        head.update({"進め方": "fast", "状態": str(Path(a.state).resolve())})
+        return head
+    head["ブランチ"] = mission_branch(a.name)
+    return head
+
+
+def next_text(pace: str, index: list[dict]) -> str:
+    """次に打つ手の文面。auto だけ別の文で、manual のステージがあれば追記する。"""
     nxt = "ステージの番号の順に command を打つ。関門のステージでは承認を取ってから次へ進む"
     if pace == "auto":
         nxt = (
@@ -355,11 +382,4 @@ def cmd_new_mission(a, waves: list[dict] | None = None) -> dict:
     manual = next((e for e in index if "manual" in e), None)
     if manual:
         nxt += f"。リリースは {manual['manual']} で行う（{manual['note']}）"
-    return result(
-        "supervise-new",
-        "ok",
-        f"ミッション {a.name} の計画を {plans} 本・{len(index)} ステージで書いた: {manifest}",
-        items,
-        {"waves": len(index), "plans": plans, "manifest": str(manifest)},
-        next=nxt,
-    )
+    return nxt
