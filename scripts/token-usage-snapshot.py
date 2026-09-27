@@ -313,6 +313,7 @@ def build(args, floor: str, prev, until_s: str, until: float, date: str) -> tupl
         "sessions": len(sessions),
         "sessions_with_pr": sum(1 for s in sessions if s.prs),
         "unlinked_external": unlinked,
+        "unlinked_ledger": skipped.pop("帳簿の寄せ先が無い", 0),
         "skipped": skipped,
         "released": args.released,
         "previous": prev[0] if prev else None,

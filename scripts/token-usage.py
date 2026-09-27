@@ -376,6 +376,8 @@ def read_claude(root: Path, idle_cap: int, until: float | None = None) -> tuple[
         if is_seat or s.cwd.startswith("/tmp/ndf-worktrees/"):
             m = WT_RE.search(s.cwd + "/")
             if m and s.times and s.usage.calls:  # 応答の無い記録（起動に失敗した席）は数えない
+                for p in sorted((main.parent / main.stem / "subagents").glob("*.jsonl")):  # 席が Agent で起動した分も席の消費に入れる
+                    s.usage.add(scan_file(p, until=until).usage)
                 seats.append(
                     External(
                         "claude",

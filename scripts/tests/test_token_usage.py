@@ -101,6 +101,9 @@ def build(tmp: Path, version: str = "10.16.0") -> dict:
     # cross-review の claude の席
     seat = dict(_assistant(30, "c1", U, model="claude-opus-5-5"), cwd=WT)
     _jsonl(claude / "-tmp-ndf-worktrees-acme--secret-repo-pr7" / "seat.jsonl", [seat])
+    # 席が Agent で起動したサブエージェントの消費も席に入る
+    seat_sub = dict(_assistant(31, "c2", U, model="claude-opus-5-5"), cwd=WT)
+    _jsonl(claude / "-tmp-ndf-worktrees-acme--secret-repo-pr7" / "seat" / "subagents" / "agent-b1.jsonl", [seat_sub])
 
     codex = tmp / "codex"
     _jsonl(
@@ -209,7 +212,8 @@ def test_external_cli_is_linked_by_worktree_and_time(tmp_path):
     assert row["reviewers"] == "claude+codex+kiro"
     assert (row["codex_input"], row["codex_out"], row["kiro_credit"]) == (5000, 50, 0.75)
     # 席は claude-opus-5-5 のため cache read は 0.05 倍: 10 + 1000*0.05 + 200*2 + 100*5
-    assert row["claude_seat_cost"] == 960
+    # 席とそのサブエージェントの 2 呼び出し
+    assert row["claude_seat_cost"] == 2 * 960
     ext = {x["runtime"]: x for x in r["external"]}
     assert ext["kiro"]["minutes"] == 2
     assert ext["codex"]["skill"] == "cross-review"

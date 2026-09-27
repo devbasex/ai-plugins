@@ -179,10 +179,15 @@ def test_ledger_rows_join_the_record(tmp_path):
     """計画が起動した claude -p の使用量も、token-usage.py の通常の実行と同じく記録へ入る。"""
     env = build(tmp_path)
     row = {"at": _ts(21), "ndf_version": "10.2.0", "kind": "work", "model": "claude-opus-5", "usage": U, "seconds": 60.0}
-    _jsonl(env["usage"] / "x.jsonl", [row])
+    lost = row | {"at": _ts(300)}  # どの会話の範囲にも入らない行
+    _jsonl(env["usage"] / "x.jsonl", [row, lost])
     ok(env, "--released", "10.3.0")
     data = json.loads((env["out"] / "2026-09-10.json").read_text(encoding="utf-8"))
     assert {(x["layer"], x["role"]) for x in data["per_role"] if x["agent_type"] == "claude -p"} == {("worker", "work")}
+    # 寄せ先の無い行は token-usage.py の JSON と同じく meta の unlinked_ledger に入り、.md の要約にも出る
+    assert data["meta"]["unlinked_ledger"] == 1
+    assert "帳簿の寄せ先が無い" not in data["meta"]["skipped"]
+    assert "寄せ先の無い帳簿の行: 1 件" in (env["out"] / "2026-09-10.md").read_text(encoding="utf-8")
 
 
 def test_other_version_on_same_date_gets_suffix(tmp_path):
