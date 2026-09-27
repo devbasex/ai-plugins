@@ -8,6 +8,7 @@ import shlex
 import subprocess
 from pathlib import Path
 
+import project_mvv
 from pace import PaceError, read_pace
 from step_result import result
 from supervise_lib.decl import SUPERVISE_DECL, decl_roots, with_decls
@@ -23,7 +24,7 @@ from supervise_lib.mission_waves import (
     plan_mission_impl,
     plan_mission_release,
 )
-from supervise_lib.paths import CHECK_PY, HERE, SELF, sha256_of
+from supervise_lib.paths import CHECK_PY, HERE, SELF
 from supervise_lib.release_templates import RELEASE_FORMS
 from supervise_lib.verify_steps import merge_step
 
@@ -167,27 +168,22 @@ def fast_refusal(a) -> str | None:
         prod = head[len("origin/") :] if head.startswith("origin/") else None
     if not prod or prod == a.base:
         return "開発版のチャネルが無い（起点のブランチと本番のブランチが同じか、本番のブランチが分からない）"
-    return mvv_refusal(a.state)
+    mroot = next((r for r in roots if any((r / ".ndf" / f).is_file() for f in ("mvv.md", "mvv.json"))), roots[0])
+    return mvv_refusal(a.state, mroot)
 
 
-def mvv_refusal(state_path: str | None) -> str | None:
-    """MVV の承認の記録があり、そのハッシュが今の MVV と一致するか。外れた理由を返す。"""
+def mvv_refusal(state_path: str | None, root=None) -> str | None:
+    """MVV の承認の照合（`lib/project_mvv.approval_refusal`）。ミッション MVV の承認の記録とハッシュの一致、
+    無ければ承認済みのプロジェクト MVV と状態に残した参照の一致を見る。外れた理由を返す。"""
     if not state_path:
         return "--pace fast には --state（ミッションの状態）が要る"
     try:
         state = json.loads(Path(state_path).read_text())
     except (OSError, ValueError) as e:
         return f"ミッションの状態を読めない: {e}"
-    mvv = state.get("mvv") or {}
-    approval = next((g for g in state.get("gates") or [] if g.get("name") == "MVV"), None)
-    if not mvv.get("path") or not Path(mvv["path"]).is_file():
-        return "ミッションの状態に MVV が無い（mission-state.py init --pace fast --milestone M で写す）"
-    if not approval or not approval.get("sha256"):
-        return "MVV の承認の記録が無い（利用者の承認を得てから mission-state.py gate <状態> MVV を打つ）"
-    now = sha256_of(Path(mvv["path"]))
-    if not (now == mvv.get("sha256") == approval["sha256"]):
-        return "MVV のハッシュが承認の記録と一致しない（承認の後に MVV が変わった）"
-    return None
+    if not isinstance(state, dict):
+        return "ミッションの状態を読めない: オブジェクトでない"
+    return project_mvv.approval_refusal(state, root or Path.cwd())
 
 
 MANUAL_RELEASE = "/ndf:release"
