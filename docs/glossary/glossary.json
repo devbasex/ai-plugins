@@ -1748,9 +1748,17 @@
     {
       "term": "pace",
       "context": "ndf-workflow",
-      "meaning": "モードとは別の軸で、工程をどう通すかを決める。既定の normal と、承認ゲートと検査の時機を変える fast",
+      "meaning": "モードとは別の軸で、工程をどう通すかを決める。既定の normal と、承認ゲートと検査の時機を変える fast と、工程は normal のまま承認ゲートだけを MVV 判定にする auto",
       "code": "pace",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+    },
+    {
+      "term": "pace: auto",
+      "context": "ndf-workflow",
+      "meaning": "進め方の 1 つ。工程は normal と同じで、承認ゲート 1・2 だけを MVV 判定で自動にする。「従う」でレッドラインが無いときだけ通し、ほかは利用者へ戻す",
+      "code": "auto",
+      "source": "plugins/ndf/skills/development-workflow/references/pace.md",
+      "pending_source": "issues/issue-1370-requirements.md"
     },
     {
       "term": "MVV",
