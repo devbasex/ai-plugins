@@ -4,6 +4,7 @@ check-trigger.py・mvv-gate.py・supervise.py が同じ規則で読む。標準�
 
     {"version": 1,
      "fast": {"enabled": true, "modes": [...], "verify": "<導入の確認のコマンド>"},
+     "auto": {"enabled": true, "modes": [...], "verify": "<導入の確認のコマンド>"},
      "areas": [{"name": "...", "common": true, "paths": ["<glob>", ...]}, ...],
      "boundary_paths": ["<glob>", ...],
      "triggers": {"score": 15, "common_weight": 2, "lines": 5000, "escapes": 2, "hours": 24}}
@@ -20,7 +21,7 @@ from pathlib import Path
 DECL_NAME = "pace.json"
 DEFAULT_TRIGGERS = {"score": 15, "common_weight": 2, "lines": 5000, "escapes": 2, "hours": 24}
 DEFAULT_MODES = ("light", "standard", "legacy-refactor")
-EXCLUDED_MODES = ("operation", "documentation")  # fast に入れられないモード（書いても無視する）
+EXCLUDED_MODES = ("operation", "documentation")  # fast と auto に入れられないモード（書いても無視する）
 
 
 class PaceError(Exception):
@@ -74,19 +75,25 @@ def read_pace(root) -> dict:
     triggers = {**DEFAULT_TRIGGERS, **given}
     if not all(isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0 for v in triggers.values()):
         raise PaceError(f"進め方の宣言の triggers は 0 以上の数で書く: {path}")
-    fast = _default(d, "fast", {})
-    if not isinstance(fast, dict):
-        raise PaceError(f"進め方の宣言の fast はオブジェクトで書く: {path}")
-    modes = _default(fast, "modes", list(DEFAULT_MODES))
+    fast = _pace_section(d, "fast", path)
+    auto = _pace_section(d, "auto", path)
+    return {**d, "fast": fast, "auto": auto, "areas": areas, "triggers": triggers, "boundary_paths": list(boundary_paths)}
+
+
+def _pace_section(d: dict, name: str, path: Path) -> dict:
+    """進め方の節（fast / auto）を読み、既定を埋める。節が無ければ不許可（enabled が偽）。"""
+    sec = _default(d, name, {})
+    if not isinstance(sec, dict):
+        raise PaceError(f"進め方の宣言の {name} はオブジェクトで書く: {path}")
+    modes = _default(sec, "modes", list(DEFAULT_MODES))
     if not _globs(modes):
-        raise PaceError(f"進め方の宣言の fast.modes は文字列の配列で書く: {path}")
+        raise PaceError(f"進め方の宣言の {name}.modes は文字列の配列で書く: {path}")
     modes = modes or list(DEFAULT_MODES)  # 空の配列は既定の 3 つ（references/pace.md の表）
-    fast = {
-        "enabled": fast.get("enabled") is True,
-        "verify": str(fast.get("verify") or ""),
+    return {
+        "enabled": sec.get("enabled") is True,
+        "verify": str(sec.get("verify") or ""),
         "modes": [m for m in modes if m not in EXCLUDED_MODES],
     }
-    return {**d, "fast": fast, "areas": areas, "triggers": triggers, "boundary_paths": list(boundary_paths)}
 
 
 def _default(d: dict, key: str, default):

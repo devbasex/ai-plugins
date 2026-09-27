@@ -1,4 +1,4 @@
-"""new mission / close の組み立てと、pace: fast と MVV の拒否の判定（#1142 の C1）。"""
+"""new mission / close の組み立てと、pace: fast / auto と MVV の拒否の判定（#1142 の C1・#1370）。"""
 
 from __future__ import annotations
 
@@ -15,14 +15,14 @@ from supervise_lib.decl import SUPERVISE_DECL, decl_roots, with_decls
 from supervise_lib.mission_waves import (
     mission_branch,
     plan_fast_check,
-    plan_fast_design,
     plan_fast_impl,
-    plan_fast_release,
     plan_mission_branch,
     plan_mission_check,
     plan_mission_design,
     plan_mission_impl,
     plan_mission_release,
+    plan_mvv_design,
+    plan_mvv_release,
 )
 from supervise_lib.paths import CHECK_PY, HERE, SELF
 from supervise_lib.release_templates import RELEASE_FORMS
@@ -40,7 +40,7 @@ def fast_mission_plans(a) -> list[dict]:
     repo = str(Path(a.worktree).resolve())
     waves = []
     if a.design:
-        waves.append({"name": "設計", "plans": {f"design-{n}": plan_fast_design(a, n, repo) for n in a.design}})
+        waves.append({"name": "設計", "plans": {f"design-{n}": plan_mvv_design(a, n, repo) for n in a.design}})
         waves.append(
             {
                 "name": "関門 1",
@@ -55,10 +55,46 @@ def fast_mission_plans(a) -> list[dict]:
     if not has_release_template(a):
         return waves + [manual_release_wave(a)]
     waves += [
-        {"name": "開発版", "plans": {"release": plan_fast_release(a, repo, a.version, "dev")}, "then_of": "実装"},
-        {"name": "本番", "plans": {"release-prod": plan_fast_release(a, repo, prod_version(a.version), "prod")}, "then_of": "実装"},
+        {"name": "開発版", "plans": {"release": plan_mvv_release(a, repo, a.version, "dev")}, "then_of": "実装"},
+        {"name": "本番", "plans": {"release-prod": plan_mvv_release(a, repo, prod_version(a.version), "prod")}, "then_of": "実装"},
     ]
     return waves
+
+
+AUTO_GATE_1 = (
+    "設計のプランの MVV 判定が通せばマージ済みで、このステージは通過する。設計のプランが関門を返したら、承認を取り "
+    '`mission-state.py gate <状態> "関門 1" --by user` と `run <プラン> --from approve` の後に次のステージの resume を打つ'
+)
+
+
+def auto_mission_plans(a) -> list[dict]:
+    """pace: auto のミッションのステージ。並びは normal と同じ（設計 → 関門 1 → ミッションのブランチ → 実装 → 検査）で、
+    後ろに開発版と本番（先頭が MVV 判定の関門 2）を続ける。設計と開発版・本番だけを MVV 判定つきのプランで作り、
+    ミッションのブランチ以降を最初のステージの --then で 1 本の queue に流す（#1370 の決定 3）。check-trigger.py は通らない。"""
+    repo = str(Path(a.worktree).resolve())
+    waves = []
+    if a.design:
+        waves.append({"name": "設計", "plans": {f"design-{n}": plan_mvv_design(a, n, repo) for n in a.design}})
+        waves.append({"name": "関門 1", "gate": AUTO_GATE_1})
+    first = "設計" if a.design else "ミッションのブランチ"
+    then = {"then_of": first} if a.design else {}
+    impl = {}
+    for n in a.issue:
+        plan = plan_mission_impl(a, n, repo)
+        plan["進め方"] = "auto"  # 課題の本文の見出し行と通過記録へ進め方を書く（supervise_lib/state.py）
+        impl[f"impl-{n}"] = plan
+    waves += [
+        {"name": "ミッションのブランチ", "plans": {"mission-branch": plan_mission_branch(a, repo)}, **then},
+        {"name": "実装", "plans": impl, "then_of": first},
+        {"name": "検査", "plans": {"check": plan_mission_check(a, repo)}, "then_of": first},
+    ]
+    if not has_release_template(a):
+        return waves + [manual_release_wave(a)]
+    prs = ["{queue_pr:check}"]  # 出す版の PR は検査のステージのミッションの PR（関門 2 の判定のコメントの宛先）
+    return waves + [
+        {"name": "開発版", "plans": {"release": plan_mvv_release(a, repo, a.version, "dev", prs=prs)}, "then_of": first},
+        {"name": "本番", "plans": {"release-prod": plan_mvv_release(a, repo, prod_version(a.version), "prod", prs=prs)}, "then_of": first},
+    ]
 
 
 def close_plan(a, repo: str) -> dict:
@@ -139,14 +175,19 @@ def close_waves(a) -> list[dict]:
     changed = {"cmd": f"{CHECK_PY} changed --id {final} --root {shlex.quote(repo)}", "skip_code": 3}
     return [
         {"name": "最終の検査", "plans": {"check": plan_fast_check(a, repo, final, final=True)}},
-        {"name": "開発版", "plans": {"release": plan_fast_release(a, repo, a.version, "dev", changed)}, "then_of": "最終の検査"},
-        {"name": "本番", "plans": {"release-prod": plan_fast_release(a, repo, a.prod, "prod", changed)}, "then_of": "最終の検査"},
+        {"name": "開発版", "plans": {"release": plan_mvv_release(a, repo, a.version, "dev", changed)}, "then_of": "最終の検査"},
+        {"name": "本番", "plans": {"release-prod": plan_mvv_release(a, repo, a.prod, "prod", changed)}, "then_of": "最終の検査"},
         {"name": "まとめ", "plans": {"close": close_plan(a, repo)}, "then_of": "最終の検査"},
     ]
 
 
-def fast_refusal(a) -> str | None:
-    """pace: fast を使ってよい条件を確かめる。外れた理由を返す（満たせば None）。"""
+MVV_PACES = ("fast", "auto")  # 承認ゲートを MVV 判定で通す進め方（使ってよい条件を確かめる）
+
+
+def pace_refusal(a) -> str | None:
+    """pace: fast / auto を使ってよい条件を確かめる。外れた理由を返す（満たせば None）。
+    読む宣言の節が進め方の名前（fast / auto）である以外は同じ条件で、ほかの節の値は使わない。"""
+    name = a.pace
     roots = decl_roots(a.worktree, getattr(a, "repo", None))
     try:
         pace = next((read_pace(r) for r in roots if (r / ".ndf" / "pace.json").is_file()), None)
@@ -154,12 +195,13 @@ def fast_refusal(a) -> str | None:
         return str(e)
     if pace is None:
         return "進め方の宣言（.ndf/pace.json）が無い"
-    if not pace["fast"]["enabled"]:
-        return ".ndf/pace.json の fast.enabled が true でない"
-    if not pace["fast"]["verify"]:
-        return ".ndf/pace.json の fast.verify（導入の確認のコマンド）が無い"
-    if a.mode not in pace["fast"]["modes"]:
-        return f"モード {a.mode} は fast に入れられない（入れられるモード: {' / '.join(pace['fast']['modes'])}）"
+    sec = pace[name]
+    if not sec["enabled"]:
+        return f".ndf/pace.json の {name}.enabled が true でない"
+    if not sec["verify"]:
+        return f".ndf/pace.json の {name}.verify（導入の確認のコマンド）が無い"
+    if a.mode not in sec["modes"]:
+        return f"モード {a.mode} は {name} に入れられない（入れられるモード: {' / '.join(sec['modes'])}）"
     prod = a.production_branch
     if not prod:
         head = subprocess.run(
@@ -169,14 +211,14 @@ def fast_refusal(a) -> str | None:
     if not prod or prod == a.base:
         return "開発版のチャネルが無い（起点のブランチと本番のブランチが同じか、本番のブランチが分からない）"
     mroot = next((r for r in roots if any((r / ".ndf" / f).is_file() for f in ("mvv.md", "mvv.json"))), roots[0])
-    return mvv_refusal(a.state, mroot)
+    return mvv_refusal(a.state, mroot, name)
 
 
-def mvv_refusal(state_path: str | None, root=None) -> str | None:
+def mvv_refusal(state_path: str | None, root=None, pace: str = "fast") -> str | None:
     """MVV の承認の照合（`lib/project_mvv.approval_refusal`）。ミッション MVV の承認の記録とハッシュの一致、
     無ければ承認済みのプロジェクト MVV と状態に残した参照の一致を見る。外れた理由を返す。"""
     if not state_path:
-        return "--pace fast には --state（ミッションの状態）が要る"
+        return f"--pace {pace} には --state（ミッションの状態）が要る"
     try:
         state = json.loads(Path(state_path).read_text())
     except (OSError, ValueError) as e:
@@ -210,6 +252,8 @@ def mission_plans(a) -> list[dict]:
     リリースの形に雛形が無ければ、リリースの段の代わりに手で行う段（manual_release_wave）を最後に置く。"""
     if getattr(a, "pace", "normal") == "fast":
         return fast_mission_plans(a)
+    if getattr(a, "pace", "normal") == "auto":
+        return auto_mission_plans(a)
     repo = str(Path(a.worktree).resolve())
     waves = []
     if a.design:
@@ -228,20 +272,42 @@ def mission_plans(a) -> list[dict]:
     return waves
 
 
+def normal_command(a) -> str:
+    """断ったときに示す normal の起動の形（--pace と --state を外した同じコマンド）。"""
+    words = ["python3", str(SELF), "new", "mission", "--name", a.name, "--worktree", a.worktree, "--issue", *map(str, a.issue)]
+    if a.design:
+        words += ["--design", *map(str, a.design)]
+    words += ["--version", a.version, "--mode", a.mode]
+    if a.out:
+        words += ["--out", a.out]
+    return " ".join(map(shlex.quote, words))
+
+
+def add_resume(index: list[dict]) -> None:
+    """then_of のステージへ resume（そのステージから最後までの then_of のステージを流す queue のコマンド）を書く。
+    承認ゲートで止まった後に続きを流すときに写す（#1370 の決定 4）。"""
+    for i, entry in enumerate(index):
+        if "then_of" not in entry:
+            continue
+        rest = [e for e in index[i + 1 :] if e.get("then_of") == entry["then_of"]]
+        cmd = f"python3 {shlex.quote(str(SELF))} queue " + " ".join(map(shlex.quote, entry["plans"])) + " --max 3"
+        entry["resume"] = cmd + "".join(" --then " + " ".join(map(shlex.quote, e["plans"])) for e in rest)
+
+
 def cmd_new_mission(a, waves: list[dict] | None = None) -> dict:
     """ミッションの計画をステージごとのファイルへ書き出す。ステージは番号の順に queue で流す。
     then_of のステージは、そのステージの queue へ --then のステージとして足す（ステージは書いた順に流れる）。"""
-    fast = waves is None and getattr(a, "pace", "normal") == "fast"
-    if fast:
-        why = fast_refusal(a)
+    pace = getattr(a, "pace", "normal")
+    if waves is None and pace in MVV_PACES:
+        why = pace_refusal(a)
         if why:
             return result(
                 "supervise-new",
                 "stopped",
-                f"pace: fast を使えない: {why}。計画を書かない",
+                f"pace: {pace} を使えない: {why}。計画を書かない",
                 [],
-                {"pace": "fast"},
-                next="normal で進める（--pace を渡さない）か、条件を満たしてから打ち直す",
+                {"pace": pace},
+                next=f"normal で進める（{normal_command(a)}）か、条件を満たしてから打ち直す",
             )
     waves = waves if waves is not None else mission_plans(a)
     out = Path(a.out or f"mission-{a.name}")
@@ -269,15 +335,23 @@ def cmd_new_mission(a, waves: list[dict] | None = None) -> dict:
                 entry["command"] = f"python3 {shlex.quote(str(SELF))} queue " + " ".join(map(shlex.quote, paths)) + " --max 3"
         index.append(entry)
         items.append(entry)
+    add_resume(index)
     manifest = out / "mission.json"
     head = {"ミッション": a.name}
-    if getattr(a, "state", None):
-        head.update({"進め方": "fast", "状態": str(Path(a.state).resolve())})
-    else:
+    # new close（waves を渡す）は --pace を持たず、状態があれば fast のミッションの終わり
+    shown = pace if pace in MVV_PACES else "fast" if getattr(a, "state", None) else None
+    if shown:
+        head.update({"進め方": shown, "状態": str(Path(a.state).resolve())})
+    if shown != "fast":
         head["ブランチ"] = mission_branch(a.name)
     manifest.write_text(json.dumps({**head, "ステージ": index}, ensure_ascii=False, indent=2) + "\n")
     plans = sum(len(e.get("plans", [])) for e in index)
     nxt = "ステージの番号の順に command を打つ。関門のステージでは承認を取ってから次へ進む"
+    if pace == "auto":
+        nxt = (
+            "最初のステージの command を打つ（後ろのステージは --then で続く）。queue が gate を返したら、承認資料に判定の理由と"
+            "根拠の項目を添えて承認を取り、関門のステージの説明に沿って続きのステージの resume を打つ"
+        )
     manual = next((e for e in index if "manual" in e), None)
     if manual:
         nxt += f"。リリースは {manual['manual']} で行う（{manual['note']}）"

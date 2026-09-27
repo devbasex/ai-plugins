@@ -1,4 +1,4 @@
-"""mission_mvv.py: `mission-state.py init --pace fast` のミッション MVV（#1078）とプロジェクト MVV（#1366）の扱い。
+"""mission_mvv.py: `mission-state.py init --pace fast` / `auto` のミッション MVV（#1078）とプロジェクト MVV（#1366）の扱い。
 
 - マイルストーンの説明（`gh api repos/<所有者>/<リポジトリ>/milestones/<M>`）から `## Mission` / `## Vision` / `## Value` の節を
   状態のファイルの隣の `mvv.md` へ写し、`mvv.path`・`mvv.sha256` を返す。見出しが 1 つでも無い・取得できないときは止まる（3）。
@@ -19,6 +19,7 @@ from pathlib import Path
 import md
 
 MVV_SECTIONS = ("Mission", "Vision", "Value")
+MVV_PACES = ("fast", "auto")  # 承認ゲートを MVV 判定で通す進め方（MVV を写し、プロジェクト MVV の参照を残す）
 EXIT_UNREADABLE, EXIT_PRECONDITION = 2, 3
 
 
@@ -50,7 +51,7 @@ def _ref(path: Path) -> dict:
 
 def init_mvv(a, project) -> tuple[dict | None, tuple | None]:
     """(状態へ書く mvv, 止まるときの (理由, 終了コード, items))。pace が normal なら (None, None)。"""
-    if a.pace != "fast" or (not a.mvv and not a.milestone and project.approved):
+    if a.pace not in MVV_PACES or (not a.mvv and not a.milestone and project.approved):
         return None, None
     if a.mvv:
         path = Path(a.mvv).resolve()
@@ -58,7 +59,7 @@ def init_mvv(a, project) -> tuple[dict | None, tuple | None]:
             return None, (f"MVV のファイルが無い: {a.mvv}", EXIT_PRECONDITION, [])
         return _ref(path), None
     if not a.milestone:
-        return None, ("--pace fast には --milestone（MVV の複製元）か --mvv が要る", EXIT_UNREADABLE, [])
+        return None, (f"--pace {a.pace} には --milestone（MVV の複製元）か --mvv が要る", EXIT_UNREADABLE, [])
     try:
         text = mvv_sections(milestone_description(a.milestone, a.repo))
     except (OSError, FileNotFoundError) as e:
