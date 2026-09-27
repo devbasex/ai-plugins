@@ -494,3 +494,41 @@ def test_cleanup_pull_removes_untracked_file_equal_to_upstream(repo, env, tmp_pa
         assert code != 0
         assert ("untracked", "a.md") not in by and by[("main_dir", str(main))]["result"] == "stopped"
         assert (main / "a.md").read_text(encoding="utf-8") == "別の中身\n"
+
+
+def clone_with_main_and_develop(tmp_path, cur):
+    """origin の HEAD が main で develop もある上流を clone し、主ディレクトリを `cur` に置く（宣言は無い）。"""
+    up = tmp_path / "up"
+    up.mkdir()
+    git(up, "init", "-q", "-b", "main")
+    for k, v in (("user.email", "t@example.com"), ("user.name", "t"), ("commit.gpgsign", "false")):
+        git(up, "config", k, v)
+    write(up, "keep.txt", "head\n")
+    git(up, "add", "-A")
+    git(up, "commit", "-q", "-m", "init")
+    git(up, "branch", "develop")
+    main = tmp_path / "main"
+    git(tmp_path, "clone", "-q", "-b", cur, str(up), str(main))
+    return main
+
+
+@pytest.mark.parametrize("cur, result", [("main", "pulled"), ("develop", "kept")])
+def test_cleanup_base_defaults_to_origin_head_not_develop(tmp_path, env, cur, result):
+    # 宣言の無いリポジトリでは、起点は origin の HEAD（main）から決まる。develop があっても採らない
+    main = clone_with_main_and_develop(tmp_path, cur)
+    env["FAKE_GH_PRS"] = json.dumps({"1": {"headRefName": "feature/gone", "state": "MERGED"}})
+    code, out, err = call("merged-steps.py", ["cleanup", "1", "--root", str(main)], env)
+    assert code == 0, err
+    item = {(i["kind"], i["name"]): i for i in out["items"]}[("main_dir", str(main))]
+    assert item["result"] == result
+    if result == "kept":
+        assert "main でなく develop" in item["reason"]
+
+
+def test_cleanup_base_follows_declaration(tmp_path, env):
+    main = clone_with_main_and_develop(tmp_path, "develop")
+    write(main, ".ndf/worktree.json", json.dumps({"version": 1, "base_branch": "develop"}))
+    env["FAKE_GH_PRS"] = json.dumps({"1": {"headRefName": "feature/gone", "state": "MERGED"}})
+    code, out, err = call("merged-steps.py", ["cleanup", "1", "--root", str(main)], env)
+    assert code == 0, err
+    assert {(i["kind"], i["name"]): i for i in out["items"]}[("main_dir", str(main))]["result"] == "pulled"

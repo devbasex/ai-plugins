@@ -34,6 +34,8 @@ def repo(tmp_path):
     git(root, "config", "commit.gpgsign", "false")
     write(root, "docs/a.md", "# 題\n\n以前は別の形だった。\n\n今の決まり。\n")
     write(root, "CHANGELOG.md", "# 変更\n")
+    # 文体の規則は宣言で掛ける（ndf_policies.doc_lint）。掛けない場合は test_project_decl.py が見る
+    write(root, ".ndf/project.json", json.dumps({"version": 1, "ndf_policies": {"doc_lint": True, "reject_md_wording_tests": True}}))
     git(root, "add", "-A")
     git(root, "commit", "-q", "-m", "init")
     git(root, "checkout", "-q", "-b", "feature/x")

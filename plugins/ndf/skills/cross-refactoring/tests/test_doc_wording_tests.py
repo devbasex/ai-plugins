@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 
 import pytest
@@ -137,7 +138,12 @@ def test_the_tracked_markdown_list_comes_from_git(gitfacts, repo):
 ITEM = {"id": "I-001", "technique": "", "estimated_diff_lines": 100, "path": "tests/test_full.py"}
 
 
-def _state(tmp_path) -> dict:
+def _state(tmp_path, reject: bool | None = True) -> dict:
+    """作業ディレクトリの宣言に `ndf_policies.reject_md_wording_tests` を置く（`None` なら宣言を置かない）。"""
+    if reject is not None:
+        decl = {"version": 1, "ndf_policies": {"doc_lint": reject, "reject_md_wording_tests": reject}}
+        (tmp_path / ".ndf").mkdir(exist_ok=True)
+        (tmp_path / ".ndf" / "project.json").write_text(json.dumps(decl), encoding="utf-8")
     return {"worktrees": {"work": str(tmp_path)}}
 
 
@@ -159,3 +165,12 @@ def test_the_add_tests_intake_rejects_the_item_with_the_reason(cmd_implement, tm
     facts[0]["files"] = ["tests/test_full.py"]
     problem = cmd_implement._test_commit_problem(facts, [], TRACKED, _state(tmp_path))
     assert problem is not None and problem.startswith(REASON)
+
+
+@pytest.mark.parametrize("reject", [None, False])
+def test_the_intakes_do_not_reject_unless_the_declaration_says_so(cmd_implement, tmp_path, reject):
+    """宣言の `ndf_policies.reject_md_wording_tests` が `true` でなければ、拒否を当てない（#1333 の決定 8）。"""
+    facts = [_fact({"tests/test_full.py": _change([], ['    p = ROOT / "README.md"\n'])})]
+    assert cmd_implement._implement_problem(ITEM, facts, [], TRACKED, _state(tmp_path, reject)) is None
+    facts[0]["files"] = ["tests/test_full.py"]
+    assert cmd_implement._test_commit_problem(facts, [], TRACKED, _state(tmp_path, reject)) is None
