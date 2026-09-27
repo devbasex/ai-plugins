@@ -8,6 +8,7 @@ statusline-command.sh) を settings.json が指している場合に、正規パ
 既存 cross-review テストの規約に倣い、隔離 HOME 上で bash スクリプトを
 subprocess 実行して settings.json の最終状態を観測する。
 """
+
 from __future__ import annotations
 
 import json
@@ -28,17 +29,9 @@ SWITCH = Path(__file__).resolve().parents[3] / "scripts" / "statusline-switch.sh
 NDF_COMMAND = "bash ~/.claude/ndf-statusline.sh"
 
 # NDF statusline コピーとみなされる最小内容 (レガシー判定用: ctx ラベル + コンテナ名取得)
-LEGACY_COPY = (
-    "#!/bin/bash\n"
-    "container_name=$(hostname)\n"
-    'printf "[ctx: 1k / 2k tokens (5%%)]"\n'
-)
+LEGACY_COPY = '#!/bin/bash\ncontainer_name=$(hostname)\nprintf "[ctx: 1k / 2k tokens (5%%)]"\n'
 # マーカー付きコピー (将来の全コピーが該当)
-MARKED_COPY = (
-    "#!/bin/bash\n"
-    "# ndf-statusline: managed (do not edit; auto-updated by ndf:statusline)\n"
-    'echo "hi"\n'
-)
+MARKED_COPY = '#!/bin/bash\n# ndf-statusline: managed (do not edit; auto-updated by ndf:statusline)\necho "hi"\n'
 # NDF と無関係なユーザー独自 statusline
 CUSTOM = '#!/bin/bash\necho "my custom bar"\n'
 
@@ -47,6 +40,7 @@ def _run_ensure(home: Path) -> subprocess.CompletedProcess:
     """隔離 HOME で `statusline-switch.sh ensure` を実行する。"""
     env = os.environ.copy()
     env["HOME"] = str(home)
+    env.pop("CLAUDE_CONFIG_DIR", None)
     return subprocess.run(
         ["bash", str(SWITCH), "ensure"],
         capture_output=True,
@@ -60,9 +54,7 @@ def _settings(home: Path) -> dict:
 
 
 def _write_settings(home: Path, command: str) -> None:
-    (home / ".claude" / "settings.json").write_text(
-        json.dumps({"statusLine": {"type": "command", "command": command}})
-    )
+    (home / ".claude" / "settings.json").write_text(json.dumps({"statusLine": {"type": "command", "command": command}}))
 
 
 def _claude(home: Path) -> Path:
@@ -132,10 +124,7 @@ def test_same_name_but_non_ndf_content_is_guarded(tmp_path: Path) -> None:
     result = _run_ensure(tmp_path)
 
     assert result.returncode == 0, result.stderr
-    assert (
-        _settings(tmp_path)["statusLine"]["command"]
-        == "bash ~/.claude/statusline-command.sh"
-    )
+    assert _settings(tmp_path)["statusLine"]["command"] == "bash ~/.claude/statusline-command.sh"
     assert not (claude / ".ndf-statusline-backup.json").exists()
 
 
@@ -203,3 +192,23 @@ def test_user_custom_gets_no_refresh_interval(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr
     assert "refreshInterval" not in _settings(tmp_path)["statusLine"]
+
+
+def test_ensure_writes_settings_under_claude_config_dir(tmp_path: Path) -> None:
+    """CLAUDE_CONFIG_DIR があれば、その下の settings.json へ書き、~/.claude/settings.json は作らない。"""
+    home = tmp_path / "home"
+    cfg = tmp_path / "cfg"
+    home.mkdir()
+    env = os.environ.copy()
+    env["HOME"] = str(home)
+    env["CLAUDE_CONFIG_DIR"] = str(cfg)
+    result = subprocess.run(
+        ["bash", str(SWITCH), "ensure"],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert result.returncode == 0, result.stderr
+    written = json.loads((cfg / "settings.json").read_text())
+    assert written["statusLine"]["command"] == NDF_COMMAND
+    assert not (home / ".claude" / "settings.json").exists()

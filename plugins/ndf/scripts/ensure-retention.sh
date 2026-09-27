@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# NDF plugin: ~/.claude/settings.json の cleanupPeriodDays を最低 90 日に保つ。
+# NDF plugin: Claude Code の設定の置き場（CLAUDE_CONFIG_DIR、無ければ ~/.claude）の settings.json の cleanupPeriodDays を最低 90 日に保つ。
 # - 既存値 >= 90 なら何もしない
 # - 既存値 < 90 or 未設定 なら 90 に更新
 # - 前回チェックから 7 日経っていなければスキップ (多重実行防止)
@@ -8,9 +8,10 @@ set -euo pipefail
 
 MIN_DAYS=90
 GUARD_DAYS=7
-SETTINGS="$HOME/.claude/settings.json"
-FLAG="$HOME/.claude/.ndf-retention-checked"
-LOCK="$HOME/.claude/.ndf-retention.lock"
+CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+SETTINGS="$CONFIG_DIR/settings.json"
+FLAG="$CONFIG_DIR/.ndf-retention-checked"
+LOCK="$CONFIG_DIR/.ndf-retention.lock"
 
 # jq 必須
 if ! command -v jq >/dev/null 2>&1; then
@@ -44,7 +45,7 @@ update_retention() {
   tmp="$(mktemp)"
   if jq --argjson v "$MIN_DAYS" '.cleanupPeriodDays = $v' "$SETTINGS" > "$tmp"; then
     mv "$tmp" "$SETTINGS"
-    echo "[ndf] cleanupPeriodDays を ${current} → ${MIN_DAYS} に更新しました (~/.claude/settings.json)"
+    echo "[ndf] cleanupPeriodDays を ${current} → ${MIN_DAYS} に更新しました (${SETTINGS})"
   else
     rm -f "$tmp"
     return 1

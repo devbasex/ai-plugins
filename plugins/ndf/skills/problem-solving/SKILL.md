@@ -100,6 +100,7 @@ description: "Fix bugs and data inconsistencies upstream at the root cause. Use 
 | 外部キー/制約が存在するか | マイグレーション履歴を追跡（追加→削除→再追加の変遷を確認） |
 | 論理削除ポリシーは何か | `SoftDeletes` / `deleted_at` の有無を確認（`delete()` と `forceDelete()` の挙動が異なる） |
 | 環境差異がないか | dev/staging/prod で同じクエリを実行して比較 |
+| 定義と呼び出し元が一致するか | Serena があれば `find_symbol` で定義を、`find_referencing_symbols` で呼び出し元を引く（ファイルを丸ごと読まない） |
 
 ### やってはいけないこと
 
@@ -173,7 +174,7 @@ Layer 4: 出力時検証（結果の妥当性チェック）
 
 - 根本原因の修正とデータ修復は**別コミット**にする（Revertしやすい）
 - 重複コードは発見次第リファクタリングする
-- 検証環境向けPRは `cherry-pick-pr` 方式で作成し、起点ブランチを汚染しない（詳細は `cherry-pick-pr` スキル参照）
+- 検証環境向けPRは `cherry-pick-pr` 方式で作成し、ベースブランチを汚染しない（詳細は `cherry-pick-pr` スキル参照）
 
 ## 6. 調査レポートの書き方
 

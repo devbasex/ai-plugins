@@ -92,13 +92,14 @@
 
 ## Codex CLI 連携
 
-詳細な独立レビューが必要な場合は `corder` エージェントに委譲するか、`/ndf:external-ai` skill の手順で `codex exec` を直接起動する。例:
+詳細な独立レビューが必要な場合は `corder` エージェントに委譲するか、`/ndf:external-ai` skill の `external-ai.py run codex` を 1 行で呼ぶ（起動・上限つきの待ち・回収はスクリプトが行う）。例:
 
 ```bash
-# === 1. プロンプト書き出し（最終出力先を明示し apply_patch で書かせる） ===
-FINAL=/tmp/codex-output-sec-scan.md
+# === 1. プロンプトを一意の一時ファイルに書く（最終出力先を明示し apply_patch で書かせる） ===
+TMP=$(mktemp -d)
+FINAL="$TMP/sec-scan-result.md"
 
-cat > /tmp/sec-scan-prompt.md <<EOF
+cat > "$TMP/sec-scan-prompt.md" <<EOF
 あなたはセキュリティレビュアーです。以下の観点で対象ファイルを精査してください:
 - OWASP Top 10 の脆弱性
 - 認証・認可の問題
@@ -116,31 +117,14 @@ Markdown。行番号と該当コードスニペットを明記。tool 呼び出�
 最後に必ず assistant message として 1 回出力してください。
 EOF
 
-# === 2. バックグラウンド起動 ===
-codex exec --dangerously-bypass-approvals-and-sandbox \
-  --config reasoning.effort=medium \
-  -C "$PWD" \
-  < /tmp/sec-scan-prompt.md \
-  > /tmp/sec-scan-stdout.md \
-  2> /tmp/sec-scan-err.log &
-
-# === 3. 完了確認（^tokens used$ sentinel を待つ。`ps -p` は zombie を生存と誤判定する） ===
-# Claude Code では、このループを Bash の run_in_background: true で実行して完了通知を待つ
-# （前景で回すと hook が止める。規約は development-workflow/references/waiting.md）
-until grep -q '^tokens used$' /tmp/sec-scan-err.log 2>/dev/null; do
-  sleep 30
-done
-
-# === 4. 成果物を回収（ファイル → stdout → stderr の三段フォールバック） ===
-if [ -s "$FINAL" ]; then
-    cp "$FINAL" ./sec-scan-result.md
-elif [ -s /tmp/sec-scan-stdout.md ]; then
-    cp /tmp/sec-scan-stdout.md ./sec-scan-result.md
-    echo "WARN: stdout からフォールバック回収（ファイル書き出しなし）" >&2
-else
-    echo "ERROR: Codex の最終出力を回収できませんでした。stderr 末尾を確認:" >&2
-    tail -200 /tmp/sec-scan-err.log
-fi
+# === 2. 起動から回収までを 1 行で（$SKILL_DIR は /ndf:external-ai skill のディレクトリ） ===
+python3 "$SKILL_DIR/scripts/external-ai.py" run codex \
+  --prompt-file "$TMP/sec-scan-prompt.md" --output-file "$FINAL" \
+  --phase review --workdir "$PWD"
+# => 最後の 1 行が JSON。{"status": "ok", ..., "metrics": {"outcome": "ok", "result": "...", ...}}
 ```
 
-詳細は `/ndf:external-ai` skill と `references/cli-codex.md` を参照。
+- Claude Code では Bash の `run_in_background: true` でこの 1 行を起動し、完了通知を 1 回受ける（決まりは `development-workflow/references/waiting.md`）
+- `status` が `ok` なら `metrics.result` のファイルを読む。`stopped` なら `metrics.outcome` に応じた次の手を `/ndf:external-ai` skill の「共通の実行手順」の表で選ぶ
+
+Codex 固有の差分は `/ndf:external-ai` skill の `references/cli-codex.md` を参照。

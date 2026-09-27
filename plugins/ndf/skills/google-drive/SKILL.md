@@ -54,8 +54,11 @@ uv run --project $SKILL_DIR python $SCRIPT --id FILE_ID --mime application/pdf -
 # バイナリファイル (画像、PDF 等) をダウンロード
 uv run --project $SKILL_DIR python $SCRIPT --id FILE_ID --download -o /tmp/file.png
 
-# ファイルをアップロード (公開共有リンク付与)
+# ファイルをアップロード (既定は非公開)
 uv run --project $SKILL_DIR python $SCRIPT --upload /path/to/file.png
+
+# リンクを知る全員が閲覧できるようにしてアップロード
+uv run --project $SKILL_DIR python $SCRIPT --upload /path/to/file.png --public
 ```
 
 `--port N` を渡すとローカルサーバ方式の OAuth で再認証 (初回かつスコープ追加時のみ必要)。

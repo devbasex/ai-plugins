@@ -15,6 +15,7 @@ Scans ~/.claude/projects/**/*.jsonl and counts, for each NDF skill:
 
 Supports project-level breakdown and date-range filtering.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -31,11 +32,17 @@ from typing import Iterable
 # 会話の記録を層の単位で読む部品は共通層にある（#550 の決定 13）。Kiro CLI が Skill を
 # symlink にするため、`.resolve()` を通してからプラグインルートへ登る（`scripts/lib/README.md`）。
 sys.path.insert(
-    0, str(pathlib.Path(__file__).resolve().parents[3] / "scripts" / "lib"),
+    0,
+    str(pathlib.Path(__file__).resolve().parents[3] / "scripts" / "lib"),
 )
-import transcript_agents  # noqa: E402
+import deps  # noqa: E402  外部パッケージの環境（#1142 の決定 17・23）
 
-# 割る候補の印を付ける目安。`development-workflow/references/context-window.md` の
+deps.require("mdtable", "yamlio")  # 表は tabulate、frontmatter は ruamel.yaml の包みで読み書きする
+import mdtable  # noqa: E402
+import transcript_agents  # noqa: E402
+import yamlio  # noqa: E402
+
+# 割る候補の目印を付ける目安。`development-workflow/references/context-window.md` の
 # 「遅くとも切る」値と揃える。**モデルに依る値であり、あの文書が書き換わったら揃え直す。**
 DEFAULT_WINDOW_LIMIT = 200000
 
@@ -108,7 +115,6 @@ def iter_events(path: pathlib.Path) -> Iterable[dict]:
         return
 
 
-_FRONT_MATTER_RE = re.compile(r"\A---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 # トリガ語の宣言は description 末尾の全角丸括弧に「・」区切りで並べる
 # （規約: plugins/ndf/skills/AUTHORING.md「トリガ語の書式」）。
 # 誤検出を避けるため、末尾にあり日本語を 1 文字以上含むものだけを宣言と見なす。
@@ -117,31 +123,40 @@ _HAS_JA_RE = re.compile(r"[ぁ-んァ-ヶ一-龠ー]")
 _TRIGGER_SPLIT_RE = re.compile(r"[・/／,、]")
 _JA_WORD_RE = re.compile(r"[一-龥ぁ-んァ-ヶー]{2,}|[A-Za-z][A-Za-z0-9_-]{2,}")
 _STOPWORDS = {
-    "true", "false", "null", "none", "when", "triggers", "trigger",
-    "description", "use", "used", "using",
+    "true",
+    "false",
+    "null",
+    "none",
+    "when",
+    "triggers",
+    "trigger",
+    "description",
+    "use",
+    "used",
+    "using",
 }
 
 
-def parse_front_matter(text: str) -> dict[str, str]:
-    m = _FRONT_MATTER_RE.match(text)
-    if not m:
+def _as_text(value) -> str:
+    """frontmatter の値を文字列で読む（配列は 1 要素 1 行、None は空）。"""
+    if value is None:
+        return ""
+    if isinstance(value, list):
+        return "\n".join(_as_text(v) for v in value)
+    return str(value)
+
+
+def parse_front_matter(text: str, where: str = "") -> dict[str, str]:
+    """SKILL.md の frontmatter を YAML として読み（`lib/yamlio.py`）、値を文字列にして返す。
+
+    YAML として読めない frontmatter は、理由を標準エラーへ 1 行出して空の辞書にする（名前はディレクトリから取る）。
+    """
+    try:
+        fm = yamlio.read_front_matter(text, where)
+    except yamlio.YamlError as exc:
+        print(f"[skill-stats] {exc}", file=sys.stderr)
         return {}
-    fm = m.group(1)
-    out: dict[str, str] = {}
-    key = None
-    buf: list[str] = []
-    for line in fm.splitlines():
-        if re.match(r"^[A-Za-z_-]+:\s*", line):
-            if key is not None:
-                out[key] = "\n".join(buf).strip()
-            k, _, v = line.partition(":")
-            key = k.strip()
-            buf = [v.strip()]
-        else:
-            buf.append(line)
-    if key is not None:
-        out[key] = "\n".join(buf).strip()
-    return out
+    return {str(k): _as_text(v) for k, v in fm.items()}
 
 
 def extract_triggers(
@@ -216,20 +231,20 @@ def load_skills(plugin_root: pathlib.Path, include_fallback: bool = False) -> li
             text = f.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
-        fm = parse_front_matter(text)
+        fm = parse_front_matter(text, str(f))
         name = fm.get("name", d.name).strip().strip('"')
         desc = fm.get("description", "").strip().strip('"')
         when = fm.get("when_to_use", "").strip().strip('"')
-        triggers, source = extract_triggers(
-            desc, when, include_fallback=include_fallback
+        triggers, source = extract_triggers(desc, when, include_fallback=include_fallback)
+        out.append(
+            {
+                "name": name,
+                "qualified": f"ndf:{name}",
+                "triggers": triggers,
+                "triggers_source": source,
+                "dir": d.name,
+            }
         )
-        out.append({
-            "name": name,
-            "qualified": f"ndf:{name}",
-            "triggers": triggers,
-            "triggers_source": source,
-            "dir": d.name,
-        })
     return out
 
 
@@ -244,10 +259,7 @@ def raw_user_text(ev: dict) -> str:
     if isinstance(c, str):
         return c
     if isinstance(c, list):
-        return "\n".join(
-            b.get("text", "") for b in c
-            if isinstance(b, dict) and b.get("type") == "text"
-        )
+        return "\n".join(b.get("text", "") for b in c if isinstance(b, dict) and b.get("type") == "text")
     return ""
 
 
@@ -368,17 +380,9 @@ def aggregate_by_project(
     hit-lookahead window. Deriving the boundary set from a filtered `skills`
     would hide other skills' slash commands and over-count hits.
     """
-    result: dict[str, tuple[Counter, Counter, Counter, Counter]] = defaultdict(
-        lambda: (Counter(), Counter(), Counter(), Counter())
-    )
-    skill_names = (
-        all_skill_names if all_skill_names is not None
-        else {s["name"] for s in skills}
-    )
-    skill_triggers = [
-        (s["qualified"], [t.lower() for t in s["triggers"] if t])
-        for s in skills
-    ]
+    result: dict[str, tuple[Counter, Counter, Counter, Counter]] = defaultdict(lambda: (Counter(), Counter(), Counter(), Counter()))
+    skill_names = all_skill_names if all_skill_names is not None else {s["name"] for s in skills}
+    skill_triggers = [(s["qualified"], [t.lower() for t in s["triggers"] if t]) for s in skills]
     for path in transcripts:
         tl, project = build_timeline(path, skill_names)
         auto, explicit, trig_h, hits = result[project]
@@ -439,17 +443,19 @@ def build_rows(
         trig = triggers_hits.get(q, 0)
         hit = hits.get(q, 0)
         rate = round(hit / trig * 100, 1) if trig else 0.0
-        rows.append({
-            "skill": q,
-            "triggers_source": s["triggers_source"],
-            "invocations": a + e,
-            "auto": a,
-            "explicit": e,
-            "triggers": trig,
-            "hits": hit,
-            "hit_rate_pct": rate,
-            "trigger_keywords": s["triggers"],
-        })
+        rows.append(
+            {
+                "skill": q,
+                "triggers_source": s["triggers_source"],
+                "invocations": a + e,
+                "auto": a,
+                "explicit": e,
+                "triggers": trig,
+                "hits": hit,
+                "hit_rate_pct": rate,
+                "trigger_keywords": s["triggers"],
+            }
+        )
         total_auto += a
         total_explicit += e
         if s["triggers_source"] == "explicit":
@@ -467,45 +473,49 @@ def build_rows(
     return rows, total
 
 
+SKILL_COLUMNS = (
+    ("skill", "left"),
+    ("triggers源", "left"),
+    ("計", "right"),
+    ("自動", "right"),
+    ("明示", "right"),
+    ("関連話題", "right"),
+    ("ヒット", "right"),
+    ("ヒット率", "right"),
+)
+
+
+def _md_table(columns, rows: list[list]) -> str:
+    """列の名前と寄せ方の組から表を組む（`lib/mdtable.py`）。"""
+    return mdtable.table_markdown([c for c, _ in columns], rows, align=[a for _, a in columns])
+
+
 def format_markdown(rows: list[dict], total: dict, heading: str | None = None) -> str:
-    lines: list[str] = []
-    if heading:
-        lines.append(heading)
-    lines.extend([
-        "| skill | triggers源 | 計 | 自動 | 明示 | 関連話題 | ヒット | ヒット率 |",
-        "|---|---|---:|---:|---:|---:|---:|---:|",
-    ])
+    body: list[list] = []
     for r in rows:
         src = r["triggers_source"]
         if src == "none":
-            rate = "-"
-            trig = "-"
-            hit = "-"
+            rate = trig = hit = "-"
         else:
             rate = f"{r['hit_rate_pct']}%" if r["triggers"] else "-"
-            trig = str(r["triggers"])
-            hit = str(r["hits"])
-        lines.append(
-            f"| {r['skill']} | {src} | {r['invocations']} | {r['auto']} | "
-            f"{r['explicit']} | {trig} | {hit} | {rate} |"
-        )
-    lines.append(
-        f"| **合計** | | **{total['invocations']}** | **{total['auto']}** | "
-        f"**{total['explicit']}** | **{total['triggers']}** | "
-        f"**{total['hits']}** | **{total['hit_rate_pct']}%** |"
+            trig, hit = r["triggers"], r["hits"]
+        body.append([r["skill"], src, r["invocations"], r["auto"], r["explicit"], trig, hit, rate])
+    body.append(
+        [
+            "**合計**",
+            "",
+            *(f"**{total[k]}**" for k in ("invocations", "auto", "explicit", "triggers", "hits")),
+            f"**{total['hit_rate_pct']}%**",
+        ]
     )
-    return "\n".join(lines)
+    table = _md_table(SKILL_COLUMNS, body)
+    return f"{heading}\n{table}" if heading else table
 
 
 # ---------- 3 層の context window の測定（#550 の AC20〜AC37） ----------
 
 _LAYER_ORDER = {"conductor": 0, "supervisor": 1, "worker": 2}
-_ROLE_ORDER = {
-    name: i for i, name in enumerate(
-        ("-",) + transcript_agents.POSTS + transcript_agents.TASKS
-        + (transcript_agents.OTHER,)
-    )
-}
+_ROLE_ORDER = {name: i for i, name in enumerate(("-",) + transcript_agents.POSTS + transcript_agents.TASKS + (transcript_agents.OTHER,))}
 
 
 def _order(layer: str, role: str) -> tuple[int, int, str]:
@@ -523,7 +533,7 @@ def measured_records(records: list) -> list:
 
 
 def summarize_agents(records: list, window_limit: int) -> tuple[list[dict], int]:
-    """層と持ち場（worker は作業の種類）とモデルの組ごとに束ねる（AC29）。"""
+    """層とフェーズ（worker は作業の種類）とモデルの組ごとに束ねる（AC29）。"""
     kept = measured_records(records)
     groups: dict[tuple[str, str, str], list] = defaultdict(list)
     for r in kept:
@@ -534,23 +544,25 @@ def summarize_agents(records: list, window_limit: int) -> tuple[list[dict], int]
         below = sum(1 for r in items if r.work < r.fixed)
         peak_max = max(r.peak for r in items)
         marks: list[str] = []
-        # **束ねる候補は supervisor の行にだけ付く。** 設計の持ち場は、作るときはどの
-        # モードでも必ず関門を返すため対象にしない（契約の印の表）。
+        # **束ねる候補は supervisor の行にだけ付く。** 設計のフェーズは、作るときはどの
+        # モードでも必ず関門を返すため対象にしない（契約の目印の表）。
         if layer == "supervisor" and role != "設計" and below > len(items) / 2:
             marks.append("束ねる候補")
         if peak_max > window_limit:
             marks.append("割る候補")
-        rows.append({
-            "layer": layer,
-            "role": role,
-            "model": model,
-            "records": len(items),
-            "fixed_median": _median([r.fixed for r in items]),
-            "work_median": _median([r.work for r in items]),
-            "work_below_fixed": below,
-            "peak_max": peak_max,
-            "mark": "・".join(marks),
-        })
+        rows.append(
+            {
+                "layer": layer,
+                "role": role,
+                "model": model,
+                "records": len(items),
+                "fixed_median": _median([r.fixed for r in items]),
+                "work_median": _median([r.work for r in items]),
+                "work_below_fixed": below,
+                "peak_max": peak_max,
+                "mark": "・".join(marks),
+            }
+        )
     rows.sort(key=lambda r: (_order(r["layer"], r["role"]), r["model"]))
     return rows, len(records) - len(kept)
 
@@ -565,13 +577,15 @@ def layer_totals(records: list) -> tuple[list[dict], dict]:
             continue
         fixed_sum = sum(r.fixed or 0 for r in items)
         work_sum = sum(r.work or 0 for r in items)
-        rows.append({
-            "layer": layer,
-            "records": len(items),
-            "fixed_sum": fixed_sum,
-            "work_sum": work_sum,
-            "total_spend": fixed_sum + work_sum,
-        })
+        rows.append(
+            {
+                "layer": layer,
+                "records": len(items),
+                "fixed_sum": fixed_sum,
+                "work_sum": work_sum,
+                "total_spend": fixed_sum + work_sum,
+            }
+        )
         total["records"] += len(items)
         total["fixed_sum"] += fixed_sum
         total["work_sum"] += work_sum
@@ -580,7 +594,7 @@ def layer_totals(records: list) -> tuple[list[dict], dict]:
 
 
 def role_usage(records: list) -> list[dict]:
-    """持ち場ごとの worker の使い方（AC37）。**行は起動元ごとに 1 つである。**"""
+    """フェーズごとの worker の使い方（AC37）。**行は起動元ごとに 1 つである。**"""
     supervisors = [r for r in records if r.layer == "supervisor"]
     supervisors.sort(key=lambda r: (r.started_at or "", r.agent_id or ""))
     workers: dict[str, list] = defaultdict(list)
@@ -597,75 +611,69 @@ def role_usage(records: list) -> list[dict]:
             continue
         fixed_sum = (s.fixed or 0) + sum(w.fixed or 0 for w in mine)
         work = s.work or 0
-        rows.append({
-            "role": s.role,
-            "supervisor": seq[s.role],   # 持ち場の中の連番。識別子は出さない
-            "supervisor_work": work,
-            "workers": len(mine),
-            "fixed_sum": fixed_sum,
-            "mark": "worker を使いすぎ" if fixed_sum > work else "",
-        })
+        rows.append(
+            {
+                "role": s.role,
+                "supervisor": seq[s.role],  # フェーズの中の連番。識別子は出さない
+                "supervisor_work": work,
+                "workers": len(mine),
+                "fixed_sum": fixed_sum,
+                "mark": "worker を使いすぎ" if fixed_sum > work else "",
+            }
+        )
     rows.sort(key=lambda r: (_ROLE_ORDER.get(r["role"], 9), r["supervisor"]))
     return rows
 
 
 def format_agent_summary_section(summary: list[dict], excluded: int) -> list[str]:
-    lines = [
-        "## 層・持ち場・モデルごとの束ね",
+    columns = (
+        ("層", "left"),
+        ("フェーズ", "left"),
+        ("モデル", "left"),
+        ("件数", "right"),
+        ("固定費の中央値", "right"),
+        ("実作業の中央値", "right"),
+        ("実作業 < 固定費", "right"),
+        ("最大充填の最大", "right"),
+        ("目印", "left"),
+    )
+    keys = ("layer", "role", "model", "records", "fixed_median", "work_median", "work_below_fixed", "peak_max", "mark")
+    return [
+        "## 層・フェーズ・モデルごとの束ね",
         "",
-        "| 層 | 持ち場 | モデル | 件数 | 固定費の中央値 | 実作業の中央値 "
-        "| 実作業 < 固定費 | 最大充填の最大 | 印 |",
-        "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |",
+        _md_table(columns, [[r[k] for k in keys] for r in summary]),
+        "",
+        f"束ねの表から外した記録: {excluded} 件（応答が 3 に満たない）",
     ]
-    for r in summary:
-        lines.append(
-            f"| {r['layer']} | {r['role']} | {r['model']} | {r['records']} | "
-            f"{r['fixed_median']} | {r['work_median']} | {r['work_below_fixed']} | "
-            f"{r['peak_max']} | {r['mark']} |"
-        )
-    lines.append("")
-    lines.append(f"束ねの表から外した記録: {excluded} 件（応答が 3 に満たない）")
-    return lines
 
 
 def format_layer_totals_section(totals_rows: list[dict], totals: dict) -> list[str]:
-    lines = [
-        "## 層ごとの合計",
-        "",
-        "| 層 | 件数 | 固定費の合計 | 実作業の合計 | 総消費 |",
-        "| --- | ---: | ---: | ---: | ---: |",
-    ]
-    for r in totals_rows:
-        lines.append(
-            f"| {r['layer']} | {r['records']} | {r['fixed_sum']} | "
-            f"{r['work_sum']} | {r['total_spend']} |"
-        )
-    lines.append(
-        f"| 合計 | {totals['records']} | {totals['fixed_sum']} | "
-        f"{totals['work_sum']} | {totals['total_spend']} |"
-    )
-    return lines
+    columns = (("層", "left"), ("件数", "right"), ("固定費の合計", "right"), ("実作業の合計", "right"), ("総消費", "right"))
+    keys = ("records", "fixed_sum", "work_sum", "total_spend")
+    rows = [[r["layer"], *(r[k] for k in keys)] for r in totals_rows] + [["合計", *(totals[k] for k in keys)]]
+    return ["## 層ごとの合計", "", _md_table(columns, rows)]
 
 
 def format_role_usage_section(usage: list[dict]) -> list[str]:
-    lines = [
-        "## 持ち場ごとの worker の使い方",
-        "",
-        "| 持ち場 | supervisor | supervisor の実作業 | worker の件数 "
-        "| supervisor と worker の固定費の合計 | 印 |",
-        "| --- | ---: | ---: | ---: | ---: | --- |",
-    ]
-    for r in usage:
-        lines.append(
-            f"| {r['role']} | {r['supervisor']} | {r['supervisor_work']} | "
-            f"{r['workers']} | {r['fixed_sum']} | {r['mark']} |"
-        )
-    return lines
+    columns = (
+        ("フェーズ", "left"),
+        ("supervisor", "right"),
+        ("supervisor の実作業", "right"),
+        ("worker の件数", "right"),
+        ("supervisor と worker の固定費の合計", "right"),
+        ("目印", "left"),
+    )
+    keys = ("role", "supervisor", "supervisor_work", "workers", "fixed_sum", "mark")
+    return ["## フェーズごとの worker の使い方", "", _md_table(columns, [[r[k] for k in keys] for r in usage])]
 
 
 def format_agents_markdown(
-    records: list, summary: list[dict], excluded: int,
-    totals_rows: list[dict], totals: dict, usage: list[dict],
+    records: list,
+    summary: list[dict],
+    excluded: int,
+    totals_rows: list[dict],
+    totals: dict,
+    usage: list[dict],
     with_session: bool,
 ) -> str:
     lines: list[str] = []
@@ -675,6 +683,11 @@ def format_agents_markdown(
         lines.append(transcript_agents.format_list(records, with_agent_id=False))
         lines.append("")
     lines.extend(format_agent_summary_section(summary, excluded))
+    lines.append(
+        "フェーズが読めなかった supervisor: "
+        f"{transcript_agents.unphased_supervisors(records)} 件"
+        "（`description` の先頭語がフェーズにも工程名にも当たらない）"
+    )
     lines.append("")
     lines.extend(format_layer_totals_section(totals_rows, totals))
     if with_session:
@@ -701,10 +714,7 @@ def all_session_ids() -> list[str]:
     root = transcript_agents.config_root() / "projects"
     if not root.is_dir():
         return []
-    return sorted(
-        p.stem for project in root.iterdir() if project.is_dir()
-        for p in project.glob("*.jsonl")
-    )
+    return sorted(p.stem for project in root.iterdir() if project.is_dir() for p in project.glob("*.jsonl"))
 
 
 def select_transcripts(
@@ -721,11 +731,7 @@ def select_transcripts(
     if args.session:
         # **`--session` は Skill の統計をそのセッションの conductor の記録だけで数える**
         # （AC6 の確かめ方）。配下の記録は `--agents` の表が扱う。
-        return [
-            path for path in (
-                transcript_agents.session_paths(s)[0] for s in args.session
-            ) if path is not None
-        ]
+        return [path for path in (transcript_agents.session_paths(s)[0] for s in args.session) if path is not None]
     return list(iter_transcripts(effective_days, date_from, date_to))
 
 
@@ -735,9 +741,7 @@ def filter_projects(
 ) -> dict[str, tuple[Counter, Counter, Counter, Counter]]:
     """プロジェクト名の部分一致でテーブルを絞る。"""
     needle = needle.lower()
-    return {
-        k: v for k, v in per_project.items() if needle in k.lower()
-    }
+    return {k: v for k, v in per_project.items() if needle in k.lower()}
 
 
 def emit_json(
@@ -757,11 +761,13 @@ def emit_json(
     projects_json = []
     for project, (auto, explicit, trig, hits) in sorted(per_project.items()):
         rows, total = build_rows(skills, auto, explicit, trig, hits)
-        projects_json.append({
-            "project": project,
-            "total": total,
-            "skills": rows,
-        })
+        projects_json.append(
+            {
+                "project": project,
+                "total": total,
+                "skills": rows,
+            }
+        )
     grand_rows, grand_total = build_rows(skills, *merge_counters(per_project))
     out = {
         "meta": {
@@ -779,14 +785,17 @@ def emit_json(
     }
     if args.agents:
         out["meta"]["window_limit"] = args.window_limit
-        out.update({
-            "agents": [r.as_row() for r in agents],
-            "agent_summary": agent_summary,
-            "layer_totals": totals_rows,
-            "totals": totals,
-            "role_usage": usage,
-            "excluded": excluded,
-        })
+        out.update(
+            {
+                "agents": [r.as_row() for r in agents],
+                "agent_summary": agent_summary,
+                "layer_totals": totals_rows,
+                "totals": totals,
+                "role_usage": usage,
+                "excluded": excluded,
+                "unphased_supervisors": transcript_agents.unphased_supervisors(agents),
+            }
+        )
     print(json.dumps(out, ensure_ascii=False, indent=2))
 
 
@@ -824,44 +833,44 @@ def emit_markdown(
 
     if args.agents:
         print()
-        print(format_agents_markdown(
-            agents, agent_summary, excluded, totals_rows, totals, usage,
-            with_session=bool(args.session),
-        ))
+        print(
+            format_agents_markdown(
+                agents,
+                agent_summary,
+                excluded,
+                totals_rows,
+                totals,
+                usage,
+                with_session=bool(args.session),
+            )
+        )
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(
         description="NDF skill usage statistics from Claude Code transcripts",
     )
-    ap.add_argument("--days", type=int, default=90,
-                    help="集計対象の遡及日数 (default: 90、--from/--to 指定時は無視)")
-    ap.add_argument("--from", dest="date_from", default=None,
-                    help="開始日 YYYY-MM-DD (inclusive)")
-    ap.add_argument("--to", dest="date_to", default=None,
-                    help="終了日 YYYY-MM-DD (inclusive)")
-    ap.add_argument("--plugin-root", default=None,
-                    help="NDFプラグインのルート (default: 自動検出)")
-    ap.add_argument("--format", choices=["md", "json"], default="md",
-                    help="出力形式 (default: md)")
-    ap.add_argument("--skill", default=None,
-                    help="skill名(部分一致)でフィルタ")
-    ap.add_argument("--project", default=None,
-                    help="プロジェクト名(部分一致)でフィルタ")
-    ap.add_argument("--by-project", action="store_true",
-                    help="プロジェクト別に個別のテーブルを出力")
-    ap.add_argument("--show-keywords", action="store_true",
-                    help="各skillに抽出されたトリガーキーワードを出力")
-    ap.add_argument("--include-fallback", action="store_true",
-                    help="Triggers欄が無いskillでも description から語彙抽出してマッチ (ノイズ多)")
-    ap.add_argument("--agents", action="store_true",
-                    help="3 層（conductor / supervisor / worker）の context window を出す")
-    ap.add_argument("--session", action="append", default=[],
-                    help="セッション ID で絞る (繰り返し可)")
-    ap.add_argument("--layer", choices=transcript_agents.LAYERS, default=None,
-                    help="--agents の出力を 1 つの層に絞る")
-    ap.add_argument("--window-limit", type=int, default=DEFAULT_WINDOW_LIMIT,
-                    help=f"割る候補の印を付ける最大充填の目安 (default: {DEFAULT_WINDOW_LIMIT})")
+    ap.add_argument("--days", type=int, default=90, help="集計対象の遡及日数 (default: 90、--from/--to 指定時は無視)")
+    ap.add_argument("--from", dest="date_from", default=None, help="開始日 YYYY-MM-DD (inclusive)")
+    ap.add_argument("--to", dest="date_to", default=None, help="終了日 YYYY-MM-DD (inclusive)")
+    ap.add_argument("--plugin-root", default=None, help="NDFプラグインのルート (default: 自動検出)")
+    ap.add_argument("--format", choices=["md", "json"], default="md", help="出力形式 (default: md)")
+    ap.add_argument("--skill", default=None, help="skill名(部分一致)でフィルタ")
+    ap.add_argument("--project", default=None, help="プロジェクト名(部分一致)でフィルタ")
+    ap.add_argument("--by-project", action="store_true", help="プロジェクト別に個別のテーブルを出力")
+    ap.add_argument("--show-keywords", action="store_true", help="各skillに抽出されたトリガーキーワードを出力")
+    ap.add_argument(
+        "--include-fallback", action="store_true", help="Triggers欄が無いskillでも description から語彙抽出してマッチ (ノイズ多)"
+    )
+    ap.add_argument("--agents", action="store_true", help="3 層（conductor / supervisor / worker）の context window を出す")
+    ap.add_argument("--session", action="append", default=[], help="セッション ID で絞る (繰り返し可)")
+    ap.add_argument("--layer", choices=transcript_agents.LAYERS, default=None, help="--agents の出力を 1 つの層に絞る")
+    ap.add_argument(
+        "--window-limit",
+        type=int,
+        default=DEFAULT_WINDOW_LIMIT,
+        help=f"割る候補の目印を付ける最大充填の目安 (default: {DEFAULT_WINDOW_LIMIT})",
+    )
     args = ap.parse_args()
 
     plugin_root = pathlib.Path(args.plugin_root) if args.plugin_root else plugin_root_default()
@@ -906,8 +915,7 @@ def main() -> int:
     if not window and effective_days:
         window.append(f"last {effective_days} days")
     print(
-        f"# NDF Skill 使用統計 ({' / '.join(window) or 'all time'} / "
-        f"transcript {len(transcripts)}件 / plugin {plugin_root})",
+        f"# NDF Skill 使用統計 ({' / '.join(window) or 'all time'} / transcript {len(transcripts)}件 / plugin {plugin_root})",
         file=sys.stderr,
     )
 
@@ -920,13 +928,30 @@ def main() -> int:
 
     if args.format == "json":
         emit_json(
-            skills, per_project, args, effective_days, plugin_root, transcripts,
-            agents, agent_summary, totals_rows, totals, usage, excluded,
+            skills,
+            per_project,
+            args,
+            effective_days,
+            plugin_root,
+            transcripts,
+            agents,
+            agent_summary,
+            totals_rows,
+            totals,
+            usage,
+            excluded,
         )
     else:
         emit_markdown(
-            skills, per_project, args,
-            agents, agent_summary, totals_rows, totals, usage, excluded,
+            skills,
+            per_project,
+            args,
+            agents,
+            agent_summary,
+            totals_rows,
+            totals,
+            usage,
+            excluded,
         )
 
     return 0

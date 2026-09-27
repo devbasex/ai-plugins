@@ -13,8 +13,11 @@ Usage:
     # バイナリファイルをダウンロード（画像、PDF等）
     python3 gdrive_fetch.py --id FILE_ID --download --output /tmp/file.png
 
-    # ファイルをアップロード（公開共有リンク付き）
+    # ファイルをアップロード（既定は非公開）
     python3 gdrive_fetch.py --upload /path/to/file.png
+
+    # リンクを知る全員が閲覧できるようにしてアップロード
+    python3 gdrive_fetch.py --upload /path/to/file.png --public
 """
 
 import argparse
@@ -44,92 +47,86 @@ from googleapiclient.discovery import build  # noqa: E402
 from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload  # noqa: E402
 
 
-SCOPES_READONLY = ['drive.readonly']
-SCOPES_FILE = ['drive.file']
+SCOPES_READONLY = ["drive.readonly"]
+SCOPES_FILE = ["drive.file"]
 
 
-def export_doc(file_id, mime_type='text/plain', output=None, port=None):
+def export_doc(file_id, mime_type="text/plain", output=None, port=None):
     """Google Docs/Sheets/Slidesをエクスポート"""
     creds = get_credentials(SCOPES_READONLY, port=port) if port else get_credentials(SCOPES_READONLY)
-    service = build('drive', 'v3', credentials=creds)
+    service = build("drive", "v3", credentials=creds)
     content = service.files().export(fileId=file_id, mimeType=mime_type).execute()
 
     if output is None:
-        output = '/tmp/gdoc_export.txt'
+        output = "/tmp/gdoc_export.txt"
 
-    with open(output, 'wb') as f:
+    with open(output, "wb") as f:
         f.write(content)
-    print(f'OK: exported {len(content)} bytes to {output}')
+    print(f"OK: exported {len(content)} bytes to {output}")
 
 
 def download_file(file_id, output, port=None):
     """バイナリファイルをダウンロード"""
     creds = get_credentials(SCOPES_READONLY, port=port) if port else get_credentials(SCOPES_READONLY)
-    service = build('drive', 'v3', credentials=creds)
+    service = build("drive", "v3", credentials=creds)
     request = service.files().get_media(fileId=file_id)
     fh = io.BytesIO()
     downloader = MediaIoBaseDownload(fh, request)
     done = False
     while not done:
         status, done = downloader.next_chunk()
-        print(f'  Download {int(status.progress() * 100)}%')
-    with open(output, 'wb') as f:
+        print(f"  Download {int(status.progress() * 100)}%")
+    with open(output, "wb") as f:
         f.write(fh.getvalue())
-    print(f'OK: downloaded {len(fh.getvalue())} bytes to {output}')
+    print(f"OK: downloaded {len(fh.getvalue())} bytes to {output}")
 
 
-def upload_file(filepath, public=True, port=None):
-    """ファイルをGoogle Driveにアップロード"""
+def upload_file(filepath, public=False, port=None):
+    """ファイルをGoogle Driveにアップロードする。`public` のときだけリンクを知る全員へ閲覧を許す"""
     creds = get_credentials(SCOPES_FILE, port=port) if port else get_credentials(SCOPES_FILE)
-    service = build('drive', 'v3', credentials=creds)
+    service = build("drive", "v3", credentials=creds)
 
     filename = os.path.basename(filepath)
-    file_metadata = {'name': filename}
+    file_metadata = {"name": filename}
     media = MediaFileUpload(filepath)
-    file = service.files().create(
-        body=file_metadata, media_body=media, fields='id,webViewLink'
-    ).execute()
+    file = service.files().create(body=file_metadata, media_body=media, fields="id,webViewLink").execute()
 
-    file_id = file['id']
+    file_id = file["id"]
     if public:
-        service.permissions().create(
-            fileId=file_id,
-            body={'type': 'anyone', 'role': 'reader'}
-        ).execute()
+        service.permissions().create(fileId=file_id, body={"type": "anyone", "role": "reader"}).execute()
 
-    direct_url = f'https://drive.google.com/uc?export=view&id={file_id}'
-    print(f'File ID: {file_id}')
-    print(f'View: {file.get("webViewLink", "N/A")}')
-    print(f'Direct URL: {direct_url}')
+    direct_url = f"https://drive.google.com/uc?export=view&id={file_id}"
+    print(f"File ID: {file_id}")
+    print(f"View: {file.get('webViewLink', 'N/A')}")
+    print(f"Direct URL: {direct_url}")
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Google Drive ファイル操作')
-    parser.add_argument('--id', help='Google Drive ファイルID')
-    parser.add_argument('--mime', default='text/plain',
-                        help='エクスポート形式 (text/plain, text/html, application/pdf)')
-    parser.add_argument('--output', '-o', help='出力ファイルパス')
-    parser.add_argument('--download', action='store_true',
-                        help='バイナリダウンロードモード')
-    parser.add_argument('--upload', metavar='FILE', help='アップロードするファイルパス')
-    parser.add_argument('--port', type=int, default=None,
-                        help='OAuth認証ポート（初回認証時のローカルコールバック用）')
+    parser = argparse.ArgumentParser(description="Google Drive ファイル操作")
+    parser.add_argument("--id", help="Google Drive ファイルID")
+    parser.add_argument("--mime", default="text/plain", help="エクスポート形式 (text/plain, text/html, application/pdf)")
+    parser.add_argument("--output", "-o", help="出力ファイルパス")
+    parser.add_argument("--download", action="store_true", help="バイナリダウンロードモード")
+    parser.add_argument("--upload", metavar="FILE", help="アップロードするファイルパス")
+    parser.add_argument(
+        "--public", action="store_true", help="アップロードしたファイルをリンクを知る全員が閲覧できるようにする（既定は非公開）"
+    )
+    parser.add_argument("--port", type=int, default=None, help="OAuth認証ポート（初回認証時のローカルコールバック用）")
     args = parser.parse_args()
 
     if args.upload:
-        upload_file(args.upload, port=args.port)
+        upload_file(args.upload, public=args.public, port=args.port)
         return
 
     if not args.id:
-        parser.print_help()
-        return
+        parser.error("--id か --upload のどちらかが要る")
 
     if args.download:
-        output = args.output or '/tmp/gdrive_download'
+        output = args.output or "/tmp/gdrive_download"
         download_file(args.id, output, port=args.port)
     else:
         export_doc(args.id, args.mime, args.output, port=args.port)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

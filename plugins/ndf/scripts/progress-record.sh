@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # NDF plugin: issue の本文へ工程の進行を記録する。
 #
-#   progress-record.sh <issue番号> <工程名> [--mode M] [--worktree P] [--plan P]
+#   progress-record.sh <issue番号> <工程名> [--mode M] [--pace normal|fast] [--worktree P] [--plan P]
 #                      [--repo <所有者>/<リポジトリ>] [--note TEXT]
 #
-# 工程名に `-` を渡すと、チェックリストを変えずに見出し行（モード・作業ツリー・計画ファイル）
+# 工程名に `-` を渡すと、チェックリストを変えずに見出し行（モード・作業ツリー・実装計画のファイル）
 # だけを更新する。`projects-sync.sh` の `mode` / `worktree` / `plan` がこの形で呼ぶ（#828）。
 #
-# **盤面の宣言が無いリポジトリでも進行が残る。** 記録先は issue の本文の `## 進行` の節で、
+# **ボードの宣言が無いリポジトリでも進行が残る。** 記録先は issue の本文の `## 進行` の節で、
 # 節の外は書き換えない（更新のたびに本文を取得し、その節だけを差し替える）。人が本文へ
 # 書いた内容を消さないためである。
 #
@@ -24,17 +24,18 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SECTION_HEADING="## 進行"
 
 usage() {
-  printf 'usage: progress-record.sh <issue番号> <工程名> [--mode M] [--worktree P] [--plan P] [--repo R] [--note TEXT]\n' >&2
+  printf 'usage: progress-record.sh <issue番号> <工程名> [--mode M] [--pace P] [--worktree P] [--plan P] [--repo R] [--note TEXT]\n' >&2
 }
 
 ISSUE="${1:-}"
 STAGE="${2:-}"
 shift 2 2>/dev/null || true
 
-MODE= WORKTREE= PLAN= REPO= NOTE=
+MODE='' PACE='' WORKTREE='' PLAN='' REPO='' NOTE=''
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --mode) MODE="${2:-}"; shift 2 ;;
+    --pace) PACE="${2:-}"; shift 2 ;;
     --worktree) WORKTREE="${2:-}"; shift 2 ;;
     --plan) PLAN="${2:-}"; shift 2 ;;
     --repo) REPO="${2:-}"; shift 2 ;;
@@ -59,6 +60,10 @@ if [ -n "$MODE" ] && ! pj_is_mode "$MODE"; then
   printf 'ERROR: 知らないモードです: %s\n' "$MODE" >&2
   exit 2
 fi
+if [ -n "$PACE" ] && ! pj_is_pace "$PACE"; then
+  printf 'ERROR: 知らない進め方です: %s\n' "$PACE" >&2
+  exit 2
+fi
 
 command -v gh >/dev/null 2>&1 || exit 0
 
@@ -72,10 +77,10 @@ else
   gh issue view "$ISSUE" --json body -q .body > "$BODY_FILE" 2>/dev/null || exit 0
 fi
 
-# 節の中身を組み立てる。**印を付けるのは、この呼び出しが記録する工程までである。**
+# 節の中身を組み立てる。**目印を付けるのは、この呼び出しが記録する工程までである。**
 # 一覧の残りは空欄のまま残し、飛ばした工程がチェックの穴として見えるようにする。
 STAMP=$(date '+%Y-%m-%d %H:%M')
-export PJ_STAGES SECTION_HEADING STAGE STAMP MODE WORKTREE PLAN NOTE
+export PJ_STAGES SECTION_HEADING STAGE STAMP MODE PACE WORKTREE PLAN NOTE
 python3 - "$BODY_FILE" > "$NEW_FILE" <<'PY' || exit 0
 import os
 import re
@@ -90,6 +95,7 @@ stamp = os.environ["STAMP"]
 # すでにある節から、済んだ工程とその記録を読み取る。**書き直すのは節だけである。**
 done: dict[str, str] = {}
 mode = os.environ.get("MODE", "")
+pace = os.environ.get("PACE", "")
 worktree = os.environ.get("WORKTREE", "")
 plan = os.environ.get("PLAN", "")
 # **見出しは行頭の単独の行として探す。** 部分一致で探すと、本文中の「## 進行状況」や
@@ -105,12 +111,13 @@ if start != -1:
         hit = re.match(r"- \[x\] (.+?)(?: — (.*))?$", line.strip())
         if hit:
             done[hit.group(1)] = hit.group(2) or ""
-    meta = re.search(r"^モード: (\S+)(?: / 作業ツリー: `(.+?)`)?(?: / 計画: `(.+?)`)?$",
+    meta = re.search(r"^モード: (\S+)(?: / 進め方: (\S+))?(?: / 作業ツリー: `(.+?)`)?(?: / 計画: `(.+?)`)?$",
                      section, re.M)
     if meta:
         mode = mode or (meta.group(1) if meta.group(1) != "—" else "")
-        worktree = worktree or (meta.group(2) or "")
-        plan = plan or (meta.group(3) or "")
+        pace = pace or (meta.group(2) or "")
+        worktree = worktree or (meta.group(3) or "")
+        plan = plan or (meta.group(4) or "")
 else:
     end = None
 
@@ -119,7 +126,7 @@ else:
 # 付随情報（`--note`）を新しく渡したときだけ、その分を足す。
 note = os.environ.get("NOTE", "")
 if stage == "-":
-    # 見出し行だけを更新する。チェックリストには印を足さない。
+    # 見出し行だけを更新する。チェックリストには目印を足さない。
     pass
 elif stage in done and done[stage]:
     if note and note not in done[stage]:
@@ -128,6 +135,8 @@ else:
     done[stage] = " / ".join([stamp] + ([note] if note else []))
 
 meta_parts = [f"モード: {mode or '—'}"]
+if pace == "fast":  # 既定（normal）は書かない
+    meta_parts.append(f"進め方: {pace}")
 if worktree:
     meta_parts.append(f"作業ツリー: `{worktree}`")
 if plan:
@@ -160,7 +169,7 @@ else
   gh issue edit "$ISSUE" --body-file "$NEW_FILE" >/dev/null 2>&1 || exit 0
 fi
 if [ "$STAGE" = "-" ]; then
-  printf '#%s 進行の見出し = %s\n' "$ISSUE" "$(sed -n '/^## 進行[[:space:]]*$/,/^## /{/^モード: /p}' "$NEW_FILE" | head -1)"
+  printf '#%s 進行の見出し = %s\n' "$ISSUE" "$(sed -n '/^## 進行[[:space:]]*$/,/^## /{/^モード: /p;}' "$NEW_FILE" | head -1)"
 else
   printf '#%s 進行 = %s\n' "$ISSUE" "$STAGE"
 fi
