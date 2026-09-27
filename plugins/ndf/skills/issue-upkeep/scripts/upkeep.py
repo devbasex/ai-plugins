@@ -13,10 +13,12 @@ candidates: 手順 1 の経路のうち機械で集められるものを集め�
   経路は diff-path（差分のパス）/ diff-identifier（削除された識別子）/ no-milestone /
   closed-milestone（閉じた課題のマイルストーン）/ sub-issue（閉じた親の子）/
   commit-subject（<ref>..HEAD のコミットの件名が #番号で指す）/ all（--all）/
-  manual（--add で担当が足したもの）。commit-subject の候補は、上限で切るときも先に残す。候補ごとに updated_at と本文の要約値を返す。
+  manual（--add で担当が足したもの）。commit-subject の候補は、上限で切るときも先に残す。候補ごとに updated_at と
+  課題の要約値（題名・本文・状態・マイルストーン・ラベル）を返す。
   --limit で 1 回に扱う件数に上限を置く。超えた分は items に載せず、metrics.deferred に番号だけを返す（終了コード 20）。
-apply: plan.json の変更を反映する。反映の直前に updated_at を照合し、変わっていれば本文の
-  要約値を比べ、それも変わっていれば飛ばす（skipped_changed）。済んだものは記録に記録して
+apply: plan.json の変更を反映する。反映の直前に updated_at を照合し、変わっていれば課題の
+  要約値を比べ、それも変わっていれば飛ばす（skipped_changed）。途中で止まった課題は書き込んだ後の
+  要約値を記録に残し、打ち直しでは自分の書き込みとして扱う。済んだものは記録に記録して
   2 度書かない。上限に当たれば Retry-After / 回復時刻 / 倍々の順で待ち、--max-waits を
   超えたら部分的に終わった状態で止める。
 report: candidates と apply の記録から完了報告の値を返す。
@@ -47,6 +49,7 @@ import re
 import sys
 import tempfile
 import time
+import urllib.parse
 from pathlib import Path
 
 _LIB = Path(__file__).resolve().parents[3] / "scripts" / "lib"
@@ -95,6 +98,22 @@ def digest(body) -> str:
     text = (body or "").replace("\r\n", "\n")
     text = "\n".join(line.rstrip() for line in text.split("\n")).strip()
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+def snapshot_digest(issue: dict) -> str:
+    """課題の要約値。apply が書き換えうる欄（題名・本文・状態・マイルストーン・ラベル）をまとめる。
+
+    本文だけを見ると、題名・マイルストーン・ラベルの並行した更新を見落として上書きする。
+    updated_at はコメントでも動くため、updated_at だけでは飛ばさない。
+    """
+    snap = {
+        "title": issue.get("title") or "",
+        "body": digest(issue.get("body")),
+        "state": issue.get("state") or "",
+        "milestone": (issue.get("milestone") or {}).get("title"),
+        "labels": sorted(lb.get("name", "") for lb in issue.get("labels") or []),
+    }
+    return hashlib.sha256(json.dumps(snap, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:16]
 
 
 def _is_identifier(tok: str) -> bool:
@@ -366,7 +385,7 @@ def cmd_candidates(a):
                 "routes": sorted(routes[n], key=ROUTES.index),
                 "terms": sorted(terms.get(n, ())),
                 "updated_at": i.get("updated_at"),
-                "digest": digest(i.get("body")),
+                "digest": snapshot_digest(i),
             }
         )
     for t in empty_milestones:
@@ -432,7 +451,12 @@ def _load_plan(path: str) -> dict:
 
 
 def _ledger_key(repo: str, act: dict) -> str:
-    ch = json.dumps(act.get("changes") or {}, ensure_ascii=False, sort_keys=True)
+    """記録のキー。plan の updated_at と要約値も含め、後の回の同じ変更を「済み」にしない。"""
+    ch = json.dumps(
+        {"changes": act.get("changes") or {}, "updated_at": act.get("updated_at"), "digest": act.get("digest")},
+        ensure_ascii=False,
+        sort_keys=True,
+    )
     return f"{repo}#{act['number']}:{hashlib.sha256(ch.encode('utf-8')).hexdigest()[:12]}"
 
 
@@ -472,6 +496,15 @@ def _diff(cur: dict, ch: dict, ms: Milestones, n: int) -> tuple[dict, list, list
     return patch, add, remove
 
 
+def _with_labels(cur: dict, got, add=(), drop=None) -> dict:
+    """ラベルの書き込みの応答（いまのラベルの一覧）を課題へ写す。応答が無ければ手元で足し引きする。"""
+    if isinstance(got, list):
+        labels = [lb if isinstance(lb, dict) else {"name": lb} for lb in got]
+    else:
+        labels = [lb for lb in cur.get("labels") or [] if lb.get("name") != drop] + [{"name": x} for x in add]
+    return {**cur, "labels": labels}
+
+
 def cmd_apply(a):
     root = git_root(a.root)
     plan = _load_plan(a.plan)
@@ -498,16 +531,20 @@ def cmd_apply(a):
         if verdict in RETURNED:
             put("returned", "要判断は反映しない")
             continue
-        if key in ledger:
+        rec = ledger.get(key)
+        if rec is not None and rec.get("result") != "partial":
             put("already", "記録にある")
             continue
         if verdict in NEEDS_APPROVAL and not act.get("approved"):
             put("needs_approval", "やらないは承認を得てから反映する")
             continue
+        cur, wrote = None, False
         try:
             cur = gh.call([f"repos/{repo}/issues/{n}"], target=n)
-            if cur.get("updated_at") != act["updated_at"] and digest(cur.get("body")) != act["digest"]:
-                put("skipped_changed", f"updated_at {act['updated_at']} → {cur.get('updated_at')}・本文も変わった")
+            now = snapshot_digest(cur)
+            own = rec is not None and now == rec.get("digest")  # 前の打ち直しで自分が書いた状態
+            if cur.get("updated_at") != act["updated_at"] and now != act["digest"] and not own:
+                put("skipped_changed", f"updated_at {act['updated_at']} → {cur.get('updated_at')}・課題の要約値も変わった")
                 continue
             patch, add, remove = _diff(cur, ch, ms, n)
             if not (patch or add or remove):
@@ -516,26 +553,36 @@ def cmd_apply(a):
                 put("unchanged", "変える内容が無い")
                 continue
             if patch:
-                gh.call([f"repos/{repo}/issues/{n}", "-X", "PATCH", "--input", "-"], stdin=json.dumps(patch, ensure_ascii=False), target=n)
+                got = gh.call(
+                    [f"repos/{repo}/issues/{n}", "-X", "PATCH", "--input", "-"], stdin=json.dumps(patch, ensure_ascii=False), target=n
+                )
+                cur, wrote = (got if isinstance(got, dict) else {**cur, **patch}), True
             if add:
-                gh.call(
+                got = gh.call(
                     [f"repos/{repo}/issues/{n}/labels", "-X", "POST", "--input", "-"],
                     stdin=json.dumps({"labels": add}, ensure_ascii=False),
                     target=n,
                 )
+                cur, wrote = _with_labels(cur, got, add=add), True
             for lb in remove:
-                gh.call([f"repos/{repo}/issues/{n}/labels/{lb}", "-X", "DELETE"], target=n)
+                seg = urllib.parse.quote(lb, safe="")  # `status/blocked` の `/` を別のパスにしない
+                got = gh.call([f"repos/{repo}/issues/{n}/labels/{seg}", "-X", "DELETE"], target=n)
+                cur, wrote = _with_labels(cur, got, drop=lb), True
             ledger[key] = {"result": "applied", "fields": sorted(patch), "add_labels": add, "remove_labels": remove}
             jsonio.write_atomic(ledger_path, ledger, indent=1)
             put("applied", ", ".join(sorted(patch) + [f"+{x}" for x in add] + [f"-{x}" for x in remove]))
-        except Partial as e:
+        except (Partial, StepError) as e:
+            if wrote:  # 書き込んだ後の要約値を残し、打ち直しで自分の書き込みを並行の更新と取り違えない
+                ledger[key] = {"result": "partial", "digest": snapshot_digest(cur)}
+                jsonio.write_atomic(ledger_path, ledger, indent=1)
+            if isinstance(e, StepError):
+                put("failed", str(e))
+                continue
             partial, why_partial = True, str(e)
             for rest in actions[idx:]:
                 buckets["pending"].append(rest["number"])
                 items.append({"kind": "issue", "name": f"#{rest['number']}", "result": "pending", "verdict": rest["verdict"]})
             break
-        except StepError as e:
-            put("failed", str(e))
 
     closed = [
         act["number"] for act in actions if act["number"] in buckets["applied"] and (act.get("changes") or {}).get("state") == "closed"
