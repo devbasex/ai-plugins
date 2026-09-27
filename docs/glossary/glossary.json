@@ -1761,6 +1761,14 @@
       "pending_source": "issues/issue-1370-requirements.md"
     },
     {
+      "term": "resume",
+      "context": "ndf-workflow",
+      "meaning": "new mission のマニフェストで then_of のステージが持つ、そのステージから最後までを流す queue のコマンド。承認ゲートで止まった後に続きを流す",
+      "code": "resume",
+      "source": "",
+      "pending_source": "issues/issue-1370-design.md"
+    },
+    {
       "term": "MVV",
       "context": "ndf-workflow",
       "meaning": "Mission / Vision / Value。プロジェクト MVV とミッション MVV の 2 層があり、下位は上位の範囲で具体化する",
