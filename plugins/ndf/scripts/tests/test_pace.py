@@ -48,6 +48,17 @@ def test_a_well_formed_declaration_is_read_with_defaults(tmp_path):
         ({"areas": [{"name": "駆動", "paths": "core/**"}]}, "areas"),
         ({"areas": [{"name": "駆動", "paths": ["core/**", None]}]}, "areas"),
         ({"fast": {"enabled": True, "modes": "light"}}, "fast.modes"),
+        ({"boundary_paths": ""}, "boundary_paths"),
+        ({"boundary_paths": False}, "boundary_paths"),
+        ({"boundary_paths": 0}, "boundary_paths"),
+        ({"boundary_paths": {}}, "boundary_paths"),
+        ({"areas": ""}, "areas"),
+        ({"areas": {}}, "areas"),
+        ({"fast": {"enabled": True, "modes": ""}}, "fast.modes"),
+        ({"fast": []}, "fast"),
+        ({"triggers": [1, 2]}, "triggers"),
+        ({"triggers": "score"}, "triggers"),
+        ({"triggers": {"score": -1}}, "triggers"),
     ],
 )
 def test_a_malformed_declaration_fails_closed(tmp_path, patch, message):
@@ -60,3 +71,8 @@ def test_a_missing_version_fails_closed(tmp_path):
     decl = {k: v for k, v in DECL.items() if k != "version"}
     with pytest.raises(pace.PaceError, match="version"):
         pace.read_pace(write(tmp_path, decl))
+
+
+def test_a_null_value_takes_the_default(tmp_path):
+    d = pace.read_pace(write(tmp_path, {**DECL, "boundary_paths": None, "triggers": None, "areas": None}))
+    assert d["boundary_paths"] == [] and d["areas"] == [] and d["triggers"] == pace.DEFAULT_TRIGGERS
