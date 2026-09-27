@@ -21,9 +21,7 @@ from typing import Any, Optional
 
 import statefile
 
-import test_strategy as ts
-
-from .. import budget, clock, danger, info, timeline, triage
+from .. import budget, clock, danger, info, timeline, triage, wholetest
 from ..gitfacts import (
     revert_range,
     collect_commit_facts,
@@ -198,36 +196,6 @@ def _flag_items(state: dict[str, Any]) -> list[str]:
     return sorted(flags)
 
 
-def _defer_whole_test(path: pathlib.Path, state: dict[str, Any], record: dict[str, Any], flags: list[str]) -> None:
-    """全体テストを CI に任せる戦略では、危険フラグの全体テストを最終ゲートの 1 回へ寄せる（#1334 決定 7・I8）。"""
-    flagged = [i["id"] for i in _newest_first(live_items(state)) if i.get("danger")]
-    deferred = record.setdefault("deferred", {"flags": [], "items": []})
-    deferred["flags"] = sorted(set(deferred.get("flags") or []) | set(flags))
-    deferred["items"] = list(dict.fromkeys(list(deferred.get("items") or []) + flagged))
-    record["resolution"] = "deferred"
-    statefile.save(path, state)
-    info(f"⏭ 危険フラグ（{', '.join(flags)}）が立ちましたが、全体テストは CI に任せる戦略のため最終ゲートへ寄せます（項目 {', '.join(flagged)}）")
-
-
-def _run_whole_locally(state: dict[str, Any], log: pathlib.Path) -> tuple[bool, bool, list[str]]:
-    """手元で全体テストを 1 度走らせる。`(通ったか, 打ち切ったか, 走らせたコマンド)`。"""
-    work = work_dir(state)
-    strategy = timeline.strategy_of(state)
-    commands = strategy.whole_commands()
-    triage.clear_junit(state)
-    passed, timed_out = True, False
-    with open(log, "wb"):
-        pass
-    for command in commands:
-        part = log.with_name(f"{log.stem}-{len(commands)}.log") if len(commands) > 1 else log
-        code, timed_out = run_with_timeout(command, work, timeline.state_whole_timeout(state), output=part)
-        if timed_out or code != 0:
-            passed = False
-        if timed_out:
-            break
-    return passed, timed_out, commands
-
-
 def _whole_test(path: pathlib.Path, state: dict[str, Any], flags: list[str]) -> bool:
     """危険フラグが立ったら全体テストを 1 度だけ走らせる（AC13 AC14）。
 
@@ -241,12 +209,12 @@ def _whole_test(path: pathlib.Path, state: dict[str, Any], flags: list[str]) -> 
     if not flags or record.get("ran"):
         return False
     if timeline.strategy_of(state).whole_on_ci:
-        _defer_whole_test(path, state, record, flags)
+        wholetest.defer_to_final_gate(path, state, record, flags, [i["id"] for i in _newest_first(live_items(state)) if i.get("danger")])
         return False
     info(f"⚠ 危険フラグ（{', '.join(flags)}）が立ったため、全体テストを 1 度走らせます")
     started = time.monotonic()
     log = pathlib.Path(state["tmp_dir"]) / "verify-whole-test.log"
-    passed, timed_out, commands = _run_whole_locally(state, log)
+    passed, timed_out, commands = wholetest.run_locally(state, log)
     record.update(
         {
             "ran": True,
@@ -267,7 +235,7 @@ def _whole_test(path: pathlib.Path, state: dict[str, Any], flags: list[str]) -> 
     record.update(triage.classify(state, timed_out))
     statefile.save(path, state)
     if record.get("fallback_reason"):
-        return _fallback_whole(path, state, record, flags, flagged, log)
+        return wholetest.fallback(path, state, record, flags, flagged, log, _fix_or_narrow)
     info(
         f"🔎 落ちたテスト {len(record['failed_tests'])} 件: フレーキー {len(record['flaky'])} / "
         f"既存失敗 {len(record['preexisting'])} / 変更起因 {len(record['caused'])}"
@@ -278,44 +246,6 @@ def _whole_test(path: pathlib.Path, state: dict[str, Any], flags: list[str]) -> 
         return False
     record["resolution"] = "fixing"
     return _fix_or_narrow(path, state, record, log)
-
-
-def _fallback_whole(
-    path: pathlib.Path,
-    state: dict[str, Any],
-    record: dict[str, Any],
-    flags: list[str],
-    flagged: list[dict[str, Any]],
-    log: pathlib.Path,
-) -> bool:
-    """JUnit で見分けられないときは全体を 1 度走らせ直す（#1334 前提 4・見分けの 4）。
-
-    通ればフレーキー（残す）。落ちれば、着手前が green なら変更起因として危険フラグの項目を修正へ回し、
-    着手前も red なら見分けられないので危険フラグの項目をまとめて取り消して理由を残す。
-    """
-    info(f"⚠ {record['fallback_reason']}ため、全体を 1 度走らせ直して見分けます")
-    rerun_log = log.with_name("verify-whole-rerun.log")
-    passed, timed_out, _ = _run_whole_locally(state, rerun_log)
-    record["fallback_rerun"] = "pass" if passed else ("timeout" if timed_out else "fail")
-    if passed:
-        record["resolution"] = "kept"
-        info("✅ 走らせ直しで通りました（フレーキー）。危険フラグの項目は取り消しません")
-        return False
-    baseline_green = (state.get("baseline_test") or {}).get("status") == "green"
-    if baseline_green and not timed_out:
-        record["caused"] = ["<全体>"]
-        record["resolution"] = "fixing"
-        record["rerun_command"] = None
-        info("🔧 走らせ直しでも落ち、着手前は通っていたため変更起因とみなします")
-        return _fix_or_narrow(path, state, record, rerun_log)
-    reason = f"危険フラグ（{', '.join(flags)}）で走らせた全体テストが落ち、見分けられなかった（{record['fallback_reason']}）"
-    for item in flagged:
-        item["failure_reason"] = reason
-    drop(path, state, [i["id"] for i in flagged], reason)
-    record["reverted"] = True
-    record["resolution"] = "reverted_all"
-    info(f"↩ {dropped_line(state, len(flagged))}。取り消した後の HEAD は最終ゲートが全体テストで確かめます")
-    return False
 
 
 def _whole_items(state: dict[str, Any], record: dict[str, Any]) -> list[dict[str, Any]]:
@@ -336,7 +266,7 @@ def _fix_or_narrow(
     無ければ全体テストのコマンドで確かめる。
     """
     items = _whole_items(state, record)
-    rerun = record.get("rerun_command") or _whole_rerun(state)
+    rerun = record.get("rerun_command") or wholetest.whole_fallback_command(state)
     if items and not _fix_stop(state):
         for item in items:
             item["status"] = FAILING
@@ -352,12 +282,6 @@ def _fix_or_narrow(
     return False
 
 
-def _whole_rerun(state: dict[str, Any]) -> Any:
-    """変更起因のファイルを挙げられないときに走らせ直す全体テスト（先頭の 1 本。シェルで走らせる文字列）。"""
-    commands = timeline.strategy_of(state).whole_commands()
-    return commands[0] if commands else []
-
-
 def _recheck_whole(path: pathlib.Path, state: dict[str, Any], record: dict[str, Any]) -> bool:
     """直した後に、落ちたテストだけを走らせ直す。通れば残し、通らなければ次の試行か絞り込みへ。"""
     items = _whole_items(state, record)
@@ -365,7 +289,7 @@ def _recheck_whole(path: pathlib.Path, state: dict[str, Any], record: dict[str, 
         record["resolution"] = "narrowed"
         return False
     log = pathlib.Path(state["tmp_dir"]) / "verify-whole-rerun.log"
-    rerun = record.get("rerun_command") or _whole_rerun(state)
+    rerun = record.get("rerun_command") or wholetest.whole_fallback_command(state)
     if _run_words(state, rerun, log):
         record["resolution"] = "fixed"
         for item in items:

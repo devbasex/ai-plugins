@@ -11,7 +11,7 @@ from step_result import result
 from supervise_lib import release_templates
 from supervise_lib.decl import with_decls
 from supervise_lib.paths import CHECK_PY, report_result, state_dir_of
-from supervise_lib.test_steps import merge_step, refactor_template_arg, scope_cmd, scope_timeout, test_meta, whole_cmd, whole_timeout
+from supervise_lib.verify_steps import merge_step, refactor_template_arg, scope_cmd, scope_timeout, test_meta, whole_cmd, whole_timeout
 
 
 RULE_IMPL = (

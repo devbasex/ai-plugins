@@ -44,14 +44,14 @@ TRACKED = ["tests/sub/test_a.py", "tests/test_b.py", "tests/Unit/Services/UserSe
 
 def test_pytest_xunit1_failures_are_read_as_file_classname_name():
     assert junit.failed_ids(PYTEST_XML, TRACKED) == ["tests/sub/test_a.py::tests.sub.test_a::test_bad", "tests/test_b.py::tests.test_b::test_err"]
-    assert junit.seconds(PYTEST_XML) == 1.5
+    assert junit.total_seconds(PYTEST_XML) == 1.5
 
 
 def test_phpunit_absolute_paths_are_mapped_to_the_tracked_file():
     assert junit.failed_ids(PHPUNIT_XML, TRACKED) == ["tests/Unit/Services/UserServiceTest.php::Tests.Unit.Services.UserServiceTest::testSave"]
     ci_root = PHPUNIT_XML.replace(b"/var/www/html/", b"/home/runner/work/carmo/carmo/")
     assert junit.failed_ids(ci_root, TRACKED) == junit.failed_ids(PHPUNIT_XML, TRACKED)
-    assert junit.seconds(PHPUNIT_XML) == 2.5
+    assert junit.total_seconds(PHPUNIT_XML) == 2.5
 
 
 def test_an_unmatched_absolute_path_is_dropped_and_bad_xml_is_none():

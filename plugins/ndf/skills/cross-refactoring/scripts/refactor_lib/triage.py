@@ -38,31 +38,19 @@ def existing_failures(state: dict[str, Any]) -> list[str]:
     return list((state.get("baseline_test") or {}).get("existing_failures") or [])
 
 
-def failed_ids(state: dict[str, Any], ci_xmls: Optional[list[bytes]] = None) -> tuple[Optional[list[str]], Optional[str]]:
+def failed_ids_of(state: dict[str, Any], ci_xmls: Optional[list[bytes]] = None) -> tuple[Optional[list[str]], Optional[str]]:
     """落ちた ID。CI の JUnit（`ci_xmls`）があればそこから、無ければ手元の suite の JUnit の置き場から読む。"""
     work = work_dir(state)
-    strategy = timeline.strategy_of(state)
     if ci_xmls is not None:
-        import junit
-
-        tracked = test_triage.tracked_files(work)
-        ids: list[str] = []
-        read_any = False
-        for xml in ci_xmls:
-            found = junit.failed_ids(xml, tracked)
-            if found is None:
-                continue
-            read_any = True
-            ids.extend(i for i in found if i not in ids)
-        return (ids, None) if read_any else (None, "CI の成果物に読める JUnit が無い")
-    return test_triage.read_junit(work, strategy)
+        return test_triage.merged_failed_ids(ci_xmls, test_triage.tracked_files(work))
+    return test_triage.read_junit(work, timeline.strategy_of(state))
 
 
 def classify(state: dict[str, Any], timed_out: bool, ci_xmls: Optional[list[bytes]] = None) -> dict[str, Any]:
     """全体テストの失敗を分ける。JUnit を読めなければ `fallback_reason` だけを返す。"""
     if timed_out:
         return {"failed_tests": None, "flaky": [], "preexisting": [], "caused": [], "fallback_reason": "全体テストが打ち切られ、落ちたテストを取り出せなかった"}
-    ids, reason = failed_ids(state, ci_xmls)
+    ids, reason = failed_ids_of(state, ci_xmls)
     if ids is not None and not ids:
         return {"failed_tests": None, "flaky": [], "preexisting": [], "caused": [], "fallback_reason": "JUnit に落ちたテストが無かった（走らせ直して見分ける）"}
     result = test_triage.classify(

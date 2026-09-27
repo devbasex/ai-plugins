@@ -22,13 +22,11 @@ from __future__ import annotations
 
 import argparse
 import pathlib
-import re
 import sys
 import time
 from typing import Any, Optional
 
 import statefile
-import test_triage
 
 from .. import clock, die, info, timeline, triage
 from ..gitfacts import (
@@ -39,7 +37,6 @@ from ..gitfacts import (
     reported_shas,
     run_with_timeout,
     safe_int,
-    check_run_result,
     collect_commit_facts,
     commits_in_range,
 )
@@ -49,12 +46,10 @@ from ..intake import (
     close_without_result,
     discard_unverified,
 )
-from ..items import live_items
-from ..outbound import plan_line
-from ..paths import git_out, load_state, sh, work_dir
-from ..undo import drop
+from ..paths import git_out, load_state, work_dir
 from ..verify import verify_final_fix_commit
 from ..verify import unassigned_fix_commits
+from ..gate_ci import ci_checks, ci_gate, ci_mode, revert_deferred
 
 
 def cmd_final_gate(args: argparse.Namespace) -> None:
@@ -99,7 +94,7 @@ def cmd_final_gate(args: argparse.Namespace) -> None:
         return
 
     stop = _final_fix_stop(state, gate)
-    if stop and _revert_deferred(path, state, gate):
+    if stop and revert_deferred(path, state, gate):
         # 寄せた危険フラグの項目を取り消した。取り消しを公開して、次の最終ゲートが CI を待ち直す。
         statefile.save(path, state)
         push_with_retry_marker(path, state, gate)
@@ -132,18 +127,13 @@ def _final_fix_stop(state: dict[str, Any], gate: dict[str, Any]) -> Optional[str
     return None
 
 
-def _ci_mode(state: dict[str, Any]) -> bool:
-    """最終ゲートを CI で見るか（戦略が CI に任せる、または `--ci-check`）。"""
-    return timeline.strategy_of(state).whole_on_ci or bool(str(state.get("ci_check") or "").strip())
-
-
 def _reusable_whole_test(state: dict[str, Any]) -> bool:
     """検証の中の全体テストを使い回せるか（決定 16）。
 
     CI で見るなら使い回さない。検証の中で走って通り、取り消しが無く（`whole_test.reverted` が偽）、
     その後に HEAD が 1 つも進んでいないときだけ真。生成物の同期のコミットが積まれていれば HEAD が進んでいるので走らせる。
     """
-    if _ci_mode(state):
+    if ci_mode(state):
         return False
     record = state.get("whole_test") or {}
     if not (record.get("ran") and record.get("status") == "pass") or record.get("reverted"):
@@ -156,10 +146,10 @@ def _run_and_record_gate_check(path: pathlib.Path, state: dict[str, Any], gate: 
     """最終ゲートのチェックを 1 回走らせ、`checks` へ記録して結果を返す。落ちたら見分け、変更起因が無ければ通す。"""
     # **排他である。** CI で見るなら手元のテストを実行せず継続的統合の結論だけで判定し、無ければ
     # 手元のテストだけで判定する。「どちらか一方が通れば通過」とはしない。
-    ci = _ci_mode(state)
+    ci = ci_mode(state)
     gate["mode"] = "ci" if ci else "test"
     started = time.monotonic()
-    passed, detail, verdict = _ci_gate(state) if ci else _local_gate(state)
+    passed, detail, verdict = ci_gate(state) if ci else _local_gate(state)
     seconds = round(time.monotonic() - started, 1)
     if not passed and verdict is not None:
         # 落ちたテストを見分ける。変更起因が無ければ通す（I5・決定 11）。
@@ -184,17 +174,9 @@ def _run_and_record_gate_check(path: pathlib.Path, state: dict[str, Any], gate: 
 
 def _gate_command(state: dict[str, Any]) -> str:
     """記録に残す最終ゲートの相手（チェックの名前か全体テストのコマンド）。"""
-    if _ci_mode(state):
-        return " / ".join(_ci_checks(state))
+    if ci_mode(state):
+        return " / ".join(ci_checks(state))
     return " && ".join(timeline.strategy_of(state).whole_commands())
-
-
-def _ci_checks(state: dict[str, Any]) -> list[str]:
-    """待つチェックの名前。`--ci-check` → 戦略の `ci.checks`（宣言の `test.ci.check` か必須のチェック）。"""
-    named = str(state.get("ci_check") or "").strip()
-    if named:
-        return [named]
-    return [str(c) for c in (timeline.strategy_of(state).ci or {}).get("checks") or []]
 
 
 def _emit_cross_review(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any], message: str) -> None:
@@ -260,36 +242,6 @@ def _gate_failing(
     info(f"❌ 最終ゲートが落ちました（{detail}）。修正ラウンド {gate['fix_rounds']} — 修正担当は {impl} です")
     statefile.emit(FINAL_GATE="failing", FINAL_FIX_IMPL=impl, FINAL_FIX_ROUND=gate["fix_rounds"])
     sys.exit(2)
-
-
-def _revert_deferred(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any]) -> bool:
-    """検証で最終ゲートへ寄せた危険フラグの項目を、変更起因のとき新しい順に取り消す（#1334 決定 7・AC8）。
-
-    取り消すたびに変更起因のファイルを手元で走らせ直し、通った時点で止める。取り消したら真。
-    寄せた項目が無い・変更起因でない・走らせ直す語が無いときは何もせず偽。
-    """
-    deferred = (state.get("whole_test") or {}).get("deferred") or {}
-    ids = [i for i in deferred.get("items") or [] if i not in (gate.get("reverted_deferred") or [])]
-    verdict = gate.get("triage") or {}
-    rerun = verdict.get("rerun_command")
-    if not ids or not verdict.get("caused") or not rerun:
-        return False
-    live = {i["id"]: i for i in live_items(state)}
-    reason = "最終ゲートへ寄せた危険フラグの全体テストで変更起因の失敗が出て、締め切りを過ぎた"
-    reverted: list[str] = []
-    for item_id in sorted(ids, key=lambda i: -int((live.get(i) or {}).get("rank") or 0)):
-        if item_id not in live:
-            continue
-        live[item_id]["failure_reason"] = reason
-        drop(path, state, [item_id], reason)
-        reverted.append(item_id)
-        code, timed_out = run_with_timeout(list(rerun), work_dir(state), timeline.state_test_timeout(state))
-        if not timed_out and code == 0:
-            break
-    gate["reverted_deferred"] = list(gate.get("reverted_deferred") or []) + reverted
-    if reverted:
-        info(f"↩ 寄せた危険フラグの項目を新しい順に取り消しました（{', '.join(reverted)}）。{plan_line(state)}")
-    return bool(reverted)
 
 
 def _final_fix_impl(state: dict[str, Any], gate: dict[str, Any]) -> str:
@@ -507,69 +459,3 @@ def _local_gate(state: dict[str, Any]) -> tuple[bool, str, Optional[dict[str, An
             return False, f"{command} / 終了コード {code}", {"timed_out": False}
     return True, f"{' && '.join(commands)} / 終了コード 0", None
 
-
-def _gh_json(path: str) -> Any:
-    out = sh(["gh", "api", "--method", "GET", path], check=False)
-    if not out:
-        return None
-    try:
-        import json
-
-        return json.loads(out)
-    except ValueError:
-        return None
-
-
-def _gh_raw(path: str) -> bytes:
-    import subprocess
-
-    p = subprocess.run(["gh", "api", "--method", "GET", path], capture_output=True)
-    return p.stdout if p.returncode == 0 else b""
-
-
-def _ci_junit(state: dict[str, Any], sha: str, checks: list[str]) -> list[bytes]:
-    """落ちたチェックの run の成果物から JUnit を落とす。取れなければ空（見分けは走らせ直しへ落ちる）。"""
-    import gh_checks
-    import junit
-
-    from types import SimpleNamespace
-
-    repo = str(state.get("repo") or "")
-    runs = gh_checks.fetch_check_runs(repo, sha, rest_get=lambda p: SimpleNamespace(body=_gh_json(p))) or []
-    for run in runs:
-        if str(run.get("name") or "") not in checks:
-            continue
-        m = re.search(r"/actions/runs/(\d+)", str(run.get("details_url") or run.get("html_url") or ""))
-        if m:
-            return junit.artifact_xmls(_gh_json, _gh_raw, repo, m.group(1), (timeline.strategy_of(state).ci or {}).get("junit_artifacts"))
-    return []
-
-
-def _ci_gate(state: dict[str, Any]) -> tuple[bool, str, Optional[dict[str, Any]]]:
-    """継続的統合の結果で判定する。`pending` の間は上限（`limits.ci_wait_timeout`）まで待つ（決定 9）。
-
-    **結果を得られないときは通過させない**（fail-closed）。上限までに終わらない・照会できないときは、待った秒と
-    理由を出して「判断が要る」（終了コード 4）で終える。
-    """
-    sha = git_out(work_dir(state), ["rev-parse", "HEAD"]) or ""
-    repo = str(state.get("repo") or "")
-    checks = _ci_checks(state)
-    if not checks:
-        die("最終ゲートで待つチェックの名前がありません（--ci-check か宣言の test.ci.check・ci.required_checks）")
-    max_wait = float(timeline.state_ci_wait_timeout(state))
-
-    def fetch() -> Optional[str]:
-        results = [check_run_result(repo, sha, name) for name in checks]
-        if any(r is None for r in results):
-            return None
-        if any(r == "pending" for r in results):
-            return "pending"
-        return "success" if all(r == "success" for r in results) else str(next(r for r in results if r != "success"))
-
-    outcome, waited, attempts = test_triage.wait_check(fetch, max_wait, on_wait=lambda gap, n: info(f"⏳ CI を待っています（{n} 回目 / 次は {gap:.0f} 秒後）"))
-    label = f"チェック {', '.join(checks)}（{sha[:7]} / 待ち {waited:.0f} 秒・照会 {attempts} 回 / 上限 {max_wait:.0f} 秒）"
-    if outcome is None:
-        die(f"{label} の結論を得られませんでした（上限までに終わらない、または照会に失敗）。判断が要ります")
-    if outcome == "success":
-        return True, f"{label} の結論は success でした", None
-    return False, f"{label} の結論は {outcome} でした", {"timed_out": False, "ci_xmls": _ci_junit(state, sha, checks)}

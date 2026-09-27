@@ -19,7 +19,6 @@ from __future__ import annotations
 import argparse
 import json
 import pathlib
-import re
 import subprocess
 import sys
 import time
@@ -27,7 +26,6 @@ import time
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE / "lib"))
 
-import junit  # noqa: E402
 import repo as repo_lib  # noqa: E402
 import test_strategy as ts  # noqa: E402
 import test_triage  # noqa: E402
@@ -56,7 +54,7 @@ def _resolve(root: pathlib.Path, template: str | None) -> tuple[ts.Strategy, dic
     return strategy, limits, notes
 
 
-def _git(root: pathlib.Path, *args: str) -> str | None:
+def _git_out(root: pathlib.Path, *args: str) -> str | None:
     p = subprocess.run(["git", *args], cwd=str(root), capture_output=True, text=True)
     return p.stdout.strip() if p.returncode == 0 else None
 
@@ -67,7 +65,7 @@ def _base_sha(root: pathlib.Path, base: str | None) -> str | None:
     if not branch:
         return None
     for ref in (f"origin/{branch}", branch):
-        sha = _git(root, "merge-base", ref, "HEAD")
+        sha = _git_out(root, "merge-base", ref, "HEAD")
         if sha:
             return sha
     return None
@@ -76,16 +74,7 @@ def _base_sha(root: pathlib.Path, base: str | None) -> str | None:
 def _classify(root: pathlib.Path, strategy: ts.Strategy, limits: dict, base: str | None, ci_xmls: list[bytes] | None = None) -> dict:
     work = str(root)
     if ci_xmls is not None:
-        tracked = test_triage.tracked_files(work)
-        ids: list[str] = []
-        read_any = False
-        for xml in ci_xmls:
-            found = junit.failed_ids(xml, tracked)
-            if found is None:
-                continue
-            read_any = True
-            ids.extend(i for i in found if i not in ids)
-        failed, reason = (ids, None) if read_any else (None, "CI の成果物に読める JUnit が無い")
+        failed, reason = test_triage.merged_failed_ids(ci_xmls, test_triage.tracked_files(work))
     else:
         failed, reason = test_triage.read_junit(work, strategy)
     if failed is not None and not failed:
@@ -102,7 +91,7 @@ def _classify(root: pathlib.Path, strategy: ts.Strategy, limits: dict, base: str
     )
 
 
-def _finish(strategy: ts.Strategy, limits: dict, notes: list[str], triage: dict | None, passed: bool, detail: str) -> int:
+def _emit_outcome(strategy: ts.Strategy, limits: dict, notes: list[str], triage: dict | None, passed: bool, detail: str) -> int:
     items = [{"strategy": strategy.name, "source": strategy.source, "limits": {k: v for k, v in limits.items() if k != "basis"}}]
     for note in notes:
         items.append({"note": note})
@@ -144,31 +133,22 @@ def cmd_scope(a) -> int:
     seconds = round(time.monotonic() - started, 1)
     detail = f"範囲テスト {len(words)} 本（{seconds} 秒 / 戦略 {strategy.name}）"
     if not failed_any:
-        return _finish(strategy, limits, notes, None, True, detail)
+        return _emit_outcome(strategy, limits, notes, None, True, detail)
     triage = _classify(root, strategy, limits, a.base) if strategy.name != ts.ROUND_ONLY else {"fallback_reason": "round-only は JUnit を読まない"}
-    return _finish(strategy, limits, notes, triage, False, detail + " が落ちた")
+    return _emit_outcome(strategy, limits, notes, triage, False, detail + " が落ちた")
 
 
-def _gh_json(path: str):
-    p = subprocess.run(["gh", "api", "--method", "GET", path], capture_output=True)
-    if p.returncode != 0:
-        return None
-    try:
-        return json.loads(p.stdout.decode("utf-8") or "null")
-    except ValueError:
-        return None
+class _Resp:
+    def __init__(self, body):
+        self.body = body
 
 
-def _gh_raw(path: str) -> bytes:
-    p = subprocess.run(["gh", "api", "--method", "GET", path], capture_output=True)
-    return p.stdout if p.returncode == 0 else b""
-
-
-def _ci_gate(root: pathlib.Path, strategy: ts.Strategy, limits: dict, notes: list[str], base: str | None) -> int:
+def _wait_ci(root: pathlib.Path, strategy: ts.Strategy, limits: dict, notes: list[str], base: str | None) -> int:
+    """Pull Request のチェックを上限まで待ち、落ちたら CI の JUnit で見分ける（F4）。"""
     import gh_checks
 
     owner_repo = repo_lib.owner_repo(root)
-    sha = _git(root, "rev-parse", "HEAD") or ""
+    sha = _git_out(root, "rev-parse", "HEAD") or ""
     checks = list((strategy.ci or {}).get("checks") or [])
     if not owner_repo or not sha:
         emit(result(TOOL, "stopped", "origin のリポジトリか HEAD が分からず、CI を読めない", [], {}))
@@ -177,8 +157,11 @@ def _ci_gate(root: pathlib.Path, strategy: ts.Strategy, limits: dict, notes: lis
         emit(result(TOOL, "stopped", "待つチェックの名前が無い（test.ci.check か ci.required_checks）", [], {}))
         return 2
 
+    def runs_now():
+        return gh_checks.fetch_check_runs(owner_repo, sha, rest_get=lambda p: _Resp(test_triage.gh_json(p)))
+
     def fetch():
-        runs = gh_checks.fetch_check_runs(owner_repo, sha, rest_get=lambda p: _Resp(_gh_json(p)))
+        runs = runs_now()
         if runs is None:
             return None
         results = [gh_checks.check_result(runs, name) for name in checks]
@@ -194,36 +177,17 @@ def _ci_gate(root: pathlib.Path, strategy: ts.Strategy, limits: dict, notes: lis
         emit(result(TOOL, "stopped", f"{detail} の結論を得られなかった（上限か照会の失敗）", [{"waited_seconds": waited}], {}))
         return 2
     if outcome == "success":
-        return _finish(strategy, limits, notes, None, True, detail)
-    run_id = _run_id_of(owner_repo, sha, checks)
-    xmls = junit.artifact_xmls(_gh_json, _gh_raw, owner_repo, run_id, (strategy.ci or {}).get("junit_artifacts")) if run_id else []
+        return _emit_outcome(strategy, limits, notes, None, True, detail)
+    xmls = test_triage.ci_junit_xmls(owner_repo, sha, checks, (strategy.ci or {}).get("junit_artifacts"), fetch_runs=runs_now)
     triage = _classify(root, strategy, limits, base, ci_xmls=xmls)
-    return _finish(strategy, limits, notes, triage, False, detail + f" の結論は {outcome}")
-
-
-class _Resp:
-    def __init__(self, body):
-        self.body = body
-
-
-def _run_id_of(owner_repo: str, sha: str, checks: list[str]) -> str | None:
-    """チェックの `details_url` から GitHub Actions の run の ID を取る。"""
-    import gh_checks
-
-    runs = gh_checks.fetch_check_runs(owner_repo, sha, rest_get=lambda p: _Resp(_gh_json(p))) or []
-    for run in runs:
-        if str(run.get("name") or "") in checks:
-            m = re.search(r"/actions/runs/(\d+)", str(run.get("details_url") or run.get("html_url") or ""))
-            if m:
-                return m.group(1)
-    return None
+    return _emit_outcome(strategy, limits, notes, triage, False, detail + f" の結論は {outcome}")
 
 
 def cmd_whole(a) -> int:
     root = pathlib.Path(a.root).resolve()
     strategy, limits, notes = _resolve(root, a.template)
     if strategy.whole_on_ci:
-        return _ci_gate(root, strategy, limits, notes, a.base)
+        return _wait_ci(root, strategy, limits, notes, a.base)
     commands = strategy.whole_commands()
     if not commands:
         emit(result(TOOL, "stopped", "全体テストのコマンド（suites[].command）が無い", [], {}))
@@ -241,10 +205,10 @@ def cmd_whole(a) -> int:
     seconds = round(time.monotonic() - started, 1)
     detail = f"全体テスト {len(commands)} 本（{seconds} 秒 / 戦略 {strategy.name}）"
     if not failed_any:
-        return _finish(strategy, limits, notes, None, True, detail)
+        return _emit_outcome(strategy, limits, notes, None, True, detail)
     if strategy.name == ts.ROUND_ONLY:
-        return _finish(strategy, limits, notes, {"fallback_reason": "round-only は JUnit を読まない"}, False, detail + " が落ちた")
-    return _finish(strategy, limits, notes, _classify(root, strategy, limits, a.base), False, detail + " が落ちた")
+        return _emit_outcome(strategy, limits, notes, {"fallback_reason": "round-only は JUnit を読まない"}, False, detail + " が落ちた")
+    return _emit_outcome(strategy, limits, notes, _classify(root, strategy, limits, a.base), False, detail + " が落ちた")
 
 
 def main(argv=None) -> int:

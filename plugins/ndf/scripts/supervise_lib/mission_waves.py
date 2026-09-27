@@ -10,7 +10,7 @@ from supervise_lib.decl import decl_fields
 from supervise_lib.paths import GLOSSARY_PY, MVV_PY, PUSH_DESIGN, SELF, SPEC_COPY_PY, WORKTREE_SETUP
 from supervise_lib.release_templates import plan_release
 from supervise_lib.templates import plan_check, plan_check_since, plan_impl
-from supervise_lib.test_steps import merge_step
+from supervise_lib.verify_steps import merge_step
 
 
 DESIGN_GLOSSARY_NOTE = "{state_dir}/work/glossary-candidates.md"  # 設計のプランが起こした用語集の候補の語

@@ -24,10 +24,9 @@ import project_decl
 import repo as repo_lib
 import statefile
 import test_strategy as ts
-import test_triage
 
 from .. import ABORT, die, info
-from ..gitfacts import run_with_timeout
+from .. import baseline as baseline_lib
 from .. import timeline
 from ..paths import (
     git_out,
@@ -38,7 +37,7 @@ from ..paths import (
 )
 from ..codemetrics_record import code_metrics_record, ensure_record, recorded_enabled
 from ..plan import PLAN_COMMENT, PLAN_FILE, PLAN_NONE, normalize_plan_file
-from ..scope import require_scope_covers_tests, test_locations
+from ..scope import require_scope_covers_tests
 from ..vocabulary import (
     DEFAULT_BUDGET_MINUTES,
     DEFAULT_SEVERITY_THRESHOLD,
@@ -560,10 +559,9 @@ def _verify_init(
     w, w_source = ts.whole_seconds(prep.decl)
     c = ts.ci_wall_seconds(prep.decl, (prep.strategy.ci or {}).get("check") if prep.strategy.ci else None)
     timeout = ts.limits(prep.strategy, int(args.budget_minutes), whole_seconds_value=w, whole_source=w_source, ci_seconds=c)["init_test_timeout"]
-    baseline = _run_baseline_test(prep.strategy, prep.work, timeout, list(args.scope), prep.tmp_dir)
+    baseline = baseline_lib.run_baseline(prep.strategy, prep.work, timeout, list(args.scope), prep.tmp_dir)
     baseline.update({"whole_seconds": w, "whole_source": w_source, "ci_seconds": c})
-    round_record = _run_round_test(prep.strategy, baseline, prep.work, timeout)
-    return participants, baseline, round_record
+    return participants, baseline, baseline_lib.round_record(prep.strategy, baseline)
 
 
 def _choose_implementer(
@@ -862,83 +860,3 @@ def _is_registered_worktree(path: pathlib.Path) -> bool:
     return any(line == f"worktree {target}" for line in out.splitlines())
 
 
-def _baseline_commands(strategy: ts.Strategy, scope: list[str], work: pathlib.Path) -> tuple[str, list[Any]]:
-    """着手前に走らせるもの。`(mode, コマンドの並び)`。
-
-    手元の戦略は全体テスト（`whole`）、CI に任せる戦略は `--scope` のテストの置き場所の範囲テスト（`scope`）、
-    `round-only` はラウンドテスト（`round`）。全体テストを手元で走らせないのは I4 による。
-    """
-    if strategy.name == ts.ROUND_ONLY:
-        # 全体テストの後にラウンドテストを 1 回。同じコマンドなら 2 度走らせない（#880）。
-        commands = list(strategy.whole_commands())
-        if strategy.round_command and strategy.round_command not in commands:
-            commands.append(strategy.round_command)
-        return "round", commands
-    if strategy.whole_on_ci:
-        locations = test_locations(scope, str(work))
-        words = []
-        for suite in strategy.scoped_suites():
-            mine = [loc for loc in locations if ts.suite_for(strategy, loc) is suite] or (locations if len(strategy.scoped_suites()) == 1 else [])
-            if mine:
-                words.append(ts.scope_words(str(suite.scope_command), mine))
-        return "scope", words
-    return "whole", strategy.whole_commands()
-
-
-def _run_baseline_test(strategy: ts.Strategy, work: pathlib.Path, timeout: int, scope: list[str], tmp_dir: pathlib.Path) -> dict[str, Any]:
-    """着手前のテストを戦略に沿って実行して記録する（#1334 F3）。
-
-    **落ちても止めない。** 落ちたテストは JUnit から読んで既存失敗として書き、最終ゲートは既存失敗の外で
-    新しく落ちたテストが無ければ通る（I5）。上限を超えたときだけ止める。
-    """
-    mode, commands = _baseline_commands(strategy, scope, work)
-    test_triage.clear_junit(str(work), strategy)
-    started = time.monotonic()
-    status = "green"
-    for i, command in enumerate(commands):
-        log = tmp_dir / f"init-{mode}-{i}.log"
-        code, timed_out = run_with_timeout(command, str(work), timeout, output=log)
-        shown = command if isinstance(command, str) else " ".join(command)
-        if timed_out:
-            die(f"着手前のテストが {timeout} 秒で終わりませんでした（{shown}）。打ち切りました")
-            raise SystemExit(ABORT)
-        if code != 0:
-            status = "red"
-    seconds = round(time.monotonic() - started, 1)
-    record: dict[str, Any] = {
-        "mode": mode,
-        "command": " && ".join(c if isinstance(c, str) else " ".join(c) for c in commands) or None,
-        "status": status,
-        "checked_at": statefile.now(),
-        "seconds": seconds,
-        # **HEAD も残す。** 全体テストが落ちたとき、既存失敗かをこの SHA で見分け（決定 22）、報告と改修計画に基準として出す。
-        "head": git_out(str(work), ["rev-parse", "HEAD"]),
-        "existing_failures": [],
-        "existing_failures_reason": None,
-    }
-    if status == "red":
-        ids, reason = test_triage.read_junit(str(work), strategy)
-        record["existing_failures"] = ids
-        record["existing_failures_reason"] = reason
-        shown = f"{len(ids)} 件を既存失敗として記録" if ids is not None else f"落ちたテストを読めない（{reason}）"
-        info(f"⚠ 着手前のテストが失敗しています（{record['command']}）。{shown}して続けます（既存失敗の外で新しく落ちたテストが無ければ最終ゲートは通ります）")
-    elif commands:
-        info(f"✅ 着手前のテスト成功: {record['command']}（{seconds} 秒 / {mode}）")
-    else:
-        info("ℹ 着手前に走らせるテストがありません（--scope のテストの置き場所を受け持つ suite が無い）")
-    return record
-
-
-def _run_round_test(
-    strategy: ts.Strategy,
-    baseline: dict[str, Any],
-    work: pathlib.Path,
-    timeout: int,
-) -> dict[str, Any]:
-    """`round-only` のラウンドテストの記録（#880）。着手前のテストがそのまま走らせたので、結果を写す。
-
-    ほかの戦略は `command` を `None` で残す。項目の検証は戦略の雛形で組み立てた語の並びだけを使う（AC10b）。
-    """
-    if strategy.name != ts.ROUND_ONLY:
-        return {"command": None, "status": baseline["status"], "checked_at": baseline["checked_at"]}
-    return {"command": strategy.round_command, "status": baseline["status"], "checked_at": baseline["checked_at"]}

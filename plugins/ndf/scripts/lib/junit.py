@@ -20,7 +20,7 @@ ARTIFACT_BYTES = 50 * 1024 * 1024
 SEP = "::"
 
 
-def seconds(xml_bytes: bytes) -> Optional[float]:
+def total_seconds(xml_bytes: bytes) -> Optional[float]:
     """JUnit の XML 1 本の直列の所要（根の `time`、無ければ直下の `testsuite` の `time` の合計）。"""
     try:
         root = ET.fromstring(xml_bytes)

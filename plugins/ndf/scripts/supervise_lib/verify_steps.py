@@ -18,7 +18,7 @@ MARGIN_SHARE = 0.1
 MARGIN_FLOOR = 30
 
 
-def strategy_of(a) -> dict | None:
+def plan_strategy(a) -> dict | None:
     """宣言から解いた戦略（`apply_decls` が載せる）。無ければ `--test-cmd` の雛形から解く。"""
     found = getattr(a, "strategy", None)
     if isinstance(found, dict):
@@ -27,12 +27,12 @@ def strategy_of(a) -> dict | None:
     return ts.resolve({}, baseline_test=template).as_state() if template else None
 
 
-def limits_of(a) -> dict:
+def plan_limits(a) -> dict:
     """テストと CI の待ちの上限（`apply_decls` が載せる `test_limits`。無ければ所要が不明のときの値）。"""
     found = getattr(a, "test_limits", None)
     if isinstance(found, dict):
         return found
-    strategy = strategy_of(a)
+    strategy = plan_strategy(a)
     return ts.limits(ts.Strategy.from_state(strategy) if strategy else ts.Strategy(ts.LOCAL_FULL, "args"), None)
 
 
@@ -57,12 +57,12 @@ def whole_cmd(a) -> str:
 
 
 def scope_timeout(a) -> int:
-    return with_margin(limits_of(a)["test_timeout"])
+    return with_margin(plan_limits(a)["test_timeout"])
 
 
 def whole_timeout(a) -> int:
     """全体テストのステップの `timeout`。手元なら `whole_timeout`、CI なら `ci_wait_timeout` に余裕を足す。"""
-    limits, strategy = limits_of(a), strategy_of(a)
+    limits, strategy = plan_limits(a), plan_strategy(a)
     on_ci = bool(strategy and strategy.get("name") == ts.LOCAL_SCOPED_CI_WHOLE)
     return with_margin(limits["ci_wait_timeout"] if on_ci else limits["whole_timeout"])
 
@@ -75,14 +75,14 @@ def refactor_template_arg(a) -> str:
 
 def merge_step(a, **extra) -> dict:
     """マージのステップ。CI の待ちの上限を `--timeout` で渡し、ステップの `timeout` はそれに余裕を足す。"""
-    ci_wait = int(limits_of(a)["ci_wait_timeout"])
+    ci_wait = int(plan_limits(a)["ci_wait_timeout"])
     return {"id": "merge", "type": "run", "timeout": with_margin(ci_wait), "cmd": f"{MERGE_CMD} --timeout {ci_wait}", "probe": MERGE_PROBE, **extra}
 
 
 def test_meta(plan: dict, a) -> dict:
     """計画の最上位に `テストの戦略` と `テストの時間` を書く。"""
-    strategy = strategy_of(a)
+    strategy = plan_strategy(a)
     if strategy:
         plan["テストの戦略"] = {"name": strategy["name"], "source": strategy["source"], "note": getattr(a, "test_note", None)}
-    plan["テストの時間"] = dict(limits_of(a))
+    plan["テストの時間"] = dict(plan_limits(a))
     return plan

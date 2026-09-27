@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """drive.py: cross-refactoring の 1 回の改修計画実行を、LLM の判断が要る地点まで進めて止まる。
 
-    drive.py <PR> --scope ... --baseline-test CMD [refactor.py init の引数...]
+    drive.py <PR> --scope ... [refactor.py init の引数...]   # テストの走らせ方は .ndf/project.json の test の戦略で決まる
 
 init → 提案 → 改修計画 → テスト追加 → 実装 → 検証と修正 → 最終ゲート → finalize を順に進める。
 参加者は全て CLI なので、止まるのは単独起動の最終ゲート（cross-review）だけである。

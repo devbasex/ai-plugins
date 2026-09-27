@@ -102,7 +102,7 @@ def workflow_jobs(tree: Tree) -> dict[str, int]:
 
 def _junit_of_run(gh: Gh, run: dict) -> dict | None:
     """run の成果物の JUnit（`lib/junit.py` の読み取り。名前の規則は `junit.JUNIT_NAME`）の直列の合計。"""
-    seconds = [s for s in (junit.seconds(xml) for xml in junit.artifact_xmls(gh.get, gh.raw, gh.repo, run["id"])) if s is not None]
+    seconds = [s for s in (junit.total_seconds(xml) for xml in junit.artifact_xmls(gh.get, gh.raw, gh.repo, run["id"])) if s is not None]
     if not seconds:
         return None
     return {"seconds": round(sum(seconds), 1), "source": "ci-junit", "detail": f"run {run['id']}（{run.get('path')}）の JUnit {len(seconds)} 本の合計"}

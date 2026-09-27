@@ -18,6 +18,7 @@ from typing import Any, Iterable, Optional
 import test_strategy as ts
 
 from .scope import covered_by_roots, test_locations
+from .timeline import strategy_of
 
 # 対象の語に含まれてはならない文字。組み立てた語の並びは `shell=False` で走らせるが、
 # 担当が書いた値を語として通す以上、シェルの構文に読める値は最初から受け取らない。
@@ -63,12 +64,6 @@ def valid_targets(
     return True
 
 
-def strategy_of(state_like: dict[str, Any]) -> Optional[ts.Strategy]:
-    """状態ファイルに `init` が写した戦略。無ければ（旧い状態ファイル）`None`。"""
-    data = state_like.get("strategy")
-    return ts.Strategy.from_state(data) if isinstance(data, dict) and data.get("name") else None
-
-
 def scope_words_for(strategy: ts.Strategy, paths: list[str]) -> Optional[list[str]]:
     """対象のパスを受け持つ suite の雛形で組んだ語の並び。`scope_command` を持つ suite が無ければ `None`。"""
     if not paths:
@@ -108,8 +103,6 @@ def limited_command(
     words = round_words(strategy)
     if words is not None:
         return words, "round_test"
-    if strategy is None:
-        return None, "none"
     scope = state_like.get("target_scope") or state_like.get("scope") or []
     targets = list(test_targets or [])
     if valid_targets(targets, work, scope, planned):

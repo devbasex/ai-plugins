@@ -236,9 +236,9 @@ def _test_words(state: dict[str, Any], item: dict[str, Any], files: list[str]) -
     if item.get("command_source") == "targets":
         return list(item["command"])
     work = work_dir(state)
-    strategy = targets.strategy_of(state)
+    strategy = timeline.strategy_of(state)
     tests = [f for f in files if targets.valid_targets([f], work, list(state.get("target_scope") or []))]
-    if strategy is not None and tests:
+    if tests:
         built = targets.scope_words_for(strategy, tests)
         if built is not None:
             return built

@@ -211,3 +211,64 @@ def wait_check(
     waited = waits.wait_until(fetch, lambda v: v != "pending", max_wait=max_wait, sleep=sleep or SLEEP, on_wait=on_wait)
     value = waited.value if waited.done else None
     return (value if value != "pending" else None), float(waited.waited), int(waited.attempts)
+
+
+def gh_json(path: str) -> Any:
+    """`gh api --method GET <path>` の JSON。照会できなければ `None`（読む要求だけ。I5）。"""
+    try:
+        p = subprocess.run(["gh", "api", "--method", "GET", path], capture_output=True)
+    except OSError:
+        return None
+    if p.returncode != 0:
+        return None
+    try:
+        import json
+
+        return json.loads(p.stdout.decode("utf-8") or "null")
+    except ValueError:
+        return None
+
+
+def gh_raw(path: str) -> bytes:
+    """`gh api --method GET <path>` のバイト列（成果物の zip）。取れなければ空。"""
+    try:
+        p = subprocess.run(["gh", "api", "--method", "GET", path], capture_output=True)
+    except OSError:
+        return b""
+    return p.stdout if p.returncode == 0 else b""
+
+
+def ci_junit_xmls(repo: str, sha: str, checks: list[str], name_glob: Optional[str], fetch_runs: Callable[[], Any] | None = None) -> list[bytes]:
+    """落ちたチェックの GitHub Actions の run の成果物から JUnit の本文を落とす。取れなければ空（見分けは走らせ直しへ落ちる）。"""
+    import re
+
+    import gh_checks
+    import junit
+
+    class _Resp:
+        def __init__(self, body):
+            self.body = body
+
+    runs = (fetch_runs() if fetch_runs else gh_checks.fetch_check_runs(repo, sha, rest_get=lambda p: _Resp(gh_json(p)))) or []
+    for run in runs:
+        if str(run.get("name") or "") not in checks:
+            continue
+        m = re.search(r"/actions/runs/(\d+)", str(run.get("details_url") or run.get("html_url") or ""))
+        if m:
+            return junit.artifact_xmls(gh_json, gh_raw, repo, m.group(1), name_glob)
+    return []
+
+
+def merged_failed_ids(xmls: list[bytes], tracked: list[str]) -> tuple[Optional[list[str]], Optional[str]]:
+    """複数の JUnit の本文から落ちた ID を集める。1 つも読めなければ `(None, 理由)`。"""
+    import junit
+
+    ids: list[str] = []
+    read_any = False
+    for xml in xmls:
+        found = junit.failed_ids(xml, tracked)
+        if found is None:
+            continue
+        read_any = True
+        ids.extend(i for i in found if i not in ids)
+    return (ids, None) if read_any else (None, "CI の成果物に読める JUnit が無い")

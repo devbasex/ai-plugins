@@ -25,7 +25,7 @@ from supervise_lib.mission_waves import (
 )
 from supervise_lib.paths import CHECK_PY, HERE, SELF, sha256_of
 from supervise_lib.release_templates import RELEASE_FORMS
-from supervise_lib.test_steps import merge_step
+from supervise_lib.verify_steps import merge_step
 
 
 def prod_version(version: str) -> str:
