@@ -285,6 +285,34 @@ def _put_text(path: Path, text: str) -> None:
         raise StepError(f"{path} を書けない: {e}", 1) from None
 
 
+def _merge_worktree_part(main, wt, meas, answers, check, written_before):
+    files = []
+    if wt is None:
+        rows = [
+            {
+                "kind": "note",
+                "key": str(WORKTREE_FILE),
+                "text": "worktree.json が無い（worktree-setup.sh init を先に通す）。起点と本番を書かない",
+            }
+        ]
+        return files, rows, {}, []
+    branches, origin = merge.branch_answer(meas, answers, check)
+    new_wt, rows, wt_written = merge.merge_worktree(wt, branches, origin, written_before)
+    if new_wt != wt:
+        files.append(
+            (main / WORKTREE_FILE, str(WORKTREE_FILE), (main / WORKTREE_FILE).read_text(encoding="utf-8"), merge.dumps(new_wt))
+        )
+    declared = [v for v in (new_wt.get("base_branch"), new_wt.get("production_branch")) if isinstance(v, str)]
+    return files, rows, wt_written, declared
+
+
+def _gitignore_note(main) -> list:
+    ignored = proc.git_out(main, "check-ignore", str(DECL_FILE), str(WORKTREE_FILE))
+    if not ignored:
+        return []
+    return [{"kind": "note", "key": "gitignore", "text": f".gitignore の対象: {ignored.replace(chr(10), '・')}（.gitignore は変えない）"}]
+
+
 def cmd_write(a):
     root = proc.git_root(a.root)
     model = _load_model()
@@ -301,26 +329,8 @@ def cmd_write(a):
     rows = [{"kind": "ignored", "key": k} for k in answers if k not in questions]
     written_before = ((existing or {}).get("analysis") or {}).get("written") or {}
 
-    files = []
-    wt_written: dict = {}
-    if wt is not None:
-        branches, origin = merge.branch_answer(meas, answers, check)
-        new_wt, wt_rows, wt_written = merge.merge_worktree(wt, branches, origin, written_before)
-        rows += wt_rows
-        if new_wt != wt:
-            files.append(
-                (main / WORKTREE_FILE, str(WORKTREE_FILE), (main / WORKTREE_FILE).read_text(encoding="utf-8"), merge.dumps(new_wt))
-            )
-        declared = [v for v in (new_wt.get("base_branch"), new_wt.get("production_branch")) if isinstance(v, str)]
-    else:
-        rows.append(
-            {
-                "kind": "note",
-                "key": str(WORKTREE_FILE),
-                "text": "worktree.json が無い（worktree-setup.sh init を先に通す）。起点と本番を書かない",
-            }
-        )
-        declared = []
+    files, wt_rows, wt_written, declared = _merge_worktree_part(main, wt, meas, answers, check, written_before)
+    rows += wt_rows
     analysis = {
         "analyzer": ANALYZER,
         "at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
@@ -338,11 +348,7 @@ def cmd_write(a):
         old = (main / DECL_FILE).read_text(encoding="utf-8") if existing is not None else None
         files.insert(0, (main / DECL_FILE, str(DECL_FILE), old, merge.dumps(doc)))
     rows += [{"kind": "note", "key": "notes", "text": n} for n in meas.get("notes") or []]
-    ignored = proc.git_out(main, "check-ignore", str(DECL_FILE), str(WORKTREE_FILE))
-    if ignored:
-        rows.append(
-            {"kind": "note", "key": "gitignore", "text": f".gitignore の対象: {ignored.replace(chr(10), '・')}（.gitignore は変えない）"}
-        )
+    rows += _gitignore_note(main)
     if not a.dry_run:
         for path, _, _, text in files:
             _put_text(path, text)
