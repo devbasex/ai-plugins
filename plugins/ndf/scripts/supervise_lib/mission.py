@@ -23,8 +23,9 @@ from supervise_lib.mission_waves import (
     plan_mission_impl,
     plan_mission_release,
 )
-from supervise_lib.paths import CHECK_PY, HERE, MERGE_CMD, MERGE_PROBE, SELF, sha256_of
+from supervise_lib.paths import CHECK_PY, HERE, SELF, sha256_of
 from supervise_lib.release_templates import RELEASE_FORMS
+from supervise_lib.test_steps import merge_step
 
 
 def prod_version(version: str) -> str:
@@ -101,7 +102,7 @@ def close_plan(a, repo: str) -> dict:
                     "next": "ready",
                 },
                 {"id": "ready", "type": "run", "cmd": "sh -c 'git push -q && gh pr ready {pr}'", "next": "merge"},
-                {"id": "merge", "type": "run", "timeout": 7200, "cmd": MERGE_CMD, "probe": MERGE_PROBE, "next": "close"},
+                merge_step(a, next="close"),
                 {
                     "id": "close",
                     "type": "run",

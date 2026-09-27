@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
+import project_decl
 import schema
 from pydantic import ConfigDict
 
@@ -105,24 +107,41 @@ def apply_decls(a) -> None:
 
     - 起点のブランチ（a.base）: --base → worktree.json の base_branch
     - 本番のブランチ（a.production_branch）: --production-branch → worktree.json の production_branch
-    - テスト（a.test_cmd・a.test_all・a.no_reports）: --test-cmd・--test-all → supervise.json の test
+    - テスト（a.strategy・a.test_limits・a.test_cmd・a.no_reports）: --test-cmd（雛形）→ project.json の test →
+      supervise.json の test.command（project.json に test が無いときだけ。読んだことを a.test_note に残す。#1334 決定 3）。
+      --test-all は廃止（知らせて無視する）
     - 同期とチェック（a.sync_checks）: supervise.json の sync_checks（無ければ計画に sync のステップを置かない）
     - 配布（a.release）: supervise.json の release
     """
+    import test_strategy as ts
+
     roots = decl_roots(a.worktree, getattr(a, "repo", None))
     wt = read_decl(roots, WORKTREE_DECL)
     sv = read_decl(roots, SUPERVISE_DECL)
-    test = supervise_shape(sv).test
+    sv_test = supervise_shape(sv).test
     a.base = getattr(a, "base", None) or wt.get("base_branch") or None
     a.production_branch = getattr(a, "production_branch", None) or wt.get("production_branch") or None
-    a.test_cmd = getattr(a, "test_cmd", None) or test.get("command") or None
-    a.test_all = getattr(a, "test_all", None) or test.get("all") or "."
-    a.no_reports = test.get("no_reports") or ""
+    a.test_cmd = getattr(a, "test_cmd", None) or None
+    if getattr(a, "test_all", None):
+        print("⚠ --test-all は廃止しました（#1334）。全体テストは宣言の suites[].command で決まります", file=sys.stderr, flush=True)
+    a.test_all = None
+    a.no_reports = sv_test.get("no_reports") or ""
     a.sync_checks = sync_checks_of(sv)
     a.release = sv.get("release") or None
+    decl, a.test_note = _project_decl(roots, sv)
+    a.strategy, a.test_limits = None, None
+    if decl.get("test") is not None or a.test_cmd:
+        try:
+            strategy = ts.resolve(decl, baseline_test=a.test_cmd)
+        except ts.StrategyError as e:
+            raise DeclError(str(e)) from e
+        w, w_source = ts.whole_seconds(decl)
+        c = ts.ci_wall_seconds(decl, (strategy.ci or {}).get("check") if strategy.ci else None)
+        a.strategy = strategy.as_state()
+        a.test_limits = ts.limits(strategy, None, whole_seconds_value=w, whole_source=w_source, ci_seconds=c)
     missing = {
         "base": (not a.base, f"起点のブランチ（--base か .ndf/{WORKTREE_DECL} の base_branch）"),
-        "test": (not a.test_cmd, f"テストのコマンド（--test-cmd か .ndf/{SUPERVISE_DECL} の test.command）"),
+        "test": (a.strategy is None, f"テストの宣言（.ndf/{project_decl.DECL.name} の test か --test-cmd、または .ndf/{SUPERVISE_DECL} の test.command）"),
         "release": (not isinstance(a.release, dict) or not a.release.get("form"), f"配布の形（.ndf/{SUPERVISE_DECL} の release.form）"),
     }
     lack = [missing[k][1] for k in NEEDS[a.kind] if missing[k][0]]
@@ -130,9 +149,23 @@ def apply_decls(a) -> None:
         raise DeclError(f"new {a.kind} に要る宣言が無い: " + "・".join(lack))
 
 
+def _project_decl(roots, sv: dict) -> tuple[dict, str | None]:
+    """roots の順に `.ndf/project.json` を探し、`test` を持つ最初の宣言。無ければ supervise.json の test を 1 つの suite として読む。"""
+    import test_strategy as ts
+
+    last: tuple[dict, str | None] = ({}, None)
+    for r in roots:
+        decl, note = ts.decl_of(r, sv)
+        if note is None and decl.get("test") is not None:
+            return decl, None
+        last = (decl, note)
+    return last
+
+
 def decl_fields(a) -> dict:
     """ミッションの雛形が各計画へ引き継ぐ、宣言から埋めた値。"""
-    return {k: getattr(a, k) for k in ("base", "production_branch", "test_cmd", "test_all", "no_reports", "sync_checks", "release")}
+    keys = ("base", "production_branch", "test_cmd", "test_all", "no_reports", "sync_checks", "release", "strategy", "test_limits", "test_note")
+    return {k: getattr(a, k, None) for k in keys}
 
 
 def with_decls(plan: dict, a) -> dict:

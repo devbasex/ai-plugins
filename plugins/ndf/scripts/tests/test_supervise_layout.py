@@ -34,6 +34,7 @@ MODULES = [
     "pr",
     "engine",
     "templates",
+    "test_steps",
     "release_templates",
     "mission_waves",
     "mission",
