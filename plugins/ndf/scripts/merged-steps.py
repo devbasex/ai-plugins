@@ -138,8 +138,8 @@ def same_untracked(main_dir, pull):
     return rels
 
 
-def cleanup(root, prs):
-    """後片付けを行い、(status, summary, items, metrics, presentation_path, next) を返す。"""
+def _recorder():
+    """後片付けの記録（items）と、1 件を足す add を返す。"""
     items = []
 
     def add(kind, name, res, reason=None, **extra):
@@ -148,87 +148,99 @@ def cleanup(root, prs):
             it["reason"] = reason
         items.append(it)
 
-    wts = list_worktrees(root)
-    main_dir = wts[0]["path"] if wts else str(root)
-    # root が消す作業ツリーのこともある（計画の merge のステップ）。以後は主ディレクトリから打つ
-    root = main_dir
-    slug = repo_slug(root)
-    wt_base = Path(os.environ.get("NDF_WORKTREE_BASE") or Path(tempfile.gettempdir()) / "ndf-worktrees")
+    return items, add
 
-    for n in prs:
-        p = gh_parts.gh(["pr", "view", str(n), "--json", "headRefName,state,mergeCommit"], cwd=root)
-        if p.returncode != 0:
-            add("pr", f"#{n}", "kept", f"gh pr view が失敗: {p.stderr.strip()[:200]}")
+
+def _delete_branch(root, branch, add):
+    """ローカルブランチを git branch -d で消し、deleted / stopped / absent を記録する。"""
+    if git(root, "rev-parse", "--verify", "-q", f"refs/heads/{branch}", check=False).returncode == 0:
+        sha = git(root, "rev-parse", f"refs/heads/{branch}").stdout.strip()
+        d = git(root, "branch", "-d", branch, check=False)
+        if d.returncode == 0:
+            add("branch", branch, "deleted", sha=sha, restore=f"git branch {branch} {sha}")
+        else:
+            add("branch", branch, "stopped", f"git branch -d が拒否: {d.stderr.strip()[:300]}", sha=sha)
+    else:
+        # 無いローカルブランチは削除済みとして報告し、止めない（#769）
+        add("branch", branch, "absent")
+
+
+def _remove_pr_tmp_worktree(root, tmp_wt, n, add):
+    """PR の一時作業ツリー（wt_base/slug/pr<n>）を、登録済みで detached のときだけ外す。"""
+    if not tmp_wt.exists():
+        return
+    listed = {str(Path(w["path"]).resolve()): w for w in list_worktrees(root)}
+    w = listed.get(str(tmp_wt.resolve()))
+    if w is None:
+        add("worktree", str(tmp_wt), "kept", "この repo の作業ツリーとして登録されていない")
+    elif not w["detached"]:
+        add("worktree", str(tmp_wt), "kept", "detached でない")
+    else:
+        ok, why = remove_worktree(root, w["path"], f"pr{n}")
+        add("worktree", w["path"], "removed" if ok else "kept", why)
+
+
+def _cleanup_pr(root, main_dir, slug, wt_base, n, add):
+    """PR 1 件分の作業ツリーとブランチを片付ける。"""
+    p = gh_parts.gh(["pr", "view", str(n), "--json", "headRefName,state,mergeCommit"], cwd=root)
+    if p.returncode != 0:
+        add("pr", f"#{n}", "kept", f"gh pr view が失敗: {p.stderr.strip()[:200]}")
+        return
+    try:
+        info = json.loads(p.stdout)
+    except ValueError:
+        add("pr", f"#{n}", "kept", "gh pr view の出力を読めない")
+        return
+    branch = info.get("headRefName")
+    if info.get("state") != "MERGED":
+        add("pr", branch or f"#{n}", "kept", f"#{n} が MERGED でない（{info.get('state')}）")
+        return
+
+    branch_free = True
+    for wt in list_worktrees(root):
+        if wt["branch"] != branch:
             continue
-        try:
-            info = json.loads(p.stdout)
-        except ValueError:
-            add("pr", f"#{n}", "kept", "gh pr view の出力を読めない")
+        if wt["path"] == main_dir:
+            add("worktree", wt["path"], "kept", "主ディレクトリはこのブランチを checkout しているため外さない")
+            branch_free = False
             continue
-        branch = info.get("headRefName")
-        if info.get("state") != "MERGED":
-            add("pr", branch or f"#{n}", "kept", f"#{n} が MERGED でない（{info.get('state')}）")
-            continue
+        ok, why = remove_worktree(root, wt["path"], branch)
+        add("worktree", wt["path"], "removed" if ok else "kept", why)
+        branch_free = branch_free and ok
 
-        branch_free = True
-        for wt in list_worktrees(root):
-            if wt["branch"] != branch:
-                continue
-            if wt["path"] == main_dir:
-                add("worktree", wt["path"], "kept", "主ディレクトリはこのブランチを checkout しているため外さない")
-                branch_free = False
-                continue
-            ok, why = remove_worktree(root, wt["path"], branch)
-            add("worktree", wt["path"], "removed" if ok else "kept", why)
-            branch_free = branch_free and ok
+    if branch_free:
+        _delete_branch(root, branch, add)
 
-        if branch_free:
-            if git(root, "rev-parse", "--verify", "-q", f"refs/heads/{branch}", check=False).returncode == 0:
-                sha = git(root, "rev-parse", f"refs/heads/{branch}").stdout.strip()
-                d = git(root, "branch", "-d", branch, check=False)
-                if d.returncode == 0:
-                    add("branch", branch, "deleted", sha=sha, restore=f"git branch {branch} {sha}")
-                else:
-                    add("branch", branch, "stopped", f"git branch -d が拒否: {d.stderr.strip()[:300]}", sha=sha)
-            else:
-                # 無いローカルブランチは削除済みとして報告し、止めない（#769）
-                add("branch", branch, "absent")
+    if slug:
+        _remove_pr_tmp_worktree(root, wt_base / slug / f"pr{n}", n, add)
 
-        if slug:
-            tmp_wt = wt_base / slug / f"pr{n}"
-            if tmp_wt.exists():
-                listed = {str(Path(w["path"]).resolve()): w for w in list_worktrees(root)}
-                w = listed.get(str(tmp_wt.resolve()))
-                if w is None:
-                    add("worktree", str(tmp_wt), "kept", "この repo の作業ツリーとして登録されていない")
-                elif not w["detached"]:
-                    add("worktree", str(tmp_wt), "kept", "detached でない")
-                else:
-                    ok, why = remove_worktree(root, w["path"], f"pr{n}")
-                    add("worktree", w["path"], "removed" if ok else "kept", why)
 
-    git(root, "worktree", "prune", check=False)
+def _update_main_dir(main_dir, add):
+    """主ディレクトリが base にいれば pull --ff-only する。失敗の理由（無ければ None）を返す。"""
     base = repo.declared_base(main_dir) or "develop"
     cur = git(main_dir, "branch", "--show-current", check=False).stdout.strip()
-    pull_err = None
     if cur != base:
         # 別のブランチへ取り込まないよう、pull はしない
         add("main_dir", main_dir, "kept", f"主ディレクトリが {base} でなく {cur or 'detached'} のため pull しない")
-    else:
+        return None
+    pull = run(["git", "-C", main_dir, "pull", "--ff-only"], check=False)
+    same = same_untracked(main_dir, pull) if pull.returncode != 0 else []
+    if same:
+        # 取り込む内容と同じ未追跡のファイル（手元の写し）だけが邪魔をしたときは、消して取り込み直す
+        for rel in same:
+            (Path(main_dir) / rel).unlink()
+            add("untracked", rel, "removed", "取り込む内容と同じ")
         pull = run(["git", "-C", main_dir, "pull", "--ff-only"], check=False)
-        same = same_untracked(main_dir, pull) if pull.returncode != 0 else []
-        if same:
-            # 取り込む内容と同じ未追跡のファイル（手元の写し）だけが邪魔をしたときは、消して取り込み直す
-            for rel in same:
-                (Path(main_dir) / rel).unlink()
-                add("untracked", rel, "removed", "取り込む内容と同じ")
-            pull = run(["git", "-C", main_dir, "pull", "--ff-only"], check=False)
-        if pull.returncode != 0:
-            pull_err = f"主ディレクトリの git pull --ff-only が失敗: {pull.stderr.strip()[:300]}"
-            add("main_dir", main_dir, "stopped", pull_err)
-        else:
-            add("main_dir", main_dir, "pulled")
+    if pull.returncode != 0:
+        pull_err = f"主ディレクトリの git pull --ff-only が失敗: {pull.stderr.strip()[:300]}"
+        add("main_dir", main_dir, "stopped", pull_err)
+        return pull_err
+    add("main_dir", main_dir, "pulled")
+    return None
 
+
+def _cleanup_result(items, prs, pull_err):
+    """記録から (status, summary, items, metrics, presentation_path, next) を組み立てる。"""
     count = {k: sum(1 for i in items if i["result"] == k) for k in ("removed", "deleted", "absent", "kept", "stopped")}
     metrics = {
         "removed_worktrees": count["removed"],
@@ -258,6 +270,24 @@ def cleanup(root, prs):
         )
         return "gate", summary, items, metrics, path, "同意を得たら git branch -D " + " ".join(names)
     return "ok", summary, items, metrics, None, None
+
+
+def cleanup(root, prs):
+    """後片付けを行い、(status, summary, items, metrics, presentation_path, next) を返す。"""
+    items, add = _recorder()
+    wts = list_worktrees(root)
+    main_dir = wts[0]["path"] if wts else str(root)
+    # root が消す作業ツリーのこともある（計画の merge のステップ）。以後は主ディレクトリから打つ
+    root = main_dir
+    slug = repo_slug(root)
+    wt_base = Path(os.environ.get("NDF_WORKTREE_BASE") or Path(tempfile.gettempdir()) / "ndf-worktrees")
+
+    for n in prs:
+        _cleanup_pr(root, main_dir, slug, wt_base, n, add)
+
+    git(root, "worktree", "prune", check=False)
+    pull_err = _update_main_dir(main_dir, add)
+    return _cleanup_result(items, prs, pull_err)
 
 
 def cmd_cleanup(a):
