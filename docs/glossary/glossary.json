@@ -1748,9 +1748,10 @@
     {
       "term": "pace",
       "context": "ndf-workflow",
-      "meaning": "モードとは別の軸で、工程をどう通すかを決める。既定の normal と、承認ゲートと検査の時機を変える fast と、工程は normal のまま承認ゲートだけを MVV 判定にする auto",
+      "meaning": "モードとは別の軸で、工程をどう通すかを決める。ウォーターフォールで各工程を検証し人の承認を取る normal、normal の承認だけを MVV 判定にする auto、実践投入の中で検証しながら MVV で自動に進める fast の 3 つ",
       "code": "pace",
-      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md",
+      "pending_source": "issues/issue-1370-design.md"
     },
     {
       "term": "pace: auto",
@@ -1759,6 +1760,13 @@
       "code": "auto",
       "source": "plugins/ndf/skills/development-workflow/references/pace.md",
       "pending_source": "issues/issue-1370-requirements.md"
+    },
+    {
+      "term": "実践投入",
+      "context": "ndf-workflow",
+      "meaning": "pace: fast の検証の場所。実装の Pull Request が develop（開発版のチャネル）へ入り、開発版として配布され使われること。fast の検査はその後にトリガーで通る",
+      "source": "plugins/ndf/skills/development-workflow/references/pace.md",
+      "pending_source": "issues/issue-1370-design.md"
     },
     {
       "term": "resume",
