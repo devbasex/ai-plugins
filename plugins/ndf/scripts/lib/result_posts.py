@@ -567,9 +567,10 @@ def cmd_fix(args: argparse.Namespace) -> int:
     if not pushed.ok:
         print(pushed.detail, file=sys.stderr)
         return 1
-    unsynced = design_body.sync_after_push(repo, int(args.pr), head, pushed.pushed)
-    if unsynced:
-        print(f"⚠️ 本文の「決めたこと」を揃えられませんでした ({unsynced})", file=sys.stderr)
+    if unsynced := design_body.sync_after_push(repo, int(args.pr), head, pushed.pushed):
+        # 本文が古いまま返信しない。打ち直すと揃えからやり直す。
+        print(f"本文の「決めたこと」を揃えられないため止めます。打ち直してください ({unsynced})", file=sys.stderr)
+        return 1
 
     actor = args.actor or _sh("gh", "api", "user", "-q", ".login") or None
     outcome = post_fix(queue_for(worktree), result, repo, int(args.pr), round_no=args.round, actor=actor)

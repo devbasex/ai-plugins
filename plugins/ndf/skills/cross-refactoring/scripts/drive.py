@@ -163,12 +163,18 @@ class Drive:
         return rc, rows
 
     def impl_phase(self, phase: str, impl: str | None = None, stem: str | None = None) -> None:
+        """担当 1 者の工程。起動の失敗では止める。
+
+        **修正の工程（`fix` / `final-fix`）は監視の非ゼロ終了で止めない。** 締め切りでの打ち切りは
+        設計どおりの結末で、続く `merge-fix` / `merge-final-fix` が結果なしの記録と取り消しを持つ。
+        ここで止めると、`final-fix` の打ち直しが担当の途中のコミットを含む頭を最終ゲートへ渡す。
+        """
         self.v.pop("PHASE_TIMEOUT", None)
         self.rf("start-phase", self.v["ID"], phase)
         impl = impl or self.v["IMPL"]
         self.sh(f"launch-cli.sh（{impl}・{phase}）", ["bash", str(HERE / "launch-cli.sh"), impl, phase, self.v["ID"]])
         rc, _ = self.monitor(impl, phase, stem or f"{{agent}}-{phase}-rf{self.v['ID']}")
-        if rc != 0:
+        if rc != 0 and phase not in ("fix", "final-fix"):
             raise Stop(f"monitor.py（{impl}・{phase}）が終了コード {rc} で止まった（タイムアウト・停滞・起動失敗）", rc)
 
     def propose(self) -> None:

@@ -78,7 +78,8 @@ FIX=$(bash "$R/scripts/resolve.sh" scripts fix) || exit 3
 4. 直したものがあればコミットする。**送らない**。`fixed` も CI の修正も無ければコミットしない
 5. **戻り値ファイルを組む。** 件数と `by_severity` を数え、設計 PR なら本文の「決めたこと」の
    節を設計文書に揃える（対象かどうかはスクリプトが決める）。設計文書は PR の head から読まれるため、
-   送るコミットがあるときは揃えず（`after_push`）、送る側が送った直後に揃える
+   送るコミットがあるときは揃えず（`after_push`）、送る側が送った直後に揃える。揃わなければ送る側は
+   返信・記録へ進まずに止まり、打ち直すと揃えからやり直す
 
    ```bash
    python3 "$FIX/fix-steps.py" finalize --decisions <雛形の JSON> [--root <worktree>]
