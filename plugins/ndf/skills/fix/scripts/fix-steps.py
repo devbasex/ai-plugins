@@ -192,6 +192,13 @@ def head_line(s: str, n: int = 100) -> str:
     return (s or "").strip().splitlines()[0][:n] if (s or "").strip() else ""
 
 
+def _root_or_cwd(root_arg) -> Path:
+    try:
+        return git_root(root_arg)
+    except StepError:
+        return Path.cwd()
+
+
 def focus_for_context(root_arg) -> review_criteria.Focus:
     """cross-review の中なら状態ファイルに写した重点（I8）、単独なら作業ツリーの宣言。"""
     state = os.environ.get("CROSS_REVIEW_STATE")
@@ -202,36 +209,14 @@ def focus_for_context(root_arg) -> review_criteria.Focus:
             crit = None
         if isinstance(crit, dict):
             return review_criteria.focus_from(crit.get("status"), crit.get("focus"), crit.get("error"))
-    try:
-        root = git_root(root_arg)
-    except StepError:
-        root = Path.cwd()
-    return review_criteria.load_focus(root)
-
-
-def mvv_for_context(root_arg) -> tuple[dict, str]:
-    """(プロジェクト MVV の参照, MVV の節)。cross-review の中なら状態ファイルに写したもの、単独なら作業ツリーの宣言（#1366）。"""
-    state = os.environ.get("CROSS_REVIEW_STATE")
-    if state:
-        try:
-            crit = json.loads(Path(state).read_text(encoding="utf-8")).get("review_criteria")
-        except (OSError, ValueError, AttributeError):
-            crit = None
-        if isinstance(crit, dict) and isinstance(crit.get("project_mvv"), dict) and crit.get("mvv_block"):
-            return crit["project_mvv"], crit["mvv_block"]
-    try:
-        root = git_root(root_arg)
-    except StepError:
-        root = Path.cwd()
-    mvv = project_mvv.load(root)
-    return project_mvv.record(mvv), project_mvv.block(mvv)
+    return review_criteria.load_focus(_root_or_cwd(root_arg))
 
 
 def cmd_context(a):
     pr = a.pr
     repo = repo_of(a)
     focus = focus_for_context(a.root)
-    mvv_ref, mvv_block = mvv_for_context(a.root)
+    mvv_ref, mvv_block = review_criteria.mvv_context(os.environ.get("CROSS_REVIEW_STATE"), lambda: _root_or_cwd(a.root))
     view = pr_for_fix(pr)
     threads = threads_with_first_comment(repo, pr)
     comments_text, comments_n = fetch_comments(repo, pr)
@@ -401,56 +386,29 @@ def pick(e: dict, *keys) -> dict:
     return {k: e.get(k) for k in keys}
 
 
+ENTRY = ("comment_id", "thread_id", "path", "line", "severity", "category", "summary", "mvv_basis")  # 見送り・却下の行へ写す鍵
+
+
 def build_result(pr: int, d: dict, commit: str | None, ci_status: str, failed_names: list[str]) -> dict:
     decs = d["decisions"]
+    mvv = review_criteria.apply_basis(d)  # 根拠の項目（#1366）
     fixed = [e for e in decs if e["decision"] == "fixed"]
     by = {s: 0 for s in SEVERITIES}
     for e in fixed:
         by[e["severity"]] += 1
-    resolved = [pick(e, "thread_id", "comment_id", "path", "line") for e in fixed]
+    resolved = [pick(e, "thread_id", "comment_id", "path", "line", "mvv_basis") for e in fixed]
     deferred = []
     names = focus_names(d)
-    mvv = project_mvv.from_record(d.get("project_mvv"))
-    for e in decs:  # 根拠の項目を正規化する（I7。返されなければ「根拠なし」か「MVV なし」で、止めない）
-        e["mvv_basis"] = project_mvv.basis(e.get("mvv_basis"), mvv)
-    for e in fixed:
-        resolved[fixed.index(e)]["mvv_basis"] = e["mvv_basis"]
     for e in decs:
         if e["decision"] == "waived":
             reply = review_criteria.waiver_reply(e["waive_kind"], names, project_mvv.basis_phrase(e["mvv_basis"], mvv))
-            deferred.append(
-                {
-                    **pick(e, "comment_id", "thread_id", "path", "line", "severity", "category", "summary", "mvv_basis"),
-                    "reason_for_deferral": reply,
-                    "reply": reply,
-                    "resolve": True,
-                    "waived": e["waive_kind"],
-                }
-            )
+            deferred.append({**pick(e, *ENTRY), "reason_for_deferral": reply, "reply": reply, "resolve": True, "waived": e["waive_kind"]})
         elif e["decision"] == "deferred":
-            deferred.append(
-                {
-                    **pick(e, "comment_id", "thread_id", "path", "line", "severity", "category", "summary", "mvv_basis"),
-                    "reason_for_deferral": e.get("reason"),
-                }
-            )
+            deferred.append({**pick(e, *ENTRY), "reason_for_deferral": e.get("reason")})
         elif e["decision"] == "separate_pr":
-            deferred.append(
-                {
-                    **pick(e, "comment_id", "thread_id", "path", "line", "severity", "category", "summary", "mvv_basis"),
-                    "reason_for_deferral": f"別 PR で対応（{e['issue']}）" + (f": {e['reason']}" if e.get("reason") else ""),
-                    "issue": e["issue"],
-                    "resolve": True,
-                }
-            )
-    rejected = [
-        {
-            **pick(e, "comment_id", "thread_id", "path", "line", "severity", "category", "summary", "mvv_basis"),
-            "reason_for_rejection": e.get("reason"),
-        }
-        for e in decs
-        if e["decision"] == "rejected"
-    ]
+            why = f"別 PR で対応（{e['issue']}）" + (f": {e['reason']}" if e.get("reason") else "")
+            deferred.append({**pick(e, *ENTRY), "reason_for_deferral": why, "issue": e["issue"], "resolve": True})
+    rejected = [{**pick(e, *ENTRY), "reason_for_rejection": e.get("reason")} for e in decs if e["decision"] == "rejected"]
     return {
         "pr": pr,
         "fix_commit": commit,

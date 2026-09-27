@@ -67,7 +67,7 @@ class RunState:
         if self.project_mvv is None:
             import project_mvv
 
-            self.project_mvv = project_mvv.load(root)
+            self.project_mvv = project_mvv.load_mvv(root)
         return self.project_mvv
 
     # --- 途中の報告 ---

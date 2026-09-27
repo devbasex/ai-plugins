@@ -24,6 +24,8 @@ PY = sys.executable
 sys.path.insert(0, str(SCRIPTS / "lib"))
 sys.path.insert(0, str(SCRIPTS))
 import project_mvv as pm  # noqa: E402
+import project_mvv_decl as pmd  # noqa: E402
+import project_mvv_signals as pms  # noqa: E402
 from step_result import validate_result  # noqa: E402
 
 BODY = """# 例のプロジェクト MVV
@@ -373,7 +375,7 @@ def test_the_same_body_cannot_be_a_new_version(env):
 
 
 def test_block_starts_with_the_whole_common_principles_even_without_a_declaration(tmp_path):
-    none = pm.load(tmp_path)
+    none = pm.load_mvv(tmp_path)
     text = pm.block(none)
     assert none.status == "none" and text.startswith(pm.principles()) and pm.contract() in text and pm.NO_MVV in text
     assert "C8" in text and "人類を守り、発展させる" in text
@@ -381,18 +383,18 @@ def test_block_starts_with_the_whole_common_principles_even_without_a_declaratio
 
 def test_block_orders_principles_project_mission_contract(env):
     assert approve(env) == 0
-    mvv = pm.load(env["root"])
+    mvv = pm.load_mvv(env["root"])
     text = pm.block(mvv, "## Mission\nミッション\n")
     i = [text.index(x) for x in ("# NDF の共通原則", "利用者の手を減らす", "# ミッション MVV", "## 判断の決まり")]
     assert i == sorted(i) and "版 1" in text
 
 
 def test_basis_normalizes_drops_unknown_and_fills_the_empty(env):
-    none = pm.load(env["root"])
+    none = pm.load_mvv(env["root"])
     assert pm.basis(None, none) == [pm.NO_MVV]
     assert pm.basis(["c4", "Value 3"], none) == ["C4"]
     assert approve(env) == 0
-    mvv = pm.load(env["root"])
+    mvv = pm.load_mvv(env["root"])
     assert pm.basis(["value2（測って決める）", "P1", "P9", "Mission"], mvv) == ["Value 2", "P1", "Mission"]
     assert pm.basis([], mvv) == [pm.NO_BASIS]
     assert pm.basis(["R2"], mvv, ["R2"]) == ["R2"]
@@ -414,21 +416,21 @@ def gate_row(sha_: str | None, verdict: str, at: str = "2999-01-01T00:00:00Z", r
 
 def test_unknown_streak_counts_only_the_same_sha_and_resets():
     rows = [gate_row("a", "unknown"), gate_row("b", "unknown"), gate_row("b", "machine"), gate_row("b", "unknown")]
-    assert pm.unknown_streak(rows, "b") == 2
-    assert pm.unknown_streak(rows + [gate_row("b", "follow")], "b") == 0
-    assert pm.unknown_streak(rows, "a") == 0
+    assert pms.unknown_streak(rows, "b") == 2
+    assert pms.unknown_streak(rows + [gate_row("b", "follow")], "b") == 0
+    assert pms.unknown_streak(rows, "a") == 0
 
 
 def test_signals_count_after_the_current_version_and_suggest_revision(env):
     assert approve(env) == 0
-    mvv = pm.load(env["root"])
-    key = pm.repo_key(env["root"])
+    mvv = pm.load_mvv(env["root"])
+    key = pm.mvv_repo_key(env["root"])
     sig_log = env["tmp"] / "state" / "project-mvv-signals.jsonl"
     old = {"at": "2000-01-01T00:00:00Z", "repo": key, "kind": "override_reject", "project_sha256": mvv.sha256}
     new = {"at": "2999-01-01T00:00:00Z", "repo": key, "kind": "override_pass", "project_sha256": mvv.sha256}
     for r in [old, new, new, new]:
-        pm.append_jsonl(sig_log, r)
-    sig = pm.signals(env["root"], mvv, signals_log=sig_log, gate_log=env["tmp"] / "none.jsonl")
+        pms.append_jsonl(sig_log, r)
+    sig = pms.signals(env["root"], mvv, signals_log=sig_log, gate_log=env["tmp"] / "none.jsonl")
     assert sig["counts"]["overrides"] == 3 and sig["counts"]["override_pass"] == 3 and sig["over"] == ["overrides"]
     code, out, _ = run(env, "signals", "--root", str(env["root"]), "--format", "json")
     assert code == 0 and out["items"][0]["kind"] == "revise"
@@ -447,7 +449,7 @@ def mission_gate(env, state: Path, *args: str) -> int:
 
 
 def signal_rows(env) -> list[dict]:
-    return pm.read_jsonl(env["tmp"] / "state" / "project-mvv-signals.jsonl")
+    return pms.read_jsonl(env["tmp"] / "state" / "project-mvv-signals.jsonl")
 
 
 def new_state(env, tmp: Path) -> Path:
@@ -542,7 +544,7 @@ def gate_check(env, state: Path, *extra: str) -> tuple[int, dict, list[dict]]:
         *extra,
         script=GATE_PY,
     )
-    return code, out, pm.read_jsonl(log)
+    return code, out, pms.read_jsonl(log)
 
 
 def test_mvv_gate_judges_with_only_the_project_mvv_and_records_the_basis(env):
@@ -600,7 +602,7 @@ def test_the_written_declaration_passes_the_pydantic_model(env):
     import schema
 
     assert approve(env) == 0
-    decl, _ = pm.decl_models()
+    decl, _ = pmd.decl_models()
     schema.load_shape(decl, json.loads((env["root"] / ".ndf" / "mvv.json").read_text()))
 
 
@@ -617,7 +619,7 @@ def test_review_state_carries_the_reference_and_the_block(env):
     import review_criteria as rc
 
     assert approve(env) == 0
-    mvv = pm.load(env["root"])
+    mvv = pm.load_mvv(env["root"])
     st = rc.as_state(rc.NO_FOCUS, mvv)
     assert st["project_mvv"] == pm.record(mvv) and st["mvv_block"] == pm.block(mvv)
     assert pm.principles() in st["reviewer_block"] and "利用者の手を減らす" in st["reviewer_block"]

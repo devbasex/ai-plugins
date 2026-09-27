@@ -56,6 +56,7 @@ import gh_call  # noqa: E402
 import gh_rest  # noqa: E402
 from pace import EXCLUDED_MODES, PaceError, matches, read_pace  # noqa: E402
 import project_mvv as pm  # noqa: E402
+import project_mvv_signals as pms  # noqa: E402
 
 TOOL = "mvv-gate"
 GATES = {"design": "関門 1（設計の承認）", "release": "関門 2（本番への配布の承認）"}
@@ -208,9 +209,9 @@ def revise_items(a, root: Path, project: pm.ProjectMvv) -> list[dict]:
     """「判定できない」の連続（I13）と改訂の兆候の閾値（I18）から、改訂の提案を返す。"""
     if not project.approved:
         return []
-    key = pm.repo_key(root)
-    rows = [r for r in pm.read_jsonl(Path(a.log).expanduser()) if r.get("repo") == key]
-    streak = pm.unknown_streak(rows, project.sha256)
+    key = pm.mvv_repo_key(root)
+    rows = [r for r in pms.read_jsonl(Path(a.log).expanduser()) if r.get("repo") == key]
+    streak = pms.unknown_streak(rows, project.sha256)
     limit = project.setting("unknown_streak")
     out = []
     if limit and streak >= limit:
@@ -223,9 +224,9 @@ def revise_items(a, root: Path, project: pm.ProjectMvv) -> list[dict]:
                 "`references/project-mvv.md` の改訂の手順へ入る",
             }
         )
-    sig = pm.signals(root, project, gate_log=Path(a.log).expanduser())
+    sig = pms.signals(root, project, gate_log=Path(a.log).expanduser())
     sig["over"] = [k for k in sig["over"] if k != "unknown_streak"]
-    sug = pm.revise_suggestion(sig)
+    sug = pms.revise_suggestion(sig)
     return out + ([sug] if sug else [])
 
 
@@ -284,7 +285,7 @@ def write_note(path: str, a, record: dict) -> None:
 
 def cmd_check(a) -> tuple[dict, int | None]:
     root = Path(a.root or ".").resolve()
-    project = pm.load(root)
+    project = pm.load_mvv(root)
     record = {
         "at": clock.now_iso("utc"),
         "gate": a.gate,
@@ -292,7 +293,7 @@ def cmd_check(a) -> tuple[dict, int | None]:
         "material": list(a.material),
         "pr": a.pr,
         "mode": a.mode or "",
-        "repo": pm.repo_key(root),
+        "repo": pm.mvv_repo_key(root),
         "project_mvv": pm.record(project),
     }
 

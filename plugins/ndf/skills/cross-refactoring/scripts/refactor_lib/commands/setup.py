@@ -295,7 +295,7 @@ class InitialContext:
 
 def _project_mvv(work: pathlib.Path) -> dict[str, Any]:
     """プロジェクト MVV の参照と MVV の節。宣言が無くても共通原則と「MVV なし」の節を持つ（止めない）。"""
-    mvv = project_mvv.load(work)
+    mvv = project_mvv.load_mvv(work)
     if mvv.status in ("unapproved", "mismatch", "unreadable"):
         info(f"⚠ プロジェクト MVV が{project_mvv.STATUS_LABEL[mvv.status]}ため、MVV なしで続けます: {mvv.error}")
     return {"ref": project_mvv.record(mvv), "block": project_mvv.block(mvv)}

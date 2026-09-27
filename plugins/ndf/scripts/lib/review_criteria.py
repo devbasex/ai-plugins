@@ -176,6 +176,28 @@ def waiver_reply(kind: str, names=(), basis: str | None = None) -> str:
     return f"{reply}{basis}" if basis else reply
 
 
+def mvv_context(state_path, root_of) -> tuple[dict, str]:
+    """(プロジェクト MVV の参照, MVV の節)。cross-review の状態ファイル（`state_path`）に写したものがあればそれ、無ければ
+    `root_of()` の作業ツリーの宣言を読む（#1366）。修正担当の文脈（`fix-steps.py context`）が使う。"""
+    try:
+        crit = json.loads(Path(state_path).read_text(encoding="utf-8")).get("review_criteria") if state_path else None
+    except (OSError, ValueError, AttributeError):
+        crit = None
+    if isinstance(crit, dict) and isinstance(crit.get("project_mvv"), dict) and crit.get("mvv_block"):
+        return crit["project_mvv"], crit["mvv_block"]
+    mvv = project_mvv.load_mvv(root_of())
+    return project_mvv.record(mvv), project_mvv.block(mvv)
+
+
+def apply_basis(decisions: dict):
+    """振り分けの各指摘の `mvv_basis` を正規化し（I7。返されなければ「根拠なし」か「MVV なし」で、止めない）、MVV を返す。"""
+    mvv = project_mvv.from_record(decisions.get("project_mvv"))
+    for e in decisions.get("decisions") or []:
+        if isinstance(e, dict):
+            e["mvv_basis"] = project_mvv.basis(e.get("mvv_basis"), mvv)
+    return mvv
+
+
 def as_state(focus: Focus, mvv=None) -> dict:
     """状態ファイルの `review_criteria` の形。`mvv`（`project_mvv.ProjectMvv`）を渡すと、参照と MVV の節も写す。"""
     out = {"status": focus.status, "focus": list(focus.names), "error": focus.error, "reviewer_block": reviewer_block(focus, mvv)}
@@ -192,7 +214,7 @@ def main(argv=None) -> int:
     focus = load_focus(a.root) if a.root else NO_FOCUS
     if focus.status == "unreadable":
         print(f"レビューの重点の宣言を読めないため、基準 1・2・4 だけで続ける: {focus.error}", file=sys.stderr)
-    mvv = project_mvv.load(a.root) if a.root else None
+    mvv = project_mvv.load_mvv(a.root) if a.root else None
     print(reviewer_block(focus, mvv) if a.block == "reviewer" else fixer_block(focus, mvv))
     return 0
 

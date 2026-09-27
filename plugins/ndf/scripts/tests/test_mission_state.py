@@ -355,10 +355,10 @@ def test_next_replace_rewrites_command_section(r6):
 
 
 def test_no_llm_calls():
-    """LLM を直接呼ばない。外へ出るのは MVV を写すときの gh api と、ミッション MVV の照合（project-mvv.py vet）だけである。"""
-    src = SCRIPT.read_text()
+    """LLM を直接呼ばない。外へ出るのは MVV を写すときの gh api（lib/mission_mvv.py）だけで、照合は mvv_llm.vet_body に任せる。"""
+    src = SCRIPT.read_text() + (SCRIPTS / "lib" / "mission_mvv.py").read_text()
     assert "claude" not in src
-    assert src.count("subprocess.run(") == 2 and '["gh", "api"' in src and '"project-mvv.py"), "vet"' in src
+    assert src.count("subprocess.run(") == 1 and '["gh", "api"' in src
 
 
 # ---------- pace: fast の MVV（#1078） ----------
@@ -510,7 +510,10 @@ def test_plan_kind_reads_the_old_key_too(tmp_path, key):
 def test_mvv_sections_keep_a_heading_inside_a_fence():
     """lib/md.py の上で読む（#1142 の D1）: 囲みの中の `## ` は Mission の節を切らない。"""
     text = "## Mission\n\n使命\n\n```md\n## 囲みの中\n```\n\n## Vision\n\n像\n\n## Value\n\n価値\n\n# 別の文書\n"
-    out = load_mission_state().mvv_sections(text)
+    load_mission_state()  # lib/ を sys.path へ足す
+    import mission_mvv
+
+    out = mission_mvv.mvv_sections(text)
     assert out == ("## Mission\n\n使命\n\n```md\n## 囲みの中\n```\n\n## Vision\n\n像\n\n## Value\n\n価値\n")
 
 

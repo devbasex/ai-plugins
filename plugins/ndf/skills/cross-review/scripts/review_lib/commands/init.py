@@ -76,7 +76,7 @@ def _review_criteria(worktree: object) -> dict[str, Any]:
     if focus.status == "unreadable":
         review_lib.info(f"⚠️ レビューの重点の宣言を読めないため、基準 1・2・4 だけで続ける: {focus.error}")
     # プロジェクト MVV（#1366）は 1 回だけ読み、参照と MVV の節を写す。担当・修正担当・見送りの返信が同じ節を読む
-    mvv = project_mvv.load(worktree) if worktree else project_mvv.ProjectMvv("none")
+    mvv = project_mvv.load_mvv(worktree) if worktree else project_mvv.ProjectMvv("none")
     if mvv.status in ("unapproved", "mismatch", "unreadable"):
         review_lib.info(f"⚠️ プロジェクト MVV が{project_mvv.STATUS_LABEL[mvv.status]}ため、MVV なしで続ける: {mvv.error}")
     return review_criteria.as_state(focus, mvv)

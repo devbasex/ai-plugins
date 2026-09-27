@@ -35,12 +35,9 @@ from __future__ import annotations
 
 import argparse
 import difflib
-import importlib.util
 import json
 import re
-import subprocess
 import sys
-import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -48,48 +45,17 @@ sys.path.insert(0, str(HERE / "lib"))
 sys.path.insert(0, str(HERE))
 import jsonio  # noqa: E402
 import project_mvv as pm  # noqa: E402
+import clock  # noqa: E402
+import project_mvv_decl as pmd  # noqa: E402
+import project_mvv_signals as pms  # noqa: E402
 from step_result import EXIT_GATE, EXIT_PRECONDITION, EXIT_UNREADABLE, StepError, emit, main_with, result, validate_result  # noqa: E402
 
-from project_lib.secret import is_secret_path, redact  # noqa: E402
+from project_lib import mvv_candidates as mc  # noqa: E402
+from project_lib import mvv_collect as mcol  # noqa: E402
+from project_lib import mvv_llm  # noqa: E402
 
 TOOL = "project-mvv"
 EXIT_MISMATCH = 4
-MAX_SOURCE = 2000  # 材料 1 件の上限の文字数
-MAX_COMMITS = 400  # 材料に入れるコミットの件名の数（新しい順）
-MAX_ISSUES = 200  # 材料に入れる課題の数（新しい順）
-ISSUE_LIMIT = 5000  # 課題の件数を数える上限
-MAX_PROMPT = 150_000  # 候補の生成へ渡す材料の上限の文字数
-INSTRUCTION_FILES = ("AGENTS.md", "CLAUDE.md", ".github/copilot-instructions.md", "GEMINI.md")
-README_FILES = ("README.md", "README.rst", "README.txt", "README")
-FOUR = (("context", "経緯"), ("premise", "前提"), ("evidence", "根拠"), ("options", "選択肢"))
-VET_VERDICTS = ("follow", "suspect", "unknown")
-
-PROPOSE_SYSTEM = """あなたはプロジェクトの MVV（Mission / Vision / Value）の候補を書く。Tool は無い。
-渡された NDF の共通原則と材料だけを根拠にする。共通原則を判断の基準として使い、原則に反する（人を害する・人の発展を妨げる）
-案は書かない。共通原則の写し（上位の原則・優先順位・C の番号の操作）を候補に入れない。固有の必ず人の承認が要る操作は P の番号で書く。
-候補は 2 案以上で、推奨の 1 案に recommended: true を付ける。各項目の evidence には材料の出典の ID（S<番号>）だけを並べる。
-人へ示す文面なので、経緯（なぜ今この判断が要るか・ここまでに何を決めたか）・前提（この答えで何が決まり何が決まらないか）・
-根拠・選択肢を先に書き、内部の用語は言い換えるか glossary に説明を書く。
-出力は次の JSON の 1 つだけ。前後に文を書かない。
-{"context": "経緯", "premise": "前提", "evidence": "根拠の要約", "options": "選択肢の要約",
- "glossary": [{"term": "語", "meaning": "説明"}],
- "candidates": [{"id": "A", "recommended": true, "summary": "1 行",
-   "mission": {"text": "...", "evidence": ["S1"]}, "vision": {"text": "...", "evidence": ["S2"]},
-   "values": [{"title": "短い名前", "text": "...", "evidence": ["S3"]}],
-   "redlines": [{"id": "P1", "text": "操作", "reason": "理由", "evidence": ["S4"]}]}],
- "questions": [{"question": "利用者に決めてもらう点", "options": [{"label": "選択肢", "effect": "選んだときに決まること"}]}]}"""
-
-VET_SYSTEM = """あなたは MVV の照合者である。Tool は無い。
-渡された本文（プロジェクト MVV の候補・改訂案、またはミッション MVV）が、NDF の共通原則と（あれば）承認済みのプロジェクト MVV に
-従うかを判定する。
-- 共通原則の必ず人の承認が要る操作（C1〜）のどれかを承認なしで行えると書く、または優先順位を変える・入れ替えるなら suspect。
-  locations の item に C の番号か priority を書く
-- ミッション MVV がプロジェクト MVV のレッドライン（P の番号）を緩める・Value を打ち消すなら suspect。item にその番号を書く
-- 原則に反する（人を害する・人の発展を妨げる）なら suspect
-- 反する所が無ければ follow。材料から決められなければ unknown（迷ったら unknown）
-- 本文を書き換えない。判定と箇所を返すだけである
-出力は次の JSON の 1 つだけ。前後に文を書かない。
-{"verdict": "follow|suspect|unknown", "locations": [{"item": "C4|priority|Value 3|P1", "reason": "..."}]}"""
 
 
 # ---------------------------------------------------------------- 共通
@@ -114,7 +80,7 @@ def _work_dir(root: Path, out_dir: str | None) -> Path:
         d = Path(out_dir).expanduser().resolve()
     else:
         name = re.sub(r"[^0-9A-Za-z._-]+", "-", str(root)).strip("-") or "root"
-        d = pm.state_base() / "project-mvv" / name
+        d = pm.mvv_state_base() / "project-mvv" / name
     try:
         d.relative_to(root)
         raise StepError(f"作業ファイルはリポジトリの外に置く（承認の前に .ndf/ へ何も書かない）: {d}", 1)
@@ -124,44 +90,12 @@ def _work_dir(root: Path, out_dir: str | None) -> Path:
     return d
 
 
-def _call_llm(system: str, prompt: str, root: Path, kind: str) -> tuple[dict | None, str, dict]:
-    """最小構成の claude -p を 1 回呼ぶ（Tool なし）。(JSON, 生の文, 使用量)。"""
-    import supervise_lib  # noqa: F401  lib/ を sys.path へ足す
-    import usage_ledger
-    from supervise_lib.claude import call_claude
-
-    res = call_claude(system, prompt, None, str(root), 900)
-    usage = {"cost_usd": res.get("cost"), "seconds": res.get("seconds")}
-    usage_ledger.append_safely(
-        str(root),
-        usage_ledger.UsageRecord(
-            source=TOOL,
-            kind=kind,
-            usage=res.get("usage") or {},
-            model_usage=res.get("model_usage"),
-            cost_usd=res.get("cost"),
-            turns=res.get("turns"),
-            seconds=res.get("seconds"),
-            session_id=res.get("session"),
-        ),
-    )
-    text = str(res.get("text") or "")
-    if not res.get("ok"):
-        return None, text[-500:], usage
-    start, end = text.find("{"), text.rfind("}")
-    try:
-        data = json.loads(text[start : end + 1]) if start >= 0 else None
-    except json.JSONDecodeError:
-        data = None
-    return (data if isinstance(data, dict) else None), text[-500:], usage
-
-
 # ---------------------------------------------------------------- check
 
 
 def cmd_check(a):
     root = _root(a)
-    mvv = pm.load(root)
+    mvv = pm.load_mvv(root)
     label = pm.STATUS_LABEL[mvv.status]
     guide = {
         "none": "策定の手順（references/project-mvv.md）へ入る: collect → propose → 対話 → vet → 承認 → approve",
@@ -187,143 +121,9 @@ def cmd_check(a):
 # ---------------------------------------------------------------- collect
 
 
-class Deadline:
-    def __init__(self, budget: float):
-        self.end = time.monotonic() + budget
-
-    def left(self) -> float:
-        return self.end - time.monotonic()
-
-    def timeout(self) -> float:
-        return max(1.0, min(30.0, self.left()))
-
-
-def _run(cmd: list[str], root: Path, dl: Deadline) -> subprocess.CompletedProcess | str:
-    """1 回のコマンド。失敗の理由は文字列で返す。"""
-    if dl.left() <= 0:
-        return "時間切れ"
-    try:
-        p = subprocess.run(cmd, cwd=root, capture_output=True, text=True, timeout=dl.timeout())
-    except FileNotFoundError:
-        return f"{cmd[0]} が無い"
-    except subprocess.TimeoutExpired:
-        return f"{' '.join(cmd[:3])} が打ち切られた"
-    if p.returncode != 0:
-        return f"{' '.join(cmd[:3])}: {(p.stderr or p.stdout).strip()[:200]}"
-    return p
-
-
-def _clean(text: str) -> str:
-    return "\n".join(redact(ln) for ln in (text or "").splitlines())[:MAX_SOURCE]
-
-
-def _doc_sources(root: Path, rel: str, kind: str) -> list[dict]:
-    """ファイルを `## ` の節ごとの出典に分ける。ref は `パス:行`。"""
-    if is_secret_path(rel):
-        return []
-    try:
-        text = (root / rel).read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
-        return []
-    lines = text.splitlines()
-    starts = [0] + [i for i, ln in enumerate(lines) if ln.startswith("## ") and i > 0]
-    out = []
-    for n, s in enumerate(starts):
-        e = starts[n + 1] if n + 1 < len(starts) else len(lines)
-        chunk = "\n".join(lines[s:e]).strip()
-        if chunk:
-            out.append({"kind": kind, "ref": f"{rel}:{s + 1}", "text": _clean(chunk)})
-    return out
-
-
-def _decision_docs(root: Path) -> list[str]:
-    d = root / "docs"
-    if not d.is_dir():
-        return []
-    found = sorted(str(p.relative_to(root)) for p in d.rglob("*.md") if "decision" in p.name.lower())
-    return found[:5]
-
-
-def _issue_repo(root: Path) -> str | None:
-    import repo
-
-    return repo.owner_repo(root)
-
-
-def collect_materials(root: Path, a) -> dict:
-    started = time.monotonic()
-    dl = Deadline(a.budget)
-    settings, err = pm.read_settings(root)
-    if err:
-        raise StepError(err, EXIT_PRECONDITION)
-    th = {
-        "commits": a.trend_commits if a.trend_commits is not None else settings["trend_commits"],
-        "issues": a.trend_issues if a.trend_issues is not None else settings["trend_issues"],
-    }
-    missing: list[dict] = []
-    commits: list[str] = []
-    n_commits = 0
-    p = _run(["git", "rev-list", "--count", "HEAD"], root, dl)
-    if isinstance(p, str):
-        missing.append({"what": "git の履歴", "reason": p})
-    else:
-        n_commits = int(p.stdout.strip() or 0)
-        q = _run(["git", "log", "--no-merges", f"-{MAX_COMMITS}", "--format=%h %s"], root, dl)
-        if isinstance(q, str):
-            missing.append({"what": "コミットの件名", "reason": q})
-        else:
-            commits = [ln for ln in q.stdout.splitlines() if ln.strip()]
-    issues: list[dict] = []
-    slug = _issue_repo(root)
-    if not slug:
-        missing.append({"what": "課題", "reason": "origin が GitHub でない（課題を読まない）"})
-    else:
-        q = _run(
-            ["gh", "issue", "list", "--repo", slug, "--state", "all", "--limit", str(ISSUE_LIMIT), "--json", "number,title,body"], root, dl
-        )
-        if isinstance(q, str):
-            missing.append({"what": "課題", "reason": q})
-        else:
-            try:
-                issues = json.loads(q.stdout or "[]")
-            except ValueError:
-                missing.append({"what": "課題", "reason": "gh の出力を読めない"})
-    counts = {"commits": n_commits, "issues": len(issues)}
-    mode = "trend" if counts["commits"] < th["commits"] and counts["issues"] < th["issues"] else "history"
-    raw: list[dict] = []
-    if a.request_file:
-        try:
-            raw.append({"kind": "request", "ref": a.request_file, "text": _clean(Path(a.request_file).read_text(encoding="utf-8"))})
-        except OSError as e:
-            missing.append({"what": "依頼文", "reason": str(e)})
-    for rel in README_FILES:
-        if (root / rel).is_file():
-            raw += _doc_sources(root, rel, "readme")
-            break
-    for rel in INSTRUCTION_FILES:
-        if (root / rel).is_file():
-            raw += _doc_sources(root, rel, "instructions")
-    if mode == "history":
-        for rel in _decision_docs(root):
-            raw += _doc_sources(root, rel, "doc")
-        for it in sorted(issues, key=lambda x: -int(x.get("number") or 0))[:MAX_ISSUES]:
-            raw.append({"kind": "issue", "ref": f"#{it.get('number')}", "text": _clean(f"{it.get('title', '')}\n\n{it.get('body') or ''}")})
-        raw += [{"kind": "commit", "ref": redact(ln), "text": redact(ln)} for ln in commits]
-    sources = [{"id": f"S{i}", **s} for i, s in enumerate(raw, 1)]
-    return {
-        "root": str(root),
-        "mode": mode,
-        "counts": counts,
-        "thresholds": th,
-        "sources": sources,
-        "missing": missing,
-        "seconds": round(time.monotonic() - started, 2),
-    }
-
-
 def cmd_collect(a):
     root = _root(a)
-    data = collect_materials(root, a)
+    data = mcol.collect_materials(root, a)
     out = _work_dir(root, a.out_dir) / "materials.json"
     jsonio.write_atomic(out, data)
     print(f"材料: {out}（{data['mode']}・出典 {len(data['sources'])} 件・{data['seconds']} 秒）")
@@ -343,131 +143,6 @@ def cmd_collect(a):
 # ---------------------------------------------------------------- propose
 
 
-def candidate_problems(data, known: set[str]) -> list[str]:
-    """候補の形の誤り（I10・I19）。"""
-    if not isinstance(data, dict):
-        return ["JSON のオブジェクトでない"]
-    errs = [f"{label}（{k}）が無い" for k, label in FOUR if not (isinstance(data.get(k), str) and data[k].strip())]
-    cands = data.get("candidates")
-    if not isinstance(cands, list) or len(cands) < 2:
-        errs.append("候補が 2 案以上ない")
-        cands = cands if isinstance(cands, list) else []
-    for i, c in enumerate(cands):
-        w = f"候補 {c.get('id', i + 1) if isinstance(c, dict) else i + 1}"
-        if not isinstance(c, dict):
-            errs.append(f"{w}: オブジェクトでない")
-            continue
-        parts = [("Mission", c.get("mission")), ("Vision", c.get("vision"))]
-        values = c.get("values")
-        if not isinstance(values, list) or not values:
-            errs.append(f"{w}: Value が無い")
-            values = []
-        parts += [(f"Value {j}", v) for j, v in enumerate(values, 1)]
-        if not isinstance(c.get("redlines"), list):
-            errs.append(f"{w}: レッドライン（redlines）が無い")
-        else:
-            parts += [(r.get("id", "P") if isinstance(r, dict) else "P", r) for r in c["redlines"]]
-        for name, part in parts:
-            if not isinstance(part, dict) or not str(part.get("text") or "").strip():
-                errs.append(f"{w}: {name} の本文が無い")
-                continue
-            ev = part.get("evidence")
-            if not isinstance(ev, list) or not ev:
-                errs.append(f"{w}: {name} の根拠が無い")
-            elif any(e not in known for e in ev):
-                errs.append(f"{w}: {name} の根拠が材料に無い ID を指す（{', '.join(str(e) for e in ev if e not in known)}）")
-    qs = data.get("questions")
-    if not isinstance(qs, list) or not any(isinstance(q, dict) and str(q.get("question") or "").strip() for q in qs):
-        errs.append("利用者に決めてもらう点（questions）が無い")
-    return errs
-
-
-def candidate_body(c: dict) -> str:
-    """候補 1 案を宣言の本文の形（`.ndf/mvv.md`）にする。"""
-    lines = ["## Mission", "", c["mission"]["text"].strip(), "", "## Vision", "", c["vision"]["text"].strip(), "", "## Value", ""]
-    for j, v in enumerate(c["values"], 1):
-        title = f"**{v['title'].strip()}**: " if str(v.get("title") or "").strip() else ""
-        lines.append(f"{j}. {title}{v['text'].strip()}")
-    reds = [r for r in c.get("redlines") or [] if isinstance(r, dict)]
-    if reds:
-        lines += ["", f"## {pm.OPERATIONS_HEADING}", "", "| # | 操作 | 理由 |", "| --- | --- | --- |"]
-        for j, r in enumerate(reds, 1):
-            lines.append(f"| P{j} | {str(r['text']).strip()} | {str(r.get('reason') or '').strip()} |")
-    return "\n".join(lines) + "\n"
-
-
-def _refs(ev, by_id: dict) -> str:
-    return "・".join(f"{e}（{by_id[e]['ref']}）" for e in ev if e in by_id)
-
-
-def candidates_md(data: dict, mats: dict, kind: str, current: str | None, bodies: dict) -> str:
-    by_id = {s["id"]: s for s in mats.get("sources", [])}
-    title = "プロジェクト MVV の改訂案" if kind == "revision" else "プロジェクト MVV の候補"
-    out = [f"# {title}", ""]
-    for k, label in FOUR:
-        out += [f"## {label}", "", data[k].strip(), ""]
-    gl = [g for g in data.get("glossary") or [] if isinstance(g, dict) and g.get("term")]
-    if gl:
-        out += ["## 用語", ""] + [f"- **{g['term']}**: {g.get('meaning', '')}" for g in gl] + [""]
-    for c in data["candidates"]:
-        head = f"## 候補 {c.get('id', '')}" + ("（推奨）" if c.get("recommended") else "")
-        out += [head, ""]
-        if c.get("summary"):
-            out += [str(c["summary"]), ""]
-        out += ["### Mission", "", c["mission"]["text"], "", f"根拠: {_refs(c['mission']['evidence'], by_id)}", ""]
-        out += ["### Vision", "", c["vision"]["text"], "", f"根拠: {_refs(c['vision']['evidence'], by_id)}", ""]
-        out += ["### Value", ""]
-        for j, v in enumerate(c["values"], 1):
-            out.append(f"{j}. **{v.get('title', '')}**: {v['text']}（根拠: {_refs(v['evidence'], by_id)}）")
-        out += ["", "### 必ず人の承認が要る操作（固有のもの）", ""]
-        reds = c.get("redlines") or []
-        if reds:
-            out += ["| # | 操作 | 理由 | 根拠 |", "| --- | --- | --- | --- |"]
-            out += [f"| P{j} | {r['text']} | {r.get('reason', '')} | {_refs(r['evidence'], by_id)} |" for j, r in enumerate(reds, 1)]
-        else:
-            out.append("- 無し（NDF の共通原則の C1〜C8 だけ）")
-        out += ["", f"本文の案: `{bodies.get(c.get('id'), '')}`", ""]
-    out += ["## 利用者に決めてもらう点", ""]
-    for q in data["questions"]:
-        if not isinstance(q, dict):
-            continue
-        out.append(f"- {q.get('question', '')}")
-        for o in q.get("options") or []:
-            if isinstance(o, dict):
-                out.append(f"  - {o.get('label', '')}: {o.get('effect', '')}")
-    if kind == "revision" and current is not None:
-        rec = next((c for c in data["candidates"] if c.get("recommended")), data["candidates"][0])
-        ch = pm.changes(current, candidate_body(rec))
-        out += ["", "## 現行との差分（推奨の案）", ""] + ([f"- {c['item']}: {c['kind']}" for c in ch] or ["- 無し"])
-    out += [
-        "",
-        "## 材料",
-        "",
-        f"- モード: {mats.get('mode')}（コミット {mats.get('counts', {}).get('commits')} 件・課題 {mats.get('counts', {}).get('issues')} 件）",
-    ]
-    out += [f"- 欠け: {m['what']}（{m['reason']}）" for m in mats.get("missing", [])]
-    return "\n".join(out) + "\n"
-
-
-def propose_prompt(mats: dict, current: str | None, reason: str | None) -> str:
-    parts = [pm.principles(), pm.contract(), "# 材料"]
-    body, size = [], 0
-    for s in mats.get("sources", []):
-        piece = f"- {s['id']} [{s['kind']}] {s['ref']}\n  " + s["text"].replace("\n", "\n  ")
-        if size + len(piece) > MAX_PROMPT:
-            break
-        body.append(piece)
-        size += len(piece)
-    parts.append("\n".join(body) or "（材料が無い）")
-    parts.append(
-        f"モード: {mats.get('mode')}（{'履歴が少ないため、README・指示書・依頼文の傾向から書く' if mats.get('mode') == 'trend' else '履歴から書く'}）"
-    )
-    if current is not None:
-        parts += ["# 現行のプロジェクト MVV（改訂の対象）", current.strip(), "# 改訂の理由", (reason or "（理由の記述なし）").strip()]
-        parts.append("改訂案を書く。候補の 1 つは現行からの差分が最小の案にする。")
-    return "\n\n".join(parts) + "\n"
-
-
 def cmd_propose(a):
     root = _root(a)
     mpath = Path(a.materials).resolve()
@@ -478,14 +153,14 @@ def cmd_propose(a):
     current = None
     kind = "new"
     if a.current:
-        mvv = pm.load(root)
+        mvv = pm.load_mvv(root)
         if not mvv.approved:
             raise StepError(f"--current には承認済みのプロジェクト MVV が要る（今は {pm.STATUS_LABEL[mvv.status]}）", EXIT_PRECONDITION)
         current, kind = mvv.body, "revision"
     reason = Path(a.reason_file).read_text(encoding="utf-8") if a.reason_file else None
-    data, raw, usage = _call_llm(PROPOSE_SYSTEM, propose_prompt(mats, current, reason), root, "mvv-propose")
+    data, raw, usage = mvv_llm.call_llm_json(mc.PROPOSE_SYSTEM, mc.propose_prompt(mats, current, reason), root, "mvv-propose")
     known = {s["id"] for s in mats.get("sources", [])}
-    errs = ["LLM が候補を返さない"] if data is None else candidate_problems(data, known)
+    errs = ["LLM が候補を返さない"] if data is None else mc.candidate_problems(data, known)
     if errs:
         emit(
             result(
@@ -502,12 +177,12 @@ def cmd_propose(a):
     bodies = {}
     for c in data["candidates"]:
         p = out_dir / f"candidate-{re.sub(r'[^0-9A-Za-z_-]+', '', str(c.get('id') or len(bodies) + 1))}.md"
-        p.write_text(candidate_body(c), encoding="utf-8")
+        p.write_text(mc.candidate_body(c), encoding="utf-8")
         bodies[c.get("id")] = str(p)
     cj = out_dir / "candidates.json"
     jsonio.write_atomic(cj, {"materials": str(mpath), "kind": kind, **data, "bodies": bodies})
     cm = out_dir / "candidates.md"
-    cm.write_text(candidates_md(data, mats, kind, current, bodies), encoding="utf-8")
+    cm.write_text(mc.candidates_md(data, mats, kind, current, bodies), encoding="utf-8")
     print(f"候補: {cm}（{len(data['candidates'])} 案）")
     emit(
         result(
@@ -533,56 +208,13 @@ def cmd_propose(a):
 # ---------------------------------------------------------------- vet
 
 
-def vet_prompt(kind: str, body: str, mvv: pm.ProjectMvv) -> str:
-    what = {"candidate": "プロジェクト MVV の候補", "revision": "プロジェクト MVV の改訂案", "mission": "ミッション MVV"}[kind]
-    parts = [pm.principles()]
-    if kind in ("mission", "revision"):
-        parts.append(pm.project_part(mvv))
-    parts += [pm.contract(), f"# 照合する本文（{what}）", body.strip()]
-    return "\n\n".join(parts) + "\n"
-
-
-def vet_body(root: Path, body: str, kind: str) -> tuple[dict, dict]:
-    """(照合の記録, 使用量)。記録は project-mvv.jsonl へ足す。本文は書き換えない（I14）。"""
-    mvv = pm.load(root)
-    rec = {
-        "at": pm.now_iso(),
-        "repo": pm.repo_key(root),
-        "kind": kind,
-        "sha256": pm.sha256_text(body),
-        "project_sha256": mvv.sha256 if mvv.approved else "",
-        "project_mvv": pm.record(mvv),
-        "verdict": "unreadable",
-        "locations": [],
-    }
-    usage: dict = {}
-    if kind in ("candidate", "revision"):
-        probs = pm.shape_problems(body)
-        if probs:
-            rec.update(verdict="suspect", locations=probs, machine=True)
-    if kind == "revision" and not mvv.approved and rec["verdict"] == "unreadable":
-        rec["locations"] = [
-            {"item": "project_mvv", "reason": f"改訂には承認済みのプロジェクト MVV が要る（今は {pm.STATUS_LABEL[mvv.status]}）"}
-        ]
-    elif rec["verdict"] == "unreadable":
-        data, raw, usage = _call_llm(VET_SYSTEM, vet_prompt(kind, body, mvv), root, "mvv-vet")
-        if data is None or data.get("verdict") not in VET_VERDICTS:
-            rec.update(raw=raw)
-        else:
-            locs = [x for x in data.get("locations") or [] if isinstance(x, dict)]
-            rec.update(verdict=data["verdict"], locations=locs)
-        rec.update(cost_usd=usage.get("cost_usd"), seconds=usage.get("seconds"))
-    pm.append_jsonl(pm.vet_log_path(), rec)
-    return rec, usage
-
-
 def cmd_vet(a):
     root = _root(a)
     try:
         body = Path(a.body).read_text(encoding="utf-8")
     except OSError as e:
         raise StepError(f"本文を読めない: {e}", EXIT_UNREADABLE) from None
-    rec, usage = vet_body(root, body, a.kind)
+    rec, usage = mvv_llm.vet_body(root, body, a.kind)
     items = [
         {"kind": "location", "name": str(x.get("item", "")), "result": rec["verdict"], "reason": str(x.get("reason", ""))}
         for x in rec["locations"]
@@ -604,10 +236,10 @@ def cmd_vet(a):
 
 
 def last_vet(root: Path, sha: str) -> dict | None:
-    key = pm.repo_key(root)
+    key = pm.mvv_repo_key(root)
     rows = [
         r
-        for r in pm.read_jsonl(pm.vet_log_path())
+        for r in pms.read_jsonl(pm.vet_log_path())
         if r.get("repo") == key and r.get("sha256") == sha and r.get("kind") in ("candidate", "revision")
     ]
     return rows[-1] if rows else None
@@ -622,7 +254,7 @@ def cmd_approve(a):
     probs = pm.shape_problems(body)
     if probs:
         raise StepError("本文の形が足りない: " + "／".join(f"{p['item']}: {p['reason']}" for p in probs), 1)
-    mvv = pm.load(root)
+    mvv = pm.load_mvv(root)
     if mvv.status == "unreadable":
         raise StepError(f"宣言が壊れているため版を足さない: {mvv.error}", 1)
     sha = pm.sha256_text(body)
@@ -654,7 +286,7 @@ def cmd_approve(a):
     v = {
         "version": len(versions) + 1,
         "sha256": sha,
-        "approved_at": pm.now_iso(),
+        "approved_at": clock.now_iso("utc"),
         "approved_by": a.by,
         "reason": reason,
         "vet": {"verdict": vet["verdict"], "at": vet["at"], "accepted_unknown": vet["verdict"] == "unknown"},
@@ -737,7 +369,7 @@ def cmd_show(a):
 
 def cmd_context(a):
     root = _root(a)
-    mvv = pm.load(root)
+    mvv = pm.load_mvv(root)
     text = pm.block(mvv)
     if a.format == "text":
         sys.stdout.write(text)
@@ -753,24 +385,13 @@ def cmd_context(a):
     )
 
 
-def escape_events(root: Path) -> list[dict]:
-    """流出不具合の記録（check-trigger.py の `kind: escape`）。読めなければ空。"""
-    try:
-        spec = importlib.util.spec_from_file_location("ndf_check_trigger", HERE / "check-trigger.py")
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        return [e for e in mod.read_events(root) if e.get("kind") == "escape"]
-    except Exception:  # noqa: BLE001  集計の材料が欠けても止めない
-        return []
-
-
 def cmd_signals(a):
     root = _root(a)
-    mvv = pm.load(root)
+    mvv = pm.load_mvv(root)
     if mvv.status == "unreadable":
         raise StepError(f"宣言が壊れている: {mvv.error}", EXIT_PRECONDITION)
-    sig = pm.signals(root, mvv, escapes=escape_events(root))
-    sug = pm.revise_suggestion(sig) if mvv.approved else None
+    sig = pms.signals(root, mvv, escapes=mvv_llm.escape_events(root))
+    sug = pms.revise_suggestion(sig) if mvv.approved else None
     c, t = sig["counts"], sig["thresholds"]
     head = f"版 {mvv.version}" if mvv.approved else pm.NO_MVV
     lines = [
@@ -788,7 +409,7 @@ def cmd_schema(a):
     import deps
 
     deps.require("schema")
-    text = pm.json_schema()
+    text = pmd.mvv_json_schema()
     if a.out:
         Path(a.out).write_text(text, encoding="utf-8")
         emit(result(TOOL, "ok", f"schema を書いた: {a.out}"))
