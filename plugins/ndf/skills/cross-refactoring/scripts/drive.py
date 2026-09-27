@@ -35,6 +35,8 @@ TOOL = "cross-refactoring-drive"
 ORDER = ("propose", "plan", "add-tests", "implement", "verify", "final", "done")
 # 修正の手順は検証の繰り返しの中にある。そこで止まった実行は検証から再開する（提案以降の CLI を起動し直さない）
 RESUME_AS = {"fix": "verify", "final-fix": "final"}
+# 監視が手順の上限で CLI を止めたときの終了コード（2 = TIMEOUT・5 = STALLED。表は monitor.py の冒頭）
+MONITOR_STOPPED = (2, 5)
 CR_DRIVE = HERE.parents[1] / "cross-review" / "scripts" / "drive.py"
 FOCUS = (
     "項目をまたいだ整合を見る。個々の改善項目の妥当性は範囲テストで判定済みのため対象外とする。"
@@ -165,17 +167,21 @@ class Drive:
     def impl_phase(self, phase: str, impl: str | None = None, stem: str | None = None) -> None:
         """担当 1 者の工程。起動の失敗では止める。
 
-        **修正の工程（`fix` / `final-fix`）は監視の非ゼロ終了で止めない。** 締め切りでの打ち切りは
-        設計どおりの結末で、続く `merge-fix` / `merge-final-fix` が結果なしの記録と取り消しを持つ。
-        ここで止めると、`final-fix` の打ち直しが担当の途中のコミットを含む頭を最終ゲートへ渡す。
+        **監視が手順の上限で CLI を止めたとき（`timeout` / `stalled`）は止めない。** 上限での打ち切りは
+        設計どおりの結末で（決定 23）、続く `merge-*` が止めたことを記録し（`note_stopped`）、
+        結果なしの記録と取り消しを持つ。ここで止めると、打ち直しが同じ CLI を余裕の分だけの上限で
+        起動し直して打ち切られ続け、`final-fix` では担当の途中のコミットを含む頭を最終ゲートへ渡す。
+
+        **修正の工程（`fix` / `final-fix`）は監視のどの非ゼロ終了でも止めない。** 結果なしの取り込みが
+        取り消しを持つためである。
         """
         self.v.pop("PHASE_TIMEOUT", None)
         self.rf("start-phase", self.v["ID"], phase)
         impl = impl or self.v["IMPL"]
         self.sh(f"launch-cli.sh（{impl}・{phase}）", ["bash", str(HERE / "launch-cli.sh"), impl, phase, self.v["ID"]])
         rc, _ = self.monitor(impl, phase, stem or f"{{agent}}-{phase}-rf{self.v['ID']}")
-        if rc != 0 and phase not in ("fix", "final-fix"):
-            raise Stop(f"monitor.py（{impl}・{phase}）が終了コード {rc} で止まった（タイムアウト・停滞・起動失敗）", rc)
+        if rc != 0 and rc not in MONITOR_STOPPED and phase not in ("fix", "final-fix"):
+            raise Stop(f"monitor.py（{impl}・{phase}）が終了コード {rc} で止まった（結果なし・起動失敗・早期の異常）", rc)
 
     def propose(self) -> None:
         """全参加者の提案。1 者が欠けても続ける（`merge-proposals` が除く）が、全員が欠けたら止める。"""
@@ -225,6 +231,12 @@ class Drive:
 
     def final_gate(self) -> None:
         i = self.v["ID"]
+        # 最終ゲートの修正の途中で止まった駆動の打ち直しは、先にその試行を取り込む（#674）。
+        # 取り込まずに `final-gate` を打つと、担当が途中まで積んだ未検証のコミットを含む頭を判定・公開する。
+        # 結果なしで閉じた試行は `merge-final-fix` が 2 で返す（`already_closed`）ため、2 でも進む。
+        gate = self.state().get("final_gate") or {}
+        if gate.get("status") == "failing" and gate.get("impl") and gate.get("fix_base_sha"):
+            self.rf("merge-final-fix", i, ok=(0, 2))
         for _ in range(100):
             rc, _ = self.rf("final-gate", i, ok=(0, 1, 2))
             if rc in (0, 1):

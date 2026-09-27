@@ -190,13 +190,63 @@ def test_prepare_worktrees_failure_stops_before_clis(tmp_path, monkeypatch, caps
     assert fake.launched() == []
 
 
-def test_monitor_failure_in_implement_stops_before_merge(tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize("rc", [3, 4, 6])
+def test_monitor_failure_in_implement_stops_before_merge(tmp_path, monkeypatch, capsys, rc):
+    """結果が無いまま異常に終わった（結果なし・早期の異常・起動失敗）ときは取り込みへ進まない。"""
     monkeypatch.setenv("CROSS_REFACTORING_TMP_DIR", str(tmp_path))
-    fake = FakeFrom(tmp_path, "implement", fail={"monitor.py": 2})
+    fake = FakeFrom(tmp_path, "implement", fail={"monitor.py": rc})
     monkeypatch.setattr(rf, "call", fake)
     code, out = run_main(ARGV, capsys)
     assert code != 0 and "monitor.py" in out["summary"]
     assert not any(c[:2] == ("refactor.py", "merge-implement") for c in fake.calls)
+
+
+@pytest.mark.parametrize("rc", [2, 5])
+@pytest.mark.parametrize("phase", ["plan", "implement"])
+def test_monitor_stop_at_limit_goes_on_to_merge(tmp_path, monkeypatch, capsys, phase, rc):
+    """監視が上限で止めた（timeout / stalled）ときは止めずに `merge-*` へ渡す（決定 23）。"""
+    monkeypatch.setenv("CROSS_REFACTORING_TMP_DIR", str(tmp_path))
+    fake = FakeFrom(tmp_path, phase, fail={"monitor.py": rc})
+    monkeypatch.setattr(rf, "call", fake)
+    code, _ = run_main(ARGV, capsys)
+    assert code == 0 and any(c[:2] == ("refactor.py", f"merge-{phase}") for c in fake.calls)
+
+
+def _final_fix_resume(tmp_path, monkeypatch, gate: dict, merge_rc: int):
+    monkeypatch.setenv("CROSS_REFACTORING_TMP_DIR", str(tmp_path))
+    fake = FakeFrom(tmp_path, "final-fix")
+    fake.state["final_gate"] = gate
+    fake.save()
+    real = fake.__call__
+
+    def call(cmd, env=None, cwd=None):
+        if Path(cmd[1]).name == "refactor.py" and cmd[2] == "merge-final-fix":
+            fake.calls.append(("refactor.py", *cmd[2:]))
+            return merge_rc, ""
+        return real(cmd, env, cwd)
+
+    monkeypatch.setattr(rf, "call", call)
+    return fake
+
+
+@pytest.mark.parametrize("merge_rc", [0, 2])
+def test_rerun_from_final_fix_merges_before_final_gate(tmp_path, monkeypatch, capsys, merge_rc):
+    """最終ゲートの修正の途中で止まった駆動は、`final-gate` の前に `merge-final-fix` を通す（#674）。
+
+    結果なしで閉じ済みの試行（`merge-final-fix` が 2）でも最終ゲートへ進む。
+    """
+    fake = _final_fix_resume(tmp_path, monkeypatch, {"status": "failing", "impl": "codex", "fix_base_sha": "abc"}, merge_rc)
+    code, _ = run_main(ARGV, capsys)
+    subs = [c[1] for c in fake.calls if c[0] == "refactor.py" and c[1] in ("merge-final-fix", "final-gate")]
+    assert code == 0 and subs[:2] == ["merge-final-fix", "final-gate"]
+    assert fake.launched() == []
+
+
+def test_final_gate_without_open_fix_does_not_merge(tmp_path, monkeypatch, capsys):
+    """開いた修正の試行が無ければ（最終ゲートが通った後など）`merge-final-fix` を打たない。"""
+    fake = _final_fix_resume(tmp_path, monkeypatch, {"status": "passed", "impl": "codex", "fix_base_sha": "abc"}, 0)
+    code, _ = run_main(ARGV, capsys)
+    assert code == 0 and not any(c[:2] == ("refactor.py", "merge-final-fix") for c in fake.calls)
 
 
 @pytest.mark.parametrize("phase", ["fix", "final-fix"])
