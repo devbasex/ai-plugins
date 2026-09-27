@@ -97,7 +97,7 @@ cross-review では `reviewer_block` / `fixer_block` の後ろへ足す。今の
 ### 決定 13: 候補の生成と照合は `supervise_lib/claude.py` の `call_claude` を Tool なしで呼ぶ
 
 利用上限の待ち・使用量の帳簿・打ち切りを既に持つ唯一の口である。mvv-gate の `ask` は同じ引数を書き写した実装で、新しい副命令が
-それを写すと 3 つ目の写しになる。mvv-gate の `ask` を `call_claude` へ寄せることは、この変更の範囲の外として別の課題にする。
+それを写すと 3 つ目の写しになる。mvv-gate の `ask` を `call_claude` へ寄せることは、この変更の範囲の外として #1367 にした。
 
 ### 決定 14: cross-refactoring の見送りの理由（8 つ）は増やさず、根拠は `mvv_basis` の項目で持つ
 
