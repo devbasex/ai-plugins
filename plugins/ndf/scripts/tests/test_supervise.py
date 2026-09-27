@@ -851,7 +851,6 @@ def test_run_gate_exit_goes_next_and_copies_presentation(tmp_path):
                 "cmd": f"echo '{out}'; exit 10",
                 "presentation_to": "issues/a.md",
                 "on_fail": "bad",
-                "rerun_failed": True,
                 "gate_next": "after",
             },
             {"id": "bad", "type": "run", "cmd": "false", "next": "end"},
@@ -1838,3 +1837,74 @@ def test_pr_body_tests_table_escapes_a_pipe_in_the_last_line(tmp_path, monkeypat
     }
     assert "結果: 完了" in engine.Engine(plan, tmp_path / "state").run()
     assert "| test | 0 | a \\| b |" in body.read_text().splitlines()
+
+
+CARMO_PROJECT = {
+    "version": 1,
+    "test": {
+        "strategy": "local-scoped-ci-whole",
+        "ci": {"check": "test-results", "junit_artifacts": "junit-*"},
+        "suites": [
+            {
+                "name": "phpunit",
+                "runner": "phpunit",
+                "command": "docker compose exec -T app ./vendor/bin/phpunit --log-junit build/ndf/junit.xml",
+                "scope_command": "docker compose exec -T app ./vendor/bin/phpunit --log-junit build/ndf/junit.xml {paths}",
+                "junit": "build/ndf/junit.xml",
+                "container": {"service": "app"},
+                "paths": ["tests"],
+            }
+        ],
+    },
+    "test_duration": {"measured": [{"seconds": 3827.0, "source": "ci-junit", "detail": "run"}]},
+    "ci": {"provider": "github-actions", "workflows": [{"path": ".github/workflows/test-results.yml", "jobs": 24, "wall_seconds": 360.0}]},
+}
+
+
+def _carmo_repo(tmp_path):
+    root = foreign_repo(tmp_path)
+    (root / ".ndf" / "project.json").write_text(json.dumps(CARMO_PROJECT))
+    return root
+
+
+def test_new_check_with_a_ci_whole_declaration_passes_no_test_command_to_the_refactoring(tmp_path):
+    """#1334 AC7 — carmo の形の宣言で `new check` を作ると、リファクタリングのステップは `--baseline-test` / `--round-test` を持たず
+    （cross-refactoring が同じ宣言から戦略を読む）、全体テストと CI の待ちの打ち切りは宣言の所要から出た値で、計画に書かれる。"""
+    root = _carmo_repo(tmp_path)
+    out = tmp_path / "check.json"
+    p = cli("new", "check", "--pr", "5", "--worktree", str(root), "--scope", "app", "tests", "--out", str(out), cwd=root)
+    assert p.returncode == 0, p.stderr
+    plan = json.loads(out.read_text())
+    steps = {s["id"]: s for s in plan["steps"]}
+    assert "--baseline-test" not in steps["refactor"]["args"] and "--round-test" not in steps["refactor"]["args"]
+    assert plan["テストの戦略"]["name"] == "local-scoped-ci-whole" and plan["テストの戦略"]["source"] == "test.strategy"
+    limits = plan["テストの時間"]
+    # 予算を持たない supervise は、テストが 3·w（w = 3,827 秒）、CI の待ちが 3·c（c = 360 秒）
+    assert limits["test_timeout"] == 3 * 3827 and limits["ci_wait_timeout"] == 3 * 360
+    assert limits["basis"]["unknown_duration"] is False
+    ci_wait = limits["ci_wait_timeout"]
+    assert steps["merge"]["cmd"].endswith(f"--timeout {ci_wait}")
+    assert steps["test-all"]["timeout"] == steps["merge"]["timeout"] > ci_wait
+    for fixed in (900, 1800, 3600):
+        assert f"--timeout {fixed}" not in steps["merge"]["cmd"]
+
+
+def test_new_impl_with_a_ci_whole_declaration_takes_the_scope_timeout_from_the_limits(tmp_path):
+    """#1334 AC7 — 範囲テストのステップの打ち切りは `limits.test_timeout` に余裕を足した値で、900 秒の固定でない。"""
+    root = _carmo_repo(tmp_path)
+    out = tmp_path / "impl.json"
+    p = cli("new", "impl", "--issue", "1", "--worktree", str(root), "--tests", "tests/Unit/A.php", "--title", "T", "--out", str(out), cwd=root)
+    assert p.returncode == 0, p.stderr
+    plan = json.loads(out.read_text())
+    steps = {s["id"]: s for s in plan["steps"]}
+    assert steps["test-limited"]["cmd"] == f"python3 {SCRIPTS / 'test-run.py'} scope --paths tests/Unit/A.php"
+    assert steps["test-limited"]["timeout"] > plan["テストの時間"]["test_timeout"] > 990
+
+
+def test_new_stops_on_a_template_whose_paths_is_not_a_word(tmp_path):
+    """#1334 決定 14 — `--filter={paths}` のように `{paths}` が 1 語で立たない雛形では計画を作らない。"""
+    root = foreign_repo(tmp_path)
+    out = tmp_path / "p.json"
+    p = cli("new", "impl", "--issue", "1", "--worktree", str(root), "--tests", "t", "--title", "T", "--test-cmd", "phpunit --filter={paths}", "--out", str(out), cwd=root)
+    assert p.returncode == 2 and "1 語" in p.stderr
+    assert not out.exists()

@@ -210,3 +210,36 @@ def test_wait_check_waits_while_pending_and_returns_none_at_the_limit():
     got, waited, attempts = test_triage.wait_check(lambda: "pending", 15, sleep=lambda s: None)
     assert got is None and attempts >= 1
     assert test_triage.wait_check(lambda: None, 15, sleep=lambda s: None)[0] is None
+
+
+def test_phpunit_ci_junit_is_split_like_pytest(tmp_path):
+    """AC6 — PHPUnit の CI の JUnit（絶対パス）から落ちた ID を取り、既存失敗と変更起因に分ける。手順は pytest と同じ。"""
+    work = tmp_path / "carmo"
+    (work / "tests" / "Unit" / "Services").mkdir(parents=True)
+    (work / "tests" / "Unit" / "Services" / "UserServiceTest.php").write_text("<?php\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=work, check=True)
+    subprocess.run(["git", "add", "-A"], cwd=work, check=True)
+    subprocess.run(["git", "-c", "user.email=t@e.st", "-c", "user.name=t", "commit", "-qm", "init"], cwd=work, check=True)
+    ci_xml = PHPUNIT_XML.replace(b"/var/www/html/", b"/home/runner/work/carmo/carmo/")
+    failed, reason = test_triage.merged_failed_ids([b"<broken", ci_xml], test_triage.tracked_files(str(work)))
+    assert reason is None
+    assert failed == ["tests/Unit/Services/UserServiceTest.php::Tests.Unit.Services.UserServiceTest::testSave"]
+    suite = ts.Suite("phpunit", "docker compose exec -T app phpunit", "docker compose exec -T app phpunit {paths}", junit="build/junit.xml", paths=["tests"])
+    strategy = ts.Strategy("local-scoped-ci-whole", "test.strategy", [suite])
+    seen = []
+
+    def run(command, cwd, timeout, log):
+        seen.append(list(command))
+        return 1, False  # JUnit を書かない走らせ直しは、そのファイルの ID がまだ落ちているとみなす
+
+    known = test_triage.classify(
+        work=str(work), strategy=strategy, failed=failed, fallback_reason=None, base_sha=None, timeout=30, log_dir=tmp_path / "logs",
+        existing_failures=list(failed), run=run,
+    )
+    assert known["preexisting"] == failed and known["caused"] == []
+    caused = test_triage.classify(
+        work=str(work), strategy=strategy, failed=failed, fallback_reason=None, base_sha=None, timeout=30, log_dir=tmp_path / "logs", run=run
+    )
+    assert caused["caused"] == failed
+    assert seen[0] == ["docker", "compose", "exec", "-T", "app", "phpunit", "tests/Unit/Services/UserServiceTest.php"]
+    assert test_triage.merged_failed_ids([b"<broken"], [])[0] is None

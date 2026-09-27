@@ -972,7 +972,7 @@ def test_calls(patch_lib):
 
     def fake_run(command, cwd, timeout, grace=5.0, output=None):
         seen.append(command)
-        return codes.get(command, 0), False
+        return codes.get(command if isinstance(command, str) else " ".join(command), 0), False
 
     patch_lib("run_with_timeout", fake_run)
     seen_codes = codes
@@ -1458,3 +1458,72 @@ def test_start_phase_rejects_an_unknown_phase(phase_state, cmd_phases):
     with pytest.raises(SystemExit) as e:
         cmd_phases.cmd_start_phase(types.SimpleNamespace(id=130, phase="review"))
     assert e.value.code == refactor_abort()
+
+
+CARMO_DECL = {
+    "version": 1,
+    "test": {
+        "strategy": "local-scoped-ci-whole",
+        "ci": {"check": "test-results", "junit_artifacts": "junit-*"},
+        "suites": [
+            {
+                "name": "phpunit",
+                "runner": "phpunit",
+                "command": "docker compose exec -T app ./vendor/bin/phpunit --log-junit build/ndf/junit.xml",
+                "scope_command": "docker compose exec -T app ./vendor/bin/phpunit --log-junit build/ndf/junit.xml {paths}",
+                "junit": "build/ndf/junit.xml",
+                "container": {"service": "app"},
+                "paths": ["tests"],
+            }
+        ],
+    },
+    "test_duration": {"measured": [{"seconds": 3827.0, "source": "ci-junit", "detail": "run"}]},
+    "ci": {
+        "provider": "github-actions",
+        "workflows": [{"path": ".github/workflows/test-results.yml", "jobs": 24, "wall_seconds": 360.0}],
+        "required_checks": ["test-results", "codex-review"],
+    },
+}
+
+
+def _push_tests_to_head(repo):
+    """head ブランチへテストの置き場所（`tests/`）を足して origin へ上げ、ローカルのブランチを消す。"""
+    _git("checkout", "-qb", HEAD_BRANCH, f"origin/{HEAD_BRANCH}", cwd=repo)
+    (repo / "tests").mkdir()
+    (repo / "tests" / "UserServiceTest.php").write_text("<?php\n")
+    _git("add", "-A", cwd=repo)
+    _git("commit", "-qm", "tests", cwd=repo)
+    _git("push", "-q", "origin", HEAD_BRANCH, cwd=repo)
+    _git("checkout", "-q", "main", cwd=repo)
+    _git("branch", "-qD", HEAD_BRANCH, cwd=repo)
+
+
+def test_a_carmo_declaration_runs_only_the_scope_test_before_the_start(run_init, tmp_path, test_calls, origin_repo):
+    """AC3・AC9・I4 — CI に任せる戦略の宣言では、`--round-test` 無しで `init` が通り、着手前は置き場所の範囲テストだけを
+    コンテナ越しに走らせる。全体テストは手元で走らせず、30 分の予算の 0.10 倍で止まらない。"""
+    _push_tests_to_head(origin_repo)
+    (origin_repo / ".ndf").mkdir(exist_ok=True)
+    (origin_repo / ".ndf" / "project.json").write_text(json.dumps(CARMO_DECL), encoding="utf-8")
+
+    run_init(_args(tmp_path, round_test=None, baseline_test=None, budget_minutes=30))
+
+    _, state = _state_of(tmp_path)
+    assert state["strategy"]["name"] == "local-scoped-ci-whole" and state["strategy"]["source"] == "test.strategy"
+    whole = CARMO_DECL["test"]["suites"][0]["command"]
+    assert whole not in test_calls.seen
+    assert test_calls.seen == [["docker", "compose", "exec", "-T", "app", "./vendor/bin/phpunit", "--log-junit", "build/ndf/junit.xml", "tests"]]
+    assert state["baseline_test"]["mode"] == "scope"
+
+
+def test_cross_refactoring_and_supervise_build_the_same_scope_words(refactor):
+    """#1334 AC7・I10 — 同じ宣言と対象から、cross-refactoring の項目の検証と supervise の `test-run.py scope` が同じ語の並びを組む。"""
+    import importlib
+
+    import test_strategy as ts
+    import test_triage
+
+    targets = importlib.import_module("refactor_lib.targets")
+    strategy = ts.resolve(CARMO_DECL)
+    paths = ["tests/Unit/AServiceTest.php", "tests/Unit/BServiceTest.php"]
+    assert targets.scope_words_for(strategy, paths) == test_triage.rerun_words(strategy, paths)[0]
+    assert targets.scope_words_for(strategy, paths)[-2:] == paths
