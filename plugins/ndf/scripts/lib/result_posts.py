@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """結果ファイルを投稿へ変える層（#730 #583）。
 
-**GitHub と git へ書くのは、レビューを回す側だけである。** 担当は指摘のファイルと結果
+**GitHub と git へ書くのは、レビューを回す側だけである。** 担当は指摘の控えと結果
 ファイルを書いて終わり、修正の担当はコミットまでを行う。この層が、その 2 種類の
 結果ファイルを読んで投稿を組み立て、待ち行列を通して送り、送信の応答を返す。
 
@@ -10,14 +10,13 @@
 決めに反する。
 
 **2 つの口を持つ。** 収束ループから呼ぶときは取り込みがこの層を呼び、単独で修正を
-行うときは同じ処理を部分命令として直接呼ぶ。入口のスクリプトを別に作らない。
+行うときは同じまとまりを部分命令として直接呼ぶ。入口のスクリプトを別に作らない。
 
 ```bash
 python3 "$SCRIPTS/lib/result_posts.py" fix --repo <所有者>/<リポジトリ> --pr <番号> \\
   --result <結果ファイル> --head <ブランチ名> --worktree <作業ツリー>
 ```
 """
-
 from __future__ import annotations
 
 import argparse
@@ -103,14 +102,16 @@ def _can_be_inline(finding: dict[str, Any]) -> bool:
 def _evacuated_line(finding: dict[str, Any]) -> str:
     where = str(finding.get("path") or "")
     line = finding.get("line")
-    head = f"`{where}:{line}`" if where and line is not None else (f"`{where}`" if where else "")
+    head = f"`{where}:{line}`" if where and line is not None else (
+        f"`{where}`" if where else "")
     severity = str(finding.get("severity") or "")
     mark = f" [{severity}]" if severity else ""
     text = str(finding.get("body") or "").strip()
     return f"- {head}{mark} {text}".strip()
 
 
-def _review_body(payload: dict[str, Any], round_no: int, seat: str, intent: str, evacuated: list[dict[str, Any]]) -> str:
+def _review_body(payload: dict[str, Any], round_no: int, seat: str, intent: str,
+                 evacuated: list[dict[str, Any]]) -> str:
     parts = [REVIEW_HEAD.format(round_no=round_no, seat=seat, event=intent)]
     summary = str(payload.get("summary") or "").strip()
     if summary:
@@ -121,17 +122,16 @@ def _review_body(payload: dict[str, Any], round_no: int, seat: str, intent: str,
     return "\n\n".join(parts) + "\n"
 
 
-def _split_findings(
-    findings: list[dict[str, Any]],
-    evacuate_all: bool,
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def _split_findings(findings: list[dict[str, Any]], evacuate_all: bool,
+                    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """指摘をインラインと総評へ振り分ける。"""
     inline = [] if evacuate_all else [f for f in findings if _can_be_inline(f)]
     evacuated = [f for f in findings if f not in inline]
     return inline, evacuated
 
 
-def _review_fields(body: str, posted_as: str, inline: list[dict[str, Any]], head_sha: str | None, since: str | None) -> dict[str, Any]:
+def _review_fields(body: str, posted_as: str, inline: list[dict[str, Any]],
+                   head_sha: str | None, since: str | None) -> dict[str, Any]:
     """レビュー API へ渡す fields を組み立てる。"""
     fields: dict[str, Any] = {"body": body, "event": posted_as}
     if head_sha:
@@ -140,24 +140,19 @@ def _review_fields(body: str, posted_as: str, inline: list[dict[str, Any]], head
         fields["since"] = since
     if inline:
         fields["comments"] = [
-            {"path": str(f.get("path")), "line": _line_no(f.get("line")), "side": "RIGHT", "body": str(f.get("body") or "")} for f in inline
+            {"path": str(f.get("path")), "line": _line_no(f.get("line")),
+             "side": "RIGHT", "body": str(f.get("body") or "")}
+            for f in inline
         ]
     return fields
 
 
-def review_posts(
-    payload_path: pathlib.Path | str,
-    result_path: pathlib.Path | str,
-    repo: str,
-    pr: int,
-    round_no: int,
-    seat: str,
-    head_sha: str | None,
-    is_own_pr: bool,
-    evacuate_all: bool = False,
-    since: str | None = None,
-) -> list[dict[str, Any]]:
-    """指摘のファイルと結果ファイルから、待ち行列へ積む項目の列を組み立てる。
+def review_posts(payload_path: pathlib.Path | str, result_path: pathlib.Path | str,
+                 repo: str, pr: int, round_no: int, seat: str,
+                 head_sha: str | None, is_own_pr: bool,
+                 evacuate_all: bool = False,
+                 since: str | None = None) -> list[dict[str, Any]]:
+    """指摘の控えと結果ファイルから、待ち行列へ積む項目の列を組み立てる。
 
     **判定の格下げはこの層が決める**（設計の決定 14）。自分の Pull Request へは変更を
     求めるレビューを送れないため、送る形だけを `COMMENT` へ落とす。本来の判定は
@@ -178,16 +173,10 @@ def review_posts(
     inline, evacuated = _split_findings(findings, evacuate_all)
     body = _review_body(payload, round_no, seat, intent, evacuated)
     fields = _review_fields(body, posted_as, inline, head_sha, since)
-    extra = {
-        "ident": f"{seat}-r{round_no}",
-        "agent": seat,
-        "seat": seat,
-        "round": round_no,
-        "intent": intent,
-        "posted_as": posted_as,
-        "inline": len(inline),
-        "body": len(evacuated),
-    }
+    extra = {"ident": f"{seat}-r{round_no}", "agent": seat, "seat": seat,
+             "round": round_no,
+             "intent": intent, "posted_as": posted_as,
+             "inline": len(inline), "body": len(evacuated)}
     return [{"kind": "review-post", "fields": fields, "extra": extra}]
 
 
@@ -222,9 +211,9 @@ def _response_url(item: dict[str, Any] | None) -> str | None:
 
 
 def _write_destinations(payload_path: pathlib.Path | str, inline_count: int) -> str:
-    """指摘のファイルへ、送れた先を書き戻す。**決めるのは投稿する側である。**
+    """控えへ、送れた先を書き戻す。**決めるのは投稿する側である。**
 
-    **原子的に書き、失敗は呼び出し元へ返す。** 半端な指摘のファイルが残ると、再実行で読めずに
+    **原子的に書き、失敗は呼び出し元へ返す。** 半端な控えが残ると、再実行で読めずに
     空として扱われ、記録済みの指摘を 0 件で置き換える。戻り値は失敗の説明で、
     書けたときは空文字である。
     """
@@ -239,23 +228,14 @@ def _write_destinations(payload_path: pathlib.Path | str, inline_count: int) -> 
     try:
         statefile.write_json_atomic(path, payload)
     except OSError as exc:
-        return f"指摘のファイルへ送れた先を書けない ({path.name}: {exc})"
+        return f"控えへ送れた先を書けない ({path.name}: {exc})"
     return ""
 
 
-def post_review(
-    queue: post_queue.Queue,
-    payload_path: pathlib.Path | str,
-    result_path: pathlib.Path | str,
-    repo: str,
-    pr: int,
-    round_no: int,
-    seat: str,
-    head_sha: str | None,
-    is_own_pr: bool,
-    actor: str | None = None,
-    since: str | None = None,
-) -> ReviewOutcome:
+def post_review(queue: post_queue.Queue, payload_path: pathlib.Path | str,
+                result_path: pathlib.Path | str, repo: str, pr: int, round_no: int,
+                seat: str, head_sha: str | None, is_own_pr: bool,
+                actor: str | None = None, since: str | None = None) -> ReviewOutcome:
     """レビューを 1 件、待ち行列を通して送る。
 
     **位置を解決できずに拒まれたら、その要求のインラインをすべて総評へ移して送り直す。**
@@ -265,24 +245,28 @@ def post_review(
 
     **退避するのは、今回積んだ項目が拒まれたときだけである。** 先に積まれていた項目
     （先客）の拒まれ方を今回分のものと取り違えると、先客を消して今回分を二重に積む。
-    今回分が送れていない限り、指摘のファイルへ送れた先を書かない。
+    今回分が送れていない限り、控えへ送れた先を書かない。
     """
     findings = len(_findings(_read_json(payload_path)))
-    item = review_posts(payload_path, result_path, repo, pr, round_no, seat, head_sha, is_own_pr, since=since)[0]
-    path = post_queue.enqueue(queue, item["kind"], repo, pr, item["fields"], actor=actor, extra=item["extra"])
+    item = review_posts(payload_path, result_path, repo, pr, round_no, seat,
+                        head_sha, is_own_pr, since=since)[0]
+    path = post_queue.enqueue(queue, item["kind"], repo, pr, item["fields"],
+                              actor=actor, extra=item["extra"])
     seq = (post_queue.read_item(path) or {}).get("seq")
     flushed = queue.flush()
 
     ours_failed = flushed.failed is not None and flushed.failed.get("seq") == seq
     if ours_failed and post_queue.rejected_by_position(flushed.failed):
         queue.drop(flushed.failed.get("seq"))
-        item = review_posts(payload_path, result_path, repo, pr, round_no, seat, head_sha, is_own_pr, evacuate_all=True, since=since)[0]
-        path = post_queue.enqueue(queue, item["kind"], repo, pr, item["fields"], actor=actor, extra=item["extra"])
+        item = review_posts(payload_path, result_path, repo, pr, round_no, seat,
+                            head_sha, is_own_pr, evacuate_all=True, since=since)[0]
+        path = post_queue.enqueue(queue, item["kind"], repo, pr, item["fields"],
+                                  actor=actor, extra=item["extra"])
         seq = (post_queue.read_item(path) or {}).get("seq")
         flushed = queue.flush()
 
     done = _find(flushed.sent, seq) or _find(flushed.skipped, seq)
-    # 送れた後に指摘のファイルを書けなければ、取り込みを止める。再実行は既投稿として照合し直す。
+    # 送れた後に控えを書けなければ、取り込みを止める。再実行は既投稿として照合し直す。
     note_error = _write_destinations(payload_path, item["extra"]["inline"]) if done else ""
     return ReviewOutcome(
         review_url=_response_url(done),
@@ -291,7 +275,8 @@ def post_review(
         queued=0 if done else 1,
         findings=findings,
         # 先客に止められた場合も、今回分は送れていない。上限だけは待てば流れる。
-        failed=bool(note_error) or bool(not done and flushed.failed is not None and not flushed.rate_limited),
+        failed=bool(note_error) or bool(not done and flushed.failed is not None
+                                        and not flushed.rate_limited),
         posted_as=item["extra"]["posted_as"],
         intent=item["extra"]["intent"],
         detail=note_error or str((flushed.failed or {}).get("last_error") or ""),
@@ -306,14 +291,15 @@ def _reply(comment_id: Any, body: str) -> dict[str, Any] | None:
         target = int(comment_id)
     except (TypeError, ValueError):
         return None
-    return {"kind": "review-reply", "fields": {"in_reply_to": target, "body": body}, "extra": {"ident": f"reply-{target}"}}
+    return {"kind": "review-reply", "fields": {"in_reply_to": target, "body": body},
+            "extra": {"ident": f"reply-{target}"}}
 
 
-def _fix_summary_body(
-    fix: dict[str, Any], round_no: int | None, resolved: int, deferred: int, rejected: int, body_notes: list[str] | None = None
-) -> str:
+def _fix_summary_body(fix: dict[str, Any], round_no: int | None,
+                      resolved: int, deferred: int, rejected: int) -> str:
     commit = str(fix.get("fix_commit") or fix.get("commit_sha") or "(なし)")
-    head = FIX_HEAD.format(round_no=round_no, commit=commit) if round_no is not None else FIX_HEAD_NO_ROUND.format(commit=commit)
+    head = (FIX_HEAD.format(round_no=round_no, commit=commit) if round_no is not None
+            else FIX_HEAD_NO_ROUND.format(commit=commit))
     by = fix.get("by_severity") or {}
     counts = " / ".join(f"{k}={by.get(k, 0)}" for k in ("critical", "major", "minor"))
     lines = [
@@ -323,26 +309,15 @@ def _fix_summary_body(
         f"決着: {resolved} 件 / 見送り: {deferred} 件 / 却下: {rejected} 件",
         f"CI: {fix.get('ci_status') or 'NONE'}",
     ]
-    if waived := sum(1 for e in _dict_items(fix.get("deferred")) if e.get("waived")):  # 既存の 4 行は変えない
-        lines.insert(4, f"基準外の見送り: {waived} 件")
-    if body_notes:
-        lines += ["", "レビュー本文の指摘への返事:", *body_notes]
     note = str(fix.get("ci_note") or "").strip()
     if note:
         lines += ["", note]
     return "\n".join(lines) + "\n"
 
 
-def _reply_items(
-    resolved: list[dict[str, Any]], deferred: list[dict[str, Any]], rejected: list[dict[str, Any]], commit: str
-) -> tuple[list[dict[str, Any]], list[str]]:
-    """決着・見送り・却下の各要素へ付ける返信の項目を、その順に組み立てる。
-
-    返すのは (返信の項目, まとめへ載せる行)。**スレッドを持たない要素（レビュー本文の
-    指摘）には返信を積まず、まとめへ載せる。** 本文の指摘の `comment_id` はレビューの
-    ID で、GitHub はレビューへの返信を受け付けない。送れない項目が待ち行列の先頭に
-    残ると、後ろの決着とまとめまで止まる（#962）。
-    """
+def _reply_items(resolved: list[dict[str, Any]], deferred: list[dict[str, Any]],
+                 rejected: list[dict[str, Any]], commit: str) -> list[dict[str, Any]]:
+    """決着・見送り・却下の各要素へ付ける返信の項目を、その順に組み立てる。"""
     # (要素の列, 返信の定型句, 理由を取り出すキー)。決着は理由の代わりにコミットを添える
     reply_rules = (
         (resolved, "対応しました。", None),
@@ -350,24 +325,20 @@ def _reply_items(
         (rejected, "この指摘は採らない判断です。", "reason_for_rejection"),
     )
     items: list[dict[str, Any]] = []
-    body_notes: list[str] = []
     for entries, lead, reason_key in reply_rules:
         for entry in entries:
-            note = (f"（{commit}）" if commit else "") if reason_key is None else str(entry.get(reason_key) or entry.get("reason") or "")
-            text = str(entry.get("reply") or "").strip() or f"{lead}{note}".strip()  # 見送りの返信は本文だけ
-            if not entry.get("thread_id"):
-                summary = str(entry.get("summary") or "").strip()
-                body_notes.append(f"- {summary}: {text}" if summary else f"- {text}")
-                continue
-            reply = _reply(entry.get("comment_id"), text)
+            if reason_key is None:
+                note = f"（{commit}）" if commit else ""
+            else:
+                note = str(entry.get(reason_key) or entry.get("reason") or "")
+            reply = _reply(entry.get("comment_id"), f"{lead}{note}".strip())
             if reply:
                 items.append(reply)
-    return items, body_notes
+    return items
 
 
-def _closing_thread_items(
-    resolved: list[dict[str, Any]], deferred: list[dict[str, Any]], rejected: list[dict[str, Any]]
-) -> list[dict[str, Any]]:
+def _closing_thread_items(resolved: list[dict[str, Any]], deferred: list[dict[str, Any]],
+                          rejected: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """スレッドを決着させる項目を組み立てる。"""
     # 見送り・却下は既定では決着させない（次のラウンドで見直す）。最終スイープは
     # スレッドを残さないため、要素の `resolve` を真にして決着まで求める。
@@ -376,11 +347,14 @@ def _closing_thread_items(
     for entry in closing:
         thread_id = entry.get("thread_id")
         if thread_id:
-            items.append({"kind": "thread-resolve", "fields": {"thread_id": str(thread_id)}, "extra": {"ident": f"resolve-{thread_id}"}})
+            items.append({"kind": "thread-resolve",
+                          "fields": {"thread_id": str(thread_id)},
+                          "extra": {"ident": f"resolve-{thread_id}"}})
     return items
 
 
-def fix_posts(result_path: pathlib.Path | str, repo: str, pr: int, round_no: int | None = None) -> list[dict[str, Any]]:
+def fix_posts(result_path: pathlib.Path | str, repo: str, pr: int,
+              round_no: int | None = None) -> list[dict[str, Any]]:
     """修正の結果ファイルから、待ち行列へ積む項目の列を組み立てる。
 
     並びは「返信 → 決着 → まとめ」である。返信を先に置くのは、決着したスレッドが
@@ -392,15 +366,14 @@ def fix_posts(result_path: pathlib.Path | str, repo: str, pr: int, round_no: int
     rejected = _dict_items(fix.get("rejected"))
     commit = str(fix.get("fix_commit") or fix.get("commit_sha") or "")
 
-    items, body_notes = _reply_items(resolved, deferred, rejected, commit)
+    items = _reply_items(resolved, deferred, rejected, commit)
     items += _closing_thread_items(resolved, deferred, rejected)
-    items.append(
-        {
-            "kind": "pr-comment",
-            "fields": {"body": _fix_summary_body(fix, round_no, len(resolved), len(deferred), len(rejected), body_notes)},
-            "extra": {"ident": f"fix-summary-{round_no if round_no is not None else commit}"},
-        }
-    )
+    items.append({
+        "kind": "pr-comment",
+        "fields": {"body": _fix_summary_body(fix, round_no, len(resolved),
+                                             len(deferred), len(rejected))},
+        "extra": {"ident": f"fix-summary-{round_no if round_no is not None else commit}"},
+    })
     return items
 
 
@@ -413,23 +386,23 @@ class FixOutcome(NamedTuple):
     queued: int
     failed: bool
     detail: str
-    # 恒久的な失敗で飛ばした項目の数（#962）。飛ばしても失敗にはしない。
-    dropped: int = 0
 
 
-def post_fix(
-    queue: post_queue.Queue, result_path: pathlib.Path | str, repo: str, pr: int, round_no: int | None = None, actor: str | None = None
-) -> FixOutcome:
+def post_fix(queue: post_queue.Queue, result_path: pathlib.Path | str, repo: str,
+             pr: int, round_no: int | None = None,
+             actor: str | None = None) -> FixOutcome:
     """返信・決着・まとめを待ち行列へ積んで流す。"""
     seqs: dict[int, str] = {}
     for item in fix_posts(result_path, repo, pr, round_no):
-        path = post_queue.enqueue(queue, item["kind"], repo, pr, item["fields"], actor=actor, extra=item["extra"])
+        path = post_queue.enqueue(queue, item["kind"], repo, pr, item["fields"],
+                                  actor=actor, extra=item["extra"])
         seq = (post_queue.read_item(path) or {}).get("seq")
         if seq is not None:
             seqs[int(seq)] = item["kind"]
     flushed = queue.flush()
 
-    done = {int(i["seq"]): i for i in (flushed.sent + flushed.skipped) if i.get("seq") is not None}
+    done = {int(i["seq"]): i for i in (flushed.sent + flushed.skipped)
+            if i.get("seq") is not None}
     summary_url = None
     for seq, kind in seqs.items():
         if kind == "pr-comment" and seq in done:
@@ -437,18 +410,13 @@ def post_fix(
             if isinstance(response, dict):
                 summary_url = response.get("html_url") or response.get("url")
     failed = flushed.failed is not None and not flushed.rate_limited
-    ours_dropped = [i for i in flushed.dropped if i.get("seq") is not None and int(i["seq"]) in seqs]
-    detail = str((flushed.failed or {}).get("last_error") or "")
-    if not detail and ours_dropped:
-        detail = "; ".join(str(i.get("last_error") or "") for i in ours_dropped)
     return FixOutcome(
         summary_url=str(summary_url) if summary_url else None,
         replied=sum(1 for s, k in seqs.items() if k == "review-reply" and s in done),
         resolved=sum(1 for s, k in seqs.items() if k == "thread-resolve" and s in done),
         queued=flushed.remaining,
         failed=bool(failed),
-        detail=detail,
-        dropped=len(ours_dropped),
+        detail=str((flushed.failed or {}).get("last_error") or ""),
     )
 
 
@@ -469,7 +437,9 @@ _CREDENTIAL_LIB = pathlib.Path(__file__).resolve().parent / "git-credential.sh"
 
 
 def _credential_fallback_args() -> list[str]:
-    r = subprocess.run(["bash", "-c", f'. "{_CREDENTIAL_LIB}"; ndf_git_credential_fallback_args'], capture_output=True, text=True)
+    r = subprocess.run(
+        ["bash", "-c", f'. "{_CREDENTIAL_LIB}"; ndf_git_credential_fallback_args'],
+        capture_output=True, text=True)
     return [line for line in r.stdout.split("\n") if line] if r.returncode == 0 else []
 
 
@@ -482,10 +452,12 @@ def _git(worktree: pathlib.Path | str, *args: str) -> subprocess.CompletedProces
     fallback = _credential_fallback_args()
     if not fallback:
         return first
-    return subprocess.run(["git", "-C", str(worktree), *fallback, *args], capture_output=True, text=True)
+    return subprocess.run(["git", "-C", str(worktree), *fallback, *args],
+                          capture_output=True, text=True)
 
 
-def push_fix(worktree: pathlib.Path | str, head_branch: str, fix_commit: str | None) -> PushResult:
+def push_fix(worktree: pathlib.Path | str, head_branch: str,
+             fix_commit: str | None) -> PushResult:
     """現在の頭を送り先のブランチへ送り、報告されたコミットが載ったことを確かめる。
 
     **ブランチ名だけを指定しない。** 作業ツリーが切り離された頭で作られている場合、
@@ -494,16 +466,20 @@ def push_fix(worktree: pathlib.Path | str, head_branch: str, fix_commit: str | N
     if not fix_commit:
         return PushResult(True, False, True, "コミットが無いため送らない")
     if not (str(worktree or "") and head_branch):
-        return PushResult(False, False, False, "送る先（作業ツリーとブランチ）が分からない")
+        return PushResult(False, False, False,
+                          "送る先（作業ツリーとブランチ）が分からない")
     pushed = _git(worktree, "push", "origin", f"HEAD:{head_branch}")
     if pushed.returncode != 0:
-        return PushResult(False, False, False, (pushed.stderr or pushed.stdout or "").strip()[:300])
+        return PushResult(False, False, False,
+                          (pushed.stderr or pushed.stdout or "").strip()[:300])
     fetched = _git(worktree, "fetch", "origin", head_branch)
     if fetched.returncode != 0:
-        return PushResult(False, True, False, (fetched.stderr or "").strip()[:300])
+        return PushResult(False, True, False,
+                          (fetched.stderr or "").strip()[:300])
     contains = _git(worktree, "merge-base", "--is-ancestor", fix_commit, "FETCH_HEAD")
     if contains.returncode != 0:
-        return PushResult(False, True, False, f"報告されたコミット {fix_commit} が origin/{head_branch} に載っていない")
+        return PushResult(False, True, False,
+                          f"報告されたコミット {fix_commit} が origin/{head_branch} に載っていない")
     return PushResult(True, True, True, "")
 
 
@@ -536,18 +512,19 @@ def _resolve_fix_inputs(args: argparse.Namespace) -> tuple[FixInputs | None, str
     外だと、`gh` が別のリポジトリを読むか解決に失敗し、頭が空のまま送信を飛ばす。
     """
     worktree = pathlib.Path(args.worktree or os.getcwd()).resolve()
-    repo = args.repo or _sh("gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner", cwd=worktree)
+    repo = args.repo or _sh("gh", "repo", "view", "--json", "nameWithOwner",
+                            "-q", ".nameWithOwner", cwd=worktree)
     if not repo:
         return None, "リポジトリを決められない（--repo を渡す）"
-    head = args.head or _sh("gh", "pr", "view", str(args.pr), "-R", repo, "--json", "headRefName", "-q", ".headRefName", cwd=worktree)
+    head = args.head or _sh("gh", "pr", "view", str(args.pr), "-R", repo,
+                            "--json", "headRefName", "-q", ".headRefName",
+                            cwd=worktree)
     if not head:
         # 送れない修正へ「対応しました」と返信しないため、返信へ進まず止める。
         return None, "送り先のブランチを決められない（--head を渡す）"
-    result = (
-        pathlib.Path(args.result)
-        if args.result
-        else (pathlib.Path(os.environ.get("CROSS_REVIEW_TMP_DIR") or str(worktree / TMP_DIRNAME)) / f"fix-pr{args.pr}-result.json")
-    )
+    result = pathlib.Path(args.result) if args.result else (
+        pathlib.Path(os.environ.get("CROSS_REVIEW_TMP_DIR")
+                     or str(worktree / TMP_DIRNAME)) / f"fix-pr{args.pr}-result.json")
     fix = _read_json(result)
     if not fix:
         return None, f"修正の結果ファイルを読めない: {result}"
@@ -562,18 +539,19 @@ def cmd_fix(args: argparse.Namespace) -> int:
     worktree, repo, head, result, fix = inputs
 
     pushed = push_fix(worktree, head, fix.get("fix_commit") or fix.get("commit_sha"))
-    print(f"PUSHED={1 if pushed.pushed else 0} COMMIT_ON_HEAD={1 if pushed.contains else 0}")
+    print(f"PUSHED={1 if pushed.pushed else 0} "
+          f"COMMIT_ON_HEAD={1 if pushed.contains else 0}")
     if not pushed.ok:
         print(pushed.detail, file=sys.stderr)
         return 1
 
     actor = args.actor or _sh("gh", "api", "user", "-q", ".login") or None
-    outcome = post_fix(queue_for(worktree), result, repo, int(args.pr), round_no=args.round, actor=actor)
+    outcome = post_fix(queue_for(worktree), result, repo, int(args.pr),
+                       round_no=args.round, actor=actor)
     if outcome.summary_url:
         print(f"POSTED summary_url={outcome.summary_url}")
-    print(f"REPLIED={outcome.replied} RESOLVED={outcome.resolved} QUEUED={outcome.queued} DROPPED={outcome.dropped}")
-    if outcome.dropped and not outcome.failed:
-        print(f"⚠️ 送れない項目を {outcome.dropped} 件飛ばしました ({outcome.detail})", file=sys.stderr)
+    print(f"REPLIED={outcome.replied} RESOLVED={outcome.resolved} "
+          f"QUEUED={outcome.queued}")
     if outcome.failed:
         print(outcome.detail, file=sys.stderr)
         return 1

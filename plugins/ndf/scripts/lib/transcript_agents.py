@@ -21,7 +21,6 @@
 書式を約束していないが、記録の合成の応答は `apiErrorStatus` と `quotaLimits.resetsAt` を値
 として持つ。`wait-reset` が眠る長さも**記録の解除時刻から取る**。固定の間隔で待たない。
 """
-
 from __future__ import annotations
 
 import argparse
@@ -35,47 +34,13 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-_LIB = pathlib.Path(__file__).resolve().parent
-if str(_LIB) not in sys.path:
-    sys.path.insert(0, str(_LIB))
-import clock  # noqa: E402  時刻の読み取り（#1142 の L0）
-import deps  # noqa: E402  外部パッケージの環境（#1142 の決定 17）
-
-
-def _parse_utc(value) -> datetime | None:
-    """ISO 8601 を読む。タイムゾーンの無い時刻は UTC として付ける（記録の `timestamp` は UTC で書かれる）。"""
-    return clock.parse(value, naive="utc")
-
-
 # ---------- 語彙（契約の文書の「語彙」の表） ----------
 
 LAYERS = ("conductor", "supervisor", "worker")
-POSTS = ("設計", "実装", "検査", "取り込み", "仕上げ")  # フェーズ（supervisor）
-TASKS = ("調査", "修正", "検証", "集計")  # 作業の種類（worker）
+POSTS = ("設計", "実装", "検査", "取り込み", "仕上げ")          # 持ち場（supervisor）
+TASKS = ("調査", "修正", "検証", "集計")                        # 作業の種類（worker）
 OTHER = "その他"
 NO_ROLE = "-"
-
-# 工程名 → フェーズ（#768）。`development-workflow/references/agent-layers.md` のフェーズの表の
-# 「通す工程」の列を写した。括弧の注記と `。` より後ろを落とした行名で引く。2 つのフェーズに
-# 現れる行名（`作業場所の用意`・`配布`）は表で先に現れるフェーズへ写す。表との一致はテストが確かめる。
-STEP_PHASES = {
-    "要求と受け入れ条件": "設計",
-    "作業場所の用意": "設計",
-    "ドキュメント再構成": "設計",
-    "ドキュメントレビュー": "設計",
-    "ドキュメントレビューの後片付け": "実装",
-    "計画": "実装",
-    "構造改善": "検査",
-    "実装レビュー": "検査",
-    "完了判定": "検査",
-    "Pull Request": "検査",
-    "確定仕様化": "取り込み",
-    "ミッションの Pull Request のマージ": "取り込み",
-    "後片付け": "取り込み",
-    "配布": "取り込み",
-    "リリース後テスト": "仕上げ",
-    "振り返り": "仕上げ",
-}
 
 ENDINGS = ("completed", "in_progress", "rate_limit", "api_error")
 
@@ -83,17 +48,8 @@ SYNTHETIC_MODEL = "<synthetic>"
 
 # 記録 1 件が持つ 11 項目（契約の文書の出力表の並び）
 ROW_KEYS = (
-    "layer",
-    "role",
-    "depth",
-    "model",
-    "fixed",
-    "peak",
-    "work",
-    "responses",
-    "duration_seconds",
-    "ending",
-    "interruptions",
+    "layer", "role", "depth", "model", "fixed", "peak", "work",
+    "responses", "duration_seconds", "ending", "interruptions",
 )
 
 
@@ -128,22 +84,19 @@ class AgentRecord:
     def as_json(self) -> dict:
         """`list` の JSON の 1 件。`agent_id` はここにだけ出る。"""
         out = self.as_row()
-        out.update(
-            {
-                "agent_id": self.agent_id,
-                "parent_agent_id": self.parent_agent_id,
-                "session": self.session,
-                "started_at": self.started_at,
-                "ended_at": self.ended_at,
-                "resets_at": self.resets_at,
-                "rate_limit_type": self.rate_limit_type,
-            }
-        )
+        out.update({
+            "agent_id": self.agent_id,
+            "parent_agent_id": self.parent_agent_id,
+            "session": self.session,
+            "started_at": self.started_at,
+            "ended_at": self.ended_at,
+            "resets_at": self.resets_at,
+            "rate_limit_type": self.rate_limit_type,
+        })
         return out
 
 
 # ---------- 記録の場所 ----------
-
 
 def config_root(root: pathlib.Path | str | None = None) -> pathlib.Path:
     """会話の記録の親（`~/.claude` か `CLAUDE_CONFIG_DIR`）を返す。"""
@@ -156,8 +109,7 @@ def config_root(root: pathlib.Path | str | None = None) -> pathlib.Path:
 
 
 def session_paths(
-    session: str,
-    root: pathlib.Path | str | None = None,
+    session: str, root: pathlib.Path | str | None = None,
 ) -> tuple[pathlib.Path | None, list[pathlib.Path]]:
     """conductor の記録と、その配下の記録のパスを返す。"""
     projects = config_root(root) / "projects"
@@ -177,8 +129,7 @@ def session_paths(
     return conductor, subs
 
 
-# ---------- 層とフェーズ ----------
-
+# ---------- 層と持ち場 ----------
 
 def head_word(description: str | None) -> str:
     """`description` の最初の `: ` より前を返す。"""
@@ -198,28 +149,15 @@ def layer_of(depth: int, description: str | None) -> str:
 
 
 def role_of(description: str | None, layer: str) -> str:
-    """フェーズ（supervisor）または作業の種類（worker）を返す。
-
-    supervisor の先頭語が工程名（`STEP_PHASES`）なら、その工程を通すフェーズへ写す（#768）。
-    `: ` を持たない古い形（例 `実装 #540 実行計画`）は全体が語彙に当たらず `その他` に落ちる。
-    """
+    """持ち場（supervisor）または作業の種類（worker）を返す。"""
     if layer == "conductor":
         return NO_ROLE
+    vocabulary = POSTS if layer == "supervisor" else TASKS
     head = head_word(description)
-    if layer == "supervisor":
-        if head in POSTS:
-            return head
-        return STEP_PHASES.get(head, OTHER)
-    return head if head in TASKS else OTHER
-
-
-def unphased_supervisors(records: list[AgentRecord]) -> int:
-    """フェーズが読めなかった（`その他` に落ちた）supervisor の件数を返す（#768）。"""
-    return sum(1 for r in records if r.layer == "supervisor" and r.role == OTHER)
+    return head if head in vocabulary else OTHER
 
 
 # ---------- 記録 1 件を読む ----------
-
 
 def _iter_lines(path: pathlib.Path) -> tuple[list[dict], int]:
     """読めた行と、飛ばした行の数を返す。"""
@@ -260,15 +198,26 @@ def _input_total(row: dict) -> int | None:
         return None
     total = 0
     for key in (
-        "input_tokens",
-        "cache_read_input_tokens",
-        "cache_creation_input_tokens",
+        "input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens",
     ):
         value = usage.get(key)
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             continue
         total += int(value)
     return total
+
+
+def _parse_time(value) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    text = value.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
 
 
 def _error_status(row: dict) -> str | None:
@@ -286,7 +235,7 @@ def _ending_of(rows: list[dict]) -> str:
     for i, row in enumerate(rows):
         if row.get("type") == "assistant":
             last_assistant = i
-    if any(row.get("type") == "user" for row in rows[last_assistant + 1 :]):
+    if any(row.get("type") == "user" for row in rows[last_assistant + 1:]):
         return "in_progress"
     if last_assistant < 0:
         return "completed"
@@ -375,10 +324,12 @@ def _count_interruptions(rows: list[dict]) -> int:
 
 def _calculate_duration(rows: list[dict]) -> tuple[str | None, str | None, int]:
     """タイムスタンプ走査で開始/終了時刻と所要時間（秒）を返す。"""
-    times = [t for t in (_parse_utc(row.get("timestamp")) for row in rows) if t]
+    times = [t for t in (_parse_time(row.get("timestamp")) for row in rows) if t]
     if not times:
         return None, None, 0
-    return times[0].isoformat(), times[-1].isoformat(), int((times[-1] - times[0]).total_seconds())
+    return times[0].isoformat(), times[-1].isoformat(), int(
+        (times[-1] - times[0]).total_seconds()
+    )
 
 
 def _fill_rate_limit(rows: list[dict], record: AgentRecord) -> None:
@@ -397,8 +348,7 @@ def _fill_rate_limit(rows: list[dict], record: AgentRecord) -> None:
             resets = quota.get("resetsAt")
             if isinstance(resets, (int, float)) and not isinstance(resets, bool):
                 record.resets_at = datetime.fromtimestamp(
-                    int(resets),
-                    tz=timezone.utc,
+                    int(resets), tz=timezone.utc,
                 ).isoformat()
             limit_type = quota.get("rateLimitType")
             if isinstance(limit_type, str):
@@ -406,22 +356,19 @@ def _fill_rate_limit(rows: list[dict], record: AgentRecord) -> None:
         break
 
 
-def read_agent_record(path: pathlib.Path, meta: dict | None = None) -> tuple[AgentRecord, int]:
+def read_file(path: pathlib.Path, meta: dict | None = None) -> tuple[AgentRecord, int]:
     """記録 1 件を読む。返すのは `AgentRecord` と飛ばした行の数である。"""
     meta = meta or {}
     rows, skipped = _iter_lines(path)
 
     depth = meta.get("spawnDepth")
+    depth = int(depth) if isinstance(depth, int) else 0
     description = meta.get("description")
-    if isinstance(depth, int):
-        layer = layer_of(depth, description)
-    else:
-        # `.meta.json` が無いか壊れている配下の記録。深さ 0 にすると conductor に数えてしまう（#764）
-        depth, layer = -1, OTHER
+    layer = layer_of(depth, description)
 
     agent_id = None
     if path.name.startswith("agent-"):
-        agent_id = path.name[len("agent-") : -len(".jsonl")]
+        agent_id = path.name[len("agent-"):-len(".jsonl")]
 
     record = AgentRecord(
         layer=layer,
@@ -437,7 +384,9 @@ def read_agent_record(path: pathlib.Path, meta: dict | None = None) -> tuple[Age
 
     _fill_rate_limit(rows, record)
 
-    record.started_at, record.ended_at, record.duration_seconds = _calculate_duration(rows)
+    record.started_at, record.ended_at, record.duration_seconds = (
+        _calculate_duration(rows)
+    )
     return record, skipped
 
 
@@ -459,32 +408,29 @@ def read_session(
     conductor_path, sub_paths = session_paths(session, root)
     records: list[AgentRecord] = []
     subs: list[tuple[AgentRecord, dict]] = []
-    skipped = no_meta = 0
+    skipped = 0
 
     if conductor_path is not None:
-        record, n = read_agent_record(conductor_path, {"spawnDepth": 0})
+        record, n = read_file(conductor_path, {"spawnDepth": 0})
         record.session = session
         skipped += n
         records.append(record)
     for path in sub_paths:
         meta = read_meta(path)
-        record, n = read_agent_record(path, meta)
+        record, n = read_file(path, meta)
         record.session = session
         skipped += n
-        no_meta += record.layer == OTHER
         records.append(record)
         subs.append((record, meta))
     _link_parent_agents(records, subs)
 
     if counter is not None:
         counter["skipped"] = counter.get("skipped", 0) + skipped
-        counter["no_meta"] = counter.get("no_meta", 0) + no_meta
     return records
 
 
 def _link_parent_agents(
-    records: list[AgentRecord],
-    subs: list[tuple[AgentRecord, dict]],
+    records: list[AgentRecord], subs: list[tuple[AgentRecord, dict]],
 ) -> None:
     by_tool_use: dict[str, AgentRecord] = {}
     for record in records:
@@ -512,7 +458,6 @@ def read_sessions(
 
 # ---------- 出力 ----------
 
-
 def _minutes(seconds: int) -> str:
     return f"{seconds / 60:.1f}"
 
@@ -521,27 +466,11 @@ def _cell(value) -> str:
     return "-" if value is None else str(value)
 
 
-# 列の名前と寄せ方（`lib/mdtable.py` へ渡す）
-LIST_COLUMNS = (
-    ("層", "left"),
-    ("フェーズ", "left"),
-    ("深さ", "right"),
-    ("モデル", "left"),
-    ("固定費", "right"),
-    ("最大充填", "right"),
-    ("実作業", "right"),
-    ("応答数", "right"),
-    ("所要（分）", "right"),
-    ("終わり方", "left"),
-    ("中断", "right"),
+LIST_HEADER = (
+    "| 層 | 持ち場 | 深さ | モデル | 固定費 | 最大充填 | 実作業 | 応答数 "
+    "| 所要（分） | 終わり方 | 中断 |"
 )
-
-
-def _agents_table(columns, rows: list[list]) -> str:
-    """表を組む（`lib/mdtable.py`）。`mdtable` は表を出すときだけ読む（記録を読むだけの側は tabulate を要しない）。"""
-    import mdtable  # deps.require("mdtable") の後でだけ import できる
-
-    return mdtable.table_markdown([c for c, _ in columns], rows, align=[a for _, a in columns])
+LIST_RULE = "| --- | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | --- | ---: |"
 
 
 def format_list(records: list[AgentRecord], with_agent_id: bool = True) -> str:
@@ -550,35 +479,26 @@ def format_list(records: list[AgentRecord], with_agent_id: bool = True) -> str:
     **`agent_id` はこの一覧にだけ出す。** `skill-stats` の集計は識別子を持たない
     （振り返りのコメントへ貼る表に載せないため。契約の文書の「出力に含めないもの」）。
     """
-    columns = LIST_COLUMNS + ((("agent_id", "left"),) if with_agent_id else ())
-    rows = [
-        [
-            r.layer,
-            r.role,
-            r.depth,
-            _cell(r.model),
-            _cell(r.fixed),
-            _cell(r.peak),
-            _cell(r.work),
-            r.responses,
-            _minutes(r.duration_seconds),
-            r.ending,
-            r.interruptions,
-        ]
-        + ([_cell(r.agent_id)] if with_agent_id else [])
-        for r in records
-    ]
-    return _agents_table(columns, rows)
+    header = LIST_HEADER + (" agent_id |" if with_agent_id else "")
+    rule = LIST_RULE + (" --- |" if with_agent_id else "")
+    lines = [header, rule]
+    for r in records:
+        row = (
+            f"| {r.layer} | {r.role} | {r.depth} | {_cell(r.model)} | "
+            f"{_cell(r.fixed)} | {_cell(r.peak)} | {_cell(r.work)} | {r.responses} | "
+            f"{_minutes(r.duration_seconds)} | {r.ending} | {r.interruptions} |"
+        )
+        lines.append(row + (f" {_cell(r.agent_id)} |" if with_agent_id else ""))
+    return "\n".join(lines)
 
 
 # ---------- 中断と再開（#657） ----------
-
 
 def parse_now(value: str | None = None) -> datetime:
     """`--now` の値を読む。省いたときは現在時刻（UTC）を返す。"""
     if not value:
         return datetime.now(timezone.utc)
-    parsed = _parse_utc(value)
+    parsed = _parse_time(value)
     if parsed is None:
         raise ValueError(f"時刻として読めない: {value}")
     return parsed
@@ -590,7 +510,7 @@ def resets_passed(record: AgentRecord, now: datetime | None = None) -> bool:
     **解除時刻を持たない上限の中断は真にする。** 待つ先が無いまま止まるのを避けるため
     である。記録から取れないだけで、上限そのものは解けているかもしれない。
     """
-    reset = _parse_utc(record.resets_at)
+    reset = _parse_time(record.resets_at)
     if reset is None:
         return True
     return reset <= (now or datetime.now(timezone.utc))
@@ -611,7 +531,9 @@ def interrupted(
     """
     picked = set(agents or ())
     # 記録の属性名 → 期待値。指定の無い（None の）軸は絞り込まない
-    wanted = {attr: value for attr, value in (("layer", layer), ("depth", depth), ("parent_agent_id", parent)) if value is not None}
+    wanted = {attr: value for attr, value in (("layer", layer), ("depth", depth),
+                                              ("parent_agent_id", parent))
+              if value is not None}
     out: list[AgentRecord] = []
     for record in records:
         if record.ending != "rate_limit":
@@ -624,41 +546,26 @@ def interrupted(
     return out
 
 
-INTERRUPTED_COLUMNS = (
-    ("層", "left"),
-    ("フェーズ", "left"),
-    ("深さ", "right"),
-    ("終わり方", "left"),
-    ("上限の種類", "left"),
-    ("解除時刻", "left"),
-    ("解除済み", "left"),
-    ("起動元", "left"),
-    ("agent_id", "left"),
+INTERRUPTED_HEADER = (
+    "| 層 | 持ち場 | 深さ | 終わり方 | 上限の種類 | 解除時刻 | 解除済み "
+    "| 起動元 | agent_id |"
 )
+INTERRUPTED_RULE = "| --- | --- | ---: | --- | --- | --- | --- | --- | --- |"
 
 
 def format_interrupted(
-    records: list[AgentRecord],
-    now: datetime | None = None,
+    records: list[AgentRecord], now: datetime | None = None,
 ) -> str:
     """中断した記録の一覧を返す。**解除時刻と起動元が読める**（AC47）。"""
-    return _agents_table(
-        INTERRUPTED_COLUMNS,
-        [
-            [
-                r.layer,
-                r.role,
-                r.depth,
-                r.ending,
-                _cell(r.rate_limit_type),
-                _cell(r.resets_at),
-                "済" if resets_passed(r, now) else "まだ",
-                _cell(r.parent_agent_id),
-                _cell(r.agent_id),
-            ]
-            for r in records
-        ],
-    )
+    lines = [INTERRUPTED_HEADER, INTERRUPTED_RULE]
+    for r in records:
+        passed = "済" if resets_passed(r, now) else "まだ"
+        lines.append(
+            f"| {r.layer} | {r.role} | {r.depth} | {r.ending} | "
+            f"{_cell(r.rate_limit_type)} | {_cell(r.resets_at)} | {passed} | "
+            f"{_cell(r.parent_agent_id)} | {_cell(r.agent_id)} |"
+        )
+    return "\n".join(lines)
 
 
 def _sleep(seconds: float) -> None:
@@ -687,12 +594,12 @@ def wait_reset(
 
     def pick() -> list[AgentRecord]:
         return interrupted(
-            read_sessions(sessions, root=root),
-            layer=layer,
-            depth=depth,
+            read_sessions(sessions, root=root), layer=layer, depth=depth,
         )
 
-    futures = [t for t in (_parse_utc(r.resets_at) for r in pick()) if t and t > now]
+    futures = [
+        t for t in (_parse_time(r.resets_at) for r in pick()) if t and t > now
+    ]
     slept = 0
     cut = False
     if futures:
@@ -730,7 +637,8 @@ def _non_negative_int(value: str) -> int:
 
 
 def _add_session_argument(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--session", action="append", default=[], required=True, help="セッション ID（繰り返して複数を渡せる）")
+    parser.add_argument("--session", action="append", default=[], required=True,
+                        help="セッション ID（繰り返して複数を渡せる）")
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -741,24 +649,30 @@ def _build_parser() -> argparse.ArgumentParser:
 
     listing = sub.add_parser("list", help="そのセッションの 3 層すべての記録を出す")
     _add_session_argument(listing)
-    listing.add_argument("--layer", choices=LAYERS, default=None, help="1 つの層に絞る")
+    listing.add_argument("--layer", choices=LAYERS, default=None,
+                         help="1 つの層に絞る")
     listing.add_argument("--format", choices=["md", "json"], default="md")
 
     stuck = sub.add_parser("interrupted", help="上限の中断だけを出す")
     _add_session_argument(stuck)
     stuck.add_argument("--layer", choices=LAYERS, default=None, help="1 つの層に絞る")
-    stuck.add_argument("--depth", type=int, default=None, help="深さで絞る。1 は conductor の直下")
-    stuck.add_argument("--agent", action="append", default=[], help="agent_id で絞る（繰り返して複数を渡せる）")
+    stuck.add_argument("--depth", type=int, default=None,
+                       help="深さで絞る。1 は conductor の直下")
+    stuck.add_argument("--agent", action="append", default=[],
+                       help="agent_id で絞る（繰り返して複数を渡せる）")
     stuck.add_argument("--parent", default=None, help="起動元の agent_id で絞る")
-    stuck.add_argument("--now", type=_now_argument, default=None, help="解除済みの判定に使う時刻（試験用。既定は現在時刻）")
+    stuck.add_argument("--now", type=_now_argument, default=None,
+                       help="解除済みの判定に使う時刻（試験用。既定は現在時刻）")
     stuck.add_argument("--format", choices=["md", "json"], default="md")
 
     waiting = sub.add_parser("wait-reset", help="解除時刻まで眠る")
     _add_session_argument(waiting)
     waiting.add_argument("--layer", choices=LAYERS, default=None, help="1 つの層に絞る")
     waiting.add_argument("--depth", type=int, default=None, help="深さで絞る")
-    waiting.add_argument("--margin", type=_non_negative_int, default=60, help="解除時刻の後に置く余白の秒数（既定 60）")
-    waiting.add_argument("--max-sleep", type=_non_negative_int, default=None, help="1 度に眠る上限の秒数。区切ったときは終了コード 3")
+    waiting.add_argument("--margin", type=_non_negative_int, default=60,
+                         help="解除時刻の後に置く余白の秒数（既定 60）")
+    waiting.add_argument("--max-sleep", type=_non_negative_int, default=None,
+                         help="1 度に眠る上限の秒数。区切ったときは終了コード 3")
     return parser
 
 
@@ -766,12 +680,10 @@ def _report_skipped(counter: dict, sessions: list[str], found: bool) -> int:
     skipped = counter.get("skipped", 0)
     if skipped:
         print(f"[transcript-agents] 読めない行を飛ばした: {skipped} 件", file=sys.stderr)
-    if counter.get("no_meta"):
-        print(f"[transcript-agents] 層が読めない記録（.meta.json が無いか壊れている）: {counter['no_meta']} 件", file=sys.stderr)
     if not found:
         print(
-            f"[transcript-agents] 記録が見つからない: {' '.join(sessions)}",
-            file=sys.stderr,
+            "[transcript-agents] 記録が見つからない: "
+            f"{' '.join(sessions)}", file=sys.stderr,
         )
     return skipped
 
@@ -784,13 +696,10 @@ def _run_list(args) -> int:
     skipped = _report_skipped(counter, args.session, bool(records))
 
     if args.format == "json":
-        print(
-            json.dumps(
-                {"agents": [r.as_json() for r in records], "skipped": skipped},
-                ensure_ascii=False,
-                indent=2,
-            )
-        )
+        print(json.dumps(
+            {"agents": [r.as_json() for r in records], "skipped": skipped},
+            ensure_ascii=False, indent=2,
+        ))
     else:
         print(format_list(records))
     return 0
@@ -800,11 +709,8 @@ def _run_interrupted(args) -> int:
     counter: dict = {}
     all_records = read_sessions(args.session, counter=counter)
     records = interrupted(
-        all_records,
-        layer=args.layer,
-        depth=args.depth,
-        agents=args.agent,
-        parent=args.parent,
+        all_records, layer=args.layer, depth=args.depth,
+        agents=args.agent, parent=args.parent,
     )
     skipped = _report_skipped(counter, args.session, bool(all_records))
     now = args.now or datetime.now(timezone.utc)
@@ -815,13 +721,9 @@ def _run_interrupted(args) -> int:
             row = record.as_json()
             row["resets_passed"] = resets_passed(record, now)
             rows.append(row)
-        print(
-            json.dumps(
-                {"agents": rows, "skipped": skipped},
-                ensure_ascii=False,
-                indent=2,
-            )
-        )
+        print(json.dumps(
+            {"agents": rows, "skipped": skipped}, ensure_ascii=False, indent=2,
+        ))
     else:
         print(format_interrupted(records, now))
     return 0
@@ -829,18 +731,16 @@ def _run_interrupted(args) -> int:
 
 def _run_wait_reset(args) -> int:
     slept, remaining, code = wait_reset(
-        args.session,
-        layer=args.layer,
-        depth=args.depth,
-        margin=args.margin,
-        max_sleep=args.max_sleep,
+        args.session, layer=args.layer, depth=args.depth,
+        margin=args.margin, max_sleep=args.max_sleep,
     )
-    print(f"[transcript-agents] 眠った: {slept} 秒 / 中断した記録: {remaining} 件")
+    print(
+        f"[transcript-agents] 眠った: {slept} 秒 / 中断した記録: {remaining} 件"
+    )
     return code
 
 
 def main(argv: list[str] | None = None) -> int:
-    deps.require("mdtable")
     args = _build_parser().parse_args(argv)
     if args.command == "interrupted":
         return _run_interrupted(args)
