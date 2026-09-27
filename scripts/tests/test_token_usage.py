@@ -455,6 +455,32 @@ def test_per_role_splits_by_agent_type(tmp_path):
     assert {x["agent_type"] for x in rows if x["role"] == "実装"} == {"-"}
 
 
+def test_agent_type_outside_ndf_and_builtins_is_grouped(tmp_path):
+    """利用者や他社の定義の名前は記録へ残さず「その他」にまとめる。組み込みの定義はそのまま載せる。"""
+    roots = build_waits(tmp_path)
+    proj = roots["claude"] / "-work-x"
+    with open(proj / f"{SID}.jsonl", "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(_assistant(39, "m8", U, [_agent("toolu_p", "acme-plugin:deployer", "設計: #1")])) + "\n")
+        fh.write(json.dumps(_assistant(39, "m7", U, [_agent("toolu_e", "Explore", "設計: #1")])) + "\n")
+    sub = proj / SID / "subagents"
+    for name, tid in (("agent-p1", "toolu_p"), ("agent-e1", "toolu_e")):
+        _jsonl(sub / f"{name}.jsonl", [_assistant(41, f"{name}-1", _u(0, 1_000, w5=1_000))])
+        (sub / f"{name}.meta.json").write_text(
+            json.dumps({"description": "設計: #1", "spawnDepth": 1, "agentType": "x", "toolUseId": tid}), encoding="utf-8"
+        )
+    rows = run_json(roots)["per_role"]
+    got = {x["agent_type"] for x in rows if x["role"] == "設計"}
+    assert got == {"ndf:supervisor", "ndf:supervisor-waits", "Explore", "その他"}
+    assert "acme" not in json.dumps(rows)
+
+
+def test_until_does_not_count_subagents_started_later(tmp_path):
+    """打ち切りより後の行しか持たないサブエージェントは起動数へ入れない（同じ打ち切りで作り直しても変わらない）。"""
+    roots = build_waits(tmp_path)
+    before = {x["agent_type"]: x["count"] for x in run_json(roots, "--until", _ts(55))["per_role"] if x["role"] == "設計"}
+    assert before == {"ndf:supervisor": 1}  # 60 分に始まる 1 時間の定義は数えない
+
+
 def test_after_5m_amounts_split_by_gap(tmp_path):
     rows = run_json(build_waits(tmp_path))["per_role"]
     got = {x["agent_type"]: x for x in rows if x["role"] == "設計"}

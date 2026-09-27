@@ -303,7 +303,9 @@ def resolve_floor(out: Path, released: str, until: float, min_version: str | Non
 
 
 def build(args, floor: str, prev, until_s: str, until: float, date: str) -> tuple[dict, str, list[str]]:
-    sessions, unlinked, skipped = tu.collect(args.claude_root, args.codex_root, args.kiro_root, until=until, min_version=floor)
+    sessions, unlinked, skipped = tu.collect(
+        args.claude_root, args.codex_root, args.kiro_root, until=until, min_version=floor, usage_root=args.usage_root
+    )
     meta = {
         "by": list(tu.AXES),
         "min_version": floor,
@@ -356,6 +358,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--claude-root", type=Path, default=home / ".claude/projects")
     ap.add_argument("--codex-root", type=Path, default=home / ".codex/sessions")
     ap.add_argument("--kiro-root", type=Path, default=home / ".kiro/sessions/cli")
+    ap.add_argument(
+        "--usage-root",
+        type=Path,
+        default=tu.usage_ledger.ledger_dir(),
+        help="計画が起動した claude -p の使用量の帳簿のディレクトリ（token-usage.py と同じ既定）",
+    )
     args = ap.parse_args(argv)
     try:
         until_s, until = parse_until(args.until)
