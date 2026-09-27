@@ -187,6 +187,13 @@ METRICS_EOF
 )
 }
 
+# 判断の基準の節（#1366）。**提案と改修計画だけ**に渡す。初期化が状態ファイルへ写した節を読む
+build_mvv_block() {
+MVV_BLOCK=
+case "$PHASE" in propose | plan) ;; *) return 0 ;; esac
+MVV_BLOCK=$(jq -r '.project_mvv.block // ""' "$STATE")
+}
+
 export_prompt_env() {
 BUDGET_MINUTES=$(jq -r '.budget_minutes' "$STATE")
 END_AT=$(jq -r '.plan.end_at // ""' "$STATE")
@@ -199,13 +206,14 @@ export RF_ITEMS=$ITEMS_JSON RF_TMP_DIR=$TMP_DIR
 export RF_BUDGET_MINUTES=$BUDGET_MINUTES RF_END_AT=$END_AT
 export RF_VOCAB_SMELLS=$VOCAB_SMELLS RF_VOCAB_TECHNIQUES=$VOCAB_TECHNIQUES
 export RF_VOCAB_SEVERITIES=$VOCAB_SEVERITIES RF_VOCAB_VIEWPOINTS=$VOCAB_VIEWPOINTS
-export RF_METRICS_BLOCK=$METRICS_BLOCK
+export RF_METRICS_BLOCK=$METRICS_BLOCK RF_MVV=$MVV_BLOCK
 }
 
 collect_items
 build_skill_block
 collect_refactoring_vocabulary
 build_metrics_block
+build_mvv_block
 export_prompt_env
 
 # 雛形は `${RF_*}` を展開するだけの素の Markdown。コマンド置換は展開しない

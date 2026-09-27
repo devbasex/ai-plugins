@@ -339,13 +339,21 @@ def read_meta(path: Path) -> dict:
         return {}
 
 
+# 名前をそのまま載せてよい組み込みの定義。これと ndf: 以外は利用者や他社の定義の名前なので載せない
+BUILTIN_AGENT_TYPES = frozenset({"general-purpose", "Explore", "Plan", "statusline-setup", "output-style-setup", "claude-code-guide"})
+
+
 def agent_type_of(meta: dict, launched: dict) -> str:
     """サブエージェントの定義の名前。meta の agentType が ndf: で始まればその値、そうでなければ起動した
-    Agent 呼び出しの subagent_type（meta の toolUseId で引く）。どちらも取れなければ -。"""
+    Agent 呼び出しの subagent_type（meta の toolUseId で引く）。どちらも取れなければ -。
+    ndf: で始まるものと組み込みの定義以外は、利用者のリポジトリや他社のプラグインの名前を記録へ残さないよう「その他」にまとめる。"""
     at = meta.get("agentType") or ""
     if at.startswith("ndf:"):
         return at
-    return launched.get(meta.get("toolUseId")) or "-"
+    name = launched.get(meta.get("toolUseId")) or ""
+    if not name:
+        return "-"
+    return name if name.startswith("ndf:") or name in BUILTIN_AGENT_TYPES else "その他"
 
 
 def mode_of(modes: Counter) -> str:
@@ -368,6 +376,10 @@ def read_claude(root: Path, idle_cap: int, until: float | None = None) -> tuple[
         if is_seat or s.cwd.startswith("/tmp/ndf-worktrees/"):
             m = WT_RE.search(s.cwd + "/")
             if m and s.times and s.usage.calls:  # 応答の無い記録（起動に失敗した席）は数えない
+                for p in sorted((main.parent / main.stem / "subagents").glob("*.jsonl")):  # 席が Agent で起動した分も席の消費に入れる
+                    sub = scan_file(p, until=until).usage
+                    sub.p = 0  # P は席 1 起動の固定費のまま（サブエージェントの最初の文脈を足さない）
+                    s.usage.add(sub)
                 seats.append(
                     External(
                         "claude",
@@ -396,6 +408,8 @@ def read_claude(root: Path, idle_cap: int, until: float | None = None) -> tuple[
         c.sec += active_seconds(s.times, idle_cap)
         modes, prs, keys = Counter(s.modes), set(s.prs), set(s.keys)
         for _, sub, meta in subs:
+            if until is not None and not sub.times:  # 打ち切りより後に起動した分は、作り直したときに起動数を増やさない
+                continue
             depth = int(meta.get("spawnDepth") or 1)
             layer = layer_of(depth, meta.get("description"))
             r = roles[(layer, role_of(meta.get("description"), layer), agent_type_of(meta, launched))]
@@ -544,6 +558,17 @@ def link_external(sessions: list[Session], externals: list[External]) -> int:
 # 帳簿の kind ごとの層。full（Skill を回すステップ）は会話が残り、会話の記録として別に数えるため読まない
 LEDGER_LAYER = {"work": "worker", "judge": "supervisor", "slow": "supervisor", "pr": "supervisor", "mvv": "supervisor"}
 LEDGER_AGENT = "claude -p"
+# 呼び出しの並びから求める値。帳簿は起動ごとの合計しか持たないため、帳簿の役には載せない（`-`）
+SEQ_KEYS = (
+    "p",
+    "rewrites",
+    "rewrites_after_5m",
+    "rewrites_untimed",
+    "rewrite_tokens",
+    "rewrite_tokens_after_5m",
+    "read_tokens_after_5m",
+    "rewrite_gap_median",
+)
 
 
 def read_ledger(root: Path, until: float | None = None) -> list[tuple[float, dict]]:
@@ -674,6 +699,10 @@ def aggregate(sessions: list[Session], by: list[str]) -> dict:
                 roles[rk].sec += r.sec
         layer_order = {"conductor": 0, "supervisor": 1, "worker": 2}
         for (layer, role, agent_type), r in sorted(roles.items(), key=lambda x: (layer_order[x[0][0]], x[0][1], x[0][2])):
+            stats = call_stats(r.usage, r.n)
+            if agent_type == LEDGER_AGENT:  # 呼び出しの並びが分からない起動は P・書き直しを出さない
+                for k in SEQ_KEYS:
+                    stats.pop(k)
             per_role.append(
                 axis
                 | {
@@ -685,7 +714,7 @@ def aggregate(sessions: list[Session], by: list[str]) -> dict:
                     "context": r.usage.context / r.n,
                     "out": r.usage.out / r.n,
                     "minutes": r.sec / r.n / 60,
-                    **call_stats(r.usage, r.n),
+                    **stats,
                 }
             )
         ext_groups: dict = defaultdict(list)
@@ -832,15 +861,15 @@ def render_md(result: dict, by: list[str]) -> str:
                 r["role"],
                 r["agent_type"],
                 str(r["count"]),
-                _k(r["p"]),
+                _k(r["p"]) if "p" in r else "-",
                 f"{r['k']:.1f}",
                 _m(r["w5"]),
                 _m(r["w1h"]),
-                str(r["rewrites"]),
-                str(r["rewrites_after_5m"]),
-                _m(r["rewrite_tokens_after_5m"]),
-                _m(r["read_tokens_after_5m"]),
-                _min(r["rewrite_gap_median"]),
+                str(r.get("rewrites", "-")),
+                str(r.get("rewrites_after_5m", "-")),
+                _m(r["rewrite_tokens_after_5m"]) if "rewrite_tokens_after_5m" in r else "-",
+                _m(r["read_tokens_after_5m"]) if "read_tokens_after_5m" in r else "-",
+                _min(r.get("rewrite_gap_median")),
             ]
             for r in result["per_role"]
         ],

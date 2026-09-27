@@ -116,7 +116,14 @@ def build(tmp: Path) -> dict:
         "## [ndf 10.1.5] - x\n\n## [ndf 10.1.0] - x\n\n## [ndf 10.0.0] - x\n",
         encoding="utf-8",
     )
-    return {"claude": tmp / "claude", "codex": tmp / "codex", "kiro": tmp / "kiro", "out": out, "changelog": changelog}
+    return {
+        "claude": tmp / "claude",
+        "codex": tmp / "codex",
+        "kiro": tmp / "kiro",
+        "usage": tmp / "usage",  # 手元の帳簿を読まない
+        "out": out,
+        "changelog": changelog,
+    }
 
 
 def run(env: dict, *args: str, until: str | None = UNTIL) -> subprocess.CompletedProcess:
@@ -129,6 +136,8 @@ def run(env: dict, *args: str, until: str | None = UNTIL) -> subprocess.Complete
         str(env["codex"]),
         "--kiro-root",
         str(env["kiro"]),
+        "--usage-root",
+        str(env["usage"]),
         "--out",
         str(env["out"]),
         "--changelog",
@@ -164,6 +173,21 @@ def test_writes_md_and_json_named_by_until_date(tmp_path):
     assert data["meta"]["until"] == UNTIL
     assert data["meta"]["by"] == ["version", "mode", "model", "cc", "reviewers"]
     assert set(data) == {"per_pr", "per_role", "external", "meta"}
+
+
+def test_ledger_rows_join_the_record(tmp_path):
+    """計画が起動した claude -p の使用量も、token-usage.py の通常の実行と同じく記録へ入る。"""
+    env = build(tmp_path)
+    row = {"at": _ts(21), "ndf_version": "10.2.0", "kind": "work", "model": "claude-opus-5", "usage": U, "seconds": 60.0}
+    lost = row | {"at": _ts(300)}  # どの会話の範囲にも入らない行
+    _jsonl(env["usage"] / "x.jsonl", [row, lost])
+    ok(env, "--released", "10.3.0")
+    data = json.loads((env["out"] / "2026-09-10.json").read_text(encoding="utf-8"))
+    assert {(x["layer"], x["role"]) for x in data["per_role"] if x["agent_type"] == "claude -p"} == {("worker", "work")}
+    # 寄せ先の無い行は token-usage.py の JSON と同じく meta の unlinked_ledger に入り、.md の要約にも出る
+    assert data["meta"]["unlinked_ledger"] == 1
+    assert "帳簿の寄せ先が無い" not in data["meta"]["skipped"]
+    assert "寄せ先の無い帳簿の行: 1 件" in (env["out"] / "2026-09-10.md").read_text(encoding="utf-8")
 
 
 def test_other_version_on_same_date_gets_suffix(tmp_path):
@@ -271,3 +295,22 @@ def test_outputs_carry_no_body_path_repository_or_session_id(tmp_path):
     for text in ((env["out"] / "2026-09-10.json").read_text(), (env["out"] / "2026-09-10.md").read_text(), p.stdout):
         for secret in ("secret-repo", "acme", "aaaaaaaa-0000", "/work/", "/tmp/ndf-worktrees", "Base directory", str(tmp_path)):
             assert secret not in text, secret
+
+
+def test_layer_rows_keep_ledger_roles_out_of_p_and_rewrites():
+    """帳簿の役（P・書き直しを持たない）は、層の P と 1 起動あたりの書き直しの分母に入らない。"""
+    import importlib.util
+
+    sys.path.insert(0, str(SCRIPT.parent))
+    spec = importlib.util.spec_from_file_location("token_usage_snapshot", SCRIPT)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = mod  # dataclass が自分のモジュールを引く
+    spec.loader.exec_module(mod)
+    seat = {"version": "10.2.0", "layer": "worker", "count": 2, "p": 30_000, "k": 4, "w5": 0, "w1h": 100}
+    seat |= {"rewrites": 2, "rewrites_after_5m": 1}
+    ledger = {"version": "10.2.0", "layer": "worker", "count": 6, "k": 8, "w5": 0, "w1h": 100}
+    [row] = mod.layer_rows([seat, ledger])
+    assert row[2] == "8" and row[3] == "30.0k"  # 起動は 8、P は席の 2 起動だけで割る
+    assert row[4] == "7.0" and row[9] == "1.00"  # k は全起動、書き直しは席の 2 起動で割る
+    [only] = mod.layer_rows([ledger])
+    assert only[3] == "-" and only[7] == "-" and only[9] == "-"

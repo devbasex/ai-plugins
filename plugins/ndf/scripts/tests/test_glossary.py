@@ -421,6 +421,15 @@ def test_code_blocks_and_inline_code_are_not_matched(repo):
     assert run(repo, "check", "--diff", "develop")[0] == 0
 
 
+def test_blockquote_lines_are_not_matched(repo):
+    """引用（`>` で始まる行）は他者の言葉の写しなので、廃止した語があっても当てない。引用の外は当てる。"""
+    write(repo, "issues/a.md", "## 依頼（原文）\n\n> オーダーを速くする\n>\n> * オーダーの一覧\n\n本文。\n")
+    assert run(repo, "check", "--diff", "develop")[0] == 0
+    write(repo, "issues/a.md", "## 依頼（原文）\n\n> オーダーを速くする\n\nオーダーは廃止した。\n")
+    code, out, _ = run(repo, "check", "--diff", "develop")
+    assert code == 1 and [i["line"] for i in out["items"]] == [5]
+
+
 def test_deprecated_inside_live_term_is_not_matched(repo):
     g = shop_glossary()
     g["terms"][1]["deprecated"] = ["カート"]

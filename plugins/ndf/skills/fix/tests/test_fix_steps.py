@@ -37,6 +37,13 @@ if a[:2] == ["repo", "view"]:
     out = "o/r"
 elif a[:2] == ["pr", "view"]:
     out = json.dumps(st["pr"])
+elif a[:2] == ["api", "graphql"] and "thread_pages" in st:
+    # ページ送り: endCursor=c<N> で N 枚目を返す（無ければ 0 枚目）
+    cur = next((x.split("=", 1)[1] for x in a if x.startswith("endCursor=")), "c0")
+    n = int(cur[1:])
+    pages = st["thread_pages"]
+    info = {{"hasNextPage": n + 1 < len(pages), "endCursor": f"c{{n + 1}}"}}
+    out = json.dumps({{"data": {{"repository": {{"pullRequest": {{"reviewThreads": {{"pageInfo": info, "nodes": pages[n]}}}}}}}}}})
 elif a[:2] == ["api", "graphql"]:
     out = json.dumps({{"data": {{"repository": {{"pullRequest": {{"reviewThreads": {{"nodes": st["threads"]}}}}}}}}}})
 elif a[:1] == ["api"]:
@@ -179,6 +186,21 @@ def test_context_collects_threads_comments_ci_and_exclusions(env):
     assert not any(c[:2] == ["pr", "merge"] or "--watch" in c for c in calls)
 
 
+def test_context_reads_every_page_of_threads(env):
+    """100 件を超えた PR でも、2 枚目以降の未解決スレッドを雛形から落とさない。"""
+    st = json.loads(env["state"].read_text())
+    t = _threads()
+    st["thread_pages"] = [[t[0], t[1]], [t[2]]]
+    env["state"].write_text(json.dumps(st))
+    code, out, err = run("context", PR, "--root", env["root"])
+    assert code == 0, err
+    assert out["metrics"]["unresolved"] == 2
+    dec = json.loads(Path(next(i["path"] for i in out["items"] if i["name"] == "decisions")).read_text())
+    assert [d["thread_id"] for d in dec["decisions"]] == ["PRRT_1", "PRRT_3"]
+    calls = [c for c in json.loads(env["state"].read_text())["calls"] if c[:2] == ["api", "graphql"]]
+    assert any("endCursor=c1" in c for c in calls)
+
+
 def test_context_without_ci_failure_skips_log(env):
     st = json.loads(env["state"].read_text())
     st["checks"] = [{"name": "test", "state": "PENDING", "link": ""}]
@@ -265,6 +287,7 @@ def test_finalize_builds_merge_fix_contract(env):
         "ci_status",
         "ci_failed_checks",
         "ci_note",
+        "project_mvv",
         "fixed_count",
         "by_severity",
         "resolved_threads",
@@ -274,15 +297,17 @@ def test_finalize_builds_merge_fix_contract(env):
     assert res["pr"] == PR and res["fix_commit"] == "abc1234" and res["fixed_count"] == 1
     assert res["by_severity"] == {"critical": 0, "major": 1, "minor": 0, "nit": 0}
     assert res["ci_status"] == "FAILURE" and res["ci_failed_checks"] == ["lint"]
-    assert res["resolved_threads"] == [{"thread_id": "PRRT_1", "comment_id": 11, "path": "a.py", "line": 3}]
+    assert res["resolved_threads"] == [{"thread_id": "PRRT_1", "comment_id": 11, "path": "a.py", "line": 3, "mvv_basis": ["MVV なし"]}]
+    assert res["project_mvv"] == {"status": "none", "version": None, "sha256": None}
     assert [d["thread_id"] for d in res["deferred"]] == ["PRRT_3", "PRRT_5"]
     assert res["deferred"][0]["reason_for_deferral"] == "好みの範囲" and "resolve" not in res["deferred"][0]
     assert res["deferred"][1]["resolve"] is True and "#900" in res["deferred"][1]["reason_for_deferral"]
     assert res["rejected"][0]["reason_for_rejection"] == "意図的な展開" and res["rejected"][0]["severity"] == "minor"
+    # 送るコミットがあるときは、送る前の head から本文を揃えない（送る側が送った後に揃える）
     sync = next(i for i in out["items"] if i["name"] == "pr-body-decisions")
-    assert sync == {"name": "pr-body-decisions", "result": "synced", "code": 0, "reason": ""}
-    assert (env["root"] / "sync.log").read_text().strip() == f"sync sync {PR}"
-    assert out["metrics"]["pr_body_decisions_code"] == 0
+    assert (sync["result"], sync["code"]) == ("after_push", None)
+    assert not (env["root"] / "sync.log").exists()
+    assert out["metrics"]["pr_body_decisions_code"] is None
     assert "result_posts.py fix --pr 812 --result" in out["next"]
 
 
@@ -330,8 +355,10 @@ def test_finalize_stops_on_invalid_decisions(env):
 )
 def test_finalize_reports_sync_exit_codes(env, monkeypatch, sync_code, label, status, exit_code):
     monkeypatch.setenv("FAKE_SYNC_CODE", str(sync_code))
+    d = _decisions()
+    d["decisions"][0].update(decision="rejected", reason="誤読")  # 送るコミットが無いときに finalize が揃える
     dec = env["tmp"] / "d.json"
-    dec.write_text(json.dumps(_decisions()), encoding="utf-8")
+    dec.write_text(json.dumps(d), encoding="utf-8")
     code, out, _ = run("finalize", "--decisions", dec, "--sync-script", env["sync"])
     assert (code, out["status"]) == (exit_code, status)
     sync = next(i for i in out["items"] if i["name"] == "pr-body-decisions")
@@ -433,7 +460,8 @@ def test_waived_minor_and_nit_close_without_commit_or_push(env):
     assert [e["thread_id"] for e in res["deferred"]] == ["PRRT_4", "PRRT_3"]
     for e, kind in zip(res["deferred"], ("doc_mismatch", "wording")):
         assert e["resolve"] is True and e["waived"] == kind
-        assert e["reply"] == review_criteria.waiver_reply(kind) == e["reason_for_deferral"]
+        assert e["reply"] == review_criteria.waiver_reply(kind, (), "（MVV なし）") == e["reason_for_deferral"]
+        assert e["mvv_basis"] == ["MVV なし"]
     assert out["metrics"]["waived"] == 2
     dropped = next(i for i in out["items"] if i["name"] == "fix-commit")
     assert dropped["result"] == "dropped" and "abc1234" in dropped["reason"]

@@ -11,6 +11,7 @@ from typing import Any, NamedTuple
 
 import review_lib  # noqa: E402
 import assignment  # noqa: E402
+import project_mvv  # noqa: E402
 import review_criteria  # noqa: E402
 from classifications import default_max_rounds, review_kind  # noqa: E402
 from review_lib import (  # noqa: E402
@@ -66,24 +67,36 @@ def _print_init_result(result: _InitResult) -> None:
     print(f"REVIEW_FOCUS={result.review_focus}")
 
 
-def _review_criteria(worktree: object) -> dict[str, Any]:
-    """PR の head の作業ツリーから重点の宣言を読み、状態ファイルの `review_criteria` を組む（#1287）。
+def _base_refs(base_branch: object) -> list[str]:
+    """base の宣言を引く ref の候補。取り込んだ remote の側を先に見る。"""
+    base = str(base_branch or "")
+    return [f"origin/{base}", base] if base else []
 
+
+def _review_criteria(worktree: object, base_branch: object = "") -> dict[str, Any]:
+    """重点の宣言（PR の head の作業ツリー）とプロジェクト MVV（base の側）を読み、状態ファイルの `review_criteria` を組む（#1287・#1366）。
+
+    プロジェクト MVV は base で承認済みのものだけを使う。PR の head が MVV を足す・書き換えても、
+    その PR 自身のレビューと修正の基準はマージの後まで変わらない。
     読めなくても止めない。基準 1・2・4 の節で続け、読めなかったことを標準エラーへ出す。
     """
     focus = review_criteria.load_focus(worktree) if worktree else review_criteria.NO_FOCUS
     if focus.status == "unreadable":
         review_lib.info(f"⚠️ レビューの重点の宣言を読めないため、基準 1・2・4 だけで続ける: {focus.error}")
-    return review_criteria.as_state(focus)
+    # プロジェクト MVV（#1366）は 1 回だけ読み、参照と MVV の節を写す。担当・修正担当・見送りの返信が同じ節を読む
+    mvv = project_mvv.load_mvv_at_ref(worktree, _base_refs(base_branch)) if worktree else project_mvv.ProjectMvv("none")
+    if mvv.status in ("unapproved", "mismatch", "unreadable"):
+        review_lib.info(f"⚠️ プロジェクト MVV が{project_mvv.STATUS_LABEL[mvv.status]}ため、MVV なしで続ける: {mvv.error}")
+    return review_criteria.as_state(focus, mvv)
 
 
-def _rewrite_review_criteria(state_file: pathlib.Path, worktree: object) -> str:
+def _rewrite_review_criteria(state_file: pathlib.Path, worktree: object, base_branch: object = "") -> str:
     """再開で、同期した後の作業ツリーから読み直して状態ファイルへ書く。
 
     待ち行列を流した結果は状態ファイルへ直接書かれているため、手元の `st` ではなく
     ファイルを読み直してから書く。
     """
-    crit = _review_criteria(worktree)
+    crit = _review_criteria(worktree, base_branch)
     try:
         st = json.loads(state_file.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -185,7 +198,7 @@ def _resume_from_state(
         review_lib.info("↻ 追加レビュー観点を state に反映して再開")
 
     tmp_dir = _sync_resume_worktree(st, pr, worktree)
-    focus_status = _rewrite_review_criteria(resume_state_file, st.get("worktree_path") or "")
+    focus_status = _rewrite_review_criteria(resume_state_file, st.get("worktree_path") or "", st.get("base_branch") or "")
     review_lib.info(f"↻ 前回中断 state から再開（round={len(st.get('rounds', []))}）")
     _print_init_result(
         _InitResult(
@@ -440,7 +453,7 @@ def _init_new_state(
                 state["review_kind"], pr_ctx.worktree, review_ctx.changed_files, review_ctx.review_instructions, manual_extra_review
             )
         )
-        state["review_criteria"] = _review_criteria(pr_ctx.worktree)
+        state["review_criteria"] = _review_criteria(pr_ctx.worktree, pr_ctx.meta.base_branch)
         store._write_state(ws_ctx.state_file, state)
         review_lib.info(f"✅ state 初期化: {ws_ctx.state_file}")
         _print_init_result(

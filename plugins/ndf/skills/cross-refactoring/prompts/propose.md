@@ -18,6 +18,10 @@ $RF_METRICS_BLOCK
 
 $RF_SKILL_BLOCK
 
+## 判断の基準（MVV）
+
+$RF_MVV
+
 ## 観点（観点ごとに探す）
 
 **次の観点を 1 つずつ順にたどり、観点ごとに対象範囲を見直して**兆候を探してください。
@@ -75,7 +79,8 @@ $RF_VOCAB_SEVERITIES
       "rationale": "1 メソッドに入力検証・変換・永続化が同居し、分岐が 7 本ある",
       "plan": "1. 検証部を validate_request として抽出\n2. 変換部を to_entity として抽出",
       "test_gap": false,
-      "estimated_diff_lines": 40
+      "estimated_diff_lines": 40,
+      "mvv_basis": ["Value 6"]
     }
   ]
 }
@@ -83,6 +88,7 @@ $RF_VOCAB_SEVERITIES
 
 - `path` はリポジトリ相対、`symbol` は関数・メソッド・クラスの名前
 - `smell` / `technique` / `severity` は**上に列挙した識別子のいずれか**
+- `mvv_basis` は、提案する判断の根拠にした判断の基準の項目の番号（`Value 3` / `C4` / `P1` など）。書かなくても見送られません
 - `path` + `symbol` + `smell` が同じ提案は 1 件へ統合されます。**他のランタイムと
   合意した提案ほど優先される**ので、独自性を狙わず素直に挙げてください
 

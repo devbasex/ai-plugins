@@ -79,6 +79,8 @@ def test_ledger_rows_join_the_session_layers(tmp_path):
     assert ledger_roles == {("supervisor", "judge"), ("worker", "work")}
     w = next(x for x in r["per_role"] if x["agent_type"] == "claude -p" and x["role"] == "work")
     assert w["w1h"] == 200 and w["w5"] == 0
+    # 帳簿は呼び出しの並びを持たないため、P・書き直しを出さない（0 として分母に入れない）
+    assert not {"p", "rewrites", "rewrites_after_5m", "rewrite_gap_median"} & w.keys()
     assert r["meta"]["unlinked_ledger"] == 1
 
 

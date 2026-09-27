@@ -97,10 +97,15 @@ def cmd_final_gate(args: argparse.Namespace) -> None:
     stop = _final_fix_stop(state, gate)
     if stop and revert_deferred(path, state, gate):
         # 寄せた危険フラグの項目を取り消した。取り消しを公開して、次の最終ゲートが CI を待ち直す。
+        # **修正の依頼ではない（`recheck`）。** 駆動は修正の CLI を起動せずに `final-gate` を打ち直す。
+        # 起点を取り消し後の HEAD へ置き直すのは、取り消しのコミットを後の `merge-final-fix` の範囲へ
+        # 入れないためである。入れると未申告として取り消され、取り消した項目が PR へ戻る。
+        gate["status"] = "recheck"
+        gate["fix_base_sha"] = git_out(work_dir(state), ["rev-parse", "HEAD"])
         statefile.save(path, state)
         push_with_retry_marker(path, state, gate)
         info(f"↩ 最終ゲートへ寄せた危険フラグの項目を取り消しました（{detail}）。次の最終ゲートが確かめます")
-        statefile.emit(FINAL_GATE="failing", FINAL_FIX_IMPL=_final_fix_impl(state, gate), FINAL_FIX_ROUND=gate["fix_rounds"])
+        statefile.emit(FINAL_GATE="recheck")
         sys.exit(2)
     if stop:
         _gate_limit_reached(path, state, gate, detail, stop)

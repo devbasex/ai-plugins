@@ -63,7 +63,9 @@ from step_result import (  # noqa: E402
     result,
     run,
 )
+import design_body  # noqa: E402
 import gh_parts  # noqa: E402
+import project_mvv  # noqa: E402
 import review_criteria  # noqa: E402
 
 TOOL = "fix"
@@ -102,24 +104,32 @@ def pr_for_fix(pr: int) -> dict:
 
 
 def threads_with_first_comment(repo: str, pr: int) -> list[dict]:
-    """未解決のスレッドを、最初のコメント（id・書き手・本文）つきで返す（`gh_parts.unresolved_threads` は id と位置だけ）。"""
+    """未解決のスレッドを最初のコメント（id・書き手・本文）つきで返す。**全ページを読む**（100 件を超えた PR で落とさない）。"""
     owner, name = repo.split("/", 1)
     query = (
-        "query($owner:String!,$name:String!,$pr:Int!){repository(owner:$owner,name:$name){"
-        "pullRequest(number:$pr){reviewThreads(first:100){nodes{id isResolved path line "
-        "comments(first:1){nodes{databaseId body author{login}}}}}}}}"
+        "query($owner:String!,$name:String!,$pr:Int!,$endCursor:String){repository(owner:$owner,name:$name){"
+        "pullRequest(number:$pr){reviewThreads(first:100,after:$endCursor){pageInfo{hasNextPage endCursor} "
+        "nodes{id isResolved path line comments(first:1){nodes{databaseId body author{login}}}}}}}}"
     )
-    data = gh_json(
-        None,
-        ["api", "graphql", "-f", f"query={query}", "-F", f"owner={owner}", "-F", f"name={name}", "-F", f"pr={pr}"],
-        "未解決スレッドの取得",
-    )
-    try:
-        nodes = data["data"]["repository"]["pullRequest"]["reviewThreads"]["nodes"]
-    except (KeyError, TypeError):
-        raise StepError("未解決スレッドの応答を読めない", EXIT_UNREADABLE)
+    nodes: list[dict] = []
+    cursor = None
+    for _ in range(1000):  # 100 件ずつ
+        args = ["api", "graphql", "-f", f"query={query}", "-F", f"owner={owner}", "-F", f"name={name}", "-F", f"pr={pr}"]
+        if cursor:
+            args += ["-f", f"endCursor={cursor}"]
+        data = gh_json(None, args, "未解決スレッドの取得")
+        try:
+            page = data["data"]["repository"]["pullRequest"]["reviewThreads"]
+            nodes.extend(page["nodes"] or [])
+        except (KeyError, TypeError):
+            raise StepError("未解決スレッドの応答を読めない", EXIT_UNREADABLE)
+        page_info = page.get("pageInfo") or {}
+        nxt = page_info.get("endCursor")
+        if not page_info.get("hasNextPage") or not nxt or nxt == cursor:
+            break
+        cursor = nxt
     out = []
-    for n in nodes or []:
+    for n in nodes:
         if n.get("isResolved"):
             continue
         first = ((n.get("comments") or {}).get("nodes") or [{}])[0] or {}
@@ -191,6 +201,13 @@ def head_line(s: str, n: int = 100) -> str:
     return (s or "").strip().splitlines()[0][:n] if (s or "").strip() else ""
 
 
+def _root_or_cwd(root_arg) -> Path:
+    try:
+        return git_root(root_arg)
+    except StepError:
+        return Path.cwd()
+
+
 def focus_for_context(root_arg) -> review_criteria.Focus:
     """cross-review の中なら状態ファイルに写した重点（I8）、単独なら作業ツリーの宣言。"""
     state = os.environ.get("CROSS_REVIEW_STATE")
@@ -201,17 +218,14 @@ def focus_for_context(root_arg) -> review_criteria.Focus:
             crit = None
         if isinstance(crit, dict):
             return review_criteria.focus_from(crit.get("status"), crit.get("focus"), crit.get("error"))
-    try:
-        root = git_root(root_arg)
-    except StepError:
-        root = Path.cwd()
-    return review_criteria.load_focus(root)
+    return review_criteria.load_focus(_root_or_cwd(root_arg))
 
 
 def cmd_context(a):
     pr = a.pr
     repo = repo_of(a)
     focus = focus_for_context(a.root)
+    mvv_ref, mvv_block = review_criteria.mvv_context(os.environ.get("CROSS_REVIEW_STATE"), lambda: _root_or_cwd(a.root))
     view = pr_for_fix(pr)
     threads = threads_with_first_comment(repo, pr)
     comments_text, comments_n = fetch_comments(repo, pr)
@@ -241,7 +255,7 @@ def cmd_context(a):
     if log_path:
         lines += ["", f"失敗ログ: {log_path}"]
     lines += ["", f"## コメント（3 種、{comments_n} 行）", "", "```", comments_text.rstrip(), "```", ""]
-    lines += [review_criteria.fixer_block(focus), ""]
+    lines += [review_criteria.fixer_block(focus, mvv_block), ""]
     ctx.write_text("\n".join(lines), encoding="utf-8")
 
     dec = d / f"fix-pr{pr}-decisions.json"
@@ -254,6 +268,7 @@ def cmd_context(a):
                 "ci_note": None,
                 "review_focus": list(focus.names),
                 "review_focus_status": focus.status,
+                "project_mvv": mvv_ref,
                 "decisions": [
                     {
                         "thread_id": t["thread_id"],
@@ -265,6 +280,7 @@ def cmd_context(a):
                         "summary": head_line(t["body"]),
                         "decision": "",
                         "reason": "",
+                        "mvv_basis": [],
                     }
                     for t in threads
                 ],
@@ -279,6 +295,7 @@ def cmd_context(a):
         {"name": "context", "path": str(ctx)},
         {"name": "decisions", "path": str(dec)},
         {"name": "review-focus", "result": focus.status, "reason": focus.error},
+        {"name": "project-mvv", "result": mvv_ref.get("status"), "version": mvv_ref.get("version"), "sha256": mvv_ref.get("sha256")},
     ]
     items += [{"name": c.get("name"), "result": "ci_failed", "state": c.get("state"), "link": c.get("link")} for c in failed]
     if log_path:
@@ -378,71 +395,42 @@ def pick(e: dict, *keys) -> dict:
     return {k: e.get(k) for k in keys}
 
 
+ENTRY = ("comment_id", "thread_id", "path", "line", "severity", "category", "summary", "mvv_basis")  # 見送り・却下の行へ写す鍵
+
+
 def build_result(pr: int, d: dict, commit: str | None, ci_status: str, failed_names: list[str]) -> dict:
     decs = d["decisions"]
+    mvv = review_criteria.apply_basis(d)  # 根拠の項目（#1366）
     fixed = [e for e in decs if e["decision"] == "fixed"]
     by = {s: 0 for s in SEVERITIES}
     for e in fixed:
         by[e["severity"]] += 1
-    resolved = [pick(e, "thread_id", "comment_id", "path", "line") for e in fixed]
+    resolved = [pick(e, "thread_id", "comment_id", "path", "line", "mvv_basis") for e in fixed]
     deferred = []
     names = focus_names(d)
     for e in decs:
         if e["decision"] == "waived":
-            reply = review_criteria.waiver_reply(e["waive_kind"], names)
-            deferred.append(
-                {
-                    **pick(e, "comment_id", "thread_id", "path", "line", "severity", "category", "summary"),
-                    "reason_for_deferral": reply,
-                    "reply": reply,
-                    "resolve": True,
-                    "waived": e["waive_kind"],
-                }
-            )
+            reply = review_criteria.waiver_reply(e["waive_kind"], names, project_mvv.basis_phrase(e["mvv_basis"], mvv))
+            deferred.append({**pick(e, *ENTRY), "reason_for_deferral": reply, "reply": reply, "resolve": True, "waived": e["waive_kind"]})
         elif e["decision"] == "deferred":
-            deferred.append(
-                {
-                    **pick(e, "comment_id", "thread_id", "path", "line", "severity", "category", "summary"),
-                    "reason_for_deferral": e.get("reason"),
-                }
-            )
+            deferred.append({**pick(e, *ENTRY), "reason_for_deferral": e.get("reason")})
         elif e["decision"] == "separate_pr":
-            deferred.append(
-                {
-                    **pick(e, "comment_id", "thread_id", "path", "line", "severity", "category", "summary"),
-                    "reason_for_deferral": f"別 PR で対応（{e['issue']}）" + (f": {e['reason']}" if e.get("reason") else ""),
-                    "issue": e["issue"],
-                    "resolve": True,
-                }
-            )
-    rejected = [
-        {**pick(e, "comment_id", "thread_id", "path", "line", "severity", "category", "summary"), "reason_for_rejection": e.get("reason")}
-        for e in decs
-        if e["decision"] == "rejected"
-    ]
+            why = f"別 PR で対応（{e['issue']}）" + (f": {e['reason']}" if e.get("reason") else "")
+            deferred.append({**pick(e, *ENTRY), "reason_for_deferral": why, "issue": e["issue"], "resolve": True})
+    rejected = [{**pick(e, *ENTRY), "reason_for_rejection": e.get("reason")} for e in decs if e["decision"] == "rejected"]
     return {
         "pr": pr,
         "fix_commit": commit,
         "ci_status": ci_status,
         "ci_failed_checks": failed_names,
         "ci_note": d.get("ci_note"),
+        "project_mvv": project_mvv.record(mvv),
         "fixed_count": len(fixed),
         "by_severity": by,
         "resolved_threads": resolved,
         "deferred": deferred,
         "rejected": rejected,
     }
-
-
-def sync_pr_body(pr: int, script: str | None, repo: str | None) -> dict:
-    """設計 PR の本文の節を揃える。終了コードの意味はスクリプトの冒頭が正本。"""
-    path = Path(script) if script else PLUGIN_ROOT / "scripts" / "pr-body-decisions.sh"
-    if not path.is_file():
-        return {"name": "pr-body-decisions", "result": "missing", "code": None, "reason": f"無い: {path}"}
-    cmd = ["bash", str(path), "sync", str(pr)] + (["--repo", repo] if repo else [])
-    p = run(cmd, check=False)
-    label = {0: "synced", 1: "mismatch", 2: "unreadable", 3: "invalid_call"}.get(p.returncode, "failed")
-    return {"name": "pr-body-decisions", "result": label, "code": p.returncode, "reason": (p.stderr.strip() or p.stdout.strip())[:300]}
 
 
 def cmd_finalize(a):
@@ -483,11 +471,13 @@ def cmd_finalize(a):
     out = Path(a.out) if a.out else result_dir() / f"fix-pr{pr}-result.json"
     out.write_text(json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
 
-    sync = (
-        {"name": "pr-body-decisions", "result": "skipped", "code": None}
-        if a.no_sync
-        else sync_pr_body(pr, a.sync_script, getattr(a, "repo", None))
-    )
+    if a.no_sync:
+        sync = {"name": "pr-body-decisions", "result": "skipped", "code": None}
+    elif commit:
+        # 設計文書は PR の head から読まれる。送る側が送った直後に揃える（`design_body.sync_after_push`）
+        sync = {"name": "pr-body-decisions", "result": "after_push", "code": None, "reason": f"{commit} を送った後に送る側が揃える"}
+    else:
+        sync = design_body.sync_decisions(pr, getattr(a, "repo", None), a.sync_script)
     items = [{"name": "result", "path": str(out)}, sync] + ([dropped] if dropped else [])
     items += [{"name": c.get("name"), "result": "ci_failed", "state": c.get("state")} for c in failed]
     waived = sum(1 for e in res["deferred"] if e.get("waived"))
@@ -514,7 +504,7 @@ def cmd_finalize(a):
                 summary + "（pr-body-decisions.sh の呼び出しが誤り）",
                 items,
                 metrics,
-                next="fix-steps.py の sync_pr_body の呼び出しを直す",
+                next="design_body.sync_decisions の呼び出しを直す",
             )
         )
     emit(

@@ -272,10 +272,16 @@ def _plan_deferred_section(state: dict[str, Any]) -> list[str]:
         lines.extend(["（なし）", ""])
         return lines
     rows = [
-        (f"`{item_label(item)}`", item.get("smell") or "—", str(item.get("defer_reason", "—")), item.get("detail") or "—")
+        (
+            f"`{item_label(item)}`",
+            item.get("smell") or "—",
+            str(item.get("defer_reason", "—")),
+            " / ".join(item.get("mvv_basis") or []) or "—",
+            item.get("detail") or "—",
+        )
         for item in deferred
     ]
-    lines.extend([mdtable.table_markdown(["対象", "兆候", "理由", "補足"], rows), ""])
+    lines.extend([mdtable.table_markdown(["対象", "兆候", "理由", "根拠（MVV）", "補足"], rows), ""])
     return lines
 
 

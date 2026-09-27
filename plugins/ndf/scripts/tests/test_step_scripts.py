@@ -172,6 +172,21 @@ def test_spec_finalize_removes_design_and_indexes_spec(repo, env):
     assert out["metrics"]["commit"] == git(repo, "rev-parse", "HEAD").strip()
 
 
+def test_spec_finalize_leaves_unrelated_staged_changes_out_of_the_commit(repo, env):
+    spec_repo(repo)
+    write(repo, "other.txt", "利用者の作業\n")
+    git(repo, "add", "--", "other.txt", "docs/specifications/x.md")
+    code, _, err = call(
+        "plan-to-spec-steps.py",
+        ["spec-finalize", "--spec", "docs/specifications/x.md", "--design", "docs/design/x-design.md", "--title", "X", "--root", str(repo)],
+        env,
+    )
+    assert code == 0, err
+    committed = set(git(repo, "show", "--name-only", "--format=", "HEAD").split())
+    assert committed == {"docs/design/x-design.md", "docs/specifications/README.md", "docs/specifications/x.md"}
+    assert git(repo, "diff", "--cached", "--name-only").split() == ["other.txt"]
+
+
 def test_spec_finalize_skips_index_lines_inside_a_fence(repo, env):
     """索引の行は囲みの外だけを数える（lib/md.py。行の字面で見ていた頃は、囲みの中の例の後ろへ足した）。"""
     spec_repo(repo)
@@ -442,6 +457,49 @@ def test_compare_files_skips_symlinks_for_a_runtime_that_drops_them(tmp_path):
     assert out == ["codex: p/skills/a/SKILL.md"]
 
 
+def kiro_project(tmp_path):
+    """この checkout の dev.kiro/install.sh で <tmp>/proj へ導入し、(src, proj) を返す。"""
+    src = SCRIPTS.parents[2]
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    p = subprocess.run(
+        ["bash", str(src / "plugins/ndf/dev.kiro/install.sh"), "--project", str(proj), "--yes"],
+        capture_output=True,
+        text=True,
+        cwd=str(src),
+    )
+    assert p.returncode == 0, p.stdout + p.stderr
+    return src, proj
+
+
+def test_compare_kiro_accepts_what_the_installer_made(tmp_path):
+    src, proj = kiro_project(tmp_path)
+    assert load_verification().compare_kiro(src, proj) == []
+
+
+@pytest.mark.parametrize("broken", ["skill_link", "prompt", "steering", "agent", "policy_link"])
+def test_compare_kiro_reports_missing_or_changed_outputs(tmp_path, broken):
+    """Kiro の生成物（skills / prompts / steering / agents）の欠落・内容違いを不一致にする。"""
+    src, proj = kiro_project(tmp_path)
+    kiro = proj / ".kiro"
+    if broken == "skill_link":
+        (kiro / "skills" / "pr").unlink()
+        want = "kiro: .kiro/skills/pr"
+    elif broken == "prompt":
+        (kiro / "prompts" / "pr.md").write_text("changed\n", encoding="utf-8")
+        want = "kiro: .kiro/prompts/pr.md"
+    elif broken == "steering":
+        (kiro / "steering" / "ndf-policies.md").write_text("stale\n", encoding="utf-8")
+        want = "kiro: .kiro/steering/ndf-policies.md"
+    elif broken == "agent":
+        (kiro / "agents" / "ndf.json").write_text("{", encoding="utf-8")
+        want = "kiro: .kiro/agents/ndf.json"
+    else:
+        (kiro / "skills" / "ndf-policies").symlink_to(src / "plugins/ndf/skills/ndf-policies")
+        want = "kiro: .kiro/skills/ndf-policies が残っている（steering へ移した Skill）"
+    assert load_verification().compare_kiro(src, proj) == [want]
+
+
 # --- phase-steps.py（互換の入口） --------------------------------------------
 
 
@@ -532,3 +590,30 @@ def test_cleanup_base_follows_declaration(tmp_path, env):
     code, out, err = call("merged-steps.py", ["cleanup", "1", "--root", str(main)], env)
     assert code == 0, err
     assert {(i["kind"], i["name"]): i for i in out["items"]}[("main_dir", str(main))]["result"] == "pulled"
+
+
+@pytest.mark.parametrize(("local", "same"), [(b"a\nb\n", True), (b"a\r\nb\r\n", False)])
+def test_same_untracked_compares_bytes_not_text(repo, tmp_path, local, same):
+    """上流が LF で手元の未追跡が CRLF なら別物とみなし、消す一覧に入れない。"""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("merged_steps", SCRIPTS / "merged-steps.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    up = tmp_path / "up.git"
+    git(tmp_path, "clone", "-q", "--bare", str(repo), str(up))
+    git(repo, "remote", "add", "origin", str(up))
+    git(repo, "fetch", "-q", "origin")
+    git(repo, "checkout", "-q", "-b", "side")
+    (repo / "new.txt").write_bytes(b"a\nb\n")
+    git(repo, "add", "new.txt")
+    git(repo, "commit", "-q", "-m", "new")
+    git(repo, "push", "-q", "origin", "side:develop")
+    git(repo, "checkout", "-q", "develop")
+    git(repo, "branch", "-q", "-D", "side")
+    git(repo, "branch", "-q", "--set-upstream-to", "origin/develop")
+    git(repo, "fetch", "-q", "origin")
+    (repo / "new.txt").write_bytes(local)
+    pull = subprocess.run(["git", "-C", str(repo), "pull", "--ff-only", "-q"], capture_output=True, text=True)
+    assert "untracked working tree files would be overwritten" in pull.stderr
+    assert mod.same_untracked(repo, pull) == (["new.txt"] if same else [])

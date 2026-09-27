@@ -625,12 +625,8 @@ def run_checks(root):
 
 def find_pr(root, head, base, states=("OPEN",)):
     """head → base の PR を探す。states の順に最初に見つかった {number, state} を返す。"""
-    items = (
-        gh_json(
-            root, ["pr", "list", "--head", head, "--base", base, "--state", "all", "--json", "number,state", "--limit", "20"], "gh pr list"
-        )
-        or []
-    )
+    args = ["pr", "list", "--head", head, "--base", base, "--state", "all", "--json", "number,state", "--limit", "20"]
+    items = gh_json(root, args, "gh pr list") or []
     for st in states:
         for it in items:
             if it.get("state") == st:
@@ -693,6 +689,10 @@ def cmd_release(a):
 
     # 開発版の PR（release/v<版> → develop）
     pr = find_pr(root, branch, "develop", states=("OPEN", "MERGED"))
+    if pr and pr["state"] == "MERGED":
+        # マージ済みの PR へ後から積んだコミットは GitHub が開き直さず develop に入らない。入っていなければ PR を作り直す
+        git(root, "fetch", "-q", "origin", "develop")
+        pr = pr if git(root, "merge-base", "--is-ancestor", "HEAD", "origin/develop", check=False).returncode == 0 else None
     if pr is None:
         section = changelog_section(root, ver)
         mark = {True: "pass", False: "fail", None: "skip"}

@@ -31,6 +31,7 @@ import datetime
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -112,9 +113,16 @@ def evacuate(path, label):
 
 
 def remove_worktree(root, path, label):
-    """作業ツリーを外す。拒否されたら退避してから --force で外す。(成否, 理由) を返す。"""
+    """作業ツリーを外す。拒否されたら未追跡・無視のファイルを退避してから --force で外す。(成否, 理由) を返す。
+
+    追跡ファイルの未コミットの変更は退避できず --force が消すため、残っていれば外さず kept にする。
+    """
     if git(root, "worktree", "remove", path, check=False).returncode == 0:
         return True, None
+    dirty = git(path, "status", "--porcelain=v1", "--untracked-files=no").stdout.splitlines()
+    if dirty:
+        names = ", ".join(line[3:] for line in dirty[:5]) + ("…" if len(dirty) > 5 else "")
+        return False, f"追跡ファイルに未コミットの変更が {len(dirty)} 件ある（{names}）ため --force で外さない"
     try:
         trash = evacuate(path, label)
     except (StepError, OSError) as e:
@@ -126,14 +134,13 @@ def remove_worktree(root, path, label):
 
 
 def same_untracked(main_dir, pull):
-    """pull を止めた未追跡のファイルが、すべて上流の内容と同じならその一覧を返す。1 つでも違えば空。"""
+    """pull を止めた未追跡のファイルが、すべて上流とバイト列で同じ（CRLF と LF も別物）ならその一覧を返す。1 つでも違えば空。"""
     if "untracked working tree files would be overwritten" not in pull.stderr:
         return []
     rels = [l.strip() for l in pull.stderr.splitlines() if l.startswith("\t")]
     for rel in rels:
-        up = run(["git", "-C", main_dir, "show", f"@{{u}}:{rel}"], check=False)
-        path = Path(main_dir) / rel
-        if up.returncode != 0 or not path.is_file() or path.read_text(errors="replace") != up.stdout:
+        up = subprocess.run(["git", "-C", str(main_dir), "show", f"@{{u}}:{rel}"], capture_output=True)
+        if up.returncode != 0 or not (path := Path(main_dir) / rel).is_file() or path.read_bytes() != up.stdout:
             return []
     return rels
 
@@ -311,7 +318,8 @@ def cmd_merge_when_green(a):
     items, waits, queued_runs = watch.items, watch.waits, watch.queued_runs
 
     if not any(i["kind"] == "pr" and i["result"] == "already_merged" for i in items):
-        p = gh_parts.gh(["pr", "merge", str(n), "--admin", f"--{a.method}"], cwd=root)
+        pin = ["--match-head-commit", watch.last_sha] if watch.last_sha else []  # 緑を確かめた先頭だけをマージする
+        p = gh_parts.gh(["pr", "merge", str(n), "--admin", f"--{a.method}", *pin], cwd=root)
         if p.returncode != 0:
             emit(
                 result(

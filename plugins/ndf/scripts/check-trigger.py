@@ -55,23 +55,18 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
-from step_result import (
-    EXIT_OK,
-    EXIT_PRECONDITION,
-    EXIT_UNREADABLE,
-    EXIT_VIOLATION,  # noqa: E402
-    emit,
-    result,
-)
+from step_result import EXIT_OK, EXIT_PRECONDITION, EXIT_UNREADABLE, EXIT_VIOLATION, emit, result  # noqa: E402
 from pace import PaceError, matches, read_pace  # noqa: E402
 import clock  # noqa: E402
 import gh_call  # noqa: E402
+import gh_rest  # noqa: E402
 import jsonio  # noqa: E402
 import proc  # noqa: E402
 import repo  # noqa: E402
 
 TOOL = "check-trigger"
 MERGE_SUBJECT = re.compile(r"^Merge pull request #(\d+) from [^/\s]+/(\S+)")
+SQUASH_SUBJECT = re.compile(r"\(#(\d+)\)$")  # squash merge の既定の件名「<題> (#N)」
 SKIP_BRANCHES = ("release/", "check/")
 BASE_PREFIX = "check-base/"
 DONE_PREFIX = "check-done/"  # 見終えた位置を origin に残すブランチ（review = 実装レビュー、check = 構造改善を含む検査）
@@ -251,6 +246,10 @@ def done_branch(review: bool) -> str:
     return DONE_PREFIX + ("review" if review else "check")
 
 
+def is_ancestor(root: Path, old: str, new: str) -> bool:
+    return proc.git(root, "merge-base", "--is-ancestor", old, new, check=False).returncode == 0
+
+
 def range_start(root: Path, events: list[dict], since: str | None, review: bool = False) -> tuple[str, datetime, str]:
     """(from のコミット, 期限の起点, 決め方)。
 
@@ -259,6 +258,8 @@ def range_start(root: Path, events: list[dict], since: str | None, review: bool 
     prev = last_check(events, review)
     ref = f"refs/remotes/origin/{done_branch(review)}"
     done = git_or_stop(root, "rev-parse", "--verify", "-q", f"{ref}^{{commit}}", check=False)
+    if done and prev and prev["to"] != done and is_ancestor(root, done, prev["to"]):
+        done = ""  # 送れなかった記録のほうが先にある（origin の位置は古い）
     if done:
         at = parse_at(prev["at"]) if prev and prev["to"] == done else commit_at(root, done)
         return done, at, f"origin/{done_branch(review)}"
@@ -278,25 +279,43 @@ def range_start(root: Path, events: list[dict], since: str | None, review: bool 
     return sha, commit_at(root, sha), f"origin/{base} との分岐点"
 
 
-def merged_prs(root: Path, frm: str, to: str, decl: dict) -> list[dict]:
+def merged_prs(root: Path, frm: str, to: str, decl: dict, skip: set[int] = frozenset()) -> tuple[list[dict], list[str]]:
+    """(範囲へ入った PR, 外した PR のコミット)。merge commit と squash merge（件名の末尾 `(#N)`）を数える。squash の
+    件名にはブランチ名が残らないため、ブランチは GitHub から読んで `SKIP_BRANCHES` を当てる。検査の PR は記録の番号
+    （skip）でも外す。外したコミットは行数からも差し引くために返す。"""
+    found = []
+    excluded = []
+    for line in git_or_stop(root, "log", "--first-parent", "--format=%H%x09%P%x09%s", f"{frm}..{to}").splitlines():
+        sha, parents, subject = line.split("\t", 2)
+        m = MERGE_SUBJECT.match(subject) if " " in parents else SQUASH_SUBJECT.search(subject.rstrip())
+        if m and int(m.group(1)) in skip:
+            excluded.append(sha)
+        elif m:
+            found.append((sha, int(m.group(1)), m.group(2) if m.re is MERGE_SUBJECT else None))
+    squashed = [n for _, n, branch in found if branch is None]
+    heads, err = gh_rest.pr_head_branches(squashed, cwd=str(root)) if squashed else ({}, "")
+    if heads is None:
+        raise Stop(f"squash merge の PR のブランチを読めない: {err}", EXIT_VIOLATION)
     out = []
-    log = git_or_stop(root, "log", "--first-parent", "--merges", "--format=%H%x09%s", f"{frm}..{to}")
-    for line in log.splitlines():
-        sha, _, subject = line.partition("\t")
-        m = MERGE_SUBJECT.match(subject)
-        if not m or m.group(2).startswith(SKIP_BRANCHES):
+    for sha, n, branch in found:
+        branch = heads.get(n, "") if branch is None else branch
+        if branch.startswith(SKIP_BRANCHES):
+            excluded.append(sha)
             continue
         files = git_or_stop(root, "diff", "--name-only", f"{sha}^1", sha).splitlines()
         common = any(area_of(f, decl)[1] for f in files)
-        out.append(
-            {"pr": int(m.group(1)), "branch": m.group(2), "common": common, "points": decl["triggers"]["common_weight"] if common else 1}
-        )
-    return out
+        out.append({"pr": n, "branch": branch, "common": common, "points": decl["triggers"]["common_weight"] if common else 1})
+    return out, excluded
 
 
-def changed_lines(root: Path, frm: str, to: str) -> int:
-    stat = git_or_stop(root, "diff", "--shortstat", frm, to)
-    return sum(int(n) for n in re.findall(r"(\d+) (?:insertion|deletion)", stat))
+def changed_lines(root: Path, frm: str, to: str, excluded: list[str] = ()) -> int:
+    """範囲の変更行数。外した PR（検査・リリース）のコミットの分は差し引く。検査の修正が次の検査を立てないためである。"""
+
+    def count(a: str, b: str) -> int:
+        stat = git_or_stop(root, "diff", "--shortstat", a, b)
+        return sum(int(n) for n in re.findall(r"(\d+) (?:insertion|deletion)", stat))
+
+    return max(0, count(frm, to) - sum(count(f"{sha}^1", sha) for sha in excluded))
 
 
 def escapes_since(events: list[dict], since: datetime) -> dict[str, int]:
@@ -313,14 +332,14 @@ def evaluate(root: Path, final: bool, since: str | None, to_ref: str | None = No
     events = read_events(root)
     frm, since_at, how = range_start(root, events, since, review)
     to = git_or_stop(root, "rev-parse", to_ref or f"origin/{range_base(root)}")
-    prs = merged_prs(root, frm, to, decl)
+    prs, excluded = merged_prs(root, frm, to, decl, {e["pr"] for e in events if e["kind"] == "check" and isinstance(e.get("pr"), int)})
     t = decl["triggers"]
     esc = escapes_since(events, since_at)
     hours = round((clock.now(utc=True) - since_at).total_seconds() / 3600, 2)
     metrics = {
         "prs": len(prs),
         "score": sum(p["points"] for p in prs),
-        "lines": changed_lines(root, frm, to),
+        "lines": changed_lines(root, frm, to, excluded),
         "hours": hours,
         "escapes": max(esc.values(), default=0),
         "from": frm,
@@ -528,21 +547,29 @@ def cmd_record(a, root: Path) -> tuple[dict, int]:
 
 
 def push_done(root: Path, to: str, review: bool) -> tuple[list[str], list[str]]:
-    """見終えた位置を origin の check-done/* へ送る。構造改善を含む検査は実装レビューも通すため両方を進める。"""
+    """見終えた位置を origin の check-done/* へ送る。構造改善を含む検査は実装レビューも通すため両方を進める。
+    fast-forward だけで送り、origin が既に `to` と同じか先なら保つ（古い検査が後に終わっても見終えた位置を戻さない）。"""
     if not to:
         return [], []
     pushed, unpushed = [], []
     for name in [done_branch(True)] + ([] if review else [done_branch(False)]):
-        ok = proc.git(root, "push", "-q", "-f", "origin", f"{to}:refs/heads/{name}", check=False).returncode == 0
+        ok = proc.git(root, "push", "-q", "origin", f"{to}:refs/heads/{name}", check=False).returncode == 0
+        if not ok:
+            git_or_stop(root, "fetch", "-q", "origin", f"+refs/heads/{name}:refs/remotes/origin/{name}", check=False)
+            ok = is_ancestor(root, to, f"refs/remotes/origin/{name}")
         (pushed if ok else unpushed).append(name)
     return pushed, unpushed
 
 
 def cmd_escape(a, root: Path) -> tuple[dict, int]:
     decl = load_decl(root)
-    info = json.loads(gh_or_stop(root, "pr", "view", str(a.pr), "--json", "files"))
+    r = gh_rest.pr_files(a.pr, cwd=str(root))
+    if r.returncode != 0:
+        raise Stop(
+            "gh が無い" if r.returncode == 127 else f"PR #{a.pr} の変更したファイルを読めない: {r.stderr.strip()[:300]}", EXIT_VIOLATION
+        )
     areas: list[str] = []
-    for f in info.get("files") or []:
+    for f in json.loads(r.stdout):
         name = area_of(f.get("path", ""), decl)[0]
         if name not in areas:
             areas.append(name)

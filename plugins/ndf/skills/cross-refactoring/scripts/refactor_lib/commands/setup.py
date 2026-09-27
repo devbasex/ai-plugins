@@ -20,6 +20,7 @@ import auth
 import jev
 import models as models_lib
 import proc
+import project_mvv
 import project_decl
 import repo as repo_lib
 import statefile
@@ -292,6 +293,14 @@ class InitialContext:
     strategy: ts.Strategy
 
 
+def _project_mvv(work: pathlib.Path) -> dict[str, Any]:
+    """プロジェクト MVV の参照と MVV の節。宣言が無くても共通原則と「MVV なし」の節を持つ（止めない）。"""
+    mvv = project_mvv.load_mvv(work)
+    if mvv.status in ("unapproved", "mismatch", "unreadable"):
+        info(f"⚠ プロジェクト MVV が{project_mvv.STATUS_LABEL[mvv.status]}ため、MVV なしで続けます: {mvv.error}")
+    return {"ref": project_mvv.record(mvv), "block": project_mvv.block(mvv)}
+
+
 def _build_initial_state(args: argparse.Namespace, ctx: InitialContext) -> dict[str, Any]:
     """確定済みの材料から、初期の状態を組み立てて返す。
 
@@ -336,6 +345,8 @@ def _build_initial_state(args: argparse.Namespace, ctx: InitialContext) -> dict[
         # 提案プロンプトへ許容値をそのまま列挙するために持たせる。
         # 定義は検証側（この CLI）にあり、状態ファイル経由で起動側へ渡す。
         "vocabulary": vocabulary(),
+        # 判断の基準（#1366）。PR の head の作業ツリーから 1 回だけ読み、提案と改修計画のプロンプトへ `RF_MVV` で渡す
+        "project_mvv": _project_mvv(ctx.work),
         "skills": {"required": list(REQUIRED_SKILLS)},
         # 最終ゲートで手元のテストの代わりに見るチェックの名前。**排他である**
         # （指定があれば手元のテストを実行しない）。

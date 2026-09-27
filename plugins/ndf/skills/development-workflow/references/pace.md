@@ -27,7 +27,8 @@ SKILL.md の「進め方（`pace`）」の続きである。区分の表と承�
 | インストール確認がある | `.ndf/pace.json` の `fast.verify` にコマンドが書かれている |
 | リポジトリが許している | `.ndf/pace.json` の `fast.enabled` が `true` |
 | モードが対象に入る | `--mode` が `fast.modes`（既定 `light` / `standard` / `legacy-refactor`）に入る。`operation` と `documentation` は書いても入らない |
-| MVV が承認済み | ミッション状態ファイルに承認ゲート `MVV` の記録があり、その `sha256` が今の `mvv.md` と一致する |
+| MVV が承認済み | ミッション状態ファイルに承認ゲート `MVV` の記録があり、その `sha256` が今の `mvv.md` と一致する。ミッション MVV が無いミッションは、承認済みのプロジェクト MVV（[project-mvv.md](project-mvv.md)）と状態に残した参照（`project_mvv.sha256`）が一致する |
+| プロジェクト MVV が改訂されていない | 状態の `project_mvv.sha256` が今の `.ndf/mvv.md` と一致する。宣言が 未承認・承認と一致しない・壊れている なら断る |
 
 **使ってはいけない場面:** 開発版のチャネルが無いリポジトリ（マージがそのまま本番に届く）、インストールを確かめる
 手段が無いリリース、戻すのが高い変更（利用者のデータの移行など。下の「レッドライン」に当たるものは承認ゲートを省かない）。
@@ -39,6 +40,7 @@ SKILL.md の「進め方（`pace`）」の続きである。区分の表と承�
 
 | 項目 | 型 | 空・無いとき | 意味 |
 | --- | --- | --- | --- |
+| `version` | 数 | 許さない（`1` だけ。必須） | 宣言の形の版。無い・`1` 以外なら `check-trigger` / `mvv-gate` / `supervise.py new mission --pace fast` が止まる |
 | `fast.enabled` | bool | 偽 | `fast` を許すか |
 | `fast.modes` | 文字列の配列 | 既定の 3 つ | `fast` を使ってよいモード |
 | `fast.verify` | 文字列 | `fast` を断る | インストール確認のコマンド |
@@ -60,7 +62,10 @@ glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。どの
 | 3 | `mission-state.py gate <状態> MVV --what <要約>` | — |
 | 4 | `supervise.py new mission ... --pace fast --state <状態>` | 終了コード 1（承認の記録が無い・ハッシュ不一致）: 2 へ戻る |
 
-`--mvv <ファイル>` を渡すと、マイルストーンからコピーせずにそのファイルを使う。**承認の後に MVV を書き換えると
+`--mvv <ファイル>` を渡すと、マイルストーンからコピーせずにそのファイルを使う。承認済みのプロジェクト MVV がある
+リポジトリ（`--root`）では、`init` がその参照（版・sha256）を状態に書き、ミッション MVV を `project-mvv.py vet --kind mission` に
+通す。プロジェクト MVV のレッドラインを緩める・Value を打ち消すミッション MVV は、状態を書かずに箇所を示して止まる（終了コード 1）。
+`--milestone` も `--mvv` も渡さなければ、プロジェクト MVV だけで判定する（承認ゲート `MVV` の記録は要らない）。**承認の後に MVV を書き換えると
 ハッシュが食い違い、判定は利用者の承認へ戻る。**
 
 ## プランのステージ
@@ -151,15 +156,19 @@ mvv-gate.py check --mission <状態> --gate design|release [--material F...] [--
 
 **機械のチェックを LLM の判定より先に通し、1 つでも外れれば LLM を呼ばずに承認ゲート（終了コード 10）へ戻す。**
 
-1. MVV の承認の記録がある
-2. 今の `mvv.md` のハッシュ・状態の `mvv.sha256`・承認の記録の `sha256` が一致する
+1. プロジェクト MVV が 未承認・承認と一致しない・壊れている のどれでもない
+2. MVV の承認の記録があり、今の `mvv.md` のハッシュ・状態の `mvv.sha256`・承認の記録の `sha256` が一致する（ミッション MVV が
+   無ければ、承認済みのプロジェクト MVV と状態の参照が一致する）
 3. `--mode` が `operation` でも `documentation` でもない
 4. `--pr` の変更したファイルが `boundary_paths` に当たらない
+5. `--pr` が `.ndf/mvv.md`・`.ndf/mvv.json` を変えない（共通原則の C7。宣言では外せない）
 
-通れば最小構成の `claude -p` に MVV とエビデンスを渡し、`verdict`（follow / not_follow / unknown）・`reasons`・`boundary`
-を JSON で返させる。**「従う」で `boundary` が空のときだけ** `mission-state.py gate` で承認ゲートの記録（`by: mvv`・判定・
+通れば最小構成の `claude -p` に MVV の節（NDF の共通原則 → プロジェクト MVV → ミッション MVV → 判断の決まり）とエビデンスを
+渡し、`verdict`（follow / not_follow / unknown）・`reasons`・`boundary`・`basis`（根拠の項目）を JSON で返させる。**「従う」で `boundary` が空のときだけ** `mission-state.py gate` で承認ゲートの記録（`by: mvv`・判定・
 理由・ログのパス）を書いて 0 を返す。ほか（従わない・判定できない・読めない・エビデンスが無い・記録を書けない）は 10 で、
-利用者の承認へ戻る。判定はすべて `mvv-gate.jsonl` へ 1 行ずつ残る。**リリースの前に取れない実測（リリースした後の効果）は
+利用者の承認へ戻る。判定はすべて `mvv-gate.jsonl` へ 1 行ずつ残る（`project_mvv` の参照と `basis` を含む）。
+利用者が承認ゲートで答えたら `mission-state.py gate <状態> <承認ゲート> --by user --outcome approved|rejected` を打つ。
+答えが直前の MVV 判定と食い違えば改訂の兆候（覆し）が残る（[project-mvv.md](project-mvv.md) の「改訂の兆候」）。**リリースの前に取れない実測（リリースした後の効果）は
 判定の対象にせず、リリースの後の測定へ回す。**
 
 ### レッドライン

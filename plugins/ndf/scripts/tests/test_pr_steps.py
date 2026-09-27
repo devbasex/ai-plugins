@@ -23,6 +23,10 @@ FAKE_GH = """#!{py}
 import json, os, sys
 a = sys.argv[1:]
 open(os.environ["FAKE_GH_LOG"], "a").write(json.dumps(a, ensure_ascii=False) + "\\n")
+# 本文の一時ファイルは呼び出し後に消えるので、受け取った時点の中身を控える
+for opt, ext in (("--body-file", ".body"), ("--input", ".input")):
+    if opt in a:
+        open(os.environ["FAKE_GH_LOG"] + ext, "w").write(open(a[a.index(opt) + 1], encoding="utf-8").read())
 limit = os.environ.get("FAKE_GH_GRAPHQL_LIMIT") == "1"
 prs = json.loads(os.environ.get("FAKE_GH_PRS", "{{}}"))
 views = json.loads(os.environ.get("FAKE_GH_VIEW", "{{}}"))
@@ -39,6 +43,8 @@ if a[:2] == ["pr", "create"]:
     if limit: graphql_fail()
     print("https://github.com/o/r/pull/42"); sys.exit(0)
 if a[:2] == ["pr", "edit"]:
+    if os.environ.get("FAKE_GH_EDIT_FAIL") == "1":
+        sys.stderr.write("edit failed\\n"); sys.exit(1)
     sys.exit(0)
 if a[:2] == ["pr", "view"]:
     if limit: graphql_fail()
@@ -146,6 +152,20 @@ def test_plan_collects_branch_base_and_changes(repo, env):
     assert [i["result"] for i in out["items"] if i["kind"] == "existing_pr"] == ["create"]
 
 
+def test_plan_counts_only_this_branch_when_base_moved_on(repo, env):
+    """起点（develop）が分岐点より進んでも、変更量は分岐点からの差分（3 点）で数え、他 PR の分を足さない。"""
+    git(repo, "checkout", "-q", "develop")
+    write(repo, "other.txt", "o\n" * 20)
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "other PR")
+    git(repo, "push", "-q", "origin", "develop")
+    git(repo, "checkout", "-q", "feature/x")
+    code, out, err = call(["plan", "--draft"], env, repo)
+    assert code == 0, err
+    m = out["metrics"]
+    assert m["commits"] == 1 and m["files"] == 1 and m["insertions"] == 1 and m["deletions"] == 0
+
+
 def test_plan_on_base_branch_redirects_to_worktree(repo, env):
     git(repo, "checkout", "-q", "develop")
     code, out, _ = call(["plan"], env, repo)
@@ -228,8 +248,41 @@ def test_create_makes_draft_pr_and_appends_review_mark(repo, env, tmp_path):
     assert m["action"] == "created" and m["number"] == 42 and m["closing_issues_in_body"] == ["#858"]
     create = next(c for c in gh_calls(env) if c[:2] == ["pr", "create"])
     assert "--draft" in create and create[create.index("--base") + 1] == "develop"
-    sent = Path(create[create.index("--body-file") + 1]).read_text()
+    sent = Path(env["FAKE_GH_LOG"] + ".body").read_text()
     assert sent.rstrip().endswith("<!-- I want to review in Japanese. -->")
+
+
+def sent_temp_paths(env):
+    """gh へ渡した本文の一時ファイル（--body-file / --input）のパス。"""
+    out = []
+    for c in gh_calls(env):
+        for opt in ("--body-file", "--input"):
+            if opt in c:
+                out.append(Path(c[c.index(opt) + 1]))
+    return out
+
+
+@pytest.mark.parametrize("limit", [False, True])
+def test_create_removes_the_body_temp_files_after_sending(repo, env, tmp_path, limit):
+    """PR 本文を入れた一時ファイル（gh 用の .md と REST fallback の JSON）を成功の経路で残さない。"""
+    if limit:
+        env["FAKE_GH_GRAPHQL_LIMIT"] = "1"
+    code, out, err = call(["create", "--title", "題", "--body-file", str(body_file(tmp_path))], env, repo)
+    assert code == 0, err
+    paths = sent_temp_paths(env)
+    assert len(paths) == (2 if limit else 1)
+    assert not [p for p in paths if p.exists()]
+    if limit:
+        assert json.loads(Path(env["FAKE_GH_LOG"] + ".input").read_text())["title"] == "題"
+
+
+def test_create_removes_the_body_temp_file_when_gh_fails(repo, env, tmp_path):
+    env["FAKE_GH_PRS"] = json.dumps({"feature/x": [{"number": 7, "url": "u", "isDraft": False, "baseRefName": "develop"}]})
+    env["FAKE_GH_EDIT_FAIL"] = "1"
+    code, out, _ = call(["create", "--title", "題", "--body-file", str(body_file(tmp_path))], env, repo)
+    assert code == 1 and out["status"] == "stopped"
+    paths = sent_temp_paths(env)
+    assert len(paths) == 1 and not paths[0].exists()
 
 
 def test_create_updates_when_pr_exists(repo, env, tmp_path):
@@ -340,7 +393,7 @@ def test_create_writes_mode_line_before_review_mark(repo, env, tmp_path):
     assert code == 0, err
     create = next(c for c in gh_calls(env) if c[:2] == ["pr", "create"])
     assert create[create.index("--base") + 1] == "mission/m1"
-    lines = [l for l in Path(create[create.index("--body-file") + 1]).read_text().splitlines() if l.strip()]
+    lines = [l for l in Path(env["FAKE_GH_LOG"] + ".body").read_text().splitlines() if l.strip()]
     assert lines[-2:] == ["モード: standard / 通した工程: 設計 → 実装", "<!-- I want to review in Japanese. -->"]
 
 
@@ -351,8 +404,8 @@ def test_update_replaces_existing_mode_line(repo, env, tmp_path):
     b = body_file(tmp_path, "## Summary\n\n- 要点\n\nモード: light / 通した工程: 実装\n")
     code, _, err = call(["update", "--body-file", str(b), "--mode", "standard", "--stages", "構造改善,実装レビュー"], env, repo)
     assert code == 0, err
-    edit = next(c for c in gh_calls(env) if c[:2] == ["pr", "edit"])
-    sent = Path(edit[edit.index("--body-file") + 1]).read_text()
+    assert any(c[:2] == ["pr", "edit"] for c in gh_calls(env))
+    sent = Path(env["FAKE_GH_LOG"] + ".body").read_text()
     assert [l for l in sent.splitlines() if l.startswith("モード: ")] == ["モード: standard / 通した工程: 構造改善 → 実装レビュー"]
 
 

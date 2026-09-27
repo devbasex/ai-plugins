@@ -34,6 +34,17 @@ if a[:2] == ["pr", "view"]:
     elif "state" in a:
         print(json.dumps({{"state": st.get("states", {{}}).get(n, "OPEN")}}))
     sys.exit(0)
+if a[:2] == ["api", "--paginate"]:  # pulls/<n>/files を 2 ページに分けて返す
+    rows = [{{"filename": p}} for p in st.get("files", {{}}).get(a[2].split("/")[-2], [])]
+    print(json.dumps(rows[:1]) + json.dumps(rows[1:]))
+    sys.exit(0)
+if a[:2] == ["api", "graphql"]:
+    import re
+    q = next(x for x in a if x.startswith("query="))
+    heads = st.get("heads", {{}})
+    repo = {{f"p{{n}}": {{"headRefName": heads.get(n, "feat/x")}} for n in re.findall(r"p(\d+): pullRequest", q)}}
+    print(json.dumps({{"data": {{"repository": repo}}}}))
+    sys.exit(0)
 if a[:2] in (["pr", "edit"], ["pr", "close"]):
     sys.exit(0)
 sys.exit(1)
@@ -167,6 +178,39 @@ def test_release_and_check_branches_are_not_counted(repo, env):
     assert len(merges.splitlines()) == 3
 
 
+def squash_pr(root: Path, n: int, title: str, files: dict[str, int]) -> str:
+    """develop へ squash merge の形（1 コミット・件名の末尾が (#N)）で入れて送る。"""
+    for path, lines in files.items():
+        p = root / path
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("".join(f"{title} {i}\n" for i in range(lines)))
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", f"{title} (#{n})")
+    git(root, "push", "-q", "origin", "develop")
+    return git(root, "rev-parse", "HEAD")
+
+
+def test_squash_merged_prs_are_counted_and_recorded_check_prs_are_not(repo, env):
+    squash_pr(repo, 11, "feat: a", {"core/x.py": 1})
+    squash_pr(repo, 12, "fix: b", {"app/y.py": 1})
+    squash_pr(repo, 30, "検査: m-1", {"app/z.py": 1})
+    append_event(env, repo, {"kind": "check", "at": iso(5), "id": "m-1", "from": "", "to": "", "result": "failed", "pr": 30})
+    code, out, _ = call(repo, env, "eval", "--review")
+    assert code == 0 and out["metrics"]["prs"] == 2
+    _, out, _ = call(repo, env, "eval")
+    assert out["metrics"]["score"] == 3
+
+
+def test_squash_merged_release_and_check_branches_are_not_counted(repo, env):
+    squash_pr(repo, 11, "release: v1.1.0", {"core/x.py": 1})
+    squash_pr(repo, 12, "検査: m-2", {"core/y.py": 1})
+    squash_pr(repo, 13, "fix: c", {"app/z.py": 1})
+    gh_set(env, heads={"11": "release/v1.1.0", "12": "check/m-2", "13": "fix/c"})
+    code, out, _ = call(repo, env, "eval")
+    assert out["metrics"]["prs"] == 1 and out["metrics"]["score"] == 1
+    assert [c[:2] for c in gh_calls(env)] == [["api", "graphql"]]  # PR 1 本ごとに呼ばない
+
+
 def test_lines_fire_only_above_threshold(repo, env):
     write_decl(repo, {**TRIGGERS, "score": 99, "lines": 10})
     git(repo, "commit", "-qam", "decl")
@@ -176,6 +220,20 @@ def test_lines_fire_only_above_threshold(repo, env):
     merge_pr(repo, 12, "feat/b", {"app/b.py": 6})
     code, out, _ = call(repo, env, "eval")
     assert code == 0 and out["items"][0]["trigger"] == "lines" and out["metrics"]["lines"] == 11
+
+
+def test_lines_of_check_and_release_prs_are_not_counted(repo, env):
+    write_decl(repo, {**TRIGGERS, "score": 99, "lines": 10})
+    git(repo, "commit", "-qam", "decl")
+    git(repo, "tag", "-a", "ndf--v1.0.1", "-m", "v1.0.1")
+    merge_pr(repo, 11, "check/m-1", {"app/a.py": 20})  # 検査の修正
+    squash_pr(repo, 12, "release: v1.1.0", {"app/b.py": 20})
+    squash_pr(repo, 30, "検査: m-2", {"app/c.py": 20})
+    append_event(env, repo, {"kind": "check", "at": iso(1), "id": "m-2", "from": "", "to": "", "result": "failed", "pr": 30})
+    gh_set(env, heads={"12": "release/v1.1.0"})
+    merge_pr(repo, 13, "feat/a", {"app/d.py": 3})
+    code, out, _ = call(repo, env, "eval")
+    assert code == 3 and out["metrics"]["lines"] == 3 and out["metrics"]["prs"] == 1
 
 
 def test_escapes_fire_on_the_second_in_the_same_area(repo, env):
@@ -437,6 +495,35 @@ def test_review_only_moves_only_the_review_branch_on_origin(repo, env, tmp_path)
     _, rv, _ = call(repo, env, "eval", "--review")
     _, full, _ = call(repo, env, "eval")
     assert rv["metrics"]["from"] == to and full["metrics"]["from"] != to and full["metrics"]["prs"] == 1
+
+
+def test_an_older_check_finishing_later_does_not_move_the_done_branch_back(repo, env, tmp_path):
+    merge_pr(repo, 11, "feat/a", {"app/a.py": 1})
+    old = state_dir(tmp_path / "old", [])
+    call(repo, env, "prepare", "--id", "m-old", "--state", str(old))
+    merge_pr(repo, 12, "feat/b", {"app/b.py": 1})
+    new_to, _ = record_merged(repo, env, tmp_path, "m-new", 31)
+    gh_set(env, states={"30": "MERGED"})
+    code, out, _ = call(repo, env, "record", "--id", "m-old", "--pr", "30", "--state", str(old))
+    assert code == 0 and out["metrics"]["pushed"] == ["check-done/review", "check-done/check"], out
+    git(repo, "fetch", "-q", "origin")
+    assert git(repo, "rev-parse", "origin/check-done/check") == git(repo, "rev-parse", "origin/check-done/review") == new_to
+
+
+def test_a_record_that_could_not_be_pushed_starts_the_next_range(repo, env, tmp_path):
+    merge_pr(repo, 11, "feat/a", {"app/a.py": 1})
+    old_to, _ = record_merged(repo, env, tmp_path, "m-1", 30)
+    merge_pr(repo, 12, "feat/b", {"app/b.py": 1})
+    st = state_dir(tmp_path / "m-2", [])
+    call(repo, env, "prepare", "--id", "m-2", "--state", str(st))
+    git(repo, "remote", "set-url", "--push", "origin", str(tmp_path / "gone.git"))  # 送れない
+    gh_set(env, states={"31": "MERGED"})
+    code, out, _ = call(repo, env, "record", "--id", "m-2", "--pr", "31", "--state", str(st))
+    new_to = json.loads((st / "check.json").read_text())["to"]
+    assert code == 0 and out["metrics"]["unpushed"] == ["check-done/review", "check-done/check"], out
+    assert git(repo, "rev-parse", "origin/check-done/check") == old_to != new_to
+    _, full, _ = call(repo, env, "eval")
+    assert full["metrics"]["from"] == new_to and full["metrics"]["prs"] == 0
 
 
 def test_a_failed_check_leaves_the_branch_on_origin(repo, env, tmp_path):

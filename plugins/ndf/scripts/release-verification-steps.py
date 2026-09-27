@@ -226,6 +226,63 @@ def verify_kiro(env, src, tmp, expect):
     return res, proj
 
 
+KIRO_PLUGIN = "plugins/ndf"
+KIRO_POLICY = "ndf-policies"
+
+
+def kiro_manifest_skills(src):
+    """manifests/kiro-skills.txt に載る Skill 名（コメント・空行を除く）。"""
+    text = (Path(src) / KIRO_PLUGIN / "manifests" / "kiro-skills.txt").read_text(encoding="utf-8")
+    return sorted({line.split("#", 1)[0].strip() for line in text.splitlines()} - {""})
+
+
+def kiro_steering_body(policy_file):
+    """install.sh が steering へ写す ndf-policies の本文（frontmatter を除いた部分）。"""
+    text = Path(policy_file).read_text(encoding="utf-8")
+    if text.startswith("---\n"):
+        end = text.find("\n---\n", 3)
+        if end != -1:
+            text = text[end + len("\n---\n") :]
+    return text.strip("\n")
+
+
+def compare_kiro(src, proj):
+    """Kiro の導入先（<proj>/.kiro）を ref の展開物と比べ、一致しないものを返す。
+
+    manifest の Skill は .kiro/skills/<名前> のリンク、dev.kiro/prompts/*.md は .kiro/prompts/ の複製、
+    ndf-policies は .kiro/steering/ndf-policies.md の本文、agents/ndf.json は JSON として読めることを見る。
+    """
+    src, kiro = Path(src), Path(proj) / ".kiro"
+    plugin = src / KIRO_PLUGIN
+    out = []
+    for name in kiro_manifest_skills(src):
+        s, t = plugin / "skills" / name, kiro / "skills" / name
+        if not (s / "SKILL.md").is_file():
+            continue  # installer も SKIP する
+        if name == KIRO_POLICY:
+            if t.exists() or t.is_symlink():
+                out.append(f"kiro: {t.relative_to(proj)} が残っている（steering へ移した Skill）")
+            continue
+        if not same_entry(s, t):
+            out.append(f"kiro: {t.relative_to(proj)}")
+    for f in sorted((plugin / "dev.kiro" / "prompts").glob("*.md")):
+        if f.name == "codex.md":
+            continue  # --with-codex のときだけ配る
+        t = kiro / "prompts" / f.name
+        if not (t.is_file() and filecmp.cmp(f, t, shallow=False)):
+            out.append(f"kiro: {t.relative_to(proj)}")
+    steering = kiro / "steering" / f"{KIRO_POLICY}.md"
+    body = kiro_steering_body(plugin / "skills" / KIRO_POLICY / "SKILL.md")
+    if not (steering.is_file() and steering.read_text(encoding="utf-8").endswith(f"\n{body}\n")):
+        out.append(f"kiro: {steering.relative_to(proj)}")
+    agent = kiro / "agents" / "ndf.json"
+    try:
+        json.loads(agent.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        out.append(f"kiro: {agent.relative_to(proj)}")
+    return out
+
+
 def cmd_verify_install(a):
     root = git_root(a.root)
     plugins = [p.strip() for p in a.plugins.split(",") if p.strip()]
@@ -270,7 +327,9 @@ def cmd_verify_install(a):
                 else:
                     mismatch += compare_files(src, d, rel[p], changed[p], name, keeps_symlinks=(name != "codex"))
         if "kiro" in runtimes:
-            runtimes_res["kiro"], _ = verify_kiro(env, src, tmp, a.expect)
+            runtimes_res["kiro"], proj = verify_kiro(env, src, tmp, a.expect)
+            if proj is not None:
+                mismatch += compare_kiro(src, proj)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

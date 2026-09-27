@@ -863,3 +863,42 @@ def test_a_reply_that_github_refuses_does_not_hold_back_the_summary(tmp_path, fa
     assert outcome.resolved == 2
     assert outcome.queued == 0
     assert "Parent comment not found" in outcome.detail
+
+
+def test_sync_after_push_runs_only_after_pushing_a_design_pr(monkeypatch):
+    """本文の「決めたこと」は送った後に揃える。送っていない・設計 PR でないときは GitHub を読まない。"""
+    import design_body
+
+    ran: list[list[str]] = []
+
+    def fake_run(cmd, **_):
+        ran.append(cmd)
+        return subprocess.CompletedProcess(cmd, 1, "", "mismatch")
+
+    monkeypatch.setattr(design_body.subprocess, "run", fake_run)
+    assert design_body.sync_after_push("o/r", 5, "feat/x", True) is None
+    assert design_body.sync_after_push("o/r", 5, "design/x", False) is None
+    assert ran == []
+    reason = design_body.sync_after_push("o/r", 5, "design/x", True)
+    assert ran[0][-4:] == ["sync", "5", "--repo", "o/r"] and "mismatch" in reason
+
+
+def test_the_standalone_command_stops_when_the_body_is_not_synced(tmp_path, monkeypatch, capsys) -> None:
+    """設計 PR で送った後に本文を揃えられなければ、返信・まとめへ進まず止める。"""
+    import design_body
+
+    work = tmp_path / "work"
+    work.mkdir()
+    monkeypatch.setattr(result_posts, "push_fix", lambda *_: result_posts.PushResult(True, True, True, ""))
+    monkeypatch.setattr(design_body, "sync_after_push", lambda *_: "pr-body-decisions.sh sync が unreadable（2）: api")
+    posted: list[object] = []
+    monkeypatch.setattr(result_posts, "post_fix", lambda *a, **k: posted.append(a))
+    monkeypatch.delenv("CROSS_REVIEW_TMP_DIR", raising=False)
+    fix = _fix_file(tmp_path)
+    args = result_posts.argparse.Namespace(
+        repo=REPO, pr=str(PR), result=str(fix), head="design/x", worktree=str(work), round=ROUND, actor=ACTOR
+    )
+
+    assert result_posts.cmd_fix(args) == 1
+    assert "揃えられない" in capsys.readouterr().err
+    assert posted == []
