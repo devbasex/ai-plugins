@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC2034  # WF_ の変数は source する側（workflow-guard.sh・stage-check.sh）が読む（#1323）
 # NDF plugin: 工程の飛ばしの検知（#221）と、設計 Pull Request のマージの判定（#266）。
 #
 # **判定はすべてこのライブラリが持つ。** 入口のスクリプト（workflow-guard.sh /
@@ -44,8 +43,8 @@ Pull Request\tR\tR\tR\tR\tR
 # `R` を数えると `standard` が 16 個、`documentation` は 14 個であり、最多ではない。根拠は
 # **混在が分割し損ねた状態であること**にある。`documentation` と他のモードが混ざる Pull Request
 # は分けると定めており、`documentation` の列にしかない必須の工程（素材の収集と出典の確定 /
-# 体裁レビュー）は、`standard` の側でチェックすると一度も求められない。混ざっていること自体が
-# 表に出ないため、`documentation` の側でチェックする。
+# 体裁レビュー）は、`standard` の側で検査すると一度も求められない。混ざっていること自体が
+# 表に出ないため、`documentation` の側で検査する。
 # **列の並びは高さと同じ順である**（決定 10）。表を軽い順に読めるようにするためであって、
 # 導出の根拠ではない。**判定の順序とも別である。** `operation` は判定では 1 番に来るが、
 # 高さは `light` の 1 つ上に置く（工程の重さが `light` と `legacy-refactor` の間にある）。
@@ -55,22 +54,15 @@ legacy-refactor\t3
 standard\t4
 documentation\t5'
 
-# 進め方（#1078）。`fast` では次の工程を課題ごとに求めない。トリガーの工程は検査のトリガーが
-# 立ったときに前回の検査からの差分へ通し、まとめる工程はミッションの終わりに 1 回通す。
-# 並びは SKILL.md の「進め方」の表と同じである。
-WF_PACES=$'normal\tfast'
-WF_FAST_TRIGGER_STAGES=$'構造改善\n実装レビュー'
-WF_FAST_DEFERRED_STAGES=$'確定仕様化\n振り返り'
-
 # 報告の引き金になる工程。ここへ進んだ時点で、記録の無い必須の工程を案内する。
 WF_REPORT_STAGE='配布'
 
-# Pull Request を作る時点のチェックで、終点にする工程。この工程より前の必須の工程を見る。
+# Pull Request を作る時点の検査で、終点にする工程。この工程より前の必須の工程を見る。
 WF_PR_STAGE='Pull Request'
-# そのチェックから外す工程。**`cross-review` は Pull Request が無いと回せない**（決定 7）。
+# その検査から外す工程。**`cross-review` は Pull Request が無いと回せない**（決定 7）。
 # 求めれば毎回欠落として出て、案内が読まれなくなる。
 WF_PR_EXEMPT_STAGE='実装レビュー'
-# 承認ラベル。**この名前のラベルがリポジトリに定義されていること自体が有効化の宣言になる**。
+# 承認の印。**この名前のラベルがリポジトリに定義されていること自体が有効化の宣言になる**。
 WF_APPROVAL_LABEL='design-approved'
 # 設計 Pull Request を見分ける head のブランチ名の接頭辞。
 WF_DESIGN_PREFIX='design/'
@@ -93,27 +85,6 @@ wf_is_stage() {
   while IFS= read -r stage; do
     [ "$stage" = "$want" ] && return 0
   done < <(wf_stages)
-  return 1
-}
-
-wf_is_pace() {
-  local want="${1:-}"
-  [ -n "$want" ] || return 1
-  case $'\t'"$WF_PACES"$'\t' in
-    *$'\t'"$want"$'\t'*) return 0 ;;
-  esac
-  return 1
-}
-
-# fast のときの工程の区分を返す（trigger / deferred）。当たらなければ 1 を返す。
-wf_fast_class() {
-  local stage="${1:-}" line
-  while IFS= read -r line; do
-    [ "$line" = "$stage" ] && { printf 'trigger\n'; return 0; }
-  done <<<"$WF_FAST_TRIGGER_STAGES"
-  while IFS= read -r line; do
-    [ "$line" = "$stage" ] && { printf 'deferred\n'; return 0; }
-  done <<<"$WF_FAST_DEFERRED_STAGES"
   return 1
 }
 
@@ -192,37 +163,54 @@ wf_stages_before_pr() {
 # **展開はしない。** コマンドの本文を判定するだけで、実行はこの hook の役目ではない。
 # `$SCRIPTS` のような未展開の変数はそのままの文字列として残る。
 #
-# **分割は hook の 1 本のエントリポイント（`hook.py words`。本体は `hook_lib/words.py`）が持つ**（#1142 の
-# 決定 20）。構文木は tree-sitter-bash で読み、SessionStart が用意した hook の環境の python で起動する。
-# `NDF_HOOK_PYTHON` があればその python を使う。**環境が無いときは何も出さない。** 呼び出し側
-# （workflow-guard.sh）は、分割の前に `wf_hook_python` で環境を確かめ、無ければ粗い見分けへ倒す。
+# **bash の文字取り出しでは書かない。** tool 実行のたびに走るため、長い本文で費用が
+# 効く。実測では 27KB の本文に 2.4 秒かかり、hook の制限時間に近づいた。同じ処理を
+# awk に置くと 0.02 秒で終わる。
 #
 # **区切りは NUL である。** 引用符の中の改行は語の一部として残るため、行で区切ると
-# 1 つの語が複数に割れる。`pr` が必須と定めるヒアドキュメントの本文はこの形になる。
+# 1 つの語が複数に割れる。`pr` が必須と定めるヒアドキュメントの本文はこの形になり、
+# 行区切りで読むと 1 行目だけを本文として扱ってしまう（#427 のレビュー）。
 # 読む側は `read -r -d ""` で受ける。
 #
-# **コマンドの境目は空の語で表す（#565）。** 1 つのコマンドの語（名前・引数・リダイレクトの字面）の後、
-# 次のコマンドの前に出す。記録の値に `"設計";` のように演算子が密着しても、値は語として切り出される。
-# 空の語は `""` を解いた結果として出ることがないため、実在の語と衝突しない。読む側は `[ -z "$tok" ]` で
-# 見分ける。置換（`$(…)`）の中のコマンドは外のコマンドの後ろに並び、ヒアドキュメントの本文はコマンドとして読まない。
-WF_HOOK_PY="$(dirname "${BASH_SOURCE[0]}")/../../../../scripts/hook.py"
-
-# hook の環境の python のパスを出す。無ければ 1 を返す。プラグインの根は実体のパス（`cd -P`）で引く
-# （hook-env.py が目印を張る名前。Kiro CLI の配置の symlink を越えても同じ根になる）。
-wf_hook_python() {
-  local root py="${NDF_HOOK_PYTHON:-}"
-  if [ -z "$py" ]; then
-    root=$(cd -P "$(dirname "${BASH_SOURCE[0]}")/../../../.." 2>/dev/null && pwd -P) || return 1
-    py="$HOME/.cache/ndf/roots$root/bin/python"
-  fi
-  [ -x "$py" ] || return 1
-  printf '%s\n' "$py"
-}
-
+# **コマンドの境目は空の語で表す（#565）。** 引用の外の `;` `|` `(` `)` `&` と、本文の
+# 途中の改行で出す。記録の値に `"設計";` のように演算子が密着すると、区切りが無ければ
+# 値の一部として読まれ、工程名ではないとして黙って捨てられていた。空の語は `""` を解いた
+# 結果として出ることがないため、実在の語と衝突しない。読む側は `[ -z "$tok" ]` で見分ける。
+#
+#   - `&` は直前が `>` `<` か直後が `>` のときリダイレクトの一部として残す（`2>&1` / `&>`）
+#   - 改行の区切りは次の行の頭で出す。awk は次の行を読むまで、行末が本文の途中だったかを
+#     知らない。空の行では出さずに持ち越すため、本文の末尾の改行（here-string が足すもの
+#     を含む）では出ない
+#   - 行末の `\` は継続として捨て、区切りを出さない
 wf_split() {
-  local py
-  py=$(wf_hook_python) || return 0
-  printf '%s' "${1:-}" | "$py" "$WF_HOOK_PY" words 2>/dev/null
+  awk '
+    function flush() { if (out != "") { printf "%s%c", out, 0; out = "" } }
+    function mark() { flush(); printf "%s%c", "", 0 }
+    {
+      n = length($0)
+      if (pending && n > 0) { printf "%s%c", "", 0; pending = 0 }
+      cont = 0
+      for (i = 1; i <= n; i++) {
+        ch = substr($0, i, 1)
+        if (quote != "") {
+          if (ch == quote) { quote = "" } else { out = out ch }
+          continue
+        }
+        if (ch == "\"" || ch == "'"'"'") { quote = ch; continue }
+        if (ch == " " || ch == "\t") { flush(); continue }
+        if (ch == ";" || ch == "|" || ch == "(" || ch == ")") { mark(); continue }
+        if (ch == "&") {
+          prev = substr($0, i - 1, 1)
+          if (prev != ">" && prev != "<" && substr($0, i + 1, 1) != ">") { mark(); continue }
+        }
+        if (ch == "\\" && i == n) { cont = 1; continue }
+        out = out ch
+      }
+      if (quote != "") { out = out "\n" }
+      else { flush(); pending = !cont }
+    }
+    END { flush() }
+  ' <<<"${1:-}"
 }
 
 # 判定の対象になりうる本文かを、走査の前に安く見分ける。
@@ -304,7 +292,7 @@ wf_parse_sync() {
 
 # --- Pull Request の作成の観測（#424） ---------------------------------------
 
-# 閉じる語の読み取りの実体。**複製は持たない**（決定 3）。`merged` と gate の両方が
+# 閉じる語の読み取りの実体。**写しは持たない**（決定 3）。`merged` と gate の両方が
 # 同じファイルを `bash` の副プロセスとして起動する。
 #
 # **`cd` では解決しない。** Skill だけを複製する Kiro CLI の配置では symlink の手前へ
@@ -342,7 +330,7 @@ _wf_pr_create_body_token() {
   [ "$found" -eq 0 ] || return 0
   case "$tok" in
     --body|-b) want=text ;;
-    --body-file|-F) want='file' ;;
+    --body-file|-F) want=file ;;
     --body=*) body="${tok#--body=}" ;;
     --body-file=*)
       body=$(_wf_read_file "${tok#--body-file=}")
@@ -362,18 +350,15 @@ wf_parse_pr_create() {
   printf '%s\n' "$out"
 }
 
-# 通過記録に記録の無い、Pull Request の作成までに求める工程を 1 行 1 件返す。
+# 控えに記録の無い、Pull Request の作成までに求める工程を 1 行 1 件返す。
 _wf_missing_before_pr() {
-  local mode="${1:-}" content="${2:-}" stage class pace
+  local mode="${1:-}" content="${2:-}" stage class
   local -a recorded=()
-  pace=$(_wf_read_pace "$content")
   while IFS= read -r stage; do
     recorded+=("$stage")
   done < <(_wf_recorded_lines "$content")
   while IFS= read -r stage; do
     _wf_contains "$stage" ${recorded[@]+"${recorded[@]}"} && continue
-    # fast のトリガー・まとめる工程は、Pull Request の作成の時点で求めない
-    if [ "$pace" = "fast" ] && wf_fast_class "$stage" >/dev/null; then continue; fi
     class=$(wf_stage_class "$mode" "$stage") || continue
     [ "$class" = "R" ] || continue
     printf '%s\n' "$stage"
@@ -390,7 +375,7 @@ _wf_parse_targets() {
   done
 }
 
-# 通過記録が存在すれば本文とモードをタブ区切り 1 行で返す。通過記録が無ければ 1 を返す。
+# 控えが存在すれば本文とモードをタブ区切り 1 行で返す。控えが無ければ 1 を返す。
 _wf_load_state_mode() {
   local repo="${1:-}" issue="${2:-}" file content mode
   file=$(wf_state_file "$repo" "$issue") || return 1
@@ -449,7 +434,6 @@ _wf_unpack_collected() {
     printf -v "${_wf_uc_targets_name}[$_wf_uc_index]" '%s' "$_wf_uc_line"
     _wf_uc_index=$((_wf_uc_index + 1))
   done
-  # shellcheck disable=SC2229  # 読み込む先の配列の名前を引数で受ける（間接の代入。#1323）
   read -r -a "$_wf_uc_modes_name" <<<"${!_wf_uc_modes_str_name}"
 }
 
@@ -516,8 +500,8 @@ _wf_compose_evidence_body() {
     body="$body"$'\n'"$line"
   done
   if [ "$conflict" -eq 1 ]; then
-    body="$body"$'\n'"モードの記録が課題ごとに食い違います（${modes_str}）。最も高い $effective を基準に見ています。"
-    body="$body"$'\n'"1 つの Pull Request に対しモードは 1 つです。閉じる課題すべての通過記録へ同じ値を書いてください。"
+    body="$body"$'\n'"モードの記録が課題ごとに食い違います（$modes_str）。最も高い $effective を基準に見ています。"
+    body="$body"$'\n'"1 つの Pull Request に対しモードは 1 つです。閉じる課題すべての控えへ同じ値を書いてください。"
   fi
   body="$body"$'\n'"記録が無いことは、その工程を通っていないことと同じではありません。記録の側が遅れているだけのこともあります。"
   body="$body"$'\n'"記録するには: bash \"\$SCRIPTS/projects-sync.sh\" <課題番号> stage \"<工程名>\""
@@ -574,7 +558,7 @@ wf_emit_context() {
   printf '"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"%s"}}\n' "$text"
 }
 
-# --- リポジトリと通過記録の置き場所 ---------------------------------------------
+# --- リポジトリと控えの置き場所 ---------------------------------------------
 
 # `<所有者>/<リポジトリ>` を返す。**通信しない。**
 # 畳む規則は projects-common.sh の pj_repo_slug の 1 箇所にある（#435）。
@@ -600,7 +584,7 @@ wf_repo_slug() {
   printf '%s/%s\n' "$owner" "$repo"
 }
 
-# 通過記録の置き場所。リポジトリの中には置かない（変更として Pull Request に載るため）。
+# 控えの置き場所。リポジトリの中には置かない（変更として Pull Request に載るため）。
 wf_state_dir() {
   local base fallback="${TMPDIR:-/tmp}/ndf-stages"
   if [ -n "${CLAUDE_PLUGIN_DATA:-}" ]; then
@@ -641,7 +625,7 @@ wf_state_file() {
 # `cd` で戻ってから `pwd` を取る形は採らない。Skill だけを複製する Kiro CLI の配置では
 # symlink の手前へ戻り、プラグインルートを外す。
 #
-# **読み込めないときは、常に取得できないものとして定義する。** 通過記録へ 1 件積む処理は、
+# **読み込めないときは、常に取得できないものとして定義する。** 控えへ 1 件積む処理は、
 # 取得できないとき書き込みそのものを行わず、終了コード 0 で工程を続ける。
 # shellcheck source=../../../../scripts/lib/lock-common.sh
 if ! . "$(dirname "${BASH_SOURCE[0]}")/../../../../scripts/lib/lock-common.sh" 2>/dev/null; then
@@ -679,9 +663,9 @@ _wf_lock_is_stale() {
   _ndf_lock_is_stale "$@"
 }
 
-# --- 通過記録 ---------------------------------------------------------
+# --- 通過工程の控え ---------------------------------------------------------
 
-# 通過記録を読む。`version` が 1 以外・読めない・壊れているものは記録が無いものとして扱う。
+# 控えを読む。`version` が 1 以外・読めない・壊れているものは記録が無いものとして扱う。
 wf_state_read() {
   local file="${1:-}" content
   if [ -n "$file" ] && [ -f "$file" ]; then
@@ -691,19 +675,12 @@ wf_state_read() {
   printf '{"version":1,"stages":[]}\n'
 }
 
-# 通過記録から記録されたモードを取り出す。
+# 控えから記録されたモードを取り出す。
 _wf_read_mode() {
   jq -r '.mode // empty' <<<"${1:-}" 2>/dev/null
 }
 
-# 通過記録から記録された進め方を取り出す。記録が無ければ normal と読む。
-_wf_read_pace() {
-  local pace
-  pace=$(jq -r '.pace // empty' <<<"${1:-}" 2>/dev/null)
-  printf '%s\n' "${pace:-normal}"
-}
-
-# 通過記録へ 1 件積む。**排他を取れないときは書き込みそのものを行わない。**
+# 控えへ 1 件積む。**排他を取れないときは書き込みそのものを行わない。**
 # 飛ばしても終了コード 0 で返って工程は続き、飛ばした工程は報告の「記録なし」に含まれる。
 wf_record() {
   local slug="${1:-}" issue="${2:-}" key="${3:-}" value="${4:-}"
@@ -712,7 +689,7 @@ wf_record() {
   file=$(wf_state_file "$slug" "$issue") || return 0
   lock="$file.lockdir"
   if ! wf_lock_acquire "$lock" "$WF_LOCK_TIMEOUT"; then
-    printf 'NOTE: #%s の通過記録が使用中のため、この記録は残しません\n' "$issue" >&2
+    printf 'NOTE: #%s の進行の控えが使用中のため、この記録は残しません\n' "$issue" >&2
     return 0
   fi
   content=$(wf_state_read "$file")
@@ -724,9 +701,6 @@ wf_record() {
     mode) updated=$(printf '%s' "$content" \
       | jq --arg r "$slug" --argjson i "$issue" --arg v "$value" --arg t "$now" \
         '.repo = $r | .issue = $i | .mode = $v | .stages = (.stages // []) | .updated_at = $t' 2>/dev/null) ;;
-    pace) updated=$(printf '%s' "$content" \
-      | jq --arg r "$slug" --argjson i "$issue" --arg v "$value" --arg t "$now" \
-        '.repo = $r | .issue = $i | .pace = $v | .stages = (.stages // []) | .updated_at = $t' 2>/dev/null) ;;
     *) wf_lock_release "$lock"; return 0 ;;
   esac
   if [ -n "$updated" ]; then
@@ -738,7 +712,7 @@ wf_record() {
   return 0
 }
 
-# 記録された工程を、通過記録に書かれた順で 1 行 1 件返す。
+# 記録された工程を、控えに書かれた順で 1 行 1 件返す。
 _wf_recorded() {
   jq -r '(.stages // []) | .[]' <<<"$1" 2>/dev/null
 }
@@ -785,35 +759,24 @@ wf_join() {
 WF_CLASS_PRESENT='present'         # 記録あり
 WF_CLASS_MISSING='missing'         # 必須で記録なし
 WF_CLASS_CONDITIONAL='conditional' # 条件付き
-WF_CLASS_TRIGGER='trigger'         # fast: トリガーで通す（記録を求めない）
-WF_CLASS_DEFERRED='deferred'       # fast: ミッションの終わりにまとめる（記録を求めない）
 
 # frontier までの各工程を分類し、'class<TAB>stage' を 1 行 1 件で返す。
 # class は WF_CLASS_* のいずれか。
 # recorded 配列・mode・frontier を引数で受け取る。
-# pace が fast なら、必須か条件付きのトリガー・まとめる工程を WF_CLASS_TRIGGER / WF_CLASS_DEFERRED にする。
-# まとめる工程は、先へ進んだ記録（frontier）より後にあっても出す（ミッションの終わりに通すため）。
 _wf_classify_stages() {
-  local mode="$1" frontier="$2" pace="$3"
-  shift 3
+  local mode="$1" frontier="$2"
+  shift 2
   local -a recorded=("$@")
-  local stage class index=0 fast
+  local stage class index=0
   while IFS= read -r stage; do
     index=$((index + 1))
+    [ "$index" -le "$frontier" ] || break
     if _wf_contains "$stage" ${recorded[@]+"${recorded[@]}"}; then
-      [ "$index" -le "$frontier" ] && printf '%s\t%s\n' "$WF_CLASS_PRESENT" "$stage"
+      printf '%s\t%s\n' "$WF_CLASS_PRESENT" "$stage"
       continue
     fi
     [ -n "$mode" ] || continue
     class=$(wf_stage_class "$mode" "$stage") || continue
-    if [ "$pace" = "fast" ] && fast=$(wf_fast_class "$stage") && { [ "$class" = "R" ] || [ "$class" = "C" ]; }; then
-      case "$fast" in
-        trigger) [ "$index" -le "$frontier" ] && printf '%s\t%s\n' "$WF_CLASS_TRIGGER" "$stage" ;;
-        deferred) printf '%s\t%s\n' "$WF_CLASS_DEFERRED" "$stage" ;;
-      esac
-      continue
-    fi
-    [ "$index" -le "$frontier" ] || continue
     case "$class" in
       R) printf '%s\t%s\n' "$WF_CLASS_MISSING" "$stage" ;;
       C) printf '%s\t%s\n' "$WF_CLASS_CONDITIONAL" "$stage" ;;
@@ -823,8 +786,8 @@ _wf_classify_stages() {
 
 # 通過工程を報告する。**終了コードで工程を止めない。**
 wf_report() {
-  local slug="${1:-}" issue="${2:-}" file content mode pace stage class frontier
-  local -a recorded=() present=() missing=() conditional=() trigger=() deferred=()
+  local slug="${1:-}" issue="${2:-}" file content mode stage class frontier
+  local -a recorded=() present=() missing=() conditional=()
 
   command -v jq >/dev/null 2>&1 || { wf_report_empty "$issue"; return 0; }
   file=$(wf_state_file "$slug" "$issue") || { wf_report_empty "$issue"; return 0; }
@@ -837,7 +800,6 @@ wf_report() {
     return 0
   fi
   mode=$(_wf_read_mode "$content")
-  pace=$(_wf_read_pace "$content")
   frontier=$(_wf_frontier "${recorded[@]}")
 
   while IFS=$'\t' read -r class stage; do
@@ -845,14 +807,10 @@ wf_report() {
       "$WF_CLASS_PRESENT") present+=("$stage") ;;
       "$WF_CLASS_MISSING") missing+=("$stage") ;;
       "$WF_CLASS_CONDITIONAL") conditional+=("$stage") ;;
-      "$WF_CLASS_TRIGGER") trigger+=("$stage") ;;
-      "$WF_CLASS_DEFERRED") deferred+=("$stage") ;;
     esac
-  done < <(_wf_classify_stages "$mode" "$frontier" "$pace" "${recorded[@]}")
+  done < <(_wf_classify_stages "$mode" "$frontier" "${recorded[@]}")
 
-  if [ -n "$mode" ] && [ "$pace" = "fast" ]; then
-    printf '#%s の通過工程（%s・進め方 fast）\n' "$issue" "$mode"
-  elif [ -n "$mode" ]; then
+  if [ -n "$mode" ]; then
     printf '#%s の通過工程（%s）\n' "$issue" "$mode"
   else
     printf '#%s の通過工程（モード不明）\n' "$issue"
@@ -860,9 +818,6 @@ wf_report() {
   printf '  記録あり: %s\n' "$(wf_join "${present[@]+"${present[@]}"}")"
   [ "${#missing[@]}" -gt 0 ] && printf '  記録なし: %s\n' "$(wf_join "${missing[@]}")"
   [ "${#conditional[@]}" -gt 0 ] && printf '  条件付き: %s\n' "$(wf_join "${conditional[@]}")"
-  [ "${#trigger[@]}" -gt 0 ] && printf '  トリガー: %s（検査のトリガーが立ったときに前回の検査からの差分へ通す）\n' \
-    "$(wf_join "${trigger[@]}")"
-  [ "${#deferred[@]}" -gt 0 ] && printf '  まとめる: %s（ミッションの終わりに 1 回通す）\n' "$(wf_join "${deferred[@]}")"
   if [ -z "$mode" ]; then
     printf 'モードの記録が無いため、必須の工程は判定しません。\n'
   elif [ "${#missing[@]}" -eq 0 ] && [ "${#conditional[@]}" -eq 0 ]; then

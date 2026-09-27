@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# NDF plugin: 通過記録を記録し、報告する（#221）。
+# NDF plugin: 通過工程の控えを記録し、報告する（#221）。
 #
-#   stage-check.sh record <課題番号> <stage|mode|pace> <値>
+#   stage-check.sh record <課題番号> <stage|mode> <値>
 #   stage-check.sh report <課題番号>
 #
 # **終了コードで工程を止めない。** 呼び出し側の誤りだけを 2 で返す。`projects-sync.sh`
@@ -14,7 +14,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/lib/workflow-common.sh" 2>/dev/null || exit 0
 
 usage() {
-  printf 'usage: stage-check.sh record <課題番号> <キー: stage|mode|pace> <値>\n' >&2
+  printf 'usage: stage-check.sh record <課題番号> <キー: stage|mode> <値>\n' >&2
   printf '       stage-check.sh report <課題番号>\n' >&2
 }
 
@@ -29,9 +29,9 @@ case "$ISSUE" in
   ''|*[!0-9]*) printf 'ERROR: 課題番号が数値ではありません: %s\n' "${ISSUE:-（無し）}" >&2; usage; exit 2 ;;
 esac
 
-# リポジトリを特定できないときは何もしない。通過記録は課題番号だけでは一意にならない。
+# リポジトリを特定できないときは何もしない。控えは課題番号だけでは一意にならない。
 SLUG=$(wf_repo_slug ".") || {
-  printf 'NOTE: origin の URL を取れないため、通過記録は扱いません\n' >&2
+  printf 'NOTE: origin の URL を取れないため、進行の控えは扱いません\n' >&2
   exit 0
 }
 
@@ -56,10 +56,6 @@ case "$KEY" in
   mode)
     wf_is_mode "$VALUE" || {
       printf 'ERROR: 知らないモードです: %s\n' "$VALUE" >&2; exit 2; }
-    ;;
-  pace)
-    wf_is_pace "$VALUE" || {
-      printf 'ERROR: 知らない進め方です: %s\n' "$VALUE" >&2; exit 2; }
     ;;
   *)
     printf 'ERROR: 知らないキーです: %s\n' "$KEY" >&2

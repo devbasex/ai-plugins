@@ -3,34 +3,26 @@
 判定は `scripts/lib/workflow-common.sh` に集約されている。**通信は行わない。**
 GitHub への問い合わせは `gh` を PATH で差し替えて作り物へ向ける。
 """
-
 from __future__ import annotations
 
 import json
-import resource
 import shlex
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
 
 from workflow_helpers import (
-    LIB,
-    base_env,
-    checkout,
-    init_repo,
-    path_with,
-    pre_tool_use,
-    run_guard,
-    run_lib,
+    LIB, base_env, checkout, init_repo, path_with, pre_tool_use, run_guard, run_lib,
     run_stage_check,
-    state_file,
-    stub_gh,
+    state_file, stub_gh,
 )
 
 DESIGN_PR = json.dumps({"number": 268, "state": "open", "head": {"ref": "design/parallel-batch-04"}, "labels": []})
 DESIGN_PR_APPROVED = json.dumps(
-    {"number": 268, "state": "open", "head": {"ref": "design/parallel-batch-04"}, "labels": [{"name": "design-approved"}]}
+    {"number": 268, "state": "open", "head": {"ref": "design/parallel-batch-04"},
+     "labels": [{"name": "design-approved"}]}
 )
 FEATURE_PR = json.dumps({"number": 218, "state": "open", "head": {"ref": "feature/issue-161"}, "labels": []})
 LABEL_DEFINED = json.dumps({"name": "design-approved"})
@@ -48,9 +40,8 @@ def state(tmp_path: Path) -> Path:
     return tmp_path / "state"
 
 
-def guard(
-    repo: Path, state: Path, command: str, responses: dict | None = None, tmp_path: Path | None = None, extra: dict | None = None
-) -> subprocess.CompletedProcess:
+def guard(repo: Path, state: Path, command: str, responses: dict | None = None,
+          tmp_path: Path | None = None, extra: dict | None = None) -> subprocess.CompletedProcess:
     env = base_env(state, extra)
     if responses is not None:
         assert tmp_path is not None
@@ -75,7 +66,9 @@ def decision(result: subprocess.CompletedProcess) -> dict:
         ("light", "", "light"),
     ],
 )
-def test_higher_mode_keeps_the_current_branch_behavior(first: str, second: str, expected: str) -> None:
+def test_higher_mode_keeps_the_current_branch_behavior(
+    first: str, second: str, expected: str
+) -> None:
     """現状固定: 高い側、同じ高さの先頭、空でない側を返す。"""
     result = run_lib(f"wf_higher_mode {shlex.quote(first)} {shlex.quote(second)}")
 
@@ -84,7 +77,6 @@ def test_higher_mode_keeps_the_current_branch_behavior(first: str, second: str, 
 
 
 # --- 判定の対象でないもの ---------------------------------------------------
-
 
 def test_another_event_does_nothing(repo: Path, state: Path) -> None:
     payload = pre_tool_use("gh pr merge 268 --squash", repo)
@@ -115,13 +107,8 @@ def test_a_command_outside_the_target_does_nothing(repo: Path, state: Path, comm
 # --- #266 設計 Pull Request のマージ ----------------------------------------
 def test_a_design_pull_request_without_the_label_is_denied(repo: Path, state: Path, tmp_path: Path) -> None:
     """#266-1"""
-    result = guard(
-        repo,
-        state,
-        "gh pr merge 268 --squash",
-        tmp_path=tmp_path,
-        responses={"pulls/268": DESIGN_PR, "labels/design-approved": LABEL_DEFINED},
-    )
+    result = guard(repo, state, "gh pr merge 268 --squash", tmp_path=tmp_path,
+                   responses={"pulls/268": DESIGN_PR, "labels/design-approved": LABEL_DEFINED})
 
     assert decision(result)["permissionDecision"] == "deny"
     assert "268" in decision(result)["permissionDecisionReason"]
@@ -138,7 +125,8 @@ def test_a_design_pull_request_without_the_label_is_denied(repo: Path, state: Pa
 )
 def test_every_way_of_merging_with_a_number_is_judged(repo: Path, state: Path, tmp_path: Path, command: str) -> None:
     """#266-2: REST の書き方でも同じ判定になる。"""
-    result = guard(repo, state, command, tmp_path=tmp_path, responses={"pulls/268": DESIGN_PR, "labels/design-approved": LABEL_DEFINED})
+    result = guard(repo, state, command, tmp_path=tmp_path,
+                   responses={"pulls/268": DESIGN_PR, "labels/design-approved": LABEL_DEFINED})
 
     assert decision(result)["permissionDecision"] == "deny"
 
@@ -159,7 +147,8 @@ def test_a_global_option_before_pr_is_judged(repo: Path, state: Path, tmp_path: 
     `-R` / `--repo` は値を別の語で取る形と、同じ語に含む形（`=` 付き・連結）がある。
     gh 2.98.0 で 5 つとも受け付けられることを確かめた。
     """
-    result = guard(repo, state, command, tmp_path=tmp_path, responses={"pulls/268": DESIGN_PR, "labels/design-approved": LABEL_DEFINED})
+    result = guard(repo, state, command, tmp_path=tmp_path,
+                   responses={"pulls/268": DESIGN_PR, "labels/design-approved": LABEL_DEFINED})
 
     assert decision(result)["permissionDecision"] == "deny"
     assert "268" in decision(result)["permissionDecisionReason"]
@@ -169,13 +158,8 @@ def test_a_global_option_with_a_value_does_not_hide_pr(repo: Path, state: Path, 
     """値を読み飛ばすのは `-R` / `--repo` に限る。知らないオプションは語だけを飛ばす。"""
     checkout(repo, "design/parallel-batch-05")
 
-    result = guard(
-        repo,
-        state,
-        "gh --help pr merge --squash",
-        tmp_path=tmp_path,
-        responses={"pulls?head=": BY_BRANCH, "labels/design-approved": LABEL_DEFINED},
-    )
+    result = guard(repo, state, "gh --help pr merge --squash", tmp_path=tmp_path,
+                   responses={"pulls?head=": BY_BRANCH, "labels/design-approved": LABEL_DEFINED})
 
     assert decision(result)["permissionDecision"] == "deny"
 
@@ -184,13 +168,8 @@ def test_a_merge_without_a_number_is_looked_up_by_branch(repo: Path, state: Path
     """#266-2 の後半: ブランチ名から番号とラベルを 1 回の応答で引く。"""
     checkout(repo, "design/parallel-batch-05")
 
-    result = guard(
-        repo,
-        state,
-        "gh pr merge --squash",
-        tmp_path=tmp_path,
-        responses={"pulls?head=": BY_BRANCH, "labels/design-approved": LABEL_DEFINED},
-    )
+    result = guard(repo, state, "gh pr merge --squash", tmp_path=tmp_path,
+                   responses={"pulls?head=": BY_BRANCH, "labels/design-approved": LABEL_DEFINED})
 
     assert decision(result)["permissionDecision"] == "deny"
     assert "290" in decision(result)["permissionDecisionReason"]
@@ -198,7 +177,8 @@ def test_a_merge_without_a_number_is_looked_up_by_branch(repo: Path, state: Path
 
 def test_a_design_pull_request_with_the_label_passes(repo: Path, state: Path, tmp_path: Path) -> None:
     """#266-3"""
-    result = guard(repo, state, "gh pr merge 268 --squash", tmp_path=tmp_path, responses={"pulls/268": DESIGN_PR_APPROVED})
+    result = guard(repo, state, "gh pr merge 268 --squash", tmp_path=tmp_path,
+                   responses={"pulls/268": DESIGN_PR_APPROVED})
 
     assert result.returncode == 0
     assert result.stdout.strip() == ""
@@ -206,31 +186,25 @@ def test_a_design_pull_request_with_the_label_passes(repo: Path, state: Path, tm
 
 def test_a_pull_request_outside_the_design_prefix_passes(repo: Path, state: Path, tmp_path: Path) -> None:
     """#266-4"""
-    result = guard(repo, state, "gh pr merge 218 --squash", tmp_path=tmp_path, responses={"pulls/218": FEATURE_PR})
+    result = guard(repo, state, "gh pr merge 218 --squash", tmp_path=tmp_path,
+                   responses={"pulls/218": FEATURE_PR})
 
     assert result.stdout.strip() == ""
 
 
 def test_an_undefined_label_passes(repo: Path, state: Path, tmp_path: Path) -> None:
     """#266-5: 定義が**無いことを確かめられた**ときだけ通す。"""
-    result = guard(
-        repo,
-        state,
-        "gh pr merge 268 --squash",
-        tmp_path=tmp_path,
-        responses={"pulls/268": DESIGN_PR, "labels/design-approved": LABEL_MISSING},
-    )
+    result = guard(repo, state, "gh pr merge 268 --squash", tmp_path=tmp_path,
+                   responses={"pulls/268": DESIGN_PR, "labels/design-approved": LABEL_MISSING})
 
     assert result.stdout.strip() == ""
 
 
 # --- #266-6 判定できないときは拒否する --------------------------------------
 
-
 def test_a_failed_query_is_denied(repo: Path, state: Path, tmp_path: Path) -> None:
-    result = guard(
-        repo, state, "gh pr merge 268 --squash", tmp_path=tmp_path, responses={"pulls/268": "!1:gh: API rate limit already exceeded"}
-    )
+    result = guard(repo, state, "gh pr merge 268 --squash", tmp_path=tmp_path,
+                   responses={"pulls/268": "!1:gh: API rate limit already exceeded"})
 
     assert decision(result)["permissionDecision"] == "deny"
     assert "head のブランチ名" in decision(result)["permissionDecisionReason"]
@@ -238,20 +212,17 @@ def test_a_failed_query_is_denied(repo: Path, state: Path, tmp_path: Path) -> No
 
 def test_a_failed_label_query_is_denied(repo: Path, state: Path, tmp_path: Path) -> None:
     """404 以外の失敗は「定義が無い」と読まない。"""
-    result = guard(
-        repo,
-        state,
-        "gh pr merge 268 --squash",
-        tmp_path=tmp_path,
-        responses={"pulls/268": DESIGN_PR, "labels/design-approved": "!1:gh: API rate limit already exceeded"},
-    )
+    result = guard(repo, state, "gh pr merge 268 --squash", tmp_path=tmp_path,
+                   responses={"pulls/268": DESIGN_PR,
+                              "labels/design-approved": "!1:gh: API rate limit already exceeded"})
 
     assert decision(result)["permissionDecision"] == "deny"
 
 
 def test_a_missing_gh_is_denied(repo: Path, state: Path, tmp_path: Path) -> None:
     """判定に要るコマンドが無い場合も拒否する。`curl` の REST は `gh` が無くても通る。"""
-    result = guard(repo, state, "gh pr merge 268 --squash", extra={"PATH": path_with(tmp_path / "bin", without=("gh",))})
+    result = guard(repo, state, "gh pr merge 268 --squash",
+                   extra={"PATH": path_with(tmp_path / "bin", without=("gh",))})
 
     assert decision(result)["permissionDecision"] == "deny"
     assert "判定に要る gh が無い" in decision(result)["permissionDecisionReason"]
@@ -259,30 +230,33 @@ def test_a_missing_gh_is_denied(repo: Path, state: Path, tmp_path: Path) -> None
 
 def test_a_missing_jq_is_denied(repo: Path, state: Path, tmp_path: Path) -> None:
     """入力を読み解けなくても、マージらしい本文は止める。"""
-    result = guard(repo, state, "gh pr merge 268 --squash", extra={"PATH": path_with(tmp_path / "bin", without=("jq",))})
+    result = guard(repo, state, "gh pr merge 268 --squash",
+                   extra={"PATH": path_with(tmp_path / "bin", without=("jq",))})
 
     assert decision(result)["permissionDecision"] == "deny"
-    assert "判定に要る jq または hook の環境が無い" in decision(result)["permissionDecisionReason"]
+    assert "判定に要る jq または awk が無い" in decision(result)["permissionDecisionReason"]
 
 
-def test_a_missing_hook_environment_is_denied(repo: Path, state: Path, tmp_path: Path) -> None:
-    """語の分割に要る hook の環境（#1142 の決定 20）が無くても、マージらしい本文は止める。
+def test_a_missing_awk_is_denied(repo: Path, state: Path, tmp_path: Path) -> None:
+    """語の分割に要る awk が無くても、マージらしい本文は止める。
 
-    環境が無いと `wf_split` が何も出さず、`wf_merge_target` は「マージではない」と
+    awk が無いと `wf_split` が何も出さず、`wf_merge_target` は「マージではない」と
     読める 1 を返す。そのまま通すと拒否の判定へ一度も入らない fail-open になる。
     """
-    result = guard(repo, state, "gh pr merge 268 --squash", extra={"NDF_HOOK_PYTHON": str(tmp_path / "no-python")})
+    result = guard(repo, state, "gh pr merge 268 --squash",
+                   extra={"PATH": path_with(tmp_path / "bin", without=("awk",))})
 
     assert decision(result)["permissionDecision"] == "deny"
-    assert "hook の環境" in decision(result)["permissionDecisionReason"]
+    assert "awk" in decision(result)["permissionDecisionReason"]
 
 
-def test_a_missing_hook_environment_with_a_global_option_is_denied(repo: Path, state: Path, tmp_path: Path) -> None:
+def test_a_missing_awk_with_a_global_option_is_denied(repo: Path, state: Path, tmp_path: Path) -> None:
     """粗い見分けも `gh` と `pr` の間のグローバルオプションを越える。"""
-    result = guard(repo, state, "gh -R devbasex/ai-plugins pr merge 268 --squash", extra={"NDF_HOOK_PYTHON": str(tmp_path / "no-python")})
+    result = guard(repo, state, "gh -R devbasex/ai-plugins pr merge 268 --squash",
+                   extra={"PATH": path_with(tmp_path / "bin", without=("awk",))})
 
     assert decision(result)["permissionDecision"] == "deny"
-    assert "hook の環境" in decision(result)["permissionDecisionReason"]
+    assert "awk" in decision(result)["permissionDecisionReason"]
 
 
 def test_a_detached_head_without_a_number_is_denied(repo: Path, state: Path, tmp_path: Path) -> None:
@@ -297,33 +271,29 @@ def test_a_detached_head_without_a_number_is_denied(repo: Path, state: Path, tmp
 def test_no_pull_request_for_the_branch_is_denied(repo: Path, state: Path, tmp_path: Path) -> None:
     checkout(repo, "design/parallel-batch-05")
 
-    result = guard(repo, state, "gh pr merge --squash", tmp_path=tmp_path, responses={"pulls?head=": "[]"})
+    result = guard(repo, state, "gh pr merge --squash", tmp_path=tmp_path,
+                   responses={"pulls?head=": "[]"})
 
     assert decision(result)["permissionDecision"] == "deny"
 
 
 def test_the_reason_carries_both_ways_of_passing(repo: Path, state: Path, tmp_path: Path) -> None:
     """#266-8: 通すために何をするかを書く。"""
-    reason = decision(
-        guard(
-            repo,
-            state,
-            "gh pr merge 268 --squash",
-            tmp_path=tmp_path,
-            responses={"pulls/268": DESIGN_PR, "labels/design-approved": LABEL_DEFINED},
-        )
-    )["permissionDecisionReason"]
+    reason = decision(guard(repo, state, "gh pr merge 268 --squash", tmp_path=tmp_path,
+                            responses={"pulls/268": DESIGN_PR,
+                                       "labels/design-approved": LABEL_DEFINED}))["permissionDecisionReason"]
 
     assert "design-approved" in reason
     assert "gh pr edit 268 --add-label design-approved" in reason
     assert "design/" in reason
 
 
-def test_the_reason_of_an_undetermined_merge_names_what_was_missing(repo: Path, state: Path, tmp_path: Path) -> None:
+def test_the_reason_of_an_undetermined_merge_names_what_was_missing(
+    repo: Path, state: Path, tmp_path: Path
+) -> None:
     """#266-6: 確かめられなかった値も出す。"""
-    reason = decision(guard(repo, state, "gh pr merge 268 --squash", tmp_path=tmp_path, responses={"pulls/268": "!1:boom"}))[
-        "permissionDecisionReason"
-    ]
+    reason = decision(guard(repo, state, "gh pr merge 268 --squash", tmp_path=tmp_path,
+                            responses={"pulls/268": "!1:boom"}))["permissionDecisionReason"]
 
     assert "確かめられなかった" in reason
     assert "design-approved" in reason
@@ -331,7 +301,6 @@ def test_the_reason_of_an_undetermined_merge_names_what_was_missing(repo: Path, 
 
 
 # --- #221 進行の記録の観測 --------------------------------------------------
-
 
 def test_parse_sync_reads_the_issue_key_and_value(repo: Path) -> None:
     result = run_lib(
@@ -345,7 +314,7 @@ def test_parse_sync_reads_the_issue_key_and_value(repo: Path) -> None:
 
 def test_parse_sync_rejects_a_command_with_too_few_arguments(repo: Path) -> None:
     result = run_lib(
-        "wf_parse_sync 'bash \"$SCRIPTS/projects-sync.sh\" 161 stage'",
+        'wf_parse_sync \'bash "$SCRIPTS/projects-sync.sh" 161 stage\'',
         cwd=repo,
     )
 
@@ -385,19 +354,8 @@ def test_recording_the_release_reports_the_missing_stages(repo: Path, state: Pat
     """#221-1: 必須の工程の記録が無いまま配布の記録へ進んだとき、名前が出力に現れる。"""
     env = base_env(state)
     run_stage_check("record", "161", "mode", "standard", cwd=repo, env=env)
-    for stage in (
-        "作業場所の用意",
-        "要求と受け入れ条件",
-        "設計",
-        "ドキュメントレビュー",
-        "計画",
-        "実装",
-        "構造改善",
-        "実装レビュー",
-        "完了判定",
-        "Pull Request",
-        "後片付け",
-    ):
+    for stage in ("作業場所の用意", "要求と受け入れ条件", "設計", "ドキュメントレビュー", "計画",
+                  "実装", "構造改善", "実装レビュー", "完了判定", "Pull Request", "後片付け"):
         run_stage_check("record", "161", "stage", stage, cwd=repo, env=env)
 
     result = guard(repo, state, 'bash "$SCRIPTS/projects-sync.sh" 161 stage "配布"')
@@ -412,14 +370,8 @@ def test_recording_the_release_without_a_gap_says_nothing(repo: Path, state: Pat
     env = base_env(state)
     run_stage_check("record", "161", "mode", "light", cwd=repo, env=env)
     for stage in (
-        "要求と受け入れ条件",
-        "作業場所の用意",
-        "設計",
-        "実装",
-        "実装レビュー",
-        "完了判定",
-        "Pull Request",
-        "後片付け",
+        "要求と受け入れ条件", "作業場所の用意", "設計", "実装", "実装レビュー", "完了判定",
+        "Pull Request", "後片付け",
     ):
         run_stage_check("record", "161", "stage", stage, cwd=repo, env=env)
 
@@ -437,13 +389,8 @@ def test_a_conditional_stage_without_a_record_is_not_a_gap(repo: Path, state: Pa
     env = base_env(state)
     run_stage_check("record", "161", "mode", "light", cwd=repo, env=env)
     for stage in (
-        "要求と受け入れ条件",
-        "作業場所の用意",
-        "実装",
-        "実装レビュー",
-        "完了判定",
-        "Pull Request",
-        "後片付け",
+        "要求と受け入れ条件", "作業場所の用意", "実装", "実装レビュー", "完了判定",
+        "Pull Request", "後片付け",
     ):
         run_stage_check("record", "161", "stage", stage, cwd=repo, env=env)
 
@@ -454,7 +401,7 @@ def test_a_conditional_stage_without_a_record_is_not_a_gap(repo: Path, state: Pa
 
 
 def test_a_repository_without_a_remote_records_nothing(tmp_path: Path, state: Path) -> None:
-    """リポジトリを特定できないときは通過記録を書かない。工程は止めない。"""
+    """リポジトリを特定できないときは控えを書かない。工程は止めない。"""
     repo = init_repo(tmp_path / "bare", remote=None)
 
     result = guard(repo, state, 'bash "$SCRIPTS/projects-sync.sh" 161 stage "配布"')
@@ -464,7 +411,6 @@ def test_a_repository_without_a_remote_records_nothing(tmp_path: Path, state: Pa
 
 
 # --- R2-002: 案内の直列化と復号の契約（現状固定） ---------------------------
-
 
 # `wf_emit_context` は systemMessage と additionalContext の両方へ同じ文字列を
 # 載せ、JSON として出す。引用符・バックスラッシュ・改行・タブ・復帰文字を含む値と
@@ -538,7 +484,7 @@ PARENT_BODY = (
 def split(text: str) -> list[str]:
     """`wf_split` の出力を語の並びで返す。区切りは空文字になる。"""
     result = subprocess.run(
-        ["bash", "-c", '. "$1"; wf_split "$2"', "_", str(LIB), text],
+        ["bash", "-c", f'. "$1"; wf_split "$2"', "_", str(LIB), text],
         capture_output=True,
     )
     assert result.returncode == 0, result.stderr
@@ -559,13 +505,12 @@ def stages_of(state: Path, issue: int) -> list[str]:
     [
         ('a "b c"; d', ["a", "b c", "", "d"]),
         ("x 2>&1 | y", ["x", "2>&1", "", "y"]),
-        # 境目はコマンドの間に 1 つ（#1142 の決定 20 の前は演算子の 1 文字ごとに出ていた）
-        ("cd x&&gh pr merge 1", ["cd", "x", "", "gh", "pr", "merge", "1"]),
+        ("cd x&&gh pr merge 1", ["cd", "x", "", "", "gh", "pr", "merge", "1"]),
         ("cmd &>/dev/null", ["cmd", "&>/dev/null"]),
         ("a b\nc", ["a", "b", "", "c"]),
         ("gh pr \\\nmerge 268", ["gh", "pr", "merge", "268"]),
         ("echo >&2 x", ["echo", ">&2", "x"]),
-        ("(a)|b||c", ["a", "", "b", "", "c"]),
+        ("(a)|b||c", ["", "a", "", "", "b", "", "", "c"]),
         ("sleep 1 & wait", ["sleep", "1", "", "wait"]),
         ('echo "a;b|c&&d(e)"', ["echo", "a;b|c&&d(e)"]),
         ("echo 'x\ny' z", ["echo", "x\ny", "z"]),
@@ -582,25 +527,12 @@ def test_split_does_not_mark_the_last_newline() -> None:
 
 
 def test_split_finishes_quickly_on_a_long_body() -> None:
-    """非機能: 36KB の本文でも、分割の費用が本文の長さに比例して増えるだけである。
-
-    演算子を引用の外に置き、区切りの判定を通す。36KB の費用を 3.6KB の費用の 20 倍以下に抑える
-    （比例なら 10 倍以下、2 乗で増えれば 100 倍近くになる）。秒の上限は実行機の速さで揺れるため
-    置かない。hook 1 回の所要は別に測る。
-
-    測るのは子のプロセスが使った CPU 時間。壁時計は並列の実行で CPU の順番待ちを含み、揺れる。
-    """
-    line = "| 表 | x; y && z 2>&1 |\n"
-    body = line * 1500
+    """非機能: 36KB の本文で 0.1 秒以内。演算子を引用の外に置き、区切りの判定を通す。"""
+    body = "| 表 | x; y && z 2>&1 |\n" * 1500
     assert len(body.encode("utf-8")) >= 36000
-
-    def cpu(text: str) -> float:
-        before = resource.getrusage(resource.RUSAGE_CHILDREN)
-        split(text)
-        after = resource.getrusage(resource.RUSAGE_CHILDREN)
-        return (after.ru_utime - before.ru_utime) + (after.ru_stime - before.ru_stime)
-
-    assert cpu(body) <= 20 * cpu(line * 150)
+    started = time.monotonic()
+    split(body)
+    assert time.monotonic() - started < 0.1
 
 
 def test_a_stage_glued_to_a_semicolon_is_recorded(repo: Path, state: Path) -> None:
@@ -671,7 +603,8 @@ def test_merge_target_stops_at_the_boundary(repo: Path) -> None:
 )
 def test_a_merge_after_an_operator_is_denied(repo: Path, state: Path, tmp_path: Path, command: str) -> None:
     """AC7"""
-    result = guard(repo, state, command, tmp_path=tmp_path, responses={"pulls/268": DESIGN_PR, "labels/design-approved": LABEL_DEFINED})
+    result = guard(repo, state, command, tmp_path=tmp_path,
+                   responses={"pulls/268": DESIGN_PR, "labels/design-approved": LABEL_DEFINED})
 
     assert decision(result)["permissionDecision"] == "deny"
     assert "268" in decision(result)["permissionDecisionReason"]
@@ -705,7 +638,8 @@ def test_pr_create_body_after_the_boundary_is_not_read(repo: Path) -> None:
 @pytest.mark.parametrize("command", ["gh pr merge \\\n  268 --merge", "gh pr \\\nmerge 268"])
 def test_a_continued_merge_is_denied(repo: Path, state: Path, tmp_path: Path, command: str) -> None:
     """AC13: 行末の `\\` の継続は区切りではない。hook を通して関門が働く。"""
-    result = guard(repo, state, command, tmp_path=tmp_path, responses={"pulls/268": DESIGN_PR, "labels/design-approved": LABEL_DEFINED})
+    result = guard(repo, state, command, tmp_path=tmp_path,
+                   responses={"pulls/268": DESIGN_PR, "labels/design-approved": LABEL_DEFINED})
 
     assert decision(result)["permissionDecision"] == "deny"
     assert "268" in decision(result)["permissionDecisionReason"]
@@ -778,7 +712,6 @@ def test_is_candidate_rejects_an_unrelated_command(text: str) -> None:
 
 # --- R2-001: `wf_looks_like_merge_text` の単体（現状固定） ------------------
 
-
 def looks_like_merge_text(text: str) -> int:
     """`wf_looks_like_merge_text` の終了コードを返す。0 が一致、1 が不一致。"""
     result = run_lib(f"wf_looks_like_merge_text {shlex.quote(text)}")
@@ -843,6 +776,7 @@ def test_is_mode_rejects_an_empty_mode() -> None:
     assert is_mode("") == 1
 
 
+
 def is_stage(stage: str) -> int:
     """`wf_is_stage` の終了コードを返す。0 が既知の工程、1 が未知または空。"""
     result = run_lib(f"wf_is_stage {shlex.quote(stage)}")
@@ -866,7 +800,7 @@ def test_is_stage_rejects_an_empty_stage() -> None:
 
 # --- R2-004: 閉じる課題でモードが食い違うときの案内（現状固定） --------------
 #
-# `wf_evidence_report` は、閉じる課題の通過記録のモードが食い違うと最も高いモードを選び、
+# `wf_evidence_report` は、閉じる課題の控えのモードが食い違うと最も高いモードを選び、
 # **全課題の不足工程をそのモードで数える**。公開の hook 入口へ `gh pr create` を渡し、
 # 復号した additionalContext の要点（食い違いの告知・選ばれたモード・課題ごとの不足
 # 工程）と、拒否を出さないことを結合の階層で固定する（対象コードは変更しない）。

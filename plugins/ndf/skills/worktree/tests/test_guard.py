@@ -4,7 +4,6 @@
 3 ランタイムの入力の差を吸収できていること、拒否の判定を返さないこと、案内を
 出す例と出さない例が対になっていることを確かめる。
 """
-
 from __future__ import annotations
 
 import json
@@ -228,7 +227,12 @@ def test_codex_apply_patch_is_normalized(main_repo: Path) -> None:
         "hook_event_name": "PreToolUse",
         "tool_name": "apply_patch",
         "tool_input": {
-            "command": ("*** Begin Patch\n*** Update File: plugins/ndf/README.md\n@@\n-# sample\n+# sample edited\n*** End Patch\n")
+            "command": (
+                "*** Begin Patch\n"
+                "*** Update File: plugins/ndf/README.md\n"
+                "@@\n-# sample\n+# sample edited\n"
+                "*** End Patch\n"
+            )
         },
     }
     result = run_guard(payload, cwd=main_repo)
@@ -242,7 +246,9 @@ def test_codex_apply_patch_on_allowed_path_is_silent(main_repo: Path) -> None:
         "cwd": str(main_repo),
         "hook_event_name": "PreToolUse",
         "tool_name": "apply_patch",
-        "tool_input": {"command": "*** Begin Patch\n*** Update File: issues/note.md\n@@\n+x\n*** End Patch\n"},
+        "tool_input": {
+            "command": "*** Begin Patch\n*** Update File: issues/note.md\n@@\n+x\n*** End Patch\n"
+        },
     }
     result = run_guard(payload, cwd=main_repo)
     assert result["out"].strip() == "", result["out"]
@@ -284,7 +290,7 @@ def test_declaration_created_mid_session_takes_effect(main_repo: Path, tmp_path:
     """宣言ファイルは後から作られる。作った直後のセッションで案内が出る。
 
     `/ndf:worktree` の手順 0 は、既に tool を動かしたセッションの途中で走る。
-    キャッシュを作業ディレクトリの一致だけで再利用すると、そのセッションでは案内が
+    控えを作業ディレクトリの一致だけで再利用すると、そのセッションでは案内が
     出ないままになる。
     """
     state = tmp_path / "state"
@@ -319,7 +325,7 @@ def test_declaration_edited_mid_session_takes_effect(main_repo: Path, tmp_path: 
     """許可パスを書き換えたら、そのセッションで判定が変わる。
 
     書き換えの前後で**長さが同じ**で、**同じ秒のうち**に書き換える。更新時刻や
-    大きさで目印を作ると、この形が捉えられない。
+    大きさで印を作ると、この形が捉えられない。
     """
     state = tmp_path / "state"
     state.mkdir()
@@ -346,7 +352,9 @@ def bash_command(command: str, session: str) -> dict:
     }
 
 
-def test_cd_into_worktree_then_relative_write_is_silent(main_repo: Path, worktree: Path) -> None:
+def test_cd_into_worktree_then_relative_write_is_silent(
+    main_repo: Path, worktree: Path
+) -> None:
     """作業ツリーへ移ってから相対パスで書き換えたときに案内を出さない。
 
     hook は主ディレクトリで実行されるため、同じコマンドの中の `cd` を反映しないと
@@ -358,7 +366,9 @@ def test_cd_into_worktree_then_relative_write_is_silent(main_repo: Path, worktre
     assert result["out"].strip() == "", result["out"]
 
 
-def test_cd_into_worktree_with_relative_path_is_silent(main_repo: Path, worktree: Path) -> None:
+def test_cd_into_worktree_with_relative_path_is_silent(
+    main_repo: Path, worktree: Path
+) -> None:
     """移動先を相対パスで書いた場合も同じ。"""
     declared(main_repo)
     command = "cd .worktrees/feature/x && echo x > plugins/ndf/README.md"
@@ -382,16 +392,18 @@ def test_cd_back_to_main_is_detected(main_repo: Path, worktree: Path) -> None:
     assert "plugins/ndf/README.md" in context_of(result)
 
 
-def test_unresolvable_cd_is_silent_for_relative_paths(main_repo: Path, worktree: Path) -> None:
+def test_unresolvable_cd_is_silent_for_relative_paths(
+    main_repo: Path, worktree: Path
+) -> None:
     """移動先を決められないときは、相対パスの書き換えで案内を出さない。"""
     declared(main_repo)
-    command = "cd \"$TARGET\"\nsed -i 's/a/b/' plugins/ndf/README.md"
+    command = 'cd "$TARGET"\nsed -i \'s/a/b/\' plugins/ndf/README.md'
     result = run_guard(bash_command(command, "s-cd-5"), cwd=main_repo)
     assert result["out"].strip() == "", result["out"]
 
 
 def test_cd_inside_a_block_is_reflected(main_repo: Path, worktree: Path) -> None:
-    """条件分岐やグループの中で作業ツリーへ移った場合も案内を出さない。
+    """条件分岐やまとまりの中で作業ツリーへ移った場合も案内を出さない。
 
     `then` / `do` / `{` の後ろを命令の位置として数えないと、中の `cd` を移動として
     追えず、移動前の位置を指した案内が出る（#186 の誤検知が残る）。
@@ -409,7 +421,7 @@ def test_cd_inside_a_block_is_reflected(main_repo: Path, worktree: Path) -> None
 
 
 def test_write_inside_a_block_without_cd_is_still_detected(main_repo: Path) -> None:
-    """グループの中でも、移動を伴わない相対パスの書き換えは案内する。"""
+    """まとまりの中でも、移動を伴わない相対パスの書き換えは案内する。"""
     declared(main_repo)
     command = "if true; then sed -i 's/a/b/' plugins/ndf/README.md; fi"
     result = run_guard(bash_command(command, "s-blk-x"), cwd=main_repo)

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # NDF plugin: tool 実行前の hook。工程の飛ばしを検知し、設計 Pull Request のマージを
-# 承認ラベルに縛る（#221 / #266）。
+# 承認の印に縛る（#221 / #266）。
 #
 # `development-workflow` の frontmatter が、この Skill を呼んだ会話の単位へ登録する。
 # 判定はすべて lib/ が持ち、この入口は入力の受け取りと出力の整形だけを行う。
@@ -18,16 +18,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PAYLOAD=$(cat 2>/dev/null || true)
 [ -n "$PAYLOAD" ] || exit 0
 
-# **jq や hook の環境が無くても、マージらしい本文は止める。** 入力を読み解けないことを通す
+# **jq や awk が無くても、マージらしい本文は止める。** 入力を読み解けないことを通す
 # 理由にしない（決定 8）。#221 の報告はここで諦める（通す側へ倒す）。
 #
-# hook の環境（SessionStart が用意した python。`wf_hook_python`）を条件へ入れるのは、`wf_split` が語の分割を
-# その python で行うためである（#1142 の決定 20）。環境が無いと分割の結果が空になり、`wf_merge_target` は
-# 何も見つけられないまま 1 を返す。呼び出し元の `wf_check_merge` はそれを「マージではない」と読んで
-# 0（許可）を返すため、拒否の判定へ一度も入らない。ここで grep による粗い見分けへ倒し、fail-closed を保つ。
-if ! command -v jq >/dev/null 2>&1 || ! wf_hook_python >/dev/null; then
+# awk を条件へ入れるのは、`wf_split` が語の分割を awk で行うためである。awk が無いと
+# 分割の結果が空になり、`wf_merge_target` は何も見つけられないまま 1 を返す。呼び出し元の
+# `wf_check_merge` はそれを「マージではない」と読んで 0（許可）を返すため、拒否の判定へ
+# 一度も入らない。ここで grep による粗い見分けへ倒し、fail-closed を保つ。
+if ! command -v jq >/dev/null 2>&1 || ! command -v awk >/dev/null 2>&1; then
   if wf_looks_like_merge_text "$PAYLOAD"; then
-    reason=$(wf_deny_undetermined "" '承認ラベル（判定に要る jq または hook の環境が無い）')
+    reason=$(wf_deny_undetermined "" '承認の印（判定に要る jq または awk が無い）')
     wf_emit_deny "$reason"
   fi
   exit 0
@@ -64,11 +64,10 @@ fi
 if SYNC=$(wf_parse_sync "$COMMAND"); then
   IFS=$'\t' read -r ISSUE KEY VALUE <<<"$SYNC"
   case "$ISSUE" in ''|*[!0-9]*) exit 0 ;; esac
-  case "$KEY" in stage|mode|pace) ;; *) exit 0 ;; esac
+  case "$KEY" in stage|mode) ;; *) exit 0 ;; esac
   [ -n "$VALUE" ] || exit 0
   if [ "$KEY" = "stage" ]; then wf_is_stage "$VALUE" || exit 0; fi
   if [ "$KEY" = "mode" ]; then wf_is_mode "$VALUE" || exit 0; fi
-  if [ "$KEY" = "pace" ]; then wf_is_pace "$VALUE" || exit 0; fi
 
   SLUG=$(wf_repo_slug ".") || exit 0
   wf_record "$SLUG" "$ISSUE" "$KEY" "$VALUE" 2>/dev/null
