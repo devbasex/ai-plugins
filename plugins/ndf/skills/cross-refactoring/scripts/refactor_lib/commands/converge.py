@@ -21,7 +21,7 @@ from typing import Any, Optional
 
 import statefile
 
-from .. import budget, clock, danger, info, timeline, triage, wholetest
+from .. import budget, clock, danger, info, targets, timeline, triage, wholetest
 from ..gitfacts import (
     revert_range,
     collect_commit_facts,
@@ -60,9 +60,11 @@ from ..verify import (
 
 def _run_words(state: dict[str, Any], words: Any, log: pathlib.Path) -> bool:
     """語の並びをシェルを通さずに走らせる（AC10b）。全体テストの文字列はシェルで走らせる。打ち切りは失敗。"""
-    command = str(words) if isinstance(words, str) else list(words)
-    timeout = timeline.state_whole_timeout(state) if isinstance(command, str) else timeline.state_test_timeout(state)
-    code, timed_out = run_with_timeout(command, work_dir(state), timeout, output=log)
+    if isinstance(words, str):
+        code, timed_out = run_with_timeout(str(words), work_dir(state), timeline.state_whole_timeout(state), output=log)
+    else:
+        # 語の並び 1 つか、suite ごとの語の並びの並び（`targets.as_commands`）。上限は suite 群で 1 つ
+        code, timed_out = targets.run_commands(words, work_dir(state), timeline.state_test_timeout(state), log)
     return (not timed_out) and code == 0
 
 
@@ -72,12 +74,12 @@ def _log_path(state: dict[str, Any], item_id: str) -> pathlib.Path:
 
 def _run_limited(state: dict[str, Any], items: list[dict[str, Any]]) -> None:
     """項目ごとに範囲テストを走らせ、`verified` / `failing` にする。同じ語の並びは 1 回だけ。"""
-    results: dict[tuple[str, ...], tuple[bool, pathlib.Path]] = {}
+    results: dict[tuple[tuple[str, ...], ...], tuple[bool, pathlib.Path]] = {}
     for item in items:
-        key = tuple(item.get("command") or [])
+        key = targets.command_key(item.get("command"))
         if key not in results:
             log = _log_path(state, item["id"])
-            results[key] = (_run_words(state, list(key), log), log)
+            results[key] = (_run_words(state, [list(c) for c in key], log), log)
         passed, log = results[key]
         item["status"] = VERIFIED if passed else FAILING
         item["last_log"] = str(log)
@@ -140,10 +142,10 @@ def _give_up(path: pathlib.Path, state: dict[str, Any]) -> None:
     """修正に使える時間が尽きたら、落ちた項目を取り消す（設計の「検証と修正の繰り返し」2）。"""
     if not _fix_stop(state):
         return
-    groups: dict[tuple[str, ...], list[dict[str, Any]]] = {}
+    groups: dict[tuple[tuple[str, ...], ...], list[dict[str, Any]]] = {}
     for item in live_items(state):
         if item.get("status") == FAILING:
-            groups.setdefault(tuple(item.get("command") or []), []).append(item)
+            groups.setdefault(targets.command_key(item.get("command")), []).append(item)
     for group in groups.values():
         _revert_shared(path, state, group, f"範囲テストが{STOP_REASON}")
 

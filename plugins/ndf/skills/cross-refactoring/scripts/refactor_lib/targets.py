@@ -13,10 +13,13 @@ from __future__ import annotations
 import os
 import pathlib
 import shlex
+import time
 from typing import Any, Iterable, Optional
 
 import test_strategy as ts
+import test_triage
 
+from .process import run_with_timeout
 from .scope import covered_by_roots, test_locations
 from .timeline import strategy_of
 
@@ -64,17 +67,71 @@ def valid_targets(
     return True
 
 
-def scope_words_for(strategy: ts.Strategy, paths: list[str]) -> Optional[list[str]]:
-    """対象のパスを受け持つ suite の雛形で組んだ語の並び。`scope_command` を持つ suite が無ければ `None`。"""
+def scope_words_for(strategy: ts.Strategy, paths: list[str]) -> Optional[list[list[str]]]:
+    """対象のパスを受け持つ suite ごとに、その suite の雛形で組んだ語の並び（suite ごとに 1 つ）。
+
+    分け方は失敗の走らせ直し（`test_triage.rerun_groups`）と同じ。`scope_command` を持つ suite が無ければ `None`。
+    """
     if not paths:
         return None
-    suite = ts.suite_for(strategy, str(paths[0]).split("::", 1)[0])
-    if suite is None:
-        scoped = strategy.scoped_suites()
-        suite = scoped[0] if scoped else None
-    if suite is None or not suite.scope_command:
-        return None
-    return ts.scope_words(suite.scope_command, list(paths))
+    return test_triage.rerun_words(strategy, [str(p) for p in paths]) or None
+
+
+def as_commands(command: Any) -> list[list[str]]:
+    """項目の `command` をコマンドの並びにする。
+
+    `command` は 1 つの語の並び（`list[str]`。suite が 1 つ）か、suite ごとの語の並びの並び
+    （`list[list[str]]`。対象が複数の suite にまたがる）。どちらでもなければ空。
+    """
+    if not isinstance(command, list) or not command:
+        return []
+    if all(isinstance(c, list) for c in command):
+        return [[str(w) for w in c] for c in command if c]
+    return [[str(w) for w in command]]
+
+
+def command_key(command: Any) -> tuple[tuple[str, ...], ...]:
+    """同じ検証を 1 回だけ走らせるための鍵。"""
+    return tuple(tuple(c) for c in as_commands(command))
+
+
+def item_command(commands: list[list[str]]) -> Any:
+    """項目の `command` に書く形。suite が 1 つなら語の並びのまま、複数なら suite ごとの並び。"""
+    return list(commands[0]) if len(commands) == 1 else [list(c) for c in commands]
+
+
+def command_text(command: Any) -> str:
+    """表示用の 1 行（suite ごとの語の並びを ` && ` でつなぐ。走らせるときはつながない）。"""
+    return " && ".join(" ".join(c) for c in as_commands(command))
+
+
+def run_commands(command: Any, work: str, timeout: int, log: pathlib.Path) -> tuple[Optional[int], bool]:
+    """項目の `command`（形は `as_commands`）をシェルを通さずに順に走らせる。戻りは（終了コード, 打ち切ったか）。
+
+    上限 `timeout` は suite 群全体で 1 つ（`test_triage.run_within`）。落ちた・打ち切った時点で止める。
+    suite が複数なら 2 本目からの出力は `log` の名前に番号を足したファイルへ書き、最後に `log` へ足す。
+    """
+    commands = as_commands(command)
+    if not commands:
+        return None, False
+    started = time.monotonic()
+    logs = [log if i == 0 else log.with_name(f"{log.stem}-{i + 1}{log.suffix}") for i in range(len(commands))]
+    code: Optional[int] = 0
+    timed_out = False
+    ran = 0
+    for words, out in zip(commands, logs):
+        code, timed_out = test_triage.run_within(
+            timeout, started, lambda left, words=words, out=out: run_with_timeout(words, work, left, output=out)
+        )
+        ran += 1
+        if timed_out or code != 0:
+            break
+    if ran > 1:
+        with open(log, "ab") as sink:
+            for extra in logs[1:ran]:
+                if extra.exists():
+                    sink.write(extra.read_bytes())
+    return code, timed_out
 
 
 def round_words(strategy: Optional[ts.Strategy]) -> Optional[list[str]]:
@@ -93,8 +150,10 @@ def limited_command(
     test_targets: list[str],
     work: str,
     planned: Iterable[str] = (),
-) -> tuple[Optional[list[str]], str]:
-    """項目の検証に使う語の並びと、その由来（`targets` / `round_test` / `none`）。
+) -> tuple[Any, str]:
+    """項目の検証に使う語の並び（形は `as_commands`）と、その由来（`targets` / `round_test` / `none`）。
+
+    対象が複数の suite にまたがるときは、suite ごとにその雛形で組んだ語の並びを全て返す。
 
     `round-only` はラウンドテストをそのまま走らせる。ほかの戦略は `test_targets` を雛形の `{paths}` へ入れ、
     入れられなければ `none`（呼ぶ側が `no_target` で見送る）。**全体テストを項目の検証に使うことはない。**
@@ -107,6 +166,6 @@ def limited_command(
     targets = list(test_targets or [])
     if valid_targets(targets, work, scope, planned):
         built = scope_words_for(strategy, targets)
-        if built is not None:
-            return built, "targets"
+        if built:
+            return item_command(built), "targets"
     return None, "none"

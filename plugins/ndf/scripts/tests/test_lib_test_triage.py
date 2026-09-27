@@ -76,3 +76,39 @@ def test_classify_shares_one_limit_across_the_reruns_and_the_baseline(monkeypatc
     )
     assert given == [100, 70, 40, 10], "4 回の再実行で 100 秒を分け合う（再実行ごとに 100 秒を渡さない）"
     assert out["preexisting"] == ["a/t.py::x", "b/t.py::y"]
+
+
+def test_a_baseline_cut_off_by_the_shared_limit_is_not_counted_as_caused(monkeypatch, tmp_path):
+    """走らせ直しが上限を使い切り、着手前の HEAD の再実行が打ち切られたら、変更起因へ倒さず判定不能で返す（#1354）。"""
+    now = [0.0]
+    monkeypatch.setattr(test_triage.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(test_triage, "tracked_files", lambda work: [])
+    monkeypatch.setattr(test_triage, "clear_junit", lambda work, strategy: None)
+    monkeypatch.setattr(test_triage, "read_junit", lambda work, strategy, tracked=None: (["a/t.py::x", "b/t.py::y"], None))
+    monkeypatch.setattr(test_triage, "_git", lambda work, args: True)
+    given: list[int] = []
+
+    def run(words, cwd, timeout, log=None):
+        given.append(timeout)
+        now[0] += 40
+        return 1, False
+
+    out = test_triage.classify(
+        work=str(tmp_path),
+        strategy=_suites(),
+        failed=["a/t.py::x", "b/t.py::y"],
+        fallback_reason=None,
+        base_sha="abc",
+        timeout=100,
+        log_dir=tmp_path / "logs",
+        run=run,
+    )
+    assert given == [100, 60, 20], "4 回目（着手前の HEAD の 2 本目）は残りが無く走らせない"
+    assert out["caused"] == []
+    assert out["fallback_reason"] and "着手前の HEAD" in out["fallback_reason"]
+
+
+def test_rerun_groups_split_targets_with_a_node_id_by_suite():
+    """`::` 付きの対象も、パスの部分で受け持つ suite を決める（#1354）。"""
+    groups = test_triage.rerun_groups(_suites(), ["a/t.py::x", "b/t.py::y"])
+    assert [(suite.name, paths) for suite, paths in groups] == [("a", ["a/t.py::x"]), ("b", ["b/t.py::y"])]

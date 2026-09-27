@@ -63,14 +63,10 @@ def ci_gate(state: dict[str, Any]) -> tuple[bool, str, Optional[dict[str, Any]]]
 
     def fetch() -> Optional[str]:
         # 1 回の照会で全チェックの run を読み、名前ごとの結果はその一覧から出す（照会はチェックの本数によらず 1 回）
-        runs = gh_checks.fetch_check_runs(repo, sha, rest_get=gh_api_get) if repo and sha else None
+        # 照会の失敗は `None`、チェックの未登録は `pending`（`checks_outcome`）で、未登録の間は上限まで待つ
+        runs = gh_checks.fetch_check_runs(repo, sha, rest_get=gh_api_get, empty_ok=True) if repo and sha else None
         last["runs"] = runs
-        results = [gh_checks.check_result(runs, name) for name in checks]
-        if any(r is None for r in results):
-            return None
-        if any(r == "pending" for r in results):
-            return "pending"
-        return "success" if all(r == "success" for r in results) else str(next(r for r in results if r != "success"))
+        return gh_checks.checks_outcome(runs, checks)
 
     outcome, waited, attempts = test_triage.wait_check(
         fetch, max_wait, on_wait=lambda gap, n: info(f"⏳ CI を待っています（{n} 回目 / 次は {gap:.0f} 秒後）")

@@ -1529,5 +1529,5 @@ def test_cross_refactoring_and_supervise_build_the_same_scope_words(refactor):
     targets = importlib.import_module("refactor_lib.targets")
     strategy = ts.resolve(CARMO_DECL)
     paths = ["tests/Unit/AServiceTest.php", "tests/Unit/BServiceTest.php"]
-    assert targets.scope_words_for(strategy, paths) == test_triage.rerun_words(strategy, paths)[0]
-    assert targets.scope_words_for(strategy, paths)[-2:] == paths
+    assert targets.scope_words_for(strategy, paths) == test_triage.rerun_words(strategy, paths)
+    assert targets.scope_words_for(strategy, paths)[0][-2:] == paths

@@ -34,7 +34,6 @@ from ..gitfacts import (
     push_with_retry_marker,
     note_stopped,
     record_observed_model,
-    run_with_timeout,
     safe_int,
     tracked_markdown,
 )
@@ -226,41 +225,41 @@ def _finish(path: pathlib.Path, state: dict[str, Any], phase: str) -> None:
 # ---------- テストの追加 ----------
 
 
-def _test_words(state: dict[str, Any], item: dict[str, Any], files: list[str]) -> Optional[list[str]]:
-    """足したテストを今のコードで走らせる語の並び。
+def _test_words(state: dict[str, Any], item: dict[str, Any], files: list[str]) -> Optional[list[list[str]]]:
+    """足したテストを今のコードで走らせる語の並び（suite ごとに 1 つ。`targets.as_commands` の形）。
 
     項目の範囲テストが対象から組み立てたものならそれを使う。ラウンドテストをそのまま使う項目は、
     戦略に雛形（`scope_command`）があれば足したテストのファイルを `{paths}` へ入れ、無ければ
     ラウンドテストをそのまま走らせる。
     """
     if item.get("command_source") == "targets":
-        return list(item["command"])
+        return targets.as_commands(item["command"]) or None
     work = work_dir(state)
     strategy = timeline.strategy_of(state)
     tests = [f for f in files if targets.valid_targets([f], work, list(state.get("target_scope") or []))]
     if tests:
         built = targets.scope_words_for(strategy, tests)
-        if built is not None:
+        if built:
             return built
-    return list(item.get("command") or []) or None
+    return targets.as_commands(item.get("command")) or None
 
 
 def _run_added_tests(state: dict[str, Any], intake: Intake) -> None:
     """足したテストが今のコードで通るかを確かめる（決定 13）。同じ語の並びは 1 回だけ走らせる。"""
     work = work_dir(state)
     timeout = timeline.state_test_timeout(state)
-    results: dict[tuple[str, ...], bool] = {}
+    results: dict[tuple[tuple[str, ...], ...], bool] = {}
     for item_id, fact in intake.accepted.items():
         words = _test_words(state, find_item(state, item_id), list(fact.get("files") or []))
         if not words:
             continue
-        key = tuple(words)
+        key = targets.command_key(words)
         if key not in results:
             log = pathlib.Path(state["tmp_dir"]) / f"add-tests-{item_id}.log"
-            code, timed_out = run_with_timeout(list(words), work, timeout, output=log)
+            code, timed_out = targets.run_commands(words, work, timeout, log)
             results[key] = (not timed_out) and code == 0
         if not results[key]:
-            intake.test_failed[item_id] = f"足したテストが今のコードで通りません（{' '.join(words)}）"
+            intake.test_failed[item_id] = f"足したテストが今のコードで通りません（{targets.command_text(words)}）"
             intake.extra.append(fact["sha"])
 
 

@@ -168,21 +168,15 @@ def _wait_ci(root: pathlib.Path, strategy: ts.Strategy, limits: dict, notes: lis
         return 2
 
     def runs_now():
-        return gh_checks.fetch_check_runs(owner_repo, sha, rest_get=lambda p: _Resp(test_triage.gh_json(p)))
+        return gh_checks.fetch_check_runs(owner_repo, sha, rest_get=lambda p: _Resp(test_triage.gh_json(p)), empty_ok=True)
 
     last: dict = {}
 
     def fetch():
         runs = runs_now()
         last["runs"] = runs
-        if runs is None:
-            return None
-        results = [gh_checks.check_result(runs, name) for name in checks]
-        if any(r is None for r in results):
-            return None
-        if any(r == "pending" for r in results):
-            return "pending"
-        return "success" if all(r == "success" for r in results) else "failure"
+        # 照会の失敗は `None`、チェックの未登録は `pending`（`gh_checks.checks_outcome`）
+        return gh_checks.checks_outcome(runs, checks)
 
     outcome, waited, attempts = test_triage.wait_check(fetch, float(limits["ci_wait_timeout"]))
     detail = (

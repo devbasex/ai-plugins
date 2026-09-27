@@ -161,11 +161,11 @@ def by_file(ids: list[str]) -> dict[str, list[str]]:
 
 
 def rerun_groups(strategy: ts.Strategy, files: list[str]) -> list[tuple[ts.Suite, list[str]]]:
-    """落ちたファイルを受け持つ suite ごとに分ける。受け持つ suite の無いファイルは最初の suite へ。"""
+    """落ちたファイル（`::` 付きの対象も可）を受け持つ suite ごとに分ける。受け持つ suite の無いものは最初の suite へ。"""
     groups: dict[str, tuple[ts.Suite, list[str]]] = {}
     scoped = strategy.scoped_suites()
     for f in files:
-        suite = ts.suite_for(strategy, f) or (scoped[0] if scoped else None)
+        suite = ts.suite_for(strategy, str(f).split("::", 1)[0]) or (scoped[0] if scoped else None)
         if suite is None:
             continue
         groups.setdefault(suite.name, (suite, []))[1].append(f)
@@ -186,14 +186,16 @@ def failing_in(
     label: str,
     run: Runner,
     started: Optional[float] = None,
-) -> tuple[list[str], bool]:
-    """`ids` のファイルだけを `work` で走らせ直し、まだ落ちている ID と JUnit を読めたかを返す。読めなければその群の全部。
+) -> tuple[list[str], bool, bool]:
+    """`ids` のファイルだけを `work` で走らせ直し、まだ落ちている ID・JUnit を読めたか・上限で打ち切ったかを返す。
 
+    読めなかった群はその群の全部をまだ落ちているとみなす。
     上限 `timeout` は `started`（`time.monotonic()`。省けば今）からの suite 群全体で 1 つ（`run_within`）。
     """
     started = time.monotonic() if started is None else started
     still: list[str] = []
     readable = True
+    cut = False
     tracked = tracked_files(work)
     for suite, paths in rerun_groups(strategy, list(by_file(ids))):
         clear_junit(work, strategy)
@@ -202,12 +204,13 @@ def failing_in(
         if not timed_out and code == 0:
             continue
         found, _ = read_junit(work, ts.Strategy(strategy.name, strategy.source, [suite]), tracked)
+        cut = cut or timed_out
         if timed_out or found is None:
             readable = False
             still.extend(i for i in ids if junit.file_of(i) in set(paths) and i not in still)
             continue
         still.extend(i for i in ids if i in found and i not in still)
-    return still, readable
+    return still, readable, cut
 
 
 def failing_at(
@@ -219,14 +222,19 @@ def failing_at(
     log_dir: pathlib.Path,
     run: Runner,
     started: Optional[float] = None,
-) -> list[str]:
-    """着手前の HEAD（`sha`）の一時のworktreeでも落ちる ID。作れない・読めなければ空（既存失敗とみなさない）。"""
+) -> Optional[list[str]]:
+    """着手前の HEAD（`sha`）の一時のworktreeでも落ちる ID。作れない・読めなければ空（既存失敗とみなさない）。
+
+    **上限で打ち切った suite があれば `None`**（見分けられない）。空にすると既存失敗が変更起因へ入るため。
+    """
     holder = pathlib.Path(tempfile.mkdtemp(prefix="ndf-baseline-"))
     tree = holder / "tree"
     try:
         if not _git(work, ["worktree", "add", "--detach", "-q", str(tree), sha]):
             return []
-        still, readable = failing_in(str(tree), strategy, ids, timeout, log_dir, "baseline", run, started)
+        still, readable, cut = failing_in(str(tree), strategy, ids, timeout, log_dir, "baseline", run, started)
+        if cut:
+            return None
         return still if readable else []
     finally:
         _git(work, ["worktree", "remove", "--force", str(tree)])
@@ -263,12 +271,23 @@ def classify(
         }
     known = set(existing_failures or [])
     started = time.monotonic()  # 上限 `timeout` は走らせ直しと着手前の HEAD の再実行の全体で 1 つ
-    still, _ = failing_in(work, strategy, failed, timeout, log_dir, "rerun", run, started)
+    still, _, _ = failing_in(work, strategy, failed, timeout, log_dir, "rerun", run, started)
     flaky = [i for i in failed if i not in still]
     at_base = [i for i in still if i in known]
     unknown = [i for i in still if i not in known]
     if unknown and base_sha:
-        at_base += failing_at(work, base_sha, strategy, unknown, timeout, log_dir, run, started)
+        base_failing = failing_at(work, base_sha, strategy, unknown, timeout, log_dir, run, started)
+        if base_failing is None:
+            # 着手前の HEAD の再実行が上限で打ち切られた。既存失敗か変更起因かを決めず、判定不能として返す
+            return {
+                "failed_tests": list(failed),
+                "flaky": flaky,
+                "preexisting": [i for i in still if i in at_base],
+                "caused": [],
+                "fallback_reason": f"着手前の HEAD の再実行が上限（{timeout} 秒）の内に終わらず、既存失敗か変更起因かを見分けられない",
+                "baseline_head": base_sha,
+            }
+        at_base += base_failing
     caused = [i for i in still if i not in at_base]
     return {
         "failed_tests": list(failed),

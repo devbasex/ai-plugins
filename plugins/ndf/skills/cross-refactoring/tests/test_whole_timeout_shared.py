@@ -79,3 +79,36 @@ def test_a_derived_round_command_does_not_run_the_suites_twice(refactor, tmp_pat
         "round-only", "derived:test.suites", [ts.Suite("a", "run a"), ts.Suite("b", "run b")], round_command="run a && run b"
     )
     assert baseline.commands_of(strategy, [], tmp_path) == ("round", ["run a", "run b"])
+
+
+def _two_suites(ts):
+    return ts.Strategy(
+        "local-full",
+        "test",
+        [ts.Suite("a", "run a", "run-a {paths}", paths=["tests/a"]), ts.Suite("b", "run b", "run-b {paths}", paths=["tests/b"])],
+    )
+
+
+def test_targets_across_suites_run_each_suite_with_its_own_template(refactor, monkeypatch, tmp_path):
+    """1 項目の `test_targets` が 2 つの suite にまたがれば、suite ごとの雛形で 2 本を組んで両方走らせる（#1354）。"""
+    targets = sys.modules["refactor_lib.targets"]
+    strategy = _two_suites(targets.ts)
+    for d in ("a", "b"):
+        (tmp_path / "tests" / d).mkdir(parents=True)
+        (tmp_path / "tests" / d / "test_t.py").write_text("", encoding="utf-8")
+    monkeypatch.setattr(targets, "strategy_of", lambda state: strategy)
+    command, origin = targets.limited_command({"target_scope": ["tests"]}, ["tests/a/test_t.py", "tests/b/test_t.py::y"], str(tmp_path))
+    assert origin == "targets"
+    assert targets.as_commands(command) == [["run-a", "tests/a/test_t.py"], ["run-b", "tests/b/test_t.py::y"]]
+    assert targets.command_key(command) == (("run-a", "tests/a/test_t.py"), ("run-b", "tests/b/test_t.py::y"))
+
+    single, _ = targets.limited_command({"target_scope": ["tests"]}, ["tests/a/test_t.py"], str(tmp_path))
+    assert single == ["run-a", "tests/a/test_t.py"], "suite が 1 つなら今の形（語の並び 1 つ）のまま"
+
+    run, given = _clock(monkeypatch, 30)
+    seen: list[list[str]] = []
+    monkeypatch.setattr(targets, "run_with_timeout", lambda words, cwd, timeout, **kw: (seen.append(words), run(words, cwd, timeout))[1])
+    code, timed_out = targets.run_commands(command, str(tmp_path), 100, tmp_path / "verify.log")
+    assert (code, timed_out) == (0, False)
+    assert seen == [["run-a", "tests/a/test_t.py"], ["run-b", "tests/b/test_t.py::y"]]
+    assert given == [100, 70], "suite 群で 1 つの上限を分け合う"
