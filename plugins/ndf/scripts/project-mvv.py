@@ -245,28 +245,19 @@ def last_vet(root: Path, sha: str) -> dict | None:
     return rows[-1] if rows else None
 
 
-def cmd_approve(a):
-    root = _root(a)
-    try:
-        body = Path(a.body).read_text(encoding="utf-8")
-    except OSError as e:
-        raise StepError(f"本文を読めない: {e}", 1) from None
-    probs = pm.shape_problems(body)
-    if probs:
-        raise StepError("本文の形が足りない: " + "／".join(f"{p['item']}: {p['reason']}" for p in probs), 1)
-    mvv = pm.load_mvv(root)
-    if mvv.status == "unreadable":
-        raise StepError(f"宣言が壊れているため版を足さない: {mvv.error}", 1)
-    sha = pm.sha256_text(body)
+def _approvable_vet(root: Path, sha: str, accept_unknown: bool) -> dict:
     vet = last_vet(root, sha)
     if vet is None:
         raise StepError("この本文への照合の記録が無い（vet を打ってから利用者の承認を取る）", 1)
-    if vet["verdict"] == "unknown" and not a.accept_unknown:
+    if vet["verdict"] == "unknown" and not accept_unknown:
         raise StepError("照合が「判定できない」。人が引き受けると決めたときだけ --accept-unknown で承認する", 1)
     if vet["verdict"] not in ("follow", "unknown"):
         where = "／".join(f"{x.get('item')}: {x.get('reason')}" for x in vet.get("locations") or [])
         raise StepError(f"照合が「{vet['verdict']}」のため承認できない（{where}）。本文を直して照合をやり直す", 1)
-    body_path, decl_path = pm.decl_paths(root)
+    return vet
+
+
+def _next_version(decl_path: Path, body: str, sha: str, a, vet: dict) -> tuple[dict, list, dict]:
     versions: list = []
     settings: dict = json.loads(json.dumps(pm.DEFAULTS))
     if decl_path.is_file():
@@ -293,6 +284,26 @@ def cmd_approve(a):
         "changes": diff,
         "body": body,
     }
+    return v, versions, settings
+
+
+def cmd_approve(a):
+    root = _root(a)
+    try:
+        body = Path(a.body).read_text(encoding="utf-8")
+    except OSError as e:
+        raise StepError(f"本文を読めない: {e}", 1) from None
+    probs = pm.shape_problems(body)
+    if probs:
+        raise StepError("本文の形が足りない: " + "／".join(f"{p['item']}: {p['reason']}" for p in probs), 1)
+    mvv = pm.load_mvv(root)
+    if mvv.status == "unreadable":
+        raise StepError(f"宣言が壊れているため版を足さない: {mvv.error}", 1)
+    sha = pm.sha256_text(body)
+    vet = _approvable_vet(root, sha, a.accept_unknown)
+    body_path, decl_path = pm.decl_paths(root)
+    v, versions, settings = _next_version(decl_path, body, sha, a, vet)
+    diff = v["changes"]
     decl = {"version": pm.DECL_VERSION, "body": pm.BODY_FILE, "settings": settings, "versions": [*versions, v]}
     errs = pm.decl_problems(decl)
     if errs:
