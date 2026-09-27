@@ -79,7 +79,7 @@ _MODULES = (
     "publish",
     "results",
     "scope",
-    "testcmd",
+    "targets",
     "triage",
     "undo",
     "verify",
@@ -127,6 +127,16 @@ def metrics() -> types.ModuleType:
 def refactor_lib(refactor: types.ModuleType) -> types.ModuleType:
     """`refactor_lib` そのもの。`ABORT` / `die` / `info` を持つ。"""
     return sys.modules["refactor_lib"]
+
+
+@pytest.fixture(autouse=True)
+def no_ci_sleep(refactor, monkeypatch):
+    """CI の待ち（`test_triage.wait_check`）を実際には眠らせない。
+
+    `waits.wait_until` は眠る長さで上限を数えるため、眠りを空にしても上限の判定は同じで、
+    テストが `pending` のまま上限まで待つ経路を秒を使わずに通れる。
+    """
+    monkeypatch.setattr(sys.modules["test_triage"], "SLEEP", lambda seconds: None)
 
 
 @pytest.fixture

@@ -77,7 +77,8 @@ run のステップ:
   `doc-lint`（追加した行の書き方のチェック）。`cmd` を書けばそちらを使う
 - `cmd` の `{pr}` は Pull Request の番号に、`{pr_url}` は URL に置き換わる（drive のステップの `args` も同じ）。
   Pull Request は pr のステップで作ったもの、または計画の `"Pull Request"`（URL なら末尾の数字を番号として読む）
-- `"rerun_failed": true`: 失敗したら落ちたテストだけ（`pytest --lf`）を走らせ直し、通れば成功として進む
+- テストのステップ（`test-limited` / `test-all`）は `test-run.py` が宣言の戦略で走らせ、落ちたテストを JUnit で
+  フレーキー・既存失敗・変更起因に分ける（変更起因が無ければ通る）。計画の `テストの戦略` と `テストの時間` に戦略と上限が載る
 - `"skip_to": "<ステップの id>"`: 終了コードが `skip_code`（既定 3。`refactor.py assess` の「飛ばしてよい」）なら
   そのステップへ進む
 - 終了コード 10〜19（共通の契約の関門）は失敗にしない。ステップの結果に `gate` を残して `"gate_next"`（無ければ

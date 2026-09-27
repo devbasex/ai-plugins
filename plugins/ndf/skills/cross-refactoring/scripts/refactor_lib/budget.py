@@ -33,18 +33,25 @@ def estimate_total(estimate: dict[str, Any]) -> float:
     return sum(float(estimate.get(name) or 0.0) for name in ("test", "implement", "verify"))
 
 
-def reserve(baseline_seconds: Optional[float], ci_check: bool, fix_minutes: float) -> dict[str, float]:
-    """予備時間 R の内訳（分）。
+def reserve(
+    strategy: Any,
+    whole_seconds: Optional[float],
+    ci_seconds: Optional[float],
+    ci_gate: bool,
+    fix_minutes: float,
+) -> dict[str, float]:
+    """予備時間 R の内訳（分。#1334 決定 8）。
 
-    全体のテストの所要は同じ実行の着手前の全体のテスト（`init`）の秒から見積もる。
-    測れていなければ 0 にする。見積りが無いのに予備時間を大きく取ると、項目が 1 件も
-    入らなくなる。最終ゲートの全体のテストは `--ci-check` があれば継続的統合が担い、
-    想定最大時間の内で走らないため 0 にする。
+    危険フラグの全体テストは手元で走らせる戦略なら所要 w、全体テストを CI に任せる戦略なら 0（最終ゲートへ寄せる）。
+    最終ゲートは手元なら w、CI で見る（戦略か `--ci-check`）なら CI の壁時計 c。w も c も測れていなければ 0 にする。
+    見積りが無いのに予備時間を大きく取ると、項目が 1 件も入らなくなる。
     """
-    whole = float(baseline_seconds) / 60 if baseline_seconds is not None else 0.0
+    import test_strategy as ts
+
+    danger, final = ts.reserve_seconds(strategy, whole_seconds, ci_seconds, ci_gate)
     return {
-        "danger_whole_test": whole,
-        "final_whole_test": 0.0 if ci_check else whole,
+        "danger_whole_test": danger / 60,
+        "final_whole_test": final / 60,
         "fix": float(fix_minutes),
         # 最終ゲートの修正 1 回分（決定 26）。検証の直しに食わせず、最終ゲートが落ちたとき
         # 必ず 1 度は直しを試みるための時間である。

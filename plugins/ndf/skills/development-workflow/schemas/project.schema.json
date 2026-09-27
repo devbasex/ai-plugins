@@ -379,7 +379,7 @@
     },
     "Suite": {
       "additionalProperties": false,
-      "description": "テストの 1 まとまり。`scope_command` の `{paths}` に範囲のパスが入る。",
+      "description": "テストの 1 まとまり。`scope_command` の `{paths}`（空白で区切った 1 語）に範囲のパスが入る。\n`junit` はコマンドが JUnit XML を書く作業ディレクトリからの相対パス（無ければ落ちたテストの見分けは走らせ直しへ落ちる）。",
       "properties": {
         "name": {
           "title": "Name",
@@ -404,6 +404,18 @@
           ],
           "default": null,
           "title": "Scope Command"
+        },
+        "junit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Junit"
         },
         "container": {
           "anyOf": [
@@ -443,7 +455,36 @@
     },
     "Test": {
       "additionalProperties": false,
+      "description": "テストの戦略（#1334）。`strategy` が空なら所要と suite から導く（`test_strategy.propose`）。",
       "properties": {
+        "strategy": {
+          "anyOf": [
+            {
+              "enum": [
+                "local-full",
+                "local-scoped-ci-whole",
+                "round-only"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Strategy"
+        },
+        "ci": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TestCi"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "suites": {
           "items": {
             "$ref": "#/$defs/Suite"
@@ -456,6 +497,38 @@
         "suites"
       ],
       "title": "Test",
+      "type": "object"
+    },
+    "TestCi": {
+      "additionalProperties": false,
+      "description": "全体テストを CI に任せるときに見る先。`check` は待つチェックの名前（空なら `ci.required_checks` のすべて）、\n`junit_artifacts` は JUnit を持つ成果物の名前の glob（空なら解析と同じ名前の規則）。",
+      "properties": {
+        "check": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Check"
+        },
+        "junit_artifacts": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Junit Artifacts"
+        }
+      },
+      "title": "TestCi",
       "type": "object"
     },
     "TestDuration": {

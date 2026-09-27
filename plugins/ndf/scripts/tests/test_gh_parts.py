@@ -255,6 +255,26 @@ def test_check_runs_are_read_to_total_count_across_pages(fake):
     assert len(runs) == 101 and runs[-1]["name"] == "last"
 
 
+def test_no_check_runs_yet_is_an_empty_list_only_when_asked(fake):
+    """push 直後（`total_count` 0）は、待つ側が頼んだときだけ空の一覧（照会の失敗の `None` と分ける。#1354）。"""
+    fake.on("api", "-i", f"repos/{REPO}/commits/{SHA}/check-runs?per_page=100&page=1", out=_rest_out({"total_count": 0, "check_runs": []}))
+
+    assert gp.fetch_check_runs(REPO, SHA) is None
+    assert gp.fetch_check_runs(REPO, SHA, empty_ok=True) == []
+
+
+def test_checks_outcome_waits_for_checks_that_are_not_listed_yet():
+    """待つチェックが一覧にまだ無いのは `pending`。照会できないときだけ `None`（#1354）。"""
+    import gh_checks
+
+    assert gh_checks.checks_outcome(None, ["t"]) is None
+    assert gh_checks.checks_outcome([], ["t"]) == "pending"
+    assert gh_checks.checks_outcome([_run("other", "success", "", 1)], ["t"]) == "pending"
+    assert gh_checks.checks_outcome([_run("t", "success", "", 1), _run("u", "", "", 2, status="in_progress")], ["t", "u"]) == "pending"
+    assert gh_checks.checks_outcome([_run("t", "success", "", 1), _run("u", "failure", "", 2)], ["t", "u"]) == "failure"
+    assert gh_checks.checks_outcome([_run("t", "success", "", 1)], ["t"]) == "success"
+
+
 # ---------------- unresolved-threads ----------------
 
 

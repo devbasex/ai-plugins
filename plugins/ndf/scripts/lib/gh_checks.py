@@ -19,10 +19,13 @@ def fetch_check_runs(
     rest_get: Callable[[str], Any] | None = None,
     per_page: int = CHECK_RUNS_PER_PAGE,
     max_pages: int = CHECK_RUNS_MAX_PAGES,
+    empty_ok: bool = False,
 ) -> list[dict[str, Any]] | None:
     """head の commit のチェックジョブを `total_count` に届くまで読む（畳む前の生の一覧）。
 
     **「照会できなかった」と「すべて成功」を区別する。** 失敗・`total_count` 0 はどちらも `None`。
+    `empty_ok` を真にすると、照会できてチェックが 1 件も無いとき（push 直後）は空の一覧を返す
+    （チェックの開始を待つ側が照会の失敗と分けるため）。
     `rest_get` は `.body` を持つ応答（失敗は `None`）を返す関数。省くと `rest` を使う。
     """
     if not repo or not sha:
@@ -41,14 +44,14 @@ def fetch_check_runs(
             except (TypeError, ValueError):
                 return None
             if total <= 0:
-                return None
+                return [] if empty_ok else None
         chunk = resp.body.get("check_runs")
         if not isinstance(chunk, list) or not chunk:
             break
         runs.extend(r for r in chunk if isinstance(r, dict))
         if len(runs) >= total:
             break
-    return runs or None
+    return runs if (runs or empty_ok) else None
 
 
 def _run_order(indexed: tuple[int, dict[str, Any]]) -> tuple[str, int, int]:
@@ -97,6 +100,20 @@ def check_result(runs: list[dict[str, Any]] | None, name: str) -> str | None:
         if str(run.get("name") or "") == name:
             return run_result(run)
     return None
+
+
+def checks_outcome(runs: list[dict[str, Any]] | None, names: list[str]) -> str | None:
+    """待つチェック群の今の結論（CI を待つ側が共有する）。照会できない（`runs` が `None`）ときだけ `None`。
+
+    一覧に**まだ現れていない**チェックは、照会の失敗ではなく `pending` とみなす（push 直後は登録前のため）。
+    全て成功なら `success`、未完了があれば `pending`、それ以外は最初の成功でない結論。
+    """
+    if runs is None:
+        return None
+    results = [check_result(runs, name) for name in names]
+    if any(r is None or r == "pending" for r in results):
+        return "pending"
+    return "success" if all(r == "success" for r in results) else str(next(r for r in results if r != "success"))
 
 
 _JOB_ID = re.compile(r"/job/(\d+)")

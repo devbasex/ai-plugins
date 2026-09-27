@@ -37,18 +37,32 @@ class Container(schema.Shape):
 
 
 class Suite(schema.Shape):
-    """テストの 1 まとまり。`scope_command` の `{paths}` に範囲のパスが入る。"""
+    """テストの 1 まとまり。`scope_command` の `{paths}`（空白で区切った 1 語）に範囲のパスが入る。
+    `junit` はコマンドが JUnit XML を書く作業ディレクトリからの相対パス（無ければ落ちたテストの見分けは走らせ直しへ落ちる）。"""
 
     name: str
     runner: str
     command: str
     scope_command: Optional[str] = None
+    junit: Optional[str] = None
     container: Optional[Container] = None
     needs: list[str] = []
     paths: list[str] = []
 
 
+class TestCi(schema.Shape):
+    """全体テストを CI に任せるときに見る先。`check` は待つチェックの名前（空なら `ci.required_checks` のすべて）、
+    `junit_artifacts` は JUnit を持つ成果物の名前の glob（空なら解析と同じ名前の規則）。"""
+
+    check: Optional[str] = None
+    junit_artifacts: Optional[str] = None
+
+
 class Test(schema.Shape):
+    """テストの戦略（#1334）。`strategy` が空なら所要と suite から導く（`test_strategy.propose`）。"""
+
+    strategy: Optional[Literal["local-full", "local-scoped-ci-whole", "round-only"]] = None
+    ci: Optional[TestCi] = None
     suites: list[Suite]
 
 

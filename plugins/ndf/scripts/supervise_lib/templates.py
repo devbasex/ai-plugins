@@ -10,7 +10,8 @@ from pathlib import Path
 from step_result import result
 from supervise_lib import release_templates
 from supervise_lib.decl import with_decls
-from supervise_lib.paths import CHECK_PY, MERGE_CMD, MERGE_PROBE, report_result, state_dir_of, with_paths
+from supervise_lib.paths import CHECK_PY, report_result, state_dir_of
+from supervise_lib.verify_steps import merge_step, refactor_template_arg, scope_cmd, scope_timeout, test_meta, whole_cmd, whole_timeout
 
 
 RULE_IMPL = (
@@ -126,9 +127,8 @@ def plan_to_merge(a, head: list[dict]) -> dict:
             "id": "test-limited",
             "type": "run",
             "stage": "完了判定",
-            "timeout": 900,
-            "rerun_failed": True,
-            "cmd": with_paths(a.test_cmd, tests),
+            "timeout": scope_timeout(a),
+            "cmd": scope_cmd(a, tests),
             "on_fail": "judge",
             "next": "pr",
         },
@@ -156,9 +156,8 @@ def plan_to_merge(a, head: list[dict]) -> dict:
             "id": "test-all",
             "type": "run",
             "stage": "完了判定",
-            "timeout": 1800,
-            "rerun_failed": True,
-            "cmd": with_paths(a.test_cmd, a.test_all),
+            "timeout": whole_timeout(a),
+            "cmd": whole_cmd(a),
             "on_fail": "judge",
             "next": "doc-lint",
         },
@@ -172,7 +171,7 @@ def plan_to_merge(a, head: list[dict]) -> dict:
             "next": "doc-lint",
         },
         {"id": "ready", "type": "run", "cmd": "sh -c 'git push -q && gh pr ready {pr}'", "next": "merge"},
-        {"id": "merge", "type": "run", "timeout": 7200, "cmd": MERGE_CMD, "probe": MERGE_PROBE, "next": "end"},
+        merge_step(a, next="end"),
     ]
     if getattr(a, "escape_of", None) is not None:
         # その場で直した不具合を「逃げた不具合」として記録する（検査のトリガーの材料。#1078）
@@ -188,6 +187,7 @@ def plan_to_merge(a, head: list[dict]) -> dict:
         "steps": steps,
     }
     with_decls(plan, a)
+    test_meta(plan, a)
     if getattr(a, "files", None):
         plan["触るファイル"] = a.files
     if a.branch:
@@ -206,7 +206,7 @@ def plan_check(a) -> dict:
         else f"$(gh api 'repos/{{owner}}/{{repo}}/pulls/{pr}/files' --paginate --jq '.[].filename'"
         f" | xargs -n1 dirname | sort -u | grep -vx '\\.')"
     )
-    # 駆動で回す（最終ゲートは全体のテスト）
+    # 駆動で回す（最終ゲートは全体テスト。テストの走らせ方は cross-refactoring が同じ宣言から読む。#1334）
     refactor = {
         "id": "refactor",
         "type": "drive",
@@ -214,10 +214,10 @@ def plan_check(a) -> dict:
         "kind": "構造改善",
         "stage": "構造改善",
         "timeout": 3600,
-        "args": f"{pr} --workflow-step --scope {scope} --baseline-test {shlex.quote(with_paths(a.test_cmd, a.test_all))}",
+        "args": f"{pr} --workflow-step --scope {scope}{refactor_template_arg(a)}",
         "next": "review",
     }
-    return with_decls(
+    return _with_test_meta(
         {
             "フェーズ": "検査",
             "課題": a.issue or [],
@@ -251,9 +251,8 @@ def plan_check(a) -> dict:
                     "id": "test-all",
                     "type": "run",
                     "stage": "完了判定",
-                    "timeout": 1800,
-                    "rerun_failed": True,
-                    "cmd": "git pull -q --rebase && " + with_paths(a.test_cmd, a.test_all),
+                    "timeout": whole_timeout(a),
+                    "cmd": "git pull -q --rebase && " + whole_cmd(a),
                     "on_fail": "judge",
                     "next": "ready",
                 },
@@ -273,11 +272,15 @@ def plan_check(a) -> dict:
                     "next": "test-all",
                 },
                 {"id": "ready", "type": "run", "cmd": f"git push -q; gh pr ready {pr}", "next": "merge"},
-                {"id": "merge", "type": "run", "timeout": 7200, "cmd": MERGE_CMD, "probe": MERGE_PROBE, "next": "end"},
+                merge_step(a, next="end"),
             ],
         },
         a,
     )
+
+
+def _with_test_meta(plan: dict, a) -> dict:
+    return test_meta(with_decls(plan, a), a)
 
 
 RULE_CHECK_SINCE = (
@@ -303,7 +306,6 @@ def plan_check_since(a) -> dict:
     if getattr(a, "since_ref", None):
         flag += f" --since {shlex.quote(a.since_ref)}"
     name = a.id
-    tests_all = shlex.quote(with_paths(a.test_cmd, a.test_all))
     state = "{state_dir}"
     scope = f"$({CHECK_PY} scope --id {name} --state {state} --root .)"
     cond = f"git -C {shlex.quote(repo)} fetch -q origin && {CHECK_PY} eval --id {name} --root {shlex.quote(repo)}"
@@ -355,7 +357,7 @@ def plan_check_since(a) -> dict:
             "kind": "構造改善",
             "stage": "構造改善",
             "timeout": 3600,
-            "args": f"{{pr}} --workflow-step --scope {scope} --baseline-test {tests_all}",
+            "args": f"{{pr}} --workflow-step --scope {scope}{refactor_template_arg(a)}",
             "next": "review",
         },
         {
@@ -373,11 +375,10 @@ def plan_check_since(a) -> dict:
             "id": "test-all",
             "type": "run",
             "stage": "完了判定",
-            "timeout": 1800,
-            "rerun_failed": True,
+            "timeout": whole_timeout(a),
             "cmd": (
                 f"git pull -q --rebase && git fetch -q origin {shlex.quote(a.base)} && "
-                f"git merge -q --no-edit origin/{shlex.quote(a.base)} && git push -q && " + with_paths(a.test_cmd, a.test_all)
+                f"git merge -q --no-edit origin/{shlex.quote(a.base)} && git push -q && " + whole_cmd(a)
             ),
             "on_fail": "judge",
             "next": "finish",
@@ -411,7 +412,7 @@ def plan_check_since(a) -> dict:
             "next": "ready",
         },
         {"id": "ready", "type": "run", "cmd": "sh -c 'git push -q && gh pr ready {pr}'", "on_fail": "abort", "next": "merge"},
-        {"id": "merge", "type": "run", "timeout": 7200, "cmd": MERGE_CMD, "probe": MERGE_PROBE, "on_fail": "abort", "next": "record"},
+        merge_step(a, on_fail="abort", next="record"),
         {"id": "record", "type": "run", "cmd": f"{record} --pr {{pr}}", "on_fail": "abort", "next": "end"},
         {"id": "abort", "type": "run", "cmd": f"{record} --failed --pr {{pr}}", "next": "end"},
         {"id": "abort-before-pr", "type": "run", "cmd": f"{record} --failed", "next": "end"},
@@ -437,7 +438,7 @@ def plan_check_since(a) -> dict:
         "実行の条件": {"cmd": cond, "skip_code": 3},
         "steps": steps,
     }
-    return with_decls(plan, a)
+    return _with_test_meta(plan, a)
 
 
 def cmd_new(a) -> dict:

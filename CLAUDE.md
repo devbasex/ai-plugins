@@ -62,13 +62,14 @@ python3 plugins/ndf/scripts/instructions-check.py --root .
 **`/ndf:cross-refactoring` は、想定最大時間（`--budget-minutes`、既定 30 分）に収まるリファクタリング計画を 1 回だけ実行する。** 参加者の全員が 1 度だけ多面的に提案し、実装担当 1 者（`--implementer` → ホスト → 参加者の先頭）が計画・テスト追加・実装・検証/修正を通す。参加者の既定は cross-review と同じ **claude / codex / kiro とホスト** で、`--exclude` / `--include` で名指しで変える（agy は `--include agy` で戻す）。レビューは最終ゲートの `cross-review` が担う。
 
 ```bash
-/ndf:cross-refactoring 130 --scope src/services tests/services --round-test "pytest tests/services -q" --baseline-test "pytest -q"
-/ndf:cross-refactoring 130 --scope src tests --baseline-test "pytest -q" --budget-minutes 30
+/ndf:cross-refactoring 130 --scope src/services tests/services
+/ndf:cross-refactoring 130 --scope src tests --budget-minutes 30
 ```
 
 - `--scope` は必須。提案が発散して PR が肥大するのを防ぐ。**検証にも効く**ので、現状固定テストの置き場所も含める
+- テストは**宣言（`.ndf/project.json` の `test`）の戦略**で走らせる。無ければ `--round-test` を渡す
 - 計画は配分テーブル（履歴の直近 10 回から集計。初期値は #917）で見積もり、「想定最大時間 − 経過 − バッファ」に収まる件数だけを採る。見送った提案は理由（`budget` / `rank` / `duplicate` / `vocabulary` / `threshold` / `no_target` / `test_failed` / `not_done`）とともに計画に残る
-- 項目の検証は**範囲テスト**（`--round-test` か `--baseline-test` の対象を計画の `test_targets` へ差し替えたもの）で走らせる。全体テストは着手前・危険フラグ（D1〜D5）が立ったときの 1 回・最終ゲートだけ。危険フラグの 1 回が落ちたら落ちたテストだけ走らせ直してフレーキー・既存失敗を除き、変更起因なら締め切りまで直す。直らなければ危険フラグの項目を新しい順に絞って取り消す。`--baseline-test` が pytest / jest / vitest でなければ `--round-test` は必須
+- 項目の検証は**範囲テスト**（`scope_command` の `{paths}` へ計画の `test_targets`）で走らせる。全体テストは着手前・危険フラグ（D1〜D5）の 1 回・最終ゲートだけ（CI に任せる戦略では危険フラグの 1 回を最終ゲートへ寄せる）。落ちたら JUnit から落ちたテストを走らせ直してフレーキー・既存失敗を除き、変更起因なら締め切りまで直す。直らなければ危険フラグの項目を新しい順に取り消す。着手前の失敗は既存失敗として記録する
 - 時間に関わる数値（手順の上限・テスト 1 回の上限・無音の打ち切り・直しの打ち切り）はすべて `--budget-minutes` から算術で出し、計画の終わりまでに状態ファイルと計画へ書き出す。監視はその手順の終わり + 余裕で CLI を止め、修正は回数でなく締め切りまで試みる。計画の後で LLM が動くのは作業の CLI だけ
 - 廃止: `--max-test-rounds` / `--max-outer-rounds` / `--max-items-per-round` / `--max-fix-rounds` / `--test-timeout` は知らせて無視する
 - ホストと同じランタイムが実装担当になる場合も、サブエージェントではなく **CLI プロセス**として起動する

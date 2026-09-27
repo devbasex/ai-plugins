@@ -104,6 +104,11 @@ def _gh_api_get(path: str) -> Optional[SimpleNamespace]:
         return None
 
 
+def gh_api_get(path: str) -> Optional[SimpleNamespace]:
+    """`_gh_api_get` の公開の名前（`gh_checks.fetch_check_runs` の `rest_get` に渡す）。"""
+    return _gh_api_get(path)
+
+
 def check_run_result(repo: str, sha: str, name: str) -> Optional[str]:
     """名前が一致したチェックジョブの、最新の実行の結果を 1 つの語で返す。
 
