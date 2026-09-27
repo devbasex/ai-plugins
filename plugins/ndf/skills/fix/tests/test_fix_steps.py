@@ -265,6 +265,7 @@ def test_finalize_builds_merge_fix_contract(env):
         "ci_status",
         "ci_failed_checks",
         "ci_note",
+        "project_mvv",
         "fixed_count",
         "by_severity",
         "resolved_threads",
@@ -274,7 +275,8 @@ def test_finalize_builds_merge_fix_contract(env):
     assert res["pr"] == PR and res["fix_commit"] == "abc1234" and res["fixed_count"] == 1
     assert res["by_severity"] == {"critical": 0, "major": 1, "minor": 0, "nit": 0}
     assert res["ci_status"] == "FAILURE" and res["ci_failed_checks"] == ["lint"]
-    assert res["resolved_threads"] == [{"thread_id": "PRRT_1", "comment_id": 11, "path": "a.py", "line": 3}]
+    assert res["resolved_threads"] == [{"thread_id": "PRRT_1", "comment_id": 11, "path": "a.py", "line": 3, "mvv_basis": ["MVV なし"]}]
+    assert res["project_mvv"] == {"status": "none", "version": None, "sha256": None}
     assert [d["thread_id"] for d in res["deferred"]] == ["PRRT_3", "PRRT_5"]
     assert res["deferred"][0]["reason_for_deferral"] == "好みの範囲" and "resolve" not in res["deferred"][0]
     assert res["deferred"][1]["resolve"] is True and "#900" in res["deferred"][1]["reason_for_deferral"]
@@ -433,7 +435,8 @@ def test_waived_minor_and_nit_close_without_commit_or_push(env):
     assert [e["thread_id"] for e in res["deferred"]] == ["PRRT_4", "PRRT_3"]
     for e, kind in zip(res["deferred"], ("doc_mismatch", "wording")):
         assert e["resolve"] is True and e["waived"] == kind
-        assert e["reply"] == review_criteria.waiver_reply(kind) == e["reason_for_deferral"]
+        assert e["reply"] == review_criteria.waiver_reply(kind, (), "（MVV なし）") == e["reason_for_deferral"]
+        assert e["mvv_basis"] == ["MVV なし"]
     assert out["metrics"]["waived"] == 2
     dropped = next(i for i in out["items"] if i["name"] == "fix-commit")
     assert dropped["result"] == "dropped" and "abc1234" in dropped["reason"]

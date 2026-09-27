@@ -64,6 +64,7 @@ from step_result import (  # noqa: E402
     run,
 )
 import gh_parts  # noqa: E402
+import project_mvv  # noqa: E402
 import review_criteria  # noqa: E402
 
 TOOL = "fix"
@@ -208,10 +209,29 @@ def focus_for_context(root_arg) -> review_criteria.Focus:
     return review_criteria.load_focus(root)
 
 
+def mvv_for_context(root_arg) -> tuple[dict, str]:
+    """(プロジェクト MVV の参照, MVV の節)。cross-review の中なら状態ファイルに写したもの、単独なら作業ツリーの宣言（#1366）。"""
+    state = os.environ.get("CROSS_REVIEW_STATE")
+    if state:
+        try:
+            crit = json.loads(Path(state).read_text(encoding="utf-8")).get("review_criteria")
+        except (OSError, ValueError, AttributeError):
+            crit = None
+        if isinstance(crit, dict) and isinstance(crit.get("project_mvv"), dict) and crit.get("mvv_block"):
+            return crit["project_mvv"], crit["mvv_block"]
+    try:
+        root = git_root(root_arg)
+    except StepError:
+        root = Path.cwd()
+    mvv = project_mvv.load(root)
+    return project_mvv.record(mvv), project_mvv.block(mvv)
+
+
 def cmd_context(a):
     pr = a.pr
     repo = repo_of(a)
     focus = focus_for_context(a.root)
+    mvv_ref, mvv_block = mvv_for_context(a.root)
     view = pr_for_fix(pr)
     threads = threads_with_first_comment(repo, pr)
     comments_text, comments_n = fetch_comments(repo, pr)
@@ -241,7 +261,7 @@ def cmd_context(a):
     if log_path:
         lines += ["", f"失敗ログ: {log_path}"]
     lines += ["", f"## コメント（3 種、{comments_n} 行）", "", "```", comments_text.rstrip(), "```", ""]
-    lines += [review_criteria.fixer_block(focus), ""]
+    lines += [review_criteria.fixer_block(focus, mvv_block), ""]
     ctx.write_text("\n".join(lines), encoding="utf-8")
 
     dec = d / f"fix-pr{pr}-decisions.json"
@@ -254,6 +274,7 @@ def cmd_context(a):
                 "ci_note": None,
                 "review_focus": list(focus.names),
                 "review_focus_status": focus.status,
+                "project_mvv": mvv_ref,
                 "decisions": [
                     {
                         "thread_id": t["thread_id"],
@@ -265,6 +286,7 @@ def cmd_context(a):
                         "summary": head_line(t["body"]),
                         "decision": "",
                         "reason": "",
+                        "mvv_basis": [],
                     }
                     for t in threads
                 ],
@@ -279,6 +301,7 @@ def cmd_context(a):
         {"name": "context", "path": str(ctx)},
         {"name": "decisions", "path": str(dec)},
         {"name": "review-focus", "result": focus.status, "reason": focus.error},
+        {"name": "project-mvv", "result": mvv_ref.get("status"), "version": mvv_ref.get("version"), "sha256": mvv_ref.get("sha256")},
     ]
     items += [{"name": c.get("name"), "result": "ci_failed", "state": c.get("state"), "link": c.get("link")} for c in failed]
     if log_path:
@@ -387,12 +410,17 @@ def build_result(pr: int, d: dict, commit: str | None, ci_status: str, failed_na
     resolved = [pick(e, "thread_id", "comment_id", "path", "line") for e in fixed]
     deferred = []
     names = focus_names(d)
+    mvv = project_mvv.from_record(d.get("project_mvv"))
+    for e in decs:  # 根拠の項目を正規化する（I7。返されなければ「根拠なし」か「MVV なし」で、止めない）
+        e["mvv_basis"] = project_mvv.basis(e.get("mvv_basis"), mvv)
+    for e in fixed:
+        resolved[fixed.index(e)]["mvv_basis"] = e["mvv_basis"]
     for e in decs:
         if e["decision"] == "waived":
-            reply = review_criteria.waiver_reply(e["waive_kind"], names)
+            reply = review_criteria.waiver_reply(e["waive_kind"], names, project_mvv.basis_phrase(e["mvv_basis"], mvv))
             deferred.append(
                 {
-                    **pick(e, "comment_id", "thread_id", "path", "line", "severity", "category", "summary"),
+                    **pick(e, "comment_id", "thread_id", "path", "line", "severity", "category", "summary", "mvv_basis"),
                     "reason_for_deferral": reply,
                     "reply": reply,
                     "resolve": True,
@@ -402,21 +430,24 @@ def build_result(pr: int, d: dict, commit: str | None, ci_status: str, failed_na
         elif e["decision"] == "deferred":
             deferred.append(
                 {
-                    **pick(e, "comment_id", "thread_id", "path", "line", "severity", "category", "summary"),
+                    **pick(e, "comment_id", "thread_id", "path", "line", "severity", "category", "summary", "mvv_basis"),
                     "reason_for_deferral": e.get("reason"),
                 }
             )
         elif e["decision"] == "separate_pr":
             deferred.append(
                 {
-                    **pick(e, "comment_id", "thread_id", "path", "line", "severity", "category", "summary"),
+                    **pick(e, "comment_id", "thread_id", "path", "line", "severity", "category", "summary", "mvv_basis"),
                     "reason_for_deferral": f"別 PR で対応（{e['issue']}）" + (f": {e['reason']}" if e.get("reason") else ""),
                     "issue": e["issue"],
                     "resolve": True,
                 }
             )
     rejected = [
-        {**pick(e, "comment_id", "thread_id", "path", "line", "severity", "category", "summary"), "reason_for_rejection": e.get("reason")}
+        {
+            **pick(e, "comment_id", "thread_id", "path", "line", "severity", "category", "summary", "mvv_basis"),
+            "reason_for_rejection": e.get("reason"),
+        }
         for e in decs
         if e["decision"] == "rejected"
     ]
@@ -426,6 +457,7 @@ def build_result(pr: int, d: dict, commit: str | None, ci_status: str, failed_na
         "ci_status": ci_status,
         "ci_failed_checks": failed_names,
         "ci_note": d.get("ci_note"),
+        "project_mvv": project_mvv.record(mvv),
         "fixed_count": len(fixed),
         "by_severity": by,
         "resolved_threads": resolved,

@@ -70,7 +70,7 @@ def env(tmp_path):
     claude = bindir / "claude"
     claude.write_text(
         f"#!/bin/sh\necho claude >> {calls}\ncat > {tmp_path / 'prompt.txt'}\n"
-        f"python3 -c 'import json,sys; print(json.dumps({{\"result\": open(sys.argv[1]).read(), \"total_cost_usd\": 0.01}}))' {tmp_path / 'answer.txt'}\n"
+        f'python3 -c \'import json,sys; print(json.dumps({{"result": open(sys.argv[1]).read(), "total_cost_usd": 0.01}}))\' {tmp_path / "answer.txt"}\n'
     )
     claude.chmod(0o755)
     root = tmp_path / "repo"
@@ -223,7 +223,9 @@ def proposal(cands: list[dict], questions=True) -> str:
             "options": "A と B",
             "glossary": [{"term": "MVV", "meaning": "Mission / Vision / Value"}],
             "candidates": cands,
-            "questions": [{"question": "速さと確かさのどちらを先にするか", "options": [{"label": "速さ", "effect": "A"}]}] if questions else [],
+            "questions": [{"question": "速さと確かさのどちらを先にするか", "options": [{"label": "速さ", "effect": "A"}]}]
+            if questions
+            else [],
         },
         ensure_ascii=False,
     )
@@ -240,7 +242,9 @@ def materials(env: dict) -> str:
         pytest.param(lambda: proposal([candidate("A")]), id="one"),
         pytest.param(lambda: proposal([candidate("A"), candidate("B", "S999")]), id="unknown-evidence"),
         pytest.param(lambda: proposal([candidate("A"), candidate("B")], questions=False), id="no-questions"),
-        pytest.param(lambda: proposal([candidate("A"), candidate("B")]).replace('"context": "MVV が無い"', '"context": ""'), id="no-context"),
+        pytest.param(
+            lambda: proposal([candidate("A"), candidate("B")]).replace('"context": "MVV が無い"', '"context": ""'), id="no-context"
+        ),
         pytest.param(lambda: "候補は書けない", id="not-json"),
     ],
 )
@@ -488,7 +492,9 @@ def test_init_fast_stops_when_the_mission_mvv_contradicts_the_project_mvv(env):
     mission = body_file(env, "## Mission\n速く\n## Vision\n回る\n## Value\n1. P1 は承認なしで変えてよい\n", "mission.md")
     answer(env, '{"verdict": "suspect", "locations": [{"item": "P1", "reason": "レッドラインを緩める"}]}')
     state = env["tmp"] / "s" / "m.json"
-    code, out, _ = run(env, "init", str(state), "--name", "m", "--pace", "fast", "--mvv", mission, "--root", str(env["root"]), script=STATE_PY)
+    code, out, _ = run(
+        env, "init", str(state), "--name", "m", "--pace", "fast", "--mvv", mission, "--root", str(env["root"]), script=STATE_PY
+    )
     assert code == 1 and "P1" in out["summary"] and not state.exists()
 
 
@@ -521,8 +527,20 @@ def gate_check(env, state: Path, *extra: str) -> tuple[int, dict, list[dict]]:
     material.write_text("# 配布\n")
     log = env["tmp"] / "gate.jsonl"
     code, out, text = run(
-        env, "check", "--mission", str(state), "--gate", "release", "--material", str(material), "--log", str(log),
-        "--root", str(env["root"]), *extra, script=GATE_PY,
+        env,
+        "check",
+        "--mission",
+        str(state),
+        "--gate",
+        "release",
+        "--material",
+        str(material),
+        "--log",
+        str(log),
+        "--root",
+        str(env["root"]),
+        *extra,
+        script=GATE_PY,
     )
     return code, out, pm.read_jsonl(log)
 
@@ -590,3 +608,65 @@ def test_defaults_hold_no_repository_specific_values():
     src = (SCRIPTS / "lib" / "project_mvv.py").read_text() + MVV_PY.read_text()
     assert "ai-plugins" not in src and "devbasex" not in src
     assert pm.DEFAULTS["trend_commits"] == 100 and pm.DEFAULTS["revise_after"] == {"overrides": 3, "unknowns": 5, "escapes": 3}
+
+
+# ---------------------------------------------------------------- cross-review・fix・supervise の judge（AC8・AC9）
+
+
+def test_review_state_carries_the_reference_and_the_block(env):
+    import review_criteria as rc
+
+    assert approve(env) == 0
+    mvv = pm.load(env["root"])
+    st = rc.as_state(rc.NO_FOCUS, mvv)
+    assert st["project_mvv"] == pm.record(mvv) and st["mvv_block"] == pm.block(mvv)
+    assert pm.principles() in st["reviewer_block"] and "利用者の手を減らす" in st["reviewer_block"]
+    fixer = rc.fixer_block(rc.NO_FOCUS, st["mvv_block"])
+    assert pm.contract() in fixer and rc.MVV_FIXER in fixer
+    assert rc.reviewer_block(rc.NO_FOCUS) == rc.reviewer_block()  # 省けば今の出力と同じ
+    assert rc.waiver_reply("wording", (), "根拠: Value 1（MVV 版 1）").endswith("根拠: Value 1（MVV 版 1）")
+
+
+def test_fix_finalize_records_the_basis_and_the_reply_phrase(env):
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("fix_steps_mvv", SCRIPTS.parent / "skills" / "fix" / "scripts" / "fix-steps.py")
+    fs = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fs)
+    d = {
+        "project_mvv": {"status": "approved", "version": 2, "sha256": "x"},
+        "decisions": [
+            {"thread_id": "T1", "decision": "waived", "waive_kind": "wording", "severity": "nit", "mvv_basis": ["value 1"]},
+            {"thread_id": "T2", "decision": "fixed", "severity": "major"},
+        ],
+    }
+    res = fs.build_result(1, d, "abc", "SUCCESS", [])
+    assert res["deferred"][0]["mvv_basis"] == ["Value 1"] and res["deferred"][0]["reply"].endswith("根拠: Value 1（MVV 版 2）")
+    assert res["resolved_threads"][0]["mvv_basis"] == [pm.NO_BASIS] and res["project_mvv"]["version"] == 2
+
+
+def test_judge_gets_the_block_and_records_the_basis(env, monkeypatch):
+    from supervise_lib import engine
+
+    assert approve(env) == 0
+    fake = env["tmp"] / "judge.sh"
+    fake.write_text(
+        f"#!/bin/sh\ncat > {env['tmp'] / 'judge-prompt.txt'}\n"
+        """echo '{"result": "{\\"decision\\": \\"stop\\", \\"reason\\": \\"x\\", \\"basis\\": [\\"Value 2\\"]}", "usage": {}}'\n"""
+    )
+    fake.chmod(0o755)
+    for k in ("NDF_MVV_STATE_DIR", "NDF_USAGE_DIR", "HOME"):
+        monkeypatch.setenv(k, env["env"][k])
+    monkeypatch.setenv("NDF_SUPERVISE_CLAUDE", str(fake))
+    plan = {
+        "フェーズ": "試験",
+        "課題": [1],
+        "作業場所": str(env["root"]),
+        "steps": [{"id": "j", "type": "judge", "question": "?", "choices": ["stop"]}],
+    }
+    s = engine.Engine(plan, env["tmp"] / "sv")
+    s.run()
+    state = json.loads((env["tmp"] / "sv" / "state.json").read_text())
+    assert state["project_mvv"] == {"status": "approved", "version": 1, "sha256": sha(BODY)}
+    assert state["log"][-1]["basis"] == ["Value 2"]
+    assert (env["tmp"] / "judge-prompt.txt").read_text().startswith(pm.principles())

@@ -184,7 +184,9 @@ def shape_problems(text: str) -> list[dict]:
         out.append({"item": "Value", "reason": "`## Value` に番号つきの箇条（`1. ...`）が無い"})
     for word in PRINCIPLE_HEADINGS:
         if any(k.startswith(word) for k in secs):
-            out.append({"item": "priority" if word == "優先順位" else "principle", "reason": f"共通原則の写し（`## {word}` の節）を持てない"})
+            out.append(
+                {"item": "priority" if word == "優先順位" else "principle", "reason": f"共通原則の写し（`## {word}` の節）を持てない"}
+            )
     for k, n in _table_ids(text):
         if k == "C":
             out.append({"item": f"C{n}", "reason": f"共通原則の操作（C{n} の行）を本文へ写せない。固有の操作は P の番号で書く"})
@@ -311,16 +313,33 @@ def load(root) -> ProjectMvv:
     try:
         body = body_path.read_text(encoding="utf-8")
     except OSError as e:
-        return ProjectMvv("mismatch", version=last["version"], sha256=last["sha256"], error=f"{body_path} を読めない: {e}",
-                          settings=settings, versions=data["versions"])
+        return ProjectMvv(
+            "mismatch",
+            version=last["version"],
+            sha256=last["sha256"],
+            error=f"{body_path} を読めない: {e}",
+            settings=settings,
+            versions=data["versions"],
+        )
     now = sha256_text(body)
     if now != last["sha256"]:
         return ProjectMvv(
-            "mismatch", version=last["version"], sha256=now, settings=settings, versions=data["versions"],
+            "mismatch",
+            version=last["version"],
+            sha256=now,
+            settings=settings,
+            versions=data["versions"],
             error=f"{body_path} の sha256 が版 {last['version']} の承認と一致しない",
         )
-    return ProjectMvv("approved", version=last["version"], sha256=now, body=body, settings=settings,
-                      approved_at=last["approved_at"], versions=data["versions"])
+    return ProjectMvv(
+        "approved",
+        version=last["version"],
+        sha256=now,
+        body=body,
+        settings=settings,
+        approved_at=last["approved_at"],
+        versions=data["versions"],
+    )
 
 
 def read_settings(root) -> tuple[dict, str | None]:
@@ -385,14 +404,15 @@ def _norm_id(s: str) -> str:
 def basis(raw, mvv: ProjectMvv, extra=()) -> list[str]:
     """根拠の項目の正規化（I7）。本文・共通原則に無い番号は落とす。空なら「MVV なし」か「根拠なし」。"""
     values = raw if isinstance(raw, (list, tuple)) else [raw] if raw else []
-    allowed = allowed_ids(mvv, extra)
+    # 状態に写した参照から組み直した MVV（本文を持たない）は、番号の形だけを見る
+    allowed = None if (mvv.approved and mvv.body is None) else allowed_ids(mvv, extra)
     out: list[str] = []
     for v in values:
         if not isinstance(v, str):
             continue
         for m in ITEM_RE.finditer(v):
             item = _norm_id(m.group(1))
-            if item in allowed and item not in out:
+            if (allowed is None or item in allowed) and item not in out:
                 out.append(item)
     if out:
         return out
@@ -518,7 +538,9 @@ def signals(root, mvv: ProjectMvv, *, signals_log=None, gate_log=None, escapes: 
     sig = [r for r in read_jsonl(signals_log or signals_log_path()) if r.get("repo") == key and _after(r, since)]
     if mvv.approved:
         sig = [r for r in sig if r.get("project_sha256") == sha]
-    gate_rows = [r for r in read_jsonl(gate_log or gate_log_path()) if (r.get("project_mvv") or {}).get("sha256") == sha and _after(r, since)]
+    gate_rows = [
+        r for r in read_jsonl(gate_log or gate_log_path()) if (r.get("project_mvv") or {}).get("sha256") == sha and _after(r, since)
+    ]
     if mvv.approved:
         gate_rows = [r for r in gate_rows if r.get("repo") in (None, key)]
     esc = [e for e in (escapes or []) if e.get("kind") == "escape" and _after(e, since)]

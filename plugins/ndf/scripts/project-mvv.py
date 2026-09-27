@@ -278,7 +278,9 @@ def collect_materials(root: Path, a) -> dict:
     if not slug:
         missing.append({"what": "課題", "reason": "origin が GitHub でない（課題を読まない）"})
     else:
-        q = _run(["gh", "issue", "list", "--repo", slug, "--state", "all", "--limit", str(ISSUE_LIMIT), "--json", "number,title,body"], root, dl)
+        q = _run(
+            ["gh", "issue", "list", "--repo", slug, "--state", "all", "--limit", str(ISSUE_LIMIT), "--json", "number,title,body"], root, dl
+        )
         if isinstance(q, str):
             missing.append({"what": "課題", "reason": q})
         else:
@@ -457,7 +459,9 @@ def propose_prompt(mats: dict, current: str | None, reason: str | None) -> str:
         body.append(piece)
         size += len(piece)
     parts.append("\n".join(body) or "（材料が無い）")
-    parts.append(f"モード: {mats.get('mode')}（{'履歴が少ないため、README・指示書・依頼文の傾向から書く' if mats.get('mode') == 'trend' else '履歴から書く'}）")
+    parts.append(
+        f"モード: {mats.get('mode')}（{'履歴が少ないため、README・指示書・依頼文の傾向から書く' if mats.get('mode') == 'trend' else '履歴から書く'}）"
+    )
     if current is not None:
         parts += ["# 現行のプロジェクト MVV（改訂の対象）", current.strip(), "# 改訂の理由", (reason or "（理由の記述なし）").strip()]
         parts.append("改訂案を書く。候補の 1 つは現行からの差分が最小の案にする。")
@@ -510,7 +514,15 @@ def cmd_propose(a):
             TOOL,
             "ok",
             f"候補を {len(data['candidates'])} 案書いた: {cm}",
-            [{"kind": "candidate", "name": str(c.get("id")), "result": "recommended" if c.get("recommended") else "option", "body": bodies[c.get("id")]} for c in data["candidates"]],
+            [
+                {
+                    "kind": "candidate",
+                    "name": str(c.get("id")),
+                    "result": "recommended" if c.get("recommended") else "option",
+                    "body": bodies[c.get("id")],
+                }
+                for c in data["candidates"]
+            ],
             {**usage, "candidates_json": str(cj), "candidates_md": str(cm)},
             presentation_path=str(cm),
             next="candidates.md を示し、分かれる点を AskUserQuestion で問う。承認の前に .ndf/ へ書かない",
@@ -549,7 +561,9 @@ def vet_body(root: Path, body: str, kind: str) -> tuple[dict, dict]:
         if probs:
             rec.update(verdict="suspect", locations=probs, machine=True)
     if kind == "revision" and not mvv.approved and rec["verdict"] == "unreadable":
-        rec["locations"] = [{"item": "project_mvv", "reason": f"改訂には承認済みのプロジェクト MVV が要る（今は {pm.STATUS_LABEL[mvv.status]}）"}]
+        rec["locations"] = [
+            {"item": "project_mvv", "reason": f"改訂には承認済みのプロジェクト MVV が要る（今は {pm.STATUS_LABEL[mvv.status]}）"}
+        ]
     elif rec["verdict"] == "unreadable":
         data, raw, usage = _call_llm(VET_SYSTEM, vet_prompt(kind, body, mvv), root, "mvv-vet")
         if data is None or data.get("verdict") not in VET_VERDICTS:
@@ -569,13 +583,20 @@ def cmd_vet(a):
     except OSError as e:
         raise StepError(f"本文を読めない: {e}", EXIT_UNREADABLE) from None
     rec, usage = vet_body(root, body, a.kind)
-    items = [{"kind": "location", "name": str(x.get("item", "")), "result": rec["verdict"], "reason": str(x.get("reason", ""))} for x in rec["locations"]]
+    items = [
+        {"kind": "location", "name": str(x.get("item", "")), "result": rec["verdict"], "reason": str(x.get("reason", ""))}
+        for x in rec["locations"]
+    ]
     for it in items:
         print(f"{it['name']}: {it['reason']}")
     if rec["verdict"] == "follow":
         emit(result(TOOL, "ok", f"照合: 従う（{a.kind}・sha256 {rec['sha256'][:12]}）", items, usage))
     label = {"suspect": "反する疑い", "unknown": "判定できない", "unreadable": "読めない"}[rec["verdict"]]
-    nxt = "箇所を示して本文を直し、照合をやり直す" if rec["verdict"] == "suspect" else "人へ戻す（判定できないを引き受けるなら approve --accept-unknown）"
+    nxt = (
+        "箇所を示して本文を直し、照合をやり直す"
+        if rec["verdict"] == "suspect"
+        else "人へ戻す（判定できないを引き受けるなら approve --accept-unknown）"
+    )
     emit(result(TOOL, "gate", f"照合: {label}（{a.kind}）", items, usage, next=nxt), EXIT_GATE)
 
 
@@ -584,7 +605,11 @@ def cmd_vet(a):
 
 def last_vet(root: Path, sha: str) -> dict | None:
     key = pm.repo_key(root)
-    rows = [r for r in pm.read_jsonl(pm.vet_log_path()) if r.get("repo") == key and r.get("sha256") == sha and r.get("kind") in ("candidate", "revision")]
+    rows = [
+        r
+        for r in pm.read_jsonl(pm.vet_log_path())
+        if r.get("repo") == key and r.get("sha256") == sha and r.get("kind") in ("candidate", "revision")
+    ]
     return rows[-1] if rows else None
 
 
@@ -686,7 +711,15 @@ def cmd_show(a):
         text = "".join(difflib.unified_diff(old["body"].splitlines(True), v["body"].splitlines(True), f"版 {a.diff}", f"版 {n}"))
         print(text)
         ch = pm.changes(old["body"], v["body"])
-        emit(result(TOOL, "ok", f"版 {a.diff} → 版 {n} の差分（{len(ch)} 項目）", [{"kind": "change", "name": c["item"], "result": c["kind"]} for c in ch], {"from": a.diff, "to": n}))
+        emit(
+            result(
+                TOOL,
+                "ok",
+                f"版 {a.diff} → 版 {n} の差分（{len(ch)} 項目）",
+                [{"kind": "change", "name": c["item"], "result": c["kind"]} for c in ch],
+                {"from": a.diff, "to": n},
+            )
+        )
     print(v["body"])
     emit(
         result(
@@ -709,7 +742,15 @@ def cmd_context(a):
     if a.format == "text":
         sys.stdout.write(text)
         return 0
-    emit(result(TOOL, "ok", f"MVV の節（{pm.STATUS_LABEL[mvv.status]}）", [{"kind": "context", "name": mvv.status, "result": mvv.status, "project_mvv": pm.record(mvv), "block": text}], pm.record(mvv)))
+    emit(
+        result(
+            TOOL,
+            "ok",
+            f"MVV の節（{pm.STATUS_LABEL[mvv.status]}）",
+            [{"kind": "context", "name": mvv.status, "result": mvv.status, "project_mvv": pm.record(mvv), "block": text}],
+            pm.record(mvv),
+        )
+    )
 
 
 def escape_events(root: Path) -> list[dict]:

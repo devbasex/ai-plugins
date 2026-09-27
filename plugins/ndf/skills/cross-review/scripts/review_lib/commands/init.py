@@ -11,6 +11,7 @@ from typing import Any, NamedTuple
 
 import review_lib  # noqa: E402
 import assignment  # noqa: E402
+import project_mvv  # noqa: E402
 import review_criteria  # noqa: E402
 from classifications import default_max_rounds, review_kind  # noqa: E402
 from review_lib import (  # noqa: E402
@@ -67,14 +68,18 @@ def _print_init_result(result: _InitResult) -> None:
 
 
 def _review_criteria(worktree: object) -> dict[str, Any]:
-    """PR の head の作業ツリーから重点の宣言を読み、状態ファイルの `review_criteria` を組む（#1287）。
+    """PR の head の作業ツリーから重点の宣言とプロジェクト MVV を読み、状態ファイルの `review_criteria` を組む（#1287・#1366）。
 
     読めなくても止めない。基準 1・2・4 の節で続け、読めなかったことを標準エラーへ出す。
     """
     focus = review_criteria.load_focus(worktree) if worktree else review_criteria.NO_FOCUS
     if focus.status == "unreadable":
         review_lib.info(f"⚠️ レビューの重点の宣言を読めないため、基準 1・2・4 だけで続ける: {focus.error}")
-    return review_criteria.as_state(focus)
+    # プロジェクト MVV（#1366）は 1 回だけ読み、参照と MVV の節を写す。担当・修正担当・見送りの返信が同じ節を読む
+    mvv = project_mvv.load(worktree) if worktree else project_mvv.ProjectMvv("none")
+    if mvv.status in ("unapproved", "mismatch", "unreadable"):
+        review_lib.info(f"⚠️ プロジェクト MVV が{project_mvv.STATUS_LABEL[mvv.status]}ため、MVV なしで続ける: {mvv.error}")
+    return review_criteria.as_state(focus, mvv)
 
 
 def _rewrite_review_criteria(state_file: pathlib.Path, worktree: object) -> str:

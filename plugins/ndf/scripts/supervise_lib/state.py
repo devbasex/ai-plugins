@@ -60,6 +60,15 @@ class RunState:
         self.worker_recent: list[str] = []
         self.worker_last_at: float | None = None
         self.run_log: Path | None = None  # run のステップの stderr（待ちの間に最後の行を読む）
+        self.project_mvv = None  # 判断の基準（lib/project_mvv.ProjectMvv）。judge の最初の 1 回で読む
+
+    def project_mvv_of(self, root):
+        """プロジェクト MVV を実行の中で 1 回だけ読み、参照を state.json に残す（#1366）。"""
+        if self.project_mvv is None:
+            import project_mvv
+
+            self.project_mvv = project_mvv.load(root)
+        return self.project_mvv
 
     # --- 途中の報告 ---
     def progress_write(self, rec: dict) -> None:
@@ -223,7 +232,12 @@ class RunState:
                 )
         self.out_path(n, sid).write_text(self.cur.get("text", ""))
         self.log.append({k: v for k, v in self.cur.items() if k != "text"})
-        (self.dir / "state.json").write_text(json.dumps({"log": self.log, "llm": self.llm}, ensure_ascii=False, indent=1))
+        data = {"log": self.log, "llm": self.llm}
+        if self.project_mvv is not None:
+            import project_mvv
+
+            data["project_mvv"] = project_mvv.record(self.project_mvv)
+        (self.dir / "state.json").write_text(json.dumps(data, ensure_ascii=False, indent=1))
 
     def write_report(self, plan: dict, result: str, reason: str) -> str:
         """`## フェーズの報告` を組み、`report.md` へ書いて返す。"""
