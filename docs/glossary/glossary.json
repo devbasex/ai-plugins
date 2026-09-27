@@ -2248,6 +2248,20 @@
       "code": "junit",
       "source": "",
       "pending_source": "issues/issue-1334-design.md"
+    },
+    {
+      "term": "依存物",
+      "context": "ndf-worktree",
+      "meaning": "パッケージマネージャが入れる、追跡されないディレクトリ（`vendor/`・`node_modules/`・`.venv` など）。worktree には最初から無い",
+      "source": "",
+      "pending_source": "issues/issue-1337-requirements.md"
+    },
+    {
+      "term": "依存の用意",
+      "context": "ndf-worktree",
+      "meaning": "worktree を作った直後に、宣言に従って依存物を worktree で使える状態にすること。手段（コマンド・参照・複製）は問わない",
+      "source": "",
+      "pending_source": "issues/issue-1337-requirements.md"
     }
   ]
 }
