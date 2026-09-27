@@ -358,6 +358,14 @@ def test_no_work_needs_approval_then_applies(env):
     assert code == 0 and env.state()["issues"]["7"]["state"] == "closed"
 
 
+@pytest.mark.parametrize("approved", ["false", 1])
+def test_no_work_rejects_non_bool_approved(env, approved):
+    snap = env.snapshot(7)
+    ch = {"state": "closed", "state_reason": "not_planned"}
+    code, _ = env.run("apply", "--plan", env.plan([_action(snap, "やらない", ch, approved=approved)]))
+    assert code == 2 and not env.writes()
+
+
 def test_needs_judgement_is_returned(env):
     snap = env.snapshot(7)
     code, out = env.run("apply", "--plan", env.plan([_action(snap, "要判断", {"body": "x"})]))
@@ -394,6 +402,14 @@ def test_report_summarises_candidates_and_apply(env):
     m = out["metrics"]
     assert m["targets"] == 7 and m["closed"] == 1 and m["verdicts"]["閉じてよい"] == 1
     assert m["wait_count"] == 0
+
+
+def test_report_after_new_candidates_drops_previous_apply(env):
+    snap = env.snapshot(4)
+    env.run("apply", "--plan", env.plan([_action(snap, "閉じてよい", {"state": "closed", "state_reason": "completed"})]))
+    env.snapshot(3)  # 次の回の candidates
+    code, out = env.run("report")
+    assert code == 0 and "closed" not in out["metrics"] and "applied" not in out["metrics"]
 
 
 def test_report_without_records_is_precondition(env):
