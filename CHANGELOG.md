@@ -12,6 +12,8 @@
 ## [ndf 10.17.33] - 2026-09-27
 
 - ミッション m1323 の課題を develop へ取り込む。（#1342）
+- cross-refactoring の `--baseline-test` に `env -u NAME ...` や `env NAME=VAL ...` を前に付けた pytest を渡しても、`--round-test` 無しで項目ごとの範囲テストを組み立てられる（#1329）
+- Docs: NDF の汎用性の調査（2026-09-27）を足す（#1341）
 
 ## [ndf 10.17.32] - 2026-09-26
 
