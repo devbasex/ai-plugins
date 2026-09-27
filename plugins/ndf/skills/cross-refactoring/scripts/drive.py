@@ -238,9 +238,13 @@ class Drive:
         if gate.get("status") == "failing" and gate.get("impl") and gate.get("fix_base_sha"):
             self.rf("merge-final-fix", i, ok=(0, 2))
         for _ in range(100):
+            self.v.pop("FINAL_GATE", None)
             rc, _ = self.rf("final-gate", i, ok=(0, 1, 2))
             if rc in (0, 1):
                 return
+            if self.v.get("FINAL_GATE") == "recheck":
+                # 寄せた危険フラグの項目を取り消しただけで、修正の依頼ではない。修正の CLI を起動せずに確かめ直す。
+                continue
             self.impl_phase("final-fix", self.v.get("FINAL_FIX_IMPL"), "{agent}-final-fix")
             self.rf("merge-final-fix", i)
 

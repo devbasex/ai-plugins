@@ -242,6 +242,29 @@ def test_rerun_from_final_fix_merges_before_final_gate(tmp_path, monkeypatch, ca
     assert fake.launched() == []
 
 
+def test_final_gate_recheck_reruns_the_gate_without_a_fix_cli(tmp_path, monkeypatch, capsys):
+    """寄せた危険フラグの項目の取り消し（`FINAL_GATE=recheck`）は修正の依頼ではない。
+
+    修正の CLI も `merge-final-fix` も通さずに `final-gate` を打ち直す。
+    """
+    fake = _final_fix_resume(tmp_path, monkeypatch, {"status": "passed"}, 0)
+    real = fake.__call__
+    gates: list = []
+
+    def call(cmd, env=None, cwd=None):
+        if Path(cmd[1]).name == "refactor.py" and cmd[2] == "final-gate":
+            gates.append(1)
+            fake.calls.append(("refactor.py", *cmd[2:]))
+            return (2, "FINAL_GATE=recheck\n") if len(gates) == 1 else (0, "FINAL_GATE=passed\n")
+        return real(cmd, env, cwd)
+
+    monkeypatch.setattr(rf, "call", call)
+    code, _ = run_main(ARGV, capsys)
+    assert code == 0 and len(gates) == 2
+    assert "final-fix" not in fake.launched()
+    assert not any(c[:2] == ("refactor.py", "merge-final-fix") for c in fake.calls)
+
+
 def test_final_gate_without_open_fix_does_not_merge(tmp_path, monkeypatch, capsys):
     """開いた修正の試行が無ければ（最終ゲートが通った後など）`merge-final-fix` を打たない。"""
     fake = _final_fix_resume(tmp_path, monkeypatch, {"status": "passed", "impl": "codex", "fix_base_sha": "abc"}, 0)
