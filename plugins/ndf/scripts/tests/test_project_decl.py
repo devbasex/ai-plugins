@@ -528,6 +528,42 @@ def test_secret_in_an_answer_is_dropped(plain, env, tmp_path):
     assert decl(plain)["issues"] == {"unknown": "秘密の形"} and "hunter2secret" not in text
 
 
+def _project_lib(name):
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        return importlib.import_module(f"project_lib.{name}")
+    finally:
+        sys.path.remove(str(SCRIPTS))
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "glpat-abcdefghij0123456789",
+        "github_pat_11ABCDEFG0123456789abcdefghij",
+        "AIzaSyA0123456789abcdefghijklmnopqrstu",
+        "sk_live_0123456789abcdefghij",
+        "npm_abcdefghijklmnopqrstuvwxyz0123456789",
+        "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.sig",
+        "password=hunter2hunter2",
+    ],
+)
+def test_secret_shapes_cover_common_credentials(value):
+    secret = _project_lib("secret")
+    assert secret.has_secret({"others": [f"x {value}"]})
+    masked = secret.mask({"kind": "mismatch", "declared": ["ok", f"x {value}"], "analyzed": {"v": value}})
+    assert value not in json.dumps(masked, ensure_ascii=False)
+    assert masked["declared"][0] == "ok"
+
+
+def test_git_is_not_started_after_the_deadline(tmp_path, monkeypatch):
+    mr = _project_lib("measure_repo")
+    tree = mr.Tree.__new__(mr.Tree)
+    tree.root, tree.deadline = tmp_path, 0.0
+    monkeypatch.setattr(mr.subprocess, "run", lambda *a, **k: pytest.fail("締め切り後に git を起動した"))
+    assert tree.git("cat-file", "-p", "HEAD:x") is None
+
+
 # --- AC14: schema はモデルの生成物 -------------------------------------------------------
 
 

@@ -40,6 +40,7 @@ from step_result import EXIT_PRECONDITION, EXIT_UNREADABLE, StepError, emit, mai
 from project_lib import ANALYZER, BRANCHES, DECL_FILE, ITEM_KEYS, WORKTREE_FILE, fingerprint, merge  # noqa: E402
 from project_lib import measure_ci as mci  # noqa: E402
 from project_lib import measure_repo as mr  # noqa: E402
+from project_lib.secret import mask  # noqa: E402
 
 TOOL = "project-decl"
 EXIT_STALE = EXIT_UNREADABLE  # 2 = 無い・古い（手順 0 が解析へ進む）
@@ -354,6 +355,7 @@ def cmd_write(a):
 
 
 def _report_write(files, rows, dry_run):
+    rows = mask(rows)  # 表に無い形の秘密も、出力の直前でもう一度伏せる
     verb = "書く（--dry-run）" if dry_run else "書いた"
     for path, name, old, new in files:
         print(f"{verb}: {path}")

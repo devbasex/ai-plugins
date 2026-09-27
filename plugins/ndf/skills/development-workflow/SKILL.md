@@ -50,7 +50,7 @@ hooks:
 
 ```bash
 # 起動したら手順 1 より先に実行する。$SCRIPTS を決めてから。決められなくても止めない
-if [ -n "${SCRIPTS:-}" ]; then bash "$SCRIPTS/worktree-setup.sh" check; echo "exit=$?"; python3 "$SCRIPTS/project-decl.py" check; echo "decl=$?"
+if [ -n "${SCRIPTS:-}" ]; then bash "$SCRIPTS/worktree-setup.sh" check; rc=$?; echo "exit=$rc"; case $rc in 0|2) python3 "$SCRIPTS/project-decl.py" check; echo "decl=$?";; esac
 else echo "exit=判定できない（scripts を解決できない）"; fi
 ```
 

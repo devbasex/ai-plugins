@@ -122,10 +122,11 @@ class Tree:
         return self.deadline - time.monotonic()
 
     def git(self, *args) -> str | None:
+        left = self.left()
+        if left <= 0:
+            return None
         try:
-            p = subprocess.run(
-                ["git", "-C", str(self.root), *args], capture_output=True, text=True, timeout=max(1.0, min(30.0, self.left()))
-            )
+            p = subprocess.run(["git", "-C", str(self.root), *args], capture_output=True, text=True, timeout=min(30.0, left))
         except (OSError, subprocess.TimeoutExpired):
             return None
         return p.stdout if p.returncode == 0 else None
