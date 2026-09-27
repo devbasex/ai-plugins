@@ -299,9 +299,7 @@ def _merge_worktree_part(main, wt, meas, answers, check, written_before):
     branches, origin = merge.branch_answer(meas, answers, check)
     new_wt, rows, wt_written = merge.merge_worktree(wt, branches, origin, written_before)
     if new_wt != wt:
-        files.append(
-            (main / WORKTREE_FILE, str(WORKTREE_FILE), (main / WORKTREE_FILE).read_text(encoding="utf-8"), merge.dumps(new_wt))
-        )
+        files.append((main / WORKTREE_FILE, str(WORKTREE_FILE), (main / WORKTREE_FILE).read_text(encoding="utf-8"), merge.dumps(new_wt)))
     declared = fingerprint.branch_names(new_wt)
     return files, rows, wt_written, declared
 

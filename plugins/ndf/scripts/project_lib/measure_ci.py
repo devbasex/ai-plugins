@@ -10,14 +10,15 @@ from __future__ import annotations
 import datetime as _dt
 import io
 import json
-import os
 import re
 import statistics
 import subprocess
 import time
 import xml.etree.ElementTree as ET
 import zipfile
-from pathlib import Path
+
+import repo as repo_id
+import run_metrics
 
 from .measure_repo import Tree, measured, question, unknown, url_hosts
 
@@ -167,14 +168,7 @@ def ndf_record(repo: str | None) -> dict | None:
     """同じ機械の NDF の実行の記録の `whole_test.init` の直近 10 件の中央値（決定 9）。"""
     if not repo:
         return None
-    env = os.environ
-    if env.get("NDF_METRICS_DIR"):
-        base = Path(env["NDF_METRICS_DIR"])
-    elif env.get("XDG_STATE_HOME"):
-        base = Path(env["XDG_STATE_HOME"]) / "ndf" / "metrics"
-    else:
-        base = Path(env.get("HOME") or Path.home()) / ".local" / "state" / "ndf" / "metrics"
-    f = base / repo.replace("/", "--") / RECORD_NAME
+    f = run_metrics.metrics_dir() / repo_id.slug(repo) / RECORD_NAME
     values = []
     try:
         lines = f.read_text(encoding="utf-8").splitlines() if f.is_file() else []
