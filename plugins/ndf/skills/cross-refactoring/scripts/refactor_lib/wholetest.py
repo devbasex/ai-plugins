@@ -25,7 +25,9 @@ def defer_to_final_gate(path: pathlib.Path, state: dict[str, Any], record: dict[
     deferred["items"] = list(dict.fromkeys(list(deferred.get("items") or []) + flagged))
     record["resolution"] = "deferred"
     statefile.save(path, state)
-    info(f"⏭ 危険フラグ（{', '.join(flags)}）が立ちましたが、全体テストは CI に任せる戦略のため最終ゲートへ寄せます（項目 {', '.join(flagged)}）")
+    info(
+        f"⏭ 危険フラグ（{', '.join(flags)}）が立ちましたが、全体テストは CI に任せる戦略のため最終ゲートへ寄せます（項目 {', '.join(flagged)}）"
+    )
 
 
 def run_locally(state: dict[str, Any], log: pathlib.Path) -> tuple[bool, bool, list[str]]:

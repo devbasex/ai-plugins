@@ -31,7 +31,9 @@ def run_command(command: Any, cwd: str, timeout: int, log: Optional[pathlib.Path
     """語の並びはシェルを通さず、文字列はシェルで走らせる。`(終了コード, 打ち切ったか)`。"""
     sink = open(log, "wb") if log is not None else subprocess.DEVNULL
     try:
-        p = subprocess.run(command, shell=isinstance(command, str), cwd=cwd, stdout=sink, stderr=subprocess.STDOUT, timeout=timeout, start_new_session=True)
+        p = subprocess.run(
+            command, shell=isinstance(command, str), cwd=cwd, stdout=sink, stderr=subprocess.STDOUT, timeout=timeout, start_new_session=True
+        )
         return p.returncode, False
     except subprocess.TimeoutExpired:
         return None, True
@@ -118,7 +120,9 @@ def rerun_words(strategy: ts.Strategy, files: list[str]) -> list[list[str]]:
     return [ts.scope_words(str(suite.scope_command), paths) for suite, paths in rerun_groups(strategy, files)]
 
 
-def failing_in(work: str, strategy: ts.Strategy, ids: list[str], timeout: int, log_dir: pathlib.Path, label: str, run: Runner) -> tuple[list[str], bool]:
+def failing_in(
+    work: str, strategy: ts.Strategy, ids: list[str], timeout: int, log_dir: pathlib.Path, label: str, run: Runner
+) -> tuple[list[str], bool]:
     """`ids` のファイルだけを `work` で走らせ直し、まだ落ちている ID と JUnit を読めたかを返す。読めなければその群の全部。"""
     still: list[str] = []
     readable = True
@@ -171,7 +175,14 @@ def classify(
     log_dir = pathlib.Path(log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
     if failed is None:
-        return {"failed_tests": None, "flaky": [], "preexisting": [], "caused": [], "fallback_reason": fallback_reason or "JUnit を読めない", "baseline_head": base_sha}
+        return {
+            "failed_tests": None,
+            "flaky": [],
+            "preexisting": [],
+            "caused": [],
+            "fallback_reason": fallback_reason or "JUnit を読めない",
+            "baseline_head": base_sha,
+        }
     known = set(existing_failures or [])
     still, _ = failing_in(work, strategy, failed, timeout, log_dir, "rerun", run)
     flaky = [i for i in failed if i not in still]
@@ -238,7 +249,9 @@ def gh_raw(path: str) -> bytes:
     return p.stdout if p.returncode == 0 else b""
 
 
-def ci_junit_xmls(repo: str, sha: str, checks: list[str], name_glob: Optional[str], fetch_runs: Callable[[], Any] | None = None) -> list[bytes]:
+def ci_junit_xmls(
+    repo: str, sha: str, checks: list[str], name_glob: Optional[str], fetch_runs: Callable[[], Any] | None = None
+) -> list[bytes]:
     """落ちたチェックの GitHub Actions の run の成果物から JUnit の本文を落とす。取れなければ空（見分けは走らせ直しへ落ちる）。"""
     import re
 

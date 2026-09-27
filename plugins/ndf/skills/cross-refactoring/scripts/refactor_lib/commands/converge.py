@@ -44,7 +44,7 @@ from ..items import (
     live_items,
 )
 from ..paths import work_dir
-from ..outbound import dropped_line, item_lines, plan_line
+from ..outbound import item_lines, plan_line
 from ..paths import git_out, load_state
 from ..phases import add_phase_seconds, finish_phase, phase_record
 from ..undo import drop, resume_pending_drop

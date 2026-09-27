@@ -49,10 +49,22 @@ def failed_ids_of(state: dict[str, Any], ci_xmls: Optional[list[bytes]] = None) 
 def classify(state: dict[str, Any], timed_out: bool, ci_xmls: Optional[list[bytes]] = None) -> dict[str, Any]:
     """全体テストの失敗を分ける。JUnit を読めなければ `fallback_reason` だけを返す。"""
     if timed_out:
-        return {"failed_tests": None, "flaky": [], "preexisting": [], "caused": [], "fallback_reason": "全体テストが打ち切られ、落ちたテストを取り出せなかった"}
+        return {
+            "failed_tests": None,
+            "flaky": [],
+            "preexisting": [],
+            "caused": [],
+            "fallback_reason": "全体テストが打ち切られ、落ちたテストを取り出せなかった",
+        }
     ids, reason = failed_ids_of(state, ci_xmls)
     if ids is not None and not ids:
-        return {"failed_tests": None, "flaky": [], "preexisting": [], "caused": [], "fallback_reason": "JUnit に落ちたテストが無かった（走らせ直して見分ける）"}
+        return {
+            "failed_tests": None,
+            "flaky": [],
+            "preexisting": [],
+            "caused": [],
+            "fallback_reason": "JUnit に落ちたテストが無かった（走らせ直して見分ける）",
+        }
     result = test_triage.classify(
         work=work_dir(state),
         strategy=timeline.strategy_of(state),

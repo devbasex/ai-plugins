@@ -177,7 +177,9 @@ def strategy_lines(state: dict[str, Any]) -> list[str]:
         f"- 範囲テストの雛形: {' / '.join(templates) or (strategy.get('round_command') or '—')}",
     ]
     if deferred:
-        lines.append(f"- 最終ゲートへ寄せた危険フラグ: {', '.join(deferred.get('flags') or [])}（項目 {', '.join(deferred.get('items') or [])}）")
+        lines.append(
+            f"- 最終ゲートへ寄せた危険フラグ: {', '.join(deferred.get('flags') or [])}（項目 {', '.join(deferred.get('items') or [])}）"
+        )
     return lines
 
 

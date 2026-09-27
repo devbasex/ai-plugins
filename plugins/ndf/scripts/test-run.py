@@ -134,7 +134,11 @@ def cmd_scope(a) -> int:
     detail = f"範囲テスト {len(words)} 本（{seconds} 秒 / 戦略 {strategy.name}）"
     if not failed_any:
         return _emit_outcome(strategy, limits, notes, None, True, detail)
-    triage = _classify(root, strategy, limits, a.base) if strategy.name != ts.ROUND_ONLY else {"fallback_reason": "round-only は JUnit を読まない"}
+    triage = (
+        _classify(root, strategy, limits, a.base)
+        if strategy.name != ts.ROUND_ONLY
+        else {"fallback_reason": "round-only は JUnit を読まない"}
+    )
     return _emit_outcome(strategy, limits, notes, triage, False, detail + " が落ちた")
 
 
@@ -172,7 +176,9 @@ def _wait_ci(root: pathlib.Path, strategy: ts.Strategy, limits: dict, notes: lis
         return "success" if all(r == "success" for r in results) else "failure"
 
     outcome, waited, attempts = test_triage.wait_check(fetch, float(limits["ci_wait_timeout"]))
-    detail = f"CI のチェック {', '.join(checks)}（{sha[:7]} / 待ち {waited:.0f} 秒・照会 {attempts} 回 / 上限 {limits['ci_wait_timeout']} 秒）"
+    detail = (
+        f"CI のチェック {', '.join(checks)}（{sha[:7]} / 待ち {waited:.0f} 秒・照会 {attempts} 回 / 上限 {limits['ci_wait_timeout']} 秒）"
+    )
     if outcome is None:
         emit(result(TOOL, "stopped", f"{detail} の結論を得られなかった（上限か照会の失敗）", [{"waited_seconds": waited}], {}))
         return 2

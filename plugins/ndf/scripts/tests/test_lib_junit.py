@@ -43,12 +43,17 @@ TRACKED = ["tests/sub/test_a.py", "tests/test_b.py", "tests/Unit/Services/UserSe
 
 
 def test_pytest_xunit1_failures_are_read_as_file_classname_name():
-    assert junit.failed_ids(PYTEST_XML, TRACKED) == ["tests/sub/test_a.py::tests.sub.test_a::test_bad", "tests/test_b.py::tests.test_b::test_err"]
+    assert junit.failed_ids(PYTEST_XML, TRACKED) == [
+        "tests/sub/test_a.py::tests.sub.test_a::test_bad",
+        "tests/test_b.py::tests.test_b::test_err",
+    ]
     assert junit.total_seconds(PYTEST_XML) == 1.5
 
 
 def test_phpunit_absolute_paths_are_mapped_to_the_tracked_file():
-    assert junit.failed_ids(PHPUNIT_XML, TRACKED) == ["tests/Unit/Services/UserServiceTest.php::Tests.Unit.Services.UserServiceTest::testSave"]
+    assert junit.failed_ids(PHPUNIT_XML, TRACKED) == [
+        "tests/Unit/Services/UserServiceTest.php::Tests.Unit.Services.UserServiceTest::testSave"
+    ]
     ci_root = PHPUNIT_XML.replace(b"/var/www/html/", b"/home/runner/work/carmo/carmo/")
     assert junit.failed_ids(ci_root, TRACKED) == junit.failed_ids(PHPUNIT_XML, TRACKED)
     assert junit.total_seconds(PHPUNIT_XML) == 2.5
@@ -68,7 +73,13 @@ def test_ci_artifacts_are_picked_by_glob_or_by_the_default_name_rule():
         z.writestr("junit.xml", PHPUNIT_XML)
         z.writestr("readme.txt", "x")
     payload = buf.getvalue()
-    arts = {"artifacts": [{"id": 1, "name": "junit-dlite-3", "size_in_bytes": 10}, {"id": 2, "name": "coverage", "size_in_bytes": 10}, {"id": 3, "name": "junit-old", "expired": True}]}
+    arts = {
+        "artifacts": [
+            {"id": 1, "name": "junit-dlite-3", "size_in_bytes": 10},
+            {"id": 2, "name": "coverage", "size_in_bytes": 10},
+            {"id": 3, "name": "junit-old", "expired": True},
+        ]
+    }
     calls = []
 
     def get(path):
@@ -103,13 +114,15 @@ def _repo(tmp_path):
 
 
 def _strategy(prefix=""):
-    return ts.Strategy("local-full", "test.strategy", [ts.Suite("py", f"{prefix}pytest -q", f"{prefix}pytest -q {{paths}}", junit="out/junit.xml", paths=["."])])
+    return ts.Strategy(
+        "local-full",
+        "test.strategy",
+        [ts.Suite("py", f"{prefix}pytest -q", f"{prefix}pytest -q {{paths}}", junit="out/junit.xml", paths=["."])],
+    )
 
 
 def _write_junit(cwd, failing):
-    cases = "".join(
-        f'<testcase classname="c" file="{f}" name="{n}"><failure/></testcase>' for f, n in failing
-    )
+    cases = "".join(f'<testcase classname="c" file="{f}" name="{n}"><failure/></testcase>' for f, n in failing)
     out = pathlib.Path(cwd) / "out"
     out.mkdir(exist_ok=True)
     (out / "junit.xml").write_bytes(f'<testsuite tests="{len(failing)}">{cases}</testsuite>'.encode())
@@ -154,12 +167,22 @@ def test_failures_are_split_into_flaky_preexisting_and_caused(tmp_path, prefix):
         return (1 if failing else 0), False
 
     out = test_triage.classify(
-        work=str(work), strategy=_strategy(prefix), failed=FAILED, fallback_reason=None, base_sha=base, timeout=30, log_dir=tmp_path / "logs", run=run
+        work=str(work),
+        strategy=_strategy(prefix),
+        failed=FAILED,
+        fallback_reason=None,
+        base_sha=base,
+        timeout=30,
+        log_dir=tmp_path / "logs",
+        run=run,
     )
     assert out["flaky"] == ["tests/sub/test_a.py::c::test_bad"]
     assert out["preexisting"] == ["tests/test_b.py::c::test_err"]
     assert out["caused"] == [] and out["fallback_reason"] is None
-    assert not any("ndf-baseline-" in line for line in subprocess.run(["git", "worktree", "list"], cwd=work, capture_output=True, text=True).stdout.splitlines())
+    assert not any(
+        "ndf-baseline-" in line
+        for line in subprocess.run(["git", "worktree", "list"], cwd=work, capture_output=True, text=True).stdout.splitlines()
+    )
 
 
 def test_a_failure_absent_at_the_base_is_caused_and_gets_a_rerun_command(tmp_path):
@@ -171,7 +194,16 @@ def test_a_failure_absent_at_the_base_is_caused_and_gets_a_rerun_command(tmp_pat
         _write_junit(cwd, failing)
         return (1 if failing else 0), False
 
-    out = test_triage.classify(work=str(work), strategy=_strategy(), failed=FAILED, fallback_reason=None, base_sha=base, timeout=30, log_dir=tmp_path / "logs", run=run)
+    out = test_triage.classify(
+        work=str(work),
+        strategy=_strategy(),
+        failed=FAILED,
+        fallback_reason=None,
+        base_sha=base,
+        timeout=30,
+        log_dir=tmp_path / "logs",
+        run=run,
+    )
     assert out["caused"] == ["tests/test_b.py::c::test_err"]
     assert out["flaky"] == ["tests/sub/test_a.py::c::test_bad"]
     assert out["rerun_words"] == [["pytest", "-q", "tests/test_b.py"]]
@@ -181,15 +213,30 @@ def test_known_existing_failures_are_preexisting_without_a_base_run(tmp_path):
     work = _repo(tmp_path)
     run = _runner({"tests/test_b.py": ["test_err"]})
     out = test_triage.classify(
-        work=str(work), strategy=_strategy(), failed=FAILED, fallback_reason=None, base_sha=None, timeout=30, log_dir=tmp_path / "logs",
-        existing_failures=["tests/test_b.py::c::test_err"], run=run,
+        work=str(work),
+        strategy=_strategy(),
+        failed=FAILED,
+        fallback_reason=None,
+        base_sha=None,
+        timeout=30,
+        log_dir=tmp_path / "logs",
+        existing_failures=["tests/test_b.py::c::test_err"],
+        run=run,
     )
     assert out["preexisting"] == ["tests/test_b.py::c::test_err"] and out["caused"] == []
     assert len(run.seen) == 1, "着手前の HEAD が無くても、init の既存失敗に載る ID は既存失敗"
 
 
 def test_without_junit_the_result_carries_the_fallback_reason(tmp_path):
-    out = test_triage.classify(work=str(tmp_path), strategy=_strategy(), failed=None, fallback_reason="JUnit が無い", base_sha=None, timeout=1, log_dir=tmp_path / "l")
+    out = test_triage.classify(
+        work=str(tmp_path),
+        strategy=_strategy(),
+        failed=None,
+        fallback_reason="JUnit が無い",
+        base_sha=None,
+        timeout=1,
+        log_dir=tmp_path / "l",
+    )
     assert out["failed_tests"] is None and out["fallback_reason"] == "JUnit が無い"
 
 
@@ -224,7 +271,13 @@ def test_phpunit_ci_junit_is_split_like_pytest(tmp_path):
     failed, reason = test_triage.merged_failed_ids([b"<broken", ci_xml], test_triage.tracked_files(str(work)))
     assert reason is None
     assert failed == ["tests/Unit/Services/UserServiceTest.php::Tests.Unit.Services.UserServiceTest::testSave"]
-    suite = ts.Suite("phpunit", "docker compose exec -T app phpunit", "docker compose exec -T app phpunit {paths}", junit="build/junit.xml", paths=["tests"])
+    suite = ts.Suite(
+        "phpunit",
+        "docker compose exec -T app phpunit",
+        "docker compose exec -T app phpunit {paths}",
+        junit="build/junit.xml",
+        paths=["tests"],
+    )
     strategy = ts.Strategy("local-scoped-ci-whole", "test.strategy", [suite])
     seen = []
 
@@ -233,12 +286,26 @@ def test_phpunit_ci_junit_is_split_like_pytest(tmp_path):
         return 1, False  # JUnit を書かない走らせ直しは、そのファイルの ID がまだ落ちているとみなす
 
     known = test_triage.classify(
-        work=str(work), strategy=strategy, failed=failed, fallback_reason=None, base_sha=None, timeout=30, log_dir=tmp_path / "logs",
-        existing_failures=list(failed), run=run,
+        work=str(work),
+        strategy=strategy,
+        failed=failed,
+        fallback_reason=None,
+        base_sha=None,
+        timeout=30,
+        log_dir=tmp_path / "logs",
+        existing_failures=list(failed),
+        run=run,
     )
     assert known["preexisting"] == failed and known["caused"] == []
     caused = test_triage.classify(
-        work=str(work), strategy=strategy, failed=failed, fallback_reason=None, base_sha=None, timeout=30, log_dir=tmp_path / "logs", run=run
+        work=str(work),
+        strategy=strategy,
+        failed=failed,
+        fallback_reason=None,
+        base_sha=None,
+        timeout=30,
+        log_dir=tmp_path / "logs",
+        run=run,
     )
     assert caused["caused"] == failed
     assert seen[0] == ["docker", "compose", "exec", "-T", "app", "phpunit", "tests/Unit/Services/UserServiceTest.php"]

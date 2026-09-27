@@ -160,7 +160,9 @@ def _print_header(state: dict[str, Any]) -> None:
         )
     elif whole.get("deferred"):
         deferred = whole["deferred"]
-        print(f"- 検証の中の全体のテスト: 最終ゲートへ寄せた（危険フラグ {', '.join(deferred.get('flags') or [])} / 項目 {', '.join(deferred.get('items') or [])}）")
+        print(
+            f"- 検証の中の全体のテスト: 最終ゲートへ寄せた（危険フラグ {', '.join(deferred.get('flags') or [])} / 項目 {', '.join(deferred.get('items') or [])}）"
+        )
     else:
         print("- 検証の中の全体のテスト: 走らせなかった（危険フラグが立たなかった）")
     triage = gate.get("triage") or {}

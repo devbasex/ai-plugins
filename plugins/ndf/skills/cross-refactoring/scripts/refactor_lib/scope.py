@@ -84,7 +84,9 @@ def tracked_files_under(path: str, work: str) -> list[str]:
 
 def test_files_under(path: str, work: str) -> list[str]:
     """`path` の配下の追跡ファイルのうち、名前がテストの形（`TEST_NAME_PATTERNS`）のもの。"""
-    return [f for f in tracked_files_under(path, work) if any(fnmatch.fnmatch(pathlib.PurePosixPath(f).name, pat) for pat in TEST_NAME_PATTERNS)]
+    return [
+        f for f in tracked_files_under(path, work) if any(fnmatch.fnmatch(pathlib.PurePosixPath(f).name, pat) for pat in TEST_NAME_PATTERNS)
+    ]
 
 
 def is_test_location(path: str, work: str) -> bool:

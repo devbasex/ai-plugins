@@ -76,7 +76,14 @@ def refactor_template_arg(a) -> str:
 def merge_step(a, **extra) -> dict:
     """マージのステップ。CI の待ちの上限を `--timeout` で渡し、ステップの `timeout` はそれに余裕を足す。"""
     ci_wait = int(plan_limits(a)["ci_wait_timeout"])
-    return {"id": "merge", "type": "run", "timeout": with_margin(ci_wait), "cmd": f"{MERGE_CMD} --timeout {ci_wait}", "probe": MERGE_PROBE, **extra}
+    return {
+        "id": "merge",
+        "type": "run",
+        "timeout": with_margin(ci_wait),
+        "cmd": f"{MERGE_CMD} --timeout {ci_wait}",
+        "probe": MERGE_PROBE,
+        **extra,
+    }
 
 
 def test_meta(plan: dict, a) -> dict:

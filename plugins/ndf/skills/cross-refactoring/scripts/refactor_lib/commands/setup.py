@@ -29,7 +29,6 @@ from .. import ABORT, die, info
 from .. import baseline as baseline_lib
 from .. import timeline
 from ..paths import (
-    git_out,
     default_worktree_base,
     sh,
     state_path,
@@ -558,7 +557,9 @@ def _verify_init(
     # 着手前のテストの上限は予算と宣言の所要から導く（決定 8）。
     w, w_source = ts.whole_seconds(prep.decl)
     c = ts.ci_wall_seconds(prep.decl, (prep.strategy.ci or {}).get("check") if prep.strategy.ci else None)
-    timeout = ts.limits(prep.strategy, int(args.budget_minutes), whole_seconds_value=w, whole_source=w_source, ci_seconds=c)["init_test_timeout"]
+    timeout = ts.limits(prep.strategy, int(args.budget_minutes), whole_seconds_value=w, whole_source=w_source, ci_seconds=c)[
+        "init_test_timeout"
+    ]
     baseline = baseline_lib.run_baseline(prep.strategy, prep.work, timeout, list(args.scope), prep.tmp_dir)
     baseline.update({"whole_seconds": w, "whole_source": w_source, "ci_seconds": c})
     return participants, baseline, baseline_lib.round_record(prep.strategy, baseline)
@@ -858,5 +859,3 @@ def _is_registered_worktree(path: pathlib.Path) -> bool:
     out = sh(["git", "worktree", "list", "--porcelain"], check=False)
     target = str(path.resolve())
     return any(line == f"worktree {target}" for line in out.splitlines())
-
-

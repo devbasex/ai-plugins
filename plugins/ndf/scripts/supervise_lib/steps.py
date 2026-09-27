@@ -18,7 +18,6 @@ import gh_call
 from supervise_lib import decl, paths, plan as plan_mod
 from supervise_lib.claude import TAIL, run_ticking
 from supervise_lib.prompts import JUDGE_SYSTEM
-from supervise_lib.slow import SLOW_EXIT
 
 
 def is_gate(code: int | None) -> bool:

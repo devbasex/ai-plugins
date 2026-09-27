@@ -105,7 +105,11 @@ def _junit_of_run(gh: Gh, run: dict) -> dict | None:
     seconds = [s for s in (junit.total_seconds(xml) for xml in junit.artifact_xmls(gh.get, gh.raw, gh.repo, run["id"])) if s is not None]
     if not seconds:
         return None
-    return {"seconds": round(sum(seconds), 1), "source": "ci-junit", "detail": f"run {run['id']}（{run.get('path')}）の JUnit {len(seconds)} 本の合計"}
+    return {
+        "seconds": round(sum(seconds), 1),
+        "source": "ci-junit",
+        "detail": f"run {run['id']}（{run.get('path')}）の JUnit {len(seconds)} 本の合計",
+    }
 
 
 def _steps_of(jobs: list[dict], run: dict) -> dict | None:

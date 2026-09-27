@@ -225,7 +225,12 @@ def _limited_commands(state: dict[str, Any], items: list[dict[str, Any]]) -> lis
     for item in items:
         words, origin = targets.limited_command(state, item.get("test_targets") or [], work, item.get("tests") or [])
         if words is None:
-            defer(state, item, DEFER_NO_TARGET, "範囲テストを組み立てられない（test_targets が --scope のテストの置き場所に無いか、雛形を持つ suite が無い）")
+            defer(
+                state,
+                item,
+                DEFER_NO_TARGET,
+                "範囲テストを組み立てられない（test_targets が --scope のテストの置き場所に無いか、雛形を持つ suite が無い）",
+            )
             continue
         item["command"], item["command_source"] = list(words), origin
         kept.append(item)

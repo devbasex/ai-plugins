@@ -632,7 +632,9 @@ def test_the_declaration_is_read_when_no_argument_is_given(run_init, tmp_path, t
     """宣言（`.ndf/project.json`）だけを入力に戦略が決まる（AC2 の経路）。ai-plugins の値で埋めない。"""
     decl = {
         "version": 1,
-        "test": {"suites": [{"name": "pytest", "runner": "pytest", "command": "pytest -q", "scope_command": "pytest -q {paths}", "paths": ["."]}]},
+        "test": {
+            "suites": [{"name": "pytest", "runner": "pytest", "command": "pytest -q", "scope_command": "pytest -q {paths}", "paths": ["."]}]
+        },
         "test_duration": {"measured": [{"seconds": 424.0, "source": "ci-steps", "detail": "x"}]},
     }
     (origin_repo / ".ndf").mkdir(exist_ok=True)
@@ -1511,7 +1513,9 @@ def test_a_carmo_declaration_runs_only_the_scope_test_before_the_start(run_init,
     assert state["strategy"]["name"] == "local-scoped-ci-whole" and state["strategy"]["source"] == "test.strategy"
     whole = CARMO_DECL["test"]["suites"][0]["command"]
     assert whole not in test_calls.seen
-    assert test_calls.seen == [["docker", "compose", "exec", "-T", "app", "./vendor/bin/phpunit", "--log-junit", "build/ndf/junit.xml", "tests"]]
+    assert test_calls.seen == [
+        ["docker", "compose", "exec", "-T", "app", "./vendor/bin/phpunit", "--log-junit", "build/ndf/junit.xml", "tests"]
+    ]
     assert state["baseline_test"]["mode"] == "scope"
 
 

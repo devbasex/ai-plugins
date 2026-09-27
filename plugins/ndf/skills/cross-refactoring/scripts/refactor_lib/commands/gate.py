@@ -154,7 +154,9 @@ def _run_and_record_gate_check(path: pathlib.Path, state: dict[str, Any], gate: 
     if not passed and verdict is not None:
         # 落ちたテストを見分ける。変更起因が無ければ通す（I5・決定 11）。
         classified = triage.classify(state, verdict.get("timed_out", False), verdict.get("ci_xmls"))
-        gate["triage"] = {k: classified.get(k) for k in ("failed_tests", "flaky", "preexisting", "caused", "fallback_reason", "rerun_command")}
+        gate["triage"] = {
+            k: classified.get(k) for k in ("failed_tests", "flaky", "preexisting", "caused", "fallback_reason", "rerun_command")
+        }
         if classified.get("fallback_reason"):
             detail += f" / 見分けを全体の走らせ直しに落とした（{classified['fallback_reason']}）"
         else:
@@ -458,4 +460,3 @@ def _local_gate(state: dict[str, Any]) -> tuple[bool, str, Optional[dict[str, An
         if code != 0:
             return False, f"{command} / 終了コード {code}", {"timed_out": False}
     return True, f"{' && '.join(commands)} / 終了コード 0", None
-

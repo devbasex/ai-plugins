@@ -1893,7 +1893,9 @@ def test_new_impl_with_a_ci_whole_declaration_takes_the_scope_timeout_from_the_l
     """#1334 AC7 — 範囲テストのステップの打ち切りは `limits.test_timeout` に余裕を足した値で、900 秒の固定でない。"""
     root = _carmo_repo(tmp_path)
     out = tmp_path / "impl.json"
-    p = cli("new", "impl", "--issue", "1", "--worktree", str(root), "--tests", "tests/Unit/A.php", "--title", "T", "--out", str(out), cwd=root)
+    p = cli(
+        "new", "impl", "--issue", "1", "--worktree", str(root), "--tests", "tests/Unit/A.php", "--title", "T", "--out", str(out), cwd=root
+    )
     assert p.returncode == 0, p.stderr
     plan = json.loads(out.read_text())
     steps = {s["id"]: s for s in plan["steps"]}
@@ -1905,6 +1907,22 @@ def test_new_stops_on_a_template_whose_paths_is_not_a_word(tmp_path):
     """#1334 決定 14 — `--filter={paths}` のように `{paths}` が 1 語で立たない雛形では計画を作らない。"""
     root = foreign_repo(tmp_path)
     out = tmp_path / "p.json"
-    p = cli("new", "impl", "--issue", "1", "--worktree", str(root), "--tests", "t", "--title", "T", "--test-cmd", "phpunit --filter={paths}", "--out", str(out), cwd=root)
+    p = cli(
+        "new",
+        "impl",
+        "--issue",
+        "1",
+        "--worktree",
+        str(root),
+        "--tests",
+        "t",
+        "--title",
+        "T",
+        "--test-cmd",
+        "phpunit --filter={paths}",
+        "--out",
+        str(out),
+        cwd=root,
+    )
     assert p.returncode == 2 and "1 語" in p.stderr
     assert not out.exists()

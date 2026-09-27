@@ -169,9 +169,13 @@ def test_no_result_does_not_pass(refactor_lib, cmd_gate, tmp_path, env_tmp_dir, 
     assert "得られませんでした" in capsys.readouterr().err
 
 
-def test_an_unfinished_ci_check_is_waited_for_until_the_limit_then_needs_a_decision(refactor_lib, cmd_gate, tmp_path, env_tmp_dir, spy, capsys):
+def test_an_unfinished_ci_check_is_waited_for_until_the_limit_then_needs_a_decision(
+    refactor_lib, cmd_gate, tmp_path, env_tmp_dir, spy, capsys
+):
     """`pending` の間は `limits.ci_wait_timeout` まで待ち、上限に届いたら待った秒を出して「判断が要る」で終える（決定 9）。"""
-    state_path = _state(tmp_path, workflow_step=True, ci_check="tests", limits={"test_timeout": 60, "whole_timeout": 60, "ci_wait_timeout": 25})
+    state_path = _state(
+        tmp_path, workflow_step=True, ci_check="tests", limits={"test_timeout": 60, "whole_timeout": 60, "ci_wait_timeout": 25}
+    )
     env_tmp_dir(state_path)
     spy["gh_out"] = _check_runs(_run("tests", conclusion=None, status="in_progress"))
 
@@ -185,7 +189,9 @@ def test_an_unfinished_ci_check_is_waited_for_until_the_limit_then_needs_a_decis
 
 def test_a_pending_check_that_turns_green_passes(refactor, cmd_gate, tmp_path, env_tmp_dir, spy, capsys):
     """待っている間に success へ変わればそのまま通す。"""
-    state_path = _state(tmp_path, workflow_step=True, ci_check="tests", limits={"test_timeout": 60, "whole_timeout": 60, "ci_wait_timeout": 600})
+    state_path = _state(
+        tmp_path, workflow_step=True, ci_check="tests", limits={"test_timeout": 60, "whole_timeout": 60, "ci_wait_timeout": 600}
+    )
     env_tmp_dir(state_path)
     answers = [_check_runs(_run("tests", conclusion=None, status="in_progress")), _check_runs(_run("tests"))]
     spy["gh_out"] = answers[0]
@@ -622,7 +628,15 @@ def test_a_caused_failure_after_the_deadline_reverts_the_deferred_items_newest_f
         limits={"test_timeout": 60, "whole_timeout": 60, "ci_wait_timeout": 60, "final_end_at": "2000-01-01T00:30:00"},
         final_gate={"fix_rounds": 1, "checks": []},
         items=[_item("I1", 1), _item("I2", 2), _item("I3", 3)],
-        whole_test={"ran": False, "flags": [], "status": None, "seconds": None, "head": None, "reverted": False, "deferred": {"flags": ["D2"], "items": ["I1", "I3"]}},
+        whole_test={
+            "ran": False,
+            "flags": [],
+            "status": None,
+            "seconds": None,
+            "head": None,
+            "reverted": False,
+            "deferred": {"flags": ["D2"], "items": ["I1", "I3"]},
+        },
     )
     env_tmp_dir(state_path)
     _failed_ci(patch_lib, spy, [NEW_FAILURE])

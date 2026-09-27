@@ -52,7 +52,13 @@ class Suite:
     paths: list[str] = field(default_factory=list)
 
     def as_state(self) -> dict[str, Any]:
-        return {"name": self.name, "command": self.command, "scope_command": self.scope_command, "junit": self.junit, "paths": list(self.paths)}
+        return {
+            "name": self.name,
+            "command": self.command,
+            "scope_command": self.scope_command,
+            "junit": self.junit,
+            "paths": list(self.paths),
+        }
 
 
 @dataclass
@@ -93,8 +99,18 @@ class Strategy:
 
     @classmethod
     def from_state(cls, data: dict[str, Any]) -> "Strategy":
-        suites = [Suite(**{k: s.get(k) for k in ("name", "command", "scope_command", "junit")}, paths=list(s.get("paths") or [])) for s in data.get("suites") or []]
-        return cls(str(data.get("name")), str(data.get("source") or ""), suites, data.get("round_command"), data.get("ci"), list(data.get("notes") or []))
+        suites = [
+            Suite(**{k: s.get(k) for k in ("name", "command", "scope_command", "junit")}, paths=list(s.get("paths") or []))
+            for s in data.get("suites") or []
+        ]
+        return cls(
+            str(data.get("name")),
+            str(data.get("source") or ""),
+            suites,
+            data.get("round_command"),
+            data.get("ci"),
+            list(data.get("notes") or []),
+        )
 
 
 # ---------- 雛形 ----------
@@ -203,7 +219,9 @@ def ci_wall_seconds(decl: dict[str, Any], check: Optional[str]) -> Optional[floa
     ci = ci_of(decl)
     if not ci:
         return None
-    walls = [(str(w.get("path") or ""), float(w["wall_seconds"])) for w in ci["workflows"] if isinstance(w.get("wall_seconds"), (int, float))]
+    walls = [
+        (str(w.get("path") or ""), float(w["wall_seconds"])) for w in ci["workflows"] if isinstance(w.get("wall_seconds"), (int, float))
+    ]
     if not walls:
         return None
     if check:
@@ -244,7 +262,9 @@ def _check_templates(suites: list[Suite]) -> None:
                 raise StrategyError(problem)
 
 
-def _from_args(decl: dict[str, Any], baseline_test: Optional[str], round_test: Optional[str], ci_check: Optional[str]) -> Optional[Strategy]:
+def _from_args(
+    decl: dict[str, Any], baseline_test: Optional[str], round_test: Optional[str], ci_check: Optional[str]
+) -> Optional[Strategy]:
     """引数からの解き方（決定 2 の表の上 3 行）。引数が無ければ `None`。"""
     test, _ = _test_of(decl)
     declared = str((test or {}).get("strategy") or "") if test else ""
@@ -317,7 +337,11 @@ def decl_of(root, supervise_decl: Optional[dict[str, Any]] = None) -> tuple[dict
     if not command:
         return decl, None
     template = command if has_paths(command) else f"{command} {PATHS}"
-    decl["test"] = {"suites": [{"name": "supervise", "runner": "supervise", "command": whole_command_of(template), "scope_command": template, "paths": ["."]}]}
+    decl["test"] = {
+        "suites": [
+            {"name": "supervise", "runner": "supervise", "command": whole_command_of(template), "scope_command": template, "paths": ["."]}
+        ]
+    }
     return decl, ".ndf/supervise.json の test.command を読んだ（.ndf/project.json に test が無い）。宣言は project.json へ移す"
 
 
@@ -343,7 +367,15 @@ def limits(
     `basis.unknown_duration` を真にする。
     """
     w, c, x = whole_seconds_value, ci_seconds, measured_seconds
-    basis = {"budget_minutes": budget_minutes, "w": w, "w_source": whole_source, "c": c, "x": x, "strategy": strategy.name, "unknown_duration": False}
+    basis = {
+        "budget_minutes": budget_minutes,
+        "w": w,
+        "w_source": whole_source,
+        "c": c,
+        "x": x,
+        "strategy": strategy.name,
+        "unknown_duration": False,
+    }
     if budget_minutes is None:
         if w is None and x is None:
             basis["unknown_duration"] = True
@@ -353,7 +385,13 @@ def limits(
             test_timeout = _ceil(TEST_FACTOR * float(x if x is not None else w))
             whole_timeout = _ceil(TEST_FACTOR * float(w if w is not None else x))
         ci_wait = _ceil(TEST_FACTOR * c) if c is not None else UNKNOWN_DURATION_LIMITS["ci_wait_timeout"]
-        return {"init_test_timeout": whole_timeout, "test_timeout": test_timeout, "whole_timeout": whole_timeout, "ci_wait_timeout": ci_wait, "basis": basis}
+        return {
+            "init_test_timeout": whole_timeout,
+            "test_timeout": test_timeout,
+            "whole_timeout": whole_timeout,
+            "ci_wait_timeout": ci_wait,
+            "basis": basis,
+        }
     seconds = float(budget_minutes) * 60
     if strategy.whole_on_ci or w is None:
         init_timeout = _ceil(seconds * INIT_TEST_SHARE)
@@ -365,7 +403,13 @@ def limits(
         test_timeout = _ceil(max(TEST_FACTOR * float(x), seconds * TEST_FLOOR_SHARE))
     whole_timeout = _ceil(max(TEST_FACTOR * float(w), seconds * TEST_FLOOR_SHARE)) if w is not None else init_timeout
     ci_wait = _ceil(max(TEST_FACTOR * c, seconds * CI_WAIT_SHARE)) if c is not None else _ceil(seconds * CI_WAIT_UNKNOWN_SHARE)
-    return {"init_test_timeout": init_timeout, "test_timeout": test_timeout, "whole_timeout": whole_timeout, "ci_wait_timeout": ci_wait, "basis": basis}
+    return {
+        "init_test_timeout": init_timeout,
+        "test_timeout": test_timeout,
+        "whole_timeout": whole_timeout,
+        "ci_wait_timeout": ci_wait,
+        "basis": basis,
+    }
 
 
 def reserve_seconds(strategy: Strategy, whole: Optional[float], ci: Optional[float], ci_gate: bool) -> tuple[float, float]:

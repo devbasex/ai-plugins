@@ -261,7 +261,9 @@ def test_narrowing_stops_as_soon_as_the_failed_tests_pass(flow, cmd_setup, cmd_i
 def test_without_junit_the_whole_test_is_rerun_and_a_green_baseline_sends_it_to_fix(flow, cmd_setup, cmd_implement, cmd_converge, capsys):
     """AC6 — JUnit が無いときは見分けを全体の走らせ直しに落とし、落としたことが結果に出る。着手前が green なら変更起因。"""
     _existing_tests(flow, {"tests/test_total.py": TEST_TOTAL})
-    _implement(flow, cmd_setup, cmd_implement, {"I-001": _touch_other("other"), "I-002": _break_total}, strategy=strategy_state(junit=False))
+    _implement(
+        flow, cmd_setup, cmd_implement, {"I-001": _touch_other("other"), "I-002": _break_total}, strategy=strategy_state(junit=False)
+    )
     capsys.readouterr()
 
     _call(cmd_converge, "cmd_verify")
@@ -280,7 +282,9 @@ def test_without_junit_and_a_red_baseline_the_flagged_items_are_reverted_togethe
     state = read_state(flow["path"])
     state["baseline_test"]["status"] = "red"
     write_state(flow["path"], state)
-    _implement(flow, cmd_setup, cmd_implement, {"I-001": _touch_other("other"), "I-002": _break_total}, strategy=strategy_state(junit=False))
+    _implement(
+        flow, cmd_setup, cmd_implement, {"I-001": _touch_other("other"), "I-002": _break_total}, strategy=strategy_state(junit=False)
+    )
     capsys.readouterr()
 
     _call(cmd_converge, "cmd_verify")

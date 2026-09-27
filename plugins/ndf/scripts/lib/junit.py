@@ -60,7 +60,11 @@ def failed_cases(xml_bytes: bytes) -> Optional[list[dict[str, str]]]:
     for case, suite_file in _cases(root):
         if case.find("failure") is None and case.find("error") is None:
             continue
-        row = {"file": str(case.get("file") or suite_file or ""), "classname": str(case.get("classname") or ""), "name": str(case.get("name") or "")}
+        row = {
+            "file": str(case.get("file") or suite_file or ""),
+            "classname": str(case.get("classname") or ""),
+            "name": str(case.get("name") or ""),
+        }
         key = (row["file"], row["classname"], row["name"])
         if key not in seen:
             seen.add(key)
@@ -133,7 +137,9 @@ def _picked(artifacts: list[dict[str, Any]], name_glob: Optional[str]) -> list[d
     return out
 
 
-def artifact_xmls(get: Callable[[str], Any], raw: Callable[[str], bytes], repo: str, run_id: Any, name_glob: Optional[str] = None) -> list[bytes]:
+def artifact_xmls(
+    get: Callable[[str], Any], raw: Callable[[str], bytes], repo: str, run_id: Any, name_glob: Optional[str] = None
+) -> list[bytes]:
     """run の成果物のうち名前が当たるものを落とし、中の XML の本文を返す。`get` は JSON を、`raw` はバイト列を返す。"""
     arts = (get(f"repos/{repo}/actions/runs/{run_id}/artifacts?per_page=100") or {}).get("artifacts") or []
     picked = _picked(arts, name_glob)

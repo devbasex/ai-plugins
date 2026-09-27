@@ -73,7 +73,9 @@ def run_baseline(strategy: ts.Strategy, work: pathlib.Path, timeout: int, scope:
         record["existing_failures"] = ids
         record["existing_failures_reason"] = reason
         shown = f"{len(ids)} 件を既存失敗として記録" if ids is not None else f"落ちたテストを読めない（{reason}）"
-        info(f"⚠ 着手前のテストが失敗しています（{record['command']}）。{shown}して続けます（既存失敗の外で新しく落ちたテストが無ければ最終ゲートは通ります）")
+        info(
+            f"⚠ 着手前のテストが失敗しています（{record['command']}）。{shown}して続けます（既存失敗の外で新しく落ちたテストが無ければ最終ゲートは通ります）"
+        )
     elif commands:
         info(f"✅ 着手前のテスト成功: {record['command']}（{seconds} 秒 / {mode}）")
     else:

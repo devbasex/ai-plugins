@@ -72,7 +72,19 @@ def test_ai_plugins_derives_local_full_from_the_duration():
     s = ts.resolve(AI_PLUGINS)
     assert (s.name, s.source) == ("local-full", "derived:test_duration")
     words = ts.scope_words(s.suites[0].scope_command, ["plugins/ndf/scripts/tests/test_x.py"])
-    assert words == ["uv", "run", "--frozen", "--project", ".", "--all-extras", "pytest", "plugins/ndf/scripts/tests/test_x.py", "-q", "-n", "4"]
+    assert words == [
+        "uv",
+        "run",
+        "--frozen",
+        "--project",
+        ".",
+        "--all-extras",
+        "pytest",
+        "plugins/ndf/scripts/tests/test_x.py",
+        "-q",
+        "-n",
+        "4",
+    ]
 
 
 def test_a_long_suite_with_a_readable_ci_derives_ci_whole():
@@ -205,7 +217,15 @@ def test_carmo_limits_with_a_30_minute_budget():
     assert got["init_test_timeout"] == 180
     assert got["test_timeout"] == 36  # 3 × 12
     assert got["ci_wait_timeout"] == 1080  # 3 × 360
-    assert got["basis"] == {"budget_minutes": 30, "w": 3827.0, "w_source": "ci-junit", "c": 360.0, "x": 12.0, "strategy": "local-scoped-ci-whole", "unknown_duration": False}
+    assert got["basis"] == {
+        "budget_minutes": 30,
+        "w": 3827.0,
+        "w_source": "ci-junit",
+        "c": 360.0,
+        "x": 12.0,
+        "strategy": "local-scoped-ci-whole",
+        "unknown_duration": False,
+    }
     assert ts.reserve_seconds(s, w, c, True) == (0.0, 360.0), "バッファに w を入れない"
 
 

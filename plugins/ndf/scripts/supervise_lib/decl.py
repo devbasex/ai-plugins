@@ -141,7 +141,10 @@ def apply_decls(a) -> None:
         a.test_limits = ts.limits(strategy, None, whole_seconds_value=w, whole_source=w_source, ci_seconds=c)
     missing = {
         "base": (not a.base, f"起点のブランチ（--base か .ndf/{WORKTREE_DECL} の base_branch）"),
-        "test": (a.strategy is None, f"テストの宣言（.ndf/{project_decl.DECL.name} の test か --test-cmd、または .ndf/{SUPERVISE_DECL} の test.command）"),
+        "test": (
+            a.strategy is None,
+            f"テストの宣言（.ndf/{project_decl.DECL.name} の test か --test-cmd、または .ndf/{SUPERVISE_DECL} の test.command）",
+        ),
         "release": (not isinstance(a.release, dict) or not a.release.get("form"), f"配布の形（.ndf/{SUPERVISE_DECL} の release.form）"),
     }
     lack = [missing[k][1] for k in NEEDS[a.kind] if missing[k][0]]
@@ -164,7 +167,18 @@ def _project_decl(roots, sv: dict) -> tuple[dict, str | None]:
 
 def decl_fields(a) -> dict:
     """ミッションの雛形が各計画へ引き継ぐ、宣言から埋めた値。"""
-    keys = ("base", "production_branch", "test_cmd", "test_all", "no_reports", "sync_checks", "release", "strategy", "test_limits", "test_note")
+    keys = (
+        "base",
+        "production_branch",
+        "test_cmd",
+        "test_all",
+        "no_reports",
+        "sync_checks",
+        "release",
+        "strategy",
+        "test_limits",
+        "test_note",
+    )
     return {k: getattr(a, k, None) for k in keys}
 
 
