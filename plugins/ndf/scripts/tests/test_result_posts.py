@@ -863,3 +863,21 @@ def test_a_reply_that_github_refuses_does_not_hold_back_the_summary(tmp_path, fa
     assert outcome.resolved == 2
     assert outcome.queued == 0
     assert "Parent comment not found" in outcome.detail
+
+
+def test_sync_after_push_runs_only_after_pushing_a_design_pr(monkeypatch):
+    """本文の「決めたこと」は送った後に揃える。送っていない・設計 PR でないときは GitHub を読まない。"""
+    import design_body
+
+    ran: list[list[str]] = []
+
+    def fake_run(cmd, **_):
+        ran.append(cmd)
+        return subprocess.CompletedProcess(cmd, 1, "", "mismatch")
+
+    monkeypatch.setattr(design_body.subprocess, "run", fake_run)
+    assert design_body.sync_after_push("o/r", 5, "feat/x", True) is None
+    assert design_body.sync_after_push("o/r", 5, "design/x", False) is None
+    assert ran == []
+    reason = design_body.sync_after_push("o/r", 5, "design/x", True)
+    assert ran[0][-4:] == ["sync", "5", "--repo", "o/r"] and "mismatch" in reason

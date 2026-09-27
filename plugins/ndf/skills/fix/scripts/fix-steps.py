@@ -63,6 +63,7 @@ from step_result import (  # noqa: E402
     result,
     run,
 )
+import design_body  # noqa: E402
 import gh_parts  # noqa: E402
 import review_criteria  # noqa: E402
 
@@ -102,24 +103,32 @@ def pr_for_fix(pr: int) -> dict:
 
 
 def threads_with_first_comment(repo: str, pr: int) -> list[dict]:
-    """未解決のスレッドを、最初のコメント（id・書き手・本文）つきで返す（`gh_parts.unresolved_threads` は id と位置だけ）。"""
+    """未解決のスレッドを最初のコメント（id・書き手・本文）つきで返す。**全ページを読む**（100 件を超えた PR で落とさない）。"""
     owner, name = repo.split("/", 1)
     query = (
-        "query($owner:String!,$name:String!,$pr:Int!){repository(owner:$owner,name:$name){"
-        "pullRequest(number:$pr){reviewThreads(first:100){nodes{id isResolved path line "
-        "comments(first:1){nodes{databaseId body author{login}}}}}}}}"
+        "query($owner:String!,$name:String!,$pr:Int!,$endCursor:String){repository(owner:$owner,name:$name){"
+        "pullRequest(number:$pr){reviewThreads(first:100,after:$endCursor){pageInfo{hasNextPage endCursor} "
+        "nodes{id isResolved path line comments(first:1){nodes{databaseId body author{login}}}}}}}}"
     )
-    data = gh_json(
-        None,
-        ["api", "graphql", "-f", f"query={query}", "-F", f"owner={owner}", "-F", f"name={name}", "-F", f"pr={pr}"],
-        "未解決スレッドの取得",
-    )
-    try:
-        nodes = data["data"]["repository"]["pullRequest"]["reviewThreads"]["nodes"]
-    except (KeyError, TypeError):
-        raise StepError("未解決スレッドの応答を読めない", EXIT_UNREADABLE)
+    nodes: list[dict] = []
+    cursor = None
+    for _ in range(1000):  # 100 件ずつ
+        args = ["api", "graphql", "-f", f"query={query}", "-F", f"owner={owner}", "-F", f"name={name}", "-F", f"pr={pr}"]
+        if cursor:
+            args += ["-f", f"endCursor={cursor}"]
+        data = gh_json(None, args, "未解決スレッドの取得")
+        try:
+            page = data["data"]["repository"]["pullRequest"]["reviewThreads"]
+            nodes.extend(page["nodes"] or [])
+        except (KeyError, TypeError):
+            raise StepError("未解決スレッドの応答を読めない", EXIT_UNREADABLE)
+        page_info = page.get("pageInfo") or {}
+        nxt = page_info.get("endCursor")
+        if not page_info.get("hasNextPage") or not nxt or nxt == cursor:
+            break
+        cursor = nxt
     out = []
-    for n in nodes or []:
+    for n in nodes:
         if n.get("isResolved"):
             continue
         first = ((n.get("comments") or {}).get("nodes") or [{}])[0] or {}
@@ -434,17 +443,6 @@ def build_result(pr: int, d: dict, commit: str | None, ci_status: str, failed_na
     }
 
 
-def sync_pr_body(pr: int, script: str | None, repo: str | None) -> dict:
-    """設計 PR の本文の節を揃える。終了コードの意味はスクリプトの冒頭が正本。"""
-    path = Path(script) if script else PLUGIN_ROOT / "scripts" / "pr-body-decisions.sh"
-    if not path.is_file():
-        return {"name": "pr-body-decisions", "result": "missing", "code": None, "reason": f"無い: {path}"}
-    cmd = ["bash", str(path), "sync", str(pr)] + (["--repo", repo] if repo else [])
-    p = run(cmd, check=False)
-    label = {0: "synced", 1: "mismatch", 2: "unreadable", 3: "invalid_call"}.get(p.returncode, "failed")
-    return {"name": "pr-body-decisions", "result": label, "code": p.returncode, "reason": (p.stderr.strip() or p.stdout.strip())[:300]}
-
-
 def cmd_finalize(a):
     d = load_decisions(a.decisions)
     pr = a.pr or d.get("pr")
@@ -483,11 +481,13 @@ def cmd_finalize(a):
     out = Path(a.out) if a.out else result_dir() / f"fix-pr{pr}-result.json"
     out.write_text(json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
 
-    sync = (
-        {"name": "pr-body-decisions", "result": "skipped", "code": None}
-        if a.no_sync
-        else sync_pr_body(pr, a.sync_script, getattr(a, "repo", None))
-    )
+    if a.no_sync:
+        sync = {"name": "pr-body-decisions", "result": "skipped", "code": None}
+    elif commit:
+        # 設計文書は PR の head から読まれる。送る側が送った直後に揃える（`design_body.sync_after_push`）
+        sync = {"name": "pr-body-decisions", "result": "after_push", "code": None, "reason": f"{commit} を送った後に送る側が揃える"}
+    else:
+        sync = design_body.sync(pr, getattr(a, "repo", None), a.sync_script)
     items = [{"name": "result", "path": str(out)}, sync] + ([dropped] if dropped else [])
     items += [{"name": c.get("name"), "result": "ci_failed", "state": c.get("state")} for c in failed]
     waived = sum(1 for e in res["deferred"] if e.get("waived"))
@@ -514,7 +514,7 @@ def cmd_finalize(a):
                 summary + "（pr-body-decisions.sh の呼び出しが誤り）",
                 items,
                 metrics,
-                next="fix-steps.py の sync_pr_body の呼び出しを直す",
+                next="design_body.sync の呼び出しを直す",
             )
         )
     emit(

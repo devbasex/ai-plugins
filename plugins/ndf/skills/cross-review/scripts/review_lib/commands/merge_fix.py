@@ -6,6 +6,7 @@ import argparse
 from typing import Any
 
 import review_lib  # noqa: E402
+import design_body  # noqa: E402
 import result_posts  # noqa: E402
 from review_lib import ci as ci_mod, findings as findings_mod, fix_result, posts, store  # noqa: E402
 
@@ -225,6 +226,11 @@ def cmd_merge_fix(args: argparse.Namespace) -> None:
     if not pushed.ok:
         review_lib.die(f"修正を送れないか、報告されたコミットが送り先に載っていません: {pushed.detail}")
     print(f"PUSHED={1 if pushed.pushed else 0} COMMIT_ON_HEAD={1 if pushed.contains else 0}")
+    unsynced = design_body.sync_after_push(
+        str(st.get("repo") or ""), int(st.get("current_pr") or pr), str(st.get("head_branch") or ""), pushed.pushed
+    )
+    if unsynced:
+        review_lib.info(f"⚠️ 本文の「決めたこと」を揃えられませんでした ({unsynced})")
 
     round_fix = _merge_fix_records(st, fix, pr)
     store._save(pr, st)
