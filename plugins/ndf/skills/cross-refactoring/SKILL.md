@@ -118,10 +118,9 @@ allowed-tools:
   起動しない**（2 は判定できなかったことを示し、飛ばしてよいとは読まない）
 
 ```bash
+BASE="<開発の起点>"   # worktree-setup.sh check の「開発の起点:」の行の名前
 python3 scripts/refactor.py assess --base "origin/$BASE"; echo "exit=$?"
 ```
-
-`$BASE` は開発の起点で、`worktree-setup.sh check` の `開発の起点:` の行の名前を使う。
 
 - Jev を使うには、環境変数 `AI_GATEWAY_API_KEY` があり、対象が公開リポジトリであること。
   `NDF_JEV=0` で使わない。使えなければ実装担当が同じ判断をする（止まらない）

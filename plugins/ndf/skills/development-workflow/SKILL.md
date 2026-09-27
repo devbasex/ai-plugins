@@ -50,7 +50,7 @@ hooks:
 
 ```bash
 # 起動したら手順 1 より先に実行する。$SCRIPTS を決めてから。決められなくても止めない
-if [ -n "${SCRIPTS:-}" ]; then bash "$SCRIPTS/worktree-setup.sh" check; echo "exit=$?"
+if [ -n "${SCRIPTS:-}" ]; then bash "$SCRIPTS/worktree-setup.sh" check; echo "exit=$?"; python3 "$SCRIPTS/project-decl.py" check; echo "decl=$?"
 else echo "exit=判定できない（scripts を解決できない）"; fi
 ```
 
@@ -62,7 +62,7 @@ else echo "exit=判定できない（scripts を解決できない）"; fi
 | 1、または `$SCRIPTS` を決められない | 止めずに手順 1 へ進む | `宣言: 判定できない（<理由>）` |
 
 **拒否しない。** 起動の時点に止める引き金が無く（hook は次のコマンドでしか働かない）、4 ランタイムで
-同じに働かせるには本文に置くしかない。frontmatter の `hooks` は発火していない疑いもある（#565）。
+同じに働かせるには本文に置くしかない。frontmatter の `hooks` は発火していない疑いもある（#565）。`decl=`（プロジェクトの宣言の判定。`exit=` が 3 なら見ない）の扱いと `宣言:` の行に足す `解析:` の部分は [references/project-analysis.md](references/project-analysis.md) の「手順 0 での扱い」にある。2 なら解析の 3 手を通してから手順 1 へ進み、3 なら先へ進まない。
 
 ### 1. 変更対象を確認する
 
@@ -119,7 +119,7 @@ NULL 許容列の追加）は `standard` として扱う。判定に迷う場合
 mode: standard
 pace: fast
 根拠: 注文確定の振る舞いを変更する。公開 API とスキーマは変えない
-宣言: あり
+宣言: あり。解析: 不要（新しい）
 必須工程: worktree → requirements-design → implementation-plan → tdd-cycle
   → refactoring → cross-review → quality-gates → pr
   → plan-to-spec（仕様が変わった場合） → merged → release
