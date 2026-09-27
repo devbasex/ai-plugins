@@ -55,14 +55,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
-from step_result import (
-    EXIT_OK,
-    EXIT_PRECONDITION,
-    EXIT_UNREADABLE,
-    EXIT_VIOLATION,  # noqa: E402
-    emit,
-    result,
-)
+from step_result import EXIT_OK, EXIT_PRECONDITION, EXIT_UNREADABLE, EXIT_VIOLATION, emit, result  # noqa: E402
 from pace import PaceError, matches, read_pace  # noqa: E402
 import clock  # noqa: E402
 import gh_call  # noqa: E402
@@ -72,6 +65,7 @@ import repo  # noqa: E402
 
 TOOL = "check-trigger"
 MERGE_SUBJECT = re.compile(r"^Merge pull request #(\d+) from [^/\s]+/(\S+)")
+SQUASH_SUBJECT = re.compile(r"\(#(\d+)\)$")  # squash merge の既定の件名「<題> (#N)」
 SKIP_BRANCHES = ("release/", "check/")
 BASE_PREFIX = "check-base/"
 DONE_PREFIX = "check-done/"  # 見終えた位置を origin に残すブランチ（review = 実装レビュー、check = 構造改善を含む検査）
@@ -278,18 +272,19 @@ def range_start(root: Path, events: list[dict], since: str | None, review: bool 
     return sha, commit_at(root, sha), f"origin/{base} との分岐点"
 
 
-def merged_prs(root: Path, frm: str, to: str, decl: dict) -> list[dict]:
+def merged_prs(root: Path, frm: str, to: str, decl: dict, skip: set[int] = frozenset()) -> list[dict]:
+    """範囲へ入った PR。merge commit と squash merge（件名の末尾 `(#N)`）を数える。squash にはブランチ名が残らないため、検査の PR は記録の番号（skip）で外す。"""
     out = []
-    log = git_or_stop(root, "log", "--first-parent", "--merges", "--format=%H%x09%s", f"{frm}..{to}")
-    for line in log.splitlines():
-        sha, _, subject = line.partition("\t")
-        m = MERGE_SUBJECT.match(subject)
-        if not m or m.group(2).startswith(SKIP_BRANCHES):
+    for line in git_or_stop(root, "log", "--first-parent", "--format=%H%x09%P%x09%s", f"{frm}..{to}").splitlines():
+        sha, parents, subject = line.split("\t", 2)
+        m = MERGE_SUBJECT.match(subject) if " " in parents else SQUASH_SUBJECT.search(subject.rstrip())
+        branch = m.group(2) if m and m.re is MERGE_SUBJECT else ""
+        if not m or branch.startswith(SKIP_BRANCHES) or int(m.group(1)) in skip:
             continue
         files = git_or_stop(root, "diff", "--name-only", f"{sha}^1", sha).splitlines()
         common = any(area_of(f, decl)[1] for f in files)
         out.append(
-            {"pr": int(m.group(1)), "branch": m.group(2), "common": common, "points": decl["triggers"]["common_weight"] if common else 1}
+            {"pr": int(m.group(1)), "branch": branch, "common": common, "points": decl["triggers"]["common_weight"] if common else 1}
         )
     return out
 
@@ -313,7 +308,7 @@ def evaluate(root: Path, final: bool, since: str | None, to_ref: str | None = No
     events = read_events(root)
     frm, since_at, how = range_start(root, events, since, review)
     to = git_or_stop(root, "rev-parse", to_ref or f"origin/{range_base(root)}")
-    prs = merged_prs(root, frm, to, decl)
+    prs = merged_prs(root, frm, to, decl, {e["pr"] for e in events if e["kind"] == "check" and isinstance(e.get("pr"), int)})
     t = decl["triggers"]
     esc = escapes_since(events, since_at)
     hours = round((clock.now(utc=True) - since_at).total_seconds() / 3600, 2)
@@ -528,12 +523,16 @@ def cmd_record(a, root: Path) -> tuple[dict, int]:
 
 
 def push_done(root: Path, to: str, review: bool) -> tuple[list[str], list[str]]:
-    """見終えた位置を origin の check-done/* へ送る。構造改善を含む検査は実装レビューも通すため両方を進める。"""
+    """見終えた位置を origin の check-done/* へ送る。構造改善を含む検査は実装レビューも通すため両方を進める。
+    fast-forward だけで送り、origin が既に `to` と同じか先なら保つ（古い検査が後に終わっても見終えた位置を戻さない）。"""
     if not to:
         return [], []
     pushed, unpushed = [], []
     for name in [done_branch(True)] + ([] if review else [done_branch(False)]):
-        ok = proc.git(root, "push", "-q", "-f", "origin", f"{to}:refs/heads/{name}", check=False).returncode == 0
+        ok = proc.git(root, "push", "-q", "origin", f"{to}:refs/heads/{name}", check=False).returncode == 0
+        if not ok:
+            git_or_stop(root, "fetch", "-q", "origin", f"+refs/heads/{name}:refs/remotes/origin/{name}", check=False)
+            ok = proc.git(root, "merge-base", "--is-ancestor", to, f"refs/remotes/origin/{name}", check=False).returncode == 0
         (pushed if ok else unpushed).append(name)
     return pushed, unpushed
 
