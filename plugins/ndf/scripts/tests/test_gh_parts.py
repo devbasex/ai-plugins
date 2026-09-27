@@ -17,6 +17,7 @@ sys.path.insert(0, str(LIB))
 _spec = importlib.util.spec_from_file_location("ndf_lib_gh_parts", LIB / "gh_parts.py")
 gp = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(gp)
+import clock  # noqa: E402
 import gh_call  # noqa: E402
 
 REPO = "o/r"
@@ -415,7 +416,7 @@ def test_review_post_downgrades_on_own_pr(fake, monkeypatch, tmp_path, viewer, o
     seen = {}
 
     def _post(queue, payload, result, repo, pr, round_no, seat, head_sha, is_own_pr, **kw):
-        seen.update(repo=repo, pr=pr, head_sha=head_sha, is_own_pr=is_own_pr)
+        seen.update(repo=repo, pr=pr, head_sha=head_sha, is_own_pr=is_own_pr, since=kw.get("since"))
         return result_posts.ReviewOutcome(
             review_url="https://github.com/o/r/pull/812#pullrequestreview-1",
             posted_inline=2,
@@ -432,7 +433,10 @@ def test_review_post_downgrades_on_own_pr(fake, monkeypatch, tmp_path, viewer, o
 
     obj, code = gp.review_post("p.json", "r.json", PR, 1, "codex", REPO, queue_dir=str(tmp_path / "q"))
 
+    since = seen.pop("since")
     assert code == 0 and seen == {"repo": REPO, "pr": PR, "head_sha": SHA, "is_own_pr": own}
+    # 入口の時刻（タイムゾーン付き）を since に渡し、前の実行の同じラウンド・席のレビューを「既投稿」にしない
+    assert clock.parse(since, naive="reject") is not None and (clock.now(utc=True) - clock.parse(since)).total_seconds() < 60
     assert obj["items"][0]["posted_as"] == ("COMMENT" if own else "REQUEST_CHANGES")
     assert obj["metrics"]["is_own_pr"] is own
 
