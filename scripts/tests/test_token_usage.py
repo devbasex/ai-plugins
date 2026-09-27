@@ -215,6 +215,8 @@ def test_external_cli_is_linked_by_worktree_and_time(tmp_path):
     # 席とそのサブエージェントの 2 呼び出し
     assert row["claude_seat_cost"] == 2 * 960
     ext = {x["runtime"]: x for x in r["external"]}
+    # P は席の最初の呼び出しの文脈だけ（サブエージェントの最初の文脈は足さない）
+    assert ext["claude"]["p"] == 1210
     assert ext["kiro"]["minutes"] == 2
     assert ext["codex"]["skill"] == "cross-review"
     assert r["meta"]["unlinked_external"] == 1
