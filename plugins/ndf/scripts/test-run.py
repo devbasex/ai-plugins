@@ -210,9 +210,9 @@ def cmd_whole(a) -> int:
     whole_timeout = float(limits["whole_timeout"])
     for i, command in enumerate(commands):
         # 上限は suite 群全体で 1 つ。後の suite には残りの秒だけを渡す（suite ごとに丸ごと渡すと N 倍まで走る）
-        left = whole_timeout - (time.monotonic() - started)
-        code, timed_out = (
-            test_triage.run_command(command, str(root), max(1, int(left)), root / LOG_DIR / f"whole-{i}.log") if left >= 1 else (None, True)
+        log = root / LOG_DIR / f"whole-{i}.log"
+        code, timed_out = test_triage.run_within(
+            whole_timeout, started, lambda left, command=command, log=log: test_triage.run_command(command, str(root), left, log)
         )
         if timed_out:
             emit(result(TOOL, "stopped", f"全体テストが {limits['whole_timeout']} 秒で終わらなかった", [], {}))

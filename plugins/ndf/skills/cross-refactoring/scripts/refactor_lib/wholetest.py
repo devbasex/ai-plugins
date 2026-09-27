@@ -7,9 +7,11 @@
 from __future__ import annotations
 
 import pathlib
+import time
 from typing import Any, Callable
 
 import statefile
+import test_triage
 
 from . import info, timeline, triage
 from .gitfacts import run_with_timeout
@@ -38,9 +40,13 @@ def run_locally(state: dict[str, Any], log: pathlib.Path) -> tuple[bool, bool, l
     passed, timed_out = True, False
     with open(log, "wb"):
         pass
+    limit, started = timeline.state_whole_timeout(state), time.monotonic()
     for i, command in enumerate(commands):
         part = log.with_name(f"{log.stem}-{i}.log") if len(commands) > 1 else log
-        code, timed_out = run_with_timeout(command, work, timeline.state_whole_timeout(state), output=part)
+        # 上限は suite 群全体で 1 つ（test-run.py の whole と同じ）
+        code, timed_out = test_triage.run_within(
+            limit, started, lambda left, command=command, part=part: run_with_timeout(command, work, left, output=part)
+        )
         if timed_out or code != 0:
             passed = False
         if timed_out:

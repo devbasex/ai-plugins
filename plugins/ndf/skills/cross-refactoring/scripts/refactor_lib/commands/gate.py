@@ -27,6 +27,7 @@ import time
 from typing import Any, Optional
 
 import statefile
+import test_triage
 
 from .. import clock, die, info, timeline, triage
 from ..gitfacts import (
@@ -453,8 +454,10 @@ def _local_gate(state: dict[str, Any]) -> tuple[bool, str, Optional[dict[str, An
     work = work_dir(state)
     timeout = timeline.state_whole_timeout(state)
     triage.clear_junit(state)
+    started = time.monotonic()
     for command in commands:
-        code, timed_out = run_with_timeout(command, work, timeout)
+        # 上限は suite 群全体で 1 つ（test-run.py の whole と同じ）
+        code, timed_out = test_triage.run_within(timeout, started, lambda left, command=command: run_with_timeout(command, work, left))
         if timed_out:
             return False, f"{command} が {timeout} 秒で終わりませんでした", {"timed_out": True}
         if code != 0:

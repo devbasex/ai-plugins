@@ -42,6 +42,16 @@ def run_command(command: Any, cwd: str, timeout: int, log: Optional[pathlib.Path
             sink.close()
 
 
+def run_within(limit: float, started: float, run: Callable[[int], tuple[Optional[int], bool]]) -> tuple[Optional[int], bool]:
+    """suite 群全体で 1 つの上限 `limit` 秒のうち、`started`（`time.monotonic()`）からの残りの秒で `run` を呼ぶ。
+
+    suite ごとに上限を丸ごと渡すと、N 本の suite で上限の N 倍まで走る。残りが 1 秒未満なら走らせずに
+    打ち切ったとみなす（`(None, True)`）。
+    """
+    left = limit - (time.monotonic() - started)
+    return run(int(left)) if left >= 1 else (None, True)
+
+
 def tracked_files(work: str) -> list[str]:
     """追跡ファイル（`git ls-files`）。リポジトリでない・ディレクトリが無いときは空。"""
     try:

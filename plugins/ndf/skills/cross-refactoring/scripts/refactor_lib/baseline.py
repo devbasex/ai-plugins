@@ -49,7 +49,10 @@ def run_baseline(strategy: ts.Strategy, work: pathlib.Path, timeout: int, scope:
     status = "green"
     for i, command in enumerate(commands):
         log = tmp_dir / f"init-{mode}-{i}.log"
-        code, timed_out = run_with_timeout(command, str(work), timeout, output=log)
+        # 上限は suite 群全体で 1 つ（test-run.py の whole と同じ）
+        code, timed_out = test_triage.run_within(
+            timeout, started, lambda left, command=command, log=log: run_with_timeout(command, str(work), left, output=log)
+        )
         shown = command if isinstance(command, str) else " ".join(command)
         if timed_out:
             die(f"着手前のテストが {timeout} 秒で終わりませんでした（{shown}）。打ち切りました")
