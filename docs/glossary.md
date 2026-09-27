@@ -34,7 +34,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | リリース差分 | — | 版と版の間（タグからタグまで）の変更 | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | インライン実行 | — | 仕事を渡す実行方式の 1 つ。いまの会話の文脈で行う | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | オーケストレーター | — | `cross-refactoring` と `cross-review` で、公開・生成物の同期を持ち、担当を回す側。3 層では conductor に当たる | 進行側、レビューを回す側 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| レッドライン | — | 当たれば MVV 判定が「従う」でも利用者の承認を求める範囲 | 越えない線 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| レッドライン | — | MVV 判定が「従う」でも利用者の承認を省かない操作。NDF の共通原則の `C<番号>`（NDF が持つ）・プロジェクト MVV の `P<番号>`（プロジェクトが足す）・ミッション MVV の `R<番号>` の 3 層 | 越えない線 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 実行条件 | — | プランを流す前に打つコマンド。`skip_code` を返せば worktree を作らずに完了とする | 実行の条件 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 流出不具合 | — | マージ済みの変更に見つかった不具合。直した Pull Request が触った領域を記録し、トリガーに数える | 逃げた不具合 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 重点領域 | — | `pace: fast` の領域のうち、触った Pull Request の点数を重くするもの | 共通層 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
@@ -142,8 +142,21 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 実行レベル | — | 仕事を渡す実行方式の LLM の使い方の水準。レベル 1 = スクリプト、レベル 2 = 分類の判断、レベル 3 = インライン実行の LLM | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | モード | `mode` | 変更の目的物で決める工程の振り分け。上から operation / documentation / standard / legacy-refactor / light | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | pace | `pace` | モードとは別の軸で、工程をどう通すかを決める。既定の normal と、承認ゲートと検査の時機を変える fast | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| MVV | — | ミッションの Mission / Vision / Value。マイルストーンの説明からコピーし、利用者が 1 回承認する。fast でゲート 1・2 の事前の許可になる | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| MVV 判定 | — | 承認ゲートのエビデンスが MVV に従うかの判定。「従う」でレッドラインが無いときだけ承認ゲートを省き、記録を残す | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| MVV | — | Mission / Vision / Value。プロジェクト MVV とミッション MVV の 2 層があり、下位は上位の範囲で具体化する | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| MVV 判定 | — | 承認ゲートのエビデンスが NDF の共通原則・プロジェクト MVV・ミッション MVV に従うかの判定。「従う」でレッドラインが無いときだけ承認ゲートを省き、記録を残す | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| 上位の原則 | — | 「人類を守り、発展させる」。NDF の共通原則の最上位の 1 文 | — | — | — |
+| プロジェクト MVV | — | プロジェクト全体の Mission / Vision / Value と固有の必ず承認が要る操作（`P<番号>`）。`.ndf/` に宣言し、利用者が承認する。判断の基準の上位 | — | — | — |
+| ミッション MVV | — | ミッション単位の MVV（既存の `mvv.md`）。プロジェクト MVV の範囲での具体化 | — | — | — |
+| MVV の版 | — | プロジェクト MVV の承認のたびに 1 ずつ上がる番号。改訂の理由と前の版との差分を伴う | — | — | — |
+| MVV の改訂 | — | プロジェクト MVV の本文を変え、利用者の承認で新しい版にすること | — | — | — |
+| 判断の地点 | — | NDF が LLM の判断を挟む場所（承認ゲートの判定・レビューの指摘と修正の可否・リファクタリングの提案の採否・judge のステップ・範囲外の起票の 3 択） | — | — | — |
+| MVV 候補 | — | 材料から書いたプロジェクト MVV の案。2 案以上と分かれる点を利用者へ示す | — | — | — |
+| 傾向モード | — | 履歴が育っていないプロジェクトで、README・指示書・依頼文の傾向から MVV 候補を出す抽出の形 | — | — | — |
+| MVV の照合 | — | 本文（候補・改訂案・ミッション MVV）が NDF の共通原則とプロジェクト MVV に従うかを「従う / 反する疑い / 判定できない」の 3 択で判定すること。従う以外は人へ戻す | — | — | — |
+| MVV の節 | — | 判断の地点へ渡す塊。NDF の共通原則の本文全体を先頭に置き、承認済みのプロジェクト MVV の本文か「MVV なし」とその理由、行動の 2 択と根拠の指示を続ける | — | — | — |
+| 根拠の項目 | — | 判断の記録に残す MVV の項目の番号（Mission / Vision / Value 3 / C4 / P1 / R2）。MVV が無ければ「MVV なし」、返されなければ「根拠なし」 | — | — | — |
+| NDF の共通原則 | — | NDF を使うすべてのプロジェクトに効く原則。NDF が持ち、利用側は上書きできない。上位の原則・優先順位・AI の行動の 2 択・判断の記録・人と AI の対話・必ず承認が要る操作 C1〜C8 を含む | — | — | — |
+| 改訂の兆候 | — | 人が AI の判断を覆した回数（「従う」を退けた・「反する疑い」を通した）・「判定できない」の回数・流出不具合の件数。現行の版のもとで数え、宣言の閾値を超えたら改訂を提案する | — | — | — |
 | トリガー | `trigger` | fast でリファクタリングとコードレビューを流す条件。点数・行数・流出不具合・経過時間・最終の 5 つ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | judge のステップ | — | 結果ファイルと規則の抜粋だけを渡し、次のステップを LLM に決めさせるステップ。Tool を持たない | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 決定 | — | judge のステップが返す、次に取る手 | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |

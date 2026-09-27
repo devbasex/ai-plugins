@@ -263,11 +263,12 @@
     {
       "term": "レッドライン",
       "context": "ndf-workflow",
-      "meaning": "当たれば MVV 判定が「従う」でも利用者の承認を求める範囲",
+      "meaning": "MVV 判定が「従う」でも利用者の承認を省かない操作。NDF の共通原則の `C<番号>`（NDF が持つ）・プロジェクト MVV の `P<番号>`（プロジェクトが足す）・ミッション MVV の `R<番号>` の 3 層",
       "deprecated": [
         "越えない線"
       ],
-      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md",
+      "pending_source": "issues/issue-1366-design.md"
     },
     {
       "term": "実行条件",
@@ -1754,14 +1755,94 @@
     {
       "term": "MVV",
       "context": "ndf-workflow",
-      "meaning": "ミッションの Mission / Vision / Value。マイルストーンの説明からコピーし、利用者が 1 回承認する。fast でゲート 1・2 の事前の許可になる",
-      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+      "meaning": "Mission / Vision / Value。プロジェクト MVV とミッション MVV の 2 層があり、下位は上位の範囲で具体化する",
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md",
+      "pending_source": "issues/issue-1366-design.md"
     },
     {
       "term": "MVV 判定",
       "context": "ndf-workflow",
-      "meaning": "承認ゲートのエビデンスが MVV に従うかの判定。「従う」でレッドラインが無いときだけ承認ゲートを省き、記録を残す",
-      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+      "meaning": "承認ゲートのエビデンスが NDF の共通原則・プロジェクト MVV・ミッション MVV に従うかの判定。「従う」でレッドラインが無いときだけ承認ゲートを省き、記録を残す",
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md",
+      "pending_source": "issues/issue-1366-design.md"
+    },
+    {
+      "term": "上位の原則",
+      "context": "ndf-workflow",
+      "meaning": "「人類を守り、発展させる」。NDF の共通原則の最上位の 1 文",
+      "pending_source": "issues/issue-1366-requirements.md"
+    },
+    {
+      "term": "プロジェクト MVV",
+      "context": "ndf-workflow",
+      "meaning": "プロジェクト全体の Mission / Vision / Value と固有の必ず承認が要る操作（`P<番号>`）。`.ndf/` に宣言し、利用者が承認する。判断の基準の上位",
+      "pending_source": "issues/issue-1366-design.md"
+    },
+    {
+      "term": "ミッション MVV",
+      "context": "ndf-workflow",
+      "meaning": "ミッション単位の MVV（既存の `mvv.md`）。プロジェクト MVV の範囲での具体化",
+      "pending_source": "issues/issue-1366-requirements.md"
+    },
+    {
+      "term": "MVV の版",
+      "context": "ndf-workflow",
+      "meaning": "プロジェクト MVV の承認のたびに 1 ずつ上がる番号。改訂の理由と前の版との差分を伴う",
+      "pending_source": "issues/issue-1366-requirements.md"
+    },
+    {
+      "term": "MVV の改訂",
+      "context": "ndf-workflow",
+      "meaning": "プロジェクト MVV の本文を変え、利用者の承認で新しい版にすること",
+      "pending_source": "issues/issue-1366-requirements.md"
+    },
+    {
+      "term": "判断の地点",
+      "context": "ndf-workflow",
+      "meaning": "NDF が LLM の判断を挟む場所（承認ゲートの判定・レビューの指摘と修正の可否・リファクタリングの提案の採否・judge のステップ・範囲外の起票の 3 択）",
+      "pending_source": "issues/issue-1366-requirements.md"
+    },
+    {
+      "term": "MVV 候補",
+      "context": "ndf-workflow",
+      "meaning": "材料から書いたプロジェクト MVV の案。2 案以上と分かれる点を利用者へ示す",
+      "pending_source": "issues/issue-1366-requirements.md"
+    },
+    {
+      "term": "傾向モード",
+      "context": "ndf-workflow",
+      "meaning": "履歴が育っていないプロジェクトで、README・指示書・依頼文の傾向から MVV 候補を出す抽出の形",
+      "pending_source": "issues/issue-1366-requirements.md"
+    },
+    {
+      "term": "MVV の照合",
+      "context": "ndf-workflow",
+      "meaning": "本文（候補・改訂案・ミッション MVV）が NDF の共通原則とプロジェクト MVV に従うかを「従う / 反する疑い / 判定できない」の 3 択で判定すること。従う以外は人へ戻す",
+      "pending_source": "issues/issue-1366-design.md"
+    },
+    {
+      "term": "MVV の節",
+      "context": "ndf-workflow",
+      "meaning": "判断の地点へ渡す塊。NDF の共通原則の本文全体を先頭に置き、承認済みのプロジェクト MVV の本文か「MVV なし」とその理由、行動の 2 択と根拠の指示を続ける",
+      "pending_source": "issues/issue-1366-design.md"
+    },
+    {
+      "term": "根拠の項目",
+      "context": "ndf-workflow",
+      "meaning": "判断の記録に残す MVV の項目の番号（Mission / Vision / Value 3 / C4 / P1 / R2）。MVV が無ければ「MVV なし」、返されなければ「根拠なし」",
+      "pending_source": "issues/issue-1366-design.md"
+    },
+    {
+      "term": "NDF の共通原則",
+      "context": "ndf-workflow",
+      "meaning": "NDF を使うすべてのプロジェクトに効く原則。NDF が持ち、利用側は上書きできない。上位の原則・優先順位・AI の行動の 2 択・判断の記録・人と AI の対話・必ず承認が要る操作 C1〜C8 を含む",
+      "pending_source": "issues/issue-1366-requirements.md"
+    },
+    {
+      "term": "改訂の兆候",
+      "context": "ndf-workflow",
+      "meaning": "人が AI の判断を覆した回数（「従う」を退けた・「反する疑い」を通した）・「判定できない」の回数・流出不具合の件数。現行の版のもとで数え、宣言の閾値を超えたら改訂を提案する",
+      "pending_source": "issues/issue-1366-design.md"
     },
     {
       "term": "トリガー",
