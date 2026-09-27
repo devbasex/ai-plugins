@@ -735,11 +735,12 @@
     {
       "term": "フレーキー / 既存失敗 / 変更起因",
       "context": "ndf-cross-refactoring",
-      "meaning": "危険フラグで走らせた全体テストが落ちたときの 3 つの分類（whole_test.flaky / preexisting / caused）",
+      "meaning": "全体テスト（着手前・危険フラグ・最終ゲート）で落ちたテストの 3 つの分類（whole_test.flaky / preexisting / caused）。ID は JUnit から読み、落ちたファイルだけを HEAD と着手前の HEAD で走らせ直して分ける",
       "source": "docs/specifications/cross-refactoring-verify-and-final-gate.md",
       "deprecated": [
         "元からの失敗"
-      ]
+      ],
+      "pending_source": "issues/issue-1334-design.md"
     },
     {
       "term": "指摘",
@@ -2122,9 +2123,26 @@
     {
       "term": "テストの戦略",
       "context": "ndf-cross-refactoring",
-      "meaning": "範囲テストの走らせ方・全体テストの置き場（手元か CI か）・落ちたテストの見分け方の組。cross-refactoring と supervise が宣言から選ぶ（#1334）",
+      "meaning": "範囲テストの走らせ方・全体テストの置き場（手元か CI か）・落ちたテストの見分け方の組。local-full / local-scoped-ci-whole / round-only の 3 つ。宣言の test.strategy か、同じ関数が所要から導く（#1334）",
       "source": "",
-      "pending_source": "issues/issue-1334-requirements.md"
+      "pending_source": "issues/issue-1334-requirements.md",
+      "code": "strategy"
+    },
+    {
+      "term": "範囲テストの雛形",
+      "context": "ndf-workflow",
+      "meaning": "{paths} を空白で区切った 1 語として含むテストのコマンド（宣言の scope_command か、{paths} を含む引数）。{paths} を対象の語の並びへ置き換えて走らせる",
+      "code": "scope_command",
+      "source": "",
+      "pending_source": "issues/issue-1334-design.md"
+    },
+    {
+      "term": "JUnit の置き場",
+      "context": "ndf-workflow",
+      "meaning": "テストのコマンドが JUnit XML を書くファイルの、作業ディレクトリからの相対パス（宣言の suites[].junit）。NDF はコマンドへ引数を足さず、このファイルを読む",
+      "code": "junit",
+      "source": "",
+      "pending_source": "issues/issue-1334-design.md"
     }
   ]
 }
