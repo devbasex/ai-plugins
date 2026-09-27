@@ -20,33 +20,128 @@
 **メインセッションでは修正コードを書かない。** `/ndf:fix` を
 `general-purpose` サブエージェントで起動する。
 
-**修正の手順・方針・戻り値ファイルの形は `/ndf:fix` が持つ**（`skills/fix/SKILL.md`）。駆動
-（`scripts/drive.py`）は fix で止まるとき、worker へ渡す指示を `prompt_file` に書く。指示が持つのは
-`/ndf:fix <PR>` の呼び出しと PR 固有の値だけである。**自動で直すのは `critical` / `major` だけで、
-`minor` / `nit` は直さず見送りの返信を付けて閉じる**（振り分けの規則は `/ndf:fix` の「重要度の判定」、
-基準の正本は `scripts/lib/review_criteria.py`）。
+**サブエージェントの責務（必須 4 点）**:
 
-| 値 | 出どころ |
-| --- | --- |
-| リポジトリ・PR・ラウンド | state.json の `repo` / `current_pr` / `rounds[-1].round` |
-| 作業ディレクトリ・ブランチ・ベース | state.json の `worktree_path` / `head_branch` / `base_branch` |
-| 前ラウンドのレビュー | `rounds[-1]` の担当ごとの `intent` / `posted_as` / `comments` / `review_url`。件数はそのラウンドで投稿した数で、対応の対象は `/ndf:fix` が PR の未解決のスレッドから数え直す |
-| コメントのスナップショット | `$TMP_DIR/cross-review-pr<PR>-existing-comments.txt` |
-| 戻り値ファイル | `$TMP_DIR/fix-pr<PR>-result.json`。環境変数 `CROSS_REVIEW_TMP_DIR` を渡すと `/ndf:fix` がここへ書く |
-| 指摘の基準 | 環境変数 `CROSS_REVIEW_STATE=$TMP_DIR/cross-review-pr<STATE_PR>-state.json`。`fix-steps.py context` が状態ファイルの `review_criteria`（`init` が写した重点）を読み、担当と同じ基準で振り分ける |
+1. critical / major / minor の修正コミット（**送らない**）
+2. 修正テストの追加・実行
+3. nit / 判断が割れる minor は **修正せず deferred 記録**
+4. 戻り値ファイル `$TMP_DIR/fix-pr<PR>-result.json` を必ず書き出す
+   （`$TMP_DIR` は env `CROSS_REVIEW_TMP_DIR` > `<worktree>/.cross_review/` の順で解決。
+   詳細は `scripts/state.py _tmp_dir()` 参照。`/tmp/` 直書きでも `state.py merge-fix` は legacy fallback で拾う）
 
-**送信・返信・決着・まとめは取り込み（`state.py merge-fix`）が行う**。worker は
+**送信・返信・決着・まとめは取り込み（`state.py merge-fix`）が行う**（#730）。サブエージェントは
 GitHub と git へ書かない。取り込みは現在の頭を指定して送り（`git push origin HEAD:<ブランチ名>`）、
 戻り値ファイルが報告したコミットが送り先に載ったことを確かめてから、`resolved_threads` /
-`deferred` / `rejected` の配列から返信と決着を、件数からまとめを組み立てて投稿キューで送る。
+`deferred` / `rejected` の配列から返信と決着を、件数からまとめを組み立てて待ち行列で送る。
 載っていなければ記録も投稿もせずに止まる。担当が送ると、切り離された頭ではブランチ名だけの
 送信が何も送らずに終了コード 0 で終わり、送ったという報告と実物が食い違う。
 
-**レビュー本文の指摘は `thread_id` を `null` にし、`comment_id` にはレビューの ID を書く。**
-スレッドを持たない要素には返信を積まず、`summary` と理由をまとめのコメントへ載せる。
-投稿キューは、送り直しても届かない項目（`HTTP 400` / `404` / `410` / `422`、レビューの
-投稿を除く）を飛ばして投稿キューの `dropped/` へ移し、後ろの決着とまとめを送る。飛ばした数は
-`DROPPED=` / `PENDING_DROPPED=` に出る。
+### サブエージェント起動例
+
+```python
+Agent(
+    subagent_type="general-purpose",
+    description=f"Fix PR #{PR} (round {ROUND})",
+    prompt=f"""
+/ndf:fix {PR} --defer-nit を実行してください。
+
+**作業ディレクトリ厳守**: cd {WORKTREE_PATH} で作業すること。
+別セッションが /work/<repo-root> 側で並行作業している可能性があり、
+worktree 外を触ると競合します。
+
+## コンテキスト
+- リポジトリ: {OWNER_REPO}
+- PR: #{PR} (round {ROUND_IN_PR}/{ROTATE_AFTER})
+- worktree: {WORKTREE_PATH}
+- ブランチ: {HEAD_BRANCH}
+- ベース: {BASE_BRANCH}
+- headRefOid: {HEAD_OID}
+- 前ラウンドのレビュー結果:
+  - codex review: {CODEX_REVIEW_URL}
+    (intent={CODEX_INTENT}, posted_as={CODEX_POSTED_AS}, {CODEX_COMMENT_COUNT}件)
+  - agy review: {AGY_REVIEW_URL}
+    (intent={AGY_INTENT}, posted_as={AGY_POSTED_AS}, {AGY_COMMENT_COUNT}件)
+- 既存コメントスナップショット: $TMP_DIR/cross-review-pr{PR}-existing-comments.txt
+
+⚠ 上の件数は **そのラウンドで新しく投稿された件数** であり、PR 上に残っている未解決の
+指摘の数ではない。前のラウンドの分や、再開の前に投稿された分がこの数の外にある。
+**対応の対象は GraphQL の `reviewThreads` を数え直して決めること**（手順 1 の
+コメント取得と、下の Resolve 用 query を使う）。この件数だけを対応すると取りこぼす。
+
+## ポリシー
+- 重要度ラベルは **AI agent の付与を鵜呑みにせず**、コードを読んで独自に再判定する
+- critical / major は自動修正
+- minor / nit のうち **パフォーマンス・可読性・重複コード排除** に該当するものは修正
+  （特にトータル行数が減る方向は積極実施 / +30 行を超えそうなら deferred + ユーザ問い合わせ）
+- それ以外の nit は deferred として記録のみ（修正しない、Resolve しない）
+- bot 指摘が誤読していたら修正せず reply で説明（rejected として記録、Resolve しない）
+- **重複指摘（codex/agy が同じ箇所を別 thread で指摘）は全 thread に reply + Resolve**
+- PR テスト範囲外の **flaky テストも見つけ次第このループで修正**（放置はリポジトリ品質を劣化させる）
+
+## 必須実行手順（順序厳守）
+
+1. PR コメント取得 (3 ソース): `fix/scripts/fetch-pr-comments.sh {OWNER_REPO} {PR}` でインラインコメント / レビュー body / PR レベルコメントを一括取得
+2. 重要度を独自再判定（AI agent のラベルは参考値）
+3. CI 状態スナップショット: `gh api repos/{OWNER_REPO}/commits/{HEAD_OID}/check-runs`
+   （**REST の 1 回だけ**。`gh pr checks` は同じ判断へ GraphQL を 4 リクエスト使う。
+   **完了待ちはしない** — `status` が `completed` でないものは対象から外し、
+   `conclusion` が `failure` のものだけを修正対象に取り込む）
+
+   ```bash
+   gh api "repos/{OWNER_REPO}/commits/{HEAD_OID}/check-runs?per_page=100" \
+     --jq '[.check_runs[] | select(.status == "completed" and .conclusion == "failure") | .name]'
+   ```
+
+   **`per_page=100` を付ける。** 既定は 30 件で、31 件目以降に失敗があると
+   失敗が無いものとして読む。`total_count` が 100 を超えるリポジトリでは
+   `&page=2` 以降も読み、`total_count` に届くまで足す。
+
+   **`commits/{HEAD_OID}/status` は使わない。** GitHub Actions は検査ジョブを記録し
+   commit の状態を記録しないため、すべて成功した commit でも `state: "pending"` /
+   `total_count: 0` を返す（実測）。保留として読むと、承認されたラウンドが収束しない。
+4. critical/major + 該当 minor/nit の修正コミット（worktree 内のみ）
+5. `./pint-changed.sh && ./larastan-changed.sh` 等の品質チェック
+6. コミットする。**送らない**（送信は取り込みが行う）
+7. **CI 再実行は待たない**（`ci_status` はコミット時点での既知失敗のみ反映）
+8. 各 thread の扱いを戻り値ファイルの配列へ入れる。**返信・決着・まとめは投稿しない**
+   （取り込みが配列から組み立てる）:
+   - 修正済み: `resolved_threads`（`thread_id` と `comment_id`）
+   - deferred: `deferred`（`comment_id` と `reason_for_deferral`）
+   - rejected: `rejected`（`comment_id` と `reason_for_rejection`）
+9. 戻り値ファイル書き出し（下記フォーマット）。`summary_comment_url` は書かない
+   （取り込みがまとめの投稿の応答から記録へ書く）
+
+## 戻り値ファイル $TMP_DIR/fix-pr{PR}-result.json
+
+```json
+{{
+  "pr": {PR},
+  "fix_commit": "abc1234",
+  "ci_status": "SUCCESS" | "FAILURE" | "PENDING",
+  "ci_failed_checks": [],
+  "fixed_count": 6,
+  "by_severity": {{"critical": 0, "major": 4, "minor": 2, "nit": 0}},
+  "resolved_threads": [
+    {{"thread_id": "PRRT_...", "comment_id": 123, "path": "...", "line": 42}}
+  ],
+  "deferred": [
+    {{"thread_id": "...", "path": "...", "line": 31, "severity": "nit",
+      "summary": "...", "comment_url": "..."}}
+  ],
+  "rejected": [
+    {{"thread_id": "...", "summary": "...", "reason_for_rejection": "..."}}
+  ]
+}}
+```
+
+> **重要**: `resolved_threads` / `deferred` / `rejected` は必ず **list（配列）** で返すこと。
+> **件数(int) を書かないこと**（例: `"resolved_threads": 3` は誤り。`[]` 形式で返す）。
+> `state.py merge-fix` がこの list を `len()` して state.json には件数(int)で保存する。
+> int を書くと過去 `merge-fix` が `TypeError` で落ちていた（現在は後方互換で int も受理するが、
+> 正は list）。対応した thread が無い場合は空配列 `[]` を返す。
+""",
+)
+```
 
 ### Step 5 後段: fix 戻り値マージ + CI 分類
 
@@ -63,25 +158,23 @@ fi
 1. `$TMP_DIR/fix-pr<PR>-result.json` を読んで `state.rounds[-1].fix` にマージ
 2. `deferred` を `state.deferred_nits` に追記
 3. **CI 失敗の分類**:
-   - code-fail（チェックジョブの名前がメタのチェック（`review_lib/ci.py` の `CI_META_PATTERNS`）に当たらない。テスト・lint・型検査・ビルドはここに入る）: `final=error` で中断 (exit 3)
+   - code-fail (`pint` / `larastan` / `phpstan` / `test` / `lint` / `type` / `build` / `ruff` / `eslint` / `tsc` / `mypy`): `final=error` で中断 (exit 3)
    - meta-only (`check_pr_requirements` / `assignees` / `reviewers` / `labels` / `meta`): `ci_note` に記録して継続
    - 不明: 保守的に code-fail 扱い
 
 meta-only の語は**区切りで挟まれた語として**一致したときだけ拾う。部分一致にすると
-`metabase tests` や `metadata lint` のようなコードチェックまで meta-only になり、失敗した
+`metabase tests` や `metadata lint` のようなコード検査まで meta-only になり、失敗した
 まま収束する。
 
 **例**: `check_pr_requirements`（Assignees 未設定）はループ継続、
-lint や型検査の失敗は即中断してユーザ判断。
+`laravel/pint` や `phpstan` の失敗は即中断してユーザ判断。
 
 **収束の判定（Step 3）も同じ振り分けを使う**（#327）。両方の AI が承認したラウンドは、
 収束を返す前に `commits/{HEAD_OID}/check-runs` を **1 度だけ** 照会する。code-related の
 失敗があれば**中断せず**終了コード 2 で修正のラウンドへ回す。収束の直前は修正の機会が
 残っている段であり、そこで中断すると直せる失敗まで人手へ戻すことになる。照会できない
-とき（`gh` の失敗 / `HTTP 422` / チェックジョブ 0 件）は収束させ、`rounds[-1].ci.verdict` へ
-`unverified` と理由を残す。**進行を止めない側へ倒す。** 同名のチェックジョブは名前ごとの
-最新の実行（`completed_at` と `started_at` の新しい方）へ畳んでから振り分ける。本文の編集や
-再実行で別の実行が成功したチェックの、前の実行の失敗は数えない。
+とき（`gh` の失敗 / `HTTP 422` / 検査ジョブ 0 件）は収束させ、`rounds[-1].ci.verdict` へ
+`unverified` と理由を残す。**進行を止めない側へ倒す。**
 
 ## Step 6: PR ローテーション (prepare → Agent → execute の 3 段)
 
@@ -204,7 +297,7 @@ stdout には両モードとも以下を KEY=VALUE で出す:
 state.json の **キーは元 PR 番号 (STATE_PR) のまま** なので、light/squash どちらでも
 後続スクリプトへの第 1 引数は `$STATE_PR` を渡し続ければよい。
 
-**巻き直しの後の最初のラウンドでは、`start-round` が新しい PR の既存コメントでスナップショットを取り直す**
+**巻き直しの後の最初のラウンドでは、`start-round` が新しい PR の既存コメントで控えを取り直す**
 （#542）。
 
 ### 後方互換: 旧 1 引数形式
@@ -232,9 +325,9 @@ Step 1 に戻る。
 ループ内の修正フェーズ (Step 5) は「一方でも REQUEST_CHANGES」のラウンドでしか走らない。
 そのため以下が取りこぼされる:
 
-- **最終 APPROVE ラウンドのインラインコメント**: 担当は指摘の基準に当たるものしか書かないが、
-  bot や人のレビューが `minor` / `nit` のインラインコメントを残していることがあり、両者
-  APPROVE でループを抜けるとこれらが未対応のまま残る。
+- **最終 APPROVE ラウンドのインラインコメント**: skill のレビュー方針上、`minor` 以下しか
+  無ければ `APPROVE` で良い。つまり **APPROVE でも minor/nit のインラインコメントが
+  投稿されている**ことがあり、両者 APPROVE でループを抜けるとこれらが未対応のまま残る。
 - **ループ中に deferred 記録した nit**: `state.deferred_nits` に積まれたまま reply のみで
   Resolve されていないスレッド。
 
@@ -259,16 +352,13 @@ while ループ脱出後にメインが以下のプロンプトでサブエー�
 >
 > PR の **全 open review thread**（インライン / レビュー body / PR レベルコメント）を
 > `gh api` で洗い出し、cross-review の codex/agy が残したものを中心に **すべて解消**せよ:
-> 振り分けは `/ndf:fix` の「重要度の判定」をそのまま使う（スイープ独自の重要度の規則を持たない）:
-> 1. `major` 以上（指摘の基準に当たる）→ コード修正 + コミット（**送らない**）し、`resolved_threads` へ入れる。
->    **コードを直すのは `major` 以上が残っていたときだけである**
-> 2. `minor` / `nit`（基準に当たらない）→ コードを変えず `waived` にする。`finalize` が見送りの返信と
->    `"resolve": true` を付けて `deferred` へ入れるので、そのまま結果ファイルへ写す
-> 3. 判断保留（`deferred`）と bot 誤指摘（`rejected`）→ 理由を添えて入れ、**`"resolve": true`** を付ける
->    （スレッドを open のまま残さない）
+> 1. 修正可能な `minor`/`nit` → コード修正 + コミット（**送らない**）し、`resolved_threads` へ入れる。
+> 2. 修正しない（好み・判断保留）`nit` → 見送りの理由を添えて `deferred` へ入れ、
+>    **`"resolve": true`** を付ける（スレッドを open のまま残さない）。
+> 3. bot 誤指摘 → 却下理由を添えて `rejected` へ入れ、`"resolve": true` を付ける。
 >
 > **GitHub と git へ書かない。** 返信・決着・送信は、メインがこの結果ファイルを読んで
-> 共通ライブラリの 1 行（`result_posts.py fix`）で行う。
+> 共通層の 1 行（`result_posts.py fix`）で行う。
 >
 > **修正をコミットした場合は、対象リポジトリの検証を 1 度通すこと。** 何を実行するかは
 > 対象リポジトリを見て決める。**コマンドを推測して組み立てない。**
@@ -362,9 +452,7 @@ sweep 中にメインが落ちても、`sweep-pr<STATE_PR>-result.json` が無�
 - 最終ステータス（`approved` / `max_rounds` / `oscillation` / `error`）
 - PR 履歴
 - ラウンドサマリ表
-- 基準外の見送りの件数（`waived`。返信を付けて閉じたもので、残 deferred の一覧には入れない）
 - 残 deferred nit 一覧
-- レビューの重点の宣言が読めなかったときは、その理由（基準 1・2・4 だけで続けた）
 
 `verify-sweep` を通していれば、`report` の出力に「## 最終スイープ」の節が入り、
 GitHub 側で数え直した残件数と、0 件にできなかった場合の理由が含まれる。
@@ -372,6 +460,8 @@ GitHub 側で数え直した残件数と、0 件にできなかった場合の�
 `verification`（実行した検証コマンドと終了コード、実行しなかった場合はその理由）を
 添えて最終報告する。
 
-> **Step 7.5 で全 open thread を Resolve する**ため、Step 8 のユーザ問い合わせは原則不要。
-> deferred は「対応見送りの記録」として report に **参考列挙**するに留める（再対応が要るものが
-> あればユーザがその場で指示できる）。`remaining_open > 0` の場合のみ、残った理由を添えて報告する。
+> **方針変更（v4.11.0）**: 従来は deferred nit を「AskUserQuestion で 1 回問い合わせ」て
+> いたが、未解決スレッドを残さない方針に変更。**Step 7.5 で nit も含め全 open thread を
+> Resolve する**ため、Step 8 のユーザ問い合わせは原則不要。deferred nit は「対応見送りの
+> 記録」として report に **参考列挙**するに留める（再対応が要るものがあればユーザが
+> その場で指示できる）。`remaining_open > 0` の場合のみ、残った理由を添えて報告する。
