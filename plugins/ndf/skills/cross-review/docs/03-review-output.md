@@ -28,13 +28,15 @@ body 先頭に必ず以下を入れる:
 
 ### 2. インラインコメントの最小化（最重要）
 
-インラインコメントは GitHub 上で **Resolve 操作が必須** になるため、本当に直すものだけ作る:
+インラインコメントは GitHub 上で **Resolve 操作が必須** になるため、本当に直すものだけ作る。
+書くのは指摘の基準（正本は `scripts/lib/review_criteria.py`。担当への指示の「指摘の基準」の節）に
+当たるものだけである:
 
 | 重要度 | インライン化 | 説明 |
 |---|---|---|
-| `critical` / `major` | ✅ する | 修正必須 |
-| `minor` | ✅ する | 明らかな改善のみ。判断が割れるなら出さない |
-| `nit` | ❌ **出さない** | 好み・スタイルはコメント化禁止。気になっても無視する |
+| `critical` / `major` | ✅ する | 指摘の基準の 1〜4 のどれかに当たる。修正必須 |
+| `minor` | ❌ **書かない** | 基準に当たらない（字句・まず起きない条件の異常処理・実装に影響しない文書の食い違い・番号や表記の揃え・好みの設計） |
+| `nit` | ❌ **書かない** | 同上 |
 
 **1 インラインコメント = 1 修正アクション** を厳守。
 コメント本文は `[重要度 / カテゴリ] 修正提案` の 1 文で完結させ、
@@ -59,7 +61,7 @@ body に書くのは **設計レベル・PR 横断の修正提案** のみ。
 
 ### 4. event 判定
 
-- `APPROVE` — 修正必須の指摘なし（minor 以下しか無い場合も APPROVE で良い）
+- `APPROVE` — 指摘の基準に当たる指摘が無い
 - `REQUEST_CHANGES` — critical / major の指摘あり
 - `COMMENT` — **基本使わない**。雑感だけの投稿は禁止
 
@@ -74,25 +76,25 @@ fix 戻り値ファイル (`$TMP_DIR/fix-pr<PR>-result.json`) を受け取った
 
 | 分類 | パターン | 振る舞い |
 |---|---|---|
-| code-fail | `pint` / `larastan` / `phpstan` / `test` / `lint` / `type` / `build` / `ruff` / `eslint` / `tsc` / `mypy` | `final=error` で中断 (exit 3) |
+| code-fail | メタのチェックの名前（`review_lib/ci.py` の `CI_META_PATTERNS`）に当たらない名前。テスト・lint・型検査・ビルドはここに入る | `final=error` で中断 (exit 3) |
 | meta-only | `check_pr_requirements` / `assignees` / `reviewers` / `labels` / `meta`（区切りで挟まれた語として一致したときだけ） | `ci_note` に記録して継続 |
 | 不明 | 上記以外 | 保守的に **code-fail 扱い** |
 
 PR メタデータ系の check（Assignees / Reviewers / Labels）は **継続**、
-pint / larastan / test / build などは **中断** を原則とする。
+テスト・lint・型検査・ビルドは **中断** を原則とする。
 
 ## アンチパターン
 
 - ❌ **修正をメインセッション内で行う** — context が一気に膨れる。必ずサブエージェント
 - ❌ **担当に GitHub へ投稿させる** — 投稿と記録を別の相手が行うと、担当が途中で止まった
   ときに投稿だけが残り、記録には無い。起動し直した担当が同じ論点をもう一度投稿する（#583）。
-  担当は指摘の控えと結果ファイルを書くだけにし、取り込みが待ち行列を通して送る（#730）
+  担当は指摘ファイルと結果ファイルを書くだけにし、取り込みが投稿キューを通して送る
 - ❌ **本文をメインの応答へ載せて投稿する** — 投稿は結果ファイルを読んだプロセス（取り込み）の
   中で組み立てる。メインが読むのは件数と参照だけ
-- ❌ **nit を都度ユーザに問う** — ループ中は deferred 記録のみ。最終スイープ (Step 7.5) で Resolve
+- ❌ **minor / nit を直す・都度ユーザに問う** — 直さず、見送りの返信を付けて閉じる（`/ndf:fix` の `waived`）
 - ❌ **未解決スレッドを残したまま終了する** — approved/max_rounds 等いずれの終了経路でも
   Step 7.5 の最終スイープを必ず実行し、open review thread 0 で終える。特に **最終 APPROVE
-  ラウンドの minor/nit インラインコメント**はループ内 fix を通らないため取りこぼしやすい
+  ラウンドに残ったインラインコメント**はループ内 fix を通らないため取りこぼしやすい
 - ❌ **`max-rounds` なしで回す** — 無限ループの温床
 - ❌ **PR ローテーションを忘れる** — 100+ コメントの巨大 PR になる
 - ❌ **light モードで Agent (general-purpose) 呼び出しを省略する** — newtext.json が無いと `rotate-pr.sh execute --mode light` はエラーで止まる。prepare → Agent → execute の 3 段は不可分
@@ -139,7 +141,7 @@ pint / larastan / test / build などは **中断** を原則とする。
 | 状態ファイルの `rounds[-1].<agent>.no_result_reason` / `monitor_detail` | `read-result` が写した値。`state.py report` のラウンド表には `<agent>=NO_RESULT(<理由>)` の形で出る |
 
 `usage_limit` は起動し直しても解けないため、判定は同じラウンドで起動し直さず終了コード 1
-で終える。枠が戻るまで待つか、その担当を外して回すかは進行側が決める。
+で終える。枠が戻るまで待つか、その担当を外して回すかはオーケストレーターが決める。
 - ❌ **fix サブエージェントが Resolve をスキップ** — reply だけでは未対応扱い。Resolve まで実行
 - ❌ **review body に identifier prefix を付け忘れる** — GitHub UI 上で誰のレビューか不明になる
 

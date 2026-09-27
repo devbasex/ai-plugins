@@ -9,6 +9,7 @@
 
 待つあいだラウンドは進まないが、巻き直しは 8 ラウンドに 1 度しか起きない。
 """
+
 from __future__ import annotations
 
 import json
@@ -29,15 +30,13 @@ POSTING_COMMANDS = ("gh pr comment", "gh pr close", "gh pr create", "gh pr reope
 
 def _code_lines(path: pathlib.Path) -> list[str]:
     """説明文を除いた行。書かれている手順だけを見る。"""
-    return [line for line in path.read_text(encoding="utf-8").splitlines()
-            if not line.lstrip().startswith("#")]
+    return [line for line in path.read_text(encoding="utf-8").splitlines() if not line.lstrip().startswith("#")]
 
 
 @pytest.mark.parametrize("command", POSTING_COMMANDS, ids=lambda c: c.replace(" ", "-"))
 def test_no_posting_command_is_called_bare(command: str) -> None:
     """素の呼び出しが残っていると、その 1 箇所だけが上限で止まる。"""
-    bare = [line.strip() for line in _code_lines(ROTATE)
-            if command in line and "gh_retry" not in line and "post_pr_comment" not in line]
+    bare = [line.strip() for line in _code_lines(ROTATE) if command in line and "gh_retry" not in line and "post_pr_comment" not in line]
     assert bare == [], bare
 
 
@@ -59,14 +58,13 @@ def test_the_shared_layer_is_reached_without_cd() -> None:
 
 
 def _queue_cli(*args: str, env: dict) -> subprocess.CompletedProcess[str]:
-    return subprocess.run([sys.executable, str(QUEUE_PY), *args],
-                          capture_output=True, text=True, timeout=120, env=env)
+    return subprocess.run([sys.executable, str(QUEUE_PY), *args], capture_output=True, text=True, timeout=120, env=env)
 
 
 def _env(fake_gh, **over) -> dict:
     import os
-    env = {**os.environ, "PATH": f"{fake_gh.dir}{os.pathsep}{os.environ['PATH']}",
-           "GH_FAKE_LOG": str(fake_gh.log)}
+
+    env = {**os.environ, "PATH": f"{fake_gh.dir}{os.pathsep}{os.environ['PATH']}", "GH_FAKE_LOG": str(fake_gh.log)}
     env.pop("GH_FAKE_MODE", None)
     env.pop("GH_FAKE_RULES", None)
     env.update(over)
@@ -75,26 +73,42 @@ def _env(fake_gh, **over) -> dict:
 
 def test_the_rollback_commands_wait_and_run_again(fake_gh) -> None:
     """上限のあいだ再実行し、回復したら成功する。"""
-    fake_gh.set_rules([
-        {"match": "", "calls_lt": 3,
-         "stdout": '{"message":"API rate limit exceeded.","status":"403"}',
-         "stderr": "gh: API rate limit exceeded. (HTTP 403)\n", "exit": 1},
-        {"match": "", "stdout": "https://github.com/o/r/pull/9\n"},
-    ])
-    out = _queue_cli("retry", "--interval", "0.01", "--max-wait", "1",
-                     "--", "gh", "pr", "close", "8",
-                     env=_env(fake_gh, GH_FAKE_RULES=str(fake_gh.rules_file)))
+    fake_gh.set_rules(
+        [
+            {
+                "match": "",
+                "calls_lt": 3,
+                "stdout": '{"message":"API rate limit exceeded.","status":"403"}',
+                "stderr": "gh: API rate limit exceeded. (HTTP 403)\n",
+                "exit": 1,
+            },
+            {"match": "", "stdout": "https://github.com/o/r/pull/9\n"},
+        ]
+    )
+    out = _queue_cli(
+        "retry",
+        "--interval",
+        "0.01",
+        "--max-wait",
+        "1",
+        "--",
+        "gh",
+        "pr",
+        "close",
+        "8",
+        env=_env(fake_gh, GH_FAKE_RULES=str(fake_gh.rules_file)),
+    )
 
     assert out.returncode == 0, out.stderr
-    assert len(fake_gh.calls()) == 4          # 上限 3 回 + 回復した 1 回
+    assert len(fake_gh.calls()) == 4  # 上限 3 回 + 回復した 1 回
     assert "https://github.com/o/r/pull/9" in out.stdout
 
 
 def test_the_rollback_commands_do_not_retry_other_failures(fake_gh) -> None:
     """権限の誤りは待っても直らない。1 回で返す。"""
-    out = _queue_cli("retry", "--interval", "0.01", "--max-wait", "1",
-                     "--", "gh", "pr", "close", "8",
-                     env=_env(fake_gh, GH_FAKE_MODE="forbidden"))
+    out = _queue_cli(
+        "retry", "--interval", "0.01", "--max-wait", "1", "--", "gh", "pr", "close", "8", env=_env(fake_gh, GH_FAKE_MODE="forbidden")
+    )
 
     assert out.returncode == 1
     # 403 は上限とも権限の誤りとも読めるため、残り回数を 1 度だけ引いて決める。
@@ -108,10 +122,22 @@ def test_a_comment_is_queued_instead_of_waiting(fake_gh, tmp_path) -> None:
     qdir = tmp_path / "pending"
     body = tmp_path / "body.txt"
     body.write_text("ℹ️ 巻き直しの案内", encoding="utf-8")
-    out = _queue_cli("post", "--dir", str(qdir), "--kind", "pr-comment",
-                     "--repo", "o/r", "--pr", "8", "--body-file", str(body),
-                     "--actor", "takemi",
-                     env=_env(fake_gh, GH_FAKE_MODE="rate_limit"))
+    out = _queue_cli(
+        "post",
+        "--dir",
+        str(qdir),
+        "--kind",
+        "pr-comment",
+        "--repo",
+        "o/r",
+        "--pr",
+        "8",
+        "--body-file",
+        str(body),
+        "--actor",
+        "takemi",
+        env=_env(fake_gh, GH_FAKE_MODE="rate_limit"),
+    )
 
     assert out.returncode == 0, out.stderr
     assert "QUEUED=1" in out.stdout
@@ -120,7 +146,7 @@ def test_a_comment_is_queued_instead_of_waiting(fake_gh, tmp_path) -> None:
 
 # ---- execute --mode light の失敗時の旧 PR 復旧（R2-001, 現状固定） ----
 #
-# 既存の検査は投稿コマンドの静的検査と retry の単独実行にとどまり、`execute` における
+# 既存のチェックは投稿コマンドの静的検査と retry の単独実行にとどまり、`execute` における
 # 旧 PR の close → 新 PR 作成失敗 → ERR trap による旧 PR 復旧のつながりを実行していない。
 # 公開入口から通し、git は成功する代替・gh は PR の開閉状態を記録する代替に差し替える
 # （外部サービスへは接続しない）。正しさを主張しない現状固定テスト。
@@ -133,7 +159,7 @@ _HEAD_BRANCH = "feature/x"
 
 # gh の代替。呼び出しを記録し、PR の開閉状態を `GH_STORE` に書く。`create` の成否だけを
 # 環境変数 `GH_CREATE` で切り替える（"ok" で成功、それ以外は 422 で失敗）。
-_FAKE_GH_EXECUTE = '''#!/usr/bin/env python3
+_FAKE_GH_EXECUTE = """#!/usr/bin/env python3
 import sys, json, os
 store = os.environ["GH_STORE"]
 calllog = os.environ["GH_CALLS"]
@@ -173,7 +199,7 @@ if argv[:2] == ["pr", "create"]:
     sys.exit(1)
 sys.stderr.write("unexpected gh call: %%r\\n" %% argv)
 sys.exit(3)
-''' % {"new_pr": _NEW_PR}
+""" % {"new_pr": _NEW_PR}
 
 _FAKE_GIT = "#!/usr/bin/env bash\nexit 0\n"
 
@@ -198,22 +224,26 @@ class _Rotation:
         self.calls.write_text("", encoding="utf-8")
 
         (self.tmp / f"cross-review-pr{_STATE_PR}-state.json").write_text(
-            json.dumps({
-                "worktree_path": str(self.worktree),
-                "current_pr": _OLD_PR,
-                "repo": _REPO,
-                "viewer_login": "tester",
-                "rounds": [{"round": 1, "pr": _OLD_PR}],
-            }),
+            json.dumps(
+                {
+                    "worktree_path": str(self.worktree),
+                    "current_pr": _OLD_PR,
+                    "repo": _REPO,
+                    "viewer_login": "tester",
+                    "rounds": [{"round": 1, "pr": _OLD_PR}],
+                }
+            ),
             encoding="utf-8",
         )
         (self.tmp / f"rotate-pr{_STATE_PR}-prepare.json").write_text(
-            json.dumps({
-                "head_branch": _HEAD_BRANCH,
-                "base_branch": "develop",
-                "is_draft": False,
-                "old_title": "t",
-            }),
+            json.dumps(
+                {
+                    "head_branch": _HEAD_BRANCH,
+                    "base_branch": "develop",
+                    "is_draft": False,
+                    "old_title": "t",
+                }
+            ),
             encoding="utf-8",
         )
         (self.tmp / f"rotate-pr{_STATE_PR}-newtext.json").write_text(
@@ -232,7 +262,10 @@ class _Rotation:
         }
         return subprocess.run(
             ["bash", str(ROTATE), "execute", str(_STATE_PR), "--mode", mode],
-            capture_output=True, text=True, timeout=180, env=env,
+            capture_output=True,
+            text=True,
+            timeout=180,
+            env=env,
         )
 
     def pr_states(self) -> dict:
@@ -253,9 +286,9 @@ def test_a_create_failure_leaves_the_old_pr_open_and_no_new_pr(rotation: _Rotati
 
     assert out.returncode != 0, out.stderr
     states = rotation.pr_states()
-    assert states[str(_OLD_PR)] == "open"          # reopen で戻る
-    assert str(_NEW_PR) not in states              # 新 PR は作られていない
-    assert "NEW_PR=" not in out.stdout             # 成功結果を出力していない
+    assert states[str(_OLD_PR)] == "open"  # reopen で戻る
+    assert str(_NEW_PR) not in states  # 新 PR は作られていない
+    assert "NEW_PR=" not in out.stdout  # 成功結果を出力していない
     joined = rotation.gh_calls()
     assert any(c.startswith(f"pr close {_OLD_PR}") for c in joined)
     assert any(c.startswith(f"pr reopen {_OLD_PR}") for c in joined)
@@ -281,9 +314,9 @@ def test_a_create_failure_in_squash_mode_reopens_the_old_pr_and_emits_no_new_pr(
 
     assert out.returncode != 0, out.stderr
     states = rotation.pr_states()
-    assert states[str(_OLD_PR)] == "open"          # reopen で戻る
-    assert str(_NEW_PR) not in states              # 新 PR は作られていない
-    assert "NEW_PR=" not in out.stdout             # 成功結果を出力していない
+    assert states[str(_OLD_PR)] == "open"  # reopen で戻る
+    assert str(_NEW_PR) not in states  # 新 PR は作られていない
+    assert "NEW_PR=" not in out.stdout  # 成功結果を出力していない
     joined = rotation.gh_calls()
     assert any(c.startswith(f"pr close {_OLD_PR}") for c in joined)
     assert any(c.startswith(f"pr reopen {_OLD_PR}") for c in joined)
@@ -309,10 +342,13 @@ def test_a_create_success_in_squash_mode_closes_the_old_pr_and_opens_the_new_pr(
 # `load_state` (state.json の読み込み) より前で止まる。現状固定として、終了コードと
 # stderr のメッセージを実行して確かめる。
 
+
 def test_an_invalid_mode_value_is_rejected() -> None:
     out = subprocess.run(
         ["bash", str(ROTATE), "execute", "123", "--mode", "bogus"],
-        capture_output=True, text=True, timeout=60,
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
 
     assert out.returncode == 2
@@ -322,7 +358,9 @@ def test_an_invalid_mode_value_is_rejected() -> None:
 def test_an_unknown_flag_is_rejected() -> None:
     out = subprocess.run(
         ["bash", str(ROTATE), "execute", "123", "--unknown-flag"],
-        capture_output=True, text=True, timeout=60,
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
 
     assert out.returncode == 2
@@ -338,7 +376,9 @@ def test_mode_without_a_value_is_rejected() -> None:
     """
     out = subprocess.run(
         ["bash", str(ROTATE), "execute", "123", "--mode"],
-        capture_output=True, text=True, timeout=60,
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
 
     assert out.returncode != 0
@@ -354,7 +394,7 @@ def test_execute_stops_when_state_json_is_missing(tmp_path) -> None:
     bin_dir.mkdir()
     calls.write_text("", encoding="utf-8")
 
-    fake_command = "#!/usr/bin/env bash\nprintf '%s\\n' \"$0 $*\" >> \"$CALLS\"\n"
+    fake_command = '#!/usr/bin/env bash\nprintf \'%s\\n\' "$0 $*" >> "$CALLS"\n'
     for command in ("gh", "git"):
         executable = bin_dir / command
         executable.write_text(fake_command, encoding="utf-8")
@@ -368,7 +408,10 @@ def test_execute_stops_when_state_json_is_missing(tmp_path) -> None:
     }
     out = subprocess.run(
         ["bash", str(ROTATE), "execute", str(_STATE_PR)],
-        capture_output=True, text=True, timeout=60, env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=env,
     )
 
     assert out.returncode == 1
@@ -383,7 +426,9 @@ def test_no_arguments_prints_usage() -> None:
     """
     out = subprocess.run(
         ["bash", str(ROTATE)],
-        capture_output=True, text=True, timeout=60,
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
 
     assert out.returncode == 2
@@ -400,31 +445,40 @@ def test_prepare_connects_state_pr_metadata_and_git_summary(tmp_path) -> None:
     tmp_dir.mkdir()
     worktree.mkdir()
     bin_dir.mkdir()
-    (tmp_dir / f"cross-review-pr{state_pr}-state.json").write_text(json.dumps({
-        "worktree_path": str(worktree),
-        "current_pr": current_pr,
-        "repo": "o/r",
-        "viewer_login": "tester",
-        "rounds": [
-            {"round": 1, "pr": 40},
-            {"round": 2, "pr": current_pr},
-            {"round": 3, "pr": current_pr},
-        ],
-    }), encoding="utf-8")
+    (tmp_dir / f"cross-review-pr{state_pr}-state.json").write_text(
+        json.dumps(
+            {
+                "worktree_path": str(worktree),
+                "current_pr": current_pr,
+                "repo": "o/r",
+                "viewer_login": "tester",
+                "rounds": [
+                    {"round": 1, "pr": 40},
+                    {"round": 2, "pr": current_pr},
+                    {"round": 3, "pr": current_pr},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
     (bin_dir / "gh").write_text(
         "#!/usr/bin/env bash\n"
-        "printf '%s\\n' '{\"number\":43,\"url\":\"https://github.com/o/r/pull/43\","
-        "\"title\":\"Current title\",\"body\":\"Current body\","
-        "\"headRefName\":\"feature/prepare\",\"baseRefName\":\"develop\","
-        "\"isDraft\":true}'\n", encoding="utf-8")
+        'printf \'%s\\n\' \'{"number":43,"url":"https://github.com/o/r/pull/43",'
+        '"title":"Current title","body":"Current body",'
+        '"headRefName":"feature/prepare","baseRefName":"develop",'
+        '"isDraft":true}\'\n',
+        encoding="utf-8",
+    )
     (bin_dir / "git").write_text(
         "#!/usr/bin/env bash\n"
-        "case \"$1\" in\n"
+        'case "$1" in\n'
         "  fetch|rev-parse) exit 0 ;;\n"
         "  log) printf 'abc123 First commit\\ndef456 Second commit\\n' ;;\n"
         "  diff) printf ' a.py | 2 ++\\n 1 file changed, 2 insertions(+)\\n' ;;\n"
         "  *) exit 3 ;;\n"
-        "esac\n", encoding="utf-8")
+        "esac\n",
+        encoding="utf-8",
+    )
     for command in ("gh", "git"):
         (bin_dir / command).chmod(0o755)
 
@@ -435,19 +489,21 @@ def test_prepare_connects_state_pr_metadata_and_git_summary(tmp_path) -> None:
     }
     out = subprocess.run(
         ["bash", str(ROTATE), "prepare", str(state_pr)],
-        capture_output=True, text=True, env=env, check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
     )
 
     assert out.returncode == 0, out.stderr
     evaluated = subprocess.run(
-        ["bash", "-c",
-         'eval "$1"; printf "%s\\n" "$PREPARE_JSON" "$OLD_PR" "$HEAD_BRANCH" '
-         '"$BASE_BRANCH" "$IS_DRAFT"', "bash", out.stdout],
-        capture_output=True, text=True, check=True,
+        ["bash", "-c", 'eval "$1"; printf "%s\\n" "$PREPARE_JSON" "$OLD_PR" "$HEAD_BRANCH" "$BASE_BRANCH" "$IS_DRAFT"', "bash", out.stdout],
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout.splitlines()
     prepare_path = tmp_dir / f"rotate-pr{state_pr}-prepare.json"
-    assert evaluated == [
-        str(prepare_path), str(current_pr), "feature/prepare", "develop", "true"]
+    assert evaluated == [str(prepare_path), str(current_pr), "feature/prepare", "develop", "true"]
     assert json.loads(prepare_path.read_text(encoding="utf-8")) == {
         "state_pr": state_pr,
         "old_pr": current_pr,
@@ -462,3 +518,25 @@ def test_prepare_connects_state_pr_metadata_and_git_summary(tmp_path) -> None:
         "git_log": "abc123 First commit\ndef456 Second commit",
         "git_diff_stat": " a.py | 2 ++\n 1 file changed, 2 insertions(+)",
     }
+
+
+# ---- execute の標準出力は eval される変数だけ（#942） ----
+
+_NOISY_GIT = (
+    "#!/usr/bin/env bash\n"
+    # pre-push の hook などが標準出力へ書く行を模す。eval されると `>` がファイルを作る。
+    'echo "==> bash build.sh --check > clobbered"\n'
+    'echo "warning: (hook output)"\n'
+    "exit 0\n"
+)
+
+
+@pytest.mark.parametrize("mode", ["light", "squash"])
+def test_the_stdout_of_execute_holds_only_the_eval_variables(rotation: _Rotation, mode: str) -> None:
+    (rotation.bin / "git").write_text(_NOISY_GIT, encoding="utf-8")
+    out = rotation.run(create_ok=True, mode=mode)
+
+    assert out.returncode == 0, out.stderr
+    lines = [line for line in out.stdout.splitlines() if line.strip()]
+    assert [line.split("=", 1)[0] for line in lines] == ["NEW_PR", "NEW_PR_URL", "NEW_BRANCH"], out.stdout
+    assert "==> bash build.sh" in out.stderr

@@ -12,7 +12,7 @@
 | `scripts/launch-reviewer.sh` | Step 2 — レビュワー起動の入口（4 ランタイム共通） |
 | `scripts/monitor.py` | Step 2 — レビュワーのプロセス多軸監視（`--agents` で担当を渡す） |
 | `scripts/wait-review.sh` | Step 2 — `monitor.py` の薄ラッパ（互換用） |
-| `scripts/bg-wait.sh` | Step 2 / 2.5 — Bash の 1 回（600 秒）に収まらない監視と反証を背景で起動し、540 秒以内の wait を 124 のあいだ**別の Bash の呼び出しで**呼び直す |
+| 共通ライブラリの `scripts/lib/bg-wait.sh` | Step 2 / 2.5 — Bash の 1 回（600 秒）に収まらない監視と反証を背景で起動し、540 秒以内の wait を 124 のあいだ**別の Bash の呼び出しで**呼び直す |
 | `scripts/state.py read-result` | Step 2.4 — result.json マージ |
 | `scripts/state.py unresolved-threads` | PR 上の未解決の指摘を数える（順序を持たない補助） |
 | `scripts/state.py judge` | Step 3 — intent + 引き継いだ指摘の判定 |
@@ -21,38 +21,19 @@
 このドキュメントは Step 0〜4 の**手順**を残す。状態ファイルの形式と AI への入出力の契約は
 [04-contracts.md](04-contracts.md) にある。スクリプト側の挙動はソースを直接参照のこと。
 
-## Step 0: 準備 + 既存 state 引き継ぎ
+## Step 0: 準備 + 既存 state 引継ぎ
 
 ```bash
-# この Skill のディレクトリを決める。候補を順に試し、最初に当たったものを絶対パスで採る。
-# Claude Code は SKILL.md 内の ${CLAUDE_PLUGIN_ROOT} をプラグインルートの絶対パスへ置き換えて
-# から渡す。シングルクォートで囲むのは、置き換えられなかったときにシェルへ展開させないため
-# である（未定義の変数を読まないので `set -u` でも落ちない）。Codex と Kiro CLI は置き換えず、
-# プラグインルートを示す環境変数も置かない（Codex は実測、Kiro CLI は未確認）。置き換えない
-# runtime では、
-# **この bash を実行する前に `<この Skill のディレクトリ>` をランタイムから渡された実際の
-# パスへ置き換えること**。置き換えないまま実行しても、その候補が外れるだけで別の場所を
-# 読むことはない。Kiro CLI は installer が `.kiro/skills/` へ symlink を張るため、置き換え
-# なくてもその位置で当たる。
-SKILL_NAME=cross-review
-PLUGIN_ROOT='${CLAUDE_PLUGIN_ROOT}'
-case "$PLUGIN_ROOT" in '$'*) PLUGIN_ROOT= ;; esac
-SKILL_DIR=
-# 明示的に渡されたディレクトリを `.kiro` より先に見る。逆にすると、Kiro の設定を持つ
-# リポジトリで Codex や Claude Code を動かしたときに別 runtime の Skill を選ぶ。
-for candidate in \
-  ${PLUGIN_ROOT:+"$PLUGIN_ROOT/skills/$SKILL_NAME"} \
-  "<この Skill のディレクトリ>" \
-  ".kiro/skills/$SKILL_NAME" \
-  "$HOME/.kiro/skills/$SKILL_NAME"
-do
-  [ -d "$candidate/scripts" ] || continue
-  # 相対パスのまま持ち回ると、この後 worktree へ移ったときに外れる。ここで絶対パスにする。
-  SKILL_DIR="$(cd "$candidate" && pwd)"
-  break
+# スクリプトの置き場所を解決の入口（scripts/resolve.sh）に尋ねる。入口を探すこのコマンドと
+# 候補の順序は development-workflow/references/scripts-lookup.md にある。
+for R in '${CLAUDE_PLUGIN_ROOT}' "$(git rev-parse --show-toplevel 2>/dev/null)/plugins/ndf" \
+  ~/.claude/plugins/cache/*/ndf/* .kiro/skills/*/../.. ~/.kiro/skills/*/../.. \
+  ~/.codex/{.tmp/,}marketplaces/*/plugins/ndf ~/.gemini/config/plugins/ndf plugins/ndf; do
+  [ -f "$R/scripts/resolve.sh" ] && break; R=
 done
-[ -n "$SKILL_DIR" ] || { echo "この Skill のディレクトリを解決できない" >&2; exit 1; }
-SCRIPTS="$SKILL_DIR/scripts"
+[ -n "$R" ] || { echo "NDF の scripts/resolve.sh が見つからない" >&2; exit 3; }
+SCRIPTS=$(bash "$R/scripts/resolve.sh" scripts cross-review) || exit 3
+LIB=$(bash "$R/scripts/resolve.sh" scripts)/lib || exit 3   # 共通ライブラリ（bg-wait.sh）
 
 # state 初期化 / 再開（プリチェック・worktree 作成・既存コメントスナップショットを内部実行）
 # ⚠ `eval "$(スクリプト)"` は、スクリプトが異常終了しても出力が空なら終了コード 0 になる。
@@ -107,7 +88,7 @@ cd "$WORKTREE"
 ROUND_VARS=$("$SCRIPTS/state.py" start-round "$STATE_PR") || {
   RC=$?
   [ "$RC" -eq 1 ] && break   # max_rounds 到達 → ループを抜けて最終スイープへ
-  exit "$RC"                 # 5=後始末が未了 / 8=作業ツリーを同期できない。その場で止める
+  exit "$RC"                 # 5=後始末が未了 / 8=worktree を同期できない。その場で止める
 }
 eval "$ROUND_VARS"
 # eval で取り込まれる変数: ROUND, ROUND_IN_PR, PR, MAX_ROUNDS, ROTATE_AFTER
@@ -117,12 +98,12 @@ eval "$ROUND_VARS"
 それ以外は新しい round エントリを state.rounds に push して KEY=VALUE を吐く。
 
 前のラウンドの後始末（返信と Resolve）が終わっていなければ **exit 5** で止まる。
-条件は Step 3 の「Step 1 の開始時に行う後始末の検査」にある。
-round エントリを保存する前に**既存コメントの控えを取り直す**（#542。失敗しても止めない。条件と形は [04-contracts.md](04-contracts.md) の「ラウンドの開始時に担当へ渡すもの」）。
+条件は Step 3 の「Step 1 の開始時に行う後始末のチェック」にある。
+round エントリを保存する前に**コメントのスナップショットを取り直す**（#542。失敗しても止めない。条件と形は [04-contracts.md](04-contracts.md) の「ラウンドの開始時に担当へ渡すもの」）。
 
 ### ラウンドの開始時の同期
 
-**round エントリを開く前に、作業ツリーを PR の head へ揃える。** 修正を作業ツリーの外で
+**round エントリを開く前に、worktree を PR の head へ揃える。** 修正を worktree の外で
 行って push すると、次のラウンドは 1 つ前の内容をレビューする。実測（PR #212）では、
 ラウンド 4 で対応済みの指摘 2 件がラウンド 5 で再び投稿された。エントリを開く前に行うのは、
 途中で止まったときにラウンドが半端に開かれず、原因を取り除いた後に同じ番号から再開できる
@@ -135,7 +116,7 @@ round エントリを保存する前に**既存コメントの控えを取り直
 | 追跡対象のファイルに変更がある | **exit 8** で止める |
 | 基準に含まれないローカルのコミットがある | **exit 8** で止める |
 | 基準を取り込めない / head を解決できない | **exit 8** で止める |
-| `worktree_path` が無い、または登録済みの作業ツリーでない | 同期せず、警告して続ける |
+| `worktree_path` が無い、または登録済みの worktree でない | 同期せず、警告して続ける |
 
 追跡対象の変更と未 push のコミットで止めるのは、それが**修正の工程が push を終えていない
 証拠**だからである。捨てると修正そのものが失われ、しかも失われたことが誰にも見えない。
@@ -152,14 +133,14 @@ round エントリを保存する前に**既存コメントの控えを取り直
 
 同期先のブランチ名は毎ラウンド取り直し、`state.json` の `head_branch` へ書き戻す。
 `squash` の巻き直しは `<branch>-r<HHMMSS>` を作るため、巻き直しの側でも `set-current-pr` が
-`--head-branch` で受け取った値を書き戻す。ラウンドの開始時にも取り直すのは、作業ツリーの
+`--head-branch` で受け取った値を書き戻す。ラウンドの開始時にも取り直すのは、worktree の
 外で行われた変更に追従するためである。
 
 ## Step 2: レビュー担当 2 者の並列レビュー
 
 **要点**: メインは launcher を **並列バックグラウンド** で起動するだけ。
-各担当は **投稿しない。** 指摘の控え（`<席>-review-pr<PR>-round<R>-payload.json`）と
-結果ファイル（`<席>-review-pr<PR>-result.json`）を一時の名前で書き、控え → 結果の順に
+各担当は **投稿しない。** 指摘ファイル（`<席>-review-pr<PR>-round<R>-payload.json`）と
+結果ファイル（`<席>-review-pr<PR>-result.json`）を一時の名前で書き、指摘ファイル → 結果の順に
 改名する。投稿は取り込み（`read-result`）が行う（#730）。**本文はメイン context に載せない**。
 
 ### 2.1 launcher 起動 + monitor
@@ -172,10 +153,10 @@ done
 
 # monitor.py が多軸で完了判定。exit code で失敗種別を分岐。上限は `--phase review`（1200 秒）。
 # ⚠ 位置引数の `both` は codex / agy の 2 者だけを指す。担当の一覧は `--agents` で渡す。
-"$SCRIPTS/bg-wait.sh" run "$TMP_DIR/review.rc" -- "$SCRIPTS/monitor.py" "$STATE_PR" --phase review --agents "$REVIEWERS_CSV"
+"$LIB/bg-wait.sh" run "$TMP_DIR/review.rc" -- "$SCRIPTS/monitor.py" "$STATE_PR" --phase review --agents "$REVIEWERS_CSV"
 # 待ちは 1 回 540 秒以内。**124 が返るあいだ、この 2 行を別の Bash の呼び出しとして呼び直す。**
 # 繰り返しを 1 回の呼び出しへ書くと、2 回目の待ちで合計が 600 秒を超えてホストに打ち切られる。
-"$SCRIPTS/bg-wait.sh" wait "$TMP_DIR/review.rc"; RC=$?
+"$LIB/bg-wait.sh" wait "$TMP_DIR/review.rc"; RC=$?
 if [ "$RC" -ne 0 ] && [ "$RC" -ne 124 ]; then
   case $RC in
     2) echo "❌ timeout"      ;;  # hard timeout 超過
@@ -222,26 +203,26 @@ for r in $REVIEWERS; do
 done
 ```
 
-`state.rounds[-1].<席の名前>` に `intent / posted_as / comments / review_url / by_severity` を分離保存する（席の名前の形は `04-contracts.md`）。
+`state.rounds[-1].<席の名前>` に `intent / posted_as / comments / review_url / by_severity` を分離保存する（スロット名の形は `04-contracts.md`）。
 
 #### 取り込みがレビューを投稿する
 
-**書き込みと記録を 1 つの部分命令に閉じる**（#730）。`read-result` は「控えを読む → 投稿を
+**書き込みと記録を 1 つの部分命令に閉じる**。`read-result` は「指摘ファイルを読む → 投稿を
 積む → 流す → 送信の応答を記録へ書き戻す → 指摘を取り込む」の順に進む。記録の参照は送信の
 応答から、件数（`comments`）は送れたインラインの数から取る。**担当の申告を GitHub の実数と
 突き合わせる処理は無い**（投稿する側と記録する側が同じになったため）。標準出力に足すのは
 件数・参照・状態の行（`POSTED review_url=` / `INLINE= BODY= QUEUED=` / `FINDINGS=`）だけである。
 
-| 止まった場所 | 待ち行列の項目 | 立て直し |
+| 止まった場所 | 投稿キューの項目 | 立て直し |
 | --- | --- | --- |
 | 送る前（上限などで送れていない） | 残る | 判定の終了コード 8 の枝が流し直す |
-| 送った後・記録の前 | 残らない | 取り込みをもう一度呼ぶ。照合（ラウンドと席までの前方一致）が先客を見つけ、増えない |
+| 送った後・記録の前 | 残らない | 取り込みをもう一度呼ぶ。照合（ラウンドとスロットまでの前方一致）が重複投稿を見つけ、増えない |
 
 本文の先頭行は `## 🤖 cross-review | round <R> | <席> | <本来の判定>` である。自分の
 Pull Request では送る形だけを `COMMENT` へ落とし、記録の `intent` は本来の判定のまま残す。
 
 **誰がレビューし、いつ止めるかは [05-pool-and-convergence.md](05-pool-and-convergence.md)
-にある。** 母集合・担当の輪番・認証の確認と、終了基準の 3 つの層をそこで定める。
+にある。** 参加者プール・担当の輪番・認証確認と、終了基準の 3 つの層をそこで定める。
 
 ## Step 3: 判定（新規の指摘 + 引き継いだ指摘 + 結果なし）
 
@@ -255,18 +236,18 @@ eval "$JUDGE_VARS"
 ### 判定の出口
 
 出口は 5 つある。**結果を取り込めていないラウンドは、収束も修正も決められない。**
-そのため結果なしの検査を、通ったかどうかの判定より先に置く。
+そのため結果なしのチェックを、通ったかどうかの判定より先に置く。
 
 | ラウンドの状態 | 出口 | 終了コード | `verdict` |
 | --- | --- | --- | --- |
 | 結果なしがあり、そのレビュアーをまだ起動し直していない | 起動し直す | 7 | `no_result` |
 | 結果なしがあり、既に起動し直している | 中断（`final = error`） | 1 | `no_result` |
-| 通ったが、待ち行列に投稿が残っている | 流し直す | 8 | `queued` |
+| 通ったが、投稿キューに投稿が残っている | 流し直す | 8 | `queued` |
 | 通った、かつ引き継いだ指摘なし | 収束（`final = approved`） | 0 | `approved` |
 | それ以外 | 修正へ | 2 | `changes_requested` |
 
-終了コード 8 を 2 と分けるのは、**修正するものが無い状態で修正の工程を起動すると空回り
-する**ためである。呼び出し側は 8 を受けたら `flush` を試し、流し切れたら判定をもう一度
+終了コード 8 を 2 と分けるのは、**修正するものが無い状態で修正の工程を起動すると再起動ループに
+なる**ためである。呼び出し側は 8 を受けたら `flush` を試し、流し切れたら判定をもう一度
 実行する（`SKILL.md` のループ）。
 
 ### 結果を残さなかったレビュアーの扱い
@@ -283,8 +264,8 @@ eval "$JUDGE_VARS"
 | `NO_RESULT` | 起動したが、使える結果が残らなかった | 通らない |
 
 `NO_RESULT` は `read-result` が書き込む。理由は `no_result_reason` に、監視が残した詳細（err.log の
-抜粋、最大 200 文字）は `monitor_detail` に残る（監視の結果ファイルがあったときだけ）。理由の語彙と
-起動し直しの可否を持つのは共通層の `monitor_outcome.py` だけで、`read-result` はその値を写す（#729）。
+抜粋、最大 200 文字）は `monitor_detail` に残る（監視結果ファイルがあったときだけ）。理由の語彙と
+リトライ可否を持つのは共通ライブラリの `monitor_outcome.py` だけで、`read-result` はその値を写す。
 
 | 理由 | 何が起きたか | 起動し直し | `read-result` の終了コード |
 | --- | --- | --- | --- |
@@ -299,7 +280,7 @@ eval "$JUDGE_VARS"
 | `cli_timeout` | CLI 自身の上限（agy の `--print-timeout`）で結果を書かずに終わった | 可 | 1 |
 | `pidfile_bad` | pid ファイルが無い・別のプロセスを指す | 可 | 1 |
 
-**記録が無いラウンドも結果なしとして読む。** 骨組みが取り込みを呼び忘れても、判定は収束しない。
+**記録が無いラウンドも結果なしとして読む。** スケルトンが取り込みを呼び忘れても、判定は収束しない。
 
 結果なしの担当があると、判定は理由を `NO_RESULT_REASONS='<担当>=<理由> ...'` の 1 行で出す。
 **起動し直しても解けない理由（`usage_limit`）を含むときは起動し直さず**、`final=error` として終了
@@ -350,7 +331,7 @@ graph TD
 
 - `APPROVE` は pass
 - `COMMENT` は `by_severity.critical == 0 && major == 0` のみ pass（軽微な指摘のみなら通す）
-- `NO_RESULT` は pass にしない（結果なしの検査が先に効くため、ここへは届かない）
+- `NO_RESULT` は pass にしない（結果なしのチェックが先に効くため、ここへは届かない）
 - `--only` 指定時は反対側を SKIP 扱いとし、pass 判定を短絡する
 - ループ収束判定は **必ず `intent`** を見る（`posted_as` ではない）
 
@@ -364,9 +345,9 @@ intent が `REQUEST_CHANGES` なら継続する。
 | `init` の再開 | 未解決の指摘を数え、`carried_over` に件数と thread ID を記録。出力に `CARRIED_OVER_THREADS=N` |
 | `judge` | `carried_over.fixed_in_round` が `null` のあいだは、両者が承認しても exit 2 |
 | `merge-fix` | 修正の工程を通したラウンド番号を `carried_over.fixed_in_round` に入れる |
-| 以降の `judge` | 引き継ぎは判定から外れ、収束の振る舞いは現行に戻る |
+| 以降の `judge` | 引継ぎは判定から外れ、収束の振る舞いは現行に戻る |
 
-新規に開始したレビューでは記録しない。引き継ぎは**再開の時点**で決まる。
+新規に開始したレビューでは記録しない。引継ぎは**再開の時点**で決まる。
 未解決の指摘を取得できなかったときは記録を書き換えない（0 件として扱わない）。
 
 修正の工程を通した後にもう一度再開したときは、**そのとき残っている指摘が前回の記録に
@@ -384,13 +365,13 @@ eval "$UNRESOLVED_VARS"
 # exit 1 = 取得できなかった（0 件と区別する）
 ```
 
-### GitHub が使えないあいだの投稿（待ち行列）
+### GitHub が使えないあいだの投稿（投稿キュー）
 
 GitHub の利用回数の上限に達すると投稿は失敗する。**失敗をそのまま止める側へ倒すと、
 レビューを 1 巡も進められない。** 上限のときだけ投稿する内容をローカルへ積み、回復した
-後に順に流す（#291）。仕組みは共通層の `post_queue.py` にある。
+後に順に流す。仕組みは共通ライブラリの `post_queue.py` にある。
 
-置き場所は状態ファイルと同じ `<作業ツリー>/.cross_review/pending/` で、1 項目 1 ファイルの
+置き場所は状態ファイルと同じ `<worktree>/.cross_review/pending/` で、1 項目 1 ファイルの
 JSON である。名前は `<連番 4 桁>-<種別>-<識別子>.json` で、**順序はこの連番だけが決める**。
 
 | 応答 | 扱い |
@@ -405,7 +386,7 @@ JSON である。名前は `<連番 4 桁>-<種別>-<識別子>.json` で、**�
 `gh api rate_limit` を引く（この照会そのものは上限を消費しない）。
 
 流すきっかけは 2 つある。**自動だけにも明示だけにもしない。** 自動だけだと、回復を待つ
-あいだ何もコマンドを実行していない場合に流れない。明示だけだと、進行側が忘れたときに
+あいだ何もコマンドを実行していない場合に流れない。明示だけだと、オーケストレーターが忘れたときに
 残ったまま収束の判定へ進む。
 
 | きっかけ | どこで | 流せなかったとき |
@@ -415,7 +396,7 @@ JSON である。名前は `<連番 4 桁>-<種別>-<識別子>.json` で、**�
 
 **取り込み（`read-result`）の入口では流さない。** `review-post` の書き戻し先はその
 ラウンドの担当のエントリで、取り込みの前にはまだ無い。流すと書き戻せないまま項目が消え、
-`queued` が真のまま待ち行列だけが空になる。判定はその状態で収束するため、投稿の存在も
+`queued` が真のまま投稿キューだけが空になる。判定はその状態で収束するため、投稿の存在も
 参照も一度も確かめられない。**流すのは両方を取り込んだ後**（`judge` の入口）で、
 取り込みは判定の直前にしかないため、流す時期が遅れるのは 1 コマンド分である。
 
@@ -439,27 +420,27 @@ JSON である。名前は `<連番 4 桁>-<種別>-<識別子>.json` で、**�
 
 #### #261 の決まりとの関係
 
-**待ち行列は、投稿が届いたことを確かめる時点を投稿の直後から流した直後へ移すだけである。**
+**投稿キューは、投稿が届いたことを確かめる時点を投稿の直後から流した直後へ移すだけである。**
 決まりそのものは変えない。
 
-| 段階 | 待ち行列を入れた後 |
+| 段階 | 投稿キューを入れた後 |
 | --- | --- |
 | 結果を取り込む | `queued` が真の結果は、届いたことの照会を飛ばす（識別子がまだ無い） |
 | 流した直後 | 投稿先の参照を書き戻し、存在を 1 度だけ確かめる。無ければ結果なしにする |
-| 判定 | 待ち行列が空のときだけ収束する |
+| 判定 | 投稿キューが空のときだけ収束する |
 
 積んだ時点で照会すると結果なしになり、起動し直しで同じ内容が二重に積まれる。
 
 **確かめる対象は、送った項目と既に届いていた項目の両方である。** 送信に成功した直後に
 中断すると、GitHub 側には投稿があるのに項目は残る。次に流すと冪等の照会で見つかって
-送らずに消えるため、ここを分けると `queued` が解除されず参照も戻らないまま待ち行列が
+送らずに消えるため、ここを分けると `queued` が解除されず参照も戻らないまま投稿キューが
 空になる。判定は `queued` を見て照会を飛ばすため、届いたことを一度も確かめないまま
 収束することになる。照会で見つけた投稿を送った応答の代わりに渡し、同じ経路へ乗せる。
 
-### Step 1 の開始時に行う後始末の検査
+### Step 1 の開始時に行う後始末のチェック
 
 `start-round` は、前のラウンドの後始末が終わっているかを次の 2 点で確かめ、
-どちらかに当たれば **exit 5** で止まる。進行側が手で修正して次のラウンドへ進めると、
+どちらかに当たれば **exit 5** で止まる。オーケストレーターが手で修正して次のラウンドへ進めると、
 Step 5 が担う返信と Resolve が飛ばされるため。
 
 | 状態 | 扱い |
@@ -467,10 +448,10 @@ Step 5 が担う返信と Resolve が飛ばされるため。
 | 前のラウンドが修正必須の判定で、`fix` の記録が無い | exit 5 |
 | 前のラウンドで Resolve したと申告された thread が GitHub 側で未解決のまま | exit 5 |
 | 前のラウンドが結果なし（`verdict = no_result`）| 修正の記録を求めない |
-| 未解決の指摘を取得できない | 検査を飛ばし、確認できなかったことを stderr へ残して続行 |
+| 未解決の指摘を取得できない | チェックを飛ばし、確認できなかったことを stderr へ残して続行 |
 
 判定の結果（`rounds[].verdict`）を持たない古い state.json では、保存された `intent` と
-重要度から判定し直して同じ検査へ通す。
+重要度から判定し直して同じチェックへ通す。
 
 ## Step 4: 振動検知
 

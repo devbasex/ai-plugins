@@ -44,10 +44,14 @@ TMP_DIR=$(tmpdir)
 STATE=$TMP_DIR/cross-review-pr$STATE_PR-state.json
 [ -s "$STATE" ] || { echo "state.json not found: $STATE" >&2; exit 1; }
 
-load_context() {
+load_review_context() {
 WORKTREE=$(jq -r '.worktree_path' "$STATE")
 REPO=$(jq -r '.repo' "$STATE")
-EXTRA_REVIEW_INSTRUCTIONS=$(jq -r '.review_instructions // .extra_review_instructions // ""' "$STATE")
+# 設計 PR は段（モデル / 詳細、#1111）ごとの観点を持つ。そのラウンドの段の観点を選び、段の観点を
+# 持たない状態ファイル（再開）は今の review_instructions を使う
+EXTRA_REVIEW_INSTRUCTIONS=$(jq -r --arg r "$ROUND" '
+  ((.rounds // []) | map(select((.round | tostring) == $r)) | last | .stage // "") as $s
+  | ((.review_instructions_by_stage // {})[$s]) // .review_instructions // .extra_review_instructions // ""' "$STATE")
 # PR (=current_pr) は gh コマンドのレビュー対象 PR 番号として使う。
 # tmp パス側は STATE_PR で固定 (monitor.py / state.py との読み書き整合のため)。
 PR=$(jq -r '.current_pr' "$STATE")
@@ -56,6 +60,17 @@ PR=$(jq -r '.current_pr' "$STATE")
 # 前の版の state.json から再開したときだけ、従来の `gh pr view` へ落ちる。
 SHA=$(jq -r '(.rounds[-1].head_sha // "")' "$STATE")
 [ -n "$SHA" ] || SHA=$(gh pr view "$PR" --json headRefOid -q .headRefOid)
+# 分類（design / code）と前のラウンドの head（#1005）。規則は classifications.py の diff_scope
+REVIEW_KIND=$(jq -r '.review_kind // "code"' "$STATE")
+PREV_SHA=$(jq -r '(.rounds // []) | if length >= 2 then (.[-2].head_sha // "") else "" end' "$STATE")
+# 指摘の基準（#1287）。init が重点の宣言を読んで写した節を使い、無ければ宣言を読まない既定の節
+# （基準 3 の無い形）を正本から組む。どのラウンドの担当も同じ基準を受け取る
+REVIEW_CRITERIA_BLOCK=$(jq -r '.review_criteria.reviewer_block // ""' "$STATE")
+if [ -z "$REVIEW_CRITERIA_BLOCK" ]; then
+  REVIEW_CRITERIA_BLOCK=$(python3 "$SCRIPT_DIR/../../../scripts/lib/review_criteria.py" reviewer) ||
+    { echo "⚠️ 指摘の基準の正本（scripts/lib/review_criteria.py）を読めないため、基準の節なしで起動する" >&2
+      REVIEW_CRITERIA_BLOCK=; }
+fi
 }
 
 prepare_prompt_context() {
@@ -95,6 +110,23 @@ $EXTRA_REVIEW_INSTRUCTIONS
 EXTRA_EOF
 )
 fi
+# 設計 PR の 2 ラウンド目以降は、前のラウンドからの変更だけを渡す。設計の指摘の連鎖は
+# 修正で変わった行から生まれるため、変わっていない行を読み直させない。code は全差分のまま
+DIFF_SCOPE_BLOCK=
+if [ "$REVIEW_KIND" = design ] && [ "$ROUND" -ge 2 ] 2>/dev/null && [ -n "$PREV_SHA" ] && [ "$PREV_SHA" != "$SHA" ]; then
+  DIFF_SCOPE_BLOCK=$(cat <<SCOPE_EOF
+
+## このラウンドで見る差分（設計 Pull Request の round 2 以降）
+前のラウンドのレビュー対象（${PREV_SHA}）からの変更だけを見る:
+
+\`\`\`bash
+git -C "$WORKTREE" diff $PREV_SHA $SHA
+\`\`\`
+
+変わっていない行へ新しい指摘を出さない。差分が取れないときだけ PR の全差分を見る。
+SCOPE_EOF
+)
+fi
 }
 
 render_review_prompt() {
@@ -117,21 +149,19 @@ workspace 外を読まなくて済むよう、以下にインライン展開す�
 $EXISTING_INLINE
 \`\`\`
 $EXTRA_REVIEW_BLOCK
+$DIFF_SCOPE_BLOCK
 
-## 出し切り
-- **見つけた指摘はこのラウンドですべて出す。次のラウンドへ回さない。** 重要度が minor のものも書く
-  （出すのは修正アクションのある指摘だけで、下の「含めてはいけないもの」は変わらない）
+$REVIEW_CRITERIA_BLOCK
 
 ## 指摘に **含めてはいけないもの**（Resolve 負荷を増やすため）
 - ❌ **「良い点」/「Strengths」/「評価できる点」** — 総評にも書かない
 - ❌ **対応アクションが無い指摘** — 観察・感想・現状説明だけは禁止
-- ❌ **nit / スタイル指摘** — 好みの問題は指摘にしない (無視する)
 - ❌ **コード引用 (\`\`\` ... \`\`\`) だけで指摘内容が無い指摘**
 - ❌ **判定 \`COMMENT\` での雑感** — 直すべき点が無ければ \`APPROVE\` にする
 
 ### 指摘の書式
 - \`[重要度 / カテゴリ]\` プレフィックス必須 (例: \`[major / 正確性]\`)
-- 重要度は \`critical\` / \`major\` / \`minor\` のみ使う (nit は指摘にしない)
+- 重要度は \`critical\` / \`major\` のみ使う（上の「指摘の基準」）
 - 本文は **1 指摘 = 1 修正アクション** で完結させる。1〜2 文で具体的な修正提案を書く
 - 指す行が分かる指摘は \`path\` と \`line\` を埋める。**差分の外の行でもよい**
   （差分の外を指す指摘は、投稿する側が総評へ移す）
@@ -153,11 +183,11 @@ $EXTRA_REVIEW_BLOCK
 
 ## 書くファイル（2 つ）
 
-**どちらも一時の名前で書き終えてから、正式の名前へ改名する。改名の順序は控えが先、
+**どちらも一時の名前で書き終えてから、正式の名前へ改名する。改名の順序は指摘のファイルが先、
 結果ファイルが後である。** 結果ファイルが正式の名前で現れたことが、2 つとも書き終えた
-印になる。途中で止まったときは正式の名前のファイルを残さない。
+目印になる。途中で止まったときは正式の名前のファイルを残さない。
 
-1. 指摘の控えを **$STEM-round$ROUND-payload.json.tmp** に書く:
+1. 指摘のファイルを **$STEM-round$ROUND-payload.json.tmp** に書く:
    \`\`\`json
    {
      "summary": "総評（1〜数行）",
@@ -219,7 +249,7 @@ esac
   "$EXTRA_DIR" review
 }
 
-load_context
+load_review_context
 prepare_prompt_context
 render_review_prompt
 launch_reviewer
