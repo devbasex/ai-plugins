@@ -121,3 +121,12 @@ class Milestones:
             )
             self._by_title[title] = made["number"]
         return self._by_title[title]
+
+
+def _with_labels(cur: dict, got, add=(), drop=None) -> dict:
+    """ラベルの書き込みの応答（いまのラベルの一覧）を課題へ写す。応答が無ければ手元で足し引きする。"""
+    if isinstance(got, list):
+        labels = [lb if isinstance(lb, dict) else {"name": lb} for lb in got]
+    else:
+        labels = [lb for lb in cur.get("labels") or [] if lb.get("name") != drop] + [{"name": x} for x in add]
+    return {**cur, "labels": labels}

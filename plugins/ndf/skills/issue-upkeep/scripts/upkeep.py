@@ -67,7 +67,7 @@ from step_result import (
     main_with,
     result,
 )
-from upkeep_gh import DEFAULT_MAX_WAIT, DEFAULT_MAX_WAITS, Gh, Milestones, Partial, _issues, _repo  # noqa: E402
+from upkeep_gh import DEFAULT_MAX_WAIT, DEFAULT_MAX_WAITS, Gh, Milestones, Partial, _issues, _repo, _with_labels  # noqa: E402
 
 TOOL = "issue-upkeep"
 
@@ -385,15 +385,6 @@ def _diff(cur: dict, ch: dict, ms: Milestones, n: int) -> tuple[dict, list, list
     return patch, add, remove
 
 
-def _with_labels(cur: dict, got, add=(), drop=None) -> dict:
-    """ラベルの書き込みの応答（いまのラベルの一覧）を課題へ写す。応答が無ければ手元で足し引きする。"""
-    if isinstance(got, list):
-        labels = [lb if isinstance(lb, dict) else {"name": lb} for lb in got]
-    else:
-        labels = [lb for lb in cur.get("labels") or [] if lb.get("name") != drop] + [{"name": x} for x in add]
-    return {**cur, "labels": labels}
-
-
 def cmd_apply(a):
     root = git_root(a.root)
     plan = _load_plan(a.plan)
@@ -476,10 +467,18 @@ def cmd_apply(a):
     closed = [
         act["number"] for act in actions if act["number"] in buckets["applied"] and (act.get("changes") or {}).get("state") == "closed"
     ]
+    # 同じ回（前の candidates 以降）の打ち直しを足し合わせ、承認後・partial 後の報告から前の反映と待ちを落とさない
+    prev = ((_read_state(sd / "apply.json") or {}).get("metrics") or {}).get("round") or {}
     metrics = {
         **buckets,
         "closed": closed,
         "waits": gh.waits,
+        "round": {
+            "applied": sorted(set(prev.get("applied", [])) | set(buckets["applied"])),
+            "closed": sorted(set(prev.get("closed", [])) | set(closed)),
+            "waits": prev.get("waits", []) + gh.waits,
+            "runs": prev.get("runs", 0) + 1,
+        },
         "partial": partial,
         "verdicts": {v: sum(1 for act in actions if act["verdict"] == v) for v in VERDICTS},
     }
@@ -557,12 +556,14 @@ def cmd_report(a):
         )
     if app:
         am = app["metrics"]
-        waits = am.get("waits", [])
+        rnd = am.get("round") or {**am, "runs": 1}  # round を持たない前の版の記録は、最後の 1 回だけを数える
+        applied, closed, waits = rnd["applied"], rnd["closed"], rnd.get("waits", [])
         metrics.update(
             {
                 "verdicts": am["verdicts"],
-                "applied": len(am["applied"]),
-                "closed": len(am["closed"]),
+                "applied": len(applied),
+                "closed": len(closed),
+                "apply_runs": rnd["runs"],
                 "returned": len(am["returned"]),
                 "skipped_changed": am["skipped_changed"],
                 "needs_approval": am["needs_approval"],
@@ -584,8 +585,7 @@ def cmd_report(a):
                 "kind": "section",
                 "name": "反映",
                 "result": "partial" if am["partial"] else "ok",
-                "value": f"直した {len(am['applied']) - len(am['closed'])} 件・閉じた {len(am['closed'])} 件・"
-                f"返した {len(am['returned'])} 件",
+                "value": f"直した {len(applied) - len(closed)} 件・閉じた {len(closed)} 件・返した {len(am['returned'])} 件",
             },
             {"kind": "section", "name": "待った回数", "result": "ok", "value": f"{len(waits)} 回・計 {metrics['wait_seconds']:g} 秒"},
         ]
