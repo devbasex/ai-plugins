@@ -168,6 +168,12 @@ def test_design_gate_is_recorded_as_gate_1(mission):
         '{"verdict": "unknown", "reasons": [], "boundary": []}',
         '{"verdict": "follow", "reasons": [], "boundary": ["他のリポジトリへの公開"]}',
         "判定できませんでした",
+        '{"verdict": "follow", "reasons": ["Value 1"]}',
+        '{"verdict": "follow", "reasons": ["Value 1"], "boundary": ""}',
+        '{"verdict": "follow", "reasons": ["Value 1"], "boundary": {}}',
+        '{"verdict": "follow", "reasons": ["Value 1"], "boundary": [{}]}',
+        '{"verdict": "follow", "reasons": "Value 1", "boundary": []}',
+        '{"verdict": "follow", "boundary": []}',
     ],
 )
 def test_anything_but_a_clean_follow_asks_the_user(mission, text):

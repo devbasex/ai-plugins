@@ -3,7 +3,8 @@
 
     python3 plan-to-spec-steps.py spec-finalize --spec <確定仕様> --design <設計>... [--title <説明>] [--root <dir>]
 
-設計のファイルを消し、確定仕様を docs/specifications/README.md の索引へ載せてコミットする。
+設計のファイルを消し、確定仕様を docs/specifications/README.md の索引へ載せてコミットする（触ったパスだけ。
+先に stage 済みの無関係な変更はコミットに入れず、stage したまま残す）。
 用語集の設定（.ndf/glossary.json）があれば、消した設計を確定前の出所（pending_source）に持つ語の
 正本（source）を確定仕様へ移し、文書を作り直して同じコミットに含める。
 確定仕様の本文は呼ぶ前に LLM が書いておく。結果は lib/step_result.py の形の 1 行の JSON。
@@ -96,10 +97,10 @@ def plan_glossary(loaded, removed: set, spec_rel: str):
     return decl, json.dumps(g, ensure_ascii=False, indent=2) + "\n", glossary.render_text(g, decl.source), items
 
 
-def write_glossary(plan) -> list:
-    """plan_glossary の正本と文書を書いて git add する。"""
+def write_glossary(plan) -> tuple[list, list]:
+    """plan_glossary の正本と文書を書いて git add する。(items, 書いたパス) を返す。"""
     if plan is None:
-        return []
+        return [], []
     decl, source_text, document_text, items = plan
     try:
         decl.source_path.write_text(source_text, encoding="utf-8")
@@ -108,7 +109,7 @@ def write_glossary(plan) -> list:
     except OSError as e:
         raise StepError(f"用語集を書けない: {e}")
     git(decl.root, "add", "-A", "--", decl.source, decl.document)
-    return items
+    return items, [decl.source, decl.document]
 
 
 def cmd_spec_finalize(a):
@@ -126,12 +127,13 @@ def cmd_spec_finalize(a):
         rels.append(rel)
     plan = plan_glossary(load_checked_glossary(root), set(rels), spec_rel)
     # 用語集を書けなければ設計を消さずに止めるため、書き込みを git rm より前に置く
-    promoted = write_glossary(plan)
+    promoted, paths = write_glossary(plan)
 
     for rel in rels:
         git(root, "rm", "-q", "--", rel)
     items = [{"kind": "design", "name": rel, "result": "removed"} for rel in rels]
     items += promoted
+    paths += rels
 
     index = root / "docs" / "specifications" / "README.md"
     if index.is_file():
@@ -140,12 +142,15 @@ def cmd_spec_finalize(a):
         if f"]({link})" not in text and f"]({spec_rel})" not in text and f"](./{link})" not in text:
             update_index(index, text, spec.name, link, a.title)
             git(root, "add", "--", index.relative_to(root).as_posix())
+            paths.append(index.relative_to(root).as_posix())
             items.append({"kind": "index", "name": index.relative_to(root).as_posix(), "result": "added", "link": link})
 
     git(root, "add", "--", spec_rel)
-    if git(root, "diff", "--cached", "--quiet", check=False).returncode == 0:
+    paths.append(spec_rel)
+    # 利用者が先に stage していた無関係な変更を巻き込まないよう、この手順が触ったパスだけを確定する
+    if git(root, "diff", "--cached", "--quiet", "HEAD", "--", *paths, check=False).returncode == 0:
         raise StepError("コミットする変更が無い")
-    sha = commit(root, f"Docs: {spec.name} を確定仕様にする")
+    sha = commit(root, f"Docs: {spec.name} を確定仕様にする", paths)
     items.append({"kind": "commit", "name": sha, "result": "committed"})
     emit(
         result(

@@ -131,6 +131,23 @@ def build_prompt(mvv: str, gate: str, materials: list[str]) -> str:
     return f"# MVV\n\n{mvv}\n\n# 関門\n\n{GATES[gate]}\n\n# 材料\n\n{body}\n"
 
 
+def well_formed(verdict) -> bool:
+    """応答が契約の形か。verdict・reasons・boundary の 3 つが揃い、reasons と boundary が文字列の配列であること。
+
+    **契約の外は関門を省かない（fail closed）。** boundary を欠く・空文字・空 object を `[]` と同じに読むと、
+    越えない線の申告が無いまま関門が省かれる。"""
+
+    def strings(v) -> bool:
+        return isinstance(v, list) and all(isinstance(x, str) for x in v)
+
+    return (
+        isinstance(verdict, dict)
+        and verdict.get("verdict") in VERDICTS
+        and strings(verdict.get("reasons"))
+        and strings(verdict.get("boundary"))
+    )
+
+
 def ask(prompt: str) -> tuple[dict | None, str, dict]:
     """(判定, 生の文, 使用量) を返す。読めなければ判定は None。
 
@@ -177,7 +194,7 @@ def ask(prompt: str) -> tuple[dict | None, str, dict]:
         verdict = json.loads(text[start : end + 1]) if start >= 0 else None
     except json.JSONDecodeError:
         verdict = None
-    if not isinstance(verdict, dict) or verdict.get("verdict") not in VERDICTS:
+    if not well_formed(verdict):
         return None, text[-500:], usage
     return verdict, text, usage
 
@@ -303,8 +320,8 @@ def cmd_check(a) -> tuple[dict, int | None]:
     verdict, raw, usage = ask(build_prompt(mvv_path.read_text(encoding="utf-8"), a.gate, materials))
     if verdict is None:
         return back("判定を読めない", "unreadable", {"raw": raw}, usage)
-    boundary = verdict.get("boundary") or []
-    record.update(reasons=verdict.get("reasons", []), boundary=boundary)
+    boundary = verdict["boundary"]
+    record.update(reasons=verdict["reasons"], boundary=boundary)
     if verdict["verdict"] != "follow" or boundary:
         why = "越えない線に当たる: " + " / ".join(map(str, boundary)) if boundary else verdict["verdict"]
         return back(why, verdict["verdict"], usage=usage)

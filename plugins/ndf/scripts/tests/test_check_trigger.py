@@ -167,6 +167,29 @@ def test_release_and_check_branches_are_not_counted(repo, env):
     assert len(merges.splitlines()) == 3
 
 
+def squash_pr(root: Path, n: int, title: str, files: dict[str, int]) -> str:
+    """develop へ squash merge の形（1 コミット・件名の末尾が (#N)）で入れて送る。"""
+    for path, lines in files.items():
+        p = root / path
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("".join(f"{title} {i}\n" for i in range(lines)))
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", f"{title} (#{n})")
+    git(root, "push", "-q", "origin", "develop")
+    return git(root, "rev-parse", "HEAD")
+
+
+def test_squash_merged_prs_are_counted_and_recorded_check_prs_are_not(repo, env):
+    squash_pr(repo, 11, "feat: a", {"core/x.py": 1})
+    squash_pr(repo, 12, "fix: b", {"app/y.py": 1})
+    squash_pr(repo, 30, "検査: m-1", {"app/z.py": 1})
+    append_event(env, repo, {"kind": "check", "at": iso(5), "id": "m-1", "from": "", "to": "", "result": "failed", "pr": 30})
+    code, out, _ = call(repo, env, "eval", "--review")
+    assert code == 0 and out["metrics"]["prs"] == 2
+    _, out, _ = call(repo, env, "eval")
+    assert out["metrics"]["score"] == 3
+
+
 def test_lines_fire_only_above_threshold(repo, env):
     write_decl(repo, {**TRIGGERS, "score": 99, "lines": 10})
     git(repo, "commit", "-qam", "decl")
@@ -437,6 +460,19 @@ def test_review_only_moves_only_the_review_branch_on_origin(repo, env, tmp_path)
     _, rv, _ = call(repo, env, "eval", "--review")
     _, full, _ = call(repo, env, "eval")
     assert rv["metrics"]["from"] == to and full["metrics"]["from"] != to and full["metrics"]["prs"] == 1
+
+
+def test_an_older_check_finishing_later_does_not_move_the_done_branch_back(repo, env, tmp_path):
+    merge_pr(repo, 11, "feat/a", {"app/a.py": 1})
+    old = state_dir(tmp_path / "old", [])
+    call(repo, env, "prepare", "--id", "m-old", "--state", str(old))
+    merge_pr(repo, 12, "feat/b", {"app/b.py": 1})
+    new_to, _ = record_merged(repo, env, tmp_path, "m-new", 31)
+    gh_set(env, states={"30": "MERGED"})
+    code, out, _ = call(repo, env, "record", "--id", "m-old", "--pr", "30", "--state", str(old))
+    assert code == 0 and out["metrics"]["pushed"] == ["check-done/review", "check-done/check"], out
+    git(repo, "fetch", "-q", "origin")
+    assert git(repo, "rev-parse", "origin/check-done/check") == git(repo, "rev-parse", "origin/check-done/review") == new_to
 
 
 def test_a_failed_check_leaves_the_branch_on_origin(repo, env, tmp_path):

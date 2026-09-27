@@ -172,6 +172,21 @@ def test_spec_finalize_removes_design_and_indexes_spec(repo, env):
     assert out["metrics"]["commit"] == git(repo, "rev-parse", "HEAD").strip()
 
 
+def test_spec_finalize_leaves_unrelated_staged_changes_out_of_the_commit(repo, env):
+    spec_repo(repo)
+    write(repo, "other.txt", "利用者の作業\n")
+    git(repo, "add", "--", "other.txt", "docs/specifications/x.md")
+    code, _, err = call(
+        "plan-to-spec-steps.py",
+        ["spec-finalize", "--spec", "docs/specifications/x.md", "--design", "docs/design/x-design.md", "--title", "X", "--root", str(repo)],
+        env,
+    )
+    assert code == 0, err
+    committed = set(git(repo, "show", "--name-only", "--format=", "HEAD").split())
+    assert committed == {"docs/design/x-design.md", "docs/specifications/README.md", "docs/specifications/x.md"}
+    assert git(repo, "diff", "--cached", "--name-only").split() == ["other.txt"]
+
+
 def test_spec_finalize_skips_index_lines_inside_a_fence(repo, env):
     """索引の行は囲みの外だけを数える（lib/md.py。行の字面で見ていた頃は、囲みの中の例の後ろへ足した）。"""
     spec_repo(repo)
