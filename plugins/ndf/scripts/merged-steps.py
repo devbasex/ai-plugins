@@ -111,10 +111,24 @@ def evacuate(path, label):
     return str(trash)
 
 
+def tracked_changes(path):
+    """追跡ファイルの未コミットの変更（modified / staged / 削除・改名）の行を返す。未追跡・無視は含めない。"""
+    out = git(path, "status", "--porcelain=v1", "--untracked-files=no").stdout
+    return [line for line in out.splitlines() if line and line[:2] not in ("??", "!!")]
+
+
 def remove_worktree(root, path, label):
-    """作業ツリーを外す。拒否されたら退避してから --force で外す。(成否, 理由) を返す。"""
+    """作業ツリーを外す。拒否されたら未追跡・無視のファイルを退避してから --force で外す。(成否, 理由) を返す。
+
+    退避できるのは未追跡・無視のファイルだけで、追跡ファイルの未コミットの変更は --force が消してしまう。
+    その変更が残っていれば外さず kept にする（AUTHORING.md「失うと戻せないもの」）。
+    """
     if git(root, "worktree", "remove", path, check=False).returncode == 0:
         return True, None
+    dirty = tracked_changes(path)
+    if dirty:
+        names = ", ".join(line[3:] for line in dirty[:5]) + ("…" if len(dirty) > 5 else "")
+        return False, f"追跡ファイルに未コミットの変更が {len(dirty)} 件ある（{names}）ため --force で外さない"
     try:
         trash = evacuate(path, label)
     except (StepError, OSError) as e:
