@@ -2,7 +2,8 @@
 
 gh は PATH の先頭に置いた偽物で置き換える。偽物は FAKE_GH_STATE の JSON を課題の置き場として
 読み書きし、呼ばれた引数を calls に積む。`throttle` に積んだ応答は、書き込みの呼び出しへ
-先頭から 1 つずつ返す（上限に当たった応答を作るため）。
+先頭から 1 つずつ返す（上限に当たった応答を作るため）。`fail` に書いたパスの一部を含む書き込みは
+上限ではない失敗で返す。ラベルのパスは GitHub と同じく 1 つの segment として読み、`/` を含めば 404 にする。
 """
 
 from __future__ import annotations
@@ -26,7 +27,7 @@ PY = sys.executable
 FUTURE = "2999-01-01T00:00:00Z"
 
 FAKE_GH = r"""#!{py}
-import json, os, re, sys
+import json, os, re, sys, urllib.parse
 a = sys.argv[1:]
 path = os.environ["FAKE_GH_STATE"]
 st = json.load(open(path, encoding="utf-8"))
@@ -59,6 +60,8 @@ if method != "GET" and st.get("throttle"):
     t = st["throttle"].pop(0)
     done(t.get("body", {{"message": "You have exceeded a secondary rate limit"}}), 1,
          t.get("headers"), "gh: You have exceeded a secondary rate limit (HTTP 403)\n")
+if method != "GET" and st.get("fail") and st["fail"] in target:
+    done("", 1, stderr="server error (HTTP 500)")
 issues = st["issues"]
 m = re.match(r"repos/o/r/issues\?state=(\w+)", target)
 if m:
@@ -72,13 +75,15 @@ if target.startswith("repos/o/r/milestones"):
 m = re.match(r"repos/o/r/issues/(\d+)/sub_issues", target)
 if m:
     done([issues[str(k)] for k in st.get("sub_issues", {{}}).get(m.group(1), [])])
-m = re.match(r"repos/o/r/issues/(\d+)/labels(?:/(.+))?$", target)
+m = re.match(r"repos/o/r/issues/(\d+)/labels(?:/([^/]+))?$", target)
 if m:
     i = issues[m.group(1)]
     if method == "POST":
         i["labels"] += [{{"name": x}} for x in json.loads(stdin)["labels"]]
     else:
-        i["labels"] = [x for x in i["labels"] if x["name"] != m.group(2)]
+        name = urllib.parse.unquote(m.group(2))
+        i["labels"] = [x for x in i["labels"] if x["name"] != name]
+    i["updated_at"] = "2026-09-25T00:00:10Z"
     done(i["labels"])
 m = re.match(r"repos/o/r/issues/(\d+)$", target)
 if m:
@@ -273,9 +278,57 @@ def test_apply_skips_when_issue_changed_after_snapshot(env):
 
 def test_apply_proceeds_when_only_updated_at_moved(env):
     snap = env.snapshot(3)
-    env.set(lambda st: st["issues"]["3"].update(updated_at="2026-09-20T00:00:00Z", labels=[{"name": "x"}]))
+    env.set(lambda st: st["issues"]["3"].update(updated_at="2026-09-20T00:00:00Z"))  # コメントだけが付いた
     code, out = env.run("apply", "--plan", env.plan([_action(snap, "追記が要る", {"body": "新"})]))
     assert code == 0 and out["metrics"]["applied"] == [3]
+
+
+@pytest.mark.parametrize(
+    "edit",
+    [
+        {"labels": [{"name": "x"}]},
+        {"title": "誰かが題名を直した"},
+        {"milestone": {"number": 2, "title": "M2"}},
+    ],
+)
+def test_apply_skips_when_other_fields_changed(env, edit):
+    snap = env.snapshot(3)
+    env.set(lambda st: st["issues"]["3"].update(updated_at="2026-09-20T00:00:00Z", **edit))
+    code, out = env.run("apply", "--plan", env.plan([_action(snap, "追記が要る", {"body": "新", "milestone": "M1"})]))
+    assert code == 20 and out["metrics"]["skipped_changed"] == [3]
+    assert not env.writes()
+
+
+def test_apply_removes_label_with_slash(env):
+    env.set(lambda st: st["issues"]["3"].update(labels=[{"name": "status/blocked"}, {"name": "bug"}]))
+    snap = env.snapshot(3)
+    code, out = env.run("apply", "--plan", env.plan([_action(snap, "追記が要る", {"remove_labels": ["status/blocked"]})]))
+    assert code == 0, out
+    assert [x["name"] for x in env.state()["issues"]["3"]["labels"]] == ["bug"]
+
+
+def test_apply_same_change_in_a_later_run_is_not_already(env):
+    snap = env.snapshot(4)
+    ch = {"state": "closed", "state_reason": "completed"}
+    env.run("apply", "--plan", env.plan([_action(snap, "閉じてよい", ch)]))
+    env.set(lambda st: st["issues"]["4"].update(state="open", updated_at="2026-09-26T00:00:00Z"))  # 再び開かれた
+    snap = env.snapshot(4)
+    code, out = env.run("apply", "--plan", env.plan([_action(snap, "閉じてよい", ch)]))
+    assert code == 0 and out["metrics"]["applied"] == [4]
+    assert env.state()["issues"]["4"]["state"] == "closed"
+
+
+def test_apply_rerun_after_partial_write_finishes_the_rest(env):
+    snap = env.snapshot(3)
+    plan = env.plan([_action(snap, "追記が要る", {"body": "新", "add_labels": ["bug"]})])
+    env.set(lambda st: st.update(fail="/labels"))
+    code, out = env.run("apply", "--plan", plan)
+    assert code == 1 and out["metrics"]["failed"] == [3]
+    assert env.state()["issues"]["3"]["body"] == "新"
+    env.set(lambda st: st.update(fail=None))
+    code, out = env.run("apply", "--plan", plan)
+    assert code == 0 and out["metrics"]["applied"] == [3], out
+    assert [x["name"] for x in env.state()["issues"]["3"]["labels"]] == ["bug"]
 
 
 def test_apply_twice_does_not_write_twice(env):
