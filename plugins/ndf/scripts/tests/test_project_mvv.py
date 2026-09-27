@@ -416,7 +416,7 @@ def test_block_starts_with_the_whole_common_principles_even_without_a_declaratio
     none = pm.load_mvv(tmp_path)
     text = pm.block(none)
     assert none.status == "none" and text.startswith(pm.principles()) and pm.contract() in text and pm.NO_MVV in text
-    assert "C8" in text and "人類を守り、発展させる" in text
+    assert "C8" in text and "人を守り、人の発展を支える" in text
 
 
 def test_block_orders_principles_project_mission_contract(env):

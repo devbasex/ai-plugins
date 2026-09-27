@@ -144,7 +144,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | pace | `pace` | モードとは別の軸で、工程をどう通すかを決める。既定の normal と、承認ゲートと検査の時機を変える fast | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | MVV | — | Mission / Vision / Value。プロジェクト MVV とミッション MVV の 2 層があり、下位は上位の範囲で具体化する | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | MVV 判定 | — | 承認ゲートのエビデンスが NDF の共通原則・プロジェクト MVV・ミッション MVV に従うかの判定。「従う」でレッドラインが無いときだけ承認ゲートを省き、記録を残す | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| 上位の原則 | — | 「人類を守り、発展させる」。NDF の共通原則の最上位の 1 文 | — | — | — |
+| 上位の原則 | — | 「人を守り、人の発展を支える」。NDF の共通原則の最上位の 1 文 | — | — | — |
 | プロジェクト MVV | — | プロジェクト全体の Mission / Vision / Value と固有の必ず承認が要る操作（`P<番号>`）。`.ndf/` に宣言し、利用者が承認する。判断の基準の上位 | — | — | — |
 | ミッション MVV | — | ミッション単位の MVV（既存の `mvv.md`）。プロジェクト MVV の範囲での具体化 | — | — | — |
 | MVV の版 | — | プロジェクト MVV の承認のたびに 1 ずつ上がる番号。改訂の理由と前の版との差分を伴う | — | — | — |

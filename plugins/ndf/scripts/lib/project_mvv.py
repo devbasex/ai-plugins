@@ -102,7 +102,7 @@ def principles() -> str:
     try:
         return PRINCIPLES_PATH.read_text(encoding="utf-8").strip()
     except OSError as e:
-        return f"# NDF の共通原則\n\n（配布物の {PRINCIPLES_PATH} を読めない: {e}）\n\n**人類を守り、発展させる。**"
+        return f"# NDF の共通原則\n\n（配布物の {PRINCIPLES_PATH} を読めない: {e}）\n\n**人を守り、人の発展を支える。**"
 
 
 def principle_ids() -> tuple[str, ...]:
