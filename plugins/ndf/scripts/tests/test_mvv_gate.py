@@ -102,7 +102,11 @@ def mission(tmp_path):
 
 def run(m: dict, text: str, *extra: str, files: list | None = None, changed: int | None = None) -> tuple[int, dict, list[dict]]:
     tmp = m["tmp"]
-    env = {"PATH": f"{fake_gh(tmp, files or ['app/x.py'], changed)}:/usr/bin:/bin", "HOME": str(tmp), "NDF_MVV_CLAUDE": fake_claude(tmp, text)}
+    env = {
+        "PATH": f"{fake_gh(tmp, files or ['app/x.py'], changed)}:/usr/bin:/bin",
+        "HOME": str(tmp),
+        "NDF_MVV_CLAUDE": fake_claude(tmp, text),
+    }
     args = [
         sys.executable,
         str(SCRIPT),
