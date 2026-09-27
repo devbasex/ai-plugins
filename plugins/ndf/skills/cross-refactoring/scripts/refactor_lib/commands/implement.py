@@ -21,6 +21,7 @@ import sys
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+import project_decl
 import statefile
 
 from .. import clock, die, info, testcmd, timeline
@@ -329,7 +330,7 @@ def _test_commit_problem(
     others = [f for f in commit.get("files") or [] if not is_test_path(f)]
     if others:
         return f"テストの追加がテスト以外のファイルを変えています（{', '.join(others[:5])}）"
-    hits = doc_wording_tests(commits, tracked, work_dir(state))
+    hits = _wording_hits(commits, tracked, state)
     if hits:
         return _doc_wording_reason(hits)
     return None
@@ -375,6 +376,14 @@ def cmd_merge_tests(args: argparse.Namespace) -> None:
 # ---------- 実装 ----------
 
 
+def _wording_hits(commits: list[dict[str, Any]], tracked: list[str], state: dict[str, Any]) -> list[tuple[str, str]]:
+    """`.md` の文言テストの拒否。宣言の `ndf_policies.reject_md_wording_tests` が `true` のときだけ当てる（決定 8）。"""
+    work = work_dir(state)
+    if not project_decl.policy(work, "reject_md_wording_tests"):
+        return []
+    return doc_wording_tests(commits, tracked, work)
+
+
 def _doc_wording_reason(hits: list[tuple[str, int]]) -> str:
     return "文書の文言を固定するテストは足さない（" + "、".join(f"{p}: {l}" for p, l in hits) + "）"
 
@@ -395,7 +404,7 @@ def _implement_problem(
     problem = verify_test_changes(collect_test_changes(commits))
     if problem:
         return problem
-    hits = doc_wording_tests(commits, tracked, work_dir(state))
+    hits = _wording_hits(commits, tracked, state)
     if hits:
         return _doc_wording_reason(hits)
     return verify_diff_budget([item], commits)

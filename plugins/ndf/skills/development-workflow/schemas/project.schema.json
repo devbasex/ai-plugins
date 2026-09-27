@@ -1,0 +1,740 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/devbasex/ai-plugins/main/plugins/ndf/skills/development-workflow/schemas/project.schema.json",
+  "$defs": {
+    "Analysis": {
+      "additionalProperties": false,
+      "properties": {
+        "analyzer": {
+          "minimum": 1,
+          "title": "Analyzer",
+          "type": "integer"
+        },
+        "at": {
+          "title": "At",
+          "type": "string"
+        },
+        "inputs": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Inputs",
+          "type": "object"
+        },
+        "branches": {
+          "$ref": "#/$defs/BranchState"
+        },
+        "written": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "title": "Written",
+          "type": "object"
+        }
+      },
+      "required": [
+        "analyzer",
+        "at",
+        "inputs",
+        "branches"
+      ],
+      "title": "Analysis",
+      "type": "object"
+    },
+    "BranchState": {
+      "additionalProperties": false,
+      "properties": {
+        "head": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Head"
+        },
+        "present": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Present",
+          "type": "array"
+        }
+      },
+      "title": "BranchState",
+      "type": "object"
+    },
+    "Checks": {
+      "additionalProperties": false,
+      "properties": {
+        "tools": {
+          "items": {
+            "$ref": "#/$defs/Tool"
+          },
+          "title": "Tools",
+          "type": "array"
+        }
+      },
+      "required": [
+        "tools"
+      ],
+      "title": "Checks",
+      "type": "object"
+    },
+    "Ci": {
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "title": "Provider",
+          "type": "string"
+        },
+        "workflows": {
+          "items": {
+            "$ref": "#/$defs/Workflow"
+          },
+          "title": "Workflows",
+          "type": "array"
+        },
+        "required_checks": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Required Checks",
+          "type": "array"
+        }
+      },
+      "required": [
+        "provider",
+        "workflows"
+      ],
+      "title": "Ci",
+      "type": "object"
+    },
+    "Container": {
+      "additionalProperties": false,
+      "properties": {
+        "service": {
+          "title": "Service",
+          "type": "string"
+        },
+        "compose_files": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Compose Files",
+          "type": "array"
+        }
+      },
+      "required": [
+        "service"
+      ],
+      "title": "Container",
+      "type": "object"
+    },
+    "Delivery": {
+      "additionalProperties": false,
+      "properties": {
+        "target": {
+          "title": "Target",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "auto",
+            "manual"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "trigger": {
+          "title": "Trigger",
+          "type": "string"
+        },
+        "branch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Branch"
+        },
+        "versioned": {
+          "title": "Versioned",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "target",
+        "kind",
+        "trigger",
+        "versioned"
+      ],
+      "title": "Delivery",
+      "type": "object"
+    },
+    "Duration": {
+      "additionalProperties": false,
+      "properties": {
+        "seconds": {
+          "minimum": 0,
+          "title": "Seconds",
+          "type": "number"
+        },
+        "source": {
+          "enum": [
+            "ndf-record",
+            "ci-junit",
+            "ci-steps"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "detail": {
+          "title": "Detail",
+          "type": "string"
+        }
+      },
+      "required": [
+        "seconds",
+        "source",
+        "detail"
+      ],
+      "title": "Duration",
+      "type": "object"
+    },
+    "Import": {
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "title": "From",
+          "type": "string"
+        },
+        "to": {
+          "title": "To",
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "to"
+      ],
+      "title": "Import",
+      "type": "object"
+    },
+    "Instructions": {
+      "additionalProperties": false,
+      "properties": {
+        "files": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Files",
+          "type": "array"
+        },
+        "imports": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Import"
+          },
+          "title": "Imports",
+          "type": "array"
+        },
+        "notes": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Notes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "files"
+      ],
+      "title": "Instructions",
+      "type": "object"
+    },
+    "Issues": {
+      "additionalProperties": false,
+      "properties": {
+        "primary": {
+          "title": "Primary",
+          "type": "string"
+        },
+        "others": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Others",
+          "type": "array"
+        }
+      },
+      "required": [
+        "primary"
+      ],
+      "title": "Issues",
+      "type": "object"
+    },
+    "Language": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        },
+        "frameworks": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Frameworks",
+          "type": "array"
+        },
+        "files": {
+          "minimum": 0,
+          "title": "Files",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "files"
+      ],
+      "title": "Language",
+      "type": "object"
+    },
+    "NdfPolicies": {
+      "additionalProperties": false,
+      "description": "ai-plugins の方針の検査を掛けるか。キーが無ければどちらも掛けない（決定 8）。",
+      "properties": {
+        "doc_lint": {
+          "title": "Doc Lint",
+          "type": "boolean"
+        },
+        "reject_md_wording_tests": {
+          "title": "Reject Md Wording Tests",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "doc_lint",
+        "reject_md_wording_tests"
+      ],
+      "title": "NdfPolicies",
+      "type": "object"
+    },
+    "Services": {
+      "additionalProperties": false,
+      "properties": {
+        "container": {
+          "title": "Container",
+          "type": "boolean"
+        },
+        "compose_files": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Compose Files",
+          "type": "array"
+        },
+        "databases": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Databases",
+          "type": "array"
+        }
+      },
+      "required": [
+        "container"
+      ],
+      "title": "Services",
+      "type": "object"
+    },
+    "Suite": {
+      "additionalProperties": false,
+      "description": "テストの 1 まとまり。`scope_command` の `{paths}` に範囲のパスが入る。",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "runner": {
+          "title": "Runner",
+          "type": "string"
+        },
+        "command": {
+          "title": "Command",
+          "type": "string"
+        },
+        "scope_command": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Scope Command"
+        },
+        "container": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Container"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "needs": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Needs",
+          "type": "array"
+        },
+        "paths": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Paths",
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "runner",
+        "command"
+      ],
+      "title": "Suite",
+      "type": "object"
+    },
+    "Test": {
+      "additionalProperties": false,
+      "properties": {
+        "suites": {
+          "items": {
+            "$ref": "#/$defs/Suite"
+          },
+          "title": "Suites",
+          "type": "array"
+        }
+      },
+      "required": [
+        "suites"
+      ],
+      "title": "Test",
+      "type": "object"
+    },
+    "TestDuration": {
+      "additionalProperties": false,
+      "properties": {
+        "measured": {
+          "items": {
+            "$ref": "#/$defs/Duration"
+          },
+          "minItems": 1,
+          "title": "Measured",
+          "type": "array"
+        }
+      },
+      "required": [
+        "measured"
+      ],
+      "title": "TestDuration",
+      "type": "object"
+    },
+    "Tool": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "config": {
+          "title": "Config",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "config"
+      ],
+      "title": "Tool",
+      "type": "object"
+    },
+    "Unknown": {
+      "additionalProperties": false,
+      "description": "測れなかった・決められなかった項目。ai-plugins の値も既定の値も入れない。",
+      "properties": {
+        "unknown": {
+          "minLength": 1,
+          "title": "Unknown",
+          "type": "string"
+        }
+      },
+      "required": [
+        "unknown"
+      ],
+      "title": "Unknown",
+      "type": "object"
+    },
+    "Workflow": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "jobs": {
+          "minimum": 0,
+          "title": "Jobs",
+          "type": "integer"
+        },
+        "wall_seconds": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Wall Seconds"
+        }
+      },
+      "required": [
+        "path",
+        "jobs"
+      ],
+      "title": "Workflow",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "プロジェクトの宣言（`.ndf/project.json`）。",
+  "properties": {
+    "$schema": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "$Schema"
+    },
+    "version": {
+      "const": 1,
+      "title": "Version",
+      "type": "integer"
+    },
+    "languages": {
+      "anyOf": [
+        {
+          "items": {
+            "$ref": "#/$defs/Language"
+          },
+          "type": "array"
+        },
+        {
+          "$ref": "#/$defs/Unknown"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Languages"
+    },
+    "test": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Test"
+        },
+        {
+          "$ref": "#/$defs/Unknown"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Test"
+    },
+    "test_duration": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TestDuration"
+        },
+        {
+          "$ref": "#/$defs/Unknown"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Test Duration"
+    },
+    "ci": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Ci"
+        },
+        {
+          "$ref": "#/$defs/Unknown"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Ci"
+    },
+    "services": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Services"
+        },
+        {
+          "$ref": "#/$defs/Unknown"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Services"
+    },
+    "delivery": {
+      "anyOf": [
+        {
+          "items": {
+            "$ref": "#/$defs/Delivery"
+          },
+          "type": "array"
+        },
+        {
+          "$ref": "#/$defs/Unknown"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Delivery"
+    },
+    "issues": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Issues"
+        },
+        {
+          "$ref": "#/$defs/Unknown"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Issues"
+    },
+    "checks": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Checks"
+        },
+        {
+          "$ref": "#/$defs/Unknown"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Checks"
+    },
+    "ndf_policies": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/NdfPolicies"
+        },
+        {
+          "$ref": "#/$defs/Unknown"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Ndf Policies"
+    },
+    "instructions": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Instructions"
+        },
+        {
+          "$ref": "#/$defs/Unknown"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Instructions"
+    },
+    "analysis": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Analysis"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "version"
+  ],
+  "title": "ProjectDecl",
+  "type": "object"
+}

@@ -50,14 +50,14 @@ hooks:
 
 ```bash
 # 起動したら手順 1 より先に実行する。$SCRIPTS を決めてから。決められなくても止めない
-if [ -n "${SCRIPTS:-}" ]; then bash "$SCRIPTS/worktree-setup.sh" check; echo "exit=$?"
+if [ -n "${SCRIPTS:-}" ]; then bash "$SCRIPTS/worktree-setup.sh" check; rc=$?; echo "exit=$rc"; case $rc in 0|2) python3 "$SCRIPTS/project-decl.py" check; echo "decl=$?";; esac
 else echo "exit=判定できない（scripts を解決できない）"; fi
 ```
 
 | 終了コード | 次に行うこと | 判定結果の出力の `宣言:` の行 |
 | --- | --- | --- |
-| 0 | 手順 1 へ進む | `宣言: あり` |
-| 2 | `worktree` の「0. 設定ファイルを用意する」を通し、`check` が 0 を返してから手順 1 へ進む | `宣言: 作成した（起点 <名前> / 本番 <名前>。未宣言なら既定ブランチ）` |
+| 0 | `decl=` を [references/project-analysis.md](references/project-analysis.md) の「手順 0 での扱い」に従って扱い、手順 1 へ進む | `宣言: あり。解析: <結果>` |
+| 2 | `worktree` の「0. 設定ファイルを用意する」を通し、`check` が 0 を返してから、`decl=` を同じく扱って手順 1 へ進む | `宣言: 作成した（起点 <名前> / 本番 <名前>。未宣言なら既定ブランチ）` |
 | 3 | **先へ進まない。** `init --force` を実行せず、`check` の出力を示して利用者に直してもらう | 出さない（判定まで進まない） |
 | 1、または `$SCRIPTS` を決められない | 止めずに手順 1 へ進む | `宣言: 判定できない（<理由>）` |
 
@@ -119,7 +119,7 @@ NULL 許容列の追加）は `standard` として扱う。判定に迷う場合
 mode: standard
 pace: fast
 根拠: 注文確定の振る舞いを変更する。公開 API とスキーマは変えない
-宣言: あり
+宣言: あり。解析: 不要（新しい）
 必須工程: worktree → requirements-design → implementation-plan → tdd-cycle
   → refactoring → cross-review → quality-gates → pr
   → plan-to-spec（仕様が変わった場合） → merged → release
