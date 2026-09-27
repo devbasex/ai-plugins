@@ -8,8 +8,7 @@ LLM を直接呼ばない（ミッション MVV の照合だけ `lib/mission_mvv
 | --- | --- |
 | `init <mission.json> --name <名> [--milestone M] [--issue N]... [--plan <種類>=<plan.json>]... [--done <done.json>]... [--dev <版>] [--prod <版>] [--goal <雛形の文字列か @ファイル>] [--pace normal\|fast\|auto] [--mvv <ファイル>] [--repo OWNER/REPO]` | 状態のファイルを作る。同じパスに別の形の JSON があれば上書きせずに止まる（終了コード 1） |
 | `update <mission.json> [--done <done.json>]... [--next <plan.json>=<文>]...` | done の JSON と報告を読み、行の状態・PR・秒・費用を埋める。何度走らせても同じ結果 |
-| `gate <mission.json> <関門の名> --what <何を> [--at <ISO 8601>] [--by user\|mvv --verdict V --reasons <JSON> --log <jsonl>] [--outcome approved\|rejected] [--root DIR]` | 関門の承認の時刻を書く。名前が `MVV` なら今の MVV のハッシュも書く。`--by user --outcome rejected` は関門を通さず差し戻しだけを残す。利用者の答えが同じ関門の直前の MVV 判定と食い違えば、改訂の兆候（覆し）を `project-mvv-signals.jsonl` へ 1 行書く |
-| `gate <mission.json> <関門の名> --withdraw` | 同じ名前の関門の MVV 判定の記録（`by: mvv`）を外す（MVV 判定で通した後に関門へ落ちたとき）。外した時刻を `withdrawals` に残し、それより前の MVV 判定を覆しの照合に使わない。記録が無ければ何もしない |
+| `gate <mission.json> <関門の名> --what <何を> [--at <ISO 8601>] [--by user\|mvv --verdict V --reasons <JSON> --log <jsonl>] [--outcome approved\|rejected] [--root DIR] [--withdraw]` | 関門の承認の時刻を書く。名前が `MVV` なら今の MVV のハッシュも書く。`--by user --outcome rejected` は関門を通さず差し戻しだけを残す。利用者の答えが同じ関門の直前の MVV 判定と食い違えば、改訂の兆候（覆し）を `project-mvv-signals.jsonl` へ 1 行書く。`--withdraw` は同じ関門の `by: mvv` の記録を外す（MVV 判定で通した後に関門へ落ちたとき。`lib/mission_mvv.withdraw`） |
 | `render <mission.json> <引継ぎ文書> --section <見出しの語> [--demote <前の節の語> --heading <新しい見出し>]` | 見出しに語を含む節の本文を置き換える。節の外は変えない |
 | `status <mission.json>` | 端末向けに 1 行ずつ（ミッション・状態・次） |
 | `next <mission.json> [--doc <引継ぎ文書> --section <見出しの語>] [--replace <見出しの語>]` | ndf-next の囲みを出す。`--replace` なら引継ぎ文書のその節も置き換える |
@@ -310,19 +309,14 @@ def cmd_gate(a) -> dict:
 
 
 def withdraw_gate(a, m: dict, at: str) -> dict:
-    """同じ名前の承認ゲートの MVV 判定の記録（by: mvv）を外す（MVV 判定で通した後に承認ゲートへ落ちたとき。#1370 の I8）。
-    外した時刻を withdrawals に残し、それより前の MVV 判定を覆しの照合で直前の判定として読ませない。
-    記録が無ければ何もしない（利用者の承認の記録は外さない）。"""
+    """同じ名前の承認ゲートの by: mvv の記録を外す（`lib/mission_mvv.withdraw`。#1370 の I8）。"""
     if a.by != "user" or a.outcome or a.verdict:
         return outcome("stopped", "--withdraw は --by・--outcome・--verdict と併せて渡さない", exit=EXIT_UNREADABLE)
-    gates = m.get("gates", [])
-    kept = [g for g in gates if not (g.get("name") == a.name and g.get("by") == "mvv")]
-    if len(kept) == len(gates):
-        return outcome("ok", f"{a.name} の MVV 判定の記録が無い（外すものが無い）", [], {"gates": len(gates), "withdrawn": 0})
-    m["gates"] = kept
-    m.setdefault("withdrawals", []).append({"name": a.name, "at": at})
-    jsonio.write_atomic(a.mission, m, indent=1)
-    return outcome("ok", f"{a.name} の MVV 判定の記録を外した（{at}）", kept, {"gates": len(kept), "withdrawn": len(gates) - len(kept)})
+    n = mission_mvv.withdraw(m, a.name, at)
+    if n:
+        jsonio.write_atomic(a.mission, m, indent=1)
+    done = f"記録を外した（{at}）" if n else "記録が無い（外すものが無い）"
+    return outcome("ok", f"{a.name} の MVV 判定の{done}", m.get("gates", []), {"gates": len(m.get("gates", [])), "withdrawn": n})
 
 
 # ---------------------------------------------------------------- 生成

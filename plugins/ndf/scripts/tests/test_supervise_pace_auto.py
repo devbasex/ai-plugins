@@ -202,8 +202,13 @@ def test_a_failed_merge_after_a_follow_verdict_ends_in_a_gate_and_withdraws_the_
     # mvv のステップが記録を書いた後に merge が落ちた流れを、run のステップだけで流す
     plan = tmp_path / "design.json"
     steps = [
-        {"id": "mvv", "type": "run", "cmd": f"{PY} {MISSION_STATE} gate {state} '関門 1' --what x --by mvv --verdict follow "
-         f"--reasons '[]' --log {log}", "next": "merge", "gate_next": "end"},
+        {
+            "id": "mvv",
+            "type": "run",
+            "cmd": f"{PY} {MISSION_STATE} gate {state} '関門 1' --what x --by mvv --verdict follow --reasons '[]' --log {log}",
+            "next": "merge",
+            "gate_next": "end",
+        },
         {"id": "merge", "type": "run", "cmd": "exit 1", "on_fail": "handoff", "next": "end"},
         {**ds["handoff"]},
         {"id": "after", "type": "run", "cmd": f"touch {tmp_path}/after", "next": "end"},

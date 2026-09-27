@@ -73,6 +73,18 @@ def init_mvv(a, project) -> tuple[dict | None, tuple | None]:
     return _ref(path), None
 
 
+def withdraw(m: dict, name: str, at: str) -> int:
+    """状態 m から同じ名前の承認ゲートの MVV 判定の記録（by: mvv）を外し、外した数を返す。MVV 判定で通した後に
+    承認ゲートへ落ちたときに使う（#1370 の I8）。外した時刻を withdrawals に残し、それより前の MVV 判定を覆しの照合で
+    直前の判定として読ませない（`project_mvv_signals.last_mvv_verdict`）。利用者の承認の記録は外さない。"""
+    gates = m.get("gates", [])
+    kept = [g for g in gates if not (g.get("name") == name and g.get("by") == "mvv")]
+    if len(kept) < len(gates):
+        m["gates"] = kept
+        m.setdefault("withdrawals", []).append({"name": name, "at": at})
+    return len(gates) - len(kept)
+
+
 def vet_stop(root: Path, path: str) -> tuple | None:
     """ミッション MVV をプロジェクト MVV に照らす。従えば None、従わなければ止まる理由と箇所。"""
     from project_lib import mvv_llm

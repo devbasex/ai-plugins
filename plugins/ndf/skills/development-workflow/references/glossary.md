@@ -93,8 +93,8 @@ flowchart TB
 | 語 | 意味 | 英語や識別子 | 正本 |
 | --- | --- | --- | --- |
 | モード | 変更の目的物で決める工程の振り分け。上から `operation` / `documentation` / `standard` / `legacy-refactor` / `light` | モード判定の結果の `mode:` | [../SKILL.md](../SKILL.md) の「判定の手順」、[workflow-modes.md](workflow-modes.md) |
-| pace | モードとは別の軸で、工程をどう通すかを決める。既定の `normal` と、承認ゲートと検査の時機を変える `fast` | `pace:`、`supervise.py new mission --pace fast`、`.ndf/pace.json` | [pace.md](pace.md) |
-| MVV | ミッションの Mission / Vision / Value。マイルストーンの説明からコピーし、利用者が 1 回承認する。`fast` でゲート 1・2 の事前の許可になる | `mvv.md`、`mvv.sha256`、承認ゲートの記録 `MVV` | [pace.md](pace.md) の「ミッションを始める」 |
+| pace | モードとは別の軸で、工程をどう通すかを決める。ウォーターフォールで人の承認を取る `normal`（既定）、`normal` の承認だけを MVV 判定にする `auto`、実践投入の中で検証しながら MVV で自動に進める `fast` の 3 つ | `pace:`、`supervise.py new mission --pace fast|auto`、`.ndf/pace.json` | [pace.md](pace.md) |
+| MVV | ミッションの Mission / Vision / Value。マイルストーンの説明からコピーし、利用者が 1 回承認する。`fast` と `auto` でゲート 1・2 の事前の許可になる | `mvv.md`、`mvv.sha256`、承認ゲートの記録 `MVV` | [pace.md](pace.md) の「ミッションを始める」 |
 | MVV 判定 | 承認ゲートのエビデンスが MVV に従うかの判定。「従う」でレッドラインが無いときだけ承認ゲートを省き、記録を残す | `mvv-gate.py check`、`verdict`（follow / not_follow / unknown）、終了コード 0 / 10 | [pace.md](pace.md) の「MVV 判定」 |
 | レッドライン | 当たれば MVV 判定が「従う」でも利用者の承認を求める範囲。秘密・認証認可・利用者のデータ・戻せない操作・他のリポジトリへの公開・対象外のモード・承認後に変わった MVV | `.ndf/pace.json` の `boundary_paths`、`boundary` | [pace.md](pace.md) の「レッドライン」 |
 | トリガー | `fast` でリファクタリングとコードレビューを流す条件。点数・行数・流出不具合・経過時間・最終の 5 つ | `check-trigger.py eval`（立つ 0 / 立たない 3 / 読めない 2）、`triggers.*` | [pace.md](pace.md) の「検査のトリガー」 |
