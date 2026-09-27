@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import sys
 import tempfile
@@ -340,19 +339,11 @@ def rest_create(root, branch, base, title, body, draft):
     try:
         p = gh_parts.gh(["api", f"repos/{owner}/{name}/pulls", "--input", tmp], cwd=root)
     finally:
-        remove_temp(tmp)
+        Path(tmp).unlink(missing_ok=True)  # 本文を /tmp に残さない
     if p.returncode != 0:
         raise StepError(f"REST でも作成が失敗: {p.stderr.strip()[:300]}")
     d = json.loads(p.stdout)
     return d["number"], d["html_url"]
-
-
-def remove_temp(path):
-    """PR 本文を入れた一時ファイルを消す。gh へ渡した後に残すと本文が /tmp に残り続ける。"""
-    try:
-        os.unlink(path)
-    except FileNotFoundError:
-        pass
 
 
 def send_body(root, branch, body, body_path, a, must_exist):
@@ -398,7 +389,7 @@ def upsert(a, must_exist):
     try:
         number, url, action = send_body(root, branch, body, body_path, a, must_exist)
     finally:
-        remove_temp(body_path)
+        Path(body_path).unlink(missing_ok=True)  # 本文を /tmp に残さない
     sync_exit = decisions_sync(root, number) if number else None
     metrics = {
         "number": number,
