@@ -144,7 +144,7 @@ def other_shape(path: str) -> str:
     return ""
 
 
-def init_mvv(a, project) -> tuple[dict | None, dict | None]:
+def init_mvv_outcome(a, project) -> tuple[dict | None, dict | None]:
     """(状態へ書く mvv, 止まるときの結果)。中身は `lib/mission_mvv.py`。"""
     mvv, stop = mission_mvv.init_mvv(a, project)
     return mvv, (outcome("stopped", stop[0], stop[2], exit=stop[1]) if stop else None)
@@ -159,7 +159,7 @@ def cmd_init(a) -> dict:
             metrics={"path": a.mission, "reason": why},
         )
     project = pm.load_mvv(Path(a.root or ".").resolve())
-    mvv, stop = init_mvv(a, project)
+    mvv, stop = init_mvv_outcome(a, project)
     if stop:
         return stop
     if a.pace == "fast" and project.approved and mvv:
