@@ -222,6 +222,20 @@ def test_lines_fire_only_above_threshold(repo, env):
     assert code == 0 and out["items"][0]["trigger"] == "lines" and out["metrics"]["lines"] == 11
 
 
+def test_lines_of_check_and_release_prs_are_not_counted(repo, env):
+    write_decl(repo, {**TRIGGERS, "score": 99, "lines": 10})
+    git(repo, "commit", "-qam", "decl")
+    git(repo, "tag", "-a", "ndf--v1.0.1", "-m", "v1.0.1")
+    merge_pr(repo, 11, "check/m-1", {"app/a.py": 20})  # 検査の修正
+    squash_pr(repo, 12, "release: v1.1.0", {"app/b.py": 20})
+    squash_pr(repo, 30, "検査: m-2", {"app/c.py": 20})
+    append_event(env, repo, {"kind": "check", "at": iso(1), "id": "m-2", "from": "", "to": "", "result": "failed", "pr": 30})
+    gh_set(env, heads={"12": "release/v1.1.0"})
+    merge_pr(repo, 13, "feat/a", {"app/d.py": 3})
+    code, out, _ = call(repo, env, "eval")
+    assert code == 3 and out["metrics"]["lines"] == 3 and out["metrics"]["prs"] == 1
+
+
 def test_escapes_fire_on_the_second_in_the_same_area(repo, env):
     write_decl(repo, {**TRIGGERS, "score": 99})
     git(repo, "commit", "-qam", "decl")

@@ -279,14 +279,18 @@ def range_start(root: Path, events: list[dict], since: str | None, review: bool 
     return sha, commit_at(root, sha), f"origin/{base} との分岐点"
 
 
-def merged_prs(root: Path, frm: str, to: str, decl: dict, skip: set[int] = frozenset()) -> list[dict]:
-    """範囲へ入った PR。merge commit と squash merge（件名の末尾 `(#N)`）を数える。squash の件名にはブランチ名が
-    残らないため、ブランチは GitHub から読んで `SKIP_BRANCHES` を当てる。検査の PR は記録の番号（skip）でも外す。"""
+def merged_prs(root: Path, frm: str, to: str, decl: dict, skip: set[int] = frozenset()) -> tuple[list[dict], list[str]]:
+    """(範囲へ入った PR, 外した PR のコミット)。merge commit と squash merge（件名の末尾 `(#N)`）を数える。squash の
+    件名にはブランチ名が残らないため、ブランチは GitHub から読んで `SKIP_BRANCHES` を当てる。検査の PR は記録の番号
+    （skip）でも外す。外したコミットは行数からも差し引くために返す。"""
     found = []
+    excluded = []
     for line in git_or_stop(root, "log", "--first-parent", "--format=%H%x09%P%x09%s", f"{frm}..{to}").splitlines():
         sha, parents, subject = line.split("\t", 2)
         m = MERGE_SUBJECT.match(subject) if " " in parents else SQUASH_SUBJECT.search(subject.rstrip())
-        if m and int(m.group(1)) not in skip:
+        if m and int(m.group(1)) in skip:
+            excluded.append(sha)
+        elif m:
             found.append((sha, int(m.group(1)), m.group(2) if m.re is MERGE_SUBJECT else None))
     squashed = [n for _, n, branch in found if branch is None]
     heads, err = gh_rest.pr_head_branches(squashed, cwd=str(root)) if squashed else ({}, "")
@@ -296,16 +300,22 @@ def merged_prs(root: Path, frm: str, to: str, decl: dict, skip: set[int] = froze
     for sha, n, branch in found:
         branch = heads.get(n, "") if branch is None else branch
         if branch.startswith(SKIP_BRANCHES):
+            excluded.append(sha)
             continue
         files = git_or_stop(root, "diff", "--name-only", f"{sha}^1", sha).splitlines()
         common = any(area_of(f, decl)[1] for f in files)
         out.append({"pr": n, "branch": branch, "common": common, "points": decl["triggers"]["common_weight"] if common else 1})
-    return out
+    return out, excluded
 
 
-def changed_lines(root: Path, frm: str, to: str) -> int:
-    stat = git_or_stop(root, "diff", "--shortstat", frm, to)
-    return sum(int(n) for n in re.findall(r"(\d+) (?:insertion|deletion)", stat))
+def changed_lines(root: Path, frm: str, to: str, excluded: list[str] = ()) -> int:
+    """範囲の変更行数。外した PR（検査・リリース）のコミットの分は差し引く。検査の修正が次の検査を立てないためである。"""
+
+    def count(a: str, b: str) -> int:
+        stat = git_or_stop(root, "diff", "--shortstat", a, b)
+        return sum(int(n) for n in re.findall(r"(\d+) (?:insertion|deletion)", stat))
+
+    return max(0, count(frm, to) - sum(count(f"{sha}^1", sha) for sha in excluded))
 
 
 def escapes_since(events: list[dict], since: datetime) -> dict[str, int]:
@@ -322,14 +332,14 @@ def evaluate(root: Path, final: bool, since: str | None, to_ref: str | None = No
     events = read_events(root)
     frm, since_at, how = range_start(root, events, since, review)
     to = git_or_stop(root, "rev-parse", to_ref or f"origin/{range_base(root)}")
-    prs = merged_prs(root, frm, to, decl, {e["pr"] for e in events if e["kind"] == "check" and isinstance(e.get("pr"), int)})
+    prs, excluded = merged_prs(root, frm, to, decl, {e["pr"] for e in events if e["kind"] == "check" and isinstance(e.get("pr"), int)})
     t = decl["triggers"]
     esc = escapes_since(events, since_at)
     hours = round((clock.now(utc=True) - since_at).total_seconds() / 3600, 2)
     metrics = {
         "prs": len(prs),
         "score": sum(p["points"] for p in prs),
-        "lines": changed_lines(root, frm, to),
+        "lines": changed_lines(root, frm, to, excluded),
         "hours": hours,
         "escapes": max(esc.values(), default=0),
         "from": frm,
