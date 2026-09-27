@@ -139,3 +139,185 @@ def test_rerun_finds_drive_state_under_default_root(tmp_path, monkeypatch, capsy
     run_main(ARGV, capsys)
     code, out = run_main(ARGV, capsys)
     assert code == 0 and out["metrics"]["items"] == 2 and fake.inits() == 1
+
+
+class FakeFrom(FakeRefactor):
+    """`init` が途中の手順（`phase`）を返し、子のスクリプトの終了コードを `fail` で決める。"""
+
+    def __init__(self, tmp: Path, phase: str, fail: dict | None = None, monitor_out: str = ""):
+        super().__init__(tmp)
+        self.state["phase"] = phase
+        self.save()
+        self.fail, self.monitor_out = fail or {}, monitor_out
+
+    def __call__(self, cmd, env=None, cwd=None):
+        name = Path(cmd[1]).name if cmd[0] in (PY, "bash") else cmd[0]
+        if name in self.fail:
+            self.calls.append((name, *cmd[2:]))
+            return self.fail[name], ""
+        if name == "monitor.py":
+            self.calls.append((name, *cmd[2:]))
+            return 0, self.monitor_out
+        if name == "refactor.py" and cmd[2] == "verify":
+            self.calls.append((name, *cmd[2:]))
+            return 0, "VERIFY=done\n"
+        if name == "refactor.py" and cmd[2] in ("merge-plan", "merge-implement"):
+            self.calls.append((name, *cmd[2:]))
+            return 0, ""
+        return super().__call__(cmd, env, cwd)
+
+    def launched(self) -> list[str]:
+        return [c[2] for c in self.calls if c[0] == "launch-cli.sh"]
+
+
+def test_rerun_from_fix_does_not_relaunch_earlier_phases(tmp_path, monkeypatch, capsys):
+    """修正の手順で止まった実行は検証から再開し、提案・改修計画・実装の CLI を起動し直さない。"""
+    monkeypatch.setenv("CROSS_REFACTORING_TMP_DIR", str(tmp_path))
+    fake = FakeFrom(tmp_path, "fix")
+    monkeypatch.setattr(rf, "call", fake)
+    code, _ = run_main(ARGV, capsys)
+    assert code == 0 and fake.launched() == []
+    assert not any(c[:2] == ("refactor.py", "measure") for c in fake.calls)
+    assert any(c[:2] == ("refactor.py", "verify") for c in fake.calls)
+
+
+def test_prepare_worktrees_failure_stops_before_clis(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("CROSS_REFACTORING_TMP_DIR", str(tmp_path))
+    fake = FakeFrom(tmp_path, "propose", fail={"prepare-worktrees.sh": 1})
+    monkeypatch.setattr(rf, "call", fake)
+    code, out = run_main(ARGV, capsys)
+    assert code != 0 and "prepare-worktrees.sh" in out["summary"]
+    assert fake.launched() == []
+
+
+@pytest.mark.parametrize("rc", [3, 4, 6])
+def test_monitor_failure_in_implement_stops_before_merge(tmp_path, monkeypatch, capsys, rc):
+    """結果が無いまま異常に終わった（結果なし・早期の異常・起動失敗）ときは取り込みへ進まない。"""
+    monkeypatch.setenv("CROSS_REFACTORING_TMP_DIR", str(tmp_path))
+    fake = FakeFrom(tmp_path, "implement", fail={"monitor.py": rc})
+    monkeypatch.setattr(rf, "call", fake)
+    code, out = run_main(ARGV, capsys)
+    assert code != 0 and "monitor.py" in out["summary"]
+    assert not any(c[:2] == ("refactor.py", "merge-implement") for c in fake.calls)
+
+
+@pytest.mark.parametrize("rc", [2, 5])
+@pytest.mark.parametrize("phase", ["plan", "implement"])
+def test_monitor_stop_at_limit_goes_on_to_merge(tmp_path, monkeypatch, capsys, phase, rc):
+    """監視が上限で止めた（timeout / stalled）ときは止めずに `merge-*` へ渡す（決定 23）。"""
+    monkeypatch.setenv("CROSS_REFACTORING_TMP_DIR", str(tmp_path))
+    fake = FakeFrom(tmp_path, phase, fail={"monitor.py": rc})
+    monkeypatch.setattr(rf, "call", fake)
+    code, _ = run_main(ARGV, capsys)
+    assert code == 0 and any(c[:2] == ("refactor.py", f"merge-{phase}") for c in fake.calls)
+
+
+def _final_fix_resume(tmp_path, monkeypatch, gate: dict, merge_rc: int):
+    monkeypatch.setenv("CROSS_REFACTORING_TMP_DIR", str(tmp_path))
+    fake = FakeFrom(tmp_path, "final-fix")
+    fake.state["final_gate"] = gate
+    fake.save()
+    real = fake.__call__
+
+    def call(cmd, env=None, cwd=None):
+        if Path(cmd[1]).name == "refactor.py" and cmd[2] == "merge-final-fix":
+            fake.calls.append(("refactor.py", *cmd[2:]))
+            return merge_rc, ""
+        return real(cmd, env, cwd)
+
+    monkeypatch.setattr(rf, "call", call)
+    return fake
+
+
+@pytest.mark.parametrize("merge_rc", [0, 2])
+def test_rerun_from_final_fix_merges_before_final_gate(tmp_path, monkeypatch, capsys, merge_rc):
+    """最終ゲートの修正の途中で止まった駆動は、`final-gate` の前に `merge-final-fix` を通す（#674）。
+
+    結果なしで閉じ済みの試行（`merge-final-fix` が 2）でも最終ゲートへ進む。
+    """
+    fake = _final_fix_resume(tmp_path, monkeypatch, {"status": "failing", "impl": "codex", "fix_base_sha": "abc"}, merge_rc)
+    code, _ = run_main(ARGV, capsys)
+    subs = [c[1] for c in fake.calls if c[0] == "refactor.py" and c[1] in ("merge-final-fix", "final-gate")]
+    assert code == 0 and subs[:2] == ["merge-final-fix", "final-gate"]
+    assert fake.launched() == []
+
+
+def test_final_gate_recheck_reruns_the_gate_without_a_fix_cli(tmp_path, monkeypatch, capsys):
+    """寄せた危険フラグの項目の取り消し（`FINAL_GATE=recheck`）は修正の依頼ではない。
+
+    修正の CLI も `merge-final-fix` も通さずに `final-gate` を打ち直す。
+    """
+    fake = _final_fix_resume(tmp_path, monkeypatch, {"status": "passed"}, 0)
+    real = fake.__call__
+    gates: list = []
+
+    def call(cmd, env=None, cwd=None):
+        if Path(cmd[1]).name == "refactor.py" and cmd[2] == "final-gate":
+            gates.append(1)
+            fake.calls.append(("refactor.py", *cmd[2:]))
+            return (2, "FINAL_GATE=recheck\n") if len(gates) == 1 else (0, "FINAL_GATE=passed\n")
+        return real(cmd, env, cwd)
+
+    monkeypatch.setattr(rf, "call", call)
+    code, _ = run_main(ARGV, capsys)
+    assert code == 0 and len(gates) == 2
+    assert "final-fix" not in fake.launched()
+    assert not any(c[:2] == ("refactor.py", "merge-final-fix") for c in fake.calls)
+
+
+def test_final_gate_without_open_fix_does_not_merge(tmp_path, monkeypatch, capsys):
+    """開いた修正の試行が無ければ（最終ゲートが通った後など）`merge-final-fix` を打たない。"""
+    fake = _final_fix_resume(tmp_path, monkeypatch, {"status": "passed", "impl": "codex", "fix_base_sha": "abc"}, 0)
+    code, _ = run_main(ARGV, capsys)
+    assert code == 0 and not any(c[:2] == ("refactor.py", "merge-final-fix") for c in fake.calls)
+
+
+@pytest.mark.parametrize("phase", ["fix", "final-fix"])
+def test_monitor_failure_in_fix_goes_on_to_merge(tmp_path, monkeypatch, capsys, phase):
+    """修正の工程は監視の非ゼロ終了で止めず、結果なしの取り込み（`merge-fix` / `merge-final-fix`）へ渡す。"""
+    monkeypatch.setenv("CROSS_REFACTORING_TMP_DIR", str(tmp_path))
+    fake = FakeFrom(tmp_path, "fix" if phase == "fix" else "final", fail={"monitor.py": 2})
+    verified, gates = [], []
+    real = fake.__call__
+
+    def call(cmd, env=None, cwd=None):
+        if Path(cmd[1]).name == "refactor.py" and cmd[2] == "verify":
+            verified.append(1)
+            fake.calls.append(("refactor.py", *cmd[2:]))
+            return 0, "VERIFY=fix\n" if phase == "fix" and len(verified) == 1 else "VERIFY=done\n"
+        if Path(cmd[1]).name == "refactor.py" and cmd[2] == "final-gate":
+            gates.append(1)
+            fake.calls.append(("refactor.py", *cmd[2:]))
+            return (2, "") if phase == "final-fix" and len(gates) == 1 else (0, "FINAL_GATE=passed\n")
+        return real(cmd, env, cwd)
+
+    monkeypatch.setattr(rf, "call", call)
+    code, _ = run_main(ARGV, capsys)
+    merge = "merge-fix" if phase == "fix" else "merge-final-fix"
+    assert code == 0 and any(c[:2] == ("refactor.py", merge) for c in fake.calls)
+
+
+def test_propose_stops_when_no_participant_finished(tmp_path, monkeypatch, capsys):
+    """全員が欠けた提案を候補 0 件の完了として扱わない。"""
+    monkeypatch.setenv("CROSS_REFACTORING_TMP_DIR", str(tmp_path))
+    fake = FakeFrom(tmp_path, "propose", fail={"monitor.py": 2})
+    monkeypatch.setattr(rf, "call", fake)
+    code, out = run_main(ARGV, capsys)
+    assert code != 0 and "提案" in out["summary"]
+    assert not any(c[:2] == ("refactor.py", "merge-proposals") for c in fake.calls)
+
+
+def test_propose_continues_when_one_participant_finished(tmp_path, monkeypatch, capsys):
+    """1 者が欠けても、提案を終えた参加者がいれば続ける（`merge-proposals` が欠けた者を除く）。"""
+    monkeypatch.setenv("CROSS_REFACTORING_TMP_DIR", str(tmp_path))
+    rows = '{"agent": "codex", "exit_code": 0}\n{"agent": "kiro", "exit_code": 2}\n'
+    fake = FakeFrom(tmp_path, "propose", monitor_out=rows)
+    real = fake.__call__
+
+    def call(cmd, env=None, cwd=None):
+        rc, out = real(cmd, env, cwd)
+        return (2, out) if Path(cmd[1]).name == "monitor.py" else (rc, out)
+
+    monkeypatch.setattr(rf, "call", call)
+    code, _ = run_main(ARGV, capsys)
+    assert code == 0 and any(c[:2] == ("refactor.py", "merge-proposals") for c in fake.calls)

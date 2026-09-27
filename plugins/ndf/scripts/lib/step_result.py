@@ -179,8 +179,9 @@ CO_AUTHOR = "Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com
 VERSION_RE = re.compile(r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?$")
 
 
-def commit(root, subject):
-    git(root, "commit", "-q", "-m", f"{subject}\n\n{CO_AUTHOR}\n")
+def commit(root, subject, paths=()):
+    """コミットして HEAD を返す。paths を渡すとその分だけを確定し（`git commit --only`）、他に stage 済みの変更は残す。"""
+    git(root, "commit", "-q", "-m", f"{subject}\n\n{CO_AUTHOR}\n", *(["--only", "--", *paths] if paths else []))
     return git(root, "rev-parse", "HEAD").stdout.strip()
 
 

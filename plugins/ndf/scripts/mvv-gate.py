@@ -86,14 +86,26 @@ def gh_or_back(args: list[str], repo: str | None, cwd: Path) -> str:
 
 
 def pr_facts(n: int, repo: str | None, cwd: Path) -> dict:
-    """PR の題名・本文・変更したファイル・先頭のコミット（GraphQL が上限なら REST で読む）。取れなければ Back。"""
-    r = gh_rest.view_json("pr", n, "title,body,files,headRefOid", repo, cwd=str(cwd))
+    """PR の題名・本文・先頭のコミットと、変更したファイルの全件（rename の前のパスを含む）。取れなければ Back。
+
+    REST の `pulls/<n>/files` は全ページでも 3000 件で黙って切れるため、取れた件数が `changedFiles` と
+    合わなければ全件を確かめられないとして Back にする。
+    """
+    r = gh_rest.view_json("pr", n, "title,body,headRefOid,changedFiles", repo, cwd=str(cwd))
     if r.returncode != 0:
         raise Back("gh が無い" if r.returncode == 127 else f"gh pr view {n}: {r.stderr.strip()[:300]}")
     try:
-        return json.loads(r.stdout)
+        info = json.loads(r.stdout)
     except ValueError:
         raise Back(f"PR #{n} の出力を読めない")
+    f = gh_rest.pr_files(n, repo, cwd=str(cwd))
+    if f.returncode != 0:
+        raise Back("gh が無い" if f.returncode == 127 else f"PR #{n} の変更したファイルを読めない: {f.stderr.strip()[:300]}")
+    files = json.loads(f.stdout)
+    changed = info.get("changedFiles") if isinstance(info, dict) else None
+    if not isinstance(changed, int) or isinstance(changed, bool) or changed != len(files):
+        raise Back(f"PR #{n} の変更したファイルを全件読めない（取れた {len(files)} 件 / changedFiles {changed}）")
+    return {**info, "files": files}
 
 
 def pr_material(n: int, info: dict) -> str:
@@ -129,6 +141,23 @@ def design_material(n: int, path: str, info: dict, repo: str | None, cwd: Path) 
 def build_prompt(mvv: str, gate: str, materials: list[str]) -> str:
     body = "\n\n".join(m[:MAX_MATERIAL] for m in materials)
     return f"# MVV\n\n{mvv}\n\n# 関門\n\n{GATES[gate]}\n\n# 材料\n\n{body}\n"
+
+
+def well_formed(verdict) -> bool:
+    """応答が契約の形か。verdict・reasons・boundary の 3 つが揃い、reasons と boundary が文字列の配列であること。
+
+    **契約の外は関門を省かない（fail closed）。** boundary を欠く・空文字・空 object を `[]` と同じに読むと、
+    越えない線の申告が無いまま関門が省かれる。"""
+
+    def strings(v) -> bool:
+        return isinstance(v, list) and all(isinstance(x, str) for x in v)
+
+    return (
+        isinstance(verdict, dict)
+        and verdict.get("verdict") in VERDICTS
+        and strings(verdict.get("reasons"))
+        and strings(verdict.get("boundary"))
+    )
 
 
 def ask(prompt: str) -> tuple[dict | None, str, dict]:
@@ -177,7 +206,7 @@ def ask(prompt: str) -> tuple[dict | None, str, dict]:
         verdict = json.loads(text[start : end + 1]) if start >= 0 else None
     except json.JSONDecodeError:
         verdict = None
-    if not isinstance(verdict, dict) or verdict.get("verdict") not in VERDICTS:
+    if not well_formed(verdict):
         return None, text[-500:], usage
     return verdict, text, usage
 
@@ -204,7 +233,15 @@ def boundary_hits(root: Path, infos: dict[int, dict]) -> list[str]:
         patterns = read_pace(root)["boundary_paths"]
     except PaceError as e:
         raise Back(str(e))
-    return [f"#{n} {f['path']}" for n, info in infos.items() for f in info.get("files", []) if matches(f.get("path", ""), patterns)]
+    hits = []
+    for n, info in infos.items():
+        for f in info.get("files", []):
+            old = f.get("previous_path")
+            if f.get("status") == "renamed" and not old:
+                hits.append(f"#{n} {f['path']}（rename の前のパスが分からない）")
+            elif matches(f.get("path", ""), patterns) or (old and matches(old, patterns)):
+                hits.append(f"#{n} {old} → {f['path']}" if old else f"#{n} {f['path']}")
+    return hits
 
 
 def write_log(path: str, record: dict) -> None:
@@ -303,8 +340,8 @@ def cmd_check(a) -> tuple[dict, int | None]:
     verdict, raw, usage = ask(build_prompt(mvv_path.read_text(encoding="utf-8"), a.gate, materials))
     if verdict is None:
         return back("判定を読めない", "unreadable", {"raw": raw}, usage)
-    boundary = verdict.get("boundary") or []
-    record.update(reasons=verdict.get("reasons", []), boundary=boundary)
+    boundary = verdict["boundary"]
+    record.update(reasons=verdict["reasons"], boundary=boundary)
     if verdict["verdict"] != "follow" or boundary:
         why = "越えない線に当たる: " + " / ".join(map(str, boundary)) if boundary else verdict["verdict"]
         return back(why, verdict["verdict"], usage=usage)

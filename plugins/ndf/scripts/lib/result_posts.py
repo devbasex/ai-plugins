@@ -30,6 +30,7 @@ from typing import Any, NamedTuple
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
+import design_body  # noqa: E402
 import post_queue  # noqa: E402
 import statefile  # noqa: E402
 
@@ -565,6 +566,10 @@ def cmd_fix(args: argparse.Namespace) -> int:
     print(f"PUSHED={1 if pushed.pushed else 0} COMMIT_ON_HEAD={1 if pushed.contains else 0}")
     if not pushed.ok:
         print(pushed.detail, file=sys.stderr)
+        return 1
+    if unsynced := design_body.sync_after_push(repo, int(args.pr), head, pushed.pushed):
+        # 本文が古いまま返信しない。打ち直すと揃えからやり直す。
+        print(f"本文の「決めたこと」を揃えられないため止めます。打ち直してください ({unsynced})", file=sys.stderr)
         return 1
 
     actor = args.actor or _sh("gh", "api", "user", "-q", ".login") or None

@@ -101,6 +101,9 @@ def build(tmp: Path, version: str = "10.16.0") -> dict:
     # cross-review の claude の席
     seat = dict(_assistant(30, "c1", U, model="claude-opus-5-5"), cwd=WT)
     _jsonl(claude / "-tmp-ndf-worktrees-acme--secret-repo-pr7" / "seat.jsonl", [seat])
+    # 席が Agent で起動したサブエージェントの消費も席に入る
+    seat_sub = dict(_assistant(31, "c2", U, model="claude-opus-5-5"), cwd=WT)
+    _jsonl(claude / "-tmp-ndf-worktrees-acme--secret-repo-pr7" / "seat" / "subagents" / "agent-b1.jsonl", [seat_sub])
 
     codex = tmp / "codex"
     _jsonl(
@@ -209,8 +212,11 @@ def test_external_cli_is_linked_by_worktree_and_time(tmp_path):
     assert row["reviewers"] == "claude+codex+kiro"
     assert (row["codex_input"], row["codex_out"], row["kiro_credit"]) == (5000, 50, 0.75)
     # 席は claude-opus-5-5 のため cache read は 0.05 倍: 10 + 1000*0.05 + 200*2 + 100*5
-    assert row["claude_seat_cost"] == 960
+    # 席とそのサブエージェントの 2 呼び出し
+    assert row["claude_seat_cost"] == 2 * 960
     ext = {x["runtime"]: x for x in r["external"]}
+    # P は席の最初の呼び出しの文脈だけ（サブエージェントの最初の文脈は足さない）
+    assert ext["claude"]["p"] == 1210
     assert ext["kiro"]["minutes"] == 2
     assert ext["codex"]["skill"] == "cross-review"
     assert r["meta"]["unlinked_external"] == 1
@@ -453,6 +459,32 @@ def test_per_role_splits_by_agent_type(tmp_path):
     assert got["ndf:supervisor-waits"]["w1h"] > 0 and got["ndf:supervisor-waits"]["w5"] == 0
     # 定義の名前が取れない起動は -
     assert {x["agent_type"] for x in rows if x["role"] == "実装"} == {"-"}
+
+
+def test_agent_type_outside_ndf_and_builtins_is_grouped(tmp_path):
+    """利用者や他社の定義の名前は記録へ残さず「その他」にまとめる。組み込みの定義はそのまま載せる。"""
+    roots = build_waits(tmp_path)
+    proj = roots["claude"] / "-work-x"
+    with open(proj / f"{SID}.jsonl", "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(_assistant(39, "m8", U, [_agent("toolu_p", "acme-plugin:deployer", "設計: #1")])) + "\n")
+        fh.write(json.dumps(_assistant(39, "m7", U, [_agent("toolu_e", "Explore", "設計: #1")])) + "\n")
+    sub = proj / SID / "subagents"
+    for name, tid in (("agent-p1", "toolu_p"), ("agent-e1", "toolu_e")):
+        _jsonl(sub / f"{name}.jsonl", [_assistant(41, f"{name}-1", _u(0, 1_000, w5=1_000))])
+        (sub / f"{name}.meta.json").write_text(
+            json.dumps({"description": "設計: #1", "spawnDepth": 1, "agentType": "x", "toolUseId": tid}), encoding="utf-8"
+        )
+    rows = run_json(roots)["per_role"]
+    got = {x["agent_type"] for x in rows if x["role"] == "設計"}
+    assert got == {"ndf:supervisor", "ndf:supervisor-waits", "Explore", "その他"}
+    assert "acme" not in json.dumps(rows)
+
+
+def test_until_does_not_count_subagents_started_later(tmp_path):
+    """打ち切りより後の行しか持たないサブエージェントは起動数へ入れない（同じ打ち切りで作り直しても変わらない）。"""
+    roots = build_waits(tmp_path)
+    before = {x["agent_type"]: x["count"] for x in run_json(roots, "--until", _ts(55))["per_role"] if x["role"] == "設計"}
+    assert before == {"ndf:supervisor": 1}  # 60 分に始まる 1 時間の定義は数えない
 
 
 def test_after_5m_amounts_split_by_gap(tmp_path):

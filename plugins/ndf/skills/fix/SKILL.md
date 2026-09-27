@@ -77,7 +77,9 @@ FIX=$(bash "$R/scripts/resolve.sh" scripts fix) || exit 3
    ためにコードを変えない。コミット前に手順 1 を打ち直し、新しい指摘・失敗があれば手順 2 へ戻る
 4. 直したものがあればコミットする。**送らない**。`fixed` も CI の修正も無ければコミットしない
 5. **戻り値ファイルを組む。** 件数と `by_severity` を数え、設計 PR なら本文の「決めたこと」の
-   節を設計文書に揃える（対象かどうかはスクリプトが決める。コミットが無くても行う）
+   節を設計文書に揃える（対象かどうかはスクリプトが決める）。設計文書は PR の head から読まれるため、
+   送るコミットがあるときは揃えず（`after_push`）、送る側が送った直後に揃える。揃わなければ送る側は
+   返信・記録へ進まずに止まり、打ち直すと揃えからやり直す
 
    ```bash
    python3 "$FIX/fix-steps.py" finalize --decisions <雛形の JSON> [--root <worktree>]
@@ -88,7 +90,7 @@ FIX=$(bash "$R/scripts/resolve.sh" scripts fix) || exit 3
    （照会できるのは送信前の head で、直した失敗が残って見えるため）。`fixed` が 0 件で `ci_fixed` も `true` でなければ `fix_commit` を捨てて `null` にし（`items`
    の `fix-commit` が `dropped`）、送信も CI も起きない。振り分けが「重要度の判定」の規則を破れば
    `stopped` で止まり、戻り値ファイルを書かない。`items[].name` が `pr-body-decisions` の `result`
-   （`synced` / `mismatch` / `unreadable` / `invalid_call`）と `code` を作業完了報告へ写す。
+   （`synced` / `mismatch` / `unreadable` / `invalid_call` / `after_push`）と `code` を作業完了報告へ写す。
    `unreadable` を一致と書かない。`invalid_call` は呼び出しの誤りで `stopped` になる
 6. 単独で呼んだときだけ、`next` の 1 行（`result_posts.py fix --pr <PR> --result <戻り値>`）を
    実行して送信と投稿を終える。送り先のブランチを決められないときはこの行が終了コード 1 で

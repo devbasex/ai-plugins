@@ -646,7 +646,11 @@ def test_a_caused_failure_after_the_deadline_reverts_the_deferred_items_newest_f
     assert e.value.code == 2, "取り消しを公開して、次の最終ゲートが CI を待ち直す"
     assert dropped == ["I3"], "新しい（rank の大きい）寄せた項目から取り消し、通った時点で止める"
     assert pushed == [True]
-    assert read_state(state_path)["final_gate"]["reverted_deferred"] == ["I3"]
+    gate = read_state(state_path)["final_gate"]
+    assert gate["reverted_deferred"] == ["I3"]
+    # 修正の依頼ではない。起点を取り消し後の HEAD へ置き直し、取り消しを後の修正の範囲へ入れない。
+    assert "FINAL_GATE=recheck" in capsys.readouterr().out
+    assert gate["status"] == "recheck" and gate["fix_base_sha"]
 
 
 def test_the_ci_gate_waits_without_pushing(patch_lib, refactor, cmd_gate, tmp_path, env_tmp_dir, spy):
