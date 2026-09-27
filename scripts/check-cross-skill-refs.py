@@ -27,6 +27,7 @@ Skill 名だけを手がかりにすると、`gh pr view` のような別の用�
 
     python3 scripts/check-cross-skill-refs.py --root .
 """
+
 from __future__ import annotations
 
 import argparse
@@ -45,8 +46,7 @@ IGNORED_DIRS = {"__pycache__", ".pytest_cache", "tests"}
 # 既に知っている参照。**共通層ではなく Skill の本体どうしの参照**であるため、置き場所を
 # 移すだけでは解けない。解くには双方の Skill の設計が要る（#344）。
 EXCEPTIONS: dict[tuple[str, str], str] = {
-    ("plugins/ndf/skills/fix/SKILL.md", "cross-review"): "#344",
-    ("plugins/ndf/skills/cross-review/scripts/state.py", "fix"): "#344",
+    ("plugins/ndf/skills/cross-review/scripts/review_lib/github.py", "fix"): "#344",
     # `google-drive` は `google-auth` の資格情報を使う。**4 つの manifest すべてが
     # 両方を載せている**ため、配る先で相手が欠けることが起きない。その条件は
     # `scripts/tests/test_google_auth_codistribution.py` が固定する。参照は候補の
@@ -56,8 +56,12 @@ EXCEPTIONS: dict[tuple[str, str], str] = {
     # （#444）。**4 つの manifest すべてが両方を載せている**ため、配る先で相手が
     # 欠けることが起きない。その条件は
     # `scripts/tests/test_refactoring_codistribution.py` が固定する。
-    ("plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/vocabulary.py",
-     "refactoring"): "#444",
+    ("plugins/ndf/skills/cross-refactoring/scripts/refactor_lib/vocabulary.py", "refactoring"): "#444",
+    # `cross-refactoring` の drive は最終ゲートで `cross-review` の drive を起動させる
+    # （#870）。**4 つの manifest すべてが両方を載せている**ため、配る先で相手が
+    # 欠けることが起きない。その条件は
+    # `scripts/tests/test_cross_review_codistribution.py` が固定する。
+    ("plugins/ndf/skills/cross-refactoring/scripts/drive.py", "cross-review"): "#870",
 }
 
 # Markdown の行内リンクの飛び先。読み手への案内であるため走査から外す。
@@ -76,15 +80,17 @@ def _patterns(names: list[str]) -> list[tuple[str, re.Pattern[str]]]:
     built = []
     for name in names:
         escaped = re.escape(name)
-        built.append((
-            name,
-            re.compile(
-                rf"\.\./{escaped}/"                                  # 相対パス
-                # Python のパス連結。**`scripts` に限らない。** 配られなければ
-                # 解決できない点で、読み込む先が `references` でも同じである。
-                rf"|\"{escaped}\"\s*/\s*\"(?:scripts|references)\""
-            ),
-        ))
+        built.append(
+            (
+                name,
+                re.compile(
+                    rf"\.\./{escaped}/"  # 相対パス
+                    # Python のパス連結。**`scripts` に限らない。** 配られなければ
+                    # 解決できない点で、読み込む先が `references` でも同じである。
+                    rf"|\"{escaped}\"\s*/\s*\"(?:scripts|references)\""
+                ),
+            )
+        )
     return built
 
 
@@ -111,7 +117,7 @@ def find_references(root: Path) -> list[tuple[str, int, str, str]]:
     found: list[tuple[str, int, str, str]] = []
     for path in _files(root):
         rel = path.relative_to(root).as_posix()
-        owner = rel.split("/")[3]        # plugins/ndf/skills/<所有する Skill>/...
+        owner = rel.split("/")[3]  # plugins/ndf/skills/<所有する Skill>/...
         is_markdown = path.suffix == ".md"
         for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             body = _strip_links(line, is_markdown)
