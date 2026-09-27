@@ -7,7 +7,6 @@ LLM は `supervise_lib/claude.py` の `call_claude` を Tool なしで 1 回呼�
 from __future__ import annotations
 
 import importlib.util
-import json
 from pathlib import Path
 
 import clock
@@ -56,12 +55,7 @@ def call_llm_json(system: str, prompt: str, root: Path, kind: str) -> tuple[dict
     text = str(res.get("text") or "")
     if not res.get("ok"):
         return None, text[-500:], usage
-    start, end = text.find("{"), text.rfind("}")
-    try:
-        data = json.loads(text[start : end + 1]) if start >= 0 else None
-    except json.JSONDecodeError:
-        data = None
-    return (data if isinstance(data, dict) else None), text[-500:], usage
+    return pm.json_object(text), text[-500:], usage
 
 
 def vet_prompt(kind: str, body: str, mvv: pm.ProjectMvv) -> str:

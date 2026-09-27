@@ -85,6 +85,16 @@ def sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def json_object(text: str) -> dict | None:
+    """文の最初の { から最後の } までを JSON として読む。dict でなければ None。"""
+    start, end = text.find("{"), text.rfind("}")
+    try:
+        data = json.loads(text[start : end + 1]) if start >= 0 else None
+    except json.JSONDecodeError:
+        data = None
+    return data if isinstance(data, dict) else None
+
+
 def principles() -> str:
     """NDF の共通原則の本文全体。読めなければ上位の原則の 1 文だけでも先頭に置けるよう、理由つきの文を返す。"""
     try:

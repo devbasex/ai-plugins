@@ -185,12 +185,8 @@ def ask(prompt: str) -> tuple[dict | None, str, dict]:
             outer, source="mvv-gate", kind="mvv", seconds=usage["seconds"] if outer.get("duration_ms") is not None else None
         ),
     )
-    start, end = text.find("{"), text.rfind("}")
-    try:
-        verdict = json.loads(text[start : end + 1]) if start >= 0 else None
-    except json.JSONDecodeError:
-        verdict = None
-    if not isinstance(verdict, dict) or verdict.get("verdict") not in VERDICTS:
+    verdict = pm.json_object(text)
+    if verdict is None or verdict.get("verdict") not in VERDICTS:
         return None, text[-500:], usage
     return verdict, text, usage
 
