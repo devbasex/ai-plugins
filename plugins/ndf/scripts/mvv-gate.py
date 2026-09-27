@@ -86,8 +86,12 @@ def gh_or_back(args: list[str], repo: str | None, cwd: Path) -> str:
 
 
 def pr_facts(n: int, repo: str | None, cwd: Path) -> dict:
-    """PR の題名・本文・先頭のコミットと、変更したファイルの全件（rename の前のパスを含む）。取れなければ Back。"""
-    r = gh_rest.view_json("pr", n, "title,body,headRefOid", repo, cwd=str(cwd))
+    """PR の題名・本文・先頭のコミットと、変更したファイルの全件（rename の前のパスを含む）。取れなければ Back。
+
+    REST の `pulls/<n>/files` は全ページでも 3000 件で黙って切れるため、取れた件数が `changedFiles` と
+    合わなければ全件を確かめられないとして Back にする。
+    """
+    r = gh_rest.view_json("pr", n, "title,body,headRefOid,changedFiles", repo, cwd=str(cwd))
     if r.returncode != 0:
         raise Back("gh が無い" if r.returncode == 127 else f"gh pr view {n}: {r.stderr.strip()[:300]}")
     try:
@@ -97,7 +101,11 @@ def pr_facts(n: int, repo: str | None, cwd: Path) -> dict:
     f = gh_rest.pr_files(n, repo, cwd=str(cwd))
     if f.returncode != 0:
         raise Back("gh が無い" if f.returncode == 127 else f"PR #{n} の変更したファイルを読めない: {f.stderr.strip()[:300]}")
-    return {**info, "files": json.loads(f.stdout)}
+    files = json.loads(f.stdout)
+    changed = info.get("changedFiles") if isinstance(info, dict) else None
+    if not isinstance(changed, int) or isinstance(changed, bool) or changed != len(files):
+        raise Back(f"PR #{n} の変更したファイルを全件読めない（取れた {len(files)} 件 / changedFiles {changed}）")
+    return {**info, "files": files}
 
 
 def pr_material(n: int, info: dict) -> str:

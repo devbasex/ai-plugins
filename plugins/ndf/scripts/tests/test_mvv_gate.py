@@ -43,10 +43,10 @@ def write_rest_files(tmp_path: Path, files: list) -> None:
     (tmp_path / "files.json").write_text(json.dumps(rows[:1]) + json.dumps(rows[1:]))
 
 
-def fake_gh(tmp_path: Path, files: list) -> str:
+def fake_gh(tmp_path: Path, files: list, changed: int | None = None) -> str:
     bindir = tmp_path / "bin"
     bindir.mkdir(exist_ok=True)
-    info = {"title": "変更", "body": "本文"}
+    info = {"title": "変更", "body": "本文", "changedFiles": len(files) if changed is None else changed}
     (tmp_path / "info.json").write_text(json.dumps(info, ensure_ascii=False))
     write_rest_files(tmp_path, files)
     gh = bindir / "gh"
@@ -100,9 +100,9 @@ def mission(tmp_path):
     return {"root": root, "state": state, "mvv": mvv, "material": material, "log": tmp_path / "log.jsonl", "tmp": tmp_path}
 
 
-def run(m: dict, text: str, *extra: str, files: list | None = None) -> tuple[int, dict, list[dict]]:
+def run(m: dict, text: str, *extra: str, files: list | None = None, changed: int | None = None) -> tuple[int, dict, list[dict]]:
     tmp = m["tmp"]
-    env = {"PATH": f"{fake_gh(tmp, files or ['app/x.py'])}:/usr/bin:/bin", "HOME": str(tmp), "NDF_MVV_CLAUDE": fake_claude(tmp, text)}
+    env = {"PATH": f"{fake_gh(tmp, files or ['app/x.py'], changed)}:/usr/bin:/bin", "HOME": str(tmp), "NDF_MVV_CLAUDE": fake_claude(tmp, text)}
     args = [
         sys.executable,
         str(SCRIPT),
@@ -231,6 +231,13 @@ def test_a_rename_out_of_a_boundary_path_never_skips_the_gate(mission):
     assert "lib/auth.py → lib/plain.py" in out["summary"] and rows[-1]["verdict"] == "machine"
 
 
+def test_files_cut_short_of_changed_files_never_skip_the_gate(mission):
+    # REST の files が 3000 件で切れたときの形: 取れた件数が changedFiles に届かない
+    code, out, _ = run(mission, FOLLOW, "--pr", "5", files=["app/x.py"], changed=3001)
+    assert (code, llm_calls(mission)) == (10, 0)
+    assert "全件読めない" in out["summary"]
+
+
 def test_a_missing_material_goes_back_to_the_user(mission):
     mission["material"].unlink()
     code, out, _ = run(mission, FOLLOW)
@@ -244,7 +251,7 @@ def fake_gh_with_design(tmp_path: Path, files: list[str], api_fails: bool = Fals
     """`gh pr view` は PR の情報を、`gh api .../contents/...` は設計文書の中身を返す偽物。呼び出しを gh-calls.txt へ残す。"""
     bindir = tmp_path / "bin"
     bindir.mkdir(exist_ok=True)
-    info = {"title": "設計", "body": "本文", "headRefOid": "abc123"}
+    info = {"title": "設計", "body": "本文", "headRefOid": "abc123", "changedFiles": len(files)}
     (tmp_path / "info.json").write_text(json.dumps(info, ensure_ascii=False))
     write_rest_files(tmp_path, files)
     (tmp_path / "doc.md").write_text(DESIGN_DOC)
