@@ -24,7 +24,7 @@ from .measure_repo import Tree, measured, question, unknown, url_hosts
 CALL_LIMIT = 30.0
 ARTIFACT_BYTES = 50 * 1024 * 1024
 JUNIT_NAME = re.compile(r"junit|test-?result|test-?report|phpunit|pytest|jest|vitest", re.I)
-TEST_STEP = re.compile(r"test|pytest|phpunit|jest|vitest|rspec", re.I)
+TEST_STEP = re.compile(r"(?<![a-z])test|pytest|phpunit|jest|vitest|rspec", re.I)
 RECORD_NAME = "cross-refactoring-allocation.jsonl"
 RECORD_ROWS = 10
 
@@ -158,7 +158,7 @@ def _steps_of(jobs: list[dict], run: dict) -> dict | None:
                 if sec is not None:
                     total += sec
                     n += 1
-    if not n:
+    if not n or total <= 0:
         return None
     return {"seconds": round(total, 1), "source": "ci-steps", "detail": f"run {run['id']}（{run.get('path')}）のテストの step {n} 個の合計"}
 
@@ -268,7 +268,9 @@ def _measure_runs(gh: Gh, jobs_static: dict[str, int], head: str | None) -> tupl
                 entry["wall_seconds"] = wall
             jobs = (gh.get(f"repos/{gh.repo}/actions/runs/{run['id']}/jobs?per_page=100") or {}).get("jobs") or []
             entry["jobs"] = max(entry["jobs"], len(jobs))
-            steps = steps or _steps_of(jobs, run)
+            found = _steps_of(jobs, run)
+            if found and found["seconds"] > (steps or {}).get("seconds", 0):
+                steps = found
             junit = junit or _junit_of_run(gh, run)
         workflows.append(entry)
     ci = {"provider": "github-actions" if workflows else "none", "workflows": workflows, "required_checks": _required_checks(gh, head)}

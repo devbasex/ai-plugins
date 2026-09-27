@@ -39,7 +39,8 @@ if path.startswith(R + "actions/runs?"):
     out({{"workflow_runs": [{{"id": 7, "path": ".github/workflows/test.yml",
         "run_started_at": "2026-09-01T00:00:00Z", "updated_at": "2026-09-01T00:06:30Z"}}]}})
 if path.startswith(R + "actions/runs/7/jobs"):
-    steps = [{{"name": "Run phpunit", "started_at": "2026-09-01T00:01:00Z", "completed_at": "2026-09-01T00:05:00Z"}}]
+    steps = [{{"name": "Run phpunit", "started_at": "2026-09-01T00:01:00Z", "completed_at": "2026-09-01T00:05:00Z"}},
+             {{"name": "Check out latest", "started_at": "2026-09-01T00:00:00Z", "completed_at": "2026-09-01T00:01:00Z"}}]
     out({{"jobs": [{{"steps": steps}}] * 3}})
 if path.startswith(R + "actions/runs/7/artifacts"):
     out({{"artifacts": [{{"id": 9, "name": "junit-1", "size_in_bytes": 100}}, {{"id": 10, "name": "coverage", "size_in_bytes": 100}}]}})
@@ -236,7 +237,8 @@ def test_analysis_creates_the_declaration_with_all_items(laravel, env, tmp_path)
 def test_measure_reads_ci_junit_steps_and_required_checks(laravel, env, tmp_path):
     _, m = measure(env, laravel, tmp_path)
     got = {d["source"]: d["seconds"] for d in m["items"]["test_duration"]["value"]["measured"]}
-    assert got == {"ci-junit": 1300.0, "ci-steps": 720.0}  # 1000.5 + 200 + 99.5（入れ子の 3 は数えない）・4 分 × 3 job
+    # 1000.5 + 200 + 99.5（入れ子の 3 は数えない）・テストの step 4 分 × 3 job（latest の step は数えない）
+    assert got == {"ci-junit": 1300.0, "ci-steps": 720.0}
     ci = m["items"]["ci"]["value"]
     assert ci["required_checks"] == ["phpunit"]
     assert ci["workflows"] == [{"path": ".github/workflows/test.yml", "jobs": 3, "wall_seconds": 390.0}]

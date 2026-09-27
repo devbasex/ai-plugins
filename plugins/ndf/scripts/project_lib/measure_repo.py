@@ -93,6 +93,7 @@ INSTRUCTION_FILES = ("AGENTS.md", "CLAUDE.md", ".claude/CLAUDE.md", "KIRO.md", "
 OLD_GUIDE_MARK = "NDF_PLUGIN_GUIDE_START"
 TEST_WORDS = re.compile(r"phpunit|pytest|jest|vitest|rspec|go test|npm (?:run )?test|docker compose exec|run-[\w-]*tests?")
 POLICY_WORDS = re.compile(r"doc-lint|文体|文言テスト|markdown-writing|書き方")
+DEPLOY_WORDS = re.compile(r"deploy|release|publish|デプロイ|リリース|本番|amplify|sam |(?<![a-z])(?:stg|prd)(?![a-z])", re.I)
 IMPORT_TOKEN = re.compile(r"(?:^|\s)@([\w./-]+\.md)\b")
 
 
@@ -173,8 +174,11 @@ def _major(spec: str) -> str | None:
 
 
 def _first_number(spec: str) -> str:
-    m = re.search(r"\d+", spec or "")
-    return m.group(0) if m else ""
+    """版の指定の主の数字（`^10.10` → `10`）。主が 0 なら次の数字まで（`^0.115` → `0.115`）。"""
+    m = re.search(r"(\d+)(?:\.(\d+))?", spec or "")
+    if not m:
+        return ""
+    return f"0.{m.group(2)}" if m.group(1) == "0" and m.group(2) else m.group(1)
 
 
 def dependencies(tree: Tree) -> dict[str, dict[str, str]]:
@@ -366,7 +370,8 @@ def _versioned(tree: Tree) -> list[str]:
 def measure_delivery(tree: Tree) -> dict:
     files = tree.shallow(*DEPLOY_FILES)
     workflows = sorted(p for p in tree.files if p.startswith(".github/workflows/") and fingerprint.is_input(p))
-    evidence = tree.grep(workflows, re.compile(r"deploy|release|publish", re.I))
+    docs = [p for p in INSTRUCTION_FILES if p in tree.files] + tree.shallow("README*.md")
+    evidence = tree.grep(workflows, DEPLOY_WORDS) + tree.grep(docs, DEPLOY_WORDS)
     tags = (tree.git("tag", "--sort=-creatordate") or "").split()
     candidates = {
         "deploy_files": files,
@@ -423,8 +428,8 @@ def measure_instructions(tree: Tree) -> dict:
         head = "\n".join((tree.read(f) or "").splitlines()[:5])
         if OLD_GUIDE_MARK in head:
             by = [i["from"] for i in imports if i["to"] == f]
-            where = f"{'・'.join(by)} が読み込んでいる" if by else "指示書にある"
-            notes.append(f"古い NDF の案内 {f} を{where}（{OLD_GUIDE_MARK}）。今の NDF を指さないので、読み込みを外すか消す")
+            where = f"{f} を {'・'.join(by)} が読み込んでいる" if by else f"{f} が指示書にある"
+            notes.append(f"古い NDF の案内 {where}（{OLD_GUIDE_MARK}）。今の NDF を指さないので、読み込みを外すか消す")
     if not files:
         notes.append("指示書（AGENTS.md・CLAUDE.md など）が無い。NDF と各ランタイムが読む指示書を置くとよい")
     return measured({"files": files, "imports": imports, "notes": notes})
