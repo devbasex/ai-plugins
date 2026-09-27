@@ -246,10 +246,12 @@ GitHub と git の送信をしない。結果ファイル: {self.path("sweep")}
                 self.env,
                 self.v.get("WORKTREE"),
             )
-            for a in agents:
-                self.st("read-result", str(self.pr), a)
-            self.st("verify-findings", str(self.pr))
-            self.sh("critique-round.sh", str(self.pr), rnd, *rv.get("REVIEWERS", "").split())
+            missing = [a for a in agents if self.st("read-result", str(self.pr), a)[0] != 0]
+            if not missing:
+                # 結果の欠けた担当がいれば、検証と反証は judge の起動し直し・中断の後へ回す。
+                # 先に通すと、起動し直した後に全担当分をもう一度通すため 1 回分が捨てられる。
+                self.st("verify-findings", str(self.pr))
+                self.sh("critique-round.sh", str(self.pr), rnd, *rv.get("REVIEWERS", "").split())
             jrc, jout = self.st("judge", str(self.pr))
             if jrc == 8:
                 self.st("flush", str(self.pr))
@@ -282,6 +284,7 @@ GitHub と git の送信をしない。結果ファイル: {self.path("sweep")}
         if rc != 0:
             raise Stop(f"state.py merge-fix が終了コード {rc} で止まった", rc)
         ds["stage"] = "round"
+        self.save_ds(ds)  # 取り込み済みを先に確定する。後の巻き直しで止まっても merge-fix を打ち直さない
         rrc, _ = self.st("should-rotate", str(self.pr))
         if rrc != 0:
             return None
