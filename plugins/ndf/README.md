@@ -1,6 +1,6 @@
 # NDF Plugin
 
-PR 運用、レビュー、調査、実装計画、仕様書化、開発方法論（要求定義・テスト駆動・リファクタリング・
+PR 運用、レビュー、調査、実装計画、仕様書化、開発方法論（要求定義・テスト駆動・構造改善・
 完了判定）、Docker container access、statusline、外部 AI 委譲、Slack 通知を提供します。
 
 配布物は `plugins/ndf/` の 1 ディレクトリにまとまっています。Skill の実体は `skills/` の
@@ -8,10 +8,10 @@ PR 運用、レビュー、調査、実装計画、仕様書化、開発方法�
 
 | ランタイム | 公開 Skill | マニフェスト |
 | --- | --- | --- |
-| Claude Code | 48 個 | `.claude-plugin/plugin.json` |
-| Codex | 44 個 | `.codex-plugin/plugin.json` |
-| Kiro CLI | 45 個 | `dev.kiro/install.sh`（プラグイン機構が無いため installer で導入） |
-| agy | 44 個 | `dev.agy/plugin.json`（取得元の登録が無いため clone から導入） |
+| Claude Code | 47 個 | `.claude-plugin/plugin.json` |
+| Codex | 43 個 | `.codex-plugin/plugin.json` |
+| Kiro CLI | 44 個 | `dev.kiro/install.sh`（プラグイン機構が無いため installer で導入） |
+| agy | 43 個 | `dev.agy/plugin.json`（取得元の登録が無いため clone から導入） |
 
 ## レイアウト
 
@@ -19,10 +19,10 @@ PR 運用、レビュー、調査、実装計画、仕様書化、開発方法�
 plugins/ndf/
 ├── .claude-plugin/plugin.json   # Claude Code のマニフェスト
 ├── .codex-plugin/plugin.json    # Codex のマニフェスト
-├── skills/                      # 配布 Skill の唯一の実体（48 個）
+├── skills/                      # 配布 Skill の唯一の実体（47 個）
 ├── skills/AUTHORING.md          # Skill 執筆の規約
 ├── manifests/                   # ランタイム別の配布 Skill 一覧
-├── agents/                      # Claude Code のサブエージェント定義（専門 8 個と、3 層の定義 3 個（supervisor 2・worker 1））
+├── agents/                      # Claude Code のサブエージェント定義（専門 8 個と worker 1 個）
 ├── hooks/claude.json            # Claude Code の PreToolUse / SessionStart / Stop hook
 ├── hooks/codex.json             # Codex の PreToolUse / SessionStart / Stop hook
 ├── scripts/                     # hook と Skill から呼ぶスクリプト
@@ -89,7 +89,7 @@ bash plugins/ndf/dev.kiro/install.sh --dry-run
 
 ```bash
 python3 -c "import json;print(json.load(open('.kiro/agents/ndf.json'))['description'])"
-# => NDF統合開発エージェント（Kiro CLI用 / v10.17.35）
+# => NDF統合開発エージェント（Kiro CLI用 / v10.17.8）
 ```
 
 ### agy
@@ -102,11 +102,11 @@ agy plugin install plugins/ndf/dev.agy                               # 初回
 agy plugin uninstall ndf && agy plugin install plugins/ndf/dev.agy   # 新しい版へ
 ```
 
-導入すると `manifests/agy-skills.txt` に載る Skill 44 個と、エージェント 11 個（専門 8 個と、3 層の定義 3 個（supervisor 2・worker 1））、hook 1 個が
-`~/.gemini/config/plugins/ndf/` へコピーされます。symlink は実体へ解決されてコピーされるため、
+導入すると `manifests/agy-skills.txt` に載る Skill 43 個と、エージェント 9 個（専門 8 個と worker 1 個）、hook 1 個が
+`~/.gemini/config/plugins/ndf/` へ複製されます。symlink は実体へ解決されて複製されるため、
 clone を消しても導入した内容は残ります。
 
-**hook はコピーされるだけで、agy はそれを読み込みません**（agy 1.1.26 で実測）。読む先は
+**hook は複製されるだけで、agy はそれを読み込みません**（agy 1.1.26 で実測）。読む先は
 `~/.gemini/config/hooks.json` の 1 か所だけです。次を実行して差し込みます。**冪等で、他の
 項目には触れません**（`--dry-run` で内容を確認でき、`--uninstall` で外せます）。
 
@@ -119,9 +119,55 @@ agy plugin list
 # => {"imports":[{"name":"ndf","source":"antigravity","components":["skills","agents","hooks"]}]}
 ```
 
-## v10.17.35 へ更新するとき
+## v10.17.8 へ更新するとき
 
-- ミッション m1334 の課題を develop へ取り込む。（#1354）
+**`/ndf:cross-refactoring` を、ラウンドを上限まで回す形から、想定最大時間（`--budget-minutes`、既定 30 分）に
+収まる計画を 1 回だけ実行する形へ改めました**（マイルストーン 26、#933）。あわせて中継の静まりの既定を
+15 秒から 5 秒へ短くしました（PR #964）。Skill の追加・削除・改名は無く、公開 Skill の数も変わりません。
+変更点の一覧は [CHANGELOG.md](../../CHANGELOG.md) にあります。
+
+**正式版です。** `main` に載ります。中身は開発版 `10.17.8-dev.1` と同じで、版数の接尾辞だけを
+外しました。
+
+| 変わったこと | 中身 |
+| --- | --- |
+| **cross-refactoring は計画を 1 回だけ実行します**（#933） | 参加者の全員が 1 度だけ提案し、実装担当 1 者（`--implementer` → ホスト → 参加者の先頭）が計画・テスト追加・実装・検証/修正を通します。輪番と適用ラウンドは無くなりました |
+| **所要は `--budget-minutes` に収めます**（#933） | 配分テーブル（履歴の直近 10 回。初期値は #917 の実測）で見積もり、「想定最大時間 − 経過 − 控え」に収まる件数だけを採ります。段の監視の上限・テスト 1 回の上限・直しの打ち切りはすべて予算から算術で出し、改修計画の「時間の上限」の表に載ります |
+| **最終ゲートの修正は必ず 1 度試みます**（#933） | 修正 1 回分の控えを計画の時点で予算から差し引き、予算を使い切った後に最終ゲートが落ちても 1 度は直しを試みます。2 回目からは想定最大時間の終わりで打ち切ります |
+| **項目の検証は限ったテストで走らせます**（#933） | 全体のテストは着手前・危険の印（D1〜D5）が立ったときの 1 回・最終ゲートだけです。`--baseline-test` が pytest / jest / vitest でなければ `--round-test` が要ります |
+| **廃止した引数**（#933） | `--max-test-rounds` / `--max-outer-rounds` / `--max-items-per-round` / `--max-fix-rounds` / `--test-timeout` は `⚠ … は廃止しました（#933）` を出して無視します（次の版で外します） |
+| **状態ファイルが新しい形になりました**（#933） | ラウンド制の途中の状態ファイル（`final` が空）では `init` が終了コード 4 で止まり、旧い版で終えるか状態を消して始め直すかを案内します。終わった状態ファイルなら作り直して始めます |
+| **中継の静まりの既定が 5 秒になりました**（PR #964） | 区間の切れ目で `/exit` を送るまでの静まりの待ちです。`NDF_RELAY_QUIET` で変えられます |
+
+**実行中の cross-refactoring は入れ替わりません。** 更新は次の `init` から効きます。
+
+正式版のチャネル（ref を指定せずに登録した取得元）なら、次で入れ替わります。**動いているセッションには
+反映されない**ため、更新したあとは起動し直してください。開発版を試すために `develop` を登録した場合は、
+[docs/versioning-and-distribution.md の「ランタイムごとの取得と導入」](../../docs/versioning-and-distribution.md#ランタイムごとの取得と導入)
+の手順で ref を指定せずに登録し直してから導入します。
+
+```bash
+claude plugin marketplace update ai-plugins
+claude plugin update ndf@ai-plugins
+
+codex plugin marketplace upgrade ai-plugins
+codex plugin add ndf@ai-plugins
+```
+
+### 手元で確かめる
+
+どれもファイルを読むか関数を呼ぶか使い方を表示するだけで、課題もファイルも書き換えません。`$SCRIPTS` は
+プラグインの `scripts/` の絶対パスで、決め方は
+[development-workflow/references/scripts-lookup.md](skills/development-workflow/references/scripts-lookup.md)
+にあります。
+
+```bash
+grep -q '"version": "10.17.8"' "$SCRIPTS/../.claude-plugin/plugin.json"; echo "exit=$?"   # 0 なら この版が入っている
+python3 "$SCRIPTS/../skills/cross-refactoring/scripts/refactor.py" init --help 2>/dev/null | grep -q -- '--budget-minutes'; echo "exit=$?"   # 0 なら cross-refactoring が想定最大時間を受け取る
+python3 -B -c 'import sys; sys.path.insert(0, sys.argv[1]); from refactor_lib import budget; sys.exit(budget.reserve(60, False, 5.5).get("final_fix") != 5.5)' "$SCRIPTS/../skills/cross-refactoring/scripts"; echo "exit=$?"   # 0 なら 最終ゲートの修正 1 回分を控えに入れる
+python3 -B -c 'import sys; sys.path.insert(0, sys.argv[1]); from assignment import choose_implementer; sys.exit(choose_implementer(["codex", "claude"], "claude") != ("claude", "host"))' "$SCRIPTS/lib"; echo "exit=$?"   # 0 なら 実装担当をホストに決める（輪番が無い）
+grep -qF '_num("NDF_RELAY_QUIET", 5)' "$SCRIPTS/relay.py"; echo "exit=$?"   # 0 なら 中継の静まりの既定が 5 秒
+```
 
 ## Playwright テストについて
 
@@ -137,17 +183,17 @@ bash plugins/playwright-kit/dev.kiro/install.sh       # Kiro CLI
 
 ## Hooks
 
-### worktree 運用（4 ランタイム共通）
+### 作業ツリー運用（4 ランタイム共通）
 
-開発の変更を `.worktrees/` の worktree の中で行い、リポジトリを clone したディレクトリ
-（メインディレクトリ）では行わない運用を支えます。**編集は止めません。** 案内が出ても操作は成立します。
+開発の変更を、リポジトリを clone したディレクトリ（主ディレクトリ）ではなく `.worktrees/` の
+作業ツリーの中で行う運用を支えます。**編集は止めません。** 案内が出ても操作は成立します。
 
 | 起きること | 担う hook | Claude Code | Codex | Kiro CLI | agy |
 | --- | --- | --- | --- | --- | --- |
-| メインディレクトリの保護対象パスを編集しようとすると案内が出る | tool 実行前 | `PreToolUse` | `PreToolUse` | — | `PreToolUse` |
-| worktree で作業する旨の案内がプロンプトごとに出る | プロンプト送信時 | — | — | `userPromptSubmit` | — |
-| メインディレクトリに残った未コミット変更が提示される | セッション開始時 | `SessionStart` | `SessionStart` | `agentSpawn` | `PreInvocation` |
-| メインディレクトリのブランチが稼働中の worktree へ追従する（既定では動かさない。worktree の設定の `follow_branch: true` で有効にする） | セッション開始時 | `SessionStart` | `SessionStart` | `agentSpawn` | `PreInvocation` |
+| 主ディレクトリの保護対象パスを編集しようとすると案内が出る | tool 実行前 | `PreToolUse` | `PreToolUse` | — | `PreToolUse` |
+| 作業ツリーで作業する旨の案内がプロンプトごとに出る | プロンプト送信時 | — | — | `userPromptSubmit` | — |
+| 主ディレクトリに残った未コミット変更が提示される | セッション開始時 | `SessionStart` | `SessionStart` | `agentSpawn` | `PreInvocation` |
+| 主ディレクトリのブランチが稼働中の作業ツリーへ追従する（既定では動かさない。宣言の `follow_branch: true` で有効にする） | セッション開始時 | `SessionStart` | `SessionStart` | `agentSpawn` | `PreInvocation` |
 
 Kiro CLI に tool 実行前の案内が無いのは、この事象でモデルへ案内を渡す手段が終了コード 2 に
 限られ、それが tool の実行を拒否するためです。拒否しない方針のもとでは置けないため、パスを
@@ -157,14 +203,14 @@ Kiro CLI に tool 実行前の案内が無いのは、この事象でモデル�
 `hooks.json` を読み込まないためです（「インストール / agy」を参照）。
 
 **agy は案内を作る時点と渡せる時点が離れています。** tool 実行前の hook がモデルへ文言を返す
-口は拒否のときにしか働かないため、案内はセッションの記録へ積み、次のモデル呼び出しの前に
+口は拒否のときにしか働かないため、案内はセッションの控えへ積み、次のモデル呼び出しの前に
 `injectSteps` で渡します。セッション開始時にあたる事象も持たないため、モデル呼び出しの通し番号が
 0 のときを開始時として扱います。
 
-**この仕組みはリポジトリ側の設定ファイル `.ndf/worktree.json` があるときだけ動きます。**
-設定が無いリポジトリでは、いずれの hook も何も出力せず終了コード 0 で終わります。
+**この仕組みはリポジトリ側の宣言ファイル `.ndf/worktree.json` があるときだけ動きます。**
+宣言が無いリポジトリでは、いずれの hook も何も出力せず終了コード 0 で終わります。
 
-設定ファイルは `/ndf:worktree` を起動すると手順 0 で作られます。手で作るなら次を実行します。
+宣言ファイルは `/ndf:worktree` を起動すると手順 0 で作られます。手で作るなら次を実行します。
 
 ```bash
 bash <プラグインのパス>/scripts/worktree-setup.sh init
@@ -179,7 +225,7 @@ bash <プラグインのパス>/scripts/worktree-setup.sh init
 }
 ```
 
-`guard.allow_paths` は、メインディレクトリで編集しても案内を出さないパスです。省略すると
+`guard.allow_paths` は、主ディレクトリで編集しても案内を出さないパスです。省略すると
 組み込みの既定（上記と同じ一覧に `.agents/` `.serena/` を加えたもの）を使います。
 空の配列を書くと「何も許可しない」という指定になります。
 
@@ -187,22 +233,21 @@ bash <プラグインのパス>/scripts/worktree-setup.sh init
 
 ### 待ちの問い合わせと長い会話を止める（Claude Code だけ）
 
-`scripts/hook.py` の token の guard（`hook_lib/token_guard.py`）が PreToolUse の `Bash` / `Read` / `Skill` / `Agent` で動き、3 つを
+`scripts/token-guard.sh` が PreToolUse の `Bash` / `Read` / `Skill` / `Agent` で動き、3 つを
 止めます。止めたときは、代わりの手段を理由の欄に出します。
 
 | 止めるもの | 止め方 | 上限 |
 | --- | --- | --- |
 | 前景の `sleep` の待ち（`while` / `until` のループの本体、または上限を超える秒数） | `NDF_SLEEP_GUARD=0` | `NDF_SLEEP_MAX_SEC`（既定 5） |
 | 変わらないファイルの同じ範囲を続けて読む Read | `NDF_READ_REPEAT_GUARD=0` | `NDF_READ_REPEAT_LIMIT`（既定 3） |
-| 文脈が上限を超えた conductor が工程へ入る起動（1 度だけ止め、新しい会話で打つコマンドを `ndf-next` のブロックで示させる。ラッパーの下では止め続ける） | `NDF_CONTEXT_GUARD=0` | `NDF_CONTEXT_LIMIT`（既定 200000） |
-| 寿命 5 分の supervisor（`ndf:supervisor`）が、文脈を最初の呼び出しの 1.5 倍以上に伸ばしたまま `cross-review` / `cross-refactoring` を起動する（止め続け、`結果: スイッチポイント` で返させる） | `NDF_SUPERVISOR_CUT_GUARD=0` | `NDF_SUPERVISOR_CUT_RATIO`（既定 1.5） |
+| 文脈が上限を超えた conductor が工程へ入る起動（1 度だけ止め、新しい会話で打つコマンドを `ndf-next` のブロックで示させる。中継の下では止め続ける） | `NDF_CONTEXT_GUARD=0` | `NDF_CONTEXT_LIMIT`（既定 200000） |
 
 | ランタイム | 待ち方 | 会話を切る |
 | --- | --- | --- |
-| Claude Code | hook ＋ 規約 | hook ＋ 再開コマンド |
-| Codex | 規約だけ | 再開コマンドだけ |
-| Kiro CLI | 規約だけ | 再開コマンドだけ |
-| agy | 規約だけ | 再開コマンドだけ |
+| Claude Code | hook ＋ 規約 | hook ＋ 引き継ぎの 1 行 |
+| Codex | 規約だけ | 引き継ぎの 1 行だけ |
+| Kiro CLI | 規約だけ | 引き継ぎの 1 行だけ |
+| agy | 規約だけ | 引き継ぎの 1 行だけ |
 
 規約は `skills/development-workflow/references/waiting.md`（待ち方）と
 `skills/development-workflow/references/context-window.md`（会話を切る）にあります。
@@ -213,18 +258,18 @@ Claude Code の SessionStart hook（`hooks/claude.json`）は上記に加えて�
 
 - `~/.claude/settings.json` の `cleanupPeriodDays` を 90 日以上に保つ
 - statusline 未設定時に NDF 標準 statusline を設定する
-- カットポイントで claude を起動し直すラッパー（`scripts/relay.py`）のコピーが在れば今の版で置き直す（`relay.py startup`。
-  版は後退させない）。10.17.4〜10.17.6 が自動で足した alias の管理ブロックが残っていれば 1 度だけ知らせる。
-  **シェルの設定は書かない。** ラッパーを入れる・外すのは `/ndf:install-wrapper`（Claude Code だけ）
+- 区間の切れ目の中継（`scripts/relay.py`）の写しが在れば今の版で置き直す（`relay.py startup`。
+  版は後退させない）。10.17.4〜10.17.6 が自動で足した alias の囲みが残っていれば 1 度だけ知らせる。
+  **シェルの設定は書かない。** 中継を入れる・外すのは `/ndf:install-wrapper`（Claude Code だけ）
 
-Claude Code の Stop・Notification・PermissionRequest hook と `AskUserQuestion` の PreToolUse hook は、
-利用者の回答か承認を待つときだけ Slack へ知らせます（下の「Slack 通知」）。ラッパーの下（`NDF_RELAY_DIR` がある）では、最後の応答の
-`ndf-next` のブロックをラッパーのシグナルファイルへ写します（`relay.py mark`）。`AskUserQuestion` の PreToolUse /
-PostToolUse hook は、ラッパーの下で質問の表示中のシグナルファイルを作る・消します（ラッパーが質問の答えを代わりに
-送らないため）。好きな時点で切り替えるのは `/ndf:restart` です。ラッパーの始め方・止め方・上限は
+Claude Code の Stop hook は終了時に Slack 通知スクリプトを実行します。通知に必要な環境変数が
+未設定の場合は送信せず終了します。中継の下（`NDF_RELAY_DIR` がある）では、最後の応答の
+`ndf-next` のブロックを中継の印へ写します（`relay.py mark`）。`AskUserQuestion` の PreToolUse /
+PostToolUse hook は、中継の下で質問の表示中の印を作る・消します（中継が質問の答えを代わりに
+送らないため）。好きな時点で切り替えるのは `/ndf:restart` です。中継の始め方・止め方・上限は
 `skills/development-workflow/references/relay.md` にあります。
 
-Codex の Stop・PermissionRequest hook（`hooks/codex.json`）は `NDF_CODEX_SLACK_NOTIFY=true` が設定されている
+Codex の Stop hook（`hooks/codex.json`）は `NDF_CODEX_SLACK_NOTIFY=true` が設定されている
 場合だけ Slack 通知を送ります。**Codex の hook は Codex 側で明示的に有効化するまで実行され
 ません。** `~/.codex/config.toml` の `[hooks.state]` に対象 hook の `enabled = true` が要ります。
 `/hooks` で対象 hook を確認し、利用するプロジェクトで有効化してください。
@@ -233,60 +278,7 @@ Kiro CLI では installer が `.kiro/agents/ndf.json` の `hooks` を生成し�
 
 ## Slack 通知
 
-利用者の回答か承認が無いと進まない時点でだけ、Slack へ知らせます。応答が終わっても、待っていなければ
-送りません。たとえば応答が「この設計でマージしてよいですか。」で終わると、次の本文が届きます。
-
-```text
-【承認待ち】[ai-plugins] この設計でマージしてよいですか。
-セッション: https://claude.ai/code/session_01AbCdEf
-host: devbase-01 / cwd: /work/ai-plugins
-PR: https://github.com/devbasex/ai-plugins/pull/1150
-```
-
-同じ応答が「設計 PR を出しました。レビューの結果を待ちます。」で終わった場合は、何も送りません。
-
-### 送る時点
-
-| ランタイム | 時点 | 印 |
-| --- | --- | --- |
-| Claude Code | ツールの権限確認（`Notification` の `permission_prompt`） | 【承認待ち】 |
-| Claude Code | 計画の承認（`ExitPlanMode` の `PermissionRequest`） | 【承認待ち】 |
-| Claude Code | 選択式の問い（`AskUserQuestion`）・MCP の入力フォーム（`elicitation_dialog` / `elicitation_url_dialog`） | 【回答待ち】 |
-| Claude Code・Codex・Kiro | 応答が文で回答か承認を求めて終わる（`Stop` / `stop`） | 【回答待ち】か【承認待ち】 |
-| Codex | ツールの実行の承認（`PermissionRequest`） | 【承認待ち】 |
-
-Codex の選択式の問いと、Kiro の承認の画面・選択式の問いは、捉える hook が無いため送りません。
-
-- **文で求めているかは、応答の最後の 3 行の形で決めます。** 問いの形（`？` `ですか` `ますか` など）、
-  依頼の形（`ください` `お願いします` `よければ` など）、利用者の返事を待つと述べる文（`承認を待っています` など）が
-  あれば待ちです。コード・引用・表・見出しは見ません。承認の語（`承認` `マージ` `進めて` `てよいですか` など）を
-  含めば【承認待ち】、含まなければ【回答待ち】です。語の並びは `scripts/lib/wait_notice.py` にあります
-- **同じ待ちは 1 回だけ送ります。** `AskUserQuestion` や `ExitPlanMode` の後に届く `permission_prompt` は
-  同じ待ちとして送りません。放置の通知（`idle_prompt`）は捉えません
-- **非対話の `claude -p`（`CLAUDE_CODE_ENTRYPOINT` が `sdk-` で始まる）では送りません。** Codex の `codex exec` と
-  Kiro の非対話の実行は対話と見分けられないため、問いの形で終われば通知が出ることがあります
-- 本文の 1 行目は種類の印・リポジトリ名・求めている文（200 字まで）です。要約は作りません
-
-### 復帰先と関連 URL
-
-| 場合 | 載る行 |
-| --- | --- |
-| Claude Code の Remote Control 中・クラウドのセッション | `セッション: https://claude.ai/code/<ID>` |
-| Claude Code のそれ以外 | `再開: claude --resume <session_id>` |
-| Codex | `再開: codex resume <session_id>` |
-| Kiro | `再開: kiro-cli chat --resume-id <ID>`。ID が無ければ `再開: kiro-cli chat --resume`（cwd で打つ） |
-
-どの場合も `host: <ホスト名> / cwd: <cwd>` の行を足します。
-
-- 【回答待ち】には、応答に出た issue（GitHub の `/issues/<n>` と `#<n>`）と Redmine の URL を 3 件まで載せます。
-  `#<n>` は `origin` が GitHub を指すときだけ URL にします
-- 【承認待ち】には PR の URL を先頭に載せます。応答に無ければ、現在のブランチの PR を `gh pr view` で補います
-- Redmine は `REDMINE_URL` のホストの URL と `Redmine #<n>` を採ります。`REDMINE_URL` が無ければ載せません
-
-### 設定
-
-利用プロジェクト側で以下の環境変数を設定します。`.env` は cwd から git のトップまで上へ探し、無ければ
-プラグインの置き場から上へ探します。既に環境にある値は上書きしません。
+利用プロジェクト側で以下の環境変数を設定します。
 
 ```bash
 SLACK_BOT_TOKEN=xoxb-...
@@ -296,20 +288,8 @@ SLACK_USER_MENTION=<@U0123456789>
 NDF_CODEX_SLACK_NOTIFY=true
 ```
 
-| 変数 | 意味 |
-| --- | --- |
-| `SLACK_BOT_TOKEN` / `SLACK_CHANNEL_ID` | 必須。無ければ何も送りません |
-| `SLACK_USER_MENTION` | 任意。メンション付きを送って通知を鳴らし、メンション無しを送り直してから前者を消します |
-| `NDF_CODEX_SLACK_NOTIFY` | Codex だけ必須。`true` のときだけ Codex で動きます |
-| `NDF_SLACK_NOTIFY_DONE` | 任意。`true` なら待ちでない応答の終わりも【完了】として送ります（本文は最後の段落の先頭 200 字） |
-| `REDMINE_URL` | 任意。Redmine の URL を見分けるホスト（例 `https://redmine.example.com`） |
-| `DEBUG_SLACK_NOTIFY` | 任意。`true` なら `~/.claude/logs/wait-notify-<日付>.log` へ判定の理由を書きます |
-
-機密値は `.env` などで管理し、リポジトリへコミットしないでください。通知の記録（同じ待ちを 2 度送らないための
-直前の 1 件）は `${XDG_STATE_HOME:-~/.local/state}/ndf/wait-notify/` にセッションごとに置き、7 日で消します。
-
-**Kiro は `install.sh --with-slack` を打ち直してください。** 通知の入口は `scripts/wait-notify.py` の 1 本です。
-`stop` hook が配布物に無い `scripts/slack-notify.js` を指す `.kiro/agents/ndf.json` では、通知が届きません。
+`SLACK_USER_MENTION` は任意です。機密値は `.env` などで管理し、リポジトリへコミットしないで
+ください。
 
 ## 外部 AI 委譲
 
@@ -328,7 +308,7 @@ Antigravity CLI をインストールしてログインします。ログイン�
 ```bash
 curl -fsSL https://antigravity.google/cli/install.sh | bash
 agy          # 初回だけ。ブラウザでログインする
-agy models   # 認証確認
+agy models   # 認証の確認
 ```
 
 ## Codex の暗黙起動抑止
@@ -358,7 +338,7 @@ agy models   # 認証確認
 
 ```text
 # 動く: 実体パスを示して読ませる
-~/.codex/plugins/cache/ai-plugins/ndf/10.17.35/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
+~/.codex/plugins/cache/ai-plugins/ndf/10.17.8/skills/deploy/SKILL.md を読んで、その手順どおりに qa/staging へ deploy PR を作成してください。
 
 # 動かない: 明示起動 ($ は展開されない)
 $deploy qa/staging
@@ -380,14 +360,14 @@ marketplace 経由でインストールした場合、Skill の実体は **ワ�
 ```text
 $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>/SKILL.md
 # 既定 ($CODEX_HOME=~/.codex) の例:
-# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.35/skills/deploy/SKILL.md
+# ~/.codex/plugins/cache/ai-plugins/ndf/10.17.8/skills/deploy/SKILL.md
 ```
 
 そのため「`deploy` の SKILL.md を探して読んで」のような曖昧な依頼は、Codex のファイル探索がワークスペース内に限られる状況では失敗しえます。**抑止した Skill は `$<skill 名>` が展開されない**ので、`codex plugin list` で実体パスを確認し、絶対パスを渡してください。
 
 ```bash
 codex plugin list | grep 'ndf@ai-plugins'
-# => ndf@ai-plugins  installed, enabled  10.17.35  <path>
+# => ndf@ai-plugins  installed, enabled  10.17.8  <path>
 ```
 
 抑止していない Skill（`markdown-writing` など）はキャッシュ配下でも `$<skill 名>` で解決するため、そちらは `$` 起動が使えます。
@@ -416,13 +396,13 @@ installer の主なオプション・既定エージェントの切り替え・�
 
 ## 実機検証の記録
 
-kiro-cli の実機検証と、Skill 数がコンテキスト量へ与える影響の実測は
+kiro-cli の実機検証と、Skill 数が文脈量へ与える影響の実測は
 [docs/field-test-records.md](docs/field-test-records.md) にある。
 **その時点の実測であり、以後の構成変更には追随しない。**
 
 ## 変更するとき
 
-Skill の実体は `skills/` の 1 箇所だけです。ランタイムごとのコピーはありません。変更したら
+Skill の実体は `skills/` の 1 箇所だけです。ランタイムごとの複製はありません。変更したら
 [CONTRIBUTING.md の「手元での検証」](../../CONTRIBUTING.md#手元での検証)の検証を実行してください。
 frontmatter の規約は [skills/AUTHORING.md](skills/AUTHORING.md) にあり、
-`python3 scripts/check-skill-frontmatter.py` でチェックします。
+`python3 scripts/check-skill-frontmatter.py` で検査します。

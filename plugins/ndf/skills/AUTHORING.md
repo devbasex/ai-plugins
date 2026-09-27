@@ -7,20 +7,20 @@
 後者は Skill を書く人ごとに判断が分かれるためである。
 Skill を配布へ載せる手順（manifests・生成物・数の記載）は [開発ガイドの「既存プラグインへ Skill を足す」](../../../docs/plugin-development-guide.md#既存プラグインへ-skill-を足す) にある。サブエージェントへ本文の代わりに渡す抜粋の形と規則は [EXCERPTS.md](EXCERPTS.md) にある。
 
-本規約のうち機械的に判定できる項目は `scripts/check-skill-frontmatter.py` がチェックし、
+本規約のうち機械的に判定できる項目は `scripts/check-skill-frontmatter.py` が検査し、
 継続的インテグレーションで実行する（`scripts/build-runtime-plugins.sh --check` /
 `scripts/validate-runtime-plugins.sh` / `scripts/check-markdown-links.py` と同じワークフロー）。
 
 ```bash
-python3 scripts/check-skill-frontmatter.py           # チェック
+python3 scripts/check-skill-frontmatter.py           # 検査
 python3 scripts/check-skill-frontmatter.py --report  # 実測値の一覧
 ```
 
 本文については `scripts/check-skill-repo-assumptions.py` が「対象リポジトリを仮定しない」の
-うち機械的に判定できる部分（ai-plugins に固有の語が本文へ現れていないか）だけをチェックする。
+うち機械的に判定できる部分（ai-plugins に固有の語が本文へ現れていないか）だけを検査する。
 
 ```bash
-python3 scripts/check-skill-repo-assumptions.py           # チェック
+python3 scripts/check-skill-repo-assumptions.py           # 検査
 python3 scripts/check-skill-repo-assumptions.py --report  # 走査の規模とヒットの一覧
 ```
 
@@ -92,7 +92,7 @@ description: "Delete merged branches and worktrees, stopping only where git refu
 
 - トリガ語は 2〜4 個。`Use when` の条件と重複する語は入れない
 - 括弧内は**日本語のみ**にする。英語のトリガ語は `Use when` の条件文へ埋め込む
-  （チェックは「末尾の全角括弧かつ日本語を含む」ものだけをトリガ宣言と見なす。英語の補足
+  （検査は「末尾の全角括弧かつ日本語を含む」ものだけをトリガ宣言と見なす。英語の補足
   `(Codex/agy)` をトリガと誤認しないための条件）
 - 括弧は全角 `（）`。半角丸括弧は本文の補足に使うため、宣言と区別できなくなる
 
@@ -165,9 +165,9 @@ description: "Delete merged branches and worktrees, stopping only where git refu
 | 2 | **他者が読む新しい内容を外へ出すか** | push と Pull Request の作成、課題の起票、外部リポジトリの取得と配置 |
 | 3 | **操作そのものが判断を問うか** | 「やらない」と判断して閉じる、範囲外として起票する |
 
-**git が拒む操作と、事後の復元の手段がある操作は対象から外す。** 拒否そのものが止まる理由になり、
+**git が拒む操作と、事後の復元の手段がある操作は対象から外す。** 拒否そのものが止める合図であり、
 `git branch <名前> <ハッシュ>`・Restore branch・`gh issue reopen` で戻せる操作を止めても二重の確認が残るだけである。
-**課題を閉じることは問い 3 に当たらない**（判断はミッションの工程を通った時点で済んでいる）。`issue-upkeep` の「やらない」は閉じること自体が判断であり、そこが違う。
+**課題を閉じることは問い 3 に当たらない**（判断はまとまりの工程を通った時点で済んでいる）。`issue-upkeep` の「やらない」は閉じること自体が判断であり、そこが違う。
 
 | 守り方 | 選ぶ条件 | 実装 |
 | --- | --- | --- |
@@ -187,7 +187,7 @@ description: "Delete merged branches and worktrees, stopping only where git refu
 | `deploy` / `cherry-pick-pr` / `statusline` | 明示指示専用 | 本番デプロイ / 環境ブランチへの push / 利用者の設定ファイルの書き換え | 1（いずれも明示起動の運用が定着） |
 | `merged` | 自動発動 + 事後の報告 | worktree・ローカルブランチ・Pull Request の head のリモートブランチの削除 | なし（拒まれた対象だけ 1 に当たり、そこで止まる） |
 | `pr` | 自動発動 + 実行前確認 | push / Pull Request の作成 | 2 |
-| `release` | 自動発動 + 実行前確認 | 本番へのリリース（ゲート 2） | 1・2 |
+| `release` | 自動発動 + 実行前確認 | 本番への配布（関門 2） | 1・2 |
 | `out-of-scope` | 自動発動 + 実行前確認 | 起票 | 2・3 |
 | `issue-upkeep` | 自動発動 + 実行前確認 | やらないと判断して閉じる | 3 |
 | `official-skills-autoloader` | 自動発動 + 実行前確認 | 外部リポジトリの取得と symlink の作成 | 2 |
@@ -218,10 +218,10 @@ Skill 名は、自動発動（トリガ語）とは別に **明示起動の入�
 逆に、外部名を**末尾に含む**のは問題ない。`cross-review` は `code-review` の末尾要素では
 ないため、`/cross` の時点で一意に決まる。
 
-`scripts/check-skill-frontmatter.py` が既知の外部名との衝突を警告する。チェックが突き合わせる
+`scripts/check-skill-frontmatter.py` が既知の外部名との衝突を警告する。検査が突き合わせる
 一覧（`KNOWN_EXTERNAL_SKILL_NAMES`）は**名前空間を除いた Skill 名**で持つ。組み込み Skill は
 そもそも名前空間を持たず、また `/` メニューで埋もれるかどうかを決めるのは名前空間ではなく
-Skill 名の部分だからである。ただし配布先に何が入っているかはチェック時点で分からないため、
+Skill 名の部分だからである。ただし配布先に何が入っているかは検査時点で分からないため、
 **一覧は手で更新する best-effort** であり網羅ではない。新しい Skill を足すときは、実際に
 `/` メニューで名前を打って確認する。
 
@@ -242,10 +242,10 @@ Skill 名の部分だからである。ただし配布先に何が入ってい�
 1. 機能が重複しているなら Skill 自体を統合する
 2. 機能が異なるなら、区別できるところまでトリガ語を具体化する
 
-### チェックできるのは NDF 内の重複だけ
+### 検査できるのは NDF 内の重複だけ
 
-`scripts/check-skill-frontmatter.py` の重複チェックは NDF の Skill 同士しか見ない。
-**ランタイム組み込みの Skill や他プラグインとの競合はチェックできない。** 配布先の環境に
+`scripts/check-skill-frontmatter.py` の重複検査は NDF の Skill 同士しか見ない。
+**ランタイム組み込みの Skill や他プラグインとの競合は検査できない。** 配布先の環境に
 何が入っているかに依存するためである。
 
 実例: 旧 `review`（現 `pr-review`）は `disable-model-invocation` を外して自動発動できる
@@ -319,7 +319,7 @@ python3 scripts/check-skill-frontmatter.py --calibrate
 ```
 
 `claude -p "/context"` を実行し、**Skill 名が一致するものだけ**で実測トークンと文字数計測を
-突き合わせて比を求め、`scripts/skill-listing-calibration.json` に保存する。以後のチェックは
+突き合わせて比を求め、`scripts/skill-listing-calibration.json` に保存する。以後の検査は
 その値を使う。実測環境と本リポジトリで Skill の版や構成が違っても、名前が一致する分だけを
 使うので影響しない。較正していない環境では安全側の既定（2.5 文字/トークン）を使う。
 
@@ -383,11 +383,13 @@ Skill の一覧 7.4k は、他のプラグインと組み込みを含む全量�
 コンテキスト 1,000,000 は過去の実測の記録で、kiro-cli 2.20.1 では同じ手段（`--list-models`）を
 取れない。値を更新するときは、その時点で一覧を取れる手段から確かめ直す。
 **NDF は Kiro でも 1M コンテキストのモデルだけを対象とする**（`dev.kiro/install.sh` が導入時に
-この前提を出力する。モデルの一覧を取る手段が kiro-cli の版によって変わるため、機械でのチェックは
+この前提を出力する。モデルの一覧を取る手段が kiro-cli の版によって変わるため、機械での検査は
 置いていない）。
 
-起動時に読み込むコンテキスト量（Kiro が全 `SKILL.md` を読む合計）に**上限は置かない**。
-コンテキスト長が同じ Claude Code に上限を置かないため、Kiro だけを縛る根拠が無い。数は smoke test のログへ残るため、増え方は
+起動時に読み込む文脈量（Kiro が全 `SKILL.md` を読む合計）に**上限は置かない**。以前は
+`tests/runtime-smoke/assertions/assert-kiro-agent.sh` が 200,000 文字で落としていたが、その
+根拠は当時のモデルのコンテキスト長を前提にした余裕分だった。コンテキスト長が同じ Claude Code に
+同種の上限が無い以上、片方だけを縛る根拠が無い。数は smoke test のログへ残るため、増え方は
 後から追える。
 
 **コンテキストが最も長い Claude Code ではなく、Codex が全体の制約になる。** 比率が 2 倍でも
@@ -481,14 +483,14 @@ AI が自分の判断で別のものへ振り替える。**振り替えた事実
 `out-of-scope` の起票先の解決は利用者のリポジトリで動くが、`marketplace.json` を見る箇所が
 指しているのは NDF の clone であって対象リポジトリではない。これは適用外である。
 
-機械のチェックは `scripts/check-skill-repo-assumptions.py` が行う。除外はファイルと理由の対で
-同スクリプトが宣言し、**宣言した対象が走査の範囲に実在しないときはチェック自体が失敗する**。
-検知するのは語の有無だけで、書き方が正しいかは判定しない。配布するスクリプト（`scripts/`）には別の語の表を掛ける。
+機械の検査は `scripts/check-skill-repo-assumptions.py` が行う。除外はファイルと理由の対で
+同スクリプトが宣言し、**宣言した対象が走査の範囲に実在しないときは検査自体が失敗する**。
+検知するのは語の有無だけで、書き方が正しいかは判定しない。
 
 **除外のファイルは `--skills-dir` に渡すのと同じ書き方（plugin family を含むパス）で書く。**
-`--skills-dir` は family を 1 つだけ指定でき、実在のチェックは**指定した family に属する宣言
+`--skills-dir` は family を 1 つだけ指定でき、実在の検査は**指定した family に属する宣言
 だけ**へ掛かる。Skill ディレクトリからの相対パスで書くと、どの family の宣言かが判別できず、
-指定しなかった family の宣言まで「実在しない」と読んでチェックを落とす。
+指定しなかった family の宣言まで「実在しない」と読んで検査を落とす。
 
 ## 参照
 

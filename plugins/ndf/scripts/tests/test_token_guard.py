@@ -1,47 +1,38 @@
 """待ちの hook と文脈量の hook（#829 / #830）。
 
-hook の 1 本のエントリポイント（`hook.py` の token-guard。#1142 の決定 20）は Claude Code の PreToolUse で動き、3 つを判定する。
+`token-guard.sh` は Claude Code の PreToolUse で動き、3 つを判定する。
 
 - 前景の `sleep` で待つ Bash（ループの本体にあるか、秒数が上限を超える）
 - 変わらないファイルの同じ範囲を続けて読み直す Read
-- 文脈が上限を超えた conductor が工程へ入る起動（工程 Skill・フェーズの supervisor）
+- 文脈が上限を超えた conductor が工程へ入る起動（工程 Skill・持ち場の supervisor）
 
 **判定が失敗してもツールを止めない。** 拒否は `permissionDecision: deny` で返し、終了コードは
 常に 0 にする。
 """
-
 from __future__ import annotations
 
 import json
 import os
 import pathlib
+import shutil
 import subprocess
-import sys
 import threading
 
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-SCRIPT = ROOT / "scripts" / "hook.py"
+SCRIPT = ROOT / "scripts" / "token-guard.sh"
 STAGES = ROOT / "scripts" / "lib" / "token-guard-stages.txt"
 WF_DOCS = ROOT / "skills" / "development-workflow"
 HOOKS = ROOT / "hooks" / "claude.json"
 MANIFESTS = ROOT / "manifests"
 
 STAGE_SKILLS = {
-    "implementation-plan",
-    "document-drafting",
-    "cross-refactoring",
-    "cross-review",
-    "pr-review",
-    "quality-gates",
-    "plan-to-spec",
-    "merged",
-    "layout-review",
-    "release-verification",
-    "retrospective",
-    "development-workflow",
-    "issue-plan-strategy",
+    "implementation-plan", "document-drafting",
+    "cross-refactoring", "cross-review", "pr-review", "quality-gates",
+    "plan-to-spec", "merged",
+    "layout-review", "release-verification", "retrospective",
+    "development-workflow", "issue-plan-strategy",
 }
 
 
@@ -52,11 +43,6 @@ def state(tmp_path, monkeypatch):
     return base
 
 
-# 並列の試験では、ロックの待ちの上限を延ばす。既定の 1 秒では、負荷の高い runner で
-# 待ちが上限を超えて 1 回分が数えられず、試験がときどき落ちる（#950）。
-PARALLEL_ENV = {"NDF_TOKEN_GUARD_LOCK_WAIT": "10"}
-
-
 def run(payload, state_dir, env=None, raw=None):
     e = {k: v for k, v in os.environ.items() if not k.startswith("NDF_")}
     e.pop("CLAUDE_PLUGIN_DATA", None)
@@ -64,7 +50,8 @@ def run(payload, state_dir, env=None, raw=None):
     if env:
         e.update(env)
     data = raw if raw is not None else json.dumps(payload)
-    return subprocess.run([sys.executable, str(SCRIPT), "token-guard"], input=data, capture_output=True, text=True, env=e, timeout=20)
+    return subprocess.run(["bash", str(SCRIPT)], input=data, capture_output=True,
+                          text=True, env=e, timeout=20)
 
 
 def denied(proc):
@@ -128,7 +115,7 @@ DENY_SLEEP = [
 ]
 
 ALLOW_SLEEP = [
-    'while read l; do echo "$l"; done < f; sleep 1',
+    "while read l; do echo \"$l\"; done < f; sleep 1",
     "python3 -m http.server & sleep 2",
     "for p in 1 2; do gh api x; sleep 1; done",
     "for i in 1 2; do sleep 3; done",
@@ -214,7 +201,6 @@ def test_sleep_guard_env(state):
 
 
 # ---------------------------------------------------------------- 連続 Read（AC7）
-
 
 def read(path, session="s1", **extra):
     ti = {"file_path": str(path)}
@@ -316,7 +302,7 @@ def test_repeat_read_env(tmp_path, state):
 def test_parallel_reads_do_not_lose_updates(tmp_path, state):
     f = tmp_path / "out.txt"
     f.write_text("")
-    env = {"NDF_READ_REPEAT_LIMIT": "10", **PARALLEL_ENV}
+    env = {"NDF_READ_REPEAT_LIMIT": "10"}
     run(read(f), state, env)
     threads = [threading.Thread(target=run, args=(read(f), state, env)) for _ in range(2)]
     for t in threads:
@@ -329,24 +315,19 @@ def test_parallel_reads_do_not_lose_updates(tmp_path, state):
 
 # ---------------------------------------------------------------- 可用性（AC9）
 
-
 def test_broken_json_passes(state):
     p = run(None, state, raw="{not json")
     assert p.returncode == 0 and p.stdout == ""
 
 
-def test_without_hook_packages_passes(tmp_path, state):
-    """hook の環境の外部パッケージ（tree-sitter-bash ほか）を import できない python では、判定をせずに通す。"""
-    e = {k: v for k, v in os.environ.items() if not k.startswith("NDF_")}
-    e["CLAUDE_PLUGIN_DATA"] = str(state)
-    p = subprocess.run(
-        [sys.executable, "-S", str(SCRIPT), "token-guard"],
-        input=json.dumps(bash("sleep 30")),
-        capture_output=True,
-        text=True,
-        env=e,
-        timeout=20,
-    )
+def test_without_jq_passes(tmp_path, state):
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    for tool in ("bash", "cat", "tail", "stat", "mkdir", "date", "mv", "rm", "find", "python3"):
+        src = shutil.which(tool)
+        if src:
+            (bindir / tool).symlink_to(src)
+    p = run(bash("sleep 30"), state, {"PATH": str(bindir)})
     assert p.returncode == 0 and p.stdout == ""
 
 
@@ -355,7 +336,8 @@ def test_unwritable_state_skips_read_but_keeps_sleep(tmp_path):
     ro.mkdir()
     ro.chmod(0o500)
     try:
-        env = {"CLAUDE_PLUGIN_DATA": "", "XDG_STATE_HOME": str(ro), "HOME": str(ro), "TMPDIR": str(ro)}
+        env = {"CLAUDE_PLUGIN_DATA": "", "XDG_STATE_HOME": str(ro), "HOME": str(ro),
+               "TMPDIR": str(ro)}
         f = tmp_path / "x.txt"
         f.write_text("")
         for _ in range(4):
@@ -370,28 +352,25 @@ def test_lock_held_passes(tmp_path, state):
     f.write_text("")
     guards = state / "guards"
     guards.mkdir(parents=True)
-    import filelock
-
-    held = filelock.FileLock(str(guards / "s1.guard.lock"))
-    held.acquire()
-    try:
-        # 3 回目は排他を取れれば拒否される回数である（test_repeat_read_denied_on_third）。
-        # 1 回ごとに排他の上限（1 秒）を待つため、それを越えて回さない（#884）
-        for _ in range(3):
-            assert denied(run(read(f), state)) is None
-    finally:
-        held.release()
+    lock = guards / "s1.lock"
+    lock.mkdir()
+    (lock / "held").write_text("")
+    (lock / "pid").write_text(str(os.getpid()))
+    (lock / "token").write_text("t")
+    # 3 回目は排他を取れれば拒否される回数である（test_repeat_read_denied_on_third）。
+    # 1 回ごとに排他の上限（1 秒）を待つため、それを越えて回さない（#884）
+    for _ in range(3):
+        assert denied(run(read(f), state)) is None
 
 
-@pytest.mark.parametrize(
-    "env,expect",
-    [
-        ({"CLAUDE_PLUGIN_DATA": "{d}/pd"}, "{d}/pd/guards"),
-        ({"CLAUDE_PLUGIN_DATA": "", "XDG_STATE_HOME": "{d}/xdg"}, "{d}/xdg/ndf/guards"),
-        ({"CLAUDE_PLUGIN_DATA": "", "XDG_STATE_HOME": "", "HOME": "{d}/home"}, "{d}/home/.local/state/ndf/guards"),
-        ({"CLAUDE_PLUGIN_DATA": "", "XDG_STATE_HOME": "", "HOME": "", "TMPDIR": "{d}/tmp"}, "{d}/tmp/ndf-guards"),
-    ],
-)
+@pytest.mark.parametrize("env,expect", [
+    ({"CLAUDE_PLUGIN_DATA": "{d}/pd"}, "{d}/pd/guards"),
+    ({"CLAUDE_PLUGIN_DATA": "", "XDG_STATE_HOME": "{d}/xdg"}, "{d}/xdg/ndf/guards"),
+    ({"CLAUDE_PLUGIN_DATA": "", "XDG_STATE_HOME": "", "HOME": "{d}/home"},
+     "{d}/home/.local/state/ndf/guards"),
+    ({"CLAUDE_PLUGIN_DATA": "", "XDG_STATE_HOME": "", "HOME": "", "TMPDIR": "{d}/tmp"},
+     "{d}/tmp/ndf-guards"),
+])
 def test_guards_dir_follows_wf_state_dir(tmp_path, env, expect):
     env = {k: v.format(d=tmp_path) for k, v in env.items()}
     (tmp_path / "tmp").mkdir()
@@ -399,18 +378,16 @@ def test_guards_dir_follows_wf_state_dir(tmp_path, env, expect):
     f.write_text("")
     e = {k: v for k, v in os.environ.items() if not k.startswith("NDF_")}
     e.update(env)
-    subprocess.run(
-        [sys.executable, str(SCRIPT), "token-guard"], input=json.dumps(read(f)), text=True, capture_output=True, env=e, check=True
-    )
+    subprocess.run(["bash", str(SCRIPT)], input=json.dumps(read(f)), text=True,
+                   capture_output=True, env=e, check=True)
     assert (pathlib.Path(expect.format(d=tmp_path)) / "read-s1.json").is_file()
     wf = subprocess.run(
-        ["bash", "-c", f". '{WF_DOCS}/scripts/lib/workflow-common.sh'; wf_state_dir"], text=True, capture_output=True, env=e
-    ).stdout.strip()
+        ["bash", "-c", f". '{WF_DOCS}/scripts/lib/workflow-common.sh'; wf_state_dir"],
+        text=True, capture_output=True, env=e).stdout.strip()
     assert pathlib.Path(wf).parent == pathlib.Path(expect.format(d=tmp_path)).parent
 
 
 # ---------------------------------------------------------------- 文脈量（AC12〜AC16）
-
 
 def transcript(tmp_path, total, name="t.jsonl", usage=True):
     path = tmp_path / name
@@ -418,7 +395,8 @@ def transcript(tmp_path, total, name="t.jsonl", usage=True):
     lines = [{"type": "user", "message": {"content": "x"}}]
     msg = {"role": "assistant", "content": []}
     if usage:
-        msg["usage"] = {"input_tokens": 10, "cache_read_input_tokens": total - 110, "cache_creation_input_tokens": 100, "output_tokens": 5}
+        msg["usage"] = {"input_tokens": 10, "cache_read_input_tokens": total - 110,
+                        "cache_creation_input_tokens": 100, "output_tokens": 5}
     lines.append({"type": "assistant", "message": msg})
     lines.append({"type": "attachment"})
     path.write_text("\n".join(json.dumps(x) for x in lines) + "\n")
@@ -431,34 +409,25 @@ def transcript_multi(tmp_path, totals, name="t.jsonl"):
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = [{"type": "user", "message": {"content": "x"}}]
     for total in totals:
-        lines.append(
-            {
-                "type": "assistant",
-                "message": {
-                    "role": "assistant",
-                    "content": [],
-                    "usage": {
-                        "input_tokens": 10,
-                        "cache_read_input_tokens": total - 110,
-                        "cache_creation_input_tokens": 100,
-                        "output_tokens": 5,
-                    },
-                },
-            }
-        )
+        lines.append({"type": "assistant", "message": {
+            "role": "assistant", "content": [],
+            "usage": {"input_tokens": 10, "cache_read_input_tokens": total - 110,
+                      "cache_creation_input_tokens": 100, "output_tokens": 5}}})
     lines.append({"type": "attachment"})
     path.write_text("\n".join(json.dumps(x) for x in lines) + "\n")
     return path
 
 
 def skill(tp, name="ndf:implementation-plan", args="#829", session="s1", **extra):
-    p = {"tool_name": "Skill", "tool_input": {"skill": name, "args": args}, "session_id": session, "transcript_path": str(tp)}
+    p = {"tool_name": "Skill", "tool_input": {"skill": name, "args": args},
+         "session_id": session, "transcript_path": str(tp)}
     p.update(extra)
     return p
 
 
 def agent(tp, desc="設計: #829 #830", session="s1", tool="Agent", **extra):
-    p = {"tool_name": tool, "tool_input": {"description": desc, "prompt": "x"}, "session_id": session, "transcript_path": str(tp)}
+    p = {"tool_name": tool, "tool_input": {"description": desc, "prompt": "x"},
+         "session_id": session, "transcript_path": str(tp)}
     p.update(extra)
     return p
 
@@ -536,7 +505,8 @@ def test_context_subagent_passes(tmp_path, state):
 
 def test_context_non_stage_passes(tmp_path, state):
     tp = transcript(tmp_path, 250_000)
-    for name in ("ndf:markdown-writing", "ndf:worktree", "ndf:progress-tracking", "ndf:out-of-scope"):
+    for name in ("ndf:markdown-writing", "ndf:worktree", "ndf:progress-tracking",
+                 "ndf:out-of-scope"):
         assert denied(run(skill(tp, name=name), state)) is None, name
     assert denied(run(agent(tp, desc="調査: 既存の規約"), state)) is None
     assert denied(run(agent(tp, desc="何かの説明"), state)) is None
@@ -594,16 +564,13 @@ def test_context_date_is_not_issue_number(tmp_path, state):
     assert reason and "/ndf:development-workflow #844（" in reason
 
 
-@pytest.mark.parametrize(
-    "desc, expect",
-    [
-        ("設計: v10.16.1 のリリース #844", "#844（"),
-        ("設計: 2026-09-23 の作業 v10.16.1", "<課題番号>（"),
-        ("検査: #829-830", "#829 #830（"),
-        ("設計: 829-830 の作業", "#829 #830（"),
-        ("実装: 2026-09-23 に #829-830 を v10.16.1 へ", "#829 #830（"),
-    ],
-)
+@pytest.mark.parametrize("desc, expect", [
+    ("設計: v10.16.1 のリリース #844", "#844（"),
+    ("設計: 2026-09-23 の作業 v10.16.1", "<課題番号>（"),
+    ("検査: #829-830", "#829 #830（"),
+    ("設計: 829-830 の作業", "#829 #830（"),
+    ("実装: 2026-09-23 に #829-830 を v10.16.1 へ", "#829 #830（"),
+])
 def test_context_issue_extraction(tmp_path, state, desc, expect):
     # 版数・日付を課題番号と読まず、範囲は両端の番号として案内する
     tp = transcript(tmp_path, 250_000)
@@ -632,7 +599,7 @@ def test_context_parallel_second_call_passes_once(tmp_path, state):
     results = []
 
     def go():
-        results.append(denied(run(skill(tp), state, PARALLEL_ENV)))
+        results.append(denied(run(skill(tp), state)))
 
     threads = [threading.Thread(target=go) for _ in range(2)]
     for t in threads:
@@ -644,7 +611,6 @@ def test_context_parallel_second_call_passes_once(tmp_path, state):
 
 def test_context_large_transcript_is_fast(tmp_path, state):
     import time
-
     tp = tmp_path / "big.jsonl"
     line = json.dumps({"type": "user", "message": {"content": "y" * 1000}}) + "\n"
     with tp.open("w") as fh:
@@ -660,9 +626,9 @@ def test_context_large_transcript_is_fast(tmp_path, state):
 
 # ---------------------------------------------------------------- 一覧と登録（AC14 / AC24）
 
-
 def test_stage_list_matches_design():
-    names = {l.strip() for l in STAGES.read_text().splitlines() if l.strip() and not l.startswith("#")}
+    names = {l.strip() for l in STAGES.read_text().splitlines()
+             if l.strip() and not l.startswith("#")}
     assert names == STAGE_SKILLS
     listed = set()
     for m in MANIFESTS.glob("*-skills.txt"):
@@ -672,12 +638,12 @@ def test_stage_list_matches_design():
 
 def test_hook_registered_for_claude():
     hooks = json.loads(HOOKS.read_text())["hooks"]["PreToolUse"]
-    ours = [h for h in hooks if any("scripts/hook.py" in x["command"] for x in h["hooks"])]
+    ours = [h for h in hooks if any("token-guard.sh" in x["command"] for x in h["hooks"])]
     assert len(ours) == 1
-    assert {"Bash", "Read", "Skill", "Agent", "Task"} <= set(ours[0]["matcher"].split("|"))
+    assert set(ours[0]["matcher"].split("|")) == {"Bash", "Read", "Skill", "Agent", "Task"}
     entry = ours[0]["hooks"][0]
-    assert entry["continueOnError"] is True and entry["timeout"] == 10
-    assert "scripts/hook.py" in hooks[0]["hooks"][0]["command"]
+    assert entry["continueOnError"] is True and entry["timeout"] == 5
+    assert "worktree-guard.sh" in hooks[0]["hooks"][0]["command"]
 
 
 def test_hook_not_registered_for_other_runtimes():
@@ -696,14 +662,14 @@ def test_context_limit_default_matches_doc(tmp_path, state):
     assert denied(run(skill(tp2, session="s2"), state)) is None
 
 
-# ---------------------------------------------------------------- ラッパーの下の conductor（#895 AC23）
+# ---------------------------------------------------------------- 中継の下の conductor（#895 AC23）
 
 import fcntl  # noqa: E402
 
 
 @pytest.fixture()
 def relay_dir(tmp_path):
-    """動いているラッパーに見立てた作業ディレクトリ。このテストのプロセスをラッパーの直接の子に見立てる。
+    """動いている中継に見立てた作業ディレクトリ。このテストのプロセスを中継の直接の子に見立てる。
 
     hook（bash）→ relay.py is-child と起こされるので、親をたどって最初に当たるのは
     このテストのプロセスになる。
@@ -751,168 +717,3 @@ def test_context_reason_asks_for_ndf_next_block(tmp_path, state):
     tp = transcript(tmp_path, 250_000)
     reason = denied(run(skill(tp), state))
     assert "ndf-next" in reason
-
-
-# ---------------------------------------------------------------- ラッパーの下の告知（#980 AC6）
-
-
-RELAY_PY = ROOT / "scripts" / "relay.py"
-
-
-def notice_line(env):
-    e = {k: v for k, v in os.environ.items() if not k.startswith("NDF_")}
-    e.update(env)
-    out = subprocess.run([sys.executable, str(RELAY_PY), "notice"], capture_output=True, text=True, env=e, timeout=20).stdout.splitlines()
-    assert out[0] == "relay"
-    return out[1]
-
-
-@pytest.mark.parametrize("quiet", [None, "inf"])
-def test_context_under_relay_reason_carries_notice(tmp_path, state, relay_dir, quiet):
-    tp = transcript(tmp_path, 250_000)
-    env = {"NDF_RELAY_DIR": str(relay_dir)}
-    if quiet is not None:
-        env["NDF_RELAY_QUIET"] = quiet
-    first = denied(run(agent(tp), state, env))
-    second = denied(run(agent(tp), state, env))
-    assert first and second
-    line = notice_line(env)
-    assert line in first and line in second
-    assert "確認を挟まずに" in second
-    assert "ラッパーがそのブロックで次の区間を起動する" not in second
-
-
-def test_context_outside_relay_reason_has_no_notice(tmp_path, state):
-    tp = transcript(tmp_path, 250_000)
-    reason = denied(run(agent(tp), state))
-    assert "1 度だけ通る" in reason
-    assert "自動で新しい会話へ切り替わる" not in reason
-
-
-# ---------------------------------------------------------------- プランの起動（#1191）
-
-
-def plan_bash(tp, cmd, session="s1", **extra):
-    p = bash(cmd, **{k: v for k, v in extra.items() if k != "agent_id"})
-    p.update({"session_id": session, "transcript_path": str(tp)})
-    if "agent_id" in extra:
-        p["agent_id"] = extra["agent_id"]
-    return p
-
-
-QUEUE_CMD = "python3 /x/scripts/supervise.py queue --max 3 a.json b.json"
-
-
-@pytest.mark.parametrize(
-    "cmd",
-    [
-        QUEUE_CMD,
-        "python3 /x/scripts/supervise.py run plan.json --from 3",
-        "cd /w && python3 '/x/scripts/supervise.py' queue --max 2 a.json",
-        'X=1 nohup python3 "/x/scripts/supervise.py" run plan.json',
-        "python3 -u /x/scripts/supervise.py run plan.json",
-        "cat <<EOF > f\ndon't\nEOF\npython3 /x/scripts/supervise.py run plan.json",
-    ],
-)
-def test_context_over_limit_denies_plan_bash(tmp_path, state, cmd):
-    tp = transcript(tmp_path, 250_000)
-    reason = denied(run(plan_bash(tp, cmd), state))
-    assert reason and "250000" in reason
-    assert denied(run(plan_bash(tp, cmd, session="s2", run_in_background=True), state))
-
-
-@pytest.mark.parametrize(
-    "cmd",
-    [
-        "python3 /x/scripts/supervise.py wait /x/done",
-        "python3 /x/scripts/supervise.py new mission --name m --issue 1",
-        "python3 /x/scripts/supervise.py note r.md",
-        "python3 /x/scripts/supervise.py history import",
-        "echo queue",
-        "echo 'python3 /x/scripts/supervise.py queue a.json'",
-        "# python3 /x/scripts/supervise.py run plan.json",
-        "printf '%s\\n' 'supervise.py run を打つ'",
-        'git commit -m "docs: 中断の手順（supervise.py run --from）"',
-        'git commit -m "docs: (supervise.py run --from)"',
-        "gh pr create --body \"$(cat <<'EOF'\npython3 /x/scripts/supervise.py queue a.json\nEOF\n)\"",
-        "cat <<-EOF > f\n\tpython3 /x/scripts/supervise.py queue a.json\n\tEOF\necho ok",
-    ],
-)
-def test_context_over_limit_passes_other_bash(tmp_path, state, cmd):
-    tp = transcript(tmp_path, 250_000)
-    assert denied(run(plan_bash(tp, cmd, run_in_background=True), state)) is None
-
-
-def test_context_plan_bash_within_limit_or_subagent_passes(tmp_path, state):
-    assert denied(run(plan_bash(transcript(tmp_path, 150_000), QUEUE_CMD), state)) is None
-    tp = transcript(tmp_path, 250_000, name="big.jsonl")
-    assert denied(run(plan_bash(tp, QUEUE_CMD, agent_id="a1"), state)) is None
-
-
-def test_context_plan_bash_once_then_pass(tmp_path, state):
-    tp = transcript(tmp_path, 250_000)
-    assert denied(run(plan_bash(tp, QUEUE_CMD), state))
-    assert denied(run(plan_bash(tp, QUEUE_CMD), state)) is None
-
-
-def test_context_plan_bash_under_relay_keeps_denying(tmp_path, state, relay_dir):
-    tp = transcript(tmp_path, 250_000)
-    env = {"NDF_RELAY_DIR": str(relay_dir)}
-    assert denied(run(plan_bash(tp, QUEUE_CMD), state, env))
-    assert denied(run(plan_bash(tp, QUEUE_CMD), state, env))
-
-
-def test_plan_bash_still_checks_sleep(tmp_path, state):
-    tp = transcript(tmp_path, 150_000)
-    assert denied(run(plan_bash(tp, QUEUE_CMD + "; sleep 600"), state))
-
-
-# ---------------------------------------------------------------- Agent の supervisor への案内（#1191）
-
-
-def hint(proc):
-    assert proc.returncode == 0, proc.stderr
-    if not proc.stdout.strip():
-        return None
-    spec = json.loads(proc.stdout)["hookSpecificOutput"]
-    assert spec["hookEventName"] == "PreToolUse"
-    assert "permissionDecision" not in spec
-    return spec["additionalContext"]
-
-
-def repo(tmp_path, decl="supervise.json"):
-    root = tmp_path / "repo"
-    (root / "sub").mkdir(parents=True)
-    subprocess.run(["git", "init", "-q", str(root)], check=True)
-    if decl:
-        (root / ".ndf").mkdir()
-        (root / ".ndf" / decl).write_text("{}")
-    return root
-
-
-def sv_agent(tp, cwd, kind="ndf:supervisor", **extra):
-    p = agent(tp, desc="設計: #829", cwd=str(cwd), **extra)
-    p["tool_input"]["subagent_type"] = kind
-    return p
-
-
-@pytest.mark.parametrize("decl", ["supervise.json", "worktree.json"])
-@pytest.mark.parametrize("kind", ["ndf:supervisor", "ndf:supervisor-waits"])
-def test_supervisor_agent_gets_plan_hint(tmp_path, state, decl, kind):
-    tp = transcript(tmp_path, 1000)
-    text = hint(run(sv_agent(tp, repo(tmp_path, decl) / "sub", kind), state))
-    assert text and "supervise.py" in text
-
-
-def test_supervisor_agent_hint_conditions(tmp_path, state):
-    tp = transcript(tmp_path, 1000)
-    assert hint(run(sv_agent(tp, repo(tmp_path, None)), state)) is None
-    root = repo(tmp_path / "b")
-    assert hint(run(sv_agent(tp, root, kind="ndf:worker"), state)) is None
-    assert hint(run(sv_agent(tp, root, agent_id="a1"), state)) is None
-    assert hint(run(sv_agent(tp, root), state, {"NDF_PLAN_HINT": "0"})) is None
-
-
-def test_supervisor_agent_over_limit_is_still_denied(tmp_path, state):
-    tp = transcript(tmp_path, 250_000)
-    assert denied(run(sv_agent(tp, repo(tmp_path)), state))

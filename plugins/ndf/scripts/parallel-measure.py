@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """並列の本数と並行度を測る（#621）。
 
-進行側が担当（作業ツリー 1 つ分）を起動する前に**起動してよい本数**を出し、ミッションを
+進行側が担当（作業ツリー 1 つ分）を起動する前に**起動してよい本数**を出し、まとまりを
 閉じるときに**並行度**を出す。2 つとも読み取りだけを行い、ファイルへも GitHub へも
 書き込まない。
 
@@ -25,24 +25,16 @@
     capacity      0 測れた / 2 引数の誤り / 3 `--meminfo` を読めない
     concurrency   0 測れた / 1 `gh pr view` が失敗した / 2 引数の誤り
 """
-
 from __future__ import annotations
 
 import argparse
 import datetime as _dt
 import json
+import subprocess
 import sys
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 from typing import Optional
-
-sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
-import clock  # noqa: E402  時刻の読み取り（#1142 の L0）
-import deps  # noqa: E402  外部パッケージの環境（#1142 の決定 17）
-
-deps.require("procs")  # cgroup の位置と使用量は procs（psutil の包み）が読む
-import procs  # noqa: E402
-import gh_parts  # noqa: E402  GitHub の読み取り（#1142 の L0）
 
 # --- 既定値（ここだけが持つ） -----------------------------------------------
 # 予備: 進行側の claude 本体（約 470MiB）と、同じ VM に常駐する他のプロセスの揺れ。
@@ -57,6 +49,8 @@ DEFAULT_MAX_LANES = 3
 DEFAULT_SWAP_FREE_MIN_PCT = 25
 
 DEFAULT_MEMINFO = "/proc/meminfo"
+DEFAULT_CGROUP_DIR = "/sys/fs/cgroup"
+DEFAULT_PROC_CGROUP = "/proc/self/cgroup"
 GH_JSON_FIELDS = "number,createdAt,mergedAt,closedAt"
 
 UNKNOWN = "unknown"
@@ -81,14 +75,13 @@ def non_negative_int(value: str) -> int:
     return parsed
 
 
-def emit_pairs(pairs: list[tuple[str, object]]) -> None:
+def emit(pairs: list[tuple[str, object]]) -> None:
     """`キー=値` を 1 行ずつ、渡された順に出す。"""
     for key, value in pairs:
         print(f"{key}={value}")
 
 
 # --- capacity ---------------------------------------------------------------
-
 
 def read_meminfo(path: Path) -> dict[str, int]:
     """`/proc/meminfo` を kB の辞書として読む。`MemAvailable` が無ければ測れない。"""
@@ -111,8 +104,9 @@ def read_meminfo(path: Path) -> dict[str, int]:
     return values
 
 
-def resolve_cgroup_dir(given: Optional[str], *, root: Optional[Path] = None, proc_cgroup: Optional[Path] = None) -> Path:
-    """`--cgroup-dir` が無いときだけ、自分の cgroup の位置を導く（`procs.cgroup_dir`）。
+def resolve_cgroup_dir(given: Optional[str], *, root: Optional[Path] = None,
+                       proc_cgroup: Optional[Path] = None) -> Path:
+    """`--cgroup-dir` が無いときだけ、自分の cgroup の位置を導く。
 
     コンテナの中では `/sys/fs/cgroup` がそのまま自分の cgroup だが、ホストでは
     `/proc/self/cgroup` の `0::<path>` が指す下にある。
@@ -121,32 +115,60 @@ def resolve_cgroup_dir(given: Optional[str], *, root: Optional[Path] = None, pro
     `CFTYPE_NOT_ON_ROOT` で置くため、cgroup v2 の根には `memory.events` が無い。
     あるということは、その位置がすでに根ではない＝自分の cgroup である。
 
-    `root` と `proc_cgroup` はチェックのための差し替え口で、既定は `procs` の 2 つの定数である。
+    `root` と `proc_cgroup` は検査のための差し替え口で、既定は上の 2 つの定数である。
     """
     if given is not None:
         return Path(given)
-    return procs.cgroup_dir(
-        procs.CGROUP_ROOT if root is None else Path(root), procs.PROC_SELF_CGROUP if proc_cgroup is None else Path(proc_cgroup)
-    )
+    root = Path(DEFAULT_CGROUP_DIR) if root is None else Path(root)
+    proc_cgroup = Path(DEFAULT_PROC_CGROUP) if proc_cgroup is None else Path(proc_cgroup)
+    if (root / "memory.events").exists():
+        return root
+    try:
+        for line in proc_cgroup.read_text(encoding="utf-8").splitlines():
+            if line.startswith("0::"):
+                relative = line[3:].strip().lstrip("/")
+                if relative:
+                    return root / relative
+    except OSError:
+        pass
+    return root
 
 
 def read_oom_kill(cgroup_dir: Path) -> object:
     """`memory.events` の `oom_kill`。読めなければ `unknown` で続ける。"""
-    oom = procs.cgroup_memory(cgroup_dir).oom_kill
-    return UNKNOWN if oom is None else oom
+    try:
+        text = (cgroup_dir / "memory.events").read_text(encoding="utf-8")
+    except OSError:
+        return UNKNOWN
+    for line in text.splitlines():
+        fields = line.split()
+        # `max 0` の行もあるため、キーの一致で選ぶ。
+        if len(fields) == 2 and fields[0] == "oom_kill":
+            try:
+                return int(fields[1])
+            except ValueError:
+                return UNKNOWN
+    return UNKNOWN
 
 
 def read_cgroup_available_mib(cgroup_dir: Path) -> object:
     """cgroup の残り。上限が無ければ `max`、読めなければ `unknown`。"""
-    mem = procs.cgroup_memory(cgroup_dir)
-    if mem.unlimited:
-        return NO_LIMIT
-    if mem.limit is None or mem.current is None:
+    try:
+        limit = (cgroup_dir / "memory.max").read_text(encoding="utf-8").strip()
+    except OSError:
         return UNKNOWN
-    return max(0, (mem.limit - mem.current) // (1024 * 1024))
+    if limit == NO_LIMIT:
+        return NO_LIMIT
+    try:
+        limit_bytes = int(limit)
+        current = int((cgroup_dir / "memory.current").read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return UNKNOWN
+    return max(0, (limit_bytes - current) // (1024 * 1024))
 
 
-def lanes_by_memory(available_mib: int, running: int, reserve_mib: int, per_lane_mib: int) -> int:
+def lanes_by_memory(available_mib: int, running: int, reserve_mib: int,
+                    per_lane_mib: int) -> int:
     """空きから導いた総本数。
 
     空きは動いている担当の使用量を引いた後の値なので、割った値は**追加できる本数**である。
@@ -177,7 +199,8 @@ def run_capacity(args: argparse.Namespace) -> int:
     if isinstance(cgroup_available, int):
         budget_mib = min(budget_mib, cgroup_available)
 
-    by_memory = lanes_by_memory(budget_mib, args.running, args.reserve_mib, args.per_lane_mib)
+    by_memory = lanes_by_memory(budget_mib, args.running, args.reserve_mib,
+                                args.per_lane_mib)
     allowed = min(args.max_lanes, by_memory)
     limited_by: list[str] = []
     if by_memory <= args.max_lanes:
@@ -201,34 +224,34 @@ def run_capacity(args: argparse.Namespace) -> int:
             allowed = 1
             limited_by.append("floor")
 
-    emit_pairs(
-        [
-            ("mem_available_mib", mem_available_mib),
-            ("swap_total_mib", swap_total_mib),
-            ("swap_free_mib", swap_free_mib),
-            ("cgroup_available_mib", cgroup_available),
-            ("oom_kill", oom_kill),
-            ("oom_kill_increased", oom_kill_increased),
-            ("running", args.running),
-            ("by_memory", by_memory),
-            ("allowed", allowed),
-            ("limited_by", ",".join(limited_by)),
-        ]
-    )
+    emit([
+        ("mem_available_mib", mem_available_mib),
+        ("swap_total_mib", swap_total_mib),
+        ("swap_free_mib", swap_free_mib),
+        ("cgroup_available_mib", cgroup_available),
+        ("oom_kill", oom_kill),
+        ("oom_kill_increased", oom_kill_increased),
+        ("running", args.running),
+        ("by_memory", by_memory),
+        ("allowed", allowed),
+        ("limited_by", ",".join(limited_by)),
+    ])
     return 0
 
 
 # --- concurrency ------------------------------------------------------------
-
 
 def parse_time(value: object, *, what: str) -> _dt.datetime:
     if not isinstance(value, str):
         # `--input` の JSON は数値も真偽も配列も持てる。素通しすると `value.strip()`
         # が `AttributeError` を出し、`gh pr view` の失敗と同じ終了コード 1 で落ちる。
         raise Usage(f"{what} が文字列ではない: {value!r}")
-    parsed = clock.parse(value, naive="utc")
-    if parsed is None:
+    try:
+        parsed = _dt.datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
         raise Usage(f"{what} が ISO8601 ではない: {value}")
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=_dt.timezone.utc)
     return parsed.astimezone(_dt.timezone.utc)
 
 
@@ -240,18 +263,25 @@ def fetch_pull_requests(numbers: list[int], repo: Optional[str]) -> list[dict]:
     """`gh pr view` で読むだけ。書き込む副コマンドは呼ばない。"""
     records = []
     for number in numbers:
-        # 起動できない（`gh` が無い）のも `gh pr view` の失敗である。空の配列を返すと
-        # `measure_spans` の `min()` が空列で落ちるため、ここで終了コード 1 にする。
-        r = gh_parts.view_json("pr", number, GH_JSON_FIELDS, repo)
-        if r.returncode != 0:
-            print(f"gh pr view {number} が失敗した: {r.stderr.strip()}", file=sys.stderr)
+        command = ["gh", "pr", "view", str(number), "--json", GH_JSON_FIELDS]
+        if repo:
+            command += ["--repo", repo]
+        try:
+            proc = subprocess.run(command, capture_output=True, text=True)
+        except OSError as exc:
+            # 起動できないのも `gh pr view` の失敗である。空の配列を返すと
+            # `measure` の `min()` が空列で落ちるため、ここで終了コード 1 にする。
+            print(f"gh を実行できない: {exc}", file=sys.stderr)
             raise SystemExit(1)
-        records.append(json.loads(r.stdout))
+        if proc.returncode != 0:
+            print(f"gh pr view {number} が失敗した: {proc.stderr.strip()}", file=sys.stderr)
+            raise SystemExit(1)
+        records.append(json.loads(proc.stdout))
     return records
 
 
 def intervals(records: list[dict], now: _dt.datetime) -> list[tuple[_dt.datetime, _dt.datetime]]:
-    """期間は `createdAt` から、`mergedAt`・`closedAt`・`--now` の最初に値のあるものまで。"""
+    """区間は `createdAt` から、`mergedAt`・`closedAt`・`--now` の最初に値のあるものまで。"""
     spans = []
     for record in records:
         created = record.get("createdAt")
@@ -269,11 +299,11 @@ def intervals(records: list[dict], now: _dt.datetime) -> list[tuple[_dt.datetime
 
 
 def build_events(
-    spans: list[tuple[_dt.datetime, _dt.datetime]],
+        spans: list[tuple[_dt.datetime, _dt.datetime]],
 ) -> list[tuple[_dt.datetime, int]]:
-    """期間を開始と終了の事象列に変換する。
+    """区間を開始と終了の事象列に変換する。
 
-    同じ時刻に閉じる期間と開く期間は重ならない。閉じるほうを先に数えるため、
+    同じ時刻に閉じる区間と開く区間は重ならない。閉じるほうを先に数えるため、
     事象の並びで終わり（−1）を始まり（+1）より前に置く。
     """
     events: list[tuple[_dt.datetime, int]] = []
@@ -300,16 +330,17 @@ def scan_events(events: list[tuple[_dt.datetime, int]]) -> tuple[int, float]:
 
 
 def summarize_measurement(
-    spans: list[tuple[_dt.datetime, _dt.datetime]],
-    max_open: int,
-    overlap_seconds: float,
+        spans: list[tuple[_dt.datetime, _dt.datetime]],
+        max_open: int,
+        overlap_seconds: float,
 ) -> dict[str, object]:
-    """期間と走査結果を表示用の集計値に整形する。"""
+    """区間と走査結果を表示用の集計値に整形する。"""
     start = min(span[0] for span in spans)
     end = max(span[1] for span in spans)
     span_seconds = (end - start).total_seconds()
     if span_seconds > 0:
-        pct = (Decimal(overlap_seconds) / Decimal(span_seconds) * 100).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
+        pct = (Decimal(overlap_seconds) / Decimal(span_seconds) * 100).quantize(
+            Decimal("0.1"), rounding=ROUND_HALF_UP)
     else:
         pct = Decimal("0.0")
     return {
@@ -322,15 +353,15 @@ def summarize_measurement(
     }
 
 
-def measure_spans(spans: list[tuple[_dt.datetime, _dt.datetime]]) -> dict[str, object]:
-    """期間を並行度の集計値へ変換する。"""
+def measure(spans: list[tuple[_dt.datetime, _dt.datetime]]) -> dict[str, object]:
+    """区間を並行度の集計値へ変換する。"""
     events = build_events(spans)
     max_open, overlap_seconds = scan_events(events)
     return summarize_measurement(spans, max_open, overlap_seconds)
 
 
 def run_concurrency(args: argparse.Namespace) -> int:
-    now = parse_time(args.now, what="--now") if args.now else clock.now(utc=True)
+    now = parse_time(args.now, what="--now") if args.now else _dt.datetime.now(_dt.timezone.utc)
     if args.input:
         try:
             records = json.loads(Path(args.input).read_text(encoding="utf-8"))
@@ -349,34 +380,41 @@ def run_concurrency(args: argparse.Namespace) -> int:
             raise Usage("Pull Request の番号を 1 つ以上渡す")
         records = fetch_pull_requests(args.numbers, args.repo)
 
-    measured = measure_spans(intervals(records, now))
-    emit_pairs([("prs", len(records))] + list(measured.items()))
+    measured = measure(intervals(records, now))
+    emit([("prs", len(records))] + list(measured.items()))
     return 0
 
 
 # --- 入口 -------------------------------------------------------------------
 
-
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="parallel-measure.py", description="並列の本数と並行度を測る（#621）")
+    parser = argparse.ArgumentParser(
+        prog="parallel-measure.py", description="並列の本数と並行度を測る（#621）")
     sub = parser.add_subparsers(dest="command", required=True)
 
     cap = sub.add_parser("capacity", help="起動してよい本数を出す")
-    cap.add_argument("--running", type=non_negative_int, default=0, help="いま動いている担当（作業ツリー 1 つ分）の数")
-    cap.add_argument("--oom-baseline", type=non_negative_int, default=None, help="実行計画に控えた oom_kill の起点")
+    cap.add_argument("--running", type=non_negative_int, default=0,
+                     help="いま動いている担当（作業ツリー 1 つ分）の数")
+    cap.add_argument("--oom-baseline", type=non_negative_int, default=None,
+                     help="実行計画に控えた oom_kill の起点")
     cap.add_argument("--reserve-mib", type=non_negative_int, default=DEFAULT_RESERVE_MIB)
     cap.add_argument("--per-lane-mib", type=non_negative_int, default=DEFAULT_PER_LANE_MIB)
-    cap.add_argument("--max", dest="max_lanes", type=non_negative_int, default=DEFAULT_MAX_LANES)
-    cap.add_argument("--swap-free-min-pct", type=non_negative_int, default=DEFAULT_SWAP_FREE_MIN_PCT)
+    cap.add_argument("--max", dest="max_lanes", type=non_negative_int,
+                     default=DEFAULT_MAX_LANES)
+    cap.add_argument("--swap-free-min-pct", type=non_negative_int,
+                     default=DEFAULT_SWAP_FREE_MIN_PCT)
     cap.add_argument("--meminfo", default=DEFAULT_MEMINFO)
     cap.add_argument("--cgroup-dir", default=None)
     cap.set_defaults(handler=run_capacity)
 
     con = sub.add_parser("concurrency", help="並行度と最大同時本数を出す")
-    con.add_argument("numbers", nargs="*", type=non_negative_int, help="対象の Pull Request の番号")
+    con.add_argument("numbers", nargs="*", type=non_negative_int,
+                     help="対象の Pull Request の番号")
     con.add_argument("--repo", default=None)
-    con.add_argument("--input", default=None, help="gh を呼ばず、番号と時刻の JSON を読む")
-    con.add_argument("--now", default=None, help="開いたままの Pull Request の期間の終わり")
+    con.add_argument("--input", default=None,
+                     help="gh を呼ばず、番号と時刻の JSON を読む")
+    con.add_argument("--now", default=None,
+                     help="開いたままの Pull Request の区間の終わり")
     con.set_defaults(handler=run_concurrency)
     return parser
 

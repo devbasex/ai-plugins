@@ -7,13 +7,12 @@
 
 **記載を消したときも落ちる。** 位置を決める語が見つからなければ、読み取れないこととして
 失敗させる（`scripts/check-doc-staleness.py` と同じ扱い）。読み取りの関数を文字列に対して
-呼べる形にしてあるのは、記載を取り除いた文字列で落ちることを同じチェックで確かめるためである。
+呼べる形にしてあるのは、記載を取り除いた文字列で落ちることを同じ検査で確かめるためである。
 
-`bash` だけは外部コマンドを使う。雛形は構文のチェックだけでなく、実際に実行して抜けた理由を
+`bash` だけは外部コマンドを使う。雛形は構文の検査だけでなく、実際に実行して抜けた理由を
 確かめる（#295 の指摘）。リポジトリの根の `conftest.py` の必須コマンドの一覧はこの Skill の
 担当の境界の外にあるため、見つからないことをこのファイルの中で失敗として扱う。
 """
-
 from __future__ import annotations
 
 import os
@@ -44,9 +43,9 @@ LIMIT_SECTION = COMPLETION_SECTIONS[2]
 
 FORM_INDEX = "## 形ごとのファイル"
 
-# #554 が退避の手順へ指示書のチェックを足した分（4 行。**詳細は
+# #554 が退避の手順へ指示書の検査を足した分（4 行。**詳細は
 # `references/instruction-files.md` が持ち、本文には呼び出しと参照への案内だけを置く**）と、
-# #623 が足した「配布の記録」（別の実行の終わりの工程が読むブロック）と「ミッションを閉じる」を
+# #623 が足した「配布の記録」（別の実行の終わりの工程が読むブロック）と「まとまりを閉じる」を
 # 含む。300 → 320 のときと同じく実測（353 行）へ余地を足して上げる。
 SKILL_MD_MAX_LINES = 365
 
@@ -56,7 +55,7 @@ def read(path: Path) -> str:
 
 
 def section(body: str, heading: str) -> str:
-    """見出しから、同じか浅い深さの次の見出しまでを返す。\n\n    囲みの中の行は見出しとして数えない。出力物の雛形は Markdown の見出しを含む。\n"""
+    """見出しから、同じか浅い深さの次の見出しまでを返す。\n\n    囲みの中の行は見出しとして数えない。出力物の雛形は Markdown の見出しを含む。\n    """
     depth = len(heading) - len(heading.lstrip("#"))
     lines = body.splitlines()
     try:
@@ -97,6 +96,7 @@ def fenced_blocks(body: str, language: str) -> list[str]:
     return blocks
 
 
+
 def link_targets(body: str) -> list[str]:
     return re.findall(r"\[[^\]]+\]\(([^)]+)\)", body)
 
@@ -110,9 +110,12 @@ def test_the_form_index_links_to_every_form_file() -> None:
     実ファイルが増えても表へ足し忘れると、`SKILL.md` から辿れる先はそのままである。
     ファイルの有無ではなく、**索引から辿り着けるか**を見る。形の数は固定しない。
     """
-    listed = [target for target in link_targets(section(read(DISTRIBUTION_FORMS), FORM_INDEX)) if target.startswith("form-")]
+    listed = [
+        target
+        for target in link_targets(section(read(DISTRIBUTION_FORMS), FORM_INDEX))
+        if target.startswith("form-")
+    ]
     assert sorted(listed) == sorted(p.name for p in REFERENCES.glob("form-*.md"))
-
 
 # --- 条件 3: 形をまたぐ決まり ------------------------------------------------------
 
@@ -164,7 +167,9 @@ def test_the_template_is_valid_bash() -> None:
     with tempfile.NamedTemporaryFile("w", suffix=".sh", encoding="utf-8") as handle:
         handle.write(template())
         handle.flush()
-        done = subprocess.run([bash_path(), "-n", handle.name], capture_output=True, text=True)
+        done = subprocess.run(
+            [bash_path(), "-n", handle.name], capture_output=True, text=True
+        )
     assert done.returncode == 0, done.stderr
 
 
@@ -201,7 +206,9 @@ def test_the_template_leaves_on_the_limit_word() -> None:
     ],
     ids=["limit", "done-over-fail-and-time", "done-regardless-of-log-order", "fail-over-time"],
 )
-def test_the_template_chooses_by_priority_when_conditions_coincide(log_body: str, overrides: dict[str, str], reason: str) -> None:
+def test_the_template_chooses_by_priority_when_conditions_coincide(
+    log_body: str, overrides: dict[str, str], reason: str
+) -> None:
     """複数の条件が同時に成立したときの選択を固定する（done > fail > idle > limit）。
 
     既存の idle ケース（`test_the_word_is_matched_as_a_fixed_string`）と合わせて優先順位を
@@ -260,15 +267,12 @@ def test_section_keeps_fenced_headings_and_stops_at_the_next_section() -> None:
 """
     result = section(body, "## 最初の節")
 
-    assert (
-        result
-        == """本文。
+    assert result == """本文。
 ```markdown
 ## 囲みの中の見出し
 雛形の本文。
 ```
 囲みの外の続き。"""
-    )
 
 
 def test_a_missing_section_is_not_passed_over() -> None:

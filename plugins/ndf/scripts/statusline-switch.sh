@@ -11,13 +11,10 @@
 set -euo pipefail
 
 CMD="${1:-status}"
-# settings.json は Claude Code と同じく CLAUDE_CONFIG_DIR（無ければ ~/.claude）の下を読み書きする。
-# statusline の本体は settings.json の command が ~ 起点で指すため ~/.claude に置く。
-CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-SETTINGS="$CONFIG_DIR/settings.json"
+SETTINGS="$HOME/.claude/settings.json"
 TARGET="$HOME/.claude/ndf-statusline.sh"
-BACKUP="$CONFIG_DIR/.ndf-statusline-backup.json"
-LOCK="$CONFIG_DIR/.ndf-statusline.lock"
+BACKUP="$HOME/.claude/.ndf-statusline-backup.json"
+LOCK="$HOME/.claude/.ndf-statusline.lock"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC="$SCRIPT_DIR/statusline.sh"
 NDF_COMMAND="bash ~/.claude/ndf-statusline.sh"
@@ -30,7 +27,7 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 0
 fi
 
-mkdir -p "$HOME/.claude" "$CONFIG_DIR"
+mkdir -p "$HOME/.claude"
 if [ ! -f "$SETTINGS" ]; then
   echo "{}" > "$SETTINGS"
 fi
@@ -66,7 +63,6 @@ current_script_path() {
   # 1つ目の置換がマッチしたら t で分岐して二重出力を防ぐ (tail -n1 のパイプを削減)。
   path="$(printf '%s\n' "$cmd" | sed -n 's/.*[[:space:]]\([^[:space:]]*\.sh\).*/\1/p; t; s/^\([^[:space:]]*\.sh\)$/\1/p')"
   [ -z "$path" ] && return 0
-  # shellcheck disable=SC2088  # 展開ではなく、文字どおりの ~ で始まる語と照らす（#1323）
   case "$path" in
     "~/"*) path="$HOME/${path#\~/}" ;;
     "~")   path="$HOME" ;;
@@ -156,7 +152,7 @@ cmd_ensure() {
     return 0
   fi
   set_ndf_statusline
-  echo "[ndf] statusLine を NDF 標準 statusline に設定しました (${SETTINGS})"
+  echo "[ndf] statusLine を NDF 標準 statusline に設定しました (~/.claude/settings.json)"
 }
 
 cmd_set() {

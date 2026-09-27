@@ -16,7 +16,7 @@ description: "Write a failing test first, then the smallest implementation that 
 | Skill | 参照している内容 | 未追加のあいだの代替 |
 | --- | --- | --- |
 | `requirements-design` | 受け入れ条件の作り方 | 受け入れ条件を「観測可能・一意・テスト可能」な 1 文へ自分で書き下す |
-| `refactoring` | リファクタリングと現状固定テスト | サイクル内の整理にとどめ、リファクタリングは別タスクへ切り出す |
+| `refactoring` | 構造改善と現状固定テスト | サイクル内の整理にとどめ、構造改善は別タスクへ切り出す |
 | `quality-gates` | 全体テストの実行とカバレッジ閾値の判定 | 対象プロジェクトのカバレッジツール設定に従い、設定がなければ測定値の記録だけ行う |
 
 ## 適用しない対象
@@ -63,11 +63,6 @@ cat Makefile 2>/dev/null | grep -n '^test'
 
 受け入れ条件 1 つに対してテスト 1 つを書く（条件の作り方は `requirements-design`※）。
 
-**設計文書のドメインモデルの節に不変条件の表があれば、不変条件 1 つにつきテストを 1 つ、受け入れ条件の
-テストより先に書く。** 表の行（`I1`…）を上から順に、その条件が破れる入力を与えて「破れたときの扱い」の
-とおりに振る舞うことを確かめる。テストの名前か docstring に不変条件の番号（`test_i1_...` など）を書き、
-設計のテスト設計の行と対応を追えるようにする。失敗の確かめ方（手順 2）は受け入れ条件のテストと同じである。
-
 ### 2. 失敗を証跡として確認する
 
 **テストを実行し、失敗を目で見る。** ここを飛ばすと、実は最初から通っていたテストや、
@@ -99,8 +94,6 @@ E   ImportError: cannot import name 'validate'   ← 期待と違う。先にこ
 - 「あとで要るはず」の抽象化（差異が 1 つしかない時点で戦略や生成の仕組みを入れない）
 - 依頼範囲外の整形・改名
 
-変える関数は、Serena が使えるときは `find_symbol`（`include_body`）で本体だけを読み、`replace_symbol_body` で書き換える。ファイルを丸ごと読まない。
-
 対象の外で不具合や不整合に気づいたときは、その場で `/ndf:out-of-scope` を起動して
 起票する。書かない判断だけをして先へ進むと、判断した理由が残らない。**起票先の
 リポジトリはその Skill が決める。** 開発中のリポジトリとは限らない。
@@ -108,7 +101,7 @@ E   ImportError: cannot import name 'validate'   ← 期待と違う。先にこ
 ### 4. 整理する
 
 テストを**通ったまま**保って構造を整える。整理中にテストが落ちたら、整理をいったん戻す。
-コードの兆候起点の本格的なリファクタリングは `refactoring`※ に委ねる。
+コードの兆候起点の本格的な構造改善は `refactoring`※ に委ねる。
 
 ### 5. 次の条件へ進む
 
@@ -161,5 +154,5 @@ E   ImportError: cannot import name 'validate'   ← 期待と違う。先にこ
 - [references/testing-levels.md](references/testing-levels.md) — 単体・結合・契約・端から端までの使い分け
 - `/ndf:out-of-scope` — 対象の外で見つけた課題の起票と、起票先のリポジトリの判断
 
-この工程に入ったら進捗記録 `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "実装"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「進捗記録」を使う）。
+この工程に入ったら記録のコマンド `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "実装"` を 1 行打つ（issue の本文と盤面の両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「記録のコマンド」を使う）。
 
