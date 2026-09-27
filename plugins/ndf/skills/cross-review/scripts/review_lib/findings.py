@@ -1,4 +1,5 @@
 """指摘の区分・統合の順位・引き継いだ指摘（#1142 の C2）。"""
+
 from __future__ import annotations
 
 from typing import Any
@@ -52,10 +53,7 @@ def _record_carried_over(st: dict[str, Any], repo: str, pr: int) -> bool:
         "thread_ids": ids,
         "fixed_in_round": None,
     }
-    review_lib.info(
-        f"⚠ 引き継いだ指摘が {len(ids)} 件残っています"
-        " — 修正の工程を 1 度通すまで収束させません"
-    )
+    review_lib.info(f"⚠ 引き継いだ指摘が {len(ids)} 件残っています — 修正の工程を 1 度通すまで収束させません")
     return True
 
 
@@ -86,11 +84,7 @@ def _verify_result(finding: dict[str, Any]) -> str:
 
 def _verdicts(finding: dict[str, Any], verdict: str) -> list[str]:
     """その値を返した担当の一覧。"""
-    return [
-        str(c.get("agent"))
-        for c in finding.get("critiques") or []
-        if c.get("verdict") == verdict
-    ]
+    return [str(c.get("agent")) for c in finding.get("critiques") or [] if c.get("verdict") == verdict]
 
 
 def _classify_finding(finding: dict[str, Any]) -> str:
@@ -145,19 +139,11 @@ def _apply_classification(finding: dict[str, Any]) -> str:
         return classification
     if _verify_result(finding) == "not_reproduced":
         command = (finding.get("verification") or {}).get("command") or ""
-        finding["rejection_reason"] = (
-            f"実行して再現しなかった（{command} が終了コード 0 を返した）"
-        )
+        finding["rejection_reason"] = f"実行して再現しなかった（{command} が終了コード 0 を返した）"
     else:
         agents = _verdicts(finding, "refute")
-        reasons = [
-            str(c.get("reason") or "")
-            for c in finding.get("critiques") or []
-            if c.get("verdict") == "refute"
-        ]
-        finding["rejection_reason"] = (
-            "refute: " + " / ".join(f"{a}: {r}" for a, r in zip(agents, reasons))
-        )
+        reasons = [str(c.get("reason") or "") for c in finding.get("critiques") or [] if c.get("verdict") == "refute"]
+        finding["rejection_reason"] = "refute: " + " / ".join(f"{a}: {r}" for a, r in zip(agents, reasons))
     return classification
 
 
@@ -186,15 +172,13 @@ def _absorb(rep: dict[str, Any], other: dict[str, Any]) -> None:
             rep["origin_runtimes"].append(agent)
 
     # 重要度は組の中で最も高いものを引き継ぐ。低い側を採ると、区分が下がる。
-    if _SEVERITY_RANK.get(str(other.get("severity")), -1) > \
-       _SEVERITY_RANK.get(str(rep.get("severity")), -1):
+    if _SEVERITY_RANK.get(str(other.get("severity")), -1) > _SEVERITY_RANK.get(str(rep.get("severity")), -1):
         rep["severity"] = other["severity"]
 
     # **実行の結果は組から選び直す。** `reproduced` > `not_reproduced` > `not_run` の
     # 順で採り、出所を残す。**実行し直さない**（2 段目は反証の後にあり、その時点では
     # 組の全員が `verification` を持っている）。
-    if _VERIFY_RANK.get(_verify_result(other), -1) > \
-       _VERIFY_RANK.get(_verify_result(rep), -1):
+    if _VERIFY_RANK.get(_verify_result(other), -1) > _VERIFY_RANK.get(_verify_result(rep), -1):
         rep["verification"] = other.get("verification")
 
     # **根拠の対は同じ要素から採る。** `evidence` だけの要素と `falsification` だけの

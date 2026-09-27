@@ -3,6 +3,7 @@
 worker が Skill を起動しない規則は、文面だけでなく定義で守らせる。Agent も外すのは、
 Skill だけを外した子が Agent で起こした孫は Skill を使えたためである（設計の表の H）。
 """
+
 from __future__ import annotations
 
 import json

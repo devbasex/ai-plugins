@@ -3,15 +3,15 @@
 conftest.py へ置くと、複数のテストを同時に実行したときに `conftest` というモジュール名が
 衝突する。直接 import する補助はこの固有名のモジュールへ置く。
 """
+
 from __future__ import annotations
 
 import subprocess
 from pathlib import Path
 
+
 def git(repo: Path, *args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["git", *args], cwd=str(repo), capture_output=True, text=True, check=True
-    )
+    return subprocess.run(["git", *args], cwd=str(repo), capture_output=True, text=True, check=True)
 
 
 def init_origin_repo(root: Path) -> Path:

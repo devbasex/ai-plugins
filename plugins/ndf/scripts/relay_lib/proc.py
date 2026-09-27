@@ -2,6 +2,7 @@
 
 プロセスの親と名前は、プロセスの包み `lib/procs.py`（psutil）で読む（決定 20）。
 """
+
 from __future__ import annotations
 
 import os

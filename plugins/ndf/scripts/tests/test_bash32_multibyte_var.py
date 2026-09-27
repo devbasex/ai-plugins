@@ -3,6 +3,7 @@
 bash 3.2 は `"（$X）"` の `）` のバイトまで変数名として読み、`set -u` の下で
 `X\\xef: unbound variable` で落ちる。`${X}` と書けば落ちない。shellcheck はこの形を検出しない。
 """
+
 import re
 import subprocess
 from pathlib import Path
@@ -14,9 +15,7 @@ PATTERN = re.compile(r"\$[A-Za-z_][A-Za-z0-9_]*(?=[^\x00-\x7f])")
 
 def bash_files():
     """plugins/ 以下の追跡されている .sh と、bash の shebang を持つファイル。"""
-    out = subprocess.run(
-        ["git", "ls-files", "-z", "--", str(PLUGINS)], cwd=REPO, capture_output=True, check=True
-    ).stdout
+    out = subprocess.run(["git", "ls-files", "-z", "--", str(PLUGINS)], cwd=REPO, capture_output=True, check=True).stdout
     for rel in filter(None, out.decode().split("\0")):
         p = REPO / rel
         if not p.is_file():

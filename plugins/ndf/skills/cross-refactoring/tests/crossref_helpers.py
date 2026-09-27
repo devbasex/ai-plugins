@@ -4,11 +4,13 @@ conftest.py へ置くと、複数の Skill のテストを同時に実行した�
 モジュール名が衝突し、別の Skill の conftest が解決されてしまう。直接 import する
 補助はこの固有名のモジュールへ置く。
 """
+
 from __future__ import annotations
 
 import datetime as _dt
 import json
 import pathlib
+import subprocess
 from typing import Any
 
 
@@ -30,8 +32,7 @@ def make_state(tmp_path: pathlib.Path, **overrides: Any) -> pathlib.Path:
         "base_branch": "main",
         "head_branch": "refactor/target",
         "worktree_root": str(tmp_path),
-        "worktrees": {"work": str(tmp_path / "work"),
-                      **{r: str(tmp_path / r) for r in runtimes}},
+        "worktrees": {"work": str(tmp_path / "work"), **{r: str(tmp_path / r) for r in runtimes}},
         "tmp_dir": str(tmp_dir),
         "target_scope": ["src"],
         "host": host,
@@ -43,8 +44,7 @@ def make_state(tmp_path: pathlib.Path, **overrides: Any) -> pathlib.Path:
         "max_fix_rounds": 3,
         "max_items_per_round": 5,
         "severity_threshold": "minor",
-        "baseline_test": {"command": "pytest -q", "status": "green",
-                          "checked_at": "2026-08-15T00:00:00"},
+        "baseline_test": {"command": "pytest -q", "status": "green", "checked_at": "2026-08-15T00:00:00"},
         "outer_round": 0,
         "phase": "init",
         "rounds": [],
@@ -108,8 +108,7 @@ def make_state_v2(tmp_path: pathlib.Path, work: pathlib.Path, **overrides: Any) 
         "ci_check": None,
         "workflow_step": True,
         "severity_threshold": "minor",
-        "baseline_test": {"command": "pytest -q tests", "status": "green",
-                          "checked_at": "2026-09-24T10:00:00", "seconds": 6.0},
+        "baseline_test": {"command": "pytest -q tests", "status": "green", "checked_at": "2026-09-24T10:00:00", "seconds": 6.0},
         "round_test": {"command": None, "status": "green", "checked_at": "2026-09-24T10:00:00"},
         "sync_command": None,
         "plan_mode": "none",
@@ -122,8 +121,7 @@ def make_state_v2(tmp_path: pathlib.Path, work: pathlib.Path, **overrides: Any) 
         "plan": None,
         "items": [],
         "deferred_items": [],
-        "whole_test": {"ran": False, "flags": [], "status": None, "seconds": None,
-                       "head": None, "reverted": False},
+        "whole_test": {"ran": False, "flags": [], "status": None, "seconds": None, "head": None, "reverted": False},
         "verify_stats": {"items": 0, "seconds": 0.0},
         "fix_stats": {"launches": 0, "seconds": 0.0},
         "final_gate": {"fix_rounds": 0, "checks": []},
@@ -143,7 +141,7 @@ def write_state(path: pathlib.Path, state: dict[str, Any]) -> None:
 
 # ---------- 版 2 の git を使う結合テストの土台（#933） ----------
 
-CALC = '''def add(a, b):
+CALC = """def add(a, b):
     return a + b
 
 
@@ -152,26 +150,24 @@ def total(values):
     for v in values:
         result = add(result, v)
     return result
-'''
+"""
 
-TEST_CALC = '''from src.calc import add
+TEST_CALC = """from src.calc import add
 
 
 def test_add():
     assert add(1, 2) == 3
-'''
+"""
 
-TEST_TOTAL = '''from src.calc import total
+TEST_TOTAL = """from src.calc import total
 
 
 def test_total():
     assert total([1, 2, 3]) == 6
-'''
+"""
 
 
 def git(*args: str, cwd: Any) -> "subprocess.CompletedProcess[str]":
-    import subprocess
-
     return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True)
 
 
@@ -186,8 +182,7 @@ def item_trailers(item_id: str) -> dict[str, str]:
     return {"Item-Id": item_id, "Impl-Runtime": "claude", "Impl-Model": "default"}
 
 
-def build_git_flow(tmp_path: pathlib.Path, monkeypatch: Any, patch_lib: Any,
-                   env_tmp_dir: Any, **state_overrides: Any) -> dict[str, Any]:
+def build_git_flow(tmp_path: pathlib.Path, monkeypatch: Any, patch_lib: Any, env_tmp_dir: Any, **state_overrides: Any) -> dict[str, Any]:
     """書き込み用の作業ディレクトリ・`pytest` の起動口・版 2 の状態を用意する。
 
     `pytest` は PATH の先頭に置いた起動口で走らせる（範囲テストはシェルを通さずに
@@ -212,16 +207,14 @@ def build_git_flow(tmp_path: pathlib.Path, monkeypatch: Any, patch_lib: Any,
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     runner = bin_dir / "pytest"
-    runner.write_text(
-        f"#!/bin/sh\nexec {sys.executable} -m pytest -p no:cacheprovider \"$@\"\n", encoding="utf-8")
+    runner.write_text(f'#!/bin/sh\nexec {sys.executable} -m pytest -p no:cacheprovider "$@"\n', encoding="utf-8")
     runner.chmod(0o755)
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
     metrics = tmp_path / "metrics"
     monkeypatch.setenv("NDF_METRICS_DIR", str(metrics))
 
     pushed: list[str] = []
-    patch_lib("push_head", lambda state: pushed.append(
-        git("rev-parse", "HEAD", cwd=state["worktrees"]["work"]).stdout.strip()))
+    patch_lib("push_head", lambda state: pushed.append(git("rev-parse", "HEAD", cwd=state["worktrees"]["work"]).stdout.strip()))
     path = make_state_v2(tmp_path, work, **state_overrides)
     env_tmp_dir(path)
     return {"work": work, "path": path, "pushed": pushed, "metrics": metrics}

@@ -5,6 +5,7 @@
 モデルは独立に選べる（kiro は claude 系も gpt 系も提供する）ため、ランタイムだけで
 まとめると、差がハーネス由来かモデル由来か切り分けられない。
 """
+
 from __future__ import annotations
 
 from typing import Any, Optional
@@ -16,15 +17,12 @@ COMPARISON_CAVEATS = [
     "改善項目の難易度が揃わない。輪番はラウンド単位なので、重い項目群を引いた"
     "ランタイムは不利になる。ラウンド数が少ないほど差は偶然に支配される",
     "提案と適用の相性がある。自分が提案した項目を自分が適用するラウンドでは有利になりうる",
-    "レビュー担当の厳しさは指標に直結する。指摘件数は「優秀」とも「過剰」とも読めるため、"
-    "指摘が修正に至った率と併せて見る",
-    "ハーネスとモデルが交絡する。ランタイムを跨いだ比較は、モデルを揃えない限り"
-    "「どちらのモデルが優秀か」の答えにならない",
+    "レビュー担当の厳しさは指標に直結する。指摘件数は「優秀」とも「過剰」とも読めるため、指摘が修正に至った率と併せて見る",
+    "ハーネスとモデルが交絡する。ランタイムを跨いだ比較は、モデルを揃えない限り「どちらのモデルが優秀か」の答えにならない",
     "kiro の既定 auto は比較に使えない。ラウンドごとに違うモデルが動きうる",
     "実際に動いたモデルを取得できるのは claude だけである。残る 3 者は指定値を"
     "信じて数えているので、CLI が別のモデルへ切り替えても気付けない",
-    "公平に比べたいなら、同じ対象・同じ範囲で --model だけ変えて複数回走らせる。"
-    "1 回の実行内での比較は参考値にとどまる",
+    "公平に比べたいなら、同じ対象・同じ範囲で --model だけ変えて複数回走らせる。1 回の実行内での比較は参考値にとどまる",
 ]
 
 
@@ -65,23 +63,17 @@ def aggregate(state: dict[str, Any]) -> dict[str, Any]:
         impl_runtime = entry.get("impl")
         if not impl_runtime:
             continue
-        impl_model = (entry.get("impl_model") or {})
+        impl_model = entry.get("impl_model") or {}
         requested = impl_model.get("requested")
         observed = impl_model.get("observed")
 
-        _append_model_measurement_warnings(
-            unmeasured, assumed, round_no, impl_runtime, requested, observed, "実装担当"
-        )
+        _append_model_measurement_warnings(unmeasured, assumed, round_no, impl_runtime, requested, observed, "実装担当")
 
         reviews = _round_reviews(entry)
         if _models.is_measurable(impl_runtime, requested):
-            _aggregate_impl_round(
-                impl, entry, items_by_id, impl_runtime, requested, reviews
-            )
+            _aggregate_impl_round(impl, entry, items_by_id, impl_runtime, requested, reviews)
 
-        _aggregate_round_reviewers(
-            reviewer, entry, round_no, reviews, unmeasured, assumed
-        )
+        _aggregate_round_reviewers(reviewer, entry, round_no, reviews, unmeasured, assumed)
 
     return {
         "impl": {k: _finish_impl(v) for k, v in sorted(impl.items())},
@@ -104,9 +96,7 @@ def _aggregate_round_reviewers(
         spec = reviewer_models.get(name) or {}
         requested = spec.get("requested")
         observed = spec.get("observed")
-        _append_model_measurement_warnings(
-            unmeasured, assumed, round_no, name, requested, observed, "レビュー担当"
-        )
+        _append_model_measurement_warnings(unmeasured, assumed, round_no, name, requested, observed, "レビュー担当")
         if _models.is_measurable(name, requested):
             _aggregate_reviewer_round(reviewer, entry, name, requested, reviews)
 
@@ -125,20 +115,14 @@ def _aggregate_impl_round(
 
     round_items = [items_by_id[i] for i in entry.get("items", []) if i in items_by_id]
     bucket["applied"] += sum(1 for i in round_items if i.get("status") == "done")
-    bucket["abandoned"] += sum(
-        1 for i in round_items if i.get("status") in {"abandoned", "blocked"}
-    )
-    bucket["budget_exceeded"] += sum(
-        1 for i in round_items if i.get("budget_exceeded")
-    )
+    bucket["abandoned"] += sum(1 for i in round_items if i.get("status") in {"abandoned", "blocked"})
+    bucket["budget_exceeded"] += sum(1 for i in round_items if i.get("budget_exceeded"))
     bucket["test_failed"] += sum(1 for i in round_items if i.get("test_failed"))
     bucket["fix_rounds"] += int(entry.get("fix_rounds") or 0)
 
     if reviews:
         first = reviews[0]
-        approved_first = all(
-            _verdict(first, r) == "APPROVE" for r in entry.get("reviewers", [])
-        )
+        approved_first = all(_verdict(first, r) == "APPROVE" for r in entry.get("reviewers", []))
         bucket["first_review_total"] += 1
         bucket["first_review_approved"] += 1 if approved_first else 0
 
@@ -158,10 +142,7 @@ def _aggregate_reviewer_round(
         if _verdict(review, name) is None:
             continue
         rb["reviews"] += 1
-        findings = [
-            f for f in review.get("findings", [])
-            if isinstance(f, dict) and f.get("reviewer") == name
-        ]
+        findings = [f for f in review.get("findings", []) if isinstance(f, dict) and f.get("reviewer") == name]
         rb["findings"] += len(findings)
         rb["findings_resolved"] += sum(1 for f in findings if f.get("resolved"))
         _tally_verdict_agreement(rb, entry, review, name)
@@ -180,9 +161,7 @@ def _tally_verdict_agreement(
         if other_verdict is None:
             continue
         rb["verdict_pairs"] += 1
-        rb["verdict_agreements"] += (
-            1 if other_verdict == _verdict(review, name) else 0
-        )
+        rb["verdict_agreements"] += 1 if other_verdict == _verdict(review, name) else 0
 
 
 def _append_model_measurement_warnings(
@@ -200,9 +179,7 @@ def _append_model_measurement_warnings(
     # 分離するかと、その理由はランタイムごとに違う。判断も文言も models.py が持つ。
     reason = _models.separation_reason(runtime, requested)
     if reason:
-        unmeasured.append(
-            f"round {round_no}: {reason}ため、{role_label}の集計から分離する"
-        )
+        unmeasured.append(f"round {round_no}: {reason}ため、{role_label}の集計から分離する")
     note = _models.assumption_note(runtime, requested)
     if note:
         assumed.append(f"round {round_no}: {note}（{role_label}）")
@@ -215,16 +192,26 @@ def _duration(entry: dict[str, Any], phases: tuple[str, ...]) -> float:
 
 def _new_impl_bucket() -> dict[str, Any]:
     return {
-        "rounds": 0, "applied": 0, "abandoned": 0, "fix_rounds": 0,
-        "budget_exceeded": 0, "test_failed": 0,
-        "first_review_total": 0, "first_review_approved": 0, "seconds": 0.0,
+        "rounds": 0,
+        "applied": 0,
+        "abandoned": 0,
+        "fix_rounds": 0,
+        "budget_exceeded": 0,
+        "test_failed": 0,
+        "first_review_total": 0,
+        "first_review_approved": 0,
+        "seconds": 0.0,
     }
 
 
 def _new_reviewer_bucket() -> dict[str, Any]:
     return {
-        "reviews": 0, "findings": 0, "findings_resolved": 0,
-        "verdict_pairs": 0, "verdict_agreements": 0, "seconds": 0.0,
+        "reviews": 0,
+        "findings": 0,
+        "findings_resolved": 0,
+        "verdict_pairs": 0,
+        "verdict_agreements": 0,
+        "seconds": 0.0,
     }
 
 
@@ -237,9 +224,7 @@ def _finish_impl(b: dict[str, Any]) -> dict[str, Any]:
     total_items = b["applied"] + b["abandoned"]
     return {
         **b,
-        "first_review_approval_rate": _ratio(
-            b["first_review_approved"], b["first_review_total"]
-        ),
+        "first_review_approval_rate": _ratio(b["first_review_approved"], b["first_review_total"]),
         "avg_fix_rounds": None if b["rounds"] == 0 else round(b["fix_rounds"] / b["rounds"], 2),
         "budget_exceeded_rate": _ratio(b["budget_exceeded"], total_items),
         "test_failure_rate": _ratio(b["test_failed"], total_items),
@@ -292,11 +277,7 @@ def _impl_rows(metrics: dict[str, Any]) -> list[str]:
 def _reviewer_rows(metrics: dict[str, Any]) -> list[str]:
     """レビュー担当の表の行を組む。"""
     return [
-        (
-            f"| {key} | {m['reviews']} | {m['findings']} | "
-            f"{_fmt(m['resolution_rate'])} | {_fmt(m['agreement_rate'])} | "
-            f"{m['seconds']:.0f} |"
-        )
+        (f"| {key} | {m['reviews']} | {m['findings']} | {_fmt(m['resolution_rate'])} | {_fmt(m['agreement_rate'])} | {m['seconds']:.0f} |")
         for key, m in metrics["reviewer"].items()
     ]
 

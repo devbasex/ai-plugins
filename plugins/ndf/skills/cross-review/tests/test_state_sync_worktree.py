@@ -4,6 +4,7 @@
 読む。指摘は現在の Pull Request に無い行へ出るか、直したはずの箇所へ再び出る。
 どちらも投稿されるため、読む側からは見分けが付かない。
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -13,9 +14,16 @@ import review_lib.workspace
 class _Recorder:
     """subprocess.run を差し替えて、渡されたコマンドを記録する。"""
 
-    def __init__(self, fetch_rc: int = 0, reset_rc: int = 0, checkout_rc: int = 0,
-                 clean_rc: int = 0, status: str = "", ahead: int = 0,
-                 ancestor_rc: int = 0):
+    def __init__(
+        self,
+        fetch_rc: int = 0,
+        reset_rc: int = 0,
+        checkout_rc: int = 0,
+        clean_rc: int = 0,
+        status: str = "",
+        ahead: int = 0,
+        ancestor_rc: int = 0,
+    ):
         self.calls: list[tuple[list[str], str | None]] = []
         self.fetch_rc = fetch_rc
         self.reset_rc = reset_rc

@@ -6,6 +6,7 @@ CLI は起動しない。担当が残すもの（結果ファイルとトレー�
 履歴は `NDF_METRICS_DIR` を `tmp_path` へ向けて書かせ、利用者の状態ディレクトリを
 触らない（#938）。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -35,32 +36,56 @@ def _call(refactor_module, name, **kwargs):
 
 
 def _propose(flow):
-    proposal = {"path": "src/calc.py", "symbol": "total", "smell": "one_by_one_iteration",
-                "technique": "replace_with_bulk_operation", "severity": "major",
-                "rationale": "足し込みを 1 件ずつ回している", "plan": "sum() へ置き換える",
-                "estimated_diff_lines": 6}
-    other = {"path": "src/calc.py", "symbol": "add", "smell": "dead_code",
-             "technique": "remove_dead_code", "severity": "minor", "rationale": "r",
-             "plan": "p", "estimated_diff_lines": 2}
+    proposal = {
+        "path": "src/calc.py",
+        "symbol": "total",
+        "smell": "one_by_one_iteration",
+        "technique": "replace_with_bulk_operation",
+        "severity": "major",
+        "rationale": "足し込みを 1 件ずつ回している",
+        "plan": "sum() へ置き換える",
+        "estimated_diff_lines": 6,
+    }
+    other = {
+        "path": "src/calc.py",
+        "symbol": "add",
+        "smell": "dead_code",
+        "technique": "remove_dead_code",
+        "severity": "minor",
+        "rationale": "r",
+        "plan": "p",
+        "estimated_diff_lines": 2,
+    }
     write_result(flow["path"], "codex-propose-rf130", {"items": [proposal, other]})
     write_result(flow["path"], "kiro-propose-rf130", {"items": [proposal]})
     write_result(flow["path"], "claude-propose-rf130", {"items": [{**proposal, "smell": "日本語"}]})
 
 
 def _plan(flow, **total_answer):
-    answer = {"key": "src/calc.py#total#one_by_one_iteration", "tier": "high",
-              "tests": ["tests/test_total.py"], "test_targets": ["tests/test_total.py"],
-              "merge_into": None, "risk": False, **total_answer}
-    write_result(flow["path"], "claude-plan-rf130", {"items": [
-        answer,
-        {"key": "src/calc.py#add#dead_code", "tier": "low", "tests": [], "test_targets": [],
-         "merge_into": None, "risk": False},
-    ]})
+    answer = {
+        "key": "src/calc.py#total#one_by_one_iteration",
+        "tier": "high",
+        "tests": ["tests/test_total.py"],
+        "test_targets": ["tests/test_total.py"],
+        "merge_into": None,
+        "risk": False,
+        **total_answer,
+    }
+    write_result(
+        flow["path"],
+        "claude-plan-rf130",
+        {
+            "items": [
+                answer,
+                {"key": "src/calc.py#add#dead_code", "tier": "low", "tests": [], "test_targets": [], "merge_into": None, "risk": False},
+            ]
+        },
+    )
 
 
-def test_the_five_phases_run_once_and_append_one_history_row(flow, cmd_propose, cmd_plan,
-                                                             cmd_setup, cmd_implement,
-                                                             cmd_converge, cmd_gate, cmd_report):
+def test_the_five_phases_run_once_and_append_one_history_row(
+    flow, cmd_propose, cmd_plan, cmd_setup, cmd_implement, cmd_converge, cmd_gate, cmd_report
+):
     work, path = flow["work"], flow["path"]
     _propose(flow)
     _call(cmd_propose, "cmd_merge_proposals")
@@ -90,9 +115,12 @@ def test_the_five_phases_run_once_and_append_one_history_row(flow, cmd_propose, 
     assert state["items"][0]["commits"]["test"] == test_sha
 
     _call(cmd_setup, "cmd_start_phase", phase="implement")
-    (work / "src" / "calc.py").write_text(CALC.replace(
-        "    result = 0\n    for v in values:\n        result = add(result, v)\n    return result\n",
-        "    return sum(values)\n"), encoding="utf-8")
+    (work / "src" / "calc.py").write_text(
+        CALC.replace(
+            "    result = 0\n    for v in values:\n        result = add(result, v)\n    return result\n", "    return sum(values)\n"
+        ),
+        encoding="utf-8",
+    )
     impl_sha = _commit(work, "Refactor: total", _trailers("I-001"))
     _call(cmd_implement, "cmd_merge_implement")
     state = read_state(path)
@@ -109,14 +137,11 @@ def test_the_five_phases_run_once_and_append_one_history_row(flow, cmd_propose, 
     state = read_state(path)
     assert state["final_gate"]["status"] == "passed"
     assert state["history_written"] is True
-    rows = (flow["metrics"] / "acme--demo" / "cross-refactoring-allocation.jsonl").read_text(
-        encoding="utf-8").splitlines()
+    rows = (flow["metrics"] / "acme--demo" / "cross-refactoring-allocation.jsonl").read_text(encoding="utf-8").splitlines()
     assert len(rows) == 1
     row = json.loads(rows[0])
     assert row["kinds"]["test"]["count"] == 1
     assert row["kinds"]["structure/replace_with_bulk_operation"]["count"] == 1
     # 履歴は 1 実行に 1 行。叩き直しても二重に書かない。
     _call(cmd_report, "cmd_finalize", review_status=None)
-    assert len((flow["metrics"] / "acme--demo" / "cross-refactoring-allocation.jsonl")
-               .read_text(encoding="utf-8").splitlines()) == 1
-
+    assert len((flow["metrics"] / "acme--demo" / "cross-refactoring-allocation.jsonl").read_text(encoding="utf-8").splitlines()) == 1

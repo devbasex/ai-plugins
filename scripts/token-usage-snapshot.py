@@ -18,6 +18,7 @@
 
 **出力に会話の本文・ファイルのパス・リポジトリ名・会話の ID を載せない**（`token-usage.py` と同じ）。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -62,6 +63,7 @@ def safe_key(v: str):
 
 
 # ---------- 前の記録と名前 ----------
+
 
 def read_records(out: Path) -> list[tuple[str, dict]]:
     records = []
@@ -114,6 +116,7 @@ def target_name(out: Path, date: str, released: str) -> str:
 
 # ---------- 表 ----------
 
+
 def table(cols: list[str], rows: list[list[str]]) -> list[str]:
     return tu.mdtable.table_markdown(cols, rows).split("\n")  # 包みは token-usage.py が根の lock で読み込み済み
 
@@ -145,8 +148,20 @@ def layer_rows(per_role: list[dict]) -> list[list[str]]:
     rows = []
     for (v, layer), a in sorted(acc.items(), key=lambda x: (tu.version_key(x[0][0]), order.get(x[0][1], 9))):
         n = a["n"]
-        rows.append([v, layer, str(int(n)), tu._k(a["p"] / n), f"{a['k'] / n:.1f}", tu._m(a["w5"] / n),
-                     tu._m(a["w1h"] / n), str(int(a["rewrites"])), str(int(a["after"])), f"{a['rewrites'] / n:.2f}"])
+        rows.append(
+            [
+                v,
+                layer,
+                str(int(n)),
+                tu._k(a["p"] / n),
+                f"{a['k'] / n:.1f}",
+                tu._m(a["w5"] / n),
+                tu._m(a["w1h"] / n),
+                str(int(a["rewrites"])),
+                str(int(a["after"])),
+                f"{a['rewrites'] / n:.2f}",
+            ]
+        )
     return rows
 
 
@@ -169,29 +184,43 @@ def notes(snap: Snapshot) -> list[str]:
     diffs, sessions, changelog, until = snap.diffs, snap.sessions, snap.changelog, snap.until
     shown = {r["version"] for r, _, _ in diffs}
     few = [f"{r['version']}（{r['sessions_with_pr']} 件）" for r, _, _ in diffs if r["sessions_with_pr"] <= FEW_SESSIONS]
-    out = [f"- **PR を作った会話が {FEW_SESSIONS} 件以下の版:** {', '.join(few) or '無し'}。"
-           "作業の中身の違いが版の違いより大きい"]
+    out = [f"- **PR を作った会話が {FEW_SESSIONS} 件以下の版:** {', '.join(few) or '無し'}。作業の中身の違いが版の違いより大きい"]
     try:
         listed = CHANGELOG_RE.findall(changelog.read_text(encoding="utf-8"))
     except OSError:
         out.append(f"- **CHANGELOG.md にあって表に出ない版:** 確かめていない（{changelog.name} を読めない）")
     else:
         lo, hi = tu.version_key(snap.floor), tu.version_key(snap.released)
-        missing = sorted({v for v in listed if safe_key(v) is not None and lo <= safe_key(v) <= hi and v not in shown},
-                         key=tu.version_key)
-        out.append(f"- **CHANGELOG.md にあって表に出ない版:** {', '.join(missing) or '無し'}。"
-                   "その版で始めた PR つきの会話が無い（会話の版は最初に読んだ版で決まる）")
+        missing = sorted({v for v in listed if safe_key(v) is not None and lo <= safe_key(v) <= hi and v not in shown}, key=tu.version_key)
+        out.append(
+            f"- **CHANGELOG.md にあって表に出ない版:** {', '.join(missing) or '無し'}。"
+            "その版で始めた PR つきの会話が無い（会話の版は最初に読んだ版で決まる）"
+        )
     live = sorted({s.version for s in sessions if s.end >= until - LIVE_WINDOW}, key=tu.version_key)
-    out.append(f"- **打ち切りの {LIVE_WINDOW // 60} 分前以降にも行がある会話を含む版:** {', '.join(live) or '無し'}。"
-               "進行中だった会話は、値が打ち切りの時刻までの分である")
+    out.append(
+        f"- **打ち切りの {LIVE_WINDOW // 60} 分前以降にも行がある会話を含む版:** {', '.join(live) or '無し'}。"
+        "進行中だった会話は、値が打ち切りの時刻までの分である"
+    )
     return out
 
 
 def _diff_table_rows(diffs) -> list[list[str]]:
-    return [[r["version"], str(r["sessions_with_pr"]), str(r["prs"]), tu._m(total),
-             "-" if ratio is None else f"{ratio:+.0%}", tu._m(r["conductor_cost"]), tu._m(r["supervisor_cost"]),
-             tu._m(r["worker_cost"]), tu._m(r["context"]), f"{r['minutes']:.1f}", tu._m(r["codex_input"])]
-            for r, total, ratio in diffs]
+    return [
+        [
+            r["version"],
+            str(r["sessions_with_pr"]),
+            str(r["prs"]),
+            tu._m(total),
+            "-" if ratio is None else f"{ratio:+.0%}",
+            tu._m(r["conductor_cost"]),
+            tu._m(r["supervisor_cost"]),
+            tu._m(r["worker_cost"]),
+            tu._m(r["context"]),
+            f"{r['minutes']:.1f}",
+            tu._m(r["codex_input"]),
+        ]
+        for r, total, ratio in diffs
+    ]
 
 
 def _reading_lines(large: list[str]) -> list[str]:
@@ -204,29 +233,49 @@ def render(snap: Snapshot) -> str:
     released, until_s, date, floor, previous = snap.released, snap.until_s, snap.date, snap.floor, snap.previous
     diffs, large, by_version = snap.diffs, snap.large, snap.by_version
     cmd = f"python3 scripts/token-usage-snapshot.py --released {released} --until {until_s} --min-version {floor}"
-    out = [f"# ndf の版ごとのトークン消費と所要時間（{date} 集計・{released} の配布）", "",
-           f"**{released} を正式版として出したときの記録である。** 打ち切りの時刻は `{until_s}`。"
-           f"表の最初の行は {floor}（前の記録: {previous or 'なし'}）。既定では前の記録の最後の版で、記録どうしが 1 行ずつ重なる。"
-           "生の記録・会話の本文・リポジトリ名・会話の ID は残していない。"
-           "集計した日時点の記録で、以後の記録の増減には追随しない。", "",
-           "## 作り方", "",
-           "同じ打ち切りの時刻で走らせ直すと、記録が残っている間は同じ `.json` ができる。ただし kiro の記録は"
-           "ターンに時刻を持たないため、打ち切りをまたいで進行中だった席は credit が変わりうる。", "",
-           "```bash", cmd,
-           f"python3 scripts/token-usage.py --min-version {floor} --until {until_s} --by version   # 末尾の「集計の出力」",
-           "```", "",
-           "## 比べるときの注意", "",
-           *notes(snap), "",
-           "## 版ごとの差（PR 1 本あたり）", "",
-           f"換算の合計は conductor・supervisor・worker の換算の和。前の版との差は、表の 1 つ上の行との比である。"
-           f"±{THRESHOLD:.0%} を超えた版を下の「読み取り」で扱う。", ""]
-    out += table(["ndf の版", "会話", "PR", "換算の合計", "前の版との差", "conductor", "supervisor", "worker",
-                  "入力", "所要", "codex 入力"],
-                 _diff_table_rows(diffs))
-    out += ["", "## 版と層ごとの呼び出しとキャッシュ（1 起動あたり）", "",
-            "P と k と書き込みは 1 起動あたり、書き直しとうち 5 分超は合計の回数である。", ""]
-    out += table(["ndf の版", "層", "起動", "P", "k", "書き込み 5 分", "書き込み 1 時間", "書き直し", "うち 5 分超",
-                  "1 起動あたりの書き直し"], layer_rows(by_version["per_role"]))
+    out = [
+        f"# ndf の版ごとのトークン消費と所要時間（{date} 集計・{released} の配布）",
+        "",
+        f"**{released} を正式版として出したときの記録である。** 打ち切りの時刻は `{until_s}`。"
+        f"表の最初の行は {floor}（前の記録: {previous or 'なし'}）。既定では前の記録の最後の版で、記録どうしが 1 行ずつ重なる。"
+        "生の記録・会話の本文・リポジトリ名・会話の ID は残していない。"
+        "集計した日時点の記録で、以後の記録の増減には追随しない。",
+        "",
+        "## 作り方",
+        "",
+        "同じ打ち切りの時刻で走らせ直すと、記録が残っている間は同じ `.json` ができる。ただし kiro の記録は"
+        "ターンに時刻を持たないため、打ち切りをまたいで進行中だった席は credit が変わりうる。",
+        "",
+        "```bash",
+        cmd,
+        f"python3 scripts/token-usage.py --min-version {floor} --until {until_s} --by version   # 末尾の「集計の出力」",
+        "```",
+        "",
+        "## 比べるときの注意",
+        "",
+        *notes(snap),
+        "",
+        "## 版ごとの差（PR 1 本あたり）",
+        "",
+        f"換算の合計は conductor・supervisor・worker の換算の和。前の版との差は、表の 1 つ上の行との比である。"
+        f"±{THRESHOLD:.0%} を超えた版を下の「読み取り」で扱う。",
+        "",
+    ]
+    out += table(
+        ["ndf の版", "会話", "PR", "換算の合計", "前の版との差", "conductor", "supervisor", "worker", "入力", "所要", "codex 入力"],
+        _diff_table_rows(diffs),
+    )
+    out += [
+        "",
+        "## 版と層ごとの呼び出しとキャッシュ（1 起動あたり）",
+        "",
+        "P と k と書き込みは 1 起動あたり、書き直しとうち 5 分超は合計の回数である。",
+        "",
+    ]
+    out += table(
+        ["ndf の版", "層", "起動", "P", "k", "書き込み 5 分", "書き込み 1 時間", "書き直し", "うち 5 分超", "1 起動あたりの書き直し"],
+        layer_rows(by_version["per_role"]),
+    )
     out += ["", "## 読み取り", "", *_reading_lines(large)]
     body = tu.render_md(by_version, ["version"])
     body = "\n".join("#" + line if line.startswith("## ") else line for line in body.splitlines())
@@ -235,6 +284,7 @@ def render(snap: Snapshot) -> str:
 
 
 # ---------- 入口 ----------
+
 
 def parse_until(value: str | None) -> tuple[str, float]:
     if value is None:
@@ -253,18 +303,37 @@ def resolve_floor(out: Path, released: str, until: float, min_version: str | Non
 
 
 def build(args, floor: str, prev, until_s: str, until: float, date: str) -> tuple[dict, str, list[str]]:
-    sessions, unlinked, skipped = tu.collect(args.claude_root, args.codex_root, args.kiro_root,
-                                             until=until, min_version=floor)
-    meta = {"by": list(tu.AXES), "min_version": floor, "until": until_s, "sessions": len(sessions),
-            "sessions_with_pr": sum(1 for s in sessions if s.prs), "unlinked_external": unlinked,
-            "skipped": skipped, "released": args.released, "previous": prev[0] if prev else None}
+    sessions, unlinked, skipped = tu.collect(args.claude_root, args.codex_root, args.kiro_root, until=until, min_version=floor)
+    meta = {
+        "by": list(tu.AXES),
+        "min_version": floor,
+        "until": until_s,
+        "sessions": len(sessions),
+        "sessions_with_pr": sum(1 for s in sessions if s.prs),
+        "unlinked_external": unlinked,
+        "skipped": skipped,
+        "released": args.released,
+        "previous": prev[0] if prev else None,
+    }
     full = tu.aggregate(sessions, list(tu.AXES)) | {"meta": meta}
     by_version = tu.aggregate(sessions, ["version"]) | {"meta": meta | {"by": ["version"]}}
     diffs = diff_rows(by_version["per_pr"])
     large = [f"{r['version']}（{ratio:+.0%}）" for r, _, ratio in diffs if ratio is not None and abs(ratio) > THRESHOLD]
-    md = render(Snapshot(args.released, until_s, until, date, floor,
-                         prev[0].removesuffix(".json") + ".md" if prev else None, diffs, large,
-                         by_version, sessions, args.changelog))
+    md = render(
+        Snapshot(
+            args.released,
+            until_s,
+            until,
+            date,
+            floor,
+            prev[0].removesuffix(".json") + ".md" if prev else None,
+            diffs,
+            large,
+            by_version,
+            sessions,
+            args.changelog,
+        )
+    )
     return full, md, large
 
 

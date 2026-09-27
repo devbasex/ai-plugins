@@ -15,6 +15,7 @@ Resolve できる単位を指す。未解決の指摘は Resolve されていな
 「取得できなかった」と「0 件」を混同しない。取得の失敗で止めると、GitHub 側の
 一時的な不調でループが進まなくなる。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -54,6 +55,7 @@ def gh_output(monkeypatch, state_mod):
         def _fake(cmd):
             calls.append(list(cmd))
             return output
+
         monkeypatch.setattr(review_lib.github, "_gh_output", _fake)
         return calls
 
@@ -61,6 +63,7 @@ def gh_output(monkeypatch, state_mod):
 
 
 # ---------------- 取得と解釈 ----------------
+
 
 def test_unresolved_threads_are_listed_with_their_identifiers(state_mod, gh_output):
     """未解決の指摘だけが、Resolve に使える識別子つきで返る。"""
@@ -93,7 +96,8 @@ def test_failure_to_fetch_returns_none(state_mod, gh_output):
 def test_missing_repository_is_treated_as_unavailable(state_mod, monkeypatch):
     """リポジトリを決められないときは GitHub を呼ばずに `None` を返す。"""
     monkeypatch.setattr(
-        review_lib.github, "_gh_output",
+        review_lib.github,
+        "_gh_output",
         lambda cmd: pytest.fail("リポジトリが無いのに GitHub を呼んでいる"),
     )
 
@@ -102,6 +106,7 @@ def test_missing_repository_is_treated_as_unavailable(state_mod, monkeypatch):
 
 
 # ---------------- サブコマンド ----------------
+
 
 def test_subcommand_prints_the_count_and_the_identifiers(tmp_dir, state_mod, gh_output, capsys):
     _seed_state(tmp_dir)

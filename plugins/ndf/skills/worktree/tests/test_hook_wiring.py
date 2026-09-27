@@ -5,10 +5,10 @@
 （Codex CLI の `apply_patch` が matcher に無く、パッチ本文の解析が使われなかった）
 を繰り返さないため、両者の一致をチェックする。
 """
+
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
 
@@ -34,22 +34,14 @@ def test_pretooluse_matcher_matches_the_library(runtime: str) -> None:
 @pytest.mark.parametrize("runtime", ["claude", "codex"])
 def test_pretooluse_runs_the_guard(runtime: str) -> None:
     config = json.loads((HOOKS_DIR / f"{runtime}.json").read_text(encoding="utf-8"))
-    commands = [
-        hook["command"]
-        for entry in config["hooks"]["PreToolUse"]
-        for hook in entry["hooks"]
-    ]
+    commands = [hook["command"] for entry in config["hooks"]["PreToolUse"] for hook in entry["hooks"]]
     assert any("scripts/hook.py" in c for c in commands), commands
 
 
 @pytest.mark.parametrize("runtime", ["claude", "codex"])
 def test_sessionstart_runs_the_session_script(runtime: str) -> None:
     config = json.loads((HOOKS_DIR / f"{runtime}.json").read_text(encoding="utf-8"))
-    commands = [
-        hook["command"]
-        for entry in config["hooks"]["SessionStart"]
-        for hook in entry["hooks"]
-    ]
+    commands = [hook["command"] for entry in config["hooks"]["SessionStart"] for hook in entry["hooks"]]
     assert any("worktree-session.sh" in c for c in commands), commands
 
 

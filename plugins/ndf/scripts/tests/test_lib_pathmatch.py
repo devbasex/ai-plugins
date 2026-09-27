@@ -3,6 +3,7 @@
 今の `glossary.declared_path_matches` と `collect._matches_file_pattern`（fnmatch）から変わる入力を固定する:
 `*` は `/` をまたがない（`*.md` は `docs/a.md` に当たらない）。
 """
+
 from __future__ import annotations
 
 import fnmatch
@@ -16,19 +17,22 @@ import pathspec  # noqa: E402,F401  包みの外部パッケージ。無けれ�
 import pathmatch  # noqa: E402
 
 
-@pytest.mark.parametrize("pattern,path,hit", [
-    ("*.md", "README.md", True),
-    ("docs/*.md", "docs/a.md", True),
-    ("docs/*.md", "docs/x/a.md", False),
-    ("docs/**", "docs/x/a.md", True),
-    ("docs/**", "docs", False),
-    ("**/*.md", "README.md", True),
-    ("**/*.md", "docs/x/a.md", True),
-    ("docs/", "docs/a.md", True),
-    ("docs/", "docsx/a.md", False),
-    ("plugins/ndf/scripts/lib/?.py", "plugins/ndf/scripts/lib/a.py", True),
-    ("./README.md", "README.md", True),
-])
+@pytest.mark.parametrize(
+    "pattern,path,hit",
+    [
+        ("*.md", "README.md", True),
+        ("docs/*.md", "docs/a.md", True),
+        ("docs/*.md", "docs/x/a.md", False),
+        ("docs/**", "docs/x/a.md", True),
+        ("docs/**", "docs", False),
+        ("**/*.md", "README.md", True),
+        ("**/*.md", "docs/x/a.md", True),
+        ("docs/", "docs/a.md", True),
+        ("docs/", "docsx/a.md", False),
+        ("plugins/ndf/scripts/lib/?.py", "plugins/ndf/scripts/lib/a.py", True),
+        ("./README.md", "README.md", True),
+    ],
+)
 def test_patterns_match_the_whole_path_from_the_root(pattern, path, hit):
     assert pathmatch.path_matches(path, [pattern]) is hit
 

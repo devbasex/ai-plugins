@@ -8,6 +8,7 @@
 
 モデルの段の APPROVE では抜けずに詳細の段へ進み、関門の数とラウンドの上限は変えない。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -31,14 +32,17 @@ import review_lib.review_focus
 PR = 1111
 
 
-@pytest.mark.parametrize("kind,round_no,has_model,want", [
-    ("design", 1, True, "model"),
-    ("design", 2, True, "detail"),
-    ("design", 3, True, "detail"),
-    ("design", 1, False, "detail"),
-    ("code", 1, True, None),
-    ("code", 2, False, None),
-])
+@pytest.mark.parametrize(
+    "kind,round_no,has_model,want",
+    [
+        ("design", 1, True, "model"),
+        ("design", 2, True, "detail"),
+        ("design", 3, True, "detail"),
+        ("design", 1, False, "detail"),
+        ("code", 1, True, None),
+        ("code", 2, False, None),
+    ],
+)
 def test_review_stage_table(kind, round_no, has_model, want):
     assert review_stage(kind, round_no, has_model) == want
 
@@ -73,17 +77,32 @@ def test_round_stage_follows_state(state_mod):
 
 
 def _approved(no, **over):
-    entry = {"round": no, "pr": PR, "started_at": "2026-09-25T00:00:00+00:00",
-             "codex": {"intent": "APPROVE", "by_severity": {}}, "agy": {"intent": "APPROVE", "by_severity": {}},
-             "head_sha": "abc"}
+    entry = {
+        "round": no,
+        "pr": PR,
+        "started_at": "2026-09-25T00:00:00+00:00",
+        "codex": {"intent": "APPROVE", "by_severity": {}},
+        "agy": {"intent": "APPROVE", "by_severity": {}},
+        "head_sha": "abc",
+    }
     entry.update(over)
     return entry
 
 
 def _state(rounds):
-    return {"current_pr": PR, "repo": "o/r", "review_kind": "design", "design_has_model": True, "max_rounds": 3,
-            "rotate_after": 8, "only": None, "rounds": rounds, "deferred_nits": [], "carried_over": None,
-            "final": None}
+    return {
+        "current_pr": PR,
+        "repo": "o/r",
+        "review_kind": "design",
+        "design_has_model": True,
+        "max_rounds": 3,
+        "rotate_after": 8,
+        "only": None,
+        "rounds": rounds,
+        "deferred_nits": [],
+        "carried_over": None,
+        "final": None,
+    }
 
 
 @pytest.fixture()
@@ -109,8 +128,7 @@ def test_model_stage_approve_does_not_leave_the_loop(state_mod, tmp_dir, capsys)
 
 
 def test_detail_stage_approve_leaves_the_loop(state_mod, tmp_dir):
-    code, st = _judge(state_mod, tmp_dir, _state([_approved(1, stage="model", verdict="model_confirmed"),
-                                                   _approved(2, stage="detail")]))
+    code, st = _judge(state_mod, tmp_dir, _state([_approved(1, stage="model", verdict="model_confirmed"), _approved(2, stage="detail")]))
     assert code == 0 and st["final"] == "approved"
 
 
@@ -126,24 +144,35 @@ def _launch(tmp_path, state, round_no):
     if not codex.exists():  # 前の起動の codex が背景で動いている間に書き直すと ETXTBSY になる
         codex.write_text("#!/bin/sh\nexit 0\n")
         codex.chmod(0o755)
-    subprocess.run(["bash", str(SCRIPTS / "launch-reviewer.sh"), "codex", str(PR), str(round_no)],
-                   env={**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
-                        "CROSS_REVIEW_TMP_DIR": str(tmp_dir)},
-                   check=True, capture_output=True, text=True, timeout=10)
+    subprocess.run(
+        ["bash", str(SCRIPTS / "launch-reviewer.sh"), "codex", str(PR), str(round_no)],
+        env={**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "CROSS_REVIEW_TMP_DIR": str(tmp_dir)},
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
     return (tmp_dir / f"codex-review-pr{PR}-prompt.md").read_text(encoding="utf-8")
 
 
 def test_launcher_passes_the_instructions_of_the_round_stage(tmp_path):
-    base = {"current_pr": PR, "repo": "o/r", "review_kind": "design", "review_instructions": "今の観点",
-            "review_instructions_by_stage": {"model": "モデルの観点", "detail": "詳細の観点"}}
+    base = {
+        "current_pr": PR,
+        "repo": "o/r",
+        "review_kind": "design",
+        "review_instructions": "今の観点",
+        "review_instructions_by_stage": {"model": "モデルの観点", "detail": "詳細の観点"},
+    }
     first = _launch(tmp_path, {**base, "rounds": [{"round": 1, "head_sha": "1" * 40, "stage": "model"}]}, 1)
     assert "モデルの観点" in first and "詳細の観点" not in first
-    second = _launch(tmp_path, {**base, "rounds": [{"round": 1, "head_sha": "1" * 40, "stage": "model"},
-                                                   {"round": 2, "head_sha": "2" * 40, "stage": "detail"}]}, 2)
+    second = _launch(
+        tmp_path,
+        {**base, "rounds": [{"round": 1, "head_sha": "1" * 40, "stage": "model"}, {"round": 2, "head_sha": "2" * 40, "stage": "detail"}]},
+        2,
+    )
     assert "詳細の観点" in second and "モデルの観点" not in second
 
 
 def test_launcher_falls_back_without_stage_instructions(tmp_path):
-    state = {"current_pr": PR, "repo": "o/r", "review_instructions": "今の観点",
-             "rounds": [{"round": 1, "head_sha": "1" * 40}]}
+    state = {"current_pr": PR, "repo": "o/r", "review_instructions": "今の観点", "rounds": [{"round": 1, "head_sha": "1" * 40}]}
     assert "今の観点" in _launch(tmp_path, state, 1)

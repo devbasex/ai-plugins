@@ -1,0 +1,39 @@
+name: Lint
+
+# formatter と静的解析（#1323）。ruff format --check・ruff check・shellcheck -S warning を、
+# git が追跡するファイルの全体へ掛ける（変わったファイルだけに絞らない。決定 9）。
+# ツールを直に起動せず、手元と同じ scripts/check-lint.sh を呼ぶ。版は根の uv.lock が固定する（I1）。
+#
+# Pull Request では絞り込まずに常に起動する（pytest.yml と同じ理由）。数秒で終わる
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - ".github/workflows/lint.yml"
+      - "**.py"
+      - "**.sh"
+      - ".githooks/**"
+      - "claude"
+      - "scripts/check-lint.sh"
+      - "pyproject.toml"
+      - "uv.lock"
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.x"
+      - name: Install uv
+        run: python3 -m pip install --upgrade uv
+      # 違反で 1、検査の仕組みの異常で 2 を返す。どちらもジョブを落とす
+      - name: Run the lint checks
+        run: bash scripts/check-lint.sh

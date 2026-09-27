@@ -3,6 +3,7 @@
 **ボードの宣言が無いリポジトリでも進行が残る。** 記録先は本文の `## 進行` の節で、節の外は
 書き換えない。人が本文へ書いた内容を消さないためである。
 """
+
 from __future__ import annotations
 
 import os
@@ -25,12 +26,14 @@ def fake_gh(tmp_path):
     (bin_dir / "gh").write_text(
         "#!/usr/bin/env bash\n"
         'if [ "$2" = "view" ] || [ "$1" = "issue" ] && [ "$2" = "view" ]; then\n'
-        f'  cat {body}\n'
+        f"  cat {body}\n"
         "  exit 0\n"
         "fi\n"
         'for i in "$@"; do\n'
-        '  case "$prev" in --body-file) cp "$i" ' f"{written}" '; exit 0 ;; esac\n'
-        '  prev=$i\n'
+        '  case "$prev" in --body-file) cp "$i" '
+        f"{written}"
+        "; exit 0 ;; esac\n"
+        "  prev=$i\n"
         "done\n"
         "exit 0\n",
         encoding="utf-8",
@@ -41,9 +44,7 @@ def fake_gh(tmp_path):
 
 def run(fake_gh, *args):
     env = {**os.environ, "PATH": f"{fake_gh.bin}:{os.environ['PATH']}"}
-    return subprocess.run(
-        ["bash", str(SCRIPT), *args], capture_output=True, text=True, env=env, timeout=60
-    )
+    return subprocess.run(["bash", str(SCRIPT), *args], capture_output=True, text=True, env=env, timeout=60)
 
 
 def test_the_section_is_appended_when_it_is_missing(fake_gh):
@@ -62,8 +63,7 @@ def test_the_section_is_appended_when_it_is_missing(fake_gh):
 def test_nothing_outside_the_section_changes(fake_gh):
     """**節の外は書き換えない。** 前後に別の節があっても残る。"""
     fake_gh.body.write_text(
-        "# 課題\n\n## 概要\n\nこれは残る\n\n## 進行\n\nモード: —\n\n- [ ] 設計\n\n"
-        "## 受け入れ条件\n\n- [ ] 何か\n",
+        "# 課題\n\n## 概要\n\nこれは残る\n\n## 進行\n\nモード: —\n\n- [ ] 設計\n\n## 受け入れ条件\n\n- [ ] 何か\n",
         encoding="utf-8",
     )
     out = run(fake_gh, "123", "設計")
@@ -77,8 +77,7 @@ def test_nothing_outside_the_section_changes(fake_gh):
 def test_the_marks_already_there_are_kept(fake_gh):
     """済んだ工程の目印と記録は残る。飛ばした工程は空欄のままになる。"""
     fake_gh.body.write_text(
-        "## 進行\n\nモード: standard / 作業ツリー: `.worktrees/x`\n\n"
-        "- [x] 作業場所の用意 — 2026-09-04 06:12\n- [ ] 要求と受け入れ条件\n",
+        "## 進行\n\nモード: standard / 作業ツリー: `.worktrees/x`\n\n- [x] 作業場所の用意 — 2026-09-04 06:12\n- [ ] 要求と受け入れ条件\n",
         encoding="utf-8",
     )
     run(fake_gh, "123", "設計")
@@ -120,14 +119,15 @@ def test_missing_gh_is_not_an_error(tmp_path):
     """
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    for name in ("bash", "python3", "date", "mktemp", "cmp", "cat", "grep", "sed",
-                 "dirname", "cd", "rm", "cp"):
+    for name in ("bash", "python3", "date", "mktemp", "cmp", "cat", "grep", "sed", "dirname", "cd", "rm", "cp"):
         found = shutil.which(name)
         if found:
             (bin_dir / name).symlink_to(found)
     out = subprocess.run(
         [str(bin_dir / "bash"), str(SCRIPT), "123", "設計"],
-        capture_output=True, text=True, timeout=60,
+        capture_output=True,
+        text=True,
+        timeout=60,
         env={**os.environ, "PATH": str(bin_dir)},
     )
     assert out.returncode == 0
@@ -156,8 +156,7 @@ def test_the_time_a_stage_was_entered_is_not_overwritten(fake_gh):
 
     書き換えると、途中で止まった実行を再開したときに「いつ入ったか」が失われる。
     """
-    fake_gh.body.write_text(
-        "## 進行\n\nモード: —\n\n- [x] 設計 — 2026-01-01 00:00\n", encoding="utf-8")
+    fake_gh.body.write_text("## 進行\n\nモード: —\n\n- [x] 設計 — 2026-01-01 00:00\n", encoding="utf-8")
     run(fake_gh, "123", "設計")
     written = fake_gh.written.read_text(encoding="utf-8") if fake_gh.written.exists() else ""
     if written:
@@ -166,8 +165,7 @@ def test_the_time_a_stage_was_entered_is_not_overwritten(fake_gh):
 
 def test_a_new_note_is_appended_to_the_existing_record(fake_gh):
     """付随情報を新しく渡したときは、既存の記録へ足す。"""
-    fake_gh.body.write_text(
-        "## 進行\n\nモード: —\n\n- [x] 設計 — 2026-01-01 00:00\n", encoding="utf-8")
+    fake_gh.body.write_text("## 進行\n\nモード: —\n\n- [x] 設計 — 2026-01-01 00:00\n", encoding="utf-8")
     run(fake_gh, "123", "設計", "--note", "PR #379")
     written = fake_gh.written.read_text(encoding="utf-8")
     assert "- [x] 設計 — 2026-01-01 00:00 / PR #379" in written

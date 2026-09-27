@@ -19,6 +19,7 @@
 （`reason`）と起動し直しの可否（`relaunch_same_agent`）を返す。結果なしの判断と可否の表を
 cross-review / cross-refactoring がそれぞれ持つと、語彙を足すたびに片方が古くなる。
 """
+
 # `from __future__ import annotations` を置かない。注釈が文字列になると `dataclass` が
 # `sys.modules[<モジュール名>]` を引くが、読む側の多くはこのファイルを `importlib` で
 # `sys.modules` に登録せずに読み込むため落ちる。実行時に評価できる形（3.10 以上）で書く。
@@ -40,8 +41,15 @@ import clock  # noqa: E402  時刻の書き出し（#1142 の L0）
 # 監視が文言の照合で結末に添えたときだけ現れ、`unparsable` は読む側（`read_launch_outcome`）
 # だけが書く（#729 の決定 7）。
 REASONS = (
-    "ok", "timeout", "stalled", "early_error", "missing", "pidfile_bad",
-    "usage_limit", "cli_timeout", "unparsable",
+    "ok",
+    "timeout",
+    "stalled",
+    "early_error",
+    "missing",
+    "pidfile_bad",
+    "usage_limit",
+    "cli_timeout",
+    "unparsable",
 )
 
 # 同じ担当を同じ条件で起動し直しても解けない理由。利用上限は起動のたびに待ちと相手の
@@ -51,8 +59,7 @@ NO_RELAUNCH_REASONS = frozenset({"usage_limit"})
 
 # 監視がこの理由を書いていれば、監視が止めたか、結果を書けない終わり方をしたと分かっている。
 # 結果ファイルの状態を見ずにその値を採る（`ok` / `missing` は結果ファイルの側で決め直す）。
-_MONITOR_DECIDED_REASONS = frozenset(
-    {"timeout", "stalled", "early_error", "usage_limit", "cli_timeout", "pidfile_bad"})
+_MONITOR_DECIDED_REASONS = frozenset({"timeout", "stalled", "early_error", "usage_limit", "cli_timeout", "pidfile_bad"})
 
 _STATUS_REASON = {
     "OK": "ok",
@@ -67,9 +74,21 @@ _STATUS_REASON = {
 # `phase` は P2（#598 / #537）で足した `--phase` の値。省いたときは null で、契約の文書の
 # とおり末尾に置く。
 OUTCOME_KEYS = (
-    "agent", "stem", "status", "exit_code", "reason", "detail",
-    "launched_at", "started_at", "ended_at", "elapsed", "idle_seconds",
-    "progress_tail", "result_exists", "pid", "phase",
+    "agent",
+    "stem",
+    "status",
+    "exit_code",
+    "reason",
+    "detail",
+    "launched_at",
+    "started_at",
+    "ended_at",
+    "elapsed",
+    "idle_seconds",
+    "progress_tail",
+    "result_exists",
+    "pid",
+    "phase",
 )
 
 JOURNAL_NAME = "monitor-outcomes.jsonl"
@@ -106,8 +125,7 @@ def journal_path(tmp_dir: os.PathLike[str] | str) -> pathlib.Path:
     return pathlib.Path(tmp_dir) / JOURNAL_NAME
 
 
-def write_outcome(tmp_dir: os.PathLike[str] | str, stem: str,
-                  outcome: dict[str, Any]) -> None:
+def write_outcome(tmp_dir: os.PathLike[str] | str, stem: str, outcome: dict[str, Any]) -> None:
     """結果ファイルを原子的に置き換える。読みかけの半端な JSON を残さない。"""
     path = outcome_path(tmp_dir, stem)
     tmp = path.with_name(f"{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
@@ -131,6 +149,7 @@ def read_outcome(tmp_dir: os.PathLike[str] | str, stem: str) -> Optional[dict[st
 @dataclass(frozen=True)
 class LaunchOutcome:
     """起動 1 回の結末。`payload` があれば使える結果、無ければ `reason` が理由。"""
+
     payload: Optional[dict[str, Any]]
     reason: Optional[str]
     detail: str
@@ -153,8 +172,7 @@ def _read_result_file(path: pathlib.Path) -> tuple[Optional[dict[str, Any]], str
     return (data, "") if isinstance(data, dict) else (None, "unparsable")
 
 
-def read_launch_outcome(tmp_dir: os.PathLike[str] | str, stem: str,
-                        result_path: Optional[os.PathLike[str] | str] = None) -> LaunchOutcome:
+def read_launch_outcome(tmp_dir: os.PathLike[str] | str, stem: str, result_path: Optional[os.PathLike[str] | str] = None) -> LaunchOutcome:
     """起動 1 回の結末を 1 つの値として読む（#729 の決定 2）。
 
     **結果ファイルが JSON オブジェクトとして読めれば使える結果が勝つ。** 監視が止めた後にも
@@ -165,19 +183,16 @@ def read_launch_outcome(tmp_dir: os.PathLike[str] | str, stem: str,
     **失敗しない。** 例外・`SystemExit`・標準出力/標準エラーへの出力を出さない。壊れた監視の
     結果ファイルは無いものとして扱う。読む側（両 Skill の取り込み）が終了コードを決める。
     """
-    path = (pathlib.Path(result_path) if result_path is not None
-            else default_result_path(tmp_dir, stem))
+    path = pathlib.Path(result_path) if result_path is not None else default_result_path(tmp_dir, stem)
     payload, result_reason = _read_result_file(path)
     monitor = read_outcome(tmp_dir, stem)
     monitor_detail = str(monitor.get("detail") or "") if monitor else ""
     if payload is not None:
-        return LaunchOutcome(payload=payload, reason=None, detail=monitor_detail,
-                             monitor=monitor, relaunch_same_agent=True)
+        return LaunchOutcome(payload=payload, reason=None, detail=monitor_detail, monitor=monitor, relaunch_same_agent=True)
     monitor_reason = monitor.get("reason") if monitor else None
     reason = monitor_reason if monitor_reason in _MONITOR_DECIDED_REASONS else result_reason
     detail = monitor_detail or _unusable_detail(path, result_reason)
-    return LaunchOutcome(payload=None, reason=reason, detail=detail, monitor=monitor,
-                         relaunch_same_agent=relaunch_same_agent(reason))
+    return LaunchOutcome(payload=None, reason=reason, detail=detail, monitor=monitor, relaunch_same_agent=relaunch_same_agent(reason))
 
 
 def _unusable_detail(path: pathlib.Path, result_reason: str) -> str:
@@ -198,6 +213,7 @@ def append_journal(tmp_dir: os.PathLike[str] | str, outcome: dict[str, Any]) -> 
     読む側（`state.py` ほか）は filelock を入れずにこのモジュールを読む。
     """
     import locks  # deps.require("locks") の後でだけ import できる
+
     locks.append_locked(journal_path(tmp_dir), json.dumps(outcome, ensure_ascii=False))
 
 
@@ -219,7 +235,11 @@ def read_journal(tmp_dir: os.PathLike[str] | str) -> list[dict[str, Any]]:
 
 
 def _record_outcome(
-    agent: str, pr: int, stem_template: str, st: Any, started_at: str,  # st は monitor_types.AgentStatus
+    agent: str,
+    pr: int,
+    stem_template: str,
+    st: Any,
+    started_at: str,  # st は monitor_types.AgentStatus
     phase: Optional[str] = None,
 ) -> None:
     """担当 1 者の監視の結果を、結果ファイルと記録へ書く（#662）。
@@ -228,17 +248,16 @@ def _record_outcome(
     読むため、書き出しの失敗は標準エラーへ 1 行出すだけにする。
     """
     import monitor_types  # 読む側（state.py ほか）が監視の型を読まずに済むよう、書くときだけ読む
+
     stem = stem_template.format(agent=agent, id=pr)
     try:
         paths = monitor_types.AgentPaths.for_(agent, pr, stem_template)
         # 結末が理由を持てばそれを、無ければ状態からの既定を書く（#729 の決定 8）
-        st.reason = (st.outcome.reason if st.outcome and st.outcome.reason
-                     else reason_for(st.status))
+        st.reason = st.outcome.reason if st.outcome and st.outcome.reason else reason_for(st.status)
         st.started_at = started_at
         st.ended_at = clock.now_iso()
         try:
-            st.launched_at = iso_from_timestamp(
-                paths.pidfile.stat().st_mtime)
+            st.launched_at = iso_from_timestamp(paths.pidfile.stat().st_mtime)
         except OSError:
             st.launched_at = None
         outcome = {
@@ -261,11 +280,9 @@ def _record_outcome(
         }
         # 組み立てたキー集合を正本（`OUTCOME_KEYS`）と突き合わせる。
         # キーを片方だけへ足すと、ここで食い違いがその場で落ちる（#662）。
-        assert set(outcome) == set(OUTCOME_KEYS), (
-            set(outcome).symmetric_difference(OUTCOME_KEYS))
+        assert set(outcome) == set(OUTCOME_KEYS), set(outcome).symmetric_difference(OUTCOME_KEYS)
         tmp_dir = paths.pidfile.parent
         write_outcome(tmp_dir, stem, outcome)
         append_journal(tmp_dir, outcome)
     except Exception as exc:  # noqa: BLE001  書き出しの失敗で監視を落とさない
-        print(f"[{agent}] ⚠ 監視の結果を書けません（{stem}）: {exc}",
-              file=sys.stderr, flush=True)
+        print(f"[{agent}] ⚠ 監視の結果を書けません（{stem}）: {exc}", file=sys.stderr, flush=True)

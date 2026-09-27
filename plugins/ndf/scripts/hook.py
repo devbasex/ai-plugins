@@ -17,6 +17,7 @@
 終了コード 0 で、判定をせずに通す**（hook が止まると Tool の呼び出しが全部止まる）。拒否を返すのは token の guard だけで、
 拒否があればそれだけを出す。案内は `additionalContext` に並べる。
 """
+
 from __future__ import annotations
 
 import json
@@ -66,8 +67,10 @@ def _merge(outs: list) -> dict | str | None:
 
 def dispatch(command: str, runtime: str, raw: dict | None) -> dict | str | None:
     from hook_lib import payload as pl
+
     if command == "wait-notify":
         from hook_lib import wait_notify
+
         wait_notify.hook(runtime, raw)
         return None
     if raw is None:
@@ -76,13 +79,16 @@ def dispatch(command: str, runtime: str, raw: dict | None) -> dict | str | None:
     outs = []
     if command in ("", "worktree-guard") and (ev.tool_kind or ev.event in ("userPromptSubmit", "UserPromptSubmit")):
         from hook_lib import worktree
+
         outs.append(worktree.notice(ev))
     if command == "token-guard" or (not command and runtime == "claude" and ev.event == "PreToolUse"):
         from hook_lib import token_guard
+
         if ev.tool in token_guard.TOOLS:
             outs.append(token_guard.decision(ev))
     if not command and (ev.event in NOTIFY_EVENTS or ev.tool == "AskUserQuestion"):
         from hook_lib import wait_notify
+
         wait_notify.hook(runtime, raw)
     return _merge(outs)
 
@@ -92,6 +98,7 @@ def main(argv: list[str]) -> int:
         command, runtime = _args(argv)
         if command == "words":  # 本文は JSON でない。語を NUL で区切って出す（hook_lib/words.py）
             from hook_lib import words
+
             got = words.command_stream(sys.stdin.read())
             sys.stdout.write("".join(w + "\0" for w in got))
             return 0

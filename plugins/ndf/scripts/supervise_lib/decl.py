@@ -1,4 +1,5 @@
 """プロジェクトごとの宣言（リポジトリの根の `.ndf/`）の読み取りと、雛形の引数への当てはめ（#1142 の C1）。"""
+
 from __future__ import annotations
 
 import json
@@ -9,7 +10,7 @@ from pydantic import ConfigDict
 
 
 # プロジェクトごとの宣言（リポジトリの根の .ndf/）。形は DECLARATIONS の節にある
-WORKTREE_DECL = "worktree.json"    # base_branch（起点のブランチ）・production_branch（本番のブランチ）
+WORKTREE_DECL = "worktree.json"  # base_branch（起点のブランチ）・production_branch（本番のブランチ）
 SUPERVISE_DECL = "supervise.json"  # test・sync_checks・release
 
 
@@ -19,6 +20,7 @@ class DeclError(Exception):
 
 class Decl(schema.Shape):
     """宣言の最上位（オブジェクトであることだけを見る。項目はプロジェクトごとに違うので拒まない）。"""
+
     model_config = ConfigDict(extra="allow")
 
 
@@ -30,6 +32,7 @@ class SyncCheck(schema.Shape):
 
 class SuperviseDecl(Decl):
     """.ndf/supervise.json のうち、形を見る項目（test・sync_checks）。"""
+
     test: dict = {}
     sync_checks: list[SyncCheck] = []
 
@@ -37,10 +40,9 @@ class SuperviseDecl(Decl):
 def supervise_shape(decl: dict) -> SuperviseDecl:
     """supervise.json の test と sync_checks の形を見る（空・null は無いとみなす）。違えば DeclError。"""
     try:
-        return schema.load_shape(SuperviseDecl, {"test": decl.get("test") or {},
-                                                 "sync_checks": decl.get("sync_checks") or []})
+        return schema.load_shape(SuperviseDecl, {"test": decl.get("test") or {}, "sync_checks": decl.get("sync_checks") or []})
     except schema.ShapeError as e:
-        raise DeclError(f"supervise.json: {e}（test はオブジェクト、sync_checks は {{\"name\", \"command\"}} の並びで書く）") from e
+        raise DeclError(f'supervise.json: {e}（test はオブジェクト、sync_checks は {{"name", "command"}} の並びで書く）') from e
 
 
 def read_decl(roots, name: str) -> dict:
@@ -88,8 +90,14 @@ def sync_checks_of(decl: dict) -> list[tuple[str, str]]:
 
 # 雛形が宣言から受けるもの。引数が宣言より先に効く
 # mission はリリースの形を要らない（雛形の無い形ならリリースの段を書かず、/ndf:release で行うと返す）
-NEEDS = {"impl": ("base", "test"), "fix": ("base", "test"), "check": ("base", "test"), "release": ("base", "release"),
-         "mission": ("base", "test"), "close": ("base", "test", "release")}
+NEEDS = {
+    "impl": ("base", "test"),
+    "fix": ("base", "test"),
+    "check": ("base", "test"),
+    "release": ("base", "release"),
+    "mission": ("base", "test"),
+    "close": ("base", "test", "release"),
+}
 
 
 def apply_decls(a) -> None:
@@ -115,8 +123,7 @@ def apply_decls(a) -> None:
     missing = {
         "base": (not a.base, f"起点のブランチ（--base か .ndf/{WORKTREE_DECL} の base_branch）"),
         "test": (not a.test_cmd, f"テストのコマンド（--test-cmd か .ndf/{SUPERVISE_DECL} の test.command）"),
-        "release": (not isinstance(a.release, dict) or not a.release.get("form"),
-                    f"配布の形（.ndf/{SUPERVISE_DECL} の release.form）"),
+        "release": (not isinstance(a.release, dict) or not a.release.get("form"), f"配布の形（.ndf/{SUPERVISE_DECL} の release.form）"),
     }
     lack = [missing[k][1] for k in NEEDS[a.kind] if missing[k][0]]
     if lack:
@@ -125,8 +132,7 @@ def apply_decls(a) -> None:
 
 def decl_fields(a) -> dict:
     """ミッションの雛形が各計画へ引き継ぐ、宣言から埋めた値。"""
-    return {k: getattr(a, k) for k in ("base", "production_branch", "test_cmd", "test_all", "no_reports",
-                                       "sync_checks", "release")}
+    return {k: getattr(a, k) for k in ("base", "production_branch", "test_cmd", "test_all", "no_reports", "sync_checks", "release")}
 
 
 def with_decls(plan: dict, a) -> dict:

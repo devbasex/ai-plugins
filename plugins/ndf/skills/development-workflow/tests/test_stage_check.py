@@ -3,6 +3,7 @@
 判定は `scripts/lib/workflow-common.sh` に集約されている。テストはこの層と入口の
 スクリプトに対して書き、GitHub への通信は行わない。
 """
+
 from __future__ import annotations
 
 import json
@@ -13,18 +14,43 @@ from pathlib import Path
 import pytest
 
 from workflow_helpers import (
-    SLUG, base_env, init_repo, path_with, run_lib, run_stage_check, state_file,
+    SLUG,
+    base_env,
+    init_repo,
+    path_with,
+    run_lib,
+    run_stage_check,
+    state_file,
 )
 
 # #161 の実測の並び（issue #221 の本文）。実装レビューと後片付けが 2 回ずつ現れる。
 MEASURED_161 = [
-    "作業場所の用意", "要求と受け入れ条件", "設計", "ドキュメント再構成", "ドキュメントレビュー",
-    "後片付け", "計画", "完了判定", "実装レビュー", "後片付け",
+    "作業場所の用意",
+    "要求と受け入れ条件",
+    "設計",
+    "ドキュメント再構成",
+    "ドキュメントレビュー",
+    "後片付け",
+    "計画",
+    "完了判定",
+    "実装レビュー",
+    "後片付け",
 ]
 # 上の並びに、実装・構造改善・Pull Request を足した完全版。抜けは確定仕様化だけになる。
 FULL_161 = [
-    "作業場所の用意", "要求と受け入れ条件", "設計", "ドキュメント再構成", "ドキュメントレビュー",
-    "後片付け", "計画", "実装", "構造改善", "完了判定", "実装レビュー", "Pull Request", "後片付け",
+    "作業場所の用意",
+    "要求と受け入れ条件",
+    "設計",
+    "ドキュメント再構成",
+    "ドキュメントレビュー",
+    "後片付け",
+    "計画",
+    "実装",
+    "構造改善",
+    "完了判定",
+    "実装レビュー",
+    "Pull Request",
+    "後片付け",
 ]
 
 
@@ -120,9 +146,13 @@ def test_a_report_without_a_gap_says_so(repo: Path, state: Path) -> None:
 
 def test_a_conditional_stage_is_listed_apart(repo: Path, state: Path) -> None:
     """条件付きの工程は必須と分けて出す。`legacy-refactor` のドキュメントレビューがこれにあたる。"""
-    seed(repo, state, 161, "legacy-refactor",
-         ["作業場所の用意", "設計", "計画", "実装", "構造改善", "実装レビュー",
-          "完了判定", "Pull Request", "後片付け"])
+    seed(
+        repo,
+        state,
+        161,
+        "legacy-refactor",
+        ["作業場所の用意", "設計", "計画", "実装", "構造改善", "実装レビュー", "完了判定", "Pull Request", "後片付け"],
+    )
 
     out = report(repo, state, 161).stdout
 
@@ -175,24 +205,26 @@ def test_a_state_file_of_another_version_is_ignored(repo: Path, state: Path) -> 
     "content",
     [
         "{壊れている",
-        json.dumps({
-            "version": 2, "repo": SLUG, "issue": 221,
-            "mode": "standard", "stages": ["設計"],
-        }, ensure_ascii=False),
+        json.dumps(
+            {
+                "version": 2,
+                "repo": SLUG,
+                "issue": 221,
+                "mode": "standard",
+                "stages": ["設計"],
+            },
+            ensure_ascii=False,
+        ),
     ],
     ids=["broken-json", "unsupported-version"],
 )
-def test_record_replaces_an_unreadable_state(
-    repo: Path, state: Path, content: str
-) -> None:
+def test_record_replaces_an_unreadable_state(repo: Path, state: Path, content: str) -> None:
     """現状固定: 読めない通過記録への再記録は旧モードと旧工程を引き継がない。"""
     path = state_file(state, 221)
     path.parent.mkdir(parents=True)
     path.write_text(content, encoding="utf-8")
 
-    result = run_lib(
-        f"wf_record {SLUG} 221 stage 計画", cwd=repo, env=base_env(state)
-    )
+    result = run_lib(f"wf_record {SLUG} 221 stage 計画", cwd=repo, env=base_env(state))
 
     assert result.returncode == 0, result.stderr
     saved = json.loads(path.read_text(encoding="utf-8"))
@@ -218,9 +250,11 @@ def test_two_records_at_once_keep_both_stages(repo: Path, state: Path) -> None:
     env = base_env(state, {"NDF_STAGE_LOCK_TIMEOUT": "20"})
     procs = [
         subprocess.Popen(
-            ["bash", str(Path(__file__).resolve().parents[1] / "scripts/stage-check.sh"),
-             "record", "221", "stage", stage],
-            cwd=str(repo), env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            ["bash", str(Path(__file__).resolve().parents[1] / "scripts/stage-check.sh"), "record", "221", "stage", stage],
+            cwd=str(repo),
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
         )
         for stage in ("設計", "計画", "実装", "実装レビュー")
     ]
@@ -297,7 +331,11 @@ def test_records_at_once_never_skip_a_stage(repo: Path, state: Path) -> None:
         procs = [
             subprocess.Popen(
                 ["bash", script, "record", str(issue), "stage", stage],
-                cwd=str(repo), env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                cwd=str(repo),
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
             )
             for stage in stages
         ]
@@ -317,8 +355,17 @@ def test_records_at_once_never_skip_a_stage(repo: Path, state: Path) -> None:
 
 # fast で配布まで進んだ課題。構造改善・実装レビュー・確定仕様化・振り返りは記録していない。
 FAST_THROUGH_RELEASE = [
-    "要求と受け入れ条件", "作業場所の用意", "設計", "ドキュメント再構成", "ドキュメントレビュー", "計画",
-    "実装", "完了判定", "Pull Request", "後片付け", "配布",
+    "要求と受け入れ条件",
+    "作業場所の用意",
+    "設計",
+    "ドキュメント再構成",
+    "ドキュメントレビュー",
+    "計画",
+    "実装",
+    "完了判定",
+    "Pull Request",
+    "後片付け",
+    "配布",
 ]
 
 
@@ -359,8 +406,23 @@ def test_an_unknown_pace_returns_two(repo: Path, state: Path) -> None:
 
 def test_the_fast_stage_names_are_rows_of_the_workflow_table() -> None:
     """SKILL.md の進め方の表に載せる工程の名前は、工程表の行名と一致する。"""
-    for stage in ("構造改善", "実装レビュー", "確定仕様化", "振り返り", "作業場所の用意", "計画", "実装",
-                  "完了判定", "Pull Request", "後片付け", "配布", "リリース後テスト", "要求と受け入れ条件", "設計",
-                  "ドキュメント再構成", "ドキュメントレビュー"):
+    for stage in (
+        "構造改善",
+        "実装レビュー",
+        "確定仕様化",
+        "振り返り",
+        "作業場所の用意",
+        "計画",
+        "実装",
+        "完了判定",
+        "Pull Request",
+        "後片付け",
+        "配布",
+        "リリース後テスト",
+        "要求と受け入れ条件",
+        "設計",
+        "ドキュメント再構成",
+        "ドキュメントレビュー",
+    ):
         result = run_lib(f'wf_is_stage "{stage}"')
         assert result.returncode == 0, stage

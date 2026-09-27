@@ -7,6 +7,7 @@
 順序は「統合 1 段目 → 実行検証 → 反証 → 取り込み（統合 2 段目）」である
 （`docs/06-evidence.md` の「走らせる順序」）。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -70,8 +71,7 @@ def test_the_subcommand_is_registered(state_mod) -> None:
 
 
 def test_init_takes_the_verification_arguments(state_mod) -> None:
-    args = state_mod.build_parser().parse_args(
-        ["init", str(PR), "--verify-command", "pytest", "--verify-exit-code", "3"])
+    args = state_mod.build_parser().parse_args(["init", str(PR), "--verify-command", "pytest", "--verify-exit-code", "3"])
     assert args.verify_command == ["pytest"]
     assert args.verify_exit_code == [3]
 
@@ -81,9 +81,16 @@ def test_init_takes_the_verification_arguments(state_mod) -> None:
 
 def _finding(fid, agent, **over):
     f = {
-        "finding_id": fid, "agent": agent, "path": "a.py", "line": 1,
-        "body": "同じ本文", "severity": "major", "pr": PR, "round": 1,
-        "origin_runtimes": [agent], "suggested_check": "",
+        "finding_id": fid,
+        "agent": agent,
+        "path": "a.py",
+        "line": 1,
+        "body": "同じ本文",
+        "severity": "major",
+        "pr": PR,
+        "round": 1,
+        "origin_runtimes": [agent],
+        "suggested_check": "",
     }
     f.update(over)
     return f
@@ -97,11 +104,16 @@ def tmp_dir(monkeypatch, tmp_path, state_mod):
 
 def _write(tmp_dir, findings, worktree, **over):
     st = {
-        "current_pr": PR, "repo": "o/r", "max_rounds": 12, "rotate_after": 8,
-        "only": None, "host": "claude", "worktree_path": str(worktree),
-        "rounds": [{"round": 1, "pr": PR, "reviewers": ["codex", "kiro"],
-                    "started_at": "2026-09-10T00:00:00+00:00"}],
-        "review_findings": list(findings), "final": None,
+        "current_pr": PR,
+        "repo": "o/r",
+        "max_rounds": 12,
+        "rotate_after": 8,
+        "only": None,
+        "host": "claude",
+        "worktree_path": str(worktree),
+        "rounds": [{"round": 1, "pr": PR, "reviewers": ["codex", "kiro"], "started_at": "2026-09-10T00:00:00+00:00"}],
+        "review_findings": list(findings),
+        "final": None,
     }
     st.update(over)
     (tmp_dir / f"cross-review-pr{PR}-state.json").write_text(json.dumps(st))
@@ -136,9 +148,7 @@ def test_verify_findings_merges_and_records(tmp_dir, tmp_path, state_mod) -> Non
     assert findings["codex-r1-0"]["verification"]["command"] == "pytest t.py"
 
 
-def test_verify_findings_records_not_run_without_a_command(
-    tmp_dir, tmp_path, state_mod
-) -> None:
+def test_verify_findings_records_not_run_without_a_command(tmp_dir, tmp_path, state_mod) -> None:
     """**渡されなければ実行しない。** 行わなかったことを記録へ残す。"""
     work = tmp_path / "work"
     work.mkdir()
@@ -151,24 +161,25 @@ def test_verify_findings_records_not_run_without_a_command(
     assert record["exit_code"] is None
 
 
-def test_collect_critiques_merges_declared_duplicates(
-    tmp_dir, tmp_path, state_mod
-) -> None:
+def test_collect_critiques_merges_declared_duplicates(tmp_dir, tmp_path, state_mod) -> None:
     """2 段目の統合が、反証の取り込みと同じ呼び出しで走る。"""
     work = tmp_path / "work"
     work.mkdir()
-    _write(tmp_dir, [
-        _finding("codex-r1-0", "codex", body="片方の本文"),
-        _finding("kiro-r1-0", "kiro", body="もう片方の本文"),
-    ], work)
+    _write(
+        tmp_dir,
+        [
+            _finding("codex-r1-0", "codex", body="片方の本文"),
+            _finding("kiro-r1-0", "kiro", body="もう片方の本文"),
+        ],
+        work,
+    )
     for agent, fid, other in (
         ("kiro", "codex-r1-0", "kiro-r1-0"),
         ("codex", "kiro-r1-0", "codex-r1-0"),
     ):
-        (tmp_dir / f"{agent}-critique-pr{PR}-round1.json").write_text(json.dumps(
-            {"critiques": [
-                {"finding_id": fid, "verdict": "duplicate",
-                 "duplicate_of": other, "reason": "同じ主張である"}]}))
+        (tmp_dir / f"{agent}-critique-pr{PR}-round1.json").write_text(
+            json.dumps({"critiques": [{"finding_id": fid, "verdict": "duplicate", "duplicate_of": other, "reason": "同じ主張である"}]})
+        )
 
     review_lib.commands.collect_critiques.cmd_collect_critiques(argparse.Namespace(pr=PR))
 

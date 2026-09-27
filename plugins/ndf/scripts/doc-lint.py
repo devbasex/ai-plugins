@@ -8,6 +8,7 @@
 結果は lib/step_result.py の形の 1 行の JSON。終了コードは 0 = ヒット無し / 1 = ヒットあり / 2 = 読めない。
 `items[]` は 1 ヒット 1 件（`name` は `パス:行`、`rule` は当たった規則、`text` は行）。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -33,10 +34,14 @@ TOOL = "doc-lint"
 # 規則名 → 正規表現。markdown-writing の「書き終えたらセルフチェック」の語に、課題番号の由来と
 # 以前との比較の語を足したもの
 RULES = {
-    "history": re.compile(r"案 ?[A-Z]\b|Option ?[A-Z]\b|パターン[0-9]|今回|壁打ち|以前は|当初は|に変更|指摘を受け|"
-                          r"レビュー対応|誤りのため"),
-    "issue-origin": re.compile(r"#\d+\s*(?:で|から|により|によって|以来|の(?:指示|指摘|差し戻し|追記|追加|変更|対応|"
-                               r"見直し|導入|修正))|（#\d+(?:\s*の[^）]{1,12})?）"),
+    "history": re.compile(
+        r"案 ?[A-Z]\b|Option ?[A-Z]\b|パターン[0-9]|今回|壁打ち|以前は|当初は|に変更|指摘を受け|"
+        r"レビュー対応|誤りのため"
+    ),
+    "issue-origin": re.compile(
+        r"#\d+\s*(?:で|から|により|によって|以来|の(?:指示|指摘|差し戻し|追記|追加|変更|対応|"
+        r"見直し|導入|修正))|（#\d+(?:\s*の[^）]{1,12})?）"
+    ),
     "comparison": re.compile(r"従来|以前|かつて|もともと|元々|旧来|過去に|によらず|ではな[いく]|に関わらず|にかかわらず"),
 }
 DEFAULT_EXCLUDE = ("CHANGELOG.md", "issues/", ".worktrees/", "docs/presentations/")
@@ -60,8 +65,16 @@ def lint_files(root: Path, files: dict[str, set[int]], all_lines: bool) -> tuple
             for rule, rx in RULES.items():
                 m = rx.search(text)
                 if m:
-                    items.append({"kind": "line", "name": f"{rel}:{n}", "result": "hit", "rule": rule,
-                                  "match": m.group(0), "text": text.strip()[:200]})
+                    items.append(
+                        {
+                            "kind": "line",
+                            "name": f"{rel}:{n}",
+                            "result": "hit",
+                            "rule": rule,
+                            "match": m.group(0),
+                            "text": text.strip()[:200],
+                        }
+                    )
     return items, total
 
 
@@ -93,21 +106,32 @@ def cmd_lint(a):
     files = glossary.added_lines(root, start, ("*.md", "**/*.md"))
     excl = tuple(a.exclude) if a.exclude is not None else DEFAULT_EXCLUDE
     generated = set(generated_documents(root))
-    files = {k: v for k, v in files.items()
-             if k not in generated and not any(k.startswith(e) or k == e.rstrip("/") for e in excl)}
+    files = {k: v for k, v in files.items() if k not in generated and not any(k.startswith(e) or k == e.rstrip("/") for e in excl)}
     items, total = lint_files(root, files, a.all_lines)
-    metrics = {"base": base, "files": len(files), "lines": total, "hits": len(items),
-               "rules": {r: sum(1 for i in items if i["rule"] == r) for r in RULES}}
+    metrics = {
+        "base": base,
+        "files": len(files),
+        "lines": total,
+        "hits": len(items),
+        "rules": {r: sum(1 for i in items if i["rule"] == r) for r in RULES},
+    }
     if items:
         summary = f"追加した {total} 行のうち {len(items)} 行に書き方のチェックの語がある（{len(files)} ファイル）"
-        emit(result(TOOL, "stopped", summary, items, metrics,
-                    next="ヒットした行を、今の決まりだけを書く形に直す（経緯・比較・課題番号の由来を外す）"))
+        emit(
+            result(
+                TOOL,
+                "stopped",
+                summary,
+                items,
+                metrics,
+                next="ヒットした行を、今の決まりだけを書く形に直す（経緯・比較・課題番号の由来を外す）",
+            )
+        )
     emit(result(TOOL, "ok", f"追加した {total} 行に書き方のチェックの語は無い（{len(files)} ファイル）", items, metrics))
 
 
 def build_parser():
-    ap = argparse.ArgumentParser(prog="doc-lint.py", description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(prog="doc-lint.py", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--root", help="対象のリポジトリの根（既定はカレントの git の根）")
     ap.add_argument("--base", help="起点の ref（既定 origin/<.ndf/worktree.json の base_branch>）")
     ap.add_argument("--exclude", nargs="*", help=f"見ないパスの接頭辞（既定 {' '.join(DEFAULT_EXCLUDE)}）")

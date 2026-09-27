@@ -4,6 +4,7 @@
 （`git interpret-trailers --parse`）に委ねているため、差し替えた出力で確かめても
 本番の読み方を確かめたことにならない。
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -25,8 +26,7 @@ Co-Authored-By: Claude Opus 5 <noreply@example.test>
 
 
 def _git(*args, cwd):
-    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True,
-                          check=True)
+    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True)
 
 
 @pytest.fixture
@@ -59,24 +59,18 @@ def commit(repo):
     return _make
 
 
-def test_a_signature_paragraph_after_the_required_ones_is_skipped(
-    gitfacts, repo, commit
-):
+def test_a_signature_paragraph_after_the_required_ones_is_skipped(gitfacts, repo, commit):
     """AC32: 必須の記名の後ろに帰属の段落が付いても 3 つとも読める。"""
     sha = commit(_SIGNED)
 
     trailers = gitfacts.commit_trailers(str(repo), sha)
 
-    assert [trailers.get(k) for k in REQUIRED] == [
-        "I-001", "claude", "claude-opus-5"]
+    assert [trailers.get(k) for k in REQUIRED] == ["I-001", "claude", "claude-opus-5"]
 
 
-def test_two_attribution_lines_in_one_paragraph_are_also_skipped(
-    gitfacts, repo, commit
-):
+def test_two_attribution_lines_in_one_paragraph_are_also_skipped(gitfacts, repo, commit):
     """AC33: 帰属の段落が 2 行でも 3 つとも読める。"""
-    sha = commit(
-        _SIGNED + "Claude-Session: https://example.test/session_1\n")
+    sha = commit(_SIGNED + "Claude-Session: https://example.test/session_1\n")
 
     trailers = gitfacts.commit_trailers(str(repo), sha)
 
@@ -101,10 +95,7 @@ def test_a_prose_paragraph_stops_the_reading(gitfacts, repo, commit):
 
 def test_a_mixed_last_paragraph_is_not_read(gitfacts, repo, commit):
     """AC35: 散文と記名の形が混ざる段落は、git が記名の段落と判定しない。"""
-    sha = commit(
-        "Refactor: 題名\n\n"
-        "ここは説明です。\nこちらも説明です。\nさらに説明です。\nRound: 3\n"
-    )
+    sha = commit("Refactor: 題名\n\nここは説明です。\nこちらも説明です。\nさらに説明です。\nRound: 3\n")
 
     trailers = gitfacts.commit_trailers(str(repo), sha)
 
@@ -113,12 +104,7 @@ def test_a_mixed_last_paragraph_is_not_read(gitfacts, repo, commit):
 
 def test_the_paragraph_nearest_the_end_wins(gitfacts, repo, commit):
     """AC36: 同じ鍵が 2 つの段落にあれば、末尾に近い方の値を採る。"""
-    sha = commit(
-        "Refactor: 題名\n\n"
-        "Item-Id: I-001\n"
-        "Impl-Runtime: claude\nImpl-Model: claude-opus-5\n\n"
-        "Impl-Model: claude-opus-5-later\n"
-    )
+    sha = commit("Refactor: 題名\n\nItem-Id: I-001\nImpl-Runtime: claude\nImpl-Model: claude-opus-5\n\nImpl-Model: claude-opus-5-later\n")
 
     trailers = gitfacts.commit_trailers(str(repo), sha)
 
@@ -135,17 +121,17 @@ def test_a_subject_shaped_like_a_trailer_is_not_read(gitfacts, repo, commit):
     assert trailers == {"Item-Id": "I-002"}
 
 
-def test_a_commit_with_an_attribution_paragraph_passes_the_implement_check(
-    gitfacts, cmd_implement, repo, commit
-):
+def test_a_commit_with_an_attribution_paragraph_passes_the_implement_check(gitfacts, cmd_implement, repo, commit):
     """AC37: 帰属の段落が付いたコミットは、記名の欠落で取り消されない。"""
     sha = commit(_SIGNED)
-    facts = gitfacts.collect_commit_facts(
-        str(repo), [sha], {sha}, "", "main")
+    facts = gitfacts.collect_commit_facts(str(repo), [sha], {sha}, "", "main")
 
     problem = cmd_implement._implement_problem(
         {"id": "I-001", "estimated_diff_lines": 100, "technique": "extract_method"},
-        facts, ["src"], [], {"worktrees": {"work": str(repo)}},
+        facts,
+        ["src"],
+        [],
+        {"worktrees": {"work": str(repo)}},
     )
 
     assert problem is None
@@ -158,7 +144,10 @@ def test_a_commit_without_the_item_trailer_is_rejected(gitfacts, cmd_implement, 
 
     problem = cmd_implement._implement_problem(
         {"id": "I-001", "estimated_diff_lines": 100, "technique": "extract_method"},
-        facts, ["src"], [], {"worktrees": {"work": str(repo)}},
+        facts,
+        ["src"],
+        [],
+        {"worktrees": {"work": str(repo)}},
     )
 
     assert problem is not None and "Item-Id" in problem

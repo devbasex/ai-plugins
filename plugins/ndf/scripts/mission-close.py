@@ -22,6 +22,7 @@ closed / already_closed / failed / kept_open（--dry-run では would_close）�
 終了コード: 0 = 失敗なし / 1 = 失敗あり（issue-upkeep へ進まない）/ 2 = 一覧が取れない・
 --record-pr 0 に --issues が無い / 3 = 呼び出しの誤り。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -36,8 +37,16 @@ sys.path.insert(0, str(HERE / "lib"))
 import deps  # noqa: E402
 
 deps.require("md")
-from step_result import (EXIT_PRECONDITION, EXIT_UNREADABLE, StepError, emit, git_root,  # noqa: E402
-                         main_with, result, run)
+from step_result import (
+    EXIT_PRECONDITION,
+    EXIT_UNREADABLE,
+    StepError,
+    emit,
+    git_root,  # noqa: E402
+    main_with,
+    result,
+    run,
+)
 import gh_call  # noqa: E402
 import md  # noqa: E402
 
@@ -47,6 +56,7 @@ VERIFY = "## リリース後テスト"
 
 
 # --- 記録の読み取り -------------------------------------------------------------
+
 
 def read_record(root, repo, n):
     """記録の PR の本文とコメントを投稿の順に 1 つの文字列にする。"""
@@ -72,14 +82,13 @@ def parse_record(text):
     sections = [s for s in md.md_sections(text) if lines[s.heading.line].startswith("#")]
     dists = [s for s in sections if lines[s.heading.line].startswith(DIST)]
     dist_start = dists[-1].heading.line if dists else None
-    out = {"found": dist_start is not None, "stage": None, "version": None, "mission_prs": [],
-           "verify_block": None}
+    out = {"found": dist_start is not None, "stage": None, "version": None, "mission_prs": [], "verify_block": None}
     if dist_start is None:
         return out
-    block = lines[dists[-1].start:dists[-1].end]
+    block = lines[dists[-1].start : dists[-1].end]
     for ln in block:
         if ln.startswith("段階: ") and out["stage"] is None:
-            out["stage"] = ln[len("段階: "):].strip()
+            out["stage"] = ln[len("段階: ") :].strip()
         elif ln.startswith(("ミッション: ", "まとまり: ")):  # 旧い記録（まとまり）も読む
             out["mission_prs"] = [int(x) for x in re.findall(r"#(\d+)", ln)]
     if (out["stage"] or "").startswith("本番"):
@@ -99,7 +108,7 @@ def parse_record(text):
             continue
         cur["lines"].append(ln)
         if ln.startswith("対象の版: ") and cur["ver"] is None:
-            cur["ver"] = re.sub(r"\s*（.*$", "", ln[len("対象の版: "):]).strip()
+            cur["ver"] = re.sub(r"\s*（.*$", "", ln[len("対象の版: ") :]).strip()
         if ln.startswith("合否:"):
             blocks.append(cur)
             cur = None
@@ -137,14 +146,16 @@ def verification_verdicts(block, record_repo):
 
 # --- 課題の収集 -----------------------------------------------------------------
 
+
 def mission_issues(root, repo, prs):
     seen, out = set(), []
     for n in prs:
         p = gh_call.gh(["pr", "view", str(n), "--repo", repo, "--json", "body", "-q", ".body"], cwd=root)
         if p.returncode != 0:
             raise StepError(f"ミッションの PR #{n} を読めない: {p.stderr.strip()[:300]}", EXIT_UNREADABLE)
-        c = subprocess.run(["bash", str(HERE / "lib" / "closing-issues.sh"), "--repo", repo],
-                           cwd=root, input=p.stdout, capture_output=True, text=True)
+        c = subprocess.run(
+            ["bash", str(HERE / "lib" / "closing-issues.sh"), "--repo", repo], cwd=root, input=p.stdout, capture_output=True, text=True
+        )
         for ln in c.stdout.splitlines():
             if "\t" not in ln:
                 continue
@@ -158,6 +169,7 @@ def mission_issues(root, repo, prs):
 
 # --- 閉じる ---------------------------------------------------------------------
 
+
 def issue_state(root, repo, n):
     p = gh_call.gh(["issue", "view", str(n), "--repo", repo, "--json", "state", "-q", ".state"], cwd=root)
     return p.stdout.strip() if p.returncode == 0 and p.stdout.strip() else None
@@ -167,8 +179,7 @@ def close_one(root, repo, n, record_repo, comment, notes):
     it = {"kind": "issue", "repo": repo, "number": n}
     before = issue_state(root, repo, n)
     if before is None:
-        return {**it, "result": "failed", "reason": "before を読めない",
-                "cmd": f"gh issue close {n} --repo {repo}"}
+        return {**it, "result": "failed", "reason": "before を読めない", "cmd": f"gh issue close {n} --repo {repo}"}
     if repo == record_repo:
         s = run(["bash", str(HERE / "projects-sync.sh"), str(n), "status", "Done"], cwd=root, check=False)
         for ln in (s.stdout + s.stderr).splitlines():
@@ -196,8 +207,17 @@ def close_one(root, repo, n, record_repo, comment, notes):
 
 def cmd_close(a):
     if a.record_pr == 0 and not a.issues:
-        emit(result(TOOL, "stopped", "--record-pr 0（本番の記録なし）は --issues と一緒に渡す", [], {"issues": 0},
-                    next="閉じる課題を --issues で渡して打ち直す"), EXIT_UNREADABLE)
+        emit(
+            result(
+                TOOL,
+                "stopped",
+                "--record-pr 0（本番の記録なし）は --issues と一緒に渡す",
+                [],
+                {"issues": 0},
+                next="閉じる課題を --issues で渡して打ち直す",
+            ),
+            EXIT_UNREADABLE,
+        )
     root = git_root(a.root)
     record_repo = a.repo
     if not record_repo:
@@ -213,8 +233,17 @@ def cmd_close(a):
         rec = parse_record(read_record(root, record_repo, a.record_pr))
         prs = a.prs or rec["mission_prs"]
     if not prs and not given:
-        emit(result(TOOL, "stopped", "ミッションの PR の一覧が取れない。推測せず運用者に一覧を聞く",
-                    [], {"issues": 0}, next="運用者に一覧を聞き、--prs で渡して打ち直す"), EXIT_UNREADABLE)
+        emit(
+            result(
+                TOOL,
+                "stopped",
+                "ミッションの PR の一覧が取れない。推測せず運用者に一覧を聞く",
+                [],
+                {"issues": 0},
+                next="運用者に一覧を聞き、--prs で渡して打ち直す",
+            ),
+            EXIT_UNREADABLE,
+        )
     issues = mission_issues(root, record_repo, prs) if prs else []
     issues += [k for k in given if k not in issues]
 
@@ -230,8 +259,9 @@ def cmd_close(a):
     if kept_all is None and a.with_verification and a.record_pr != 0:
         blk = rec["verify_block"]
         if blk is None:
-            kept_all = ("配布なしの後のリリース後テストの記録が無い" if stage.startswith("配布なし")
-                        else "本番の版のリリース後テストの記録が無い")
+            kept_all = (
+                "配布なしの後のリリース後テストの記録が無い" if stage.startswith("配布なし") else "本番の版のリリース後テストの記録が無い"
+            )
         else:
             verdicts = verification_verdicts(blk, record_repo)
             if verdicts is None:
@@ -245,27 +275,31 @@ def cmd_close(a):
             items.append({**base, "result": "kept_open", "reason": kept_all})
             continue
         if verdicts is not None and not verdicts.get((repo, n), False):
-            why = ("リリース後テストの行が無い" if (repo, n) not in verdicts
-                   else "リリース後テストに合格でない条件がある（不合格・保留）")
+            why = "リリース後テストの行が無い" if (repo, n) not in verdicts else "リリース後テストに合格でない条件がある（不合格・保留）"
             items.append({**base, "result": "kept_open", "reason": why})
             continue
         if a.dry_run:
             st = issue_state(root, repo, n)
-            items.append({**base, "result": "already_closed" if st == "CLOSED" else "would_close",
-                          **({"reason": "状態を読めない"} if st is None else {})})
+            items.append(
+                {
+                    **base,
+                    "result": "already_closed" if st == "CLOSED" else "would_close",
+                    **({"reason": "状態を読めない"} if st is None else {}),
+                }
+            )
             continue
         items.append(close_one(root, repo, n, record_repo, comment, notes))
 
-    count = {k: sum(1 for i in items if i["result"] == k)
-             for k in ("closed", "already_closed", "failed", "kept_open", "would_close")}
+    count = {k: sum(1 for i in items if i["result"] == k) for k in ("closed", "already_closed", "failed", "kept_open", "would_close")}
     metrics = {"issues": len(items), **count, "prs": len(prs)}
-    summary = (f"閉じた {count['closed']} 件・既に閉じていた {count['already_closed']} 件・"
-               f"失敗 {count['failed']} 件・開いたまま {count['kept_open']} 件")
+    summary = (
+        f"閉じた {count['closed']} 件・既に閉じていた {count['already_closed']} 件・"
+        f"失敗 {count['failed']} 件・開いたまま {count['kept_open']} 件"
+    )
     if a.dry_run:
         summary += f"（試行。閉じる予定 {count['would_close']} 件）"
     if count["failed"]:
-        emit(result(TOOL, "stopped", summary, items + notes, metrics,
-                    next="失敗した課題の cmd でやり直す。issue-upkeep へ進まない"))
+        emit(result(TOOL, "stopped", summary, items + notes, metrics, next="失敗した課題の cmd でやり直す。issue-upkeep へ進まない"))
     emit(result(TOOL, "ok", summary, items + notes, metrics))
 
 
@@ -285,8 +319,9 @@ def number_list(s):
 
 def build_parser():
     ap = Parser(prog="mission-close.py", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--record-pr", type=int, required=True,
-                    help="配布の記録を置いた PR の番号。0 は本番の記録なし（--issues と一緒に渡す）")
+    ap.add_argument(
+        "--record-pr", type=int, required=True, help="配布の記録を置いた PR の番号。0 は本番の記録なし（--issues と一緒に渡す）"
+    )
     ap.add_argument("--prs", type=number_list, help="ミッションの PR の番号（カンマ区切り）。省けば配布の記録から読む")
     ap.add_argument("--issues", type=number_list, help="閉じる課題の番号（カンマ区切り）。PR の閉じる語と和を取る")
     ap.add_argument("--repo", help="記録のリポジトリ（owner/name）。省けば gh repo view で決める")

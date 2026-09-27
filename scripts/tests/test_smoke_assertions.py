@@ -7,6 +7,7 @@
 
 **判定はパイプの右で行わない。** 結果を変数で受けてから照合する。
 """
+
 from __future__ import annotations
 
 import re
@@ -22,9 +23,7 @@ EARLY_EXIT_ON_THE_RIGHT = re.compile(r"\|\s*(grep\b[^|]*\s-\w*q|head\b)")
 def offending_lines() -> list[tuple[str, int, str]]:
     found: list[tuple[str, int, str]] = []
     for script in sorted(ASSERTIONS.glob("*.sh")):
-        for number, line in enumerate(
-            script.read_text(encoding="utf-8").splitlines(), 1
-        ):
+        for number, line in enumerate(script.read_text(encoding="utf-8").splitlines(), 1):
             if line.lstrip().startswith("#"):
                 continue
             if EARLY_EXIT_ON_THE_RIGHT.search(line):

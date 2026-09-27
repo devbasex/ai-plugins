@@ -17,6 +17,7 @@
 stem の突き合わせ（設計文書の未確認 6）もここで固定する。起動の手順・監視・取り込みの
 3 つが同じ形の stem を組み立てなければ、監視の結果ファイルを引けない。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -96,9 +97,7 @@ def _read_result(state_mod, rfile: pathlib.Path | None) -> int:
 
 
 @pytest.mark.parametrize("reason", MONITOR_DECIDED)
-def test_the_monitor_reason_is_recorded_when_no_result_file_exists(
-    tmp_dir, state_mod, reason, capsys
-):
+def test_the_monitor_reason_is_recorded_when_no_result_file_exists(tmp_dir, state_mod, reason, capsys):
     """監視が理由を決めていれば、結果ファイルが無いときその理由と詳細が残る。"""
     _seed_state(tmp_dir)
     _write_monitor(tmp_dir, reason)
@@ -128,9 +127,7 @@ def test_the_monitor_reason_wins_over_an_unreadable_result_file(tmp_dir, state_m
     assert entry["monitor_detail"] == DETAIL
 
 
-def test_without_a_monitor_file_the_reason_is_missing_and_no_detail_key_is_written(
-    tmp_dir, state_mod
-):
+def test_without_a_monitor_file_the_reason_is_missing_and_no_detail_key_is_written(tmp_dir, state_mod):
     """監視の結果ファイルが無ければ `missing` で、`monitor_detail` の鍵そのものが無い。"""
     _seed_state(tmp_dir)
 
@@ -155,9 +152,7 @@ def test_an_unparsable_result_without_a_monitor_file_keeps_exit_code_3(tmp_dir, 
 
 
 @pytest.mark.parametrize("reason", ("ok", "missing"))
-def test_a_monitor_that_did_not_decide_falls_back_to_the_result_file(
-    tmp_dir, state_mod, reason
-):
+def test_a_monitor_that_did_not_decide_falls_back_to_the_result_file(tmp_dir, state_mod, reason):
     """監視が `ok` / `missing` なら理由は結果ファイルの側で決まり、詳細だけ残る。"""
     _seed_state(tmp_dir)
     _write_monitor(tmp_dir, reason, detail="exit 0")
@@ -186,10 +181,17 @@ def test_a_readable_result_file_wins_over_the_monitor_reason(tmp_dir, state_mod)
     _seed_state(tmp_dir)
     _write_monitor(tmp_dir, "usage_limit")
     rfile = tmp_dir / "result.json"
-    rfile.write_text(json.dumps({
-        "event": "APPROVE", "posted_as": "APPROVE", "comments_count": 0,
-        "review_url": "https://example/pr/1#1", "by_severity": {},
-    }))
+    rfile.write_text(
+        json.dumps(
+            {
+                "event": "APPROVE",
+                "posted_as": "APPROVE",
+                "comments_count": 0,
+                "review_url": "https://example/pr/1#1",
+                "by_severity": {},
+            }
+        )
+    )
 
     review_lib.commands.read_result.cmd_read_result(argparse.Namespace(pr=PR, agent=AGENT, file=str(rfile)))
 
@@ -214,20 +216,18 @@ def test_no_verdict_still_overrides_after_the_common_read(tmp_dir, state_mod):
 
 def _launcher_stem_pattern() -> str:
     """`launch-reviewer.sh` の `STEM=` の行から、ディレクトリを除いた stem の形を取る。"""
-    lines = [l for l in _LAUNCHER.read_text(encoding="utf-8").splitlines()
-             if re.match(r"^\s*STEM=", l)]
+    lines = [l for l in _LAUNCHER.read_text(encoding="utf-8").splitlines() if re.match(r"^\s*STEM=", l)]
     assert len(lines) == 1, lines
     value = lines[0].split("=", 1)[1].strip()
     assert value.startswith("$TMP_DIR/"), value
-    return value[len("$TMP_DIR/"):]
+    return value[len("$TMP_DIR/") :]
 
 
 def test_the_three_stems_have_the_same_shape(tmp_dir, state_mod, monitor_mod):
     """起動の手順・監視・取り込みの stem が同じ形で、監視の結果ファイルを引ける。"""
     # 起動の手順（bash）: 変数名を置き換えて形を比べる
     # 起動の手順が持つのは席の名前（`$SEAT`）である。CLI はそこから引く（#727）
-    launcher = (_launcher_stem_pattern()
-                .replace("$SEAT", AGENT).replace("$STATE_PR", str(PR)))
+    launcher = _launcher_stem_pattern().replace("$SEAT", AGENT).replace("$STATE_PR", str(PR))
     # 監視（Python）: 既定の stem テンプレート
     monitor = monitor_mod.DEFAULT_STEM_TEMPLATE.format(agent=AGENT, id=PR)
     assert launcher == monitor == STEM

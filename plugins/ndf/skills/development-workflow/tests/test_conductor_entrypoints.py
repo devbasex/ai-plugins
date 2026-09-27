@@ -4,6 +4,7 @@
 テストは列の値からパスと副命令を取り出し、ファイルがあること・副命令をそのスクリプトが受けることを見る。
 文言は照合しない。スクリプトを動かしたり消したりしたのに一覧を直し忘れた状態を落とす。
 """
+
 from __future__ import annotations
 
 import re
@@ -66,8 +67,7 @@ def accepted_subcommands(path: Path, prefix: list[str]) -> str:
     argparse のスクリプトは `<prefix> --help` の出力、そうでないものは本体の文字列リテラルを見る。
     """
     if path.suffix == ".py":
-        got = subprocess.run([sys.executable, str(path), *prefix, "--help"],
-                             capture_output=True, text=True, timeout=60)
+        got = subprocess.run([sys.executable, str(path), *prefix, "--help"], capture_output=True, text=True, timeout=60)
         if got.returncode == 0 and "usage:" in got.stdout:
             return got.stdout
     return path.read_text(encoding="utf-8")
@@ -79,5 +79,4 @@ def test_listed_subcommand_is_accepted(entry: str):
     script = PLUGIN_ROOT / path
     for i, sub in enumerate(subs):
         text = accepted_subcommands(script, subs[:i])
-        assert re.search(rf"(?<![\w-]){re.escape(sub)}(?![\w-])", text), \
-            f"{entry}: {path} が副命令 {sub} を受けない"
+        assert re.search(rf"(?<![\w-]){re.escape(sub)}(?![\w-])", text), f"{entry}: {path} が副命令 {sub} を受けない"

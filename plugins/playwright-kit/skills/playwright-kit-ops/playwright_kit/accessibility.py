@@ -23,9 +23,18 @@ from playwright.sync_api import Page
 DEFAULT_TAGS: tuple[str, ...] = ("wcag2a", "wcag2aa", "wcag21aa", "wcag22aa")
 
 # page_role × a11y 自動実行のデフォルト対象。フォーム / 商取引 / 認証系は a11y 影響大。
-DEFAULT_AUTO_ROLES: frozenset[str] = frozenset({
-    "lp", "list", "form", "dashboard", "cart", "checkout", "settings", "auth",
-})
+DEFAULT_AUTO_ROLES: frozenset[str] = frozenset(
+    {
+        "lp",
+        "list",
+        "form",
+        "dashboard",
+        "cart",
+        "checkout",
+        "settings",
+        "auth",
+    }
+)
 
 
 def is_available() -> bool:
@@ -55,7 +64,8 @@ def scan_page(
     axe = Axe()
     try:
         results = axe.run(
-            page, options={"runOnly": {"type": "tag", "values": list(tags)}},
+            page,
+            options={"runOnly": {"type": "tag", "values": list(tags)}},
         )
     except TypeError:
         # axe-playwright-python の旧版は options 非対応
@@ -63,21 +73,23 @@ def scan_page(
 
     violations: list[dict[str, Any]] = []
     for v in results.response.get("violations", []):
-        violations.append({
-            "id": v.get("id"),
-            "impact": v.get("impact"),
-            "tags": v.get("tags", []),
-            "help": v.get("help"),
-            "helpUrl": v.get("helpUrl"),
-            "nodes": [
-                {
-                    "html": n.get("html", "")[:200],
-                    "target": n.get("target", []),
-                    "failureSummary": n.get("failureSummary", "")[:300],
-                }
-                for n in v.get("nodes", [])
-            ],
-        })
+        violations.append(
+            {
+                "id": v.get("id"),
+                "impact": v.get("impact"),
+                "tags": v.get("tags", []),
+                "help": v.get("help"),
+                "helpUrl": v.get("helpUrl"),
+                "nodes": [
+                    {
+                        "html": n.get("html", "")[:200],
+                        "target": n.get("target", []),
+                        "failureSummary": n.get("failureSummary", "")[:300],
+                    }
+                    for n in v.get("nodes", [])
+                ],
+            }
+        )
     return violations
 
 

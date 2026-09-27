@@ -2,6 +2,7 @@
 
 プロジェクトの追跡しているファイルと、宣言のスコープの場所から対象を集め、即時読み込みの参照を読む。
 """
+
 from __future__ import annotations
 
 import os
@@ -22,6 +23,7 @@ IMPORT_RE = re.compile(r"(?:(?<=^)|(?<=[\s*_~]))@([A-Za-z0-9._\-/~]+)")
 
 # --- 指示書を集める ----------------------------------------------------------
 
+
 def _matches_file_pattern(rel: str, patterns: list[str]) -> bool:
     """`/` を含まない値はどの階層のファイル名にも、含む値は根からの相対パスに当てる（git の wildmatch）。"""
     return pathmatch.path_matches(rel, [p if "/" in p else f"**/{p}" for p in patterns])
@@ -37,7 +39,9 @@ def collect_project(root: Path, decl: Declaration) -> ScopeRoot:
     try:
         result = subprocess.run(
             ["git", "-C", str(root), "ls-files", "-z"],
-            capture_output=True, text=True, check=True,
+            capture_output=True,
+            text=True,
+            check=True,
         )
     except (OSError, subprocess.CalledProcessError) as exc:
         raise CheckError(f"git が使えない（{root}）: {exc}") from exc
@@ -51,21 +55,30 @@ def collect_project(root: Path, decl: Declaration) -> ScopeRoot:
         # 中にある指示書でも、開いた先は作業ツリーの外である。
         if not path.is_file() or not _inside_root(str(path), root):
             continue
-        scope_root.targets.append(Target(
-            path=path, rel=rel, scope="project", root=root,
-            is_root_file="/" not in rel, imports=decl.imports,
-        ))
+        scope_root.targets.append(
+            Target(
+                path=path,
+                rel=rel,
+                scope="project",
+                root=root,
+                is_root_file="/" not in rel,
+                imports=decl.imports,
+            )
+        )
     return scope_root
 
 
 def _build_scope_metadata(
-    entry: dict, scope: str,
+    entry: dict,
+    scope: str,
 ) -> tuple[Source | None, dict | None]:
     source = None
     if scope == "plugins":
         source = Source(
-            name=str(entry.get("name", "")), version=str(entry.get("version", "")),
-            origin=str(entry.get("origin", "")), update=str(entry.get("update", "")),
+            name=str(entry.get("name", "")),
+            version=str(entry.get("version", "")),
+            origin=str(entry.get("origin", "")),
+            update=str(entry.get("update", "")),
             ndf=bool(entry.get("ndf", False)),
         )
     allow = entry.get("imports")
@@ -75,7 +88,10 @@ def _build_scope_metadata(
 
 
 def _enumerate_scope_files(
-    located: Path, scope: str, allow: dict | None, source: Source | None,
+    located: Path,
+    scope: str,
+    allow: dict | None,
+    source: Source | None,
 ) -> tuple[ScopeRoot, list[Path]] | None:
     if located.is_file():
         return ScopeRoot(located.parent, scope, allow, source), [located]
@@ -87,7 +103,10 @@ def _enumerate_scope_files(
 
 
 def _collect_scope_entry(
-    entry: dict, scope: str, root: Path, decl: Declaration,
+    entry: dict,
+    scope: str,
+    root: Path,
+    decl: Declaration,
 ) -> ScopeRoot | None:
     """`scopes` の 1 件から集める。位置が無ければ `None` を返す。"""
     raw_path = entry.get("path")
@@ -105,10 +124,17 @@ def _collect_scope_entry(
             continue
         if not _inside_root(str(path), scope_root.root):
             continue
-        scope_root.targets.append(Target(
-            path=path, rel=rel, scope=scope, root=scope_root.root,
-            is_root_file="/" not in rel, imports=allow, source=source,
-        ))
+        scope_root.targets.append(
+            Target(
+                path=path,
+                rel=rel,
+                scope=scope,
+                root=scope_root.root,
+                is_root_file="/" not in rel,
+                imports=allow,
+                source=source,
+            )
+        )
     return scope_root
 
 
@@ -127,6 +153,7 @@ def display_path(target: Target) -> str:
 
 
 # --- 本文の読み方 ------------------------------------------------------------
+
 
 def mask_code(text: str) -> list[str]:
     """コードブロックとコードスパンを空白へ潰した行の並び。**位置は保つ**（行と桁が動かない）。"""

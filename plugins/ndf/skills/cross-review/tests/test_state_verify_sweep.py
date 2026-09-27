@@ -11,6 +11,7 @@
 | 1 件 | 1 件 | 1 | 6（件数と理由を完了報告へ入れる） |
 | 0 件 | 取得できない | 0（申告のまま） | 0（確認できなかったことを残す） |
 """
+
 from __future__ import annotations
 
 import argparse
@@ -51,8 +52,11 @@ def _read(tmp_dir: pathlib.Path) -> dict:
 
 def _sweep(tmp_dir: pathlib.Path, **over) -> None:
     payload = {
-        "resolved": 5, "fixed_in_sweep": 2, "commit": "abc1234",
-        "remaining_open": 0, "items": [],
+        "resolved": 5,
+        "fixed_in_sweep": 2,
+        "commit": "abc1234",
+        "remaining_open": 0,
+        "items": [],
     }
     payload.update(over)
     (tmp_dir / f"sweep-pr{PR}-result.json").write_text(json.dumps(payload))
@@ -68,9 +72,11 @@ def tmp_dir(monkeypatch, tmp_path, state_mod):
 def unresolved(monkeypatch, state_mod):
     def _set(threads):
         monkeypatch.setattr(
-            review_lib.github, "_fetch_unresolved_threads",
+            review_lib.github,
+            "_fetch_unresolved_threads",
             lambda repo, pr: threads,
         )
+
     return _set
 
 
@@ -79,6 +85,7 @@ def _args() -> argparse.Namespace:
 
 
 # ---------------- 検証 ----------------
+
 
 def test_zero_remaining_is_confirmed_against_github(tmp_dir, state_mod, unresolved, capsys):
     _write(tmp_dir, _state())
@@ -99,8 +106,7 @@ def test_a_declaration_of_zero_does_not_override_the_actual_count(tmp_dir, state
     """申告が 0 件でも、GitHub 側に残っていれば残件数として記録する。"""
     _write(tmp_dir, _state())
     _sweep(tmp_dir, remaining_open=0)
-    unresolved([{"id": "PRRT_a", "path": "src/foo.py", "line": "42"},
-                {"id": "PRRT_b", "path": "docs/bar.md", "line": "7"}])
+    unresolved([{"id": "PRRT_a", "path": "src/foo.py", "line": "42"}, {"id": "PRRT_b", "path": "docs/bar.md", "line": "7"}])
 
     with pytest.raises(SystemExit) as e:
         review_lib.commands.report.cmd_verify_sweep(_args())
@@ -161,11 +167,19 @@ def test_a_missing_sweep_result_fails(tmp_dir, state_mod, unresolved):
 
 # ---------------- 完了報告 ----------------
 
+
 def test_report_includes_the_remaining_count_and_the_reason(tmp_dir, state_mod, capsys):
-    _write(tmp_dir, _state(sweep={
-        "declared_remaining_open": 1, "remaining_open": 1,
-        "remaining_reason": "外部の担当者による指摘のため保留", "verified": True,
-    }))
+    _write(
+        tmp_dir,
+        _state(
+            sweep={
+                "declared_remaining_open": 1,
+                "remaining_open": 1,
+                "remaining_reason": "外部の担当者による指摘のため保留",
+                "verified": True,
+            }
+        ),
+    )
 
     review_lib.commands.report.cmd_report(argparse.Namespace(pr=PR))
 
@@ -176,10 +190,17 @@ def test_report_includes_the_remaining_count_and_the_reason(tmp_dir, state_mod, 
 
 
 def test_report_states_zero_when_nothing_remains(tmp_dir, state_mod, capsys):
-    _write(tmp_dir, _state(sweep={
-        "declared_remaining_open": 0, "remaining_open": 0,
-        "remaining_reason": None, "verified": True,
-    }))
+    _write(
+        tmp_dir,
+        _state(
+            sweep={
+                "declared_remaining_open": 0,
+                "remaining_open": 0,
+                "remaining_reason": None,
+                "verified": True,
+            }
+        ),
+    )
 
     review_lib.commands.report.cmd_report(argparse.Namespace(pr=PR))
 

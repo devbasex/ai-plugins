@@ -1,4 +1,5 @@
 """`launch-cli.sh` のランタイム別引数を固定する。"""
+
 from __future__ import annotations
 
 import os

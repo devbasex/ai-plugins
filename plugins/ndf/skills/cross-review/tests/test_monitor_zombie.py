@@ -7,6 +7,7 @@ Docker without --init 環境では、nohup/disown で起動したプロセスが
 差し替え先は `procs._process`（psutil のプロセスを引く 1 か所。#1142 の D3 で `/proc/<pid>/status` の
 読み取りと `os.kill(pid, 0)` から移した）。
 """
+
 from __future__ import annotations
 
 from unittest import mock

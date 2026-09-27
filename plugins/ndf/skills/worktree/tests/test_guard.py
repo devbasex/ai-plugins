@@ -4,6 +4,7 @@
 3 ランタイムの入力の差を吸収できていること、拒否の判定を返さないこと、案内を
 出す例と出さない例が対になっていることを確かめる。
 """
+
 from __future__ import annotations
 
 import json
@@ -227,12 +228,7 @@ def test_codex_apply_patch_is_normalized(main_repo: Path) -> None:
         "hook_event_name": "PreToolUse",
         "tool_name": "apply_patch",
         "tool_input": {
-            "command": (
-                "*** Begin Patch\n"
-                "*** Update File: plugins/ndf/README.md\n"
-                "@@\n-# sample\n+# sample edited\n"
-                "*** End Patch\n"
-            )
+            "command": ("*** Begin Patch\n*** Update File: plugins/ndf/README.md\n@@\n-# sample\n+# sample edited\n*** End Patch\n")
         },
     }
     result = run_guard(payload, cwd=main_repo)
@@ -246,9 +242,7 @@ def test_codex_apply_patch_on_allowed_path_is_silent(main_repo: Path) -> None:
         "cwd": str(main_repo),
         "hook_event_name": "PreToolUse",
         "tool_name": "apply_patch",
-        "tool_input": {
-            "command": "*** Begin Patch\n*** Update File: issues/note.md\n@@\n+x\n*** End Patch\n"
-        },
+        "tool_input": {"command": "*** Begin Patch\n*** Update File: issues/note.md\n@@\n+x\n*** End Patch\n"},
     }
     result = run_guard(payload, cwd=main_repo)
     assert result["out"].strip() == "", result["out"]
@@ -352,9 +346,7 @@ def bash_command(command: str, session: str) -> dict:
     }
 
 
-def test_cd_into_worktree_then_relative_write_is_silent(
-    main_repo: Path, worktree: Path
-) -> None:
+def test_cd_into_worktree_then_relative_write_is_silent(main_repo: Path, worktree: Path) -> None:
     """作業ツリーへ移ってから相対パスで書き換えたときに案内を出さない。
 
     hook は主ディレクトリで実行されるため、同じコマンドの中の `cd` を反映しないと
@@ -366,9 +358,7 @@ def test_cd_into_worktree_then_relative_write_is_silent(
     assert result["out"].strip() == "", result["out"]
 
 
-def test_cd_into_worktree_with_relative_path_is_silent(
-    main_repo: Path, worktree: Path
-) -> None:
+def test_cd_into_worktree_with_relative_path_is_silent(main_repo: Path, worktree: Path) -> None:
     """移動先を相対パスで書いた場合も同じ。"""
     declared(main_repo)
     command = "cd .worktrees/feature/x && echo x > plugins/ndf/README.md"
@@ -392,12 +382,10 @@ def test_cd_back_to_main_is_detected(main_repo: Path, worktree: Path) -> None:
     assert "plugins/ndf/README.md" in context_of(result)
 
 
-def test_unresolvable_cd_is_silent_for_relative_paths(
-    main_repo: Path, worktree: Path
-) -> None:
+def test_unresolvable_cd_is_silent_for_relative_paths(main_repo: Path, worktree: Path) -> None:
     """移動先を決められないときは、相対パスの書き換えで案内を出さない。"""
     declared(main_repo)
-    command = 'cd "$TARGET"\nsed -i \'s/a/b/\' plugins/ndf/README.md'
+    command = "cd \"$TARGET\"\nsed -i 's/a/b/' plugins/ndf/README.md"
     result = run_guard(bash_command(command, "s-cd-5"), cwd=main_repo)
     assert result["out"].strip() == "", result["out"]
 

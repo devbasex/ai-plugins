@@ -5,6 +5,7 @@ subprocess.run を包み、テストの呼び出しはそのまま流す。そ�
   wt_extract_write_target の引数（コマンドと起点）と PWD を集める
 - token-guard.sh の呼び出しは、標準入力の JSON と NDF_SLEEP_MAX_SEC を集める
 """
+
 from __future__ import annotations
 
 import json
@@ -43,10 +44,15 @@ def run(*a, **kw):
             if isinstance(data, bytes):
                 data = data.decode()
             with open(TOKEN, "a") as f:
-                f.write(json.dumps({"input": data, "max": env.get("NDF_SLEEP_MAX_SEC"),
-                                    "guard": env.get("NDF_SLEEP_GUARD")}, ensure_ascii=False) + "\n")
-        elif (REAL + "/worktree-guard.sh" in flat or REAL + "/lib/worktree-common.sh" in flat) and \
-                ("wt_extract_write_target" in flat or "worktree-guard.sh" in flat):
+                f.write(
+                    json.dumps(
+                        {"input": data, "max": env.get("NDF_SLEEP_MAX_SEC"), "guard": env.get("NDF_SLEEP_GUARD")}, ensure_ascii=False
+                    )
+                    + "\n"
+                )
+        elif (REAL + "/worktree-guard.sh" in flat or REAL + "/lib/worktree-common.sh" in flat) and (
+            "wt_extract_write_target" in flat or "worktree-guard.sh" in flat
+        ):
             kw2 = dict(kw)
             env = dict(kw.get("env") or os.environ)
             env["NDF_T2_CAP"] = CAP

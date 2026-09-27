@@ -107,7 +107,7 @@ LEGACY_AGENT_FILE="$KIRO_DIR/agents/default.json"
 
 require_path() {
   local test_flag="$1" path="$2"
-  [ "$test_flag" "$path" ] || {
+  test "$test_flag" "$path" || {
     echo "ERROR: $path が見つかりません" >&2
     exit 1
   }

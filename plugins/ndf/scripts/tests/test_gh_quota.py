@@ -1,4 +1,5 @@
 """2 つの枠の使い分けと上限の扱い（lib/gh_quota.py・#1142 の L0・不足 g）。待ちと時刻は差し替え、実際には待たない。"""
+
 from __future__ import annotations
 
 import sys
@@ -33,16 +34,18 @@ def test_fallback_without_an_alternate_returns_the_limit():
 
 def test_wait_for_reset_sleeps_until_the_reset_then_retries_once():
     tries, slept = [Attempt(None, RATE, "graphql"), Attempt("ok", "", "graphql")], []
-    a = gh_quota.wait_for_reset(lambda: tries.pop(0), "graphql", sleep=slept.append, now=lambda: 1000.0,
-                                limits=lambda: {"graphql": {"remaining": 0, "reset": 1300}})
+    a = gh_quota.wait_for_reset(
+        lambda: tries.pop(0), "graphql", sleep=slept.append, now=lambda: 1000.0, limits=lambda: {"graphql": {"remaining": 0, "reset": 1300}}
+    )
     assert a.value == "ok" and slept == [301.0]
 
 
 def test_wait_for_reset_without_a_readable_reset_waits_60_and_is_capped():
     slept = []
     gh_quota.wait_for_reset(lambda: Attempt(None, RATE), sleep=slept.append, now=lambda: 0.0, limits=lambda: None)
-    gh_quota.wait_for_reset(lambda: Attempt(None, RATE), sleep=slept.append, now=lambda: 0.0,
-                            limits=lambda: {"graphql": {"remaining": 0, "reset": 10 ** 9}})
+    gh_quota.wait_for_reset(
+        lambda: Attempt(None, RATE), sleep=slept.append, now=lambda: 0.0, limits=lambda: {"graphql": {"remaining": 0, "reset": 10**9}}
+    )
     assert slept == [60.0, float(gh_quota.MAX_WAIT)]
 
 
@@ -53,10 +56,13 @@ def test_wait_for_reset_does_not_wait_on_other_failures():
 
 
 def test_rate_limits_reads_both_quotas(fake):
-    fake.on("api", "-i", "rate_limit", out=rest_out({"resources": {
-        "graphql": {"remaining": 0, "reset": 1700}, "core": {"remaining": 4700, "reset": 1800}}}))
-    assert gh_quota.rate_limits() == {"graphql": {"remaining": 0, "reset": 1700},
-                                      "core": {"remaining": 4700, "reset": 1800}}
+    fake.on(
+        "api",
+        "-i",
+        "rate_limit",
+        out=rest_out({"resources": {"graphql": {"remaining": 0, "reset": 1700}, "core": {"remaining": 4700, "reset": 1800}}}),
+    )
+    assert gh_quota.rate_limits() == {"graphql": {"remaining": 0, "reset": 1700}, "core": {"remaining": 4700, "reset": 1800}}
 
 
 def test_rate_limits_unreadable_is_none(fake):
@@ -88,29 +94,32 @@ def resp(body, not_modified=False, error=""):
 
 
 def test_poll_until_backs_off_while_nothing_changes_and_stops_when_done():
-    reads = [resp({"s": "pending"}), resp({"s": "pending"}, True), resp({"s": "pending"}, True),
-             resp({"s": "done"})]
+    reads = [resp({"s": "pending"}), resp({"s": "pending"}, True), resp({"s": "pending"}, True), resp({"s": "done"})]
     clock = Clock()
-    body, reached = gh_quota.poll_until("p", lambda b: b["s"] == "done", timeout=600, sleep=clock.sleep,
-                                        now=clock.now, read=lambda path: reads.pop(0))
+    body, reached = gh_quota.poll_until(
+        "p", lambda b: b["s"] == "done", timeout=600, sleep=clock.sleep, now=clock.now, read=lambda path: reads.pop(0)
+    )
     assert reached and body == {"s": "done"}
     assert clock.slept == [10, 20, 40]
 
 
 def test_poll_until_gives_up_at_the_timeout():
     clock = Clock()
-    body, reached = gh_quota.poll_until("p", lambda b: False, timeout=35, sleep=clock.sleep, now=clock.now,
-                                        read=lambda path: resp({"s": "pending"}, True))
+    body, reached = gh_quota.poll_until(
+        "p", lambda b: False, timeout=35, sleep=clock.sleep, now=clock.now, read=lambda path: resp({"s": "pending"}, True)
+    )
     assert not reached and body == {"s": "pending"} and clock.slept == [20]
 
 
 def test_poll_until_uses_etag_reads_that_do_not_count(fake):
     """既定の読みは gh_call.rest_cached（ETag 付き）。2 回目からは If-None-Match が付く。"""
-    outs = [(0, rest_out({"s": "pending"}, etag='"e"'), ""), (1, rest_out(None, "304 Not Modified"), "gh: HTTP 304"),
-            (0, rest_out({"s": "done"}, etag='"f"'), "")]
+    outs = [
+        (0, rest_out({"s": "pending"}, etag='"e"'), ""),
+        (1, rest_out(None, "304 Not Modified"), "gh: HTTP 304"),
+        (0, rest_out({"s": "done"}, etag='"f"'), ""),
+    ]
     fake.on_fn("api", fn=lambda args, stdin: gh_call.GhResult(*outs.pop(0)))
     clock = Clock()
-    body, reached = gh_quota.poll_until("repos/o/r/pulls/1", lambda b: b["s"] == "done", timeout=600,
-                                        sleep=clock.sleep, now=clock.now)
+    body, reached = gh_quota.poll_until("repos/o/r/pulls/1", lambda b: b["s"] == "done", timeout=600, sleep=clock.sleep, now=clock.now)
     assert reached and body == {"s": "done"}
     assert [a[1] == "-H" for a, _ in fake.calls] == [False, True, True]

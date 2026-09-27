@@ -2,6 +2,7 @@
 
 `assess` を持つ。状態ファイルは読まない（`init` より前に呼ぶため）。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -28,8 +29,7 @@ def cmd_assess(args: argparse.Namespace) -> None:
     """
     changes = production_code_changes(os.getcwd(), args.base)
     if changes is None:
-        print(f"ERROR: 起点 {args.base} から HEAD までの差分を取れません",
-              file=sys.stderr)
+        print(f"ERROR: 起点 {args.base} から HEAD までの差分を取れません", file=sys.stderr)
         sys.exit(UNDECIDABLE)
     total = sum(n for _, n in changes)
     if not changes:

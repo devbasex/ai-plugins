@@ -3,6 +3,7 @@
 SKILL.md の bash ブロックを、Claude Code と同じく `${CLAUDE_PLUGIN_ROOT}` と `$ARGUMENTS` を
 置き換えてから実行し、4 つの操作がプロジェクトの `.mcp.json` に効くことを確かめる。
 """
+
 from __future__ import annotations
 
 import json
@@ -45,13 +46,14 @@ def test_the_skill_has_one_bash_block():
 def _run(project: Path, arguments: str) -> subprocess.CompletedProcess[str]:
     block = BASH_BLOCK.findall(SKILL_MD.read_text(encoding="utf-8"))[0]
     script = block.replace("${CLAUDE_PLUGIN_ROOT}", str(PLUGIN)).replace("$ARGUMENTS", arguments)
-    env = {k: v for k, v in os.environ.items()
-           if k not in {"WORKSPACE_ROOT", "GIT_WORK_TREE", "CLAUDE_PROJECT_DIR",
-                        "CODEX_WORKSPACE_ROOT", "KIRO_WORKSPACE_ROOT"}}
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k not in {"WORKSPACE_ROOT", "GIT_WORK_TREE", "CLAUDE_PROJECT_DIR", "CODEX_WORKSPACE_ROOT", "KIRO_WORKSPACE_ROOT"}
+    }
     env["PROJECT_ROOT"] = str(project)
     env["HOME"] = str(project / "home")
-    return subprocess.run(["bash", "-euc", script], cwd=project, env=env,
-                          capture_output=True, text=True, check=False)
+    return subprocess.run(["bash", "-euc", script], cwd=project, env=env, capture_output=True, text=True, check=False)
 
 
 def _servers(project: Path) -> dict:

@@ -11,6 +11,7 @@
 読めない参照として、書かずに 1 で終わる（コミット前の `issues/` のファイルを指して済ませないため）。
 どこにも無いパス（これから作るファイル）は見ない。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -74,8 +75,7 @@ def first_diff(a: str, b: str) -> dict:
         if x != y:
             return {"line": i + 1, "github": x[:200], "file": y[:200]}
     n = min(len(la), len(lb))
-    return {"line": n + 1, "github": (la[n] if n < len(la) else "")[:200],
-            "file": (lb[n] if n < len(lb) else "")[:200]}
+    return {"line": n + 1, "github": (la[n] if n < len(la) else "")[:200], "file": (lb[n] if n < len(lb) else "")[:200]}
 
 
 def main() -> int:
@@ -90,25 +90,48 @@ def main() -> int:
     want = Path(a.file).read_text()
     missing = local_only_paths(want)
     if missing:
-        emit(result(TOOL, "stopped", f"#{a.number} の本文が GitHub から読めないパスを指す: {'・'.join(missing)}",
-                    [{"number": a.number, "result": "local_only", "path": m} for m in missing],
-                    next="中身を本文へ入れるか、コミットして push してから打ち直す"))
-    p = subprocess.run(["gh", "issue", "edit", str(a.number), "--body-file", a.file, *repo],
-                       capture_output=True, text=True)
+        emit(
+            result(
+                TOOL,
+                "stopped",
+                f"#{a.number} の本文が GitHub から読めないパスを指す: {'・'.join(missing)}",
+                [{"number": a.number, "result": "local_only", "path": m} for m in missing],
+                next="中身を本文へ入れるか、コミットして push してから打ち直す",
+            )
+        )
+    p = subprocess.run(["gh", "issue", "edit", str(a.number), "--body-file", a.file, *repo], capture_output=True, text=True)
     if p.returncode != 0:
-        emit(result(TOOL, "stopped", f"#{a.number} を書き直せない: {p.stderr.strip()[:300]}",
-                    [{"number": a.number, "result": "edit_failed"}]))
-    v = subprocess.run(["gh", "issue", "view", str(a.number), "--json", "body", "-q", ".body", *repo],
-                       capture_output=True, text=True)
+        emit(
+            result(
+                TOOL, "stopped", f"#{a.number} を書き直せない: {p.stderr.strip()[:300]}", [{"number": a.number, "result": "edit_failed"}]
+            )
+        )
+    v = subprocess.run(["gh", "issue", "view", str(a.number), "--json", "body", "-q", ".body", *repo], capture_output=True, text=True)
     if v.returncode != 0:
-        emit(result(TOOL, "stopped", f"#{a.number} を読み直せない: {v.stderr.strip()[:300]}",
-                    [{"number": a.number, "result": "view_failed"}]), 2)
+        emit(
+            result(
+                TOOL, "stopped", f"#{a.number} を読み直せない: {v.stderr.strip()[:300]}", [{"number": a.number, "result": "view_failed"}]
+            ),
+            2,
+        )
     if norm(v.stdout) != norm(want):
         diff = first_diff(norm(v.stdout), norm(want))
-        emit(result(TOOL, "stopped", f"#{a.number} の本文がファイルと食い違う（{diff['line']} 行目）",
-                    [{"number": a.number, "result": "mismatch", **diff}]))
-    emit(result(TOOL, "ok", f"#{a.number} の本文を書き直し、読み直して一致を確かめた",
-                [{"number": a.number, "result": "matched", "lines": len(norm(want).splitlines())}]))
+        emit(
+            result(
+                TOOL,
+                "stopped",
+                f"#{a.number} の本文がファイルと食い違う（{diff['line']} 行目）",
+                [{"number": a.number, "result": "mismatch", **diff}],
+            )
+        )
+    emit(
+        result(
+            TOOL,
+            "ok",
+            f"#{a.number} の本文を書き直し、読み直して一致を確かめた",
+            [{"number": a.number, "result": "matched", "lines": len(norm(want).splitlines())}],
+        )
+    )
 
 
 if __name__ == "__main__":

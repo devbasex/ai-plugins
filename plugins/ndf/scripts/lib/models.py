@@ -7,6 +7,7 @@
 モデル名の妥当性は各 CLI の検証に委ねる。ここで綴りをチェックすると、CLI 側が新しい
 モデルを増やすたびにこの表を追いかけることになり、必ず古くなる。
 """
+
 from __future__ import annotations
 
 import json
@@ -57,17 +58,12 @@ def parse_model_args(pairs: Optional[Iterable[str]]) -> dict[str, Optional[str]]
     seen: set[str] = set()
     for raw in pairs or []:
         if "=" not in raw:
-            raise ModelSpecError(
-                f"--model は <ランタイム>=<モデル> の形式で指定してください: {raw}"
-            )
+            raise ModelSpecError(f"--model は <ランタイム>=<モデル> の形式で指定してください: {raw}")
         runtime, _, model = raw.partition("=")
         runtime = runtime.strip()
         model = model.strip()
         if runtime not in parsed:
-            raise ModelSpecError(
-                f"未知のランタイムです: {runtime}"
-                f"（指定できるのは {'/'.join(ALL_RUNTIMES)}）"
-            )
+            raise ModelSpecError(f"未知のランタイムです: {runtime}（指定できるのは {'/'.join(ALL_RUNTIMES)}）")
         if not model:
             raise ModelSpecError(f"モデル名が空です: {raw}")
         if runtime in seen:
@@ -152,6 +148,7 @@ def observed_model(runtime: str, stdout_text: str) -> Optional[str]:
     usage = payload.get("modelUsage") if isinstance(payload, dict) else None
     if not isinstance(usage, dict) or not usage:
         return None
+
     # 複数モデルが動いた場合は入力トークンが最も多いものを主たるモデルとみなす。
     def _input_tokens(item: tuple[str, Any]) -> int:
         _, v = item
@@ -160,9 +157,7 @@ def observed_model(runtime: str, stdout_text: str) -> Optional[str]:
     return max(usage.items(), key=_input_tokens)[0]
 
 
-def mismatch_warning(
-    runtime: str, requested: Optional[str], observed: Optional[str]
-) -> Optional[str]:
+def mismatch_warning(runtime: str, requested: Optional[str], observed: Optional[str]) -> Optional[str]:
     """指定値と実測値の食い違いを警告文にする。食い違いが無ければ `None`。
 
     実測値を取れないランタイムでは常に `None` になる。「取れない」ことと
@@ -173,7 +168,4 @@ def mismatch_warning(
         return None
     if observed == requested:
         return None
-    return (
-        f"⚠ {runtime}: 指定したモデル {requested} と実際に動いたモデル {observed} が"
-        "食い違っています。比較には使えません"
-    )
+    return f"⚠ {runtime}: 指定したモデル {requested} と実際に動いたモデル {observed} が食い違っています。比較には使えません"

@@ -7,6 +7,7 @@ agy には取得元の登録が無く、`agy plugin list` も版数を出さな�
 
 **記載を消してチェックを通せない形にする。** Skill 数を読み取れないこと自体も失敗として扱う。
 """
+
 from __future__ import annotations
 
 import json

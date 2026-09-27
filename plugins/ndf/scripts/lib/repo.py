@@ -3,6 +3,7 @@
 git だけで決める（`proc` の上に置く）。`gh repo view` まで使って決めるのは `gh_call.resolve_repo` で、
 GitHub を呼ぶのは `gh_*` のモジュールだけにする。
 """
+
 from __future__ import annotations
 
 import json

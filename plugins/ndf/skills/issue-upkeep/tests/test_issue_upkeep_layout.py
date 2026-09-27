@@ -1,4 +1,5 @@
 """`issue-upkeep` の構成と配線（#331 / #712 / #713）。"""
+
 from __future__ import annotations
 
 import json
@@ -30,18 +31,16 @@ def section(text: str, heading: str) -> str:
     """見出しから、同じ深さか浅い次の見出しまでを返す。"""
     level = heading.split(" ", 1)[0]
     start = text.index(heading + "\n")
-    rest = text[start + len(heading):]
-    ends = [m.start() for m in re.finditer(r"^(#+) ", rest, re.MULTILINE)
-            if len(m.group(1)) <= len(level)]
-    return heading + (rest[:ends[0]] if ends else rest)
+    rest = text[start + len(heading) :]
+    ends = [m.start() for m in re.finditer(r"^(#+) ", rest, re.MULTILINE) if len(m.group(1)) <= len(level)]
+    return heading + (rest[: ends[0]] if ends else rest)
 
 
 @pytest.mark.parametrize("runtime", ["claude", "codex", "kiro", "agy"])
 def test_the_skill_is_distributed(runtime: str) -> None:
     """4 つの manifest すべてに載る。"""
     manifest = ROOT / "plugins" / "ndf" / "manifests" / f"{runtime}-skills.txt"
-    names = [line.split("#", 1)[0].strip()
-             for line in manifest.read_text(encoding="utf-8").splitlines()]
+    names = [line.split("#", 1)[0].strip() for line in manifest.read_text(encoding="utf-8").splitlines()]
     assert "issue-upkeep" in names
 
 
@@ -71,11 +70,9 @@ def test_the_parent_side_lookup_lists_the_linked_children() -> None:
         {"id": 1001, "number": 12, "title": "child a"},
         {"id": 1002, "number": 34, "title": "child b"},
     ]
-    done = subprocess.run(["jq", "-r", expression], input=json.dumps(sub_issues),
-                          capture_output=True, text=True, check=True)
+    done = subprocess.run(["jq", "-r", expression], input=json.dumps(sub_issues), capture_output=True, text=True, check=True)
     assert done.stdout.splitlines() == ["12", "34"]
 
     # branch: 子が 1 件も結び付いていない親では、一覧が空で返る。
-    done = subprocess.run(["jq", "-r", expression], input="[]",
-                          capture_output=True, text=True, check=True)
+    done = subprocess.run(["jq", "-r", expression], input="[]", capture_output=True, text=True, check=True)
     assert done.stdout.splitlines() == []

@@ -3,6 +3,7 @@
 #436 で Step 5 の判定はテストへ置き換わり、レビューは Step 7 の `cross-review` が担う。
 受け口が残っていると `--phase review` が通り、結果ファイルを待つ側が止まる。
 """
+
 from __future__ import annotations
 
 import os
@@ -24,7 +25,8 @@ def test_the_review_phase_is_rejected(tmp_path: pathlib.Path) -> None:
     proc = subprocess.run(
         [str(LAUNCH), "codex", "review", "130", "1"],
         env={**os.environ, "CROSS_REFACTORING_TMP_DIR": str(state_path.parent)},
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     assert proc.returncode != 0
     assert "未知の手順です" in proc.stderr
@@ -35,4 +37,3 @@ def test_the_launcher_does_not_name_the_removed_prompt() -> None:
     text = LAUNCH.read_text(encoding="utf-8")
     assert "review.md" not in text
     assert "RF_POST_EVENT_NOTE" not in text
-

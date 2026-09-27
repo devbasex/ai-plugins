@@ -6,6 +6,7 @@ HEAD の複製を 2 つ作り、片方で今の `release-steps.py bump --plugin 
 基底が変わる上げ方（PATCH）の 2 つを見る。cmd_bump の手で直す箇所の報告と check-doc-staleness.py の実行は
 NDF の側に残る部分なので比べない。
 """
+
 from __future__ import annotations
 
 import json
@@ -22,7 +23,7 @@ REPO = HERE.parents[4]
 RELEASE = HERE.parents[1] / "release-steps.py"
 TOOL = "hook-trial"
 # 15 箇所（定義ファイルと更新案内の見出し 8・説明文書の本文 7）
-BUMPCFG = r'''[tool.bumpversion]
+BUMPCFG = r"""[tool.bumpversion]
 current_version = "{old}"
 parse = "(?P<major>\\d+)\\.(?P<minor>\\d+)\\.(?P<patch>\\d+)(?:-(?P<pre_l>dev|rc)\\.(?P<pre_n>\\d+))?"
 serialize = ["{{major}}.{{minor}}.{{patch}}-{{pre_l}}.{{pre_n}}", "{{major}}.{{minor}}.{{patch}}"]
@@ -94,7 +95,7 @@ replace = "| 正式版 | `{{new_major}}.{{new_minor}}.{{new_patch}}` |"
 filename = "docs/versioning-and-distribution.md"
 search = "`{{current_major}}.{{current_minor}}.{{current_patch}}` の次を開発するなら"
 replace = "`{{new_major}}.{{new_minor}}.{{new_patch}}` の次を開発するなら"
-'''
+"""
 
 
 def sh(cmd, cwd, **kw):
@@ -132,16 +133,35 @@ def case(work: Path, old: str, new: str) -> dict:
         now = {"status": "error", "summary": (p.stdout + p.stderr)[-300:]}
     cfg = work / "bumpversion.toml"
     cfg.write_text(BUMPCFG.format(old=old), encoding="utf-8")
-    q = sh([str(Path(sys.executable).parent / "bump-my-version"), "replace", "--config-file", str(cfg),
-            "--current-version", old, "--new-version", new, "--allow-dirty"], b)
+    q = sh(
+        [
+            str(Path(sys.executable).parent / "bump-my-version"),
+            "replace",
+            "--config-file",
+            str(cfg),
+            "--current-version",
+            old,
+            "--new-version",
+            new,
+            "--allow-dirty",
+        ],
+        b,
+    )
     ca, cb = changed(a), changed(b)
     differ = sorted(n for n in set(ca) | set(cb) if ca.get(n) != cb.get(n))
-    return {"from": old, "to": new, "cmd_bump": now.get("status"), "cmd_bump_summary": now.get("summary"),
-            "cmd_bump_files": sorted(ca), "bump_my_version_exit": q.returncode,
-            "bump_my_version_err": (q.stderr or "")[-400:] if q.returncode else "",
-            "bump_my_version_files": sorted(cb), "differs": differ,
-            "diff": {n: {"cmd_bump": ca.get(n, ""), "bump_my_version": cb.get(n, "")} for n in differ},
-            "lines": sum(len([l for l in v.splitlines() if l.startswith("+")]) for v in ca.values())}
+    return {
+        "from": old,
+        "to": new,
+        "cmd_bump": now.get("status"),
+        "cmd_bump_summary": now.get("summary"),
+        "cmd_bump_files": sorted(ca),
+        "bump_my_version_exit": q.returncode,
+        "bump_my_version_err": (q.stderr or "")[-400:] if q.returncode else "",
+        "bump_my_version_files": sorted(cb),
+        "differs": differ,
+        "diff": {n: {"cmd_bump": ca.get(n, ""), "bump_my_version": cb.get(n, "")} for n in differ},
+        "lines": sum(len([l for l in v.splitlines() if l.startswith("+")]) for v in ca.values()),
+    }
 
 
 def cmd_bump(a) -> None:
@@ -152,8 +172,10 @@ def cmd_bump(a) -> None:
     if not m:
         emit(result(TOOL, "stopped", f"今の版 {old} を読めない"), 3)
     major, minor, patch, pre, n = m.groups()
-    news = [f"{major}.{minor}.{patch}-{pre}.{int(n) + 1}" if pre else f"{major}.{minor}.{int(patch) + 1}-dev.1",
-            f"{major}.{minor}.{int(patch) + 1}"]
+    news = [
+        f"{major}.{minor}.{patch}-{pre}.{int(n) + 1}" if pre else f"{major}.{minor}.{int(patch) + 1}-dev.1",
+        f"{major}.{minor}.{int(patch) + 1}",
+    ]
     items, bad = [], []
     for new in news:
         r = case(work / new, old, new)
@@ -162,5 +184,7 @@ def cmd_bump(a) -> None:
         if not ok:
             bad.append(f"{old} → {new}")
     status = "stopped" if bad else "ok"
-    emit(result(TOOL, status, "bump-my-version の書き換えが cmd_bump と" + ("同じ" if not bad else "違う: " + " / ".join(bad)),
-                items), 0 if status == "ok" else 1)
+    emit(
+        result(TOOL, status, "bump-my-version の書き換えが cmd_bump と" + ("同じ" if not bad else "違う: " + " / ".join(bad)), items),
+        0 if status == "ok" else 1,
+    )

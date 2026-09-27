@@ -2,6 +2,7 @@
 
 差分予算・コミット数の上限・テストの上限秒数など、工程の判断に使う値も持つ。
 """
+
 from __future__ import annotations
 
 import pathlib
@@ -16,16 +17,14 @@ import md
 # **読めなければ止める。** 呼び名が揃わないと重複排除が効かず、同じ提案が別物として残る。
 # 確認は `init` の時点で行う（`commands/setup.py`）。
 
+
 class VocabularyUnavailable(RuntimeError):
     """呼び名の表を読めないことを表す。**握りつぶさない。**"""
 
 
 # 呼び名の表の位置。**現在地には依存させない。** `uv run --script` で起動したときの
 # 現在地は、スクリプトの位置と揃わない。
-VOCABULARY_TABLE = (
-    pathlib.Path(__file__).resolve().parents[3]
-    / "refactoring" / "references" / "vocabulary.md"
-)
+VOCABULARY_TABLE = pathlib.Path(__file__).resolve().parents[3] / "refactoring" / "references" / "vocabulary.md"
 
 
 def _read_table(heading: str, value_column: str) -> dict[str, str]:
@@ -36,10 +35,8 @@ def _read_table(heading: str, value_column: str) -> dict[str, str]:
     """
     try:
         text = VOCABULARY_TABLE.read_text(encoding="utf-8")
-    except OSError as exc:                       # 読めない = 呼び名が無い
-        raise VocabularyUnavailable(
-            f"呼び名の表を読めません: {VOCABULARY_TABLE} ({exc})"
-        ) from exc
+    except OSError as exc:  # 読めない = 呼び名が無い
+        raise VocabularyUnavailable(f"呼び名の表を読めません: {VOCABULARY_TABLE} ({exc})") from exc
     section = md.section_named(text, heading, level=2)
     if section is None:
         raise VocabularyUnavailable(f"呼び名の表に「{heading}」の節がありません")
@@ -49,9 +46,7 @@ def _read_table(heading: str, value_column: str) -> dict[str, str]:
     try:
         i_id, i_value = table.header.index("識別子"), table.header.index(value_column)
     except ValueError as exc:
-        raise VocabularyUnavailable(
-            f"呼び名の表の「{heading}」に列がありません: {exc}"
-        ) from exc
+        raise VocabularyUnavailable(f"呼び名の表の「{heading}」に列がありません: {exc}") from exc
     return {row[i_id].strip("`"): row[i_value] for row in table.rows}
 
 
@@ -121,8 +116,14 @@ DEFER_NO_TARGET = "no_target"
 DEFER_TEST_FAILED = "test_failed"
 DEFER_NOT_DONE = "not_done"
 DEFER_REASONS = (
-    DEFER_BUDGET, DEFER_RANK, DEFER_DUPLICATE, DEFER_VOCABULARY, DEFER_THRESHOLD,
-    DEFER_NO_TARGET, DEFER_TEST_FAILED, DEFER_NOT_DONE,
+    DEFER_BUDGET,
+    DEFER_RANK,
+    DEFER_DUPLICATE,
+    DEFER_VOCABULARY,
+    DEFER_THRESHOLD,
+    DEFER_NO_TARGET,
+    DEFER_TEST_FAILED,
+    DEFER_NOT_DONE,
 )
 
 # 手順の名前（#933）。**状態・履歴・`launch-cli.sh`・`limits.py`・雛形で同じ語を使う。**
@@ -192,8 +193,5 @@ DIFF_BUDGET_FACTOR = 2
 EXTRACTION_DIFF_BUDGET_FACTOR = 3
 
 EXTRACTION_TECHNIQUES: frozenset[str] = frozenset(
-    name
-    for name, factor in _read_table("手法ごとの差分予算の倍率", "倍率").items()
-    if factor == str(EXTRACTION_DIFF_BUDGET_FACTOR)
+    name for name, factor in _read_table("手法ごとの差分予算の倍率", "倍率").items() if factor == str(EXTRACTION_DIFF_BUDGET_FACTOR)
 )
-

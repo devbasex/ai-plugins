@@ -1,4 +1,5 @@
 """共通の公開入口から codex / claude を起動する現状固定テスト。"""
+
 from __future__ import annotations
 
 import json
@@ -11,14 +12,14 @@ import pytest
 
 
 LAUNCH = pathlib.Path(__file__).resolve().parents[3] / "scripts" / "lib" / "launch-cli.sh"
-STUB = r'''#!/usr/bin/env python3
+STUB = r"""#!/usr/bin/env python3
 import json, os, pathlib, sys
 pathlib.Path(os.environ["NDF_TEST_RECORD"]).write_text(json.dumps({
     "argv": sys.argv[1:],
     "cwd": os.getcwd(),
     "stdin": sys.stdin.read(),
 }), encoding="utf-8")
-'''
+"""
 PROMPT = "1 行目の依頼\n2 行目の条件\n"
 
 

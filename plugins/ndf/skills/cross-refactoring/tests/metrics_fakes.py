@@ -5,6 +5,7 @@
 1 つの Python の台本を、ツールの名前（と uvx / npx）で置く。起動のたびに `FAKE_LOG` へ
 `{tool, argv, cwd}` を 1 行足す。`FAKE_<TOOL>` で振る舞いを変える（`fail` / `garbage` / `slow`）。
 """
+
 from __future__ import annotations
 
 import json
@@ -15,7 +16,7 @@ import subprocess
 import sys
 from typing import Any, Iterable
 
-FAKE = r'''#!__PYTHON__
+FAKE = r"""#!__PYTHON__
 import ast, json, os, re, subprocess, sys, time
 name, args = os.path.basename(sys.argv[0]), sys.argv[1:]
 if name == "uvx":
@@ -114,7 +115,7 @@ elif name == "jscpd":
     total = {"lines": 40, "sources": len(files), "clones": len(dups), "duplicatedLines": 9 * len(dups)}
     with open(os.path.join(output, "jscpd-report.json"), "w") as f:
         json.dump({"statistics": {"total": total}, "duplicates": dups}, f)
-'''
+"""
 
 ALL_TOOLS = ("ruff", "complexipy", "lizard", "symilar", "jscpd")
 
@@ -145,8 +146,7 @@ def calls(log: pathlib.Path) -> list[dict[str, Any]]:
 
 
 def git(*args: str, cwd: Any) -> str:
-    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True,
-                          check=True).stdout
+    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True).stdout
 
 
 def make_repo(work: pathlib.Path, files: dict[str, str], untracked: dict[str, str] = None) -> None:

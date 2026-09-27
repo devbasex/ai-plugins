@@ -3,6 +3,7 @@
 確認（`probe`）はスタブで、呼び出しの引数を記録する。環境変数の読み取りは
 `auth.probe_auth` の責務なので、飛ばしは `probe` が `(…, True)` を返す形で確かめる。
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -33,10 +34,7 @@ def _probe(failing: dict[str, str] | None = None, *, skipped: bool = False):
         calls.append(list(names))
         if skipped:
             return {}, True
-        results = {
-            n: {"command": f"{n} probe", "ok": n not in failing, "detail": failing.get(n, "")}
-            for n in names
-        }
+        results = {n: {"command": f"{n} probe", "ok": n not in failing, "detail": failing.get(n, "")} for n in names}
         return results, False
 
     probe.calls = calls
@@ -45,12 +43,15 @@ def _probe(failing: dict[str, str] | None = None, *, skipped: bool = False):
 
 # ---------- AC1 / AC2: 通らない者を外す・全員を要する ----------
 
+
 def test_one_failing_participant_is_moved_to_unavailable(assignment):
     """AC1: 母集合 3 者のうち 1 者が通らないと、残り 2 者が母集合の順で使える者になる。"""
     probe = _probe({"agy": "コマンドが見つかりません"})
 
     p = assignment.resolve_participants(
-        ["codex", "agy", "kiro"], host="claude", probe=probe,
+        ["codex", "agy", "kiro"],
+        host="claude",
+        probe=probe,
     )
 
     assert p.available == ["codex", "kiro"]
@@ -67,7 +68,10 @@ def test_require_all_fails_with_the_missing_name_and_reason(assignment):
 
     with pytest.raises(assignment.AssignmentError) as exc:
         assignment.resolve_participants(
-            ["codex", "agy", "kiro"], host="claude", probe=probe, require_all=True,
+            ["codex", "agy", "kiro"],
+            host="claude",
+            probe=probe,
+            require_all=True,
         )
 
     assert "agy" in str(exc.value)
@@ -77,12 +81,16 @@ def test_require_all_fails_with_the_missing_name_and_reason(assignment):
 
 # ---------- AC3: 確認の相手は exclude を除き include を含む ----------
 
+
 def test_probe_is_called_once_with_included_but_not_excluded(assignment):
     probe = _probe()
 
     p = assignment.resolve_participants(
-        ["codex", "agy", "kiro"], host="claude",
-        include=["claude"], exclude=["agy"], probe=probe,
+        ["codex", "agy", "kiro"],
+        host="claude",
+        include=["claude"],
+        exclude=["agy"],
+        probe=probe,
     )
 
     assert probe.calls == [["claude", "codex", "kiro"]]
@@ -95,7 +103,10 @@ def test_only_narrows_the_probe_to_that_one(assignment):
     probe = _probe()
 
     p = assignment.resolve_participants(
-        ["codex", "agy", "kiro"], host="claude", only="kiro", probe=probe,
+        ["codex", "agy", "kiro"],
+        host="claude",
+        only="kiro",
+        probe=probe,
     )
 
     assert probe.calls == [["kiro"]]
@@ -105,19 +116,26 @@ def test_only_narrows_the_probe_to_that_one(assignment):
 
 # ---------- AC4: 名前の矛盾 ----------
 
-@pytest.mark.parametrize("kwargs", [
-    dict(include=["agy"], exclude=["agy"]),
-    dict(include=["gemini"]),
-    dict(exclude=["gemini"]),
-    dict(only="agy", exclude=["agy"]),
-    dict(only="gemini"),
-])
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        dict(include=["agy"], exclude=["agy"]),
+        dict(include=["gemini"]),
+        dict(exclude=["gemini"]),
+        dict(only="agy", exclude=["agy"]),
+        dict(only="gemini"),
+    ],
+)
 def test_conflicting_names_raise_before_probing(assignment, kwargs):
     probe = _probe()
 
     with pytest.raises(assignment.AssignmentError):
         assignment.resolve_participants(
-            ["codex", "agy", "kiro"], host="claude", probe=probe, **kwargs,
+            ["codex", "agy", "kiro"],
+            host="claude",
+            probe=probe,
+            **kwargs,
         )
 
     assert probe.calls == []
@@ -128,7 +146,10 @@ def test_excluding_a_name_outside_the_pool_is_ignored(assignment):
     probe = _probe()
 
     p = assignment.resolve_participants(
-        ["codex", "agy", "kiro"], host="claude", exclude=["claude"], probe=probe,
+        ["codex", "agy", "kiro"],
+        host="claude",
+        exclude=["claude"],
+        probe=probe,
     )
 
     assert p.excluded == []
@@ -139,7 +160,10 @@ def test_excluding_a_name_outside_the_pool_is_ignored(assignment):
 
 def test_ignored_and_real_exclusions_are_kept_apart(assignment):
     p = assignment.resolve_participants(
-        ["claude", "codex", "kiro"], host="claude", exclude=["agy", "kiro"], probe=_probe(),
+        ["claude", "codex", "kiro"],
+        host="claude",
+        exclude=["agy", "kiro"],
+        probe=_probe(),
     )
 
     assert p.excluded == ["kiro"]
@@ -152,7 +176,10 @@ def test_only_names_a_runtime_outside_the_pool(assignment):
     probe = _probe()
 
     p = assignment.resolve_participants(
-        ["claude", "codex", "kiro"], host="claude", only="agy", probe=probe,
+        ["claude", "codex", "kiro"],
+        host="claude",
+        only="agy",
+        probe=probe,
     )
 
     assert probe.calls == [["agy"]]
@@ -164,18 +191,24 @@ def test_excluding_an_included_host_is_a_conflict_not_out_of_pool(assignment):
     """include でホストを足したうえで exclude すると、重なりとして弾く（母集合には入る）。"""
     with pytest.raises(assignment.AssignmentError):
         assignment.resolve_participants(
-            ["codex", "agy", "kiro"], host="claude",
-            include=["claude"], exclude=["claude"], probe=_probe(),
+            ["codex", "agy", "kiro"],
+            host="claude",
+            include=["claude"],
+            exclude=["claude"],
+            probe=_probe(),
         )
 
 
 # ---------- AC5: 飛ばし ----------
 
+
 def test_skipped_probe_marks_everyone_available(assignment):
     probe = _probe(skipped=True)
 
     p = assignment.resolve_participants(
-        ["codex", "agy", "kiro"], host="claude", probe=probe,
+        ["codex", "agy", "kiro"],
+        host="claude",
+        probe=probe,
     )
 
     assert p.available == ["codex", "agy", "kiro"]
@@ -186,7 +219,10 @@ def test_skipped_probe_marks_everyone_available(assignment):
 
 def test_skipped_probe_satisfies_require_all(assignment):
     p = assignment.resolve_participants(
-        ["codex", "agy", "kiro"], host="claude", probe=_probe(skipped=True), require_all=True,
+        ["codex", "agy", "kiro"],
+        host="claude",
+        probe=_probe(skipped=True),
+        require_all=True,
     )
     assert p.available == ["codex", "agy", "kiro"]
     assert p.require_all is True
@@ -194,10 +230,13 @@ def test_skipped_probe_satisfies_require_all(assignment):
 
 # ---------- 記録の形 ----------
 
+
 def test_to_state_has_the_eight_keys_without_fallback(assignment):
     p = assignment.resolve_participants(
-        ["codex", "agy", "kiro"], host="claude",
-        include=["claude"], exclude=["agy"],
+        ["codex", "agy", "kiro"],
+        host="claude",
+        include=["claude"],
+        exclude=["agy"],
         probe=_probe({"kiro": "1 秒で応答しませんでした"}),
     )
 
@@ -215,8 +254,11 @@ def test_to_state_has_the_eight_keys_without_fallback(assignment):
 
 def test_included_and_excluded_are_kept_in_fixed_order(assignment):
     p = assignment.resolve_participants(
-        ["codex", "agy", "kiro"], host="claude",
-        include=["claude"], exclude=["kiro", "agy"], probe=_probe(),
+        ["codex", "agy", "kiro"],
+        host="claude",
+        include=["claude"],
+        exclude=["kiro", "agy"],
+        probe=_probe(),
     )
     assert p.excluded == ["agy", "kiro"]
     assert p.available == ["claude", "codex"]
@@ -238,17 +280,19 @@ def test_excluding_all_pool_members_leaves_empty_available(assignment):
     assert p.excluded == ["codex", "agy", "kiro"]
 
 
-
 def test_participant_missing_from_probe_results_is_unavailable_with_empty_reason(assignment):
     """確認の結果に名前が無い者は、理由が空の `unavailable` になる（R2-001 の現状固定）。
 
     明示的に `ok=False` を返す経路とは別の分岐である。結果がある成功者だけが残る。
     """
+
     def probe(names):
         return {"codex": {"command": "codex probe", "ok": True, "detail": ""}}, False
 
     p = assignment.resolve_participants(
-        ["codex", "agy", "kiro"], host="claude", probe=probe,
+        ["codex", "agy", "kiro"],
+        host="claude",
+        probe=probe,
     )
 
     assert p.available == ["codex"]

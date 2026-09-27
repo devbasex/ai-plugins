@@ -1,4 +1,5 @@
 """配分テーブルの集計と履歴の読み書き（#933 の「データ構造: 履歴と配分テーブル」）。"""
+
 from __future__ import annotations
 
 import importlib
@@ -44,13 +45,15 @@ def test_missing_or_broken_history_uses_defaults(allocation, tmp_path):
 def test_build_table_per_kind_window_and_fallbacks(allocation):
     rows = []
     # 古い 1 行だけが珍しい手法を持つ。後ろに test だけの行が 12 行続いても遡れる
-    rows.append({"kinds": {"structure/rare": {"count": 1, "seconds": 600},
-                           "test": {"count": 1, "seconds": 6000}}})
+    rows.append({"kinds": {"structure/rare": {"count": 1, "seconds": 600}, "test": {"count": 1, "seconds": 6000}}})
     for _ in range(12):
-        rows.append({"kinds": {"test": {"count": 2, "seconds": 240},
-                               "structure/extract_method": {"count": 0, "seconds": 0}},
-                     "verify": {"items": 4, "seconds": 48},
-                     "fix": {"launches": 0, "seconds": 0}})
+        rows.append(
+            {
+                "kinds": {"test": {"count": 2, "seconds": 240}, "structure/extract_method": {"count": 0, "seconds": 0}},
+                "verify": {"items": 4, "seconds": 48},
+                "fix": {"launches": 0, "seconds": 0},
+            }
+        )
     table = allocation.build_table(rows, DEFAULTS)
     assert table["source"] == "history"
     # test は直近 10 行（すべて 2 件 240 秒）で 2 分。古い 6000 秒の行は窓の外
@@ -66,8 +69,7 @@ def test_build_table_per_kind_window_and_fallbacks(allocation):
 
 
 def test_structure_aggregate_sums_all_techniques(allocation):
-    rows = [{"kinds": {"structure/a": {"count": 1, "seconds": 60},
-                       "structure/b": {"count": 3, "seconds": 420}}}]
+    rows = [{"kinds": {"structure/a": {"count": 1, "seconds": 60}, "structure/b": {"count": 3, "seconds": 420}}}]
     table = allocation.build_table(rows, DEFAULTS)
     assert table["structure"] == pytest.approx(2.0)
     assert table["kinds"]["structure/b"] == pytest.approx(140 / 60)
@@ -76,20 +78,27 @@ def test_structure_aggregate_sums_all_techniques(allocation):
 
 def _state():
     return {
-        "id": 917, "current_pr": 917, "implementer": "claude", "budget_minutes": 60,
-        "started_at": "2026-09-23T14:29:12+00:00", "ended_at": "2026-09-23T15:22:32+00:00",
-        "phases": {"propose": {"started_at": "a", "ended_at": "b", "seconds": 272},
-                   "plan": {"seconds": 180}},
+        "id": 917,
+        "current_pr": 917,
+        "implementer": "claude",
+        "budget_minutes": 60,
+        "started_at": "2026-09-23T14:29:12+00:00",
+        "ended_at": "2026-09-23T15:22:32+00:00",
+        "phases": {"propose": {"started_at": "a", "ended_at": "b", "seconds": 272}, "plan": {"seconds": 180}},
         "items": [
-            {"id": "I-001", "kind": "structure/extract_method",
-             "commits": {"test": "t1", "implement": "i1", "fix": []},
-             "seconds": {"test": 150, "implement": 80}},
-            {"id": "I-002", "kind": "structure/extract_method",
-             "commits": {"test": None, "implement": "i2", "fix": []},
-             "seconds": {"test": None, "implement": 40}},
-            {"id": "I-003", "kind": "structure/rename",
-             "commits": {"test": None, "implement": None},
-             "seconds": {}},
+            {
+                "id": "I-001",
+                "kind": "structure/extract_method",
+                "commits": {"test": "t1", "implement": "i1", "fix": []},
+                "seconds": {"test": 150, "implement": 80},
+            },
+            {
+                "id": "I-002",
+                "kind": "structure/extract_method",
+                "commits": {"test": None, "implement": "i2", "fix": []},
+                "seconds": {"test": None, "implement": 40},
+            },
+            {"id": "I-003", "kind": "structure/rename", "commits": {"test": None, "implement": None}, "seconds": {}},
         ],
         "verify_stats": {"items": 2, "seconds": 20},
         "fix_stats": {"launches": 1, "seconds": 300},
@@ -106,8 +115,7 @@ def test_build_row_and_append_round_trip(allocation, tmp_path):
     assert row["pr"] == 917
     assert row["elapsed_seconds"] == 3200
     assert row["phases"] == {"propose": 272, "plan": 180}
-    assert row["kinds"] == {"test": {"count": 1, "seconds": 150},
-                            "structure/extract_method": {"count": 2, "seconds": 120}}
+    assert row["kinds"] == {"test": {"count": 1, "seconds": 150}, "structure/extract_method": {"count": 2, "seconds": 120}}
     assert row["verify"] == {"items": 2, "seconds": 20}
     assert row["fix"] == {"launches": 1, "seconds": 300}
     # 走らなかった危険フラグの全体のテストは null
@@ -129,9 +137,14 @@ def test_build_row_skips_reverted_and_deferred_items(allocation):
     state = _state()
     for status in ("reverted", "deferred"):
         state["items"].append(
-            {"id": f"I-{status}", "kind": "structure/extract_method", "status": status,
-             "commits": {"test": "tx", "implement": "ix"},
-             "seconds": {"test": 999, "implement": 999}})
+            {
+                "id": f"I-{status}",
+                "kind": "structure/extract_method",
+                "status": status,
+                "commits": {"test": "tx", "implement": "ix"},
+                "seconds": {"test": 999, "implement": 999},
+            }
+        )
     assert allocation.build_row(state)["kinds"] == allocation.build_row(_state())["kinds"]
 
 

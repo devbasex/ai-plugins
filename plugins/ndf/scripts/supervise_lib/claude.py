@@ -3,6 +3,7 @@
 `ClaudeRunner.call` が claude -p を呼ぶ唯一の口である（work / drive の worker / judge / slow / pr）。
 ハンドラーと遅れの見張りは、`Engine` が渡す `ctx` の `claude` を通して呼ぶ。
 """
+
 from __future__ import annotations
 
 import json
@@ -43,20 +44,38 @@ WORK_TOOLS = "Read,Edit,Write,Bash,Grep,Glob"
 # work のステップに載せる MCP は Serena だけ（mcp-serena の .mcp.json と同じ起動）。シンボル単位で読み・直し、
 # 大きなファイルの全文を読まずに済ませる。Tool の定義で起動の固定費が約 1.1 万増える（実測: 1 関数の修正で
 # $0.047 → $0.131）ため既定では載せず、ステップに "serena": true を書いたときだけ載せる
-SERENA_MCP = {"mcpServers": {"serena": {
-    "type": "stdio", "command": "uvx",
-    "args": ["--from", "serena-agent==1.7.0", "serena", "start-mcp-server", "--context", "claude-code",
-             "--project-from-cwd", "--add-mode", "no-memories", "--add-mode", "no-onboarding",
-             "--enable-web-dashboard", "False"],
-    "env": {"SERENA_HOME": ".serena"}}}}
+SERENA_MCP = {
+    "mcpServers": {
+        "serena": {
+            "type": "stdio",
+            "command": "uvx",
+            "args": [
+                "--from",
+                "serena-agent==1.7.0",
+                "serena",
+                "start-mcp-server",
+                "--context",
+                "claude-code",
+                "--project-from-cwd",
+                "--add-mode",
+                "no-memories",
+                "--add-mode",
+                "no-onboarding",
+                "--enable-web-dashboard",
+                "False",
+            ],
+            "env": {"SERENA_HOME": ".serena"},
+        }
+    }
+}
 FULL_TOOLS = "Read,Edit,Write,Bash,Grep,Glob,Skill,Agent,Monitor,SendMessage,ToolSearch"
 TAIL = 6000  # LLM へ渡す出力の末尾の文字数
-LIMIT_RETRY = 900      # 利用上限の解除時刻が読めないときの待ち（秒）。計画の "limit_retry_seconds"
+LIMIT_RETRY = 900  # 利用上限の解除時刻が読めないときの待ち（秒）。計画の "limit_retry_seconds"
 LIMIT_WAIT_MAX = 10800  # 利用上限の待ちの最大（秒）。計画の "limit_wait_max"
 # claude の古い形の上限の文言（`Claude AI usage limit reached|<解除の UNIX 時刻>`）
 LIMIT_EPOCH = re.compile(r"usage limit reached\|(\d{9,11})", re.I)
 LIMIT_RESETS = re.compile(r"resets?(?:\s+at)?\s+(\d{1,2})(?::(\d{2}))?\s*([ap]m)?(?:\s*\(([^)]+)\))?", re.I)
-TICK = 5.0             # 子プロセスの待ちを区切って見る秒数の上限
+TICK = 5.0  # 子プロセスの待ちを区切って見る秒数の上限
 
 
 def kill_group(p: subprocess.Popen) -> None:
@@ -73,8 +92,9 @@ def kill_group(p: subprocess.Popen) -> None:
         pass
 
 
-def run_ticking(cmd, tick=None, every: float = TICK, timeout: float | None = None, input: str | None = None,
-                err_path: Path | None = None, **kw) -> subprocess.CompletedProcess:
+def run_ticking(
+    cmd, tick=None, every: float = TICK, timeout: float | None = None, input: str | None = None, err_path: Path | None = None, **kw
+) -> subprocess.CompletedProcess:
     """subprocess.run と同じく待つが、every 秒ごとに tick() を呼ぶ（長いステップの待ちの中で進行を書く）。
 
     err_path を渡すと stderr をそのファイルへ書かせる（待ちの間に最後の行を読めるように）。
@@ -82,9 +102,15 @@ def run_ticking(cmd, tick=None, every: float = TICK, timeout: float | None = Non
     tick() が例外を投げたら（遅れの見張りの打ち切り）、子のプロセスグループを止めてから投げ直す。"""
     errf = open(err_path, "w", encoding="utf-8") if err_path else None
     try:
-        p = subprocess.Popen(cmd, stdin=subprocess.PIPE if input is not None else subprocess.DEVNULL,
-                             stdout=subprocess.PIPE, stderr=errf or subprocess.PIPE, text=True,
-                             start_new_session=True, **kw)
+        p = subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE if input is not None else subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=errf or subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+            **kw,
+        )
     except BaseException:
         if errf:
             errf.close()
@@ -116,28 +142,45 @@ def run_ticking(cmd, tick=None, every: float = TICK, timeout: float | None = Non
             errf.close()
 
 
-def claude_cmd(system: str, tools: str | None, cwd: str, full: bool = False,
-               serena: bool = False, resume: str | None = None) -> list[str]:
+def claude_cmd(system: str, tools: str | None, cwd: str, full: bool = False, serena: bool = False, resume: str | None = None) -> list[str]:
     base = shlex.split(os.environ.get("NDF_SUPERVISE_CLAUDE", "claude"))
     if full:
         # Skill を回すステップ（cross-review など）。設定・プラグイン・Skill・hook をそのまま読む
         # 新しい文脈の claude -p。本体の会話なのでキャッシュはサブスクリプションなら 1 時間。
         # 報告が無いまま終わったときに --resume で起こし直すため、会話は残す
-        return base + ["-p", "--output-format", "json",
-                       "--permission-mode", "acceptEdits", "--allowed-tools", FULL_TOOLS,
-                       "--append-system-prompt", system] + (["--resume", resume] if resume else [])
+        return (
+            base
+            + [
+                "-p",
+                "--output-format",
+                "json",
+                "--permission-mode",
+                "acceptEdits",
+                "--allowed-tools",
+                FULL_TOOLS,
+                "--append-system-prompt",
+                system,
+            ]
+            + (["--resume", resume] if resume else [])
+        )
     cmd = base + [
-        "-p", "--output-format", "json", "--no-session-persistence",
-        "--setting-sources", "", "--strict-mcp-config", "--disable-slash-commands",
-        "--system-prompt", system,
+        "-p",
+        "--output-format",
+        "json",
+        "--no-session-persistence",
+        "--setting-sources",
+        "",
+        "--strict-mcp-config",
+        "--disable-slash-commands",
+        "--system-prompt",
+        system,
     ]
     if tools:
         allowed = tools
         if serena:
             cmd += ["--mcp-config", json.dumps(SERENA_MCP)]
             allowed += ",mcp__serena"
-        cmd += ["--tools", tools, "--allowed-tools", allowed, "--permission-mode", "acceptEdits",
-                "--add-dir", cwd]
+        cmd += ["--tools", tools, "--allowed-tools", allowed, "--permission-mode", "acceptEdits", "--add-dir", cwd]
     else:
         cmd += ["--tools", ""]
     model = os.environ.get("NDF_SUPERVISE_MODEL")
@@ -153,9 +196,19 @@ def claude_kind(system: str, full: bool) -> str:
     return {JUDGE_SYSTEM: "judge", SLOW_SYSTEM: "slow", PR_SYSTEM: "pr"}.get(system, "work")
 
 
-def call_claude(system: str, prompt: str, tools: str | None, cwd: str, timeout: int,
-                full: bool = False, serena: bool = False, resume: str | None = None,
-                env: dict | None = None, tick=None, every: float = TICK) -> dict:
+def call_claude(
+    system: str,
+    prompt: str,
+    tools: str | None,
+    cwd: str,
+    timeout: int,
+    full: bool = False,
+    serena: bool = False,
+    resume: str | None = None,
+    env: dict | None = None,
+    tick=None,
+    every: float = TICK,
+) -> dict:
     """claude -p を 1 回呼び、結果の本文と使用量を返す（既定は最小構成）。
 
     `env` は環境に足す変数（認証の切り替え）。利用上限で落ちたら `"limit": true` と、読めれば
@@ -163,11 +216,19 @@ def call_claude(system: str, prompt: str, tools: str | None, cwd: str, timeout: 
     """
     started = time.time()
     try:
-        p = run_ticking(claude_cmd(system, tools, cwd, full, serena, resume), tick, every, input=prompt,
-                        cwd=cwd, timeout=timeout, env={**os.environ, **env} if env else None)
+        p = run_ticking(
+            claude_cmd(system, tools, cwd, full, serena, resume),
+            tick,
+            every,
+            input=prompt,
+            cwd=cwd,
+            timeout=timeout,
+            env={**os.environ, **env} if env else None,
+        )
     except subprocess.TimeoutExpired:
-        return ClaudeCall(ok=False, text=f"打ち切り（{timeout} 秒）", usage={}, seconds=timeout,
-                          kind=claude_kind(system, full), model_usage=None)
+        return ClaudeCall(
+            ok=False, text=f"打ち切り（{timeout} 秒）", usage={}, seconds=timeout, kind=claude_kind(system, full), model_usage=None
+        )
     try:
         data = json.loads(p.stdout)
     except json.JSONDecodeError:
@@ -177,19 +238,21 @@ def call_claude(system: str, prompt: str, tools: str | None, cwd: str, timeout: 
     ok = p.returncode == 0 and not data.get("is_error")
     text = data.get("result") or p.stderr[-TAIL:]
     limit = not ok and is_usage_limit("\n".join([str(data.get("result") or ""), p.stderr, p.stdout]))
-    return ClaudeCall({
-        "ok": ok,
-        "text": text,
-        "usage": data.get("usage") or {},
-        "model_usage": data.get("modelUsage") if isinstance(data.get("modelUsage"), dict) else None,
-        "kind": claude_kind(system, full),
-        "cost": data.get("total_cost_usd"),
-        "turns": data.get("num_turns"),
-        "session": data.get("session_id"),
-        "seconds": round(time.time() - started, 1),
-        "limit": limit,
-        "resets_at": limit_reset_at("\n".join([str(data.get("result") or ""), p.stderr])) if limit else None,
-    })
+    return ClaudeCall(
+        {
+            "ok": ok,
+            "text": text,
+            "usage": data.get("usage") or {},
+            "model_usage": data.get("modelUsage") if isinstance(data.get("modelUsage"), dict) else None,
+            "kind": claude_kind(system, full),
+            "cost": data.get("total_cost_usd"),
+            "turns": data.get("num_turns"),
+            "session": data.get("session_id"),
+            "seconds": round(time.time() - started, 1),
+            "limit": limit,
+            "resets_at": limit_reset_at("\n".join([str(data.get("result") or ""), p.stderr])) if limit else None,
+        }
+    )
 
 
 def is_usage_limit(text: str) -> bool:
@@ -283,8 +346,10 @@ class ClaudeRunner:
                 return res
             wait = max(0.0, res["resets_at"] + 60 - time.time()) if res.get("resets_at") else float(retry)
             if waited + wait > wait_max:
-                raise UsageLimit(f"利用上限の待ちが最大 {wait_max} 秒を超える（待った {round(waited)} 秒、"
-                                 f"次の待ち {round(wait)} 秒）: {(res.get('text') or '')[:200]}")
+                raise UsageLimit(
+                    f"利用上限の待ちが最大 {wait_max} 秒を超える（待った {round(waited)} 秒、"
+                    f"次の待ち {round(wait)} 秒）: {(res.get('text') or '')[:200]}"
+                )
             short = os.environ.get("NDF_SUPERVISE_LIMIT_SLEEP")
             paused_at = time.time()
             until = paused_at + (min(wait, float(short)) if short else wait)
@@ -305,8 +370,7 @@ class ClaudeRunner:
         cur["limit"] = True
         cur["limit_hits"] = cur.get("limit_hits", 0) + 1
         if res.get("resets_at"):
-            cur["limit_resets"] = datetime.fromtimestamp(res["resets_at"]).astimezone().isoformat(
-                timespec="minutes")
+            cur["limit_resets"] = datetime.fromtimestamp(res["resets_at"]).astimezone().isoformat(timespec="minutes")
 
     def record_usage(self, kind: str, res: dict) -> None:
         """1 回の呼び出しの使用量を実行の状態へ数え、使用量の帳簿へ 1 行足す（I8）。
@@ -316,7 +380,15 @@ class ClaudeRunner:
         ctx = self.ctx
         ctx.state.add_usage(kind, res)
         rec = usage_ledger.UsageRecord(
-            source="supervise", kind=res.get("kind") or kind, usage=res.get("usage", {}), plan=ctx.plan_path,
-            step=str(ctx.state.cur.get("id") or ""), model_usage=res.get("model_usage"), cost_usd=res.get("cost"),
-            turns=res.get("turns"), seconds=res.get("seconds"), session_id=res.get("session"))
+            source="supervise",
+            kind=res.get("kind") or kind,
+            usage=res.get("usage", {}),
+            plan=ctx.plan_path,
+            step=str(ctx.state.cur.get("id") or ""),
+            model_usage=res.get("model_usage"),
+            cost_usd=res.get("cost"),
+            turns=res.get("turns"),
+            seconds=res.get("seconds"),
+            session_id=res.get("session"),
+        )
         usage_ledger.append_safely(ctx.cwd, rec)

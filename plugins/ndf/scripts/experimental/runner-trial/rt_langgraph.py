@@ -3,6 +3,7 @@
 ステップ 1 つをノード 1 つにし、行き先は rt_common.route を条件付きの辺にする。承認ゲートは
 interrupt() で止め、Command(resume=...) で続ける。チェックポイントはノードの終わりごとに SQLite へ書く。
 """
+
 from __future__ import annotations
 
 import operator
@@ -44,6 +45,7 @@ def graph_for(ctx: Ctx):
             if count >= LIMIT:
                 return {**upd, "cur": END, "status": "limit"}
             return {**upd, "cur": target}
+
         return node
 
     def gate_node(s: PlanState) -> dict:

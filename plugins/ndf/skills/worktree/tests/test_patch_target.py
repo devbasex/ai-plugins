@@ -3,6 +3,7 @@
 Codex CLI はファイルの編集を `apply_patch` で渡し、パスは `tool_input.command` の
 本文にある。実機の入力で確認した形を対象とする。
 """
+
 from __future__ import annotations
 
 from hook_lib import write_target

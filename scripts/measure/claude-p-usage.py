@@ -22,6 +22,7 @@
   C. レビュー・改修の席: <projects>/-tmp-ndf-worktrees-*（cross-review / cross-refactoring の claude の席）。
      token-usage.py が外部 CLI として扱うもの。参考として別に数える
 """
+
 from __future__ import annotations
 
 import argparse
@@ -78,9 +79,11 @@ def ts(s: str) -> float:
 
 # ---------- 版と PR ----------
 
+
 def load_versions() -> list[tuple[str, float]]:
-    out = subprocess.run(["git", "tag", "-l", "ndf--v10.17.*", "--format=%(refname:short) %(creatordate:unix)"],
-                         cwd=REPO, capture_output=True, text=True).stdout.split("\n")
+    out = subprocess.run(
+        ["git", "tag", "-l", "ndf--v10.17.*", "--format=%(refname:short) %(creatordate:unix)"], cwd=REPO, capture_output=True, text=True
+    ).stdout.split("\n")
     vs = [(l.split()[0].removeprefix("ndf--v"), float(l.split()[1])) for l in out if l.strip()]
     vs = [v for v in vs if "-" not in v[0]]
     return sorted(vs, key=lambda v: v[1])
@@ -103,9 +106,25 @@ def changelog_prs() -> dict[int, str]:
 
 def load_prs(cache: Path) -> list[dict]:
     if not cache.exists():
-        data = subprocess.run(["gh", "pr", "list", "--state", "all", "--limit", "400", "--search", "created:>=2026-09-21",
-                               "--json", "number,title,headRefName,mergedAt,createdAt,state"],
-                              cwd=REPO, capture_output=True, text=True, check=True).stdout
+        data = subprocess.run(
+            [
+                "gh",
+                "pr",
+                "list",
+                "--state",
+                "all",
+                "--limit",
+                "400",
+                "--search",
+                "created:>=2026-09-21",
+                "--json",
+                "number,title,headRefName,mergedAt,createdAt,state",
+            ],
+            cwd=REPO,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
         cache.write_text(data)
     return json.loads(cache.read_text())
 
@@ -140,6 +159,7 @@ class Mapper:
 
 # ---------- A / C: 記録の残る会話 ----------
 
+
 def first_user_head(path: Path) -> str:
     for line in open(path, encoding="utf-8", errors="replace"):
         try:
@@ -157,8 +177,14 @@ def kind_of(branch: str, head: str) -> str:
         return "review"
     if "cross-refactoring" in h:
         return "refactoring"
-    for pre, k in (("design/", "design"), ("release/", "release"), ("check", "check"), ("feat", "impl"),
-                   ("fix/", "impl"), ("docs/", "impl")):
+    for pre, k in (
+        ("design/", "design"),
+        ("release/", "release"),
+        ("check", "check"),
+        ("feat", "impl"),
+        ("fix/", "impl"),
+        ("docs/", "impl"),
+    ):
         if branch.startswith(pre):
             return k
     return "不明"
@@ -173,10 +199,23 @@ def conv_row(path: Path, until: float | None) -> dict | None:
         u.add(x.usage)
     if not s.times or not u.calls:
         return None
-    return {"start": min(s.times), "end": max(s.times), "active_sec": tu.active_seconds(s.times, tu.IDLE_CAP),
-            "model": tu.most_common(s.models), "cwd": s.cwd, "calls": u.calls, "calls_main": s.usage.calls,
-            "subagents": len(subs), "input": u.inp, "cache_read": u.read, "cache_write_5m": u.w5,
-            "cache_write_1h": u.w1h, "output": u.out, "P": s.usage.p, "cost": round(u.cost, 1)}
+    return {
+        "start": min(s.times),
+        "end": max(s.times),
+        "active_sec": tu.active_seconds(s.times, tu.IDLE_CAP),
+        "model": tu.most_common(s.models),
+        "cwd": s.cwd,
+        "calls": u.calls,
+        "calls_main": s.usage.calls,
+        "subagents": len(subs),
+        "input": u.inp,
+        "cache_read": u.read,
+        "cache_write_5m": u.w5,
+        "cache_write_1h": u.w1h,
+        "output": u.out,
+        "P": s.usage.p,
+        "cost": round(u.cost, 1),
+    }
 
 
 def read_persisted(since: float, until: float | None, mp: Mapper) -> tuple[list[dict], list[dict]]:
@@ -189,15 +228,19 @@ def read_persisted(since: float, until: float | None, mp: Mapper) -> tuple[list[
             if not r or r["start"] < since:
                 continue
             if d.name.startswith(WT_PREFIX):
-                branch = r["cwd"].replace(str(REPO / ".worktrees") + "/", "") if r["cwd"] else d.name[len(WT_PREFIX):]
+                branch = r["cwd"].replace(str(REPO / ".worktrees") + "/", "") if r["cwd"] else d.name[len(WT_PREFIX) :]
                 r.update(source="A", branch=branch, kind=kind_of(branch, first_user_head(f)))
                 cands = mp.by_branch.get(branch, [])
                 r["prs"] = [p["number"] for p in cands]
                 wt.append(r)
             elif d.name.startswith(SEAT_PREFIX):
-                key = d.name[len(SEAT_PREFIX):]
-                r.update(source="C", branch=key, kind="review" if key.startswith("pr") else "refactoring",
-                         prs=[int(key[2:])] if key.startswith("pr") and key[2:].isdigit() else [])
+                key = d.name[len(SEAT_PREFIX) :]
+                r.update(
+                    source="C",
+                    branch=key,
+                    kind="review" if key.startswith("pr") else "refactoring",
+                    prs=[int(key[2:])] if key.startswith("pr") and key[2:].isdigit() else [],
+                )
                 seats.append(r)
             else:  # 他のリポジトリの席は数えない（名前も残さない）
                 continue
@@ -205,6 +248,7 @@ def read_persisted(since: float, until: float | None, mp: Mapper) -> tuple[list[
 
 
 # ---------- B: 記録の残らない claude -p（フェーズの報告） ----------
+
 
 def parse_report(text: str) -> list[dict]:
     out = []
@@ -218,13 +262,23 @@ def parse_report(text: str) -> list[dict]:
         pr = PR_RE.search(block)
         iss = ISSUE_RE.search(block)
         ph = PHASE_RE.search(block)
-        out.append({"record": rec.group(1).rstrip("`）)"), "input": int(m.group(1)), "cache_read": int(m.group(2)),
-                    "cache_write": int(m.group(3)), "output": int(m.group(4)), "usd": float(m.group(5)),
-                    "work": int(w.group(1)) if w else None, "judge": int(w.group(2)) if w else None,
-                    "turns": sum(int(r[1]) for r in rows), "llm_sec": sum(float(r[2] or 0) for r in rows),
-                    "pr_field": re.findall(r"(?:pull/|#|^)(\d{3,5})\b", pr.group(1).strip()) if pr else [],
-                    "issues": [int(x) for x in re.findall(r"#(\d+)", iss.group(1))] if iss else [],
-                    "phase_len": len(ph.group(1)) if ph else 0})
+        out.append(
+            {
+                "record": rec.group(1).rstrip("`）)"),
+                "input": int(m.group(1)),
+                "cache_read": int(m.group(2)),
+                "cache_write": int(m.group(3)),
+                "output": int(m.group(4)),
+                "usd": float(m.group(5)),
+                "work": int(w.group(1)) if w else None,
+                "judge": int(w.group(2)) if w else None,
+                "turns": sum(int(r[1]) for r in rows),
+                "llm_sec": sum(float(r[2] or 0) for r in rows),
+                "pr_field": re.findall(r"(?:pull/|#|^)(\d{3,5})\b", pr.group(1).strip()) if pr else [],
+                "issues": [int(x) for x in re.findall(r"#(\d+)", iss.group(1))] if iss else [],
+                "phase_len": len(ph.group(1)) if ph else 0,
+            }
+        )
     return out
 
 
@@ -256,8 +310,11 @@ def read_reports(since: float, until: float | None) -> list[dict]:
             if t is None or t < since or (until and t > until):
                 continue
             content = (d.get("message") or {}).get("content")
-            texts = [tu._text(c.get("content")) for c in content if isinstance(c, dict) and c.get("type") == "tool_result"] \
-                if isinstance(content, list) else []
+            texts = (
+                [tu._text(c.get("content")) for c in content if isinstance(c, dict) and c.get("type") == "tool_result"]
+                if isinstance(content, list)
+                else []
+            )
             for tx in texts:
                 for r in parse_report(tx):
                     k = (r["record"], r["input"], r["cache_read"], r["output"])
@@ -269,15 +326,22 @@ def read_reports(since: float, until: float | None) -> list[dict]:
         m = PLANNAME_RE.search(r["record"])
         r["plan"] = f"{m.group(1)}/{m.group(2)}" if m else "不明"
         name = m.group(2) if m else ""
-        r["kind"] = next((k for k in ("impl", "design", "spec", "check", "review", "release") if k in name),
-                         "impl" if re.fullmatch(r"plan-[\d-]+", name) else "不明")  # 初期の名前（plan-<課題>）は実装の計画
+        r["kind"] = next(
+            (k for k in ("impl", "design", "spec", "check", "review", "release") if k in name),
+            "impl" if re.fullmatch(r"plan-[\d-]+", name) else "不明",
+        )  # 初期の名前（plan-<課題>）は実装の計画
         if r["kind"] == "spec":
             r["kind"] = "design"
         if r["input"] + r["cache_read"] + r["cache_write"] + r["output"] == 0:
             continue  # LLM を使わなかった計画（run だけ）は数えない
         # 換算: モデルと 5 分/1 時間の別が無い。既定のモデル（claude-opus-5-5）の read 倍率と、書き込み 5 分（下限）
-        r["cost_low"] = round(r["input"] + r["cache_read"] * tu.read_rate("claude-opus-5-5")
-                              + r["cache_write"] * tu.WEIGHTS["w5"] + r["output"] * tu.WEIGHTS["out"], 1)
+        r["cost_low"] = round(
+            r["input"]
+            + r["cache_read"] * tu.read_rate("claude-opus-5-5")
+            + r["cache_write"] * tu.WEIGHTS["w5"]
+            + r["output"] * tu.WEIGHTS["out"],
+            1,
+        )
         r["cost_high"] = round(r["cost_low"] + r["cache_write"] * (tu.WEIGHTS["w1h"] - tu.WEIGHTS["w5"]), 1)
         out.append(r)
     # 同じ記録で数値が伸びた報告（途中と最後）は最後の 1 件だけ残す
@@ -288,6 +352,7 @@ def read_reports(since: float, until: float | None) -> list[dict]:
 
 
 # ---------- 寄せと集計 ----------
+
 
 def assign(rows: list[dict], mp: Mapper, pr_key) -> Counter:
     unassigned = Counter()
@@ -315,6 +380,7 @@ def pr_of_report(mp: Mapper):
         for i in r["issues"]:
             prs += [p["number"] for p in mp.by_issue.get(i, []) if p.get("mergedAt")]
         return sorted(set(prs))[:1]
+
     return f
 
 
@@ -332,57 +398,82 @@ def table(mp: Mapper, a: list[dict], b: list[dict], c: list[dict]) -> list[dict]
             m = re.search(r"issue-(\d+)", r["branch"])
             r["in_B"] = bool(m and int(m.group(1)) in b_issues)
         cost = sum(r["cost"] for r in av if not r["in_B"]) + sum(r["cost_low"] for r in bv)
-        rows.append({
-            "version": v, "A_convs": len(av), "B_plans": len(bv), "prs": len(prs),
-            "cost_A": round(sum(r["cost"] for r in av)), "cost_B_low": round(sum(r["cost_low"] for r in bv)),
-            "cost_B_high": round(sum(r["cost_high"] for r in bv)), "cost_total_low": round(cost),
-            "A_in_B": sum(r["in_B"] for r in av),
-            "cost_per_pr": round(cost / len(prs)) if prs else None,
-            "A_P_per_conv": round(sum(r["P"] for r in av) / len(av)) if av else None,
-            "A_calls_per_conv": round(sum(r["calls"] for r in av) / len(av), 1) if av else None,
-            "A_min_per_conv": round(sum(r["active_sec"] for r in av) / len(av) / 60, 1) if av else None,
-            "B_turns_per_plan": round(sum(r["turns"] for r in bv) / len(bv), 1) if bv else None,
-            "B_llm_min_per_plan": round(sum(r["llm_sec"] for r in bv) / len(bv) / 60, 1) if bv else None,
-            "C_seats": len(cv), "C_cost": round(sum(r["cost"] for r in cv)),
-            "C_P_per_seat": round(sum(r["P"] for r in cv) / len(cv)) if cv else None,
-            "C_calls_per_seat": round(sum(r["calls"] for r in cv) / len(cv), 1) if cv else None,
-            "kinds_A": dict(Counter(r["kind"] for r in av)), "kinds_B": dict(Counter(r["kind"] for r in bv)),
-        })
+        rows.append(
+            {
+                "version": v,
+                "A_convs": len(av),
+                "B_plans": len(bv),
+                "prs": len(prs),
+                "cost_A": round(sum(r["cost"] for r in av)),
+                "cost_B_low": round(sum(r["cost_low"] for r in bv)),
+                "cost_B_high": round(sum(r["cost_high"] for r in bv)),
+                "cost_total_low": round(cost),
+                "A_in_B": sum(r["in_B"] for r in av),
+                "cost_per_pr": round(cost / len(prs)) if prs else None,
+                "A_P_per_conv": round(sum(r["P"] for r in av) / len(av)) if av else None,
+                "A_calls_per_conv": round(sum(r["calls"] for r in av) / len(av), 1) if av else None,
+                "A_min_per_conv": round(sum(r["active_sec"] for r in av) / len(av) / 60, 1) if av else None,
+                "B_turns_per_plan": round(sum(r["turns"] for r in bv) / len(bv), 1) if bv else None,
+                "B_llm_min_per_plan": round(sum(r["llm_sec"] for r in bv) / len(bv) / 60, 1) if bv else None,
+                "C_seats": len(cv),
+                "C_cost": round(sum(r["cost"] for r in cv)),
+                "C_P_per_seat": round(sum(r["P"] for r in cv) / len(cv)) if cv else None,
+                "C_calls_per_seat": round(sum(r["calls"] for r in cv) / len(cv), 1) if cv else None,
+                "kinds_A": dict(Counter(r["kind"] for r in av)),
+                "kinds_B": dict(Counter(r["kind"] for r in bv)),
+            }
+        )
     return rows
 
 
 def md(rows: list[dict], meta: dict) -> str:
     def f(x):
         return "-" if x is None else (f"{x:,}" if isinstance(x, int) else str(x))
-    out = ["# マイルストーン 26 の claude -p の消費（#1142 の進め方 0）", "",
-           f"生成: {meta['generated']} / 範囲: {meta['since']} 〜 {meta['until'] or '最後まで'}", "",
-           "換算は token-usage.py の係数（input 1 / cache read はモデル別 / cache write 5 分 1.25・1 時間 2 / output 5）。"
-           "A = 記録の残る claude -p（.worktrees の会話）、B = 記録の残らない supervise.py の claude -p（フェーズの報告の合計。"
-           "換算の下限: opus-5-5 の read 倍率・書き込みを 5 分とみなす）、C = レビュー・改修の claude の席（/tmp/ndf-worktrees）。"
-           "換算 A+B は B に含まれる A（full のステップの会話）を除いて足す。PR 数と PR あたりは A + B。所要は A の行の間隔（30 分で打ち切り）、B は報告の秒の合計。", "",
-           "| 版 | A 会話（うち B に含む） | B 計画 | PR | 換算 A | 換算 B（下限〜上限） | 換算 A+B | PR あたり | A の P/会話 | A の呼び出し/会話 | A の所要（分） | B の往復/計画 | B の LLM 所要（分） | C 席 | 換算 C | C の P/席 |",
-           "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"]
+
+    out = [
+        "# マイルストーン 26 の claude -p の消費（#1142 の進め方 0）",
+        "",
+        f"生成: {meta['generated']} / 範囲: {meta['since']} 〜 {meta['until'] or '最後まで'}",
+        "",
+        "換算は token-usage.py の係数（input 1 / cache read はモデル別 / cache write 5 分 1.25・1 時間 2 / output 5）。"
+        "A = 記録の残る claude -p（.worktrees の会話）、B = 記録の残らない supervise.py の claude -p（フェーズの報告の合計。"
+        "換算の下限: opus-5-5 の read 倍率・書き込みを 5 分とみなす）、C = レビュー・改修の claude の席（/tmp/ndf-worktrees）。"
+        "換算 A+B は B に含まれる A（full のステップの会話）を除いて足す。PR 数と PR あたりは A + B。所要は A の行の間隔（30 分で打ち切り）、B は報告の秒の合計。",
+        "",
+        "| 版 | A 会話（うち B に含む） | B 計画 | PR | 換算 A | 換算 B（下限〜上限） | 換算 A+B | PR あたり | A の P/会話 | A の呼び出し/会話 | A の所要（分） | B の往復/計画 | B の LLM 所要（分） | C 席 | 換算 C | C の P/席 |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+    ]
     for r in rows:
-        out.append(f"| {r['version']} | {r['A_convs']}（{r['A_in_B']}） | {r['B_plans']} | {r['prs']} | {f(r['cost_A'])} | "
-                   f"{f(r['cost_B_low'])}〜{f(r['cost_B_high'])} | {f(r['cost_total_low'])} | {f(r['cost_per_pr'])} | "
-                   f"{f(r['A_P_per_conv'])} | {f(r['A_calls_per_conv'])} | {f(r['A_min_per_conv'])} | "
-                   f"{f(r['B_turns_per_plan'])} | {f(r['B_llm_min_per_plan'])} | {r['C_seats']} | {f(r['C_cost'])} | "
-                   f"{f(r['C_P_per_seat'])} |")
+        out.append(
+            f"| {r['version']} | {r['A_convs']}（{r['A_in_B']}） | {r['B_plans']} | {r['prs']} | {f(r['cost_A'])} | "
+            f"{f(r['cost_B_low'])}〜{f(r['cost_B_high'])} | {f(r['cost_total_low'])} | {f(r['cost_per_pr'])} | "
+            f"{f(r['A_P_per_conv'])} | {f(r['A_calls_per_conv'])} | {f(r['A_min_per_conv'])} | "
+            f"{f(r['B_turns_per_plan'])} | {f(r['B_llm_min_per_plan'])} | {r['C_seats']} | {f(r['C_cost'])} | "
+            f"{f(r['C_P_per_seat'])} |"
+        )
     out += ["", "## 寄せられなかったもの", ""]
     for src, c in meta["unassigned"].items():
         for k, n in c.items():
             out.append(f"- {src}: {k} {n} 件")
-    out += ["", "## 会話・計画ごと（A と B）", "",
-            "| 出所 | ブランチ / 計画 | 種類 | 開始 | 終了 | モデル | 呼び出し | input | cache read | write 5 分 | write 1 時間 | output | P | 換算 | PR | 版 | 寄せ方 |",
-            "| --- | --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | --- |"]
+    out += [
+        "",
+        "## 会話・計画ごと（A と B）",
+        "",
+        "| 出所 | ブランチ / 計画 | 種類 | 開始 | 終了 | モデル | 呼び出し | input | cache read | write 5 分 | write 1 時間 | output | P | 換算 | PR | 版 | 寄せ方 |",
+        "| --- | --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | --- |",
+    ]
     for r in meta["A"]:
-        out.append(f"| A | {r['branch']} | {r['kind']} | {iso(r['start'])} | {iso(r['end'])} | {r['model']} | {r['calls']} | "
-                   f"{r['input']:,} | {r['cache_read']:,} | {r['cache_write_5m']:,} | {r['cache_write_1h']:,} | {r['output']:,} | "
-                   f"{r['P']:,} | {r['cost']:,} | {r.get('pr') or '-'} | {r['version'] or '-'} | {r['by']} |")
+        out.append(
+            f"| A | {r['branch']} | {r['kind']} | {iso(r['start'])} | {iso(r['end'])} | {r['model']} | {r['calls']} | "
+            f"{r['input']:,} | {r['cache_read']:,} | {r['cache_write_5m']:,} | {r['cache_write_1h']:,} | {r['output']:,} | "
+            f"{r['P']:,} | {r['cost']:,} | {r.get('pr') or '-'} | {r['version'] or '-'} | {r['by']} |"
+        )
     for r in meta["B"]:
-        out.append(f"| B | {r['plan']} | {r['kind']} | - | {iso(r['at'])} | 不明 | 往復 {r['turns']} | {r['input']:,} | "
-                   f"{r['cache_read']:,} | 合計 {r['cache_write']:,} | - | {r['output']:,} | - | {r['cost_low']:,} | "
-                   f"{r.get('pr') or '-'} | {r['version'] or '-'} | {r['by']} |")
+        out.append(
+            f"| B | {r['plan']} | {r['kind']} | - | {iso(r['at'])} | 不明 | 往復 {r['turns']} | {r['input']:,} | "
+            f"{r['cache_read']:,} | 合計 {r['cache_write']:,} | - | {r['output']:,} | - | {r['cost_low']:,} | "
+            f"{r.get('pr') or '-'} | {r['version'] or '-'} | {r['by']} |"
+        )
     return "\n".join(out) + "\n"
 
 
@@ -394,8 +485,11 @@ def main() -> int:
     ap.add_argument("--sv-root", type=Path, default=SV_ROOT, help="計画の状態の置き場（既定 %(default)s）")
     ap.add_argument("--projects", type=Path, default=PROJ, help="Claude Code の会話の置き場（既定 %(default)s）")
     ap.add_argument("--seat-prefix", default=SEAT_PREFIX, help="レビュー・改修の席の会話の置き場の接頭辞（既定 %(default)s）")
-    ap.add_argument("--out", default=str(Path.home() / ".local/state/ndf/measure-1142/claude-p-usage"),
-                    help="出力の接頭辞（.md と .json を書く。既定 %(default)s）")
+    ap.add_argument(
+        "--out",
+        default=str(Path.home() / ".local/state/ndf/measure-1142/claude-p-usage"),
+        help="出力の接頭辞（.md と .json を書く。既定 %(default)s）",
+    )
     a = ap.parse_args()
     configure(a.repo, a.sv_root, a.projects, a.seat_prefix)
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
@@ -403,19 +497,28 @@ def main() -> int:
     mp = Mapper(load_prs(Path(a.out).parent / "prs.json"))
     A, C = read_persisted(since, until, mp)
     B = read_reports(since, until)
-    un = {"A": assign(A, mp, lambda r: r["prs"]), "B": assign(B, mp, pr_of_report(mp)),
-          "C": assign(C, mp, lambda r: r["prs"])}
+    un = {"A": assign(A, mp, lambda r: r["prs"]), "B": assign(B, mp, pr_of_report(mp)), "C": assign(C, mp, lambda r: r["prs"])}
     rows = table(mp, A, B, C)
-    meta = {"generated": iso(datetime.now(timezone.utc).timestamp()), "since": a.since, "until": a.until,
-            "unassigned": {k: dict(v) for k, v in un.items()}, "A": A, "B": B}
+    meta = {
+        "generated": iso(datetime.now(timezone.utc).timestamp()),
+        "since": a.since,
+        "until": a.until,
+        "unassigned": {k: dict(v) for k, v in un.items()},
+        "A": A,
+        "B": B,
+    }
     Path(a.out + ".md").write_text(md(rows, meta))
     for r in A + C:
         r.pop("cwd", None)
     for r in B:
         r.pop("record", None)
-    Path(a.out + ".json").write_text(json.dumps({"meta": {k: meta[k] for k in ("generated", "since", "until", "unassigned")},
-                                                 "by_version": rows, "A": A, "B": B, "C": C},
-                                                ensure_ascii=False, indent=1))
+    Path(a.out + ".json").write_text(
+        json.dumps(
+            {"meta": {k: meta[k] for k in ("generated", "since", "until", "unassigned")}, "by_version": rows, "A": A, "B": B, "C": C},
+            ensure_ascii=False,
+            indent=1,
+        )
+    )
     print(json.dumps({"A": len(A), "B": len(B), "C": len(C), "unassigned": meta["unassigned"]}, ensure_ascii=False))
     return 0
 

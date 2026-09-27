@@ -2,6 +2,7 @@
 
 **公開するのはオーケストレーターだけである。** 認証の退避の値はライブラリ（`scripts/lib/git-credential.sh`）が持つ。
 """
+
 from __future__ import annotations
 
 import pathlib
@@ -28,9 +29,7 @@ def _run_sync_command(state: dict[str, Any], work: str, command: str) -> None:
     **黙って push しない。** 同期できない状態を公開すると、利用者のリポジトリの
     チェックを壊したまま進むことになる。
     """
-    code, timed_out = run_with_timeout(
-        command, work, timeline.state_test_timeout(state)
-    )
+    code, timed_out = run_with_timeout(command, work, timeline.state_test_timeout(state))
     if not (timed_out or code != 0):
         return
     # **途中まで書き換えた差分を残さない。** 残すと次の実行は
@@ -67,9 +66,7 @@ def _publish_commit_message(produced: list[str], plan_rel: str) -> str:
     return SYNC_COMMIT_MESSAGE
 
 
-def _commit_sync_changes(
-    work: str, command: str, produced: list[str], plan_rel: str = ""
-) -> None:
+def _commit_sync_changes(work: str, command: str, produced: list[str], plan_rel: str = "") -> None:
     """同期が作った差分を進行側のコミットとして積む。差分が無ければ何もしない。
 
     このコミットはどの改善項目にも属さない。取り消しでは積み直されないが、
@@ -84,8 +81,7 @@ def _commit_sync_changes(
     # 確認済みだからである。
     try:
         sh(["git", "add", "--", *produced], cwd=work)
-        sh(["git", "commit", "-m", _publish_commit_message(produced, plan_rel)],
-            cwd=work)
+        sh(["git", "commit", "-m", _publish_commit_message(produced, plan_rel)], cwd=work)
     except SystemExit:
         worktree._discard_worktree_changes(work)
         raise
@@ -130,9 +126,7 @@ def _sync_generated(state: dict[str, Any]) -> None:
 
 # 退避に使う値は共通層が 1 か所で持つ（#524）。**複製は持たない。** 手順書と実装が
 # 別々に同じ文字列を持つと、片方だけが更新される。
-_CREDENTIAL_LIB = (
-    pathlib.Path(__file__).resolve().parents[4] / "scripts" / "lib" / "git-credential.sh"
-)
+_CREDENTIAL_LIB = pathlib.Path(__file__).resolve().parents[4] / "scripts" / "lib" / "git-credential.sh"
 
 
 def gh_available() -> bool:
@@ -146,7 +140,8 @@ def credential_fallback_args() -> list[str]:
         return []
     out = subprocess.run(
         ["bash", "-c", f'. "{_CREDENTIAL_LIB}"; ndf_git_credential_fallback_args'],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     if out.returncode != 0:
         return []
@@ -188,9 +183,7 @@ def push_head(state: dict[str, Any]) -> None:
     publish_plan_comment(state)
 
 
-def push_with_retry_marker(
-    path: pathlib.Path, state: dict[str, Any], entry: dict[str, Any]
-) -> None:
+def push_with_retry_marker(path: pathlib.Path, state: dict[str, Any], entry: dict[str, Any]) -> None:
     """保留のフラグを立ててから push し、成功したらフラグを消す。
 
     フラグを残さずに push すると、失敗したときに**取り消しがローカルだけに留まる**。
@@ -203,9 +196,7 @@ def push_with_retry_marker(
     statefile.save(path, state)
 
 
-def flush_pending_push(
-    path: pathlib.Path, state: dict[str, Any], entry: dict[str, Any]
-) -> None:
+def flush_pending_push(path: pathlib.Path, state: dict[str, Any], entry: dict[str, Any]) -> None:
     """前回やり残した push を、処理済みの判定より**先に**片づける。"""
     if not entry.get("pending_push"):
         return

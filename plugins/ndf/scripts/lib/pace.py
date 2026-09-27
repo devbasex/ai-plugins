@@ -10,6 +10,7 @@ check-trigger.py・mvv-gate.py・supervise.py が同じ規則で読む。標準�
 
 glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。`**/` は 0 階層でもよい。
 """
+
 from __future__ import annotations
 
 import json
@@ -59,8 +60,9 @@ def read_pace(root) -> dict:
         raise PaceError(f"進め方の宣言はオブジェクトで書く: {path}")
     areas = d.get("areas") or []
     if not isinstance(areas, list) or not all(
-            isinstance(a, dict) and isinstance(a.get("name"), str) and a["name"]
-            and isinstance(a.get("paths"), list) and a["paths"] for a in areas):
+        isinstance(a, dict) and isinstance(a.get("name"), str) and a["name"] and isinstance(a.get("paths"), list) and a["paths"]
+        for a in areas
+    ):
         raise PaceError(f"進め方の宣言の areas は name と paths を持つ: {path}")
     triggers = {**DEFAULT_TRIGGERS, **(d.get("triggers") or {})}
     if not all(isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0 for v in triggers.values()):
@@ -69,7 +71,9 @@ def read_pace(root) -> dict:
     if not isinstance(fast, dict):
         raise PaceError(f"進め方の宣言の fast はオブジェクトで書く: {path}")
     modes = fast.get("modes") or list(DEFAULT_MODES)
-    fast = {"enabled": fast.get("enabled") is True, "verify": str(fast.get("verify") or ""),
-            "modes": [m for m in modes if m not in EXCLUDED_MODES]}
-    return {**d, "fast": fast, "areas": areas, "triggers": triggers,
-            "boundary_paths": list(d.get("boundary_paths") or [])}
+    fast = {
+        "enabled": fast.get("enabled") is True,
+        "verify": str(fast.get("verify") or ""),
+        "modes": [m for m in modes if m not in EXCLUDED_MODES],
+    }
+    return {**d, "fast": fast, "areas": areas, "triggers": triggers, "boundary_paths": list(d.get("boundary_paths") or [])}

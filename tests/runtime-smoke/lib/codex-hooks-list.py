@@ -46,9 +46,7 @@ def main():
 
     # 標準エラーは読み続けないとパイプが詰まる。失敗の説明に使う末尾だけを残す。
     stderr_tail = deque(maxlen=20)
-    threading.Thread(
-        target=lambda: stderr_tail.extend(proc.stderr), daemon=True
-    ).start()
+    threading.Thread(target=lambda: stderr_tail.extend(proc.stderr), daemon=True).start()
 
     def send(message):
         proc.stdin.write(json.dumps(message) + "\n")
@@ -65,8 +63,7 @@ def main():
     threading.Thread(target=read_stdout, daemon=True).start()
 
     try:
-        send({"id": 1, "method": "initialize",
-              "params": {"clientInfo": {"name": "runtime-smoke", "version": "0.0.0"}}})
+        send({"id": 1, "method": "initialize", "params": {"clientInfo": {"name": "runtime-smoke", "version": "0.0.0"}}})
         send({"method": "initialized"})
         send({"id": HOOKS_LIST_ID, "method": "hooks/list", "params": {"cwds": [args.cwd]}})
 
@@ -92,11 +89,9 @@ def main():
                 sys.stdout.write("\n")
                 return
             if reader_done.is_set() and not lines:
-                fail("codex app-server exited before answering hooks/list:\n"
-                     + "".join(received), stderr_tail)
+                fail("codex app-server exited before answering hooks/list:\n" + "".join(received), stderr_tail)
             if time.monotonic() > deadline:
-                fail(f"codex app-server did not answer hooks/list within {TIMEOUT_SECONDS}s:\n"
-                     + "".join(received), stderr_tail)
+                fail(f"codex app-server did not answer hooks/list within {TIMEOUT_SECONDS}s:\n" + "".join(received), stderr_tail)
             time.sleep(0.05)
     finally:
         if proc.poll() is None:

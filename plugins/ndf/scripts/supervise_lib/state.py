@@ -3,6 +3,7 @@
 `RunState` は、ステップの結果・記録（`state.json` の `log` と `llm`）・途中の報告（`progress.jsonl`）・
 承認ゲート・報告（`report.md`）を持つ。書くのはこのクラスだけである。
 """
+
 from __future__ import annotations
 
 import json
@@ -37,12 +38,11 @@ class RunState:
         self.work.mkdir(parents=True, exist_ok=True)
         self.results: dict[str, dict] = {}
         self.log: list[dict] = []
-        self.llm = {"work": 0, "judge": 0, "input": 0, "cache_read": 0, "cache_write": 0,
-                    "output": 0, "cost": 0.0}
+        self.llm = {"work": 0, "judge": 0, "input": 0, "cache_read": 0, "cache_write": 0, "output": 0, "cost": 0.0}
         self.last_stage = "無し"
         self.pace_recorded = False
-        self.gates: list[dict] = []      # run のステップが返した関門（終了コード 10〜19）
-        self.switched: list[str] = []    # 利用上限で足した認証の変数の名前
+        self.gates: list[dict] = []  # run のステップが返した関門（終了コード 10〜19）
+        self.switched: list[str] = []  # 利用上限で足した認証の変数の名前
         self.cur: dict = {}
         self.fail_counts: dict[str, int] = {}
         # 途中の報告（progress.jsonl）。LLM を使わずスクリプトで書き・分ける
@@ -55,8 +55,7 @@ class RunState:
         self.worker_last = ""
         self.worker_counts: dict[str, int] = {}
         self.attention_keys: set[str] = set()
-        self.pcount = {"step": 0, "alive": 0, "worker": 0, "malformed": 0, "attention": 0, "slow": 0, "llm": 0,
-                       "llm_cost": 0.0}
+        self.pcount = {"step": 0, "alive": 0, "worker": 0, "malformed": 0, "attention": 0, "slow": 0, "llm": 0, "llm_cost": 0.0}
         self.slow_events: list[dict] = []
         self.worker_recent: list[str] = []
         self.worker_last_at: float | None = None
@@ -140,9 +139,18 @@ class RunState:
         c = self.cur
         text = c.get("text", "") or ""
         summary = c.get("decision") or next((l for l in reversed(text.splitlines()) if l.strip()), "")
-        self.progress_write({"kind": "step", "step": c.get("id"), "type": c.get("type"), "exit": c.get("exit"),
-                             "seconds": c.get("seconds"), "cost": (c.get("llm") or {}).get("cost", 0.0),
-                             "next": nxt or "end", "summary": summary.strip()[:160]})
+        self.progress_write(
+            {
+                "kind": "step",
+                "step": c.get("id"),
+                "type": c.get("type"),
+                "exit": c.get("exit"),
+                "seconds": c.get("seconds"),
+                "cost": (c.get("llm") or {}).get("cost", 0.0),
+                "next": nxt or "end",
+                "summary": summary.strip()[:160],
+            }
+        )
 
     # --- 記録 ---
     def out_path(self, n: int, sid: str) -> Path:
@@ -174,8 +182,7 @@ class RunState:
         self.llm["output"] += u.get("output_tokens", 0)
         self.llm["cost"] += res.get("cost") or 0.0
         # ステップごとの内訳（往復の回数・トークン・費用）。同じステップで複数回呼べば足し合わせる
-        c = self.cur.setdefault("llm", {"calls": 0, "turns": 0, "input": 0, "cache_read": 0,
-                                        "cache_write": 0, "output": 0, "cost": 0.0})
+        c = self.cur.setdefault("llm", {"calls": 0, "turns": 0, "input": 0, "cache_read": 0, "cache_write": 0, "output": 0, "cost": 0.0})
         c["calls"] += 1
         c["turns"] += res.get("turns") or 0
         c["input"] += u.get("input_tokens", 0)
@@ -189,8 +196,7 @@ class RunState:
         models = c.setdefault("models", {})
         for name, mu in (res.get("model_usage") or {}).items():
             mu = mu if isinstance(mu, dict) else {}
-            m = models.setdefault(name, {"calls": 0, "input": 0, "cache_read": 0, "cache_write": 0,
-                                         "output": 0, "cost": 0.0})
+            m = models.setdefault(name, {"calls": 0, "input": 0, "cache_read": 0, "cache_write": 0, "output": 0, "cost": 0.0})
             m["calls"] += 1
             m["input"] += mu.get("inputTokens") or 0
             m["cache_read"] += mu.get("cacheReadInputTokens") or 0
@@ -203,28 +209,37 @@ class RunState:
         self.results[sid] = dict(self.cur)
         self.read_worker_lines()
         self.step_line(nxt)
-        if (self.cur.get("exit") not in (0, None) and not is_gate(self.cur.get("exit")) and nxt
-                and (self.cur.get("slow") or {}).get("act") != "retry"):
+        if (
+            self.cur.get("exit") not in (0, None)
+            and not is_gate(self.cur.get("exit"))
+            and nxt
+            and (self.cur.get("slow") or {}).get("act") != "retry"
+        ):
             fails = self.fail_counts[sid] = self.fail_counts.get(sid, 0) + 1
             if fails >= 2 and next_type == "judge":
-                self.attention("judge のステップで stop が出そう",
-                               f"ステップ {sid} が {fails} 回落ちた（exit={self.cur.get('exit')}）。次は judge のステップ {nxt}")
+                self.attention(
+                    "judge のステップで stop が出そう",
+                    f"ステップ {sid} が {fails} 回落ちた（exit={self.cur.get('exit')}）。次は judge のステップ {nxt}",
+                )
         self.out_path(n, sid).write_text(self.cur.get("text", ""))
         self.log.append({k: v for k, v in self.cur.items() if k != "text"})
-        (self.dir / "state.json").write_text(json.dumps(
-            {"log": self.log, "llm": self.llm}, ensure_ascii=False, indent=1))
+        (self.dir / "state.json").write_text(json.dumps({"log": self.log, "llm": self.llm}, ensure_ascii=False, indent=1))
 
     def write_report(self, plan: dict, result: str, reason: str) -> str:
         """`## フェーズの報告` を組み、`report.md` へ書いて返す。"""
         l = self.llm
         self.read_worker_lines()
         pc = self.pcount
-        steps = " → ".join(f"{e['id']}" + (f"[{e['decision']}]" if "decision" in e else
-                                           f"(exit={e.get('exit')})") for e in self.log)
-        rows = "\n".join(
-            f"| {e['id']} | {e['llm']['turns']} | {e.get('seconds', '')} | {e['llm']['cache_read']} | "
-            f"{e['llm']['cache_write']} | {e['llm']['output']} | ${e['llm']['cost']:.3f} |"
-            for e in self.log if e.get("llm")) or "| 無し | | | | | | |"
+        steps = " → ".join(f"{e['id']}" + (f"[{e['decision']}]" if "decision" in e else f"(exit={e.get('exit')})") for e in self.log)
+        rows = (
+            "\n".join(
+                f"| {e['id']} | {e['llm']['turns']} | {e.get('seconds', '')} | {e['llm']['cache_read']} | "
+                f"{e['llm']['cache_write']} | {e['llm']['output']} | ${e['llm']['cost']:.3f} |"
+                for e in self.log
+                if e.get("llm")
+            )
+            or "| 無し | | | | | | |"
+        )
         counts = {}
         for e in self.log:
             if "counts" in e:
@@ -234,39 +249,62 @@ class RunState:
             gate_line = "; ".join(f"ステップ {g['id']}（exit={g['exit']}）" for g in self.gates)
         else:
             gate_line = "本番の系へ届く操作" if result == "関門" else "無し"
-        presented = ", ".join([*(g["presentation"] for g in self.gates if g.get("presentation")),
-                               *(e["presentation"] for e in self.log if e.get("gate_as_ok") and e.get("presentation"))
-                               ]) or "無し"
+        presented = (
+            ", ".join(
+                [
+                    *(g["presentation"] for g in self.gates if g.get("presentation")),
+                    *(e["presentation"] for e in self.log if e.get("gate_as_ok") and e.get("presentation")),
+                ]
+            )
+            or "無し"
+        )
         extra = ""
         if self.switched:
             extra += f"- 認証: 切り替え（{', '.join(self.switched)}）\n"
         limited = [e for e in self.log if e.get("limit")]
         if limited:
-            extra += "- 利用上限: " + "; ".join(
-                f"{e['id']} {e.get('limit_hits', 1)} 回（待ち {e.get('limit_waited', 0)} 秒"
-                + (f"・解除 {e['limit_resets']}" if e.get("limit_resets") else "") + "）" for e in limited) + "\n"
-        acted = [e for e in self.slow_events
-                 if e.get("act") != "wait" or e.get("by") == "llm" or (e.get("probe") or {}).get("action") == "remedied"]
+            extra += (
+                "- 利用上限: "
+                + "; ".join(
+                    f"{e['id']} {e.get('limit_hits', 1)} 回（待ち {e.get('limit_waited', 0)} 秒"
+                    + (f"・解除 {e['limit_resets']}" if e.get("limit_resets") else "")
+                    + "）"
+                    for e in limited
+                )
+                + "\n"
+            )
+        acted = [
+            e
+            for e in self.slow_events
+            if e.get("act") != "wait" or e.get("by") == "llm" or (e.get("probe") or {}).get("action") == "remedied"
+        ]
         if acted:
-            extra += "- 遅れ: " + "; ".join(
-                f"{e['step']} {e.get('round', 0)} 回目 {e['act']}（{e['by']}"
-                + (f"・{e['probe']['class']}" if e.get("probe") else "") + "）" for e in acted) + "\n"
+            extra += (
+                "- 遅れ: "
+                + "; ".join(
+                    f"{e['step']} {e.get('round', 0)} 回目 {e['act']}（{e['by']}"
+                    + (f"・{e['probe']['class']}" if e.get("probe") else "")
+                    + "）"
+                    for e in acted
+                )
+                + "\n"
+            )
         text = f"""## フェーズの報告
 
-- フェーズ: {plan.get('フェーズ')}
-- 課題: {' '.join('#' + str(i) for i in plan.get('課題', []))}
+- フェーズ: {plan.get("フェーズ")}
+- 課題: {" ".join("#" + str(i) for i in plan.get("課題", []))}
 - 結果: {result}
 - 関門: {gate_line}
-- 次のフェーズ: {plan.get('次のフェーズ', '無し') if result == '完了' else '無し'}
-- Pull Request: {plan.get('Pull Request', '無し')}
+- 次のフェーズ: {plan.get("次のフェーズ", "無し") if result == "完了" else "無し"}
+- Pull Request: {plan.get("Pull Request", "無し")}
 - 最後に記録した工程: {self.last_stage}
-- 使った worker: 修正 {l['work']}（claude -p）/ 判断 {l['judge']}（claude -p）
-{extra}- 途中の報告: ステップ {pc['step']} / まだ動いている {pc['alive']} / worker {pc['worker']}（形が違う {pc['malformed']}）/ conductor 向け {pc['attention']} / 遅れの調査 {pc['slow']} / LLM へ回した {pc['llm']} 回・${pc['llm_cost']:.3f}（{self.progress}）
+- 使った worker: 修正 {l["work"]}（claude -p）/ 判断 {l["judge"]}（claude -p）
+{extra}- 途中の報告: ステップ {pc["step"]} / まだ動いている {pc["alive"]} / worker {pc["worker"]}（形が違う {pc["malformed"]}）/ conductor 向け {pc["attention"]} / 遅れの調査 {pc["slow"]} / LLM へ回した {pc["llm"]} 回・${pc["llm_cost"]:.3f}（{self.progress}）
 - 提示物: {presented}
 - 理由: {reason}
 - 通ったステップ: {steps}
 - 件数: {counts_line}
-- LLM の使用量: 入力 {l['input']} / cache read {l['cache_read']} / cache write {l['cache_write']} / 出力 {l['output']} / ${l['cost']:.3f}
+- LLM の使用量: 入力 {l["input"]} / cache read {l["cache_read"]} / cache write {l["cache_write"]} / 出力 {l["output"]} / ${l["cost"]:.3f}
 - 記録: {self.dir}
 
 | ステップ | 往復 | 秒 | cache read | cache write | 出力 | 費用 |

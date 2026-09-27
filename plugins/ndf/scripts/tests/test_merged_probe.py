@@ -2,6 +2,7 @@
 
 gh は PATH の先頭に置いた偽物で置き換える。偽物は FAKE_GH_STATE の JSON を読み、呼ばれた引数を calls に積む。
 """
+
 from __future__ import annotations
 
 import json
@@ -16,7 +17,7 @@ SCRIPTS = Path(__file__).resolve().parents[1]
 MERGED = SCRIPTS / "merged-steps.py"
 PY = sys.executable
 
-FAKE_GH = r'''#!{py}
+FAKE_GH = r"""#!{py}
 import json, os, sys
 a = sys.argv[1:]
 path = os.environ["FAKE_GH_STATE"]
@@ -44,12 +45,17 @@ else:
 if out is not None:
     print(out)
 sys.exit(code)
-'''
+"""
 
 
 def check(name, status, conclusion="", run_id="11", job_id="22"):
-    return {"__typename": "CheckRun", "name": name, "status": status, "conclusion": conclusion,
-            "detailsUrl": f"https://github.com/o/r/actions/runs/{run_id}/job/{job_id}"}
+    return {
+        "__typename": "CheckRun",
+        "name": name,
+        "status": status,
+        "conclusion": conclusion,
+        "detailsUrl": f"https://github.com/o/r/actions/runs/{run_id}/job/{job_id}",
+    }
 
 
 def pr(n, *checks, state="OPEN"):
@@ -71,12 +77,12 @@ def gh(tmp_path, monkeypatch):
     def setup(**st):
         state.write_text(json.dumps(st))
         return state
+
     return setup
 
 
 def probe(tmp_path, *args):
-    p = subprocess.run([PY, str(MERGED), "probe", *args, "--root", str(tmp_path / "repo")],
-                       capture_output=True, text=True)
+    p = subprocess.run([PY, str(MERGED), "probe", *args, "--root", str(tmp_path / "repo")], capture_output=True, text=True)
     return p.returncode, json.loads(p.stdout.strip().splitlines()[-1]) if p.stdout.strip() else None
 
 
@@ -85,9 +91,10 @@ def calls(state):
 
 
 def stale_setup(gh, attempt):
-    return gh(prs={"1100": pr(1100, check("runtime-plugin-build-check", "IN_PROGRESS"))},
-              runs={"11": {"status": "completed", "attempt": attempt,
-                           "jobs": [{"databaseId": 22, "status": "in_progress", "conclusion": ""}]}})
+    return gh(
+        prs={"1100": pr(1100, check("runtime-plugin-build-check", "IN_PROGRESS"))},
+        runs={"11": {"status": "completed", "attempt": attempt, "jobs": [{"databaseId": 22, "status": "in_progress", "conclusion": ""}]}},
+    )
 
 
 def test_stale_with_act_reruns_job_and_is_remedied(tmp_path, gh):
@@ -120,16 +127,28 @@ def test_rerun_failure_is_judge(tmp_path, gh):
     assert (out["metrics"]["class"], out["metrics"]["action"]) == ("stale", "judge")
 
 
-@pytest.mark.parametrize("checks,runs,expected", [
-    ([check("a", "COMPLETED", "FAILURE")], {}, ("failed", "fix")),
-    ([check("a", "IN_PROGRESS")], {"11": {"status": "completed", "attempt": 1,
-                                         "jobs": [{"databaseId": 22, "conclusion": "success"}]}}, ("settled", "wait")),
-    ([check("a", "QUEUED")], {"11": {"status": "queued", "attempt": 1,
-                                    "jobs": [{"databaseId": 22, "status": "queued"}]}}, ("queued", "wait")),
-    ([check("a", "IN_PROGRESS")], {"11": {"status": "in_progress", "attempt": 1,
-                                         "jobs": [{"databaseId": 22, "status": "in_progress"}]}}, ("running", "wait")),
-    ([check("a", "COMPLETED", "SUCCESS")], {}, ("passed", "judge")),
-])
+@pytest.mark.parametrize(
+    "checks,runs,expected",
+    [
+        ([check("a", "COMPLETED", "FAILURE")], {}, ("failed", "fix")),
+        (
+            [check("a", "IN_PROGRESS")],
+            {"11": {"status": "completed", "attempt": 1, "jobs": [{"databaseId": 22, "conclusion": "success"}]}},
+            ("settled", "wait"),
+        ),
+        (
+            [check("a", "QUEUED")],
+            {"11": {"status": "queued", "attempt": 1, "jobs": [{"databaseId": 22, "status": "queued"}]}},
+            ("queued", "wait"),
+        ),
+        (
+            [check("a", "IN_PROGRESS")],
+            {"11": {"status": "in_progress", "attempt": 1, "jobs": [{"databaseId": 22, "status": "in_progress"}]}},
+            ("running", "wait"),
+        ),
+        ([check("a", "COMPLETED", "SUCCESS")], {}, ("passed", "judge")),
+    ],
+)
 def test_classes(tmp_path, gh, checks, runs, expected):
     gh(prs={"5": pr(5, *checks)}, runs=runs, queued_runs=4)
     _, out = probe(tmp_path, "--pr", "5")
@@ -139,8 +158,10 @@ def test_classes(tmp_path, gh, checks, runs, expected):
 
 
 def test_strongest_class_wins_across_prs_found_by_head(tmp_path, gh):
-    gh(heads={"release/v1": [7], "develop": [8]},
-       prs={"7": pr(7, check("a", "COMPLETED", "SUCCESS")), "8": pr(8, check("b", "COMPLETED", "FAILURE"))})
+    gh(
+        heads={"release/v1": [7], "develop": [8]},
+        prs={"7": pr(7, check("a", "COMPLETED", "SUCCESS")), "8": pr(8, check("b", "COMPLETED", "FAILURE"))},
+    )
     _, out = probe(tmp_path, "--head", "release/v1", "--head", "develop")
     assert out["metrics"]["class"] == "failed" and out["metrics"]["prs"] == [7, 8]
 
@@ -159,13 +180,16 @@ def test_needs_pr_or_head(tmp_path, gh):
 
 # --- merge-when-green の待ちの間隔（lib/waits.py） ----------------------------------------
 
+
 def test_green_watch_stretches_the_interval_while_nothing_changes(monkeypatch):
     """読んだ中身が変わらない間は間隔を 1.5 倍ずつ --interval の 6 倍まで伸ばし、変われば戻す。pending を見ずに
     通ったときの確かめ直しは --recheck で眠る（前は --interval のまま伸ばさなかった）。"""
     import argparse
+
     monkeypatch.syspath_prepend(str(SCRIPTS / "lib"))
     monkeypatch.syspath_prepend(str(SCRIPTS))
     from merged_lib import checks
+
     pending = {"__typename": "CheckRun", "name": "t", "status": "IN_PROGRESS", "conclusion": None}
     done = {"__typename": "CheckRun", "name": "t", "status": "COMPLETED", "conclusion": "SUCCESS"}
     views = [("a", pending)] * 6 + [("b", pending)] * 2 + [("c", done)] * 2
@@ -174,6 +198,7 @@ def test_green_watch_stretches_the_interval_while_nothing_changes(monkeypatch):
     def view(_root, _n):
         sha, check = next(calls)
         return {"state": "OPEN", "headRefOid": sha, "statusCheckRollup": [check]}
+
     slept = []
     monkeypatch.setattr(checks, "pr_state", view)
     monkeypatch.setattr(checks, "probe_checks", lambda _root, _rollup: ([], [], []))

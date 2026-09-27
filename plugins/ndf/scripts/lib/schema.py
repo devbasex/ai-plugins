@@ -16,6 +16,7 @@
 
 使う側は `deps.require("schema")` を先に呼ぶ。
 """
+
 from __future__ import annotations
 
 from typing import Annotated, Any, Iterable, TypeVar

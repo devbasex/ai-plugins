@@ -20,6 +20,7 @@ tree-sitter-bash の上へ移した `hook_lib/write_target.py:shell_targets` が
 | 関数定義 | 本体の移動を外へ漏らさず、呼び出しの後は決めない |
 | 複合構文・リダイレクト | `if` の中の移動、命令名より前のリダイレクト、記述子の複製 |
 """
+
 from __future__ import annotations
 
 import pathlib
@@ -48,39 +49,36 @@ CASES = [
     ("empty", "", "", [], 1),
     ("fd_dup", "make build 2>&1", "", [], 1),
     ("heredoc", "cat > report.md <<EOS\nx > y\nEOS", "", ["report.md"], 0),
-    ("sed_after_redirect", "sed -i 's/a/b/' x.md >log y.md", "",
-     ["x.md", "y.md", "log"], 0),
+    ("sed_after_redirect", "sed -i 's/a/b/' x.md >log y.md", "", ["x.md", "y.md", "log"], 0),
     # --- 現在地の追跡 ---
-    ("cd_then_write", "cd .worktrees/x\nsed -i 's/a/b/' README.md", "/base",
-     ["/base/.worktrees/x/README.md"], 0),
-    ("unresolvable_cd", 'cd "$TARGET"\nsed -i \'s/a/b/\' README.md', "/base", [], 1),
-    ("redirect_before_command", ">/dev/null cd .worktrees/x\necho hi > README.md",
-     "/base", ["/base/.worktrees/x/README.md"], 0),
-    ("cd_or_exit", "cd .worktrees/x || exit 1\necho hi > README.md", "/base",
-     ["/base/.worktrees/x/README.md"], 0),
-    ("cd_or_group_exit", "cd .worktrees/x || { echo ng; exit 1; }\necho hi > README.md",
-     "/base", ["/base/.worktrees/x/README.md"], 0),
+    ("cd_then_write", "cd .worktrees/x\nsed -i 's/a/b/' README.md", "/base", ["/base/.worktrees/x/README.md"], 0),
+    ("unresolvable_cd", "cd \"$TARGET\"\nsed -i 's/a/b/' README.md", "/base", [], 1),
+    ("redirect_before_command", ">/dev/null cd .worktrees/x\necho hi > README.md", "/base", ["/base/.worktrees/x/README.md"], 0),
+    ("cd_or_exit", "cd .worktrees/x || exit 1\necho hi > README.md", "/base", ["/base/.worktrees/x/README.md"], 0),
+    ("cd_or_group_exit", "cd .worktrees/x || { echo ng; exit 1; }\necho hi > README.md", "/base", ["/base/.worktrees/x/README.md"], 0),
     # --- 部分シェルになる区画（パイプ・背景実行・`( )`） ---
-    ("cd_in_pipe", "cd .worktrees/x | true\necho hi > README.md", "/base",
-     ["/base/README.md"], 0),
-    ("pipe_segment_cd", "cd .worktrees/x && echo hi | tee README.md", "/base",
-     ["/base/.worktrees/x/README.md"], 0),
-    ("background_job", "cd .worktrees/x & echo hi > README.md", "/base",
-     ["/base/README.md"], 0),
-    ("subshell_cd", "( cd .worktrees/x; echo hi > in.md )\necho hi > out.md", "/base",
-     ["/base/.worktrees/x/in.md", "/base/out.md"], 0),
+    ("cd_in_pipe", "cd .worktrees/x | true\necho hi > README.md", "/base", ["/base/README.md"], 0),
+    ("pipe_segment_cd", "cd .worktrees/x && echo hi | tee README.md", "/base", ["/base/.worktrees/x/README.md"], 0),
+    ("background_job", "cd .worktrees/x & echo hi > README.md", "/base", ["/base/README.md"], 0),
+    ("subshell_cd", "( cd .worktrees/x; echo hi > in.md )\necho hi > out.md", "/base", ["/base/.worktrees/x/in.md", "/base/out.md"], 0),
     # --- 複合構文 ---
-    ("case_branches",
-     "case $1 in\n  a) cd .worktrees/x; echo hi > a.md ;;\n  b) echo hi > b.md ;;\nesac",
-     "/base", ["/base/.worktrees/x/a.md", "/base/b.md"], 0),
-    ("if_block_cd", "if true; then cd .worktrees/x; fi\necho hi > README.md",
-     "/base", [], 1),
+    (
+        "case_branches",
+        "case $1 in\n  a) cd .worktrees/x; echo hi > a.md ;;\n  b) echo hi > b.md ;;\nesac",
+        "/base",
+        ["/base/.worktrees/x/a.md", "/base/b.md"],
+        0,
+    ),
+    ("if_block_cd", "if true; then cd .worktrees/x; fi\necho hi > README.md", "/base", [], 1),
     # --- 関数定義 ---
-    ("function_def",
-     "f() {\n  cd .worktrees/x\n  echo hi > inner.md\n}\necho hi > outer.md",
-     "/base", ["/base/.worktrees/x/inner.md", "/base/outer.md"], 0),
-    ("function_call_after_move", "f() { cd .worktrees/x; }\nf\necho hi > after.md",
-     "/base", [], 1),
+    (
+        "function_def",
+        "f() {\n  cd .worktrees/x\n  echo hi > inner.md\n}\necho hi > outer.md",
+        "/base",
+        ["/base/.worktrees/x/inner.md", "/base/outer.md"],
+        0,
+    ),
+    ("function_call_after_move", "f() { cd .worktrees/x; }\nf\necho hi > after.md", "/base", [], 1),
 ]
 
 
@@ -95,7 +93,10 @@ def _extract(command: str, base: str) -> tuple[list[str], int]:
     [pytest.param(*case[1:], id=case[0]) for case in CASES],
 )
 def test_the_public_entry_point_keeps_its_output(
-    command: str, base: str, targets: list[str], rc: int,
+    command: str,
+    base: str,
+    targets: list[str],
+    rc: int,
 ) -> None:
     assert _extract(command, base) == (targets, rc)
 
@@ -119,7 +120,10 @@ def test_the_public_entry_point_keeps_its_output(
     ],
 )
 def test_a_leading_tilde_is_the_home_directory(
-    command: str, targets: list[str], rc: int, monkeypatch: pytest.MonkeyPatch,
+    command: str,
+    targets: list[str],
+    rc: int,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # bash は引用符の無い語の先頭の `~` を $HOME へ展開する。起点へ継ぎ足すと、
     # リポジトリの外への書き込みを主ディレクトリの編集として案内する。

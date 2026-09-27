@@ -4,6 +4,7 @@
 取り込み（`merge-*`）と `verify` が書く。担当の申告（`elapsed_seconds`）は使わない
 （#917 では申告と監視の実測が食い違った）。
 """
+
 from __future__ import annotations
 
 from typing import Any, Optional

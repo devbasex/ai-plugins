@@ -8,6 +8,7 @@
 
 文言は照合しない。状態の値がプロンプトへ渡ったかだけを見る。
 """
+
 from __future__ import annotations
 
 import os
@@ -25,12 +26,25 @@ ITEM_COMMAND = ["pytest", "-q", "tests/unit/test_scope_only.py"]
 
 
 def _item(status: str) -> dict:
-    return {"id": "I-001", "rank": 1, "path": "src/a.py", "symbol": "Foo", "smell": "long_method",
-            "technique": "extract_method", "rationale": "r", "plan": "p", "tests": [],
-            "test_targets": ["tests/unit/test_scope_only.py"], "command": ITEM_COMMAND,
-            "estimate": {"test": 0.0, "implement": 1.3, "verify": 0.2},
-            "start_deadline": "2099-01-01T00:00:00+00:00", "test_start_deadline": None,
-            "status": status, "fix_count": 0, "last_log": "/tmp/verify-I-001.log"}
+    return {
+        "id": "I-001",
+        "rank": 1,
+        "path": "src/a.py",
+        "symbol": "Foo",
+        "smell": "long_method",
+        "technique": "extract_method",
+        "rationale": "r",
+        "plan": "p",
+        "tests": [],
+        "test_targets": ["tests/unit/test_scope_only.py"],
+        "command": ITEM_COMMAND,
+        "estimate": {"test": 0.0, "implement": 1.3, "verify": 0.2},
+        "start_deadline": "2099-01-01T00:00:00+00:00",
+        "test_start_deadline": None,
+        "status": status,
+        "fix_count": 0,
+        "last_log": "/tmp/verify-I-001.log",
+    }
 
 
 def _prompt(tmp_path, phase, *, round_test=ROUND_TEST, status="planned"):
@@ -38,13 +52,25 @@ def _prompt(tmp_path, phase, *, round_test=ROUND_TEST, status="planned"):
     for name in ("work", "codex"):
         (tmp_path / name).mkdir(exist_ok=True)
     state_path = make_state_v2(
-        tmp_path, work, runtimes=["codex", "kiro"],
+        tmp_path,
+        work,
+        runtimes=["codex", "kiro"],
         baseline_test={"command": BASELINE, "status": "green"},
         round_test={"command": round_test, "status": "green"},
-        candidates=[{"path": "src/a.py", "symbol": "Foo", "smell": "long_method",
-                     "technique": "extract_method", "severity": "major", "rationale": "r",
-                     "plan": "p", "proposed_by": ["codex"]}],
-        items=[_item(status)])
+        candidates=[
+            {
+                "path": "src/a.py",
+                "symbol": "Foo",
+                "smell": "long_method",
+                "technique": "extract_method",
+                "severity": "major",
+                "rationale": "r",
+                "plan": "p",
+                "proposed_by": ["codex"],
+            }
+        ],
+        items=[_item(status)],
+    )
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
     stub = bin_dir / "codex"
@@ -52,10 +78,10 @@ def _prompt(tmp_path, phase, *, round_test=ROUND_TEST, status="planned"):
     stub.chmod(0o755)
     subprocess.run(
         [str(LAUNCH), "codex", phase, "130"],
-        env={**os.environ,
-             "CROSS_REFACTORING_TMP_DIR": str(state_path.parent),
-             "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"},
-        check=True, capture_output=True, text=True,
+        env={**os.environ, "CROSS_REFACTORING_TMP_DIR": str(state_path.parent), "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"},
+        check=True,
+        capture_output=True,
+        text=True,
     )
     name = "codex-final-fix" if phase == "final-fix" else f"codex-{phase}-rf130"
     return (state_path.parent / f"{name}-prompt.md").read_text(encoding="utf-8")
@@ -95,17 +121,20 @@ def test_fix_of_a_whole_test_failure_runs_only_the_failed_tests(tmp_path):
     for name in ("work", "codex"):
         (tmp_path / name).mkdir(exist_ok=True)
     item = {**_item("failing"), "whole_test_command": ["pytest", "-q", "tests/t.py::test_whole"]}
-    state_path = make_state_v2(tmp_path, work, runtimes=["codex", "kiro"],
-                               baseline_test={"command": BASELINE, "status": "green"},
-                               items=[item])
+    state_path = make_state_v2(
+        tmp_path, work, runtimes=["codex", "kiro"], baseline_test={"command": BASELINE, "status": "green"}, items=[item]
+    )
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     (bin_dir / "codex").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     (bin_dir / "codex").chmod(0o755)
-    subprocess.run([str(LAUNCH), "codex", "fix", "130"],
-                   env={**os.environ, "CROSS_REFACTORING_TMP_DIR": str(state_path.parent),
-                        "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"},
-                   check=True, capture_output=True, text=True)
+    subprocess.run(
+        [str(LAUNCH), "codex", "fix", "130"],
+        env={**os.environ, "CROSS_REFACTORING_TMP_DIR": str(state_path.parent), "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"},
+        check=True,
+        capture_output=True,
+        text=True,
+    )
     text = (state_path.parent / "codex-fix-rf130-prompt.md").read_text(encoding="utf-8")
     assert "pytest -q tests/t.py::test_whole" in text
     assert " ".join(ITEM_COMMAND) not in text

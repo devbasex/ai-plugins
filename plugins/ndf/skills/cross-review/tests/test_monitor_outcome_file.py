@@ -11,6 +11,7 @@
 - AC6: 一時ディレクトリへ書けなくても AC5 のとおり
 - AC7: `launch-cli.sh` は起動の前に結果ファイルを消し、記録は消さない
 """
+
 from __future__ import annotations
 
 import datetime as _dt
@@ -31,17 +32,37 @@ _MONITOR_SHIM = _HERE.parent / "scripts" / "monitor.py"
 _LAUNCH_CLI = _LIB / "launch-cli.sh"
 
 OUTCOME_KEYS = {
-    "agent", "stem", "status", "exit_code", "reason", "detail",
-    "launched_at", "started_at", "ended_at", "elapsed", "idle_seconds",
-    "progress_tail", "result_exists", "pid",
+    "agent",
+    "stem",
+    "status",
+    "exit_code",
+    "reason",
+    "detail",
+    "launched_at",
+    "started_at",
+    "ended_at",
+    "elapsed",
+    "idle_seconds",
+    "progress_tail",
+    "result_exists",
+    "pid",
     # P2（#598 / #537）で足した `--phase` の値。省いたときは null
     "phase",
 }
 STDOUT_KEYS = {
-    "agent": str, "status": str, "exit_code": int, "pid": (int, type(None)),
-    "elapsed": float, "detail": str, "err_log_size": int,
-    "stdout_log_size": int, "progress_log_size": int, "progress_tail": str,
-    "idle_seconds": float, "result_exists": bool, "sentinel_seen": bool,
+    "agent": str,
+    "status": str,
+    "exit_code": int,
+    "pid": (int, type(None)),
+    "elapsed": float,
+    "detail": str,
+    "err_log_size": int,
+    "stdout_log_size": int,
+    "progress_log_size": int,
+    "progress_tail": str,
+    "idle_seconds": float,
+    "result_exists": bool,
+    "sentinel_seen": bool,
 }
 
 
@@ -58,12 +79,14 @@ def _dead_pid() -> int:
     return proc.pid
 
 
-def _run_monitor(tmp_dir: pathlib.Path, *extra: str, script: pathlib.Path = _MONITOR_LIB,
-                 pr: int = 7, agents: str = "codex") -> subprocess.CompletedProcess:
+def _run_monitor(
+    tmp_dir: pathlib.Path, *extra: str, script: pathlib.Path = _MONITOR_LIB, pr: int = 7, agents: str = "codex"
+) -> subprocess.CompletedProcess:
     return subprocess.run(
-        [sys.executable, str(script), str(pr), "--agents", agents,
-         "--tmp-dir", str(tmp_dir), "--poll", "1", *extra],
-        capture_output=True, text=True, timeout=60,
+        [sys.executable, str(script), str(pr), "--agents", agents, "--tmp-dir", str(tmp_dir), "--poll", "1", *extra],
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
 
 
@@ -81,6 +104,7 @@ def _is_iso_with_tz(value: str) -> bool:
 
 
 # ---------- AC1 / AC3 / AC4 ----------
+
 
 def test_outcome_file_has_the_contract_keys_and_tz_aware_times(tmp_path):
     stem = "codex-review-pr7"
@@ -132,11 +156,17 @@ def test_outcome_of_a_timed_out_process_is_timeout(tmp_path):
     assert (outcome["status"], outcome["reason"]) == ("TIMEOUT", "timeout")
 
 
-@pytest.mark.parametrize(("status", "reason"), [
-    ("OK", "ok"), ("TIMEOUT", "timeout"), ("STALLED", "stalled"),
-    ("EARLY_ERROR", "early_error"), ("NO_RESULT", "missing"),
-    ("PIDFILE_BAD", "pidfile_bad"),
-])
+@pytest.mark.parametrize(
+    ("status", "reason"),
+    [
+        ("OK", "ok"),
+        ("TIMEOUT", "timeout"),
+        ("STALLED", "stalled"),
+        ("EARLY_ERROR", "early_error"),
+        ("NO_RESULT", "missing"),
+        ("PIDFILE_BAD", "pidfile_bad"),
+    ],
+)
 def test_reason_follows_status(status, reason):
     assert _load_outcome_mod().reason_for(status) == reason
 
@@ -148,13 +178,11 @@ def test_reason_rejects_unknown_status():
 
 def test_pidfile_bad_outcome_has_null_launched_at(monitor_mod, tmp_path, monkeypatch, capsys):
     """pid ファイルを 30 秒待つ猶予を省くため、監視の本体だけを差し替えて CLI を通す。"""
-    def fake_monitor_agent(**kwargs):
-        return monitor_mod.AgentStatus(
-            agent=kwargs["agent"], status="PIDFILE_BAD", exit_code=6,
-            detail="pidfile not found")
 
-    monkeypatch.setattr(sys, "argv", [
-        "monitor.py", "7", "--agents", "kiro", "--tmp-dir", str(tmp_path)])
+    def fake_monitor_agent(**kwargs):
+        return monitor_mod.AgentStatus(agent=kwargs["agent"], status="PIDFILE_BAD", exit_code=6, detail="pidfile not found")
+
+    monkeypatch.setattr(sys, "argv", ["monitor.py", "7", "--agents", "kiro", "--tmp-dir", str(tmp_path)])
     with mock.patch.object(monitor_mod, "monitor_agent", side_effect=fake_monitor_agent):
         with pytest.raises(SystemExit) as exc:
             monitor_mod.main()
@@ -166,6 +194,7 @@ def test_pidfile_bad_outcome_has_null_launched_at(monitor_mod, tmp_path, monkeyp
 
 
 # ---------- AC2 ----------
+
 
 def test_journal_keeps_every_run_of_the_same_stem(tmp_path):
     stem = "codex-review-pr7"
@@ -187,14 +216,11 @@ def test_each_agent_gets_its_own_outcome_and_journal_line(tmp_path):
     _finished(tmp_path, "codex-propose-rf3-r1", result=True)
     _finished(tmp_path, "kiro-propose-rf3-r1", result=False)
 
-    proc = _run_monitor(tmp_path, "--stem-template", "{agent}-propose-rf{id}-r1",
-                        pr=3, agents="codex,kiro")
+    proc = _run_monitor(tmp_path, "--stem-template", "{agent}-propose-rf{id}-r1", pr=3, agents="codex,kiro")
 
     assert proc.returncode == 3
-    rows = [json.loads(line) for line in
-            (tmp_path / "monitor-outcomes.jsonl").read_text(encoding="utf-8").splitlines()]
-    assert sorted((r["agent"], r["reason"]) for r in rows) == [
-        ("codex", "ok"), ("kiro", "missing")]
+    rows = [json.loads(line) for line in (tmp_path / "monitor-outcomes.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert sorted((r["agent"], r["reason"]) for r in rows) == [("codex", "ok"), ("kiro", "missing")]
     assert (tmp_path / "kiro-propose-rf3-r1-monitor.json").is_file()
 
 
@@ -210,6 +236,7 @@ def test_shim_entry_point_writes_the_same_files(tmp_path):
 
 
 # ---------- AC5 / AC6 ----------
+
 
 def _stdout_rows(proc: subprocess.CompletedProcess) -> list[dict]:
     return [json.loads(line) for line in proc.stdout.splitlines() if line.strip()]
@@ -274,6 +301,7 @@ def test_read_only_tmp_dir_keeps_exit_code_and_stdout(tmp_path):
 
 # ---------- AC7 ----------
 
+
 def test_launch_cli_removes_stale_outcome_but_keeps_journal(tmp_path):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -293,7 +321,10 @@ def test_launch_cli_removes_stale_outcome_but_keeps_journal(tmp_path):
     env = dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}")
     proc = subprocess.run(
         ["bash", str(_LAUNCH_CLI), "codex", str(work), str(prompt), str(stem)],
-        capture_output=True, text=True, env=env, timeout=30,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=30,
     )
 
     assert proc.returncode == 0, proc.stderr
@@ -303,13 +334,12 @@ def test_launch_cli_removes_stale_outcome_but_keeps_journal(tmp_path):
 
 # ---------- read_outcome ----------
 
+
 def test_read_outcome_returns_dict_for_valid_file(tmp_path):
     mod = _load_outcome_mod()
     stem = "codex-review-pr7"
     payload = {"agent": "codex", "status": "OK", "reason": "ok"}
-    (tmp_path / f"{stem}-monitor.json").write_text(
-        json.dumps(payload, ensure_ascii=False), encoding="utf-8"
-    )
+    (tmp_path / f"{stem}-monitor.json").write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     assert mod.read_outcome(tmp_path, stem) == payload
 
 
@@ -328,4 +358,3 @@ def test_read_outcome_returns_none_for_missing_broken_or_non_dict_file(tmp_path)
 
     (tmp_path / "scalar-monitor.json").write_text('"string"', encoding="utf-8")
     assert mod.read_outcome(tmp_path, "scalar") is None
-

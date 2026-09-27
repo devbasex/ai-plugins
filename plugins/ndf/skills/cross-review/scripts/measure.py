@@ -20,6 +20,7 @@
 測る指標と、比較として読むときの限界は
 [../docs/06-evidence.md](../docs/06-evidence.md) にある。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -131,8 +132,7 @@ def _reviewer_count(round_rec: dict[str, Any]) -> int:
     reviewers = round_rec.get("reviewers")
     if isinstance(reviewers, list) and reviewers:
         return len(reviewers)
-    return sum(1 for key, value in round_rec.items()
-               if SEAT_PATTERN.match(key) and isinstance(value, dict))
+    return sum(1 for key, value in round_rec.items() if SEAT_PATTERN.match(key) and isinstance(value, dict))
 
 
 def _cost(st: dict[str, Any]) -> dict[str, Any]:
@@ -189,8 +189,7 @@ def _representatives(st: dict[str, Any]) -> list[dict[str, Any]]:
     return [f for f in findings if isinstance(f, dict) and not f.get("merged_into")]
 
 
-def _matches(finding: dict[str, Any], pr: int | None, round_no: int,
-             path: str, line: int) -> bool:
+def _matches(finding: dict[str, Any], pr: int | None, round_no: int, path: str, line: int) -> bool:
     """その解決が指しうる指摘かどうか。
 
     **同じ Pull Request の指摘に限る。** `review_findings[].round` は状態
@@ -217,8 +216,7 @@ def _has_recorded_positions(st: dict[str, Any]) -> bool:
     """
     for round_rec in _rounds(st):
         fix = round_rec.get("fix")
-        if isinstance(fix, dict) and isinstance(
-                fix.get("resolved_thread_positions"), list):
+        if isinstance(fix, dict) and isinstance(fix.get("resolved_thread_positions"), list):
             return True
     return False
 
@@ -231,15 +229,11 @@ def _find_best_match(
     line: int,
 ) -> tuple[str | None, bool]:
     """解決位置に対応する指摘 ID と、曖昧だったかを返す。"""
-    candidates = [
-        f for f in representatives if _matches(f, pr, round_no, path, line)
-    ]
+    candidates = [f for f in representatives if _matches(f, pr, round_no, path, line)]
     if not candidates:
         return None, False
     newest = max(_as_int(f.get("round")) or 0 for f in candidates)
-    newest_candidates = [
-        f for f in candidates if (_as_int(f.get("round")) or 0) == newest
-    ]
+    newest_candidates = [f for f in candidates if (_as_int(f.get("round")) or 0) == newest]
     if len(newest_candidates) > 1:
         return None, True
     finding_id = newest_candidates[0].get("finding_id")
@@ -257,15 +251,15 @@ def _resolved_position_sources(st: dict[str, Any]) -> list[ResolvedPositionSourc
     sources: list[ResolvedPositionSource] = []
     for index, round_rec in enumerate(rounds):
         fix = round_rec.get("fix")
-        positions = (
-            fix.get("resolved_thread_positions") if isinstance(fix, dict) else None
-        )
+        positions = fix.get("resolved_thread_positions") if isinstance(fix, dict) else None
         if isinstance(positions, list):
-            sources.append(ResolvedPositionSource(
-                _round_no(rounds, index),
-                _as_int(round_rec.get("pr")),
-                positions,
-            ))
+            sources.append(
+                ResolvedPositionSource(
+                    _round_no(rounds, index),
+                    _as_int(round_rec.get("pr")),
+                    positions,
+                )
+            )
     return sources
 
 
@@ -290,8 +284,7 @@ def _add_oracle_match(
     if path is None or line is None:
         # 位置の欠けた要素も落とさない（`_thread_positions` が残す）。
         return Oracle(oracle.finding_ids, oracle.unmatched + 1, oracle.ambiguous)
-    finding_id, is_ambiguous = _find_best_match(
-        representatives, pr, round_no, path, line)
+    finding_id, is_ambiguous = _find_best_match(representatives, pr, round_no, path, line)
     if is_ambiguous:
         return Oracle(oracle.finding_ids, oracle.unmatched, oracle.ambiguous + 1)
     if finding_id is None:
@@ -319,8 +312,7 @@ def _oracle(st: dict[str, Any]) -> Oracle | None:
     for source in _resolved_position_sources(st):
         for position in source.positions:
             path, line = _resolved_position(position)
-            oracle = _add_oracle_match(
-                oracle, representatives, source.pr, source.round_no, path, line)
+            oracle = _add_oracle_match(oracle, representatives, source.pr, source.round_no, path, line)
     return oracle
 
 
@@ -333,7 +325,9 @@ def _oracle_output(oracle: Oracle | None) -> dict[str, Any]:
     """
     if oracle is None:
         return {
-            "found": None, "unmatched": None, "ambiguous": None,
+            "found": None,
+            "unmatched": None,
+            "ambiguous": None,
             "reason": "no_resolved_thread_positions",
         }
     return {
@@ -388,8 +382,7 @@ def _method_output(finding_ids: set[str], oracle_ids: set[str] | None) -> dict[s
     }
 
 
-def _single(representatives: list[dict[str, Any]],
-            oracle_ids: set[str] | None) -> dict[str, Any]:
+def _single(representatives: list[dict[str, Any]], oracle_ids: set[str] | None) -> dict[str, Any]:
     """1 者だけの方式。**担当ごとに 1 通り出す。**
 
     1 者だけの結果は誰を選ぶかで変わる。1 つの数字にまとめると、選び方が結果に
@@ -400,14 +393,10 @@ def _single(representatives: list[dict[str, Any]],
     for finding in representatives:
         for agent in _origin_runtimes(finding):
             per_agent.setdefault(agent, set()).add(str(finding.get("finding_id")))
-    return {
-        agent: _method_output(ids, oracle_ids)
-        for agent, ids in sorted(per_agent.items())
-    }
+    return {agent: _method_output(ids, oracle_ids) for agent, ids in sorted(per_agent.items())}
 
 
-def _majority(representatives: list[dict[str, Any]],
-              oracle_ids: set[str] | None) -> dict[str, Any]:
+def _majority(representatives: list[dict[str, Any]], oracle_ids: set[str] | None) -> dict[str, Any]:
     """多数決の方式。**3 本目の統合の結果を読む。**
 
     `origin_runtimes` が 2 者以上の指摘を採る。**位置が近いだけの組を自分で
@@ -415,11 +404,7 @@ def _majority(representatives: list[dict[str, Any]],
     持つと片方だけが古くなる）。統合し損ねた組は `duplicate_candidates` に残り、
     この方式には入らない。
     """
-    finding_ids = {
-        str(finding.get("finding_id"))
-        for finding in representatives
-        if len(set(_origin_runtimes(finding))) >= 2
-    }
+    finding_ids = {str(finding.get("finding_id")) for finding in representatives if len(set(_origin_runtimes(finding))) >= 2}
     return _method_output(finding_ids, oracle_ids)
 
 
@@ -465,15 +450,11 @@ def _scoped_oracle_ids(
     """
     if oracle_ids is None:
         return None
-    rounds_by_id = {
-        str(finding.get("finding_id")): _as_int(finding.get("round"))
-        for finding in representatives
-    }
+    rounds_by_id = {str(finding.get("finding_id")): _as_int(finding.get("round")) for finding in representatives}
     return {fid for fid in oracle_ids if rounds_by_id.get(fid) in marked}
 
 
-def _proposed(st: dict[str, Any], representatives: list[dict[str, Any]],
-              oracle_ids: set[str] | None) -> dict[str, Any]:
+def _proposed(st: dict[str, Any], representatives: list[dict[str, Any]], oracle_ids: set[str] | None) -> dict[str, Any]:
     """この変更の方式。**読むのは証拠集約を通ったラウンドだけである。**
 
     目印の無いラウンドを母集合へ入れると、区分の付かない指摘が
@@ -491,21 +472,21 @@ def _proposed(st: dict[str, Any], representatives: list[dict[str, Any]],
     marked = _evidence_rounds(st)
     if not marked:
         return {
-            "found": None, "matched": None, "of_oracle": None,
-            "oracle_scope": None, "oracle_base": None,
+            "found": None,
+            "matched": None,
+            "of_oracle": None,
+            "oracle_scope": None,
+            "oracle_base": None,
             "reason": "no_evidence_rounds",
         }
     finding_ids = {
         str(finding.get("finding_id"))
         for finding in representatives
-        if _as_int(finding.get("round")) in marked
-        and finding.get("classification") in COUNTED_CLASSIFICATIONS
+        if _as_int(finding.get("round")) in marked and finding.get("classification") in COUNTED_CLASSIFICATIONS
     }
     base_ids = _scoped_oracle_ids(representatives, oracle_ids, marked)
     result = _method_output(finding_ids, base_ids)
-    result["oracle_scope"] = (
-        "all_rounds" if _all_rounds_marked(st, marked) else "evidence_rounds"
-    )
+    result["oracle_scope"] = "all_rounds" if _all_rounds_marked(st, marked) else "evidence_rounds"
     result["oracle_base"] = None if base_ids is None else len(base_ids)
     return result
 
@@ -561,8 +542,7 @@ def _read_state_file(path: pathlib.Path) -> dict[str, Any]:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="cross-review の状態ファイル 1 つから効果を測る（#156）")
+    parser = argparse.ArgumentParser(description="cross-review の状態ファイル 1 つから効果を測る（#156）")
     parser.add_argument("state_file", help="cross-review-pr<番号>-state.json のパス")
     parser.add_argument("--output", help="書き出し先。省略すると標準出力へ出す")
     return parser

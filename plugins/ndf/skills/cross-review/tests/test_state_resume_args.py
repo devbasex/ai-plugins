@@ -5,6 +5,7 @@
 `--include` / `--exclude` / `--require-all`）を渡した再開だけが、使える者の解決を
 やり直して参加者を作り直す（決定 14）。渡さなかった引数は状態ファイルの値で補う。
 """
+
 from __future__ import annotations
 
 import json
@@ -28,9 +29,12 @@ REPO = "acme/demo"
 def _participants(**over) -> dict:
     p = {
         "pool": ["codex", "agy", "kiro"],
-        "included": [], "excluded": [],
+        "included": [],
+        "excluded": [],
         "available": ["codex", "agy", "kiro"],
-        "unavailable": {}, "probe_skipped": False, "require_all": False,
+        "unavailable": {},
+        "probe_skipped": False,
+        "require_all": False,
         "fallback": [],
     }
     p.update(over)
@@ -90,8 +94,7 @@ def resume(state_mod, monkeypatch, tmp_path):
     monkeypatch.setattr(review_lib.participants.auth, "probe_auth", probe)
 
     def run(*argv: str) -> dict:
-        args = state_mod.build_parser().parse_args(
-            ["init", str(PR), "--worktree", str(tmp_path), *argv])
+        args = state_mod.build_parser().parse_args(["init", str(PR), "--worktree", str(tmp_path), *argv])
         review_lib.commands.init.cmd_init(args)
         return json.loads((tmp_path / f"cross-review-pr{PR}-state.json").read_text())
 
@@ -108,6 +111,7 @@ def _seats(state_mod, tmp_path) -> list[str]:
 
 # ---------------- 反映する引数（AC25） ----------------
 
+
 def test_max_rounds_is_replaced_and_recorded(resume, tmp_path, capsys):
     """AC25: `--max-rounds 20` は状態へ反映され、1 行出て、記録へ 1 件積まれる。"""
     _state(tmp_path)
@@ -123,8 +127,7 @@ def test_max_rounds_is_replaced_and_recorded(resume, tmp_path, capsys):
 def test_the_other_replaced_fields_are_applied_too(resume, tmp_path):
     """AC25 後半: `--rotate-after` / `--verify-command` / `--verify-exit-code` も反映する。"""
     _state(tmp_path, verify_commands=["pytest -q"], verify_exit_codes=[1])
-    st = resume("--rotate-after", "4", "--verify-command", "ruff check",
-                "--verify-exit-code", "2")
+    st = resume("--rotate-after", "4", "--verify-command", "ruff check", "--verify-exit-code", "2")
     assert st["rotate_after"] == 4
     # 置き換えであり、足し込みではない。
     assert st["verify_commands"] == ["ruff check"]
@@ -141,14 +144,15 @@ def test_the_same_value_is_not_recorded(resume, tmp_path, capsys):
 
 # ---------------- 渡さない再開（AC26） ----------------
 
+
 def test_a_resume_without_arguments_changes_nothing(resume, tmp_path):
     """AC26: 引数を渡さない再開では 6 項目が変わらず、確認コマンドは 1 回も呼ばれない。"""
-    _state(tmp_path, only="kiro", verify_commands=["pytest -q"], verify_exit_codes=[1],
-           participants=_participants(available=["codex", "kiro"]))
+    _state(
+        tmp_path, only="kiro", verify_commands=["pytest -q"], verify_exit_codes=[1], participants=_participants(available=["codex", "kiro"])
+    )
     before = json.loads((tmp_path / f"cross-review-pr{PR}-state.json").read_text())
     st = resume()
-    for key in ("max_rounds", "rotate_after", "verify_commands", "verify_exit_codes",
-                "only", "participants"):
+    for key in ("max_rounds", "rotate_after", "verify_commands", "verify_exit_codes", "only", "participants"):
         assert st[key] == before[key], key
     assert resume.calls == []
     assert st["resume_changes"] == []
@@ -156,12 +160,23 @@ def test_a_resume_without_arguments_changes_nothing(resume, tmp_path):
 
 # ---------------- 1 者指定（AC27） ----------------
 
+
 def test_only_is_replaced_and_narrows_the_next_round(resume, state_mod, tmp_path):
     """AC27: `--only codex` は `only` を書き換え、次のラウンドを 1 席にする。"""
-    _state(tmp_path, rounds=[{"round": 1, "pr": PR, "started_at": "x",
-                              "reviewers": ["agy", "kiro"], "verdict": "approved",
-                              "agy": {"intent": "APPROVE", "by_severity": {}},
-                              "kiro": {"intent": "APPROVE", "by_severity": {}}}])
+    _state(
+        tmp_path,
+        rounds=[
+            {
+                "round": 1,
+                "pr": PR,
+                "started_at": "x",
+                "reviewers": ["agy", "kiro"],
+                "verdict": "approved",
+                "agy": {"intent": "APPROVE", "by_severity": {}},
+                "kiro": {"intent": "APPROVE", "by_severity": {}},
+            }
+        ],
+    )
     st = resume("--only", "codex")
     assert st["only"] == "codex"
     # 過去のラウンドの担当は変わらない（決定 11）。
@@ -169,8 +184,7 @@ def test_only_is_replaced_and_narrows_the_next_round(resume, state_mod, tmp_path
     assert _seats(state_mod, tmp_path) == ["codex"]
 
 
-def test_only_that_cannot_be_reached_stops_before_writing(
-        resume, state_mod, tmp_path, monkeypatch, capsys):
+def test_only_that_cannot_be_reached_stops_before_writing(resume, state_mod, tmp_path, monkeypatch, capsys):
     """再開で渡した 1 者指定が確認を通らなければ、状態を書き換えずに終了コード 1。
 
     1 者指定は状態へ反映する引数であると同時に、参加者を作り直す引数でもある。
@@ -200,6 +214,7 @@ def test_only_none_clears_the_narrowing(resume, tmp_path, capsys):
 
 
 # ---------------- 外す者・足す者（AC28） ----------------
+
 
 def test_exclude_reruns_the_probe_and_drops_the_name(resume, state_mod, tmp_path):
     """AC28: `--exclude kiro` は確認をやり直し、使える者から kiro を外す。
@@ -243,8 +258,7 @@ def test_exclude_none_clears_the_exclusions(resume, tmp_path):
 
 def test_unpassed_arguments_come_from_the_state_file(resume, tmp_path):
     """AC28 後半: 渡さなかった引数は状態ファイルの値で補う（決定 14）。"""
-    _state(tmp_path, participants=_participants(
-        included=["claude"], available=["claude", "codex", "kiro"]))
+    _state(tmp_path, participants=_participants(included=["claude"], available=["claude", "codex", "kiro"]))
     st = resume("--exclude", "kiro")
     assert st["participants"]["included"] == ["claude"]
     assert st["participants"]["excluded"] == ["kiro"]
@@ -252,9 +266,12 @@ def test_unpassed_arguments_come_from_the_state_file(resume, tmp_path):
 
 
 def _started_with_exclude_agy(tmp_path):
-    return _state(tmp_path, participants=_participants(
-        pool=["claude", "codex", "kiro"], excluded=[], ignored_exclude=["agy"],
-        available=["claude", "codex", "kiro"]))
+    return _state(
+        tmp_path,
+        participants=_participants(
+            pool=["claude", "codex", "kiro"], excluded=[], ignored_exclude=["agy"], available=["claude", "codex", "kiro"]
+        ),
+    )
 
 
 def test_ignored_exclusions_survive_a_resume_without_exclude(resume, state_mod, tmp_path, capsys):
@@ -264,8 +281,7 @@ def test_ignored_exclusions_survive_a_resume_without_exclude(resume, state_mod, 
     assert st["participants"]["ignored_exclude"] == ["agy"]
     assert st["participants"]["excluded"] == []
     st["final"] = "approved"
-    (tmp_path / f"cross-review-pr{PR}-state.json").write_text(
-        json.dumps(st, ensure_ascii=False), encoding="utf-8")
+    (tmp_path / f"cross-review-pr{PR}-state.json").write_text(json.dumps(st, ensure_ascii=False), encoding="utf-8")
     capsys.readouterr()
     review_lib.commands.report.cmd_report(type("A", (), {"pr": PR})())
     assert "- --exclude で指定したが既定の母集合に無かった者: agy" in capsys.readouterr().out
@@ -273,9 +289,12 @@ def test_ignored_exclusions_survive_a_resume_without_exclude(resume, state_mod, 
 
 def test_real_and_ignored_exclusions_survive_a_resume_without_exclude(resume, tmp_path):
     """現状固定: 実際の除外と母集合外の除外を同時に持つ状態も再開できる。"""
-    _state(tmp_path, participants=_participants(
-        pool=["claude", "codex", "kiro"], excluded=["kiro"],
-        ignored_exclude=["agy"], available=["claude", "codex"]))
+    _state(
+        tmp_path,
+        participants=_participants(
+            pool=["claude", "codex", "kiro"], excluded=["kiro"], ignored_exclude=["agy"], available=["claude", "codex"]
+        ),
+    )
 
     st = resume("--require-all")
 
@@ -308,8 +327,7 @@ def test_only_wins_over_an_ignored_exclusion(resume, state_mod, tmp_path):
 
 def test_include_of_a_real_exclusion_still_conflicts(resume, tmp_path):
     """外した者（`excluded`）と `--include` の重なりは今どおり止める。"""
-    path = _state(tmp_path, participants=_participants(
-        pool=["claude", "codex", "kiro"], excluded=["kiro"], available=["claude", "codex"]))
+    path = _state(tmp_path, participants=_participants(pool=["claude", "codex", "kiro"], excluded=["kiro"], available=["claude", "codex"]))
     before = path.read_text(encoding="utf-8")
     with pytest.raises(SystemExit) as e:
         resume("--include", "kiro")
@@ -319,8 +337,7 @@ def test_include_of_a_real_exclusion_still_conflicts(resume, tmp_path):
 
 def test_only_none_after_only_agy_returns_to_the_default_three(resume, state_mod, tmp_path):
     """#786 の AC4b: `--only agy` で始めた実行を `--only none` で再開すると、既定の 3 者へ戻る。"""
-    _state(tmp_path, only="agy", participants=_participants(
-        pool=["claude", "codex", "kiro"], available=["agy"]))
+    _state(tmp_path, only="agy", participants=_participants(pool=["claude", "codex", "kiro"], available=["agy"]))
     st = resume("--only", "none")
     assert st["only"] is None
     assert st["participants"]["available"] == ["claude", "codex", "kiro"]
@@ -364,6 +381,7 @@ def test_a_state_without_participants_can_be_rebuilt(resume, tmp_path):
 
 
 # ---------------- 知らせる引数（AC29） ----------------
+
 
 def test_host_is_not_applied_but_reported(resume, tmp_path, capsys):
     """AC29: `--host codex` は反映せず、1 行で知らせる。"""

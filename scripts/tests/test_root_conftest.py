@@ -10,6 +10,7 @@
 前提の不足は、`PATH` を絞った子プロセスとして pytest を起動して確かめる。実行環境の
 `PATH` は書き換えない。
 """
+
 from __future__ import annotations
 
 import os
@@ -76,17 +77,13 @@ def test_the_root_conftest_declares_the_plugin() -> None:
 
 
 def test_the_skill_conftest_no_longer_declares_the_plugin() -> None:
-    body = (
-        REPO_ROOT / "plugins/playwright-kit/skills/playwright-kit-ops/tests/conftest.py"
-    ).read_text(encoding="utf-8")
+    body = (REPO_ROOT / "plugins/playwright-kit/skills/playwright-kit-ops/tests/conftest.py").read_text(encoding="utf-8")
     assert 'pytest_plugins = ["pytester"]' not in body
 
 
 def test_the_skill_config_loads_the_plugin_for_its_own_root() -> None:
     """その skill のディレクトリを起点にした実行でも `pytester` が要る。"""
-    body = (
-        REPO_ROOT / "plugins/playwright-kit/skills/playwright-kit-ops/pyproject.toml"
-    ).read_text(encoding="utf-8")
+    body = (REPO_ROOT / "plugins/playwright-kit/skills/playwright-kit-ops/pyproject.toml").read_text(encoding="utf-8")
     assert "-p pytester" in body
 
 
@@ -222,9 +219,9 @@ def test_the_child_process_does_not_inherit_a_monitor_variable(
         mod.pytest_configure(None)
 
         out = subprocess.run(
-            [sys.executable, "-c",
-             "import os; print([k for k in os.environ if k.startswith('MONITOR_')])"],
-            capture_output=True, text=True,
+            [sys.executable, "-c", "import os; print([k for k in os.environ if k.startswith('MONITOR_')])"],
+            capture_output=True,
+            text=True,
         )
         assert out.stdout.strip() == "[]", out.stdout
     finally:
@@ -262,8 +259,7 @@ def test_the_isolation_holds_from_a_bundle_directory() -> None:
     env.update({"MONITOR_STALL_AGY": "1800", "MONITOR_TIMEOUT": "1800"})
 
     result = subprocess.run(
-        [sys.executable, "-m", "pytest", "test_monitor_stall_default.py", "-q",
-         "--no-header", "-p", "no:cacheprovider"],
+        [sys.executable, "-m", "pytest", "test_monitor_stall_default.py", "-q", "--no-header", "-p", "no:cacheprovider"],
         cwd=str(bundle),
         capture_output=True,
         text=True,
@@ -293,9 +289,11 @@ def _collected_ids(shard: tuple[int, int] | None) -> list[str]:
     if shard is not None:
         env["SHARD_INDEX"], env["SHARD_TOTAL"] = str(shard[0]), str(shard[1])
     proc = subprocess.run(
-        [sys.executable, "-m", "pytest", SHARD_TARGET, "--collect-only", "-q",
-         "--no-header", "-p", "no:cacheprovider", "-p", "no:xdist"],
-        cwd=str(REPO_ROOT), capture_output=True, text=True, env=env,
+        [sys.executable, "-m", "pytest", SHARD_TARGET, "--collect-only", "-q", "--no-header", "-p", "no:cacheprovider", "-p", "no:xdist"],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        env=env,
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
     return [line for line in proc.stdout.splitlines() if "::" in line]

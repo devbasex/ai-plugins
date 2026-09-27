@@ -7,6 +7,7 @@
 `concurrency` の `gh` は `PATH` の先頭へ置いた偽物に差し替え、受けた引数を記録する
 （読み取りだけを行うことのチェック、AC42）。
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -37,8 +38,8 @@ parallel_measure = _load_module()
 
 # --- 入力の組み立て ----------------------------------------------------------
 
-def meminfo(tmp_path: Path, *, available_mib: int, swap_total_mib: int,
-            swap_free_mib: int, name: str = "meminfo") -> Path:
+
+def meminfo(tmp_path: Path, *, available_mib: int, swap_total_mib: int, swap_free_mib: int, name: str = "meminfo") -> Path:
     """`/proc/meminfo` の体裁の入力。値は kB で書く。"""
     path = tmp_path / name
     path.write_text(
@@ -51,14 +52,14 @@ def meminfo(tmp_path: Path, *, available_mib: int, swap_total_mib: int,
     return path
 
 
-def cgroup(tmp_path: Path, *, oom_kill: int | None = None, memory_max: str | None = None,
-           memory_current: int | None = None, name: str = "cgroup") -> Path:
+def cgroup(
+    tmp_path: Path, *, oom_kill: int | None = None, memory_max: str | None = None, memory_current: int | None = None, name: str = "cgroup"
+) -> Path:
     path = tmp_path / name
     path.mkdir(parents=True, exist_ok=True)
     if oom_kill is not None:
         # 実物は `max 0` の行も持つ。`oom_kill` だけを読むことのチェックでもある。
-        (path / "memory.events").write_text(
-            f"low 0\nhigh 0\nmax 0\noom 0\noom_kill {oom_kill}\n", encoding="utf-8")
+        (path / "memory.events").write_text(f"low 0\nhigh 0\nmax 0\noom 0\noom_kill {oom_kill}\n", encoding="utf-8")
     if memory_max is not None:
         (path / "memory.max").write_text(f"{memory_max}\n", encoding="utf-8")
     if memory_current is not None:
@@ -69,7 +70,9 @@ def cgroup(tmp_path: Path, *, oom_kill: int | None = None, memory_max: str | Non
 def run(*args: str, env: dict | None = None) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, str(SCRIPT), *args],
-        capture_output=True, text=True, env=env,
+        capture_output=True,
+        text=True,
+        env=env,
     )
 
 
@@ -82,18 +85,23 @@ def keys(out: str) -> dict[str, str]:
     return values
 
 
-def capacity(tmp_path: Path, *args: str, available_mib: int = 9742,
-             swap_total_mib: int = 2047, swap_free_mib: int = 310,
-             oom_kill: int | None = 1, memory_max: str | None = "max",
-             memory_current: int | None = 0) -> subprocess.CompletedProcess:
-    mem = meminfo(tmp_path, available_mib=available_mib, swap_total_mib=swap_total_mib,
-                  swap_free_mib=swap_free_mib)
-    cg = cgroup(tmp_path, oom_kill=oom_kill, memory_max=memory_max,
-                memory_current=memory_current)
+def capacity(
+    tmp_path: Path,
+    *args: str,
+    available_mib: int = 9742,
+    swap_total_mib: int = 2047,
+    swap_free_mib: int = 310,
+    oom_kill: int | None = 1,
+    memory_max: str | None = "max",
+    memory_current: int | None = 0,
+) -> subprocess.CompletedProcess:
+    mem = meminfo(tmp_path, available_mib=available_mib, swap_total_mib=swap_total_mib, swap_free_mib=swap_free_mib)
+    cg = cgroup(tmp_path, oom_kill=oom_kill, memory_max=memory_max, memory_current=memory_current)
     return run("capacity", "--meminfo", str(mem), "--cgroup-dir", str(cg), *args)
 
 
 # --- capacity: 空きメモリから本数を出す（AC31 / AC33） -----------------------
+
 
 def test_capacity_reports_the_measured_values(tmp_path: Path) -> None:
     """2026-09-17 のこのホストの値での出力（契約の文書の例）。"""
@@ -120,12 +128,12 @@ def test_capacity_allows_three_when_swap_is_free(tmp_path: Path) -> None:
     assert "swap_low" not in keys(proc.stdout)["limited_by"]
 
 
-def test_capacity_does_not_limit_swap_at_the_free_percentage_boundary(
-        tmp_path: Path) -> None:
+def test_capacity_does_not_limit_swap_at_the_free_percentage_boundary(tmp_path: Path) -> None:
     """現状固定: 空き swap が閾値と等しい場合は swap_low にしない。"""
     proc = capacity(
         tmp_path,
-        "--swap-free-min-pct", "25",
+        "--swap-free-min-pct",
+        "25",
         swap_total_mib=2000,
         swap_free_mib=500,
     )
@@ -161,7 +169,8 @@ def test_capacity_accepts_zero_max_but_floors_allowed_at_one(tmp_path: Path) -> 
     """現状固定: 上限 0 も受理するが、通常時の allowed は 1 を下回らない。"""
     proc = capacity(
         tmp_path,
-        "--max", "0",
+        "--max",
+        "0",
         available_mib=2048,
         swap_free_mib=2047,
     )
@@ -200,11 +209,10 @@ def test_capacity_takes_the_reserve_from_the_argument(tmp_path: Path) -> None:
 
 # --- capacity: cgroup の残り（AC31 / AC33） ---------------------------------
 
+
 def test_capacity_uses_the_cgroup_limit_when_it_is_smaller(tmp_path: Path) -> None:
     """cgroup に上限があるホストでは、VM の空きではなく cgroup の残りが決める。"""
-    proc = capacity(tmp_path, swap_free_mib=2047,
-                    memory_max=str(8 * 1024 * 1024 * 1024),
-                    memory_current=4 * 1024 * 1024 * 1024)
+    proc = capacity(tmp_path, swap_free_mib=2047, memory_max=str(8 * 1024 * 1024 * 1024), memory_current=4 * 1024 * 1024 * 1024)
     assert proc.returncode == 0
     values = keys(proc.stdout)
     assert values["cgroup_available_mib"] == "4096"
@@ -253,9 +261,7 @@ def test_capacity_continues_when_memory_current_is_not_numeric(tmp_path: Path) -
 
 def test_capacity_floors_the_cgroup_remainder_at_zero(tmp_path: Path) -> None:
     """使用量が上限を超えている（負の残り）ときも 0 として扱い、落ちない。"""
-    proc = capacity(tmp_path, swap_free_mib=2047,
-                    memory_max=str(1024 * 1024 * 1024),
-                    memory_current=2 * 1024 * 1024 * 1024)
+    proc = capacity(tmp_path, swap_free_mib=2047, memory_max=str(1024 * 1024 * 1024), memory_current=2 * 1024 * 1024 * 1024)
     assert proc.returncode == 0
     assert keys(proc.stdout)["cgroup_available_mib"] == "0"
 
@@ -264,6 +270,7 @@ def test_capacity_floors_the_cgroup_remainder_at_zero(tmp_path: Path) -> None:
 # 自分の cgroup を測るための解決である。ホストでは `/sys/fs/cgroup` が kernel の根で、
 # `memory.events` を持たない（`CFTYPE_NOT_ON_ROOT`）ため `/proc/self/cgroup` へ回る。
 # コンテナの中では `/sys/fs/cgroup` がすでに自分の cgroup なのでそのまま使う。
+
 
 def proc_cgroup(tmp_path: Path, path: str, *, name: str = "proc-cgroup") -> Path:
     """`/proc/self/cgroup`（cgroup v2）の体裁の入力。"""
@@ -275,56 +282,74 @@ def proc_cgroup(tmp_path: Path, path: str, *, name: str = "proc-cgroup") -> Path
 def test_resolve_cgroup_dir_returns_the_given_directory(tmp_path: Path) -> None:
     """`--cgroup-dir` が渡されたら、どちらの入力も読まない。"""
     given = tmp_path / "given"
-    assert parallel_measure.resolve_cgroup_dir(
-        str(given),
-        root=cgroup(tmp_path, oom_kill=1, name="root"),
-        proc_cgroup=proc_cgroup(tmp_path, "/user.slice/session.scope"),
-    ) == given
+    assert (
+        parallel_measure.resolve_cgroup_dir(
+            str(given),
+            root=cgroup(tmp_path, oom_kill=1, name="root"),
+            proc_cgroup=proc_cgroup(tmp_path, "/user.slice/session.scope"),
+        )
+        == given
+    )
 
 
-def test_resolve_cgroup_dir_uses_the_root_when_it_holds_memory_events(
-        tmp_path: Path) -> None:
+def test_resolve_cgroup_dir_uses_the_root_when_it_holds_memory_events(tmp_path: Path) -> None:
     """`memory.events` がある `/sys/fs/cgroup` は、すでに自分の cgroup である。"""
     root = cgroup(tmp_path, oom_kill=1, name="root")
-    assert parallel_measure.resolve_cgroup_dir(
-        None, root=root,
-        proc_cgroup=proc_cgroup(tmp_path, "/user.slice/session.scope"),
-    ) == root
+    assert (
+        parallel_measure.resolve_cgroup_dir(
+            None,
+            root=root,
+            proc_cgroup=proc_cgroup(tmp_path, "/user.slice/session.scope"),
+        )
+        == root
+    )
 
 
-def test_resolve_cgroup_dir_derives_from_proc_when_the_root_has_no_events(
-        tmp_path: Path) -> None:
+def test_resolve_cgroup_dir_derives_from_proc_when_the_root_has_no_events(tmp_path: Path) -> None:
     """kernel の根には `memory.events` が無い。`0::<path>` の下を測る。"""
     root = tmp_path / "root"
     leaf = cgroup(root, oom_kill=2, name="user.slice")
-    assert parallel_measure.resolve_cgroup_dir(
-        None, root=root, proc_cgroup=proc_cgroup(tmp_path, "/user.slice"),
-    ) == leaf
+    assert (
+        parallel_measure.resolve_cgroup_dir(
+            None,
+            root=root,
+            proc_cgroup=proc_cgroup(tmp_path, "/user.slice"),
+        )
+        == leaf
+    )
 
 
-def test_resolve_cgroup_dir_uses_the_root_when_proc_says_the_root(
-        tmp_path: Path) -> None:
+def test_resolve_cgroup_dir_uses_the_root_when_proc_says_the_root(tmp_path: Path) -> None:
     root = tmp_path / "root"
     root.mkdir()
-    assert parallel_measure.resolve_cgroup_dir(
-        None, root=root, proc_cgroup=proc_cgroup(tmp_path, "/"),
-    ) == root
+    assert (
+        parallel_measure.resolve_cgroup_dir(
+            None,
+            root=root,
+            proc_cgroup=proc_cgroup(tmp_path, "/"),
+        )
+        == root
+    )
 
 
-def test_resolve_cgroup_dir_uses_the_root_when_proc_is_unreadable(
-        tmp_path: Path) -> None:
+def test_resolve_cgroup_dir_uses_the_root_when_proc_is_unreadable(tmp_path: Path) -> None:
     root = tmp_path / "root"
     root.mkdir()
-    assert parallel_measure.resolve_cgroup_dir(
-        None, root=root, proc_cgroup=tmp_path / "none",
-    ) == root
+    assert (
+        parallel_measure.resolve_cgroup_dir(
+            None,
+            root=root,
+            proc_cgroup=tmp_path / "none",
+        )
+        == root
+    )
 
 
 # --- capacity: 測れない環境（AC32） -----------------------------------------
 
+
 def test_capacity_exits_three_when_meminfo_is_absent(tmp_path: Path) -> None:
-    proc = run("capacity", "--meminfo", str(tmp_path / "no-such-file"),
-               "--cgroup-dir", str(cgroup(tmp_path, oom_kill=1)))
+    proc = run("capacity", "--meminfo", str(tmp_path / "no-such-file"), "--cgroup-dir", str(cgroup(tmp_path, oom_kill=1)))
     assert proc.returncode == 3
     assert "allowed=" not in proc.stdout
     assert proc.stdout.strip() == ""
@@ -334,8 +359,7 @@ def test_capacity_exits_three_when_meminfo_is_absent(tmp_path: Path) -> None:
 def test_capacity_exits_three_when_mem_available_is_missing(tmp_path: Path) -> None:
     path = tmp_path / "partial"
     path.write_text("MemTotal: 21000000 kB\n", encoding="utf-8")
-    proc = run("capacity", "--meminfo", str(path),
-               "--cgroup-dir", str(cgroup(tmp_path, oom_kill=1)))
+    proc = run("capacity", "--meminfo", str(path), "--cgroup-dir", str(cgroup(tmp_path, oom_kill=1)))
     assert proc.returncode == 3
     assert proc.stdout.strip() == ""
 
@@ -393,9 +417,9 @@ def test_capacity_rejects_per_lane_mib_zero(tmp_path: Path) -> None:
 
 # --- capacity: OOM Killer の回数（AC35） ------------------------------------
 
+
 def test_capacity_lowers_the_count_when_oom_kill_increased(tmp_path: Path) -> None:
-    proc = capacity(tmp_path, "--oom-baseline", "1", "--running", "3",
-                    oom_kill=2, swap_free_mib=2047)
+    proc = capacity(tmp_path, "--oom-baseline", "1", "--running", "3", oom_kill=2, swap_free_mib=2047)
     assert proc.returncode == 0
     values = keys(proc.stdout)
     assert values["oom_kill_increased"] == "yes"
@@ -404,19 +428,16 @@ def test_capacity_lowers_the_count_when_oom_kill_increased(tmp_path: Path) -> No
 
 
 def test_capacity_says_no_when_oom_kill_did_not_increase(tmp_path: Path) -> None:
-    proc = capacity(tmp_path, "--oom-baseline", "1", "--running", "3",
-                    oom_kill=1, swap_free_mib=2047)
+    proc = capacity(tmp_path, "--oom-baseline", "1", "--running", "3", oom_kill=1, swap_free_mib=2047)
     values = keys(proc.stdout)
     assert values["oom_kill_increased"] == "no"
     assert "oom_kill_increased" not in values["limited_by"]
 
 
 @pytest.mark.parametrize("running", ["0", "1"])
-def test_capacity_allows_zero_only_on_the_review_that_saw_the_increase(
-        tmp_path: Path, running: str) -> None:
+def test_capacity_allows_zero_only_on_the_review_that_saw_the_increase(tmp_path: Path, running: str) -> None:
     """`running` が 0 か 1 のとき、下限の 1 を当てると「今の本数 − 1 以下」を満たせない。"""
-    proc = capacity(tmp_path, "--oom-baseline", "1", "--running", running,
-                    oom_kill=2, swap_free_mib=2047)
+    proc = capacity(tmp_path, "--oom-baseline", "1", "--running", running, oom_kill=2, swap_free_mib=2047)
     values = keys(proc.stdout)
     assert values["allowed"] == "0"
     assert "floor" not in values["limited_by"]
@@ -434,21 +455,17 @@ def test_capacity_without_a_baseline_does_not_judge(tmp_path: Path) -> None:
 
 INTERVALS = [
     # 重なる 2 本（1 時間）
-    {"number": 1, "createdAt": "2026-09-01T00:00:00Z",
-     "mergedAt": "2026-09-01T02:00:00Z", "closedAt": "2026-09-01T02:00:00Z"},
-    {"number": 2, "createdAt": "2026-09-01T01:00:00Z",
-     "mergedAt": "2026-09-01T03:00:00Z", "closedAt": "2026-09-01T03:00:00Z"},
+    {"number": 1, "createdAt": "2026-09-01T00:00:00Z", "mergedAt": "2026-09-01T02:00:00Z", "closedAt": "2026-09-01T02:00:00Z"},
+    {"number": 2, "createdAt": "2026-09-01T01:00:00Z", "mergedAt": "2026-09-01T03:00:00Z", "closedAt": "2026-09-01T03:00:00Z"},
     # 端が接するだけ（重ならない）。開いたまま
-    {"number": 3, "createdAt": "2026-09-01T03:00:00Z",
-     "mergedAt": None, "closedAt": None},
+    {"number": 3, "createdAt": "2026-09-01T03:00:00Z", "mergedAt": None, "closedAt": None},
 ]
 
 
 def concurrency(tmp_path: Path, *args: str, data=INTERVALS) -> subprocess.CompletedProcess:
     path = tmp_path / "prs.json"
     path.write_text(json.dumps(data), encoding="utf-8")
-    return run("concurrency", "--input", str(path),
-               "--now", "2026-09-01T04:00:00Z", *args)
+    return run("concurrency", "--input", str(path), "--now", "2026-09-01T04:00:00Z", *args)
 
 
 def test_concurrency_measures_the_overlap(tmp_path: Path) -> None:
@@ -467,12 +484,13 @@ def test_concurrency_measures_the_overlap(tmp_path: Path) -> None:
 
 def test_concurrency_counts_a_touching_pair_as_no_overlap(tmp_path: Path) -> None:
     """同じ時刻に閉じる期間と開く期間は重ならない（閉じるほうを先に数える）。"""
-    proc = concurrency(tmp_path, data=[
-        {"number": 1, "createdAt": "2026-09-01T00:00:00Z",
-         "mergedAt": "2026-09-01T01:00:00Z", "closedAt": None},
-        {"number": 2, "createdAt": "2026-09-01T01:00:00Z",
-         "mergedAt": "2026-09-01T02:00:00Z", "closedAt": None},
-    ])
+    proc = concurrency(
+        tmp_path,
+        data=[
+            {"number": 1, "createdAt": "2026-09-01T00:00:00Z", "mergedAt": "2026-09-01T01:00:00Z", "closedAt": None},
+            {"number": 2, "createdAt": "2026-09-01T01:00:00Z", "mergedAt": "2026-09-01T02:00:00Z", "closedAt": None},
+        ],
+    )
     values = keys(proc.stdout)
     assert values["overlap_minutes"] == "0"
     assert values["concurrency_pct"] == "0.0"
@@ -480,10 +498,12 @@ def test_concurrency_counts_a_touching_pair_as_no_overlap(tmp_path: Path) -> Non
 
 
 def test_concurrency_uses_closed_at_when_not_merged(tmp_path: Path) -> None:
-    proc = concurrency(tmp_path, data=[
-        {"number": 1, "createdAt": "2026-09-01T00:00:00Z",
-         "mergedAt": None, "closedAt": "2026-09-01T01:00:00Z"},
-    ])
+    proc = concurrency(
+        tmp_path,
+        data=[
+            {"number": 1, "createdAt": "2026-09-01T00:00:00Z", "mergedAt": None, "closedAt": "2026-09-01T01:00:00Z"},
+        ],
+    )
     values = keys(proc.stdout)
     assert values["end"] == "2026-09-01T01:00:00Z"
     assert values["span_minutes"] == "60"
@@ -491,12 +511,13 @@ def test_concurrency_uses_closed_at_when_not_merged(tmp_path: Path) -> None:
 
 def test_concurrency_rounds_half_up(tmp_path: Path) -> None:
     """秒の比を小数 1 桁へ四捨五入する。分へ丸めた値からは求めない。"""
-    proc = concurrency(tmp_path, data=[
-        {"number": 1, "createdAt": "2026-09-01T00:00:00Z",
-         "mergedAt": "2026-09-01T00:00:25Z", "closedAt": None},
-        {"number": 2, "createdAt": "2026-09-01T00:00:00Z",
-         "mergedAt": "2026-09-01T00:01:20Z", "closedAt": None},
-    ])
+    proc = concurrency(
+        tmp_path,
+        data=[
+            {"number": 1, "createdAt": "2026-09-01T00:00:00Z", "mergedAt": "2026-09-01T00:00:25Z", "closedAt": None},
+            {"number": 2, "createdAt": "2026-09-01T00:00:00Z", "mergedAt": "2026-09-01T00:01:20Z", "closedAt": None},
+        ],
+    )
     values = keys(proc.stdout)
     # 重なり 25 秒 ÷ 期間 80 秒 = 31.25% → 31.3（ROUND_HALF_UP）
     assert values["overlap_minutes"] == "0"
@@ -504,10 +525,12 @@ def test_concurrency_rounds_half_up(tmp_path: Path) -> None:
 
 
 def test_concurrency_handles_a_zero_span(tmp_path: Path) -> None:
-    proc = concurrency(tmp_path, data=[
-        {"number": 1, "createdAt": "2026-09-01T00:00:00Z",
-         "mergedAt": "2026-09-01T00:00:00Z", "closedAt": None},
-    ])
+    proc = concurrency(
+        tmp_path,
+        data=[
+            {"number": 1, "createdAt": "2026-09-01T00:00:00Z", "mergedAt": "2026-09-01T00:00:00Z", "closedAt": None},
+        ],
+    )
     assert proc.returncode == 0
     assert keys(proc.stdout)["concurrency_pct"] == "0.0"
 
@@ -533,14 +556,15 @@ def test_concurrency_rejects_a_non_object_element(tmp_path: Path, data: list) ->
     assert "--input" in proc.stderr
 
 
-@pytest.mark.parametrize("record", [
-    {"number": 1, "createdAt": 20260901, "mergedAt": None, "closedAt": None},
-    {"number": 1, "createdAt": "2026-09-01T00:00:00Z", "mergedAt": 20260901,
-     "closedAt": None},
-    {"number": 1, "createdAt": "2026-09-01T00:00:00Z", "mergedAt": None,
-     "closedAt": ["2026-09-01T01:00:00Z"]},
-    {"number": 1, "createdAt": True, "mergedAt": None, "closedAt": None},
-])
+@pytest.mark.parametrize(
+    "record",
+    [
+        {"number": 1, "createdAt": 20260901, "mergedAt": None, "closedAt": None},
+        {"number": 1, "createdAt": "2026-09-01T00:00:00Z", "mergedAt": 20260901, "closedAt": None},
+        {"number": 1, "createdAt": "2026-09-01T00:00:00Z", "mergedAt": None, "closedAt": ["2026-09-01T01:00:00Z"]},
+        {"number": 1, "createdAt": True, "mergedAt": None, "closedAt": None},
+    ],
+)
 def test_concurrency_rejects_a_non_string_time(tmp_path: Path, record: dict) -> None:
     """時刻の欄が文字列でない入力も、入力の誤りとして終了コード 2 で弾く。
 
@@ -554,15 +578,13 @@ def test_concurrency_rejects_a_non_string_time(tmp_path: Path, record: dict) -> 
 
 # --- concurrency: `gh` は読むだけ（AC42） -----------------------------------
 
+
 def fake_gh(tmp_path: Path, *, fail: bool = False) -> tuple[dict, Path]:
     """`PATH` の先頭へ置く偽の `gh`。受けた引数を 1 行ずつ控える。"""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
     log = tmp_path / "gh-args.log"
-    body = (
-        "#!/usr/bin/env bash\n"
-        f'printf "%s\\n" "$*" >> "{log}"\n'
-    )
+    body = f'#!/usr/bin/env bash\nprintf "%s\\n" "$*" >> "{log}"\n'
     if fail:
         body += 'echo "boom" >&2\nexit 1\n'
     else:

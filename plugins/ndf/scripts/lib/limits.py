@@ -23,6 +23,7 @@ Usage:
 
 表に無い工程名は終了コード 1 で拒む。別名は持たない（呼び出し側が正規化する）。
 """
+
 from __future__ import annotations
 
 import os
@@ -46,9 +47,9 @@ PHASE_TIMEOUT = {
 
 # 担当ごとの無進捗の許容（秒）。
 AGENT_STALL = {
-    "codex": 180,   # 推論ログを逐次出す
-    "agy": 480,     # err.log がほぼ無音
-    "kiro": 480,    # ツール実行の待ちで数分沈黙することがある
+    "codex": 180,  # 推論ログを逐次出す
+    "agy": 480,  # err.log がほぼ無音
+    "kiro": 480,  # ツール実行の待ちで数分沈黙することがある
     "claude": 900,  # `--output-format json` は完了まで 1 バイトも出さない
 }
 
@@ -76,7 +77,8 @@ def safe_int_env(name: str, fallback: int) -> int:
     except (ValueError, TypeError):
         print(
             f"⚠ env {name}={raw!r} が int に変換できません — {fallback} を使用",
-            file=sys.stderr, flush=True,
+            file=sys.stderr,
+            flush=True,
         )
         return fallback
 
@@ -86,9 +88,7 @@ def _check_phase(phase: str) -> None:
         raise KeyError(f"上限の表に無い工程です: {phase!r}（{' / '.join(PHASE_TIMEOUT)}）")
 
 
-def _resolve_timeout(
-    explicit: Optional[int], per_agent_env: str, shared_env: str, builtin: int
-) -> int:
+def _resolve_timeout(explicit: Optional[int], per_agent_env: str, shared_env: str, builtin: int) -> int:
     """明示値 → 担当別環境変数 → 共通環境変数 → 組み込み値の順で解決する。
 
     監視の上限（`monitor_timeout`）と無進捗の許容（`stall_timeout`）は同じ優先順位で
@@ -106,7 +106,9 @@ def monitor_timeout(phase: str, agent: str, explicit: Optional[int] = None) -> i
     """監視の上限。`explicit`（`--timeout`）→ `MONITOR_TIMEOUT_<担当>` → `MONITOR_TIMEOUT` → 表。"""
     _check_phase(phase)
     return _resolve_timeout(
-        explicit, f"MONITOR_TIMEOUT_{agent.upper()}", "MONITOR_TIMEOUT",
+        explicit,
+        f"MONITOR_TIMEOUT_{agent.upper()}",
+        "MONITOR_TIMEOUT",
         PHASE_TIMEOUT[phase],
     )
 
@@ -114,7 +116,9 @@ def monitor_timeout(phase: str, agent: str, explicit: Optional[int] = None) -> i
 def stall_timeout(agent: str, explicit: Optional[int] = None) -> int:
     """無進捗の許容。`explicit`（`--stall-timeout`）→ `MONITOR_STALL_<担当>` → `MONITOR_STALL` → 表。"""
     return _resolve_timeout(
-        explicit, f"MONITOR_STALL_{agent.upper()}", "MONITOR_STALL",
+        explicit,
+        f"MONITOR_STALL_{agent.upper()}",
+        "MONITOR_STALL",
         AGENT_STALL.get(agent, DEFAULT_STALL),
     )
 
@@ -173,8 +177,7 @@ def main(argv: list[str]) -> int:
     if argv[:1] == ["check"] and len(argv) == 1:
         broken = check()
         for phase, agent, stall, monitor, cli in broken:
-            print(f"{phase} × {agent}: 無進捗の許容 {stall} / 監視の上限 {monitor} / "
-                  f"CLI の上限 {cli}", file=sys.stderr)
+            print(f"{phase} × {agent}: 無進捗の許容 {stall} / 監視の上限 {monitor} / CLI の上限 {cli}", file=sys.stderr)
         return 1 if broken else 0
     options = _parse_cli_options(argv[3:]) if argv[:1] == ["cli-timeout"] else ((None, True) if len(argv) == 3 else None)
     if len(argv) >= 3 and argv[0] in ("cli-timeout", "monitor-timeout") and options is not None:

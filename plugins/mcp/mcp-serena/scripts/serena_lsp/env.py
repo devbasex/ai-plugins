@@ -12,6 +12,7 @@ PreToolUse の hook の command は目印の `bin/python` を `sh -c '[ -x "$0" 
   できればそのまま戻り、できなければ環境を用意して自分を起動し直す。uv が無ければ版を固定して入れ、入れられなければ
   理由を出して終了コード 3 で終わる（NDF の `deps.require()` と同じ契約）
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -134,9 +135,13 @@ def sync() -> int:
         if not uv:
             _say(f"uv を入れられない（ネットワークか権限が無い）。手で入れてから打ち直す: {INSTALL_HINT}")
             return EXIT_PRECONDITION
-        p = subprocess.run([uv, "sync", "--quiet", "--frozen", "--compile-bytecode", "--project", str(PLUGIN_ROOT)],
-                           env=dict(os.environ, UV_PROJECT_ENVIRONMENT=str(venv)), stdin=subprocess.DEVNULL,
-                           capture_output=True, text=True)
+        p = subprocess.run(
+            [uv, "sync", "--quiet", "--frozen", "--compile-bytecode", "--project", str(PLUGIN_ROOT)],
+            env=dict(os.environ, UV_PROJECT_ENVIRONMENT=str(venv)),
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+        )
         if p.returncode != 0:
             _say(f"uv sync が失敗した（終了コード {p.returncode}）: {(p.stderr or '').strip()[-300:]}")
             return EXIT_PRECONDITION
@@ -155,10 +160,17 @@ def prepare(wait: float = 8.0) -> str | None:
         if ready(venv):
             link_pointers(venv)
             return python
-        code = f"import sys; sys.path.insert(0, {str(Path(__file__).resolve().parents[1])!r}); " \
-               "from serena_lsp import env; sys.exit(env.sync())"
-        child = subprocess.Popen([sys.executable, "-c", code], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                                 stderr=subprocess.DEVNULL, start_new_session=True)
+        code = (
+            f"import sys; sys.path.insert(0, {str(Path(__file__).resolve().parents[1])!r}); "
+            "from serena_lsp import env; sys.exit(env.sync())"
+        )
+        child = subprocess.Popen(
+            [sys.executable, "-c", code],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
         deadline = time.monotonic() + wait
         while child.poll() is None and time.monotonic() < deadline:
             time.sleep(0.1)

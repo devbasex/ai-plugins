@@ -15,6 +15,7 @@
 結果は lib/step_result.py の形の 1 行の JSON（`tool: "glossary"`）。終了コードは副命令ごとに
 0 = 通す・当たりなし / 1 = 止める・当たりあり / 2 = 読めない・パスが境界を越える。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -60,6 +61,7 @@ def unreadable(msg):
 
 # --- パスの境界 -----------------------------------------------------------------
 
+
 def inside(root: Path, rel: str, label: str) -> Path:
     """リポジトリの根の内側のパスだけを受ける。違反は何も書かずに 2 で止める。"""
     if not isinstance(rel, str) or not rel:
@@ -75,6 +77,7 @@ def inside(root: Path, rel: str, label: str) -> Path:
 
 
 # --- 宣言と用語集の読み込み ------------------------------------------------------
+
 
 class Declaration:
     def __init__(self, root: Path, raw: dict):
@@ -95,8 +98,7 @@ class Declaration:
         paths = check.get("paths", [])
         sections = check.get("term_sections", DEFAULT_TERM_SECTIONS)
         source_paths = check.get("source_paths", [])
-        for name, value in (("check.paths", paths), ("check.term_sections", sections),
-                            ("check.source_paths", source_paths)):
+        for name, value in (("check.paths", paths), ("check.term_sections", sections), ("check.source_paths", source_paths)):
             if not isinstance(value, list) or not all(isinstance(v, str) and v for v in value):
                 raise unreadable(f"{DECLARATION} の {name} は文字列の配列で書く")
         for pat in paths:
@@ -173,6 +175,7 @@ def live_words(g: dict) -> set[str]:
 
 # --- 文書の生成 -------------------------------------------------------------------
 
+
 def _plain(value) -> str:
     """セルと地の文に書く字面（改行は空白、空は「—」）。`|` のエスケープは呼ぶ側（mdtable）が持つ。"""
     return str(value or "").replace("\r\n", "\n").replace("\n", " ").strip() or "—"
@@ -200,12 +203,12 @@ def render_text(g: dict, source: str) -> str:
             dep_code = "、".join(f"`{w}`" for w in deprecated_code_of(t))
             src = f"`{t['source']}`" if t.get("source") else ""
             body.append([_plain(v) for v in (t.get("term"), code, t.get("meaning"), dep, dep_code, src)])
-        out += [mdtable.table_markdown(["語", "識別子", "意味", "廃止した語", "廃止した識別子", "正本"], body,
-                                       align=["left"] * 6), ""]
+        out += [mdtable.table_markdown(["語", "識別子", "意味", "廃止した語", "廃止した識別子", "正本"], body, align=["left"] * 6), ""]
     return "\n".join(out).rstrip("\n") + "\n"
 
 
 # --- 用語集の形 --------------------------------------------------------------------
+
 
 def pending_problem(root: Path, rel: str) -> str | None:
     """pending_source は根の内側の正規の相対パスで設計文書を指す。spec-finalize はこの形でだけ照合する。"""
@@ -226,8 +229,13 @@ def structure_findings(g: dict, decl: Declaration) -> list[dict]:
 
     ids = []
     for i, c in enumerate(g.get("contexts", [])):
-        if not isinstance(c, dict) or not isinstance(c.get("id"), str) or not c["id"] or \
-                not isinstance(c.get("name"), str) or not c["name"]:
+        if (
+            not isinstance(c, dict)
+            or not isinstance(c.get("id"), str)
+            or not c["id"]
+            or not isinstance(c.get("name"), str)
+            or not c["name"]
+        ):
             hit("schema", "", f"contexts[{i}] に id と name が要る")
             continue
         if c["id"] in ids:
@@ -256,11 +264,15 @@ def structure_findings(g: dict, decl: Declaration) -> list[dict]:
             hit("schema", t["term"], f"terms[{i}] の source は文字列で書く")
         elif "pending_source" in t and not isinstance(t["pending_source"], str):
             hit("schema", t["term"], f"terms[{i}] の pending_source は文字列で書く")
-        elif decl.source_paths and t.get("source") and "://" not in t["source"] and \
-                not declared_path_matches(t["source"], decl.source_paths):
-            hit("unconfirmed_source", t["term"],
+        elif (
+            decl.source_paths and t.get("source") and "://" not in t["source"] and not declared_path_matches(t["source"], decl.source_paths)
+        ):
+            hit(
+                "unconfirmed_source",
+                t["term"],
                 f"terms[{i}] の source が確定仕様を指さない: {t['source']}（check.source_paths に当たるパスへ移す。"
-                "確定前は source を空にし、plan-to-spec が確定仕様を書いたときに入れる）")
+                "確定前は source を空にし、plan-to-spec が確定仕様を書いたときに入れる）",
+            )
         if isinstance(t.get("pending_source"), str) and (problem := pending_problem(decl.root, t["pending_source"])):
             hit("schema", t["term"], f"terms[{i}] の pending_source {problem}: {t['pending_source']}")
         if t["context"] not in ids:
@@ -272,8 +284,9 @@ def structure_findings(g: dict, decl: Declaration) -> list[dict]:
                 hit("schema", w, f"terms[{i}] の廃止した語が同じコンテキストの生きた語と重なる")
         if "code" in t and code_of(t) is None:
             hit("schema", str(t["code"]), f"terms[{i}] の code は英小文字の snake_case で書く（例: approval_gate）")
-        if "deprecated_code" in t and (not isinstance(t["deprecated_code"], list)
-                                       or len(deprecated_code_of(t)) != len(t["deprecated_code"])):
+        if "deprecated_code" in t and (
+            not isinstance(t["deprecated_code"], list) or len(deprecated_code_of(t)) != len(t["deprecated_code"])
+        ):
             hit("schema", t["term"], f"terms[{i}] の deprecated_code は英小文字の snake_case の文字列の配列で書く")
         for w in deprecated_code_of(t):
             if w in codes_by_ctx.get(t["context"], set()):
@@ -281,8 +294,7 @@ def structure_findings(g: dict, decl: Declaration) -> list[dict]:
         if code_of(t):
             ckey = (t["context"], code_of(t))
             if ckey in code_seen:
-                hit("schema", code_of(t),
-                    f"コンテキスト {t['context']} で terms[{code_seen[ckey]}] と terms[{i}] が同じ識別子")
+                hit("schema", code_of(t), f"コンテキスト {t['context']} で terms[{code_seen[ckey]}] と terms[{i}] が同じ識別子")
             else:
                 code_seen[ckey] = i
         key = (t["context"], t["term"])
@@ -301,18 +313,25 @@ def stale_findings(g: dict, decl: Declaration) -> list[dict]:
         have = None
     if have == want:
         return []
-    return [{"rule": "stale_document", "path": decl.document, "line": 0, "term": "",
-             "detail": f"用語集から作り直していない。`glossary.py render` を打つ（{decl.source}）"}]
+    return [
+        {
+            "rule": "stale_document",
+            "path": decl.document,
+            "line": 0,
+            "term": "",
+            "detail": f"用語集から作り直していない。`glossary.py render` を打つ（{decl.source}）",
+        }
+    ]
 
 
 # --- 文書の中の語 --------------------------------------------------------------------
+
 
 def word_pattern(words) -> re.Pattern | None:
     words = sorted({w for w in words if w}, key=len, reverse=True)
     if not words:
         return None
-    parts = [rf"(?<![A-Za-z0-9_]){re.escape(w)}(?![A-Za-z0-9_])" if ASCII_WORD.match(w) else re.escape(w)
-             for w in words]
+    parts = [rf"(?<![A-Za-z0-9_]){re.escape(w)}(?![A-Za-z0-9_])" if ASCII_WORD.match(w) else re.escape(w) for w in words]
     return re.compile("|".join(parts))
 
 
@@ -324,7 +343,7 @@ def clean_term(cell_text: str) -> str:
     s = cell_text.strip()
     for mark in ("**", "__", "`"):
         if s.startswith(mark) and s.endswith(mark) and len(s) > 2 * len(mark):
-            s = s[len(mark):-len(mark)].strip()
+            s = s[len(mark) : -len(mark)].strip()
     return s
 
 
@@ -353,16 +372,22 @@ def scan(text: str, term_sections: list[str]):
         yield n, mask_inline_code(line), terms.get(n)
 
 
-def text_findings(rel: str, text: str, wanted: set[int] | None, g: dict, decl: Declaration,
-                  dep_re, live_re) -> list[dict]:
+def text_findings(rel: str, text: str, wanted: set[int] | None, g: dict, decl: Declaration, dep_re, live_re) -> list[dict]:
     live = live_words(g)
     items = []
     for n, body, term in scan(text, decl.term_sections):
         if wanted is not None and n not in wanted:
             continue
         if term and term not in live:
-            items.append({"rule": "unregistered", "path": rel, "line": n, "term": term,
-                          "detail": "用語集に無い語。同じ変更で用語集へ足して render する"})
+            items.append(
+                {
+                    "rule": "unregistered",
+                    "path": rel,
+                    "line": n,
+                    "term": term,
+                    "detail": "用語集に無い語。同じ変更で用語集へ足して render する",
+                }
+            )
         if dep_re is None:
             continue
         spans = [m.span() for m in live_re.finditer(body)] if live_re else []
@@ -370,8 +395,15 @@ def text_findings(rel: str, text: str, wanted: set[int] | None, g: dict, decl: D
             s, e = m.span()
             if any(a <= s and e <= b for a, b in spans):
                 continue
-            items.append({"rule": "deprecated", "path": rel, "line": n, "term": m.group(0),
-                          "detail": f"廃止した語。{replacement(g, m.group(0))} と書く"})
+            items.append(
+                {
+                    "rule": "deprecated",
+                    "path": rel,
+                    "line": n,
+                    "term": m.group(0),
+                    "detail": f"廃止した語。{replacement(g, m.group(0))} と書く",
+                }
+            )
     return items
 
 
@@ -410,12 +442,13 @@ def mask_comments(lines: list[str], suffix: str) -> list[str]:
             if opened:
                 i, quote = i + len(opened), opened
                 continue
-            if (c == "#" and hash_style and (suffix == ".py" or i == 0 or line[i - 1] in " \t;|&(")) \
-                    or (not hash_style and line.startswith("//", i)):
+            if (c == "#" and hash_style and (suffix == ".py" or i == 0 or line[i - 1] in " \t;|&(")) or (
+                not hash_style and line.startswith("//", i)
+            ):
                 chars[i:] = " " * (len(line) - i)
                 break
             if not hash_style and line.startswith("/*", i):
-                chars[i:i + 2], block, i = "  ", True, i + 2
+                chars[i : i + 2], block, i = "  ", True, i + 2
                 continue
             i += 1
         if quote not in multiline and not escaped_eol:
@@ -435,8 +468,15 @@ def code_findings(rel: str, text: str, wanted: set[int] | None, g: dict, dep_re,
             s, e = m.span()
             if any(a <= s and e <= b for a, b in spans):
                 continue
-            items.append({"rule": "deprecated_code", "path": rel, "line": n, "term": m.group(0),
-                          "detail": f"廃止した識別子。{code_replacement(g, m.group(0))} と書く"})
+            items.append(
+                {
+                    "rule": "deprecated_code",
+                    "path": rel,
+                    "line": n,
+                    "term": m.group(0),
+                    "detail": f"廃止した識別子。{code_replacement(g, m.group(0))} と書く",
+                }
+            )
     return items
 
 
@@ -460,6 +500,7 @@ def replacement(g: dict, word: str) -> str:
 
 
 # --- git ------------------------------------------------------------------------------
+
 
 def git_checked(root: Path, *args, check=True) -> subprocess.CompletedProcess:
     p = proc.git(root, *args, check=False)
@@ -493,6 +534,7 @@ def declared_path_matches(rel: str, patterns: list[str]) -> bool:
 
 # --- 副命令 ----------------------------------------------------------------------------
 
+
 def script_cmd(root: Path, sub: str) -> str:
     return f"python3 {Path(__file__).resolve()} {sub} --root {root}"
 
@@ -519,8 +561,15 @@ def cmd_gate(a):
         {"text": f"語の候補を集める: {script_cmd(root, 'candidates')}（0 件なら要求から語を起こす）"},
         {"text": "手順: requirements-design の手順 0（用語集を用意する）"},
     ]
-    emit(result(TOOL, "stopped", f"{' / '.join(missing)} が無い。設計の工程へ入る前に用語集を作る。"
-                                 + " → ".join(s["text"] for s in steps), steps), EXIT_VIOLATION)
+    emit(
+        result(
+            TOOL,
+            "stopped",
+            f"{' / '.join(missing)} が無い。設計の工程へ入る前に用語集を作る。" + " → ".join(s["text"] for s in steps),
+            steps,
+        ),
+        EXIT_VIOLATION,
+    )
 
 
 def cmd_init(a):
@@ -532,8 +581,13 @@ def cmd_init(a):
         raw_decl = None
     else:
         source, document = a.source or DEFAULT_SOURCE, a.document or DEFAULT_DOCUMENT
-        raw_decl = {"version": 1, "format": "json", "source": source, "document": document,
-                    "check": {"paths": list(DEFAULT_PATHS), "term_sections": list(DEFAULT_TERM_SECTIONS)}}
+        raw_decl = {
+            "version": 1,
+            "format": "json",
+            "source": source,
+            "document": document,
+            "check": {"paths": list(DEFAULT_PATHS), "term_sections": list(DEFAULT_TERM_SECTIONS)},
+        }
         decl = Declaration(root, raw_decl)
     glossary = load_glossary(decl) if decl.source_path.exists() else {"version": 1, "contexts": [], "terms": []}
     writes = []
@@ -551,8 +605,11 @@ def cmd_init(a):
         except OSError as e:
             raise unreadable(f"{rel} を書けない: {e}")
         items.append({"name": rel, "result": "created"})
-    emit(result(TOOL, "ok", f"{len(items)} 個のファイルを作った" if items else "宣言・用語集・文書は揃っている",
-                items, {"created": len(items)}))
+    emit(
+        result(
+            TOOL, "ok", f"{len(items)} 個のファイルを作った" if items else "宣言・用語集・文書は揃っている", items, {"created": len(items)}
+        )
+    )
 
 
 def cmd_candidates(a):
@@ -595,7 +652,7 @@ def cmd_candidates(a):
                     add(m.group(1) or m.group(2), "type", f"{rel}:{n}")
     items = [it for it in found.values() if it["kind"] != "bold" or it["count"] >= 3]
     items.sort(key=lambda it: (-it["count"], it["kind"], it["term"]))
-    items = items[:a.limit]
+    items = items[: a.limit]
     summary = f"語の候補 {len(items)} 件" if items else "語の候補は 0 件（スクラッチ）。要求から語を起こす"
     emit(result(TOOL, "ok", summary, items, {"candidates": len(items)}))
 
@@ -666,8 +723,7 @@ def cmd_check(a):
     metrics = {"hits": len(items)}
     if items:
         rules = sorted({it["rule"] for it in items})
-        emit(result(TOOL, "stopped", f"{len(items)} 件の当たり（{', '.join(rules)}）", items, metrics),
-             EXIT_VIOLATION)
+        emit(result(TOOL, "stopped", f"{len(items)} 件の当たり（{', '.join(rules)}）", items, metrics), EXIT_VIOLATION)
     emit(result(TOOL, "ok", "当たりなし", [], metrics))
 
 
@@ -693,8 +749,7 @@ def cmd_diff(a):
     before, after = glossary_at(root, decl, a.base), glossary_at(root, decl, a.head)
 
     def index(g):
-        return {(t["context"], t["term"]): t for t in terms_of(g)
-                if isinstance(t.get("context"), str) and isinstance(t.get("term"), str)}
+        return {(t["context"], t["term"]): t for t in terms_of(g) if isinstance(t.get("context"), str) and isinstance(t.get("term"), str)}
 
     b, h = index(before), index(after)
     items = []
@@ -705,18 +760,21 @@ def cmd_diff(a):
             continue
         old = b[key]
         if old.get("meaning") != t.get("meaning"):
-            items.append({"change": "meaning_changed", "context": ctx, "term": term,
-                          "before": old.get("meaning"), "after": t.get("meaning")})
+            items.append(
+                {"change": "meaning_changed", "context": ctx, "term": term, "before": old.get("meaning"), "after": t.get("meaning")}
+            )
         for w in deprecated_of(t):
             if w not in deprecated_of(old):
                 items.append({"change": "deprecated", "context": ctx, "term": w, "before": None, "after": term})
     for key, t in b.items():
         if key not in h:
-            items.append({"change": "removed", "context": key[0], "term": key[1], "before": t.get("meaning"),
-                          "after": None})
+            items.append({"change": "removed", "context": key[0], "term": key[1], "before": t.get("meaning"), "after": None})
     counts = {c: sum(1 for it in items if it["change"] == c) for c in ("added", "meaning_changed", "deprecated", "removed")}
-    summary = "用語集の変化は無い" if not items else \
-        f"足した {counts['added']}・意味を変えた {counts['meaning_changed']}・廃止した {counts['deprecated']}・消した {counts['removed']}"
+    summary = (
+        "用語集の変化は無い"
+        if not items
+        else f"足した {counts['added']}・意味を変えた {counts['meaning_changed']}・廃止した {counts['deprecated']}・消した {counts['removed']}"
+    )
     emit(result(TOOL, "ok", summary, items, counts))
 
 

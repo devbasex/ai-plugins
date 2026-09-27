@@ -6,6 +6,7 @@
 確かめたいのは**呼び出しの形**であって、ファイル名に触れた行の中身ではない。呼び出し行の
 近くで参照先を説明することはむしろ望ましいため、候補からコメント行を除く。
 """
+
 from __future__ import annotations
 
 from doc_staleness_helpers import CHECKER, REPO_ROOT
@@ -16,11 +17,7 @@ CHECKER_NAME = "scripts/check-doc-staleness.py"
 
 def invocation_lines(body: str) -> list[str]:
     """説明文書のチェックを起動している行。コメント行は候補から除く。"""
-    return [
-        line
-        for line in body.splitlines()
-        if CHECKER_NAME in line and not line.lstrip().startswith("#")
-    ]
+    return [line for line in body.splitlines() if CHECKER_NAME in line and not line.lstrip().startswith("#")]
 
 
 def test_checker_script_exists() -> None:

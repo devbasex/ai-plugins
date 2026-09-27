@@ -3,6 +3,7 @@
 読めないディレクトリが PATH にあると、補助が例外で落ちてテスト一式が赤くなっていた。
 環境に依存しないよう、読めないディレクトリは一時ディレクトリの権限で作る。
 """
+
 from __future__ import annotations
 
 import os
@@ -14,7 +15,8 @@ import pytest
 from workflow_helpers import path_with
 
 pytestmark = pytest.mark.skipif(
-    os.geteuid() == 0, reason="root は権限のチェックを受けないため、読めないディレクトリを作れない",
+    os.geteuid() == 0,
+    reason="root は権限のチェックを受けないため、読めないディレクトリを作れない",
 )
 
 
@@ -41,7 +43,9 @@ def lock(directory: Path, mode: int, changed: list[Path]) -> None:
 
 
 def test_an_unreadable_directory_does_not_break_the_path(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, restore_modes: list[Path],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    restore_modes: list[Path],
 ) -> None:
     """権限 000 のディレクトリと、祖先を辿れないディレクトリ（`/root/.local/bin` の形）。"""
     tools = tmp_path / "tools"
@@ -62,7 +66,8 @@ def test_an_unreadable_directory_does_not_break_the_path(
 
 
 def test_every_copy_of_the_command_is_hidden(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """同じ名前が複数の場所にあっても、どれも見えなくする。同居する他のコマンドは残す。"""
     first, second = tmp_path / "first", tmp_path / "second"
@@ -78,7 +83,8 @@ def test_every_copy_of_the_command_is_hidden(
 
 
 def test_calling_again_with_the_same_directory_does_not_collide(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """同じ `bin_dir` で隠す対象を変えて呼び直しても、前の複製に引きずられない。"""
     tools = tmp_path / "tools"
@@ -96,7 +102,8 @@ def test_calling_again_with_the_same_directory_does_not_collide(
 
 
 def test_a_relative_path_entry_keeps_working_links(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """PATH の相対パスから写したリンクも、複製の場所から辿れる。"""
     command(tmp_path / "tools", "jq")
@@ -111,7 +118,9 @@ def test_a_relative_path_entry_keeps_working_links(
 
 
 def test_a_command_that_cannot_be_hidden_raises(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, restore_modes: list[Path],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    restore_modes: list[Path],
 ) -> None:
     """一覧できないが実行はできるディレクトリに対象があれば、隠せないので落とす。"""
     sealed = tmp_path / "sealed"

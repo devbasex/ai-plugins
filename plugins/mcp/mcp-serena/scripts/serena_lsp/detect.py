@@ -1,4 +1,5 @@
 """追跡しているファイルの拡張子を数え、しきい値で言語を選ぶ。"""
+
 import subprocess
 
 from . import table
@@ -10,8 +11,7 @@ class GitUnavailable(Exception):
 
 def list_files(root) -> list:
     try:
-        proc = subprocess.run(["git", "-C", str(root), "ls-files", "-z"],
-                              capture_output=True, timeout=30)
+        proc = subprocess.run(["git", "-C", str(root), "ls-files", "-z"], capture_output=True, timeout=30)
     except (OSError, subprocess.SubprocessError) as exc:
         raise GitUnavailable(str(exc)) from exc
     if proc.returncode != 0:

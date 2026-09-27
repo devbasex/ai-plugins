@@ -2,6 +2,7 @@
 
 移す前は `キー: 値` の行を字面で読み、値の引用符を外すだけだった。YAML として読むため、次の入力で結果が変わる。
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -16,8 +17,7 @@ def _run(tmp_path: Path, front: str) -> str:
     skills_dir = tmp_path / "plugins/ndf/skills"
     (skills_dir / "probe").mkdir(parents=True)
     (skills_dir / "probe" / "SKILL.md").write_text(f"---\n{front}---\n\n# probe\n", encoding="utf-8")
-    p = subprocess.run([sys.executable, str(CHECKER), "--skills-dir", str(skills_dir)],
-                       capture_output=True, text=True, check=False)
+    p = subprocess.run([sys.executable, str(CHECKER), "--skills-dir", str(skills_dir)], capture_output=True, text=True, check=False)
     return p.stdout + p.stderr
 
 

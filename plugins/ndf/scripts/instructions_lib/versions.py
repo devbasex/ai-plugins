@@ -2,6 +2,7 @@
 
 リリース済みの版は `CHANGELOG` の見出しと git のタグから読む。
 """
+
 from __future__ import annotations
 
 import os
@@ -18,13 +19,13 @@ from instructions_lib.collect import _inside_root, display_path
 # `-` だけで、数として読める要素に先頭の 0 が無い）。
 VERSION_RE = re.compile(r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$")
 # 行の書き出しに現れる版数。`1.2.3.4` のような別の形へは当たらない。
-VERSION_AT_START = re.compile(
-    r"^v?(?P<version>\d+\.\d+\.\d+(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?)(?![0-9A-Za-z.-])")
+VERSION_AT_START = re.compile(r"^v?(?P<version>\d+\.\d+\.\d+(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?)(?![0-9A-Za-z.-])")
 # 段落の書き出しから読み飛ばす目印（箇条書きの記号と強調）。
 LEAD_RE = re.compile(r"^\s*(?:[-*+]\s+|\d+\.\s+)?[*_~]*")
 
 
 # --- 判定: 出た版の段落 ------------------------------------------------------
+
 
 def semver_key(version: str) -> tuple:
     """semver の順序。**数として読める要素は読めない要素より前**に来る。"""
@@ -62,7 +63,9 @@ def _read_tag_lines(root: Path) -> list[str]:
     try:
         result = subprocess.run(
             ["git", "-C", str(root), "tag"],
-            capture_output=True, text=True, check=True,
+            capture_output=True,
+            text=True,
+            check=True,
         )
     except (OSError, subprocess.CalledProcessError) as exc:
         raise CheckError(f"git tag を読めない: {exc}") from exc
@@ -128,8 +131,7 @@ def paragraph_starts(text: str) -> list[tuple[int, str, bool]]:
     return starts
 
 
-def version_findings(target: Target, text: str, latest: str,
-                     decl: Declaration, criteria: Criteria) -> list[Finding]:
+def version_findings(target: Target, text: str, latest: str, decl: Declaration, criteria: Criteria) -> list[Finding]:
     findings: list[Finding] = []
     if not criteria.enabled("released-version-paragraph"):
         return findings
@@ -141,33 +143,38 @@ def version_findings(target: Target, text: str, latest: str,
         if not match:
             continue
         version = match.group("version")
-        rest = body.strip()[match.end():].lstrip()
+        rest = body.strip()[match.end() :].lstrip()
         pending = bool(decl.pending_marker) and rest.startswith(decl.pending_marker)
         if pending:
             hit = base_triple(version) < latest_base
-            reason = (f"{version} は版が決まる前の段落で、基底が最新（{latest}）未満である")
+            reason = f"{version} は版が決まる前の段落で、基底が最新（{latest}）未満である"
         else:
             hit = base_triple(version) <= latest_base
             reason = f"{version} の段落が残っている（最新は {latest}）"
         if not hit:
             continue
-        findings.append(Finding(
-            "released-version-paragraph",
-            f"{reason}。次の見出しまでを {where} へ移す",
-            target.scope, display_path(target), number, target.source))
+        findings.append(
+            Finding(
+                "released-version-paragraph",
+                f"{reason}。次の見出しまでを {where} へ移す",
+                target.scope,
+                display_path(target),
+                number,
+                target.source,
+            )
+        )
         reported.add(number)
     if decl.pending_marker:
-        findings.extend(_inline_pending_findings(target, text, latest, decl.pending_marker,
-                                                 reported))
+        findings.extend(_inline_pending_findings(target, text, latest, decl.pending_marker, reported))
     return findings
 
 
-def _inline_pending_findings(target: Target, text: str, latest: str, marker: str,
-                             reported: set[int]) -> list[Finding]:
+def _inline_pending_findings(target: Target, text: str, latest: str, marker: str, reported: set[int]) -> list[Finding]:
     """段落の途中の「<版> の次の版で」。その版の次の版が既に出ていれば拾う（#945）。"""
     pattern = re.compile(
         r"(?<![0-9A-Za-z.-])v?(?P<version>\d+\.\d+\.\d+(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?)"
-        r"(?![0-9A-Za-z.-])\s*" + re.escape(marker))
+        r"(?![0-9A-Za-z.-])\s*" + re.escape(marker)
+    )
     latest_base = base_triple(latest)
     findings: list[Finding] = []
     for number, (line, fenced) in enumerate(zip(text.splitlines(), code_lines(text)), start=1):
@@ -177,10 +184,16 @@ def _inline_pending_findings(target: Target, text: str, latest: str, marker: str
             version = match.group("version")
             if base_triple(version) >= latest_base:
                 continue
-            findings.append(Finding(
-                "released-version-paragraph",
-                f"段落の途中の「{version} {marker}」が指す版は既に出ている（最新は {latest}）。"
-                "変更が入った版へ書き換えるか、目印を最新の版へ進める",
-                target.scope, display_path(target), number, target.source))
+            findings.append(
+                Finding(
+                    "released-version-paragraph",
+                    f"段落の途中の「{version} {marker}」が指す版は既に出ている（最新は {latest}）。"
+                    "変更が入った版へ書き換えるか、目印を最新の版へ進める",
+                    target.scope,
+                    display_path(target),
+                    number,
+                    target.source,
+                )
+            )
             break
     return findings

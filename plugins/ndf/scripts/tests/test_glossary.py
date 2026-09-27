@@ -3,6 +3,7 @@
 用語集の語は、どのプロジェクトにも無い通販の領域の語だけで書く（I6: スクリプトは特定の
 プロジェクトの語を持たず、すべて用語集から読む）。
 """
+
 from __future__ import annotations
 
 import json
@@ -64,9 +65,16 @@ def shop_glossary(terms=None):
             {"id": "ordering", "name": "受注", "meaning": "注文を受けて確定するまで"},
             {"id": "shipping", "name": "配送", "meaning": "確定した注文を届けるまで"},
         ],
-        "terms": terms if terms is not None else [
-            {"term": "注文", "context": "ordering", "meaning": "顧客が買うと決めた品の組", "deprecated": ["オーダー"],
-             "source": "docs/ordering.md"},
+        "terms": terms
+        if terms is not None
+        else [
+            {
+                "term": "注文",
+                "context": "ordering",
+                "meaning": "顧客が買うと決めた品の組",
+                "deprecated": ["オーダー"],
+                "source": "docs/ordering.md",
+            },
             {"term": "カートリッジ", "context": "ordering", "meaning": "交換できる部品"},
             {"term": "荷物", "context": "shipping", "meaning": "1 回で運ぶ箱", "deprecated": ["cart"], "source": ""},
         ],
@@ -74,9 +82,16 @@ def shop_glossary(terms=None):
 
 
 def declaration(**check):
-    return {"version": 1, "format": "json", "source": DEFAULT_SOURCE, "document": DEFAULT_DOCUMENT,
-            "check": {"paths": check.get("paths", ["issues/*.md"]),
-                      **({"term_sections": check["term_sections"]} if "term_sections" in check else {})}}
+    return {
+        "version": 1,
+        "format": "json",
+        "source": DEFAULT_SOURCE,
+        "document": DEFAULT_DOCUMENT,
+        "check": {
+            "paths": check.get("paths", ["issues/*.md"]),
+            **({"term_sections": check["term_sections"]} if "term_sections" in check else {}),
+        },
+    }
 
 
 @pytest.fixture
@@ -109,6 +124,7 @@ def rules_of(out):
 
 
 # --- 不変条件（I1〜I6） --------------------------------------------------------
+
 
 def test_i1_same_term_twice_in_one_context_is_duplicate(repo):
     g = shop_glossary()
@@ -221,8 +237,7 @@ def test_i5_modes_with_design_stop_without_declaration(bare, mode):
 
 def test_i6_all_rules_run_from_a_glossary_without_project_words(repo):
     """ai-plugins の語を含まない用語集で、5 つの規則がすべて当たる。"""
-    write(repo, "issues/a.md", "# 要求\n\n## 用語\n\n| 用語 | 意味 |\n| --- | --- |\n| 在庫 | 置いてある品 |\n\n"
-                               "オーダーを受ける。\n")
+    write(repo, "issues/a.md", "# 要求\n\n## 用語\n\n| 用語 | 意味 |\n| --- | --- |\n| 在庫 | 置いてある品 |\n\nオーダーを受ける。\n")
     g = shop_glossary()
     g["terms"].append({"term": "荷物", "context": "shipping", "meaning": "重複"})
     g["terms"].append({"term": "送り状", "context": "nowhere", "meaning": "伝票"})
@@ -234,13 +249,15 @@ def test_i6_all_rules_run_from_a_glossary_without_project_words(repo):
 
 # --- 入口の検査（gate） ----------------------------------------------------------
 
+
 @pytest.mark.parametrize("mode", ["light", "operation", "documentation"])
 def test_gate_passes_modes_without_design(bare, mode):
     assert run(bare, "gate", "--mode", mode)[0] == 0
 
 
-@pytest.mark.parametrize("terms", [[], [{"term": "注文", "context": "ordering", "meaning": "m"},
-                                        {"term": "荷物", "context": "shipping", "meaning": "m"}]])
+@pytest.mark.parametrize(
+    "terms", [[], [{"term": "注文", "context": "ordering", "meaning": "m"}, {"term": "荷物", "context": "shipping", "meaning": "m"}]]
+)
 def test_gate_passes_empty_or_small_glossary(bare, terms):
     write_json(bare, ".ndf/glossary.json", declaration())
     write_json(bare, DEFAULT_SOURCE, shop_glossary(terms))
@@ -269,6 +286,7 @@ def test_gate_unknown_version_or_format_is_2(bare, field, value):
 
 
 # --- 起こす（init） ----------------------------------------------------------------
+
 
 def test_init_creates_three_files_and_gate_passes(bare):
     code, out, err = run(bare, "init")
@@ -327,6 +345,7 @@ def test_init_uses_given_places_without_declaration(bare):
 
 # --- 文書（render） ----------------------------------------------------------------
 
+
 def test_render_has_heading_and_six_columns_per_context(repo):
     doc = (repo / DEFAULT_DOCUMENT).read_text()
     assert doc.startswith("# 用語集\n")
@@ -357,8 +376,7 @@ def test_unregistered_term_fails_and_passes_after_adding(repo):
     write(repo, "issues/a.md", TERMS_DOC + "| 在庫 | 置いてある品 |\n")
     code, out, err = run(repo, "check", "--diff", "develop")
     assert code == 1
-    assert out["items"] == [{"rule": "unregistered", "path": "issues/a.md", "line": 8, "term": "在庫",
-                             "detail": out["items"][0]["detail"]}]
+    assert out["items"] == [{"rule": "unregistered", "path": "issues/a.md", "line": 8, "term": "在庫", "detail": out["items"][0]["detail"]}]
     assert "ERROR: issues/a.md:8: unregistered: 在庫" in err
     g = shop_glossary()
     g["terms"].append({"term": "在庫", "context": "ordering", "meaning": "置いてある品"})
@@ -395,8 +413,11 @@ def test_diff_ignores_lines_added_on_base_after_branching(repo):
 
 
 def test_code_blocks_and_inline_code_are_not_matched(repo):
-    write(repo, "issues/a.md", "`オーダー` は廃止した。\n\n```text\nオーダー\n```\n\n"
-                               "## 用語\n\n| 用語 | 意味 |\n| --- | --- |\n| 注文 | m |\n")
+    write(
+        repo,
+        "issues/a.md",
+        "`オーダー` は廃止した。\n\n```text\nオーダー\n```\n\n## 用語\n\n| 用語 | 意味 |\n| --- | --- |\n| 注文 | m |\n",
+    )
     assert run(repo, "check", "--diff", "develop")[0] == 0
 
 
@@ -440,8 +461,11 @@ def test_files_outside_check_paths_and_other_tables_are_not_matched(repo):
 
 def test_term_sections_come_from_declaration(repo):
     write_json(repo, ".ndf/glossary.json", declaration(term_sections=["Glossary"]))
-    write(repo, "issues/a.md", "## Glossary\n\n| Term | Meaning |\n| --- | --- |\n| stock | m |\n\n"
-                               "## 用語\n\n| 用語 | 意味 |\n| --- | --- |\n| 在庫 | m |\n")
+    write(
+        repo,
+        "issues/a.md",
+        "## Glossary\n\n| Term | Meaning |\n| --- | --- |\n| stock | m |\n\n## 用語\n\n| 用語 | 意味 |\n| --- | --- |\n| 在庫 | m |\n",
+    )
     code, out, _ = run(repo, "check", "--diff", "develop")
     assert code == 1 and [it["term"] for it in out["items"]] == ["stock"]
 
@@ -493,23 +517,34 @@ def test_missing_required_field_is_schema(repo):
 
 # --- 識別子（code / deprecated_code） ----------------------------------------------
 
+
 def import_glossary():
     sys.path.insert(0, str(SCRIPTS))
     import glossary
+
     return glossary
 
 
 def test_code_forms_derive_every_spelling_from_snake_case():
-    assert import_glossary().code_forms("shopping_cart") == \
-        ["shopping_cart", "ShoppingCart", "SHOPPING_CART", "shopping-cart"]
+    assert import_glossary().code_forms("shopping_cart") == ["shopping_cart", "ShoppingCart", "SHOPPING_CART", "shopping-cart"]
     assert import_glossary().code_forms("plan") == ["plan", "Plan", "PLAN"]
 
 
-@pytest.mark.parametrize("field,value", [
-    ("code", "ShoppingCart"), ("code", "shopping-cart"), ("code", "shopping__cart"), ("code", "_cart"),
-    ("code", "2cart"), ("code", ""), ("code", 1), ("deprecated_code", "cart"), ("deprecated_code", ["Cart"]),
-    ("deprecated_code", [1]),
-])
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("code", "ShoppingCart"),
+        ("code", "shopping-cart"),
+        ("code", "shopping__cart"),
+        ("code", "_cart"),
+        ("code", "2cart"),
+        ("code", ""),
+        ("code", 1),
+        ("deprecated_code", "cart"),
+        ("deprecated_code", ["Cart"]),
+        ("deprecated_code", [1]),
+    ],
+)
 def test_malformed_code_is_schema(repo, field, value):
     g = shop_glossary()
     g["terms"][0][field] = value
@@ -602,11 +637,14 @@ def test_deprecated_code_in_comments_is_not_matched_but_in_strings_is(repo):
     write(repo, "src/a.py", "# cart is the old name\nx = 1  # Cart\ny = '#' + cart\n")
     write(repo, "src/b.sh", "#!/bin/sh\n# CART\necho ${#cart} # cart\n")
     write(repo, "src/c.js", "// cart\nconst u = 'http://x'; /* Cart\n cart */ cart;\n")
-    write(repo, "src/d.ts", "let s = \"// \\\" \" + Cart; // cart\n")
+    write(repo, "src/d.ts", 'let s = "// \\" " + Cart; // cart\n')
     code, out, err = run(repo, "check", "--diff", "develop")
     assert code == 1, (out, err)
     assert sorted((it["path"], it["line"], it["term"]) for it in out["items"]) == [
-        ("src/a.py", 3, "cart"), ("src/b.sh", 3, "cart"), ("src/c.js", 3, "cart"), ("src/d.ts", 1, "Cart"),
+        ("src/a.py", 3, "cart"),
+        ("src/b.sh", 3, "cart"),
+        ("src/c.js", 3, "cart"),
+        ("src/d.ts", 1, "Cart"),
     ]
 
 
@@ -617,25 +655,27 @@ def test_comment_marks_inside_multiline_strings_are_not_comments(repo):
     code, out, err = run(repo, "check", "--diff", "develop")
     assert code == 1, (out, err)
     assert sorted((it["path"], it["line"], it["term"]) for it in out["items"]) == [
-        ("src/a.py", 2, "cart"), ("src/c.js", 2, "Cart"), ("src/c.js", 3, "cart"),
+        ("src/a.py", 2, "cart"),
+        ("src/c.js", 2, "Cart"),
+        ("src/c.js", 3, "cart"),
     ]
 
 
 def test_escaped_newline_inside_plain_strings_carries_the_quote(repo):
     coded_repo(repo)
     write(repo, "src/a.py", "s = 'a\\\n# cart' # cart\nt = '\\\\' # cart\n")
-    write(repo, "src/c.js", "const u = \"a\\\n// Cart\"; // cart\n")
+    write(repo, "src/c.js", 'const u = "a\\\n// Cart"; // cart\n')
     code, out, err = run(repo, "check", "--diff", "develop")
     assert code == 1, (out, err)
     assert sorted((it["path"], it["line"], it["term"]) for it in out["items"]) == [
-        ("src/a.py", 2, "cart"), ("src/c.js", 2, "Cart"),
+        ("src/a.py", 2, "cart"),
+        ("src/c.js", 2, "Cart"),
     ]
 
 
 def test_shell_backslash_outside_quotes_and_inside_single_quotes(repo):
     coded_repo(repo)
-    write(repo, "src/b.sh", "echo 'it'\\''s' # cart\necho \\' # cart\ntr -d '\\' # cart\n"
-                            "echo \"a\n# cart\" # cart\n")
+    write(repo, "src/b.sh", "echo 'it'\\''s' # cart\necho \\' # cart\ntr -d '\\' # cart\necho \"a\n# cart\" # cart\n")
     code, out, err = run(repo, "check", "--diff", "develop")
     assert code == 1, (out, err)
     assert [(it["path"], it["line"], it["term"]) for it in out["items"]] == [("src/b.sh", 5, "cart")]
@@ -663,6 +703,7 @@ def test_no_declaration_check_and_diff_are_ok(bare):
 
 # --- 差分（diff） -------------------------------------------------------------------
 
+
 def test_diff_reports_four_changes(repo):
     g = shop_glossary()
     g["terms"][0]["meaning"] = "新しい意味"
@@ -673,8 +714,12 @@ def test_diff_reports_four_changes(repo):
     code, out, _ = run(repo, "diff", "--base", "develop")
     assert code == 0
     got = {(it["change"], it["context"], it["term"]) for it in out["items"]}
-    assert got == {("meaning_changed", "ordering", "注文"), ("removed", "ordering", "カートリッジ"),
-                   ("added", "ordering", "返品"), ("deprecated", "shipping", "パッケージ")}
+    assert got == {
+        ("meaning_changed", "ordering", "注文"),
+        ("removed", "ordering", "カートリッジ"),
+        ("added", "ordering", "返品"),
+        ("deprecated", "shipping", "パッケージ"),
+    }
     changed = next(it for it in out["items"] if it["change"] == "meaning_changed")
     assert changed["before"] == "顧客が買うと決めた品の組" and changed["after"] == "新しい意味"
 
@@ -690,9 +735,14 @@ def test_diff_between_two_refs_with_missing_side(bare):
 
 # --- 候補（candidates） ------------------------------------------------------------
 
+
 def test_candidates_collect_three_kinds(repo):
-    write(repo, "docs/spec.md", "## 用語\n\n| 用語 | 意味 |\n| --- | --- |\n| 在庫 | 置いてある品 |\n| 注文 | 既にある |\n\n"
-                                "**引当**を行う。**引当**の後で**引当**を戻す。\n")
+    write(
+        repo,
+        "docs/spec.md",
+        "## 用語\n\n| 用語 | 意味 |\n| --- | --- |\n| 在庫 | 置いてある品 |\n| 注文 | 既にある |\n\n"
+        "**引当**を行う。**引当**の後で**引当**を戻す。\n",
+    )
     write(repo, "src/model.ts", "export class Invoice {}\ninterface Payment {}\ntype Refund = {};\n")
     commit(repo)
     code, out, _ = run(repo, "candidates")
@@ -710,6 +760,7 @@ def test_candidates_empty_repository_is_scratch(bare):
 
 
 # --- パスの境界 ---------------------------------------------------------------------
+
 
 def _outside_cases(tmp_path, root):
     outside = tmp_path / "outside"
@@ -729,8 +780,14 @@ def test_declaration_paths_outside_root_stop_every_command(bare, tmp_path, field
         d[field] = bad
     write_json(bare, ".ndf/glossary.json", d)
     before, outside_before = snapshot(bare), snapshot(tmp_path / "outside")
-    for args in (["gate", "--mode", "standard"], ["init"], ["candidates"], ["render"],
-                 ["check", "--diff", "develop"], ["diff", "--base", "develop"]):
+    for args in (
+        ["gate", "--mode", "standard"],
+        ["init"],
+        ["candidates"],
+        ["render"],
+        ["check", "--diff", "develop"],
+        ["diff", "--base", "develop"],
+    ):
         code, _, err = run(bare, *args)
         assert code == 2, (args, err)
     assert snapshot(bare) == before

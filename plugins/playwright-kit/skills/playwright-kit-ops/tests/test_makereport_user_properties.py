@@ -9,9 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import MagicMock
 
-import pytest
 
 from playwright_kit.fixtures.evidence import PwkEvidence
 from playwright_kit.config import (
@@ -83,9 +81,7 @@ def _simulate_makereport(item, rep):
         if ev.har_relpath:
             rep.user_properties.append(("pwk_har", str(ev.case_dir / ev.har_relpath)))
         if ev.trace_relpath:
-            rep.user_properties.append(
-                ("pwk_trace", str(ev.case_dir / ev.trace_relpath))
-            )
+            rep.user_properties.append(("pwk_trace", str(ev.case_dir / ev.trace_relpath)))
         rep.user_properties.append(("pwk_console_errors", len(ev.console_errors)))
         rep.user_properties.append(("pwk_page_errors", len(ev.page_errors)))
 

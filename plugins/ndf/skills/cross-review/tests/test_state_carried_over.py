@@ -14,6 +14,7 @@
 ラウンドに軽微な指摘が乗るのは通常の経路であり、そこを条件にするとラウンドが増え続ける。
 収束を止めるのは修正の工程を 1 度通すまでで、増えるラウンドは最大 1 回に収まる。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -43,13 +44,15 @@ def _state(**over) -> dict:
         "max_rounds": 12,
         "rotate_after": 8,
         "only": None,
-        "rounds": [{
-            "round": 1,
-            "pr": PR,
-            "started_at": "2026-08-31T00:00:00+00:00",
-            "codex": {"intent": "APPROVE", "by_severity": {}},
-            "agy": {"intent": "APPROVE", "by_severity": {}},
-        }],
+        "rounds": [
+            {
+                "round": 1,
+                "pr": PR,
+                "started_at": "2026-08-31T00:00:00+00:00",
+                "codex": {"intent": "APPROVE", "by_severity": {}},
+                "agy": {"intent": "APPROVE", "by_severity": {}},
+            }
+        ],
         "deferred_nits": [],
         "final": None,
     }
@@ -74,15 +77,19 @@ def tmp_dir(monkeypatch, tmp_path, state_mod):
 @pytest.fixture()
 def unresolved(monkeypatch, state_mod):
     """GitHub 側の未解決の指摘を差し替える。`None` は取得できなかったことを表す。"""
+
     def _set(threads):
         monkeypatch.setattr(
-            review_lib.github, "_fetch_unresolved_threads",
+            review_lib.github,
+            "_fetch_unresolved_threads",
             lambda repo, pr: threads,
         )
+
     return _set
 
 
 # ---------------- 再開の時点で記録する ----------------
+
 
 def test_resume_records_the_carried_over_threads(state_mod, unresolved):
     unresolved(_threads("PRRT_a", "PRRT_b"))
@@ -121,14 +128,22 @@ def test_init_resume_reports_the_carried_over_count(tmp_dir, state_mod, unresolv
     """再開の出力に引き継いだ指摘の件数が出て、状態ファイルへ残る。"""
     unresolved(_threads("PRRT_a", "PRRT_b"))
     monkeypatch.setattr(review_lib.github, "_repo_from_gh", lambda: REPO)
-    _write(tmp_dir, _state(
-        auto_review_instructions="",
-        review_instructions="",
-        worktree_path=str(tmp_dir),
-    ))
+    _write(
+        tmp_dir,
+        _state(
+            auto_review_instructions="",
+            review_instructions="",
+            worktree_path=str(tmp_dir),
+        ),
+    )
     args = argparse.Namespace(
-        pr=PR, max_rounds=12, rotate_after=8, only=None,
-        worktree=str(tmp_dir), focus=None, extra_instructions_file=None,
+        pr=PR,
+        max_rounds=12,
+        rotate_after=8,
+        only=None,
+        worktree=str(tmp_dir),
+        focus=None,
+        extra_instructions_file=None,
     )
 
     review_lib.commands.init.cmd_init(args)
@@ -139,11 +154,19 @@ def test_init_resume_reports_the_carried_over_count(tmp_dir, state_mod, unresolv
 
 # ---------------- 収束の判定 ----------------
 
+
 def test_approval_does_not_converge_while_carried_over_threads_wait(tmp_dir, state_mod, capsys):
     """両者が承認しても、引き継いだ指摘が修正の工程を通るまで収束させない。"""
-    _write(tmp_dir, _state(carried_over={
-        "count": 2, "thread_ids": ["PRRT_a", "PRRT_b"], "fixed_in_round": None,
-    }))
+    _write(
+        tmp_dir,
+        _state(
+            carried_over={
+                "count": 2,
+                "thread_ids": ["PRRT_a", "PRRT_b"],
+                "fixed_in_round": None,
+            }
+        ),
+    )
 
     with pytest.raises(SystemExit) as e:
         review_lib.commands.judge.cmd_judge(argparse.Namespace(pr=PR))
@@ -155,9 +178,16 @@ def test_approval_does_not_converge_while_carried_over_threads_wait(tmp_dir, sta
 
 def test_approval_converges_after_the_fix_step_ran_once(tmp_dir, state_mod):
     """修正の工程を 1 度通した後は、承認が揃ったラウンドで収束する。"""
-    _write(tmp_dir, _state(carried_over={
-        "count": 2, "thread_ids": ["PRRT_a", "PRRT_b"], "fixed_in_round": 1,
-    }))
+    _write(
+        tmp_dir,
+        _state(
+            carried_over={
+                "count": 2,
+                "thread_ids": ["PRRT_a", "PRRT_b"],
+                "fixed_in_round": 1,
+            }
+        ),
+    )
 
     with pytest.raises(SystemExit) as e:
         review_lib.commands.judge.cmd_judge(argparse.Namespace(pr=PR))
@@ -179,9 +209,16 @@ def test_without_carried_over_threads_the_verdict_is_unchanged(tmp_dir, state_mo
 
 def test_judge_records_the_verdict_on_the_round(tmp_dir, state_mod):
     """次のラウンドのチェックが読めるよう、判定の結果をラウンドへ残す。"""
-    _write(tmp_dir, _state(carried_over={
-        "count": 1, "thread_ids": ["PRRT_a"], "fixed_in_round": None,
-    }))
+    _write(
+        tmp_dir,
+        _state(
+            carried_over={
+                "count": 1,
+                "thread_ids": ["PRRT_a"],
+                "fixed_in_round": None,
+            }
+        ),
+    )
 
     with pytest.raises(SystemExit):
         review_lib.commands.judge.cmd_judge(argparse.Namespace(pr=PR))
@@ -191,15 +228,31 @@ def test_judge_records_the_verdict_on_the_round(tmp_dir, state_mod):
 
 # ---------------- 修正の工程を通した記録 ----------------
 
+
 def test_merge_fix_marks_the_round_that_handled_the_carried_over(tmp_dir, state_mod):
-    _write(tmp_dir, _state(carried_over={
-        "count": 2, "thread_ids": ["PRRT_a", "PRRT_b"], "fixed_in_round": None,
-    }))
-    (tmp_dir / f"fix-pr{PR}-result.json").write_text(json.dumps({
-        "pr": PR, "fix_commit": "abc1234", "ci_status": "SUCCESS",
-        "fixed_count": 2, "resolved_threads": [{"thread_id": "PRRT_a"}],
-        "deferred": [], "rejected": [],
-    }))
+    _write(
+        tmp_dir,
+        _state(
+            carried_over={
+                "count": 2,
+                "thread_ids": ["PRRT_a", "PRRT_b"],
+                "fixed_in_round": None,
+            }
+        ),
+    )
+    (tmp_dir / f"fix-pr{PR}-result.json").write_text(
+        json.dumps(
+            {
+                "pr": PR,
+                "fix_commit": "abc1234",
+                "ci_status": "SUCCESS",
+                "fixed_count": 2,
+                "resolved_threads": [{"thread_id": "PRRT_a"}],
+                "deferred": [],
+                "rejected": [],
+            }
+        )
+    )
 
     review_lib.commands.merge_fix.cmd_merge_fix(argparse.Namespace(pr=PR, file=None))
 
@@ -210,13 +263,29 @@ def test_merge_fix_marks_the_round_that_handled_the_carried_over(tmp_dir, state_
 
 def test_merge_fix_keeps_the_first_round_that_handled_it(tmp_dir, state_mod):
     """既に記録があるラウンド番号は書き換えない。"""
-    _write(tmp_dir, _state(carried_over={
-        "count": 2, "thread_ids": ["PRRT_a"], "fixed_in_round": 1,
-    }))
-    (tmp_dir / f"fix-pr{PR}-result.json").write_text(json.dumps({
-        "pr": PR, "fix_commit": "def5678", "ci_status": "SUCCESS",
-        "fixed_count": 1, "resolved_threads": [], "deferred": [], "rejected": [],
-    }))
+    _write(
+        tmp_dir,
+        _state(
+            carried_over={
+                "count": 2,
+                "thread_ids": ["PRRT_a"],
+                "fixed_in_round": 1,
+            }
+        ),
+    )
+    (tmp_dir / f"fix-pr{PR}-result.json").write_text(
+        json.dumps(
+            {
+                "pr": PR,
+                "fix_commit": "def5678",
+                "ci_status": "SUCCESS",
+                "fixed_count": 1,
+                "resolved_threads": [],
+                "deferred": [],
+                "rejected": [],
+            }
+        )
+    )
 
     review_lib.commands.merge_fix.cmd_merge_fix(argparse.Namespace(pr=PR, file=None))
 
@@ -225,6 +294,7 @@ def test_merge_fix_keeps_the_first_round_that_handled_it(tmp_dir, state_mod):
 
 # ---------------- 通した後の再開 ----------------
 
+
 def test_resume_after_the_fix_step_keeps_the_record(state_mod, unresolved):
     """通した後に残る指摘だけなら、通したラウンドの記録を残す。
 
@@ -232,9 +302,13 @@ def test_resume_after_the_fix_step_keeps_the_record(state_mod, unresolved):
     再開のたびに未処理として数え直すと、収束が再開のたびに 1 ラウンド先送りされる。
     """
     unresolved(_threads("PRRT_a", "PRRT_b"))
-    st = _state(carried_over={
-        "count": 2, "thread_ids": ["PRRT_a", "PRRT_b"], "fixed_in_round": 1,
-    })
+    st = _state(
+        carried_over={
+            "count": 2,
+            "thread_ids": ["PRRT_a", "PRRT_b"],
+            "fixed_in_round": 1,
+        }
+    )
 
     changed = review_lib.findings._record_carried_over(st, REPO, PR)
 
@@ -246,9 +320,13 @@ def test_resume_after_the_fix_step_keeps_the_record(state_mod, unresolved):
 def test_resume_after_the_fix_step_with_a_new_thread_forces_one_more_round(state_mod, unresolved):
     """通した後に新しい指摘が出たときは、それを含めてもう 1 度通す。"""
     unresolved(_threads("PRRT_a", "PRRT_new"))
-    st = _state(carried_over={
-        "count": 1, "thread_ids": ["PRRT_a"], "fixed_in_round": 1,
-    })
+    st = _state(
+        carried_over={
+            "count": 1,
+            "thread_ids": ["PRRT_a"],
+            "fixed_in_round": 1,
+        }
+    )
 
     changed = review_lib.findings._record_carried_over(st, REPO, PR)
 
@@ -261,9 +339,13 @@ def test_resume_after_the_fix_step_with_a_new_thread_forces_one_more_round(state
 def test_resume_before_the_fix_step_still_counts_again(state_mod, unresolved):
     """まだ通していないあいだは、これまでどおり数え直して収束を抑止する。"""
     unresolved(_threads("PRRT_a"))
-    st = _state(carried_over={
-        "count": 1, "thread_ids": ["PRRT_a"], "fixed_in_round": None,
-    })
+    st = _state(
+        carried_over={
+            "count": 1,
+            "thread_ids": ["PRRT_a"],
+            "fixed_in_round": None,
+        }
+    )
 
     changed = review_lib.findings._record_carried_over(st, REPO, PR)
 

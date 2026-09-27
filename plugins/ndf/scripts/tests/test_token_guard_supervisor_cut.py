@@ -4,6 +4,7 @@
 起動するとき、自身の記録の最初の呼び出しの文脈 P と最後の呼び出しの文脈 C を比べ、C ≥ 比 × P なら止める。
 偽の会話の記録（<セッション>.jsonl と <セッション>/subagents/agent-<ID>.jsonl）を一時ディレクトリに作って渡す。
 """
+
 from __future__ import annotations
 
 import json
@@ -21,8 +22,10 @@ AGENT_ID = "a1b2c3"
 
 
 def call(tokens: int) -> dict:
-    return {"type": "assistant", "message": {"usage": {
-        "input_tokens": 10, "cache_read_input_tokens": tokens - 10 - 100, "cache_creation_input_tokens": 100}}}
+    return {
+        "type": "assistant",
+        "message": {"usage": {"input_tokens": 10, "cache_read_input_tokens": tokens - 10 - 100, "cache_creation_input_tokens": 100}},
+    }
 
 
 def user() -> dict:
@@ -43,8 +46,7 @@ def transcript(tmp_path, own_rows, parent_last=P):
 
 
 def payload(tp, skill="cross-review", agent_type="ndf:supervisor", agent_id=AGENT_ID):
-    p = {"tool_name": "Skill", "tool_input": {"skill": skill, "args": "#1"},
-         "session_id": "sess", "transcript_path": str(tp)}
+    p = {"tool_name": "Skill", "tool_input": {"skill": skill, "args": "#1"}, "session_id": "sess", "transcript_path": str(tp)}
     if agent_id is not None:
         p["agent_id"] = agent_id
     if agent_type is not None:
@@ -56,8 +58,9 @@ def run(data, tmp_path, env=None):
     e = {k: v for k, v in os.environ.items() if not k.startswith("NDF_")}
     e["CLAUDE_PLUGIN_DATA"] = str(tmp_path / "plugin-data")
     e.update(env or {})
-    proc = subprocess.run([sys.executable, str(SCRIPT), "token-guard"], input=json.dumps(data), capture_output=True,
-                          text=True, env=e, timeout=20)
+    proc = subprocess.run(
+        [sys.executable, str(SCRIPT), "token-guard"], input=json.dumps(data), capture_output=True, text=True, env=e, timeout=20
+    )
     assert proc.returncode == 0, proc.stderr
     if not proc.stdout.strip():
         return None
@@ -71,22 +74,25 @@ def grown(ratio):
 
 
 # 表の # は設計のテスト（issue-954-design-tests.md の「AC5 の入力の表」）の行番号
-@pytest.mark.parametrize("agent_type,skill,ratio,env,stop", [
-    ("ndf:supervisor", "cross-review", 1.5, {}, True),                          # 1
-    ("ndf:supervisor", "ndf:cross-review", 1.5, {}, True),                      # 2
-    ("ndf:supervisor", "cross-refactoring", 3, {}, True),                       # 3
-    ("ndf:supervisor", "ndf:cross-refactoring", 3, {}, True),                   # 4
-    ("ndf:supervisor", "cross-review", 1.4, {}, False),                         # 5
-    ("ndf:supervisor", "pr", 3, {}, False),                                     # 6
-    ("ndf:worker", "cross-review", 3, {}, False),                               # 9
-    ("general-purpose", "cross-review", 3, {}, False),                          # 10
-    (None, "cross-review", 3, {}, False),                                       # 11
-    ("ndf:supervisor-waits", "cross-review", 5, {}, False),                     # 17
-    ("ndf:supervisor", "cross-review", 3, {"NDF_CONTEXT_GUARD": "0"}, True),    # 18
-    ("ndf:supervisor", "cross-review", 3, {"NDF_SUPERVISOR_CUT_GUARD": "0"}, False),  # 12
-    ("ndf:supervisor", "cross-review", 2.5, {"NDF_SUPERVISOR_CUT_RATIO": "3"}, False),  # 15
-    ("ndf:supervisor", "cross-review", 3, {"NDF_SUPERVISOR_CUT_RATIO": "3"}, True),     # 16
-])
+@pytest.mark.parametrize(
+    "agent_type,skill,ratio,env,stop",
+    [
+        ("ndf:supervisor", "cross-review", 1.5, {}, True),  # 1
+        ("ndf:supervisor", "ndf:cross-review", 1.5, {}, True),  # 2
+        ("ndf:supervisor", "cross-refactoring", 3, {}, True),  # 3
+        ("ndf:supervisor", "ndf:cross-refactoring", 3, {}, True),  # 4
+        ("ndf:supervisor", "cross-review", 1.4, {}, False),  # 5
+        ("ndf:supervisor", "pr", 3, {}, False),  # 6
+        ("ndf:worker", "cross-review", 3, {}, False),  # 9
+        ("general-purpose", "cross-review", 3, {}, False),  # 10
+        (None, "cross-review", 3, {}, False),  # 11
+        ("ndf:supervisor-waits", "cross-review", 5, {}, False),  # 17
+        ("ndf:supervisor", "cross-review", 3, {"NDF_CONTEXT_GUARD": "0"}, True),  # 18
+        ("ndf:supervisor", "cross-review", 3, {"NDF_SUPERVISOR_CUT_GUARD": "0"}, False),  # 12
+        ("ndf:supervisor", "cross-review", 2.5, {"NDF_SUPERVISOR_CUT_RATIO": "3"}, False),  # 15
+        ("ndf:supervisor", "cross-review", 3, {"NDF_SUPERVISOR_CUT_RATIO": "3"}, True),  # 16
+    ],
+)
 def test_cut_by_ratio(tmp_path, agent_type, skill, ratio, env, stop):
     tp = transcript(tmp_path, grown(ratio))
     reason = run(payload(tp, skill=skill, agent_type=agent_type), tmp_path, env)

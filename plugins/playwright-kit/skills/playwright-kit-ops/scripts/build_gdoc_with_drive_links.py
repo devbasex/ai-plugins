@@ -46,12 +46,18 @@ def list_folder_files(service, folder_id: str, prefix: str = "") -> dict[str, st
     out: dict[str, str] = {}
     page_token: str | None = None
     while True:
-        resp = service.files().list(
-            q=f"'{folder_id}' in parents and trashed=false",
-            fields="nextPageToken, files(id,name,mimeType)",
-            pageSize=200, pageToken=page_token,
-            supportsAllDrives=True, includeItemsFromAllDrives=True,
-        ).execute()
+        resp = (
+            service.files()
+            .list(
+                q=f"'{folder_id}' in parents and trashed=false",
+                fields="nextPageToken, files(id,name,mimeType)",
+                pageSize=200,
+                pageToken=page_token,
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True,
+            )
+            .execute()
+        )
         for f in resp.get("files", []):
             rel = f"{prefix}/{f['name']}".lstrip("/")
             if f["mimeType"] == FOLDER_MIME:
@@ -65,14 +71,17 @@ def list_folder_files(service, folder_id: str, prefix: str = "") -> dict[str, st
 
 def find_run_folder_id(service, parent_id: str, run_id: str) -> str:
     """parent 配下の run_id 名フォルダの ID を返す。なければ例外。"""
-    files = service.files().list(
-        q=(
-            f"'{parent_id}' in parents and name='{run_id}' "
-            f"and mimeType='{FOLDER_MIME}' and trashed=false"
-        ),
-        fields="files(id,name)",
-        supportsAllDrives=True, includeItemsFromAllDrives=True,
-    ).execute().get("files", [])
+    files = (
+        service.files()
+        .list(
+            q=(f"'{parent_id}' in parents and name='{run_id}' and mimeType='{FOLDER_MIME}' and trashed=false"),
+            fields="files(id,name)",
+            supportsAllDrives=True,
+            includeItemsFromAllDrives=True,
+        )
+        .execute()
+        .get("files", [])
+    )
     if not files:
         raise SystemExit(f"ERROR: run-id folder '{run_id}' not found under {parent_id}")
     return files[0]["id"]
@@ -134,10 +143,8 @@ def rewrite_links(md: str, mapping: dict[str, str]) -> tuple[str, int]:
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--md", required=True, type=Path)
-    p.add_argument("--folder", required=True,
-                   help="Drive folder containing the run-id subfolder")
-    p.add_argument("--run-id", required=True,
-                   help="Run id subfolder name (= local report dir name)")
+    p.add_argument("--folder", required=True, help="Drive folder containing the run-id subfolder")
+    p.add_argument("--run-id", required=True, help="Run id subfolder name (= local report dir name)")
     p.add_argument("--name", required=True)
     args = p.parse_args()
 
@@ -161,18 +168,31 @@ def main() -> int:
     tmp_md.write_text(md_new, encoding="utf-8")
 
     media = MediaFileUpload(str(tmp_md), mimetype="text/markdown", resumable=True)
-    file = service.files().create(
-        body={"name": args.name, "mimeType": DOC_MIME, "parents": [args.folder]},
-        media_body=media,
-        fields="id,name,webViewLink,mimeType",
-        supportsAllDrives=True,
-    ).execute()
-    print(json.dumps({
-        "id": file["id"], "name": file["name"],
-        "mime_type": file["mimeType"], "url": file["webViewLink"],
-        "run_folder_id": run_folder_id, "indexed": len(mapping),
-        "replaced_links": replaced,
-    }, ensure_ascii=False, indent=2))
+    file = (
+        service.files()
+        .create(
+            body={"name": args.name, "mimeType": DOC_MIME, "parents": [args.folder]},
+            media_body=media,
+            fields="id,name,webViewLink,mimeType",
+            supportsAllDrives=True,
+        )
+        .execute()
+    )
+    print(
+        json.dumps(
+            {
+                "id": file["id"],
+                "name": file["name"],
+                "mime_type": file["mimeType"],
+                "url": file["webViewLink"],
+                "run_folder_id": run_folder_id,
+                "indexed": len(mapping),
+                "replaced_links": replaced,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
     return 0
 
 

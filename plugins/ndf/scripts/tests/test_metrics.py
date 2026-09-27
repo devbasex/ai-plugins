@@ -1,4 +1,5 @@
 """担当ごとの指標集計に対する現状固定テスト。"""
+
 from __future__ import annotations
 
 import importlib.util
@@ -98,10 +99,8 @@ def test_aggregate_current_metrics_for_representative_state() -> None:
         },
         "unmeasured": [],
         "assumed": [
-            "round 1: codex は指定した gpt-5 で動いた前提で数える"
-            "（実測不可）（実装担当）",
-            "round 1: agy は指定した gpt-5 で動いた前提で数える"
-            "（実測不可）（レビュー担当）",
+            "round 1: codex は指定した gpt-5 で動いた前提で数える（実測不可）（実装担当）",
+            "round 1: agy は指定した gpt-5 で動いた前提で数える（実測不可）（レビュー担当）",
         ],
     }
 
@@ -139,12 +138,9 @@ def test_aggregate_current_metrics_for_unmeasured_models_and_missing_verdicts() 
     # モデル不一致は警告されるが、現状では指定モデルの実装集計に残る。
     assert list(result["impl"]) == ["claude / claude-opus"]
     assert result["unmeasured"] == [
-        "round 2: ⚠ claude: 指定したモデル claude-opus と実際に動いたモデル "
-        "claude-sonnet が食い違っています。比較には使えません",
-        "round 2: kiro の auto はラウンドごとに違うモデルが動きうるため、"
-        "レビュー担当の集計から分離する",
-        "round 2: codex はモデルを指定しておらず、実際に動いたモデルも取得できないため、"
-        "レビュー担当の集計から分離する",
+        "round 2: ⚠ claude: 指定したモデル claude-opus と実際に動いたモデル claude-sonnet が食い違っています。比較には使えません",
+        "round 2: kiro の auto はラウンドごとに違うモデルが動きうるため、レビュー担当の集計から分離する",
+        "round 2: codex はモデルを指定しておらず、実際に動いたモデルも取得できないため、レビュー担当の集計から分離する",
     ]
     assert set(result["reviewer"]) == {"agy / gpt-5", "claude / claude-sonnet"}
     assert result["reviewer"]["claude / claude-sonnet"]["reviews"] == 2

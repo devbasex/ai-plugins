@@ -6,6 +6,7 @@
 時刻と JSON の読みはライブラリの 1 つの実装を使う（決定 6）。JSON の書き込みだけは、権限 0600 と
 symlink の指す先の置き換えを保つため `_write_file` の上に置く。
 """
+
 from __future__ import annotations
 
 import datetime as _dt
@@ -145,7 +146,8 @@ def _lock(path: str, seconds: float | None) -> ExitStack | None:
     """`path`（`<名前>.lock`）の排他を `seconds` 秒まで待って取る（None は取れるまで待つ）。取れなければ None。
     取った排他は `_unlock` で放す。"""
     import locks  # 外部パッケージ（filelock）を使う。読み込みのときには import しない
-    target = path[:-len(".lock")] if path.endswith(".lock") else path
+
+    target = path[: -len(".lock")] if path.endswith(".lock") else path
     held = ExitStack()
     try:
         held.enter_context(locks.exclusive(target, timeout=seconds))

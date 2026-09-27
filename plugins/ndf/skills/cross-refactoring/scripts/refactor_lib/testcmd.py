@@ -13,6 +13,7 @@
 対象の語の見分けは `scope.round_test_roots` と同じ規則を使う。範囲の関門と検証とで
 同じコマンドを別々に読むと、関門を通したコマンドが検証で違う形に組み立てられる。
 """
+
 from __future__ import annotations
 
 import os
@@ -39,6 +40,11 @@ _PREFIXES: tuple[tuple[str, ...], ...] = (
     ("npx",),
 )
 
+# `env` の前置きで値を取るオプション（#1312）。`-S` は後ろの 1 語をコマンドとして割るため、
+# 語の並びから実行器を読めない。ここに入れず、既知でないとして扱う。
+_ENV_VALUE_OPTIONS = frozenset({"-u", "--unset", "-C", "--chdir"})
+_ENV_FLAGS = frozenset({"-i", "--ignore-environment", "-", "-0", "--null", "-v", "--debug"})
+
 # 対象の語に含まれてはならない文字。組み立てた語の並びは `shell=False` で走らせるが、
 # 担当が書いた値を語として通す以上、シェルの構文に読める値は最初から受け取らない。
 _SHELL_CHARS = frozenset(";&|$`<>()\n")
@@ -56,22 +62,45 @@ def _skip_options(words: list[str], i: int) -> int:
     return i
 
 
+def _skip_env(words: list[str], i: int) -> Optional[int]:
+    """`env` の前置き（オプションと `NAME=VAL`）を読み飛ばした位置。読めないオプションなら `None`。"""
+    i += 1
+    while i < len(words):
+        word = words[i]
+        if word in _ENV_VALUE_OPTIONS:
+            i += 2
+        elif word in _ENV_FLAGS or word.startswith(("--unset=", "--chdir=")):
+            i += 1
+        elif word.startswith("-"):
+            return None
+        elif "=" in word:
+            i += 1
+        else:
+            break
+    return i
+
+
 def runner_index(words: list[str]) -> Optional[int]:
     """既知の実行器の**最後の語**の位置。既知でなければ `None`。
 
     `python -m pytest` なら `pytest` の位置を返す。対象の語はこの位置より後ろにある。
     """
     i = 0
+    if words[:1] == ["env"]:
+        skipped = _skip_env(words, 0)
+        if skipped is None:
+            return None
+        i = skipped
     progressed = True
     while progressed:
         progressed = False
         for prefix in _PREFIXES:
-            if tuple(words[i:i + len(prefix)]) == prefix:
+            if tuple(words[i : i + len(prefix)]) == prefix:
                 i = _skip_options(words, i + len(prefix))
                 progressed = True
                 break
     for runner in KNOWN_RUNNERS:
-        if tuple(words[i:i + len(runner)]) == runner:
+        if tuple(words[i : i + len(runner)]) == runner:
             return i + len(runner) - 1
     return None
 
@@ -128,11 +157,14 @@ def build(command: str, targets: list[str], work: str) -> Optional[list[str]]:
         return words + list(targets)
     kept = [word for i, word in enumerate(words) if i not in set(hits)]
     # 取り除いた語はすべて最初の位置以降にあるため、最初の位置は残した並びでも同じである。
-    return kept[:hits[0]] + list(targets) + kept[hits[0]:]
+    return kept[: hits[0]] + list(targets) + kept[hits[0] :]
 
 
 def valid_targets(
-    targets: list[str], work: str, scope: list[str], planned: Iterable[str] = (),
+    targets: list[str],
+    work: str,
+    scope: list[str],
+    planned: Iterable[str] = (),
 ) -> bool:
     """`test_targets` が組み立てに使えるか。1 つでも満たさなければ偽。
 
@@ -175,7 +207,9 @@ def _command_of(value: Any) -> Optional[str]:
 
 
 def limited_command(
-    state_like: dict[str, Any], test_targets: list[str], work: str,
+    state_like: dict[str, Any],
+    test_targets: list[str],
+    work: str,
     planned: Iterable[str] = (),
 ) -> tuple[Optional[list[str]], str]:
     """項目の検証に使う語の並びと、その由来（`targets` / `round_test` / `none`）。
@@ -231,7 +265,7 @@ def failed_nodes(output: str) -> list[str]:
     for line in str(output or "").splitlines():
         for prefix in _SUMMARY_PREFIXES:
             if line.startswith(prefix):
-                node = _node_of(line[len(prefix):])
+                node = _node_of(line[len(prefix) :])
                 if node and node not in found:
                     found.append(node)
     return found
@@ -251,6 +285,5 @@ def rerun_command(command: str, nodes: list[str], work: str) -> Optional[list[st
     idx = runner_index(words)
     if idx is None or words[idx] != "pytest":
         return None
-    kept = [word for i, word in enumerate(words)
-            if not (i > idx and os.path.normpath(word) == "." and words[i - 1] not in VALUE_OPTIONS)]
+    kept = [word for i, word in enumerate(words) if not (i > idx and os.path.normpath(word) == "." and words[i - 1] not in VALUE_OPTIONS)]
     return build(shlex.join(kept), list(nodes), work)

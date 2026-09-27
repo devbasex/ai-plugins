@@ -151,9 +151,7 @@ def pytest_configure(config: pytest.Config) -> None:
     # invocation_params.args を走査して明示指定を検出する。
     try:
         cli_args = list(config.invocation_params.args)
-        video_explicitly_set = any(
-            a == "--video" or a.startswith("--video=") for a in cli_args
-        )
+        video_explicitly_set = any(a == "--video" or a.startswith("--video=") for a in cli_args)
         no_video = config.getoption("pwk_no_video", default=False)
         no_evidence = config.getoption("pwk_no_evidence", default=False)
         if not video_explicitly_set:
@@ -204,16 +202,10 @@ def pytest_runtest_makereport(item, call):
         if ev.har_relpath:
             rep.user_properties.append(("pwk_har", str(ev.case_dir / ev.har_relpath)))
         if ev.trace_relpath:
-            rep.user_properties.append(
-                ("pwk_trace", str(ev.case_dir / ev.trace_relpath))
-            )
-        rep.user_properties.append(
-            ("pwk_body_check_violations", len(ev.body_check_violations))
-        )
+            rep.user_properties.append(("pwk_trace", str(ev.case_dir / ev.trace_relpath)))
+        rep.user_properties.append(("pwk_body_check_violations", len(ev.body_check_violations)))
         if ev.body_check_violations:
-            rep.user_properties.append(
-                ("pwk_body_check_detail", list(ev.body_check_violations))
-            )
+            rep.user_properties.append(("pwk_body_check_detail", list(ev.body_check_violations)))
         return
 
     if rep.when != "call":
@@ -224,9 +216,7 @@ def pytest_runtest_makereport(item, call):
         if ev.har_relpath:
             rep.user_properties.append(("pwk_har", str(ev.case_dir / ev.har_relpath)))
         if ev.trace_relpath:
-            rep.user_properties.append(
-                ("pwk_trace", str(ev.case_dir / ev.trace_relpath))
-            )
+            rep.user_properties.append(("pwk_trace", str(ev.case_dir / ev.trace_relpath)))
         rep.user_properties.append(("pwk_console_errors", len(ev.console_errors)))
         rep.user_properties.append(("pwk_page_errors", len(ev.page_errors)))
 
@@ -298,11 +288,7 @@ def _collect_entries(terminalreporter) -> list[PwkTestEntry]:
                 page_errors=int(props.get("pwk_page_errors") or 0),
                 # Amazon Q Critical-3: skipped 時の longrepr は tuple 形式のため
                 # failed / error のときのみ str() 化する。他 outcome は None のまま。
-                error_message=(
-                    str(rep.longrepr)
-                    if outcome_key in ("failed", "error") and rep.longrepr
-                    else None
-                ),
+                error_message=(str(rep.longrepr) if outcome_key in ("failed", "error") and rep.longrepr else None),
             )
             call_entries[nodeid] = entry
 
@@ -325,9 +311,7 @@ def _collect_entries(terminalreporter) -> list[PwkTestEntry]:
             if not entry.trace_path and props.get("pwk_trace"):
                 entry.trace_path = props["pwk_trace"]
             if "pwk_body_check_violations" in props:
-                entry.body_check_violations = int(
-                    props.get("pwk_body_check_violations") or 0
-                )
+                entry.body_check_violations = int(props.get("pwk_body_check_violations") or 0)
             detail = props.get("pwk_body_check_detail")
             if detail:
                 entry.body_check_detail = list(detail)
@@ -337,13 +321,8 @@ def _collect_entries(terminalreporter) -> list[PwkTestEntry]:
             # しないが、それ以外の outcome は teardown 失敗を反映させる
             # (xfail テストでも teardown の body_check fail は実バグ扱い)。
             teardown_outcome = getattr(rep, "outcome", None)
-            if (
-                teardown_outcome in ("failed", "error")
-                and entry.outcome not in ("failed", "error")
-            ):
-                entry.outcome = (
-                    "error" if teardown_outcome == "error" else "failed"
-                )
+            if teardown_outcome in ("failed", "error") and entry.outcome not in ("failed", "error"):
+                entry.outcome = "error" if teardown_outcome == "error" else "failed"
                 if rep.longrepr and not entry.error_message:
                     entry.error_message = str(rep.longrepr)
 
@@ -368,11 +347,7 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
 
     cached_cfg = getattr(config, "_pwk_config", None)
     base_url = cached_cfg.base_url if cached_cfg is not None else None
-    title = (
-        cached_cfg.report.title
-        if cached_cfg is not None
-        else "シナリオ E2E テスト 実施報告書"
-    )
+    title = cached_cfg.report.title if cached_cfg is not None else "シナリオ E2E テスト 実施報告書"
 
     # evidence.py の _resolve_out_dir と同一キャッシュ (_pwk_out_dir) を参照する。
     # これにより両者が独立に datetime.now() を呼んで別ディレクトリを作る問題を解消。
@@ -388,9 +363,7 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
     if session_start_ts is not None:
         started = _dt.datetime.fromtimestamp(session_start_ts)
     else:
-        started = _dt.datetime.now() - _dt.timedelta(
-            seconds=sum(e.duration_s for e in entries)
-        )
+        started = _dt.datetime.now() - _dt.timedelta(seconds=sum(e.duration_s for e in entries))
     finished = _dt.datetime.now()
     path = write_report(
         entries,
@@ -413,9 +386,7 @@ def pytest_sessionfinish(session, exitstatus):
 
     ``upload_evidence.upload`` を直接呼ぶ。失敗時は警告のみで test 結果には影響しない。
     """
-    folder_id: str | None = session.config.getoption(
-        "pwk_drive_folder", default=None
-    )
+    folder_id: str | None = session.config.getoption("pwk_drive_folder", default=None)
     if not folder_id:
         return
 
@@ -432,9 +403,7 @@ def pytest_sessionfinish(session, exitstatus):
 
         # report.md は kind=any でアップ
         if report_path.exists():
-            upload(
-                report_path, kind="any", parent_folder_id=folder_id, public=False
-            )
+            upload(report_path, kind="any", parent_folder_id=folder_id, public=False)
 
         # trace.zip / *.har / *.mp4 / body_check.jsonl を 1 階層下から拾い上げる
         for sub in out_dir.iterdir():
@@ -447,9 +416,7 @@ def pytest_sessionfinish(session, exitstatus):
                 # detect_kind は body_check.jsonl 等の任意ファイルを未知の kind
                 # と扱うため、jsonl は ``any`` に固定する。
                 kind = "any" if suffix == ".jsonl" else detect_kind(f)
-                upload(
-                    f, kind=kind, parent_folder_id=folder_id, public=False
-                )
+                upload(f, kind=kind, parent_folder_id=folder_id, public=False)
     except Exception as exc:  # pragma: no cover - depends on Drive auth
         import warnings
 
@@ -484,8 +451,7 @@ def _try_load_config_silently(config: pytest.Config) -> Any | None:
         import warnings
 
         warnings.warn(
-            f"[pwk] config load 失敗 ({raw_path}): {exc}. "
-            "pwk_role_<id> fixture は動的登録されません。",
+            f"[pwk] config load 失敗 ({raw_path}): {exc}. pwk_role_<id> fixture は動的登録されません。",
             stacklevel=2,
         )
         return None

@@ -163,9 +163,7 @@ def test_write_report_produces_file(tmp_path: Path):
     started = _dt.datetime(2026, 4, 26, 12, 0, 0)
     finished = _dt.datetime(2026, 4, 26, 12, 0, 1)
     out = tmp_path / "out"
-    path = write_report(
-        [_entry()], out_dir=out, started_at=started, finished_at=finished
-    )
+    path = write_report([_entry()], out_dir=out, started_at=started, finished_at=finished)
     assert path == out / "report.md"
     assert path.exists()
     txt = path.read_text(encoding="utf-8")
@@ -259,10 +257,7 @@ def test_render_markdown_body_check_escapes_newlines_in_snippet():
     assert "body_check 違反の詳細" in md
     # 表の row には改行が混ざっていない (cell が複数行に割れない)
     detail_section = md.split("body_check 違反の詳細", 1)[1]
-    table_rows = [
-        line for line in detail_section.splitlines()
-        if line.startswith("| 1 ")
-    ]
+    table_rows = [line for line in detail_section.splitlines() if line.startswith("| 1 ")]
     assert len(table_rows) == 1
     row = table_rows[0]
     assert "line1 line2 with pipe \\| and \\`code\\`" in row

@@ -8,9 +8,9 @@
 | 取り消した項目の内訳を書かない（件数だけ） | D2 |
 | 改修計画の URL を**生の URL**で書く | D3 |
 """
+
 from __future__ import annotations
 
-import pytest
 
 from crossref_helpers import make_state_v2, read_state
 
@@ -19,13 +19,23 @@ COMMENT_URL = "https://github.com/devbasex/ai-plugins/pull/130#issuecomment-999"
 
 def _item(**over):
     base = {
-        "id": "I-001", "rank": 1, "path": "src/foo.py",
-        "symbol": "Foo.handle", "smell": "long_method",
-        "technique": "extract_method", "severity": "major", "tier": "high",
-        "rationale": "理由", "plan": "手順", "tests": [],
+        "id": "I-001",
+        "rank": 1,
+        "path": "src/foo.py",
+        "symbol": "Foo.handle",
+        "smell": "long_method",
+        "technique": "extract_method",
+        "severity": "major",
+        "tier": "high",
+        "rationale": "理由",
+        "plan": "手順",
+        "tests": [],
         "estimate": {"test": 0.0, "implement": 1.3, "verify": 0.2},
-        "estimated_diff_lines": 40, "proposed_by": ["codex"],
-        "status": "verified", "fix_count": 0, "danger": [],
+        "estimated_diff_lines": 40,
+        "proposed_by": ["codex"],
+        "status": "verified",
+        "fix_count": 0,
+        "danger": [],
         "commits": {"test": None, "implement": "abc1234", "fix": []},
     }
     base.update(over)
@@ -42,6 +52,7 @@ def _state(tmp_path, **over):
 
 
 # ---------- D3: 改修計画の参照 ----------
+
 
 def test_the_plan_reference_is_a_raw_url(outbound, tmp_path):
     """**Markdown のリンクにしない。** 読み手が URL を取り出せなくなる。"""
@@ -69,14 +80,14 @@ def test_the_file_mode_points_at_the_file(outbound, tmp_path):
 
 # ---------- D1: 項目の指し方 ----------
 
+
 def test_an_item_is_named_with_its_file_and_symbol(outbound, tmp_path):
     _, state = _state(tmp_path)
-    assert outbound.item_lines(state, ["I-001"]) == [
-        "I-001 `src/foo.py#Foo.handle`"
-    ]
+    assert outbound.item_lines(state, ["I-001"]) == ["I-001 `src/foo.py#Foo.handle`"]
 
 
 # ---------- D2: 取り消しは件数だけ ----------
+
 
 def test_a_drop_is_reported_as_a_count(outbound, tmp_path):
     _, state = _state(tmp_path)
@@ -85,19 +96,26 @@ def test_a_drop_is_reported_as_a_count(outbound, tmp_path):
     assert COMMENT_URL in line
 
 
-def test_the_report_does_not_list_the_deferred_breakdown(refactor, tmp_path,
-                                                         env_tmp_dir, capsys):
+def test_the_report_does_not_list_the_deferred_breakdown(refactor, tmp_path, env_tmp_dir, capsys):
     """D2 — 進行の報告は件数だけを述べ、内訳は改修計画へ譲る。"""
-    path, _ = _state(tmp_path, deferred_items=[{
-        "item_id": "I-002", "path": "src/bar.py",
-        "symbol": "Bar.run", "smell": "duplication",
-        "defer_reason": "budget", "detail": "想定最大時間に収まらない",
-    }])
+    path, _ = _state(
+        tmp_path,
+        deferred_items=[
+            {
+                "item_id": "I-002",
+                "path": "src/bar.py",
+                "symbol": "Bar.run",
+                "smell": "duplication",
+                "defer_reason": "budget",
+                "detail": "想定最大時間に収まらない",
+            }
+        ],
+    )
     env_tmp_dir(path)
     refactor.cmd_report(type("A", (), {"id": 130, "metrics": False})())
     out = capsys.readouterr().out
     assert "見送り: 1 件" in out
-    assert "budget 1" in out             # 理由別の件数（AC26）
+    assert "budget 1" in out  # 理由別の件数（AC26）
     assert "src/bar.py#Bar.run" not in out, "内訳を書いている"
     assert "想定最大時間に収まらない" not in out, "内訳を書いている"
     assert COMMENT_URL in out, "改修計画の生の URL が無い"
@@ -109,14 +127,24 @@ def test_the_report_counts_each_item_once(refactor, tmp_path, env_tmp_dir, capsy
     見送った項目（`status: deferred`、`deferred_items` にもある）は見送りにだけ数え、
     取り消しに数えない。
     """
-    path, _ = _state(tmp_path, items=[
-        _item(id="I-001", status="verified"),
-        _item(id="I-002", status="reverted", failure_reason="検証の失敗"),
-        _item(id="I-003", status="deferred", failure_reason="締め切り"),
-    ], deferred_items=[{
-        "item_id": "I-003", "path": "src/foo.py", "symbol": "Foo.handle",
-        "smell": "long_method", "defer_reason": "not_done", "detail": "締め切り",
-    }])
+    path, _ = _state(
+        tmp_path,
+        items=[
+            _item(id="I-001", status="verified"),
+            _item(id="I-002", status="reverted", failure_reason="検証の失敗"),
+            _item(id="I-003", status="deferred", failure_reason="締め切り"),
+        ],
+        deferred_items=[
+            {
+                "item_id": "I-003",
+                "path": "src/foo.py",
+                "symbol": "Foo.handle",
+                "smell": "long_method",
+                "defer_reason": "not_done",
+                "detail": "締め切り",
+            }
+        ],
+    )
     env_tmp_dir(path)
     refactor.cmd_report(type("A", (), {"id": 130, "metrics": False})())
     out = capsys.readouterr().out
@@ -124,16 +152,14 @@ def test_the_report_counts_each_item_once(refactor, tmp_path, env_tmp_dir, capsy
     assert "not_done 1" in out
 
 
-def test_the_report_names_the_plan_in_its_header(refactor, tmp_path,
-                                                 env_tmp_dir, capsys):
+def test_the_report_names_the_plan_in_its_header(refactor, tmp_path, env_tmp_dir, capsys):
     path, _ = _state(tmp_path)
     env_tmp_dir(path)
     refactor.cmd_report(type("A", (), {"id": 130, "metrics": False})())
     assert f"- 改修計画: {COMMENT_URL}" in capsys.readouterr().out
 
 
-def test_the_report_still_names_each_item_with_its_symbol(refactor, tmp_path,
-                                                          env_tmp_dir, capsys):
+def test_the_report_still_names_each_item_with_its_symbol(refactor, tmp_path, env_tmp_dir, capsys):
     """D1 — 改善項目の表は残す。**取り消しの内訳とは別のものである。**"""
     path, _ = _state(tmp_path)
     env_tmp_dir(path)
@@ -142,6 +168,7 @@ def test_the_report_still_names_each_item_with_its_symbol(refactor, tmp_path,
 
 
 # ---------- R2-001: 状態に無い項目のフォールバック ----------
+
 
 def test_an_unknown_item_id_is_returned_without_a_label(outbound, tmp_path):
     """`item_id` が `state['items']` に無ければ、ラベルを付けず ID だけを返す。

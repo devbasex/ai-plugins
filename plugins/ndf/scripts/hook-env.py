@@ -13,6 +13,7 @@
 - 入れられない（ネットワークが無い・権限が無い）ときは理由を標準エラーへ 1 行出す。**終了コードは常に 0**
   （セッションの開始を止めない）。標準出力へは何も書かない（SessionStart の標準出力はモデルへ渡る）
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -90,8 +91,13 @@ def sync_env() -> int:
             return 3
         extras = [x for g in hook_python.GROUPS for x in ("--extra", g)]
         env = dict(os.environ, UV_PROJECT_ENVIRONMENT=str(venv))
-        p = subprocess.run([uv, "sync", "--quiet", "--frozen", "--inexact", "--compile-bytecode", "--project", str(deps.PLUGIN_ROOT),
-                            *extras], env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True)
+        p = subprocess.run(
+            [uv, "sync", "--quiet", "--frozen", "--inexact", "--compile-bytecode", "--project", str(deps.PLUGIN_ROOT), *extras],
+            env=env,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+        )
         if p.returncode != 0:
             _say(f"uv sync が失敗した（終了コード {p.returncode}）: {(p.stderr or '').strip()[-300:]}")
             return 3
@@ -111,9 +117,13 @@ def main(argv: list[str]) -> int:
             return 0
         LOG.parent.mkdir(parents=True, exist_ok=True)
         with open(LOG, "w", encoding="utf-8") as log:
-            child = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "--sync"],
-                                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=log,
-                                     start_new_session=True)
+            child = subprocess.Popen(
+                [sys.executable, str(Path(__file__).resolve()), "--sync"],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=log,
+                start_new_session=True,
+            )
         deadline = time.monotonic() + wait
         while child.poll() is None and time.monotonic() < deadline:
             time.sleep(0.1)

@@ -6,6 +6,7 @@
 構文木の癖を 3 つ包みの中で直す: 並び（`&&` / `||`）とパイプの末尾のリダイレクトが並び全体に付く
 （最後のコマンドへ付け直す）・`<>` が ERROR になる（演算子の字面をつないで読む）・`time` がコマンド名になる。
 """
+
 from __future__ import annotations
 
 import os
@@ -33,6 +34,7 @@ def text(n) -> str:
 
 class Word(str):
     """引用を外した語。`tilde` は、引用の外の `~` で始まり bash がホームへ展開する形か。"""
+
     tilde = False
 
 
@@ -69,6 +71,7 @@ def statements(n):
 
 
 # --- 書き込み先 --------------------------------------------------------------
+
 
 class St:
     def __init__(self, base):
@@ -162,8 +165,7 @@ class Targets:
             self.redirects(redirs, st)
             c = self.seq(n, st)
             return (c[0], False, False)
-        if t in ("if_statement", "while_statement", "for_statement", "c_style_for_statement",
-                 "case_statement"):
+        if t in ("if_statement", "while_statement", "for_statement", "c_style_for_statement", "case_statement"):
             self.redirects(redirs, st)
             return self.block(n, st)
         if t == "function_definition":
@@ -215,8 +217,14 @@ class Targets:
                     if c.type == "do_group":
                         self.seq(c, st)
                     elif field(n, c) in ("value", "initializer", "condition", "update") and c.type not in (
-                            "command", "list", "pipeline", "redirected_statement", "compound_statement",
-                            "subshell", "negated_command"):
+                        "command",
+                        "list",
+                        "pipeline",
+                        "redirected_statement",
+                        "compound_statement",
+                        "subshell",
+                        "negated_command",
+                    ):
                         self.substs(c, st)
                     else:
                         self.stmt(c, st)
@@ -297,13 +305,12 @@ class Targets:
                 continue
             dests = [c for c in r.children if field(r, c) == "destination"]
             dest = dests[0] if dests else None
-            op = "".join(text(c) for c in r.children
-                         if field(r, c) not in ("destination", "descriptor")).replace(" ", "")
+            op = "".join(text(c) for c in r.children if field(r, c) not in ("destination", "descriptor")).replace(" ", "")
             if dest is not None:
                 self.substs(dest, st)
             if op not in WRITE_OPS or dest is None:
                 continue
-            gap = r.text[:dest.start_byte - r.start_byte]
+            gap = r.text[: dest.start_byte - r.start_byte]
             if b"\n" in gap:  # `>` の直後の改行は bash の構文エラー（ファイルは開かない）
                 continue
             v = value(dest)
@@ -350,19 +357,19 @@ class Targets:
         self.redirects(rs, st)  # リダイレクトは命令より先に（cd の前の位置で）開く
         for k, w in enumerate(words):
             if w == "tee":
-                for a in words[k + 1:]:
+                for a in words[k + 1 :]:
                     if not a.startswith("-"):
                         self.emit(a, st)
             elif w == "sed":
-                self.sed(words[k + 1:], st)
+                self.sed(words[k + 1 :], st)
             elif w in ("cp", "mv"):
-                self.cp_mv(words[k + 1:], st)
+                self.cp_mv(words[k + 1 :], st)
         if st.base is not None and name in st.moving:
             st.cwd = None
         if not is_cd:
             return (0, False, False)
         dest, eoo = "", False
-        for a in words[i + 1:]:
+        for a in words[i + 1 :]:
             if a == "--" and not eoo:
                 eoo = True
                 continue

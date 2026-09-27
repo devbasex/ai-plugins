@@ -5,6 +5,7 @@
 順位を決め、配分テーブルで見積もり、想定最大時間に収まる件数を選び、項目ごとの
 締め切りを出す。**数え上げと比較はスクリプトが行う**（決定 11）。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -46,8 +47,10 @@ def _read_plan_answers(state: dict[str, Any]) -> dict[str, dict[str, Any]]:
     outcome = read_result(state, impl, "plan")
     payload = outcome.payload
     if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
-        info(f"⚠ 実装担当 {impl} の改修計画を読めませんでした（{outcome.reason or 'missing'}）。"
-             "等級は既定、足すテストは無しとして改修計画します")
+        info(
+            f"⚠ 実装担当 {impl} の改修計画を読めませんでした（{outcome.reason or 'missing'}）。"
+            "等級は既定、足すテストは無しとして改修計画します"
+        )
         return {}
     answers: dict[str, dict[str, Any]] = {}
     for entry in payload["items"]:
@@ -64,12 +67,18 @@ def _strings(value: Any) -> list[str]:
 
 def _proposal_text(item: dict[str, Any]) -> str:
     """Jev へ送る提案の文。**提案のフィールドと賛同した者の数だけ**（決定 2・非機能の条件）。"""
-    return json.dumps({
-        "path": item.get("path"), "symbol": item.get("symbol"),
-        "smell": item.get("smell"), "technique": item.get("technique"),
-        "rationale": item.get("rationale"), "plan": item.get("plan"),
-        "agreed_by": len(item.get("proposed_by") or []),
-    }, ensure_ascii=False)
+    return json.dumps(
+        {
+            "path": item.get("path"),
+            "symbol": item.get("symbol"),
+            "smell": item.get("smell"),
+            "technique": item.get("technique"),
+            "rationale": item.get("rationale"),
+            "plan": item.get("plan"),
+            "agreed_by": len(item.get("proposed_by") or []),
+        },
+        ensure_ascii=False,
+    )
 
 
 def _jev_usable(state: dict[str, Any]) -> bool:
@@ -82,8 +91,11 @@ def _count_failure(state: dict[str, Any]) -> None:
 
 
 def _jev_score(
-    state: dict[str, Any], text: str, question: str,
-    options: list[str], min_confidence: float,
+    state: dict[str, Any],
+    text: str,
+    question: str,
+    options: list[str],
+    min_confidence: float,
 ) -> Optional[str]:
     if not _jev_usable(state):
         return None
@@ -95,7 +107,10 @@ def _jev_score(
 
 
 def _jev_boolean(
-    state: dict[str, Any], text: str, question: str, min_confidence: float,
+    state: dict[str, Any],
+    text: str,
+    question: str,
+    min_confidence: float,
 ) -> Optional[tuple[bool, bool]]:
     if not _jev_usable(state):
         return None
@@ -130,8 +145,10 @@ def _decide_tiers(state: dict[str, Any], answers: dict[str, dict[str, Any]]) -> 
 def _same_change(state: dict[str, Any], a: dict[str, Any], b: dict[str, Any]) -> bool:
     """同じ変更か。Jev が確信度 0.8 以上で真と答えたら統合、それ以外は実装担当の `merge_into`。"""
     result = _jev_boolean(
-        state, f"A: {_proposal_text(a)}\nB: {_proposal_text(b)}",
-        "Do proposals A and B describe the same code change?", JEV_DUPLICATE_CONFIDENCE,
+        state,
+        f"A: {_proposal_text(a)}\nB: {_proposal_text(b)}",
+        "Do proposals A and B describe the same code change?",
+        JEV_DUPLICATE_CONFIDENCE,
     )
     if result is not None and result[0] and result[1]:
         return True
@@ -182,7 +199,8 @@ def _decide_public_io(state: dict[str, Any], items: list[dict[str, Any]]) -> Non
     for item in items:
         item["public_io"], item["public_io_source"] = bool(item.get("risk")), "runtime"
         result = _jev_boolean(
-            state, _proposal_text(item),
+            state,
+            _proposal_text(item),
             "Could this refactoring change the public input or output of the code?",
             JEV_RISK_CONFIDENCE,
         )
@@ -210,11 +228,9 @@ def _limited_commands(state: dict[str, Any], items: list[dict[str, Any]]) -> lis
     }
     kept = []
     for item in items:
-        words, origin = testcmd.limited_command(
-            source_state, item.get("test_targets") or [], work, item.get("tests") or [])
+        words, origin = testcmd.limited_command(source_state, item.get("test_targets") or [], work, item.get("tests") or [])
         if words is None:
-            defer(state, item, DEFER_NO_TARGET,
-                  "範囲テストを組み立てられず、--round-test も無い")
+            defer(state, item, DEFER_NO_TARGET, "範囲テストを組み立てられず、--round-test も無い")
             continue
         item["command"], item["command_source"] = list(words), origin
         kept.append(item)
@@ -222,31 +238,52 @@ def _limited_commands(state: dict[str, Any], items: list[dict[str, Any]]) -> lis
 
 
 def _plan_items(
-    state: dict[str, Any], selected: list[dict[str, Any]], end: Any,
+    state: dict[str, Any],
+    selected: list[dict[str, Any]],
+    end: Any,
 ) -> list[dict[str, Any]]:
     """採った候補から項目（`items[]`）を作る。"""
     deadlines = budget.deadlines(selected, end)
     items = []
     for rank, (candidate, deadline) in enumerate(zip(selected, deadlines), start=1):
         test_deadline = deadline.get("test_start_deadline")
-        items.append({
-            **{k: candidate.get(k) for k in (
-                "path", "symbol", "smell", "technique", "severity", "rationale", "plan",
-                "estimated_diff_lines", "proposed_by", "tier", "tier_source", "risk",
-                "tests", "test_targets", "command", "command_source")},
-            "id": f"I-{rank:03d}",
-            "candidate_id": candidate["id"],
-            "rank": rank,
-            "kind": item_kind(candidate),
-            "estimate": candidate["estimate"],
-            "start_deadline": clock.iso(deadline["start_deadline"]),
-            "test_start_deadline": clock.iso(test_deadline) if test_deadline else None,
-            "status": PLANNED,
-            "commits": {"test": None, "implement": None, "fix": []},
-            "seconds": {},
-            "fix_count": 0,
-            "danger": [],
-        })
+        items.append(
+            {
+                **{
+                    k: candidate.get(k)
+                    for k in (
+                        "path",
+                        "symbol",
+                        "smell",
+                        "technique",
+                        "severity",
+                        "rationale",
+                        "plan",
+                        "estimated_diff_lines",
+                        "proposed_by",
+                        "tier",
+                        "tier_source",
+                        "risk",
+                        "tests",
+                        "test_targets",
+                        "command",
+                        "command_source",
+                    )
+                },
+                "id": f"I-{rank:03d}",
+                "candidate_id": candidate["id"],
+                "rank": rank,
+                "kind": item_kind(candidate),
+                "estimate": candidate["estimate"],
+                "start_deadline": clock.iso(deadline["start_deadline"]),
+                "test_start_deadline": clock.iso(test_deadline) if test_deadline else None,
+                "status": PLANNED,
+                "commits": {"test": None, "implement": None, "fix": []},
+                "seconds": {},
+                "fix_count": 0,
+                "danger": [],
+            }
+        )
     return items
 
 
@@ -280,11 +317,9 @@ def cmd_merge_plan(args: argparse.Namespace) -> None:
     available = budget.available_minutes(int(state["budget_minutes"]), elapsed, reserve)
     selected, skipped = budget.select(ranked, available)
     for item in skipped:
-        defer(state, item, DEFER_BUDGET,
-              f"見積り {budget.estimate_total(item['estimate']):.1f} 分が残りに入らない")
+        defer(state, item, DEFER_BUDGET, f"見積り {budget.estimate_total(item['estimate']):.1f} 分が残りに入らない")
 
-    end = budget.end_time(clock.parse(state["started_at"]), int(state["budget_minutes"]),
-                          budget.reserve_total(reserve))
+    end = budget.end_time(clock.parse(state["started_at"]), int(state["budget_minutes"]), budget.reserve_total(reserve))
     state["items"] = _plan_items(state, selected, end)
     _decide_public_io(state, state["items"])
     state["plan"] = {
@@ -308,13 +343,17 @@ def cmd_merge_plan(args: argparse.Namespace) -> None:
 
 
 def _report(state: dict[str, Any], available: float, skipped: int) -> None:
-    info(f"使える時間 {available:.1f} 分 → 採用 {len(state['items'])} 件 / 時間で見送り {skipped} 件"
-         f"（配分: {state['plan']['table_source']}）")
+    info(
+        f"使える時間 {available:.1f} 分 → 採用 {len(state['items'])} 件 / 時間で見送り {skipped} 件"
+        f"（配分: {state['plan']['table_source']}）"
+    )
     for item in state["items"]:
         tests = f" + テスト {len(item['tests'])}" if item["tests"] else ""
-        info(f"  {item['id']} [{item['tier']}] {item_label(item)} {item['technique']}"
-             f"（見積り {budget.estimate_total(item['estimate']):.1f} 分{tests} / "
-             f"着手の締め切り {item['start_deadline']}）")
+        info(
+            f"  {item['id']} [{item['tier']}] {item_label(item)} {item['technique']}"
+            f"（見積り {budget.estimate_total(item['estimate']):.1f} 分{tests} / "
+            f"着手の締め切り {item['start_deadline']}）"
+        )
 
 
 def _emit_and_exit(state: dict[str, Any], replay: bool = False) -> None:

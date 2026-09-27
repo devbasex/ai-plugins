@@ -18,6 +18,7 @@
 
 `deps.require()` は呼ばない（`uv run` を挟まない。I13）。
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -133,6 +134,7 @@ def enter(argv: list[str], launcher: str, root: str = PKG_ROOT) -> int | None:
     reason = f"ラッパーの環境（{venv}）が無い。/ndf:install-wrapper を打ち直す"
     if sub == "run":
         from . import claude as cl  # 外部パッケージを import しない
+
         claude = cl.resolve_claude()
         cl.say(f"ラッパーを始めない（{reason}）。カットポイントでは示されたコマンドを手で入力する")
         if claude is not None and cl.depth() < 2:

@@ -3,6 +3,7 @@
 cross-refactoring は提案を参加者の全員が、改修計画以降を実装担当 1 者が通し（#933 の決定 1）、
 cross-review は claude / codex / kiro とホストの母集合（ホストが agy なら 4 者）から 2 席を決める。母集合の既定は Skill ごとに違う。
 """
+
 from __future__ import annotations
 
 import pytest
@@ -12,6 +13,7 @@ HOSTS = ["claude", "codex", "agy", "kiro"]
 
 
 # ---------- ホスト判定 ----------
+
 
 def test_explicit_host_wins(assignment):
     assert assignment.detect_host("codex") == ("codex", "explicit")
@@ -52,6 +54,7 @@ def test_host_detection_fails_loudly_when_unknown(assignment):
 
 # ---------- 母集合 ----------
 
+
 @pytest.mark.parametrize("host", HOSTS)
 def test_default_pool_is_the_default_three_and_the_host(assignment, host):
     """cross-review と cross-refactoring で共通: claude / codex / kiro とホスト（ホストが agy のときだけ 4 者）。"""
@@ -69,6 +72,7 @@ def test_no_runtime_is_excluded_from_applying(assignment):
 
 # ---------- 実装担当（cross-refactoring。#933 の決定 1） ----------
 
+
 @pytest.mark.parametrize("host", HOSTS)
 def test_the_host_implements_when_it_participates(assignment, host):
     """名指しが無ければ、参加者にいるホストが実装担当になる。"""
@@ -82,8 +86,7 @@ def test_the_first_participant_implements_when_the_host_is_out(assignment):
 
 
 def test_a_named_implementer_wins_over_the_host(assignment):
-    assert assignment.choose_implementer(
-        ["claude", "codex", "kiro"], "claude", "kiro") == ("kiro", "named")
+    assert assignment.choose_implementer(["claude", "codex", "kiro"], "claude", "kiro") == ("kiro", "named")
 
 
 def test_a_named_implementer_outside_the_participants_is_rejected(assignment):
@@ -101,8 +104,7 @@ def test_no_participant_cannot_choose_an_implementer(assignment):
 def test_the_implementer_is_deterministic(assignment, host):
     """再開しても担当が変わらないこと（同じ入力なら同じ結果。状態に依らない）。"""
     participants = assignment.default_pool(host)
-    assert assignment.choose_implementer(participants, host) == \
-        assignment.choose_implementer(list(participants), host)
+    assert assignment.choose_implementer(participants, host) == assignment.choose_implementer(list(participants), host)
 
 
 def test_the_rotation_is_gone(assignment):
@@ -128,6 +130,7 @@ def test_host_runtimes_covers_every_participant(assignment):
 
 # ---------- 席の埋め方と席の名前（#727。cross-review が使う） ----------
 
+
 def _previous_review_rotation(round_no: int, pool: list[str]) -> list[str]:
     """席の埋め方より前の輪番。3 者の母集合から `(round_no - 1) % 3` の者を外した 2 者。
 
@@ -143,8 +146,7 @@ def test_review_seats_match_the_previous_rotation_for_three_available(assignment
         # `host` だけを持つ状態ファイルの母集合（全ランタイム − ホスト）。`default_pool` はホストを含む
         pool = [r for r in assignment.ALL_RUNTIMES if r != host]
         for round_no in range(1, 13):
-            assert assignment.review_seats(round_no, pool, []) == \
-                _previous_review_rotation(round_no, pool), f"host={host} round={round_no}"
+            assert assignment.review_seats(round_no, pool, []) == _previous_review_rotation(round_no, pool), f"host={host} round={round_no}"
 
 
 def test_review_seats_with_four_available_give_each_two_turns(assignment):

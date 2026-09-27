@@ -23,6 +23,7 @@
 `playwright-kit-ops` のディレクトリを起点にした実行では、このファイルは読まれない。
 `pytester` はそのディレクトリの `pyproject.toml` の `addopts` が読み込む。
 """
+
 from __future__ import annotations
 
 import os
@@ -231,8 +232,7 @@ def _isolated_metrics_dir() -> object:
 
 
 @pytest.fixture(autouse=True)
-def _isolated_usage_dirs(_isolated_metrics_dir: Path, request: pytest.FixtureRequest,
-                         monkeypatch: pytest.MonkeyPatch) -> None:
+def _isolated_usage_dirs(_isolated_metrics_dir: Path, request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
     """テストごとに、使用量の帳簿とプランの状態の実体の置き場所を別の一時ディレクトリへ向ける（#1142）。
 
     どちらも書く時に作るため、ここではパスを決めるだけでディレクトリを作らない。

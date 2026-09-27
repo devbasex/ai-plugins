@@ -14,6 +14,7 @@
 用語は `issues/parallel-batch-03/02-issue-196.md` に従う。レビュアーは codex と
 agy の 2 つを指す。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -104,9 +105,7 @@ def test_only_codex_converges_on_a_codex_approval(tmp_dir, state_mod):
     assert _read(tmp_dir)["final"] == "approved"
 
 
-def test_only_narrows_the_round_and_a_missing_result_stays_visible(
-    tmp_dir, state_mod, capsys
-):
+def test_only_narrows_the_round_and_a_missing_result_stays_visible(tmp_dir, state_mod, capsys):
     """`--only` はそのラウンドの担当を 1 者へ絞り、結果なしは `NO_RESULT` で残る。
 
     **絞った側を担当のまま残さない。** 残すと、指定した 1 者が輪番に含まれない
@@ -130,9 +129,7 @@ def test_only_narrows_the_round_and_a_missing_result_stays_visible(
 
 def _read_result(state_mod, rfile: pathlib.Path, agent: str = "agy") -> int:
     with pytest.raises(SystemExit) as e:
-        review_lib.commands.read_result.cmd_read_result(
-            argparse.Namespace(pr=PR, agent=agent, file=str(rfile))
-        )
+        review_lib.commands.read_result.cmd_read_result(argparse.Namespace(pr=PR, agent=agent, file=str(rfile)))
     return int(e.value.code or 0)
 
 
@@ -251,9 +248,7 @@ def test_a_no_result_round_needs_no_fix_record(tmp_dir, state_mod):
     assert len(_read(tmp_dir)["rounds"]) == 2
 
 
-def test_a_round_without_a_verdict_and_a_missing_agent_can_be_followed(
-    tmp_dir, state_mod
-):
+def test_a_round_without_a_verdict_and_a_missing_agent_can_be_followed(tmp_dir, state_mod):
     """判定の結果を持たない古い状態ファイルでも、項目が欠けたラウンドの次を開始できる。"""
     _write(tmp_dir, _state([_round(codex=_approve())]))
 

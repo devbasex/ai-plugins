@@ -66,6 +66,7 @@ current_script_path() {
   # 1つ目の置換がマッチしたら t で分岐して二重出力を防ぐ (tail -n1 のパイプを削減)。
   path="$(printf '%s\n' "$cmd" | sed -n 's/.*[[:space:]]\([^[:space:]]*\.sh\).*/\1/p; t; s/^\([^[:space:]]*\.sh\)$/\1/p')"
   [ -z "$path" ] && return 0
+  # shellcheck disable=SC2088  # 展開ではなく、文字どおりの ~ で始まる語と照らす（#1323）
   case "$path" in
     "~/"*) path="$HOME/${path#\~/}" ;;
     "~")   path="$HOME" ;;

@@ -4,6 +4,7 @@
 一部だけのスナップショットで上書きすると、前のラウンドの指摘が重複の検出から消えるためである。
 `--strict` 無しの振る舞い（3 つとも失敗したときだけ 1）は `init` が使うため変えない。
 """
+
 from __future__ import annotations
 
 import pathlib
@@ -21,13 +22,12 @@ def _run(tmp_path, failing: set[str], *args: str) -> subprocess.CompletedProcess
     bin_dir.mkdir(exist_ok=True)
     gh = bin_dir / "gh"
     cases = "\n".join(f'  *"{f}"*) exit 1 ;;' for f in failing)
-    gh.write_text("#!/usr/bin/env bash\ncase \"$2\" in\n" + cases + "\n  *) echo '[]' ;;\nesac\n",
-                  encoding="utf-8")
+    gh.write_text('#!/usr/bin/env bash\ncase "$2" in\n' + cases + "\n  *) echo '[]' ;;\nesac\n", encoding="utf-8")
     gh.chmod(0o755)
     import os
+
     env = dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}")
-    return _RUN(["bash", str(SCRIPT), *args, "acme/demo", "5"],
-                capture_output=True, text=True, env=env)
+    return _RUN(["bash", str(SCRIPT), *args, "acme/demo", "5"], capture_output=True, text=True, env=env)
 
 
 @pytest.mark.parametrize("strict, rc", [(False, 0), (True, 1)])
@@ -45,12 +45,15 @@ def test_strict_succeeds_when_every_source_answers(tmp_path):
     assert _run(tmp_path, set(), "--strict").returncode == 0
 
 
-@pytest.mark.parametrize("args", [
-    (),
-    ("acme/demo",),
-    ("--strict", "acme/demo"),
-    ("", "5"),
-])
+@pytest.mark.parametrize(
+    "args",
+    [
+        (),
+        ("acme/demo",),
+        ("--strict", "acme/demo"),
+        ("", "5"),
+    ],
+)
 def test_missing_arguments_exit_before_calling_gh(args):
     """現状固定: 必須引数が欠けた場合は gh を探す前に Usage を出して終了する。"""
     import os
@@ -107,7 +110,7 @@ def _run_with_payloads(tmp_path) -> subprocess.CompletedProcess:
     gh = bin_dir / "gh"
     gh.write_text(
         "#!/usr/bin/env bash\n"
-        "case \"$2\" in\n"
+        'case "$2" in\n'
         f'  *"pulls/5/comments"*) cat "{payload_dir}/inline.json" ;;\n'
         f'  *"pulls/5/reviews"*) cat "{payload_dir}/reviews.json" ;;\n'
         f'  *"issues/5/comments"*) cat "{payload_dir}/issues.json" ;;\n'

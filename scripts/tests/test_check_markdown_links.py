@@ -7,6 +7,7 @@
 チェックは一時ディレクトリへ作った木に対して別プロセスで実行する。スクリプト名が `-` を含み、
 そのままでは import できないためである。
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -26,7 +27,8 @@ import md  # noqa: E402  見出しのアンカーの規則の持ち主（#1142 �
 def run(root: Path) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, str(CHECK), "--root", str(root)],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
 
 
@@ -117,8 +119,7 @@ def test_link_inside_inline_code_is_ignored(tmp_path: Path) -> None:
     write(
         tmp_path,
         "docs/a.md",
-        "`[文言](位置)` の書き方と `<a href=\"無い.md\">` の書き方\n"
-        "``[x](無い.md) と ` を含む``\n",
+        '`[文言](位置)` の書き方と `<a href="無い.md">` の書き方\n``[x](無い.md) と ` を含む``\n',
     )
     result = run(tmp_path)
     assert result.returncode == 0, result.stderr
@@ -151,8 +152,7 @@ def test_broken_links_inside_block_quote_are_ignored(tmp_path: Path) -> None:
     write(
         tmp_path,
         "docs/a.md",
-        "> [Markdown](missing-markdown.md)\n"
-        '> <a href="missing-html.md">HTML</a>\n',
+        '> [Markdown](missing-markdown.md)\n> <a href="missing-html.md">HTML</a>\n',
     )
 
     result = run(tmp_path)
@@ -250,12 +250,7 @@ def test_link_targets_extracts_html_and_excludes_images() -> None:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
 
-    text = (
-        "標準リンク [a](std.md) と "
-        '<a href="dq.md">dq</a> と '
-        "<a href='sq.md'>sq</a> と "
-        "画像 ![alt](img.png) を含む\n"
-    )
+    text = "標準リンク [a](std.md) と <a href=\"dq.md\">dq</a> と <a href='sq.md'>sq</a> と 画像 ![alt](img.png) を含む\n"
     targets = module.link_targets(text)
 
     assert "dq.md" in targets
@@ -371,10 +366,7 @@ def test_anchor_refs_skips_external_and_absolute_path_fragments() -> None:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
 
-    text = (
-        "[外部](https://example.com/doc.md#sec)\n"
-        "[絶対パス](/doc.md#sec)\n"
-    )
+    text = "[外部](https://example.com/doc.md#sec)\n[絶対パス](/doc.md#sec)\n"
 
     assert module.anchor_refs(text) == []
 

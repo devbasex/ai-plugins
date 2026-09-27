@@ -7,6 +7,7 @@
 外部プロセス（gh / 各 CLI / git push）は呼ばない。状態ファイルを一時ディレクトリへ
 組み立ててサブコマンドを実行する方式に揃える。
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -20,6 +21,7 @@ _HERE = pathlib.Path(__file__).resolve().parent
 _SCRIPT = _HERE.parent / "scripts" / "refactor.py"
 _LIB = _HERE.parents[2] / "scripts" / "lib"
 
+
 def _load_module(name: str, path: pathlib.Path) -> types.ModuleType:
     spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
@@ -29,9 +31,11 @@ def _load_module(name: str, path: pathlib.Path) -> types.ModuleType:
     spec.loader.exec_module(mod)
     return mod
 
+
 @pytest.fixture(scope="session")
 def refactor() -> types.ModuleType:
     return _load_module("cross_refactoring_refactor", _SCRIPT)
+
 
 # ---------- モジュールごとのフィクスチャ ----------
 #
@@ -44,12 +48,43 @@ def refactor() -> types.ModuleType:
 # 別のオブジェクトになり、差し替えが入口側へ伝わらない。
 
 _MODULES = (
-    "commands.converge", "commands.gate", "commands.implement", "commands.plan",
-    "commands.phases", "commands.propose", "commands.report", "commands.setup",
-    "commands.measure", "codemetrics", "codemetrics_read", "codemetrics_record", "codemetrics_view",
-    "allocation", "budget", "clock", "danger", "gitfacts", "github", "intake", "items",
-    "outbound", "pathkinds", "paths", "phases", "plan", "process", "proposals", "publish",
-    "results", "scope", "testcmd", "triage", "undo", "verify", "vocabulary", "worktree",
+    "commands.converge",
+    "commands.gate",
+    "commands.implement",
+    "commands.plan",
+    "commands.phases",
+    "commands.propose",
+    "commands.report",
+    "commands.setup",
+    "commands.measure",
+    "codemetrics",
+    "codemetrics_read",
+    "codemetrics_record",
+    "codemetrics_view",
+    "allocation",
+    "budget",
+    "clock",
+    "danger",
+    "gitfacts",
+    "github",
+    "intake",
+    "items",
+    "outbound",
+    "pathkinds",
+    "paths",
+    "phases",
+    "plan",
+    "process",
+    "proposals",
+    "publish",
+    "results",
+    "scope",
+    "testcmd",
+    "triage",
+    "undo",
+    "verify",
+    "vocabulary",
+    "worktree",
 )
 
 
@@ -58,9 +93,7 @@ def _module_fixture(name: str, fixture_name: str):
     def _fixture(refactor: types.ModuleType) -> types.ModuleType:
         module = sys.modules[f"refactor_lib.{name}"]
         if name == "commands.setup":
-            module.cmd_start_phase = sys.modules[
-                "refactor_lib.commands.phases"
-            ].cmd_start_phase
+            module.cmd_start_phase = sys.modules["refactor_lib.commands.phases"].cmd_start_phase
         return module
 
     return _fixture
@@ -68,9 +101,7 @@ def _module_fixture(name: str, fixture_name: str):
 
 for _name in _MODULES:
     # `commands.apply` → `cmd_apply`、`gitfacts` → `gitfacts`
-    _fixture_name = (
-        "cmd_" + _name.split(".", 1)[1] if _name.startswith("commands.") else _name
-    )
+    _fixture_name = "cmd_" + _name.split(".", 1)[1] if _name.startswith("commands.") else _name
     globals()[_fixture_name] = _module_fixture(_name, _fixture_name)
 
 
@@ -79,15 +110,18 @@ def assignment() -> types.ModuleType:
     sys.path.insert(0, str(_LIB))
     return _load_module("ndf_lib_assignment", _LIB / "assignment.py")
 
+
 @pytest.fixture(scope="session")
 def models() -> types.ModuleType:
     sys.path.insert(0, str(_LIB))
     return _load_module("ndf_lib_models", _LIB / "models.py")
 
+
 @pytest.fixture(scope="session")
 def metrics() -> types.ModuleType:
     sys.path.insert(0, str(_LIB))
     return _load_module("ndf_lib_metrics", _LIB / "metrics.py")
+
 
 @pytest.fixture(scope="session")
 def refactor_lib(refactor: types.ModuleType) -> types.ModuleType:
@@ -107,6 +141,7 @@ def patch_lib(refactor, monkeypatch):
     段階 3（#441）より前は入口の `__setattr__` がこれを行っていた。**入口から
     仕掛けを外したので、テストの側が持つ。** 実装には何も残さない。
     """
+
     def _patch(name: str, value: object) -> None:
         hit = False
         for mod in list(sys.modules.values()):
@@ -140,11 +175,14 @@ def no_git(paths, patch_lib, monkeypatch):
     patch_lib("sh", lambda cmd, **k: calls.append(list(cmd)) or "")
     return calls
 
+
 @pytest.fixture
 def env_tmp_dir(monkeypatch):
     """`CROSS_REFACTORING_TMP_DIR` を差し替えるヘルパ。"""
+
     def _set(state_path: pathlib.Path) -> None:
         monkeypatch.setenv("CROSS_REFACTORING_TMP_DIR", str(state_path.parent))
+
     return _set
 
 

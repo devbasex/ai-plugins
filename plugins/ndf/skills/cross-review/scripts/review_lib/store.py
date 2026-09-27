@@ -3,6 +3,7 @@
 `cross-review-pr<N>-state.json` を読み書きするのはこのモジュールだけである（I12）。書くときは
 `_write_state` を通し、保存のたびに実行の要約（`run_metrics`）を書き直す。
 """
+
 from __future__ import annotations
 
 import json
@@ -22,7 +23,8 @@ def _git_toplevel() -> str | None:
     try:
         r = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
         )
         if r.returncode == 0 and r.stdout.strip():
             return r.stdout.strip()
@@ -110,18 +112,19 @@ def _write_state(p: pathlib.Path, state: dict[str, Any]) -> None:
     run_metrics.after_save(p, state, "cross-review", _summary_extra)
 
 
-def _summary_extra(path: pathlib.Path, state: dict[str, Any],
-                   launches: list[dict[str, Any]]) -> dict[str, Any]:
+def _summary_extra(path: pathlib.Path, state: dict[str, Any], launches: list[dict[str, Any]]) -> dict[str, Any]:
     """cross-review の要約だけが持つ鍵。`measure.py` の出力をそのまま置く（決定 8）。"""
     scripts = str(pathlib.Path(__file__).resolve().parents[1])
     if scripts not in sys.path:
         sys.path.insert(0, scripts)
     import measure
+
     return {"measure": measure.measure(state)}
 
 
 def _find_resumable_state(
-    pr: object, worktree: str,
+    pr: object,
+    worktree: str,
 ) -> tuple[dict[str, Any], pathlib.Path] | None:
     """既存 state を探し、再開できるものだけを (state, path) で返す。
 

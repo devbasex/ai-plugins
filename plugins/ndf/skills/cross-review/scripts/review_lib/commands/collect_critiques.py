@@ -1,4 +1,5 @@
 """副命令 `collect-critiques`（#1142 の C2）。"""
+
 from __future__ import annotations
 
 import argparse
@@ -13,7 +14,11 @@ from review_lib import findings as findings_mod, participants as participants_mo
 
 # 反証で返してよい値（#156）。**一覧に無い値は結ばない。**
 CRITIQUE_VERDICTS = (
-    "support", "refute", "insufficient_evidence", "duplicate", "out_of_scope",
+    "support",
+    "refute",
+    "insufficient_evidence",
+    "duplicate",
+    "out_of_scope",
 )
 
 
@@ -83,9 +88,7 @@ def _critique_record(agent: str, item: dict[str, Any]) -> dict[str, Any]:
     return record
 
 
-def _record_unmatched_critique(
-    unmatched: list[dict[str, Any]], record: dict[str, Any], item: dict[str, Any]
-) -> None:
+def _record_unmatched_critique(unmatched: list[dict[str, Any]], record: dict[str, Any], item: dict[str, Any]) -> None:
     entry = {**record, "finding_id": item.get("finding_id")}
     if entry not in unmatched:
         unmatched.append(entry)
@@ -156,8 +159,7 @@ def cmd_collect_critiques(args: argparse.Namespace) -> None:
     _merge_declared_duplicates(st, round_no)
 
     unmatched = st.get("unmatched_critiques") or []
-    review_lib.info(f"✅ 反証を取り込みました: {attached} 件"
-         + (f"（結び先なし {len(unmatched)} 件）" if unmatched else ""))
+    review_lib.info(f"✅ 反証を取り込みました: {attached} 件" + (f"（結び先なし {len(unmatched)} 件）" if unmatched else ""))
 
     # **揃っていない対象は統合の後に数える。** 束ねられた側は対象から外れるため、
     # 先に数えると、代表へ返された 1 件で足りる組を不足として扱う。
@@ -172,15 +174,9 @@ def cmd_collect_critiques(args: argparse.Namespace) -> None:
     store._save(pr, st)
 
 
-def _round_finding_index(
-    st: dict[str, Any], round_no: int
-) -> dict[Any, dict[str, Any]]:
+def _round_finding_index(st: dict[str, Any], round_no: int) -> dict[Any, dict[str, Any]]:
     """そのラウンドの指摘を `finding_id` で引ける索引にする。"""
-    return {
-        f.get("finding_id"): f
-        for f in st.get("review_findings") or []
-        if f.get("round") == round_no
-    }
+    return {f.get("finding_id"): f for f in st.get("review_findings") or [] if f.get("round") == round_no}
 
 
 def _missing_critique_targets(
@@ -198,9 +194,7 @@ def _missing_critique_targets(
     return missing
 
 
-def _handle_incomplete_critiques(
-    pr: int, st: dict[str, Any], round_no: int, missing: dict[str, list[str]]
-) -> None:
+def _handle_incomplete_critiques(pr: int, st: dict[str, Any], round_no: int, missing: dict[str, list[str]]) -> None:
     """有効な反証が揃わなかったラウンドの扱い（#549 レビュー対応）。
 
     **目印は付けず、先に付いていた目印は外す**（#732）。目印の無いラウンドは従来どおり全件を
@@ -210,11 +204,8 @@ def _handle_incomplete_critiques(
     である**（`judge` の結果なしと同じ作法。2 度続けて揃わないのは対象ではなく実行
     環境の側の事象であり、そのときも目印を付けないまま工程を進める）。
     """
-    st["evidence_rounds"] = [
-        r for r in st.get("evidence_rounds") or []
-        if not _same_round_no(r, round_no)]
-    entry = next(
-        (r for r in st.get("rounds") or [] if r.get("round") == round_no), None)
+    st["evidence_rounds"] = [r for r in st.get("evidence_rounds") or [] if not _same_round_no(r, round_no)]
+    entry = next((r for r in st.get("rounds") or [] if r.get("round") == round_no), None)
     relaunched = list((entry or {}).get("critique_relaunched") or [])
     pending = [a for a in sorted(missing) if a not in relaunched]
     if pending and entry is not None:
@@ -222,13 +213,11 @@ def _handle_incomplete_critiques(
     store._save(pr, st)
     detail = " / ".join(f"{a}: {len(v)} 件" for a, v in sorted(missing.items()))
     if not pending:
-        review_lib.info(f"⚠ 取り直した後も反証が揃いません: {detail}。"
-             "証拠集約の目印を付けないため、このラウンドは全件を数えます")
+        review_lib.info(f"⚠ 取り直した後も反証が揃いません: {detail}。証拠集約の目印を付けないため、このラウンドは全件を数えます")
         return
     print(f"CRITIQUE_RETRY_AGENTS='{' '.join(pending)}'")
     print(f"CRITIQUE_RETRY_AGENTS_CSV={','.join(pending)}")
-    review_lib.info(f"→ 有効な反証が揃っていない: {detail}。目印を付けず、"
-         f"同じラウンドで 1 度だけ取り直す: {' '.join(pending)}")
+    review_lib.info(f"→ 有効な反証が揃っていない: {detail}。目印を付けず、同じラウンドで 1 度だけ取り直す: {' '.join(pending)}")
     sys.exit(7)
 
 

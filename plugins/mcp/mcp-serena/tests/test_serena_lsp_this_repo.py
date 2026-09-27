@@ -1,4 +1,5 @@
 """このリポジトリの .serena/project.yml が検出の結果と食い違わない（AC4）。"""
+
 from serena_lsp_testlib import PLUGIN, run_json
 from serena_lsp import project_yml as py
 

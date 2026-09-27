@@ -4,6 +4,7 @@
 リポジトリ全体へ同じ規則を掛けると偽の指摘が出る（実測で 23 件）。バッククォートを
 **含む文字**を並べる文はこの Skill の本文にしかなく、そこだけが二重の囲みを要する。
 """
+
 from __future__ import annotations
 
 import re
@@ -32,9 +33,7 @@ def unbalanced_lines() -> list[tuple[int, str]]:
         index = 0
         while index < len(runs):
             opening = runs[index]
-            closing = next(
-                (j for j in range(index + 1, len(runs)) if runs[j] == opening), None
-            )
+            closing = next((j for j in range(index + 1, len(runs)) if runs[j] == opening), None)
             if closing is None:
                 found.append((number, line))
                 break

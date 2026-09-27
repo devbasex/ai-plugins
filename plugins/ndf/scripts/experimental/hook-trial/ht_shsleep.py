@@ -3,6 +3,7 @@
 - sleep_deny(cmd, limit): 前景の sleep を止めるか（lib/token_guard_sleep.py の should_deny と同じ規則）
 - plan_command(cmd): supervise.py の queue / run を起動するか（token-guard.sh の plan_command と同じ規則）
 """
+
 from __future__ import annotations
 
 import re
@@ -43,8 +44,9 @@ def _sleep(n, limit, loop, bg, depth) -> bool:
         return False
     if t in SEQ or t == "subshell":
         return any(_sleep(c, limit, loop, bg or b, depth) for c, b in statements(n))
-    return any(_sleep(c, limit, loop, bg or (c.next_sibling is not None and c.next_sibling.type == "&"), depth)
-               for c in n.children if c.is_named)
+    return any(
+        _sleep(c, limit, loop, bg or (c.next_sibling is not None and c.next_sibling.type == "&"), depth) for c in n.children if c.is_named
+    )
 
 
 def _sleep_cmd(n, limit, loop, depth) -> bool:
@@ -66,7 +68,7 @@ def _sleep_cmd(n, limit, loop, depth) -> bool:
         break
     if i >= len(words):
         return False
-    name, rest = words[i], words[i + 1:]
+    name, rest = words[i], words[i + 1 :]
     if name == "sleep" and rest:
         sec = seconds(rest[0])
         return loop or (sec is not None and sec > limit)
@@ -94,6 +96,7 @@ def _substs(n):
 
 
 # --- プランを起こす副命令 --------------------------------------------------------
+
 
 def plan_command(cmd: str) -> bool:
     if "supervise.py" not in cmd:

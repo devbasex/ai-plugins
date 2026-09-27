@@ -13,6 +13,7 @@ init → 提案 → 改修計画 → テスト追加 → 実装 → 検証と修
 子の起動・KEY=VALUE の読み取り・最終ステータスの決定は `scripts/lib/loop_drive.py` にある。
 件数（metrics）は状態ファイルから数える: items / adopted / reverted / deferred / fix_rounds（項目の修正の回数の和）/ final_gate。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -33,8 +34,10 @@ import repo as repo_lib  # noqa: E402
 TOOL = "cross-refactoring-drive"
 ORDER = ("propose", "plan", "add-tests", "implement", "verify", "final", "done")
 CR_DRIVE = HERE.parents[1] / "cross-review" / "scripts" / "drive.py"
-FOCUS = ("項目をまたいだ整合を見る。個々の改善項目の妥当性は範囲テストで判定済みのため対象外とする。"
-         "複数の項目で触った箇所の重複・打ち消し・命名の揺れ、取り消した項目の残骸、生成物と配布物の同期を確かめる")
+FOCUS = (
+    "項目をまたいだ整合を見る。個々の改善項目の妥当性は範囲テストで判定済みのため対象外とする。"
+    "複数の項目で触った箇所の重複・打ち消し・命名の揺れ、取り消した項目の残骸、生成物と配布物の同期を確かめる"
+)
 
 
 class Drive:
@@ -67,6 +70,7 @@ class Drive:
         if str(HERE) not in sys.path:
             sys.path.append(str(HERE))
         from refactor_lib import paths
+
         ap = argparse.ArgumentParser(add_help=False)
         ap.add_argument("--worktree-root")
         root = ap.parse_known_args(self.init_args)[0].worktree_root
@@ -75,9 +79,9 @@ class Drive:
         if os.environ.get("CROSS_REFACTORING_TMP_DIR"):
             return paths.tmp_dir_for(Path())  # 環境変数が作業ディレクトリより先に効く
         from refactor_lib.commands.setup import github_repo_from_origin
+
         repo = github_repo_from_origin()
-        return paths.tmp_dir_for(paths.default_worktree_base() / repo_lib.slug(repo) / f"rf{self.pr}" / "work") \
-            if repo else None
+        return paths.tmp_dir_for(paths.default_worktree_base() / repo_lib.slug(repo) / f"rf{self.pr}" / "work") if repo else None
 
     def finished_vars(self) -> dict | None:
         """段階が done の駆動の状態があれば、その init_vars を返す（I7）。"""
@@ -105,20 +109,38 @@ class Drive:
         by = {}
         for it in items:
             by[it.get("status")] = by.get(it.get("status"), 0) + 1
-        return {"items": len(items), "adopted": by.get("verified", 0), "reverted": by.get("reverted", 0),
-                "deferred": by.get("deferred", 0),
-                "fix_rounds": sum(int(it.get("fix_count") or 0) for it in items),
-                "final_gate": self.v.get("FINAL_GATE") or (s.get("final_gate") or {}).get("status")}
+        return {
+            "items": len(items),
+            "adopted": by.get("verified", 0),
+            "reverted": by.get("reverted", 0),
+            "deferred": by.get("deferred", 0),
+            "fix_rounds": sum(int(it.get("fix_count") or 0) for it in items),
+            "final_gate": self.v.get("FINAL_GATE") or (s.get("final_gate") or {}).get("status"),
+        }
 
     def todo(self, phase: str) -> bool:
         cur = self.v.get("PHASE") or "propose"
         return ORDER.index(phase) >= ORDER.index(cur) if cur in ORDER else True
 
     def monitor(self, agents: str, phase: str, stem: str) -> None:
-        extra = ["--timeout", self.v["PHASE_TIMEOUT"], "--stall-timeout", self.v["PHASE_TIMEOUT"]] \
-            if self.v.get("PHASE_TIMEOUT") else []
-        call([sys.executable, str(LIB / "monitor.py"), self.v["ID"], "--agents", agents, "--tmp-dir",
-              self.v["TMP_DIR"], "--stem-template", stem, "--phase", phase, *extra], self.env)
+        extra = ["--timeout", self.v["PHASE_TIMEOUT"], "--stall-timeout", self.v["PHASE_TIMEOUT"]] if self.v.get("PHASE_TIMEOUT") else []
+        call(
+            [
+                sys.executable,
+                str(LIB / "monitor.py"),
+                self.v["ID"],
+                "--agents",
+                agents,
+                "--tmp-dir",
+                self.v["TMP_DIR"],
+                "--stem-template",
+                stem,
+                "--phase",
+                phase,
+                *extra,
+            ],
+            self.env,
+        )
 
     def impl_phase(self, phase: str, impl: str | None = None, stem: str | None = None) -> None:
         self.v.pop("PHASE_TIMEOUT", None)
@@ -178,8 +200,12 @@ class Drive:
 
     def done(self, extra: dict | None = None) -> dict:
         c = {**self.counts(), **(extra or {})}
-        return dp.done(TOOL, f"改修計画の実行が終わった（項目 {c['items']}・採用 {c['adopted']}・"
-                       f"取り消し {c['reverted']}・見送り {c['deferred']}）", self.report(), c)
+        return dp.done(
+            TOOL,
+            f"改修計画の実行が終わった（項目 {c['items']}・採用 {c['adopted']}・取り消し {c['reverted']}・見送り {c['deferred']}）",
+            self.report(),
+            c,
+        )
 
     def run(self) -> dict:
         iv = self.finished_vars()
@@ -242,6 +268,7 @@ def main(argv: list[str] | None = None) -> None:
 
 if __name__ == "__main__":
     import deps  # noqa: E402
+
     # `refactor_lib` を同じプロセスで読む（状態の置き場・origin の owner/repo）。呼び名の表は md で読む
     deps.require("md", "mdtable")
     main()

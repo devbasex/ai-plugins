@@ -11,6 +11,7 @@ worktree 作成・既存コメント取得・認証確認はこの経路の対�
 `gh` だけは模した実体（`fake_gh`）を PATH へ置き、`_fetch_changed_files` の実際の
 呼び出し（REST 失敗 → `gh pr view --json files` 成功）を通す。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -28,12 +29,14 @@ PR = 7200
 REPO = "o/r"
 
 # gh pr view --json files が返す代表的な files JSON（fallback 側）。
-_FALLBACK_FILES = json.dumps({
-    "files": [
-        {"path": "src/app.py", "changeType": "MODIFIED"},
-        {"path": "docs/readme.md", "changeType": "ADDED"},
-    ]
-})
+_FALLBACK_FILES = json.dumps(
+    {
+        "files": [
+            {"path": "src/app.py", "changeType": "MODIFIED"},
+            {"path": "docs/readme.md", "changeType": "ADDED"},
+        ]
+    }
+)
 
 
 @pytest.fixture()
@@ -49,9 +52,9 @@ def stub_init_scaffolding(monkeypatch, state_mod, tmp_path):
     worktree.mkdir()
 
     monkeypatch.setattr(
-        review_lib.github, "_fetch_pr_metadata",
-        lambda pr, repo=None: review_lib.github.PrMetadata(
-            REPO, "takemi", "feat/x", "abc123", "develop", False, 4000, None),
+        review_lib.github,
+        "_fetch_pr_metadata",
+        lambda pr, repo=None: review_lib.github.PrMetadata(REPO, "takemi", "feat/x", "abc123", "develop", False, 4000, None),
     )
     monkeypatch.setattr(review_lib.github, "_viewer_login", lambda: "takemi")
     monkeypatch.setattr(review_lib.workspace, "_create_worktree", lambda *a: None)
@@ -75,17 +78,18 @@ def stub_init_scaffolding(monkeypatch, state_mod, tmp_path):
 
 def _init_args(worktree: pathlib.Path) -> argparse.Namespace:
     return argparse.Namespace(
-        pr=PR, max_rounds=12, rotate_after=8, only=None, worktree=str(worktree),
-        focus=None, extra_instructions_file=None, host="claude")
+        pr=PR, max_rounds=12, rotate_after=8, only=None, worktree=str(worktree), focus=None, extra_instructions_file=None, host="claude"
+    )
 
 
-def test_the_rest_files_api_failure_falls_back_to_gh_pr_view(
-        state_mod, fake_gh, tmp_dir, stub_init_scaffolding, capsys) -> None:
+def test_the_rest_files_api_failure_falls_back_to_gh_pr_view(state_mod, fake_gh, tmp_dir, stub_init_scaffolding, capsys) -> None:
     """REST の PR files API が空/失敗のとき、`gh pr view --json files` から作られる。"""
-    fake_gh.set_rules([
-        {"match": f"repos/{REPO}/pulls/{PR}/files", "stdout": "", "exit": 1},
-        {"match": f"pr view {PR} --json files", "stdout": _FALLBACK_FILES},
-    ])
+    fake_gh.set_rules(
+        [
+            {"match": f"repos/{REPO}/pulls/{PR}/files", "stdout": "", "exit": 1},
+            {"match": f"pr view {PR} --json files", "stdout": _FALLBACK_FILES},
+        ]
+    )
 
     review_lib.commands.init.cmd_init(_init_args(stub_init_scaffolding))
 
@@ -93,8 +97,7 @@ def test_the_rest_files_api_failure_falls_back_to_gh_pr_view(
     assert any(f"repos/{REPO}/pulls/{PR}/files" in c for c in calls)
     assert any(f"pr view {PR} --json files" in c for c in calls)
 
-    saved = json.loads(
-        (tmp_dir / f"cross-review-pr{PR}-state.json").read_text(encoding="utf-8"))
+    saved = json.loads((tmp_dir / f"cross-review-pr{PR}-state.json").read_text(encoding="utf-8"))
     assert saved["changed_files"] == [
         {"status": "M", "paths": ["src/app.py"]},
         {"status": "A", "paths": ["docs/readme.md"]},
@@ -108,16 +111,16 @@ def test_the_rest_files_api_failure_falls_back_to_gh_pr_view(
     assert f"PR={PR}" in result.out
 
 
-def test_the_empty_rest_response_also_falls_back(
-        state_mod, fake_gh, tmp_dir, stub_init_scaffolding) -> None:
+def test_the_empty_rest_response_also_falls_back(state_mod, fake_gh, tmp_dir, stub_init_scaffolding) -> None:
     """REST が終了コード 0 でも空配列を返すときも fallback を試す。"""
-    fake_gh.set_rules([
-        {"match": f"repos/{REPO}/pulls/{PR}/files", "stdout": ""},
-        {"match": f"pr view {PR} --json files", "stdout": _FALLBACK_FILES},
-    ])
+    fake_gh.set_rules(
+        [
+            {"match": f"repos/{REPO}/pulls/{PR}/files", "stdout": ""},
+            {"match": f"pr view {PR} --json files", "stdout": _FALLBACK_FILES},
+        ]
+    )
 
     review_lib.commands.init.cmd_init(_init_args(stub_init_scaffolding))
 
-    saved = json.loads(
-        (tmp_dir / f"cross-review-pr{PR}-state.json").read_text(encoding="utf-8"))
+    saved = json.loads((tmp_dir / f"cross-review-pr{PR}-state.json").read_text(encoding="utf-8"))
     assert len(saved["changed_files"]) == 2

@@ -4,19 +4,18 @@
 判定は宣言に起点が書かれていて、そのブランチが origin にあるときだけ働く。書く前・作る前は
 成功で通す。時期を人の手で合わせずに済ませるためである。
 """
+
 from __future__ import annotations
 
 import json
 import subprocess
 from pathlib import Path
 
-import pytest
 
 from branch_repo_helpers import push_branch
 
 ROOT = Path(__file__).resolve().parents[2]
 GUARD = ROOT / "scripts" / "check-pr-base.sh"
-
 
 
 def declare(repo: Path, body: dict) -> None:
@@ -26,9 +25,7 @@ def declare(repo: Path, body: dict) -> None:
 
 
 def guard(repo: Path, head_ref: str) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["bash", str(GUARD), head_ref], cwd=str(repo), capture_output=True, text=True
-    )
+    return subprocess.run(["bash", str(GUARD), head_ref], cwd=str(repo), capture_output=True, text=True)
 
 
 def test_without_declaration_passes(origin_repo: Path) -> None:
@@ -84,9 +81,7 @@ def test_from_other_branch_fails(origin_repo: Path) -> None:
 
 def test_missing_argument_fails(origin_repo: Path) -> None:
     """分岐元を渡し忘れたときは、通さずに使い方を出す。"""
-    got = subprocess.run(
-        ["bash", str(GUARD)], cwd=str(origin_repo), capture_output=True, text=True
-    )
+    got = subprocess.run(["bash", str(GUARD)], cwd=str(origin_repo), capture_output=True, text=True)
     assert got.returncode == 2
     assert "使い方" in got.stdout + got.stderr
 

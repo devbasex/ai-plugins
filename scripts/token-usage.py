@@ -23,6 +23,7 @@
 **出力に会話の本文・ファイルのパス・リポジトリ名・会話の ID を載せない。** 集計値は
 `docs/metrics/` へコミットするため、他社のリポジトリ名も残さない。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -125,6 +126,7 @@ def _text(content) -> str:
 
 # ---------- claude の記録 ----------
 
+
 @dataclass
 class Usage:
     """応答の usage の合計と、呼び出しの並びから数えた値。
@@ -135,6 +137,7 @@ class Usage:
     `rewrite_tokens_after_5m` は直前の間隔が 5 分を超えた書き直しの量、`read_tokens_after_5m` は直前の
     間隔が 5 分を超えた書き直しでない呼び出しの読み込みの量（1 時間の寿命で書き直しを免れた分）。
     """
+
     calls: int = 0
     inp: int = 0
     read: int = 0
@@ -158,8 +161,20 @@ class Usage:
         return sum(WEIGHTS[k] * getattr(self, k) for k in WEIGHTS) + self.read_cost
 
     def add(self, other: Usage) -> None:
-        for k in ("calls", "inp", "read", "w5", "w1h", "out", "read_cost", "p", "rewrites", "rewrite_tokens",
-                  "rewrite_tokens_after_5m", "read_tokens_after_5m"):
+        for k in (
+            "calls",
+            "inp",
+            "read",
+            "w5",
+            "w1h",
+            "out",
+            "read_cost",
+            "p",
+            "rewrites",
+            "rewrite_tokens",
+            "rewrite_tokens_after_5m",
+            "read_tokens_after_5m",
+        ):
             setattr(self, k, getattr(self, k) + getattr(other, k))
         self.gaps.extend(other.gaps)
 
@@ -353,14 +368,21 @@ def read_claude(root: Path, idle_cap: int, until: float | None = None) -> tuple[
         if is_seat or s.cwd.startswith("/tmp/ndf-worktrees/"):
             m = WT_RE.search(s.cwd + "/")
             if m and s.times and s.usage.calls:  # 応答の無い記録（起動に失敗した席）は数えない
-                seats.append(External("claude", m.group(2)[:2], "/".join(m.groups()), min(s.times),
-                                      active_seconds(s.times, idle_cap), s.models and most_common(s.models) or "不明",
-                                      tokens={"context": s.usage.context, "out": s.usage.out, "cost": s.usage.cost},
-                                      usage=s.usage))
+                seats.append(
+                    External(
+                        "claude",
+                        m.group(2)[:2],
+                        "/".join(m.groups()),
+                        min(s.times),
+                        active_seconds(s.times, idle_cap),
+                        s.models and most_common(s.models) or "不明",
+                        tokens={"context": s.usage.context, "out": s.usage.out, "cost": s.usage.cost},
+                        usage=s.usage,
+                    )
+                )
             continue
         subs = [(p, scan_file(p, until=until), read_meta(p)) for p in sorted((main.parent / main.stem / "subagents").glob("*.jsonl"))]
-        found = [v for v in (s.versions or [v for _, sub, _ in subs for v in sub.versions])
-                 if versions.version_order(v) is not None]
+        found = [v for v in (s.versions or [v for _, sub, _ in subs for v in sub.versions]) if versions.version_order(v) is not None]
         if not found or not s.times:
             skipped["版を判定できない"] += 1
             continue
@@ -383,12 +405,25 @@ def read_claude(root: Path, idle_cap: int, until: float | None = None) -> tuple[
             modes.update(sub.modes)
             prs |= sub.prs
             keys |= sub.keys
-        sessions.append(Session(found[0], mode_of(modes), most_common(s.models), most_common(s.cc), prs, keys,
-                                min(s.times), max(s.times), c.sec, dict(roles)))
+        sessions.append(
+            Session(
+                found[0],
+                mode_of(modes),
+                most_common(s.models),
+                most_common(s.cc),
+                prs,
+                keys,
+                min(s.times),
+                max(s.times),
+                c.sec,
+                dict(roles),
+            )
+        )
     return sessions, seats, dict(skipped)
 
 
 # ---------- 外部 CLI ----------
+
 
 @dataclass
 class External:
@@ -443,10 +478,22 @@ def read_codex(root: Path, idle_cap: int, until: float | None = None) -> list[Ex
             for _, inp, cached, out_t in calls:
                 usage.add(Usage(1, inp - cached, cached, 0, 0, out_t))
             usage.record_calls([(t, inp, inp - cached, cached) for t, inp, cached, _ in calls])
-        out.append(External("codex", m.group(2)[:2], "/".join(m.groups()), min(times), active_seconds(times, idle_cap),
-                            model or "不明", tokens={"input": total.get("input_tokens", 0),
-                                                    "cached": total.get("cached_input_tokens", 0),
-                                                    "out": total.get("output_tokens", 0)}, usage=usage))
+        out.append(
+            External(
+                "codex",
+                m.group(2)[:2],
+                "/".join(m.groups()),
+                min(times),
+                active_seconds(times, idle_cap),
+                model or "不明",
+                tokens={
+                    "input": total.get("input_tokens", 0),
+                    "cached": total.get("cached_input_tokens", 0),
+                    "out": total.get("output_tokens", 0),
+                },
+                usage=usage,
+            )
+        )
     return out
 
 
@@ -466,8 +513,17 @@ def read_kiro(root: Path, until: float | None = None) -> list[External]:
         credit = sum(x.get("value", 0) for t in turns for x in (t.get("metering_usage") or []))
         sec = sum((t.get("turn_duration") or {}).get("secs", 0) for t in turns)
         models = Counter(t.get("model") for t in turns if t.get("model"))
-        out.append(External("kiro", m.group(2)[:2], "/".join(m.groups()), start, sec, most_common(models),
-                            tokens={"credit": credit, "calls": len(turns)}))
+        out.append(
+            External(
+                "kiro",
+                m.group(2)[:2],
+                "/".join(m.groups()),
+                start,
+                sec,
+                most_common(models),
+                tokens={"credit": credit, "calls": len(turns)},
+            )
+        )
     return out
 
 
@@ -486,8 +542,7 @@ def link_external(sessions: list[Session], externals: list[External]) -> int:
 # ---------- 使用量の帳簿 ----------
 
 # 帳簿の kind ごとの層。full（Skill を回すステップ）は会話が残り、会話の記録として別に数えるため読まない
-LEDGER_LAYER = {"work": "worker", "judge": "supervisor", "slow": "supervisor", "pr": "supervisor",
-                "mvv": "supervisor"}
+LEDGER_LAYER = {"work": "worker", "judge": "supervisor", "slow": "supervisor", "pr": "supervisor", "mvv": "supervisor"}
 LEDGER_AGENT = "claude -p"
 
 
@@ -506,8 +561,9 @@ def ledger_usage(r: dict) -> Usage:
     u = r.get("usage") if isinstance(r.get("usage"), dict) else {}
     w5, w1h = usage_ledger.cache_writes(u)
     read = u.get("cache_read_input_tokens") or 0
-    return Usage(int(r.get("turns") or 1), u.get("input_tokens") or 0, read, w5, w1h, u.get("output_tokens") or 0,
-                 read * read_rate(r.get("model")))
+    return Usage(
+        int(r.get("turns") or 1), u.get("input_tokens") or 0, read, w5, w1h, u.get("output_tokens") or 0, read * read_rate(r.get("model"))
+    )
 
 
 def link_ledger(sessions: list[Session], rows: list[tuple[float, dict]]) -> int:
@@ -530,6 +586,7 @@ def link_ledger(sessions: list[Session], rows: list[tuple[float, dict]]) -> int:
 
 # ---------- 集計 ----------
 
+
 def _m(x: float) -> str:
     return f"{x / 1e6:.2f}M"
 
@@ -545,11 +602,19 @@ def call_stats(u: Usage, n: int) -> dict:
     """
     known = [g for g in u.gaps if g is not None]
     gap = median(known)
-    return {"p": u.p / n, "k": u.calls / n, "w5": u.w5 / n, "w1h": u.w1h / n,
-            "rewrites": u.rewrites, "rewrites_after_5m": sum(1 for g in known if g > CACHE_5M),
-            "rewrites_untimed": len(u.gaps) - len(known),
-            "rewrite_tokens": u.rewrite_tokens, "rewrite_tokens_after_5m": u.rewrite_tokens_after_5m,
-            "read_tokens_after_5m": u.read_tokens_after_5m, "rewrite_gap_median": None if gap is None else gap / 60}
+    return {
+        "p": u.p / n,
+        "k": u.calls / n,
+        "w5": u.w5 / n,
+        "w1h": u.w1h / n,
+        "rewrites": u.rewrites,
+        "rewrites_after_5m": sum(1 for g in known if g > CACHE_5M),
+        "rewrites_untimed": len(u.gaps) - len(known),
+        "rewrite_tokens": u.rewrite_tokens,
+        "rewrite_tokens_after_5m": u.rewrite_tokens_after_5m,
+        "read_tokens_after_5m": u.read_tokens_after_5m,
+        "rewrite_gap_median": None if gap is None else gap / 60,
+    }
 
 
 def _min(x: float | None) -> str:
@@ -581,14 +646,24 @@ def aggregate(sessions: list[Session], by: list[str]) -> dict:
                 for e in s.external:
                     for tk, tv in e.tokens.items():
                         ext[f"{e.runtime}.{tk}"] += tv
-            per_pr.append(axis | {
-                "sessions": len(ss), "sessions_with_pr": len(with_pr), "prs": n_pr,
-                "conductor_cost": layer_cost["conductor"] / n_pr, "supervisor_cost": layer_cost["supervisor"] / n_pr,
-                "worker_cost": layer_cost["worker"] / n_pr, "context": total.context / n_pr, "out": total.out / n_pr,
-                "minutes": sum(s.active for s in with_pr) / n_pr / 60,
-                "codex_input": ext["codex.input"] / n_pr, "codex_out": ext["codex.out"] / n_pr,
-                "kiro_credit": ext["kiro.credit"] / n_pr, "claude_seat_cost": ext["claude.cost"] / n_pr,
-            })
+            per_pr.append(
+                axis
+                | {
+                    "sessions": len(ss),
+                    "sessions_with_pr": len(with_pr),
+                    "prs": n_pr,
+                    "conductor_cost": layer_cost["conductor"] / n_pr,
+                    "supervisor_cost": layer_cost["supervisor"] / n_pr,
+                    "worker_cost": layer_cost["worker"] / n_pr,
+                    "context": total.context / n_pr,
+                    "out": total.out / n_pr,
+                    "minutes": sum(s.active for s in with_pr) / n_pr / 60,
+                    "codex_input": ext["codex.input"] / n_pr,
+                    "codex_out": ext["codex.out"] / n_pr,
+                    "kiro_credit": ext["kiro.credit"] / n_pr,
+                    "claude_seat_cost": ext["claude.cost"] / n_pr,
+                }
+            )
         else:
             per_pr.append(axis | {"sessions": len(ss), "sessions_with_pr": 0, "prs": 0})
         roles: dict = defaultdict(Role)
@@ -599,9 +674,20 @@ def aggregate(sessions: list[Session], by: list[str]) -> dict:
                 roles[rk].sec += r.sec
         layer_order = {"conductor": 0, "supervisor": 1, "worker": 2}
         for (layer, role, agent_type), r in sorted(roles.items(), key=lambda x: (layer_order[x[0][0]], x[0][1], x[0][2])):
-            per_role.append(axis | {"layer": layer, "role": role, "agent_type": agent_type, "count": r.n, "cost": r.usage.cost / r.n,
-                                    "context": r.usage.context / r.n, "out": r.usage.out / r.n,
-                                    "minutes": r.sec / r.n / 60, **call_stats(r.usage, r.n)})
+            per_role.append(
+                axis
+                | {
+                    "layer": layer,
+                    "role": role,
+                    "agent_type": agent_type,
+                    "count": r.n,
+                    "cost": r.usage.cost / r.n,
+                    "context": r.usage.context / r.n,
+                    "out": r.usage.out / r.n,
+                    "minutes": r.sec / r.n / 60,
+                    **call_stats(r.usage, r.n),
+                }
+            )
         ext_groups: dict = defaultdict(list)
         for s in ss:
             for e in s.external:
@@ -623,9 +709,18 @@ def aggregate(sessions: list[Session], by: list[str]) -> dict:
                 stats = {"turns": tok.pop("calls") / len(es)}
             else:
                 stats = {}
-            external.append(axis | {"runtime": rt, "skill": "cross-review" if kind == "pr" else "cross-refactoring",
-                                    "cli_model": model, "count": len(es), **{k: v / len(es) for k, v in tok.items()},
-                                    "minutes": sum(e.sec for e in es) / len(es) / 60, **stats})
+            external.append(
+                axis
+                | {
+                    "runtime": rt,
+                    "skill": "cross-review" if kind == "pr" else "cross-refactoring",
+                    "cli_model": model,
+                    "count": len(es),
+                    **{k: v / len(es) for k, v in tok.items()},
+                    "minutes": sum(e.sec for e in es) / len(es) / 60,
+                    **stats,
+                }
+            )
     return {"per_pr": per_pr, "per_role": per_role, "external": external}
 
 
@@ -636,65 +731,179 @@ def render_md(result: dict, by: list[str]) -> str:
         return mdtable.table_markdown(cols, rows).split("\n")
 
     meta = result["meta"]
-    summary = (f"対象の会話: {meta['sessions']} 件 / PR を作った会話: {meta['sessions_with_pr']} 件 / "
-               f"寄せ先の無い外部 CLI: {meta['unlinked_external']} 件 / "
-               f"寄せ先の無い帳簿の行: {meta.get('unlinked_ledger', 0)} 件")
+    summary = (
+        f"対象の会話: {meta['sessions']} 件 / PR を作った会話: {meta['sessions_with_pr']} 件 / "
+        f"寄せ先の無い外部 CLI: {meta['unlinked_external']} 件 / "
+        f"寄せ先の無い帳簿の行: {meta.get('unlinked_ledger', 0)} 件"
+    )
     rates = " / ".join(f"{m} {r}" for m, r in READ_RATES)
-    legend = (f"換算は input を 1 とした費用（cache read はモデル別: {rates} / 他 {READ_RATE_DEFAULT}。"
-              "cache write 5 分 1.25・1 時間 2 / output 5）。入力は input + cache read + cache write。所要は分。")
-    calls_legend = (f"P は起動ごとの固定費（最初の呼び出しの文脈）、k は呼び出し回数（どちらも 1 起動あたり）。"
-                    f"書き直しは 2 回目以降の呼び出しのうち、書き込みが文脈の {REWRITE_SHARE:.0%} を超え、かつ "
-                    f"{REWRITE_MIN // 1000}k を超えたものの回数（合計）。5 分超はそのうち直前の呼び出しとの間隔が "
-                    f"{CACHE_5M // 60} 分を超えた回数、間隔は直前の間隔の中央値（分）。"
-                    f"5 分超の書き直し・読み込みは、直前の間隔が {CACHE_5M // 60} 分を超えた呼び出しの書き直しの量と、"
-                    "書き直しでない呼び出しの読み込みの量（どちらも合計）。定義はサブエージェントの定義の名前。")
+    legend = (
+        f"換算は input を 1 とした費用（cache read はモデル別: {rates} / 他 {READ_RATE_DEFAULT}。"
+        "cache write 5 分 1.25・1 時間 2 / output 5）。入力は input + cache read + cache write。所要は分。"
+    )
+    calls_legend = (
+        f"P は起動ごとの固定費（最初の呼び出しの文脈）、k は呼び出し回数（どちらも 1 起動あたり）。"
+        f"書き直しは 2 回目以降の呼び出しのうち、書き込みが文脈の {REWRITE_SHARE:.0%} を超え、かつ "
+        f"{REWRITE_MIN // 1000}k を超えたものの回数（合計）。5 分超はそのうち直前の呼び出しとの間隔が "
+        f"{CACHE_5M // 60} 分を超えた回数、間隔は直前の間隔の中央値（分）。"
+        f"5 分超の書き直し・読み込みは、直前の間隔が {CACHE_5M // 60} 分を超えた呼び出しの書き直しの量と、"
+        "書き直しでない呼び出しの読み込みの量（どちらも合計）。定義はサブエージェントの定義の名前。"
+    )
     out = [summary, "", legend, "", "## PR 1 本あたり", ""]
     rows = []
     for r in result["per_pr"]:
         if not r["prs"]:
             continue
-        rows.append([r[a] for a in by] + [str(r["sessions_with_pr"]), str(r["prs"]), _m(r["conductor_cost"]),
-                    _m(r["supervisor_cost"]), _m(r["worker_cost"]), _m(r["context"]), _k(r["out"]),
-                    f"{r['minutes']:.1f}", _m(r["codex_input"]), _k(r["codex_out"]),
-                    f"{r['kiro_credit']:.2f}", _m(r["claude_seat_cost"])])
-    out += table(heads + ["会話", "PR", "conductor 換算", "supervisor 換算", "worker 換算", "入力", "出力", "所要",
-                          "codex 入力", "codex 出力", "kiro credit", "claude 席 換算"], rows)
+        rows.append(
+            [r[a] for a in by]
+            + [
+                str(r["sessions_with_pr"]),
+                str(r["prs"]),
+                _m(r["conductor_cost"]),
+                _m(r["supervisor_cost"]),
+                _m(r["worker_cost"]),
+                _m(r["context"]),
+                _k(r["out"]),
+                f"{r['minutes']:.1f}",
+                _m(r["codex_input"]),
+                _k(r["codex_out"]),
+                f"{r['kiro_credit']:.2f}",
+                _m(r["claude_seat_cost"]),
+            ]
+        )
+    out += table(
+        heads
+        + [
+            "会話",
+            "PR",
+            "conductor 換算",
+            "supervisor 換算",
+            "worker 換算",
+            "入力",
+            "出力",
+            "所要",
+            "codex 入力",
+            "codex 出力",
+            "kiro credit",
+            "claude 席 換算",
+        ],
+        rows,
+    )
     out += ["", "## フェーズごと（1 起動あたり）", ""]
-    out += table(heads + ["層", "フェーズ", "定義", "起動", "換算", "入力", "出力", "所要"],
-                 [[r[a] for a in by] + [r["layer"], r["role"], r["agent_type"], str(r["count"]), _m(r["cost"]), _m(r["context"]),
-                                        _k(r["out"]), f"{r['minutes']:.1f}"] for r in result["per_role"]])
+    out += table(
+        heads + ["層", "フェーズ", "定義", "起動", "換算", "入力", "出力", "所要"],
+        [
+            [r[a] for a in by]
+            + [
+                r["layer"],
+                r["role"],
+                r["agent_type"],
+                str(r["count"]),
+                _m(r["cost"]),
+                _m(r["context"]),
+                _k(r["out"]),
+                f"{r['minutes']:.1f}",
+            ]
+            for r in result["per_role"]
+        ],
+    )
     out += ["", "## フェーズごとの呼び出しとキャッシュ", "", calls_legend, ""]
-    out += table(heads + ["層", "フェーズ", "定義", "起動", "P", "k", "書き込み 5 分", "書き込み 1 時間", "書き直し", "5 分超",
-                          "5 分超の書き直し", "5 分超の読み込み", "間隔"],
-                 [[r[a] for a in by] + [r["layer"], r["role"], r["agent_type"], str(r["count"]), _k(r["p"]), f"{r['k']:.1f}",
-                                        _m(r["w5"]), _m(r["w1h"]), str(r["rewrites"]), str(r["rewrites_after_5m"]),
-                                        _m(r["rewrite_tokens_after_5m"]), _m(r["read_tokens_after_5m"]),
-                                        _min(r["rewrite_gap_median"])] for r in result["per_role"]])
-    out += ["", "## 外部 CLI（1 起動あたり）", "",
-            "kiro はトークン数を記録しない（値が 0）ため credit だけを載せる。agy は読まない。", ""]
-    out += table(heads + ["ランタイム", "Skill", "モデル", "起動", "入力", "cache", "出力", "credit", "所要"],
-                 [[r[a] for a in by] + [r["runtime"], r["skill"], r["cli_model"], str(r["count"]),
-                                        _m(r.get("input", r.get("context", 0))), _m(r.get("cached", 0)),
-                                        _k(r.get("out", 0)), f"{r.get('credit', 0):.2f}", f"{r['minutes']:.1f}"]
-                  for r in result["external"]])
-    out += ["", "## 外部 CLI の呼び出しとキャッシュ（1 起動あたり）", "",
-            "codex は input のうち cached に当たらなかった分を書き込みとみなし、呼び出しごとの値（last_token_usage）を持つ席だけで数える。"
-            "kiro は呼び出し回数を記録しない（利用者のターン数は JSON の turns）。取れない値は -。", ""]
-    out += table(heads + ["ランタイム", "Skill", "モデル", "起動", "P", "k", "書き直し", "5 分超", "5 分超の書き直し",
-                          "5 分超の読み込み", "間隔"],
-                 [[r[a] for a in by] + [r["runtime"], r["skill"], r["cli_model"], str(r["count"]),
-                                        _k(r["p"]) if "p" in r else "-", f"{r['k']:.1f}" if "k" in r else "-",
-                                        str(r.get("rewrites", "-")), str(r.get("rewrites_after_5m", "-")),
-                                        _m(r["rewrite_tokens_after_5m"]) if "rewrite_tokens_after_5m" in r else "-",
-                                        _m(r["read_tokens_after_5m"]) if "read_tokens_after_5m" in r else "-",
-                                        _min(r.get("rewrite_gap_median"))]
-                  for r in result["external"]])
+    out += table(
+        heads
+        + [
+            "層",
+            "フェーズ",
+            "定義",
+            "起動",
+            "P",
+            "k",
+            "書き込み 5 分",
+            "書き込み 1 時間",
+            "書き直し",
+            "5 分超",
+            "5 分超の書き直し",
+            "5 分超の読み込み",
+            "間隔",
+        ],
+        [
+            [r[a] for a in by]
+            + [
+                r["layer"],
+                r["role"],
+                r["agent_type"],
+                str(r["count"]),
+                _k(r["p"]),
+                f"{r['k']:.1f}",
+                _m(r["w5"]),
+                _m(r["w1h"]),
+                str(r["rewrites"]),
+                str(r["rewrites_after_5m"]),
+                _m(r["rewrite_tokens_after_5m"]),
+                _m(r["read_tokens_after_5m"]),
+                _min(r["rewrite_gap_median"]),
+            ]
+            for r in result["per_role"]
+        ],
+    )
+    out += ["", "## 外部 CLI（1 起動あたり）", "", "kiro はトークン数を記録しない（値が 0）ため credit だけを載せる。agy は読まない。", ""]
+    out += table(
+        heads + ["ランタイム", "Skill", "モデル", "起動", "入力", "cache", "出力", "credit", "所要"],
+        [
+            [r[a] for a in by]
+            + [
+                r["runtime"],
+                r["skill"],
+                r["cli_model"],
+                str(r["count"]),
+                _m(r.get("input", r.get("context", 0))),
+                _m(r.get("cached", 0)),
+                _k(r.get("out", 0)),
+                f"{r.get('credit', 0):.2f}",
+                f"{r['minutes']:.1f}",
+            ]
+            for r in result["external"]
+        ],
+    )
+    out += [
+        "",
+        "## 外部 CLI の呼び出しとキャッシュ（1 起動あたり）",
+        "",
+        "codex は input のうち cached に当たらなかった分を書き込みとみなし、呼び出しごとの値（last_token_usage）を持つ席だけで数える。"
+        "kiro は呼び出し回数を記録しない（利用者のターン数は JSON の turns）。取れない値は -。",
+        "",
+    ]
+    out += table(
+        heads + ["ランタイム", "Skill", "モデル", "起動", "P", "k", "書き直し", "5 分超", "5 分超の書き直し", "5 分超の読み込み", "間隔"],
+        [
+            [r[a] for a in by]
+            + [
+                r["runtime"],
+                r["skill"],
+                r["cli_model"],
+                str(r["count"]),
+                _k(r["p"]) if "p" in r else "-",
+                f"{r['k']:.1f}" if "k" in r else "-",
+                str(r.get("rewrites", "-")),
+                str(r.get("rewrites_after_5m", "-")),
+                _m(r["rewrite_tokens_after_5m"]) if "rewrite_tokens_after_5m" in r else "-",
+                _m(r["read_tokens_after_5m"]) if "read_tokens_after_5m" in r else "-",
+                _min(r.get("rewrite_gap_median")),
+            ]
+            for r in result["external"]
+        ],
+    )
     return "\n".join(out) + "\n"
 
 
-def collect(claude_root: Path, codex_root: Path, kiro_root: Path, idle_cap: int = IDLE_CAP,
-            until: float | None = None, min_version: str | None = None,
-            usage_root: Path | None = None) -> tuple[list[Session], int, dict]:
+def collect(
+    claude_root: Path,
+    codex_root: Path,
+    kiro_root: Path,
+    idle_cap: int = IDLE_CAP,
+    until: float | None = None,
+    min_version: str | None = None,
+    usage_root: Path | None = None,
+) -> tuple[list[Session], int, dict]:
     """記録を 1 回読み、外部 CLI と帳簿の行を寄せてから版で絞る。（会話, 寄せ先の無い外部 CLI の件数, 読み飛ばした件数）を返す。
 
     `token-usage-snapshot.py` が読み込みを 1 回にするために関数として呼ぶ。`usage_root` を渡したときだけ
@@ -723,10 +932,17 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--by", default="version,mode,model", help=f"表の軸（カンマ区切り）: {', '.join(AXES)}")
     ap.add_argument("--idle-cap", type=int, default=IDLE_CAP, help="所要に入れる行の間隔の上限（秒）")
     ap.add_argument("--format", choices=("md", "json"), default="md")
-    ap.add_argument("--usage-root", type=Path, default=usage_ledger.ledger_dir(),
-                    help="計画が起動した claude -p の使用量の帳簿のディレクトリ（既定は lib/usage_ledger.py の置き場所）")
-    ap.add_argument("--until", help="この時刻より後の記録の行を読まない（ISO 8601。例: 2026-09-24T09:00:00Z）。"
-                                     "進行中の会話を含むときに、同じ集計を後から作り直せるようにする")
+    ap.add_argument(
+        "--usage-root",
+        type=Path,
+        default=usage_ledger.ledger_dir(),
+        help="計画が起動した claude -p の使用量の帳簿のディレクトリ（既定は lib/usage_ledger.py の置き場所）",
+    )
+    ap.add_argument(
+        "--until",
+        help="この時刻より後の記録の行を読まない（ISO 8601。例: 2026-09-24T09:00:00Z）。"
+        "進行中の会話を含むときに、同じ集計を後から作り直せるようにする",
+    )
     args = ap.parse_args(argv)
     by = [a.strip() for a in args.by.split(",") if a.strip()]
     bad = [a for a in by if a not in AXES]
@@ -740,12 +956,20 @@ def main(argv: list[str] | None = None) -> int:
             ap.error(f"--until を時刻として読めない: {args.until}")
         if datetime.fromisoformat(args.until.replace("Z", "+00:00")).tzinfo is None:  # 機械の時間帯で打ち切りが変わる
             ap.error(f"--until に時間帯を付ける（例: 2026-09-24T09:00:00Z）: {args.until}")
-    sessions, unlinked, skipped = collect(args.claude_root, args.codex_root, args.kiro_root, args.idle_cap, until,
-                                          args.min_version, args.usage_root)
+    sessions, unlinked, skipped = collect(
+        args.claude_root, args.codex_root, args.kiro_root, args.idle_cap, until, args.min_version, args.usage_root
+    )
     result = aggregate(sessions, by)
-    result["meta"] = {"by": by, "min_version": args.min_version, "until": args.until, "sessions": len(sessions),
-                      "sessions_with_pr": sum(1 for s in sessions if s.prs), "unlinked_external": unlinked,
-                      "unlinked_ledger": skipped.pop("帳簿の寄せ先が無い", 0), "skipped": skipped}
+    result["meta"] = {
+        "by": by,
+        "min_version": args.min_version,
+        "until": args.until,
+        "sessions": len(sessions),
+        "sessions_with_pr": sum(1 for s in sessions if s.prs),
+        "unlinked_external": unlinked,
+        "unlinked_ledger": skipped.pop("帳簿の寄せ先が無い", 0),
+        "skipped": skipped,
+    }
     if args.format == "json":
         json.dump(result, sys.stdout, ensure_ascii=False, indent=1)
         sys.stdout.write("\n")

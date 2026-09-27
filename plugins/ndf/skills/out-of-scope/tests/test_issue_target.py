@@ -6,6 +6,7 @@
 読み取れないこと自体も失敗として扱う。表の書き方を変えるだけでこのチェックを無効にできる形に
 しない。
 """
+
 from __future__ import annotations
 
 from pathlib import Path

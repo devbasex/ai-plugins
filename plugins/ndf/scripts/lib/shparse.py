@@ -19,6 +19,7 @@ hook の 1 本のエントリポイント（決定 20）が、書き込み先の
 
 hook の経路で使うため、`deps.require()` は呼ばない（決定 20。hook は用意済みの環境の python から起動する）。
 """
+
 from __future__ import annotations
 
 import re
@@ -46,13 +47,13 @@ class Word(str):
 
 class Statement(NamedTuple):
     node: Node
-    background: bool   # 直後が `&`
+    background: bool  # 直後が `&`
 
 
 class Redirected(NamedTuple):
     body: Node | None
     redirects: list[Node]
-    reattach: bool     # 本体が並び・パイプ・コマンドで、リダイレクトは最後のコマンドへ付け直す
+    reattach: bool  # 本体が並び・パイプ・コマンドで、リダイレクトは最後のコマンドへ付け直す
 
 
 @lru_cache(maxsize=1)
@@ -78,14 +79,14 @@ def _read_write_quirk(n: Node) -> bool:
     text, prev, nxt = node_text(n), n.prev_sibling, n.next_sibling
     if text == ">" and prev is not None and prev.type == "<":
         return n.parent is not None and n.parent.type == "file_redirect"
-    return (text == "<" and nxt is not None and nxt.type == "file_redirect" and nxt.start_byte == n.end_byte
-            and node_text(nxt).startswith(">"))
+    return (
+        text == "<" and nxt is not None and nxt.type == "file_redirect" and nxt.start_byte == n.end_byte and node_text(nxt).startswith(">")
+    )
 
 
 def _heredoc_arithmetic(n: Node) -> bool:
     """ヒアドキュメントの本文の `$((…))`（構文木はコマンド置換と読むが算術展開で、中の ERROR は読み違いである）。"""
-    return (n.type == "command_substitution" and n.parent is not None and n.parent.type == "heredoc_body"
-            and node_text(n).startswith("$(("))
+    return n.type == "command_substitution" and n.parent is not None and n.parent.type == "heredoc_body" and node_text(n).startswith("$((")
 
 
 def has_unreadable_error(root: Node) -> bool:
@@ -148,8 +149,7 @@ def split_redirects(n: Node) -> Redirected:
 
 def redirect_operator(r: Node) -> str:
     """リダイレクトの演算子（`>`・`>>`・`&>`・`<>` など）。ERROR に割れた `<>` もつないで読む。"""
-    return "".join(node_text(c) for c in r.children
-                   if field_of(r, c) not in ("destination", "descriptor")).replace(" ", "")
+    return "".join(node_text(c) for c in r.children if field_of(r, c) not in ("destination", "descriptor")).replace(" ", "")
 
 
 def redirect_destination(r: Node) -> Node | None:
@@ -159,7 +159,7 @@ def redirect_destination(r: Node) -> Node | None:
 
 def destination_after_newline(r: Node, dest: Node) -> bool:
     """演算子と被演算子の間に改行がある（bash では構文エラーで、ファイルを開かない）。"""
-    return b"\n" in (r.text or b"")[:dest.start_byte - r.start_byte]
+    return b"\n" in (r.text or b"")[: dest.start_byte - r.start_byte]
 
 
 def heredoc_quoted(r: Node) -> bool:

@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/skills/fix/scripts/fix-steps.py", "name": "", "kind": "lines", "reason": "一括の整形（#1323）で物理行が増えた。500 行以下にしたら消す", "lines": 592}

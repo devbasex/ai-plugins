@@ -3,6 +3,7 @@
 レビューのスレッドとコメントのような入れ子は、GraphQL なら 1 回で読める（REST ではページとスレッドの数だけ要る）。
 スレッドの resolve・Projects のボード・draft を ready にする操作は REST に無く、GraphQL の枠でしか行えない。
 """
+
 from __future__ import annotations
 
 import json
@@ -31,9 +32,7 @@ UNRESOLVED_THREADS_JQ = (
 )
 
 
-def unresolved_threads(repo: str, pr: int,
-                       output: Callable[[list[str]], str | None] | None = None
-                       ) -> list[dict[str, str]] | None:
+def unresolved_threads(repo: str, pr: int, output: Callable[[list[str]], str | None] | None = None) -> list[dict[str, str]] | None:
     """未解決のレビュースレッドを `thread_id` つきで返す。0 件は空の一覧、取得できなければ `None`。
 
     `output` は `gh` の argv を受けて標準出力（失敗は `None`）を返す関数。省くと `RUNNER` を使う。
@@ -42,12 +41,24 @@ def unresolved_threads(repo: str, pr: int,
     owner, sep, name = str(repo or "").partition("/")
     if not (owner and sep and name):
         return None
-    out = (output or gh_call._output_via_runner)([
-        "gh", "api", "graphql", "--paginate",
-        "-F", f"owner={owner}", "-F", f"name={name}", "-F", f"pr={int(pr)}",
-        "-f", f"query={UNRESOLVED_THREADS_QUERY}",
-        "--jq", UNRESOLVED_THREADS_JQ,
-    ])
+    out = (output or gh_call._output_via_runner)(
+        [
+            "gh",
+            "api",
+            "graphql",
+            "--paginate",
+            "-F",
+            f"owner={owner}",
+            "-F",
+            f"name={name}",
+            "-F",
+            f"pr={int(pr)}",
+            "-f",
+            f"query={UNRESOLVED_THREADS_QUERY}",
+            "--jq",
+            UNRESOLVED_THREADS_JQ,
+        ]
+    )
     if out is None:
         return None
     threads: list[dict[str, str]] = []
@@ -55,11 +66,13 @@ def unresolved_threads(repo: str, pr: int,
         if not line.strip():
             continue
         cols = line.split("\t")
-        threads.append({
-            "thread_id": cols[0],
-            "path": cols[1] if len(cols) > 1 else "",
-            "line": cols[2] if len(cols) > 2 else "",
-        })
+        threads.append(
+            {
+                "thread_id": cols[0],
+                "path": cols[1] if len(cols) > 1 else "",
+                "line": cols[2] if len(cols) > 2 else "",
+            }
+        )
     return threads
 
 
@@ -82,7 +95,6 @@ def graphql(query: str, variables: dict[str, Any] | None = None) -> gh_quota.Att
         d = None
     errors = (d or {}).get("errors") if isinstance(d, dict) else None
     if r.returncode != 0 or errors or not isinstance(d, dict):
-        why = (r.stderr.strip() or json.dumps(errors, ensure_ascii=False) if errors else r.stderr.strip()) \
-            or "GraphQL の応答を読めない"
+        why = (r.stderr.strip() or json.dumps(errors, ensure_ascii=False) if errors else r.stderr.strip()) or "GraphQL の応答を読めない"
         return gh_quota.Attempt(None, why, "graphql")
     return gh_quota.Attempt(d.get("data"), "", "graphql")

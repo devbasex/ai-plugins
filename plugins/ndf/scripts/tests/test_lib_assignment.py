@@ -1,4 +1,5 @@
 """担当決定の現状固定テスト。"""
+
 from __future__ import annotations
 
 import importlib.util
@@ -8,6 +9,7 @@ from pathlib import Path
 import pytest
 
 ASSIGNMENT = Path(__file__).resolve().parents[1] / "lib" / "assignment.py"
+
 
 @pytest.fixture(scope="module")
 def assignment():
@@ -73,14 +75,13 @@ def test_the_default_pool_rejects_a_host_outside_host_runtimes(assignment, host)
 
 # ---------- 実装担当の選び方（#933 の決定 1。cross-refactoring が使う） ----------
 
+
 def test_choose_implementer_prefers_the_named_participant(assignment):
-    assert assignment.choose_implementer(["claude", "codex", "kiro"], "claude", "kiro") \
-        == ("kiro", "named")
+    assert assignment.choose_implementer(["claude", "codex", "kiro"], "claude", "kiro") == ("kiro", "named")
 
 
 def test_choose_implementer_uses_the_host_when_it_participates(assignment):
-    assert assignment.choose_implementer(["codex", "claude", "kiro"], "claude") \
-        == ("claude", "host")
+    assert assignment.choose_implementer(["codex", "claude", "kiro"], "claude") == ("claude", "host")
 
 
 def test_choose_implementer_falls_back_to_the_first_participant(assignment):
@@ -100,6 +101,7 @@ def test_choose_implementer_rejects_an_empty_list(assignment):
 
 # ---------- 席名からランタイム名への変換（#727） ----------
 
+
 def test_seat_runtime_extracts_runtime_name(assignment):
     """現状固定: 基底席と副席から同じランタイム名を返す。"""
     for runtime in assignment.ALL_RUNTIMES:
@@ -116,6 +118,7 @@ def test_seat_runtime_extracts_runtime_name(assignment):
 
 
 # ---------- レビュー席の割り当て（#727。cross-review が使う） ----------
+
 
 def test_review_seats_with_three_or_more_available_rotates_in_available_order(assignment):
     """3者以上: available の順序を保った2席が輪番で選ばれる。"""
@@ -178,12 +181,16 @@ def test_review_seats_rejects_a_bad_round(assignment):
 
 # ---------- 既定の母集合（cross-review と cross-refactoring で共通）と座席 ----------
 
-@pytest.mark.parametrize("host, expected", [
-    ("claude", ["claude", "codex", "kiro"]),
-    ("codex", ["claude", "codex", "kiro"]),
-    ("kiro", ["claude", "codex", "kiro"]),
-    ("agy", ["claude", "codex", "agy", "kiro"]),
-])
+
+@pytest.mark.parametrize(
+    "host, expected",
+    [
+        ("claude", ["claude", "codex", "kiro"]),
+        ("codex", ["claude", "codex", "kiro"]),
+        ("kiro", ["claude", "codex", "kiro"]),
+        ("agy", ["claude", "codex", "agy", "kiro"]),
+    ],
+)
 def test_default_pool_leaves_agy_out_unless_it_is_the_host(assignment, host, expected):
     """AC1〜AC3。"""
     assert assignment.default_pool(host) == expected
@@ -196,7 +203,9 @@ def _no_probe(names):
 def test_default_seats_for_a_claude_host(assignment):
     """AC1: round 1 codex+kiro / round 2 claude+kiro / round 3 claude+codex。"""
     p = assignment.resolve_participants(
-        assignment.default_pool("claude"), host="claude", probe=_no_probe,
+        assignment.default_pool("claude"),
+        host="claude",
+        probe=_no_probe,
     )
     seats = [assignment.review_seats(r, p.available, []) for r in (1, 2, 3)]
     assert seats == [["codex", "kiro"], ["claude", "kiro"], ["claude", "codex"]]
@@ -205,14 +214,20 @@ def test_default_seats_for_a_claude_host(assignment):
 def test_include_agy_restores_the_previous_rotation(assignment):
     """AC4: `--include agy` の座席は 4 者の母集合の輪番と同じ。`--exclude agy` は止めない。"""
     p = assignment.resolve_participants(
-        assignment.default_pool("claude"), host="claude", include=["agy"], probe=_no_probe,
+        assignment.default_pool("claude"),
+        host="claude",
+        include=["agy"],
+        probe=_no_probe,
     )
     four = list(assignment.ALL_RUNTIMES)
     for r in range(1, 5):
         assert assignment.review_seats(r, p.available, []) == assignment.review_seats(r, four, [])
 
     q = assignment.resolve_participants(
-        assignment.default_pool("claude"), host="claude", exclude=["agy"], probe=_no_probe,
+        assignment.default_pool("claude"),
+        host="claude",
+        exclude=["agy"],
+        probe=_no_probe,
     )
     assert q.ignored_exclude == ["agy"]
     assert "agy" not in q.available
@@ -226,24 +241,24 @@ def test_only_agy_without_include_and_its_conflicts(assignment):
     assert p.included == []
 
     with pytest.raises(assignment.AssignmentError, match="矛盾"):
-        assignment.resolve_participants(
-            pool, host="claude", only="agy", exclude=["agy"], probe=_no_probe)
+        assignment.resolve_participants(pool, host="claude", only="agy", exclude=["agy"], probe=_no_probe)
 
     called = []
     with pytest.raises(assignment.AssignmentError):
-        assignment.resolve_participants(
-            pool, host="claude", only="typo", probe=lambda n: called.append(n) or ({}, True))
+        assignment.resolve_participants(pool, host="claude", only="typo", probe=lambda n: called.append(n) or ({}, True))
     assert called == []
 
 
-@pytest.mark.parametrize("include, only, expected", [
-    ([], None, ["kiro", "agy"]),
-    (["agy"], None, ["kiro"]),
-    ([], "agy", ["kiro"]),
-    (["kiro"], None, ["kiro", "agy"]),
-])
-def test_recorded_exclusions_restores_both_kinds_unless_newly_named(
-        assignment, include, only, expected):
+@pytest.mark.parametrize(
+    "include, only, expected",
+    [
+        ([], None, ["kiro", "agy"]),
+        (["agy"], None, ["kiro"]),
+        ([], "agy", ["kiro"]),
+        (["kiro"], None, ["kiro", "agy"]),
+    ],
+)
+def test_recorded_exclusions_restores_both_kinds_unless_newly_named(assignment, include, only, expected):
     """#786 の AC4d / 決定 12: 外した者と無視した除外を足し戻す。無視した名前は新しい指定が勝つ。
 
     外した者（`excluded`）は `include` に重なっても残す（矛盾は `resolve_participants` が止める）。

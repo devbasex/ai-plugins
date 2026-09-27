@@ -64,28 +64,18 @@ def main() -> int:
     parser.add_argument("--url", help="検査対象 URL")
     parser.add_argument("--url-list", type=Path, help="URL を 1 行 1 件で書いたファイル")
     parser.add_argument("--storage-state", default=None, help="ログイン済 storage_state.json")
-    parser.add_argument("--tags", nargs="+", default=list(DEFAULT_TAGS),
-                        help=f"axe-core タグ (default: {list(DEFAULT_TAGS)})")
-    parser.add_argument("--output", type=Path, default=None,
-                        help="JSON 出力先 (省略時 stdout)")
-    parser.add_argument("--fail-on-violations", action="store_true",
-                        help="violations_count > 0 で exit 1")
+    parser.add_argument("--tags", nargs="+", default=list(DEFAULT_TAGS), help=f"axe-core タグ (default: {list(DEFAULT_TAGS)})")
+    parser.add_argument("--output", type=Path, default=None, help="JSON 出力先 (省略時 stdout)")
+    parser.add_argument("--fail-on-violations", action="store_true", help="violations_count > 0 で exit 1")
     parser.add_argument("--headed", action="store_true")
     args = parser.parse_args()
 
     if not args.url and not args.url_list:
         parser.error("--url または --url-list が必要です")
 
-    urls = (
-        [line.strip() for line in args.url_list.read_text().splitlines() if line.strip()]
-        if args.url_list else [args.url]
-    )
+    urls = [line.strip() for line in args.url_list.read_text().splitlines() if line.strip()] if args.url_list else [args.url]
 
-    results = [
-        scan(u, storage_state=args.storage_state, tags=args.tags,
-             headless=not args.headed)
-        for u in urls
-    ]
+    results = [scan(u, storage_state=args.storage_state, tags=args.tags, headless=not args.headed) for u in urls]
 
     total_violations = sum(r.get("violations_count", 0) for r in results)
 
@@ -93,10 +83,16 @@ def main() -> int:
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(text, encoding="utf-8")
-        print(json.dumps({
-            "output": str(args.output), "count": len(results),
-            "violations": total_violations,
-        }, ensure_ascii=False))
+        print(
+            json.dumps(
+                {
+                    "output": str(args.output),
+                    "count": len(results),
+                    "violations": total_violations,
+                },
+                ensure_ascii=False,
+            )
+        )
     else:
         sys.stdout.write(text + "\n")
     print(f"violations: {total_violations}", file=sys.stderr)

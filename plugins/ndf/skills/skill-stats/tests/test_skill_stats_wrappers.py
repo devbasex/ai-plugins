@@ -3,6 +3,7 @@
 frontmatter は `lib/yamlio.py`（ruamel.yaml）、表は `lib/mdtable.py`（tabulate）で読み書きする。
 自作の読み取りと組み立てから変わる入力を、ここで固定する。
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -28,7 +29,7 @@ def test_a_folded_description_is_read_as_its_text(ss):
 
 
 def test_quoted_values_lose_their_quotes(ss):
-    fm = ss.parse_front_matter('---\nname: "x"\ndescription: \'説明\'\n---\n')
+    fm = ss.parse_front_matter("---\nname: \"x\"\ndescription: '説明'\n---\n")
     assert fm == {"name": "x", "description": "説明"}
 
 
@@ -51,10 +52,26 @@ def test_no_front_matter_is_empty(ss):
 def test_the_skill_table_uses_spaced_rules_and_an_empty_total_cell(ss):
     """区切りの行は `| --- |` の形、合計の行の空のセルは `|  |` になる（自作は `|---|` と `| |`）。"""
     rows = [
-        {"skill": "ndf:pr", "triggers_source": "none", "invocations": 12, "auto": 2, "explicit": 10,
-         "triggers": 0, "hits": 0, "hit_rate_pct": 0.0},
-        {"skill": "ndf:fix", "triggers_source": "explicit", "invocations": 11, "auto": 3, "explicit": 8,
-         "triggers": 8, "hits": 3, "hit_rate_pct": 37.5},
+        {
+            "skill": "ndf:pr",
+            "triggers_source": "none",
+            "invocations": 12,
+            "auto": 2,
+            "explicit": 10,
+            "triggers": 0,
+            "hits": 0,
+            "hit_rate_pct": 0.0,
+        },
+        {
+            "skill": "ndf:fix",
+            "triggers_source": "explicit",
+            "invocations": 11,
+            "auto": 3,
+            "explicit": 8,
+            "triggers": 8,
+            "hits": 3,
+            "hit_rate_pct": 37.5,
+        },
     ]
     total = {"invocations": 23, "auto": 5, "explicit": 18, "triggers": 8, "hits": 3, "hit_rate_pct": 37.5}
     assert ss.format_markdown(rows, total, heading="## 見出し").splitlines() == [

@@ -13,6 +13,7 @@
 取得だけで、それらは取得できなくても進む側へ倒してある（`_fetch_unresolved_threads` /
 `_sync_worktree`）。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -40,31 +41,34 @@ def tmp_dir(monkeypatch, tmp_path, state_mod) -> pathlib.Path:
 
 
 def _seed_resumable(tmp_dir: pathlib.Path) -> None:
-    (tmp_dir / f"cross-review-pr{PR}-state.json").write_text(json.dumps({
-        "current_pr": PR,
-        "repo": REPO,
-        "tmp_dir": str(tmp_dir),
-        # キャッシュとして持っている値。再開ではこれを読み、GitHub へは問い合わせない。
-        "head_branch": "feat/x",
-        "base_branch": "develop",
-        "pr_author": "takemi",
-        "viewer_login": "takemi",
-        "is_own_pr": True,
-        "event_downgrade": True,
-        "worktree_path": "",
-        "auto_review_categories": ["code"],
-        "auto_review_instructions": "コードの観点",
-        "review_instructions": "コードの観点",
-        "rounds": [],
-        "carried_over": None,
-        "final": None,
-    }), encoding="utf-8")
+    (tmp_dir / f"cross-review-pr{PR}-state.json").write_text(
+        json.dumps(
+            {
+                "current_pr": PR,
+                "repo": REPO,
+                "tmp_dir": str(tmp_dir),
+                # キャッシュとして持っている値。再開ではこれを読み、GitHub へは問い合わせない。
+                "head_branch": "feat/x",
+                "base_branch": "develop",
+                "pr_author": "takemi",
+                "viewer_login": "takemi",
+                "is_own_pr": True,
+                "event_downgrade": True,
+                "worktree_path": "",
+                "auto_review_categories": ["code"],
+                "auto_review_instructions": "コードの観点",
+                "review_instructions": "コードの観点",
+                "rounds": [],
+                "carried_over": None,
+                "final": None,
+            }
+        ),
+        encoding="utf-8",
+    )
 
 
 def _init_args() -> argparse.Namespace:
-    return argparse.Namespace(
-        pr=PR, max_rounds=12, rotate_after=8, only=None, worktree=None,
-        focus=None, extra_instructions_file=None)
+    return argparse.Namespace(pr=PR, max_rounds=12, rotate_after=8, only=None, worktree=None, focus=None, extra_instructions_file=None)
 
 
 # ---- 受け入れ条件 2: 所有者と名前は git から解決する ----
@@ -74,8 +78,7 @@ def test_the_repository_is_resolved_from_git(state_mod) -> None:
     assert review_lib.github._repo_from_git() == REPO
 
 
-def test_the_repository_falls_back_to_gh_only_when_git_cannot_answer(
-        state_mod, monkeypatch) -> None:
+def test_the_repository_falls_back_to_gh_only_when_git_cannot_answer(state_mod, monkeypatch) -> None:
     monkeypatch.setattr(review_lib.github, "_git_remote_url", lambda: "")
     assert review_lib.github._repo_from_git() is None
 
@@ -83,8 +86,7 @@ def test_the_repository_falls_back_to_gh_only_when_git_cannot_answer(
 # ---- 受け入れ条件 1 / 3: 再開の入口はキャッシュを読み直さない ----
 
 
-def test_the_resume_path_does_not_look_up_the_cached_values(
-        state_mod, fake_gh, tmp_dir, capsys) -> None:
+def test_the_resume_path_does_not_look_up_the_cached_values(state_mod, fake_gh, tmp_dir, capsys) -> None:
     _seed_resumable(tmp_dir)
     # 未解決スレッドの照会だけが残る。0 件の応答（空の出力）を返す。
     fake_gh.set_rules([{"match": "graphql", "stdout": ""}])
@@ -96,8 +98,7 @@ def test_the_resume_path_does_not_look_up_the_cached_values(
     assert "RESUMED=1" in capsys.readouterr().out
 
 
-def test_the_only_remaining_lookup_is_the_round_varying_one(
-        state_mod, fake_gh, tmp_dir) -> None:
+def test_the_only_remaining_lookup_is_the_round_varying_one(state_mod, fake_gh, tmp_dir) -> None:
     """残る取得はラウンドごとに変わる値だけである。数と中身を固定する。"""
     _seed_resumable(tmp_dir)
     fake_gh.set_rules([{"match": "graphql", "stdout": ""}])
@@ -109,8 +110,7 @@ def test_the_only_remaining_lookup_is_the_round_varying_one(
     assert "graphql" in calls[0] and "reviewThreads" in calls[0]
 
 
-def test_the_resume_survives_the_rate_limit(state_mod, fake_gh, tmp_dir,
-                                            capsys) -> None:
+def test_the_resume_survives_the_rate_limit(state_mod, fake_gh, tmp_dir, capsys) -> None:
     """上限のもとでも再開できる。これが #291 で止まっていた入口である。"""
     _seed_resumable(tmp_dir)
     fake_gh.set_mode("rate_limit")
@@ -125,36 +125,35 @@ def test_the_resume_survives_the_rate_limit(state_mod, fake_gh, tmp_dir,
 # ---- 自分のログイン名をキャッシュにする ----
 
 
-def test_the_viewer_login_is_kept_in_the_state(state_mod, tmp_dir, monkeypatch,
-                                               tmp_path) -> None:
+def test_the_viewer_login_is_kept_in_the_state(state_mod, tmp_dir, monkeypatch, tmp_path) -> None:
     """一度取ったログイン名を状態ファイルへ持つ。待ち行列の冪等の照合が使う。"""
     worktree = tmp_path / "wt"
     worktree.mkdir()
-    monkeypatch.setattr(review_lib.github, "_fetch_pr_metadata", lambda pr, repo=None:
-                        review_lib.github.PrMetadata(REPO, "takemi", "feat/x", "abc",
-                                             "develop", False, 4000, None))
+    monkeypatch.setattr(
+        review_lib.github,
+        "_fetch_pr_metadata",
+        lambda pr, repo=None: review_lib.github.PrMetadata(REPO, "takemi", "feat/x", "abc", "develop", False, 4000, None),
+    )
     monkeypatch.setattr(review_lib.github, "_fetch_changed_files", lambda pr, repo: [])
     monkeypatch.setattr(review_lib.github, "_viewer_login", lambda: "takemi")
     monkeypatch.setattr(review_lib.github, "_repo_from_gh", lambda: REPO)
     monkeypatch.setattr(review_lib.workspace, "_create_worktree", lambda *a: None)
     monkeypatch.setattr(review_lib.workspace, "_is_registered_worktree", lambda p: True)
     monkeypatch.setattr(review_lib.workspace, "_sync_worktree", lambda *a, **k: None)
-    monkeypatch.setattr(subprocess, "run", lambda *a, **k:
-                        __import__("types").SimpleNamespace(
-                            returncode=0, stdout="", stderr=""))
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: __import__("types").SimpleNamespace(returncode=0, stdout="", stderr=""))
     args = _init_args()
     args.worktree = str(worktree)
 
     review_lib.commands.init.cmd_init(args)
 
-    saved = json.loads(
-        (tmp_dir / f"cross-review-pr{PR}-state.json").read_text(encoding="utf-8"))
+    saved = json.loads((tmp_dir / f"cross-review-pr{PR}-state.json").read_text(encoding="utf-8"))
     assert saved["viewer_login"] == "takemi"
+
+
 # ---- キャッシュを GitHub より先に読む ----
 
 
-def test_the_repository_comes_from_the_resume_state_before_github(
-        state_mod, fake_gh, tmp_dir, monkeypatch, capsys) -> None:
+def test_the_repository_comes_from_the_resume_state_before_github(state_mod, fake_gh, tmp_dir, monkeypatch, capsys) -> None:
     """`origin` を読めない環境でも、キャッシュの `repo` を先に読む。
 
     落とし先が `gh repo view` だけだと、上限に達している環境ではキャッシュを探す前に
@@ -171,8 +170,7 @@ def test_the_repository_comes_from_the_resume_state_before_github(
     assert [c for c in fake_gh.joined() if "repo view" in c] == []
 
 
-def test_the_resume_state_is_not_read_without_a_place_to_look(
-        state_mod, monkeypatch) -> None:
+def test_the_resume_state_is_not_read_without_a_place_to_look(state_mod, monkeypatch) -> None:
     """既定の作業ツリーの位置はリポジトリ名を含むため、名前抜きでは探せない。"""
     monkeypatch.delenv("CROSS_REVIEW_TMP_DIR", raising=False)
     assert review_lib.github._repo_from_resume(PR, None) is None

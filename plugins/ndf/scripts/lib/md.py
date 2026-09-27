@@ -11,6 +11,7 @@
 
 使う側は `deps.require("md")` を先に呼ぶ。
 """
+
 from __future__ import annotations
 
 import unicodedata
@@ -24,15 +25,15 @@ from markdown_it.token import Token
 
 class Heading(NamedTuple):
     level: int
-    title: str      # インラインの記法を外した字面（`code` は中身だけ）
-    line: int       # 見出しの行（0 始まり）
-    anchor: str     # GitHub のアンカー（同じ文書で重なれば `-1` などが付く）
+    title: str  # インラインの記法を外した字面（`code` は中身だけ）
+    line: int  # 見出しの行（0 始まり）
+    anchor: str  # GitHub のアンカー（同じ文書で重なれば `-1` などが付く）
 
 
 class Section(NamedTuple):
     heading: Heading
-    start: int      # 見出しの次の行
-    end: int        # 同じか浅い見出しの行、または文書の終わり（含まない）
+    start: int  # 見出しの次の行
+    end: int  # 同じか浅い見出しの行、または文書の終わり（含まない）
 
 
 class Table(NamedTuple):
@@ -142,7 +143,7 @@ def md_sections(text: str) -> list[Section]:
     total = _line_count(text)
     out = []
     for k, h in enumerate(hs):
-        end = next((o.line for o in hs[k + 1:] if o.level <= h.level), total)
+        end = next((o.line for o in hs[k + 1 :] if o.level <= h.level), total)
         out.append(Section(h, h.line + 1, end))
     return out
 
@@ -200,7 +201,7 @@ def links(text: str) -> list[Link]:
             if c.type != "link_open":
                 continue
             label = []
-            for d in kids[k + 1:]:
+            for d in kids[k + 1 :]:
                 if d.type == "link_close":
                     break
                 if d.type in ("text", "code_inline"):

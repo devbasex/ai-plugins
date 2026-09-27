@@ -2,6 +2,7 @@
 
 会話の記録の作り方は test_token_usage.py の合成の記録を使う。
 """
+
 from __future__ import annotations
 
 import json
@@ -14,21 +15,53 @@ from test_token_usage import U_COST, _jsonl, _ts, build  # noqa: E402
 
 SCRIPT = Path(__file__).resolve().parents[1] / "token-usage.py"
 
-LEDGER_USAGE = {"input_tokens": 10, "output_tokens": 100, "cache_read_input_tokens": 1000,
-                "cache_creation_input_tokens": 200,
-                "cache_creation": {"ephemeral_5m_input_tokens": 0, "ephemeral_1h_input_tokens": 200}}
+LEDGER_USAGE = {
+    "input_tokens": 10,
+    "output_tokens": 100,
+    "cache_read_input_tokens": 1000,
+    "cache_creation_input_tokens": 200,
+    "cache_creation": {"ephemeral_5m_input_tokens": 0, "ephemeral_1h_input_tokens": 200},
+}
 
 
 def row(minute: int, kind: str, version: str = "10.16.0") -> dict:
-    return {"at": _ts(minute), "ndf_version": version, "source": "supervise", "plan": "/tmp/p.json", "step": "s",
-            "kind": kind, "model": "claude-opus-5", "usage": LEDGER_USAGE, "model_usage": None,
-            "cost_usd": 0.1, "turns": 3, "seconds": 60.0, "session_id": None}
+    return {
+        "at": _ts(minute),
+        "ndf_version": version,
+        "source": "supervise",
+        "plan": "/tmp/p.json",
+        "step": "s",
+        "kind": kind,
+        "model": "claude-opus-5",
+        "usage": LEDGER_USAGE,
+        "model_usage": None,
+        "cost_usd": 0.1,
+        "turns": 3,
+        "seconds": 60.0,
+        "session_id": None,
+    }
 
 
 def run_json(roots: dict, usage: Path, *args: str) -> dict:
-    p = subprocess.run([sys.executable, str(SCRIPT), "--claude-root", str(roots["claude"]),
-                        "--codex-root", str(roots["codex"]), "--kiro-root", str(roots["kiro"]),
-                        "--usage-root", str(usage), "--format", "json", *args], capture_output=True, text=True)
+    p = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--claude-root",
+            str(roots["claude"]),
+            "--codex-root",
+            str(roots["codex"]),
+            "--kiro-root",
+            str(roots["kiro"]),
+            "--usage-root",
+            str(usage),
+            "--format",
+            "json",
+            *args,
+        ],
+        capture_output=True,
+        text=True,
+    )
     assert p.returncode == 0, p.stderr
     return json.loads(p.stdout)
 
@@ -37,8 +70,7 @@ def test_ledger_rows_join_the_session_layers(tmp_path):
     roots = build(tmp_path)
     usage = tmp_path / "usage"
     # work は worker、judge は supervisor。full は会話が残り別に数えられるため読まない。範囲の外は寄せない
-    _jsonl(usage / "acme__secret-repo.jsonl", [row(20, "work"), row(21, "judge"), row(22, "full"),
-                                              row(900, "work")])
+    _jsonl(usage / "acme__secret-repo.jsonl", [row(20, "work"), row(21, "judge"), row(22, "full"), row(900, "work")])
     r = run_json(roots, usage)
     [pr] = r["per_pr"]
     assert pr["supervisor_cost"] == 2 * U_COST + U_COST

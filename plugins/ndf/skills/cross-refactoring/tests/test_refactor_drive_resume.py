@@ -3,6 +3,7 @@
 実機の `refactor.py init` は、`phase` が `done` の状態を再開の対象にせず、新しい状態で作り直す。
 偽物の `call` がその振る舞いを模し、打ち直した駆動が実際の件数を返すことを確かめる。
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -51,8 +52,9 @@ class FakeRefactor:
             if self.state.get("phase") == "done":
                 self.state = {"items": [], "phase": "propose"}
                 self.save()
-            return 0, (f"ID=7\nTMP_DIR={self.tmp}\nPHASE={self.state['phase']}\nIMPL=codex\n"
-                       f"RUNTIMES=codex\nRUNTIMES_CSV=codex\nWORK={self.tmp}\n")
+            return 0, (
+                f"ID=7\nTMP_DIR={self.tmp}\nPHASE={self.state['phase']}\nIMPL=codex\nRUNTIMES=codex\nRUNTIMES_CSV=codex\nWORK={self.tmp}\n"
+            )
         if sub == "merge-proposals":
             return 2, ""
         if sub == "final-gate":

@@ -9,6 +9,7 @@
 `hook session-start` は環境を用意し、用意できた環境の python で通知を行う（用意できなければ通知を飛ばす）。
 `hook pre-tool-use` は hook の command が環境の python を直に起動する（環境が無ければ command が素通しする）。
 """
+
 import argparse
 import json
 import os
@@ -29,6 +30,7 @@ def _emit(result: dict, as_json: bool) -> None:
 
 def cmd_detect(args) -> int:
     from serena_lsp import detect, table
+
     root = Path(args.root).resolve()
     try:
         detected, skipped = detect.detect(root, table.load())
@@ -41,12 +43,16 @@ def cmd_detect(args) -> int:
 
 def cmd_configure(args) -> int:
     from serena_lsp import verify
+
     try:
         result, code = verify.configure(
-            Path(args.root).resolve(), dry_run=args.dry_run, gitignore=args.gitignore,
+            Path(args.root).resolve(),
+            dry_run=args.dry_run,
+            gitignore=args.gitignore,
             serena_gitignore=args.serena_gitignore,
             only=[s for s in (args.only or "").split(",") if s] or None,
-            serena_cmd=args.serena)
+            serena_cmd=args.serena,
+        )
     except verify.Terminated as exc:
         print("中断しました。検証を通った言語だけを書きました", file=sys.stderr)
         return 128 + int(exc.args[0])
@@ -56,6 +62,7 @@ def cmd_configure(args) -> int:
 
 def cmd_check(args) -> int:
     from serena_lsp import check
+
     result, code = check.run(Path(args.root).resolve(), runtime=args.runtime)
     _emit(result, args.json)
     return code
@@ -64,6 +71,7 @@ def cmd_check(args) -> int:
 def _session_env(args) -> bool:
     """SessionStart の環境の用意。通知へ進むなら真（環境の python で動いている）。起動し直すときは戻らない。"""
     from serena_lsp import env, hooks
+
     if hooks._skip_for_client(args.client) or os.environ.get(env.REEXEC_ENV):
         return env.importable()
     python = env.prepare()
@@ -79,6 +87,7 @@ def cmd_hook(args) -> int:
         if args.event == "session-start" and not _session_env(args):
             return 0
         from serena_lsp import hooks
+
         raw = sys.stdin.read()
         payload = json.loads(raw) if raw.strip() else {}
         if not isinstance(payload, dict):
@@ -130,6 +139,7 @@ def main(argv=None) -> int:
     args.argv = list(sys.argv[1:] if argv is None else argv)
     if args.command != "hook":
         from serena_lsp import env
+
         env.ensure(CLI, args.argv)
     return args.func(args)
 

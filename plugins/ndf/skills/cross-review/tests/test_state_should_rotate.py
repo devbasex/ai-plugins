@@ -9,6 +9,7 @@ docstring が定める契約:
     round_in_pr >= rotate_after && total < max_rounds  → rotate (exit 0, CURRENT_PR/ROUND_IN_PR を出力)
     それ以外                                            → keep   (exit 2)
 """
+
 from __future__ import annotations
 
 import argparse
@@ -22,8 +23,7 @@ PR = 6100
 REPO = "o/r"
 
 
-def _state(rounds: list[dict], *, rotate_after: int = 8, max_rounds: int = 12,
-           current_pr: int = PR) -> dict:
+def _state(rounds: list[dict], *, rotate_after: int = 8, max_rounds: int = 12, current_pr: int = PR) -> dict:
     return {
         "current_pr": current_pr,
         "repo": REPO,
@@ -47,8 +47,7 @@ def tmp_dir(monkeypatch, tmp_path, state_mod) -> pathlib.Path:
     return tmp_path
 
 
-def test_reaching_rotate_after_under_the_round_cap_signals_rotate(
-        tmp_dir, state_mod, capsys) -> None:
+def test_reaching_rotate_after_under_the_round_cap_signals_rotate(tmp_dir, state_mod, capsys) -> None:
     """round_in_pr が rotate_after 以上、かつ total が max_rounds 未満で rotate。"""
     _write(tmp_dir, _state(_rounds(PR, 8), rotate_after=8, max_rounds=12))
 
@@ -81,8 +80,7 @@ def test_reaching_the_round_cap_keeps_even_past_rotate_after(tmp_dir, state_mod)
     assert e.value.code == 2
 
 
-def test_round_in_pr_counts_only_the_current_pr_after_a_rotation(
-        tmp_dir, state_mod, capsys) -> None:
+def test_round_in_pr_counts_only_the_current_pr_after_a_rotation(tmp_dir, state_mod, capsys) -> None:
     """ローテーション後は current_pr が変わり、round_in_pr は新 PR の分だけを数える。"""
     new_pr = PR + 1
     rounds = _rounds(PR, 8) + _rounds(new_pr, 8)
@@ -104,11 +102,12 @@ def test_round_in_pr_counts_only_the_current_pr_after_a_rotation(
 # total が **前の PR の round も数える**ことと、その境界が `<` であることを、
 # round_in_pr を動かさずに固定する。
 
+
 def test_the_round_cap_counts_rounds_of_earlier_prs_too(tmp_dir, state_mod) -> None:
     """round_in_pr が rotate_after ちょうどでも、前の PR を含めた total が
     max_rounds に達していれば keep。"""
     new_pr = PR + 1
-    rounds = _rounds(PR, 4) + _rounds(new_pr, 8)   # total=12, round_in_pr=8
+    rounds = _rounds(PR, 4) + _rounds(new_pr, 8)  # total=12, round_in_pr=8
     _write(tmp_dir, _state(rounds, rotate_after=8, max_rounds=12, current_pr=new_pr))
 
     with pytest.raises(SystemExit) as e:
@@ -120,7 +119,7 @@ def test_the_round_cap_counts_rounds_of_earlier_prs_too(tmp_dir, state_mod) -> N
 def test_one_round_below_the_cap_still_rotates(tmp_dir, state_mod, capsys) -> None:
     """同じ round_in_pr のまま total だけを 1 減らすと rotate へ切り替わる。"""
     new_pr = PR + 1
-    rounds = _rounds(PR, 3) + _rounds(new_pr, 8)   # total=11, round_in_pr=8
+    rounds = _rounds(PR, 3) + _rounds(new_pr, 8)  # total=11, round_in_pr=8
     _write(tmp_dir, _state(rounds, rotate_after=8, max_rounds=12, current_pr=new_pr))
 
     with pytest.raises(SystemExit) as e:

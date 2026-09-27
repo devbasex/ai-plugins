@@ -18,6 +18,7 @@
 `--output-file` に置く。監視の結果（`<stem>-monitor.json`）の状態と理由を `metrics` に写す。
 待ちの上限は `limits.py` の工程の値で、上限を超えると必ず終わる。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -48,9 +49,7 @@ STEM_TEMPLATE = "{agent}-ext{id}"
 TMP_ENV = "NDF_EXTERNAL_AI_TMP_DIR"
 ERR_TAIL_LINES = 200
 ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
-AUTH_DETAIL = re.compile(
-    r"HTTP/\S+ (?:401|403)|Authentication failed|Permission denied|API key|Unauthorized",
-    re.IGNORECASE)
+AUTH_DETAIL = re.compile(r"HTTP/\S+ (?:401|403)|Authentication failed|Permission denied|API key|Unauthorized", re.IGNORECASE)
 
 # 監視の状態 → 結末。どれも `ok` に畳まない。
 MONITOR_OUTCOME = {
@@ -62,20 +61,17 @@ MONITOR_OUTCOME = {
 
 
 def tmp_dir(arg: str | None) -> pathlib.Path:
-    d = pathlib.Path(arg or os.environ.get(TMP_ENV)
-                     or pathlib.Path(tempfile.gettempdir()) / "ndf" / "external-ai")
+    d = pathlib.Path(arg or os.environ.get(TMP_ENV) or pathlib.Path(tempfile.gettempdir()) / "ndf" / "external-ai")
     d = d.resolve()
     d.mkdir(parents=True, exist_ok=True)
     return d
 
 
-def finish(runtime: str, outcome: str, summary: str, metrics: dict, code: int | None = None,
-           next_: str | None = None):
+def finish(runtime: str, outcome: str, summary: str, metrics: dict, code: int | None = None, next_: str | None = None):
     status = "ok" if outcome == "ok" else "stopped"
     metrics = {"outcome": outcome, "runtime": runtime, **metrics}
     item = {"kind": "cli", "name": runtime, "result": outcome}
-    sr.emit(sr.result(TOOL, status, summary, [item], metrics, next=next_),
-            code if code is not None else sr.default_code(status))
+    sr.emit(sr.result(TOOL, status, summary, [item], metrics, next=next_), code if code is not None else sr.default_code(status))
 
 
 def precheck(runtime: str, skip_auth: bool) -> tuple[str, str] | None:
@@ -110,6 +106,7 @@ def read_stdout(runtime: str, path: pathlib.Path) -> str:
         text = ANSI.sub("", text)
     if runtime == "claude":
         import json
+
         try:
             payload = json.loads(text)
         except ValueError:
@@ -144,9 +141,11 @@ def recover(runtime: str, stem: pathlib.Path, output: pathlib.Path) -> tuple[str
 def with_output_instruction(prompt: str, output: pathlib.Path) -> str:
     if str(output) in prompt:
         return prompt
-    return (prompt.rstrip("\n") + "\n\n## 出力先（必須）\n"
-            f"最終結果を `{output}` に書き出したうえで、stdout にも同内容を出力すること。"
-            "tool 呼び出しのみで終了せず、最後に必ず 1 回出力すること。\n")
+    return (
+        prompt.rstrip("\n") + "\n\n## 出力先（必須）\n"
+        f"最終結果を `{output}` に書き出したうえで、stdout にも同内容を出力すること。"
+        "tool 呼び出しのみで終了せず、最後に必ず 1 回出力すること。\n"
+    )
 
 
 def cmd_run(a) -> None:
@@ -155,13 +154,10 @@ def cmd_run(a) -> None:
     if not prompt.is_file() or prompt.stat().st_size == 0:
         finish(runtime, "launch_failed", f"プロンプトが無いか空: {prompt}", {}, sr.EXIT_PRECONDITION)
     if a.phase not in limits.PHASE_TIMEOUT:
-        finish(runtime, "launch_failed",
-               f"上限の表に無い工程: {a.phase}（{' / '.join(limits.PHASE_TIMEOUT)}）", {},
-               sr.EXIT_UNREADABLE)
+        finish(runtime, "launch_failed", f"上限の表に無い工程: {a.phase}（{' / '.join(limits.PHASE_TIMEOUT)}）", {}, sr.EXIT_UNREADABLE)
     workdir = pathlib.Path(a.workdir or os.getcwd()).resolve()
     if not workdir.is_dir():
-        finish(runtime, "launch_failed", f"作業ディレクトリが無い: {workdir}", {},
-               sr.EXIT_PRECONDITION)
+        finish(runtime, "launch_failed", f"作業ディレクトリが無い: {workdir}", {}, sr.EXIT_PRECONDITION)
     skip_auth = a.no_auth_check or bool(os.environ.get(auth.SKIP_ENV))
     pre = precheck(runtime, skip_auth)
     if pre:
@@ -175,25 +171,34 @@ def cmd_run(a) -> None:
     stem_name = STEM_TEMPLATE.format(agent=runtime, id=run_id)
     stem = tdir / stem_name
     prompt_copy = pathlib.Path(f"{stem}-prompt.md")
-    prompt_copy.write_text(with_output_instruction(
-        prompt.read_text(encoding="utf-8"), output), encoding="utf-8")
+    prompt_copy.write_text(with_output_instruction(prompt.read_text(encoding="utf-8"), output), encoding="utf-8")
 
-    cli_limit = (str(a.timeout + limits.CLI_MARGIN) if a.timeout else a.phase)
-    launch = [str(LIB / "launch-cli.sh"), runtime, str(workdir), str(prompt_copy), str(stem),
-              a.model or "", str(output.parent), cli_limit]
+    cli_limit = str(a.timeout + limits.CLI_MARGIN) if a.timeout else a.phase
+    launch = [str(LIB / "launch-cli.sh"), runtime, str(workdir), str(prompt_copy), str(stem), a.model or "", str(output.parent), cli_limit]
     p = proc.run(launch, check=False)
     if p.returncode != 0:
-        finish(runtime, "launch_failed", f"起動できない: {p.stderr.strip()[:300]}",
-               {"stem": str(stem)})
+        finish(runtime, "launch_failed", f"起動できない: {p.stderr.strip()[:300]}", {"stem": str(stem)})
     # 監視は `<stem>-result.json` の有無で結果を見る。結果ファイルへのリンクにして、
     # 結果ファイルが書かれたことを完了の証拠にする。
     link = pathlib.Path(f"{stem}-result.json")
     link.unlink(missing_ok=True)
     link.symlink_to(output)
 
-    mon = [sys.executable, str(LIB / "monitor.py"), str(run_id), "--agents", runtime,
-           "--tmp-dir", str(tdir), "--stem-template", STEM_TEMPLATE, "--phase", a.phase,
-           "--poll", str(a.poll)]
+    mon = [
+        sys.executable,
+        str(LIB / "monitor.py"),
+        str(run_id),
+        "--agents",
+        runtime,
+        "--tmp-dir",
+        str(tdir),
+        "--stem-template",
+        STEM_TEMPLATE,
+        "--phase",
+        a.phase,
+        "--poll",
+        str(a.poll),
+    ]
     if a.timeout:
         mon += ["--timeout", str(a.timeout)]
     if a.stall_timeout:
@@ -204,31 +209,45 @@ def cmd_run(a) -> None:
     mstatus, reason = rec.get("status", "PIDFILE_BAD"), rec.get("reason", "pidfile_bad")
     source, path = recover(runtime, stem, output)
     stdout_log = pathlib.Path(f"{stem}-stdout.log")
-    observed = models.observed_model(
-        runtime, stdout_log.read_text(encoding="utf-8", errors="replace")
-        if stdout_log.is_file() else "")
-    metrics = {"result": path, "source": source, "model": observed or a.model or "default",
-               "monitor_status": mstatus, "reason": reason, "detail": rec.get("detail", ""),
-               "elapsed": rec.get("elapsed"), "phase": a.phase, "stem": str(stem)}
+    observed = models.observed_model(runtime, stdout_log.read_text(encoding="utf-8", errors="replace") if stdout_log.is_file() else "")
+    metrics = {
+        "result": path,
+        "source": source,
+        "model": observed or a.model or "default",
+        "monitor_status": mstatus,
+        "reason": reason,
+        "detail": rec.get("detail", ""),
+        "elapsed": rec.get("elapsed"),
+        "phase": a.phase,
+        "stem": str(stem),
+    }
 
     if mstatus in ("OK", "NO_RESULT") and source in ("file", "stdout"):
         finish(runtime, "ok", f"{runtime} の結果を回収した（{source}）: {path}", metrics)
     if mstatus in ("OK", "NO_RESULT"):
-        finish(runtime, "no_result",
-               f"{runtime} は終わったが結果が無い（理由: {reason}）", metrics,
-               next_=f"stderr の末尾を読む: {path}" if path else None)
+        finish(
+            runtime,
+            "no_result",
+            f"{runtime} は終わったが結果が無い（理由: {reason}）",
+            metrics,
+            next_=f"stderr の末尾を読む: {path}" if path else None,
+        )
     outcome = MONITOR_OUTCOME.get(mstatus, "launch_failed")
     if reason == "usage_limit":
         outcome = "usage_limit"
     elif outcome == "early_error" and AUTH_DETAIL.search(rec.get("detail", "")):
         outcome = "auth"
-    finish(runtime, outcome, f"{runtime} を止めた（{mstatus} / 理由: {reason}）", metrics,
-           next_=f"stderr の末尾を読む: {path}" if path else None)
+    finish(
+        runtime,
+        outcome,
+        f"{runtime} を止めた（{mstatus} / 理由: {reason}）",
+        metrics,
+        next_=f"stderr の末尾を読む: {path}" if path else None,
+    )
 
 
 def main(argv=None) -> None:
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("check", help="CLI があり認証が通るか")
     c.add_argument("runtime", choices=RUNTIMES)
@@ -237,8 +256,7 @@ def main(argv=None) -> None:
     r.add_argument("runtime", choices=RUNTIMES)
     r.add_argument("--prompt-file", required=True)
     r.add_argument("--output-file", required=True)
-    r.add_argument("--phase", default=limits.DEFAULT_PHASE,
-                   help=f"上限の表の工程（{' / '.join(limits.PHASE_TIMEOUT)}）")
+    r.add_argument("--phase", default=limits.DEFAULT_PHASE, help=f"上限の表の工程（{' / '.join(limits.PHASE_TIMEOUT)}）")
     r.add_argument("--model", default=None)
     r.add_argument("--workdir", default=None, help="CLI の作業ディレクトリ（既定はカレント）")
     r.add_argument("--timeout", type=int, default=None, help="監視の上限（秒）。既定は工程の値")

@@ -4,6 +4,7 @@ macOS が標準で持つ bash は 3.2 である。`mapfile` / `readarray` / 連�
 `${var,,}` はいずれも bash 4 以降の機能で、3.2 では 127 や構文エラーになる。
 hook は失敗しても黙って終わるため、案内が出ない形で壊れる。
 """
+
 from __future__ import annotations
 
 import re

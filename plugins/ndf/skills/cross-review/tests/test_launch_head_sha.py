@@ -10,6 +10,7 @@
 CLI そのものは起動しない。`gh` / `codex` / `agy` を、呼ばれた事実を書き出すだけの
 実行ファイルへ置き換える。
 """
+
 from __future__ import annotations
 
 import json
@@ -84,7 +85,10 @@ def _launch(script: str, tmp_path: pathlib.Path, *, head_sha: str | None) -> tup
     tmp_dir, ctx = _setup(tmp_path, head_sha=head_sha)
     subprocess.run(
         [str(SCRIPTS / script), str(PR), "1"],
-        env=ctx["env"], check=True, capture_output=True, text=True,
+        env=ctx["env"],
+        check=True,
+        capture_output=True,
+        text=True,
     )
     stem = "codex" if "codex" in script else "agy"
     prompt = tmp_dir / f"{stem}-review-pr{PR}-prompt.md"

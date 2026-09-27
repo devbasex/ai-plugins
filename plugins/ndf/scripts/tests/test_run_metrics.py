@@ -4,11 +4,11 @@
 ここでは共通層の `run_metrics.py` を単体で確かめ、状態の保存からの呼び出しは
 各 Skill のテストが確かめる。
 """
+
 from __future__ import annotations
 
 import importlib.util
 import json
-import os
 import pathlib
 import subprocess
 import sys
@@ -19,8 +19,19 @@ LIB = pathlib.Path(__file__).resolve().parents[1] / "lib"
 RUN_METRICS = LIB / "run_metrics.py"
 
 COMMON_KEYS = {
-    "schema", "kind", "repo", "id", "ndf_version", "host", "started_at",
-    "ended_at", "last_saved_at", "final", "wall_clock_seconds", "rounds", "launches",
+    "schema",
+    "kind",
+    "repo",
+    "id",
+    "ndf_version",
+    "host",
+    "started_at",
+    "ended_at",
+    "last_saved_at",
+    "final",
+    "wall_clock_seconds",
+    "rounds",
+    "launches",
 }
 
 
@@ -47,8 +58,7 @@ def _review_state(tmp_dir: pathlib.Path, **over) -> dict:
         "review_instructions": "秘密のレビュー観点",
         "rounds": [
             {"round": 1, "started_at": "2026-09-15T10:00:00+09:00"},
-            {"round": 2, "started_at": "2026-09-15T10:12:00+09:00",
-             "ended_at": "2026-09-15T10:25:00+09:00"},
+            {"round": 2, "started_at": "2026-09-15T10:12:00+09:00", "ended_at": "2026-09-15T10:25:00+09:00"},
         ],
         "final": "approved",
     }
@@ -63,27 +73,38 @@ def _journal(tmp_dir: pathlib.Path, *rows: dict) -> None:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
-def _launch(agent: str, stem: str, reason: str, started: str, ended: str,
-            elapsed: float = 60.0) -> dict:
-    status = {"ok": "OK", "timeout": "TIMEOUT", "missing": "NO_RESULT",
-              "stalled": "STALLED", "early_error": "EARLY_ERROR"}[reason]
+def _launch(agent: str, stem: str, reason: str, started: str, ended: str, elapsed: float = 60.0) -> dict:
+    status = {"ok": "OK", "timeout": "TIMEOUT", "missing": "NO_RESULT", "stalled": "STALLED", "early_error": "EARLY_ERROR"}[reason]
     return {
-        "agent": agent, "stem": stem, "status": status, "exit_code": 0,
-        "reason": reason, "detail": "Authorization: Bearer sk-secret-xyz",
-        "launched_at": started, "started_at": started, "ended_at": ended,
-        "elapsed": elapsed, "idle_seconds": 1.0, "progress_tail": "",
-        "result_exists": reason == "ok", "pid": 123,
+        "agent": agent,
+        "stem": stem,
+        "status": status,
+        "exit_code": 0,
+        "reason": reason,
+        "detail": "Authorization: Bearer sk-secret-xyz",
+        "launched_at": started,
+        "started_at": started,
+        "ended_at": ended,
+        "elapsed": elapsed,
+        "idle_seconds": 1.0,
+        "progress_tail": "",
+        "result_exists": reason == "ok",
+        "pid": 123,
     }
 
 
 # ---------- AC10: 置き場所 ----------
 
-@pytest.mark.parametrize(("env", "expected"), [
-    ({"NDF_METRICS_DIR": "D", "XDG_STATE_HOME": "X", "HOME": "H"}, "D"),
-    ({"XDG_STATE_HOME": "X", "HOME": "H"}, "X/ndf/metrics"),
-    ({"HOME": "H"}, "H/.local/state/ndf/metrics"),
-    ({"NDF_METRICS_DIR": "", "XDG_STATE_HOME": "", "HOME": "H"}, "H/.local/state/ndf/metrics"),
-])
+
+@pytest.mark.parametrize(
+    ("env", "expected"),
+    [
+        ({"NDF_METRICS_DIR": "D", "XDG_STATE_HOME": "X", "HOME": "H"}, "D"),
+        ({"XDG_STATE_HOME": "X", "HOME": "H"}, "X/ndf/metrics"),
+        ({"HOME": "H"}, "H/.local/state/ndf/metrics"),
+        ({"NDF_METRICS_DIR": "", "XDG_STATE_HOME": "", "HOME": "H"}, "H/.local/state/ndf/metrics"),
+    ],
+)
 def test_metrics_dir_resolution_order(rm, tmp_path, env, expected):
     env = {k: (str(tmp_path / v) if v else v) for k, v in env.items()}
     assert rm.metrics_dir(env) == tmp_path / expected
@@ -93,14 +114,14 @@ def test_metrics_disabled_writes_nothing(rm, tmp_path):
     state_path = tmp_path / "tmp" / "cross-review-pr665-state.json"
     base = tmp_path / "metrics"
     env = {"NDF_METRICS": "0", "NDF_METRICS_DIR": str(base)}
-    path, reason = rm.write_summary(state_path, _review_state(tmp_path / "tmp"),
-                                    "cross-review", env=env)
+    path, reason = rm.write_summary(state_path, _review_state(tmp_path / "tmp"), "cross-review", env=env)
     assert path is None
     assert "NDF_METRICS=0" in reason
     assert not base.exists()
 
 
 # ---------- AC8 のパス / AC12 / AC15 / AC17 ----------
+
 
 def test_summary_path_uses_repo_kind_id_and_utc_start(rm, tmp_path):
     state = _review_state(tmp_path)
@@ -128,8 +149,7 @@ def test_summary_has_common_keys_and_launches_without_detail(rm, tmp_path):
     assert (summary["repo"], summary["id"], summary["host"]) == ("devbasex/ai-plugins", 665, "claude")
     assert summary["final"] == "approved"
     assert summary["wall_clock_seconds"] == 1800
-    assert summary["ndf_version"] == json.loads(
-        (LIB.parents[1] / ".claude-plugin" / "plugin.json").read_text())["version"]
+    assert summary["ndf_version"] == json.loads((LIB.parents[1] / ".claude-plugin" / "plugin.json").read_text())["version"]
     assert summary["rounds"] == [
         {"round": 1, "started_at": "2026-09-15T10:00:00+09:00", "ended_at": "2026-09-15T10:12:00+09:00"},
         {"round": 2, "started_at": "2026-09-15T10:12:00+09:00", "ended_at": "2026-09-15T10:25:00+09:00"},
@@ -146,12 +166,14 @@ def test_summary_ignores_malformed_and_non_object_journal_rows(rm, tmp_path):
     tmp_dir = tmp_path / "tmp"
     tmp_dir.mkdir()
     launch = _launch(
-        "agy", "agy-review-pr665", "ok",
-        "2026-09-15T10:01:00+09:00", "2026-09-15T10:02:00+09:00",
+        "agy",
+        "agy-review-pr665",
+        "ok",
+        "2026-09-15T10:01:00+09:00",
+        "2026-09-15T10:02:00+09:00",
     )
     (tmp_dir / "monitor-outcomes.jsonl").write_text(
-        "{not json\n" + json.dumps(["not", "an", "object"]) + "\n"
-        + json.dumps(launch) + "\n",
+        "{not json\n" + json.dumps(["not", "an", "object"]) + "\n" + json.dumps(launch) + "\n",
         encoding="utf-8",
     )
 
@@ -161,9 +183,7 @@ def test_summary_ignores_malformed_and_non_object_journal_rows(rm, tmp_path):
         "cross-review",
     )
 
-    assert summary["launches"] == [
-        {key: value for key, value in launch.items() if key != "detail"}
-    ]
+    assert summary["launches"] == [{key: value for key, value in launch.items() if key != "detail"}]
 
 
 def test_unfinished_run_has_null_end_and_last_saved_at(rm, tmp_path):
@@ -179,16 +199,17 @@ def test_unfinished_run_has_null_end_and_last_saved_at(rm, tmp_path):
 
 def test_naive_times_get_the_local_timezone(rm, tmp_path):
     """cross-refactoring の `statefile.now` はタイムゾーンを持たない。"""
-    state = {"id": 130, "repo": "o/r", "host": "codex", "started_at": "2026-08-15T00:00:00",
-             "final": None, "rounds": []}
+    state = {"id": 130, "repo": "o/r", "host": "codex", "started_at": "2026-08-15T00:00:00", "final": None, "rounds": []}
     summary = rm.build_summary(tmp_path / "s.json", state, "cross-refactoring")
     import datetime as dt
+
     assert dt.datetime.fromisoformat(summary["started_at"]).tzinfo is not None
 
 
 def test_extra_keys_are_merged(rm, tmp_path):
-    summary = rm.build_summary(tmp_path / "s.json", _review_state(tmp_path), "cross-review",
-                               extra=lambda path, st, launches: {"measure": {"rounds": 2}})
+    summary = rm.build_summary(
+        tmp_path / "s.json", _review_state(tmp_path), "cross-review", extra=lambda path, st, launches: {"measure": {"rounds": 2}}
+    )
     assert summary["measure"] == {"rounds": 2}
 
 
@@ -207,6 +228,7 @@ def test_write_summary_overwrites_the_same_file(rm, tmp_path):
 def test_after_save_swallows_errors(rm, tmp_path, monkeypatch, capsys):
     def boom(*a, **k):
         raise RuntimeError("壊れた")
+
     monkeypatch.setattr(rm, "build_summary", boom)
     rm.after_save(tmp_path / "s.json", _review_state(tmp_path), "cross-review")
     assert "壊れた" in capsys.readouterr().err
@@ -214,13 +236,21 @@ def test_after_save_swallows_errors(rm, tmp_path, monkeypatch, capsys):
 
 # ---------- AC19〜AC22: 集計 ----------
 
-def _summary(kind, id_, started, minutes, *, final="approved", repo="o/r", version="10.12.0",
-             rounds=1, launches=()):
+
+def _summary(kind, id_, started, minutes, *, final="approved", repo="o/r", version="10.12.0", rounds=1, launches=()):
     wall = None if final is None else minutes * 60
     return {
-        "schema": 1, "kind": kind, "repo": repo, "id": id_, "ndf_version": version,
-        "host": "claude", "started_at": started, "ended_at": None, "last_saved_at": started,
-        "final": final, "wall_clock_seconds": wall,
+        "schema": 1,
+        "kind": kind,
+        "repo": repo,
+        "id": id_,
+        "ndf_version": version,
+        "host": "claude",
+        "started_at": started,
+        "ended_at": None,
+        "last_saved_at": started,
+        "final": final,
+        "wall_clock_seconds": wall,
         "rounds": [{"round": i + 1} for i in range(rounds)],
         "launches": list(launches),
     }
@@ -232,14 +262,18 @@ def metrics_tree(tmp_path):
     (base / "o--r").mkdir(parents=True)
     (base / "x--y").mkdir(parents=True)
     rows = [
-        _summary("cross-review", 1, "2026-09-01T10:00:00+09:00", 10, rounds=1,
-                 launches=[{"agent": "agy", "reason": "timeout"}, {"agent": "kiro", "reason": "ok"}]),
-        _summary("cross-review", 2, "2026-09-02T10:00:00+09:00", 20, rounds=2,
-                 launches=[{"agent": "agy", "reason": "timeout"}]),
+        _summary(
+            "cross-review",
+            1,
+            "2026-09-01T10:00:00+09:00",
+            10,
+            rounds=1,
+            launches=[{"agent": "agy", "reason": "timeout"}, {"agent": "kiro", "reason": "ok"}],
+        ),
+        _summary("cross-review", 2, "2026-09-02T10:00:00+09:00", 20, rounds=2, launches=[{"agent": "agy", "reason": "timeout"}]),
         _summary("cross-review", 3, "2026-09-03T10:00:00+09:00", 40, rounds=3),
         _summary("cross-review", 4, "2026-09-04T10:00:00+09:00", 0, final=None),
-        _summary("cross-refactoring", 5, "2026-09-05T10:00:00+09:00", 90, repo="x/y",
-                 version="10.13.0"),
+        _summary("cross-refactoring", 5, "2026-09-05T10:00:00+09:00", 90, repo="x/y", version="10.13.0"),
     ]
     for row in rows:
         folder = row["repo"].replace("/", "--")
@@ -251,7 +285,9 @@ def metrics_tree(tmp_path):
 def _aggregate(base, *args):
     return subprocess.run(
         [sys.executable, str(RUN_METRICS), "aggregate", "--dir", str(base), *args],
-        capture_output=True, text=True, timeout=30,
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
 
 
@@ -274,13 +310,16 @@ def test_aggregate_total_by_kind_with_unfinished_row(metrics_tree):
     assert "読めない要約: 1 件" in proc.stdout + proc.stderr
 
 
-@pytest.mark.parametrize(("args", "counts"), [
-    (("--since", "2026-09-02"), {"cross-review": "2", "cross-refactoring": "1"}),
-    (("--until", "2026-09-02"), {"cross-review": "2"}),
-    (("--repo", "x/y"), {"cross-refactoring": "1"}),
-    (("--kind", "cross-refactoring"), {"cross-refactoring": "1"}),
-    (("--version", "10.12.0"), {"cross-review": "3"}),
-])
+@pytest.mark.parametrize(
+    ("args", "counts"),
+    [
+        (("--since", "2026-09-02"), {"cross-review": "2", "cross-refactoring": "1"}),
+        (("--until", "2026-09-02"), {"cross-review": "2"}),
+        (("--repo", "x/y"), {"cross-refactoring": "1"}),
+        (("--kind", "cross-refactoring"), {"cross-refactoring": "1"}),
+        (("--version", "10.12.0"), {"cross-review": "3"}),
+    ],
+)
 def test_aggregate_filters(metrics_tree, args, counts):
     proc = _aggregate(metrics_tree, *args)
     assert proc.returncode == 0, proc.stderr
@@ -324,20 +363,24 @@ _SELECT_ROWS = [
 
 def _select_args(**over):
     import argparse
+
     base = {"since": None, "until": None, "repo": None, "kind": None, "version": None}
     base.update(over)
     return argparse.Namespace(**base)
 
 
-@pytest.mark.parametrize("over, expected", [
-    ({}, ["a", "b", "c", "d"]),
-    ({"repo": "o/x"}, ["a", "c", "d"]),
-    ({"kind": "cross-refactoring"}, ["c"]),
-    ({"version": "1.0.0"}, ["a", "b"]),
-    ({"repo": "o/x", "kind": "cross-review", "version": "2.0.0"}, ["d"]),
-    ({"repo": "o/z"}, []),
-    ({"repo": "", "kind": "", "version": ""}, ["a", "b", "c", "d"]),
-])
+@pytest.mark.parametrize(
+    "over, expected",
+    [
+        ({}, ["a", "b", "c", "d"]),
+        ({"repo": "o/x"}, ["a", "c", "d"]),
+        ({"kind": "cross-refactoring"}, ["c"]),
+        ({"version": "1.0.0"}, ["a", "b"]),
+        ({"repo": "o/x", "kind": "cross-review", "version": "2.0.0"}, ["d"]),
+        ({"repo": "o/z"}, []),
+        ({"repo": "", "kind": "", "version": ""}, ["a", "b", "c", "d"]),
+    ],
+)
 def test_select_equality_filters(rm, over, expected):
     picked = rm._select(_SELECT_ROWS, _select_args(**over))
     assert [row["id"] for row in picked] == expected

@@ -4,6 +4,7 @@
 記録から組み立てる（#933 の決定 8）。記録は手で書き、`refactor_lib.measure` と、状態の
 保存の差し込み口を通した要約を読む。
 """
+
 from __future__ import annotations
 
 import datetime as dt
@@ -34,15 +35,26 @@ def _args(state_id=130, **over):
 
 
 def _stamp(naive: str) -> str:
-    return (dt.datetime.fromisoformat(naive).astimezone()
-            .astimezone(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ"))
+    return dt.datetime.fromisoformat(naive).astimezone().astimezone(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
 
 def _launch(stem: str, started: str, ended: str, elapsed: float, reason: str = "ok") -> dict:
-    return {"agent": stem.split("-", 1)[0], "stem": stem, "status": "OK", "exit_code": 0,
-            "reason": reason, "detail": "err.log の抜粋", "launched_at": started,
-            "started_at": started, "ended_at": ended, "elapsed": elapsed,
-            "idle_seconds": 0.0, "progress_tail": "", "result_exists": True, "pid": 1}
+    return {
+        "agent": stem.split("-", 1)[0],
+        "stem": stem,
+        "status": "OK",
+        "exit_code": 0,
+        "reason": reason,
+        "detail": "err.log の抜粋",
+        "launched_at": started,
+        "started_at": started,
+        "ended_at": ended,
+        "elapsed": elapsed,
+        "idle_seconds": 0.0,
+        "progress_tail": "",
+        "result_exists": True,
+        "pid": 1,
+    }
 
 
 def _t(minute: int) -> str:
@@ -54,13 +66,13 @@ def _state(root: pathlib.Path, **over) -> pathlib.Path:
     work = root / "work"
     work.mkdir(parents=True, exist_ok=True)
     git("init", "-q", cwd=work)
-    git("-c", "user.email=t@e.st", "-c", "user.name=t", "commit", "-q", "--allow-empty",
-        "-m", "init", cwd=work)
+    git("-c", "user.email=t@e.st", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init", cwd=work)
     over.setdefault("started_at", "2026-08-15T00:00:00")
     return make_state_v2(root, work, **over)
 
 
 # ---------- AC9 ----------
+
 
 def test_start_phase_writes_the_summary(refactor, tmp_path, env_tmp_dir, metrics):
     """状態を保存するサブコマンドが、実行の要約を書く。"""
@@ -69,8 +81,7 @@ def test_start_phase_writes_the_summary(refactor, tmp_path, env_tmp_dir, metrics
 
     refactor.cmd_start_phase(_args(phase="propose"))
 
-    expected = (metrics / "acme--demo"
-                / f"cross-refactoring-rf130-{_stamp('2026-08-15T00:00:00')}.json")
+    expected = metrics / "acme--demo" / f"cross-refactoring-rf130-{_stamp('2026-08-15T00:00:00')}.json"
     assert sorted(metrics.rglob("cross-refactoring-rf*.json")) == [expected]
     summary = json.loads(expected.read_text())
     assert summary["kind"] == "cross-refactoring"
@@ -83,14 +94,17 @@ def test_start_phase_writes_the_summary(refactor, tmp_path, env_tmp_dir, metrics
 
 # ---------- AC14 ----------
 
+
 def test_phases_counts_launches_and_seconds_per_phase(rf_measure):
     """手順の所要は状態から、起動回数と CLI の秒は監視の記録から足す。"""
-    state = {"phases": {
-        "propose": {"started_at": _t(0), "ended_at": _t(6), "seconds": 360.0},
-        "implement": {"started_at": _t(10), "ended_at": _t(25), "seconds": 900.0},
-        "verify": {"started_at": _t(25), "ended_at": _t(26), "seconds": 60.0},
-        "plan": {"started_at": _t(6)},            # 終わっていない手順は所要を置かない
-    }}
+    state = {
+        "phases": {
+            "propose": {"started_at": _t(0), "ended_at": _t(6), "seconds": 360.0},
+            "implement": {"started_at": _t(10), "ended_at": _t(25), "seconds": 900.0},
+            "verify": {"started_at": _t(25), "ended_at": _t(26), "seconds": 60.0},
+            "plan": {"started_at": _t(6)},  # 終わっていない手順は所要を置かない
+        }
+    }
     launches = [
         _launch("codex-propose-rf130", _t(1), _t(3), 120.0),
         _launch("agy-propose-rf130", _t(1), _t(5), 240.0, reason="timeout"),
@@ -102,7 +116,7 @@ def test_phases_counts_launches_and_seconds_per_phase(rf_measure):
         _launch("claude-fix-rf130", _t(29), _t(30), 60.0),
         _launch("codex-final-fix", _t(50), _t(55), 300.0),
         _launch("codex-review-pr130", _t(56), _t(57), 60.0),  # 知らない形は数えない
-        _launch("claude-apply-r1", _t(58), _t(59), 60.0),     # ラウンド制の形も数えない
+        _launch("claude-apply-r1", _t(58), _t(59), 60.0),  # ラウンド制の形も数えない
     ]
 
     phases = rf_measure.phases(state, launches)
@@ -114,29 +128,27 @@ def test_phases_counts_launches_and_seconds_per_phase(rf_measure):
     assert phases["fix"] == {"launches": 2, "cli_seconds": 180.0}
     assert phases["judge-test-changes"]["launches"] == 1
     assert phases["final-fix"] == {"launches": 1, "cli_seconds": 300.0}
-    assert set(phases) == {"propose", "plan", "implement", "verify", "fix",
-                           "judge-test-changes", "final-fix"}
+    assert set(phases) == {"propose", "plan", "implement", "verify", "fix", "judge-test-changes", "final-fix"}
 
 
 def test_phases_without_records_or_launches_are_absent(rf_measure):
     """測っていない手順を 0 で置かない。"""
     assert rf_measure.phases({"phases": {}}, []) == {}
     assert rf_measure.phases({}, [_launch("codex-propose-rf130", _t(1), _t(3), 120.0)]) == {
-        "propose": {"launches": 1, "cli_seconds": 120.0}}
+        "propose": {"launches": 1, "cli_seconds": 120.0}
+    }
 
 
 def test_the_summary_extra_carries_the_budget_and_the_implementer(rf_measure, tmp_path):
-    state = {"budget_minutes": 45, "implementer": "codex",
-             "phases": {"propose": {"seconds": 12.0}}}
+    state = {"budget_minutes": 45, "implementer": "codex", "phases": {"propose": {"seconds": 12.0}}}
     extra = rf_measure.summary_extra(tmp_path / "s.json", state, [])
-    assert extra == {"phases": {"propose": {"seconds": 12.0}},
-                     "budget_minutes": 45, "implementer": "codex"}
+    assert extra == {"phases": {"propose": {"seconds": 12.0}}, "budget_minutes": 45, "implementer": "codex"}
 
 
 # ---------- AC16 ----------
 
-def test_summary_failure_keeps_exit_code_and_stdout(
-        refactor, tmp_path, env_tmp_dir, metrics, monkeypatch, capsys):
+
+def test_summary_failure_keeps_exit_code_and_stdout(refactor, tmp_path, env_tmp_dir, metrics, monkeypatch, capsys):
     run_metrics = sys.modules["run_metrics"]
 
     def run(sub: pathlib.Path) -> tuple[int, str, str]:
@@ -183,6 +195,7 @@ def test_a_raising_hook_does_not_break_save(tmp_path, capsys, refactor):
 
 # ---------- AC23 ----------
 
+
 def test_report_ends_with_the_summary_path(refactor, tmp_path, env_tmp_dir, metrics, capsys):
     state_path = _state(tmp_path)
     env_tmp_dir(state_path)
@@ -194,8 +207,7 @@ def test_report_ends_with_the_summary_path(refactor, tmp_path, env_tmp_dir, metr
     assert last == f"計測の要約: {path.resolve()}"
 
 
-def test_report_with_metrics_still_ends_with_the_summary_line(
-        refactor, tmp_path, env_tmp_dir, metrics, monkeypatch, capsys):
+def test_report_with_metrics_still_ends_with_the_summary_line(refactor, tmp_path, env_tmp_dir, metrics, monkeypatch, capsys):
     state_path = _state(tmp_path)
     env_tmp_dir(state_path)
     monkeypatch.setenv("NDF_METRICS", "0")

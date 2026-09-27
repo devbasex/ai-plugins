@@ -13,6 +13,7 @@ hook・sdk・bump）。環境は ~/.cache/ndf/venv/hook-trial-<extra> に置く�
 作業ファイルは --work（既定 ~/.cache/ndf/hook-trial）に置く。
 結果は lib/step_result.py の形の 1 行の JSON。終了コード 0 = ok / 1 = 確かめたことが成り立たない / 3 = 前提が無い。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -58,15 +59,14 @@ def reexec_into(extra: str) -> None:
     if not uv:
         emit(result(TOOL, "stopped", f"uv を入れられない（{dt.UV_VERSION}）"), 3)
     env = dict(os.environ, NDF_DEPS_REEXEC="1", UV_PROJECT_ENVIRONMENT=venv_of(extra))
-    argv = [uv, "run", "--quiet", "--frozen", "--project", str(PROJECT), "--extra", extra,
-            "python", str(HERE), *sys.argv[1:]]
+    argv = [uv, "run", "--quiet", "--frozen", "--project", str(PROJECT), "--extra", extra, "python", str(HERE), *sys.argv[1:]]
     os.execve(uv, argv, env)
 
 
 # --- collect ---------------------------------------------------------------
 
 TEST_DIRS = ["plugins/ndf/skills/worktree/tests", "plugins/ndf/scripts/tests", "scripts/tests/test_agy_install_hooks.py"]
-CAPTURE_WRAPPER = r'''
+CAPTURE_WRAPPER = r"""
 # --- T2 の入力の採取（作業ディレクトリの複製だけに足す） ---
 eval "$(declare -f wt_extract_write_target | sed '1s/^wt_extract_write_target/__t2_orig_wewt/')"
 wt_extract_write_target() {
@@ -75,11 +75,12 @@ wt_extract_write_target() {
   fi
   __t2_orig_wewt "$@"
 }
-'''
+"""
 
 
 def cmd_collect(a) -> None:
     import shutil
+
     work = Path(a.work)
     copy = work / "scripts-copy"
     shutil.rmtree(copy, ignore_errors=True)
@@ -88,18 +89,46 @@ def cmd_collect(a) -> None:
     with open(copy / "lib" / "worktree-common.sh", "a", encoding="utf-8") as f:
         f.write(CAPTURE_WRAPPER)
     (work / "cap").mkdir(parents=True)
-    env = dict(os.environ, NDF_T2_REPO=str(REPO), NDF_T2_WORK=str(work),
-               PYTHONPATH=os.pathsep.join([str(PROJECT), os.environ.get("PYTHONPATH", "")]))
-    cmd = ["uv", "run", "--project", "plugins/playwright-kit/skills/playwright-kit-ops", "--with", "pytest",
-           "--with", "pytest-xdist", "pytest", "-p", "ht_capture", *TEST_DIRS, "-q", "-n", "4", "-p", "no:cacheprovider"]
+    env = dict(
+        os.environ,
+        NDF_T2_REPO=str(REPO),
+        NDF_T2_WORK=str(work),
+        PYTHONPATH=os.pathsep.join([str(PROJECT), os.environ.get("PYTHONPATH", "")]),
+    )
+    cmd = [
+        "uv",
+        "run",
+        "--project",
+        "plugins/playwright-kit/skills/playwright-kit-ops",
+        "--with",
+        "pytest",
+        "--with",
+        "pytest-xdist",
+        "pytest",
+        "-p",
+        "ht_capture",
+        *TEST_DIRS,
+        "-q",
+        "-n",
+        "4",
+        "-p",
+        "no:cacheprovider",
+    ]
     p = subprocess.run(cmd, cwd=REPO, env=env, capture_output=True, text=True)
     tail = (p.stdout or p.stderr).strip().splitlines()[-1:] or [""]
     inputs = gather(work)
     (work / "inputs.json").write_text(json.dumps(inputs, ensure_ascii=False, indent=1), encoding="utf-8")
     status = "ok" if p.returncode == 0 else "stopped"
-    emit(result(TOOL, status, f"hook のテストの入力を集めた（{tail[0]}）", [],
-                {"write_target": len(inputs["write_target"]), "bash": len(inputs["bash"]),
-                 "inputs": str(work / "inputs.json")}), 0 if status == "ok" else 1)
+    emit(
+        result(
+            TOOL,
+            status,
+            f"hook のテストの入力を集めた（{tail[0]}）",
+            [],
+            {"write_target": len(inputs["write_target"]), "bash": len(inputs["bash"]), "inputs": str(work / "inputs.json")},
+        ),
+        0 if status == "ok" else 1,
+    )
 
 
 def gather(work: Path) -> dict:
@@ -109,7 +138,7 @@ def gather(work: Path) -> dict:
         i = 0
         while i < len(parts) - 1 and parts[i] == b"R":
             n = int(parts[i + 2])
-            args = [x.decode(errors="replace") for x in parts[i + 3:i + 3 + n]]
+            args = [x.decode(errors="replace") for x in parts[i + 3 : i + 3 + n]]
             i += 3 + n
             wt.setdefault((args[0] if args else "", args[1] if len(args) > 1 else ""), True)
     tok: dict = {}
@@ -124,40 +153,40 @@ def gather(work: Path) -> dict:
             if d.get("tool_name") != "Bash" or not isinstance(ti, dict) or not isinstance(ti.get("command"), str):
                 continue
             tok.setdefault((ti["command"], r.get("max") or "5"), bool(ti.get("run_in_background")))
-    return {"write_target": [{"command": c, "base": b} for (c, b) in sorted(wt)],
-            "bash": [{"command": c, "max": m, "background": bg} for (c, m), bg in sorted(tok.items())]}
+    return {
+        "write_target": [{"command": c, "base": b} for (c, b) in sorted(wt)],
+        "bash": [{"command": c, "max": m, "background": bg} for (c, m), bg in sorted(tok.items())],
+    }
 
 
 # --- parity ----------------------------------------------------------------
 
 LIB = SCRIPTS / "lib" / "worktree-common.sh"
-BATCH_WT = r'''set -uo pipefail
+BATCH_WT = r"""set -uo pipefail
 . "$1"
 while IFS= read -r -d '' cmd && IFS= read -r -d '' base; do
   out=$(wt_extract_write_target "$cmd" "$base"); rc=$?
   printf '%s\0%s\0' "$rc" "$out"
 done
-'''
-BATCH_PLAN = r'''source <(sed -n '/^split_commands() {/,/^}/p;/^plan_command() {/,/^}/p' "$1")
+"""
+BATCH_PLAN = r"""source <(sed -n '/^split_commands() {/,/^}/p;/^plan_command() {/,/^}/p' "$1")
 while IFS= read -r -d '' cmd; do
   if plan_command "$cmd"; then printf '1\0'; else printf '0\0'; fi
 done
-'''
+"""
 
 
 def now_write_targets(pairs: list[tuple[str, str]]) -> list[list[str]]:
     data = b"".join(c.encode() + b"\0" + b.encode() + b"\0" for c, b in pairs)
-    p = subprocess.run(["bash", "-c", BATCH_WT, "batch", str(LIB)], input=data, capture_output=True,
-                       env=dict(os.environ, LC_ALL="C"))
+    p = subprocess.run(["bash", "-c", BATCH_WT, "batch", str(LIB)], input=data, capture_output=True, env=dict(os.environ, LC_ALL="C"))
     parts = p.stdout.split(b"\0")
     return [[ln for ln in parts[2 * k + 1].decode(errors="replace").splitlines() if ln] for k in range(len(pairs))]
 
 
 def now_plan(cmds: list[str]) -> list[bool]:
     data = b"".join(c.encode() + b"\0" for c in cmds)
-    p = subprocess.run(["bash", "-c", BATCH_PLAN, "batch", str(SCRIPTS / "token-guard.sh")], input=data,
-                       capture_output=True)
-    return [x == b"1" for x in p.stdout.split(b"\0")[:len(cmds)]]
+    p = subprocess.run(["bash", "-c", BATCH_PLAN, "batch", str(SCRIPTS / "token-guard.sh")], input=data, capture_output=True)
+    return [x == b"1" for x in p.stdout.split(b"\0")[: len(cmds)]]
 
 
 def uniq(xs):
@@ -167,6 +196,7 @@ def uniq(xs):
 def cmd_parity(a) -> None:
     import ht_shparse as sp
     import ht_shsleep as ss
+
     spec = importlib.util.spec_from_file_location("token_guard_sleep", SCRIPTS / "lib" / "token_guard_sleep.py")
     tgs = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(tgs)
@@ -184,8 +214,7 @@ def cmd_parity(a) -> None:
         new = sp.write_targets(c, b)
         errors += sp.has_error(c)
         if uniq(got) != uniq(new):
-            items.append({"kind": "write_target", "name": c, "result": "differs", "base": b,
-                          "now": uniq(got), "tree_sitter": uniq(new)})
+            items.append({"kind": "write_target", "name": c, "result": "differs", "base": b, "now": uniq(got), "tree_sitter": uniq(new)})
     for c, got in zip(cmds, now_plan(cmds)):
         new = ss.plan_command(c)
         if got != new:
@@ -201,16 +230,16 @@ def cmd_parity(a) -> None:
         except Exception:
             new = False
         if got != new:
-            items.append({"kind": "sleep_deny", "name": c, "result": "differs", "limit": lim,
-                          "now": got, "tree_sitter": new})
+            items.append({"kind": "sleep_deny", "name": c, "result": "differs", "limit": lim, "now": got, "tree_sitter": new})
     out = work / "parity.json"
     out.write_text(json.dumps(items, ensure_ascii=False, indent=1), encoding="utf-8")
     kinds = {k: sum(1 for i in items if i["kind"] == k) for k in ("write_target", "plan_command", "sleep_deny")}
-    metrics = {"write_target_inputs": len(pairs), "commands": len(cmds), "parse_errors": errors,
-               "differs": kinds, "list": str(out)}
+    metrics = {"write_target_inputs": len(pairs), "commands": len(cmds), "parse_errors": errors, "differs": kinds, "list": str(out)}
     status = "ok" if not items else "stopped"
-    emit(result(TOOL, status, f"入力 {len(pairs)} 件・コマンド {len(cmds)} 件のうち食い違い {len(items)} 件",
-                items, metrics), 0 if status == "ok" else 1)
+    emit(
+        result(TOOL, status, f"入力 {len(pairs)} 件・コマンド {len(cmds)} 件のうち食い違い {len(items)} 件", items, metrics),
+        0 if status == "ok" else 1,
+    )
 
 
 def main() -> None:

@@ -6,6 +6,7 @@
 改修計画で見積りを収め、実装の中は項目ごとの締め切りで着手を止める。手順の監視の上限は
 `timeline` がこの締め切りから導く（決定 23。決定 4 の「実行中の CLI を止めない」を改めた）。
 """
+
 from __future__ import annotations
 
 import datetime as _dt
@@ -117,10 +118,7 @@ def deadlines(selected: list[dict[str, Any]], T: _dt.datetime) -> list[dict[str,
         impl_after = sum(part("implement", x) for x in estimates[i:])
         test_after = sum(part("test", x) for x in estimates[i:])
         start = T - _dt.timedelta(minutes=impl_after + verify_all)
-        test_start = (
-            T - _dt.timedelta(minutes=impl_verify_all + test_after)
-            if part("test", e) > 0 else None
-        )
+        test_start = T - _dt.timedelta(minutes=impl_verify_all + test_after) if part("test", e) > 0 else None
         result.append({"start_deadline": start, "test_start_deadline": test_start})
     return result
 
@@ -140,9 +138,7 @@ def fix_end(started_at: _dt.datetime, budget_minutes: int, reserve: dict[str, An
     )
 
 
-def fix_time_left(
-    started_at: _dt.datetime, budget_minutes: int, reserve: dict[str, Any], now: _dt.datetime
-) -> float:
+def fix_time_left(started_at: _dt.datetime, budget_minutes: int, reserve: dict[str, Any], now: _dt.datetime) -> float:
     """修正に使える残り（分）。終わりは `fix_end`。"""
     return (fix_end(started_at, budget_minutes, reserve) - now).total_seconds() / 60
 

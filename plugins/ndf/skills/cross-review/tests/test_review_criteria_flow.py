@@ -4,6 +4,7 @@ init は PR の作業ツリーの重点の宣言（`.ndf/review.json`）を読�
 レビュー担当への節を写す。`launch-reviewer.sh` はその節を指示へ差し込み、節が無ければ宣言を
 読まない既定の節（基準 3 の無い形）を差し込む。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -26,8 +27,7 @@ def _declare(root: pathlib.Path, text: str) -> None:
 
 
 def _prompt(tmp_path: pathlib.Path, **state_over) -> str:
-    state = {"current_pr": PR, "repo": "o/r", "worktree_path": str(tmp_path),
-             "rounds": [{"round": 1, "head_sha": "a" * 40}]}
+    state = {"current_pr": PR, "repo": "o/r", "worktree_path": str(tmp_path), "rounds": [{"round": 1, "head_sha": "a" * 40}]}
     state.update(state_over)
     (tmp_path / f"cross-review-pr{PR}-state.json").write_text(json.dumps(state, ensure_ascii=False))
     bin_dir = tmp_path / "bin"
@@ -35,9 +35,12 @@ def _prompt(tmp_path: pathlib.Path, **state_over) -> str:
     stub = bin_dir / "codex"
     stub.write_text("#!/bin/sh\nexit 0\n")
     stub.chmod(0o755)
-    p = subprocess.run(["bash", str(SCRIPT), "codex", str(PR), "1"], capture_output=True, text=True,
-                       env={**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
-                            "CROSS_REVIEW_TMP_DIR": str(tmp_path)})
+    p = subprocess.run(
+        ["bash", str(SCRIPT), "codex", str(PR), "1"],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "CROSS_REVIEW_TMP_DIR": str(tmp_path)},
+    )
     assert p.returncode == 0, p.stderr
     return (tmp_path / f"codex-review-pr{PR}-prompt.md").read_text(encoding="utf-8")
 
@@ -72,21 +75,38 @@ def resumable(monkeypatch, tmp_path, state_mod):
     wt = tmp_path / "wt"
     wt.mkdir()
     state_file = tmp_path / f"cross-review-pr{PR}-state.json"
-    state_file.write_text(json.dumps({
-        "current_pr": PR, "repo": "o/r", "tmp_dir": str(tmp_path), "head_branch": "feat/x",
-        "base_branch": "develop", "pr_author": "a", "viewer_login": "a", "is_own_pr": True,
-        "event_downgrade": True, "worktree_path": str(wt), "auto_review_categories": ["code"],
-        "auto_review_instructions": "観点", "review_instructions": "観点", "rounds": [],
-        "carried_over": None, "final": None,
-        "review_criteria": {"status": "none", "focus": [], "error": None, "reviewer_block": "古い節"},
-    }), encoding="utf-8")
+    state_file.write_text(
+        json.dumps(
+            {
+                "current_pr": PR,
+                "repo": "o/r",
+                "tmp_dir": str(tmp_path),
+                "head_branch": "feat/x",
+                "base_branch": "develop",
+                "pr_author": "a",
+                "viewer_login": "a",
+                "is_own_pr": True,
+                "event_downgrade": True,
+                "worktree_path": str(wt),
+                "auto_review_categories": ["code"],
+                "auto_review_instructions": "観点",
+                "review_instructions": "観点",
+                "rounds": [],
+                "carried_over": None,
+                "final": None,
+                "review_criteria": {"status": "none", "focus": [], "error": None, "reviewer_block": "古い節"},
+            }
+        ),
+        encoding="utf-8",
+    )
     return wt, state_file
 
 
 def _resume(fake_gh):
     fake_gh.set_rules([{"match": "graphql", "stdout": ""}])
-    review_lib.commands.init.cmd_init(argparse.Namespace(
-        pr=PR, max_rounds=12, rotate_after=8, only=None, worktree=None, focus=None, extra_instructions_file=None))
+    review_lib.commands.init.cmd_init(
+        argparse.Namespace(pr=PR, max_rounds=12, rotate_after=8, only=None, worktree=None, focus=None, extra_instructions_file=None)
+    )
 
 
 def test_resume_rewrites_the_criteria_from_the_declaration(resumable, fake_gh, capsys):
@@ -124,24 +144,52 @@ import result_posts  # noqa: E402
 
 def _waived(tid: str, cid: int, kind: str) -> dict:
     reply = review_lib.commands.init.review_criteria.waiver_reply(kind)
-    return {"comment_id": cid, "thread_id": tid, "path": "a.md", "line": 1, "severity": "minor",
-            "summary": "x", "reason_for_deferral": reply, "reply": reply, "resolve": True, "waived": kind}
+    return {
+        "comment_id": cid,
+        "thread_id": tid,
+        "path": "a.md",
+        "line": 1,
+        "severity": "minor",
+        "summary": "x",
+        "reason_for_deferral": reply,
+        "reply": reply,
+        "resolve": True,
+        "waived": kind,
+    }
 
 
 def test_a_sweep_of_only_waived_threads_closes_them_without_a_commit(tmp_path, monkeypatch, state_mod, capsys):
     monkeypatch.setenv("CROSS_REVIEW_TMP_DIR", str(tmp_path))
-    sweep = {"resolved": 2, "fixed_in_sweep": 0, "commit": None, "fix_commit": None, "resolved_threads": [],
-             "deferred": [_waived("PRRT_a", 1, "wording"), _waived("PRRT_b", 2, "unlikely")], "rejected": [],
-             "remaining_open": 0, "remaining_reason": None, "items": []}
+    sweep = {
+        "resolved": 2,
+        "fixed_in_sweep": 0,
+        "commit": None,
+        "fix_commit": None,
+        "resolved_threads": [],
+        "deferred": [_waived("PRRT_a", 1, "wording"), _waived("PRRT_b", 2, "unlikely")],
+        "rejected": [],
+        "remaining_open": 0,
+        "remaining_reason": None,
+        "items": [],
+    }
     (tmp_path / f"sweep-pr{PR}-result.json").write_text(json.dumps(sweep, ensure_ascii=False))
     posts = result_posts.fix_posts(tmp_path / f"sweep-pr{PR}-result.json", "o/r", PR)
     closed = {p["fields"]["thread_id"] for p in posts if p["kind"] == "thread-resolve"}
     assert closed == {"PRRT_a", "PRRT_b"}
     assert result_posts.push_fix(tmp_path, "feat/x", sweep["fix_commit"]).pushed is False
 
-    (tmp_path / f"cross-review-pr{PR}-state.json").write_text(json.dumps({
-        "current_pr": PR, "repo": "o/r", "rounds": [], "deferred_nits": [], "final": "approved",
-        "pr_history": [{"pr": PR, "opened_at": "...", "closed_at": None, "rounds": 1}]}))
+    (tmp_path / f"cross-review-pr{PR}-state.json").write_text(
+        json.dumps(
+            {
+                "current_pr": PR,
+                "repo": "o/r",
+                "rounds": [],
+                "deferred_nits": [],
+                "final": "approved",
+                "pr_history": [{"pr": PR, "opened_at": "...", "closed_at": None, "rounds": 1}],
+            }
+        )
+    )
     monkeypatch.setattr(review_lib.github, "_fetch_unresolved_threads", lambda repo, pr: [])
     with pytest.raises(SystemExit) as e:
         review_lib.commands.report.cmd_verify_sweep(argparse.Namespace(pr=PR, file=None))
@@ -149,9 +197,10 @@ def test_a_sweep_of_only_waived_threads_closes_them_without_a_commit(tmp_path, m
 
 
 def test_the_report_counts_waived_apart_from_the_remaining_nits(state_mod, capsys):
-    st = {"deferred_nits": [_waived("PRRT_a", 1, "wording"),
-                            {"severity": "nit", "path": "b.py", "line": 2, "summary": "残り"}],
-          "review_criteria": {"status": "unreadable", "error": "壊れた宣言"}}
+    st = {
+        "deferred_nits": [_waived("PRRT_a", 1, "wording"), {"severity": "nit", "path": "b.py", "line": 2, "summary": "残り"}],
+        "review_criteria": {"status": "unreadable", "error": "壊れた宣言"},
+    }
     review_lib.commands.report._print_review_focus(st)
     review_lib.commands.report._print_deferred_nits(st)
     out = capsys.readouterr().out

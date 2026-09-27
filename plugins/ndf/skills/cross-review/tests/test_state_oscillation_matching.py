@@ -13,6 +13,7 @@
 閾値は 0.5 のまま変えない。一致の条件を広げると重なりの比は大きくなる方向にしか動かない
 ため、閾値も同時に動かすとどちらの変更が結果を変えたのかが分からなくなる。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -46,9 +47,7 @@ def _seed(tmp_dir: pathlib.Path) -> None:
 
 
 def _payload(tmp_dir: pathlib.Path, round_no: int, comments: list[dict]) -> None:
-    (tmp_dir / f"codex-review-pr{PR}-round{round_no}-payload.json").write_text(
-        json.dumps({"comments": comments}, ensure_ascii=False)
-    )
+    (tmp_dir / f"codex-review-pr{PR}-round{round_no}-payload.json").write_text(json.dumps({"comments": comments}, ensure_ascii=False))
 
 
 def _run(tmp_dir: pathlib.Path, state_mod, prev: list[dict], curr: list[dict]):
@@ -62,7 +61,8 @@ def _run(tmp_dir: pathlib.Path, state_mod, prev: list[dict], curr: list[dict]):
 
 def test_the_same_position_counts_as_the_same_place(tmp_dir, state_mod, capsys):
     code = _run(
-        tmp_dir, state_mod,
+        tmp_dir,
+        state_mod,
         [{"path": "a.py", "line": 10, "body": "直す"}],
         [{"path": "a.py", "line": 10, "body": "直す"}],
     )
@@ -73,7 +73,8 @@ def test_the_same_position_counts_as_the_same_place(tmp_dir, state_mod, capsys):
 def test_a_line_that_moved_by_one_counts_as_the_same_place(tmp_dir, state_mod, capsys):
     """行が 1 行ずれても同じ箇所として数える。これが従来は拾えなかった形である。"""
     code = _run(
-        tmp_dir, state_mod,
+        tmp_dir,
+        state_mod,
         [{"path": "a.py", "line": 10, "body": "引数のチェックが抜けている"}],
         [{"path": "a.py", "line": 11, "body": "まったく別の指摘の文面"}],
     )
@@ -84,7 +85,8 @@ def test_a_line_that_moved_by_one_counts_as_the_same_place(tmp_dir, state_mod, c
 def test_the_same_body_far_away_counts_as_the_same_place(tmp_dir, state_mod, capsys):
     """行が離れていても、同じファイルで本文が同じなら同じ箇所として数える。"""
     code = _run(
-        tmp_dir, state_mod,
+        tmp_dir,
+        state_mod,
         [{"path": "a.py", "line": 10, "body": "引数のチェックが抜けている"}],
         [{"path": "a.py", "line": 400, "body": "引数のチェックが抜けている"}],
     )
@@ -94,7 +96,8 @@ def test_the_same_body_far_away_counts_as_the_same_place(tmp_dir, state_mod, cap
 
 def test_a_different_place_is_not_counted(tmp_dir, state_mod, capsys):
     code = _run(
-        tmp_dir, state_mod,
+        tmp_dir,
+        state_mod,
         [{"path": "a.py", "line": 10, "body": "引数のチェックが抜けている"}],
         [{"path": "b.py", "line": 10, "body": "戻り値の型が合っていない"}],
     )
@@ -104,7 +107,8 @@ def test_a_different_place_is_not_counted(tmp_dir, state_mod, capsys):
 
 def test_a_line_far_enough_away_is_not_counted(tmp_dir, state_mod):
     code = _run(
-        tmp_dir, state_mod,
+        tmp_dir,
+        state_mod,
         [{"path": "a.py", "line": 10, "body": "引数のチェックが抜けている"}],
         [{"path": "a.py", "line": 14, "body": "戻り値の型が合っていない"}],
     )
@@ -117,7 +121,8 @@ def test_two_japanese_bodies_do_not_collapse_into_one(tmp_dir, state_mod):
     ASCII の英数字だけを残す正規化では本文が空になり、別の指摘どうしが一致してしまう。
     """
     code = _run(
-        tmp_dir, state_mod,
+        tmp_dir,
+        state_mod,
         [{"path": "a.py", "line": 10, "body": "引数のチェックが抜けている"}],
         [{"path": "a.py", "line": 400, "body": "戻り値の型が合っていない"}],
     )
@@ -126,7 +131,8 @@ def test_two_japanese_bodies_do_not_collapse_into_one(tmp_dir, state_mod):
 
 def test_the_breakdown_is_printed(tmp_dir, state_mod, capsys):
     code = _run(
-        tmp_dir, state_mod,
+        tmp_dir,
+        state_mod,
         [
             {"path": "a.py", "line": 10, "body": "あ"},
             {"path": "b.py", "line": 20, "body": "い"},
@@ -146,7 +152,8 @@ def test_the_breakdown_is_printed(tmp_dir, state_mod, capsys):
 def test_the_threshold_stays_at_half(tmp_dir, state_mod):
     """重なりが半分に満たなければ続行する。"""
     code = _run(
-        tmp_dir, state_mod,
+        tmp_dir,
+        state_mod,
         [{"path": "a.py", "line": 10, "body": "あ"}],
         [
             {"path": "a.py", "line": 10, "body": "あ"},
@@ -165,7 +172,8 @@ def test_the_body_normalization_keeps_letters_of_any_language(state_mod):
 
 def test_a_comment_with_an_unreadable_line_is_skipped(tmp_dir, state_mod):
     code = _run(
-        tmp_dir, state_mod,
+        tmp_dir,
+        state_mod,
         [{"path": "a.py", "line": 10, "body": "あ"}],
         [{"path": "a.py", "line": "ten", "body": "あ"}, {"path": "a.py", "line": 10, "body": "あ"}],
     )
@@ -181,14 +189,14 @@ def test_new_finding_count_characterization_conditions(tmp_dir, state_mod):
         {"path": "c.py", "line": 30, "body": "本文C"},
     ]
     curr = [
-        {"path": "a.py", "line": 10, "body": "本文A"},        # 1. 完全一致 -> 一致
-        {"path": "a.py", "line": 13, "body": "別の本文1"},      # 2. 近傍境界 (+3) -> 一致
-        {"path": "a.py", "line": 7, "body": "別の本文2"},       # 2. 近傍境界 (-3) -> 一致
-        {"path": "a.py", "line": 14, "body": "別の本文3"},      # 2. 近傍境界外 (+4) -> 不一致（新規）
-        {"path": "a.py", "line": 200, "body": "本文B"},        # 3. 離れた同一本文 -> 一致
-        {"path": "b.py", "line": 10, "body": "本文A"},         # 4. 別ファイル -> 不一致（新規）
-        {"path": "a.py", "line": 300, "body": "!!!"},          # 5. 空本文（正規化で空） -> 不一致（新規）
-        {"path": "c.py", "line": 80, "body": "異なる本文"},    # 6. 通常の不一致 -> 不一致（新規）
+        {"path": "a.py", "line": 10, "body": "本文A"},  # 1. 完全一致 -> 一致
+        {"path": "a.py", "line": 13, "body": "別の本文1"},  # 2. 近傍境界 (+3) -> 一致
+        {"path": "a.py", "line": 7, "body": "別の本文2"},  # 2. 近傍境界 (-3) -> 一致
+        {"path": "a.py", "line": 14, "body": "別の本文3"},  # 2. 近傍境界外 (+4) -> 不一致（新規）
+        {"path": "a.py", "line": 200, "body": "本文B"},  # 3. 離れた同一本文 -> 一致
+        {"path": "b.py", "line": 10, "body": "本文A"},  # 4. 別ファイル -> 不一致（新規）
+        {"path": "a.py", "line": 300, "body": "!!!"},  # 5. 空本文（正規化で空） -> 不一致（新規）
+        {"path": "c.py", "line": 80, "body": "異なる本文"},  # 6. 通常の不一致 -> 不一致（新規）
     ]
     _payload(tmp_dir, 1, prev)
     _payload(tmp_dir, 2, curr)
@@ -227,4 +235,3 @@ def test_oscillation_matching_priority_near_over_body(tmp_dir, state_mod, capsys
     assert code == 4
     err = capsys.readouterr().err
     assert "位置=0 近傍=1 本文=0" in err
-

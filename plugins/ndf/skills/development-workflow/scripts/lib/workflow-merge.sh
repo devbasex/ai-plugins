@@ -35,6 +35,7 @@ wf_merge_target() {
 }
 
 # `wf_merge_target` の 1 語分。`num` は呼び出し元のものを書き換える。
+# shellcheck disable=SC2034,SC2154  # state と found は呼び出し元 _wf_scan_gh_verb の局所変数を読み書きする（#1323）
 _wf_merge_target_token() {
   local tok="${1:-}" rest
   # REST の経路。`pulls/<番号>/merge` を指す語は、方式を問わずマージの意図と見なす。

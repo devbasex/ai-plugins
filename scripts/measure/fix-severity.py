@@ -21,6 +21,7 @@ PR のコメント・スレッド・スレッドのコメントは、1 ページ
   raised_from_minor        最初のラベルが minor / nit で、「対応しました」の返信を持つスレッドの数
   verdict                  minor_ratio ≤ 上限 かつ minor_only_rounds ≤ 上限 × prs。まとめが 0 件なら null（判定不能）
 """
+
 from __future__ import annotations
 
 import argparse
@@ -41,9 +42,16 @@ LEVELS = ("critical", "major", "minor", "nit")
 PAGE = "pageInfo{hasNextPage endCursor}"
 COMMENTS = "nodes{body createdAt} " + PAGE
 THREADS = "nodes{id comments(first:30){" + COMMENTS + "}} " + PAGE
-QUERY = ("query($q:String!,$after:String){search(query:$q,type:ISSUE,first:30,after:$after){" + PAGE
-         + " nodes{... on PullRequest{id number comments(first:100){" + COMMENTS + "}"
-         + " reviewThreads(first:100){" + THREADS + "}}}}}")
+QUERY = (
+    "query($q:String!,$after:String){search(query:$q,type:ISSUE,first:30,after:$after){"
+    + PAGE
+    + " nodes{... on PullRequest{id number comments(first:100){"
+    + COMMENTS
+    + "}"
+    + " reviewThreads(first:100){"
+    + THREADS
+    + "}}}}}"
+)
 # 1 ページに収まらなかった connection の続き（ノードの id から読む）。(型, connection, 選ぶ鍵)
 MORE = {
     "comments": ("PullRequest", "comments", COMMENTS),
@@ -53,6 +61,7 @@ MORE = {
 
 
 # --- 解析（純粋な関数。単体テストはここだけを縛る） ------------------------------
+
 
 def parse_summary(body: str) -> dict | None:
     """まとめのコメントなら件数を返す。まとめでなければ None。"""
@@ -70,8 +79,9 @@ def thread_label(bodies: list[str]) -> str | None:
     return m[1].lower() if m else None
 
 
-def aggregate(summaries: list[tuple[int, str]], threads: list[list[str]],
-              max_minor_ratio: float = 0.10, max_minor_only_per_pr: float = 0.05) -> dict:
+def aggregate(
+    summaries: list[tuple[int, str]], threads: list[list[str]], max_minor_ratio: float = 0.10, max_minor_only_per_pr: float = 0.05
+) -> dict:
     """まとめのコメント（PR 番号と本文）とスレッド（コメントの本文の列）から集計する。"""
     parsed = [(pr, s) for pr, s in ((pr, parse_summary(b)) for pr, b in summaries) if s]
     fixed = {k: sum(s[k] for _, s in parsed) for k in ("critical", "major", "minor")}
@@ -90,8 +100,11 @@ def aggregate(summaries: list[tuple[int, str]], threads: list[list[str]],
     posted_total = sum(posted.values())
     minor_ratio = fixed["minor"] / total if total else 0.0
     return {
-        "summaries": len(parsed), "prs": prs, "fixed_by_severity": fixed,
-        "minor_ratio": round(minor_ratio, 4), "minor_only_rounds": minor_only,
+        "summaries": len(parsed),
+        "prs": prs,
+        "fixed_by_severity": fixed,
+        "minor_ratio": round(minor_ratio, 4),
+        "minor_only_rounds": minor_only,
         "waived": sum(s["waived"] for _, s in parsed),
         "posted_by_severity": posted,
         "posted_minor_ratio": round((posted["minor"] + posted["nit"]) / posted_total, 4) if posted_total else 0.0,
@@ -130,6 +143,7 @@ def collect(nodes: list[dict], since: datetime, until: datetime | None) -> tuple
 
 # --- 取得 -----------------------------------------------------------------------
 
+
 def gh_graphql(query: str, **variables) -> dict:
     args = ["gh", "api", "graphql", "-f", f"query={query}"]
     for k, v in variables.items():
@@ -144,8 +158,7 @@ def gh_graphql(query: str, **variables) -> dict:
 def complete(conn: dict, node_id: str, kind: str, run=gh_graphql) -> None:
     """connection の残りのページを足す。1 ページに収まっていれば照会しない。"""
     typename, field, select = MORE[kind]
-    query = ("query($id:ID!,$after:String){node(id:$id){... on " + typename
-             + "{" + field + "(first:100,after:$after){" + select + "}}}}")
+    query = "query($id:ID!,$after:String){node(id:$id){... on " + typename + "{" + field + "(first:100,after:$after){" + select + "}}}}"
     while (conn.get("pageInfo") or {}).get("hasNextPage"):
         more = run(query, id=node_id, after=conn["pageInfo"]["endCursor"])["node"][field]
         conn["nodes"] = (conn.get("nodes") or []) + (more.get("nodes") or [])
@@ -181,8 +194,7 @@ def main(argv=None) -> int:
     a = ap.parse_args(argv)
     since, until = parse_time(a.since), parse_time(a.until) if a.until else None
     summaries, threads = collect(fetch(a.repo, since), since, until)
-    res = {"repo": a.repo, "since": a.since, "until": a.until,
-           **aggregate(summaries, threads, a.max_minor_ratio, a.max_minor_only_per_pr)}
+    res = {"repo": a.repo, "since": a.since, "until": a.until, **aggregate(summaries, threads, a.max_minor_ratio, a.max_minor_only_per_pr)}
     text = json.dumps(res, ensure_ascii=False, indent=1)
     if a.out:
         Path(a.out).write_text(text + "\n", encoding="utf-8")

@@ -352,3 +352,14 @@ mcp-serena が言語サーバーを選び、インストールを確かめると
 | HTSM | — | テスト戦略を Mission / Environment / Product Elements / Quality Criteria の 4 つで組む Heuristic Test Strategy Model | — | — | `plugins/playwright-kit/skills/playwright-planning/docs/README.md` |
 | SFDIPOT | — | Product Elements の 7 因子（Structure / Function / Data / Interfaces / Platform / Operations / Time） | — | — | `plugins/playwright-kit/skills/playwright-planning/docs/README.md` |
 | EP / BVA | — | 同値分割（Equivalence Partitioning）と境界値分析（Boundary Value Analysis） | — | — | `plugins/playwright-kit/skills/playwright-planning/docs/README.md` |
+
+## このリポジトリの開発の検査（`repo-dev-checks`）
+
+ai-plugins の開発で formatter と静的解析を手元と CI で走らせるときの語。NDF が利用者へ配る振る舞いではない
+
+| 語 | 識別子 | 意味 | 廃止した語 | 廃止した識別子 | 正本 |
+| --- | --- | --- | --- | --- | --- |
+| 一括の整形 | — | リポジトリの全対象へ formatter を掛け、結果を 1 つのコミットにしたもの。.git-blame-ignore-revs に載せる単位 | — | — | — |
+| 検査のコマンド | — | 手元で formatter の確認と静的解析を、CI と同じ版・同じ設定で走らせる 1 つのコマンド | — | — | — |
+| 一括の自動修正 | — | リポジトリの全対象へ ruff check --fix を掛け、結果を 1 つのコミットにしたもの。一括の整形と同じく .git-blame-ignore-revs に載せる | — | — | — |
+| 抑止 | — | 静的解析の指摘を、行のコメント（# noqa・# shellcheck disable=）か設定の除外で出さなくすること。理由を添える | — | — | — |

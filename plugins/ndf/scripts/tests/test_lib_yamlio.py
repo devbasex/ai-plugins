@@ -3,6 +3,7 @@
 今の `skill-stats.py:parse_front_matter` から変わる入力を固定する: 値は YAML の型で返る
 （`true` は真偽値、`[a, b]` は配列、複数行の `>` は畳んだ文字列）。
 """
+
 from __future__ import annotations
 
 import sys
@@ -28,8 +29,7 @@ description: >
 
 def test_values_come_back_typed():
     fm = yamlio.read_front_matter(DOC)
-    assert fm == {"name": "fix", "disable-model-invocation": True, "tags": ["a", "b"],
-                  "description": "一行目 二行目\n"}
+    assert fm == {"name": "fix", "disable-model-invocation": True, "tags": ["a", "b"], "description": "一行目 二行目\n"}
     assert yamlio.front_matter_text(DOC).startswith('name: "fix"')
     assert yamlio.split_front_matter(DOC).body == "# 本文\n" and yamlio.split_front_matter(DOC).body_line == 8
 

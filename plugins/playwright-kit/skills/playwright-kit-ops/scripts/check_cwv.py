@@ -71,41 +71,39 @@ def main() -> int:
     parser.add_argument("--url", help="計測対象 URL")
     parser.add_argument("--url-list", type=Path, help="URL を 1 行 1 件で書いたファイル")
     parser.add_argument("--storage-state", default=None)
-    parser.add_argument("--device", default=None,
-                        help="Playwright device 名 (例: 'Pixel 5')")
-    parser.add_argument("--observe-ms", type=int, default=5000,
-                        help="PerformanceObserver 観測時間 (ms)")
+    parser.add_argument("--device", default=None, help="Playwright device 名 (例: 'Pixel 5')")
+    parser.add_argument("--observe-ms", type=int, default=5000, help="PerformanceObserver 観測時間 (ms)")
     parser.add_argument("--output", type=Path, default=None)
-    parser.add_argument("--fail-on-poor", action="store_true",
-                        help="poor 判定 1 件以上で exit 1")
+    parser.add_argument("--fail-on-poor", action="store_true", help="poor 判定 1 件以上で exit 1")
     parser.add_argument("--headed", action="store_true")
     args = parser.parse_args()
 
     if not args.url and not args.url_list:
         parser.error("--url または --url-list が必要です")
 
-    urls = (
-        [line.strip() for line in args.url_list.read_text().splitlines() if line.strip()]
-        if args.url_list else [args.url]
-    )
+    urls = [line.strip() for line in args.url_list.read_text().splitlines() if line.strip()] if args.url_list else [args.url]
 
     results = [
-        measure(u, storage_state=args.storage_state, device_name=args.device,
-                headless=not args.headed, observe_ms=args.observe_ms)
+        measure(u, storage_state=args.storage_state, device_name=args.device, headless=not args.headed, observe_ms=args.observe_ms)
         for u in urls
     ]
 
-    has_poor = any(
-        any(v == "poor" for v in r.get("judgement", {}).values()) for r in results
-    )
+    has_poor = any(any(v == "poor" for v in r.get("judgement", {}).values()) for r in results)
 
     text = json.dumps(results, indent=2, ensure_ascii=False)
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(text, encoding="utf-8")
-        print(json.dumps({
-            "output": str(args.output), "count": len(results), "has_poor": has_poor,
-        }, ensure_ascii=False))
+        print(
+            json.dumps(
+                {
+                    "output": str(args.output),
+                    "count": len(results),
+                    "has_poor": has_poor,
+                },
+                ensure_ascii=False,
+            )
+        )
     else:
         sys.stdout.write(text + "\n")
     return 1 if args.fail_on_poor and has_poor else 0

@@ -1,4 +1,5 @@
 """プロセスの生死・親子・木の停止・メモリの包み（lib/procs.py・#1142 の決定 19）。外部パッケージは全体テストの環境（根の pyproject.toml）が入れる。"""
+
 from __future__ import annotations
 
 import os

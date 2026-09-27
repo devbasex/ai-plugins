@@ -12,6 +12,7 @@
 | 基準に含まれないローカルのコミットがある | 終了コード 8 で止める |
 | `worktree_path` が無い | 同期せず続ける |
 """
+
 from __future__ import annotations
 
 import argparse
@@ -40,18 +41,13 @@ def _rest(head_branch: str = BRANCH, oid: str = OID, fork: bool = False) -> str:
         "number": PR,
         "user": {"login": "someone"},
         "head": {
-            "ref": head_branch, "sha": oid,
+            "ref": head_branch,
+            "sha": oid,
             "repo": {"full_name": ("fork/r" if fork else REPO)},
         },
         "base": {"ref": "develop"},
     }
-    return (
-        "HTTP/2.0 200 OK\n"
-        "Content-Type: application/json; charset=utf-8\r\n"
-        "X-Ratelimit-Remaining: 4972\r\n"
-        "\r\n"
-        + json.dumps(body)
-    )
+    return "HTTP/2.0 200 OK\nContent-Type: application/json; charset=utf-8\r\nX-Ratelimit-Remaining: 4972\r\n\r\n" + json.dumps(body)
 
 
 class _Recorder:
@@ -113,7 +109,7 @@ class _Recorder:
         return [c for c, _ in self.calls]
 
     def issued(self, prefix: list[str]) -> bool:
-        return any(c[:len(prefix)] == prefix for c in self.commands())
+        return any(c[: len(prefix)] == prefix for c in self.commands())
 
 
 def _state(**over) -> dict:
@@ -153,13 +149,14 @@ def run(monkeypatch, state_mod):
     def _set(rec: _Recorder) -> _Recorder:
         monkeypatch.setattr(subprocess, "run", rec)
         # RUNNER を差し替えると gh_call は githubkit を使わず、`gh` を subprocess.run で起こす
-        monkeypatch.setattr(gh_call, "RUNNER",
-                            lambda args, stdin=None, cwd=None: gh_call._subprocess_gh(args, stdin, cwd))
+        monkeypatch.setattr(gh_call, "RUNNER", lambda args, stdin=None, cwd=None: gh_call._subprocess_gh(args, stdin, cwd))
         return rec
+
     return _set
 
 
 # ---------------- 揃える ----------------
+
 
 def test_syncs_before_opening_a_round(tmp_dir, state_mod, run):
     """作業ツリーが古いとき、取り込みと基準への巻き戻しを発行してからラウンドを開く。"""
@@ -191,6 +188,7 @@ def test_does_nothing_when_already_at_head(tmp_dir, state_mod, run, capsys):
 
 
 # ---------------- 失われるものがあるときは止める ----------------
+
 
 def test_stops_when_tracked_files_are_modified(tmp_dir, state_mod, run, capsys):
     """追跡対象の変更は、修正の工程が push を終えていない証拠である。捨てずに止める。"""
@@ -242,6 +240,7 @@ def test_a_sync_failure_does_not_end_the_loop(tmp_dir, state_mod, run):
 
 
 # ---------------- 同期先の取り方 ----------------
+
 
 def test_head_ref_comes_from_github(tmp_dir, state_mod, run):
     """状態ファイルの `head_branch` ではなく、その時点の head を GitHub から取る。
@@ -313,6 +312,7 @@ def test_strict_stops_when_the_base_commit_is_missing(tmp_dir, state_mod, run):
 
 
 # ---------------- 同期の対象が無い ----------------
+
 
 def test_continues_without_a_worktree_path(tmp_dir, state_mod, run):
     """同期の対象が無いことと、同期できないことは分けて扱う。前者は続ける。"""

@@ -28,17 +28,16 @@ _ENV_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
 
 def _expand_env_in_str(s: str) -> str:
     """文字列中の ${VAR} / ${VAR:-default} を環境変数で展開する。"""
+
     def repl(m: re.Match) -> str:
         name, default = m.group(1), m.group(2)
         val = os.environ.get(name)
         if val is None:
             if default is None:
-                raise ValueError(
-                    f"環境変数 ${{{name}}} が未定義です "
-                    "(default 指定 ${VAR:-default} または env を設定してください)"
-                )
+                raise ValueError(f"環境変数 ${{{name}}} が未定義です (default 指定 ${{VAR:-default}} または env を設定してください)")
             return default
         return val
+
     return _ENV_RE.sub(repl, s)
 
 
@@ -115,6 +114,7 @@ class BrowserConfig(_Section):
 
 # --- 接続/認証 -------------------------------------------------------
 
+
 class BasicAuth(_Section):
     user: str = ""
     password: str = ""
@@ -138,6 +138,7 @@ class Role(_Section):
 
 
 # --- レポート設定 ---------------------------------------------------
+
 
 class ReportConfig(_Section):
     title: str = "シナリオ E2E テスト 実施報告書"
@@ -228,15 +229,31 @@ class RunnerConfig(_Section):
 
 # --- accessibility / web vitals (v0.3.0) -----------------------------
 
+
 class AccessibilityConfig(_Section):
     """axe-core 自動スキャンの設定 (page_role に応じて runner が自動実行)。空の配列は既定値に戻る。"""
+
     enabled: bool = True
-    auto_roles: list[str] = Field(default_factory=lambda: [
-        "lp", "list", "form", "dashboard", "cart", "checkout", "settings", "auth",
-    ])
-    tags: list[str] = Field(default_factory=lambda: [
-        "wcag2a", "wcag2aa", "wcag21aa", "wcag22aa",
-    ])
+    auto_roles: list[str] = Field(
+        default_factory=lambda: [
+            "lp",
+            "list",
+            "form",
+            "dashboard",
+            "cart",
+            "checkout",
+            "settings",
+            "auth",
+        ]
+    )
+    tags: list[str] = Field(
+        default_factory=lambda: [
+            "wcag2a",
+            "wcag2aa",
+            "wcag21aa",
+            "wcag22aa",
+        ]
+    )
     # 検出した violations を testcase の FAIL 要因として扱うか (false なら情報出力のみ)
     fail_on_violations: bool = True
 
@@ -245,10 +262,16 @@ class AccessibilityConfig(_Section):
 
 class WebVitalsConfig(_Section):
     """Core Web Vitals 自動計測の設定 (page_role に応じて runner が自動実行)。空の配列は既定値に戻る。"""
+
     enabled: bool = True
-    auto_roles: list[str] = Field(default_factory=lambda: [
-        "lp", "list", "dashboard", "search",
-    ])
+    auto_roles: list[str] = Field(
+        default_factory=lambda: [
+            "lp",
+            "list",
+            "dashboard",
+            "search",
+        ]
+    )
     observe_ms: int = 5000
     # poor 判定が 1 件でもあれば testcase を FAIL とするか
     fail_on_poor: bool = True
@@ -257,6 +280,7 @@ class WebVitalsConfig(_Section):
 
 
 # --- body_check (PHP / SSR エラー検出, v0.4.0) ----------------------
+
 
 class BodyCheckConfig(_Section):
     """ページ本文の文字列マッチ検出 (PHP / SSR プロジェクト向け)。
@@ -283,25 +307,31 @@ class BodyCheckConfig(_Section):
     """
 
     enabled: bool = True
-    fatal_patterns: list[str] = Field(default_factory=lambda: [
-        "Fatal error",
-        "Uncaught",
-        "Parse error",
-    ])
-    warning_patterns: list[str] = Field(default_factory=lambda: [
-        "STRICT:",
-        "Warning:",
-        "Notice:",
-        "Deprecated:",
-    ])
+    fatal_patterns: list[str] = Field(
+        default_factory=lambda: [
+            "Fatal error",
+            "Uncaught",
+            "Parse error",
+        ]
+    )
+    warning_patterns: list[str] = Field(
+        default_factory=lambda: [
+            "STRICT:",
+            "Warning:",
+            "Notice:",
+            "Deprecated:",
+        ]
+    )
     # 文字数ベースの head 切り出し閾値 (code points)。PLAN18 のフィールド名は
     # ``warning_head_bytes`` だったが、説明文は「先頭 300 文字」と書かれており
     # 矛盾していた。実用上は文字数の方が日本語ページで安定するため採用。
     # 旧名 ``warning_head_bytes`` も alias として受理する。
     warning_head_chars: int = 300
-    not_found_patterns: list[str] = Field(default_factory=lambda: [
-        "File not found",
-    ])
+    not_found_patterns: list[str] = Field(
+        default_factory=lambda: [
+            "File not found",
+        ]
+    )
     fail_on_match: bool = True
 
     @model_validator(mode="before")
@@ -313,6 +343,7 @@ class BodyCheckConfig(_Section):
 
 
 # --- ルート ---------------------------------------------------------
+
 
 class Config(_Section):
     base_url: str
@@ -351,10 +382,7 @@ class Config(_Section):
     @classmethod
     def load(cls, path: Path) -> "Config":
         if not path.exists():
-            raise FileNotFoundError(
-                f"設定ファイルが見つかりません: {path}\n"
-                "templates/scenario.config.yaml をコピーして作成してください。"
-            )
+            raise FileNotFoundError(f"設定ファイルが見つかりません: {path}\ntemplates/scenario.config.yaml をコピーして作成してください。")
         with path.open("r", encoding="utf-8") as fp:
             raw = yaml.safe_load(fp)
         if not isinstance(raw, dict):
@@ -374,22 +402,24 @@ class Config(_Section):
         basic_auth = BasicAuth.model_validate(target.get("basic_auth") or {})
         roles = {rid: _role_from_raw(rid, r) for rid, r in (raw.get("roles") or {}).items()}
 
-        cfg = cls.model_validate({
-            "base_url": target["base_url"].rstrip("/"),
-            "basic_auth": basic_auth,
-            "verify_tls": raw.get("verify_tls", False),
-            "roles": roles,
-            "playwright": raw.get("playwright") or {},
-            "runner": raw.get("runner") or {},
-            "report": raw.get("report") or {},
-            "config_path": config_path,
-            "browser": raw.get("browser") or {},
-            "tolerated_console_errors": raw.get("tolerated_console_errors") or [],
-            "tolerated_page_errors": raw.get("tolerated_page_errors") or [],
-            "accessibility": raw.get("accessibility") or {},
-            "web_vitals": raw.get("web_vitals") or {},
-            "body_check": raw.get("body_check") or {},
-        })
+        cfg = cls.model_validate(
+            {
+                "base_url": target["base_url"].rstrip("/"),
+                "basic_auth": basic_auth,
+                "verify_tls": raw.get("verify_tls", False),
+                "roles": roles,
+                "playwright": raw.get("playwright") or {},
+                "runner": raw.get("runner") or {},
+                "report": raw.get("report") or {},
+                "config_path": config_path,
+                "browser": raw.get("browser") or {},
+                "tolerated_console_errors": raw.get("tolerated_console_errors") or [],
+                "tolerated_page_errors": raw.get("tolerated_page_errors") or [],
+                "accessibility": raw.get("accessibility") or {},
+                "web_vitals": raw.get("web_vitals") or {},
+                "body_check": raw.get("body_check") or {},
+            }
+        )
 
         # fail-fast: requires_basic_auth=True なロールが宣言されているのに
         # basic_auth.user が空ならば実行時に HTTP 401 で必ず落ちる。先に検出して
@@ -397,8 +427,7 @@ class Config(_Section):
         for role in cfg.roles.values():
             if role.login.requires_basic_auth and not basic_auth.user:
                 raise ValueError(
-                    f"role '{role.id}' は requires_basic_auth=True だが、"
-                    f"target.basic_auth.user が空 (config.yaml を確認してください)"
+                    f"role '{role.id}' は requires_basic_auth=True だが、target.basic_auth.user が空 (config.yaml を確認してください)"
                 )
 
         return cfg

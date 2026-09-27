@@ -2,6 +2,7 @@
 
 GitHub へは通信しない。`gh` を PATH から外すか、記録するだけの偽物へ差し替える。
 """
+
 from __future__ import annotations
 
 import json
@@ -21,9 +22,7 @@ def fake_gh(tmp_path, log, exit_code: int = 0, stderr: str = "") -> dict:
     gh = bindir / "gh"
     gh.write_text(
         "#!/usr/bin/env bash\n"
-        f'printf "%s\\n" "$*" >> "{log}"\n'
-        + (f'printf "%s" {stderr!r} >&2\n' if stderr else "")
-        + f"exit {exit_code}\n",
+        f'printf "%s\\n" "$*" >> "{log}"\n' + (f'printf "%s" {stderr!r} >&2\n' if stderr else "") + f"exit {exit_code}\n",
         encoding="utf-8",
     )
     gh.chmod(gh.stat().st_mode | stat.S_IEXEC)
@@ -39,7 +38,7 @@ def board_stdout(stdout: str) -> str:
     入口は先に issue の本文を更新し、その 1 行を出す（#828）。ボードの行は同じ文面のため、
     先頭の issue の本文の行を 1 つだけ外して残りをボードの出力として読む。
     """
-    return stdout[len(ISSUE_LINE):] if stdout.startswith(ISSUE_LINE) else stdout
+    return stdout[len(ISSUE_LINE) :] if stdout.startswith(ISSUE_LINE) else stdout
 
 
 def test_no_declaration_writes_only_the_issue_body(repo, tmp_path) -> None:
@@ -177,20 +176,22 @@ def scripted_gh(tmp_path, items, repo: str = HOST_REPO, total_count: int | None 
     log = tmp_path / "gh.log"
     (data / "view.json").write_text(json.dumps({"id": "PVT_1"}), encoding="utf-8")
     (data / "items.json").write_text(
-        json.dumps({
-            "items": [
-                {"id": item_id(r, n), "content": {"number": n, "repository": r}}
-                for r, n in entries
-            ],
-            "totalCount": len(entries) if total_count is None else total_count,
-        }),
+        json.dumps(
+            {
+                "items": [{"id": item_id(r, n), "content": {"number": n, "repository": r}} for r, n in entries],
+                "totalCount": len(entries) if total_count is None else total_count,
+            }
+        ),
         encoding="utf-8",
     )
     (data / "fields.json").write_text(
-        json.dumps({"fields": [
-            {"id": "FLD_1", "name": "進行",
-             "options": [{"id": "OPT_1", "name": "実装レビュー"}]},
-        ]}),
+        json.dumps(
+            {
+                "fields": [
+                    {"id": "FLD_1", "name": "進行", "options": [{"id": "OPT_1", "name": "実装レビュー"}]},
+                ]
+            }
+        ),
         encoding="utf-8",
     )
     gh = bindir / "gh"

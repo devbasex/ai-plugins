@@ -3,6 +3,7 @@
 比較を成立させるための 3 点を見る。**指定値が固定されること**、
 **実際に動いたモデルを記録できること**、**既定モデルのラウンドを区別すること**。
 """
+
 from __future__ import annotations
 
 import json
@@ -11,6 +12,7 @@ import pytest
 
 
 # ---------- モデル指定の解析 ----------
+
 
 def test_repeated_model_args(models):
     spec = models.parse_model_args(["codex=gpt-5.5", "claude=opus-5"])
@@ -50,6 +52,7 @@ def test_duplicate_runtime_is_an_error(models):
 
 # ---------- フラグ生成 ----------
 
+
 def test_model_flag_for_each_runtime(models):
     for runtime in ("claude", "codex", "agy", "kiro"):
         assert models.model_flag(runtime, "m") == ["--model", "m"]
@@ -60,6 +63,7 @@ def test_no_flag_when_unspecified(models):
 
 
 # ---------- 計測に使えるかの判定 ----------
+
 
 def test_only_claude_reports_the_model_that_actually_ran(models):
     """実測モデル名を取得できるランタイムを 1 箇所で宣言する。"""
@@ -96,27 +100,17 @@ def test_measurability_covers_every_participant(models, runtime, model, measurab
 
 def test_separation_reason_differs_by_runtime(models):
     """分離の理由は「既定モデル（auto）」に固定せず、ランタイムごとに書き分ける。"""
-    assert models.separation_reason("kiro", None) == (
-        "kiro の auto はラウンドごとに違うモデルが動きうる"
-    )
-    assert models.separation_reason("kiro", "auto") == (
-        "kiro の auto はラウンドごとに違うモデルが動きうる"
-    )
-    assert models.separation_reason("codex", None) == (
-        "codex はモデルを指定しておらず、実際に動いたモデルも取得できない"
-    )
-    assert models.separation_reason("agy", None) == (
-        "agy はモデルを指定しておらず、実際に動いたモデルも取得できない"
-    )
+    assert models.separation_reason("kiro", None) == ("kiro の auto はラウンドごとに違うモデルが動きうる")
+    assert models.separation_reason("kiro", "auto") == ("kiro の auto はラウンドごとに違うモデルが動きうる")
+    assert models.separation_reason("codex", None) == ("codex はモデルを指定しておらず、実際に動いたモデルも取得できない")
+    assert models.separation_reason("agy", None) == ("agy はモデルを指定しておらず、実際に動いたモデルも取得できない")
     assert models.separation_reason("claude", None) is None
     assert models.separation_reason("codex", "gpt-5.5") is None
 
 
 def test_assumption_note_marks_rounds_counted_on_trust(models):
     """指定があり実測できないラウンドは分離しないが、前提を報告へ残す。"""
-    assert models.assumption_note("codex", "gpt-5.5") == (
-        "codex は指定した gpt-5.5 で動いた前提で数える（実測不可）"
-    )
+    assert models.assumption_note("codex", "gpt-5.5") == ("codex は指定した gpt-5.5 で動いた前提で数える（実測不可）")
     assert models.assumption_note("claude", "opus-5") is None
     assert models.assumption_note("codex", None) is None
 
@@ -128,19 +122,27 @@ def test_label_marks_default_rounds(models):
 
 # ---------- 実測値の取り出し ----------
 
+
 def test_observed_model_from_claude_json(models):
-    out = json.dumps({
-        "type": "result", "is_error": False,
-        "modelUsage": {"claude-opus-5": {"inputTokens": 100}},
-    })
+    out = json.dumps(
+        {
+            "type": "result",
+            "is_error": False,
+            "modelUsage": {"claude-opus-5": {"inputTokens": 100}},
+        }
+    )
     assert models.observed_model("claude", out) == "claude-opus-5"
 
 
 def test_observed_model_picks_the_dominant_model(models):
-    out = json.dumps({"modelUsage": {
-        "claude-haiku-4-5": {"inputTokens": 10},
-        "claude-opus-5": {"inputTokens": 900},
-    }})
+    out = json.dumps(
+        {
+            "modelUsage": {
+                "claude-haiku-4-5": {"inputTokens": 10},
+                "claude-opus-5": {"inputTokens": 900},
+            }
+        }
+    )
     assert models.observed_model("claude", out) == "claude-opus-5"
 
 
@@ -162,6 +164,7 @@ def test_mismatch_warning(models):
 
 # ---------- 集計 ----------
 
+
 def _state_with_history():
     return {
         "items": [
@@ -171,34 +174,40 @@ def _state_with_history():
         ],
         "rounds": [
             {
-                "round": 1, "impl": "codex",
+                "round": 1,
+                "impl": "codex",
                 "impl_model": {"requested": "gpt-5.5", "observed": None},
                 "reviewers": ["agy", "kiro"],
-                "reviewer_models": {"agy": {"requested": "gemini-3.8",
-                                             "observed": None},
-                                    "kiro": {"requested": "claude-opus-5",
-                                             "observed": None}},
+                "reviewer_models": {
+                    "agy": {"requested": "gemini-3.8", "observed": None},
+                    "kiro": {"requested": "claude-opus-5", "observed": None},
+                },
                 "items": ["R1-001", "R1-002"],
                 "fix_rounds": 1,
                 "durations": {"apply": 100, "review": 50, "fix": 20},
                 "reviewer_seconds": {"agy": 30, "kiro": 20},
                 "reviews": [
-                    {"round": 1, "agy": "REQUEST_CHANGES", "kiro": "APPROVE",
-                     "findings": [
-                         {"reviewer": "agy", "item_id": "R1-002", "resolved": True},
-                         {"reviewer": "agy", "item_id": "R1-001", "resolved": False},
-                     ]},
-                    {"round": 2, "agy": "APPROVE", "kiro": "APPROVE",
-                     "findings": []},
+                    {
+                        "round": 1,
+                        "agy": "REQUEST_CHANGES",
+                        "kiro": "APPROVE",
+                        "findings": [
+                            {"reviewer": "agy", "item_id": "R1-002", "resolved": True},
+                            {"reviewer": "agy", "item_id": "R1-001", "resolved": False},
+                        ],
+                    },
+                    {"round": 2, "agy": "APPROVE", "kiro": "APPROVE", "findings": []},
                 ],
             },
             {
-                "round": 2, "impl": "claude",
+                "round": 2,
+                "impl": "claude",
                 "impl_model": {"requested": "opus-5", "observed": "opus-5"},
                 "reviewers": ["codex", "kiro"],
-                "reviewer_models": {"codex": {"requested": "gpt-5.5", "observed": None},
-                                    "kiro": {"requested": "claude-opus-5",
-                                             "observed": None}},
+                "reviewer_models": {
+                    "codex": {"requested": "gpt-5.5", "observed": None},
+                    "kiro": {"requested": "claude-opus-5", "observed": None},
+                },
                 "items": ["R2-001"],
                 "fix_rounds": 0,
                 "durations": {"apply": 200, "review": 40},
@@ -268,9 +277,7 @@ def test_unspecified_rounds_are_separated_per_runtime(metrics):
     state["rounds"][0]["impl_model"] = {"requested": None, "observed": None}
     state["rounds"][0]["impl"] = "codex"
     agg = metrics.aggregate(state)
-    assert any(
-        "codex はモデルを指定しておらず" in w for w in agg["unmeasured"]
-    ), agg["unmeasured"]
+    assert any("codex はモデルを指定しておらず" in w for w in agg["unmeasured"]), agg["unmeasured"]
     text = metrics.format_report(agg)
     assert "集計から分離したラウンド" in text
 
@@ -330,9 +337,7 @@ def test_report_survives_empty_state(metrics):
 # はどのテストも通していなかった。
 
 
-def test_record_observed_model_saves_the_observed_value(
-    gitfacts, tmp_path
-):
+def test_record_observed_model_saves_the_observed_value(gitfacts, tmp_path):
     """R2-005 — stdout ログの実測モデルを implementer_model.observed へ保存する。
 
     指定値を変えない。指定の固定は `init` が持つ（test_init の実装担当のモデル）。
@@ -341,20 +346,21 @@ def test_record_observed_model_saves_the_observed_value(
     tmp_dir.mkdir()
     # 実装手順の骨格は `claude-implement-rf130`（I3）。
     (tmp_dir / "claude-implement-rf130-stdout.log").write_text(
-        json.dumps({
-            "type": "result", "is_error": False,
-            "modelUsage": {"claude-opus-5": {"inputTokens": 100}},
-        }),
+        json.dumps(
+            {
+                "type": "result",
+                "is_error": False,
+                "modelUsage": {"claude-opus-5": {"inputTokens": 100}},
+            }
+        ),
         encoding="utf-8",
     )
-    state = {"id": 130, "tmp_dir": str(tmp_dir),
-             "implementer_model": {"requested": "claude-opus-5", "observed": None}}
+    state = {"id": 130, "tmp_dir": str(tmp_dir), "implementer_model": {"requested": "claude-opus-5", "observed": None}}
 
     gitfacts.record_observed_model(state, "claude", "implement")
 
     # 現状固定: stdout ログから拾った実測値が保存される。
-    assert state["implementer_model"] == {"requested": "claude-opus-5",
-                                          "observed": "claude-opus-5"}
+    assert state["implementer_model"] == {"requested": "claude-opus-5", "observed": "claude-opus-5"}
 
 
 def test_record_observed_model_reads_only_the_named_phase(gitfacts, tmp_path):
@@ -362,10 +368,9 @@ def test_record_observed_model_reads_only_the_named_phase(gitfacts, tmp_path):
     tmp_dir = tmp_path / "tmp"
     tmp_dir.mkdir()
     (tmp_dir / "claude-plan-rf130-stdout.log").write_text(
-        json.dumps({"type": "result", "modelUsage": {"claude-opus-5": {"inputTokens": 1}}}),
-        encoding="utf-8")
-    state = {"id": 130, "tmp_dir": str(tmp_dir),
-             "implementer_model": {"requested": None, "observed": None}}
+        json.dumps({"type": "result", "modelUsage": {"claude-opus-5": {"inputTokens": 1}}}), encoding="utf-8"
+    )
+    state = {"id": 130, "tmp_dir": str(tmp_dir), "implementer_model": {"requested": None, "observed": None}}
 
     gitfacts.record_observed_model(state, "claude", "implement")
 

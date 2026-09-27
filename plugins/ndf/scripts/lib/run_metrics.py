@@ -27,6 +27,7 @@ cross-review / cross-refactoring の 1 回の実行が、何分かかりどう�
                              [--kind <種類>] [--version <版>]
                              [--by total|round-count|reason] [--dir <置き場所>]
 """
+
 from __future__ import annotations
 
 import argparse
@@ -57,6 +58,7 @@ Extra = Callable[[pathlib.Path, dict, list], dict]
 
 # ---------------- 置き場所 ----------------
 
+
 def metrics_dir(env: Optional[Mapping[str, str]] = None) -> pathlib.Path:
     """要約の置き場所。**`NDF_METRICS=0` は見ない**（集計は止めた後も読める）。
 
@@ -78,6 +80,7 @@ def _disabled(env: Mapping[str, str]) -> bool:
 
 # ---------------- 時刻 ----------------
 
+
 def _iso_seconds(value: Any) -> Optional[str]:
     """読めた時刻を、元のタイムゾーンのまま秒までで書き直す。読めなければ `None`。"""
     parsed = clock.parse(value)
@@ -92,12 +95,12 @@ def _whole_seconds(start: Any, end: Any) -> Optional[int]:
 
 # ---------------- 要約の組み立て ----------------
 
+
 @functools.lru_cache(maxsize=1)
 def _ndf_version() -> Optional[str]:
     """プラグインの版。**読めなければ `null`**（配布の形によって置き場所が無い）。"""
     try:
-        data = json.loads(
-            (_LIB.parents[1] / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+        data = json.loads((_LIB.parents[1] / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
     version = data.get("version") if isinstance(data, dict) else None
@@ -168,8 +171,7 @@ def _round_rows(state: dict, run_end: Optional[str]) -> list[dict]:
 _REVIEW_STEM = re.compile(r"-pr(\d+)$")
 
 
-def _launches(state_path: pathlib.Path, state: dict, kind: str,
-              started_at: Optional[str], run_end: Optional[str]) -> list[dict]:
+def _launches(state_path: pathlib.Path, state: dict, kind: str, started_at: Optional[str], run_end: Optional[str]) -> list[dict]:
     """監視の記録のうち、この実行の起動だけを `detail` を除いて返す。
 
     **一時ディレクトリは回し直しで使い回され、記録は追記だけで消えない。** 開始より前
@@ -193,8 +195,7 @@ def _launches(state_path: pathlib.Path, state: dict, kind: str,
     return rows
 
 
-def build_summary(state_path: pathlib.Path, state: dict, kind: str,
-                  extra: Optional[Extra] = None) -> dict:
+def build_summary(state_path: pathlib.Path, state: dict, kind: str, extra: Optional[Extra] = None) -> dict:
     if kind not in KINDS:
         raise ValueError(f"要約の種類として知らない値です: {kind!r}")
     final = state.get("final")
@@ -223,10 +224,14 @@ def build_summary(state_path: pathlib.Path, state: dict, kind: str,
 
 # ---------------- 書き出し ----------------
 
-def write_summary(state_path: pathlib.Path, state: dict, kind: str,
-                  extra: Optional[Extra] = None,
-                  env: Optional[Mapping[str, str]] = None,
-                  ) -> tuple[Optional[pathlib.Path], Optional[str]]:
+
+def write_summary(
+    state_path: pathlib.Path,
+    state: dict,
+    kind: str,
+    extra: Optional[Extra] = None,
+    env: Optional[Mapping[str, str]] = None,
+) -> tuple[Optional[pathlib.Path], Optional[str]]:
     """要約を原子的に書く。書いたパスか、書かなかった理由を返す。"""
     env = os.environ if env is None else env
     if _disabled(env):
@@ -243,8 +248,7 @@ def write_summary(state_path: pathlib.Path, state: dict, kind: str,
     return path.resolve(), None
 
 
-def after_save(state_path: pathlib.Path, state: dict, kind: str,
-               extra: Optional[Extra] = None) -> None:
+def after_save(state_path: pathlib.Path, state: dict, kind: str, extra: Optional[Extra] = None) -> None:
     """状態の保存の後に呼ぶ。**失敗しても収束ループを止めない**（AC16）。"""
     try:
         write_summary(state_path, state, kind, extra)
@@ -252,8 +256,7 @@ def after_save(state_path: pathlib.Path, state: dict, kind: str,
         print(f"⚠ 計測の要約を書けません: {exc}", file=sys.stderr)
 
 
-def report_line(state_path: pathlib.Path, state: dict, kind: str,
-                extra: Optional[Extra] = None) -> str:
+def report_line(state_path: pathlib.Path, state: dict, kind: str, extra: Optional[Extra] = None) -> str:
     """`report` の最後の行。**要約を書き直してから**そのパスか理由を返す。"""
     try:
         path, reason = write_summary(state_path, state, kind, extra)
@@ -265,6 +268,7 @@ def report_line(state_path: pathlib.Path, state: dict, kind: str,
 
 
 # ---------------- 集計 ----------------
+
 
 def _load_summaries(base: pathlib.Path) -> tuple[list[dict], int]:
     rows: list[dict] = []
@@ -297,10 +301,9 @@ def _bound(value: Optional[str], *, upper: bool) -> Optional[_dt.datetime]:
     return parsed
 
 
-def _within_time_bound(started: Optional[_dt.datetime],
-                       since: Optional[_dt.datetime],
-                       until: Optional[_dt.datetime],
-                       until_exclusive: bool) -> bool:
+def _within_time_bound(
+    started: Optional[_dt.datetime], since: Optional[_dt.datetime], until: Optional[_dt.datetime], until_exclusive: bool
+) -> bool:
     if since and (started is None or started < since):
         return False
     if until and (started is None or (started >= until if until_exclusive else started > until)):
@@ -318,8 +321,7 @@ def _select(rows: list[dict], args: argparse.Namespace) -> list[dict]:
         started = clock.parse(row.get("started_at"))
         if not _within_time_bound(started, since, until, until_exclusive):
             continue
-        if any(getattr(args, attr) and row.get(key) != getattr(args, attr)
-               for attr, key in equality_filters):
+        if any(getattr(args, attr) and row.get(key) != getattr(args, attr) for attr, key in equality_filters):
             continue
         out.append(row)
     return out
@@ -346,6 +348,7 @@ def _one_decimal(value: float) -> str:
 def _table(header: list[str], rows: list[list[str]]) -> str:
     """先頭の列を左、ほかを右へ寄せた表（`lib/mdtable.py`）。`mdtable` は集計を出すときだけ読む。"""
     import mdtable  # deps.require("mdtable") の後でだけ import できる
+
     return mdtable.table_markdown(header, rows, align=["left"] + ["right"] * (len(header) - 1))
 
 
@@ -354,9 +357,17 @@ def _finished_rows(rows: list[dict]) -> list[list[str]]:
     for kind in KINDS:
         minutes = sorted(m for r in rows if r.get("kind") == kind and (m := _wall_minutes(r)) is not None)
         if minutes:
-            out.append([kind, str(len(minutes)), _one_decimal(_quantile(minutes, 0.5)),
-                        _one_decimal(_quantile(minutes, 0.75)), _one_decimal(_quantile(minutes, 0.9)),
-                        _one_decimal(minutes[-1]), _one_decimal(sum(minutes))])
+            out.append(
+                [
+                    kind,
+                    str(len(minutes)),
+                    _one_decimal(_quantile(minutes, 0.5)),
+                    _one_decimal(_quantile(minutes, 0.75)),
+                    _one_decimal(_quantile(minutes, 0.9)),
+                    _one_decimal(minutes[-1]),
+                    _one_decimal(sum(minutes)),
+                ]
+            )
     return out
 
 
@@ -365,14 +376,15 @@ def _unfinished_rows(rows: list[dict]) -> list[list[str]]:
     for kind in KINDS:
         pending = [r for r in rows if r.get("kind") == kind and r.get("final") is None]
         if pending:
-            out.append([f"終わっていない（{kind}）", str(len(pending)),
-                        "—", "—", "—", "—", "—"])
+            out.append([f"終わっていない（{kind}）", str(len(pending)), "—", "—", "—", "—", "—"])
     return out
 
 
 def _by_total(rows: list[dict]) -> str:
-    return _table(["種類", "件数", "中央値（分）", "p75（分）", "p90（分）", "最大（分）", "合計（分）"],
-                  _finished_rows(rows) + _unfinished_rows(rows))
+    return _table(
+        ["種類", "件数", "中央値（分）", "p75（分）", "p90（分）", "最大（分）", "合計（分）"],
+        _finished_rows(rows) + _unfinished_rows(rows),
+    )
 
 
 def _round_count_bucket(count: int) -> Optional[str]:
