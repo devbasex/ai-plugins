@@ -8,7 +8,8 @@
     review_criteria.py fixer    [--root <worktree>]   修正担当への節を標準出力へ
 
 `--root` を省くと宣言を読まない既定の節（基準 3 の無い形）を出す。宣言が読めないときは理由を標準エラーへ出し、
-終了コードは 0 のまま基準 1・2・4 の節を出す。
+終了コードは 0 のまま基準 1・2・4 の節を出す。`--root` を渡すと、節の後ろへ MVV の節（NDF の共通原則 → プロジェクト MVV →
+判断の決まり。`project_mvv.block`・#1366）を足す。
 
 宣言の形（ほかの鍵は無視する）:
 
@@ -22,6 +23,10 @@ import json
 import sys
 from pathlib import Path
 from typing import NamedTuple
+
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+import project_mvv  # noqa: E402
 
 DECL_PATH = (".ndf", "review.json")
 
@@ -101,9 +106,16 @@ def _criteria_lines(focus: Focus) -> list[str]:
     return lines
 
 
-def reviewer_block(focus: Focus = NO_FOCUS) -> str:
-    """レビュー担当への「指摘の基準」の節。宣言があるときだけ基準 3 の行を持つ。"""
-    return "\n".join(
+def _mvv_text(mvv) -> str:
+    """MVV の節（`project_mvv.ProjectMvv` か、状態に写した節の文字列）。省けば空。"""
+    if mvv is None:
+        return ""
+    return mvv if isinstance(mvv, str) else project_mvv.block(mvv)
+
+
+def reviewer_block(focus: Focus = NO_FOCUS, mvv=None) -> str:
+    """レビュー担当への「指摘の基準」の節。宣言があるときだけ基準 3 の行を持つ。`mvv` を渡すと MVV の節を後ろへ足す。"""
+    base = "\n".join(
         [
             "## 指摘の基準",
             "次のどれかに当たるものだけを、重要度 `critical` か `major` で書く（`minor` / `nit` は使わない）。"
@@ -113,12 +125,20 @@ def reviewer_block(focus: Focus = NO_FOCUS) -> str:
             f"書かないもの: {NOT_WRITTEN}",
         ]
     )
+    extra = _mvv_text(mvv)
+    return f"{base}\n\n{extra}".rstrip() if extra else base
 
 
-def fixer_block(focus: Focus = NO_FOCUS) -> str:
-    """修正担当への「指摘の基準」の節。基準・書かないもの・見送りの種類・返信の雛形。"""
+MVV_FIXER = (
+    "振り分けの各指摘の `mvv_basis` に、直す・見送る判断の根拠にした MVV の項目の番号（`Value 3` / `C4` / `P1` など）を並べる。"
+    "返信の末尾の根拠の句は `finalize` が足す。"
+)
+
+
+def fixer_block(focus: Focus = NO_FOCUS, mvv=None) -> str:
+    """修正担当への「指摘の基準」の節。基準・書かないもの・見送りの種類・返信の雛形。`mvv` を渡すと MVV の節を後ろへ足す。"""
     kinds = [f"- `{k}`: {v}" for k, v in WAIVE_KINDS.items()]
-    return "\n".join(
+    base = "\n".join(
         [
             "## 指摘の基準",
             "",
@@ -139,22 +159,51 @@ def fixer_block(focus: Focus = NO_FOCUS) -> str:
             "> " + waiver_reply("doc_mismatch", focus.names if focus.status == "declared" else ()),
         ]
     )
+    extra = _mvv_text(mvv)
+    return f"{base}\n\n{extra.rstrip()}\n\n{MVV_FIXER}" if extra else base
 
 
-def waiver_reply(kind: str, names=()) -> str:
-    """見送りの返信の本文。重点の名前があるときだけ重点の句を足す。不明な種類は ValueError。"""
+def waiver_reply(kind: str, names=(), basis: str | None = None) -> str:
+    """見送りの返信の本文。重点の名前があるときだけ重点の句を足す。`basis`（`project_mvv.basis_phrase` の句。
+    例: 「根拠: Value 1（MVV 版 1）」）を渡すと末尾に足す。不明な種類は ValueError。"""
     if kind not in WAIVE_KINDS:
         raise ValueError(f"見送りの種類が {'/'.join(WAIVE_KINDS)} のどれでもない: {kind!r}")
     inner = WAIVE_KINDS[kind]
     names = [n for n in (names or ()) if isinstance(n, str) and n.strip()]
     if names:
         inner += REPLY_FOCUS.format(names=" / ".join(names))
-    return REPLY.format(inner=inner)
+    reply = REPLY.format(inner=inner)
+    return f"{reply}{basis}" if basis else reply
 
 
-def as_state(focus: Focus) -> dict:
-    """状態ファイルの `review_criteria` の形。"""
-    return {"status": focus.status, "focus": list(focus.names), "error": focus.error, "reviewer_block": reviewer_block(focus)}
+def mvv_context(state_path, root_of) -> tuple[dict, str]:
+    """(プロジェクト MVV の参照, MVV の節)。cross-review の状態ファイル（`state_path`）に写したものがあればそれ、無ければ
+    `root_of()` の作業ツリーの宣言を読む（#1366）。修正担当の文脈（`fix-steps.py context`）が使う。"""
+    try:
+        crit = json.loads(Path(state_path).read_text(encoding="utf-8")).get("review_criteria") if state_path else None
+    except (OSError, ValueError, AttributeError):
+        crit = None
+    if isinstance(crit, dict) and isinstance(crit.get("project_mvv"), dict) and crit.get("mvv_block"):
+        return crit["project_mvv"], crit["mvv_block"]
+    mvv = project_mvv.load_mvv(root_of())
+    return project_mvv.record(mvv), project_mvv.block(mvv)
+
+
+def apply_basis(decisions: dict):
+    """振り分けの各指摘の `mvv_basis` を正規化し（I7。返されなければ「根拠なし」か「MVV なし」で、止めない）、MVV を返す。"""
+    mvv = project_mvv.from_record(decisions.get("project_mvv"))
+    for e in decisions.get("decisions") or []:
+        if isinstance(e, dict):
+            e["mvv_basis"] = project_mvv.basis(e.get("mvv_basis"), mvv)
+    return mvv
+
+
+def as_state(focus: Focus, mvv=None) -> dict:
+    """状態ファイルの `review_criteria` の形。`mvv`（`project_mvv.ProjectMvv`）を渡すと、参照と MVV の節も写す。"""
+    out = {"status": focus.status, "focus": list(focus.names), "error": focus.error, "reviewer_block": reviewer_block(focus, mvv)}
+    if mvv is not None:
+        out.update(project_mvv=project_mvv.record(mvv), mvv_block=project_mvv.block(mvv))
+    return out
 
 
 def main(argv=None) -> int:
@@ -165,7 +214,8 @@ def main(argv=None) -> int:
     focus = load_focus(a.root) if a.root else NO_FOCUS
     if focus.status == "unreadable":
         print(f"レビューの重点の宣言を読めないため、基準 1・2・4 だけで続ける: {focus.error}", file=sys.stderr)
-    print(reviewer_block(focus) if a.block == "reviewer" else fixer_block(focus))
+    mvv = project_mvv.load_mvv(a.root) if a.root else None
+    print(reviewer_block(focus, mvv) if a.block == "reviewer" else fixer_block(focus, mvv))
     return 0
 
 

@@ -18,6 +18,7 @@ import gh_call
 from supervise_lib import decl, paths, plan as plan_mod
 from supervise_lib.claude import TAIL, run_ticking
 from supervise_lib.prompts import JUDGE_SYSTEM
+import project_mvv
 
 
 def is_gate(code: int | None) -> bool:
@@ -172,8 +173,9 @@ class JudgeStep:
 
     def execute(self, ctx, step: dict) -> dict:
         choices = step.get("choices")
+        mvv = ctx.state.project_mvv_of(ctx.cwd)  # 判断の基準（#1366）。実行の開始で 1 回だけ読む
         prompt = (
-            f"フェーズ: {ctx.plan.get('フェーズ')} / 課題: {ctx.plan.get('課題')}\n"
+            project_mvv.block(mvv) + "\n" + f"フェーズ: {ctx.plan.get('フェーズ')} / 課題: {ctx.plan.get('課題')}\n"
             f"問い: {step['question']}\n"
             + (f"選べる値: {', '.join(choices)}（関門なら gate、止めるなら stop）\n" if choices else "")
             + f"作業ディレクトリ: {ctx.state.work}（worker の作業ファイルの置き場所）\n"
@@ -182,5 +184,6 @@ class JudgeStep:
         res = ctx.claude.call(JUDGE_SYSTEM, prompt, None, ctx.cwd, step.get("timeout", 600))
         ctx.claude.record_usage("judge", res)
         d = parse_decision(res["text"]) if res["ok"] else {"decision": "stop", "reason": res["text"][:200]}
-        ctx.state.cur.update(exit=0, text=json.dumps(d, ensure_ascii=False), seconds=res["seconds"])
+        d["basis"] = project_mvv.basis(d.get("basis"), mvv)  # 返されなければ「根拠なし」か「MVV なし」（止めない）
+        ctx.state.cur.update(exit=0, text=json.dumps(d, ensure_ascii=False), seconds=res["seconds"], basis=d["basis"])
         return d

@@ -71,6 +71,8 @@ def deferred_record(item: dict[str, Any], reason: str, detail: str = "") -> dict
     }
     if item.get("id"):
         record["item_id"] = item["id"]
+    if item.get("mvv_basis"):
+        record["mvv_basis"] = list(item["mvv_basis"])
     if detail:
         record["detail"] = detail
     return record

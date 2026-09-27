@@ -20,6 +20,10 @@
 
 $RF_SKILL_BLOCK
 
+## 判断の基準（MVV）
+
+$RF_MVV
+
 ## 改善候補
 
 ```json
@@ -35,6 +39,7 @@ $RF_ITEMS
 | `test_targets` | この項目の検証に走らせるテストの対象（パスか、`<パス>::<名前>` のノード ID）。オーケストレーターがテストのコマンドへ差し込む。**対象ラウンドテストの置き場所の中で、実在するもの**に限る（足すテストを含めてよい） |
 | `merge_into` | 同じ `path` + `symbol` の別の改善候補と**同じ変更**なら、その改善候補の `key`。違えば `null` |
 | `risk` | 公開の入出力（関数の引数と戻り値・CLI の引数と出力・ファイルの形）が変わりうるなら `true` |
+| `mvv_basis` | `tier` を決めた根拠にした判断の基準の項目の番号（`Value 3` / `C4` / `P1` など）。無ければ空 |
 
 - **コマンドは書かない。** `test_targets` だけを返します。空白・`;` `&` `|` `$` などを
   含む値は使われません
@@ -54,7 +59,7 @@ $RF_ITEMS
   "items": [
     {"key": "src/a.py#Foo.run#long_method", "tier": "high",
      "tests": ["tests/test_a.py"], "test_targets": ["tests/test_a.py::TestFoo"],
-     "merge_into": null, "risk": false}
+     "merge_into": null, "risk": false, "mvv_basis": ["Value 1"]}
   ]
 }
 ```

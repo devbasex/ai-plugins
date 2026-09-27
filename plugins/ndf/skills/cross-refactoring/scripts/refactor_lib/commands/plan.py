@@ -14,6 +14,7 @@ import sys
 from typing import Any, Optional
 
 import jev
+import project_mvv
 import run_metrics
 import statefile
 
@@ -123,8 +124,12 @@ def _jev_boolean(
 
 def _decide_tiers(state: dict[str, Any], answers: dict[str, dict[str, Any]]) -> None:
     """候補の全件に等級を付ける。Jev の確信度が下限に満たなければ実装担当の等級を使う。"""
+    mvv = project_mvv.from_record((state.get("project_mvv") or {}).get("ref"))
     for item in state["candidates"]:
         answer = answers.get(key_text(item)) or {}
+        # 実装担当の採否の根拠を先に、提案者の根拠を後に並べる（#1366）
+        raw = [*_strings(answer.get("mvv_basis")), *(b for b in item.get("mvv_basis") or [] if isinstance(b, str))]
+        item["mvv_basis"] = project_mvv.basis(raw, mvv)
         runtime_tier = answer.get("tier") if answer.get("tier") in TIERS else DEFAULT_TIER
         item["tier"], item["tier_source"] = runtime_tier, "runtime"
         item["tests"] = _strings(answer.get("tests"))
@@ -268,6 +273,7 @@ def _plan_items(
                         "test_targets",
                         "command",
                         "command_source",
+                        "mvv_basis",
                     )
                 },
                 "id": f"I-{rank:03d}",
