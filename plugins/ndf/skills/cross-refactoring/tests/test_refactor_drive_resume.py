@@ -139,3 +139,87 @@ def test_rerun_finds_drive_state_under_default_root(tmp_path, monkeypatch, capsy
     run_main(ARGV, capsys)
     code, out = run_main(ARGV, capsys)
     assert code == 0 and out["metrics"]["items"] == 2 and fake.inits() == 1
+
+
+class FakeFrom(FakeRefactor):
+    """`init` が途中の手順（`phase`）を返し、子のスクリプトの終了コードを `fail` で決める。"""
+
+    def __init__(self, tmp: Path, phase: str, fail: dict | None = None, monitor_out: str = ""):
+        super().__init__(tmp)
+        self.state["phase"] = phase
+        self.save()
+        self.fail, self.monitor_out = fail or {}, monitor_out
+
+    def __call__(self, cmd, env=None, cwd=None):
+        name = Path(cmd[1]).name if cmd[0] in (PY, "bash") else cmd[0]
+        if name in self.fail:
+            self.calls.append((name, *cmd[2:]))
+            return self.fail[name], ""
+        if name == "monitor.py":
+            self.calls.append((name, *cmd[2:]))
+            return 0, self.monitor_out
+        if name == "refactor.py" and cmd[2] == "verify":
+            self.calls.append((name, *cmd[2:]))
+            return 0, "VERIFY=done\n"
+        if name == "refactor.py" and cmd[2] in ("merge-plan", "merge-implement"):
+            self.calls.append((name, *cmd[2:]))
+            return 0, ""
+        return super().__call__(cmd, env, cwd)
+
+    def launched(self) -> list[str]:
+        return [c[2] for c in self.calls if c[0] == "launch-cli.sh"]
+
+
+def test_rerun_from_fix_does_not_relaunch_earlier_phases(tmp_path, monkeypatch, capsys):
+    """修正の手順で止まった実行は検証から再開し、提案・改修計画・実装の CLI を起動し直さない。"""
+    monkeypatch.setenv("CROSS_REFACTORING_TMP_DIR", str(tmp_path))
+    fake = FakeFrom(tmp_path, "fix")
+    monkeypatch.setattr(rf, "call", fake)
+    code, _ = run_main(ARGV, capsys)
+    assert code == 0 and fake.launched() == []
+    assert not any(c[:2] == ("refactor.py", "measure") for c in fake.calls)
+    assert any(c[:2] == ("refactor.py", "verify") for c in fake.calls)
+
+
+def test_prepare_worktrees_failure_stops_before_clis(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("CROSS_REFACTORING_TMP_DIR", str(tmp_path))
+    fake = FakeFrom(tmp_path, "propose", fail={"prepare-worktrees.sh": 1})
+    monkeypatch.setattr(rf, "call", fake)
+    code, out = run_main(ARGV, capsys)
+    assert code != 0 and "prepare-worktrees.sh" in out["summary"]
+    assert fake.launched() == []
+
+
+def test_monitor_failure_in_implement_stops_before_merge(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("CROSS_REFACTORING_TMP_DIR", str(tmp_path))
+    fake = FakeFrom(tmp_path, "implement", fail={"monitor.py": 2})
+    monkeypatch.setattr(rf, "call", fake)
+    code, out = run_main(ARGV, capsys)
+    assert code != 0 and "monitor.py" in out["summary"]
+    assert not any(c[:2] == ("refactor.py", "merge-implement") for c in fake.calls)
+
+
+def test_propose_stops_when_no_participant_finished(tmp_path, monkeypatch, capsys):
+    """全員が欠けた提案を候補 0 件の完了として扱わない。"""
+    monkeypatch.setenv("CROSS_REFACTORING_TMP_DIR", str(tmp_path))
+    fake = FakeFrom(tmp_path, "propose", fail={"monitor.py": 2})
+    monkeypatch.setattr(rf, "call", fake)
+    code, out = run_main(ARGV, capsys)
+    assert code != 0 and "提案" in out["summary"]
+    assert not any(c[:2] == ("refactor.py", "merge-proposals") for c in fake.calls)
+
+
+def test_propose_continues_when_one_participant_finished(tmp_path, monkeypatch, capsys):
+    """1 者が欠けても、提案を終えた参加者がいれば続ける（`merge-proposals` が欠けた者を除く）。"""
+    monkeypatch.setenv("CROSS_REFACTORING_TMP_DIR", str(tmp_path))
+    rows = '{"agent": "codex", "exit_code": 0}\n{"agent": "kiro", "exit_code": 2}\n'
+    fake = FakeFrom(tmp_path, "propose", monitor_out=rows)
+    real = fake.__call__
+
+    def call(cmd, env=None, cwd=None):
+        rc, out = real(cmd, env, cwd)
+        return (2, out) if Path(cmd[1]).name == "monitor.py" else (rc, out)
+
+    monkeypatch.setattr(rf, "call", call)
+    code, _ = run_main(ARGV, capsys)
+    assert code == 0 and any(c[:2] == ("refactor.py", "merge-proposals") for c in fake.calls)

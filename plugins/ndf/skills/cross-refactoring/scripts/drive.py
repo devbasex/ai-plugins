@@ -33,6 +33,8 @@ import repo as repo_lib  # noqa: E402
 
 TOOL = "cross-refactoring-drive"
 ORDER = ("propose", "plan", "add-tests", "implement", "verify", "final", "done")
+# 修正の手順は検証の繰り返しの中にある。そこで止まった実行は検証から再開する（提案以降の CLI を起動し直さない）
+RESUME_AS = {"fix": "verify", "final-fix": "final"}
 CR_DRIVE = HERE.parents[1] / "cross-review" / "scripts" / "drive.py"
 FOCUS = (
     "項目をまたいだ整合を見る。個々の改善項目の妥当性は範囲テストで判定済みのため対象外とする。"
@@ -120,11 +122,20 @@ class Drive:
 
     def todo(self, phase: str) -> bool:
         cur = self.v.get("PHASE") or "propose"
+        cur = RESUME_AS.get(cur, cur)
         return ORDER.index(phase) >= ORDER.index(cur) if cur in ORDER else True
 
-    def monitor(self, agents: str, phase: str, stem: str) -> None:
+    def sh(self, what: str, cmd: list[str]) -> str:
+        """子のスクリプトを打ち、非ゼロ終了なら駆動を止める。"""
+        rc, out = call(cmd, self.env)
+        if rc != 0:
+            raise Stop(f"{what} が終了コード {rc} で止まった", rc)
+        return out
+
+    def monitor(self, agents: str, phase: str, stem: str) -> tuple[int, list[dict]]:
+        """監視を打ち、終了コードと担当ごとの最終ステータス（1 行 1 JSON）を返す。"""
         extra = ["--timeout", self.v["PHASE_TIMEOUT"], "--stall-timeout", self.v["PHASE_TIMEOUT"]] if self.v.get("PHASE_TIMEOUT") else []
-        call(
+        rc, out = call(
             [
                 sys.executable,
                 str(LIB / "monitor.py"),
@@ -141,27 +152,50 @@ class Drive:
             ],
             self.env,
         )
+        rows = []
+        for line in out.splitlines():
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(row, dict) and "agent" in row:
+                rows.append(row)
+        return rc, rows
 
     def impl_phase(self, phase: str, impl: str | None = None, stem: str | None = None) -> None:
         self.v.pop("PHASE_TIMEOUT", None)
         self.rf("start-phase", self.v["ID"], phase)
         impl = impl or self.v["IMPL"]
-        call(["bash", str(HERE / "launch-cli.sh"), impl, phase, self.v["ID"]], self.env)
-        self.monitor(impl, phase, stem or f"{{agent}}-{phase}-rf{self.v['ID']}")
+        self.sh(f"launch-cli.sh（{impl}・{phase}）", ["bash", str(HERE / "launch-cli.sh"), impl, phase, self.v["ID"]])
+        rc, _ = self.monitor(impl, phase, stem or f"{{agent}}-{phase}-rf{self.v['ID']}")
+        if rc != 0:
+            raise Stop(f"monitor.py（{impl}・{phase}）が終了コード {rc} で止まった（タイムアウト・停滞・起動失敗）", rc)
+
+    def propose(self) -> None:
+        """全参加者の提案。1 者が欠けても続ける（`merge-proposals` が除く）が、全員が欠けたら止める。"""
+        i = self.v["ID"]
+        launched = []
+        for a in self.v.get("RUNTIMES", "").split():
+            rc, _ = call(["bash", str(HERE / "launch-cli.sh"), a, "propose", i], self.env)
+            if rc == 0:
+                launched.append(a)
+        if not launched:
+            raise Stop("提案の CLI を 1 者も起動できなかった", 1)
+        rc, rows = self.monitor(",".join(launched), "propose", f"{{agent}}-propose-rf{i}")
+        if rc != 0 and not any(r.get("exit_code") == 0 for r in rows):
+            raise Stop(f"monitor.py（propose）が終了コード {rc} で止まり、提案を終えた参加者がいない", rc)
 
     # --- 進行 ---
     def phases(self) -> None:
         i = self.v["ID"]
         go_final = False
         if self.todo("propose"):
-            _, head = call(["git", "-C", self.v["WORK"], "rev-parse", "HEAD"])
-            call(["bash", str(HERE / "prepare-worktrees.sh"), i, "sync", head.strip()], self.env)
+            head = self.sh("git rev-parse HEAD", ["git", "-C", self.v["WORK"], "rev-parse", "HEAD"])
+            self.sh("prepare-worktrees.sh sync", ["bash", str(HERE / "prepare-worktrees.sh"), i, "sync", head.strip()])
             # 提案の前に指標を 1 回だけ測る（#1319）。測定の失敗では止めない（4 だけが中断）。
             self.rf("measure", i, ok=(0, 1))
             self.rf("start-phase", i, "propose")
-            for a in self.v.get("RUNTIMES", "").split():
-                call(["bash", str(HERE / "launch-cli.sh"), a, "propose", i], self.env)
-            self.monitor(self.v.get("RUNTIMES_CSV", ""), "propose", f"{{agent}}-propose-rf{i}")
+            self.propose()
             go_final = self.rf("merge-proposals", i, ok=(0, 2))[0] == 2
         if not go_final:
             if self.todo("plan"):
@@ -233,7 +267,7 @@ class Drive:
             return self.done({"review_status": status})
         if ds.get("stage") == "done":
             return self.done({"review_status": ds.get("review_status")})
-        call(["bash", str(HERE / "prepare-worktrees.sh"), self.v["ID"]], self.env)
+        self.sh("prepare-worktrees.sh", ["bash", str(HERE / "prepare-worktrees.sh"), self.v["ID"]])
         self.phases()
         self.final_gate()
         if self.v.get("FINAL_GATE") == "cross-review":
