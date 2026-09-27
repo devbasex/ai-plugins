@@ -159,6 +159,28 @@ def baseline_line(baseline: dict[str, Any]) -> str:
     return f"{status}（{'—' if seconds is None else f'{seconds} 秒'} / HEAD {head}）"
 
 
+def existing_failures_line(baseline: dict[str, Any]) -> str:
+    """既存失敗の件数。JUnit を読めなかったときは理由。"""
+    ids = baseline.get("existing_failures")
+    if ids is None:
+        return f"読めない（{baseline.get('existing_failures_reason') or '—'}）" if baseline.get("status") == "red" else "0"
+    return str(len(ids))
+
+
+def strategy_lines(state: dict[str, Any]) -> list[str]:
+    """テストの戦略・根拠・範囲テストの雛形・最終ゲートへ寄せた危険フラグ（#1334）。報告と改修計画が共有する。"""
+    strategy = state.get("strategy") or {}
+    templates = [s.get("scope_command") for s in strategy.get("suites") or [] if s.get("scope_command")]
+    deferred = (state.get("whole_test") or {}).get("deferred") or {}
+    lines = [
+        f"- テストの戦略: {strategy.get('name') or '—'}（根拠 {strategy.get('source') or '—'}）",
+        f"- 範囲テストの雛形: {' / '.join(templates) or (strategy.get('round_command') or '—')}",
+    ]
+    if deferred:
+        lines.append(f"- 最終ゲートへ寄せた危険フラグ: {', '.join(deferred.get('flags') or [])}（項目 {', '.join(deferred.get('items') or [])}）")
+    return lines
+
+
 def format_plan(state: dict[str, Any]) -> str:
     """改修計画の本文を組み立てる。**同じ状態からは同じ本文が出る。**
 
@@ -175,8 +197,10 @@ def format_plan(state: dict[str, Any]) -> str:
         "理由と手順は提案の時点でしか残らないため、公開の直前に書き出している。",
         "",
         f"- 対象範囲: {', '.join(state.get('target_scope') or []) or '（未指定）'}",
-        f"- 着手前のテスト: {baseline.get('command') or '（未指定）'}",
-        f"- 着手前の全体のテストの結果: {baseline_line(baseline)}",
+        *strategy_lines(state),
+        f"- 着手前のテスト: {baseline.get('command') or '（未指定）'}（{baseline.get('mode') or 'whole'}）",
+        f"- 着手前のテストの結果: {baseline_line(baseline)}",
+        f"- 既存失敗の件数: {existing_failures_line(baseline)}",
         f"- 想定最大時間: {state.get('budget_minutes')} 分 / 改修計画の時点で使えた時間: {plan.get('available_minutes', '—')} 分",
         f"- 実装担当: {state.get('implementer') or '—'}",
         "",
@@ -205,20 +229,31 @@ _LIMIT_ROWS = (
     ("final_fix_seconds", "最終ゲートの修正の 1 回目に必ず渡す長さ（秒。予備時間の final_fix）"),
     ("measure_timeout", "指標の測定の上限（秒。提案の枠の中から割く）"),
     ("init_test_timeout", "着手前のテスト 1 回の上限（秒）"),
-    ("test_timeout", "テスト 1 回の上限（秒）"),
+    ("test_timeout", "範囲テスト 1 回の上限（秒）"),
+    ("whole_timeout", "手元の全体テスト 1 回の上限（秒）"),
+    ("ci_wait_timeout", "CI の待ちの上限（秒）"),
     ("margin_seconds", "余裕（秒。手順の上限と CLI の上限に足す）"),
 )
 
 
 def limits_section(limits: dict[str, Any]) -> list[str]:
-    """実行時の値の表。読み手が実行の前にすべての時刻を見られるようにする（決定 24）。
+    """実行時の値の表（テストの時間）。読み手が実行の前にすべての時刻を見られるようにする（決定 24）。
 
-    無音の打ち切りは手順の監視の上限と同じ値のため、行を分けない。
+    無音の打ち切りは手順の監視の上限と同じ値のため、行を分けない。上限を出した入力（`basis`）を並べる。
     """
     if not limits:
         return []
     rows = [(label, "—" if limits.get(key) is None else str(limits[key])) for key, label in _LIMIT_ROWS]
     lines = ["## 時間の上限", "", mdtable.table_markdown(["値", "中身"], rows)]
+    basis = limits.get("basis") or {}
+    if basis:
+        lines.extend(
+            [
+                "",
+                f"入力: 予算 {basis.get('budget_minutes')} 分 / 全体テストの所要 w {basis.get('w')}（{basis.get('w_source') or '—'}）"
+                f" / 着手前の実測 x {basis.get('x')} / CI の壁時計 c {basis.get('c')} / 戦略 {basis.get('strategy')}",
+            ]
+        )
     lines.extend(["", "無音の打ち切りは手順の監視の上限と同じ値である。項目ごとの締め切りは各項目の節にある。", ""])
     return lines
 

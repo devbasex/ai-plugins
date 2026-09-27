@@ -12,7 +12,9 @@ import datetime as dt
 
 import pytest
 
-from crossref_helpers import make_state_v2, read_state, write_result, write_state
+from crossref_helpers import SCOPE_COMMAND, make_state_v2, read_state, strategy_state, write_result, write_state
+
+SCOPE_WORDS = SCOPE_COMMAND.split()[:-1]
 
 
 def _candidate(n, symbol, *, smell="long_method", technique="extract_method", agreed=("codex",), severity="major"):
@@ -70,7 +72,8 @@ def test_items_carry_rank_estimate_tests_and_targets(planned, cmd_plan, capsys):
     items = state["items"]
     assert [i["candidate_id"] for i in items] == ["C-001", "C-002"]  # 等級が先
     assert items[0]["tests"] == ["tests/test_new.py"]
-    assert items[0]["command"] == ["pytest", "-q", "tests/test_new.py"]
+    # 範囲テストは戦略の雛形の `{paths}` を対象へ置き換えたもの（#1334 AC2）。語は雛形の語の並びから `{paths}` を除いたものを含む。
+    assert items[0]["command"] == SCOPE_WORDS + ["tests/test_new.py"]
     assert items[0]["estimate"] == {"test": 2.7, "implement": 1.3, "verify": 0.2}
     assert items[0]["test_start_deadline"] is not None
     assert items[1]["test_start_deadline"] is None
@@ -127,9 +130,14 @@ def test_an_item_without_a_limited_test_is_no_target(planned, cmd_plan):
     assert sorted(d["defer_reason"] for d in state["deferred_items"]) == ["no_target"] * 3
 
 
+def _round_only(command):
+    return strategy_state("round-only", "args", suites=[], round_command=command)
+
+
 def test_a_round_test_is_used_as_is_when_targets_cannot_be_built(planned, cmd_plan):
+    """`round-only` はラウンドテストをそのまま走らせる（AC4 の `--round-test` の経路）。"""
     a = _candidate(1, "f")
-    path = planned([a], [_answer(a, test_targets=[])], round_test={"command": "make test-unit", "status": "green"})
+    path = planned([a], [_answer(a, test_targets=[])], strategy=_round_only("make test-unit"))
     _run(cmd_plan)
     item = read_state(path)["items"][0]
     assert item["command"] == ["make", "test-unit"]
@@ -138,10 +146,19 @@ def test_a_round_test_is_used_as_is_when_targets_cannot_be_built(planned, cmd_pl
 
 def test_a_missing_plan_result_uses_defaults_and_does_not_stop(planned, cmd_plan):
     a = _candidate(1, "f")
-    path = planned([a], None, round_test={"command": "pytest -q tests", "status": "green"})
+    path = planned([a], None, strategy=_round_only("pytest -q tests"))
     _run(cmd_plan)
     item = read_state(path)["items"][0]
     assert (item["tier"], item["tests"], item["command_source"]) == ("medium", [], "round_test")
+
+
+def test_the_verify_estimate_grows_with_the_measured_scope_test(planned, cmd_plan):
+    """項目の検証の見積りは、配分の verify と着手前の範囲テストの実測の大きい方（#1334 決定 8）。"""
+    a = _candidate(1, "f")
+    baseline = {"mode": "scope", "command": "x", "status": "green", "checked_at": "t", "seconds": 90.0, "existing_failures": []}
+    path = planned([a], [_answer(a)], strategy=strategy_state("local-scoped-ci-whole"), baseline_test=baseline)
+    _run(cmd_plan)
+    assert read_state(path)["items"][0]["estimate"]["verify"] == pytest.approx(1.5)
 
 
 def test_runtime_merge_into_defers_the_duplicate(planned, cmd_plan):

@@ -16,7 +16,7 @@ from ..codemetrics_view import record_lines
 from ..items import item_label
 from ..measure import summary_extra
 from ..outbound import plan_reference
-from ..plan import baseline_line
+from ..plan import baseline_line, existing_failures_line, strategy_lines
 from ..paths import load_state
 from ..phases import phase_record
 from ..vocabulary import DEFER_REASONS
@@ -149,14 +149,23 @@ def _print_header(state: dict[str, Any]) -> None:
     )
     jev_line = "使った" if judge.get("kind") == "jev" else f"使わなかった（{judge.get('reason')}）"
     print(f"- 判断に Jev を: {jev_line} / 呼び出しの失敗 {judge.get('failures', 0)} 回")
-    print(f"- 着手前の全体のテスト: {baseline_line(state.get('baseline_test') or {})}")
+    for line in strategy_lines(state):
+        print(line)
+    baseline = state.get("baseline_test") or {}
+    print(f"- 着手前のテスト（{baseline.get('mode') or 'whole'}）: {baseline_line(baseline)} / 既存失敗 {existing_failures_line(baseline)}")
     if whole.get("ran"):
         print(
             f"- 検証の中の全体のテスト: 走らせた（危険フラグ {', '.join(whole.get('flags') or [])} / "
             f"{whole.get('status')}{_whole_detail(whole)}）"
         )
+    elif whole.get("deferred"):
+        deferred = whole["deferred"]
+        print(f"- 検証の中の全体のテスト: 最終ゲートへ寄せた（危険フラグ {', '.join(deferred.get('flags') or [])} / 項目 {', '.join(deferred.get('items') or [])}）")
     else:
         print("- 検証の中の全体のテスト: 走らせなかった（危険フラグが立たなかった）")
+    triage = gate.get("triage") or {}
+    if triage:
+        print(f"- 最終ゲートの見分け: {_triage_line(triage)}")
     print(
         f"- 最終ゲート: {gate.get('mode') or '—'}（{gate.get('status') or '未実行'}"
         f"{' / 検証の結果を使い回した' if gate.get('whole_test_reused') else ''}"
@@ -191,8 +200,16 @@ _RESOLUTIONS = {
     "fixing": "直しの途中",
     "fixed": "直して通った",
     "narrowed": "直らず、危険フラグの項目を新しい順に取り消した",
-    "reverted_all": "落ちたテストを取り出せず、危険フラグの項目をまとめて取り消した",
+    "reverted_all": "落ちたテストを見分けられず、危険フラグの項目をまとめて取り消した",
+    "deferred": "全体テストを CI に任せる戦略のため、最終ゲートへ寄せた",
 }
+
+
+def _triage_line(triage: dict[str, Any]) -> str:
+    """見分けの結果の 1 行。JUnit で見分けられなかったときは落とした理由。"""
+    if triage.get("fallback_reason"):
+        return f"全体の走らせ直しに落とした（{triage['fallback_reason']}）"
+    return f"フレーキー {len(triage.get('flaky') or [])}・既存失敗 {len(triage.get('preexisting') or [])}・変更起因 {len(triage.get('caused') or [])}"
 
 
 def _whole_detail(whole: dict[str, Any]) -> str:
@@ -201,14 +218,8 @@ def _whole_detail(whole: dict[str, Any]) -> str:
         return ""
     if not whole.get("resolution"):
         return " / 危険フラグの項目を取り消した" if whole.get("reverted") else ""
-    counts = ""
-    if whole.get("failed_tests") is not None:
-        counts = (
-            f" / 揺れ {len(whole.get('flaky') or [])}・元からの失敗 "
-            f"{len(whole.get('preexisting') or [])}・変更が原因 {len(whole.get('caused') or [])}"
-        )
-    why = f"（{whole['unparsed_reason']}）" if whole.get("unparsed_reason") else ""
-    return f"{counts} / {_RESOLUTIONS.get(whole['resolution'], whole['resolution'])}{why}"
+    counts = f" / {_triage_line(whole)}" if whole.get("failed_tests") is not None or whole.get("fallback_reason") else ""
+    return f"{counts} / {_RESOLUTIONS.get(whole['resolution'], whole['resolution'])}"
 
 
 def _phase_table(state: dict[str, Any]) -> str:

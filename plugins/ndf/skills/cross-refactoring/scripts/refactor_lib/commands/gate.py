@@ -2,11 +2,16 @@
 
 | 起動のされ方 | 最終ゲート | 見分け方 |
 | --- | --- | --- |
-| `development-workflow` の 1 工程 | `cross-review` を省き、**全体のテスト**で判定 | `--workflow-step` |
+| `development-workflow` の 1 工程 | `cross-review` を省き、**全体テスト**で判定 | `--workflow-step` |
 | 単独 | `cross-review` を実行 | 既定 |
 
 **引数で受け取る。** 環境変数や記録の読み取りは、起動元が違っても同じ値になりうる。
 呼ぶ側が明示する形にすれば、判定が 1 か所で済む。
+
+全体テストの置き場は戦略で決まる（#1334）。`local-full` / `round-only` は手元で走らせ、`local-scoped-ci-whole`（か
+`--ci-check`）は push 済みの HEAD のチェックを上限まで待つ。落ちたら JUnit から落ちたテストを取り、フレーキー・既存失敗・
+変更起因に分け、変更起因が無ければ通す（I5）。検証で最終ゲートへ寄せた危険フラグの項目は、変更起因のとき締め切りを
+過ぎていれば新しい順に取り消す（決定 7）。
 
 **テストで見つからない誤りを拾う工程は消えない。** 工程として起動したときに省いた
 分は、工程表の「実装レビュー」（`pr` → `cross-review`）が持つ。ここへ軽量なレビューを
@@ -17,13 +22,15 @@ from __future__ import annotations
 
 import argparse
 import pathlib
+import re
 import sys
 import time
 from typing import Any, Optional
 
 import statefile
+import test_triage
 
-from .. import clock, die, info, timeline
+from .. import clock, die, info, timeline, triage
 from ..gitfacts import (
     discard_impl_leftovers,
     flush_pending_push,
@@ -42,24 +49,28 @@ from ..intake import (
     close_without_result,
     discard_unverified,
 )
-from ..paths import git_out, load_state, work_dir
+from ..items import live_items
+from ..outbound import plan_line
+from ..paths import git_out, load_state, sh, work_dir
+from ..undo import drop
 from ..verify import verify_final_fix_commit
 from ..verify import unassigned_fix_commits
 
 
 def cmd_final_gate(args: argparse.Namespace) -> None:
-    """最終ゲートを通す（#933 の AC16b・決定 15・決定 16）。
+    """最終ゲートを通す（#933 の AC16b・決定 15・決定 16、#1334 F4〜F6）。
 
     終了コード: 0 = 通過（または `cross-review` を実行する） / 2 = 落ちた
-    （修正ラウンドへ） / 1 = 修正を打ち切った（想定最大時間の終わり）（**取り消さず**報告へ抜ける）。
+    （修正ラウンドへ） / 1 = 修正を打ち切った（想定最大時間の終わり）（**取り消さず**報告へ抜ける）/
+    4 = 判断できない（CI が上限までに終わらない・照会できない）。
 
     **最終ゲートは push 済みの地点である。** 打ち切っても取り消さない。取り消しの
     判断は Pull Request の読み手が持つため、失敗として報告に書く。
 
-    | 起動のされ方 | 見るもの |
+    | 全体テストの置き場 | 見るもの |
     | --- | --- |
-    | `--ci-check` あり | 継続的統合の結果 |
-    | `--ci-check` なし | HEAD で全体のテストを 1 度。検証の中で通り、取り消しが無く、HEAD が進んでいなければ使い回す |
+    | CI（`local-scoped-ci-whole` か `--ci-check`） | 継続的統合の結果。`pending` の間は `limits.ci_wait_timeout` まで待つ |
+    | 手元 | HEAD で全体テストを 1 度。検証の中で通り、取り消しが無く、HEAD が進んでいなければ使い回す |
 
     単独起動は、通れば `cross-review` へ渡す（`FINAL_GATE=cross-review`）。
     """
@@ -70,10 +81,10 @@ def cmd_final_gate(args: argparse.Namespace) -> None:
 
     if _reusable_whole_test(state):
         gate["whole_test_reused"] = True
-        passed, detail = True, "検証の中で通った全体のテストを使い回しました（HEAD は進んでいません）"
+        passed, detail = True, "検証の中で通った全体テストを使い回しました（HEAD は進んでいません）"
         gate["mode"] = "test"
     else:
-        passed, detail = _run_and_record_gate_check(state, gate)
+        passed, detail = _run_and_record_gate_check(path, state, gate)
 
     if passed and standalone:
         _emit_cross_review(
@@ -88,6 +99,13 @@ def cmd_final_gate(args: argparse.Namespace) -> None:
         return
 
     stop = _final_fix_stop(state, gate)
+    if stop and _revert_deferred(path, state, gate):
+        # 寄せた危険フラグの項目を取り消した。取り消しを公開して、次の最終ゲートが CI を待ち直す。
+        statefile.save(path, state)
+        push_with_retry_marker(path, state, gate)
+        info(f"↩ 最終ゲートへ寄せた危険フラグの項目を取り消しました（{detail}）。次の最終ゲートが確かめます")
+        statefile.emit(FINAL_GATE="failing", FINAL_FIX_IMPL=_final_fix_impl(state, gate), FINAL_FIX_ROUND=gate["fix_rounds"])
+        sys.exit(2)
     if stop:
         _gate_limit_reached(path, state, gate, detail, stop)
         return
@@ -114,14 +132,18 @@ def _final_fix_stop(state: dict[str, Any], gate: dict[str, Any]) -> Optional[str
     return None
 
 
-def _reusable_whole_test(state: dict[str, Any]) -> bool:
-    """検証の中の全体のテストを使い回せるか（決定 16）。
+def _ci_mode(state: dict[str, Any]) -> bool:
+    """最終ゲートを CI で見るか（戦略が CI に任せる、または `--ci-check`）。"""
+    return timeline.strategy_of(state).whole_on_ci or bool(str(state.get("ci_check") or "").strip())
 
-    `--ci-check` があれば使い回さない（継続的統合が見る）。検証の中で走って通り、
-    取り消しが無く（`whole_test.reverted` が偽）、その後に HEAD が 1 つも進んでいない
-    ときだけ真。生成物の同期のコミットが積まれていれば HEAD が進んでいるので走らせる。
+
+def _reusable_whole_test(state: dict[str, Any]) -> bool:
+    """検証の中の全体テストを使い回せるか（決定 16）。
+
+    CI で見るなら使い回さない。検証の中で走って通り、取り消しが無く（`whole_test.reverted` が偽）、
+    その後に HEAD が 1 つも進んでいないときだけ真。生成物の同期のコミットが積まれていれば HEAD が進んでいるので走らせる。
     """
-    if str(state.get("ci_check") or "").strip():
+    if _ci_mode(state):
         return False
     record = state.get("whole_test") or {}
     if not (record.get("ran") and record.get("status") == "pass") or record.get("reverted"):
@@ -130,21 +152,49 @@ def _reusable_whole_test(state: dict[str, Any]) -> bool:
     return bool(head) and head == record.get("head")
 
 
-def _run_and_record_gate_check(state: dict[str, Any], gate: dict[str, Any]) -> tuple[bool, str]:
-    """最終ゲートのチェックを 1 回走らせ、`checks` へ記録して結果を返す。"""
-    # **排他である。** `--ci-check` があれば手元のテストを実行せず継続的統合の成功
-    # だけで判定し、無ければ手元のテストだけで判定する。「どちらか一方が通れば通過」
-    # とはしない（OR で採ると、手元のテストの失敗を継続的統合の成功が覆す）。
-    ci_check = str(state.get("ci_check") or "").strip()
-    gate["mode"] = "ci" if ci_check else "test"
+def _run_and_record_gate_check(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any]) -> tuple[bool, str]:
+    """最終ゲートのチェックを 1 回走らせ、`checks` へ記録して結果を返す。落ちたら見分け、変更起因が無ければ通す。"""
+    # **排他である。** CI で見るなら手元のテストを実行せず継続的統合の結論だけで判定し、無ければ
+    # 手元のテストだけで判定する。「どちらか一方が通れば通過」とはしない。
+    ci = _ci_mode(state)
+    gate["mode"] = "ci" if ci else "test"
     started = time.monotonic()
-    passed, detail = _ci_gate(state, ci_check) if ci_check else _local_gate(state)
+    passed, detail, verdict = _ci_gate(state) if ci else _local_gate(state)
     seconds = round(time.monotonic() - started, 1)
-    _record_gate_check(gate, ci_check or _baseline_command(state), passed, detail, seconds)
-    if not ci_check:
+    if not passed and verdict is not None:
+        # 落ちたテストを見分ける。変更起因が無ければ通す（I5・決定 11）。
+        classified = triage.classify(state, verdict.get("timed_out", False), verdict.get("ci_xmls"))
+        gate["triage"] = {k: classified.get(k) for k in ("failed_tests", "flaky", "preexisting", "caused", "fallback_reason", "rerun_command")}
+        if classified.get("fallback_reason"):
+            detail += f" / 見分けを全体の走らせ直しに落とした（{classified['fallback_reason']}）"
+        else:
+            detail += (
+                f" / フレーキー {len(classified['flaky'])}・既存失敗 {len(classified['preexisting'])}・変更起因 {len(classified['caused'])}"
+            )
+            if not classified["caused"]:
+                passed = True
+                detail += "（変更起因の失敗は無い）"
+    _record_gate_check(gate, _gate_command(state), passed, detail, seconds)
+    if not ci:
         # 履歴の `whole_test.final`（AC17）。修正の後に走らせ直したときは足し込む。
         gate["whole_test_seconds"] = round(float(gate.get("whole_test_seconds") or 0.0) + seconds, 1)
+    statefile.save(path, state)
     return passed, detail
+
+
+def _gate_command(state: dict[str, Any]) -> str:
+    """記録に残す最終ゲートの相手（チェックの名前か全体テストのコマンド）。"""
+    if _ci_mode(state):
+        return " / ".join(_ci_checks(state))
+    return " && ".join(timeline.strategy_of(state).whole_commands())
+
+
+def _ci_checks(state: dict[str, Any]) -> list[str]:
+    """待つチェックの名前。`--ci-check` → 戦略の `ci.checks`（宣言の `test.ci.check` か必須のチェック）。"""
+    named = str(state.get("ci_check") or "").strip()
+    if named:
+        return [named]
+    return [str(c) for c in (timeline.strategy_of(state).ci or {}).get("checks") or []]
 
 
 def _emit_cross_review(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any], message: str) -> None:
@@ -212,8 +262,34 @@ def _gate_failing(
     sys.exit(2)
 
 
-def _baseline_command(state: dict[str, Any]) -> str:
-    return str((state.get("baseline_test") or {}).get("command") or "")
+def _revert_deferred(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any]) -> bool:
+    """検証で最終ゲートへ寄せた危険フラグの項目を、変更起因のとき新しい順に取り消す（#1334 決定 7・AC8）。
+
+    取り消すたびに変更起因のファイルを手元で走らせ直し、通った時点で止める。取り消したら真。
+    寄せた項目が無い・変更起因でない・走らせ直す語が無いときは何もせず偽。
+    """
+    deferred = (state.get("whole_test") or {}).get("deferred") or {}
+    ids = [i for i in deferred.get("items") or [] if i not in (gate.get("reverted_deferred") or [])]
+    verdict = gate.get("triage") or {}
+    rerun = verdict.get("rerun_command")
+    if not ids or not verdict.get("caused") or not rerun:
+        return False
+    live = {i["id"]: i for i in live_items(state)}
+    reason = "最終ゲートへ寄せた危険フラグの全体テストで変更起因の失敗が出て、締め切りを過ぎた"
+    reverted: list[str] = []
+    for item_id in sorted(ids, key=lambda i: -int((live.get(i) or {}).get("rank") or 0)):
+        if item_id not in live:
+            continue
+        live[item_id]["failure_reason"] = reason
+        drop(path, state, [item_id], reason)
+        reverted.append(item_id)
+        code, timed_out = run_with_timeout(list(rerun), work_dir(state), timeline.state_test_timeout(state))
+        if not timed_out and code == 0:
+            break
+    gate["reverted_deferred"] = list(gate.get("reverted_deferred") or []) + reverted
+    if reverted:
+        info(f"↩ 寄せた危険フラグの項目を新しい順に取り消しました（{', '.join(reverted)}）。{plan_line(state)}")
+    return bool(reverted)
 
 
 def _final_fix_impl(state: dict[str, Any], gate: dict[str, Any]) -> str:
@@ -306,7 +382,7 @@ def _verify_final_fix_commits(
     claimed_shas = reported_shas(payload)
     unassigned = unassigned_fix_commits(work, claimed_shas, ordered_range)
     # **テストコマンドは渡さない。** 合否は `final-gate` が採った側で 1 度だけ見る
-    # （`--ci-check` を指定した実行で手元のテストを走らせないため）。
+    # （CI で見る実行で手元のテストを走らせないため）。
     facts = collect_commit_facts(
         work,
         claimed_shas,
@@ -413,29 +489,87 @@ def cmd_merge_final_fix(args: argparse.Namespace) -> None:
     statefile.save(path, state)
     # **取り消したかどうかに関わらず公開する。** 最終ゲートは push 済みの地点なので、
     # 公開しないと Pull Request の内容と手元の HEAD が食い違ったまま次の判定へ入る。
-    # `--ci-check` の実行では、push しないと読む対象のチェックそのものが動かない。
+    # CI で見る実行では、push しないと読む対象のチェックそのものが動かない。
     push_with_retry_marker(path, state, gate)
 
 
-def _local_gate(state: dict[str, Any]) -> tuple[bool, str]:
-    """全体のテストを手元で実行する。**全体のテストを呼ぶのは `init` とここだけである。**"""
-    command = _baseline_command(state)
+def _local_gate(state: dict[str, Any]) -> tuple[bool, str, Optional[dict[str, Any]]]:
+    """全体テストを手元で実行する（I4: `local-scoped-ci-whole` では呼ばない）。3 つ目は落ちたときの見分けの材料。"""
+    commands = timeline.strategy_of(state).whole_commands()
     work = work_dir(state)
-    timeout = timeline.state_test_timeout(state)
-    code, timed_out = run_with_timeout(command, work, timeout)
-    if timed_out:
-        return False, f"{command} が {timeout} 秒で終わりませんでした"
-    return code == 0, f"{command} / 終了コード {code}"
+    timeout = timeline.state_whole_timeout(state)
+    triage.clear_junit(state)
+    for command in commands:
+        code, timed_out = run_with_timeout(command, work, timeout)
+        if timed_out:
+            return False, f"{command} が {timeout} 秒で終わりませんでした", {"timed_out": True}
+        if code != 0:
+            return False, f"{command} / 終了コード {code}", {"timed_out": False}
+    return True, f"{' && '.join(commands)} / 終了コード 0", None
 
 
-def _ci_gate(state: dict[str, Any], name: str) -> tuple[bool, str]:
-    """継続的統合の結果で判定する。**読むのは `check-runs` の 1 回だけ。**
+def _gh_json(path: str) -> Any:
+    out = sh(["gh", "api", "--method", "GET", path], check=False)
+    if not out:
+        return None
+    try:
+        import json
 
-    **結果を得られないときは通過させない**（fail-closed）。照会できなかったことと、
-    チェックが成功したことは別である。
+        return json.loads(out)
+    except ValueError:
+        return None
+
+
+def _gh_raw(path: str) -> bytes:
+    import subprocess
+
+    p = subprocess.run(["gh", "api", "--method", "GET", path], capture_output=True)
+    return p.stdout if p.returncode == 0 else b""
+
+
+def _ci_junit(state: dict[str, Any], sha: str, checks: list[str]) -> list[bytes]:
+    """落ちたチェックの run の成果物から JUnit を落とす。取れなければ空（見分けは走らせ直しへ落ちる）。"""
+    import gh_checks
+    import junit
+
+    from types import SimpleNamespace
+
+    repo = str(state.get("repo") or "")
+    runs = gh_checks.fetch_check_runs(repo, sha, rest_get=lambda p: SimpleNamespace(body=_gh_json(p))) or []
+    for run in runs:
+        if str(run.get("name") or "") not in checks:
+            continue
+        m = re.search(r"/actions/runs/(\d+)", str(run.get("details_url") or run.get("html_url") or ""))
+        if m:
+            return junit.artifact_xmls(_gh_json, _gh_raw, repo, m.group(1), (timeline.strategy_of(state).ci or {}).get("junit_artifacts"))
+    return []
+
+
+def _ci_gate(state: dict[str, Any]) -> tuple[bool, str, Optional[dict[str, Any]]]:
+    """継続的統合の結果で判定する。`pending` の間は上限（`limits.ci_wait_timeout`）まで待つ（決定 9）。
+
+    **結果を得られないときは通過させない**（fail-closed）。上限までに終わらない・照会できないときは、待った秒と
+    理由を出して「判断が要る」（終了コード 4）で終える。
     """
     sha = git_out(work_dir(state), ["rev-parse", "HEAD"]) or ""
-    result: Optional[str] = check_run_result(str(state.get("repo") or ""), sha, name)
-    if result is None:
-        return False, f"チェック {name} の結果を得られませんでした（{sha[:7]}）"
-    return result == "success", f"チェック {name} の結論は {result} でした（{sha[:7]}）"
+    repo = str(state.get("repo") or "")
+    checks = _ci_checks(state)
+    if not checks:
+        die("最終ゲートで待つチェックの名前がありません（--ci-check か宣言の test.ci.check・ci.required_checks）")
+    max_wait = float(timeline.state_ci_wait_timeout(state))
+
+    def fetch() -> Optional[str]:
+        results = [check_run_result(repo, sha, name) for name in checks]
+        if any(r is None for r in results):
+            return None
+        if any(r == "pending" for r in results):
+            return "pending"
+        return "success" if all(r == "success" for r in results) else str(next(r for r in results if r != "success"))
+
+    outcome, waited, attempts = test_triage.wait_check(fetch, max_wait, on_wait=lambda gap, n: info(f"⏳ CI を待っています（{n} 回目 / 次は {gap:.0f} 秒後）"))
+    label = f"チェック {', '.join(checks)}（{sha[:7]} / 待ち {waited:.0f} 秒・照会 {attempts} 回 / 上限 {max_wait:.0f} 秒）"
+    if outcome is None:
+        die(f"{label} の結論を得られませんでした（上限までに終わらない、または照会に失敗）。判断が要ります")
+    if outcome == "success":
+        return True, f"{label} の結論は success でした", None
+    return False, f"{label} の結論は {outcome} でした", {"timed_out": False, "ci_xmls": _ci_junit(state, sha, checks)}

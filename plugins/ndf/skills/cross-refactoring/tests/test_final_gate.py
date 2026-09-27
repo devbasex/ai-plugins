@@ -18,13 +18,19 @@ import json
 
 import pytest
 
-from crossref_helpers import make_state_v2, read_state
+from crossref_helpers import WHOLE_COMMAND, make_state_v2, read_state, strategy_state
+
+# 状態の戦略の全体テスト（手元で 1 度走らせるコマンド）。
+WHOLE = WHOLE_COMMAND
 
 
 def _state(tmp_path, **over):
     over.setdefault("workflow_step", False)
-    over.setdefault("baseline_test", {"command": "pytest -q", "status": "green", "checked_at": "2026-09-24T10:00:00", "seconds": 6.0})
     return make_state_v2(tmp_path, tmp_path / "work", phase="final", **over)
+
+
+def _abort(refactor_lib):
+    return refactor_lib.ABORT
 
 
 def _args(state_id=130):
@@ -36,7 +42,7 @@ def spy(patch_lib, refactor, monkeypatch):
     """テストの実行と `gh` の呼び出しを差し替え、何を呼んだかを記録する。"""
     seen: dict[str, list] = {"tests": [], "gh": []}
 
-    def fake_run(command, cwd, timeout, grace=5.0):
+    def fake_run(command, cwd, timeout, grace=5.0, output=None):
         seen["tests"].append(command)
         return seen.get("test_code", 0), False
 
@@ -69,7 +75,7 @@ def test_a_standalone_run_goes_to_cross_review_after_the_whole_test(refactor, cm
     cmd_gate.cmd_final_gate(_args())
 
     assert "FINAL_GATE=cross-review" in capsys.readouterr().out
-    assert spy["tests"] == ["pytest -q"]
+    assert spy["tests"] == [WHOLE]
     gate = read_state(state_path)["final_gate"]
     assert gate["mode"] == "cross-review"
     assert gate["checked_mode"] == "test"
@@ -86,7 +92,7 @@ def test_a_workflow_step_run_skips_cross_review_and_runs_the_tests(refactor, cmd
     out = capsys.readouterr().out
     assert "FINAL_GATE=passed" in out
     assert "cross-review" not in out
-    assert spy["tests"] == ["pytest -q"]
+    assert spy["tests"] == [WHOLE]
     assert read_state(state_path)["final_gate"]["status"] == "passed"
 
 
@@ -151,36 +157,62 @@ def test_a_failed_ci_check_does_not_pass(cmd_gate, tmp_path, env_tmp_dir, spy):
         "not json",  # 応答を解釈できない
     ],
 )
-def test_no_result_does_not_pass(cmd_gate, tmp_path, env_tmp_dir, spy, payload):
-    """fail-closed — **結果を得られないときは通過させない。**"""
+def test_no_result_does_not_pass(refactor_lib, cmd_gate, tmp_path, env_tmp_dir, spy, payload, capsys):
+    """fail-closed — **結果を得られないときは通過させず、「判断が要る」で終える**（#1334 非機能の可用性）。"""
     state_path = _state(tmp_path, workflow_step=True, ci_check="tests")
     env_tmp_dir(state_path)
     spy["gh_out"] = payload
 
     with pytest.raises(SystemExit) as e:
         cmd_gate.cmd_final_gate(_args())
-    assert e.value.code == 2
+    assert e.value.code == _abort(refactor_lib)
+    assert "得られませんでした" in capsys.readouterr().err
 
 
-def test_an_unfinished_ci_check_does_not_pass(cmd_gate, tmp_path, env_tmp_dir, spy):
-    state_path = _state(tmp_path, workflow_step=True, ci_check="tests")
+def test_an_unfinished_ci_check_is_waited_for_until_the_limit_then_needs_a_decision(refactor_lib, cmd_gate, tmp_path, env_tmp_dir, spy, capsys):
+    """`pending` の間は `limits.ci_wait_timeout` まで待ち、上限に届いたら待った秒を出して「判断が要る」で終える（決定 9）。"""
+    state_path = _state(tmp_path, workflow_step=True, ci_check="tests", limits={"test_timeout": 60, "whole_timeout": 60, "ci_wait_timeout": 25})
     env_tmp_dir(state_path)
     spy["gh_out"] = _check_runs(_run("tests", conclusion=None, status="in_progress"))
 
     with pytest.raises(SystemExit) as e:
         cmd_gate.cmd_final_gate(_args())
-    assert e.value.code == 2
+    assert e.value.code == _abort(refactor_lib)
+    assert len(spy["gh"]) > 1, "pending の間は問い合わせ直す"
+    err = capsys.readouterr().err
+    assert "上限 25 秒" in err and "待ち" in err
 
 
-def test_a_named_check_that_is_missing_does_not_pass(refactor, cmd_gate, tmp_path, env_tmp_dir, spy):
-    """名前が一致しないチェックの成功で通さない。"""
+def test_a_pending_check_that_turns_green_passes(refactor, cmd_gate, tmp_path, env_tmp_dir, spy, capsys):
+    """待っている間に success へ変わればそのまま通す。"""
+    state_path = _state(tmp_path, workflow_step=True, ci_check="tests", limits={"test_timeout": 60, "whole_timeout": 60, "ci_wait_timeout": 600})
+    env_tmp_dir(state_path)
+    answers = [_check_runs(_run("tests", conclusion=None, status="in_progress")), _check_runs(_run("tests"))]
+    spy["gh_out"] = answers[0]
+    original = spy["gh"]
+
+    class _Rotating(list):
+        def append(self, item):
+            super().append(item)
+            spy["gh_out"] = answers[min(len(self), len(answers) - 1)]
+
+    spy["gh"] = _Rotating(original)
+
+    cmd_gate.cmd_final_gate(_args())
+
+    assert "FINAL_GATE=passed" in capsys.readouterr().out
+    assert spy["tests"] == []
+
+
+def test_a_named_check_that_is_missing_does_not_pass(refactor_lib, cmd_gate, tmp_path, env_tmp_dir, spy):
+    """名前が一致しないチェックの成功で通さない。結論を得られないので「判断が要る」で終える。"""
     state_path = _state(tmp_path, workflow_step=True, ci_check="tests")
     env_tmp_dir(state_path)
     spy["gh_out"] = _check_runs(_run("lint"))
 
     with pytest.raises(SystemExit) as e:
         cmd_gate.cmd_final_gate(_args())
-    assert e.value.code == 2
+    assert e.value.code == _abort(refactor_lib)
 
 
 def test_a_failing_local_test_is_not_overturned_by_the_ci(refactor, cmd_gate, tmp_path, env_tmp_dir, spy):
@@ -345,7 +377,7 @@ def test_a_standalone_run_with_a_round_test_runs_the_baseline_test_once(refactor
 
     cmd_gate.cmd_final_gate(_args())
 
-    assert spy["tests"] == ["pytest -q"]
+    assert spy["tests"] == [WHOLE]
     assert "FINAL_GATE=cross-review" in capsys.readouterr().out
     gate = read_state(state_path)["final_gate"]
     assert gate["mode"] == "cross-review"
@@ -359,7 +391,7 @@ def test_a_workflow_step_run_with_a_round_test_runs_the_baseline_test_once(refac
 
     cmd_gate.cmd_final_gate(_args())
 
-    assert spy["tests"] == ["pytest -q"]
+    assert spy["tests"] == [WHOLE]
     assert "FINAL_GATE=passed" in capsys.readouterr().out
 
 
@@ -416,10 +448,10 @@ def test_the_whole_test_runs_unless_it_is_reusable(refactor, cmd_gate, tmp_path,
 
     cmd_gate.cmd_final_gate(_args())
 
-    assert spy["tests"] == ["pytest -q"]
+    assert spy["tests"] == [WHOLE]
     gate = read_state(state_path)["final_gate"]
     assert not gate.get("whole_test_reused")
-    assert gate["checks"][-1]["command"] == "pytest -q"
+    assert gate["checks"][-1]["command"] == WHOLE
 
 
 def test_a_ci_check_is_not_replaced_by_the_whole_test_in_verify(refactor, cmd_gate, tmp_path, env_tmp_dir, spy):
@@ -466,7 +498,7 @@ def test_the_gate_check_records_the_command_and_seconds(refactor, cmd_gate, tmp_
 
     check = read_state(state_path)["final_gate"]["checks"][-1]
     assert check["mode"] == "test"
-    assert check["command"] == "pytest -q"
+    assert check["command"] == WHOLE
     assert isinstance(check["seconds"], (int, float)) and check["seconds"] >= 0
 
 

@@ -55,10 +55,17 @@ def test_every_limit_follows_the_budget(timeline, budget_minutes):
     assert got["final_fix_seconds"] == 330
 
 
-def test_the_test_limit_grows_with_the_measured_whole_test(timeline):
-    assert timeline.test_timeout(30, 59.0) == 177  # 3 × 59
-    assert timeline.test_timeout(30, 1.0) == 18  # 0.01 × 1800 が下限
-    assert timeline.test_timeout(30, None) == 180  # 測れていなければ着手前の上限
+def test_the_test_limit_grows_with_the_measured_test(timeline):
+    """テスト 1 回の上限は共通層 `test_strategy.limits` の式（`max(3·x, 0.01·B)`。#1334 決定 8）。"""
+    import sys
+
+    ts = sys.modules["test_strategy"]
+    local = ts.Strategy("local-full", "args")
+    assert ts.limits(local, 30, measured_seconds=59.0)["test_timeout"] == 177  # 3 × 59
+    assert ts.limits(local, 30, measured_seconds=1.0)["test_timeout"] == 18  # 0.01 × 1800 が下限
+    assert ts.limits(local, 30)["test_timeout"] == 180  # 測れていなければ着手前の上限
+    # 係数は 1 か所（共通層）にあり、timeline はそれを再公開する
+    assert timeline.TEST_FACTOR == ts.TEST_FACTOR and timeline.INIT_TEST_SHARE == ts.INIT_TEST_SHARE
 
 
 def test_values_after_the_plan_are_empty_before_the_plan(timeline):

@@ -126,9 +126,10 @@ def test_limited_test_files(danger, repo):
         "tests/test_plan.py",
         "tests/x.py",
     ]
-    assert danger.limited_test_files_from_round_test("pytest tests -q", str(repo)) == ["tests/test_plan.py"]
-    # 対象の語が無いコマンドは挙げられない（決定 21）
-    assert danger.limited_test_files_from_round_test("make test", str(repo)) is None
+    # ラウンドテストをそのまま走らせる項目は、`--scope` のテストの置き場所の配下の追跡ファイル（#1334 決定 13）。
+    # コマンドの語（`docker compose exec -T app ...` の `app`）からは読まない。
+    assert danger.limited_test_files_from_scope(["src", "tests"], str(repo)) == ["tests/test_plan.py"]
+    assert danger.limited_test_files_from_scope(["src"], str(repo)) is None
 
 
 def test_item_flags_combines(danger, repo):
