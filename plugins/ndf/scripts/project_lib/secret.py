@@ -22,8 +22,10 @@ SECRET_VALUE = re.compile(
     r"|\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+"  # JWT
     r"|-----BEGIN"  # 鍵
     r"|://[^/\s:@]+:[^/\s@]+@"  # URL に埋めた資格情報
-    r"|(?i:\b(?:password|passwd|secret|token|api[_-]?key|access[_-]?key)\b\s*[=:]\s*[\"']?[^\s\"']{8,})"  # 代入の形
 )
+# 代入の形。テストの固定値（`PASSWORD=testpassword`）にも当たるため、宣言の値の判定（`has_secret`）には使わず、
+# 表示と出力で伏せる（`redact` / `mask`）ときだけ当てる
+ASSIGNED_SECRET = re.compile(r"(?i:\b(?:password|passwd|secret|token|api[_-]?key|access[_-]?key)\b\s*[=:]\s*[\"']?[^\s\"']{8,})")
 MASK = "（伏せた）"
 
 
@@ -41,7 +43,7 @@ def has_secret(value: Any) -> bool:
 
 def redact(text: str) -> str:
     """秘密の形に当たる行を伏せる（根拠の行・差分の行に当てる）。"""
-    return MASK if SECRET_VALUE.search(text) else text
+    return MASK if SECRET_VALUE.search(text) or ASSIGNED_SECRET.search(text) else text
 
 
 def mask(value: Any) -> Any:

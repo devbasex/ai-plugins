@@ -109,6 +109,10 @@ def unknown(reason: str) -> dict:
     return {"status": "unknown", "reason": reason}
 
 
+class TimeUp(Exception):
+    """測定の締め切りを越えた。読めなかったことを「ファイルが無い」と区別するため、`None` を返さずに上げる。"""
+
+
 class Tree:
     """HEAD の木と、秘密の名前の表を当てた読み取り。"""
 
@@ -124,10 +128,14 @@ class Tree:
     def git(self, *args) -> str | None:
         left = self.left()
         if left <= 0:
-            return None
+            raise TimeUp
         try:
             p = subprocess.run(["git", "-C", str(self.root), *args], capture_output=True, text=True, timeout=min(30.0, left))
-        except (OSError, subprocess.TimeoutExpired):
+        except subprocess.TimeoutExpired:
+            if self.left() <= 0:
+                raise TimeUp from None
+            return None
+        except OSError:
             return None
         return p.stdout if p.returncode == 0 else None
 

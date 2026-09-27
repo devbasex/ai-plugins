@@ -156,6 +156,9 @@ def measure_project(root: Path, budget: float) -> dict:
             return None
         try:
             return fn()
+        except mr.TimeUp:  # 途中で締め切りを越えた項目は、読めた分だけで測ったことにしない
+            items[key] = mr.unknown("時間切れ")
+            return None
         except Exception as e:  # noqa: BLE001  1 項目の失敗で測定を止めない（I12）
             items[key] = mr.unknown(f"測れない: {type(e).__name__}: {str(e)[:200]}")
             return None

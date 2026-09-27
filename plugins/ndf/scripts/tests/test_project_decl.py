@@ -545,7 +545,6 @@ def _project_lib(name):
         "sk_live_0123456789abcdefghij",
         "npm_abcdefghijklmnopqrstuvwxyz0123456789",
         "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.sig",
-        "password=hunter2hunter2",
     ],
 )
 def test_secret_shapes_cover_common_credentials(value):
@@ -556,12 +555,41 @@ def test_secret_shapes_cover_common_credentials(value):
     assert masked["declared"][0] == "ok"
 
 
+def test_assignment_shape_is_masked_but_keeps_the_declaration(laravel, env, tmp_path):
+    secret = _project_lib("secret")
+    assert not secret.has_secret("PASSWORD=testpassword pytest")
+    assert "testpassword" not in json.dumps(secret.mask({"declared": "PASSWORD=testpassword pytest"}))
+    analyze(env, laravel, tmp_path, LARAVEL_ANSWERS)
+    d = decl(laravel)
+    suites = [{"name": "hand", "runner": "phpunit", "command": "PASSWORD=testpassword make test"}]
+    d["test"] = {"suites": suites}
+    write(laravel, ".ndf/project.json", json.dumps(d, ensure_ascii=False, indent=2))
+    analyze(env, laravel, tmp_path, LARAVEL_ANSWERS)
+    assert decl(laravel)["test"] == {"suites": suites}
+
+
 def test_git_is_not_started_after_the_deadline(tmp_path, monkeypatch):
     mr = _project_lib("measure_repo")
     tree = mr.Tree.__new__(mr.Tree)
-    tree.root, tree.deadline = tmp_path, 0.0
+    tree.root, tree.deadline, tree.files = tmp_path, 0.0, {"x"}
     monkeypatch.setattr(mr.subprocess, "run", lambda *a, **k: pytest.fail("締め切り後に git を起動した"))
-    assert tree.git("cat-file", "-p", "HEAD:x") is None
+    with pytest.raises(mr.TimeUp):
+        tree.read("x")
+
+
+def test_item_crossing_the_deadline_is_timed_out_not_measured(laravel, monkeypatch):
+    spec = importlib.util.spec_from_file_location("project_decl_cli", SCRIPTS / "project-decl.py")
+    cli = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cli)
+
+    def time_up(*_):
+        raise cli.mr.TimeUp
+
+    monkeypatch.setattr(cli.mr, "measure_test", time_up)
+    monkeypatch.setattr(cli.mci, "measure_ci", time_up)
+    m = cli.measure_project(laravel, 60.0)
+    assert m["items"]["test"] == {"status": "unknown", "reason": "時間切れ"}
+    assert m["items"]["ci"] == {"status": "unknown", "reason": "時間切れ"}
 
 
 # --- AC14: schema はモデルの生成物 -------------------------------------------------------
