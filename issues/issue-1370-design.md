@@ -59,15 +59,15 @@
 | # | 集約 | 条件 | 破れたときの扱い |
 | --- | --- | --- | --- |
 | I1 | ミッションのプラン | `--pace auto` は、開発版のチャネルがある・`auto.verify` がある・`auto.enabled` が真・モードが `auto.modes` に入り `operation` / `documentation` でない・承認済みの MVV（プロジェクト MVV かミッション MVV）が状態と一致する、の 5 つがそろうときだけプランを書く | `stopped`（終了コード 1）でプランもマニフェストも書かず、欠けた条件と `normal` の起動の形を示す（AC1） |
-| I2 | ミッションのプラン | `auto` のステージは `normal` の並び（設計 → ゲート 1 → ミッションブランチ → 実装 → 検査）の後に開発版と本番を続け、ゲート 2 は本番のプランの先頭のステップになる。`normal` の `配布` は開発版のリリースで、`auto` では `開発版` と呼ぶ（`fast` と同じ名前。本番を入れる理由は決定 7）。実装のプランの起点と宛先はミッションブランチである | ステージの並びか宛先が上と違えば誤り（AC2） |
+| I2 | ミッションのプラン | `auto` のステージは `normal` の並び（設計 → ゲート 1 → ミッションブランチ → 実装 → 検査）の後に開発版と本番を続け、ゲート 2 は本番のプランの先頭のステップになる。`normal` の `配布` は開発版のリリースで、`auto` では `開発版` と呼ぶ（`fast` と同じ名前。本番を入れる理由は決定 7）。実装のプランの起点と宛先はミッションブランチである。例外として、リリースの形（`release.form`）に雛形が無ければ開発版と本番の代わりに `manual` のステージ（`/ndf:release`）を 1 つ置き、ゲート 2 は conductor が利用者の承認を取る（`fast` の雛形の無いときと同じ扱い。I1 の条件は 5 つのままで、雛形の有無では断らない） | ステージの並びか宛先が上と違えば誤り（AC2）。雛形が無いのに開発版・本番のプランを書く、`manual` のステージで MVV 判定を走らせれば誤り |
 | I3 | ミッションのプラン | `auto` のプランは `check-trigger.py` を呼ぶステップも実行条件も持たない | 1 つでも持てば誤り（AC2） |
 | I4 | ミッションのプラン | ゲート 1 の MVV 判定のステップは設計の cross-review と用語チェックの後にあり、判定が 0 のときだけ承認ラベルの付与とマージへ進む。0 以外（10・その他）はプランを `関門` で終える | 判定の前にマージへ進む経路、10 でマージへ進む経路があれば誤り（AC3・AC5） |
-| I5 | ミッションのプラン | ゲート 2 の MVV 判定のステップは本番のプランの先頭にあり、開発版のプラン（インストール確認を含む）がすべて完了したときだけ流れる。0 のときだけ版上げへ進む | 開発版の完了の前に本番が流れる、10 で版上げへ進む経路があれば誤り（AC4・AC5） |
+| I5 | ミッションのプラン | ゲート 2 の MVV 判定のステップは本番のプランの先頭にあり、開発版のプラン（インストール確認を含む）がすべて完了したときだけ流れる。0 のときだけ判定のコメント（I8）を経て版上げへ進む。リリースの形に雛形が無いときは I2 の例外に従い、この条件は当てない（ゲート 2 は人が承認する） | 開発版の完了の前に本番が流れる、10 で版上げへ進む経路があれば誤り（AC4・AC5） |
 | I6 | ミッションのプラン | 設計から本番までの後ろのステージは、前のステージのプランがすべて `完了` のときだけ流れる。1 本でも `関門` か停止なら、後ろのステージは流れずに queue が `gate` か `stopped` を返す | 承認ゲートのプランの後に後ろのステージが流れたら誤り（AC3〜AC5） |
 | I7 | ミッションのプラン | `then_of` で続くステージは、マニフェストに `resume`（そのステージから最後までを流す queue のコマンド）を持つ | 承認ゲートの後に続きを流すコマンドがマニフェストに無ければ誤り |
-| I8 | ミッション状態ファイル | 自動で通した承認ゲートには `by: mvv` の記録があり、`mvv-gate.jsonl` に同じ判定の 1 行があり、ゲート 1 は設計 PR に判定のコメントがある。記録を書けなければ自動で通さない | 記録の無い承認ゲートの通過、記録を書けないのに通った経路があれば誤り（AC6・E5） |
+| I8 | ミッション状態ファイル | 自動で通した承認ゲートには `by: mvv` の記録があり、`mvv-gate.jsonl` に同じ判定の 1 行があり、Pull Request に判定のコメントがある。コメントの宛先は、ゲート 1 が設計 PR、ゲート 2 が本番のプランの `mvv` のステップへ `--pr` で渡す PR（`auto` では検査のステージが出したミッションの develop 宛 PR、`fast` では出す版に入った実装 PR）のすべてである。記録を書けなければ自動で通さない。`by: mvv` の記録は `mvv` のステップ（ゲート 1 は `approve`・`merge` より前、ゲート 2 はコメントと `bump` より前）で書かれるため、その後の `handoff` で承認ゲートへ落ちたときは、`handoff` が同じ承認ゲートの記録を `mission-state.py gate --withdraw` で外してから終了コード 10 を返す。外した後の状態に直前の MVV 判定は無いので、`handoff` の後の `--by user` の承認・差し戻しは覆しとして書かれない（`mvv-gate.jsonl` の判定の行は残る） | 記録の無い承認ゲートの通過、記録を書けないのに通った経路、ゲート 2 のコメントが無いまま `bump` へ進む経路、`handoff` の後に `by: mvv` の記録が残る経路、`handoff` の後の差し戻しで `override_reject` が書かれる経路があれば誤り（AC6・AC7・E5） |
 | I9 | 進め方の宣言 | `auto` の節が無い・`enabled` が真でなければ `auto` を許さない。`fast` の節の値は `auto` の判定に使わない | `fast` だけを許した宣言で `auto` が通ったら誤り（影響の「無ければ不許可」） |
-| I10 | ミッションのプラン | `normal` と `fast` のプランとマニフェストは、この変更の前と同じ内容で書き出される（マニフェストの `resume` の追加と、共有する設計のプランの `handoff` の追加を除く） | 既存のテストが落ちたら誤り（AC10） |
+| I10 | ミッションのプラン | `normal` と `fast` のプランとマニフェストは、この変更の前と同じ内容で書き出される（マニフェストの `resume` の追加と、共有する設計と本番のプランの `handoff`・本番の `note` の追加を除く） | 既存のテストが落ちたら誤り（AC10） |
 | I11 | 進め方の定義 | 3 つの進め方を同じ 6 項目（何のための進め方か・検証の場所・承認・判定と配布の単位・確定仕様化と振り返り・向く場面）で並べた表は `SKILL.md` の「進め方」の節の 1 か所だけにあり、`pace.md` はそれを参照する | 同じ表が 2 か所にある、項目が 6 つそろわなければ誤り（AC11。決定 10） |
 | I12 | 進め方の定義 | `pace.md` は進め方ごとにフローの図を 1 つずつ持つ。`fast` の図では実践投入（実装 PR が develop へ入る）が検査より前にあり、`normal` と `auto` の図はノードの並びが同じで、違うのは承認ゲートの担い手の表記だけである | 図が 3 つそろわない、`fast` で検査が実践投入より前、`normal` と `auto` で並びが違えば誤り（AC11・AC12） |
 
@@ -77,10 +77,11 @@
 | --- | --- | --- | --- |
 | E1 | `--pace auto` の使ってよい条件を確かめた | `supervise.py new mission`（`pace_refusal`） | conductor（断られたら欠けた条件と `normal` の形を示す） |
 | E2 | ステージのプランを `normal` と同じ並びで書き出し、ゲート 1・2 のステップを MVV 判定にした | `supervise.py new mission`（`auto_mission_plans`） | conductor（設計のステージの `command` を打つ） |
-| E3 | ゲート 1 で MVV 判定が「従う」を返し、承認ラベルを付けてマージし、次のステージへ続いた | 設計のプランの `mvv` → `approve` → `merge` のステップ | queue（ミッションブランチのステージを流す） |
-| E4 | ゲート 2 で MVV 判定が「従う」を返し、本番のプランが続けて流れた | 本番のプランの `mvv` のステップ | 本番のプランの `bump` 以降 |
-| E5 | 判定と結果を記録した | `mvv-gate.py`（`mission-state.py gate --by mvv`・`mvv-gate.jsonl`・`--note` の PR のコメント） | 利用者・`project-mvv.py signals`（#1366） |
+| E3 | ゲート 1 で MVV 判定が「従う」を返し、承認ラベルを付けてマージし、次のステージへ続いた。順序は `mvv`（E5 の記録）→ `approve`（判定のコメント・ラベル）→ `merge` で、記録はマージの前に書かれる | 設計のプランの `mvv` → `approve` → `merge` のステップ | queue（ミッションブランチのステージを流す） |
+| E4 | ゲート 2 で MVV 判定が「従う」を返し、本番のプランが続けて流れた。順序は `mvv`（E5 の記録）→ `note`（判定のコメント）→ `bump` 以降で、記録は版上げの前に書かれる | 本番のプランの `mvv` → `note` のステップ | 本番のプランの `bump` 以降 |
+| E5 | 判定と結果を記録した。状態と `mvv-gate.jsonl` は `mvv` のステップの中で、PR のコメントはゲート 1 が `approve`、ゲート 2 が `note` のステップで `--note` のファイルから付ける（宛先は I8） | `mvv-gate.py`（`mission-state.py gate --by mvv`・`mvv-gate.jsonl`・`--note` のファイル）と、コメントを付けるステップ | 利用者・`project-mvv.py signals`（#1366） |
 | E6 | 人が判定を覆した | conductor（利用者の答えを受けて `mission-state.py gate --by user --outcome`） | `project-mvv-signals.jsonl`（#1366） |
+| E7 | 記録の後の失敗で承認ゲートへ落ち、自動の通過を取り消した | `handoff` のステップ（`mission-state.py gate --withdraw`） | conductor（承認ゲートの提示。状態に `by: mvv` の記録が無い） |
 
 E3・E4 が起きなかったとき（判定が 0 以外）は、プランが `関門` で終わり、queue が `gate` を返して conductor が起きる。
 これは新しいイベントではなく、既存の承認ゲートの提示（`approval-request.md` の形）へ戻ることである。
@@ -114,13 +115,13 @@ E3・E4 が起きなかったとき（判定が 0 以外）は、プランが `�
 | 進め方の宣言の読み取り（`scripts/lib/pace.py` ） | 変更 | `fast` と同じ形の `auto` の節を読み、既定を埋める。節の読み取りを 1 つの関数にまとめ、`fast` と `auto` で共用する。`EXCLUDED_MODES` は両方に効く |
 | 使ってよい条件（`supervise_lib/mission.py` の `pace_refusal` ） | 変更（`fast_refusal` を改める） | 進め方の名前を受け、宣言のその節・開発版のチャネル・MVV の承認（#1366 の `approval_refusal`）を見る。`fast` と `auto` で同じ関数を通り、読む節だけが違う |
 | auto のステージ（`supervise_lib/mission.py` の `auto_mission_plans` ） | 新設 | `normal` のステージ（設計・ゲート 1・ミッションブランチ・実装・検査・開発版・本番）を、設計のプランと開発版・本番のプランだけ MVV 判定つきの関数で作る。ゲート 1 のステージは説明だけを持ち（プランを持たない）、ミッションブランチ以降を設計の `then_of` にする |
-| MVV 判定つきの設計のプラン（`supervise_lib/mission_waves.py` の `plan_mvv_design` ） | 変更（`plan_fast_design` を改める） | 今の `plan_fast_design` の中身に、`approve` と `merge` の失敗を承認ゲートへ落とす `handoff` のステップを足し、名前を進め方に依らない形にして `fast` と `auto` から呼ぶ |
-| MVV 判定つきのリリースのプラン（同 `plan_mvv_release` ） | 変更（`plan_fast_release` を改める） | 同上。開発版は `facts` を `gate_as_ok` にし、本番は先頭に `mvv` のステップを置く（今の `release_templates.py` の `mvv` の分岐のまま） |
+| MVV 判定つきの設計のプラン（`supervise_lib/mission_waves.py` の `plan_mvv_design` ） | 変更（`plan_fast_design` を改める） | 今の `plan_fast_design` の中身に、`approve` と `merge` の失敗を承認ゲートへ落とす `handoff` のステップ（`関門 1` の `by: mvv` の記録を外してから終了コード 10。I8）を足し、名前を進め方に依らない形にして `fast` と `auto` から呼ぶ |
+| MVV 判定つきのリリースのプラン（同 `plan_mvv_release` ） | 変更（`plan_fast_release` を改める） | 同上。開発版は `facts` を `gate_as_ok` にし、本番は先頭に `mvv` のステップを置く（今の `release_templates.py` の `mvv` の分岐）。本番の `mvv` に `--note` を渡し、`mvv` と `bump` の間に判定のコメントを `--pr` の PR のすべてへ付ける `note` のステップと、その失敗を受ける `handoff`（`関門 2` の記録を外して終了コード 10）を足す（I8） |
 | マニフェストの書き出し（`supervise_lib/mission.py` の `cmd_new_mission` ） | 変更 | `進め方` を `a.pace` から書く（今は `--state` の有無で `fast` と決め打ち）。`then_of` のステージへ `resume` を書く。承認ゲートのステージの説明を進め方ごとに変える |
 | 起動の引数（`supervise_lib/new_args.py` ） | 変更 | `--pace` の選択肢に `auto` を足す。`normal` のときだけ `--state` を捨てる今の扱いを保つ |
 | 進め方の記録（`supervise_lib/state.py`・`scripts/progress-record.sh`・`scripts/lib/projects-common.sh` ） | 変更 | 値の一覧に `auto` を足す。`normal` 以外なら本文の見出し行へ `進め方: <値>` を書く。プランの `進め方` を最初に見たときに記録する今の処理を `fast` 以外にも効かせる |
 | 工程の飛ばしの案内（`development-workflow/scripts/lib/workflow-common.sh` ） | 変更 | 値の一覧に `auto` を足す。工程の区分（トリガー / まとめる）は `fast` だけに当て、`auto` は `normal` と同じく全工程を求める |
-| ミッション状態ファイル（`scripts/mission-state.py` ） | 変更 | `--pace` の選択肢に `auto` を足し、`init` の MVV の写し（`--milestone` / `--mvv`、#1366 のプロジェクト MVV の参照）を `fast` と `auto` の両方で行う |
+| ミッション状態ファイル（`scripts/mission-state.py` ） | 変更 | `gate` に `--withdraw`（同じ名前の承認ゲートの記録を外す。記録が無ければ何もせず 0）を足す（I8）。`--pace` の選択肢に `auto` を足し、`init` の MVV の写し（`--milestone` / `--mvv`、#1366 のプロジェクト MVV の参照）を `fast` と `auto` の両方で行う |
 | MVV 判定（`scripts/mvv-gate.py` ） | 変更（説明文だけ） | 判定の規則は変えない。説明と止まるときの案内の `--pace fast` を「`--pace fast` か `auto`」へ改める |
 | 進め方の定義（`development-workflow/SKILL.md` の「進め方」の節） | 変更 | 3 つの進め方の定義の表（要求の前提 3 の表の 6 項目をそのまま写す）を置き、フローと詳細は `pace.md` へ送る。今の `fast` の区分の表と承認ゲートの表は `pace.md` へ移す（行数の上限。決定 10）。判定結果の `pace:` の行を `normal` 以外で出す |
 | 進め方の詳細（`development-workflow/references/pace.md` ） | 変更（章立てを組み直す） | 題を「進め方（`pace`）」へ改め、進め方ごとのフローの図 3 つ・`fast` と `auto` の使ってよい条件・設定・始め方・ステージ・止まった後の続け方・記録の読み方を持つ。章立ては下の「手順書の章立て」 |
@@ -321,6 +322,7 @@ classDiagram
 
 | 名前 | 変更 | 互換性 |
 | --- | --- | --- |
+| `mission-state.py gate <状態> <承認ゲート> --withdraw` | 選択肢の追加。同じ名前の `gates[]` の行を外す。`--by` と併せて渡せば `stopped` | 省けば今と同じ |
 | `mission-state.py init --pace auto` | 選択肢の追加。MVV の写しとプロジェクト MVV の参照は `fast` と同じ | 既存の値は変わらない |
 | `progress-record.sh --pace auto`・`projects-sync.sh <N> pace auto` | 値の一覧に足す。本文の見出し行に `進め方: auto` | 既存の値は変わらない |
 | `development-workflow` の判定結果 | `pace:` の行を `normal` 以外で出す（`pace: auto`）。`次のコマンド:` は `pace.md` の「ミッションを始める」の `auto` の 1 つ目 | 出力の行の形は同じ |
@@ -398,7 +400,7 @@ sequenceDiagram
 graph TD
     D[設計のプラン: 設計 → PR → cross-review → 用語チェック] --> M1{mvv-gate --gate design}
     M1 -->|0: 従う・レッドラインなし・記録済み| AP[approve: ラベル・コメント・ready]
-    AP -->|失敗| HO[handoff: 終了コード 10]
+    AP -->|失敗| HO[handoff: 関門 1 の記録を外して終了コード 10]
     AP --> MG[merge]
     MG -->|失敗| HO
     HO --> GATE1[プランは 関門 → queue は gate]
@@ -408,7 +410,10 @@ graph TD
     IM --> CK[検査: develop 宛 PR を 1 回]
     CK --> DV[開発版: リリースとインストール確認・承認資料]
     DV --> M2{本番の先頭 mvv-gate --gate release}
-    M2 -->|0| PD[bump 以降: 本番へリリース]
+    M2 -->|0| NT[note: 判定のコメントを --pr の PR へ]
+    NT -->|失敗| HO2[handoff: 関門 2 の記録を外して終了コード 10]
+    HO2 --> GATE2
+    NT --> PD[bump 以降: 本番へリリース]
     M2 -->|10| GATE2[プランは 関門 → queue は gate]
     GATE1 --> C[conductor: 承認資料に判定の理由と根拠を添えて示す]
     GATE2 --> C
@@ -416,7 +421,10 @@ graph TD
 
 **承認ラベルの付与とマージの失敗は、新しいステップ `handoff` で承認ゲートへ落とす。** 今の `plan_fast_design` の `approve` と
 `merge` は `on_fail` を持たず、落ちるとエンジン（`engine.py` の `_next_after_step`）がプランを `止まった` で終える。`handoff` は
-理由を 1 行出して終了コード 10 を返す `run` のステップ（`gate_next: end`）で、2 つのステップの `on_fail` がここを指す。
+`mission-state.py gate <状態> "関門 1" --withdraw` で `mvv` のステップが書いた `by: mvv` の記録を外し、理由を 1 行出して終了コード 10 を返す
+`run` のステップ（`gate_next: end`）で、2 つのステップの `on_fail` がここを指す。記録を外せなかったときも終了コード 10 を返し、
+外せなかったことを理由の行に書く（conductor は承認資料にそれを添える）。本番のプランの `note` の失敗も、`関門 2` を外す同じ形の
+`handoff` へ落とす。
 終了コード 10 は `lib/step_result.py` の `EXIT_GATE` で、エンジンが承認ゲートとして扱うため、プランの結果は `関門` になり、
 queue は `gate` を返す（決定 8）。
 
@@ -441,7 +449,8 @@ sequenceDiagram
 ```
 
 自動で通った後に利用者が差し戻すときも、`gate "関門 N" --by user --outcome rejected` を打つ。直前の判定が `follow` なので
-#1366 の覆しの記録（`override_reject`）が書かれる（AC7）。マージ済みの変更を戻す操作そのものは、この変更の範囲の外で
+#1366 の覆しの記録（`override_reject`）が書かれる（AC7）。`handoff` で止まった後は `by: mvv` の記録が外れていて直前の判定が
+無いため、承認も差し戻しも覆しとして書かれない（I8）。マージ済みの変更を戻す操作そのものは、この変更の範囲の外で
 今の手順（取り消しの Pull Request）に従う。
 
 ## 非機能の実現方式
@@ -453,7 +462,7 @@ sequenceDiagram
 
 ## 決定の記録
 
-`issues/issue-1370-design-decisions.md` にある（決定 1〜10）。
+`issues/issue-1370-design-decisions.md` にある（決定 1〜11）。
 
 ## テスト設計
 
@@ -464,15 +473,16 @@ sequenceDiagram
 | AC2・I2・I3 | `auto` のマニフェストのステージの名前と順が上の 7 つで、実装のプランの起点と PR の宛先がミッションブランチ、検査のプランがミッションの develop 宛 PR を出す。どのプランの JSON にも `check-trigger.py` の文字列が無い | 実装を `fast` の関数で作る。検査に実行条件を付ける |
 | AC3・I4 | 設計のプランの `mvv` のステップが cross-review と用語チェックの後にあり、`next` が `approve`、`gate_next` が `end`。判定の差し替えで 0 を返すと `approve` → `merge` へ進み、10 を返すとプランの結果が `関門` になる | `mvv` を cross-review の前に置く。10 で `approve` へ進む |
 | AC3・I6 | 設計のプランが `関門` を返す queue で、ミッションブランチ以降のプランが `流さなかった` になり、queue の結果が `gate`。すべて `完了` なら後ろが流れる | `--then` を外してステージを並べる |
-| AC4・I5 | 本番のプランの先頭のステップが `mvv --gate release` で、開発版のプランの `facts` が `gate_as_ok`。本番が開発版の `--then` の後ろにある | 本番の `mvv` を外す。本番を開発版より前に置く |
+| AC4・I5 | 本番のプランの先頭のステップが `mvv --gate release` で、次が `note`、その次が `bump`。開発版のプランの `facts` が `gate_as_ok`。本番が開発版の `--then` の後ろにある | 本番の `mvv` を外す。本番を開発版より前に置く |
+| I2（雛形が無いとき） | `release.form` に雛形の無い宣言で `new mission --pace auto` が `ok` になり、マニフェストの最後が `manual` のステージ 1 つで、開発版・本番のプランと `mvv --gate release` のステップが無い | 雛形が無いのに断る。雛形が無いのに本番のプランを書く |
 | AC5 | 判定の差し替えで `not_follow`・`unknown`・`boundary` あり、状態の書き込みの失敗、`approve` の `gh` の失敗のそれぞれで、設計のプランが `関門` で終わり、マージのステップが走らない。`merge` が落ちたときもプランが `関門` で終わる（`止まった` にならない） | どれか 1 つでマージへ進む。`handoff` の `on_fail` を外す |
-| AC6・I8 | 判定が 0 の経路で、状態に `関門 1` の `by: mvv`、`mvv-gate.jsonl` に 1 行、PR のコメントの本文（`--note` のファイル）が残る | 記録を書く前に 0 を返す |
+| AC6・I8 | 判定が 0 の経路で、状態に `関門 1`・`関門 2` の `by: mvv`、`mvv-gate.jsonl` にそれぞれ 1 行、`--note` のファイルが残り、ゲート 1 は設計 PR、ゲート 2 は `--pr` の PR のすべてへ `gh pr comment` が打たれる（`gh` の差し替えで宛先を数える）。`approve`・`merge`・`note` を落とすと、状態から該当の `by: mvv` が消え、その後の `gate --by user --outcome rejected` で覆しが書かれない | 記録を書く前に 0 を返す。本番の `note` を外す。`handoff` の `--withdraw` を外す |
 | AC7 | `by: mvv` の `follow` の後の `gate --by user --outcome rejected` で覆しが 1 行書かれる（#1366 のテストを `pace: auto` の状態で 1 行足す） | 状態の `pace` で覆しの記録を分岐させる |
 | AC8 | `development-workflow` の判定結果の `pace:` の行の出し分け（`normal` で出さず、`fast`・`auto` で出す）と `pace.md` の `auto` の条件・記録の読み方の節を、cross-review で見る（文言の照合テストは書かない） | — （レビューで見る） |
 | AC11・I11 | `SKILL.md` の「進め方」の節に 6 項目 × 3 列の表が 1 つあり、`pace.md` に同じ表が無いことを cross-review で見る。`SKILL.md` の行数は `check-skill-frontmatter.py` が 500 行で落とす | — （レビューで見る。文言の照合テストは書かない） |
 | AC12・I12 | `pace.md` の図 3 つの並び（`fast` で実践投入が検査より前、`normal` と `auto` で並びが同じ）と、図が GitHub で描けることを cross-review で見る | — （レビューで見る） |
 | AC9 | ai-plugins で `pace: auto` のミッションを 1 本流し、ゲート 1・2 の結果（自動で通ったか、止まった理由）を課題のコメントに残す | — （実測） |
-| AC10・I10 | 既存の `test_supervise_pace.py`・`test_pace.py`・`test_mission_state.py`・`test_progress_record.py` と `normal` の `new mission` のテストが、`plan_fast_*` の改名と `resume`・`handoff` の追加の後も通る（`handoff` を見る行だけを足す） | `normal` のマニフェストに `進め方` を書く。`handoff` 以外で `fast` のプランの中身を変える |
+| AC10・I10 | 既存の `test_supervise_pace.py`・`test_pace.py`・`test_mission_state.py`・`test_progress_record.py` と `normal` の `new mission` のテストが、`plan_fast_*` の改名と `resume`・`handoff` の追加の後も通る（`handoff` と本番の `note` を見る行だけを足す） | `normal` のマニフェストに `進め方` を書く。`handoff` と `note` 以外で `fast` のプランの中身を変える |
 | I7 | `then_of` のステージがすべて `resume` を持ち、それを打つとそのステージから最後までが流れる（ステージの数と順が一致する） | `resume` に後ろのステージを入れ忘れる |
 | 進め方の記録 | `progress-record.sh --pace auto` が本文の見出し行に `進め方: auto` を書き、`workflow-common.sh` が `auto` の課題でリファクタリングの記録の無さを案内する | `auto` を `wf_fast_class` に当てる |
 
