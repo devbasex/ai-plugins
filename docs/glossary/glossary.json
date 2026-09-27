@@ -1754,14 +1754,16 @@
     {
       "term": "MVV",
       "context": "ndf-workflow",
-      "meaning": "ミッションの Mission / Vision / Value。マイルストーンの説明からコピーし、利用者が 1 回承認する。fast でゲート 1・2 の事前の許可になる",
-      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+      "meaning": "Mission / Vision / Value。プロジェクト MVV とミッション MVV の 2 層があり、下位は上位の範囲で具体化する",
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md",
+      "pending_source": "issues/issue-1366-design.md"
     },
     {
       "term": "MVV 判定",
       "context": "ndf-workflow",
-      "meaning": "承認ゲートのエビデンスが MVV に従うかの判定。「従う」でレッドラインが無いときだけ承認ゲートを省き、記録を残す",
-      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+      "meaning": "承認ゲートのエビデンスが上位の原則・プロジェクト MVV・ミッション MVV に従うかの判定。「従う」でレッドラインが無いときだけ承認ゲートを省き、記録を残す",
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md",
+      "pending_source": "issues/issue-1366-design.md"
     },
     {
       "term": "上位の原則",
@@ -1810,6 +1812,24 @@
       "context": "ndf-workflow",
       "meaning": "履歴が育っていないプロジェクトで、README・指示書・依頼文の傾向から MVV 候補を出す抽出の形",
       "pending_source": "issues/issue-1366-requirements.md"
+    },
+    {
+      "term": "MVV の照合",
+      "context": "ndf-workflow",
+      "meaning": "本文（候補・改訂案・ミッション MVV）が上位の原則とプロジェクト MVV に従うかを「従う / 反する疑い / 判定できない」の 3 択で判定すること。従う以外は人へ戻す",
+      "pending_source": "issues/issue-1366-design.md"
+    },
+    {
+      "term": "MVV の節",
+      "context": "ndf-workflow",
+      "meaning": "判断の地点へ渡す塊。上位の原則を先頭に置き、承認済みのプロジェクト MVV の本文か「MVV なし」とその理由を続ける",
+      "pending_source": "issues/issue-1366-design.md"
+    },
+    {
+      "term": "根拠の項目",
+      "context": "ndf-workflow",
+      "meaning": "判断の記録に残す MVV の項目の番号（Mission / Vision / Value 3 / R2）。MVV が無ければ「MVV なし」、返されなければ「根拠なし」",
+      "pending_source": "issues/issue-1366-design.md"
     },
     {
       "term": "トリガー",

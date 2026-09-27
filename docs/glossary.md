@@ -142,8 +142,8 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 実行レベル | — | 仕事を渡す実行方式の LLM の使い方の水準。レベル 1 = スクリプト、レベル 2 = 分類の判断、レベル 3 = インライン実行の LLM | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | モード | `mode` | 変更の目的物で決める工程の振り分け。上から operation / documentation / standard / legacy-refactor / light | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | pace | `pace` | モードとは別の軸で、工程をどう通すかを決める。既定の normal と、承認ゲートと検査の時機を変える fast | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| MVV | — | ミッションの Mission / Vision / Value。マイルストーンの説明からコピーし、利用者が 1 回承認する。fast でゲート 1・2 の事前の許可になる | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| MVV 判定 | — | 承認ゲートのエビデンスが MVV に従うかの判定。「従う」でレッドラインが無いときだけ承認ゲートを省き、記録を残す | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| MVV | — | Mission / Vision / Value。プロジェクト MVV とミッション MVV の 2 層があり、下位は上位の範囲で具体化する | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| MVV 判定 | — | 承認ゲートのエビデンスが上位の原則・プロジェクト MVV・ミッション MVV に従うかの判定。「従う」でレッドラインが無いときだけ承認ゲートを省き、記録を残す | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 上位の原則 | — | 「人類を守り、発展させる」。NDF が持つ固定の文で、すべてのプロジェクト MVV の上に立ち、上書きできない | — | — | — |
 | プロジェクト MVV | — | プロジェクト全体の Mission / Vision / Value とレッドライン。`.ndf/` に宣言し、利用者が承認する。判断の基準の上位 | — | — | — |
 | ミッション MVV | — | ミッション単位の MVV（既存の `mvv.md`）。プロジェクト MVV の範囲での具体化 | — | — | — |
@@ -152,6 +152,9 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 判断の地点 | — | NDF が LLM の判断を挟む場所（承認ゲートの判定・レビューの指摘と修正の可否・リファクタリングの提案の採否・judge のステップ・範囲外の起票の 3 択） | — | — | — |
 | MVV 候補 | — | 材料から書いたプロジェクト MVV の案。2 案以上と分かれる点を利用者へ示す | — | — | — |
 | 傾向モード | — | 履歴が育っていないプロジェクトで、README・指示書・依頼文の傾向から MVV 候補を出す抽出の形 | — | — | — |
+| MVV の照合 | — | 本文（候補・改訂案・ミッション MVV）が上位の原則とプロジェクト MVV に従うかを「従う / 反する疑い / 判定できない」の 3 択で判定すること。従う以外は人へ戻す | — | — | — |
+| MVV の節 | — | 判断の地点へ渡す塊。上位の原則を先頭に置き、承認済みのプロジェクト MVV の本文か「MVV なし」とその理由を続ける | — | — | — |
+| 根拠の項目 | — | 判断の記録に残す MVV の項目の番号（Mission / Vision / Value 3 / R2）。MVV が無ければ「MVV なし」、返されなければ「根拠なし」 | — | — | — |
 | トリガー | `trigger` | fast でリファクタリングとコードレビューを流す条件。点数・行数・流出不具合・経過時間・最終の 5 つ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | judge のステップ | — | 結果ファイルと規則の抜粋だけを渡し、次のステップを LLM に決めさせるステップ。Tool を持たない | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 決定 | — | judge のステップが返す、次に取る手 | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
