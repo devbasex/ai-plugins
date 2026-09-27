@@ -86,14 +86,18 @@ def gh_or_back(args: list[str], repo: str | None, cwd: Path) -> str:
 
 
 def pr_facts(n: int, repo: str | None, cwd: Path) -> dict:
-    """PR の題名・本文・変更したファイル・先頭のコミット（GraphQL が上限なら REST で読む）。取れなければ Back。"""
-    r = gh_rest.view_json("pr", n, "title,body,files,headRefOid", repo, cwd=str(cwd))
+    """PR の題名・本文・先頭のコミットと、変更したファイルの全件（rename の前のパスを含む）。取れなければ Back。"""
+    r = gh_rest.view_json("pr", n, "title,body,headRefOid", repo, cwd=str(cwd))
     if r.returncode != 0:
         raise Back("gh が無い" if r.returncode == 127 else f"gh pr view {n}: {r.stderr.strip()[:300]}")
     try:
-        return json.loads(r.stdout)
+        info = json.loads(r.stdout)
     except ValueError:
         raise Back(f"PR #{n} の出力を読めない")
+    f = gh_rest.pr_files(n, repo, cwd=str(cwd))
+    if f.returncode != 0:
+        raise Back("gh が無い" if f.returncode == 127 else f"PR #{n} の変更したファイルを読めない: {f.stderr.strip()[:300]}")
+    return {**info, "files": json.loads(f.stdout)}
 
 
 def pr_material(n: int, info: dict) -> str:
@@ -221,7 +225,15 @@ def boundary_hits(root: Path, infos: dict[int, dict]) -> list[str]:
         patterns = read_pace(root)["boundary_paths"]
     except PaceError as e:
         raise Back(str(e))
-    return [f"#{n} {f['path']}" for n, info in infos.items() for f in info.get("files", []) if matches(f.get("path", ""), patterns)]
+    hits = []
+    for n, info in infos.items():
+        for f in info.get("files", []):
+            old = f.get("previous_path")
+            if f.get("status") == "renamed" and not old:
+                hits.append(f"#{n} {f['path']}（rename の前のパスが分からない）")
+            elif matches(f.get("path", ""), patterns) or (old and matches(old, patterns)):
+                hits.append(f"#{n} {old} → {f['path']}" if old else f"#{n} {f['path']}")
+    return hits
 
 
 def write_log(path: str, record: dict) -> None:

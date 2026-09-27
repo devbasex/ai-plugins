@@ -59,6 +59,7 @@ from step_result import EXIT_OK, EXIT_PRECONDITION, EXIT_UNREADABLE, EXIT_VIOLAT
 from pace import PaceError, matches, read_pace  # noqa: E402
 import clock  # noqa: E402
 import gh_call  # noqa: E402
+import gh_rest  # noqa: E402
 import jsonio  # noqa: E402
 import proc  # noqa: E402
 import repo  # noqa: E402
@@ -245,6 +246,10 @@ def done_branch(review: bool) -> str:
     return DONE_PREFIX + ("review" if review else "check")
 
 
+def is_ancestor(root: Path, old: str, new: str) -> bool:
+    return proc.git(root, "merge-base", "--is-ancestor", old, new, check=False).returncode == 0
+
+
 def range_start(root: Path, events: list[dict], since: str | None, review: bool = False) -> tuple[str, datetime, str]:
     """(from のコミット, 期限の起点, 決め方)。
 
@@ -253,6 +258,8 @@ def range_start(root: Path, events: list[dict], since: str | None, review: bool 
     prev = last_check(events, review)
     ref = f"refs/remotes/origin/{done_branch(review)}"
     done = git_or_stop(root, "rev-parse", "--verify", "-q", f"{ref}^{{commit}}", check=False)
+    if done and prev and prev["to"] != done and is_ancestor(root, done, prev["to"]):
+        done = ""  # 送れなかった記録のほうが先にある（origin の位置は古い）
     if done:
         at = parse_at(prev["at"]) if prev and prev["to"] == done else commit_at(root, done)
         return done, at, f"origin/{done_branch(review)}"
@@ -273,19 +280,26 @@ def range_start(root: Path, events: list[dict], since: str | None, review: bool 
 
 
 def merged_prs(root: Path, frm: str, to: str, decl: dict, skip: set[int] = frozenset()) -> list[dict]:
-    """範囲へ入った PR。merge commit と squash merge（件名の末尾 `(#N)`）を数える。squash にはブランチ名が残らないため、検査の PR は記録の番号（skip）で外す。"""
-    out = []
+    """範囲へ入った PR。merge commit と squash merge（件名の末尾 `(#N)`）を数える。squash の件名にはブランチ名が
+    残らないため、ブランチは GitHub から読んで `SKIP_BRANCHES` を当てる。検査の PR は記録の番号（skip）でも外す。"""
+    found = []
     for line in git_or_stop(root, "log", "--first-parent", "--format=%H%x09%P%x09%s", f"{frm}..{to}").splitlines():
         sha, parents, subject = line.split("\t", 2)
         m = MERGE_SUBJECT.match(subject) if " " in parents else SQUASH_SUBJECT.search(subject.rstrip())
-        branch = m.group(2) if m and m.re is MERGE_SUBJECT else ""
-        if not m or branch.startswith(SKIP_BRANCHES) or int(m.group(1)) in skip:
+        if m and int(m.group(1)) not in skip:
+            found.append((sha, int(m.group(1)), m.group(2) if m.re is MERGE_SUBJECT else None))
+    squashed = [n for _, n, branch in found if branch is None]
+    heads, err = gh_rest.pr_head_branches(squashed, cwd=str(root)) if squashed else ({}, "")
+    if heads is None:
+        raise Stop(f"squash merge の PR のブランチを読めない: {err}", EXIT_VIOLATION)
+    out = []
+    for sha, n, branch in found:
+        branch = heads.get(n, "") if branch is None else branch
+        if branch.startswith(SKIP_BRANCHES):
             continue
         files = git_or_stop(root, "diff", "--name-only", f"{sha}^1", sha).splitlines()
         common = any(area_of(f, decl)[1] for f in files)
-        out.append(
-            {"pr": int(m.group(1)), "branch": branch, "common": common, "points": decl["triggers"]["common_weight"] if common else 1}
-        )
+        out.append({"pr": n, "branch": branch, "common": common, "points": decl["triggers"]["common_weight"] if common else 1})
     return out
 
 
@@ -532,16 +546,20 @@ def push_done(root: Path, to: str, review: bool) -> tuple[list[str], list[str]]:
         ok = proc.git(root, "push", "-q", "origin", f"{to}:refs/heads/{name}", check=False).returncode == 0
         if not ok:
             git_or_stop(root, "fetch", "-q", "origin", f"+refs/heads/{name}:refs/remotes/origin/{name}", check=False)
-            ok = proc.git(root, "merge-base", "--is-ancestor", to, f"refs/remotes/origin/{name}", check=False).returncode == 0
+            ok = is_ancestor(root, to, f"refs/remotes/origin/{name}")
         (pushed if ok else unpushed).append(name)
     return pushed, unpushed
 
 
 def cmd_escape(a, root: Path) -> tuple[dict, int]:
     decl = load_decl(root)
-    info = json.loads(gh_or_stop(root, "pr", "view", str(a.pr), "--json", "files"))
+    r = gh_rest.pr_files(a.pr, cwd=str(root))
+    if r.returncode != 0:
+        raise Stop(
+            "gh が無い" if r.returncode == 127 else f"PR #{a.pr} の変更したファイルを読めない: {r.stderr.strip()[:300]}", EXIT_VIOLATION
+        )
     areas: list[str] = []
-    for f in info.get("files") or []:
+    for f in json.loads(r.stdout):
         name = area_of(f.get("path", ""), decl)[0]
         if name not in areas:
             areas.append(name)

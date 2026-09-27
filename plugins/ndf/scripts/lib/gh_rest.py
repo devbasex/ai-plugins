@@ -52,6 +52,63 @@ def view_json(kind: str, number: int, fields: str, repo: str | None = None, cwd:
     return gh_call.GhResult(0, json.dumps(gh_fields.to_json_shape(kind, d, fields), ensure_ascii=False), "")
 
 
+def pr_files(number: int, repo: str | None = None, cwd: str | None = None) -> gh_call.GhResult:
+    """PR の変更したファイルを全件読む（REST の `pulls/<n>/files` を全ページ）。
+
+    `gh pr view --json files` は先頭 100 件で切れ、rename の前のパスも返さない。stdout は
+    `[{"path", "previous_path", "status", "additions", "deletions"}]` の JSON（`previous_path` は rename のときだけ値を持つ）。
+    """
+    path = f"repos/{repo or '{owner}/{repo}'}/pulls/{int(number)}/files?per_page={PER_PAGE}"
+    r = gh_call.gh(["api", "--paginate", path], cwd=cwd)
+    if r.returncode != 0:
+        return r
+    rows: list = []
+    text, dec, i = r.stdout, json.JSONDecoder(), 0
+    try:
+        while True:  # --paginate はページごとの配列を続けて書く（`[...][...]`）
+            while i < len(text) and text[i].isspace():
+                i += 1
+            if i >= len(text):
+                break
+            page, i = dec.raw_decode(text, i)
+            if not isinstance(page, list):
+                raise ValueError(page)
+            rows += page
+        files = [
+            {
+                "path": f["filename"],
+                "previous_path": f.get("previous_filename"),
+                "status": f.get("status", ""),
+                "additions": f.get("additions", 0),
+                "deletions": f.get("deletions", 0),
+            }
+            for f in rows
+        ]
+    except (ValueError, TypeError, KeyError):
+        return gh_call.GhResult(1, "", f"PR #{int(number)} の変更したファイルを読めない")
+    return gh_call.GhResult(0, json.dumps(files, ensure_ascii=False), "")
+
+
+def pr_head_branches(numbers: list[int], cwd: str | None = None) -> tuple[dict[int, str] | None, str]:
+    """PR の番号 → head のブランチ名（`cwd` のリポジトリ）。GraphQL の別名で 100 件ずつまとめて読む（PR 1 本ごとに呼ばない）。
+    番号が PR でないもの（squash の件名の `(#N)` が課題を指すなど）は空文字。読めなければ (None, 理由)。"""
+    out: dict[int, str] = {}
+    for i in range(0, len(numbers), PER_PAGE):
+        chunk = [int(n) for n in numbers[i : i + PER_PAGE]]
+        fields = " ".join(f"p{n}: pullRequest(number: {n}) {{ headRefName }}" for n in chunk)
+        query = f"query($owner: String!, $name: String!) {{ repository(owner: $owner, name: $name) {{ {fields} }} }}"
+        r = gh_call.gh(["api", "graphql", "-F", "owner={owner}", "-F", "name={repo}", "-f", f"query={query}"], cwd=cwd)
+        try:
+            data = json.loads(r.stdout)["data"]["repository"]
+        except (ValueError, KeyError, TypeError):
+            data = None
+        if not isinstance(data, dict):  # 一部の番号が PR でないだけなら data は残る
+            return None, ("gh が無い" if r.returncode == 127 else (r.stderr or r.stdout).strip()[:300] or "応答を読めない")
+        for n in chunk:
+            out[n] = (data.get(f"p{n}") or {}).get("headRefName") or ""
+    return out, ""
+
+
 def _rest(path: str, method: str = "GET", payload: Any = None) -> Attempt:
     resp = gh_call.request(path, method, payload)
     if not resp.ok or resp.error:
