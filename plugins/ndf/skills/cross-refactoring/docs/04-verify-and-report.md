@@ -225,6 +225,7 @@ rf_eval start-phase "$ID" final-fix                        # PHASE_TIMEOUT = 想
 | 返す値 | 何に使うか |
 | --- | --- |
 | `FINAL_GATE=failing` | 最終ゲート修正へ入ることを示す |
+| `FINAL_GATE=recheck` | 寄せた危険フラグの項目を取り消しただけで、修正の依頼ではない。駆動は修正の CLI を起動せずに `final-gate` を打ち直す。起点は取り消し後の HEAD へ置き直す |
 | `FINAL_FIX_IMPL` | 修正を起動する担当。**実装担当**（輪番は無い） |
 | `FINAL_FIX_ROUND` | 何回目の修正か |
 
