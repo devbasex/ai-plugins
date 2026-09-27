@@ -67,7 +67,11 @@ def env(tmp_path):
     bindir.mkdir()
     calls = tmp_path / "calls.txt"
     gh = bindir / "gh"
-    gh.write_text(f"#!/bin/sh\necho gh $* >> {calls}\ncat {tmp_path / 'gh-out.json'} 2>/dev/null || echo '[]'\n")
+    gh.write_text(
+        f"#!/bin/sh\necho gh $* >> {calls}\n"
+        f'case "$*" in *pulls/*/files*) cat {tmp_path / "gh-files.json"}; exit 0;; esac\n'
+        f"cat {tmp_path / 'gh-out.json'} 2>/dev/null || echo '[]'\n"
+    )
     gh.chmod(0o755)
     claude = bindir / "claude"
     claude.write_text(
@@ -605,7 +609,11 @@ def test_mvv_gate_goes_back_without_the_llm_when_the_declaration_does_not_match(
 def test_mvv_gate_never_passes_a_pr_that_changes_the_declaration(env):
     assert approve(env) == 0
     state = gate_state(env, env["tmp"], with_mission=True)
-    (env["tmp"] / "gh-out.json").write_text(json.dumps({"title": "t", "body": "b", "files": [{"path": ".ndf/mvv.md", "additions": 1}]}))
+    # REST の `pulls/<n>/files` の形（変更したファイルは `gh pr view --json files` でなく REST の全件で読む）
+    (env["tmp"] / "gh-out.json").write_text(json.dumps({"title": "t", "body": "b", "changedFiles": 1}))
+    (env["tmp"] / "gh-files.json").write_text(
+        json.dumps([{"filename": ".ndf/mvv.md", "status": "modified", "additions": 1, "deletions": 0}])
+    )
     before = calls(env, "claude")
     code, out, rows = gate_check(env, state, "--pr", "5")
     assert code == 10 and calls(env, "claude") == before and "C7" in rows[-1]["reasons"][0]

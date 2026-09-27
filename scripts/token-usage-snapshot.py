@@ -141,25 +141,28 @@ def layer_rows(per_role: list[dict]) -> list[list[str]]:
         a = acc[(r["version"], r["layer"])]
         n = r["count"]
         a["n"] += n
-        for k in ("p", "k", "w5", "w1h"):
+        for k in ("k", "w5", "w1h"):
             a[k] += r[k] * n
-        a["rewrites"] += r["rewrites"]
-        a["after"] += r["rewrites_after_5m"]
+        if "p" in r:  # 帳簿の役は呼び出しの並びを持たないため、P・書き直しの分母から外す
+            a["pn"] += n
+            a["p"] += r["p"] * n
+            a["rewrites"] += r["rewrites"]
+            a["after"] += r["rewrites_after_5m"]
     rows = []
     for (v, layer), a in sorted(acc.items(), key=lambda x: (tu.version_key(x[0][0]), order.get(x[0][1], 9))):
-        n = a["n"]
+        n, pn = a["n"], a["pn"]
         rows.append(
             [
                 v,
                 layer,
                 str(int(n)),
-                tu._k(a["p"] / n),
+                tu._k(a["p"] / pn) if pn else "-",
                 f"{a['k'] / n:.1f}",
                 tu._m(a["w5"] / n),
                 tu._m(a["w1h"] / n),
-                str(int(a["rewrites"])),
-                str(int(a["after"])),
-                f"{a['rewrites'] / n:.2f}",
+                str(int(a["rewrites"])) if pn else "-",
+                str(int(a["after"])) if pn else "-",
+                f"{a['rewrites'] / pn:.2f}" if pn else "-",
             ]
         )
     return rows
@@ -303,7 +306,9 @@ def resolve_floor(out: Path, released: str, until: float, min_version: str | Non
 
 
 def build(args, floor: str, prev, until_s: str, until: float, date: str) -> tuple[dict, str, list[str]]:
-    sessions, unlinked, skipped = tu.collect(args.claude_root, args.codex_root, args.kiro_root, until=until, min_version=floor)
+    sessions, unlinked, skipped = tu.collect(
+        args.claude_root, args.codex_root, args.kiro_root, until=until, min_version=floor, usage_root=args.usage_root
+    )
     meta = {
         "by": list(tu.AXES),
         "min_version": floor,
@@ -311,6 +316,7 @@ def build(args, floor: str, prev, until_s: str, until: float, date: str) -> tupl
         "sessions": len(sessions),
         "sessions_with_pr": sum(1 for s in sessions if s.prs),
         "unlinked_external": unlinked,
+        "unlinked_ledger": skipped.pop("帳簿の寄せ先が無い", 0),
         "skipped": skipped,
         "released": args.released,
         "previous": prev[0] if prev else None,
@@ -356,6 +362,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--claude-root", type=Path, default=home / ".claude/projects")
     ap.add_argument("--codex-root", type=Path, default=home / ".codex/sessions")
     ap.add_argument("--kiro-root", type=Path, default=home / ".kiro/sessions/cli")
+    ap.add_argument(
+        "--usage-root",
+        type=Path,
+        default=tu.usage_ledger.ledger_dir(),
+        help="計画が起動した claude -p の使用量の帳簿のディレクトリ（token-usage.py と同じ既定）",
+    )
     args = ap.parse_args(argv)
     try:
         until_s, until = parse_until(args.until)

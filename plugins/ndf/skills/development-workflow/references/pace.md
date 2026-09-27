@@ -40,6 +40,7 @@ SKILL.md の「進め方（`pace`）」の続きである。区分の表と承�
 
 | 項目 | 型 | 空・無いとき | 意味 |
 | --- | --- | --- | --- |
+| `version` | 数 | 許さない（`1` だけ。必須） | 宣言の形の版。無い・`1` 以外なら `check-trigger` / `mvv-gate` / `supervise.py new mission --pace fast` が止まる |
 | `fast.enabled` | bool | 偽 | `fast` を許すか |
 | `fast.modes` | 文字列の配列 | 既定の 3 つ | `fast` を使ってよいモード |
 | `fast.verify` | 文字列 | `fast` を断る | インストール確認のコマンド |

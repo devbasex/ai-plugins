@@ -55,9 +55,16 @@ def run_locally(state: dict[str, Any], log: pathlib.Path) -> tuple[bool, bool, l
 
 
 def whole_fallback_command(state: dict[str, Any]) -> Any:
-    """変更起因のファイルを挙げられないときに走らせ直す全体テスト（先頭の 1 本。シェルで走らせる文字列）。"""
+    """変更起因のファイルを挙げられないときに走らせ直す全体テスト（シェルで走らせる文字列）。
+
+    **suite が複数なら全部を走らせる。** 先頭だけにすると、2 本目以降だけが落ちたときに先頭が通って
+    直ったと誤り、最終ゲートで同じ失敗を見つけ直して修正の起動が増える。各 suite は括弧で分けて
+    作業ディレクトリの移動を持ち越さず、`&&` で最初に落ちた suite で止める。
+    """
     commands = timeline.strategy_of(state).whole_commands()
-    return commands[0] if commands else []
+    if len(commands) <= 1:
+        return commands[0] if commands else []
+    return " && ".join(f"( {c} )" for c in commands)
 
 
 def fallback(

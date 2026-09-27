@@ -13,13 +13,15 @@ candidates: 手順 1 の経路のうち機械で集められるものを集め�
   経路は diff-path（差分のパス）/ diff-identifier（削除された識別子）/ no-milestone /
   closed-milestone（閉じた課題のマイルストーン）/ sub-issue（閉じた親の子）/
   commit-subject（<ref>..HEAD のコミットの件名が #番号で指す）/ all（--all）/
-  manual（--add で担当が足したもの）。commit-subject の候補は、上限で切るときも先に残す。候補ごとに updated_at と本文の要約値を返す。
+  manual（--add で担当が足したもの）。commit-subject の候補は、上限で切るときも先に残す。候補ごとに updated_at と
+  課題の要約値（題名・本文・状態・マイルストーン・ラベル）を返す。
   --limit で 1 回に扱う件数に上限を置く。超えた分は items に載せず、metrics.deferred に番号だけを返す（終了コード 20）。
-apply: plan.json の変更を反映する。反映の直前に updated_at を照合し、変わっていれば本文の
-  要約値を比べ、それも変わっていれば飛ばす（skipped_changed）。済んだものは記録に記録して
+apply: plan.json の変更を反映する。反映の直前に updated_at を照合し、変わっていれば課題の
+  要約値を比べ、それも変わっていれば飛ばす（skipped_changed）。途中で止まった課題は書き込んだ後の
+  要約値を記録に残し、打ち直しでは自分の書き込みとして扱う。済んだものは記録に記録して
   2 度書かない。上限に当たれば Retry-After / 回復時刻 / 倍々の順で待ち、--max-waits を
   超えたら部分的に終わった状態で止める。
-report: candidates と apply の記録から完了報告の値を返す。
+report: candidates と apply の記録から完了報告の値を返す。candidates は前の回の apply の記録を消す。
 
 plan.json の形:
 
@@ -46,13 +48,12 @@ import os
 import re
 import sys
 import tempfile
-import time
+import urllib.parse
 from pathlib import Path
 
 _LIB = Path(__file__).resolve().parents[3] / "scripts" / "lib"
 sys.path.insert(0, str(_LIB))
 import jsonio  # noqa: E402
-import post_queue  # noqa: E402
 from step_result import (
     EXIT_PAUSE,
     EXIT_PRECONDITION,
@@ -66,6 +67,7 @@ from step_result import (
     main_with,
     result,
 )
+from upkeep_gh import DEFAULT_MAX_WAIT, DEFAULT_MAX_WAITS, Gh, Milestones, Partial, _issues, _repo, _with_labels  # noqa: E402
 
 TOOL = "issue-upkeep"
 
@@ -76,11 +78,6 @@ NEEDS_APPROVAL = ("やらない",)
 RETURNED = ("要判断",)
 
 ROUTES = ("diff-path", "diff-identifier", "no-milestone", "closed-milestone", "sub-issue", "commit-subject", "all", "manual")
-
-# 待ちの既定。倍々の起点は、作成の二次的な制限で実測した 60 秒の間隔に合わせる。
-DOUBLING_START = 60.0
-DEFAULT_MAX_WAITS = 8
-DEFAULT_MAX_WAIT = 900.0
 
 # 削除された識別子として拾う語の形。短い語や記号を含まない語は、ありふれた単語と区別できない。
 _TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]*[A-Za-z0-9_]")
@@ -97,35 +94,26 @@ def digest(body) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
 
 
+def snapshot_digest(issue: dict) -> str:
+    """課題の要約値。apply が書き換えうる欄（題名・本文・状態・マイルストーン・ラベル）をまとめる。
+
+    本文だけを見ると、題名・マイルストーン・ラベルの並行した更新を見落として上書きする。
+    updated_at はコメントでも動くため、updated_at だけでは飛ばさない。
+    """
+    snap = {
+        "title": issue.get("title") or "",
+        "body": digest(issue.get("body")),
+        "state": issue.get("state") or "",
+        "milestone": (issue.get("milestone") or {}).get("title"),
+        "labels": sorted(lb.get("name", "") for lb in issue.get("labels") or []),
+    }
+    return hashlib.sha256(json.dumps(snap, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:16]
+
+
 def _is_identifier(tok: str) -> bool:
     if len(tok) < _MIN_TOKEN:
         return False
     return any(c in tok for c in "_-.") or bool(re.search(r"[a-z][A-Z]", tok))
-
-
-def _decode_concat(text: str) -> list:
-    """`gh api --paginate` が出す、連結された JSON 配列を 1 つの列にする。"""
-    out, dec, i, text = [], json.JSONDecoder(), 0, text or ""
-    while True:
-        while i < len(text) and text[i].isspace():
-            i += 1
-        if i >= len(text):
-            return out
-        obj, i = dec.raw_decode(text, i)
-        out.extend(obj if isinstance(obj, list) else [obj])
-
-
-def _split_include(stdout: str) -> tuple[dict, str]:
-    """`gh api -i` の出力をヘッダ（小文字のキー）と本文に分ける。"""
-    if not stdout.startswith("HTTP/"):
-        return {}, stdout
-    parts = re.split(r"\r?\n\r?\n", stdout, maxsplit=1)
-    headers = {}
-    for line in parts[0].splitlines()[1:]:
-        if ":" in line:
-            k, v = line.split(":", 1)
-            headers[k.strip().lower()] = v.strip()
-    return headers, parts[1] if len(parts) > 1 else ""
 
 
 def _state_dir(arg, repo: str) -> Path:
@@ -143,75 +131,7 @@ def _read_state(path: Path):
         raise StepError(f"{path} を読めない: {e.detail or e}", EXIT_UNREADABLE)
 
 
-# ---------------- gh の呼び出しと待ち ----------------
-
-
-class Partial(Exception):
-    """待ちの回数か長さが上限を超えた。"""
-
-
-class Gh:
-    """gh api を呼ぶ。上限に当たれば応答から待つ長さを決めて待ち、再実行する。"""
-
-    def __init__(self, repo: str, max_waits: int = DEFAULT_MAX_WAITS, max_wait: float = DEFAULT_MAX_WAIT, sleep=None, now=None):
-        self.repo = repo
-        self.max_waits = max_waits
-        self.max_wait = max_wait
-        self.sleep = sleep or (lambda s: None if os.environ.get("NDF_UPKEEP_NO_SLEEP") else time.sleep(s))
-        self.now = now or time.time
-        self.waits: list[dict] = []
-        self._doubling = 0.0
-
-    def _wait_for(self, headers: dict) -> tuple[float, str]:
-        ra = headers.get("retry-after")
-        if ra and ra.strip().isdigit():
-            return float(ra), "retry-after"
-        reset = headers.get("x-ratelimit-reset")
-        if headers.get("x-ratelimit-remaining") == "0" and reset and reset.isdigit():
-            return max(1.0, float(reset) - self.now()), "reset"
-        self._doubling = self._doubling * 2 if self._doubling else DOUBLING_START
-        return self._doubling, "doubling"
-
-    def call(self, args: list[str], stdin: str | None = None, target=None, paginate=False):
-        """`gh api <args>` を呼び、本文の JSON を返す。失敗は StepError。"""
-        cmd = ["gh", "api", *(["--paginate"] if paginate else ["-i"]), *args]
-        while True:
-            a = post_queue.run(cmd, stdin=stdin)
-            headers, body = _split_include(a.stdout)
-            att = post_queue.Attempt(a.code, body, a.stderr)
-            if att.ok:
-                self._doubling = 0.0
-                if not body.strip():
-                    return None
-                try:
-                    return _decode_concat(body) if paginate else json.loads(body)
-                except ValueError:
-                    raise StepError(f"gh api {' '.join(args)} の出力を読めない", EXIT_UNREADABLE)
-            if not post_queue.is_rate_limited(att):
-                raise StepError(f"gh api {' '.join(args)} が失敗: {att.summary()}")
-            seconds, why = self._wait_for(headers)
-            if len(self.waits) >= self.max_waits or seconds > self.max_wait:
-                raise Partial(f"待ちが上限を超えた（{len(self.waits)} 回・次は {seconds:g} 秒）")
-            self.waits.append({"number": target, "seconds": round(seconds, 1), "why": why})
-            print(f"⏳ 上限のため {seconds:g} 秒待つ（{why}）: gh api {' '.join(args)}", file=sys.stderr)
-            self.sleep(seconds)
-
-
-def _repo(root, arg) -> str:
-    if arg:
-        return arg
-    p = post_queue.run(["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"])
-    if not p.ok or not p.stdout.strip():
-        raise StepError(f"リポジトリを決められない（--repo を渡す）: {p.summary()}", EXIT_PRECONDITION)
-    return p.stdout.strip()
-
-
 # ---------------- candidates ----------------
-
-
-def _issues(gh: Gh, query: str) -> list[dict]:
-    rows = gh.call([f"repos/{gh.repo}/issues?{query}&per_page=100"], paginate=True) or []
-    return [r for r in rows if isinstance(r, dict) and not r.get("pull_request")]
 
 
 def _ref_date(root, ref: str) -> str:
@@ -366,7 +286,7 @@ def cmd_candidates(a):
                 "routes": sorted(routes[n], key=ROUTES.index),
                 "terms": sorted(terms.get(n, ())),
                 "updated_at": i.get("updated_at"),
-                "digest": digest(i.get("body")),
+                "digest": snapshot_digest(i),
             }
         )
     for t in empty_milestones:
@@ -401,7 +321,9 @@ def cmd_candidates(a):
             f"上限 {a.limit} 件を超えた {len(deferred)} 件（deferred）は、次の回に --add で渡すか --limit を上げる" if deferred else None
         ),
     )
-    jsonio.write_atomic(_state_dir(a.state_dir, repo) / "candidates.json", out, indent=1)
+    sd = _state_dir(a.state_dir, repo)
+    (sd / "apply.json").unlink(missing_ok=True)  # 前の回の apply を今回の報告へ混ぜない
+    jsonio.write_atomic(sd / "candidates.json", out, indent=1)
     emit(out, EXIT_PAUSE if deferred else None)
 
 
@@ -423,6 +345,8 @@ def _load_plan(path: str) -> dict:
             errs.append(f"#{act['number']} の verdict は {' / '.join(VERDICTS)} のどれか")
         if not act.get("updated_at") or not act.get("digest"):
             errs.append(f"#{act['number']} に updated_at と digest が無い（照合できない）")
+        if "approved" in act and not isinstance(act["approved"], bool):  # "false" などで承認を通さない
+            errs.append(f"#{act['number']} の approved は true / false で書く")
         ch = act.get("changes", {})
         if not isinstance(ch, dict):
             errs.append(f"#{act['number']} の changes はオブジェクトで書く")
@@ -432,24 +356,13 @@ def _load_plan(path: str) -> dict:
 
 
 def _ledger_key(repo: str, act: dict) -> str:
-    ch = json.dumps(act.get("changes") or {}, ensure_ascii=False, sort_keys=True)
+    """記録のキー。plan の updated_at と要約値も含め、後の回の同じ変更を「済み」にしない。"""
+    ch = json.dumps(
+        {"changes": act.get("changes") or {}, "updated_at": act.get("updated_at"), "digest": act.get("digest")},
+        ensure_ascii=False,
+        sort_keys=True,
+    )
     return f"{repo}#{act['number']}:{hashlib.sha256(ch.encode('utf-8')).hexdigest()[:12]}"
-
-
-class Milestones:
-    def __init__(self, gh: Gh):
-        self.gh, self._by_title = gh, None
-
-    def number(self, title: str, target) -> int:
-        if self._by_title is None:
-            rows = self.gh.call([f"repos/{self.gh.repo}/milestones?state=all&per_page=100"], target=target, paginate=True) or []
-            self._by_title = {r["title"]: r["number"] for r in rows}
-        if title not in self._by_title:
-            made = self.gh.call(
-                [f"repos/{self.gh.repo}/milestones", "-X", "POST", "--input", "-"], stdin=json.dumps({"title": title}), target=target
-            )
-            self._by_title[title] = made["number"]
-        return self._by_title[title]
 
 
 def _diff(cur: dict, ch: dict, ms: Milestones, n: int) -> tuple[dict, list, list]:
@@ -498,16 +411,20 @@ def cmd_apply(a):
         if verdict in RETURNED:
             put("returned", "要判断は反映しない")
             continue
-        if key in ledger:
+        rec = ledger.get(key)
+        if rec is not None and rec.get("result") != "partial":
             put("already", "記録にある")
             continue
-        if verdict in NEEDS_APPROVAL and not act.get("approved"):
+        if verdict in NEEDS_APPROVAL and act.get("approved") is not True:
             put("needs_approval", "やらないは承認を得てから反映する")
             continue
+        cur, wrote = None, False
         try:
             cur = gh.call([f"repos/{repo}/issues/{n}"], target=n)
-            if cur.get("updated_at") != act["updated_at"] and digest(cur.get("body")) != act["digest"]:
-                put("skipped_changed", f"updated_at {act['updated_at']} → {cur.get('updated_at')}・本文も変わった")
+            now = snapshot_digest(cur)
+            own = rec is not None and now == rec.get("digest")  # 前の打ち直しで自分が書いた状態
+            if cur.get("updated_at") != act["updated_at"] and now != act["digest"] and not own:
+                put("skipped_changed", f"updated_at {act['updated_at']} → {cur.get('updated_at')}・課題の要約値も変わった")
                 continue
             patch, add, remove = _diff(cur, ch, ms, n)
             if not (patch or add or remove):
@@ -516,34 +433,52 @@ def cmd_apply(a):
                 put("unchanged", "変える内容が無い")
                 continue
             if patch:
-                gh.call([f"repos/{repo}/issues/{n}", "-X", "PATCH", "--input", "-"], stdin=json.dumps(patch, ensure_ascii=False), target=n)
+                got = gh.call(
+                    [f"repos/{repo}/issues/{n}", "-X", "PATCH", "--input", "-"], stdin=json.dumps(patch, ensure_ascii=False), target=n
+                )
+                cur, wrote = (got if isinstance(got, dict) else {**cur, **patch}), True
             if add:
-                gh.call(
+                got = gh.call(
                     [f"repos/{repo}/issues/{n}/labels", "-X", "POST", "--input", "-"],
                     stdin=json.dumps({"labels": add}, ensure_ascii=False),
                     target=n,
                 )
+                cur, wrote = _with_labels(cur, got, add=add), True
             for lb in remove:
-                gh.call([f"repos/{repo}/issues/{n}/labels/{lb}", "-X", "DELETE"], target=n)
+                seg = urllib.parse.quote(lb, safe="")  # `status/blocked` の `/` を別のパスにしない
+                got = gh.call([f"repos/{repo}/issues/{n}/labels/{seg}", "-X", "DELETE"], target=n)
+                cur, wrote = _with_labels(cur, got, drop=lb), True
             ledger[key] = {"result": "applied", "fields": sorted(patch), "add_labels": add, "remove_labels": remove}
             jsonio.write_atomic(ledger_path, ledger, indent=1)
             put("applied", ", ".join(sorted(patch) + [f"+{x}" for x in add] + [f"-{x}" for x in remove]))
-        except Partial as e:
+        except (Partial, StepError) as e:
+            if wrote:  # 書き込んだ後の要約値を残し、打ち直しで自分の書き込みを並行の更新と取り違えない
+                ledger[key] = {"result": "partial", "digest": snapshot_digest(cur)}
+                jsonio.write_atomic(ledger_path, ledger, indent=1)
+            if isinstance(e, StepError):
+                put("failed", str(e))
+                continue
             partial, why_partial = True, str(e)
             for rest in actions[idx:]:
                 buckets["pending"].append(rest["number"])
                 items.append({"kind": "issue", "name": f"#{rest['number']}", "result": "pending", "verdict": rest["verdict"]})
             break
-        except StepError as e:
-            put("failed", str(e))
 
     closed = [
         act["number"] for act in actions if act["number"] in buckets["applied"] and (act.get("changes") or {}).get("state") == "closed"
     ]
+    # 同じ回（前の candidates 以降）の打ち直しを足し合わせ、承認後・partial 後の報告から前の反映と待ちを落とさない
+    prev = ((_read_state(sd / "apply.json") or {}).get("metrics") or {}).get("round") or {}
     metrics = {
         **buckets,
         "closed": closed,
         "waits": gh.waits,
+        "round": {
+            "applied": sorted(set(prev.get("applied", [])) | set(buckets["applied"])),
+            "closed": sorted(set(prev.get("closed", [])) | set(closed)),
+            "waits": prev.get("waits", []) + gh.waits,
+            "runs": prev.get("runs", 0) + 1,
+        },
         "partial": partial,
         "verdicts": {v: sum(1 for act in actions if act["verdict"] == v) for v in VERDICTS},
     }
@@ -621,12 +556,14 @@ def cmd_report(a):
         )
     if app:
         am = app["metrics"]
-        waits = am.get("waits", [])
+        rnd = am.get("round") or {**am, "runs": 1}  # round を持たない前の版の記録は、最後の 1 回だけを数える
+        applied, closed, waits = rnd["applied"], rnd["closed"], rnd.get("waits", [])
         metrics.update(
             {
                 "verdicts": am["verdicts"],
-                "applied": len(am["applied"]),
-                "closed": len(am["closed"]),
+                "applied": len(applied),
+                "closed": len(closed),
+                "apply_runs": rnd["runs"],
                 "returned": len(am["returned"]),
                 "skipped_changed": am["skipped_changed"],
                 "needs_approval": am["needs_approval"],
@@ -648,8 +585,7 @@ def cmd_report(a):
                 "kind": "section",
                 "name": "反映",
                 "result": "partial" if am["partial"] else "ok",
-                "value": f"直した {len(am['applied']) - len(am['closed'])} 件・閉じた {len(am['closed'])} 件・"
-                f"返した {len(am['returned'])} 件",
+                "value": f"直した {len(applied) - len(closed)} 件・閉じた {len(closed)} 件・返した {len(am['returned'])} 件",
             },
             {"kind": "section", "name": "待った回数", "result": "ok", "value": f"{len(waits)} 回・計 {metrics['wait_seconds']:g} 秒"},
         ]

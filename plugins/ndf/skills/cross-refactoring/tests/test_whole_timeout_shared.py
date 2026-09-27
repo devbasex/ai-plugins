@@ -112,3 +112,18 @@ def test_targets_across_suites_run_each_suite_with_its_own_template(refactor, mo
     assert (code, timed_out) == (0, False)
     assert seen == [["run-a", "tests/a/test_t.py"], ["run-b", "tests/b/test_t.py::y"]]
     assert given == [100, 70], "suite 群で 1 つの上限を分け合う"
+
+
+def test_whole_fallback_reruns_every_suite(refactor, monkeypatch, tmp_path):
+    """JUnit で見分けられないときの再検証は全 suite を走らせる。2 本目だけが落ちても直ったと誤らない。"""
+    import subprocess
+
+    wholetest = sys.modules["refactor_lib.wholetest"]
+    ts = wholetest.timeline.ts
+    monkeypatch.setattr(wholetest.timeline, "strategy_of", lambda state: ts.Strategy("local-full", "test", [ts.Suite("a", "run a")]))
+    assert wholetest.whole_fallback_command({}) == "run a"
+    two = ts.Strategy("local-full", "test", [ts.Suite("a", "true"), ts.Suite("b", "false")])
+    monkeypatch.setattr(wholetest.timeline, "strategy_of", lambda state: two)
+    command = wholetest.whole_fallback_command({})
+    assert command == "( true ) && ( false )"
+    assert subprocess.run(command, shell=True, cwd=tmp_path).returncode != 0
