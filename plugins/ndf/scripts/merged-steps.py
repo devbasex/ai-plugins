@@ -31,6 +31,7 @@ import datetime
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -133,14 +134,13 @@ def remove_worktree(root, path, label):
 
 
 def same_untracked(main_dir, pull):
-    """pull を止めた未追跡のファイルが、すべて上流の内容と同じならその一覧を返す。1 つでも違えば空。"""
+    """pull を止めた未追跡のファイルが、すべて上流とバイト列で同じ（CRLF と LF も別物）ならその一覧を返す。1 つでも違えば空。"""
     if "untracked working tree files would be overwritten" not in pull.stderr:
         return []
     rels = [l.strip() for l in pull.stderr.splitlines() if l.startswith("\t")]
     for rel in rels:
-        up = run(["git", "-C", main_dir, "show", f"@{{u}}:{rel}"], check=False)
-        path = Path(main_dir) / rel
-        if up.returncode != 0 or not path.is_file() or path.read_text(errors="replace") != up.stdout:
+        up = subprocess.run(["git", "-C", str(main_dir), "show", f"@{{u}}:{rel}"], capture_output=True)
+        if up.returncode != 0 or not (path := Path(main_dir) / rel).is_file() or path.read_bytes() != up.stdout:
             return []
     return rels
 
