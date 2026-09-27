@@ -344,7 +344,7 @@ def test_merge_when_green_rewaits_on_push_and_merges(repo, gh):
     kinds = [(i["kind"], i["result"]) for i in out["items"]]
     assert ("restart", "rewait") in kinds and ("pr", "merged") in kinds
     merges = [c for c in gh.get()["calls"] if c[:2] == ["pr", "merge"]]
-    assert merges == [["pr", "merge", "5", "--admin", "--merge"]]
+    assert merges == [["pr", "merge", "5", "--admin", "--merge", "--match-head-commit", "bbb"]]  # 緑を確かめた先頭に限る
 
 
 def pr_views(gh):
