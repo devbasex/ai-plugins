@@ -164,8 +164,11 @@ def _wait_ci(root: pathlib.Path, strategy: ts.Strategy, limits: dict, notes: lis
     def runs_now():
         return gh_checks.fetch_check_runs(owner_repo, sha, rest_get=lambda p: _Resp(test_triage.gh_json(p)))
 
+    last: dict = {}
+
     def fetch():
         runs = runs_now()
+        last["runs"] = runs
         if runs is None:
             return None
         results = [gh_checks.check_result(runs, name) for name in checks]
@@ -184,7 +187,9 @@ def _wait_ci(root: pathlib.Path, strategy: ts.Strategy, limits: dict, notes: lis
         return 2
     if outcome == "success":
         return _emit_outcome(strategy, limits, notes, None, True, detail)
-    xmls = test_triage.ci_junit_xmls(owner_repo, sha, checks, (strategy.ci or {}).get("junit_artifacts"), fetch_runs=runs_now)
+    xmls = test_triage.ci_junit_xmls(
+        owner_repo, sha, checks, (strategy.ci or {}).get("junit_artifacts"), fetch_runs=lambda: last.get("runs")
+    )
     triage = _classify(root, strategy, limits, base, ci_xmls=xmls)
     return _emit_outcome(strategy, limits, notes, triage, False, detail + f" の結論は {outcome}")
 
@@ -202,8 +207,13 @@ def cmd_whole(a) -> int:
     (root / LOG_DIR).mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
     failed_any = False
+    whole_timeout = float(limits["whole_timeout"])
     for i, command in enumerate(commands):
-        code, timed_out = test_triage.run_command(command, str(root), int(limits["whole_timeout"]), root / LOG_DIR / f"whole-{i}.log")
+        # 上限は suite 群全体で 1 つ。後の suite には残りの秒だけを渡す（suite ごとに丸ごと渡すと N 倍まで走る）
+        left = whole_timeout - (time.monotonic() - started)
+        code, timed_out = (
+            test_triage.run_command(command, str(root), max(1, int(left)), root / LOG_DIR / f"whole-{i}.log") if left >= 1 else (None, True)
+        )
         if timed_out:
             emit(result(TOOL, "stopped", f"全体テストが {limits['whole_timeout']} 秒で終わらなかった", [], {}))
             return 2

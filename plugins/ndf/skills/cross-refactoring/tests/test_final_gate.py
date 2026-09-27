@@ -558,7 +558,7 @@ def _failed_ci(patch_lib, spy, ids):
     """CI が落ち、成果物の JUnit から `ids` が落ちたと読める。範囲の走らせ直しも落ちる。"""
     spy["gh_out"] = _check_runs(_run("tests", conclusion="failure"))
     spy["test_code"] = 1
-    patch_lib("ci_junit", lambda state, sha, checks: [b"<testsuites/>"])
+    patch_lib("ci_junit", lambda state, sha, checks, runs=None: [b"<testsuites/>"])
     patch_lib("failed_ids_of", lambda state, ci_xmls=None: (list(ids), None))
 
 
@@ -661,3 +661,16 @@ def test_the_ci_gate_waits_without_pushing(patch_lib, refactor, cmd_gate, tmp_pa
 
     assert pushed == []
     assert not any(cmd[:2] == ["git", "push"] for cmd in spy["gh"])
+
+
+def test_the_ci_gate_reads_every_check_with_one_query_per_poll(refactor, cmd_gate, tmp_path, env_tmp_dir, spy, capsys):
+    """待つチェックが複数でも、1 回の照会でチェックジョブの一覧を 1 度だけ読む（照会の回数がチェックの本数倍にならない）。"""
+    ci = {"check": "tests", "checks": ["tests", "lint", "e2e"], "junit_artifacts": None}
+    state_path = _ci_whole_state(tmp_path, strategy=strategy_state("local-scoped-ci-whole", ci=ci))
+    env_tmp_dir(state_path)
+    spy["gh_out"] = _check_runs(_run("tests"), _run("lint"), _run("e2e"))
+
+    cmd_gate.cmd_final_gate(_args())
+
+    assert "FINAL_GATE=passed" in capsys.readouterr().out
+    assert len([cmd for cmd in spy["gh"] if any("check-runs" in str(w) for w in cmd)]) == 1

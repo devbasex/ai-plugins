@@ -15,7 +15,7 @@ import test_triage
 
 from . import die, info, timeline
 from .github import gh_api_get
-from .gitfacts import check_run_result, run_with_timeout
+from .gitfacts import run_with_timeout
 from .items import live_items
 from .outbound import plan_line
 from .paths import git_out, work_dir
@@ -35,11 +35,16 @@ def ci_checks(state: dict[str, Any]) -> list[str]:
     return [str(c) for c in (timeline.strategy_of(state).ci or {}).get("checks") or []]
 
 
-def ci_junit(state: dict[str, Any], sha: str, checks: list[str]) -> list[bytes]:
-    """落ちたチェックの run の成果物から JUnit を落とす。取れなければ空（見分けは走らせ直しへ落ちる）。"""
+def ci_junit(state: dict[str, Any], sha: str, checks: list[str], runs: Optional[list[dict[str, Any]]] = None) -> list[bytes]:
+    """落ちたチェックの run の成果物から JUnit を落とす。取れなければ空（見分けは走らせ直しへ落ちる）。
+
+    `runs` は判定に使ったチェックジョブの一覧。渡せば照会し直さない。
+    """
     repo = str(state.get("repo") or "")
     glob = (timeline.strategy_of(state).ci or {}).get("junit_artifacts")
-    return test_triage.ci_junit_xmls(repo, sha, checks, glob, fetch_runs=lambda: gh_checks.fetch_check_runs(repo, sha, rest_get=gh_api_get))
+    return test_triage.ci_junit_xmls(
+        repo, sha, checks, glob, fetch_runs=lambda: runs if runs is not None else gh_checks.fetch_check_runs(repo, sha, rest_get=gh_api_get)
+    )
 
 
 def ci_gate(state: dict[str, Any]) -> tuple[bool, str, Optional[dict[str, Any]]]:
@@ -54,9 +59,13 @@ def ci_gate(state: dict[str, Any]) -> tuple[bool, str, Optional[dict[str, Any]]]
     if not checks:
         die("最終ゲートで待つチェックの名前がありません（--ci-check か宣言の test.ci.check・ci.required_checks）")
     max_wait = float(timeline.state_ci_wait_timeout(state))
+    last: dict[str, Any] = {}
 
     def fetch() -> Optional[str]:
-        results = [check_run_result(repo, sha, name) for name in checks]
+        # 1 回の照会で全チェックの run を読み、名前ごとの結果はその一覧から出す（照会はチェックの本数によらず 1 回）
+        runs = gh_checks.fetch_check_runs(repo, sha, rest_get=gh_api_get) if repo and sha else None
+        last["runs"] = runs
+        results = [gh_checks.check_result(runs, name) for name in checks]
         if any(r is None for r in results):
             return None
         if any(r == "pending" for r in results):
@@ -71,7 +80,7 @@ def ci_gate(state: dict[str, Any]) -> tuple[bool, str, Optional[dict[str, Any]]]
         die(f"{label} の結論を得られませんでした（上限までに終わらない、または照会に失敗）。判断が要ります")
     if outcome == "success":
         return True, f"{label} の結論は success でした", None
-    return False, f"{label} の結論は {outcome} でした", {"timed_out": False, "ci_xmls": ci_junit(state, sha, checks)}
+    return False, f"{label} の結論は {outcome} でした", {"timed_out": False, "ci_xmls": ci_junit(state, sha, checks, last.get("runs"))}
 
 
 def revert_deferred(path: pathlib.Path, state: dict[str, Any], gate: dict[str, Any]) -> bool:

@@ -95,6 +95,29 @@ def test_ci_artifacts_are_picked_by_glob_or_by_the_default_name_rule():
     assert junit.artifact_xmls(get, raw, "acme/demo", 7, None) == [PHPUNIT_XML]
 
 
+def _check_run(run_id, name, conclusion, stamp):
+    url = f"https://github.com/acme/demo/actions/runs/{run_id}/job/{run_id}0"
+    return {"id": run_id, "name": name, "status": "completed", "conclusion": conclusion, "completed_at": stamp, "details_url": url}
+
+
+def test_ci_junit_is_read_from_the_latest_failed_run_of_every_failed_check(monkeypatch):
+    """判定と同じ最新の run から読む。再実行の前の古い run と、成功したチェックの run は読まない。"""
+    read: list = []
+    monkeypatch.setattr(junit, "artifact_xmls", lambda get, raw, repo, run_id, glob: read.append(run_id) or [run_id.encode()])
+    runs = [
+        _check_run(1, "unit", "failure", "2026-01-01T00:00:00Z"),  # 再実行の前
+        _check_run(2, "unit", "failure", "2026-01-01T01:00:00Z"),
+        _check_run(3, "e2e", "failure", "2026-01-01T01:00:00Z"),
+        _check_run(4, "lint", "failure", "2026-01-01T00:00:00Z"),
+        _check_run(5, "lint", "success", "2026-01-01T01:00:00Z"),  # 再実行で通った
+    ]
+
+    got = test_triage.ci_junit_xmls("acme/demo", "sha", ["unit", "e2e", "lint"], None, fetch_runs=lambda: runs)
+
+    assert read == ["2", "3"]
+    assert got == [b"2", b"3"]
+
+
 # ---------- 見分け（fake の実行器で 3 つに分ける） ----------
 
 

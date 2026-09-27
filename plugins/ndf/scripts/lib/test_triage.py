@@ -252,7 +252,11 @@ def gh_raw(path: str) -> bytes:
 def ci_junit_xmls(
     repo: str, sha: str, checks: list[str], name_glob: Optional[str], fetch_runs: Callable[[], Any] | None = None
 ) -> list[bytes]:
-    """落ちたチェックの GitHub Actions の run の成果物から JUnit の本文を落とす。取れなければ空（見分けは走らせ直しへ落ちる）。"""
+    """落ちたチェックの GitHub Actions の run の成果物から JUnit の本文を落とす。取れなければ空（見分けは走らせ直しへ落ちる）。
+
+    判定（`gh_checks.check_result`）と同じく同名のチェックを最新の実行へ畳み、成功でなかったチェックの run だけを読む。
+    再実行の前の古い run の成果物では分けない。落ちたチェックが複数なら、その全部の run から集める（同じ run は 1 回）。
+    """
     import re
 
     import gh_checks
@@ -263,13 +267,16 @@ def ci_junit_xmls(
             self.body = body
 
     runs = (fetch_runs() if fetch_runs else gh_checks.fetch_check_runs(repo, sha, rest_get=lambda p: _Resp(gh_json(p)))) or []
-    for run in runs:
-        if str(run.get("name") or "") not in checks:
+    xmls: list[bytes] = []
+    read: set[str] = set()
+    for run in gh_checks.fold_check_runs(runs):
+        if str(run.get("name") or "") not in checks or gh_checks.run_result(run) == "success":
             continue
         m = re.search(r"/actions/runs/(\d+)", str(run.get("details_url") or run.get("html_url") or ""))
-        if m:
-            return junit.artifact_xmls(gh_json, gh_raw, repo, m.group(1), name_glob)
-    return []
+        if m and m.group(1) not in read:
+            read.add(m.group(1))
+            xmls.extend(junit.artifact_xmls(gh_json, gh_raw, repo, m.group(1), name_glob))
+    return xmls
 
 
 def merged_failed_ids(xmls: list[bytes], tracked: list[str]) -> tuple[Optional[list[str]], Optional[str]]:
