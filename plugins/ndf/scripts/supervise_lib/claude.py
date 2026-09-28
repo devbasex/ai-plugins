@@ -295,7 +295,7 @@ class ClaudeRunner:
         retry = ctx.plan.get("limit_retry_seconds", LIMIT_RETRY)
         wait_max = ctx.plan.get("limit_wait_max", LIMIT_WAIT_MAX)
         fallback = ca.fallback_env()
-        multi = ca.switchable()
+        multi = ca.registered() >= 2
         tried_fallback, waited = False, 0.0
         tried: set[str] = set()  # この呼び出しで上限に当たったアカウント
         kw = {"tick": ctx.tick, "every": st.every, **kw}
