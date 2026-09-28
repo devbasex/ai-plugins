@@ -276,8 +276,7 @@ def _declared(v) -> dict | None:
 
 def _tier(name: str) -> str:
     """`.credentials.json` の `rateLimitTier` だけを読む（トークンは持たない。I8）。"""
-    o = _oauth(name)
-    t = o.get("rateLimitTier") if o is not None else None
+    t = (_oauth(name) or {}).get("rateLimitTier")
     return t if isinstance(t, str) else ""
 
 
@@ -310,9 +309,7 @@ def _path(name: str, file: str) -> str:
 
 
 def _oauth(name: str) -> dict | None:
-    """`.credentials.json` の `claudeAiOauth`（辞書でなければ None）。"""
-    d = _read(_path(name, CRED_FILE))
-    o = d.get("claudeAiOauth") if d else None
+    o = (_read(_path(name, CRED_FILE)) or {}).get("claudeAiOauth")
     return o if isinstance(o, dict) else None
 
 
