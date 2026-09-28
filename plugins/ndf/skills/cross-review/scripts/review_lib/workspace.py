@@ -47,11 +47,18 @@ def _is_registered_worktree(path: str) -> bool:
     return any(line == f"worktree {target}" for line in out.splitlines())
 
 
-def _prepare_review_deps(worktree: str, *, if_unprepared: bool = False) -> None:
+def _prepare_review_deps(worktree: str, *, if_unprepared: bool = False, is_fork: bool = False) -> None:
     """宣言（`.ndf/worktree.json` の `deps`）に従って依存を用意する（#1337）。失敗したら止まる。
 
     worktree は消さない。次の init が使い回すときに `if_unprepared` でやり直す。
+
+    **フォーク PR では用意しない。** 依存の用意（`npm ci`・`composer install` など）は PR の head の
+    package.json・composer.json のスクリプトを走らせるため、外部の投稿者のコードがレビュー担当の環境変数
+    （`GH_TOKEN` など）の届く所で動く。
     """
+    if is_fork:
+        review_lib.info(f"ℹ フォーク PR のため依存の用意（.ndf/worktree.json の deps）を行いません: {worktree}")
+        return
     if worktree_deps.prepare_reporting(worktree, if_unprepared=if_unprepared):
         review_lib.die(f"依存の用意に失敗しました（worktree は残します。次の init がやり直します）: {worktree}")
 

@@ -32,6 +32,18 @@ def test_run_with_timeout_does_not_run_when_unreachable(gitfacts, container_reac
     assert not marker.exists()
 
 
+def test_run_with_timeout_skips_the_check_for_non_test_commands(gitfacts, container_reach, tmp_path, monkeypatch):
+    """生成物の同期などテストでないコマンドは、コンテナが止まっていても走る。"""
+
+    def unreachable(cwd):
+        raise container_reach.Unreachable("サービス app のコンテナが動いていない")
+
+    monkeypatch.setattr(container_reach, "env_for", unreachable)
+    marker = tmp_path / "ran"
+    assert gitfacts.run_with_timeout(f"touch {marker}", str(tmp_path), 30, reach=False) == (0, False)
+    assert marker.exists()
+
+
 def test_refactor_stops_when_unreachable(refactor, container_reach, monkeypatch, capsys):
     def unreachable(args):
         raise container_reach.Unreachable("サービス app のコンテナが動いていない")

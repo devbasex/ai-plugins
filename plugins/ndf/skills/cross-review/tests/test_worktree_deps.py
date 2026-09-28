@@ -69,3 +69,14 @@ def test_review_worktree_failure_stops_init_and_keeps_worktree(repo: pathlib.Pat
 
     assert e.value.code == 1
     assert wt.is_dir()
+
+
+def test_fork_review_worktree_does_not_run_declared_commands(repo: pathlib.Path, tmp_path: pathlib.Path) -> None:
+    counter = tmp_path / "count"
+    _declare(repo, {"run": [f"echo x >> {counter}"]})
+    wt = tmp_path / "ndf-worktrees" / "pr1"
+    workspace._create_worktree(str(wt), 1, "feat/x")
+
+    workspace._prepare_review_deps(str(wt), is_fork=True)
+
+    assert not counter.exists()

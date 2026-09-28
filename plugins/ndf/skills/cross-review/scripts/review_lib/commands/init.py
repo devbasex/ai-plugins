@@ -341,7 +341,9 @@ def _init_new_state(
             review_instructions=review_instructions,
         )
 
-    def _prepare_worktree_and_comments(worktree: str, pr: object, head_branch: str, repo: str) -> _InitWorkspaceContext:
+    def _prepare_worktree_and_comments(
+        worktree: str, pr: object, head_branch: str, repo: str, is_fork: bool = False
+    ) -> _InitWorkspaceContext:
         # worktree 分離 — _tmp_dir() より先に worktree を作成/確認する
         reused = False
         if not pathlib.Path(worktree).exists():
@@ -357,7 +359,7 @@ def _init_new_state(
             pathlib.Path(worktree).rename(stale)
             review_lib.info(f"⚠ 現リポジトリの worktree でないため退避: {stale}")
             workspace_mod._create_worktree(worktree, pr, head_branch)
-        workspace_mod._prepare_review_deps(worktree, if_unprepared=reused)
+        workspace_mod._prepare_review_deps(worktree, if_unprepared=reused, is_fork=is_fork)
 
         # worktree 作成/確認後に _tmp_dir() を呼ぶ (ここで .cross_review/ が作られる)
         tmp_dir = store._tmp_dir(worktree)
@@ -481,5 +483,5 @@ def _init_new_state(
         return
 
     review_ctx = _prepare_review_instructions(pr, pr_ctx.repo, manual_extra_review)
-    ws_ctx = _prepare_worktree_and_comments(pr_ctx.worktree, pr, pr_ctx.meta.head_branch, pr_ctx.repo)
+    ws_ctx = _prepare_worktree_and_comments(pr_ctx.worktree, pr, pr_ctx.meta.head_branch, pr_ctx.repo, is_fork=pr_ctx.meta.is_fork)
     _finalize_initial_state(args, pr, pr_ctx, review_ctx, ws_ctx, manual_extra_review)
