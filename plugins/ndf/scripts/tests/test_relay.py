@@ -3231,7 +3231,9 @@ def test_start_env_failure_uses_metered_or_stops(accounts, monkeypatch):
     """替えるアカウントが無ければ従量の接続の宣言へ、それも無ければ子を起動せずに止まる。"""
     accounts.add("a", util5=10)
     accounts.add("b", util5=30)
-    monkeypatch.setattr(relay_claude, "section_env", lambda base, name: relay_claude.ca.env_for(name, base) if name == "metered" else None)
+    monkeypatch.setattr(
+        relay_claude, "section_env", lambda base, name: relay_claude.ca.account_env(name, base) if name == "metered" else None
+    )
     to, _, _, env = _bare_relay({"NDF_SUPERVISE_CLAUDE_FALLBACK": "ANTHROPIC_API_KEY=k"}).replace_unusable("a")
     assert to == "metered" and env["ANTHROPIC_API_KEY"] == "k"
     with pytest.raises(relay_run.NoAccountEnv):

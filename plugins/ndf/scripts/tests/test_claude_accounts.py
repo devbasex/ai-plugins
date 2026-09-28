@@ -177,7 +177,7 @@ def test_permissions_and_shared_credentials_untouched(accounts):
     before = (shared.read_bytes(), shared.stat().st_mtime_ns)
     ca.rows()
     ca.choose()
-    ca.env_for("b", {})
+    ca.account_env("b", {})
     ca.note_limit("a", "seven_day", None)
     assert (shared.read_bytes(), shared.stat().st_mtime_ns) == before
     assert oct(accounts.root.stat().st_mode & 0o777) == "0o700"
@@ -187,7 +187,7 @@ def test_permissions_and_shared_credentials_untouched(accounts):
             assert oct(f.stat().st_mode & 0o777) == "0o600", f
 
 
-def test_env_for_account_and_metered_do_not_mix(accounts, monkeypatch):
+def test_account_env_and_metered_do_not_mix(accounts, monkeypatch):
     tok = accounts.add("a")
     decl = "CLAUDE_CODE_USE_BEDROCK=1 AWS_PROFILE=p ANTHROPIC_API_KEY=sk-SECRET"
     base = {
@@ -197,19 +197,19 @@ def test_env_for_account_and_metered_do_not_mix(accounts, monkeypatch):
         "CLAUDE_CODE_OAUTH_TOKEN": "old",
         "X": "y",
     }
-    env = ca.env_for("a", base)
+    env = ca.account_env("a", base)
     assert env["CLAUDE_CODE_OAUTH_TOKEN"] == tok and env["NDF_CLAUDE_ACCOUNT"] == "a" and env["X"] == "y"
     assert "CLAUDE_CODE_USE_BEDROCK" not in env and "ANTHROPIC_API_KEY" not in env
-    m = ca.env_for("metered", {"NDF_SUPERVISE_CLAUDE_FALLBACK": decl, "CLAUDE_CODE_OAUTH_TOKEN": tok})
+    m = ca.account_env("metered", {"NDF_SUPERVISE_CLAUDE_FALLBACK": decl, "CLAUDE_CODE_OAUTH_TOKEN": tok})
     assert "CLAUDE_CODE_OAUTH_TOKEN" not in m and m["NDF_CLAUDE_ACCOUNT"] == "metered"
     assert m["CLAUDE_CODE_USE_BEDROCK"] == "1" and m["AWS_PROFILE"] == "p"
 
 
-def test_env_for_account_drops_undeclared_auth(accounts):
+def test_account_env_drops_undeclared_auth(accounts):
     """宣言が無くても、認証の優先順位でトークンより上に来る変数はアカウントの子から外す。"""
     tok = accounts.add("a")
     base = {k: "1" for k in ca.FOREIGN_AUTH_ENV}
-    env = ca.env_for("a", base)
+    env = ca.account_env("a", base)
     assert env["CLAUDE_CODE_OAUTH_TOKEN"] == tok and not set(ca.FOREIGN_AUTH_ENV) & set(env)
 
 
@@ -217,7 +217,7 @@ def test_metered_env_keeps_only_declared_auth():
     """従量の接続は、宣言より優先される親の認証の変数を外してから宣言を重ねる。"""
     base = {k: "1" for k in ca.FOREIGN_AUTH_ENV}
     base["NDF_SUPERVISE_CLAUDE_FALLBACK"] = "ANTHROPIC_API_KEY=sk-SECRET"
-    env = ca.env_for("metered", base)
+    env = ca.account_env("metered", base)
     assert env["ANTHROPIC_API_KEY"] == "sk-SECRET"
     assert not {"ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX"} & set(env)
 

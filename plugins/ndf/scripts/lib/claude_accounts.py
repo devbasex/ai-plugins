@@ -401,7 +401,7 @@ def fallback_env(environ=None) -> dict:
     return out
 
 
-def env_for(name: str, base: dict, before: float | None = REFRESH_BEFORE, min_left: float = 0) -> dict | None:
+def account_env(name: str, base: dict, before: float | None = REFRESH_BEFORE, min_left: float = 0) -> dict | None:
     """`base` にアカウント `name`（か `metered`）の環境を重ねる。トークンを得られなければ None。
 
     従量の接続は `CLAUDE_CODE_OAUTH_TOKEN` と `FOREIGN_AUTH_ENV` を外してから宣言の変数を重ねる（認証の方式を

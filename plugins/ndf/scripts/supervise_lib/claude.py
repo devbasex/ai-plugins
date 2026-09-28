@@ -327,7 +327,7 @@ class ClaudeRunner:
                 elif not multi and fallback and not tried_fallback:
                     tried_fallback = True
                     # 宣言より優先される親の認証（OAuth トークン・AUTH_TOKEN・Bedrock/Vertex など）を外した環境で呼ぶ
-                    metered = ca.env_for(ca.METERED, dict(os.environ))
+                    metered = ca.account_env(ca.METERED, dict(os.environ))
                     res = self._try_fallback_once(
                         fallback, lambda: call_claude(system, prompt, tools, cwd, timeout, child_env=metered, **kw)
                     )
@@ -403,20 +403,20 @@ class ClaudeRunner:
             if c.name and (c.score is None or c.score < ca.switch_at()):
                 self.switch(c.name, "recovered")
             else:
-                return ca.env_for(ca.METERED, dict(os.environ))
+                return ca.account_env(ca.METERED, dict(os.environ))
         if self.account is None:
             return None
-        env = ca.env_for(self.account, dict(os.environ), None if self.account in self.keep() else ca.REFRESH_BEFORE, timeout)
+        env = ca.account_env(self.account, dict(os.environ), None if self.account in self.keep() else ca.REFRESH_BEFORE, timeout)
         if env is not None:
             return env
         c = ca.choose(exclude={self.account}, keep=self.keep(), min_left=timeout)
-        env = ca.env_for(c.name, dict(os.environ), None if c.name in self.keep() else ca.REFRESH_BEFORE, timeout) if c.name else None
+        env = ca.account_env(c.name, dict(os.environ), None if c.name in self.keep() else ca.REFRESH_BEFORE, timeout) if c.name else None
         if env is not None:
             self.switch(c.name, "auth")
             return env
         if fallback:
             self.switch(ca.METERED, "auth", keys=list(fallback))
-            return ca.env_for(ca.METERED, dict(os.environ))
+            return ca.account_env(ca.METERED, dict(os.environ))
         if c.earliest:
             name, until = c.earliest
             raise AccountsLimited(

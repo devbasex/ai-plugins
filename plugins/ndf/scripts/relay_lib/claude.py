@@ -473,4 +473,4 @@ def section_env(base: dict, account: str | None) -> dict | None:
     トークンを得られなければ None。"""
     if account is None:
         return dict(base)
-    return ca.env_for(account, base)
+    return ca.account_env(account, base)
