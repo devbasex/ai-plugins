@@ -8,7 +8,7 @@ from pathlib import Path
 
 from supervise_lib.decl import decl_fields
 from supervise_lib.paths import GLOSSARY_PY, MVV_PY, PUSH_DESIGN, SELF, SPEC_COPY_PY, WORKTREE_SETUP
-from supervise_lib.release_templates import MVV_NOTE, advise_steps, plan_release
+from supervise_lib.release_templates import MVV_NOTE, plan_release
 from supervise_lib.templates import plan_check, plan_check_since, plan_impl
 from supervise_lib.verify_steps import handoff_step, merge_step
 
@@ -259,13 +259,29 @@ def plan_mission_release(a, repo: str, advise: bool = False) -> dict:
 def advise_design_steps(a) -> list[dict]:
     """助言の MVV 判定（#1400）の mvv・mvv-note のステップ。判定によらず、想定外の失敗でも関門 1 の judge（gate）へ進む。"""
     state = shlex.quote(str(Path(a.state).resolve()))
-    note = {
-        "timeout": 300,
-        "cmd": f"sh -c '[ ! -f {MVV_NOTE} ] || gh pr comment {{pr}} --body-file {MVV_NOTE}'",
-        "on_fail": "gate",
-        "next": "gate",
-    }
-    return advise_steps(state, "design", f"--pr {{pr}} --mode {a.mode} --root .", note, {"stage": "設計"})
+    note = MVV_NOTE
+    return [
+        {
+            "id": "mvv",
+            "type": "run",
+            "stage": "設計",
+            "timeout": 900,
+            # 前の実行の判定の記録を載せないよう先に消す（MVV なしのときは記録を書かない）
+            "cmd": f"rm -f {note} && {MVV_PY} check --mission {state} --gate design --pr {{pr}} --mode {a.mode} --root . "
+            f"--note {note} --advise",
+            "on_fail": "mvv-note",
+            "next": "mvv-note",
+        },
+        {
+            "id": "mvv-note",
+            "type": "run",
+            "stage": "設計",
+            "timeout": 300,
+            "cmd": f"sh -c '[ ! -f {note} ] || gh pr comment {{pr}} --body-file {note}'",
+            "on_fail": "gate",
+            "next": "gate",
+        },
+    ]
 
 
 def plan_advise_design(a, n: int, repo: str) -> dict:
