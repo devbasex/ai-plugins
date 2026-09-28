@@ -501,12 +501,6 @@ def fallback_env(environ=None) -> dict:
     return out
 
 
-def _strip_auth(env: dict, keys) -> None:
-    """認証の方式を 1 つにするため、`env` から `keys` の変数を外す。"""
-    for k in keys:
-        env.pop(k, None)
-
-
 def account_env(name: str, base: dict, before: float | None = REFRESH_BEFORE, min_left: float = 0) -> dict | None:
     """`base` にアカウント `name`（か `metered`）の環境を重ねる。トークンを得られなければ None。
 
@@ -515,16 +509,13 @@ def account_env(name: str, base: dict, before: float | None = REFRESH_BEFORE, mi
     （`FOREIGN_AUTH_ENV`）を外してからトークンと名前を足す（混ぜない。I16）。"""
     env = dict(base)
     declared = fallback_env(base)
-    if name == METERED:
-        _strip_auth(env, (TOKEN_ENV, *FOREIGN_AUTH_ENV))
-        env.update(declared)
-        env[NAME_ENV] = METERED
-        return env
-    tok = token(name, before, min_left=min_left)
-    if tok is None:
+    metered = name == METERED
+    tok = None if metered else token(name, before, min_left=min_left)
+    if not metered and tok is None:
         return None
-    _strip_auth(env, (*declared, *FOREIGN_AUTH_ENV))
-    env[TOKEN_ENV] = tok
+    for k in ((TOKEN_ENV,) if metered else tuple(declared)) + FOREIGN_AUTH_ENV:
+        env.pop(k, None)
+    env.update(declared if metered else {TOKEN_ENV: tok})
     env[NAME_ENV] = name
     return env
 
