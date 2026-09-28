@@ -7,7 +7,7 @@ import shlex
 from pathlib import Path
 
 from supervise_lib.decl import WORKTREE_DECL, DeclError, with_decls
-from supervise_lib.paths import HERE, MERGED_PY, MVV_PY, STEPS_PY, VERIFY_PY, main_dir_of_worktree
+from supervise_lib.paths import HERE, MERGED_PY, MVV_PY, STEPS_PY, VERIFY_PY
 from supervise_lib.plan import QUEUE_PRS
 from supervise_lib.verify_steps import handoff_step
 
@@ -58,7 +58,7 @@ def plan_release_package_plugin(a) -> dict:
     base = re.sub(r"-.*$", "", v)  # 開発版の本番承認の提示物は正式版の番号で作る
     # --prs-from-queue なら、queue が先行の計画の Pull Request の番号で QUEUE_PRS を置き換える
     prs = " ".join([*map(str, a.prs), *([QUEUE_PRS] if getattr(a, "prs_from_queue", False) else [])])
-    repo = a.repo or main_dir_of_worktree(a.worktree)
+    repo = a.repo or (a.worktree.split("/.worktrees/")[0] if "/.worktrees/" in a.worktree else None)
     sync = bool(getattr(a, "sync_checks", None))
     after_notes = "sync" if sync else "release"
     run_ids = (
