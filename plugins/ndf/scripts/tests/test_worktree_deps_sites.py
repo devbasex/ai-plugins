@@ -75,9 +75,7 @@ def test_ensure_worktree_reports_failure_and_keeps_worktree(tmp_path: Path) -> N
     wt = repo / ".worktrees" / "feat" / "a"
     assert wt.is_dir()
     # 使い回すとき、未用意ならやり直す
-    (repo / ".ndf" / "worktree.json").write_text(
-        json.dumps({"version": 1, "deps": {"copy_from_main": ["vendor"]}}), encoding="utf-8"
-    )
+    (repo / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, "deps": {"copy_from_main": ["vendor"]}}), encoding="utf-8")
     assert paths.ensure_worktree(plan(repo)) is None
     assert pint_runs(wt)
 
@@ -123,9 +121,7 @@ def test_failing_at_cannot_tell_when_preparation_fails(tmp_path: Path) -> None:
     repo = repo_with_vendor(tmp_path, {"run": ["false"]})
     sha = git(repo, "rev-parse", "HEAD").strip()
     ran: list[str] = []
-    out = test_triage.failing_at(
-        str(repo), sha, _strategy(), ["t/a.py::x"], 60, tmp_path, lambda *a: ran.append("x") or (1, False)
-    )
+    out = test_triage.failing_at(str(repo), sha, _strategy(), ["t/a.py::x"], 60, tmp_path, lambda *a: ran.append("x") or (1, False))
     assert out is None and ran == []
 
 

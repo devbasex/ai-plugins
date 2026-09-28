@@ -98,9 +98,7 @@ def prepare(worktree: str | Path, *, main_dir: str | Path | None = None, if_unpr
     return Result(p.returncode, p.stderr.strip())
 
 
-def prepare_reporting(
-    worktree: str | Path, *, main_dir: str | Path | None = None, if_unprepared: bool = False
-) -> str | None:
+def prepare_reporting(worktree: str | Path, *, main_dir: str | Path | None = None, if_unprepared: bool = False) -> str | None:
     """`prepare` して報告（済み・失敗の行と末尾）を標準エラーへ出す。失敗なら先頭の 1 行を返す（ほかは None）。
 
     worktree は消さない。呼び出し側は返った行を誤りの文に入れて止まる。

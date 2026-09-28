@@ -64,11 +64,7 @@ def mark_of(worktree: Path) -> Path:
 
 
 def snapshot(root: Path) -> dict[str, str]:
-    return {
-        str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest()
-        for p in sorted(root.rglob("*"))
-        if p.is_file()
-    }
+    return {str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(root.rglob("*")) if p.is_file()}
 
 
 # --- 受け入れ条件 1: create が依存物を用意する -------------------------------
@@ -283,9 +279,7 @@ def test_in_place_rewrite_of_hardlink_fails(repo: Path) -> None:
 def test_local_declaration_deps_is_not_applied(repo: Path) -> None:
     """I8: 個人の宣言の deps は反映せず、status の反映しない項目に出る。"""
     declare(repo)
-    (repo / ".ndf" / "worktree.local.json").write_text(
-        json.dumps({"version": 1, "deps": {"run": ["touch RAN"]}}), encoding="utf-8"
-    )
+    (repo / ".ndf" / "worktree.local.json").write_text(json.dumps({"version": 1, "deps": {"run": ["touch RAN"]}}), encoding="utf-8")
     wt = add_worktree(repo)
 
     r = run(DEPS, ["prepare", str(wt)], repo)
