@@ -249,15 +249,6 @@ def manual_release_wave(a) -> dict:
     }
 
 
-def advises(a, closing: bool = False) -> bool:
-    """--state を渡した normal だけ助言の MVV 判定を置く（#1400 の決定 4）。new close（closing）には置かない。"""
-    return bool(getattr(a, "state", None)) and not closing
-
-
-def mission_state_path(a) -> str:
-    return str(Path(a.state).resolve())
-
-
 def mission_plans(a) -> list[dict]:
     """ミッションのステージを順に返す。ステージの中の計画は queue --max 3 で同時に流してよい。
     リリースの形に雛形が無ければ、リリースの段の代わりに手で行う段（manual_release_wave）を最後に置く。"""
@@ -266,7 +257,7 @@ def mission_plans(a) -> list[dict]:
     if getattr(a, "pace", "normal") == "auto":
         return auto_mission_plans(a)
     repo = str(Path(a.worktree).resolve())
-    advise = advises(a)
+    advise = bool(getattr(a, "state", None))  # --state を渡した normal だけ助言の MVV 判定を置く（#1400 の決定 4）
     design = plan_advise_design if advise else plan_mission_design
     waves = []
     if a.design:
@@ -287,7 +278,7 @@ def mission_plans(a) -> list[dict]:
 
 def user_gate_cmd(a, gate: str, pr: bool) -> str:
     """利用者の答えを状態へ書くコマンド（覆しの記録。#1400 の AC6）。承認ゲート 1 は答えた設計 PR を --pr で渡す。"""
-    state = shlex.quote(mission_state_path(a))
+    state = shlex.quote(str(Path(a.state).resolve()))
     return (
         f"python3 {shlex.quote(str(HERE / 'mission-state.py'))} gate {state} {shlex.quote(gate)} --what <要約> --by user"
         + (" --pr <設計 PR>" if pr else "")
@@ -352,7 +343,7 @@ def cmd_new_mission(a, waves: list[dict] | None = None) -> dict:
         # worker と judge がミッション MVV を状態から読む（#1400 の決定 12）
         for wave in waves:
             for plan in (wave.get("plans") or {}).values():
-                plan["ミッション状態"] = mission_state_path(a)
+                plan["ミッション状態"] = str(Path(a.state).resolve())
     out = Path(a.out or f"mission-{a.name}")
     out.mkdir(parents=True, exist_ok=True)
     index = write_stage_index(waves, out)
@@ -367,7 +358,7 @@ def cmd_new_mission(a, waves: list[dict] | None = None) -> dict:
         f"ミッション {a.name} の計画を {plans} 本・{len(index)} ステージで書いた: {manifest}",
         index,
         {"waves": len(index), "plans": plans, "manifest": str(manifest)},
-        next=next_text(pace, index, advise=pace == "normal" and advises(a, closing)),
+        next=next_text(pace, index, advise=pace == "normal" and not closing and bool(getattr(a, "state", None))),
     )
 
 
@@ -404,16 +395,16 @@ def manifest_head(a, pace: str, closing: bool = False) -> dict:
     """manifest の見出し（ミッション / 進め方 / 状態 / ブランチ）。"""
     head = {"ミッション": a.name}
     if pace in MVV_PACES:
-        head.update({"進め方": pace, "状態": mission_state_path(a)})
+        head.update({"進め方": pace, "状態": str(Path(a.state).resolve())})
         if pace != "fast":
             head["ブランチ"] = mission_branch(a.name)
         return head
     # new close（waves を渡す）は --pace を持たず、状態があれば fast のミッションの終わり
     if getattr(a, "state", None) and closing:
-        head.update({"進め方": "fast", "状態": mission_state_path(a)})
+        head.update({"進め方": "fast", "状態": str(Path(a.state).resolve())})
         return head
     if getattr(a, "state", None):  # normal と --state（#1400）
-        head.update({"進め方": "normal", "状態": mission_state_path(a)})
+        head.update({"進め方": "normal", "状態": str(Path(a.state).resolve())})
     head["ブランチ"] = mission_branch(a.name)
     return head
 
