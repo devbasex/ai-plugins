@@ -34,39 +34,6 @@ REASON_LIMITED = "limited"  # すべて上限で従量の接続へ
 REASON_AUTH = "auth"  # 認証が通らなかった
 
 
-_RECOVERED, _LIMIT = object(), object()  # 理由の文字列と重ならない表の鍵
-
-
-def _msg_recovered(sw, prev, to, reason) -> tuple[str, dict]:
-    return f"{ca.account_label(to)}の上限が外れたため、従量の接続からアカウント {to} へ戻して続ける", {"reason": REASON_RECOVERED}
-
-
-def _msg_threshold(sw, prev, to, reason) -> tuple[str, dict]:
-    n = sw.watch.due if sw.watch is not None and sw.watch.due is not None else 0
-    return f"{prev} の使用率が {n:.0f}% に達したため、アカウントを {ca.account_label(to)}へ替える", {"usage": round(n)}
-
-
-def _msg_limit(sw, prev, to, reason) -> tuple[str, dict]:
-    return f"利用上限（{reason}）に達したため、アカウントを {prev} から {ca.account_label(to)}へ替えて続ける", {}
-
-
-def _msg_auth(sw, prev, to, reason) -> tuple[str, dict]:
-    return f"認証が通らなかったため、アカウントを {prev} から {ca.account_label(to)}へ替えて続ける", {}
-
-
-def _msg_default(sw, prev, to, reason) -> tuple[str, dict]:
-    return f"アカウントを {prev or '既定のログイン'} から {ca.account_label(to)}へ替える", {}
-
-
-# 切り替えの理由 → (画面の 1 行, 記録の行へ足す項目) を作る関数（`AccountSwitch._switch_message` が引く）
-_SWITCH_MESSAGES = {
-    _RECOVERED: _msg_recovered,
-    REASON_THRESHOLD: _msg_threshold,
-    _LIMIT: _msg_limit,
-    REASON_AUTH: _msg_auth,
-}
-
-
 def recoverable(c: ca.Choice, thr: float) -> bool:
     """従量の接続から候補 `c` へ戻せるか（選べて、使用率が閾値 `thr` 未満か不明）。"""
     return bool(c.name) and (c.score is None or c.score < thr)
@@ -216,9 +183,16 @@ class AccountSwitch:
 
     def _switch_message(self, prev: str | None, to: str, reason: str | None) -> tuple[str, dict]:
         """2 つ目以降の区間でアカウントを替えたときの (画面の 1 行, 記録の行へ足す項目)。理由ごとに決まる。"""
-        # 従量の接続から戻すときは理由に依らず先に効く。上限の種類はどれも同じ文にまとめる
-        key = _RECOVERED if prev == ca.METERED else _LIMIT if reason in cu.KINDS else reason
-        return _SWITCH_MESSAGES.get(key, _msg_default)(self, prev, to, reason)
+        if prev == ca.METERED:
+            return f"{ca.account_label(to)}の上限が外れたため、従量の接続からアカウント {to} へ戻して続ける", {"reason": REASON_RECOVERED}
+        if reason == REASON_THRESHOLD:
+            n = self.watch.due if self.watch is not None and self.watch.due is not None else 0
+            return f"{prev} の使用率が {n:.0f}% に達したため、アカウントを {ca.account_label(to)}へ替える", {"usage": round(n)}
+        if reason in cu.KINDS:
+            return f"利用上限（{reason}）に達したため、アカウントを {prev} から {ca.account_label(to)}へ替えて続ける", {}
+        if reason == REASON_AUTH:
+            return f"認証が通らなかったため、アカウントを {prev} から {ca.account_label(to)}へ替えて続ける", {}
+        return f"アカウントを {prev or '既定のログイン'} から {ca.account_label(to)}へ替える", {}
 
     @staticmethod
     def earliest(choice: ca.Choice | None) -> dict | None:
