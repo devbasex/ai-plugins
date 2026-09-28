@@ -152,7 +152,7 @@ Pull Request では `merged` の対象が起点ブランチそのものになる
 | 自動発動 + 実行前確認 | 問いのどれかが「はい」で、自然文で依頼される | 実行前確認を持つ |
 | 自動発動 + 事後の報告 | 3 つとも「いいえ」 | 実行前確認を置かず、止まる条件（git やサービスの拒否）だけを本文に書き、消した対象と戻し方を完了報告の必須項目にする |
 
-`merged` は「自動発動 + 事後の報告」で、`pr` / `release` / `out-of-scope` / `issue-upkeep` /
+`merged` は「自動発動 + 事後の報告」で、`pr` / `release` / `out-of-scope` / `backlog-refinement` /
 `official-skills-autoloader` は「自動発動 + 実行前確認」のままである。どの問いに当たるかは
 `AUTHORING.md` の適用表が持つ。
 
@@ -179,7 +179,7 @@ Pull Request では `merged` の対象が起点ブランチそのものになる
 | `release-verification` | 検証結果を記録した後 | 後に振り返りが続かない変更 |
 | `release` | 「蓄積した課題を棚卸しする」の前 | 後にリリース後テストも振り返りも続かない変更 |
 
-いずれも「スプリントを閉じる → `issue-upkeep`」の順で呼ぶ。
+いずれも「スプリントを閉じる → `backlog-refinement`」の順で呼ぶ。
 
 | # | 閉じる条件 | 満たさないとき |
 | --- | --- | --- |
@@ -203,8 +203,8 @@ Pull Request を選ぶため、別のスプリント課題を閉じうる。
 | `失敗（理由）` | 最後の読みが CLOSED でない、または読み取りが 0 以外で終わった |
 | `開いたまま（理由）` | 閉じる条件に当たらない |
 
-**`失敗` が 1 件でもあれば、最終工程を完了と報告せず、`issue-upkeep` を呼ばずに止まる。**
-`開いたまま` は失敗ではなく、`issue-upkeep` へ進んでよい。
+**`失敗` が 1 件でもあれば、最終工程を完了と報告せず、`backlog-refinement` を呼ばずに止まる。**
+`開いたまま` は失敗ではなく、`backlog-refinement` へ進んでよい。
 
 **他のリポジトリの課題にはボードを書かない。** `projects-sync.sh` は `--repo` を取らず、実行した
 リポジトリのボードで番号を引くため、他のリポジトリの番号を渡すと同じ番号の別の課題を更新する。
@@ -247,7 +247,7 @@ Pull Request を選ぶため、別のスプリント課題を閉じうる。
 | 観点 | 確かめ方 |
 | --- | --- |
 | `gh issue close` と `status "Done"` を持つ `SKILL.md` が `progress-tracking` だけ、承認ゲートが 2 つのまま | 文書を読んで確かめる |
-| 3 つの最終工程で「スプリントを閉じる」が `issue-upkeep` より前にある | 同上 |
+| 3 つの最終工程で「スプリントを閉じる」が `backlog-refinement` より前にある | 同上 |
 | リリース記録の読み取りと閉じる手順が手順書のコード例のとおりに動く（本番の版のブロックの選択、`配布なし` の後のブロック、`スプリント:` の行の取り出し、ボード → close → 読み直しの順、一覧が空なら止まる、最初の読みに失敗したらボードを触らない） | `plugins/ndf/skills/development-workflow/tests/test_workflow_hooks.py`（`closing_step` / `record_reader` を名前に持つテスト。疑似 `gh` で呼び出しの順を固定する） |
 | `release/SKILL.md` の行数が上限（365 行）に収まる | `plugins/ndf/skills/release/tests/test_completion_check.py`（`test_the_skill_md_stays_within_its_budget`） |
 | frontmatter の `description` から "after listing them for approval" が消えている | `python3 scripts/check-skill-frontmatter.py` |

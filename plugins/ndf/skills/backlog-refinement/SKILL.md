@@ -1,5 +1,5 @@
 ---
-name: issue-upkeep
+name: backlog-refinement
 description: "Bring the existing issue list back in line with reality: fix stale bodies, assign milestones, and close what is not worth doing. Use when a change is finished and the issue list has drifted（課題の棚卸しをするとき・issueの整理・やらないと決める）."
 argument-hint: "[--all] [--repo owner/repo]"
 allowed-tools:
@@ -78,10 +78,10 @@ allowed-tools:
 **候補の収集（手順 1）・反映（手順 3）・報告の値は `upkeep.py` が持ち、区分の決定（手順 2A / 2B）だけを
 LLM が持つ。** スクリプトの置き場所 `$R` の決め方は `development-workflow/references/scripts-lookup.md`
 にある。出力はどれも 1 行の JSON（形は `$R/scripts/lib/README.md`）で、記録は
-`$NDF_UPKEEP_STATE_DIR`（既定は一時ディレクトリの `ndf/issue-upkeep/`）の下にリポジトリごとに置く。
+`$NDF_UPKEEP_STATE_DIR`（既定は一時ディレクトリの `ndf/backlog-refinement/`）の下にリポジトリごとに置く。
 
 ```bash
-UPKEEP=$(bash "$R/scripts/resolve.sh" scripts issue-upkeep) || exit 3
+UPKEEP=$(bash "$R/scripts/resolve.sh" scripts backlog-refinement) || exit 3
 ```
 
 | 終了コード | status | 次の手 |
@@ -309,15 +309,15 @@ python3 "$UPKEEP/upkeep.py" apply --plan plan.json [--max-waits N]
 | --- | --- |
 | `out-of-scope` | 範囲外の課題を、**見つけたその場で**起票する |
 | `retrospective` | **その変更の進め方**を見直し、起票の取りこぼしを拾う |
-| `issue-upkeep` | **蓄積した既存の課題**を棚卸しする |
+| `backlog-refinement` | **蓄積した既存の課題**を棚卸しする |
 
 **課題に対する判断は 2 種類ある。** やるかどうかを決める価値の判断と、どこを直すかを決める
 構造の判断である。溜まった課題に対しては、どちらもこの Skill が持つ。
 
 | 判断 | 発見の瞬間 | 溜まった課題 |
 | --- | --- | --- |
-| 価値（やるか） | `out-of-scope` の「起票しない」 | `issue-upkeep` の「やらない」 |
-| 構造（どこを直すか） | `out-of-scope` の「範囲内へ入れる」、`problem-solving` の「上流で直す」 | `issue-upkeep` の「ルートコーズ」 |
+| 価値（やるか） | `out-of-scope` の「起票しない」 | `backlog-refinement` の「やらない」 |
+| 構造（どこを直すか） | `out-of-scope` の「範囲内へ入れる」、`problem-solving` の「上流で直す」 | `backlog-refinement` の「ルートコーズ」 |
 
 **この表の正本はここである。** 他の Skill はこの表を指し、写さない。
 

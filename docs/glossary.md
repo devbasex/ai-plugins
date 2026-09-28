@@ -339,11 +339,11 @@ instructions-check.py が見る指示書・スコープ・読み込み量・リ�
 
 ## NDF の課題の棚卸し（`ndf-issue-upkeep`）
 
-issue-upkeep と out-of-scope が課題を分類し、起票するときの語。区分・現象レイヤー・修正レイヤー・起票先
+backlog-refinement と out-of-scope が課題を分類し、起票するときの語。区分・現象レイヤー・修正レイヤー・起票先
 
 | 語 | 識別子 | 意味 | 廃止した語 | 廃止した識別子 | 正本 |
 | --- | --- | --- | --- | --- | --- |
-| 区分 | — | issue-upkeep が課題ごとに決める 8 つ（そのまま・追記が要る・書き直しが要る・閉じてよい・やらない・重複・ルートコーズ・要判断） | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| 区分 | — | backlog-refinement が課題ごとに決める 8 つ（そのまま・追記が要る・書き直しが要る・閉じてよい・やらない・重複・ルートコーズ・要判断） | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 現象レイヤー | — | 課題が実際に現れている場所。ファイル・クラス・レイヤーのいずれかで書く | — | — | `docs/specifications/ndf-issue-upkeep-root-cause.md` |
 | 修正レイヤー | — | 原因を直すべき場所。その責務を持つべき場所までさかのぼる | — | — | `docs/specifications/ndf-issue-upkeep-root-cause.md` |
 | ルートコーズ | — | 修正レイヤーが現象レイヤーと違う課題に付ける区分。現れている場所では直さない | — | — | `docs/specifications/ndf-issue-upkeep-root-cause.md` |
@@ -351,8 +351,8 @@ issue-upkeep と out-of-scope が課題を分類し、起票するときの語�
 | 親 issue | — | クラスタの修正レイヤーを直すために新しく作る課題 | — | — | `docs/specifications/ndf-issue-upkeep-root-cause.md` |
 | 子 issue | — | クラスタに属する既存の課題。親 issue を作った後も閉じない | — | — | `docs/specifications/ndf-issue-upkeep-root-cause.md` |
 | 修正方針 | — | 修正レイヤーへの直し方。移動 / 統合 / 新設 / 向きの修正 / 分離 の 5 つ | 採る手 | — | `docs/specifications/ndf-issue-upkeep-root-cause.md` |
-| やらない | — | 課題そのものは成り立つが、抱える費用が直す費用を下回ると決める区分の値 | — | — | `plugins/ndf/skills/issue-upkeep/SKILL.md` |
-| 再検討条件 | — | 「やらない」で閉じた課題を再び考える条件 | 再燃の条件 | — | `plugins/ndf/skills/issue-upkeep/SKILL.md` |
+| やらない | — | 課題そのものは成り立つが、抱える費用が直す費用を下回ると決める区分の値 | — | — | `plugins/ndf/skills/backlog-refinement/SKILL.md` |
+| 再検討条件 | — | 「やらない」で閉じた課題を再び考える条件 | 再燃の条件 | — | `plugins/ndf/skills/backlog-refinement/SKILL.md` |
 | 起票先 | — | gh issue create が issue を作るリポジトリ | — | — | `plugins/ndf/skills/out-of-scope/references/issue-target.md` |
 | 上流リポジトリ | — | NDF の Skill・エージェント・hook の実体を持つリポジトリ | 配布元のリポジトリ | — | `plugins/ndf/skills/out-of-scope/references/issue-target.md` |
 | 開発対象リポジトリ | — | NDF を使って開発している側のリポジトリ。gh repo view が返すもの | 開発対象のリポジトリ | — | `plugins/ndf/skills/out-of-scope/references/issue-target.md` |

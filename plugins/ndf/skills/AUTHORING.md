@@ -167,7 +167,7 @@ description: "Delete merged branches and worktrees, stopping only where git refu
 
 **git が拒む操作と、事後の復元の手段がある操作は対象から外す。** 拒否そのものが止まる理由になり、
 `git branch <名前> <ハッシュ>`・Restore branch・`gh issue reopen` で戻せる操作を止めても二重の確認が残るだけである。
-**課題を閉じることは問い 3 に当たらない**（判断はスプリントの工程を通った時点で済んでいる）。`issue-upkeep` の「やらない」は閉じること自体が判断であり、そこが違う。
+**課題を閉じることは問い 3 に当たらない**（判断はスプリントの工程を通った時点で済んでいる）。`backlog-refinement` の「やらない」は閉じること自体が判断であり、そこが違う。
 
 | 守り方 | 選ぶ条件 | 実装 |
 | --- | --- | --- |
@@ -189,7 +189,7 @@ description: "Delete merged branches and worktrees, stopping only where git refu
 | `pr` | 自動発動 + 実行前確認 | push / Pull Request の作成 | 2 |
 | `release` | 自動発動 + 実行前確認 | 本番へのリリース（ゲート 2） | 1・2 |
 | `out-of-scope` | 自動発動 + 実行前確認 | 起票 | 2・3 |
-| `issue-upkeep` | 自動発動 + 実行前確認 | やらないと判断して閉じる | 3 |
+| `backlog-refinement` | 自動発動 + 実行前確認 | やらないと判断して閉じる | 3 |
 | `official-skills-autoloader` | 自動発動 + 実行前確認 | 外部リポジトリの取得と symlink の作成 | 2 |
 
 ## 命名の規則

@@ -19,7 +19,7 @@ closed / already_closed / failed / kept_open（--dry-run では would_close）�
 {kind:"board_note"} の項目に載る。
 `--record-pr 0` は「本番の記録なし」（最終の検査で変更が無く本番を飛ばした）。配布の記録を読まず、
 閉じる条件も見ずに --issues の課題を閉じる。--issues と一緒のときだけ受ける。
-終了コード: 0 = 失敗なし / 1 = 失敗あり（issue-upkeep へ進まない）/ 2 = 一覧が取れない・
+終了コード: 0 = 失敗なし / 1 = 失敗あり（backlog-refinement へ進まない）/ 2 = 一覧が取れない・
 --record-pr 0 に --issues が無い / 3 = 呼び出しの誤り。
 """
 
@@ -331,7 +331,7 @@ def cmd_close(a):
 
     count, metrics, summary = _close_summary(items, prs, a.dry_run)
     if count["failed"]:
-        emit(result(TOOL, "stopped", summary, items + notes, metrics, next="失敗した課題の cmd でやり直す。issue-upkeep へ進まない"))
+        emit(result(TOOL, "stopped", summary, items + notes, metrics, next="失敗した課題の cmd でやり直す。backlog-refinement へ進まない"))
     emit(result(TOOL, "ok", summary, items + notes, metrics))
 
 

@@ -25,6 +25,8 @@ ARGS: dict[str, tuple[tuple[tuple[str, ...], tuple[str, ...]], ...]] = {
 }
 # スクリプト: 旧名のファイル → 渡し先
 SCRIPTS = {"mission-state.py": "sprint-state.py", "mission-close.py": "sprint-close.py", "bundle-close.py": "sprint-close.py"}
+# Skill: 旧名 → 新しい名前（#1429 の決定 20）。`resolve.sh scripts|skill <旧名>` が `skill_name` で引く
+SKILLS = {"issue-upkeep": "backlog-refinement"}
 # キー: 新しいキー → 旧名のキー（プランの `スプリント状態`・記録の `sprint`）
 KEYS = {"スプリント状態": "ミッション状態", "sprint": "mission", "sprint_mvv": "mission_mvv"}
 # 頭: ブランチの頭（新しい名前 → 旧名）
@@ -92,6 +94,15 @@ def forward(old_script: str, mode: str | None = None) -> None:
     os.execv(sys.executable, [sys.executable, str(new), *sys.argv[1:]])
 
 
+def skill_name(name: str, mode: str | None = None) -> str:
+    """Skill の名前を返す。旧名なら案内を 1 行出して新しい名前を返す（やめた後は終了コード 2 で止まる）。"""
+    new = SKILLS.get(name)
+    if new is None:
+        return name
+    _tell(f"Skill {name}", new, mode)
+    return new
+
+
 def read_key(d: dict, key: str, default=None):
     """新しいキーを読み、無ければ旧名のキーを読む。どちらも書き換えない。"""
     if key in d:
@@ -109,3 +120,12 @@ def branch_prefixes(new: str = "sprint/") -> tuple[str, ...]:
 def record_labels(new: str = "スプリント: ") -> tuple[str, ...]:
     """リリース記録の行の見出し。新しい名前を先に、旧名を後に並べる。"""
     return (new, *RECORD_LABELS.get(new, ()))
+
+
+if __name__ == "__main__":
+    # `legacy_names.py skill <名前>`: resolve.sh が旧名の Skill を新しい名前へ引く
+    if len(sys.argv) == 3 and sys.argv[1] == "skill":
+        print(skill_name(sys.argv[2]))
+    else:
+        print("使い方: legacy_names.py skill <Skill名>", file=sys.stderr)
+        sys.exit(2)

@@ -101,8 +101,8 @@ supervisor の中で動く worker は、この 1 行の中に含める。
 | 触る場所の見込み | そのバンドルの設計の行の「触るファイルと節」にし、確度を `見込み` にする |
 | 依存 | バンドルの間の依存。設計の行の「設計の依存」へ `<先のバンドル>-設計:収束` として写す |
 
-**表を書く側は `issue-upkeep` の
-[milestones.md](../../issue-upkeep/references/milestones.md) である。** 読む側のこの手順は、
+**表を書く側は `backlog-refinement` の
+[milestones.md](../../backlog-refinement/references/milestones.md) である。** 読む側のこの手順は、
 書く側の手順が入る前でも動く（表が無ければ次の段落の作り方へ落ちる）。
 
 ```bash

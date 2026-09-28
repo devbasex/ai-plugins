@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""upkeep.py: issue-upkeep の手順 1（候補の収集）と手順 3（反映）の決まった手順。
+"""upkeep.py: backlog-refinement の手順 1（候補の収集）と手順 3（反映）の決まった手順。
 
     python3 upkeep.py candidates --since-ref <ref> [--all] [--add 12,34] [--limit N]
                       [--repo owner/name] [--state-dir <dir>] [--root <dir>]
@@ -69,7 +69,7 @@ from step_result import (
 )
 from upkeep_gh import DEFAULT_MAX_WAIT, DEFAULT_MAX_WAITS, Gh, Milestones, Partial, _issues, _repo, _with_labels  # noqa: E402
 
-TOOL = "issue-upkeep"
+TOOL = "backlog-refinement"
 
 VERDICTS = ("そのまま", "追記が要る", "書き直しが要る", "閉じてよい", "やらない", "重複", "ルートコーズ", "要判断")
 # 承認を得てから反映する区分。承認の無いものは needs_approval へ回す。
@@ -117,7 +117,7 @@ def _is_identifier(tok: str) -> bool:
 
 
 def _state_dir(arg, repo: str) -> Path:
-    base = arg or os.environ.get("NDF_UPKEEP_STATE_DIR") or str(Path(tempfile.gettempdir()) / "ndf" / "issue-upkeep")
+    base = arg or os.environ.get("NDF_UPKEEP_STATE_DIR") or str(Path(tempfile.gettempdir()) / "ndf" / "backlog-refinement")
     d = Path(base) / repo.replace("/", "--")
     d.mkdir(parents=True, exist_ok=True)
     return d
