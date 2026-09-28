@@ -224,58 +224,46 @@ def _from_text(text: str, key: str) -> Wait:
     return Wait(kind, excerpt, key)
 
 
-def _classify_claude(event: str, tool: str, tool_input: dict, hook_input: dict, transcript_text: str, key: str) -> Wait | None:
-    if event == "Notification":
-        ntype = hook_input.get("notification_type")
-        message = str(hook_input.get("message") or "")[:EXCERPT_LIMIT]
-        if ntype == "permission_prompt":
-            return Wait(APPROVAL, message, key)
-        if ntype in ("elicitation_dialog", "elicitation_url_dialog"):
-            return Wait(ANSWER, message, key)
-        return None
-    if event == "PermissionRequest":
-        if tool == "ExitPlanMode":
-            return Wait(APPROVAL, _plan_excerpt(str(tool_input.get("plan") or "")), key)
-        return None
-    if event == "PreToolUse":
-        if tool == "AskUserQuestion":
-            return Wait(ANSWER, _question_excerpt(tool_input), key)
-        return None
-    if event == "Stop":
-        return _from_text(hook_input.get("last_assistant_message") or transcript_text, key)
-    return None
-
-
-def _classify_codex(event: str, tool: str, tool_input: dict, hook_input: dict, transcript_text: str, key: str) -> Wait | None:
-    if event == "PermissionRequest":
-        return Wait(APPROVAL, f"{tool or 'ツール'} の実行の承認", key)
-    if event == "Stop":
-        return _from_text(hook_input.get("last_assistant_message") or transcript_text, key)
-    return None
-
-
-def _classify_kiro(event: str, tool: str, tool_input: dict, hook_input: dict, transcript_text: str, key: str) -> Wait | None:
-    # 入口は stop フックにだけ置く。名前の付いたほかの事象は応答の途中でありうるため待ちにしない。
-    if event and event.lower() != "stop":
-        return None
-    return _from_text(hook_input.get("assistant_response") or transcript_text, key)
-
-
-_CLASSIFIERS = {"claude": _classify_claude, "codex": _classify_codex, "kiro": _classify_kiro}
-
-
 def classify_event(runtime: str, hook_input: dict, transcript_text: str = "", key: str = "") -> Wait | None:
     """ランタイムの事象を待ちへ訳す。待ちを作らない事象は None。
 
     `transcript_text` は transcript の最後の assistant の本文（`Stop` に本文が無いときに使う）。
     """
-    classify = _CLASSIFIERS.get(runtime)
-    if classify is None:
-        return None
     event = hook_input.get("hook_event_name") or ""
     tool = hook_input.get("tool_name") or ""
     tool_input = hook_input.get("tool_input") if isinstance(hook_input.get("tool_input"), dict) else {}
-    return classify(event, tool, tool_input, hook_input, transcript_text, key)
+    if runtime == "claude":
+        if event == "Notification":
+            ntype = hook_input.get("notification_type")
+            message = str(hook_input.get("message") or "")[:EXCERPT_LIMIT]
+            if ntype == "permission_prompt":
+                return Wait(APPROVAL, message, key)
+            if ntype in ("elicitation_dialog", "elicitation_url_dialog"):
+                return Wait(ANSWER, message, key)
+            return None
+        if event == "PermissionRequest":
+            if tool == "ExitPlanMode":
+                return Wait(APPROVAL, _plan_excerpt(str(tool_input.get("plan") or "")), key)
+            return None
+        if event == "PreToolUse":
+            if tool == "AskUserQuestion":
+                return Wait(ANSWER, _question_excerpt(tool_input), key)
+            return None
+        if event == "Stop":
+            return _from_text(hook_input.get("last_assistant_message") or transcript_text, key)
+        return None
+    if runtime == "codex":
+        if event == "PermissionRequest":
+            return Wait(APPROVAL, f"{tool or 'ツール'} の実行の承認", key)
+        if event == "Stop":
+            return _from_text(hook_input.get("last_assistant_message") or transcript_text, key)
+        return None
+    if runtime == "kiro":
+        # 入口は stop フックにだけ置く。名前の付いたほかの事象は応答の途中でありうるため待ちにしない。
+        if event and event.lower() != "stop":
+            return None
+        return _from_text(hook_input.get("assistant_response") or transcript_text, key)
+    return None
 
 
 # ---------------------------------------------------------------------------
