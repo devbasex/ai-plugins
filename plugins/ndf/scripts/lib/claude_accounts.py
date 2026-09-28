@@ -277,9 +277,8 @@ def _declared(v) -> dict | None:
 
 def _tier(name: str) -> str:
     """`.credentials.json` の `rateLimitTier` だけを読む（トークンは持たない。I8）。"""
-    d = _read(os.path.join(account_dir(name), CRED_FILE))
-    o = d.get("claudeAiOauth") if d else None
-    t = o.get("rateLimitTier") if isinstance(o, dict) else None
+    o = _oauth(name)
+    t = o.get("rateLimitTier") if o is not None else None
     return t if isinstance(t, str) else ""
 
 
@@ -311,10 +310,16 @@ def _creds_path(name: str) -> str:
     return os.path.join(account_dir(name), CRED_FILE)
 
 
-def _creds(name: str) -> dict | None:
+def _oauth(name: str) -> dict | None:
+    """`.credentials.json` の `claudeAiOauth`（辞書でなければ None）。"""
     d = _read(_creds_path(name))
     o = d.get("claudeAiOauth") if d else None
-    return o if isinstance(o, dict) and isinstance(o.get("accessToken"), str) and o["accessToken"] else None
+    return o if isinstance(o, dict) else None
+
+
+def _creds(name: str) -> dict | None:
+    o = _oauth(name)
+    return o if o is not None and isinstance(o.get("accessToken"), str) and o["accessToken"] else None
 
 
 def _token_held(name: str, before: float | None, now: float, force: bool = False, min_left: float = 0) -> str | None:
