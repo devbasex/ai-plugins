@@ -177,6 +177,11 @@ def reaches_by_merge(row: dict, production: str | None) -> bool:
     return row.get("kind") == "auto" and bool(production) and row.get("branch") == production and row.get("production") is not False
 
 
+def _first_merge_row(decl: DeliveryDecl) -> tuple[int, dict] | None:
+    """本番チャネルへのマージで自動で本番系へ届く最初の行（番号と行）。"""
+    return next(((i, row) for i, row in enumerate(decl.rows) if reaches_by_merge(row, decl.production)), None)
+
+
 def dev_channel(decl: DeliveryDecl) -> DevChannel:
     """開発版のチャネルの形。上から順に最初に当たった条件で決まる。起点と本番チャネルが違えば delivery を読まない。"""
     none = "開発版のチャネルが無い"
@@ -187,9 +192,9 @@ def dev_channel(decl: DeliveryDecl) -> DevChannel:
     if decl.rows_state:
         why = {"problems": "読めない", "unknown": "不明", "absent": "無い"}[decl.rows_state]
         return DevChannel(None, f"{none}（起点と本番のブランチが同じで、{PJ} の delivery が{why}）")
-    for i, row in enumerate(decl.rows):
-        if reaches_by_merge(row, decl.production):
-            return DevChannel(None, f"{none}（delivery[{i}] が本番チャネル {decl.production} へのマージで自動で本番系へ届く）")
+    hit = _first_merge_row(decl)
+    if hit:
+        return DevChannel(None, f"{none}（delivery[{hit[0]}] が本番チャネル {decl.production} へのマージで自動で本番系へ届く）")
     prod = [(i, r) for i, r in enumerate(decl.rows) if r.get("production") is True]
     if not prod:
         return DevChannel(None, f"{none}（起点と本番のブランチが同じで、本番系へ届く行（production: true）が宣言されていない）")
@@ -223,10 +228,11 @@ def judge_target(decl: DeliveryDecl, target: str) -> Verdict:
             UNDETERMINED,
             f"宛先 {target} は本番チャネルだが、{why}ため反映の仕方を決められない（project-decl.py で delivery を宣言すれば次から判定できる）",
         )
-    for i, row in enumerate(decl.rows):
-        if reaches_by_merge(row, decl.production):
-            items.append({"kind": "decl", "name": f"{PJ} の delivery[{i}]", "result": _row_text(row)})
-            return v(PRODUCTION, f"delivery[{i}]（{row.get('target')}）は {target} へのマージで自動で反映する")
+    hit = _first_merge_row(decl)
+    if hit:
+        i, row = hit
+        items.append({"kind": "decl", "name": f"{PJ} の delivery[{i}]", "result": _row_text(row)})
+        return v(PRODUCTION, f"delivery[{i}]（{row.get('target')}）は {target} へのマージで自動で反映する")
     items.append({"kind": "decl", "name": f"{PJ} の delivery", "result": f"{len(decl.rows)} 行"})
     return v(NOT_PRODUCTION, f"{target} へのマージで自動で反映する delivery の行が無い")
 
