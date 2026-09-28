@@ -52,13 +52,18 @@ def epoch(s) -> float | None:
 
 @dataclass
 class Usage:
-    """最後に取得した残量。`five_hour`・`seven_day` は `{utilization, resets_at}`（空は読めなかった）。"""
+    """最後に取得した残量。`five_hour`・`seven_day` は `{utilization, resets_at}`（空は読めなかった）。
+
+    `scoped` はモデル別の週の枠 `[{model, utilization, resets_at}]`（`[]` は応答に無かった、None は読めなかった）、
+    `spend` は支出の状態 `{percent, severity}`（None は読めなかった）。`spend_limit_reached` は応答の生の値である。"""
 
     five_hour: dict | None = None
     seven_day: dict | None = None
     spend_limit_reached: bool | None = None
     fetched_at: float = 0.0
     error: str | None = None
+    scoped: list | None = None
+    spend: dict | None = None
 
     @classmethod
     def from_json(cls, d: dict | None) -> Usage | None:
@@ -70,6 +75,8 @@ class Usage:
             spend_limit_reached=d.get("spend_limit_reached") if isinstance(d.get("spend_limit_reached"), bool) else None,
             fetched_at=epoch(d.get("fetched_at")) or 0.0,
             error=d.get("error") if isinstance(d.get("error"), str) else None,
+            scoped=_scoped_saved(d.get("scoped")),
+            spend=d.get("spend") if isinstance(d.get("spend"), dict) else None,
         )
 
     def to_json(self) -> dict:
@@ -77,19 +84,38 @@ class Usage:
             "fetched_at": iso_utc(self.fetched_at),
             "five_hour": self.five_hour,
             "seven_day": self.seven_day,
+            "scoped": self.scoped,
             "spend_limit_reached": self.spend_limit_reached,
+            "spend": self.spend,
             "error": self.error,
         }
 
-    def known(self) -> bool:
+    def windows_known(self) -> bool:
         return self.error is None and (self.five_hour is not None or self.seven_day is not None)
 
+    def windows(self) -> list[dict]:
+        """使用率の読める枠（5 時間の枠・週の枠・モデル別の週の枠）。"""
+        ws = [self.five_hour, self.seven_day, *(self.scoped or [])]
+        return [w for w in ws if isinstance(w, dict) and isinstance(w.get("utilization"), (int, float))]
+
     def score(self) -> float | None:
-        """`five_hour` と `seven_day` の使用率の大きい方。読めなければ None。"""
-        if not self.known():
+        """使用率: 5 時間の枠・週の枠・モデル別の週の枠の使用率の最大（I5）。読めなければ None。"""
+        if not self.windows_known():
             return None
-        vals = [w["utilization"] for w in (self.five_hour, self.seven_day) if w and isinstance(w.get("utilization"), (int, float))]
+        vals = [w["utilization"] for w in self.windows()]
         return float(max(vals)) if vals else None
+
+    def spend_reached(self) -> bool | None:
+        """支出上限に達したか（I4）: `spend_limit_reached`・`spend.percent` ≥ 100・`spend.severity` = critical のどれか。
+
+        どれも読めなければ None。"""
+        sp = self.spend or {}
+        pct, sev = sp.get("percent"), sp.get("severity")
+        if self.spend_limit_reached or (isinstance(pct, (int, float)) and pct >= 100) or sev == "critical":
+            return True
+        if self.spend_limit_reached is None and self.spend is None:
+            return None
+        return False
 
     def resets(self, key: str) -> float | None:
         w = getattr(self, key)
@@ -97,21 +123,72 @@ class Usage:
 
     def limited_until(self, now: float) -> float | None:
         """上限にあるならそのリセット時刻（支出上限で時刻が無ければ無限）。無ければ None。"""
-        if not self.known():
+        if not self.windows_known():
             return None
-        if self.spend_limit_reached:
+        if self.spend_reached():
             return math.inf
-        until = [
-            self.resets(k) or math.inf
-            for k in ("five_hour", "seven_day")
-            if isinstance(getattr(self, k), dict) and (getattr(self, k).get("utilization") or 0) >= 100
-        ]
+        until = [epoch(w.get("resets_at")) or math.inf for w in self.windows() if w["utilization"] >= 100]
         until = [t for t in until if t > now]
         return max(until) if until else None
 
 
+def _scoped_one(x) -> dict | None:
+    if not isinstance(x, dict) or not isinstance(x.get("utilization"), (int, float)):
+        return None
+    return _scoped_row(x.get("model"), x["utilization"], x.get("resets_at"))
+
+
+def _scoped_row(model, util: float, resets) -> dict:
+    """モデル別の週の枠の 1 行（保存の形）。文字列でない `model`・`resets_at` は None にする。"""
+    return {
+        "model": model if isinstance(model, str) else None,
+        "utilization": float(util),
+        "resets_at": resets if isinstance(resets, str) else None,
+    }
+
+
+def _scoped_saved(v) -> list | None:
+    """保存した `scoped` を読む。配列でない・要素が崩れていれば None（読めなかった）。"""
+    if not isinstance(v, list):
+        return None
+    out = [_scoped_one(x) for x in v]
+    return None if any(x is None for x in out) else out
+
+
+def _parse_scoped(limits) -> list | None:
+    """応答の `limits[]` から `kind == "weekly_scoped"` を写す。キーが無ければ `[]`、崩れていれば None（I6）。"""
+    if limits is None:
+        return []
+    if not isinstance(limits, list):
+        return None
+    out = [_parse_scoped_limit(x) for x in limits if isinstance(x, dict) and x.get("kind") == "weekly_scoped"]
+    return None if any(x is None for x in out) else out
+
+
+def _parse_scoped_limit(x: dict) -> dict | None:
+    """`weekly_scoped` の要素 1 つを保存の形へ写す。`percent` が数でなければ None（崩れている）。"""
+    if not isinstance(x.get("percent"), (int, float)):
+        return None
+    scope = x.get("scope") if isinstance(x.get("scope"), dict) else {}
+    m = scope.get("model") if isinstance(scope.get("model"), dict) else {}
+    model = m.get("display_name") if isinstance(m.get("display_name"), str) else m.get("id")
+    return _scoped_row(model, x["percent"], x.get("resets_at"))
+
+
+def _parse_spend(sp) -> dict | None:
+    if not isinstance(sp, dict):
+        return None
+    pct, sev = sp.get("percent"), sp.get("severity")
+    return {
+        "percent": float(pct) if isinstance(pct, (int, float)) and not isinstance(pct, bool) else None,
+        "severity": sev if isinstance(sev, str) else None,
+    }
+
+
 def parse_usage(d: dict | None, now: float) -> Usage:
-    """取得先の応答を読む。形が違えば残量不明（`error: shape`）。"""
+    """取得先の応答を読む。`five_hour`・`seven_day` の形が違えば残量不明（`error: shape`）。
+
+    `limits[]` と `spend` の崩れはその項目だけを読めなかった（None）とし、残量全体を不明にしない（I6）。"""
 
     def window(key: str) -> dict | None:
         w = d.get(key)
@@ -131,7 +208,14 @@ def parse_usage(d: dict | None, now: float) -> Usage:
         return Usage(fetched_at=now, error="shape")
     ex = d.get("extra_usage")
     spend = ex.get("spend_limit_reached") if isinstance(ex, dict) and isinstance(ex.get("spend_limit_reached"), bool) else None
-    return Usage(five_hour=five, seven_day=seven, spend_limit_reached=spend, fetched_at=now)
+    return Usage(
+        five_hour=five,
+        seven_day=seven,
+        spend_limit_reached=spend,
+        fetched_at=now,
+        scoped=_parse_scoped(d.get("limits")),
+        spend=_parse_spend(d.get("spend")),
+    )
 
 
 # ---------------------------------------------------------------- 宛先

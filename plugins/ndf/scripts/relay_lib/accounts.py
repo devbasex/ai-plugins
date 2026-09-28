@@ -1,4 +1,4 @@
-"""`relay.py account add|list|remove`: 切り替えに使う claude アカウントの登録・一覧・削除（#1389）。
+"""`relay.py account add|list|capacity|remove`: 切り替えに使う claude アカウントの登録・一覧・枠の大きさの宣言・削除（#1389・#1453）。
 
 置き場を書くのは `lib/claude_accounts.py` である。ここは端末の入出力と、専用の設定ディレクトリでの
 `claude auth login` / `auth status` / `auth logout` の起動と、重複の確かめ（I3）だけを持つ（推論は呼ばない）。登録は利用者が端末から
@@ -18,7 +18,7 @@ from .common import PKG_ROOT  # noqa: F401  lib/ を sys.path に置く
 import claude_accounts as ca  # noqa: E402,I001
 import claude_usage as cu  # noqa: E402
 
-USAGE = "usage: relay.py account add <名前> | list [--json] | remove <名前>"
+USAGE = "usage: relay.py account add <名前> | list [--json] | capacity <名前> <5 時間の枠|-> <週の枠|-> | remove <名前>"
 AUTH_ENV = ca.AUTH_ENV  # 専用の設定ディレクトリで claude を起動するときに外す変数（正本は claude_accounts）
 
 
@@ -135,6 +135,27 @@ def _window(w: dict | None, form: str) -> str:
     return f"{w['utilization']:.0f}%（{ca.local_time(cu.epoch(w.get('resets_at')), form)}）"
 
 
+def _usd(v: float | None) -> str:
+    """USD の値（小数第 1 位まで。整数なら小数を省く）。不明は `-`。"""
+    if v is None:
+        return "-"
+    t = f"{v:,.1f}"
+    return t[:-2] if t.endswith(".0") else t
+
+
+def _capacity(r: dict) -> str:
+    """`<5 時間の枠> / <週の枠>`。宣言の値には `*` を付ける。"""
+    return " / ".join(_usd(r["capacity"][k]) + ("*" if r["capacity_declared"][k] is not None else "") for k in ca.WINDOWS)
+
+
+def _scoped(scoped: list | None) -> str:
+    """モデル別の週の枠のうち使用率の最も高い 1 つ。"""
+    if not scoped:
+        return "-"
+    w = max(scoped, key=lambda x: x["utilization"])
+    return f"{w['model'] or '-'} {_window(w, '%m-%d')}"
+
+
 def cmd_list(as_json: bool) -> int:
     try:
         rows = ca.rows()
@@ -147,22 +168,73 @@ def cmd_list(as_json: bool) -> int:
     if not rows:
         print("登録済みのアカウントは無い")
         return 0
-    table = [("名前", "識別", "5 時間", "7 日", "支出上限", "状態")]
-    emails = [r["email"].lower() for r in rows]
-    for r in rows:
-        spend = {True: "達している", False: "達していない"}.get(r["spend_limit_reached"], "-")
-        # 同じメールアドレスが 2 件以上あるときだけ組織名を添える（1 件なら個人の組織名はメールの繰り返しになる）
-        ident = f"{r['email']}（{r['org_name']}）" if r["org_name"] and emails.count(r["email"].lower()) > 1 else r["email"]
-        table.append((r["name"], ident, _window(r["five_hour"], "%H:%M"), _window(r["seven_day"], "%m-%d"), spend, r["state"]))
-    widths = [max(_width(row[i]) for row in table) for i in range(len(table[0]))]
-    for row in table:
-        print("  ".join(c + " " * (w - _width(c)) for c, w in zip(row, widths)).rstrip())
+    for line in _table_lines(rows):
+        print(line)
     return 0
+
+
+HEADER = ("名前", "識別", "5 時間", "7 日", "モデル別の週", "支出上限", "枠の大きさ", "残り", "状態")
+
+
+def _table_row(r: dict, emails: list[str]) -> tuple[str, ...]:
+    """一覧の 1 件を表示の 1 行へ写す。`emails` は全件のメールアドレス（小文字）。"""
+    spend = {True: "達している", False: "達していない"}.get(r["spend_limit_reached"], "-")
+    # 同じメールアドレスが 2 件以上あるときだけ組織名を添える（1 件なら個人の組織名はメールの繰り返しになる）
+    ident = f"{r['email']}（{r['org_name']}）" if r["org_name"] and emails.count(r["email"].lower()) > 1 else r["email"]
+    return (
+        r["name"],
+        ident,
+        _window(r["five_hour"], "%H:%M"),
+        _window(r["seven_day"], "%m-%d"),
+        _scoped(r["scoped"]),
+        spend,
+        _capacity(r),
+        _usd(r["remaining"]),
+        r["state"],
+    )
+
+
+def _table_lines(rows: list[dict]) -> list[str]:
+    """見出しと各件を列の幅（全角は 2）でそろえた行。"""
+    emails = [r["email"].lower() for r in rows]
+    table = [HEADER, *(_table_row(r, emails) for r in rows)]
+    widths = [max(_width(row[i]) for row in table) for i in range(len(table[0]))]
+    return ["  ".join(c + " " * (w - _width(c)) for c, w in zip(row, widths)).rstrip() for row in table]
 
 
 def _width(s: str) -> int:
     """端末の表示幅（全角は 2）。"""
     return sum(2 if ord(ch) > 0x2E7F else 1 for ch in s)
+
+
+def _capacity_arg(v: str) -> float | None:
+    """枠の引数（正の数か `-`）。`-` は None、読めない・0 以下は ValueError。"""
+    if v == "-":
+        return None
+    x = float(v)
+    if not x > 0 or x == float("inf"):
+        raise ValueError(v)
+    return x
+
+
+def cmd_capacity(name: str, five: str, seven: str) -> int:
+    """枠の大きさを宣言する（`-` はその枠の宣言を外して対応表へ戻す）。"""
+    try:
+        declared = {"five_hour": _capacity_arg(five), "seven_day": _capacity_arg(seven)}
+    except ValueError:
+        print(USAGE, file=sys.stderr)
+        return 2
+    try:
+        acc = ca.set_capacity(name, declared)
+    except (ca.lock_timeout(), OSError) as e:
+        print(f"置き場へ書けない（{e}）", file=sys.stderr)
+        return 1
+    if acc is None:
+        print(f"登録されていない: {name}", file=sys.stderr)
+        return 1
+    cap = acc.capacity()
+    print(f"枠の大きさ: {name} 5 時間 {_usd(cap['five_hour'])} / 週 {_usd(cap['seven_day'])}")
+    return 0
 
 
 def cmd_remove(name: str) -> int:
@@ -187,6 +259,8 @@ def cmd_account(args: list[str]) -> int:
         return cmd_add(args[1])
     if sub == "list" and args[1:] in ([], ["--json"]):
         return cmd_list(args[1:] == ["--json"])
+    if sub == "capacity" and len(args) == 4:
+        return cmd_capacity(*args[1:])
     if sub == "remove" and len(args) == 2:
         return cmd_remove(args[1])
     print(USAGE, file=sys.stderr)

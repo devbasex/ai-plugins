@@ -2800,7 +2800,7 @@ def test_prune_treats_zombie_as_dead(tmp_path):
 # ---------------------------------------------------------------- 登録済みのアカウントの切り替え（#1389）
 
 sys.path.insert(0, str(ROOT / "scripts" / "tests"))
-from account_fake import FakeAnthropic, accounts, window  # noqa: E402,F401
+from account_fake import FakeAnthropic, accounts, scoped_limit, window  # noqa: E402,F401
 
 
 def synthetic_row(text, quota=None):
@@ -3146,7 +3146,7 @@ def test_account_add_list_remove(tmp_path, accounts):
     p = account_cmd(tmp_path, accounts, "list", tty=False)
     assert p.returncode == 0, p.stderr
     lines = p.stdout.splitlines()
-    assert lines[0].split() == ["名前", "識別", "5", "時間", "7", "日", "支出上限", "状態"]
+    assert lines[0].split() == ["名前", "識別", "5", "時間", "7", "日", "モデル別の週", "支出上限", "枠の大きさ", "残り", "状態"]
     assert any(
         line.startswith("work1")
         and "a@example.com" in line
@@ -3308,3 +3308,333 @@ def test_start_env_failure_uses_metered_or_stops(accounts, monkeypatch):
     assert to == "metered" and env["ANTHROPIC_API_KEY"] == "k"
     with pytest.raises(relay_run.NoAccountEnv):
         _bare_relay({}).replace_unusable("a")
+
+
+# ---------------------------------------------------------------- 残りの量（#1453）
+
+
+def _picker(cur):
+    r = _bare_relay({})
+    r.account, r.watch = cur, None
+    return r
+
+
+@pytest.mark.parametrize(
+    "other, to",
+    [
+        (dict(tier="default_claude_max_5x", util5=50, util7=0), "b"),  # 26.25 > 16.8
+        (dict(tier="default_claude_max_5x", util5=80, util7=0), "a"),  # 10.5 <= 16.8
+        (dict(util5=50, util7=0), "b"),  # 残りの量が不明: 使用率 50 < 92
+        (dict(util5=91, util7=0), "b"),
+    ],
+)
+def test_pick_compares_remaining_over_threshold(accounts, other, to):
+    """AC8・I9: 今が使えて閾値を超えたとき、両方分かれば残りの量で、どちらかが不明なら使用率で比べる。"""
+    accounts.add("a", tier="default_claude_max_20x", util5=92, util7=0)  # 16.8
+    accounts.add("b", **other)
+    name, reason, _ = _picker("a").pick(None)
+    assert (name, reason) == (to, "threshold" if to == "b" else None)
+
+
+def test_pick_keeps_current_when_candidate_usage_is_higher(accounts):
+    accounts.add("a", util5=92, util7=0)
+    accounts.add("b", util5=95, util7=0)
+    assert _picker("a").pick(None)[0] == "a"
+
+
+def test_account_capacity_and_list(tmp_path, accounts):
+    """AC3・AC7・I8: 宣言は一覧の枠の大きさと残りの量に効き、`-` で外すと表へ戻る。トークンを出さない。"""
+    accounts.add("a", tier="default_claude_max_5x", util5=40, util7=50)
+    accounts.add("b", util5=10, util7=10, extra={"limits": [scoped_limit(58)]})
+    creds = (accounts.root / "a" / ".credentials.json").read_bytes()
+    p = account_cmd(tmp_path, accounts, "capacity", "a", "1000", "900", tty=False)
+    assert p.returncode == 0 and "枠の大きさ: a 5 時間 1,000 / 週 900" in p.stdout, p.stderr
+    rows = {r["name"]: r for r in json.loads(account_cmd(tmp_path, accounts, "list", "--json", tty=False).stdout)}
+    assert rows["a"]["capacity"] == {"five_hour": 1000.0, "seven_day": 900.0}
+    assert rows["a"]["capacity_declared"] == {"five_hour": 1000.0, "seven_day": 900.0}
+    assert rows["a"]["remaining"] == pytest.approx(450.0) and rows["a"]["tier"] == "default_claude_max_5x"
+    assert rows["b"]["capacity"] == {"five_hour": None, "seven_day": None} and rows["b"]["remaining"] is None
+    assert rows["b"]["scoped"][0]["model"] == "Fable" and rows["b"]["tier"] is None
+    table = account_cmd(tmp_path, accounts, "list", tty=False).stdout
+    line_a = next(x for x in table.splitlines() if x.startswith("a "))
+    line_b = next(x for x in table.splitlines() if x.startswith("b "))
+    assert "1,000* / 900*" in line_a and " 450 " in line_a
+    assert "Fable 58%" in line_b and "- / -" in line_b
+    assert account_cmd(tmp_path, accounts, "capacity", "a", "-", "-", tty=False).returncode == 0
+    rows = {r["name"]: r for r in json.loads(account_cmd(tmp_path, accounts, "list", "--json", tty=False).stdout)}
+    assert rows["a"]["capacity"] == {"five_hour": 52.5, "seven_day": 640.0} and rows["a"]["remaining"] == pytest.approx(31.5)
+    assert (accounts.root / "a" / ".credentials.json").read_bytes() == creds
+    assert "SECRET" not in table and "SECRET" not in json.dumps(rows)
+    assert account_cmd(tmp_path, accounts, "capacity", "a", "0", "-", tty=False).returncode == 2
+    assert account_cmd(tmp_path, accounts, "capacity", "a", "x", "-", tty=False).returncode == 2
+    assert account_cmd(tmp_path, accounts, "capacity", "zz", "1", "1", tty=False).returncode == 1
+
+
+# ---------------------------------------------------------------- 現状固定: 区間のアカウントの選び方（AccountSwitch.pick）
+
+from relay_lib import switch as relay_switch  # noqa: E402
+
+
+class _Acc:
+    def __init__(self, relogin=False, limited=None, left=None):
+        self.needs_relogin, self.limited, self.left = relogin, limited, left
+
+    def limited_until(self, now):
+        return self.limited
+
+    def remaining(self):
+        return self.left
+
+
+class _Use:
+    def __init__(self, score):
+        self.s = score
+
+    def score(self):
+        return self.s
+
+
+def _fake_ca(monkeypatch, *, choice, usage=None, acc=None, thr=90.0):
+    """`pick` と `check` が読む `ca` を差し替え、`choose` に渡った引数を記録する。"""
+    calls = []
+
+    def choose(exclude=(), **kw):
+        calls.append({"exclude": set(exclude), **kw})
+        return choice
+
+    monkeypatch.setattr(relay_switch.ca, "switch_at", lambda: thr)
+    monkeypatch.setattr(relay_switch.ca, "choose", choose)
+    monkeypatch.setattr(relay_switch.ca, "usage", lambda name, before=None: usage)
+    monkeypatch.setattr(relay_switch.ca, "load_account", lambda name: acc)
+    return calls
+
+
+def _pk(cur, env=None, due=None):
+    r = _bare_relay(env or {})
+    r.account = cur
+    r.watch = None if due is None else type("W", (), {"due": due})()
+    return r
+
+
+METERED_DECL = {"NDF_SUPERVISE_CLAUDE_FALLBACK": "ANTHROPIC_API_KEY=k"}
+
+
+@pytest.mark.parametrize(
+    "kind, cur, env, name, want, exclude",
+    [
+        ("five_hour", "a", {}, "b", ("b", "five_hour"), {"a"}),
+        ("auth", "a", {}, "b", ("b", "auth"), set()),
+        ("five_hour", "metered", {}, "b", ("b", "recovered"), set()),
+        ("five_hour", None, {}, "b", ("b", "five_hour"), set()),
+        ("five_hour", "a", METERED_DECL, None, ("metered", "five_hour"), {"a"}),
+        ("five_hour", "a", {}, None, (None, "five_hour"), {"a"}),
+        ("five_hour", "metered", METERED_DECL, None, (None, "five_hour"), set()),
+    ],
+)
+def test_pick_after_limit_characterization(monkeypatch, kind, cur, env, name, want, exclude):
+    """現状固定: 上限の後（`kind` あり）の選び方と、`choose` へ渡す除外。"""
+    c = relay_switch.ca.Choice(name)
+    calls = _fake_ca(monkeypatch, choice=c)
+    assert _pk(cur, env).pick(kind) == (*want, c)
+    assert calls[0]["exclude"] == exclude
+
+
+@pytest.mark.parametrize(
+    "name, score, want",
+    [("b", 10.0, ("b", "recovered")), ("b", None, ("b", "recovered")), ("b", 95.0, ("metered", None)), (None, None, ("metered", None))],
+)
+def test_pick_on_metered_characterization(monkeypatch, name, score, want):
+    """現状固定: 従量の接続で区間を起動するとき、閾値未満（または不明）の候補があれば戻す。"""
+    c = relay_switch.ca.Choice(name, score=score)
+    _fake_ca(monkeypatch, choice=c)
+    assert _pk("metered").pick(None) == (*want, c)
+
+
+@pytest.mark.parametrize(
+    "cur, acc, score, due, name, env, want, keep_choice",
+    [
+        # 今が使えて閾値未満なら `choose` を呼ばずに替えない
+        ("a", _Acc(), 50.0, None, "b", {}, ("a", None), False),
+        ("a", _Acc(), None, None, "b", {}, ("a", None), False),
+        # 閾値を超えた・定期の確認が立てた
+        ("a", _Acc(), 95.0, None, "b", {}, ("b", "threshold"), True),
+        ("a", _Acc(), 50.0, 91.0, "b", {}, ("b", "threshold"), True),
+        # 使えない（登録が無い・再ログインが要る・上限にある）
+        ("a", None, 10.0, None, "b", {}, ("b", "unusable"), True),
+        ("a", _Acc(relogin=True), 10.0, None, "b", {}, ("b", "unusable"), True),
+        ("a", _Acc(limited=1.0), 10.0, None, "b", {}, ("b", "unusable"), True),
+        (None, None, None, None, "b", {}, ("b", "start"), True),
+        # 候補が無い
+        ("a", _Acc(), 95.0, None, None, METERED_DECL, ("a", None), True),
+        ("a", None, None, None, None, METERED_DECL, ("metered", "limited"), True),
+        (None, None, None, None, None, METERED_DECL, ("metered", "limited"), True),
+        ("a", None, None, None, None, {}, ("a", None), True),
+        (None, None, None, None, None, {}, (None, None), True),
+    ],
+)
+def test_pick_section_start_characterization(monkeypatch, cur, acc, score, due, name, env, want, keep_choice):
+    """現状固定: 区間の起動（`kind` が None）で今のアカウントを残すか替えるか。"""
+    c = relay_switch.ca.Choice(name, score=10.0)
+    calls = _fake_ca(monkeypatch, choice=c, usage=None if score is None else _Use(score), acc=acc)
+    assert _pk(cur, env, due).pick(None) == (*want, c if keep_choice else None)
+    if keep_choice:
+        assert calls[0]["exclude"] == ({cur} if cur else set())
+    else:
+        assert calls == []
+
+
+@pytest.mark.parametrize(
+    "left, c_left, c_score, want",
+    [(100.0, 100.0, 10.0, "a"), (100.0, 101.0, 99.0, "b"), (None, 500.0, 96.0, "a"), (None, 500.0, 94.0, "b"), (None, None, None, "b")],
+)
+def test_pick_no_better_characterization(monkeypatch, left, c_left, c_score, want):
+    """現状固定: 閾値を超えたとき、候補が今より良くなければ今を残す（残りの量 → 使用率の順で比べる）。"""
+    c = relay_switch.ca.Choice("b", score=c_score, remaining=c_left)
+    _fake_ca(monkeypatch, choice=c, usage=_Use(95.0), acc=_Acc(left=left))
+    assert _pk("a").pick(None) == ((want, "threshold", c) if want == "b" else ("a", None, c))
+
+
+# ---------------------------------------------------------------- 現状固定: 定期の確認（UsageWatch.check）
+
+
+def _watch(cur):
+    return relay_switch.UsageWatch(type("R", (), {"account": cur})())
+
+
+def _drain(w):
+    out = []
+    while not w.lines.empty():
+        out.append(w.lines.get_nowait())
+    return out
+
+
+@pytest.mark.parametrize(
+    "name, score, recover",
+    [("b", 10.0, "b"), ("b", None, "b"), ("b", 90.0, None), (None, None, None)],
+)
+def test_usage_watch_on_metered_characterization(monkeypatch, name, score, recover):
+    """現状固定: 従量の接続の間は、閾値未満（または不明）の候補を `recover` に立て、1 行を 1 度だけ積む。"""
+    calls = _fake_ca(monkeypatch, choice=relay_switch.ca.Choice(name, score=score))
+    w = _watch("metered")
+    w.check()
+    w.check()
+    assert w.recover == recover and w.due is None
+    assert _drain(w) == ([f"{name} の上限が外れた。次のカットポイントで従量の接続から戻す"] if recover else [])
+    assert calls[0] == {"exclude": set(), "before": 0}
+
+
+def test_usage_watch_recover_cleared_characterization(monkeypatch):
+    """現状固定: 戻せる候補が無くなれば `recover` を外す。"""
+    _fake_ca(monkeypatch, choice=relay_switch.ca.Choice(None))
+    w = _watch("metered")
+    w.recover = "b"
+    w.check()
+    assert w.recover is None and _drain(w) == []
+
+
+@pytest.mark.parametrize(
+    "cur, score, thr, due, want_due, lines",
+    [
+        ("a", 95.4, 90.0, None, 95.4, ["a の使用率が 95% を超えた。次のカットポイントで替える"]),
+        ("a", 90.0, 90.0, None, 90.0, ["a の使用率が 90% を超えた。次のカットポイントで替える"]),
+        ("a", 89.9, 90.0, None, None, []),
+        ("a", None, 90.0, None, None, []),
+        ("a", 95.0, 100.0, None, None, []),
+        ("a", 95.0, 90.0, 91.0, 91.0, []),
+        (None, 95.0, 90.0, None, None, []),
+    ],
+)
+def test_usage_watch_on_account_characterization(monkeypatch, cur, score, thr, due, want_due, lines):
+    """現状固定: アカウントの間は、今の使用率が閾値以上なら `due` を立てる（閾値 100 以上・立て済み・未登録は読まない）。"""
+    _fake_ca(monkeypatch, choice=None, usage=None if score is None else _Use(score), thr=thr)
+    w = _watch(cur)
+    w.due = due
+    w.check()
+    assert w.due == want_due and w.recover is None and _drain(w) == lines
+
+
+# ---------------------------------------------------------------- 現状固定: 区間のアカウントの知らせ（AccountSwitch.tell_account）
+
+
+def _teller(monkeypatch, section, env=None, due=None):
+    """画面の 1 行と記録の行を集める `Relay`。`account_label` は `名前（m）` に固定する。"""
+    monkeypatch.setattr(relay_switch.ca, "account_label", lambda n: f"{n}（m）")
+    r = _pk("a", env, due)
+    r.section, r.screens, r.rows = section, [], []
+    r.term = type("T", (), {"screen": lambda _s, line: r.screens.append(line)})()
+    r.log = lambda **row: r.rows.append(row)
+    return r
+
+
+@pytest.mark.parametrize("prev, to, section", [("a", "a", 2), ("a", None, 2), (None, None, 1)])
+def test_tell_account_silent_characterization(monkeypatch, prev, to, section):
+    """現状固定: 2 区間目以降で同じアカウント、または替え先が無いなら何も出さない。"""
+    r = _teller(monkeypatch, section)
+    r.tell_account(prev, to, "threshold", None)
+    assert r.screens == [] and r.rows == []
+
+
+@pytest.mark.parametrize("prev, to", [(None, "b"), ("b", "b")])
+def test_tell_account_first_section_characterization(monkeypatch, prev, to):
+    """現状固定: 1 区間目は起動したアカウントの 1 行だけを出し、記録しない。"""
+    r = _teller(monkeypatch, 1)
+    r.tell_account(prev, to, None, None)
+    assert r.screens == ["ndf-relay: アカウント b（m）で起動する"] and r.rows == []
+
+
+@pytest.mark.parametrize(
+    "section, decl, choice, screen, keys, earliest",
+    [
+        (
+            2,
+            "ANTHROPIC_API_KEY=k",
+            None,
+            "ndf-relay: 登録済みのアカウントはすべて上限にある。従量の接続（ANTHROPIC_API_KEY）へ替えて続ける",
+            ["ANTHROPIC_API_KEY"],
+            None,
+        ),
+        (
+            1,
+            "ANTHROPIC_API_KEY=k ANTHROPIC_BASE_URL=u",
+            ("x", float("inf")),
+            "ndf-relay: 登録済みのアカウントはすべて上限にある（最も早く戻るのは x、不明）。従量の接続（ANTHROPIC_API_KEY ほか 1 つ）へ替えて続ける",
+            ["ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL"],
+            {"name": "x", "at": None},
+        ),
+        (2, "", None, "ndf-relay: 登録済みのアカウントはすべて上限にある。従量の接続（宣言）へ替えて続ける", [], None),
+    ],
+)
+def test_tell_account_metered_characterization(monkeypatch, section, decl, choice, screen, keys, earliest):
+    """現状固定: 従量の接続へ替えたら、区間によらず 1 行と `account` の記録（宣言のキーと最も早く戻る時刻）を残す。"""
+    r = _teller(monkeypatch, section, {"NDF_SUPERVISE_CLAUDE_FALLBACK": decl})
+    c = relay_switch.ca.Choice(None, earliest=choice)
+    r.tell_account("a", "metered", "five_hour", c)
+    assert r.screens == [screen]
+    assert r.rows == [
+        {"event": "account", "section": section, "reason": "five_hour", "from": "a", "to": "metered", "keys": keys, "earliest": earliest}
+    ]
+
+
+@pytest.mark.parametrize(
+    "prev, reason, due, line, extra",
+    [
+        ("metered", "five_hour", None, "b（m）の上限が外れたため、従量の接続からアカウント b へ戻して続ける", {"reason": "recovered"}),
+        ("metered", "threshold", 95.0, "b（m）の上限が外れたため、従量の接続からアカウント b へ戻して続ける", {"reason": "recovered"}),
+        ("a", "threshold", 95.4, "a の使用率が 95% に達したため、アカウントを b（m）へ替える", {"usage": 95}),
+        ("a", "threshold", None, "a の使用率が 0% に達したため、アカウントを b（m）へ替える", {"usage": 0}),
+        *[
+            ("a", k, None, f"利用上限（{k}）に達したため、アカウントを a から b（m）へ替えて続ける", {})
+            for k in ("five_hour", "seven_day", "spend", "unknown")
+        ],
+        ("a", "auth", None, "認証が通らなかったため、アカウントを a から b（m）へ替えて続ける", {}),
+        ("a", "unusable", None, "アカウントを a から b（m）へ替える", {}),
+        (None, "start", None, "アカウントを 既定のログイン から b（m）へ替える", {}),
+        ("a", None, None, "アカウントを a から b（m）へ替える", {}),
+    ],
+)
+def test_tell_account_reason_lines_characterization(monkeypatch, prev, reason, due, line, extra):
+    """現状固定: 2 区間目以降でアカウントへ替えたとき、理由ごとの 1 行と `account` の記録。"""
+    r = _teller(monkeypatch, 3, due=due)
+    r.tell_account(prev, "b", reason, None)
+    assert r.screens == ["ndf-relay: " + line]
+    assert r.rows == [{"event": "account", "section": 3, "reason": reason, "from": prev, "to": "b", **extra}]

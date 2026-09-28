@@ -45,6 +45,13 @@ CRED_FILE = ".credentials.json"
 REFRESH_BEFORE = 3600.0  # 期限のこの秒数前を切ったら更新する
 LOCK_WAIT = 30.0
 NO_RESET_HOLD = 5 * 3600.0  # リセット時刻の読めない上限の観測を候補から外す秒数
+# 枠の大きさの対応表（`rateLimitTier` → 枠ごとの USD 換算）。根拠は issues/relay-capacity-estimate-2026-09-28.md。
+# Max 5x の週の枠は非公式の比（1,100 × 3.5 / 6）による仮の値（#1453 の決定 1）。表に無い tier は宣言だけで決まる
+CAPACITY: dict[str, dict[str, float]] = {
+    "default_claude_max_20x": {"five_hour": 210.0, "seven_day": 1100.0},
+    "default_claude_max_5x": {"five_hour": 52.5, "seven_day": 640.0},
+}
+WINDOWS = ("five_hour", "seven_day")
 
 
 # ---------------------------------------------------------------- 設定と置き場
@@ -154,7 +161,7 @@ def _locked(name: str):
         yield
 
 
-def _lock_timeout() -> type[BaseException]:
+def lock_timeout() -> type[BaseException]:
     import locks
 
     return locks.LockTimeout
@@ -172,6 +179,37 @@ class Account:
     usage: Usage | None
     org_id: str = ""  # 組織（`claude auth status` の orgId）。組織を記録する前の登録は空
     org_name: str = ""
+    tier: str = ""  # `.credentials.json` の `claudeAiOauth.rateLimitTier`。読めなければ空
+    declared: dict | None = None  # 枠の大きさの宣言（`account.json` の `capacity`。正の数の枠だけ）
+
+    def score(self) -> float | None:  # 使用率（残量を読んでいなければ None）
+        return self.usage.score() if self.usage else None
+
+    def known(self) -> bool:  # 残量を読めているか
+        return bool(self.usage and self.usage.windows_known())
+
+    def capacity(self) -> dict:
+        """枠ごとの枠の大きさ（USD）。宣言 → 対応表 → 不明（None）の順に決まる（I2）。"""
+        table = CAPACITY.get(self.tier) or {}
+        declared = self.declared or {}
+        return {k: declared.get(k, table.get(k)) for k in WINDOWS}
+
+    def remaining(self) -> float | None:
+        """残りの量: 枠の大きさと使用率が分かる枠の「枠の大きさ ×（1 − 使用率 / 100）」の最小（I1）。無ければ None。
+
+        モデル別の週の枠の大きさは週の枠と同じとする。"""
+        u = self.usage
+        if u is None or not u.windows_known():
+            return None
+        cap = self.capacity()
+        pairs = [(cap["five_hour"], u.five_hour), (cap["seven_day"], u.seven_day)]
+        pairs += [(cap["seven_day"], w) for w in u.scoped or []]
+        vals = [
+            max(0.0, c * (1 - w["utilization"] / 100))
+            for c, w in pairs
+            if c is not None and isinstance(w, dict) and isinstance(w.get("utilization"), (int, float))
+        ]
+        return min(vals) if vals else None
 
     def observed_until(self, now: float) -> float | None:
         """上限の観測（`limit`）が今も効いているなら、その終わりの時刻。"""
@@ -183,7 +221,7 @@ class Account:
         if until <= now:
             return None
         u = self.usage
-        if u is not None and u.known() and u.fetched_at > observed and u.limited_until(now) is None:
+        if u is not None and u.windows_known() and u.fetched_at > observed and u.limited_until(now) is None:
             return None  # 観測の後に読んだ残量が上限にない
         return until
 
@@ -197,10 +235,10 @@ class Account:
             return "再登録が要る"
         until = self.limited_until(now)
         if until is not None:
-            if self.usage and self.usage.known() and self.usage.spend_limit_reached or (self.limit or {}).get("type") == "spend":
+            if self.known() and self.usage.spend_reached() or (self.limit or {}).get("type") == "spend":
                 return "支出上限"
             return f"上限（{local_time(until)}）"
-        return "使える" if self.usage and self.usage.known() else "残量不明"
+        return "使える" if self.known() else "残量不明"
 
 
 def local_time(t: float | None, form: str = "%m-%d %H:%M") -> str:
@@ -210,8 +248,7 @@ def local_time(t: float | None, form: str = "%m-%d %H:%M") -> str:
 
 
 def load_account(name: str) -> Account | None:
-    d = account_dir(name)
-    a = _read(os.path.join(d, ACCOUNT_FILE))
+    a = _read(_path(name, ACCOUNT_FILE))
     if a is None:
         return None
     return Account(
@@ -219,15 +256,31 @@ def load_account(name: str) -> Account | None:
         email=str(a.get("email") or ""),
         needs_relogin=bool(a.get("needs_relogin")),
         limit=a.get("limit") if isinstance(a.get("limit"), dict) else None,
-        usage=Usage.from_json(_read(os.path.join(d, USAGE_FILE))),
+        usage=Usage.from_json(_read(_path(name, USAGE_FILE))),
         org_id=str(a.get("org_id") or ""),
         org_name=str(a.get("org_name") or ""),
+        tier=_tier(name),
+        declared=_declared(a.get("capacity")),
     )
+
+
+def _declared(v) -> dict | None:
+    """`account.json` の `capacity` のうち正の数の枠だけ。1 つも無ければ None（I7）。"""
+    if not isinstance(v, dict):
+        return None
+    out = {k: float(v[k]) for k in WINDOWS if isinstance(v.get(k), (int, float)) and not isinstance(v.get(k), bool) and v[k] > 0}
+    return out or None
+
+
+def _tier(name: str) -> str:
+    """`.credentials.json` の `rateLimitTier` だけを読む（トークンは持たない。I8）。"""
+    t = (_oauth(name) or {}).get("rateLimitTier")
+    return t if isinstance(t, str) else ""
 
 
 def _update_account(name: str, **fields) -> None:
     """排他の中で呼ぶ。登録の無いアカウントは作らない（I2）。"""
-    path = os.path.join(account_dir(name), ACCOUNT_FILE)
+    path = _path(name, ACCOUNT_FILE)
     a = _read(path)
     if a is not None:
         a.update(fields)
@@ -242,21 +295,24 @@ def note_limit(name: str, kind: str, resets_at: float | None, now: float | None 
     try:
         with _locked(name):
             _update_account(name, limit={"type": kind, "resets_at": iso_utc(resets_at), "observed_at": iso_utc(now)})
-    except (_lock_timeout(), OSError):
+    except (lock_timeout(), OSError):
         pass
 
 
 # ---------------------------------------------------------------- トークン
 
 
-def _creds_path(name: str) -> str:
-    return os.path.join(account_dir(name), CRED_FILE)
+def _path(name: str, file: str) -> str:
+    return os.path.join(account_dir(name), file)
+
+
+def _oauth(name: str) -> dict | None:
+    o = (_read(_path(name, CRED_FILE)) or {}).get("claudeAiOauth")
+    return o if isinstance(o, dict) else None
 
 
 def _creds(name: str) -> dict | None:
-    d = _read(_creds_path(name))
-    o = d.get("claudeAiOauth") if d else None
-    return o if isinstance(o, dict) and isinstance(o.get("accessToken"), str) and o["accessToken"] else None
+    return o if (o := _oauth(name)) is not None and isinstance(o.get("accessToken"), str) and o["accessToken"] else None
 
 
 def _token_held(name: str, before: float | None, now: float, force: bool = False, min_left: float = 0) -> str | None:
@@ -264,7 +320,7 @@ def _token_held(name: str, before: float | None, now: float, force: bool = False
 
     `before` は期限の何秒前を切ったら更新するか（None は更新しない）。`min_left`（打ち切りの秒）以下しか残らないものは
     更新するか None にする。`force` は期限に関わらず更新する（401 のとき）。断られたら `needs_relogin` を真にする。"""
-    a = _read(os.path.join(account_dir(name), ACCOUNT_FILE))
+    a = _read(_path(name, ACCOUNT_FILE))
     if a is None or a.get("needs_relogin"):
         return None
     o = _creds(name)
@@ -273,22 +329,21 @@ def _token_held(name: str, before: float | None, now: float, force: bool = False
         return None
     exp = (o.get("expiresAt") or 0) / 1000
     before = None if before is None else max(before, min_left)
-    if not force and (before is None or exp - now > before):
-        return o["accessToken"] if exp - now > min_left else None
+    left = o["accessToken"] if exp - now > min_left else None
+    return left if not force and (before is None or exp - now > before) else _refresh_and_store(name, o, now, None if force else left)
+
+
+def _refresh_and_store(name: str, o: dict, now: float, fallback: str | None) -> str | None:
+    """排他の中で呼ぶ。トークンを更新して書き込み、新しいアクセストークンを返す。一時的な失敗なら `fallback`。"""
     rexp = o.get("refreshTokenExpiresAt")
-    if isinstance(rexp, (int, float)) and rexp / 1000 <= now:
-        _update_account(name, needs_relogin=True)
-        return None
-    how, new = refresh_oauth(o, now)
+    how, new = ("rejected", None) if isinstance(rexp, (int, float)) and rexp / 1000 <= now else refresh_oauth(o, now)
     if how == "rejected":
         _update_account(name, needs_relogin=True)
         return None
-    if new is None:  # 一時的な失敗。残りが足りれば今のトークンを使う
-        return o["accessToken"] if exp - now > min_left and not force else None
+    if new is None:
+        return fallback
     try:
-        whole = _read(_creds_path(name)) or {}
-        whole["claudeAiOauth"] = new
-        _write(_creds_path(name), whole)
+        _write(_path(name, CRED_FILE), {**(_read(_path(name, CRED_FILE)) or {}), "claudeAiOauth": new})
     except OSError:
         _update_account(name, needs_relogin=True)
         return None
@@ -301,7 +356,7 @@ def token(name: str, before: float | None = REFRESH_BEFORE, now: float | None = 
     try:
         with _locked(name):
             return _token_held(name, before, now, min_left=min_left)
-    except (_lock_timeout(), OSError):
+    except (lock_timeout(), OSError):
         return None
 
 
@@ -328,18 +383,18 @@ def _fetch(name: str, before: float | None, now: float) -> Usage:
 def usage(name: str, before: float | None = REFRESH_BEFORE, now: float | None = None) -> Usage | None:
     """残量。前の取得から `check_interval()` 秒の中なら保存した値を返し、取得先を呼ばない（I6）。"""
     now = time.time() if now is None else now
-    path = os.path.join(account_dir(name), USAGE_FILE)
+    path = _path(name, USAGE_FILE)
     try:
         with _locked(name):
             saved = Usage.from_json(_read(path))
             if saved is not None and now - saved.fetched_at < check_interval():
                 return saved
-            if _read(os.path.join(account_dir(name), ACCOUNT_FILE)) is None:
+            if _read(_path(name, ACCOUNT_FILE)) is None:
                 return None
             u = _fetch(name, before, now)
             _write(path, u.to_json())
             return u
-    except (_lock_timeout(), OSError):
+    except (lock_timeout(), OSError):
         return Usage.from_json(_read(path))
 
 
@@ -348,47 +403,66 @@ def usage(name: str, before: float | None = REFRESH_BEFORE, now: float | None = 
 
 @dataclass
 class Choice:
-    """選んだアカウント（無ければ None）と、すべて上限のときに最も早く戻るアカウントと時刻。"""
+    """選んだアカウント（無ければ None）と、すべて上限のときに最も早く戻るアカウントと時刻。
+
+    `score` は選んだアカウントの使用率（切り替えの閾値と比べる値）、`remaining` は残りの量（不明は None）。"""
 
     name: str | None
     score: float | None = None
     earliest: tuple[str, float] | None = None
+    remaining: float | None = None
 
 
-def choose(exclude=(), before: float | None = REFRESH_BEFORE, keep=(), now: float | None = None, min_left: float = 0) -> Choice:
-    """上限に達していないアカウントのうち、使用率の大きい方が最も小さいものを選ぶ（前提 4・I7）。
+def _try_order(pool: list[Account], readable: bool) -> list[Account]:
+    """試す順（I3）: 使用率が閾値未満（読めないものを含む）の側を先に、各側の中で (1) 残りの量の大きい順 →
+    (2) 残りの量が不明で使用率を読めるものを使用率の小さい順 → (3) 読める候補が無いときだけ残量不明を名前の順。
+    同順は `five_hour` のリセット時刻の早い方、次に名前の順。"""
+    thr = switch_at()
+    below = [a for a in pool if a.score() is None or a.score() < thr]
+    return _order_side(below, readable) + _order_side([a for a in pool if a not in below], readable)
 
-    並んだら `five_hour` のリセット時刻が早い方、さらに並べば名前の順。残量不明は、上限に達していない候補に読めるものが
-    無いときだけ候補にする（名前の順）。「再登録が要る」とトークンを得られないもの（残り `min_left` 秒以下を含む）は
-    外す（I13）。`keep` の名前はトークンを更新しない（動いている区間のアカウント。I5）。"""
-    now = time.time() if now is None else now
-    earliest: tuple[str, float] | None = None
-    pool: list[Account] = []
-    for n in names():
-        if n in exclude:
-            continue
+
+def _order_side(side: list[Account], readable: bool) -> list[Account]:
+    rem = {a.name: a.remaining() for a in side}
+    reset = {a.name: (a.usage.resets("five_hour") if a.usage else None) or math.inf for a in side}
+    by_rem = [a for a in side if rem[a.name] is not None]
+    by_score = [a for a in side if rem[a.name] is None and a.score() is not None]
+    out = sorted(by_rem, key=lambda a: (-rem[a.name], reset[a.name], a.name))
+    out += sorted(by_score, key=lambda a: (a.score(), reset[a.name], a.name))
+    if not readable:
+        out += sorted((a for a in side if a not in by_rem and a not in by_score), key=lambda a: a.name)
+    return out
+
+
+def _account_pool(exclude, before: float | None, keep, now: float) -> tuple[list[Account], tuple[str, float] | None]:
+    """上限に達していない候補と、上限にあるもののうち最も早く戻るアカウントと時刻。「再登録が要る」は外す。"""
+    pool, earliest = [], None
+    for n in [n for n in names() if n not in exclude]:
         usage(n, None if n in keep else before, now)
         acc = load_account(n)
         if acc is None or acc.needs_relogin:
             continue
         until = acc.limited_until(now)
-        if until is not None:
-            if earliest is None or until < earliest[1]:
-                earliest = (n, until)
-            continue
-        pool.append(acc)
-    readable = any(a.usage and a.usage.known() for a in pool)
-    while pool:
-        known = [a for a in pool if a.usage is not None and a.usage.score() is not None]
-        if known:
-            pick = min(known, key=lambda a: (a.usage.score(), a.usage.resets("five_hour") or math.inf, a.name))
-        elif readable:
-            break
-        else:
-            pick = min(pool, key=lambda a: a.name)
+        if until is None:
+            pool.append(acc)
+        elif earliest is None or until < earliest[1]:
+            earliest = (n, until)
+    return pool, earliest
+
+
+def choose(exclude=(), before: float | None = REFRESH_BEFORE, keep=(), now: float | None = None, min_left: float = 0) -> Choice:
+    """上限に達していないアカウントのうち、残りの量の最も大きいものを選ぶ（#1453 の I3）。
+
+    使用率が切り替えの閾値未満の候補を先に試し、残りの量の分からない候補は分かる候補の後ろへ使用率の順で並べる。
+    残量不明は、上限に達していない候補に読めるものが無いときだけ候補にする（名前の順）。「再登録が要る」とトークンを
+    得られないもの（残り `min_left` 秒以下を含む）は外す（#1389 の I13）。`keep` の名前はトークンを更新しない
+    （動いている区間のアカウント。#1389 の I5）。"""
+    now = time.time() if now is None else now
+    pool, earliest = _account_pool(exclude, before, keep, now)
+    readable = any(a.known() for a in pool)
+    for pick in _try_order(pool, readable):
         if token(pick.name, None if pick.name in keep else before, now, min_left) is not None:
-            return Choice(pick.name, pick.usage.score() if pick.usage else None, earliest)
-        pool.remove(pick)
+            return Choice(pick.name, pick.score(), earliest, pick.remaining())
     return Choice(None, None, earliest)
 
 
@@ -413,18 +487,13 @@ def account_env(name: str, base: dict, before: float | None = REFRESH_BEFORE, mi
     （`FOREIGN_AUTH_ENV`）を外してからトークンと名前を足す（混ぜない。I16）。"""
     env = dict(base)
     declared = fallback_env(base)
-    if name == METERED:
-        for k in (TOKEN_ENV, *FOREIGN_AUTH_ENV):
-            env.pop(k, None)
-        env.update(declared)
-        env[NAME_ENV] = METERED
-        return env
-    tok = token(name, before, min_left=min_left)
-    if tok is None:
+    metered = name == METERED
+    tok = None if metered else token(name, before, min_left=min_left)
+    if not metered and tok is None:
         return None
-    for k in (*declared, *FOREIGN_AUTH_ENV):
+    for k in ((TOKEN_ENV,) if metered else tuple(declared)) + FOREIGN_AUTH_ENV:
         env.pop(k, None)
-    env[TOKEN_ENV] = tok
+    env.update(declared if metered else {TOKEN_ENV: tok})
     env[NAME_ENV] = name
     return env
 
@@ -471,6 +540,26 @@ def set_org(name: str, org_id: str, org_name: str) -> None:
         _update_account(name, org_id=org_id, org_name=org_name)
 
 
+def set_capacity(name: str, declared: dict) -> Account | None:
+    """枠の大きさの宣言を書く。`declared` は枠ごとに正の数（宣言する）か None（外して対応表へ戻す）。
+
+    登録されていなければ None。書くのは `account.json` だけである（I8）。"""
+    with _locked(name):
+        path = _path(name, ACCOUNT_FILE)
+        a = _read(path)
+        if a is None:
+            return None
+        cur = _declared(a.get("capacity")) or {}
+        for k in WINDOWS:
+            if k in declared:
+                if declared[k] is None:
+                    cur.pop(k, None)
+                else:
+                    cur[k] = float(declared[k])
+        _update_account(name, capacity=cur or None)
+    return load_account(name)
+
+
 def unregister(name: str) -> None:
     with _locked(name):
         shutil.rmtree(account_dir(name), ignore_errors=True)
@@ -489,7 +578,7 @@ def rows(now: float | None = None) -> list[dict]:
         acc = load_account(n)
         if acc is None:
             continue
-        u = acc.usage if acc.usage and acc.usage.known() else None
+        u = acc.usage if acc.known() else None
         out.append(
             {
                 "name": n,
@@ -498,7 +587,13 @@ def rows(now: float | None = None) -> list[dict]:
                 "org_name": acc.org_name or None,
                 "five_hour": u.five_hour if u else None,
                 "seven_day": u.seven_day if u else None,
-                "spend_limit_reached": u.spend_limit_reached if u else None,
+                "scoped": u.scoped if u else None,
+                "spend_limit_reached": u.spend_reached() if u else None,
+                "spend": u.spend if u else None,
+                "tier": acc.tier or None,
+                "capacity": acc.capacity(),
+                "capacity_declared": {k: (acc.declared or {}).get(k) for k in WINDOWS},
+                "remaining": acc.remaining(),
                 "state": acc.state(now),
             }
         )

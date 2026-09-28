@@ -141,14 +141,28 @@ claude はログインの資格情報を Keychain に置き、設定ディレク
 python3 ~/.claude/ndf/relay.py account add work1   # 専用の設定ディレクトリで claude auth login が動く
 python3 ~/.claude/ndf/relay.py account add work2
 python3 ~/.claude/ndf/relay.py account list        # 推論を呼ばずに残量を出す（--json もある）
+python3 ~/.claude/ndf/relay.py account capacity work2 - 900   # 週の枠の大きさだけを 900 USD と宣言する（- - で外す）
 python3 ~/.claude/ndf/relay.py account remove work2
 ```
 
 ```text
-名前   識別           5 時間        7 日         支出上限      状態
-work1  a@example.com  15%（04:59）  3%（09-29）  達していない  使える
-work2  b@example.com  2%（05:40）   41%（09-30） 達していない  使える
+名前   識別           5 時間        7 日         モデル別の週        支出上限      枠の大きさ     残り  状態
+work1  a@example.com  50%（04:59）  3%（09-29）  Fable 58%（09-29）  達していない  210 / 1,100    105   使える
+work2  b@example.com  40%（05:40）  0%（09-30）  -                   達していない  52.5 / 900*    31.5  使える
 ```
+
+**アカウントは残りの量（USD 換算）の大きい順に選ぶ。** 残りの量は、5 時間の枠・週の枠・モデル別の週の枠（`limits[]` の
+`weekly_scoped`）ごとの「枠の大きさ ×（1 − 使用率 / 100）」の最小である。枠の大きさは `account capacity` の宣言（`*` 付き）
+→ `.credentials.json` の `rateLimitTier` から引く対応表の順に決まる。モデル別の週の枠の大きさは週の枠と同じとする。
+
+| `rateLimitTier` | 5 時間の枠（USD） | 週の枠（USD） |
+| --- | ---: | ---: |
+| `default_claude_max_20x` | 210 | 1,100 |
+| `default_claude_max_5x` | 52.5 | 640（仮の値） |
+
+表に無い tier（Team premium など）で宣言も無いアカウントは、枠の大きさが `-` になり、残りの量の分かるアカウントの後ろへ
+使用率の小さい順で並ぶ。使用率が切り替えの閾値以上のアカウントは、閾値未満のアカウントより後に試す。支出上限は
+`extra_usage.spend_limit_reached`・`spend.percent` ≥ 100・`spend.severity` = `critical` のどれかで達したとする。
 
 識別の列は、同じメールアドレスの登録が 2 件以上あるときだけ `a@example.com（Team A）` のように組織名を添える。
 
@@ -159,7 +173,7 @@ work2  b@example.com  2%（05:40）   41%（09-30） 達していない  使え�
 
 | いつ | ラッパー | `supervise.py`（プランの claude -p） |
 | --- | --- | --- |
-| 起動 | 区間ごとに、上限に達していないアカウントのうち `5 時間` と `7 日` の使用率の大きい方が最も小さいものを選ぶ。今のアカウントが閾値未満なら替えない | 起動したときのアカウント（`NDF_CLAUDE_ACCOUNT`）で呼ぶ |
+| 起動 | 区間ごとに、上限に達していないアカウントのうち残りの量の最も大きいものを選ぶ。今のアカウントが閾値未満なら替えず、閾値を超えていても候補の残りの量が今以下なら替えない | 起動したときのアカウント（`NDF_CLAUDE_ACCOUNT`）で呼ぶ |
 | 利用上限（5 時間・7 日・支出上限） | 子の応答が上限で終わると（`StopFailure` hook の `limit.json`）、次の区間を別のアカウントで `claude --resume <会話> "<最初の入力>"` として起動する。最初の入力は `ndf-next` があればそれ、無ければ未達の `/goal <条件>`、それも無ければ定型の文。**背景の作業が残っている間は子を終えない** | 待たずに別のアカウントで同じ呼び出しをやり直す |
 | 使用率が閾値を超えた | 定期の確認（推論なし）が 1 行を出し、**次のカットポイントで**替える | — |
 | すべて上限 | 宣言があれば従量の接続へ移る。無ければ 1 行を出して子を残す | 宣言があれば従量の接続へ移る。無ければ今と同じ上限待ち |
