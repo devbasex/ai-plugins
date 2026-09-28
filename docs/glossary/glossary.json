@@ -2304,6 +2304,27 @@
       "meaning": "追加利用の支出の上限（individual spend limit）。extra_usage.spend_limit_reached で読む",
       "source": "",
       "pending_source": "issues/issue-1389-requirements.md"
+    },
+    {
+      "term": "アカウントの置き場",
+      "context": "ndf-relay",
+      "meaning": "登録済みアカウントごとの設定ディレクトリを並べた ${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/accounts/。書くのは lib/claude_accounts.py だけ",
+      "source": "",
+      "pending_source": "issues/issue-1389-design.md"
+    },
+    {
+      "term": "上限シグナルファイル",
+      "context": "ndf-relay",
+      "meaning": "子の claude の応答が API の失敗で終わったときに、StopFailure hook がラッパーの作業ディレクトリへ書く limit.json",
+      "source": "",
+      "pending_source": "issues/issue-1389-design.md"
+    },
+    {
+      "term": "切り替えの閾値",
+      "context": "ndf-relay",
+      "meaning": "今のアカウントの使用率がこれを超えたら、次のカットポイントで別の登録済みアカウントへ替える値（NDF_ACCOUNT_SWITCH_AT、既定 90%）",
+      "source": "",
+      "pending_source": "issues/issue-1389-design.md"
     }
   ]
 }
