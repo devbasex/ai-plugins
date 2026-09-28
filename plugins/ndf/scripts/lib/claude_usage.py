@@ -135,11 +135,15 @@ class Usage:
 def _scoped_one(x) -> dict | None:
     if not isinstance(x, dict) or not isinstance(x.get("utilization"), (int, float)):
         return None
-    model = x.get("model")
+    return _scoped_row(x.get("model"), x["utilization"], x.get("resets_at"))
+
+
+def _scoped_row(model, util: float, resets) -> dict:
+    """モデル別の週の枠の 1 行（保存の形）。文字列でない `model`・`resets_at` は None にする。"""
     return {
         "model": model if isinstance(model, str) else None,
-        "utilization": float(x["utilization"]),
-        "resets_at": x.get("resets_at") if isinstance(x.get("resets_at"), str) else None,
+        "utilization": float(util),
+        "resets_at": resets if isinstance(resets, str) else None,
     }
 
 
@@ -166,13 +170,7 @@ def _parse_scoped(limits) -> list | None:
         scope = x.get("scope") if isinstance(x.get("scope"), dict) else {}
         m = scope.get("model") if isinstance(scope.get("model"), dict) else {}
         model = m.get("display_name") if isinstance(m.get("display_name"), str) else m.get("id")
-        out.append(
-            {
-                "model": model if isinstance(model, str) else None,
-                "utilization": float(x["percent"]),
-                "resets_at": x.get("resets_at") if isinstance(x.get("resets_at"), str) else None,
-            }
-        )
+        out.append(_scoped_row(model, x["percent"], x.get("resets_at")))
     return out
 
 
