@@ -90,7 +90,7 @@ class Usage:
             "error": self.error,
         }
 
-    def known(self) -> bool:
+    def windows_known(self) -> bool:
         return self.error is None and (self.five_hour is not None or self.seven_day is not None)
 
     def windows(self) -> list[dict]:
@@ -100,7 +100,7 @@ class Usage:
 
     def score(self) -> float | None:
         """使用率: 5 時間の枠・週の枠・モデル別の週の枠の使用率の最大（I5）。読めなければ None。"""
-        if not self.known():
+        if not self.windows_known():
             return None
         vals = [w["utilization"] for w in self.windows()]
         return float(max(vals)) if vals else None
@@ -123,7 +123,7 @@ class Usage:
 
     def limited_until(self, now: float) -> float | None:
         """上限にあるならそのリセット時刻（支出上限で時刻が無ければ無限）。無ければ None。"""
-        if not self.known():
+        if not self.windows_known():
             return None
         if self.spend_reached():
             return math.inf

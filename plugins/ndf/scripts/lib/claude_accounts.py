@@ -188,7 +188,7 @@ class Account:
 
     def known(self) -> bool:
         """残量を読めているか。"""
-        return bool(self.usage and self.usage.known())
+        return bool(self.usage and self.usage.windows_known())
 
     def capacity(self) -> dict:
         """枠ごとの枠の大きさ（USD）。宣言 → 対応表 → 不明（None）の順に決まる（I2）。"""
@@ -201,7 +201,7 @@ class Account:
 
         モデル別の週の枠の大きさは週の枠と同じとする。"""
         u = self.usage
-        if u is None or not u.known():
+        if u is None or not u.windows_known():
             return None
         cap = self.capacity()
         pairs = [(cap["five_hour"], u.five_hour), (cap["seven_day"], u.seven_day)]
@@ -223,7 +223,7 @@ class Account:
         if until <= now:
             return None
         u = self.usage
-        if u is not None and u.known() and u.fetched_at > observed and u.limited_until(now) is None:
+        if u is not None and u.windows_known() and u.fetched_at > observed and u.limited_until(now) is None:
             return None  # 観測の後に読んだ残量が上限にない
         return until
 
