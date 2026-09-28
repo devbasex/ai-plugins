@@ -319,44 +319,6 @@ def install_source(root, a):
     return (slug, market_of(root, slug), d.production), plugins
 
 
-def _extract_ref(root, rev, dest):
-    """`rev` の中身を `git archive | tar -x` で `dest` へ展開する。"""
-    dest.mkdir()
-    arch = subprocess.run(["git", "-C", str(root), "archive", rev], capture_output=True)
-    if arch.returncode != 0:
-        raise StepError(f"git archive {rev[:8]} が失敗: {arch.stderr.decode(errors='replace')[:300]}")
-    tar = subprocess.run(["tar", "-x", "-C", str(dest)], input=arch.stdout, capture_output=True)
-    if tar.returncode != 0:
-        raise StepError(f"展開が失敗: {tar.stderr.decode(errors='replace')[:300]}")
-
-
-def _user_env_items(before, after):
-    """利用者の環境の前後で変わったキーの項目。"""
-    return [
-        {"kind": "user_env", "name": k, "result": "changed", "before": before[k], "after": after[k]}
-        for k in before
-        if before[k] != after[k]
-    ]
-
-
-def _runtime_items(runtimes_res, expect):
-    """ランタイムごとの項目と、すべて ok か。"""
-    items, all_ok = [], True
-    for name, r in runtimes_res.items():
-        v = r.get("version")
-        # mcp-serena などは別の版を持つので、ndf があれば ndf だけを --expect と比べる
-        vs = ([v.get("ndf")] if "ndf" in v else list(v.values())) if isinstance(v, dict) else [v]
-        res = "ok"
-        if r.get("exit") != 0:
-            res = "failed"
-        elif any(x != expect for x in vs):
-            res = "version_mismatch"
-        if res != "ok":
-            all_ok = False
-        items.append({"kind": "runtime", "name": name, "result": res, **r})
-    return items, all_ok
-
-
 def cmd_verify_install(a):
     root = git_root(a.root)
     where, plugins = install_source(root, a)
@@ -376,7 +338,13 @@ def cmd_verify_install(a):
     runtimes_res, mismatch = {}, []
     try:
         src = Path(tmp) / "src"
-        _extract_ref(root, ref_rev, src)
+        src.mkdir()
+        arch = subprocess.run(["git", "-C", str(root), "archive", ref_rev], capture_output=True)
+        if arch.returncode != 0:
+            raise StepError(f"git archive {ref_rev[:8]} が失敗: {arch.stderr.decode(errors='replace')[:300]}")
+        tar = subprocess.run(["tar", "-x", "-C", str(src)], input=arch.stdout, capture_output=True)
+        if tar.returncode != 0:
+            raise StepError(f"展開が失敗: {tar.stderr.decode(errors='replace')[:300]}")
 
         changed = {
             p: ([f for f in git(root, "diff", "--name-only", prev, ref_rev, "--", r).stdout.split() if f] if prev else [])
@@ -401,11 +369,25 @@ def cmd_verify_install(a):
         shutil.rmtree(tmp, ignore_errors=True)
 
     after = user_env_snapshot()
+    items = []
     env_same = before == after
-    items = _user_env_items(before, after)
-    rt_items, rt_ok = _runtime_items(runtimes_res, a.expect)
-    items += rt_items
-    ok = env_same and not mismatch and rt_ok
+    if not env_same:
+        for k in before:
+            if before[k] != after[k]:
+                items.append({"kind": "user_env", "name": k, "result": "changed", "before": before[k], "after": after[k]})
+    ok = env_same and not mismatch
+    for name, r in runtimes_res.items():
+        v = r.get("version")
+        # mcp-serena などは別の版を持つので、ndf があれば ndf だけを --expect と比べる
+        vs = ([v.get("ndf")] if "ndf" in v else list(v.values())) if isinstance(v, dict) else [v]
+        res = "ok"
+        if r.get("exit") != 0:
+            res = "failed"
+        elif any(x != a.expect for x in vs):
+            res = "version_mismatch"
+        if res != "ok":
+            ok = False
+        items.append({"kind": "runtime", "name": name, "result": res, **r})
     items += [{"kind": "file", "name": m, "result": "mismatch"} for m in mismatch]
     metrics = {
         "ref": a.ref,
