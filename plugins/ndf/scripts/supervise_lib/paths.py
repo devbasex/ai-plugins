@@ -44,6 +44,12 @@ WORKTREE_LOCK_RETRIES = 5  # .git/config の lock で落ちたときのやり直
 WORKTREE_LOCK_WAIT = 1.0  # やり直しの間隔（秒）
 
 
+def main_dir_of_worktree(wt) -> str | None:
+    """作業場所のパスの `/.worktrees/` より前（元のリポジトリ）。`/.worktrees/` が無ければ `None`。"""
+    s = str(wt)
+    return s.split("/.worktrees/")[0] if "/.worktrees/" in s else None
+
+
 def is_config_lock(stderr: str) -> bool:
     return "could not lock config file" in stderr or "File exists" in stderr
 
@@ -68,7 +74,7 @@ def ensure_worktree(plan: dict, sleep=time.sleep) -> str | None:
     if wt.exists():
         # 使い回す作業ツリーは、依存の用意が済んでいなければ用意する（#1337）
         return _prepare_deps(wt, if_unprepared=True)
-    repo = plan.get("リポジトリ") or (str(wt).split("/.worktrees/")[0] if "/.worktrees/" in str(wt) else None)
+    repo = plan.get("リポジトリ") or main_dir_of_worktree(wt)
     if not repo:
         return "作業ツリーの元のリポジトリが分からない（計画に リポジトリ を書く）"
     base = plan.get("起点")
