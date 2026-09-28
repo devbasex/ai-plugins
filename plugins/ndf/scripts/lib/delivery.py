@@ -182,25 +182,28 @@ def _first_merge_row(decl: DeliveryDecl) -> tuple[int, dict] | None:
     return next(((i, row) for i, row in enumerate(decl.rows) if reaches_by_merge(row, decl.production)), None)
 
 
+def _no_channel(why: str) -> DevChannel:
+    return DevChannel(None, f"開発版のチャネルが無い（{why}）")
+
+
 def dev_channel(decl: DeliveryDecl) -> DevChannel:
     """開発版のチャネルの形。上から順に最初に当たった条件で決まる。起点と本番チャネルが違えば delivery を読まない。"""
-    none = "開発版のチャネルが無い"
     if not decl.production:
-        return DevChannel(None, f"{none}（本番のブランチが分からない）")
+        return _no_channel("本番のブランチが分からない")
     if decl.production != decl.base:
         return DevChannel(SEPARATE_BRANCH)
     if decl.rows_state:
         why = {"problems": "読めない", "unknown": "不明", "absent": "無い"}[decl.rows_state]
-        return DevChannel(None, f"{none}（起点と本番のブランチが同じで、{PJ} の delivery が{why}）")
+        return _no_channel(f"起点と本番のブランチが同じで、{PJ} の delivery が{why}")
     hit = _first_merge_row(decl)
     if hit:
-        return DevChannel(None, f"{none}（delivery[{hit[0]}] が本番チャネル {decl.production} へのマージで自動で本番系へ届く）")
+        return _no_channel(f"delivery[{hit[0]}] が本番チャネル {decl.production} へのマージで自動で本番系へ届く")
     prod = [(i, r) for i, r in enumerate(decl.rows) if r.get("production") is True]
     if not prod:
-        return DevChannel(None, f"{none}（起点と本番のブランチが同じで、本番系へ届く行（production: true）が宣言されていない）")
+        return _no_channel("起点と本番のブランチが同じで、本番系へ届く行（production: true）が宣言されていない")
     for i, row in prod:
         if row.get("kind") != "manual":
-            return DevChannel(None, f"{none}（delivery[{i}] は本番系へ自動で届く）")
+            return _no_channel(f"delivery[{i}] は本番系へ自動で届く")
     return DevChannel(MANUAL_PRODUCTION)
 
 
