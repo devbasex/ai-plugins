@@ -617,3 +617,21 @@ def test_same_untracked_compares_bytes_not_text(repo, tmp_path, local, same):
     pull = subprocess.run(["git", "-C", str(repo), "pull", "--ff-only", "-q"], capture_output=True, text=True)
     assert "untracked working tree files would be overwritten" in pull.stderr
     assert mod.same_untracked(repo, pull) == (["new.txt"] if same else [])
+
+
+def test_verify_install_source_comes_from_origin_and_declaration(repo):
+    """#1336 の決定 8・I9: 導入元の owner/repo は origin、ref の候補とプラグインは宣言から読む。ai-plugins の宣言では今と同じ値。"""
+    import argparse
+
+    mod = load_verification()
+    git(repo, "remote", "add", "origin", "https://github.com/devbasex/ai-plugins.git")
+    write(repo, ".ndf/worktree.json", json.dumps({"version": 1, "base_branch": "develop", "production_branch": "main"}))
+    write(repo, ".ndf/supervise.json", json.dumps({"release": {"form": "package-plugin", "plugin": "ndf", "runtimes": ["claude"]}}))
+    write(repo, ".claude-plugin/marketplace.json", json.dumps({"name": "ai-plugins"}))
+    where, plugins = mod.install_source(repo, argparse.Namespace(ref="develop", plugins=None))
+    assert where == ("devbasex/ai-plugins", "ai-plugins", "main") and plugins == ["ndf"]
+    with pytest.raises(mod.StepError, match="--ref trunk"):
+        mod.install_source(repo, argparse.Namespace(ref="trunk", plugins=None))
+    write(repo, ".ndf/worktree.json", json.dumps({"version": 1, "base_branch": "trunk", "production_branch": "live"}))
+    where, _ = mod.install_source(repo, argparse.Namespace(ref="trunk", plugins="foo"))
+    assert where[2] == "live"

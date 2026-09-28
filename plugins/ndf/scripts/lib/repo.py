@@ -38,14 +38,34 @@ def slug(owner_repo_value: str | None) -> str | None:
     return owner_repo_value.replace("/", "--") if owner_repo_value else None
 
 
+def read_worktree_decl(root) -> tuple[dict, str | None]:
+    """`.ndf/worktree.json` の中身と、読めなかった理由。`root` → メインディレクトリの順に探す。
+
+    無ければ `({}, None)`。JSON として読めない・オブジェクトでなければ `({}, 理由)`（理由にファイルを書く）。
+    """
+    main = main_dir(root) if root else None
+    for base in dict.fromkeys(p for p in (Path(root) if root else None, main) if p):
+        f = Path(base) / WORKTREE_DECL
+        if not f.is_file():
+            continue
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as e:
+            return {}, f"{WORKTREE_DECL}: JSON として読めない（{e}）"
+        if not isinstance(data, dict):
+            return {}, f"{WORKTREE_DECL}: 最上位がオブジェクトでない"
+        return data, None
+    return {}, None
+
+
+def _branch_value(v) -> str | None:
+    return v if isinstance(v, str) and v else None
+
+
 def declared_base(root, remote: bool = False) -> str | None:
     """`.ndf/worktree.json` の `base_branch`。`remote` なら `origin/<名前>`。宣言が無い・読めなければ `None`。"""
-    f = Path(root) / WORKTREE_DECL
-    try:
-        v = json.loads(f.read_text(encoding="utf-8")).get("base_branch") if f.is_file() else None
-    except (OSError, ValueError, AttributeError):
-        return None
-    if not isinstance(v, str) or not v:
+    v = _branch_value(read_worktree_decl(root)[0].get("base_branch"))
+    if v is None:
         return None
     return f"origin/{v}" if remote else v
 
@@ -64,3 +84,18 @@ def default_branch(root) -> str | None:
 def base_branch(root) -> str | None:
     """開発の起点。`.ndf/worktree.json` の `base_branch` → 既定ブランチ（`default_branch`）の順。決まらなければ `None`。"""
     return declared_base(root) or default_branch(root)
+
+
+def production_branch(root, decl: dict | None = None) -> tuple[str | None, str]:
+    """本番チャネルと、その出所。`.ndf/worktree.json` の `production_branch` → 既定ブランチ（`default_branch`）の順。
+
+    `decl` を渡せばそれを `worktree.json` の中身として使う（読み直さない）。決まらなければ `(None, 理由)`。
+    """
+    wt = read_worktree_decl(root)[0] if decl is None else decl
+    v = _branch_value(wt.get("production_branch"))
+    if v:
+        return v, f"{WORKTREE_DECL} の production_branch"
+    d = default_branch(root)
+    if d:
+        return d, "既定ブランチ（origin/HEAD → ローカルの main / master）"
+    return None, "production_branch も既定ブランチ（origin/HEAD・main・master）も無い"

@@ -48,7 +48,7 @@ elif a[:2] == ["pr", "view"]:
         seq = st.get("pr_seq", {{}}).get(n)
         if seq:
             cur = seq.pop(0) if len(seq) > 1 else seq[0]
-            out = json.dumps(cur)
+            out = json.dumps({{"baseRefName": "develop", **cur}})  # 宛先は本番チャネル（main）でない既定
         else:
             code = 1
 elif a[:2] == ["pr", "merge"]:
@@ -56,6 +56,14 @@ elif a[:2] == ["pr", "merge"]:
     if code == 0:
         for s in st.get("pr_seq", {{}}).get(a[2], []):
             s["state"] = "MERGED"
+elif a[:2] == ["pr", "list"]:
+    out = json.dumps(st.get("open_prs", []))
+elif a[:2] == ["pr", "create"]:
+    code = st.get("create_code", 0)
+    if code == 0:
+        out = "https://github.com/o/r/pull/" + str(st.get("create_number", 77))
+    else:
+        sys.stderr.write(st.get("create_err", "create failed") + "\n")
 elif a[:2] == ["pr", "ready"]:
     code = st.get("ready_code", 0)
     if code == 0:
@@ -113,6 +121,7 @@ def repo(tmp_path):
     (root / "keep.txt").write_text("x\n", encoding="utf-8")
     git(root, "add", "-A")
     git(root, "commit", "-q", "-m", "init")
+    git(root, "branch", "main")  # 本番チャネル（既定ブランチ）。develop 宛ての PR は承認ゲート 2 に当たらない
     return root
 
 
@@ -541,7 +550,7 @@ def test_merge_when_green_readies_draft_before_merge(repo, gh):
     assert code == 0, (out, err)
     assert [i for i in out["items"] if i["kind"] == "pr"] == [
         {"kind": "pr", "name": "#5", "result": "ready"},
-        {"kind": "pr", "name": "#5", "result": "merged", "method": "merge"},
+        {"kind": "pr", "name": "#5", "result": "merged", "method": "merge", "head": "a"},
     ]
     calls = [c[:2] for c in gh.get()["calls"] if c[0] == "pr" and c[1] in ("ready", "merge")]
     assert calls == [["pr", "ready"], ["pr", "merge"]]
@@ -639,3 +648,149 @@ def test_verification_verdicts_reads_a_missing_result_cell_as_not_passed():
     """GFM の表は欠けたセルを空として読む。`結果` の欠けた行は合格でない（前は表ごと読めない扱い）。"""
     block = "## リリース後テスト\n\n| 課題 | 条件 | 結果 |\n| --- | --- | --- |\n| #7 | a | 合格 |\n| #8 | b |\n\n合否: 不合格\n"
     assert load_sprint_close().verification_verdicts(block, "o/r") == {("o/r", 7): True, ("o/r", 8): False}
+
+
+# --- 承認ゲート 2（自動反映の本番チャネルへのマージ。#1336） ------------------------
+
+
+def declare(repo, wt, rows=None):
+    """仮のリポジトリへサンプルと同じ宣言を置く（rows が None なら project.json を置かない）。"""
+    nd = repo / ".ndf"
+    nd.mkdir(exist_ok=True)
+    (nd / "worktree.json").write_text(json.dumps({"version": 1, **wt}) if isinstance(wt, dict) else wt, encoding="utf-8")
+    if rows is not None:
+        (nd / "project.json").write_text(json.dumps({"delivery": rows}, ensure_ascii=False), encoding="utf-8")
+
+
+CONSOLE = (
+    {"base_branch": "main", "production_branch": "main"},
+    [{"target": "本番（ECS）", "kind": "auto", "trigger": "t", "branch": "main", "versioned": False}],
+)
+TRYGROUP = (
+    {"base_branch": "develop", "production_branch": "main"},
+    [
+        {"target": "stg", "kind": "auto", "trigger": "t", "branch": "develop", "versioned": False},
+        {"target": "prd", "kind": "auto", "trigger": "t", "branch": "main", "versioned": False},
+    ],
+)
+
+
+def merges(gh):
+    return [c for c in gh.get()["calls"] if c[:2] == ["pr", "merge"]]
+
+
+def to(base, sha="a"):
+    return {
+        "baseRefName": base,
+        "headRefName": "feat/x",
+        "url": "https://github.com/o/r/pull/5",
+        "additions": 3,
+        "deletions": 1,
+        "changedFiles": 2,
+        **passed_pr(sha),
+    }
+
+
+def test_merge_when_green_stops_production_merge_without_approval(repo, gh):
+    """AC1・I1: carmo-system-console の宣言で main 宛ては、CI を待たず gh pr merge も ready も打たずに 10 で終える。"""
+    declare(repo, *CONSOLE)
+    gh.set(pr_seq={"5": [dict(to("main"), isDraft=True)]})
+    code, out, err = call("merged-steps.py", ["merge-when-green", "5", "--interval", "0", "--no-cleanup"], gh.env, repo)
+    assert code == 10, (out, err)
+    assert out["status"] == "gate" and out["metrics"] == {"gate": "production-merge", "verdict": "production", "target": "main"}
+    names = [i["name"] for i in out["items"] if i["kind"] == "decl"]
+    assert ".ndf/worktree.json の production_branch" in names and ".ndf/project.json の delivery[0]" in names
+    assert "--gate-approved user" in out["next"] and Path(out["presentation_path"]).is_file()
+    assert "https://github.com/o/r/pull/5" in Path(out["presentation_path"]).read_text(encoding="utf-8")
+    assert merges(gh) == [] and not [c for c in gh.get()["calls"] if c[:2] == ["pr", "ready"]]
+
+
+def test_merge_when_green_trygroup_stops_main_and_passes_develop(repo, gh):
+    """AC2: 本番（main）宛ては止まり、検証（develop）宛てはマージへ進む。"""
+    declare(repo, *TRYGROUP)
+    gh.set(pr_seq={"5": [to("main")]})
+    code, out, _ = call("merged-steps.py", ["merge-when-green", "5", "--interval", "0", "--no-cleanup"], gh.env, repo)
+    assert code == 10 and merges(gh) == []
+    gh.set(pr_seq={"5": [to("develop"), to("develop"), to("develop")]})
+    code, out, err = call("merged-steps.py", ["merge-when-green", "5", "--interval", "0", "--recheck", "0", "--no-cleanup"], gh.env, repo)
+    assert code == 0, (out, err)
+    assert len(merges(gh)) == 1 and out["metrics"]["verdict"] == "not-production"
+
+
+def test_merge_when_green_proceeds_with_approval_and_records_it(repo, gh):
+    """AC8・I8: 止まった同じ PR は --gate-approved でマージへ進み、担い手と先頭のコミットを結果に残す。無ければ何度でも止まる。"""
+    declare(repo, *CONSOLE)
+    for _ in range(2):
+        gh.set(pr_seq={"5": [to("main")]})
+        code, _, _ = call("merged-steps.py", ["merge-when-green", "5", "--interval", "0", "--no-cleanup"], gh.env, repo)
+        assert code == 10 and merges(gh) == []
+    gh.set(pr_seq={"5": [to("main", "bbb")] * 3})
+    code, out, err = call(
+        "merged-steps.py",
+        ["merge-when-green", "5", "--interval", "0", "--recheck", "0", "--no-cleanup", "--gate-approved", "user"],
+        gh.env,
+        repo,
+    )
+    assert code == 0, (out, err)
+    merged = next(i for i in out["items"] if i["kind"] == "pr" and i["result"] == "merged")
+    assert merged["gate_approved"] == "user" and merged["head"] == "bbb"
+    assert merges(gh) == [["pr", "merge", "5", "--admin", "--merge", "--match-head-commit", "bbb"]]
+
+
+@pytest.mark.parametrize("broken", ["worktree", "project"])
+def test_merge_when_green_stops_on_broken_declaration(repo, gh, broken):
+    """AC7: 宣言が壊れていれば、本番系へ出るかを決められないとして止まる（止めない側へ倒さない）。"""
+    if broken == "worktree":
+        declare(repo, "{", CONSOLE[1])
+    else:
+        declare(repo, CONSOLE[0])
+        (repo / ".ndf" / "project.json").write_text("[1,", encoding="utf-8")
+    gh.set(pr_seq={"5": [to("develop")]})
+    code, out, _ = call("merged-steps.py", ["merge-when-green", "5", "--interval", "0", "--no-cleanup"], gh.env, repo)
+    assert code == 10 and out["metrics"]["verdict"] == "undetermined" and merges(gh) == []
+    assert f"{broken}.json" in out["summary"]
+    code, out, _ = call("merged-steps.py", ["merge-gate", "--base", "develop"], gh.env, repo)
+    assert code == 10 and out["metrics"]["verdict"] == "undetermined"
+
+
+def test_merge_gate_judges_without_gh(repo, gh):
+    """AC6・I3: merge-gate は宛先の引数と宣言だけで判定する（--pr が無ければ gh を呼ばない）。"""
+    declare(
+        repo,
+        {"base_branch": "develop", "production_branch": "main"},
+        [{"target": "ndf", "kind": "manual", "trigger": "t", "branch": "main", "versioned": True}],
+    )
+    code, out, _ = call("merged-steps.py", ["merge-gate", "--base", "develop"], gh.env, repo)
+    assert code == 0 and out["metrics"]["verdict"] == "not-production"
+    declare(repo, *CONSOLE)
+    code, out, _ = call("merged-steps.py", ["merge-gate", "--base", "main"], gh.env, repo)
+    assert code == 10 and out["metrics"]["gate"] == "production-merge"
+    assert gh.get().get("calls", []) == []
+
+
+def test_promote_creates_pr_and_merges_after_approval_without_cleanup(repo, gh):
+    """I7: 昇格の Pull Request を作り、承認が無ければ止め、承認があればマージして後片付けをしない。"""
+    declare(repo, *TRYGROUP)
+    gh.set(create_number=9, pr_seq={"9": [dict(to("main"), headRefName="develop")]})
+    code, out, _ = call("merged-steps.py", ["promote", "--head", "develop", "--base", "main", "--interval", "0"], gh.env, repo)
+    assert code == 10 and "promote-approved" in out["next"] and merges(gh) == []
+    gh.set(open_prs=[{"number": 9}], pr_seq={"9": [dict(to("main"), headRefName="develop")] * 3})
+    code, out, err = call(
+        "merged-steps.py",
+        ["promote", "--head", "develop", "--base", "main", "--interval", "0", "--recheck", "0", "--gate-approved", "mvv"],
+        gh.env,
+        repo,
+    )
+    assert code == 0, (out, err)
+    assert [c for c in gh.get()["calls"] if c[:2] == ["pr", "create"]] == []
+    assert next(i for i in out["items"] if i.get("result") == "merged")["gate_approved"] == "mvv"
+    assert "removed_worktrees" not in out["metrics"]  # 後片付けをしない（develop を消さない）
+    assert "develop" in git(repo, "branch", "--list", "develop")
+
+
+def test_promote_prepare_writes_material_and_stops_short(repo, gh):
+    declare(repo, *TRYGROUP)
+    gh.set(create_number=9, pr_seq={"9": [dict(to("main"), headRefName="develop")]})
+    code, out, _ = call("merged-steps.py", ["promote", "--head", "develop", "--base", "main", "--prepare"], gh.env, repo)
+    assert code == 0 and out["metrics"]["pr"] == 9 and Path(out["presentation_path"]).is_file()
+    assert merges(gh) == []

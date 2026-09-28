@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# NDF plugin: 設計 Pull Request のマージを承認ラベルに縛る判定（#266）。
+# NDF plugin: 設計 Pull Request のマージを承認ラベルに縛る判定（#266）と、自動反映の本番チャネルへの
+# 直接のマージを止める判定（#1336）。
 #
 # `workflow-common.sh` が読み込む。単独では使わない（分割・JSON・リポジトリの解決を
 # そちらへ置いているため）。**この層は通信を行う唯一の場所である。**
@@ -177,8 +178,34 @@ wf_check_merge() {
   [ -n "$head" ] || {
     wf_deny_undetermined "$num" 'head のブランチ名（応答から読み取れない）'; return 1; }
 
-  # 設計 Pull Request でなければ、この仕組みは関わらない。
-  case "$head" in "$WF_DESIGN_PREFIX"*) ;; *) return 0 ;; esac
+  # 設計 Pull Request なら承認ラベルを確かめる。
+  case "$head" in
+    "$WF_DESIGN_PREFIX"*) _wf_verify_approval_label "$slug" "$num" "$head" "$json" || return 1 ;;
+  esac
 
-  _wf_verify_approval_label "$slug" "$num" "$head" "$json"
+  _wf_check_production_merge "$num" "$(jq -r '.base.ref // empty' <<<"$json" 2>/dev/null)"
+}
+
+# 宛先が自動反映の本番チャネルなら、直接のマージを止めて merge-when-green へ案内する（#1336 の決定 9）。
+# 判定は `hook.py merge-target`（`lib/delivery.py`）が持ち、ここへ規則を写さない。判定の出力が読めなければ止める。
+_wf_check_production_merge() {
+  local num="${1:-<番号>}" base="${2:-}" py out verdict reason merged
+  py=$(wf_hook_python) || {
+    wf_deny_undetermined "$num" '宛先が本番系へ出るか（判定に要る hook の環境が無い）'; return 1; }
+  out=$("$py" "$WF_HOOK_PY" merge-target --base "$base" --root "$(pwd)" 2>/dev/null)
+  verdict=${out%%$'\n'*}
+  reason=${out#*$'\n'}
+  reason=${reason%$'\n'}
+  [ "$verdict" = "not-production" ] && return 0
+  merged="$(cd "$(dirname "$WF_HOOK_PY")" 2>/dev/null && pwd)/merged-steps.py"
+  if [ "$verdict" = "production" ]; then
+    printf 'Pull Request #%s の宛先 %s は自動反映の本番チャネルです（%s）。このマージは本番系への反映になります。\n' \
+      "$num" "$base" "$reason"
+  else
+    printf 'Pull Request #%s の宛先 %s へのマージが本番系へ出るかを決められないため止めます（%s）。\n' \
+      "$num" "${base:-（不明）}" "${reason:-判定を読めない}"
+  fi
+  printf '直接の gh pr merge は止めます。承認ゲート 2 の承認を得てから、次のコマンドでマージしてください。\n'
+  printf '  python3 %s merge-when-green %s --gate-approved user\n' "$merged" "$num"
+  return 1
 }

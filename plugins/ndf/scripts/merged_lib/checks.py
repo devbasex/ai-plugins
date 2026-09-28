@@ -102,8 +102,12 @@ def queued_run_count(root):
         return None
 
 
+# 1 回の読みで、待ちに使う状態と、承認ゲート 2 の判定と承認資料に使う宛先・差分の量をまとめて取る（#1336）
+PR_FIELDS = "state,isDraft,headRefOid,statusCheckRollup,mergeStateStatus,baseRefName,headRefName,url,title,additions,deletions,changedFiles"
+
+
 def pr_state(root, n):
-    return gh_json(root, ["pr", "view", str(n), "--json", "state,isDraft,headRefOid,statusCheckRollup,mergeStateStatus"], f"gh pr view {n}")
+    return gh_json(root, ["pr", "view", str(n), "--json", PR_FIELDS], f"gh pr view {n}")
 
 
 def watch_stuck_checks(root, n, probed, a, items, stale_since, rerun_done, waits):
@@ -181,6 +185,7 @@ class GreenWatch:
         self.empty_since = None  # rollup が空のままになった時刻（チェックが載る前か、CI の無いリポジトリか）
         self.last_sha, self.recheck = None, False
         self.stale_since, self.rerun_done = {}, set()  # 取り残しを見た時刻（チェックの名前ごと）/ 再実行したチェック
+        self.on_open = None  # 開いた PR を最初に読んだとき、draft を外す前に 1 度だけ呼ぶ（承認ゲート 2 の判定。#1336）
 
     def wait(self):
         """終わるまで読み直す。読んだ中身（先頭のコミットとチェックの状態）が変わらない間は、間隔を 1.5 倍ずつ
@@ -216,6 +221,9 @@ class GreenWatch:
                     [{"kind": "pr", "name": f"#{n}", "result": "stopped", "reason": f"state={state}"}],
                 )
             )
+        if self.on_open is not None:
+            hook, self.on_open = self.on_open, None
+            hook(info)
         if info.get("isDraft"):
             # draft のままではマージできない。ready で走り出すチェックも待つよう、待ちの前に外す
             p = gh_parts.gh(["pr", "ready", str(n)], cwd=root)

@@ -103,6 +103,7 @@ def ensure_worktree(plan: dict, sleep=time.sleep) -> str | None:
 
 
 MERGE_CMD = f"python3 {HERE / 'merged-steps.py'} merge-when-green {{pr}}"
+MERGE_GATE_CMD = f"python3 {HERE / 'merged-steps.py'} merge-gate --pr {{pr}}"  # 宛先は PR から読む（プランの途中で宛先が変わる）
 # マージの待ちのステップの一次の調査（遅れたとき PR のチェックを分け、取り残しを再実行する）
 MERGE_PROBE = {"cmd": f"python3 {HERE / 'merged-steps.py'} probe --pr {{pr}} --act"}
 CHECK_PY = f"python3 {HERE / 'check-trigger.py'}"

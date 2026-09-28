@@ -11,7 +11,7 @@ import math
 import shlex
 
 import test_strategy as ts
-from supervise_lib.paths import MERGE_CMD, MERGE_PROBE, SPRINT_STATE_PY, TEST_RUN_PY
+from supervise_lib.paths import MERGE_CMD, MERGE_GATE_CMD, MERGE_PROBE, SPRINT_STATE_PY, TEST_RUN_PY
 
 # ステップの `timeout` に足す余裕（上限の 1 割。下限は監視の 1 周期の 2 倍）
 MARGIN_SHARE = 0.1
@@ -73,10 +73,20 @@ def refactor_template_arg(a) -> str:
     return f" --baseline-test {shlex.quote(template)}" if template else ""
 
 
-def merge_step(a, **extra) -> dict:
-    """マージのステップ。CI の待ちの上限を `--timeout` で渡し、ステップの `timeout` はそれに余裕を足す。"""
+def merge_steps(a, **extra) -> list[dict]:
+    """マージの 3 ステップ（#1336 の決定 1）。
+
+    - `merge-gate`: 宛先が承認ゲート 2（自動反映の本番チャネル）に当たるかだけを判定する。当たればプランを終える（`gate_next: end`）
+    - `merge`: CI を待ってマージする。CI の待ちの上限を `--timeout` で渡し、ステップの `timeout` はそれに余裕を足す
+    - `merge-approved`: `merge` に `--gate-approved user` を足したもの。通常の流れからは入らず、承認の後に `--from merge-approved` でだけ入る
+
+    `extra` の `next`（と `on_fail`）は `merge` と `merge-approved` に付ける。`next` が無いと `merge` が並びの次の
+    `merge-approved` へ流れるため、必ず渡す。
+    """
+    if "next" not in extra:
+        raise ValueError("merge_steps には next が要る（merge が merge-approved へ流れないように）")
     ci_wait = int(plan_limits(a)["ci_wait_timeout"])
-    return {
+    merge = {
         "id": "merge",
         "type": "run",
         "timeout": with_margin(ci_wait),
@@ -84,6 +94,11 @@ def merge_step(a, **extra) -> dict:
         "probe": MERGE_PROBE,
         **extra,
     }
+    gate = {"id": "merge-gate", "type": "run", "timeout": 120, "cmd": MERGE_GATE_CMD, "gate_next": "end", "next": "merge"}
+    if extra.get("on_fail"):
+        gate["on_fail"] = extra["on_fail"]
+    approved = {**merge, "id": "merge-approved", "cmd": f"{MERGE_CMD} --timeout {ci_wait} --gate-approved user"}
+    return [gate, merge, approved]
 
 
 def handoff_step(state: str, gate: str, what: str) -> dict:

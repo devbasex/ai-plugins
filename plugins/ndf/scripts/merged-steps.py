@@ -2,13 +2,20 @@
 """merged-steps.py: merged の後片付けの決まった手順。
 
     python3 merged-steps.py cleanup <PR番号>... [--root <dir>]
-    python3 merged-steps.py merge-when-green <PR番号> [--method merge|squash|rebase]
+    python3 merged-steps.py merge-gate (--base <宛先> | --pr <PR番号>) [--pr <PR番号>] [--root <dir>]
+    python3 merged-steps.py merge-when-green <PR番号> [--gate-approved user|mvv] [--method merge|squash|rebase]
                             [--interval 秒] [--timeout 秒] [--stale-after 秒] [--no-cleanup] [--root <dir>]
+    python3 merged-steps.py promote --head <ベースブランチ> --base <本番チャネル> [--prepare] [--gate-approved user|mvv]
 
 cleanup: マージ済みの PR の作業ツリーとローカルブランチを外し、主ディレクトリを取り込む。
 merge-when-green: PR が draft なら `gh pr ready` で外し、CI のチェックが全部通るまで待ち
 （push で先頭のコミットが変われば待ち直す）、
 失敗があれば止まり、通れば `gh pr merge --admin` でマージして cleanup まで行う。
+最初の読みで宛先（baseRefName）を判定し、自動反映の本番チャネルか判定できない宛先なら、--gate-approved が無い限り
+CI を待たずに承認ゲート 2 で止まる（status: gate・metrics.gate: production-merge。判定は lib/delivery.py。#1336）。
+merge-gate: 宛先の判定だけを行う（0 = 進めてよい / 10 = 承認ゲート 2）。
+promote: 昇格の Pull Request（ベースブランチ → 本番チャネル）を探すか作り、merge-when-green と同じ判定と待ちで
+マージする（後片付けはしない）。--prepare は用意して承認資料を書くところで 0 で終える。
 実行が終わったのにチェックが pending のまま --stale-after 秒続けば、そのジョブを 1 度だけ
 `gh run rerun --job` で再実行し、再実行でも取り残されれば止まる。実行が終わりジョブに結論が
 あれば、チェックの表示が pending のままでも待たずにその結論で扱う。ジョブがランナーを待つ間は、
@@ -20,8 +27,9 @@ probe: 開いた PR のチェックを読み、強い順に failed（fix）/ sta
 stale_again（再実行しても取り残し）/ settled・queued・running（wait）/ passed・none（judge）の 1 つに分ける。
 `metrics` に class・action・prs・queued_runs を持つ。書き込みは --act の再実行だけ。終了コードは 0 = 調べた。
 
-結果は lib/step_result.py の形の 1 行の JSON。終了コードは 0 = ok / 10 = `git branch -D` が要る
-ブランチがある（同意が要る。提示物を書く）/ 1 = 取り込み・CI・マージが失敗 / 2 = 読めない。
+結果は lib/step_result.py の形の 1 行の JSON。終了コードは 0 = ok / 10 = 承認ゲート 2（metrics.gate が
+production-merge）か、`git branch -D` が要るブランチがある（同意が要る。どちらも提示物を書く）/
+1 = 取り込み・CI・マージが失敗 / 2 = 読めない。
 """
 
 from __future__ import annotations
@@ -56,9 +64,9 @@ import gh_parts  # noqa: E402
 import repo  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from merged_lib import merge  # noqa: E402
 from merged_lib.checks import (
     FAIL_CONCLUSIONS,
-    GreenWatch,
     check_states,
     probe_checks,  # noqa: E402
     queued_run_count,
@@ -307,36 +315,19 @@ def cmd_cleanup(a):
     emit(result(TOOL, status, summary, items, metrics, path, nxt))
 
 
-# --- merge-when-green ---------------------------------------------------------
+# --- merge-gate・merge-when-green・promote（本体は merged_lib/merge.py） ----------------
+
+
+def cmd_merge_gate(a):
+    merge.merge_gate(a)
 
 
 def cmd_merge_when_green(a):
-    root = git_root(a.root)
-    n = a.pr
-    watch = GreenWatch(root, a)
-    watch.wait()
-    items, waits, queued_runs = watch.items, watch.waits, watch.queued_runs
+    merge.merge_when_green(a, cleanup)
 
-    if not any(i["kind"] == "pr" and i["result"] == "already_merged" for i in items):
-        pin = ["--match-head-commit", watch.last_sha] if watch.last_sha else []  # 緑を確かめた先頭だけをマージする
-        p = gh_parts.gh(["pr", "merge", str(n), "--admin", f"--{a.method}", *pin], cwd=root)
-        if p.returncode != 0:
-            emit(
-                result(
-                    TOOL,
-                    "stopped",
-                    f"gh pr merge --admin が失敗: {p.stderr.strip()[:300]}",
-                    items + [{"kind": "pr", "name": f"#{n}", "result": "stopped", "reason": p.stderr.strip()[:300]}],
-                    {"waits": waits},
-                )
-            )
-        items.append({"kind": "pr", "name": f"#{n}", "result": "merged", "method": a.method})
 
-    if a.no_cleanup:
-        emit(result(TOOL, "ok", f"#{n} をマージした（後片付けは行わない）", items, {"waits": waits, "queued_runs": queued_runs}))
-    status, summary, citems, metrics, path, nxt = cleanup(root, [n])
-    metrics = {**metrics, "waits": waits, "queued_runs": queued_runs}
-    emit(result(TOOL, status, f"#{n} をマージした。{summary}", items + citems, metrics, path, nxt))
+def cmd_promote(a):
+    merge.promote(a, cleanup)
 
 
 # --- probe --------------------------------------------------------------------
@@ -465,23 +456,28 @@ def build_parser():
     p = sub.add_parser("cleanup", parents=[common_parser()], help="マージ済みの PR の作業ツリーとローカルブランチを片付ける")
     p.add_argument("prs", nargs="+", type=int, metavar="PR番号")
     p.set_defaults(func=cmd_cleanup)
+    g = sub.add_parser(
+        "merge-gate", parents=[common_parser()], help="宛先へのマージが承認ゲート 2（自動反映の本番チャネル）に当たるかを判定する"
+    )
+    g.add_argument("--base", help="Pull Request の宛先のブランチ（省けば --pr の宛先を読む）")
+    g.add_argument("--pr", type=int, help="承認資料に URL と差分の量を載せる Pull Request")
+    g.set_defaults(func=cmd_merge_gate)
     m = sub.add_parser("merge-when-green", parents=[common_parser()], help="CI が通るまで待ち、--admin でマージして後片付けまで行う")
     m.add_argument("pr", type=int, metavar="PR番号")
-    m.add_argument("--method", choices=("merge", "squash", "rebase"), default="merge")
-    m.add_argument("--interval", type=float, default=10.0, help="CI を読み直す間隔（秒）")
-    m.add_argument("--recheck", type=float, default=5.0, help="pending を見ずに通っていたとき、確かめ直すまでの間隔（秒）")
-    m.add_argument(
-        "--no-checks-after", type=float, default=60.0, help="rollup が空のままこの秒数を過ぎたら、CI の無いリポジトリとしてマージする"
-    )
-    m.add_argument("--timeout", type=float, default=3600.0, help="CI を待つ上限（秒）")
-    m.add_argument(
-        "--stale-after",
-        type=float,
-        default=300.0,
-        help="実行が終わったのにチェックが pending のまま続けば、ジョブを 1 度だけ再実行するまでの秒数",
-    )
+    merge.add_wait_args(m)
     m.add_argument("--no-cleanup", action="store_true", help="マージだけ行い、後片付けをしない")
     m.set_defaults(func=cmd_merge_when_green)
+    pm = sub.add_parser(
+        "promote",
+        parents=[common_parser()],
+        help="昇格の Pull Request（ベースブランチ → 本番チャネル）を作り、承認ゲート 2 の後にマージする",
+    )
+    pm.add_argument("--head", required=True, help="昇格させるブランチ（ベースブランチ）")
+    pm.add_argument("--base", required=True, help="本番チャネル")
+    pm.add_argument("--prepare", action="store_true", help="Pull Request を用意して承認資料を書くところで終える（マージしない）")
+    pm.add_argument("--out", help="--prepare の承認資料の置き場（既定は提示物の置き場）")
+    merge.add_wait_args(pm)
+    pm.set_defaults(func=cmd_promote)
     pr = sub.add_parser(
         "probe", parents=[common_parser()], help="開いた PR のチェックを分類する（遅れの一次の調査）。--act なら取り残しを再実行する"
     )
