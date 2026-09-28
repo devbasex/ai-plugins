@@ -15,7 +15,7 @@ from supervise_lib.decl import decl_fields
 from supervise_lib.paths import GLOSSARY_PY, MVV_PY, PUSH_DESIGN, SELF, SPEC_COPY_PY, WORKTREE_SETUP
 from supervise_lib.release_templates import MVV_NOTE, advise_steps, plan_release
 from supervise_lib.templates import plan_check, plan_check_since, plan_impl
-from supervise_lib.verify_steps import handoff_step, merge_step
+from supervise_lib.verify_steps import handoff_step, merge_steps
 
 
 DESIGN_GLOSSARY_NOTE = "{state_dir}/work/glossary-candidates.md"  # 設計のプランが起こした用語集の候補の語
@@ -333,9 +333,9 @@ def plan_mvv_design(a, n: int, repo: str) -> dict:
             "cmd": f"sh -c 'gh pr edit {{pr}} --add-label design-approved && "
             f"{{ [ ! -f {note} ] || gh pr comment {{pr}} --body-file {note}; }} && gh pr ready {{pr}}'",
             "on_fail": "handoff",
-            "next": "merge",
+            "next": "merge-gate",
         },
-        merge_step(a, next="end", on_fail="handoff"),
+        *merge_steps(a, next="end", on_fail="handoff"),
         handoff_step(str(Path(a.state).resolve()), "関門 1", "承認ラベルの付与かマージ"),
     ]
     plan["規則"] = (

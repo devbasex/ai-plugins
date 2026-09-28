@@ -28,7 +28,7 @@ from supervise_lib.sprint_waves import (
 from supervise_lib.new_args import NEW_ARGS
 from supervise_lib.paths import CHECK_PY, HERE, SELF
 from supervise_lib.release_templates import RELEASE_FORMS
-from supervise_lib.verify_steps import merge_step
+from supervise_lib.verify_steps import merge_steps
 
 
 def prod_version(version: str) -> str:
@@ -140,8 +140,8 @@ def close_plan(a, repo: str) -> dict:
                     "changes": "無し（文書の置き場所だけ）",
                     "next": "ready",
                 },
-                {"id": "ready", "type": "run", "cmd": "sh -c 'git push -q && gh pr ready {pr}'", "next": "merge"},
-                merge_step(a, next="close"),
+                {"id": "ready", "type": "run", "cmd": "sh -c 'git push -q && gh pr ready {pr}'", "next": "merge-gate"},
+                *merge_steps(a, next="close"),
                 {
                     "id": "close",
                     "type": "run",

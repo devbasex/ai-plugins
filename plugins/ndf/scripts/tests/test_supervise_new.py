@@ -328,7 +328,7 @@ def test_new_fix_runs_tests_pr_and_merge_without_the_worker_step(tmp_path):
     assert res["tool"] == "supervise-new" and res["status"] == "ok" and res["items"][0]["kind"] == "fix"
     plan = json.loads(out.read_text())
     order, steps = fix_order(plan)
-    assert order == ["test-limited", "pr", "test-all", "doc-lint", "ready", "merge"]
+    assert order == ["test-limited", "pr", "test-all", "doc-lint", "ready", "merge-gate", "merge"]
     assert not any(s["type"] == "work" and s.get("kind") == "実装" for s in plan["steps"])
     assert "merge-when-green" in steps["merge"]["cmd"] and steps["pr"]["title"] == "Fix: x"
     assert "tests/test_x.py" in steps["test-limited"]["cmd"] and plan["作業場所"] == str(root)
@@ -451,3 +451,18 @@ def test_dev_release_does_not_bump_other_plugins(tmp_path):
     root = plugin_repo(tmp_path)
     steps = release_steps_of(root, tmp_path, "dev", "1.0.1-dev.1")
     assert "bump-others" not in steps and steps["bump"]["next"] == "changelog"
+
+
+def test_merge_steps_gate_then_merge_and_approved_only_by_from(tmp_path):
+    """#1336 の決定 1: 判定のステップで承認ゲート 2 に当たればプランを終え、承認の後は --from merge-approved でだけ
+    --gate-approved user のマージへ入る（通常の流れの merge は merge-approved へ流れない）。"""
+    root = plain_repo(tmp_path)
+    out = tmp_path / "plan.json"
+    p = new_fix(root, out, "--worktree", str(root))
+    assert p.returncode == 0, p.stderr
+    order, steps = fix_order(json.loads(out.read_text()))
+    assert "merge-approved" not in order
+    gate, merge, approved = steps["merge-gate"], steps["merge"], steps["merge-approved"]
+    assert "merge-gate --pr {pr}" in gate["cmd"] and gate["gate_next"] == "end" and gate["next"] == "merge"
+    assert "--gate-approved" not in merge["cmd"] and approved["cmd"] == merge["cmd"] + " --gate-approved user"
+    assert approved["next"] == merge["next"] == "end"

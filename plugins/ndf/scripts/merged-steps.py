@@ -2,7 +2,7 @@
 """merged-steps.py: merged の後片付けの決まった手順。
 
     python3 merged-steps.py cleanup <PR番号>... [--root <dir>]
-    python3 merged-steps.py merge-gate --base <宛先> [--pr <PR番号>] [--root <dir>]
+    python3 merged-steps.py merge-gate (--base <宛先> | --pr <PR番号>) [--pr <PR番号>] [--root <dir>]
     python3 merged-steps.py merge-when-green <PR番号> [--gate-approved user|mvv] [--method merge|squash|rebase]
                             [--interval 秒] [--timeout 秒] [--stale-after 秒] [--no-cleanup] [--root <dir>]
     python3 merged-steps.py promote --head <ベースブランチ> --base <本番チャネル> [--prepare] [--gate-approved user|mvv]
@@ -459,7 +459,7 @@ def build_parser():
     g = sub.add_parser(
         "merge-gate", parents=[common_parser()], help="宛先へのマージが承認ゲート 2（自動反映の本番チャネル）に当たるかを判定する"
     )
-    g.add_argument("--base", required=True, help="Pull Request の宛先のブランチ")
+    g.add_argument("--base", help="Pull Request の宛先のブランチ（省けば --pr の宛先を読む）")
     g.add_argument("--pr", type=int, help="承認資料に URL と差分の量を載せる Pull Request")
     g.set_defaults(func=cmd_merge_gate)
     m = sub.add_parser("merge-when-green", parents=[common_parser()], help="CI が通るまで待ち、--admin でマージして後片付けまで行う")

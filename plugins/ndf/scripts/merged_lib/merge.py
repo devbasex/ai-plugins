@@ -94,17 +94,21 @@ def gate_stop(n, verdict, info=None, next_cmd=None, plan_step="merge-approved"):
 def merge_gate(a):
     """宛先へのマージが承認ゲート 2 に当たるかだけを判定する（gh を呼ぶのは承認資料に --pr の中身を載せるときだけ）。"""
     root = git_root(a.root)
-    verdict = delivery.judge_target(delivery.load_delivery(root), a.base)
+    if not a.base and not a.pr:
+        raise StepError("merge-gate には --base か --pr が要る", 2)
+    info = None if a.base else pr_state(root, a.pr)  # 宛先を渡さないプランは、PR の宛先を 1 回だけ読む
+    base = a.base or (info or {}).get("baseRefName") or ""
+    verdict = delivery.judge_target(delivery.load_delivery(root), base)
     if verdict.stops:
-        info = pr_state(root, a.pr) if a.pr else None
+        info = info or (pr_state(root, a.pr) if a.pr else None)
         gate_stop(a.pr, verdict, info)
     emit(
         result(
             TOOL,
             "ok",
-            f"宛先 {a.base} へのマージは承認ゲート 2 に当たらない（{verdict.reason}）",
+            f"宛先 {base} へのマージは承認ゲート 2 に当たらない（{verdict.reason}）",
             verdict.items,
-            {"verdict": verdict.value, "target": a.base},
+            {"verdict": verdict.value, "target": base},
         )
     )
 
