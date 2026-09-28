@@ -1853,6 +1853,12 @@
       "pending_source": "issues/issue-1366-design.md"
     },
     {
+      "term": "覆し",
+      "context": "ndf-workflow",
+      "meaning": "承認ゲートで人の答えが直前の MVV 判定と食い違ったこと。「反する疑い」「判定できない」を人が通すと override_pass、「従う」を人が差し戻すと override_reject。MVV の改訂の兆候に数える",
+      "pending_source": "issues/issue-1400-requirements.md"
+    },
+    {
       "term": "NDF の共通原則",
       "context": "ndf-workflow",
       "meaning": "NDF を使うすべてのプロジェクトに効く原則。NDF が持ち、利用側は上書きできない。上位の原則・優先順位・AI の行動の 2 択・判断の記録・人と AI の対話・必ず承認が要る操作 C1〜C8 を含む",
