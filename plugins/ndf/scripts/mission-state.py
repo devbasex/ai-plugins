@@ -146,15 +146,9 @@ def other_shape(path: str) -> str:
     return ""
 
 
-def init_mvv_outcome(a, project) -> tuple[dict | None, dict | None]:
-    """(状態へ書く mvv, 止まるときの結果)。中身は `lib/mission_mvv.py`。"""
-    mvv, stop = mission_mvv.init_mvv(a, project)
-    return mvv, (outcome("stopped", stop[0], stop[2], exit=stop[1]) if stop else None)
-
-
-def normal_mvv_outcome(a) -> tuple[dict | None, dict | None, list[dict]]:
-    """pace: normal の (状態へ書く mvv, 止まるときの結果, 結果の items に載せる特定できなかった理由)。#1400 の決定 13。"""
-    mvv, stop, note = mission_mvv.normal_mvv(a)
+def init_mvv_outcome(a, project) -> tuple[dict | None, dict | None, list[dict]]:
+    """(状態へ書く mvv, 止まるときの結果, 結果の items に載せる特定できなかった理由)。中身は `lib/mission_mvv.py`（normal は #1400 の決定 13）。"""
+    mvv, stop, note = mission_mvv.normal_mvv(a) if a.pace not in mission_mvv.MVV_PACES else (*mission_mvv.init_mvv(a, project), None)
     return mvv, (outcome("stopped", stop[0], stop[2], exit=stop[1]) if stop else None), [note] if note else []
 
 
@@ -167,11 +161,7 @@ def cmd_init(a) -> dict:
             metrics={"path": a.mission, "reason": why},
         )
     project = pm.load_mvv(Path(a.root or ".").resolve())
-    notes: list[dict] = []
-    if a.pace in mission_mvv.MVV_PACES:
-        mvv, stop = init_mvv_outcome(a, project)
-    else:
-        mvv, stop, notes = normal_mvv_outcome(a)
+    mvv, stop, notes = init_mvv_outcome(a, project)
     if stop:
         return stop
     if a.pace in mission_mvv.MVV_PACES and project.approved and mvv:

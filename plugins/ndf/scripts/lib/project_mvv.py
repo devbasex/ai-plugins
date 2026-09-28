@@ -44,6 +44,13 @@ STATUS_LABEL = {
 }
 NO_MVV = "MVV なし"
 NO_BASIS = "根拠なし"
+VERDICT_LABEL = {  # MVV 判定の語（mvv-gate.py の助言の判定の表示）
+    "follow": "従う",
+    "not_follow": "反する疑い",
+    "unknown": "判定できない",
+    "machine": "機械のチェックで外れた",
+    "unreadable": "判定を読めない",
+}
 MISSION_PREFIX = "ミッション"  # ミッション MVV の項目の頭（#1400 の決定 15。R の番号には付けない）
 ITEM_RE = re.compile(r"(?i)(?:(ミッション)\s*|\b)(mission|vision|value\s*\d+|[CPR]\d+)\b")
 MISSION_HINT = "この節の項目を根拠に書くときは頭に「ミッション」を付ける（例: ミッション Value 4）。R の番号はそのまま"
@@ -376,6 +383,34 @@ def mission_text_of(state: dict) -> tuple[str | None, str | None]:
         return Path(ref["path"]).read_text(encoding="utf-8"), None
     except OSError as e:
         return None, f"MVV のファイルを読めない: {e}"
+
+
+def mission_source(mission: str | None, mvv: str | None, milestone: str | None, repo: str | None) -> tuple[str | None, dict | None]:
+    """`project-mvv.py context` のミッション MVV の (本文, 結果の `mission_mvv`)。出所を渡さなければ (None, None)。読めなくても止めない（#1400 の決定 12）。"""
+    try:
+        if mission:
+            text, why = mission_text_of(json.loads(Path(mission).read_text(encoding="utf-8")))
+            if text is None and why is None:
+                why = f"状態に mvv が無い: {mission}"
+            source = f"state:{mission}"
+        elif mvv:
+            text, why, source = Path(mvv).read_text(encoding="utf-8"), None, f"file:{mvv}"
+        elif milestone:
+            import deps
+
+            deps.require("md")
+            import mission_mvv as mm
+
+            text = mm.mvv_sections(mm.milestone_description(milestone, repo))
+            why = None if text else f"マイルストーン {milestone} の説明に ## Mission / ## Vision / ## Value の見出しがそろっていない"
+            source = f"milestone:{milestone}"
+        else:
+            return None, None
+    except (OSError, ValueError) as e:
+        return None, {"reason": f"ミッション MVV を読めない: {e}"}
+    if text is None:
+        return None, {"reason": why}
+    return text, {"sha256": sha256_text(text), "source": source}
 
 
 def approval_refusal(state: dict, root, mvv: ProjectMvv | None = None, advise: bool = False) -> str | None:

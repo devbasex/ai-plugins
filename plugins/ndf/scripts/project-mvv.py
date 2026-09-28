@@ -378,38 +378,10 @@ def cmd_show(a):
 # ---------------------------------------------------------------- context / signals
 
 
-def mission_source(a) -> tuple[str | None, dict | None]:
-    """ミッション MVV の (本文, 結果の `mission_mvv`)。出所を渡さなければ (None, None)。読めなくても止めない（#1400 の決定 12）。"""
-    try:
-        if a.mission:
-            text, why = pm.mission_text_of(json.loads(Path(a.mission).read_text(encoding="utf-8")))
-            if text is None and why is None:
-                why = f"状態に mvv が無い: {a.mission}"
-            source = f"state:{a.mission}"
-        elif a.mvv:
-            text, why, source = Path(a.mvv).read_text(encoding="utf-8"), None, f"file:{a.mvv}"
-        elif a.milestone:
-            import deps
-
-            deps.require("md")
-            import mission_mvv
-
-            text = mission_mvv.mvv_sections(mission_mvv.milestone_description(a.milestone, a.repo))
-            why = None if text else f"マイルストーン {a.milestone} の説明に ## Mission / ## Vision / ## Value の見出しがそろっていない"
-            source = f"milestone:{a.milestone}"
-        else:
-            return None, None
-    except (OSError, ValueError) as e:
-        return None, {"reason": f"ミッション MVV を読めない: {e}"}
-    if text is None:
-        return None, {"reason": why}
-    return text, {"sha256": pm.sha256_text(text), "source": source}
-
-
 def cmd_context(a):
     root = _root(a)
     mvv = pm.load_mvv(root)
-    mission, ref = mission_source(a)
+    mission, ref = pm.mission_source(a.mission, a.mvv, a.milestone, a.repo)
     if mission is not None and not mvv.approved:  # 決定 16: プロジェクト MVV が承認済みのときだけ足す
         mission, ref = None, {"reason": f"プロジェクト MVV が{pm.STATUS_LABEL[mvv.status]}。ミッション MVV を節へ足さない"}
     text = pm.block(mvv, mission)

@@ -62,6 +62,7 @@ from step_result import EXIT_GATE, emit, result  # noqa: E402
 import clock  # noqa: E402
 import gh_call  # noqa: E402
 import gh_rest  # noqa: E402
+import jsonio  # noqa: E402
 from pace import DECL_NAME, EXCLUDED_MODES, PaceError, matches, read_pace  # noqa: E402
 import project_mvv as pm  # noqa: E402
 import project_mvv_signals as pms  # noqa: E402
@@ -71,13 +72,6 @@ GATES = {"design": "関門 1（設計の承認）", "release": "関門 2（本�
 GATE_NAMES = {"design": "関門 1", "release": "関門 2"}  # mission-state.py の関門の記録の名前
 MVV_GATE = "MVV"  # 利用者が MVV を承認した記録の名前
 VERDICTS = ("follow", "not_follow", "unknown")
-VERDICT_LABEL = {
-    "follow": "従う",
-    "not_follow": "反する疑い",
-    "unknown": "判定できない",
-    "machine": "機械のチェックで外れた",
-    "unreadable": "判定を読めない",
-}
 MAX_MATERIAL = 60_000  # 材料 1 件の上限の文字数（超えた分は切る）
 
 DECL_PATHS = (f"{pm.DECL_DIR}/{pm.BODY_FILE}", f"{pm.DECL_DIR}/{pm.DECL_FILE}")  # 変える PR は MVV 判定で通さない（I15）
@@ -344,20 +338,11 @@ def advise_note(a, record: dict, reasons: str) -> str:
     verdict = record["verdict"]
     return (
         f"## MVV 判定（{GATES[a.gate]}・助言）\n\n"
-        f"- 判定: {VERDICT_LABEL.get(verdict, verdict)}（{verdict}。助言であり、承認は利用者が行う）\n"
+        f"- 判定: {pm.VERDICT_LABEL.get(verdict, verdict)}（{verdict}。助言であり、承認は利用者が行う）\n"
         f"- {pm.basis_phrase(record.get('basis'), project, sha)}\n"
         f"- 時刻: {record['at']}\n- ログ: `{Path(a.log).expanduser()}` の {record['at']} の行\n\n"
         f"### 理由\n\n{reasons}\n"
     )
-
-
-def read_state(path: str) -> dict:
-    """ミッションの状態。読めない・オブジェクトでなければ空（判定の中で改めて読んで外れにする）。"""
-    try:
-        state = json.loads(Path(path).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-    return state if isinstance(state, dict) else {}
 
 
 def advise_none(a, project: pm.ProjectMvv) -> tuple[dict, int | None]:
@@ -380,7 +365,7 @@ def cmd_check(a) -> tuple[dict, int | None]:
         "mode": a.mode or "",
         "repo": pm.mvv_repo_key(root),
         "project_mvv": pm.record(project),
-        "pace": str(read_state(a.mission).get("pace") or ""),
+        "pace": str(jsonio.read(a.mission, missing={}, broken={}, want=dict).get("pace") or ""),  # 読めなければ判定の中で外れにする
         "mission_mvv": None,
     }
 
@@ -391,7 +376,7 @@ def cmd_check(a) -> tuple[dict, int | None]:
         if a.note:
             write_note(a.note, a, record)
         suggest = revise_items(a, root, project) if record["verdict"] != "machine" else []
-        label = VERDICT_LABEL.get(record["verdict"], record["verdict"])
+        label = pm.VERDICT_LABEL.get(record["verdict"], record["verdict"])
         return result(
             TOOL,
             "ok",
