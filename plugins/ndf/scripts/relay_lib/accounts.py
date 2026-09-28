@@ -40,11 +40,11 @@ def cmd_add(name: str, code: str | None = None, yes: bool = False, as_json: bool
 def _add(asker: Asker, name: str | None, code: str | None, as_json: bool, swept: set[str]) -> dict:
     name = asker.value("<名前>", "アカウントの名前", name)
     if code is not None:
-        res = login.finish(name, login.read_code(code), swept)
+        res = login.finish_login(name, login.read_code(code), swept)
     elif asker.interactive:
         res = login.add_once(name, quiet_stdout=as_json)
     else:
-        res = login.start(name)
+        res = login.start_login(name)
     return {"name": name, **res}
 
 
@@ -116,7 +116,7 @@ def _metered_label(m: dict) -> str:
     if m["source"] == "env":
         return "環境変数（" + ", ".join(m["keys"]) + "）"
     if m["provider"] == bd.PROVIDER:
-        return bd.label(m["details"])
+        return bd.decl_label(m["details"])
     return m["provider"] or "-"
 
 
@@ -231,7 +231,9 @@ def cmd_remove(name: str) -> int:
 def _verify_or_fail(profile: str, region: str, model: str) -> None:
     fail = bd.verify(profile, region, model)
     if fail is not None:
-        raise Fail(fail.reason, f"{bd.label(bd.details(profile, region, model))} を{fail.text()}。保存しない", aws_error=fail.aws_error)
+        raise Fail(
+            fail.reason, f"{bd.decl_label(bd.details(profile, region, model))} を{fail.text()}。保存しない", aws_error=fail.aws_error
+        )
 
 
 def _add_bedrock(asker: Asker, profile: str | None, region: str | None, model: str | None) -> dict:
@@ -249,7 +251,7 @@ def _add_bedrock(asker: Asker, profile: str | None, region: str | None, model: s
     old = ca.load_metered()
     det = bd.details(profile, region, model)
     prev = (old.details.get("profile") if old else None) or (old.provider if old else None)
-    q = f"前の宣言（{prev}）を {bd.label(det)} で置き換える？" if old else f"{bd.label(det)} を従量の接続として保存する？"
+    q = f"前の宣言（{prev}）を {bd.decl_label(det)} で置き換える？" if old else f"{bd.decl_label(det)} を従量の接続として保存する？"
     if not asker.confirm("--yes", q):
         raise MissingArgs(["--yes"])
     try:
@@ -258,7 +260,7 @@ def _add_bedrock(asker: Asker, profile: str | None, region: str | None, model: s
         raise Fail("write_failed", f"置き場へ書けない（{e}）") from e
     if ca.FALLBACK_ENV in os.environ:
         print(f"環境変数 {ca.FALLBACK_ENV} が定義されているため、保存した宣言は効かない（環境変数が優先する）", file=sys.stderr)
-    res = {"provider": bd.PROVIDER, **det, "replaced": old is not None, "text": f"登録した: 従量の接続（{bd.label(det, '・')}）"}
+    res = {"provider": bd.PROVIDER, **det, "replaced": old is not None, "text": f"登録した: 従量の接続（{bd.decl_label(det, '・')}）"}
     if old is not None:
         res["previous_profile"] = prev
     return res
@@ -278,7 +280,7 @@ def _check(name: str | None) -> dict:
         raise Fail("aws_missing", "aws CLI が見つからない")
     _verify_or_fail(profile, region, model)
     det = bd.details(profile, region, model)
-    return {"provider": bd.PROVIDER, **det, "text": f"呼べる: 従量の接続（{bd.label(det, '・')}）"}
+    return {"provider": bd.PROVIDER, **det, "text": f"呼べる: 従量の接続（{bd.decl_label(det, '・')}）"}
 
 
 # ---------------------------------------------------------------- 入口

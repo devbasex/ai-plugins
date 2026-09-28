@@ -23,7 +23,11 @@ import claude_accounts as ca  # noqa: E402
 import procs  # noqa: E402
 
 MODEL = "us.anthropic.claude-sonnet-4-5-v1:0"
-AWS_SECRETS = {"AWS_ACCESS_KEY_ID": "AKIA-KEY-SECRET", "AWS_SECRET_ACCESS_KEY": "aws-secret-SECRET", "AWS_SESSION_TOKEN": "aws-session-SECRET"}
+AWS_SECRETS = {
+    "AWS_ACCESS_KEY_ID": "AKIA-KEY-SECRET",
+    "AWS_SECRET_ACCESS_KEY": "aws-secret-SECRET",
+    "AWS_SESSION_TOKEN": "aws-session-SECRET",
+}
 
 
 @pytest.fixture()
@@ -88,7 +92,12 @@ def test_add_bedrock_interactive_then_list(tmp_path, accounts, aws):  # noqa: F8
     assert p.returncode == 0, p.stderr
     assert f"登録した: 従量の接続（Bedrock・bedrock-dev・us-west-2・{MODEL}）" in p.stdout
     decl = json.loads(metered_file(accounts).read_text())
-    assert decl["env"] == {"CLAUDE_CODE_USE_BEDROCK": "1", "AWS_PROFILE": "bedrock-dev", "AWS_REGION": "us-west-2", "ANTHROPIC_MODEL": MODEL}
+    assert decl["env"] == {
+        "CLAUDE_CODE_USE_BEDROCK": "1",
+        "AWS_PROFILE": "bedrock-dev",
+        "AWS_REGION": "us-west-2",
+        "ANTHROPIC_MODEL": MODEL,
+    }
     assert oct(metered_file(accounts).stat().st_mode & 0o777) == "0o600"
     lines = run(tmp_path, accounts, aws, "list").stdout.splitlines()
     assert any(x.startswith("metered") and "bedrock-dev" in x and "us-west-2" in x and MODEL in x and "保存した宣言" in x for x in lines)
@@ -141,22 +150,36 @@ def test_add_bedrock_missing_args_without_terminal(tmp_path, accounts, aws):  # 
     [
         ({"sts_error": "An error occurred (ExpiredToken) when calling GetCallerIdentity: body-SECRET"}, "auth_expired", "ExpiredToken"),
         (
-            {"converse_error": "An error occurred (AccessDeniedException) when calling Converse: User: arn:x is not authorized to perform: bedrock:InvokeModel body-SECRET"},
+            {
+                "converse_error": "An error occurred (AccessDeniedException) when calling Converse: User: arn:x is not authorized to perform: bedrock:InvokeModel body-SECRET"
+            },
             "no_permission",
             "AccessDeniedException",
         ),
         (
-            {"converse_error": "An error occurred (AccessDeniedException) when calling Converse: You don't have access to the model with the specified model ID. body-SECRET"},
+            {
+                "converse_error": "An error occurred (AccessDeniedException) when calling Converse: You don't have access to the model with the specified model ID. body-SECRET"
+            },
             "model_unavailable",
             "AccessDeniedException",
         ),
         (
-            {"converse_error": "An error occurred (ValidationException) when calling Converse: The provided model identifier is invalid. body-SECRET"},
+            {
+                "converse_error": "An error occurred (ValidationException) when calling Converse: The provided model identifier is invalid. body-SECRET"
+            },
             "model_unavailable",
             "ValidationException",
         ),
-        ({"converse_error": 'Could not connect to the endpoint URL: "https://bedrock-runtime.xx.amazonaws.com/" body-SECRET'}, "region_unavailable", "EndpointConnectionError"),
-        ({"converse_error": "An error occurred (ThrottlingException) when calling Converse: body-SECRET"}, "unclassified", "ThrottlingException"),
+        (
+            {"converse_error": 'Could not connect to the endpoint URL: "https://bedrock-runtime.xx.amazonaws.com/" body-SECRET'},
+            "region_unavailable",
+            "EndpointConnectionError",
+        ),
+        (
+            {"converse_error": "An error occurred (ThrottlingException) when calling Converse: body-SECRET"},
+            "unclassified",
+            "ThrottlingException",
+        ),
     ],
 )
 def test_add_bedrock_verify_failure_keeps_old(tmp_path, accounts, aws, conf, reason, name):  # noqa: F811
@@ -221,7 +244,16 @@ def test_list_shows_env_and_broken_declarations(tmp_path, accounts, aws):  # noq
     """F3・I4・I5: 環境変数の宣言は値を出さず変数の名前だけ。保存先が壊れていれば壊れていると出す。"""
     metered_file(accounts).write_text("{not json")
     rows = out_json(run(tmp_path, accounts, aws, "list", "--json"))
-    assert rows == [{"name": "metered", "kind": "metered", "source": "saved", "provider": None, "details": {}, "state": "壊れている（宣言なしとして扱う）"}]
+    assert rows == [
+        {
+            "name": "metered",
+            "kind": "metered",
+            "source": "saved",
+            "provider": None,
+            "details": {},
+            "state": "壊れている（宣言なしとして扱う）",
+        }
+    ]
     p = run(tmp_path, accounts, aws, "list", "--json", NDF_SUPERVISE_CLAUDE_FALLBACK="ANTHROPIC_API_KEY=sk-SECRET")
     assert out_json(p)[-1]["keys"] == ["ANTHROPIC_API_KEY"] and "SECRET" not in p.stdout
     lines = run(tmp_path, accounts, aws, "list", NDF_SUPERVISE_CLAUDE_FALLBACK="ANTHROPIC_API_KEY=sk-SECRET").stdout

@@ -30,7 +30,7 @@ URL_RE = re.compile(r"https://[^\s\x1b\"'<>]+")
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 
 
-def _env(config_dir: str) -> dict:
+def _claude_env(config_dir: str) -> dict:
     env = {k: v for k, v in os.environ.items() if k not in AUTH_ENV and k not in cl.DROP_ENV and k != "NDF_RELAY_DIR"}
     env["CLAUDE_CONFIG_DIR"] = config_dir
     return env
@@ -40,7 +40,7 @@ def _auth(claude: str, config_dir: str, *args: str) -> subprocess.CompletedProce
     """専用の設定ディレクトリで `claude auth <副命令>` を起動する。起動できなければ None。"""
     try:
         return subprocess.run(
-            [claude, "auth", *args], env=_env(config_dir), stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30
+            [claude, "auth", *args], env=_claude_env(config_dir), stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -100,7 +100,9 @@ def check_name(name: str) -> None:
         raise Fail("invalid_name", f"名前は英小文字・数字・- と _ の 32 字まで（{ca.METERED} は使えない）: {name}", 2)
     if sys.platform == "darwin":
         # macOS の claude は資格情報を Keychain に置き、設定ディレクトリの .credentials.json を書かない
-        raise Fail("platform", "macOS では登録できない（claude が資格情報を Keychain に置き、.credentials.json を書かない）。Linux で使う", 2)
+        raise Fail(
+            "platform", "macOS では登録できない（claude が資格情報を Keychain に置き、.credentials.json を書かない）。Linux で使う", 2
+        )
     old = ca.load_account(name)
     if old is not None and not old.needs_relogin:
         raise Fail("already_registered", f"登録済み: {name}（{old.email}）。置き直すなら先に account remove {name}")
@@ -134,7 +136,7 @@ def add_once(name: str, quiet_stdout: bool = False) -> dict:
     staging = ca.staging_dir(name)
     try:
         try:
-            subprocess.run([claude, "auth", "login"], env=_env(staging), stdout=sys.stderr if quiet_stdout else None)
+            subprocess.run([claude, "auth", "login"], env=_claude_env(staging), stdout=sys.stderr if quiet_stdout else None)
         except (OSError, subprocess.SubprocessError) as e:
             raise Fail("claude_missing", f"claude auth login を起動できない（{e}）") from e
         return _register(claude, name, staging, "bad_code")
@@ -159,7 +161,7 @@ def _read_url(out: str, proc: subprocess.Popen) -> str | None:
     return None
 
 
-def start(name: str) -> dict:
+def start_login(name: str) -> dict:
     """1 回目: 待機中のログインを起動し、認可の URL と期限を返す（E8）。同じ名前の途中の状態は作り直す。"""
     check_name(name)
     claude = _claude()
@@ -171,7 +173,7 @@ def start(name: str) -> dict:
         try:
             proc = subprocess.Popen(
                 [claude, "auth", "login"],
-                env=_env(os.path.join(d, "config")),
+                env=_claude_env(os.path.join(d, "config")),
                 stdin=rfd,
                 stdout=ofd,
                 stderr=ofd,
@@ -208,7 +210,7 @@ def _wait_exit(p: ca.Pending) -> bool:
     return False
 
 
-def finish(name: str, code: str, swept: set[str]) -> dict:
+def finish_login(name: str, code: str, swept: set[str]) -> dict:
     """2 回目: 認可コードを待機中のログインへ渡して登録する（E9）。どの失敗でも登録の途中の状態を捨てる。"""
     if name in swept:
         raise Fail("expired", f"登録の途中の状態が期限切れで捨てられた。account add {name} からやり直す")

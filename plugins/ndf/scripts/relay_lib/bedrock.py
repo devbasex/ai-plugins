@@ -45,7 +45,7 @@ def aws_path() -> str | None:
     return shutil.which("aws")
 
 
-def _env(profile: str, region: str | None) -> dict:
+def _aws_env(profile: str, region: str | None) -> dict:
     """子へ渡すのと同じ環境（AWS の鍵の変数を外し、プロファイルと地域を置く。決定 14）。"""
     env = {k: v for k, v in os.environ.items() if k not in ca.AWS_KEY_ENV}
     env["AWS_PROFILE"] = profile
@@ -58,7 +58,7 @@ def _aws(args: list[str], profile: str | None = None, region: str | None = None)
     aws = aws_path()
     if aws is None:
         return None
-    env = _env(profile, region) if profile else {k: v for k, v in os.environ.items() if k not in ca.AWS_KEY_ENV}
+    env = _aws_env(profile, region) if profile else {k: v for k, v in os.environ.items() if k not in ca.AWS_KEY_ENV}
     try:
         return subprocess.run([aws, *args], env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=TIMEOUT)
     except subprocess.TimeoutExpired:
@@ -84,7 +84,18 @@ def region(profile: str) -> str:
 def models(profile: str, reg: str) -> list[str]:
     """推論プロファイル（SYSTEM_DEFINED）のうち ID に `anthropic.claude` を含むもの。読めなければ空。"""
     p = _aws(
-        ["bedrock", "list-inference-profiles", "--type-equals", "SYSTEM_DEFINED", "--output", "json", "--profile", profile, "--region", reg],
+        [
+            "bedrock",
+            "list-inference-profiles",
+            "--type-equals",
+            "SYSTEM_DEFINED",
+            "--output",
+            "json",
+            "--profile",
+            profile,
+            "--region",
+            reg,
+        ],
         profile,
         reg,
     )
@@ -110,7 +121,7 @@ def error_name(err: str) -> str:
     return ""
 
 
-def classify(err: str) -> VerifyFailure:
+def classify_failure(err: str) -> VerifyFailure:
     """`bedrock-runtime converse` の失敗を区分へ振り分ける（設計の「失敗の 4 区分への振り分け」）。"""
     name = error_name(err)
     low = err.lower()
@@ -142,7 +153,7 @@ def verify(profile: str, reg: str, model: str) -> VerifyFailure | None:
     p = _aws(args, profile, reg)
     if p is None:
         return VerifyFailure("unclassified", "")
-    return None if p.returncode == 0 else classify(p.stderr)
+    return None if p.returncode == 0 else classify_failure(p.stderr)
 
 
 def decl_env(profile: str, reg: str, model: str) -> dict:
@@ -154,7 +165,7 @@ def details(profile: str, reg: str, model: str) -> dict:
     return {"profile": profile, "region": reg, "model": model}
 
 
-def label(d: dict, sep: str = "（") -> str:
+def decl_label(d: dict, sep: str = "（") -> str:
     """一覧と結果の文に出す識別。既定は `Bedrock（<プロファイル>・<地域>・<モデル>）`、`sep="・"` は括弧の中に入れる形。"""
     body = "・".join(d.get(k, "-") for k in ("profile", "region", "model"))
     return f"Bedrock（{body}）" if sep == "（" else f"Bedrock{sep}{body}"

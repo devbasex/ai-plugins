@@ -65,7 +65,11 @@ class FakeAws:
         self.conf_path.write_text(json.dumps(self.conf))
 
     def env(self) -> dict:
-        return {"PATH": f"{self.bin}{os.pathsep}/usr/bin{os.pathsep}/bin", "FAKE_AWS_CONF": str(self.conf_path), "FAKE_AWS_LOG": str(self.log_path)}
+        return {
+            "PATH": f"{self.bin}{os.pathsep}/usr/bin{os.pathsep}/bin",
+            "FAKE_AWS_CONF": str(self.conf_path),
+            "FAKE_AWS_LOG": str(self.log_path),
+        }
 
     def calls(self) -> list[dict]:
         return [json.loads(x) for x in self.log_path.read_text().splitlines()] if self.log_path.exists() else []
