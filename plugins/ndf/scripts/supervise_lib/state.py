@@ -42,7 +42,7 @@ class RunState:
         self.last_stage = "無し"
         self.pace_recorded = False
         self.gates: list[dict] = []  # run のステップが返した関門（終了コード 10〜19）
-        self.switched: list[str] = []  # 利用上限で足した認証の変数の名前
+        self.switched: list[str] = []  # 利用上限で切り替えた認証（変数の名前・アカウント・従量の接続）
         self.cur: dict = {}
         self.fail_counts: dict[str, int] = {}
         # 途中の報告（progress.jsonl）。LLM を使わずスクリプトで書き・分ける

@@ -21,6 +21,7 @@
 | `answer [mark <中身>]` | 質問に答えた後の Stop を模す。`relay.py mark` を呼び（中身が無ければブロック無し）、終了コード 0 で終わる |
 | `unq` | 質問の合図だけを消す |
 | `stop` | ブロックの無い応答の Stop を模す。`relay.py mark` を呼ぶ |
+| `fail <error>` | 応答が API の失敗で終わった StopFailure を模す。`relay.py limit` を呼ぶ（#1389） |
 
 行の中の Esc（`\\x1b`）は読み捨てる（入力待ちの Esc 1 回は何もしない形を模す）。
 
@@ -73,6 +74,11 @@ def transcript():
     return os.path.join(D, f"transcript-{os.getpid()}.jsonl")
 
 
+def do_fail(error):
+    data = {"session_id": f"s{os.getpid()}", "transcript_path": transcript(), "cwd": os.getcwd(), "error": error}
+    subprocess.run([sys.executable, RELAY, "limit"], input=json.dumps(data), text=True)
+
+
 def do_mark(body):
     msg = f"次の区間:\n\n```ndf-next\n{body}\n```" if body is not None else "ブロックは無い"
     data = {
@@ -119,6 +125,8 @@ def handle(line):
         sys.exit(0)
     elif line == "stop":
         do_mark(None)
+    elif line.startswith("fail "):
+        do_fail(line[5:])
     elif line == "unq":
         try:
             os.unlink(os.path.join(os.environ["NDF_RELAY_DIR"], "question"))
@@ -148,6 +156,10 @@ def main():
             "relay_dir": os.environ.get("NDF_RELAY_DIR"),
             "claudecode": os.environ.get("CLAUDECODE"),
             "depth": os.environ.get("NDF_RELAY_DEPTH"),
+            "token": os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"),
+            "account": os.environ.get("NDF_CLAUDE_ACCOUNT"),
+            "bedrock": os.environ.get("CLAUDE_CODE_USE_BEDROCK"),
+            "api_key": os.environ.get("ANTHROPIC_API_KEY"),
         },
     )
     open(transcript(), "a").close()
