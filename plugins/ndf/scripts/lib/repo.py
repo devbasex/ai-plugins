@@ -86,16 +86,3 @@ def base_branch(root) -> str | None:
     return declared_base(root) or default_branch(root)
 
 
-def production_branch(root, decl: dict | None = None) -> tuple[str | None, str]:
-    """本番チャネルと、その出所。`.ndf/worktree.json` の `production_branch` → 既定ブランチ（`default_branch`）の順。
-
-    `decl` を渡せばそれを `worktree.json` の中身として使う（読み直さない）。決まらなければ `(None, 理由)`。
-    """
-    wt = read_worktree_decl(root)[0] if decl is None else decl
-    v = _branch_value(wt.get("production_branch"))
-    if v:
-        return v, f"{WORKTREE_DECL} の production_branch"
-    d = default_branch(root)
-    if d:
-        return d, "既定ブランチ（origin/HEAD → ローカルの main / master）"
-    return None, "production_branch も既定ブランチ（origin/HEAD・main・master）も無い"
