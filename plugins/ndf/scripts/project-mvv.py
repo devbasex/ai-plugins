@@ -7,7 +7,7 @@
     python3 project-mvv.py vet      --body F --kind candidate|revision|mission [--root DIR]
     python3 project-mvv.py approve  --body F --by NAME [--reason TEXT] [--accept-unknown] [--root DIR]
     python3 project-mvv.py show     [--version N] [--diff M] [--root DIR]
-    python3 project-mvv.py context  [--root DIR] [--format text|json]
+    python3 project-mvv.py context  [--root DIR] [--format text|json] [--mission <状態> | --mvv F | --milestone M [--repo OWNER/REPO]]
     python3 project-mvv.py signals  [--root DIR] [--format text|json]
     python3 project-mvv.py schema   [--out FILE]
 
@@ -24,7 +24,9 @@
 - `approve`: 利用者の承認の後に打つ。同じ本文への直近の照合が「従う」（か `--accept-unknown` で人が引き受けた「判定できない」）
   のときだけ宣言を書く。書くのはこの副命令だけである
 - `show`: 版の本文、または版 M から N への差分
-- `context`: 判断の地点へ渡す MVV の節（宣言が無くても共通原則と「MVV なし」を出す）
+- `context`: 判断の地点へ渡す MVV の節（宣言が無くても共通原則と「MVV なし」を出す）。ミッション MVV の出所（`--mission` の状態の
+  `mvv`・`--mvv` のファイル・`--milestone` の説明）を 1 つ渡すと、プロジェクト MVV が承認済みのときだけミッション MVV の節を足す（#1400）。
+  特定できなければ止めずにプロジェクト MVV だけの節を出し、`--format json` の `mission_mvv` に理由を書く
 - `signals`: 現行の版のもとでの覆し・「判定できない」・流出不具合の件数と閾値。超えていれば `items` に改訂の提案
 
 結果は lib/step_result.py の形の 1 行の JSON で、その前に人が読む行を出す。LLM は `supervise_lib/claude.py` の
@@ -376,22 +378,48 @@ def cmd_show(a):
 # ---------------------------------------------------------------- context / signals
 
 
+def mission_source(a) -> tuple[str | None, dict | None]:
+    """ミッション MVV の (本文, 結果の `mission_mvv`)。出所を渡さなければ (None, None)。読めなくても止めない（#1400 の決定 12）。"""
+    try:
+        if a.mission:
+            text, why = pm.mission_text_of(json.loads(Path(a.mission).read_text(encoding="utf-8")))
+            if text is None and why is None:
+                why = f"状態に mvv が無い: {a.mission}"
+            source = f"state:{a.mission}"
+        elif a.mvv:
+            text, why, source = Path(a.mvv).read_text(encoding="utf-8"), None, f"file:{a.mvv}"
+        elif a.milestone:
+            import deps
+
+            deps.require("md")
+            import mission_mvv
+
+            text = mission_mvv.mvv_sections(mission_mvv.milestone_description(a.milestone, a.repo))
+            why = None if text else f"マイルストーン {a.milestone} の説明に ## Mission / ## Vision / ## Value の見出しがそろっていない"
+            source = f"milestone:{a.milestone}"
+        else:
+            return None, None
+    except (OSError, ValueError) as e:
+        return None, {"reason": f"ミッション MVV を読めない: {e}"}
+    if text is None:
+        return None, {"reason": why}
+    return text, {"sha256": pm.sha256_text(text), "source": source}
+
+
 def cmd_context(a):
     root = _root(a)
     mvv = pm.load_mvv(root)
-    text = pm.block(mvv)
+    mission, ref = mission_source(a)
+    if mission is not None and not mvv.approved:  # 決定 16: プロジェクト MVV が承認済みのときだけ足す
+        mission, ref = None, {"reason": f"プロジェクト MVV が{pm.STATUS_LABEL[mvv.status]}。ミッション MVV を節へ足さない"}
+    text = pm.block(mvv, mission)
     if a.format == "text":
         sys.stdout.write(text)
         return 0
-    emit(
-        result(
-            TOOL,
-            "ok",
-            f"MVV の節（{pm.STATUS_LABEL[mvv.status]}）",
-            [{"kind": "context", "name": mvv.status, "result": mvv.status, "project_mvv": pm.record(mvv), "block": text}],
-            pm.record(mvv),
-        )
-    )
+    item = {"kind": "context", "name": mvv.status, "result": mvv.status, "project_mvv": pm.record(mvv), "block": text}
+    if ref is not None:
+        item["mission_mvv"] = ref
+    emit(result(TOOL, "ok", f"MVV の節（{pm.STATUS_LABEL[mvv.status]}）", [item], pm.record(mvv)))
 
 
 def cmd_signals(a):
@@ -461,6 +489,11 @@ def build_parser():
     p.add_argument("--diff", type=int, help="この版から --version（既定は現行）への差分")
     p = add("context", cmd_context, "MVV の節を出す")
     p.add_argument("--format", choices=("text", "json"), default="text")
+    src = p.add_mutually_exclusive_group()
+    src.add_argument("--mission", help="ミッションの状態（mission-state.py のファイル）。状態の mvv を sha256 の一致を見て読む")
+    src.add_argument("--mvv", help="ミッション MVV のファイル")
+    src.add_argument("--milestone", help="説明に ## Mission / ## Vision / ## Value を持つマイルストーン（写しは作らない）")
+    p.add_argument("--repo", help="--milestone を読むリポジトリ（OWNER/REPO。既定はカレント）")
     p = add("signals", cmd_signals, "改訂の兆候を集計する")
     p.add_argument("--format", choices=("text", "json"), default="text")
     p = sub.add_parser("schema", help="宣言の JSON Schema を出す")

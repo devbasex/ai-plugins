@@ -12,7 +12,7 @@ from supervise_lib.plan import QUEUE_PRS
 from supervise_lib.verify_steps import handoff_step
 
 
-MVV_NOTE = "{state_dir}/work/mvv-note.md"  # mvv-gate.py が従うときに書く判定の記録（PR のコメント）
+MVV_NOTE = "{state_dir}/work/mvv-note.md"  # mvv-gate.py が書く判定の記録（PR のコメントか承認資料の末尾）
 RULE_RELEASE_DEV = (
     "run のステップが落ちたら、出力を読んで直せるもの（版数の書き漏れ・文書の形）は fix。外部の待ち（CI・ネットワーク）"
     "の揺れなら同じステップをもう一度（retry）。認証や権限の不足・タグの重複は stop。"
@@ -156,6 +156,7 @@ def plan_release_package_plugin(a) -> dict:
         )
     approval = f"issues/approval-{plugin}-v{base}.md"
     mvv = getattr(a, "mvv", None)
+    advise = getattr(a, "advise", None)  # 助言の MVV 判定を置くミッションの状態（pace: normal。#1400）
     if dev:
         prev = f" --prev-tag {a.prev_tag}" if a.prev_tag else ""
         facts = {
@@ -178,9 +179,11 @@ def plan_release_package_plugin(a) -> dict:
                 "cwd": repo,
                 "cmd": f"{STEPS_PY} notes --version {v} --prs {prs} --approval {approval} --verified {rts} --ref {a.base}",
                 "on_fail": "judge",
-                "next": "end",
+                "next": "mvv" if advise else "end",
             },
         ]
+        if advise:
+            steps += advise_release_steps(a, repo, approval, prs)
     steps += [
         {
             "id": "judge",
@@ -244,6 +247,34 @@ def plan_release_package_plugin(a) -> dict:
         plan["リポジトリ"] = repo
         plan["記録"] = str(HERE / "projects-sync.sh")
     return plan
+
+
+def advise_release_steps(a, repo: str | None, approval: str, prs: str) -> list[dict]:
+    """開発版の explain の後の助言の MVV 判定（#1400）。承認資料と出す版の PR を材料にし、判定の記録を承認資料の末尾へ足す。
+    判定によらず、想定外の失敗でも mvv-note へ進み、プランの結果は facts の関門のままである。"""
+    material = f"{repo}/{approval}" if repo else approval
+    state = shlex.quote(str(Path(a.advise).resolve()))
+    return [
+        {
+            "id": "mvv",
+            "type": "run",
+            "timeout": 900,
+            "cmd": f"rm -f {MVV_NOTE} && {MVV_PY} check --mission {state} --gate release "
+            f"--material {shlex.quote(material)} --pr {prs} --mode {a.mode}"
+            + (f" --root {shlex.quote(repo)}" if repo else "")
+            + f" --note {MVV_NOTE} --advise",
+            "on_fail": "mvv-note",
+            "next": "mvv-note",
+        },
+        {
+            "id": "mvv-note",
+            "type": "run",
+            "timeout": 120,
+            **({"cwd": repo} if repo else {}),
+            "cmd": f"sh -c '[ ! -f {MVV_NOTE} ] || {{ printf \"\\n\"; cat {MVV_NOTE}; }} >> {approval}'",
+            "next": "end",
+        },
+    ]
 
 
 # changed-plugins の結果 JSON（最後の行）の items を「名前 版」の行にする

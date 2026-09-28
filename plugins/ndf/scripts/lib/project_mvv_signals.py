@@ -111,9 +111,10 @@ def revise_suggestion(sig: dict) -> dict | None:
 GATE_KEYS = {"関門 1": "design", "関門 2": "release"}  # mvv-gate.py の --gate
 
 
-def last_mvv_verdict(state: dict, mission: str, gate: str, gate_log) -> str | None:
+def last_mvv_verdict(state: dict, mission: str, gate: str, gate_log, pr: int | None = None) -> str | None:
     """同じ承認ゲートの直前の MVV 判定（状態の `by: mvv` の記録か、mvv-gate.jsonl の同じミッションの最後の行の新しい方）。
-    それより新しい取り消し（`withdrawals`）があれば None。"""
+    それより新しい取り消し（`withdrawals`）があれば None。`pr` を渡すと、mvv-gate.jsonl の行は `pr` にその番号を含むものだけを
+    見る（1 つのミッションの複数の設計 PR の判定を取り違えない。#1400 の I8）。"""
     found = []
     g = next((g for g in state.get("gates", []) if g.get("name") == gate and g.get("by") == "mvv"), None)
     if g:
@@ -122,7 +123,9 @@ def last_mvv_verdict(state: dict, mission: str, gate: str, gate_log) -> str | No
     rows = [
         r
         for r in read_jsonl(Path(gate_log).expanduser())
-        if r.get("gate") == GATE_KEYS.get(gate) and str(Path(str(r.get("mission") or "")).resolve()) == me
+        if r.get("gate") == GATE_KEYS.get(gate)
+        and str(Path(str(r.get("mission") or "")).resolve()) == me
+        and (pr is None or pr in (r.get("pr") or []))
     ]
     if rows:
         found.append((rows[-1].get("at") or "", rows[-1].get("verdict")))
@@ -134,9 +137,11 @@ def last_mvv_verdict(state: dict, mission: str, gate: str, gate_log) -> str | No
     return verdict if verdict in ("follow", "not_follow", "unknown") else None
 
 
-def record_override(state: dict, mission: str, gate: str, outcome: str | None, at: str, root, gate_log) -> dict | None:
+def record_override(
+    state: dict, mission: str, gate: str, outcome: str | None, at: str, root, gate_log, pr: int | None = None
+) -> dict | None:
     """利用者の答え（`outcome`。省くと approved）が直前の MVV 判定と食い違えば、覆しを 1 行書いて返す（I18）。"""
-    verdict = last_mvv_verdict(state, mission, gate, gate_log)
+    verdict = last_mvv_verdict(state, mission, gate, gate_log, pr)
     if outcome == "rejected" and verdict == "follow":
         kind = "override_reject"
     elif outcome != "rejected" and verdict in ("not_follow", "unknown"):

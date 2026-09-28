@@ -3,7 +3,7 @@
 
     python3 mvv-gate.py check --mission <ミッションの状態> --gate design|release
                               [--material <ファイル>...] [--pr N...] [--mode M]
-                              [--log <jsonl>] [--repo OWNER/REPO] [--root DIR] [--note <ファイル>]
+                              [--log <jsonl>] [--repo OWNER/REPO] [--root DIR] [--note <ファイル>] [--advise]
 
 `pace: fast` と `pace: auto` の関門 1（設計の承認）と関門 2（本番への配布の承認）を、利用者が承認した MVV への事前の
 承認として扱うための判定である。判定の前に、次を機械で見る。1 つでも外れれば LLM を呼ばずに関門へ戻す。
@@ -26,10 +26,18 @@ PR の先頭のコミットの中身も足す）を最小構成の claude -p に
 - それ以外（従わない・判定できない・越えない線・判定を読めない・材料を取れない）: status gate（終了コード 10）。
   利用者の承認を求める
 
-判定は毎回 --log（既定 ~/.local/state/ndf/mvv-gate.jsonl）へ 1 行で残す（プロジェクト MVV の参照 `project_mvv` と根拠の項目 `basis`
-を含む）。同じプロジェクト MVV のもとで「判定できない」が宣言の回数（`settings.unknown_streak`）続くか、改訂の兆候が閾値を超えると、
+判定は毎回 --log（既定 ~/.local/state/ndf/mvv-gate.jsonl）へ 1 行で残す（プロジェクト MVV の参照 `project_mvv`・根拠の項目 `basis`・
+ミッションの状態の進め方 `pace`・判定に渡したミッション MVV の `mission_mvv`（sha256 か null）を含む）。同じプロジェクト MVV のもとで「判定できない」が宣言の回数（`settings.unknown_streak`）続くか、改訂の兆候が閾値を超えると、
 結果の `items` に改訂の提案を載せる。--note を渡すと、Pull Request の
 コメントに使う判定の記録（判定・理由・ログ）を Markdown で書く。claude は NDF_MVV_CLAUDE で差し替えられる。
+
+`--advise`（助言の MVV 判定。`pace: normal` の承認ゲート 1・2 の前。#1400）: 判定の規則と機械のチェックは同じだが、
+承認ゲートの記録（`by: mvv`）を書かず、どの判定でも status ok（終了コード 0）で返す。承認するのは利用者である。
+
+- プロジェクト MVV が承認済みでなければ、LLM を呼ばず、行も --note も書かずに `items[0]` を `{"verdict": "none", "status": ...}` にする
+- ミッション MVV の承認の記録（関門 `MVV`）を求めず、ファイルと状態の sha256 の一致だけを見る
+- 進め方の宣言（`.ndf/pace.json`）が無ければ越えない線のパスを空とする（壊れていれば今どおり外れ）
+- --note は機械のチェックで外れた・読めないときも含めて書き、外れた理由を理由の欄に載せる
 """
 
 from __future__ import annotations
@@ -54,7 +62,7 @@ from step_result import EXIT_GATE, emit, result  # noqa: E402
 import clock  # noqa: E402
 import gh_call  # noqa: E402
 import gh_rest  # noqa: E402
-from pace import EXCLUDED_MODES, PaceError, matches, read_pace  # noqa: E402
+from pace import DECL_NAME, EXCLUDED_MODES, PaceError, matches, read_pace  # noqa: E402
 import project_mvv as pm  # noqa: E402
 import project_mvv_signals as pms  # noqa: E402
 
@@ -63,6 +71,13 @@ GATES = {"design": "関門 1（設計の承認）", "release": "関門 2（本�
 GATE_NAMES = {"design": "関門 1", "release": "関門 2"}  # mission-state.py の関門の記録の名前
 MVV_GATE = "MVV"  # 利用者が MVV を承認した記録の名前
 VERDICTS = ("follow", "not_follow", "unknown")
+VERDICT_LABEL = {
+    "follow": "従う",
+    "not_follow": "反する疑い",
+    "unknown": "判定できない",
+    "machine": "機械のチェックで外れた",
+    "unreadable": "判定を読めない",
+}
 MAX_MATERIAL = 60_000  # 材料 1 件の上限の文字数（超えた分は切る）
 
 DECL_PATHS = (f"{pm.DECL_DIR}/{pm.BODY_FILE}", f"{pm.DECL_DIR}/{pm.DECL_FILE}")  # 変える PR は MVV 判定で通さない（I15）
@@ -255,7 +270,10 @@ def revise_items(a, root: Path, project: pm.ProjectMvv) -> list[dict]:
     return out + ([sug] if sug else [])
 
 
-def boundary_hits(root: Path, infos: dict[int, dict]) -> list[str]:
+def boundary_hits(root: Path, infos: dict[int, dict], advise: bool = False) -> list[str]:
+    """越えない線のパスに当たる変更。`advise` では進め方の宣言が無いことを線が無いとして扱う（#1400 の決定 7）。"""
+    if advise and not (root / ".ndf" / DECL_NAME).exists():
+        return []
     try:
         patterns = read_pace(root)["boundary_paths"]
     except PaceError as e:
@@ -305,6 +323,9 @@ def record_gate(a, record: dict) -> str | None:
 def write_note(path: str, a, record: dict) -> None:
     reasons = "\n".join(f"- {r}" for r in record["reasons"]) or "- （無し）"
     Path(path).parent.mkdir(parents=True, exist_ok=True)
+    if a.advise:
+        Path(path).write_text(advise_note(a, record, reasons), encoding="utf-8")
+        return
     Path(path).write_text(
         f"## MVV 判定（{GATES[a.gate]}）\n\n"
         f"- 判定: {record['verdict']}（関門を省いた。利用者が承認した MVV を事前の許可として扱う）\n"
@@ -316,9 +337,40 @@ def write_note(path: str, a, record: dict) -> None:
     )
 
 
+def advise_note(a, record: dict, reasons: str) -> str:
+    """助言の MVV 判定の記録（承認資料に載せる）。判定・根拠・時刻・ログ・理由。"""
+    project = pm.from_record(record["project_mvv"])
+    sha = (record.get("mission_mvv") or {}).get("sha256")
+    verdict = record["verdict"]
+    return (
+        f"## MVV 判定（{GATES[a.gate]}・助言）\n\n"
+        f"- 判定: {VERDICT_LABEL.get(verdict, verdict)}（{verdict}。助言であり、承認は利用者が行う）\n"
+        f"- {pm.basis_phrase(record.get('basis'), project, sha)}\n"
+        f"- 時刻: {record['at']}\n- ログ: `{Path(a.log).expanduser()}` の {record['at']} の行\n\n"
+        f"### 理由\n\n{reasons}\n"
+    )
+
+
+def read_state(path: str) -> dict:
+    """ミッションの状態。読めない・オブジェクトでなければ空（判定の中で改めて読んで外れにする）。"""
+    try:
+        state = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return state if isinstance(state, dict) else {}
+
+
+def advise_none(a, project: pm.ProjectMvv) -> tuple[dict, int | None]:
+    """助言の MVV 判定で、プロジェクト MVV が承認済みでないとき（#1400 の I3）。LLM も行も記録も出さない。"""
+    item = {"verdict": "none", "status": project.status}
+    return result(TOOL, "ok", f"{GATES[a.gate]} の MVV 判定（助言）: {pm.NO_MVV}（{pm.STATUS_LABEL[project.status]}）", [item]), None
+
+
 def cmd_check(a) -> tuple[dict, int | None]:
     root = Path(a.root or ".").resolve()
     project = pm.load_mvv(root)
+    if a.advise and not project.approved:
+        return advise_none(a, project)
     record = {
         "at": clock.now_iso("utc"),
         "gate": a.gate,
@@ -328,11 +380,34 @@ def cmd_check(a) -> tuple[dict, int | None]:
         "mode": a.mode or "",
         "repo": pm.mvv_repo_key(root),
         "project_mvv": pm.record(project),
+        "pace": str(read_state(a.mission).get("pace") or ""),
+        "mission_mvv": None,
     }
 
+    def advised(summary: str, usage: dict | None = None, extra: dict | None = None):
+        """助言の MVV 判定の結果。行と記録を書き、判定によらず 0 で返す（#1400 の決定 2）。"""
+        record["passed"] = False
+        write_log(a.log, record)
+        if a.note:
+            write_note(a.note, a, record)
+        suggest = revise_items(a, root, project) if record["verdict"] != "machine" else []
+        label = VERDICT_LABEL.get(record["verdict"], record["verdict"])
+        return result(
+            TOOL,
+            "ok",
+            f"{GATES[a.gate]} の MVV 判定（助言）: {label}（{summary}）。承認は利用者が行う",
+            [{**record, **(extra or {})}, *suggest],
+            usage or {},
+            next="判定を承認資料に載せて利用者の承認を求める",
+        ), None
+
     def back(why: str, verdict: str, extra: dict | None = None, usage: dict | None = None):
-        record.update(verdict=verdict, reasons=[why] if verdict == "machine" else record.get("reasons", []), passed=False, **(usage or {}))
+        # 機械のチェックの外れ（と助言の判定を読めないとき）は、外れた理由を理由の欄に載せる
+        listed = verdict == "machine" or (a.advise and verdict == "unreadable")
+        record.update(verdict=verdict, reasons=[why] if listed else record.get("reasons", []), passed=False, **(usage or {}))
         record.setdefault("basis", pm.basis(None, project))
+        if a.advise:
+            return advised(why, usage, extra)
         write_log(a.log, record)
         suggest = revise_items(a, root, project) if verdict != "machine" else []
         return result(
@@ -348,17 +423,19 @@ def cmd_check(a) -> tuple[dict, int | None]:
         state = json.loads(Path(a.mission).read_text(encoding="utf-8"))
         if project.status in ("unapproved", "mismatch", "unreadable"):
             raise Back(f"プロジェクト MVV が{pm.STATUS_LABEL[project.status]}（{project.error or ''}）")
-        why = pm.approval_refusal(state, root, project)
+        why = pm.approval_refusal(state, root, project, advise=a.advise)
         if why:
             raise Back(why)
         mission = mission_text(state)
+        if mission is not None:
+            record["mission_mvv"] = {"sha256": state["mvv"]["sha256"]}
         if a.mode in EXCLUDED_MODES:
             raise Back(f"モード {a.mode} は関門を省かない")
         infos = {n: pr_facts(n, a.repo, root) for n in a.pr}
         changed = decl_changes(infos)
         if changed:
             raise Back("プロジェクト MVV の宣言を変える（共通原則の C7。MVV 判定で通さない）: " + " / ".join(changed))
-        hits = boundary_hits(root, infos)
+        hits = boundary_hits(root, infos, a.advise)
         if hits:
             raise Back("越えない線のパスに当たる: " + " / ".join(hits))
         materials = []
@@ -384,7 +461,11 @@ def cmd_check(a) -> tuple[dict, int | None]:
         return back("判定を読めない", "unreadable", {"raw": raw}, usage)
     boundary = verdict["boundary"]
     rids = sorted(set(re.findall(r"\bR\d+\b", mission or "")))
-    record.update(reasons=verdict["reasons"], boundary=boundary, basis=pm.basis(verdict.get("basis"), project, rids))
+    record.update(reasons=verdict["reasons"], boundary=boundary, basis=pm.basis(verdict.get("basis"), project, rids, mission))
+    if a.advise:
+        record.update(verdict=verdict["verdict"], **usage)
+        why = "越えない線に当たる: " + " / ".join(map(str, boundary)) if boundary else verdict["verdict"]
+        return advised(why, usage)
     if verdict["verdict"] != "follow" or boundary:
         why = "越えない線に当たる: " + " / ".join(map(str, boundary)) if boundary else verdict["verdict"]
         return back(why, verdict["verdict"], usage=usage)
@@ -420,7 +501,10 @@ def main() -> int:
     c.add_argument("--log", default=str(pm.gate_log_path()))
     c.add_argument("--repo")
     c.add_argument("--root", help="進め方の宣言を読むリポジトリの根（既定はカレント）")
-    c.add_argument("--note", help="従うときに、判定の記録を Markdown で書く所（Pull Request のコメントに使う）")
+    c.add_argument("--note", help="従うとき（--advise ではプロジェクト MVV が承認済みのすべての判定）に、判定の記録を Markdown で書く所")
+    c.add_argument(
+        "--advise", action="store_true", help="助言の MVV 判定: 承認ゲートの記録を書かず、どの判定でも 0 で返す（pace: normal。#1400）"
+    )
     a = ap.parse_args()
     out, code = cmd_check(a)
     emit(out, code)
