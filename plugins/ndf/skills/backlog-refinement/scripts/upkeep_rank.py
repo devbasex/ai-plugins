@@ -272,6 +272,51 @@ def _group(board, n, place, nearest):
     return sorted(out)
 
 
+def _forward_candidate(board, n, r, b, place, nearest, base, threshold, rejected):
+    """前倒しの候補 1 件。戻り値は (move_digest, 却下で外したもの, 候補) で、どちらか一方だけが入る。"""
+    cfg = board.cfg
+    group = _group(board, n, place, nearest)
+    md = stable_digest({**base, "number": n, "direction": FORWARD, "from": place.get(n), "to": nearest,
+                  "digest": board.estimates[n].digest, "group": group})  # fmt: skip
+    if (n, FORWARD, md) in rejected:
+        return md, {"number": n, "direction": FORWARD, "move_digest": md}, None
+    auto = r.observed_harm and (r.ubv >= cfg.auto_threshold or r.rr_oe >= cfg.auto_threshold)
+    decision = AUTO if auto else (APPROVED if n in board.approved else APPROVAL)
+    higher = [COLUMN_NAMES[c] for c in ("ubv", "tc", "rr_oe") if getattr(r, c) > getattr(b, c)]
+    return md, None, {"number": n, "from": place.get(n), "to": nearest, "cod": r.cod, "boundary_cod": b.cod,
+                      "threshold": threshold, "diff": r.cod - b.cod, "higher_columns": higher, "decision": decision,
+                      "group": group, "move_digest": md}  # fmt: skip
+
+
+def _backward_candidate(board, forward, near_rows, place, nearest, base, rejected):
+    """後ろ倒しの候補。戻り値は (backward, dropped に足すもの, seen に足すもの)。"""
+    order = board.order
+    backward, dropped, seen = [], [], []
+    depended = {bb for a, bb in board.edges if place.get(a) == nearest and place.get(bb) == nearest}
+    free = [r for r in near_rows if r.number not in depended]
+    low = min(free, key=lambda r: (r.cod, -r.value, r.number), default=None)
+    if low is not None and low.cod < min(f["cod"] for f in forward):
+        pair = sorted(f["number"] for f in forward)
+        md = stable_digest({**base, "number": low.number, "direction": BACKWARD, "from": nearest, "to": order[1],
+                      "digest": board.estimates[low.number].digest, "pair": pair})  # fmt: skip
+        seen.append(md)
+        if (low.number, BACKWARD, md) in rejected:
+            dropped.append({"number": low.number, "direction": BACKWARD, "move_digest": md})
+        else:
+            decision = APPROVED if low.number in board.approved else APPROVAL
+            backward.append({"number": low.number, "from": nearest, "to": order[1], "cod": low.cod,
+                             "decision": decision, "move_digest": md})  # fmt: skip
+    return backward, dropped, seen
+
+
+def _stale_rejections(rejected, seen):
+    return [
+        {"number": r.get("number"), "direction": r.get("direction"), "move_digest": r.get("move_digest")}
+        for r in rejected
+        if r.get("move_digest") not in seen
+    ]
+
+
 def _candidates(board, rows, place):
     """前倒し・後ろ倒しの候補（AC6〜AC8）と、却下で外したもの・却下の一覧の古い要素。"""
     cfg, order = board.cfg, board.order
@@ -291,41 +336,18 @@ def _candidates(board, rows, place):
         r = rows[n]
         if place.get(n) == nearest or r.cod < threshold:
             continue
-        group = _group(board, n, place, nearest)
-        md = stable_digest({**base, "number": n, "direction": FORWARD, "from": place.get(n), "to": nearest,
-                      "digest": board.estimates[n].digest, "group": group})  # fmt: skip
+        md, drop, item = _forward_candidate(board, n, r, b, place, nearest, base, threshold, rejected)
         seen.append(md)
-        if (n, FORWARD, md) in rejected:
-            dropped.append({"number": n, "direction": FORWARD, "move_digest": md})
-            continue
-        auto = r.observed_harm and (r.ubv >= cfg.auto_threshold or r.rr_oe >= cfg.auto_threshold)
-        decision = AUTO if auto else (APPROVED if n in board.approved else APPROVAL)
-        higher = [COLUMN_NAMES[c] for c in ("ubv", "tc", "rr_oe") if getattr(r, c) > getattr(b, c)]
-        forward.append({"number": n, "from": place.get(n), "to": nearest, "cod": r.cod, "boundary_cod": b.cod,
-                        "threshold": threshold, "diff": r.cod - b.cod, "higher_columns": higher, "decision": decision,
-                        "group": group, "move_digest": md})  # fmt: skip
+        if drop is not None:
+            dropped.append(drop)
+        else:
+            forward.append(item)
     backward = []
     if forward and len(order) > 1:
-        depended = {bb for a, bb in board.edges if place.get(a) == nearest and place.get(bb) == nearest}
-        free = [r for r in near_rows if r.number not in depended]
-        low = min(free, key=lambda r: (r.cod, -r.value, r.number), default=None)
-        if low is not None and low.cod < min(f["cod"] for f in forward):
-            pair = sorted(f["number"] for f in forward)
-            md = stable_digest({**base, "number": low.number, "direction": BACKWARD, "from": nearest, "to": order[1],
-                          "digest": board.estimates[low.number].digest, "pair": pair})  # fmt: skip
-            seen.append(md)
-            if (low.number, BACKWARD, md) in rejected:
-                dropped.append({"number": low.number, "direction": BACKWARD, "move_digest": md})
-            else:
-                decision = APPROVED if low.number in board.approved else APPROVAL
-                backward.append({"number": low.number, "from": nearest, "to": order[1], "cod": low.cod,
-                                 "decision": decision, "move_digest": md})  # fmt: skip
-    stale = [
-        {"number": r.get("number"), "direction": r.get("direction"), "move_digest": r.get("move_digest")}
-        for r in board.rejected
-        if r.get("move_digest") not in seen
-    ]
-    return forward, backward, dropped, stale
+        backward, dropped_add, seen_add = _backward_candidate(board, forward, near_rows, place, nearest, base, rejected)
+        dropped += dropped_add
+        seen += seen_add
+    return forward, backward, dropped, _stale_rejections(board.rejected, seen)
 
 
 def _milestone_out(board, rows, place, title, idx):
