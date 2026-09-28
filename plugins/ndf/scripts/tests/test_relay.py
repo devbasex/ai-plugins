@@ -3613,3 +3613,28 @@ def test_tell_account_metered_characterization(monkeypatch, section, decl, choic
     assert r.rows == [
         {"event": "account", "section": section, "reason": "five_hour", "from": "a", "to": "metered", "keys": keys, "earliest": earliest}
     ]
+
+
+@pytest.mark.parametrize(
+    "prev, reason, due, line, extra",
+    [
+        ("metered", "five_hour", None, "b（m）の上限が外れたため、従量の接続からアカウント b へ戻して続ける", {"reason": "recovered"}),
+        ("metered", "threshold", 95.0, "b（m）の上限が外れたため、従量の接続からアカウント b へ戻して続ける", {"reason": "recovered"}),
+        ("a", "threshold", 95.4, "a の使用率が 95% に達したため、アカウントを b（m）へ替える", {"usage": 95}),
+        ("a", "threshold", None, "a の使用率が 0% に達したため、アカウントを b（m）へ替える", {"usage": 0}),
+        *[
+            ("a", k, None, f"利用上限（{k}）に達したため、アカウントを a から b（m）へ替えて続ける", {})
+            for k in ("five_hour", "seven_day", "spend", "unknown")
+        ],
+        ("a", "auth", None, "認証が通らなかったため、アカウントを a から b（m）へ替えて続ける", {}),
+        ("a", "unusable", None, "アカウントを a から b（m）へ替える", {}),
+        (None, "start", None, "アカウントを 既定のログイン から b（m）へ替える", {}),
+        ("a", None, None, "アカウントを a から b（m）へ替える", {}),
+    ],
+)
+def test_tell_account_reason_lines_characterization(monkeypatch, prev, reason, due, line, extra):
+    """現状固定: 2 区間目以降でアカウントへ替えたとき、理由ごとの 1 行と `account` の記録。"""
+    r = _teller(monkeypatch, 3, due=due)
+    r.tell_account(prev, "b", reason, None)
+    assert r.screens == ["ndf-relay: " + line]
+    assert r.rows == [{"event": "account", "section": 3, "reason": reason, "from": prev, "to": "b", **extra}]
