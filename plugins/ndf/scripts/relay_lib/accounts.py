@@ -216,10 +216,12 @@ def _remove(asker: Asker, name: str | None) -> dict:
     return {"name": name, "text": f"外した: {name}"}
 
 
-def _verify_or_fail(t: bd.Target) -> None:
-    fail = bd.verify(t)
+def _verify_or_fail(profile: str, region: str, model: str) -> None:
+    fail = bd.verify(profile, region, model)
     if fail is not None:
-        raise Fail(fail.reason, f"{t.label()} を{fail.text()}。保存しない", aws_error=fail.aws_error)
+        raise Fail(
+            fail.reason, f"{bd.decl_label(bd.details(profile, region, model))} を{fail.text()}。保存しない", aws_error=fail.aws_error
+        )
 
 
 def _add_bedrock(asker: Asker, profile: str | None, region: str | None, model: str | None) -> dict:
@@ -233,16 +235,15 @@ def _add_bedrock(asker: Asker, profile: str | None, region: str | None, model: s
         profile = asker.value("--profile", "AWS のプロファイル", None, cands)
     region = region or bd.region(profile) or asker.value("--region", f"地域（{profile} に region が無い）")
     model = asker.value("--model", "モデル", model, bd.models(profile, region))
-    t = bd.Target(profile, region, model)
-    _verify_or_fail(t)
+    _verify_or_fail(profile, region, model)
     old = ca.load_metered()
-    det = t.details()
+    det = bd.details(profile, region, model)
     prev = (old.details.get("profile") if old else None) or (old.provider if old else None)
     q = f"前の宣言（{prev}）を {bd.decl_label(det)} で置き換える？" if old else f"{bd.decl_label(det)} を従量の接続として保存する？"
     if not asker.confirm("--yes", q):
         raise MissingArgs(["--yes"])
     try:
-        ca.save_metered(bd.PROVIDER, t.env(), det)
+        ca.save_metered(bd.PROVIDER, bd.decl_env(profile, region, model), det)
     except (OSError, ValueError) as e:
         raise Fail("write_failed", f"置き場へ書けない（{e}）") from e
     if ca.FALLBACK_ENV in os.environ:
@@ -265,9 +266,8 @@ def _check(name: str | None) -> dict:
         raise Fail("not_bedrock", "今の宣言は Bedrock（CLAUDE_CODE_USE_BEDROCK・AWS_REGION・ANTHROPIC_MODEL）でないため確かめられない")
     if bd.aws_path() is None:
         raise Fail("aws_missing", "aws CLI が見つからない")
-    t = bd.Target(profile, region, model)
-    _verify_or_fail(t)
-    det = t.details()
+    _verify_or_fail(profile, region, model)
+    det = bd.details(profile, region, model)
     return {"provider": bd.PROVIDER, **det, "text": f"呼べる: 従量の接続（{bd.decl_label(det, '・')}）"}
 
 
