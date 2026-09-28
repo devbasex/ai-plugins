@@ -1682,7 +1682,7 @@ def test_new_impl_opens_pr_before_test_all(tmp_path):
     steps = json.loads(out.read_text())["steps"]
     st = {s["id"]: s for s in steps}
     assert st["test-limited"]["next"] == "pr" and st["pr"]["next"] == "test-all"
-    assert st["doc-lint"]["next"] == "ready" and st["ready"]["next"] == "merge"
+    assert st["doc-lint"]["next"] == "ready" and st["ready"]["next"] == "merge-gate" and st["merge-gate"]["next"] == "merge"
     assert "git push" in st["ready"]["cmd"] and "gh pr ready {pr}" in st["ready"]["cmd"]
     assert st["fix"]["next"] == "test-limited"
     assert set(st["judge"]["choices"]) <= set(st) | {"stop"}

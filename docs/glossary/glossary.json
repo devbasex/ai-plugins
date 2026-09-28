@@ -2312,7 +2312,7 @@
     {
       "term": "スプリント",
       "context": "ndf-workflow",
-      "meaning": "1 つの版として出す課題と Pull Request のセット。期間ではなく、1 つの版として出す中身で切る。工程はスプリント単位で 1 回ずつ通し、モードもスプリントで 1 つにする",
+      "meaning": "1 回のリリースとして出す課題と Pull Request のセット。版数を持つプロジェクトでは 1 つの版になる。期間ではなく、1 回のリリースとして出す中身で切る。工程はスプリント単位で 1 回ずつ通し、モードもスプリントで 1 つにする",
       "code": "sprint",
       "deprecated": [
         "ミッション"
@@ -2379,6 +2379,126 @@
       "meaning": "ベースブランチから本番チャネルへ変更を入れる Pull Request",
       "code": "promotion_pr",
       "pending_source": "issues/issue-1336-design.md"
+    },
+    {
+      "term": "プロダクトバックログ",
+      "context": "ndf-issue-upkeep",
+      "meaning": "open の課題を着手の順に並べた全体。マイルストーンの順（上の層）→ マイルストーンの中の順位（下の層）の辞書順で読む",
+      "pending_source": "issues/issue-1429-requirements.md"
+    },
+    {
+      "term": "スプリントバックログの候補",
+      "context": "ndf-issue-upkeep",
+      "meaning": "1 つのマイルストーンの中の課題を順位で並べたもの。次のスプリントはその先頭から容量の分を切り出す",
+      "pending_source": "issues/issue-1429-requirements.md"
+    },
+    {
+      "term": "遅延コスト",
+      "context": "ndf-issue-upkeep",
+      "meaning": "課題の着手を遅らせると失う量の相対値。実害の大きさ・時間的重要度・リスク低減の 3 つの見積の段階の和。略して CoD",
+      "pending_source": "issues/issue-1429-requirements.md"
+    },
+    {
+      "term": "実害の目安",
+      "context": "ndf-issue-upkeep",
+      "meaning": "実害の大きさの見積の段階の帯を影響範囲の区分で決める表。既定は全体の停止・データの損失・安全機構の欠落が 13〜20、一部の機能の誤動作・手戻りが 5〜8、表示や終了コードの誤り（結果は正しい）が 2〜3、どれにも当たらなければ 1。帯の中の値はアンカー（段階を比べる基準の課題）と比べて決める。宣言で変えられる",
+      "pending_source": "issues/issue-1429-design.md"
+    },
+    {
+      "term": "退避策の状態",
+      "context": "ndf-issue-upkeep",
+      "meaning": "退避策・回避策が実際に止まるのを防いでいるか（防いでいる / 部分的 / 無い）。防いでいるときだけ実害の大きさとリスク低減を下げる根拠になる。実害の大きさを下げてよいのは実害の目安の区分を 1 つ下げるまでである",
+      "pending_source": "issues/issue-1429-design.md"
+    },
+    {
+      "term": "WSJF",
+      "context": "ndf-issue-upkeep",
+      "meaning": "遅延コストを大きさの見積の段階で割った値。人が実施する前提の一般的な形で、順位の値の大きさの指数が 1 のときに当たる",
+      "pending_source": "issues/issue-1429-design.md"
+    },
+    {
+      "term": "見積の段階",
+      "context": "ndf-issue-upkeep",
+      "meaning": "遅延コストの 3 つの要素と大きさに付ける相対値。宣言の尺度（既定は 1, 2, 3, 5, 8, 13, 20）の中から選ぶ。大きさは AI エージェントが実施したときの費用（所要時間・LLM の費用・変更量）で付け、人の工数では付けない",
+      "pending_source": "issues/issue-1429-design.md"
+    },
+    {
+      "term": "切り出しの境界",
+      "context": "ndf-issue-upkeep",
+      "meaning": "マイルストーンの中の順位を、大きい課題の枠に当てた 1 切れを除いて先頭から、大きさの見積の段階の和が容量の残りに収まるまで取ったときの、最後の課題",
+      "pending_source": "issues/issue-1429-design.md"
+    },
+    {
+      "term": "前倒しの候補",
+      "context": "ndf-issue-upkeep",
+      "meaning": "後ろのマイルストーンか未設定にあり、遅延コストが直近のマイルストーンの切り出しの境界の課題より余白以上に高い課題",
+      "pending_source": "issues/issue-1429-requirements.md"
+    },
+    {
+      "term": "後ろ倒しの候補",
+      "context": "ndf-issue-upkeep",
+      "meaning": "直近のマイルストーンのうち、同じマイルストーンの課題が依存していない課題の中で遅延コストが最も低い 1 件。前倒しの候補の最小の遅延コスト以上のものと、順序で次のマイルストーンが無いときは出さない。前倒しの候補と対にして示す",
+      "pending_source": "issues/issue-1429-design.md"
+    },
+    {
+      "term": "容量",
+      "context": "ndf-issue-upkeep",
+      "meaning": "1 つのスプリントへ切り出す大きさの見積の段階の和の上限。宣言か引数で受け、既定値を持たない",
+      "pending_source": "issues/issue-1429-design.md"
+    },
+    {
+      "term": "余白",
+      "context": "ndf-issue-upkeep",
+      "meaning": "前倒しの候補にするために、遅延コストが切り出しの境界の課題を上回るべき尺度の段階の数。既定は 1",
+      "pending_source": "issues/issue-1429-design.md"
+    },
+    {
+      "term": "自動の閾値",
+      "context": "ndf-issue-upkeep",
+      "meaning": "前倒しを承認なしに反映するために、実害の大きさかリスク低減のどちらかが届くべき段階。既定は 8",
+      "pending_source": "issues/issue-1429-design.md"
+    },
+    {
+      "term": "バックログの宣言",
+      "context": "ndf-issue-upkeep",
+      "meaning": "尺度・余白・自動の閾値・容量・被依存の対応表・ラベルの下限・大きさの指数・大きい課題の閾値と枠の割合・実害の目安・アンカーを持つ `.ndf/backlog.json`",
+      "pending_source": "issues/issue-1429-design.md"
+    },
+    {
+      "term": "順位の値",
+      "context": "ndf-issue-upkeep",
+      "meaning": "遅延コストを大きさの見積の段階の α 乗で割った値（α は大きさの指数）。マイルストーンの中の順位を決める",
+      "pending_source": "issues/issue-1429-design.md"
+    },
+    {
+      "term": "大きさの指数",
+      "context": "ndf-issue-upkeep",
+      "meaning": "順位の値で大きさの見積の段階に掛ける指数 α。0 以上 1 以下で、既定は 0.3（AI エージェントが実施する前提）。1 で WSJF、0 で遅延コストだけになる",
+      "pending_source": "issues/issue-1429-design.md"
+    },
+    {
+      "term": "大きい課題",
+      "context": "ndf-issue-upkeep",
+      "meaning": "大きさの見積の段階が宣言の閾値（既定は尺度の上から 2 番目。既定の尺度では 13）以上の課題",
+      "pending_source": "issues/issue-1429-design.md"
+    },
+    {
+      "term": "大きい課題の枠",
+      "context": "ndf-issue-upkeep",
+      "meaning": "容量のうち枠の割合（既定 0.5）の分を、マイルストーンの中で遅延コストが最大の大きい課題の 1 切れへ先に当てる取り決め。容量が無い回は出さない",
+      "pending_source": "issues/issue-1429-design.md"
+    },
+    {
+      "term": "分割が要る",
+      "context": "ndf-issue-upkeep",
+      "meaning": "大きい課題の枠に当たったが、枠に収まるサブイシューが無く課題そのものも枠を超える状態。報告に出し、自動で分割しない",
+      "pending_source": "issues/issue-1429-design.md"
+    },
+    {
+      "term": "人の判断待ち",
+      "context": "ndf-issue-upkeep",
+      "meaning": "着手の前に人の判断（needs-decision・承認ゲート）を要する状態。費用に数えず、順位の値を変えずに印として出す",
+      "pending_source": "issues/issue-1429-design.md"
     }
   ]
 }

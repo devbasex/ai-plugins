@@ -56,17 +56,28 @@ def _identity(claude: str, config_dir: str) -> tuple[str, str, str] | None:
     return d["email"], org_id if isinstance(org_id, str) else "", org_name if isinstance(org_name, str) else ""
 
 
-def owner_of(email: str, org_id: str = "", other_than: str = "") -> str | None:
+def _backfill_org(claude: str, acc: ca.Account) -> str:
+    """組織を記録する前の登録の組織を、その設定ディレクトリの `auth status` から読み直して書き戻す。読めなければ空。"""
+    ident = _identity(claude, ca.account_dir(acc.name))
+    if ident is None or not ident[1] or ident[0].lower() != acc.email.lower():
+        return ""
+    ca.set_org(acc.name, ident[1], ident[2])
+    return ident[1]
+
+
+def owner_of(email: str, org_id: str = "", other_than: str = "", claude: str | None = None) -> str | None:
     """同じメールアドレスと組織で登録済みのアカウントの名前（I3）。
 
-    1 つのメールアドレスで複数の組織（個人と Team など）に属せ、組織ごとに利用上限が別になる。どちらかの
-    組織が分からない（組織を記録する前の登録）ときは、違うと言い切れないので同じとみなす。
+    1 つのメールアドレスで複数の組織（個人と Team など）に属せ、組織ごとに利用上限が別になる。既存の登録の
+    組織が分からない（組織を記録する前の登録）ときは、`claude` があれば読み直して書き戻す。それでもどちらかの
+    組織が分からなければ、違うと言い切れないので同じとみなす。
     """
     for n in ca.names():
         acc = ca.load_account(n)
         if n == other_than or not acc or not acc.email or acc.email.lower() != email.lower():
             continue
-        if not acc.org_id or not org_id or acc.org_id == org_id:
+        known = acc.org_id or (_backfill_org(claude, acc) if claude and org_id else "")
+        if not known or not org_id or known == org_id:
             return n
     return None
 
@@ -106,7 +117,7 @@ def cmd_add(name: str) -> int:
             print("ログインが通らなかった。登録しない", file=sys.stderr)
             return 1
         email, org_id, org_name = ident
-        owner = owner_of(email, org_id, other_than=name)
+        owner = owner_of(email, org_id, other_than=name, claude=claude)
         if owner:
             acc = ca.load_account(owner)
             print(f"登録済み: {owner}（{_who(acc.email, acc.org_name) if acc else email}）", file=sys.stderr)

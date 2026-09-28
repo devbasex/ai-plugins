@@ -28,14 +28,22 @@ from workflow_helpers import (
     stub_gh,
 )
 
-DESIGN_PR = json.dumps({"number": 268, "state": "open", "head": {"ref": "design/parallel-batch-04"}, "labels": []})
-DESIGN_PR_APPROVED = json.dumps(
-    {"number": 268, "state": "open", "head": {"ref": "design/parallel-batch-04"}, "labels": [{"name": "design-approved"}]}
+DESIGN_PR = json.dumps(
+    {"number": 268, "state": "open", "head": {"ref": "design/parallel-batch-04"}, "base": {"ref": "develop"}, "labels": []}
 )
-FEATURE_PR = json.dumps({"number": 218, "state": "open", "head": {"ref": "feature/issue-161"}, "labels": []})
+DESIGN_PR_APPROVED = json.dumps(
+    {
+        "number": 268,
+        "state": "open",
+        "head": {"ref": "design/parallel-batch-04"},
+        "base": {"ref": "develop"},
+        "labels": [{"name": "design-approved"}],
+    }
+)
+FEATURE_PR = json.dumps({"number": 218, "state": "open", "head": {"ref": "feature/issue-161"}, "base": {"ref": "develop"}, "labels": []})
 LABEL_DEFINED = json.dumps({"name": "design-approved"})
 LABEL_MISSING = "!1:gh: Not Found (HTTP 404)"
-BY_BRANCH = json.dumps([{"number": 290, "head": {"ref": "design/parallel-batch-05"}, "labels": []}])
+BY_BRANCH = json.dumps([{"number": 290, "head": {"ref": "design/parallel-batch-05"}, "base": {"ref": "develop"}, "labels": []}])
 
 
 @pytest.fixture()
@@ -893,3 +901,46 @@ def test_conflicting_modes_apply_the_highest_to_every_issue(repo: Path, state: P
     assert "実装" not in note_417.split(": ")[-1].split(" / ")
     assert "実装" in note_418.split(": ")[-1].split(" / ")
     assert "設計" not in note_418.split(": ")[-1].split(" / ")
+
+
+# --- #1336 自動反映の本番チャネルへの直接のマージ ---------------------------------------
+
+
+def _declare(repo: Path, production: str, rows: list) -> None:
+    nd = repo / ".ndf"
+    nd.mkdir(exist_ok=True)
+    (nd / "worktree.json").write_text(json.dumps({"version": 1, "base_branch": "develop", "production_branch": production}))
+    (nd / "project.json").write_text(json.dumps({"delivery": rows}))
+
+
+TRYGROUP_ROWS = [
+    {"target": "stg", "kind": "auto", "trigger": "t", "branch": "develop", "versioned": False},
+    {"target": "prd", "kind": "auto", "trigger": "t", "branch": "main", "versioned": False},
+]
+
+
+def _pr(base: str) -> str:
+    return json.dumps({"number": 218, "state": "open", "head": {"ref": "feature/issue-161"}, "base": {"ref": base}, "labels": []})
+
+
+def test_a_merge_into_the_auto_production_channel_is_denied(repo: Path, state: Path, tmp_path: Path) -> None:
+    """決定 9: 自動反映の本番チャネル宛ての直接の gh pr merge を拒み、merge-when-green へ案内する。"""
+    _declare(repo, "main", TRYGROUP_ROWS)
+    result = guard(repo, state, "gh pr merge 218 --merge", tmp_path=tmp_path, responses={"pulls/218": _pr("main")})
+    out = decision(result)
+    assert out["permissionDecision"] == "deny"
+    assert "merge-when-green 218 --gate-approved user" in out["permissionDecisionReason"]
+
+
+def test_a_merge_into_the_staging_branch_passes(repo: Path, state: Path, tmp_path: Path) -> None:
+    """検証へ反映するブランチ（本番チャネルでない）宛ては止めない。"""
+    _declare(repo, "main", TRYGROUP_ROWS)
+    result = guard(repo, state, "gh pr merge 218 --merge", tmp_path=tmp_path, responses={"pulls/218": _pr("develop")})
+    assert result.stdout.strip() == ""
+
+
+def test_a_merge_with_an_unreadable_base_is_denied(repo: Path, state: Path, tmp_path: Path) -> None:
+    """宛先を読めない応答は、止めない側へ倒さない。"""
+    no_base = json.dumps({"number": 218, "state": "open", "head": {"ref": "feature/issue-161"}, "labels": []})
+    result = guard(repo, state, "gh pr merge 218 --merge", tmp_path=tmp_path, responses={"pulls/218": no_base})
+    assert decision(result)["permissionDecision"] == "deny"

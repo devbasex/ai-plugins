@@ -192,10 +192,10 @@ def main() -> int:
     if a.cmd == "new" and a.kind in ("sprint", "close"):
         new_args.check_sprint(ap, a)
         try:
-            if a.kind == "close":
-                apply_decls(a)
-                emit(sprint.cmd_new_sprint(a, sprint.close_waves(a)))
             apply_decls(a)
+            sprint.apply_routes(a)
+            if a.kind == "close":
+                emit(sprint.cmd_new_sprint(a, sprint.close_waves(a)))
             res = sprint.cmd_new_sprint(a)
             emit(res, 1 if res["status"] == "stopped" else None)
         except DeclError as e:

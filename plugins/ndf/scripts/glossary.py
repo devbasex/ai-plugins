@@ -421,6 +421,31 @@ def text_findings(rel: str, text: str, wanted: set[int] | None, g: dict, decl: D
     return items
 
 
+def _consume_block_comment(line: str, chars: list[str], i: int) -> tuple[bool, int]:
+    """`/* */` の続きを `chars` の上で空白にする。(まだブロックの中か, 次の位置) を返す。"""
+    end = line.find("*/", i)
+    stop = len(line) if end < 0 else end + 2
+    chars[i:stop] = " " * (stop - i)
+    return end < 0, stop
+
+
+def _advance_in_quote(line: str, i: int, quote: str, sh: bool, escaped_eol: bool) -> tuple[int, str | None, bool]:
+    """引用の中を 1 手進める。(次の位置, 開いている引用, 行末の `\\` で改行をエスケープしたか) を返す。"""
+    if line[i] == "\\" and not (sh and quote == "'"):
+        return i + 2, quote, i + 1 == len(line)
+    if line.startswith(quote, i):
+        return i + len(quote), None, escaped_eol
+    return i + 1, quote, escaped_eol
+
+
+def _is_line_comment_start(line: str, i: int, hash_style: bool, suffix: str) -> bool:
+    """`i` から行末までのコメント（`#` か `//`）が始まるか。"""
+    c = line[i]
+    return (c == "#" and hash_style and (suffix == ".py" or i == 0 or line[i - 1] in " \t;|&(")) or (
+        not hash_style and line.startswith("//", i)
+    )
+
+
 def mask_comments(lines: list[str], suffix: str) -> list[str]:
     """コードの行のコメントを空白に置き換える。`#` は .py / .sh（.sh は語の頭だけ）、`//` と `/* */` は .js / .ts。
     文字列の内側の記号はコメントとみなさない（`"--cart"` の識別子は残す）。行をまたぐ文字列（.py の三連引用符、
@@ -435,19 +460,11 @@ def mask_comments(lines: list[str], suffix: str) -> list[str]:
         chars, i, escaped_eol = list(line), 0, False
         while i < len(line):
             if block:
-                end = line.find("*/", i)
-                stop = len(line) if end < 0 else end + 2
-                chars[i:stop] = " " * (stop - i)
-                block, i = end < 0, stop
+                block, i = _consume_block_comment(line, chars, i)
                 continue
             c = line[i]
             if quote:
-                if c == "\\" and not (sh and quote == "'"):
-                    escaped_eol, i = i + 1 == len(line), i + 2
-                elif line.startswith(quote, i):
-                    i, quote = i + len(quote), None
-                else:
-                    i += 1
+                i, quote, escaped_eol = _advance_in_quote(line, i, quote, sh, escaped_eol)
                 continue
             if sh and c == "\\":
                 i += 2
@@ -456,9 +473,7 @@ def mask_comments(lines: list[str], suffix: str) -> list[str]:
             if opened:
                 i, quote = i + len(opened), opened
                 continue
-            if (c == "#" and hash_style and (suffix == ".py" or i == 0 or line[i - 1] in " \t;|&(")) or (
-                not hash_style and line.startswith("//", i)
-            ):
+            if _is_line_comment_start(line, i, hash_style, suffix):
                 chars[i:] = " " * (len(line) - i)
                 break
             if not hash_style and line.startswith("/*", i):
@@ -494,17 +509,24 @@ def code_findings(rel: str, text: str, wanted: set[int] | None, g: dict, dep_re,
     return items
 
 
+def _live_form_for(t: dict, form: str) -> str | None:
+    """語 `t` の廃止した識別子のうち、書き方が `form` に一致するものに対応する生きた識別子。無ければ None。"""
+    for w in deprecated_code_of(t):
+        hits = [live for dep, live in zip(spellings(w), spellings(code_of(t))) if dep == form]
+        if hits:
+            return hits[0]
+    return None
+
+
 def code_replacement(g: dict, form: str) -> str:
     """廃止した識別子の出た書き方に合わせて、生きた識別子を同じ書き方で返す（PascalCase で出たら PascalCase）。"""
     names = []
     for t in terms_of(g):
         if not code_of(t) or not isinstance(t.get("term"), str):
             continue
-        for w in deprecated_code_of(t):
-            hits = [live for dep, live in zip(spellings(w), spellings(code_of(t))) if dep == form]
-            if hits:
-                names.append(f"{hits[0]}（{t['term']}）")
-                break
+        live = _live_form_for(t, form)
+        if live is not None:
+            names.append(f"{live}（{t['term']}）")
     return " / ".join(dict.fromkeys(names)) or "用語集の識別子"
 
 
@@ -626,6 +648,24 @@ def cmd_init(a):
     )
 
 
+def _md_candidates(rel, text, sections, add):
+    """.md 1 ファイルから、語の節の表の語と太字の語を候補に足す。"""
+    for n, body, term in scan(text, sections):
+        if term:
+            add(term, "table", f"{rel}:{n}")
+        for m in BOLD.finditer(body):
+            word = m.group(1).strip()
+            if not word.endswith((":", "：")):  # 「対象:」のような見出しの札は語ではない
+                add(word, "bold", f"{rel}:{n}")
+
+
+def _code_candidates(rel, lines, add):
+    """.md 以外の 1 ファイルから、型名を候補に足す。"""
+    for n, line in enumerate(lines, 1):
+        for m in TYPE_NAME.finditer(line):
+            add(m.group(1) or m.group(2), "type", f"{rel}:{n}")
+
+
 def cmd_candidates(a):
     root = Path(a.root)
     decl = load_declaration(root)
@@ -651,19 +691,10 @@ def cmd_candidates(a):
             text = p.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
-        lines = text.splitlines()
         if rel.endswith(".md"):
-            for n, body, term in scan(text, sections):
-                if term:
-                    add(term, "table", f"{rel}:{n}")
-                for m in BOLD.finditer(body):
-                    word = m.group(1).strip()
-                    if not word.endswith((":", "：")):  # 「対象:」のような見出しの札は語ではない
-                        add(word, "bold", f"{rel}:{n}")
+            _md_candidates(rel, text, sections, add)
         else:
-            for n, line in enumerate(lines, 1):
-                for m in TYPE_NAME.finditer(line):
-                    add(m.group(1) or m.group(2), "type", f"{rel}:{n}")
+            _code_candidates(rel, text.splitlines(), add)
     items = [it for it in found.values() if it["kind"] != "bold" or it["count"] >= 3]
     items.sort(key=lambda it: (-it["count"], it["kind"], it["term"]))
     items = items[: a.limit]
@@ -695,6 +726,36 @@ def cmd_render(a):
     emit(result(TOOL, "ok", f"{decl.document} を書いた", [{"name": decl.document, "result": "written"}]))
 
 
+def _build_word_patterns(g):
+    """本文の廃止語・生きた語と、識別子の廃止形・生きた形の 4 本の正規表現。"""
+    dep_words = {w for t in terms_of(g) for w in deprecated_of(t) if len(w) >= 2} - live_words(g)
+    dep_re, live_re = word_pattern(dep_words), word_pattern(live_words(g))
+    live_forms = {f for t in terms_of(g) if code_of(t) for f in code_forms(code_of(t))}
+    dep_forms = {f for t in terms_of(g) for w in deprecated_code_of(t) for f in code_forms(w)} - live_forms
+    return dep_re, live_re, word_pattern(dep_forms), word_pattern(live_forms)
+
+
+def _collect_targets(a, root: Path, decl) -> list[tuple[str, str, set[int] | None]]:
+    """--file か --diff から、確かめる (相対パス, 本文, 見る行) の並び。"""
+    targets: list[tuple[str, str, set[int] | None]] = []
+    if a.file:
+        for f in a.file:
+            p = Path(f)
+            try:
+                text = p.read_text(encoding="utf-8")
+            except OSError as e:
+                raise unreadable(f"{f} を読めない: {e}")
+            targets.append((f, text, None))
+    else:
+        for rel, lines in sorted(added_lines(root, a.diff).items()):
+            if rel == decl.document or not (rel.endswith(CODE_SUFFIXES) or declared_path_matches(rel, decl.paths)):
+                continue
+            p = root / rel
+            if p.is_file():
+                targets.append((rel, p.read_text(encoding="utf-8", errors="replace"), lines))
+    return targets
+
+
 def cmd_check(a):
     root = Path(a.root)
     decl = load_declaration(root)
@@ -703,27 +764,8 @@ def cmd_check(a):
     g = load_glossary(decl)
     items = structure_findings(g, decl) + stale_findings(g, decl)
     if a.rules == "all" and (a.diff or a.file):
-        dep_words = {w for t in terms_of(g) for w in deprecated_of(t) if len(w) >= 2} - live_words(g)
-        dep_re, live_re = word_pattern(dep_words), word_pattern(live_words(g))
-        live_forms = {f for t in terms_of(g) if code_of(t) for f in code_forms(code_of(t))}
-        dep_forms = {f for t in terms_of(g) for w in deprecated_code_of(t) for f in code_forms(w)} - live_forms
-        dep_code_re, live_code_re = word_pattern(dep_forms), word_pattern(live_forms)
-        targets: list[tuple[str, str, set[int] | None]] = []
-        if a.file:
-            for f in a.file:
-                p = Path(f)
-                try:
-                    text = p.read_text(encoding="utf-8")
-                except OSError as e:
-                    raise unreadable(f"{f} を読めない: {e}")
-                targets.append((f, text, None))
-        else:
-            for rel, lines in sorted(added_lines(root, a.diff).items()):
-                if rel == decl.document or not (rel.endswith(CODE_SUFFIXES) or declared_path_matches(rel, decl.paths)):
-                    continue
-                p = root / rel
-                if p.is_file():
-                    targets.append((rel, p.read_text(encoding="utf-8", errors="replace"), lines))
+        dep_re, live_re, dep_code_re, live_code_re = _build_word_patterns(g)
+        targets = _collect_targets(a, root, decl)
         for rel, text, wanted in targets:
             if a.file and (root / decl.document).resolve() == Path(rel).resolve():
                 continue
