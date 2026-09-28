@@ -32,7 +32,13 @@ def changelog_span(lines, plugin, version):
 
 def plugin_of(root, a) -> str:
     """配るプラグイン: --plugin → `.ndf/supervise.json` の release.plugin。決まらなければ止める。"""
-    plugin = getattr(a, "plugin", None) or (delivery.load_delivery(root).release or {}).get("plugin")
+    return _plugin_from(a, delivery.load_delivery(root))
+
+
+def _plugin_from(a, d):
+    """--plugin → --plugins の先頭 → 宣言 `d` の release.plugin の順に決める。決まらなければ止める。"""
+    arg = getattr(a, "plugin", None) or (getattr(a, "plugins", None) or "").split(",")[0].strip() or None
+    plugin = arg or (d.release or {}).get("plugin")
     if not plugin:
         raise StepError("配るプラグインを決められない（--plugin か .ndf/supervise.json の release.plugin）", EXIT_PRECONDITION)
     return plugin
@@ -53,12 +59,8 @@ def release_decl(root, a=None):
     d = delivery.load_delivery(root)
     if d.problems:
         raise StepError("宣言を読めない: " + " / ".join(d.problems), EXIT_PRECONDITION)
-    arg = getattr(a, "plugin", None) or (getattr(a, "plugins", None) or "").split(",")[0].strip() or None
-    plugin = arg or (d.release or {}).get("plugin")
     if not (d.base and d.production):
         raise StepError(
             "ベースブランチか本番チャネルを決められない（.ndf/worktree.json の base_branch・production_branch）", EXIT_PRECONDITION
         )
-    if not plugin:
-        raise StepError("配るプラグインを決められない（--plugin か .ndf/supervise.json の release.plugin）", EXIT_PRECONDITION)
-    return d.base, d.production, plugin
+    return d.base, d.production, _plugin_from(a, d)
