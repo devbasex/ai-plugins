@@ -58,29 +58,16 @@ def _ref(path: Path) -> dict:
     return {"path": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
 
 
-def _file_ref(a) -> tuple[dict | None, tuple | None]:
-    """`--mvv` のファイルの参照。無ければ止まるときの (理由, 終了コード, items)。"""
-    path = Path(a.mvv).resolve()
-    if not path.is_file():
-        return None, (f"MVV のファイルが無い: {a.mvv}", EXIT_PRECONDITION, [])
-    return _ref(path), None
-
-
-def _write_copy(a, text: str) -> dict:
-    """ミッション MVV を状態のファイルの隣の mvv.md へ写し、参照を返す。"""
-    path = Path(a.mission).resolve().parent / "mvv.md"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-    return _ref(path)
-
-
 def normal_mvv(a) -> tuple[dict | None, tuple | None, dict | None]:
     """pace: normal の写し（#1400 の決定 13）。(状態へ書く mvv, 止まるときの (理由, 終了コード, items), 特定できなかった理由の 1 件)。
 
     `--mvv` のファイルが無いときだけ止まる（明示の指定の誤り）。`--milestone` の説明を読めない・見出しがそろわないときは
     止めずに理由を返す。照合（vet）は呼び手もしない。"""
     if a.mvv:
-        return (*_file_ref(a), None)
+        path = Path(a.mvv).resolve()
+        if not path.is_file():
+            return None, (f"MVV のファイルが無い: {a.mvv}", EXIT_PRECONDITION, []), None
+        return _ref(path), None, None
     if not a.milestone:
         return None, None, None
     try:
@@ -89,7 +76,10 @@ def normal_mvv(a) -> tuple[dict | None, tuple | None, dict | None]:
         text, why = None, f"マイルストーン {a.milestone} の説明を読めない: {e}"
     if text is None:
         return None, None, {"kind": "mission_mvv", "result": "none", "reason": f"{why}。ミッション MVV なしで進める"}
-    return _write_copy(a, text), None, None
+    path = Path(a.mission).resolve().parent / "mvv.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return _ref(path), None, None
 
 
 def init_mvv(a, project) -> tuple[dict | None, tuple | None]:
@@ -97,7 +87,10 @@ def init_mvv(a, project) -> tuple[dict | None, tuple | None]:
     if a.pace not in MVV_PACES or (not a.mvv and not a.milestone and project.approved):
         return None, None
     if a.mvv:
-        return _file_ref(a)
+        path = Path(a.mvv).resolve()
+        if not path.is_file():
+            return None, (f"MVV のファイルが無い: {a.mvv}", EXIT_PRECONDITION, [])
+        return _ref(path), None
     if not a.milestone:
         return None, (f"--pace {a.pace} には --milestone（MVV の複製元）か --mvv が要る", EXIT_UNREADABLE, [])
     try:
@@ -106,7 +99,10 @@ def init_mvv(a, project) -> tuple[dict | None, tuple | None]:
         return None, (f"マイルストーン {a.milestone} の説明を読めない: {e}", EXIT_PRECONDITION, [])
     if text is None:
         return None, (f"{why}。説明を直してから打ち直す", EXIT_PRECONDITION, [])
-    return _write_copy(a, text), None
+    path = Path(a.mission).resolve().parent / "mvv.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return _ref(path), None
 
 
 def withdraw(m: dict, name: str, at: str) -> int:
