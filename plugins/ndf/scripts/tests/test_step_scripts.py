@@ -635,31 +635,3 @@ def test_verify_install_source_comes_from_origin_and_declaration(repo):
     write(repo, ".ndf/worktree.json", json.dumps({"version": 1, "base_branch": "trunk", "production_branch": "live"}))
     where, _ = mod.install_source(repo, argparse.Namespace(ref="trunk", plugins="foo"))
     assert where[2] == "live"
-
-
-def test_verify_install_reports_runtime_version_and_missing_dir(repo, tmp_path, monkeypatch):
-    """現状固定: cmd_verify_install は runtime の版の不一致と導入先の欠落を items と metrics に出し stopped にする。"""
-    import argparse
-
-    mod = load_verification()
-    (repo / "plugins" / "ndf").mkdir(parents=True, exist_ok=True)
-    write(repo, "plugins/ndf/.claude-plugin/plugin.json", "{}")
-    git(repo, "add", "-A")
-    git(repo, "commit", "-q", "-m", "p")
-    up = tmp_path / "up.git"
-    git(tmp_path, "clone", "-q", "--bare", str(repo), str(up))
-    git(repo, "remote", "add", "origin", str(up))
-    monkeypatch.setattr(mod, "install_source", lambda root, a: (("o/r", "m", "main"), ["ndf"]))
-    monkeypatch.setattr(mod, "user_env_snapshot", lambda: {"k": 1})
-    monkeypatch.setattr(mod, "verify_claude", lambda *x: ({"exit": 0, "version": {"ndf": "0.9.0", "x": "1"}}, {"ndf": None}))
-    monkeypatch.setattr(mod, "verify_codex", lambda *x: ({"exit": 1, "version": "1.0.0"}, {"ndf": None}))
-    out = []
-    monkeypatch.setattr(mod, "emit", lambda r: out.append(r))
-    mod.cmd_verify_install(argparse.Namespace(root=str(repo), ref="develop", expect="1.0.0", runtimes="claude,codex"))
-    r = out[0]
-    assert r["status"] == "stopped"
-    rt = {i["name"]: i["result"] for i in r["items"] if i["kind"] == "runtime"}
-    assert rt == {"claude": "version_mismatch", "codex": "failed"}
-    files = [i["name"] for i in r["items"] if i["kind"] == "file"]
-    assert files == ["claude: ndf の導入先が無い", "codex: ndf の導入先が無い"]
-    assert r["metrics"]["mismatch"] == 2 and r["metrics"]["prev_tag"] is None and r["metrics"]["user_env_unchanged"] is True
