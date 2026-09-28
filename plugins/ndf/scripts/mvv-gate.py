@@ -45,7 +45,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import shlex
 import subprocess
 import sys
@@ -445,8 +444,7 @@ def cmd_check(a) -> tuple[dict, int | None]:
     if verdict is None:
         return back("判定を読めない", "unreadable", {"raw": raw}, usage)
     boundary = verdict["boundary"]
-    rids = sorted(set(re.findall(r"\bR\d+\b", mission or "")))
-    record.update(reasons=verdict["reasons"], boundary=boundary, basis=pm.basis(verdict.get("basis"), project, rids, mission))
+    record.update(reasons=verdict["reasons"], boundary=boundary, basis=pm.basis(verdict.get("basis"), project, mission=mission))
     if a.advise:
         record.update(verdict=verdict["verdict"], **usage)
         why = "越えない線に当たる: " + " / ".join(map(str, boundary)) if boundary else verdict["verdict"]
