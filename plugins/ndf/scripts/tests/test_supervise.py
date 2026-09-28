@@ -907,10 +907,10 @@ def test_section_token_shorter_than_timeout_switches(tmp_path, seq, accounts, mo
 
 
 def test_no_token_and_no_alternative_stops_without_old_env(tmp_path, seq, accounts, monkeypatch):
-    """トークンを得られず替え先も宣言も無ければ、起動した時の環境で呼ばずに止まる。"""
+    """トークンを得られず替え先も宣言も無ければ、起動した時の環境で呼ばずに止まる（上限なだけの替え先は待つ）。"""
     set_responses, calls = seq
     accounts.add("a", expires_in=-60, refresh_in=-10)
-    accounts.add("b", util5=100)
+    accounts.add("b", expires_in=-60, refresh_in=-10)
     monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", "a")
     set_responses(OK)
     s, text = run_plan(tmp_path, [{"id": "w", "type": "work", "prompt": "直す", "next": "end"}])

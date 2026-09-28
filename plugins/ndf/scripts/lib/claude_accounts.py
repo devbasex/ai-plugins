@@ -405,12 +405,14 @@ def fallback_env(environ=None) -> dict:
 def env_for(name: str, base: dict, before: float | None = REFRESH_BEFORE, min_left: float = 0) -> dict | None:
     """`base` にアカウント `name`（か `metered`）の環境を重ねる。トークンを得られなければ None。
 
-    従量の接続は宣言の変数を足して `CLAUDE_CODE_OAUTH_TOKEN` を外す。アカウントは宣言のキーと、認証の優先順位で
-    トークンより上に来る変数（`FOREIGN_AUTH_ENV`）を外してからトークンと名前を足す（混ぜない。I16）。"""
+    従量の接続は `CLAUDE_CODE_OAUTH_TOKEN` と `FOREIGN_AUTH_ENV` を外してから宣言の変数を重ねる（認証の方式を
+    宣言どおり 1 つにする）。アカウントは宣言のキーと、認証の優先順位でトークンより上に来る変数
+    （`FOREIGN_AUTH_ENV`）を外してからトークンと名前を足す（混ぜない。I16）。"""
     env = dict(base)
     declared = fallback_env(base)
     if name == METERED:
-        env.pop(TOKEN_ENV, None)
+        for k in (TOKEN_ENV, *FOREIGN_AUTH_ENV):
+            env.pop(k, None)
         env.update(declared)
         env[NAME_ENV] = METERED
         return env

@@ -213,6 +213,15 @@ def test_env_for_account_drops_undeclared_auth(accounts):
     assert env["CLAUDE_CODE_OAUTH_TOKEN"] == tok and not set(ca.FOREIGN_AUTH_ENV) & set(env)
 
 
+def test_metered_env_keeps_only_declared_auth():
+    """従量の接続は、宣言より優先される親の認証の変数を外してから宣言を重ねる。"""
+    base = {k: "1" for k in ca.FOREIGN_AUTH_ENV}
+    base["NDF_SUPERVISE_CLAUDE_FALLBACK"] = "ANTHROPIC_API_KEY=sk-SECRET"
+    env = ca.env_for("metered", base)
+    assert env["ANTHROPIC_API_KEY"] == "sk-SECRET"
+    assert not {"ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX"} & set(env)
+
+
 def test_token_with_short_life_is_not_given(accounts):
     """更新しないトークンは、期限まで min_left 秒以下なら渡さない。"""
     tok = accounts.add("a", expires_in=600)
@@ -277,3 +286,34 @@ def test_kind_of_text(text, kind):
 
 def test_fallback_env_reads_given_environ():
     assert ca.fallback_env({"NDF_SUPERVISE_CLAUDE_FALLBACK": "A=1 'B=2 3' junk"}) == {"A": "1", "B": "2 3"}
+
+
+def _runner(monkeypatch, section):
+    sys.path.insert(0, str(SCRIPTS))
+    from supervise_lib import claude as sc
+
+    monkeypatch.setenv(ca.NAME_ENV, section)
+    return sc, sc.ClaudeRunner(object())
+
+
+def test_supervise_waits_when_others_are_only_limited(accounts, monkeypatch):
+    """区間のトークンの残りが打ち切りより短く、他が上限なだけなら止めずに解除まで待たせる。"""
+    accounts.add("a", expires_in=600)
+    tb = accounts.add("b", util5=None)
+    accounts.fake.set_usage(tb, window(100, 1800), window(5))
+    sc, r = _runner(monkeypatch, "a")
+    with pytest.raises(sc.AccountsLimited) as e:
+        r.child_env(1800, {})
+    assert e.value.resets_at is not None and e.value.resets_at > time.time()
+
+
+def test_supervise_stops_when_no_candidate(accounts, monkeypatch):
+    """替えるアカウントが 1 つも無ければ（再登録が要る）認証で止まる。"""
+    accounts.add("a", expires_in=600)
+    accounts.add("b")
+    acc = accounts.account("b")
+    acc["needs_relogin"] = True
+    accounts.write(accounts.root / "b" / "account.json", acc)
+    sc, r = _runner(monkeypatch, "a")
+    with pytest.raises(sc.AuthUnavailable):
+        r.child_env(1800, {})

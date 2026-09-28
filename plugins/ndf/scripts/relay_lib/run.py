@@ -43,6 +43,10 @@ from .terminal import StartFailed, Terminal, pty_available, wait_exit_code
 import claude_accounts as ca  # noqa: E402,I001  common が lib/ を sys.path に置く
 
 
+class NoAccountEnv(Exception):
+    """選んだアカウントのトークンを起動の直前に得られず、替えるアカウントも従量の接続の宣言も無い。子を起動しない。"""
+
+
 class Relay(AccountSwitch):
     """前景に常駐し、区間ごとの claude を擬似端末の子として起動する。"""
 
@@ -97,8 +101,10 @@ class Relay(AccountSwitch):
         prev = self.account
         to, reason, choice = (plan or self.pick(None)) if self.multi else (None, None, None)
         env = cl.section_env(self.env, to) if to else None
+        if to and env is None:  # 親の認証へ戻さない。選び直し、無ければ止める
+            to, reason, choice, env = self.replace_unusable(to)
         if env is None:
-            env, to = self.env, None
+            env = self.env
         at = self.term.spawn(self.claude, [*(carried or []), *args], cwd, env, self.path(CHILD_FILE))
         self.section += 1
         self.started_at = at
@@ -127,6 +133,22 @@ class Relay(AccountSwitch):
                 if not self.watch.thread.is_alive():
                     self.watch.start()
         self.limit.release()
+
+    def replace_unusable(self, failed: str) -> tuple[str, str, ca.Choice, dict]:
+        """トークンを得られなかった `failed` の代わりを選ぶ。(名前か `metered`, 理由, 選んだ結果, 環境)。
+        登録済みのアカウント → 従量の接続の宣言の順に試し、どれも無ければ NoAccountEnv を投げる。"""
+        tried = {failed}
+        while True:
+            c = ca.choose(exclude=tried)
+            if not c.name:
+                break
+            env = cl.section_env(self.env, c.name)
+            if env is not None:
+                return c.name, "auth", c, env
+            tried.add(c.name)
+        if failed != ca.METERED and ca.fallback_env(self.env):
+            return ca.METERED, "auth", c, cl.section_env(self.env, ca.METERED)
+        raise NoAccountEnv(f"アカウント {failed} のトークンを得られず、替えるアカウントも従量の接続の宣言も無い")
 
     # -- 合図の判定
 
@@ -344,6 +366,10 @@ class Relay(AccountSwitch):
             self.log(event="stop", section=self.section + 1, reason="start-failed", errno=e.err)
             cl.say(f"claude を起動できない（{os.strerror(e.err)}）")
             return 127
+        except NoAccountEnv as e:
+            self.log(event="stop", section=self.section + 1, reason="auth")
+            cl.say(f"claude を起動しない（{e}）")
+            return 2
         while True:
             res = self.term.pump(tick=self.tick)
             if res[0] == "exit":
@@ -373,6 +399,8 @@ class Relay(AccountSwitch):
                 self.start_section(args, cwd, command, from_session, fb, carried, plan)
             except StartFailed as e:
                 return self.give_up("start-failed", f"claude を起動できない（{os.strerror(e.err)}）", shown, errno=e.err)
+            except NoAccountEnv as e:
+                return self.give_up("auth", str(e), shown)
 
     def close(self) -> None:
         if self.watch is not None:

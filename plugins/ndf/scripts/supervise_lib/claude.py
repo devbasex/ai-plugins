@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import shlex
 import signal
@@ -271,6 +272,14 @@ class AuthUnavailable(UsageLimit):
     """登録済みのアカウントのトークンを得られず、替えるアカウントも従量の接続も無い。起動した時の環境で呼ばずに止まる。"""
 
 
+class AccountsLimited(Exception):
+    """今のアカウントのトークンを渡せず、他のアカウントは上限なだけ（待てば戻る）。上限と同じく解除まで待つ。"""
+
+    def __init__(self, message: str, resets_at: float | None):
+        super().__init__(message)
+        self.resets_at = resets_at
+
+
 class ClaudeRunner:
     """claude -p を呼ぶ唯一の口。利用上限の待ちと認証の切り替え、使用量の数えと帳簿への追記を持つ。
 
@@ -304,7 +313,11 @@ class ClaudeRunner:
         tried: set[str] = set()  # この呼び出しで上限に当たったアカウント
         kw = {"tick": ctx.tick, "every": st.every, **kw}
         while True:
-            child = self.child_env(timeout, fallback) if multi else None
+            try:
+                child = self.child_env(timeout, fallback) if multi else None
+            except AccountsLimited as e:
+                waited += self._wait_for_reset({"resets_at": e.resets_at, "text": str(e)}, retry, wait_max, waited)
+                continue
             res = call_claude(system, prompt, tools, cwd, timeout, child_env=child, **kw)
             if res.get("limit"):
                 self.note_limit(res)
@@ -379,8 +392,8 @@ class ClaudeRunner:
 
         従量の接続で動いている間は、起動のたびに登録済みのアカウントへ戻れるかを確かめる（閾値未満のものだけ）。
         今のアカウントのトークンが得られなければ（期限切れ・期限まで `timeout` 秒以下・再登録が要る）別のアカウントを
-        選び、無ければ従量の接続（`fallback`）へ移る。それも無ければ AuthUnavailable を投げる（起動した時の古い
-        トークンで呼ばない）。"""
+        選び、無ければ従量の接続（`fallback`）へ移る。それも無く、他のアカウントが上限なだけなら AccountsLimited を
+        投げて解除まで待たせる。候補が 1 つも無ければ AuthUnavailable を投げる（起動した時の古いトークンで呼ばない）。"""
         if self.account == ca.METERED:
             c = ca.choose(keep=self.keep(), min_left=timeout)
             if c.name and (c.score is None or c.score < ca.switch_at()):
@@ -400,6 +413,12 @@ class ClaudeRunner:
         if fallback:
             self.switch(ca.METERED, "auth", keys=list(fallback))
             return ca.env_for(ca.METERED, dict(os.environ))
+        if c.earliest:
+            name, until = c.earliest
+            raise AccountsLimited(
+                f"アカウント {self.account} のトークンを渡せず、替えるアカウント {name} は上限にある",
+                None if until == math.inf else until,
+            )
         raise AuthUnavailable(f"アカウント {self.account} のトークンを得られず、替えるアカウントも従量の接続の宣言も無い")
 
     def switch(self, to: str, reason: str, keys: list[str] | None = None) -> None:

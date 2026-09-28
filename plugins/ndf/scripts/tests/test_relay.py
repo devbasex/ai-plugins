@@ -3209,3 +3209,30 @@ def test_account_add_stops_on_macos(monkeypatch, capsys):
     monkeypatch.setattr(relay_accounts.sys, "platform", "darwin")
     assert relay_accounts.cmd_add("work1") == 2
     assert "macOS" in capsys.readouterr().err
+
+
+def _bare_relay(env):
+    r = object.__new__(relay_run.Relay)
+    r.env = env
+    return r
+
+
+def test_start_env_failure_repicks_another_account(accounts, monkeypatch):
+    """選んだアカウントのトークンを起動の直前に得られなければ、親の認証へ戻さず別のアカウントを選ぶ。"""
+    accounts.add("a", util5=10)
+    tb = accounts.add("b", util5=30)
+    real = relay_claude.section_env
+    monkeypatch.setattr(relay_claude, "section_env", lambda base, name: None if name == "a" else real(base, name))
+    to, reason, _, env = _bare_relay({}).replace_unusable("a")
+    assert (to, reason, env["CLAUDE_CODE_OAUTH_TOKEN"]) == ("b", "auth", tb)
+
+
+def test_start_env_failure_uses_metered_or_stops(accounts, monkeypatch):
+    """替えるアカウントが無ければ従量の接続の宣言へ、それも無ければ子を起動せずに止まる。"""
+    accounts.add("a", util5=10)
+    accounts.add("b", util5=30)
+    monkeypatch.setattr(relay_claude, "section_env", lambda base, name: relay_claude.ca.env_for(name, base) if name == "metered" else None)
+    to, _, _, env = _bare_relay({"NDF_SUPERVISE_CLAUDE_FALLBACK": "ANTHROPIC_API_KEY=k"}).replace_unusable("a")
+    assert to == "metered" and env["ANTHROPIC_API_KEY"] == "k"
+    with pytest.raises(relay_run.NoAccountEnv):
+        _bare_relay({}).replace_unusable("a")
