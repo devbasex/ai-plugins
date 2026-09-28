@@ -29,6 +29,8 @@
     python3 release-steps.py approval-facts --version <版> --prs <PR番号>... [--prev-tag <タグ>] [--plugin <名前>] [--root <dir>]
     python3 release-steps.py notes          --version <版> --prs <PR番号>... [--approval <提示物>]
                                             [--verified claude,codex,kiro] [--ref <ブランチ>] [--plugin <名前>] [--root <dir>]
+    python3 release-steps.py deploy-facts   --verify <コマンド> --out <承認資料> [--root <dir>]
+                                            （手動反映の本番系の承認ゲート 2 の材料。release_lib/deploy.py。#1454）
 
 ブランチ（ベースブランチ・本番チャネル）は `.ndf/worktree.json` の base_branch・production_branch（無ければ既定ブランチ）、
 プラグイン（タグ `<名前>--v<版>`・題 `Release: <名前> v<版>`）は引数 → `.ndf/supervise.json` の release.plugin から読む（#1336）。
@@ -67,7 +69,7 @@ import schema  # noqa: E402
 import versions  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from release_lib import bump  # noqa: E402
+from release_lib import bump, deploy  # noqa: E402
 from release_lib.names import changelog_section, changelog_span, h2_lines, next_h2, plugin_of, release_decl  # noqa: E402
 from step_result import (
     EXIT_GATE,
@@ -986,6 +988,14 @@ def cmd_notes(a):
     )
 
 
+def cmd_deploy_facts(a):
+    """確認が非 0 なら 1（承認資料は書く）、宣言が読めない・--out へ書けないなら 2 で終える。"""
+    items, m = deploy.deploy_facts(git_root(a.root), a.verify, a.out)
+    if m["verify_exit"] != 0:
+        emit(result(TOOL, "stopped", f"導入の確認が {m['verify_exit']} で終わった。本番のデプロイへ進まない", items, m, a.out))
+    emit(result(TOOL, "ok", f"承認資料を書いた（本番系の行 {m['rows']}・{m['base']} の先頭 {m['sha'][:8] or '不明'}）", items, m, a.out))
+
+
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description="リポジトリが宣言した配布のコマンドと、配布の決まった手順を走らせる")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -1044,6 +1054,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--verified", default="", help="--approval: 導入を確かめた経路（カンマ区切り。例 claude,codex,kiro）")
     p.add_argument("--ref", help="--approval: 検証への配布で導入した ref（既定は宣言のベースブランチ）")
     p.set_defaults(func=cmd_notes)
+
+    deploy.add_parser(sub, common, cmd_deploy_facts)
     return ap
 
 

@@ -114,7 +114,7 @@ def apply_decls(a) -> None:
     - 同期とチェック（a.sync_checks）: supervise.json の sync_checks（無ければ計画に sync のステップを置かない）
     - 配布（a.release）: supervise.json の release
 
-    リリースの経路（a.routes）は sprint と close だけが使い、`sprint.apply_routes` が release_routes と require_versions で組む。
+    リリースの経路（a.routes）は sprint と close だけが使い、`sprint_routes.apply_routes` が delivery_decl（宣言。a.delivery）と require_versions で組む。
     """
     import test_strategy as ts
 
@@ -155,10 +155,9 @@ def apply_decls(a) -> None:
         raise DeclError(f"new {a.kind} に要る宣言が無い: " + "・".join(lack))
 
 
-def release_routes(a, forms) -> list:
-    """リリースの経路（lib/delivery.py の routes）。release.form があればそれ、無ければ project.json の delivery から導く。
-    `forms` は雛形のある release.form の値。project.json が読めなければ経路を決められないとして手で行うステージへ落とす
-    （理由は note に出る）。"""
+def delivery_decl(a) -> "delivery.DeliveryDecl":
+    """配布の判定に使う宣言（lib/delivery.py の DeliveryDecl）。起点と本番のブランチは引数（a.base・a.production_branch）が
+    宣言より先に効く。読めない宣言は `problems` に書き、例外を上げない。"""
     import repo
 
     roots = decl_roots(a.worktree, getattr(a, "repo", None))
@@ -171,7 +170,7 @@ def release_routes(a, forms) -> list:
         project = read_decl(roots, project_decl.DECL.name)
     except DeclError as e:
         project, problems = {}, [*problems, str(e)]
-    d = delivery.build(
+    return delivery.build(
         wt,
         project,
         a.release,
@@ -180,7 +179,6 @@ def release_routes(a, forms) -> list:
         base=a.base,
         production=a.production_branch,
     )
-    return delivery.routes(d, tuple(forms))
 
 
 def require_versions(a) -> None:

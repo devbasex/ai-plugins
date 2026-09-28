@@ -173,6 +173,18 @@
         "versioned": {
           "title": "Versioned",
           "type": "boolean"
+        },
+        "production": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Production"
         }
       },
       "required": [

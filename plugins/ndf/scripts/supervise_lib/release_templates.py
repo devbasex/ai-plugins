@@ -373,6 +373,67 @@ def plan_promote(a, repo: str, ci_wait: int, mvv: str | None = None, condition: 
     return with_decls(plan, a)
 
 
+GATE_2_MATERIAL = "{state_dir}/work/approval-deploy.md"  # deploy-facts が書く承認資料
+
+
+def plan_gate_2(a, repo: str, mvv: str, verify: str, prs: str | None, condition: dict | None = None) -> dict:
+    """手動反映の本番系（#1454）の承認ゲート 2 のプラン: facts（導入の確認を走らせ承認資料を書く。落ちたら止まる）→
+    mvv（承認ゲート 2 の MVV 判定）→ note（判定の記録を PR へ。PR が無ければ承認資料の末尾へ）。note が落ちたら handoff。
+    `prs` が None（fast の単独の queue。前のステージの PR を集められない）なら、mvv は判定を打たずに承認ゲート（10）を返す。
+    本番のデプロイそのものは、このプランの後の手で行う「本番」のステージで担い手が起こす。"""
+    state = str(Path(mvv).resolve())
+    q = shlex.quote
+    facts = {
+        "id": "facts",
+        "type": "run",
+        "stage": "配布",
+        "timeout": 1500,  # 導入の確認の上限（雛形の verify-install と同じ）
+        "cwd": repo,
+        "cmd": f"{STEPS_PY} deploy-facts --root {q(repo)} --verify {q(verify)} --out {GATE_2_MATERIAL}",
+        "next": "mvv",
+    }
+    if prs is None:
+        why = q("前のステージの Pull Request を集められないため、承認ゲート 2 は MVV 判定で通さず、利用者の承認を求める")
+        steps = [
+            facts,
+            {
+                "id": "mvv",
+                "type": "run",
+                "timeout": 60,
+                "cmd": f"sh -c 'echo \"$1\"; exit 10' mvv {why}",
+                "gate_next": "end",
+                "next": "end",
+            },
+        ]
+    else:
+        mvv_cmd = (
+            f"{MVV_PY} check --sprint {q(state)} --gate release --material {GATE_2_MATERIAL} --pr {prs} --mode {a.mode} "
+            f"--root {q(repo)} --note {MVV_NOTE}"
+        )
+        note_cmd = (
+            f"sh -c 'set -- {prs}; [ $# -gt 0 ] || {{ cat {MVV_NOTE} >> {GATE_2_MATERIAL}; exit 0; }}; "
+            f'for p; do gh pr comment "$p" --body-file {MVV_NOTE} || exit 1; done\''
+        )
+        steps = [facts, *mvv_gate_steps(mvv_cmd, note_cmd, "end"), handoff_step(state, "関門 2", "判定のコメント")]
+    plan = {
+        "フェーズ": "配布（承認ゲート 2）",
+        "課題": a.issue,
+        "モード": a.mode,
+        "作業場所": repo,
+        "リポジトリ": repo,
+        "規則": RULE_GATE_2,
+        "上限": 12,
+        "steps": steps,
+    }
+    if condition:
+        plan["実行の条件"] = condition
+    return with_decls(plan, a)
+
+
+RULE_GATE_2 = (
+    "本番のデプロイの前の承認ゲート 2。導入の確認（facts）が落ちたら直さずに止める。本番のデプロイ（trigger）はこのプランでは打たない。"
+)
+
 RULE_PROMOTE = (
     "昇格の Pull Request のマージは本番系への反映で、承認ゲート 2 に当たる。承認の無いマージは merged-steps.py が止める。"
     "CI の失敗は直さずに止める（昇格の Pull Request にはコミットを足さない）。"
