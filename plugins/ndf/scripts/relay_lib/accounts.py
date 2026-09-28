@@ -260,11 +260,12 @@ def _check(name: str | None) -> dict:
     env = ca.fallback_env()
     if not env:
         raise Fail("no_declaration", "従量の接続の宣言が無い")
-    t = bd.from_env(env)
-    if t is None:
+    profile, region, model = env.get("AWS_PROFILE", "default"), env.get("AWS_REGION", ""), env.get("ANTHROPIC_MODEL", "")
+    if env.get("CLAUDE_CODE_USE_BEDROCK") in (None, "", "0") or not region or not model:
         raise Fail("not_bedrock", "今の宣言は Bedrock（CLAUDE_CODE_USE_BEDROCK・AWS_REGION・ANTHROPIC_MODEL）でないため確かめられない")
     if bd.aws_path() is None:
         raise Fail("aws_missing", "aws CLI が見つからない")
+    t = bd.Target(profile, region, model)
     _verify_or_fail(t)
     det = t.details()
     return {"provider": bd.PROVIDER, **det, "text": f"呼べる: 従量の接続（{bd.decl_inline(det)}）"}
