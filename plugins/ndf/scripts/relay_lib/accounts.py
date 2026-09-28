@@ -132,6 +132,10 @@ def _list_rows() -> dict:
     return {"rows": rows, "text": "\n".join(_table_lines(rows))}
 
 
+def cmd_list(as_json: bool) -> int:
+    return _respond("list", as_json, _list_rows)
+
+
 HEADER = ("名前", "識別", "5 時間", "7 日", "モデル別の週", "支出上限", "枠の大きさ", "残り", "状態")
 
 
@@ -197,6 +201,10 @@ def _capacity_cmd(asker: Asker, name: str | None, five: str | None, seven: str |
     return {"name": name, "capacity": cap, "text": f"枠の大きさ: {name} 5 時間 {_usd(cap['five_hour'])} / 週 {_usd(cap['seven_day'])}"}
 
 
+def cmd_capacity(name: str, five: str, seven: str) -> int:
+    return _respond("capacity", False, lambda: _capacity_cmd(Asker(), name, five, seven))
+
+
 def _remove(asker: Asker, name: str | None) -> dict:
     name = asker.value("<名前>", "外す名前（アカウントか metered）", name)
     if name == ca.METERED:
@@ -214,6 +222,10 @@ def _remove(asker: Asker, name: str | None) -> dict:
         print("claude auth logout が通らなかった（登録は外す）", file=sys.stderr)
     ca.unregister(name)
     return {"name": name, "text": f"外した: {name}"}
+
+
+def cmd_remove(name: str) -> int:
+    return _respond("remove", False, lambda: _remove(Asker(), name))
 
 
 def _verify_or_fail(profile: str, region: str, model: str) -> None:
