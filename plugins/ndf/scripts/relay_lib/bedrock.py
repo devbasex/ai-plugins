@@ -49,6 +49,14 @@ class Target:
         return decl_label(self.details())
 
 
+def from_env(env: dict) -> Target | None:
+    """従量の接続の宣言の変数の組から呼ぶ先を読む（`Target.env` の逆）。Bedrock の宣言でなければ None。"""
+    region, model = env.get("AWS_REGION", ""), env.get("ANTHROPIC_MODEL", "")
+    if env.get("CLAUDE_CODE_USE_BEDROCK") in (None, "", "0") or not region or not model:
+        return None
+    return Target(env.get("AWS_PROFILE", "default"), region, model)
+
+
 @dataclass
 class VerifyFailure:
     """呼べるかの確認の失敗。`reason` は区分、`aws_error` は元の AWS のエラーの種類の名前（読めなければ空）。"""
