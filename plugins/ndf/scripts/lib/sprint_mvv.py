@@ -1,14 +1,14 @@
-"""mission_mvv.py: `mission-state.py init` のミッション MVV（#1078・#1400）とプロジェクト MVV（#1366）の扱い。
+"""sprint_mvv.py: `sprint-state.py init` のスプリント MVV（#1078・#1400）とプロジェクト MVV（#1366）の扱い。
 
 `pace: normal` は `normal_mvv` が写す（特定できなくても止めず、照合もしない）。以下は `fast` / `auto` の扱い。
 
 - マイルストーンの説明（`gh api repos/<所有者>/<リポジトリ>/milestones/<M>`）から `## Mission` / `## Vision` / `## Value` の節を
   状態のファイルの隣の `mvv.md` へ写し、`mvv.path`・`mvv.sha256` を返す。見出しが 1 つでも無い・取得できないときは止まる（3）。
-  `--mvv` を渡せば写さずにそのファイルを使う。どちらも無ければ 2（承認済みのプロジェクト MVV があれば、ミッション MVV なしで進める）
-- 承認済みのプロジェクト MVV（`--root` の `.ndf/`）があれば、ミッション MVV を照合（`project-mvv.py vet --kind mission` と同じ）に通し、
+  `--mvv` を渡せば写さずにそのファイルを使う。どちらも無ければ 2（承認済みのプロジェクト MVV があれば、スプリント MVV なしで進める）
+- 承認済みのプロジェクト MVV（`--root` の `.ndf/`）があれば、スプリント MVV を照合（`project-mvv.py vet --kind sprint` と同じ）に通し、
   「従う」でなければ箇所を示して止まる（1）。状態には参照（`project_mvv`: 版・sha256）を書く
 
-止まるときは `(理由, 終了コード, items)` を返し、`mission-state.py` が結果の形にする。
+止まるときは `(理由, 終了コード, items)` を返し、`sprint-state.py` が結果の形にする。
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from pathlib import Path
 import md
 
 MVV_SECTIONS = ("Mission", "Vision", "Value")
-MVV_PACES = ("fast", "auto")  # 承認ゲートを MVV 判定で通す進め方（ミッション MVV を写せなければ止まり、写しを照合する）
+MVV_PACES = ("fast", "auto")  # 承認ゲートを MVV 判定で通す進め方（スプリント MVV を写せなければ止まり、写しを照合する）
 EXIT_UNREADABLE, EXIT_PRECONDITION = 2, 3
 
 
@@ -69,8 +69,8 @@ def normal_mvv(a) -> tuple[dict | None, tuple | None, dict | None]:
     except OSError as e:
         text, why = None, f"マイルストーン {a.milestone} の説明を読めない: {e}"
     if text is None:
-        return None, None, {"kind": "mission_mvv", "result": "none", "reason": f"{why}。ミッション MVV なしで進める"}
-    path = Path(a.mission).resolve().parent / "mvv.md"
+        return None, None, {"kind": "sprint_mvv", "result": "none", "reason": f"{why}。スプリント MVV なしで進める"}
+    path = Path(a.sprint).resolve().parent / "mvv.md"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
     return _ref(path), None, None
@@ -94,7 +94,7 @@ def init_mvv(a, project) -> tuple[dict | None, tuple | None]:
     if text is None:
         why = f"マイルストーン {a.milestone} の説明に ## Mission / ## Vision / ## Value の見出しがそろっていない。説明を直してから打ち直す"
         return None, (why, EXIT_PRECONDITION, [])
-    path = Path(a.mission).resolve().parent / "mvv.md"
+    path = Path(a.sprint).resolve().parent / "mvv.md"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
     return _ref(path), None
@@ -118,11 +118,11 @@ def withdrawn(m: dict, name: str) -> bool:
 
 
 def vet_stop(root: Path, path: str) -> tuple | None:
-    """ミッション MVV をプロジェクト MVV に照らす。従えば None、従わなければ止まる理由と箇所。"""
+    """スプリント MVV をプロジェクト MVV に照らす。従えば None、従わなければ止まる理由と箇所。"""
     from project_lib import mvv_llm
 
-    rec, _ = mvv_llm.vet_body(root, Path(path).read_text(encoding="utf-8"), "mission")
+    rec, _ = mvv_llm.vet_body(root, Path(path).read_text(encoding="utf-8"), "sprint")
     if rec["verdict"] == "follow":
         return None
     where = "／".join(f"{x.get('item')}: {x.get('reason')}" for x in rec["locations"])
-    return f"ミッション MVV がプロジェクト MVV と食い違う（{rec['verdict']}）: {where}。状態を書かない", 1, rec["locations"]
+    return f"スプリント MVV がプロジェクト MVV と食い違う（{rec['verdict']}）: {where}。状態を書かない", 1, rec["locations"]

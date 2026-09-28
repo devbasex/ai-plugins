@@ -91,13 +91,13 @@ def sync_checks_of(decl: dict) -> list[tuple[str, str]]:
 
 
 # 雛形が宣言から受けるもの。引数が宣言より先に効く
-# mission はリリースの形を要らない（雛形の無い形ならリリースの段を書かず、/ndf:release で行うと返す）
+# sprint はリリースの形を要らない（雛形の無い形ならリリースの段を書かず、/ndf:release で行うと返す）
 NEEDS = {
     "impl": ("base", "test"),
     "fix": ("base", "test"),
     "check": ("base", "test"),
     "release": ("base", "release"),
-    "mission": ("base", "test"),
+    "sprint": ("base", "test"),
     "close": ("base", "test", "release"),
 }
 
@@ -166,7 +166,7 @@ def _project_decl(roots, sv: dict) -> tuple[dict, str | None]:
 
 
 def decl_fields(a) -> dict:
-    """ミッションの雛形が各計画へ引き継ぐ、宣言から埋めた値。"""
+    """スプリントの雛形が各計画へ引き継ぐ、宣言から埋めた値。"""
     keys = (
         "base",
         "production_branch",

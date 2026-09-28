@@ -19,7 +19,7 @@
 | lines | 前回の検査からの変更（追加 + 削除）> triggers.lines |
 | escapes | 前回の検査の後に、同じ領域で逃げた不具合の記録 ≥ triggers.escapes |
 | hours | 前回の検査から triggers.hours 時間以上たち、その間に PR が 1 本以上ある |
-| final | --final を渡し、範囲に PR が 1 本以上ある（ミッションの終わり） |
+| final | --final を渡し、範囲に PR が 1 本以上ある（スプリントの終わり） |
 | review | --review を渡し、前回のレビューからの範囲に PR が 1 本以上ある（開発版ごとの実装レビュー。ほかのトリガーは見ない） |
 
 **範囲の起点（前回の検査）は、origin の `check-done/review`（`--review`）か `check-done/check`（それ以外）→

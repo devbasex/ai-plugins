@@ -19,7 +19,7 @@ SUPERVISE = SCRIPTS / "supervise.py"
 PKG = SCRIPTS / "supervise_lib"
 
 SUBCOMMANDS = ["run", "history", "expected", "example", "new", "queue", "wait", "design-glossary", "note", "sync-check"]
-NEW_KINDS = ["impl", "fix", "check", "release", "mission", "close"]
+NEW_KINDS = ["impl", "fix", "check", "release", "sprint", "close"]
 MODULES = [
     "__init__",
     "paths",
@@ -36,8 +36,8 @@ MODULES = [
     "templates",
     "verify_steps",
     "release_templates",
-    "mission_waves",
-    "mission",
+    "sprint_waves",
+    "sprint",
     "queue",
     "commands",
     "new_args",
@@ -55,8 +55,8 @@ NO_ENGINE = [
     "pr",
     "templates",
     "release_templates",
-    "mission_waves",
-    "mission",
+    "sprint_waves",
+    "sprint",
     "queue",
     "new_args",
     "paths",

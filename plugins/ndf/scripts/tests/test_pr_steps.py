@@ -368,15 +368,15 @@ def test_bad_calls_exit_2(repo, env, args):
     assert code == 2
 
 
-# --- ミッションの宛て先とモードの 1 行（#1005） --------------------------------------
+# --- スプリントの宛て先とモードの 1 行（#1005） --------------------------------------
 
 
-def test_plan_mission_base_is_accepted_without_review(repo, env):
-    git(repo, "push", "-q", "origin", "develop:mission/m1")
+def test_plan_sprint_base_is_accepted_without_review(repo, env):
+    git(repo, "push", "-q", "origin", "develop:sprint/m1")
     git(repo, "fetch", "-q", "origin")
-    code, out, err = call(["plan", "--base", "mission/m1"], env, repo)
+    code, out, err = call(["plan", "--base", "sprint/m1"], env, repo)
     assert code == 0, err
-    assert out["metrics"]["target"] == "mission" and out["metrics"]["review"] is False
+    assert out["metrics"]["target"] == "sprint" and out["metrics"]["review"] is False
 
 
 def test_plan_develop_base_needs_review(repo, env):
@@ -388,11 +388,11 @@ def test_plan_develop_base_needs_review(repo, env):
 def test_create_writes_mode_line_before_review_mark(repo, env, tmp_path):
     b = body_file(tmp_path)
     code, out, err = call(
-        ["create", "--title", "題", "--body-file", str(b), "--base", "mission/m1", "--mode", "standard", "--stages", "設計,実装"], env, repo
+        ["create", "--title", "題", "--body-file", str(b), "--base", "sprint/m1", "--mode", "standard", "--stages", "設計,実装"], env, repo
     )
     assert code == 0, err
     create = next(c for c in gh_calls(env) if c[:2] == ["pr", "create"])
-    assert create[create.index("--base") + 1] == "mission/m1"
+    assert create[create.index("--base") + 1] == "sprint/m1"
     lines = [l for l in Path(env["FAKE_GH_LOG"] + ".body").read_text().splitlines() if l.strip()]
     assert lines[-2:] == ["モード: standard / 通した工程: 設計 → 実装", "<!-- I want to review in Japanese. -->"]
 

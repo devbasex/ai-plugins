@@ -125,23 +125,23 @@ python3 "$SCRIPTS/pr-steps.py" report <番号>
 URL は最終行に生のまま置く（Markdown リンクにすると利用者の画面では番号しか表示されない）。
 コミット履歴は報告に含めない。
 
-## ミッションブランチ宛てと develop 宛て
+## スプリントブランチ宛てと develop 宛て
 
 **宛て先で、Pull Request の役割が変わる。** `plan` の `metrics.target` と `metrics.review` が区分を返す。
 
 | 宛て先 | 何の Pull Request か | コードレビュー | `metrics` |
 | --- | --- | --- | --- |
-| `mission/<名前>` | 課題の Pull Request。課題の worktree からミッションブランチへ集める | 通さない。緑になったらミッションブランチへ取り込む | `target: mission` / `review: false` |
-| develop（worktree の設定の `base_branch`） | ミッションの Pull Request（ミッションで 1 本）か、ミッションブランチを経ない単独の Pull Request | 通す（リファクタリング・`cross-review`・完了判定を 1 回） | `target: develop` / `review: true` |
+| `sprint/<名前>` | 課題の Pull Request。課題の worktree からスプリントブランチへ集める | 通さない。緑になったらスプリントブランチへ取り込む | `target: sprint` / `review: false` |
+| develop（worktree の設定の `base_branch`） | スプリントの Pull Request（スプリントで 1 本）か、スプリントブランチを経ない単独の Pull Request | 通す（リファクタリング・`cross-review`・完了判定を 1 回） | `target: develop` / `review: true` |
 
-課題の Pull Request は `--base mission/<名前>` で出す。ミッションの Pull Request は、
-ミッションブランチの worktree から `--base` を省いて出し、本文にミッションが閉じる課題を番号ごとに書く。
+課題の Pull Request は `--base sprint/<名前>` で出す。スプリントの Pull Request は、
+スプリントブランチの worktree から `--base` を省いて出し、本文にスプリントが閉じる課題を番号ごとに書く。
 
 ## 閉じる語は本文だけに書く
 
 **閉じる語（`Closes` / `Fixes` / `Resolves`）は Pull Request の本文だけに、番号ごとに書く。** コミット
-メッセージに書くと、マージでそのコミットが指す課題だけが先に閉じ、ミッションが割れる。**本文の閉じる語は
-外さない**（`stage-completeness.md` と `progress-tracking` の「ミッションを閉じる」が本文を入力にする）。
+メッセージに書くと、マージでそのコミットが指す課題だけが先に閉じ、スプリントが割れる。**本文の閉じる語は
+外さない**（`stage-completeness.md` と `progress-tracking` の「スプリントを閉じる」が本文を入力にする）。
 
 ## 設計 Pull Request の本文
 

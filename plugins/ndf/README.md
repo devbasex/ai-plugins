@@ -121,7 +121,7 @@ agy plugin list
 
 ## v10.17.40 へ更新するとき
 
-- ミッション m1400 の課題を develop へ取り込む。（#1410）
+- スプリント m1400 の課題を develop へ取り込む。
 
 ## Playwright テストについて
 

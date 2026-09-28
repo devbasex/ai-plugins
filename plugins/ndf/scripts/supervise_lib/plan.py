@@ -54,7 +54,7 @@ drive のステップ: `cmd`（または `"drive": "cross-review" | "cross-refac
        "release": {"form": "package-plugin", "plugin": "<名前>", "runtimes": ["claude", ...]}}
   テストの範囲の選び方（--tests）と配布してよいかの判断は、宣言にせず conductor と judge のステップに残す
 
-配布の雛形（new release）: 形（`release.form`）ごとにある。無い形は /ndf:release で配る（new mission は配布の計画を
+配布の雛形（new release）: 形（`release.form`）ごとにある。無い形は /ndf:release で配る（new sprint は配布の計画を
 書かずに検査までを書き、結果の next と items に /ndf:release で行うことを載せる。new close と new release は形を要る）。
 - `package-plugin`（Claude Code のプラグイン）: dev は bump → changelog → 説明文 → sync-check → release →
   verify-install（起点のブランチ）→ approval-facts → 提示物の説明文。approval-facts の提示物は

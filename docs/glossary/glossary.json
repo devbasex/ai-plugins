@@ -263,7 +263,7 @@
     {
       "term": "レッドライン",
       "context": "ndf-workflow",
-      "meaning": "MVV 判定が「従う」でも利用者の承認を省かない操作。NDF の共通原則の `C<番号>`（NDF が持つ）・プロジェクト MVV の `P<番号>`（プロジェクトが足す）・ミッション MVV の `R<番号>` の 3 層",
+      "meaning": "MVV 判定が「従う」でも利用者の承認を省かない操作。NDF の共通原則の `C<番号>`（NDF が持つ）・プロジェクト MVV の `P<番号>`（プロジェクトが足す）・スプリント MVV の `R<番号>` の 3 層",
       "deprecated": [
         "越えない線"
       ],
@@ -464,16 +464,6 @@
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
-      "term": "ミッション状態ファイル",
-      "context": "ndf-workflow",
-      "meaning": "ミッションのプラン・done・承認ゲートの記録・MVV・版を持つファイル（`mission.json`）",
-      "deprecated": [
-        "ミッションの状態"
-      ],
-      "code": "mission_state",
-      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
-    },
-    {
       "term": "シグナルファイル",
       "context": "ndf-workflow",
       "meaning": "ラッパーへ知らせるファイル（`next.json` と `stop`）",
@@ -553,15 +543,6 @@
       "meaning": "worktree の分岐元と Pull Request の宛先",
       "deprecated": [
         "起点のブランチ"
-      ],
-      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
-    },
-    {
-      "term": "ミッションブランチ",
-      "context": "ndf-workflow",
-      "meaning": "課題の Pull Request を集め、ベースブランチへの Pull Request をミッションで 1 本にするブランチ",
-      "deprecated": [
-        "ミッションのブランチ"
       ],
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
@@ -948,7 +929,7 @@
     {
       "term": "conductor",
       "context": "ndf-workflow",
-      "meaning": "人間と対話しているセッション。ミッションを持ち、承認ゲートで人間へ問えるのはこの層だけ",
+      "meaning": "人間と対話しているセッション。スプリントを持ち、承認ゲートで人間へ問えるのはこの層だけ",
       "code": "conductor",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
@@ -1037,23 +1018,6 @@
       "source": "docs/specifications/ndf-cleanup-and-bundle-closing.md"
     },
     {
-      "term": "ミッション",
-      "context": "ndf-workflow",
-      "meaning": "1 回のリリースとして出す課題と Pull Request のセット。版数を持つプロジェクトでは 1 つの版になり、版数を持たないプロジェクトでは名前で識別する。工程はミッション単位で 1 回ずつ通し、モードもミッションで 1 つにする",
-      "code": "mission",
-      "source": "plugins/ndf/skills/development-workflow/references/glossary.md",
-      "pending_source": "issues/issue-1336-design.md"
-    },
-    {
-      "term": "ミッション課題",
-      "context": "ndf-workflow",
-      "meaning": "ミッションに含まれる Pull Request の本文が、閉じる語で指す課題",
-      "source": "docs/specifications/ndf-cleanup-and-bundle-closing.md",
-      "deprecated": [
-        "ミッションの課題"
-      ]
-    },
-    {
       "term": "最終工程",
       "context": "ndf-workflow",
       "meaning": "その実行で最後に通る工程。振り返りを通るなら retrospective、通らずリリース後テストを通るなら release-verification",
@@ -1065,7 +1029,7 @@
     {
       "term": "リリース記録",
       "context": "ndf-release",
-      "meaning": "release が Pull Request へ残す記録のブロック。段階・版・ミッションの Pull Request を持つ",
+      "meaning": "release が Pull Request へ残す記録のブロック。段階・版・スプリントの Pull Request を持つ",
       "source": "docs/specifications/ndf-cleanup-and-bundle-closing.md",
       "deprecated": [
         "リリースの記録"
@@ -1116,7 +1080,7 @@
     {
       "term": "実行計画",
       "context": "ndf-workflow",
-      "meaning": "ミッションの課題を、バンドル・工程ごとの依存・触る箇所・着手できる時点で並べた表。オーケストレーターが持つ",
+      "meaning": "スプリントの課題を、バンドル・工程ごとの依存・触る箇所・着手できる時点で並べた表。オーケストレーターが持つ",
       "source": "docs/specifications/ndf-execution-plan-and-parallel-capacity.md"
     },
     {
@@ -1572,7 +1536,7 @@
     {
       "term": "マイルストーン",
       "context": "ndf-workflow",
-      "meaning": "着手の順序を表す単位。ミッションはこの中から切り出す",
+      "meaning": "着手の順序を表す単位。スプリントはこの中から切り出す",
       "code": "milestone",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
@@ -1711,7 +1675,7 @@
     {
       "term": "ステージ",
       "context": "ndf-workflow",
-      "meaning": "パイプラインの中のプランのグループ 1 つ。中はキューで並列に流し、前のステージがすべて完了したときだけ次のステージが流れる。new mission はステージごとにプランを書き出す（設計・ゲート 1・実装・検査・開発版・本番）",
+      "meaning": "パイプラインの中のプランのグループ 1 つ。中はキューで並列に流し、前のステージがすべて完了したときだけ次のステージが流れる。new sprint はステージごとにプランを書き出す（設計・ゲート 1・実装・検査・開発版・本番）",
       "code": "pipeline_stage",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
@@ -1769,21 +1733,21 @@
     {
       "term": "resume",
       "context": "ndf-workflow",
-      "meaning": "new mission のマニフェストで then_of のステージが持つ、そのステージから最後までを流す queue のコマンド。承認ゲートで止まった後に続きを流す",
+      "meaning": "new sprint のマニフェストで then_of のステージが持つ、そのステージから最後までを流す queue のコマンド。承認ゲートで止まった後に続きを流す",
       "code": "resume",
       "source": "plugins/ndf/skills/development-workflow/references/pace.md"
     },
     {
       "term": "MVV",
       "context": "ndf-workflow",
-      "meaning": "Mission / Vision / Value。プロジェクト MVV とミッション MVV の 2 層があり、下位は上位の範囲で具体化する",
+      "meaning": "Mission / Vision / Value。プロジェクト MVV とスプリント MVV の 2 層があり、下位は上位の範囲で具体化する",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md",
       "pending_source": "issues/issue-1366-design.md"
     },
     {
       "term": "MVV 判定",
       "context": "ndf-workflow",
-      "meaning": "承認ゲートのエビデンスが NDF の共通原則・プロジェクト MVV・ミッション MVV に従うかの判定。auto と fast では「従う」でレッドラインが無いときだけ承認ゲートを省き、記録を残す。normal では助言の MVV 判定として承認資料に載せ、承認は人が行う",
+      "meaning": "承認ゲートのエビデンスが NDF の共通原則・プロジェクト MVV・スプリント MVV に従うかの判定。auto と fast では「従う」でレッドラインが無いときだけ承認ゲートを省き、記録を残す。normal では助言の MVV 判定として承認資料に載せ、承認は人が行う",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md",
       "pending_source": "issues/issue-1400-design.md"
     },
@@ -1805,12 +1769,6 @@
       "context": "ndf-workflow",
       "meaning": "プロジェクト全体の Mission / Vision / Value と固有の必ず承認が要る操作（`P<番号>`）。`.ndf/` に宣言し、利用者が承認する。判断の基準の上位",
       "pending_source": "issues/issue-1366-design.md"
-    },
-    {
-      "term": "ミッション MVV",
-      "context": "ndf-workflow",
-      "meaning": "ミッション単位の MVV（既存の `mvv.md`）。プロジェクト MVV の範囲での具体化",
-      "pending_source": "issues/issue-1366-requirements.md"
     },
     {
       "term": "MVV の版",
@@ -1845,7 +1803,7 @@
     {
       "term": "MVV の照合",
       "context": "ndf-workflow",
-      "meaning": "本文（候補・改訂案・ミッション MVV）が NDF の共通原則とプロジェクト MVV に従うかを「従う / 反する疑い / 判定できない」の 3 択で判定すること。従う以外は人へ戻す",
+      "meaning": "本文（候補・改訂案・スプリント MVV）が NDF の共通原則とプロジェクト MVV に従うかを「従う / 反する疑い / 判定できない」の 3 択で判定すること。従う以外は人へ戻す",
       "pending_source": "issues/issue-1366-design.md"
     },
     {
@@ -1857,7 +1815,7 @@
     {
       "term": "根拠の項目",
       "context": "ndf-workflow",
-      "meaning": "判断の記録と設計の決定の記録に残す MVV の項目の番号（Mission / Vision / Value 3 / C4 / P1 / R2）。ミッション MVV の項目は頭に「ミッション」を付ける（ミッション Value 4。R の番号はそのまま）。MVV が無ければ「MVV なし」、返されなければ「根拠なし」",
+      "meaning": "判断の記録と設計の決定の記録に残す MVV の項目の番号（Mission / Vision / Value 3 / C4 / P1 / R2）。スプリント MVV の項目は頭に「スプリント」を付ける（スプリント Value 4。R の番号はそのまま）。MVV が無ければ「MVV なし」、返されなければ「根拠なし」",
       "source": "plugins/ndf/skills/development-workflow/references/project-mvv.md",
       "pending_source": "issues/issue-1400-design.md"
     },
@@ -2356,32 +2314,50 @@
       "context": "ndf-workflow",
       "meaning": "1 つの版として出す課題と Pull Request のセット。期間ではなく、1 つの版として出す中身で切る。工程はスプリント単位で 1 回ずつ通し、モードもスプリントで 1 つにする",
       "code": "sprint",
-      "pending_source": "issues/issue-1407-requirements.md"
+      "deprecated": [
+        "ミッション"
+      ],
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
       "term": "スプリント状態ファイル",
       "context": "ndf-workflow",
-      "meaning": "スプリントのプラン・done・承認ゲートの記録・MVV・版を持つファイル（`sprint.json`）",
+      "meaning": "スプリントのプラン・done・承認ゲートの記録・MVV・版を持つファイル（パスは呼ぶ側が決め、手順書の例は `sprint-state.json`。目録 `sprint.json` とは別のファイル）",
       "code": "sprint_state",
-      "pending_source": "issues/issue-1407-requirements.md"
+      "deprecated": [
+        "ミッション状態ファイル",
+        "ミッションの状態"
+      ],
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
       "term": "スプリントブランチ",
       "context": "ndf-workflow",
       "meaning": "課題の Pull Request を集め、ベースブランチへの Pull Request をスプリントで 1 本にするブランチ（`sprint/<名前>`）",
-      "pending_source": "issues/issue-1407-requirements.md"
+      "deprecated": [
+        "ミッションブランチ",
+        "ミッションのブランチ"
+      ],
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
       "term": "スプリント課題",
       "context": "ndf-workflow",
       "meaning": "スプリントに含まれる Pull Request の本文が、閉じる語で指す課題",
-      "pending_source": "issues/issue-1407-requirements.md"
+      "deprecated": [
+        "ミッション課題",
+        "ミッションの課題"
+      ],
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
       "term": "スプリント MVV",
       "context": "ndf-workflow",
       "meaning": "スプリント単位の MVV。プロジェクト MVV の範囲での具体化",
-      "pending_source": "issues/issue-1407-requirements.md"
+      "deprecated": [
+        "ミッション MVV"
+      ],
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
       "term": "自動反映の本番チャネル",

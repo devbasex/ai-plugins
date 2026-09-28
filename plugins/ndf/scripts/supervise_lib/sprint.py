@@ -1,4 +1,4 @@
-"""new mission / close の組み立てと、pace: fast / auto と MVV の拒否の判定（#1142 の C1・#1370）。"""
+"""new sprint / close の組み立てと、pace: fast / auto と MVV の拒否の判定（#1142 の C1・#1370）。"""
 
 from __future__ import annotations
 
@@ -12,15 +12,15 @@ import project_mvv
 from pace import PaceError, read_pace
 from step_result import result
 from supervise_lib.decl import SUPERVISE_DECL, decl_roots, with_decls
-from supervise_lib.mission_waves import (
-    mission_branch,
+from supervise_lib.sprint_waves import (
+    sprint_branch,
     plan_fast_check,
     plan_fast_impl,
-    plan_mission_branch,
-    plan_mission_check,
-    plan_mission_design,
-    plan_mission_impl,
-    plan_mission_release,
+    plan_sprint_branch,
+    plan_sprint_check,
+    plan_sprint_design,
+    plan_sprint_impl,
+    plan_sprint_release,
     plan_advise_design,
     plan_mvv_design,
     plan_mvv_release,
@@ -35,8 +35,8 @@ def prod_version(version: str) -> str:
     return re.sub(r"-.*$", "", version)
 
 
-def fast_mission_plans(a) -> list[dict]:
-    """pace: fast のミッションのステージ。ミッションのブランチを作らず、実装は起点のブランチへ直接入れる。
+def fast_sprint_plans(a) -> list[dict]:
+    """pace: fast のスプリントのステージ。スプリントブランチを作らず、実装は起点のブランチへ直接入れる。
     実装の queue が --then のステージで 検査（実行の条件）→ 実装レビュー（開発版ごと）→ 開発版 → 本番（先頭が MVV 判定）を
     順に流す。検査が立てばその中でレビューも通るため、実装レビューのステージは範囲が空になり流れない。"""
     repo = str(Path(a.worktree).resolve())
@@ -65,34 +65,34 @@ def fast_mission_plans(a) -> list[dict]:
 
 AUTO_GATE_1 = (
     "設計のプランの MVV 判定が通せばマージ済みで、このステージは通過する。設計のプランが関門を返したら、承認を取り "
-    '`mission-state.py gate <状態> "関門 1" --by user` と `run <プラン> --from approve` の後に次のステージの resume を打つ'
+    '`sprint-state.py gate <状態> "関門 1" --by user` と `run <プラン> --from approve` の後に次のステージの resume を打つ'
 )
 
 
-def auto_mission_plans(a) -> list[dict]:
-    """pace: auto のミッションのステージ。並びは normal と同じ（設計 → 関門 1 → ミッションのブランチ → 実装 → 検査）で、
+def auto_sprint_plans(a) -> list[dict]:
+    """pace: auto のスプリントのステージ。並びは normal と同じ（設計 → 関門 1 → スプリントブランチ → 実装 → 検査）で、
     後ろに開発版と本番（先頭が MVV 判定の関門 2）を続ける。設計と開発版・本番だけを MVV 判定つきのプランで作り、
-    ミッションのブランチ以降を最初のステージの --then で 1 本の queue に流す（#1370 の決定 3）。check-trigger.py は通らない。"""
+    スプリントブランチ以降を最初のステージの --then で 1 本の queue に流す（#1370 の決定 3）。check-trigger.py は通らない。"""
     repo = str(Path(a.worktree).resolve())
     waves = []
     if a.design:
         waves.append({"name": "設計", "plans": {f"design-{n}": plan_mvv_design(a, n, repo) for n in a.design}})
         waves.append({"name": "関門 1", "gate": AUTO_GATE_1})
-    first = "設計" if a.design else "ミッションのブランチ"
+    first = "設計" if a.design else "スプリントブランチ"
     then = {"then_of": first} if a.design else {}
     impl = {}
     for n in a.issue:
-        plan = plan_mission_impl(a, n, repo)
+        plan = plan_sprint_impl(a, n, repo)
         plan["進め方"] = "auto"  # 課題の本文の見出し行と通過記録へ進め方を書く（supervise_lib/state.py）
         impl[f"impl-{n}"] = plan
     waves += [
-        {"name": "ミッションのブランチ", "plans": {"mission-branch": plan_mission_branch(a, repo)}, **then},
+        {"name": "スプリントブランチ", "plans": {"sprint-branch": plan_sprint_branch(a, repo)}, **then},
         {"name": "実装", "plans": impl, "then_of": first},
-        {"name": "検査", "plans": {"check": plan_mission_check(a, repo)}, "then_of": first},
+        {"name": "検査", "plans": {"check": plan_sprint_check(a, repo)}, "then_of": first},
     ]
     if not has_release_template(a):
         return waves + [manual_release_wave(a)]
-    prs = ["{queue_pr:check}"]  # 出す版の PR は検査のステージのミッションの PR（関門 2 の判定のコメントの宛先）
+    prs = ["{queue_pr:check}"]  # 出す版の PR は検査のステージのスプリントの PR（関門 2 の判定のコメントの宛先）
     return waves + [
         {"name": "開発版", "plans": {"release": plan_mvv_release(a, repo, a.version, "dev", prs=prs)}, "then_of": first},
         {"name": "本番", "plans": {"release-prod": plan_mvv_release(a, repo, prod_version(a.version), "prod", prs=prs)}, "then_of": first},
@@ -100,7 +100,7 @@ def auto_mission_plans(a) -> list[dict]:
 
 
 def close_plan(a, repo: str) -> dict:
-    """ミッションの終わりのまとめ: 確定仕様化 → Pull Request → 課題を閉じる → 振り返りを 1 回ずつ。"""
+    """スプリントの終わりのまとめ: 確定仕様化 → Pull Request → 課題を閉じる → 振り返りを 1 回ずつ。"""
     issues = ",".join(map(str, a.issue))
     refs = " ".join(f"#{i}" for i in a.issue)
     branch = f"spec/{a.name}"
@@ -135,8 +135,8 @@ def close_plan(a, repo: str) -> dict:
                     "type": "pr",
                     "stage": "Pull Request",
                     "base": a.base,
-                    "title": f"確定仕様化: ミッション {a.name}",
-                    "summary": f"ミッション {a.name}（{refs}）の計画と設計を docs/ へ移す。issues/ と docs/ だけを触る",
+                    "title": f"確定仕様化: スプリント {a.name}",
+                    "summary": f"スプリント {a.name}（{refs}）の計画と設計を docs/ へ移す。issues/ と docs/ だけを触る",
                     "changes": "無し（文書の置き場所だけ）",
                     "next": "ready",
                 },
@@ -148,8 +148,8 @@ def close_plan(a, repo: str) -> dict:
                     "stage": "後片付け",
                     "cwd": repo,
                     "timeout": 900,
-                    "cmd": f"python3 {HERE / 'mission-close.py'} --record-pr {{queue_pr:release-prod}} --issues {issues} "
-                    f"--with-verification --label {shlex.quote(f'ミッション {a.name}の後片付け')}",
+                    "cmd": f"python3 {HERE / 'sprint-close.py'} --record-pr {{queue_pr:release-prod}} --issues {issues} "
+                    f"--with-verification --label {shlex.quote(f'スプリント {a.name}の後片付け')}",
                     "next": "retro",
                 },
                 {
@@ -159,7 +159,7 @@ def close_plan(a, repo: str) -> dict:
                     "kind": "振り返り",
                     "stage": "振り返り",
                     "timeout": 3600,
-                    "prompt": f"/ndf:retrospective ミッション {a.name}（{refs}）。材料に検査の記録の集計（`{stats}` の出力: "
+                    "prompt": f"/ndf:retrospective スプリント {a.name}（{refs}）。材料に検査の記録の集計（`{stats}` の出力: "
                     "トリガーが立った回数・検査ごとの指摘の件数・検査の後に逃げた不具合の件数）を使い、閾値の"
                     "見直しが要るかを書く。",
                     "next": "end",
@@ -171,7 +171,7 @@ def close_plan(a, repo: str) -> dict:
 
 
 def close_waves(a) -> list[dict]:
-    """ミッションの終わりのステージ。最終の検査で変更があったときだけ開発版と本番が流れる。"""
+    """スプリントの終わりのステージ。最終の検査で変更があったときだけ開発版と本番が流れる。"""
     repo = str(Path(a.worktree).resolve())
     final = f"{a.name}-final"
     changed = {"cmd": f"{CHECK_PY} changed --id {final} --root {shlex.quote(repo)}", "skip_code": 3}
@@ -217,16 +217,16 @@ def pace_refusal(a) -> str | None:
 
 
 def mvv_refusal(state_path: str | None, root=None, pace: str = "fast") -> str | None:
-    """MVV の承認の照合（`lib/project_mvv.approval_refusal`）。ミッション MVV の承認の記録とハッシュの一致、
+    """MVV の承認の照合（`lib/project_mvv.approval_refusal`）。スプリント MVV の承認の記録とハッシュの一致、
     無ければ承認済みのプロジェクト MVV と状態に残した参照の一致を見る。外れた理由を返す。"""
     if not state_path:
-        return f"--pace {pace} には --state（ミッションの状態）が要る"
+        return f"--pace {pace} には --state（スプリントの状態）が要る"
     try:
         state = json.loads(Path(state_path).read_text())
     except (OSError, ValueError) as e:
-        return f"ミッションの状態を読めない: {e}"
+        return f"スプリントの状態を読めない: {e}"
     if not isinstance(state, dict):
-        return "ミッションの状態を読めない: オブジェクトでない"
+        return "スプリントの状態を読めない: オブジェクトでない"
     return project_mvv.approval_refusal(state, root or Path.cwd())
 
 
@@ -239,7 +239,7 @@ def has_release_template(a) -> bool:
 
 
 def manual_release_wave(a) -> dict:
-    """雛形の無いリリースの形のミッションの最後に置く、手で行うリリースの段（計画を持たない）。"""
+    """雛形の無いリリースの形のスプリントの最後に置く、手で行うリリースの段（計画を持たない）。"""
     form = (a.release or {}).get("form") if isinstance(a.release, dict) else None
     why = f"リリースの形 {form!r} に雛形が無い" if form else f".ndf/{SUPERVISE_DECL} に release.form が無い"
     return {
@@ -254,32 +254,32 @@ def advises(a, closing: bool = False) -> bool:
     return bool(getattr(a, "state", None)) and not closing
 
 
-def mission_state_path(a) -> str:
+def sprint_state_path(a) -> str:
     return str(Path(a.state).resolve())
 
 
-def mission_plans(a) -> list[dict]:
-    """ミッションのステージを順に返す。ステージの中の計画は queue --max 3 で同時に流してよい。
+def sprint_plans(a) -> list[dict]:
+    """スプリントのステージを順に返す。ステージの中の計画は queue --max 3 で同時に流してよい。
     リリースの形に雛形が無ければ、リリースの段の代わりに手で行う段（manual_release_wave）を最後に置く。"""
     if getattr(a, "pace", "normal") == "fast":
-        return fast_mission_plans(a)
+        return fast_sprint_plans(a)
     if getattr(a, "pace", "normal") == "auto":
-        return auto_mission_plans(a)
+        return auto_sprint_plans(a)
     repo = str(Path(a.worktree).resolve())
     advise = advises(a)
-    design = plan_advise_design if advise else plan_mission_design
+    design = plan_advise_design if advise else plan_sprint_design
     waves = []
     if a.design:
         waves.append({"name": "設計", "plans": {f"design-{n}": design(a, n, repo) for n in a.design}})
         waves.append({"name": "関門 1", "gate": normal_gate_1(a) if advise else "設計 Pull Request をまとめて承認してマージする"})
     waves += [
-        {"name": "ミッションのブランチ", "plans": {"mission-branch": plan_mission_branch(a, repo)}},
-        {"name": "実装", "plans": {f"impl-{n}": plan_mission_impl(a, n, repo) for n in a.issue}},
-        {"name": "検査", "plans": {"check": plan_mission_check(a, repo)}},
+        {"name": "スプリントブランチ", "plans": {"sprint-branch": plan_sprint_branch(a, repo)}},
+        {"name": "実装", "plans": {f"impl-{n}": plan_sprint_impl(a, n, repo) for n in a.issue}},
+        {"name": "検査", "plans": {"check": plan_sprint_check(a, repo)}},
     ]
     if not has_release_template(a):
         return waves + [manual_release_wave(a)]
-    release = {"name": "配布", "plans": {"release": plan_mission_release(a, repo, advise)}, "then_of": "検査"}
+    release = {"name": "配布", "plans": {"release": plan_sprint_release(a, repo, advise)}, "then_of": "検査"}
     if advise:
         release["note"] = normal_gate_2(a)
     return waves + [release]
@@ -287,9 +287,9 @@ def mission_plans(a) -> list[dict]:
 
 def user_gate_cmd(a, gate: str, pr: bool) -> str:
     """利用者の答えを状態へ書くコマンド（覆しの記録。#1400 の AC6）。承認ゲート 1 は答えた設計 PR を --pr で渡す。"""
-    state = shlex.quote(mission_state_path(a))
+    state = shlex.quote(sprint_state_path(a))
     return (
-        f"python3 {shlex.quote(str(HERE / 'mission-state.py'))} gate {state} {shlex.quote(gate)} --what <要約> --by user"
+        f"python3 {shlex.quote(str(HERE / 'sprint-state.py'))} gate {state} {shlex.quote(gate)} --what <要約> --by user"
         + (" --pr <設計 PR>" if pr else "")
         + " --outcome approved|rejected"
     )
@@ -310,11 +310,11 @@ def normal_gate_2(a) -> str:
 
 
 def normal_command(a) -> str:
-    """断ったときに示す normal の起動の形（mission が受ける引数をすべて写し、--pace と --state だけを外す）。"""
-    words = ["python3", str(SELF), "new", "mission"]
+    """断ったときに示す normal の起動の形（sprint が受ける引数をすべて写し、--pace と --state だけを外す）。"""
+    words = ["python3", str(SELF), "new", "sprint"]
     for name, _, allowed in NEW_ARGS:
         value = getattr(a, name.lstrip("-").replace("-", "_"), None)
-        if "mission" not in allowed.split() or name in ("--pace", "--state") or value in (None, [], False):
+        if "sprint" not in allowed.split() or name in ("--pace", "--state") or value in (None, [], False):
             continue
         words += [name, *map(str, value)] if isinstance(value, list) else [name] if value is True else [name, str(value)]
     return " ".join(map(shlex.quote, words))
@@ -331,8 +331,8 @@ def add_resume(index: list[dict]) -> None:
         entry["resume"] = cmd + "".join(" --then " + " ".join(map(shlex.quote, e["plans"])) for e in rest)
 
 
-def cmd_new_mission(a, waves: list[dict] | None = None) -> dict:
-    """ミッションの計画をステージごとのファイルへ書き出す。ステージは番号の順に queue で流す。
+def cmd_new_sprint(a, waves: list[dict] | None = None) -> dict:
+    """スプリントの計画をステージごとのファイルへ書き出す。ステージは番号の順に queue で流す。
     then_of のステージは、そのステージの queue へ --then のステージとして足す（ステージは書いた順に流れる）。"""
     pace = getattr(a, "pace", "normal")
     if waves is None and pace in MVV_PACES:
@@ -347,24 +347,24 @@ def cmd_new_mission(a, waves: list[dict] | None = None) -> dict:
                 next=f"normal で進める（{normal_command(a)}）か、条件を満たしてから打ち直す",
             )
     closing = waves is not None
-    waves = waves if waves is not None else mission_plans(a)
+    waves = waves if waves is not None else sprint_plans(a)
     if getattr(a, "state", None):
-        # worker と judge がミッション MVV を状態から読む（#1400 の決定 12）
+        # worker と judge がスプリント MVV を状態から読む（#1400 の決定 12）
         for wave in waves:
             for plan in (wave.get("plans") or {}).values():
-                plan["ミッション状態"] = mission_state_path(a)
-    out = Path(a.out or f"mission-{a.name}")
+                plan["スプリント状態"] = sprint_state_path(a)
+    out = Path(a.out or f"sprint-{a.name}")
     out.mkdir(parents=True, exist_ok=True)
     index = write_stage_index(waves, out)
     add_resume(index)
-    manifest = out / "mission.json"
+    manifest = out / "sprint.json"
     head = manifest_head(a, pace, closing)
     manifest.write_text(json.dumps({**head, "ステージ": index}, ensure_ascii=False, indent=2) + "\n")
     plans = sum(len(e.get("plans", [])) for e in index)
     return result(
         "supervise-new",
         "ok",
-        f"ミッション {a.name} の計画を {plans} 本・{len(index)} ステージで書いた: {manifest}",
+        f"スプリント {a.name} の計画を {plans} 本・{len(index)} ステージで書いた: {manifest}",
         index,
         {"waves": len(index), "plans": plans, "manifest": str(manifest)},
         next=next_text(pace, index, advise=pace == "normal" and advises(a, closing)),
@@ -401,20 +401,20 @@ def write_stage_index(waves: list[dict], out: Path) -> list[dict]:
 
 
 def manifest_head(a, pace: str, closing: bool = False) -> dict:
-    """manifest の見出し（ミッション / 進め方 / 状態 / ブランチ）。"""
-    head = {"ミッション": a.name}
+    """manifest の見出し（スプリント / 進め方 / 状態 / ブランチ）。"""
+    head = {"スプリント": a.name}
     if pace in MVV_PACES:
-        head.update({"進め方": pace, "状態": mission_state_path(a)})
+        head.update({"進め方": pace, "状態": sprint_state_path(a)})
         if pace != "fast":
-            head["ブランチ"] = mission_branch(a.name)
+            head["ブランチ"] = sprint_branch(a)
         return head
-    # new close（waves を渡す）は --pace を持たず、状態があれば fast のミッションの終わり
+    # new close（waves を渡す）は --pace を持たず、状態があれば fast のスプリントの終わり
     if getattr(a, "state", None) and closing:
-        head.update({"進め方": "fast", "状態": mission_state_path(a)})
+        head.update({"進め方": "fast", "状態": sprint_state_path(a)})
         return head
     if getattr(a, "state", None):  # normal と --state（#1400）
-        head.update({"進め方": "normal", "状態": mission_state_path(a)})
-    head["ブランチ"] = mission_branch(a.name)
+        head.update({"進め方": "normal", "状態": sprint_state_path(a)})
+    head["ブランチ"] = sprint_branch(a)
     return head
 
 
@@ -425,7 +425,7 @@ def next_text(pace: str, index: list[dict], advise: bool = False) -> str:
     if advise:
         nxt += (
             "。承認資料には助言の MVV 判定を載せ、利用者が答えたら関門 1 のステージの gate・配布のステージの note にある "
-            "mission-state.py gate（--what と --by user。関門 1 は --pr も）を打つ"
+            "sprint-state.py gate（--what と --by user。関門 1 は --pr も）を打つ"
         )
     if pace == "auto":
         nxt = (

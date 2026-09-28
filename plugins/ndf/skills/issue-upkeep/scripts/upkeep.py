@@ -186,54 +186,59 @@ def _still_present(root, term: str) -> bool:
     return git(root, "grep", "-q", "-F", "-e", term, "HEAD", check=False).returncode == 0
 
 
-def cmd_candidates(a):
-    root = git_root(a.root)
-    repo = _repo(root, a.repo)
-    gh = Gh(repo)
-    since = _ref_date(root, a.since_ref)
-    open_issues = _issues(gh, "state=open")
-    by_num = {i["number"]: i for i in open_issues}
-    routes: dict[int, set] = {}
-    terms: dict[int, set] = {}
-    notes = []
+class _Routes:
+    """open の課題ごとに、拾った経路と手がかりの語を集める。"""
 
-    def hit(n, route, term=None):
-        if n in by_num:
-            routes.setdefault(n, set()).add(route)
+    def __init__(self, open_issues):
+        self.by_num = {i["number"]: i for i in open_issues}
+        self.routes: dict[int, set] = {}
+        self.terms: dict[int, set] = {}
+
+    def add(self, n, route, term=None):
+        if n in self.by_num:
+            self.routes.setdefault(n, set()).add(route)
             if term:
-                terms.setdefault(n, set()).add(term)
+                self.terms.setdefault(n, set()).add(term)
 
-    paths, idents = diff_terms(root, a.since_ref)
+
+def _route_diff(open_issues, root, since_ref, routes):
+    paths, idents = diff_terms(root, since_ref)
     needles = _path_needles(root, paths)
     gone: dict[str, bool] = {}
     for i in open_issues:
         text = f"{i.get('title') or ''}\n{i.get('body') or ''}"
         for needle in needles:
             if _mentions_path(text, needle):
-                hit(i["number"], "diff-path", needle)
+                routes.add(i["number"], "diff-path", needle)
         for t in idents:
             if _mentions(text, t):
                 if t not in gone:
                     gone[t] = not _still_present(root, t)
                 if gone[t]:
-                    hit(i["number"], "diff-identifier", t)
+                    routes.add(i["number"], "diff-identifier", t)
+    return paths, idents
 
+
+def _route_milestones(gh, repo, open_issues, since, routes, notes):
     milestones = gh.call([f"repos/{repo}/milestones?state=all&per_page=100"], paginate=True) or []
     closed = [c for c in _issues(gh, f"state=closed&since={since}") if (c.get("closed_at") or "") >= since]
     empty_milestones = []
     if milestones:
         for i in open_issues:
             if not i.get("milestone"):
-                hit(i["number"], "no-milestone")
+                routes.add(i["number"], "no-milestone")
         touched = {c["milestone"]["title"] for c in closed if c.get("milestone")}
         for i in open_issues:
             if i.get("milestone") and i["milestone"]["title"] in touched:
-                hit(i["number"], "closed-milestone", i["milestone"]["title"])
+                routes.add(i["number"], "closed-milestone", i["milestone"]["title"])
         open_titles = {i["milestone"]["title"] for i in open_issues if i.get("milestone")}
         empty_milestones = sorted(t for t in touched if t not in open_titles)
     else:
         notes.append("マイルストーンが無いため no-milestone と closed-milestone を飛ばした")
+    return closed, empty_milestones
 
+
+def _route_sub_issues(gh, repo, closed, open_issues, routes, notes):
     closed_nums = {c["number"] for c in closed}
     sub_api = True
     for c in closed:
@@ -249,33 +254,40 @@ def cmd_candidates(a):
             raise
         for k in kids:
             if k.get("state") == "open":
-                hit(k["number"], "sub-issue", f"#{c['number']}")
+                routes.add(k["number"], "sub-issue", f"#{c['number']}")
     for i in open_issues:
         for m in re.finditer(r"親[^\n#]{0,20}#(\d+)\b", i.get("body") or ""):
             if int(m.group(1)) in closed_nums:
-                hit(i["number"], "sub-issue", f"#{m.group(1)}")
+                routes.add(i["number"], "sub-issue", f"#{m.group(1)}")
 
-    for line in git(root, "log", "--no-merges", "--format=%s", f"{a.since_ref}..HEAD").stdout.splitlines():
+
+def _route_commits(root, since_ref, routes):
+    for line in git(root, "log", "--no-merges", "--format=%s", f"{since_ref}..HEAD").stdout.splitlines():
         for m in re.finditer(r"#(\d+)\b", line):
-            hit(int(m.group(1)), "commit-subject", line)
+            routes.add(int(m.group(1)), "commit-subject", line)
 
+
+def _route_manual(a, routes, notes):
     if a.all:
-        for n in by_num:
-            hit(n, "all")
+        for n in routes.by_num:
+            routes.add(n, "all")
     for n in a.add:
-        if n not in by_num:
+        if n not in routes.by_num:
             notes.append(f"--add の #{n} は open でないため除いた")
-        hit(n, "manual")
+        routes.add(n, "manual")
 
+
+def _candidate_result(a, repo, since, open_issues, closed, paths, idents, routes, empty_milestones, notes, waits):
+    found = routes.routes
     # コミットの件名が指す課題は直っている見込みが高いため、上限で切るときも先に残す
-    order = sorted(routes, key=lambda n: ("commit-subject" not in routes[n], -len(routes[n]), n))
+    order = sorted(found, key=lambda n: ("commit-subject" not in found[n], -len(found[n]), n))
     keep = order if a.limit is None else order[: a.limit]
     deferred = [n for n in order if n not in set(keep)]
     items = []
     # 上限を超えた候補は items に載せない（metrics.deferred にだけ並べる）。載せると
     # 区分を決める対象として求められ、上限が効かない。
     for n in keep:
-        i = by_num[n]
+        i = routes.by_num[n]
         items.append(
             {
                 "kind": "issue",
@@ -283,15 +295,15 @@ def cmd_candidates(a):
                 "result": "candidate",
                 "number": n,
                 "title": i.get("title") or "",
-                "routes": sorted(routes[n], key=ROUTES.index),
-                "terms": sorted(terms.get(n, ())),
+                "routes": sorted(found[n], key=ROUTES.index),
+                "terms": sorted(routes.terms.get(n, ())),
                 "updated_at": i.get("updated_at"),
                 "digest": snapshot_digest(i),
             }
         )
     for t in empty_milestones:
         items.append({"kind": "milestone", "name": t, "result": "no-open-issue"})
-    by_route = {r: sum(1 for n in keep if r in routes[n]) for r in ROUTES}
+    by_route = {r: sum(1 for n in keep if r in found[n]) for r in ROUTES}
     metrics = {
         "since_ref": a.since_ref,
         "since": since,
@@ -304,7 +316,7 @@ def cmd_candidates(a):
         "paths": len(paths),
         "identifiers": len(idents),
         "notes": notes,
-        "waits": gh.waits,
+        "waits": waits,
     }
     summary = (
         f"候補 {len(keep)} 件（open {len(open_issues)} 件中）: "
@@ -321,6 +333,25 @@ def cmd_candidates(a):
             f"上限 {a.limit} 件を超えた {len(deferred)} 件（deferred）は、次の回に --add で渡すか --limit を上げる" if deferred else None
         ),
     )
+    return out, deferred
+
+
+def cmd_candidates(a):
+    root = git_root(a.root)
+    repo = _repo(root, a.repo)
+    gh = Gh(repo)
+    since = _ref_date(root, a.since_ref)
+    open_issues = _issues(gh, "state=open")
+    routes = _Routes(open_issues)
+    notes = []
+
+    paths, idents = _route_diff(open_issues, root, a.since_ref, routes)
+    closed, empty_milestones = _route_milestones(gh, repo, open_issues, since, routes, notes)
+    _route_sub_issues(gh, repo, closed, open_issues, routes, notes)
+    _route_commits(root, a.since_ref, routes)
+    _route_manual(a, routes, notes)
+
+    out, deferred = _candidate_result(a, repo, since, open_issues, closed, paths, idents, routes, empty_milestones, notes, gh.waits)
     sd = _state_dir(a.state_dir, repo)
     (sd / "apply.json").unlink(missing_ok=True)  # 前の回の apply を今回の報告へ混ぜない
     jsonio.write_atomic(sd / "candidates.json", out, indent=1)
@@ -385,98 +416,65 @@ def _diff(cur: dict, ch: dict, ms: Milestones, n: int) -> tuple[dict, list, list
     return patch, add, remove
 
 
-def cmd_apply(a):
-    root = git_root(a.root)
-    plan = _load_plan(a.plan)
-    repo = a.repo or plan.get("repo") or _repo(root, None)
-    sd = _state_dir(a.state_dir, repo)
-    ledger_path = sd / "ledger.json"
-    ledger = _read_state(ledger_path) or {}
-    gh = Gh(repo, max_waits=a.max_waits, max_wait=a.max_wait)
-    ms = Milestones(gh)
-    buckets = {k: [] for k in ("applied", "skipped_changed", "unchanged", "already", "needs_approval", "returned", "failed", "pending")}
-    items, partial, why_partial = [], False, ""
-    actions = plan["actions"]
-    for idx, act in enumerate(actions):
-        n, verdict, ch = act["number"], act["verdict"], act.get("changes") or {}
-        key = _ledger_key(repo, act)
+def _apply_one(gh, ms, repo, act, rec, record):
+    """1 件を反映し (区分, 理由) を返す。Partial は書き込み後の要約値を記録してから投げ直す。"""
+    n, verdict, ch = act["number"], act["verdict"], act.get("changes") or {}
+    if verdict in RETURNED:
+        return "returned", "要判断は反映しない"
+    if rec is not None and rec.get("result") != "partial":
+        return "already", "記録にある"
+    if verdict in NEEDS_APPROVAL and act.get("approved") is not True:
+        return "needs_approval", "やらないは承認を得てから反映する"
+    cur, wrote = None, False
+    try:
+        cur = gh.call([f"repos/{repo}/issues/{n}"], target=n)
+        now = snapshot_digest(cur)
+        own = rec is not None and now == rec.get("digest")  # 前の打ち直しで自分が書いた状態
+        if cur.get("updated_at") != act["updated_at"] and now != act["digest"] and not own:
+            return "skipped_changed", f"updated_at {act['updated_at']} → {cur.get('updated_at')}・課題の要約値も変わった"
+        patch, add, remove = _diff(cur, ch, ms, n)
+        if not (patch or add or remove):
+            record({"result": "unchanged"})
+            return "unchanged", "変える内容が無い"
+        if patch:
+            got = gh.call(
+                [f"repos/{repo}/issues/{n}", "-X", "PATCH", "--input", "-"], stdin=json.dumps(patch, ensure_ascii=False), target=n
+            )
+            cur, wrote = (got if isinstance(got, dict) else {**cur, **patch}), True
+        if add:
+            got = gh.call(
+                [f"repos/{repo}/issues/{n}/labels", "-X", "POST", "--input", "-"],
+                stdin=json.dumps({"labels": add}, ensure_ascii=False),
+                target=n,
+            )
+            cur, wrote = _with_labels(cur, got, add=add), True
+        for lb in remove:
+            seg = urllib.parse.quote(lb, safe="")  # `status/blocked` の `/` を別のパスにしない
+            got = gh.call([f"repos/{repo}/issues/{n}/labels/{seg}", "-X", "DELETE"], target=n)
+            cur, wrote = _with_labels(cur, got, drop=lb), True
+        record({"result": "applied", "fields": sorted(patch), "add_labels": add, "remove_labels": remove})
+        return "applied", ", ".join(sorted(patch) + [f"+{x}" for x in add] + [f"-{x}" for x in remove])
+    except (Partial, StepError) as e:
+        if wrote:  # 書き込んだ後の要約値を残し、打ち直しで自分の書き込みを並行の更新と取り違えない
+            record({"result": "partial", "digest": snapshot_digest(cur)})
+        if isinstance(e, StepError):
+            return "failed", str(e)
+        raise
 
-        def put(bucket, reason=""):
-            buckets[bucket].append(n)
-            it = {"kind": "issue", "name": f"#{n}", "result": bucket, "verdict": verdict}
-            if reason:
-                it["reason"] = reason
-            items.append(it)
 
-        if verdict in RETURNED:
-            put("returned", "要判断は反映しない")
-            continue
-        rec = ledger.get(key)
-        if rec is not None and rec.get("result") != "partial":
-            put("already", "記録にある")
-            continue
-        if verdict in NEEDS_APPROVAL and act.get("approved") is not True:
-            put("needs_approval", "やらないは承認を得てから反映する")
-            continue
-        cur, wrote = None, False
-        try:
-            cur = gh.call([f"repos/{repo}/issues/{n}"], target=n)
-            now = snapshot_digest(cur)
-            own = rec is not None and now == rec.get("digest")  # 前の打ち直しで自分が書いた状態
-            if cur.get("updated_at") != act["updated_at"] and now != act["digest"] and not own:
-                put("skipped_changed", f"updated_at {act['updated_at']} → {cur.get('updated_at')}・課題の要約値も変わった")
-                continue
-            patch, add, remove = _diff(cur, ch, ms, n)
-            if not (patch or add or remove):
-                ledger[key] = {"result": "unchanged"}
-                jsonio.write_atomic(ledger_path, ledger, indent=1)
-                put("unchanged", "変える内容が無い")
-                continue
-            if patch:
-                got = gh.call(
-                    [f"repos/{repo}/issues/{n}", "-X", "PATCH", "--input", "-"], stdin=json.dumps(patch, ensure_ascii=False), target=n
-                )
-                cur, wrote = (got if isinstance(got, dict) else {**cur, **patch}), True
-            if add:
-                got = gh.call(
-                    [f"repos/{repo}/issues/{n}/labels", "-X", "POST", "--input", "-"],
-                    stdin=json.dumps({"labels": add}, ensure_ascii=False),
-                    target=n,
-                )
-                cur, wrote = _with_labels(cur, got, add=add), True
-            for lb in remove:
-                seg = urllib.parse.quote(lb, safe="")  # `status/blocked` の `/` を別のパスにしない
-                got = gh.call([f"repos/{repo}/issues/{n}/labels/{seg}", "-X", "DELETE"], target=n)
-                cur, wrote = _with_labels(cur, got, drop=lb), True
-            ledger[key] = {"result": "applied", "fields": sorted(patch), "add_labels": add, "remove_labels": remove}
-            jsonio.write_atomic(ledger_path, ledger, indent=1)
-            put("applied", ", ".join(sorted(patch) + [f"+{x}" for x in add] + [f"-{x}" for x in remove]))
-        except (Partial, StepError) as e:
-            if wrote:  # 書き込んだ後の要約値を残し、打ち直しで自分の書き込みを並行の更新と取り違えない
-                ledger[key] = {"result": "partial", "digest": snapshot_digest(cur)}
-                jsonio.write_atomic(ledger_path, ledger, indent=1)
-            if isinstance(e, StepError):
-                put("failed", str(e))
-                continue
-            partial, why_partial = True, str(e)
-            for rest in actions[idx:]:
-                buckets["pending"].append(rest["number"])
-                items.append({"kind": "issue", "name": f"#{rest['number']}", "result": "pending", "verdict": rest["verdict"]})
-            break
-
+def _apply_outcome(repo, actions, buckets, partial, why_partial, prev, waits):
+    """区分ごとの課題番号から metrics・要約・終了の状態・次の手を作る。"""
     closed = [
         act["number"] for act in actions if act["number"] in buckets["applied"] and (act.get("changes") or {}).get("state") == "closed"
     ]
-    # 同じ回（前の candidates 以降）の打ち直しを足し合わせ、承認後・partial 後の報告から前の反映と待ちを落とさない
-    prev = ((_read_state(sd / "apply.json") or {}).get("metrics") or {}).get("round") or {}
     metrics = {
         **buckets,
         "closed": closed,
-        "waits": gh.waits,
+        "waits": waits,
         "round": {
             "applied": sorted(set(prev.get("applied", [])) | set(buckets["applied"])),
             "closed": sorted(set(prev.get("closed", [])) | set(closed)),
-            "waits": prev.get("waits", []) + gh.waits,
+            "waits": prev.get("waits", []) + waits,
             "runs": prev.get("runs", 0) + 1,
         },
         "partial": partial,
@@ -486,7 +484,7 @@ def cmd_apply(a):
         f"反映 {len(buckets['applied'])} 件（閉じた {len(closed)} 件）・照合で飛ばした "
         f"{len(buckets['skipped_changed'])} 件・変更なし {len(buckets['unchanged'])} 件・済み "
         f"{len(buckets['already'])} 件・承認待ち {len(buckets['needs_approval'])} 件・返した "
-        f"{len(buckets['returned'])} 件・失敗 {len(buckets['failed'])} 件・待ち {len(gh.waits)} 回"
+        f"{len(buckets['returned'])} 件・失敗 {len(buckets['failed'])} 件・待ち {len(waits)} 回"
         + (f"。部分的に終えた（{why_partial}）" if partial else "")
     )
     status, code, nxt, pres = "ok", None, None, None
@@ -517,6 +515,46 @@ def cmd_apply(a):
         if partial:
             parts.append("時間を置いて同じ plan で apply を打ち直す（済んだものは記録で飛ぶ）")
         nxt = "。".join(parts)
+    return status, code, summary, metrics, pres, nxt
+
+
+def cmd_apply(a):
+    root = git_root(a.root)
+    plan = _load_plan(a.plan)
+    repo = a.repo or plan.get("repo") or _repo(root, None)
+    sd = _state_dir(a.state_dir, repo)
+    ledger_path = sd / "ledger.json"
+    ledger = _read_state(ledger_path) or {}
+    gh = Gh(repo, max_waits=a.max_waits, max_wait=a.max_wait)
+    ms = Milestones(gh)
+    buckets = {k: [] for k in ("applied", "skipped_changed", "unchanged", "already", "needs_approval", "returned", "failed", "pending")}
+    items, partial, why_partial = [], False, ""
+    actions = plan["actions"]
+    for idx, act in enumerate(actions):
+        n, verdict = act["number"], act["verdict"]
+        key = _ledger_key(repo, act)
+
+        def record(value, key=key):
+            ledger[key] = value
+            jsonio.write_atomic(ledger_path, ledger, indent=1)
+
+        try:
+            bucket, reason = _apply_one(gh, ms, repo, act, ledger.get(key), record)
+        except Partial as e:
+            partial, why_partial = True, str(e)
+            for rest in actions[idx:]:
+                buckets["pending"].append(rest["number"])
+                items.append({"kind": "issue", "name": f"#{rest['number']}", "result": "pending", "verdict": rest["verdict"]})
+            break
+        buckets[bucket].append(n)
+        it = {"kind": "issue", "name": f"#{n}", "result": bucket, "verdict": verdict}
+        if reason:
+            it["reason"] = reason
+        items.append(it)
+
+    # 同じ回（前の candidates 以降）の打ち直しを足し合わせ、承認後・partial 後の報告から前の反映と待ちを落とさない
+    prev = ((_read_state(sd / "apply.json") or {}).get("metrics") or {}).get("round") or {}
+    status, code, summary, metrics, pres, nxt = _apply_outcome(repo, actions, buckets, partial, why_partial, prev, gh.waits)
     out = result(TOOL, status, summary, items, metrics, presentation_path=pres, next=nxt)
     jsonio.write_atomic(sd / "apply.json", out, indent=1)
     emit(out, code)

@@ -420,9 +420,9 @@ def plan_check_since(a) -> dict:
     if review_only:
         steps = [s for s in steps if s["id"] not in ("assess", "refactor")]
     issues = list(a.issue or [])
-    if not issues and getattr(a, "mission", None):
+    if not issues and getattr(a, "sprint", None):
         try:
-            issues = [int(i) for i in json.loads(Path(a.mission).read_text()).get("issues", [])]
+            issues = [int(i) for i in json.loads(Path(a.sprint).read_text()).get("issues", [])]
         except (OSError, ValueError, TypeError):
             issues = []
     plan = {

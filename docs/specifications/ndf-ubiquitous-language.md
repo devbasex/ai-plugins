@@ -27,7 +27,7 @@ NDF の開発ワークフローは、要求と設計の前に、そのプロジ�
 | 仕様のコピーのスクリプト | `plugins/ndf/scripts/spec-copy.py` | 課題の本文からコピーを作る（`write`）。本文とコピーの食い違いを返す（`check`） |
 | 用語集の形式の参照 | `plugins/ndf/skills/requirements-design/references/glossary-format.md` | 用語集の設定と用語集の JSON の形、未登録の語とみなす規則、文書の形 |
 | ドメインモデルの参照 | `plugins/ndf/skills/design/references/domain-model.md` | ドメインモデルの節の書き方 |
-| 設計のフェーズのステップ | `plugins/ndf/scripts/supervise.py` の `plan_mission_design` / `plan_fast_design` | 入口の検査（`glossary`）と、レビューの後の用語チェック（`glossary-check` ほか） |
+| 設計のフェーズのステップ | `plugins/ndf/scripts/supervise.py` の `plan_sprint_design` / `plan_fast_design` | 入口の検査（`glossary`）と、レビューの後の用語チェック（`glossary-check` ほか） |
 | レビューのラウンドの種類 | `plugins/ndf/skills/cross-review/scripts/classifications.py` の `review_stage` / `has_domain_model`・`state.py`・`launch-reviewer.sh` | 設計 Pull Request のラウンドをモデルレビューと詳細レビューに分け、それぞれの観点を渡す |
 | 確定仕様化の引き継ぎ | `plugins/ndf/scripts/plan-to-spec-steps.py` の `spec-finalize` | 消した設計を確定前の出所に持つ語の正本を、確定仕様へ移す |
 | ai-plugins の用語集の設定と用語集 | `.ndf/glossary.json`・`docs/glossary/glossary.json`・`docs/glossary.md` | このリポジトリのユビキタス言語 |

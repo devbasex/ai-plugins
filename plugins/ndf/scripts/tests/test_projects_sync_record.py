@@ -118,7 +118,7 @@ def test_a_wrong_value_writes_nothing(repo, key, value):
 
 
 def test_status_does_not_write_the_issue_body(repo):
-    """`status` はボードだけに書く（「ミッションを閉じる」だけが使う）。"""
+    """`status` はボードだけに書く（「スプリントを閉じる」だけが使う）。"""
     declare(repo)
     out = run(repo, SYNC, "42", "status", "Done")
     assert out.returncode == 0, out.stderr

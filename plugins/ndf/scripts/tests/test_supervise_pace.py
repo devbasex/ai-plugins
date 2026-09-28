@@ -1,4 +1,4 @@
-"""supervise.py の `pace: fast`（#1078）: 計画の組み立て（new mission --pace fast・new check --since-last・
+"""supervise.py の `pace: fast`（#1078）: 計画の組み立て（new sprint --pace fast・new check --since-last・
 new close・new release --mvv・new impl --escape-of）と実行（実行の条件・--then のステージ・{queue_pr:<名>}・gate_as_ok）。
 
 実機の claude と gh は呼ばない（計画の形と、run のステップだけの計画を流して見る）。
@@ -16,7 +16,7 @@ import pytest
 
 SCRIPTS = Path(__file__).resolve().parents[1]
 SUPERVISE = SCRIPTS / "supervise.py"
-MISSION_STATE = SCRIPTS / "mission-state.py"
+SPRINT_STATE = SCRIPTS / "sprint-state.py"
 REPO = SCRIPTS.parents[2]
 PY = sys.executable
 
@@ -28,17 +28,17 @@ def cli(*args, cwd=None):
     return subprocess.run([PY, str(SUPERVISE), *args], capture_output=True, text=True, cwd=cwd or REPO)
 
 
-def mission_state(tmp_path: Path, approve: bool = True) -> Path:
+def sprint_state(tmp_path: Path, approve: bool = True) -> Path:
     mvv = tmp_path / "mvv-src.md"
     mvv.write_text("## Mission\n速く\n## Vision\n回る\n## Value\n実測\n")
-    state = tmp_path / "state" / "mission-state.json"
+    state = tmp_path / "state" / "sprint-state.json"
     subprocess.run(
-        [PY, str(MISSION_STATE), "init", str(state), "--name", "m", "--pace", "fast", "--mvv", str(mvv), "--root", str(tmp_path)],
+        [PY, str(SPRINT_STATE), "init", str(state), "--name", "m", "--pace", "fast", "--mvv", str(mvv), "--root", str(tmp_path)],
         check=True,
         capture_output=True,
     )
     if approve:
-        subprocess.run([PY, str(MISSION_STATE), "gate", str(state), "MVV", "--what", "MVV を承認"], check=True, capture_output=True)
+        subprocess.run([PY, str(SPRINT_STATE), "gate", str(state), "MVV", "--what", "MVV を承認"], check=True, capture_output=True)
     return state
 
 
@@ -58,14 +58,14 @@ def assert_transitions_exist(plan: dict) -> None:
                 assert s[k] in ids or s[k] == "end", (plan.get("フェーズ"), s)
 
 
-# ---------- new mission --pace fast ----------
+# ---------- new sprint --pace fast ----------
 
 
-def new_fast_mission(tmp_path, state, *extra):
+def new_fast_sprint(tmp_path, state, *extra):
     out = tmp_path / "m"
     p = cli(
         "new",
-        "mission",
+        "sprint",
         "--name",
         "m26",
         "--worktree",
@@ -88,19 +88,19 @@ def new_fast_mission(tmp_path, state, *extra):
     return p, out
 
 
-def test_fast_mission_puts_check_then_dev_then_prod_after_the_implementation(tmp_path):
-    p, out = new_fast_mission(tmp_path, mission_state(tmp_path))
+def test_fast_sprint_puts_check_then_dev_then_prod_after_the_implementation(tmp_path):
+    p, out = new_fast_sprint(tmp_path, sprint_state(tmp_path))
     assert p.returncode == 0, p.stdout + p.stderr
-    manifest = load(out / "mission.json")
-    assert manifest["進め方"] == "fast" and manifest["状態"].endswith("mission-state.json")
+    manifest = load(out / "sprint.json")
+    assert manifest["進め方"] == "fast" and manifest["状態"].endswith("sprint-state.json")
     waves = {w["name"]: w for w in manifest["ステージ"]}
     assert [w["name"] for w in manifest["ステージ"]] == ["設計", "関門 1", "実装", "検査", "実装レビュー", "開発版", "本番"]
     cmd = waves["実装"]["command"]
     check, dev, prod = waves["検査"]["plans"][0], waves["開発版"]["plans"][0], waves["本番"]["plans"][0]
     review = waves["実装レビュー"]["plans"][0]
     assert cmd.index("--then " + check) < cmd.index("--then " + review) < cmd.index("--then " + dev) < cmd.index("--then " + prod)
-    # ミッションのブランチを作らない。スクリプトの絶対パスは .worktrees/mission/... を含みうるので、ブランチ名で見る。
-    assert "mission/m26" not in json.dumps(manifest, ensure_ascii=False)
+    # スプリントブランチを作らない。スクリプトの絶対パスは .worktrees/sprint/... を含みうるので、ブランチ名で見る。
+    assert "sprint/m26" not in json.dumps(manifest, ensure_ascii=False)
 
     impl = load(waves["実装"]["plans"][0])
     assert impl["起点"] == "origin/develop" and next(s for s in impl["steps"] if s["type"] == "pr")["base"] == "develop"
@@ -152,23 +152,23 @@ def approve_runs_with_or_without_note(tmp_path, cmd):
 
 
 @pytest.mark.parametrize("change", ["unapproved", "changed"])
-def test_fast_mission_is_refused_without_a_matching_approval(tmp_path, change):
-    state = mission_state(tmp_path, approve=change != "unapproved")
+def test_fast_sprint_is_refused_without_a_matching_approval(tmp_path, change):
+    state = sprint_state(tmp_path, approve=change != "unapproved")
     if change == "changed":
         mvv = Path(load(state)["mvv"]["path"])
         mvv.write_text(mvv.read_text() + "足した行\n")
-    p, out = new_fast_mission(tmp_path, state)
+    p, out = new_fast_sprint(tmp_path, state)
     assert p.returncode == 1, p.stdout + p.stderr
     assert json.loads(p.stdout)["status"] == "stopped"
     assert not list(out.glob("*.json")) if out.exists() else True
 
 
-def test_fast_mission_is_refused_for_operation_mode(tmp_path):
-    p, out = new_fast_mission(tmp_path, mission_state(tmp_path), "--mode", "operation")
+def test_fast_sprint_is_refused_for_operation_mode(tmp_path):
+    p, out = new_fast_sprint(tmp_path, sprint_state(tmp_path), "--mode", "operation")
     assert p.returncode == 1 and "モード" in json.loads(p.stdout)["summary"]
 
 
-def test_fast_mission_is_refused_without_the_declaration(tmp_path):
+def test_fast_sprint_is_refused_without_the_declaration(tmp_path):
     repo = tmp_path / "repo"
     (repo / ".ndf").mkdir(parents=True)
     (repo / ".ndf" / "worktree.json").write_text('{"version": 1, "base_branch": "develop", "production_branch": "main"}')
@@ -176,7 +176,7 @@ def test_fast_mission_is_refused_without_the_declaration(tmp_path):
     out = tmp_path / "m"
     p = cli(
         "new",
-        "mission",
+        "sprint",
         "--name",
         "m",
         "--worktree",
@@ -188,7 +188,7 @@ def test_fast_mission_is_refused_without_the_declaration(tmp_path):
         "--pace",
         "fast",
         "--state",
-        str(mission_state(tmp_path)),
+        str(sprint_state(tmp_path)),
         "--out",
         str(out),
         cwd=repo,
@@ -273,12 +273,12 @@ def test_close_runs_spec_close_and_retro_once_each_in_order(tmp_path):
         "--prod",
         "10.18.0",
         "--state",
-        str(mission_state(tmp_path)),
+        str(sprint_state(tmp_path)),
         "--out",
         str(out),
     )
     assert p.returncode == 0, p.stdout + p.stderr
-    manifest = load(out / "mission.json")
+    manifest = load(out / "sprint.json")
     waves = {w["name"]: w for w in manifest["ステージ"]}
     assert [w["name"] for w in manifest["ステージ"]] == ["最終の検査", "開発版", "本番", "まとめ"]
     final = load(waves["最終の検査"]["plans"][0])
@@ -303,7 +303,7 @@ def test_close_runs_spec_close_and_retro_once_each_in_order(tmp_path):
 
 
 def test_release_with_mvv(tmp_path):
-    state = mission_state(tmp_path)
+    state = sprint_state(tmp_path)
     for channel, version in (("prod", "10.18.0"), ("dev", "10.18.0-dev.1")):
         out = tmp_path / f"{channel}.json"
         p = cli(

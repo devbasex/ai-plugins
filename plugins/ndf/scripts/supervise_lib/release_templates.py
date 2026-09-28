@@ -140,7 +140,7 @@ def plan_release_package_plugin(a) -> dict:
     ]
     if not dev:
         # 後片付け: 配布の PR（head が release/v{v} で始まる。開発版の release/v{v}-dev.N も含む。宛先は起点のブランチ）と
-        # ミッションの PR（--prs）のブランチと作業ツリー
+        # スプリントの PR（--prs）のブランチと作業ツリー
         run_ids.append("cleanup")
         steps.append(
             {
@@ -156,7 +156,7 @@ def plan_release_package_plugin(a) -> dict:
         )
     approval = f"issues/approval-{plugin}-v{base}.md"
     mvv = getattr(a, "mvv", None)
-    advise = getattr(a, "advise", None)  # 助言の MVV 判定を置くミッションの状態（pace: normal。#1400）
+    advise = getattr(a, "advise", None)  # 助言の MVV 判定を置くスプリントの状態（pace: normal。#1400）
     if dev:
         prev = f" --prev-tag {a.prev_tag}" if a.prev_tag else ""
         facts = {
@@ -213,7 +213,7 @@ def plan_release_package_plugin(a) -> dict:
                 "id": "mvv",
                 "type": "run",
                 "timeout": 900,
-                "cmd": f"{MVV_PY} check --mission {shlex.quote(state)} --gate release "
+                "cmd": f"{MVV_PY} check --sprint {shlex.quote(state)} --gate release "
                 f"--material {shlex.quote(material)} --pr {prs} --mode {a.mode}"
                 + (f" --root {shlex.quote(repo)}" if repo else "")
                 + f" --note {MVV_NOTE}",
@@ -259,7 +259,7 @@ def advise_steps(state: str, gate: str, args: str, note: dict, head: dict | None
             **(head or {}),
             "timeout": 900,
             # 前の実行の判定の記録を載せないよう先に消す（MVV なしのときは記録を書かない）
-            "cmd": f"rm -f {MVV_NOTE} && {MVV_PY} check --mission {state} --gate {gate} {args} --note {MVV_NOTE} --advise",
+            "cmd": f"rm -f {MVV_NOTE} && {MVV_PY} check --sprint {state} --gate {gate} {args} --note {MVV_NOTE} --advise",
             "on_fail": "mvv-note",
             "next": "mvv-note",
         },

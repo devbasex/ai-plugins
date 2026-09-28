@@ -1,5 +1,5 @@
 """supervise.py の `pace: auto`（#1370）: 使ってよい条件・ステージの並び・承認ゲート 1・2 の MVV 判定のステップ・
-handoff（記録の後の失敗を承認ゲートへ落とす）・resume と、mission-state.py gate --withdraw。
+handoff（記録の後の失敗を承認ゲートへ落とす）・resume と、sprint-state.py gate --withdraw。
 
 実機の claude と gh は呼ばない（計画の形と、run のステップだけの計画を流して見る）。
 """
@@ -16,7 +16,7 @@ import pytest
 
 SCRIPTS = Path(__file__).resolve().parents[1]
 SUPERVISE = SCRIPTS / "supervise.py"
-MISSION_STATE = SCRIPTS / "mission-state.py"
+SPRINT_STATE = SCRIPTS / "sprint-state.py"
 REPO = SCRIPTS.parents[2]
 PY = sys.executable
 
@@ -24,7 +24,7 @@ sys.path.insert(0, str(SCRIPTS))
 from supervise_lib import queue  # noqa: E402
 
 AUTO = {"enabled": True, "modes": ["light", "standard", "legacy-refactor"], "verify": "true"}
-STAGES = ["設計", "関門 1", "ミッションのブランチ", "実装", "検査", "開発版", "本番"]
+STAGES = ["設計", "関門 1", "スプリントブランチ", "実装", "検査", "開発版", "本番"]
 
 
 def load(path) -> dict:
@@ -35,17 +35,17 @@ def steps_of(plan: dict) -> dict:
     return {s["id"]: s for s in plan["steps"]}
 
 
-def mission_state(tmp_path: Path, approve: bool = True) -> Path:
+def sprint_state(tmp_path: Path, approve: bool = True) -> Path:
     mvv = tmp_path / "mvv-src.md"
     mvv.write_text("## Mission\n速く\n## Vision\n回る\n## Value\n実測\n")
-    state = tmp_path / "state" / "mission-state.json"
+    state = tmp_path / "state" / "sprint-state.json"
     subprocess.run(
-        [PY, str(MISSION_STATE), "init", str(state), "--name", "m", "--pace", "auto", "--mvv", str(mvv), "--root", str(tmp_path)],
+        [PY, str(SPRINT_STATE), "init", str(state), "--name", "m", "--pace", "auto", "--mvv", str(mvv), "--root", str(tmp_path)],
         check=True,
         capture_output=True,
     )
     if approve:
-        subprocess.run([PY, str(MISSION_STATE), "gate", str(state), "MVV", "--what", "MVV を承認"], check=True, capture_output=True)
+        subprocess.run([PY, str(SPRINT_STATE), "gate", str(state), "MVV", "--what", "MVV を承認"], check=True, capture_output=True)
     return state
 
 
@@ -63,9 +63,9 @@ def make_repo(tmp_path: Path, pace: dict | None, prod: str = "main", form: bool 
     return repo
 
 
-def new_mission(tmp_path, repo, state, *extra, pace="auto", design=True):
+def new_sprint(tmp_path, repo, state, *extra, pace="auto", design=True):
     out = tmp_path / "m"
-    args = ["new", "mission", "--name", "m27", "--worktree", str(repo), "--issue", "11", "12"]
+    args = ["new", "sprint", "--name", "m27", "--worktree", str(repo), "--issue", "11", "12"]
     args += ["--design", "11"] if design else []
     args += ["--version", "10.18.0-dev.1", "--pace", pace, "--state", str(state), "--out", str(out), *extra]
     p = subprocess.run([PY, str(SUPERVISE), *args], capture_output=True, text=True, cwd=repo)
@@ -75,12 +75,12 @@ def new_mission(tmp_path, repo, state, *extra, pace="auto", design=True):
 # ---------- 使ってよい条件（AC1・I1・I9） ----------
 
 
-def test_auto_mission_writes_the_normal_order_with_mvv_gates(tmp_path):
+def test_auto_sprint_writes_the_normal_order_with_mvv_gates(tmp_path):
     repo = make_repo(tmp_path, {"auto": AUTO})
-    p, out = new_mission(tmp_path, repo, mission_state(tmp_path))
+    p, out = new_sprint(tmp_path, repo, sprint_state(tmp_path))
     assert p.returncode == 0, p.stdout + p.stderr
-    manifest = load(out / "mission.json")
-    assert manifest["進め方"] == "auto" and manifest["ブランチ"] == "mission/m27" and manifest["状態"].endswith("mission-state.json")
+    manifest = load(out / "sprint.json")
+    assert manifest["進め方"] == "auto" and manifest["ブランチ"] == "sprint/m27" and manifest["状態"].endswith("sprint-state.json")
     assert [w["name"] for w in manifest["ステージ"]] == STAGES
     waves = {w["name"]: w for w in manifest["ステージ"]}
     # 設計の queue が後ろのステージを 1 ステージずつ --then で流す
@@ -93,10 +93,10 @@ def test_auto_mission_writes_the_normal_order_with_mvv_gates(tmp_path):
         resume = waves[n]["resume"]
         assert resume.split(" --then ")[0].endswith(f"{waves[n]['plans'][-1]} --max 3")
         assert resume.count(" --then ") == len(STAGES[2:]) - 1 - i
-    # 実装はミッションのブランチへ入り、検査はミッションの develop 宛 PR を 1 回出す
+    # 実装はスプリントブランチへ入り、検査はスプリントの develop 宛 PR を 1 回出す
     impl = load(waves["実装"]["plans"][0])
-    assert impl["起点"] == "origin/mission/m27" and impl["進め方"] == "auto"
-    assert next(s for s in impl["steps"] if s["type"] == "pr")["base"] == "mission/m27"
+    assert impl["起点"] == "origin/sprint/m27" and impl["進め方"] == "auto"
+    assert next(s for s in impl["steps"] if s["type"] == "pr")["base"] == "sprint/m27"
     check = load(waves["検査"]["plans"][0])
     assert steps_of(check)["pr"]["base"] == "develop" and "実行の条件" not in check
     # check-trigger.py はどのプランにも無い
@@ -128,16 +128,16 @@ def test_auto_mission_writes_the_normal_order_with_mvv_gates(tmp_path):
 )
 def test_auto_is_refused_when_the_declaration_does_not_allow_it(tmp_path, pace, word):
     repo = make_repo(tmp_path, pace)
-    p, out = new_mission(tmp_path, repo, mission_state(tmp_path))
+    p, out = new_sprint(tmp_path, repo, sprint_state(tmp_path))
     res = json.loads(p.stdout)
     assert p.returncode == 1 and res["status"] == "stopped" and word in res["summary"], res
-    assert "--pace" not in res["next"] and "new mission" in res["next"] and not out.exists()
+    assert "--pace" not in res["next"] and "new sprint" in res["next"] and not out.exists()
 
 
-def test_the_normal_fallback_keeps_every_mission_option(tmp_path):
+def test_the_normal_fallback_keeps_every_sprint_option(tmp_path):
     repo = make_repo(tmp_path, None)
     extra = ["--test-cmd", "pytest {paths}", "--tests", "a", "b", "--scope", "s", "--base", "dev2", "--production-branch", "prd"]
-    p, _ = new_mission(tmp_path, repo, mission_state(tmp_path), *extra)
+    p, _ = new_sprint(tmp_path, repo, sprint_state(tmp_path), *extra)
     nxt = json.loads(p.stdout)["next"]
     assert "--pace" not in nxt and "--state" not in nxt
     for part in ["--test-cmd 'pytest {paths}'", "--tests a b", "--scope s", "--base dev2", "--production-branch prd", "--design 11"]:
@@ -146,39 +146,39 @@ def test_the_normal_fallback_keeps_every_mission_option(tmp_path):
 
 def test_auto_is_refused_for_operation_mode_without_a_dev_channel_and_without_mvv(tmp_path):
     repo = make_repo(tmp_path, {"auto": {**AUTO, "modes": ["operation", "standard"]}})
-    p, _ = new_mission(tmp_path, repo, mission_state(tmp_path), "--mode", "operation")
+    p, _ = new_sprint(tmp_path, repo, sprint_state(tmp_path), "--mode", "operation")
     assert p.returncode == 1 and "モード operation" in json.loads(p.stdout)["summary"]
     repo2 = make_repo(tmp_path / "b", {"auto": AUTO}, prod="develop")
-    p, _ = new_mission(tmp_path / "b", repo2, mission_state(tmp_path / "b"))
+    p, _ = new_sprint(tmp_path / "b", repo2, sprint_state(tmp_path / "b"))
     assert p.returncode == 1 and "開発版のチャネル" in json.loads(p.stdout)["summary"]
     repo3 = make_repo(tmp_path / "c", {"auto": AUTO})
-    p, out = new_mission(tmp_path / "c", repo3, mission_state(tmp_path / "c", approve=False))
+    p, out = new_sprint(tmp_path / "c", repo3, sprint_state(tmp_path / "c", approve=False))
     assert p.returncode == 1 and json.loads(p.stdout)["status"] == "stopped" and not out.exists()
 
 
 def test_the_fast_and_auto_sections_do_not_stand_in_for_each_other(tmp_path):
     repo = make_repo(tmp_path, {"auto": AUTO})
-    p, _ = new_mission(tmp_path, repo, mission_state(tmp_path), pace="fast")
+    p, _ = new_sprint(tmp_path, repo, sprint_state(tmp_path), pace="fast")
     assert p.returncode == 1 and "fast.enabled" in json.loads(p.stdout)["summary"]
 
 
 # ---------- 設計が無いとき・リリースの雛形が無いとき（I2） ----------
 
 
-def test_without_design_the_mission_branch_carries_the_command(tmp_path):
+def test_without_design_the_sprint_branch_carries_the_command(tmp_path):
     repo = make_repo(tmp_path, {"auto": AUTO})
-    p, out = new_mission(tmp_path, repo, mission_state(tmp_path), design=False)
+    p, out = new_sprint(tmp_path, repo, sprint_state(tmp_path), design=False)
     assert p.returncode == 0, p.stdout + p.stderr
-    waves = load(out / "mission.json")["ステージ"]
+    waves = load(out / "sprint.json")["ステージ"]
     assert [w["name"] for w in waves] == STAGES[2:]
-    assert "command" in waves[0] and all(w["then_of"] == "ミッションのブランチ" and "resume" in w for w in waves[1:])
+    assert "command" in waves[0] and all(w["then_of"] == "スプリントブランチ" and "resume" in w for w in waves[1:])
 
 
 def test_without_a_release_template_the_last_stage_is_manual(tmp_path):
     repo = make_repo(tmp_path, {"auto": AUTO}, form=False)
-    p, out = new_mission(tmp_path, repo, mission_state(tmp_path))
+    p, out = new_sprint(tmp_path, repo, sprint_state(tmp_path))
     assert p.returncode == 0, p.stdout + p.stderr
-    waves = load(out / "mission.json")["ステージ"]
+    waves = load(out / "sprint.json")["ステージ"]
     assert [w["name"] for w in waves] == [*STAGES[:5], "リリース"] and "manual" in waves[-1]
     assert not any("--gate release" in Path(p).read_text() for w in waves for p in w.get("plans", []))
 
@@ -188,7 +188,7 @@ def test_without_a_release_template_the_last_stage_is_manual(tmp_path):
 
 def gate_mvv(state: Path, gate: str, log: Path) -> None:
     subprocess.run(
-        [PY, str(MISSION_STATE), "gate", str(state), gate, "--what", "MVV 判定", "--by", "mvv", "--verdict", "follow"]
+        [PY, str(SPRINT_STATE), "gate", str(state), gate, "--what", "MVV 判定", "--by", "mvv", "--verdict", "follow"]
         + ["--reasons", "[]", "--log", str(log)],
         check=True,
         capture_output=True,
@@ -197,10 +197,10 @@ def gate_mvv(state: Path, gate: str, log: Path) -> None:
 
 def auto_plans(tmp_path) -> tuple[Path, dict]:
     repo = make_repo(tmp_path, {"auto": AUTO})
-    state = mission_state(tmp_path)
-    p, out = new_mission(tmp_path, repo, state)
+    state = sprint_state(tmp_path)
+    p, out = new_sprint(tmp_path, repo, state)
     assert p.returncode == 0, p.stdout + p.stderr
-    return state, {w["name"]: w for w in load(out / "mission.json")["ステージ"]}
+    return state, {w["name"]: w for w in load(out / "sprint.json")["ステージ"]}
 
 
 def test_a_failed_merge_after_a_follow_verdict_ends_in_a_gate_and_withdraws_the_record(tmp_path, monkeypatch):
@@ -208,14 +208,14 @@ def test_a_failed_merge_after_a_follow_verdict_ends_in_a_gate_and_withdraws_the_
     state, waves = auto_plans(tmp_path)
     ds = steps_of(load(waves["設計"]["plans"][0]))
     log = tmp_path / "mvv-gate.jsonl"
-    log.write_text(json.dumps({"at": "2026-09-27T00:00:00Z", "gate": "design", "mission": str(state), "verdict": "follow"}) + "\n")
+    log.write_text(json.dumps({"at": "2026-09-27T00:00:00Z", "gate": "design", "sprint": str(state), "verdict": "follow"}) + "\n")
     # mvv のステップが記録を書いた後に merge が落ちた流れを、run のステップだけで流す
     plan = tmp_path / "design.json"
     steps = [
         {
             "id": "mvv",
             "type": "run",
-            "cmd": f"{PY} {MISSION_STATE} gate {state} '関門 1' --what x --by mvv --verdict follow --reasons '[]' --log {log}",
+            "cmd": f"{PY} {SPRINT_STATE} gate {state} '関門 1' --what x --by mvv --verdict follow --reasons '[]' --log {log}",
             "next": "merge",
             "gate_next": "end",
         },
@@ -231,7 +231,7 @@ def test_a_failed_merge_after_a_follow_verdict_ends_in_a_gate_and_withdraws_the_
     assert not [g for g in m["gates"] if g["name"] == "関門 1"] and m["withdrawals"][0]["name"] == "関門 1"
     # 外した後の差し戻しは覆しとして書かれない
     p = subprocess.run(
-        [PY, str(MISSION_STATE), "gate", str(state), "関門 1", "--what", "差し戻し", "--outcome", "rejected", "--mvv-log", str(log)],
+        [PY, str(SPRINT_STATE), "gate", str(state), "関門 1", "--what", "差し戻し", "--outcome", "rejected", "--mvv-log", str(log)],
         capture_output=True,
         text=True,
     )
@@ -241,10 +241,10 @@ def test_a_failed_merge_after_a_follow_verdict_ends_in_a_gate_and_withdraws_the_
 
 def test_a_rejection_after_an_automatic_pass_is_an_override(tmp_path, monkeypatch):
     monkeypatch.setenv("NDF_MVV_STATE_DIR", str(tmp_path / "mvv-state"))
-    state = mission_state(tmp_path)
+    state = sprint_state(tmp_path)
     gate_mvv(state, "関門 2", tmp_path / "mvv-gate.jsonl")
     p = subprocess.run(
-        [PY, str(MISSION_STATE), "gate", str(state), "関門 2", "--what", "差し戻し", "--outcome", "rejected"]
+        [PY, str(SPRINT_STATE), "gate", str(state), "関門 2", "--what", "差し戻し", "--outcome", "rejected"]
         + ["--mvv-log", str(tmp_path / "mvv-gate.jsonl")],
         capture_output=True,
         text=True,
@@ -255,31 +255,31 @@ def test_a_rejection_after_an_automatic_pass_is_an_override(tmp_path, monkeypatc
 
 
 def test_withdraw_keeps_the_user_record_and_does_nothing_without_a_record(tmp_path):
-    state = mission_state(tmp_path)
-    p = subprocess.run([PY, str(MISSION_STATE), "gate", str(state), "関門 1", "--withdraw"], capture_output=True, text=True)
+    state = sprint_state(tmp_path)
+    p = subprocess.run([PY, str(SPRINT_STATE), "gate", str(state), "関門 1", "--withdraw"], capture_output=True, text=True)
     assert p.returncode == 0 and json.loads(p.stdout)["metrics"]["withdrawn"] == 0
     assert [w["name"] for w in load(state)["withdrawals"]] == ["関門 1"]
-    subprocess.run([PY, str(MISSION_STATE), "gate", str(state), "関門 1", "--what", "承認"], check=True, capture_output=True)
-    p = subprocess.run([PY, str(MISSION_STATE), "gate", str(state), "関門 1", "--withdraw"], capture_output=True, text=True)
+    subprocess.run([PY, str(SPRINT_STATE), "gate", str(state), "関門 1", "--what", "承認"], check=True, capture_output=True)
+    p = subprocess.run([PY, str(SPRINT_STATE), "gate", str(state), "関門 1", "--withdraw"], capture_output=True, text=True)
     assert p.returncode == 0 and [g["name"] for g in load(state)["gates"]].count("関門 1") == 1
-    p = subprocess.run([PY, str(MISSION_STATE), "gate", str(state), "関門 1", "--withdraw", "--by", "mvv"], capture_output=True, text=True)
+    p = subprocess.run([PY, str(SPRINT_STATE), "gate", str(state), "関門 1", "--withdraw", "--by", "mvv"], capture_output=True, text=True)
     assert p.returncode != 0 and json.loads(p.stdout)["status"] == "stopped"
 
 
 def test_a_parallel_design_plan_cannot_revive_a_withdrawn_gate(tmp_path):
     """並列の設計プラン: 片方の handoff が先に取り消したら、もう片方が後から書く by: mvv は断られる（#1383 の指摘）。"""
-    state = mission_state(tmp_path)
-    p = subprocess.run([PY, str(MISSION_STATE), "gate", str(state), "関門 1", "--withdraw"], capture_output=True, text=True)
+    state = sprint_state(tmp_path)
+    p = subprocess.run([PY, str(SPRINT_STATE), "gate", str(state), "関門 1", "--withdraw"], capture_output=True, text=True)
     assert p.returncode == 0
     p = subprocess.run(
-        [PY, str(MISSION_STATE), "gate", str(state), "関門 1", "--what", "MVV 判定", "--by", "mvv", "--verdict", "follow"]
+        [PY, str(SPRINT_STATE), "gate", str(state), "関門 1", "--what", "MVV 判定", "--by", "mvv", "--verdict", "follow"]
         + ["--reasons", "[]", "--log", str(tmp_path / "mvv-gate.jsonl")],
         capture_output=True,
         text=True,
     )
     assert p.returncode != 0 and json.loads(p.stdout)["status"] == "stopped"
     assert not [g for g in load(state).get("gates", []) if g["name"] == "関門 1"]
-    subprocess.run([PY, str(MISSION_STATE), "gate", str(state), "関門 1", "--what", "承認"], check=True, capture_output=True)
+    subprocess.run([PY, str(SPRINT_STATE), "gate", str(state), "関門 1", "--what", "承認"], check=True, capture_output=True)
     assert [g.get("by") for g in load(state)["gates"] if g["name"] == "関門 1"] == [None]
 
 

@@ -377,7 +377,7 @@ def plan_hint(raw: dict) -> dict | None:
     return {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
-            "additionalContext": f"このリポジトリには .ndf/ の宣言がある。このフェーズは python3 {HERE}/supervise.py new <種別>（mission / impl / check / release）のプランで作り、supervise.py queue で流せる。Agent の supervisor に落とすのはプランの雛形が無いときだけ（development-workflow の references/agent-layers.md のフェーズの表）。この案内を止めるなら NDF_PLAN_HINT=0",
+            "additionalContext": f"このリポジトリには .ndf/ の宣言がある。このフェーズは python3 {HERE}/supervise.py new <種別>（sprint / impl / check / release）のプランで作り、supervise.py queue で流せる。Agent の supervisor に落とすのはプランの雛形が無いときだけ（development-workflow の references/agent-layers.md のフェーズの表）。この案内を止めるなら NDF_PLAN_HINT=0",
         }
     }
 
