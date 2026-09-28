@@ -249,32 +249,37 @@ def plan_release_package_plugin(a) -> dict:
     return plan
 
 
+def advise_steps(state: str, gate: str, args: str, note: dict, head: dict | None = None) -> list[dict]:
+    """助言の MVV 判定（#1400）の mvv・mvv-note のステップ。判定によらず、想定外の失敗でも mvv-note へ進む。
+    `head` は両ステップの type の後（stage）、`note` は mvv-note の timeout から後（載せ先と後続）である。"""
+    return [
+        {
+            "id": "mvv",
+            "type": "run",
+            **(head or {}),
+            "timeout": 900,
+            # 前の実行の判定の記録を載せないよう先に消す（MVV なしのときは記録を書かない）
+            "cmd": f"rm -f {MVV_NOTE} && {MVV_PY} check --mission {state} --gate {gate} {args} --note {MVV_NOTE} --advise",
+            "on_fail": "mvv-note",
+            "next": "mvv-note",
+        },
+        {"id": "mvv-note", "type": "run", **(head or {}), **note},
+    ]
+
+
 def advise_release_steps(a, repo: str | None, approval: str, prs: str) -> list[dict]:
     """開発版の explain の後の助言の MVV 判定（#1400）。承認資料と出す版の PR を材料にし、判定の記録を承認資料の末尾へ足す。
     判定によらず、想定外の失敗でも mvv-note へ進み、プランの結果は facts の関門のままである。"""
     material = f"{repo}/{approval}" if repo else approval
     state = shlex.quote(str(Path(a.advise).resolve()))
-    return [
-        {
-            "id": "mvv",
-            "type": "run",
-            "timeout": 900,
-            "cmd": f"rm -f {MVV_NOTE} && {MVV_PY} check --mission {state} --gate release "
-            f"--material {shlex.quote(material)} --pr {prs} --mode {a.mode}"
-            + (f" --root {shlex.quote(repo)}" if repo else "")
-            + f" --note {MVV_NOTE} --advise",
-            "on_fail": "mvv-note",
-            "next": "mvv-note",
-        },
-        {
-            "id": "mvv-note",
-            "type": "run",
-            "timeout": 120,
-            **({"cwd": repo} if repo else {}),
-            "cmd": f"sh -c '[ ! -f {MVV_NOTE} ] || {{ printf \"\\n\"; cat {MVV_NOTE}; }} >> {approval}'",
-            "next": "end",
-        },
-    ]
+    args = f"--material {shlex.quote(material)} --pr {prs} --mode {a.mode}" + (f" --root {shlex.quote(repo)}" if repo else "")
+    note = {
+        "timeout": 120,
+        **({"cwd": repo} if repo else {}),
+        "cmd": f"sh -c '[ ! -f {MVV_NOTE} ] || {{ printf \"\\n\"; cat {MVV_NOTE}; }} >> {approval}'",
+        "next": "end",
+    }
+    return advise_steps(state, "release", args, note)
 
 
 # changed-plugins の結果 JSON（最後の行）の items を「名前 版」の行にする
