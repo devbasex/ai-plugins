@@ -194,13 +194,19 @@ class Account:
         vals = [v for v in (self.usage.limited_until(now) if self.usage else None, self.observed_until(now)) if v]
         return max(vals) if vals else None
 
+    def spend_limited(self) -> bool:
+        """支出上限に達しているか。残量が読めて spend_limit_reached が真か、記録した上限の種類が spend なら真。"""
+        if self.usage and self.usage.known() and self.usage.spend_limit_reached:
+            return True
+        return (self.limit or {}).get("type") == "spend"
+
     def state(self, now: float) -> str:
         """一覧の状態の列。"""
         if self.needs_relogin:
             return "再登録が要る"
         until = self.limited_until(now)
         if until is not None:
-            if self.usage and self.usage.known() and self.usage.spend_limit_reached or (self.limit or {}).get("type") == "spend":
+            if self.spend_limited():
                 return "支出上限"
             return f"上限（{local_time(until)}）"
         return "使える" if self.usage and self.usage.known() else "残量不明"
