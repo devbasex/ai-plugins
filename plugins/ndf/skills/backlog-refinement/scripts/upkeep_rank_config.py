@@ -113,6 +113,38 @@ def _parse_pairs(v, key):
     return tuple((_decl_int(a, key), _decl_int(b, key)) for a, b in v)
 
 
+def _parse_scale(v) -> tuple:
+    if isinstance(v, str):
+        try:
+            v = [int(x) for x in v.split(",") if x.strip()]
+        except ValueError:
+            raise RankError(f"scale は整数の並びで書く: {v!r}")
+    scale = tuple(_decl_int(x, "scale") for x in v)
+    if len(scale) < 2 or scale[0] <= 0 or any(b <= a for a, b in zip(scale, scale[1:])):
+        raise RankError("scale は 2 個以上の正の整数の狭義の昇順で書く")
+    return scale
+
+
+def _parse_label_floor(floor, in_scale) -> dict:
+    if not isinstance(floor, dict):
+        raise RankError("label_floor はラベル → 段階のオブジェクトで書く")
+    return {str(k): in_scale(v, f"label_floor[{k}]") for k, v in floor.items()}
+
+
+def _parse_harm_guide(guide, scale) -> dict:
+    if not isinstance(guide, dict) or not guide:
+        raise RankError("harm_guide は区分 → [下端, 上端] のオブジェクトで書く")
+    bands = {}
+    for k, band in guide.items():
+        if not isinstance(band, (list, tuple)) or len(band) != 2:
+            raise RankError(f"harm_guide[{k}] は [下端, 上端] で書く")
+        lo, hi = _decl_int(band[0], "harm_guide"), _decl_int(band[1], "harm_guide")
+        if lo > hi or not any(lo <= v <= hi for v in scale):
+            raise RankError(f"harm_guide[{k}] の帯 {lo}〜{hi} に尺度の値が無い")
+        bands[str(k)] = (lo, hi)
+    return bands
+
+
 def build_config(args: dict, decl: dict | None) -> Config:
     """引数 → 宣言 → 既定値の順に採り、検証する。args の値が None のキーは渡されていないとみなす。"""
     decl = decl or {}
@@ -126,15 +158,7 @@ def build_config(args: dict, decl: dict | None) -> Config:
             return decl[key]
         return default
 
-    scale = pick("scale", DEFAULT_SCALE)
-    if isinstance(scale, str):
-        try:
-            scale = [int(x) for x in scale.split(",") if x.strip()]
-        except ValueError:
-            raise RankError(f"scale は整数の並びで書く: {scale!r}")
-    scale = tuple(_decl_int(x, "scale") for x in scale)
-    if len(scale) < 2 or scale[0] <= 0 or any(b <= a for a, b in zip(scale, scale[1:])):
-        raise RankError("scale は 2 個以上の正の整数の狭義の昇順で書く")
+    scale = _parse_scale(pick("scale", DEFAULT_SCALE))
 
     def in_scale(v, key):
         v = _decl_int(v, key)
@@ -154,10 +178,7 @@ def build_config(args: dict, decl: dict | None) -> Config:
         raise RankError("dependents_steps は被依存の数の下限の昇順で書く")
     for _, s in deps:
         in_scale(s, "dependents_steps の段階")
-    floor = pick("label_floor", {}) or {}
-    if not isinstance(floor, dict):
-        raise RankError("label_floor はラベル → 段階のオブジェクトで書く")
-    floor = {str(k): in_scale(v, f"label_floor[{k}]") for k, v in floor.items()}
+    floor = _parse_label_floor(pick("label_floor", {}) or {}, in_scale)
     alpha = _decl_number(pick("size_exponent", DEFAULTS["size_exponent"]), "size_exponent")
     if not 0 <= alpha <= 1:
         raise RankError("size_exponent は 0 以上 1 以下")
@@ -165,17 +186,7 @@ def build_config(args: dict, decl: dict | None) -> Config:
     if not 0 <= ratio < 1:
         raise RankError("large_slot_ratio は 0 以上 1 未満")
     large = in_scale(pick("large_min_size", scale[-2]), "large_min_size")
-    guide = pick("harm_guide", DEFAULTS["harm_guide"])
-    if not isinstance(guide, dict) or not guide:
-        raise RankError("harm_guide は区分 → [下端, 上端] のオブジェクトで書く")
-    bands = {}
-    for k, band in guide.items():
-        if not isinstance(band, (list, tuple)) or len(band) != 2:
-            raise RankError(f"harm_guide[{k}] は [下端, 上端] で書く")
-        lo, hi = _decl_int(band[0], "harm_guide"), _decl_int(band[1], "harm_guide")
-        if lo > hi or not any(lo <= v <= hi for v in scale):
-            raise RankError(f"harm_guide[{k}] の帯 {lo}〜{hi} に尺度の値が無い")
-        bands[str(k)] = (lo, hi)
+    bands = _parse_harm_guide(pick("harm_guide", DEFAULTS["harm_guide"]), scale)
     anchors = pick("anchors", {}) or {}
     if not isinstance(anchors, dict):
         raise RankError("anchors は列 → 段階 → 課題の列のオブジェクトで書く")
