@@ -128,9 +128,9 @@ python3 plugins/ndf/scripts/supervise.py wait q/done.json
 - キューは始めに流すプランの一覧（`--then` を含む）と読み始める所を done の隣の `<done>.plans.json` へ書き、
   wait はそれを読む。知らせた `attention` の続きは `<done>.wait.json` に残る
 
-### 1 ミッションの流し方
+### 1 スプリントの流し方
 
-**1 ミッション（実装 → 開発版 → ゲート 2 → 本番 → 後片付け）で conductor が起きるのは、承認ゲート・`attention`・
+**1 スプリント（実装 → 開発版 → ゲート 2 → 本番 → 後片付け）で conductor が起きるのは、承認ゲート・`attention`・
 キューの終わりだけである。** プランの組み立て・待ちの見張り・次のプランの起動のために起きない。
 
 1. 実装のプランを並べ、開発版のリリースプランを `new release --channel dev --prs-from-queue` で作る
@@ -140,31 +140,31 @@ python3 plugins/ndf/scripts/supervise.py wait q/done.json
 2. `queue <実装のプラン>... --then <開発版のプラン> --done <パス>` と `wait <パス>` を背景で起動する
 3. `wait` が 0 で終わり、キューの結果が `gate`（開発版の facts のステップのゲート 2）なら、承認資料を添えて本番の承認を取る
 4. 承認の後、`queue <本番のプラン> --done <パス>` と `wait <パス>` を背景で起動する。本番のプランのステップの最後は
-   後片付け（`merged-steps.py cleanup`）で、リリースの PR（`release/v<版>` → main）とミッションの PR（`--prs`）の
+   後片付け（`merged-steps.py cleanup`）で、リリースの PR（`release/v<版>` → main）とスプリントの PR（`--prs`）の
    ブランチ・worktree を片付ける。`git branch -D` が要るブランチがあれば承認ゲートで止まる
 5. `wait` が 0 で終わったら、引継ぎ文書を `supervise.py note` で更新し、`ndf-next` を出す
 
-### ミッションを流すコマンド
+### スプリントを流すコマンド
 
-**`normal` の 1 ミッション（設計 → 承認ゲート 1 → ミッションブランチ → 実装 → 検査 → 開発版 → 承認ゲート 2 → 本番）で
-conductor が起きるのは、承認ゲート・`attention`・キューの終わりだけである。** 例はミッション `m6`（課題 1052・1053、
-設計 Pull Request は 1052）で、`sv() { python3 "$SCRIPTS/supervise.py" "$@"; }`、`O=<作業ディレクトリ>/mission-m6` とする。
+**`normal` の 1 スプリント（設計 → 承認ゲート 1 → スプリントブランチ → 実装 → 検査 → 開発版 → 承認ゲート 2 → 本番）で
+conductor が起きるのは、承認ゲート・`attention`・キューの終わりだけである。** 例はスプリント `m6`（課題 1052・1053、
+設計 Pull Request は 1052）で、`sv() { python3 "$SCRIPTS/supervise.py" "$@"; }`、`O=<作業ディレクトリ>/sprint-m6` とする。
 キューと `wait` は背景で起動し、done は上の「supervise.py の進捗ログ」で読む。
 
-1. プランを書き出す。ステージごとのプランとミッション状態ファイル（`$O/mission.json`）ができる:
-   `sv new mission --name m6 --worktree <リポジトリの根> --issue 1052 1053 --design 1052 --version 10.18.0-dev.1 --out $O`
+1. プランを書き出す。ステージごとのプランと目録（`$O/sprint.json`）ができる:
+   `sv new sprint --name m6 --worktree <リポジトリの根> --issue 1052 1053 --design 1052 --version 10.18.0-dev.1 --out $O`
 2. 設計: `sv queue $O/1-design-1052.json --max 3 --done $O/done-1.json` と `sv wait $O/done-1.json`
 3. 承認ゲート 1: キューの結果が `gate` なら、設計 Pull Request をまとめて 1 回の承認に載せる。承認の後、
    conductor が `python3 "$SCRIPTS/merged-steps.py" merge-when-green <設計 PR 番号>` でマージする
-4. ミッションブランチ: `sv queue $O/3-mission-branch.json --done $O/done-3.json` と `sv wait $O/done-3.json`
+4. スプリントブランチ: `sv queue $O/3-sprint-branch.json --done $O/done-3.json` と `sv wait $O/done-3.json`
 5. 実装: `sv queue $O/4-impl-1052.json $O/4-impl-1053.json --max 3 --done $O/done-4.json` と `sv wait $O/done-4.json`
 6. 検査 → 開発版: `sv queue $O/5-check.json --max 3 --then $O/6-release.json --done $O/done-5.json` と
-   `sv wait $O/done-5.json`。検査のプランがミッションの Pull Request をベースブランチへマージし、開発版のリリースプランが続けて流れる
+   `sv wait $O/done-5.json`。検査のプランがスプリントの Pull Request をベースブランチへマージし、開発版のリリースプランが続けて流れる
 7. 承認ゲート 2: キューの結果が `gate`（開発版の facts のステップ）なら、承認資料を添えて本番の承認を取る
-8. 本番: `sv new release --version 10.18.0 --prs <ミッションの PR 番号> --channel prod --worktree <リポジトリの根>/.worktrees/release/v10.18.0 --out $O/7-release-prod.json`、
+8. 本番: `sv new release --version 10.18.0 --prs <スプリントの PR 番号> --channel prod --worktree <リポジトリの根>/.worktrees/release/v10.18.0 --out $O/7-release-prod.json`、
    続けて `sv queue $O/7-release-prod.json --done $O/done-7.json` と `sv wait $O/done-7.json`。最後のステップが後片付けを行う
 
-- ステージの番号とプランのファイル名は `new mission` の出力（`mission.json` の `ステージ`）が正である。書き出した `command` に `--done` を足して打つ
+- ステージの番号とプランのファイル名は `new sprint` の出力（`sprint.json` の `ステージ`）が正である。書き出した `command` に `--done` を足して打つ
 - 確定仕様化と振り返りは `normal` のプランが持たないため、supervisor で回す（[agent-layers.md](agent-layers.md) の表の取り込み・仕上げの行）
 - 本番の後に続けるコマンドは [relay.md](relay.md)、`pace: fast` と `pace: auto` の並びは [pace.md](pace.md) にある
 

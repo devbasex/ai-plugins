@@ -13,6 +13,7 @@ import time
 from pathlib import Path
 
 import clock
+import legacy_names
 import usage_ledger
 from supervise_lib.claude import TICK
 
@@ -61,7 +62,7 @@ class RunState:
         self.worker_last_at: float | None = None
         self.run_log: Path | None = None  # run のステップの stderr（待ちの間に最後の行を読む）
         self.project_mvv = None  # 判断の基準（lib/project_mvv.ProjectMvv）。judge か work の最初の 1 回で読む
-        self.mission_mvv: str | None = None  # ミッション MVV の本文（読んで無ければ ""）。最初の 1 回で読む
+        self.sprint_mvv: str | None = None  # スプリント MVV の本文（読んで無ければ ""）。最初の 1 回で読む
 
     def project_mvv_of(self, root):
         """プロジェクト MVV を実行の中で 1 回だけ読み、参照を state.json に残す（#1366）。"""
@@ -71,30 +72,30 @@ class RunState:
             self.project_mvv = project_mvv.load_mvv(root)
         return self.project_mvv
 
-    def mission_mvv_of(self, plan: dict) -> str | None:
-        """プランの `ミッション状態` の `mvv` からミッション MVV の本文を実行の中で 1 回だけ読む（#1400 の決定 12）。
+    def sprint_mvv_of(self, plan: dict) -> str | None:
+        """プランの `スプリント状態` の `mvv` からスプリント MVV の本文を実行の中で 1 回だけ読む（#1400 の決定 12）。
 
         状態が無い・`mvv` が無ければ None。ファイルが無い・状態の sha256 と一致しなければ None にし、conductor 向けに 1 行残す（I10）。"""
-        if self.mission_mvv is not None:
-            return self.mission_mvv or None
+        if self.sprint_mvv is not None:
+            return self.sprint_mvv or None
         import project_mvv
 
-        path = plan.get("ミッション状態")
+        path = legacy_names.read_key(plan, "スプリント状態")  # 改名の前のプランは旧名のキーで持つ（#1407）
         text, why = None, None
         if path:
             try:
-                text, why = project_mvv.mission_text_of(json.loads(Path(path).read_text(encoding="utf-8")))
+                text, why = project_mvv.sprint_text_of(json.loads(Path(path).read_text(encoding="utf-8")))
             except (OSError, ValueError) as e:
-                why = f"ミッションの状態を読めない: {e}"
-        self.mission_mvv = text or ""
+                why = f"スプリントの状態を読めない: {e}"
+        self.sprint_mvv = text or ""
         if why:
-            self.attention("ミッション MVV を使えない", f"{why}。プロジェクト MVV だけで進める（{path}）")
+            self.attention("スプリント MVV を使えない", f"{why}。プロジェクト MVV だけで進める（{path}）")
         return text
 
     def mvv_block_of(self, root, plan: dict) -> tuple:
-        """(プロジェクト MVV, ミッション MVV の本文か None)。ミッション MVV はプロジェクト MVV が承認済みのときだけ読む（決定 16）。"""
+        """(プロジェクト MVV, スプリント MVV の本文か None)。スプリント MVV はプロジェクト MVV が承認済みのときだけ読む（決定 16）。"""
         mvv = self.project_mvv_of(root)
-        return mvv, (self.mission_mvv_of(plan) if mvv.approved else None)
+        return mvv, (self.sprint_mvv_of(plan) if mvv.approved else None)
 
     # --- 途中の報告 ---
     def progress_write(self, rec: dict) -> None:

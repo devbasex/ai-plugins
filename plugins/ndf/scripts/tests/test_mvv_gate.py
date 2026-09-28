@@ -60,8 +60,8 @@ def sha(text: str) -> str:
 
 
 @pytest.fixture
-def mission(tmp_path):
-    """MVV を写して利用者が承認したミッションの状態（mission-state.py の形）。"""
+def sprint(tmp_path):
+    """MVV を写して利用者が承認したスプリントの状態（sprint-state.py の形）。"""
     root = tmp_path / "repo"
     (root / ".ndf").mkdir(parents=True)
     (root / ".ndf" / "pace.json").write_text(
@@ -77,7 +77,7 @@ def mission(tmp_path):
     mvv = tmp_path / "state" / "mvv.md"
     mvv.parent.mkdir()
     mvv.write_text(MVV)
-    state = tmp_path / "state" / "mission-state.json"
+    state = tmp_path / "state" / "sprint-state.json"
     state.write_text(
         json.dumps(
             {
@@ -111,7 +111,7 @@ def run(m: dict, text: str, *extra: str, files: list | None = None, changed: int
         sys.executable,
         str(SCRIPT),
         "check",
-        "--mission",
+        "--sprint",
         str(m["state"]),
         "--gate",
         "release",
@@ -139,33 +139,33 @@ def gates(m: dict) -> dict:
     return {g["name"]: g for g in json.loads(m["state"].read_text())["gates"]}
 
 
-def test_follow_passes_the_gate_and_is_recorded(mission):
-    code, out, rows = run(mission, FOLLOW, "--pr", "5")
+def test_follow_passes_the_gate_and_is_recorded(sprint):
+    code, out, rows = run(sprint, FOLLOW, "--pr", "5")
     assert (code, out["status"]) == (0, "ok")
     assert len(rows) == 1 and rows[0]["passed"] is True and rows[0]["reasons"] == ["Value 1 に沿う"]
-    g = gates(mission)["関門 2"]
-    assert (g["by"], g["verdict"], g["reasons"], g["log"]) == ("mvv", "follow", ["Value 1 に沿う"], str(mission["log"]))
-    assert "速くする" in (mission["tmp"] / "prompt.txt").read_text()
+    g = gates(sprint)["関門 2"]
+    assert (g["by"], g["verdict"], g["reasons"], g["log"]) == ("mvv", "follow", ["Value 1 に沿う"], str(sprint["log"]))
+    assert "速くする" in (sprint["tmp"] / "prompt.txt").read_text()
 
 
-def test_design_gate_is_recorded_as_gate_1(mission):
-    tmp = mission["tmp"]
+def test_design_gate_is_recorded_as_gate_1(sprint):
+    tmp = sprint["tmp"]
     env = {"PATH": f"{fake_gh(tmp, ['issues/x.md'])}:/usr/bin:/bin", "HOME": str(tmp), "NDF_MVV_CLAUDE": fake_claude(tmp, FOLLOW)}
     p = subprocess.run(
         [
             sys.executable,
             str(SCRIPT),
             "check",
-            "--mission",
-            str(mission["state"]),
+            "--sprint",
+            str(sprint["state"]),
             "--gate",
             "design",
             "--pr",
             "7",
             "--log",
-            str(mission["log"]),
+            str(sprint["log"]),
             "--root",
-            str(mission["root"]),
+            str(sprint["root"]),
             "--note",
             str(tmp / "note.md"),
         ],
@@ -174,7 +174,7 @@ def test_design_gate_is_recorded_as_gate_1(mission):
         env=env,
     )
     assert p.returncode == 0, p.stdout + p.stderr
-    assert gates(mission)["関門 1"]["by"] == "mvv"
+    assert gates(sprint)["関門 1"]["by"] == "mvv"
     assert "follow" in (tmp / "note.md").read_text()
 
 
@@ -193,59 +193,59 @@ def test_design_gate_is_recorded_as_gate_1(mission):
         '{"verdict": "follow", "boundary": []}',
     ],
 )
-def test_anything_but_a_clean_follow_asks_the_user(mission, text):
-    code, out, rows = run(mission, text)
+def test_anything_but_a_clean_follow_asks_the_user(sprint, text):
+    code, out, rows = run(sprint, text)
     assert (code, out["status"]) == (10, "gate")
     assert rows[-1]["passed"] is False
-    assert "関門 2" not in gates(mission)
+    assert "関門 2" not in gates(sprint)
 
 
-def test_without_the_approval_the_llm_is_not_called(mission):
-    st = json.loads(mission["state"].read_text())
+def test_without_the_approval_the_llm_is_not_called(sprint):
+    st = json.loads(sprint["state"].read_text())
     st["gates"] = []
-    mission["state"].write_text(json.dumps(st))
-    code, out, _ = run(mission, FOLLOW)
-    assert (code, llm_calls(mission)) == (10, 0)
+    sprint["state"].write_text(json.dumps(st))
+    code, out, _ = run(sprint, FOLLOW)
+    assert (code, llm_calls(sprint)) == (10, 0)
 
 
-def test_a_changed_mvv_after_the_approval_goes_back_to_the_user(mission):
-    mission["mvv"].write_text(MVV + "\n4. LLM が足した行\n")
-    code, out, _ = run(mission, FOLLOW)
-    assert (code, llm_calls(mission)) == (10, 0)
+def test_a_changed_mvv_after_the_approval_goes_back_to_the_user(sprint):
+    sprint["mvv"].write_text(MVV + "\n4. LLM が足した行\n")
+    code, out, _ = run(sprint, FOLLOW)
+    assert (code, llm_calls(sprint)) == (10, 0)
     assert "ハッシュ" in out["summary"]
 
 
 @pytest.mark.parametrize("mode", ["operation", "documentation"])
-def test_modes_outside_fast_never_skip_the_gate(mission, mode):
-    code, out, _ = run(mission, FOLLOW, "--mode", mode)
-    assert (code, llm_calls(mission)) == (10, 0)
+def test_modes_outside_fast_never_skip_the_gate(sprint, mode):
+    code, out, _ = run(sprint, FOLLOW, "--mode", mode)
+    assert (code, llm_calls(sprint)) == (10, 0)
 
 
 @pytest.mark.parametrize("path", ["lib/auth.py", ".github/workflows/ci.yml"])
-def test_boundary_paths_never_skip_the_gate(mission, path):
-    code, out, rows = run(mission, FOLLOW, "--pr", "5", files=["app/x.py", path])
-    assert (code, llm_calls(mission)) == (10, 0)
+def test_boundary_paths_never_skip_the_gate(sprint, path):
+    code, out, rows = run(sprint, FOLLOW, "--pr", "5", files=["app/x.py", path])
+    assert (code, llm_calls(sprint)) == (10, 0)
     assert path in out["summary"]
     assert rows[-1]["verdict"] == "machine"
 
 
-def test_a_rename_out_of_a_boundary_path_never_skips_the_gate(mission):
-    code, out, rows = run(mission, FOLLOW, "--pr", "5", files=["app/x.py", ("lib/auth.py", "lib/plain.py")])
-    assert (code, llm_calls(mission)) == (10, 0)
+def test_a_rename_out_of_a_boundary_path_never_skips_the_gate(sprint):
+    code, out, rows = run(sprint, FOLLOW, "--pr", "5", files=["app/x.py", ("lib/auth.py", "lib/plain.py")])
+    assert (code, llm_calls(sprint)) == (10, 0)
     assert "lib/auth.py → lib/plain.py" in out["summary"] and rows[-1]["verdict"] == "machine"
 
 
-def test_files_cut_short_of_changed_files_never_skip_the_gate(mission):
+def test_files_cut_short_of_changed_files_never_skip_the_gate(sprint):
     # REST の files が 3000 件で切れたときの形: 取れた件数が changedFiles に届かない
-    code, out, _ = run(mission, FOLLOW, "--pr", "5", files=["app/x.py"], changed=3001)
-    assert (code, llm_calls(mission)) == (10, 0)
+    code, out, _ = run(sprint, FOLLOW, "--pr", "5", files=["app/x.py"], changed=3001)
+    assert (code, llm_calls(sprint)) == (10, 0)
     assert "全件読めない" in out["summary"]
 
 
-def test_a_missing_material_goes_back_to_the_user(mission):
-    mission["material"].unlink()
-    code, out, _ = run(mission, FOLLOW)
-    assert (code, llm_calls(mission)) == (10, 0)
+def test_a_missing_material_goes_back_to_the_user(sprint):
+    sprint["material"].unlink()
+    code, out, _ = run(sprint, FOLLOW)
+    assert (code, llm_calls(sprint)) == (10, 0)
 
 
 DESIGN_DOC = "# 設計\n\nドメインモデルの節\n"
@@ -280,7 +280,7 @@ def run_design(m: dict, files: list[str], gate: str = "design", api_fails: bool 
             sys.executable,
             str(SCRIPT),
             "check",
-            "--mission",
+            "--sprint",
             str(m["state"]),
             "--gate",
             gate,
@@ -304,24 +304,24 @@ def run_design(m: dict, files: list[str], gate: str = "design", api_fails: bool 
     return p.returncode, out, rows
 
 
-def test_design_gate_passes_the_design_doc_of_the_pr_as_material(mission):
-    code, out, rows = run_design(mission, ["issues/x-design.md", "app/x.py"])
+def test_design_gate_passes_the_design_doc_of_the_pr_as_material(sprint):
+    code, out, rows = run_design(sprint, ["issues/x-design.md", "app/x.py"])
     assert code == 0, out
-    assert "ドメインモデルの節" in (mission["tmp"] / "prompt.txt").read_text()
+    assert "ドメインモデルの節" in (sprint["tmp"] / "prompt.txt").read_text()
     assert rows[-1]["material"] == ["#7 issues/x-design.md"]
-    api = [ln for ln in (mission["tmp"] / "gh-calls.txt").read_text().splitlines() if ln.startswith("api") and "/contents/" in ln]
+    api = [ln for ln in (sprint["tmp"] / "gh-calls.txt").read_text().splitlines() if ln.startswith("api") and "/contents/" in ln]
     assert len(api) == 1 and "repos/o/r/contents/issues/x-design.md?ref=abc123" in api[0]
 
 
-def test_release_gate_does_not_fetch_design_docs(mission):
-    code, out, rows = run_design(mission, ["issues/x-design.md"], gate="release")
+def test_release_gate_does_not_fetch_design_docs(sprint):
+    code, out, rows = run_design(sprint, ["issues/x-design.md"], gate="release")
     assert code == 0, out
-    assert "ドメインモデルの節" not in (mission["tmp"] / "prompt.txt").read_text()
+    assert "ドメインモデルの節" not in (sprint["tmp"] / "prompt.txt").read_text()
     assert rows[-1]["material"] == []
 
 
-def test_an_unreadable_design_doc_goes_back_to_the_user(mission):
-    code, out, rows = run_design(mission, ["issues/x-design.md"], api_fails=True)
-    assert (code, llm_calls(mission)) == (10, 0)
+def test_an_unreadable_design_doc_goes_back_to_the_user(sprint):
+    code, out, rows = run_design(sprint, ["issues/x-design.md"], api_fails=True)
+    assert (code, llm_calls(sprint)) == (10, 0)
     assert "issues/x-design.md" in out["summary"]
     assert rows[-1]["verdict"] == "machine"

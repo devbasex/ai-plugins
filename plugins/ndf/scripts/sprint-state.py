@@ -1,0 +1,602 @@
+#!/usr/bin/env python3
+r"""スプリントの状態を sprint.json に持ち、引継ぎ文書の節・status・ndf-next を生成する（#1063）。
+
+LLM を直接呼ばない（スプリント MVV の照合だけ `lib/sprint_mvv.py` に任せる）。入力は supervise.py queue の done の JSON と
+各計画の report.md だけである。
+
+| 副命令 | 何をする |
+| --- | --- |
+| `init <sprint.json> --name <名> [--milestone M] [--issue N]... [--plan <種類>=<plan.json>]... [--done <done.json>]... [--dev <版>] [--prod <版>] [--goal <雛形の文字列か @ファイル>] [--pace normal\|fast\|auto] [--mvv <ファイル>] [--repo OWNER/REPO]` | 状態のファイルを作る。同じパスに別の形の JSON があれば上書きせずに止まる（終了コード 1） |
+| `update <sprint.json> [--done <done.json>]... [--next <plan.json>=<文>]...` | done の JSON と報告を読み、行の状態・PR・秒・費用を埋める。何度走らせても同じ結果 |
+| `gate <sprint.json> <関門の名> --what <何を> [--at <ISO 8601>] [--by user\|mvv --verdict V --reasons <JSON> --log <jsonl>] [--outcome approved\|rejected] [--pr N] [--root DIR] [--withdraw]` | 関門の承認の時刻を書く。名前が `MVV` なら今の MVV のハッシュも書く。`--by user --outcome rejected` は関門を通さず差し戻しだけを残す。利用者の答えが同じ関門の直前の MVV 判定（`--pr` を渡せばその PR の判定）と食い違えば、改訂の兆候（覆し）を `project-mvv-signals.jsonl` へ 1 行書く。`--withdraw` は同じ関門の `by: mvv` の記録を外し、取り消しを残す（MVV 判定で通した後に関門へ落ちたとき。`lib/sprint_mvv.withdraw`）。取り消した関門へは以後 `--by mvv` を書かない |
+| `render <sprint.json> <引継ぎ文書> --section <見出しの語> [--demote <前の節の語> --heading <新しい見出し>]` | 見出しに語を含む節の本文を置き換える。節の外は変えない |
+| `status <sprint.json>` | 端末向けに 1 行ずつ（スプリント・状態・次） |
+| `next <sprint.json> [--doc <引継ぎ文書> --section <見出しの語>] [--replace <見出しの語>]` | ndf-next の囲みを出す。`--replace` なら引継ぎ文書のその節も置き換える |
+
+雛形（`--goal`）は `{name}`・`{milestone}`・`{heading}`（現在地の見出し）・`{dev}`・`{prod}`・
+`{issues}` を差し込む。
+
+スプリント MVV の写し（#1078・#1370・#1400）の書き方は `lib/sprint_mvv.py` にある。`--pace fast` と `--pace auto` は写せなければ
+止まり、写しをプロジェクト MVV に照らす。`--pace normal` は `--mvv` か `--milestone` から写せたときだけ写し、止めず、照らさない。
+承認済みのプロジェクト MVV の参照（版・sha256）は進め方によらず書く（#1366・#1400）。外へ出るのはマイルストーンの説明を読む gh api だけである。
+
+計画の種類は 実装・開発版・本番（ほかの語もそのまま使える）。done を登録しなければ、計画の
+状態ディレクトリ（`<計画>-state/queue-done.json`）を探す。
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import supervise_lib  # noqa: E402,F401  lib/ を sys.path へ足す
+import deps  # noqa: E402
+
+deps.require("md", "mdtable", "schema", "locks")  # schema は supervise_lib.paths → decl が使う
+from supervise_lib.paths import sha256_of, state_dir_of  # noqa: E402
+import clock  # noqa: E402
+import jsonio  # noqa: E402
+import locks  # noqa: E402
+import md  # noqa: E402
+import mdtable  # noqa: E402
+import step_result  # noqa: E402
+import project_mvv as pm  # noqa: E402
+import project_mvv_signals as pms  # noqa: E402
+import sprint_mvv  # noqa: E402
+
+TOOL = "sprint-state"
+SECTION_DEFAULT = "今の会話の進み"
+NEXT_SECTION_DEFAULT = "次に実行するコマンド"
+NOT_DONE = "まだ"
+PACES = ("normal", "fast", "auto")
+MVV_GATE = "MVV"  # 利用者が MVV を承認した記録の名前
+EXIT_UNREADABLE, EXIT_PRECONDITION = 2, 3
+
+
+def outcome(status: str, summary: str, items=None, metrics=None, **extra) -> dict:
+    """結果 JSON（`step_result.result` の形）。`exit` などの鍵を足せる（`main` が終了コードに読む）。"""
+    return {**step_result.result(TOOL, status, summary, items, metrics), **extra}
+
+
+def field(report: str, name: str) -> str:
+    m = re.search(rf"^- {re.escape(name)}: (.*)$", report, re.M)
+    return m.group(1).strip() if m else ""
+
+
+def pr_label(value: str) -> str:
+    """報告の Pull Request（URL か番号）を `#番号` にする。無ければ空。"""
+    if not value or value == "無し":
+        return ""
+    m = re.search(r"(\d+)\s*$", value)
+    return f"#{m.group(1)}" if m else value
+
+
+def report_cost(report: str) -> float | None:
+    m = re.search(r"/ \$([0-9.]+)\s*$", field(report, "LLM の使用量"))
+    return float(m.group(1)) if m else None
+
+
+def plan_issues(plan: str) -> list[int]:
+    try:
+        return [int(i) for i in json.loads(Path(plan).read_text()).get("課題", [])]
+    except (OSError, ValueError, TypeError):
+        return []
+
+
+PHASE_KINDS = {"配布（開発版）": "開発版", "配布（本番）": "本番"}
+
+
+def plan_kind(plan: str) -> str:
+    """計画の「フェーズ」（旧キー「持ち場」も読む）から表の行の種類を決める（配布の 2 つは開発版・本番）。"""
+    try:
+        data = json.loads(Path(plan).read_text())
+        phase = str(data.get("フェーズ") or data.get("持ち場") or "")
+    except (OSError, ValueError, AttributeError):
+        phase = ""
+    return PHASE_KINDS.get(phase, phase or "計画")
+
+
+def parse_pair(text: str, flag: str) -> tuple[str, str]:
+    key, sep, value = text.partition("=")
+    if not sep or not key or not value:
+        raise SystemExit(f"{flag} は <左>=<右> の形で渡す: {text}")
+    return key, value
+
+
+def default_label(kind: str, issues: list[int], m: dict) -> str:
+    if kind == "開発版" and m.get("versions", {}).get("dev"):
+        return f"開発版 {m['versions']['dev']}"
+    if kind == "本番" and m.get("versions", {}).get("prod"):
+        return f"本番 {m['versions']['prod']}"
+    tail = " ".join(f"#{i}" for i in issues)
+    return f"{kind} {tail}".strip()
+
+
+# ---------------------------------------------------------------- init / update / gate
+
+
+STATE_KEYS = ("plans", "done", "gates", "goal_template")
+
+
+def other_shape(path: str) -> str:
+    """既存のファイルが状態の形でなければ、その理由を返す。無い・空・状態の形なら空。
+
+    supervise.py new sprint の目録（`スプリント` / `ブランチ` / `ステージ`）も同じ名前で書かれる。
+    同じ場所へ置くと、上書きでステージの目録が消える（#1082）。
+    """
+    p = Path(path)
+    if not p.exists():
+        return ""
+    text = p.read_text()
+    if not text.strip():
+        return ""
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return "JSON として読めない"
+    if not isinstance(data, dict):
+        return "オブジェクトでない"
+    missing = [k for k in STATE_KEYS if k not in data]
+    if missing:
+        return "状態の鍵（" + " / ".join(missing) + "）が無い"
+    return ""
+
+
+def init_mvv_outcome(a, project) -> tuple[dict | None, dict | None, list[dict]]:
+    """(状態へ書く mvv, 止まるときの結果, 結果の items に載せる特定できなかった理由)。中身は `lib/sprint_mvv.py`（normal は #1400 の決定 13）。"""
+    mvv, stop, note = sprint_mvv.normal_mvv(a) if a.pace not in sprint_mvv.MVV_PACES else (*sprint_mvv.init_mvv(a, project), None)
+    return mvv, (outcome("stopped", stop[0], stop[2], exit=stop[1]) if stop else None), [note] if note else []
+
+
+def cmd_init(a) -> dict:
+    why = other_shape(a.sprint)
+    if why:
+        return outcome(
+            "stopped",
+            f"別の形の JSON があるため上書きしない（{why}）: {a.sprint}。 状態のファイルは別の名前か別の場所に置く",
+            metrics={"path": a.sprint, "reason": why},
+        )
+    project = pm.load_mvv(Path(a.root or ".").resolve())
+    mvv, stop, notes = init_mvv_outcome(a, project)
+    if stop:
+        return stop
+    if a.pace in sprint_mvv.MVV_PACES and project.approved and mvv:
+        stop = sprint_mvv.vet_stop(Path(a.root or ".").resolve(), mvv["path"])
+        if stop:
+            return outcome("stopped", stop[0], stop[2], exit=stop[1])
+    goal = a.goal or ""
+    if goal.startswith("@"):
+        goal = Path(goal[1:]).read_text().rstrip("\n")
+    m = {
+        "name": a.name,
+        "milestone": a.milestone or "",
+        "issues": a.issue or [],
+        "versions": {"dev": a.dev or "", "prod": a.prod or ""},
+        "plans": [],
+        "done": list(a.done or []),
+        "gates": [],
+        "goal_template": goal,
+        "pace": a.pace,
+    }
+    if mvv:
+        m["mvv"] = mvv
+    if project.approved:  # pace によらず参照を残す（#1400 の決定 3。助言の MVV 判定が改訂に気づくため）
+        m["project_mvv"] = {"version": project.version, "sha256": project.sha256}
+    for text in a.plan or []:
+        kind, plan = parse_pair(text, "--plan")
+        issues = plan_issues(plan)
+        m["plans"].append({"kind": kind, "plan": plan, "issues": issues, "label": default_label(kind, issues, m), "next": ""})
+    jsonio.write_atomic(a.sprint, m, indent=1)
+    return outcome(
+        "ok",
+        f"スプリント {a.name} を書いた（計画 {len(m['plans'])} 本）: {a.sprint}",
+        [{"plan": p["plan"], "kind": p["kind"]} for p in m["plans"]] + notes,
+        {"plans": len(m["plans"]), "done": len(m["done"])},
+    )
+
+
+def done_items(m: dict) -> dict[str, dict]:
+    """登録した done（無ければ各計画の状態ディレクトリの queue-done.json）の items を計画のパスで引く。"""
+    paths = list(m.get("done", []))
+    for p in m.get("plans", []):
+        d = str(state_dir_of(p["plan"]) / "queue-done.json")
+        if d not in paths:
+            paths.append(d)
+    items: dict[str, dict] = {}
+    for d in paths:
+        try:
+            data = json.loads(Path(d).read_text())
+        except (OSError, ValueError):
+            continue
+        for it in data.get("items", []):
+            if it.get("plan"):
+                items[it["plan"]] = it  # 後に書いた done（登録の順）を採る
+    return items
+
+
+def fill_row(p: dict, item: dict | None) -> dict:
+    row = {"result": NOT_DONE, "exit": None, "pr": "", "seconds": None, "cost": None, "reason": "", "report": ""}
+    if item is None:
+        return row
+    row.update(result=item.get("result") or "不明", exit=item.get("exit"), seconds=item.get("seconds"))
+    rep = Path(item.get("report") or state_dir_of(p["plan"]) / "report.md")
+    if rep.is_file():
+        text = rep.read_text()
+        row["report"] = str(rep)
+        row["pr"] = pr_label(field(text, "Pull Request"))
+        row["cost"] = report_cost(text)
+        reason = field(text, "理由")
+        if row["result"] != "完了" and reason not in ("", "無し"):
+            row["reason"] = reason
+    return row
+
+
+def cmd_update(a) -> dict:
+    m = jsonio.read(a.sprint)
+    for d in a.done or []:
+        if d not in m["done"]:
+            m["done"].append(d)
+    nexts = dict(parse_pair(t, "--next") for t in (a.next or []))
+    items = done_items(m)
+    known = {p["plan"] for p in m["plans"]}
+    for plan in items:
+        # init で --plan を渡さなかった計画も、done に載った時点で表の行にする
+        if plan not in known:
+            issues = plan_issues(plan)
+            kind = plan_kind(plan)
+            m["plans"].append({"kind": kind, "plan": plan, "issues": issues, "label": default_label(kind, issues, m), "next": ""})
+    for p in m["plans"]:
+        if p["plan"] in nexts:
+            p["next"] = nexts[p["plan"]]
+        if not p.get("issues"):
+            p["issues"] = plan_issues(p["plan"])
+        p["row"] = fill_row(p, items.get(p["plan"]))
+    jsonio.write_atomic(a.sprint, m, indent=1)
+    rows = [{"plan": p["plan"], **p["row"]} for p in m["plans"]]
+    finished = sum(1 for r in rows if r["result"] != NOT_DONE)
+    stopped = sum(1 for r in rows if r["result"] not in (NOT_DONE, "完了"))
+    summary = f"計画 {len(rows)} 本: 終わった {finished} / 完了でない {stopped}"
+    return outcome("ok", summary, rows, {"plans": len(rows), "finished": finished, "stopped": stopped})
+
+
+def cmd_gate(a) -> dict:
+    # 並列の設計プランが同じ関門を書く（mvv の記録と handoff の取り消し）ため、読んで書く間を排他にする
+    with locks.exclusive(a.sprint, timeout=60):
+        return gate_locked(a)
+
+
+def gate_locked(a) -> dict:
+    m = jsonio.read(a.sprint)
+    at = a.at or clock.now_iso("utc")
+    if a.withdraw:
+        return withdraw_gate(a, m, at)
+    if not a.what:
+        return outcome("stopped", "--what が要る（--withdraw のときだけ省ける）", exit=EXIT_UNREADABLE)
+    entry = {"name": a.name, "what": a.what, "at": at}
+    if a.by == "user":
+        override = pms.record_override(m, a.sprint, a.name, a.outcome, at, Path(a.root or ".").resolve(), a.mvv_log, pr=a.pr)
+        if a.outcome == "rejected":
+            m.setdefault("rejections", []).append({**entry, "by": "user", "outcome": "rejected"})
+            jsonio.write_atomic(a.sprint, m, indent=1)
+            extra = f"。覆しを記録した（{override['kind']}）" if override else ""
+            summary = f"{a.name} の差し戻しを書いた（{at}。関門は通さない）{extra}"
+            return outcome("ok", summary, [override] if override else [], {"gates": len(m.get("gates", []))})
+        if a.outcome:
+            entry["outcome"] = "approved"
+    if a.name == MVV_GATE:
+        mvv = m.get("mvv") or {}
+        if not mvv.get("path") or not Path(mvv["path"]).is_file():
+            return outcome("stopped", "MVV が無い（init --pace fast か auto で写す）。MVV の承認を書かない")
+        entry["sha256"] = sha256_of(Path(mvv["path"]))
+    if a.by == "mvv":
+        if sprint_mvv.withdrawn(m, a.name):
+            return outcome("stopped", f"{a.name} は MVV 判定の通過を取り消した。自動で通さず、利用者の承認を求める")
+        if not a.verdict:
+            return outcome("stopped", "--by mvv には --verdict が要る", exit=EXIT_UNREADABLE)
+        try:
+            reasons = json.loads(a.reasons or "[]")
+        except ValueError:
+            return outcome("stopped", f"--reasons は JSON の配列で渡す: {a.reasons}", exit=EXIT_UNREADABLE)
+        entry.update(by="mvv", verdict=a.verdict, reasons=reasons if isinstance(reasons, list) else [reasons], log=a.log or "")
+    m["gates"] = gates = [g for g in m.get("gates", []) if g.get("name") != a.name] + [entry]
+    jsonio.write_atomic(a.sprint, m, indent=1)
+    who = "MVV 判定" if a.by == "mvv" else "承認"
+    return outcome("ok", f"{a.name} の{who}を書いた（{at}）", gates, {"gates": len(gates)})
+
+
+def withdraw_gate(a, m: dict, at: str) -> dict:
+    """同じ名前の承認ゲートの by: mvv の記録を外す（`lib/sprint_mvv.withdraw`。#1370 の I8）。"""
+    if a.by != "user" or a.outcome or a.verdict:
+        return outcome("stopped", "--withdraw は --by・--outcome・--verdict と併せて渡さない", exit=EXIT_UNREADABLE)
+    n = sprint_mvv.withdraw(m, a.name, at)
+    jsonio.write_atomic(a.sprint, m, indent=1)
+    done = f"記録を外した（{at}）" if n else "記録が無い（外すものが無い）"
+    return outcome("ok", f"{a.name} の MVV 判定の{done}", m.get("gates", []), {"gates": len(m.get("gates", [])), "withdrawn": n})
+
+
+# ---------------------------------------------------------------- 生成
+
+
+def gate_word(g: dict) -> str:
+    """関門を誰が通したか。記録に by が無ければ利用者の承認。"""
+    return "MVV 判定" if g.get("by") == "mvv" else "承認"
+
+
+def row_of(p: dict) -> dict:
+    return p.get("row") or fill_row(p, None)
+
+
+def fmt_seconds(v) -> str:
+    return "—" if v is None else f"{v:g}"
+
+
+def fmt_cost(v) -> str:
+    return "—" if v is None else f"${v:.3f}"
+
+
+def state_text(r: dict) -> str:
+    s = r["result"]
+    if r["result"] not in (NOT_DONE, "完了") and r.get("exit") not in (None, 0):
+        s += f"（exit={r['exit']}）"
+    if r.get("reason"):
+        s += f"。理由: {r['reason']}"
+    return s
+
+
+TABLE_HEAD = ("計画", "状態", "PR", "秒", "費用", "次")
+TABLE_ALIGN = (None, None, None, "right", "right", None)
+
+
+def section_body(m: dict) -> str:
+    """節の本文（見出しの次の行から）。空行で始まり、空行で終わる。"""
+    rows = []
+    for p in m.get("plans", []):
+        r = row_of(p)
+        rows.append(
+            [
+                x or "—"
+                for x in (
+                    p.get("label") or p["plan"],
+                    state_text(r),
+                    r.get("pr"),
+                    fmt_seconds(r.get("seconds")),
+                    fmt_cost(r.get("cost")),
+                    p.get("next"),
+                )
+            ]
+        )
+    lines = ["", mdtable.table_markdown(TABLE_HEAD, rows, align=TABLE_ALIGN), ""]
+    head = f"- スプリント: {m.get('name', '')}"
+    if m.get("milestone"):
+        head += f"（マイルストーン {m['milestone']}）"
+    if m.get("issues"):
+        head += "。課題: " + " ".join(f"#{i}" for i in m["issues"])
+    lines.append(head)
+    v = m.get("versions", {})
+    if v.get("dev") or v.get("prod"):
+        lines.append(f"- 版: 開発版 {v.get('dev') or '—'} / 本番 {v.get('prod') or '—'}")
+    for g in m.get("gates", []):
+        lines.append(f"- {g['name']} {gate_word(g)}（{g['at']}）: {g.get('what', '')}")
+    if m.get("done"):
+        lines.append("- queue の done: " + " ".join(f"`{d}`" for d in m["done"]))
+    total = [row_of(p).get("cost") for p in m.get("plans", [])]
+    if any(c is not None for c in total):
+        lines.append(f"- LLM の費用の計: ${sum(c for c in total if c is not None):.3f}")
+    lines.append("")
+    return "\n".join(lines) + "\n"
+
+
+def find_section(text: str, word: str) -> tuple[int, int, int, str] | None:
+    """見出しに word を含む最初の節の (見出しの行の始まり, 本文の始まり, 本文の終わり, 見出しの行) を返す。
+
+    本文は、見出しと同じか浅い見出しの手前まで。囲みのコードブロックの中の # は見出しとみなさない。
+    見出しは行頭の `#` で始まるもの（ATX）だけを数える。"""
+    lines = text.splitlines(keepends=True)
+    offsets = [0]
+    for line in lines:
+        offsets.append(offsets[-1] + len(line))
+    atx = [h for h in md.headings(text) if lines[h.line].startswith("#")]
+    for k, h in enumerate(atx):
+        if word not in lines[h.line].rstrip("\r\n"):
+            continue
+        end = next((o.line for o in atx[k + 1 :] if o.level <= h.level), None)
+        return offsets[h.line], offsets[h.line + 1], len(text) if end is None else offsets[end], lines[h.line]
+    return None
+
+
+def heading_text(line: str) -> str:
+    return line.rstrip("\r\n").lstrip("#").strip()
+
+
+def cmd_render(a) -> dict:
+    m = jsonio.read(a.sprint)
+    text = Path(a.doc).read_text()
+    found = find_section(text, a.section)
+    if found is None:
+        return outcome("stopped", f"見出しに「{a.section}」を含む節が無い: {a.doc}")
+    head_start, body_start, body_end, head_line = found
+    body = section_body(m)
+    if a.demote:
+        if not a.heading:
+            return outcome("stopped", "--demote には新しい見出し（--heading）が要る")
+        hashes = re.match(r"^#+", head_line).group(0)
+        eol = head_line[len(head_line.rstrip("\r\n")) :] or "\n"
+        old_head = head_line.replace(a.section, a.demote, 1)
+        new = f"{hashes} {a.heading}{eol}{body}"
+        out = text[:head_start] + new + old_head + text[body_start:]
+        summary = f"節「{heading_text(head_line)}」を「{heading_text(old_head)}」へ下げ、節「{a.heading}」を足した"
+    else:
+        out = text[:body_start] + body + text[body_end:]
+        summary = f"節「{heading_text(head_line)}」の本文を置き換えた"
+    if out != text:
+        Path(a.doc).write_text(out)
+    return outcome("ok", summary, [{"doc": a.doc, "changed": out != text}], {"plans": len(m.get("plans", [])), "bytes": len(body.encode())})
+
+
+def status_lines(m: dict) -> list[str]:
+    head = f"スプリント: {m.get('name', '')}"
+    if m.get("milestone"):
+        head += f"（マイルストーン {m['milestone']}）"
+    out = [head]
+    for p in m.get("plans", []):
+        r = row_of(p)
+        extra = "・".join(
+            x
+            for x in (
+                r.get("pr"),
+                (f"{fmt_seconds(r['seconds'])} 秒" if r.get("seconds") is not None else ""),
+                (fmt_cost(r["cost"]) if r.get("cost") is not None else ""),
+            )
+            if x
+        )
+        state = state_text(r) + (f"（{extra}）" if extra else "")
+        out.append(f"{p.get('label') or p['plan']}: {state}。次: {p.get('next') or '—'}")
+    for g in m.get("gates", []):
+        out.append(f"{g['name']}: {gate_word(g)} {g['at']}")
+    return out
+
+
+def cmd_status(a) -> dict | None:
+    m = jsonio.read(a.sprint)
+    lines = status_lines(m)
+    if a.json:
+        return outcome("ok", lines[0], lines[1:], {"plans": len(m.get("plans", []))})
+    print("\n".join(lines))
+    return None
+
+
+class Blank(dict):
+    def __missing__(self, key):
+        return "{" + key + "}"
+
+
+def next_block(m: dict, heading: str) -> str:
+    v = m.get("versions", {})
+    values = Blank(
+        name=m.get("name", ""),
+        milestone=m.get("milestone", ""),
+        heading=heading,
+        dev=v.get("dev", ""),
+        prod=v.get("prod", ""),
+        issues=" ".join(f"#{i}" for i in m.get("issues", [])),
+    )
+    body = (m.get("goal_template") or "").format_map(values).strip("\n")
+    return f"```ndf-next\n{body}\n```\n"
+
+
+def cmd_next(a) -> dict | None:
+    m = jsonio.read(a.sprint)
+    heading = m.get("heading", "")
+    text = None
+    if a.doc:
+        text = Path(a.doc).read_text()
+        found = find_section(text, a.section)
+        if found is None:
+            return outcome("stopped", f"見出しに「{a.section}」を含む節が無い: {a.doc}")
+        heading = heading_text(found[3])
+    if not (m.get("goal_template") or "").strip():
+        return outcome("stopped", "sprint.json に /goal の雛形（goal_template）が無い")
+    block = next_block(m, heading)
+    if not a.replace:
+        if a.json:
+            return outcome("ok", "ndf-next の囲みを作った", [block], {"heading": heading})
+        print(block, end="")
+        return None
+    if text is None:
+        return outcome("stopped", "--replace には引継ぎ文書（--doc）が要る")
+    found = find_section(text, a.replace)
+    if found is None:
+        return outcome("stopped", f"見出しに「{a.replace}」を含む節が無い: {a.doc}")
+    _, body_start, body_end, head_line = found
+    tail = "\n" if body_end < len(text) else ""
+    out = text[:body_start] + "\n" + block + tail + text[body_end:]
+    if out != text:
+        Path(a.doc).write_text(out)
+    return outcome(
+        "ok", f"節「{heading_text(head_line)}」を ndf-next の囲みで置き換えた", [block], {"heading": heading, "changed": out != text}
+    )
+
+
+def build_parser() -> argparse.ArgumentParser:
+    ap = argparse.ArgumentParser(prog="sprint-state.py", description=__doc__.split("\n")[0])
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    s = sub.add_parser("init")
+    s.add_argument("sprint")
+    s.add_argument("--name", required=True)
+    s.add_argument("--milestone")
+    s.add_argument("--issue", type=int, action="append")
+    s.add_argument("--plan", action="append", help="<種類>=<plan.json>（種類は 実装・開発版・本番 など）")
+    s.add_argument("--done", action="append")
+    s.add_argument("--dev")
+    s.add_argument("--prod")
+    s.add_argument("--goal", help="/goal の文面の雛形。@<ファイル> ならファイルから読む")
+    s.add_argument("--pace", choices=PACES, default="normal", help="スプリントの進め方（既定 normal）")
+    s.add_argument("--mvv", help="マイルストーンから写さずに使うスプリント MVV のファイル")
+    s.add_argument("--repo", help="マイルストーンを読むリポジトリ（OWNER/REPO。既定はカレント）")
+    s.add_argument("--root", help="プロジェクト MVV（.ndf/mvv.md・mvv.json）を読むリポジトリの根（既定はカレント）")
+
+    s = sub.add_parser("update")
+    s.add_argument("sprint")
+    s.add_argument("--done", action="append")
+    s.add_argument("--next", action="append", help="<plan.json>=<行の「次」>")
+
+    s = sub.add_parser("gate")
+    s.add_argument("sprint")
+    s.add_argument("name")
+    s.add_argument("--what", help="何を承認したか（--withdraw のとき以外は要る）")
+    s.add_argument("--at")
+    s.add_argument("--by", choices=("user", "mvv"), default="user", help="誰が関門を通したか（既定 user）")
+    s.add_argument("--verdict", help="--by mvv: 判定")
+    s.add_argument("--reasons", help="--by mvv: 理由（JSON の配列）")
+    s.add_argument("--log", help="--by mvv: 判定のログ（mvv-gate.jsonl）のパス")
+    s.add_argument(
+        "--outcome", choices=("approved", "rejected"), help="--by user: 利用者の答え（省くと approved。記録に outcome を書かない）"
+    )
+    s.add_argument("--mvv-log", default=str(pm.gate_log_path()), help="--by user: 直前の MVV 判定を読むログ（既定 mvv-gate.jsonl）")
+    s.add_argument("--pr", type=int, help="--by user: 答えた Pull Request。渡すとその PR の MVV 判定だけを直前の判定として比べる")
+    s.add_argument("--root", help="覆しの記録の repo（既定はカレント）")
+    s.add_argument("--withdraw", action="store_true", help="同じ名前の承認ゲートの MVV 判定の記録（by: mvv）を外す（無ければ何もしない）")
+
+    s = sub.add_parser("render")
+    s.add_argument("sprint")
+    s.add_argument("doc")
+    s.add_argument("--section", default=SECTION_DEFAULT)
+    s.add_argument("--demote", help="今の節の見出しの語をこの語へ替えて下げ、新しい節を前に足す（例: 前の会話の進み）")
+    s.add_argument("--heading", help="--demote で足す節の見出し")
+
+    s = sub.add_parser("status")
+    s.add_argument("sprint")
+    s.add_argument("--json", action="store_true")
+
+    s = sub.add_parser("next")
+    s.add_argument("sprint")
+    s.add_argument("--doc")
+    s.add_argument("--section", default=SECTION_DEFAULT, help="現在地の見出しを読む節")
+    s.add_argument(
+        "--replace", nargs="?", const=NEXT_SECTION_DEFAULT, help=f"引継ぎ文書のこの語の節を置き換える（既定 {NEXT_SECTION_DEFAULT}）"
+    )
+    s.add_argument("--json", action="store_true")
+    return ap
+
+
+def main(argv: list[str] | None = None) -> int:
+    a = build_parser().parse_args(argv)
+    fn = {"init": cmd_init, "update": cmd_update, "gate": cmd_gate, "render": cmd_render, "status": cmd_status, "next": cmd_next}[a.cmd]
+    try:
+        out = fn(a)
+    except (OSError, ValueError) as e:
+        out = outcome("stopped", f"読めない・書けない: {e}")
+    if out is None:
+        return 0
+    code = out.pop("exit", None)
+    print(json.dumps(out, ensure_ascii=False))
+    return 0 if out["status"] == "ok" else code or 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

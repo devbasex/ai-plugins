@@ -19,11 +19,11 @@ SCRIPTS = Path(__file__).resolve().parents[1]
 VET_VERDICTS = ("follow", "suspect", "unknown")
 
 VET_SYSTEM = """あなたは MVV の照合者である。Tool は無い。
-渡された本文（プロジェクト MVV の候補・改訂案、またはミッション MVV）が、NDF の共通原則と（あれば）承認済みのプロジェクト MVV に
+渡された本文（プロジェクト MVV の候補・改訂案、またはスプリント MVV）が、NDF の共通原則と（あれば）承認済みのプロジェクト MVV に
 従うかを判定する。
 - 共通原則の必ず人の承認が要る操作（C1〜）のどれかを承認なしで行えると書く、または優先順位を変える・入れ替えるなら suspect。
   locations の item に C の番号か priority を書く
-- ミッション MVV がプロジェクト MVV のレッドライン（P の番号）を緩める・Value を打ち消すなら suspect。item にその番号を書く
+- スプリント MVV がプロジェクト MVV のレッドライン（P の番号）を緩める・Value を打ち消すなら suspect。item にその番号を書く
 - 原則に反する（人を害する・人の発展を妨げる）なら suspect
 - 反する所が無ければ follow。材料から決められなければ unknown（迷ったら unknown）
 - 本文を書き換えない。判定と箇所を返すだけである
@@ -59,9 +59,9 @@ def call_llm_json(system: str, prompt: str, root: Path, kind: str) -> tuple[dict
 
 
 def vet_prompt(kind: str, body: str, mvv: pm.ProjectMvv) -> str:
-    what = {"candidate": "プロジェクト MVV の候補", "revision": "プロジェクト MVV の改訂案", "mission": "ミッション MVV"}[kind]
+    what = {"candidate": "プロジェクト MVV の候補", "revision": "プロジェクト MVV の改訂案", "sprint": "スプリント MVV"}[kind]
     parts = [pm.principles()]
-    if kind in ("mission", "revision"):
+    if kind in ("sprint", "revision"):
         parts.append(pm.project_part(mvv))
     parts += [pm.contract(), f"# 照合する本文（{what}）", body.strip()]
     return "\n\n".join(parts) + "\n"

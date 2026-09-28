@@ -107,7 +107,7 @@ MERGE_CMD = f"python3 {HERE / 'merged-steps.py'} merge-when-green {{pr}}"
 MERGE_PROBE = {"cmd": f"python3 {HERE / 'merged-steps.py'} probe --pr {{pr}} --act"}
 CHECK_PY = f"python3 {HERE / 'check-trigger.py'}"
 MVV_PY = f"python3 {HERE / 'mvv-gate.py'}"
-MISSION_STATE_PY = f"python3 {HERE / 'mission-state.py'}"
+SPRINT_STATE_PY = f"python3 {HERE / 'sprint-state.py'}"
 GLOSSARY_PY = f"python3 {HERE / 'glossary.py'}"
 SPEC_COPY_PY = f"python3 {HERE / 'spec-copy.py'}"
 # 設計の PR の本文の「決めたこと」を設計文書の決定へ合わせてから push する（CI の pr-body-decisions が見る）
