@@ -2352,6 +2352,38 @@
       "pending_source": "issues/issue-1389-design.md"
     },
     {
+      "term": "スプリント",
+      "context": "ndf-workflow",
+      "meaning": "1 つの版として出す課題と Pull Request のセット。期間ではなく、1 つの版として出す中身で切る。工程はスプリント単位で 1 回ずつ通し、モードもスプリントで 1 つにする",
+      "code": "sprint",
+      "pending_source": "issues/issue-1407-requirements.md"
+    },
+    {
+      "term": "スプリント状態ファイル",
+      "context": "ndf-workflow",
+      "meaning": "スプリントのプラン・done・承認ゲートの記録・MVV・版を持つファイル（`sprint.json`）",
+      "code": "sprint_state",
+      "pending_source": "issues/issue-1407-requirements.md"
+    },
+    {
+      "term": "スプリントブランチ",
+      "context": "ndf-workflow",
+      "meaning": "課題の Pull Request を集め、ベースブランチへの Pull Request をスプリントで 1 本にするブランチ（`sprint/<名前>`）",
+      "pending_source": "issues/issue-1407-requirements.md"
+    },
+    {
+      "term": "スプリント課題",
+      "context": "ndf-workflow",
+      "meaning": "スプリントに含まれる Pull Request の本文が、閉じる語で指す課題",
+      "pending_source": "issues/issue-1407-requirements.md"
+    },
+    {
+      "term": "スプリント MVV",
+      "context": "ndf-workflow",
+      "meaning": "スプリント単位の MVV。プロジェクト MVV の範囲での具体化",
+      "pending_source": "issues/issue-1407-requirements.md"
+    },
+    {
       "term": "自動反映の本番チャネル",
       "context": "ndf-workflow",
       "meaning": "本番チャネルのうち、マージ（push）で本番系への反映が自動で始まるもの。宣言の delivery に kind: auto で本番チャネルを branch に持つ行があるときに当たる。そこへのマージは承認ゲート 2 に当たる",
