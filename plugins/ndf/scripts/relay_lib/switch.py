@@ -61,7 +61,7 @@ class UsageWatch:
         cur, thr = self.relay.account, ca.switch_at()
         if cur == ca.METERED:
             c = ca.choose(before=0)  # 期限を過ぎたトークンだけを更新する
-            if c.name and (c.score is None or c.score < thr):
+            if c.recoverable(thr):
                 if self.recover != c.name:
                     self.lines.put(f"{c.name} の上限が外れた。次のカットポイントで従量の接続から戻す")
                 self.recover = c.name
@@ -97,7 +97,7 @@ class AccountSwitch:
             return None, kind, c
         if cur == ca.METERED:
             c = ca.choose()
-            if c.name and (c.score is None or c.score < thr):
+            if c.recoverable(thr):
                 return c.name, "recovered", c
             return ca.METERED, None, c
         due = self.watch.due if self.watch is not None else None
