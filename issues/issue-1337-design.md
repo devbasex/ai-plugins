@@ -48,9 +48,13 @@ project-trygroup-prd は宣言を足さなくても通る。`./scripts/run-pytho
 | 集約 | 持ち主（書き換えてよいもの） | 根 | エンティティ | 値オブジェクト |
 | --- | --- | --- | --- | --- |
 | 依存の用意（worktree ごと） | `worktree-deps.sh` | 用意の印（worktree ごとの git ディレクトリの `ndf-deps`） | — | 用意の手順（複製 / 実体の複製 / コマンド）・用意の結果の 1 行 |
-| 到達の確認（worktree とサービスの組ごと） | `lib/container_reach.py` | 到達の判定 | — | 探りの印（乱数のファイル名と中身）・コンテナへ渡す環境（`COMPOSE_PROJECT_NAME`・`COMPOSE_FILE`・`NDF_WORKTREE`） |
+| 到達の確認（worktree とサービスの組ごと） | `lib/container_reach.py` | 到達の判定 | — | 探りの印（乱数のファイル名と中身） |
+| テスト環境の割り当て（worktree ごと。既存） | `worktree-testenv.sh` | 台帳の割り当て | — | コンテナへ渡す環境（`compose_env` が組む `NDF_ENVIRONMENT`・`NDF_SLOT`・`NDF_WORKTREE`・`NDF_SHARED_NETWORK`・`NDF_PORT_<役割>` と、`COMPOSE_PROJECT_NAME=<環境名>`・`COMPOSE_FILE=<compose_files を : で結んだ絶対パス>` の全部） |
 
 **依存の用意の宣言（共有設定の `deps`）は集約に入れない。** 書くのは利用者で、NDF は読むだけである。
+**コンテナへ渡す環境の持ち主は `worktree-testenv.sh` の 1 つだけである。** `up` と同じ `compose_env` が組んだ環境を
+`compose-env` で出し、到達の確認はそれをそのまま受けて探るだけにする。自分で組むと、`${NDF_PORT_HTTP}` を参照する
+compose の定義を `exec` が再解釈するときに値が空になり、`up` と違う解釈で exec が失敗する。
 `worktree` を作る 6 箇所（構成要素の表）は依存の用意を書き換えず、`worktree-deps.sh` を呼ぶだけである。
 
 ### 不変条件
@@ -58,15 +62,15 @@ project-trygroup-prd は宣言を足さなくても通る。`./scripts/run-pytho
 | # | 集約 | 条件 | 破れたときの扱い |
 | --- | --- | --- | --- |
 | I1 | 依存の用意 | 共有設定に `deps` が無ければ、worktree を作る 6 箇所は今と同じ git のコマンドだけを打ち、同じファイルを作り、同じ出力を出す | 変更前後の比較のテストが落ちる |
-| I2 | 依存の用意 | 用意の書き込み先は worktree の中だけである。途中の symlink をたどって外へ書かない（`destination_is_safe` の規則） | その手順で止め、失敗として返す |
+| I2 | 依存の用意 | 依存物の置き場所（複製・実体の複製の書き込み先）は worktree の中だけである。途中の symlink をたどって外へ書かない（`destination_is_safe` の規則）。例外は用意の印の 1 つで、`git -C <worktree> rev-parse --git-dir` が返すディレクトリの `ndf-deps` にだけ書く | その手順で止め、失敗として返す |
 | I3 | 依存の用意 | 用意は git の状態を変えない。用意の後の `git status --porcelain` は用意の前と一致する（依存物は git が無視するパスに置く） | 変わったパスを挙げて失敗として返す。印を書かない |
 | I4 | 依存の用意 | 用意が失敗しても worktree は消さない。作成の処理は 0 以外で終わる | — |
 | I5 | 依存の用意 | 宣言が壊れていれば、用意の手順を 1 つも実行しない | 宣言のファイルと誤りの箇所を示し、終了コード 3 で返す |
-| I6 | 依存の用意 | 用意の印がある worktree では、用意をやり直さない | — |
-| I7 | 依存の用意 | worktree を消した後、メインディレクトリの依存物のファイルの一覧と内容は、作る前と一致する（symlink を張らない） | 消した後の比較のテストが落ちる |
+| I6 | 依存の用意 | `--if-unprepared` で呼ばれたとき、用意の印があれば手順を 1 つも走らせない。引数なしの `prepare` は印を見ずにやり直し、成功すれば印を書き直す | — |
+| I7 | 依存の用意 | worktree を消した後、メインディレクトリの依存物のファイルの一覧と内容は、作る前と一致する（symlink を張らない）。ハードリンクの複製は同じ実体を指すため、**`copy_from_main` に置けるのは worktree の中でその場で書き換えないパスだけ**とする（宣言の契約。書き換えるものは `copy_as_real` に置く）。用意の中では、複製の前に時刻の印を置き、`run` の後に `find <copy_from_main のパス> -type f -links +1 -newer <時刻の印>` で、複製の後にその場で書き換えられたハードリンクを探す | 用意では見つかったパスを挙げて失敗（1）として返し、印を書かない。消した後の比較のテストが落ちる |
 | I8 | 依存の用意 | `deps.run` で走らせるのは共有設定に書かれたコマンドだけである。個人設定の `deps` は反映しない | 個人設定の `deps` は「反映しない項目」として `status` に出る |
 | I9 | 到達の確認 | 宣言でコンテナを指定した suite は、到達を確かめてから走らせる。確かめられなければ走らせない | 届かない理由を示し、テストを「判断できない」（`test-run.py` の 2）として返す |
-| I10 | 到達の確認 | 探りの印は確認の後に必ず消す | 消せなければ到達しなかったものとして扱う |
+| I10 | 到達の確認 | 探りの印は git が無視するパス（worktree の `.ndf-evidence/reach-<乱数>`）に置き、置く前に共通の git ディレクトリの `info/exclude` へ `.ndf-evidence/` を登録する（`worktree-testenv.sh` の `exclude_evidence` と同じ）。確認の後に必ず消す。途中で止められて消せなくても、Pull Request と利用者のコミットには入らない | 登録できなければ印を置かずに届かないものとして扱う。消せなければ到達しなかったものとして扱う |
 
 ### ドメインイベント
 
@@ -85,7 +89,7 @@ project-trygroup-prd は宣言を足さなくても通る。`./scripts/run-pytho
 | 用語 | 意味 | 用語集への反映 |
 | --- | --- | --- |
 | 依存物 | パッケージマネージャが入れる、追跡されないディレクトリ（`vendor/`・`node_modules/`・`.venv` など）。worktree には最初から無い | 既存（`ndf-worktree`） |
-| 依存の用意 | worktree を作った直後に、宣言に従って依存物を worktree で使える状態にすること | 既存（`ndf-worktree`） |
+| 依存の用意 | worktree を作った直後、または未用意の既存 worktree を使う前（使い回し・手で打つやり直し）に、宣言に従って依存物を worktree で使える状態にすること | 既存（`ndf-worktree`。定義を広げる） |
 | 用意の印 | 依存の用意が済んだことを示す、worktree ごとの git ディレクトリの `ndf-deps` ファイル。使い回すときはこれを見てやり直しを省く | 追加（`ndf-worktree`） |
 | 到達の確認 | コンテナの中から worktree の探りの印を読み、テストのコンテナが worktree を見ているかを確かめること | 追加（`ndf-worktree`） |
 
@@ -123,9 +127,9 @@ project-trygroup-prd は宣言を足さなくても通る。`./scripts/run-pytho
 | 依存の用意（`worktree-deps.sh`） | `prepare` で宣言を読み、複製・実体の複製・コマンドの順に用意し、git の状態の不変（I3）を確かめ、印を書き、1 行を出す | 新設 |
 | 依存の用意の包み（`lib/worktree_deps.py`） | Python の作成箇所（W2〜W4・W6）から呼ぶ。共有設定を自分で読み、ファイルが無いか `deps` が無ければ何も起動しない（I1）。`deps` があるか、JSON として読めなければ `worktree-deps.sh prepare` を打ち（壊れているかの判定は `worktree-deps.sh` だけが持つ）、終了コードと 1 行を返す | 新設 |
 | 作成の 6 箇所（W1〜W6） | `git worktree add` の直後に用意を呼ぶ。使い回す経路（W2〜W5）では `--if-unprepared` で呼ぶ | 変更 |
-| 到達の確認（`lib/container_reach.py`） | コンテナを指定した suite を走らせる前に、渡す環境を組み、探りの印で到達を確かめる。CLI（`probe`）も持ち、シェルから呼べる | 新設 |
+| 到達の確認（`lib/container_reach.py`） | コンテナを指定した suite を走らせる前に、`worktree-testenv.sh compose-env` が出した環境を受け、探りの印で到達を確かめる。環境を自分で組まない。CLI（`probe`）も持ち、シェルから呼べる | 新設 |
 | テストを走らせる 2 つの関数 | `test_triage.run_command` と `refactor_lib.process.run_with_timeout` は、到達の確認が返した環境を足して走らせる。届かなければ走らせずに「判断できない」を返す | 変更 |
-| テスト環境（`worktree-testenv.sh test`） | 種類に `service` があれば、`container_reach.py probe` で到達を確かめてから走らせる。`COMPOSE_PROJECT_NAME`・`COMPOSE_FILE`・`NDF_WORKTREE` を渡す | 変更 |
+| テスト環境（`worktree-testenv.sh`） | `compose-env` を足し、`up` と同じ `compose_env` が組んだ環境の全部に `COMPOSE_PROJECT_NAME`・`COMPOSE_FILE` を加えて `KEY=VALUE` で出す（割り当てを新しく取らない）。`test` は種類に `service` があれば、`container_reach.py probe` で到達を確かめてから同じ環境で走らせる | 変更 |
 | worktree の設定のスキーマ（`worktree.schema.json`） | `deps` 節と、`testenv.test_kinds.*.service` を足す | 変更 |
 | 宣言のモデル（`project_lib/model.py` の `Container`） | 既にある `suites[].container`（`service`・`compose_files`）の意味を「到達を確かめて走らせる」に決める。形は変えない | 変更（説明だけ） |
 | `worktree` Skill | 手順 2-1（外部 Skill への委譲）と 2-3（手で `git worktree add`）の後に `worktree-deps.sh prepare` を打つ。`EnterWorktree` との付き合い方の節を足す（決定 9 の 3 行）。`references/declaration.md` に `deps`、`references/test-execution.md` にコンテナの suite と到達の確認を書く | 変更 |
@@ -241,14 +245,16 @@ worktree-deps.sh prepare <worktree> [--if-unprepared]
 | 終了コード | 意味 | 標準エラー |
 | --- | --- | --- |
 | 0 | 用意した / 宣言が無い / `--if-unprepared` で印があった | 用意したときだけ `依存の用意: 済み（<手順の数> 件・<秒> 秒）`。ほかは何も出さない |
-| 1 | 用意が失敗した（複製元が無い・複製できない・書き込み先が外・コマンドが 0 以外・git の状態が変わった） | `依存の用意: 失敗（<手順>・<秒> 秒）` の後に、失敗した手順の出力の末尾 20 行 |
+| 0 | 印がある worktree で引数なしの `prepare` を打ち、印を無視してやり直して成功した（印を書き直す） | `依存の用意: 済み（<手順の数> 件・<秒> 秒）` |
+| 1 | 用意が失敗した（複製元が無い・複製できない・書き込み先が外・コマンドが 0 以外・git の状態が変わった・`copy_from_main` のハードリンクがその場で書き換えられた（I7）） | `依存の用意: 失敗（<手順>・<秒> 秒）` の後に、失敗した手順の出力の末尾 20 行 |
 | 3 | 宣言が壊れている | `依存の用意: 宣言が壊れています（<ファイル>: <箇所>）`。用意の手順は 1 つも実行しない（I5） |
 
 - **標準出力には何も出さない。** `worktree-setup.sh create` の標準出力（`作業ツリー:`・`起点:` の 2 行）を変えないためである
 - `<手順>` は `copy_from_main[0] vendor`・`run[1] composer install` の形で、宣言の中の位置と値を示す
 - 印は `git -C <worktree> rev-parse --git-dir` が返すディレクトリの `ndf-deps` に、用意した時刻を 1 行で書く。
   worktree の中には書かないため、git の状態を変えない（I3）
-- 失敗したときは印を書かない。次の `--if-unprepared` の呼び出しがやり直す
+- 失敗したときは印を書かない。次の `--if-unprepared` の呼び出しがやり直す。引数なしの失敗では、前からあった印を消してから
+  用意を始めるため、失敗の後に印は残らない
 
 ### 作成の箇所の終了の形
 
@@ -271,10 +277,10 @@ python3 container_reach.py probe <worktree> --service <サービス> [--compose-
 
 | 手順 | 内容 |
 | --- | --- |
-| 1. 環境を組む | worktree にテスト環境の割り当て（`worktree-testenv.sh env` の台帳）があれば、`COMPOSE_PROJECT_NAME=<環境名>`・`COMPOSE_FILE=<compose_files を : で結んだ絶対パス>`・`NDF_WORKTREE=<worktree>` を返す環境に入れる。割り当てが無ければ何も足さない |
-| 2. 印を置く | worktree の根へ `.ndf-reach-<乱数>` を作り、中身に乱数を書く |
-| 3. 読む | 1 の環境で、worktree を作業ディレクトリにして `docker compose exec -T <サービス> cat .ndf-reach-<乱数>` を打つ |
-| 4. 消す | 印を消す（I10） |
+| 1. 環境を受ける | `worktree-testenv.sh compose-env <worktree>` を打ち、出た `KEY=VALUE` の全部を返す環境に入れる（`NDF_*` と `COMPOSE_PROJECT_NAME`・`COMPOSE_FILE`）。割り当てが無ければ何も出ず、何も足さない。自分では組まない |
+| 2. 印を置く | 共通の git ディレクトリの `info/exclude` へ `.ndf-evidence/` を登録してから、worktree の `.ndf-evidence/reach-<乱数>` を作り、中身に乱数を書く（I10） |
+| 3. 読む | 1 の環境で、worktree を作業ディレクトリにして `docker compose exec -T <サービス> cat .ndf-evidence/reach-<乱数>` を打つ |
+| 4. 消す | 印を消す（I10。`finally` で消す。外から止められて残っても git は無視する） |
 | 5. 判定 | 出力が乱数と一致すれば到達した。コンテナが無い・exec が 0 以外・中身が違う、はいずれも届かない |
 
 | 終了コード（CLI） | 意味 | 出力 |
@@ -294,6 +300,10 @@ python3 container_reach.py probe <worktree> --service <サービス> [--compose-
 
 `testenv.test_kinds.<種類>.service`（string・任意）を足す。あれば走らせる前に `container_reach.py probe` を打ち、1・2 なら
 走らせずにその終了コードで終わる。0 なら出力の環境を足して走らせる。無ければ今と同じである。
+
+`compose-env <worktree>` を足す。台帳に割り当てがあれば、`compose_env` が組む `NDF_*` の全部に
+`COMPOSE_PROJECT_NAME=<環境名>`・`COMPOSE_FILE=<compose_files を : で結んだ絶対パス>` を加え、標準出力へ `KEY=VALUE` で
+1 行ずつ出して 0 で終わる。割り当てが無ければ何も出さずに 0 で終わる。`env` と違い、割り当てを新しく取らない。
 
 ## 処理の流れ
 
@@ -320,6 +330,7 @@ sequenceDiagram
     D->>G: status --porcelain（用意の前）
     D->>CP: copy_from_main・copy_as_real を順に複製
     D->>D: run を順に sh -c
+    D->>D: copy_from_main の内側で、その場で書き換えられたハードリンクを探す（I7）
     D->>G: status --porcelain（用意の後）
     alt どこかで失敗・状態が変わった
         D-->>C: 1（手順と末尾 20 行）
@@ -339,13 +350,15 @@ stateDiagram-v2
     未用意 --> 未用意: prepare が 1・3（印を書かない）
     未用意 --> 宣言なし: 共有設定に deps が無い
     用意済み --> 用意済み: --if-unprepared（何もしない）
+    用意済み --> 用意済み: 引数なしの prepare が 0（やり直して印を書き直す）
+    用意済み --> 未用意: 引数なしの prepare が 1・3（印を消す）
     用意済み --> [*]: worktree remove（印ごと消える）
     未用意 --> [*]: worktree remove
     宣言なし --> [*]: worktree remove
 ```
 
-**用意済みから未用意へ戻る遷移は無い。** 使い回す worktree で宣言や lock ファイルが変わっても、印を消さない限り
-やり直さない（前提 3）。やり直すときは印を消して `prepare` を打つ（`worktree` Skill に書く）。
+**使い回す経路（`--if-unprepared`）では、用意済みから未用意へ戻らない。** 使い回す worktree で宣言や lock ファイルが
+変わってもやり直さない（前提 3）。やり直すときは引数なしで `prepare` を打つ。印を消す手順は要らない（`worktree` Skill に書く）。
 
 ### コンテナで走るテスト
 
@@ -358,7 +371,7 @@ sequenceDiagram
     alt 無い
         R-->>T: 足す環境なし（今と同じ）
     else ある
-        R->>R: テスト環境の割り当てから環境を組む
+        R->>R: worktree-testenv.sh compose-env の環境を受ける
         R->>R: 探りの印を置く
         R->>K: compose exec -T <service> cat <印>
         K-->>R: 中身
