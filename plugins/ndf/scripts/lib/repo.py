@@ -63,13 +63,13 @@ def read_json_object(f: Path, label: str) -> tuple[dict, str | None]:
     return data, None
 
 
-def branch_value(v) -> str | None:
+def _branch_value(v) -> str | None:
     return v if isinstance(v, str) and v else None
 
 
 def declared_base(root, remote: bool = False) -> str | None:
     """`.ndf/worktree.json` の `base_branch`。`remote` なら `origin/<名前>`。宣言が無い・読めなければ `None`。"""
-    v = branch_value(read_worktree_decl(root)[0].get("base_branch"))
+    v = _branch_value(read_worktree_decl(root)[0].get("base_branch"))
     if v is None:
         return None
     return f"origin/{v}" if remote else v
