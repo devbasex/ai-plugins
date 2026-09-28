@@ -101,17 +101,18 @@ class AccountSwitch:
                 return c.name, "recovered", c
             return ca.METERED, None, c
         due = self.watch.due if self.watch is not None else None
-        usable, score = False, None
+        usable, score, left = False, None, None
         if cur is not None:
             u = ca.usage(cur)
             acc = ca.load_account(cur)
             usable = acc is not None and not acc.needs_relogin and acc.limited_until(time.time()) is None
             score = u.score() if u else None
+            left = acc.remaining() if acc is not None else None
             if usable and due is None and (score is None or score < thr):
                 return cur, None, None
         c = ca.choose(exclude={cur} if cur else set())
         if c.name:
-            if usable and score is not None and c.score is not None and c.score >= score:
+            if usable and self.no_better(c, score, left):
                 return cur, None, c
             return c.name, "threshold" if usable else ("start" if cur is None else "unusable"), c
         if usable:
@@ -119,6 +120,15 @@ class AccountSwitch:
         if declared:
             return ca.METERED, "limited", c
         return cur, None, c
+
+    @staticmethod
+    def no_better(c: ca.Choice, score: float | None, left: float | None) -> bool:
+        """候補 `c` が今のアカウント（使用率 `score`・残りの量 `left`）より良くないか（#1453 の I9）。
+
+        両方の残りの量が分かれば残りの量で、どちらかが不明なら使用率で比べる。"""
+        if left is not None and c.remaining is not None:
+            return c.remaining <= left
+        return score is not None and c.score is not None and c.score >= score
 
     def tell_account(self, prev: str | None, to: str | None, reason: str | None, choice: ca.Choice | None) -> None:
         """区間を起動したアカウントを画面の 1 行と記録（`account` の行）に残す（I12）。トークンと宣言の値は書かない。"""
