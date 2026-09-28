@@ -2,6 +2,9 @@
 
 `Relay` はセッションを切り替える状態機械である。合図の判定の材料（会話の記録）は `claude`、
 入出力と子の起動は `terminal`、記録は `record` が持つ。
+
+区間のアカウント（#1389）の選び方・上限シグナルファイルの判定・定期の確認は `switch` の `AccountSwitch` と
+`UsageWatch` が持つ。
 """
 
 from __future__ import annotations
@@ -15,6 +18,7 @@ from . import claude as cl
 from . import record, version_dir
 from .common import (
     CHILD_FILE,
+    LIMIT_FILE,
     LOCK_FILE,
     LOG_FILE,
     MARK_FILE,
@@ -33,10 +37,13 @@ from .common import (
 )
 from .mark import asked_after
 from .record import RelayRecord, StartLimit
+from .switch import AccountSwitch, UsageWatch
 from .terminal import StartFailed, Terminal, pty_available, wait_exit_code
 
+import claude_accounts as ca  # noqa: E402,I001  common が lib/ を sys.path に置く
 
-class Relay:
+
+class Relay(AccountSwitch):
     """前景に常駐し、区間ごとの claude を擬似端末の子として起動する。"""
 
     def __init__(self, claude: str, relay_dir: str, marketplace: str, version: str, term: Terminal, limit: StartLimit):
@@ -55,6 +62,12 @@ class Relay:
         self.exited = None
         self.saw_question = False
         self.quiet = quiet_seconds()
+        # 登録済みのアカウントが 2 つ以上あるときだけ切り替える（I8。起動したときに決める）
+        self.multi = ca.registered() >= 2
+        self.account: str | None = None  # 今の区間のアカウント（`metered` は従量の接続。None は今と同じ環境）
+        self.noted = self.told = None  # 上限の観測を残した・背景の作業の 1 行を出したシグナルファイルの written_at
+        self.auth_section = 0  # 認証の失敗を扱った区間（区間ごとに 1 度だけ）
+        self.watch = UsageWatch(self) if self.multi else None
         self.lock = _lock(self.path(LOCK_FILE), None)  # 動いている間は持ち続ける（relay_running が見る）
         with open(self.path(PID_FILE), "w") as f:
             f.write(str(os.getpid()))
@@ -68,13 +81,27 @@ class Relay:
     # -- 子の起動
 
     def start_section(
-        self, args: list[str], cwd: str, command: str, from_session: str, cwd_fallback: str | None = None, carried: list[str] | None = None
+        self,
+        args: list[str],
+        cwd: str,
+        command: str,
+        from_session: str,
+        cwd_fallback: str | None = None,
+        carried: list[str] | None = None,
+        plan: tuple | None = None,
     ) -> None:
+        """区間を起動する。`plan` は上限の後に決めた (アカウント, 理由, 選んだ結果)。無ければここで選ぶ（F4）。"""
         self.record.drop_mark()
         remove(self.path(QUESTION_FILE))
-        at = self.term.spawn(self.claude, [*(carried or []), *args], cwd, self.env, self.path(CHILD_FILE))
+        prev = self.account
+        to, reason, choice = (plan or self.pick(None)) if self.multi else (None, None, None)
+        env = cl.section_env(self.env, to) if to else None
+        if env is None:
+            env, to = self.env, None
+        at = self.term.spawn(self.claude, [*(carried or []), *args], cwd, env, self.path(CHILD_FILE))
         self.section += 1
         self.started_at = at
+        self.account = to
         row = dict(
             event="start",
             at=stamp(at),
@@ -89,7 +116,15 @@ class Relay:
             row["cwd_fallback"] = cwd_fallback
         if carried is not None:
             row["carried"] = carried
+        if self.multi:
+            row["account"] = to
         self.log(**row)
+        if self.multi:
+            self.tell_account(prev, to, reason, choice)
+            if self.watch is not None:
+                self.watch.reset()
+                if not self.watch.thread.is_alive():
+                    self.watch.start()
         self.limit.release()
 
     # -- 合図の判定
@@ -101,7 +136,8 @@ class Relay:
         if self.halted:
             return None
         try:
-            return self._tick()
+            self.flush_lines()
+            return self._tick_limit() or self._tick()
         except Exception as e:  # 本体の例外で子を巻き込まない
             self.halt("error", f"ラッパーの中で例外が起きた（{type(e).__name__}）")
             return None
@@ -159,6 +195,16 @@ class Relay:
 
     def _still_due(self, m) -> bool:
         """`/exit` を書く直前の確かめ直し。質問が無く、合図が同じで、取りやめの行が無いか。"""
+        if m.get("_kind") == "limit":
+            now = self.read_limit()
+            tp = m.get("transcript_path") or ""
+            return (
+                not os.path.exists(self.path(QUESTION_FILE))
+                and now is not None
+                and now.get("written_at") == m.get("written_at")
+                and not asked_after(self.dir, self.path(LIMIT_FILE))
+                and not cl.after_mark(tp, parse_iso(m.get("written_at")) or 0)[1]
+            )
         now = self.read_mark()
         if (
             os.path.exists(self.path(QUESTION_FILE))
@@ -258,7 +304,7 @@ class Relay:
         """`/exit` の後の後処理。子を終わらせ、読み直した合図から続ける合図か終了コードを決める。
         `event="end"` はここで 1 度だけ記録する。続けるなら (合図, None)、終わるなら (None, 終了コード)。"""
         ended_by, status, questioned = self.end_child()
-        again = self.read_mark()
+        again = self.read_limit() if m.get("_kind") == "limit" else self.read_mark()
         requeued = questioned or again is None or again.get("written_at") != m.get("written_at")
         if requeued:
             # 書いた /exit が質問の答えの後に働いた。答えの後の Stop が合図を書き直すか消している
@@ -270,9 +316,15 @@ class Relay:
         if requeued:
             why = self.recheck(again)
             if why:
-                return None, self.give_up(why[0], why[1], again["command"])
-            return again, None
+                return None, self.give_up(why[0], why[1], again.get("command") or self.resume_command(m))
+            # 上限の後は、読み直したシグナルファイルでも決めたアカウントのまま続ける
+            return (m if m.get("_kind") == "limit" else again), None
         return m, None
+
+    def resume_command(self, m) -> str:
+        """利用者が手で打つ次のコマンド（上限の後）。"""
+        args, *_ = self.limit_start(m)
+        return shlex.join(["claude", *args])
 
     def prepare_next(self, m) -> tuple[str, str | None] | None:
         """プラグインを更新し、合図から次の区間の (cwd, 退避前の cwd) を決める。更新に失敗したら None。"""
@@ -306,18 +358,27 @@ class Relay:
             m, code = self.finalize_section(m, written)
             if code is not None:
                 return code
-            command = m["command"]
-            nxt = self.prepare_next(m)
+            plan = None
+            if m.get("_kind") == "limit":
+                self.drop_limit(m)
+                args, command, from_session, src = self.limit_start(m)
+                plan = m["_plan"]
+                shown = shlex.join(["claude", *args])
+            else:
+                args, command, from_session, src, shown = [m["command"]], m["command"], m.get("session_id") or "", m, m["command"]
+            nxt = self.prepare_next(src)
             if nxt is None:
-                return self.give_up("update-failed", "プラグインの更新か版の読み取りに失敗した", command)
+                return self.give_up("update-failed", "プラグインの更新か版の読み取りに失敗した", shown)
             cwd, fb = nxt
             self.term.screen(f"── ndf-relay: 区間 {self.section + 1} ──")
             try:
-                self.start_section([command], cwd, command, m.get("session_id") or "", fb, carried)
+                self.start_section(args, cwd, command, from_session, fb, carried, plan)
             except StartFailed as e:
-                return self.give_up("start-failed", f"claude を起動できない（{os.strerror(e.err)}）", command, errno=e.err)
+                return self.give_up("start-failed", f"claude を起動できない（{os.strerror(e.err)}）", shown, errno=e.err)
 
     def close(self) -> None:
+        if self.watch is not None:
+            self.watch.stop()
         self.limit.release()
         remove(self.path(PID_FILE))
         _unlock(self.lock)

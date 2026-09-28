@@ -18,7 +18,7 @@ from pathlib import Path
 import claude_accounts as ca
 import procs
 import usage_ledger
-from claude_accounts import LIMIT_EPOCH, fallback_env, limit_reset_at  # noqa: F401  上限の文言と宣言の読みは部品が持つ
+from claude_usage import LIMIT_EPOCH, kind_of_text, limit_reset_at  # noqa: F401  上限の文言の読みは部品が持つ
 from monitor import USAGE_LIMIT_FATAL  # 利用上限の文言の表
 from supervise_lib.prompts import JUDGE_SYSTEM, PR_SYSTEM, SLOW_SYSTEM
 
@@ -300,7 +300,7 @@ class ClaudeRunner:
             if res.get("limit"):
                 self.note_limit(res)
                 if multi and self.account != ca.METERED:
-                    kind = ca.kind_of_text(res.get("text") or "")
+                    kind = kind_of_text(res.get("text") or "")
                     if self.account:
                         ca.note_limit(self.account, kind, res.get("resets_at"))
                         tried.add(self.account)

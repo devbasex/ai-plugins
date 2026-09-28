@@ -17,6 +17,7 @@ SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS / "lib"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import claude_accounts as ca  # noqa: E402
+import claude_usage as cu  # noqa: E402
 from account_fake import accounts, window  # noqa: E402,F401
 
 
@@ -227,13 +228,13 @@ def test_usage_shape_change_is_unknown(accounts):
     tok = accounts.add("a", util5=None)
     accounts.fake.usage[tok] = (200, {"five_hour": "x"})
     u = ca.usage("a")
-    assert u.error == "shape" and u.score() is None and ca.load("a").state(time.time()) == "残量不明"
+    assert u.error == "shape" and u.score() is None and ca.load_account("a").state(time.time()) == "残量不明"
 
 
 def test_spend_state(accounts):
     accounts.add("a", spend=True)
     assert ca.rows()[0]["state"] == "支出上限"
-    assert ca.load("a").limited_until(time.time()) == math.inf
+    assert ca.load_account("a").limited_until(time.time()) == math.inf
 
 
 @pytest.mark.parametrize(
@@ -246,7 +247,7 @@ def test_spend_state(accounts):
     ],
 )
 def test_kind_of_text(text, kind):
-    assert ca.kind_of_text(text) == kind
+    assert cu.kind_of_text(text) == kind
 
 
 def test_fallback_env_reads_given_environ():

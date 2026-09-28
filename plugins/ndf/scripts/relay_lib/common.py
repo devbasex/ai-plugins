@@ -25,6 +25,8 @@ import clock  # noqa: E402
 import jsonio  # noqa: E402
 
 MARK_FILE = "next.json"
+# 子の応答が API の失敗（利用上限など）で終わったときに StopFailure hook が書くシグナルファイル（#1389）
+LIMIT_FILE = "limit.json"
 STOP_FILE = "stop"
 LOCK_FILE = "relay.lock"
 PID_FILE = "relay.pid"

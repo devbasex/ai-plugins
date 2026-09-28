@@ -74,3 +74,4 @@ ignore = [
 # account_fake のフィクスチャ accounts も同じ形（#1389）
 "plugins/ndf/scripts/tests/test_claude_accounts.py" = ["F811"]
 "plugins/ndf/scripts/tests/test_supervise.py" = ["F811"]
+"plugins/ndf/scripts/tests/test_relay.py" = ["F811"]

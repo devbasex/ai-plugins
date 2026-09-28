@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/lib/claude_usage.py", "name": "urllib.request", "kind": "wrapped", "reason": "#1389 の決定 13。ラッパーの環境（relay_lib/runtime.py の GROUPS）に lib/notify.py の httpx・python-dotenv を足さずに、使用量の取得先とトークンの更新の宛先を呼ぶため標準ライブラリで送る"}

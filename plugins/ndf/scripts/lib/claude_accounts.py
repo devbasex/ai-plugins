@@ -1,24 +1,19 @@
-"""登録済みの claude アカウント: 置き場・トークンの更新・使用量・選び方・子の環境（#1389）。
+"""登録済みの claude アカウント: 置き場・トークン・使用量の保存・選び方・子の環境（#1389）。
 
 ラッパー（`relay_lib/`）と `supervise.py` が同じこの部品を使う。置き場のファイルを書くのはこのモジュールだけである
-（`account add` の中で claude 自身が書く `.credentials.json` と `.claude.json` を除く）。
+（`account add` の中で claude 自身が書く `.credentials.json` と `.claude.json` を除く）。宛先への 1 回の要求と
+文言の読みは `lib/claude_usage.py` が持つ。
 
-```text
-${NDF_ACCOUNTS_DIR:-${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/accounts}/   0700
-├── work1/              0700。claude の設定ディレクトリ（auth login の書き先）
-│   ├── .credentials.json   0600。claude が書き、更新の後はここが書き戻す
-│   ├── .claude.json        claude が書く
-│   ├── account.json        0600。name・email・registered_at・needs_relogin・limit
-│   └── usage.json          0600。最後の取得の結果（上書き）
-└── work1.lock          アカウントごとの排他（lib/locks.py）
-```
+置き場は `${NDF_ACCOUNTS_DIR:-${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/accounts}/`（0700）。アカウントごとの設定ディレクトリ
+`<名前>/`（0700。`auth login` の書き先）に `.credentials.json`・`account.json`・`usage.json`（0600）を置き、
+排他は `<名前>.lock` で取る。
 
 - 共有の設定ディレクトリの `.credentials.json` は読まず、書かない。子へは選んだアカウントのアクセストークンを
   環境変数 `CLAUDE_CODE_OAUTH_TOKEN` で渡す（引数に載せない）
 - 使用量の取得先は 1 アカウントにつき `NDF_ACCOUNT_CHECK_INTERVAL` 秒（既定 300）に 1 回までしか呼ばない。
   数えるのは `usage.json` の `fetched_at`（成否を問わない）で、プロセス・コンテナをまたぐ
 - 選び方・判定に LLM を呼ばない。呼ぶのは使用量の取得先とトークンの更新の宛先だけである
-- 標準ライブラリと `clock`・`locks`（filelock。使う関数の中で import する）だけを読む
+- 標準ライブラリと `claude_usage`・`locks`（filelock。使う関数の中で import する）だけを読む
 """
 
 from __future__ import annotations
@@ -30,14 +25,11 @@ import re
 import shlex
 import shutil
 import time
-import urllib.error
-import urllib.request
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
+from datetime import datetime
 
-import clock
+from claude_usage import Usage, epoch, get_usage, iso_utc, refresh_oauth
 
 NAME_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,31}")
 METERED = "metered"  # 従量の接続を表す予約の名前。登録できない
@@ -47,38 +39,30 @@ FALLBACK_ENV = "NDF_SUPERVISE_CLAUDE_FALLBACK"
 ACCOUNT_FILE = "account.json"
 USAGE_FILE = "usage.json"
 CRED_FILE = ".credentials.json"
-# 取得先と更新の宛先（Claude Code 2.1.283 の本体と同じ）。`NDF_ACCOUNT_USAGE_URL`・`NDF_ACCOUNT_TOKEN_URL` は試験用
-USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
-TOKEN_URL = "https://platform.claude.com/v1/oauth/token"
-CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 REFRESH_BEFORE = 3600.0  # 期限のこの秒数前を切ったら更新する
-HTTP_TIMEOUT = 10.0
 LOCK_WAIT = 30.0
 NO_RESET_HOLD = 5 * 3600.0  # リセット時刻の読めない上限の観測を候補から外す秒数
-KINDS = ("five_hour", "seven_day", "spend", "unknown")
-# claude の古い形の上限の文言（`Claude AI usage limit reached|<解除の UNIX 時刻>`）と、`resets 3pm (UTC)` の形
-LIMIT_EPOCH = re.compile(r"usage limit reached\|(\d{9,11})", re.I)
-LIMIT_RESETS = re.compile(r"resets?(?:\s+at)?\s+(\d{1,2})(?::(\d{2}))?\s*([ap]m)?(?:\s*\(([^)]+)\))?", re.I)
 
 
 # ---------------------------------------------------------------- 設定と置き場
 
 
-def _num(name: str, default: float) -> float:
+def _setting(name: str, default: float) -> float:
+    """設定の数（負は 0）。無い・読めないときは `default`。"""
     try:
-        return float(os.environ.get(name, "") or default)
+        return max(0.0, float(os.environ.get(name, "") or default))
     except ValueError:
         return default
 
 
 def check_interval() -> float:
     """使用量の取得の最短の間隔（秒）。定期の確認の間隔も兼ねる。"""
-    return _num("NDF_ACCOUNT_CHECK_INTERVAL", 300)
+    return _setting("NDF_ACCOUNT_CHECK_INTERVAL", 300)
 
 
 def switch_at() -> float:
     """切り替えの閾値（%）。100 以上なら閾値による切り替えをしない。"""
-    return _num("NDF_ACCOUNT_SWITCH_AT", 90)
+    return _setting("NDF_ACCOUNT_SWITCH_AT", 90)
 
 
 def store_dir() -> str:
@@ -173,76 +157,7 @@ def _lock_timeout() -> type[BaseException]:
     return locks.LockTimeout
 
 
-def _iso(t: float | None) -> str | None:
-    return None if t is None else datetime.fromtimestamp(t, timezone.utc).isoformat(timespec="seconds")
-
-
-def _epoch(s) -> float | None:
-    d = clock.parse(s, naive="utc") if isinstance(s, str) else None
-    return d.timestamp() if d is not None else None
-
-
-# ---------------------------------------------------------------- 残量と上限の観測
-
-
-@dataclass
-class Usage:
-    """最後に取得した残量。`five_hour`・`seven_day` は `{utilization, resets_at}`（空は読めなかった）。"""
-
-    five_hour: dict | None = None
-    seven_day: dict | None = None
-    spend_limit_reached: bool | None = None
-    fetched_at: float = 0.0
-    error: str | None = None
-
-    @classmethod
-    def from_json(cls, d: dict | None) -> Usage | None:
-        if not isinstance(d, dict):
-            return None
-        return cls(
-            five_hour=d.get("five_hour") if isinstance(d.get("five_hour"), dict) else None,
-            seven_day=d.get("seven_day") if isinstance(d.get("seven_day"), dict) else None,
-            spend_limit_reached=d.get("spend_limit_reached") if isinstance(d.get("spend_limit_reached"), bool) else None,
-            fetched_at=_epoch(d.get("fetched_at")) or 0.0,
-            error=d.get("error") if isinstance(d.get("error"), str) else None,
-        )
-
-    def to_json(self) -> dict:
-        return {
-            "fetched_at": _iso(self.fetched_at),
-            "five_hour": self.five_hour,
-            "seven_day": self.seven_day,
-            "spend_limit_reached": self.spend_limit_reached,
-            "error": self.error,
-        }
-
-    def known(self) -> bool:
-        return self.error is None and (self.five_hour is not None or self.seven_day is not None)
-
-    def score(self) -> float | None:
-        """`five_hour` と `seven_day` の使用率の大きい方。読めなければ None。"""
-        if not self.known():
-            return None
-        vals = [w["utilization"] for w in (self.five_hour, self.seven_day) if w and isinstance(w.get("utilization"), (int, float))]
-        return float(max(vals)) if vals else None
-
-    def resets(self, key: str) -> float | None:
-        w = getattr(self, key)
-        return _epoch(w.get("resets_at")) if isinstance(w, dict) else None
-
-    def limited_until(self, now: float) -> float | None:
-        """上限にあるならそのリセット時刻（支出上限で時刻が無ければ無限）。無ければ None。"""
-        if not self.known():
-            return None
-        if self.spend_limit_reached:
-            return math.inf
-        until = [
-            self.resets(k) or math.inf
-            for k in ("five_hour", "seven_day")
-            if isinstance(getattr(self, k), dict) and (getattr(self, k).get("utilization") or 0) >= 100
-        ]
-        until = [t for t in until if t > now]
-        return max(until) if until else None
+# ---------------------------------------------------------------- アカウントと上限の観測
 
 
 @dataclass
@@ -258,8 +173,8 @@ class Account:
         lim = self.limit
         if not isinstance(lim, dict):
             return None
-        observed = _epoch(lim.get("observed_at")) or now
-        until = _epoch(lim.get("resets_at")) or observed + NO_RESET_HOLD
+        observed = epoch(lim.get("observed_at")) or now
+        until = epoch(lim.get("resets_at")) or observed + NO_RESET_HOLD
         if until <= now:
             return None
         u = self.usage
@@ -289,7 +204,7 @@ def local_time(t: float | None, form: str = "%m-%d %H:%M") -> str:
     return datetime.fromtimestamp(t).astimezone().strftime(form)
 
 
-def load(name: str) -> Account | None:
+def load_account(name: str) -> Account | None:
     d = account_dir(name)
     a = _read(os.path.join(d, ACCOUNT_FILE))
     if a is None:
@@ -320,7 +235,7 @@ def note_limit(name: str, kind: str, resets_at: float | None, now: float | None 
     now = time.time() if now is None else now
     try:
         with _locked(name):
-            _update_account(name, limit={"type": kind, "resets_at": _iso(resets_at), "observed_at": _iso(now)})
+            _update_account(name, limit={"type": kind, "resets_at": iso_utc(resets_at), "observed_at": iso_utc(now)})
     except (_lock_timeout(), OSError):
         pass
 
@@ -336,51 +251,6 @@ def _creds(name: str) -> dict | None:
     d = _read(_creds_path(name))
     o = d.get("claudeAiOauth") if d else None
     return o if isinstance(o, dict) and isinstance(o.get("accessToken"), str) and o["accessToken"] else None
-
-
-def _http(req: urllib.request.Request, timeout: float) -> tuple[int, dict | None]:
-    """(状態, JSON)。通信の失敗は (0, None)、JSON でなければ (状態, None)。"""
-    req.add_header("User-Agent", "ndf-claude-accounts")
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as f:
-            status, body = f.status, f.read()
-    except urllib.error.HTTPError as e:
-        status, body = e.code, b""
-    except (OSError, ValueError):
-        return 0, None
-    try:
-        data = json.loads(body)
-    except ValueError:
-        return status, None
-    return status, data if isinstance(data, dict) else None
-
-
-def _refresh(o: dict, now: float) -> tuple[str, dict | None]:
-    """リフレッシュトークンで更新する。("ok", 新しい claudeAiOauth) / ("rejected", None) / ("error", None)。"""
-    body = {
-        "grant_type": "refresh_token",
-        "refresh_token": o.get("refreshToken") or "",
-        "client_id": CLIENT_ID,
-        "scope": " ".join(o.get("scopes") or []),
-    }
-    req = urllib.request.Request(
-        os.environ.get("NDF_ACCOUNT_TOKEN_URL") or TOKEN_URL,
-        data=json.dumps(body).encode(),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    status, d = _http(req, 30)
-    if status == 0 or status >= 500:
-        return "error", None
-    if status != 200 or not d or not isinstance(d.get("access_token"), str) or not isinstance(d.get("expires_in"), (int, float)):
-        return "rejected", None
-    new = dict(o, accessToken=d["access_token"], refreshToken=d.get("refresh_token") or o.get("refreshToken"))
-    new["expiresAt"] = int((now + d["expires_in"]) * 1000)
-    if isinstance(d.get("refresh_token_expires_in"), (int, float)):
-        new["refreshTokenExpiresAt"] = int((now + d["refresh_token_expires_in"]) * 1000)
-    if isinstance(d.get("scope"), str) and d["scope"]:
-        new["scopes"] = d["scope"].split()
-    return "ok", new
 
 
 def _token_held(name: str, before: float | None, now: float, force: bool = False) -> str | None:
@@ -402,7 +272,7 @@ def _token_held(name: str, before: float | None, now: float, force: bool = False
     if isinstance(rexp, (int, float)) and rexp / 1000 <= now:
         _update_account(name, needs_relogin=True)
         return None
-    how, new = _refresh(o, now)
+    how, new = refresh_oauth(o, now)
     if how == "rejected":
         _update_account(name, needs_relogin=True)
         return None
@@ -431,53 +301,21 @@ def token(name: str, before: float | None = REFRESH_BEFORE, now: float | None = 
 # ---------------------------------------------------------------- 使用量
 
 
-def _parse_usage(d: dict | None, now: float) -> Usage:
-    def window(key: str) -> dict | None:
-        w = d.get(key)
-        if w is None:
-            return None
-        if not isinstance(w, dict) or not isinstance(w.get("utilization"), (int, float)):
-            raise ValueError(key)
-        return {"utilization": float(w["utilization"]), "resets_at": w.get("resets_at") if isinstance(w.get("resets_at"), str) else None}
-
-    try:
-        if not isinstance(d, dict):
-            raise ValueError("body")
-        five, seven = window("five_hour"), window("seven_day")
-        if five is None and seven is None:
-            raise ValueError("windows")
-    except ValueError:
-        return Usage(fetched_at=now, error="shape")
-    ex = d.get("extra_usage")
-    spend = ex.get("spend_limit_reached") if isinstance(ex, dict) and isinstance(ex.get("spend_limit_reached"), bool) else None
-    return Usage(five_hour=five, seven_day=seven, spend_limit_reached=spend, fetched_at=now)
-
-
 def _fetch(name: str, before: float | None, now: float) -> Usage:
-    """排他の中で呼ぶ。取得先を呼んで残量を読む（推論は呼ばない）。"""
+    """排他の中で呼ぶ。取得先を呼んで残量を読む（推論は呼ばない）。401 なら 1 度だけ更新してやり直す。"""
     tok = _token_held(name, before, now)
     if tok is None:
         return Usage(fetched_at=now, error="token")
     o = _creds(name) or {}
     if "user:profile" not in (o.get("scopes") or ["user:profile"]):
         return Usage(fetched_at=now, error="scope")
-    for attempt in range(2):
-        req = urllib.request.Request(
-            os.environ.get("NDF_ACCOUNT_USAGE_URL") or USAGE_URL,
-            headers={"Authorization": f"Bearer {tok}", "anthropic-beta": "oauth-2025-04-20"},
-        )
-        status, d = _http(req, HTTP_TIMEOUT)
-        if status == 401 and attempt == 0 and before is not None:
-            tok = _token_held(name, before, now, force=True)
-            if tok is None:
-                return Usage(fetched_at=now, error="http-401")
-            continue
-        if status == 0:
-            return Usage(fetched_at=now, error="network")
-        if status != 200:
-            return Usage(fetched_at=now, error=f"http-{status}")
-        return _parse_usage(d, now)
-    return Usage(fetched_at=now, error="http-401")
+    status, u = get_usage(tok, now)
+    if status == 401 and before is not None:
+        tok = _token_held(name, before, now, force=True)
+        if tok is None:
+            return u
+        status, u = get_usage(tok, now)
+    return u
 
 
 def usage(name: str, before: float | None = REFRESH_BEFORE, now: float | None = None) -> Usage | None:
@@ -523,12 +361,9 @@ def choose(exclude=(), before: float | None = REFRESH_BEFORE, keep=(), now: floa
     for n in names():
         if n in exclude:
             continue
-        acc = load(n)
+        usage(n, None if n in keep else before, now)
+        acc = load_account(n)
         if acc is None or acc.needs_relogin:
-            continue
-        acc.usage = usage(n, None if n in keep else before, now) or acc.usage
-        acc.needs_relogin = bool((load(n) or acc).needs_relogin)
-        if acc.needs_relogin:
             continue
         readable |= bool(acc.usage and acc.usage.known())
         until = acc.limited_until(now)
@@ -586,63 +421,17 @@ def env_for(name: str, base: dict, before: float | None = REFRESH_BEFORE) -> dic
     return env
 
 
-def label(name: str | None) -> str:
+def account_label(name: str | None) -> str:
     """画面の 1 行に出す識別（`名前（メール）`）。トークンは含めない。"""
     if not name:
         return "既定のログイン"
     if name == METERED:
         return "従量の接続"
-    acc = load(name)
+    acc = load_account(name)
     return f"{name}（{acc.email}）" if acc and acc.email else name
 
 
-# ---------------------------------------------------------------- 上限の文言
-
-
-def kind_of_text(text: str) -> str:
-    """上限の文言の種類（`five_hour`・`seven_day`・`spend`・`unknown`）。"""
-    t = (text or "").lower()
-    if "spend limit" in t or "spending limit" in t:
-        return "spend"
-    if "session limit" in t or "5-hour" in t or "five_hour" in t:
-        return "five_hour"
-    if "weekly limit" in t or "seven_day" in t:
-        return "seven_day"
-    return "unknown"
-
-
-def limit_reset_at(text: str, now: float | None = None) -> float | None:
-    """上限の文言から解除の時刻（UNIX 時刻）を読む。読めなければ None。
-
-    読む形: `usage limit reached|<UNIX 時刻>` と `resets 3pm (Asia/Tokyo)` / `resets at 15:30`。
-    時刻だけの形は、今より後の最初のその時刻（時間帯が無ければ手元の時間帯）とする。
-    """
-    now = time.time() if now is None else now
-    m = LIMIT_EPOCH.search(text or "")
-    if m:
-        return float(m.group(1))
-    m = LIMIT_RESETS.search(text or "")
-    if not m:
-        return None
-    hour, minute, ampm, zone = int(m.group(1)), int(m.group(2) or 0), (m.group(3) or "").lower(), m.group(4)
-    if ampm:
-        if not 1 <= hour <= 12:
-            return None
-        hour = hour % 12 + (12 if ampm == "pm" else 0)
-    if hour > 23 or minute > 59:
-        return None
-    try:
-        tz = ZoneInfo(zone.strip()) if zone else None
-    except (KeyError, ValueError):
-        tz = None
-    cur = datetime.fromtimestamp(now, tz) if tz else datetime.fromtimestamp(now).astimezone()
-    at = cur.replace(hour=hour, minute=minute, second=0, microsecond=0)
-    if at.timestamp() <= now:
-        at += timedelta(days=1)
-    return at.timestamp()
-
-
-# ---------------------------------------------------------------- 登録・削除（`relay.py account` が呼ぶ）
+# ---------------------------------------------------------------- 登録・削除・一覧（`relay.py account` が呼ぶ）
 
 
 def staging_dir(name: str) -> str:
@@ -657,7 +446,7 @@ def staging_dir(name: str) -> str:
 def owner_of(email: str, other_than: str = "") -> str | None:
     """同じメールアドレスで登録済みのアカウントの名前（I3）。"""
     for n in names():
-        acc = load(n)
+        acc = load_account(n)
         if n != other_than and acc and acc.email and acc.email.lower() == email.lower():
             return n
     return None
@@ -668,10 +457,8 @@ def register(name: str, staging: str, email: str) -> None:
     now = time.time()
     with _locked(name):
         final = account_dir(name)
-        _write(
-            os.path.join(staging, ACCOUNT_FILE),
-            {"name": name, "email": email, "registered_at": _iso(now), "needs_relogin": False, "limit": None},
-        )
+        row = {"name": name, "email": email, "registered_at": iso_utc(now), "needs_relogin": False, "limit": None}
+        _write(os.path.join(staging, ACCOUNT_FILE), row)
         if os.path.exists(final):
             shutil.rmtree(final)
         os.replace(staging, final)
@@ -693,7 +480,7 @@ def rows(now: float | None = None) -> list[dict]:
     out = []
     for n in names():
         usage(n, 0, now)
-        acc = load(n)
+        acc = load_account(n)
         if acc is None:
             continue
         u = acc.usage if acc.usage and acc.usage.known() else None
