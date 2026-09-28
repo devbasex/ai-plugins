@@ -217,7 +217,7 @@ def cmd_capacity(name: str, five: str, seven: str) -> int:
         return 2
     try:
         acc = ca.set_capacity(name, declared)
-    except (ca._lock_timeout(), OSError) as e:
+    except (ca.lock_timeout(), OSError) as e:
         print(f"置き場へ書けない（{e}）", file=sys.stderr)
         return 1
     if acc is None:

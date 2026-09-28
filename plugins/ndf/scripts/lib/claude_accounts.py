@@ -161,7 +161,7 @@ def _locked(name: str):
         yield
 
 
-def _lock_timeout() -> type[BaseException]:
+def lock_timeout() -> type[BaseException]:
     import locks
 
     return locks.LockTimeout
@@ -292,7 +292,7 @@ def note_limit(name: str, kind: str, resets_at: float | None, now: float | None 
     try:
         with _locked(name):
             _update_account(name, limit={"type": kind, "resets_at": iso_utc(resets_at), "observed_at": iso_utc(now)})
-    except (_lock_timeout(), OSError):
+    except (lock_timeout(), OSError):
         pass
 
 
@@ -362,7 +362,7 @@ def token(name: str, before: float | None = REFRESH_BEFORE, now: float | None = 
     try:
         with _locked(name):
             return _token_held(name, before, now, min_left=min_left)
-    except (_lock_timeout(), OSError):
+    except (lock_timeout(), OSError):
         return None
 
 
@@ -400,7 +400,7 @@ def usage(name: str, before: float | None = REFRESH_BEFORE, now: float | None = 
             u = _fetch(name, before, now)
             _write(path, u.to_json())
             return u
-    except (_lock_timeout(), OSError):
+    except (lock_timeout(), OSError):
         return Usage.from_json(_read(path))
 
 
