@@ -150,3 +150,77 @@ def test_routes_fallbacks(tmp_path):
     assert [(r.route, r.stage) for r in other] == [("template", "manual")]
     assert delivery.needs_version(other) is False
     assert delivery.needs_version(delivery.routes(sample(tmp_path, "ai-plugins"), FORMS)) is True
+
+
+# ---------- 手動反映の本番系（#1454） ----------
+
+SAME = {"base_branch": "main", "production_branch": "main"}
+STG = {"target": "staging", "kind": "manual", "trigger": "cdk deploy Stg", "branch": "main", "versioned": False, "production": False}
+PRD = {"target": "production", "kind": "manual", "trigger": "cdk deploy Prd", "branch": "main", "versioned": False, "production": True}
+AUTO_MAIN = {"target": "web", "kind": "auto", "trigger": "push", "branch": "main", "versioned": False}
+
+
+def channel(tmp_path, wt, rows=..., **kw):
+    return delivery.dev_channel(delivery.load_delivery(make_repo(tmp_path / "r", wt, rows, **kw)))
+
+
+@pytest.mark.parametrize("rows", [[STG, PRD], [PRD], [{**AUTO_MAIN, "production": False}, PRD]])
+def test_dev_channel_manual_production(tmp_path, rows):
+    """AC1・I2: 起点と本番が同じでも、本番系の行がすべて手動なら手動反映の本番系。"""
+    c = channel(tmp_path, SAME, rows)
+    assert c.ok and c.value == delivery.MANUAL_PRODUCTION
+
+
+@pytest.mark.parametrize(
+    "rows, raw_pj, word",
+    [
+        ([STG, PRD, AUTO_MAIN], None, "delivery[2]"),  # AC2: 自動反映の本番チャネル
+        ([STG, PRD, {**AUTO_MAIN, "production": True}], None, "delivery[2]"),
+        ([STG, {**PRD, "kind": "auto", "branch": "release"}], None, "自動で届く"),  # 表の 6
+        (..., None, "無い"),  # AC3
+        ({"unknown": "測れない"}, None, "不明"),
+        (..., "[1,", "読めない"),
+        ([STG, {**PRD, "production": None}], None, "production: true"),  # 本番系の行を宣言していない
+    ],
+)
+def test_dev_channel_refuses_when_undetermined(tmp_path, rows, raw_pj, word):
+    c = channel(tmp_path, SAME, rows, raw_pj=raw_pj)
+    assert not c.ok and "開発版のチャネルが無い" in c.reason and word in c.reason, c.reason
+
+
+@pytest.mark.parametrize("rows, raw_pj", [(..., None), (..., "[1,"), ([STG, PRD], None), ([AUTO_MAIN], None)])
+def test_dev_channel_separate_branch_does_not_read_delivery(tmp_path, rows, raw_pj):
+    """AC9・I1: 起点と本番が違えば delivery を読まずに separate-branch。"""
+    c = channel(tmp_path, {"base_branch": "develop", "production_branch": "main"}, rows, raw_pj=raw_pj)
+    assert c.value == delivery.SEPARATE_BRANCH
+
+
+@pytest.mark.parametrize(
+    "rows, value",
+    [
+        ([STG, PRD], "not-production"),  # AC5
+        ([{**AUTO_MAIN, "production": False}, PRD], "not-production"),  # I4: 検証の環境への自動反映
+        ([AUTO_MAIN], "production"),  # I4: production を書いていない行は今と同じ
+    ],
+)
+def test_judge_target_reads_production(tmp_path, rows, value):
+    assert delivery.judge_target(delivery.load_delivery(make_repo(tmp_path / "r", SAME, rows)), "main").value == value
+
+
+def test_dev_channel_does_not_call_gh(tmp_path, monkeypatch):
+    """I3: 開発版のチャネルの判定も gh を呼ばない。"""
+    root = make_repo(tmp_path / "r", SAME, [STG, PRD])
+    bin_dir, mark = tmp_path / "bin", tmp_path / "gh-called"
+    bin_dir.mkdir()
+    (bin_dir / "gh").write_text(f"#!/bin/sh\ntouch {mark}\nexit 1\n")
+    (bin_dir / "gh").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}:{__import__('os').environ['PATH']}")
+    assert delivery.dev_channel(delivery.load_delivery(root)).ok
+    assert not mark.exists()
+
+
+def test_route_rows_carry_production_only_when_written(tmp_path):
+    """I8: production を書いていない行の経路は今と同じ 5 キー。"""
+    d = delivery.load_delivery(make_repo(tmp_path / "r", SAME, [STG, {k: v for k, v in PRD.items() if k != "production"}]))
+    rows = [r.as_dict() for r in delivery.routes(d, FORMS)]
+    assert rows[0]["production"] is False and "production" not in rows[1]

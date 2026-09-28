@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from typing import Literal, Optional, Union
 
-from pydantic import Field
+from pydantic import Field, StrictBool
 
 import schema
 
@@ -104,7 +104,7 @@ class Delivery(schema.Shape):
     trigger: str
     branch: Optional[str] = None
     versioned: bool
-    production: Optional[bool] = None  # true: 本番系へ届く / false: 届かない（検証の環境）/ 無し: 決めない（#1454）
+    production: Optional[StrictBool] = None  # true: 本番系へ届く / false: 届かない（検証の環境）/ 無し: 決めない（#1454）
 
 
 class Issues(schema.Shape):
