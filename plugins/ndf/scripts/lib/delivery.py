@@ -51,6 +51,15 @@ class DeliveryDecl:
     sources: dict = field(default_factory=dict)
     unknown: str | None = None  # delivery が {"unknown": ...} のときの理由
 
+    @property
+    def rows_state(self) -> str | None:
+        """delivery の行が使えない理由（`problems` / `unknown` / `absent`）。問題が無く行が並びなら None。"""
+        if self.problems:
+            return "problems"
+        if self.rows is None:
+            return "unknown" if self.unknown else "absent"
+        return None
+
 
 @dataclass
 class Verdict:
@@ -175,8 +184,8 @@ def dev_channel(decl: DeliveryDecl) -> DevChannel:
         return DevChannel(None, f"{none}（本番のブランチが分からない）")
     if decl.production != decl.base:
         return DevChannel(SEPARATE_BRANCH)
-    if decl.problems or decl.rows is None:
-        why = "読めない" if decl.problems else "不明" if decl.unknown else "無い"
+    if decl.rows_state:
+        why = {"problems": "読めない", "unknown": "不明", "absent": "無い"}[decl.rows_state]
         return DevChannel(None, f"{none}（起点と本番のブランチが同じで、{PJ} の delivery が{why}）")
     for i, row in enumerate(decl.rows):
         if reaches_by_merge(row, decl.production):
@@ -254,13 +263,11 @@ def routes(decl: DeliveryDecl, forms=()) -> list[Route]:
     if form:
         return _template_route(decl, form, forms)
     if decl.rows is None:
-        why = (
-            "宣言を読めない（" + " / ".join(decl.problems) + "）"
-            if decl.problems
-            else f"{PJ} の delivery が不明（{decl.unknown}）"
-            if decl.unknown
-            else f"{PJ} に delivery も {SV} に release.form も無い"
-        )
+        why = {
+            "problems": "宣言を読めない（" + " / ".join(decl.problems) + "）",
+            "unknown": f"{PJ} の delivery が不明（{decl.unknown}）",
+            "absent": f"{PJ} に delivery も {SV} に release.form も無い",
+        }[decl.rows_state]
         return [Route(MANUAL, "（不明）", None, STAGE_MANUAL, f"{why}ため、リリースの経路を決められない")]
     if not decl.rows:
         return [Route(NONE, "（無し）", None, STAGE_NONE, "delivery が [] で、配布しない")]
