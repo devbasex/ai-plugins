@@ -331,27 +331,20 @@ def _token_held(name: str, before: float | None, now: float, force: bool = False
     exp = (o.get("expiresAt") or 0) / 1000
     before = None if before is None else max(before, min_left)
     left = o["accessToken"] if exp - now > min_left else None
-    if not force and (before is None or exp - now > before):
-        return left
-    return _refresh_and_store(name, o, now, None if force else left)
+    return left if not force and (before is None or exp - now > before) else _refresh_and_store(name, o, now, None if force else left)
 
 
 def _refresh_and_store(name: str, o: dict, now: float, fallback: str | None) -> str | None:
     """排他の中で呼ぶ。トークンを更新して書き込み、新しいアクセストークンを返す。一時的な失敗なら `fallback`。"""
     rexp = o.get("refreshTokenExpiresAt")
-    if isinstance(rexp, (int, float)) and rexp / 1000 <= now:
-        _update_account(name, needs_relogin=True)
-        return None
-    how, new = refresh_oauth(o, now)
+    how, new = ("rejected", None) if isinstance(rexp, (int, float)) and rexp / 1000 <= now else refresh_oauth(o, now)
     if how == "rejected":
         _update_account(name, needs_relogin=True)
         return None
     if new is None:
         return fallback
     try:
-        whole = _read(_path(name, CRED_FILE)) or {}
-        whole["claudeAiOauth"] = new
-        _write(_path(name, CRED_FILE), whole)
+        _write(_path(name, CRED_FILE), {**(_read(_path(name, CRED_FILE)) or {}), "claudeAiOauth": new})
     except OSError:
         _update_account(name, needs_relogin=True)
         return None
