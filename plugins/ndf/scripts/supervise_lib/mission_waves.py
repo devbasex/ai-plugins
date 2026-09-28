@@ -8,7 +8,7 @@ from pathlib import Path
 
 from supervise_lib.decl import decl_fields
 from supervise_lib.paths import GLOSSARY_PY, MVV_PY, PUSH_DESIGN, SELF, SPEC_COPY_PY, WORKTREE_SETUP
-from supervise_lib.release_templates import MVV_NOTE, plan_release
+from supervise_lib.release_templates import MVV_NOTE, advise_steps, plan_release
 from supervise_lib.templates import plan_check, plan_check_since, plan_impl
 from supervise_lib.verify_steps import handoff_step, merge_step
 
@@ -236,8 +236,9 @@ def plan_mission_check(a, repo: str) -> dict:
     return plan
 
 
-def plan_mission_release(a, repo: str) -> dict:
-    """開発版の配布。検査の queue が --then で流し、検査の PR を --prs へ渡す。"""
+def plan_mission_release(a, repo: str, advise: bool = False) -> dict:
+    """開発版の配布。検査の queue が --then で流し、検査の PR を --prs へ渡す。`advise` なら承認資料の後に
+    助言の MVV 判定を置く（pace: normal と --state。#1400）。"""
     ns = argparse.Namespace(
         **decl_fields(a),
         version=a.version,
@@ -250,8 +251,36 @@ def plan_mission_release(a, repo: str) -> dict:
         branch=f"release/v{a.version}",
         issue=a.issue,
         mode=a.mode,
+        advise=a.state if advise else None,
     )
     return plan_release(ns)
+
+
+def advise_design_steps(a) -> list[dict]:
+    """助言の MVV 判定（#1400）の mvv・mvv-note のステップ。判定によらず、想定外の失敗でも関門 1 の judge（gate）へ進む。"""
+    state = shlex.quote(str(Path(a.state).resolve()))
+    note = {
+        "timeout": 300,
+        "cmd": f"sh -c '[ ! -f {MVV_NOTE} ] || gh pr comment {{pr}} --body-file {MVV_NOTE}'",
+        "on_fail": "gate",
+        "next": "gate",
+    }
+    return advise_steps(state, "design", f"--pr {{pr}} --mode {a.mode} --root .", note, {"stage": "設計"})
+
+
+def plan_advise_design(a, n: int, repo: str) -> dict:
+    """pace: normal と --state の設計: 用語チェックの後の push と関門 1 の judge の間へ助言の MVV 判定を入れる（#1400 の決定 4）。
+    判定は設計 PR へコメントし、プランは判定によらず関門 1 で止まる（承認は利用者が行う）。"""
+    plan = plan_mission_design(a, n, repo)
+    steps = plan["steps"]
+    gate = steps.pop()
+    for s in steps:
+        if s["id"] == "push-glossary":
+            s["next"] = "mvv"
+    gate["inputs"] = [*gate["inputs"], "mvv"]
+    gate["question"] += "。mvv に助言の MVV 判定（判定・理由・根拠）があれば、関門 1 の提示に載せる（承認は利用者が行う）"
+    plan["steps"] = [*steps, *advise_design_steps(a), gate]
+    return plan
 
 
 def plan_mvv_design(a, n: int, repo: str) -> dict:

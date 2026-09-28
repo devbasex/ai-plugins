@@ -1790,6 +1790,7 @@
       "term": "助言の MVV 判定",
       "context": "ndf-workflow",
       "meaning": "承認ゲートの記録（by: mvv）は書かないが、mvv-gate.jsonl へ判定の行（pace 付き）を書き、判定・理由・根拠の項目を承認資料へ載せる MVV 判定（mvv-gate.py check --advise）。normal の承認ゲートの前に走り、承認するのは人である",
+      "source": "plugins/ndf/skills/development-workflow/references/pace.md",
       "pending_source": "issues/issue-1400-design.md"
     },
     {
@@ -1855,8 +1856,9 @@
     {
       "term": "根拠の項目",
       "context": "ndf-workflow",
-      "meaning": "判断の記録に残す MVV の項目の番号（Mission / Vision / Value 3 / C4 / P1 / R2）。MVV が無ければ「MVV なし」、返されなければ「根拠なし」",
-      "pending_source": "issues/issue-1366-design.md"
+      "meaning": "判断の記録と設計の決定の記録に残す MVV の項目の番号（Mission / Vision / Value 3 / C4 / P1 / R2）。ミッション MVV の項目は頭に「ミッション」を付ける（ミッション Value 4。R の番号はそのまま）。MVV が無ければ「MVV なし」、返されなければ「根拠なし」",
+      "source": "plugins/ndf/skills/development-workflow/references/project-mvv.md",
+      "pending_source": "issues/issue-1400-design.md"
     },
     {
       "term": "覆し",

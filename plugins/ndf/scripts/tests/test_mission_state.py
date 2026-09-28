@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -17,6 +18,20 @@ import pytest
 SCRIPTS = Path(__file__).resolve().parents[1]
 SCRIPT = SCRIPTS / "mission-state.py"
 RELAY = SCRIPTS / "relay.py"
+
+NO_GH: dict[str, str] = {}
+
+
+@pytest.fixture(autouse=True)
+def no_gh(tmp_path):
+    """`init --milestone` はマイルストーンの説明を gh api で読む（#1400）。本物の gh を呼ばないよう、`run` の子にだけ落ちる偽物を先に置く。"""
+    bindir = tmp_path / "no-gh"
+    bindir.mkdir()
+    (bindir / "gh").write_text("#!/bin/sh\necho 'gh は使えない（テスト）' >&2\nexit 1\n")
+    (bindir / "gh").chmod(0o755)
+    NO_GH["PATH"] = f"{bindir}:{os.environ.get('PATH', '')}"
+    yield
+    NO_GH.clear()
 
 
 def report(phase: str, issues: str, res: str, pr: str, cost: str, reason: str = "無し") -> str:
@@ -120,7 +135,7 @@ def r6(tmp_path):
 
 
 def run(*args: str) -> subprocess.CompletedProcess:
-    return subprocess.run([sys.executable, str(SCRIPT), *args], capture_output=True, text=True, timeout=30)
+    return subprocess.run([sys.executable, str(SCRIPT), *args], capture_output=True, text=True, timeout=30, env={**os.environ, **NO_GH})
 
 
 def ok(*args: str) -> dict:

@@ -21,6 +21,7 @@ from supervise_lib.mission_waves import (
     plan_mission_design,
     plan_mission_impl,
     plan_mission_release,
+    plan_advise_design,
     plan_mvv_design,
     plan_mvv_release,
 )
@@ -248,6 +249,15 @@ def manual_release_wave(a) -> dict:
     }
 
 
+def advises(a, closing: bool = False) -> bool:
+    """--state を渡した normal だけ助言の MVV 判定を置く（#1400 の決定 4）。new close（closing）には置かない。"""
+    return bool(getattr(a, "state", None)) and not closing
+
+
+def mission_state_path(a) -> str:
+    return str(Path(a.state).resolve())
+
+
 def mission_plans(a) -> list[dict]:
     """ミッションのステージを順に返す。ステージの中の計画は queue --max 3 で同時に流してよい。
     リリースの形に雛形が無ければ、リリースの段の代わりに手で行う段（manual_release_wave）を最後に置く。"""
@@ -256,21 +266,47 @@ def mission_plans(a) -> list[dict]:
     if getattr(a, "pace", "normal") == "auto":
         return auto_mission_plans(a)
     repo = str(Path(a.worktree).resolve())
+    advise = advises(a)
+    design = plan_advise_design if advise else plan_mission_design
     waves = []
     if a.design:
-        waves.append({"name": "設計", "plans": {f"design-{n}": plan_mission_design(a, n, repo) for n in a.design}})
-        waves.append({"name": "関門 1", "gate": "設計 Pull Request をまとめて承認してマージする"})
+        waves.append({"name": "設計", "plans": {f"design-{n}": design(a, n, repo) for n in a.design}})
+        waves.append({"name": "関門 1", "gate": normal_gate_1(a) if advise else "設計 Pull Request をまとめて承認してマージする"})
     waves += [
         {"name": "ミッションのブランチ", "plans": {"mission-branch": plan_mission_branch(a, repo)}},
         {"name": "実装", "plans": {f"impl-{n}": plan_mission_impl(a, n, repo) for n in a.issue}},
         {"name": "検査", "plans": {"check": plan_mission_check(a, repo)}},
     ]
-    waves.append(
-        {"name": "配布", "plans": {"release": plan_mission_release(a, repo)}, "then_of": "検査"}
-        if has_release_template(a)
-        else manual_release_wave(a)
+    if not has_release_template(a):
+        return waves + [manual_release_wave(a)]
+    release = {"name": "配布", "plans": {"release": plan_mission_release(a, repo, advise)}, "then_of": "検査"}
+    if advise:
+        release["note"] = normal_gate_2(a)
+    return waves + [release]
+
+
+def user_gate_cmd(a, gate: str, pr: bool) -> str:
+    """利用者の答えを状態へ書くコマンド（覆しの記録。#1400 の AC6）。承認ゲート 1 は答えた設計 PR を --pr で渡す。"""
+    state = shlex.quote(mission_state_path(a))
+    return (
+        f"python3 {shlex.quote(str(HERE / 'mission-state.py'))} gate {state} {shlex.quote(gate)} --what <要約> --by user"
+        + (" --pr <設計 PR>" if pr else "")
+        + " --outcome approved|rejected"
     )
-    return waves
+
+
+def normal_gate_1(a) -> str:
+    return (
+        "設計 Pull Request をまとめて承認してマージする。承認資料には各設計 PR の助言の MVV 判定（PR のコメント。無ければ「MVV なし」）を"
+        f"載せる。利用者が答えたら、設計 PR ごとに `{user_gate_cmd(a, '関門 1', True)}` を打つ"
+    )
+
+
+def normal_gate_2(a) -> str:
+    return (
+        "承認ゲート 2: 承認資料の末尾に助言の MVV 判定が載る（無ければ「MVV なし」）。利用者が本番への配布に答えたら、"
+        f"`{user_gate_cmd(a, '関門 2', False)}` を打つ"
+    )
 
 
 def normal_command(a) -> str:
@@ -310,13 +346,19 @@ def cmd_new_mission(a, waves: list[dict] | None = None) -> dict:
                 {"pace": pace},
                 next=f"normal で進める（{normal_command(a)}）か、条件を満たしてから打ち直す",
             )
+    closing = waves is not None
     waves = waves if waves is not None else mission_plans(a)
+    if getattr(a, "state", None):
+        # worker と judge がミッション MVV を状態から読む（#1400 の決定 12）
+        for wave in waves:
+            for plan in (wave.get("plans") or {}).values():
+                plan["ミッション状態"] = mission_state_path(a)
     out = Path(a.out or f"mission-{a.name}")
     out.mkdir(parents=True, exist_ok=True)
     index = write_stage_index(waves, out)
     add_resume(index)
     manifest = out / "mission.json"
-    head = manifest_head(a, pace)
+    head = manifest_head(a, pace, closing)
     manifest.write_text(json.dumps({**head, "ステージ": index}, ensure_ascii=False, indent=2) + "\n")
     plans = sum(len(e.get("plans", [])) for e in index)
     return result(
@@ -325,7 +367,7 @@ def cmd_new_mission(a, waves: list[dict] | None = None) -> dict:
         f"ミッション {a.name} の計画を {plans} 本・{len(index)} ステージで書いた: {manifest}",
         index,
         {"waves": len(index), "plans": plans, "manifest": str(manifest)},
-        next=next_text(pace, index),
+        next=next_text(pace, index, advise=pace == "normal" and advises(a, closing)),
     )
 
 
@@ -345,6 +387,8 @@ def write_stage_index(waves: list[dict], out: Path) -> list[dict]:
                 p.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n")
                 paths.append(str(p))
             entry["plans"] = paths
+            if "note" in wave:
+                entry["note"] = wave["note"]
             if "then_of" in wave:
                 # 前のステージの queue が --then で続けて流す
                 entry["then_of"] = wave["then_of"]
@@ -356,25 +400,33 @@ def write_stage_index(waves: list[dict], out: Path) -> list[dict]:
     return index
 
 
-def manifest_head(a, pace: str) -> dict:
+def manifest_head(a, pace: str, closing: bool = False) -> dict:
     """manifest の見出し（ミッション / 進め方 / 状態 / ブランチ）。"""
     head = {"ミッション": a.name}
     if pace in MVV_PACES:
-        head.update({"進め方": pace, "状態": str(Path(a.state).resolve())})
+        head.update({"進め方": pace, "状態": mission_state_path(a)})
         if pace != "fast":
             head["ブランチ"] = mission_branch(a.name)
         return head
     # new close（waves を渡す）は --pace を持たず、状態があれば fast のミッションの終わり
-    if getattr(a, "state", None):
-        head.update({"進め方": "fast", "状態": str(Path(a.state).resolve())})
+    if getattr(a, "state", None) and closing:
+        head.update({"進め方": "fast", "状態": mission_state_path(a)})
         return head
+    if getattr(a, "state", None):  # normal と --state（#1400）
+        head.update({"進め方": "normal", "状態": mission_state_path(a)})
     head["ブランチ"] = mission_branch(a.name)
     return head
 
 
-def next_text(pace: str, index: list[dict]) -> str:
-    """次に打つ手の文面。auto だけ別の文で、manual のステージがあれば追記する。"""
+def next_text(pace: str, index: list[dict], advise: bool = False) -> str:
+    """次に打つ手の文面。auto だけ別の文で、manual のステージがあれば追記する。`advise`（normal と --state）なら
+    承認資料に助言の MVV 判定を載せ、答えを状態へ書くことを足す。"""
     nxt = "ステージの番号の順に command を打つ。関門のステージでは承認を取ってから次へ進む"
+    if advise:
+        nxt += (
+            "。承認資料には助言の MVV 判定を載せ、利用者が答えたら関門 1 のステージの gate・配布のステージの note にある "
+            "mission-state.py gate（--what と --by user。関門 1 は --pr も）を打つ"
+        )
     if pace == "auto":
         nxt = (
             "最初のステージの command を打つ（後ろのステージは --then で続く）。queue が gate を返したら、承認資料に判定の理由と"
