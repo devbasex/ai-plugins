@@ -146,7 +146,7 @@ Python の作成箇所は共有設定を自分で読むため、`deps` が無け
 
 | 項目 | 内容 |
 | --- | --- |
-| ホストから打つ carmo の pre-commit | devcontainer の外（`REMOTE_CONTAINERS` が無い）では、pre-commit が `docker compose exec -T app ./vendor/bin/pint` を打つ。compose のプロジェクト名は作業ディレクトリの名前か `.env` から決まり、NDF はフックの環境に手を入れない。今の carmo の運用（devbase のコンテナの中で打つ）では通らない経路で、受け入れ条件 9 の確認も devcontainer の中で行う。確かめるのは実装の後の手動確認である |
+| ホストから打つ carmo の pre-commit | devcontainer の外（`REMOTE_CONTAINERS` が無い）では、pre-commit が `docker compose exec -T app ./vendor/bin/pint` を打つ。compose のプロジェクト名は作業ディレクトリの名前か `.env` から決まり、NDF はフックの環境に手を入れない。今の carmo の運用（devbase のコンテナの中で打つ）では通らない経路で、受け入れ条件 9 の確認も devcontainer の中で行う。**2026-09-28 の承認ゲート 1 で、利用者がこの経路をこの課題の範囲外と決めた（#1388 が扱う）** |
 | lock ファイルを変える Pull Request の使い回し | cross-review のレビュー worktree は、ラウンドの間に `composer.lock` などが変わっても用意をやり直さない（決定 4）。依存物が古いまま走ったテストが落ちる経路はあるが、偽の green にはならない（コードは worktree のものを読む）。事例が出たら宣言でやり直しを求める形を足す |
 | ハードリンクの複製先の書き換え | 決定 2 のとおり、用意の中（`run`）でその場で書き換えたものは検査で失敗にする。用意の後にテストやツールがその場で書く経路は検出せず、`copy_from_main` に書き換えないパスだけを置く宣言の契約で防ぐ。受け入れ条件 6 は消した後の一致だけを見る |
 | 到達の確認の所要 | `docker compose exec` を 1 プロセスで 1 回打つ。carmo の規模のコンテナでの所要は実装で測る |
