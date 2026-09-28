@@ -1039,9 +1039,10 @@
     {
       "term": "ミッション",
       "context": "ndf-workflow",
-      "meaning": "1 つの版として出す課題と Pull Request のセット。工程はミッション単位で 1 回ずつ通し、モードもミッションで 1 つにする",
+      "meaning": "1 回のリリースとして出す課題と Pull Request のセット。版数を持つプロジェクトでは 1 つの版になり、版数を持たないプロジェクトでは名前で識別する。工程はミッション単位で 1 回ずつ通し、モードもミッションで 1 つにする",
       "code": "mission",
-      "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
+      "source": "plugins/ndf/skills/development-workflow/references/glossary.md",
+      "pending_source": "issues/issue-1336-design.md"
     },
     {
       "term": "ミッション課題",
@@ -2381,6 +2382,27 @@
       "context": "ndf-workflow",
       "meaning": "スプリント単位の MVV。プロジェクト MVV の範囲での具体化",
       "pending_source": "issues/issue-1407-requirements.md"
+    },
+    {
+      "term": "自動反映の本番チャネル",
+      "context": "ndf-workflow",
+      "meaning": "本番チャネルのうち、マージ（push）で本番系への反映が自動で始まるもの。宣言の delivery に kind: auto で本番チャネルを branch に持つ行があるときに当たる。そこへのマージは承認ゲート 2 に当たる",
+      "code": "auto_production_branch",
+      "pending_source": "issues/issue-1336-design.md"
+    },
+    {
+      "term": "リリースの経路",
+      "context": "ndf-release",
+      "meaning": "変更が本番系へ届く道筋の種類。template（release.form の雛形で組む）/ merge（マージで反映）/ manual（手で反映）/ none（届けない）。release.form があればそれ、無ければ宣言の delivery から決まる。リリースの形とは別の軸",
+      "code": "release_route",
+      "pending_source": "issues/issue-1336-design.md"
+    },
+    {
+      "term": "昇格の Pull Request",
+      "context": "ndf-release",
+      "meaning": "ベースブランチから本番チャネルへ変更を入れる Pull Request",
+      "code": "promotion_pr",
+      "pending_source": "issues/issue-1336-design.md"
     }
   ]
 }
