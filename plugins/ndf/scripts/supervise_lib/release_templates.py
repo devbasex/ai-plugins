@@ -299,5 +299,95 @@ def bump_others_cmd(a, plugin: str) -> str:
     )
 
 
+def plan_promote(a, repo: str, ci_wait: int, mvv: str | None = None, condition: dict | None = None, production: str | None = None) -> dict:
+    """昇格のプラン（#1336 の F5）: ベースブランチ（a.base）から本番チャネル（a.production_branch）への Pull Request を
+    `merged-steps.py promote` が作り（あれば使い）、承認ゲート 2 の後にマージする。後片付けはしない（head はベースブランチ）。
+
+    - normal（`mvv` 無し）: promote（承認の引数無し。承認ゲート 2 で終える）→ promote-approved（`--from` でだけ入る）
+    - fast / auto（`mvv` にスプリントの状態）: prepare（PR と承認資料）→ mvv（承認ゲート 2 の MVV 判定）→ note（判定のコメント）→
+      promote（`--gate-approved mvv`）。note か promote が落ちたら handoff が承認ゲートへ落とす
+    """
+    head, base = a.base, production or a.production_branch
+    if not base:
+        raise DeclError(f"昇格に要る本番チャネルが無い（--production-branch か .ndf/{WORKTREE_DECL} の production_branch）")
+    promote = f"{MERGED_PY} promote --head {shlex.quote(head)} --base {shlex.quote(base)}"
+    wait = f" --timeout {ci_wait}"
+    timeout = ci_wait + max(30, ci_wait // 10)
+    approved = {
+        "id": "promote-approved",
+        "type": "run",
+        "stage": "配布",
+        "timeout": timeout,
+        "cmd": promote + wait + " --gate-approved user",
+        "next": "end",
+    }
+    if not mvv:
+        steps = [
+            {"id": "promote", "type": "run", "stage": "配布", "timeout": timeout, "cmd": promote + wait, "gate_next": "end", "next": "end"},
+            approved,
+        ]
+    else:
+        state = str(Path(mvv).resolve())
+        material = "{state_dir}/work/approval-promote.md"
+        pr_of = f'$(gh pr list --head {shlex.quote(head)} --base {shlex.quote(base)} --state open --json number --jq ".[0].number")'
+        steps = [
+            {
+                "id": "prepare",
+                "type": "run",
+                "stage": "配布",
+                "timeout": 300,
+                "cmd": f"{promote} --prepare --out {material}",
+                "next": "mvv",
+            },
+            {
+                "id": "mvv",
+                "type": "run",
+                "timeout": 900,
+                "cmd": f"sh -c '{MVV_PY} check --sprint {shlex.quote(state)} --gate release --material {material} --pr {pr_of} "
+                f"--mode {a.mode} --root {shlex.quote(repo)} --note {MVV_NOTE}'",
+                "next": "note",
+                "gate_next": "end",
+            },
+            {
+                "id": "note",
+                "type": "run",
+                "timeout": 300,
+                "cmd": f"sh -c 'gh pr comment {pr_of} --body-file {MVV_NOTE}'",
+                "on_fail": "handoff",
+                "next": "promote",
+            },
+            {
+                "id": "promote",
+                "type": "run",
+                "stage": "配布",
+                "timeout": timeout,
+                "cmd": promote + wait + " --gate-approved mvv",
+                "on_fail": "handoff",
+                "gate_next": "end",
+                "next": "end",
+            },
+            approved,
+            handoff_step(state, "関門 2", "昇格のマージ"),
+        ]
+    plan = {
+        "フェーズ": "配布（昇格）",
+        "課題": a.issue,
+        "モード": a.mode,
+        "作業場所": repo,
+        "リポジトリ": repo,
+        "規則": RULE_PROMOTE,
+        "上限": 12,
+        "steps": steps,
+    }
+    if condition:
+        plan["実行の条件"] = condition
+    return with_decls(plan, a)
+
+
+RULE_PROMOTE = (
+    "昇格の Pull Request のマージは本番系への反映で、承認ゲート 2 に当たる。承認の無いマージは merged-steps.py が止める。"
+    "CI の失敗は直さずに止める（昇格の Pull Request にはコミットを足さない）。"
+)
+
 # 配布の形（release の form-<形>.md）ごとの雛形。無い形は /ndf:release で配る
 RELEASE_FORMS = {"package-plugin": plan_release_package_plugin}

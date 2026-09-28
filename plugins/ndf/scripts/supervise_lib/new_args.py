@@ -162,8 +162,8 @@ NEW_ARGS = [
         {
             "help": {
                 "*": "配る版（例 10.17.11-dev.1）",
-                "sprint": "開発版の版（例 3.8.0-dev.1。リリースの雛形があるとき開発版のプランに使う）",
-                "close": "開発版の版（最終の検査で変更があったときに配る）",
+                "sprint": "開発版の版（例 3.8.0-dev.1。release.form の雛形で配るときだけ要る）",
+                "close": "開発版の版（最終の検査で変更があったときに配る。release.form の雛形で配るときだけ要る）",
             }
         },
         "release sprint close",
@@ -209,7 +209,7 @@ NEW_ARGS = [
         },
         "sprint close",
     ),
-    ("--prod", {"help": "本番の版（例 10.18.0）"}, "close"),
+    ("--prod", {"help": "本番の版（例 10.18.0。release.form の雛形で配るときだけ要る）"}, "close"),
     ("--milestone", {"help": "マイルストーン（振り返りの材料）"}, "close"),
 ]
 NEW_REQUIRED = {
@@ -217,8 +217,8 @@ NEW_REQUIRED = {
     "fix": "--worktree か --branch・--tests・--title",
     "check": "--pr か --since-last（--id と組）",
     "release": "--version・--prs（か --prs-from-queue）・--channel",
-    "sprint": "--name・--issue・--version",
-    "close": "--name・--issue・--version・--prod・--state",
+    "sprint": "--name・--issue（release.form の雛形で配るときは --version も）",
+    "close": "--name・--issue・--state（release.form の雛形で配るときは --version・--prod も）",
 }
 
 
@@ -240,7 +240,11 @@ def add_new_parsers(sub, epilog: str) -> None:
             description=f"{short}。\n\n{steps}",
             epilog=f"必須の引数: {NEW_REQUIRED[kind]}。\n"
             + DECL_HELP.format(needs=needs)
-            + ("。\n任意の設定: " + DECL_WORDS["release"] if kind == "sprint" else ""),
+            + (
+                "。\n任意の設定: " + DECL_WORDS["release"] + "（無ければ .ndf/project.json の delivery からリリースの経路を導く）"
+                if kind in ("sprint", "close")
+                else ""
+            ),
             formatter_class=argparse.RawDescriptionHelpFormatter,
         )
         for name, kw, allowed in NEW_ARGS:
@@ -283,10 +287,11 @@ def check_new(ap: argparse.ArgumentParser, a) -> None:
 
 
 def check_sprint(ap: argparse.ArgumentParser, a) -> None:
-    """sprint / close の引数の組を確かめる。"""
-    if not (a.name and a.issue and a.version):
-        ap.error(f"new {a.kind} には --name・--issue・--version（開発版の版）が要る")
+    """sprint / close の引数の組を確かめる。版数（--version・--prod）はリリースの経路が雛形のときだけ要り、
+    宣言を読んだ後に apply_decls が確かめる（#1336）。"""
+    if not (a.name and a.issue):
+        ap.error(f"new {a.kind} には --name・--issue が要る")
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", a.name):
         ap.error("--name は英数字・. _ - だけで書く（ブランチ名 sprint/<名前> に使う）")
-    if a.kind == "close" and not (a.prod and a.state):
-        ap.error("new close には --prod（本番の版）と --state（スプリントの状態）が要る")
+    if a.kind == "close" and not a.state:
+        ap.error("new close には --state（スプリントの状態）が要る")

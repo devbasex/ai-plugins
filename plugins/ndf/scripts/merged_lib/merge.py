@@ -205,18 +205,17 @@ def promote(a, cleanup):
     if a.prepare:
         info = pr_state(root, n)
         verdict = delivery.judge_target(delivery.load_delivery(root), info.get("baseRefName") or a.base)
-        path = None
-        if verdict.stops:
-            path = approval_present(
-                TOOL,
-                f"promote-{n}",
-                title=f"#{n} の昇格（{a.head} → {a.base}。承認ゲート 2）",
-                targets=[{"url": info.get("url") or f"#{n}", "title": info.get("title"), "base_head": f"{a.base} ← {a.head}"}],
-                change=f"{info.get('changedFiles', '?')} ファイル・+{info.get('additions', '?')} / -{info.get('deletions', '?')} 行",
-                judge=[("判定", verdict.value), ("理由", verdict.reason), *[(i["name"], i["result"]) for i in verdict.items]],
-                consent=[f"#{n} を {a.base} へマージし、本番系へ反映する"],
-                rollback=GATE_ROLLBACK,
-            )
+        path = approval_present(
+            TOOL,
+            f"promote-{n}",
+            title=f"#{n} の昇格（{a.head} → {a.base}。承認ゲート 2）",
+            targets=[{"url": info.get("url") or f"#{n}", "title": info.get("title"), "base_head": f"{a.base} ← {a.head}"}],
+            change=f"{info.get('changedFiles', '?')} ファイル・+{info.get('additions', '?')} / -{info.get('deletions', '?')} 行",
+            judge=[("判定", verdict.value), ("理由", verdict.reason), *[(i["name"], i["result"]) for i in verdict.items]],
+            consent=[f"#{n} を {a.base} へマージし、本番系へ反映する"],
+            rollback=GATE_ROLLBACK,
+            path=a.out,
+        )
         emit(
             result(
                 TOOL,

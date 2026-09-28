@@ -475,6 +475,7 @@ def build_parser():
     pm.add_argument("--head", required=True, help="昇格させるブランチ（ベースブランチ）")
     pm.add_argument("--base", required=True, help="本番チャネル")
     pm.add_argument("--prepare", action="store_true", help="Pull Request を用意して承認資料を書くところで終える（マージしない）")
+    pm.add_argument("--out", help="--prepare の承認資料の置き場（既定は提示物の置き場）")
     merge.add_wait_args(pm)
     pm.set_defaults(func=cmd_promote)
     pr = sub.add_parser(

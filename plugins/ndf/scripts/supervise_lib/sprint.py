@@ -8,10 +8,11 @@ import shlex
 import subprocess
 from pathlib import Path
 
+import delivery
 import project_mvv
 from pace import PaceError, read_pace
 from step_result import result
-from supervise_lib.decl import SUPERVISE_DECL, decl_roots, with_decls
+from supervise_lib.decl import decl_roots, release_routes, require_versions, with_decls
 from supervise_lib.sprint_waves import (
     sprint_branch,
     plan_fast_check,
@@ -27,8 +28,8 @@ from supervise_lib.sprint_waves import (
 )
 from supervise_lib.new_args import NEW_ARGS
 from supervise_lib.paths import CHECK_PY, HERE, SELF
-from supervise_lib.release_templates import RELEASE_FORMS
-from supervise_lib.verify_steps import merge_steps
+from supervise_lib.release_templates import RELEASE_FORMS, plan_promote
+from supervise_lib.verify_steps import merge_steps, plan_limits
 
 
 def prod_version(version: str) -> str:
@@ -55,7 +56,7 @@ def fast_sprint_plans(a) -> list[dict]:
         {"name": "実装レビュー", "plans": {"review": plan_fast_check(a, repo, f"{a.name}-review", review_only=True)}, "then_of": "実装"},
     ]
     if not has_release_template(a):
-        return waves + [manual_release_wave(a)]
+        return waves + route_waves(a, repo, "実装", mvv=a.state)  # 開発版のステージは置かない（#1336 の決定 12）
     waves += [
         {"name": "開発版", "plans": {"release": plan_mvv_release(a, repo, a.version, "dev")}, "then_of": "実装"},
         {"name": "本番", "plans": {"release-prod": plan_mvv_release(a, repo, prod_version(a.version), "prod")}, "then_of": "実装"},
@@ -91,7 +92,7 @@ def auto_sprint_plans(a) -> list[dict]:
         {"name": "検査", "plans": {"check": plan_sprint_check(a, repo)}, "then_of": first},
     ]
     if not has_release_template(a):
-        return waves + [manual_release_wave(a)]
+        return waves + route_waves(a, repo, first, mvv=a.state)
     prs = ["{queue_pr:check}"]  # 出す版の PR は検査のステージのスプリントの PR（関門 2 の判定のコメントの宛先）
     return waves + [
         {"name": "開発版", "plans": {"release": plan_mvv_release(a, repo, a.version, "dev", prs=prs)}, "then_of": first},
@@ -105,6 +106,8 @@ def close_plan(a, repo: str) -> dict:
     refs = " ".join(f"#{i}" for i in a.issue)
     branch = f"spec/{a.name}"
     stats = f"{CHECK_PY} stats --root {shlex.quote(repo)}"
+    # 配布の記録は雛形の本番の PR にある。雛形で組まない経路は記録を持たない（0 = 本番の記録なし。#1336）
+    record_pr = "{queue_pr:release-prod}" if has_release_template(a) else "0"
     return with_decls(
         {
             "フェーズ": "まとめ",
@@ -148,7 +151,7 @@ def close_plan(a, repo: str) -> dict:
                     "stage": "後片付け",
                     "cwd": repo,
                     "timeout": 900,
-                    "cmd": f"python3 {HERE / 'sprint-close.py'} --record-pr {{queue_pr:release-prod}} --issues {issues} "
+                    "cmd": f"python3 {HERE / 'sprint-close.py'} --record-pr {record_pr} --issues {issues} "
                     f"--with-verification --label {shlex.quote(f'スプリント {a.name}の後片付け')}",
                     "next": "retro",
                 },
@@ -175,11 +178,15 @@ def close_waves(a) -> list[dict]:
     repo = str(Path(a.worktree).resolve())
     final = f"{a.name}-final"
     changed = {"cmd": f"{CHECK_PY} changed --id {final} --root {shlex.quote(repo)}", "skip_code": 3}
+    check = {"name": "最終の検査", "plans": {"check": plan_fast_check(a, repo, final, final=True)}}
+    close = {"name": "まとめ", "plans": {"close": close_plan(a, repo)}, "then_of": "最終の検査"}
+    if not has_release_template(a):
+        return [check, *route_waves(a, repo, "最終の検査", mvv=a.state, condition=changed), close]
     return [
-        {"name": "最終の検査", "plans": {"check": plan_fast_check(a, repo, final, final=True)}},
+        check,
         {"name": "開発版", "plans": {"release": plan_mvv_release(a, repo, a.version, "dev", changed)}, "then_of": "最終の検査"},
         {"name": "本番", "plans": {"release-prod": plan_mvv_release(a, repo, a.prod, "prod", changed)}, "then_of": "最終の検査"},
-        {"name": "まとめ", "plans": {"close": close_plan(a, repo)}, "then_of": "最終の検査"},
+        close,
     ]
 
 
@@ -233,20 +240,55 @@ def mvv_refusal(state_path: str | None, root=None, pace: str = "fast") -> str | 
 MANUAL_RELEASE = "/ndf:release"
 
 
+def apply_routes(a) -> None:
+    """a.routes（リリースの経路）を宣言から組み、雛形で組む経路なら版数を確かめる（足りなければ DeclError）。"""
+    a.routes = release_routes(a, RELEASE_FORMS)
+    require_versions(a)
+
+
+def routes_of(a) -> list:
+    """リリースの経路（apply_decls が載せる a.routes。無ければ release.form だけから導く）。"""
+    rs = getattr(a, "routes", None)
+    if rs is None:
+        d = delivery.build({}, {}, a.release, base=a.base, production=getattr(a, "production_branch", None))
+        rs = delivery.routes(d, tuple(RELEASE_FORMS))
+    return rs
+
+
+def route_rows(a) -> list[dict]:
+    """sprint.json の「リリースの経路」の行。"""
+    return [r.as_dict() for r in routes_of(a)]
+
+
 def has_release_template(a) -> bool:
-    """宣言のリリースの形（release.form）に雛形があるか。無い・知らない形なら False。"""
-    return isinstance(a.release, dict) and a.release.get("form") in RELEASE_FORMS
+    """リリースの経路が release.form の雛形（開発版 → 本番）で組むものか。"""
+    return any(r.stage == delivery.STAGE_TEMPLATE for r in routes_of(a))
 
 
 def manual_release_wave(a) -> dict:
-    """雛形の無いリリースの形のスプリントの最後に置く、手で行うリリースの段（計画を持たない）。"""
-    form = (a.release or {}).get("form") if isinstance(a.release, dict) else None
-    why = f"リリースの形 {form!r} に雛形が無い" if form else f".ndf/{SUPERVISE_DECL} に release.form が無い"
-    return {
-        "name": "リリース",
-        "manual": MANUAL_RELEASE,
-        "note": f"{why}（雛形のある形: {', '.join(RELEASE_FORMS)}）。検査の後に {MANUAL_RELEASE} で行う",
-    }
+    """手で届ける経路のために最後に置く、手で行うリリースのステージ（プランを持たない）。note に経路ごとの理由を書く。"""
+    notes = [r.note for r in routes_of(a) if r.stage == delivery.STAGE_MANUAL and r.note]
+    why = "。".join(notes) or "手で届ける経路がある"
+    return {"name": "リリース", "manual": MANUAL_RELEASE, "note": f"{why}。検査の後に {MANUAL_RELEASE} で行う"}
+
+
+def route_waves(a, repo: str, then_of: str, mvv: str | None = None, condition: dict | None = None, note: str | None = None) -> list[dict]:
+    """雛形で組まない経路のステージ（#1336）。昇格の経路（promote）があれば「本番」（昇格のプラン）を、手で届ける経路
+    （manual）があれば「リリース」（手で行う）をこの順に置く。ベースブランチへのマージで届く経路（merged-by-check）と
+    届けない経路（none）はステージを置かない。"""
+    rs = routes_of(a)
+    waves = []
+    promote = next((r for r in rs if r.stage == delivery.STAGE_PROMOTE), None)
+    if promote:
+        ci_wait = int(plan_limits(a)["ci_wait_timeout"])
+        plan = plan_promote(a, repo, ci_wait, mvv, condition, production=promote.branch)
+        wave = {"name": "本番", "plans": {"promote": plan}, "then_of": then_of}
+        if note:
+            wave["note"] = note
+        waves.append(wave)
+    if any(r.stage == delivery.STAGE_MANUAL for r in rs):
+        waves.append(manual_release_wave(a))
+    return waves
 
 
 def advises(a, closing: bool = False) -> bool:
@@ -260,7 +302,7 @@ def sprint_state_path(a) -> str:
 
 def sprint_plans(a) -> list[dict]:
     """スプリントのステージを順に返す。ステージの中の計画は queue --max 3 で同時に流してよい。
-    リリースの形に雛形が無ければ、リリースの段の代わりに手で行う段（manual_release_wave）を最後に置く。"""
+    リリースの経路が雛形で組むものでなければ、経路ごとのステージ（route_waves）を最後に置く。"""
     if getattr(a, "pace", "normal") == "fast":
         return fast_sprint_plans(a)
     if getattr(a, "pace", "normal") == "auto":
@@ -278,7 +320,7 @@ def sprint_plans(a) -> list[dict]:
         {"name": "検査", "plans": {"check": plan_sprint_check(a, repo)}},
     ]
     if not has_release_template(a):
-        return waves + [manual_release_wave(a)]
+        return waves + route_waves(a, repo, "検査", note=normal_gate_2(a) if advise else None)
     release = {"name": "配布", "plans": {"release": plan_sprint_release(a, repo, advise)}, "then_of": "検査"}
     if advise:
         release["note"] = normal_gate_2(a)
@@ -359,7 +401,7 @@ def cmd_new_sprint(a, waves: list[dict] | None = None) -> dict:
     add_resume(index)
     manifest = out / "sprint.json"
     head = manifest_head(a, pace, closing)
-    manifest.write_text(json.dumps({**head, "ステージ": index}, ensure_ascii=False, indent=2) + "\n")
+    manifest.write_text(json.dumps({**head, "リリースの経路": route_rows(a), "ステージ": index}, ensure_ascii=False, indent=2) + "\n")
     plans = sum(len(e.get("plans", [])) for e in index)
     return result(
         "supervise-new",

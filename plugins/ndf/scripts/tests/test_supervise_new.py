@@ -90,9 +90,8 @@ def test_new_sprint_with_package_plugin_keeps_release_stage(tmp_path):
     assert names[-1] == "配布" and "/ndf:release" not in json.loads(p.stdout)["next"]
 
 
-def test_new_close_still_needs_release_form(tmp_path):
-    root = plain_repo(tmp_path)
-    p = cli(
+def close_cli(root, out, *extra):
+    return cli(
         "new",
         "close",
         "--name",
@@ -101,17 +100,102 @@ def test_new_close_still_needs_release_form(tmp_path):
         str(root),
         "--issue",
         "216",
-        "--version",
-        "3.8.0-dev.1",
-        "--prod",
-        "3.8.0",
         "--state",
-        str(tmp_path / "s.json"),
+        str(root / "s.json"),
         "--out",
-        str(tmp_path / "c"),
+        str(out),
+        *extra,
         cwd=root,
     )
-    assert p.returncode == 2 and "release.form" in p.stderr
+
+
+@pytest.mark.parametrize("delivery", [None, {"unknown": "CI の設定を読めない"}])
+def test_new_close_without_release_form_puts_manual_stage(tmp_path, delivery):
+    """#1336 の AC5: delivery が無い・不明でも止まらず、手で行う配布のステージが入り、理由が note に出る。"""
+    root = plain_repo(tmp_path)
+    if delivery is not None:
+        (root / ".ndf" / "project.json").write_text(json.dumps({"delivery": delivery}, ensure_ascii=False))
+    out = tmp_path / "c"
+    p = close_cli(root, out)
+    assert p.returncode == 0, p.stderr
+    manifest = json.loads((out / "sprint.json").read_text())
+    assert [w["name"] for w in manifest["ステージ"]] == ["最終の検査", "リリース", "まとめ"]
+    note = manifest["ステージ"][1]["note"]
+    assert "delivery" in note and ("不明" in note if delivery else "無い" in note)
+    close = json.loads(Path(manifest["ステージ"][2]["plans"][0]).read_text())
+    assert "--record-pr 0 " in next(s["cmd"] for s in close["steps"] if s["id"] == "close")
+
+
+def test_new_sprint_and_close_with_package_plugin_still_need_versions(tmp_path):
+    """#1336 の I6: 雛形で組む経路だけが版数を要する。"""
+    root = plain_repo(tmp_path, {"form": "package-plugin", "plugin": "foo", "runtimes": ["claude"]})
+    p = cli("new", "sprint", "--name", "m6", "--worktree", str(root), "--issue", "216", "--out", str(tmp_path / "m"), cwd=root)
+    assert p.returncode == 2 and "--version" in p.stderr
+    p = close_cli(root, tmp_path / "c", "--version", "3.8.0-dev.1")
+    assert p.returncode == 2 and "--prod" in p.stderr and "--version" not in p.stderr.split("無い:")[-1]
+
+
+SAMPLES = {
+    "carmo-system-console": (
+        {"base_branch": "main", "production_branch": "main"},
+        [{"target": "本番（ECS）", "kind": "auto", "trigger": "CodePipeline", "branch": "main", "versioned": False}],
+        [("merge", "merged-by-check")],
+        [],
+    ),
+    "project-trygroup-prd": (
+        {"base_branch": "develop", "production_branch": "main"},
+        [
+            {"target": "stg", "kind": "auto", "trigger": "develop へのマージ", "branch": "develop", "versioned": False},
+            {"target": "prd", "kind": "auto", "trigger": "main へのマージ", "branch": "main", "versioned": False},
+        ],
+        [("merge", "merged-by-check"), ("merge", "promote")],
+        ["本番"],
+    ),
+    "carmo-contractors-app": (
+        {"base_branch": "main", "production_branch": "main"},
+        [
+            {"target": "web（Amplify）", "kind": "auto", "trigger": "push", "branch": "main", "versioned": False},
+            {"target": "api", "kind": "manual", "trigger": "sam deploy --config-env prod", "versioned": False},
+        ],
+        [("merge", "merged-by-check"), ("manual", "manual")],
+        ["リリース"],
+    ),
+    "with-ai-dev": (
+        {"base_branch": "main", "production_branch": "main"},
+        [{"target": "本番", "kind": "manual", "trigger": "手でデプロイする", "versioned": False}],
+        [("manual", "manual")],
+        ["リリース"],
+    ),
+    "no-delivery": ({"base_branch": "main", "production_branch": "main"}, [], [("none", "none")], []),
+}
+
+
+@pytest.mark.parametrize("name", list(SAMPLES))
+def test_samples_start_and_close_a_sprint_without_versions(tmp_path, name):
+    """#1336 の AC3・AC4・AC11: 版数の無い宣言で new sprint と new close が --version・--prod・release.form 無しで通り、
+    経路に合ったステージだけが検査の後に入る（ベースブランチへのマージで届く経路と配布しない宣言は置かない）。"""
+    wt, rows, expected, stages = SAMPLES[name]
+    root = plain_repo(tmp_path)
+    (root / ".ndf" / "worktree.json").write_text(json.dumps({"version": 1, **wt}))
+    (root / ".ndf" / "project.json").write_text(json.dumps({"delivery": rows}, ensure_ascii=False))
+    out = tmp_path / "m"
+    p = cli("new", "sprint", "--name", "m6", "--worktree", str(root), "--issue", "216", "--out", str(out), cwd=root)
+    assert p.returncode == 0, p.stderr
+    manifest = json.loads((out / "sprint.json").read_text())
+    assert [(r["route"], r["stage"]) for r in manifest["リリースの経路"]] == expected
+    names = [w["name"] for w in manifest["ステージ"]]
+    assert names == ["スプリントブランチ", "実装", "検査", *stages]
+    if "本番" in stages:
+        promote = json.loads(Path(manifest["ステージ"][3]["plans"][0]).read_text())
+        cmds = {s["id"]: s["cmd"] for s in promote["steps"]}
+        assert "promote --head develop --base main" in cmds["promote"] and "--gate-approved" not in cmds["promote"]
+        assert cmds["promote-approved"].endswith("--gate-approved user")
+        assert manifest["ステージ"][3]["then_of"] == "検査"
+    close_out = tmp_path / "c"
+    p = close_cli(root, close_out)
+    assert p.returncode == 0, p.stderr
+    closing = json.loads((close_out / "sprint.json").read_text())
+    assert [w["name"] for w in closing["ステージ"]] == ["最終の検査", *stages, "まとめ"]
 
 
 # --- #1193: 設計のプランの入口 --------------------------------------------------------
@@ -466,3 +550,21 @@ def test_merge_steps_gate_then_merge_and_approved_only_by_from(tmp_path):
     assert "merge-gate --pr {pr}" in gate["cmd"] and gate["gate_next"] == "end" and gate["next"] == "merge"
     assert "--gate-approved" not in merge["cmd"] and approved["cmd"] == merge["cmd"] + " --gate-approved user"
     assert approved["next"] == merge["next"] == "end"
+
+
+def test_plan_promote_with_mvv_judges_before_merging(tmp_path):
+    """#1336 の F5（fast / auto）: prepare → mvv（承認ゲート 2 の判定。関門ならプランを終える）→ note → promote
+    （--gate-approved mvv）。note か promote が落ちたら handoff が承認ゲートへ落とす。"""
+    import argparse
+
+    from supervise_lib.release_templates import plan_promote
+
+    a = argparse.Namespace(base="develop", production_branch="main", issue=[1], mode="standard", no_reports="")
+    plan = plan_promote(a, str(tmp_path), 600, mvv=str(tmp_path / "s.json"))
+    steps = {s["id"]: s for s in plan["steps"]}
+    assert [s["id"] for s in plan["steps"]][:4] == ["prepare", "mvv", "note", "promote"]
+    assert "--prepare --out" in steps["prepare"]["cmd"] and steps["mvv"]["gate_next"] == "end"
+    assert "--gate release" in steps["mvv"]["cmd"] and "--material {state_dir}/work/approval-promote.md" in steps["mvv"]["cmd"]
+    assert steps["promote"]["cmd"].endswith("--gate-approved mvv") and steps["promote"]["on_fail"] == "handoff"
+    assert steps["note"]["on_fail"] == "handoff" and steps["handoff"]["gate_next"] == "end"
+    assert plan["base_branch"] == "develop"

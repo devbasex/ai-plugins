@@ -185,7 +185,13 @@ def routes(decl: DeliveryDecl, forms=()) -> list[Route]:
         note = f"リリースの形 {form!r} に雛形が無い（雛形のある形: {', '.join(forms)}）"
         return [Route(TEMPLATE, str(form), decl.production, STAGE_MANUAL, note)]
     if decl.rows is None:
-        why = f"{PJ} の delivery が不明（{decl.unknown}）" if decl.unknown else f"{PJ} に delivery も {SV} に release.form も無い"
+        why = (
+            "宣言を読めない（" + " / ".join(decl.problems) + "）"
+            if decl.problems
+            else f"{PJ} の delivery が不明（{decl.unknown}）"
+            if decl.unknown
+            else f"{PJ} に delivery も {SV} に release.form も無い"
+        )
         return [Route(MANUAL, "（不明）", None, STAGE_MANUAL, f"{why}ため、リリースの経路を決められない")]
     if not decl.rows:
         return [Route(NONE, "（無し）", None, STAGE_NONE, "delivery が [] で、配布しない")]
