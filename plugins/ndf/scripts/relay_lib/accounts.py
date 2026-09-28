@@ -168,29 +168,38 @@ def cmd_list(as_json: bool) -> int:
     if not rows:
         print("登録済みのアカウントは無い")
         return 0
-    table = [("名前", "識別", "5 時間", "7 日", "モデル別の週", "支出上限", "枠の大きさ", "残り", "状態")]
-    emails = [r["email"].lower() for r in rows]
-    for r in rows:
-        spend = {True: "達している", False: "達していない"}.get(r["spend_limit_reached"], "-")
-        # 同じメールアドレスが 2 件以上あるときだけ組織名を添える（1 件なら個人の組織名はメールの繰り返しになる）
-        ident = f"{r['email']}（{r['org_name']}）" if r["org_name"] and emails.count(r["email"].lower()) > 1 else r["email"]
-        table.append(
-            (
-                r["name"],
-                ident,
-                _window(r["five_hour"], "%H:%M"),
-                _window(r["seven_day"], "%m-%d"),
-                _scoped(r["scoped"]),
-                spend,
-                _capacity(r),
-                _usd(r["remaining"]),
-                r["state"],
-            )
-        )
-    widths = [max(_width(row[i]) for row in table) for i in range(len(table[0]))]
-    for row in table:
-        print("  ".join(c + " " * (w - _width(c)) for c, w in zip(row, widths)).rstrip())
+    for line in _table_lines(rows):
+        print(line)
     return 0
+
+
+HEADER = ("名前", "識別", "5 時間", "7 日", "モデル別の週", "支出上限", "枠の大きさ", "残り", "状態")
+
+
+def _table_row(r: dict, emails: list[str]) -> tuple[str, ...]:
+    """一覧の 1 件を表示の 1 行へ写す。`emails` は全件のメールアドレス（小文字）。"""
+    spend = {True: "達している", False: "達していない"}.get(r["spend_limit_reached"], "-")
+    # 同じメールアドレスが 2 件以上あるときだけ組織名を添える（1 件なら個人の組織名はメールの繰り返しになる）
+    ident = f"{r['email']}（{r['org_name']}）" if r["org_name"] and emails.count(r["email"].lower()) > 1 else r["email"]
+    return (
+        r["name"],
+        ident,
+        _window(r["five_hour"], "%H:%M"),
+        _window(r["seven_day"], "%m-%d"),
+        _scoped(r["scoped"]),
+        spend,
+        _capacity(r),
+        _usd(r["remaining"]),
+        r["state"],
+    )
+
+
+def _table_lines(rows: list[dict]) -> list[str]:
+    """見出しと各件を列の幅（全角は 2）でそろえた行。"""
+    emails = [r["email"].lower() for r in rows]
+    table = [HEADER, *(_table_row(r, emails) for r in rows)]
+    widths = [max(_width(row[i]) for row in table) for i in range(len(table[0]))]
+    return ["  ".join(c + " " * (w - _width(c)) for c, w in zip(row, widths)).rstrip() for row in table]
 
 
 def _width(s: str) -> int:
