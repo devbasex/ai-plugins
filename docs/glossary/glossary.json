@@ -2425,14 +2425,14 @@
     {
       "term": "WSJF",
       "context": "ndf-issue-upkeep",
-      "meaning": "遅延コストを大きさの見積の段階で割った値。マイルストーンの中の順位を決める",
-      "pending_source": "issues/issue-1429-requirements.md"
+      "meaning": "遅延コストを大きさの見積の段階で割った値。人が実施する前提の一般的な形で、順位の値の大きさの指数が 1 のときに当たる",
+      "pending_source": "issues/issue-1429-design.md"
     },
     {
       "term": "見積の段階",
       "context": "ndf-issue-upkeep",
-      "meaning": "遅延コストの 3 つの要素と大きさに付ける相対値。宣言の尺度（既定は 1, 2, 3, 5, 8, 13, 20）の中から選ぶ",
-      "pending_source": "issues/issue-1429-requirements.md"
+      "meaning": "遅延コストの 3 つの要素と大きさに付ける相対値。宣言の尺度（既定は 1, 2, 3, 5, 8, 13, 20）の中から選ぶ。大きさは AI エージェントが実施したときの費用（所要時間・LLM の費用・変更量）で付け、人の工数では付けない",
+      "pending_source": "issues/issue-1429-design.md"
     },
     {
       "term": "切り出しの境界",
@@ -2473,7 +2473,43 @@
     {
       "term": "バックログの宣言",
       "context": "ndf-issue-upkeep",
-      "meaning": "尺度・余白・自動の閾値・容量・被依存の写し方・ラベルの下限・アンカーを持つ `.ndf/backlog.json`",
+      "meaning": "尺度・余白・自動の閾値・容量・被依存の写し方・ラベルの下限・大きさの指数・大きい課題の閾値と枠の割合・アンカーを持つ `.ndf/backlog.json`",
+      "pending_source": "issues/issue-1429-design.md"
+    },
+    {
+      "term": "順位の値",
+      "context": "ndf-issue-upkeep",
+      "meaning": "遅延コストを大きさの見積の段階の α 乗で割った値（α は大きさの指数）。マイルストーンの中の順位を決める",
+      "pending_source": "issues/issue-1429-design.md"
+    },
+    {
+      "term": "大きさの指数",
+      "context": "ndf-issue-upkeep",
+      "meaning": "順位の値で大きさの見積の段階に掛ける指数 α。0 以上 1 以下で、既定は 0.3（AI エージェントが実施する前提）。1 で WSJF、0 で遅延コストだけになる",
+      "pending_source": "issues/issue-1429-design.md"
+    },
+    {
+      "term": "大きい課題",
+      "context": "ndf-issue-upkeep",
+      "meaning": "大きさの見積の段階が宣言の閾値（既定は尺度の上から 2 番目。既定の尺度では 13）以上の課題",
+      "pending_source": "issues/issue-1429-design.md"
+    },
+    {
+      "term": "大きい課題の枠",
+      "context": "ndf-issue-upkeep",
+      "meaning": "容量のうち枠の割合（既定 0.5）の分を、マイルストーンの中で遅延コストが最大の大きい課題の 1 切れへ先に当てる取り決め。容量が無い回は出さない",
+      "pending_source": "issues/issue-1429-design.md"
+    },
+    {
+      "term": "分割が要る",
+      "context": "ndf-issue-upkeep",
+      "meaning": "大きい課題の枠に当たったが、枠に収まるサブイシューが無く課題そのものも枠を超える状態。報告に出し、自動で分割しない",
+      "pending_source": "issues/issue-1429-design.md"
+    },
+    {
+      "term": "人の判断待ち",
+      "context": "ndf-issue-upkeep",
+      "meaning": "着手の前に人の判断（needs-decision・承認ゲート）を要する状態。費用に数えず、順位の値を変えずに印として出す",
       "pending_source": "issues/issue-1429-design.md"
     }
   ]
