@@ -30,6 +30,25 @@ REASONS = {
 }
 
 
+@dataclass(frozen=True)
+class Target:
+    """呼ぶ先（プロファイル・地域・モデル）。宣言の変数の組・一覧の識別・結果の文の識別を作る。"""
+
+    profile: str
+    region: str
+    model: str
+
+    def details(self) -> dict:
+        return {"profile": self.profile, "region": self.region, "model": self.model}
+
+    def env(self) -> dict:
+        """従量の接続の宣言の変数の組。"""
+        return {"CLAUDE_CODE_USE_BEDROCK": "1", "AWS_PROFILE": self.profile, "AWS_REGION": self.region, "ANTHROPIC_MODEL": self.model}
+
+    def label(self) -> str:
+        return decl_label(self.details())
+
+
 @dataclass
 class VerifyFailure:
     """呼べるかの確認の失敗。`reason` は区分、`aws_error` は元の AWS のエラーの種類の名前（読めなければ空）。"""
@@ -140,29 +159,21 @@ def classify_failure(err: str) -> VerifyFailure:
     return VerifyFailure("unclassified", name)
 
 
-def verify(profile: str, reg: str, model: str) -> VerifyFailure | None:
+def verify(t: Target) -> VerifyFailure | None:
     """認証（`sts get-caller-identity`）と 1 回の短い応答（`bedrock-runtime converse`・最大 1 トークン）を確かめる。"""
+    profile, reg = t.profile, t.region
     p = _aws(["sts", "get-caller-identity", "--output", "json", "--profile", profile, "--region", reg], profile, reg)
     if p is None:
         return VerifyFailure("unclassified", "")
     if p.returncode != 0:
         return VerifyFailure("auth_expired", error_name(p.stderr))
     messages = json.dumps([{"role": "user", "content": [{"text": "ping"}]}])
-    args = ["bedrock-runtime", "converse", "--model-id", model, "--messages", messages]
+    args = ["bedrock-runtime", "converse", "--model-id", t.model, "--messages", messages]
     args += ["--inference-config", json.dumps({"maxTokens": 1}), "--output", "json", "--profile", profile, "--region", reg]
     p = _aws(args, profile, reg)
     if p is None:
         return VerifyFailure("unclassified", "")
     return None if p.returncode == 0 else classify_failure(p.stderr)
-
-
-def decl_env(profile: str, reg: str, model: str) -> dict:
-    """従量の接続の宣言の変数の組。"""
-    return {"CLAUDE_CODE_USE_BEDROCK": "1", "AWS_PROFILE": profile, "AWS_REGION": reg, "ANTHROPIC_MODEL": model}
-
-
-def details(profile: str, reg: str, model: str) -> dict:
-    return {"profile": profile, "region": reg, "model": model}
 
 
 def decl_label(d: dict, sep: str = "（") -> str:
