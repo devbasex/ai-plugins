@@ -247,7 +247,7 @@ def _add_bedrock(asker: Asker, profile: str | None, region: str | None, model: s
         raise Fail("write_failed", f"置き場へ書けない（{e}）") from e
     if ca.FALLBACK_ENV in os.environ:
         print(f"環境変数 {ca.FALLBACK_ENV} が定義されているため、保存した宣言は効かない（環境変数が優先する）", file=sys.stderr)
-    res = {"provider": bd.PROVIDER, **det, "replaced": old is not None, "text": f"登録した: 従量の接続（{bd.decl_label(det, '・')}）"}
+    res = {"provider": bd.PROVIDER, **det, "replaced": old is not None, "text": f"登録した: 従量の接続（{bd.decl_inline(det)}）"}
     if old is not None:
         res["previous_profile"] = prev
     return res
@@ -268,7 +268,7 @@ def _check(name: str | None) -> dict:
     t = bd.Target(profile, region, model)
     _verify_or_fail(t)
     det = t.details()
-    return {"provider": bd.PROVIDER, **det, "text": f"呼べる: 従量の接続（{bd.decl_label(det, '・')}）"}
+    return {"provider": bd.PROVIDER, **det, "text": f"呼べる: 従量の接続（{bd.decl_inline(det)}）"}
 
 
 # ---------------------------------------------------------------- 入口
