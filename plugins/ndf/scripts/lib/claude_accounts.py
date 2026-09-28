@@ -182,6 +182,14 @@ class Account:
     tier: str = ""  # `.credentials.json` の `claudeAiOauth.rateLimitTier`。読めなければ空
     declared: dict | None = None  # 枠の大きさの宣言（`account.json` の `capacity`。正の数の枠だけ）
 
+    def score(self) -> float | None:
+        """使用率（残量を読んでいなければ None）。"""
+        return self.usage.score() if self.usage else None
+
+    def known(self) -> bool:
+        """残量を読めているか。"""
+        return bool(self.usage and self.usage.known())
+
     def capacity(self) -> dict:
         """枠ごとの枠の大きさ（USD）。宣言 → 対応表 → 不明（None）の順に決まる（I2）。"""
         table = CAPACITY.get(self.tier) or {}
@@ -229,10 +237,10 @@ class Account:
             return "再登録が要る"
         until = self.limited_until(now)
         if until is not None:
-            if self.usage and self.usage.known() and self.usage.spend_reached() or (self.limit or {}).get("type") == "spend":
+            if self.known() and self.usage.spend_reached() or (self.limit or {}).get("type") == "spend":
                 return "支出上限"
             return f"上限（{local_time(until)}）"
-        return "使える" if self.usage and self.usage.known() else "残量不明"
+        return "使える" if self.known() else "残量不明"
 
 
 def local_time(t: float | None, form: str = "%m-%d %H:%M") -> str:
@@ -429,14 +437,14 @@ def _try_order(pool: list[Account], readable: bool) -> list[Account]:
         return (a.usage.resets("five_hour") if a.usage else None) or math.inf
 
     out: list[Account] = []
-    below = [a for a in pool if a.usage is None or a.usage.score() is None or a.usage.score() < thr]
+    below = [a for a in pool if a.score() is None or a.score() < thr]
     above = [a for a in pool if a not in below]
     for side in (below, above):
         rem = {a.name: a.remaining() for a in side}
         by_rem = [a for a in side if rem[a.name] is not None]
-        by_score = [a for a in side if rem[a.name] is None and a.usage is not None and a.usage.score() is not None]
+        by_score = [a for a in side if rem[a.name] is None and a.score() is not None]
         out += sorted(by_rem, key=lambda a: (-rem[a.name], reset(a), a.name))
-        out += sorted(by_score, key=lambda a: (a.usage.score(), reset(a), a.name))
+        out += sorted(by_score, key=lambda a: (a.score(), reset(a), a.name))
         if not readable:
             out += sorted((a for a in side if a not in by_rem and a not in by_score), key=lambda a: a.name)
     return out
@@ -475,10 +483,10 @@ def choose(exclude=(), before: float | None = REFRESH_BEFORE, keep=(), now: floa
         return None if n in keep else before
 
     pool, earliest = _candidates(exclude, before_for, now)
-    readable = any(a.usage and a.usage.known() for a in pool)
+    readable = any(a.known() for a in pool)
     for pick in _try_order(pool, readable):
         if token(pick.name, before_for(pick.name), now, min_left) is not None:
-            return Choice(pick.name, pick.usage.score() if pick.usage else None, earliest, pick.remaining())
+            return Choice(pick.name, pick.score(), earliest, pick.remaining())
     return Choice(None, None, earliest)
 
 
@@ -599,7 +607,7 @@ def rows(now: float | None = None) -> list[dict]:
         acc = load_account(n)
         if acc is None:
             continue
-        u = acc.usage if acc.usage and acc.usage.known() else None
+        u = acc.usage if acc.known() else None
         out.append(
             {
                 "name": n,
