@@ -2423,6 +2423,18 @@
       "pending_source": "issues/issue-1429-requirements.md"
     },
     {
+      "term": "実害の目安",
+      "context": "ndf-issue-upkeep",
+      "meaning": "実害の大きさの見積の段階の帯を影響範囲の区分で決める表。既定は全体の停止・データの損失・安全機構の欠落が 13〜20、一部の機能の誤動作・手戻りが 5〜8、表示や終了コードの誤り（結果は正しい）が 2〜3、どれにも当たらなければ 1。帯の中の値はアンカー（段階を比べる基準の課題）と比べて決める。宣言で変えられる",
+      "pending_source": "issues/issue-1429-design.md"
+    },
+    {
+      "term": "退避策の状態",
+      "context": "ndf-issue-upkeep",
+      "meaning": "退避策・回避策が実際に止まるのを防いでいるか（防いでいる / 部分的 / 無い）。防いでいるときだけ実害の大きさとリスク低減を下げる根拠になる",
+      "pending_source": "issues/issue-1429-design.md"
+    },
+    {
       "term": "WSJF",
       "context": "ndf-issue-upkeep",
       "meaning": "遅延コストを大きさの見積の段階で割った値。人が実施する前提の一般的な形で、順位の値の大きさの指数が 1 のときに当たる",
@@ -2473,7 +2485,7 @@
     {
       "term": "バックログの宣言",
       "context": "ndf-issue-upkeep",
-      "meaning": "尺度・余白・自動の閾値・容量・被依存の写し方・ラベルの下限・大きさの指数・大きい課題の閾値と枠の割合・アンカーを持つ `.ndf/backlog.json`",
+      "meaning": "尺度・余白・自動の閾値・容量・被依存の写し方・ラベルの下限・大きさの指数・大きい課題の閾値と枠の割合・実害の目安・アンカーを持つ `.ndf/backlog.json`",
       "pending_source": "issues/issue-1429-design.md"
     },
     {
