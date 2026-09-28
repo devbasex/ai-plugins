@@ -231,8 +231,10 @@ def _add_bedrock(asker: Asker, profile: str | None, region: str | None, model: s
     _verify_or_fail(t)
     old = ca.load_metered()
     det = t.details()
-    prev = (old.details.get("profile") if old else None) or (old.provider if old else None)
-    q = f"前の宣言（{prev}）を {bd.decl_label(det)} で置き換える？" if old else f"{bd.decl_label(det)} を従量の接続として保存する？"
+    q, previous = f"{bd.decl_label(det)} を従量の接続として保存する？", {}
+    if old is not None:
+        prev = old.details.get("profile") or old.provider
+        q, previous = f"前の宣言（{prev}）を {bd.decl_label(det)} で置き換える？", {"previous_profile": prev}
     if not asker.confirm("--yes", q):
         raise MissingArgs(["--yes"])
     try:
@@ -241,10 +243,7 @@ def _add_bedrock(asker: Asker, profile: str | None, region: str | None, model: s
         raise Fail("write_failed", f"置き場へ書けない（{e}）") from e
     if ca.FALLBACK_ENV in os.environ:
         print(f"環境変数 {ca.FALLBACK_ENV} が定義されているため、保存した宣言は効かない（環境変数が優先する）", file=sys.stderr)
-    res = {"provider": bd.PROVIDER, **det, "replaced": old is not None, "text": f"登録した: 従量の接続（{bd.decl_inline(det)}）"}
-    if old is not None:
-        res["previous_profile"] = prev
-    return res
+    return {"provider": bd.PROVIDER, **det, "replaced": old is not None, "text": f"登録した: 従量の接続（{bd.decl_inline(det)}）", **previous}
 
 
 def _check(name: str | None) -> dict:
