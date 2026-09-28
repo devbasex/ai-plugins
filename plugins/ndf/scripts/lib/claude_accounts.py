@@ -94,14 +94,6 @@ def registered() -> int:
     return len(names())
 
 
-MIN_TO_SWITCH = 2  # 登録がこの数以上あれば切り替える（I8）
-
-
-def switchable() -> bool:
-    """アカウントを切り替えられるだけの登録があるか。"""
-    return registered() >= MIN_TO_SWITCH
-
-
 def _read(path: str) -> dict | None:
     try:
         with open(path, encoding="utf-8") as f:
