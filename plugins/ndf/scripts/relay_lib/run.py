@@ -360,16 +360,9 @@ class Relay(AccountSwitch):
 
     def loop(self, first_args: list[str]) -> int:
         carried = cl.carried_args(first_args)
-        try:
-            self.start_section(first_args, os.getcwd(), shlex.join(first_args), "")
-        except StartFailed as e:
-            self.log(event="stop", section=self.section + 1, reason="start-failed", errno=e.err)
-            cl.say(f"claude を起動できない（{os.strerror(e.err)}）")
-            return 127
-        except NoAccountEnv as e:
-            self.log(event="stop", section=self.section + 1, reason="auth")
-            cl.say(f"claude を起動しない（{e}）")
-            return 2
+        code = self._start_first_section(first_args)
+        if code is not None:
+            return code
         while True:
             res = self.term.pump(tick=self.tick)
             if res[0] == "exit":
@@ -382,25 +375,47 @@ class Relay(AccountSwitch):
             m, code = self.finalize_section(m, written)
             if code is not None:
                 return code
-            plan = None
-            if m.get("_kind") == "limit":
-                self.drop_limit(m)
-                args, command, from_session, src = self.limit_start(m)
-                plan = m["_plan"]
-                shown = shlex.join(["claude", *args])
-            else:
-                args, command, from_session, src, shown = [m["command"]], m["command"], m.get("session_id") or "", m, m["command"]
+            args, command, from_session, src, shown, plan = self._next_section_input(m)
             nxt = self.prepare_next(src)
             if nxt is None:
                 return self.give_up("update-failed", "プラグインの更新か版の読み取りに失敗した", shown)
             cwd, fb = nxt
             self.term.screen(f"── ndf-relay: 区間 {self.section + 1} ──")
-            try:
-                self.start_section(args, cwd, command, from_session, fb, carried, plan)
-            except StartFailed as e:
-                return self.give_up("start-failed", f"claude を起動できない（{os.strerror(e.err)}）", shown, errno=e.err)
-            except NoAccountEnv as e:
-                return self.give_up("auth", str(e), shown)
+            code = self._start_next_section(args, cwd, command, from_session, fb, carried, plan, shown)
+            if code is not None:
+                return code
+
+    def _start_first_section(self, first_args: list[str]) -> int | None:
+        """最初の区間を起動する。起動できなければ終了コード。"""
+        try:
+            self.start_section(first_args, os.getcwd(), shlex.join(first_args), "")
+        except StartFailed as e:
+            self.log(event="stop", section=self.section + 1, reason="start-failed", errno=e.err)
+            cl.say(f"claude を起動できない（{os.strerror(e.err)}）")
+            return 127
+        except NoAccountEnv as e:
+            self.log(event="stop", section=self.section + 1, reason="auth")
+            cl.say(f"claude を起動しない（{e}）")
+            return 2
+        return None
+
+    def _next_section_input(self, m: dict) -> tuple[list[str], str, str, dict, str, tuple | None]:
+        """次の区間の (引数, 記録のコマンド, 元の会話, cwd の元, 表示のコマンド, 上限の後の選び方)。"""
+        if m.get("_kind") == "limit":
+            self.drop_limit(m)
+            args, command, from_session, src = self.limit_start(m)
+            return args, command, from_session, src, shlex.join(["claude", *args]), m["_plan"]
+        return [m["command"]], m["command"], m.get("session_id") or "", m, m["command"], None
+
+    def _start_next_section(self, args, cwd, command, from_session, fb, carried, plan, shown) -> int | None:
+        """次の区間を起動する。起動できなければ終了コード。"""
+        try:
+            self.start_section(args, cwd, command, from_session, fb, carried, plan)
+        except StartFailed as e:
+            return self.give_up("start-failed", f"claude を起動できない（{os.strerror(e.err)}）", shown, errno=e.err)
+        except NoAccountEnv as e:
+            return self.give_up("auth", str(e), shown)
+        return None
 
     def close(self) -> None:
         if self.watch is not None:
