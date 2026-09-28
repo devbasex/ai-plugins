@@ -145,7 +145,9 @@ def test_a_failed_verify_stops_before_the_mvv_judge(tmp_path, verify, ran):
 
 
 def deploy_facts(repo, verify, out):
-    p = subprocess.run([PY, str(STEPS), "deploy-facts", "--root", str(repo), "--verify", verify, "--out", str(out)], capture_output=True, text=True)
+    p = subprocess.run(
+        [PY, str(STEPS), "deploy-facts", "--root", str(repo), "--verify", verify, "--out", str(out)], capture_output=True, text=True
+    )
     return p.returncode, json.loads(p.stdout.strip().splitlines()[-1])
 
 
