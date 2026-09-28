@@ -104,10 +104,21 @@ supervise.py new mission は new sprint へ改名した。new sprint で呼ぶ�
 | ミッション課題 | スプリント課題 | 移す（1 語） |
 | ミッション MVV | スプリント MVV | — |
 
-**目録を「ミッション状態ファイル」と呼ぶ 3 か所は「目録」へ書き換える**（E2。語の置き換えを機械的に当てない）。
-`agent-layers.md:77`（ステージの置き場）・`waiting.md:154`（プランを書き出したときにできるもの）・`context-window.md:199`（再開の表の 4 行目）は、
-キー `ステージ` を持つ目録（`<out>/mission.json`）を「ミッション状態ファイル」と呼んでいる。これをそのまま「スプリント状態ファイル」へ
-置き換えると、再開のときに conductor が `ステージ` をスプリント状態ファイルの側で探す。3 か所は「目録（`<out>/sprint.json`）」と書く。
+**目録を「ミッション状態ファイル」と呼ぶ 5 か所は「目録」へ書き換える**（E2。語の置き換えを機械的に当てない）。
+`agent-layers.md:77`（ステージの置き場）・`agent-layers.md:83`（仕上げは「ミッション状態ファイルの外」＝目録のステージの外）・
+`agent-layers.md:273`（承認の後に次のステージの `command` を打つ）・`waiting.md:154`（プランを書き出したときにできるもの）・
+`context-window.md:199`（再開の表の 4 行目）は、キー `ステージ` とステージの `command` を持つ目録（`<out>/mission.json`。
+`supervise_lib/mission.py:396-398`）を「ミッション状態ファイル」と呼んでいる。これをそのまま「スプリント状態ファイル」へ置き換えると、
+再開のときと承認の後に conductor が `ステージ`・`command` をスプリント状態ファイルの側で探す。5 か所は「目録（`<out>/sprint.json`）」と書く。
+
+**スプリント状態ファイルの例を `mission.json` と書く箇所は `sprint-state.json` へ書き換える**（E1・E2。ファイル名の対応
+`mission.json → sprint.json` を当てない）。`relay.md:186`（「ミッション状態ファイル `mission.json`（プランの出力先に置く）」）・
+`relay.md:190`〜`213`（`mission-state.py init ~/.local/state/ndf/sv/r7/mission.json`・`gate` / `update` / `render` / `next` / `status` の
+`<mission.json>`・`$O/mission.json`）・用語集の出典 `references/glossary.md:171`（スプリント状態ファイルの行の「`mission.json`」）と
+`:62`（スプリントの行の「状態のファイル `mission.json`」）は、スプリント状態ファイルの例に `mission.json` を使っている。
+`sprint.json` へ置き換えると状態ファイルが目録と同じ `$O/sprint.json` になり、`sprint-state.py init` が別の形の JSON を見て
+終了コード 1 で止まる（`relay.md:186`・`mission-state.py:128`）。これらは `sprint-state.json`（`$O/sprint-state.json`・
+`<sprint-state.json>`）と書く。目録の `mission.json`（`waiting.md:167` の `new mission` の出力など）だけを `sprint.json` にする。
 
 **意味の文だけを直す語**（E1）: レッドライン・MVV・MVV 判定・MVV の照合・根拠の項目・実行計画・マイルストーン・リリース記録・
 conductor・ステージ・resume の 11 語。意味の文の「ミッション」を「スプリント」へ、`new mission` を `new sprint` へ置き換える。
