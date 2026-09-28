@@ -185,8 +185,30 @@ def test_deploy_facts_stops_when_head_is_not_the_delivered_commit(tmp_path):
     assert deploy_facts(repo, f"touch {mark}", out)[0] == 3
     commit_all(repo)
     subprocess.run(["git", "-C", str(repo), "checkout", "-q", "--detach", "HEAD~1"], check=True)
+    (repo / "diverged").write_text("x")
+    commit_all(repo)
     code, res = deploy_facts(repo, f"touch {mark}", out)
     assert code == 3 and not mark.exists() and not out.exists(), res
+
+
+def test_deploy_facts_catches_up_when_origin_moved_ahead(tmp_path):
+    """検査の PR が origin でマージされた後、遅れた主ディレクトリを先頭まで fast-forward してから確認する。"""
+    repo = make_repo(tmp_path, [STG, PRD])
+    commit_all(repo)
+    origin = tmp_path / "origin.git"
+    subprocess.run(["git", "clone", "-q", "--bare", str(repo), str(origin)], check=True)
+    subprocess.run(["git", "-C", str(repo), "remote", "add", "origin", str(origin)], check=True)
+    other = tmp_path / "other"
+    subprocess.run(["git", "clone", "-q", str(origin), str(other)], check=True)
+    (other / "merged").write_text("x")
+    commit_all(other)
+    subprocess.run(["git", "-C", str(other), "push", "-q", "origin", "main"], check=True)
+    ahead = subprocess.run(["git", "-C", str(other), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    mark, out = tmp_path / "ran", tmp_path / "a.md"
+    code, res = deploy_facts(repo, f"touch {mark}", out)
+    assert code == 0 and mark.exists() and res["metrics"]["sha"] == ahead, res
+    head = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    assert head == ahead
 
 
 def test_the_model_accepts_production_and_keeps_old_declarations():

@@ -4,7 +4,8 @@
 
 `verify`（`.ndf/pace.json` の `<節>.verify`）を `root` で `sh -c` で走らせ、本番系へ届ける行（`production: true` と、
 `production` の無い手動の行）の target・trigger、ベースブランチの先頭のコミット（本番へ届けるのはこのコミットに限る）、
-確認の終了コードを `out` へ書く。確認するコミットと届けるコミットを同じにするため、`root` の HEAD が先頭と違う・
+確認の終了コードを `out` へ書く。`root` が先頭より遅れていれば（検査の PR が origin でマージされた後の主ディレクトリ）
+先に fast-forward する。確認するコミットと届けるコミットを同じにするため、それでも `root` の HEAD が先頭と違う・
 追跡中のファイルに変更があるときは確認を走らせずに 3 で止まる。確認の出力は秘密を含みうるため承認資料
 （MVV 判定で外部の LLM へ渡る）へ載せず、所有者だけが読める `<out>.verify.log` へ分ける。宣言が読めない・
 `out` へ書けないときは EXIT_UNREADABLE の StepError を投げる。
@@ -67,14 +68,29 @@ def cmd_deploy_facts(a):
     emit(result(TOOL, "ok", f"承認資料を書いた（本番系の行 {m['rows']}・{m['base']} の先頭 {m['sha'][:8]}）", items, m, a.out))
 
 
+def catch_up(root, base: str, sha: str, head: str) -> str:
+    """root が base（か detached）にいて HEAD が先頭の祖先なら先頭まで fast-forward し、新しい HEAD を返す。
+    検査の PR が origin でマージされた後、主ディレクトリは遅れたままになるため（検査の collect の pull と同じ役割）。"""
+    branch = proc.git_out(root, "symbolic-ref", "-q", "--short", "HEAD")
+    if not sha or head == sha or branch not in (None, base):
+        return head
+    if proc.git_out(root, "merge-base", "--is-ancestor", head, sha) is None:
+        return head
+    proc.git_out(root, "merge", "-q", "--ff-only", sha)
+    return proc.git_out(root, "rev-parse", "HEAD") or ""
+
+
 def head_of_base(root, base: str) -> str:
-    """ベースブランチの先頭のコミット。root の HEAD がそれと違う・追跡中のファイルに変更があれば StepError（3）。"""
+    """ベースブランチの先頭のコミット。root が遅れていれば先に fast-forward する。それでも HEAD が先頭と違う・
+    追跡中のファイルに変更があれば StepError（3）。"""
     if not base:
         raise StepError("ベースブランチを決められない。届けるコミットを定められない", EXIT_PRECONDITION)
     proc.git_out(root, "fetch", "-q", "origin", base)
     sha = proc.git_out(root, "rev-parse", f"origin/{base}") or proc.git_out(root, "rev-parse", base) or ""
     head = proc.git_out(root, "rev-parse", "HEAD") or ""
     dirty = proc.git_out(root, "status", "--porcelain", "--untracked-files=no")
+    if dirty == "":
+        head = catch_up(root, base, sha, head)
     if not sha or head != sha or dirty is None or dirty:
         why = f"HEAD {head[:8] or '不明'} / {base} の先頭 {sha[:8] or '不明'}" + ("・追跡中のファイルに変更あり" if dirty else "")
         raise StepError(f"確認するコミットが届けるコミットと違う（{why}）。{root} を {base} の先頭にしてから打ち直す", EXIT_PRECONDITION)
