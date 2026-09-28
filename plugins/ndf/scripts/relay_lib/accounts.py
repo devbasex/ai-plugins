@@ -74,23 +74,40 @@ def _scoped(scoped: list | None) -> str:
     return f"{w['model'] or '-'} {_window(w, '%m-%d')}"
 
 
-def _metered(source: str, state: str, provider: str | None = None, details: dict | None = None, **extra) -> dict:
-    """従量の接続の行（`extra` は `state` の前に置く）。"""
-    return {"name": ca.METERED, "kind": "metered", "source": source, "provider": provider, "details": details or {}, **extra, "state": state}
-
-
 def _metered_row() -> dict | None:
     """一覧の最後に足す従量の接続の行（宣言が無ければ None）。環境変数の宣言は値を出さず変数の名前だけを出す。"""
     if ca.FALLBACK_ENV in os.environ:
         keys = list(ca.fallback_env())
         if not keys:
             return None
-        return _metered("env", "環境変数の宣言", keys=keys)
+        return {
+            "name": ca.METERED,
+            "kind": "metered",
+            "source": "env",
+            "provider": None,
+            "details": {},
+            "keys": keys,
+            "state": "環境変数の宣言",
+        }
     decl = ca.load_metered()
     if decl is not None:
-        return _metered("saved", "保存した宣言", decl.provider, decl.details)
+        return {
+            "name": ca.METERED,
+            "kind": "metered",
+            "source": "saved",
+            "provider": decl.provider,
+            "details": decl.details,
+            "state": "保存した宣言",
+        }
     if ca.metered_problem() is not None:
-        return _metered("saved", "壊れている（宣言なしとして扱う）")
+        return {
+            "name": ca.METERED,
+            "kind": "metered",
+            "source": "saved",
+            "provider": None,
+            "details": {},
+            "state": "壊れている（宣言なしとして扱う）",
+        }
     return None
 
 
