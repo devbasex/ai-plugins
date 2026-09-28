@@ -190,47 +190,56 @@ def _open_promote_pr(root, head, base):
     return prs[0]["number"] if prs else None
 
 
+def _find_or_create_promote_pr(root, head, base):
+    """昇格の Pull Request を探し、無ければ作る。(番号, 作ったか) を返す。昇格する変更が無ければ ok で終える。"""
+    n = _open_promote_pr(root, head, base)
+    if n is not None:
+        return n, False
+    title = f"昇格: {head} → {base}"
+    body = f"{head} の変更を本番チャネル {base} へ入れる（merged-steps.py promote が作った）。マージは承認ゲート 2 の後に行う。"
+    p = gh_parts.gh(["pr", "create", "--head", head, "--base", base, "--title", title, "--body", body], cwd=root)
+    if p.returncode != 0:
+        err = (p.stderr or "").strip()
+        if "No commits between" in err:
+            emit(result(TOOL, "ok", f"{head} から {base} へ昇格する変更が無い", [], {"pr": None, "target": base}))
+        raise StepError(f"gh pr create が失敗: {err[:300]}")
+    return int((p.stdout or "").strip().rstrip("/").rsplit("/", 1)[-1]), True
+
+
+def _prepare_promote(root, a, n, item):
+    """--prepare: 判定と承認資料を書き、昇格の Pull Request を用意した結果を出して終える。"""
+    info = pr_state(root, n)
+    verdict = delivery.judge_target(delivery.load_delivery(root), info.get("baseRefName") or a.base)
+    path = approval_present(
+        TOOL,
+        f"promote-{n}",
+        title=f"#{n} の昇格（{a.head} → {a.base}。承認ゲート 2）",
+        targets=[{"url": info.get("url") or f"#{n}", "title": info.get("title"), "base_head": f"{a.base} ← {a.head}"}],
+        change=_change_text(info),
+        judge=_judge_rows(verdict),
+        consent=[f"#{n} を {a.base} へマージし、本番系へ反映する"],
+        rollback=GATE_ROLLBACK,
+        path=a.out,
+    )
+    emit(
+        result(
+            TOOL,
+            "ok",
+            f"昇格の Pull Request #{n} を用意した（{a.head} → {a.base}）",
+            verdict.items + [item],
+            {"pr": n, "verdict": verdict.value, "target": a.base},
+            path,
+        )
+    )
+
+
 def promote(a, cleanup):
     """ベースブランチ（--head）から本番チャネル（--base）への昇格の Pull Request を作り（あれば使い）、承認ゲート 2 の後にマージする。
     head はベースブランチなので、マージの後に後片付けをしない（#1336 の I7）。"""
     root = git_root(a.root)
-    n = _open_promote_pr(root, a.head, a.base)
-    created = False
-    if n is None:
-        title = f"昇格: {a.head} → {a.base}"
-        body = f"{a.head} の変更を本番チャネル {a.base} へ入れる（merged-steps.py promote が作った）。マージは承認ゲート 2 の後に行う。"
-        p = gh_parts.gh(["pr", "create", "--head", a.head, "--base", a.base, "--title", title, "--body", body], cwd=root)
-        if p.returncode != 0:
-            err = (p.stderr or "").strip()
-            if "No commits between" in err:
-                emit(result(TOOL, "ok", f"{a.head} から {a.base} へ昇格する変更が無い", [], {"pr": None, "target": a.base}))
-            raise StepError(f"gh pr create が失敗: {err[:300]}")
-        n = int((p.stdout or "").strip().rstrip("/").rsplit("/", 1)[-1])
-        created = True
+    n, created = _find_or_create_promote_pr(root, a.head, a.base)
     item = {"kind": "pr", "name": f"#{n}", "result": "created" if created else "found", "base": a.base, "head_branch": a.head}
     if a.prepare:
-        info = pr_state(root, n)
-        verdict = delivery.judge_target(delivery.load_delivery(root), info.get("baseRefName") or a.base)
-        path = approval_present(
-            TOOL,
-            f"promote-{n}",
-            title=f"#{n} の昇格（{a.head} → {a.base}。承認ゲート 2）",
-            targets=[{"url": info.get("url") or f"#{n}", "title": info.get("title"), "base_head": f"{a.base} ← {a.head}"}],
-            change=_change_text(info),
-            judge=_judge_rows(verdict),
-            consent=[f"#{n} を {a.base} へマージし、本番系へ反映する"],
-            rollback=GATE_ROLLBACK,
-            path=a.out,
-        )
-        emit(
-            result(
-                TOOL,
-                "ok",
-                f"昇格の Pull Request #{n} を用意した（{a.head} → {a.base}）",
-                verdict.items + [item],
-                {"pr": n, "verdict": verdict.value, "target": a.base},
-                path,
-            )
-        )
+        _prepare_promote(root, a, n, item)
     a.pr, a.no_cleanup = n, True
     merge_when_green(a, cleanup, next_cmd=f"promote --head {a.head} --base {a.base} --gate-approved user", plan_step="promote-approved")
