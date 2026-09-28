@@ -222,15 +222,37 @@ def judge_target(decl: DeliveryDecl, target: str) -> Verdict:
     return v(NOT_PRODUCTION, f"{target} へのマージで自動で反映する delivery の行が無い")
 
 
+def _template_route(decl: DeliveryDecl, form, forms) -> list[Route]:
+    if form in forms:
+        return [Route(TEMPLATE, str(form), decl.production, STAGE_TEMPLATE)]
+    note = f"リリースの形 {form!r} に雛形が無い（雛形のある形: {', '.join(forms)}）"
+    return [Route(TEMPLATE, str(form), decl.production, STAGE_MANUAL, note)]
+
+
+def _row_route(row: dict, decl: DeliveryDecl) -> Route:
+    """delivery の 1 行から経路を 1 つ作る。"""
+    target, branch = str(row.get("target") or ""), row.get("branch") or None
+    prod = row.get("production") if isinstance(row.get("production"), bool) else None
+    if row.get("kind") == "auto" and not row.get("versioned"):
+        if branch and branch == decl.base:
+            return Route(MERGE, target, branch, STAGE_MERGED_BY_CHECK, production=prod)
+        if branch and branch == decl.production:
+            note = f"{decl.base} → {branch} の昇格の Pull Request で届く"
+            return Route(MERGE, target, branch, STAGE_PROMOTE, note, prod)
+        why = "ブランチが無い" if not branch else f"{branch} はベースブランチでも本番チャネルでもない"
+        return Route(MERGE, target, branch, STAGE_MANUAL, f"{target}: マージで反映するが{why}ため、手で届ける", prod)
+    note = f"{target}: {row.get('trigger') or '（手順の記述無し）'}"
+    if row.get("versioned"):
+        note += "（版数を持つ経路の雛形は release.form で選ぶ）"
+    return Route(MANUAL, target, branch, STAGE_MANUAL, note, prod)
+
+
 def routes(decl: DeliveryDecl, forms=()) -> list[Route]:
     """リリースの経路。`release.form` があればそれ（`template`）だけで決まり、無ければ `delivery` の行ごとに決める。
     `forms` は雛形のある `release.form` の値（無い形は手で行うステージへ落とす）。"""
     form = (decl.release or {}).get("form") if decl.release else None
     if form:
-        if form in forms:
-            return [Route(TEMPLATE, str(form), decl.production, STAGE_TEMPLATE)]
-        note = f"リリースの形 {form!r} に雛形が無い（雛形のある形: {', '.join(forms)}）"
-        return [Route(TEMPLATE, str(form), decl.production, STAGE_MANUAL, note)]
+        return _template_route(decl, form, forms)
     if decl.rows is None:
         why = (
             "宣言を読めない（" + " / ".join(decl.problems) + "）"
@@ -242,25 +264,7 @@ def routes(decl: DeliveryDecl, forms=()) -> list[Route]:
         return [Route(MANUAL, "（不明）", None, STAGE_MANUAL, f"{why}ため、リリースの経路を決められない")]
     if not decl.rows:
         return [Route(NONE, "（無し）", None, STAGE_NONE, "delivery が [] で、配布しない")]
-    out = []
-    for row in decl.rows:
-        target, branch = str(row.get("target") or ""), row.get("branch") or None
-        prod = row.get("production") if isinstance(row.get("production"), bool) else None
-        if row.get("kind") == "auto" and not row.get("versioned"):
-            if branch and branch == decl.base:
-                out.append(Route(MERGE, target, branch, STAGE_MERGED_BY_CHECK, production=prod))
-            elif branch and branch == decl.production:
-                note = f"{decl.base} → {branch} の昇格の Pull Request で届く"
-                out.append(Route(MERGE, target, branch, STAGE_PROMOTE, note, prod))
-            else:
-                why = "ブランチが無い" if not branch else f"{branch} はベースブランチでも本番チャネルでもない"
-                out.append(Route(MERGE, target, branch, STAGE_MANUAL, f"{target}: マージで反映するが{why}ため、手で届ける", prod))
-            continue
-        note = f"{target}: {row.get('trigger') or '（手順の記述無し）'}"
-        if row.get("versioned"):
-            note += "（版数を持つ経路の雛形は release.form で選ぶ）"
-        out.append(Route(MANUAL, target, branch, STAGE_MANUAL, note, prod))
-    return out
+    return [_row_route(row, decl) for row in decl.rows]
 
 
 def needs_version(rs: list[Route]) -> bool:
