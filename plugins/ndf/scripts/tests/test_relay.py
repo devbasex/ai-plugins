@@ -3182,3 +3182,21 @@ def test_account_add_rejects(tmp_path, accounts):
 def test_account_list_empty(tmp_path, accounts):
     p = account_cmd(tmp_path, accounts, "list", tty=False)
     assert p.returncode == 0 and p.stdout.strip() == "登録済みのアカウントは無い"
+
+
+def test_slow_usage_endpoint_does_not_stall_relay(term, accounts):
+    """性能の条件: 取得先が応答しなくても、定期の確認は別スレッドなので子への中継が止まらない。"""
+    accounts.add("a", util5=10)
+    accounts.add("b", util5=30)
+    t = account_term(term, accounts)
+    t.wait_start(1)
+    accounts.fake.delay = 8  # 定期の確認（1 秒ごと）の取得が待たされる
+    time.sleep(1.5)
+    pid = t.starts()[0]["pid"]
+    sent = time.time()
+    t.type("size\r")
+    t.wait(lambda: (t.fake_dir / f"size-{pid}").exists(), timeout=5, what="中継")
+    assert time.time() - sent < 1.0
+    accounts.fake.delay = 0
+    t.type("quit 0\r")
+    assert t.finish() == 0
