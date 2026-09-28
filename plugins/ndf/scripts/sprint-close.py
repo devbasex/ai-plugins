@@ -206,48 +206,24 @@ def close_one(root, repo, n, record_repo, comment, notes):
     return {**it, "result": "failed", "reason": why, "cmd": f"gh issue close {n} --repo {repo}"}
 
 
-def cmd_close(a):
-    if a.record_pr == 0 and not a.issues:
-        emit(
-            result(
-                TOOL,
-                "stopped",
-                "--record-pr 0（本番の記録なし）は --issues と一緒に渡す",
-                [],
-                {"issues": 0},
-                next="閉じる課題を --issues で渡して打ち直す",
-            ),
-            EXIT_UNREADABLE,
-        )
-    root = git_root(a.root)
-    record_repo = a.repo
-    if not record_repo:
-        p = gh_call.gh(["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"], cwd=root)
-        record_repo = p.stdout.strip()
-        if p.returncode != 0 or not record_repo:
-            raise StepError("記録のリポジトリを決められない（--repo を渡す）", EXIT_PRECONDITION)
-    given = [(record_repo, n) for n in a.issues or []]
-    if a.record_pr == 0:
-        rec = {"found": True, "stage": "配布なし（本番の記録なし）", "sprint_prs": [], "verify_block": None}
-        prs = []
-    else:
-        rec = parse_record(read_record(root, record_repo, a.record_pr))
-        prs = a.prs or rec["sprint_prs"]
-    if not prs and not given:
-        emit(
-            result(
-                TOOL,
-                "stopped",
-                "スプリントの PR の一覧が取れない。推測せず運用者に一覧を聞く",
-                [],
-                {"issues": 0},
-                next="運用者に一覧を聞き、--prs で渡して打ち直す",
-            ),
-            EXIT_UNREADABLE,
-        )
-    issues = sprint_issues(root, record_repo, prs) if prs else []
-    issues += [k for k in given if k not in issues]
+def _record_repo(a, root):
+    if a.repo:
+        return a.repo
+    p = gh_call.gh(["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"], cwd=root)
+    record_repo = p.stdout.strip()
+    if p.returncode != 0 or not record_repo:
+        raise StepError("記録のリポジトリを決められない（--repo を渡す）", EXIT_PRECONDITION)
+    return record_repo
 
+
+def _read_sprint_record(a, root, record_repo):
+    if a.record_pr == 0:
+        return {"found": True, "stage": "配布なし（本番の記録なし）", "sprint_prs": [], "verify_block": None}, []
+    rec = parse_record(read_record(root, record_repo, a.record_pr))
+    return rec, a.prs or rec["sprint_prs"]
+
+
+def _closing_blocker(a, rec, record_repo):
     stage = rec["stage"] or ""
     kept_all = None
     if a.record_pr == 0:
@@ -267,38 +243,78 @@ def cmd_close(a):
             verdicts = verification_verdicts(blk, record_repo)
             if verdicts is None:
                 kept_all = "条件と課題の対応が読めない"
+    return kept_all, verdicts
 
-    items, notes = [], []
-    comment = f"スプリント（{a.label}）を通りました" if a.label else "スプリントの終わりの工程を通りました"
-    for repo, n in issues:
-        base = {"kind": "issue", "repo": repo, "number": n}
-        if kept_all:
-            items.append({**base, "result": "kept_open", "reason": kept_all})
-            continue
-        if verdicts is not None and not verdicts.get((repo, n), False):
-            why = "リリース後テストの行が無い" if (repo, n) not in verdicts else "リリース後テストに合格でない条件がある（不合格・保留）"
-            items.append({**base, "result": "kept_open", "reason": why})
-            continue
-        if a.dry_run:
-            st = issue_state(root, repo, n)
-            items.append(
-                {
-                    **base,
-                    "result": "already_closed" if st == "CLOSED" else "would_close",
-                    **({"reason": "状態を読めない"} if st is None else {}),
-                }
-            )
-            continue
-        items.append(close_one(root, repo, n, record_repo, comment, notes))
 
+def _close_item(a, root, repo, n, record_repo, kept_all, verdicts, comment, notes):
+    base = {"kind": "issue", "repo": repo, "number": n}
+    if kept_all:
+        return {**base, "result": "kept_open", "reason": kept_all}
+    if verdicts is not None and not verdicts.get((repo, n), False):
+        why = "リリース後テストの行が無い" if (repo, n) not in verdicts else "リリース後テストに合格でない条件がある（不合格・保留）"
+        return {**base, "result": "kept_open", "reason": why}
+    if a.dry_run:
+        st = issue_state(root, repo, n)
+        return {
+            **base,
+            "result": "already_closed" if st == "CLOSED" else "would_close",
+            **({"reason": "状態を読めない"} if st is None else {}),
+        }
+    return close_one(root, repo, n, record_repo, comment, notes)
+
+
+def _close_summary(items, prs, dry_run):
     count = {k: sum(1 for i in items if i["result"] == k) for k in ("closed", "already_closed", "failed", "kept_open", "would_close")}
     metrics = {"issues": len(items), **count, "prs": len(prs)}
     summary = (
         f"閉じた {count['closed']} 件・既に閉じていた {count['already_closed']} 件・"
         f"失敗 {count['failed']} 件・開いたまま {count['kept_open']} 件"
     )
-    if a.dry_run:
+    if dry_run:
         summary += f"（試行。閉じる予定 {count['would_close']} 件）"
+    return count, metrics, summary
+
+
+def cmd_close(a):
+    if a.record_pr == 0 and not a.issues:
+        emit(
+            result(
+                TOOL,
+                "stopped",
+                "--record-pr 0（本番の記録なし）は --issues と一緒に渡す",
+                [],
+                {"issues": 0},
+                next="閉じる課題を --issues で渡して打ち直す",
+            ),
+            EXIT_UNREADABLE,
+        )
+    root = git_root(a.root)
+    record_repo = _record_repo(a, root)
+    given = [(record_repo, n) for n in a.issues or []]
+    rec, prs = _read_sprint_record(a, root, record_repo)
+    if not prs and not given:
+        emit(
+            result(
+                TOOL,
+                "stopped",
+                "スプリントの PR の一覧が取れない。推測せず運用者に一覧を聞く",
+                [],
+                {"issues": 0},
+                next="運用者に一覧を聞き、--prs で渡して打ち直す",
+            ),
+            EXIT_UNREADABLE,
+        )
+    issues = sprint_issues(root, record_repo, prs) if prs else []
+    issues += [k for k in given if k not in issues]
+
+    kept_all, verdicts = _closing_blocker(a, rec, record_repo)
+
+    items, notes = [], []
+    comment = f"スプリント（{a.label}）を通りました" if a.label else "スプリントの終わりの工程を通りました"
+    for repo, n in issues:
+        items.append(_close_item(a, root, repo, n, record_repo, kept_all, verdicts, comment, notes))
+
+    count, metrics, summary = _close_summary(items, prs, a.dry_run)
     if count["failed"]:
         emit(result(TOOL, "stopped", summary, items + notes, metrics, next="失敗した課題の cmd でやり直す。issue-upkeep へ進まない"))
     emit(result(TOOL, "ok", summary, items + notes, metrics))
