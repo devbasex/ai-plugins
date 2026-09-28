@@ -35,7 +35,7 @@ RECORD_LABELS = {"スプリント: ": ("ミッション: ", "まとまり: ")}
 WHEN = "旧名の受け付けは、改名を載せた正式版の次の正式版でやめる"
 
 
-def notice(old: str, new: str) -> str:
+def rename_notice(old: str, new: str) -> str:
     """旧名で呼ばれたときの案内の 1 行。"""
     return f"{old} は {new} へ改名した。{new} で呼ぶ（{WHEN}）"
 
@@ -50,7 +50,7 @@ def _tell(old: str, new: str, mode: str | None = None) -> None:
     if (mode or MODE) == "refuse":
         print(refusal(old, new), file=sys.stderr)
         sys.exit(2)
-    print(notice(old, new), file=sys.stderr)
+    print(rename_notice(old, new), file=sys.stderr)
 
 
 def rewrite_argv(entry: str, argv: list[str], mode: str | None = None) -> list[str]:

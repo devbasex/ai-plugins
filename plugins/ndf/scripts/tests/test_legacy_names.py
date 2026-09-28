@@ -67,7 +67,7 @@ def test_new_mission_writes_the_same_plans_as_new_sprint(tmp_path):
     old = run(SUPERVISE, "new", "mission", *new_sprint_args(tmp_path, out))
     assert (old.returncode, old.stdout, snapshot(out)) == (new.returncode, new.stdout, files)
     assert notices(new.stderr) == []
-    assert notices(old.stderr) == [ln.notice("supervise.py new mission", "new sprint")]
+    assert notices(old.stderr) == [ln.rename_notice("supervise.py new mission", "new sprint")]
 
 
 def test_new_check_with_mission_is_the_same_as_with_sprint(tmp_path):
@@ -116,7 +116,7 @@ def test_old_state_script_gives_the_same_result_with_one_notice(tmp_path):
     new = run(SCRIPTS / "sprint-state.py", "status", state)
     old = run(SCRIPTS / "mission-state.py", "status", state)
     assert (old.returncode, old.stdout) == (new.returncode, new.stdout) and new.stdout.startswith("スプリント: m")
-    assert notices(old.stderr) == [ln.notice("mission-state.py", "sprint-state.py")]
+    assert notices(old.stderr) == [ln.rename_notice("mission-state.py", "sprint-state.py")]
 
 
 @pytest.mark.parametrize("old", ["mission-close.py", "bundle-close.py"])
@@ -124,7 +124,7 @@ def test_old_close_scripts_return_the_exit_code_of_the_new_one(old):
     new = run(SCRIPTS / "sprint-close.py", "--record-pr", "0")  # --issues が無い: 2
     got = run(SCRIPTS / old, "--record-pr", "0")
     assert (got.returncode, got.stdout) == (new.returncode, new.stdout) and new.returncode == 2
-    assert notices(got.stderr) == [ln.notice(old, "sprint-close.py")]
+    assert notices(got.stderr) == [ln.rename_notice(old, "sprint-close.py")]
 
 
 def test_old_scripts_are_thin_entries_to_the_table():
