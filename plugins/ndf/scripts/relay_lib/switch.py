@@ -89,25 +89,13 @@ class AccountSwitch:
         cur, thr = self.account, ca.switch_at()
         declared = bool(ca.fallback_env(self.env))
         if kind is not None:
-            c = ca.choose(exclude=set() if kind == "auth" or cur in (None, ca.METERED) else {cur})
-            if c.name:
-                return c.name, "recovered" if cur == ca.METERED else kind, c
-            if declared and cur != ca.METERED:
-                return ca.METERED, kind, c
-            return None, kind, c
+            return self._pick_after_limit(kind, cur, declared)
         if cur == ca.METERED:
-            c = ca.choose()
-            if c.name and (c.score is None or c.score < thr):
-                return c.name, "recovered", c
-            return ca.METERED, None, c
+            return self._pick_from_metered(thr)
         due = self.watch.due if self.watch is not None else None
         usable, score, left = False, None, None
         if cur is not None:
-            u = ca.usage(cur)
-            acc = ca.load_account(cur)
-            usable = acc is not None and not acc.needs_relogin and acc.limited_until(time.time()) is None
-            score = u.score() if u else None
-            left = acc.remaining() if acc is not None else None
+            usable, score, left = self._current_standing(cur)
             if usable and due is None and (score is None or score < thr):
                 return cur, None, None
         c = ca.choose(exclude={cur} if cur else set())
@@ -120,6 +108,34 @@ class AccountSwitch:
         if declared:
             return ca.METERED, "limited", c
         return cur, None, c
+
+    @staticmethod
+    def _pick_after_limit(kind: str, cur: str | None, declared: bool) -> tuple[str | None, str | None, ca.Choice]:
+        """上限の後の選び直し。None が返れば切り替えずに子を残す。"""
+        c = ca.choose(exclude=set() if kind == "auth" or cur in (None, ca.METERED) else {cur})
+        if c.name:
+            return c.name, "recovered" if cur == ca.METERED else kind, c
+        if declared and cur != ca.METERED:
+            return ca.METERED, kind, c
+        return None, kind, c
+
+    @staticmethod
+    def _pick_from_metered(thr: float) -> tuple[str | None, str | None, ca.Choice]:
+        """従量の接続で動く区間の起動。戻せるアカウントがあれば戻す。"""
+        c = ca.choose()
+        if c.name and (c.score is None or c.score < thr):
+            return c.name, "recovered", c
+        return ca.METERED, None, c
+
+    @staticmethod
+    def _current_standing(cur: str) -> tuple[bool, float | None, float | None]:
+        """今のアカウントの (使えるか, 使用率, 残りの量)。"""
+        u = ca.usage(cur)
+        acc = ca.load_account(cur)
+        usable = acc is not None and not acc.needs_relogin and acc.limited_until(time.time()) is None
+        score = u.score() if u else None
+        left = acc.remaining() if acc is not None else None
+        return usable, score, left
 
     @staticmethod
     def no_better(c: ca.Choice, score: float | None, left: float | None) -> bool:
