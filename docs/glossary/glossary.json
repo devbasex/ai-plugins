@@ -1444,12 +1444,6 @@
       ]
     },
     {
-      "term": "自動反映の本番チャネル",
-      "context": "ndf-workflow",
-      "meaning": "本番チャネルのうち、マージ（push）で本番系への反映が自動で始まるもの。宣言の delivery に kind: auto でそのブランチを branch に持つ行があるときに当たる。そこへのマージは承認ゲート 2 に当たる",
-      "pending_source": "issues/issue-1336-design.md"
-    },
-    {
       "term": "必須ルール",
       "context": "ndf-workflow",
       "meaning": "分割と並行の手法を担当へ任せたうえで、それでも守る規則",
@@ -2384,20 +2378,6 @@
       "context": "ndf-release",
       "meaning": "ベースブランチから本番チャネルへ変更を入れる Pull Request",
       "code": "promotion_pr",
-      "pending_source": "issues/issue-1336-design.md"
-    },
-    {
-      "term": "リリースの経路",
-      "context": "ndf-release",
-      "meaning": "変更が本番系へ届く道筋の種類。template（release.form の雛形で組む）/ merge（マージで反映）/ manual（手で反映）/ none（届けない）。release.form が無ければ宣言の delivery から導く",
-      "code": "route",
-      "pending_source": "issues/issue-1336-design.md"
-    },
-    {
-      "term": "昇格の Pull Request",
-      "context": "ndf-release",
-      "meaning": "ベースブランチから本番チャネルへ変更を入れる Pull Request。merged-steps.py promote が作り、承認ゲート 2 の後にマージする",
-      "code": "promote",
       "pending_source": "issues/issue-1336-design.md"
     },
     {
