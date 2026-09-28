@@ -57,7 +57,7 @@ documentation\t5'
 
 # 進め方（#1078・#1370）。`auto` は `normal` と同じ工程を求める（承認ゲートの担い手だけが違う）。
 # `fast` では次の工程を課題ごとに求めない。トリガーの工程は検査のトリガーが
-# 立ったときに前回の検査からの差分へ通し、まとめる工程はミッションの終わりに 1 回通す。
+# 立ったときに前回の検査からの差分へ通し、まとめる工程はスプリントの終わりに 1 回通す。
 # 並びは SKILL.md の「進め方」の表と同じである。
 WF_PACES=$'normal\tfast\tauto'
 WF_FAST_TRIGGER_STAGES=$'構造改善\n実装レビュー'
@@ -787,13 +787,13 @@ WF_CLASS_PRESENT='present'         # 記録あり
 WF_CLASS_MISSING='missing'         # 必須で記録なし
 WF_CLASS_CONDITIONAL='conditional' # 条件付き
 WF_CLASS_TRIGGER='trigger'         # fast: トリガーで通す（記録を求めない）
-WF_CLASS_DEFERRED='deferred'       # fast: ミッションの終わりにまとめる（記録を求めない）
+WF_CLASS_DEFERRED='deferred'       # fast: スプリントの終わりにまとめる（記録を求めない）
 
 # frontier までの各工程を分類し、'class<TAB>stage' を 1 行 1 件で返す。
 # class は WF_CLASS_* のいずれか。
 # recorded 配列・mode・frontier を引数で受け取る。
 # pace が fast なら、必須か条件付きのトリガー・まとめる工程を WF_CLASS_TRIGGER / WF_CLASS_DEFERRED にする。
-# まとめる工程は、先へ進んだ記録（frontier）より後にあっても出す（ミッションの終わりに通すため）。
+# まとめる工程は、先へ進んだ記録（frontier）より後にあっても出す（スプリントの終わりに通すため）。
 _wf_classify_stages() {
   local mode="$1" frontier="$2" pace="$3"
   shift 3
@@ -863,7 +863,7 @@ wf_report() {
   [ "${#conditional[@]}" -gt 0 ] && printf '  条件付き: %s\n' "$(wf_join "${conditional[@]}")"
   [ "${#trigger[@]}" -gt 0 ] && printf '  トリガー: %s（検査のトリガーが立ったときに前回の検査からの差分へ通す）\n' \
     "$(wf_join "${trigger[@]}")"
-  [ "${#deferred[@]}" -gt 0 ] && printf '  まとめる: %s（ミッションの終わりに 1 回通す）\n' "$(wf_join "${deferred[@]}")"
+  [ "${#deferred[@]}" -gt 0 ] && printf '  まとめる: %s（スプリントの終わりに 1 回通す）\n' "$(wf_join "${deferred[@]}")"
   if [ -z "$mode" ]; then
     printf 'モードの記録が無いため、必須の工程は判定しません。\n'
   elif [ "${#missing[@]}" -eq 0 ] && [ "${#conditional[@]}" -eq 0 ]; then

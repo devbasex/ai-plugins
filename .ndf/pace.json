@@ -12,7 +12,7 @@
   },
   "areas": [
     {"name": "駆動", "common": true,
-     "paths": ["plugins/ndf/scripts/supervise.py", "plugins/ndf/scripts/mission-state.py", "plugins/ndf/scripts/relay.py",
+     "paths": ["plugins/ndf/scripts/supervise.py", "plugins/ndf/scripts/sprint-state.py", "plugins/ndf/scripts/relay.py",
                "plugins/ndf/skills/*/scripts/drive.py"]},
     {"name": "共通の部品と結果の契約", "common": true, "paths": ["plugins/ndf/scripts/lib/**"]},
     {"name": "hook", "common": true, "paths": ["plugins/ndf/hooks/**", "plugins/ndf/scripts/*-guard.sh"]},

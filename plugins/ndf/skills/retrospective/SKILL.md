@@ -103,7 +103,7 @@ issue と Pull Request の両方で検索する。**
 「Pull Request の番号を特定する」で決めた Pull Request の base と merge のコミットである。用語集の設定の無い
 プロジェクトでは `items` が空になり、投稿に何も載せない。
 
-**context window の値は測って取る。** 記憶や体感で書かない。ミッションを複数のセッションで
+**context window の値は測って取る。** 記憶や体感で書かない。スプリントを複数のセッションで
 通したときは `--session` を繰り返して 1 つの表にする。**目印の判定は記録ごとの比で行われる**
 ため、固定費の水準が違うセッションを束ねても判定の意味は変わらない。中央値と合計の列は
 分布の目安として読む。
@@ -142,7 +142,7 @@ python3 "$CLAUDE_PLUGIN_ROOT/skills/skill-stats/scripts/skill-stats.py" \
 | 起点 | 記録の本体を置く場所 | 辿る経路 |
 | --- | --- | --- |
 | 1 件の issue | その issue へのコメント | その issue の本文末尾へ 1 行 |
-| 複数の issue（ミッション） | そのミッションをリリースした Pull Request へのコメント | 対象のすべての issue の本文末尾へ 1 行 |
+| 複数の issue（スプリント） | そのスプリントをリリースした Pull Request へのコメント | 対象のすべての issue の本文末尾へ 1 行 |
 | 起点の issue を持たない変更 | その変更の Pull Request へのコメント | 追加の 1 行は要らない |
 
 **閉じた issue にもコメントは投稿できる。** GitHub が拒むのは locked のときだけである。
@@ -159,7 +159,7 @@ python3 "$CLAUDE_PLUGIN_ROOT/skills/skill-stats/scripts/skill-stats.py" \
 | 手順 | 入力 | 出力 | 止まる条件 |
 | --- | --- | --- | --- |
 | 1. 開発の起点を解決する | `.ndf/worktree.json` の `base_branch`、origin | `$dev_base` | 設定したブランチが origin にもローカルにも無い |
-| 2. 記録対象の基準ブランチを決める | 下表の場合、`$dev_base`（起点の issue を持たない変更だけが使う） | `$record_base` | ミッションをリリースした先のブランチを判別できない |
+| 2. 記録対象の基準ブランチを決める | 下表の場合、`$dev_base`（起点の issue を持たない変更だけが使う） | `$record_base` | スプリントをリリースした先のブランチを判別できない |
 | 3. 基準コミットから Pull Request を引く | `$record_base`、`$RECORD_REPO` | マージ済みの Pull Request 1 件の番号 | マージ済みへ絞った結果が 1 件でない |
 
 **手順 1: 開発の起点を解決する**
@@ -211,9 +211,9 @@ fi
 | 場合 | 起点にするコミット |
 | --- | --- |
 | 起点の issue を持たない変更 | その変更をマージした先のブランチ（起点。`.ndf/worktree.json` の `base_branch`）の先頭 |
-| ミッション | そのミッションをリリースした先（正式版のチャネルのブランチ）の先頭 |
+| スプリント | そのスプリントをリリースした先（正式版のチャネルのブランチ）の先頭 |
 
-**ミッションを対象にする場合は、そのミッションをリリースした先を使う。**
+**スプリントを対象にする場合は、そのスプリントをリリースした先を使う。**
 `$dev_base` は開発の起点であり、リリースした先とは限らない。開発の起点とリリースの先が別の
 ブランチであるリポジトリで `$dev_base` のまま引くと、起点の先頭に
 関連付いた別の Pull Request を選び、誤った番号へ記録を投稿する。
@@ -224,13 +224,13 @@ record_base=$dev_base
 ```
 
 ```bash
-# ミッション — リリースした先を使う。**リリースした先は対象リポジトリが決める。** 開発の起点を
+# スプリント — リリースした先を使う。**リリースした先は対象リポジトリが決める。** 開発の起点を
 # そのままリリースに使っているリポジトリでは `$dev_base` と同じ値になり、正式版のチャネルを
 # 分けているリポジトリでは別の値になる。字面で書かず、既定ブランチ（origin の HEAD が
 # 指す先）で確かめる。取れないときは推測せず番号を利用者に聞く
 record_base=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')
 [ -n "$record_base" ] || {
-  printf 'NOTE: ミッションを配布した先のブランチを判別できません。番号を利用者に聞いてください\n' >&2
+  printf 'NOTE: スプリントを配布した先のブランチを判別できません。番号を利用者に聞いてください\n' >&2
   exit 1
 }
 ```
@@ -307,7 +307,7 @@ worker を減らす・そのままのどれにするかと、その理由を 1 �
 
 ```bash
 gh issue comment <issue番号> --repo "$RECORD_REPO" --body-file <記録のファイル>   # 起点が 1 件の issue
-gh pr comment <PR番号> --repo "$RECORD_REPO" --body-file <記録のファイル>         # ミッション / 起点の issue を持たない変更
+gh pr comment <PR番号> --repo "$RECORD_REPO" --body-file <記録のファイル>         # スプリント / 起点の issue を持たない変更
 ```
 
 #### 辿る経路を作る
@@ -326,7 +326,7 @@ printf '\n振り返り: %s\n' "<コメントの URL>" >> /tmp/issue-body.md
 gh issue edit <issue番号> --repo "$RECORD_REPO" --body-file /tmp/issue-body.md
 ```
 
-ミッションでは、対象のすべての issue へ同じ URL の 1 行を足す。起点の issue を持たない変更では
+スプリントでは、対象のすべての issue へ同じ URL の 1 行を足す。起点の issue を持たない変更では
 この手順が要らない。記録は Pull Request 自身に付いている。
 
 **設計判断の理由と実測の結果を残す。** Skill の挙動そのものは各 `SKILL.md` が正であり、
@@ -342,16 +342,16 @@ gh issue edit <issue番号> --repo "$RECORD_REPO" --body-file /tmp/issue-body.md
 
 この工程に入ったら進捗記録 `bash "$SCRIPTS/projects-sync.sh" <issue番号> stage "振り返り"` を 1 行打つ（issue の本文とボードの両方に残る。`$SCRIPTS` の決め方は `development-workflow` の `references/scripts-lookup.md`、3 層では起動指示の「進捗記録」を使う）。 **入口のこの記録ではボードの `Status` を書かない。** 先に `Done` にすると、ボードの `Auto-close issue` が課題を閉じ、reopen の手段が報告から落ちる。
 
-## ミッションを閉じる
+## スプリントを閉じる
 
 **振り返りを通る変更では、この工程がその実行の最終工程である。** 記録を投稿した後に、
-`progress-tracking` の「ミッションを閉じる」を行う。**手順はそこが正本で、ここには写さない。**
+`progress-tracking` の「スプリントを閉じる」を行う。**手順はそこが正本で、ここには写さない。**
 ボードの `Status` を `Done` にするのも、課題を閉じるのも、その手順の中で行う。
 
 ## 蓄積した課題を棚卸しする
 
-**「ミッションを閉じる」の後に `/ndf:issue-upkeep` を呼ぶ。** 順序を逆にすると、`issue-upkeep` の
-手順 1 が読む「このミッションで閉じた課題」がまだ閉じていない。振り返りが拾うのは、この変更から出た
+**「スプリントを閉じる」の後に `/ndf:issue-upkeep` を呼ぶ。** 順序を逆にすると、`issue-upkeep` の
+手順 1 が読む「このスプリントで閉じた課題」がまだ閉じていない。振り返りが拾うのは、この変更から出た
 取りこぼしである。**変更をまたいで溜まった課題そのもの**は対象にしていない。
 
 対象が 0 件ならその Skill 自身が飛ばす。
@@ -365,5 +365,5 @@ gh issue edit <issue番号> --repo "$RECORD_REPO" --body-file /tmp/issue-body.md
 - `/ndf:release-verification` — この工程の前に行うリリース後テスト
 - `/ndf:out-of-scope` — 取りこぼしを見つけたときの起票
 - `/ndf:plan-to-spec` — 決まった仕様の永続化（振り返りとは別の出力物）
-- `/ndf:progress-tracking` — 「ミッションを閉じる」の正本
+- `/ndf:progress-tracking` — 「スプリントを閉じる」の正本
 - `/ndf:issue-upkeep` — 蓄積した課題の棚卸し（この工程の最後に呼ぶ）

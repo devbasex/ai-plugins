@@ -43,10 +43,10 @@
 | [review_criteria.py](review_criteria.py) | 指摘の基準の正本（基準 1〜4・書かないもの・見送りの種類・見送りの返信の雛形）と、レビューの重点の宣言（`.ndf/review.json`）の読み取り。レビュー担当への節・修正担当への節・見送りの返信を組む。宣言が読めなくても例外を上げず基準 1・2・4 で返す | `cross-review`（`review_lib/commands/init.py`・`launch-reviewer.sh`） / `fix-steps.py` |
 | [result_posts.py](result_posts.py) | 結果ファイル（指摘ファイル・修正の戻り値）を投稿へ組み立て、待ち行列から送る | `cross-review`（`review_lib/` / `drive.py`） / `fix-steps.py` |
 | [git-credential.sh](git-credential.sh) | credential helper が応答しない環境で git を通す退避の値 | `cross-refactoring`（`refactor_lib/publish.py`） |
-| [closing-issues.sh](closing-issues.sh) | Pull Request の本文から、閉じる語が指す issue を取り出す | `progress-tracking`（ミッションを閉じる） / `merged`（OPEN の一覧） / `development-workflow` の hook |
+| [closing-issues.sh](closing-issues.sh) | Pull Request の本文から、閉じる語が指す issue を取り出す | `progress-tracking`（スプリントを閉じる） / `merged`（OPEN の一覧） / `development-workflow` の hook |
 | [refresh.py](refresh.py) | 観点の出典の取得・指紋の比較・一覧の提示・待ちの扱い（#554）。**提示するだけで書き換えない** | `instructions-check.py` |
 | [transcript_agents.py](transcript_agents.py) | 会話の記録を conductor / supervisor / worker の層の単位で読む（#550）。上限の中断の一覧（`interrupted`）と解除の待ち（`wait-reset`）も持つ（#657）。**読むだけで送信の経路を持たない** | `skill-stats` / `development-workflow` |
-| [step_result.py](step_result.py) | 手順のスクリプトの結果 JSON の形・検証（`validate_result`）・出力と終了（`emit`）・承認資料（`approval_present`）と、git / gh を呼ぶ小関数（`StepError`・`run`・`git`・`git_root` は `proc` の再エクスポート） | `merged-steps.py` / `plan-to-spec-steps.py` / `release-steps.py` / `release-verification-steps.py` / `mission-close.py` / `drive_pause.py` |
+| [step_result.py](step_result.py) | 手順のスクリプトの結果 JSON の形・検証（`validate_result`）・出力と終了（`emit`）・承認資料（`approval_present`）と、git / gh を呼ぶ小関数（`StepError`・`run`・`git`・`git_root` は `proc` の再エクスポート） | `merged-steps.py` / `plan-to-spec-steps.py` / `release-steps.py` / `release-verification-steps.py` / `sprint-close.py` / `drive_pause.py` |
 | [gh_parts.py](gh_parts.py) | PR / issue の取得と本文の節の差し替え。`pr-info`（メタ・本文・差分の統計・checks を名前ごとの最新の実行へ畳んだもの・未解決のスレッド。GraphQL が上限なら REST へ退避。差分とログはファイルへ書く）、`unresolved-threads`、`body-section`（節の取得・置換・末尾への 1 行の追記。節の終わりに `<!-- ndf:section-end -->` を置き、後ろへ足した行を節に含めない）、`review-post`（自分の PR なら REQUEST_CHANGES を COMMENT へ下げる）。結果は `step_result` の形。エントリポイントと再エクスポートだけを持ち、部品は下の `gh_*` の 8 本にある | `cross-review`（`review_lib/` の未解決のスレッドと checks） |
 | [gh_call.py](gh_call.py) | GitHub の呼び出しの最下層。GitHub を呼ぶのはここだけで、テストは `RUNNER` を差し替える。REST の 1 回の要求（githubkit が import できれば githubkit、できなければ `gh api`）と、ETag 付きの読み直し（`rest_cached`。変わっていなければ 304 で上限に数えられない） | `gh_*` |
 | [gh_quota.py](gh_quota.py) | 上限の見分け・枠（GraphQL と REST）の残り・枠の代替（`with_fallback`）・回復の時刻までの待ち（`wait_for_reset`）・変化が無い間に伸ばす待ちの間隔（`PollInterval`・`poll_until`） | `gh_*` |
@@ -61,11 +61,11 @@
 | [proc.py](proc.py) | 子プロセスと git の起動（失敗は `StepError(msg, code)`）・`die`・`info` | `step_result.py` / `statefile.py` / `repo.py` / `cross-review`（`review_lib/`） / `cross-refactoring`（`refactor_lib/paths.py`・`commands/setup.py`） |
 | [repo.py](repo.py) | メインディレクトリ・`owner/repo`・slug・起点（宣言のベースブランチ → origin の HEAD → `main` → `master`。git だけで決める） | `cross-review`（`review_lib/`） / `cross-refactoring`（`drive.py`・`commands/setup.py`） / `pr-steps.py` / `merged-steps.py`（C1〜C7 で各スクリプト） |
 | [project_decl.py](project_decl.py) | プロジェクトの宣言（`.ndf/project.json`）の読み取りと `ndf_policies` の判定。読めなければ `{}` で、キーが無ければ方針の検査を掛けない | `doc-lint.py` / `cross-refactoring`（`commands/implement.py`） |
-| [project_mvv.py](project_mvv.py) | プロジェクト MVV の宣言（`.ndf/mvv.md`・`.ndf/mvv.json`）の読み取り（例外を上げず approved / none / unapproved / mismatch / unreadable）と、判断の地点へ渡す MVV の節（NDF の共通原則 → プロジェクト MVV → 判断の決まり）・根拠の項目の正規化・状態への写し・改訂の兆候の集計・fast の許可の照合。標準ライブラリだけで書く（型は `decl_models()` が pydantic を読んでから組む） | `project-mvv.py` / `mvv-gate.py` / `mission-state.py` / `supervise_lib`（`mission.py`・`steps.py`） / `review_criteria.py` / `cross-review`（`commands/init.py`） / `fix-steps.py` / `cross-refactoring`（`commands/setup.py`・`propose.py`・`plan.py`） |
+| [project_mvv.py](project_mvv.py) | プロジェクト MVV の宣言（`.ndf/mvv.md`・`.ndf/mvv.json`）の読み取り（例外を上げず approved / none / unapproved / mismatch / unreadable）と、判断の地点へ渡す MVV の節（NDF の共通原則 → プロジェクト MVV → 判断の決まり）・根拠の項目の正規化・状態への写し・改訂の兆候の集計・fast の許可の照合。標準ライブラリだけで書く（型は `decl_models()` が pydantic を読んでから組む） | `project-mvv.py` / `mvv-gate.py` / `sprint-state.py` / `supervise_lib`（`sprint.py`・`steps.py`） / `review_criteria.py` / `cross-review`（`commands/init.py`） / `fix-steps.py` / `cross-refactoring`（`commands/setup.py`・`propose.py`・`plan.py`） |
 | [project_mvv_body.py](project_mvv_body.py) | プロジェクト MVV の本文の解析（見出し・Value の番号・固有の操作の `P<番号>`）と形の誤り（共通原則の写しを含む）・版どうしの差分 | `project_mvv.py` / `project-mvv.py` |
 | [project_mvv_decl.py](project_mvv_decl.py) | `.ndf/mvv.json` の形（標準ライブラリの検査と pydantic の型）と設定の既定。`schemas/mvv.schema.json` の正本 | `project_mvv.py` / `project-mvv.py` |
-| [project_mvv_signals.py](project_mvv_signals.py) | 改訂の兆候（覆し・「判定できない」・流出不具合）の記録と集計、「判定できない」の連続 | `project-mvv.py` / `mvv-gate.py` / `mission-state.py` |
-| [mission_mvv.py](mission_mvv.py) | `mission-state.py init --pace fast` のミッション MVV の写し（マイルストーンの説明から）と、プロジェクト MVV への照合 | `mission-state.py` |
+| [project_mvv_signals.py](project_mvv_signals.py) | 改訂の兆候（覆し・「判定できない」・流出不具合）の記録と集計、「判定できない」の連続 | `project-mvv.py` / `mvv-gate.py` / `sprint-state.py` |
+| [sprint_mvv.py](sprint_mvv.py) | `sprint-state.py init --pace fast` のスプリント MVV の写し（マイルストーンの説明から）と、プロジェクト MVV への照合 | `sprint-state.py` |
 | [loop_drive.py](loop_drive.py) | 収束ループの drive の部品（`call`・`parse_vars`・`review_status`） | 収束ループの 2 つの `drive.py` |
 | [deps.py](deps.py) | 外部パッケージを使うエントリポイントが最初に呼ぶ `require("<グループ>")`。import できなければ uv の環境（宣言と版の固定はプラグインルートの `pyproject.toml` と `uv.lock`。`project=` を渡せばその根の 1 組と `<根>/.venv`）で起動し直し、uv が無ければ版を固定して入れる。入れられなければ終了コード 3。hook とラッパーは `require()` を呼ばない（ラッパーの環境は `relay_lib/runtime.py` が `find_uv`・`install_uv`・`venv_dir` で用意する） | 外部パッケージを使うエントリポイント・根の `scripts/`（`scripts/lib/ndf_wrappers.py` を通す）・`relay_lib/runtime.py` |
 | [md.py](md.py) | Markdown の構造の読み取り（囲み・見出し・節・表・地の文・リンクとアンカー）。markdown-it-py を呼ぶのはここだけ。書き込みは読み取った行の区間で呼び出し側が行う | `cross-refactoring`（`refactor_lib/vocabulary.py`）・`relay_lib/mark.py`。ほかは D1〜D8 が呼び出し側を置き換える |
@@ -101,7 +101,7 @@ Skill から呼ぶ手順のスクリプト（`scripts/*-steps.py`）は、最後
 
 | 項目 | 必須 | 形 | 意味 |
 | --- | --- | --- | --- |
-| `tool` | はい | 文字列 | 呼んだ Skill の名前（`merged` / `plan-to-spec` / `release` / `release-verification`）。`mission-close.py` は `mission-close` |
+| `tool` | はい | 文字列 | 呼んだ Skill の名前（`merged` / `plan-to-spec` / `release` / `release-verification`）。`sprint-close.py` は `sprint-close` |
 | `status` | はい | `ok` / `gate` / `stopped` | 3 値に固定する |
 | `summary` | はい | 文字列 | 1 行の要約。報告へそのまま写せる |
 | `items` | はい | オブジェクトの配列 | 対象ごとの結果。`kind` / `name` / `result` を持つ。`result` の語彙はスクリプトごとに決めてよい |

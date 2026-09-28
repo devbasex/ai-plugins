@@ -176,8 +176,8 @@ def cmd_plan(a):
             ),
             EXIT_PRECONDITION,
         )
-    # ミッションのブランチ宛て（課題の PR）は宣言の外でも起点として受ける
-    if base not in allowed and pr_target(base) != "mission" and not a.force:
+    # スプリントブランチ宛て（課題の PR）は宣言の外でも起点として受ける
+    if base not in allowed and pr_target(base) != "sprint" and not a.force:
         items[1]["result"] = "redirect"
         emit(
             result(
@@ -233,7 +233,7 @@ def cmd_plan(a):
         )
     action = "既存の PR を更新する" if pr else "新しい PR を作る"
     if not needs_review(base):
-        action += "（ミッションのブランチ宛て。実装レビューはミッションの PR で通す）"
+        action += "（スプリントブランチ宛て。実装レビューはスプリントの PR で通す）"
     emit(
         result(
             TOOL,

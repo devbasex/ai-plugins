@@ -38,10 +38,10 @@ def plain_repo(tmp_path, release=None):
     return root
 
 
-def new_mission(root, out, *extra):
+def new_sprint(root, out, *extra):
     return cli(
         "new",
-        "mission",
+        "sprint",
         "--name",
         "m6",
         "--worktree",
@@ -64,16 +64,16 @@ def new_mission(root, out, *extra):
 
 
 @pytest.mark.parametrize("release", [None, {"form": "merge"}])
-def test_new_mission_without_release_template_writes_until_check(tmp_path, release):
+def test_new_sprint_without_release_template_writes_until_check(tmp_path, release):
     root = plain_repo(tmp_path, release)
     out = tmp_path / "m"
-    p = new_mission(root, out)
+    p = new_sprint(root, out)
     assert p.returncode == 0, p.stderr
     res = json.loads(p.stdout)
     assert res["status"] == "ok" and "/ndf:release" in res["next"]
-    manifest = json.loads((out / "mission.json").read_text())
+    manifest = json.loads((out / "sprint.json").read_text())
     names = [w["name"] for w in manifest["ステージ"]]
-    assert names == ["設計", "関門 1", "ミッションのブランチ", "実装", "検査", "リリース"]
+    assert names == ["設計", "関門 1", "スプリントブランチ", "実装", "検査", "リリース"]
     last = manifest["ステージ"][-1]
     assert last["manual"] == "/ndf:release" and "plans" not in last and "command" not in last
     assert any(it.get("manual") == "/ndf:release" for it in res["items"])
@@ -81,12 +81,12 @@ def test_new_mission_without_release_template_writes_until_check(tmp_path, relea
     assert "--then" not in waves["検査"]["command"]  # 検査の queue の後に流す計画は無い
 
 
-def test_new_mission_with_package_plugin_keeps_release_stage(tmp_path):
+def test_new_sprint_with_package_plugin_keeps_release_stage(tmp_path):
     root = plain_repo(tmp_path, {"form": "package-plugin", "plugin": "foo", "runtimes": ["claude"]})
     out = tmp_path / "m"
-    p = new_mission(root, out)
+    p = new_sprint(root, out)
     assert p.returncode == 0, p.stderr
-    names = [w["name"] for w in json.loads((out / "mission.json").read_text())["ステージ"]]
+    names = [w["name"] for w in json.loads((out / "sprint.json").read_text())["ステージ"]]
     assert names[-1] == "配布" and "/ndf:release" not in json.loads(p.stdout)["next"]
 
 
@@ -120,8 +120,8 @@ def test_new_close_still_needs_release_form(tmp_path):
 def design_plan(tmp_path):
     root = plain_repo(tmp_path)
     out = tmp_path / "m"
-    assert new_mission(root, out).returncode == 0
-    waves = {w["name"]: w for w in json.loads((out / "mission.json").read_text())["ステージ"]}
+    assert new_sprint(root, out).returncode == 0
+    waves = {w["name"]: w for w in json.loads((out / "sprint.json").read_text())["ステージ"]}
     return json.loads(Path(waves["設計"]["plans"][0]).read_text())
 
 
@@ -268,8 +268,8 @@ def test_pr_step_appends_existing_files(tmp_path, monkeypatch):
 # --- #1194: 種別ごとの help ------------------------------------------------------------
 
 
-def test_new_mission_help_shows_only_its_arguments_and_declarations(tmp_path):
-    p = cli("new", "mission", "--help", cwd=tmp_path)
+def test_new_sprint_help_shows_only_its_arguments_and_declarations(tmp_path):
+    p = cli("new", "sprint", "--help", cwd=tmp_path)
     assert p.returncode == 0
     for word in ("--design", "--version", "base_branch", "test.command", "release.form", "/ndf:release"):
         assert word in p.stdout, word
@@ -277,13 +277,13 @@ def test_new_mission_help_shows_only_its_arguments_and_declarations(tmp_path):
         assert word not in p.stdout, word
 
 
-def test_new_impl_help_differs_from_mission(tmp_path):
+def test_new_impl_help_differs_from_sprint(tmp_path):
     impl = cli("new", "impl", "--help", cwd=tmp_path).stdout
     assert "--tests" in impl and "--test-cmd" in impl and "--design" not in impl and "--channel" not in impl
 
 
 def test_every_new_argument_has_help(tmp_path):
-    for kind in ("impl", "fix", "check", "release", "mission", "close"):
+    for kind in ("impl", "fix", "check", "release", "sprint", "close"):
         p = cli("new", kind, "--help", cwd=tmp_path)
         assert p.returncode == 0, kind
         opts = p.stdout.split("options:\n", 1)[1].split("\n\n", 1)[0].splitlines()
@@ -297,7 +297,7 @@ def test_every_new_argument_has_help(tmp_path):
 
 def test_top_help_has_phase_table(tmp_path):
     out = cli("--help", cwd=tmp_path).stdout
-    for kind in ("new mission", "new impl", "new fix", "new check", "new release", "new close"):
+    for kind in ("new sprint", "new impl", "new fix", "new check", "new release", "new close"):
         assert kind in out, kind
     for sub in ("run", "queue", "wait"):
         assert cli(sub, "--help", cwd=tmp_path).stdout.count("\n") > 5, sub

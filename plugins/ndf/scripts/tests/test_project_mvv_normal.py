@@ -2,8 +2,8 @@
 
 - work のステップの worker へ MVV の節を渡す（AC1・AC7・AC12・I4・I10）
 - `mvv-gate.py check --advise`（助言の MVV 判定）: 判定によらず 0・承認ゲートの記録を書かない・行に pace（AC4〜AC7・I1・I3・I5）
-- `pace: normal` と `--state` のミッションのプラン（AC4・AC5・I2・I7）と覆し（AC6・I8）
-- ミッション MVV の特定と根拠の項目（AC12・I11・I12・決定 13〜16）
+- `pace: normal` と `--state` のスプリントのプラン（AC4・AC5・I2・I7）と覆し（AC6・I8）
+- スプリント MVV の特定と根拠の項目（AC12・I11・I12・決定 13〜16）
 
 claude と gh は `test_project_mvv` の偽物を使う（呼ばれるたびに calls.txt へ 1 行を足す）。
 """
@@ -26,7 +26,7 @@ from supervise_lib.prompts import FULL_SYSTEM, WORK_SYSTEM  # noqa: E402
 from supervise_lib.state import RunState  # noqa: E402
 from supervise_lib.steps import JudgeStep  # noqa: E402
 
-MISSION = "## Mission\n速く届ける\n\n## Vision\n止まらない\n\n## Value\n1. 実測で決める\n2. R1 は人が決める\n"
+SPRINT = "## Mission\n速く届ける\n\n## Vision\n止まらない\n\n## Value\n1. 実測で決める\n2. R1 は人が決める\n"
 NOT_FOLLOW = '{"verdict": "not_follow", "reasons": ["Value 2 に反する"], "boundary": [], "basis": ["Value 2"]}'
 FOLLOW_GATE = '{"verdict": "follow", "reasons": ["Value 1 に沿う"], "boundary": [], "basis": ["Value 1"]}'
 
@@ -42,7 +42,7 @@ def advise(env, state: Path, *extra: str) -> tuple[int, dict, list[dict], Path]:
     material = env["tmp"] / "approval.md"
     material.write_text("# 配布\n")
     log, note = env["tmp"] / "gate.jsonl", env["tmp"] / "note.md"
-    args = ["check", "--mission", str(state), "--gate", "release", "--material", str(material), "--log", str(log)]
+    args = ["check", "--sprint", str(state), "--gate", "release", "--material", str(material), "--log", str(log)]
     code, out, text = run(env, *args, "--root", str(env["root"]), "--note", str(note), "--advise", *extra, script=GATE_PY)
     assert out, text
     return code, out, pms.read_jsonl(log), note
@@ -66,7 +66,7 @@ def test_advise_returns_0_for_every_verdict_and_never_records_the_gate(env, text
     code, out, rows, note = advise(env, state)
     assert (code, out["status"]) == (0, "ok") and gates_of(state) == []  # I1
     assert rows[-1]["verdict"] == verdict and rows[-1]["passed"] is False and rows[-1]["pace"] == "normal"
-    assert rows[-1]["mission_mvv"] is None
+    assert rows[-1]["sprint_mvv"] is None
     text = note.read_text()
     assert "助言" in text and f"（{verdict}。" in text and "根拠: " in text and "（MVV 版 1）" in text
 
@@ -108,7 +108,7 @@ def test_advise_treats_a_missing_pace_declaration_as_no_boundary(env):
     code, _, text = run(
         env,
         "check",
-        *("--mission", str(state), "--gate", "release", "--material", str(env["tmp"] / "approval.md")),
+        *("--sprint", str(state), "--gate", "release", "--material", str(env["tmp"] / "approval.md")),
         *("--log", str(env["tmp"] / "gate.jsonl"), "--root", str(env["root"])),
         script=GATE_PY,
     )
@@ -144,78 +144,78 @@ def test_user_answers_against_the_advice_are_overrides(env):
 def test_the_override_compares_with_the_verdict_of_the_same_pr(tmp_path):
     state = {"gates": []}
     log = tmp_path / "gate.jsonl"
-    mission = str(tmp_path / "m.json")
-    pms.append_jsonl(log, {"at": "2026-09-28T00:00:00Z", "gate": "design", "mission": mission, "pr": [1], "verdict": "not_follow"})
-    pms.append_jsonl(log, {"at": "2026-09-28T00:01:00Z", "gate": "design", "mission": mission, "pr": [2], "verdict": "follow"})
-    assert pms.last_mvv_verdict(state, mission, "関門 1", log, 1) == "not_follow"
-    assert pms.last_mvv_verdict(state, mission, "関門 1", log, 2) == "follow"
-    assert pms.last_mvv_verdict(state, mission, "関門 1", log) == "follow"
+    sprint = str(tmp_path / "m.json")
+    pms.append_jsonl(log, {"at": "2026-09-28T00:00:00Z", "gate": "design", "sprint": sprint, "pr": [1], "verdict": "not_follow"})
+    pms.append_jsonl(log, {"at": "2026-09-28T00:01:00Z", "gate": "design", "sprint": sprint, "pr": [2], "verdict": "follow"})
+    assert pms.last_mvv_verdict(state, sprint, "関門 1", log, 1) == "not_follow"
+    assert pms.last_mvv_verdict(state, sprint, "関門 1", log, 2) == "follow"
+    assert pms.last_mvv_verdict(state, sprint, "関門 1", log) == "follow"
 
 
-# ---------------------------------------------------------------- ミッション MVV（AC12）
+# ---------------------------------------------------------------- スプリント MVV（AC12）
 
 
-def test_normal_init_copies_the_mission_mvv_without_vetting_it(env):
+def test_normal_init_copies_the_sprint_mvv_without_vetting_it(env):
     assert approve(env) == 0
     before = calls(env, "claude")
-    state = normal_state(env, "--mvv", body_file(env, MISSION, "mission.md"))
+    state = normal_state(env, "--mvv", body_file(env, SPRINT, "sprint.md"))
     m = json.loads(state.read_text())
-    assert m["project_mvv"] == {"version": 1, "sha256": sha(BODY)} and m["mvv"]["sha256"] == sha(MISSION)
+    assert m["project_mvv"] == {"version": 1, "sha256": sha(BODY)} and m["mvv"]["sha256"] == sha(SPRINT)
     assert calls(env, "claude") == before  # I11: 照合（vet）をしない
     code, out, _ = run(env, "init", str(env["tmp"] / "x.json"), "--name", "m", "--mvv", str(env["tmp"] / "no.md"), script=STATE_PY)
     assert code == 3 and "MVV のファイルが無い" in out["summary"]
 
 
 def test_normal_init_reads_the_milestone_and_goes_on_without_the_headings(env):
-    (env["tmp"] / "gh-out.json").write_text(MISSION)
+    (env["tmp"] / "gh-out.json").write_text(SPRINT)
     m = json.loads(normal_state(env, "--milestone", "26").read_text())
     assert Path(m["mvv"]["path"]).read_text().startswith("## Mission") and "project_mvv" not in m
     (env["tmp"] / "gh-out.json").write_text("## Mission\nだけ\n")
     state = env["tmp"] / "ns" / "short.json"
     code, out, text = run(env, "init", str(state), "--name", "m", "--milestone", "26", "--root", str(env["root"]), script=STATE_PY)
     assert code == 0 and "mvv" not in json.loads(state.read_text()), text
-    assert out["items"][-1]["kind"] == "mission_mvv" and out["items"][-1]["result"] == "none"
+    assert out["items"][-1]["kind"] == "sprint_mvv" and out["items"][-1]["result"] == "none"
 
 
-def test_advise_reads_the_mission_mvv_without_its_approval_record(env):
+def test_advise_reads_the_sprint_mvv_without_its_approval_record(env):
     assert approve(env) == 0
-    state = normal_state(env, "--mvv", body_file(env, MISSION, "mission.md"))
-    answer(env, '{"verdict": "follow", "reasons": ["x"], "boundary": [], "basis": ["ミッション Value 1", "Value 1", "R1"]}')
+    state = normal_state(env, "--mvv", body_file(env, SPRINT, "sprint.md"))
+    answer(env, '{"verdict": "follow", "reasons": ["x"], "boundary": [], "basis": ["スプリント Value 1", "Value 1", "R1"]}')
     code, _, rows, note = advise(env, state)
-    assert code == 0 and rows[-1]["verdict"] == "follow" and rows[-1]["mission_mvv"] == {"sha256": sha(MISSION)}
-    assert rows[-1]["basis"] == ["ミッション Value 1", "Value 1", "R1"]
-    assert f"# ミッション MVV（sha256 {sha(MISSION)[:8]}）" in (env["tmp"] / "prompt.txt").read_text()
-    assert f"根拠: Value 1 / ミッション Value 1 / R1（MVV 版 1・ミッション MVV {sha(MISSION)[:8]}）" in note.read_text()
+    assert code == 0 and rows[-1]["verdict"] == "follow" and rows[-1]["sprint_mvv"] == {"sha256": sha(SPRINT)}
+    assert rows[-1]["basis"] == ["スプリント Value 1", "Value 1", "R1"]
+    assert f"# スプリント MVV（sha256 {sha(SPRINT)[:8]}）" in (env["tmp"] / "prompt.txt").read_text()
+    assert f"根拠: Value 1 / スプリント Value 1 / R1（MVV 版 1・スプリント MVV {sha(SPRINT)[:8]}）" in note.read_text()
     # 写しが状態と食い違えば LLM を呼ばず機械のチェックで外れる（I10）
-    Path(json.loads(state.read_text())["mvv"]["path"]).write_text(MISSION + "足した\n")
+    Path(json.loads(state.read_text())["mvv"]["path"]).write_text(SPRINT + "足した\n")
     before = calls(env, "claude")
     code, _, rows, _ = advise(env, state)
     assert code == 0 and calls(env, "claude") == before and rows[-1]["verdict"] == "machine"
 
 
-def test_basis_keeps_the_mission_items_apart_from_the_project_items(env):
+def test_basis_keeps_the_sprint_items_apart_from_the_project_items(env):
     assert approve(env) == 0
     mvv = pm.load_mvv(env["root"])
-    items = pm.basis(["ミッション Value 1", "Value 2", "R1", "ミッション R1", "ミッション Value 9"], mvv, mission=MISSION)
-    assert items == ["ミッション Value 1", "Value 2", "R1"]
-    assert pm.basis_phrase(items, mvv, "3f9a1c2e00") == "根拠: Value 2 / ミッション Value 1 / R1（MVV 版 1・ミッション MVV 3f9a1c2e）"
-    assert pm.basis_phrase(["Value 1"], mvv) == "根拠: Value 1（MVV 版 1）"  # ミッション MVV が無ければ今の句
+    items = pm.basis(["スプリント Value 1", "Value 2", "R1", "スプリント R1", "スプリント Value 9"], mvv, sprint=SPRINT)
+    assert items == ["スプリント Value 1", "Value 2", "R1"]
+    assert pm.basis_phrase(items, mvv, "3f9a1c2e00") == "根拠: Value 2 / スプリント Value 1 / R1（MVV 版 1・スプリント MVV 3f9a1c2e）"
+    assert pm.basis_phrase(["Value 1"], mvv) == "根拠: Value 1（MVV 版 1）"  # スプリント MVV が無ければ今の句
 
 
-def test_context_adds_the_mission_mvv_only_with_a_source(env):
+def test_context_adds_the_sprint_mvv_only_with_a_source(env):
     base = run(env, "context", "--root", str(env["root"]), "--format", "json")[1]["items"][0]
     assert approve(env) == 0
     mvv = pm.load_mvv(env["root"])
-    (env["tmp"] / "gh-out.json").write_text(MISSION)
+    (env["tmp"] / "gh-out.json").write_text(SPRINT)
     code, out, _ = run(env, "context", "--root", str(env["root"]), "--format", "json", "--milestone", "26")
     item = out["items"][0]
-    assert code == 0 and item["block"] == pm.block(mvv, MISSION) and item["mission_mvv"]["sha256"] == sha(MISSION)
+    assert code == 0 and item["block"] == pm.block(mvv, SPRINT) and item["sprint_mvv"]["sha256"] == sha(SPRINT)
     code, out, _ = run(env, "context", "--root", str(env["root"]), "--format", "json")
-    assert out["items"][0]["block"] == pm.block(mvv) and "mission_mvv" not in out["items"][0]
+    assert out["items"][0]["block"] == pm.block(mvv) and "sprint_mvv" not in out["items"][0]
     (env["tmp"] / "gh-out.json").write_text("見出しなし\n")
     out = run(env, "context", "--root", str(env["root"]), "--format", "json", "--milestone", "26")[1]
-    assert out["items"][0]["block"] == pm.block(mvv) and "reason" in out["items"][0]["mission_mvv"]
-    assert "mission_mvv" not in base and base["block"] == pm.block(pm.ProjectMvv("none"))
+    assert out["items"][0]["block"] == pm.block(mvv) and "reason" in out["items"][0]["sprint_mvv"]
+    assert "sprint_mvv" not in base and base["block"] == pm.block(pm.ProjectMvv("none"))
 
 
 # ---------------------------------------------------------------- work のステップと judge（AC1・AC7・AC12・I4・I10）
@@ -243,8 +243,8 @@ def work_ctx(root: Path, tmp: Path, plan: dict | None = None, texts=()) -> Simpl
     )
 
 
-def mission_plan(env) -> dict:
-    return {"ミッション状態": str(normal_state(env, "--mvv", body_file(env, MISSION, "mission.md")))}
+def sprint_plan(env) -> dict:
+    return {"スプリント状態": str(normal_state(env, "--mvv", body_file(env, SPRINT, "sprint.md")))}
 
 
 def test_worker_gets_the_same_block_in_all_three_calls(env, monkeypatch):
@@ -264,7 +264,7 @@ def test_worker_gets_the_same_block_in_all_three_calls(env, monkeypatch):
 
 
 def test_worker_prompt_is_unchanged_without_an_approved_mvv(env):
-    ctx = work_ctx(env["root"], env["tmp"], mission_plan(env))  # ミッション MVV があっても足さない（決定 16）
+    ctx = work_ctx(env["root"], env["tmp"], sprint_plan(env))  # スプリント MVV があっても足さない（決定 16）
     worker_steps.WorkStep().execute(ctx, {"id": "w", "prompt": "直す"})
     assert ctx.claude.calls[-1]["system"] == WORK_SYSTEM
     (env["root"] / ".ndf").mkdir(exist_ok=True)
@@ -274,53 +274,53 @@ def test_worker_prompt_is_unchanged_without_an_approved_mvv(env):
     assert ctx.claude.calls[-1]["system"] == WORK_SYSTEM
 
 
-def test_worker_and_judge_read_the_mission_mvv_of_the_state(env):
+def test_worker_and_judge_read_the_sprint_mvv_of_the_state(env):
     assert approve(env) == 0
     mvv = pm.load_mvv(env["root"])
-    plan = mission_plan(env)
+    plan = sprint_plan(env)
     ctx = work_ctx(env["root"], env["tmp"], plan)
     worker_steps.WorkStep().execute(ctx, {"id": "w", "prompt": "直す"})
-    assert ctx.claude.calls[-1]["system"] == WORK_SYSTEM + "\n\n" + pm.block(mvv, MISSION)
-    ctx = work_ctx(env["root"], env["tmp"], plan, ['{"decision": "stop", "reason": "x", "basis": ["ミッション Value 1"]}'])
+    assert ctx.claude.calls[-1]["system"] == WORK_SYSTEM + "\n\n" + pm.block(mvv, SPRINT)
+    ctx = work_ctx(env["root"], env["tmp"], plan, ['{"decision": "stop", "reason": "x", "basis": ["スプリント Value 1"]}'])
     d = JudgeStep().execute(ctx, {"id": "j", "question": "?", "choices": ["stop"]})
-    assert ctx.claude.calls[-1]["prompt"].startswith(pm.block(mvv, MISSION)) and d["basis"] == ["ミッション Value 1"]
+    assert ctx.claude.calls[-1]["prompt"].startswith(pm.block(mvv, SPRINT)) and d["basis"] == ["スプリント Value 1"]
 
 
-def test_a_changed_mission_mvv_falls_back_to_the_project_mvv_with_a_note(env):
+def test_a_changed_sprint_mvv_falls_back_to_the_project_mvv_with_a_note(env):
     assert approve(env) == 0
-    plan = mission_plan(env)
-    Path(json.loads(Path(plan["ミッション状態"]).read_text())["mvv"]["path"]).write_text("書き換えた\n")
+    plan = sprint_plan(env)
+    Path(json.loads(Path(plan["スプリント状態"]).read_text())["mvv"]["path"]).write_text("書き換えた\n")
     ctx = work_ctx(env["root"], env["tmp"], plan)
     worker_steps.WorkStep().execute(ctx, {"id": "w", "prompt": "直す"})
     assert ctx.claude.calls[-1]["system"] == WORK_SYSTEM + "\n\n" + pm.block(pm.load_mvv(env["root"]))
     lines = [json.loads(ln) for ln in ctx.state.progress.read_text().splitlines()]
-    assert [ln["reason"] for ln in lines if ln["kind"] == "attention"] == ["ミッション MVV を使えない"]
+    assert [ln["reason"] for ln in lines if ln["kind"] == "attention"] == ["スプリント MVV を使えない"]
 
 
-# ---------------------------------------------------------------- normal のミッションのプラン（AC4・AC5・I2・I7）
+# ---------------------------------------------------------------- normal のスプリントのプラン（AC4・AC5・I2・I7）
 
 
-def new_normal_mission(tmp_path: Path, *extra: str):
+def new_normal_sprint(tmp_path: Path, *extra: str):
     out = tmp_path / "m"
     p = cli(
         "new",
-        "mission",
+        "sprint",
         *("--name", "m26", "--worktree", str(tmp_path), "--issue", "11", "--design", "11"),
         *("--version", "10.18.0-dev.1", "--out", str(out)),
         *extra,
     )
     assert p.returncode == 0, p.stdout + p.stderr
-    return load(out / "mission.json"), json.loads(p.stdout.splitlines()[-1])
+    return load(out / "sprint.json"), json.loads(p.stdout.splitlines()[-1])
 
 
-def test_normal_mission_with_a_state_puts_the_advice_before_both_gates(tmp_path):
+def test_normal_sprint_with_a_state_puts_the_advice_before_both_gates(tmp_path):
     state = tmp_path / "state.json"
     state.write_text(json.dumps({"name": "m", "pace": "normal", "gates": []}))
-    manifest, out = new_normal_mission(tmp_path, "--state", str(state))
-    assert (manifest["進め方"], manifest["状態"], manifest["ブランチ"]) == ("normal", str(state.resolve()), "mission/m26")
+    manifest, out = new_normal_sprint(tmp_path, "--state", str(state))
+    assert (manifest["進め方"], manifest["状態"], manifest["ブランチ"]) == ("normal", str(state.resolve()), "sprint/m26")
     waves = {w["name"]: w for w in manifest["ステージ"]}
     assert "--what <要約> --by user --pr <設計 PR>" in waves["関門 1"]["gate"] and "--by user" in waves["配布"]["note"]
-    assert "mission-state.py gate" in out["next"]
+    assert "sprint-state.py gate" in out["next"]
     design = load(waves["設計"]["plans"][0])
     ds = steps_of(design)
     assert [s["id"] for s in design["steps"]][-3:] == ["mvv", "mvv-note", "gate"]
@@ -334,26 +334,26 @@ def test_normal_mission_with_a_state_puts_the_advice_before_both_gates(tmp_path)
     for w in manifest["ステージ"]:
         for path in w.get("plans", []):
             plan = load(path)
-            assert plan["ミッション状態"] == str(state.resolve())
+            assert plan["スプリント状態"] == str(state.resolve())
             assert_transitions_exist(plan)
     assert sum(1 for w in manifest["ステージ"] for p in w.get("plans", []) for s in load(p)["steps"] if s["id"] == "mvv") == 2
 
 
-def test_normal_mission_without_a_state_is_unchanged(tmp_path):
-    manifest, out = new_normal_mission(tmp_path)
+def test_normal_sprint_without_a_state_is_unchanged(tmp_path):
+    manifest, out = new_normal_sprint(tmp_path)
     assert "状態" not in manifest and "進め方" not in manifest
     for w in manifest["ステージ"]:
         for path in w.get("plans", []):
             plan = load(path)
-            assert "ミッション状態" not in plan and not any(s["id"] in ("mvv", "mvv-note") for s in plan["steps"])
-    assert "mission-state.py" not in out["next"]
+            assert "スプリント状態" not in plan and not any(s["id"] in ("mvv", "mvv-note") for s in plan["steps"])
+    assert "sprint-state.py" not in out["next"]
 
 
 @pytest.mark.parametrize("code", [0, 1])
 def test_the_design_plan_stops_at_gate_1_whatever_the_advice(tmp_path, monkeypatch, code):
     state = tmp_path / "state.json"
     state.write_text(json.dumps({"name": "m", "pace": "normal", "gates": []}))
-    manifest, _ = new_normal_mission(tmp_path, "--state", str(state))
+    manifest, _ = new_normal_sprint(tmp_path, "--state", str(state))
     design = load(next(w for w in manifest["ステージ"] if w["name"] == "設計")["plans"][0])
     tail = design["steps"][-3:]
     tail[0]["cmd"], tail[1]["cmd"] = f"exit {code}", "true"
@@ -374,7 +374,7 @@ def test_the_design_plan_stops_at_gate_1_whatever_the_advice(tmp_path, monkeypat
 
 
 def test_advise_design_steps_keeps_its_current_shape(tmp_path):
-    from supervise_lib.mission_waves import MVV_NOTE, MVV_PY, advise_design_steps
+    from supervise_lib.sprint_waves import MVV_NOTE, MVV_PY, advise_design_steps
 
     state = tmp_path / "state.json"
     a = SimpleNamespace(state=str(state), mode="standard")
@@ -385,7 +385,7 @@ def test_advise_design_steps_keeps_its_current_shape(tmp_path):
             "type": "run",
             "stage": "設計",
             "timeout": 900,
-            "cmd": f"rm -f {note} && {MVV_PY} check --mission {state.resolve()} --gate design --pr {{pr}} --mode standard --root . "
+            "cmd": f"rm -f {note} && {MVV_PY} check --sprint {state.resolve()} --gate design --pr {{pr}} --mode standard --root . "
             f"--note {note} --advise",
             "on_fail": "mvv-note",
             "next": "mvv-note",

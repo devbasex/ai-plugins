@@ -3096,7 +3096,10 @@ if sys.argv[1:3] == ["auth", "login"]:
     sys.exit(0)
 if sys.argv[1:3] == ["auth", "status"]:
     ok = os.path.exists(os.path.join(d, ".credentials.json"))
-    print(json.dumps({"loggedIn": ok, "email": os.environ["FAKE_EMAIL"]} if ok else {"loggedIn": False}))
+    st = {"loggedIn": ok, "email": os.environ["FAKE_EMAIL"]}
+    if os.environ.get("FAKE_ORG_ID"):
+        st.update(orgId=os.environ["FAKE_ORG_ID"], orgName=os.environ.get("FAKE_ORG_NAME", ""), subscriptionType="max")
+    print(json.dumps(st if ok else {"loggedIn": False}))
     sys.exit(0)
 if sys.argv[1:3] == ["auth", "logout"]:
     sys.exit(0)
@@ -3177,6 +3180,54 @@ def test_account_add_rejects(tmp_path, accounts):
     assert sorted(p.name for p in accounts.root.iterdir() if not p.name.endswith(".lock")) == ["work1"]
     assert account_cmd(tmp_path, accounts, "remove", "none", tty=False).returncode == 1
     assert account_cmd(tmp_path, accounts, "list", "--bad", tty=False).returncode == 2
+
+
+def test_account_add_same_email_other_org(tmp_path, accounts):
+    """I3: 1 つのメールアドレスでも組織が違えば別のアカウントとして登録でき、同じ組織なら拒む。"""
+    personal = {"FAKE_EMAIL": "a@example.com", "FAKE_ORG_ID": "org-p", "FAKE_ORG_NAME": "a@example.com's Organization"}
+    team = {"FAKE_EMAIL": "a@example.com", "FAKE_ORG_ID": "org-t", "FAKE_ORG_NAME": "Team A"}
+    assert account_cmd(tmp_path, accounts, "add", "work1", **personal).returncode == 0
+    p = account_cmd(tmp_path, accounts, "add", "work2", **team)
+    assert p.returncode == 0, p.stderr
+    assert accounts.account("work2")["org_id"] == "org-t" and accounts.account("work2")["org_name"] == "Team A"
+    p = account_cmd(tmp_path, accounts, "add", "work3", **{**team, "FAKE_EMAIL": "A@example.com"})
+    assert p.returncode == 1 and "登録済み: work2" in p.stderr and "Team A" in p.stderr
+    rows = json.loads(account_cmd(tmp_path, accounts, "list", "--json", tty=False).stdout)
+    assert [(r["name"], r["org_id"], r["org_name"]) for r in rows] == [
+        ("work1", "org-p", "a@example.com's Organization"),
+        ("work2", "org-t", "Team A"),
+    ]
+    lines = account_cmd(tmp_path, accounts, "list", tty=False).stdout.splitlines()
+    assert any(line.startswith("work2") and "a@example.com（Team A）" in line for line in lines)
+    assert sorted(p.name for p in accounts.root.iterdir() if not p.name.endswith(".lock")) == ["work1", "work2"]
+
+
+def test_account_add_same_email_without_known_org_rejects(tmp_path, accounts):
+    """I3: 組織の分からない登録（古い account.json）と同じメールは、組織が違うと言い切れないので拒む。"""
+    accounts.add("old", email="a@example.com")
+    p = account_cmd(tmp_path, accounts, "add", "work1", FAKE_EMAIL="a@example.com", FAKE_ORG_ID="org-t", FAKE_ORG_NAME="Team A")
+    assert p.returncode == 1 and "登録済み: old" in p.stderr
+    lines = account_cmd(tmp_path, accounts, "list", tty=False).stdout.splitlines()
+    assert any(line.startswith("old") and "a@example.com" in line and "（" not in line.split()[1] for line in lines)
+
+
+def test_owner_of_compares_email_and_org(accounts):
+    """I3: 同じメールアドレスと組織の登録を拒む。どちらかの組織が分からなければ同じとみなす（安全側）。"""
+    from relay_lib.accounts import ca as relay_ca, owner_of
+
+    accounts.add("p", email="x@example.com", org_id="org-p", org_name="Personal")
+    accounts.add("old", email="y@example.com")
+    assert owner_of("X@example.com", "org-p") == "p" and owner_of("x@example.com", "org-p", other_than="p") is None
+    assert owner_of("x@example.com", "org-t") is None
+    assert owner_of("x@example.com", "") == "p"  # 新しい側の組織が分からない
+    assert owner_of("y@example.com", "org-t") == "old"  # 既存の側の組織が分からない
+    acc = relay_ca.load_account("p")
+    assert (acc.org_id, acc.org_name) == ("org-p", "Personal")
+    assert (relay_ca.load_account("old").org_id, relay_ca.load_account("old").org_name) == ("", "")
+    st = relay_ca.staging_dir("t")
+    relay_ca.register("t", st, "x@example.com", org_id="org-t", org_name="Team")
+    assert (accounts.account("t")["org_id"], accounts.account("t")["org_name"]) == ("org-t", "Team")
+    assert owner_of("x@example.com", "org-t") == "t"
 
 
 def test_account_list_empty(tmp_path, accounts):

@@ -825,7 +825,7 @@ def test_context_over_limit_denies_plan_bash(tmp_path, state, cmd):
     "cmd",
     [
         "python3 /x/scripts/supervise.py wait /x/done",
-        "python3 /x/scripts/supervise.py new mission --name m --issue 1",
+        "python3 /x/scripts/supervise.py new sprint --name m --issue 1",
         "python3 /x/scripts/supervise.py note r.md",
         "python3 /x/scripts/supervise.py history import",
         "echo queue",

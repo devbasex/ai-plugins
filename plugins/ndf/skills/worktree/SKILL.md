@@ -161,15 +161,15 @@ cd "$main_dir/.worktrees/$branch"
 
 既存のブランチで作業を続けるなら `-b` を外す。
 
-**ミッションの中では、課題の worktree をミッションブランチから切る。** ミッション
-ブランチ（`mission/<名前>`）そのものは起点（`base_branch`）から切り、課題の worktree は
-`--from` にミッションブランチを渡す。設定の `base_branch` は develop のまま変えない。
+**スプリントの中では、課題の worktree をスプリントブランチから切る。** スプリント
+ブランチ（`sprint/<名前>`）そのものは起点（`base_branch`）から切り、課題の worktree は
+`--from` にスプリントブランチを渡す。設定の `base_branch` は develop のまま変えない。
 
 ```bash
-# ミッションブランチ。起点は設定の base_branch
-bash "$SCRIPTS/worktree-setup.sh" create mission/<名前>
-# 課題の worktree。起点はミッションブランチ
-bash "$SCRIPTS/worktree-setup.sh" create feat/issue-<番号>-<名前> --from mission/<名前>
+# スプリントブランチ。起点は設定の base_branch
+bash "$SCRIPTS/worktree-setup.sh" create sprint/<名前>
+# 課題の worktree。起点はスプリントブランチ
+bash "$SCRIPTS/worktree-setup.sh" create feat/issue-<番号>-<名前> --from sprint/<名前>
 ```
 
 `create` は `.worktrees/` の登録を確かめ、`origin` を取得してから作り、worktree のパスと

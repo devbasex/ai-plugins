@@ -5,13 +5,13 @@
 
 **1 語には 1 つの意味だけを持たせる。** 語を足すときは、下の「語を足すときの規則」に従う。
 
-## 例: 2026-09-25 のミッション
+## 例: 2026-09-25 のスプリント
 
 【】で囲んだ語が下の表にある。
 
-1. 【ラッパー】が【セッション】8 を起動し、【conductor】が【引継ぎ文書】の【ndf-next】から入り直した。【ミッション】は
+1. 【ラッパー】が【セッション】8 を起動し、【conductor】が【引継ぎ文書】の【ndf-next】から入り直した。【スプリント】は
    「pace: fast の実装・cross-review の空回りと詰まり・リリースの待ちの修正」で、課題は #1078 と #632 #962 だった
-2. 【pace】は `fast` である。利用者は始めに【MVV】を 1 回承認し、conductor が `mission-state.py gate <状態> MVV` で記録した
+2. 【pace】は `fast` である。利用者は始めに【MVV】を 1 回承認し、conductor が `sprint-state.py gate <状態> MVV` で記録した
 3. conductor は実装の【プラン】を 2 本（`plan-1078.json`・`plan-632-962.json`）と開発版のプランを 1 本作り、
    【キュー】へ実装を先に、開発版を `--then` で後ろに渡した。このプランの列が【パイプライン】で、列の 1 つ分が【ステージ】である
 4. 実装のプランは【ステップ】を `impl → sync → test-limited → judge → pr → test-all → doc-lint → ready → merge` の順に流した。
@@ -21,7 +21,7 @@
 7. リリースの Pull Request の待ちが【スタックしたチェック】で止まる不具合は、起票せず【即時修正】すると決めた。
    修正の Pull Request #1101 を足して、開発版を `10.17.22-dev.2` として出し直した
 8. 【ゲート 2】で【MVV 判定】は【レッドライン】（`.github/workflows/` を触った）に当たり、利用者の承認へ戻った。利用者が承認した
-9. conductor は本番のキューと `mission-state.py update → render → next` を 1 本の背景の Bash で流し、【本番】へ【正式版】 `10.17.22` をリリースした
+9. conductor は本番のキューと `sprint-state.py update → render → next` を 1 本の背景の Bash で流し、【本番】へ【正式版】 `10.17.22` をリリースした
 10. 最後に `relay.py notice` の【アナウンス】と ndf-next を出して応答を終え、ラッパーが次のセッションを起動した
 
 ## 大きさの関係
@@ -29,7 +29,7 @@
 ```mermaid
 flowchart TB
     subgraph MS["マイルストーン（着手の順序）"]
-        subgraph MI["ミッション（1 つの版として出す課題と Pull Request のセット）"]
+        subgraph MI["スプリント（1 つの版として出す課題と Pull Request のセット）"]
             subgraph CH["パイプライン（キューが --then でつなぐプランの列）"]
                 subgraph T1["ステージ 1（同時に 3 本まで）"]
                     P1["プラン: 実装 #1078"]
@@ -51,22 +51,23 @@ flowchart TB
 
 - **プラン 1 本がフェーズ 1 つに当たる。** フェーズは工程表の行（工程）をいくつか合わせたもので、プランはその手順をステップの列として持つ
 - **ステップとステージは大きさが違う。** ステップはプランの中の 1 要素、ステージはパイプラインの中のプランのグループである
-- **セッションはミッションと入れ子にならない。** セッションは 1 回の claude の起動で、1 つのセッションで 1 つの
-  ミッションを通すことも、1 つのミッションが複数のセッションにまたがることもある
+- **セッションはスプリントと入れ子にならない。** セッションは 1 回の claude の起動で、1 つのセッションで 1 つの
+  スプリントを通すことも、1 つのスプリントが複数のセッションにまたがることもある
 
 ## 進行の単位
 
 | 語 | 意味 | 英語や識別子 | 正本 |
 | --- | --- | --- | --- |
-| マイルストーン | 着手の順序を表す単位。ミッションはこの中から切り出す | GitHub の milestone。open は `<2 桁の連番> <主題>`、closed は `v<版数>` | [parallel-work.md](parallel-work.md) の「用語」 |
-| ミッション | 1 つの版として出す課題と Pull Request のセット。工程はミッション単位で 1 回ずつ通し、モードもミッションで 1 つにする | ブランチ `mission/<名前>`、状態のファイル `mission.json` | [parallel-work.md](parallel-work.md) の「用語」 |
+| マイルストーン | 着手の順序を表す単位。スプリントはこの中から切り出す | GitHub の milestone。open は `<2 桁の連番> <主題>`、closed は `v<版数>` | [parallel-work.md](parallel-work.md) の「用語」 |
+| スプリント | 1 つの版として出す課題と Pull Request のセット。区切りは 1 つの版として出す中身で決める。工程はスプリント単位で 1 回ずつ通し、モードもスプリントで 1 つにする | ブランチ `sprint/<名前>`、目録 `sprint.json`、状態のファイル（例 `sprint-state.json`） | [parallel-work.md](parallel-work.md) の「用語」 |
+| スプリント課題 | スプリントに含まれる Pull Request の本文が、閉じる語で指す課題 | `sprint-close.py` が閉じる | [progress-tracking](../../progress-tracking/SKILL.md) |
 | 工程 | 工程表（モードごとに起動する Skill の表）の 1 行。要求と受け入れ条件・設計・実装・リリースなど | 進捗記録の `stage` | [../SKILL.md](../SKILL.md) の「モードごとに起動する Skill」 |
 | フェーズ | supervisor 1 つ（またはプラン 1 本）が通す、連続する工程のグループ。設計・実装・検査・取り込み・仕上げ・リリースの 6 つ | プランの `"フェーズ"`、Agent の `description` の先頭語 | [agent-layers.md](agent-layers.md) の「フェーズ」 |
-| プラン | `supervise.py` が流す 1 本の JSON。フェーズの手順をステップの列として持つ | `plan.json`、`supervise.py new impl` / `check` / `release` / `mission` / `close` | [supervise.py](../../../scripts/supervise.py) の docstring |
+| プラン | `supervise.py` が流す 1 本の JSON。フェーズの手順をステップの列として持つ | `plan.json`、`supervise.py new impl` / `check` / `release` / `sprint` / `close` | [supervise.py](../../../scripts/supervise.py) の docstring |
 | ステップ | プランの `steps` の 1 要素。型は run / work / drive / judge / pr の 5 つ | `"id"`・`"type"`・`"next"`、`supervise.py run <プラン> --from <ステップの id>` | [supervise.py](../../../scripts/supervise.py) の docstring |
 | キュー | プランを空いた枠へ順に流す副命令。同時に `--max` 本まで流し、終わると結果を done へ書く | `supervise.py queue <plan.json>... --max 3 --then <plan.json>... --done <パス>` | [supervise.py](../../../scripts/supervise.py) の docstring |
 | パイプライン | キューが `--then` でつないだプランの列（実装 → 開発版 → 本番） | `--then`、`new release --prs-from-queue` | [relay.md](relay.md) の「カットポイントの引継ぎ文書と ndf-next はスクリプトで作る」 |
-| ステージ | パイプラインの中のプランのグループ 1 つ。中はキューで並列に流し、前のステージがすべて完了したときだけ次のステージが流れる。`new mission` はステージごとにプランを書き出す（設計・ゲート 1・実装・検査・開発版・本番） | `--then` の 1 回分、`then_of` | [pace.md](pace.md) の「プランのステージ」 |
+| ステージ | パイプラインの中のプランのグループ 1 つ。中はキューで並列に流し、前のステージがすべて完了したときだけ次のステージが流れる。`new sprint` はステージごとにプランを書き出す（設計・ゲート 1・実装・検査・開発版・本番） | `--then` の 1 回分、`then_of` | [pace.md](pace.md) の「プランのステージ」 |
 | セッション | ラッパーが起動する claude の 1 回の起動（1 つの会話）。番号を付けて「セッション 4」と呼ぶ。ndf-next のブロックで次のセッションへ切り替わる | セッションの境の行 `── ndf-relay: 区間 2 ──`、`log.jsonl` の `section` | [relay.md](relay.md) |
 | context window | 1 回の会話が保持する文脈の全体と、その量 | `NDF_CONTEXT_LIMIT`（既定 200,000） | [context-window.md](context-window.md) の「用語」 |
 | カットポイント | context window を切ってよい 4 点。3 層ではフェーズの境になる | — | [context-window.md](context-window.md) の「切ってよい点は 4 つある」 |
@@ -78,7 +79,7 @@ flowchart TB
 | 語 | 意味 | 英語や識別子 | 正本 |
 | --- | --- | --- | --- |
 | 3 層 | 工程を conductor → supervisor → worker の順に起動して通す形 | — | [agent-layers.md](agent-layers.md) |
-| conductor | 人間と対話しているセッション。ミッションを持ち、承認ゲートで人間へ問えるのはこの層だけ | `AskUserQuestion` | [agent-layers.md](agent-layers.md) の「3 層の責務」 |
+| conductor | 人間と対話しているセッション。スプリントを持ち、承認ゲートで人間へ問えるのはこの層だけ | `AskUserQuestion` | [agent-layers.md](agent-layers.md) の「3 層の責務」 |
 | supervisor | 1 つのフェーズを通すサブエージェント。人間へ問わない | `ndf:supervisor`（キャッシュの寿命 5 分）/ `ndf:supervisor-waits`（1 時間） | [agent-layers.md](agent-layers.md) の「3 層の責務」 |
 | worker | 1 つの作業（調査・修正・検証・集計）を行うサブエージェント。別のサブエージェントを起動しない | `ndf:worker`、プランの work のステップ | [agent-layers.md](agent-layers.md) の「3 層の責務」 |
 | ラッパー | 利用者の `claude` を包んで常駐し、ndf-next のブロックを拾って `/exit`・プラグインの更新・次のセッションの起動を行う（Claude Code だけ） | `relay.py run`、`/ndf:install-wrapper`、`NDF_RELAY_DIR` | [relay.md](relay.md) |
@@ -93,8 +94,9 @@ flowchart TB
 | 語 | 意味 | 英語や識別子 | 正本 |
 | --- | --- | --- | --- |
 | モード | 変更の目的物で決める工程の振り分け。上から `operation` / `documentation` / `standard` / `legacy-refactor` / `light` | モード判定の結果の `mode:` | [../SKILL.md](../SKILL.md) の「判定の手順」、[workflow-modes.md](workflow-modes.md) |
-| pace | モードとは別の軸で、工程をどう通すかを決める。ウォーターフォールで人の承認を取る `normal`（既定）、`normal` の承認だけを MVV 判定にする `auto`、実践投入の中で検証しながら MVV で自動に進める `fast` の 3 つ | `pace:`、`supervise.py new mission --pace fast|auto`、`.ndf/pace.json` | [pace.md](pace.md) |
-| MVV | ミッションの Mission / Vision / Value。マイルストーンの説明からコピーし、利用者が 1 回承認する。`fast` と `auto` でゲート 1・2 の事前の許可になる | `mvv.md`、`mvv.sha256`、承認ゲートの記録 `MVV` | [pace.md](pace.md) の「ミッションを始める」 |
+| pace | モードとは別の軸で、工程をどう通すかを決める。ウォーターフォールで人の承認を取る `normal`（既定）、`normal` の承認だけを MVV 判定にする `auto`、実践投入の中で検証しながら MVV で自動に進める `fast` の 3 つ | `pace:`、`supervise.py new sprint --pace fast|auto`、`.ndf/pace.json` | [pace.md](pace.md) |
+| MVV | スプリントの Mission / Vision / Value。マイルストーンの説明からコピーし、利用者が 1 回承認する。`fast` と `auto` でゲート 1・2 の事前の許可になる | `mvv.md`、`mvv.sha256`、承認ゲートの記録 `MVV` | [pace.md](pace.md) の「スプリントを始める」 |
+| スプリント MVV | スプリント単位の MVV。プロジェクト MVV の範囲での具体化 | `sprint-state.py init --milestone` / `--mvv` で写す | [project-mvv.md](project-mvv.md) |
 | MVV 判定 | 承認ゲートのエビデンスが MVV に従うかの判定。「従う」でレッドラインが無いときだけ承認ゲートを省き、記録を残す | `mvv-gate.py check`、`verdict`（follow / not_follow / unknown）、終了コード 0 / 10 | [pace.md](pace.md) の「MVV 判定」 |
 | レッドライン | 当たれば MVV 判定が「従う」でも利用者の承認を求める範囲。秘密・認証認可・利用者のデータ・戻せない操作・他のリポジトリへの公開・対象外のモード・承認後に変わった MVV | `.ndf/pace.json` の `boundary_paths`、`boundary` | [pace.md](pace.md) の「レッドライン」 |
 | トリガー | `fast` でリファクタリングとコードレビューを流す条件。点数・行数・流出不具合・経過時間・最終の 5 つ | `check-trigger.py eval`（立つ 0 / 立たない 3 / 読めない 2）、`triggers.*` | [pace.md](pace.md) の「検査のトリガー」 |
@@ -111,7 +113,7 @@ flowchart TB
 | --- | --- | --- | --- |
 | 承認ゲート | 人手の承認を求める点。取り消せない操作の前の 2 つだけで、増やさない | 報告の `結果: 関門`、結果 JSON の `status: gate`、終了コード 10〜19 | [../SKILL.md](../SKILL.md) の「人手の承認を求める承認ゲート」 |
 | ゲート 1 | 設計 Pull Request のマージ。文書では企画承認に当たる | 承認ラベル `design-approved` | [../SKILL.md](../SKILL.md) の「設計 Pull Request のマージ」 |
-| ゲート 2 | 本番系へ届く操作（本番へのリリースと `operation` の実行）。文書では制作物承認に当たる | `mission-state.py gate <状態> "関門 2"` | [../SKILL.md](../SKILL.md) の「本番系へ届く操作」 |
+| ゲート 2 | 本番系へ届く操作（本番へのリリースと `operation` の実行）。文書では制作物承認に当たる | `sprint-state.py gate <状態> "関門 2"` | [../SKILL.md](../SKILL.md) の「本番系へ届く操作」 |
 | 承認ラベル | 人間が設計を承認したことを表す Pull Request のラベル。無ければ hook が設計 Pull Request のマージを拒む | `design-approved` | [stage-completeness.md](stage-completeness.md) の「用語」 |
 | 承認資料 | 承認を求めるときに示すもの。対象を開くためのものと、承認の判断に使うものの 2 層を持つ | 報告の `提示物:`、結果 JSON の `presentation_path`、`issues/approval-<plugin>-v<正式版>.md`（承認資料のコピー） | [approval-request.md](approval-request.md) |
 | エビデンス | 承認資料のうち機械で作れる部分と、conductor が確かめて足した事実。MVV 判定へ渡す | `release-steps.py approval-facts`、プランの `facts` のステップ、`mvv-gate.py --material` | [release-steps.md](../../release/references/release-steps.md)、[pace.md](pace.md) の「MVV 判定」 |
@@ -168,7 +170,7 @@ flowchart TB
 | ボード | 進行を記録する GitHub Projects のプロジェクト 1 つ。設定が無ければ何も動かない | `.ndf/projects.json` | [projects-tracking.md](projects-tracking.md) の「用語」 |
 | 通過工程 | ある課題について、進捗記録が実際に書かれた工程の集合 | — | [stage-completeness.md](stage-completeness.md) の「用語」 |
 | 通過記録 | 通過工程を課題ごとに残したファイル | `stage-check.sh report <番号>` | [stage-completeness.md](stage-completeness.md) の「用語」 |
-| ミッション状態ファイル | ミッションのプラン・done・承認ゲートの記録・MVV・版を持つファイル。引継ぎ文書の表と ndf-next をここから作る | `mission.json`、`mission-state.py init` / `update` / `gate` / `render` / `next` / `status` | [mission-state.py](../../../scripts/mission-state.py) の docstring |
+| スプリント状態ファイル | スプリントのプラン・done・承認ゲートの記録・MVV・版を持つファイル。パスは呼ぶ側が決め、目録 `sprint.json` とは別のファイルにする。引継ぎ文書の表と ndf-next をここから作る | 例 `sprint-state.json`、`sprint-state.py init` / `update` / `gate` / `render` / `next` / `status` | [sprint-state.py](../../../scripts/sprint-state.py) の docstring |
 | 引継ぎ文書 | 会話を切って再開するための文書。「今の会話の進み」（プランごとの行の表）と「次に実行するコマンド」の節をスクリプトが書く | `issues/handoff-<名>.md`、`supervise.py note` | [relay.md](relay.md) の「カットポイントの引継ぎ文書と ndf-next はスクリプトで作る」 |
 | ndf-next | 次のセッションの最初の入力を置く、情報文字列 `ndf-next` の囲みのコードブロック。最後の応答に 1 つだけ置く | 囲みの情報文字列 `ndf-next` | [context-window.md](context-window.md) の「新しい会話で戻す」 |
 | シグナルファイル | ラッパーへ知らせるファイル。Stop hook が最後の応答の ndf-next を移した `next.json` と、止める `stop`。ラッパーはこれを受けてセッションを切り替える | `next.json`、`stop`、`relay.py mark` | [relay.md](relay.md) の「承認ゲートを越えない守り」 |
@@ -188,7 +190,7 @@ flowchart TB
 | worktree | 開発の変更を行う git worktree。課題ごとに 1 つ切る | `.worktrees/<ブランチ名>`、`/ndf:worktree` | [worktree](../../worktree/SKILL.md) |
 | メインディレクトリ | リポジトリを clone したディレクトリ。`issues/` `docs/` と各ランタイムの設定は、ここで編集してよい | `git rev-parse --git-common-dir` の親 | [worktree](../../worktree/SKILL.md) の用語の表 |
 | ベースブランチ | worktree の分岐元と Pull Request の宛先 | `.ndf/worktree.json` の `base_branch` | [../SKILL.md](../SKILL.md) の「本番系へ届く操作」 |
-| ミッションブランチ | 課題の Pull Request を集め、ベースブランチへの Pull Request をミッションで 1 本にするブランチ。`fast` では作らない | `mission/<名前>` | [parallel-work.md](parallel-work.md) の「ミッションの中の並列の 4 つの形」 |
+| スプリントブランチ | 課題の Pull Request を集め、ベースブランチへの Pull Request をスプリントで 1 本にするブランチ。`fast` では作らない | `sprint/<名前>` | [parallel-work.md](parallel-work.md) の「スプリントの中の並列の 4 つの形」 |
 | 安定版と実験版 | NDF の変更の 2 つの経路。既定で働くもの（安定版）は工程どおりに、呼んだときだけ働くもの（実験版）はその場で実装して使ってから入れる | stable / experimental、台帳 `docs/ndf-experiments.md` | ai-plugins の `AGENTS.md` の「安定版と実験版」 |
 | 即時修正 | 4 つの条件（[../SKILL.md](../SKILL.md) の「即時修正」）を満たす不具合を、起票せず、その場のプランで直すこと。マージ済みの変更の不具合なら流出不具合として記録する | `new impl --escape-of <PR>` | [../SKILL.md](../SKILL.md) の「即時修正」、[pace.md](pace.md) の「流出不具合の記録」 |
 | 範囲外の課題 | この変更の受け入れ条件にも直す対象にも入らない課題。見つけたその場で issue にする | `/ndf:out-of-scope` | [out-of-scope](../../out-of-scope/SKILL.md) |
