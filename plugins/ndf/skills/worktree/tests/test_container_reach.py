@@ -110,9 +110,7 @@ def test_stopped_container_does_not_run(main_repo: Path, worktree: Path, env: di
 
 def test_missing_container_runtime_returns_2(main_repo: Path, worktree: Path, env: dict) -> None:
     declare(main_repo)
-    r = run_testenv(
-        ["test", str(worktree), "--kind", "unit"], main_repo, {**env, "WT_DOCKER_COMMAND": "/nonexistent/docker"}
-    )
+    r = run_testenv(["test", str(worktree), "--kind", "unit"], main_repo, {**env, "WT_DOCKER_COMMAND": "/nonexistent/docker"})
     assert r.returncode == 2
     assert not ran(env)
 
@@ -174,9 +172,7 @@ def test_a_left_mark_stays_out_of_git(main_repo: Path, worktree: Path, env: dict
 def test_probe_cli_prints_the_env_when_reached(main_repo: Path, worktree: Path, env: dict) -> None:
     declare(main_repo)
     run_testenv(["env", str(worktree)], main_repo, env)
-    r = subprocess.run(
-        [sys.executable, str(REACH), "probe", str(worktree), "--service", "app"], env=env, capture_output=True, text=True
-    )
+    r = subprocess.run([sys.executable, str(REACH), "probe", str(worktree), "--service", "app"], env=env, capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     assert f"NDF_WORKTREE={worktree.resolve()}" in r.stdout.splitlines()
 

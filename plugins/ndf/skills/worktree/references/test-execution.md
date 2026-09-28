@@ -211,6 +211,45 @@ bash "$SCRIPTS/worktree-testenv.sh" unexpose "$WT"
 切り分けは、コンテナから入口、ホストから公開ポート、同一ネットワークから公開ポート、実機の
 順に行う。
 
+## コンテナで走るテストの到達の確認
+
+コンテナの中でテストを走らせるリポジトリでは、コンテナがメインディレクトリをマウントしていると、worktree の
+変更ではなくメインディレクトリのコードでテストが走り、通ってしまう。NDF は走らせる前に、そのコンテナが
+worktree を見ているかを確かめ（到達の確認）、見ていなければ走らせない。
+
+対象は次の 2 つだけである。コマンドの語からは判定しない。
+
+| 書く場所 | 何を書くか | 確かめる経路 |
+| --- | --- | --- |
+| `.ndf/project.json` の `test.suites[].container` | `service`（とテスト環境が無いときの `compose_files`） | `test-run.py`（3 層）・cross-refactoring の範囲テストと全体テスト |
+| `.ndf/worktree.json` の `testenv.test_kinds.<種類>.service` | サービス名 | `worktree-testenv.sh test` |
+
+確かめ方: worktree に探りの印（`.ndf-evidence/reach-<乱数>`）を置き、`worktree-testenv.sh compose-env` が出す
+テスト環境の値（`NDF_*`・`COMPOSE_PROJECT_NAME`・`COMPOSE_FILE`）を付けて `docker compose exec -T <サービス> cat <印>`
+を打つ。中身が一致すれば、同じ値を付けてテストのコマンドを走らせる。印は共通の git ディレクトリの
+`info/exclude` へ `.ndf-evidence/` を登録してから置き、確かめた後に消す。
+
+```bash
+bash "$SCRIPTS/worktree-testenv.sh" compose-env "$WT"   # 割り当て済みのテスト環境へ向ける値（割り当てを新しく取らない）
+python3 "$SCRIPTS/lib/container_reach.py" probe "$WT" --service app; echo $?  # 0 届いた / 1 届かない / 2 実行系が無い
+```
+
+届かないときの扱い:
+
+| 経路 | 扱い |
+| --- | --- |
+| `test-run.py` | 走らせずに 2（判断できない）で終わり、`summary` に理由を出す |
+| cross-refactoring | 走らせずに止まる。着手前のテストでも既存失敗として記録しない |
+| 落ちたテストの見分け（着手前の HEAD の一時の worktree） | 見分けられないとして扱う（既存失敗とみなさない） |
+| `worktree-testenv.sh test` | 走らせずに 1（実行系が無ければ 2）で終わる |
+
+**テスト環境は自動で起こさない。** 届かない理由に起こし方（`worktree-testenv.sh up <worktree>`）が出る。テスト環境の
+compose の定義は `NDF_WORKTREE` をアプリのコードの位置へマウントしておく。
+
+**コンテナで走る suite のコマンドには `-p`・`-f` を書かない。** `COMPOSE_PROJECT_NAME`・`COMPOSE_FILE` は環境変数で
+渡すため、コマンドで固定すると到達の確認と実際の実行が別のコンテナを見る。環境変数の `COMPOSE_PROJECT_NAME` は
+`.env` の値より優先される。
+
 ## 後片付け
 
 | 目的 | コマンド | 残るもの |

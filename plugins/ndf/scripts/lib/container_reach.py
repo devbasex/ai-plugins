@@ -56,9 +56,7 @@ def docker_command() -> str:
 
 def compose_env(worktree: str | Path) -> dict[str, str]:
     """`worktree-testenv.sh compose-env` が出す環境。割り当てが無ければ空。"""
-    p = subprocess.run(
-        ["bash", str(TESTENV), "compose-env", str(worktree)], capture_output=True, text=True, stdin=subprocess.DEVNULL
-    )
+    p = subprocess.run(["bash", str(TESTENV), "compose-env", str(worktree)], capture_output=True, text=True, stdin=subprocess.DEVNULL)
     if p.returncode != 0:
         raise Unreachable(f"テスト環境の値を得られない: {p.stderr.strip()[:300]}")
     env: dict[str, str] = {}
@@ -91,7 +89,7 @@ def _exclude_evidence(worktree: Path) -> bool:
     return True
 
 
-def probe(worktree: str | Path, service: str, compose_files: Iterable[str] = ()) -> dict[str, str]:
+def probe_worktree(worktree: str | Path, service: str, compose_files: Iterable[str] = ()) -> dict[str, str]:
     """サービスのコンテナが worktree を見ていれば、足す環境を返す。見ていなければ `Unreachable`。
 
     `compose_files`（宣言の suite の `container.compose_files`）は、テスト環境の割り当てが `COMPOSE_FILE` を
@@ -138,14 +136,11 @@ def probe(worktree: str | Path, service: str, compose_files: Iterable[str] = ())
     if p.returncode == 0 and p.stdout.strip() == token:
         return env
     if p.returncode == 0 or "No such file" in p.stdout + p.stderr:
-        raise Unreachable(
-            f"サービス {service} の作業ディレクトリはこの worktree ではない（メインディレクトリを見ている可能性がある）"
-        )
+        raise Unreachable(f"サービス {service} の作業ディレクトリはこの worktree ではない（メインディレクトリを見ている可能性がある）")
     project = env.get("COMPOSE_PROJECT_NAME") or "既定"
     tail = (p.stderr.strip().splitlines() or [""])[-1][:200]
     raise Unreachable(
-        f"サービス {service} のコンテナが動いていない（プロジェクト {project}）。"
-        f"worktree-testenv.sh up {wt} で起こす（{tail}）"
+        f"サービス {service} のコンテナが動いていない（プロジェクト {project}）。worktree-testenv.sh up {wt} で起こす（{tail}）"
     )
 
 
@@ -176,7 +171,7 @@ def env_for(cwd: str | Path) -> dict[str, str]:
         return _CACHE[key]
     env: dict[str, str] = {}
     for service, files in container_suites(cwd):
-        env.update(probe(cwd, service, files))
+        env.update(probe_worktree(cwd, service, files))
     _CACHE[key] = env
     return env
 
@@ -190,7 +185,7 @@ def main(argv: list[str] | None = None) -> int:
     pr.add_argument("--compose-file", action="append", default=[])
     a = ap.parse_args(argv)
     try:
-        env = probe(a.worktree, a.service, a.compose_file)
+        env = probe_worktree(a.worktree, a.service, a.compose_file)
     except Unreachable as e:
         print(e.reason, file=sys.stderr)
         return e.code
