@@ -9,6 +9,8 @@ import subprocess
 import time
 from typing import Optional
 
+import container_reach
+
 from . import info
 from .paths import git_out
 
@@ -19,6 +21,8 @@ def run_with_timeout(
     timeout: int,
     kill_grace: float = 5.0,
     output: Optional[pathlib.Path] = None,
+    *,
+    reach: bool = True,
 ) -> tuple[Optional[int], bool]:
     """テストコマンドを実行し `(終了コード, 打ち切ったか)` を返す。
 
@@ -33,13 +37,19 @@ def run_with_timeout(
     シェルで走らせる。
 
     `output` を渡すと標準出力と標準エラーをそのファイルへ書く（修正担当へ渡す材料）。
+
+    宣言にコンテナで走る suite があれば、そのコンテナが `cwd` を見ているかを先に確かめ、テスト環境の値を足して
+    走らせる。見ていなければ走らせずに `container_reach.Unreachable` を送る（#1337）。
+    テストでないコマンド（生成物の同期など）は `reach=False` で渡し、確かめずに走らせる。
     """
+    extra = container_reach.env_for(cwd) if reach else {}
     sink = open(output, "wb") if output is not None else None
     try:
         proc = subprocess.Popen(
             command,
             shell=isinstance(command, str),
             cwd=cwd,
+            env={**os.environ, **extra} if extra else None,
             start_new_session=True,
             stdout=sink if sink is not None else subprocess.PIPE,
             stderr=subprocess.STDOUT if sink is not None else subprocess.PIPE,

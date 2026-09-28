@@ -157,3 +157,21 @@ wt_declaration_local_ignored() {
   printf '%s' "$analysis" | jq -r '.ignored[]'
   return 0
 }
+
+# 共有の宣言に依存の用意（`deps` 節）があるかを見る（#1337）。あれば 0、無ければ 1。
+# **個人の宣言は見ない。** `deps` は個人の宣言から反映しない（`_wt_local_analysis` の許可一覧に無い）。
+#
+# 共有の宣言が JSON として読めないときも 0 を返す。壊れているかの判定と報告は
+# `worktree-deps.sh prepare` だけが持つ。ファイルが無い・`deps` が無いか null か空の object・
+# `jq` が無いときは 1 を返し、worktree を作る箇所は `worktree-deps.sh` を起こさない。
+wt_deps_declared() {
+  local main_dir="${1:-}" file rc
+  [ -n "$main_dir" ] || return 1
+  file="$main_dir/$WT_DECLARATION_FILE"
+  [ -f "$file" ] || return 1
+  command -v jq >/dev/null 2>&1 || return 1
+  jq -e 'type == "object" and has("deps") and .deps != null and .deps != {}' "$file" >/dev/null 2>&1
+  rc=$?
+  [ "$rc" = 1 ] && return 1
+  return 0
+}

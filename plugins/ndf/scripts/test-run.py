@@ -10,7 +10,8 @@ suite の `command` を、CI に任せる戦略なら Pull Request のチェッ�
 `lib/test_triage.classify` で フレーキー・既存失敗・変更起因 に分ける。`--template` は引数の雛形で、宣言より先に効く。
 
 終了コード: 0 = 通った（フレーキーと既存失敗だけのときも 0。`items` に分類を持つ）/ 1 = 変更起因の失敗がある /
-2 = 判断できない（CI が上限までに終わらない・`gh` が使えない・宣言の不足。理由と待った秒を `summary` に出す）。
+2 = 判断できない（CI が上限までに終わらない・`gh` が使えない・宣言の不足・コンテナで走る suite が worktree を見ていない。
+理由と待った秒を `summary` に出す）。
 出力は `lib/step_result.py` の形の 1 行の JSON。
 """
 
@@ -26,6 +27,7 @@ import time
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE / "lib"))
 
+import container_reach  # noqa: E402
 import repo as repo_lib  # noqa: E402
 import test_strategy as ts  # noqa: E402
 import test_triage  # noqa: E402
@@ -244,6 +246,9 @@ def main(argv=None) -> int:
     except ts.StrategyError as e:
         emit(result(TOOL, "stopped", str(e), [], {}))
         return 2
+    except container_reach.Unreachable as e:
+        # 走らせるとメインディレクトリのコードの結果になる。通ったとも落ちたともせず、判断できないで返す（#1337）
+        emit(result(TOOL, "stopped", f"コンテナで走る suite へ worktree が届かない: {e.reason}", [], {}), code=2)
 
 
 if __name__ == "__main__":

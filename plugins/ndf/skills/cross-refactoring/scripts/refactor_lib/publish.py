@@ -29,7 +29,8 @@ def _run_sync_command(state: dict[str, Any], work: str, command: str) -> None:
     **黙って push しない。** 同期できない状態を公開すると、利用者のリポジトリの
     チェックを壊したまま進むことになる。
     """
-    code, timed_out = run_with_timeout(command, work, timeline.state_test_timeout(state))
+    # 同期はテストではない。コンテナの到達を確かめると、コンテナが止まっているだけで公開の直前に止まる（#1337）
+    code, timed_out = run_with_timeout(command, work, timeline.state_test_timeout(state), reach=False)
     if not (timed_out or code != 0):
         return
     # **途中まで書き換えた差分を残さない。** 残すと次の実行は

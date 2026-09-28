@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from worktree_helpers import add_origin, git, push_branch, run_lib, write_declaration
+from worktree_helpers import SCRIPTS_DIR, add_origin, git, push_branch, run_lib, write_declaration
 
 
 def resolve(main_repo: Path) -> tuple[str, str, int]:
@@ -147,7 +147,8 @@ def create_snippet() -> str:
 def run_documented_steps(main_repo: Path) -> Path:
     """手順のとおりに作業ツリーを作り、その位置を返す。"""
     snippet = create_snippet().replace("feature/<name>", "feature/x")
-    got = run_lib(f'main_dir="{main_repo}"\n{snippet}', cwd=main_repo)
+    # $SCRIPTS は手順 0 で決める値。手順は宣言の依存の用意も打つ
+    got = run_lib(f'main_dir="{main_repo}"\nSCRIPTS="{SCRIPTS_DIR}"\n{snippet}', cwd=main_repo)
     assert got.returncode == 0, got.stderr + got.stdout
     return main_repo / ".worktrees" / "feature" / "x"
 

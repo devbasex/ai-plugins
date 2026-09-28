@@ -15,6 +15,7 @@ import tempfile
 import time
 from pathlib import Path
 
+import worktree_deps
 from supervise_lib import decl, plan as plan_mod
 
 SELF = Path(__file__).resolve().parent.parent / "supervise.py"
@@ -47,6 +48,12 @@ def is_config_lock(stderr: str) -> bool:
     return "could not lock config file" in stderr or "File exists" in stderr
 
 
+def _prepare_deps(wt, **kw) -> str | None:
+    """依存を用意し、失敗したら誤りの文を返す（`worktree_deps.prepare_reporting` の先頭行を包む）。"""
+    err = worktree_deps.prepare_reporting(wt, **kw)
+    return f"作業ツリーは作ったが依存の用意に失敗した: {err}" if err else None
+
+
 def ensure_worktree(plan: dict, sleep=time.sleep) -> str | None:
     """計画に branch があり作業場所が無ければ、作業ツリーを作る。誤りの文を返す（無ければ None）。
 
@@ -56,8 +63,11 @@ def ensure_worktree(plan: dict, sleep=time.sleep) -> str | None:
     plan = plan_mod.normalize_plan(dict(plan))
     branch = plan.get("branch")
     wt = Path(plan["作業場所"])
-    if not branch or wt.exists():
+    if not branch:
         return None
+    if wt.exists():
+        # 使い回す作業ツリーは、依存の用意が済んでいなければ用意する（#1337）
+        return _prepare_deps(wt, if_unprepared=True)
     repo = plan.get("リポジトリ") or (str(wt).split("/.worktrees/")[0] if "/.worktrees/" in str(wt) else None)
     if not repo:
         return "作業ツリーの元のリポジトリが分からない（計画に リポジトリ を書く）"
@@ -82,7 +92,7 @@ def ensure_worktree(plan: dict, sleep=time.sleep) -> str | None:
         cmd = ["git", "-C", repo, "worktree", "add", "-q"] + ([str(wt), branch] if has else ["-b", branch, str(wt), base])
         p = subprocess.run(cmd, capture_output=True, text=True)
         if p.returncode == 0:
-            return None
+            return _prepare_deps(wt, main_dir=repo)
         if not is_config_lock(p.stderr):
             break
         # lock で途中まで作られた作業ツリーは、次のやり直しの前に片付ける
