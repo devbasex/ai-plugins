@@ -431,20 +431,14 @@ def _try_order(pool: list[Account], readable: bool) -> list[Account]:
     return out
 
 
-def choose(exclude=(), before: float | None = REFRESH_BEFORE, keep=(), now: float | None = None, min_left: float = 0) -> Choice:
-    """上限に達していないアカウントのうち、残りの量の最も大きいものを選ぶ（#1453 の I3）。
-
-    使用率が切り替えの閾値未満の候補を先に試し、残りの量の分からない候補は分かる候補の後ろへ使用率の順で並べる。
-    残量不明は、上限に達していない候補に読めるものが無いときだけ候補にする（名前の順）。「再登録が要る」とトークンを
-    得られないもの（残り `min_left` 秒以下を含む）は外す（#1389 の I13）。`keep` の名前はトークンを更新しない
-    （動いている区間のアカウント。#1389 の I5）。"""
-    now = time.time() if now is None else now
+def _candidates(exclude, before_for, now: float) -> tuple[list[Account], tuple[str, float] | None]:
+    """上限に達していない候補と、上限にあるもののうち最も早く戻るアカウントと時刻。「再登録が要る」は外す。"""
     earliest: tuple[str, float] | None = None
     pool: list[Account] = []
     for n in names():
         if n in exclude:
             continue
-        usage(n, None if n in keep else before, now)
+        usage(n, before_for(n), now)
         acc = load_account(n)
         if acc is None or acc.needs_relogin:
             continue
@@ -454,9 +448,25 @@ def choose(exclude=(), before: float | None = REFRESH_BEFORE, keep=(), now: floa
                 earliest = (n, until)
             continue
         pool.append(acc)
+    return pool, earliest
+
+
+def choose(exclude=(), before: float | None = REFRESH_BEFORE, keep=(), now: float | None = None, min_left: float = 0) -> Choice:
+    """上限に達していないアカウントのうち、残りの量の最も大きいものを選ぶ（#1453 の I3）。
+
+    使用率が切り替えの閾値未満の候補を先に試し、残りの量の分からない候補は分かる候補の後ろへ使用率の順で並べる。
+    残量不明は、上限に達していない候補に読めるものが無いときだけ候補にする（名前の順）。「再登録が要る」とトークンを
+    得られないもの（残り `min_left` 秒以下を含む）は外す（#1389 の I13）。`keep` の名前はトークンを更新しない
+    （動いている区間のアカウント。#1389 の I5）。"""
+    now = time.time() if now is None else now
+
+    def before_for(n: str) -> float | None:
+        return None if n in keep else before
+
+    pool, earliest = _candidates(exclude, before_for, now)
     readable = any(a.usage and a.usage.known() for a in pool)
     for pick in _try_order(pool, readable):
-        if token(pick.name, None if pick.name in keep else before, now, min_left) is not None:
+        if token(pick.name, before_for(pick.name), now, min_left) is not None:
             return Choice(pick.name, pick.usage.score() if pick.usage else None, earliest, pick.remaining())
     return Choice(None, None, earliest)
 
