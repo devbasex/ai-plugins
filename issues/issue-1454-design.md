@@ -82,7 +82,7 @@ ai-plugins（ `develop` → `main` ・ `release.form: package-plugin` ）は経�
 | I2 | 開発版のチャネルの判定 | 起点と本番チャネルが同じときに `manual-production` にするのは、宣言が読め、 `production: true` の行が 1 つ以上あり、それがすべて `kind: manual` で、本番チャネルへのマージで自動で反映する行（ `kind: auto` ・ `branch` が本番チャネル・ `production` が `false` でない）が無いときだけである。ほかは「無し」にする | `pace: auto` / `fast` が断る。テストが落とす |
 | I3 | 開発版のチャネルの判定 | 判定は宣言と git の参照だけから作り、 `gh` を呼ばない | テストが落とす |
 | I4 | マージの判定 | `production: false` と書いた `kind: auto` の行は、本番チャネルへのマージを本番系へ届く操作に数えない。 `production` を書いていない行は今と同じに数える | テストが落とす |
-| I5 | スプリントのプラン | `manual-production` の形の `auto` / `fast` のプランには、MVV 判定（承認ゲート 2）がちょうど 1 回あり、それは手で行う「本番」のステージより前で、検査のマージより後である | AC4 のテストが落とす |
+| I5 | スプリントのプラン | `manual-production` の形の `auto` / `fast` のプランには、MVV 判定（承認ゲート 2。 `fast` の単独の queue では利用者の承認ゲート）がちょうど 1 回あり、それは手で行う「本番」のステージより前で、検査のマージより後である | AC4 のテストが落とす |
 | I6 | スプリントのプラン | 同じ形で、 `<節>.verify` は MVV 判定と同じプランの、MVV 判定より前のステップ（ `facts` ）で走り、非 0 ならプランは MVV 判定へ進まずに止まる | AC6 のテストが落とす |
 | I7 | スプリントのプラン | `production` を書いていない手動の行は、手で行う「本番」のステージ（承認ゲート 2 の後）へ入れ、「開発版」へ入れない | 承認の無いまま本番系へ届きうる。テストが落とす |
 | I8 | スプリントのプラン | `release.form` に雛形があるリポジトリ（ai-plugins）と、 `production` を 1 行も書いていない宣言のプランは、変更の前後で同じになる | AC8 のテストが落とす |
@@ -99,7 +99,7 @@ ai-plugins（ `develop` → `main` ・ `release.form: package-plugin` ）は経�
 | E4 | 検査のプランがベースブランチへマージした | 検査のプランの `merge` | `merge-gate` （ `judge_target` ） |
 | E5 | 開発版へ届け、導入の確認が済んだ | 手で行う「開発版」のステージと `gate-2` の `facts` | `gate-2` の `mvv` |
 | E6 | 承認ゲート 2 を通した | `gate-2` の `mvv` （ `by: mvv` ）か利用者（ `by: user` ） | 手で行う「本番」のステージ |
-| E7 | 担い手が本番のデプロイを起こした | `/ndf:release` | — |
+| E7 | 担い手が本番のデプロイを起こした | 担い手（手で行う「本番」のステージで、 `/ndf:release` を使い承認資料のコミットで `trigger` を打つ） | conductor（「本番」のステージを済ませてスプリントを閉じる）。デプロイの結果（失敗）は `/ndf:release` の手順が扱い、NDF のプランは結果を読まない |
 
 ### 用語
 
@@ -263,7 +263,7 @@ release-steps.py deploy-facts --root <リポジトリ> --verify <コマンド> -
 | 項目 | 内容 |
 | --- | --- |
 | 動き | `--root` で `<コマンド>` を `sh -c` で走らせ、承認資料を `--out` へ書く |
-| 承認資料 | 本番系へ届ける行（ `production: true` と、 `production` の無い手動の行）の `target` ・ `trigger` 、ベースブランチの先頭のコミット、確認のコマンドと終了コードと出力の末尾 |
+| 承認資料 | 本番系へ届ける行（ `production: true` と、 `production` の無い手動の行）の `target` ・ `trigger` 、ベースブランチの先頭のコミット（SHA。本番へ届けるのはこのコミットに限る）、確認のコマンドと終了コードと出力の末尾 |
 | 終了コード | 確認が 0 なら 0。確認が非 0 なら 1（承認資料は書く）。宣言が読めない・`--out` へ書けないなら 2 |
 | 結果 | 1 行の結果 JSON（ `step_result.result` の形）。 `metrics.verify_exit` に確認の終了コード |
 
@@ -276,8 +276,13 @@ release-steps.py deploy-facts --root <リポジトリ> --verify <コマンド> -
 | `note` | run | PR があれば判定の記録を各 PR へコメントし、無ければ承認資料の末尾へ足す | end | `handoff` |
 | `handoff` | run | `verify_steps.handoff_step` （承認ゲート 2・判定の記録） | — | 10（承認ゲート） |
 
-`--pr` は、検査の後に続けて流れるとき `auto` は `{queue_pr:check}` 、 `fast` は `{queue_prs}` 。単独の queue（前に「開発版」の手で
-行うステージがある）では渡さない。 `fast` のスプリントの終わり（ `new close` ）は実行条件（ `changed --id <M>-final` ）を付ける。
+`--pr` は、 `auto` では常に `{queue_pr:check}` （検査のスプリントの Pull Request）を渡す。単独の queue（前に「開発版」の手で
+行うステージがある）でも、queue が同じディレクトリの検査の計画の報告から番号を埋める（ `supervise_lib/queue.py` の `fill_queue_pr` ）。
+`fast` は検査の後に続けて流れるとき `{queue_prs}` を渡す。 `fast` の単独の queue は前のステージの Pull Request（実装の直接のマージ）を
+集められないため、 `mvv` のステップは MVV 判定を打たずに 10（承認ゲート。利用者が承認する）を返す。 `{queue_pr:check}` が `0` に
+埋まった（検査の報告が無い・飛ばされた）ときは、 `mvv-gate.py` が Pull Request を読めずに人へ戻す（10）。どの形でも、変更したファイルの
+`boundary_paths` （秘密・認証認可・利用者のデータ）と `.ndf/mvv.*` （C7）の照合を通さないまま MVV 判定で承認ゲート 2 を通さない。
+`fast` のスプリントの終わり（ `new close` ）は実行条件（ `changed --id <M>-final` ）を付ける。
 
 ### `sprint.json` のステージ（手動反映の本番系の形の `auto` / `fast` ）
 
@@ -285,7 +290,7 @@ release-steps.py deploy-facts --root <リポジトリ> --verify <コマンド> -
 | --- | --- | --- |
 | 開発版 | `manual` ・ `note` | `production: false` の手動の経路の `target` と `trigger` 。承認は要らない。「済んだら承認ゲート 2 の `command` を打つ」 |
 | 承認ゲート 2 | `plans` ・ `command` か `then_of` | `gate-2` |
-| 本番 | `manual` ・ `note` | 残りの手動の経路の `target` と `trigger` 。「承認ゲート 2 が通過（ `by: mvv` か `by: user` の記録）してから `/ndf:release` で届ける」 |
+| 本番 | `manual` ・ `note` | 残りの手動の経路の `target` と `trigger` 。「承認ゲート 2 が通過（ `by: mvv` か `by: user` の記録）してから、承認資料のコミット（ `deploy-facts` が書いた SHA）を checkout して `/ndf:release` で `trigger` を打つ。ベースブランチの先頭がそのコミットと違えば、承認ゲート 2 の `command` からやり直す」。 `/ndf:release` へはこの note と承認資料のパスを引き継ぐ |
 
 `normal` は今と同じ「リリース」のステージ 1 つで、手で届けるすべての経路を載せる。
 
@@ -345,5 +350,5 @@ stateDiagram-v2
 | 大項目 | 実現方式 |
 | --- | --- |
 | 運用・保守性 | 開発版のチャネルの判定は `lib/delivery.py` の `dev_channel` の 1 か所に置き、 `pace_refusal` と `route_waves` が呼ぶ。本番チャネルへのマージで自動で届くかは `reaches_by_merge` の 1 か所に置き、 `judge_target` と `dev_channel` が呼ぶ。どちらも宣言と git の参照だけを読む |
-| セキュリティ | 決められないとき（表の 1・3〜6）は断る側へ倒す。 `production` を書いていない手動の行は承認ゲート 2 の後へ置く（I7）。 `gate-2` の `facts` の失敗は止まる側で、 `mvv` へ進まない |
+| セキュリティ | 決められないとき（表の 1・3〜6）は断る側へ倒す。 `production` を書いていない手動の行は承認ゲート 2 の後へ置く（I7）。 `gate-2` の `facts` の失敗は止まる側で、 `mvv` へ進まない。 `mvv` は Pull Request の変更（ `boundary_paths` ・ `.ndf/mvv.*` ）を照合できないときは人へ戻す。本番へ届けるのは承認資料のコミットに限る |
 | 移行性 | `production` は任意の項目で、無い行は今の読み方のまま（ `reaches_by_merge` は `is not False` で今の判定と一致する）。 `Route.as_dict` は `None` を出さないため、今の `sprint.json` は変わらない |
