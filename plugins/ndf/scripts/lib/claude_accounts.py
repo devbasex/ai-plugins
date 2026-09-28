@@ -250,7 +250,7 @@ def local_time(t: float | None, form: str = "%m-%d %H:%M") -> str:
 
 
 def load_account(name: str) -> Account | None:
-    a = _read(_account_path(name))
+    a = _read(_path(name, ACCOUNT_FILE))
     if a is None:
         return None
     return Account(
@@ -258,7 +258,7 @@ def load_account(name: str) -> Account | None:
         email=str(a.get("email") or ""),
         needs_relogin=bool(a.get("needs_relogin")),
         limit=a.get("limit") if isinstance(a.get("limit"), dict) else None,
-        usage=Usage.from_json(_read(_usage_path(name))),
+        usage=Usage.from_json(_read(_path(name, USAGE_FILE))),
         org_id=str(a.get("org_id") or ""),
         org_name=str(a.get("org_name") or ""),
         tier=_tier(name),
@@ -283,7 +283,7 @@ def _tier(name: str) -> str:
 
 def _update_account(name: str, **fields) -> None:
     """排他の中で呼ぶ。登録の無いアカウントは作らない（I2）。"""
-    path = _account_path(name)
+    path = _path(name, ACCOUNT_FILE)
     a = _read(path)
     if a is not None:
         a.update(fields)
@@ -305,21 +305,13 @@ def note_limit(name: str, kind: str, resets_at: float | None, now: float | None 
 # ---------------------------------------------------------------- トークン
 
 
-def _creds_path(name: str) -> str:
-    return os.path.join(account_dir(name), CRED_FILE)
-
-
-def _account_path(name: str) -> str:
-    return os.path.join(account_dir(name), ACCOUNT_FILE)
-
-
-def _usage_path(name: str) -> str:
-    return os.path.join(account_dir(name), USAGE_FILE)
+def _path(name: str, file: str) -> str:
+    return os.path.join(account_dir(name), file)
 
 
 def _oauth(name: str) -> dict | None:
     """`.credentials.json` の `claudeAiOauth`（辞書でなければ None）。"""
-    d = _read(_creds_path(name))
+    d = _read(_path(name, CRED_FILE))
     o = d.get("claudeAiOauth") if d else None
     return o if isinstance(o, dict) else None
 
@@ -334,7 +326,7 @@ def _token_held(name: str, before: float | None, now: float, force: bool = False
 
     `before` は期限の何秒前を切ったら更新するか（None は更新しない）。`min_left`（打ち切りの秒）以下しか残らないものは
     更新するか None にする。`force` は期限に関わらず更新する（401 のとき）。断られたら `needs_relogin` を真にする。"""
-    a = _read(_account_path(name))
+    a = _read(_path(name, ACCOUNT_FILE))
     if a is None or a.get("needs_relogin"):
         return None
     o = _creds(name)
@@ -367,9 +359,9 @@ def _refresh_and_store(name: str, o: dict, now: float, fallback: str | None) -> 
     if new is None:
         return fallback
     try:
-        whole = _read(_creds_path(name)) or {}
+        whole = _read(_path(name, CRED_FILE)) or {}
         whole["claudeAiOauth"] = new
-        _write(_creds_path(name), whole)
+        _write(_path(name, CRED_FILE), whole)
     except OSError:
         _update_account(name, needs_relogin=True)
         return None
@@ -409,13 +401,13 @@ def _fetch(name: str, before: float | None, now: float) -> Usage:
 def usage(name: str, before: float | None = REFRESH_BEFORE, now: float | None = None) -> Usage | None:
     """残量。前の取得から `check_interval()` 秒の中なら保存した値を返し、取得先を呼ばない（I6）。"""
     now = time.time() if now is None else now
-    path = _usage_path(name)
+    path = _path(name, USAGE_FILE)
     try:
         with _locked(name):
             saved = Usage.from_json(_read(path))
             if saved is not None and now - saved.fetched_at < check_interval():
                 return saved
-            if _read(_account_path(name)) is None:
+            if _read(_path(name, ACCOUNT_FILE)) is None:
                 return None
             u = _fetch(name, before, now)
             _write(path, u.to_json())
@@ -593,7 +585,7 @@ def set_capacity(name: str, declared: dict) -> Account | None:
 
     登録されていなければ None。書くのは `account.json` だけである（I8）。"""
     with _locked(name):
-        path = _account_path(name)
+        path = _path(name, ACCOUNT_FILE)
         a = _read(path)
         if a is None:
             return None
