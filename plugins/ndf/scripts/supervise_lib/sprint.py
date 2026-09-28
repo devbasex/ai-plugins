@@ -359,31 +359,44 @@ def cmd_new_sprint(a, waves: list[dict] | None = None) -> dict:
     )
 
 
+def _write_plans(wave: dict, i: int, out: Path) -> list[str]:
+    """ステージのプランを 1 つずつファイルへ書き、パスの一覧を返す。"""
+    paths = []
+    for key, plan in wave["plans"].items():
+        p = out / f"{i}-{key}.json"
+        p.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n")
+        paths.append(str(p))
+    return paths
+
+
+def _stage_entry(wave: dict, i: int, out: Path) -> dict:
+    """ステージ 1 件の一覧の項目。then_of のステージは command を持たず、前のステージへ連結される。"""
+    entry = {"wave": i, "name": wave["name"]}
+    if "gate" in wave:
+        entry["gate"] = wave["gate"]
+    elif "manual" in wave:
+        entry.update(manual=wave["manual"], note=wave["note"])
+    else:
+        paths = _write_plans(wave, i, out)
+        entry["plans"] = paths
+        if "note" in wave:
+            entry["note"] = wave["note"]
+        if "then_of" in wave:
+            entry["then_of"] = wave["then_of"]
+        else:
+            entry["command"] = f"python3 {shlex.quote(str(SELF))} queue " + " ".join(map(shlex.quote, paths)) + " --max 3"
+    return entry
+
+
 def write_stage_index(waves: list[dict], out: Path) -> list[dict]:
     """ステージごとのプランをファイルへ書き、ステージの一覧（command / then_of の連結を含む）を返す。"""
     index = []
     for i, wave in enumerate(waves, 1):
-        entry = {"wave": i, "name": wave["name"]}
-        if "gate" in wave:
-            entry["gate"] = wave["gate"]
-        elif "manual" in wave:
-            entry.update(manual=wave["manual"], note=wave["note"])
-        else:
-            paths = []
-            for key, plan in wave["plans"].items():
-                p = out / f"{i}-{key}.json"
-                p.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n")
-                paths.append(str(p))
-            entry["plans"] = paths
-            if "note" in wave:
-                entry["note"] = wave["note"]
-            if "then_of" in wave:
-                # 前のステージの queue が --then で続けて流す
-                entry["then_of"] = wave["then_of"]
-                prev = next(e for e in index if e["name"] == wave["then_of"])
-                prev["command"] += " --then " + " ".join(map(shlex.quote, paths))
-            else:
-                entry["command"] = f"python3 {shlex.quote(str(SELF))} queue " + " ".join(map(shlex.quote, paths)) + " --max 3"
+        entry = _stage_entry(wave, i, out)
+        if "then_of" in entry:
+            # 前のステージの queue が --then で続けて流す
+            prev = next(e for e in index if e["name"] == entry["then_of"])
+            prev["command"] += " --then " + " ".join(map(shlex.quote, entry["plans"]))
         index.append(entry)
     return index
 
