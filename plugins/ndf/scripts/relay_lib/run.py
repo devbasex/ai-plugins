@@ -13,6 +13,7 @@ import os
 import shlex
 import signal
 import time
+from dataclasses import dataclass
 
 from . import claude as cl
 from . import record, version_dir
@@ -45,6 +46,19 @@ import claude_accounts as ca  # noqa: E402,I001  common が lib/ を sys.path �
 
 class NoAccountEnv(Exception):
     """選んだアカウントのトークンを起動の直前に得られず、替えるアカウントも従量の接続の宣言も無い。子を起動しない。"""
+
+
+@dataclass
+class SectionInput:
+    """区間の起動の入力。`plan` は上限の後に決めた (アカウント, 理由, 選んだ結果)。"""
+
+    args: list[str]
+    cwd: str
+    command: str
+    from_session: str
+    cwd_fallback: str | None = None
+    carried: list[str] | None = None
+    plan: tuple | None = None
 
 
 class Relay(AccountSwitch):
@@ -84,17 +98,10 @@ class Relay(AccountSwitch):
 
     # -- 子の起動
 
-    def start_section(
-        self,
-        args: list[str],
-        cwd: str,
-        command: str,
-        from_session: str,
-        cwd_fallback: str | None = None,
-        carried: list[str] | None = None,
-        plan: tuple | None = None,
-    ) -> None:
-        """区間を起動する。`plan` は上限の後に決めた (アカウント, 理由, 選んだ結果)。無ければここで選ぶ（F4）。"""
+    def start_section(self, s: SectionInput) -> None:
+        """区間を起動する。`s.plan` は上限の後に決めた (アカウント, 理由, 選んだ結果)。無ければここで選ぶ（F4）。"""
+        args, cwd, command, from_session = s.args, s.cwd, s.command, s.from_session
+        cwd_fallback, carried, plan = s.cwd_fallback, s.carried, s.plan
         self.record.drop_mark()
         remove(self.path(QUESTION_FILE))
         remove(self.path(LIMIT_FILE))  # 前の子の上限シグナルファイル（新しい子の hook はまだ書けない）
@@ -388,7 +395,7 @@ class Relay(AccountSwitch):
     def _start_first_section(self, first_args: list[str]) -> int | None:
         """最初の区間を起動する。起動できなければ終了コード。"""
         try:
-            self.start_section(first_args, os.getcwd(), shlex.join(first_args), "")
+            self.start_section(SectionInput(args=first_args, cwd=os.getcwd(), command=shlex.join(first_args), from_session=""))
         except StartFailed as e:
             self.log(event="stop", section=self.section + 1, reason="start-failed", errno=e.err)
             cl.say(f"claude を起動できない（{os.strerror(e.err)}）")
@@ -410,7 +417,9 @@ class Relay(AccountSwitch):
     def _start_next_section(self, args, cwd, command, from_session, fb, carried, plan, shown) -> int | None:
         """次の区間を起動する。起動できなければ終了コード。"""
         try:
-            self.start_section(args, cwd, command, from_session, fb, carried, plan)
+            self.start_section(
+                SectionInput(args=args, cwd=cwd, command=command, from_session=from_session, cwd_fallback=fb, carried=carried, plan=plan)
+            )
         except StartFailed as e:
             return self.give_up("start-failed", f"claude を起動できない（{os.strerror(e.err)}）", shown, errno=e.err)
         except NoAccountEnv as e:
