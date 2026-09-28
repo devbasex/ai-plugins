@@ -300,66 +300,49 @@ class ClaudeRunner:
             if res.get("limit"):
                 self.note_limit(res)
                 if multi and self.account != ca.METERED:
-                    if self._switch_after_limit(res, tried, fallback):
+                    kind = kind_of_text(res.get("text") or "")
+                    if self.account:
+                        ca.note_limit(self.account, kind, res.get("resets_at"))
+                        tried.add(self.account)
+                    nxt = ca.choose(exclude=tried, keep=self.keep())
+                    if nxt.name:
+                        self.switch(nxt.name, kind)
+                        continue
+                    if fallback:
+                        self.switch(ca.METERED, kind, keys=list(fallback))
                         continue
                 elif not multi and fallback and not tried_fallback:
                     tried_fallback = True
-                    res = self._try_fallback_once(fallback, lambda: call_claude(system, prompt, tools, cwd, timeout, env=fallback, **kw))
+                    for k in fallback:
+                        if k not in st.switched:
+                            st.switched.append(k)
+                    st.cur["auth"] = "切り替え（" + ", ".join(fallback) + "）"
+                    res = call_claude(system, prompt, tools, cwd, timeout, env=fallback, **kw)
+                    if res.get("limit"):
+                        self.note_limit(res)
             if not res.get("limit"):
                 return res
-            waited += self._wait_for_reset(res, retry, wait_max, waited)
+            wait = max(0.0, res["resets_at"] + 60 - time.time()) if res.get("resets_at") else float(retry)
+            if waited + wait > wait_max:
+                raise UsageLimit(
+                    f"利用上限の待ちが最大 {wait_max} 秒を超える（待った {round(waited)} 秒、"
+                    f"次の待ち {round(wait)} 秒）: {(res.get('text') or '')[:200]}"
+                )
+            short = os.environ.get("NDF_SUPERVISE_LIMIT_SLEEP")
+            paused_at = time.time()
+            until = paused_at + (min(wait, float(short)) if short else wait)
+            ctx.slow.paused = True  # 上限の待ちは遅れと見なさない（待った秒を経過から引く）
+            try:
+                while time.time() < until:  # 待ちの間も「まだ動いている」を書く
+                    time.sleep(max(0.0, min(st.every, until - time.time())))
+                    ctx.tick()
+            finally:
+                ctx.slow.paused = False
+                if ctx.slow.watch:
+                    ctx.slow.watch.paused += time.time() - paused_at
+            waited += wait
+            st.cur["limit_waited"] = round(st.cur.get("limit_waited", 0) + wait, 1)
             tried.clear()  # 待った後は上限の解けたアカウントを選び直せる
-
-    def _switch_after_limit(self, res: dict, tried: set[str], fallback: dict) -> bool:
-        """上限に当たったアカウントを記録し、登録済みのアカウントか従量の接続へ替える。替えたら真。"""
-        kind = kind_of_text(res.get("text") or "")
-        if self.account:
-            ca.note_limit(self.account, kind, res.get("resets_at"))
-            tried.add(self.account)
-        nxt = ca.choose(exclude=tried, keep=self.keep())
-        if nxt.name:
-            self.switch(nxt.name, kind)
-            return True
-        if fallback:
-            self.switch(ca.METERED, kind, keys=list(fallback))
-            return True
-        return False
-
-    def _try_fallback_once(self, fallback: dict, call) -> ClaudeCall:
-        """旧来の FALLBACK の変数を足して起動し直す（登録が 1 つ以下のとき、1 度だけ）。"""
-        st = self.ctx.state
-        for k in fallback:
-            if k not in st.switched:
-                st.switched.append(k)
-        st.cur["auth"] = "切り替え（" + ", ".join(fallback) + "）"
-        res = call()
-        if res.get("limit"):
-            self.note_limit(res)
-        return res
-
-    def _wait_for_reset(self, res: dict, retry: float, wait_max: float, waited: float) -> float:
-        """解除の時刻まで待ち、待った秒数を返す。待ちの合計が wait_max を超えるなら UsageLimit を投げる。"""
-        ctx, st = self.ctx, self.ctx.state
-        wait = max(0.0, res["resets_at"] + 60 - time.time()) if res.get("resets_at") else float(retry)
-        if waited + wait > wait_max:
-            raise UsageLimit(
-                f"利用上限の待ちが最大 {wait_max} 秒を超える（待った {round(waited)} 秒、"
-                f"次の待ち {round(wait)} 秒）: {(res.get('text') or '')[:200]}"
-            )
-        short = os.environ.get("NDF_SUPERVISE_LIMIT_SLEEP")
-        paused_at = time.time()
-        until = paused_at + (min(wait, float(short)) if short else wait)
-        ctx.slow.paused = True  # 上限の待ちは遅れと見なさない（待った秒を経過から引く）
-        try:
-            while time.time() < until:  # 待ちの間も「まだ動いている」を書く
-                time.sleep(max(0.0, min(st.every, until - time.time())))
-                ctx.tick()
-        finally:
-            ctx.slow.paused = False
-            if ctx.slow.watch:
-                ctx.slow.watch.paused += time.time() - paused_at
-        st.cur["limit_waited"] = round(st.cur.get("limit_waited", 0) + wait, 1)
-        return wait
 
     def keep(self) -> set[str]:
         """トークンを更新しないアカウント（動いている区間のもの）。"""
