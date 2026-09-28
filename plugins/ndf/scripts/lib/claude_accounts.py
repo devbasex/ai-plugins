@@ -465,6 +465,12 @@ def register(name: str, staging: str, email: str, org_id: str = "", org_name: st
         _secure(name)
 
 
+def set_org(name: str, org_id: str, org_name: str) -> None:
+    """組織を記録する前の登録へ、読み直した組織を書き戻す。"""
+    with _locked(name):
+        _update_account(name, org_id=org_id, org_name=org_name)
+
+
 def unregister(name: str) -> None:
     with _locked(name):
         shutil.rmtree(account_dir(name), ignore_errors=True)

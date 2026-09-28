@@ -1,0 +1,1 @@
+{"path": "plugins/ndf/scripts/lib/claude_accounts.py", "name": "", "kind": "lines", "reason": "relay の account add で組織を記録する前の登録を補うため、組織を読み直して書き戻す set_org を足して 505 行。500 行以下を目指す対象のまま残す。置き場の登録・削除を別のモジュールへ分ければこの例外は要らなくなる", "lines": 505}

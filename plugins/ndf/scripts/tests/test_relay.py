@@ -3099,6 +3099,9 @@ if sys.argv[1:3] == ["auth", "status"]:
     st = {"loggedIn": ok, "email": os.environ["FAKE_EMAIL"]}
     if os.environ.get("FAKE_ORG_ID"):
         st.update(orgId=os.environ["FAKE_ORG_ID"], orgName=os.environ.get("FAKE_ORG_NAME", ""), subscriptionType="max")
+    own = os.path.join(d, "fake-status.json")  # 登録済みの設定ディレクトリごとの識別（組織の読み直しを試す）
+    if os.path.exists(own):
+        st = {"loggedIn": ok, **json.load(open(own))}
     print(json.dumps(st if ok else {"loggedIn": False}))
     sys.exit(0)
 if sys.argv[1:3] == ["auth", "logout"]:
@@ -3203,12 +3206,28 @@ def test_account_add_same_email_other_org(tmp_path, accounts):
 
 
 def test_account_add_same_email_without_known_org_rejects(tmp_path, accounts):
-    """I3: 組織の分からない登録（古い account.json）と同じメールは、組織が違うと言い切れないので拒む。"""
+    """I3: 組織の分からない登録（古い account.json）で組織を読み直せなければ、組織が違うと言い切れないので拒む。"""
     accounts.add("old", email="a@example.com")
+    (accounts.root / "old" / ".credentials.json").unlink()  # ログアウト済み: auth status から組織を読めない
     p = account_cmd(tmp_path, accounts, "add", "work1", FAKE_EMAIL="a@example.com", FAKE_ORG_ID="org-t", FAKE_ORG_NAME="Team A")
     assert p.returncode == 1 and "登録済み: old" in p.stderr
     lines = account_cmd(tmp_path, accounts, "list", tty=False).stdout.splitlines()
     assert any(line.startswith("old") and "a@example.com" in line and "（" not in line.split()[1] for line in lines)
+
+
+def test_account_add_backfills_org_of_old_registration(tmp_path, accounts):
+    """I3: 組織の分からない登録は、その設定ディレクトリの auth status から組織を読み直して書き戻し、別の組織なら登録する。"""
+    accounts.add("old", email="a@example.com")
+    accounts.write(accounts.root / "old" / "fake-status.json", {"email": "a@example.com", "orgId": "org-p", "orgName": "Personal"})
+    p = account_cmd(tmp_path, accounts, "add", "work1", FAKE_EMAIL="a@example.com", FAKE_ORG_ID="org-t", FAKE_ORG_NAME="Team A")
+    assert p.returncode == 0, p.stderr
+    assert (accounts.account("old")["org_id"], accounts.account("old")["org_name"]) == ("org-p", "Personal")
+    assert accounts.account("old")["email"] == "a@example.com" and accounts.account("old")["needs_relogin"] is False
+    assert any(c["argv"][:2] == ["auth", "status"] and c["dir"].endswith("/old") for c in auth_calls(tmp_path))
+    lines = account_cmd(tmp_path, accounts, "list", tty=False).stdout.splitlines()
+    assert any(line.startswith("old") and "a@example.com（Personal）" in line for line in lines)
+    p = account_cmd(tmp_path, accounts, "add", "work2", FAKE_EMAIL="a@example.com", FAKE_ORG_ID="org-p", FAKE_ORG_NAME="Personal")
+    assert p.returncode == 1 and "登録済み: old" in p.stderr
 
 
 def test_owner_of_compares_email_and_org(accounts):
