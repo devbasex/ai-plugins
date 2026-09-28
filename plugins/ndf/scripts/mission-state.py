@@ -8,7 +8,7 @@ LLM を直接呼ばない（ミッション MVV の照合だけ `lib/mission_mvv
 | --- | --- |
 | `init <mission.json> --name <名> [--milestone M] [--issue N]... [--plan <種類>=<plan.json>]... [--done <done.json>]... [--dev <版>] [--prod <版>] [--goal <雛形の文字列か @ファイル>] [--pace normal\|fast\|auto] [--mvv <ファイル>] [--repo OWNER/REPO]` | 状態のファイルを作る。同じパスに別の形の JSON があれば上書きせずに止まる（終了コード 1） |
 | `update <mission.json> [--done <done.json>]... [--next <plan.json>=<文>]...` | done の JSON と報告を読み、行の状態・PR・秒・費用を埋める。何度走らせても同じ結果 |
-| `gate <mission.json> <関門の名> --what <何を> [--at <ISO 8601>] [--by user\|mvv --verdict V --reasons <JSON> --log <jsonl>] [--outcome approved\|rejected] [--root DIR] [--withdraw]` | 関門の承認の時刻を書く。名前が `MVV` なら今の MVV のハッシュも書く。`--by user --outcome rejected` は関門を通さず差し戻しだけを残す。利用者の答えが同じ関門の直前の MVV 判定と食い違えば、改訂の兆候（覆し）を `project-mvv-signals.jsonl` へ 1 行書く。`--withdraw` は同じ関門の `by: mvv` の記録を外し、取り消しを残す（MVV 判定で通した後に関門へ落ちたとき。`lib/mission_mvv.withdraw`）。取り消した関門へは以後 `--by mvv` を書かない |
+| `gate <mission.json> <関門の名> --what <何を> [--at <ISO 8601>] [--by user\|mvv --verdict V --reasons <JSON> --log <jsonl>] [--outcome approved\|rejected] [--pr N] [--root DIR] [--withdraw]` | 関門の承認の時刻を書く。名前が `MVV` なら今の MVV のハッシュも書く。`--by user --outcome rejected` は関門を通さず差し戻しだけを残す。利用者の答えが同じ関門の直前の MVV 判定（`--pr` を渡せばその PR の判定）と食い違えば、改訂の兆候（覆し）を `project-mvv-signals.jsonl` へ 1 行書く。`--withdraw` は同じ関門の `by: mvv` の記録を外し、取り消しを残す（MVV 判定で通した後に関門へ落ちたとき。`lib/mission_mvv.withdraw`）。取り消した関門へは以後 `--by mvv` を書かない |
 | `render <mission.json> <引継ぎ文書> --section <見出しの語> [--demote <前の節の語> --heading <新しい見出し>]` | 見出しに語を含む節の本文を置き換える。節の外は変えない |
 | `status <mission.json>` | 端末向けに 1 行ずつ（ミッション・状態・次） |
 | `next <mission.json> [--doc <引継ぎ文書> --section <見出しの語>] [--replace <見出しの語>]` | ndf-next の囲みを出す。`--replace` なら引継ぎ文書のその節も置き換える |
@@ -16,8 +16,9 @@ LLM を直接呼ばない（ミッション MVV の照合だけ `lib/mission_mvv
 雛形（`--goal`）は `{name}`・`{milestone}`・`{heading}`（現在地の見出し）・`{dev}`・`{prod}`・
 `{issues}` を差し込む。
 
-`--pace fast` と `--pace auto`（#1078・#1366・#1370）: ミッション MVV の写しとプロジェクト MVV の参照の書き方は `lib/mission_mvv.py` にある。
-外へ出るのはマイルストーンの説明を読む gh api だけである。
+ミッション MVV の写し（#1078・#1370・#1400）の書き方は `lib/mission_mvv.py` にある。`--pace fast` と `--pace auto` は写せなければ
+止まり、写しをプロジェクト MVV に照らす。`--pace normal` は `--mvv` か `--milestone` から写せたときだけ写し、止めず、照らさない。
+承認済みのプロジェクト MVV の参照（版・sha256）は進め方によらず書く（#1366・#1400）。外へ出るのはマイルストーンの説明を読む gh api だけである。
 
 計画の種類は 実装・開発版・本番（ほかの語もそのまま使える）。done を登録しなければ、計画の
 状態ディレクトリ（`<計画>-state/queue-done.json`）を探す。
@@ -145,10 +146,10 @@ def other_shape(path: str) -> str:
     return ""
 
 
-def init_mvv_outcome(a, project) -> tuple[dict | None, dict | None]:
-    """(状態へ書く mvv, 止まるときの結果)。中身は `lib/mission_mvv.py`。"""
-    mvv, stop = mission_mvv.init_mvv(a, project)
-    return mvv, (outcome("stopped", stop[0], stop[2], exit=stop[1]) if stop else None)
+def init_mvv_outcome(a, project) -> tuple[dict | None, dict | None, list[dict]]:
+    """(状態へ書く mvv, 止まるときの結果, 結果の items に載せる特定できなかった理由)。中身は `lib/mission_mvv.py`（normal は #1400 の決定 13）。"""
+    mvv, stop, note = mission_mvv.normal_mvv(a) if a.pace not in mission_mvv.MVV_PACES else (*mission_mvv.init_mvv(a, project), None)
+    return mvv, (outcome("stopped", stop[0], stop[2], exit=stop[1]) if stop else None), [note] if note else []
 
 
 def cmd_init(a) -> dict:
@@ -160,7 +161,7 @@ def cmd_init(a) -> dict:
             metrics={"path": a.mission, "reason": why},
         )
     project = pm.load_mvv(Path(a.root or ".").resolve())
-    mvv, stop = init_mvv_outcome(a, project)
+    mvv, stop, notes = init_mvv_outcome(a, project)
     if stop:
         return stop
     if a.pace in mission_mvv.MVV_PACES and project.approved and mvv:
@@ -183,7 +184,7 @@ def cmd_init(a) -> dict:
     }
     if mvv:
         m["mvv"] = mvv
-    if a.pace in mission_mvv.MVV_PACES and project.approved:
+    if project.approved:  # pace によらず参照を残す（#1400 の決定 3。助言の MVV 判定が改訂に気づくため）
         m["project_mvv"] = {"version": project.version, "sha256": project.sha256}
     for text in a.plan or []:
         kind, plan = parse_pair(text, "--plan")
@@ -193,7 +194,7 @@ def cmd_init(a) -> dict:
     return outcome(
         "ok",
         f"ミッション {a.name} を書いた（計画 {len(m['plans'])} 本）: {a.mission}",
-        [{"plan": p["plan"], "kind": p["kind"]} for p in m["plans"]],
+        [{"plan": p["plan"], "kind": p["kind"]} for p in m["plans"]] + notes,
         {"plans": len(m["plans"]), "done": len(m["done"])},
     )
 
@@ -277,7 +278,7 @@ def gate_locked(a) -> dict:
         return outcome("stopped", "--what が要る（--withdraw のときだけ省ける）", exit=EXIT_UNREADABLE)
     entry = {"name": a.name, "what": a.what, "at": at}
     if a.by == "user":
-        override = pms.record_override(m, a.mission, a.name, a.outcome, at, Path(a.root or ".").resolve(), a.mvv_log)
+        override = pms.record_override(m, a.mission, a.name, a.outcome, at, Path(a.root or ".").resolve(), a.mvv_log, pr=a.pr)
         if a.outcome == "rejected":
             m.setdefault("rejections", []).append({**entry, "by": "user", "outcome": "rejected"})
             jsonio.write_atomic(a.mission, m, indent=1)
@@ -535,8 +536,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--prod")
     s.add_argument("--goal", help="/goal の文面の雛形。@<ファイル> ならファイルから読む")
     s.add_argument("--pace", choices=PACES, default="normal", help="ミッションの進め方（既定 normal）")
-    s.add_argument("--mvv", help="--pace fast / auto: マイルストーンから写さずに使う MVV のファイル")
-    s.add_argument("--repo", help="--pace fast / auto: マイルストーンを読むリポジトリ（OWNER/REPO。既定はカレント）")
+    s.add_argument("--mvv", help="マイルストーンから写さずに使うミッション MVV のファイル")
+    s.add_argument("--repo", help="マイルストーンを読むリポジトリ（OWNER/REPO。既定はカレント）")
     s.add_argument("--root", help="プロジェクト MVV（.ndf/mvv.md・mvv.json）を読むリポジトリの根（既定はカレント）")
 
     s = sub.add_parser("update")
@@ -557,6 +558,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--outcome", choices=("approved", "rejected"), help="--by user: 利用者の答え（省くと approved。記録に outcome を書かない）"
     )
     s.add_argument("--mvv-log", default=str(pm.gate_log_path()), help="--by user: 直前の MVV 判定を読むログ（既定 mvv-gate.jsonl）")
+    s.add_argument("--pr", type=int, help="--by user: 答えた Pull Request。渡すとその PR の MVV 判定だけを直前の判定として比べる")
     s.add_argument("--root", help="覆しの記録の repo（既定はカレント）")
     s.add_argument("--withdraw", action="store_true", help="同じ名前の承認ゲートの MVV 判定の記録（by: mvv）を外す（無ければ何もしない）")
 

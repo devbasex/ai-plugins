@@ -38,12 +38,12 @@ python3 "$SCRIPTS/supervise.py" wait <プラン>-state/queue-done.json
 | --- | --- |
 | `scripts/mission-state.py init` | ミッションの状態ファイルを作る |
 | `scripts/mission-state.py update` | 終えたプランと次のプランを状態ファイルへ書く |
-| `scripts/mission-state.py gate` | 承認ゲートの判定（利用者か MVV）を状態ファイルへ書く。利用者の答えは `--by user --outcome approved\|rejected`（差し戻しは承認ゲートを通さず記録だけ残す） |
+| `scripts/mission-state.py gate` | 承認ゲートの判定（利用者か MVV）を状態ファイルへ書く。利用者の答えは `--what <要約> --by user [--pr <設計 PR>] --outcome approved\|rejected`（差し戻しは承認ゲートを通さず記録だけ残す） |
 | `scripts/project-mvv.py` | プロジェクト MVV の判定（`check`）・材料（`collect`）・候補（`propose`）・照合（`vet`）・承認の書き込み（`approve`）・版（`show`）・節（`context`）・改訂の兆候（`signals`）。手順は [project-mvv.md](project-mvv.md) |
 | `scripts/mission-state.py status` | 今の状態を出す |
 | `scripts/mission-state.py next` | 切れ目で引継ぎ文書へ置く ndf-next の囲みを作る |
 | `scripts/mission-state.py render` | 状態を表に書き出す |
-| `scripts/mvv-gate.py check` | 承認ゲートの前に MVV の判定を行う |
+| `scripts/mvv-gate.py check` | 承認ゲートの前に MVV の判定を行う（`--advise` は `normal` の助言の MVV 判定。[pace.md](pace.md) の「MVV 判定」） |
 | `scripts/glossary.py gate` | 設計の工程の入口で用語集があるかを確かめる |
 
 ## 検査・マージ・リリース

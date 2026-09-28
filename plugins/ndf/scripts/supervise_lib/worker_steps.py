@@ -13,12 +13,19 @@ from supervise_lib import paths
 from supervise_lib.claude import TAIL, WORK_TOOLS, run_ticking
 from supervise_lib.prompts import FULL_SYSTEM, PROGRESS_PROMPT, REPORT_DONE, REPORT_NOT_DONE, RESUME_PROMPT, WORK_SYSTEM, WORKDIR_PROMPT
 from supervise_lib.steps import RunStep, last_json
+import project_mvv
 
 
 class WorkStep:
     """work のステップ: 1 つの作業を worker（最小構成の claude -p か external-ai.py run）に行わせる。"""
 
     kind = "work"
+
+    def mvv_system(self, ctx) -> str:
+        """worker のシステムプロンプトの末尾へ足す MVV の節（#1400 の決定 5）。プロジェクト MVV が承認済みのときだけ
+        `project_mvv.block` の出力をそのまま返し（ミッションが特定できればミッション MVV も入る）、ほかは空文字。"""
+        mvv, mission = ctx.state.mvv_block_of(ctx.cwd, ctx.plan)
+        return "\n\n" + project_mvv.block(mvv, mission) if mvv.approved else ""
 
     def issue_text(self, ctx, step: dict) -> str:
         nums = step.get("issues")
@@ -37,10 +44,11 @@ class WorkStep:
     def call_worker(self, ctx, step: dict, prompt: str, cwd: str, name: str) -> dict:
         """worker を 1 回起動する。`runtime` があれば external-ai.py run、無ければ最小構成の claude -p。"""
         rt = step.get("runtime")
+        system = WORK_SYSTEM + self.mvv_system(ctx)
         if not rt or rt == "claude-p":
-            return ctx.claude.call(WORK_SYSTEM, prompt, WORK_TOOLS, cwd, step.get("timeout", 1800), serena=bool(step.get("serena")))
+            return ctx.claude.call(system, prompt, WORK_TOOLS, cwd, step.get("timeout", 1800), serena=bool(step.get("serena")))
         pf, of = ctx.state.dir / f"{name}-prompt.md", ctx.state.dir / f"{name}-output.md"
-        pf.write_text(WORK_SYSTEM + "\n\n" + prompt)
+        pf.write_text(system + "\n\n" + prompt)
         started = time.time()
         cmd = [
             sys.executable,
@@ -89,8 +97,9 @@ class WorkStep:
             # Skill の本文が手順を持つ。プロンプトは Skill の呼び出しをそのまま渡す
             prompt = step["prompt"]
         full = bool(step.get("full"))
+        system = FULL_SYSTEM + self.mvv_system(ctx)
         if full:
-            res = ctx.claude.call(FULL_SYSTEM, prompt, WORK_TOOLS, cwd, step.get("timeout", 1800), full=True)
+            res = ctx.claude.call(system, prompt, WORK_TOOLS, cwd, step.get("timeout", 1800), full=True)
         else:
             res = self.call_worker(ctx, step, prompt, cwd, step["id"])
         ctx.claude.record_usage("work", res)
@@ -99,7 +108,7 @@ class WorkStep:
         for _ in range(3):
             if not full or REPORT_DONE.search(res["text"] or "") or not res.get("session"):
                 break
-            res = ctx.claude.call(FULL_SYSTEM, RESUME_PROMPT, WORK_TOOLS, cwd, step.get("timeout", 1800), full=True, resume=res["session"])
+            res = ctx.claude.call(system, RESUME_PROMPT, WORK_TOOLS, cwd, step.get("timeout", 1800), full=True, resume=res["session"])
             ctx.claude.record_usage("work", res)
         if (full and not REPORT_DONE.search(res["text"] or "")) or REPORT_NOT_DONE.search(res["text"] or ""):
             res["ok"] = False

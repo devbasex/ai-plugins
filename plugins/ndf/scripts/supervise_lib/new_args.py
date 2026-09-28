@@ -47,6 +47,8 @@ NEW_KINDS = {
         "ブランチへ集める）→ 検査 1 回 → リリース（開発版）。ステージの中は queue --max 3 で流す。\n"
         "リリースの形（release.form）が無いか雛形の無い形なら、リリースのプランを書かず、最後のステージに"
         "「/ndf:release で行う」を置く。\n"
+        "--state <状態>（normal）: 設計の用語チェックの後と開発版の承認資料の後に助言の MVV 判定（mvv-gate.py check --advise）を置く。"
+        "承認は利用者が行う。\n"
         "--pace fast --state <状態>: 使ってよい条件を確かめ、設計（承認ゲート 1 は MVV 判定）→ 実装（起点の"
         "ブランチへ直接）→ 検査（実行の条件）→ 開発版 → 本番（承認ゲート 2 は MVV 判定）を書く",
     ),
@@ -201,7 +203,8 @@ NEW_ARGS = [
         {
             "help": {
                 "*": "ミッションの状態（mission-state.py のファイル）",
-                "mission": "ミッションの状態（--pace fast / auto と組。mission-state.py のファイル）",
+                "mission": "ミッションの状態（mission-state.py のファイル）。--pace fast / auto では要る。normal で渡すと承認ゲート 1・2 の前に"
+                "助言の MVV 判定を置き、worker と judge が状態のミッション MVV を読む",
             }
         },
         "mission close",
@@ -287,5 +290,3 @@ def check_mission(ap: argparse.ArgumentParser, a) -> None:
         ap.error("--name は英数字・. _ - だけで書く（ブランチ名 mission/<名前> に使う）")
     if a.kind == "close" and not (a.prod and a.state):
         ap.error("new close には --prod（本番の版）と --state（ミッションの状態）が要る")
-    if a.kind == "mission" and a.pace == "normal":
-        a.state = None
