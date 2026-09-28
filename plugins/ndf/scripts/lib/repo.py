@@ -48,14 +48,19 @@ def read_worktree_decl(root) -> tuple[dict, str | None]:
         f = Path(base) / WORKTREE_DECL
         if not f.is_file():
             continue
-        try:
-            data = json.loads(f.read_text(encoding="utf-8"))
-        except (OSError, ValueError) as e:
-            return {}, f"{WORKTREE_DECL}: JSON として読めない（{e}）"
-        if not isinstance(data, dict):
-            return {}, f"{WORKTREE_DECL}: 最上位がオブジェクトでない"
-        return data, None
+        return read_json_object(f, WORKTREE_DECL)
     return {}, None
+
+
+def read_json_object(f: Path, label: str) -> tuple[dict, str | None]:
+    """`f` を JSON のオブジェクトとして読む。読めない・オブジェクトでなければ `({}, 理由)`（理由の先頭は `label`）。"""
+    try:
+        data = json.loads(f.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        return {}, f"{label}: JSON として読めない（{e}）"
+    if not isinstance(data, dict):
+        return {}, f"{label}: 最上位がオブジェクトでない"
+    return data, None
 
 
 def _branch_value(v) -> str | None:
