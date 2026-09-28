@@ -266,6 +266,28 @@ def unscored(sd, read_state, open_issues, snapshot_digest) -> list[int]:
 # ---------------- apply ----------------
 
 
+def _rejected_by_length(e: StepError) -> bool:
+    return "422" in str(e) or "Validation Failed" in str(e)
+
+
+def _write_one(ms, cur, m, desc):
+    """1 本のマイルストーンの節を書く。戻り値は (written / unchanged / failed, 切り詰めた行数か None)。"""
+    limit = None
+    while True:
+        new = R.replace_rank_section(desc, R.render_rank_table(m, limit))
+        if new == desc:
+            return "unchanged", limit
+        if not R.outside_unchanged(desc, new):
+            return "failed", limit  # 節の外が変わる書き込みはしない
+        try:
+            ms.set_description(cur["number"], new, target=m["title"])
+            return "written", limit
+        except StepError as e:
+            if not _rejected_by_length(e) or limit == 0:  # 長さで拒まれたときだけ減らす
+                return "failed", limit
+            limit = len(m["rows"]) // 2 if limit is None else limit // 2
+
+
 class RankPlan:
     """plan の順位付けの部分（`rank`・`rejected`・actions の `reschedule`）。"""
 
@@ -343,25 +365,10 @@ class RankPlan:
             desc = (cur or {}).get("description") or ""
             if cur is None or (not m["rows"] and R.parse_rank_table(desc) is None):
                 continue
-            limit = None
-            while True:
-                new = R.replace_rank_section(desc, R.render_rank_table(m, limit))
-                if new == desc:
-                    got["unchanged"].append(m["title"])
-                    break
-                if not R.outside_unchanged(desc, new):
-                    got["failed"].append(m["title"])  # 節の外が変わる書き込みはしない
-                    break
-                try:
-                    ms.set_description(cur["number"], new, target=m["title"])
-                    got["written"].append(m["title"])
-                    break
-                except StepError as e:
-                    if not ("422" in str(e) or "Validation Failed" in str(e)) or limit == 0:  # 長さで拒まれたときだけ減らす
-                        got["failed"].append(m["title"])
-                        break
-                    limit = len(m["rows"]) // 2 if limit is None else limit // 2
-                    got["truncated"][m["title"]] = limit
+            kind, limit = _write_one(ms, cur, m, desc)
+            if limit is not None:
+                got["truncated"][m["title"]] = limit
+            got[kind].append(m["title"])
         return got
 
 
