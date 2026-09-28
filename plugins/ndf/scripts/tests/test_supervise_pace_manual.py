@@ -127,6 +127,7 @@ def test_normal_keeps_one_release_stage(tmp_path):
 def test_a_failed_verify_stops_before_the_mvv_judge(tmp_path, verify, ran):
     """AC6・I6: facts が導入の確認を走らせ、非 0 なら mvv へ進まずにプランが止まる。"""
     repo = make_repo(tmp_path, [STG, PRD], verify)
+    commit_all(repo)
     p, out = new_sprint(tmp_path, repo)
     assert p.returncode == 0, p.stdout + p.stderr
     gate = next(w for w in load(out / "sprint.json")["ステージ"] if w["name"] == "承認ゲート 2")
@@ -151,20 +152,41 @@ def deploy_facts(repo, verify, out):
     return p.returncode, json.loads(p.stdout.strip().splitlines()[-1])
 
 
+def commit_all(repo):
+    g = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@example.com"]
+    subprocess.run([*g, "add", "-A"], check=True)
+    subprocess.run([*g, "commit", "-qm", "c"], check=True)
+
+
 def test_deploy_facts_writes_the_material(tmp_path):
-    """AC6: 確認の終了コードと出力、本番系へ届ける行を承認資料に載せ、非 0 なら 1 で終える。"""
+    """AC6: 確認の終了コードと本番系へ届ける行を承認資料に載せ、非 0 なら 1 で終える。出力は資料へ載せず 0600 のログへ分ける。"""
     extra = {"target": "batch", "kind": "manual", "trigger": "deploy batch", "versioned": False}
     repo = make_repo(tmp_path, [STG, PRD, extra])
+    commit_all(repo)
     out = tmp_path / "a.md"
-    code, res = deploy_facts(repo, "echo stack-ok", out)
-    text = out.read_text()
-    assert code == 0 and res["metrics"]["verify_exit"] == 0 and "stack-ok" in text
+    code, res = deploy_facts(repo, "echo out-$((40+2))", out)
+    text, log = out.read_text(), Path(res["metrics"]["log"])
+    assert code == 0 and res["metrics"]["verify_exit"] == 0 and "out-42" not in text
+    assert "out-42" in log.read_text() and log.stat().st_mode & 0o777 == 0o600
     assert "cdk deploy Prd" in text and "deploy batch" in text and "cdk deploy Stg" not in text
     code, res = deploy_facts(repo, "echo drift; exit 3", out)
     assert code == 1 and res["status"] == "stopped" and res["metrics"]["verify_exit"] == 3
-    assert "drift" in out.read_text() and "終了コード: 3" in out.read_text()
+    assert "終了コード: 3" in out.read_text()
     (repo / ".ndf" / "project.json").write_text("{")
     assert deploy_facts(repo, "true", out)[0] == 2
+
+
+def test_deploy_facts_stops_when_head_is_not_the_delivered_commit(tmp_path):
+    """確認するコミットと届けるコミットを同じにする: HEAD が先頭と違う・追跡中の変更があれば確認を走らせずに 3。"""
+    repo = make_repo(tmp_path, [STG, PRD])
+    commit_all(repo)
+    mark, out = tmp_path / "ran", tmp_path / "a.md"
+    (repo / ".ndf" / "supervise.json").write_text("{}")
+    assert deploy_facts(repo, f"touch {mark}", out)[0] == 3
+    commit_all(repo)
+    subprocess.run(["git", "-C", str(repo), "checkout", "-q", "--detach", "HEAD~1"], check=True)
+    code, res = deploy_facts(repo, f"touch {mark}", out)
+    assert code == 3 and not mark.exists() and not out.exists(), res
 
 
 def test_the_model_accepts_production_and_keeps_old_declarations():

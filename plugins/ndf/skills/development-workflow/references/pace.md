@@ -220,7 +220,7 @@ glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。どの
 | ステージ | 中身 | 流し方 |
 | --- | --- | --- |
 | 開発版 | 手で行う（`/ndf:release`）。`production: false` の行（検証の環境）へ届ける。承認は要らない。行が無ければ置かない | conductor が検査の後に行い、済んだら承認ゲート 2 の `command` を打つ |
-| 承認ゲート 2 | プラン `gate-2`: `facts`（`release-steps.py deploy-facts` が `<節>.verify` を走らせ、承認資料 `{state_dir}/work/approval-deploy.md` に本番系の行・ベースブランチの先頭のコミット・確認の出力を書く。非 0 なら止まる）→ `mvv`（承認ゲート 2 の MVV 判定）→ `note`。`note` が落ちたら `handoff` | 開発版があれば単独の queue（`command`）、無ければ検査に `--then` で続く |
+| 承認ゲート 2 | プラン `gate-2`: `facts`（`release-steps.py deploy-facts` が `<節>.verify` を走らせ、承認資料 `{state_dir}/work/approval-deploy.md` に本番系の行・ベースブランチの先頭のコミット・確認の終了コードを書く。確認の出力は秘密を含みうるため資料へ載せず、所有者だけが読める `<承認資料>.verify.log` へ分ける。作業ツリーの HEAD が先頭と違う・追跡中の変更があれば確認を走らせずに 3、確認が非 0 なら 1 で止まる）→ `mvv`（承認ゲート 2 の MVV 判定）→ `note`。`note` が落ちたら `handoff` | 開発版があれば単独の queue（`command`）、無ければ検査に `--then` で続く |
 | 本番 | 手で行う（`/ndf:release`）。`production: true` の行と、`production` を書いていない手動の行 | 承認ゲート 2 の通過（関門 2 の記録）の後に、承認資料のコミットを checkout して `trigger` を打つ。ベースブランチの先頭が違えば承認ゲート 2 からやり直す |
 
 `mvv` の `--pr` は、`auto` では検査のスプリントの Pull Request（`{queue_pr:check}`）、検査に続く `fast` では前のステージの Pull Request の
