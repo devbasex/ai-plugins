@@ -302,9 +302,11 @@ Pull Request のレビューを CLI へ委譲し、新しい指摘が出なく�
 | アカウントの切り替え | — | 次に起動する claude（ラッパーの次の区間・worker のやり直し）を、別の登録済みアカウントの認証で起動すること。動いているプロセスの認証は替えない | — | — | — |
 | 使用率 | — | api/oauth/usage が返す five_hour / seven_day の utilization（%）。推論を呼ばずに読む | — | — | — |
 | 支出上限 | — | 追加利用の支出の上限（individual spend limit）。extra_usage.spend_limit_reached で読む | — | — | — |
+| 従量の接続 | — | 利用上限の無い、使った分だけ費用が掛かる claude の接続（Bedrock か Anthropic API の API キー）。中身は利用者が宣言し、登録済みアカウントがすべて上限のときだけ使う | — | — | — |
 | アカウントの置き場 | — | 登録済みアカウントごとの設定ディレクトリを並べた ${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/accounts/。書くのは lib/claude_accounts.py だけ | — | — | — |
 | 上限シグナルファイル | — | 子の claude の応答が API の失敗で終わったときに、StopFailure hook がラッパーの作業ディレクトリへ書く limit.json | — | — | — |
 | 切り替えの閾値 | — | 今のアカウントの使用率がこれを超えたら、次のカットポイントで別の登録済みアカウントへ替える値（NDF_ACCOUNT_SWITCH_AT、既定 90%） | — | — | — |
+| 従量の接続の宣言 | — | 従量の接続で起動する子へ足す変数の並び。NDF_SUPERVISE_CLAUDE_FALLBACK（KEY=VALUE を空白区切り）に利用者が書き、ラッパーと supervise.py が同じものを読む | — | — | — |
 
 ## NDF のリリース（`ndf-release`）
 
