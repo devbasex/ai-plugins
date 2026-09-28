@@ -126,44 +126,52 @@ def watch_stuck_checks(root, n, probed, a, items, stale_since, rerun_done, waits
         since = stale_since.setdefault(name, now)
         if now - since < a.stale_after:
             continue
-        if name in rerun_done:
-            emit(
-                result(
-                    TOOL,
-                    "stopped",
-                    f"#{n} の取り残されたチェックが再実行でも動かない: {name}",
-                    items
-                    + [
-                        {
-                            "kind": "check",
-                            "name": name,
-                            "result": "stuck",
-                            "run": run_id,
-                            "job": job_id,
-                            "reason": "取り残されたチェックが再実行でも動かない",
-                        }
-                    ],
-                    {"waits": waits},
-                    next=f"gh run view {run_id} で実行とジョブの状態を読み、手で再実行するか GitHub の障害を確かめる",
-                )
+        _rerun_stale_check(root, n, name, run_id, job_id, items, waits, rerun_done, stale_since)
+    return _report_queued(root, queued)
+
+
+def _rerun_stale_check(root, n, name, run_id, job_id, items, waits, rerun_done, stale_since):
+    """取り残されたチェック 1 件を 1 度だけ再実行する。再実行済み・再実行の失敗なら emit で止まる。"""
+    if name in rerun_done:
+        emit(
+            result(
+                TOOL,
+                "stopped",
+                f"#{n} の取り残されたチェックが再実行でも動かない: {name}",
+                items
+                + [
+                    {
+                        "kind": "check",
+                        "name": name,
+                        "result": "stuck",
+                        "run": run_id,
+                        "job": job_id,
+                        "reason": "取り残されたチェックが再実行でも動かない",
+                    }
+                ],
+                {"waits": waits},
+                next=f"gh run view {run_id} で実行とジョブの状態を読み、手で再実行するか GitHub の障害を確かめる",
             )
-        p = gh_parts.gh(["run", "rerun", run_id, "--job", job_id], cwd=root)
-        if p.returncode != 0:
-            emit(
-                result(
-                    TOOL,
-                    "stopped",
-                    f"gh run rerun {run_id} --job {job_id} が失敗: {p.stderr.strip()[:300]}",
-                    items
-                    + [
-                        {"kind": "check", "name": name, "result": "stopped", "run": run_id, "job": job_id, "reason": p.stderr.strip()[:300]}
-                    ],
-                    {"waits": waits},
-                )
+        )
+    p = gh_parts.gh(["run", "rerun", run_id, "--job", job_id], cwd=root)
+    if p.returncode != 0:
+        emit(
+            result(
+                TOOL,
+                "stopped",
+                f"gh run rerun {run_id} --job {job_id} が失敗: {p.stderr.strip()[:300]}",
+                items
+                + [{"kind": "check", "name": name, "result": "stopped", "run": run_id, "job": job_id, "reason": p.stderr.strip()[:300]}],
+                {"waits": waits},
             )
-        items.append({"kind": "check", "name": name, "result": "rerun", "run": run_id, "job": job_id})
-        rerun_done.add(name)
-        del stale_since[name]
+        )
+    items.append({"kind": "check", "name": name, "result": "rerun", "run": run_id, "job": job_id})
+    rerun_done.add(name)
+    del stale_since[name]
+
+
+def _report_queued(root, queued):
+    """ランナー待ちの件数を stderr へ 1 行出し、待ち行列の件数を返す（待ちが無ければ None）。"""
     if not queued:
         return None
     count = queued_run_count(root)
