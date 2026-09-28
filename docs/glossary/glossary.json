@@ -1871,7 +1871,7 @@
     {
       "term": "開発版",
       "context": "ndf-workflow",
-      "meaning": "ベースブランチ（develop）に載るチャネルと、そこへ出す接尾辞付きの版。マージされた変更がそのまま載る",
+      "meaning": "ベースブランチ（develop）に載るチャネルと、そこへ出す接尾辞付きの版。マージされた変更がそのまま載る。手動反映の本番系の形では、production: false の行（検証の環境）へ届くことも開発版に当たる",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
@@ -2369,7 +2369,7 @@
     {
       "term": "手動反映の本番系",
       "context": "ndf-workflow",
-      "meaning": "配布の宣言の行のうち、本番系へ届くと宣言され、kind: manual（担い手が手で起こす）のもの。そこへ届ける操作の前に承認ゲート 2 を掛ける。自動反映の本番チャネルと対になる",
+      "meaning": "配布の宣言の行のうち、production: true と宣言され、kind: manual（担い手が手で起こす）のもの。そこへ届ける操作の前に承認ゲート 2 を掛ける。自動反映の本番チャネルと対になる",
       "code": "manual_production",
       "pending_source": "issues/issue-1454-requirements.md"
     },

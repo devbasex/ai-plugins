@@ -162,7 +162,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | 決定 | — | judge のステップが返す、次に取る手 | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | ゲート 1 | — | 設計 Pull Request のマージ。文書では企画承認に当たる | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | ゲート 2 | — | 本番系へ届く操作（本番へのリリースと operation の実行）。文書では制作物承認に当たる | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| 開発版 | — | ベースブランチ（develop）に載るチャネルと、そこへ出す接尾辞付きの版。マージされた変更がそのまま載る | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| 開発版 | — | ベースブランチ（develop）に載るチャネルと、そこへ出す接尾辞付きの版。マージされた変更がそのまま載る。手動反映の本番系の形では、production: false の行（検証の環境）へ届くことも開発版に当たる | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 本番 | — | 利用者が現に使っているチャネル・環境・外部サービス（本番系）。プラグインのリリースでは本番のブランチ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 正式版 | — | 本番チャネルへ出す、接尾辞の無い版。出したらリリースタグを打つ | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 検査 | — | リファクタリング・コードレビュー・完了判定・Pull Request を通すフェーズ。fast ではトリガーが立ったときだけ、前回の検査からの差分に流す。コードレビューだけは開発版ごとに流す（--review-only） | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
@@ -200,7 +200,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | スプリント課題 | — | スプリントに含まれる Pull Request の本文が、閉じる語で指す課題 | ミッション課題、ミッションの課題 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | スプリント MVV | — | スプリント単位の MVV。プロジェクト MVV の範囲での具体化 | ミッション MVV | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 自動反映の本番チャネル | `auto_production_branch` | 本番チャネルのうち、マージ（push）で本番系への反映が自動で始まるもの。宣言の delivery に kind: auto で本番チャネルを branch に持つ行があるときに当たる。そこへのマージは承認ゲート 2 に当たる | — | — | — |
-| 手動反映の本番系 | `manual_production` | 配布の宣言の行のうち、本番系へ届くと宣言され、kind: manual（担い手が手で起こす）のもの。そこへ届ける操作の前に承認ゲート 2 を掛ける。自動反映の本番チャネルと対になる | — | — | — |
+| 手動反映の本番系 | `manual_production` | 配布の宣言の行のうち、production: true と宣言され、kind: manual（担い手が手で起こす）のもの。そこへ届ける操作の前に承認ゲート 2 を掛ける。自動反映の本番チャネルと対になる | — | — | — |
 
 ## NDF の Slack 通知（`ndf-notification`）
 
