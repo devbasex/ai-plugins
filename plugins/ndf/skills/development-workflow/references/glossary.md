@@ -124,7 +124,7 @@ flowchart TB
 | --- | --- | --- | --- |
 | リリース | 変更を利用者へ届く形で公開すること。その工程とフェーズの名前でもある | `/ndf:release`、`supervise.py new release`、工程表の行と進捗記録の `stage` の値は `配布` | [release](../../release/SKILL.md) |
 | リリースプラン | リリースの手順をステップの列として持つプラン | `supervise.py new release`、`--channel dev` / `prod` | [supervise.py](../../../scripts/supervise.py) の docstring |
-| 開発版 | ベースブランチ（`develop`）に載るチャネルと、そこへ出す接尾辞付きの版。マージされた変更がそのまま載る | `<版>-dev.<n>`、`new release --channel dev` | [release](../../release/SKILL.md) の「リリース種別」 |
+| 開発版 | ベースブランチ（`develop`）に載るチャネルと、そこへ出す接尾辞付きの版。マージされた変更がそのまま載る。手動反映の本番系の形では、`production: false` の行（検証の環境）へ届くことも開発版に当たる | `<版>-dev.<n>`、`new release --channel dev` | [release](../../release/SKILL.md) の「リリース種別」 |
 | 本番 | 利用者が現に使っているチャネル・環境・外部サービス（本番系）。プラグインのリリースでは本番のブランチ | `.ndf/worktree.json` の `production_branch`（無ければ既定ブランチ）、`--channel prod` | [../SKILL.md](../SKILL.md) の「本番系へ届く操作」 |
 | 正式版 | 本番チャネルへ出す、接尾辞の無い版。出したらリリースタグを打つ | タグ `<plugin>--v<版>` | [release](../../release/SKILL.md) の「リリース種別」 |
 | 検証リリース | 開発版と分かる版数での公開か、検証環境への反映。提示して進めてよい | — | [release](../../release/SKILL.md) の「リリース種別」 |
