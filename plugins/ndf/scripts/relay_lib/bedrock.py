@@ -178,15 +178,7 @@ def verify(t: Target) -> VerifyFailure | None:
     return None if p.returncode == 0 else classify_failure(p.stderr)
 
 
-def _decl_body(d: dict) -> str:
-    return "・".join(d.get(k, "-") for k in ("profile", "region", "model"))
-
-
-def decl_label(d: dict) -> str:
-    """一覧と結果の文に出す識別（`Bedrock（<プロファイル>・<地域>・<モデル>）`）。"""
-    return f"Bedrock（{_decl_body(d)}）"
-
-
-def decl_inline(d: dict) -> str:
-    """括弧の中に入れる形の識別（`Bedrock・<プロファイル>・<地域>・<モデル>`）。"""
-    return f"Bedrock・{_decl_body(d)}"
+def decl_label(d: dict, sep: str = "（") -> str:
+    """一覧と結果の文に出す識別。既定は `Bedrock（<プロファイル>・<地域>・<モデル>）`、`sep="・"` は括弧の中に入れる形。"""
+    body = "・".join(d.get(k, "-") for k in ("profile", "region", "model"))
+    return f"Bedrock（{body}）" if sep == "（" else f"Bedrock{sep}{body}"
