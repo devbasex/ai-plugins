@@ -18,7 +18,7 @@ from pathlib import Path
 import claude_accounts as ca
 import procs
 import usage_ledger
-from claude_usage import LIMIT_EPOCH, kind_of_text, limit_reset_at  # noqa: F401  上限の文言の読みは部品が持つ
+from claude_usage import LIMIT_EPOCH, kind_of_text, limit_reset_at  # 上限の文言の読みは部品が持つ
 from monitor import USAGE_LIMIT_FATAL  # 利用上限の文言の表
 from supervise_lib.prompts import JUDGE_SYSTEM, PR_SYSTEM, SLOW_SYSTEM
 

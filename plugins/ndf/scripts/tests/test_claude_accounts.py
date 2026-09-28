@@ -252,3 +252,28 @@ def test_kind_of_text(text, kind):
 
 def test_fallback_env_reads_given_environ():
     assert ca.fallback_env({"NDF_SUPERVISE_CLAUDE_FALLBACK": "A=1 'B=2 3' junk"}) == {"A": "1", "B": "2 3"}
+
+
+@pytest.mark.parametrize(
+    "text,expect",
+    [
+        ("Claude AI usage limit reached|1760000000", 1760000000.0),
+        ("You've hit your limit · resets 3pm (UTC)", "15:00"),
+        ("You've hit your session limit · resets at 9:30am (Asia/Tokyo)", "00:30"),
+        ("resets 23:05", None),
+        ("no time here", "none"),
+    ],
+)
+def test_limit_reset_at(text, expect):
+    now = 1758790800.0  # 2025-09-25 09:00 UTC
+    got = cu.limit_reset_at(text, now)
+    if expect == "none":
+        assert got is None
+    elif isinstance(expect, float):
+        assert got == expect
+    elif expect is None:
+        assert got is not None and 0 < got - now <= 86400
+    else:
+        from datetime import datetime, timezone
+
+        assert got > now and datetime.fromtimestamp(got, timezone.utc).strftime("%H:%M") == expect
