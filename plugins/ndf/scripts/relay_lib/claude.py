@@ -311,7 +311,7 @@ def pending_wakeups(transcript_path: str, now: float) -> list[dict]:
     止まる（区間 7・16）。`stop: true` の呼び出しより前の予約は取り消されたものとして数えない。"""
     fires: list[float] = []
     for row in _iter_transcript_rows(transcript_path):
-        content = (row.get("message") or {}).get("content") if isinstance(row.get("message"), dict) else None
+        content = _content(row)
         at = parse_iso(row.get("timestamp"))
         if row.get("type") != "assistant" or not isinstance(content, list) or at is None:
             continue
@@ -345,7 +345,7 @@ def _is_user_prompt(row: dict) -> bool:
     """利用者が入力した行か。hook の差し戻し（`isMeta`）と Tool の結果は除く。"""
     if row.get("type") != "user" or row.get("isMeta"):
         return False
-    content = (row.get("message") or {}).get("content") if isinstance(row.get("message"), dict) else None
+    content = _content(row)
     if isinstance(content, str):
         return True
     if isinstance(content, list):
@@ -357,17 +357,26 @@ def _is_user_prompt(row: dict) -> bool:
     return False
 
 
+def _content(row: dict) -> list | str | None:
+    """行の `message.content`（`message` が辞書でなければ None）。"""
+    return row["message"].get("content") if isinstance(row.get("message"), dict) else None
+
+
+def _background_uses(row: dict) -> list[dict]:
+    """`assistant` の行のうち、背景の処理を起動する Tool の呼び出し（`run_in_background` が真）。"""
+    content = _content(row)
+    if row.get("type") != "assistant" or not isinstance(content, list):
+        return []
+    return [
+        c
+        for c in content
+        if isinstance(c, dict) and c.get("type") == "tool_use" and isinstance(c.get("input"), dict) and c["input"].get("run_in_background")
+    ]
+
+
 def _starts_background(row: dict) -> bool:
     """背景の処理を起動する Tool の呼び出し（`run_in_background` が真）を含む `assistant` の行か。"""
-    if row.get("type") != "assistant" or not isinstance(row.get("message"), dict):
-        return False
-    content = row["message"].get("content")
-    if not isinstance(content, list):
-        return False
-    return any(
-        isinstance(c, dict) and c.get("type") == "tool_use" and isinstance(c.get("input"), dict) and c["input"].get("run_in_background")
-        for c in content
-    )
+    return any(_background_uses(row))
 
 
 def after_mark(transcript_path: str, written: float) -> tuple[bool, bool]:
@@ -454,15 +463,7 @@ def background_open(transcript_path: str, now: float) -> bool:
     started: set[str] = set()
     ended: set[str] = set()
     for row in _iter_transcript_rows(transcript_path):
-        if _starts_background(row):
-            for c in row["message"]["content"]:
-                if (
-                    isinstance(c, dict)
-                    and c.get("type") == "tool_use"
-                    and isinstance(c.get("input"), dict)
-                    and c["input"].get("run_in_background")
-                ):
-                    started.add(str(c.get("id") or ""))
+        started.update(str(c.get("id") or "") for c in _background_uses(row))
         if row.get("type") in ("queue-operation", "attachment", "user"):
             blob = json.dumps(row, ensure_ascii=False)
             if "<task-notification>" in blob:
