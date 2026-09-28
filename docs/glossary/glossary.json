@@ -2367,6 +2367,13 @@
       "pending_source": "issues/issue-1336-design.md"
     },
     {
+      "term": "手動反映の本番系",
+      "context": "ndf-workflow",
+      "meaning": "配布の宣言の行のうち、本番系へ届くと宣言され、kind: manual（担い手が手で起こす）のもの。そこへ届ける操作の前に承認ゲート 2 を掛ける。自動反映の本番チャネルと対になる",
+      "code": "manual_production",
+      "pending_source": "issues/issue-1454-requirements.md"
+    },
+    {
       "term": "リリースの経路",
       "context": "ndf-release",
       "meaning": "変更が本番系へ届く道筋の種類。template（release.form の雛形で組む）/ merge（マージで反映）/ manual（手で反映）/ none（届けない）。release.form があればそれ、無ければ宣言の delivery から決まる。リリースの形とは別の軸",
