@@ -383,18 +383,14 @@ class ClaudeRunner:
                 return ca.env_for(ca.METERED, dict(os.environ))
         if self.account is None:
             return None
-        env = self._env_of(self.account)
+        env = ca.env_for(self.account, dict(os.environ), None if self.account in self.keep() else ca.REFRESH_BEFORE)
         if env is not None:
             return env
         c = ca.choose(exclude={self.account}, keep=self.keep())
         if not c.name:
             return None
         self.switch(c.name, "auth")
-        return self._env_of(c.name)
-
-    def _env_of(self, name: str) -> dict | None:
-        """name で起動する環境。keep に入る名前はトークンを更新しない（I5）。"""
-        return ca.env_for(name, dict(os.environ), None if name in self.keep() else ca.REFRESH_BEFORE)
+        return ca.env_for(c.name, dict(os.environ), None if c.name in self.keep() else ca.REFRESH_BEFORE)
 
     def switch(self, to: str, reason: str, keys: list[str] | None = None) -> None:
         """次の呼び出しのアカウントを替え、プランの状態（`auth`・`switched`）と途中の報告へ 1 行残す（I12）。"""
