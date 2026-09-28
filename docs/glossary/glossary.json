@@ -567,7 +567,7 @@
     {
       "term": "棚卸し",
       "context": "ndf-workflow",
-      "meaning": "既存の課題の本文・マイルストーン・ラベルを現状に合わせること",
+      "meaning": "既存の課題の本文・マイルストーン・ラベルを現状に合わせ、着手の順位を決め直すこと。スクラムのバックログリファインメントに当たる",
       "deprecated": [
         "手入れ"
       ],
@@ -1901,7 +1901,7 @@
     {
       "term": "完了判定",
       "context": "ndf-workflow",
-      "meaning": "コマンドの証跡で完了を判定する工程",
+      "meaning": "コマンドの証跡で完了を判定する工程。スクラムの完了の定義に当たる",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {

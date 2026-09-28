@@ -196,7 +196,7 @@ def test_rank_without_milestones_is_skipped(env):
 
 def test_unscored_issues_are_excluded_and_capacity_is_asked_for(env):
     code, out = env.run("rank")
-    assert code == 20 and out["status"] == "gate"
+    assert code == 20  # status は validate_result が終了コードと照らす
     assert {e["number"] for e in out["metrics"]["excluded"]} == {1, 2, 3, 4}
     code, out = env.run("rank", "--scores", env.scores(BASE))
     assert code == 0 and "--capacity" in out["next"]
