@@ -9,7 +9,7 @@ from pathlib import Path
 from supervise_lib.decl import WORKTREE_DECL, DeclError, with_decls
 from supervise_lib.paths import HERE, MERGED_PY, MVV_PY, STEPS_PY, VERIFY_PY
 from supervise_lib.plan import QUEUE_PRS
-from supervise_lib.verify_steps import handoff_step
+from supervise_lib.verify_steps import MARGIN_FLOOR, handoff_step
 
 
 MVV_NOTE = "{state_dir}/work/mvv-note.md"  # mvv-gate.py が書く判定の記録（PR のコメントか承認資料の末尾）
@@ -206,29 +206,16 @@ def plan_release_package_plugin(a) -> dict:
         # 関門 2 を MVV で判定する。関門（10）なら報告は 結果: 関門 で止まり、conductor が承認を取ってから
         # run <計画> --from bump で続ける。従えば判定の記録を --pr の PR のすべてへコメントしてから bump へ進み、
         # コメントが落ちたら handoff が関門 2 の by: mvv の記録を外して関門で終える（#1370 の I8）
-        material = f"{repo}/{approval}" if repo else approval
+        material = _material_path(repo, approval)
         state = str(Path(mvv).resolve())
-        steps[0:0] = [
-            {
-                "id": "mvv",
-                "type": "run",
-                "timeout": 900,
-                "cmd": f"{MVV_PY} check --sprint {shlex.quote(state)} --gate release "
-                f"--material {shlex.quote(material)} --pr {prs} --mode {a.mode}"
-                + (f" --root {shlex.quote(repo)}" if repo else "")
-                + f" --note {MVV_NOTE}",
-                "next": "note",
-                "gate_next": "end",
-            },
-            {
-                "id": "note",
-                "type": "run",
-                "timeout": 300,
-                "cmd": f"sh -c 'for p in {prs}; do gh pr comment \"$p\" --body-file {MVV_NOTE} || exit 1; done'",
-                "on_fail": "handoff",
-                "next": "bump",
-            },
-        ]
+        steps[0:0] = mvv_gate_steps(
+            f"{MVV_PY} check --sprint {shlex.quote(state)} --gate release "
+            f"--material {shlex.quote(material)} --pr {prs} --mode {a.mode}"
+            + (f" --root {shlex.quote(repo)}" if repo else "")
+            + f" --note {MVV_NOTE}",
+            f"sh -c 'for p in {prs}; do gh pr comment \"$p\" --body-file {MVV_NOTE} || exit 1; done'",
+            "bump",
+        )
         steps.append(handoff_step(state, "関門 2", "判定のコメント"))
     rule = RULE_RELEASE_DEV if dev else RULE_RELEASE_PROD_MVV if mvv else RULE_RELEASE_PROD
     plan = {
@@ -270,7 +257,7 @@ def advise_steps(state: str, gate: str, args: str, note: dict, head: dict | None
 def advise_release_steps(a, repo: str | None, approval: str, prs: str) -> list[dict]:
     """開発版の explain の後の助言の MVV 判定（#1400）。承認資料と出す版の PR を材料にし、判定の記録を承認資料の末尾へ足す。
     判定によらず、想定外の失敗でも mvv-note へ進み、プランの結果は facts の関門のままである。"""
-    material = f"{repo}/{approval}" if repo else approval
+    material = _material_path(repo, approval)
     state = shlex.quote(str(Path(a.advise).resolve()))
     args = f"--material {shlex.quote(material)} --pr {prs} --mode {a.mode}" + (f" --root {shlex.quote(repo)}" if repo else "")
     note = {
@@ -298,6 +285,98 @@ def bump_others_cmd(a, plugin: str) -> str:
         f'{STEPS_PY} bump --plugin "$n" --to "$to" --base {a.base} || exit 1; done'
     )
 
+
+def mvv_gate_steps(mvv_cmd: str, note_cmd: str, next_id: str) -> list[dict]:
+    """関門 2 の MVV 判定（mvv）と、判定の記録のコメント（note。落ちたら handoff）の 2 ステップ。note の後は `next_id` へ進む。"""
+    return [
+        {"id": "mvv", "type": "run", "timeout": 900, "cmd": mvv_cmd, "next": "note", "gate_next": "end"},
+        {"id": "note", "type": "run", "timeout": 300, "cmd": note_cmd, "on_fail": "handoff", "next": next_id},
+    ]
+
+
+def _material_path(repo, approval):
+    """承認資料の置き場。元のリポジトリが分かればその下。"""
+    return f"{repo}/{approval}" if repo else approval
+
+
+def plan_promote(a, repo: str, ci_wait: int, mvv: str | None = None, condition: dict | None = None, production: str | None = None) -> dict:
+    """昇格のプラン（#1336 の F5）: ベースブランチ（a.base）から本番チャネル（a.production_branch）への Pull Request を
+    `merged-steps.py promote` が作り（あれば使い）、承認ゲート 2 の後にマージする。後片付けはしない（head はベースブランチ）。
+
+    - normal（`mvv` 無し）: promote（承認の引数無し。承認ゲート 2 で終える）→ promote-approved（`--from` でだけ入る）
+    - fast / auto（`mvv` にスプリントの状態）: prepare（PR と承認資料）→ mvv（承認ゲート 2 の MVV 判定）→ note（判定のコメント）→
+      promote（`--gate-approved mvv`）。note か promote が落ちたら handoff が承認ゲートへ落とす
+    """
+    head, base = a.base, production or a.production_branch
+    if not base:
+        raise DeclError(f"昇格に要る本番チャネルが無い（--production-branch か .ndf/{WORKTREE_DECL} の production_branch）")
+    promote = f"{MERGED_PY} promote --head {shlex.quote(head)} --base {shlex.quote(base)}"
+    wait = f" --timeout {ci_wait}"
+    timeout = ci_wait + max(MARGIN_FLOOR, ci_wait // 10)
+    approved = {
+        "id": "promote-approved",
+        "type": "run",
+        "stage": "配布",
+        "timeout": timeout,
+        "cmd": promote + wait + " --gate-approved user",
+        "next": "end",
+    }
+    if not mvv:
+        steps = [
+            {"id": "promote", "type": "run", "stage": "配布", "timeout": timeout, "cmd": promote + wait, "gate_next": "end", "next": "end"},
+            approved,
+        ]
+    else:
+        state = str(Path(mvv).resolve())
+        material = "{state_dir}/work/approval-promote.md"
+        pr_of = f'$(gh pr list --head {shlex.quote(head)} --base {shlex.quote(base)} --state open --json number --jq ".[0].number")'
+        steps = [
+            {
+                "id": "prepare",
+                "type": "run",
+                "stage": "配布",
+                "timeout": 300,
+                "cmd": f"{promote} --prepare --out {material}",
+                "next": "mvv",
+            },
+            *mvv_gate_steps(
+                f"sh -c '{MVV_PY} check --sprint {shlex.quote(state)} --gate release --material {material} --pr {pr_of} "
+                f"--mode {a.mode} --root {shlex.quote(repo)} --note {MVV_NOTE}'",
+                f"sh -c 'gh pr comment {pr_of} --body-file {MVV_NOTE}'",
+                "promote",
+            ),
+            {
+                "id": "promote",
+                "type": "run",
+                "stage": "配布",
+                "timeout": timeout,
+                "cmd": promote + wait + " --gate-approved mvv",
+                "on_fail": "handoff",
+                "gate_next": "end",
+                "next": "end",
+            },
+            approved,
+            handoff_step(state, "関門 2", "昇格のマージ"),
+        ]
+    plan = {
+        "フェーズ": "配布（昇格）",
+        "課題": a.issue,
+        "モード": a.mode,
+        "作業場所": repo,
+        "リポジトリ": repo,
+        "規則": RULE_PROMOTE,
+        "上限": 12,
+        "steps": steps,
+    }
+    if condition:
+        plan["実行の条件"] = condition
+    return with_decls(plan, a)
+
+
+RULE_PROMOTE = (
+    "昇格の Pull Request のマージは本番系への反映で、承認ゲート 2 に当たる。承認の無いマージは merged-steps.py が止める。"
+    "CI の失敗は直さずに止める（昇格の Pull Request にはコミットを足さない）。"
+)
 
 # 配布の形（release の form-<形>.md）ごとの雛形。無い形は /ndf:release で配る
 RELEASE_FORMS = {"package-plugin": plan_release_package_plugin}

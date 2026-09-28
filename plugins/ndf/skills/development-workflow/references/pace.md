@@ -153,8 +153,8 @@ glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。どの
 | 開発版 | `release`（`facts` は `gate_as_ok`。出す版の Pull Request は検査のプランの PR） | 4 つ目の `--then` |
 | 本番 | `release-prod`（先頭が `mvv` → `note`（判定のコメントを検査の PR へ）→ `bump`） | 5 つ目の `--then` |
 
-`--design` を省くと設計とゲート 1 が無く、スプリントブランチのステージが `command` を持つ。リリースの形（`release.form`）に
-雛形が無ければ、開発版と本番の代わりに `manual` のステージ（`/ndf:release`）が 1 つ入り、ゲート 2 は利用者が承認する。
+`--design` を省くと設計とゲート 1 が無く、スプリントブランチのステージが `command` を持つ。リリースの経路が雛形で
+組むもの（`release.form` に雛形がある）でなければ、開発版と本番の代わりに下の「リリースの経路からステージを組む」のステージが入る。
 `then_of` のステージはマニフェストに `resume`（そのステージから最後までを流す queue のコマンド）を持つ。
 
 **MVV 判定の後のステップ（`approve`・`merge`・本番の `note`）が落ちたら、`handoff` のステップが承認ゲートへ落とす。**
@@ -182,6 +182,28 @@ glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。どの
 を `--then` のステージで流す。`close` のステップは `sprint-close.py --record-pr {queue_pr:release-prod} --issues <課題>
 --with-verification` で、本番が飛ばされたときは `--record-pr 0`（本番の記録なし）になる。まとめのプランは課題すべてへ
 工程を記録するため、通過記録の報告が `まとめる:` から `記録あり:` へ移る。
+リリースの経路が雛形で組むものでなければ `--version`・`--prod` は要らず、開発版と本番の代わりに下の経路のステージが入り、
+`close` のステップは `--record-pr 0` になる。
+
+## リリースの経路からステージを組む
+
+**`new sprint` / `new close` は、リリースの経路（`lib/delivery.py` の `routes`）から検査の後のステージを組む。**
+`.ndf/supervise.json` に `release.form` があれば経路は雛形（`template`）で、今の開発版と本番のステージを置き、版数
+（`--version`、`close` は `--prod` も）が要る。無ければ `.ndf/project.json` の `delivery` の行ごとに経路を決め、版数は要らない。
+選んだ経路は `sprint.json` の `リリースの経路` に並ぶ。
+
+| `delivery` の行 | 経路 | 検査の後に置くステージ |
+| --- | --- | --- |
+| `kind: auto`・`branch` がベースブランチ | `merge` | 置かない。検査の Pull Request のマージが反映で、宛先が自動反映の本番チャネルならそこで承認ゲート 2 に当たる |
+| `kind: auto`・`branch` が本番チャネル（ベースブランチと違う） | `merge` | 「本番」: 昇格のプラン（ベースブランチ → 本番チャネルの Pull Request を `merged-steps.py promote` が作り、承認ゲート 2 の後にマージする。後片付けはしない） |
+| `kind: auto`・`branch` が無いか別のブランチ、`kind: manual`、`versioned: true` | `manual` | 「リリース」: 手で行うステージ（`/ndf:release`。note に `target` と `trigger`） |
+| `delivery: []` | `none` | 置かない |
+| `delivery` が無い・不明（`{"unknown": ...}`） | `manual` | 「リリース」: 手で行うステージ。note に経路を決められない理由 |
+
+「本番」と「リリース」が両方あれば、この順に置く。昇格のプランは `normal` では `promote`（承認の引数無し。承認ゲート 2 で
+終える）→ 承認の後に `run <プラン> --from promote-approved`、`fast` / `auto` では `prepare`（Pull Request と承認資料）→
+`mvv`（承認ゲート 2 の MVV 判定）→ `note` → `promote`（`--gate-approved mvv`）で、`note` か `promote` が落ちたら `handoff` が
+承認ゲートへ落とす。`fast` / `auto` の `merge` の経路では開発版のステージを置かない（ベースブランチへのマージが検証への反映である）。
 
 ## 承認ゲートで止まった後の続け方
 
@@ -191,7 +213,7 @@ glob の `**` は区切りをまたぎ、`*` と `?` はまたがない。どの
 | 答え | 打つもの |
 | --- | --- |
 | 承認（ゲート 1） | `sprint-state.py gate <状態> "関門 1" --what <要約> --by user --outcome approved` → `supervise.py run <設計のプラン> --from approve` → マニフェストのスプリントブランチのステージの `resume` |
-| 承認（ゲート 2） | `sprint-state.py gate <状態> "関門 2" --what <要約> --by user --outcome approved` → `supervise.py run <本番のプラン> --from bump` |
+| 承認（ゲート 2） | `sprint-state.py gate <状態> "関門 2" --what <要約> --by user --outcome approved` → `supervise.py run <本番のプラン> --from bump`（昇格のプランは `--from promote-approved`、マージの `merge-gate` で止まったプランは `--from merge-approved`） |
 | 差し戻し | `sprint-state.py gate <状態> "関門 N" --what <要約> --by user --outcome rejected`。続きは流さない |
 
 **判定と食い違う答えは覆しとして残る。** 「従う」で自動に通った後の差し戻しは `override_reject`、「従わない」「判定できない」で

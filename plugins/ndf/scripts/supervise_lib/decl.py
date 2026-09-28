@@ -6,6 +6,7 @@ import json
 import sys
 from pathlib import Path
 
+import delivery
 import project_decl
 import schema
 from pydantic import ConfigDict
@@ -91,14 +92,14 @@ def sync_checks_of(decl: dict) -> list[tuple[str, str]]:
 
 
 # 雛形が宣言から受けるもの。引数が宣言より先に効く
-# sprint はリリースの形を要らない（雛形の無い形ならリリースの段を書かず、/ndf:release で行うと返す）
+# sprint と close はリリースの形を要らない（リリースの経路を delivery から導く。雛形で組む経路だけが版数を要する。#1336）
 NEEDS = {
     "impl": ("base", "test"),
     "fix": ("base", "test"),
     "check": ("base", "test"),
     "release": ("base", "release"),
     "sprint": ("base", "test"),
-    "close": ("base", "test", "release"),
+    "close": ("base", "test"),
 }
 
 
@@ -112,6 +113,8 @@ def apply_decls(a) -> None:
       --test-all は廃止（知らせて無視する）
     - 同期とチェック（a.sync_checks）: supervise.json の sync_checks（無ければ計画に sync のステップを置かない）
     - 配布（a.release）: supervise.json の release
+
+    リリースの経路（a.routes）は sprint と close だけが使い、`sprint.apply_routes` が release_routes と require_versions で組む。
     """
     import test_strategy as ts
 
@@ -152,6 +155,44 @@ def apply_decls(a) -> None:
         raise DeclError(f"new {a.kind} に要る宣言が無い: " + "・".join(lack))
 
 
+def release_routes(a, forms) -> list:
+    """リリースの経路（lib/delivery.py の routes）。release.form があればそれ、無ければ project.json の delivery から導く。
+    `forms` は雛形のある release.form の値。project.json が読めなければ経路を決められないとして手で行うステージへ落とす
+    （理由は note に出る）。"""
+    import repo
+
+    roots = decl_roots(a.worktree, getattr(a, "repo", None))
+    problems = []
+    try:
+        wt = read_decl(roots, WORKTREE_DECL)
+    except DeclError as e:
+        wt, problems = {}, [str(e)]
+    try:
+        project = read_decl(roots, project_decl.DECL.name)
+    except DeclError as e:
+        project, problems = {}, [*problems, str(e)]
+    d = delivery.build(
+        wt,
+        project,
+        a.release,
+        default_branch=repo.default_branch(roots[0]),
+        problems=problems,
+        base=a.base,
+        production=a.production_branch,
+    )
+    return delivery.routes(d, tuple(forms))
+
+
+def require_versions(a) -> None:
+    """版数（--version・close は --prod も）は、リリースの経路が雛形（template）で組むときだけ要る（#1336 の I6）。"""
+    if not delivery.needs_version(a.routes):
+        return
+    need = [("version", "--version", "版数"), *([("prod", "--prod", "本番の版")] if a.kind == "close" else [])]
+    gaps = [f"{what}（{flag}。release.form の雛形は版数で組む）" for attr, flag, what in need if not getattr(a, attr, None)]
+    if gaps:
+        raise DeclError(f"new {a.kind} に要る宣言が無い: " + "・".join(gaps))
+
+
 def _project_decl(roots, sv: dict) -> tuple[dict, str | None]:
     """roots の順に `.ndf/project.json` を探し、`test` を持つ最初の宣言。無ければ supervise.json の test を 1 つの suite として読む。"""
     import test_strategy as ts
@@ -178,6 +219,7 @@ def decl_fields(a) -> dict:
         "strategy",
         "test_limits",
         "test_note",
+        "routes",
     )
     return {k: getattr(a, k, None) for k in keys}
 

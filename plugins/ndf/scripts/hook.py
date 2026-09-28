@@ -3,6 +3,8 @@
 
     <hook の環境の python> hook.py [worktree-guard | token-guard | wait-notify] [--runtime claude|codex|kiro]
     <hook の環境の python> hook.py words     < コマンドの本文   # 語の分割（workflow-guard.sh の wf_split）
+    <hook の環境の python> hook.py merge-target --base <宛先> [--root <dir>]
+        # マージの宛先の判定（workflow-merge.sh の wf_check_merge。lib/delivery.py。1 行目が判定、2 行目が理由）
 
 副命令を省くと、事象と Tool の名前で振り分ける。
 
@@ -28,7 +30,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE / "lib"))
 sys.path.insert(0, str(HERE))
 
-COMMANDS = ("worktree-guard", "token-guard", "wait-notify", "words")
+COMMANDS = ("worktree-guard", "token-guard", "wait-notify", "words", "merge-target")
 RUNTIMES = ("claude", "codex", "kiro")
 NOTIFY_EVENTS = ("Stop", "stop", "Notification", "PermissionRequest")
 
@@ -93,6 +95,21 @@ def dispatch(command: str, runtime: str, raw: dict | None) -> dict | str | None:
     return _merge(outs)
 
 
+def _opt(argv: list[str], name: str) -> str | None:
+    return argv[argv.index(name) + 1] if name in argv[:-1] else None
+
+
+def merge_target(argv: list[str]) -> str:
+    """`--base` の宛先へのマージの判定（`production` / `not-production` / `undetermined`）と理由の 2 行。"""
+    import delivery
+
+    base = _opt(argv, "--base")
+    if base is None:
+        return ""
+    verdict = delivery.judge_target(delivery.load_delivery(_opt(argv, "--root") or "."), base)
+    return f"{verdict.value}\n{verdict.reason}\n"
+
+
 def main(argv: list[str]) -> int:
     try:
         command, runtime = _args(argv)
@@ -101,6 +118,9 @@ def main(argv: list[str]) -> int:
 
             got = words.command_stream(sys.stdin.read())
             sys.stdout.write("".join(w + "\0" for w in got))
+            return 0
+        if command == "merge-target":  # 判定できなければ何も出さない（呼び出し側が止める側へ倒す）
+            sys.stdout.write(merge_target(argv))
             return 0
         try:
             raw = json.loads(sys.stdin.read() or "null")

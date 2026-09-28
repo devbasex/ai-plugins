@@ -11,7 +11,7 @@ from step_result import result
 from supervise_lib import release_templates
 from supervise_lib.decl import with_decls
 from supervise_lib.paths import CHECK_PY, report_result, state_dir_of
-from supervise_lib.verify_steps import merge_step, refactor_template_arg, scope_cmd, scope_timeout, test_meta, whole_cmd, whole_timeout
+from supervise_lib.verify_steps import merge_steps, refactor_template_arg, scope_cmd, scope_timeout, test_meta, whole_cmd, whole_timeout
 
 
 RULE_IMPL = (
@@ -170,12 +170,14 @@ def plan_to_merge(a, head: list[dict]) -> dict:
             "prompt": "ヒットした行を今の決まりだけを書く形へ直してコミットする（push しない）。",
             "next": "doc-lint",
         },
-        {"id": "ready", "type": "run", "cmd": "sh -c 'git push -q && gh pr ready {pr}'", "next": "merge"},
-        merge_step(a, next="end"),
+        {"id": "ready", "type": "run", "cmd": "sh -c 'git push -q && gh pr ready {pr}'", "next": "merge-gate"},
+        *merge_steps(a, next="end"),
     ]
     if getattr(a, "escape_of", None) is not None:
         # その場で直した不具合を「逃げた不具合」として記録する（検査のトリガーの材料。#1078）
-        steps[-1]["next"] = "escape"
+        for step in steps:
+            if step["id"] in ("merge", "merge-approved"):
+                step["next"] = "escape"
         steps.append({"id": "escape", "type": "run", "cmd": f"{CHECK_PY} escape --pr {{pr}} --of {a.escape_of}", "next": "end"})
     plan = {
         "フェーズ": "実装",
@@ -271,8 +273,8 @@ def plan_check(a) -> dict:
                     "prompt": "失敗したテストを直してコミットし、git push する。",
                     "next": "test-all",
                 },
-                {"id": "ready", "type": "run", "cmd": f"git push -q; gh pr ready {pr}", "next": "merge"},
-                merge_step(a, next="end"),
+                {"id": "ready", "type": "run", "cmd": f"git push -q; gh pr ready {pr}", "next": "merge-gate"},
+                *merge_steps(a, next="end"),
             ],
         },
         a,
@@ -411,8 +413,8 @@ def plan_check_since(a) -> dict:
             "on_fail": "abort",
             "next": "ready",
         },
-        {"id": "ready", "type": "run", "cmd": "sh -c 'git push -q && gh pr ready {pr}'", "on_fail": "abort", "next": "merge"},
-        merge_step(a, on_fail="abort", next="record"),
+        {"id": "ready", "type": "run", "cmd": "sh -c 'git push -q && gh pr ready {pr}'", "on_fail": "abort", "next": "merge-gate"},
+        *merge_steps(a, on_fail="abort", next="record"),
         {"id": "record", "type": "run", "cmd": f"{record} --pr {{pr}}", "on_fail": "abort", "next": "end"},
         {"id": "abort", "type": "run", "cmd": f"{record} --failed --pr {{pr}}", "next": "end"},
         {"id": "abort-before-pr", "type": "run", "cmd": f"{record} --failed", "next": "end"},

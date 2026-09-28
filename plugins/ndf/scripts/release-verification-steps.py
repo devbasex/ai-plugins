@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """release-verification-steps.py: リリース後テストの導入確認（#862。試作は #827 の phase-steps.py）。
 
-    python3 release-verification-steps.py verify-install --ref develop|main --expect <版>
-        [--plugins ndf,...] [--runtimes claude,codex,kiro] [--root <dir>]
+    python3 release-verification-steps.py verify-install --ref <ベースブランチ|本番チャネル> --expect <版>
+        [--plugins <名前>,...] [--runtimes claude,codex,kiro] [--root <dir>]
 
 隔離した HOME で ref から導入し、導入された版と、前の正式版のタグから変わったファイルの中身が
 ref と一致するかを確かめる。利用者の HOME の設定が変わっていないことも確かめる。
 結果は lib/step_result.py の形の 1 行の JSON。終了コードは 0 = ok / 1 = 不一致か導入の失敗 /
-2 = 呼び出しの誤り（未知の runtime）/ 3 = plugin が無い。
+2 = 呼び出しの誤り（未知の runtime・宣言に無い ref）/ 3 = plugin が無い。
+導入元の owner/repo は origin の URL、マーケットプレイスの名前は `.claude-plugin/marketplace.json` の name、ref の
+候補（ベースブランチ・本番チャネル）は `.ndf/worktree.json`、プラグインとタグの接頭辞は --plugins → 宣言の
+release.plugin から読む（#1336）。
 """
 
 from __future__ import annotations
@@ -37,10 +40,19 @@ from step_result import (
     result,
     version_arg,
 )
+import delivery  # noqa: E402
+import repo as repo_lib  # noqa: E402
 
 TOOL = "release-verification"
-REPO_SLUG = "devbasex/ai-plugins"
-MARKET = "ai-plugins"
+
+
+def market_of(root, slug):
+    """マーケットプレイスの名前: `.claude-plugin/marketplace.json` の name → リポジトリ名（#1336）。"""
+    try:
+        name = json.loads((Path(root) / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8")).get("name")
+    except (OSError, ValueError, AttributeError):
+        name = None
+    return name if isinstance(name, str) and name else slug.split("/", 1)[-1]
 
 
 def rc_digest(path):
@@ -100,9 +112,9 @@ def run_env_i(cmd, env, cwd=None, timeout=600):
         return 124, f"{' '.join(cmd)} が {timeout} 秒で終わらない"
 
 
-def installed_dir(cache_root, p, expect):
-    """<設定>/plugins/cache/ai-plugins/<p>/<版> を探す。期待の版が無ければ最新のものを返す。"""
-    base = Path(cache_root) / "plugins" / "cache" / MARKET / p
+def installed_dir(cache_root, p, expect, market):
+    """<設定>/plugins/cache/<マーケットプレイス>/<p>/<版> を探す。期待の版が無ければ最新のものを返す。"""
+    base = Path(cache_root) / "plugins" / "cache" / market / p
     if not base.is_dir():
         return None
     if (base / expect).is_dir():
@@ -171,36 +183,38 @@ def _run_steps(env, steps):
     return res, out, True
 
 
-def verify_claude(env, ref, plugins, expect):
-    src = f"https://github.com/{REPO_SLUG}.git#{ref}" if ref != "main" else REPO_SLUG
+def verify_claude(env, ref, plugins, expect, where):
+    slug, market, production = where
+    src = f"https://github.com/{slug}.git#{ref}" if ref != production else slug
     steps = [["claude", "plugin", "marketplace", "add", src]]
-    steps += [["claude", "plugin", "install", f"{p}@{MARKET}"] for p in plugins]
+    steps += [["claude", "plugin", "install", f"{p}@{market}"] for p in plugins]
     steps.append(["claude", "plugin", "list"])
     res, out, ok = _run_steps(env, steps)
     if not ok:
         return res, {}
     dirs = {}
     for p in plugins:
-        d = installed_dir(env["CLAUDE_CONFIG_DIR"], p, expect)
+        d = installed_dir(env["CLAUDE_CONFIG_DIR"], p, expect, market)
         dirs[p] = d
         v = manifest_version(d) if d else None
-        m = re.search(rf"{re.escape(p)}@{MARKET}\S*\s+(?:.*?)?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)", out)
+        m = re.search(rf"{re.escape(p)}@{market}\S*\s+(?:.*?)?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)", out)
         res["version"][p] = v or (m.group(1) if m else None)
     return res, dirs
 
 
-def verify_codex(env, ref, plugins, expect):
-    add = ["codex", "plugin", "marketplace", "add", REPO_SLUG]
-    if ref != "main":
+def verify_codex(env, ref, plugins, expect, where):
+    slug, market, production = where
+    add = ["codex", "plugin", "marketplace", "add", slug]
+    if ref != production:
         add += ["--ref", ref]
-    steps = [add] + [["codex", "plugin", "add", f"{p}@{MARKET}"] for p in plugins]
+    steps = [add] + [["codex", "plugin", "add", f"{p}@{market}"] for p in plugins]
     steps.append(["codex", "plugin", "list"])
     res, _, ok = _run_steps(env, steps)
     if not ok:
         return res, {}
     dirs = {}
     for p in plugins:
-        d = installed_dir(env["CODEX_HOME"], p, expect)
+        d = installed_dir(env["CODEX_HOME"], p, expect, market)
         dirs[p] = d
         res["version"][p] = manifest_version(d) if d else None
     return res, dirs
@@ -283,9 +297,26 @@ def compare_kiro(src, proj):
     return out
 
 
+def install_source(root, a):
+    """導入元（owner/repo・マーケットプレイスの名前・本番チャネル）と、確かめるプラグイン。値は origin の URL と宣言から読む
+    （#1336 の決定 8）。--ref は宣言のベースブランチか本番チャネルに限る。"""
+    d = delivery.load_delivery(root)
+    slug = repo_lib.owner_repo(root)
+    if not slug:
+        raise StepError("導入元の owner/repo を origin の URL から決められない", EXIT_UNREADABLE)
+    refs = [b for b in dict.fromkeys((d.base, d.production)) if b]
+    if a.ref not in refs:
+        raise StepError(f"--ref {a.ref} は宣言のベースブランチか本番チャネル（{' / '.join(refs) or '無し'}）でない", EXIT_UNREADABLE)
+    names = a.plugins or (d.release or {}).get("plugin") or ""
+    plugins = [p.strip() for p in names.split(",") if p.strip()]
+    if not plugins:
+        raise StepError("確かめるプラグインを決められない（--plugins か .ndf/supervise.json の release.plugin）", EXIT_UNREADABLE)
+    return (slug, market_of(root, slug), d.production), plugins
+
+
 def cmd_verify_install(a):
     root = git_root(a.root)
-    plugins = [p.strip() for p in a.plugins.split(",") if p.strip()]
+    where, plugins = install_source(root, a)
     runtimes = [r.strip() for r in a.runtimes.split(",") if r.strip()]
     bad = [r for r in runtimes if r not in ("claude", "codex", "kiro")]
     if bad:
@@ -294,9 +325,10 @@ def cmd_verify_install(a):
 
     git(root, "fetch", "-q", "origin", "--tags")
     ref_rev = git(root, "rev-parse", f"origin/{a.ref}").stdout.strip()
-    tags = git(root, "tag", "--list", "ndf--v*", "--sort=-v:refname").stdout.split()
-    cur = f"ndf--v{a.expect}"
-    prev = next((t for t in tags if t != cur and "-" not in t[len("ndf--v") :]), None)
+    prefix = f"{plugins[0]}--v"  # タグの接頭辞は先頭のプラグイン（宣言の release.plugin）から決める
+    tags = git(root, "tag", "--list", f"{prefix}*", "--sort=-v:refname").stdout.split()
+    cur = f"{prefix}{a.expect}"
+    prev = next((t for t in tags if t != cur and "-" not in t[len(prefix) :]), None)
 
     before = user_env_snapshot()
     tmp = tempfile.mkdtemp(prefix="ndf-verify-install-")
@@ -319,7 +351,7 @@ def cmd_verify_install(a):
         for name, fn in (("claude", verify_claude), ("codex", verify_codex)):
             if name not in runtimes:
                 continue
-            res, dirs = fn(env, a.ref, plugins, a.expect)
+            res, dirs = fn(env, a.ref, plugins, a.expect, where)
             runtimes_res[name] = res
             for p, d in dirs.items():
                 if d is None:
@@ -379,9 +411,9 @@ def build_parser():
     ap.add_argument("--root", help="対象のリポジトリの根（既定はカレントの git の根）")
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("verify-install", parents=[common_parser()], help="隔離した HOME で ref から導入し、版と中身を確かめる")
-    p.add_argument("--ref", required=True, choices=("develop", "main"))
+    p.add_argument("--ref", required=True, help="導入する ref（宣言のベースブランチか本番チャネル）")
     p.add_argument("--expect", required=True, type=version_arg)
-    p.add_argument("--plugins", default="ndf", help="カンマ区切り（例 ndf,mcp-serena）")
+    p.add_argument("--plugins", help="カンマ区切り（例 ndf,mcp-serena。既定は宣言の release.plugin）")
     p.add_argument("--runtimes", default="claude,codex,kiro", help="カンマ区切り（claude,codex,kiro）")
     p.set_defaults(func=cmd_verify_install)
     return ap
