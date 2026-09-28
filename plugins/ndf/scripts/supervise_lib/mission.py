@@ -9,7 +9,7 @@ import subprocess
 from pathlib import Path
 
 import project_mvv
-from pace import PaceError, read_pace
+from pace import MVV_PACES, PaceError, read_pace
 from step_result import result
 from supervise_lib.decl import SUPERVISE_DECL, decl_roots, with_decls
 from supervise_lib.mission_waves import (
@@ -180,8 +180,6 @@ def close_waves(a) -> list[dict]:
         {"name": "まとめ", "plans": {"close": close_plan(a, repo)}, "then_of": "最終の検査"},
     ]
 
-
-MVV_PACES = ("fast", "auto")  # 承認ゲートを MVV 判定で通す進め方（使ってよい条件を確かめる）
 
 
 def pace_refusal(a) -> str | None:
