@@ -350,7 +350,7 @@ gh issue edit <issue番号> --repo "$RECORD_REPO" --body-file /tmp/issue-body.md
 
 ## 蓄積した課題を棚卸しする
 
-**「スプリントを閉じる」の後に `/ndf:issue-upkeep` を呼ぶ。** 順序を逆にすると、`issue-upkeep` の
+**「スプリントを閉じる」の後に `/ndf:backlog-refinement` を呼ぶ。** 順序を逆にすると、`backlog-refinement` の
 手順 1 が読む「このスプリントで閉じた課題」がまだ閉じていない。振り返りが拾うのは、この変更から出た
 取りこぼしである。**変更をまたいで溜まった課題そのもの**は対象にしていない。
 
@@ -358,7 +358,7 @@ gh issue edit <issue番号> --repo "$RECORD_REPO" --body-file /tmp/issue-body.md
 
 **振り返りはクラスタの発見を担わない。** クラスタは、同じ修正レイヤーを指す課題の集まりで
 ある。振り返りは 1 回の変更を見るため、変更をまたいで溜まった課題どうしの関係が見えない。
-見つけるのは `issue-upkeep` の「ルートコーズ」である。
+見つけるのは `backlog-refinement` の「ルートコーズ」である。
 
 ## 関連
 
@@ -366,4 +366,4 @@ gh issue edit <issue番号> --repo "$RECORD_REPO" --body-file /tmp/issue-body.md
 - `/ndf:out-of-scope` — 取りこぼしを見つけたときの起票
 - `/ndf:plan-to-spec` — 決まった仕様の永続化（振り返りとは別の出力物）
 - `/ndf:progress-tracking` — 「スプリントを閉じる」の正本
-- `/ndf:issue-upkeep` — 蓄積した課題の棚卸し（この工程の最後に呼ぶ）
+- `/ndf:backlog-refinement` — 蓄積した課題の棚卸し（この工程の最後に呼ぶ）

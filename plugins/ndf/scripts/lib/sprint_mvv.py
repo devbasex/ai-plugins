@@ -19,20 +19,42 @@ import subprocess
 from pathlib import Path
 
 import md
+from gh_sections import SECTION_END
 
 MVV_SECTIONS = ("Mission", "Vision", "Value")
 MVV_PACES = ("fast", "auto")  # 承認ゲートを MVV 判定で通す進め方（スプリント MVV を写せなければ止まり、写しを照合する）
 EXIT_UNREADABLE, EXIT_PRECONDITION = 2, 3
 
 
+# 説明の末尾に棚卸しが置く表。棚卸しのたびに変わり、スプリント MVV の承認の対象ではないため写さない（#1429 の決定 16）
+BACKLOG_TABLES = ("### 並列の組（見込み）", "### 順位")
+
+
+def _drop_backlog_tables(block: str) -> str:
+    """節の中から棚卸しの表（見出しから、次の `###` 以上の見出しか節の終わりの目印まで）を除く。"""
+    out, skip = [], False
+    for line in block.split("\n"):
+        if line.strip() in BACKLOG_TABLES:
+            skip = True
+            continue
+        if skip and line.strip() == SECTION_END:
+            skip = False
+            continue
+        if skip and re.match(r"#{1,3}\s", line):
+            skip = False
+        if not skip:
+            out.append(line)
+    return "\n".join(out).strip()
+
+
 def mvv_sections(text: str) -> str | None:
-    """説明から Mission / Vision / Value の節を順に取り出す。1 つでも無ければ None。"""
+    """説明から Mission / Vision / Value の節を順に取り出す。1 つでも無ければ None。棚卸しの表は含めない。"""
     lines = text.splitlines()
     found = {}
     for s in md.md_sections(text):
         m = re.match(r"(Mission|Vision|Value)\b", s.heading.title)
         if s.heading.level == 2 and m and lines[s.heading.line].startswith("## "):
-            found.setdefault(m.group(1), "\n".join(lines[s.heading.line : s.end]).strip())
+            found.setdefault(m.group(1), _drop_backlog_tables("\n".join(lines[s.heading.line : s.end])))
     if any(k not in found for k in MVV_SECTIONS):
         return None
     return "\n\n".join(found[k] for k in MVV_SECTIONS) + "\n"

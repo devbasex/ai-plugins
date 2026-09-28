@@ -383,7 +383,7 @@ git checkout release/<PLAN-ID>
 
 - `/ndf:implementation-plan` — plan ファイルのフォーマット (本 skill が依存)
 - `/ndf:development-workflow` — 並行の必須ルールと変更重複の目安（`references/parallel-work.md`）
-- `/ndf:issue-upkeep` — マイルストーンの説明へ書く課題グループ（実行計画のバンドルの初期値）
+- `/ndf:backlog-refinement` — マイルストーンの説明へ書く課題グループ（実行計画のバンドルの初期値）
 - `/ndf:pr` — 通常の PR 作成 / 更新
 - `/ndf:cherry-pick-pr` — 検証ブランチへの cherry-pick PR とブランチ汚染を避ける原則
 - `/ndf:pr-review` / `/ndf:cross-review` — レビュー（`--branch` で PR 前のセルフレビュー）

@@ -1,4 +1,4 @@
-"""`issue-upkeep` の構成と配線（#331 / #712 / #713）。"""
+"""`backlog-refinement` の構成と配線（#331 / #712 / #713）。"""
 
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ def test_the_skill_is_distributed(runtime: str) -> None:
     """4 つの manifest すべてに載る。"""
     manifest = ROOT / "plugins" / "ndf" / "manifests" / f"{runtime}-skills.txt"
     names = [line.split("#", 1)[0].strip() for line in manifest.read_text(encoding="utf-8").splitlines()]
-    assert "issue-upkeep" in names
+    assert "backlog-refinement" in names
 
 
 # ---------- やり直しで 2 度行わない（grouping.md） ----------

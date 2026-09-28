@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""upkeep.py: issue-upkeep の手順 1（候補の収集）と手順 3（反映）の決まった手順。
+"""upkeep.py: backlog-refinement の手順 1（候補の収集）と手順 3（反映）の決まった手順。
 
     python3 upkeep.py candidates --since-ref <ref> [--all] [--add 12,34] [--limit N]
                       [--repo owner/name] [--state-dir <dir>] [--root <dir>]
     python3 upkeep.py apply --plan plan.json [--max-waits N] [--max-wait 秒]
                       [--repo owner/name] [--state-dir <dir>] [--root <dir>]
     python3 upkeep.py report [--repo owner/name] [--state-dir <dir>] [--root <dir>]
+    python3 upkeep.py rank [--scores <見積の入力>] [--capacity N] ...（引数と記録は upkeep_rank_cmd.py の冒頭）
 
 区分の決定（手順 2A / 2B）は持たない。LLM が candidates の結果を読んで区分を決め、plan.json に書く。
 
@@ -13,7 +14,8 @@ candidates: 手順 1 の経路のうち機械で集められるものを集め�
   経路は diff-path（差分のパス）/ diff-identifier（削除された識別子）/ no-milestone /
   closed-milestone（閉じた課題のマイルストーン）/ sub-issue（閉じた親の子）/
   commit-subject（<ref>..HEAD のコミットの件名が #番号で指す）/ all（--all）/
-  manual（--add で担当が足したもの）。commit-subject の候補は、上限で切るときも先に残す。候補ごとに updated_at と
+  manual（--add で担当が足したもの）/ unscored（記録の見積が無いか、付けた後に要約値が変わった課題。rank を打った
+  リポジトリだけ。上限で切るときは数えない）。commit-subject の候補は、上限で切るときも先に残す。候補ごとに updated_at と
   課題の要約値（題名・本文・状態・マイルストーン・ラベル）を返す。
   --limit で 1 回に扱う件数に上限を置く。超えた分は items に載せず、metrics.deferred に番号だけを返す（終了コード 20）。
 apply: plan.json の変更を反映する。反映の直前に updated_at を照合し、変わっていれば課題の
@@ -21,7 +23,9 @@ apply: plan.json の変更を反映する。反映の直前に updated_at を照
   要約値を記録に残し、打ち直しでは自分の書き込みとして扱う。済んだものは記録に記録して
   2 度書かない。上限に当たれば Retry-After / 回復時刻 / 倍々の順で待ち、--max-waits を
   超えたら部分的に終わった状態で止める。
-report: candidates と apply の記録から完了報告の値を返す。candidates は前の回の apply の記録を消す。
+report: candidates・rank・apply の記録から完了報告の値を返す。candidates は前の回の apply と rank の記録を消す。
+rank: 順位・切り出しの境界・前倒しと後ろ倒しの候補（算出は upkeep_rank.py）。plan の rank・rejected・reschedule は
+  upkeep_rank_cmd.py の RankPlan が確かめ、承認の要る移動は「やらない」と同じく needs_approval へ回す。
 
 plan.json の形:
 
@@ -31,7 +35,10 @@ plan.json の形:
                   "changes": {"body": "...", "title": "...", "milestone": "<題名>" | null,
                               "add_labels": ["..."], "remove_labels": ["..."],
                               "state": "closed", "state_reason": "completed" | "not_planned"},
-                  "approved": false}]}
+                  "reschedule": "前倒し" | "後ろ倒し",  # rank の候補を反映するときだけ
+                  "approved": false}],
+     "rank": "<rank.json の metrics.digest>",  # 書くと各マイルストーンの説明の ### 順位 を書く
+     "rejected": [{"number": 34, "direction": "前倒し" | "後ろ倒し"}]}  # 人が退けた移動
 
 結果は lib/step_result.py の形の 1 行の JSON。終了コードは 0 = ok / 10 = 「やらない」に承認が
 要る / 20 = LLM の判断待ち（上限を超えた候補・照合で飛ばした課題・部分的に終わった反映）/
@@ -67,9 +74,11 @@ from step_result import (
     main_with,
     result,
 )
+import upkeep_rank_cmd as RC  # noqa: E402
+import upkeep_report  # noqa: E402
 from upkeep_gh import DEFAULT_MAX_WAIT, DEFAULT_MAX_WAITS, Gh, Milestones, Partial, _issues, _repo, _with_labels  # noqa: E402
 
-TOOL = "issue-upkeep"
+TOOL = "backlog-refinement"
 
 VERDICTS = ("そのまま", "追記が要る", "書き直しが要る", "閉じてよい", "やらない", "重複", "ルートコーズ", "要判断")
 # 承認を得てから反映する区分。承認の無いものは needs_approval へ回す。
@@ -77,7 +86,7 @@ NEEDS_APPROVAL = ("やらない",)
 # 反映しない区分。人へ返す。
 RETURNED = ("要判断",)
 
-ROUTES = ("diff-path", "diff-identifier", "no-milestone", "closed-milestone", "sub-issue", "commit-subject", "all", "manual")
+ROUTES = ("diff-path", "diff-identifier", "no-milestone", "closed-milestone", "sub-issue", "commit-subject", "all", "manual", "unscored")
 
 # 削除された識別子として拾う語の形。短い語や記号を含まない語は、ありふれた単語と区別できない。
 _TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]*[A-Za-z0-9_]")
@@ -117,7 +126,7 @@ def _is_identifier(tok: str) -> bool:
 
 
 def _state_dir(arg, repo: str) -> Path:
-    base = arg or os.environ.get("NDF_UPKEEP_STATE_DIR") or str(Path(tempfile.gettempdir()) / "ndf" / "issue-upkeep")
+    base = arg or os.environ.get("NDF_UPKEEP_STATE_DIR") or str(Path(tempfile.gettempdir()) / "ndf" / "backlog-refinement")
     d = Path(base) / repo.replace("/", "--")
     d.mkdir(parents=True, exist_ok=True)
     return d
@@ -234,8 +243,8 @@ def _route_milestones(gh, repo, open_issues, since, routes, notes):
         open_titles = {i["milestone"]["title"] for i in open_issues if i.get("milestone")}
         empty_milestones = sorted(t for t in touched if t not in open_titles)
     else:
-        notes.append("マイルストーンが無いため no-milestone と closed-milestone を飛ばした")
-    return closed, empty_milestones
+        notes.append("マイルストーンが無いため no-milestone と closed-milestone と unscored を飛ばした")
+    return closed, empty_milestones, bool(milestones)
 
 
 def _route_sub_issues(gh, repo, closed, open_issues, routes, notes):
@@ -280,7 +289,7 @@ def _route_manual(a, routes, notes):
 def _candidate_result(a, repo, since, open_issues, closed, paths, idents, routes, empty_milestones, notes, waits):
     found = routes.routes
     # コミットの件名が指す課題は直っている見込みが高いため、上限で切るときも先に残す
-    order = sorted(found, key=lambda n: ("commit-subject" not in found[n], -len(found[n]), n))
+    order = sorted(found, key=lambda n: ("commit-subject" not in found[n], -len(found[n] - {"unscored"}), n))
     keep = order if a.limit is None else order[: a.limit]
     deferred = [n for n in order if n not in set(keep)]
     items = []
@@ -346,14 +355,17 @@ def cmd_candidates(a):
     notes = []
 
     paths, idents = _route_diff(open_issues, root, a.since_ref, routes)
-    closed, empty_milestones = _route_milestones(gh, repo, open_issues, since, routes, notes)
+    closed, empty_milestones, has_milestones = _route_milestones(gh, repo, open_issues, since, routes, notes)
     _route_sub_issues(gh, repo, closed, open_issues, routes, notes)
     _route_commits(root, a.since_ref, routes)
     _route_manual(a, routes, notes)
+    sd = _state_dir(a.state_dir, repo)
+    for n in RC.unscored(sd, _read_state, open_issues, snapshot_digest) if has_milestones else []:
+        routes.add(n, "unscored")
 
     out, deferred = _candidate_result(a, repo, since, open_issues, closed, paths, idents, routes, empty_milestones, notes, gh.waits)
-    sd = _state_dir(a.state_dir, repo)
-    (sd / "apply.json").unlink(missing_ok=True)  # 前の回の apply を今回の報告へ混ぜない
+    for f in ("apply.json", "rank.json"):  # 前の回の apply と rank を今回の報告へ混ぜない
+        (sd / f).unlink(missing_ok=True)
     jsonio.write_atomic(sd / "candidates.json", out, indent=1)
     emit(out, EXIT_PAUSE if deferred else None)
 
@@ -416,8 +428,8 @@ def _diff(cur: dict, ch: dict, ms: Milestones, n: int) -> tuple[dict, list, list
     return patch, add, remove
 
 
-def _apply_one(gh, ms, repo, act, rec, record):
-    """1 件を反映し (区分, 理由) を返す。Partial は書き込み後の要約値を記録してから投げ直す。"""
+def _apply_one(gh, ms, repo, act, rec, record, hold=None):
+    """1 件を反映し (区分, 理由) を返す。hold は承認を待つ移動の理由。Partial は書き込み後の要約値を記録してから投げ直す。"""
     n, verdict, ch = act["number"], act["verdict"], act.get("changes") or {}
     if verdict in RETURNED:
         return "returned", "要判断は反映しない"
@@ -425,6 +437,8 @@ def _apply_one(gh, ms, repo, act, rec, record):
         return "already", "記録にある"
     if verdict in NEEDS_APPROVAL and act.get("approved") is not True:
         return "needs_approval", "やらないは承認を得てから反映する"
+    if hold:  # 承認の要る前倒し・後ろ倒しは approved によらず待つ（rank --approved で承認済みになる）
+        return "needs_approval", hold
     cur, wrote = None, False
     try:
         cur = gh.call([f"repos/{repo}/issues/{n}"], target=n)
@@ -462,7 +476,7 @@ def _apply_one(gh, ms, repo, act, rec, record):
         raise
 
 
-def _apply_outcome(repo, actions, buckets, partial, why_partial, prev, waits):
+def _apply_outcome(repo, actions, buckets, partial, why_partial, prev, waits, rp):
     """区分ごとの課題番号から metrics・要約・終了の状態・次の手を作る。"""
     closed = [
         act["number"] for act in actions if act["number"] in buckets["applied"] and (act.get("changes") or {}).get("state") == "closed"
@@ -479,6 +493,7 @@ def _apply_outcome(repo, actions, buckets, partial, why_partial, prev, waits):
         },
         "partial": partial,
         "verdicts": {v: sum(1 for act in actions if act["verdict"] == v) for v in VERDICTS},
+        "tables": rp.tables,
     }
     summary = (
         f"反映 {len(buckets['applied'])} 件（閉じた {len(closed)} 件）・照合で飛ばした "
@@ -492,27 +507,18 @@ def _apply_outcome(repo, actions, buckets, partial, why_partial, prev, waits):
         status, code = "stopped", 1
     elif buckets["needs_approval"]:
         status, code = "gate", 10
-        pres = approval_present(
-            TOOL,
-            repo.replace("/", "--") + "-no-work",
-            title="「やらない」で閉じる課題の承認",
-            targets=[{"url": f"https://github.com/{repo}/issues/{x}"} for x in buckets["needs_approval"]],
-            change=f"{len(buckets['needs_approval'])} 件を wontfix で閉じる",
-            judge=[
-                (f"#{act['number']}", (act.get("changes") or {}).get("body", "")[:300])
-                for act in actions
-                if act["number"] in buckets["needs_approval"]
-            ],
-            consent=[f"#{x} を「やらない」で閉じる" for x in buckets["needs_approval"]],
-            rollback="閉じた課題を reopen し、wontfix を外す（本文は GitHub の編集履歴から戻せる）",
-        )
+        pres = RC.approval_presentation(TOOL, repo, actions, buckets["needs_approval"], rp.holds, approval_present)
         nxt = '承認を得た課題に "approved": true を付けて同じ plan で apply を打ち直す（済んだものは記録で飛ぶ）'
-    elif partial or buckets["skipped_changed"]:
+        if rp.holds:
+            nxt += "。前倒し・後ろ倒しは承認を得た番号を rank --approved で渡して打ち直し、その結果で plan を作り直す"
+    elif rp.stale:
+        status, code, nxt = "gate", EXIT_PAUSE, "plan の rank が rank.json と合わない。rank を打ち直して plan を作り直す"
+    elif partial or buckets["skipped_changed"] or rp.tables["failed"]:
         status, code = "gate", EXIT_PAUSE
         parts = []
         if buckets["skipped_changed"]:
             parts.append("照合で飛ばした " + " ".join(f"#{x}" for x in buckets["skipped_changed"]) + " を手順 2A へ戻す")
-        if partial:
+        if partial or rp.tables["failed"]:
             parts.append("時間を置いて同じ plan で apply を打ち直す（済んだものは記録で飛ぶ）")
         nxt = "。".join(parts)
     return status, code, summary, metrics, pres, nxt
@@ -529,7 +535,8 @@ def cmd_apply(a):
     ms = Milestones(gh)
     buckets = {k: [] for k in ("applied", "skipped_changed", "unchanged", "already", "needs_approval", "returned", "failed", "pending")}
     items, partial, why_partial = [], False, ""
-    actions = plan["actions"]
+    rp = RC.RankPlan(plan, sd, _read_state)
+    actions = [] if rp.stale else plan["actions"]  # rank.json と合わない plan は何も書かない
     for idx, act in enumerate(actions):
         n, verdict = act["number"], act["verdict"]
         key = _ledger_key(repo, act)
@@ -539,7 +546,7 @@ def cmd_apply(a):
             jsonio.write_atomic(ledger_path, ledger, indent=1)
 
         try:
-            bucket, reason = _apply_one(gh, ms, repo, act, ledger.get(key), record)
+            bucket, reason = _apply_one(gh, ms, repo, act, ledger.get(key), record, rp.hold(act))
         except Partial as e:
             partial, why_partial = True, str(e)
             for rest in actions[idx:]:
@@ -551,84 +558,18 @@ def cmd_apply(a):
         if reason:
             it["reason"] = reason
         items.append(it)
+    try:
+        rp.tables = rp.write_tables(None if partial else ms)
+    except Partial as e:
+        partial, why_partial = True, str(e)
+    rp.update_rejected()
 
     # 同じ回（前の candidates 以降）の打ち直しを足し合わせ、承認後・partial 後の報告から前の反映と待ちを落とさない
     prev = ((_read_state(sd / "apply.json") or {}).get("metrics") or {}).get("round") or {}
-    status, code, summary, metrics, pres, nxt = _apply_outcome(repo, actions, buckets, partial, why_partial, prev, gh.waits)
+    status, code, summary, metrics, pres, nxt = _apply_outcome(repo, actions, buckets, partial, why_partial, prev, gh.waits, rp)
     out = result(TOOL, status, summary, items, metrics, presentation_path=pres, next=nxt)
     jsonio.write_atomic(sd / "apply.json", out, indent=1)
     emit(out, code)
-
-
-# ---------------- report ----------------
-
-
-def cmd_report(a):
-    root = git_root(a.root)
-    repo = _repo(root, a.repo)
-    sd = _state_dir(a.state_dir, repo)
-    cand, app = _read_state(sd / "candidates.json"), _read_state(sd / "apply.json")
-    if cand is None and app is None:
-        raise StepError(f"記録が無い（candidates も apply もまだ打っていない）: {sd}", EXIT_PRECONDITION)
-    items, metrics = [], {"repo": repo}
-    if cand:
-        cm = cand["metrics"]
-        metrics.update(
-            {
-                "targets": cm["candidates"],
-                "by_route": cm["by_route"],
-                "deferred": cm["deferred"],
-                "notes": cm.get("notes", []),
-                "empty_milestones": [i["name"] for i in cand["items"] if i["kind"] == "milestone"],
-            }
-        )
-        items.append(
-            {
-                "kind": "section",
-                "name": "対象",
-                "result": "ok",
-                "value": f"{cm['candidates']} 件（" + "・".join(f"{r} {c}" for r, c in cm["by_route"].items() if c) + "）"
-                if cm["candidates"]
-                else "0 件のため飛ばした",
-            }
-        )
-    if app:
-        am = app["metrics"]
-        rnd = am.get("round") or {**am, "runs": 1}  # round を持たない前の版の記録は、最後の 1 回だけを数える
-        applied, closed, waits = rnd["applied"], rnd["closed"], rnd.get("waits", [])
-        metrics.update(
-            {
-                "verdicts": am["verdicts"],
-                "applied": len(applied),
-                "closed": len(closed),
-                "apply_runs": rnd["runs"],
-                "returned": len(am["returned"]),
-                "skipped_changed": am["skipped_changed"],
-                "needs_approval": am["needs_approval"],
-                "failed": am["failed"],
-                "pending": am["pending"],
-                "partial": am["partial"],
-                "wait_count": len(waits),
-                "wait_seconds": round(sum(w["seconds"] for w in waits), 1),
-            }
-        )
-        items += [
-            {
-                "kind": "section",
-                "name": "区分の内訳",
-                "result": "ok",
-                "value": "・".join(f"{v} {c}" for v, c in am["verdicts"].items() if c),
-            },
-            {
-                "kind": "section",
-                "name": "反映",
-                "result": "partial" if am["partial"] else "ok",
-                "value": f"直した {len(applied) - len(closed)} 件・閉じた {len(closed)} 件・返した {len(am['returned'])} 件",
-            },
-            {"kind": "section", "name": "待った回数", "result": "ok", "value": f"{len(waits)} 回・計 {metrics['wait_seconds']:g} 秒"},
-        ]
-    summary = " / ".join(f"{i['name']}: {i['value']}" for i in items)
-    emit(result(TOOL, "ok", summary, items, metrics))
 
 
 # ---------------- CLI ----------------
@@ -658,8 +599,10 @@ def build_parser():
     p.add_argument("--max-waits", type=int, default=DEFAULT_MAX_WAITS)
     p.add_argument("--max-wait", type=float, default=DEFAULT_MAX_WAIT, help="1 回の待ちの上限（秒）")
     p.set_defaults(func=cmd_apply)
+    ctx = argparse.Namespace(tool=TOOL, state_dir=_state_dir, read_state=_read_state)
     r = sub.add_parser("report", parents=[common])
-    r.set_defaults(func=cmd_report)
+    r.set_defaults(func=lambda a: upkeep_report.cmd_report(a, ctx))
+    RC.add_parser(sub, common, _numbers, lambda a: RC.cmd_rank(a, ctx))
     return ap
 
 

@@ -1,6 +1,6 @@
 # 課題を根本原因の場所で直す区分（ルートコーズ）
 
-溜まった課題の棚卸（`issue-upkeep`）に、課題を現れている場所ではなく根本原因の場所で直すと
+溜まった課題の棚卸（`backlog-refinement`）に、課題を根本原因の場所で直すと
 決める区分「ルートコーズ」を置いた。あわせて、どこを直すかという構造の判断の担い手を、4 つの
 Skill の境界に書いた。この文書は、決めたことの理由と、実測で確かめた事実を残す。
 
@@ -9,10 +9,10 @@ Skill の境界に書いた。この文書は、決めたことの理由と、�
 
 | 何を読むか | 正本 |
 | --- | --- |
-| 8 つの区分の並び、用語、手順 1 / 2A / 2B / 3、判断と見る対象の表 | `plugins/ndf/skills/issue-upkeep/SKILL.md` |
-| ルートコーズの条件、手順 3 での対応、修正レイヤーの決め方、修正方針、親 issue と子 issue | `plugins/ndf/skills/issue-upkeep/references/grouping.md` |
-| 「やらない」の条件 2 の行き先 | `plugins/ndf/skills/issue-upkeep/references/no-work.md` |
-| 直近のマイルストーン、親 issue の割り当て | `plugins/ndf/skills/issue-upkeep/references/milestones.md` |
+| 8 つの区分の並び、用語、手順 1 / 2A / 2B / 3、判断と見る対象の表 | `plugins/ndf/skills/backlog-refinement/SKILL.md` |
+| ルートコーズの条件、手順 3 での対応、修正レイヤーの決め方、修正方針、親 issue と子 issue | `plugins/ndf/skills/backlog-refinement/references/grouping.md` |
+| 「やらない」の条件 2 の行き先 | `plugins/ndf/skills/backlog-refinement/references/no-work.md` |
+| 直近のマイルストーン、親 issue の割り当て | `plugins/ndf/skills/backlog-refinement/references/milestones.md` |
 
 ## 概要
 
@@ -56,9 +56,9 @@ Skill の境界に書いた。この文書は、決めたことの理由と、�
 指す記録が無かった。
 
 **課題への判断は、価値（やるか）と構造（どこを直すか）の 2 種類ある。** 発見の瞬間の判断は
-`out-of-scope` と `problem-solving` が持ち、溜まった課題の価値の判断は `issue-upkeep` の
+`out-of-scope` と `problem-solving` が持ち、溜まった課題の価値の判断は `backlog-refinement` の
 「やらない」が持っていた。溜まった課題の構造の判断を、どの Skill も自分の役目と書いていな
-かった。この升を「ルートコーズ」で埋め、判断と見る対象の表の正本を `issue-upkeep` に置いた。
+かった。この升を「ルートコーズ」で埋め、判断と見る対象の表の正本を `backlog-refinement` に置いた。
 
 ## 仕様
 
@@ -159,7 +159,7 @@ open の `13` は説明に「次に着手する（05 より先）」と書き、
 
 ## テスト観点
 
-`plugins/ndf/skills/issue-upkeep/tests/test_issue_upkeep_layout.py` が、`SKILL.md` と参照の文字列を
+`plugins/ndf/skills/backlog-refinement/tests/test_issue_upkeep_layout.py` が、`SKILL.md` と参照の文字列を
 直接照合する。
 
 | 観点 | 満たすこと |
@@ -179,7 +179,7 @@ GitHub 上の状態（親 issue の起票と結び付け）は自動テストに
 
 ## 関連リンク
 
-- [issue-upkeep](../../plugins/ndf/skills/issue-upkeep/SKILL.md)
-- [grouping.md](../../plugins/ndf/skills/issue-upkeep/references/grouping.md)
+- [backlog-refinement](../../plugins/ndf/skills/backlog-refinement/SKILL.md)
+- [grouping.md](../../plugins/ndf/skills/backlog-refinement/references/grouping.md)
 - [refactoring の手法の呼び名](../../plugins/ndf/skills/refactoring/references/vocabulary.md)
 - 起点の課題: #712 / #713。設計: PR #714。実装: PR #717

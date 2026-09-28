@@ -17,7 +17,7 @@ notion-writing
 merged
 ndf-policies
 out-of-scope
-issue-upkeep
+backlog-refinement
 progress-tracking
 plan-to-spec
 pr

@@ -49,7 +49,7 @@
     {
       "id": "ndf-issue-upkeep",
       "name": "NDF の課題の棚卸し",
-      "meaning": "issue-upkeep と out-of-scope が課題を分類し、起票するときの語。区分・現象レイヤー・修正レイヤー・起票先"
+      "meaning": "backlog-refinement と out-of-scope が課題を分類し、起票するときの語。区分・現象レイヤー・修正レイヤー・起票先"
     },
     {
       "id": "ndf-worktree",
@@ -567,7 +567,7 @@
     {
       "term": "棚卸し",
       "context": "ndf-workflow",
-      "meaning": "既存の課題の本文・マイルストーン・ラベルを現状に合わせること",
+      "meaning": "既存の課題の本文・マイルストーン・ラベルを現状に合わせ、着手の順位を決め直すこと。スクラムのバックログリファインメントに当たる",
       "deprecated": [
         "手入れ"
       ],
@@ -758,7 +758,7 @@
     {
       "term": "区分",
       "context": "ndf-issue-upkeep",
-      "meaning": "issue-upkeep が課題ごとに決める 8 つ（そのまま・追記が要る・書き直しが要る・閉じてよい・やらない・重複・ルートコーズ・要判断）",
+      "meaning": "backlog-refinement が課題ごとに決める 8 つ（そのまま・追記が要る・書き直しが要る・閉じてよい・やらない・重複・ルートコーズ・要判断）",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
@@ -1544,13 +1544,13 @@
       "term": "やらない",
       "context": "ndf-issue-upkeep",
       "meaning": "課題そのものは成り立つが、抱える費用が直す費用を下回ると決める区分の値",
-      "source": "plugins/ndf/skills/issue-upkeep/SKILL.md"
+      "source": "plugins/ndf/skills/backlog-refinement/SKILL.md"
     },
     {
       "term": "再検討条件",
       "context": "ndf-issue-upkeep",
       "meaning": "「やらない」で閉じた課題を再び考える条件",
-      "source": "plugins/ndf/skills/issue-upkeep/SKILL.md",
+      "source": "plugins/ndf/skills/backlog-refinement/SKILL.md",
       "deprecated": [
         "再燃の条件"
       ]
@@ -1901,7 +1901,7 @@
     {
       "term": "完了判定",
       "context": "ndf-workflow",
-      "meaning": "コマンドの証跡で完了を判定する工程",
+      "meaning": "コマンドの証跡で完了を判定する工程。スクラムの完了の定義に当たる",
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
