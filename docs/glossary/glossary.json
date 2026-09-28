@@ -2263,16 +2263,16 @@
     {
       "term": "使用率",
       "context": "ndf-relay",
-      "meaning": "api/oauth/usage が返す five_hour / seven_day の utilization（%）。推論を呼ばずに読む",
+      "meaning": "api/oauth/usage が返す five_hour / seven_day の utilization と、limits[] の weekly_scoped の percent（%）。推論を呼ばずに読む。切り替えの閾値と比べるのはその最大",
       "source": "",
-      "pending_source": "issues/issue-1389-requirements.md"
+      "pending_source": "issues/issue-1453-design.md"
     },
     {
       "term": "支出上限",
       "context": "ndf-relay",
-      "meaning": "追加利用の支出の上限（individual spend limit）。extra_usage.spend_limit_reached で読む",
+      "meaning": "追加利用の支出の上限（individual spend limit）。extra_usage.spend_limit_reached が真か、spend.percent が 100 以上か、spend.severity が critical なら達したとする",
       "source": "",
-      "pending_source": "issues/issue-1389-requirements.md"
+      "pending_source": "issues/issue-1453-design.md"
     },
     {
       "term": "従量の接続",
@@ -2499,6 +2499,36 @@
       "context": "ndf-issue-upkeep",
       "meaning": "着手の前に人の判断（needs-decision・承認ゲート）を要する状態。費用に数えず、順位の値を変えずに印として出す",
       "pending_source": "issues/issue-1429-design.md"
+    },
+    {
+      "term": "残りの量",
+      "context": "ndf-relay",
+      "meaning": "登録済みアカウントが上限に達するまでに使える量の見積り。枠ごとの「枠の大きさ ×（1 − 使用率 / 100）」の最小（USD 換算）。保存せず、選ぶ・一覧を出すたびに求める",
+      "pending_source": "issues/issue-1453-design.md"
+    },
+    {
+      "term": "枠の大きさ",
+      "context": "ndf-relay",
+      "meaning": "1 つの枠（5 時間の枠・週の枠・モデル別の週の枠）が 0% から 100% になるまでに使える量（USD 換算）。支出上限とは別の量",
+      "pending_source": "issues/issue-1453-design.md"
+    },
+    {
+      "term": "枠の大きさの対応表",
+      "context": "ndf-relay",
+      "meaning": "rateLimitTier から 5 時間の枠と週の枠の大きさを引く表（claude_accounts.CAPACITY）",
+      "pending_source": "issues/issue-1453-design.md"
+    },
+    {
+      "term": "枠の大きさの宣言",
+      "context": "ndf-relay",
+      "meaning": "利用者が登録済みアカウントごとに書く枠の大きさ（account.json の capacity）。対応表の値より先に効く",
+      "pending_source": "issues/issue-1453-design.md"
+    },
+    {
+      "term": "モデル別の週の枠",
+      "context": "ndf-relay",
+      "meaning": "使用量の応答の limits[] のうち kind が weekly_scoped のもの。特定のモデル（例: Fable）だけの週の上限",
+      "pending_source": "issues/issue-1453-design.md"
     }
   ]
 }
