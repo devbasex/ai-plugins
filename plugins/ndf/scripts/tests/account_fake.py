@@ -87,8 +87,24 @@ class Store:
         self.fake = fake
         self.shared = shared
 
-    def add(self, name, email=None, token=None, expires_in=8 * 3600, util5=10.0, util7=10.0, spend=False, scopes=None, refresh_in=None):
-        """アカウントを置き場へ直に置き、偽物に残量を持たせる。`util5` が None なら残量を返さない（503）。"""
+    def add(
+        self,
+        name,
+        email=None,
+        token=None,
+        expires_in=8 * 3600,
+        util5=10.0,
+        util7=10.0,
+        spend=False,
+        scopes=None,
+        refresh_in=None,
+        org_id=None,
+        org_name=None,
+    ):
+        """アカウントを置き場へ直に置き、偽物に残量を持たせる。`util5` が None なら残量を返さない（503）。
+
+        `org_id` が None なら組織を書かない（組織を記録する前の account.json の形）。
+        """
         token = token or f"{name}-access-SECRET"
         d = self.root / name
         d.mkdir(parents=True, mode=0o700, exist_ok=True)
@@ -102,16 +118,16 @@ class Store:
         if refresh_in is not None:
             oauth["refreshTokenExpiresAt"] = int((time.time() + refresh_in) * 1000)
         self.write(d / ".credentials.json", {"claudeAiOauth": oauth})
-        self.write(
-            d / "account.json",
-            {
-                "name": name,
-                "email": email or f"{name}@example.com",
-                "registered_at": "2026-09-28T00:00:00+00:00",
-                "needs_relogin": False,
-                "limit": None,
-            },
-        )
+        row = {
+            "name": name,
+            "email": email or f"{name}@example.com",
+            "registered_at": "2026-09-28T00:00:00+00:00",
+            "needs_relogin": False,
+            "limit": None,
+        }
+        if org_id is not None:
+            row.update(org_id=org_id, org_name=org_name or "")
+        self.write(d / "account.json", row)
         if util5 is not None:
             self.fake.set_usage(token, window(util5, 3600), window(util7, 86400), spend)
         else:

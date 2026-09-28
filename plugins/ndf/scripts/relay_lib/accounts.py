@@ -1,7 +1,7 @@
 """`relay.py account add|list|remove`: 切り替えに使う claude アカウントの登録・一覧・削除（#1389）。
 
 置き場を書くのは `lib/claude_accounts.py` である。ここは端末の入出力と、専用の設定ディレクトリでの
-`claude auth login` / `auth status` / `auth logout` の起動だけを持つ（推論は呼ばない）。登録は利用者が端末から
+`claude auth login` / `auth status` / `auth logout` の起動と、重複の確かめ（I3）だけを持つ（推論は呼ばない）。登録は利用者が端末から
 打ったときだけ行う（I2）。
 """
 
@@ -38,8 +38,11 @@ def _auth(claude: str, config_dir: str, *args: str) -> subprocess.CompletedProce
         return None
 
 
-def _email(claude: str, config_dir: str) -> str | None:
-    """専用の設定ディレクトリの `claude auth status`（JSON）からメールアドレスを読む。"""
+def _identity(claude: str, config_dir: str) -> tuple[str, str, str] | None:
+    """専用の設定ディレクトリの `claude auth status`（JSON）からメールアドレス・組織の ID・組織名を読む。
+
+    組織の 2 つは無ければ空。1 つのメールアドレスで組織ごとに別のアカウントになるため、組織まで読む（I3）。
+    """
     p = _auth(claude, config_dir, "status", "--json")
     if p is None:
         return None
@@ -49,7 +52,27 @@ def _email(claude: str, config_dir: str) -> str | None:
         return None
     if not isinstance(d, dict) or not d.get("loggedIn") or not isinstance(d.get("email"), str):
         return None
-    return d["email"]
+    org_id, org_name = d.get("orgId"), d.get("orgName")
+    return d["email"], org_id if isinstance(org_id, str) else "", org_name if isinstance(org_name, str) else ""
+
+
+def owner_of(email: str, org_id: str = "", other_than: str = "") -> str | None:
+    """同じメールアドレスと組織で登録済みのアカウントの名前（I3）。
+
+    1 つのメールアドレスで複数の組織（個人と Team など）に属せ、組織ごとに利用上限が別になる。どちらかの
+    組織が分からない（組織を記録する前の登録）ときは、違うと言い切れないので同じとみなす。
+    """
+    for n in ca.names():
+        acc = ca.load_account(n)
+        if n == other_than or not acc or not acc.email or acc.email.lower() != email.lower():
+            continue
+        if not acc.org_id or not org_id or acc.org_id == org_id:
+            return n
+    return None
+
+
+def _who(email: str, org_name: str) -> str:
+    return f"{email}・{org_name}" if org_name else email
 
 
 def cmd_add(name: str) -> int:
@@ -78,18 +101,20 @@ def cmd_add(name: str) -> int:
         except (OSError, subprocess.SubprocessError) as e:
             print(f"claude auth login を起動できない（{e}）", file=sys.stderr)
             return 1
-        email = _email(claude, staging)
-        if email is None or not os.path.isfile(os.path.join(staging, ca.CRED_FILE)):
+        ident = _identity(claude, staging)
+        if ident is None or not os.path.isfile(os.path.join(staging, ca.CRED_FILE)):
             print("ログインが通らなかった。登録しない", file=sys.stderr)
             return 1
-        owner = ca.owner_of(email, other_than=name)
+        email, org_id, org_name = ident
+        owner = owner_of(email, org_id, other_than=name)
         if owner:
-            print(f"登録済み: {owner}（{email}）", file=sys.stderr)
+            acc = ca.load_account(owner)
+            print(f"登録済み: {owner}（{_who(acc.email, acc.org_name) if acc else email}）", file=sys.stderr)
             return 1
-        ca.register(name, staging, email)
+        ca.register(name, staging, email, org_id, org_name)
     finally:
         ca.discard(staging)
-    print(f"登録した: {name}（{email}）")
+    print(f"登録した: {name}（{_who(email, org_name)}）")
     return 0
 
 
@@ -112,9 +137,12 @@ def cmd_list(as_json: bool) -> int:
         print("登録済みのアカウントは無い")
         return 0
     table = [("名前", "識別", "5 時間", "7 日", "支出上限", "状態")]
+    emails = [r["email"].lower() for r in rows]
     for r in rows:
         spend = {True: "達している", False: "達していない"}.get(r["spend_limit_reached"], "-")
-        table.append((r["name"], r["email"], _window(r["five_hour"], "%H:%M"), _window(r["seven_day"], "%m-%d"), spend, r["state"]))
+        # 同じメールアドレスが 2 件以上あるときだけ組織名を添える（1 件なら個人の組織名はメールの繰り返しになる）
+        ident = f"{r['email']}（{r['org_name']}）" if r["org_name"] and emails.count(r["email"].lower()) > 1 else r["email"]
+        table.append((r["name"], ident, _window(r["five_hour"], "%H:%M"), _window(r["seven_day"], "%m-%d"), spend, r["state"]))
     widths = [max(_width(row[i]) for row in table) for i in range(len(table[0]))]
     for row in table:
         print("  ".join(c + " " * (w - _width(c)) for c, w in zip(row, widths)).rstrip())

@@ -134,7 +134,8 @@ conductor では、コンテキスト量の hook が工程へ入る起動を 1 �
 **claude のアカウントを 2 つ以上登録しておくと、利用上限で止まらずに別のアカウントで続く。** 登録は端末から打つ
 （`claude auth login` が URL を示し、認可コードの貼り付けを待つ）。**Linux（コンテナを含む）だけで使える。** macOS の
 claude はログインの資格情報を Keychain に置き、設定ディレクトリの `.credentials.json` を書かないため、macOS の
-`account add` は登録の前に止まる。
+`account add` は登録の前に止まる。1 つのメールアドレスで複数の組織（個人と Team など）に属していれば、組織ごとに別の
+アカウントとして登録できる（ログインのときに組織を選ぶ。同じメールアドレスと組織の 2 つ目は拒む）。
 
 ```bash
 python3 ~/.claude/ndf/relay.py account add work1   # 専用の設定ディレクトリで claude auth login が動く
@@ -148,6 +149,8 @@ python3 ~/.claude/ndf/relay.py account remove work2
 work1  a@example.com  15%（04:59）  3%（09-29）  達していない  使える
 work2  b@example.com  2%（05:40）   41%（09-30） 達していない  使える
 ```
+
+識別の列は、同じメールアドレスの登録が 2 件以上あるときだけ `a@example.com（Team A）` のように組織名を添える。
 
 状態は `使える`・`上限（<リセット時刻>）`・`支出上限`・`残量不明`・`再登録が要る` の 5 つ。`再登録が要る` は同じ名前で
 `account add` し直す。置き場は `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/accounts/`（0700。ファイルは 0600）で、共有の

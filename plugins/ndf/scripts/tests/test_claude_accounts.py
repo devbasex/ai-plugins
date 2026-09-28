@@ -247,13 +247,13 @@ def test_names_ignore_staging_and_reserved(accounts):
     assert not ca.valid_name("metered") and not ca.valid_name("A") and ca.valid_name("work-1")
 
 
-def test_register_replaces_and_owner_of(accounts):
+def test_register_replaces(accounts):
     accounts.add("a", email="x@example.com")
     st = Path(ca.staging_dir("b"))
     assert oct(st.stat().st_mode & 0o777) == "0o700" and ca.names() == ["a"]
-    assert ca.owner_of("X@example.com") == "a" and ca.owner_of("x@example.com", other_than="a") is None
     ca.register("b", str(st), "y@example.com")
     assert ca.names() == ["a", "b"] and accounts.account("b")["email"] == "y@example.com"
+    assert "org_id" not in accounts.account("b")  # 組織が分からなければ書かない
     ca.unregister("b")
     assert ca.names() == ["a"]
 
