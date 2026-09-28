@@ -257,9 +257,7 @@ def _term_schema_findings(i: int, t: dict, decl: Declaration, ids: list[str], hi
         hit("schema", t["term"], f"terms[{i}] の source は文字列で書く")
     elif "pending_source" in t and not isinstance(t["pending_source"], str):
         hit("schema", t["term"], f"terms[{i}] の pending_source は文字列で書く")
-    elif (
-        decl.source_paths and t.get("source") and "://" not in t["source"] and not declared_path_matches(t["source"], decl.source_paths)
-    ):
+    elif decl.source_paths and t.get("source") and "://" not in t["source"] and not declared_path_matches(t["source"], decl.source_paths):
         hit(
             "unconfirmed_source",
             t["term"],
@@ -280,9 +278,7 @@ def _deprecated_findings(i: int, t: dict, live_by_ctx: dict[str, set[str]], code
             hit("schema", w, f"terms[{i}] の廃止した語が同じコンテキストの生きた語と重なる")
     if "code" in t and code_of(t) is None:
         hit("schema", str(t["code"]), f"terms[{i}] の code は英小文字の snake_case で書く（例: approval_gate）")
-    if "deprecated_code" in t and (
-        not isinstance(t["deprecated_code"], list) or len(deprecated_code_of(t)) != len(t["deprecated_code"])
-    ):
+    if "deprecated_code" in t and (not isinstance(t["deprecated_code"], list) or len(deprecated_code_of(t)) != len(t["deprecated_code"])):
         hit("schema", t["term"], f"terms[{i}] の deprecated_code は英小文字の snake_case の文字列の配列で書く")
     for w in deprecated_code_of(t):
         if w in codes_by_ctx.get(t["context"], set()):
