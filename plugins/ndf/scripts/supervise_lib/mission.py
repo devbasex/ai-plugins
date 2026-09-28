@@ -181,7 +181,6 @@ def close_waves(a) -> list[dict]:
     ]
 
 
-
 def pace_refusal(a) -> str | None:
     """pace: fast / auto を使ってよい条件を確かめる。外れた理由を返す（満たせば None）。
     読む宣言の節が進め方の名前（fast / auto）である以外は同じ条件で、ほかの節の値は使わない。"""
