@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -123,6 +124,29 @@ def test_failing_at_cannot_tell_when_preparation_fails(tmp_path: Path) -> None:
     ran: list[str] = []
     out = test_triage.failing_at(str(repo), sha, _strategy(), ["t/a.py::x"], 60, tmp_path, lambda *a: ran.append("x") or (1, False))
     assert out is None and ran == []
+
+
+def test_failing_at_bounds_preparation_by_the_triage_limit(tmp_path: Path) -> None:
+    """依存の用意も走らせ直しと同じ上限の中で行い、使い切れば見分けられない（None）。"""
+    repo = repo_with_vendor(tmp_path, {"run": ["sleep 30"]})
+    sha = git(repo, "rev-parse", "HEAD").strip()
+    ran: list[str] = []
+    t0 = time.monotonic()
+    out = test_triage.failing_at(str(repo), sha, _strategy(), ["t/a.py::x"], 2, tmp_path, lambda *a: ran.append("x") or (1, False))
+    assert out is None and ran == []
+    assert time.monotonic() - t0 < 20
+
+
+def test_failing_at_skips_preparation_when_suites_run_in_containers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """コンテナの suite があれば一時の worktree は届かないため、用意の前に見分けられない（None）とする。"""
+    counter = tmp_path / "count"
+    repo = repo_with_vendor(tmp_path, {"run": [f"echo x >> {counter}"]})
+    sha = git(repo, "rev-parse", "HEAD").strip()
+    monkeypatch.setattr(test_triage.container_reach, "container_suites", lambda root: [("app", ())])
+    ran: list[str] = []
+    out = test_triage.failing_at(str(repo), sha, _strategy(), ["t/a.py::x"], 60, tmp_path, lambda *a: ran.append("x") or (1, False))
+    assert out is None and ran == []
+    assert not counter.exists()
 
 
 # --- 包み ---------------------------------------------------------------------

@@ -4,10 +4,10 @@
 #   prepare <worktree> [--if-unprepared]
 #       共有の宣言（.ndf/worktree.json）の `deps` 節に従って、依存物を worktree で使える状態にする。
 #       copy_from_main（ハードリンクの複製）・copy_as_real（実体の複製）・run（コマンド）の順に行う。
-#       --if-unprepared は、用意の印があれば何もしない（使い回す worktree で使う）
+#       --if-unprepared は、今の HEAD と宣言で用意した印があれば何もしない（使い回す worktree で使う）
 #
 # 終了コード:
-#   0  用意した / 宣言が無い / --if-unprepared で印があった
+#   0  用意した / 宣言が無い / --if-unprepared で今の HEAD と宣言の印があった
 #   1  用意が失敗した（複製元が無い・複製できない・書き込み先が外・コマンドが 0 以外・
 #      git の状態が変わった・copy_from_main のハードリンクがその場で書き換えられた）
 #   3  宣言が壊れている（手順を 1 つも実行しない）
@@ -69,7 +69,17 @@ GIT_DIR_ABS=$(git -C "$TARGET" rev-parse --absolute-git-dir 2>/dev/null) || {
 }
 MARK="$GIT_DIR_ABS/ndf-deps"
 
-if [ "$IF_UNPREPARED" = 1 ] && [ -f "$MARK" ]; then
+# 印の中身。用意した時の HEAD と宣言の中身を持ち、どちらかが変われば印は効かない
+# （同期で lockfile や package.json が変わった worktree を、古い依存物のまま使わない）。
+deps_key() {
+  local head decl=none
+  head=$(git -C "$TARGET" rev-parse HEAD 2>/dev/null) || head=none
+  [ -f "$DECL_FILE" ] && decl=$(cksum < "$DECL_FILE")
+  printf 'head=%s decl=%s' "$head" "$decl"
+}
+KEY=$(deps_key)
+
+if [ "$IF_UNPREPARED" = 1 ] && [ -f "$MARK" ] && [ "$(cat "$MARK" 2>/dev/null)" = "$KEY" ]; then
   exit 0
 fi
 
@@ -198,7 +208,7 @@ if [ "$BEFORE" != "$AFTER" ]; then
   fail "git の状態"
 fi
 
-date -Iseconds > "$MARK" 2>/dev/null || {
+printf '%s\n' "$KEY" > "$MARK" 2>/dev/null || {
   printf '用意の印を書けません: %s\n' "$MARK" >> "$LOG"
   fail "用意の印"
 }

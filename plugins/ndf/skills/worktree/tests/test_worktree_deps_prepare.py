@@ -253,6 +253,25 @@ def test_if_unprepared_skips_when_marked(repo: Path, tmp_path: Path) -> None:
     assert counter.read_text().count("x") == 2
 
 
+def test_if_unprepared_redoes_after_head_or_declaration_changes(repo: Path, tmp_path: Path) -> None:
+    """印は用意した時の HEAD と宣言に結び付く。別の commit へ同期した後・宣言を変えた後はやり直す。"""
+    counter = tmp_path / "count"
+    declare(repo, {"run": [f"echo x >> {counter}"]})
+    wt = add_worktree(repo)
+    assert run(DEPS, ["prepare", str(wt), "--if-unprepared"], repo).returncode == 0
+
+    git(repo, "commit", "-q", "--allow-empty", "-m", "next")
+    git(wt, "checkout", "-q", "--detach", git(repo, "rev-parse", "HEAD").stdout.strip())
+    assert run(DEPS, ["prepare", str(wt), "--if-unprepared"], repo).returncode == 0
+    assert counter.read_text().count("x") == 2
+
+    declare(repo, {"run": [f"echo x >> {counter}", "true"]})
+    assert run(DEPS, ["prepare", str(wt), "--if-unprepared"], repo).returncode == 0
+    assert counter.read_text().count("x") == 3
+    assert run(DEPS, ["prepare", str(wt), "--if-unprepared"], repo).returncode == 0
+    assert counter.read_text().count("x") == 3
+
+
 def test_failed_redo_removes_mark(repo: Path) -> None:
     """引数なしの prepare が失敗したら印は残らない。"""
     declare(repo, {"run": ["true"]})

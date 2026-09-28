@@ -239,15 +239,21 @@ def failing_at(
 
     **上限で打ち切った suite があれば `None`**（見分けられない）。空にすると既存失敗が変更起因へ入るため。
     宣言（`.ndf/worktree.json` の `deps`）の依存の用意に失敗したときも `None` を返す。
+    依存の用意も上限 `timeout`（`started` から。走らせ直しと同じ 1 つ）の中で行い、使い切れば `None` を返す。
+    宣言にコンテナで走る suite があれば、一時の worktree はコンテナへ届かないため用意の前に `None` を返す。
     """
+    started = time.monotonic() if started is None else started
     holder = pathlib.Path(tempfile.mkdtemp(prefix="ndf-baseline-"))
     tree = holder / "tree"
     try:
         if not _git(work, ["worktree", "add", "--detach", "-q", str(tree), sha]):
             return []
+        if container_reach.container_suites(tree):
+            return None  # 一時の worktree はコンテナへ届かない。見分けられない（用意も無駄になる）
         # 依存物の無い worktree では着手前の HEAD でも落ち、変更起因が既存失敗へ入る（#1337）。
         # 用意できなければ見分けられない
-        if not worktree_deps.prepare(tree).ok:
+        left = timeout - (time.monotonic() - started)
+        if left < 1 or not worktree_deps.prepare(tree, timeout=left).ok:
             return None
         try:
             still, readable, cut = failing_in(str(tree), strategy, ids, timeout, log_dir, "baseline", run, started)

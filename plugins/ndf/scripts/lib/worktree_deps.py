@@ -21,6 +21,8 @@ CLI（シェルの作成箇所から呼ぶ）:
 from __future__ import annotations
 
 import json
+import os
+import signal
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -28,6 +30,7 @@ from pathlib import Path
 
 DECLARATION_FILE = ".ndf/worktree.json"
 SCRIPT = Path(__file__).resolve().parent.parent / "worktree-deps.sh"
+TIMEOUT_CODE = 124  # `prepare(timeout=...)` が打ち切ったとき（`timeout(1)` と同じ値）
 
 
 @dataclass(frozen=True)
@@ -84,18 +87,41 @@ def declared(main_dir: str | Path) -> bool:
     return data.get("deps") not in (None, {})
 
 
-def prepare(worktree: str | Path, *, main_dir: str | Path | None = None, if_unprepared: bool = False) -> Result:
+def prepare(
+    worktree: str | Path,
+    *,
+    main_dir: str | Path | None = None,
+    if_unprepared: bool = False,
+    timeout: float | None = None,
+) -> Result:
     """宣言があれば `worktree-deps.sh prepare` を打つ。宣言が無ければ何も起こさず `Result(0)` を返す。
 
     `if_unprepared` は使い回す worktree で使う（用意の印があれば手順を 1 つも走らせない）。
+    `timeout`（秒）を過ぎたら `run` の孫ごとプロセスグループを止め、`Result(TIMEOUT_CODE)` を返す。
     """
     main = Path(main_dir) if main_dir else main_dir_of(worktree)
     # メインディレクトリそのものは用意の対象にしない（`run` をメインディレクトリで走らせない）
     if main is None or main.resolve() == Path(worktree).resolve() or not declared(main):
         return Result(0)
     cmd = ["bash", str(SCRIPT), "prepare", str(worktree)] + (["--if-unprepared"] if if_unprepared else [])
-    p = subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL)
-    return Result(p.returncode, p.stderr.strip())
+    p = subprocess.Popen(
+        cmd,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=timeout is not None,  # 打ち切るときだけグループごと止める
+    )
+    try:
+        _, err = p.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(p.pid, signal.SIGKILL)
+        except OSError:
+            p.kill()
+        p.communicate()
+        return Result(TIMEOUT_CODE, f"依存の用意: 打ち切り（{int(timeout or 0)} 秒）")
+    return Result(p.returncode, err.strip())
 
 
 def _prepare_and_report(worktree: str | Path, *, main_dir: str | Path | None = None, if_unprepared: bool = False) -> Result:
