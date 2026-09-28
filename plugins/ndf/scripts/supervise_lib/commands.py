@@ -16,7 +16,7 @@ import slow_step as ss
 from step_result import result
 from supervise_lib.decl import SUPERVISE_DECL, DeclError, decl_roots, read_decl, sync_checks_of
 from supervise_lib.engine import Engine
-from supervise_lib.paths import HERE, state_dir_of
+from supervise_lib.paths import HERE, main_dir_of_worktree, state_dir_of
 from supervise_lib.plan import expand_parts, normalize_plan
 
 
@@ -210,7 +210,7 @@ def cmd_expected(plan_path: str, history: str | None, slow_pairs: list[str]) -> 
     except (OSError, ValueError, KeyError, TypeError) as e:
         return result("supervise-expected", "stopped", f"計画を読めない: {e}"), 2
     wt = Path(str(plan.get("作業場所") or "."))
-    repo = plan.get("リポジトリ") or (str(wt).split("/.worktrees/")[0] if "/.worktrees/" in str(wt) else None)
+    repo = plan.get("リポジトリ") or main_dir_of_worktree(wt)
     try:
         decl = read_decl(decl_roots(str(wt), repo), SUPERVISE_DECL).get("slow")
         cfg = ss.resolve_config(ss.parse_overrides(slow_pairs), plan.get("slow"), decl)
