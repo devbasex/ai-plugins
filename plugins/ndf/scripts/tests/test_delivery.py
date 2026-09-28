@@ -73,7 +73,7 @@ def make_repo(root: Path, wt=None, delivery_rows=..., release=None, raw_wt=None,
 
 def sample(tmp_path, name):
     wt, rows, rel = SAMPLES[name]
-    return delivery.load(make_repo(tmp_path / name, wt, rows, rel))
+    return delivery.load_delivery(make_repo(tmp_path / name, wt, rows, rel))
 
 
 @pytest.mark.parametrize(
@@ -96,17 +96,17 @@ def test_judge_samples(tmp_path, name, target, value):
 
 def test_judge_undetermined_rows(tmp_path):
     """I2: 宣言が壊れている・本番チャネルが決まらない・本番チャネル宛てで delivery が不明か無いときは止める側へ倒す。"""
-    broken_wt = delivery.load(make_repo(tmp_path / "a", raw_wt="{", delivery_rows=[]))
+    broken_wt = delivery.load_delivery(make_repo(tmp_path / "a", raw_wt="{", delivery_rows=[]))
     assert delivery.judge_target(broken_wt, "develop").value == "undetermined"
     assert "worktree.json" in delivery.judge_target(broken_wt, "develop").reason
-    broken_pj = delivery.load(make_repo(tmp_path / "b", {"production_branch": "main"}, raw_pj="[1,"))
+    broken_pj = delivery.load_delivery(make_repo(tmp_path / "b", {"production_branch": "main"}, raw_pj="[1,"))
     assert delivery.judge_target(broken_pj, "main").value == "undetermined"
     assert "project.json" in delivery.judge_target(broken_pj, "main").reason
-    no_prod = delivery.load(make_repo(tmp_path / "c", {}, []))  # origin/HEAD も main も無い
+    no_prod = delivery.load_delivery(make_repo(tmp_path / "c", {}, []))  # origin/HEAD も main も無い
     assert delivery.judge_target(no_prod, "develop").value == "undetermined"
-    unknown = delivery.load(make_repo(tmp_path / "d", {"production_branch": "main"}, {"unknown": "測れない"}))
+    unknown = delivery.load_delivery(make_repo(tmp_path / "d", {"production_branch": "main"}, {"unknown": "測れない"}))
     assert delivery.judge_target(unknown, "main").value == "undetermined"
-    missing = delivery.load(make_repo(tmp_path / "e", {"production_branch": "main"}))
+    missing = delivery.load_delivery(make_repo(tmp_path / "e", {"production_branch": "main"}))
     assert delivery.judge_target(missing, "main").value == "undetermined"
     # I4: 本番チャネルが決まれば、それ以外の宛先は delivery が無くても止めない
     assert delivery.judge_target(missing, "develop").value == "not-production"
@@ -121,7 +121,7 @@ def test_judge_does_not_call_gh(tmp_path, monkeypatch):
     (bin_dir / "gh").write_text(f"#!/bin/sh\ntouch {mark}\nexit 1\n")
     (bin_dir / "gh").chmod(0o755)
     monkeypatch.setenv("PATH", f"{bin_dir}:{__import__('os').environ['PATH']}")
-    assert delivery.judge_target(delivery.load(root), "main").value == "production"
+    assert delivery.judge_target(delivery.load_delivery(root), "main").value == "production"
     assert not mark.exists()
 
 
@@ -140,13 +140,13 @@ def test_routes_samples(tmp_path):
 
 def test_routes_fallbacks(tmp_path):
     """I5: release.form が先に効き、どちらも無ければ manual と理由。[] は none。"""
-    none = delivery.routes(delivery.load(make_repo(tmp_path / "n", {"production_branch": "main"}, [])), FORMS)
+    none = delivery.routes(delivery.load_delivery(make_repo(tmp_path / "n", {"production_branch": "main"}, [])), FORMS)
     assert [(r.route, r.stage) for r in none] == [("none", "none")]
-    missing = delivery.routes(delivery.load(make_repo(tmp_path / "m", {"production_branch": "main"})), FORMS)
+    missing = delivery.routes(delivery.load_delivery(make_repo(tmp_path / "m", {"production_branch": "main"})), FORMS)
     assert [(r.route, r.stage) for r in missing] == [("manual", "manual")] and "delivery" in missing[0].note
-    unknown = delivery.routes(delivery.load(make_repo(tmp_path / "u", {"production_branch": "main"}, {"unknown": "x"})), FORMS)
+    unknown = delivery.routes(delivery.load_delivery(make_repo(tmp_path / "u", {"production_branch": "main"}, {"unknown": "x"})), FORMS)
     assert unknown[0].stage == "manual" and "不明" in unknown[0].note
-    other = delivery.routes(delivery.load(make_repo(tmp_path / "o", {}, [], {"form": "service"})), FORMS)
+    other = delivery.routes(delivery.load_delivery(make_repo(tmp_path / "o", {}, [], {"form": "service"})), FORMS)
     assert [(r.route, r.stage) for r in other] == [("template", "manual")]
     assert delivery.needs_version(other) is False
     assert delivery.needs_version(delivery.routes(sample(tmp_path, "ai-plugins"), FORMS)) is True
