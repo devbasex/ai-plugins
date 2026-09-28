@@ -401,7 +401,8 @@ def mission_source(mission: str | None, mvv: str | None, milestone: str | None, 
             deps.require("md")
             import mission_mvv as mm
 
-            text, why = mm.milestone_text(milestone, repo)
+            text = mm.mvv_sections(mm.milestone_description(milestone, repo))
+            why = None if text else f"マイルストーン {milestone} の説明に ## Mission / ## Vision / ## Value の見出しがそろっていない"
             source = f"milestone:{milestone}"
         else:
             return None, None
