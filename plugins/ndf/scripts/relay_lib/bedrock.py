@@ -64,9 +64,11 @@ def aws_path() -> str | None:
     return shutil.which("aws")
 
 
-def _aws_env(profile: str, region: str | None) -> dict:
-    """子へ渡すのと同じ環境（AWS の鍵の変数を外し、プロファイルと地域を置く。決定 14）。"""
+def _aws_env(profile: str | None = None, region: str | None = None) -> dict:
+    """子へ渡すのと同じ環境（AWS の鍵の変数を外し、プロファイルと地域を置く。決定 14）。プロファイルが無ければ鍵を外すだけ。"""
     env = {k: v for k, v in os.environ.items() if k not in ca.AWS_KEY_ENV}
+    if not profile:
+        return env
     env["AWS_PROFILE"] = profile
     if region:
         env["AWS_REGION"] = region
@@ -77,7 +79,7 @@ def _aws(args: list[str], profile: str | None = None, region: str | None = None)
     aws = aws_path()
     if aws is None:
         return None
-    env = _aws_env(profile, region) if profile else {k: v for k, v in os.environ.items() if k not in ca.AWS_KEY_ENV}
+    env = _aws_env(profile, region)
     try:
         return subprocess.run([aws, *args], env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=TIMEOUT)
     except subprocess.TimeoutExpired:
