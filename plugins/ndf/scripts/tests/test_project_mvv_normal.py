@@ -400,3 +400,32 @@ def test_advise_design_steps_keeps_its_current_shape(tmp_path):
             "next": "gate",
         },
     ]
+
+
+@pytest.mark.parametrize("repo", [None, "/r/repo"])
+def test_advise_release_steps_keeps_its_current_shape(tmp_path, repo):
+    from supervise_lib.release_templates import MVV_NOTE, MVV_PY, advise_release_steps
+
+    state = tmp_path / "state.json"
+    a = SimpleNamespace(advise=str(state), mode="standard")
+    material = f"{repo}/approval.md" if repo else "approval.md"
+    root = f" --root {repo}" if repo else ""
+    assert advise_release_steps(a, repo, "approval.md", "12 13") == [
+        {
+            "id": "mvv",
+            "type": "run",
+            "timeout": 900,
+            "cmd": f"rm -f {MVV_NOTE} && {MVV_PY} check --mission {state.resolve()} --gate release "
+            f"--material {material} --pr 12 13 --mode standard{root} --note {MVV_NOTE} --advise",
+            "on_fail": "mvv-note",
+            "next": "mvv-note",
+        },
+        {
+            "id": "mvv-note",
+            "type": "run",
+            "timeout": 120,
+            **({"cwd": repo} if repo else {}),
+            "cmd": f"sh -c '[ ! -f {MVV_NOTE} ] || {{ printf \"\\n\"; cat {MVV_NOTE}; }} >> approval.md'",
+            "next": "end",
+        },
+    ]
