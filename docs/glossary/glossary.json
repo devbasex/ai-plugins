@@ -2485,7 +2485,7 @@
     {
       "term": "バックログの宣言",
       "context": "ndf-issue-upkeep",
-      "meaning": "尺度・余白・自動の閾値・容量・被依存の写し方・ラベルの下限・大きさの指数・大きい課題の閾値と枠の割合・実害の目安・アンカーを持つ `.ndf/backlog.json`",
+      "meaning": "尺度・余白・自動の閾値・容量・被依存の対応表・ラベルの下限・大きさの指数・大きい課題の閾値と枠の割合・実害の目安・アンカーを持つ `.ndf/backlog.json`",
       "pending_source": "issues/issue-1429-design.md"
     },
     {
