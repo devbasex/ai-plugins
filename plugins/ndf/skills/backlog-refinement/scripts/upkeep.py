@@ -35,7 +35,10 @@ plan.json の形:
                   "changes": {"body": "...", "title": "...", "milestone": "<題名>" | null,
                               "add_labels": ["..."], "remove_labels": ["..."],
                               "state": "closed", "state_reason": "completed" | "not_planned"},
-                  "approved": false}]}
+                  "reschedule": "前倒し" | "後ろ倒し",  # rank の候補を反映するときだけ
+                  "approved": false}],
+     "rank": "<rank.json の metrics.digest>",  # 書くと各マイルストーンの説明の ### 順位 を書く
+     "rejected": [{"number": 34, "direction": "前倒し" | "後ろ倒し"}]}  # 人が退けた移動
 
 結果は lib/step_result.py の形の 1 行の JSON。終了コードは 0 = ok / 10 = 「やらない」に承認が
 要る / 20 = LLM の判断待ち（上限を超えた候補・照合で飛ばした課題・部分的に終わった反映）/
