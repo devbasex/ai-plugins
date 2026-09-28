@@ -16,6 +16,7 @@ import os
 import sys
 
 from . import bedrock as bd
+from . import claude as cl
 from . import login
 from .ask import Asker, Fail, MissingArgs
 from .common import PKG_ROOT  # noqa: F401  lib/ を sys.path に置く
@@ -204,7 +205,12 @@ def _remove(asker: Asker, name: str | None) -> dict:
         return {"name": name, "text": f"外した: {name}（保存した従量の接続の宣言）"}
     if ca.load_account(name) is None:
         raise Fail("not_registered", f"登録されていない: {name}")
-    if not login.logout(name):
+    claude = cl.resolve_claude()
+    ok = False
+    if claude is not None:
+        p = login._auth(claude, ca.account_dir(name), "logout")
+        ok = p is not None and p.returncode == 0
+    if not ok:
         print("claude auth logout が通らなかった（登録は外す）", file=sys.stderr)
     ca.unregister(name)
     return {"name": name, "text": f"外した: {name}"}

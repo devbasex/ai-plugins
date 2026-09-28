@@ -115,15 +115,6 @@ def _claude() -> str:
     return claude
 
 
-def logout(name: str) -> bool:
-    """アカウント `name` の設定ディレクトリで `claude auth logout` を打つ。claude が見つからないか通らなければ偽。"""
-    claude = cl.resolve_claude()
-    if claude is None:
-        return False
-    p = _auth(claude, ca.account_dir(name), "logout")
-    return p is not None and p.returncode == 0
-
-
 def _register(claude: str, name: str, config_dir: str, fail_reason: str) -> dict:
     """ログインの済んだ `config_dir` を確かめて `name` として置く（I3）。"""
     ident = _identity(claude, config_dir)
