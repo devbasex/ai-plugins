@@ -41,20 +41,24 @@ def prod_version(version: str) -> str:
     return re.sub(r"-.*$", "", version)
 
 
+def mvv_design_waves(a, repo: str, gate: str) -> list[dict]:
+    """MVV 判定つきの設計のステージと、その後の関門 1。設計の課題が無ければ空。"""
+    if not a.design:
+        return []
+    return [
+        {"name": "設計", "plans": {f"design-{n}": plan_mvv_design(a, n, repo) for n in a.design}},
+        {"name": "関門 1", "gate": gate},
+    ]
+
+
 def fast_sprint_plans(a) -> list[dict]:
     """pace: fast のスプリントのステージ。スプリントブランチを作らず、実装は起点のブランチへ直接入れる。
     実装の queue が --then のステージで 検査（実行の条件）→ 実装レビュー（開発版ごと）→ 開発版 → 本番（先頭が MVV 判定）を
     順に流す。検査が立てばその中でレビューも通るため、実装レビューのステージは範囲が空になり流れない。"""
     repo = str(Path(a.worktree).resolve())
-    waves = []
-    if a.design:
-        waves.append({"name": "設計", "plans": {f"design-{n}": plan_mvv_design(a, n, repo) for n in a.design}})
-        waves.append(
-            {
-                "name": "関門 1",
-                "gate": "設計の計画がすべて完了なら通過する。結果が関門の計画の Pull Request だけ、利用者の承認を取ってマージする",
-            }
-        )
+    waves = mvv_design_waves(
+        a, repo, "設計の計画がすべて完了なら通過する。結果が関門の計画の Pull Request だけ、利用者の承認を取ってマージする"
+    )
     waves += [
         {"name": "実装", "plans": {f"impl-{n}": plan_fast_impl(a, n, repo) for n in a.issue}},
         {"name": "検査", "plans": {"check": plan_fast_check(a, repo, f"{a.name}-1")}, "then_of": "実装"},
@@ -80,10 +84,7 @@ def auto_sprint_plans(a) -> list[dict]:
     後ろに開発版と本番（先頭が MVV 判定の関門 2）を続ける。設計と開発版・本番だけを MVV 判定つきのプランで作り、
     スプリントブランチ以降を最初のステージの --then で 1 本の queue に流す（#1370 の決定 3）。check-trigger.py は通らない。"""
     repo = str(Path(a.worktree).resolve())
-    waves = []
-    if a.design:
-        waves.append({"name": "設計", "plans": {f"design-{n}": plan_mvv_design(a, n, repo) for n in a.design}})
-        waves.append({"name": "関門 1", "gate": AUTO_GATE_1})
+    waves = mvv_design_waves(a, repo, AUTO_GATE_1)
     first = "設計" if a.design else "スプリントブランチ"
     then = {"then_of": first} if a.design else {}
     impl = {}
