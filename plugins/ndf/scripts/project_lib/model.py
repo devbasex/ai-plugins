@@ -32,6 +32,10 @@ class Language(schema.Shape):
 
 
 class Container(schema.Shape):
+    """suite を走らせるコンテナ。書いた suite は、テストを走らせる前にそのサービスのコンテナが worktree を見ているかを
+    確かめ（`lib/container_reach.py`）、テスト環境の値を足して走らせる。見ていなければ走らせない。
+    `compose_files` はテスト環境の割り当てが `COMPOSE_FILE` を持たないときだけ使う。"""
+
     service: str
     compose_files: list[str] = []
 

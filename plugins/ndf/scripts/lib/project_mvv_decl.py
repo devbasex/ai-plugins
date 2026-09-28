@@ -32,30 +32,34 @@ def resolve_settings(settings: dict | None) -> dict:
     return out
 
 
+_VERSION_KEYS = {"version", "sha256", "approved_at", "approved_by", "reason", "vet", "changes", "body"}
+
+
 def decl_problems(data) -> list[str]:
     """`.ndf/mvv.json` の形の誤り（`decl_models()` の型と同じ規則を標準ライブラリで見る）。"""
     if not isinstance(data, dict):
         return ["オブジェクトでない"]
-    errs = []
-    allowed = {"version", "body", "settings", "versions"}
-    errs += [f"{k}: 知らない項目" for k in sorted(set(data) - allowed)]
-    if data.get("version") != DECL_VERSION:
-        errs.append(f"version: {DECL_VERSION} にする")
-    if not isinstance(data.get("body"), str) or not data.get("body"):
-        errs.append("body: 文字列にする")
-    errs += _settings_problems(data.get("settings", {}))
+    errs = _root_problems(data) + _settings_problems(data.get("settings", {}))
     vs = data.get("versions")
     if not isinstance(vs, list) or not vs:
         errs.append("versions: 1 件以上の配列にする")
         return errs
-    keys = {"version", "sha256", "approved_at", "approved_by", "reason", "vet", "changes", "body"}
     for i, v in enumerate(vs):
-        errs += _version_problems(i, v, keys)
+        errs += _version_problems(i, v)
+    return errs
+
+
+def _root_problems(data: dict) -> list[str]:
+    allowed = {"version", "body", "settings", "versions"}
+    errs = [f"{k}: 知らない項目" for k in sorted(set(data) - allowed)]
+    if data.get("version") != DECL_VERSION:
+        errs.append(f"version: {DECL_VERSION} にする")
+    if not isinstance(data.get("body"), str) or not data.get("body"):
+        errs.append("body: 文字列にする")
     return errs
 
 
 def _settings_problems(st) -> list[str]:
-    """settings（知らない項目・非負の整数・revise_after）の誤り。"""
     if not isinstance(st, dict):
         return ["settings: オブジェクトにする"]
     errs = [f"settings.{k}: 知らない項目" for k in sorted(set(st) - set(DEFAULTS))]
@@ -64,23 +68,26 @@ def _settings_problems(st) -> list[str]:
             errs.append(f"settings.{k}: 0 以上の整数にする")
     ra = st.get("revise_after")
     if ra is not None:
-        if not isinstance(ra, dict):
-            errs.append("settings.revise_after: オブジェクトにする")
-        else:
-            errs += [f"settings.revise_after.{k}: 知らない項目" for k in sorted(set(ra) - set(DEFAULTS["revise_after"]))]
-            for k, v in ra.items():
-                if v is not None and (not isinstance(v, int) or isinstance(v, bool) or v < 1):
-                    errs.append(f"settings.revise_after.{k}: 1 以上の整数にする")
+        errs += _revise_after_problems(ra)
     return errs
 
 
-def _version_problems(i: int, v, keys: set[str]) -> list[str]:
-    """versions[i] 1 件の誤り。"""
+def _revise_after_problems(ra) -> list[str]:
+    if not isinstance(ra, dict):
+        return ["settings.revise_after: オブジェクトにする"]
+    errs = [f"settings.revise_after.{k}: 知らない項目" for k in sorted(set(ra) - set(DEFAULTS["revise_after"]))]
+    for k, v in ra.items():
+        if v is not None and (not isinstance(v, int) or isinstance(v, bool) or v < 1):
+            errs.append(f"settings.revise_after.{k}: 1 以上の整数にする")
+    return errs
+
+
+def _version_problems(i: int, v) -> list[str]:
     w = f"versions[{i}]"
     if not isinstance(v, dict):
         return [f"{w}: オブジェクトにする"]
-    errs = [f"{w}.{k}: 知らない項目" for k in sorted(set(v) - keys)]
-    errs += [f"{w}.{k}: 必須の項目が無い" for k in sorted(keys - set(v) - {"reason"})]
+    errs = [f"{w}.{k}: 知らない項目" for k in sorted(set(v) - _VERSION_KEYS)]
+    errs += [f"{w}.{k}: 必須の項目が無い" for k in sorted(_VERSION_KEYS - set(v) - {"reason"})]
     if v.get("version") != i + 1:
         errs.append(f"{w}.version: {i + 1} にする（版は 1 から 1 ずつ上がる）")
     for k in ("sha256", "approved_at", "approved_by", "body"):

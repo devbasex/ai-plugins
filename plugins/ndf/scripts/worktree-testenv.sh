@@ -6,6 +6,7 @@
 #   bake --tag <値>                        基準を作る
 #   up <作業ツリー> [--profile <名前>] [--tag <値>]  起動する
 #   test <作業ツリー> --kind <種類> [--out <パス>]   宣言の実行コマンドを走らせる
+#   compose-env <作業ツリー>               割り当て済みのテスト環境をコンテナへ渡す値を KEY=VALUE で出す
 #   stop <作業ツリー>                      止める。データは残す
 #   down <作業ツリー> [--volumes]          破棄し、割り当てを解放する
 #   expose <作業ツリー>                    外部公開する
@@ -462,6 +463,19 @@ do_test() {
   ensure_assignment || return 1
   build_test_env || return 1
 
+  # 種類に service があれば、そのコンテナが worktree を見ているかを確かめてから走らせる（#1337）。
+  # 届かなければ走らせず、到達の確認の終了コード（1 届かない / 2 実行系が無い）で終わる。
+  local service reach line reach_rc
+  service=$(test_kind_get '.testenv.test_kinds[$k].service // empty')
+  if [ -n "$service" ]; then
+    reach=$(python3 "$SCRIPT_DIR/lib/container_reach.py" probe "$TARGET" --service "$service")
+    reach_rc=$?
+    [ "$reach_rc" = 0 ] || return "$reach_rc"
+    while IFS= read -r line; do
+      [ -n "$line" ] && TEST_ENV+=("$line")
+    done <<<"$reach"
+  fi
+
   touch_or_warn
 
   # 実行中は reap の対象から外れるよう、ロックを握ったまま走らせる。
@@ -478,6 +492,25 @@ do_test() {
   wt_lock_release "$lock"
   touch_or_warn
   return "$rc"
+}
+
+# --- compose-env ------------------------------------------------------------
+
+# 割り当て済みのテスト環境へ向けるための値を、標準出力へ KEY=VALUE で 1 行ずつ出す（#1337）。
+# `up` と同じ `compose_env` の値に、COMPOSE_PROJECT_NAME（環境名）と COMPOSE_FILE（compose_files を : で
+# 結んだ絶対パス）を加える。**割り当てを新しく取らない。** 割り当てが無ければ何も出さずに 0 で終わる。
+do_compose_env() {
+  load_assignment || return 0
+  local rc=0 i files=""
+  compose_file_args || rc=$?
+  [ "$rc" = 1 ] && return 1
+  compose_env
+  printf '%s\n' "${COMPOSE_ENV[@]}"
+  printf 'COMPOSE_PROJECT_NAME=%s\n' "$ENVIRONMENT"
+  for ((i = 1; i < ${#COMPOSE_FILE_ARGS[@]}; i += 2)); do
+    files="${files:+$files:}${COMPOSE_FILE_ARGS[$i]}"
+  done
+  [ -z "$files" ] || printf 'COMPOSE_FILE=%s\n' "$files"
 }
 
 # --- expose / unexpose ------------------------------------------------------
@@ -702,13 +735,14 @@ case "$SUBCOMMAND" in
   bake) do_bake ;;
   up) do_up ;;
   test) do_test ;;
+  compose-env) do_compose_env ;;
   stop) do_stop ;;
   down) do_down ;;
   expose) do_expose ;;
   unexpose) do_unexpose ;;
   reap) do_reap ;;
   *)
-    printf '使い方: worktree-testenv.sh <env|tag|bake|up|test|stop|down|expose|unexpose|reap> [対象] [オプション]\n' >&2
+    printf '使い方: worktree-testenv.sh <env|tag|bake|up|test|compose-env|stop|down|expose|unexpose|reap> [対象] [オプション]\n' >&2
     exit 1
     ;;
 esac

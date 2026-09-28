@@ -115,7 +115,12 @@ wt_in_worktree && echo "作業ツリーの中" || echo "主ディレクトリ"
 
 導入の有無は、利用できる Skill の一覧に `superpowers:using-git-worktrees` が
 含まれるかで判定する。含まれていれば、その Skill を起動して作成を任せ、
-戻ってきたら手順 3 へ進む。含まれていなければ 2-2 へ進む。
+戻ってきたら作られた worktree で依存の用意（[依存の用意](#依存の用意)）を打ってから
+手順 3 へ進む。含まれていなければ 2-2 へ進む。
+
+```bash
+bash "$SCRIPTS/worktree-deps.sh" prepare "<作られた worktree のパス>"
+```
 
 ### 2-2. `.worktrees/` の登録を確かめる
 
@@ -150,6 +155,7 @@ base=$(wt_base_branch "$main_dir") || exit 1
 start="origin/$base"
 git -C "$main_dir" show-ref --verify --quiet "refs/remotes/origin/$base" || start="$base"
 git -C "$main_dir" worktree add -b "$branch" "$main_dir/.worktrees/$branch" "$start"
+bash "$SCRIPTS/worktree-deps.sh" prepare "$main_dir/.worktrees/$branch"
 cd "$main_dir/.worktrees/$branch"
 ```
 
@@ -168,6 +174,7 @@ bash "$SCRIPTS/worktree-setup.sh" create feat/issue-<番号>-<名前> --from mis
 
 `create` は `.worktrees/` の登録を確かめ、`origin` を取得してから作り、worktree のパスと
 起点を出力する。ベースブランチが origin にもローカルにも無いときは作らずに 1 で終わる。
+設定に `deps` があれば、作った直後に依存の用意まで行う（[依存の用意](#依存の用意)）。
 
 **既定ブランチと開発の起点は別物である。** 既定ブランチに正式版を置き、開発の本流を
 `develop` などの別のブランチに置くリポジトリでは、既定ブランチから分岐すると開発中の
@@ -261,6 +268,51 @@ Pull Request がマージされた後の削除は `/ndf:merged` が行う。
 | 0 個または複数 | ベースブランチに合わせる（設定が無ければ既定ブランチ） |
 
 メインディレクトリに未コミットの変更があるときは追従せず、変更がある事実だけを伝える。
+
+## `EnterWorktree` との付き合い方
+
+**NDF の手順は `EnterWorktree` と Agent の `isolation: "worktree"` を使わない。** 隔離したセッションでは、
+Claude Code 本体が Bash を走らせる直前に「git がメインディレクトリを触らない」と示せないコマンドを拒む
+（`Refusing to run it`）。判定は権限モードに関係なく働き、版で変わる。
+
+| 状況 | どこで何を打つか |
+| --- | --- |
+| NDF の手順で worktree に入る | `worktree-setup.sh create` の後に `cd <worktree>` する（手順 2-3） |
+| 隔離の中で `… \| bash "$CLOSING"` の形が拒まれた | worktree の中で、スクリプトを変数でなくリテラルの絶対パスで書き、複合コマンドを 1 つずつに割る（`… \| bash /abs/…/lib/closing-issues.sh`） |
+| それでも拒まれる（`git -C <メインディレクトリ>` など） | `ExitWorktree` で隔離を外し、`cd <worktree>` してから同じコマンドを打つ |
+
+2.1.283 で本物の `closing-issues.sh` を打って確かめた。変数で渡す形と `git -C <メインディレクトリ>` は拒まれ、
+リテラルの絶対パスの形は通り、`ExitWorktree` の後は拒まれた行がそのまま通った。
+
+## 依存の用意
+
+worktree は追跡されているファイルしか持たないため、`vendor/`・`node_modules/`・`.env` が無く、pre-commit や
+テストが落ちる。設定（`.ndf/worktree.json`）の `deps` に用意の仕方を書くと、NDF が worktree を作るとき
+（`worktree-setup.sh create`・3 層の run と queue・cross-review・cross-refactoring・落ちたテストの見分け）に
+メインディレクトリから依存物を用意する。書き方は [references/declaration.md](references/declaration.md) の `deps` にある。
+
+```json
+{ "version": 1, "deps": { "copy_from_main": ["vendor"], "copy_as_real": [".env"] } }
+```
+
+標準エラーに `依存の用意: 済み（2 件・1 秒）` が出れば用意できている。失敗すると、どの手順が失敗したかと
+出力の末尾を出して 0 以外で終わる。**worktree は消さない。** 直してから手で打ち直す。
+
+```bash
+bash "$SCRIPTS/worktree-deps.sh" prepare "$WT"                  # 印を見ずにやり直す
+bash "$SCRIPTS/worktree-deps.sh" prepare "$WT" --if-unprepared  # 用意が済んでいなければ用意する
+```
+
+用意が済むと worktree ごとの git の管理ディレクトリに印（`ndf-deps`）を書く。印は用意した時の HEAD と宣言の
+中身を持つ。使い回す worktree は、HEAD も宣言も変わっていなければやり直さない（別の commit へ同期した後はやり直す）。
+このやり直しでは、既にある `copy_from_main` / `copy_as_real` の宛先はメインディレクトリと食い違っていてもそのまま使い、
+無い宛先の複製と `run` だけを走らせる（`run` が入れ替えた依存物や、メインディレクトリ側の更新で止めない）。
+コミットしていない lock ファイルの変更などで用意し直すときは、引数なしの `prepare` を打つ。
+
+**`copy_from_main` に置くのは、worktree の中でその場で書き換えないパスだけにする。** ハードリンクで複製するため、
+その場で書き換えるとメインディレクトリの同じファイルも変わる。書き換えるもの（`.env`・自動読み込みの生成物）は
+`copy_as_real` に置く。symlink は張らない（PHP の `__DIR__` などがメインディレクトリを指し、メインディレクトリの
+コードでテストが走る）。
 
 ## ローカル環境での動作検証
 
