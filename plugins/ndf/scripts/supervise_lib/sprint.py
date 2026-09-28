@@ -244,13 +244,15 @@ def sprint_state_path(a) -> str:
     return str(Path(a.state).resolve())
 
 
+PACE_PLANS = {"fast": fast_sprint_plans, "auto": auto_sprint_plans}  # 進め方ごとのステージの組み立て（normal は sprint_plans）
+
+
 def sprint_plans(a) -> list[dict]:
     """スプリントのステージを順に返す。ステージの中の計画は queue --max 3 で同時に流してよい。
     リリースの経路が雛形で組むものでなければ、経路ごとのステージ（route_waves）を最後に置く。"""
-    if getattr(a, "pace", "normal") == "fast":
-        return fast_sprint_plans(a)
-    if getattr(a, "pace", "normal") == "auto":
-        return auto_sprint_plans(a)
+    build = PACE_PLANS.get(getattr(a, "pace", "normal"))
+    if build:
+        return build(a)
     repo = str(Path(a.worktree).resolve())
     advise = advises(a)
     design = plan_advise_design if advise else plan_sprint_design
