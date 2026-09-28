@@ -905,6 +905,31 @@ def test_error_that_is_not_limit_is_plain_failure(tmp_path, seq):
     assert s.state.results["j"]["decision"] == "stop" and "理由: 直せない" in text
 
 
+@pytest.mark.parametrize(
+    "text,expect",
+    [
+        ("Claude AI usage limit reached|1760000000", 1760000000.0),
+        ("You've hit your limit · resets 3pm (UTC)", "15:00"),
+        ("You've hit your session limit · resets at 9:30am (Asia/Tokyo)", "00:30"),
+        ("resets 23:05", None),
+        ("no time here", "none"),
+    ],
+)
+def test_limit_reset_at(text, expect):
+    now = 1758790800.0  # 2025-09-25 09:00 UTC
+    got = claude.limit_reset_at(text, now)
+    if expect == "none":
+        assert got is None
+    elif isinstance(expect, float):
+        assert got == expect
+    elif expect is None:
+        assert got is not None and 0 < got - now <= 86400
+    else:
+        from datetime import datetime, timezone
+
+        assert got > now and datetime.fromtimestamp(got, timezone.utc).strftime("%H:%M") == expect
+
+
 def test_is_usage_limit_matches_monitor_table():
     assert claude.is_usage_limit('{"api_error_status": 429}')
     assert claude.is_usage_limit("You've hit your weekly limit")
