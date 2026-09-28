@@ -141,34 +141,11 @@ class Engine:
     def run(self, start: str | None = None) -> str:
         st, slow = self.state, self.slow
         sid = start or self.order[0]
+        if start and not self.plan.get("Pull Request"):
+            self._restore_pr()
         result, reason = "完了", "無し"
         limit = self.plan.get("上限", 30)
         n = 0
-        stopped = self._prepare(start)
-        if stopped:
-            return stopped
-        while sid:
-            n += 1
-            if n > limit:
-                result, reason = "止まった", f"ステップの数が上限 {limit} を超えた"
-                break
-            step = self.steps.get(sid)
-            if step is None:
-                result, reason = "止まった", f"知らないステップ: {sid}"
-                break
-            nxt, r_result, r_reason = self._run_step(sid, step)
-            if r_result is not None:
-                result, reason = r_result, r_reason
-            slow.end_watch()
-            st.record(n, sid, nxt, (self.steps.get(nxt) or {}).get("type") if nxt else None, is_gate)
-            sid = nxt
-        return self.report(*self._final_result(result, reason))
-
-    def _prepare(self, start: str | None) -> str | None:
-        """ステップを流す前の準備。流さないときは報告を返す（流すなら None）。"""
-        st, slow = self.state, self.slow
-        if start and not self.plan.get("Pull Request"):
-            self._restore_pr()
         try:
             slow.cfg = slow.resolve_slow()
         except ss.SlowConfigError as e:
@@ -181,37 +158,44 @@ class Engine:
         if err:
             return self.report("止まった", err)
         slow.history = ss.history_path(self.cwd, st.dir, slow.cfg.history)
-        return None
-
-    def _run_step(self, sid: str, step: dict) -> tuple[str | None, str | None, str | None]:
-        """1 ステップを始めて流し、(次のステップ, 結果, 理由) を返す。結果を変えないときは結果・理由が None。"""
-        st, slow = self.state, self.slow
-        self.keep_cwd()
-        st.record_stage(step.get("stage"), self.plan, self.cwd)
-        st.cur = {"id": sid, "type": step["type"]}
-        st.step_started = time.time()
-        carry, slow.carry = slow.carry, None
-        slow.watch = slow.start_watch(step, carry if carry and carry.step_id == sid else None)
-        try:
-            if step["type"] == "judge":
-                return self._next_after_judge(sid, step)
-            ok, _ = self.handlers[step["type"]].execute(self.ctx, step)
-            return self._next_after_step(sid, step, ok)
-        except UsageLimit as e:
-            # 利用上限と、渡せるトークンが無いことはステップの失敗と区別する（on_fail・judge へ回さない）
-            st.cur.setdefault("exit", 1)
-            st.cur["text"] = str(e)
-            return None, "止まった", "認証" if isinstance(e, AuthUnavailable) else "利用上限"
-        except SlowAction as e:
-            return self._next_after_slow(e, sid, step)
-
-    def _final_result(self, result: str, reason: str) -> tuple[str, str]:
-        """完了のまま終えても、関門を返したステップがあれば結果を関門にする。"""
-        if result == "完了" and self.state.gates:
+        while sid:
+            n += 1
+            if n > limit:
+                result, reason = "止まった", f"ステップの数が上限 {limit} を超えた"
+                break
+            step = self.steps.get(sid)
+            if step is None:
+                result, reason = "止まった", f"知らないステップ: {sid}"
+                break
+            self.keep_cwd()
+            st.record_stage(step.get("stage"), self.plan, self.cwd)
+            st.cur = {"id": sid, "type": step["type"]}
+            st.step_started = time.time()
+            carry, slow.carry = slow.carry, None
+            slow.watch = slow.start_watch(step, carry if carry and carry.step_id == sid else None)
+            try:
+                if step["type"] == "judge":
+                    nxt, r_result, r_reason = self._next_after_judge(sid, step)
+                else:
+                    ok, _ = self.handlers[step["type"]].execute(self.ctx, step)
+                    nxt, r_result, r_reason = self._next_after_step(sid, step, ok)
+            except UsageLimit as e:
+                # 利用上限と、渡せるトークンが無いことはステップの失敗と区別する（on_fail・judge へ回さない）
+                st.cur.setdefault("exit", 1)
+                st.cur["text"] = str(e)
+                nxt, r_result, r_reason = None, "止まった", "認証" if isinstance(e, AuthUnavailable) else "利用上限"
+            except SlowAction as e:
+                nxt, r_result, r_reason = self._next_after_slow(e, sid, step)
+            if r_result is not None:
+                result, reason = r_result, r_reason
+            slow.end_watch()
+            st.record(n, sid, nxt, (self.steps.get(nxt) or {}).get("type") if nxt else None, is_gate)
+            sid = nxt
+        if result == "完了" and st.gates:
             result = "関門"
             if reason == "無し":
-                reason = "; ".join(f"ステップ {g['id']} が関門を返した（exit={g['exit']}）" for g in self.state.gates)
-        return result, reason
+                reason = "; ".join(f"ステップ {g['id']} が関門を返した（exit={g['exit']}）" for g in st.gates)
+        return self.report(result, reason)
 
     def _restore_pr(self) -> None:
         """途中から再開するときは、前の実行の報告に残った Pull Request を {pr} に使う。"""
