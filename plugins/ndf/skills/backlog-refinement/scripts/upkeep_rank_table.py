@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 
 import gh_sections
-from upkeep_rank_config import COLUMN_NAMES, COLUMNS, HEADING
+from upkeep_rank_config import COLUMN_NAMES, COLUMNS, HEADING, SLOT_NONE, SLOT_SPLIT
 
 # ---------------- 前回との差分 ----------------
 
@@ -88,9 +88,9 @@ def render_rank_table(ms: dict, limit: int | None = None) -> str:
 
 
 def slot_text(slot: dict) -> str:
-    if slot["status"] == "なし":
+    if slot["status"] == SLOT_NONE:
         return f"なし（枠 {slot['budget']} を順位の先頭からの切り出しへ戻した）"
-    if slot["status"] == "分割が要る":
+    if slot["status"] == SLOT_SPLIT:
         return f"#{slot['issue']} は分割が要る（Size {slot['size']} / 枠 {slot['budget']}）"
     if slot["slice"] == slot["issue"]:
         return f"#{slot['issue']}（Size {slot['size']} / 枠 {slot['budget']}）"

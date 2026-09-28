@@ -33,6 +33,9 @@ from upkeep_rank_config import (  # noqa: F401  呼び出し側は upkeep_rank �
     HEADING,
     MITIGATIONS,
     RESTORED_WHY,
+    SLOT_FIT,
+    SLOT_NONE,
+    SLOT_SPLIT,
     Config,
     CycleError,
     Estimate,
@@ -195,7 +198,7 @@ def large_slot(rows_in, capacity, cfg: Config, sub_issues, edges):
     by_num = {r.number: r for r in rows_in}
     large = [r for r in rows_in if r.size >= cfg.large_min_size]
     if not large:
-        return {"issue": None, "slice": None, "size": None, "budget": budget, "status": "なし"}
+        return {"issue": None, "slice": None, "size": None, "budget": budget, "status": SLOT_NONE}
     big = min(large, key=lambda r: (-r.cod, r.number))
     kids = [k for k in sub_issues.get(big.number, []) if k in by_num]
     if kids:
@@ -205,15 +208,15 @@ def large_slot(rows_in, capacity, cfg: Config, sub_issues, edges):
     else:
         piece = big.number if big.size <= budget else None
     if piece is None:
-        return {"issue": big.number, "slice": None, "size": big.size, "budget": budget, "status": "分割が要る"}
-    return {"issue": big.number, "slice": piece, "size": by_num[piece].size, "budget": budget, "status": "当てた"}
+        return {"issue": big.number, "slice": None, "size": big.size, "budget": budget, "status": SLOT_SPLIT}
+    return {"issue": big.number, "slice": piece, "size": by_num[piece].size, "budget": budget, "status": SLOT_FIT}
 
 
 def boundary(rows_in, capacity, slot):
     """切り出しの境界（決定 21 の B）。枠の 1 切れを除いて先頭から、容量の残りに収まるまで取った最後の課題。"""
     if capacity is None or not rows_in:
         return None
-    piece = slot["slice"] if slot and slot["status"] == "当てた" else None
+    piece = slot["slice"] if slot and slot["status"] == SLOT_FIT else None
     rest = capacity - (slot["size"] if piece is not None else 0)
     total, last = 0, None
     for r in rows_in:

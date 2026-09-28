@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from step_result import EXIT_PRECONDITION, StepError, emit, git_root, result
 from upkeep_gh import _repo
+from upkeep_rank_config import SLOT_SPLIT
 
 
 def cmd_report(a, ctx):
@@ -82,7 +83,7 @@ def report_sections(rank_out, app) -> tuple[list, dict]:
     m = (rank_out or {}).get("metrics") or {}
     if not m.get("milestones"):
         return [], {}
-    split = [x["large_slot"]["issue"] for x in m["milestones"] if (x.get("large_slot") or {}).get("status") == "分割が要る"]
+    split = [x["large_slot"]["issue"] for x in m["milestones"] if (x.get("large_slot") or {}).get("status") == SLOT_SPLIT]
     tables = ((app or {}).get("metrics") or {}).get("tables") or {}
     metrics = {
         "ranked": {x["title"]: len(x["rows"]) for x in m["milestones"]},

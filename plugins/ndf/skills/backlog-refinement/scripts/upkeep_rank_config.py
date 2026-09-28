@@ -13,6 +13,7 @@ MITIGATIONS = ("防いでいる", "部分的", "無い")
 FORWARD, BACKWARD = "前倒し", "後ろ倒し"
 DIRECTIONS = (FORWARD, BACKWARD)
 AUTO, APPROVAL, APPROVED = "自動", "承認", "承認済み"
+SLOT_NONE, SLOT_SPLIT, SLOT_FIT = "なし", "分割が要る", "当てた"
 HEADING = "### 順位"
 RESTORED_WHY = "前回の表から戻した"
 
