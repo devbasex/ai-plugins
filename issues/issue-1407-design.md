@@ -52,6 +52,10 @@ supervise.py new mission は new sprint へ改名した。new sprint で呼ぶ�
 | 覆しの記録 | `sprint-state.py gate --by user`（`lib/project_mvv_signals.py`） | `project-mvv-signals.jsonl` の 1 行 | — | 状態のパス（`sprint`） |
 | 旧名の対応表 | `lib/legacy_names.py` | 表 `LEGACY` | 対応の行 | 旧名・新しい名前・受け付けの切り替え（`MODE`） |
 
+**目録とスプリント状態ファイルは別のファイルで、書き手は 1 つずつである。** `supervise.py new sprint` が書くのは
+目録 `<out>/sprint.json` とステージごとのプランだけで、スプリント状態ファイルはパスを値としてプランの `スプリント状態` に写すだけで
+開きも書きもしない。`sprint-state.py`（`init` / `update` / `gate`）が書くのはスプリント状態ファイルだけで、目録とプランを書かない。
+
 **旧名の対応表は、ほかの集約を書き換えない。** 入口（`supervise.py`・`mvv-gate.py`・`project-mvv.py`・旧名のスクリプト）が
 引数を渡す前に表を引き、読み手（`supervise_lib/state.py`・`lib/pr_mode.py`・`lib/project_mvv_signals.py`・`sprint-close.py`）が
 旧名のキーを読むときに表を引く。旧名のファイルとキーは読むだけで、書くのは常に新しい名前である。
@@ -60,12 +64,12 @@ supervise.py new mission は new sprint へ改名した。new sprint で呼ぶ�
 
 | # | 集約 | 条件 | 破れたときの扱い |
 | --- | --- | --- | --- |
-| I1 | 旧名の対応表 | 旧名の呼び出しは、新しい名前の呼び出しと同じ結果（書き出すファイル・結果の JSON・終了コード）を返し、標準エラーに新しい名前を 1 行で案内する | テストが落ちる。旧名の入口を表の経路へ戻す |
+| I1 | 旧名の対応表 | 受け付けの切り替え（`MODE`）が「受け付ける」のとき、旧名の呼び出しは、新しい名前の呼び出しと同じ結果（書き出すファイル・結果の JSON・終了コード）を返し、標準エラーに新しい名前を 1 行で案内する | テストが落ちる。旧名の入口を表の経路へ戻す |
 | I2 | 旧名の対応表 | 旧名は `lib/legacy_names.py` の表にだけ書く。入口と読み手は表を引き、旧名の文字列を自分で持たない。同じ役割の関数を旧名と新名で 2 つ持たない | テストが落ちる（旧名の文字列を表の外で探す） |
 | I3 | スプリント状態・スプリントのプラン・MVV 判定の記録 | 旧名のファイルとキー（目録 `mission.json`・プランの `ミッション状態`・記録の `mission`）は読むだけで、書き換えない。新しく書くのは新しい名前だけ | テストが落ちる（旧名の入力のハッシュが変わる） |
 | I4 | スプリントのプラン | `mission/<名前>` があり `sprint/<名前>` が無いスプリントは、`mission/<名前>` を使い続ける。宛先が `mission/` で始まる Pull Request も、課題の Pull Request として扱う | テストが落ちる |
 | I5 | （語の全体） | MVV の Mission の意味の語と識別子（`## Mission` の見出し・MVV の候補の `mission` のキー・`Mission` の項目の番号）は変えない | テストが落ちる（プロジェクト MVV の読み取りと候補の出力の既存テスト） |
-| I6 | 旧名の対応表 | 受け付けの切り替えを「やめる」にすると、旧名の呼び出しは新しい名前を示して終了コード 2 で止まり、何も書かない | テストが落ちる |
+| I6 | 旧名の対応表 | 受け付けの切り替え（`MODE`）を「やめる」にすると、旧名の呼び出しは新しい名前を示して終了コード 2 で止まり、何も書かない。I1 と I6 は `MODE` の値で排他で、どちらか一方だけが効く | テストが落ちる |
 | I7 | スプリントのプラン | 同じ引数の `new sprint` は、改名の前の `new mission` と名前の置き換えを除いて同じステージ・プラン・承認ゲートを書き出す（AC8） | テストが落ちる。置き換え以外の差分を戻す |
 
 ### ドメインイベント
@@ -75,7 +79,7 @@ supervise.py new mission は new sprint へ改名した。new sprint で呼ぶ�
 | E1 | 用語集の語を置き換え、旧名を廃止した語に載せた | 実装の最初のコミット | 用語チェック（`glossary.py check`） |
 | E2 | 本文・コード・ファイル名をスプリントへ置き換えた | 実装のコミット | 既存のテスト・構造チェック |
 | E3 | 利用者がスプリントを始めた（`supervise.py new sprint`） | 利用者か conductor | `supervise_lib/sprint.py`（旧名 `new mission` は旧名の対応表を経て同じ所へ渡る） |
-| E4 | スプリントブランチを作った（`sprint/<名前>`） | スプリントブランチのプラン | `worktree-setup.sh`・`pr-steps.py`（既存の `mission/<名前>` があればそれを使う） |
+| E4 | スプリントブランチを作った（`sprint/<名前>`） | スプリントブランチのプラン | `supervise_lib/sprint_waves.py`（表を引き、既存の `mission/<名前>` があればそれをブランチにする）・`lib/pr_mode.py`（表の旧名の頭 `mission/` の宛先も課題の Pull Request と判定する）。`worktree-setup.sh` は渡された `--from` を使うだけ、`pr-steps.py` は `lib/pr_mode.py` の判定を使うだけで、どちらも旧名の頭を持たない（I2） |
 | E5 | 改名の前に始めた実行を再開した | 利用者か conductor が既存のプランを `queue` に渡した | `supervise_lib/state.py`（`ミッション状態` を読む）・旧名のスクリプト（新しいスクリプトへ渡す） |
 | E6 | 旧名の受け付けを外した | 受け付けをやめる課題（決定 4）の実装 | 旧名の対応表（切り替えを「やめる」へ）。旧名で呼ぶと終了コード 2 |
 
@@ -84,7 +88,7 @@ supervise.py new mission は new sprint へ改名した。new sprint で呼ぶ�
 | 用語 | 意味 | 用語集への反映 |
 | --- | --- | --- |
 | スプリント | 1 つの版として出す課題と Pull Request のセット。期間ではなく、1 つの版として出す中身で切る。工程はスプリント単位で 1 回ずつ通し、モードもスプリントで 1 つにする | 追加（要求の PR で済み）。E1 で `source` を `plugins/ndf/skills/development-workflow/references/glossary.md` にし、`deprecated` に旧名を載せる |
-| スプリント状態ファイル | スプリントのプラン・done・承認ゲートの記録・MVV・版を持つファイル（`sprint.json`） | 同上 |
+| スプリント状態ファイル | スプリントのプラン・done・承認ゲートの記録・MVV・版を持つファイル（パスは呼ぶ側が決め、手順書の例は `sprint-state.json`。目録 `sprint.json` とは別のファイル） | 同上 |
 | スプリントブランチ | 課題の Pull Request を集め、ベースブランチへの Pull Request をスプリントで 1 本にするブランチ（`sprint/<名前>`） | 同上 |
 | スプリント課題 | スプリントに含まれる Pull Request の本文が、閉じる語で指す課題 | 同上 |
 | スプリント MVV | スプリント単位の MVV。プロジェクト MVV の範囲での具体化 | 同上 |
@@ -286,7 +290,7 @@ erDiagram
 | プランのキー | `スプリント状態` | `ミッション状態` | 許す（空は「状態を渡さずに組んだ」） | `state.py` が表の `read_key` で新しいキー → 旧名のキーの順に読む |
 | MVV 判定の記録のキー | `sprint`・`sprint_mvv` | `mission`・`mission_mvv` | `sprint_mvv` は許す（空は「スプリント MVV なしで判定した」） | 覆しの記録の読み手が `read_key` で両方を読む。`mvv-gate.jsonl` の既存の行は書き換えない |
 | 覆しの記録のキー | `sprint` | `mission` | 許さない | 書くのは新しいキーだけ。既存の行は書き換えない |
-| スプリント状態ファイル | 呼ぶ側がパスを渡す（手順書の例は `sprint.json`） | 手順書の例は `mission.json` | — | 状態の中身のキーは `mission` を含まないため、形は変わらない |
+| スプリント状態ファイル | 呼ぶ側がパスを渡す（手順書の例は `sprint-state.json`。目録 `sprint.json` と同じパスにしない） | 手順書の例は `mission.json` | — | 状態の中身のキーは `mission` を含まないため、形は変わらない |
 | リリース記録の行 | `スプリント: PR #<番号> / ...` | `ミッション:`・`まとまり:` | — | `sprint-close.py` の `parse_record` が表の見出しをすべて読む |
 | スクリプトの出力 | `project-mvv.py` の `sprint_mvv`・`sprint-close.py` の `sprint_prs`・`sprint-state.py status` の `スプリント:` の行 | `mission_mvv`・`mission_prs`・`ミッション:` | — | 旧名を併記しない（決定 9） |
 
