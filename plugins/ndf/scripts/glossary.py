@@ -421,31 +421,6 @@ def text_findings(rel: str, text: str, wanted: set[int] | None, g: dict, decl: D
     return items
 
 
-def _consume_block_comment(line: str, chars: list[str], i: int) -> tuple[bool, int]:
-    """`/* */` の続きを `chars` の上で空白にする。(まだブロックの中か, 次の位置) を返す。"""
-    end = line.find("*/", i)
-    stop = len(line) if end < 0 else end + 2
-    chars[i:stop] = " " * (stop - i)
-    return end < 0, stop
-
-
-def _advance_in_quote(line: str, i: int, quote: str, sh: bool, escaped_eol: bool) -> tuple[int, str | None, bool]:
-    """引用の中を 1 手進める。(次の位置, 開いている引用, 行末の `\\` で改行をエスケープしたか) を返す。"""
-    if line[i] == "\\" and not (sh and quote == "'"):
-        return i + 2, quote, i + 1 == len(line)
-    if line.startswith(quote, i):
-        return i + len(quote), None, escaped_eol
-    return i + 1, quote, escaped_eol
-
-
-def _is_line_comment_start(line: str, i: int, hash_style: bool, suffix: str) -> bool:
-    """`i` から行末までのコメント（`#` か `//`）が始まるか。"""
-    c = line[i]
-    return (c == "#" and hash_style and (suffix == ".py" or i == 0 or line[i - 1] in " \t;|&(")) or (
-        not hash_style and line.startswith("//", i)
-    )
-
-
 def mask_comments(lines: list[str], suffix: str) -> list[str]:
     """コードの行のコメントを空白に置き換える。`#` は .py / .sh（.sh は語の頭だけ）、`//` と `/* */` は .js / .ts。
     文字列の内側の記号はコメントとみなさない（`"--cart"` の識別子は残す）。行をまたぐ文字列（.py の三連引用符、
@@ -460,11 +435,19 @@ def mask_comments(lines: list[str], suffix: str) -> list[str]:
         chars, i, escaped_eol = list(line), 0, False
         while i < len(line):
             if block:
-                block, i = _consume_block_comment(line, chars, i)
+                end = line.find("*/", i)
+                stop = len(line) if end < 0 else end + 2
+                chars[i:stop] = " " * (stop - i)
+                block, i = end < 0, stop
                 continue
             c = line[i]
             if quote:
-                i, quote, escaped_eol = _advance_in_quote(line, i, quote, sh, escaped_eol)
+                if c == "\\" and not (sh and quote == "'"):
+                    escaped_eol, i = i + 1 == len(line), i + 2
+                elif line.startswith(quote, i):
+                    i, quote = i + len(quote), None
+                else:
+                    i += 1
                 continue
             if sh and c == "\\":
                 i += 2
@@ -473,7 +456,9 @@ def mask_comments(lines: list[str], suffix: str) -> list[str]:
             if opened:
                 i, quote = i + len(opened), opened
                 continue
-            if _is_line_comment_start(line, i, hash_style, suffix):
+            if (c == "#" and hash_style and (suffix == ".py" or i == 0 or line[i - 1] in " \t;|&(")) or (
+                not hash_style and line.startswith("//", i)
+            ):
                 chars[i:] = " " * (len(line) - i)
                 break
             if not hash_style and line.startswith("/*", i):
