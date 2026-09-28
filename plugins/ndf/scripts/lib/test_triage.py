@@ -22,8 +22,10 @@ import tempfile
 import time
 from typing import Any, Callable, Optional
 
+import container_reach
 import junit
 import test_strategy as ts
+import worktree_deps
 
 Runner = Callable[[Any, str, int, Optional[pathlib.Path]], tuple[Optional[int], bool]]
 SLEEP = time.sleep  # CI の待ちの眠り。テストが差し替える
@@ -34,12 +36,22 @@ def run_command(command: Any, cwd: str, timeout: int, log: Optional[pathlib.Path
 
     **打ち切るときはプロセスグループごと止める。** `subprocess.run(timeout=...)` が止めるのは直接の子
     （シェル）だけで、pytest などの孫が残って作業ツリーを書き換え続ける（`refactor_lib.process.run_with_timeout` と同じ理由）。
+
+    宣言にコンテナで走る suite があれば、そのコンテナが `cwd` を見ているかを先に確かめ、テスト環境の値を足して
+    走らせる。見ていなければ走らせずに `container_reach.Unreachable` を送る（#1337）。
     """
+    extra = container_reach.env_for(cwd)
     sink = open(log, "wb") if log is not None else subprocess.DEVNULL
     try:
         try:
             proc = subprocess.Popen(
-                command, shell=isinstance(command, str), cwd=cwd, stdout=sink, stderr=subprocess.STDOUT, start_new_session=True
+                command,
+                shell=isinstance(command, str),
+                cwd=cwd,
+                env={**os.environ, **extra} if extra else None,
+                stdout=sink,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
             )
         except OSError:
             return 127, False
@@ -226,13 +238,27 @@ def failing_at(
     """着手前の HEAD（`sha`）の一時のworktreeでも落ちる ID。作れない・読めなければ空（既存失敗とみなさない）。
 
     **上限で打ち切った suite があれば `None`**（見分けられない）。空にすると既存失敗が変更起因へ入るため。
+    宣言（`.ndf/worktree.json` の `deps`）の依存の用意に失敗したときも `None` を返す。
+    依存の用意も上限 `timeout`（`started` から。走らせ直しと同じ 1 つ）の中で行い、使い切れば `None` を返す。
+    宣言にコンテナで走る suite があれば、一時の worktree はコンテナへ届かないため用意の前に `None` を返す。
     """
+    started = time.monotonic() if started is None else started
     holder = pathlib.Path(tempfile.mkdtemp(prefix="ndf-baseline-"))
     tree = holder / "tree"
     try:
         if not _git(work, ["worktree", "add", "--detach", "-q", str(tree), sha]):
             return []
-        still, readable, cut = failing_in(str(tree), strategy, ids, timeout, log_dir, "baseline", run, started)
+        if container_reach.container_suites(tree):
+            return None  # 一時の worktree はコンテナへ届かない。見分けられない（用意も無駄になる）
+        # 依存物の無い worktree では着手前の HEAD でも落ち、変更起因が既存失敗へ入る（#1337）。
+        # 用意できなければ見分けられない
+        left = timeout - (time.monotonic() - started)
+        if left < 1 or not worktree_deps.prepare(tree, timeout=left).ok:
+            return None
+        try:
+            still, readable, cut = failing_in(str(tree), strategy, ids, timeout, log_dir, "baseline", run, started)
+        except container_reach.Unreachable:
+            return None  # 一時の worktree はコンテナへ届かない。見分けられない
         if cut:
             return None
         return still if readable else []

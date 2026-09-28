@@ -2272,6 +2272,69 @@
       "meaning": "コンテナの中から worktree の探りの印を読み、テストのコンテナが worktree を見ているかを確かめること",
       "source": "",
       "pending_source": "issues/issue-1337-design.md"
+    },
+    {
+      "term": "登録済みアカウント",
+      "context": "ndf-relay",
+      "meaning": "利用者が登録のコマンドで認証情報を預けた claude のアカウント。アカウントの切り替えの候補になる",
+      "source": "",
+      "pending_source": "issues/issue-1389-requirements.md"
+    },
+    {
+      "term": "アカウントの切り替え",
+      "context": "ndf-relay",
+      "meaning": "次に起動する claude（ラッパーの次の区間・worker のやり直し）を、別の登録済みアカウントの認証で起動すること。動いているプロセスの認証は替えない",
+      "source": "",
+      "pending_source": "issues/issue-1389-requirements.md"
+    },
+    {
+      "term": "使用率",
+      "context": "ndf-relay",
+      "meaning": "api/oauth/usage が返す five_hour / seven_day の utilization（%）。推論を呼ばずに読む",
+      "source": "",
+      "pending_source": "issues/issue-1389-requirements.md"
+    },
+    {
+      "term": "支出上限",
+      "context": "ndf-relay",
+      "meaning": "追加利用の支出の上限（individual spend limit）。extra_usage.spend_limit_reached で読む",
+      "source": "",
+      "pending_source": "issues/issue-1389-requirements.md"
+    },
+    {
+      "term": "従量の接続",
+      "context": "ndf-relay",
+      "meaning": "利用上限の無い、使った分だけ費用が掛かる claude の接続（Bedrock か Anthropic API の API キー）。中身は利用者が宣言し、登録済みアカウントがすべて上限のときだけ使う",
+      "source": "",
+      "pending_source": "issues/issue-1389-requirements.md"
+    },
+    {
+      "term": "アカウントの置き場",
+      "context": "ndf-relay",
+      "meaning": "登録済みアカウントごとの設定ディレクトリを並べた ${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/accounts/。書くのは lib/claude_accounts.py だけ",
+      "source": "",
+      "pending_source": "issues/issue-1389-design.md"
+    },
+    {
+      "term": "上限シグナルファイル",
+      "context": "ndf-relay",
+      "meaning": "子の claude の応答が API の失敗で終わったときに、StopFailure hook がラッパーの作業ディレクトリへ書く limit.json",
+      "source": "",
+      "pending_source": "issues/issue-1389-design.md"
+    },
+    {
+      "term": "切り替えの閾値",
+      "context": "ndf-relay",
+      "meaning": "今のアカウントの使用率がこれを超えたら、次のカットポイントで別の登録済みアカウントへ替える値（NDF_ACCOUNT_SWITCH_AT、既定 90%）",
+      "source": "",
+      "pending_source": "issues/issue-1389-design.md"
+    },
+    {
+      "term": "従量の接続の宣言",
+      "context": "ndf-relay",
+      "meaning": "従量の接続で起動する子へ足す変数の並び。NDF_SUPERVISE_CLAUDE_FALLBACK（KEY=VALUE を空白区切り）に利用者が書き、ラッパーと supervise.py が同じものを読む",
+      "source": "",
+      "pending_source": "issues/issue-1389-design.md"
     }
   ]
 }

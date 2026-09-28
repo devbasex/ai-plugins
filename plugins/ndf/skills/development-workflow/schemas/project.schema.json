@@ -118,6 +118,7 @@
     },
     "Container": {
       "additionalProperties": false,
+      "description": "suite を走らせるコンテナ。書いた suite は、テストを走らせる前にそのサービスのコンテナが worktree を見ているかを\n確かめ（`lib/container_reach.py`）、テスト環境の値を足して走らせる。見ていなければ走らせない。\n`compose_files` はテスト環境の割り当てが `COMPOSE_FILE` を持たないときだけ使う。",
       "properties": {
         "service": {
           "title": "Service",

@@ -130,7 +130,9 @@ def _pr_metadata_of(repo: str, resp: RestResponse) -> PrMetadata | None:
         head_branch=str(head.get("ref") or ""),
         head_sha=str(head.get("sha") or ""),
         base_branch=str(base.get("ref") or ""),
-        is_fork=bool(head_repo) and head_repo != repo,
+        # head の repo が欠ける（削除・参照できないフォーク）ときもフォークとして扱う。同じリポジトリだと
+        # 確かめられたときだけ、依存の用意（PR の head のスクリプトを走らせる）を許す（#1337）。
+        is_fork=head_repo.lower() != repo.lower(),
         rate_remaining=resp.rate_remaining,
         rate_reset=resp.rate_reset,
     )
