@@ -25,6 +25,14 @@ import claude_usage as cu  # noqa: E402
 # 上限シグナルファイルのうち、アカウントを替える引き金になる `error`（`authentication_failed` は別に扱う）
 LIMIT_ERRORS = ("rate_limit", "billing_error")
 
+# 切り替えの理由（`pick` が決め、画面の 1 行と記録の `reason` に出る）。上限の種類（`cu.KINDS`）も理由になる
+REASON_THRESHOLD = "threshold"  # 使用率が閾値を超えた
+REASON_START = "start"  # 既定のログインから最初のアカウントへ
+REASON_UNUSABLE = "unusable"  # 今のアカウントが使えない
+REASON_RECOVERED = "recovered"  # 従量の接続からアカウントへ戻す
+REASON_LIMITED = "limited"  # すべて上限で従量の接続へ
+REASON_AUTH = "auth"  # 認証が通らなかった
+
 
 def recoverable(c: ca.Choice, thr: float) -> bool:
     """従量の接続から候補 `c` へ戻せるか（選べて、使用率が閾値 `thr` 未満か不明）。"""
@@ -107,19 +115,19 @@ class AccountSwitch:
         if c.name:
             if usable and self.no_better(c, score, left):
                 return cur, None, c
-            return c.name, "threshold" if usable else ("start" if cur is None else "unusable"), c
+            return c.name, REASON_THRESHOLD if usable else (REASON_START if cur is None else REASON_UNUSABLE), c
         if usable:
             return cur, None, c
         if declared:
-            return ca.METERED, "limited", c
+            return ca.METERED, REASON_LIMITED, c
         return cur, None, c
 
     @staticmethod
     def _pick_after_limit(kind: str, cur: str | None, declared: bool) -> tuple[str | None, str | None, ca.Choice]:
         """上限の後の選び直し。None が返れば切り替えずに子を残す。"""
-        c = ca.choose(exclude=set() if kind == "auth" or cur in (None, ca.METERED) else {cur})
+        c = ca.choose(exclude=set() if kind == REASON_AUTH or cur in (None, ca.METERED) else {cur})
         if c.name:
-            return c.name, "recovered" if cur == ca.METERED else kind, c
+            return c.name, REASON_RECOVERED if cur == ca.METERED else kind, c
         if declared and cur != ca.METERED:
             return ca.METERED, kind, c
         return None, kind, c
@@ -129,7 +137,7 @@ class AccountSwitch:
         """従量の接続で動く区間の起動。戻せるアカウントがあれば戻す。"""
         c = ca.choose()
         if recoverable(c, thr):
-            return c.name, "recovered", c
+            return c.name, REASON_RECOVERED, c
         return ca.METERED, None, c
 
     @staticmethod
@@ -170,14 +178,14 @@ class AccountSwitch:
         row = {"event": "account", "section": self.section, "reason": reason, "from": prev, "to": to}
         if prev == ca.METERED:
             line = f"{ca.account_label(to)}の上限が外れたため、従量の接続からアカウント {to} へ戻して続ける"
-            row["reason"] = "recovered"
-        elif reason == "threshold":
+            row["reason"] = REASON_RECOVERED
+        elif reason == REASON_THRESHOLD:
             n = self.watch.due if self.watch is not None and self.watch.due is not None else 0
             line = f"{prev} の使用率が {n:.0f}% に達したため、アカウントを {ca.account_label(to)}へ替える"
             row["usage"] = round(n)
         elif reason in cu.KINDS:
             line = f"利用上限（{reason}）に達したため、アカウントを {prev} から {ca.account_label(to)}へ替えて続ける"
-        elif reason == "auth":
+        elif reason == REASON_AUTH:
             line = f"認証が通らなかったため、アカウントを {prev} から {ca.account_label(to)}へ替えて続ける"
         else:
             line = f"アカウントを {prev or '既定のログイン'} から {ca.account_label(to)}へ替える"
@@ -236,7 +244,7 @@ class AccountSwitch:
         snap = cl.file_snap(tp)
         if self._limit_on_hold(lim, written, tp, snap):
             return None
-        kind, resets = ("auth", None) if auth else cl.limit_of(tp)
+        kind, resets = (REASON_AUTH, None) if auth else cl.limit_of(tp)
         self._note_observed(lim, kind, resets)
         if self._wait_background(lim, kind, tp):
             return None
@@ -284,7 +292,7 @@ class AccountSwitch:
         """上限の観測を 1 つのシグナルファイルにつき 1 回だけ記録する。"""
         if self.noted != lim["written_at"]:
             self.noted = lim["written_at"]
-            if kind != "auth":
+            if kind != REASON_AUTH:
                 ca.note_limit(self.account or "", kind, resets)
 
     def _wait_background(self, lim, kind, tp) -> bool:

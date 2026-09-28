@@ -38,7 +38,7 @@ from .common import (
 )
 from .mark import asked_after
 from .record import RelayRecord, StartLimit
-from .switch import AccountSwitch, UsageWatch
+from .switch import REASON_AUTH, AccountSwitch, UsageWatch
 from .terminal import StartFailed, Terminal, pty_available, wait_exit_code
 
 import claude_accounts as ca  # noqa: E402,I001  common が lib/ を sys.path に置く
@@ -151,10 +151,10 @@ class Relay(AccountSwitch):
                 break
             env = cl.section_env(self.env, c.name)
             if env is not None:
-                return c.name, "auth", c, env
+                return c.name, REASON_AUTH, c, env
             tried.add(c.name)
         if failed != ca.METERED and ca.fallback_env(self.env):
-            return ca.METERED, "auth", c, cl.section_env(self.env, ca.METERED)
+            return ca.METERED, REASON_AUTH, c, cl.section_env(self.env, ca.METERED)
         raise NoAccountEnv(f"アカウント {failed} のトークンを得られず、替えるアカウントも従量の接続の宣言も無い")
 
     # -- 合図の判定
