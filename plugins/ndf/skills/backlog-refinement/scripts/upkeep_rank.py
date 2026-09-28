@@ -258,6 +258,13 @@ def _milestone_rows(board, rows, place, title):
     return [rows[n] for n in topo_order(nums, board.edges, lambda n: row_key(rows[n]))]
 
 
+def _slot_and_boundary(board, ranked):
+    """直近のマイルストーンの大きい課題の枠と、切り出しの境界。候補と表で同じ決め方を使う。"""
+    cfg = board.cfg
+    slot = large_slot(ranked, cfg.capacity, cfg, board.sub_issues, board.edges)
+    return slot, boundary(ranked, cfg.capacity, slot)
+
+
 def _group(board, n, place, nearest):
     """候補が依存する課題のうち、直近より後ろか未設定にあるもの（推移的に集める）。"""
     deps = {}
@@ -325,8 +332,7 @@ def _candidates(board, rows, place):
     cfg, order = board.cfg, board.order
     nearest = order[0]
     near_rows = _milestone_rows(board, rows, place, nearest)
-    slot = large_slot(near_rows, cfg.capacity, cfg, board.sub_issues, board.edges)
-    bnd = boundary(near_rows, cfg.capacity, slot)
+    _, bnd = _slot_and_boundary(board, near_rows)
     if bnd is None:
         return [], [], [], []
     b = rows[bnd["number"]]
@@ -356,8 +362,7 @@ def _candidates(board, rows, place):
 def _milestone_out(board, rows, place, title, idx):
     cfg = board.cfg
     ranked = _milestone_rows(board, rows, place, title)
-    slot = large_slot(ranked, cfg.capacity, cfg, board.sub_issues, board.edges)
-    bnd = boundary(ranked, cfg.capacity, slot)
+    slot, bnd = _slot_and_boundary(board, ranked)
     out_rows = [
         {
             "rank": k,
