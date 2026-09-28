@@ -452,14 +452,14 @@ def _order_side(side: list[Account], readable: bool, reset) -> list[Account]:
     return out
 
 
-def _candidates(exclude, before_for, now: float) -> tuple[list[Account], tuple[str, float] | None]:
+def _candidates(exclude, before: float | None, keep, now: float) -> tuple[list[Account], tuple[str, float] | None]:
     """上限に達していない候補と、上限にあるもののうち最も早く戻るアカウントと時刻。「再登録が要る」は外す。"""
     earliest: tuple[str, float] | None = None
     pool: list[Account] = []
     for n in names():
         if n in exclude:
             continue
-        usage(n, before_for(n), now)
+        usage(n, None if n in keep else before, now)
         acc = load_account(n)
         if acc is None or acc.needs_relogin:
             continue
@@ -480,14 +480,10 @@ def choose(exclude=(), before: float | None = REFRESH_BEFORE, keep=(), now: floa
     得られないもの（残り `min_left` 秒以下を含む）は外す（#1389 の I13）。`keep` の名前はトークンを更新しない
     （動いている区間のアカウント。#1389 の I5）。"""
     now = time.time() if now is None else now
-
-    def before_for(n: str) -> float | None:
-        return None if n in keep else before
-
-    pool, earliest = _candidates(exclude, before_for, now)
+    pool, earliest = _candidates(exclude, before, keep, now)
     readable = any(a.known() for a in pool)
     for pick in _try_order(pool, readable):
-        if token(pick.name, before_for(pick.name), now, min_left) is not None:
+        if token(pick.name, None if pick.name in keep else before, now, min_left) is not None:
             return Choice(pick.name, pick.score(), earliest, pick.remaining())
     return Choice(None, None, earliest)
 
