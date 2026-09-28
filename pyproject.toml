@@ -71,3 +71,5 @@ ignore = [
 "plugins/ndf/scripts/tests/test_gh_call.py" = ["F811"]
 "plugins/ndf/scripts/tests/test_gh_quota.py" = ["F811"]
 "plugins/ndf/scripts/tests/test_gh_rest.py" = ["F811"]
+# test_project_mvv のフィクスチャ env を import し、テストの引数で同じ名前を受ける（上と同じ形）
+"plugins/ndf/scripts/tests/test_project_mvv_normal.py" = ["F811"]

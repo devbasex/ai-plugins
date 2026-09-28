@@ -238,7 +238,9 @@ def work_ctx(root: Path, tmp: Path, plan: dict | None = None, texts=()) -> Simpl
     plan = {"作業場所": str(root), "課題": [], **(plan or {})}
     state = RunState(tmp / "sv", plan)
     state.cur = {"id": "w"}
-    return SimpleNamespace(plan=plan, cwd=str(root), state=state, claude=FakeClaude(list(texts)), inputs_text=lambda s: "", tick=lambda: None)
+    return SimpleNamespace(
+        plan=plan, cwd=str(root), state=state, claude=FakeClaude(list(texts)), inputs_text=lambda s: "", tick=lambda: None
+    )
 
 
 def mission_plan(env) -> dict:
@@ -356,7 +358,9 @@ def test_the_design_plan_stops_at_gate_1_whatever_the_advice(tmp_path, monkeypat
     tail = design["steps"][-3:]
     tail[0]["cmd"], tail[1]["cmd"] = f"exit {code}", "true"
     fake = tmp_path / "judge.sh"
-    fake.write_text("""#!/bin/sh\ncat > /dev/null\necho '{"result": "{\\"decision\\": \\"gate\\", \\"reason\\": \\"関門 1\\"}", "usage": {}}'\n""")
+    fake.write_text(
+        """#!/bin/sh\ncat > /dev/null\necho '{"result": "{\\"decision\\": \\"gate\\", \\"reason\\": \\"関門 1\\"}", "usage": {}}'\n"""
+    )
     fake.chmod(0o755)
     monkeypatch.setenv("NDF_SUPERVISE_CLAUDE", str(fake))
     monkeypatch.setenv("NDF_USAGE_DIR", str(tmp_path / "usage"))
