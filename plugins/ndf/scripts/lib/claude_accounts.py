@@ -591,28 +591,30 @@ def rows(now: float | None = None) -> list[dict]:
     for n in names():
         usage(n, 0, now)
         acc = load_account(n)
-        if acc is None:
-            continue
-        u = acc.usage if acc.known() else None
-        out.append(
-            {
-                "name": n,
-                "email": acc.email,
-                "org_id": acc.org_id or None,
-                "org_name": acc.org_name or None,
-                "five_hour": u.five_hour if u else None,
-                "seven_day": u.seven_day if u else None,
-                "scoped": u.scoped if u else None,
-                "spend_limit_reached": u.spend_reached() if u else None,
-                "spend": u.spend if u else None,
-                "tier": acc.tier or None,
-                "capacity": acc.capacity(),
-                "capacity_declared": {k: (acc.declared or {}).get(k) for k in WINDOWS},
-                "remaining": acc.remaining(),
-                "state": acc.state(now),
-            }
-        )
+        if acc is not None:
+            out.append(_row(n, acc, now))
     return out
+
+
+def _row(name: str, acc: Account, now: float) -> dict:
+    """一覧の 1 アカウント分の行。残量を読めていなければ枠と支出の鍵は None。"""
+    u = acc.usage if acc.known() else None
+    return {
+        "name": name,
+        "email": acc.email,
+        "org_id": acc.org_id or None,
+        "org_name": acc.org_name or None,
+        "five_hour": u.five_hour if u else None,
+        "seven_day": u.seven_day if u else None,
+        "scoped": u.scoped if u else None,
+        "spend_limit_reached": u.spend_reached() if u else None,
+        "spend": u.spend if u else None,
+        "tier": acc.tier or None,
+        "capacity": acc.capacity(),
+        "capacity_declared": {k: (acc.declared or {}).get(k) for k in WINDOWS},
+        "remaining": acc.remaining(),
+        "state": acc.state(now),
+    }
 
 
 # ---------------------------------------------------------------- 保存した従量の接続の宣言（#1468）
