@@ -641,24 +641,6 @@ def cmd_init(a):
     )
 
 
-def _md_candidates(rel, text, sections, add):
-    """.md 1 ファイルから、語の節の表の語と太字の語を候補に足す。"""
-    for n, body, term in scan(text, sections):
-        if term:
-            add(term, "table", f"{rel}:{n}")
-        for m in BOLD.finditer(body):
-            word = m.group(1).strip()
-            if not word.endswith((":", "：")):  # 「対象:」のような見出しの札は語ではない
-                add(word, "bold", f"{rel}:{n}")
-
-
-def _code_candidates(rel, lines, add):
-    """.md 以外の 1 ファイルから、型名を候補に足す。"""
-    for n, line in enumerate(lines, 1):
-        for m in TYPE_NAME.finditer(line):
-            add(m.group(1) or m.group(2), "type", f"{rel}:{n}")
-
-
 def cmd_candidates(a):
     root = Path(a.root)
     decl = load_declaration(root)
@@ -684,10 +666,19 @@ def cmd_candidates(a):
             text = p.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
+        lines = text.splitlines()
         if rel.endswith(".md"):
-            _md_candidates(rel, text, sections, add)
+            for n, body, term in scan(text, sections):
+                if term:
+                    add(term, "table", f"{rel}:{n}")
+                for m in BOLD.finditer(body):
+                    word = m.group(1).strip()
+                    if not word.endswith((":", "：")):  # 「対象:」のような見出しの札は語ではない
+                        add(word, "bold", f"{rel}:{n}")
         else:
-            _code_candidates(rel, text.splitlines(), add)
+            for n, line in enumerate(lines, 1):
+                for m in TYPE_NAME.finditer(line):
+                    add(m.group(1) or m.group(2), "type", f"{rel}:{n}")
     items = [it for it in found.values() if it["kind"] != "bold" or it["count"] >= 3]
     items.sort(key=lambda it: (-it["count"], it["kind"], it["term"]))
     items = items[: a.limit]
