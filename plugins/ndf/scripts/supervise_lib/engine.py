@@ -131,7 +131,7 @@ class Engine:
         if Path(self.ctx.cwd).is_dir():
             return
         wt = str(self.plan["作業場所"])
-        root = self.plan.get("リポジトリ") or (wt.split("/.worktrees/")[0] if "/.worktrees/" in wt else None)
+        root = self.plan.get("リポジトリ") or paths.main_dir_of_worktree(wt)
         if root and Path(root).is_dir():
             self.ctx.cwd = root
 
@@ -278,9 +278,7 @@ class Engine:
         """計画の実行の条件を、作業ツリーを作る前に打つ。流すなら None、流さないなら報告を返す。"""
         cmd = str(cond.get("cmd") or "").replace("{state_dir}", str(self.state.dir))
         wt = Path(self.plan["作業場所"])
-        cwd = self.plan.get("リポジトリ") or (
-            str(wt) if wt.is_dir() else str(wt).split("/.worktrees/")[0] if "/.worktrees/" in str(wt) else None
-        )
+        cwd = self.plan.get("リポジトリ") or (str(wt) if wt.is_dir() else paths.main_dir_of_worktree(wt))
         if cwd and not Path(cwd).is_dir():
             cwd = None
         started = time.time()
