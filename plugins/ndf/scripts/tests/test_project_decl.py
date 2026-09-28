@@ -720,3 +720,35 @@ def test_dependencies_of_an_empty_repo_are_empty_per_language(tmp_path):
     mr = _project_lib("measure_repo")
     root = init_repo(tmp_path / "empty", {"README.md": "x\n", "package.json": "[1]", "composer.json": "{broken"})
     assert mr.dependencies(mr.Tree(root, time.monotonic() + 60)) == {"php": {}, "javascript": {}, "python": {}}
+
+
+# --- 現状固定: テストの手順の候補（_test_commands） ----------------------------------------
+
+
+def test_test_commands_lists_scripts_make_targets_and_shell_files(tmp_path):
+    mr = _project_lib("measure_repo")
+    files = {
+        "package.json": json.dumps({"scripts": {"test": "jest", "build": "tsc", "test:e2e": "playwright"}}),
+        "api/composer.json": json.dumps({"scripts": {"unit-test": "phpunit", "lint": "pint"}}),
+        "Makefile": "build:\n\tgo build\ntest: deps\n\tgo test\ntest-int:\n\tx\nnot-test:\n",
+        "bin/run-tests.sh": "#!/bin/sh\n",
+        "a/b/test.sh": "#!/bin/sh\n",  # 2 段下は拾わない
+        "test.py": "",
+    }
+    root = init_repo(tmp_path / "cmds", files)
+    assert mr._test_commands(mr.Tree(root, time.monotonic() + 60)) == [
+        "package.json: test = jest",
+        "package.json: test:e2e = playwright",
+        "api/composer.json: unit-test = phpunit",
+        "Makefile: test: deps",
+        "Makefile: test-int:",
+        "bin/run-tests.sh",
+    ]
+
+
+def test_test_commands_are_capped_at_max_evidence(tmp_path):
+    mr = _project_lib("measure_repo")
+    scripts = {f"test{i:02}": "x" for i in range(mr.MAX_EVIDENCE + 5)}
+    root = init_repo(tmp_path / "many", {"package.json": json.dumps({"scripts": scripts})})
+    cmds = mr._test_commands(mr.Tree(root, time.monotonic() + 60))
+    assert cmds == [f"package.json: test{i:02} = x" for i in range(mr.MAX_EVIDENCE)]
