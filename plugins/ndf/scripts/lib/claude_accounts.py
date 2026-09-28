@@ -408,7 +408,7 @@ class Choice:
     remaining: float | None = None
 
 
-def _order(pool: list[Account], readable: bool) -> list[Account]:
+def _try_order(pool: list[Account], readable: bool) -> list[Account]:
     """試す順（I3）: 使用率が閾値未満（読めないものを含む）の側を先に、各側の中で (1) 残りの量の大きい順 →
     (2) 残りの量が不明で使用率を読めるものを使用率の小さい順 → (3) 読める候補が無いときだけ残量不明を名前の順。
     同順は `five_hour` のリセット時刻の早い方、次に名前の順。"""
@@ -455,7 +455,7 @@ def choose(exclude=(), before: float | None = REFRESH_BEFORE, keep=(), now: floa
             continue
         pool.append(acc)
     readable = any(a.usage and a.usage.known() for a in pool)
-    for pick in _order(pool, readable):
+    for pick in _try_order(pool, readable):
         if token(pick.name, None if pick.name in keep else before, now, min_left) is not None:
             return Choice(pick.name, pick.usage.score() if pick.usage else None, earliest, pick.remaining())
     return Choice(None, None, earliest)
