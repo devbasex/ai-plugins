@@ -10,7 +10,19 @@ from __future__ import annotations
 
 import delivery
 import md
-from step_result import EXIT_PRECONDITION, StepError, base_of
+from step_result import EXIT_PRECONDITION, StepError, base_of, git
+
+
+def release_tag(plugin, version):
+    """正式版・開発版のリリースタグ `<plugin>--v<版>`。"""
+    return f"{plugin}--v{version}"
+
+
+def release_tag_before(root, plugin, current=None):
+    """<plugin>--v で始まり接尾辞の無いタグのうち、current を除いて最も新しいもの。無ければ None。"""
+    head = release_tag(plugin, "")
+    tags = git(root, "tag", "--list", f"{head}*", "--sort=-v:refname").stdout.split()
+    return next((t for t in tags if t != current and "-" not in t[len(head) :]), None)
 
 
 def h2_lines(lines):
