@@ -63,7 +63,7 @@ class Relay(AccountSwitch):
         self.saw_question = False
         self.quiet = quiet_seconds()
         # 登録済みのアカウントが 2 つ以上あるときだけ切り替える（I8。起動したときに決める）
-        self.multi = ca.registered() >= 2
+        self.multi = ca.switchable()
         self.account: str | None = None  # 今の区間のアカウント（`metered` は従量の接続。None は今と同じ環境）
         self.noted = self.told = None  # 上限の観測を残した・背景の作業の 1 行を出したシグナルファイルの written_at
         self.auth_section = 0  # 認証の失敗を扱った区間（区間ごとに 1 度だけ）
