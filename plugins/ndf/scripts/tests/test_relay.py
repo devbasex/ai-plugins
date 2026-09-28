@@ -3551,3 +3551,65 @@ def test_usage_watch_on_account_characterization(monkeypatch, cur, score, thr, d
     w.due = due
     w.check()
     assert w.due == want_due and w.recover is None and _drain(w) == lines
+
+
+# ---------------------------------------------------------------- 現状固定: 区間のアカウントの知らせ（AccountSwitch.tell_account）
+
+
+def _teller(monkeypatch, section, env=None, due=None):
+    """画面の 1 行と記録の行を集める `Relay`。`account_label` は `名前（m）` に固定する。"""
+    monkeypatch.setattr(relay_switch.ca, "account_label", lambda n: f"{n}（m）")
+    r = _pk("a", env, due)
+    r.section, r.screens, r.rows = section, [], []
+    r.term = type("T", (), {"screen": lambda _s, line: r.screens.append(line)})()
+    r.log = lambda **row: r.rows.append(row)
+    return r
+
+
+@pytest.mark.parametrize("prev, to, section", [("a", "a", 2), ("a", None, 2), (None, None, 1)])
+def test_tell_account_silent_characterization(monkeypatch, prev, to, section):
+    """現状固定: 2 区間目以降で同じアカウント、または替え先が無いなら何も出さない。"""
+    r = _teller(monkeypatch, section)
+    r.tell_account(prev, to, "threshold", None)
+    assert r.screens == [] and r.rows == []
+
+
+@pytest.mark.parametrize("prev, to", [(None, "b"), ("b", "b")])
+def test_tell_account_first_section_characterization(monkeypatch, prev, to):
+    """現状固定: 1 区間目は起動したアカウントの 1 行だけを出し、記録しない。"""
+    r = _teller(monkeypatch, 1)
+    r.tell_account(prev, to, None, None)
+    assert r.screens == ["ndf-relay: アカウント b（m）で起動する"] and r.rows == []
+
+
+@pytest.mark.parametrize(
+    "section, decl, choice, screen, keys, earliest",
+    [
+        (
+            2,
+            "ANTHROPIC_API_KEY=k",
+            None,
+            "ndf-relay: 登録済みのアカウントはすべて上限にある。従量の接続（ANTHROPIC_API_KEY）へ替えて続ける",
+            ["ANTHROPIC_API_KEY"],
+            None,
+        ),
+        (
+            1,
+            "ANTHROPIC_API_KEY=k ANTHROPIC_BASE_URL=u",
+            ("x", float("inf")),
+            "ndf-relay: 登録済みのアカウントはすべて上限にある（最も早く戻るのは x、不明）。従量の接続（ANTHROPIC_API_KEY ほか 1 つ）へ替えて続ける",
+            ["ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL"],
+            {"name": "x", "at": None},
+        ),
+        (2, "", None, "ndf-relay: 登録済みのアカウントはすべて上限にある。従量の接続（宣言）へ替えて続ける", [], None),
+    ],
+)
+def test_tell_account_metered_characterization(monkeypatch, section, decl, choice, screen, keys, earliest):
+    """現状固定: 従量の接続へ替えたら、区間によらず 1 行と `account` の記録（宣言のキーと最も早く戻る時刻）を残す。"""
+    r = _teller(monkeypatch, section, {"NDF_SUPERVISE_CLAUDE_FALLBACK": decl})
+    c = relay_switch.ca.Choice(None, earliest=choice)
+    r.tell_account("a", "metered", "five_hour", c)
+    assert r.screens == [screen]
+    assert r.rows == [
+        {"event": "account", "section": section, "reason": "five_hour", "from": "a", "to": "metered", "keys": keys, "earliest": earliest}
+    ]
