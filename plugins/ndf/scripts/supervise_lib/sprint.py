@@ -5,14 +5,12 @@ from __future__ import annotations
 import json
 import re
 import shlex
-import subprocess
 from pathlib import Path
 
-import delivery
 import project_mvv
-from pace import PaceError, read_pace
+from pace import PaceError
 from step_result import result
-from supervise_lib.decl import decl_roots, release_routes, require_versions, with_decls
+from supervise_lib.decl import decl_roots, with_decls
 from supervise_lib.sprint_waves import (
     sprint_branch,
     plan_fast_check,
@@ -28,8 +26,15 @@ from supervise_lib.sprint_waves import (
 )
 from supervise_lib.new_args import NEW_ARGS
 from supervise_lib.paths import CHECK_PY, HERE, SELF
-from supervise_lib.release_templates import RELEASE_FORMS, plan_promote
-from supervise_lib.verify_steps import merge_steps, plan_limits
+from supervise_lib.sprint_routes import (
+    MVV_PACES,
+    dev_channel_of,
+    has_release_template,
+    pace_decl,
+    route_rows,
+    route_waves,
+)
+from supervise_lib.verify_steps import merge_steps
 
 
 def prod_version(version: str) -> str:
@@ -190,16 +195,13 @@ def close_waves(a) -> list[dict]:
     ]
 
 
-MVV_PACES = ("fast", "auto")  # 承認ゲートを MVV 判定で通す進め方（使ってよい条件を確かめる）
-
-
 def pace_refusal(a) -> str | None:
     """pace: fast / auto を使ってよい条件を確かめる。外れた理由を返す（満たせば None）。
     読む宣言の節が進め方の名前（fast / auto）である以外は同じ条件で、ほかの節の値は使わない。"""
     name = a.pace
     roots = decl_roots(a.worktree, getattr(a, "repo", None))
     try:
-        pace = next((read_pace(r) for r in roots if (r / ".ndf" / "pace.json").is_file()), None)
+        pace = pace_decl(a)
     except PaceError as e:
         return str(e)
     if pace is None:
@@ -211,14 +213,9 @@ def pace_refusal(a) -> str | None:
         return f".ndf/pace.json の {name}.verify（導入の確認のコマンド）が無い"
     if a.mode not in sec["modes"]:
         return f"モード {a.mode} は {name} に入れられない（入れられるモード: {' / '.join(sec['modes'])}）"
-    prod = a.production_branch
-    if not prod:
-        head = subprocess.run(
-            ["git", "-C", str(roots[0]), "symbolic-ref", "--short", "refs/remotes/origin/HEAD"], capture_output=True, text=True
-        ).stdout.strip()
-        prod = head[len("origin/") :] if head.startswith("origin/") else None
-    if not prod or prod == a.base:
-        return "開発版のチャネルが無い（起点のブランチと本番のブランチが同じか、本番のブランチが分からない）"
+    channel = dev_channel_of(a)
+    if not channel.ok:
+        return channel.reason
     mroot = next((r for r in roots if any((r / ".ndf" / f).is_file() for f in ("mvv.md", "mvv.json"))), roots[0])
     return mvv_refusal(a.state, mroot, name)
 
@@ -235,60 +232,6 @@ def mvv_refusal(state_path: str | None, root=None, pace: str = "fast") -> str | 
     if not isinstance(state, dict):
         return "スプリントの状態を読めない: オブジェクトでない"
     return project_mvv.approval_refusal(state, root or Path.cwd())
-
-
-MANUAL_RELEASE = "/ndf:release"
-
-
-def apply_routes(a) -> None:
-    """a.routes（リリースの経路）を宣言から組み、雛形で組む経路なら版数を確かめる（足りなければ DeclError）。"""
-    a.routes = release_routes(a, RELEASE_FORMS)
-    require_versions(a)
-
-
-def routes_of(a) -> list:
-    """リリースの経路（apply_decls が載せる a.routes。無ければ release.form だけから導く）。"""
-    rs = getattr(a, "routes", None)
-    if rs is None:
-        d = delivery.build({}, {}, a.release, base=a.base, production=getattr(a, "production_branch", None))
-        rs = delivery.routes(d, tuple(RELEASE_FORMS))
-    return rs
-
-
-def route_rows(a) -> list[dict]:
-    """sprint.json の「リリースの経路」の行。"""
-    return [r.as_dict() for r in routes_of(a)]
-
-
-def has_release_template(a) -> bool:
-    """リリースの経路が release.form の雛形（開発版 → 本番）で組むものか。"""
-    return any(r.stage == delivery.STAGE_TEMPLATE for r in routes_of(a))
-
-
-def manual_release_wave(a) -> dict:
-    """手で届ける経路のために最後に置く、手で行うリリースのステージ（プランを持たない）。note に経路ごとの理由を書く。"""
-    notes = [r.note for r in routes_of(a) if r.stage == delivery.STAGE_MANUAL and r.note]
-    why = "。".join(notes) or "手で届ける経路がある"
-    return {"name": "リリース", "manual": MANUAL_RELEASE, "note": f"{why}。検査の後に {MANUAL_RELEASE} で行う"}
-
-
-def route_waves(a, repo: str, then_of: str, mvv: str | None = None, condition: dict | None = None, note: str | None = None) -> list[dict]:
-    """雛形で組まない経路のステージ（#1336）。昇格の経路（promote）があれば「本番」（昇格のプラン）を、手で届ける経路
-    （manual）があれば「リリース」（手で行う）をこの順に置く。ベースブランチへのマージで届く経路（merged-by-check）と
-    届けない経路（none）はステージを置かない。"""
-    rs = routes_of(a)
-    waves = []
-    promote = next((r for r in rs if r.stage == delivery.STAGE_PROMOTE), None)
-    if promote:
-        ci_wait = int(plan_limits(a)["ci_wait_timeout"])
-        plan = plan_promote(a, repo, ci_wait, mvv, condition, production=promote.branch)
-        wave = {"name": "本番", "plans": {"promote": plan}, "then_of": then_of}
-        if note:
-            wave["note"] = note
-        waves.append(wave)
-    if any(r.stage == delivery.STAGE_MANUAL for r in rs):
-        waves.append(manual_release_wave(a))
-    return waves
 
 
 def advises(a, closing: bool = False) -> bool:
@@ -474,7 +417,6 @@ def next_text(pace: str, index: list[dict], advise: bool = False) -> str:
             "最初のステージの command を打つ（後ろのステージは --then で続く）。queue が gate を返したら、承認資料に判定の理由と"
             "根拠の項目を添えて承認を取り、関門のステージの説明に沿って続きのステージの resume を打つ"
         )
-    manual = next((e for e in index if "manual" in e), None)
-    if manual:
-        nxt += f"。リリースは {manual['manual']} で行う（{manual['note']}）"
+    for manual in (e for e in index if "manual" in e):
+        nxt += f"。{manual['name']}は {manual['manual']} で行う（{manual['note']}）"
     return nxt

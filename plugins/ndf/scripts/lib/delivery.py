@@ -6,6 +6,8 @@
 - `judge_target`: 宛先のブランチへのマージが自動反映の本番チャネルへ入るか（`production` / `not-production` /
   `undetermined`）。決められないときは `undetermined` にし、止める側へ倒す
 - `routes`: 変更が本番系へ届く道筋（`template` / `merge` / `manual` / `none`）と、それを届けるステージ
+- `dev_channel`: 開発版のチャネルの形（`separate-branch` / `manual-production` / 無し）。`pace: fast` / `auto` の使ってよい
+  条件とスプリントのステージの組み立てが読む（#1454）
 """
 
 from __future__ import annotations
@@ -27,6 +29,10 @@ STAGE_MERGED_BY_CHECK = "merged-by-check"  # ベースブランチへのマー�
 STAGE_PROMOTE = "promote"  # 昇格の Pull Request（ベースブランチ → 本番チャネル）
 STAGE_MANUAL = "manual"  # 手で行うステージ（/ndf:release）
 STAGE_NONE = "none"  # 届けない（ステージを置かない）
+
+# 開発版のチャネルの形（DevChannel.value）
+SEPARATE_BRANCH = "separate-branch"  # 起点と本番チャネルが違う
+MANUAL_PRODUCTION = "manual-production"  # 起点と本番チャネルが同じで、本番系へ届く行がすべて手動（手動反映の本番系）
 
 WT = f".ndf/{repo.WORKTREE_DECL.name}"
 PJ = str(project_decl.DECL)
@@ -59,15 +65,29 @@ class Verdict:
 
 
 @dataclass
+class DevChannel:
+    value: str | None
+    reason: str = ""  # value が None のときの断る理由
+
+    @property
+    def ok(self) -> bool:
+        return self.value is not None
+
+
+@dataclass
 class Route:
     route: str
     target: str
     branch: str | None
     stage: str
     note: str | None = None
+    production: bool | None = None  # delivery の行の production（無ければ None）
 
     def as_dict(self) -> dict:
-        return {"route": self.route, "target": self.target, "branch": self.branch, "stage": self.stage, "note": self.note}
+        d = {"route": self.route, "target": self.target, "branch": self.branch, "stage": self.stage, "note": self.note}
+        if self.production is not None:
+            d["production"] = self.production
+        return d
 
 
 def _rows_of(project: dict, problems: list[str]) -> tuple[list[dict] | None, str | None]:
@@ -143,6 +163,33 @@ def _row_text(row: dict) -> str:
     return " ".join(str(x) for x in (row.get("kind"), row.get("branch") or "（ブランチ無し）", row.get("target") or "") if x)
 
 
+def reaches_by_merge(row: dict, production: str | None) -> bool:
+    """行が本番チャネルへのマージで自動で本番系へ届くか。`production: false`（検証の環境）の行は数えない。"""
+    return row.get("kind") == "auto" and bool(production) and row.get("branch") == production and row.get("production") is not False
+
+
+def dev_channel(decl: DeliveryDecl) -> DevChannel:
+    """開発版のチャネルの形。上から順に最初に当たった条件で決まる。起点と本番チャネルが違えば delivery を読まない。"""
+    none = "開発版のチャネルが無い"
+    if not decl.production:
+        return DevChannel(None, f"{none}（本番のブランチが分からない）")
+    if decl.production != decl.base:
+        return DevChannel(SEPARATE_BRANCH)
+    if decl.problems or decl.rows is None:
+        why = "読めない" if decl.problems else "不明" if decl.unknown else "無い"
+        return DevChannel(None, f"{none}（起点と本番のブランチが同じで、{PJ} の delivery が{why}）")
+    for i, row in enumerate(decl.rows):
+        if reaches_by_merge(row, decl.production):
+            return DevChannel(None, f"{none}（delivery[{i}] が本番チャネル {decl.production} へのマージで自動で本番系へ届く）")
+    prod = [(i, r) for i, r in enumerate(decl.rows) if r.get("production") is True]
+    if not prod:
+        return DevChannel(None, f"{none}（起点と本番のブランチが同じで、本番系へ届く行（production: true）が宣言されていない）")
+    for i, row in prod:
+        if row.get("kind") != "manual":
+            return DevChannel(None, f"{none}（delivery[{i}] は本番系へ自動で届く）")
+    return DevChannel(MANUAL_PRODUCTION)
+
+
 def judge_target(decl: DeliveryDecl, target: str) -> Verdict:
     """宛先 `target` へのマージが自動反映の本番チャネルへ入るか。上から順に最初に当たった条件で決まる。"""
     items = [
@@ -168,7 +215,7 @@ def judge_target(decl: DeliveryDecl, target: str) -> Verdict:
             f"宛先 {target} は本番チャネルだが、{why}ため反映の仕方を決められない（project-decl.py で delivery を宣言すれば次から判定できる）",
         )
     for i, row in enumerate(decl.rows):
-        if row.get("kind") == "auto" and row.get("branch") == decl.production:
+        if reaches_by_merge(row, decl.production):
             items.append({"kind": "decl", "name": f"{PJ} の delivery[{i}]", "result": _row_text(row)})
             return v(PRODUCTION, f"delivery[{i}]（{row.get('target')}）は {target} へのマージで自動で反映する")
     items.append({"kind": "decl", "name": f"{PJ} の delivery", "result": f"{len(decl.rows)} 行"})
@@ -198,19 +245,21 @@ def routes(decl: DeliveryDecl, forms=()) -> list[Route]:
     out = []
     for row in decl.rows:
         target, branch = str(row.get("target") or ""), row.get("branch") or None
+        prod = row.get("production") if isinstance(row.get("production"), bool) else None
         if row.get("kind") == "auto" and not row.get("versioned"):
             if branch and branch == decl.base:
-                out.append(Route(MERGE, target, branch, STAGE_MERGED_BY_CHECK))
+                out.append(Route(MERGE, target, branch, STAGE_MERGED_BY_CHECK, production=prod))
             elif branch and branch == decl.production:
-                out.append(Route(MERGE, target, branch, STAGE_PROMOTE, f"{decl.base} → {branch} の昇格の Pull Request で届く"))
+                note = f"{decl.base} → {branch} の昇格の Pull Request で届く"
+                out.append(Route(MERGE, target, branch, STAGE_PROMOTE, note, prod))
             else:
                 why = "ブランチが無い" if not branch else f"{branch} はベースブランチでも本番チャネルでもない"
-                out.append(Route(MERGE, target, branch, STAGE_MANUAL, f"{target}: マージで反映するが{why}ため、手で届ける"))
+                out.append(Route(MERGE, target, branch, STAGE_MANUAL, f"{target}: マージで反映するが{why}ため、手で届ける", prod))
             continue
         note = f"{target}: {row.get('trigger') or '（手順の記述無し）'}"
         if row.get("versioned"):
             note += "（版数を持つ経路の雛形は release.form で選ぶ）"
-        out.append(Route(MANUAL, target, branch, STAGE_MANUAL, note))
+        out.append(Route(MANUAL, target, branch, STAGE_MANUAL, note, prod))
     return out
 
 
