@@ -256,7 +256,7 @@ class AccountSwitch:
         latest = max(written, self.term.last_input, snap[1] / 1e9 if snap else 0)
         if time.time() - latest < self.quiet:
             return True
-        if self._limit_asked():
+        if os.path.exists(self.path(QUESTION_FILE)) or asked_after(self.dir, self.path(LIMIT_FILE)):
             return True
         if cl.after_mark(tp, written)[1]:
             self.drop_limit(lim)  # シグナルファイルの後に利用者が入力した
@@ -265,14 +265,6 @@ class AccountSwitch:
             self.halt("stop-file", "停止の合図がある")
             return True
         return False
-
-    def _limit_asked(self) -> bool:
-        """上限のシグナルファイルの後に質問が出ているか（質問ファイルがあるか、シグナルファイルより後に尋ねた）。"""
-        return os.path.exists(self.path(QUESTION_FILE)) or asked_after(self.dir, self.path(LIMIT_FILE))
-
-    def _limit_interrupted(self, lim, written: float) -> bool:
-        """上限のシグナルファイルの後に利用者が割り込んだか（質問が出た、または利用者が入力した）。"""
-        return self._limit_asked() or cl.after_mark(lim.get("transcript_path") or "", written)[1]
 
     def _note_observed(self, lim, kind, resets):
         """上限の観測を 1 つのシグナルファイルにつき 1 回だけ記録する。"""

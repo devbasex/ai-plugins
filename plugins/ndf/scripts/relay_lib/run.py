@@ -198,10 +198,13 @@ class Relay(AccountSwitch):
         """`/exit` を書く直前の確かめ直し。質問が無く、合図が同じで、取りやめの行が無いか。"""
         if m.get("_kind") == "limit":
             now = self.read_limit()
+            tp = m.get("transcript_path") or ""
             return (
-                now is not None
+                not os.path.exists(self.path(QUESTION_FILE))
+                and now is not None
                 and now.get("written_at") == m.get("written_at")
-                and not self._limit_interrupted(m, parse_iso(m.get("written_at")) or 0)
+                and not asked_after(self.dir, self.path(LIMIT_FILE))
+                and not cl.after_mark(tp, parse_iso(m.get("written_at")) or 0)[1]
             )
         now = self.read_mark()
         if (
