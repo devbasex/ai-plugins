@@ -500,6 +500,145 @@ def test_compare_kiro_reports_missing_or_changed_outputs(tmp_path, broken):
     assert load_verification().compare_kiro(src, proj) == [want]
 
 
+def fake_verify_install(monkeypatch, tmp_path, *, tags, runtimes_out, dirs, snapshots, kiro_mismatch=()):
+    """cmd_verify_install の外部呼び出し（git / archive / 導入 / 比較）を置き換え、emit された結果と呼び出しを返す。"""
+    import argparse
+    import types
+
+    mod = load_verification()
+    calls = {"git": [], "compare": [], "emit": None}
+
+    def fake_git(root, *args):
+        calls["git"].append(args)
+        out = {"rev-parse": "abcdef1234567890\n", "tag": "\n".join(tags) + "\n", "diff": f"{args[-1]}/a.md\n"}.get(args[0], "")
+        return types.SimpleNamespace(stdout=out)
+
+    def fake_run(cmd, **kw):
+        if cmd[0] == "tar":
+            assert kw["input"] == b"ARCHIVE"
+        return types.SimpleNamespace(returncode=0, stdout=b"ARCHIVE", stderr=b"")
+
+    def verifier(name):
+        return lambda env, ref, plugins, expect: (runtimes_out[name], dirs[name])
+
+    def fake_compare(src, d, rel, changed, label, keeps_symlinks=True):
+        calls["compare"].append((d, rel, changed, label, keeps_symlinks))
+        return [f"{label}: {rel}/x"] if d == "bad" else []
+
+    snaps = iter(snapshots)
+    monkeypatch.setattr(mod, "git_root", lambda r: tmp_path)
+    monkeypatch.setattr(mod, "plugin_dir", lambda root, p: root / "plugins" / p)
+    monkeypatch.setattr(mod, "git", fake_git)
+    monkeypatch.setattr(mod, "subprocess", types.SimpleNamespace(run=fake_run))
+    monkeypatch.setattr(mod, "user_env_snapshot", lambda: next(snaps))
+    monkeypatch.setattr(mod, "isolated_env", lambda tmp: {"HOME": tmp})
+    monkeypatch.setattr(mod, "verify_claude", verifier("claude"))
+    monkeypatch.setattr(mod, "verify_codex", verifier("codex"))
+    monkeypatch.setattr(mod, "verify_kiro", lambda env, src, tmp, expect: (runtimes_out["kiro"], dirs["kiro"]))
+    monkeypatch.setattr(mod, "compare_files", fake_compare)
+    monkeypatch.setattr(mod, "compare_kiro", lambda src, proj: list(kiro_mismatch))
+    monkeypatch.setattr(mod, "emit", lambda obj: calls.__setitem__("emit", obj))
+
+    def run(runtimes="claude,codex,kiro", plugins="ndf,mcp-x"):
+        a = argparse.Namespace(root=None, ref="develop", expect="1.2.0", plugins=plugins, runtimes=runtimes)
+        mod.cmd_verify_install(a)
+        return calls["emit"], calls
+
+    return run
+
+
+def test_verify_install_all_ok_reports_each_runtime_and_metrics(monkeypatch, tmp_path):
+    """現状固定: 全 runtime が期待の版で導入され、中身も一致すれば ok。前の正式版は ref の版と -dev の付くタグを飛ばす。"""
+    run = fake_verify_install(
+        monkeypatch,
+        tmp_path,
+        tags=["ndf--v1.2.0", "ndf--v1.2.0-dev.3", "ndf--v1.1.0", "ndf--v1.0.0"],
+        runtimes_out={
+            "claude": {"exit": 0, "version": {"ndf": "1.2.0", "mcp-x": "9.9.9"}},
+            "codex": {"exit": 0, "version": "1.2.0"},
+            "kiro": {"exit": 0, "version": "1.2.0"},
+        },
+        dirs={"claude": {"ndf": "c-ndf", "mcp-x": "c-x"}, "codex": {"ndf": "x-ndf", "mcp-x": "x-x"}, "kiro": "proj"},
+        snapshots=[{"a": "1"}, {"a": "1"}],
+    )
+    out, calls = run()
+    assert out["tool"] == "release-verification" and out["status"] == "ok"
+    assert out["summary"] == "develop（abcdef12）から claude, codex, kiro へ導入し v1.2.0 を確かめた"
+    assert out["metrics"] == {
+        "ref": "develop",
+        "rev": "abcdef12",
+        "prev_tag": "ndf--v1.1.0",
+        "expect": "1.2.0",
+        "user_env_unchanged": True,
+        "mismatch": 0,
+    }
+    assert [(i["kind"], i["name"], i["result"]) for i in out["items"]] == [
+        ("runtime", "claude", "ok"),
+        ("runtime", "codex", "ok"),
+        ("runtime", "kiro", "ok"),
+    ]
+    assert out["items"][0]["exit"] == 0 and out["items"][0]["version"] == {"ndf": "1.2.0", "mcp-x": "9.9.9"}
+    assert calls["git"][0] == ("fetch", "-q", "origin", "--tags")
+    assert ("diff", "--name-only", "ndf--v1.1.0", "abcdef1234567890", "--", "plugins/ndf") in calls["git"]
+    assert calls["compare"] == [
+        ("c-ndf", "plugins/ndf", ["plugins/ndf/a.md"], "claude", True),
+        ("c-x", "plugins/mcp-x", ["plugins/mcp-x/a.md"], "claude", True),
+        ("x-ndf", "plugins/ndf", ["plugins/ndf/a.md"], "codex", False),
+        ("x-x", "plugins/mcp-x", ["plugins/mcp-x/a.md"], "codex", False),
+    ]
+
+
+def test_verify_install_collects_every_failure_into_stopped(monkeypatch, tmp_path):
+    """現状固定: 導入の失敗・版の違い・導入先の欠落・中身の不一致・利用者の環境の変化を 1 つの stopped にまとめる。"""
+    run = fake_verify_install(
+        monkeypatch,
+        tmp_path,
+        tags=["ndf--v1.2.0"],
+        runtimes_out={
+            "claude": {"exit": 0, "version": {"mcp-x": "1.0.0"}},
+            "codex": {"exit": 1, "version": "1.2.0"},
+            "kiro": {"exit": 0, "version": "1.2.0"},
+        },
+        dirs={"claude": {"ndf": None, "mcp-x": "bad"}, "codex": {"ndf": "x-ndf", "mcp-x": "x-x"}, "kiro": "proj"},
+        snapshots=[{"a": "1", "b": "2"}, {"a": "1", "b": "3"}],
+        kiro_mismatch=["kiro: .kiro/skills/pr"],
+    )
+    out, calls = run()
+    assert out["status"] == "stopped"
+    assert out["summary"] == "導入の確認が通らない（runtime: claude, codex / 中身の不一致 3 件 / 利用者の環境が変わった）"
+    assert out["metrics"]["prev_tag"] is None and out["metrics"]["user_env_unchanged"] is False
+    assert out["metrics"]["mismatch"] == 3
+    assert [(i["kind"], i["name"], i["result"]) for i in out["items"]] == [
+        ("user_env", "b", "changed"),
+        ("runtime", "claude", "version_mismatch"),
+        ("runtime", "codex", "failed"),
+        ("runtime", "kiro", "ok"),
+        ("file", "claude: ndf の導入先が無い", "mismatch"),
+        ("file", "claude: plugins/mcp-x/x", "mismatch"),
+        ("file", "kiro: .kiro/skills/pr", "mismatch"),
+    ]
+    assert out["items"][0]["before"] == "2" and out["items"][0]["after"] == "3"
+    # 前の正式版が無ければ差分を取らず、比べるファイルは空
+    assert not any(g[0] == "diff" for g in calls["git"])
+    assert all(c[2] == [] for c in calls["compare"])
+
+
+def test_verify_install_runs_only_the_requested_runtimes(monkeypatch, tmp_path):
+    """現状固定: --runtimes に無い runtime は導入も比較もしない。"""
+    run = fake_verify_install(
+        monkeypatch,
+        tmp_path,
+        tags=[],
+        runtimes_out={"codex": {"exit": 0, "version": "1.2.0"}},
+        dirs={"codex": {"ndf": "x-ndf"}},
+        snapshots=[{}, {}],
+    )
+    out, calls = run(runtimes=" codex ,", plugins="ndf")
+    assert out["status"] == "ok"
+    assert [i["name"] for i in out["items"]] == ["codex"]
+    assert [c[3] for c in calls["compare"]] == ["codex"]
+
+
 # --- phase-steps.py（互換の入口） --------------------------------------------
 
 
