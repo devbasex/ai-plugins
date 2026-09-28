@@ -98,8 +98,8 @@ def build(
     """読んだ宣言の中身から組む。`base` / `production` を渡せばそれを先に使う（引数が宣言より先に効く）。"""
     problems = list(problems or [])
     sources = {}
-    wt_base = wt.get("base_branch") if isinstance(wt.get("base_branch"), str) and wt.get("base_branch") else None
-    wt_prod = wt.get("production_branch") if isinstance(wt.get("production_branch"), str) and wt.get("production_branch") else None
+    wt_base = repo.branch_value(wt.get("base_branch"))
+    wt_prod = repo.branch_value(wt.get("production_branch"))
     b = base or wt_base or default_branch
     sources["base"] = "引数" if base else (f"{WT} の base_branch" if wt_base else "既定ブランチ")
     p = production or wt_prod or default_branch
