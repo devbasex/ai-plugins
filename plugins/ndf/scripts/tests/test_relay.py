@@ -3492,3 +3492,62 @@ def test_pick_no_better_characterization(monkeypatch, left, c_left, c_score, wan
     c = relay_switch.ca.Choice("b", score=c_score, remaining=c_left)
     _fake_ca(monkeypatch, choice=c, usage=_Use(95.0), acc=_Acc(left=left))
     assert _pk("a").pick(None) == ((want, "threshold", c) if want == "b" else ("a", None, c))
+
+
+# ---------------------------------------------------------------- 現状固定: 定期の確認（UsageWatch.check）
+
+
+def _watch(cur):
+    return relay_switch.UsageWatch(type("R", (), {"account": cur})())
+
+
+def _drain(w):
+    out = []
+    while not w.lines.empty():
+        out.append(w.lines.get_nowait())
+    return out
+
+
+@pytest.mark.parametrize(
+    "name, score, recover",
+    [("b", 10.0, "b"), ("b", None, "b"), ("b", 90.0, None), (None, None, None)],
+)
+def test_usage_watch_on_metered_characterization(monkeypatch, name, score, recover):
+    """現状固定: 従量の接続の間は、閾値未満（または不明）の候補を `recover` に立て、1 行を 1 度だけ積む。"""
+    calls = _fake_ca(monkeypatch, choice=relay_switch.ca.Choice(name, score=score))
+    w = _watch("metered")
+    w.check()
+    w.check()
+    assert w.recover == recover and w.due is None
+    assert _drain(w) == ([f"{name} の上限が外れた。次のカットポイントで従量の接続から戻す"] if recover else [])
+    assert calls[0] == {"exclude": set(), "before": 0}
+
+
+def test_usage_watch_recover_cleared_characterization(monkeypatch):
+    """現状固定: 戻せる候補が無くなれば `recover` を外す。"""
+    _fake_ca(monkeypatch, choice=relay_switch.ca.Choice(None))
+    w = _watch("metered")
+    w.recover = "b"
+    w.check()
+    assert w.recover is None and _drain(w) == []
+
+
+@pytest.mark.parametrize(
+    "cur, score, thr, due, want_due, lines",
+    [
+        ("a", 95.4, 90.0, None, 95.4, ["a の使用率が 95% を超えた。次のカットポイントで替える"]),
+        ("a", 90.0, 90.0, None, 90.0, ["a の使用率が 90% を超えた。次のカットポイントで替える"]),
+        ("a", 89.9, 90.0, None, None, []),
+        ("a", None, 90.0, None, None, []),
+        ("a", 95.0, 100.0, None, None, []),
+        ("a", 95.0, 90.0, 91.0, 91.0, []),
+        (None, 95.0, 90.0, None, None, []),
+    ],
+)
+def test_usage_watch_on_account_characterization(monkeypatch, cur, score, thr, due, want_due, lines):
+    """現状固定: アカウントの間は、今の使用率が閾値以上なら `due` を立てる（閾値 100 以上・立て済み・未登録は読まない）。"""
+    _fake_ca(monkeypatch, choice=None, usage=None if score is None else _Use(score), thr=thr)
+    w = _watch(cur)
+    w.due = due
+    w.check()
+    assert w.due == want_due and w.recover is None and _drain(w) == lines
