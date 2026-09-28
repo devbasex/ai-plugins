@@ -13,6 +13,32 @@ from upkeep_rank_config import COLUMN_NAMES, COLUMNS, HEADING, SLOT_NONE, SLOT_S
 # ---------------- 前回との差分 ----------------
 
 
+def _row_change(title, r, p, prev) -> dict | None:
+    """今の行 1 件の変化。前回の行 p が無ければ new（前回の表が切り詰められていれば unknown_previous）。順位が同じなら None。"""
+    if p is None:
+        kind = "unknown_previous" if prev and prev.get("truncated") else "new"
+        return {"milestone": title, "number": r["number"], "kind": kind, "from_rank": None,
+                "to_rank": r["rank"], "columns": [], "reason": "前回の表に無い"}  # fmt: skip
+    cols = [f"{COLUMN_NAMES[c]} {p[c]}→{r[c]}" for c in COLUMNS if p[c] != r[c]]
+    if p["rank"] == r["rank"]:
+        return None
+    kind = "up" if r["rank"] < p["rank"] else "down"
+    reason = "段階の変化: " + "・".join(cols) if cols else "ほかの課題の変化（入った・外れた・段階の変化・依存）"
+    return {"milestone": title, "number": r["number"], "kind": kind, "from_rank": p["rank"],
+            "to_rank": r["rank"], "columns": cols, "reason": reason}  # fmt: skip
+
+
+def _removed_reason(n, excluded, placement) -> str:
+    """前回にあって今は無い行の理由。"""
+    if n in excluded:
+        return f"順位から外れた（{excluded[n]}）"
+    if n not in placement:
+        return "open でない"
+    if placement.get(n) is None:
+        return "マイルストーンから外れた"
+    return f"{placement[n]} へ移った"
+
+
 def rank_changes(milestones, previous, placement, excluded) -> list:
     """前回の `### 順位` の表と比べた変化（AC12）。前回の表が無いマイルストーンは全件を new にする。"""
     out = []
@@ -21,32 +47,14 @@ def rank_changes(milestones, previous, placement, excluded) -> list:
         prev_rows = {r["number"]: r for r in (prev or {}).get("rows", [])}
         now = {r["number"] for r in ms["rows"]}
         for r in ms["rows"]:
-            p = prev_rows.get(r["number"])
-            if p is None:
-                kind = "unknown_previous" if prev and prev.get("truncated") else "new"
-                out.append({"milestone": ms["title"], "number": r["number"], "kind": kind, "from_rank": None,
-                            "to_rank": r["rank"], "columns": [], "reason": "前回の表に無い"})  # fmt: skip
-                continue
-            cols = [f"{COLUMN_NAMES[c]} {p[c]}→{r[c]}" for c in COLUMNS if p[c] != r[c]]
-            if p["rank"] == r["rank"]:
-                continue
-            kind = "up" if r["rank"] < p["rank"] else "down"
-            reason = "段階の変化: " + "・".join(cols) if cols else "ほかの課題の変化（入った・外れた・段階の変化・依存）"
-            out.append({"milestone": ms["title"], "number": r["number"], "kind": kind, "from_rank": p["rank"],
-                        "to_rank": r["rank"], "columns": cols, "reason": reason})  # fmt: skip
+            change = _row_change(ms["title"], r, prev_rows.get(r["number"]), prev)
+            if change is not None:
+                out.append(change)
         for n, p in prev_rows.items():
             if n in now:
                 continue
-            if n in excluded:
-                reason = f"順位から外れた（{excluded[n]}）"
-            elif n not in placement:
-                reason = "open でない"
-            elif placement.get(n) is None:
-                reason = "マイルストーンから外れた"
-            else:
-                reason = f"{placement[n]} へ移った"
             out.append({"milestone": ms["title"], "number": n, "kind": "removed", "from_rank": p["rank"],
-                        "to_rank": None, "columns": [], "reason": reason})  # fmt: skip
+                        "to_rank": None, "columns": [], "reason": _removed_reason(n, excluded, placement)})  # fmt: skip
     return out
 
 
