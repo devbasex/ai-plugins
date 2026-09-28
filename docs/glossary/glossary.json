@@ -2276,6 +2276,34 @@
       "meaning": "コンテナの中から worktree の探りの印を読み、テストのコンテナが worktree を見ているかを確かめること",
       "source": "",
       "pending_source": "issues/issue-1337-design.md"
+    },
+    {
+      "term": "登録済みアカウント",
+      "context": "ndf-relay",
+      "meaning": "利用者が登録のコマンドで認証情報を預けた claude のアカウント。アカウントの切り替えの候補になる",
+      "source": "",
+      "pending_source": "issues/issue-1389-requirements.md"
+    },
+    {
+      "term": "アカウントの切り替え",
+      "context": "ndf-relay",
+      "meaning": "次に起動する claude（ラッパーの次の区間・worker のやり直し）を、別の登録済みアカウントの認証で起動すること。動いているプロセスの認証は替えない",
+      "source": "",
+      "pending_source": "issues/issue-1389-requirements.md"
+    },
+    {
+      "term": "使用率",
+      "context": "ndf-relay",
+      "meaning": "api/oauth/usage が返す five_hour / seven_day の utilization（%）。推論を呼ばずに読む",
+      "source": "",
+      "pending_source": "issues/issue-1389-requirements.md"
+    },
+    {
+      "term": "支出上限",
+      "context": "ndf-relay",
+      "meaning": "追加利用の支出の上限（individual spend limit）。extra_usage.spend_limit_reached で読む",
+      "source": "",
+      "pending_source": "issues/issue-1389-requirements.md"
     }
   ]
 }
