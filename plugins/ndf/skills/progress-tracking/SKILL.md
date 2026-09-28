@@ -198,7 +198,7 @@ python3 "$SCRIPTS/sprint-close.py" --record-pr <記録のPR番号> \
 | `failed` | 状態を読めない、または閉じた後も CLOSED でない | 番号・`reason`・`cmd`（やり直す `gh issue close`） |
 | `kept_open` | 閉じる条件に当たらない | 番号と `reason`（いつ閉じるか） |
 
-**`kept_open` は失敗ではない。** 止める理由にせず、`backlog-refinement` へ進んでよい。
+**`kept_open` は止める理由にしない。** `backlog-refinement` へ進んでよい。
 
 ### 閉じる条件
 
