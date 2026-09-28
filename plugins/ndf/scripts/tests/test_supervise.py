@@ -708,7 +708,7 @@ n = len(open(os.path.join(state, "calls")).read().splitlines()) if os.path.exist
 responses = json.load(open(os.path.join(state, "responses.json")))
 r = responses[min(n, len(responses) - 1)]
 sys.stdin.read()
-open(os.path.join(state, "calls"), "a").write(json.dumps({"n": n, "bedrock": os.environ.get("CLAUDE_CODE_USE_BEDROCK"), "token": os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"), "account": os.environ.get("NDF_CLAUDE_ACCOUNT")}) + "\\n")
+open(os.path.join(state, "calls"), "a").write(json.dumps({"n": n, "bedrock": os.environ.get("CLAUDE_CODE_USE_BEDROCK"), "token": os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"), "account": os.environ.get("NDF_CLAUDE_ACCOUNT"), "auth_token": os.environ.get("ANTHROPIC_AUTH_TOKEN")}) + "\\n")
 if r.get("stderr"):
     sys.stderr.write(r["stderr"])
 print(json.dumps(r["out"]))
@@ -877,6 +877,18 @@ def test_single_account_keeps_fallback_once_per_call(tmp_path, seq, accounts, mo
     s, text = run_plan(tmp_path, WORK_THEN_FAIL)
     assert [(c["token"], c["bedrock"]) for c in calls()] == [(None, None), (None, "1")]
     assert "- 認証: 切り替え（CLAUDE_CODE_USE_BEDROCK）" in text
+
+
+def test_single_account_fallback_drops_parent_auth(tmp_path, seq, accounts, monkeypatch):
+    """登録が 1 つ以下の FALLBACK でも、宣言より優先される親の認証（AUTH_TOKEN・OAuth トークン）を外して呼ぶ。"""
+    set_responses, calls = seq
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "parent-SECRET")
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "parent-oauth")
+    monkeypatch.setenv("NDF_SUPERVISE_CLAUDE_FALLBACK", "CLAUDE_CODE_USE_BEDROCK=1")
+    set_responses(LIMIT, OK)
+    run_plan(tmp_path, WORK_THEN_FAIL)
+    got = [(c["auth_token"], c["token"], c["bedrock"]) for c in calls()]
+    assert got == [("parent-SECRET", "parent-oauth", None), (None, None, "1")]
 
 
 def test_section_account_is_not_refreshed_by_plan(tmp_path, seq, accounts, monkeypatch):

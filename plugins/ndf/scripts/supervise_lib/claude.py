@@ -326,7 +326,11 @@ class ClaudeRunner:
                         continue
                 elif not multi and fallback and not tried_fallback:
                     tried_fallback = True
-                    res = self._try_fallback_once(fallback, lambda: call_claude(system, prompt, tools, cwd, timeout, env=fallback, **kw))
+                    # 宣言より優先される親の認証（OAuth トークン・AUTH_TOKEN・Bedrock/Vertex など）を外した環境で呼ぶ
+                    metered = ca.env_for(ca.METERED, dict(os.environ))
+                    res = self._try_fallback_once(
+                        fallback, lambda: call_claude(system, prompt, tools, cwd, timeout, child_env=metered, **kw)
+                    )
             if not res.get("limit"):
                 return res
             waited += self._wait_for_reset(res, retry, wait_max, waited)
