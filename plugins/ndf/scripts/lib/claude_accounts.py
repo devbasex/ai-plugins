@@ -45,6 +45,11 @@ AWS_KEY_ENV = ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"
 SECRET_ENV = (*AWS_KEY_ENV, "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", TOKEN_ENV)
 METERED_FILE = "metered.json"
 PENDING_TTL = 600.0  # 登録の途中の状態の期限（秒。#1468 の決定 3）
+# 登録の途中の状態の置き場（`pending_dir`）に置くもの
+PENDING_CONFIG = "config"
+PENDING_FIFO = "code.fifo"
+PENDING_OUT = "login.out"
+PENDING_FILE = "pending.json"
 ACCOUNT_FILE = "account.json"
 USAGE_FILE = "usage.json"
 CRED_FILE = ".credentials.json"
@@ -730,9 +735,9 @@ def make_pending(name: str) -> str:
     make_store()
     d = pending_dir(name)
     os.mkdir(d, 0o700)
-    os.mkdir(os.path.join(d, "config"), 0o700)
-    os.mkfifo(os.path.join(d, "code.fifo"), 0o600)
-    os.close(os.open(os.path.join(d, "login.out"), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
+    os.mkdir(os.path.join(d, PENDING_CONFIG), 0o700)
+    os.mkfifo(os.path.join(d, PENDING_FIFO), 0o600)
+    os.close(os.open(os.path.join(d, PENDING_OUT), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
     return d
 
 
@@ -750,12 +755,12 @@ def save_pending(name: str, pid: int, now: float | None = None) -> Pending:
         "created_at": iso_utc(now),
         "expires_at": iso_utc(p.expires_at),
     }
-    _write(os.path.join(pending_dir(name), "pending.json"), row)
+    _write(os.path.join(pending_dir(name), PENDING_FILE), row)
     return p
 
 
 def read_pending(name: str) -> Pending | None:
-    d = _read(os.path.join(pending_dir(name), "pending.json"))
+    d = _read(os.path.join(pending_dir(name), PENDING_FILE))
     if d is None or not isinstance(d.get("pid"), int) or not isinstance(d.get("pid_start"), (int, float)):
         return None
     return Pending(name, d["pid"], float(d["pid_start"]), epoch(d.get("expires_at")) or 0.0)

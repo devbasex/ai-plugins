@@ -168,12 +168,12 @@ def start_login(name: str) -> dict:
     d = ca.make_pending(name)
     ok = False
     try:
-        rfd = os.open(os.path.join(d, "code.fifo"), os.O_RDWR)  # 読み手を先に持つ（2 回目の書き込みを待たせない）
-        ofd = os.open(os.path.join(d, "login.out"), os.O_WRONLY | os.O_APPEND)
+        rfd = os.open(os.path.join(d, ca.PENDING_FIFO), os.O_RDWR)  # 読み手を先に持つ（2 回目の書き込みを待たせない）
+        ofd = os.open(os.path.join(d, ca.PENDING_OUT), os.O_WRONLY | os.O_APPEND)
         try:
             proc = subprocess.Popen(
                 [claude, "auth", "login"],
-                env=_claude_env(os.path.join(d, "config")),
+                env=_claude_env(os.path.join(d, ca.PENDING_CONFIG)),
                 stdin=rfd,
                 stdout=ofd,
                 stderr=ofd,
@@ -185,7 +185,7 @@ def start_login(name: str) -> dict:
             os.close(rfd)
             os.close(ofd)
         p = ca.save_pending(name, proc.pid)
-        url = _read_url(os.path.join(d, "login.out"), proc)
+        url = _read_url(os.path.join(d, ca.PENDING_OUT), proc)
         if url is None:
             raise Fail("claude_missing", "claude auth login が認可の URL を出さなかった")
         ok = True
@@ -226,7 +226,7 @@ def finish_login(name: str, code: str, swept: set[str]) -> dict:
         if not code or "\n" in code:
             raise Fail("bad_code", "認可コードが空か 2 行以上")
         try:
-            fd = os.open(os.path.join(ca.pending_dir(name), "code.fifo"), os.O_WRONLY | os.O_NONBLOCK)
+            fd = os.open(os.path.join(ca.pending_dir(name), ca.PENDING_FIFO), os.O_WRONLY | os.O_NONBLOCK)
         except OSError as e:
             raise Fail("no_pending", f"待機中のログインが終わっていた。account add {name} からやり直す") from e
         try:
@@ -235,7 +235,7 @@ def finish_login(name: str, code: str, swept: set[str]) -> dict:
             os.close(fd)
         if not _wait_exit(p):
             raise Fail("bad_code", "claude auth login が終わらなかった。登録しない")
-        return _register(_claude(), name, os.path.join(ca.pending_dir(name), "config"), "bad_code")
+        return _register(_claude(), name, os.path.join(ca.pending_dir(name), ca.PENDING_CONFIG), "bad_code")
     finally:
         ca.discard_pending(name)
 
