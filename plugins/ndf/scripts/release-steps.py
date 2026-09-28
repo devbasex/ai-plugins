@@ -68,16 +68,7 @@ import versions  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from release_lib import bump  # noqa: E402
-from release_lib.names import (  # noqa: E402
-    changelog_section,
-    changelog_span,
-    h2_lines,
-    next_h2,
-    plugin_of,
-    release_decl,
-    release_tag,
-    release_tag_before,
-)
+from release_lib.names import changelog_section, changelog_span, h2_lines, next_h2, plugin_of, release_decl  # noqa: E402
 from step_result import (
     EXIT_GATE,
     EXIT_PRECONDITION,
@@ -446,6 +437,13 @@ def cmd_bump(a):
     )
 
 
+def release_tag_before(root, plugin, current=None):
+    """<plugin>--v で始まり接尾辞の無いタグのうち、current を除いて最も新しいもの。無ければ None。"""
+    head = f"{plugin}--v"
+    tags = git(root, "tag", "--list", f"{head}*", "--sort=-v:refname").stdout.split()
+    return next((t for t in tags if t != current and "-" not in t[len(head) :]), None)
+
+
 def next_release(name, old):
     """PATCH を 1 つ上げた正式版（`2.3.4` と `2.3.4-dev.1` は `2.3.5`）。"""
     try:
@@ -715,7 +713,7 @@ def cmd_release(a):
         emit(result(TOOL, "ok", f"{plugin} v{ver} を {base} へ出した（#{release_pr}）", items, metrics))
 
     # 本番: ベースブランチ → 本番チャネル、タグ、GitHub Release（利用者の承認を得てから呼ぶ）
-    tag = release_tag(plugin, ver)
+    tag = f"{plugin}--v{ver}"
     git(root, "fetch", "-q", "origin", "--tags")
     if git(root, "rev-parse", "-q", "--verify", f"refs/tags/{tag}", check=False).returncode == 0:
         raise StepError(f"タグ {tag} は既にある")
@@ -765,7 +763,7 @@ def cmd_approval_facts(a):
         raise StepError("リポジトリの owner/name を決められない", EXIT_PRECONDITION)
     base, prod, plugin = release_decl(root, a)
     git(root, "fetch", "-q", "origin", "--tags")
-    cur_tag = release_tag(plugin, a.version)
+    cur_tag = f"{plugin}--v{a.version}"
     prev = a.prev_tag or release_tag_before(root, plugin, cur_tag)
     if not prev:
         raise StepError("前のタグを決められない（--prev-tag を渡す）", EXIT_PRECONDITION)
