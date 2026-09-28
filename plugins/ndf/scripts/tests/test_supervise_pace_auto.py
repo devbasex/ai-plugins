@@ -248,12 +248,29 @@ def test_withdraw_keeps_the_user_record_and_does_nothing_without_a_record(tmp_pa
     state = mission_state(tmp_path)
     p = subprocess.run([PY, str(MISSION_STATE), "gate", str(state), "関門 1", "--withdraw"], capture_output=True, text=True)
     assert p.returncode == 0 and json.loads(p.stdout)["metrics"]["withdrawn"] == 0
-    assert "withdrawals" not in load(state)
+    assert [w["name"] for w in load(state)["withdrawals"]] == ["関門 1"]
     subprocess.run([PY, str(MISSION_STATE), "gate", str(state), "関門 1", "--what", "承認"], check=True, capture_output=True)
     p = subprocess.run([PY, str(MISSION_STATE), "gate", str(state), "関門 1", "--withdraw"], capture_output=True, text=True)
     assert p.returncode == 0 and [g["name"] for g in load(state)["gates"]].count("関門 1") == 1
     p = subprocess.run([PY, str(MISSION_STATE), "gate", str(state), "関門 1", "--withdraw", "--by", "mvv"], capture_output=True, text=True)
     assert p.returncode != 0 and json.loads(p.stdout)["status"] == "stopped"
+
+
+def test_a_parallel_design_plan_cannot_revive_a_withdrawn_gate(tmp_path):
+    """並列の設計プラン: 片方の handoff が先に取り消したら、もう片方が後から書く by: mvv は断られる（#1383 の指摘）。"""
+    state = mission_state(tmp_path)
+    p = subprocess.run([PY, str(MISSION_STATE), "gate", str(state), "関門 1", "--withdraw"], capture_output=True, text=True)
+    assert p.returncode == 0
+    p = subprocess.run(
+        [PY, str(MISSION_STATE), "gate", str(state), "関門 1", "--what", "MVV 判定", "--by", "mvv", "--verdict", "follow"]
+        + ["--reasons", "[]", "--log", str(tmp_path / "mvv-gate.jsonl")],
+        capture_output=True,
+        text=True,
+    )
+    assert p.returncode != 0 and json.loads(p.stdout)["status"] == "stopped"
+    assert not [g for g in load(state).get("gates", []) if g["name"] == "関門 1"]
+    subprocess.run([PY, str(MISSION_STATE), "gate", str(state), "関門 1", "--what", "承認"], check=True, capture_output=True)
+    assert [g.get("by") for g in load(state)["gates"] if g["name"] == "関門 1"] == [None]
 
 
 def fake_gh(tmp_path, fail: bool = False) -> tuple[dict, Path]:

@@ -75,14 +75,19 @@ def init_mvv(a, project) -> tuple[dict | None, tuple | None]:
 
 def withdraw(m: dict, name: str, at: str) -> int:
     """状態 m から同じ名前の承認ゲートの MVV 判定の記録（by: mvv）を外し、外した数を返す。MVV 判定で通した後に
-    承認ゲートへ落ちたときに使う（#1370 の I8）。外した時刻を withdrawals に残し、それより前の MVV 判定を覆しの照合で
-    直前の判定として読ませない（`project_mvv_signals.last_mvv_verdict`）。利用者の承認の記録は外さない。"""
+    承認ゲートへ落ちたときに使う（#1370 の I8）。外した時刻は外す記録が無くても withdrawals に残す。並列の設計プランが
+    後から書く by: mvv を `withdrawn` で断り、1 件でも関門へ落ちたら自動の通過を残さないためである。それより前の
+    MVV 判定は覆しの照合で直前の判定として読ませない（`project_mvv_signals.last_mvv_verdict`）。利用者の承認の記録は外さない。"""
     gates = m.get("gates", [])
     kept = [g for g in gates if not (g.get("name") == name and g.get("by") == "mvv")]
-    if len(kept) < len(gates):
-        m["gates"] = kept
-        m.setdefault("withdrawals", []).append({"name": name, "at": at})
+    m["gates"] = kept
+    m.setdefault("withdrawals", []).append({"name": name, "at": at})
     return len(gates) - len(kept)
+
+
+def withdrawn(m: dict, name: str) -> bool:
+    """同じ名前の承認ゲートで MVV 判定の通過を取り消したことがあるか。あれば by: mvv の記録を書かない。"""
+    return any(w.get("name") == name for w in m.get("withdrawals", []))
 
 
 def vet_stop(root: Path, path: str) -> tuple | None:
