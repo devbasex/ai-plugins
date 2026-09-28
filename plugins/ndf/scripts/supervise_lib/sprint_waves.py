@@ -1,10 +1,15 @@
-"""ミッションのステージごとのプランを作る関数（#1142 の C1）。組み立てと拒否の判定は `mission` が持つ。"""
+"""スプリントのステージごとのプランを作る関数（#1142 の C1）。組み立てと拒否の判定は `sprint` が持つ。"""
 
 from __future__ import annotations
 
 import argparse
+import functools
 import shlex
+import subprocess
+import sys
 from pathlib import Path
+
+import legacy_names
 
 from supervise_lib.decl import decl_fields
 from supervise_lib.paths import GLOSSARY_PY, MVV_PY, PUSH_DESIGN, SELF, SPEC_COPY_PY, WORKTREE_SETUP
@@ -20,11 +25,26 @@ RULE_DESIGN = (
 )
 
 
-def mission_branch(name: str) -> str:
-    return f"mission/{name}"
+@functools.cache
+def _branch_of(repo: str, name: str) -> str:
+    new, *olds = legacy_names.branch_prefixes("sprint/")
+    for prefix in (new, *olds):
+        refs = (f"refs/heads/{prefix}{name}", f"refs/remotes/origin/{prefix}{name}")
+        p = subprocess.run(["git", "-C", repo, "for-each-ref", "--format=%(refname)", *refs], capture_output=True, text=True)
+        if p.returncode == 0 and p.stdout.strip():
+            if prefix != new:
+                print(f"{prefix}{name} が既にあるため、スプリントブランチに使い続ける（新しく切るときは {new}{name}）", file=sys.stderr)
+            return prefix + name
+    return new + name
 
 
-def plan_mission_design(a, n: int, repo: str) -> dict:
+def sprint_branch(a) -> str:
+    """スプリントブランチ（`sprint/<名前>`）。`sprint/<名前>` の参照が無く、改名の前の旧名の頭の参照があれば
+    そちらを使い続ける（#1407 の I4）。参照はローカルと origin のものだけを見て、fetch しない（決定 6）。"""
+    return _branch_of(str(Path(a.worktree).resolve()), a.name)
+
+
+def plan_sprint_design(a, n: int, repo: str) -> dict:
     """設計のフェーズ: 設計文書を書き、設計 PR を出し、cross-review（設計の既定 3 ラウンド）の後に関門 1 で止まる。"""
     branch = f"design/issue-{n}"
     glossary_check = f"{GLOSSARY_PY} check --diff origin/{shlex.quote(a.base)} --root ."
@@ -92,7 +112,7 @@ def plan_mission_design(a, n: int, repo: str) -> dict:
                 "stage": "ドキュメントレビュー",
                 "base": a.base,
                 "title": f"設計: #{n}",
-                "summary": f"#{n} の設計（ミッション {a.name}）",
+                "summary": f"#{n} の設計（スプリント {a.name}）",
                 "append": [DESIGN_GLOSSARY_NOTE],
                 "next": "review",
             },
@@ -162,9 +182,9 @@ def plan_mission_design(a, n: int, repo: str) -> dict:
     }
 
 
-def plan_mission_branch(a, repo: str) -> dict:
-    """ミッションのブランチを起点のブランチから切り、origin へ送る。"""
-    mb = mission_branch(a.name)
+def plan_sprint_branch(a, repo: str) -> dict:
+    """スプリントブランチを起点のブランチから切り、origin へ送る。"""
+    mb = sprint_branch(a)
     wt = f"{repo}/.worktrees/{mb}"
     cmd = (
         f"bash {shlex.quote(str(WORKTREE_SETUP))} create {shlex.quote(mb)} && git -C {shlex.quote(wt)} push -q -u origin {shlex.quote(mb)}"
@@ -176,13 +196,13 @@ def plan_mission_branch(a, repo: str) -> dict:
         "作業場所": repo,
         "規則": "",
         "上限": 3,
-        "steps": [{"id": "mission-branch", "type": "run", "stage": "作業場所の用意", "timeout": 600, "cmd": cmd, "next": "end"}],
+        "steps": [{"id": "sprint-branch", "type": "run", "stage": "作業場所の用意", "timeout": 600, "cmd": cmd, "next": "end"}],
     }
 
 
-def plan_mission_impl(a, n: int, repo: str) -> dict:
-    """実装のフェーズ: 課題の作業ツリーをミッションのブランチから切り、課題の PR をミッションのブランチへ集める。"""
-    mb = mission_branch(a.name)
+def plan_sprint_impl(a, n: int, repo: str) -> dict:
+    """実装のフェーズ: 課題の作業ツリーをスプリントブランチから切り、課題の PR をスプリントブランチへ集める。"""
+    mb = sprint_branch(a)
     branch = f"feat/issue-{n}-{a.name}"
     ns = argparse.Namespace(
         **{
@@ -194,8 +214,8 @@ def plan_mission_impl(a, n: int, repo: str) -> dict:
             "mode": a.mode,
             "worktree": f"{repo}/.worktrees/{branch}",
             "base": mb,
-            "title": f"#{n} を実装する（ミッション {a.name}）",
-            "summary": f"#{n}（ミッション {a.name} のブランチへ集める）",
+            "title": f"#{n} を実装する（スプリント {a.name}）",
+            "summary": f"#{n}（スプリント {a.name} のブランチへ集める）",
             "branch": branch,
         }
     )
@@ -204,9 +224,9 @@ def plan_mission_impl(a, n: int, repo: str) -> dict:
     return plan
 
 
-def plan_mission_check(a, repo: str) -> dict:
-    """検査のフェーズ: ミッションのブランチから起点のブランチへ PR を 1 本出し、構造改善・cross-review・完了判定を 1 回通す。"""
-    mb = mission_branch(a.name)
+def plan_sprint_check(a, repo: str) -> dict:
+    """検査のフェーズ: スプリントブランチから起点のブランチへ PR を 1 本出し、構造改善・cross-review・完了判定を 1 回通す。"""
+    mb = sprint_branch(a)
     ns = argparse.Namespace(**decl_fields(a), pr="{pr}", scope=a.scope, issue=a.issue, mode=a.mode, worktree=f"{repo}/.worktrees/{mb}")
     plan = plan_check(ns)
     plan.pop("Pull Request", None)
@@ -226,17 +246,17 @@ def plan_mission_check(a, repo: str) -> dict:
             "type": "pr",
             "stage": "Pull Request",
             "base": a.base,
-            "title": f"ミッション {a.name}",
+            "title": f"スプリント {a.name}",
             "body": "template",
-            "summary": f"ミッション {a.name} の課題を {a.base} へ取り込む。\n\n{related}",
-            "changes": f"ミッション {a.name} の課題を {a.base} へ取り込む。",
+            "summary": f"スプリント {a.name} の課題を {a.base} へ取り込む。\n\n{related}",
+            "changes": f"スプリント {a.name} の課題を {a.base} へ取り込む。",
             "next": "assess",
         },
     ] + plan["steps"]
     return plan
 
 
-def plan_mission_release(a, repo: str, advise: bool = False) -> dict:
+def plan_sprint_release(a, repo: str, advise: bool = False) -> dict:
     """開発版の配布。検査の queue が --then で流し、検査の PR を --prs へ渡す。`advise` なら承認資料の後に
     助言の MVV 判定を置く（pace: normal と --state。#1400）。"""
     ns = argparse.Namespace(
@@ -271,7 +291,7 @@ def advise_design_steps(a) -> list[dict]:
 def plan_advise_design(a, n: int, repo: str) -> dict:
     """pace: normal と --state の設計: 用語チェックの後の push と関門 1 の judge の間へ助言の MVV 判定を入れる（#1400 の決定 4）。
     判定は設計 PR へコメントし、プランは判定によらず関門 1 で止まる（承認は利用者が行う）。"""
-    plan = plan_mission_design(a, n, repo)
+    plan = plan_sprint_design(a, n, repo)
     steps = plan["steps"]
     gate = steps.pop()
     for s in steps:
@@ -286,7 +306,7 @@ def plan_advise_design(a, n: int, repo: str) -> dict:
 def plan_mvv_design(a, n: int, repo: str) -> dict:
     """pace: fast と auto の設計: 関門 1 の judge を MVV 判定のステップへ替える。従えばラベルとコメントを付けてマージする。
     ラベルの付与かマージが落ちたら handoff で関門 1 の by: mvv の記録を外し、プランを関門で終える（#1370 の I8）。"""
-    plan = plan_mission_design(a, n, repo)
+    plan = plan_sprint_design(a, n, repo)
     state = shlex.quote(str(Path(a.state).resolve()))
     note = MVV_NOTE
     # 用語チェックの当たりが直し切れずに残ったら、mvv の判定へ渡さず関門 1 の judge（gate）へ回す
@@ -302,7 +322,7 @@ def plan_mvv_design(a, n: int, repo: str) -> dict:
             "type": "run",
             "stage": "設計",
             "timeout": 900,
-            "cmd": f"{MVV_PY} check --mission {state} --gate design --pr {{pr}} --mode {a.mode} --root . --note {note}",
+            "cmd": f"{MVV_PY} check --sprint {state} --gate design --pr {{pr}} --mode {a.mode} --root . --note {note}",
             "next": "approve",
             "gate_next": "end",
         },
@@ -326,7 +346,7 @@ def plan_mvv_design(a, n: int, repo: str) -> dict:
 
 def plan_fast_impl(a, n: int, repo: str) -> dict:
     """pace: fast の実装: 課題の作業ツリーを起点のブランチから切り、Pull Request を起点のブランチへ直接入れる。
-    閉じる語は書かない（課題はミッションの終わりの close のステップが閉じる）。"""
+    閉じる語は書かない（課題はスプリントの終わりの close のステップが閉じる）。"""
     branch = f"feat/issue-{n}-{a.name}"
     ns = argparse.Namespace(
         **{
@@ -337,8 +357,8 @@ def plan_fast_impl(a, n: int, repo: str) -> dict:
             "tests": a.tests or ["."],
             "mode": a.mode,
             "worktree": f"{repo}/.worktrees/{branch}",
-            "title": f"#{n} を実装する（ミッション {a.name}）",
-            "summary": f"#{n}（ミッション {a.name}。課題はミッションの終わりに閉じる）",
+            "title": f"#{n} を実装する（スプリント {a.name}）",
+            "summary": f"#{n}（スプリント {a.name}。課題はスプリントの終わりに閉じる）",
             "branch": branch,
         }
     )
@@ -354,7 +374,7 @@ def plan_fast_check(a, repo: str, name: str, final: bool = False, review_only: b
         worktree=repo,
         issue=a.issue,
         mode=a.mode,
-        mission=getattr(a, "state", None),
+        sprint=getattr(a, "state", None),
         final=final,
         review_only=review_only,
     )

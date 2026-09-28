@@ -1,4 +1,4 @@
-"""ミッションの状態（`mission-state.py`、#1063）。
+"""スプリントの状態（`sprint-state.py`、#1063）。
 
 入力は `supervise.py queue` の done の JSON と `report.md` の形（r6 の実物の形）から作る。
 LLM も gh も呼ばない。
@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 SCRIPTS = Path(__file__).resolve().parents[1]
-SCRIPT = SCRIPTS / "mission-state.py"
+SCRIPT = SCRIPTS / "sprint-state.py"
 RELAY = SCRIPTS / "relay.py"
 
 NO_GH: dict[str, str] = {}
@@ -130,8 +130,8 @@ def r6(tmp_path):
             ensure_ascii=False,
         )
     )
-    mission = tmp_path / "mission.json"
-    return {"dir": tmp_path, "a": a, "b": b, "dev": dev, "prod": prod, "done": str(done), "pdone": str(pdone), "mission": str(mission)}
+    sprint = tmp_path / "sprint.json"
+    return {"dir": tmp_path, "a": a, "b": b, "dev": dev, "prod": prod, "done": str(done), "pdone": str(pdone), "sprint": str(sprint)}
 
 
 def run(*args: str) -> subprocess.CompletedProcess:
@@ -153,7 +153,7 @@ GOAL = (
 def init(r6) -> None:
     ok(
         "init",
-        r6["mission"],
+        r6["sprint"],
         "--name",
         "(a)(b) 置き換え",
         "--milestone",
@@ -213,7 +213,7 @@ DOC = """# 引継ぎ
 
 def test_update_fills_rows_and_render_writes_table(r6):
     init(r6)
-    out = ok("update", r6["mission"], "--done", r6["pdone"], "--next", f"{r6['a']}=次のミッションからチェインで流す")
+    out = ok("update", r6["sprint"], "--done", r6["pdone"], "--next", f"{r6['a']}=次のスプリントからチェインで流す")
     rows = {i["plan"]: i for i in out["items"]}
     assert (rows[r6["a"]]["result"], rows[r6["a"]]["pr"], rows[r6["a"]]["seconds"], rows[r6["a"]]["cost"]) == (
         "完了",
@@ -227,9 +227,9 @@ def test_update_fills_rows_and_render_writes_table(r6):
 
     doc = r6["dir"] / "handoff.md"
     doc.write_text(DOC)
-    ok("render", r6["mission"], str(doc), "--section", "今の会話の進み")
+    ok("render", r6["sprint"], str(doc), "--section", "今の会話の進み")
     text = doc.read_text()
-    assert "| 実装 #1053 | 完了 | #1056 | 586.4 | $1.178 | 次のミッションからチェインで流す |" in text
+    assert "| 実装 #1053 | 完了 | #1056 | 586.4 | $1.178 | 次のスプリントからチェインで流す |" in text
     assert "| 実装 #1054 | 止まった（exit=3）。理由: merge のステップで衝突 | #1058 | 816 | $2.170 | — |" in text
     assert "| 開発版 10.17.17-dev.1 | まだ | — | — | — | — |" in text
     assert "| 本番 10.17.17 | 完了 | — | 300.3 | $0.000 | — |" in text
@@ -244,17 +244,17 @@ def split_around(text: str, head: str, next_head: str) -> tuple[str, str]:
 
 def test_render_keeps_bytes_outside_section(r6):
     init(r6)
-    ok("update", r6["mission"])
+    ok("update", r6["sprint"])
     doc = r6["dir"] / "handoff.md"
     doc.write_bytes(DOC.encode())
     before = split_around(DOC, "## 今の会話の進み（06:53〜07:33 UTC）\n", "## 前の会話の進み")
-    ok("render", r6["mission"], str(doc), "--section", "今の会話の進み")
+    ok("render", r6["sprint"], str(doc), "--section", "今の会話の進み")
     after_text = doc.read_bytes().decode()
     assert split_around(after_text, "## 今の会話の進み（06:53〜07:33 UTC）\n", "## 前の会話の進み") == before
     # 囲みの中の見出しと小見出しは節の本文として置き換わる
     assert "囲みの中の見出し" not in after_text and "小見出しも節の中" not in after_text
     # 2 度目は 1 バイトも変えない
-    ok("render", r6["mission"], str(doc), "--section", "今の会話の進み")
+    ok("render", r6["sprint"], str(doc), "--section", "今の会話の進み")
     assert doc.read_bytes().decode() == after_text
 
 
@@ -262,7 +262,7 @@ def test_render_stops_without_section(r6):
     init(r6)
     doc = r6["dir"] / "handoff.md"
     doc.write_text(DOC)
-    p = run("render", r6["mission"], str(doc), "--section", "無い節")
+    p = run("render", r6["sprint"], str(doc), "--section", "無い節")
     assert p.returncode == 1
     out = json.loads(p.stdout)
     assert out["status"] == "stopped" and "無い節" in out["summary"]
@@ -271,12 +271,12 @@ def test_render_stops_without_section(r6):
 
 def test_render_demote_adds_new_section_before(r6):
     init(r6)
-    ok("update", r6["mission"])
+    ok("update", r6["sprint"])
     doc = r6["dir"] / "handoff.md"
     doc.write_text(DOC)
     ok(
         "render",
-        r6["mission"],
+        r6["sprint"],
         str(doc),
         "--section",
         "今の会話の進み",
@@ -295,50 +295,50 @@ def test_render_demote_adds_new_section_before(r6):
 
 def test_update_twice_is_same(r6):
     init(r6)
-    ok("update", r6["mission"], "--done", r6["pdone"])
-    first = Path(r6["mission"]).read_bytes()
-    out1 = run("update", r6["mission"], "--done", r6["pdone"]).stdout
-    assert Path(r6["mission"]).read_bytes() == first
-    assert run("update", r6["mission"], "--done", r6["pdone"]).stdout == out1
+    ok("update", r6["sprint"], "--done", r6["pdone"])
+    first = Path(r6["sprint"]).read_bytes()
+    out1 = run("update", r6["sprint"], "--done", r6["pdone"]).stdout
+    assert Path(r6["sprint"]).read_bytes() == first
+    assert run("update", r6["sprint"], "--done", r6["pdone"]).stdout == out1
 
 
 def test_init_stops_on_other_shape_json(r6):
-    """同じパスに supervise.py new mission の目録（別の形の JSON）があれば、上書きせずに止まる（#1082）。"""
-    catalog = {"ミッション": "m", "ブランチ": "fix/x", "ステージ": [{"計画": ["a.json"]}]}
-    path = Path(r6["mission"])
+    """同じパスに supervise.py new sprint の目録（別の形の JSON）があれば、上書きせずに止まる（#1082）。"""
+    catalog = {"スプリント": "m", "ブランチ": "fix/x", "ステージ": [{"計画": ["a.json"]}]}
+    path = Path(r6["sprint"])
     path.write_text(json.dumps(catalog, ensure_ascii=False))
     before = path.read_bytes()
-    p = run("init", r6["mission"], "--name", "m")
+    p = run("init", r6["sprint"], "--name", "m")
     assert p.returncode != 0
     out = json.loads(p.stdout)
-    assert out["status"] == "stopped" and r6["mission"] in out["summary"]
+    assert out["status"] == "stopped" and r6["sprint"] in out["summary"]
     assert path.read_bytes() == before
 
 
 def test_init_overwrites_own_state(r6):
     """同じ形（状態のファイル）なら、これまでどおり作り直す。"""
     init(r6)
-    out = ok("init", r6["mission"], "--name", "作り直し")
+    out = ok("init", r6["sprint"], "--name", "作り直し")
     assert out["status"] == "ok"
-    assert json.loads(Path(r6["mission"]).read_text())["name"] == "作り直し"
+    assert json.loads(Path(r6["sprint"]).read_text())["name"] == "作り直し"
 
 
 def test_gate_and_status(r6):
     init(r6)
-    ok("update", r6["mission"], "--done", r6["pdone"])
-    ok("gate", r6["mission"], "関門 2", "--what", "本番 10.17.17", "--at", "2026-09-25T07:22:00+00:00")
-    ok("gate", r6["mission"], "関門 2", "--what", "本番 10.17.17", "--at", "2026-09-25T07:23:00+00:00")
-    m = json.loads(Path(r6["mission"]).read_text())
+    ok("update", r6["sprint"], "--done", r6["pdone"])
+    ok("gate", r6["sprint"], "関門 2", "--what", "本番 10.17.17", "--at", "2026-09-25T07:22:00+00:00")
+    ok("gate", r6["sprint"], "関門 2", "--what", "本番 10.17.17", "--at", "2026-09-25T07:23:00+00:00")
+    m = json.loads(Path(r6["sprint"]).read_text())
     assert m["gates"] == [{"name": "関門 2", "what": "本番 10.17.17", "at": "2026-09-25T07:23:00+00:00"}]
-    p = run("status", r6["mission"])
+    p = run("status", r6["sprint"])
     lines = p.stdout.splitlines()
-    assert lines[0] == "ミッション: (a)(b) 置き換え（マイルストーン 26）"
+    assert lines[0] == "スプリント: (a)(b) 置き換え（マイルストーン 26）"
     assert "実装 #1053: 完了（#1056・586.4 秒・$1.178）。次: —" in lines
     assert lines[-1] == "関門 2: 承認 2026-09-25T07:23:00+00:00"
 
 
 def load_relay():
-    spec = importlib.util.spec_from_file_location("relay_for_mission", RELAY)
+    spec = importlib.util.spec_from_file_location("relay_for_sprint", RELAY)
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)
     return m
@@ -348,7 +348,7 @@ def test_next_is_ndf_next_block_for_relay(r6):
     init(r6)
     doc = r6["dir"] / "handoff.md"
     doc.write_text(DOC)
-    p = run("next", r6["mission"], "--doc", str(doc), "--section", "今の会話の進み")
+    p = run("next", r6["sprint"], "--doc", str(doc), "--section", "今の会話の進み")
     assert p.returncode == 0, p.stderr
     blocks = load_relay().next_blocks("前置き\n\n" + p.stdout)
     assert blocks == [
@@ -361,7 +361,7 @@ def test_next_replace_rewrites_command_section(r6):
     init(r6)
     doc = r6["dir"] / "handoff.md"
     doc.write_text(DOC)
-    ok("next", r6["mission"], "--doc", str(doc), "--replace")
+    ok("next", r6["sprint"], "--doc", str(doc), "--replace")
     text = doc.read_text()
     assert "古い文面" not in text
     assert text[: text.index("## 次に実行するコマンド")] == DOC[: DOC.index("## 次に実行するコマンド")]
@@ -370,8 +370,8 @@ def test_next_replace_rewrites_command_section(r6):
 
 
 def test_no_llm_calls():
-    """LLM を直接呼ばない。外へ出るのは MVV を写すときの gh api（lib/mission_mvv.py）だけで、照合は mvv_llm.vet_body に任せる。"""
-    src = SCRIPT.read_text() + (SCRIPTS / "lib" / "mission_mvv.py").read_text()
+    """LLM を直接呼ばない。外へ出るのは MVV を写すときの gh api（lib/sprint_mvv.py）だけで、照合は mvv_llm.vet_body に任せる。"""
+    src = SCRIPT.read_text() + (SCRIPTS / "lib" / "sprint_mvv.py").read_text()
     assert "claude" not in src
     assert src.count("subprocess.run(") == 1 and '["gh", "api"' in src
 
@@ -422,10 +422,10 @@ def test_init_fast_copies_the_three_sections_and_hashes_them(tmp_path):
     import hashlib
 
     env = gh_env(tmp_path, MILESTONE)
-    mission = tmp_path / "state" / "mission-state.json"
-    p = run_env(env, "init", str(mission), "--name", "m", "--pace", "fast", "--milestone", "26", "--root", str(tmp_path))
+    sprint = tmp_path / "state" / "sprint-state.json"
+    p = run_env(env, "init", str(sprint), "--name", "m", "--pace", "fast", "--milestone", "26", "--root", str(tmp_path))
     assert p.returncode == 0, p.stdout + p.stderr
-    m = json.loads(mission.read_text())
+    m = json.loads(sprint.read_text())
     mvv = Path(m["mvv"]["path"])
     assert m["pace"] == "fast" and mvv == tmp_path / "state" / "mvv.md"
     text = mvv.read_text()
@@ -438,10 +438,10 @@ def test_init_fast_copies_the_three_sections_and_hashes_them(tmp_path):
 @pytest.mark.parametrize("description", [MILESTONE.replace("## Vision", "## 展望"), None])
 def test_init_fast_without_the_sections_writes_nothing_and_returns_three(tmp_path, description):
     env = gh_env(tmp_path, description)
-    mission = tmp_path / "state" / "mission-state.json"
-    p = run_env(env, "init", str(mission), "--name", "m", "--pace", "fast", "--milestone", "26", "--root", str(tmp_path))
+    sprint = tmp_path / "state" / "sprint-state.json"
+    p = run_env(env, "init", str(sprint), "--name", "m", "--pace", "fast", "--milestone", "26", "--root", str(tmp_path))
     assert p.returncode == 3, p.stdout + p.stderr
-    assert not mission.exists()
+    assert not sprint.exists()
 
 
 def test_init_fast_without_a_source_returns_two(tmp_path):
@@ -452,7 +452,7 @@ def test_init_fast_without_a_source_returns_two(tmp_path):
 
 def test_init_normal_keeps_the_old_shape(r6):
     init(r6)
-    m = json.loads(Path(r6["mission"]).read_text())
+    m = json.loads(Path(r6["sprint"]).read_text())
     assert m["pace"] == "normal" and "mvv" not in m
 
 
@@ -461,12 +461,12 @@ def test_mvv_approval_and_the_gate_by_the_judgement(tmp_path):
 
     mvv = tmp_path / "given.md"
     mvv.write_text("## Mission\nx\n## Vision\ny\n## Value\nz\n")
-    mission = tmp_path / "mission-state.json"
-    ok("init", str(mission), "--name", "m", "--pace", "fast", "--mvv", str(mvv), "--root", str(tmp_path))
-    ok("gate", str(mission), "MVV", "--what", "MVV を承認")
+    sprint = tmp_path / "sprint-state.json"
+    ok("init", str(sprint), "--name", "m", "--pace", "fast", "--mvv", str(mvv), "--root", str(tmp_path))
+    ok("gate", str(sprint), "MVV", "--what", "MVV を承認")
     ok(
         "gate",
-        str(mission),
+        str(sprint),
         "関門 2",
         "--what",
         "本番 10.17.30",
@@ -479,7 +479,7 @@ def test_mvv_approval_and_the_gate_by_the_judgement(tmp_path):
         "--log",
         "/x/mvv-gate.jsonl",
     )
-    g = {x["name"]: x for x in json.loads(mission.read_text())["gates"]}
+    g = {x["name"]: x for x in json.loads(sprint.read_text())["gates"]}
     assert g["MVV"]["sha256"] == hashlib.sha256(mvv.read_bytes()).hexdigest()
     assert g["MVV"].get("by", "user") == "user"
     assert (g["関門 2"]["by"], g["関門 2"]["verdict"], g["関門 2"]["reasons"], g["関門 2"]["log"]) == (
@@ -488,28 +488,28 @@ def test_mvv_approval_and_the_gate_by_the_judgement(tmp_path):
         ["Value 1"],
         "/x/mvv-gate.jsonl",
     )
-    p = run("status", str(mission))
+    p = run("status", str(sprint))
     assert "関門 2: MVV 判定 " in p.stdout
 
 
 def test_mvv_approval_without_an_mvv_stops(r6):
     init(r6)
-    assert run("gate", r6["mission"], "MVV", "--what", "x").returncode == 1
+    assert run("gate", r6["sprint"], "MVV", "--what", "x").returncode == 1
 
 
 def test_update_adds_plans_from_done_without_init_plan(r6):
-    ok("init", r6["mission"], "--name", "計画を渡さない", "--dev", "10.17.17-dev.1", "--prod", "10.17.17")
-    out = ok("update", r6["mission"], "--done", r6["done"], "--done", r6["pdone"])
+    ok("init", r6["sprint"], "--name", "計画を渡さない", "--dev", "10.17.17-dev.1", "--prod", "10.17.17")
+    out = ok("update", r6["sprint"], "--done", r6["done"], "--done", r6["pdone"])
     rows = {i["plan"]: i for i in out["items"]}
     assert set(rows) == {r6["a"], r6["b"], r6["prod"]}
     assert (rows[r6["a"]]["result"], rows[r6["a"]]["pr"]) == ("完了", "#1056")
-    m = json.loads(Path(r6["mission"]).read_text())
+    m = json.loads(Path(r6["sprint"]).read_text())
     assert {p["plan"]: p["label"] for p in m["plans"]}[r6["prod"]] == "本番 10.17.17"
     assert {p["plan"]: p["kind"] for p in m["plans"]}[r6["a"]] == "実装"
 
 
-def load_mission_state():
-    spec = importlib.util.spec_from_file_location("mission_state", SCRIPT)
+def load_sprint_state():
+    spec = importlib.util.spec_from_file_location("sprint_state", SCRIPT)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
@@ -519,22 +519,22 @@ def load_mission_state():
 def test_plan_kind_reads_the_old_key_too(tmp_path, key):
     plan = tmp_path / "plan.json"
     plan.write_text(json.dumps({key: "配布（開発版）"}, ensure_ascii=False))
-    assert load_mission_state().plan_kind(str(plan)) == "開発版"
+    assert load_sprint_state().plan_kind(str(plan)) == "開発版"
 
 
 def test_mvv_sections_keep_a_heading_inside_a_fence():
     """lib/md.py の上で読む（#1142 の D1）: 囲みの中の `## ` は Mission の節を切らない。"""
     text = "## Mission\n\n使命\n\n```md\n## 囲みの中\n```\n\n## Vision\n\n像\n\n## Value\n\n価値\n\n# 別の文書\n"
-    load_mission_state()  # lib/ を sys.path へ足す
-    import mission_mvv
+    load_sprint_state()  # lib/ を sys.path へ足す
+    import sprint_mvv
 
-    out = mission_mvv.mvv_sections(text)
+    out = sprint_mvv.mvv_sections(text)
     assert out == ("## Mission\n\n使命\n\n```md\n## 囲みの中\n```\n\n## Vision\n\n像\n\n## Value\n\n価値\n")
 
 
 def test_find_section_skips_headings_inside_a_fence():
     text = "# 文書\n\n```\n## 今の会話の進み\n```\n\n## 今の会話の進み\n\n本文\n\n## 次\n"
-    head_start, body_start, body_end, head_line = load_mission_state().find_section(text, "今の会話の進み")
+    head_start, body_start, body_end, head_line = load_sprint_state().find_section(text, "今の会話の進み")
     assert head_line == "## 今の会話の進み\n"
     assert text[body_start:body_end] == "\n本文\n\n"
     assert text[head_start:body_start] == head_line

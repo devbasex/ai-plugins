@@ -11,7 +11,7 @@ import math
 import shlex
 
 import test_strategy as ts
-from supervise_lib.paths import MERGE_CMD, MERGE_PROBE, MISSION_STATE_PY, TEST_RUN_PY
+from supervise_lib.paths import MERGE_CMD, MERGE_PROBE, SPRINT_STATE_PY, TEST_RUN_PY
 
 # ステップの `timeout` に足す余裕（上限の 1 割。下限は監視の 1 周期の 2 倍）
 MARGIN_SHARE = 0.1
@@ -92,7 +92,7 @@ def handoff_step(state: str, gate: str, what: str) -> dict:
     st, g = shlex.quote(state), shlex.quote(gate)
     why = shlex.quote(f"{what}が失敗した。{gate} は自動で通さず、利用者の承認を求める")
     cmd = (
-        f'sh -c \'{MISSION_STATE_PY} gate "$1" "$2" --withdraw >/dev/null || echo "$2 の MVV 判定の記録を外せなかった"; '
+        f'sh -c \'{SPRINT_STATE_PY} gate "$1" "$2" --withdraw >/dev/null || echo "$2 の MVV 判定の記録を外せなかった"; '
         f'echo "$3"; exit 10\' handoff {st} {g} {why}'
     )
     return {"id": "handoff", "type": "run", "timeout": 120, "cmd": cmd, "gate_next": "end", "next": "end"}

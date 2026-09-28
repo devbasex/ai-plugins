@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """mvv-gate.py: 関門の材料が MVV に従うかを判定し、従えば関門を省いた記録を残す（#1078）。
 
-    python3 mvv-gate.py check --mission <ミッションの状態> --gate design|release
+    python3 mvv-gate.py check --sprint <スプリントの状態> --gate design|release
                               [--material <ファイル>...] [--pr N...] [--mode M]
                               [--log <jsonl>] [--repo OWNER/REPO] [--root DIR] [--note <ファイル>] [--advise]
 
@@ -9,25 +9,25 @@
 承認として扱うための判定である。判定の前に、次を機械で見る。1 つでも外れれば LLM を呼ばずに関門へ戻す。
 
 1. プロジェクト MVV（`.ndf/mvv.md`・`.ndf/mvv.json`。#1366）が 未承認・承認と一致しない・壊れている のどれでもない
-2. ミッションの状態に MVV（`mvv.path`・`mvv.sha256`）と、利用者の承認の記録（関門 `MVV` の `sha256`）があり、今の MVV のファイルの
-   ハッシュ・状態の `mvv.sha256`・承認の記録の `sha256` がすべて一致する。ミッション MVV が無いミッションは、承認済みのプロジェクト MVV と
+2. スプリントの状態に MVV（`mvv.path`・`mvv.sha256`）と、利用者の承認の記録（関門 `MVV` の `sha256`）があり、今の MVV のファイルの
+   ハッシュ・状態の `mvv.sha256`・承認の記録の `sha256` がすべて一致する。スプリント MVV が無いスプリントは、承認済みのプロジェクト MVV と
    状態に残したその参照（`project_mvv.sha256`）が一致すればよい（`lib/project_mvv.approval_refusal`）
 3. `--mode` が `operation` でも `documentation` でもない
 4. `--pr` の変更したファイルが、進め方の宣言（`.ndf/pace.json`）の `boundary_paths` に当たらない
 5. `--pr` がプロジェクト MVV の宣言（`.ndf/mvv.md`・`.ndf/mvv.json`）を変えない（共通原則の C7。宣言では外せない固定の検査）
 
-通れば、MVV の節（NDF の共通原則の本文全体 → プロジェクト MVV → ミッション MVV → 判断の決まり。`lib/project_mvv.block`）と
+通れば、MVV の節（NDF の共通原則の本文全体 → プロジェクト MVV → スプリント MVV → 判断の決まり。`lib/project_mvv.block`）と
 材料（提示物のファイル・PR の題名と本文と変更したファイル。`--gate design` では PR が変更した `issues/` の設計文書の
 PR の先頭のコミットの中身も足す）を最小構成の claude -p に渡し、
 「従う / 従わない / 判定できない」と理由と越えない線と根拠の項目（`basis`）を JSON で返させる。
 
-- 従う（越えない線なし）: `mission-state.py gate` で関門の記録（`by: mvv`・判定・理由・ログ）を書き、
+- 従う（越えない線なし）: `sprint-state.py gate` で関門の記録（`by: mvv`・判定・理由・ログ）を書き、
   status ok（終了コード 0）。記録を書けなければ関門へ戻す
 - それ以外（従わない・判定できない・越えない線・判定を読めない・材料を取れない）: status gate（終了コード 10）。
   利用者の承認を求める
 
 判定は毎回 --log（既定 ~/.local/state/ndf/mvv-gate.jsonl）へ 1 行で残す（プロジェクト MVV の参照 `project_mvv`・根拠の項目 `basis`・
-ミッションの状態の進め方 `pace`・判定に渡したミッション MVV の `mission_mvv`（sha256 か null）を含む）。同じプロジェクト MVV のもとで「判定できない」が宣言の回数（`settings.unknown_streak`）続くか、改訂の兆候が閾値を超えると、
+スプリントの状態の進め方 `pace`・判定に渡したスプリント MVV の `sprint_mvv`（sha256 か null）を含む）。同じプロジェクト MVV のもとで「判定できない」が宣言の回数（`settings.unknown_streak`）続くか、改訂の兆候が閾値を超えると、
 結果の `items` に改訂の提案を載せる。--note を渡すと、Pull Request の
 コメントに使う判定の記録（判定・理由・ログ）を Markdown で書く。claude は NDF_MVV_CLAUDE で差し替えられる。
 
@@ -35,7 +35,7 @@ PR の先頭のコミットの中身も足す）を最小構成の claude -p に
 承認ゲートの記録（`by: mvv`）を書かず、どの判定でも status ok（終了コード 0）で返す。承認するのは利用者である。
 
 - プロジェクト MVV が承認済みでなければ、LLM を呼ばず、行も --note も書かずに `items[0]` を `{"verdict": "none", "status": ...}` にする
-- ミッション MVV の承認の記録（関門 `MVV`）を求めず、ファイルと状態の sha256 の一致だけを見る
+- スプリント MVV の承認の記録（関門 `MVV`）を求めず、ファイルと状態の sha256 の一致だけを見る
 - 進め方の宣言（`.ndf/pace.json`）が無ければ越えない線のパスを空とする（壊れていれば今どおり外れ）
 - --note は機械のチェックで外れた・読めないときも含めて書き、外れた理由を理由の欄に載せる
 """
@@ -59,6 +59,7 @@ import deps  # noqa: E402
 deps.require("schema", "procs")  # schema は supervise_lib.paths → decl、procs は ask() の supervise_lib.claude が使う
 from step_result import EXIT_GATE, emit, result  # noqa: E402
 import clock  # noqa: E402
+import legacy_names  # noqa: E402
 import gh_call  # noqa: E402
 import gh_rest  # noqa: E402
 import jsonio  # noqa: E402
@@ -68,22 +69,22 @@ import project_mvv_signals as pms  # noqa: E402
 
 TOOL = "mvv-gate"
 GATES = {"design": "関門 1（設計の承認）", "release": "関門 2（本番への配布の承認）"}
-GATE_NAMES = {"design": "関門 1", "release": "関門 2"}  # mission-state.py の関門の記録の名前
+GATE_NAMES = {"design": "関門 1", "release": "関門 2"}  # sprint-state.py の関門の記録の名前
 MVV_GATE = "MVV"  # 利用者が MVV を承認した記録の名前
 VERDICTS = ("follow", "not_follow", "unknown")
 MAX_MATERIAL = 60_000  # 材料 1 件の上限の文字数（超えた分は切る）
 
 DECL_PATHS = (f"{pm.DECL_DIR}/{pm.BODY_FILE}", f"{pm.DECL_DIR}/{pm.DECL_FILE}")  # 変える PR は MVV 判定で通さない（I15）
 
-SYSTEM = """あなたは開発の関門の判定者である。利用者はプロジェクト MVV かミッションの MVV（Mission / Vision / Value）を承認済みで、
+SYSTEM = """あなたは開発の関門の判定者である。利用者はプロジェクト MVV かスプリントの MVV（Mission / Vision / Value）を承認済みで、
 MVV に従う変更なら関門での個別の承認を省いてよいと決めている。材料を読み、この変更が NDF の共通原則・プロジェクト MVV・
-ミッション MVV に従うかを判定する（優先順位は共通原則のとおり）。
+スプリント MVV に従うかを判定する（優先順位は共通原則のとおり）。
 
 - 共通原則に反せず、Mission と Vision に沿い、Value のどれにも反しないなら follow
 - どれかに反するなら not_follow。材料から読み取れず決められないなら unknown（迷ったら unknown）
 - 配布の前に取れない実測（配布した後の効果）は判定の対象にしない。配布の後の測定へ回るものとして扱い、
   それが無いことだけを理由に unknown にしない
-- 必ず人の承認が要る操作（共通原則の C の番号・プロジェクト MVV の P の番号・ミッション MVV の越えない線）に当たる変更を
+- 必ず人の承認が要る操作（共通原則の C の番号・プロジェクト MVV の P の番号・スプリント MVV の越えない線）に当たる変更を
   含むなら、boundary にその中身を書く（boundary が空でなければ関門は省かれない）
 - basis に根拠にした項目の番号（Mission / Vision / Value 3 / C4 / P1 / R2 など）を並べる
 
@@ -158,10 +159,10 @@ def design_material(n: int, path: str, info: dict, repo: str | None, cwd: Path) 
     return f"## 設計文書 {path}（PR #{n}）\n\n{text}"
 
 
-def build_prompt(project: pm.ProjectMvv, mission: str | None, gate: str, materials: list[str]) -> str:
-    """MVV の節（共通原則 → プロジェクト MVV → ミッション MVV → 判断の決まり）→ 関門 → 材料。"""
+def build_prompt(project: pm.ProjectMvv, sprint: str | None, gate: str, materials: list[str]) -> str:
+    """MVV の節（共通原則 → プロジェクト MVV → スプリント MVV → 判断の決まり）→ 関門 → 材料。"""
     body = "\n\n".join(m[:MAX_MATERIAL] for m in materials)
-    return f"{pm.block(project, mission)}\n# 関門\n\n{GATES[gate]}\n\n# 材料\n\n{body}\n"
+    return f"{pm.block(project, sprint)}\n# 関門\n\n{GATES[gate]}\n\n# 材料\n\n{body}\n"
 
 
 def well_formed(verdict) -> bool:
@@ -216,8 +217,8 @@ def ask(prompt: str) -> tuple[dict | None, str, dict]:
     return verdict, text, usage
 
 
-def mission_text(state: dict) -> str | None:
-    """ミッション MVV の本文。無ければ None（照合は `pm.approval_refusal` が済ませている）。"""
+def sprint_text(state: dict) -> str | None:
+    """スプリント MVV の本文。無ければ None（照合は `pm.approval_refusal` が済ませている）。"""
     path = (state.get("mvv") or {}).get("path")
     return Path(path).read_text(encoding="utf-8") if path else None
 
@@ -278,13 +279,13 @@ def write_log(path: str, record: dict) -> None:
 
 
 def record_gate(a, record: dict) -> str | None:
-    """関門の記録をミッションの状態へ書く。書けなければ理由を返す。"""
+    """関門の記録をスプリントの状態へ書く。書けなければ理由を返す。"""
     what = "MVV 判定: " + " / ".join([*(f"#{n}" for n in a.pr), *a.material]) if (a.pr or a.material) else "MVV 判定"
     cmd = [
         sys.executable,
-        str(HERE / "mission-state.py"),
+        str(HERE / "sprint-state.py"),
         "gate",
-        a.mission,
+        a.sprint,
         GATE_NAMES[a.gate],
         "--what",
         what,
@@ -321,7 +322,7 @@ def write_note(path: str, a, record: dict) -> None:
 def advise_note(a, record: dict, reasons: str) -> str:
     """助言の MVV 判定の記録（承認資料に載せる）。判定・根拠・時刻・ログ・理由。"""
     project = pm.from_record(record["project_mvv"])
-    sha = (record.get("mission_mvv") or {}).get("sha256")
+    sha = (record.get("sprint_mvv") or {}).get("sha256")
     verdict = record["verdict"]
     return (
         f"## MVV 判定（{GATES[a.gate]}・助言）\n\n"
@@ -339,15 +340,15 @@ def advise_none(a, project: pm.ProjectMvv) -> tuple[dict, int | None]:
 
 
 def machine_checks(a, root: Path, project: pm.ProjectMvv, record: dict) -> tuple[str | None, list[str]]:
-    """機械のチェック（状態・承認・モード・宣言・越えない線・材料）。ミッション MVV の本文と材料を返し、外れは `Back` を投げる。"""
-    state = json.loads(Path(a.mission).read_text(encoding="utf-8"))
+    """機械のチェック（状態・承認・モード・宣言・越えない線・材料）。スプリント MVV の本文と材料を返し、外れは `Back` を投げる。"""
+    state = json.loads(Path(a.sprint).read_text(encoding="utf-8"))
     if project.status in ("unapproved", "mismatch", "unreadable"):
         raise Back(f"プロジェクト MVV が{pm.STATUS_LABEL[project.status]}（{project.error or ''}）")
     if why := pm.approval_refusal(state, root, project, advise=a.advise):
         raise Back(why)
-    mission = mission_text(state)
-    if mission is not None:
-        record["mission_mvv"] = {"sha256": state["mvv"]["sha256"]}
+    sprint = sprint_text(state)
+    if sprint is not None:
+        record["sprint_mvv"] = {"sha256": state["mvv"]["sha256"]}
     if a.mode in EXCLUDED_MODES:
         raise Back(f"モード {a.mode} は関門を省かない")
     infos = {n: pr_facts(n, a.repo, root) for n in a.pr}
@@ -368,7 +369,7 @@ def machine_checks(a, root: Path, project: pm.ProjectMvv, record: dict) -> tuple
                 record["material"].append(f"#{n} {path}")
     if not materials:
         raise Back("材料が無い（--material か --pr を渡す）")
-    return mission, materials
+    return sprint, materials
 
 
 def cmd_check(a) -> tuple[dict, int | None]:
@@ -379,14 +380,14 @@ def cmd_check(a) -> tuple[dict, int | None]:
     record = {
         "at": clock.now_iso("utc"),
         "gate": a.gate,
-        "mission": a.mission,
+        "sprint": a.sprint,
         "material": list(a.material),
         "pr": a.pr,
         "mode": a.mode or "",
         "repo": pm.mvv_repo_key(root),
         "project_mvv": pm.record(project),
-        "pace": str(jsonio.read(a.mission, missing={}, broken={}, want=dict).get("pace") or ""),  # 読めなければ判定の中で外れにする
-        "mission_mvv": None,
+        "pace": str(jsonio.read(a.sprint, missing={}, broken={}, want=dict).get("pace") or ""),  # 読めなければ判定の中で外れにする
+        "sprint_mvv": None,
     }
 
     def advised(summary: str, usage: dict | None = None, extra: dict | None = None):
@@ -425,17 +426,17 @@ def cmd_check(a) -> tuple[dict, int | None]:
         ), EXIT_GATE
 
     try:
-        mission, materials = machine_checks(a, root, project, record)
+        sprint, materials = machine_checks(a, root, project, record)
     except (OSError, ValueError) as e:
-        return back(f"ミッションの状態を読めない: {e}", "machine")
+        return back(f"スプリントの状態を読めない: {e}", "machine")
     except Back as e:
         return back(str(e), "machine")
 
-    verdict, raw, usage = ask(build_prompt(project, mission, a.gate, materials))
+    verdict, raw, usage = ask(build_prompt(project, sprint, a.gate, materials))
     if verdict is None:
         return back("判定を読めない", "unreadable", {"raw": raw}, usage)
     boundary = verdict["boundary"]
-    record.update(reasons=verdict["reasons"], boundary=boundary, basis=pm.basis(verdict.get("basis"), project, mission=mission))
+    record.update(reasons=verdict["reasons"], boundary=boundary, basis=pm.basis(verdict.get("basis"), project, sprint=sprint))
     if a.advise:
         record.update(verdict=verdict["verdict"], **usage)
         why = "越えない線に当たる: " + " / ".join(map(str, boundary)) if boundary else verdict["verdict"]
@@ -467,7 +468,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("check")
-    c.add_argument("--mission", required=True, help="ミッションの状態（mission-state.py のファイル）")
+    c.add_argument("--sprint", required=True, help="スプリントの状態（sprint-state.py のファイル）")
     c.add_argument("--gate", required=True, choices=sorted(GATES))
     c.add_argument("--material", nargs="+", default=[])
     c.add_argument("--pr", nargs="+", type=int, default=[])
@@ -479,7 +480,7 @@ def main() -> int:
     c.add_argument(
         "--advise", action="store_true", help="助言の MVV 判定: 承認ゲートの記録を書かず、どの判定でも 0 で返す（pace: normal。#1400）"
     )
-    a = ap.parse_args()
+    a = ap.parse_args(legacy_names.rewrite_argv("mvv-gate.py", sys.argv[1:]))
     out, code = cmd_check(a)
     emit(out, code)
 

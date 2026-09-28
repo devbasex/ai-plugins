@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
-r"""ミッションの状態を mission.json に持ち、引継ぎ文書の節・status・ndf-next を生成する（#1063）。
+r"""スプリントの状態を sprint.json に持ち、引継ぎ文書の節・status・ndf-next を生成する（#1063）。
 
-LLM を直接呼ばない（ミッション MVV の照合だけ `lib/mission_mvv.py` に任せる）。入力は supervise.py queue の done の JSON と
+LLM を直接呼ばない（スプリント MVV の照合だけ `lib/sprint_mvv.py` に任せる）。入力は supervise.py queue の done の JSON と
 各計画の report.md だけである。
 
 | 副命令 | 何をする |
 | --- | --- |
-| `init <mission.json> --name <名> [--milestone M] [--issue N]... [--plan <種類>=<plan.json>]... [--done <done.json>]... [--dev <版>] [--prod <版>] [--goal <雛形の文字列か @ファイル>] [--pace normal\|fast\|auto] [--mvv <ファイル>] [--repo OWNER/REPO]` | 状態のファイルを作る。同じパスに別の形の JSON があれば上書きせずに止まる（終了コード 1） |
-| `update <mission.json> [--done <done.json>]... [--next <plan.json>=<文>]...` | done の JSON と報告を読み、行の状態・PR・秒・費用を埋める。何度走らせても同じ結果 |
-| `gate <mission.json> <関門の名> --what <何を> [--at <ISO 8601>] [--by user\|mvv --verdict V --reasons <JSON> --log <jsonl>] [--outcome approved\|rejected] [--pr N] [--root DIR] [--withdraw]` | 関門の承認の時刻を書く。名前が `MVV` なら今の MVV のハッシュも書く。`--by user --outcome rejected` は関門を通さず差し戻しだけを残す。利用者の答えが同じ関門の直前の MVV 判定（`--pr` を渡せばその PR の判定）と食い違えば、改訂の兆候（覆し）を `project-mvv-signals.jsonl` へ 1 行書く。`--withdraw` は同じ関門の `by: mvv` の記録を外し、取り消しを残す（MVV 判定で通した後に関門へ落ちたとき。`lib/mission_mvv.withdraw`）。取り消した関門へは以後 `--by mvv` を書かない |
-| `render <mission.json> <引継ぎ文書> --section <見出しの語> [--demote <前の節の語> --heading <新しい見出し>]` | 見出しに語を含む節の本文を置き換える。節の外は変えない |
-| `status <mission.json>` | 端末向けに 1 行ずつ（ミッション・状態・次） |
-| `next <mission.json> [--doc <引継ぎ文書> --section <見出しの語>] [--replace <見出しの語>]` | ndf-next の囲みを出す。`--replace` なら引継ぎ文書のその節も置き換える |
+| `init <sprint.json> --name <名> [--milestone M] [--issue N]... [--plan <種類>=<plan.json>]... [--done <done.json>]... [--dev <版>] [--prod <版>] [--goal <雛形の文字列か @ファイル>] [--pace normal\|fast\|auto] [--mvv <ファイル>] [--repo OWNER/REPO]` | 状態のファイルを作る。同じパスに別の形の JSON があれば上書きせずに止まる（終了コード 1） |
+| `update <sprint.json> [--done <done.json>]... [--next <plan.json>=<文>]...` | done の JSON と報告を読み、行の状態・PR・秒・費用を埋める。何度走らせても同じ結果 |
+| `gate <sprint.json> <関門の名> --what <何を> [--at <ISO 8601>] [--by user\|mvv --verdict V --reasons <JSON> --log <jsonl>] [--outcome approved\|rejected] [--pr N] [--root DIR] [--withdraw]` | 関門の承認の時刻を書く。名前が `MVV` なら今の MVV のハッシュも書く。`--by user --outcome rejected` は関門を通さず差し戻しだけを残す。利用者の答えが同じ関門の直前の MVV 判定（`--pr` を渡せばその PR の判定）と食い違えば、改訂の兆候（覆し）を `project-mvv-signals.jsonl` へ 1 行書く。`--withdraw` は同じ関門の `by: mvv` の記録を外し、取り消しを残す（MVV 判定で通した後に関門へ落ちたとき。`lib/sprint_mvv.withdraw`）。取り消した関門へは以後 `--by mvv` を書かない |
+| `render <sprint.json> <引継ぎ文書> --section <見出しの語> [--demote <前の節の語> --heading <新しい見出し>]` | 見出しに語を含む節の本文を置き換える。節の外は変えない |
+| `status <sprint.json>` | 端末向けに 1 行ずつ（スプリント・状態・次） |
+| `next <sprint.json> [--doc <引継ぎ文書> --section <見出しの語>] [--replace <見出しの語>]` | ndf-next の囲みを出す。`--replace` なら引継ぎ文書のその節も置き換える |
 
 雛形（`--goal`）は `{name}`・`{milestone}`・`{heading}`（現在地の見出し）・`{dev}`・`{prod}`・
 `{issues}` を差し込む。
 
-ミッション MVV の写し（#1078・#1370・#1400）の書き方は `lib/mission_mvv.py` にある。`--pace fast` と `--pace auto` は写せなければ
+スプリント MVV の写し（#1078・#1370・#1400）の書き方は `lib/sprint_mvv.py` にある。`--pace fast` と `--pace auto` は写せなければ
 止まり、写しをプロジェクト MVV に照らす。`--pace normal` は `--mvv` か `--milestone` から写せたときだけ写し、止めず、照らさない。
 承認済みのプロジェクト MVV の参照（版・sha256）は進め方によらず書く（#1366・#1400）。外へ出るのはマイルストーンの説明を読む gh api だけである。
 
@@ -46,9 +46,9 @@ import mdtable  # noqa: E402
 import step_result  # noqa: E402
 import project_mvv as pm  # noqa: E402
 import project_mvv_signals as pms  # noqa: E402
-import mission_mvv  # noqa: E402
+import sprint_mvv  # noqa: E402
 
-TOOL = "mission-state"
+TOOL = "sprint-state"
 SECTION_DEFAULT = "今の会話の進み"
 NEXT_SECTION_DEFAULT = "次に実行するコマンド"
 NOT_DONE = "まだ"
@@ -125,7 +125,7 @@ STATE_KEYS = ("plans", "done", "gates", "goal_template")
 def other_shape(path: str) -> str:
     """既存のファイルが状態の形でなければ、その理由を返す。無い・空・状態の形なら空。
 
-    supervise.py new mission の目録（`ミッション` / `ブランチ` / `ステージ`）も同じ名前で書かれる。
+    supervise.py new sprint の目録（`スプリント` / `ブランチ` / `ステージ`）も同じ名前で書かれる。
     同じ場所へ置くと、上書きでステージの目録が消える（#1082）。
     """
     p = Path(path)
@@ -147,25 +147,25 @@ def other_shape(path: str) -> str:
 
 
 def init_mvv_outcome(a, project) -> tuple[dict | None, dict | None, list[dict]]:
-    """(状態へ書く mvv, 止まるときの結果, 結果の items に載せる特定できなかった理由)。中身は `lib/mission_mvv.py`（normal は #1400 の決定 13）。"""
-    mvv, stop, note = mission_mvv.normal_mvv(a) if a.pace not in mission_mvv.MVV_PACES else (*mission_mvv.init_mvv(a, project), None)
+    """(状態へ書く mvv, 止まるときの結果, 結果の items に載せる特定できなかった理由)。中身は `lib/sprint_mvv.py`（normal は #1400 の決定 13）。"""
+    mvv, stop, note = sprint_mvv.normal_mvv(a) if a.pace not in sprint_mvv.MVV_PACES else (*sprint_mvv.init_mvv(a, project), None)
     return mvv, (outcome("stopped", stop[0], stop[2], exit=stop[1]) if stop else None), [note] if note else []
 
 
 def cmd_init(a) -> dict:
-    why = other_shape(a.mission)
+    why = other_shape(a.sprint)
     if why:
         return outcome(
             "stopped",
-            f"別の形の JSON があるため上書きしない（{why}）: {a.mission}。 状態のファイルは別の名前か別の場所に置く",
-            metrics={"path": a.mission, "reason": why},
+            f"別の形の JSON があるため上書きしない（{why}）: {a.sprint}。 状態のファイルは別の名前か別の場所に置く",
+            metrics={"path": a.sprint, "reason": why},
         )
     project = pm.load_mvv(Path(a.root or ".").resolve())
     mvv, stop, notes = init_mvv_outcome(a, project)
     if stop:
         return stop
-    if a.pace in mission_mvv.MVV_PACES and project.approved and mvv:
-        stop = mission_mvv.vet_stop(Path(a.root or ".").resolve(), mvv["path"])
+    if a.pace in sprint_mvv.MVV_PACES and project.approved and mvv:
+        stop = sprint_mvv.vet_stop(Path(a.root or ".").resolve(), mvv["path"])
         if stop:
             return outcome("stopped", stop[0], stop[2], exit=stop[1])
     goal = a.goal or ""
@@ -190,10 +190,10 @@ def cmd_init(a) -> dict:
         kind, plan = parse_pair(text, "--plan")
         issues = plan_issues(plan)
         m["plans"].append({"kind": kind, "plan": plan, "issues": issues, "label": default_label(kind, issues, m), "next": ""})
-    jsonio.write_atomic(a.mission, m, indent=1)
+    jsonio.write_atomic(a.sprint, m, indent=1)
     return outcome(
         "ok",
-        f"ミッション {a.name} を書いた（計画 {len(m['plans'])} 本）: {a.mission}",
+        f"スプリント {a.name} を書いた（計画 {len(m['plans'])} 本）: {a.sprint}",
         [{"plan": p["plan"], "kind": p["kind"]} for p in m["plans"]] + notes,
         {"plans": len(m["plans"]), "done": len(m["done"])},
     )
@@ -236,7 +236,7 @@ def fill_row(p: dict, item: dict | None) -> dict:
 
 
 def cmd_update(a) -> dict:
-    m = jsonio.read(a.mission)
+    m = jsonio.read(a.sprint)
     for d in a.done or []:
         if d not in m["done"]:
             m["done"].append(d)
@@ -255,7 +255,7 @@ def cmd_update(a) -> dict:
         if not p.get("issues"):
             p["issues"] = plan_issues(p["plan"])
         p["row"] = fill_row(p, items.get(p["plan"]))
-    jsonio.write_atomic(a.mission, m, indent=1)
+    jsonio.write_atomic(a.sprint, m, indent=1)
     rows = [{"plan": p["plan"], **p["row"]} for p in m["plans"]]
     finished = sum(1 for r in rows if r["result"] != NOT_DONE)
     stopped = sum(1 for r in rows if r["result"] not in (NOT_DONE, "完了"))
@@ -265,12 +265,12 @@ def cmd_update(a) -> dict:
 
 def cmd_gate(a) -> dict:
     # 並列の設計プランが同じ関門を書く（mvv の記録と handoff の取り消し）ため、読んで書く間を排他にする
-    with locks.exclusive(a.mission, timeout=60):
+    with locks.exclusive(a.sprint, timeout=60):
         return gate_locked(a)
 
 
 def gate_locked(a) -> dict:
-    m = jsonio.read(a.mission)
+    m = jsonio.read(a.sprint)
     at = a.at or clock.now_iso("utc")
     if a.withdraw:
         return withdraw_gate(a, m, at)
@@ -278,10 +278,10 @@ def gate_locked(a) -> dict:
         return outcome("stopped", "--what が要る（--withdraw のときだけ省ける）", exit=EXIT_UNREADABLE)
     entry = {"name": a.name, "what": a.what, "at": at}
     if a.by == "user":
-        override = pms.record_override(m, a.mission, a.name, a.outcome, at, Path(a.root or ".").resolve(), a.mvv_log, pr=a.pr)
+        override = pms.record_override(m, a.sprint, a.name, a.outcome, at, Path(a.root or ".").resolve(), a.mvv_log, pr=a.pr)
         if a.outcome == "rejected":
             m.setdefault("rejections", []).append({**entry, "by": "user", "outcome": "rejected"})
-            jsonio.write_atomic(a.mission, m, indent=1)
+            jsonio.write_atomic(a.sprint, m, indent=1)
             extra = f"。覆しを記録した（{override['kind']}）" if override else ""
             summary = f"{a.name} の差し戻しを書いた（{at}。関門は通さない）{extra}"
             return outcome("ok", summary, [override] if override else [], {"gates": len(m.get("gates", []))})
@@ -293,7 +293,7 @@ def gate_locked(a) -> dict:
             return outcome("stopped", "MVV が無い（init --pace fast か auto で写す）。MVV の承認を書かない")
         entry["sha256"] = sha256_of(Path(mvv["path"]))
     if a.by == "mvv":
-        if mission_mvv.withdrawn(m, a.name):
+        if sprint_mvv.withdrawn(m, a.name):
             return outcome("stopped", f"{a.name} は MVV 判定の通過を取り消した。自動で通さず、利用者の承認を求める")
         if not a.verdict:
             return outcome("stopped", "--by mvv には --verdict が要る", exit=EXIT_UNREADABLE)
@@ -303,17 +303,17 @@ def gate_locked(a) -> dict:
             return outcome("stopped", f"--reasons は JSON の配列で渡す: {a.reasons}", exit=EXIT_UNREADABLE)
         entry.update(by="mvv", verdict=a.verdict, reasons=reasons if isinstance(reasons, list) else [reasons], log=a.log or "")
     m["gates"] = gates = [g for g in m.get("gates", []) if g.get("name") != a.name] + [entry]
-    jsonio.write_atomic(a.mission, m, indent=1)
+    jsonio.write_atomic(a.sprint, m, indent=1)
     who = "MVV 判定" if a.by == "mvv" else "承認"
     return outcome("ok", f"{a.name} の{who}を書いた（{at}）", gates, {"gates": len(gates)})
 
 
 def withdraw_gate(a, m: dict, at: str) -> dict:
-    """同じ名前の承認ゲートの by: mvv の記録を外す（`lib/mission_mvv.withdraw`。#1370 の I8）。"""
+    """同じ名前の承認ゲートの by: mvv の記録を外す（`lib/sprint_mvv.withdraw`。#1370 の I8）。"""
     if a.by != "user" or a.outcome or a.verdict:
         return outcome("stopped", "--withdraw は --by・--outcome・--verdict と併せて渡さない", exit=EXIT_UNREADABLE)
-    n = mission_mvv.withdraw(m, a.name, at)
-    jsonio.write_atomic(a.mission, m, indent=1)
+    n = sprint_mvv.withdraw(m, a.name, at)
+    jsonio.write_atomic(a.sprint, m, indent=1)
     done = f"記録を外した（{at}）" if n else "記録が無い（外すものが無い）"
     return outcome("ok", f"{a.name} の MVV 判定の{done}", m.get("gates", []), {"gates": len(m.get("gates", [])), "withdrawn": n})
 
@@ -370,7 +370,7 @@ def section_body(m: dict) -> str:
             ]
         )
     lines = ["", mdtable.table_markdown(TABLE_HEAD, rows, align=TABLE_ALIGN), ""]
-    head = f"- ミッション: {m.get('name', '')}"
+    head = f"- スプリント: {m.get('name', '')}"
     if m.get("milestone"):
         head += f"（マイルストーン {m['milestone']}）"
     if m.get("issues"):
@@ -413,7 +413,7 @@ def heading_text(line: str) -> str:
 
 
 def cmd_render(a) -> dict:
-    m = jsonio.read(a.mission)
+    m = jsonio.read(a.sprint)
     text = Path(a.doc).read_text()
     found = find_section(text, a.section)
     if found is None:
@@ -438,7 +438,7 @@ def cmd_render(a) -> dict:
 
 
 def status_lines(m: dict) -> list[str]:
-    head = f"ミッション: {m.get('name', '')}"
+    head = f"スプリント: {m.get('name', '')}"
     if m.get("milestone"):
         head += f"（マイルストーン {m['milestone']}）"
     out = [head]
@@ -461,7 +461,7 @@ def status_lines(m: dict) -> list[str]:
 
 
 def cmd_status(a) -> dict | None:
-    m = jsonio.read(a.mission)
+    m = jsonio.read(a.sprint)
     lines = status_lines(m)
     if a.json:
         return outcome("ok", lines[0], lines[1:], {"plans": len(m.get("plans", []))})
@@ -489,7 +489,7 @@ def next_block(m: dict, heading: str) -> str:
 
 
 def cmd_next(a) -> dict | None:
-    m = jsonio.read(a.mission)
+    m = jsonio.read(a.sprint)
     heading = m.get("heading", "")
     text = None
     if a.doc:
@@ -499,7 +499,7 @@ def cmd_next(a) -> dict | None:
             return outcome("stopped", f"見出しに「{a.section}」を含む節が無い: {a.doc}")
         heading = heading_text(found[3])
     if not (m.get("goal_template") or "").strip():
-        return outcome("stopped", "mission.json に /goal の雛形（goal_template）が無い")
+        return outcome("stopped", "sprint.json に /goal の雛形（goal_template）が無い")
     block = next_block(m, heading)
     if not a.replace:
         if a.json:
@@ -522,11 +522,11 @@ def cmd_next(a) -> dict | None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(prog="mission-state.py", description=__doc__.split("\n")[0])
+    ap = argparse.ArgumentParser(prog="sprint-state.py", description=__doc__.split("\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("init")
-    s.add_argument("mission")
+    s.add_argument("sprint")
     s.add_argument("--name", required=True)
     s.add_argument("--milestone")
     s.add_argument("--issue", type=int, action="append")
@@ -535,18 +535,18 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--dev")
     s.add_argument("--prod")
     s.add_argument("--goal", help="/goal の文面の雛形。@<ファイル> ならファイルから読む")
-    s.add_argument("--pace", choices=PACES, default="normal", help="ミッションの進め方（既定 normal）")
-    s.add_argument("--mvv", help="マイルストーンから写さずに使うミッション MVV のファイル")
+    s.add_argument("--pace", choices=PACES, default="normal", help="スプリントの進め方（既定 normal）")
+    s.add_argument("--mvv", help="マイルストーンから写さずに使うスプリント MVV のファイル")
     s.add_argument("--repo", help="マイルストーンを読むリポジトリ（OWNER/REPO。既定はカレント）")
     s.add_argument("--root", help="プロジェクト MVV（.ndf/mvv.md・mvv.json）を読むリポジトリの根（既定はカレント）")
 
     s = sub.add_parser("update")
-    s.add_argument("mission")
+    s.add_argument("sprint")
     s.add_argument("--done", action="append")
     s.add_argument("--next", action="append", help="<plan.json>=<行の「次」>")
 
     s = sub.add_parser("gate")
-    s.add_argument("mission")
+    s.add_argument("sprint")
     s.add_argument("name")
     s.add_argument("--what", help="何を承認したか（--withdraw のとき以外は要る）")
     s.add_argument("--at")
@@ -563,18 +563,18 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--withdraw", action="store_true", help="同じ名前の承認ゲートの MVV 判定の記録（by: mvv）を外す（無ければ何もしない）")
 
     s = sub.add_parser("render")
-    s.add_argument("mission")
+    s.add_argument("sprint")
     s.add_argument("doc")
     s.add_argument("--section", default=SECTION_DEFAULT)
     s.add_argument("--demote", help="今の節の見出しの語をこの語へ替えて下げ、新しい節を前に足す（例: 前の会話の進み）")
     s.add_argument("--heading", help="--demote で足す節の見出し")
 
     s = sub.add_parser("status")
-    s.add_argument("mission")
+    s.add_argument("sprint")
     s.add_argument("--json", action="store_true")
 
     s = sub.add_parser("next")
-    s.add_argument("mission")
+    s.add_argument("sprint")
     s.add_argument("--doc")
     s.add_argument("--section", default=SECTION_DEFAULT, help="現在地の見出しを読む節")
     s.add_argument(

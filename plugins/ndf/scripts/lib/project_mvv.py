@@ -51,13 +51,13 @@ VERDICT_LABEL = {  # MVV 判定の語（mvv-gate.py の助言の判定の表示�
     "machine": "機械のチェックで外れた",
     "unreadable": "判定を読めない",
 }
-MISSION_PREFIX = "ミッション"  # ミッション MVV の項目の頭（#1400 の決定 15。R の番号には付けない）
-ITEM_RE = re.compile(r"(?i)(?:(ミッション)\s*|\b)(mission|vision|value\s*\d+|[CPR]\d+)\b")
-MISSION_HINT = "この節の項目を根拠に書くときは頭に「ミッション」を付ける（例: ミッション Value 4）。R の番号はそのまま"
+SPRINT_PREFIX = "スプリント"  # スプリント MVV の項目の頭（#1400 の決定 15。R の番号には付けない）
+ITEM_RE = re.compile(r"(?i)(?:(スプリント)\s*|\b)(mission|vision|value\s*\d+|[CPR]\d+)\b")
+SPRINT_HINT = "この節の項目を根拠に書くときは頭に「スプリント」を付ける（例: スプリント Value 4）。R の番号はそのまま"
 
 CONTRACT = """## 判断の決まり（NDF の共通原則）
 
-- 上の NDF の共通原則を判断の基準として使う。プロジェクト MVV とミッション MVV はその範囲で読み、優先順位は共通原則のとおりにする（下位は上位を上書きしない）
+- 上の NDF の共通原則を判断の基準として使う。プロジェクト MVV とスプリント MVV はその範囲で読み、優先順位は共通原則のとおりにする（下位は上位を上書きしない）
 - 判断の結果として取れる行動は「進める」か「止めて人へ戻す（理由と根拠を添える）」の 2 つだけである。原則を理由に、指示と違う変更を独自に加えない。決められないときは人へ戻す
 - 判断の範囲は目の前の変更・操作に限る
 - 必ず人の承認が要る操作（C の番号・P の番号・R の番号）は、あなたの解釈で緩めない
@@ -275,20 +275,20 @@ def project_part(mvv: ProjectMvv) -> str:
     return f"# プロジェクト MVV\n\n{NO_MVV}（{reason}）。NDF の共通原則だけを基準にする。"
 
 
-def block(mvv: ProjectMvv, mission: str | None = None) -> str:
-    """MVV の節（I5）。共通原則の本文全体 → プロジェクト MVV（か「MVV なし」）→ ミッション MVV → 判断の決まり。
+def block(mvv: ProjectMvv, sprint: str | None = None) -> str:
+    """MVV の節（I5）。共通原則の本文全体 → プロジェクト MVV（か「MVV なし」）→ スプリント MVV → 判断の決まり。
 
-    ミッション MVV の節の見出しには本文の sha256 の先頭 8 文字を、直後には項目の書き方を置く（#1400 の決定 15）。"""
+    スプリント MVV の節の見出しには本文の sha256 の先頭 8 文字を、直後には項目の書き方を置く（#1400 の決定 15）。"""
     parts = [principles(), project_part(mvv)]
-    if mission:
-        parts.append(f"# ミッション MVV（sha256 {sha256_text(mission)[:8]}）\n\n{MISSION_HINT}\n\n{mission.strip()}")
+    if sprint:
+        parts.append(f"# スプリント MVV（sha256 {sha256_text(sprint)[:8]}）\n\n{SPRINT_HINT}\n\n{sprint.strip()}")
     parts.append(contract())
     return "\n\n".join(parts) + "\n"
 
 
-def allowed_ids(mvv: ProjectMvv, extra=(), mission: str | None = None) -> set[str]:
-    """根拠に書いてよい番号。ミッション MVV の本文を渡すと、その項目（頭に「ミッション」）と R の番号も許す。"""
-    own = {f"{MISSION_PREFIX} {i}" for i in item_ids(mission)} | set(re.findall(r"\bR\d+\b", mission)) if mission else set()
+def allowed_ids(mvv: ProjectMvv, extra=(), sprint: str | None = None) -> set[str]:
+    """根拠に書いてよい番号。スプリント MVV の本文を渡すと、その項目（頭に「スプリント」）と R の番号も許す。"""
+    own = {f"{SPRINT_PREFIX} {i}" for i in item_ids(sprint)} | set(re.findall(r"\bR\d+\b", sprint)) if sprint else set()
     return {*principle_ids(), *mvv.item_ids(), *extra, *own}
 
 
@@ -300,18 +300,18 @@ def _norm_id(s: str, prefix: str | None = None) -> str:
     else:
         m = re.match(r"(?i)value\s*(\d+)$", s)
         item = f"Value {int(m.group(1))}" if m else s[0].upper() + str(int(s[1:]))
-    # R の番号はミッション MVV だけが持つので頭を付けない。C・P はプロジェクト MVV と共通原則の番号
-    return f"{MISSION_PREFIX} {item}" if prefix and item[0] not in "CPR" else item
+    # R の番号はスプリント MVV だけが持つので頭を付けない。C・P はプロジェクト MVV と共通原則の番号
+    return f"{SPRINT_PREFIX} {item}" if prefix and item[0] not in "CPR" else item
 
 
-def basis(raw, mvv: ProjectMvv, extra=(), mission: str | None = None) -> list[str]:
+def basis(raw, mvv: ProjectMvv, extra=(), sprint: str | None = None) -> list[str]:
     """根拠の項目の正規化（I7）。本文・共通原則に無い番号は落とす。空なら「MVV なし」か「根拠なし」。
 
-    ミッション MVV の項目は頭に「ミッション」を付けたまま、プロジェクト MVV の同じ番号と別の項目として残す（#1400 の I12）。
-    `mission` にミッション MVV の本文を渡すと、その項目を許す。"""
+    スプリント MVV の項目は頭に「スプリント」を付けたまま、プロジェクト MVV の同じ番号と別の項目として残す（#1400 の I12）。
+    `sprint` にスプリント MVV の本文を渡すと、その項目を許す。"""
     values = raw if isinstance(raw, (list, tuple)) else [raw] if raw else []
     # 状態に写した参照から組み直した MVV（本文を持たない）は、番号の形だけを見る
-    allowed = None if (mvv.approved and mvv.body is None) else allowed_ids(mvv, extra, mission)
+    allowed = None if (mvv.approved and mvv.body is None) else allowed_ids(mvv, extra, sprint)
     out: list[str] = []
     for v in values:
         if not isinstance(v, str):
@@ -326,18 +326,18 @@ def basis(raw, mvv: ProjectMvv, extra=(), mission: str | None = None) -> list[st
 
 
 def _item_order(item: str) -> int:
-    """根拠の句の並び: プロジェクト MVV と共通原則 → ミッション MVV → R の番号。"""
-    return 1 if item.startswith(MISSION_PREFIX) else 2 if re.fullmatch(r"R\d+", item) else 0
+    """根拠の句の並び: プロジェクト MVV と共通原則 → スプリント MVV → R の番号。"""
+    return 1 if item.startswith(SPRINT_PREFIX) else 2 if re.fullmatch(r"R\d+", item) else 0
 
 
-def basis_phrase(items, mvv: ProjectMvv, mission_sha: str | None = None) -> str:
+def basis_phrase(items, mvv: ProjectMvv, sprint_sha: str | None = None) -> str:
     """見送りの返信と設計の決定の根拠の句。例: 「根拠: Value 1（MVV 版 1）」「（MVV なし）」。
 
-    ミッション MVV の sha256 を渡すと、括弧にその先頭 8 文字を足す（「根拠: Value 6 / ミッション Value 4（MVV 版 1・ミッション MVV 3f9a1c2e）」）。"""
+    スプリント MVV の sha256 を渡すと、括弧にその先頭 8 文字を足す（「根拠: Value 6 / スプリント Value 4（MVV 版 1・スプリント MVV 3f9a1c2e）」）。"""
     items = sorted((x for x in (items or []) if x not in (NO_MVV, NO_BASIS)), key=_item_order)
     if not mvv.approved:
         return f"根拠: {' / '.join(items)}（{NO_MVV}）" if items else f"（{NO_MVV}）"
-    tail = f"・ミッション MVV {mission_sha[:8]}" if mission_sha else ""
+    tail = f"・スプリント MVV {sprint_sha[:8]}" if sprint_sha else ""
     return f"根拠: {' / '.join(items) if items else NO_BASIS}（MVV 版 {mvv.version}{tail}）"
 
 
@@ -348,35 +348,35 @@ def from_record(ref) -> ProjectMvv:
     return ProjectMvv(ref["status"], version=ref.get("version"), sha256=ref.get("sha256"))
 
 
-def mission_mvv_refusal(state: dict, advise: bool = False) -> str | None:
-    """ミッション MVV の 3 者（ファイル・状態・承認の記録）の一致。外れた理由を返す。
+def sprint_mvv_refusal(state: dict, advise: bool = False) -> str | None:
+    """スプリント MVV の 3 者（ファイル・状態・承認の記録）の一致。外れた理由を返す。
 
     `advise`（助言の MVV 判定。#1400 の決定 14）では承認の記録（承認ゲート `MVV`）を求めず、ファイルと状態の一致だけを見る。"""
     mvv = state.get("mvv") or {}
     if not mvv.get("path") or not mvv.get("sha256"):
-        return "ミッションの状態に MVV が無い（mission-state.py init --milestone M で写す）"
+        return "スプリントの状態に MVV が無い（sprint-state.py init --milestone M で写す）"
     path = Path(mvv["path"])
     if not path.is_file():
         return f"MVV のファイルが無い: {path}"
     now = hashlib.sha256(path.read_bytes()).hexdigest()
     if advise:
-        return None if now == mvv["sha256"] else "ミッション MVV が状態と一致しない（init の後に写しが変わった）"
+        return None if now == mvv["sha256"] else "スプリント MVV が状態と一致しない（init の後に写しが変わった）"
     approval = next((g for g in state.get("gates") or [] if g.get("name") == "MVV"), None)
     if not approval or not approval.get("sha256"):
-        return "MVV の承認の記録が無い（利用者の承認を得てから mission-state.py gate <状態> MVV を打つ）"
+        return "MVV の承認の記録が無い（利用者の承認を得てから sprint-state.py gate <状態> MVV を打つ）"
     if not (now == mvv["sha256"] == approval["sha256"]):
         return "MVV のハッシュが承認の記録と一致しない（承認の後に MVV が変わった）"
     return None
 
 
-def mission_text_of(state: dict) -> tuple[str | None, str | None]:
-    """状態の `mvv` からミッション MVV の本文を読む（#1400 の I10）。(本文, 特定できなかった理由)。
+def sprint_text_of(state: dict) -> tuple[str | None, str | None]:
+    """状態の `mvv` からスプリント MVV の本文を読む（#1400 の I10）。(本文, 特定できなかった理由)。
 
     状態に `mvv` が無ければ (None, None)。ファイルが無い・状態の sha256 と一致しなければ (None, 理由)。例外を上げない。"""
     ref = state.get("mvv") if isinstance(state, dict) else None
     if not isinstance(ref, dict) or not ref.get("path"):
         return None, None
-    why = mission_mvv_refusal(state, advise=True)
+    why = sprint_mvv_refusal(state, advise=True)
     if why:
         return None, why
     try:
@@ -385,21 +385,21 @@ def mission_text_of(state: dict) -> tuple[str | None, str | None]:
         return None, f"MVV のファイルを読めない: {e}"
 
 
-def mission_source(mission: str | None, mvv: str | None, milestone: str | None, repo: str | None) -> tuple[str | None, dict | None]:
-    """`project-mvv.py context` のミッション MVV の (本文, 結果の `mission_mvv`)。出所を渡さなければ (None, None)。読めなくても止めない（#1400 の決定 12）。"""
+def sprint_source(sprint: str | None, mvv: str | None, milestone: str | None, repo: str | None) -> tuple[str | None, dict | None]:
+    """`project-mvv.py context` のスプリント MVV の (本文, 結果の `sprint_mvv`)。出所を渡さなければ (None, None)。読めなくても止めない（#1400 の決定 12）。"""
     try:
-        if mission:
-            text, why = mission_text_of(json.loads(Path(mission).read_text(encoding="utf-8")))
+        if sprint:
+            text, why = sprint_text_of(json.loads(Path(sprint).read_text(encoding="utf-8")))
             if text is None and why is None:
-                why = f"状態に mvv が無い: {mission}"
-            source = f"state:{mission}"
+                why = f"状態に mvv が無い: {sprint}"
+            source = f"state:{sprint}"
         elif mvv:
             text, why, source = Path(mvv).read_text(encoding="utf-8"), None, f"file:{mvv}"
         elif milestone:
             import deps
 
             deps.require("md")
-            import mission_mvv as mm
+            import sprint_mvv as mm
 
             text = mm.mvv_sections(mm.milestone_description(milestone, repo))
             why = None if text else f"マイルストーン {milestone} の説明に ## Mission / ## Vision / ## Value の見出しがそろっていない"
@@ -407,15 +407,15 @@ def mission_source(mission: str | None, mvv: str | None, milestone: str | None, 
         else:
             return None, None
     except (OSError, ValueError) as e:
-        return None, {"reason": f"ミッション MVV を読めない: {e}"}
+        return None, {"reason": f"スプリント MVV を読めない: {e}"}
     if text is None:
         return None, {"reason": why}
     return text, {"sha256": sha256_text(text), "source": source}
 
 
 def approval_refusal(state: dict, root, mvv: ProjectMvv | None = None, advise: bool = False) -> str | None:
-    """MVV 判定の前の照合（I11・決定 12）。ミッション MVV があれば 3 者の一致、無ければ承認済みのプロジェクト MVV。
-    どちらでも、状態に残したプロジェクト MVV の参照が今の宣言と食い違えば断る。`advise` は `mission_mvv_refusal` へ渡す。"""
+    """MVV 判定の前の照合（I11・決定 12）。スプリント MVV があれば 3 者の一致、無ければ承認済みのプロジェクト MVV。
+    どちらでも、状態に残したプロジェクト MVV の参照が今の宣言と食い違えば断る。`advise` は `sprint_mvv_refusal` へ渡す。"""
     mvv = mvv or load_mvv(root)
     if mvv.status in ("unapproved", "mismatch", "unreadable"):
         return f"プロジェクト MVV が{STATUS_LABEL[mvv.status]}（{mvv.error or ''}）。利用者の承認へ戻す"
@@ -424,9 +424,9 @@ def approval_refusal(state: dict, root, mvv: ProjectMvv | None = None, advise: b
         now = f"版 {mvv.version}" if mvv.approved else STATUS_LABEL[mvv.status]
         return f"プロジェクト MVV が改訂された（状態は版 {ref.get('version')}、今は {now}）。利用者の承認へ戻す"
     if (state.get("mvv") or {}).get("path"):
-        return mission_mvv_refusal(state, advise)
+        return sprint_mvv_refusal(state, advise)
     if mvv.approved:
         if not ref.get("sha256"):
-            return "ミッションの状態にプロジェクト MVV の参照が無い（mission-state.py init で書く）"
+            return "スプリントの状態にプロジェクト MVV の参照が無い（sprint-state.py init で書く）"
         return None
-    return mission_mvv_refusal(state, advise)
+    return sprint_mvv_refusal(state, advise)

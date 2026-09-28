@@ -22,9 +22,9 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
     supervise.py new fix (--worktree DIR | --branch B) --tests PATH... --title T [--issue N] [--escape-of N] [--summary S] [--out F]
         # 即時修正: 作業場所の今のコミットを 範囲テスト → Pull Request → 全体テスト → doc-lint → ready → マージ で流す
     supervise.py new check --pr N --worktree DIR [--issue N...] [--scope PATH...] [--out F]
-    supervise.py new check --since-last --id <名> --worktree <リポジトリの根> [--mission <状態>] [--final] [--since-ref R] [--out F]
+    supervise.py new check --since-last --id <名> --worktree <リポジトリの根> [--sprint <状態>] [--final] [--since-ref R] [--out F]
         # 前回の検査からの差分を範囲にする検査（pace: fast）。実行の条件 check-trigger.py eval が立ったときだけ流れる
-    supervise.py new check --since-last --review-only --id <名> --worktree <リポジトリの根> [--mission <状態>] [--since-ref R] [--out F]
+    supervise.py new check --since-last --review-only --id <名> --worktree <リポジトリの根> [--sprint <状態>] [--since-ref R] [--out F]
         # 実装レビューだけ（開発版ごと）。前回のレビューから PR が 1 本以上で流れ、構造改善のトリガーの起点は動かさない
         # new の共通: [--base B] [--test-cmd CMD] [--production-branch B]（宣言より先に効く。下の「宣言」）。
         # テストは .ndf/project.json の test（戦略・suites[].scope_command の {paths}・junit）を test-run.py が読む
@@ -32,18 +32,18 @@ supervisor（サブエージェント）の代わりに、このスクリプト�
                              [--issue N...] [--prev-tag T] [--repo DIR] [--out F]
         # --prs-from-queue: queue が --then でこの計画を流す前に、先行の計画の報告の Pull Request を集めて
         # --prs に足す（--prs の固定の番号と併用できる）。prod のステップの最後は後片付け（merged-steps.py cleanup）
-    supervise.py new release ... --mvv <ミッションの状態>
+    supervise.py new release ... --mvv <スプリントの状態>
         # prod: 先頭に MVV 判定（mvv-gate.py）のステップを置く。dev: approval-facts のステップを gate_as_ok にする
-    supervise.py new mission --name M --worktree <リポジトリの根> --issue N... --version <開発版> [--design N...] [--tests PATH...] [--out DIR]
-        # 並列の設計 → 関門 1 → ミッションのブランチ → 並列の実装（ミッションのブランチへ集める）→ 検査 1 回 → 配布
-        # をステージごとの計画の JSON と mission.json へ書き出す。ステージの中は queue --max 3 で流す。配布は検査の queue が --then で流す
+    supervise.py new sprint --name M --worktree <リポジトリの根> --issue N... --version <開発版> [--design N...] [--tests PATH...] [--out DIR]
+        # 並列の設計 → 関門 1 → スプリントブランチ → 並列の実装（スプリントブランチへ集める）→ 検査 1 回 → 配布
+        # をステージごとの計画の JSON と sprint.json へ書き出す。ステージの中は queue --max 3 で流す。配布は検査の queue が --then で流す
         # 設計の計画: 用語集（無ければ worktree の中で起こしてコミットする）→ 要求と受け入れ条件（本文と写しが一致すれば
         # 飛ばす）→ 設計 → 設計 PR → cross-review → 用語チェック → 関門 1
         # release.form が無いか雛形の無い形なら配布の計画を書かず、最後のステージを「/ndf:release で行う」にする
-        # --pace fast --state <ミッションの状態>: 使ってよい条件を確かめ、設計（関門 1 は MVV 判定）→ 実装（develop へ直接）
+        # --pace fast --state <スプリントの状態>: 使ってよい条件を確かめ、設計（関門 1 は MVV 判定）→ 実装（develop へ直接）
         # → 検査（実行の条件）→ 開発版 → 本番（関門 2 は MVV 判定）を書く。条件に外れれば計画を書かずに止まる
     supervise.py new close --name M --worktree <根> --issue N... --version <開発版> --prod <正式版> --state <状態> [--out DIR]
-        # ミッションの終わり: 最終の検査 → 開発版 → 本番（最終の検査で変更があったときだけ）→ 確定仕様化・閉じる・振り返り
+        # スプリントの終わり: 最終の検査 → 開発版 → 本番（最終の検査で変更があったときだけ）→ 確定仕様化・閉じる・振り返り
     supervise.py design-glossary --mode M --root . --out <候補の語.md>
         # 設計の計画の入口: 用語集が揃えば何もしない。無ければ init と candidates を打ってコミットし、候補の語を書く
     supervise.py queue <plan.json>... [--max 3] [--then <plan.json>...]... [--done <パス>]
@@ -81,19 +81,20 @@ import deps  # noqa: E402
 deps.require(
     "mdtable", "schema", "procs", "locks"
 )  # 表（pr・commands）・宣言の形（decl）・claude -p の打ち切り（claude）・アカウントの排他（claude_accounts）
-from supervise_lib import commands, mission, new_args, queue, templates  # noqa: E402
+from supervise_lib import commands, sprint, new_args, queue, templates  # noqa: E402
 from supervise_lib.decl import DeclError, apply_decls  # noqa: E402
 from supervise_lib.plan import EXAMPLE  # noqa: E402
+import legacy_names  # noqa: E402
 from step_result import emit  # noqa: E402  supervise_lib が lib/ を sys.path へ足す
 
 MAIN_EPILOG = """フェーズごとの種別（new <種別> --help で、書き出すステップの並び・要る設定・引数を出す）:
   フェーズ                                 種別
-  設計 → 承認ゲート 1 → 実装 → 検査（ミッション）  new mission（リリースの形に雛形があればリリースまで）
+  設計 → 承認ゲート 1 → 実装 → 検査（スプリント）  new sprint（リリースの形に雛形があればリリースまで）
   実装（1 課題の Pull Request）              new impl
   即時修正（worker の実装なしで Pull Request）  new fix
   検査（1 本の Pull Request か前回からの差分）   new check
   リリース（開発版か本番）                   new release
-  ミッションの終わり                         new close
+  スプリントの終わり                         new close
 書き出したプランは run で 1 本、queue で並べて流し、wait で終わりか attention まで待つ。"""
 
 
@@ -180,7 +181,7 @@ def main() -> int:
     c = sub.add_parser("sync-check", help="宣言した同期とチェック（.ndf/supervise.json の sync_checks）")
     c.add_argument("--root", default=".")
     c.add_argument("--commit", action="store_true", help="同期で変わったファイルをコミットする")
-    a = ap.parse_args()
+    a = ap.parse_args(legacy_names.rewrite_argv("supervise.py", sys.argv[1:]))
     if a.cmd == "new":
         new_args.fill_new_defaults(a)
     if a.cmd == "design-glossary":
@@ -188,14 +189,14 @@ def main() -> int:
     if a.cmd == "example":
         print(json.dumps(EXAMPLE, ensure_ascii=False, indent=2))
         return 0
-    if a.cmd == "new" and a.kind in ("mission", "close"):
-        new_args.check_mission(ap, a)
+    if a.cmd == "new" and a.kind in ("sprint", "close"):
+        new_args.check_sprint(ap, a)
         try:
             if a.kind == "close":
                 apply_decls(a)
-                emit(mission.cmd_new_mission(a, mission.close_waves(a)))
+                emit(sprint.cmd_new_sprint(a, sprint.close_waves(a)))
             apply_decls(a)
-            res = mission.cmd_new_mission(a)
+            res = sprint.cmd_new_sprint(a)
             emit(res, 1 if res["status"] == "stopped" else None)
         except DeclError as e:
             ap.error(str(e))

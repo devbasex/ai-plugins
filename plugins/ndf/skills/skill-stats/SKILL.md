@@ -45,7 +45,7 @@ Claude Code の transcript JSONL ファイル (`~/.claude/projects/*.jsonl`) を
 
 # --- 3 層の context window の測定 (#550) ---
 /ndf:skill-stats --agents --session <conductor のセッション>   # 4 つの表を出す
-/ndf:skill-stats --agents --session A --session B              # ミッションを 1 つの表にする
+/ndf:skill-stats --agents --session A --session B              # スプリントを 1 つの表にする
 /ndf:skill-stats --agents --layer supervisor                   # 1 つの層に絞る
 /ndf:skill-stats --agents --session A --window-limit 150000    # 割る候補の目安を変える
 ```

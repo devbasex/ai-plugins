@@ -1,6 +1,6 @@
 """project_mvv_signals.py: 改訂の兆候の記録と集計（#1366 の I13・I18）。標準ライブラリだけで書く。
 
-覆し（`project-mvv-signals.jsonl`）は `mission-state.py gate --by user` が、同じ承認ゲートの直前の MVV 判定と食い違うときだけ書く。
+覆し（`project-mvv-signals.jsonl`）は `sprint-state.py gate --by user` が、同じ承認ゲートの直前の MVV 判定と食い違うときだけ書く。
 「判定できない」（`mvv-gate.jsonl`）と流出不具合（検査の記録の `kind: escape`）は既存の記録を読む。
 """
 
@@ -10,6 +10,7 @@ import datetime
 import json
 from pathlib import Path
 
+import legacy_names
 import project_mvv as pm
 
 
@@ -111,25 +112,25 @@ def revise_suggestion(sig: dict) -> dict | None:
 GATE_KEYS = {"関門 1": "design", "関門 2": "release"}  # mvv-gate.py の --gate
 
 
-def last_mvv_verdict(state: dict, mission: str, gate: str, gate_log, pr: int | None = None) -> str | None:
-    """同じ承認ゲートの直前の MVV 判定（状態の `by: mvv` の記録か、mvv-gate.jsonl の同じミッションの最後の行の新しい方）。
+def last_mvv_verdict(state: dict, sprint: str, gate: str, gate_log, pr: int | None = None) -> str | None:
+    """同じ承認ゲートの直前の MVV 判定（状態の `by: mvv` の記録か、mvv-gate.jsonl の同じスプリントの最後の行の新しい方）。
     それより新しい取り消し（`withdrawals`）があれば None。`pr` を渡すと、mvv-gate.jsonl の行は `pr` にその番号を含むものだけを
-    見る（1 つのミッションの複数の設計 PR の判定を取り違えない。#1400 の I8）。"""
+    見る（1 つのスプリントの複数の設計 PR の判定を取り違えない。#1400 の I8）。"""
     found = []
     g = next((g for g in state.get("gates", []) if g.get("name") == gate and g.get("by") == "mvv"), None)
     if g:
         found.append((g.get("at") or "", g.get("verdict")))
-    me = str(Path(mission).resolve())
+    me = str(Path(sprint).resolve())
     rows = [
         r
         for r in read_jsonl(Path(gate_log).expanduser())
         if r.get("gate") == GATE_KEYS.get(gate)
-        and str(Path(str(r.get("mission") or "")).resolve()) == me
+        and str(Path(str(legacy_names.read_key(r, "sprint") or "")).resolve()) == me
         and (pr is None or pr in (r.get("pr") or []))
     ]
     if rows:
         found.append((rows[-1].get("at") or "", rows[-1].get("verdict")))
-    # 自動の通過を取り消した（mission-state.py gate --withdraw）なら、それより前の判定は直前の判定として読まない
+    # 自動の通過を取り消した（sprint-state.py gate --withdraw）なら、それより前の判定は直前の判定として読まない
     found += [(w.get("at") or "", "withdrawn") for w in state.get("withdrawals", []) if w.get("name") == gate]
     if not found:
         return None
@@ -138,10 +139,10 @@ def last_mvv_verdict(state: dict, mission: str, gate: str, gate_log, pr: int | N
 
 
 def record_override(
-    state: dict, mission: str, gate: str, outcome: str | None, at: str, root, gate_log, pr: int | None = None
+    state: dict, sprint: str, gate: str, outcome: str | None, at: str, root, gate_log, pr: int | None = None
 ) -> dict | None:
     """利用者の答え（`outcome`。省くと approved）が直前の MVV 判定と食い違えば、覆しを 1 行書いて返す（I18）。"""
-    verdict = last_mvv_verdict(state, mission, gate, gate_log, pr)
+    verdict = last_mvv_verdict(state, sprint, gate, gate_log, pr)
     if outcome == "rejected" and verdict == "follow":
         kind = "override_reject"
     elif outcome != "rejected" and verdict in ("not_follow", "unknown"):
@@ -152,7 +153,7 @@ def record_override(
     row = {
         "at": at,
         "repo": pm.mvv_repo_key(root),
-        "mission": str(Path(mission).resolve()),
+        "sprint": str(Path(sprint).resolve()),
         "gate": gate,
         "kind": kind,
         "mvv_verdict": verdict,

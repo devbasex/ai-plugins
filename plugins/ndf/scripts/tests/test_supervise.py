@@ -1090,14 +1090,14 @@ def test_new_release_requires_version():
     assert p.returncode != 0 and "--version" in p.stderr
 
 
-# --- ミッション（#1005） ------------------------------------------------------------
+# --- スプリント（#1005） ------------------------------------------------------------
 
 
-def test_new_mission_writes_waves_in_order(tmp_path):
+def test_new_sprint_writes_waves_in_order(tmp_path):
     out = tmp_path / "m"
     p = cli(
         "new",
-        "mission",
+        "sprint",
         "--name",
         "v10-18",
         "--worktree",
@@ -1115,9 +1115,9 @@ def test_new_mission_writes_waves_in_order(tmp_path):
     assert p.returncode == 0, p.stderr
     res = json.loads(p.stdout)
     assert res["status"] == "ok"
-    manifest = json.loads((out / "mission.json").read_text())
-    assert manifest["ブランチ"] == "mission/v10-18"
-    assert [w["name"] for w in manifest["ステージ"]] == ["設計", "関門 1", "ミッションのブランチ", "実装", "検査", "配布"]
+    manifest = json.loads((out / "sprint.json").read_text())
+    assert manifest["ブランチ"] == "sprint/v10-18"
+    assert [w["name"] for w in manifest["ステージ"]] == ["設計", "関門 1", "スプリントブランチ", "実装", "検査", "配布"]
     waves = {w["name"]: w for w in manifest["ステージ"]}
     assert "plans" not in waves["関門 1"] and waves["関門 1"]["gate"]
     assert len(waves["実装"]["plans"]) == 2 and waves["実装"]["command"].endswith("--max 3")
@@ -1163,11 +1163,11 @@ def test_new_mission_writes_waves_in_order(tmp_path):
     assert "glossary-recheck" in ds["gate"]["inputs"]
 
     impl = json.loads(Path(waves["実装"]["plans"][0]).read_text())
-    assert impl["起点"] == "origin/mission/v10-18"
-    assert next(s for s in impl["steps"] if s["type"] == "pr")["base"] == "mission/v10-18"
+    assert impl["起点"] == "origin/sprint/v10-18"
+    assert next(s for s in impl["steps"] if s["type"] == "pr")["base"] == "sprint/v10-18"
 
     check = json.loads(Path(waves["検査"]["plans"][0]).read_text())
-    assert check["branch"] == "mission/v10-18" and "Pull Request" not in check
+    assert check["branch"] == "sprint/v10-18" and "Pull Request" not in check
     pr = next(s for s in check["steps"] if s["type"] == "pr")
     assert pr["base"] == "develop" and "関連: #11 #12" in pr["summary"]
     assert "Closes" not in pr["summary"]
@@ -1175,17 +1175,17 @@ def test_new_mission_writes_waves_in_order(tmp_path):
     assert [s["id"] for s in check["steps"]][:3] == ["collect", "pr", "assess"]
 
 
-def test_new_mission_without_design_skips_gate(tmp_path):
+def test_new_sprint_without_design_skips_gate(tmp_path):
     out = tmp_path / "m"
-    p = cli("new", "mission", "--name", "m", "--worktree", str(tmp_path), "--issue", "1", "--version", "10.18.0-dev.1", "--out", str(out))
+    p = cli("new", "sprint", "--name", "m", "--worktree", str(tmp_path), "--issue", "1", "--version", "10.18.0-dev.1", "--out", str(out))
     assert p.returncode == 0, p.stderr
-    names = [w["name"] for w in json.loads((out / "mission.json").read_text())["ステージ"]]
-    assert names == ["ミッションのブランチ", "実装", "検査", "配布"]
+    names = [w["name"] for w in json.loads((out / "sprint.json").read_text())["ステージ"]]
+    assert names == ["スプリントブランチ", "実装", "検査", "配布"]
 
 
 @pytest.mark.parametrize("args", [["--issue", "1"], ["--name", "a b", "--issue", "1"], ["--name", "m"], ["--name", "m", "--issue", "1"]])
-def test_new_mission_rejects_bad_args(tmp_path, args):
-    assert cli("new", "mission", "--worktree", str(tmp_path), *args).returncode == 2
+def test_new_sprint_rejects_bad_args(tmp_path, args):
+    assert cli("new", "sprint", "--worktree", str(tmp_path), *args).returncode == 2
 
 
 FAKE_GH_PR = """#!{py}
@@ -1796,11 +1796,11 @@ def test_new_check_without_scope_drives_over_the_pr_directories(tmp_path):
     assert "gh pr diff" not in refactor["args"]
 
 
-def test_new_mission_check_and_release_run_without_a_whole_skill(tmp_path):
+def test_new_sprint_check_and_release_run_without_a_whole_skill(tmp_path):
     out = tmp_path / "m"
-    p = cli("new", "mission", "--name", "m", "--worktree", str(tmp_path), "--issue", "1", "--version", "10.18.0-dev.1", "--out", str(out))
+    p = cli("new", "sprint", "--name", "m", "--worktree", str(tmp_path), "--issue", "1", "--version", "10.18.0-dev.1", "--out", str(out))
     assert p.returncode == 0, p.stderr
-    waves = {w["name"]: w for w in json.loads((out / "mission.json").read_text())["ステージ"]}
+    waves = {w["name"]: w for w in json.loads((out / "sprint.json").read_text())["ステージ"]}
     for name in ("検査", "配布"):
         for path in waves[name]["plans"]:
             assert not [s for s in json.loads(Path(path).read_text())["steps"] if s.get("full")], path

@@ -19,7 +19,7 @@ SCRIPTS = Path(__file__).resolve().parents[1]
 REPO = SCRIPTS.parents[2]
 MVV_PY = SCRIPTS / "project-mvv.py"
 GATE_PY = SCRIPTS / "mvv-gate.py"
-STATE_PY = SCRIPTS / "mission-state.py"
+STATE_PY = SCRIPTS / "sprint-state.py"
 PY = sys.executable
 sys.path.insert(0, str(SCRIPTS / "lib"))
 sys.path.insert(0, str(SCRIPTS))
@@ -419,11 +419,11 @@ def test_block_starts_with_the_whole_common_principles_even_without_a_declaratio
     assert "C8" in text and "人を守り、人の発展を支える" in text
 
 
-def test_block_orders_principles_project_mission_contract(env):
+def test_block_orders_principles_project_sprint_contract(env):
     assert approve(env) == 0
     mvv = pm.load_mvv(env["root"])
     text = pm.block(mvv, "## Mission\nミッション\n")
-    i = [text.index(x) for x in ("# NDF の共通原則", "利用者の手を減らす", "# ミッション MVV", "## 判断の決まり")]
+    i = [text.index(x) for x in ("# NDF の共通原則", "利用者の手を減らす", "# スプリント MVV", "## 判断の決まり")]
     assert i == sorted(i) and "版 1" in text
 
 
@@ -479,10 +479,10 @@ def test_signals_without_a_declaration_is_0(env):
     assert code == 0 and out["items"] == []
 
 
-# ---------------------------------------------------------------- mission-state（AC12・AC17・I11・I18）
+# ---------------------------------------------------------------- sprint-state（AC12・AC17・I11・I18）
 
 
-def mission_gate(env, state: Path, *args: str) -> int:
+def sprint_gate(env, state: Path, *args: str) -> int:
     return run(env, "gate", str(state), "関門 2", "--what", "本番", "--root", str(env["root"]), *args, script=STATE_PY)[0]
 
 
@@ -499,21 +499,21 @@ def new_state(env, tmp: Path) -> Path:
 
 def test_gate_records_overrides_only_when_the_user_disagrees(env):
     state = new_state(env, env["tmp"])
-    mission_gate(env, state, "--by", "mvv", "--verdict", "not_follow", "--reasons", "[]")
-    assert mission_gate(env, state) == 0
+    sprint_gate(env, state, "--by", "mvv", "--verdict", "not_follow", "--reasons", "[]")
+    assert sprint_gate(env, state) == 0
     assert [r["kind"] for r in signal_rows(env)] == ["override_pass"]
-    mission_gate(env, state, "--by", "mvv", "--verdict", "follow", "--reasons", "[]")
-    assert mission_gate(env, state, "--outcome", "rejected") == 0
+    sprint_gate(env, state, "--by", "mvv", "--verdict", "follow", "--reasons", "[]")
+    assert sprint_gate(env, state, "--outcome", "rejected") == 0
     assert [r["kind"] for r in signal_rows(env)] == ["override_pass", "override_reject"]
     m = json.loads(state.read_text())
     assert m["rejections"][0]["outcome"] == "rejected"
     assert next(g for g in m["gates"] if g["name"] == "関門 2")["by"] == "mvv"  # 差し戻しは関門を通さない
-    mission_gate(env, state, "--by", "mvv", "--verdict", "follow", "--reasons", "[]")
-    assert mission_gate(env, state, "--outcome", "approved") == 0
+    sprint_gate(env, state, "--by", "mvv", "--verdict", "follow", "--reasons", "[]")
+    assert sprint_gate(env, state, "--outcome", "approved") == 0
     assert len(signal_rows(env)) == 2
 
 
-def test_init_fast_with_a_project_mvv_writes_the_reference_without_a_mission_mvv(env):
+def test_init_fast_with_a_project_mvv_writes_the_reference_without_a_sprint_mvv(env):
     assert approve(env) == 0
     state = env["tmp"] / "s" / "m.json"
     code, _, text = run(env, "init", str(state), "--name", "m", "--pace", "fast", "--root", str(env["root"]), script=STATE_PY)
@@ -527,37 +527,37 @@ def test_init_fast_with_a_project_mvv_writes_the_reference_without_a_mission_mvv
     assert "改訂された" in pm.approval_refusal(m, env["root"])
 
 
-def test_init_fast_stops_when_the_mission_mvv_contradicts_the_project_mvv(env):
+def test_init_fast_stops_when_the_sprint_mvv_contradicts_the_project_mvv(env):
     assert approve(env) == 0
-    mission = body_file(env, "## Mission\n速く\n## Vision\n回る\n## Value\n1. P1 は承認なしで変えてよい\n", "mission.md")
+    sprint = body_file(env, "## Mission\n速く\n## Vision\n回る\n## Value\n1. P1 は承認なしで変えてよい\n", "sprint.md")
     answer(env, '{"verdict": "suspect", "locations": [{"item": "P1", "reason": "レッドラインを緩める"}]}')
     state = env["tmp"] / "s" / "m.json"
     code, out, _ = run(
-        env, "init", str(state), "--name", "m", "--pace", "fast", "--mvv", mission, "--root", str(env["root"]), script=STATE_PY
+        env, "init", str(state), "--name", "m", "--pace", "fast", "--mvv", sprint, "--root", str(env["root"]), script=STATE_PY
     )
     assert code == 1 and "P1" in out["summary"] and not state.exists()
 
 
-def test_fast_refusal_asks_for_a_mission_mvv_when_there_is_no_project_mvv(tmp_path):
+def test_fast_refusal_asks_for_a_sprint_mvv_when_there_is_no_project_mvv(tmp_path):
     assert "MVV が無い" in pm.approval_refusal({"gates": []}, tmp_path)
 
 
 # ---------------------------------------------------------------- mvv-gate（AC7・AC9・AC11・I6・I13・I15）
 
 
-def gate_state(env, tmp: Path, with_mission: bool) -> Path:
+def gate_state(env, tmp: Path, with_sprint: bool) -> Path:
     state = tmp / "gs" / "m.json"
     (env["root"] / ".ndf" / "pace.json").write_text(
         json.dumps({"version": 1, "fast": {"enabled": True, "verify": "true"}, "areas": [], "boundary_paths": ["lib/auth.py"]})
     )
     args = ["init", str(state), "--name", "m", "--pace", "fast", "--root", str(env["root"])]
-    if with_mission:
-        mission = body_file(env, "## Mission\n速く\n## Vision\n回る\n## Value\n1. 実測\n", "mission.md")
-        args += ["--mvv", mission]
+    if with_sprint:
+        sprint = body_file(env, "## Mission\n速く\n## Vision\n回る\n## Value\n1. 実測\n", "sprint.md")
+        args += ["--mvv", sprint]
         answer(env, FOLLOW)
     code, _, text = run(env, *args, script=STATE_PY)
     assert code == 0, text
-    if with_mission:
+    if with_sprint:
         run(env, "gate", str(state), "MVV", "--what", "承認", script=STATE_PY)
     return state
 
@@ -569,7 +569,7 @@ def gate_check(env, state: Path, *extra: str) -> tuple[int, dict, list[dict]]:
     code, out, text = run(
         env,
         "check",
-        "--mission",
+        "--sprint",
         str(state),
         "--gate",
         "release",
@@ -587,7 +587,7 @@ def gate_check(env, state: Path, *extra: str) -> tuple[int, dict, list[dict]]:
 
 def test_mvv_gate_judges_with_only_the_project_mvv_and_records_the_basis(env):
     assert approve(env) == 0
-    state = gate_state(env, env["tmp"], with_mission=False)
+    state = gate_state(env, env["tmp"], with_sprint=False)
     answer(env, '{"verdict": "follow", "reasons": ["Value 1"], "boundary": [], "basis": ["Value 1", "Z9"]}')
     before = calls(env, "claude")
     code, out, rows = gate_check(env, state)
@@ -599,7 +599,7 @@ def test_mvv_gate_judges_with_only_the_project_mvv_and_records_the_basis(env):
 
 def test_mvv_gate_goes_back_without_the_llm_when_the_declaration_does_not_match(env):
     assert approve(env) == 0
-    state = gate_state(env, env["tmp"], with_mission=True)
+    state = gate_state(env, env["tmp"], with_sprint=True)
     (env["root"] / ".ndf" / "mvv.md").write_text(BODY + "足した\n")
     before = calls(env, "claude")
     code, out, rows = gate_check(env, state)
@@ -608,7 +608,7 @@ def test_mvv_gate_goes_back_without_the_llm_when_the_declaration_does_not_match(
 
 def test_mvv_gate_never_passes_a_pr_that_changes_the_declaration(env):
     assert approve(env) == 0
-    state = gate_state(env, env["tmp"], with_mission=True)
+    state = gate_state(env, env["tmp"], with_sprint=True)
     # REST の `pulls/<n>/files` の形（変更したファイルは `gh pr view --json files` でなく REST の全件で読む）
     (env["tmp"] / "gh-out.json").write_text(json.dumps({"title": "t", "body": "b", "changedFiles": 1}))
     (env["tmp"] / "gh-files.json").write_text(
@@ -621,7 +621,7 @@ def test_mvv_gate_never_passes_a_pr_that_changes_the_declaration(env):
 
 def test_mvv_gate_suggests_revision_after_the_unknown_streak(env):
     assert approve(env) == 0
-    state = gate_state(env, env["tmp"], with_mission=False)
+    state = gate_state(env, env["tmp"], with_sprint=False)
     answer(env, '{"verdict": "unknown", "reasons": ["決められない"], "boundary": []}')
     outs = [gate_check(env, state)[1] for _ in range(3)]
     assert [any(i.get("kind") == "revise" for i in o["items"]) for o in outs] == [False, False, True]

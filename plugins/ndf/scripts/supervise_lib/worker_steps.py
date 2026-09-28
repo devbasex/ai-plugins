@@ -23,9 +23,9 @@ class WorkStep:
 
     def mvv_system(self, ctx) -> str:
         """worker のシステムプロンプトの末尾へ足す MVV の節（#1400 の決定 5）。プロジェクト MVV が承認済みのときだけ
-        `project_mvv.block` の出力をそのまま返し（ミッションが特定できればミッション MVV も入る）、ほかは空文字。"""
-        mvv, mission = ctx.state.mvv_block_of(ctx.cwd, ctx.plan)
-        return "\n\n" + project_mvv.block(mvv, mission) if mvv.approved else ""
+        `project_mvv.block` の出力をそのまま返し（スプリントが特定できればスプリント MVV も入る）、ほかは空文字。"""
+        mvv, sprint = ctx.state.mvv_block_of(ctx.cwd, ctx.plan)
+        return "\n\n" + project_mvv.block(mvv, sprint) if mvv.approved else ""
 
     def issue_text(self, ctx, step: dict) -> str:
         nums = step.get("issues")

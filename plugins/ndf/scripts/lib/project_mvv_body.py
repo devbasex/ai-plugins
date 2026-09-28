@@ -77,7 +77,7 @@ def shape_problems(text: str) -> list[dict]:
         if k == "C":
             out.append({"item": f"C{n}", "reason": f"共通原則の操作（C{n} の行）を本文へ写せない。固有の操作は P の番号で書く"})
         if k == "R":
-            out.append({"item": f"R{n}", "reason": "R の番号はミッション MVV のものである。固有の操作は P の番号で書く"})
+            out.append({"item": f"R{n}", "reason": "R の番号はスプリント MVV のものである。固有の操作は P の番号で書く"})
     ops = _section(secs, OPERATIONS_HEADING)
     if ops is not None:
         others = [f"{k}{n}" for k, n in _table_ids("\n".join(ops)) if k != "P"]

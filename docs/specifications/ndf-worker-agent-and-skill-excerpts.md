@@ -13,7 +13,7 @@ supervisor は進行を進捗記録 1 行で残し、worker は Skill と Agent 
 | conductor → supervisor / supervisor → worker の起動指示の雛形と守る規則、委譲の線 | `plugins/ndf/skills/development-workflow/references/agent-layers.md` |
 | 実行方式の比較表、仕事ごとの選び方、小さな作業の線引き、サブエージェントの Tool を定義で絞る理由 | `plugins/ndf/skills/development-workflow/references/work-vessels.md` |
 | 抜粋の形・置き場所・入れるもの / 入れないもの・上限を超えたときの扱い | `plugins/ndf/skills/EXCERPTS.md` |
-| 進捗記録のキーと打つ時点、「ミッションを閉じる」手順 | `plugins/ndf/skills/progress-tracking/SKILL.md`（抜粋は `references/excerpt.md`） |
+| 進捗記録のキーと打つ時点、「スプリントを閉じる」手順 | `plugins/ndf/skills/progress-tracking/SKILL.md`（抜粋は `references/excerpt.md`） |
 | worker のエージェント定義 | `plugins/ndf/agents/worker.md` |
 
 ## 概要
@@ -98,7 +98,7 @@ flowchart TB
 - **進捗記録は 1 回の Bash 実行に 1 件である。** 通過記録は 1 回の実行の最初の記録しか
   読まない
 - **supervisor は `development-workflow` を起動しない。** `progress-tracking` を起動するのは、
-  最終工程で「ミッションを閉じる」手順を行うときだけである
+  最終工程で「スプリントを閉じる」手順を行うときだけである
 - **worker は Skill を起動せず、`SKILL.md` を読まない。** 起動指示が Skill の起動そのものを
   手順として渡したときだけ、その 1 つを起動してよい。起動してよいかは起動指示を書く側が決める
 - **抜粋の正本は本文である。** 抜粋に本文に無い規則を置かない
@@ -121,7 +121,7 @@ projects-sync.sh <課題番号> <キー> <値>
 | `mode` | フェーズの最初の工程で 1 度 | `progress-record.sh <課題> - --mode <値>`（見出し行だけ） | モードのフィールド | モードを書く |
 | `worktree` | 作業場所の用意の後に 1 度 | `progress-record.sh <課題> - --worktree <値>` | worktree のフィールド | 読まない |
 | `plan` | 計画の後に 1 度 | `progress-record.sh <課題> - --plan <値>` | 実装計画のファイルのフィールド | 読まない |
-| `status` | 「ミッションを閉じる」だけ | 書かない | Status | 読まない |
+| `status` | 「スプリントを閉じる」だけ | 書かない | Status | 読まない |
 
 見出し行だけを更新するときは、既にある見出し行のモード・ worktree ・実装計画のファイルのうち
 渡さなかったものを引き継ぐ。
@@ -162,10 +162,10 @@ conductor の起動指示と、それを写した手順が「10 個」と数で�
 
 | # | 規則 |
 | --- | --- |
-| 3 | 工程に入った時点で起動指示の「進捗記録」を課題ごとに 1 回打つ。1 回の Bash 実行に 1 件。`development-workflow` を起動しない。ミッションを閉じるときだけ `progress-tracking` を起動して本文の手順に従う |
+| 3 | 工程に入った時点で起動指示の「進捗記録」を課題ごとに 1 回打つ。1 回の Bash 実行に 1 件。`development-workflow` を起動しない。スプリントを閉じるときだけ `progress-tracking` を起動して本文の手順に従う |
 | 7 | 委譲してよい作業は worker へ出し、委譲しない 5 つは自分で行う。小さな作業は worker へ出さずにインライン実行にする（`work-vessels.md` の線引き） |
 
-「ミッションを閉じる」手順は `progress-tracking` の本文に残る。#856 がこれを `mission-close.py` へ
+「スプリントを閉じる」手順は `progress-tracking` の本文に残る。#856 がこれを `sprint-close.py` へ
 移した時点で、この例外も要らなくなる。
 
 ### worker の起動指示と定義
@@ -370,7 +370,7 @@ CLI の worker（#760）で Skill を塞ぐ手段は次のとおりで、今の 
   `No matching deferred tools found.` を返し、Tool に Skill と Agent が無いこと（#828 に記録がある）
 - `agent-layers.md` の 2 つの起動指示の雛形の中に、`progress-tracking` / `development-workflow` を
   起動・読み込みさせる文が無いこと。残ってよいのは conductor 側の説明、「3 層の責務」の表の
-  conductor の行、supervisor の規則 3 の禁止の文と「ミッションを閉じる」の例外だけである
+  conductor の行、supervisor の規則 3 の禁止の文と「スプリントを閉じる」の例外だけである
 - `grep -rn "この工程に入ったら.*progress-tracking" plugins/ndf/skills/*/SKILL.md` が 0 件で、
   `design` の「進行を記録する」の節も進捗記録の形であること
 - `progress-tracking/references/excerpt.md` が 1 行目のマーカーと 3 つの見出しを持ち、40 行かつ

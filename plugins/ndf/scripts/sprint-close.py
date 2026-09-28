@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""mission-close.py: ミッションを閉じる（progress-tracking の「ミッションを閉じる」の手順）。
+"""sprint-close.py: スプリントを閉じる（progress-tracking の「スプリントを閉じる」の手順）。
 
-    python3 mission-close.py --record-pr <PR番号> [--prs 1,2] [--issues 3,4] [--with-verification]
+    python3 sprint-close.py --record-pr <PR番号> [--prs 1,2] [--issues 3,4] [--with-verification]
                              [--label "<マイルストーン>の<工程名>"] [--dry-run] [--root <dir>]
 
 1. 記録の PR の本文とコメントを読み、最後の「## 配布の記録」ブロックを取る
-2. ミッションの PR の一覧（--prs、無ければブロックの `ミッション:` の行）の本文から、閉じる語が
+2. スプリントの PR の一覧（--prs、無ければブロックの `スプリント:` の行）の本文から、閉じる語が
    指す課題を集める（lib/closing-issues.sh）。--issues の課題（記録のリポジトリ）を足す
    （`pace: fast` の実装 PR は閉じる語を持たない）
 3. 閉じる条件 1（本番への配布まで済んだ、または配布なし）と、--with-verification のときは
@@ -49,8 +49,9 @@ from step_result import (
 )
 import gh_call  # noqa: E402
 import md  # noqa: E402
+import legacy_names  # noqa: E402
 
-TOOL = "mission-close"
+TOOL = "sprint-close"
 DIST = "## 配布の記録"
 VERIFY = "## リリース後テスト"
 
@@ -74,7 +75,7 @@ def read_record(root, repo, n):
 def parse_record(text):
     """最後の配布の記録と、使うリリース後テストのブロックを読む。
 
-    戻り値: {"found", "stage", "version", "mission_prs", "verify_block"}。
+    戻り値: {"found", "stage", "version", "sprint_prs", "verify_block"}。
     verify_block は本番なら対象の版が一致する最後のブロック、配布なしなら最後の配布の記録より
     後の最後のブロック。無ければ None。
     """
@@ -82,15 +83,15 @@ def parse_record(text):
     sections = [s for s in md.md_sections(text) if lines[s.heading.line].startswith("#")]
     dists = [s for s in sections if lines[s.heading.line].startswith(DIST)]
     dist_start = dists[-1].heading.line if dists else None
-    out = {"found": dist_start is not None, "stage": None, "version": None, "mission_prs": [], "verify_block": None}
+    out = {"found": dist_start is not None, "stage": None, "version": None, "sprint_prs": [], "verify_block": None}
     if dist_start is None:
         return out
     block = lines[dists[-1].start : dists[-1].end]
     for ln in block:
         if ln.startswith("段階: ") and out["stage"] is None:
             out["stage"] = ln[len("段階: ") :].strip()
-        elif ln.startswith(("ミッション: ", "まとまり: ")):  # 旧い記録（まとまり）も読む
-            out["mission_prs"] = [int(x) for x in re.findall(r"#(\d+)", ln)]
+        elif ln.startswith(legacy_names.record_labels("スプリント: ")):  # 改名の前の記録の見出しも読む
+            out["sprint_prs"] = [int(x) for x in re.findall(r"#(\d+)", ln)]
     if (out["stage"] or "").startswith("本番"):
         for ln in block:
             if ln.startswith("版: ") and "→" in ln:
@@ -147,12 +148,12 @@ def verification_verdicts(block, record_repo):
 # --- 課題の収集 -----------------------------------------------------------------
 
 
-def mission_issues(root, repo, prs):
+def sprint_issues(root, repo, prs):
     seen, out = set(), []
     for n in prs:
         p = gh_call.gh(["pr", "view", str(n), "--repo", repo, "--json", "body", "-q", ".body"], cwd=root)
         if p.returncode != 0:
-            raise StepError(f"ミッションの PR #{n} を読めない: {p.stderr.strip()[:300]}", EXIT_UNREADABLE)
+            raise StepError(f"スプリントの PR #{n} を読めない: {p.stderr.strip()[:300]}", EXIT_UNREADABLE)
         c = subprocess.run(
             ["bash", str(HERE / "lib" / "closing-issues.sh"), "--repo", repo], cwd=root, input=p.stdout, capture_output=True, text=True
         )
@@ -227,24 +228,24 @@ def cmd_close(a):
             raise StepError("記録のリポジトリを決められない（--repo を渡す）", EXIT_PRECONDITION)
     given = [(record_repo, n) for n in a.issues or []]
     if a.record_pr == 0:
-        rec = {"found": True, "stage": "配布なし（本番の記録なし）", "mission_prs": [], "verify_block": None}
+        rec = {"found": True, "stage": "配布なし（本番の記録なし）", "sprint_prs": [], "verify_block": None}
         prs = []
     else:
         rec = parse_record(read_record(root, record_repo, a.record_pr))
-        prs = a.prs or rec["mission_prs"]
+        prs = a.prs or rec["sprint_prs"]
     if not prs and not given:
         emit(
             result(
                 TOOL,
                 "stopped",
-                "ミッションの PR の一覧が取れない。推測せず運用者に一覧を聞く",
+                "スプリントの PR の一覧が取れない。推測せず運用者に一覧を聞く",
                 [],
                 {"issues": 0},
                 next="運用者に一覧を聞き、--prs で渡して打ち直す",
             ),
             EXIT_UNREADABLE,
         )
-    issues = mission_issues(root, record_repo, prs) if prs else []
+    issues = sprint_issues(root, record_repo, prs) if prs else []
     issues += [k for k in given if k not in issues]
 
     stage = rec["stage"] or ""
@@ -268,7 +269,7 @@ def cmd_close(a):
                 kept_all = "条件と課題の対応が読めない"
 
     items, notes = [], []
-    comment = f"ミッション（{a.label}）を通りました" if a.label else "ミッションの終わりの工程を通りました"
+    comment = f"スプリント（{a.label}）を通りました" if a.label else "スプリントの終わりの工程を通りました"
     for repo, n in issues:
         base = {"kind": "issue", "repo": repo, "number": n}
         if kept_all:
@@ -318,11 +319,11 @@ def number_list(s):
 
 
 def build_parser():
-    ap = Parser(prog="mission-close.py", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = Parser(prog="sprint-close.py", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument(
         "--record-pr", type=int, required=True, help="配布の記録を置いた PR の番号。0 は本番の記録なし（--issues と一緒に渡す）"
     )
-    ap.add_argument("--prs", type=number_list, help="ミッションの PR の番号（カンマ区切り）。省けば配布の記録から読む")
+    ap.add_argument("--prs", type=number_list, help="スプリントの PR の番号（カンマ区切り）。省けば配布の記録から読む")
     ap.add_argument("--issues", type=number_list, help="閉じる課題の番号（カンマ区切り）。PR の閉じる語と和を取る")
     ap.add_argument("--repo", help="記録のリポジトリ（owner/name）。省けば gh repo view で決める")
     ap.add_argument("--with-verification", action="store_true", help="リリース後テストを通る経路（閉じる条件 2 を見る）")
