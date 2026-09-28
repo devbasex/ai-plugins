@@ -3368,3 +3368,127 @@ def test_account_capacity_and_list(tmp_path, accounts):
     assert account_cmd(tmp_path, accounts, "capacity", "a", "0", "-", tty=False).returncode == 2
     assert account_cmd(tmp_path, accounts, "capacity", "a", "x", "-", tty=False).returncode == 2
     assert account_cmd(tmp_path, accounts, "capacity", "zz", "1", "1", tty=False).returncode == 1
+
+
+# ---------------------------------------------------------------- 現状固定: 区間のアカウントの選び方（AccountSwitch.pick）
+
+from relay_lib import switch as relay_switch  # noqa: E402
+
+
+class _Acc:
+    def __init__(self, relogin=False, limited=None, left=None):
+        self.needs_relogin, self.limited, self.left = relogin, limited, left
+
+    def limited_until(self, now):
+        return self.limited
+
+    def remaining(self):
+        return self.left
+
+
+class _Use:
+    def __init__(self, score):
+        self.s = score
+
+    def score(self):
+        return self.s
+
+
+def _fake_ca(monkeypatch, *, choice, usage=None, acc=None, thr=90.0):
+    """`pick` と `check` が読む `ca` を差し替え、`choose` に渡った引数を記録する。"""
+    calls = []
+
+    def choose(exclude=(), **kw):
+        calls.append({"exclude": set(exclude), **kw})
+        return choice
+
+    monkeypatch.setattr(relay_switch.ca, "switch_at", lambda: thr)
+    monkeypatch.setattr(relay_switch.ca, "choose", choose)
+    monkeypatch.setattr(relay_switch.ca, "usage", lambda name, before=None: usage)
+    monkeypatch.setattr(relay_switch.ca, "load_account", lambda name: acc)
+    return calls
+
+
+def _pk(cur, env=None, due=None):
+    r = _bare_relay(env or {})
+    r.account = cur
+    r.watch = None if due is None else type("W", (), {"due": due})()
+    return r
+
+
+METERED_DECL = {"NDF_SUPERVISE_CLAUDE_FALLBACK": "ANTHROPIC_API_KEY=k"}
+
+
+@pytest.mark.parametrize(
+    "kind, cur, env, name, want, exclude",
+    [
+        ("five_hour", "a", {}, "b", ("b", "five_hour"), {"a"}),
+        ("auth", "a", {}, "b", ("b", "auth"), set()),
+        ("five_hour", "metered", {}, "b", ("b", "recovered"), set()),
+        ("five_hour", None, {}, "b", ("b", "five_hour"), set()),
+        ("five_hour", "a", METERED_DECL, None, ("metered", "five_hour"), {"a"}),
+        ("five_hour", "a", {}, None, (None, "five_hour"), {"a"}),
+        ("five_hour", "metered", METERED_DECL, None, (None, "five_hour"), set()),
+    ],
+)
+def test_pick_after_limit_characterization(monkeypatch, kind, cur, env, name, want, exclude):
+    """現状固定: 上限の後（`kind` あり）の選び方と、`choose` へ渡す除外。"""
+    c = relay_switch.ca.Choice(name)
+    calls = _fake_ca(monkeypatch, choice=c)
+    assert _pk(cur, env).pick(kind) == (*want, c)
+    assert calls[0]["exclude"] == exclude
+
+
+@pytest.mark.parametrize(
+    "name, score, want",
+    [("b", 10.0, ("b", "recovered")), ("b", None, ("b", "recovered")), ("b", 95.0, ("metered", None)), (None, None, ("metered", None))],
+)
+def test_pick_on_metered_characterization(monkeypatch, name, score, want):
+    """現状固定: 従量の接続で区間を起動するとき、閾値未満（または不明）の候補があれば戻す。"""
+    c = relay_switch.ca.Choice(name, score=score)
+    _fake_ca(monkeypatch, choice=c)
+    assert _pk("metered").pick(None) == (*want, c)
+
+
+@pytest.mark.parametrize(
+    "cur, acc, score, due, name, env, want, keep_choice",
+    [
+        # 今が使えて閾値未満なら `choose` を呼ばずに替えない
+        ("a", _Acc(), 50.0, None, "b", {}, ("a", None), False),
+        ("a", _Acc(), None, None, "b", {}, ("a", None), False),
+        # 閾値を超えた・定期の確認が立てた
+        ("a", _Acc(), 95.0, None, "b", {}, ("b", "threshold"), True),
+        ("a", _Acc(), 50.0, 91.0, "b", {}, ("b", "threshold"), True),
+        # 使えない（登録が無い・再ログインが要る・上限にある）
+        ("a", None, 10.0, None, "b", {}, ("b", "unusable"), True),
+        ("a", _Acc(relogin=True), 10.0, None, "b", {}, ("b", "unusable"), True),
+        ("a", _Acc(limited=1.0), 10.0, None, "b", {}, ("b", "unusable"), True),
+        (None, None, None, None, "b", {}, ("b", "start"), True),
+        # 候補が無い
+        ("a", _Acc(), 95.0, None, None, METERED_DECL, ("a", None), True),
+        ("a", None, None, None, None, METERED_DECL, ("metered", "limited"), True),
+        (None, None, None, None, None, METERED_DECL, ("metered", "limited"), True),
+        ("a", None, None, None, None, {}, ("a", None), True),
+        (None, None, None, None, None, {}, (None, None), True),
+    ],
+)
+def test_pick_section_start_characterization(monkeypatch, cur, acc, score, due, name, env, want, keep_choice):
+    """現状固定: 区間の起動（`kind` が None）で今のアカウントを残すか替えるか。"""
+    c = relay_switch.ca.Choice(name, score=10.0)
+    calls = _fake_ca(monkeypatch, choice=c, usage=None if score is None else _Use(score), acc=acc)
+    assert _pk(cur, env, due).pick(None) == (*want, c if keep_choice else None)
+    if keep_choice:
+        assert calls[0]["exclude"] == ({cur} if cur else set())
+    else:
+        assert calls == []
+
+
+@pytest.mark.parametrize(
+    "left, c_left, c_score, want",
+    [(100.0, 100.0, 10.0, "a"), (100.0, 101.0, 99.0, "b"), (None, 500.0, 96.0, "a"), (None, 500.0, 94.0, "b"), (None, None, None, "b")],
+)
+def test_pick_no_better_characterization(monkeypatch, left, c_left, c_score, want):
+    """現状固定: 閾値を超えたとき、候補が今より良くなければ今を残す（残りの量 → 使用率の順で比べる）。"""
+    c = relay_switch.ca.Choice("b", score=c_score, remaining=c_left)
+    _fake_ca(monkeypatch, choice=c, usage=_Use(95.0), acc=_Acc(left=left))
+    assert _pk("a").pick(None) == ((want, "threshold", c) if want == "b" else ("a", None, c))
