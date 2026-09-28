@@ -695,6 +695,36 @@ def cmd_render(a):
     emit(result(TOOL, "ok", f"{decl.document} を書いた", [{"name": decl.document, "result": "written"}]))
 
 
+def _build_word_patterns(g):
+    """本文の廃止語・生きた語と、識別子の廃止形・生きた形の 4 本の正規表現。"""
+    dep_words = {w for t in terms_of(g) for w in deprecated_of(t) if len(w) >= 2} - live_words(g)
+    dep_re, live_re = word_pattern(dep_words), word_pattern(live_words(g))
+    live_forms = {f for t in terms_of(g) if code_of(t) for f in code_forms(code_of(t))}
+    dep_forms = {f for t in terms_of(g) for w in deprecated_code_of(t) for f in code_forms(w)} - live_forms
+    return dep_re, live_re, word_pattern(dep_forms), word_pattern(live_forms)
+
+
+def _collect_targets(a, root: Path, decl) -> list[tuple[str, str, set[int] | None]]:
+    """--file か --diff から、確かめる (相対パス, 本文, 見る行) の並び。"""
+    targets: list[tuple[str, str, set[int] | None]] = []
+    if a.file:
+        for f in a.file:
+            p = Path(f)
+            try:
+                text = p.read_text(encoding="utf-8")
+            except OSError as e:
+                raise unreadable(f"{f} を読めない: {e}")
+            targets.append((f, text, None))
+    else:
+        for rel, lines in sorted(added_lines(root, a.diff).items()):
+            if rel == decl.document or not (rel.endswith(CODE_SUFFIXES) or declared_path_matches(rel, decl.paths)):
+                continue
+            p = root / rel
+            if p.is_file():
+                targets.append((rel, p.read_text(encoding="utf-8", errors="replace"), lines))
+    return targets
+
+
 def cmd_check(a):
     root = Path(a.root)
     decl = load_declaration(root)
@@ -703,27 +733,8 @@ def cmd_check(a):
     g = load_glossary(decl)
     items = structure_findings(g, decl) + stale_findings(g, decl)
     if a.rules == "all" and (a.diff or a.file):
-        dep_words = {w for t in terms_of(g) for w in deprecated_of(t) if len(w) >= 2} - live_words(g)
-        dep_re, live_re = word_pattern(dep_words), word_pattern(live_words(g))
-        live_forms = {f for t in terms_of(g) if code_of(t) for f in code_forms(code_of(t))}
-        dep_forms = {f for t in terms_of(g) for w in deprecated_code_of(t) for f in code_forms(w)} - live_forms
-        dep_code_re, live_code_re = word_pattern(dep_forms), word_pattern(live_forms)
-        targets: list[tuple[str, str, set[int] | None]] = []
-        if a.file:
-            for f in a.file:
-                p = Path(f)
-                try:
-                    text = p.read_text(encoding="utf-8")
-                except OSError as e:
-                    raise unreadable(f"{f} を読めない: {e}")
-                targets.append((f, text, None))
-        else:
-            for rel, lines in sorted(added_lines(root, a.diff).items()):
-                if rel == decl.document or not (rel.endswith(CODE_SUFFIXES) or declared_path_matches(rel, decl.paths)):
-                    continue
-                p = root / rel
-                if p.is_file():
-                    targets.append((rel, p.read_text(encoding="utf-8", errors="replace"), lines))
+        dep_re, live_re, dep_code_re, live_code_re = _build_word_patterns(g)
+        targets = _collect_targets(a, root, decl)
         for rel, text, wanted in targets:
             if a.file and (root / decl.document).resolve() == Path(rel).resolve():
                 continue
