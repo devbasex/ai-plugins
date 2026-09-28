@@ -372,7 +372,7 @@ class ClaudeRunner:
         今のアカウントのトークンが得られなければ（期限切れ・再登録が要る）別のアカウントを選ぶ。"""
         if self.account == ca.METERED:
             c = ca.choose(keep=self.keep())
-            if c.recoverable(ca.switch_at()):
+            if c.name and (c.score is None or c.score < ca.switch_at()):
                 self.switch(c.name, "recovered")
             else:
                 return ca.env_for(ca.METERED, dict(os.environ))

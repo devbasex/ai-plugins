@@ -347,10 +347,6 @@ class Choice:
     score: float | None = None
     earliest: tuple[str, float] | None = None
 
-    def recoverable(self, threshold: float) -> bool:
-        """従量の接続から戻せるか。選べたアカウントがあり、使用率が読めないか閾値未満なら真。"""
-        return bool(self.name) and (self.score is None or self.score < threshold)
-
 
 def choose(exclude=(), before: float | None = REFRESH_BEFORE, keep=(), now: float | None = None) -> Choice:
     """上限に達していないアカウントのうち、使用率の大きい方が最も小さいものを選ぶ（前提 4・I7）。
