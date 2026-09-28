@@ -215,7 +215,7 @@ CoD は 3 列の和で、既定の尺度の最大 20 を超える（#1399 は 24
 
 根拠: Value 6（MVV 版 1）・利用者の決定
 
-## 決定 20: Skill の名前は `backlog-refinement` へ改名する（conductor の推奨。承認ゲート 1 で利用者が決める）
+## 決定 20: Skill の名前は `backlog-refinement` へ改名する（承認ゲート 1 で利用者が決定 2026-09-28）
 
 利用者の提案（2026-09-28）: 用語集のスプリントと整合させるため `issue-upkeep` を改名する。候補は `sprint-planning` と `backlog-refinement`。
 
