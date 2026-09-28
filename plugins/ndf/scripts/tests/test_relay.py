@@ -2800,7 +2800,7 @@ def test_prune_treats_zombie_as_dead(tmp_path):
 # ---------------------------------------------------------------- 登録済みのアカウントの切り替え（#1389）
 
 sys.path.insert(0, str(ROOT / "scripts" / "tests"))
-from account_fake import FakeAnthropic, accounts, window  # noqa: E402,F401
+from account_fake import FakeAnthropic, accounts, scoped_limit, window  # noqa: E402,F401
 
 
 def synthetic_row(text, quota=None):
@@ -3146,7 +3146,7 @@ def test_account_add_list_remove(tmp_path, accounts):
     p = account_cmd(tmp_path, accounts, "list", tty=False)
     assert p.returncode == 0, p.stderr
     lines = p.stdout.splitlines()
-    assert lines[0].split() == ["名前", "識別", "5", "時間", "7", "日", "支出上限", "状態"]
+    assert lines[0].split() == ["名前", "識別", "5", "時間", "7", "日", "モデル別の週", "支出上限", "枠の大きさ", "残り", "状態"]
     assert any(
         line.startswith("work1")
         and "a@example.com" in line
@@ -3308,3 +3308,63 @@ def test_start_env_failure_uses_metered_or_stops(accounts, monkeypatch):
     assert to == "metered" and env["ANTHROPIC_API_KEY"] == "k"
     with pytest.raises(relay_run.NoAccountEnv):
         _bare_relay({}).replace_unusable("a")
+
+
+# ---------------------------------------------------------------- 残りの量（#1453）
+
+
+def _picker(cur):
+    r = _bare_relay({})
+    r.account, r.watch = cur, None
+    return r
+
+
+@pytest.mark.parametrize(
+    "other, to",
+    [
+        (dict(tier="default_claude_max_5x", util5=50, util7=0), "b"),  # 26.25 > 16.8
+        (dict(tier="default_claude_max_5x", util5=80, util7=0), "a"),  # 10.5 <= 16.8
+        (dict(util5=50, util7=0), "b"),  # 残りの量が不明: 使用率 50 < 92
+        (dict(util5=91, util7=0), "b"),
+    ],
+)
+def test_pick_compares_remaining_over_threshold(accounts, other, to):
+    """AC8・I9: 今が使えて閾値を超えたとき、両方分かれば残りの量で、どちらかが不明なら使用率で比べる。"""
+    accounts.add("a", tier="default_claude_max_20x", util5=92, util7=0)  # 16.8
+    accounts.add("b", **other)
+    name, reason, _ = _picker("a").pick(None)
+    assert (name, reason) == (to, "threshold" if to == "b" else None)
+
+
+def test_pick_keeps_current_when_candidate_usage_is_higher(accounts):
+    accounts.add("a", util5=92, util7=0)
+    accounts.add("b", util5=95, util7=0)
+    assert _picker("a").pick(None)[0] == "a"
+
+
+def test_account_capacity_and_list(tmp_path, accounts):
+    """AC3・AC7・I8: 宣言は一覧の枠の大きさと残りの量に効き、`-` で外すと表へ戻る。トークンを出さない。"""
+    accounts.add("a", tier="default_claude_max_5x", util5=40, util7=50)
+    accounts.add("b", util5=10, util7=10, extra={"limits": [scoped_limit(58)]})
+    creds = (accounts.root / "a" / ".credentials.json").read_bytes()
+    p = account_cmd(tmp_path, accounts, "capacity", "a", "1000", "900", tty=False)
+    assert p.returncode == 0 and "枠の大きさ: a 5 時間 1,000 / 週 900" in p.stdout, p.stderr
+    rows = {r["name"]: r for r in json.loads(account_cmd(tmp_path, accounts, "list", "--json", tty=False).stdout)}
+    assert rows["a"]["capacity"] == {"five_hour": 1000.0, "seven_day": 900.0}
+    assert rows["a"]["capacity_declared"] == {"five_hour": 1000.0, "seven_day": 900.0}
+    assert rows["a"]["remaining"] == pytest.approx(450.0) and rows["a"]["tier"] == "default_claude_max_5x"
+    assert rows["b"]["capacity"] == {"five_hour": None, "seven_day": None} and rows["b"]["remaining"] is None
+    assert rows["b"]["scoped"][0]["model"] == "Fable" and rows["b"]["tier"] is None
+    table = account_cmd(tmp_path, accounts, "list", tty=False).stdout
+    line_a = next(x for x in table.splitlines() if x.startswith("a "))
+    line_b = next(x for x in table.splitlines() if x.startswith("b "))
+    assert "1,000* / 900*" in line_a and " 450 " in line_a
+    assert "Fable 58%" in line_b and "- / -" in line_b
+    assert account_cmd(tmp_path, accounts, "capacity", "a", "-", "-", tty=False).returncode == 0
+    rows = {r["name"]: r for r in json.loads(account_cmd(tmp_path, accounts, "list", "--json", tty=False).stdout)}
+    assert rows["a"]["capacity"] == {"five_hour": 52.5, "seven_day": 640.0} and rows["a"]["remaining"] == pytest.approx(31.5)
+    assert (accounts.root / "a" / ".credentials.json").read_bytes() == creds
+    assert "SECRET" not in table and "SECRET" not in json.dumps(rows)
+    assert account_cmd(tmp_path, accounts, "capacity", "a", "0", "-", tty=False).returncode == 2
+    assert account_cmd(tmp_path, accounts, "capacity", "a", "x", "-", tty=False).returncode == 2
+    assert account_cmd(tmp_path, accounts, "capacity", "zz", "1", "1", tty=False).returncode == 1

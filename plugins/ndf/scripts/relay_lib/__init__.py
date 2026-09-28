@@ -8,7 +8,7 @@
 | `stop` | 動いているラッパーすべてに停止の合図を置く |
 | `mark` | Stop hook の本体。最後の応答の `ndf-next` のブロックを合図 `next.json` へ写す |
 | `limit` | StopFailure hook の本体。子の応答が API の失敗（利用上限など）で終わったことを `limit.json` へ書く（#1389） |
-| `account add <名前>` / `account list [--json]` / `account remove <名前>` | 切り替えに使う claude アカウントを登録する・一覧する・外す（#1389。置き場は `lib/claude_accounts.py`） |
+| `account add <名前>` / `account list [--json]` / `account capacity <名前> <5 時間の枠> <週の枠>` / `account remove <名前>` | 切り替えに使う claude アカウントを登録する・一覧する・枠の大きさを宣言する（`-` で外す）・外す（#1389・#1453。置き場は `lib/claude_accounts.py`） |
 | `install` / `uninstall` / `status` | `/ndf:install-wrapper` の本体。複製（ランチャーとバージョンディレクトリ）とラッパーの rc を `${CLAUDE_CONFIG_DIR:-~/.claude}/ndf/` に置き、シェルの設定へ読み込みの 1 行を足す・外す・状態を示す（#928） |
 | `startup` | SessionStart hook の本体。在る複製を今の版で置き直し（版は後退させない）、10.17.4〜10.17.6 が自動で足した囲みを 1 度だけ知らせる。シェルの設定は書かない |
 | `question open` / `question close` | `AskUserQuestion` の `PreToolUse` / `PostToolUse` hook の本体。質問の表示中の合図を作る・消す（関門を越えない守り） |
@@ -46,7 +46,7 @@ def main(argv: list[str]) -> int:
 
     if not argv:
         print(
-            "usage: relay.py run|stop|mark|limit|install|uninstall|status|startup|question open|close|is-child|notice|account add|list|remove",
+            "usage: relay.py run|stop|mark|limit|install|uninstall|status|startup|question open|close|is-child|notice|account add|list|capacity|remove",
             file=sys.stderr,
         )
         return 2

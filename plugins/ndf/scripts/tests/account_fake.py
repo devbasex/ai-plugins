@@ -70,15 +70,26 @@ class FakeAnthropic:
         self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
 
-    def set_usage(self, token, five=None, seven=None, spend=False, status=200):
-        self.usage[token] = self.usage_reply(five, seven, spend, status)
+    def set_usage(self, token, five=None, seven=None, spend=False, status=200, extra=None):
+        self.usage[token] = self.usage_reply(five, seven, spend, status, extra)
 
     @staticmethod
-    def usage_reply(five=None, seven=None, spend=False, status=200):
-        return (status, {"five_hour": five, "seven_day": seven, "extra_usage": {"spend_limit_reached": spend}})
+    def usage_reply(five=None, seven=None, spend=False, status=200, extra=None):
+        """`extra` は応答へそのまま足すキー（`limits`・`spend` など。#1453）。"""
+        return (status, {"five_hour": five, "seven_day": seven, "extra_usage": {"spend_limit_reached": spend}, **(extra or {})})
 
     def close(self):
         self.server.shutdown()
+
+
+def scoped_limit(percent, model="Fable", resets_in=86400.0):
+    """応答の `limits[]` のモデル別の週の枠の 1 要素（#1453 の設計が読む `kind`・`percent`・`resets_at`・`scope.model`）。"""
+    return {
+        "kind": "weekly_scoped",
+        "percent": percent,
+        "resets_at": time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime(time.time() + resets_in)),
+        "scope": {"model": {"id": model.lower(), "display_name": model}},
+    }
 
 
 class Store:
@@ -100,10 +111,14 @@ class Store:
         refresh_in=None,
         org_id=None,
         org_name=None,
+        tier=None,
+        capacity=None,
+        extra=None,
     ):
         """アカウントを置き場へ直に置き、偽物に残量を持たせる。`util5` が None なら残量を返さない（503）。
 
-        `org_id` が None なら組織を書かない（組織を記録する前の account.json の形）。
+        `org_id` が None なら組織を書かない（組織を記録する前の account.json の形）。`tier` は `rateLimitTier`、
+        `capacity` は枠の大きさの宣言、`extra` は使用量の応答へ足すキー（#1453）。
         """
         token = token or f"{name}-access-SECRET"
         d = self.root / name
@@ -115,6 +130,8 @@ class Store:
             "scopes": scopes if scopes is not None else ["user:inference", "user:profile"],
             "subscriptionType": "max",
         }
+        if tier is not None:
+            oauth["rateLimitTier"] = tier
         if refresh_in is not None:
             oauth["refreshTokenExpiresAt"] = int((time.time() + refresh_in) * 1000)
         self.write(d / ".credentials.json", {"claudeAiOauth": oauth})
@@ -127,9 +144,11 @@ class Store:
         }
         if org_id is not None:
             row.update(org_id=org_id, org_name=org_name or "")
+        if capacity is not None:
+            row["capacity"] = capacity
         self.write(d / "account.json", row)
         if util5 is not None:
-            self.fake.set_usage(token, window(util5, 3600), window(util7, 86400), spend)
+            self.fake.set_usage(token, window(util5, 3600), window(util7, 86400), spend, extra=extra)
         else:
             self.fake.usage[token] = (503, {"error": "unavailable"})
         return token
