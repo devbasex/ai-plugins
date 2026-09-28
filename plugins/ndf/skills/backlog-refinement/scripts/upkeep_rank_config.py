@@ -228,33 +228,48 @@ class Estimate:
         return d
 
 
-def validate_estimate(raw: dict, cfg: Config, check_band: bool = True):
-    """見積の入力を検証する。(Estimate, None) か (None, 理由) を返す（I1・I10）。"""
-    if not isinstance(raw, dict) or not isinstance(raw.get("number"), int):
-        return None, "number が無い"
+def _read_columns(raw: dict, cfg: Config):
+    """列ごとの段階と根拠を読む。(steps, why, None) か (None, None, 理由) を返す。"""
     steps, why = {}, {}
     for c in COLUMNS:
         col = raw.get(c)
         if not isinstance(col, dict) or "step" not in col:
-            return None, f"{COLUMN_NAMES[c]} の段階が無い"
+            return None, None, f"{COLUMN_NAMES[c]} の段階が無い"
         if col["step"] not in cfg.scale or isinstance(col["step"], bool):
-            return None, f"{COLUMN_NAMES[c]} の段階 {col['step']!r} は尺度に無い"
+            return None, None, f"{COLUMN_NAMES[c]} の段階 {col['step']!r} は尺度に無い"
         if not isinstance(col.get("why"), str) or not col["why"].strip():
-            return None, f"{COLUMN_NAMES[c]} の根拠の 1 行が空"
+            return None, None, f"{COLUMN_NAMES[c]} の根拠の 1 行が空"
         steps[c], why[c] = col["step"], col["why"].strip()
+    return steps, why, None
+
+
+def _check_ubv_band(ubv, impact, mitigation, cfg: Config) -> str | None:
+    """UBV が区分の帯に入るかを見る。外れていれば理由を返す。"""
+    if impact not in cfg.harm_guide:
+        return f"UBV の区分 {impact!r} は実害の目安に無い（{' / '.join(cfg.harm_guide)}）"
+    lo, hi = cfg.harm_guide[impact]
+    lower = cfg.lower_band(impact) if mitigation == "防いでいる" else None
+    if not (lo <= ubv <= hi or (lower and lower[0] <= ubv <= lower[1] and ubv < lo)):
+        extra = "（退避策が防いでいるときだけ 1 つ下の区分の帯も受け付ける）" if ubv < lo else ""
+        return f"UBV {ubv} は区分「{impact}」の帯 {lo}〜{hi} の外{extra}"
+    return None
+
+
+def validate_estimate(raw: dict, cfg: Config, check_band: bool = True):
+    """見積の入力を検証する。(Estimate, None) か (None, 理由) を返す（I1・I10）。"""
+    if not isinstance(raw, dict) or not isinstance(raw.get("number"), int):
+        return None, "number が無い"
+    steps, why, err = _read_columns(raw, cfg)
+    if err:
+        return None, err
     mitigation = raw.get("mitigation", "無い")
     if mitigation not in MITIGATIONS:
         return None, f"退避策の状態 {mitigation!r} は {' / '.join(MITIGATIONS)} のどれでもない"
     impact = raw["ubv"].get("impact")
     if check_band:
-        if impact not in cfg.harm_guide:
-            return None, f"UBV の区分 {impact!r} は実害の目安に無い（{' / '.join(cfg.harm_guide)}）"
-        lo, hi = cfg.harm_guide[impact]
-        ubv = steps["ubv"]
-        lower = cfg.lower_band(impact) if mitigation == "防いでいる" else None
-        if not (lo <= ubv <= hi or (lower and lower[0] <= ubv <= lower[1] and ubv < lo)):
-            extra = "（退避策が防いでいるときだけ 1 つ下の区分の帯も受け付ける）" if ubv < lo else ""
-            return None, f"UBV {ubv} は区分「{impact}」の帯 {lo}〜{hi} の外{extra}"
+        err = _check_ubv_band(steps["ubv"], impact, mitigation, cfg)
+        if err:
+            return None, err
     for key in ("observed_harm", "waiting_decision"):
         if key in raw and not isinstance(raw[key], bool):
             return None, f"{key} は true / false で書く"
