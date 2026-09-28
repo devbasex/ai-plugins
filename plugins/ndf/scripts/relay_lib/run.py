@@ -172,6 +172,24 @@ class Relay(AccountSwitch):
             self.halt("error", f"ラッパーの中で例外が起きた（{type(e).__name__}）")
             return None
 
+    def _may_start(self, written: float) -> bool:
+        """次の区間の起動の許可を取る。取れない・起動の上限で断られたら偽（断られたら止める）。"""
+        if not self.limit.take():
+            return False
+        refusal = self.limit.refusal(written, self.started_at)
+        if refusal:
+            self.limit.release()
+            self.halt(*refusal)
+            return False
+        return True
+
+    def _stop_requested(self) -> bool:
+        """停止の合図があれば止めて真。"""
+        if os.path.exists(self.path(STOP_FILE)):
+            self.halt("stop-file", "停止の合図がある")
+            return True
+        return False
+
     def _tick(self):
         m = self.read_mark()
         if m is None:
@@ -192,15 +210,7 @@ class Relay(AccountSwitch):
             return None
         if not unmet and cl.replied_after(tp, written):
             return None
-        if os.path.exists(self.path(STOP_FILE)):
-            self.halt("stop-file", "停止の合図がある")
-            return None
-        if not self.limit.take():
-            return None
-        refusal = self.limit.refusal(written, self.started_at)
-        if refusal:
-            self.limit.release()
-            self.halt(*refusal)
+        if self._stop_requested() or not self._may_start(written):
             return None
         m["_snap"] = snap
         m["_unmet"] = unmet

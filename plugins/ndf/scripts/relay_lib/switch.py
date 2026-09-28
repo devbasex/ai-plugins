@@ -16,7 +16,7 @@ import threading
 import time
 
 from . import claude as cl
-from .common import LIMIT_FILE, QUESTION_FILE, STOP_FILE, load_json, parse_iso, remove, stamp
+from .common import LIMIT_FILE, QUESTION_FILE, load_json, parse_iso, remove, stamp
 from .mark import asked_after
 
 import claude_accounts as ca  # noqa: E402,I001  common が lib/ を sys.path に置く
@@ -249,12 +249,7 @@ class AccountSwitch:
             self.term.screen("ndf-relay: " + self.all_limited(choice) + "。子はこのまま残す")
             self.drop_limit(lim)
             return None
-        if not self.limit.take():
-            return None
-        refusal = self.limit.refusal(written, self.started_at)
-        if refusal:
-            self.limit.release()
-            self.halt(*refusal)
+        if not self._may_start(written):
             return None
         return {**lim, "_kind": "limit", "_snap": snap, "_plan": (to, reason, choice)}
 
@@ -275,10 +270,7 @@ class AccountSwitch:
         if cl.after_mark(tp, written)[1]:
             self.drop_limit(lim)  # シグナルファイルの後に利用者が入力した
             return True
-        if os.path.exists(self.path(STOP_FILE)):
-            self.halt("stop-file", "停止の合図がある")
-            return True
-        return False
+        return self._stop_requested()
 
     def _limit_asked(self) -> bool:
         """上限のシグナルファイルの後に質問が出ているか（質問ファイルがあるか、シグナルファイルより後に尋ねた）。"""
