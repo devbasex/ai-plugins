@@ -75,8 +75,8 @@ supervise.py new mission --pace normal --state <状態> --design 1400 --issue 14
 
 | 用語 | 意味 | 用語集への反映 |
 | --- | --- | --- |
-| 助言の MVV 判定 | 承認ゲートの記録を書かずに、判定・理由・根拠の項目を承認資料へ載せるだけの MVV 判定（`mvv-gate.py check --advise`）。`normal` の承認ゲートの前に走り、承認するのは人である | 追加（`ndf-workflow`） |
-| MVV 判定 | 承認ゲートの材料が MVV に従うかの判定。`auto` / `fast` では「従う」で承認ゲートを通し、`normal` では助言の MVV 判定として承認資料へ載せる | 意味の変更（`ndf-workflow`） |
+| 助言の MVV 判定 | 承認ゲートの記録（`by: mvv`）は書かないが、`mvv-gate.jsonl` へ判定の行（`pace` 付き）を書き、判定・理由・根拠の項目を承認資料へ載せる MVV 判定（`mvv-gate.py check --advise`）。`normal` の承認ゲートの前に走り、承認するのは人である | 追加（`ndf-workflow`） |
+| MVV 判定 | 承認ゲートの材料が MVV に従うかの判定。`auto` / `fast` では「従う」かつレッドラインが無いときだけ承認ゲートを通し、`normal` では助言の MVV 判定として承認資料へ載せる | 意味の変更（`ndf-workflow`） |
 | 根拠の項目 | 既存の語。設計の決定の記録にも書く | 変えない |
 | 覆し | 既存の語。`normal` の承認ゲートでも数える | 変えない |
 

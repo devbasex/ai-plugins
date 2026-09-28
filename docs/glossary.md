@@ -147,7 +147,7 @@ NDF が提供する工程・承認ゲート・モード・ステップの語。d
 | resume | `resume` | new mission のマニフェストで then_of のステージが持つ、そのステージから最後までを流す queue のコマンド。承認ゲートで止まった後に続きを流す | — | — | `plugins/ndf/skills/development-workflow/references/pace.md` |
 | MVV | — | Mission / Vision / Value。プロジェクト MVV とミッション MVV の 2 層があり、下位は上位の範囲で具体化する | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | MVV 判定 | — | 承認ゲートのエビデンスが NDF の共通原則・プロジェクト MVV・ミッション MVV に従うかの判定。auto と fast では「従う」でレッドラインが無いときだけ承認ゲートを省き、記録を残す。normal では助言の MVV 判定として承認資料に載せ、承認は人が行う | — | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
-| 助言の MVV 判定 | — | 承認ゲートの記録を書かずに、判定・理由・根拠の項目を承認資料へ載せるだけの MVV 判定（mvv-gate.py check --advise）。normal の承認ゲートの前に走り、承認するのは人である | — | — | — |
+| 助言の MVV 判定 | — | 承認ゲートの記録（by: mvv）は書かないが、mvv-gate.jsonl へ判定の行（pace 付き）を書き、判定・理由・根拠の項目を承認資料へ載せる MVV 判定（mvv-gate.py check --advise）。normal の承認ゲートの前に走り、承認するのは人である | — | — | — |
 | 上位の原則 | — | 「人を守り、人の発展を支える」。NDF の共通原則の最上位の 1 文 | — | — | — |
 | プロジェクト MVV | — | プロジェクト全体の Mission / Vision / Value と固有の必ず承認が要る操作（`P<番号>`）。`.ndf/` に宣言し、利用者が承認する。判断の基準の上位 | — | — | — |
 | ミッション MVV | — | ミッション単位の MVV（既存の `mvv.md`）。プロジェクト MVV の範囲での具体化 | — | — | — |

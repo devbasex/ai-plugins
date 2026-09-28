@@ -1789,7 +1789,7 @@
     {
       "term": "助言の MVV 判定",
       "context": "ndf-workflow",
-      "meaning": "承認ゲートの記録を書かずに、判定・理由・根拠の項目を承認資料へ載せるだけの MVV 判定（mvv-gate.py check --advise）。normal の承認ゲートの前に走り、承認するのは人である",
+      "meaning": "承認ゲートの記録（by: mvv）は書かないが、mvv-gate.jsonl へ判定の行（pace 付き）を書き、判定・理由・根拠の項目を承認資料へ載せる MVV 判定（mvv-gate.py check --advise）。normal の承認ゲートの前に走り、承認するのは人である",
       "pending_source": "issues/issue-1400-design.md"
     },
     {
