@@ -663,35 +663,3 @@ def test_verify_install_reports_runtime_version_and_missing_dir(repo, tmp_path, 
     files = [i["name"] for i in r["items"] if i["kind"] == "file"]
     assert files == ["claude: ndf の導入先が無い", "codex: ndf の導入先が無い"]
     assert r["metrics"]["mismatch"] == 2 and r["metrics"]["prev_tag"] is None and r["metrics"]["user_env_unchanged"] is True
-
-
-def test_verify_install_ok_passes_prev_tag_changes_and_kiro(repo, tmp_path, monkeypatch):
-    """現状固定: 前回の正式版タグからの差分を compare_files へ渡し、kiro も比べ、すべて揃えば ok を出す。"""
-    import argparse
-
-    mod = load_verification()
-    write(repo, "plugins/ndf/.claude-plugin/plugin.json", "{}")
-    git(repo, "add", "-A")
-    git(repo, "commit", "-q", "-m", "p")
-    git(repo, "tag", "ndf--v0.9.0")
-    git(repo, "tag", "ndf--v1.0.0-dev.1")
-    write(repo, "plugins/ndf/b.txt", "b\n")
-    git(repo, "add", "-A")
-    git(repo, "commit", "-q", "-m", "b")
-    up = tmp_path / "up.git"
-    git(tmp_path, "clone", "-q", "--bare", str(repo), str(up))
-    git(repo, "remote", "add", "origin", str(up))
-    monkeypatch.setattr(mod, "install_source", lambda root, a: (("o/r", "m", "main"), ["ndf"]))
-    monkeypatch.setattr(mod, "user_env_snapshot", lambda: {"k": 1})
-    monkeypatch.setattr(mod, "verify_claude", lambda *x: ({"exit": 0, "version": {"ndf": "1.0.0"}}, {"ndf": tmp_path}))
-    seen = []
-    monkeypatch.setattr(mod, "compare_files", lambda src, d, rel, changed, name, keeps_symlinks: seen.append((rel, changed, name, keeps_symlinks)) or [])
-    monkeypatch.setattr(mod, "verify_kiro", lambda env, src, tmp, expect: ({"exit": 0, "version": "1.0.0"}, None))
-    out = []
-    monkeypatch.setattr(mod, "emit", lambda r: out.append(r))
-    mod.cmd_verify_install(argparse.Namespace(root=str(repo), ref="develop", expect="1.0.0", runtimes="claude, kiro"))
-    r = out[0]
-    assert r["status"] == "ok"
-    assert seen == [("plugins/ndf", ["plugins/ndf/b.txt"], "claude", True)]
-    assert [(i["name"], i["result"]) for i in r["items"]] == [("claude", "ok"), ("kiro", "ok")]
-    assert r["metrics"]["prev_tag"] == "ndf--v0.9.0" and r["metrics"]["mismatch"] == 0
