@@ -186,59 +186,54 @@ def _still_present(root, term: str) -> bool:
     return git(root, "grep", "-q", "-F", "-e", term, "HEAD", check=False).returncode == 0
 
 
-class _Routes:
-    """open の課題ごとに、拾った経路と手がかりの語を集める。"""
+def cmd_candidates(a):
+    root = git_root(a.root)
+    repo = _repo(root, a.repo)
+    gh = Gh(repo)
+    since = _ref_date(root, a.since_ref)
+    open_issues = _issues(gh, "state=open")
+    by_num = {i["number"]: i for i in open_issues}
+    routes: dict[int, set] = {}
+    terms: dict[int, set] = {}
+    notes = []
 
-    def __init__(self, open_issues):
-        self.by_num = {i["number"]: i for i in open_issues}
-        self.routes: dict[int, set] = {}
-        self.terms: dict[int, set] = {}
-
-    def add(self, n, route, term=None):
-        if n in self.by_num:
-            self.routes.setdefault(n, set()).add(route)
+    def hit(n, route, term=None):
+        if n in by_num:
+            routes.setdefault(n, set()).add(route)
             if term:
-                self.terms.setdefault(n, set()).add(term)
+                terms.setdefault(n, set()).add(term)
 
-
-def _route_diff(open_issues, root, since_ref, routes):
-    paths, idents = diff_terms(root, since_ref)
+    paths, idents = diff_terms(root, a.since_ref)
     needles = _path_needles(root, paths)
     gone: dict[str, bool] = {}
     for i in open_issues:
         text = f"{i.get('title') or ''}\n{i.get('body') or ''}"
         for needle in needles:
             if _mentions_path(text, needle):
-                routes.add(i["number"], "diff-path", needle)
+                hit(i["number"], "diff-path", needle)
         for t in idents:
             if _mentions(text, t):
                 if t not in gone:
                     gone[t] = not _still_present(root, t)
                 if gone[t]:
-                    routes.add(i["number"], "diff-identifier", t)
-    return paths, idents
+                    hit(i["number"], "diff-identifier", t)
 
-
-def _route_milestones(gh, repo, open_issues, since, routes, notes):
     milestones = gh.call([f"repos/{repo}/milestones?state=all&per_page=100"], paginate=True) or []
     closed = [c for c in _issues(gh, f"state=closed&since={since}") if (c.get("closed_at") or "") >= since]
     empty_milestones = []
     if milestones:
         for i in open_issues:
             if not i.get("milestone"):
-                routes.add(i["number"], "no-milestone")
+                hit(i["number"], "no-milestone")
         touched = {c["milestone"]["title"] for c in closed if c.get("milestone")}
         for i in open_issues:
             if i.get("milestone") and i["milestone"]["title"] in touched:
-                routes.add(i["number"], "closed-milestone", i["milestone"]["title"])
+                hit(i["number"], "closed-milestone", i["milestone"]["title"])
         open_titles = {i["milestone"]["title"] for i in open_issues if i.get("milestone")}
         empty_milestones = sorted(t for t in touched if t not in open_titles)
     else:
         notes.append("マイルストーンが無いため no-milestone と closed-milestone を飛ばした")
-    return closed, empty_milestones
 
-
-def _route_sub_issues(gh, repo, closed, open_issues, routes, notes):
     closed_nums = {c["number"] for c in closed}
     sub_api = True
     for c in closed:
@@ -254,40 +249,33 @@ def _route_sub_issues(gh, repo, closed, open_issues, routes, notes):
             raise
         for k in kids:
             if k.get("state") == "open":
-                routes.add(k["number"], "sub-issue", f"#{c['number']}")
+                hit(k["number"], "sub-issue", f"#{c['number']}")
     for i in open_issues:
         for m in re.finditer(r"親[^\n#]{0,20}#(\d+)\b", i.get("body") or ""):
             if int(m.group(1)) in closed_nums:
-                routes.add(i["number"], "sub-issue", f"#{m.group(1)}")
+                hit(i["number"], "sub-issue", f"#{m.group(1)}")
 
-
-def _route_commits(root, since_ref, routes):
-    for line in git(root, "log", "--no-merges", "--format=%s", f"{since_ref}..HEAD").stdout.splitlines():
+    for line in git(root, "log", "--no-merges", "--format=%s", f"{a.since_ref}..HEAD").stdout.splitlines():
         for m in re.finditer(r"#(\d+)\b", line):
-            routes.add(int(m.group(1)), "commit-subject", line)
+            hit(int(m.group(1)), "commit-subject", line)
 
-
-def _route_manual(a, routes, notes):
     if a.all:
-        for n in routes.by_num:
-            routes.add(n, "all")
+        for n in by_num:
+            hit(n, "all")
     for n in a.add:
-        if n not in routes.by_num:
+        if n not in by_num:
             notes.append(f"--add の #{n} は open でないため除いた")
-        routes.add(n, "manual")
+        hit(n, "manual")
 
-
-def _candidate_result(a, repo, since, open_issues, closed, paths, idents, routes, empty_milestones, notes, waits):
-    found = routes.routes
     # コミットの件名が指す課題は直っている見込みが高いため、上限で切るときも先に残す
-    order = sorted(found, key=lambda n: ("commit-subject" not in found[n], -len(found[n]), n))
+    order = sorted(routes, key=lambda n: ("commit-subject" not in routes[n], -len(routes[n]), n))
     keep = order if a.limit is None else order[: a.limit]
     deferred = [n for n in order if n not in set(keep)]
     items = []
     # 上限を超えた候補は items に載せない（metrics.deferred にだけ並べる）。載せると
     # 区分を決める対象として求められ、上限が効かない。
     for n in keep:
-        i = routes.by_num[n]
+        i = by_num[n]
         items.append(
             {
                 "kind": "issue",
@@ -295,15 +283,15 @@ def _candidate_result(a, repo, since, open_issues, closed, paths, idents, routes
                 "result": "candidate",
                 "number": n,
                 "title": i.get("title") or "",
-                "routes": sorted(found[n], key=ROUTES.index),
-                "terms": sorted(routes.terms.get(n, ())),
+                "routes": sorted(routes[n], key=ROUTES.index),
+                "terms": sorted(terms.get(n, ())),
                 "updated_at": i.get("updated_at"),
                 "digest": snapshot_digest(i),
             }
         )
     for t in empty_milestones:
         items.append({"kind": "milestone", "name": t, "result": "no-open-issue"})
-    by_route = {r: sum(1 for n in keep if r in found[n]) for r in ROUTES}
+    by_route = {r: sum(1 for n in keep if r in routes[n]) for r in ROUTES}
     metrics = {
         "since_ref": a.since_ref,
         "since": since,
@@ -316,7 +304,7 @@ def _candidate_result(a, repo, since, open_issues, closed, paths, idents, routes
         "paths": len(paths),
         "identifiers": len(idents),
         "notes": notes,
-        "waits": waits,
+        "waits": gh.waits,
     }
     summary = (
         f"候補 {len(keep)} 件（open {len(open_issues)} 件中）: "
@@ -333,25 +321,6 @@ def _candidate_result(a, repo, since, open_issues, closed, paths, idents, routes
             f"上限 {a.limit} 件を超えた {len(deferred)} 件（deferred）は、次の回に --add で渡すか --limit を上げる" if deferred else None
         ),
     )
-    return out, deferred
-
-
-def cmd_candidates(a):
-    root = git_root(a.root)
-    repo = _repo(root, a.repo)
-    gh = Gh(repo)
-    since = _ref_date(root, a.since_ref)
-    open_issues = _issues(gh, "state=open")
-    routes = _Routes(open_issues)
-    notes = []
-
-    paths, idents = _route_diff(open_issues, root, a.since_ref, routes)
-    closed, empty_milestones = _route_milestones(gh, repo, open_issues, since, routes, notes)
-    _route_sub_issues(gh, repo, closed, open_issues, routes, notes)
-    _route_commits(root, a.since_ref, routes)
-    _route_manual(a, routes, notes)
-
-    out, deferred = _candidate_result(a, repo, since, open_issues, closed, paths, idents, routes, empty_milestones, notes, gh.waits)
     sd = _state_dir(a.state_dir, repo)
     (sd / "apply.json").unlink(missing_ok=True)  # 前の回の apply を今回の報告へ混ぜない
     jsonio.write_atomic(sd / "candidates.json", out, indent=1)
