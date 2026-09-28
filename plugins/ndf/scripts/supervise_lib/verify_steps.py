@@ -11,7 +11,7 @@ import math
 import shlex
 
 import test_strategy as ts
-from supervise_lib.paths import MERGE_CMD, MERGE_PROBE, TEST_RUN_PY
+from supervise_lib.paths import MERGE_CMD, MERGE_PROBE, MISSION_STATE_PY, TEST_RUN_PY
 
 # ステップの `timeout` に足す余裕（上限の 1 割。下限は監視の 1 周期の 2 倍）
 MARGIN_SHARE = 0.1
@@ -84,6 +84,18 @@ def merge_step(a, **extra) -> dict:
         "probe": MERGE_PROBE,
         **extra,
     }
+
+
+def handoff_step(state: str, gate: str, what: str) -> dict:
+    """MVV 判定で通した後のステップ（ラベル・マージ・判定のコメント）が落ちたときに承認ゲートへ落とすステップ（#1370 の I8）。
+    `mvv` のステップが書いた `by: mvv` の記録を外し、理由を 1 行出して終了コード 10（承認ゲート）を返す。外せなくても 10 を返す。"""
+    st, g = shlex.quote(state), shlex.quote(gate)
+    why = shlex.quote(f"{what}が失敗した。{gate} は自動で通さず、利用者の承認を求める")
+    cmd = (
+        f'sh -c \'{MISSION_STATE_PY} gate "$1" "$2" --withdraw >/dev/null || echo "$2 の MVV 判定の記録を外せなかった"; '
+        f'echo "$3"; exit 10\' handoff {st} {g} {why}'
+    )
+    return {"id": "handoff", "type": "run", "timeout": 120, "cmd": cmd, "gate_next": "end", "next": "end"}
 
 
 def test_meta(plan: dict, a) -> dict:

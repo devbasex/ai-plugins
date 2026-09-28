@@ -138,7 +138,7 @@ conductor では、コンテキスト量の hook が工程へ入る起動を 1 �
 
 1. プランを作った後に 1 度: `mission-state.py init ~/.local/state/ndf/sv/r7/mission.json --name <ミッション> --milestone 26 --plan 実装=<plan.json> ... --plan 開発版=<plan.json> --plan 本番=<plan.json> --done <queue の done> --dev <開発版> --prod <本番> --goal @<雛形>`（雛形は次のセッションの `/goal` の文面。`{heading}`・`{dev}`・`{prod}`・`{milestone}`・`{name}`・`{issues}` を差し込む）
 2. 承認ゲートで承認を得たら: `mission-state.py gate <mission.json> "関門 2" --what "本番 <版>"`
-   - `pace: fast` のミッションは、1 に `--pace fast --milestone <M>`（MVV のコピー元。`--mvv <ファイル>` でもよい）を足し、利用者が
+   - `pace: fast` と `pace: auto` のミッションは、1 に `--pace <値> --milestone <M>`（MVV のコピー元。`--mvv <ファイル>` でもよい）を足し、利用者が
      `mvv.md` を承認した後に `mission-state.py gate <mission.json> MVV --what <要約>` を打つ。ゲート 1・2 の記録は、MVV 判定が
      通したときは `mvv-gate.py` が `--by mvv --verdict --reasons --log` 付きで書く（`status` の行は「MVV 判定」）
 3. カットポイントでは次の順に呼ぶ:

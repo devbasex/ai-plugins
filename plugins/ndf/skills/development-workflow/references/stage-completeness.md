@@ -137,7 +137,7 @@ bash "$SCRIPTS/../skills/development-workflow/scripts/stage-check.sh" report <�
 
 | 呼び方 | 出力 | 終了コード |
 | --- | --- | --- |
-| `record <課題番号> <stage\|mode\|pace> <値>` | 無し。排他を取れなかったときだけ標準エラーへ 1 行。`pace` は `normal` / `fast` | 0 |
+| `record <課題番号> <stage\|mode\|pace> <値>` | 無し。排他を取れなかったときだけ標準エラーへ 1 行。`pace` は `normal` / `fast` / `auto` | 0 |
 | `report <課題番号>`（記録が無い） | 記録が無い旨の 1 行 | 0 |
 | `report <課題番号>`（欠落が無い） | 通過工程の一覧 | 0 |
 | `report <課題番号>`（欠落がある） | 通過工程の一覧と、記録の無い必須の工程 | 0 |
@@ -166,6 +166,8 @@ bash "$SCRIPTS/../skills/development-workflow/scripts/stage-check.sh" report <�
   [SKILL.md](../SKILL.md) の「モードごとに起動する Skill」の表から機械で導ける
 
 ### 進め方 `fast` の報告
+
+`pace` が `auto` の課題は `normal` と同じく全工程の記録を求める（見出しに `進め方 auto` と出るだけ）。
 
 通過記録に `pace` が `fast` と記録された課題では、トリガーで通す工程（`構造改善` / `実装レビュー`）を `トリガー:`、
 ミッションの終わりにまとめる工程（確定仕様化 / 振り返り）を `まとめる:` の行へ出し、`記録なし:` と記録を促す

@@ -166,7 +166,7 @@ conductor が起きるのは、承認ゲート・`attention`・キューの終�
 
 - ステージの番号とプランのファイル名は `new mission` の出力（`mission.json` の `ステージ`）が正である。書き出した `command` に `--done` を足して打つ
 - 確定仕様化と振り返りは `normal` のプランが持たないため、supervisor で回す（[agent-layers.md](agent-layers.md) の表の取り込み・仕上げの行）
-- 本番の後に続けるコマンドは [relay.md](relay.md)、`pace: fast` の並びは [pace.md](pace.md) にある
+- 本番の後に続けるコマンドは [relay.md](relay.md)、`pace: fast` と `pace: auto` の並びは [pace.md](pace.md) にある
 
 **サブエージェントは、背景の処理を残したまま応答を終えない。** 完了通知で再開はされるが、
 **親には応答を終えた時点で 1 度「終わった」と通知が届き、途中の文面が結果として渡る**

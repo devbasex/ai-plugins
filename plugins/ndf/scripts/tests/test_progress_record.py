@@ -206,6 +206,14 @@ def test_pace_fast_is_written_after_the_mode_and_kept(fake_gh):
     assert "モード: standard / 進め方: fast / 作業ツリー: `.worktrees/x`" in fake_gh.written.read_text(encoding="utf-8")
 
 
+def test_pace_auto_is_written_in_the_heading_line(fake_gh):
+    """#1370: auto も normal でないので見出し行へ書く。"""
+    fake_gh.body.write_text("## 進行\n\nモード: standard\n\n- [ ] 設計\n", encoding="utf-8")
+    out = run(fake_gh, "123", "設計", "--pace", "auto")
+    assert out.returncode == 0, out.stderr
+    assert "モード: standard / 進め方: auto" in fake_gh.written.read_text(encoding="utf-8")
+
+
 def test_pace_normal_is_not_written_and_an_unknown_pace_is_rejected(fake_gh):
     fake_gh.body.write_text("## 進行\n\nモード: standard\n\n- [ ] 設計\n", encoding="utf-8")
     run(fake_gh, "123", "設計", "--pace", "normal")

@@ -9,8 +9,10 @@ from pathlib import Path
 from supervise_lib.decl import WORKTREE_DECL, DeclError, with_decls
 from supervise_lib.paths import HERE, MERGED_PY, MVV_PY, STEPS_PY, VERIFY_PY
 from supervise_lib.plan import QUEUE_PRS
+from supervise_lib.verify_steps import handoff_step
 
 
+MVV_NOTE = "{state_dir}/work/mvv-note.md"  # mvv-gate.py が従うときに書く判定の記録（PR のコメント）
 RULE_RELEASE_DEV = (
     "run のステップが落ちたら、出力を読んで直せるもの（版数の書き漏れ・文書の形）は fix。外部の待ち（CI・ネットワーク）"
     "の揺れなら同じステップをもう一度（retry）。認証や権限の不足・タグの重複は stop。"
@@ -199,20 +201,32 @@ def plan_release_package_plugin(a) -> dict:
     ]
     if mvv and not dev:
         # 関門 2 を MVV で判定する。関門（10）なら報告は 結果: 関門 で止まり、conductor が承認を取ってから
-        # run <計画> --from bump で続ける
+        # run <計画> --from bump で続ける。従えば判定の記録を --pr の PR のすべてへコメントしてから bump へ進み、
+        # コメントが落ちたら handoff が関門 2 の by: mvv の記録を外して関門で終える（#1370 の I8）
         material = f"{repo}/{approval}" if repo else approval
-        steps.insert(
-            0,
+        state = str(Path(mvv).resolve())
+        steps[0:0] = [
             {
                 "id": "mvv",
                 "type": "run",
                 "timeout": 900,
-                "cmd": f"{MVV_PY} check --mission {shlex.quote(str(Path(mvv).resolve()))} --gate release "
-                f"--material {shlex.quote(material)} --pr {prs} --mode {a.mode}" + (f" --root {shlex.quote(repo)}" if repo else ""),
-                "next": "bump",
+                "cmd": f"{MVV_PY} check --mission {shlex.quote(state)} --gate release "
+                f"--material {shlex.quote(material)} --pr {prs} --mode {a.mode}"
+                + (f" --root {shlex.quote(repo)}" if repo else "")
+                + f" --note {MVV_NOTE}",
+                "next": "note",
                 "gate_next": "end",
             },
-        )
+            {
+                "id": "note",
+                "type": "run",
+                "timeout": 300,
+                "cmd": f"sh -c 'for p in {prs}; do gh pr comment \"$p\" --body-file {MVV_NOTE} || exit 1; done'",
+                "on_fail": "handoff",
+                "next": "bump",
+            },
+        ]
+        steps.append(handoff_step(state, "関門 2", "判定のコメント"))
     rule = RULE_RELEASE_DEV if dev else RULE_RELEASE_PROD_MVV if mvv else RULE_RELEASE_PROD
     plan = {
         "フェーズ": f"配布（{'開発版' if dev else '本番'}）",
