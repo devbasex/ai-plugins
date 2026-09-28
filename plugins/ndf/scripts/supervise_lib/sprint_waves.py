@@ -10,7 +10,6 @@ import sys
 from pathlib import Path
 
 import legacy_names
-from pr_mode import SPRINT_PREFIX
 
 from supervise_lib.decl import decl_fields
 from supervise_lib.paths import GLOSSARY_PY, MVV_PY, PUSH_DESIGN, SELF, SPEC_COPY_PY, WORKTREE_SETUP
@@ -28,9 +27,8 @@ RULE_DESIGN = (
 
 @functools.cache
 def _branch_of(repo: str, name: str) -> str:
-    prefixes = legacy_names.branch_prefixes(SPRINT_PREFIX)
-    new = prefixes[0]
-    for prefix in prefixes:
+    new, *olds = legacy_names.branch_prefixes("sprint/")
+    for prefix in (new, *olds):
         refs = (f"refs/heads/{prefix}{name}", f"refs/remotes/origin/{prefix}{name}")
         p = subprocess.run(["git", "-C", repo, "for-each-ref", "--format=%(refname)", *refs], capture_output=True, text=True)
         if p.returncode == 0 and p.stdout.strip():
