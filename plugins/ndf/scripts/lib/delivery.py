@@ -209,12 +209,15 @@ def dev_channel(decl: DeliveryDecl) -> DevChannel:
 
 def judge_target(decl: DeliveryDecl, target: str) -> Verdict:
     """宛先 `target` へのマージが自動反映の本番チャネルへ入るか。上から順に最初に当たった条件で決まる。"""
-    items = [
-        {"kind": "decl", "name": decl.sources.get("production", f"{WT} の production_branch"), "result": decl.production or "（無し）"}
-    ]
+    items = []
+
+    def append_decl(name, result):
+        items.append({"kind": "decl", "name": name, "result": result})
 
     def v(value, reason):
         return Verdict(target, value, reason, items)
+
+    append_decl(decl.sources.get("production", f"{WT} の production_branch"), decl.production or "（無し）")
 
     if decl.problems:
         return v(UNDETERMINED, "宣言を読めない: " + " / ".join(decl.problems))
@@ -225,8 +228,8 @@ def judge_target(decl: DeliveryDecl, target: str) -> Verdict:
     if target != decl.production:
         return v(NOT_PRODUCTION, f"宛先 {target} は本番チャネル {decl.production} でない")
     if decl.rows is None:
-        why = f"delivery が不明（{decl.unknown}）" if decl.unknown else "delivery が無い"
-        items.append({"kind": "decl", "name": f"{PJ} の delivery", "result": decl.unknown and "unknown" or "（無し）"})
+        why = {"unknown": f"delivery が不明（{decl.unknown}）", "absent": "delivery が無い"}[decl.rows_state]
+        append_decl(f"{PJ} の delivery", {"unknown": "unknown", "absent": "（無し）"}[decl.rows_state])
         return v(
             UNDETERMINED,
             f"宛先 {target} は本番チャネルだが、{why}ため反映の仕方を決められない（project-decl.py で delivery を宣言すれば次から判定できる）",
@@ -234,9 +237,9 @@ def judge_target(decl: DeliveryDecl, target: str) -> Verdict:
     hit = _first_merge_row(decl)
     if hit:
         i, row = hit
-        items.append({"kind": "decl", "name": f"{PJ} の delivery[{i}]", "result": _row_text(row)})
+        append_decl(f"{PJ} の delivery[{i}]", _row_text(row))
         return v(PRODUCTION, f"delivery[{i}]（{row.get('target')}）は {target} へのマージで自動で反映する")
-    items.append({"kind": "decl", "name": f"{PJ} の delivery", "result": f"{len(decl.rows)} 行"})
+    append_decl(f"{PJ} の delivery", f"{len(decl.rows)} 行")
     return v(NOT_PRODUCTION, f"{target} へのマージで自動で反映する delivery の行が無い")
 
 
