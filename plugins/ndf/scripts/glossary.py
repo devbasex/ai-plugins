@@ -509,17 +509,24 @@ def code_findings(rel: str, text: str, wanted: set[int] | None, g: dict, dep_re,
     return items
 
 
+def _live_form_for(t: dict, form: str) -> str | None:
+    """語 `t` の廃止した識別子のうち、書き方が `form` に一致するものに対応する生きた識別子。無ければ None。"""
+    for w in deprecated_code_of(t):
+        hits = [live for dep, live in zip(spellings(w), spellings(code_of(t))) if dep == form]
+        if hits:
+            return hits[0]
+    return None
+
+
 def code_replacement(g: dict, form: str) -> str:
     """廃止した識別子の出た書き方に合わせて、生きた識別子を同じ書き方で返す（PascalCase で出たら PascalCase）。"""
     names = []
     for t in terms_of(g):
         if not code_of(t) or not isinstance(t.get("term"), str):
             continue
-        for w in deprecated_code_of(t):
-            hits = [live for dep, live in zip(spellings(w), spellings(code_of(t))) if dep == form]
-            if hits:
-                names.append(f"{hits[0]}（{t['term']}）")
-                break
+        live = _live_form_for(t, form)
+        if live is not None:
+            names.append(f"{live}（{t['term']}）")
     return " / ".join(dict.fromkeys(names)) or "用語集の識別子"
 
 
