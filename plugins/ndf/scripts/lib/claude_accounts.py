@@ -334,16 +334,11 @@ def _token_held(name: str, before: float | None, now: float, force: bool = False
         _update_account(name, needs_relogin=True)
         return None
     exp = (o.get("expiresAt") or 0) / 1000
-    if not _needs_refresh(exp, now, before, force, min_left):
-        return o["accessToken"] if exp - now > min_left else None
-    # 一時的な失敗なら、残りが足りれば今のトークンを使う
-    return _refresh_and_store(name, o, now, o["accessToken"] if exp - now > min_left and not force else None)
-
-
-def _needs_refresh(exp: float, now: float, before: float | None, force: bool, min_left: float) -> bool:
-    """期限 `exp` のトークンを更新するか。`before` は `min_left` 以上に引き上げる（None は更新しない）。"""
     before = None if before is None else max(before, min_left)
-    return force or (before is not None and exp - now <= before)
+    left = o["accessToken"] if exp - now > min_left else None
+    if not force and (before is None or exp - now > before):
+        return left
+    return _refresh_and_store(name, o, now, None if force else left)
 
 
 def _refresh_and_store(name: str, o: dict, now: float, fallback: str | None) -> str | None:
