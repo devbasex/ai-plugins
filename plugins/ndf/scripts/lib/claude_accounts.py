@@ -271,6 +271,12 @@ def _creds(name: str) -> dict | None:
     return o if isinstance(o, dict) and isinstance(o.get("accessToken"), str) and o["accessToken"] else None
 
 
+def _relogin(name: str) -> None:
+    """再登録が要ると記す（呼ぶ側はそのまま None を返す）。"""
+    _update_account(name, needs_relogin=True)
+    return None
+
+
 def _token_held(name: str, before: float | None, now: float, force: bool = False) -> str | None:
     """排他の中で呼ぶ。使えるアクセストークン（使えなければ None）。
 
@@ -281,19 +287,16 @@ def _token_held(name: str, before: float | None, now: float, force: bool = False
         return None
     o = _creds(name)
     if not _secure(name) or o is None:
-        _update_account(name, needs_relogin=True)
-        return None
+        return _relogin(name)
     exp = (o.get("expiresAt") or 0) / 1000
     if not force and (before is None or exp - now > before):
         return o["accessToken"] if exp > now else None
     rexp = o.get("refreshTokenExpiresAt")
     if isinstance(rexp, (int, float)) and rexp / 1000 <= now:
-        _update_account(name, needs_relogin=True)
-        return None
+        return _relogin(name)
     how, new = refresh_oauth(o, now)
     if how == "rejected":
-        _update_account(name, needs_relogin=True)
-        return None
+        return _relogin(name)
     if new is None:  # 通信の失敗。期限の前なら今のトークンを使う
         return o["accessToken"] if exp > now and not force else None
     try:
@@ -301,8 +304,7 @@ def _token_held(name: str, before: float | None, now: float, force: bool = False
         whole["claudeAiOauth"] = new
         _write(_creds_path(name), whole)
     except OSError:
-        _update_account(name, needs_relogin=True)
-        return None
+        return _relogin(name)
     return new["accessToken"]
 
 
