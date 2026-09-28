@@ -2403,6 +2403,54 @@
       "meaning": "ベースブランチから本番チャネルへ変更を入れる Pull Request",
       "code": "promotion_pr",
       "pending_source": "issues/issue-1336-design.md"
+    },
+    {
+      "term": "プロダクトバックログ",
+      "context": "ndf-issue-upkeep",
+      "meaning": "open の課題を着手の順に並べた全体。マイルストーンの順（上の層）→ マイルストーンの中の順位（下の層）の辞書順で読む",
+      "pending_source": "issues/issue-1429-requirements.md"
+    },
+    {
+      "term": "スプリントバックログの候補",
+      "context": "ndf-issue-upkeep",
+      "meaning": "1 つのマイルストーンの中の課題を順位で並べたもの。次のスプリントはその先頭から容量の分を切り出す",
+      "pending_source": "issues/issue-1429-requirements.md"
+    },
+    {
+      "term": "遅延コスト",
+      "context": "ndf-issue-upkeep",
+      "meaning": "課題の着手を遅らせると失う量の相対値。実害の大きさ・時間的重要度・リスク低減の 3 つの見積の段階の和。略して CoD",
+      "pending_source": "issues/issue-1429-requirements.md"
+    },
+    {
+      "term": "WSJF",
+      "context": "ndf-issue-upkeep",
+      "meaning": "遅延コストを大きさの見積の段階で割った値。マイルストーンの中の順位を決める",
+      "pending_source": "issues/issue-1429-requirements.md"
+    },
+    {
+      "term": "見積の段階",
+      "context": "ndf-issue-upkeep",
+      "meaning": "遅延コストの 3 つの要素と大きさに付ける相対値。宣言の尺度（既定は 1, 2, 3, 5, 8, 13, 20）の中から選ぶ",
+      "pending_source": "issues/issue-1429-requirements.md"
+    },
+    {
+      "term": "切り出しの境界",
+      "context": "ndf-issue-upkeep",
+      "meaning": "マイルストーンの中の順位を先頭から大きさの見積の段階の和が容量に収まるまで取ったときの、最後の課題",
+      "pending_source": "issues/issue-1429-requirements.md"
+    },
+    {
+      "term": "前倒しの候補",
+      "context": "ndf-issue-upkeep",
+      "meaning": "後ろのマイルストーンか未設定にあり、遅延コストが直近のマイルストーンの切り出しの境界の課題より余白以上に高い課題",
+      "pending_source": "issues/issue-1429-requirements.md"
+    },
+    {
+      "term": "後ろ倒しの候補",
+      "context": "ndf-issue-upkeep",
+      "meaning": "直近のマイルストーンの中で遅延コストが最も低い課題。前倒しの候補と対にして示す",
+      "pending_source": "issues/issue-1429-requirements.md"
     }
   ]
 }
