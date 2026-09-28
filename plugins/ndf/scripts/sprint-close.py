@@ -72,52 +72,6 @@ def read_record(root, repo, n):
     return "\n".join(parts)
 
 
-def _read_dist_block(block):
-    """配布の記録の節から段階・スプリントの PR・本番の版を読む。"""
-    out = {"stage": None, "version": None, "sprint_prs": []}
-    for ln in block:
-        if ln.startswith("段階: ") and out["stage"] is None:
-            out["stage"] = ln[len("段階: ") :].strip()
-        elif ln.startswith(legacy_names.record_labels("スプリント: ")):  # 改名の前の記録の見出しも読む
-            out["sprint_prs"] = [int(x) for x in re.findall(r"#(\d+)", ln)]
-    if (out["stage"] or "").startswith("本番"):
-        for ln in block:
-            if ln.startswith("版: ") and "→" in ln:
-                out["version"] = re.sub(r"\s*（.*$", "", ln.split("→", 1)[1]).strip()
-                break
-    return out
-
-
-def _verify_blocks(lines, sections):
-    """リリース後テストのブロックを切り出す。各ブロックは {"start": 開始行, "ver": 対象の版, "lines": 行の並び}。"""
-    blocks = []
-    verify_heads = {s.heading.line for s in sections if lines[s.heading.line].startswith(VERIFY)}
-    cur = None
-    for i, ln in enumerate(lines):
-        if i in verify_heads:
-            cur = {"start": i, "ver": None, "lines": [ln]}
-            continue
-        if cur is None:
-            continue
-        cur["lines"].append(ln)
-        if ln.startswith("対象の版: ") and cur["ver"] is None:
-            cur["ver"] = re.sub(r"\s*（.*$", "", ln[len("対象の版: ") :]).strip()
-        if ln.startswith("合否:"):
-            blocks.append(cur)
-            cur = None
-    return blocks
-
-
-def _pick_verify_block(blocks, stage, version, dist_start):
-    if stage.startswith("配布なし"):
-        after = [b for b in blocks if b["start"] > dist_start]
-        return "\n".join(after[-1]["lines"]) if after else None
-    if version:
-        hit = [b for b in blocks if b["ver"] == version]
-        return "\n".join(hit[-1]["lines"]) if hit else None
-    return None
-
-
 def parse_record(text):
     """最後の配布の記録と、使うリリース後テストのブロックを読む。
 
@@ -132,9 +86,40 @@ def parse_record(text):
     out = {"found": dist_start is not None, "stage": None, "version": None, "sprint_prs": [], "verify_block": None}
     if dist_start is None:
         return out
-    out.update(_read_dist_block(lines[dists[-1].start : dists[-1].end]))
-    blocks = _verify_blocks(lines, sections)
-    out["verify_block"] = _pick_verify_block(blocks, out["stage"] or "", out["version"], dist_start)
+    block = lines[dists[-1].start : dists[-1].end]
+    for ln in block:
+        if ln.startswith("段階: ") and out["stage"] is None:
+            out["stage"] = ln[len("段階: ") :].strip()
+        elif ln.startswith(legacy_names.record_labels("スプリント: ")):  # 改名の前の記録の見出しも読む
+            out["sprint_prs"] = [int(x) for x in re.findall(r"#(\d+)", ln)]
+    if (out["stage"] or "").startswith("本番"):
+        for ln in block:
+            if ln.startswith("版: ") and "→" in ln:
+                out["version"] = re.sub(r"\s*（.*$", "", ln.split("→", 1)[1]).strip()
+                break
+
+    blocks = []  # (開始行, 対象の版, 行の並び)
+    verify_heads = {s.heading.line for s in sections if lines[s.heading.line].startswith(VERIFY)}
+    cur = None
+    for i, ln in enumerate(lines):
+        if i in verify_heads:
+            cur = {"start": i, "ver": None, "lines": [ln]}
+            continue
+        if cur is None:
+            continue
+        cur["lines"].append(ln)
+        if ln.startswith("対象の版: ") and cur["ver"] is None:
+            cur["ver"] = re.sub(r"\s*（.*$", "", ln[len("対象の版: ") :]).strip()
+        if ln.startswith("合否:"):
+            blocks.append(cur)
+            cur = None
+    stage = out["stage"] or ""
+    if stage.startswith("配布なし"):
+        after = [b for b in blocks if b["start"] > dist_start]
+        out["verify_block"] = "\n".join(after[-1]["lines"]) if after else None
+    elif out["version"]:
+        hit = [b for b in blocks if b["ver"] == out["version"]]
+        out["verify_block"] = "\n".join(hit[-1]["lines"]) if hit else None
     return out
 
 
