@@ -176,21 +176,23 @@ class AccountSwitch:
             self.term.screen(f"ndf-relay: アカウント {ca.account_label(to)}で起動する")
             return
         row = {"event": "account", "section": self.section, "reason": reason, "from": prev, "to": to}
-        if prev == ca.METERED:
-            line = f"{ca.account_label(to)}の上限が外れたため、従量の接続からアカウント {to} へ戻して続ける"
-            row["reason"] = REASON_RECOVERED
-        elif reason == REASON_THRESHOLD:
-            n = self.watch.due if self.watch is not None and self.watch.due is not None else 0
-            line = f"{prev} の使用率が {n:.0f}% に達したため、アカウントを {ca.account_label(to)}へ替える"
-            row["usage"] = round(n)
-        elif reason in cu.KINDS:
-            line = f"利用上限（{reason}）に達したため、アカウントを {prev} から {ca.account_label(to)}へ替えて続ける"
-        elif reason == REASON_AUTH:
-            line = f"認証が通らなかったため、アカウントを {prev} から {ca.account_label(to)}へ替えて続ける"
-        else:
-            line = f"アカウントを {prev or '既定のログイン'} から {ca.account_label(to)}へ替える"
+        line, extra = self._switch_message(prev, to, reason)
+        row.update(extra)
         self.term.screen("ndf-relay: " + line)
         self.log(**row)
+
+    def _switch_message(self, prev: str | None, to: str, reason: str | None) -> tuple[str, dict]:
+        """2 つ目以降の区間でアカウントを替えたときの (画面の 1 行, 記録の行へ足す項目)。理由ごとに決まる。"""
+        if prev == ca.METERED:
+            return f"{ca.account_label(to)}の上限が外れたため、従量の接続からアカウント {to} へ戻して続ける", {"reason": REASON_RECOVERED}
+        if reason == REASON_THRESHOLD:
+            n = self.watch.due if self.watch is not None and self.watch.due is not None else 0
+            return f"{prev} の使用率が {n:.0f}% に達したため、アカウントを {ca.account_label(to)}へ替える", {"usage": round(n)}
+        if reason in cu.KINDS:
+            return f"利用上限（{reason}）に達したため、アカウントを {prev} から {ca.account_label(to)}へ替えて続ける", {}
+        if reason == REASON_AUTH:
+            return f"認証が通らなかったため、アカウントを {prev} から {ca.account_label(to)}へ替えて続ける", {}
+        return f"アカウントを {prev or '既定のログイン'} から {ca.account_label(to)}へ替える", {}
 
     @staticmethod
     def earliest(choice: ca.Choice | None) -> dict | None:
