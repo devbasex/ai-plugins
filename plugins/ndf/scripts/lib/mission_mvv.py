@@ -1,4 +1,6 @@
-"""mission_mvv.py: `mission-state.py init --pace fast` / `auto` のミッション MVV（#1078）とプロジェクト MVV（#1366）の扱い。
+"""mission_mvv.py: `mission-state.py init` のミッション MVV（#1078・#1400）とプロジェクト MVV（#1366）の扱い。
+
+`pace: normal` は `normal_mvv` が写す（特定できなくても止めず、照合もしない）。以下は `fast` / `auto` の扱い。
 
 - マイルストーンの説明（`gh api repos/<所有者>/<リポジトリ>/milestones/<M>`）から `## Mission` / `## Vision` / `## Value` の節を
   状態のファイルの隣の `mvv.md` へ写し、`mvv.path`・`mvv.sha256` を返す。見出しが 1 つでも無い・取得できないときは止まる（3）。
@@ -19,7 +21,7 @@ from pathlib import Path
 import md
 
 MVV_SECTIONS = ("Mission", "Vision", "Value")
-MVV_PACES = ("fast", "auto")  # 承認ゲートを MVV 判定で通す進め方（MVV を写し、プロジェクト MVV の参照を残す）
+MVV_PACES = ("fast", "auto")  # 承認ゲートを MVV 判定で通す進め方（ミッション MVV を写せなければ止まり、写しを照合する）
 EXIT_UNREADABLE, EXIT_PRECONDITION = 2, 3
 
 
@@ -49,8 +51,33 @@ def _ref(path: Path) -> dict:
     return {"path": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
 
 
+def normal_mvv(a) -> tuple[dict | None, tuple | None, dict | None]:
+    """pace: normal の写し（#1400 の決定 13）。(状態へ書く mvv, 止まるときの (理由, 終了コード, items), 特定できなかった理由の 1 件)。
+
+    `--mvv` のファイルが無いときだけ止まる（明示の指定の誤り）。`--milestone` の説明を読めない・見出しがそろわないときは
+    止めずに理由を返す。照合（vet）は呼び手もしない。"""
+    if a.mvv:
+        path = Path(a.mvv).resolve()
+        if not path.is_file():
+            return None, (f"MVV のファイルが無い: {a.mvv}", EXIT_PRECONDITION, []), None
+        return _ref(path), None, None
+    if not a.milestone:
+        return None, None, None
+    try:
+        text = mvv_sections(milestone_description(a.milestone, a.repo))
+        why = None if text else f"マイルストーン {a.milestone} の説明に ## Mission / ## Vision / ## Value の見出しがそろっていない"
+    except OSError as e:
+        text, why = None, f"マイルストーン {a.milestone} の説明を読めない: {e}"
+    if text is None:
+        return None, None, {"kind": "mission_mvv", "result": "none", "reason": f"{why}。ミッション MVV なしで進める"}
+    path = Path(a.mission).resolve().parent / "mvv.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return _ref(path), None, None
+
+
 def init_mvv(a, project) -> tuple[dict | None, tuple | None]:
-    """(状態へ書く mvv, 止まるときの (理由, 終了コード, items))。pace が normal なら (None, None)。"""
+    """(状態へ書く mvv, 止まるときの (理由, 終了コード, items))。pace が normal なら `normal_mvv` が受け持つ。"""
     if a.pace not in MVV_PACES or (not a.mvv and not a.milestone and project.approved):
         return None, None
     if a.mvv:

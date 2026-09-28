@@ -111,6 +111,9 @@ issue のことではない。
 選んだ結論と、その理由と、採らなかった案を残す。書き方は
 [references/decisions.md](references/decisions.md) にある。
 
+**決定ごとに、根拠にした MVV の項目を最後の行に書く**（「根拠: Value 6（MVV 版 1）」）。MVV に反する疑いのある決定は
+設計に書かずに人へ戻す（理由と根拠の項目つき）。MVV の節の読み方と根拠の行の形は [project-mvv.md の「工程での読み方」](../development-workflow/references/project-mvv.md) にある。
+
 ### 4. 進む前に文書の内部整合を突き合わせる
 
 **[references/design-template.md](references/design-template.md) の「進む前に突き合わせる対」

@@ -7,7 +7,7 @@
     python3 project-mvv.py vet      --body F --kind candidate|revision|mission [--root DIR]
     python3 project-mvv.py approve  --body F --by NAME [--reason TEXT] [--accept-unknown] [--root DIR]
     python3 project-mvv.py show     [--version N] [--diff M] [--root DIR]
-    python3 project-mvv.py context  [--root DIR] [--format text|json]
+    python3 project-mvv.py context  [--root DIR] [--format text|json] [--mission <状態> | --mvv F | --milestone M [--repo OWNER/REPO]]
     python3 project-mvv.py signals  [--root DIR] [--format text|json]
     python3 project-mvv.py schema   [--out FILE]
 
@@ -24,7 +24,9 @@
 - `approve`: 利用者の承認の後に打つ。同じ本文への直近の照合が「従う」（か `--accept-unknown` で人が引き受けた「判定できない」）
   のときだけ宣言を書く。書くのはこの副命令だけである
 - `show`: 版の本文、または版 M から N への差分
-- `context`: 判断の地点へ渡す MVV の節（宣言が無くても共通原則と「MVV なし」を出す）
+- `context`: 判断の地点へ渡す MVV の節（宣言が無くても共通原則と「MVV なし」を出す）。ミッション MVV の出所（`--mission` の状態の
+  `mvv`・`--mvv` のファイル・`--milestone` の説明）を 1 つ渡すと、プロジェクト MVV が承認済みのときだけミッション MVV の節を足す（#1400）。
+  特定できなければ止めずにプロジェクト MVV だけの節を出し、`--format json` の `mission_mvv` に理由を書く
 - `signals`: 現行の版のもとでの覆し・「判定できない」・流出不具合の件数と閾値。超えていれば `items` に改訂の提案
 
 結果は lib/step_result.py の形の 1 行の JSON で、その前に人が読む行を出す。LLM は `supervise_lib/claude.py` の
@@ -379,19 +381,17 @@ def cmd_show(a):
 def cmd_context(a):
     root = _root(a)
     mvv = pm.load_mvv(root)
-    text = pm.block(mvv)
+    mission, ref = pm.mission_source(a.mission, a.mvv, a.milestone, a.repo)
+    if mission is not None and not mvv.approved:  # 決定 16: プロジェクト MVV が承認済みのときだけ足す
+        mission, ref = None, {"reason": f"プロジェクト MVV が{pm.STATUS_LABEL[mvv.status]}。ミッション MVV を節へ足さない"}
+    text = pm.block(mvv, mission)
     if a.format == "text":
         sys.stdout.write(text)
         return 0
-    emit(
-        result(
-            TOOL,
-            "ok",
-            f"MVV の節（{pm.STATUS_LABEL[mvv.status]}）",
-            [{"kind": "context", "name": mvv.status, "result": mvv.status, "project_mvv": pm.record(mvv), "block": text}],
-            pm.record(mvv),
-        )
-    )
+    item = {"kind": "context", "name": mvv.status, "result": mvv.status, "project_mvv": pm.record(mvv), "block": text}
+    if ref is not None:
+        item["mission_mvv"] = ref
+    emit(result(TOOL, "ok", f"MVV の節（{pm.STATUS_LABEL[mvv.status]}）", [item], pm.record(mvv)))
 
 
 def cmd_signals(a):
@@ -461,6 +461,11 @@ def build_parser():
     p.add_argument("--diff", type=int, help="この版から --version（既定は現行）への差分")
     p = add("context", cmd_context, "MVV の節を出す")
     p.add_argument("--format", choices=("text", "json"), default="text")
+    src = p.add_mutually_exclusive_group()
+    src.add_argument("--mission", help="ミッションの状態（mission-state.py のファイル）。状態の mvv を sha256 の一致を見て読む")
+    src.add_argument("--mvv", help="ミッション MVV のファイル")
+    src.add_argument("--milestone", help="説明に ## Mission / ## Vision / ## Value を持つマイルストーン（写しは作らない）")
+    p.add_argument("--repo", help="--milestone を読むリポジトリ（OWNER/REPO。既定はカレント）")
     p = add("signals", cmd_signals, "改訂の兆候を集計する")
     p.add_argument("--format", choices=("text", "json"), default="text")
     p = sub.add_parser("schema", help="宣言の JSON Schema を出す")
