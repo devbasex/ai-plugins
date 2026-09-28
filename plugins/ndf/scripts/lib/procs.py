@@ -53,6 +53,17 @@ def pid_alive(pid: int) -> bool:
         return False
 
 
+def start_time(pid: int) -> float | None:
+    """pid の開始の時刻（epoch 秒・小数 2 桁）。無い・ゾンビなら None。pid の使い回しを見分けるのに使う。"""
+    p = _process(pid)
+    if p is None or not pid_alive(pid):
+        return None
+    try:
+        return round(p.create_time(), 2)
+    except psutil.Error:
+        return None
+
+
 def pid_is_zombie(pid: int) -> bool:
     p = _process(pid)
     if p is None:

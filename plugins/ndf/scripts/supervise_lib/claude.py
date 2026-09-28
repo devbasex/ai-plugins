@@ -12,6 +12,7 @@ import os
 import shlex
 import signal
 import subprocess
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
@@ -293,6 +294,7 @@ class ClaudeRunner:
         self.section = os.environ.get(ca.NAME_ENV) or None
         # 次の呼び出しのアカウント（`metered` は従量の接続）。None は起動したときの環境のまま
         self.account = self.section
+        self.metered_told = False  # 壊れた保存の宣言の 1 行を出したか
 
     def call(self, system: str, prompt: str, tools: str | None, cwd: str, timeout: int, **kw) -> ClaudeCall:
         """claude -p を呼ぶ。利用上限をここで扱う。
@@ -308,6 +310,7 @@ class ClaudeRunner:
         retry = ctx.plan.get("limit_retry_seconds", LIMIT_RETRY)
         wait_max = ctx.plan.get("limit_wait_max", LIMIT_WAIT_MAX)
         fallback = ca.fallback_env()
+        self._tell_metered_problem()
         multi = ca.registered() >= 2
         tried_fallback, waited = False, 0.0
         tried: set[str] = set()  # この呼び出しで上限に当たったアカウント
@@ -335,6 +338,16 @@ class ClaudeRunner:
                 return res
             waited += self._wait_for_reset(res, retry, wait_max, waited)
             tried.clear()  # 待った後は上限の解けたアカウントを選び直せる
+
+    def _tell_metered_problem(self) -> None:
+        """保存した従量の接続の宣言が壊れていれば、最初の呼び出しの前に標準エラーと進捗ログへ 1 行出す（#1468 の I5）。"""
+        if self.metered_told:
+            return
+        self.metered_told = True
+        bad = ca.metered_problem()
+        if bad:
+            print("supervise: " + bad, file=sys.stderr)
+            self.ctx.state.progress_write({"kind": "metered_invalid", "detail": bad})
 
     def _switch_after_limit(self, res: dict, tried: set[str], fallback: dict) -> bool:
         """上限に当たったアカウントを記録し、登録済みのアカウントか従量の接続へ替える。替えたら真。"""

@@ -133,6 +133,10 @@ class Relay(AccountSwitch):
         if self.multi:
             row["account"] = to
         self.log(**row)
+        bad = ca.metered_problem(self.env) if self.section == 1 else None
+        if bad:  # 保存した宣言が壊れていれば、宣言なしとして扱い 1 行出す（#1468 の I5）
+            self.term.screen("ndf-relay: " + bad)
+            self.log(event="metered_invalid", section=self.section, detail=bad)
         if self.multi:
             self.tell_account(prev, to, reason, choice)
             if self.watch is not None:

@@ -1,132 +1,51 @@
-"""`relay.py account add|list|capacity|remove`: 切り替えに使う claude アカウントの登録・一覧・枠の大きさの宣言・削除（#1389・#1453）。
+"""`relay.py account`: 切り替えに使う claude アカウントと従量の接続の登録・一覧・確かめ・枠の大きさの宣言・削除（#1389・#1453・#1468）。
 
-置き場を書くのは `lib/claude_accounts.py` である。ここは端末の入出力と、専用の設定ディレクトリでの
-`claude auth login` / `auth status` / `auth logout` の起動と、重複の確かめ（I3）だけを持つ（推論は呼ばない）。登録は利用者が端末から
-打ったときだけ行う（I2）。
+置き場を書くのは `lib/claude_accounts.py` である。ここは副命令の入口（引数の読み取り・登録の途中の状態の掃除・
+結果を文か JSON で出す）と、`list`・`remove`・`capacity`・`check` の中身を持つ（推論は呼ばない）。OAuth の登録は
+`login`、Bedrock の登録と確かめは `bedrock`、値の決定（引数 → 対話 → 足りない引数）は `ask` が持つ。
+
+すべての副命令が `--yes`（確認を飛ばす。確認の無い副命令では何もしない）と `--json`（結果を JSON 1 つで標準出力へ。
+人向けの文と問いは標準エラー）を受ける。端末でなければ入力を待たず、足りない引数を名前で示して終了コード 2 で終わる。
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
-import subprocess
 import sys
 
+from . import bedrock as bd
 from . import claude as cl
+from . import login
+from .ask import Asker, Fail, MissingArgs
 from .common import PKG_ROOT  # noqa: F401  lib/ を sys.path に置く
+from .login import owner_of  # noqa: F401  公開の名前（テストが使う）
 
 import claude_accounts as ca  # noqa: E402,I001
 import claude_usage as cu  # noqa: E402
 
-USAGE = "usage: relay.py account add <名前> | list [--json] | capacity <名前> <5 時間の枠|-> <週の枠|-> | remove <名前>"
+USAGE = (
+    "usage: relay.py account add [<名前>] [--code <コード>|-] | add-bedrock [--profile <名前>] [--region <地域>] [--model <ID>]"
+    " | check metered | list | capacity <名前> <5 時間の枠|-> <週の枠|-> | remove <名前>|metered  （共通: [--yes] [--json]）"
+)
 AUTH_ENV = ca.AUTH_ENV  # 専用の設定ディレクトリで claude を起動するときに外す変数（正本は claude_accounts）
 
 
-def _env(config_dir: str) -> dict:
-    env = {k: v for k, v in os.environ.items() if k not in AUTH_ENV and k not in cl.DROP_ENV and k != "NDF_RELAY_DIR"}
-    env["CLAUDE_CONFIG_DIR"] = config_dir
-    return env
+def cmd_add(name: str, code: str | None = None, yes: bool = False, as_json: bool = False, swept: set[str] | None = None) -> int:
+    """`account add`（関数として呼ぶ形。入口は `cmd_account`）。"""
+    return _respond("add", as_json, lambda: _add(Asker(yes), name, code, as_json, swept or set()))
 
 
-def _auth(claude: str, config_dir: str, *args: str) -> subprocess.CompletedProcess | None:
-    """専用の設定ディレクトリで `claude auth <副命令>` を起動する。起動できなければ None。"""
-    try:
-        return subprocess.run(
-            [claude, "auth", *args], env=_env(config_dir), stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-
-
-def _identity(claude: str, config_dir: str) -> tuple[str, str, str] | None:
-    """専用の設定ディレクトリの `claude auth status`（JSON）からメールアドレス・組織の ID・組織名を読む。
-
-    組織の 2 つは無ければ空。1 つのメールアドレスで組織ごとに別のアカウントになるため、組織まで読む（I3）。
-    """
-    p = _auth(claude, config_dir, "status", "--json")
-    if p is None:
-        return None
-    try:
-        d = json.loads(p.stdout)
-    except ValueError:
-        return None
-    if not isinstance(d, dict) or not d.get("loggedIn") or not isinstance(d.get("email"), str):
-        return None
-    org_id, org_name = d.get("orgId"), d.get("orgName")
-    return d["email"], org_id if isinstance(org_id, str) else "", org_name if isinstance(org_name, str) else ""
-
-
-def _backfill_org(claude: str, acc: ca.Account) -> str:
-    """組織を記録する前の登録の組織を、その設定ディレクトリの `auth status` から読み直して書き戻す。読めなければ空。"""
-    ident = _identity(claude, ca.account_dir(acc.name))
-    if ident is None or not ident[1] or ident[0].lower() != acc.email.lower():
-        return ""
-    ca.set_org(acc.name, ident[1], ident[2])
-    return ident[1]
-
-
-def owner_of(email: str, org_id: str = "", other_than: str = "", claude: str | None = None) -> str | None:
-    """同じメールアドレスと組織で登録済みのアカウントの名前（I3）。
-
-    1 つのメールアドレスで複数の組織（個人と Team など）に属せ、組織ごとに利用上限が別になる。既存の登録の
-    組織が分からない（組織を記録する前の登録）ときは、`claude` があれば読み直して書き戻す。それでもどちらかの
-    組織が分からなければ、違うと言い切れないので同じとみなす。
-    """
-    for n in ca.names():
-        acc = ca.load_account(n)
-        if n == other_than or not acc or not acc.email or acc.email.lower() != email.lower():
-            continue
-        known = acc.org_id or (_backfill_org(claude, acc) if claude and org_id else "")
-        if not known or not org_id or known == org_id:
-            return n
-    return None
-
-
-def _who(email: str, org_name: str) -> str:
-    return f"{email}・{org_name}" if org_name else email
-
-
-def cmd_add(name: str) -> int:
-    if not ca.valid_name(name):
-        print(f"名前は英小文字・数字・- と _ の 32 字まで（{ca.METERED} は使えない）: {name}", file=sys.stderr)
-        return 2
-    if sys.platform == "darwin":
-        # macOS の claude は資格情報を Keychain に置き、設定ディレクトリの .credentials.json を書かない
-        print("macOS では登録できない（claude が資格情報を Keychain に置き、.credentials.json を書かない）。Linux で使う", file=sys.stderr)
-        return 2
-    if not sys.stdin.isatty():
-        print("登録は端末から打つ（claude auth login が認可コードの貼り付けを待つ）", file=sys.stderr)
-        return 2
-    old = ca.load_account(name)
-    if old is not None and not old.needs_relogin:
-        print(f"登録済み: {name}（{old.email}）。置き直すなら先に account remove {name}", file=sys.stderr)
-        return 1
-    claude = cl.resolve_claude()
-    if claude is None:
-        print("本物の claude が見つからない", file=sys.stderr)
-        return 1
-    staging = ca.staging_dir(name)
-    try:
-        try:
-            subprocess.run([claude, "auth", "login"], env=_env(staging))
-        except (OSError, subprocess.SubprocessError) as e:
-            print(f"claude auth login を起動できない（{e}）", file=sys.stderr)
-            return 1
-        ident = _identity(claude, staging)
-        if ident is None or not os.path.isfile(os.path.join(staging, ca.CRED_FILE)):
-            print("ログインが通らなかった。登録しない", file=sys.stderr)
-            return 1
-        email, org_id, org_name = ident
-        owner = owner_of(email, org_id, other_than=name, claude=claude)
-        if owner:
-            acc = ca.load_account(owner)
-            print(f"登録済み: {owner}（{_who(acc.email, acc.org_name) if acc else email}）", file=sys.stderr)
-            return 1
-        ca.register(name, staging, email, org_id, org_name)
-    finally:
-        ca.discard(staging)
-    print(f"登録した: {name}（{_who(email, org_name)}）")
-    return 0
+def _add(asker: Asker, name: str | None, code: str | None, as_json: bool, swept: set[str]) -> dict:
+    name = asker.value("<名前>", "アカウントの名前", name)
+    if code is not None:
+        res = login.finish(name, login.read_code(code), swept)
+    elif asker.interactive:
+        res = login.add_once(name, quiet_stdout=as_json)
+    else:
+        res = login.start(name)
+    return {"name": name, **res}
 
 
 def _window(w: dict | None, form: str) -> str:
@@ -156,21 +75,65 @@ def _scoped(scoped: list | None) -> str:
     return f"{w['model'] or '-'} {_window(w, '%m-%d')}"
 
 
-def cmd_list(as_json: bool) -> int:
+def _metered_row() -> dict | None:
+    """一覧の最後に足す従量の接続の行（宣言が無ければ None）。環境変数の宣言は値を出さず変数の名前だけを出す。"""
+    if ca.FALLBACK_ENV in os.environ:
+        keys = list(ca.fallback_env())
+        if not keys:
+            return None
+        return {
+            "name": ca.METERED,
+            "kind": "metered",
+            "source": "env",
+            "provider": None,
+            "details": {},
+            "keys": keys,
+            "state": "環境変数の宣言",
+        }
+    decl = ca.load_metered()
+    if decl is not None:
+        return {
+            "name": ca.METERED,
+            "kind": "metered",
+            "source": "saved",
+            "provider": decl.provider,
+            "details": decl.details,
+            "state": "保存した宣言",
+        }
+    if ca.metered_problem() is not None:
+        return {
+            "name": ca.METERED,
+            "kind": "metered",
+            "source": "saved",
+            "provider": None,
+            "details": {},
+            "state": "壊れている（宣言なしとして扱う）",
+        }
+    return None
+
+
+def _metered_label(m: dict) -> str:
+    if m["source"] == "env":
+        return "環境変数（" + ", ".join(m["keys"]) + "）"
+    if m["provider"] == bd.PROVIDER:
+        return bd.label(m["details"])
+    return m["provider"] or "-"
+
+
+def _list_rows() -> dict:
     try:
-        rows = ca.rows()
+        rows = [{**r, "kind": "oauth"} for r in ca.rows()]
     except OSError as e:
-        print(f"置き場を読めない（{e}）", file=sys.stderr)
-        return 1
-    if as_json:
-        print(json.dumps(rows, ensure_ascii=False, indent=2))
-        return 0
+        raise Fail("write_failed", f"置き場を読めない（{e}）") from e
+    m = _metered_row()
+    rows += [m] if m else []
     if not rows:
-        print("登録済みのアカウントは無い")
-        return 0
-    for line in _table_lines(rows):
-        print(line)
-    return 0
+        return {"rows": rows, "text": "登録済みのアカウントは無い"}
+    return {"rows": rows, "text": "\n".join(_table_lines(rows))}
+
+
+def cmd_list(as_json: bool) -> int:
+    return _respond("list", as_json, _list_rows)
 
 
 HEADER = ("名前", "識別", "5 時間", "7 日", "モデル別の週", "支出上限", "枠の大きさ", "残り", "状態")
@@ -178,6 +141,8 @@ HEADER = ("名前", "識別", "5 時間", "7 日", "モデル別の週", "支出
 
 def _table_row(r: dict, emails: list[str]) -> tuple[str, ...]:
     """一覧の 1 件を表示の 1 行へ写す。`emails` は全件のメールアドレス（小文字）。"""
+    if r["kind"] == "metered":
+        return (r["name"], _metered_label(r), *("-",) * (len(HEADER) - 3), r["state"])
     spend = {True: "達している", False: "達していない"}.get(r["spend_limit_reached"], "-")
     # 同じメールアドレスが 2 件以上あるときだけ組織名を添える（1 件なら個人の組織名はメールの繰り返しになる）
     ident = f"{r['email']}（{r['org_name']}）" if r["org_name"] and emails.count(r["email"].lower()) > 1 else r["email"]
@@ -196,7 +161,7 @@ def _table_row(r: dict, emails: list[str]) -> tuple[str, ...]:
 
 def _table_lines(rows: list[dict]) -> list[str]:
     """見出しと各件を列の幅（全角は 2）でそろえた行。"""
-    emails = [r["email"].lower() for r in rows]
+    emails = [r["email"].lower() for r in rows if r["kind"] == "oauth"]
     table = [HEADER, *(_table_row(r, emails) for r in rows)]
     widths = [max(_width(row[i]) for row in table) for i in range(len(table[0]))]
     return ["  ".join(c + " " * (w - _width(c)) for c, w in zip(row, widths)).rstrip() for row in table]
@@ -217,51 +182,186 @@ def _capacity_arg(v: str) -> float | None:
     return x
 
 
-def cmd_capacity(name: str, five: str, seven: str) -> int:
+def _capacity_cmd(asker: Asker, name: str | None, five: str | None, seven: str | None) -> dict:
     """枠の大きさを宣言する（`-` はその枠の宣言を外して対応表へ戻す）。"""
+    name = asker.value("<名前>", "アカウントの名前", name)
+    five = asker.value("<5 時間の枠>", "5 時間の枠（USD か -）", five)
+    seven = asker.value("<週の枠>", "週の枠（USD か -）", seven)
     try:
         declared = {"five_hour": _capacity_arg(five), "seven_day": _capacity_arg(seven)}
-    except ValueError:
-        print(USAGE, file=sys.stderr)
-        return 2
+    except ValueError as e:
+        raise Fail("invalid_name", USAGE, 2) from e
     try:
         acc = ca.set_capacity(name, declared)
     except (ca.lock_timeout(), OSError) as e:
-        print(f"置き場へ書けない（{e}）", file=sys.stderr)
-        return 1
+        raise Fail("write_failed", f"置き場へ書けない（{e}）") from e
     if acc is None:
-        print(f"登録されていない: {name}", file=sys.stderr)
-        return 1
+        raise Fail("not_registered", f"登録されていない: {name}")
     cap = acc.capacity()
-    print(f"枠の大きさ: {name} 5 時間 {_usd(cap['five_hour'])} / 週 {_usd(cap['seven_day'])}")
-    return 0
+    return {"name": name, "capacity": cap, "text": f"枠の大きさ: {name} 5 時間 {_usd(cap['five_hour'])} / 週 {_usd(cap['seven_day'])}"}
 
 
-def cmd_remove(name: str) -> int:
+def cmd_capacity(name: str, five: str, seven: str) -> int:
+    return _respond("capacity", False, lambda: _capacity_cmd(Asker(), name, five, seven))
+
+
+def _remove(asker: Asker, name: str | None) -> dict:
+    name = asker.value("<名前>", "外す名前（アカウントか metered）", name)
+    if name == ca.METERED:
+        if not ca.remove_metered():
+            raise Fail("no_declaration", "保存した従量の接続の宣言が無い")
+        return {"name": name, "text": f"外した: {name}（保存した従量の接続の宣言）"}
     if ca.load_account(name) is None:
-        print(f"登録されていない: {name}", file=sys.stderr)
-        return 1
+        raise Fail("not_registered", f"登録されていない: {name}")
     claude = cl.resolve_claude()
     ok = False
     if claude is not None:
-        p = _auth(claude, ca.account_dir(name), "logout")
+        p = login._auth(claude, ca.account_dir(name), "logout")
         ok = p is not None and p.returncode == 0
     if not ok:
         print("claude auth logout が通らなかった（登録は外す）", file=sys.stderr)
     ca.unregister(name)
-    print(f"外した: {name}")
-    return 0
+    return {"name": name, "text": f"外した: {name}"}
+
+
+def cmd_remove(name: str) -> int:
+    return _respond("remove", False, lambda: _remove(Asker(), name))
+
+
+def _verify_or_fail(profile: str, region: str, model: str) -> None:
+    fail = bd.verify(profile, region, model)
+    if fail is not None:
+        raise Fail(fail.reason, f"{bd.label(bd.details(profile, region, model))} を{fail.text()}。保存しない", aws_error=fail.aws_error)
+
+
+def _add_bedrock(asker: Asker, profile: str | None, region: str | None, model: str | None) -> dict:
+    """Bedrock の従量の接続を登録する（F1）。呼べるかの確認が通ったものだけを保存する（I2）。"""
+    if bd.aws_path() is None:
+        raise Fail("aws_missing", "aws CLI が見つからない（Bedrock の登録には aws が要る）")
+    if not profile:
+        cands = bd.profiles()
+        if not cands:
+            raise Fail("no_profiles", "AWS のプロファイルが無い（aws configure list-profiles が 0 件）。先に aws configure sso などで作る")
+        profile = asker.value("--profile", "AWS のプロファイル", None, cands)
+    region = region or bd.region(profile) or asker.value("--region", f"地域（{profile} に region が無い）")
+    model = asker.value("--model", "モデル", model, bd.models(profile, region))
+    _verify_or_fail(profile, region, model)
+    old = ca.load_metered()
+    det = bd.details(profile, region, model)
+    prev = (old.details.get("profile") if old else None) or (old.provider if old else None)
+    q = f"前の宣言（{prev}）を {bd.label(det)} で置き換える？" if old else f"{bd.label(det)} を従量の接続として保存する？"
+    if not asker.confirm("--yes", q):
+        raise MissingArgs(["--yes"])
+    try:
+        ca.save_metered(bd.PROVIDER, bd.decl_env(profile, region, model), det)
+    except (OSError, ValueError) as e:
+        raise Fail("write_failed", f"置き場へ書けない（{e}）") from e
+    if ca.FALLBACK_ENV in os.environ:
+        print(f"環境変数 {ca.FALLBACK_ENV} が定義されているため、保存した宣言は効かない（環境変数が優先する）", file=sys.stderr)
+    res = {"provider": bd.PROVIDER, **det, "replaced": old is not None, "text": f"登録した: 従量の接続（{bd.label(det, '・')}）"}
+    if old is not None:
+        res["previous_profile"] = prev
+    return res
+
+
+def _check(name: str | None) -> dict:
+    """今効いている従量の接続の宣言で、Bedrock の Claude を呼べるかを確かめる（F2）。"""
+    if name != ca.METERED:
+        raise Fail("invalid_name", "確かめられるのは metered だけ: account check metered", 2)
+    env = ca.fallback_env()
+    if not env:
+        raise Fail("no_declaration", "従量の接続の宣言が無い")
+    profile, region, model = env.get("AWS_PROFILE", "default"), env.get("AWS_REGION", ""), env.get("ANTHROPIC_MODEL", "")
+    if env.get("CLAUDE_CODE_USE_BEDROCK") in (None, "", "0") or not region or not model:
+        raise Fail("not_bedrock", "今の宣言は Bedrock（CLAUDE_CODE_USE_BEDROCK・AWS_REGION・ANTHROPIC_MODEL）でないため確かめられない")
+    if bd.aws_path() is None:
+        raise Fail("aws_missing", "aws CLI が見つからない")
+    _verify_or_fail(profile, region, model)
+    det = bd.details(profile, region, model)
+    return {"provider": bd.PROVIDER, **det, "text": f"呼べる: 従量の接続（{bd.label(det, '・')}）"}
+
+
+# ---------------------------------------------------------------- 入口
+
+
+class _Parser(argparse.ArgumentParser):
+    def error(self, message):
+        raise Fail("invalid_name", f"{message}\n{USAGE}", 2)
+
+
+def _account_parser() -> argparse.ArgumentParser:
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--yes", action="store_true")
+    common.add_argument("--json", action="store_true")
+    p = _Parser(prog="relay.py account", add_help=False)
+    sub = p.add_subparsers(dest="sub", parser_class=_Parser)
+    a = sub.add_parser("add", parents=[common], add_help=False)
+    a.add_argument("name", nargs="?")
+    a.add_argument("--code")
+    b = sub.add_parser("add-bedrock", parents=[common], add_help=False)
+    for k in ("--profile", "--region", "--model"):
+        b.add_argument(k)
+    sub.add_parser("check", parents=[common], add_help=False).add_argument("name", nargs="?")
+    sub.add_parser("list", parents=[common], add_help=False)
+    sub.add_parser("remove", parents=[common], add_help=False).add_argument("name", nargs="?")
+    c = sub.add_parser("capacity", parents=[common], add_help=False)
+    for k in ("name", "five", "seven"):
+        c.add_argument(k, nargs="?")
+    return p
+
+
+def _emit(command: str, as_json: bool, code: int, payload: dict) -> int:
+    if as_json:
+        body = payload["rows"] if command == "list" and code == 0 else {"ok": code == 0, "command": command, **payload}
+        print(json.dumps(body, ensure_ascii=False, indent=2 if command == "list" else None))
+    return code
+
+
+def _respond(command: str, as_json: bool, fn) -> int:
+    """副命令を動かし、結果を文（成功は標準出力・失敗は標準エラー）か JSON 1 つ（標準出力）で出す。"""
+    try:
+        res = fn()
+    except MissingArgs as e:
+        cands = "".join(f"\n  {k} の候補: {', '.join(v)}" for k, v in e.candidates.items())
+        msg = ("入力を待たずに止めた。足りない引数: " + ", ".join(e.missing) + cands) if e.missing else "入力が無い"
+        if not as_json:
+            print(msg, file=sys.stderr)
+        return _emit(command, as_json, 2, {"reason": "missing_args", "missing": e.missing, "candidates": e.candidates, "message": msg})
+    except Fail as e:
+        if not as_json:
+            print(e.message, file=sys.stderr)
+        return _emit(command, as_json, e.code, {"reason": e.reason, **e.extra, "message": e.message})
+    except OSError as e:
+        msg = f"置き場へ書けない（{e}）"
+        if not as_json:
+            print(msg, file=sys.stderr)
+        return _emit(command, as_json, 1, {"reason": "write_failed", "message": msg})
+    text = res.pop("text", None)
+    if not as_json and text:
+        print(text)
+    return _emit(command, as_json, 0, res)
 
 
 def cmd_account(args: list[str]) -> int:
-    sub = args[0] if args else ""
-    if sub == "add" and len(args) == 2:
-        return cmd_add(args[1])
-    if sub == "list" and args[1:] in ([], ["--json"]):
-        return cmd_list(args[1:] == ["--json"])
-    if sub == "capacity" and len(args) == 4:
-        return cmd_capacity(*args[1:])
-    if sub == "remove" and len(args) == 2:
-        return cmd_remove(args[1])
-    print(USAGE, file=sys.stderr)
-    return 2
+    try:
+        a = _account_parser().parse_args(args)
+    except Fail as e:  # 読めない引数は usage と 2（今と同じ。決定 9）
+        print(e.message, file=sys.stderr)
+        return 2
+    if a.sub is None:
+        print(USAGE, file=sys.stderr)
+        return 2
+    try:
+        swept = ca.sweep_pending()  # 期限を過ぎた登録の途中の状態を毎回捨てる（E10）
+    except OSError:
+        swept = set()
+    asker = Asker(a.yes)
+    handlers = {
+        "add": lambda: _add(asker, a.name, a.code, a.json, swept),
+        "add-bedrock": lambda: _add_bedrock(asker, a.profile, a.region, a.model),
+        "check": lambda: _check(a.name),
+        "list": _list_rows,
+        "remove": lambda: _remove(asker, a.name),
+        "capacity": lambda: _capacity_cmd(asker, a.name, a.five, a.seven),
+    }
+    return _respond(a.sub, a.json, handlers[a.sub])

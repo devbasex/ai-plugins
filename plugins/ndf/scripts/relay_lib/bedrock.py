@@ -1,0 +1,160 @@
+"""`relay.py account add-bedrock` / `check metered` の aws の呼び出しと、呼べるかの確認の失敗の区分（#1468）。
+
+aws の外の語（プロファイル・エラーの種類の名前）をこちらの語（従量の接続の宣言・失敗の区分）へ変える翻訳の層である。
+aws へ渡すのはプロファイル名・地域・モデルの ID だけで、鍵は aws 自身が `~/.aws/` から読む。aws の出力のうち使うのは
+エラーの種類の名前（`An error occurred (<名前>)` の括弧の中）と終了コードだけで、応答とエラーの本文は画面へ出さない（I9）。
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import shutil
+import subprocess
+from dataclasses import dataclass
+
+from .common import PKG_ROOT  # noqa: F401  lib/ を sys.path に置く
+
+import claude_accounts as ca  # noqa: E402,I001
+
+PROVIDER = "bedrock"
+TIMEOUT = 60
+ERROR_RE = re.compile(r"An error occurred \(([A-Za-z0-9_.]+)\)")
+REASONS = {
+    "auth_expired": "認証切れ",
+    "no_permission": "権限が無い",
+    "region_unavailable": "地域で使えない",
+    "model_unavailable": "モデルが有効でない",
+    "unclassified": "区分できない失敗",
+}
+
+
+@dataclass
+class VerifyFailure:
+    """呼べるかの確認の失敗。`reason` は区分、`aws_error` は元の AWS のエラーの種類の名前（読めなければ空）。"""
+
+    reason: str
+    aws_error: str
+
+    def text(self) -> str:
+        return f"呼べない（{REASONS[self.reason]}・{self.aws_error or '不明'}）"
+
+
+def aws_path() -> str | None:
+    return shutil.which("aws")
+
+
+def _env(profile: str, region: str | None) -> dict:
+    """子へ渡すのと同じ環境（AWS の鍵の変数を外し、プロファイルと地域を置く。決定 14）。"""
+    env = {k: v for k, v in os.environ.items() if k not in ca.AWS_KEY_ENV}
+    env["AWS_PROFILE"] = profile
+    if region:
+        env["AWS_REGION"] = region
+    return env
+
+
+def _aws(args: list[str], profile: str | None = None, region: str | None = None) -> subprocess.CompletedProcess | None:
+    aws = aws_path()
+    if aws is None:
+        return None
+    env = _env(profile, region) if profile else {k: v for k, v in os.environ.items() if k not in ca.AWS_KEY_ENV}
+    try:
+        return subprocess.run([aws, *args], env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(args, 124, "", "Timeout")
+    except OSError:
+        return None
+
+
+def profiles() -> list[str]:
+    """`aws configure list-profiles` の候補。読めなければ空。"""
+    p = _aws(["configure", "list-profiles"])
+    if p is None or p.returncode != 0:
+        return []
+    return [x.strip() for x in p.stdout.splitlines() if x.strip()]
+
+
+def region(profile: str) -> str:
+    """プロファイルの `region`。未設定なら空。"""
+    p = _aws(["configure", "get", "region", "--profile", profile])
+    return p.stdout.strip() if p is not None and p.returncode == 0 else ""
+
+
+def models(profile: str, reg: str) -> list[str]:
+    """推論プロファイル（SYSTEM_DEFINED）のうち ID に `anthropic.claude` を含むもの。読めなければ空。"""
+    p = _aws(
+        ["bedrock", "list-inference-profiles", "--type-equals", "SYSTEM_DEFINED", "--output", "json", "--profile", profile, "--region", reg],
+        profile,
+        reg,
+    )
+    if p is None or p.returncode != 0:
+        return []
+    try:
+        rows = json.loads(p.stdout).get("inferenceProfileSummaries") or []
+    except (ValueError, AttributeError):
+        return []
+    ids = [r.get("inferenceProfileId") for r in rows if isinstance(r, dict)]
+    return sorted(i for i in ids if isinstance(i, str) and "anthropic.claude" in i)
+
+
+def error_name(err: str) -> str:
+    """aws の標準エラーからエラーの種類の名前。接続の失敗は `EndpointConnectionError`。読めなければ空。"""
+    m = ERROR_RE.search(err)
+    if m:
+        return m.group(1)
+    if "Could not connect to the endpoint URL" in err:
+        return "EndpointConnectionError"
+    if "Timeout" in err or "timed out" in err:
+        return "Timeout"
+    return ""
+
+
+def classify(err: str) -> VerifyFailure:
+    """`bedrock-runtime converse` の失敗を区分へ振り分ける（設計の「失敗の 4 区分への振り分け」）。"""
+    name = error_name(err)
+    low = err.lower()
+    if name == "EndpointConnectionError" or "not supported in this region" in low or "not available in this region" in low:
+        return VerifyFailure("region_unavailable", name)
+    if name in ("ExpiredTokenException", "UnrecognizedClientException", "InvalidSignatureException"):
+        return VerifyFailure("auth_expired", name)
+    if name == "AccessDeniedException":
+        if "not authorized to perform" in low or "explicit deny" in low:
+            return VerifyFailure("no_permission", name)
+        if "access to the model" in low or "model access" in low:
+            return VerifyFailure("model_unavailable", name)
+        return VerifyFailure("no_permission", name)
+    if name in ("ValidationException", "ResourceNotFoundException") and ("model" in low or "identifier" in low):
+        return VerifyFailure("model_unavailable", name)
+    return VerifyFailure("unclassified", name)
+
+
+def verify(profile: str, reg: str, model: str) -> VerifyFailure | None:
+    """認証（`sts get-caller-identity`）と 1 回の短い応答（`bedrock-runtime converse`・最大 1 トークン）を確かめる。"""
+    p = _aws(["sts", "get-caller-identity", "--output", "json", "--profile", profile, "--region", reg], profile, reg)
+    if p is None:
+        return VerifyFailure("unclassified", "")
+    if p.returncode != 0:
+        return VerifyFailure("auth_expired", error_name(p.stderr))
+    messages = json.dumps([{"role": "user", "content": [{"text": "ping"}]}])
+    args = ["bedrock-runtime", "converse", "--model-id", model, "--messages", messages]
+    args += ["--inference-config", json.dumps({"maxTokens": 1}), "--output", "json", "--profile", profile, "--region", reg]
+    p = _aws(args, profile, reg)
+    if p is None:
+        return VerifyFailure("unclassified", "")
+    return None if p.returncode == 0 else classify(p.stderr)
+
+
+def decl_env(profile: str, reg: str, model: str) -> dict:
+    """従量の接続の宣言の変数の組。"""
+    return {"CLAUDE_CODE_USE_BEDROCK": "1", "AWS_PROFILE": profile, "AWS_REGION": reg, "ANTHROPIC_MODEL": model}
+
+
+def details(profile: str, reg: str, model: str) -> dict:
+    return {"profile": profile, "region": reg, "model": model}
+
+
+def label(d: dict, sep: str = "（") -> str:
+    """一覧と結果の文に出す識別。既定は `Bedrock（<プロファイル>・<地域>・<モデル>）`、`sep="・"` は括弧の中に入れる形。"""
+    body = "・".join(d.get(k, "-") for k in ("profile", "region", "model"))
+    return f"Bedrock（{body}）" if sep == "（" else f"Bedrock{sep}{body}"

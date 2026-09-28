@@ -3014,6 +3014,40 @@ def test_metered_safety_net_and_recovery(term, accounts):
     no_secret(t)
 
 
+def test_saved_metered_declaration_is_used(term, accounts):
+    """#1468 の AC4: 保存した宣言があれば、すべて上限のときに次の区間をその変数で起動する（環境変数が無いとき）。"""
+    ta = accounts.add("a", util5=10)
+    tb = accounts.add("b", util5=None)
+    accounts.fake.set_usage(tb, window(100, 1800), window(5))
+    decl = {"CLAUDE_CODE_USE_BEDROCK": "1", "AWS_PROFILE": "p", "AWS_REGION": "us-west-2"}
+    accounts.write(
+        accounts.root / "metered.json", {"version": 1, "provider": "bedrock", "env": decl, "details": {"profile": "p"}, "verified_at": "x"}
+    )
+    t = account_term(term, accounts)
+    t.wait_start(1)
+    accounts.fake.set_usage(ta, window(100, 3600), window(5))
+    hit_limit(t, 0)
+    t.wait_start(2)
+    s1 = t.starts()[1]
+    assert (s1["token"], s1["account"], s1["bedrock"]) == (None, "metered", "1")
+    assert events(t.rows(), "account")[0]["keys"] == list(decl) and events(t.rows(), "metered_invalid") == []
+    no_secret(t)
+
+
+def test_broken_saved_declaration_is_told_at_first_section(term, accounts):
+    """#1468 の I5: 保存先が壊れていれば、区間 1 の起動で画面と log.jsonl に 1 行出し、宣言なしとして扱う。"""
+    accounts.add("a", util5=10)
+    accounts.add("b", util5=20)
+    (accounts.root / "metered.json").write_text("{broken")
+    t = account_term(term, accounts)
+    t.wait_start(1)
+    t.wait(lambda: "壊れている" in t.text, timeout=10, what="壊れた宣言の 1 行")
+    assert len(events(t.rows(), "metered_invalid")) == 1
+    t.type("mark 次\r")
+    t.wait_start(2)
+    assert len(events(t.rows(), "metered_invalid")) == 1
+
+
 def test_limit_file_is_kept_when_rewritten(tmp_path, accounts, monkeypatch):
     """I15: 読んだ後に書き直された上限シグナルファイルは消さない。"""
     sys.path.insert(0, str(ROOT / "scripts"))
@@ -3090,6 +3124,12 @@ open(os.environ["FAKE_AUTH_LOG"], "a").write(json.dumps({"argv": sys.argv[1:], "
 if sys.argv[1:3] == ["auth", "login"]:
     if os.environ.get("FAKE_LOGIN_FAIL"):
         sys.exit(1)
+    if not os.isatty(0):  # 端末でない: 認可の URL を出し、標準入力の認可コードを待つ（2.1.284 の実測の形。#1468）
+        print("Browser didn't open? Use the url below to sign in:\\n\\nhttps://claude.com/cai/oauth/authorize?code=true&state=st", flush=True)
+        print("Paste code here if prompted > ", end="", flush=True)
+        if sys.stdin.readline().strip() != os.environ.get("FAKE_CODE", "code-SECRET"):
+            print("OAuth error: Invalid code", flush=True)
+            sys.exit(1)
     name = os.path.basename(d)
     oauth = {"accessToken": "login-access-SECRET", "refreshToken": "r", "expiresAt": int((time.time() + 28800) * 1000), "scopes": ["user:profile"]}
     open(os.path.join(d, ".credentials.json"), "w").write(json.dumps({"claudeAiOauth": oauth}))
@@ -3177,7 +3217,6 @@ def test_account_add_rejects(tmp_path, accounts):
     assert p.returncode == 1 and "登録済み: work1" in p.stderr
     assert account_cmd(tmp_path, accounts, "add", "Bad!").returncode == 2
     assert account_cmd(tmp_path, accounts, "add", "metered").returncode == 2
-    assert account_cmd(tmp_path, accounts, "add", "work3", tty=False).returncode == 2
     assert account_cmd(tmp_path, accounts, "add", "work4", FAKE_LOGIN_FAIL="1", FAKE_EMAIL="c@example.com").returncode == 1
     assert account_cmd(tmp_path, accounts, "add", "work1", FAKE_EMAIL="a@example.com").returncode == 1  # 登録済みの名前
     assert sorted(p.name for p in accounts.root.iterdir() if not p.name.endswith(".lock")) == ["work1"]
