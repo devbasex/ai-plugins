@@ -93,7 +93,7 @@ def read_key(d: dict, key: str, default=None):
     return d.get(old, default) if old else default
 
 
-def branch_prefixes(new: str = "sprint/") -> tuple[str, ...]:
+def branch_prefixes(new: str) -> tuple[str, ...]:
     """ブランチの頭。新しい名前を先に、旧名を後に並べる。"""
     old = BRANCH_PREFIXES.get(new)
     return (new, old) if old else (new,)
