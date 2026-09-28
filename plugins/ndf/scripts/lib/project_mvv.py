@@ -52,6 +52,7 @@ VERDICT_LABEL = {  # MVV 判定の語（mvv-gate.py の助言の判定の表示�
     "unreadable": "判定を読めない",
 }
 MISSION_PREFIX = "ミッション"  # ミッション MVV の項目の頭（#1400 の決定 15。R の番号には付けない）
+R_ID_RE = re.compile(r"\bR\d+\b")  # ミッション MVV だけが持つ R の番号
 ITEM_RE = re.compile(r"(?i)(?:(ミッション)\s*|\b)(mission|vision|value\s*\d+|[CPR]\d+)\b")
 MISSION_HINT = "この節の項目を根拠に書くときは頭に「ミッション」を付ける（例: ミッション Value 4）。R の番号はそのまま"
 
@@ -288,7 +289,7 @@ def block(mvv: ProjectMvv, mission: str | None = None) -> str:
 
 def allowed_ids(mvv: ProjectMvv, extra=(), mission: str | None = None) -> set[str]:
     """根拠に書いてよい番号。ミッション MVV の本文を渡すと、その項目（頭に「ミッション」）と R の番号も許す。"""
-    own = {f"{MISSION_PREFIX} {i}" for i in item_ids(mission)} | set(re.findall(r"\bR\d+\b", mission)) if mission else set()
+    own = {f"{MISSION_PREFIX} {i}" for i in item_ids(mission)} | set(R_ID_RE.findall(mission)) if mission else set()
     return {*principle_ids(), *mvv.item_ids(), *extra, *own}
 
 
@@ -327,7 +328,7 @@ def basis(raw, mvv: ProjectMvv, extra=(), mission: str | None = None) -> list[st
 
 def _item_order(item: str) -> int:
     """根拠の句の並び: プロジェクト MVV と共通原則 → ミッション MVV → R の番号。"""
-    return 1 if item.startswith(MISSION_PREFIX) else 2 if re.fullmatch(r"R\d+", item) else 0
+    return 1 if item.startswith(MISSION_PREFIX) else 2 if R_ID_RE.fullmatch(item) else 0
 
 
 def basis_phrase(items, mvv: ProjectMvv, mission_sha: str | None = None) -> str:
