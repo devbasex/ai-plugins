@@ -60,6 +60,7 @@ if str(_LIB) not in sys.path:
     sys.path.insert(0, str(_LIB))
 import clock  # noqa: E402  時刻の読み取り（#1142 の L0）
 import deps  # noqa: E402  外部パッケージの環境（#1142 の決定 17）
+import gh_graphql  # noqa: E402  未解決のスレッドの問い合わせ（#1142 の L0）
 import gh_quota  # noqa: E402  上限の語（#1142 の L0）
 import proc  # noqa: E402  子プロセスの起動（#1142 の L0）
 
@@ -83,20 +84,9 @@ POSTED = "posted"
 QUEUED = "queued"
 FAILED = "failed"
 
-# 未解決のスレッドの識別子だけを読む問い合わせ。**解決の冪等はこの一覧だけで決まる**
-# （一覧に無ければ、既に解決されている）。
-_UNRESOLVED_QUERY = """
-query($owner: String!, $name: String!, $pr: Int!, $endCursor: String) {
-  repository(owner: $owner, name: $name) {
-    pullRequest(number: $pr) {
-      reviewThreads(first: 100, after: $endCursor) {
-        pageInfo { hasNextPage endCursor }
-        nodes { id isResolved }
-      }
-    }
-  }
-}
-"""
+# 未解決のスレッドの識別子の一覧。問い合わせは gh_graphql と共有し、jq で識別子だけを取り出す。
+# **解決の冪等はこの一覧だけで決まる**（一覧に無ければ、既に解決されている）。
+_UNRESOLVED_QUERY = gh_graphql.UNRESOLVED_THREADS_QUERY
 _UNRESOLVED_JQ = ".data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false) | .id"
 
 _RESOLVE_MUTATION = """
@@ -359,27 +349,10 @@ def _list_all(path: str) -> list[dict[str, Any]] | None:
 
 def unresolved_thread_ids(repo: str, pr: int) -> list[str] | None:
     """未解決のスレッドの識別子。読めなければ `None`。"""
-    owner, sep, name = str(repo or "").partition("/")
-    if not (owner and sep and name):
+    argv = gh_graphql.unresolved_threads_argv(repo, pr, _UNRESOLVED_JQ)
+    if argv is None:
         return None
-    a = run(
-        [
-            "gh",
-            "api",
-            "graphql",
-            "--paginate",
-            "-F",
-            f"owner={owner}",
-            "-F",
-            f"name={name}",
-            "-F",
-            f"pr={int(pr)}",
-            "-f",
-            f"query={_UNRESOLVED_QUERY}",
-            "--jq",
-            _UNRESOLVED_JQ,
-        ]
-    )
+    a = run(argv)
     if not a.ok:
         return None
     return [line.strip() for line in a.stdout.splitlines() if line.strip()]
