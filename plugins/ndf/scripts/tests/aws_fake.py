@@ -11,6 +11,8 @@ import json
 import os
 from pathlib import Path
 
+MODEL = "us.anthropic.claude-sonnet-4-5-v1:0"  # 偽の aws が既定で返すモデルの ID
+
 AWS_FAKE = """#!/usr/bin/env python3
 import json, os, sys
 conf = json.load(open(os.environ["FAKE_AWS_CONF"]))
@@ -58,7 +60,7 @@ class FakeAws:
         self.conf_path = tmp_path / "fake-aws.json"
         self.log_path = tmp_path / "fake-aws.jsonl"
         self.conf: dict = {}
-        self.set(profiles=["bedrock-dev"], regions={"bedrock-dev": "us-west-2"}, models=["us.anthropic.claude-sonnet-4-5-v1:0"])
+        self.set(profiles=["bedrock-dev"], regions={"bedrock-dev": "us-west-2"}, models=[MODEL])
 
     def set(self, **conf) -> None:
         self.conf.update(conf)

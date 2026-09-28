@@ -15,14 +15,13 @@ import time
 
 import pytest
 from account_fake import accounts  # noqa: F401
-from aws_fake import FakeAws
+from aws_fake import MODEL, FakeAws
 from test_relay import AUTH_FAKE, RELAY, auth_calls, isolated_env  # noqa: F401
 
 sys.path.insert(0, str(RELAY.parent / "lib"))
 import claude_accounts as ca  # noqa: E402
 import procs  # noqa: E402
 
-MODEL = "us.anthropic.claude-sonnet-4-5-v1:0"
 AWS_SECRETS = {
     "AWS_ACCESS_KEY_ID": "AKIA-KEY-SECRET",
     "AWS_SECRET_ACCESS_KEY": "aws-secret-SECRET",
