@@ -447,19 +447,16 @@ def _candidates(exclude, before: float | None, keep, now: float) -> tuple[list[A
     """上限に達していない候補と、上限にあるもののうち最も早く戻るアカウントと時刻。「再登録が要る」は外す。"""
     earliest: tuple[str, float] | None = None
     pool: list[Account] = []
-    for n in names():
-        if n in exclude:
-            continue
+    for n in [n for n in names() if n not in exclude]:
         usage(n, None if n in keep else before, now)
         acc = load_account(n)
         if acc is None or acc.needs_relogin:
             continue
         until = acc.limited_until(now)
-        if until is not None:
-            if earliest is None or until < earliest[1]:
-                earliest = (n, until)
-            continue
-        pool.append(acc)
+        if until is None:
+            pool.append(acc)
+        elif earliest is None or until < earliest[1]:
+            earliest = (n, until)
     return pool, earliest
 
 
