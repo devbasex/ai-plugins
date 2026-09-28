@@ -19,8 +19,7 @@ import claude_accounts as ca  # noqa: E402,I001
 import claude_usage as cu  # noqa: E402
 
 USAGE = "usage: relay.py account add <名前> | list [--json] | remove <名前>"
-# 専用の設定ディレクトリで claude を起動するときに外す変数（外の認証と混ぜない）
-AUTH_ENV = (ca.TOKEN_ENV, ca.NAME_ENV, "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX")
+AUTH_ENV = ca.AUTH_ENV  # 専用の設定ディレクトリで claude を起動するときに外す変数（正本は claude_accounts）
 
 
 def _env(config_dir: str) -> dict:
@@ -56,6 +55,10 @@ def _email(claude: str, config_dir: str) -> str | None:
 def cmd_add(name: str) -> int:
     if not ca.valid_name(name):
         print(f"名前は英小文字・数字・- と _ の 32 字まで（{ca.METERED} は使えない）: {name}", file=sys.stderr)
+        return 2
+    if sys.platform == "darwin":
+        # macOS の claude は資格情報を Keychain に置き、設定ディレクトリの .credentials.json を書かない
+        print("macOS では登録できない（claude が資格情報を Keychain に置き、.credentials.json を書かない）。Linux で使う", file=sys.stderr)
         return 2
     if not sys.stdin.isatty():
         print("登録は端末から打つ（claude auth login が認可コードの貼り付けを待つ）", file=sys.stderr)

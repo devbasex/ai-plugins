@@ -267,6 +267,10 @@ class UsageLimit(Exception):
     """利用上限の待ちが最大を超えた。ステップの失敗とは区別して止まる。"""
 
 
+class AuthUnavailable(UsageLimit):
+    """登録済みのアカウントのトークンを得られず、替えるアカウントも従量の接続も無い。起動した時の環境で呼ばずに止まる。"""
+
+
 class ClaudeRunner:
     """claude -p を呼ぶ唯一の口。利用上限の待ちと認証の切り替え、使用量の数えと帳簿への追記を持つ。
 
@@ -300,7 +304,7 @@ class ClaudeRunner:
         tried: set[str] = set()  # この呼び出しで上限に当たったアカウント
         kw = {"tick": ctx.tick, "every": st.every, **kw}
         while True:
-            child = self.child_env() if multi else None
+            child = self.child_env(timeout, fallback) if multi else None
             res = call_claude(system, prompt, tools, cwd, timeout, child_env=child, **kw)
             if res.get("limit"):
                 self.note_limit(res)
@@ -370,27 +374,33 @@ class ClaudeRunner:
         """トークンを更新しないアカウント（動いている区間のもの）。"""
         return {self.section} if self.section else set()
 
-    def child_env(self) -> dict | None:
-        """次の呼び出しの環境（登録が 2 つ以上のとき）。None は起動したときの環境のまま。
+    def child_env(self, timeout: float = 0, fallback: dict | None = None) -> dict | None:
+        """次の呼び出しの環境（登録が 2 つ以上のとき）。None は起動したときの環境のまま（アカウントを持たないとき）。
 
         従量の接続で動いている間は、起動のたびに登録済みのアカウントへ戻れるかを確かめる（閾値未満のものだけ）。
-        今のアカウントのトークンが得られなければ（期限切れ・再登録が要る）別のアカウントを選ぶ。"""
+        今のアカウントのトークンが得られなければ（期限切れ・期限まで `timeout` 秒以下・再登録が要る）別のアカウントを
+        選び、無ければ従量の接続（`fallback`）へ移る。それも無ければ AuthUnavailable を投げる（起動した時の古い
+        トークンで呼ばない）。"""
         if self.account == ca.METERED:
-            c = ca.choose(keep=self.keep())
+            c = ca.choose(keep=self.keep(), min_left=timeout)
             if c.name and (c.score is None or c.score < ca.switch_at()):
                 self.switch(c.name, "recovered")
             else:
                 return ca.env_for(ca.METERED, dict(os.environ))
         if self.account is None:
             return None
-        env = ca.env_for(self.account, dict(os.environ), None if self.account in self.keep() else ca.REFRESH_BEFORE)
+        env = ca.env_for(self.account, dict(os.environ), None if self.account in self.keep() else ca.REFRESH_BEFORE, timeout)
         if env is not None:
             return env
-        c = ca.choose(exclude={self.account}, keep=self.keep())
-        if not c.name:
-            return None
-        self.switch(c.name, "auth")
-        return ca.env_for(c.name, dict(os.environ), None if c.name in self.keep() else ca.REFRESH_BEFORE)
+        c = ca.choose(exclude={self.account}, keep=self.keep(), min_left=timeout)
+        env = ca.env_for(c.name, dict(os.environ), None if c.name in self.keep() else ca.REFRESH_BEFORE, timeout) if c.name else None
+        if env is not None:
+            self.switch(c.name, "auth")
+            return env
+        if fallback:
+            self.switch(ca.METERED, "auth", keys=list(fallback))
+            return ca.env_for(ca.METERED, dict(os.environ))
+        raise AuthUnavailable(f"アカウント {self.account} のトークンを得られず、替えるアカウントも従量の接続の宣言も無い")
 
     def switch(self, to: str, reason: str, keys: list[str] | None = None) -> None:
         """次の呼び出しのアカウントを替え、プランの状態（`auth`・`switched`）と途中の報告へ 1 行残す（I12）。"""

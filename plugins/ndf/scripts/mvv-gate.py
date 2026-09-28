@@ -49,7 +49,7 @@ sys.path.insert(0, str(HERE))
 import supervise_lib  # noqa: E402,F401  lib/ を sys.path へ足す
 import deps  # noqa: E402
 
-deps.require("schema")  # supervise_lib.paths → decl が使う
+deps.require("schema", "procs")  # schema は supervise_lib.paths → decl、procs は ask() の supervise_lib.claude が使う
 from step_result import EXIT_GATE, emit, result  # noqa: E402
 import clock  # noqa: E402
 import gh_call  # noqa: E402

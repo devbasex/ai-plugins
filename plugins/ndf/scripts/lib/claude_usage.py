@@ -30,6 +30,7 @@ USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 TOKEN_URL = "https://platform.claude.com/v1/oauth/token"
 CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 HTTP_TIMEOUT = 10.0
+REFRESH_REJECTED = frozenset({400, 401, 403})  # リフレッシュトークンが取り消されたと読む状態
 KINDS = ("five_hour", "seven_day", "spend", "unknown")
 # claude の古い形の上限の文言（`Claude AI usage limit reached|<解除の UNIX 時刻>`）と、`resets 3pm (UTC)` の形
 LIMIT_EPOCH = re.compile(r"usage limit reached\|(\d{9,11})", re.I)
@@ -182,10 +183,12 @@ def refresh_oauth(o: dict, now: float) -> tuple[str, dict | None]:
         method="POST",
     )
     status, d = _http(req, 30)
-    if status == 0 or status >= 500:
-        return "error", None
-    if status != 200 or not d or not isinstance(d.get("access_token"), str) or not isinstance(d.get("expires_in"), (int, float)):
+    # 取り消し（invalid_grant など）と分かる 400/401/403 だけを rejected にする。429・408・5xx・通信の失敗・
+    # 形の崩れた 200 は一時的な失敗として error（今のトークンを使い、次回に再試行する）にする
+    if status in REFRESH_REJECTED:
         return "rejected", None
+    if status != 200 or not d or not isinstance(d.get("access_token"), str) or not isinstance(d.get("expires_in"), (int, float)):
+        return "error", None
     new = dict(o, accessToken=d["access_token"], refreshToken=d.get("refresh_token") or o.get("refreshToken"))
     new["expiresAt"] = int((now + d["expires_in"]) * 1000)
     if isinstance(d.get("refresh_token_expires_in"), (int, float)):

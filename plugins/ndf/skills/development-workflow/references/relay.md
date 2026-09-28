@@ -132,7 +132,9 @@ conductor では、コンテキスト量の hook が工程へ入る起動を 1 �
 ## 利用上限でアカウントを替えて続ける
 
 **claude のアカウントを 2 つ以上登録しておくと、利用上限で止まらずに別のアカウントで続く。** 登録は端末から打つ
-（`claude auth login` が URL を示し、認可コードの貼り付けを待つ）。
+（`claude auth login` が URL を示し、認可コードの貼り付けを待つ）。**Linux（コンテナを含む）だけで使える。** macOS の
+claude はログインの資格情報を Keychain に置き、設定ディレクトリの `.credentials.json` を書かないため、macOS の
+`account add` は登録の前に止まる。
 
 ```bash
 python3 ~/.claude/ndf/relay.py account add work1   # 専用の設定ディレクトリで claude auth login が動く

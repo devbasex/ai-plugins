@@ -35,6 +35,9 @@ NAME_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,31}")
 METERED = "metered"  # 従量の接続を表す予約の名前。登録できない
 TOKEN_ENV = "CLAUDE_CODE_OAUTH_TOKEN"
 NAME_ENV = "NDF_CLAUDE_ACCOUNT"
+# 認証の優先順位でトークンより上に来る変数（アカウントの子で外す）と、専用の設定ディレクトリの claude で外す変数
+FOREIGN_AUTH_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX")
+AUTH_ENV = (TOKEN_ENV, NAME_ENV, *FOREIGN_AUTH_ENV)
 FALLBACK_ENV = "NDF_SUPERVISE_CLAUDE_FALLBACK"
 ACCOUNT_FILE = "account.json"
 USAGE_FILE = "usage.json"
@@ -253,11 +256,11 @@ def _creds(name: str) -> dict | None:
     return o if isinstance(o, dict) and isinstance(o.get("accessToken"), str) and o["accessToken"] else None
 
 
-def _token_held(name: str, before: float | None, now: float, force: bool = False) -> str | None:
+def _token_held(name: str, before: float | None, now: float, force: bool = False, min_left: float = 0) -> str | None:
     """排他の中で呼ぶ。使えるアクセストークン（使えなければ None）。
 
-    `before` は期限の何秒前を切ったら更新するか（None は更新しない。更新しないとき、期限を過ぎたものは None）。
-    `force` は期限に関わらず更新する（取得先が 401 を返したとき）。更新を断られたら `needs_relogin` を真にする。"""
+    `before` は期限の何秒前を切ったら更新するか（None は更新しない）。`min_left`（打ち切りの秒）以下しか残らないものは
+    更新するか None にする。`force` は期限に関わらず更新する（401 のとき）。断られたら `needs_relogin` を真にする。"""
     a = _read(os.path.join(account_dir(name), ACCOUNT_FILE))
     if a is None or a.get("needs_relogin"):
         return None
@@ -266,8 +269,9 @@ def _token_held(name: str, before: float | None, now: float, force: bool = False
         _update_account(name, needs_relogin=True)
         return None
     exp = (o.get("expiresAt") or 0) / 1000
+    before = None if before is None else max(before, min_left)
     if not force and (before is None or exp - now > before):
-        return o["accessToken"] if exp > now else None
+        return o["accessToken"] if exp - now > min_left else None
     rexp = o.get("refreshTokenExpiresAt")
     if isinstance(rexp, (int, float)) and rexp / 1000 <= now:
         _update_account(name, needs_relogin=True)
@@ -276,8 +280,8 @@ def _token_held(name: str, before: float | None, now: float, force: bool = False
     if how == "rejected":
         _update_account(name, needs_relogin=True)
         return None
-    if new is None:  # 通信の失敗。期限の前なら今のトークンを使う
-        return o["accessToken"] if exp > now and not force else None
+    if new is None:  # 一時的な失敗。残りが足りれば今のトークンを使う
+        return o["accessToken"] if exp - now > min_left and not force else None
     try:
         whole = _read(_creds_path(name)) or {}
         whole["claudeAiOauth"] = new
@@ -288,12 +292,12 @@ def _token_held(name: str, before: float | None, now: float, force: bool = False
     return new["accessToken"]
 
 
-def token(name: str, before: float | None = REFRESH_BEFORE, now: float | None = None) -> str | None:
-    """子へ渡すアクセストークン。期限の `before` 秒前を切っていれば更新する（None は更新しない）。"""
+def token(name: str, before: float | None = REFRESH_BEFORE, now: float | None = None, min_left: float = 0) -> str | None:
+    """子へ渡すアクセストークン。期限の `before` 秒前を切っていれば更新する（None は更新しない）。`min_left` は `_token_held`。"""
     now = time.time() if now is None else now
     try:
         with _locked(name):
-            return _token_held(name, before, now)
+            return _token_held(name, before, now, min_left=min_left)
     except (_lock_timeout(), OSError):
         return None
 
@@ -348,16 +352,15 @@ class Choice:
     earliest: tuple[str, float] | None = None
 
 
-def choose(exclude=(), before: float | None = REFRESH_BEFORE, keep=(), now: float | None = None) -> Choice:
+def choose(exclude=(), before: float | None = REFRESH_BEFORE, keep=(), now: float | None = None, min_left: float = 0) -> Choice:
     """上限に達していないアカウントのうち、使用率の大きい方が最も小さいものを選ぶ（前提 4・I7）。
 
-    並んだら `five_hour` のリセット時刻が早い方、さらに並べば名前の順。残量の読めないアカウントは、読めるアカウントが
-    1 つも無いときだけ候補にする（名前の順）。「再登録が要る」は候補にしない（I13）。トークンを得られないものは
-    外して選び直す。`keep` の名前はトークンを更新しない（動いている区間のアカウント。I5）。"""
+    並んだら `five_hour` のリセット時刻が早い方、さらに並べば名前の順。残量不明は、上限に達していない候補に読めるものが
+    無いときだけ候補にする（名前の順）。「再登録が要る」とトークンを得られないもの（残り `min_left` 秒以下を含む）は
+    外す（I13）。`keep` の名前はトークンを更新しない（動いている区間のアカウント。I5）。"""
     now = time.time() if now is None else now
     earliest: tuple[str, float] | None = None
     pool: list[Account] = []
-    readable = False  # 残量の読めるアカウントが 1 つでもあるか（上限のものを含む）
     for n in names():
         if n in exclude:
             continue
@@ -365,13 +368,13 @@ def choose(exclude=(), before: float | None = REFRESH_BEFORE, keep=(), now: floa
         acc = load_account(n)
         if acc is None or acc.needs_relogin:
             continue
-        readable |= bool(acc.usage and acc.usage.known())
         until = acc.limited_until(now)
         if until is not None:
             if earliest is None or until < earliest[1]:
                 earliest = (n, until)
             continue
         pool.append(acc)
+    readable = any(a.usage and a.usage.known() for a in pool)
     while pool:
         known = [a for a in pool if a.usage is not None and a.usage.score() is not None]
         if known:
@@ -380,7 +383,7 @@ def choose(exclude=(), before: float | None = REFRESH_BEFORE, keep=(), now: floa
             break
         else:
             pick = min(pool, key=lambda a: a.name)
-        if token(pick.name, None if pick.name in keep else before, now) is not None:
+        if token(pick.name, None if pick.name in keep else before, now, min_left) is not None:
             return Choice(pick.name, pick.usage.score() if pick.usage else None, earliest)
         pool.remove(pick)
     return Choice(None, None, earliest)
@@ -399,11 +402,11 @@ def fallback_env(environ=None) -> dict:
     return out
 
 
-def env_for(name: str, base: dict, before: float | None = REFRESH_BEFORE) -> dict | None:
+def env_for(name: str, base: dict, before: float | None = REFRESH_BEFORE, min_left: float = 0) -> dict | None:
     """`base` にアカウント `name`（か `metered`）の環境を重ねる。トークンを得られなければ None。
 
-    従量の接続は宣言の変数を足して `CLAUDE_CODE_OAUTH_TOKEN` を外す。アカウントは宣言のキーを外してから
-    トークンと名前を足す（混ぜない。I16）。"""
+    従量の接続は宣言の変数を足して `CLAUDE_CODE_OAUTH_TOKEN` を外す。アカウントは宣言のキーと、認証の優先順位で
+    トークンより上に来る変数（`FOREIGN_AUTH_ENV`）を外してからトークンと名前を足す（混ぜない。I16）。"""
     env = dict(base)
     declared = fallback_env(base)
     if name == METERED:
@@ -411,10 +414,10 @@ def env_for(name: str, base: dict, before: float | None = REFRESH_BEFORE) -> dic
         env.update(declared)
         env[NAME_ENV] = METERED
         return env
-    tok = token(name, before)
+    tok = token(name, before, min_left=min_left)
     if tok is None:
         return None
-    for k in declared:
+    for k in (*declared, *FOREIGN_AUTH_ENV):
         env.pop(k, None)
     env[TOKEN_ENV] = tok
     env[NAME_ENV] = name

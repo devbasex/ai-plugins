@@ -70,10 +70,11 @@ def test_unknown_is_candidate_only_when_none_known(accounts):
     assert ca.choose(exclude={"b"}).name == "a"
 
 
-def test_unknown_not_candidate_when_known_limited_exists(accounts):
+def test_unknown_is_candidate_when_only_limited_are_known(accounts):
+    """上限に達したアカウントの残量が読めても、上限に達していない候補に読めるものが無ければ読めないものを選ぶ。"""
     accounts.add("a", util5=None)
     accounts.add("b", util5=100, util7=10)
-    assert ca.choose().name is None
+    assert ca.choose().name == "a"
 
 
 def test_observed_limit_excludes_until_reset(accounts):
@@ -202,6 +203,30 @@ def test_env_for_account_and_metered_do_not_mix(accounts, monkeypatch):
     m = ca.env_for("metered", {"NDF_SUPERVISE_CLAUDE_FALLBACK": decl, "CLAUDE_CODE_OAUTH_TOKEN": tok})
     assert "CLAUDE_CODE_OAUTH_TOKEN" not in m and m["NDF_CLAUDE_ACCOUNT"] == "metered"
     assert m["CLAUDE_CODE_USE_BEDROCK"] == "1" and m["AWS_PROFILE"] == "p"
+
+
+def test_env_for_account_drops_undeclared_auth(accounts):
+    """宣言が無くても、認証の優先順位でトークンより上に来る変数はアカウントの子から外す。"""
+    tok = accounts.add("a")
+    base = {k: "1" for k in ca.FOREIGN_AUTH_ENV}
+    env = ca.env_for("a", base)
+    assert env["CLAUDE_CODE_OAUTH_TOKEN"] == tok and not set(ca.FOREIGN_AUTH_ENV) & set(env)
+
+
+def test_token_with_short_life_is_not_given(accounts):
+    """更新しないトークンは、期限まで min_left 秒以下なら渡さない。"""
+    tok = accounts.add("a", expires_in=600)
+    assert ca.token("a", None) == tok
+    assert ca.token("a", None, min_left=1800) is None
+
+
+@pytest.mark.parametrize("status", [429, 408, 500])
+def test_transient_refresh_failure_keeps_account(accounts, status):
+    """一時的な失敗（429・408・5xx）は再登録を求めず、期限の前なら今のトークンを使う。"""
+    tok = accounts.add("a", expires_in=60)
+    accounts.fake.refresh["a-refresh-SECRET"] = (status, {"error": "busy"})
+    assert ca.token("a") == tok
+    assert not accounts.account("a").get("needs_relogin")
 
 
 def test_names_ignore_staging_and_reserved(accounts):

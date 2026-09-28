@@ -3200,3 +3200,12 @@ def test_slow_usage_endpoint_does_not_stall_relay(term, accounts):
     accounts.fake.delay = 0
     t.type("quit 0\r")
     assert t.finish() == 0
+
+
+def test_account_add_stops_on_macos(monkeypatch, capsys):
+    """macOS の claude は .credentials.json を書かないため、登録の前に止まる。"""
+    from relay_lib import accounts as relay_accounts
+
+    monkeypatch.setattr(relay_accounts.sys, "platform", "darwin")
+    assert relay_accounts.cmd_add("work1") == 2
+    assert "macOS" in capsys.readouterr().err

@@ -882,7 +882,7 @@ def test_single_account_keeps_fallback_once_per_call(tmp_path, seq, accounts, mo
 def test_section_account_is_not_refreshed_by_plan(tmp_path, seq, accounts, monkeypatch):
     """I5: 動いている区間のアカウントは期限の 60 分前を切っても更新しない。期限を過ぎていれば別のアカウントで呼ぶ。"""
     set_responses, calls = seq
-    ta = accounts.add("a", expires_in=600)
+    ta = accounts.add("a", expires_in=2400)  # 期限の 60 分前を切り、打ち切りの 1800 秒よりは長い
     tb = accounts.add("b", util5=30)
     accounts.fake.refresh["a-refresh-SECRET"] = (200, {"access_token": "a-new", "expires_in": 28800})
     monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", "a")
@@ -893,6 +893,39 @@ def test_section_account_is_not_refreshed_by_plan(tmp_path, seq, accounts, monke
     s, _ = run_plan(tmp_path, [{"id": "w", "type": "work", "prompt": "直す", "next": "end"}])
     assert calls()[1]["token"] == tb and accounts.fake.refresh_calls == []
     assert s.state.results["w"]["auth"] == "アカウント b（auth）"
+
+
+def test_section_token_shorter_than_timeout_switches(tmp_path, seq, accounts, monkeypatch):
+    """区間のトークンが打ち切りの秒より先に切れるなら、途中で切れないように別のアカウントで呼ぶ。"""
+    set_responses, calls = seq
+    accounts.add("a", expires_in=600)
+    tb = accounts.add("b", util5=30)
+    monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", "a")
+    set_responses(OK)
+    s, _ = run_plan(tmp_path, [{"id": "w", "type": "work", "prompt": "直す", "next": "end"}])
+    assert calls()[0]["token"] == tb and s.state.results["w"]["auth"] == "アカウント b（auth）"
+
+
+def test_no_token_and_no_alternative_stops_without_old_env(tmp_path, seq, accounts, monkeypatch):
+    """トークンを得られず替え先も宣言も無ければ、起動した時の環境で呼ばずに止まる。"""
+    set_responses, calls = seq
+    accounts.add("a", expires_in=-60, refresh_in=-10)
+    accounts.add("b", util5=100)
+    monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", "a")
+    set_responses(OK)
+    s, text = run_plan(tmp_path, [{"id": "w", "type": "work", "prompt": "直す", "next": "end"}])
+    assert calls() == [] and "止まった" in text and "認証" in text
+
+
+def test_no_token_moves_to_metered_when_declared(tmp_path, seq, accounts, monkeypatch):
+    set_responses, calls = seq
+    accounts.add("a", expires_in=-60, refresh_in=-10)
+    accounts.add("b", util5=100)
+    monkeypatch.setenv("NDF_CLAUDE_ACCOUNT", "a")
+    monkeypatch.setenv("NDF_SUPERVISE_CLAUDE_FALLBACK", "CLAUDE_CODE_USE_BEDROCK=1")
+    set_responses(OK)
+    run_plan(tmp_path, [{"id": "w", "type": "work", "prompt": "直す", "next": "end"}])
+    assert [(c["token"], c["bedrock"], c["account"]) for c in calls()] == [(None, "1", "metered")]
 
 
 def test_error_that_is_not_limit_is_plain_failure(tmp_path, seq):
